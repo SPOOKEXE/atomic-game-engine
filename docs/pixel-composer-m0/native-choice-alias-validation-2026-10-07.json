@@ -1,0 +1,1363 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug restore missing source choice labels and verified bounds. no executor added; licensed raster parity remains unverified.",
+  "contract": {
+    "source_revision": "b69eca232217360cf1502ef0223523d818606652",
+    "source_base": "https://github.com/Ttanasart-pt/Pixel-Composer/blob/b69eca232217360cf1502ef0223523d818606652/",
+    "official_source_verification": {
+      "commit": "b69eca232217360cf1502ef0223523d818606652",
+      "tree": "bb1c1e2c8419723ac9bdcf3cda8b6752b32563f6",
+      "script_files_checked": 1830,
+      "mismatches": []
+    },
+    "sha256": {
+      "scripts/_node_VFX_spawner/_node_VFX_spawner.gml": "0ee83cbd3df463139224d31da7df54a8559a279ce00eac09f5092b102a00f03f",
+      "scripts/node_2d_light/node_2d_light.gml": "cda0217c4520fe9c016253a51a19d4b6d713e887fc7e5f14d82f5012931882da",
+      "scripts/node_3d_particle/node_3d_particle.gml": "0291be5f3bb09fcef3fe465adec8838fe4f946eca73c84953462b16100724363",
+      "scripts/node_VFX_spawner/node_VFX_spawner.gml": "28b1198223224bb0c130c00ecebfa437bde4bf94e38772db26ccb75233367c94",
+      "scripts/node_atlas_set/node_atlas_set.gml": "762e1cee5a6f5e5d57ec5a8f855cf19d9e4f8ebaa03e4a2683b5ab22f438ba2f",
+      "scripts/node_bend/node_bend.gml": "401f23a8238cdadd6ca94411ba3fa29c63507453904ca48b6bbc0661a63ef6d7",
+      "scripts/node_bevel/node_bevel.gml": "bfa14a6fc20ad0ca9a3cad533683658180f8e246274f6cbe9a0487786875da27",
+      "scripts/node_feedback_input/node_feedback_input.gml": "2b01f1e8356cdbb86f118642379632e8f4942ea192daab0f9d14dd692268af21",
+      "scripts/node_gradient_cos/node_gradient_cos.gml": "f6b7419faefadfedbc8bcf317900334aa5524a5167a9dd35cf940ced030045fa",
+      "scripts/node_group_input/node_group_input.gml": "8464d00067ea8a594730384407d0e39053fa67fc8e1db9a59b666ad4a513f215",
+      "scripts/node_hlsl/node_hlsl.gml": "3eb726ee17c8a89304bef70d368cd32e7e8f29d36cff298e7e2dc803ad66bb3b",
+      "scripts/node_image_grid/node_image_grid.gml": "c58faa50e372cccb2ad6cff5d633d899299789afe9f79e198d7e98eee743fad8",
+      "scripts/node_iterator_input/node_iterator_input.gml": "3ca7443a32eef8431bfa598a796d9d5bd6eb1e86e1477893709ba703627d7108",
+      "scripts/node_liquefy/node_liquefy.gml": "00f1fb0dc820d7e074286f3a280bb5ca700084392a7840bbae333acb1ce1f1c4",
+      "scripts/node_lua_compute/node_lua_compute.gml": "1297807c241271600f22e912ab1757e5b3417bfffc89e787137eee05bdc48f83",
+      "scripts/node_lua_surface/node_lua_surface.gml": "93a710db8ea3a34f602b045c8594e799c735ed81b9bb0c1abdd6b872d8d268c7",
+      "scripts/node_mk_dialog/node_mk_dialog.gml": "ae4c7faa9dbe72fd326ca26ac3df0ac318f2a90959d5c40a6637066b765bafd4",
+      "scripts/node_mk_grass/node_mk_grass.gml": "8491b7e0297487207abf6b7681637fe570564fa4b0f1f7d161a377df484d4b19",
+      "scripts/node_mk_tile/node_mk_tile.gml": "af8701bdaecb28928fb5a784b38e9ef9ac4fa54410b069300504f52ec71384d0",
+      "scripts/node_mk_tree_branch/node_mk_tree_branch.gml": "914aad8773bd1f2cfbc20f456bf946fd8ed24021ee6eecf91feeae16cae7d542",
+      "scripts/node_mk_tree_branch_fan/node_mk_tree_branch_fan.gml": "2cbd0c7c76df0a88b9326e3111410ae557f221474713d0074eaf23eede1fe7f8",
+      "scripts/node_mk_tree_leaf/node_mk_tree_leaf.gml": "b6bfbd8f4532608140c357297ec59866858aba47cfde8dbdfb09e302bae484e7",
+      "scripts/node_mk_tree_root/node_mk_tree_root.gml": "c8b09e3484504e8cd3ac9e2d3b973b9fd49cdcb288f945599e35af29407c9e33",
+      "scripts/node_mk_tree_root_path/node_mk_tree_root_path.gml": "903da8fc9e20faab2ca87f03354a969fb54b09df99360690778637c06ec647cc",
+      "scripts/node_normal_light/node_normal_light.gml": "0a2c6bb5d7ad923582f256a4489aa5d63a97241cc784e36509fe7841d37ca04e",
+      "scripts/node_particle/node_particle.gml": "f4a0d553d91bd0cddb5ccc50dc8f9dc21d54d406ebb9094f74a78cb637bc6886",
+      "scripts/node_path_shape_3d/node_path_shape_3d.gml": "e779dec5d2e9b82dd1a215ef4640182653e73396ba09b9ada722d40a19f6d9a4",
+      "scripts/node_psystem_3d_mask/node_psystem_3d_mask.gml": "1c402a9776e4a4efa1023d328605937937f829715214eeb62f2fb3b5c1ae9312",
+      "scripts/node_psystem_3d_spawn/node_psystem_3d_spawn.gml": "30151d3ec560148e80971cdbe41801a4b970e56f21bb10e725353e2db1acc6cb",
+      "scripts/node_psystem_render/node_psystem_render.gml": "f2b9cbeec08c6b91efabb79f58faa4119b4e5348984aae591b23594c3ca0e032",
+      "scripts/node_repeat/node_repeat.gml": "dfca1362dffef0747b1c6bfcf7d355547f97bec433e28389f0010a3a880a1694",
+      "scripts/node_scatter_points_3d/node_scatter_points_3d.gml": "5a666c5fbb40962cf01c987551e7578b4fca1c6ff9b0ee21dd8776ea5cc66a23",
+      "scripts/node_shadow_cast/node_shadow_cast.gml": "e7d33e694f7212e165ef871498756222d8659b70bd400e20a5bfa8ecc6cf8dfa",
+      "scripts/node_shape_polygon/node_shape_polygon.gml": "8a061fc8256a1df6491e6f280f1a27ee59fec07a623b66e3f14085c4dc88b837"
+    },
+    "rules": [
+      "61 absent inspector choice lists restored across 33 nodes",
+      "16 formerly unknown source choice maps gain raw source indices and clamp counts",
+      "separator slots stay in raw maps and clamp counts; display labels omit separators",
+      "fixed inputs and repeated templates retain source facts",
+      "mutable aliases retain unknown raw maps",
+      "existing labels, defaults and reviewed metadata overrides preserved",
+      "saved grouped enum values retain numeric source indices"
+    ]
+  },
+  "refreshed_rows": [
+    {
+      "node": "Node_2D_light",
+      "scope": "template",
+      "index": "0",
+      "name": "Light shape",
+      "file": "scripts/node_2d_light/node_2d_light.gml",
+      "evidence_files": [
+        "scripts/node_2d_light/node_2d_light.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Point",
+        "Ellipse",
+        "Line",
+        "Line asymmetric",
+        "Saber",
+        "Spot",
+        "Flame"
+      ]
+    },
+    {
+      "node": "Node_2D_light",
+      "scope": "template",
+      "index": "10",
+      "name": "Attenuation",
+      "file": "scripts/node_2d_light/node_2d_light.gml",
+      "evidence_files": [
+        "scripts/node_2d_light/node_2d_light.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Quadratic",
+        "Invert quadratic",
+        "Linear",
+        "Custom"
+      ]
+    },
+    {
+      "node": "Node_3D_Particle",
+      "scope": "inputs",
+      "index": "3",
+      "name": "Spawn Type",
+      "file": "scripts/node_3d_particle/node_3d_particle.gml",
+      "evidence_files": [
+        "scripts/node_3d_particle/node_3d_particle.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Stream",
+        "Burst",
+        "Trigger"
+      ]
+    },
+    {
+      "node": "Node_3D_Particle",
+      "scope": "inputs",
+      "index": "8",
+      "name": "Spawn Source",
+      "file": "scripts/node_3d_particle/node_3d_particle.gml",
+      "evidence_files": [
+        "scripts/node_3d_particle/node_3d_particle.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Shape",
+        "Path",
+        "Mesh Vertices",
+        "Direct Data"
+      ]
+    },
+    {
+      "node": "Node_3D_Particle",
+      "scope": "inputs",
+      "index": "30",
+      "name": "Spawn Shape",
+      "file": "scripts/node_3d_particle/node_3d_particle.gml",
+      "evidence_files": [
+        "scripts/node_3d_particle/node_3d_particle.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Box",
+        "Sphere",
+        "Circle"
+      ]
+    },
+    {
+      "node": "Node_Atlas_Set",
+      "scope": "inputs",
+      "index": "4",
+      "name": "Mode",
+      "file": "scripts/node_atlas_set/node_atlas_set.gml",
+      "evidence_files": [
+        "scripts/node_atlas_set/node_atlas_set.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Absolute",
+        "Relative"
+      ]
+    },
+    {
+      "node": "Node_Atlas_Set",
+      "scope": "inputs",
+      "index": "7",
+      "name": "Mode",
+      "file": "scripts/node_atlas_set/node_atlas_set.gml",
+      "evidence_files": [
+        "scripts/node_atlas_set/node_atlas_set.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Absolute",
+        "Relative"
+      ]
+    },
+    {
+      "node": "Node_Atlas_Set",
+      "scope": "inputs",
+      "index": "11",
+      "name": "Mode",
+      "file": "scripts/node_atlas_set/node_atlas_set.gml",
+      "evidence_files": [
+        "scripts/node_atlas_set/node_atlas_set.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Absolute",
+        "Additive",
+        "Multiplicative"
+      ]
+    },
+    {
+      "node": "Node_Atlas_Set",
+      "scope": "inputs",
+      "index": "14",
+      "name": "Mode",
+      "file": "scripts/node_atlas_set/node_atlas_set.gml",
+      "evidence_files": [
+        "scripts/node_atlas_set/node_atlas_set.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Absolute",
+        "Multiplicative"
+      ]
+    },
+    {
+      "node": "Node_Atlas_Set",
+      "scope": "inputs",
+      "index": "17",
+      "name": "Mode",
+      "file": "scripts/node_atlas_set/node_atlas_set.gml",
+      "evidence_files": [
+        "scripts/node_atlas_set/node_atlas_set.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Absolute",
+        "Additive",
+        "Multiplicative"
+      ]
+    },
+    {
+      "node": "Node_Bend",
+      "scope": "inputs",
+      "index": "2",
+      "name": "Type",
+      "file": "scripts/node_bend/node_bend.gml",
+      "evidence_files": [
+        "scripts/node_bend/node_bend.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Arc",
+        "Wave"
+      ]
+    },
+    {
+      "node": "Node_Bevel",
+      "scope": "inputs",
+      "index": "4",
+      "name": "Slope",
+      "file": "scripts/node_bevel/node_bevel.gml",
+      "evidence_files": [
+        "scripts/node_bevel/node_bevel.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Linear",
+        "Smooth",
+        "Circular"
+      ]
+    },
+    {
+      "node": "Node_Feedback_Input",
+      "scope": "inputs",
+      "index": "2",
+      "name": "Input Type",
+      "file": "scripts/node_feedback_input/node_feedback_input.gml",
+      "evidence_files": [
+        "scripts/node_feedback_input/node_feedback_input.gml",
+        "scripts/node_group_input/node_group_input.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Integer",
+        "Float",
+        "Boolean",
+        "Color",
+        "Surface",
+        "File Path",
+        "Curve",
+        "Text",
+        "Object",
+        "Node",
+        "Any",
+        "Path",
+        "Particle",
+        "Rigidbody Object",
+        "Domain",
+        "Struct",
+        "Strands",
+        "Mesh",
+        "Trigger",
+        "3D Mesh",
+        "3D Light",
+        "3D Camera",
+        "3D Scene",
+        "3D Material",
+        "PCX",
+        "Audio",
+        "Fluid Domain",
+        "SDF",
+        "Gradient"
+      ]
+    },
+    {
+      "node": "Node_Gradient_Cos",
+      "scope": "inputs",
+      "index": "14",
+      "name": "Type",
+      "file": "scripts/node_gradient_cos/node_gradient_cos.gml",
+      "evidence_files": [
+        "scripts/node_gradient_cos/node_gradient_cos.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Linear",
+        "Circular",
+        "Radial",
+        "Diamond"
+      ]
+    },
+    {
+      "node": "Node_Group_Input",
+      "scope": "inputs",
+      "index": "2",
+      "name": "Input Type",
+      "file": "scripts/node_group_input/node_group_input.gml",
+      "evidence_files": [
+        "scripts/node_group_input/node_group_input.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Integer",
+        "Float",
+        "Boolean",
+        "Color",
+        "Surface",
+        "File Path",
+        "Curve",
+        "Text",
+        "Object",
+        "Node",
+        "Any",
+        "Path",
+        "Particle",
+        "Rigidbody Object",
+        "Domain",
+        "Struct",
+        "Strands",
+        "Mesh",
+        "Trigger",
+        "3D Mesh",
+        "3D Light",
+        "3D Camera",
+        "3D Scene",
+        "3D Material",
+        "PCX",
+        "Audio",
+        "Fluid Domain",
+        "SDF",
+        "Gradient"
+      ]
+    },
+    {
+      "node": "Node_HLSL",
+      "scope": "template",
+      "index": "1",
+      "name": "Argument type",
+      "file": "scripts/node_hlsl/node_hlsl.gml",
+      "evidence_files": [
+        "scripts/node_hlsl/node_hlsl.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Float",
+        "Int",
+        "Vec2",
+        "Vec3",
+        "Vec4",
+        "Mat3",
+        "Mat4",
+        "Sampler2D",
+        "Color"
+      ]
+    },
+    {
+      "node": "Node_Image_Grid",
+      "scope": "inputs",
+      "index": "0",
+      "name": "Main Axis",
+      "file": "scripts/node_image_grid/node_image_grid.gml",
+      "evidence_files": [
+        "scripts/node_image_grid/node_image_grid.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Horizontal",
+        "Vertical"
+      ]
+    },
+    {
+      "node": "Node_Iterator_Input",
+      "scope": "inputs",
+      "index": "2",
+      "name": "Input Type",
+      "file": "scripts/node_iterator_input/node_iterator_input.gml",
+      "evidence_files": [
+        "scripts/node_iterator_input/node_iterator_input.gml",
+        "scripts/node_group_input/node_group_input.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Integer",
+        "Float",
+        "Boolean",
+        "Color",
+        "Surface",
+        "File Path",
+        "Curve",
+        "Text",
+        "Object",
+        "Node",
+        "Any",
+        "Path",
+        "Particle",
+        "Rigidbody Object",
+        "Domain",
+        "Struct",
+        "Strands",
+        "Mesh",
+        "Trigger",
+        "3D Mesh",
+        "3D Light",
+        "3D Camera",
+        "3D Scene",
+        "3D Material",
+        "PCX",
+        "Audio",
+        "Fluid Domain",
+        "SDF",
+        "Gradient"
+      ]
+    },
+    {
+      "node": "Node_Liquefy",
+      "scope": "template",
+      "index": "0",
+      "name": "Type",
+      "file": "scripts/node_liquefy/node_liquefy.gml",
+      "evidence_files": [
+        "scripts/node_liquefy/node_liquefy.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Push",
+        "Twirl",
+        "Pinch",
+        "Bloat"
+      ]
+    },
+    {
+      "node": "Node_Lua_Compute",
+      "scope": "template",
+      "index": "1",
+      "name": "Argument type",
+      "file": "scripts/node_lua_compute/node_lua_compute.gml",
+      "evidence_files": [
+        "scripts/node_lua_compute/node_lua_compute.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Number",
+        "String",
+        "Surface",
+        "Struct"
+      ]
+    },
+    {
+      "node": "Node_Lua_Surface",
+      "scope": "template",
+      "index": "1",
+      "name": "Argument type",
+      "file": "scripts/node_lua_surface/node_lua_surface.gml",
+      "evidence_files": [
+        "scripts/node_lua_surface/node_lua_surface.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Number",
+        "String",
+        "Surface",
+        "Struct"
+      ]
+    },
+    {
+      "node": "Node_MK_Dialog",
+      "scope": "template",
+      "index": "0",
+      "name": "Track Position",
+      "file": "scripts/node_mk_dialog/node_mk_dialog.gml",
+      "evidence_files": [
+        "scripts/node_mk_dialog/node_mk_dialog.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Start",
+        "End",
+        "Start/End",
+        "Always"
+      ]
+    },
+    {
+      "node": "Node_MK_Dialog",
+      "scope": "template",
+      "index": "1",
+      "name": "Apply Group",
+      "file": "scripts/node_mk_dialog/node_mk_dialog.gml",
+      "evidence_files": [
+        "scripts/node_mk_dialog/node_mk_dialog.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Letter",
+        "Words",
+        "All"
+      ]
+    },
+    {
+      "node": "Node_MK_Grass",
+      "scope": "inputs",
+      "index": "7",
+      "name": "Shape",
+      "file": "scripts/node_mk_grass/node_mk_grass.gml",
+      "evidence_files": [
+        "scripts/node_mk_grass/node_mk_grass.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Dense Bush",
+        "V",
+        "Hash",
+        "Line",
+        "W",
+        "Surface"
+      ]
+    },
+    {
+      "node": "Node_MK_Tile",
+      "scope": "inputs",
+      "index": "5",
+      "name": "Edge Type",
+      "file": "scripts/node_mk_tile/node_mk_tile.gml",
+      "evidence_files": [
+        "scripts/node_mk_tile/node_mk_tile.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Uniform",
+        "Individual"
+      ]
+    },
+    {
+      "node": "Node_MK_Tile",
+      "scope": "inputs",
+      "index": "12",
+      "name": "Edge Sprite",
+      "file": "scripts/node_mk_tile/node_mk_tile.gml",
+      "evidence_files": [
+        "scripts/node_mk_tile/node_mk_tile.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Single",
+        "Left + Center + Right"
+      ]
+    },
+    {
+      "node": "Node_MK_Tile",
+      "scope": "inputs",
+      "index": "13",
+      "name": "Edge Transform",
+      "file": "scripts/node_mk_tile/node_mk_tile.gml",
+      "evidence_files": [
+        "scripts/node_mk_tile/node_mk_tile.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Flip",
+        "Rotate"
+      ]
+    },
+    {
+      "node": "Node_MK_Tree_Branch",
+      "scope": "inputs",
+      "index": "27",
+      "name": "Length Blending",
+      "file": "scripts/node_mk_tree_branch/node_mk_tree_branch.gml",
+      "evidence_files": [
+        "scripts/node_mk_tree_branch/node_mk_tree_branch.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "None",
+        "Override",
+        "Multiply",
+        "Screen"
+      ]
+    },
+    {
+      "node": "Node_MK_Tree_Branch",
+      "scope": "inputs",
+      "index": "17",
+      "name": "Edge Blending",
+      "file": "scripts/node_mk_tree_branch/node_mk_tree_branch.gml",
+      "evidence_files": [
+        "scripts/node_mk_tree_branch/node_mk_tree_branch.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "None",
+        "Override",
+        "Multiply",
+        "Screen"
+      ]
+    },
+    {
+      "node": "Node_MK_Tree_Branch",
+      "scope": "inputs",
+      "index": "52",
+      "name": "Array Selection",
+      "file": "scripts/node_mk_tree_branch/node_mk_tree_branch.gml",
+      "evidence_files": [
+        "scripts/node_mk_tree_branch/node_mk_tree_branch.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Ordered",
+        "Random"
+      ]
+    },
+    {
+      "node": "Node_MK_Tree_Branch_Fan",
+      "scope": "inputs",
+      "index": "27",
+      "name": "Length Blending",
+      "file": "scripts/node_mk_tree_branch_fan/node_mk_tree_branch_fan.gml",
+      "evidence_files": [
+        "scripts/node_mk_tree_branch_fan/node_mk_tree_branch_fan.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "None",
+        "Override",
+        "Multiply",
+        "Screen"
+      ]
+    },
+    {
+      "node": "Node_MK_Tree_Branch_Fan",
+      "scope": "inputs",
+      "index": "29",
+      "name": "Edge Blending",
+      "file": "scripts/node_mk_tree_branch_fan/node_mk_tree_branch_fan.gml",
+      "evidence_files": [
+        "scripts/node_mk_tree_branch_fan/node_mk_tree_branch_fan.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "None",
+        "Override",
+        "Multiply",
+        "Screen"
+      ]
+    },
+    {
+      "node": "Node_MK_Tree_Branch_Fan",
+      "scope": "inputs",
+      "index": "37",
+      "name": "Array Selection",
+      "file": "scripts/node_mk_tree_branch_fan/node_mk_tree_branch_fan.gml",
+      "evidence_files": [
+        "scripts/node_mk_tree_branch_fan/node_mk_tree_branch_fan.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Ordered",
+        "Random"
+      ]
+    },
+    {
+      "node": "Node_MK_Tree_Leaf",
+      "scope": "inputs",
+      "index": "59",
+      "name": "Array Selection",
+      "file": "scripts/node_mk_tree_leaf/node_mk_tree_leaf.gml",
+      "evidence_files": [
+        "scripts/node_mk_tree_leaf/node_mk_tree_leaf.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Ordered",
+        "Random"
+      ]
+    },
+    {
+      "node": "Node_MK_Tree_Path_Root",
+      "scope": "inputs",
+      "index": "24",
+      "name": "Array Selection",
+      "file": "scripts/node_mk_tree_root_path/node_mk_tree_root_path.gml",
+      "evidence_files": [
+        "scripts/node_mk_tree_root_path/node_mk_tree_root_path.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Ordered",
+        "Random"
+      ]
+    },
+    {
+      "node": "Node_MK_Tree_Root",
+      "scope": "inputs",
+      "index": "24",
+      "name": "Length Blending",
+      "file": "scripts/node_mk_tree_root/node_mk_tree_root.gml",
+      "evidence_files": [
+        "scripts/node_mk_tree_root/node_mk_tree_root.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "None",
+        "Override",
+        "Multiply",
+        "Screen"
+      ]
+    },
+    {
+      "node": "Node_MK_Tree_Root",
+      "scope": "inputs",
+      "index": "16",
+      "name": "Edge Blending",
+      "file": "scripts/node_mk_tree_root/node_mk_tree_root.gml",
+      "evidence_files": [
+        "scripts/node_mk_tree_root/node_mk_tree_root.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "None",
+        "Override",
+        "Multiply",
+        "Screen"
+      ]
+    },
+    {
+      "node": "Node_MK_Tree_Root",
+      "scope": "inputs",
+      "index": "43",
+      "name": "Array Selection",
+      "file": "scripts/node_mk_tree_root/node_mk_tree_root.gml",
+      "evidence_files": [
+        "scripts/node_mk_tree_root/node_mk_tree_root.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Ordered",
+        "Random"
+      ]
+    },
+    {
+      "node": "Node_Normal_Light",
+      "scope": "template",
+      "index": "0",
+      "name": "Type",
+      "file": "scripts/node_normal_light/node_normal_light.gml",
+      "evidence_files": [
+        "scripts/node_normal_light/node_normal_light.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Point",
+        "Sun",
+        "Line",
+        "Spot"
+      ]
+    },
+    {
+      "node": "Node_Normal_Light",
+      "scope": "template",
+      "index": "9",
+      "name": "Attenuation",
+      "file": "scripts/node_normal_light/node_normal_light.gml",
+      "evidence_files": [
+        "scripts/node_normal_light/node_normal_light.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Quadratic",
+        "Invert quadratic",
+        "Linear",
+        "Custom"
+      ]
+    },
+    {
+      "node": "Node_Particle",
+      "scope": "inputs",
+      "index": "26",
+      "name": "On Animation End",
+      "file": "scripts/node_particle/node_particle.gml",
+      "evidence_files": [
+        "scripts/node_particle/node_particle.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Loop",
+        "Ping pong",
+        "Destroy"
+      ]
+    },
+    {
+      "node": "Node_Particle",
+      "scope": "inputs",
+      "index": "16",
+      "name": "Spawn Type",
+      "file": "scripts/node_particle/node_particle.gml",
+      "evidence_files": [
+        "scripts/node_particle/node_particle.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Stream",
+        "Burst",
+        "Trigger"
+      ]
+    },
+    {
+      "node": "Node_Particle",
+      "scope": "inputs",
+      "index": "4",
+      "name": "Spawn Source",
+      "file": "scripts/node_particle/node_particle.gml",
+      "evidence_files": [
+        "scripts/node_particle/node_particle.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Area Inside",
+        "Area Border",
+        "Map",
+        "Path",
+        "Direct Data"
+      ]
+    },
+    {
+      "node": "Node_Particle",
+      "scope": "inputs",
+      "index": "24",
+      "name": "Distribution",
+      "file": "scripts/node_particle/node_particle.gml",
+      "evidence_files": [
+        "scripts/node_particle/node_particle.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Uniform",
+        "Random",
+        "Poisson"
+      ]
+    },
+    {
+      "node": "Node_Path_Shape_3D",
+      "scope": "inputs",
+      "index": "2",
+      "name": "Shape",
+      "file": "scripts/node_path_shape_3d/node_path_shape_3d.gml",
+      "evidence_files": [
+        "scripts/node_path_shape_3d/node_path_shape_3d.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Rectangle",
+        "Ellipse",
+        "Regular Polygon",
+        "Star",
+        "Spring",
+        "Spring Sphere",
+        "Spiral"
+      ]
+    },
+    {
+      "node": "Node_Repeat",
+      "scope": "inputs",
+      "index": "16",
+      "name": "Array Select",
+      "file": "scripts/node_repeat/node_repeat.gml",
+      "evidence_files": [
+        "scripts/node_repeat/node_repeat.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Order",
+        "Random",
+        "Spread"
+      ]
+    },
+    {
+      "node": "Node_Repeat",
+      "scope": "inputs",
+      "index": "26",
+      "name": "Stack",
+      "file": "scripts/node_repeat/node_repeat.gml",
+      "evidence_files": [
+        "scripts/node_repeat/node_repeat.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "None",
+        "X",
+        "Y"
+      ]
+    },
+    {
+      "node": "Node_Repeat",
+      "scope": "template",
+      "index": "1",
+      "name": "Select Mode",
+      "file": "scripts/node_repeat/node_repeat.gml",
+      "evidence_files": [
+        "scripts/node_repeat/node_repeat.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Index",
+        "Area",
+        "Linear",
+        "Surface"
+      ]
+    },
+    {
+      "node": "Node_Scatter_Points_3D",
+      "scope": "inputs",
+      "index": "4",
+      "name": "Shape",
+      "file": "scripts/node_scatter_points_3d/node_scatter_points_3d.gml",
+      "evidence_files": [
+        "scripts/node_scatter_points_3d/node_scatter_points_3d.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Cube",
+        "Sphere"
+      ]
+    },
+    {
+      "node": "Node_Shadow_Cast",
+      "scope": "template",
+      "index": "0",
+      "name": "Type",
+      "file": "scripts/node_shadow_cast/node_shadow_cast.gml",
+      "evidence_files": [
+        "scripts/node_shadow_cast/node_shadow_cast.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Point",
+        "Sun"
+      ]
+    },
+    {
+      "node": "Node_Shadow_Cast",
+      "scope": "template",
+      "index": "5",
+      "name": "Attenuation",
+      "file": "scripts/node_shadow_cast/node_shadow_cast.gml",
+      "evidence_files": [
+        "scripts/node_shadow_cast/node_shadow_cast.gml"
+      ],
+      "fields": [
+        "source_choices",
+        "source_behavior",
+        "choices"
+      ],
+      "labels": [
+        "Quadratic",
+        "Invert quadratic",
+        "Linear",
+        "Custom"
+      ]
+    },
+    {
+      "node": "Node_Shape_Polygon",
+      "scope": "inputs",
+      "index": "4",
+      "name": "Shape",
+      "file": "scripts/node_shape_polygon/node_shape_polygon.gml",
+      "evidence_files": [
+        "scripts/node_shape_polygon/node_shape_polygon.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Rectangle",
+        "Diamond",
+        "Trapezoid",
+        "Parallelogram",
+        "Ellipse",
+        "Arc",
+        "Ring",
+        "Crescent",
+        "Pie",
+        "Squircle",
+        "Regular Polygon",
+        "Star",
+        "Cross",
+        "Capsule",
+        "Leaf",
+        "Gear"
+      ]
+    },
+    {
+      "node": "Node_VFX_Spawner",
+      "scope": "inputs",
+      "index": "26",
+      "name": "On Animation End",
+      "file": "scripts/node_VFX_spawner/node_VFX_spawner.gml",
+      "evidence_files": [
+        "scripts/node_VFX_spawner/node_VFX_spawner.gml",
+        "scripts/_node_VFX_spawner/_node_VFX_spawner.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Loop",
+        "Ping pong",
+        "Destroy"
+      ]
+    },
+    {
+      "node": "Node_VFX_Spawner",
+      "scope": "inputs",
+      "index": "16",
+      "name": "Spawn Type",
+      "file": "scripts/node_VFX_spawner/node_VFX_spawner.gml",
+      "evidence_files": [
+        "scripts/node_VFX_spawner/node_VFX_spawner.gml",
+        "scripts/_node_VFX_spawner/_node_VFX_spawner.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Stream",
+        "Burst",
+        "Trigger"
+      ]
+    },
+    {
+      "node": "Node_VFX_Spawner",
+      "scope": "inputs",
+      "index": "4",
+      "name": "Spawn Source",
+      "file": "scripts/node_VFX_spawner/node_VFX_spawner.gml",
+      "evidence_files": [
+        "scripts/node_VFX_spawner/node_VFX_spawner.gml",
+        "scripts/_node_VFX_spawner/_node_VFX_spawner.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Area Inside",
+        "Area Border",
+        "Map",
+        "Path",
+        "Direct Data"
+      ]
+    },
+    {
+      "node": "Node_VFX_Spawner",
+      "scope": "inputs",
+      "index": "24",
+      "name": "Distribution",
+      "file": "scripts/node_VFX_spawner/node_VFX_spawner.gml",
+      "evidence_files": [
+        "scripts/node_VFX_spawner/node_VFX_spawner.gml",
+        "scripts/_node_VFX_spawner/_node_VFX_spawner.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Uniform",
+        "Random"
+      ]
+    },
+    {
+      "node": "Node_pSystem_3D_Mask",
+      "scope": "inputs",
+      "index": "8",
+      "name": "Shape",
+      "file": "scripts/node_psystem_3d_mask/node_psystem_3d_mask.gml",
+      "evidence_files": [
+        "scripts/node_psystem_3d_mask/node_psystem_3d_mask.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Sphere",
+        "Plane"
+      ]
+    },
+    {
+      "node": "Node_pSystem_3D_Spawn",
+      "scope": "inputs",
+      "index": "7",
+      "name": "Type",
+      "file": "scripts/node_psystem_3d_spawn/node_psystem_3d_spawn.gml",
+      "evidence_files": [
+        "scripts/node_psystem_3d_spawn/node_psystem_3d_spawn.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Shape",
+        "Path",
+        "Mesh Vertices",
+        "Direct Data"
+      ]
+    },
+    {
+      "node": "Node_pSystem_3D_Spawn",
+      "scope": "inputs",
+      "index": "8",
+      "name": "Shape",
+      "file": "scripts/node_psystem_3d_spawn/node_psystem_3d_spawn.gml",
+      "evidence_files": [
+        "scripts/node_psystem_3d_spawn/node_psystem_3d_spawn.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Box",
+        "Sphere",
+        "Circle"
+      ]
+    },
+    {
+      "node": "Node_pSystem_Render",
+      "scope": "inputs",
+      "index": "4",
+      "name": "Surface Array",
+      "file": "scripts/node_psystem_render/node_psystem_render.gml",
+      "evidence_files": [
+        "scripts/node_psystem_render/node_psystem_render.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Random",
+        "Order",
+        "Animation",
+        "Scale"
+      ]
+    },
+    {
+      "node": "Node_pSystem_Render",
+      "scope": "inputs",
+      "index": "7",
+      "name": "On Animation End",
+      "file": "scripts/node_psystem_render/node_psystem_render.gml",
+      "evidence_files": [
+        "scripts/node_psystem_render/node_psystem_render.gml"
+      ],
+      "fields": [
+        "choices"
+      ],
+      "labels": [
+        "Loop",
+        "Ping pong",
+        "Destroy"
+      ]
+    }
+  ],
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-alias-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-alias-build-batch2.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-alias-cpu-batch2-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5320,
+    "startup_test_cases": 1,
+    "python_tests": 102,
+    "cli_tests": 16,
+    "scoped_vulkan_cases": 31,
+    "choice_alias_semantic_cases": 3,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3574,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-alias-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-alias-source-stability-batch2.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-alias-cpu-child-hashes-batch2.json",
+    "read_review": "Sol read-only review found no remaining blockers; scoped snapshot comparison preserved unrelated facts",
+    "existing_build_warnings": [
+      "glslang ENABLE_HLSL deprecation, v0.26 roadmap audit already recorded",
+      "CacheGroupReplay.cpp missing-field-initializers"
+    ]
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "check": "python",
+      "test": "test_local_helper_choices_retain_inspector_labels_and_source_evidence",
+      "output": "AssertionError: [] is not None",
+      "repair": "grug correct fixture expectation: legacy parser sees final empty list; raw source choices and clamp count remain unknown",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-alias-cpu-python-batch1.log"
+    },
+    {
+      "batch": 1,
+      "check": "lint",
+      "output": "Found 12 errors: I001, SIM115, FURB167, B023, PLW1510",
+      "repair": "grug sort imports, name re.MULTILINE, close CSV/JSON with context managers, bind loop lambda arguments, and state git probe check=False",
+      "evidence": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/choice-alias-cpu-lint-batch1.log"
+    }
+  ],
+  "not_run": [
+    "headed live Studio, approval pending",
+    "licensed reference pixel captures, reference build unavailable",
+    "dedicated performance profiling; this metadata change makes no speed claim"
+  ]
+}

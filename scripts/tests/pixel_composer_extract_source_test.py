@@ -6,13 +6,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 REPOSITORY = Path(__file__).resolve().parents[2]
 EXTRACTOR = REPOSITORY / "scripts/pixel-composer/extract-source.py"
 
 
 class PixelComposerExtractSourceTest(unittest.TestCase):
-    def extract(self, root: Path, include_condition: bool = False, include_gradient: bool = False) -> dict:
+    def extract(self, root: Path, include_condition: bool = False, include_gradient: bool = False, include_aliases: bool = False) -> dict:
         script_root = root / "source"
         files = {
             "scripts/scrollBox/scrollBox.gml": "",
@@ -287,7 +286,7 @@ function Node_Path_Shape_3D(_x, _y, _group=noone) : Node(_x, _y, _group) constru
     static getPointRatio=function(_rat,_ind=0,out=undefined) { if(!is(out,__vec3P)) out=new __vec3P(); return out; }
 }
 """
-        if include_condition or include_gradient:
+        if include_condition or include_gradient or include_aliases:
             files["scripts/node_value_enum_scroll/node_value_enum_scroll.gml"] = '''
 #macro nodeValue_EScroll nodeValue_Enum_Scroll
 function __NodeValue_Enum_Scroll(_name, _node, _value, _data) : NodeValue(_name, _node, CONNECT_TYPE.input, VALUE_TYPE.integer, _value, "") constructor {
@@ -333,6 +332,18 @@ function Node_Condition(_x, _y, _group = noone) : Node(_x, _y, _group) construct
     }
 }
 '''
+        if include_aliases:
+            files["scripts/node_choice_alias/node_choice_alias.gml"] = """
+function Node_Choice_Alias(_x, _y) : Node(_x, _y) constructor {
+    var modes = __enum_array_gen(["Arc", "Wave"], s_node_bend_type);
+    newInput(2, nodeValue_EScroll("Type", 0, modes));
+    var mutable_modes = __enum_array_gen(["Old", "New"], s_node_bend_type);
+    newInput(3, nodeValue_EScroll("Mutable Type", 0, mutable_modes));
+    mutable_modes = [];
+    var sections = __enum_array_gen(["First", -1, "Second"], s_node_bend_type);
+    newInput(4, nodeValue_EScroll("Sections", 0, sections));
+}
+"""
         if include_gradient:
             files["scripts/node_gradient/node_gradient.gml"] = '''
 function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructor {
@@ -377,6 +388,7 @@ function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructo
                 "Node_Scatter_Point_Fibonacci",
                 *(('Node_Condition',) if include_condition else ()),
                 *(('Node_Gradient',) if include_gradient else ()),
+                *(('Node_Choice_Alias',) if include_aliases else ()),
             ):
                 writer.writerow({"node_id": node})
 
@@ -636,6 +648,30 @@ function Node_Gradient(_x, _y, _group = noone) : Node(_x, _y, _group) constructo
         self.assertNotIn("array_select", other)
         self.assertIn("scripts/node_text/node_text.gml", snapshot["source_constructor_evidence"])
         self.assertIn("scripts/node_value/node_value.gml", snapshot["source_constructor_evidence"])
+
+    def test_local_helper_choices_retain_inspector_labels_and_source_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            snapshot = self.extract(Path(temporary), include_aliases=True)
+        inputs = snapshot["nodes"]["Node_Choice_Alias"]["inputs"]
+        fixed = next(item for item in inputs if item["index"] == "2")
+        self.assertEqual(["Arc", "Wave"], fixed["choices"])
+        self.assertEqual({"status": "resolved", "entries": [
+            {"choice_index": 0, "label": "Arc"}, {"choice_index": 1, "label": "Wave"}
+        ]}, fixed["source_choices"])
+        self.assertEqual(2, fixed["source_behavior"]["choice_clamp"]["choice_count"])
+        self.assertIn("scripts/node_choice_alias/node_choice_alias.gml", snapshot["source_constructor_evidence"])
+        mutable = next(item for item in inputs if item["index"] == "3")
+        # grug legacy parser sees the final empty list; raw source choices stay unknown.
+        self.assertEqual([], mutable["choices"])
+        self.assertEqual({"status": "unknown", "entries": None}, mutable["source_choices"])
+        self.assertIsNone(mutable["source_behavior"]["choice_clamp"]["choice_count"])
+        sections = next(item for item in inputs if item["index"] == "4")
+        self.assertEqual(["First", "Second"], sections["choices"])
+        self.assertEqual({"status": "resolved", "entries": [
+            {"choice_index": 0, "label": "First"}, {"choice_index": 1, "separator": -1},
+            {"choice_index": 2, "label": "Second"}
+        ]}, sections["source_choices"])
+        self.assertEqual(3, sections["source_behavior"]["choice_clamp"]["choice_count"])
 
 
 if __name__ == "__main__":

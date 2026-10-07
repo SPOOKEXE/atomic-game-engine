@@ -17,11 +17,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-from enum_values import parse_enum_members
-from surface_depth import DEPTH_LABELS, depth_attribute
 from array_depth import SourceIndex, apply_runtime_depth_mutations, declaration_depth
-from source_selection import verified_source_nodes
-from source_array_classification import SourceArrayClassification, apply_input_classification_mutations, _result
+from enum_values import parse_enum_members
+from source_array_classification import (
+    SourceArrayClassification,
+    _result,
+    apply_input_classification_mutations,
+)
 from source_behavior import (
     _matching_end,
     choice_count,
@@ -33,12 +35,15 @@ from source_behavior import (
     node_vector_math_choice_source,
     source_choice_map,
 )
+from source_selection import verified_source_nodes
+from surface_depth import DEPTH_LABELS, depth_attribute
 
 root = Path(sys.argv[1])
-matrix = list(csv.DictReader(open(sys.argv[2], encoding="utf-8")))
+with Path(sys.argv[2]).open(encoding="utf-8") as matrix_file:
+    matrix = list(csv.DictReader(matrix_file))
 out = Path(sys.argv[3])
 
-FUNCTION = re.compile(r"^\s*function\s+(Node_[A-Za-z0-9_]+)\s*\(([^)]*)\)\s*(?::\s*([A-Za-z0-9_]+)\s*\()?", re.M)
+FUNCTION = re.compile(r"^\s*function\s+(Node_[A-Za-z0-9_]+)\s*\(([^)]*)\)\s*(?::\s*([A-Za-z0-9_]+)\s*\()?", re.MULTILINE)
 INPUT = re.compile(r"newInput\(\s*([^,]+?)\s*,\s*nodeValue_([A-Za-z0-9_]+)\s*\(")
 GENERIC_INPUT = re.compile(r"newInput\(\s*([^,]+?)\s*,\s*nodeValue\s*\(")
 OUTPUT = re.compile(r"newOutput\(\s*([^,]+?)\s*,\s*nodeValue_Output\s*\(")
@@ -46,7 +51,7 @@ SURFACE_OUTPUT = re.compile(r"newOutput\(\s*([^,]+?)\s*,\s*nodeValue_Surface\s*\
 ACTIVE = re.compile(r"newActiveInput\(\s*([^)]+)\)")
 # Constructors whose name argument has a default.
 DEFAULT_NAMES = {"Dimension": "Dimension", "Anchor": "Anchor", "Pbbox": "PBbox"}
-NODE_ATTRIBUTE = re.compile(r"^\s*(?:self\.)?attributes\.([a-z_][a-z0-9_]*)\s*=\s*([^;\n]+)", re.M)
+NODE_ATTRIBUTE = re.compile(r"^\s*(?:self\.)?attributes\.([a-z_][a-z0-9_]*)\s*=\s*([^;\n]+)", re.MULTILINE)
 EDITOR_ATTRIBUTES = {
     "hovering", "focusing", "file_checker", "cache_use", "cache_data", "cache", "timeline_override", "show_preview",
     "layer_visible", "layer_selectable", "layer_order", "display_name", "select_object", "temp_path",
@@ -84,9 +89,9 @@ SCALAR_DEPTH_SOURCE_FILES = (
     "scripts/node_value_float/node_value_float.gml",
     "scripts/__node_value_number/__node_value_number.gml",
 )
-GLOBAL_ARRAY = re.compile(r"(?:^|;)\s*(?:global\.)?([A-Z_][A-Z0-9_]*)\s*=\s*\[", re.M)
+GLOBAL_ARRAY = re.compile(r"(?:^|;)\s*(?:global\.)?([A-Z_][A-Z0-9_]*)\s*=\s*\[", re.MULTILINE)
 STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
-MACRO = re.compile(r"^\s*#macro\s+([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$", re.M)
+MACRO = re.compile(r"^\s*#macro\s+([A-Za-z_][A-Za-z0-9_]*)\s+(.+)$", re.MULTILINE)
 ENUM = re.compile(r"\benum\s+([A-Z_][A-Z0-9_]*)\s*\{([^}]*)\}")
 
 files, bases, bodies = {}, {}, {}
@@ -532,8 +537,10 @@ def parse(name, seen):
                     separator_verified=source_choice_evidence is not None,
                     allowlisted_arrays=generated_choice_arrays,
                 )
-                if choice_expression in generated_choice_arrays and source_choices is not None:
-                    entry["choices"] = [choice["label"] for choice in source_choices]
+                if source_choices is not None and entry.get("choices") is None:
+                    # grug local helper aliases still need inspector labels and source evidence.
+                    entry["choices"] = [choice["label"] for choice in source_choices if "label" in choice]
+                    record_constructor_source(name)
             entry["source_choices"] = {
                 "status": "resolved" if source_choices is not None else "unknown",
                 "entries": source_choices,
@@ -570,7 +577,7 @@ def parse(name, seen):
             if not chain_args or not chain_args[0]:
                 continue
             helper, index, position = chain.group(1), chain_args[0], match.start() + 1 + order
-            suffix = lambda at, fallback: chain_args[at].strip('"') if len(chain_args) > at and chain_args[at].startswith('"') else fallback
+            suffix = lambda at, fallback, chain_args=chain_args: chain_args[at].strip('"') if len(chain_args) > at and chain_args[at].startswith('"') else fallback
             if helper == "setMappable":
                 entry["mapped"] = "range"
                 mapped_range_type = MAPPED_RANGE_TYPE_OVERRIDES.get((name, entry["name"]))
@@ -826,7 +833,7 @@ def parse(name, seen):
     return inputs, outputs
 
 
-commit = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+commit = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, check=False).stdout.strip()
 nodes = {}
 for row in matrix:
     node = row["node_id"]
@@ -882,21 +889,23 @@ for node in nodes.values():
     for item in node["inputs"] + node.get("dynamic", {}).get("template", []):
         item.pop("_source_classification_state", None)
 
-json.dump(
-    {
-        "source_commit": commit,
-        "nodes": nodes,
-        "macros": macros,
-        "enums": enums,
-        "enum_values": enum_values,
-        "source_behavior_evidence": source_behavior_evidence,
-        "source_constructor_evidence": source_constructor_evidence,
-        "source_array_classification_evidence": source_classification.evidence,
-        "source_choice_evidence": source_choice_evidence,
-        "source_choice_generated_evidence": source_choice_generated_evidence,
-    },
-    open(out, "w", encoding="utf-8"),
-    indent=1,
-    sort_keys=True,
-)
+with out.open("w", encoding="utf-8") as snapshot_file:
+    json.dump(
+        {
+            "source_commit": commit,
+            "nodes": nodes,
+            "macros": macros,
+            "enums": enums,
+            "enum_values": enum_values,
+            "source_behavior_evidence": source_behavior_evidence,
+            "source_constructor_evidence": source_constructor_evidence,
+            "source_array_classification_evidence": source_classification.evidence,
+            "source_choice_evidence": source_choice_evidence,
+            "source_choice_generated_evidence": source_choice_generated_evidence,
+        },
+        snapshot_file,
+        indent=1,
+        sort_keys=True,
+    )
+
 print(f"{len(nodes)} nodes from {len(matrix)} matrix rows at {commit}")

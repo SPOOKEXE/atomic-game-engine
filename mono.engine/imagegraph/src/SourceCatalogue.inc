@@ -89,10 +89,17 @@ S	I	attribute_array_process	?
 D	3	25
 T	input_14		14	Active	boolean		
 S	T	input_14	0
-T	light_shape	Light shape	0	EScroll	enum	e 0	
+T	light_shape	Light shape	0	EScroll	enum	e 0	Point;Ellipse;Line;Line asymmetric;Saber;Spot;Flame
 S	T	light_shape	0
-B	T	light_shape	0	general	1	default	?
-C	T	light_shape	unknown
+B	T	light_shape	0	general	1	default	7
+C	T	light_shape	resolved
+Q	T	light_shape	0	0	s "Point"
+Q	T	light_shape	1	0	s "Ellipse"
+Q	T	light_shape	2	0	s "Line"
+Q	T	light_shape	3	0	s "Line asymmetric"
+Q	T	light_shape	4	0	s "Saber"
+Q	T	light_shape	5	0	s "Spot"
+Q	T	light_shape	6	0	s "Flame"
 T	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	T	position	1
 V	T	position	1
@@ -141,10 +148,14 @@ T	intensity	Intensity	3	Slider	scalar	d 1
 S	T	intensity	0
 T	color	Color	4	Color	colour	c 255 255 255 255	
 S	T	color	0
-T	attenuation	Attenuation	10	EScroll	enum	e 0	
+T	attenuation	Attenuation	10	EScroll	enum	e 0	Quadratic;Invert quadratic;Linear;Custom
 S	T	attenuation	0
-B	T	attenuation	0	general	1	default	?
-C	T	attenuation	unknown
+B	T	attenuation	0	general	1	default	4
+C	T	attenuation	resolved
+Q	T	attenuation	0	0	s "Quadratic"
+Q	T	attenuation	1	0	s "Invert quadratic"
+Q	T	attenuation	2	0	s "Linear"
+Q	T	attenuation	3	0	s "Custom"
 T	atten_curve	AttenCurve	24	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	
 S	T	atten_curve	1
 A	T	atten_curve	1
@@ -1363,7 +1374,7 @@ I	mesh	Mesh	0	D3Mesh	mesh
 S	I	mesh	0
 I	spawn	Spawn	2	Bool	boolean	b 1	
 S	I	spawn	0
-I	spawn_type	Spawn Type	3	EScroll	enum	e 0	
+I	spawn_type	Spawn Type	3	EScroll	enum	e 0	Stream;Burst;Trigger
 S	I	spawn_type	0
 B	I	spawn_type	0	general	1	default	3
 C	I	spawn_type	resolved
@@ -1384,7 +1395,7 @@ I	lifespan	Lifespan	12	Range	vector2	v 20 30
 S	I	lifespan	1
 V	I	lifespan	1
 A	I	lifespan	1
-I	spawn_source	Spawn Source	8	EScroll	enum	e 0	
+I	spawn_source	Spawn Source	8	EScroll	enum	e 0	Shape;Path;Mesh Vertices;Direct Data
 S	I	spawn_source	0
 B	I	spawn_source	0	general	1	default	4
 C	I	spawn_source	resolved
@@ -1392,7 +1403,7 @@ Q	I	spawn_source	0	0	s "Shape"
 Q	I	spawn_source	1	0	s "Path"
 Q	I	spawn_source	2	0	s "Mesh Vertices"
 Q	I	spawn_source	3	0	s "Direct Data"
-I	spawn_shape	Spawn Shape	30	EScroll	enum	e 0	
+I	spawn_shape	Spawn Shape	30	EScroll	enum	e 0	Box;Sphere;Circle
 S	I	spawn_shape	0
 B	I	spawn_shape	0	general	1	default	3
 C	I	spawn_shape	resolved
@@ -3029,7 +3040,7 @@ I	surface	Surface	2	Surface	image
 S	I	surface	0
 I	set_position	Set Position	3	Bool	boolean	b 0	
 S	I	set_position	0
-I	mode	Mode	4	EButton	enum	e 0	
+I	mode	Mode	4	EButton	enum	e 0	Absolute;Relative
 S	I	mode	0
 B	I	mode	0	general	1	always	2
 C	I	mode	resolved
@@ -3041,7 +3052,7 @@ V	I	position	1
 A	I	position	1
 I	set_rotation	Set Rotation	6	Bool	boolean	b 0	
 S	I	set_rotation	0
-I	mode_2	Mode	7	EButton	enum	e 0	
+I	mode_2	Mode	7	EButton	enum	e 0	Absolute;Relative
 S	I	mode_2	0
 B	I	mode_2	0	general	1	always	2
 C	I	mode_2	resolved
@@ -3053,7 +3064,7 @@ I	recalculate_position	Recalculate Position	9	Bool	boolean	b 1
 S	I	recalculate_position	0
 I	set_scale	Set Scale	10	Bool	boolean	b 0	
 S	I	set_scale	0
-I	mode_3	Mode	11	EButton	enum	e 0	
+I	mode_3	Mode	11	EButton	enum	e 0	Absolute;Additive;Multiplicative
 S	I	mode_3	0
 B	I	mode_3	0	general	1	always	3
 C	I	mode_3	resolved
@@ -3070,7 +3081,7 @@ V	I	anchor	1
 A	I	anchor	?
 I	set_blending	Set Blending	13	Bool	boolean	b 0	
 S	I	set_blending	0
-I	mode_4	Mode	14	EButton	enum	e 0	
+I	mode_4	Mode	14	EButton	enum	e 0	Absolute;Multiplicative
 S	I	mode_4	0
 B	I	mode_4	0	general	1	always	2
 C	I	mode_4	resolved
@@ -3080,7 +3091,7 @@ I	blend	Blend	15	Color	colour	c 255 255 255 255
 S	I	blend	0
 I	set_alpha	Set Alpha	16	Bool	boolean	b 0	
 S	I	set_alpha	0
-I	mode_5	Mode	17	EButton	enum	e 0	
+I	mode_5	Mode	17	EButton	enum	e 0	Absolute;Additive;Multiplicative
 S	I	mode_5	0
 B	I	mode_5	0	general	1	always	3
 C	I	mode_5	resolved
@@ -3304,10 +3315,12 @@ I	dimension_unit	Dimension Unit	-1	DimensionUnit	enum	e 1	Pixel;Project;Mask
 S	I	dimension_unit	?
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
-I	type	Type	2	EScroll	enum	e 0	
+I	type	Type	2	EScroll	enum	e 0	Arc;Wave
 S	I	type	0
-B	I	type	0	general	1	default	?
-C	I	type	unknown
+B	I	type	0	general	1	default	2
+C	I	type	resolved
+Q	I	type	0	0	s "Arc"
+Q	I	type	1	0	s "Wave"
 I	axis	Axis	3	EButton	enum	e 0	X;Y
 S	I	axis	0
 B	I	axis	0	general	1	always	2
@@ -3367,7 +3380,7 @@ I	invert_mask	Invert mask	9	Bool	boolean	b 0
 S	I	invert_mask	0
 I	mask_feather	Mask feather	10	Slider	scalar	d 0	
 S	I	mask_feather	0
-I	slope	Slope	4	EScroll	enum	e 0	
+I	slope	Slope	4	EScroll	enum	e 0	Linear;Smooth;Circular
 S	I	slope	0
 B	I	slope	0	general	1	default	3
 C	I	slope	resolved
@@ -8107,7 +8120,7 @@ I	visible_check	Visible Check	10	Float	scalar	d 0
 S	I	visible_check	0
 I	visible_check_to	Visible Check To	11	Float	scalar	d 0	
 S	I	visible_check_to	0
-I	input_type	Input Type	2	EScroll	enum	e 11	
+I	input_type	Input Type	2	EScroll	enum	e 11	Integer;Float;Boolean;Color;Surface;File Path;Curve;Text;Object;Node;Any;Path;Particle;Rigidbody Object;Domain;Struct;Strands;Mesh;Trigger;3D Mesh;3D Light;3D Camera;3D Scene;3D Material;PCX;Audio;Fluid Domain;SDF;Gradient
 S	I	input_type	0
 B	I	input_type	0	general	1	disabled	32
 C	I	input_type	resolved
@@ -9167,7 +9180,7 @@ S	I	scale	0
 I	progress_remap	Progress Remap	24	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	
 S	I	progress_remap	1
 A	I	progress_remap	1
-I	type	Type	14	EScroll	enum	e 0	
+I	type	Type	14	EScroll	enum	e 0	Linear;Circular;Radial;Diamond
 S	I	type	0
 B	I	type	0	general	1	default	4
 C	I	type	resolved
@@ -10306,7 +10319,7 @@ I	visible_check	Visible Check	10	Float	scalar	d 0
 S	I	visible_check	0
 I	visible_check_to	Visible Check To	11	Float	scalar	d 0	
 S	I	visible_check_to	0
-I	input_type	Input Type	2	EScroll	enum	e 11	
+I	input_type	Input Type	2	EScroll	enum	e 11	Integer;Float;Boolean;Color;Surface;File Path;Curve;Text;Object;Node;Any;Path;Particle;Rigidbody Object;Domain;Struct;Strands;Mesh;Trigger;3D Mesh;3D Light;3D Camera;3D Scene;3D Material;PCX;Audio;Fluid Domain;SDF;Gradient
 S	I	input_type	0
 B	I	input_type	0	general	1	disabled	32
 C	I	input_type	resolved
@@ -10403,7 +10416,7 @@ S	I	attribute_array_process	?
 D	5	3
 T	argument_name	Argument name	0	Text	text	s ""	
 S	T	argument_name	0
-T	argument_type	Argument type	1	EScroll	enum	e 0	
+T	argument_type	Argument type	1	EScroll	enum	e 0	Float;Int;Vec2;Vec3;Vec4;Mat3;Mat4;Sampler2D;Color
 S	T	argument_type	0
 B	T	argument_type	0	general	1	default	9
 C	T	argument_type	resolved
@@ -10865,10 +10878,12 @@ S	I	frame	0
 O	surface_out	Surface Out	0	image	i -4	s "noone"
 O	dimension	Dimension	1	vector2	v 1 1	s "[1,1]"
 N	pc.image_grid	Node_Image_Grid	Image Grid	compose	scripts/node_image_grid/node_image_grid.gml
-I	main_axis	Main Axis	0	EScroll	enum	e 0	
+I	main_axis	Main Axis	0	EScroll	enum	e 0	Horizontal;Vertical
 S	I	main_axis	0
-B	I	main_axis	0	general	1	default	?
-C	I	main_axis	unknown
+B	I	main_axis	0	general	1	default	2
+C	I	main_axis	resolved
+Q	I	main_axis	0	0	s "Horizontal"
+Q	I	main_axis	1	0	s "Vertical"
 I	column	Column	1	Int	integer	i 4	
 S	I	column	0
 I	origin	Origin	8	EScroll	enum	e 0	Top Left;Top Right;Bottom Left;Bottom Right
@@ -11326,7 +11341,7 @@ I	visible_check	Visible Check	10	Float	scalar	d 0
 S	I	visible_check	0
 I	visible_check_to	Visible Check To	11	Float	scalar	d 0	
 S	I	visible_check_to	0
-I	input_type	Input Type	2	EScroll	enum	e 11	
+I	input_type	Input Type	2	EScroll	enum	e 11	Integer;Float;Boolean;Color;Surface;File Path;Curve;Text;Object;Node;Any;Path;Particle;Rigidbody Object;Domain;Struct;Strands;Mesh;Trigger;3D Mesh;3D Light;3D Camera;3D Scene;3D Material;PCX;Audio;Fluid Domain;SDF;Gradient
 S	I	input_type	0
 B	I	input_type	0	general	1	disabled	32
 C	I	input_type	resolved
@@ -12197,10 +12212,14 @@ S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
 D	7	11
-T	type	Type	0	EScroll	enum	e 0	
+T	type	Type	0	EScroll	enum	e 0	Push;Twirl;Pinch;Bloat
 S	T	type	0
-B	T	type	0	general	1	default	?
-C	T	type	unknown
+B	T	type	0	general	1	default	4
+C	T	type	resolved
+Q	T	type	0	0	s "Push"
+Q	T	type	1	0	s "Twirl"
+Q	T	type	2	0	s "Pinch"
+Q	T	type	3	0	s "Bloat"
 T	position	Position	1	Vec2	vector2	v 0.5 0.5	
 S	T	position	1
 V	T	position	1
@@ -12322,7 +12341,7 @@ A	I	lua_code	?
 D	5	3
 T	argument_name	Argument name	0	Text	text	s ""	
 S	T	argument_name	0
-T	argument_type	Argument type	1	EScroll	enum	e 0	
+T	argument_type	Argument type	1	EScroll	enum	e 0	Number;String;Surface;Struct
 S	T	argument_type	0
 B	T	argument_type	0	general	1	default	4
 C	T	argument_type	resolved
@@ -12366,7 +12385,7 @@ A	I	lua_code	?
 D	5	3
 T	argument_name	Argument name	0	Text	text	s ""	
 S	T	argument_name	0
-T	argument_type	Argument type	1	EScroll	enum	e 0	
+T	argument_type	Argument type	1	EScroll	enum	e 0	Number;String;Surface;Struct
 S	T	argument_type	0
 B	T	argument_type	0	general	1	default	4
 C	T	argument_type	resolved
@@ -13718,14 +13737,21 @@ I	attribute_manual_position	attribute manual_position	-1	AttributeArray	array	a 
 S	I	attribute_manual_position	?
 A	I	attribute_manual_position	?
 D	27	17
-T	track_position	Track Position	0	EScroll	enum	e 0	
+T	track_position	Track Position	0	EScroll	enum	e 0	Start;End;Start/End;Always
 S	T	track_position	0
-B	T	track_position	0	general	1	default	?
-C	T	track_position	unknown
-T	apply_group	Apply Group	1	EScroll	enum	e 0	
+B	T	track_position	0	general	1	default	4
+C	T	track_position	resolved
+Q	T	track_position	0	0	s "Start"
+Q	T	track_position	1	0	s "End"
+Q	T	track_position	2	0	s "Start/End"
+Q	T	track_position	3	0	s "Always"
+T	apply_group	Apply Group	1	EScroll	enum	e 0	Letter;Words;All
 S	T	apply_group	0
-B	T	apply_group	0	general	1	default	?
-C	T	apply_group	unknown
+B	T	apply_group	0	general	1	default	3
+C	T	apply_group	resolved
+Q	T	apply_group	0	0	s "Letter"
+Q	T	apply_group	1	0	s "Words"
+Q	T	apply_group	2	0	s "All"
 T	origin	Origin	2	Slider	scalar	d 0	
 S	T	origin	0
 T	duration_type	Duration Type	14	EScroll	enum	e 1	Frame;Ratio
@@ -14430,10 +14456,16 @@ I	sample_color	Sample Color	24	Color	colour	c 255 255 255 255
 S	I	sample_color	0
 I	sample_threshold	Sample Threshold	25	Slider	scalar	d 0.1	
 S	I	sample_threshold	0
-I	shape	Shape	7	EScroll	enum	e 0	
+I	shape	Shape	7	EScroll	enum	e 0	Dense Bush;V;Hash;Line;W;Surface
 S	I	shape	0
-B	I	shape	0	general	1	default	?
-C	I	shape	unknown
+B	I	shape	0	general	1	default	6
+C	I	shape	resolved
+Q	I	shape	0	0	s "Dense Bush"
+Q	I	shape	1	0	s "V"
+Q	I	shape	2	0	s "Hash"
+Q	I	shape	3	0	s "Line"
+Q	I	shape	4	0	s "W"
+Q	I	shape	5	0	s "Surface"
 I	ratio	Ratio	22	Slider	scalar	d 0.5	
 S	I	ratio	0
 I	size	Size	8	Range	vector2	v 4 4	
@@ -15692,18 +15724,24 @@ S	I	crop	1
 A	I	crop	1
 I	exclude_empty	Exclude Empty	17	Bool	boolean	b 0	
 S	I	exclude_empty	0
-I	edge_type	Edge Type	5	EScroll	enum	e 0	
+I	edge_type	Edge Type	5	EScroll	enum	e 0	Uniform;Individual
 S	I	edge_type	0
-B	I	edge_type	0	general	1	default	?
-C	I	edge_type	unknown
-I	edge_sprite	Edge Sprite	12	EScroll	enum	e 0	
+B	I	edge_type	0	general	1	default	2
+C	I	edge_type	resolved
+Q	I	edge_type	0	0	s "Uniform"
+Q	I	edge_type	1	0	s "Individual"
+I	edge_sprite	Edge Sprite	12	EScroll	enum	e 0	Single;Left + Center + Right
 S	I	edge_sprite	0
-B	I	edge_sprite	0	general	1	default	?
-C	I	edge_sprite	unknown
-I	edge_transform	Edge Transform	13	EScroll	enum	e 0	
+B	I	edge_sprite	0	general	1	default	2
+C	I	edge_sprite	resolved
+Q	I	edge_sprite	0	0	s "Single"
+Q	I	edge_sprite	1	0	s "Left + Center + Right"
+I	edge_transform	Edge Transform	13	EScroll	enum	e 0	Flip;Rotate
 S	I	edge_transform	0
-B	I	edge_transform	0	general	1	default	?
-C	I	edge_transform	unknown
+B	I	edge_transform	0	general	1	default	2
+C	I	edge_transform	resolved
+Q	I	edge_transform	0	0	s "Flip"
+Q	I	edge_transform	1	0	s "Rotate"
 I	edge_shift	Edge Shift	10	IPadding	vector4	w 0 0 0 0	
 S	I	edge_shift	1
 A	I	edge_shift	1
@@ -15969,7 +16007,7 @@ I	inherit_parent_color	Inherit Parent Color	37	Slider	scalar	d 0
 S	I	inherit_parent_color	0
 I	base_color	Base Color	12	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	base_color	0
-I	length_blending	Length Blending	27	EButton	enum	e 0	
+I	length_blending	Length Blending	27	EButton	enum	e 0	None;Override;Multiply;Screen
 S	I	length_blending	0
 B	I	length_blending	0	general	1	always	4
 C	I	length_blending	resolved
@@ -15979,7 +16017,7 @@ Q	I	length_blending	2	0	s "Multiply"
 Q	I	length_blending	3	0	s "Screen"
 I	length_color	Length Color	28	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	length_color	0
-I	edge_blending	Edge Blending	17	EButton	enum	e 0	
+I	edge_blending	Edge Blending	17	EButton	enum	e 0	None;Override;Multiply;Screen
 S	I	edge_blending	0
 B	I	edge_blending	0	general	1	always	4
 C	I	edge_blending	resolved
@@ -15993,7 +16031,7 @@ I	r_edge_color	R Edge Color	29	Gradient	gradient	g 0 1 0 255 255 255 255
 S	I	r_edge_color	0
 I	texture	Texture	30	Surface	image		
 S	I	texture	0
-I	array_selection	Array Selection	52	EButton	enum	e 0	
+I	array_selection	Array Selection	52	EButton	enum	e 0	Ordered;Random
 S	I	array_selection	0
 B	I	array_selection	0	general	1	always	2
 C	I	array_selection	resolved
@@ -16126,7 +16164,7 @@ I	inherit_parent_color	Inherit Parent Color	25	Slider	scalar	d 0
 S	I	inherit_parent_color	0
 I	base_color	Base Color	26	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	base_color	0
-I	length_blending	Length Blending	27	EButton	enum	e 0	
+I	length_blending	Length Blending	27	EButton	enum	e 0	None;Override;Multiply;Screen
 S	I	length_blending	0
 B	I	length_blending	0	general	1	always	4
 C	I	length_blending	resolved
@@ -16136,7 +16174,7 @@ Q	I	length_blending	2	0	s "Multiply"
 Q	I	length_blending	3	0	s "Screen"
 I	length_color	Length Color	28	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	length_color	0
-I	edge_blending	Edge Blending	29	EButton	enum	e 0	
+I	edge_blending	Edge Blending	29	EButton	enum	e 0	None;Override;Multiply;Screen
 S	I	edge_blending	0
 B	I	edge_blending	0	general	1	always	4
 C	I	edge_blending	resolved
@@ -16150,7 +16188,7 @@ I	r_edge_color	R Edge Color	31	Gradient	gradient	g 0 1 0 255 255 255 255
 S	I	r_edge_color	0
 I	texture	Texture	32	Surface	image		
 S	I	texture	0
-I	array_selection	Array Selection	37	EButton	enum	e 0	
+I	array_selection	Array Selection	37	EButton	enum	e 0	Ordered;Random
 S	I	array_selection	0
 B	I	array_selection	0	general	1	always	2
 C	I	array_selection	resolved
@@ -16418,7 +16456,7 @@ S	I	size_over_whorled	1
 A	I	size_over_whorled	1
 I	texture	Texture	9	Surface	image		
 S	I	texture	0
-I	array_selection	Array Selection	59	EButton	enum	e 0	
+I	array_selection	Array Selection	59	EButton	enum	e 0	Ordered;Random
 S	I	array_selection	0
 B	I	array_selection	0	general	1	always	2
 C	I	array_selection	resolved
@@ -16739,7 +16777,7 @@ I	r_edge_color	R Edge Color	19	Gradient	gradient	g 0 1 0 255 255 255 255
 S	I	r_edge_color	0
 I	texture	Texture	20	Surface	image		
 S	I	texture	0
-I	array_selection	Array Selection	24	EButton	enum	e 0	
+I	array_selection	Array Selection	24	EButton	enum	e 0	Ordered;Random
 S	I	array_selection	0
 B	I	array_selection	0	general	1	always	2
 C	I	array_selection	resolved
@@ -16981,7 +17019,7 @@ Q	I	draw_mode	0	0	s "Texture"
 Q	I	draw_mode	1	0	s "Line"
 I	base_color	Base Color	12	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	base_color	0
-I	length_blending	Length Blending	24	EButton	enum	e 0	
+I	length_blending	Length Blending	24	EButton	enum	e 0	None;Override;Multiply;Screen
 S	I	length_blending	0
 B	I	length_blending	0	general	1	always	4
 C	I	length_blending	resolved
@@ -16991,7 +17029,7 @@ Q	I	length_blending	2	0	s "Multiply"
 Q	I	length_blending	3	0	s "Screen"
 I	length_color	Length Color	25	Gradient	gradient	g 0 1 0 255 255 255 255	
 S	I	length_color	0
-I	edge_blending	Edge Blending	16	EButton	enum	e 0	
+I	edge_blending	Edge Blending	16	EButton	enum	e 0	None;Override;Multiply;Screen
 S	I	edge_blending	0
 B	I	edge_blending	0	general	1	always	4
 C	I	edge_blending	resolved
@@ -17005,7 +17043,7 @@ I	r_edge_color	R Edge Color	26	Gradient	gradient	g 0 1 0 255 255 255 255
 S	I	r_edge_color	0
 I	texture	Texture	27	Surface	image		
 S	I	texture	0
-I	array_selection	Array Selection	43	EButton	enum	e 0	
+I	array_selection	Array Selection	43	EButton	enum	e 0	Ordered;Random
 S	I	array_selection	0
 B	I	array_selection	0	general	1	always	2
 C	I	array_selection	resolved
@@ -18724,10 +18762,14 @@ S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
 D	6	16
-T	type	Type	0	EScroll	enum	e 0	
+T	type	Type	0	EScroll	enum	e 0	Point;Sun;Line;Spot
 S	T	type	0
-B	T	type	0	general	1	default	?
-C	T	type	unknown
+B	T	type	0	general	1	default	4
+C	T	type	resolved
+Q	T	type	0	0	s "Point"
+Q	T	type	1	0	s "Sun"
+Q	T	type	2	0	s "Line"
+Q	T	type	3	0	s "Spot"
 T	position	Position	1	Vec2	vector2	v 0 0	
 S	T	position	1
 V	T	position	1
@@ -18752,10 +18794,14 @@ T	color	Color	4	Color	colour	c 255 255 255 255
 S	T	color	0
 T	end_color	End Color	6	Color	colour	c 255 255 255 255	
 S	T	end_color	0
-T	attenuation	Attenuation	9	EScroll	enum	e 0	
+T	attenuation	Attenuation	9	EScroll	enum	e 0	Quadratic;Invert quadratic;Linear;Custom
 S	T	attenuation	0
-B	T	attenuation	0	general	1	default	?
-C	T	attenuation	unknown
+B	T	attenuation	0	general	1	default	4
+C	T	attenuation	resolved
+Q	T	attenuation	0	0	s "Quadratic"
+Q	T	attenuation	1	0	s "Invert quadratic"
+Q	T	attenuation	2	0	s "Linear"
+Q	T	attenuation	3	0	s "Custom"
 T	atten_curve	AttenCurve	10	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	
 S	T	atten_curve	1
 A	T	atten_curve	1
@@ -21606,7 +21652,7 @@ V	I	animation_speed	1
 A	I	animation_speed	1
 I	stretch_animation	Stretch Animation	49	Bool	boolean	b 0	
 S	I	stretch_animation	0
-I	on_animation_end	On Animation End	26	EButton	enum	e 0	
+I	on_animation_end	On Animation End	26	EButton	enum	e 0	Loop;Ping pong;Destroy
 S	I	on_animation_end	0
 B	I	on_animation_end	0	general	1	always	3
 C	I	on_animation_end	resolved
@@ -21615,7 +21661,7 @@ Q	I	on_animation_end	1	0	s "Ping pong"
 Q	I	on_animation_end	2	0	s "Destroy"
 I	spawn	Spawn	27	Bool	boolean	b 1	
 S	I	spawn	0
-I	spawn_type	Spawn Type	16	EButton	enum	e 0	
+I	spawn_type	Spawn Type	16	EButton	enum	e 0	Stream;Burst;Trigger
 S	I	spawn_type	0
 B	I	spawn_type	0	general	1	always	3
 C	I	spawn_type	resolved
@@ -21636,7 +21682,7 @@ I	lifespan	Lifespan	5	Range	vector2	v 20 30
 S	I	lifespan	1
 V	I	lifespan	1
 A	I	lifespan	1
-I	spawn_source	Spawn Source	4	EScroll	enum	e 0	
+I	spawn_source	Spawn Source	4	EScroll	enum	e 0	Area Inside;Area Border;Map;Path;Direct Data
 S	I	spawn_source	0
 B	I	spawn_source	0	general	1	default	5
 C	I	spawn_source	resolved
@@ -21657,7 +21703,7 @@ S	I	spawn_path	0
 I	spawn_data	Spawn Data	62	Vector	array	a vector2 0	
 S	I	spawn_data	0
 A	I	spawn_data	2
-I	distribution	Distribution	24	EButton	enum	e 1	
+I	distribution	Distribution	24	EButton	enum	e 1	Uniform;Random;Poisson
 S	I	distribution	0
 B	I	distribution	0	general	1	always	3
 C	I	distribution	resolved
@@ -22984,7 +23030,7 @@ Q	I	up_axis	1	0	s "Y"
 Q	I	up_axis	2	0	s "Z"
 I	rotation	Rotation	4	Rotation	scalar	d 0	
 S	I	rotation	0
-I	shape	Shape	2	EScroll	enum	e 0	
+I	shape	Shape	2	EScroll	enum	e 0	Rectangle;Ellipse;Regular Polygon;Star;Spring;Spring Sphere;Spiral
 S	I	shape	0
 B	I	shape	0	general	1	default	9
 C	I	shape	resolved
@@ -25563,7 +25609,7 @@ A	I	padding	1
 I	surface_in	Surface In	0	Surface	image		
 S	I	surface_in	0
 A	I	surface_in	?
-I	array_select	Array Select	16	EButton	enum	e 0	
+I	array_select	Array Select	16	EButton	enum	e 0	Order;Random;Spread
 S	I	array_select	0
 B	I	array_select	0	general	1	always	3
 C	I	array_select	resolved
@@ -25641,7 +25687,7 @@ S	I	shift_position_curved	?
 I	shift_position_over_copy	Shift Position Over Copy	38	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 1 0.3333333333333333 0 -0.3333333333333333 0 1 1 0 0	
 S	I	shift_position_over_copy	1
 A	I	shift_position_over_copy	1
-I	stack	Stack	26	EButton	enum	e 0	
+I	stack	Stack	26	EButton	enum	e 0	None;X;Y
 S	I	stack	0
 B	I	stack	0	general	1	always	3
 C	I	stack	resolved
@@ -25740,10 +25786,14 @@ S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
 D	57	18
-T	select_mode	Select Mode	1	EScroll	enum	e 0	
+T	select_mode	Select Mode	1	EScroll	enum	e 0	Index;Area;Linear;Surface
 S	T	select_mode	0
-B	T	select_mode	0	general	1	default	?
-C	T	select_mode	unknown
+B	T	select_mode	0	general	1	default	4
+C	T	select_mode	resolved
+Q	T	select_mode	0	0	s "Index"
+Q	T	select_mode	1	0	s "Area"
+Q	T	select_mode	2	0	s "Linear"
+Q	T	select_mode	3	0	s "Surface"
 T	select_area	Select Area	9	Area	area	r 0.5 0.5 0.5 0.5 0 0	
 S	T	select_area	1
 A	T	select_area	1
@@ -27034,7 +27084,7 @@ I	attribute_process	attribute process	-1	Bool	boolean	b 1
 S	I	attribute_process	0
 I	seed	Seed	0	Seed	scalar		
 S	I	seed	0
-I	shape	Shape	4	EScroll	enum	e 0	
+I	shape	Shape	4	EScroll	enum	e 0	Cube;Sphere
 S	I	shape	0
 B	I	shape	0	general	1	default	2
 C	I	shape	resolved
@@ -27307,10 +27357,12 @@ S	I	attribute_color_depth	?
 I	attribute_array_process	Array Process Type	-1	EButton	enum	e 0	Loop;Hold;Expand;Expand inverse
 S	I	attribute_array_process	?
 D	7	14
-T	type	Type	0	EScroll	enum	e 0	
+T	type	Type	0	EScroll	enum	e 0	Point;Sun
 S	T	type	0
-B	T	type	0	general	1	default	?
-C	T	type	unknown
+B	T	type	0	general	1	default	2
+C	T	type	resolved
+Q	T	type	0	0	s "Point"
+Q	T	type	1	0	s "Sun"
 T	position	Position	3	Vec2	vector2	v 0.5 0.5	
 S	T	position	1
 V	T	position	1
@@ -27325,10 +27377,14 @@ T	intensity	Intensity	2	Float	scalar	d 1
 S	T	intensity	0
 T	color	Color	1	Color	colour	c 255 255 255 255	
 S	T	color	0
-T	attenuation	Attenuation	5	EScroll	enum	e 0	
+T	attenuation	Attenuation	5	EScroll	enum	e 0	Quadratic;Invert quadratic;Linear;Custom
 S	T	attenuation	0
-B	T	attenuation	0	general	1	default	?
-C	T	attenuation	unknown
+B	T	attenuation	0	general	1	default	4
+C	T	attenuation	resolved
+Q	T	attenuation	0	0	s "Quadratic"
+Q	T	attenuation	1	0	s "Invert quadratic"
+Q	T	attenuation	2	0	s "Linear"
+Q	T	attenuation	3	0	s "Custom"
 T	att_curve	Att. Curve	13	Curve	curve	q 2 0 1 0 0 1 0 0 0 0 0 0.3333333333333333 0.3333333333333333 -0.3333333333333333 -0.3333333333333333 1 1 0 0	
 S	T	att_curve	1
 A	T	att_curve	1
@@ -27906,7 +27962,7 @@ V	I	scale	1
 A	I	scale	1
 I	scale_unit	Scale Unit	-1	ValueUnit	enum	e 1	Pixel;Reference
 S	I	scale_unit	?
-I	shape	Shape	4	EScroll	enum	e 0	
+I	shape	Shape	4	EScroll	enum	e 0	Rectangle;Diamond;Trapezoid;Parallelogram;Ellipse;Arc;Ring;Crescent;Pie;Squircle;Regular Polygon;Star;Cross;Capsule;Leaf;Gear
 S	I	shape	0
 B	I	shape	0	general	1	default	20
 C	I	shape	resolved
@@ -31430,7 +31486,7 @@ V	I	animation_speed	1
 A	I	animation_speed	1
 I	stretch_animation	Stretch Animation	49	Bool	boolean	b 0	
 S	I	stretch_animation	0
-I	on_animation_end	On Animation End	26	EButton	enum	e 0	
+I	on_animation_end	On Animation End	26	EButton	enum	e 0	Loop;Ping pong;Destroy
 S	I	on_animation_end	0
 B	I	on_animation_end	0	general	1	always	3
 C	I	on_animation_end	resolved
@@ -31439,7 +31495,7 @@ Q	I	on_animation_end	1	0	s "Ping pong"
 Q	I	on_animation_end	2	0	s "Destroy"
 I	spawn	Spawn	27	Bool	boolean	b 1	
 S	I	spawn	0
-I	spawn_type	Spawn Type	16	EButton	enum	e 0	
+I	spawn_type	Spawn Type	16	EButton	enum	e 0	Stream;Burst;Trigger
 S	I	spawn_type	0
 B	I	spawn_type	0	general	1	always	3
 C	I	spawn_type	resolved
@@ -31460,7 +31516,7 @@ I	lifespan	Lifespan	5	Range	vector2	v 20 30
 S	I	lifespan	1
 V	I	lifespan	1
 A	I	lifespan	1
-I	spawn_source	Spawn Source	4	EScroll	enum	e 0	
+I	spawn_source	Spawn Source	4	EScroll	enum	e 0	Area Inside;Area Border;Map;Path;Direct Data
 S	I	spawn_source	0
 B	I	spawn_source	0	general	1	default	5
 C	I	spawn_source	resolved
@@ -31481,7 +31537,7 @@ S	I	spawn_path	0
 I	spawn_data	Spawn Data	62	Vector	array	a vector2 0	
 S	I	spawn_data	0
 A	I	spawn_data	2
-I	distribution	Distribution	24	EButton	enum	e 1	
+I	distribution	Distribution	24	EButton	enum	e 1	Uniform;Random
 S	I	distribution	0
 B	I	distribution	0	general	1	always	2
 C	I	distribution	resolved
@@ -33590,7 +33646,7 @@ S	I	type	0
 B	I	type	0	general	1	default	1
 C	I	type	resolved
 Q	I	type	0	0	s "Shape"
-I	shape	Shape	8	EScroll	enum	e 0	
+I	shape	Shape	8	EScroll	enum	e 0	Sphere;Plane
 S	I	shape	0
 B	I	shape	0	general	1	default	2
 C	I	shape	resolved
@@ -33786,7 +33842,7 @@ I	lifespan	Lifespan	5	Range	vector2	v 20 30
 S	I	lifespan	1
 V	I	lifespan	1
 A	I	lifespan	1
-I	type	Type	7	EScroll	enum	e 0	
+I	type	Type	7	EScroll	enum	e 0	Shape;Path;Mesh Vertices;Direct Data
 S	I	type	0
 B	I	type	0	general	1	default	4
 C	I	type	resolved
@@ -33794,7 +33850,7 @@ Q	I	type	0	0	s "Shape"
 Q	I	type	1	0	s "Path"
 Q	I	type	2	0	s "Mesh Vertices"
 Q	I	type	3	0	s "Direct Data"
-I	shape	Shape	8	EScroll	enum	e 0	
+I	shape	Shape	8	EScroll	enum	e 0	Box;Sphere;Circle
 S	I	shape	0
 B	I	shape	0	general	1	default	3
 C	I	shape	resolved
@@ -34497,7 +34553,7 @@ I	mask	Mask	1	Buffer	buffer
 S	I	mask	0
 I	surfaces	Surfaces	3	Surface	image		
 S	I	surfaces	0
-I	surface_array	Surface Array	4	EScroll	enum	e 0	
+I	surface_array	Surface Array	4	EScroll	enum	e 0	Random;Order;Animation;Scale
 S	I	surface_array	0
 B	I	surface_array	0	general	1	default	4
 C	I	surface_array	resolved
@@ -34511,7 +34567,7 @@ V	I	animation_speed	1
 A	I	animation_speed	1
 I	stretch_animation	Stretch Animation	6	Bool	boolean	b 0	
 S	I	stretch_animation	0
-I	on_animation_end	On Animation End	7	EButton	enum	e 0	
+I	on_animation_end	On Animation End	7	EButton	enum	e 0	Loop;Ping pong;Destroy
 S	I	on_animation_end	0
 B	I	on_animation_end	0	general	1	always	3
 C	I	on_animation_end	resolved

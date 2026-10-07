@@ -2392,7 +2392,15 @@
      },
      {
       "array_depth": 0,
-      "choices": null,
+      "choices": [
+       "Point",
+       "Ellipse",
+       "Line",
+       "Line asymmetric",
+       "Saber",
+       "Spot",
+       "Flame"
+      ],
       "default": "0",
       "extra": [
        "typeList"
@@ -2404,15 +2412,44 @@
       "source_behavior": {
        "actual_connectability": "general",
        "choice_clamp": {
-        "choice_count": null,
+        "choice_count": 7,
         "mode": "default"
        },
        "fractional_interpolation": true,
        "strict_suggestion": false
       },
       "source_choices": {
-       "entries": null,
-       "status": "unknown"
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Point"
+        },
+        {
+         "choice_index": 1,
+         "label": "Ellipse"
+        },
+        {
+         "choice_index": 2,
+         "label": "Line"
+        },
+        {
+         "choice_index": 3,
+         "label": "Line asymmetric"
+        },
+        {
+         "choice_index": 4,
+         "label": "Saber"
+        },
+        {
+         "choice_index": 5,
+         "label": "Spot"
+        },
+        {
+         "choice_index": 6,
+         "label": "Flame"
+        }
+       ],
+       "status": "resolved"
       }
      },
      {
@@ -2564,7 +2601,12 @@
      },
      {
       "array_depth": 0,
-      "choices": null,
+      "choices": [
+       "Quadratic",
+       "Invert quadratic",
+       "Linear",
+       "Custom"
+      ],
       "default": "0",
       "extra": [
        "attnList"
@@ -2576,15 +2618,32 @@
       "source_behavior": {
        "actual_connectability": "general",
        "choice_clamp": {
-        "choice_count": null,
+        "choice_count": 4,
         "mode": "default"
        },
        "fractional_interpolation": true,
        "strict_suggestion": false
       },
       "source_choices": {
-       "entries": null,
-       "status": "unknown"
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Quadratic"
+        },
+        {
+         "choice_index": 1,
+         "label": "Invert quadratic"
+        },
+        {
+         "choice_index": 2,
+         "label": "Linear"
+        },
+        {
+         "choice_index": 3,
+         "label": "Custom"
+        }
+       ],
+       "status": "resolved"
       }
      },
      {
@@ -8253,7 +8312,11 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Stream",
+      "Burst",
+      "Trigger"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -8338,7 +8401,12 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Shape",
+      "Path",
+      "Mesh Vertices",
+      "Direct Data"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -8380,7 +8448,11 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Box",
+      "Sphere",
+      "Circle"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -16122,7 +16194,10 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Absolute",
+      "Relative"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -16174,7 +16249,10 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Absolute",
+      "Relative"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -16235,7 +16313,11 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Absolute",
+      "Additive",
+      "Multiplicative"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -16327,7 +16409,11 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Absolute",
+      "Multiplicative"
+     ]
     },
     {
      "array_depth": 0,
@@ -16349,7 +16435,11 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Absolute",
+      "Additive",
+      "Multiplicative"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -17445,7 +17535,10 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Arc",
+      "Wave"
+     ],
      "default": "0",
      "extra": [
       "_types"
@@ -17457,15 +17550,24 @@
      "source_behavior": {
       "actual_connectability": "general",
       "choice_clamp": {
-       "choice_count": null,
+       "choice_count": 2,
        "mode": "default"
       },
       "fractional_interpolation": true,
       "strict_suggestion": false
      },
      "source_choices": {
-      "entries": null,
-      "status": "unknown"
+      "entries": [
+       {
+        "choice_index": 0,
+        "label": "Arc"
+       },
+       {
+        "choice_index": 1,
+        "label": "Wave"
+       }
+      ],
+      "status": "resolved"
      }
     },
     {
@@ -17767,7 +17869,11 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Linear",
+      "Smooth",
+      "Circular"
+     ],
      "curves": [
       "curved"
      ],
@@ -39717,7 +39823,37 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Integer",
+      "Float",
+      "Boolean",
+      "Color",
+      "Surface",
+      "File Path",
+      "Curve",
+      "Text",
+      "Object",
+      "Node",
+      "Any",
+      "Path",
+      "Particle",
+      "Rigidbody Object",
+      "Domain",
+      "Struct",
+      "Strands",
+      "Mesh",
+      "Trigger",
+      "3D Mesh",
+      "3D Light",
+      "3D Camera",
+      "3D Scene",
+      "3D Material",
+      "PCX",
+      "Audio",
+      "Fluid Domain",
+      "SDF",
+      "Gradient"
+     ],
      "default": "11",
      "extra": [
       "{ data: GROUP_IO_TYPE_NAME,   update_hover: false }"
@@ -44365,7 +44501,12 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Linear",
+      "Circular",
+      "Radial",
+      "Diamond"
+     ],
      "default": "0",
      "extra": [
       "__gradTypes"
@@ -49064,7 +49205,37 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Integer",
+      "Float",
+      "Boolean",
+      "Color",
+      "Surface",
+      "File Path",
+      "Curve",
+      "Text",
+      "Object",
+      "Node",
+      "Any",
+      "Path",
+      "Particle",
+      "Rigidbody Object",
+      "Domain",
+      "Struct",
+      "Strands",
+      "Mesh",
+      "Trigger",
+      "3D Mesh",
+      "3D Light",
+      "3D Camera",
+      "3D Scene",
+      "3D Material",
+      "PCX",
+      "Audio",
+      "Fluid Domain",
+      "SDF",
+      "Gradient"
+     ],
      "default": "11",
      "extra": [
       "{ data: GROUP_IO_TYPE_NAME,   update_hover: false }"
@@ -49448,7 +49619,17 @@
      },
      {
       "array_depth": 0,
-      "choices": null,
+      "choices": [
+       "Float",
+       "Int",
+       "Vec2",
+       "Vec3",
+       "Vec4",
+       "Mat3",
+       "Mat4",
+       "Sampler2D",
+       "Color"
+      ],
       "default": "0",
       "extra": [
        "{ data: shader_vartype, update_hover: false }"
@@ -51647,7 +51828,10 @@
    "inputs": [
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Horizontal",
+      "Vertical"
+     ],
      "default": "0",
      "extra": [
       "__axis"
@@ -51659,15 +51843,24 @@
      "source_behavior": {
       "actual_connectability": "general",
       "choice_clamp": {
-       "choice_count": null,
+       "choice_count": 2,
        "mode": "default"
       },
       "fractional_interpolation": true,
       "strict_suggestion": false
      },
      "source_choices": {
-      "entries": null,
-      "status": "unknown"
+      "entries": [
+       {
+        "choice_index": 0,
+        "label": "Horizontal"
+       },
+       {
+        "choice_index": 1,
+        "label": "Vertical"
+       }
+      ],
+      "status": "resolved"
      }
     },
     {
@@ -53786,7 +53979,37 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Integer",
+      "Float",
+      "Boolean",
+      "Color",
+      "Surface",
+      "File Path",
+      "Curve",
+      "Text",
+      "Object",
+      "Node",
+      "Any",
+      "Path",
+      "Particle",
+      "Rigidbody Object",
+      "Domain",
+      "Struct",
+      "Strands",
+      "Mesh",
+      "Trigger",
+      "3D Mesh",
+      "3D Light",
+      "3D Camera",
+      "3D Scene",
+      "3D Material",
+      "PCX",
+      "Audio",
+      "Fluid Domain",
+      "SDF",
+      "Gradient"
+     ],
      "default": "11",
      "extra": [
       "{ data: GROUP_IO_TYPE_NAME,   update_hover: false }"
@@ -57586,7 +57809,12 @@
     "template": [
      {
       "array_depth": 0,
-      "choices": null,
+      "choices": [
+       "Push",
+       "Twirl",
+       "Pinch",
+       "Bloat"
+      ],
       "default": "0",
       "extra": [
        "typeList"
@@ -57598,15 +57826,32 @@
       "source_behavior": {
        "actual_connectability": "general",
        "choice_clamp": {
-        "choice_count": null,
+        "choice_count": 4,
         "mode": "default"
        },
        "fractional_interpolation": true,
        "strict_suggestion": false
       },
       "source_choices": {
-       "entries": null,
-       "status": "unknown"
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Push"
+        },
+        {
+         "choice_index": 1,
+         "label": "Twirl"
+        },
+        {
+         "choice_index": 2,
+         "label": "Pinch"
+        },
+        {
+         "choice_index": 3,
+         "label": "Bloat"
+        }
+       ],
+       "status": "resolved"
       }
      },
      {
@@ -58274,7 +58519,12 @@
      },
      {
       "array_depth": 0,
-      "choices": null,
+      "choices": [
+       "Number",
+       "String",
+       "Surface",
+       "Struct"
+      ],
       "default": "0",
       "extra": [
        "{ data: lua_dtype, update_hover: false }"
@@ -58507,7 +58757,12 @@
      },
      {
       "array_depth": 0,
-      "choices": null,
+      "choices": [
+       "Number",
+       "String",
+       "Surface",
+       "Struct"
+      ],
       "default": "0",
       "extra": [
        "{ data: lua_dtype, update_hover: false }"
@@ -63162,7 +63417,12 @@
     "template": [
      {
       "array_depth": 0,
-      "choices": null,
+      "choices": [
+       "Start",
+       "End",
+       "Start/End",
+       "Always"
+      ],
       "default": "0",
       "extra": [
        "positionTypeList"
@@ -63174,20 +63434,41 @@
       "source_behavior": {
        "actual_connectability": "general",
        "choice_clamp": {
-        "choice_count": null,
+        "choice_count": 4,
         "mode": "default"
        },
        "fractional_interpolation": true,
        "strict_suggestion": false
       },
       "source_choices": {
-       "entries": null,
-       "status": "unknown"
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Start"
+        },
+        {
+         "choice_index": 1,
+         "label": "End"
+        },
+        {
+         "choice_index": 2,
+         "label": "Start/End"
+        },
+        {
+         "choice_index": 3,
+         "label": "Always"
+        }
+       ],
+       "status": "resolved"
       }
      },
      {
       "array_depth": 0,
-      "choices": null,
+      "choices": [
+       "Letter",
+       "Words",
+       "All"
+      ],
       "default": "0",
       "extra": [
        "applyGroupList"
@@ -63199,15 +63480,28 @@
       "source_behavior": {
        "actual_connectability": "general",
        "choice_clamp": {
-        "choice_count": null,
+        "choice_count": 3,
         "mode": "default"
        },
        "fractional_interpolation": true,
        "strict_suggestion": false
       },
       "source_choices": {
-       "entries": null,
-       "status": "unknown"
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Letter"
+        },
+        {
+         "choice_index": 1,
+         "label": "Words"
+        },
+        {
+         "choice_index": 2,
+         "label": "All"
+        }
+       ],
+       "status": "resolved"
       }
      },
      {
@@ -66417,7 +66711,14 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Dense Bush",
+      "V",
+      "Hash",
+      "Line",
+      "W",
+      "Surface"
+     ],
      "default": "0",
      "extra": [
       "{ data: shape_types, horizontal: 2, text_pad: ui(16) }"
@@ -66429,15 +66730,40 @@
      "source_behavior": {
       "actual_connectability": "general",
       "choice_clamp": {
-       "choice_count": null,
+       "choice_count": 6,
        "mode": "default"
       },
       "fractional_interpolation": true,
       "strict_suggestion": false
      },
      "source_choices": {
-      "entries": null,
-      "status": "unknown"
+      "entries": [
+       {
+        "choice_index": 0,
+        "label": "Dense Bush"
+       },
+       {
+        "choice_index": 1,
+        "label": "V"
+       },
+       {
+        "choice_index": 2,
+        "label": "Hash"
+       },
+       {
+        "choice_index": 3,
+        "label": "Line"
+       },
+       {
+        "choice_index": 4,
+        "label": "W"
+       },
+       {
+        "choice_index": 5,
+        "label": "Surface"
+       }
+      ],
+      "status": "resolved"
      }
     },
     {
@@ -71361,7 +71687,10 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Uniform",
+      "Individual"
+     ],
      "default": "0",
      "extra": [
       "_edge_types"
@@ -71373,20 +71702,32 @@
      "source_behavior": {
       "actual_connectability": "general",
       "choice_clamp": {
-       "choice_count": null,
+       "choice_count": 2,
        "mode": "default"
       },
       "fractional_interpolation": true,
       "strict_suggestion": false
      },
      "source_choices": {
-      "entries": null,
-      "status": "unknown"
+      "entries": [
+       {
+        "choice_index": 0,
+        "label": "Uniform"
+       },
+       {
+        "choice_index": 1,
+        "label": "Individual"
+       }
+      ],
+      "status": "resolved"
      }
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Single",
+      "Left + Center + Right"
+     ],
      "default": "0",
      "extra": [
       "_edge_sprite_types"
@@ -71398,20 +71739,32 @@
      "source_behavior": {
       "actual_connectability": "general",
       "choice_clamp": {
-       "choice_count": null,
+       "choice_count": 2,
        "mode": "default"
       },
       "fractional_interpolation": true,
       "strict_suggestion": false
      },
      "source_choices": {
-      "entries": null,
-      "status": "unknown"
+      "entries": [
+       {
+        "choice_index": 0,
+        "label": "Single"
+       },
+       {
+        "choice_index": 1,
+        "label": "Left + Center + Right"
+       }
+      ],
+      "status": "resolved"
      }
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Flip",
+      "Rotate"
+     ],
      "default": "0",
      "extra": [
       "_edge_transform"
@@ -71423,15 +71776,24 @@
      "source_behavior": {
       "actual_connectability": "general",
       "choice_clamp": {
-       "choice_count": null,
+       "choice_count": 2,
        "mode": "default"
       },
       "fractional_interpolation": true,
       "strict_suggestion": false
      },
      "source_choices": {
-      "entries": null,
-      "status": "unknown"
+      "entries": [
+       {
+        "choice_index": 0,
+        "label": "Flip"
+       },
+       {
+        "choice_index": 1,
+        "label": "Rotate"
+       }
+      ],
+      "status": "resolved"
      }
     },
     {
@@ -72439,7 +72801,12 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "None",
+      "Override",
+      "Multiply",
+      "Screen"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -72490,7 +72857,12 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "None",
+      "Override",
+      "Multiply",
+      "Screen"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -72586,7 +72958,11 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Ordered",
+      "Random"
+     ]
     },
     {
      "array_depth": 1,
@@ -73027,7 +73403,12 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "None",
+      "Override",
+      "Multiply",
+      "Screen"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -73078,7 +73459,12 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "None",
+      "Override",
+      "Multiply",
+      "Screen"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -73174,7 +73560,11 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Ordered",
+      "Random"
+     ]
     }
    ],
    "outputs": [
@@ -74199,7 +74589,11 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Ordered",
+      "Random"
+     ]
     },
     {
      "array_depth": 0,
@@ -75428,7 +75822,11 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Ordered",
+      "Random"
+     ]
     }
    ],
    "outputs": [
@@ -76344,7 +76742,13 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "None",
+      "Override",
+      "Multiply",
+      "Screen"
+     ]
     },
     {
      "array_depth": 0,
@@ -76392,7 +76796,13 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "None",
+      "Override",
+      "Multiply",
+      "Screen"
+     ]
     },
     {
      "array_depth": 0,
@@ -76450,7 +76860,11 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Ordered",
+      "Random"
+     ]
     }
    ],
    "outputs": [
@@ -83626,7 +84040,12 @@
     "template": [
      {
       "array_depth": 0,
-      "choices": null,
+      "choices": [
+       "Point",
+       "Sun",
+       "Line",
+       "Spot"
+      ],
       "default": "0",
       "extra": [
        "typeList"
@@ -83638,15 +84057,32 @@
       "source_behavior": {
        "actual_connectability": "general",
        "choice_clamp": {
-        "choice_count": null,
+        "choice_count": 4,
         "mode": "default"
        },
        "fractional_interpolation": true,
        "strict_suggestion": false
       },
       "source_choices": {
-       "entries": null,
-       "status": "unknown"
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Point"
+        },
+        {
+         "choice_index": 1,
+         "label": "Sun"
+        },
+        {
+         "choice_index": 2,
+         "label": "Line"
+        },
+        {
+         "choice_index": 3,
+         "label": "Spot"
+        }
+       ],
+       "status": "resolved"
       }
      },
      {
@@ -83725,7 +84161,12 @@
      },
      {
       "array_depth": 0,
-      "choices": null,
+      "choices": [
+       "Quadratic",
+       "Invert quadratic",
+       "Linear",
+       "Custom"
+      ],
       "default": "0",
       "extra": [
        "attnList"
@@ -83737,15 +84178,32 @@
       "source_behavior": {
        "actual_connectability": "general",
        "choice_clamp": {
-        "choice_count": null,
+        "choice_count": 4,
         "mode": "default"
        },
        "fractional_interpolation": true,
        "strict_suggestion": false
       },
       "source_choices": {
-       "entries": null,
-       "status": "unknown"
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Quadratic"
+        },
+        {
+         "choice_index": 1,
+         "label": "Invert quadratic"
+        },
+        {
+         "choice_index": 2,
+         "label": "Linear"
+        },
+        {
+         "choice_index": 3,
+         "label": "Custom"
+        }
+       ],
+       "status": "resolved"
       }
      },
      {
@@ -97046,7 +97504,12 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Loop",
+      "Ping pong",
+      "Destroy"
+     ]
     },
     {
      "array_depth": 0,
@@ -97090,7 +97553,12 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Stream",
+      "Burst",
+      "Trigger"
+     ]
     },
     {
      "array_depth": 0,
@@ -97180,7 +97648,14 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Area Inside",
+      "Area Border",
+      "Map",
+      "Path",
+      "Direct Data"
+     ]
     },
     {
      "array_depth": 1,
@@ -97252,7 +97727,12 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Uniform",
+      "Random",
+      "Poisson"
+     ]
     },
     {
      "array_depth": 0,
@@ -102969,7 +103449,15 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Rectangle",
+      "Ellipse",
+      "Regular Polygon",
+      "Star",
+      "Spring",
+      "Spring Sphere",
+      "Spiral"
+     ],
      "default": "0",
      "extra": [
       "{ data: shapeScroll, horizontal: 1, text_pad: ui(8) }"
@@ -113873,7 +114361,12 @@
     "template": [
      {
       "array_depth": 0,
-      "choices": null,
+      "choices": [
+       "Index",
+       "Area",
+       "Linear",
+       "Surface"
+      ],
       "default": "0",
       "extra": [
        "enum_select_mode"
@@ -113885,15 +114378,32 @@
       "source_behavior": {
        "actual_connectability": "general",
        "choice_clamp": {
-        "choice_count": null,
+        "choice_count": 4,
         "mode": "default"
        },
        "fractional_interpolation": true,
        "strict_suggestion": false
       },
       "source_choices": {
-       "entries": null,
-       "status": "unknown"
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Index"
+        },
+        {
+         "choice_index": 1,
+         "label": "Area"
+        },
+        {
+         "choice_index": 2,
+         "label": "Linear"
+        },
+        {
+         "choice_index": 3,
+         "label": "Surface"
+        }
+       ],
+       "status": "resolved"
       }
      },
      {
@@ -114236,7 +114746,12 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Order",
+      "Random",
+      "Spread"
+     ]
     },
     {
      "array_depth": 1,
@@ -114510,7 +115025,11 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "None",
+      "X",
+      "Y"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -120565,7 +121084,11 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Cube",
+      "Sphere"
+     ]
     },
     {
      "array_depth": 0,
@@ -121703,7 +122226,10 @@
     "template": [
      {
       "array_depth": 0,
-      "choices": null,
+      "choices": [
+       "Point",
+       "Sun"
+      ],
       "default": "0",
       "extra": [
        "__ltype"
@@ -121715,15 +122241,24 @@
       "source_behavior": {
        "actual_connectability": "general",
        "choice_clamp": {
-        "choice_count": null,
+        "choice_count": 2,
         "mode": "default"
        },
        "fractional_interpolation": true,
        "strict_suggestion": false
       },
       "source_choices": {
-       "entries": null,
-       "status": "unknown"
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Point"
+        },
+        {
+         "choice_index": 1,
+         "label": "Sun"
+        }
+       ],
+       "status": "resolved"
       }
      },
      {
@@ -121766,7 +122301,12 @@
      },
      {
       "array_depth": 0,
-      "choices": null,
+      "choices": [
+       "Quadratic",
+       "Invert quadratic",
+       "Linear",
+       "Custom"
+      ],
       "default": "0",
       "extra": [
        "__atype"
@@ -121778,15 +122318,32 @@
       "source_behavior": {
        "actual_connectability": "general",
        "choice_clamp": {
-        "choice_count": null,
+        "choice_count": 4,
         "mode": "default"
        },
        "fractional_interpolation": true,
        "strict_suggestion": false
       },
       "source_choices": {
-       "entries": null,
-       "status": "unknown"
+       "entries": [
+        {
+         "choice_index": 0,
+         "label": "Quadratic"
+        },
+        {
+         "choice_index": 1,
+         "label": "Invert quadratic"
+        },
+        {
+         "choice_index": 2,
+         "label": "Linear"
+        },
+        {
+         "choice_index": 3,
+         "label": "Custom"
+        }
+       ],
+       "status": "resolved"
       }
      },
      {
@@ -124123,7 +124680,24 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Rectangle",
+      "Diamond",
+      "Trapezoid",
+      "Parallelogram",
+      "Ellipse",
+      "Arc",
+      "Ring",
+      "Crescent",
+      "Pie",
+      "Squircle",
+      "Regular Polygon",
+      "Star",
+      "Cross",
+      "Capsule",
+      "Leaf",
+      "Gear"
+     ],
      "default": "0",
      "extra": [
       "{ data: shapesArray, horizontal: 1, text_pad: ui(16) }"
@@ -140201,7 +140775,12 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Loop",
+      "Ping pong",
+      "Destroy"
+     ]
     },
     {
      "array_depth": 0,
@@ -140247,7 +140826,12 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Stream",
+      "Burst",
+      "Trigger"
+     ]
     },
     {
      "array_depth": 0,
@@ -140303,7 +140887,13 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Area Inside",
+      "Area Border",
+      "Map",
+      "Path",
+      "Direct Data"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -140419,7 +141009,11 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Uniform",
+      "Random"
+     ]
     },
     {
      "array_depth": 0,
@@ -149517,7 +150111,11 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Sphere",
+      "Plane"
+     ]
     },
     {
      "array_depth": 0,
@@ -150333,7 +150931,12 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Shape",
+      "Path",
+      "Mesh Vertices",
+      "Direct Data"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -150375,7 +150978,11 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Box",
+      "Sphere",
+      "Circle"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -153103,7 +153710,12 @@
     },
     {
      "array_depth": 0,
-     "choices": null,
+     "choices": [
+      "Random",
+      "Order",
+      "Animation",
+      "Scale"
+     ],
      "default": "0",
      "extra": [
       ""
@@ -153196,7 +153808,12 @@
        }
       ],
       "status": "resolved"
-     }
+     },
+     "choices": [
+      "Loop",
+      "Ping pong",
+      "Destroy"
+     ]
     }
    ],
    "outputs": [
@@ -155941,10 +156558,142 @@
   "scripts/node_refract/node_refract.gml": {
    "bytes": 2533,
    "sha256": "08008f6a73b08ca9f3687e06089f186e1a637ba919a1a518b86e9d8cc4359011"
-  }
-,
+  },
   "scripts/node_text/node_text.gml": {
    "bytes": 27610,
    "sha256": "34640857e6878bb84c4778649dedfac455a062d2a3be35cbb0b191f3cb8cc9ca"
-  } }
+  },
+  "scripts/node_2d_light/node_2d_light.gml": {
+   "bytes": 18721,
+   "sha256": "cda0217c4520fe9c016253a51a19d4b6d713e887fc7e5f14d82f5012931882da"
+  },
+  "scripts/node_3d_particle/node_3d_particle.gml": {
+   "bytes": 27892,
+   "sha256": "0291be5f3bb09fcef3fe465adec8838fe4f946eca73c84953462b16100724363"
+  },
+  "scripts/node_atlas_set/node_atlas_set.gml": {
+   "bytes": 4395,
+   "sha256": "762e1cee5a6f5e5d57ec5a8f855cf19d9e4f8ebaa03e4a2683b5ab22f438ba2f"
+  },
+  "scripts/node_bend/node_bend.gml": {
+   "bytes": 9859,
+   "sha256": "401f23a8238cdadd6ca94411ba3fa29c63507453904ca48b6bbc0661a63ef6d7"
+  },
+  "scripts/node_bevel/node_bevel.gml": {
+   "bytes": 2753,
+   "sha256": "bfa14a6fc20ad0ca9a3cad533683658180f8e246274f6cbe9a0487786875da27"
+  },
+  "scripts/node_feedback_input/node_feedback_input.gml": {
+   "bytes": 918,
+   "sha256": "2b01f1e8356cdbb86f118642379632e8f4942ea192daab0f9d14dd692268af21"
+  },
+  "scripts/node_group_input/node_group_input.gml": {
+   "bytes": 18653,
+   "sha256": "8464d00067ea8a594730384407d0e39053fa67fc8e1db9a59b666ad4a513f215"
+  },
+  "scripts/node_gradient_cos/node_gradient_cos.gml": {
+   "bytes": 6072,
+   "sha256": "f6b7419faefadfedbc8bcf317900334aa5524a5167a9dd35cf940ced030045fa"
+  },
+  "scripts/node_hlsl/node_hlsl.gml": {
+   "bytes": 14583,
+   "sha256": "3eb726ee17c8a89304bef70d368cd32e7e8f29d36cff298e7e2dc803ad66bb3b"
+  },
+  "scripts/node_image_grid/node_image_grid.gml": {
+   "bytes": 6469,
+   "sha256": "c58faa50e372cccb2ad6cff5d633d899299789afe9f79e198d7e98eee743fad8"
+  },
+  "scripts/node_iterator_input/node_iterator_input.gml": {
+   "bytes": 1120,
+   "sha256": "3ca7443a32eef8431bfa598a796d9d5bd6eb1e86e1477893709ba703627d7108"
+  },
+  "scripts/node_liquefy/node_liquefy.gml": {
+   "bytes": 11648,
+   "sha256": "00f1fb0dc820d7e074286f3a280bb5ca700084392a7840bbae333acb1ce1f1c4"
+  },
+  "scripts/node_lua_compute/node_lua_compute.gml": {
+   "bytes": 6498,
+   "sha256": "1297807c241271600f22e912ab1757e5b3417bfffc89e787137eee05bdc48f83"
+  },
+  "scripts/node_lua_surface/node_lua_surface.gml": {
+   "bytes": 6430,
+   "sha256": "93a710db8ea3a34f602b045c8594e799c735ed81b9bb0c1abdd6b872d8d268c7"
+  },
+  "scripts/node_mk_dialog/node_mk_dialog.gml": {
+   "bytes": 26509,
+   "sha256": "ae4c7faa9dbe72fd326ca26ac3df0ac318f2a90959d5c40a6637066b765bafd4"
+  },
+  "scripts/node_mk_grass/node_mk_grass.gml": {
+   "bytes": 15724,
+   "sha256": "8491b7e0297487207abf6b7681637fe570564fa4b0f1f7d161a377df484d4b19"
+  },
+  "scripts/node_mk_tile/node_mk_tile.gml": {
+   "bytes": 23511,
+   "sha256": "af8701bdaecb28928fb5a784b38e9ef9ac4fa54410b069300504f52ec71384d0"
+  },
+  "scripts/node_mk_tree_branch/node_mk_tree_branch.gml": {
+   "bytes": 15574,
+   "sha256": "914aad8773bd1f2cfbc20f456bf946fd8ed24021ee6eecf91feeae16cae7d542"
+  },
+  "scripts/node_mk_tree_branch_fan/node_mk_tree_branch_fan.gml": {
+   "bytes": 12805,
+   "sha256": "2cbd0c7c76df0a88b9326e3111410ae557f221474713d0074eaf23eede1fe7f8"
+  },
+  "scripts/node_mk_tree_leaf/node_mk_tree_leaf.gml": {
+   "bytes": 29298,
+   "sha256": "b6bfbd8f4532608140c357297ec59866858aba47cfde8dbdfb09e302bae484e7"
+  },
+  "scripts/node_mk_tree_root_path/node_mk_tree_root_path.gml": {
+   "bytes": 8417,
+   "sha256": "903da8fc9e20faab2ca87f03354a969fb54b09df99360690778637c06ec647cc"
+  },
+  "scripts/node_mk_tree_root/node_mk_tree_root.gml": {
+   "bytes": 12208,
+   "sha256": "c8b09e3484504e8cd3ac9e2d3b973b9fd49cdcb288f945599e35af29407c9e33"
+  },
+  "scripts/node_normal_light/node_normal_light.gml": {
+   "bytes": 10232,
+   "sha256": "0a2c6bb5d7ad923582f256a4489aa5d63a97241cc784e36509fe7841d37ca04e"
+  },
+  "scripts/node_particle/node_particle.gml": {
+   "bytes": 32801,
+   "sha256": "f4a0d553d91bd0cddb5ccc50dc8f9dc21d54d406ebb9094f74a78cb637bc6886"
+  },
+  "scripts/node_repeat/node_repeat.gml": {
+   "bytes": 34187,
+   "sha256": "dfca1362dffef0747b1c6bfcf7d355547f97bec433e28389f0010a3a880a1694"
+  },
+  "scripts/node_scatter_points_3d/node_scatter_points_3d.gml": {
+   "bytes": 5145,
+   "sha256": "5a666c5fbb40962cf01c987551e7578b4fca1c6ff9b0ee21dd8776ea5cc66a23"
+  },
+  "scripts/node_shadow_cast/node_shadow_cast.gml": {
+   "bytes": 12359,
+   "sha256": "e7d33e694f7212e165ef871498756222d8659b70bd400e20a5bfa8ecc6cf8dfa"
+  },
+  "scripts/node_shape_polygon/node_shape_polygon.gml": {
+   "bytes": 12095,
+   "sha256": "8a061fc8256a1df6491e6f280f1a27ee59fec07a623b66e3f14085c4dc88b837"
+  },
+  "scripts/node_VFX_spawner/node_VFX_spawner.gml": {
+   "bytes": 3361,
+   "sha256": "28b1198223224bb0c130c00ecebfa437bde4bf94e38772db26ccb75233367c94"
+  },
+  "scripts/_node_VFX_spawner/_node_VFX_spawner.gml": {
+   "bytes": 27079,
+   "sha256": "0ee83cbd3df463139224d31da7df54a8559a279ce00eac09f5092b102a00f03f"
+  },
+  "scripts/node_psystem_3d_mask/node_psystem_3d_mask.gml": {
+   "bytes": 5136,
+   "sha256": "1c402a9776e4a4efa1023d328605937937f829715214eeb62f2fb3b5c1ae9312"
+  },
+  "scripts/node_psystem_3d_spawn/node_psystem_3d_spawn.gml": {
+   "bytes": 23449,
+   "sha256": "30151d3ec560148e80971cdbe41801a4b970e56f21bb10e725353e2db1acc6cb"
+  },
+  "scripts/node_psystem_render/node_psystem_render.gml": {
+   "bytes": 10574,
+   "sha256": "f2b9cbeec08c6b91efabb79f58faa4119b4e5348984aae591b23594c3ca0e032"
+  }
+ }
 }
