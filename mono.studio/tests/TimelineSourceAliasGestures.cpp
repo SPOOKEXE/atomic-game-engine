@@ -61,6 +61,54 @@ namespace {
 			Doc.SourceAnimators->Detached = {metadata};
 			Doc.SourceAnimators->DetachedValues = {{"owner", std::nullopt, {physical}, physical.Port}};
 		}
+		void SharedFractionalKeys() {
+			auto &physical = Doc.SourceAnimators->DetachedValues[0].Keys;
+			SetFrameTime(physical[0], {1, .25, false});
+			auto middle = physical[0];
+			SetFrameTime(middle, {3, .5, false});
+			middle.SourceKeyId = "middle-key";
+			middle.SourceDriver.reset();
+			middle.Data = .5;
+			auto last = middle;
+			SetFrameTime(last, {5, .75, false});
+			last.SourceKeyId = "last-key";
+			last.Data = .75;
+			physical.push_back(middle);
+			physical.push_back(last);
+			auto sibling = Doc.Nodes[1];
+			sibling.Id = "sibling";
+			Doc.Nodes.push_back(sibling);
+			auto binding = Doc.SourceAnimators->Bindings[0];
+			binding.NodeId = "sibling";
+			Doc.SourceAnimators->Bindings.push_back(binding);
+			Doc.Tracks.push_back({"sibling", "mix", "hold", -1});
+			Doc.Keyframes.resize(1);
+			for (const auto &node : {"alias", "sibling"})
+				for (auto key : physical) {
+					key.NodeId = node;
+					key.Port = "mix";
+					key.SourceKeyId.clear();
+					Doc.Keyframes.push_back(std::move(key));
+				}
+		}
+		ImVec2 Marker(std::string_view node, FrameTime time) const {
+			const auto marker =
+				std::find_if(View.Markers.begin(), View.Markers.end(), [&](const auto &entry) {
+					return View.Tracks[entry.Row].NodeId == node && entry.Time == time;
+				});
+			REQUIRE(marker != View.Markers.end());
+			return marker->Position;
+		}
+		void CheckRoundTrip(const Document &before) {
+			const auto accepted = Doc;
+			REQUIRE(History.Undo(Doc));
+			CHECK(Doc == before);
+			CHECK_FALSE(History.CanUndo());
+			REQUIRE(History.Redo(Doc));
+			CHECK(Doc == accepted);
+			CHECK_FALSE(History.CanRedo());
+		}
+
 		~AliasSheet() {
 			ImGui::SetCurrentContext(Context);
 			ImGui::DestroyContext(Context);
@@ -231,4 +279,137 @@ TEST_CASE(
 	CHECK_FALSE(ui.History.CanUndo());
 	CHECK_FALSE(ui.View.Dragging);
 	CHECK(ui.Error.Code == Status::InvalidValue);
+}
+
+TEST_CASE(
+	"Alt-copy through one visible alias fans out one physical copy", "[studio][timeline][source_aliases]"
+) {
+	AliasSheet ui;
+	ui.SharedFractionalKeys();
+	ui.Frame();
+	ui.Frame();
+	const auto before = ui.Doc;
+	ui.Keys.Selection = {
+		studio::TimelineKeyEditor::Identity(ui.Doc.Keyframes[1]),
+		studio::TimelineKeyEditor::Identity(ui.Doc.Keyframes[4])
+	};
+	auto &io = ImGui::GetIO();
+	io.AddKeyEvent(ImGuiMod_Alt, true);
+	ui.Frame();
+	const auto point = ui.Marker("alias", {1, .25, false});
+	ui.Down(point);
+	REQUIRE(ui.View.Copying);
+	REQUIRE(ui.View.Originals.size() == 1);
+	ui.Mouse({point.x + 2.75f * float(ui.View.PixelsPerFrame), point.y});
+	CHECK(ui.Doc == before);
+	ui.Up();
+	INFO(ui.Error.Message);
+	REQUIRE(ui.Changes == 1);
+	const auto &physical = ui.Doc.SourceAnimators->DetachedValues[0].Keys;
+	REQUIRE(physical.size() == 4);
+	const auto copy =
+		std::find_if(physical.begin(), physical.end(), [](const auto &key) { return key.Tick == 4; });
+	REQUIRE(copy != physical.end());
+	CHECK(copy->SourceKeyId.empty());
+	CHECK_FALSE(copy->SourceDriver);
+	CHECK(std::count_if(ui.Doc.Keyframes.begin(), ui.Doc.Keyframes.end(), [](const auto &key) {
+			  return (key.NodeId == "alias" || key.NodeId == "sibling") && key.Tick == 4;
+		  }) == 2);
+	REQUIRE(ui.Keys.Selection.size() == 1);
+	CHECK(ui.Keys.Selection[0].NodeId == "alias");
+	CHECK(ui.Keys.Selection[0].Time == FrameTime{4, 0, false});
+	ui.CheckRoundTrip(before);
+}
+
+TEST_CASE(
+	"Ctrl Alt scale deduplicates shared aliases at fractional destinations",
+	"[studio][timeline][source_aliases]"
+) {
+	AliasSheet ui;
+	ui.SharedFractionalKeys();
+	ui.Frame();
+	ui.Frame();
+	const auto before = ui.Doc;
+	for (const auto &key : ui.Doc.Keyframes)
+		if (key.NodeId != "owner") ui.Keys.Selection.push_back(studio::TimelineKeyEditor::Identity(key));
+	const auto selected = ui.Keys.Selection;
+	auto &io = ImGui::GetIO();
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddKeyEvent(ImGuiMod_Alt, true);
+	ui.Frame();
+	const auto point = ui.Marker("alias", {5, .75, false});
+	ui.Down(point);
+	REQUIRE(ui.View.Scaling);
+	REQUIRE(ui.View.Originals.size() == 6);
+	ui.Mouse({point.x + 2.25f * float(ui.View.PixelsPerFrame), point.y});
+	CHECK(ui.Doc == before);
+	SECTION("Release commits once") {
+		ui.Up();
+		INFO(ui.Error.Message);
+		REQUIRE(ui.Changes == 1);
+		const auto &physical = ui.Doc.SourceAnimators->DetachedValues[0].Keys;
+		REQUIRE(physical.size() == 3);
+		CHECK(GetFrameTime(physical[0]) == FrameTime{1, .25, false});
+		CHECK(GetFrameTime(physical[1]) == FrameTime{4, .625, false});
+		CHECK(GetFrameTime(physical[2]) == FrameTime{8, 0, false});
+		CHECK(physical[1].SourceKeyId == "middle-key");
+		CHECK(ui.Keys.Selection.size() == 6);
+		CHECK(std::count_if(ui.Keys.Selection.begin(), ui.Keys.Selection.end(), [](const auto &id) {
+				  return id.Time == FrameTime{4, .625, false};
+			  }) == 2);
+		ui.CheckRoundTrip(before);
+	}
+	SECTION("Escape cancels before release") {
+		io.AddKeyEvent(ImGuiKey_Escape, true);
+		ui.Frame();
+		io.AddKeyEvent(ImGuiKey_Escape, false);
+		ui.Up();
+		CHECK(ui.Doc == before);
+		CHECK(ui.Keys.Selection == selected);
+		CHECK(ui.Attempts == 0);
+		CHECK_FALSE(ui.History.CanUndo());
+		CHECK_FALSE(ui.View.Dragging);
+	}
+}
+
+TEST_CASE(
+	"Alt-copy collision replaces one shared physical key in one undo", "[studio][timeline][source_aliases]"
+) {
+	AliasSheet ui;
+	ui.SharedFractionalKeys();
+	for (auto &key : ui.Doc.Keyframes)
+		if (GetFrameTime(key) == FrameTime{3, .5, false}) SetFrameTime(key, {4, 0, false});
+	SetFrameTime(ui.Doc.SourceAnimators->DetachedValues[0].Keys[1], {4, 0, false});
+	ui.Frame();
+	ui.Frame();
+	const auto before = ui.Doc;
+	auto &io = ImGui::GetIO();
+	io.AddKeyEvent(ImGuiMod_Alt, true);
+	ui.Frame();
+	const auto point = ui.Marker("sibling", {1, .25, false});
+	ui.Down(point);
+	REQUIRE(ui.View.Copying);
+	ui.Mouse({point.x + 2.75f * float(ui.View.PixelsPerFrame), point.y});
+	ui.Up();
+	INFO(ui.Error.Message);
+	REQUIRE(ui.Changes == 1);
+	const auto &physical = ui.Doc.SourceAnimators->DetachedValues[0].Keys;
+	REQUIRE(physical.size() == 3);
+	const auto copy = std::find_if(physical.begin(), physical.end(), [](const auto &key) {
+		return GetFrameTime(key) == FrameTime{4, 0, false};
+	});
+	REQUIRE(copy != physical.end());
+	CHECK(copy->Data == before.SourceAnimators->DetachedValues[0].Keys[0].Data);
+	CHECK(copy->SourceKeyId.empty());
+	CHECK_FALSE(copy->SourceDriver);
+	CHECK(std::none_of(physical.begin(), physical.end(), [](const auto &key) {
+		return key.SourceKeyId == "middle-key";
+	}));
+	CHECK(std::count_if(ui.Doc.Keyframes.begin(), ui.Doc.Keyframes.end(), [](const auto &key) {
+			  return (key.NodeId == "alias" || key.NodeId == "sibling") &&
+					 GetFrameTime(key) == FrameTime{4, 0, false};
+		  }) == 2);
+	REQUIRE(ui.Keys.Selection.size() == 1);
+	CHECK(ui.Keys.Selection[0].NodeId == "sibling");
+	ui.CheckRoundTrip(before);
 }
