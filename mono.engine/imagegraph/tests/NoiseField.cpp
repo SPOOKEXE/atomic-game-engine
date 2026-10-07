@@ -231,84 +231,86 @@ TEST_CASE("Noise generator rejects fractional integer controls without throwing"
 	CHECK(diagnostic.Port == "seed");
 }
 
-TEST_CASE("Source simplex field samples the same raster as its selected image output", "[noise_field]") {
-	Document document;
-	document.FormatVersion = 9;
-	document.Nodes = {
-		{"source",
-		 "pc.noise_simplex",
-		 "",
-		 {},
-		 {{"dimension", Vector2{3, 2}},
-		  {"dimension_unit", EnumValue{0}},
-		  {"seed", 123.0},
-		  {"iteration", int64_t{2}}}},
-		{"sample", "value.sample_noise", "", {}, {{"position", Vector2{.25, .75}}}}
-	};
-	document.Links = {{"source", "field", "sample", "field"}};
-	document.Outputs = {{"image", "source", "surface_out"}, {"sample", "sample", "value"}};
-	Plan plan;
-	Diagnostic diagnostic;
-	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
-	Image image;
-	REQUIRE(Evaluate(document, plan, "image", image, diagnostic) == Status::Ok);
-	EvaluatedValue sampled;
-	REQUIRE(EvaluateValue(document, plan, "sample", {}, sampled, diagnostic) == Status::Ok);
-	SurfacePixel pixel;
-	REQUIRE(LoadSurfacePixel(image, 0, 1, pixel));
-	CHECK(std::get<double>(sampled.Data) == pixel[0]);
+TEST_CASE("Source noise fields sample the same raster as its selected image output", "[noise_field]") {
+	for (const auto *type : {"pc.noise_simplex", "pc.perlin", "pc.cellular"}) {
+		Document document;
+		document.FormatVersion = 9;
+		document.Nodes = {
+			{"source",
+			 type,
+			 "",
+			 {},
+			 {{"dimension", Vector2{3, 2}},
+			  {"dimension_unit", EnumValue{0}},
+			  {"seed", 123.0},
+			  {"iteration", int64_t{2}}}},
+			{"sample", "value.sample_noise", "", {}, {{"position", Vector2{.25, .75}}}}
+		};
+		document.Links = {{"source", "field", "sample", "field"}};
+		document.Outputs = {{"image", "source", "surface_out"}, {"sample", "sample", "value"}};
+		Plan plan;
+		Diagnostic diagnostic;
+		REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+		Image image;
+		REQUIRE(Evaluate(document, plan, "image", image, diagnostic) == Status::Ok);
+		EvaluatedValue sampled;
+		REQUIRE(EvaluateValue(document, plan, "sample", {}, sampled, diagnostic) == Status::Ok);
+		SurfacePixel pixel;
+		REQUIRE(LoadSurfacePixel(image, 0, 1, pixel));
+		CHECK(std::get<double>(sampled.Data) == pixel[0]);
+	}
 }
 
-TEST_CASE(
-	"Source simplex processor arrays retain fields and sampler diagnoses field arrays", "[noise_field]"
-) {
-	Document processor;
-	processor.FormatVersion = 9;
-	ArrayValue iterations;
-	iterations.ElementType = ValueType::Integer;
-	iterations.Elements = {int64_t{1}, int64_t{2}};
-	processor.Nodes = {
-		{"source",
-		 "pc.noise_simplex",
-		 "",
-		 {},
-		 {{"dimension", Vector2{3, 2}},
-		  {"dimension_unit", EnumValue{0}},
-		  {"seed", 123.0},
-		  {"iteration", iterations}}}
-	};
-	processor.Outputs = {{"images", "source", "surface_out"}, {"fields", "source", "field"}};
-	Plan plan;
-	Diagnostic diagnostic;
-	REQUIRE(Compile(processor, plan, diagnostic) == Status::Ok);
-	ImageArray images;
-	REQUIRE(EvaluateArray(processor, plan, "images", {}, images, diagnostic) == Status::Ok);
-	REQUIRE(images.Images.size() == 2);
-	for (size_t row = 0; row < images.Images.size(); ++row) {
-		Document scalar = processor;
-		scalar.Nodes[0].Values.back().Data = int64_t(row + 1);
-		Plan scalarPlan;
-		REQUIRE(Compile(scalar, scalarPlan, diagnostic) == Status::Ok);
-		Image expected;
-		REQUIRE(Evaluate(scalar, scalarPlan, "images", expected, diagnostic) == Status::Ok);
-		CHECK(images.Images[row] == expected);
+TEST_CASE("Source noise processor arrays retain fields and sampler diagnoses field arrays", "[noise_field]") {
+	for (const auto *type : {"pc.noise_simplex", "pc.perlin", "pc.cellular"}) {
+		Document processor;
+		processor.FormatVersion = 9;
+		ArrayValue iterations;
+		iterations.ElementType = ValueType::Integer;
+		iterations.Elements = {int64_t{1}, int64_t{2}};
+		processor.Nodes = {
+			{"source",
+			 type,
+			 "",
+			 {},
+			 {{"dimension", Vector2{3, 2}},
+			  {"dimension_unit", EnumValue{0}},
+			  {"seed", 123.0},
+			  {"iteration", iterations}}}
+		};
+		processor.Outputs = {{"images", "source", "surface_out"}, {"fields", "source", "field"}};
+		Plan plan;
+		Diagnostic diagnostic;
+		REQUIRE(Compile(processor, plan, diagnostic) == Status::Ok);
+		ImageArray images;
+		REQUIRE(EvaluateArray(processor, plan, "images", {}, images, diagnostic) == Status::Ok);
+		REQUIRE(images.Images.size() == 2);
+		for (size_t row = 0; row < images.Images.size(); ++row) {
+			Document scalar = processor;
+			scalar.Nodes[0].Values.back().Data = int64_t(row + 1);
+			Plan scalarPlan;
+			REQUIRE(Compile(scalar, scalarPlan, diagnostic) == Status::Ok);
+			Image expected;
+			REQUIRE(Evaluate(scalar, scalarPlan, "images", expected, diagnostic) == Status::Ok);
+			CHECK(images.Images[row] == expected);
+		}
+		EvaluatedValue fields;
+		REQUIRE(EvaluateValue(processor, plan, "fields", {}, fields, diagnostic) == Status::Ok);
+		const auto &array = std::get<ArrayValue>(fields.Data);
+		REQUIRE(array.Elements.size() == images.Images.size());
+		CHECK(array.ElementType == ValueType::Noise2D);
+		for (size_t row = 0; row < array.Elements.size(); ++row) {
+			const auto &field = std::get<NoiseFieldValue>(array.Elements[row]);
+			REQUIRE(field.Data->Raster);
+			CHECK(field.Data->Raster->Pixels == images.Images[row].Pixels);
+		}
+		Document sampler = processor;
+		sampler.Nodes.push_back({"sample", "value.sample_noise", "", {}, {{"position", Vector2{.25, .75}}}});
+		sampler.Links = {{"source", "field", "sample", "field"}};
+		sampler.Outputs = {{"value", "sample", "value"}};
+		EvaluatedValue value;
+		CHECK(EvaluateValueOutput(sampler, "value", value, diagnostic) == Status::InvalidValue);
+		CHECK(diagnostic.NodeId == "sample");
+		CHECK(diagnostic.Port == "field");
 	}
-	EvaluatedValue fields;
-	REQUIRE(EvaluateValue(processor, plan, "fields", {}, fields, diagnostic) == Status::Ok);
-	const auto &array = std::get<ArrayValue>(fields.Data);
-	REQUIRE(array.Elements.size() == images.Images.size());
-	CHECK(array.ElementType == ValueType::Noise2D);
-	for (size_t row = 0; row < array.Elements.size(); ++row) {
-		const auto &field = std::get<NoiseFieldValue>(array.Elements[row]);
-		REQUIRE(field.Data->Raster);
-		CHECK(field.Data->Raster->Pixels == images.Images[row].Pixels);
-	}
-	Document sampler = processor;
-	sampler.Nodes.push_back({"sample", "value.sample_noise", "", {}, {{"position", Vector2{.25, .75}}}});
-	sampler.Links = {{"source", "field", "sample", "field"}};
-	sampler.Outputs = {{"value", "sample", "value"}};
-	EvaluatedValue value;
-	CHECK(EvaluateValueOutput(sampler, "value", value, diagnostic) == Status::InvalidValue);
-	CHECK(diagnostic.NodeId == "sample");
-	CHECK(diagnostic.Port == "field");
 }

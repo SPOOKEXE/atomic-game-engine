@@ -105113,6 +105113,7 @@
      "index": "2",
      "kind": "Vec2",
      "mapped": "range",
+     "mapped_range_type": "vector2",
      "name": "Scale",
      "source_array_classification": true
     },
@@ -156798,6 +156799,10 @@
   "scripts/node_pixel_math/node_pixel_math.gml": {
    "bytes": 4594,
    "sha256": "4b15f23363583f476e7801f08574df9b5f4a162321851995185393ca20418359"
+  },
+  "scripts/node_perlin/node_perlin.gml": {
+   "bytes": 4993,
+   "sha256": "9b659974876c3142c1c0ed02ca6133a62b93b83576f7ee8173efe9822cf7afe3"
   }
  }
 }

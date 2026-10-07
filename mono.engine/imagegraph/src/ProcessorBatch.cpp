@@ -16,6 +16,7 @@
 #include "nodes/SourceGlow.hpp"
 #include "nodes/SourceJpeg.hpp"
 #include "nodes/SourceNoise.hpp"
+#include "nodes/SourcePerlin.hpp"
 #include "nodes/SourcePixelMath.hpp"
 #include "nodes/SourcePixelSort.hpp"
 #include "nodes/SourcePolar.hpp"
@@ -877,6 +878,7 @@ namespace engine::imagegraph::detail {
 							   : context.Authored.Type == "pc.noise"	  ? AdmitSourceNoise
 							   : context.Authored.Type == "pc.caustic"	  ? AdmitSourceCaustic
 							   : context.Authored.Type == "pc.cellular"	  ? AdmitSourceCellular
+							   : context.Authored.Type == "pc.perlin"	  ? AdmitSourcePerlin
 							   : context.Authored.Type == "pc.polar"	  ? AdmitSourcePolar
 							   : context.Authored.Type == "pc.tile"		  ? AdmitSourceTileTransform
 																		  : nullptr;

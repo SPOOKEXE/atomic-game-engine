@@ -325,9 +325,20 @@ class PixelComposerCatalogueMetadataTest(unittest.TestCase):
                 )
                 self.assertIn("I\tattribute_process\tattribute process\t-1\tBool\tboolean\tb 0\t", catalogue[start:end])
 
-    def test_herringbone_gabor_mapped_scale_preserves_the_two_source_components(self):
+    def test_mapped_scale_preserves_the_two_source_components(self):
         snapshot = json.loads((REPOSITORY / "docs/pixel-composer-m0/source-inputs.json").read_text())
-        for name, expected in (("Node_Herringbone_Tile", "v 0.25 0.25"), ("Node_Gabor_Noise", "v 4 4")):
+        self.assertEqual(
+            {
+                "bytes": 4993,
+                "sha256": "9b659974876c3142c1c0ed02ca6133a62b93b83576f7ee8173efe9822cf7afe3",
+            },
+            snapshot["source_constructor_evidence"]["scripts/node_perlin/node_perlin.gml"],
+        )
+        for name, expected in (
+            ("Node_Herringbone_Tile", "v 0.25 0.25"),
+            ("Node_Gabor_Noise", "v 4 4"),
+            ("Node_Perlin", "v 4 4"),
+        ):
             node = snapshot["nodes"][name]
             control = next(v for v in node["inputs"] if v["name"] == "Scale")
             self.assertEqual("Vec2", control["kind"])

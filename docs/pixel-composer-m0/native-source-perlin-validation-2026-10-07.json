@@ -1,0 +1,116 @@
+{
+  "date": "2026-10-07",
+  "scope": "grug add bounded pc.perlin and sampleable scalar 2D Perlin/Cellular field outputs. broader Composer work remains active.",
+  "source": {
+    "revision": "b69eca232217360cf1502ef0223523d818606652",
+    "sha256": {
+      "scripts/node_perlin/node_perlin.gml": "9b659974876c3142c1c0ed02ca6133a62b93b83576f7ee8173efe9822cf7afe3",
+      "shaders/sh_perlin_tiled/sh_perlin_tiled.fsh": "9290434c5dec1301e98b8129c0c11349c0465d6d05932993d261a2bee9b4f29b",
+      "scripts/shader_functions/shader_functions.gml": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7",
+      "scripts/node_value_vec2/node_value_vec2.gml": "c37cd3670441eb5dc0655db8d8751d22b135577e71a513936d7354704a501112"
+    }
+  },
+  "contract": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourcePerlin.cpp",
+    "rules": [
+      "pinned gradient hash, phase, tile/rotation, four-corner cubic interpolation and Add/Max octave equations",
+      "Greyscale/RGB/HSV, source offsets, levels and channel ranges; seven explicit output depths",
+      "Scale uses two lanes with [4,4] default; maps use nearest mean RGB ignoring alpha; nested mapped Scale uniform uploads refuse",
+      "Position units and linked Surface/SurfaceArray projections preserve source getters; Dimension SurfaceArray schedules and equal-size collapse",
+      "UV flips Y and retains alpha at zero mix; selected stored output masks alpha through RGBA8 scratch then copies back to selected depth",
+      "all 23 physical source slots, four processor schedules, animated seed and instance persistence",
+      "64 million cumulative work cap and conservative retained-byte quote before output or observers",
+      "Perlin and Cellular catalogue fields retain stored raster red channel; scalar and processor-array integrations share declared schema",
+      "explicit seed required; raw Atlas bindings, undefined consumed divisions, nested uploads and finite/storage overflow refuse by named port"
+    ]
+  },
+  "validation": {
+    "preset": "release-tests",
+    "build_exit_code": 0,
+    "build_logs": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-build-batch1.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-build-batch2.log",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-build-batch3.log"
+    ],
+    "final_batch": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-cpu-batch3-results.json",
+    "checks": 20,
+    "all_final_checks_passed": true,
+    "cpp_test_cases": 5530,
+    "new_perlin_test_cases": 16,
+    "python_tests": 115,
+    "cli_tests": 16,
+    "startup_test_cases": 1,
+    "scoped_vulkan_cases": 31,
+    "backend": "SDL offscreen Vulkan",
+    "frozen_source_paths": 3910,
+    "source_stability": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-source-stability-batch1.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-source-stability-batch2.json",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-source-stability-batch3.json"
+    ],
+    "tested_binaries_unchanged": true,
+    "child_binary_hashes": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-cpu-child-hashes-batch3.json",
+    "independent_reference_count": 26,
+    "independent_references": [
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-independent-reference.py",
+      ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/perlin-independent-reference.json"
+    ],
+    "read_review": "root reviewed complete pinned shader, node, map helper, native executor, shared registration/projections, metadata and fixtures"
+  },
+  "issues": [
+    {
+      "batch": 1,
+      "build_failed": true,
+      "cause": "Dimension-array test referred to absent DrawArray helper",
+      "repair": "Add test-local Compile/EvaluateArray helper; no stale-binary tests run"
+    },
+    {
+      "batch": 2,
+      "checks": 20,
+      "passed": 19,
+      "failures": [
+        {
+          "test": "scalar and array noise fields",
+          "cause": "runtime field generation enabled without catalogue field ports",
+          "repair": "declare Perlin/Cellular field outputs; runtime detection reads output schema"
+        },
+        {
+          "test": "seed animation",
+          "cause": "2x2 with default Scale4 samples integer lattice coordinates independent of seed",
+          "repair": "author Scale [3,2] to sample off-lattice"
+        }
+      ]
+    }
+  ],
+  "not_run": [
+    "matched captures from licensed Pixel Composer executable",
+    "headed live Studio verification",
+    "dedicated Perlin performance profiling"
+  ],
+  "limits": [
+    "independent source-equation references do not establish licensed runtime pixel parity",
+    "binary32 CPU libm sine/cosine may differ from shader device math",
+    "ENGINE_PROFILE marks executor work; no measured performance claim"
+  ],
+  "build_warnings": [
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/nodes/ArrayNumericNodes.cpp:339:58: warning: \u2018a\u2019 may be used uninitialized [-Wmaybe-uninitialized]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/nodes/ArrayNumericNodes.cpp:339:58: warning: \u2018b\u2019 may be used uninitialized [-Wmaybe-uninitialized]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/nodes/ArrayNumericNodes.cpp:241:79: warning: \u2018multiplier\u2019 may be used uninitialized [-Wmaybe-uninitialized]",
+    "/usr/include/c++/13/bits/stl_vector.h:106:49: warning: \u2018*(std::_Vector_base<engine::imagegraph::SourceArrayItem, std::allocator<engine::imagegraph::SourceArrayItem> >::_Vector_impl_data*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::vari",
+    "/usr/include/c++/13/bits/stl_vector.h:107:33: warning: \u2018*(std::_Vector_base<engine::imagegraph::SourceArrayItem, std::allocator<engine::imagegraph::SourceArrayItem> >::_Vector_impl_data*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::vari",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/include/engine/imagegraph/Surface.hpp:36:16: warning: \u2018*(engine::imagegraph::Image*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<bool, long int",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/include/engine/imagegraph/Surface.hpp:36:16: warning: \u2018*(engine::imagegraph::Image*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<bool, long int",
+    "/usr/include/c++/13/bits/stl_vector.h:106:49: warning: \u2018*(std::_Vector_base<engine::imagegraph::SourceArrayItem, std::allocator<engine::imagegraph::SourceArrayItem> >::_Vector_impl_data*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::vari",
+    "/usr/include/c++/13/bits/stl_vector.h:107:33: warning: \u2018*(std::_Vector_base<engine::imagegraph::SourceArrayItem, std::allocator<engine::imagegraph::SourceArrayItem> >::_Vector_impl_data*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::vari",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/include/engine/imagegraph/Surface.hpp:36:16: warning: \u2018*(engine::imagegraph::Image*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<bool, long int",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/include/engine/imagegraph/Surface.hpp:36:16: warning: \u2018*(engine::imagegraph::Image*)((char*)&<unnamed> + offsetof(engine::imagegraph::value_type, engine::imagegraph::SourceArrayItem::Data.std::variant<std::variant<bool, long int",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/CacheGroupReplay.cpp:1429:111: warning: missing initializer for member \u2018engine::imagegraph::CacheGroupReplayOperation::MemberId\u2019 [-Wmissing-field-initializers]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/CacheGroupReplay.cpp:1429:111: warning: missing initializer for member \u2018engine::imagegraph::CacheGroupReplayOperation::Members\u2019 [-Wmissing-field-initializers]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/SourceFlipGrid.cpp:94:30: warning: variable \u2018s\u2019 set but not used [-Wunused-but-set-variable]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/SourceFlipParticles.cpp:37:30: warning: variable \u2018particleVel\u2019 set but not used [-Wunused-but-set-variable]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/NativeFrameCacheReceipt.cpp:287:28: warning: \u2018*(std::_Optional_payload_base<long unsigned int>::_Storage<long unsigned int, true>*)((char*)&requestedFrame + offsetof(const std::optional<long unsigned int>,std::optional<long ",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/FrameCacheReplay.cpp:2772:9: warning: missing initializer for member \u2018engine::imagegraph::CacheGroupReplayOutput::Domain\u2019 [-Wmissing-field-initializers]",
+    "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/FrameCacheReplay.cpp:2772:9: warning: missing initializer for member \u2018engine::imagegraph::CacheGroupReplayOutput::Refusal\u2019 [-Wmissing-field-initializers]"
+  ],
+  "build_warnings_note": "warnings originated in unchanged sources rebuilt by shared-header dependency; no Perlin source warnings in the final build"
+}

@@ -110,7 +110,9 @@ namespace engine::imagegraph {
 	bool IsNoiseImageGenerator(std::string_view type) {
 		if (type == "image.noise_simplex") return true;
 		const auto *entry = FindCatalogueEntry(type);
-		return entry && entry->Family == "generate" && type.find("noise") != std::string_view::npos;
+		return entry && std::any_of(entry->Outputs.begin(), entry->Outputs.end(), [](const auto &output) {
+				   return output.Id == "field" && output.Type == ValueType::Noise2D;
+			   });
 	}
 	namespace {
 		uint64_t Mix(uint64_t value) {

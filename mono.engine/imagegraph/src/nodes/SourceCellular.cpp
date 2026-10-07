@@ -654,7 +654,9 @@ namespace engine::imagegraph::detail {
 				in.Mask || std::any_of(c.ImageArrays.begin(), c.ImageArrays.end(), [](const auto &input) {
 					return input.first == "mask" && input.second && !input.second->Images.empty();
 				});
-			if (!source2d::ComplexBatchAdmission(c, 1, "surface_out", "surface_out", 1 + size_t(mask)))
+			if (!source2d::ComplexBatchAdmission(
+					c, 1, "surface_out", "surface_out", 1 + size_t(mask) + size_t(c.NoiseFieldRequested)
+				))
 				return false;
 			const uint64_t pixels = uint64_t(in.Canvas.Width) * in.Canvas.Height;
 			if (work > CELLULAR_WORK_LIMIT || pixels > (CELLULAR_WORK_LIMIT - work) / CELLULAR_BASE_WORK)
