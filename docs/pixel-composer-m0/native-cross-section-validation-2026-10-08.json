@@ -1,0 +1,614 @@
+{
+  "phase": "bounded-source-cross-section",
+  "date": "2026-10-08",
+  "profile": "native-source-cross-section",
+  "node": "pc.cross_section",
+  "policy": "mono.engine/imagegraph/docs/native-cross-section-policy.json",
+  "acceptance": {
+    "batch": 67,
+    "accepted": true,
+    "status": "accepted joined batch67",
+    "scope": "shared working tree, owned Cross Section changes with other existing uncommitted work",
+    "native_binary_cases": 6196,
+    "startup_cases": 1,
+    "python_cases": 116,
+    "cli_cases": 16
+  },
+  "source": {
+    "repository": "pixel-composer",
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "license": "MIT",
+    "copyright": "Copyright (c) 2023 Tanasart",
+    "license_file_sha256": "b772b6b7cb58e3c62b228b1e3ba28abf3750d019a08a2fdd82ac71e0a1a19cc2",
+    "node_script": {
+      "path": "scripts/node_cross_section/node_cross_section.gml",
+      "sha256": "05913d8d06f486e399f081d56b98d8c440257eff5be040b54881134b174aa5f2"
+    },
+    "shader_files": [
+      {
+        "path": "shaders/sh_cross_section/sh_cross_section.fsh",
+        "sha256": "aa0b27e251b272bdc5bdbf3989e1d42c06b52d788d2e7332bde7d196182e1b14"
+      },
+      {
+        "path": "shaders/sh_mask_empty/sh_mask_empty.fsh",
+        "sha256": "aeacb3cf2133dfe1f3b3adf2d3aabde00a0b177461085bb25b65e5620d40bf6f"
+      },
+      {
+        "path": "shaders/sh_draw_r8/sh_draw_r8.fsh",
+        "sha256": "8a1357e2c2752a4bf507eebfb351b29daf5457f87a755607a14d5608cf1e6c67"
+      },
+      {
+        "path": "shaders/sh_draw_r16/sh_draw_r16.fsh",
+        "sha256": "8a1357e2c2752a4bf507eebfb351b29daf5457f87a755607a14d5608cf1e6c67"
+      },
+      {
+        "path": "shaders/sh_draw_r32/sh_draw_r32.fsh",
+        "sha256": "8a1357e2c2752a4bf507eebfb351b29daf5457f87a755607a14d5608cf1e6c67"
+      }
+    ],
+    "shader_notice": "The node and listed shaders have no separate header notice. The pinned source repository LICENSE is MIT.",
+    "licensed_runtime_parity": "unverified",
+    "licensed_gpu_parity": "unverified",
+    "live_studio": "unverified"
+  },
+  "summary": "Bounded Draw Cross Section native CPU pixels for all eight controls, source format-helper behavior, two-pass mask quantization, whole-batch work/byte admission and native/PXC persistence. Joined batch67 passes; no licensed or GPU pixel-parity claim.",
+  "coverage": {
+    "physical_controls": [
+      {
+        "index": 0,
+        "port": "surface_in",
+        "kind": "surface",
+        "required": true,
+        "default": "runtime input"
+      },
+      {
+        "index": 1,
+        "port": "axis",
+        "kind": "enum",
+        "default": 0,
+        "choices": [
+          "X",
+          "Y"
+        ]
+      },
+      {
+        "index": 2,
+        "port": "position",
+        "kind": "slider",
+        "default": 0
+      },
+      {
+        "index": 3,
+        "port": "anti_aliasing",
+        "kind": "boolean",
+        "default": false
+      },
+      {
+        "index": 4,
+        "port": "mode",
+        "kind": "enum",
+        "default": 0,
+        "choices": [
+          "BW",
+          "Colored"
+        ]
+      },
+      {
+        "index": 5,
+        "port": "mask",
+        "kind": "optional surface",
+        "default": "no runtime input",
+        "binding": "Automatically bound source input index 5."
+      },
+      {
+        "index": 6,
+        "port": "to_alpha",
+        "kind": "boolean",
+        "default": false
+      },
+      {
+        "index": 7,
+        "port": "level",
+        "kind": "range",
+        "default": [
+          0,
+          1
+        ]
+      }
+    ],
+    "preserved_synthetic_metadata": {
+      "attribute_process": "Default true; processing control.",
+      "attribute_color_depth": "Default 0; ignored by the source surface_verify path. Native output remains RGBA8 for every value.",
+      "mask_alpha_only": "Default false; preserved but ignored by the source mask shader path.",
+      "attribute_array_process": "Default 0; preserved as synthetic metadata."
+    },
+    "native_profile": {
+      "implementation": "bounded native CPU profile",
+      "output_format": "RGBA8 at input dimensions, regardless of attribute_color_depth.",
+      "base_sampling": "Pixel-center source coordinates; nearest or bilinear sampling selected by anti_aliasing.",
+      "base_section": "For multi-channel input, compute alpha-weighted luma and a level threshold, then emit the binary section in BW mode or optionally replace source alpha in Colored mode.",
+      "red_base": "Single-channel sources use the source red-draw helper behavior: sample the full source at pixel-center UVs, replicate R to RGB, and set alpha to one. Axis, position, mode, level, and to_alpha do not change this path; anti_aliasing still selects nearest or bilinear base filtering.",
+      "initial_quantization": "Quantize all base RGBA channels to RGBA8 before applying a mask.",
+      "mask": "Sample at nearest filtering. Multiply base alpha by the mean of raw mask RGB channels times mask alpha, then quantize the resulting alpha to RGBA8.",
+      "red_mask_profile": "Under the native OpenGL-style R-format swizzle, a red-only sample is (r, 0, 0, 1), so the mask factor is r/3. The licensed source-runner backend swizzle is unverified.",
+      "enum_admission": "Native execution accepts integral Axis and Mode choices only. Source widget clamping is applied to scalar choices; processor-array values bypass that clamp. Fractional native enum values refuse. Exact source shader uniform conversion for fractional values is unverified.",
+      "boolean_conversion": "Native numeric booleans use finite value not equal to zero. Fractional source-runner boolean conversion is unverified."
+    },
+    "whole_batch_admission": {
+      "work_cap": 64000000,
+      "estimated_work_per_pixel": {
+        "without_mask": 96,
+        "with_mask": 160
+      },
+      "output_bytes_per_pixel": 4,
+      "behavior": "Quote cumulative work and RGBA8 bytes across selected rows, validate sample results before allocation, and refuse before output allocation or row observers when the batch exceeds limits."
+    },
+    "independent_oracle": {
+      "source": "mono.engine/imagegraph/tests/SourceCrossSection.cpp",
+      "scope": "Independent pixel oracle covers axes, modes, filtering, alpha, raw and reversed levels, quantization before mask, and the single-channel red helper path.",
+      "parity_limit": "Does not establish licensed runtime shader arithmetic, GPU texture behavior, or live Studio parity."
+    },
+    "core_coverage": {
+      "source": "mono.engine/imagegraph/tests/SourceCrossSection.cpp",
+      "fixture_scope": "Defaults and ignored depth metadata; endpoint sampling; threshold equality and alpha-weighted luma; all seven source formats; raw RGBA and R32 masks; linked controls and grouped animation; four processor modes; scalar choice clamping versus array refusal; malformed, nonfinite, Atlas, binding, dimension, byte, and whole-batch refusal. Actual sampled NaN/Inf texels and finite luma, threshold and mask overflow refuse before publication; tiny finite numeric booleans retain native truth.",
+      "status": "passed joined batch67"
+    },
+    "io_coverage": {
+      "source": "mono.engine/imagegraphio/tests/SourceCrossSection.cpp",
+      "fixture_scope": "All eight physical bindings; six physical value edits; linked and grouped controls; position animation with native and PXC replay; four array modes; fixed RGBA8 output across retained depth metadata; opaque preservation and atomic refusal for unsupported edits, malformed inputs, stale source, and invalid projections.",
+      "status": "passed joined batch67"
+    },
+    "workload_coverage": {
+      "source": "mono.engine/imagegraph/tests/SourceCrossSectionWorkloads.cpp",
+      "fixture_scope": "Three format blocks rotate seven source formats across three rows at 64x48, 96x64, and 128x96. Exercise both axes, both modes, anti-aliasing off and on, To Alpha combinations, no mask plus grayscale and red masks, and the ignored mask_alpha_only flag. Cold and repeat runs compare complete image bytes and stable row metadata.",
+      "refusal_scope": "Three low-byte-budget cases and three late oversized-row work refusals check preflight before allocation and no output allocation-counter growth.",
+      "oracle_scope": "Quadrant grayscale oracle samples 12 locations per output after source quantization, axis slicing, luma thresholding, mask-alpha multiplication, and final alpha quantization; single-channel output uses full-UV red passthrough.",
+      "status": "passed joined batch67"
+    },
+    "core_cross_section_cases": 12,
+    "io_cross_section_cases": 6,
+    "optimized_cross_section_workload_cases": 1
+  },
+  "owned_paths": [
+    "mono.engine/imagegraph/src/nodes/SourceCrossSection.cpp",
+    "mono.engine/imagegraph/src/nodes/SourceCrossSection.hpp",
+    "mono.engine/imagegraph/src/nodes/Source2DNodes.cpp",
+    "mono.engine/imagegraph/src/ProcessorBatch.cpp",
+    "mono.engine/imagegraph/src/SourceMappedInputs.hpp",
+    "mono.engine/imagegraph/tests/SourceCrossSection.cpp",
+    "mono.engine/imagegraph/tests/SourceCrossSectionWorkloads.cpp",
+    "mono.engine/imagegraphio/tests/SourceCrossSection.cpp",
+    "mono.engine/imagegraph/docs/native-cross-section-policy.json",
+    "docs/pixel-composer-m0/node-parity-matrix.csv",
+    "ROADMAP.md",
+    "docs/pixel-composer-m0/native-cross-section-validation-2026-10-08.json"
+  ],
+  "owned_source_hashes": {
+    "mono.engine/imagegraph/src/nodes/SourceCrossSection.cpp": "06b4b34c49fe55b6a61783cd3b4f8c34c36d2a70e5447341dc797ae9910871c7",
+    "mono.engine/imagegraph/src/nodes/SourceCrossSection.hpp": "0065e1fc2594594f07532e7bfc0bfa6a513826bdc550166dd13a288d1cf017cb",
+    "mono.engine/imagegraph/src/nodes/Source2DNodes.cpp": "3aad590a7234462a71ffb9d4a182af0d141a7a8353785b2d7ea9f24428706c94",
+    "mono.engine/imagegraph/src/ProcessorBatch.cpp": "330f18a2a8bf9572573994c7cdeb809354a299039edeff6f5b0c04da0e16d4ae",
+    "mono.engine/imagegraph/src/SourceMappedInputs.hpp": "3e54c15a3751440badd0d5753182d8049fb956e8d2fa4739a4f8f2aba94e9365",
+    "mono.engine/imagegraph/tests/SourceCrossSection.cpp": "fc333f67c1f508105a3be5f752122524009ef5b46e880a39687931a8bf87d157",
+    "mono.engine/imagegraph/tests/SourceCrossSectionWorkloads.cpp": "878c6622e459a05f4f51dd755b3a8a4ec5c1d41b7566728450f6a16dac9f3fd8",
+    "mono.engine/imagegraphio/tests/SourceCrossSection.cpp": "f4a638a53c1a16fc3cab3f2c9297c482ce12631eea3881f8847dab06ac62a67f"
+  },
+  "validation": {
+    "status": "accepted joined batch67",
+    "receipt": "docs/pixel-composer-m0/native-cross-section-validation-2026-10-08.json",
+    "acceptance": true,
+    "builds": [
+      {
+        "preset": "release-tests",
+        "batch": 66,
+        "exit_code": 0,
+        "elapsed_seconds": 145.81,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch66.log",
+        "log_sha256": "3d870690d5966b5159fc679d0425fb6e8632f284080d3bfd8268a15910694a18",
+        "keep_going": true,
+        "warnings": [
+          "CMake Deprecation Warning at mono.vendor/shaderc/third_party/glslang/CMakeLists.txt:111 (message):"
+        ]
+      },
+      {
+        "preset": "profile",
+        "batch": 66,
+        "exit_code": 0,
+        "elapsed_seconds": 169.92,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch66.log",
+        "log_sha256": "c52e7278cc742ea9ca41980a42e2be5f3bc539fc2f4d297c43d54f10edb5e64e",
+        "keep_going": true,
+        "warnings": [
+          "CMake Deprecation Warning at mono.vendor/shaderc/third_party/glslang/CMakeLists.txt:111 (message):"
+        ]
+      },
+      {
+        "preset": "release-tests",
+        "batch": 67,
+        "exit_code": 0,
+        "elapsed_seconds": 27.79,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch67.log",
+        "log_sha256": "b7eba4e00ba01a6cd4ba74f9d6118330961cd9832fba07601e895c87f1ef29d0",
+        "keep_going": true,
+        "warnings": []
+      },
+      {
+        "preset": "profile",
+        "batch": 67,
+        "exit_code": 0,
+        "elapsed_seconds": 24.26,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch67.log",
+        "log_sha256": "617f3c461b7d23cd9b0b19d401c192fc76ca2f9343945cf55c05324a7fb7b89f",
+        "keep_going": true,
+        "warnings": []
+      }
+    ],
+    "checks": [
+      {
+        "name": "bake",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-bake-batch67.log",
+        "binary": ".cache/build/release-tests/tests/test_bake",
+        "binary_sha256": "14ae7bda292487563e308c269c9372c2b0bd5dc22f8b008119e0b003b5462e97",
+        "exit_code": 0,
+        "assertions": 15997,
+        "cases": 161,
+        "binary_sha256_after": "14ae7bda292487563e308c269c9372c2b0bd5dc22f8b008119e0b003b5462e97",
+        "binary_changed_during_test": false,
+        "log_sha256": "165447e5f758b5531f2a67fd2d4e56270b8c30c653a026dff178708608445516"
+      },
+      {
+        "name": "physics",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-physics-batch67.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+        "binary_sha256": "cf2938d703dbb067075203e9ec7f5fdf3e0a2545550123cfca594eb06ca0a2dc",
+        "exit_code": 0,
+        "assertions": 715,
+        "cases": 43,
+        "binary_sha256_after": "cf2938d703dbb067075203e9ec7f5fdf3e0a2545550123cfca594eb06ca0a2dc",
+        "binary_changed_during_test": false,
+        "log_sha256": "512d229e6cfe430c3cec64f55ecae30171720ba1c4c93721e2d50bb2c2ed049a"
+      },
+      {
+        "name": "runner",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-runner-batch67.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+        "binary_sha256": "e0eb03a60ce6cea7c12ed1e18dc5595945610e11cf3e97292ad72d0cb6da3054",
+        "exit_code": 0,
+        "assertions": 296,
+        "cases": 29,
+        "binary_sha256_after": "e0eb03a60ce6cea7c12ed1e18dc5595945610e11cf3e97292ad72d0cb6da3054",
+        "binary_changed_during_test": false,
+        "log_sha256": "5653e4fa2d1e03534c669bdf808694e9bd26a4cb34df8c516374ccedd9ea0b57"
+      },
+      {
+        "name": "font",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-font-batch67.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+        "binary_sha256": "0ea081671f479c51574a8fde14c2510e9b5b8e443c2cb44cb650a94dfe4d1756",
+        "exit_code": 0,
+        "assertions": 1845,
+        "cases": 43,
+        "binary_sha256_after": "0ea081671f479c51574a8fde14c2510e9b5b8e443c2cb44cb650a94dfe4d1756",
+        "binary_changed_during_test": false,
+        "log_sha256": "7630045a10aa4083ff41e242d491f2497a782457b8273d5674d784e5e61400be"
+      },
+      {
+        "name": "export",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-export-batch67.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+        "binary_sha256": "262c5985a6dca74421c7bab8fc6136b638881ac9aeca345c55c4c6bf6295ccb8",
+        "exit_code": 0,
+        "assertions": 3401,
+        "cases": 95,
+        "binary_sha256_after": "262c5985a6dca74421c7bab8fc6136b638881ac9aeca345c55c4c6bf6295ccb8",
+        "binary_changed_during_test": false,
+        "log_sha256": "c9e36a2bcf22ab5df1d4d5bddddd6326e41f71ad292c001393875c2a8457fd9e"
+      },
+      {
+        "name": "render",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-render-batch67.log",
+        "binary": ".cache/build/release-tests/tests/test_render",
+        "binary_sha256": "1c04d9ceff149f20468a334fa0d3392fc2f40ce2fd01f9a90b66b221b7b6c437",
+        "exit_code": 0,
+        "assertions": 2005,
+        "cases": 33,
+        "binary_sha256_after": "1c04d9ceff149f20468a334fa0d3392fc2f40ce2fd01f9a90b66b221b7b6c437",
+        "binary_changed_during_test": false,
+        "log_sha256": "03472628667bfdddd459d22f6507cf426cbab60d567ad8bee8b142e076229977"
+      },
+      {
+        "name": "cli",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-cli-batch67.log",
+        "exit_code": 0,
+        "ctest_cases": 16,
+        "log_sha256": "30fe748033c02b4c8fb502647af19462727c969ad8f0c25b026682be8f8f0b65"
+      },
+      {
+        "name": "io",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch67.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+        "binary_sha256": "3c8cc20b1f635a7e161ac8b70c2afba39dab8a93153dd17d097b3d22a07e00ed",
+        "exit_code": 0,
+        "assertions": 19010,
+        "cases": 402,
+        "binary_sha256_after": "3c8cc20b1f635a7e161ac8b70c2afba39dab8a93153dd17d097b3d22a07e00ed",
+        "binary_changed_during_test": false,
+        "log_sha256": "37e750ea91cd8c6ade3a825b4149ed3edd8921e5330f940dafd24eb8664823aa"
+      },
+      {
+        "name": "core",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch67.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraph",
+        "binary_sha256": "fa158cdae031090f5cf25547108beb9b011386fddb15e867cb8912bc0abde408",
+        "exit_code": 0,
+        "assertions": 2954327,
+        "cases": 3741,
+        "binary_sha256_after": "fa158cdae031090f5cf25547108beb9b011386fddb15e867cb8912bc0abde408",
+        "binary_changed_during_test": false,
+        "log_sha256": "7cecd1d1d7e6c31c6c3460db0a23c28a8b790c53cdd34da94dcc5db61f31068f"
+      },
+      {
+        "name": "assetc",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-assetc-batch67.log",
+        "binary": ".cache/build/release-tests/tests/test_assetc",
+        "binary_sha256": "2629e9d1f026de5e6a3402fef6573f4adbcb990dc90b07fcecff741827f8a53e",
+        "exit_code": 0,
+        "assertions": 563,
+        "cases": 49,
+        "binary_sha256_after": "2629e9d1f026de5e6a3402fef6573f4adbcb990dc90b07fcecff741827f8a53e",
+        "binary_changed_during_test": false,
+        "log_sha256": "740233df82f51789d48a988cb53fcbfc91c2e18382c8868ae9a244f14986b900"
+      },
+      {
+        "name": "client",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-client-batch67.log",
+        "binary": ".cache/build/release-tests/tests/test_client",
+        "binary_sha256": "a52571b92313888840a90d2a8fa5af5253ee2628e4784ebf0da06ef1cb7d3a69",
+        "exit_code": 0,
+        "assertions": 23853,
+        "cases": 359,
+        "binary_sha256_after": "a52571b92313888840a90d2a8fa5af5253ee2628e4784ebf0da06ef1cb7d3a69",
+        "binary_changed_during_test": false,
+        "log_sha256": "80b61a8bd255c9de72b901791c8095b03bad172767a142ca30d89bd6e68b798b"
+      },
+      {
+        "name": "studio",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-studio-batch67.log",
+        "binary": ".cache/build/release-tests/tests/test_studio",
+        "binary_sha256": "6570155dc168e0bac63cd15a3e0f774acc89526ac8bf8fdfc37f44272b3aa763",
+        "exit_code": 0,
+        "assertions": 51329,
+        "cases": 1159,
+        "binary_sha256_after": "6570155dc168e0bac63cd15a3e0f774acc89526ac8bf8fdfc37f44272b3aa763",
+        "binary_changed_during_test": false,
+        "log_sha256": "690e3c0521de775e2ef855f494fe5eae4c56afd6b12fe38b9aa68760e9cc1daf"
+      },
+      {
+        "name": "nodegraph",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-nodegraph-batch67.log",
+        "binary": ".cache/build/release-tests/tests/test_nodegraph",
+        "binary_sha256": "d19323ed3d7ea072195cd77ed603a1be05e93c5d66d01c834e74b463d4ff748d",
+        "exit_code": 0,
+        "assertions": 410,
+        "cases": 42,
+        "binary_sha256_after": "d19323ed3d7ea072195cd77ed603a1be05e93c5d66d01c834e74b463d4ff748d",
+        "binary_changed_during_test": false,
+        "log_sha256": "2d6740e51c84be84ed8ef50473b79251f7e554e975623759b5cb8f21f98a05e9"
+      },
+      {
+        "name": "ui",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-ui-batch67.log",
+        "binary": ".cache/build/release-tests/tests/test_ui",
+        "binary_sha256": "305e6b19eeafc3837c2679e635a114229bc4d79091e623dd1178d7774a8f6f8e",
+        "exit_code": 0,
+        "assertions": 704,
+        "cases": 40,
+        "binary_sha256_after": "305e6b19eeafc3837c2679e635a114229bc4d79091e623dd1178d7774a8f6f8e",
+        "binary_changed_during_test": false,
+        "log_sha256": "56acfc5ee53c0db1acf1e7865380b62b6c04140f684f2c484bc016fadcb1e591"
+      },
+      {
+        "name": "startup",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-startup-batch67.log",
+        "exit_code": 0,
+        "assertions": 5,
+        "cases": 1,
+        "log_sha256": "12286d2f057a9b3be86f0c917c10bf451b22533bc5b5d14dfb05fa00c17cfaf4"
+      },
+      {
+        "name": "lint",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-lint-batch67.log",
+        "exit_code": 0,
+        "log_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+      },
+      {
+        "name": "architecture",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-architecture-batch67.log",
+        "exit_code": 0,
+        "log_sha256": "e2920b48a3c7c18b9bb66b525c591a2eb61a1986c17204060ce321e87ea6ff4f"
+      },
+      {
+        "name": "python",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-python-batch67.log",
+        "exit_code": 0,
+        "python_cases": 116,
+        "log_sha256": "515c6dba4bed9d48bf7ac82f4772a013eb879b468164f68f8b98a89e59de9c83"
+      },
+      {
+        "name": "format",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-format-batch67.log",
+        "exit_code": 0,
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "diff",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-diff-batch67.log",
+        "exit_code": 0,
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "optimized_preflight": {
+      "command": [
+        ".cache/build/profile/tests/test_imagegraph",
+        "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads],[imagegraph][path_repeat_workloads],[imagegraph][tile_random_workloads],[imagegraph][path_wave_workloads],[imagegraph][repeat_texture_workloads],[imagegraph][cross_section_workloads]"
+      ],
+      "exit_code": 0,
+      "binary_sha256": "f0329c542bbb253fd66647a027c1e2a64170bf4629205b9381d67993ce2f8cbf",
+      "binary_sha256_after": "f0329c542bbb253fd66647a027c1e2a64170bf4629205b9381d67993ce2f8cbf",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch67.log",
+      "log_sha256": "9db99da7b05af1fc8b7fb08c556d0fbf59becd4f32d37b6c131211c2541ccf33",
+      "assertions": 818875,
+      "cases": 8
+    },
+    "workload_counters": {
+      "exit_code": 0,
+      "results": [
+        {
+          "suite": "engine.imagegraph.bench.pixel-kernels",
+          "validated": true,
+          "profiles": 208,
+          "spans": 2067,
+          "sha_before": "329b6847047f7f2d7ab7f202e3a47a88ff46dfe879307a9f5a77895a8dd77c1c",
+          "sha_after": "329b6847047f7f2d7ab7f202e3a47a88ff46dfe879307a9f5a77895a8dd77c1c"
+        },
+        {
+          "suite": "engine.imagegraph.bench.path-particle",
+          "validated": true,
+          "profiles": 65,
+          "spans": 7449,
+          "sha_before": "329b6847047f7f2d7ab7f202e3a47a88ff46dfe879307a9f5a77895a8dd77c1c",
+          "sha_after": "329b6847047f7f2d7ab7f202e3a47a88ff46dfe879307a9f5a77895a8dd77c1c"
+        },
+        {
+          "suite": "engine.imagegraph.bench.shape-triangulate",
+          "validated": true,
+          "profiles": 26,
+          "spans": 507,
+          "sha_before": "329b6847047f7f2d7ab7f202e3a47a88ff46dfe879307a9f5a77895a8dd77c1c",
+          "sha_after": "329b6847047f7f2d7ab7f202e3a47a88ff46dfe879307a9f5a77895a8dd77c1c"
+        },
+        {
+          "validated": true,
+          "binary_sha256": "329b6847047f7f2d7ab7f202e3a47a88ff46dfe879307a9f5a77895a8dd77c1c",
+          "heap_compiled": 1,
+          "workloads": {
+            "group": {
+              "profiles": 13,
+              "spans": 6006,
+              "operations_per_call": 17,
+              "retained_bytes": [
+                17608,
+                17608,
+                17608,
+                17608,
+                17608
+              ]
+            },
+            "tunnel": {
+              "profiles": 13,
+              "spans": 33995,
+              "operations_per_call": 7,
+              "retained_bytes": [
+                99296,
+                99296,
+                99296,
+                99296,
+                99296
+              ]
+            }
+          }
+        },
+        {
+          "validated": true,
+          "binary_sha256": "329b6847047f7f2d7ab7f202e3a47a88ff46dfe879307a9f5a77895a8dd77c1c",
+          "preset": "profile",
+          "backend": "cpu",
+          "heap_compiled": 1,
+          "workload": {
+            "profiles": 13,
+            "spans": 468,
+            "owners": 64,
+            "steps_per_call": 16,
+            "completions_per_call": 16,
+            "refusals_per_call": 2,
+            "resets_per_call": 85,
+            "state_fnv": "3059338748087447014",
+            "retained_bytes": 11112
+          }
+        }
+      ],
+      "errors": [],
+      "stderr": "",
+      "workload_variants": 26,
+      "profile_calls": 338,
+      "total_spans": 50492,
+      "timing_output": "kept in memory only; no benchmark timing file"
+    },
+    "source_stability": {
+      "paths": 4296,
+      "changed": []
+    },
+    "logs_and_hashes": "Recorded per-check log paths and SHA-256 hashes; source and child binaries stable.",
+    "parity_claim": false,
+    "child_binary_stability": {
+      "before": {
+        ".cache/build/release-tests/tools/assetc": "9b6c0af2af8afd2ecae0fa03277e2f8618475151206226ebe21ce6ac5be1dc89",
+        ".cache/build/release-tests/tools/imagegraph": "01439db6dec03a8ebba48e3fff1a0531037785adab41fe60d1cc9a4a2c399321"
+      },
+      "after": {
+        ".cache/build/release-tests/tools/assetc": "9b6c0af2af8afd2ecae0fa03277e2f8618475151206226ebe21ce6ac5be1dc89",
+        ".cache/build/release-tests/tools/imagegraph": "01439db6dec03a8ebba48e3fff1a0531037785adab41fe60d1cc9a4a2c399321"
+      }
+    },
+    "prebuild_review_repairs": [
+      "Preserve finite numeric boolean truth before any float cast.",
+      "Classify nonfinite Position as InvalidValue before shader float conversion.",
+      "Admit only the ignored pc.cross_section mask_alpha_only synthetic field for Expand Inverse slot validation."
+    ],
+    "failed_predecessors": [
+      {
+        "batch": 66,
+        "accepted": false,
+        "failed_checks": [
+          {
+            "name": "core",
+            "exit_code": 42,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch66.log",
+            "log_sha256": "a856a7e5a5625678401448263722f21a6f67c1a0fe6037580ea056fbcd6ad216",
+            "cases": 3741,
+            "passed_cases": 3740,
+            "failed_cases": 1,
+            "failed_assertions": 1152,
+            "case": "Cross Section workloads preserve source slices masks and bounded processor admission"
+          }
+        ],
+        "optimized_preflight": {
+          "exit_code": 42,
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch66.log",
+          "log_sha256": "e3b0a50191583770ceecfff58e0d93c2bc8bcaf8c8c45504cfe84d4784b1b967",
+          "cases": 8,
+          "passed_cases": 7,
+          "failed_cases": 1,
+          "failed_assertions": 1152
+        },
+        "other_joined_checks_passed": 19,
+        "existing_profiles_passed": 26,
+        "root_cause": "Workload oracle loaded single-channel {r,0,0,1} but omitted the source draw helper replication to {r,r,r,1}. Production kernel and dedicated core fixtures already replicate correctly.",
+        "repairs": [
+          "Correct the independent workload oracle single-channel base branch before quantization."
+        ]
+      }
+    ],
+    "build_warning_note": "Batch66 reconfiguration emitted the existing glslang ENABLE_HLSL deprecation warning in both presets. ROADMAP v0.26 already records checking whether shaderc needs that front-end. Final batch67 builds emitted no warnings."
+  },
+  "limitations": [
+    "Fractional Axis and Mode conversion in the pinned shader runtime is unverified; the native profile refuses fractional values.",
+    "Fractional source-runner boolean conversion is unverified.",
+    "The native R-mask profile uses OpenGL-style channel swizzling; the licensed backend behavior is unverified.",
+    "Licensed runtime and GPU parity are unverified.",
+    "Live Studio behavior is unverified.",
+    "Physical Atlas inputs and attribute_process=false outer arrays are unsupported.",
+    "Offscreen Vulkan checks were previously authorized; live Studio verification was not run.",
+    "Other uncommitted work exists in the shared tree; the isolated committed tree was not separately rebuilt."
+  ]
+}

@@ -1,0 +1,240 @@
+{
+  "profile": "native-source-cross-section",
+  "node": "pc.cross_section",
+  "source": {
+    "repository": "pixel-composer",
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "source_node": "scripts/node_cross_section/node_cross_section.gml",
+    "source_node_sha256": "05913d8d06f486e399f081d56b98d8c440257eff5be040b54881134b174aa5f2",
+    "shader": "shaders/sh_cross_section/sh_cross_section.fsh",
+    "shader_sha256": "aa0b27e251b272bdc5bdbf3989e1d42c06b52d788d2e7332bde7d196182e1b14",
+    "shader_helpers": [
+      {
+        "path": "shaders/sh_mask_empty/sh_mask_empty.fsh",
+        "sha256": "aeacb3cf2133dfe1f3b3adf2d3aabde00a0b177461085bb25b65e5620d40bf6f",
+        "role": "post-process mask alpha"
+      },
+      {
+        "path": "shaders/sh_draw_r8/sh_draw_r8.fsh",
+        "sha256": "8a1357e2c2752a4bf507eebfb351b29daf5457f87a755607a14d5608cf1e6c67",
+        "role": "R-channel passthrough to RGB; __channel_pre selects by source format"
+      },
+      {
+        "path": "shaders/sh_draw_r16/sh_draw_r16.fsh",
+        "sha256": "8a1357e2c2752a4bf507eebfb351b29daf5457f87a755607a14d5608cf1e6c67",
+        "role": "R-channel passthrough to RGB; __channel_pre selects by source format"
+      },
+      {
+        "path": "shaders/sh_draw_r32/sh_draw_r32.fsh",
+        "sha256": "8a1357e2c2752a4bf507eebfb351b29daf5457f87a755607a14d5608cf1e6c67",
+        "role": "R-channel passthrough to RGB; __channel_pre selects by source format"
+      },
+      {
+        "path": "shaders/sh_draw_surface/sh_draw_surface.fsh",
+        "sha256": "99ecaf3c38293ee2fb1bbe923d4b78e7a25770c16795bba5ec2dffd87d38eeac",
+        "role": "generic draw-surface shader helper"
+      }
+    ],
+    "license": {
+      "path": "LICENSE",
+      "sha256": "b772b6b7cb58e3c62b228b1e3ba28abf3750d019a08a2fdd82ac71e0a1a19cc2",
+      "spdx": "MIT",
+      "copyright": "Copyright (c) 2023 Tanasart",
+      "full_text_verified": true,
+      "full_text_sha256": "b772b6b7cb58e3c62b228b1e3ba28abf3750d019a08a2fdd82ac71e0a1a19cc2",
+      "file_specific_notice": "No separate copyright or license notice appears in the Cross Section node or fragment shader headers."
+    },
+    "source_oracle": "pinned node, fragment shader and helper shaders",
+    "reference_executable": "unavailable",
+    "gpu_parity": "unknown",
+    "live_runtime_parity": "unknown"
+  },
+  "physical_inputs": [
+    {
+      "index": 0,
+      "port": "surface_in",
+      "display_name": "Surface In",
+      "kind": "surface",
+      "default": "runtime required input",
+      "required": true
+    },
+    {
+      "index": 1,
+      "port": "axis",
+      "display_name": "Axis",
+      "kind": "enum",
+      "default": 0,
+      "choices": [
+        "X",
+        "Y"
+      ],
+      "scalar_widget_clamp": "Always to [0,1]"
+    },
+    {
+      "index": 2,
+      "port": "position",
+      "display_name": "Position",
+      "kind": "slider",
+      "default": 0
+    },
+    {
+      "index": 3,
+      "port": "anti_aliasing",
+      "display_name": "Anti-aliasing",
+      "kind": "boolean",
+      "default": false
+    },
+    {
+      "index": 4,
+      "port": "mode",
+      "display_name": "Mode",
+      "kind": "enum",
+      "default": 0,
+      "choices": [
+        "BW",
+        "Colored"
+      ],
+      "scalar_widget_clamp": "Always to [0,1]"
+    },
+    {
+      "index": 5,
+      "port": "mask",
+      "display_name": "Mask",
+      "kind": "surface",
+      "default": "runtime optional input"
+    },
+    {
+      "index": 6,
+      "port": "to_alpha",
+      "display_name": "To Alpha",
+      "kind": "boolean",
+      "default": false
+    },
+    {
+      "index": 7,
+      "port": "level",
+      "display_name": "Level",
+      "kind": "range/vector2",
+      "default": [
+        0,
+        1
+      ]
+    }
+  ],
+  "synthetic_attributes": {
+    "attribute_process": {
+      "default": true,
+      "kind": "scalar boolean",
+      "role": "node processing flag"
+    },
+    "mask_alpha_only": {
+      "default": false,
+      "kind": "scalar boolean",
+      "role": "preserved authored metadata; ignored by this node path"
+    },
+    "attribute_color_depth": {
+      "default": 0,
+      "kind": "scalar enum",
+      "role": "Default 0; source calls attribute_surface_depth(), but surface_verify ignores the stored value; native output is fixed RGBA8 for all values."
+    },
+    "attribute_array_process": {
+      "default": 0,
+      "kind": "scalar enum",
+      "choices": [
+        "Loop",
+        "Hold",
+        "Expand",
+        "Expand inverse"
+      ]
+    }
+  },
+  "native_profile": {
+    "implementation": "bounded native CPU profile",
+    "output_format": "rgba8_unorm",
+    "array_controls": "Scalar Axis and Mode use source Always clamp with RawCount=2, yielding [0,1]. Array getter values bypass widget clamping. Native profile requires integral Axis and Mode values in [0,1] and explicitly refuses fractional or unsupported values; GameMaker runner behavior for fractional array values remains unresolved.",
+    "base_sampling": "For RGBA source surfaces, follow the axis-selected cross-section line at the authored position. For R8/R16/R32 base input, __channel_pre selects the matching channel helper and performs full-UV grayscale passthrough into RGB with alpha one.",
+    "anti_aliasing": "false uses nearest sampling; true uses bilinear sampling for the base cross-section sample.",
+    "modes": {
+      "BW (0)": "Compute luminance from RGB using 0.2126, 0.7152, 0.0722, multiply by input alpha, invert, mix the raw Level endpoints, then step against the axis-oriented coordinate. Output grayscale with alpha one.",
+      "Colored (1)": "Pass through the sampled RGBA color. When To Alpha is true, replace output alpha with the computed step result."
+    },
+    "mask": "Applied after the initial RGBA8 base output quantization. Sample Mask with nearest filtering, compute (r+g+b)/3 * alpha, and multiply the already-quantized base alpha by that value before writing the result. For an R-channel mask, native uses OpenGL-style (r,0,0,1) sampling, which is a profile choice and not observed source-runner backend behavior. mask_alpha_only remains preserved but ignored.",
+    "work_and_bytes": {
+      "aggregate_work_cap": 64000000,
+      "unit": "cumulative estimated work units for selected processor rows",
+      "per_output_pixel": {
+        "without_mask": 96,
+        "with_mask": 160
+      },
+      "accounting": "Conservative CPU bound covers preflight validation, requote and output write, up to four base-texture taps for bilinear sampling, and one mask tap when present.",
+      "output_bytes_per_pixel": 4,
+      "byte_admission": "Quote all selected rows and their RGBA8 output bytes against AvailableBytes before allocation or row observation."
+    },
+    "parity_claim": false,
+    "limitations": [
+      "GPU shader arithmetic, licensed runtime behavior, and live Studio behavior remain unverified.",
+      "Fractional Axis and Mode values are explicitly refused by the native profile; source shader uniform conversion for fractional values is unverified.",
+      "Fractional source-runner boolean conversion is unverified; native numeric boolean profile uses finite value not equal to zero.",
+      "The native R-mask profile uses OpenGL-style (r,0,0,1) channel swizzling; licensed backend behavior is unverified.",
+      "Physical Atlas inputs and attribute_process=false outer arrays are unsupported."
+    ],
+    "boolean_controls": "The native profile accepts boolean values and finite numeric controls through a finite-nonzero truth conversion. GameMaker fractional boolean conversion behavior is unresolved; no float-cast truth behavior is claimed.",
+    "blend": "Assumes the default normal blend entry state used by the node draw path.",
+    "validation_status": "accepted joined batch67"
+  },
+  "native_references": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourceCrossSection.cpp",
+    "fixture": "mono.engine/imagegraph/tests/SourceCrossSection.cpp"
+  },
+  "validation": {
+    "status": "accepted joined batch67",
+    "receipt": "docs/pixel-composer-m0/native-cross-section-validation-2026-10-08.json",
+    "batch": 67,
+    "checks": 20,
+    "native_binary_cases": 6196,
+    "startup_cases": 1,
+    "python_cases": 116,
+    "cli_cases": 16,
+    "suite_results": {
+      "core_cases": 3741,
+      "core_assertions": 2954327,
+      "io_cases": 402,
+      "io_assertions": 19010,
+      "studio_cases": 1159,
+      "studio_assertions": 51329,
+      "offscreen_vulkan_render_cases": 33,
+      "offscreen_vulkan_render_assertions": 2005
+    },
+    "cross_section_coverage": {
+      "core_cases": 12,
+      "io_cases": 6,
+      "optimized_workload_cases": 1,
+      "optimized_preflight_cases": 8,
+      "optimized_preflight_assertions": 818875
+    },
+    "workload_counters": {
+      "profiles": 26,
+      "calls": 338,
+      "spans": 50492,
+      "source_paths_stable": 4296,
+      "build_warnings": 0
+    },
+    "supported_domain": {
+      "physical_controls": 8,
+      "native_output": "RGBA8",
+      "work_cap": 64000000,
+      "estimated_work_per_pixel": {
+        "without_mask": 96,
+        "with_mask": 160
+      },
+      "output_bytes_per_pixel": 4,
+      "coverage": "All source controls; axis and mode; nearest/bilinear base sampling; BW/Colored and To Alpha; raw and reversed level ranges; masks, R-channel helpers, quantization; native and PXC persistence; array row processing; bounded admission and refusal.",
+      "limitations": "Atlas and attribute_process=false outer arrays unsupported; fractional Axis/Mode and source-runner numeric boolean conversions do not claim runtime parity."
+    },
+    "licensed_runtime_parity": "unverified",
+    "licensed_gpu_parity": "unverified",
+    "live_studio": "unverified",
+    "parity_claim": false,
+    "build_warnings": 0
+  }
+}

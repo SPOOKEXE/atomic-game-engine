@@ -13,6 +13,7 @@
 #include "nodes/SourceBend.hpp"
 #include "nodes/SourceCaustic.hpp"
 #include "nodes/SourceCellular.hpp"
+#include "nodes/SourceCrossSection.hpp"
 #include "nodes/SourceDisplace.hpp"
 #include "nodes/SourceFoldNoise.hpp"
 #include "nodes/SourceGaussianNoise.hpp"
@@ -943,6 +944,14 @@ namespace engine::imagegraph::detail {
 				uint64_t scratchOwned = 0;
 				if (!selectRow(row, scratchOwned) ||
 					!AdmitSourceRepeatTexture(context, batchWork, batchBytes))
+					return false;
+			}
+		}
+		if (context.Authored.Type == "pc.cross_section") {
+			uint64_t batchWork = 0, batchBytes = 0;
+			for (size_t row = 0; row < count; ++row) {
+				uint64_t scratchOwned = 0;
+				if (!selectRow(row, scratchOwned) || !AdmitSourceCrossSection(context, batchWork, batchBytes))
 					return false;
 			}
 		}

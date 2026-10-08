@@ -88,6 +88,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Add bounded Tile Random with source dimensions, nearest CPU pixels and native/PXC save/reopen checks.
 - [x] Add bounded Wave Path with source controls, owned sampling state and native/PXC save/reopen checks.
 - [x] Add bounded Repeat Texture with all three modes, source controls and native/PXC save/reopen checks.
+- [x] Add bounded Draw Cross Section with source controls, fixed RGBA8 output and native/PXC save/reopen checks.
 - [x] Preserve typed Any group ports and dynamic sockets; retain defaults, fanout, nesting and image pixels after ungroup and save/reopen.
 - [x] Verify grouped Cache Clear through the real Studio host across all eight source gates.
 - [x] Preserve native Collection instances, disabled-group lifecycle and ordinary tagged boundary routes.

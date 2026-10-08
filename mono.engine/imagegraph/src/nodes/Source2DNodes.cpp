@@ -1,6 +1,7 @@
 #include "Families.hpp"
 #include "Processor.hpp"
 #include "Source2DMath.hpp"
+#include "SourceCrossSection.hpp"
 
 #include <array>
 #include <cmath>
@@ -324,6 +325,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> Source2DExecutors() {
 		static constexpr std::array ENTRIES{
 			ExecutorEntry{"pc.xdo_g_threshold", SourceXDoG, true},
+			ExecutorEntry{"pc.cross_section", DrawSourceCrossSection, true},
 			ExecutorEntry{"pc.kuwahara", SourceKuwahara, true},
 			ExecutorEntry{"pc.blobify", SourceBlobify, true},
 			ExecutorEntry{"pc.mirror_polar", SourceMirrorPolar, true},
