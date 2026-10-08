@@ -1,0 +1,156 @@
+{
+  "node": "pc.path_repeat",
+  "source": {
+    "repository": "pixel-composer",
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "path": "scripts/node_path_repeat/node_path_repeat.gml",
+    "role": "source-derived oracle; licensed reference executable unavailable"
+  },
+  "scope": {
+    "implementation": "bounded planar Path2D only",
+    "three_dimensional_paths": "unsupported",
+    "parity_claim": false,
+    "vector_controls": "Numeric pairs, scalars, integers, surface dimensions and sampled planar paths; other present control payloads explicitly refuse."
+  },
+  "physical_inputs": [
+    {
+      "index": 0,
+      "port": "path",
+      "kind": "source pin"
+    },
+    {
+      "index": 1,
+      "port": "amount",
+      "default": 4
+    },
+    {
+      "index": 2,
+      "port": "shift_position",
+      "default": [
+        0,
+        0
+      ],
+      "unit_control": true
+    },
+    {
+      "index": 3,
+      "port": "shift_rotation",
+      "default": 0
+    },
+    {
+      "index": 4,
+      "port": "shift_scale",
+      "default": [
+        1,
+        1
+      ]
+    },
+    {
+      "index": 5,
+      "port": "anchor",
+      "default": [
+        0,
+        0
+      ],
+      "unit_control": true
+    },
+    {
+      "index": 6,
+      "port": "pattern",
+      "default": 0,
+      "choices": [
+        "Linear",
+        "Circular"
+      ]
+    },
+    {
+      "index": 7,
+      "port": "center",
+      "default": [
+        0.5,
+        0.5
+      ],
+      "unit_control": true
+    },
+    {
+      "index": 8,
+      "port": "radius",
+      "default": [
+        0.5,
+        0.5
+      ],
+      "unit_control": true
+    },
+    {
+      "index": 9,
+      "port": "rotate_along",
+      "default": true
+    },
+    {
+      "index": 10,
+      "port": "position",
+      "default": [
+        0,
+        0
+      ],
+      "unit_control": true
+    },
+    {
+      "index": 11,
+      "port": "rotation",
+      "default": 0
+    },
+    {
+      "index": 12,
+      "port": "scale",
+      "default": [
+        1,
+        1
+      ]
+    }
+  ],
+  "unit_controls": [
+    "anchor_unit",
+    "center_unit",
+    "radius_unit",
+    "position_unit",
+    "shift_position_unit"
+  ],
+  "semantics": {
+    "copy_order": "repeat-major, then input-line order",
+    "transform_order": [
+      "subtract anchor",
+      "rotate",
+      "multiply component-wise scale",
+      "add anchor and position"
+    ],
+    "linear_position": "position + index * shift_position",
+    "linear_rotation_degrees": "rotation + index * shift_rotation",
+    "linear_scale": "scale * pow(shift_scale, index), component-wise",
+    "circular_angle_degrees": "(360 / amount) * index",
+    "circular_offset": [
+      "center.x + radius.x * cos(angle)",
+      "center.y - radius.y * sin(angle)"
+    ],
+    "circular_position": "position + circular offset + index * shift_position",
+    "rotate_along": "when true, add circular angle to rotation; when false, omit it",
+    "path_metrics": "each copy retains source segment counts, lengths, accumulated lengths, and sampled weights",
+    "bounds": "output getter uses the default unit bounds [0,0]-[1,1]",
+    "processor_arrays": "evaluate each processor row into an independent complete repeated path",
+    "animation": "Path-linked vector controls sample at their own local raw animator X ratio before processor rows; surface and sampled path getters bypass reference conversion.",
+    "empty_result": "zero amount or missing/default path produces zero lines and zero metrics; sampling returns the supplied output unchanged",
+    "units": "Reference primitive vectors, including linked numbers and vectors, multiply by project width and height. Pixel values are unchanged.",
+    "amount_getter": "The source Int getter rounds numeric values before executor admission."
+  },
+  "bounds": {
+    "amount": "Normalized nonnegative integral count within MaximumArrayElements; negative source allocation sizes are unsupported.",
+    "work": "REPEAT_WORK_LIMIT = 2^24, checked against processor rows, copies, path lines, and estimated child runtime work",
+    "bytes": "reserve caller evaluation budget before construction; enforce MaximumEvaluationBytes per result and processor row",
+    "payload": "validate source depth, cloned operation count, line count, and output payload before returning"
+  },
+  "native_tests": [
+    "mono.engine/imagegraph/tests/SourcePathRepeat.cpp",
+    "mono.engine/imagegraphio/tests/PxcxPathRepeat.cpp",
+    "mono.engine/imagegraph/tests/SourcePathRepeatWorkloads.cpp"
+  ]
+}

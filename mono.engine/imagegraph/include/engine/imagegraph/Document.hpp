@@ -279,7 +279,8 @@ namespace engine::imagegraph {
 		Flatten,
 		Smoothen,
 		Bake,
-		Spiral
+		Spiral,
+		Repeat
 	};
 	// Shape ratio samples preserve the source analytic curve independently of
 	// sampled chord lengths.

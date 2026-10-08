@@ -230,6 +230,12 @@ namespace engine::imagegraph::detail {
 					replacement.MaxX = replacement.MaxY = 1;
 					replacement.HasBoundary = true;
 				}
+				if (operation.Kind == SourcePathOperationKind::Repeat) {
+					replacement.EvaluationContext = &context;
+					replacement.MinX = replacement.MinY = 0;
+					replacement.MaxX = replacement.MaxY = 1;
+					replacement.HasBoundary = true;
+				}
 				if (operation.Kind == SourcePathOperationKind::Transform) {
 					if (replacement.Inputs.empty()) {
 						replacement.MinX = replacement.MinY = 0;
@@ -407,7 +413,8 @@ namespace engine::imagegraph::detail {
 			if (*Operation == SourcePathOperationKind::Blend)
 				return SourceData->BlendInputsValid[0] ? Inputs[0].LineCount() : 1;
 			if (*Operation != SourcePathOperationKind::Bake &&
-				*Operation != SourcePathOperationKind::Combine && *Operation != SourcePathOperationKind::Join)
+				*Operation != SourcePathOperationKind::Combine &&
+				*Operation != SourcePathOperationKind::Repeat && *Operation != SourcePathOperationKind::Join)
 				return Inputs.empty() ? 1 : Inputs[0].LineCount();
 			size_t count = 0;
 			for (const auto &child : Inputs)
@@ -929,6 +936,35 @@ namespace engine::imagegraph::detail {
 					return out;
 				}
 			}
+			if (Operation && *Operation == SourcePathOperationKind::Repeat) {
+				const auto *scale = SelectLine(line);
+				if (!scale) return out;
+				const auto &rotation = scale->Inputs[0];
+				out = rotation.Inputs[0].PointRatioInto(ratio, line, out);
+				const auto &rotate = *rotation.SourceData, &transform = *scale->SourceData;
+				const double x = out.Position.X - rotate.TransformAnchor.X,
+							 y = out.Position.Y - rotate.TransformAnchor.Y;
+				double rotatedX = x, rotatedY = y;
+				if (rotate.TransformRotation == 180) {
+					rotatedX = -x;
+					rotatedY = -y;
+				} else if (rotate.TransformRotation != 0) {
+					const double angle = -rotate.TransformRotation * std::numbers::pi / 180;
+					rotatedX = x * std::cos(angle) - y * std::sin(angle);
+					rotatedY = x * std::sin(angle) + y * std::cos(angle);
+				}
+				const PathPoint point{
+					transform.TransformAnchor.X + transform.TransformPosition.X +
+						rotatedX * transform.TransformScale.X,
+					transform.TransformAnchor.Y + transform.TransformPosition.Y +
+						rotatedY * transform.TransformScale.Y,
+					out.Weight
+				};
+				if ((!std::isfinite(point.X) || !std::isfinite(point.Y)) && EvaluationContext)
+					EvaluationContext->Fail(Status::InvalidValue, "Repeat Path sample is nonfinite", "path");
+				out.Position = {point.X, point.Y};
+				return out;
+			}
 			if (SourceData && SourceData->Spiral) return SpiralPointInto(ratio, line, out);
 			if (SourceData && SourceData->Sequential) return SequentialPoint(ratio, line, false, out);
 			if (SourceData && SourceData->Baked) return BakedPointInto(ratio * Length(line), line, out);
@@ -964,6 +1000,8 @@ namespace engine::imagegraph::detail {
 		}
 		SourcePathPointBuffer
 		PointDistanceInto(double distance, size_t line, SourcePathPointBuffer &out) const {
+			if (Operation && *Operation == SourcePathOperationKind::Repeat)
+				return PointRatioInto(distance / Length(line), line, out);
 			if (SourceData && SourceData->Spiral) return SpiralPointInto(distance / Length(), line, out);
 			if (SourceData && SourceData->Baked) return BakedPointInto(distance, line, out);
 			if (Operation && *Operation == SourcePathOperationKind::Join && Inputs.empty()) return out;
@@ -1111,6 +1149,8 @@ namespace engine::imagegraph::detail {
 			return p;
 		}
 		PathPoint PointDistance(double distance, size_t line = 0) const {
+			if (Operation && *Operation == SourcePathOperationKind::Repeat)
+				return PointRatio(distance / Length(line), line);
 			if (SourceData && SourceData->Spiral) {
 				SourcePathPointBuffer p;
 				SpiralPointInto(distance / Length(), line, p);
@@ -1189,6 +1229,11 @@ namespace engine::imagegraph::detail {
 				   *Operation != SourcePathOperationKind::WeightAdjust;
 		}
 		PathPoint PointRatio(double ratio, size_t line = 0) const {
+			if (Operation && *Operation == SourcePathOperationKind::Repeat) {
+				SourcePathPointBuffer point;
+				PointRatioInto(ratio, line, point);
+				return {point.Position.X, point.Position.Y, point.Weight};
+			}
 			if (SourceData && SourceData->Spiral) {
 				SourcePathPointBuffer p;
 				SpiralPointInto(ratio, line, p);

@@ -1451,6 +1451,7 @@ namespace engine::imagegraph {
 					return;
 				}
 				stream << (operation.Kind == SourcePathOperationKind::Reverse		 ? "reverse"
+						   : operation.Kind == SourcePathOperationKind::Repeat		 ? "repeat"
 						   : operation.Kind == SourcePathOperationKind::Trim		 ? "trim"
 						   : operation.Kind == SourcePathOperationKind::Offset		 ? "offset"
 						   : operation.Kind == SourcePathOperationKind::Blend		 ? "blend"
@@ -2468,20 +2469,21 @@ namespace engine::imagegraph {
 					return true;
 				}
 				if (!(stream >> count) || count > Limits::MaximumArrayElements ||
-					(kind != "reverse" && kind != "combine" && kind != "trim" && kind != "offset" &&
-					 kind != "blend" && kind != "join" && kind != "redistribute" && kind != "skew" &&
-					 kind != "transform" && kind != "area_map" && kind != "shift" &&
+					(kind != "reverse" && kind != "repeat" && kind != "combine" && kind != "trim" &&
+					 kind != "offset" && kind != "blend" && kind != "join" && kind != "redistribute" &&
+					 kind != "skew" && kind != "transform" && kind != "area_map" && kind != "shift" &&
 					 kind != "weight_adjust" && kind != "extends" && kind != "flatten" &&
 					 kind != "smoothen") ||
 					(kind == "blend" ? count != 2
 					 : (kind == "skew" || kind == "redistribute")
 						 ? count != 1
-						 : (kind != "combine" && kind != "join" && count > 1)))
+						 : (kind != "combine" && kind != "repeat" && kind != "join" && count > 1)))
 					return false;
 				if (!admit(sizeof(SourcePathData2D) + count * sizeof(Path2D))) return false;
 				Path2D path;
 				auto &operation = path.SourceOperation.emplace();
 				operation.Kind = kind == "reverse"		   ? SourcePathOperationKind::Reverse
+								 : kind == "repeat"		   ? SourcePathOperationKind::Repeat
 								 : kind == "trim"		   ? SourcePathOperationKind::Trim
 								 : kind == "offset"		   ? SourcePathOperationKind::Offset
 								 : kind == "blend"		   ? SourcePathOperationKind::Blend
@@ -2659,6 +2661,8 @@ namespace engine::imagegraph {
 					if (!typed) return false;
 					operation.Inputs.push_back(std::move(std::get<Path2D>(child)));
 				}
+				if (operation.Kind == SourcePathOperationKind::Repeat && !detail::ValidSourcePath2D(path))
+					return false;
 				value = std::move(path);
 				return true;
 			}
@@ -14831,7 +14835,7 @@ namespace engine::imagegraph {
 						// Source Vec2 surface getters bypass numeric unit conversion.
 						const bool shapeSurfaceVector =
 							input.SourceKind == "Vec2" &&
-							(node.Type == "pc.mirror_polar" ||
+							(node.Type == "pc.mirror_polar" || node.Type == "pc.path_repeat" ||
 							 (node.Type == "pc.text" &&
 							  (input.Id == "fixed_dimension" || input.Id == "offset" ||
 							   input.Id == "character_range")) ||
@@ -14974,7 +14978,8 @@ namespace engine::imagegraph {
 												   : nullptr;
 						const bool sourceSurfaceVec2 =
 							input.SourceKind == "Vec2" &&
-							((node.Type == "pc.text" &&
+							(node.Type == "pc.path_repeat" ||
+							 (node.Type == "pc.text" &&
 							  (input.Id == "fixed_dimension" || input.Id == "offset" ||
 							   input.Id == "character_range")) ||
 							 (node.Type == "pc.padding" && input.Id == "dimension") ||
@@ -15415,8 +15420,7 @@ namespace engine::imagegraph {
 				const auto separatedInput = [&](std::string_view port) -> detail::SourceAxisStorageView {
 					if ((frozenTunnelGetter && port != "value_in") ||
 						!detail::ReadsSourceInput(inputSelection, index, port) ||
-						(node.Type == "pc.mirror_polar" && detail::SourceMirrorVectorIndex(port)) ||
-						context.IsLinked(port) ||
+						detail::SourceConsumerVectorIndex(node.Type, port) || context.IsLinked(port) ||
 						!detail::SourceFrameCacheReadsPort(context.FrameCacheInputReads, port) ||
 						!detail::SourceSeparatedVec2Input(node, port))
 						return {};
@@ -15505,10 +15509,11 @@ namespace engine::imagegraph {
 					if (!sampleSeparatedInput(input.Id)) return diagnostic.Code;
 				for (const auto &input : node.DynamicInputs)
 					if (!sampleSeparatedInput(input.Id)) return diagnostic.Code;
-				std::array<Value, 5> mirrorAxisSamples{};
-				if (node.Type == "pc.mirror_polar") {
-					for (size_t i = 0; i < detail::SourceMirrorVectorPorts.size(); ++i) {
-						const auto port = detail::SourceMirrorVectorPorts[i];
+				std::array<Value, 7> mirrorAxisSamples{};
+				const auto consumerVectorPorts = detail::SourceConsumerVectorPorts(node.Type);
+				if (!consumerVectorPorts.empty()) {
+					for (size_t i = 0; i < consumerVectorPorts.size(); ++i) {
+						const auto port = consumerVectorPorts[i];
 						if ((frozenTunnelGetter && port != "value_in") ||
 							!detail::ReadsSourceInput(inputSelection, index, port))
 							continue;

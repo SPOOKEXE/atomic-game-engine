@@ -1,5 +1,6 @@
 #include "Families.hpp"
 #include "Path.hpp"
+#include "SourcePathRepeat.hpp"
 
 #include <engine/imagegraph/DataReplay.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
@@ -262,7 +263,9 @@ namespace engine::imagegraph::detail {
 	}
 	std::span<const ExecutorEntry> SourcePathGeometryExecutors() {
 		static const ExecutorEntry entries[] = {
-			{"pc.path_transform", GeometryTransform, true}, {"pc.path_map_area", GeometryAreaMap, true}
+			{"pc.path_repeat", SourcePathRepeat, true},
+			{"pc.path_transform", GeometryTransform, true},
+			{"pc.path_map_area", GeometryAreaMap, true}
 		};
 		return entries;
 	}

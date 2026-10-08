@@ -149,9 +149,9 @@ namespace engine::imagegraph::detail {
 		std::span<const std::pair<std::string_view, const ImageArray *>> InlineOwnerImageArrays;
 		// Source Dimension inputs distinguish resolved links from authored values when applying units.
 		std::vector<std::string_view> LinkedValues;
-		// Exact five Vec2 junctions of the source Polar Mirror constructor.
-		std::array<bool, 5> MirrorPathSamples{};
-		std::array<const Value *, 5> MirrorRawAnimators{};
+		// Consumer-local Vec2 path projections preserve Polar Mirror and Repeat animator ownership.
+		std::array<bool, 7> MirrorPathSamples{};
+		std::array<const Value *, 7> MirrorRawAnimators{};
 		// Input domains borrow current producer metadata; payload storage remains in its normal owner.
 		const GroupReplayEntry *GroupReplay = nullptr;
 		std::vector<std::pair<std::string_view, SourceSocketDomain>> InputDomains;

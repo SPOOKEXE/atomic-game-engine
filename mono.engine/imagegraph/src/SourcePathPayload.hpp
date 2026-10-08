@@ -156,17 +156,34 @@ namespace engine::imagegraph::detail {
 		if (op.Kind == SourcePathOperationKind::Shape)
 			return op.Inputs.empty() && op.Shape && op.TrimRange == Vector2{0, 1} &&
 				   ValidSourcePathShape(*op.Shape);
-		if (op.Kind != SourcePathOperationKind::Reverse && op.Kind != SourcePathOperationKind::Combine &&
-			op.Kind != SourcePathOperationKind::Trim && op.Kind != SourcePathOperationKind::Offset &&
-			op.Kind != SourcePathOperationKind::Blend && op.Kind != SourcePathOperationKind::Join &&
-			op.Kind != SourcePathOperationKind::Redistribute && op.Kind != SourcePathOperationKind::Skew &&
-			op.Kind != SourcePathOperationKind::Transform && op.Kind != SourcePathOperationKind::AreaMap &&
-			op.Kind != SourcePathOperationKind::Shift && op.Kind != SourcePathOperationKind::Spiral &&
-			op.Kind != SourcePathOperationKind::WeightAdjust && !sequential)
+		if (op.Kind != SourcePathOperationKind::Reverse && op.Kind != SourcePathOperationKind::Repeat &&
+			op.Kind != SourcePathOperationKind::Combine && op.Kind != SourcePathOperationKind::Trim &&
+			op.Kind != SourcePathOperationKind::Offset && op.Kind != SourcePathOperationKind::Blend &&
+			op.Kind != SourcePathOperationKind::Join && op.Kind != SourcePathOperationKind::Redistribute &&
+			op.Kind != SourcePathOperationKind::Skew && op.Kind != SourcePathOperationKind::Transform &&
+			op.Kind != SourcePathOperationKind::AreaMap && op.Kind != SourcePathOperationKind::Shift &&
+			op.Kind != SourcePathOperationKind::Spiral && op.Kind != SourcePathOperationKind::WeightAdjust &&
+			!sequential)
 			return false;
-		if (op.Kind != SourcePathOperationKind::Combine && op.Kind != SourcePathOperationKind::Join &&
-			op.Kind != SourcePathOperationKind::Blend && op.Inputs.size() > 1)
+		if (op.Kind != SourcePathOperationKind::Combine && op.Kind != SourcePathOperationKind::Repeat &&
+			op.Kind != SourcePathOperationKind::Join && op.Kind != SourcePathOperationKind::Blend &&
+			op.Inputs.size() > 1)
 			return false;
+		if (op.Kind == SourcePathOperationKind::Repeat) {
+			if (op.TrimRange != Vector2{0, 1}) return false;
+			for (const auto &copy : op.Inputs) {
+				if (!copy.SourceOperation) return false;
+				const auto &scale = *copy.SourceOperation;
+				if (scale.Kind != SourcePathOperationKind::Transform || scale.Inputs.size() != 1 ||
+					scale.TransformRotation != 0 || !scale.Inputs[0].SourceOperation)
+					return false;
+				const auto &rotation = *scale.Inputs[0].SourceOperation;
+				if (rotation.Kind != SourcePathOperationKind::Transform || rotation.Inputs.size() != 1 ||
+					rotation.TransformPosition != Vector2{} || rotation.TransformScale != Vector2{1, 1} ||
+					rotation.TransformAnchor != scale.TransformAnchor)
+					return false;
+			}
+		}
 		if (!std::isfinite(op.TrimRange.X) || !std::isfinite(op.TrimRange.Y)) return false;
 		for (const auto &child : op.Inputs)
 			if (!ValidSourcePath2D(child, depth + 1, count)) return false;
