@@ -81,6 +81,7 @@ namespace engine::imagegraph::detail {
 					  SourceArgumentExecutors(),
 					  SourceMatrixExecutors(),
 					  SourcePathExecutors(),
+					  SourceSmoothPathExecutors(),
 					  SourcePathComposeExecutors(),
 					  SourcePathModifierExecutors(),
 					  SourcePathGeometryExecutors(),
@@ -190,11 +191,11 @@ namespace engine::imagegraph::detail {
 				if (type == "pc.vfx_renderer" && port.starts_with("input_1_")) return true;
 				if (type == "pc.edge_detect" && port == "attribute_filter") return true;
 				if (type == "pc.segment_filter" && port == "segment") return true;
-				if (type == "pc.path_join") {
+				if (type == "pc.path_smooth" || type == "pc.path_join") {
 					const auto *entry = FindCatalogueEntry(type);
 					size_t group = 0;
 					const auto *slot = entry ? FindDynamicTemplate(*entry, port, group) : nullptr;
-					return slot && slot->Id == "path";
+					return slot && slot->Id == (type == "pc.path_smooth" ? "anchor" : "path");
 				}
 				if ((type == "pc.palette" && port == "palette") ||
 					((type == "pc.palette_sort" || type == "pc.palette_shrink") && port == "palette_in") ||

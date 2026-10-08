@@ -121,6 +121,7 @@ namespace engine::imagegraph::detail {
 				}
 			}
 		} else if constexpr (std::is_same_v<Leaf, Path2D>) {
+			if (value.SourceSmooth && !callback(*value.SourceSmooth, route)) return false;
 			if (value.SourceOperation) {
 				auto &op = *value.SourceOperation;
 				if ((op.Kind == SourcePathOperationKind::Shift ||

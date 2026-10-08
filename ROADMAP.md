@@ -87,6 +87,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Add bounded planar Repeat Path with all controls, local vector getters and native/PXC save/reopen checks.
 - [x] Add bounded Tile Random with source dimensions, nearest CPU pixels and native/PXC save/reopen checks.
 - [x] Add bounded Wave Path with source controls, owned sampling state and native/PXC save/reopen checks.
+- [x] Add bounded Smooth Path with source handles, shared sample cache and native/PXC save checks.
 - [x] Add bounded Repeat Texture with all three modes, source controls and native/PXC save/reopen checks.
 - [x] Add bounded Draw Cross Section with source controls, fixed RGBA8 output and native/PXC save/reopen checks.
 - [x] Add bounded Markov Gradient with ordered palette replacement, global frame seeds and native/PXC save support.

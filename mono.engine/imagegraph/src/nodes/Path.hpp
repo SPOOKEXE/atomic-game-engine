@@ -43,7 +43,7 @@ namespace engine::imagegraph::detail {
 
 	class PathRuntime {
 		// Storage is freed before its lease, including the old buffers displaced by Init.
-		AllocationReservation StorageCharge;
+		mutable AllocationReservation StorageCharge;
 		std::optional<SourcePathOperationKind> Operation;
 		Vector2 TrimRange{0, 1};
 		std::vector<PathRuntime> Inputs;
@@ -69,7 +69,9 @@ namespace engine::imagegraph::detail {
 				return std::nullopt;
 			const uint64_t count = path.Anchors.size();
 			const uint64_t segments = count < 2 ? 0 : (path.Loop ? count : count - 1);
-			return count * sizeof(std::array<double, 6>) +
+			return (path.SourceSmooth ? path.SourceSmooth->Cache.size() * sizeof(SourceSmoothPathCachePoint)
+									  : 0) +
+				   count * sizeof(std::array<double, 6>) +
 				   path.Weights.size() * sizeof(std::array<double, 2>) +
 				   (segments * 2 + (count < 2 ? 0 : count + 1 + 101)) * sizeof(double);
 		}
@@ -324,12 +326,25 @@ namespace engine::imagegraph::detail {
 				return true;
 			}
 
+			if (path.SourceSmooth && path.Anchors.size() * uint64_t(PATH_RESOLUTION) >
+										 64000000 / std::max<size_t>(context.ProcessorCount, 1))
+				return context.Fail(
+					Status::LimitExceeded, "Smooth Path exceeds whole processor work bounds", "path"
+				);
 			auto charge = context.ReserveWorkspace(*bytes, "path");
 			if (!charge) return false;
 			PathRuntime replacement;
 			replacement.StorageCharge = std::move(*charge);
 			replacement.Loop = path.Loop;
 			replacement.Segmented = path.Segmented;
+			if (path.SourceSmooth) replacement.SourceSmooth = *path.SourceSmooth;
+			if (path.SourceSmooth) {
+				if (replacement.SourceSmooth->Cache.capacity() != path.SourceSmooth->Cache.size())
+					return context.Fail(
+						Status::LimitExceeded, "Smooth Path cache capacity exceeds admission", "path"
+					);
+				replacement.EvaluationContext = &context;
+			}
 			replacement.Anchors.reserve(path.Anchors.size());
 			replacement.Weights.reserve(path.Weights.size());
 			if (path.Anchors.size() >= 2) {
@@ -343,7 +358,10 @@ namespace engine::imagegraph::detail {
 				replacement.Anchors.push_back(anchor.Controls);
 			for (const PathWeight &weight : path.Weights)
 				replacement.Weights.push_back({weight.Position, weight.Weight});
-			replacement.UpdateLength();
+			if (path.SourceSmooth) {
+				if (!replacement.UpdateLengthSmooth()) return false;
+			} else
+				replacement.UpdateLength();
 			Swap(replacement);
 			return true;
 		}
@@ -362,6 +380,7 @@ namespace engine::imagegraph::detail {
 			swap(EvaluationContext, other.EvaluationContext);
 			swap(Loop, other.Loop);
 			swap(Segmented, other.Segmented);
+			swap(SourceSmooth, other.SourceSmooth);
 			Anchors.swap(other.Anchors);
 			Weights.swap(other.Weights);
 			Lengths.swap(other.Lengths);
@@ -378,6 +397,7 @@ namespace engine::imagegraph::detail {
 
 		bool Loop = false;
 		bool Segmented = false;
+		mutable std::optional<SourceSmoothPathPolicy> SourceSmooth;
 		std::vector<std::array<double, 6>> Anchors;
 		std::vector<std::array<double, 2>> Weights;
 		std::vector<double> Lengths, LengthAccumulated, LengthRatio, WeightRatio;
@@ -497,8 +517,11 @@ namespace engine::imagegraph::detail {
 		}
 
 		PathPoint SegmentPoint(size_t index, double t) const {
-			const auto &a0 = Anchors[index % Anchors.size()];
-			const auto &a1 = Anchors[(index + 1) % Anchors.size()];
+			return SegmentPointPair(index % Anchors.size(), (index + 1) % Anchors.size(), t);
+		}
+		PathPoint SegmentPointPair(size_t from, size_t to, double t) const {
+			const auto &a0 = Anchors[from];
+			const auto &a1 = Anchors[to];
 			if (a0[4] == 0 && a0[5] == 0 && a1[2] == 0 && a1[3] == 0)
 				return {a0[0] + (a1[0] - a0[0]) * t, a0[1] + (a1[1] - a0[1]) * t, 1.0};
 			return {
@@ -506,6 +529,146 @@ namespace engine::imagegraph::detail {
 				BezierComponent(t, a0[1], a1[1], a0[1] + a0[5], a1[1] + a1[3]),
 				1.0
 			};
+		}
+
+		PathPoint SmoothInvalid(const char *message) const {
+			if (EvaluationContext) EvaluationContext->Fail(Status::InvalidValue, message, "path");
+			return {NAN, NAN, NAN};
+		}
+
+		bool UpdateLengthSmooth() {
+			ENGINE_PROFILE("imagegraph.path.smooth.length");
+			if (Anchors.size() < 2) return true;
+			const size_t segments = Loop ? Anchors.size() : Anchors.size() - 1;
+			for (size_t index = 0; index < segments; ++index) {
+				double length = 0;
+				PathPoint previous;
+				// Smooth's source cache omits the endpoint, unlike the ordinary Path cache.
+				for (int step = 0; step < PATH_RESOLUTION; ++step) {
+					const auto point = SegmentPoint(index, double(step) / PATH_RESOLUTION);
+					if (!std::isfinite(point.X) || !std::isfinite(point.Y)) {
+						SmoothInvalid("Smooth Path sampled geometry is nonfinite");
+						return false;
+					}
+					AddBoundary(point.X, point.Y);
+					if (step) length += std::hypot(point.X - previous.X, point.Y - previous.Y);
+					previous = point;
+				}
+				LengthTotal += length;
+				if (!std::isfinite(LengthTotal)) {
+					SmoothInvalid("Smooth Path sampled length is nonfinite");
+					return false;
+				}
+				Lengths.push_back(length);
+				LengthAccumulated.push_back(LengthTotal);
+			}
+			return true;
+		}
+
+		PathPoint SmoothPointDistance(double distance, double weight = 1) const {
+			if (Lengths.empty()) return {0, 0, weight};
+			const double original = distance;
+			auto *memo = EvaluationContext ? EvaluationContext->PathShiftMemo : nullptr;
+			const bool cache = SourceSmooth->NormalizedLength;
+			if (cache && memo && !memo->ValidationProbe) {
+				if (!memo->SmoothOwner(*EvaluationContext, *SourceSmooth)) return {NAN, NAN, NAN};
+				if (const auto *found =
+						memo->FindExact(*EvaluationContext, SourceSmooth->EvaluationMemoId, original))
+					return {found->Point.X, found->Point.Y, found->Point.Weight};
+				if (EvaluationContext->FailureCode != Status::Ok) return {NAN, NAN, NAN};
+			} else if (cache && std::isfinite(original)) {
+				const auto found = std::lower_bound(
+					SourceSmooth->Cache.begin(),
+					SourceSmooth->Cache.end(),
+					original,
+					[](const auto &point, double value) { return point.Distance < value; }
+				);
+				if (found != SourceSmooth->Cache.end() && found->Distance == original)
+					return {found->Position.X, found->Position.Y, found->Weight};
+			}
+			if (!std::isfinite(distance) || !(LengthTotal > 0))
+				return SmoothInvalid("Smooth Path sampling has an undefined distance or zero length");
+			if (Loop) {
+				distance = std::fmod(distance, LengthTotal);
+				if (distance < 0) distance += LengthTotal;
+			} else
+				distance = std::clamp(distance, 0., LengthTotal);
+			size_t index = 0;
+			double t = 0;
+			if (SourceSmooth->NormalizedLength) {
+				for (; index < Lengths.size(); ++index) {
+					if (distance > Lengths[index]) {
+						distance -= Lengths[index];
+						continue;
+					}
+					if (!(Lengths[index] > 0))
+						return SmoothInvalid("Smooth Path selected segment has zero length");
+					t = distance / Lengths[index];
+					break;
+				}
+				if (index == Lengths.size())
+					return SmoothInvalid("Smooth Path distance selects an undefined segment");
+			} else {
+				const double position = distance / LengthTotal * Anchors.size();
+				index = size_t(std::floor(position)) % Anchors.size();
+				t = position - std::trunc(position);
+			}
+			auto point = SegmentPoint(index, t);
+			point.Weight = weight;
+			if (!std::isfinite(point.X) || !std::isfinite(point.Y) || !std::isfinite(weight))
+				return SmoothInvalid("Smooth Path sampled position or weight is nonfinite");
+			if (cache && memo) {
+				if (!memo->StoreExact(
+						*EvaluationContext,
+						SourceSmooth->EvaluationMemoId,
+						original,
+						{point.X, point.Y, weight}
+					))
+					return {NAN, NAN, NAN};
+			} else if (cache && (!EvaluationContext || !memo || !memo->ValidationProbe)) {
+				auto &values = SourceSmooth->Cache;
+				if (values.size() >= Limits::MaximumArrayElements) {
+					if (EvaluationContext)
+						EvaluationContext->Fail(
+							Status::LimitExceeded, "Smooth Path sample cache exceeds bounds", "path"
+						);
+					return {NAN, NAN, NAN};
+				}
+				if (values.size() == values.capacity()) {
+					const size_t next =
+						std::min(Limits::MaximumArrayElements, std::max<size_t>(1, values.capacity() * 2));
+					std::optional<AllocationReservation> admission;
+					if (EvaluationContext) {
+						admission = EvaluationContext->ReserveWorkspace(
+							next * sizeof(SourceSmoothPathCachePoint), "path"
+						);
+						if (!admission) return {NAN, NAN, NAN};
+					}
+					const size_t old = values.capacity();
+					std::vector<SourceSmoothPathCachePoint> replacement;
+					replacement.reserve(next);
+					if (replacement.capacity() != next)
+						return SmoothInvalid("Smooth Path cache capacity exceeds admission");
+					for (const auto &value : values)
+						replacement.push_back(value);
+					values.swap(replacement);
+					std::vector<SourceSmoothPathCachePoint>{}.swap(replacement);
+					if (admission) {
+						if (!StorageCharge.Merge(std::move(*admission))) std::terminate();
+						if (old) {
+							auto release = StorageCharge.Split(old * sizeof(SourceSmoothPathCachePoint));
+							if (!release) std::terminate();
+						}
+					}
+				}
+				const auto insertion = std::lower_bound(
+					values.begin(), values.end(), original, [](const auto &entry, double value) {
+						return entry.Distance < value;
+					}
+				);
+				values.insert(insertion, {original, {point.X, point.Y}, weight});
+			}
+			return point;
 		}
 
 		// updateLength: each segment is sampled at PATH_RESOLUTION + 1 points and measured as a polyline.
@@ -968,6 +1131,12 @@ namespace engine::imagegraph::detail {
 			return out;
 		}
 		SourcePathPointBuffer PointRatioInto(double ratio, size_t line, SourcePathPointBuffer &out) const {
+			if (SourceSmooth) {
+				const auto point = SmoothPointDistance((ratio - std::trunc(ratio)) * LengthTotal, out.Weight);
+				out.Position = {point.X, point.Y};
+				out.Weight = point.Weight;
+				return out;
+			}
 			if (Operation && Inputs.empty() && !WeightSpatial) {
 				if (*Operation == SourcePathOperationKind::Join) return out;
 				if (*Operation == SourcePathOperationKind::Shift ||
@@ -1041,6 +1210,12 @@ namespace engine::imagegraph::detail {
 		}
 		SourcePathPointBuffer
 		PointDistanceInto(double distance, size_t line, SourcePathPointBuffer &out) const {
+			if (SourceSmooth) {
+				const auto point = SmoothPointDistance(distance, out.Weight);
+				out.Position = {point.X, point.Y};
+				out.Weight = point.Weight;
+				return out;
+			}
 			if (Operation && *Operation == SourcePathOperationKind::Repeat)
 				return PointRatioInto(distance / Length(line), line, out);
 			if (SourceData && SourceData->Wave) return WavePointInto(distance / Length(), line, out);
@@ -1191,6 +1366,7 @@ namespace engine::imagegraph::detail {
 			return p;
 		}
 		PathPoint PointDistance(double distance, size_t line = 0) const {
+			if (SourceSmooth) return SmoothPointDistance(distance);
 			if (Operation && *Operation == SourcePathOperationKind::Repeat)
 				return PointRatio(distance / Length(line), line);
 			if (SourceData && SourceData->Wave) {
@@ -1276,6 +1452,7 @@ namespace engine::imagegraph::detail {
 				   *Operation != SourcePathOperationKind::WeightAdjust;
 		}
 		PathPoint PointRatio(double ratio, size_t line = 0) const {
+			if (SourceSmooth) return SmoothPointDistance((ratio - std::trunc(ratio)) * LengthTotal);
 			if (Operation && *Operation == SourcePathOperationKind::Repeat) {
 				SourcePathPointBuffer point;
 				PointRatioInto(ratio, line, point);
@@ -1347,6 +1524,19 @@ namespace engine::imagegraph::detail {
 		}
 
 		PathPoint PointSegment(double ratio) const {
+			if (SourceSmooth) {
+				if (Anchors.empty()) return {};
+				if (!std::isfinite(ratio)) return SmoothInvalid("Smooth Path segment position is nonfinite");
+				const double whole = std::floor(ratio);
+				const double from = std::fmod(whole, double(Anchors.size()));
+				const double to = std::fmod(whole + 1, double(Anchors.size()));
+				if (from < 0 || to < 0)
+					return SmoothInvalid("Smooth Path segment index is outside the represented range");
+				const auto point = SegmentPointPair(size_t(from), size_t(to), ratio - std::trunc(ratio));
+				return std::isfinite(point.X) && std::isfinite(point.Y)
+						   ? point
+						   : SmoothInvalid("Smooth Path segment position is nonfinite");
+			}
 			if (Operation) return {NAN, NAN, NAN};
 			if (Lengths.empty()) return {};
 			const size_t count = Anchors.size();

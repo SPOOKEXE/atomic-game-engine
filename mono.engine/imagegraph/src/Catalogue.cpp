@@ -419,6 +419,14 @@ namespace engine::imagegraph {
 		if (entry.Type == "pc.argument" && input.Id == "default_value" && input.SourceIndex == 2 &&
 			input.SourceKind == "Text" && input.Type == ValueType::Any)
 			return detail::ValidPayload(array, false);
+		// Smooth consumes its declared coordinate arrays in one update.
+		if (entry.Type == "pc.path_smooth" && input.Id == "anchor" && input.SourceIndex == 0 &&
+			input.SourceKind == "Vec2" && input.Type == ValueType::Vector2 &&
+			input.SourceArrayClassification == true && input.ArrayDepthKnown && input.ArrayDepth == 1)
+			return (array.ElementType == ValueType::Boolean || array.ElementType == ValueType::Enum ||
+					array.ElementType == ValueType::Scalar || array.ElementType == ValueType::Integer ||
+					array.ElementType == ValueType::Vector2 || array.ElementType == ValueType::Any) &&
+				   detail::ValidPayload(array, true);
 		// The source WAV sink consumes [channel][sample] itself and starts with [[]].
 		if (entry.Type == "pc.wav_file_write" && input.Id == "audio_data" && input.SourceIndex == 1 &&
 			input.SourceKind == "Float" && input.Type == ValueType::Scalar && input.ArrayDepthKnown &&

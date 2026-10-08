@@ -16,7 +16,7 @@ namespace engine::imagegraph::detail {
 			SourcePathShiftRoute route;
 			if (!Route(context, route, port, output ? 'h' : 'a', output ? context.ProcessorRow : 0))
 				return false;
-			auto callback = [&](SourcePathData2D &op, const SourcePathShiftRoute &identity) {
+			auto callback = [&](auto &op, const SourcePathShiftRoute &identity) {
 				if (trusted && op.EvaluationMemoId &&
 					op.EvaluationMemoId <= context.PathShiftMemo->Owners.size())
 					return true;
@@ -43,7 +43,7 @@ namespace engine::imagegraph::detail {
 		const auto contains = [](const Value &value) {
 			SourcePathShiftRoute route;
 			bool found = false;
-			auto callback = [&](const SourcePathData2D &, const SourcePathShiftRoute &) {
+			auto callback = [&](const auto &, const SourcePathShiftRoute &) {
 				found = true;
 				return true;
 			};
@@ -103,10 +103,10 @@ namespace engine::imagegraph::detail {
 			);
 		SourcePathShiftRoute route;
 		if (!Route(context, route, "path", 'o', context.ProcessorRow)) return false;
-		path.SourceOperation->EvaluationMemoId =
-			context.PathShiftMemo->OwnerId(context, route.View(), "path");
-
-		return path.SourceOperation->EvaluationMemoId != 0;
+		auto &identity =
+			path.SourceSmooth ? path.SourceSmooth->EvaluationMemoId : path.SourceOperation->EvaluationMemoId;
+		identity = context.PathShiftMemo->OwnerId(context, route.View(), "path");
+		return identity != 0;
 	}
 	bool StampSourcePathShiftHostOutput(NodeContext &context, AuthoredValue &value) {
 		return !context.PathShiftMemo || Stamp(context, value.Data, value.Port, false, true);
@@ -121,7 +121,7 @@ namespace engine::imagegraph::detail {
 	}
 	void StripSourcePathShiftIdentities(Value &value) {
 		SourcePathShiftRoute route;
-		auto callback = [](SourcePathData2D &op, const SourcePathShiftRoute &) {
+		auto callback = [](auto &op, const SourcePathShiftRoute &) {
 			op.EvaluationMemoId = 0;
 			return true;
 		};

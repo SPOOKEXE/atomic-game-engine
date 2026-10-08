@@ -249,12 +249,28 @@ namespace engine::imagegraph {
 		bool operator==(const PathWeight &) const = default;
 	};
 
+	struct SourceSmoothPathCachePoint {
+		double Distance = 0;
+		Vector2 Position;
+		double Weight = 1;
+		bool operator==(const SourceSmoothPathCachePoint &) const = default;
+	};
+	struct SourceSmoothPathPolicy {
+		bool NormalizedLength = true;
+		std::vector<SourceSmoothPathCachePoint> Cache;
+		uint64_t EvaluationMemoId = 0;
+		bool operator==(const SourceSmoothPathPolicy &other) const {
+			return NormalizedLength == other.NormalizedLength && Cache == other.Cache;
+		}
+	};
+
 	struct Path2D {
 		bool Loop = false;
 		std::vector<PathAnchor> Anchors;
 		std::vector<PathWeight> Weights;
 		// Source segment objects count their points as segments, unlike authored Bézier paths.
 		bool Segmented = false;
+		OwnedPayload3D<SourceSmoothPathPolicy> SourceSmooth{};
 		// Empty backing denotes an authored anchor path; owned operations preserve lazy source sampling.
 		OwnedPayload3D<SourcePathData2D> SourceOperation{};
 		bool operator==(const Path2D &) const = default;

@@ -9,24 +9,204 @@ namespace engine::imagegraph::detail {
 		Diagnostic &diagnostic
 	) {
 		SourcePathShiftRoute route;
-		auto synchronize = [&](SourcePathData2D &operation, const SourcePathShiftRoute &) {
-			if (operation.Wave && operation.EvaluationMemoId) {
+		auto synchronize = [&](auto &operation, const SourcePathShiftRoute &) {
+			if constexpr (std::is_same_v<std::remove_cvref_t<decltype(operation)>, SourceSmoothPathPolicy>) {
+				if (!operation.EvaluationMemoId) return true;
 				if (operation.EvaluationMemoId > memo.Owners.size()) {
+					diagnostic = {Status::InvalidValue, {}, "path", "Smooth Path publication lacks owner"};
+					return false;
+				}
+				if (!memo.Owners[operation.EvaluationMemoId - 1].SmoothInitialized) return true;
+				size_t count = 0;
+				for (const auto &entry : memo.Entries) {
+					if (++memo.LookupWork > SourcePathShiftMemo::MAXIMUM_LOOKUP_WORK) {
+						diagnostic = {
+							Status::LimitExceeded, {}, "path", "Smooth Path publication work exceeds bounds"
+						};
+						return false;
+					}
+					count += entry.ExactCoordinate && entry.OwnerId == operation.EvaluationMemoId;
+				}
+				const uint64_t work = memo.Entries.size() + count * (std::bit_width(count) + 1);
+				if (work > SourcePathShiftMemo::MAXIMUM_LOOKUP_WORK - memo.LookupWork) {
 					diagnostic = {
-						Status::InvalidValue, {}, "path", "Source Wave publication lacks current owner"
+						Status::LimitExceeded, {}, "path", "Smooth Path publication work exceeds bounds"
+					};
+					return false;
+				}
+				memo.LookupWork += work;
+				auto admission = budget.Reserve(count * sizeof(SourceSmoothPathCachePoint));
+				if (!admission) {
+					diagnostic = {
+						Status::LimitExceeded, {}, "path", "Smooth Path cache publication exceeds budget"
+					};
+					return false;
+				}
+				std::vector<SourceSmoothPathCachePoint> replacement;
+				replacement.reserve(count);
+				if (replacement.capacity() != count) {
+					diagnostic = {
+						Status::LimitExceeded, {}, "path", "Smooth Path cache capacity exceeds admission"
+					};
+					return false;
+				}
+				for (const auto &entry : memo.Entries)
+					if (entry.ExactCoordinate && entry.OwnerId == operation.EvaluationMemoId)
+						replacement.push_back(
+							{entry.Coordinate, {entry.Point.X, entry.Point.Y}, entry.Point.Weight}
+						);
+				std::sort(replacement.begin(), replacement.end(), [](const auto &a, const auto &b) {
+					return a.Distance < b.Distance;
+				});
+				const uint64_t oldBytes = operation.Cache.capacity() * sizeof(SourceSmoothPathCachePoint);
+				operation.Cache.swap(replacement);
+				std::vector<SourceSmoothPathCachePoint>{}.swap(replacement);
+				if (!charge.Merge(std::move(*admission))) std::terminate();
+				if (oldBytes) {
+					auto release = charge.Split(oldBytes);
+					if (!release) std::terminate();
+				}
+				return true;
+			} else {
+				if (operation.Wave && operation.EvaluationMemoId) {
+					if (operation.EvaluationMemoId > memo.Owners.size()) {
+						diagnostic = {
+							Status::InvalidValue, {}, "path", "Source Wave publication lacks current owner"
+						};
+						return false;
+					}
+					const auto &owner = memo.Owners[operation.EvaluationMemoId - 1];
+					if (!owner.WaveInitialized) return true;
+					auto &state = *operation.Wave;
+					size_t count = 0;
+					for (const auto &entry : memo.Entries)
+						count += !entry.ExactCoordinate && entry.OwnerId == operation.EvaluationMemoId;
+					bool same = state.Cache.size() == count;
+					size_t index = 0;
+					for (const auto &entry : memo.Entries) {
+						if (entry.ExactCoordinate || entry.OwnerId != operation.EvaluationMemoId) continue;
+						const SourcePathSequentialCachePoint point{
+							entry.Coordinate,
+							uint32_t(entry.Line),
+							{{entry.Point.X, entry.Point.Y}, entry.Point.Weight}
+						};
+						if (same && state.Cache[index] != point) same = false;
+						++index;
+					}
+					if (!same) {
+						auto admission = budget.Reserve(count * sizeof(SourcePathSequentialCachePoint));
+						if (!admission) {
+							diagnostic = {
+								Status::LimitExceeded,
+								{},
+								"path",
+								"Source Wave cache publication exceeds budget"
+							};
+							return false;
+						}
+						std::vector<SourcePathSequentialCachePoint> replacement;
+						replacement.reserve(count);
+						if (replacement.capacity() != count) {
+							diagnostic = {
+								Status::LimitExceeded,
+								{},
+								"path",
+								"Source Wave cache capacity exceeds admission"
+							};
+							return false;
+						}
+						for (const auto &entry : memo.Entries)
+							if (!entry.ExactCoordinate && entry.OwnerId == operation.EvaluationMemoId)
+								replacement.push_back(
+									{entry.Coordinate,
+									 uint32_t(entry.Line),
+									 {{entry.Point.X, entry.Point.Y}, entry.Point.Weight}}
+								);
+						const uint64_t oldBytes =
+							state.Cache.capacity() * sizeof(SourcePathSequentialCachePoint);
+						state.Cache.swap(replacement);
+						std::vector<SourcePathSequentialCachePoint>{}.swap(replacement);
+						if (!charge.Merge(std::move(*admission))) std::terminate();
+						if (oldBytes) {
+							auto release = charge.Split(oldBytes);
+							if (!release) std::terminate();
+						}
+					}
+					state.Buffers = owner.WaveBuffers;
+					return true;
+				}
+				if (operation.Spiral && operation.EvaluationMemoId) {
+					if (operation.EvaluationMemoId > memo.Owners.size()) {
+						diagnostic = {
+							Status::InvalidValue, {}, "path", "Source Spiral publication lacks current owner"
+						};
+						return false;
+					}
+					const auto &owner = memo.Owners[operation.EvaluationMemoId - 1];
+					if (!owner.SpiralInitialized) return true;
+					auto &state = *operation.Spiral;
+					size_t count = 0;
+					for (const auto &entry : memo.Entries)
+						count += !entry.ExactCoordinate && entry.OwnerId == operation.EvaluationMemoId;
+					auto admission = budget.Reserve(count * sizeof(SourcePathSequentialCachePoint));
+					if (!admission) {
+						diagnostic = {
+							Status::LimitExceeded,
+							{},
+							"path",
+							"Source Spiral cache publication exceeds budget"
+						};
+						return false;
+					}
+					std::vector<SourcePathSequentialCachePoint> replacement;
+					replacement.reserve(count);
+					if (replacement.capacity() != count) {
+						diagnostic = {
+							Status::LimitExceeded,
+							{},
+							"path",
+							"Source Spiral cache capacity exceeds admission"
+						};
+						return false;
+					}
+					for (const auto &entry : memo.Entries)
+						if (!entry.ExactCoordinate && entry.OwnerId == operation.EvaluationMemoId)
+							replacement.push_back(
+								{entry.Coordinate,
+								 uint32_t(entry.Line),
+								 {{entry.Point.X, entry.Point.Y}, entry.Point.Weight}}
+							);
+					const uint64_t oldBytes = state.Cache.capacity() * sizeof(SourcePathSequentialCachePoint);
+					state.Cache.swap(replacement);
+					std::vector<SourcePathSequentialCachePoint>{}.swap(replacement);
+					if (!charge.Merge(std::move(*admission))) std::terminate();
+					if (oldBytes) {
+						auto release = charge.Split(oldBytes);
+						if (!release) std::terminate();
+					}
+					state.Buffers = owner.SpiralBuffers;
+					return true;
+				}
+				if (!operation.Sequential || !operation.EvaluationMemoId) return true;
+				if (!operation.EvaluationMemoId || operation.EvaluationMemoId > memo.Owners.size()) {
+					diagnostic = {
+						Status::InvalidValue,
+						{},
+						"path",
+						"Source sequential path publication lacks its current owner"
 					};
 					return false;
 				}
 				const auto &owner = memo.Owners[operation.EvaluationMemoId - 1];
-				if (!owner.WaveInitialized) return true;
-				auto &state = *operation.Wave;
+				if (!owner.SequentialInitialized) return true;
+				auto &state = *operation.Sequential;
 				size_t count = 0;
 				for (const auto &entry : memo.Entries)
-					count += entry.OwnerId == operation.EvaluationMemoId;
+					count += !entry.ExactCoordinate && entry.OwnerId == operation.EvaluationMemoId;
 				bool same = state.Cache.size() == count;
 				size_t index = 0;
 				for (const auto &entry : memo.Entries) {
-					if (entry.OwnerId != operation.EvaluationMemoId) continue;
+					if (entry.ExactCoordinate || entry.OwnerId != operation.EvaluationMemoId) continue;
 					const SourcePathSequentialCachePoint point{
 						entry.Coordinate,
 						uint32_t(entry.Line),
@@ -39,7 +219,10 @@ namespace engine::imagegraph::detail {
 					auto admission = budget.Reserve(count * sizeof(SourcePathSequentialCachePoint));
 					if (!admission) {
 						diagnostic = {
-							Status::LimitExceeded, {}, "path", "Source Wave cache publication exceeds budget"
+							Status::LimitExceeded,
+							{},
+							"path",
+							"Source sequential path cache publication exceeds byte budget"
 						};
 						return false;
 					}
@@ -47,12 +230,15 @@ namespace engine::imagegraph::detail {
 					replacement.reserve(count);
 					if (replacement.capacity() != count) {
 						diagnostic = {
-							Status::LimitExceeded, {}, "path", "Source Wave cache capacity exceeds admission"
+							Status::LimitExceeded,
+							{},
+							"path",
+							"Source sequential path cache capacity exceeds admission"
 						};
 						return false;
 					}
 					for (const auto &entry : memo.Entries)
-						if (entry.OwnerId == operation.EvaluationMemoId)
+						if (!entry.ExactCoordinate && entry.OwnerId == operation.EvaluationMemoId)
 							replacement.push_back(
 								{entry.Coordinate,
 								 uint32_t(entry.Line),
@@ -67,126 +253,12 @@ namespace engine::imagegraph::detail {
 						if (!release) std::terminate();
 					}
 				}
-				state.Buffers = owner.WaveBuffers;
+				if (operation.Kind == SourcePathOperationKind::Smoothen) {
+					state.SmoothPoint = owner.SequentialBuffers[0];
+					state.SmoothProbe = owner.SequentialBuffers[1];
+				}
 				return true;
 			}
-			if (operation.Spiral && operation.EvaluationMemoId) {
-				if (operation.EvaluationMemoId > memo.Owners.size()) {
-					diagnostic = {
-						Status::InvalidValue, {}, "path", "Source Spiral publication lacks current owner"
-					};
-					return false;
-				}
-				const auto &owner = memo.Owners[operation.EvaluationMemoId - 1];
-				if (!owner.SpiralInitialized) return true;
-				auto &state = *operation.Spiral;
-				size_t count = 0;
-				for (const auto &entry : memo.Entries)
-					count += entry.OwnerId == operation.EvaluationMemoId;
-				auto admission = budget.Reserve(count * sizeof(SourcePathSequentialCachePoint));
-				if (!admission) {
-					diagnostic = {
-						Status::LimitExceeded, {}, "path", "Source Spiral cache publication exceeds budget"
-					};
-					return false;
-				}
-				std::vector<SourcePathSequentialCachePoint> replacement;
-				replacement.reserve(count);
-				if (replacement.capacity() != count) {
-					diagnostic = {
-						Status::LimitExceeded, {}, "path", "Source Spiral cache capacity exceeds admission"
-					};
-					return false;
-				}
-				for (const auto &entry : memo.Entries)
-					if (entry.OwnerId == operation.EvaluationMemoId)
-						replacement.push_back(
-							{entry.Coordinate,
-							 uint32_t(entry.Line),
-							 {{entry.Point.X, entry.Point.Y}, entry.Point.Weight}}
-						);
-				const uint64_t oldBytes = state.Cache.capacity() * sizeof(SourcePathSequentialCachePoint);
-				state.Cache.swap(replacement);
-				std::vector<SourcePathSequentialCachePoint>{}.swap(replacement);
-				if (!charge.Merge(std::move(*admission))) std::terminate();
-				if (oldBytes) {
-					auto release = charge.Split(oldBytes);
-					if (!release) std::terminate();
-				}
-				state.Buffers = owner.SpiralBuffers;
-				return true;
-			}
-			if (!operation.Sequential || !operation.EvaluationMemoId) return true;
-			if (!operation.EvaluationMemoId || operation.EvaluationMemoId > memo.Owners.size()) {
-				diagnostic = {
-					Status::InvalidValue,
-					{},
-					"path",
-					"Source sequential path publication lacks its current owner"
-				};
-				return false;
-			}
-			const auto &owner = memo.Owners[operation.EvaluationMemoId - 1];
-			if (!owner.SequentialInitialized) return true;
-			auto &state = *operation.Sequential;
-			size_t count = 0;
-			for (const auto &entry : memo.Entries)
-				count += entry.OwnerId == operation.EvaluationMemoId;
-			bool same = state.Cache.size() == count;
-			size_t index = 0;
-			for (const auto &entry : memo.Entries) {
-				if (entry.OwnerId != operation.EvaluationMemoId) continue;
-				const SourcePathSequentialCachePoint point{
-					entry.Coordinate,
-					uint32_t(entry.Line),
-					{{entry.Point.X, entry.Point.Y}, entry.Point.Weight}
-				};
-				if (same && state.Cache[index] != point) same = false;
-				++index;
-			}
-			if (!same) {
-				auto admission = budget.Reserve(count * sizeof(SourcePathSequentialCachePoint));
-				if (!admission) {
-					diagnostic = {
-						Status::LimitExceeded,
-						{},
-						"path",
-						"Source sequential path cache publication exceeds byte budget"
-					};
-					return false;
-				}
-				std::vector<SourcePathSequentialCachePoint> replacement;
-				replacement.reserve(count);
-				if (replacement.capacity() != count) {
-					diagnostic = {
-						Status::LimitExceeded,
-						{},
-						"path",
-						"Source sequential path cache capacity exceeds admission"
-					};
-					return false;
-				}
-				for (const auto &entry : memo.Entries)
-					if (entry.OwnerId == operation.EvaluationMemoId)
-						replacement.push_back(
-							{entry.Coordinate,
-							 uint32_t(entry.Line),
-							 {{entry.Point.X, entry.Point.Y}, entry.Point.Weight}}
-						);
-				const uint64_t oldBytes = state.Cache.capacity() * sizeof(SourcePathSequentialCachePoint);
-				state.Cache.swap(replacement);
-				std::vector<SourcePathSequentialCachePoint>{}.swap(replacement);
-				if (!charge.Merge(std::move(*admission))) std::terminate();
-				if (oldBytes) {
-					auto release = charge.Split(oldBytes);
-					if (!release) std::terminate();
-				}
-			}
-			if (operation.Kind == SourcePathOperationKind::Smoothen) {
-				state.SmoothPoint = owner.SequentialBuffers[0];
-				state.SmoothProbe = owner.SequentialBuffers[1];
-			}
-			return true;
 		};
 		if (!std::visit([&](auto &leaf) { return VisitSourcePathShift(leaf, route, synchronize); }, value))
 			return false;

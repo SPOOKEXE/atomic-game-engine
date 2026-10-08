@@ -16,6 +16,7 @@ namespace engine::imagegraph::detail {
 			bool SpiralInitialized = false;
 			std::array<SourcePathPointBuffer, 3> WaveBuffers{};
 			bool WaveInitialized = false;
+			bool SmoothInitialized = false;
 		};
 		struct Entry {
 			uint64_t OwnerId = 0;
@@ -23,6 +24,7 @@ namespace engine::imagegraph::detail {
 			SourcePathShiftKey Ratio;
 			SourcePathShiftSample Point;
 			double Coordinate = 0;
+			bool ExactCoordinate = false;
 		};
 		AllocationReservation Charge;
 		std::vector<Owner> Owners;
@@ -192,10 +194,49 @@ namespace engine::imagegraph::detail {
 					);
 					return nullptr;
 				}
-				if (entry.OwnerId == owner && entry.Line == line && entry.Ratio == key) return &entry;
+				if (!entry.ExactCoordinate && entry.OwnerId == owner && entry.Line == line &&
+					entry.Ratio == key)
+					return &entry;
 			}
 			return nullptr;
 		}
+		bool SmoothOwner(NodeContext &context, const SourceSmoothPathPolicy &policy) {
+			if (!policy.EvaluationMemoId || policy.EvaluationMemoId > Owners.size())
+				return context.Fail(Status::InvalidValue, "Smooth Path lacks evaluation identity", "path");
+			if (ValidationProbe || Owners[policy.EvaluationMemoId - 1].SmoothInitialized) return true;
+			for (const auto &point : policy.Cache)
+				if (!StoreExact(
+						context,
+						policy.EvaluationMemoId,
+						point.Distance,
+						{point.Position.X, point.Position.Y, point.Weight}
+					))
+					return false;
+			Owners[policy.EvaluationMemoId - 1].SmoothInitialized = true;
+			return true;
+		}
+		const Entry *FindExact(NodeContext &context, uint64_t owner, double distance) {
+			if (!owner || owner > Owners.size() || !std::isfinite(distance)) {
+				context.Fail(Status::InvalidValue, "Smooth Path cache identity is invalid", "path");
+				return nullptr;
+			}
+			for (const auto &entry : Entries) {
+				if (!Step(context)) return nullptr;
+				if (entry.ExactCoordinate && entry.OwnerId == owner && entry.Coordinate == distance)
+					return &entry;
+			}
+			return nullptr;
+		}
+		bool StoreExact(NodeContext &context, uint64_t owner, double distance, SourcePathShiftSample point) {
+			if (!owner || owner > Owners.size() || !std::isfinite(distance) || !std::isfinite(point.X) ||
+				!std::isfinite(point.Y) || !std::isfinite(point.Weight))
+				return context.Fail(Status::InvalidValue, "Smooth Path cache sample is invalid", "path");
+			if (ValidationProbe) return true;
+			if (!Grow(context, Entries)) return false;
+			Entries.push_back({owner, 0, {}, point, distance, true});
+			return true;
+		}
+
 		bool Store(
 			NodeContext &context,
 			uint64_t owner,

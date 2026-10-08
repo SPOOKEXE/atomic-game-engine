@@ -1,0 +1,1160 @@
+{
+  "phase": "bounded-source-smooth-path",
+  "date": "2026-10-08",
+  "scope": "grug add bounded source smooth paths with shared exact-distance sample state and native/PXC persistence.",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_checkout": "/tmp/pixel-composer-source-b69eca232217360cf1502ef0223523d818606652",
+  "source_scripts": {
+    "scripts/node_path_smooth/node_path_smooth.gml": "04b768b67d57eab9f91ad9d018cef480816a8e12e261899dc4abfa2cdae6afc0",
+    "scripts/__path/__path.gml": "5a3243e1bac128dfd342e6f4488d9e82e46ce4cada72e15677cd9b3cf4c7945d"
+  },
+  "behavior_contract": [
+    "32 endpoint-exclusive samples",
+    "six controls with dynamic ordered anchors and bankersround",
+    "memo keyed by exact original distance stores XY and caller weight; shared consumers; normalized=true",
+    "persist smooth policy under nativeversion 9",
+    "retain Position for empty anchors",
+    "refuse bounded invalid inputs atomically"
+  ],
+  "fixtures": [
+    "mono.engine/imagegraph/tests/SourceSmoothPath.cpp",
+    "mono.engine/imagegraph/tests/SourceSmoothPathWorkloads.cpp",
+    "mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp"
+  ],
+  "validation": {
+    "batch": 80,
+    "status": "accepted",
+    "acceptance": true,
+    "results": {
+      "checks": 20,
+      "native_binary_cases": 6253,
+      "startup_cases": 1,
+      "python_cases": 116,
+      "cli_cases": 16,
+      "optimized_workload_cases": 41,
+      "optimized_workload_assertions": 2268481,
+      "bake": {
+        "cases": 161,
+        "assertions": 15997
+      },
+      "physics": {
+        "cases": 43,
+        "assertions": 715
+      },
+      "runner": {
+        "cases": 29,
+        "assertions": 296
+      },
+      "font": {
+        "cases": 43,
+        "assertions": 1845
+      },
+      "export": {
+        "cases": 95,
+        "assertions": 3401
+      },
+      "render": {
+        "cases": 33,
+        "assertions": 2006
+      },
+      "io": {
+        "cases": 422,
+        "assertions": 20016
+      },
+      "core": {
+        "cases": 3778,
+        "assertions": 4410752
+      },
+      "assetc": {
+        "cases": 49,
+        "assertions": 563
+      },
+      "client": {
+        "cases": 359,
+        "assertions": 23855
+      },
+      "studio": {
+        "cases": 1159,
+        "assertions": 51329
+      },
+      "nodegraph": {
+        "cases": 42,
+        "assertions": 410
+      },
+      "ui": {
+        "cases": 40,
+        "assertions": 704
+      },
+      "startup": {
+        "cases": 1,
+        "assertions": 5
+      }
+    },
+    "source_stability": {
+      "paths": 4305,
+      "changed": []
+    },
+    "optimized_preflight": {
+      "command": [
+        ".cache/build/profile/tests/test_imagegraph",
+        "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads],[imagegraph][path_repeat_workloads],[imagegraph][tile_random_workloads],[imagegraph][path_wave_workloads],[imagegraph][repeat_texture_workloads],[imagegraph][cross_section_workloads],[imagegraph][markov_gradient_workloads],[imagegraph][path_smooth][workload],[source_argument]"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 2.483,
+      "binary_sha256": "677be4884a3d49cb19d12ae4412adebfbd87d00397a0f2621969000d6ac325ee",
+      "binary_sha256_after": "677be4884a3d49cb19d12ae4412adebfbd87d00397a0f2621969000d6ac325ee",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch80.log",
+      "log_sha256": "c46bfc850a3c86698ab2a892d9e1564b3980ac169a4dd85c8455d21ef820c5ca"
+    },
+    "checks": [
+      {
+        "name": "bake",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-bake-batch80.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_bake"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_bake",
+        "binary_sha256": "14ae7bda292487563e308c269c9372c2b0bd5dc22f8b008119e0b003b5462e97",
+        "exit_code": 0,
+        "assertions": 15997,
+        "cases": 161,
+        "binary_sha256_after": "14ae7bda292487563e308c269c9372c2b0bd5dc22f8b008119e0b003b5462e97",
+        "binary_changed_during_test": false,
+        "log_sha256": "6e51ce9d3407820058f73a9a5a35e5b64fb29f8fac4c05aa2dc55df9750c3131"
+      },
+      {
+        "name": "physics",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-physics-batch80.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphphysics"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+        "binary_sha256": "bac6f2b9b2503f1974e29513bc0b97a3250bba17b4a08677edac1c8ad359d96e",
+        "exit_code": 0,
+        "assertions": 715,
+        "cases": 43,
+        "binary_sha256_after": "bac6f2b9b2503f1974e29513bc0b97a3250bba17b4a08677edac1c8ad359d96e",
+        "binary_changed_during_test": false,
+        "log_sha256": "7237474a82709a2dcc41157717717c6222601d57b75b2fd6bd140dc85e8be27a"
+      },
+      {
+        "name": "runner",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-runner-batch80.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph_runner"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+        "binary_sha256": "7f9ef2a85b1130a0e1385f5895f89fb6fdc51b681924cb5646dce7527a380f0a",
+        "exit_code": 0,
+        "assertions": 296,
+        "cases": 29,
+        "binary_sha256_after": "7f9ef2a85b1130a0e1385f5895f89fb6fdc51b681924cb5646dce7527a380f0a",
+        "binary_changed_during_test": false,
+        "log_sha256": "051827c2b51c5971f96dd4083b26d45c1b5a612e410fc646f1002e07caaa651b"
+      },
+      {
+        "name": "font",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-font-batch80.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+        "binary_sha256": "5b8844a3533b6823c35089273f042ecfda2288efa9dc245ea97692c7a5fa892c",
+        "exit_code": 0,
+        "assertions": 1845,
+        "cases": 43,
+        "binary_sha256_after": "5b8844a3533b6823c35089273f042ecfda2288efa9dc245ea97692c7a5fa892c",
+        "binary_changed_during_test": false,
+        "log_sha256": "f4273a96c0d8e404d0f8845630f42c1f3a0dbfee446944993212e6dcd2c3c2c6"
+      },
+      {
+        "name": "export",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-export-batch80.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphexport"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+        "binary_sha256": "6bdf286a04701dbd5e5761d721fed1666c0b2195e117aff29af35b43b4573a23",
+        "exit_code": 0,
+        "assertions": 3401,
+        "cases": 95,
+        "binary_sha256_after": "6bdf286a04701dbd5e5761d721fed1666c0b2195e117aff29af35b43b4573a23",
+        "binary_changed_during_test": false,
+        "log_sha256": "2414dbebfd02b7a310a576d94502f4522c86131ce32621272a82e3991f19b5f2"
+      },
+      {
+        "name": "render",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-render-batch80.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_render",
+          "[gpu][imagegraph],[source-camera-host-gpu],[transform-host-gpu],[composer-gpu],[camera-queue-replacement-gpu],[source-skybox-group-gpu],[sdf-host-gpu],[source_sdf],[sdf-capture],[particle3d],*Transform Image 3D*"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_render",
+        "binary_sha256": "1dd26bcb137e21f6a45c471c33b54a42c548d71e8fd9d80b1c3edfd15bb3b2f6",
+        "exit_code": 0,
+        "assertions": 2006,
+        "cases": 33,
+        "binary_sha256_after": "1dd26bcb137e21f6a45c471c33b54a42c548d71e8fd9d80b1c3edfd15bb3b2f6",
+        "binary_changed_during_test": false,
+        "log_sha256": "414f2382eb852c63c6111384dbc07dea5ebd5fa7122ad0394ee15ebe7a61c76d"
+      },
+      {
+        "name": "cli",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-cli-batch80.log",
+        "command": [
+          "ctest",
+          "--test-dir",
+          ".cache/build/release-tests",
+          "-R",
+          "^(imagegraph_cli_|assetc_cli_)",
+          "--output-on-failure",
+          "-j8"
+        ],
+        "exit_code": 0,
+        "ctest_cases": 16,
+        "log_sha256": "d90939ad973e9fe053c0d5ee5a33bb98e3799181482ff8cabac6372157d4986a"
+      },
+      {
+        "name": "io",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch80.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphio"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+        "binary_sha256": "d78d3795af1f593c668c1366086b7e4b1ab8caf2d0a8693aabea9e5126bc9d1d",
+        "exit_code": 0,
+        "assertions": 20016,
+        "cases": 422,
+        "binary_sha256_after": "d78d3795af1f593c668c1366086b7e4b1ab8caf2d0a8693aabea9e5126bc9d1d",
+        "binary_changed_during_test": false,
+        "log_sha256": "c0e54cf2655bf8f377cff9efa42bec1b5a06f008131ffe3afd49c2bea09537db"
+      },
+      {
+        "name": "core",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch80.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraph",
+        "binary_sha256": "b2096808aac141a93ae258132a167484a19424175b4e2c3936b3463d3d7784d1",
+        "exit_code": 0,
+        "assertions": 4410752,
+        "cases": 3778,
+        "binary_sha256_after": "b2096808aac141a93ae258132a167484a19424175b4e2c3936b3463d3d7784d1",
+        "binary_changed_during_test": false,
+        "log_sha256": "348e0ed8d1526b9906806e8eda2d044f85c0e1cb72a6f93075271b07390dda7f"
+      },
+      {
+        "name": "assetc",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-assetc-batch80.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_assetc"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_assetc",
+        "binary_sha256": "aa4e0865625c2dcc04271b38f34dad943de56f8b937f4391ec04cb8228578aea",
+        "exit_code": 0,
+        "assertions": 563,
+        "cases": 49,
+        "binary_sha256_after": "aa4e0865625c2dcc04271b38f34dad943de56f8b937f4391ec04cb8228578aea",
+        "binary_changed_during_test": false,
+        "log_sha256": "2c6a555083817a38066925ca55d4ac89c5393fa400728b4493410e67220c02f0"
+      },
+      {
+        "name": "client",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-client-batch80.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_client",
+          "~[.],[argument_binding][gpu],[argument-transform-gpu]",
+          "--rng-seed",
+          "1403467049"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_client",
+        "binary_sha256": "d98b73641c01fda591b180a978ed34a66ec5cb51941aa18dcbfb4eeab66133e1",
+        "exit_code": 0,
+        "assertions": 23855,
+        "cases": 359,
+        "binary_sha256_after": "d98b73641c01fda591b180a978ed34a66ec5cb51941aa18dcbfb4eeab66133e1",
+        "binary_changed_during_test": false,
+        "log_sha256": "83e16b642002071404ee8b448e37e61ee91439ae0fdfe76ea10c59ff7429feaa"
+      },
+      {
+        "name": "studio",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-studio-batch80.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_studio"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_studio",
+        "binary_sha256": "eb72cbfe3bda229e82fb4ad3f5cbba0838ed3d0d93221b16693e84de3e335fc8",
+        "exit_code": 0,
+        "assertions": 51329,
+        "cases": 1159,
+        "binary_sha256_after": "eb72cbfe3bda229e82fb4ad3f5cbba0838ed3d0d93221b16693e84de3e335fc8",
+        "binary_changed_during_test": false,
+        "log_sha256": "b45bfcf2425b22002881bfe842523f6a5c32163c61ce0c7b5352bda971002064"
+      },
+      {
+        "name": "nodegraph",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-nodegraph-batch80.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_nodegraph"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_nodegraph",
+        "binary_sha256": "d19323ed3d7ea072195cd77ed603a1be05e93c5d66d01c834e74b463d4ff748d",
+        "exit_code": 0,
+        "assertions": 410,
+        "cases": 42,
+        "binary_sha256_after": "d19323ed3d7ea072195cd77ed603a1be05e93c5d66d01c834e74b463d4ff748d",
+        "binary_changed_during_test": false,
+        "log_sha256": "4c7074e73e35b4347f6847ec96081f880ad019e46a14e5003923273f219e281e"
+      },
+      {
+        "name": "ui",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-ui-batch80.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_ui"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_ui",
+        "binary_sha256": "135942a57fd7b2f6f8b9161d9f807d1ee64c25dde655244c898d109c7cf73b0d",
+        "exit_code": 0,
+        "assertions": 704,
+        "cases": 40,
+        "binary_sha256_after": "135942a57fd7b2f6f8b9161d9f807d1ee64c25dde655244c898d109c7cf73b0d",
+        "binary_changed_during_test": false,
+        "log_sha256": "a6600b82df098e23d9776f704ea1ac6919c0b4186ba6245883226febf7514ea5"
+      },
+      {
+        "name": "startup",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-startup-batch80.log",
+        "command": [
+          "ctest",
+          "--test-dir",
+          ".cache/build/release-tests",
+          "-R",
+          "^studio_composer_startup_arguments$",
+          "-V"
+        ],
+        "exit_code": 0,
+        "assertions": 5,
+        "cases": 1,
+        "log_sha256": "5222233b161a7f6b09fbe759186703f3adc31648ff4567ce79a0855335f35d81"
+      },
+      {
+        "name": "lint",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-lint-batch80.log",
+        "command": [
+          "ruff",
+          "check",
+          "scripts/pixel-composer/generate-catalogue.py",
+          "scripts/tests/pixel_composer_catalogue_metadata_test.py",
+          "scripts/pixel-composer/extract-source.py",
+          "scripts/tests/pixel_composer_extract_source_test.py",
+          "scripts/pixel-composer/source_behavior.py",
+          "scripts/tests/pixel_composer_source_behavior_test.py"
+        ],
+        "exit_code": 0,
+        "log_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+      },
+      {
+        "name": "architecture",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-architecture-batch80.log",
+        "command": [
+          "cmake",
+          "-DGRAPH=.cache/build/release-tests/target-graph.json",
+          "-DEXPECTED=mono.tools/architecture/expected_graph.json",
+          "-P",
+          "mono.tools/architecture/CheckTargetGraph.cmake"
+        ],
+        "exit_code": 0,
+        "log_sha256": "e2920b48a3c7c18b9bb66b525c591a2eb61a1986c17204060ce321e87ea6ff4f"
+      },
+      {
+        "name": "python",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-python-batch80.log",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "scripts/tests",
+          "-p",
+          "pixel_composer_*_test.py"
+        ],
+        "exit_code": 0,
+        "python_cases": 116,
+        "log_sha256": "0dd147e673e4ef140dcd4c86e86038ed77558550fd066dcd3416c91e432b599b"
+      },
+      {
+        "name": "format",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-format-batch80.log",
+        "command": [
+          "/usr/bin/clang-format-21",
+          "--dry-run",
+          "--Werror",
+          "mono.studio/src/ImageGraphCacheBackground.hpp",
+          "mono.studio/src/ImageGraphCacheBackground.cpp",
+          "mono.studio/tests/ImageGraphCacheBackground.cpp",
+          "mono.studio/src/ImageGraphCacheControls.hpp",
+          "mono.studio/tests/ImageGraphCacheControls.cpp",
+          "mono.studio/nodegraph/include/nodegraph/Editor.hpp",
+          "mono.studio/nodegraph/src/Editor.cpp",
+          "mono.studio/nodegraph/tests/Editor.cpp",
+          "mono.studio/include/studio/ImageGraph.hpp",
+          "mono.studio/src/ImageGraph.cpp",
+          "mono.studio/tests/ImageGraph.cpp",
+          "mono.studio/src/ImageGraphCacheEditObservation.cpp",
+          "mono.studio/src/ImageGraphCacheEditObservation.hpp",
+          "mono.studio/tests/ImageGraphCacheEditObservation.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp",
+          "mono.engine/imagegraph/src/CacheGroupReplay.cpp",
+          "mono.engine/imagegraph/tests/CacheGroupReplay.cpp",
+          "mono.engine/imagegraph/tests/FeedbackHost.cpp",
+          "mono.engine/imagegraphio/tests/FrameCacheProperties.cpp",
+          "mono.engine/imagegraphio/tests/SourceFrameCache.cpp",
+          "mono.studio/src/ImageComposer.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/DataReplay.hpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp",
+          "mono.engine/imagegraph/src/DataReplay.cpp",
+          "mono.engine/imagegraph/src/Document.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/FrameCacheReplay.hpp",
+          "mono.engine/imagegraph/src/FrameCacheReplay.cpp",
+          "mono.engine/imagegraph/src/SourceFrameCacheInputs.hpp",
+          "mono.engine/imagegraph/src/SourceFrameCacheLookup.hpp",
+          "mono.engine/imagegraph/src/NativeFrameCacheReceipt.hpp",
+          "mono.engine/imagegraph/src/NativeFrameCacheReceipt.cpp",
+          "mono.engine/imagegraph/src/NodeExecutors.hpp",
+          "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp",
+          "mono.engine/imagegraph/src/CacheResultsReplay.cpp",
+          "mono.engine/imagegraph/tests/FrameCacheReplay.cpp",
+          "mono.engine/imagegraph/tests/CacheResultsReplay.cpp",
+          "mono.engine/imagegraph/src/SourcePathShiftVisit.hpp",
+          "mono.engine/imagegraph/tests/DataReplay.cpp",
+          "mono.engine/imagegraph/tests/SourcePathShiftReplayIngress.cpp",
+          "mono.engine/imagegraph/tests/SourcePathSequentialNodes.cpp",
+          "mono.engine/imagegraph/tests/StatefulOutputs.cpp",
+          "mono.engine/ui/src/Interface.cpp",
+          "mono.engine/ui/tests/Interface.cpp",
+          "mono.engine/ui/include/engine/ui/Interface.hpp",
+          "mono.engine/imagegraph/src/TimelineOverrides.hpp",
+          "mono.engine/imagegraph/src/TimelineOverrides.cpp",
+          "mono.engine/imagegraph/tests/TimelineOverrides.cpp",
+          "mono.engine/imagegraph/src/SourcePathPayload.hpp",
+          "mono.engine/imagegraph/src/nodes/Path.hpp",
+          "mono.engine/imagegraph/tests/Catalogue.cpp",
+          "mono.engine/imagegraph/src/CacheGroupReplayClone.hpp",
+          "mono.engine/imagegraph/src/PendingGraph.hpp",
+          "mono.engine/imagegraph/src/PendingGraph.cpp",
+          "mono.engine/imagegraph/tests/PendingGraph.cpp",
+          "mono.engine/imagegraph/tests/SourcePatternGeneratorIntegration.cpp",
+          "mono.studio/tests/ImageGraphPatternGroups.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceHilbertNodes.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp",
+          "mono.engine/imagegraph/src/SourceModeTransition.cpp",
+          "mono.engine/imagegraph/src/GroupReplay.cpp",
+          "mono.engine/imagegraph/src/BuiltinRandomCaptureCodec.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/BuiltinRandomCaptureCodec.hpp",
+          "mono.engine/imagegraph/tests/BuiltinRandomCaptureCodec.cpp",
+          "mono.engine/imagegraph/tests/SourceSeparatedVec2.cpp",
+          "mono.engine/imagegraph/tests/SourceMirrorPathProjection.cpp",
+          "mono.engine/imagegraphio/src/PxcxImport.cpp",
+          "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+          "mono.engine/imagegraphio/tests/PxcxMirrorPathRatio.cpp",
+          "mono.engine/imagegraph/src/SourceSeparatedVec2.hpp",
+          "mono.engine/imagegraph/src/SourceSeparatedVec2.cpp",
+          "mono.engine/imagegraph/src/SourceAnimatorIdentity.hpp",
+          "mono.engine/imagegraph/src/SourceMirrorAnimator.hpp",
+          "mono.engine/imagegraphio/tests/PxcxSeparatedVec2.cpp",
+          "mono.engine/imagegraph/src/SourceGetterProjection.cpp",
+          "mono.engine/imagegraph/tests/SourceGetterProjection.cpp",
+          "mono.engine/imagegraph/src/SourceInputSelection.hpp",
+          "mono.engine/imagegraph/src/SourceInputEvaluation.hpp",
+          "mono.engine/imagegraph/src/PcxControls.cpp",
+          "mono.engine/imagegraph/tests/SourceInputEvaluation.cpp",
+          "mono.engine/imagegraph/tests/SourceInputMoves.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/GroupReplay.hpp",
+          "mono.engine/imagegraph/src/PixelBuilderGroups.cpp",
+          "mono.engine/imagegraph/tests/GroupReplay.cpp",
+          "mono.engine/imagegraph/src/SourceAxisStorage.hpp",
+          "mono.engine/imagegraph/src/SourceVec2Defaults.hpp",
+          "mono.engine/imagegraph/src/SourceVec2Defaults.cpp",
+          "mono.engine/imagegraph/tests/SourceVec2Defaults.cpp",
+          "mono.engine/imagegraph/src/GroupClonePayload.cpp",
+          "mono.engine/imagegraph/src/SourceFont.cpp",
+          "mono.engine/imagegraph/src/SourceBuiltinRandom.cpp",
+          "mono.studio/src/SourceDynamicGroups.cpp",
+          "mono.studio/tests/ImageGraphSourceInputs.cpp",
+          "mono.engine/imagegraph/tests/SourceAxisInitialization.cpp",
+          "mono.engine/imagegraph/src/Catalogue.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp",
+          "mono.studio/src/ImageGraphGroupHost.hpp",
+          "mono.studio/tests/ImageGraphGroupHost.cpp",
+          "mono.engine/imagegraph/tests/SourceAxisReadRequests.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/SourceAxisTransition.hpp",
+          "mono.engine/imagegraph/src/SourceAxisTransition.cpp",
+          "mono.engine/imagegraph/tests/SourceAxisTransition.cpp",
+          "mono.studio/src/ImageGraphAxisControls.hpp",
+          "mono.studio/tests/ImageGraphAxisControls.cpp",
+          "mono.engine/imagegraph/src/GroupInstanceRecapture.cpp",
+          "mono.engine/imagegraph/src/SourceAnimatorPersistence.cpp",
+          "mono.engine/imagegraph/src/SourceAnimatorPersistence.hpp",
+          "mono.engine/imagegraphio/tests/SourceArtworkEdit.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/SourceKeyframeTransition.hpp",
+          "mono.engine/imagegraph/src/SourceKeyframeTransition.cpp",
+          "mono.engine/imagegraph/tests/SourceKeyframeTransition.cpp",
+          "mono.studio/src/ImageGraph.cpp",
+          "mono.studio/src/TimelineDopesheet.hpp",
+          "mono.studio/tests/TimelineSourceAliases.cpp",
+          "mono.studio/src/ImageGraphCapturedKeyEdit.hpp",
+          "mono.studio/src/TimelineEaseEditor.hpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/SourceTrackTransition.hpp",
+          "mono.engine/imagegraph/src/SourceTrackTransition.cpp",
+          "mono.engine/imagegraph/tests/SourceTrackTransition.cpp",
+          "mono.studio/src/TimelineKeyDelete.hpp",
+          "mono.studio/tests/TimelineKeyDelete.cpp",
+          "mono.studio/include/studio/ImageGraph.hpp",
+          "mono.studio/src/AnimationTrackPolicyEditor.hpp",
+          "mono.studio/src/ImageGraphSourceKeyEdit.hpp",
+          "mono.studio/src/ImageGraphKeyPinProjection.hpp",
+          "mono.studio/src/ImageComposer.cpp",
+          "mono.studio/src/KeyframeKindEditor.hpp",
+          "mono.studio/src/TimelineKeyEditor.hpp",
+          "mono.studio/tests/ImageGraphSourceKeyEdit.cpp",
+          "mono.studio/src/TimelineKeyActions.hpp",
+          "mono.studio/src/TimelineScalarKeys.hpp",
+          "mono.studio/tests/TimelineScalarKeys.cpp",
+          "mono.studio/tests/TimelineKeyEditor.cpp",
+          "mono.studio/tests/TimelineScalarDopesheet.cpp",
+          "mono.studio/tests/ComposerWorkflow.cpp",
+          "mono.studio/src/ImageGraphTimelineRead.hpp",
+          "mono.studio/tests/ImageGraphTimelineRead.cpp",
+          "mono.engine/imagegraph/src/GroupReplayInternal.hpp",
+          "mono.studio/tests/ImageGraph.cpp",
+          "mono.studio/tests/TimelineDopesheetActions.cpp",
+          "mono.studio/src/TimelineScalarKeyControls.hpp",
+          "mono.studio/src/KeyframeSourceDriverControls.hpp",
+          "mono.studio/tests/TimelineEaseEditor.cpp",
+          "mono.engine/imagegraphio/tests/PxcxSeparatedVec2.cpp",
+          "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+          "mono.studio/src/ImageGraphFilePublish.hpp",
+          "mono.studio/tests/ImageGraphFilePublish.cpp",
+          "mono.studio/src/PxcxSave.cpp",
+          "mono.engine/imagegraphio/include/engine/imagegraphio/PxcxAppend.hpp",
+          "mono.engine/imagegraphio/src/PxcxAppend.cpp",
+          "mono.engine/imagegraphio/tests/PxcxAppend.cpp",
+          "mono.studio/tests/ImageGraphSourceHistory.cpp",
+          "mono.studio/src/ImageGraphHistorySource.hpp",
+          "mono.studio/src/ImageGraphHistoryCanvas.hpp",
+          "mono.studio/src/ImageGraphAppendGroups.hpp",
+          "mono.studio/tests/ImageGraphAppendGroups.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/GroupReplay.hpp",
+          "mono.engine/imagegraph/src/Document.cpp",
+          "mono.engine/imagegraph/src/GroupCallbackDocument.cpp",
+          "mono.engine/imagegraph/src/GroupCallbackOpaque.hpp",
+          "mono.engine/imagegraph/tests/GroupCallbackDocument.cpp",
+          "mono.studio/src/ImageGraphAppendGroups.hpp",
+          "mono.studio/tests/ImageGraphAppendGroups.cpp",
+          "mono.engine/imagegraphio/include/engine/imagegraphio/PxcxAppend.hpp",
+          "mono.engine/imagegraphio/src/PxcxAppend.cpp",
+          "mono.engine/imagegraphio/tests/PxcxAppend.cpp",
+          "mono.studio/nodegraph/include/nodegraph/Graph.hpp",
+          "mono.studio/nodegraph/src/Graph.cpp",
+          "mono.studio/nodegraph/src/Layout.cpp",
+          "mono.studio/nodegraph/src/Serialize.cpp",
+          "mono.studio/nodegraph/src/Editor.cpp",
+          "mono.studio/nodegraph/tests/Graph.cpp",
+          "mono.studio/nodegraph/tests/Layout.cpp",
+          "mono.studio/nodegraph/tests/Serialize.cpp",
+          "mono.studio/src/ImageGraph.cpp",
+          "mono.studio/include/studio/ImageGraph.hpp",
+          "mono.studio/src/ImageGraphHistoryCanvas.hpp",
+          "mono.studio/tests/ImageGraph.cpp",
+          "mono.studio/tests/ImageGraphSourceHistory.cpp",
+          "mono.studio/src/ImageComposer.cpp",
+          "mono.studio/src/ImageGraphAppendProject.hpp",
+          "mono.engine/imagegraphio/tests/PxcxEdit.cpp",
+          "mono.studio/src/ImageGraphFileSetPublish.hpp",
+          "mono.studio/include/studio/PxcxSave.hpp",
+          "mono.studio/src/PxcxSave.cpp",
+          "mono.studio/src/ImageComposer.cpp",
+          "mono.studio/tests/PxcxSave.cpp",
+          "mono.studio/tests/ImageGraphFilePublish.cpp",
+          "mono.engine/imagegraphio/src/OrdinarySourceGroups.hpp",
+          "mono.engine/imagegraphio/tests/PxcxGroups.cpp",
+          "mono.engine/imagegraphexport/include/engine/imagegraphexport/PxcxCollectionFiles.hpp",
+          "mono.engine/imagegraphexport/src/PxcxCollectionFiles.cpp",
+          "mono.engine/imagegraphexport/tests/PxcxCollectionFiles.cpp",
+          "mono.studio/tests/ImageGraphFilePublish.cpp",
+          "mono.engine/imagegraphio/tests/PxcxCollectionLoad.cpp",
+          "mono.engine/imagegraphexport/include/engine/imagegraphexport/PxcxCollectionLoad.hpp",
+          "mono.engine/imagegraphexport/src/PxcxCollectionLoad.cpp",
+          "mono.engine/imagegraphexport/src/PxcxCodecHeap.hpp",
+          "mono.engine/imagegraphexport/tests/PxcxCollectionLoad.cpp",
+          "mono.engine/imagegraph/fuzz/FrameCache.cpp",
+          "mono.engine/imagegraph/src/HostCapture.cpp",
+          "mono.engine/imagegraph/src/nodes/Host.cpp",
+          "mono.engine/imagegraph/tests/SourceSdfHost.cpp",
+          "mono.engine/render/include/engine/render/SourceSdf.hpp",
+          "mono.engine/render/include/engine/render/Renderer.hpp",
+          "mono.engine/render/src/SourceSdf.hpp",
+          "mono.engine/render/src/SourceSdf.cpp",
+          "mono.engine/render/src/SourceSdfRequest.cpp",
+          "mono.engine/render/src/SourceSdfCapture.cpp",
+          "mono.engine/render/src/RendererComposer.cpp",
+          "mono.engine/render/src/RendererState.hpp",
+          "mono.engine/render/src/RenderTargets.cpp",
+          "mono.engine/render/src/ImageGraphTransform3DResident.cpp",
+          "mono.engine/render/tests/SourceSdfCapture.cpp",
+          "mono.engine/render/tests/SourceSdfHostGpu.cpp",
+          "mono.client/src/ImageGraphComposerAdapter.cpp",
+          "mono.client/src/ImageGraphSdfAdapter.cpp",
+          "mono.client/src/ImageGraphRuntime.cpp",
+          "mono.client/tests/SourceSdfGraphHost.cpp",
+          "mono.studio/src/ImageGraphComposerHost.hpp",
+          "mono.studio/src/ImageGraphHost.hpp",
+          "mono.studio/tests/SourceSdfGraphHost.cpp",
+          "mono.engine/imagegraph/src/SourceArgumentHost.cpp",
+          "mono.engine/imagegraph/tests/SourceArgumentNodes.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/SourceFont.hpp",
+          "mono.engine/imagegraph/src/Document.cpp",
+          "mono.engine/imagegraph/src/NodeExecutors.hpp",
+          "mono.engine/imagegraph/src/SourceFontObservationContext.hpp",
+          "mono.engine/imagegraphfont/include/engine/imagegraphfont/GraphFontHost.hpp",
+          "mono.engine/imagegraphfont/include/engine/imagegraphfont/GraphFontInputs.hpp",
+          "mono.engine/imagegraphfont/src/GraphFontHost.cpp",
+          "mono.engine/imagegraphfont/src/GraphFontInputs.cpp",
+          "mono.engine/imagegraphfont/tests/GraphFontHost.cpp",
+          "mono.engine/imagegraphfont/tests/GraphFontInputs.cpp",
+          "mono.engine/imagegraphfont/tests/WrappedFontBatch.cpp",
+          "mono.engine/imagegraphfont/tests/WrappedFontHost.cpp",
+          "mono.engine/imagegraphfont/tests/fixtures/FontHostBoundary.hpp",
+          "mono.studio/tests/ImageGraphExportIntent.cpp",
+          "mono.engine/imagegraphfont/tests/FontBoundaryWorkloads.cpp",
+          "mono.engine/imagegraphexport/tests/GraphMeshHost.cpp",
+          "mono.engine/imagegraphexport/src/GraphMeshHost.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceAreaWarp.cpp",
+          "mono.engine/imagegraph/tests/SourceAreaWarp.cpp",
+          "mono.engine/imagegraph/src/nodes/Families.hpp",
+          "mono.engine/imagegraph/src/NodeExecutors.cpp",
+          "mono.engine/imagegraph/src/ProcessorBatch.cpp",
+          "mono.engine/imagegraph/tests/SourceAreaWarpAtlas.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceBlendDepth.cpp",
+          "mono.engine/imagegraph/tests/SourceBlendDepth.cpp",
+          "mono.engine/imagegraph/src/nodes/Sampler.hpp",
+          "mono.engine/imagegraph/src/nodes/SourceRefractClean.hpp",
+          "mono.engine/imagegraph/tests/SourceChoiceAliases.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceBend.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceBend.hpp",
+          "mono.engine/imagegraph/tests/SourceBend.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePixelMath.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePixelMath.hpp",
+          "mono.engine/imagegraph/tests/SourcePixelMath.cpp",
+          "mono.studio/nodegraph/include/nodegraph/Types.hpp",
+          "mono.studio/nodegraph/src/Types.cpp",
+          "mono.studio/nodegraph/src/Serialize.cpp",
+          "mono.studio/nodegraph/src/Graph.cpp",
+          "mono.studio/nodegraph/tests/Graph.cpp",
+          "mono.studio/nodegraph/tests/Serialize.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/NoiseField.hpp",
+          "mono.engine/imagegraph/src/NoiseField.cpp",
+          "mono.engine/imagegraph/src/ValuePayload.hpp",
+          "mono.engine/imagegraph/src/ValueNodeSchemas.hpp",
+          "mono.engine/imagegraph/src/ValueNodeEval.hpp",
+          "mono.engine/imagegraph/tests/NoiseField.cpp",
+          "mono.studio/src/ImageGraphPorts.hpp",
+          "mono.studio/tests/ImageGraphNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceGlow.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceGlow.hpp",
+          "mono.engine/imagegraph/tests/SourceGlow.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePolar.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePolar.hpp",
+          "mono.engine/imagegraph/tests/SourcePolar.cpp",
+          "mono.engine/imagegraph/src/SourceMappedInputs.hpp",
+          "mono.engine/imagegraph/src/nodes/SourceTileTransform.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceTileTransform.hpp",
+          "mono.engine/imagegraph/tests/SourceTileTransform.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceDisplace.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceDisplace.hpp",
+          "mono.engine/imagegraph/tests/SourceDisplace.cpp",
+          "mono.engine/imagegraph/tests/SourceDisplaceBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceJpeg.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceJpeg.hpp",
+          "mono.engine/imagegraph/tests/SourceJpeg.cpp",
+          "mono.engine/imagegraph/tests/SourceJpegBatch.cpp",
+          "mono.engine/imagegraph/tests/NoiseModes.cpp",
+          "mono.studio/src/ImageGraphNoiseControls.hpp",
+          "mono.studio/tests/ImageGraphNoiseControls.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePixelSort.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePixelSort.hpp",
+          "mono.engine/imagegraph/tests/SourcePixelSort.cpp",
+          "mono.engine/imagegraph/tests/SourcePixelSortBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceNoise.hpp",
+          "mono.engine/imagegraph/tests/SourceNoise.cpp",
+          "mono.engine/imagegraph/tests/SourceNoiseBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceCaustic.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceCaustic.hpp",
+          "mono.engine/imagegraph/tests/SourceCaustic.cpp",
+          "mono.engine/imagegraph/tests/SourceCausticBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceCellular.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceCellular.hpp",
+          "mono.engine/imagegraph/tests/SourceCellular.cpp",
+          "mono.engine/imagegraph/tests/SourceCellularBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePerlin.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePerlin.hpp",
+          "mono.engine/imagegraph/tests/SourcePerlin.cpp",
+          "mono.engine/imagegraph/tests/SourcePerlinBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceVoronoiExtra.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceVoronoiExtra.hpp",
+          "mono.engine/imagegraph/tests/SourceVoronoiExtra.cpp",
+          "mono.engine/imagegraph/tests/SourceVoronoiExtraBatch.cpp",
+          "mono.engine/imagegraphexport/tests/GraphCommandHost.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceShardNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceShardNoise.hpp",
+          "mono.engine/imagegraph/tests/SourceShardNoise.cpp",
+          "mono.engine/imagegraph/tests/SourceShardNoiseBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceStrandNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceStrandNoise.hpp",
+          "mono.engine/imagegraph/tests/SourceStrandNoise.cpp",
+          "mono.engine/imagegraph/tests/SourceStrandNoiseBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceWeave.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceWeave.hpp",
+          "mono.engine/imagegraph/tests/SourceWeave.cpp",
+          "mono.engine/imagegraph/tests/SourceWeaveBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePytagoreanTile.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePytagoreanTile.hpp",
+          "mono.engine/imagegraph/src/nodes/SourceShaderGradient.hpp",
+          "mono.engine/imagegraph/tests/SourcePytagoreanTile.cpp",
+          "mono.engine/imagegraph/tests/SourcePytagoreanTileBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePerlinExtra.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePerlinExtra.hpp",
+          "mono.engine/imagegraph/tests/SourcePerlinExtra.cpp",
+          "mono.engine/imagegraph/tests/SourcePerlinExtraBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceNoiseCube.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceNoiseCube.hpp",
+          "mono.engine/imagegraph/tests/SourcePerlinCube.cpp",
+          "mono.engine/imagegraph/tests/SourcePerlinCubeBatch.cpp",
+          "mono.engine/imagegraph/tests/SourceCellularCube.cpp",
+          "mono.engine/imagegraph/tests/SourceCellularCubeBatch.cpp",
+          "mono.engine/imagegraph/tests/SourceSimplexCube.cpp",
+          "mono.engine/imagegraph/tests/SourceSimplexCubeBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceWaveletNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceWaveletNoise.hpp",
+          "mono.engine/imagegraph/tests/SourceWaveletNoise.cpp",
+          "mono.engine/imagegraph/tests/SourceWaveletNoiseBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceScratchNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceScratchNoise.hpp",
+          "mono.engine/imagegraph/tests/SourceScratchNoise.cpp",
+          "mono.engine/imagegraph/tests/SourceScratchNoiseBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceFoldNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceFoldNoise.hpp",
+          "mono.engine/imagegraph/tests/SourceFoldNoise.cpp",
+          "mono.engine/imagegraph/tests/SourceFoldNoiseBatch.cpp",
+          "mono.client/tests/ImageGraphArgumentBindings.cpp",
+          "mono.client/tests/ImageGraphRuntime.cpp",
+          "mono.engine/bake/include/engine/bake/SpriteCache.hpp",
+          "mono.engine/bake/src/SpriteCache.cpp",
+          "mono.engine/bake/tests/SpriteCache.cpp",
+          "mono.engine/imagegraph/src/SourcePathSequentialSync.cpp",
+          "mono.engine/imagegraph/src/SourcePathShiftMemo.cpp",
+          "mono.engine/imagegraph/src/SourcePathShiftMemo.hpp",
+          "mono.engine/imagegraph/src/nodes/Values.cpp",
+          "mono.engine/imagegraph/tests/SourcePathShiftNodes.cpp",
+          "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphExport.hpp",
+          "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphFileHost.hpp",
+          "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphImageCache.hpp",
+          "mono.engine/imagegraphexport/src/GraphAuthoredExport.cpp",
+          "mono.engine/imagegraphexport/src/GraphExport.cpp",
+          "mono.engine/imagegraphexport/src/GraphExportSession.cpp",
+          "mono.engine/imagegraphexport/src/GraphImageCacheHost.cpp",
+          "mono.engine/imagegraphexport/src/GraphRasterHost.hpp",
+          "mono.engine/imagegraphexport/src/Runner.cpp",
+          "mono.engine/imagegraphexport/tests/GraphExportSession.cpp",
+          "mono.engine/imagegraphexport/tests/GraphImageCache.cpp",
+          "mono.engine/imagegraphphysics/tests/CacheResultsClear.cpp",
+          "mono.engine/imagegraphphysics/tests/CacheResultsTransport.cpp",
+          "mono.engine/render/src/ImageGraphTransform3DResident.hpp",
+          "mono.engine/render/tests/ComposerSurfaceGpu.cpp",
+          "mono.studio/src/ImageGraphCacheClearAction.hpp",
+          "mono.studio/src/ImageGraphImageActions.hpp",
+          "mono.studio/tests/ImageComposerArguments.cpp",
+          "mono.studio/tests/ImageGraphCacheClearAction.cpp",
+          "mono.studio/tests/ImageGraphImageEdit.cpp",
+          "mono.studio/tests/UiAuthoring.cpp",
+          "mono.tools/assetc/app/main.cpp",
+          "mono.tools/assetc/tests/GraphImageCacheCli.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceSmoothPathNodes.cpp",
+          "mono.engine/imagegraph/tests/SourceSmoothPath.cpp",
+          "mono.engine/imagegraph/tests/SourceSmoothPathWorkloads.cpp",
+          "mono.engine/imagegraphexport/src/GraphFrameCacheCook.cpp",
+          "mono.engine/imagegraphfont/benchmarks/WrappedText.cpp",
+          "mono.engine/imagegraphfont/tests/WrappedTextWorkloads.cpp",
+          "mono.engine/imagegraphfont/tests/fixtures/WrappedTextBoundary.hpp",
+          "mono.engine/imagegraphio/include/engine/imagegraphio/SourceFrameCache.hpp",
+          "mono.engine/imagegraphio/src/SourceFrameCache.cpp",
+          "mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+          "mono.engine/render/tests/SourceSkyboxGroupGpu.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceTileRandom.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceTileRandom.hpp",
+          "mono.engine/imagegraph/src/nodes/SourceTileTransform.cpp",
+          "mono.engine/imagegraph/src/ProcessorBatch.cpp",
+          "mono.engine/imagegraph/src/Document.cpp",
+          "mono.engine/imagegraph/tests/SourceTileRandom.cpp",
+          "mono.engine/imagegraph/tests/SourceTileRandomWorkloads.cpp",
+          "mono.engine/imagegraphio/tests/PxcxTileRandom.cpp"
+        ],
+        "exit_code": 0,
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "diff",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-diff-batch80.log",
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exit_code": 0,
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "builds": [
+      {
+        "preset": "release-tests",
+        "exit_code": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch80.log",
+        "sha256": "09478713a1ea7facfc71e81c2af3c05b1d27a2b6095d4e1ee9e9fecb3a78632b",
+        "compiler_warnings": 3
+      },
+      {
+        "preset": "profile",
+        "exit_code": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch80.log",
+        "sha256": "df6268d2df4f813af5faeb22d2d698831af97c0df204579dd124a4fa96eb9f3a",
+        "compiler_warnings": 3
+      }
+    ],
+    "limitations": [
+      "grug did not run live Studio.",
+      "desktop and licensed source runtime parity remain unknown.",
+      "typed Vector3, Vector4 and Quaternion array defaults remain outside the native schema; Any arrays retain these tuple rows.",
+      "grug makes no performance speedup claim."
+    ]
+  },
+  "note": "grug kept the failed build and test attempts above. final joined batch accepts the bounded native profile; no licensed or live source parity claim.",
+  "failed_build_attempts": [
+    {
+      "batch": 76,
+      "presets": [
+        "release-tests",
+        "profile"
+      ],
+      "failure": "inline smooth policy expanded sizeof(Value) from 88 to 128; existing layout guards failed",
+      "interrupted": true,
+      "reason": "stop repeated compilation after the shared layout blocker was reproduced in both presets",
+      "runtime_checks": "not run against stale binaries",
+      "source_stability": {
+        "paths": 4305,
+        "changed": []
+      },
+      "logs": [
+        {
+          "path": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch76.log",
+          "sha256": "72ab2162f6a8e533aa8ef66781d180ac8af37ce0c8c3d5c2d42d67b8dbb25868"
+        },
+        {
+          "path": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch76.log",
+          "sha256": "ea3caa426dcb3a6f4e9f026b7fe7e5cddfa95359aa48ecf4c9a11232a1e0fddb"
+        }
+      ]
+    },
+    {
+      "batch": 77,
+      "build_exit_codes": {
+        "release-tests": 1,
+        "profile": 1
+      },
+      "issues": [
+        {
+          "kind": "compile",
+          "cause": "three visitor callbacks accept SourcePathData2D only; new Smooth leaf requires generic parameter",
+          "files": [
+            "mono.engine/imagegraph/tests/SourcePathShiftNodes.cpp",
+            "mono.engine/imagegraph/tests/SourcePathShiftReplayIngress.cpp"
+          ],
+          "repair": "change the three identity-only callbacks to const auto &"
+        }
+      ],
+      "source_stability": {
+        "paths": 4305,
+        "changed": []
+      },
+      "runtime_checks": "not run; core test binaries could not link",
+      "logs": [
+        {
+          "path": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch77.log",
+          "sha256": "64bd6b1b877db2c150ae0bf1cc2ee0689485f2bd5bc51661287cf1c2075e4c91",
+          "compiler_errors": 3,
+          "compiler_warnings": 301
+        },
+        {
+          "path": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch77.log",
+          "sha256": "43ba06a872f25861a2185e6b11fd784737cabf7ffbf072b7026cf83026203913",
+          "compiler_errors": 3,
+          "compiler_warnings": 247
+        }
+      ]
+    }
+  ],
+  "failed_runtime_attempts": [
+    {
+      "batch": 78,
+      "checks_passed": 18,
+      "checks_failed": [
+        "core",
+        "io"
+      ],
+      "new_fixture_cases_failed": 10,
+      "optimized_workload_cases": {
+        "total": 41,
+        "passed": 40,
+        "failed": 1
+      },
+      "source_stability": {
+        "paths": 4305,
+        "changed": []
+      },
+      "issues": [
+        {
+          "unit": "io",
+          "case": "PXC Smooth empty fixed records retain typed constructor controls",
+          "assertions": [
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 93,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:93: FAILED:\nexplicitly with message:\n  missing Smooth control: loop"
+            },
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 275,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:275: FAILED:\n  CHECK( Authored(smooth, control.Port) == control.Data )\ndue to unexpected exception with message:\n  { nested assertion failed }"
+            },
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 93,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:93: FAILED:\nexplicitly with message:\n  missing Smooth control: round_anchor"
+            },
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 275,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:275: FAILED:\n  CHECK( Authored(smooth, control.Port) == control.Data )\ndue to unexpected exception with message:\n  { nested assertion failed }"
+            },
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 93,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:93: FAILED:\nexplicitly with message:\n  missing Smooth control: smoothness"
+            },
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 275,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:275: FAILED:\n  CHECK( Authored(smooth, control.Port) == control.Data )\ndue to unexpected exception with message:\n  { nested assertion failed }"
+            },
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 93,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:93: FAILED:\nexplicitly with message:\n  missing Smooth control: sample_path"
+            },
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 275,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:275: FAILED:\n  CHECK( Authored(smooth, control.Port) == control.Data )\ndue to unexpected exception with message:\n  { nested assertion failed }"
+            },
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 93,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:93: FAILED:\nexplicitly with message:\n  missing Smooth control: sample_mode"
+            },
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 275,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:275: FAILED:\n  CHECK( Authored(smooth, control.Port) == control.Data )\ndue to unexpected exception with message:\n  { nested assertion failed }"
+            },
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 93,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:93: FAILED:\nexplicitly with message:\n  missing Smooth control: normalized_length"
+            },
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 275,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:275: FAILED:\n  CHECK( Authored(smooth, control.Port) == control.Data )\ndue to unexpected exception with message:\n  { nested assertion failed }"
+            },
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 107,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:107: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  5 == 0\nwith message:\n  node type is not registered\n\nORIGINAL_SINK status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_EXPLICIT_REQUEST status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_DEFAULT_OVERLOAD status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nINVERT_DIAGNOSTIC_BEGIN inherited-depth status=0 message=\ninclude_alpha variant=0 bool=0\nchann"
+            }
+          ]
+        },
+        {
+          "unit": "io",
+          "case": "PXC Smooth dynamic input bypass keeps the anchor value through edit and reopen",
+          "assertions": [
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 294,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:294: FAILED:\n  REQUIRE( Native(imported.Graph, \"smooth\").Type == \"pc.path_smooth\" )\nwith expansion:\n  \"pxcx.opaque/Node_Path_Smooth\"\n  ==\n  \"pc.path_smooth\""
+            }
+          ]
+        },
+        {
+          "unit": "io",
+          "case": "Smooth sampling policy survives a durable native path value",
+          "assertions": [
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 107,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:107: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  5 == 0\nwith message:\n  node type is not registered"
+            }
+          ]
+        },
+        {
+          "unit": "io",
+          "case": "PXC Smooth maps and saves six controls and dynamic anchors",
+          "assertions": [
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 141,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:141: FAILED:\n  REQUIRE( smooth.Type == \"pc.path_smooth\" )\nwith expansion:\n  \"pxcx.opaque/Node_Path_Smooth\"\n  ==\n  \"pc.path_smooth\"\n\nORIGINAL_SINK status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_EXPLICIT_REQUEST status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_DEFAULT_OVERLOAD status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nINVERT_DIAGNOSTIC_BEGIN saved-boundary status=0 message=\ninclude_alpha variant="
+            }
+          ]
+        },
+        {
+          "unit": "core",
+          "case": "Smooth source getters use numeric diagonals and physical surface dimensions for linked anchors",
+          "assertions": [
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp",
+              "line": 65,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp:65: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  '\\r' == 0\nwith message:\n  value input needs a typed source smooth:anchor_1"
+            }
+          ]
+        },
+        {
+          "unit": "core",
+          "case": "Smooth dense source geometry stays bounded and repeat sampling retains its exact metrics",
+          "assertions": [
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPathWorkloads.cpp",
+              "line": 60,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPathWorkloads.cpp:60: FAILED:\n  REQUIRE( compiled == Status::Ok )\nwith expansion:\n  6 == 0\nwith message:\n  unknown authored property"
+            }
+          ]
+        },
+        {
+          "unit": "core",
+          "case": "Smooth controls stay one source update and widget mode clamps before dispatch",
+          "assertions": [
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp",
+              "line": 58,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp:58: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  7 == 0\nwith message:\n  authored property has the wrong value type smooth:loop"
+            }
+          ]
+        },
+        {
+          "unit": "core",
+          "case": "Smooth native format nine preserves policy in scalar flat and nested path values",
+          "assertions": [
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp",
+              "line": 378,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp:378: FAILED:\n  REQUIRE( Read(Write(saved), restored, error) == Status::Ok )\nwith expansion:\n  1 == 0"
+            }
+          ]
+        },
+        {
+          "unit": "core",
+          "case": "Smooth dynamic sockets flatten coordinate rows in source input order and ignore depth three",
+          "assertions": [
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp",
+              "line": 58,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp:58: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  6 == 0\nwith message:\n  unknown authored property smooth:anchor_0"
+            }
+          ]
+        },
+        {
+          "unit": "core",
+          "case": "Smooth refuses undefined negative segment indices and nonfinite controls atomically",
+          "assertions": [
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp",
+              "line": 58,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp:58: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  6 == 0\nwith message:\n  unknown authored property smooth:anchor_0\n\n===============================================================================\ntest cases:    3778 |    3772 passed | 6 failed\nassertions: 4410021 | 4410015 passed | 6 failed"
+            }
+          ]
+        }
+      ],
+      "manifest": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch78-results.json"
+    },
+    {
+      "batch": 79,
+      "checks_passed": 18,
+      "checks_failed": [
+        "core",
+        "io"
+      ],
+      "new_fixture_cases_failed": 3,
+      "optimized_workload_cases": {
+        "total": 41,
+        "passed": 41,
+        "failed": 0
+      },
+      "source_stability": {
+        "paths": 4305,
+        "changed": []
+      },
+      "issues": [
+        {
+          "unit": "io",
+          "case": "PXC Smooth dynamic input bypass keeps the anchor value through edit and reopen",
+          "assertions": [
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp",
+              "line": 319,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp:319: FAILED:\n  REQUIRE( Compile(reopened.Graph, plan, diagnostic) == Status::Ok )\nwith expansion:\n  6 == 0\nwith message:\n\n\n===============================================================================\ntest cases:   422 |   421 passed | 1 failed\nassertions: 20014 | 20013 passed | 1 failed"
+            }
+          ]
+        },
+        {
+          "unit": "core",
+          "case": "Smooth native format nine preserves policy in scalar flat and nested path values",
+          "assertions": [
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp",
+              "line": 398,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp:398: FAILED:\n  REQUIRE( decoded == Status::Ok )\nwith expansion:\n  1 == 0\nwith message:\n  malformed imagegraph record at line 8"
+            }
+          ]
+        },
+        {
+          "unit": "core",
+          "case": "Smooth dynamic sockets flatten coordinate rows in source input order and ignore depth three",
+          "assertions": [
+            {
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp",
+              "line": 68,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSmoothPath.cpp:68: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  8 == 0\nwith message:\n  dynamic input default is invalid smooth:anchor_0\n\n===============================================================================\ntest cases:    3778 |    3776 passed | 2 failed\nassertions: 4410707 | 4410705 passed | 2 failed"
+            }
+          ]
+        }
+      ],
+      "manifest": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch79-results.json"
+    }
+  ],
+  "policy": {
+    "path": "mono.engine/imagegraph/docs/native-smooth-path-policy.json",
+    "sha256": "7f223e76a574b657e3b09b3923ad4287ef00286a96531cfce3780e19c520520e"
+  }
+}

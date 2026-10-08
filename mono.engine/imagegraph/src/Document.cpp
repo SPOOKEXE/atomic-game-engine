@@ -973,8 +973,8 @@ namespace engine::imagegraph {
 			if (const auto *array = std::get_if<ArrayValue>(&value); array && !array->Nested.empty())
 				return array->ElementType != ValueType::Image && array->ElementType != ValueType::Array &&
 					   (array->ElementType < ValueType::Gradient ||
-						(array->ElementType == ValueType::Area || array->ElementType == ValueType::Enum ||
-						 array->ElementType == ValueType::Particle ||
+						(array->ElementType == ValueType::Path2D || array->ElementType == ValueType::Area ||
+						 array->ElementType == ValueType::Enum || array->ElementType == ValueType::Particle ||
 						 array->ElementType == ValueType::Strand ||
 						 array->ElementType == ValueType::Tileset || array->ElementType == ValueType::Rigid ||
 						 array->ElementType == ValueType::Atlas)) &&
@@ -1170,8 +1170,8 @@ namespace engine::imagegraph {
 					if (const auto *input =
 							FindCatalogueInput(*entry, id.substr(0, id.size() - BYPASS_SUFFIX.size())))
 						return input->Type;
-					// HLSL source input bypasses also identify authored dynamic argument records.
-					if (node.Type == "pc.hlsl") {
+					// Source bypasses identify declared HLSL arguments and Smooth anchors.
+					if (node.Type == "pc.hlsl" || node.Type == "pc.path_smooth") {
 						const auto inputId = id.substr(0, id.size() - BYPASS_SUFFIX.size());
 						for (const auto &input : node.DynamicInputs)
 							if (input.Id == inputId) return input.Type;
@@ -1195,9 +1195,9 @@ namespace engine::imagegraph {
 		}
 
 		bool WithinArrayBudget(const ArrayValue &array) {
-			if (array.ElementType == ValueType::Particle || array.ElementType == ValueType::Tileset ||
-				array.ElementType == ValueType::Rigid || array.ElementType == ValueType::Atlas ||
-				array.ElementType == ValueType::Strand)
+			if (array.ElementType == ValueType::Path2D || array.ElementType == ValueType::Particle ||
+				array.ElementType == ValueType::Tileset || array.ElementType == ValueType::Rigid ||
+				array.ElementType == ValueType::Atlas || array.ElementType == ValueType::Strand)
 				return detail::ValidPayload(array, true);
 			if (!array.Nested.empty()) {
 				if (array.Nested.size() > Limits::MaximumArrayElements) return false;
@@ -1242,8 +1242,8 @@ namespace engine::imagegraph {
 			if (!array.Nested.empty())
 				return array.ElementType != ValueType::Image && array.ElementType != ValueType::Array &&
 					   (array.ElementType < ValueType::Gradient ||
-						(array.ElementType == ValueType::Area || array.ElementType == ValueType::Enum ||
-						 array.ElementType == ValueType::Particle ||
+						(array.ElementType == ValueType::Path2D || array.ElementType == ValueType::Area ||
+						 array.ElementType == ValueType::Enum || array.ElementType == ValueType::Particle ||
 						 array.ElementType == ValueType::Tileset || array.ElementType == ValueType::Rigid ||
 						 array.ElementType == ValueType::Atlas || array.ElementType == ValueType::Strand)) &&
 					   detail::ValidPayload(array, true);
@@ -1251,10 +1251,11 @@ namespace engine::imagegraph {
 				return detail::ValidPayload(array, false);
 			if (!array.Nested.empty() || !WithinArrayBudget(array) || array.ElementType == ValueType::Image ||
 				array.ElementType == ValueType::Array ||
-				(array.ElementType >= ValueType::Gradient && array.ElementType != ValueType::Area &&
-				 array.ElementType != ValueType::Enum && array.ElementType != ValueType::Particle &&
-				 array.ElementType != ValueType::Tileset && array.ElementType != ValueType::Rigid &&
-				 array.ElementType != ValueType::Atlas && array.ElementType != ValueType::Strand) ||
+				(array.ElementType >= ValueType::Gradient && array.ElementType != ValueType::Path2D &&
+				 array.ElementType != ValueType::Area && array.ElementType != ValueType::Enum &&
+				 array.ElementType != ValueType::Particle && array.ElementType != ValueType::Tileset &&
+				 array.ElementType != ValueType::Rigid && array.ElementType != ValueType::Atlas &&
+				 array.ElementType != ValueType::Strand) ||
 				TypeName(array.ElementType).empty())
 				return false;
 			for (const ElementValue &element : array.Elements)
@@ -1315,6 +1316,7 @@ namespace engine::imagegraph {
 				return "w";
 			case 11:
 				return std::get<Path2D>(value).SourceOperation ? "po"
+					   : std::get<Path2D>(value).SourceSmooth  ? "pm"
 					   : std::get<Path2D>(value).Segmented	   ? "ps"
 															   : "p";
 			case 12:
@@ -1441,7 +1443,12 @@ namespace engine::imagegraph {
 						WriteValue(stream, Value{std::move(child)});
 					}
 					for (const auto &child : operation.Inputs) {
-						stream << ' ' << (child.SourceOperation ? "po" : child.Segmented ? "ps" : "p") << ' ';
+						stream << ' '
+							   << (child.SourceOperation ? "po"
+								   : child.SourceSmooth	 ? "pm"
+								   : child.Segmented	 ? "ps"
+														 : "p")
+							   << ' ';
 						WritePathPayload(stream, child);
 					}
 					return;
@@ -1457,7 +1464,12 @@ namespace engine::imagegraph {
 						WriteValue(stream, Value{std::move(child)});
 					}
 					for (const auto &child : operation.Inputs) {
-						stream << ' ' << (child.SourceOperation ? "po" : child.Segmented ? "ps" : "p") << ' ';
+						stream << ' '
+							   << (child.SourceOperation ? "po"
+								   : child.SourceSmooth	 ? "pm"
+								   : child.Segmented	 ? "ps"
+														 : "p")
+							   << ' ';
 						WritePathPayload(stream, child);
 					}
 					return;
@@ -1553,10 +1565,22 @@ namespace engine::imagegraph {
 					for (uint8_t reverse : operation.Reversed)
 						stream << ' ' << unsigned(reverse);
 				for (const auto &child : operation.Inputs) {
-					stream << ' ' << (child.SourceOperation ? "po" : child.Segmented ? "ps" : "p") << ' ';
+					stream << ' '
+						   << (child.SourceOperation ? "po"
+							   : child.SourceSmooth	 ? "pm"
+							   : child.Segmented	 ? "ps"
+													 : "p")
+						   << ' ';
 					WritePathPayload(stream, child);
 				}
 				return;
+			}
+			if (path.SourceSmooth) {
+				stream << path.SourceSmooth->NormalizedLength << ' ' << path.SourceSmooth->Cache.size()
+					   << ' ';
+				for (const auto &point : path.SourceSmooth->Cache)
+					stream << std::setprecision(17) << point.Distance << ' ' << point.Position.X << ' '
+						   << point.Position.Y << ' ' << point.Weight << ' ';
 			}
 			stream << path.Loop << ' ' << path.Anchors.size() << ' ' << path.Weights.size();
 			for (const auto &anchor : path.Anchors) {
@@ -1986,10 +2010,10 @@ namespace engine::imagegraph {
 				const auto type = ParseType(typeName);
 				if (!type || *type == ValueType::Image || *type == ValueType::Array ||
 					(*type >= ValueType::Gradient &&
-					 !(version >= 9 && (*type == ValueType::Area || *type == ValueType::Enum ||
-										*type == ValueType::Particle || *type == ValueType::Tileset ||
-										*type == ValueType::Rigid || *type == ValueType::Atlas ||
-										*type == ValueType::Strand))))
+					 !(version >= 9 && (*type == ValueType::Path2D || *type == ValueType::Area ||
+										*type == ValueType::Enum || *type == ValueType::Particle ||
+										*type == ValueType::Tileset || *type == ValueType::Rigid ||
+										*type == ValueType::Atlas || *type == ValueType::Strand))))
 					return false;
 				ArrayValue array{*type, {}};
 				if (!admit(count * sizeof(ElementValue))) return false;
@@ -2736,7 +2760,28 @@ namespace engine::imagegraph {
 				value = std::move(path);
 				return true;
 			}
-			if (tag == "p" || (tag == "ps" && version >= 9)) {
+			if (tag == "p" || ((tag == "ps" || tag == "pm") && version >= 9)) {
+				unsigned normalized = 1;
+				SourceSmoothPathPolicy smooth;
+				if (tag == "pm") {
+					size_t cacheCount = 0;
+					if (!(stream >> normalized >> cacheCount) || normalized > 1 ||
+						cacheCount > Limits::MaximumArrayElements || (!normalized && cacheCount))
+						return false;
+					smooth.NormalizedLength = bool(normalized);
+					if (!admit(cacheCount * sizeof(SourceSmoothPathCachePoint))) return false;
+					smooth.Cache.reserve(cacheCount);
+					for (size_t index = 0; index < cacheCount; ++index) {
+						SourceSmoothPathCachePoint point;
+						if (!(stream >> point.Distance >> point.Position.X >> point.Position.Y >>
+							  point.Weight) ||
+							!std::isfinite(point.Distance) || !std::isfinite(point.Position.X) ||
+							!std::isfinite(point.Position.Y) || !std::isfinite(point.Weight) ||
+							(index && !(smooth.Cache.back().Distance < point.Distance)))
+							return false;
+						smooth.Cache.push_back(point);
+					}
+				}
 				unsigned loop = 0;
 				size_t anchorCount = 0, weightCount = 0;
 				if (!(stream >> loop >> anchorCount >> weightCount) || loop > 1 ||
@@ -2744,6 +2789,10 @@ namespace engine::imagegraph {
 					return false;
 				Path2D path;
 				path.Segmented = tag == "ps";
+				if (tag == "pm") {
+					if (!admit(sizeof(SourceSmoothPathPolicy))) return false;
+					path.SourceSmooth.emplace() = std::move(smooth);
+				}
 				path.Loop = loop != 0;
 				if (!admit(anchorCount * sizeof(PathAnchor) + weightCount * sizeof(PathWeight))) return false;
 				path.Anchors.reserve(anchorCount);
@@ -2762,6 +2811,7 @@ namespace engine::imagegraph {
 						return false;
 					path.Weights.push_back(weight);
 				}
+				if (tag == "pm" && !detail::ValidSourcePath2D(path)) return false;
 				value = std::move(path);
 				return true;
 			}
@@ -5527,11 +5577,11 @@ namespace engine::imagegraph {
 			const auto recursive = [](const Value &value) {
 				const auto *array = std::get_if<ArrayValue>(&value);
 				const auto *path = std::get_if<Path2D>(&value);
-				if (path && (path->Segmented || path->SourceOperation)) return true;
+				if (path && (path->Segmented || path->SourceOperation || path->SourceSmooth)) return true;
 				if (array) {
 					const auto segmented = [](const ElementValue &element) {
 						const auto *p = std::get_if<Path2D>(&element);
-						return p && (p->Segmented || p->SourceOperation);
+						return p && (p->Segmented || p->SourceOperation || p->SourceSmooth);
 					};
 					for (const auto &element : array->Elements)
 						if (segmented(element)) return true;
@@ -6052,7 +6102,9 @@ namespace engine::imagegraph {
 						return diagnostic.Code;
 					}
 					const auto *array = std::get_if<ArrayValue>(&*input.Default);
-					if (!IsFinite(*input.Default) || (array && !ValidArray(*array))) {
+					const bool smoothAnchorArray =
+						node.Type == "pc.path_smooth" && dynamicArray && sourceDefault;
+					if (!smoothAnchorArray && (!IsFinite(*input.Default) || (array && !ValidArray(*array)))) {
 						SetDiagnostic(
 							diagnostic,
 							Status::InvalidValue,
@@ -15406,6 +15458,18 @@ namespace engine::imagegraph {
 					if (link != plan.EffectiveLinks.end()) {
 						context.LinkedValues.emplace_back(input.Id);
 						const size_t sourceIndex = nodeIndices.at(link->FromNode);
+						if (node.Type == "pc.path_smooth" && produced[sourceIndex]) {
+							size_t group = 0;
+							const auto *slot = FindDynamicTemplate(*catalogueEntry, input.Id, group);
+							if (slot && slot->Id == "anchor")
+								if (const Image *image =
+										FindImageOutput(results[sourceIndex], link->FromPort)) {
+									context.Values.emplace_back(
+										input.Id, Vector2{double(image->Width), double(image->Height)}
+									);
+									continue;
+								}
+						}
 						if (input.Type == ValueType::Any && produced[sourceIndex]) {
 							if (const ImageArray *array =
 									FindImageArrayOutput(results[sourceIndex], link->FromPort)) {

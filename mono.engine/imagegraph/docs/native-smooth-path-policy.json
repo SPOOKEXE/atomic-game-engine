@@ -1,0 +1,160 @@
+{
+  "profile": "native-source-smooth-path",
+  "node": "pc.path_smooth",
+  "source": {
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "documentation": "https://docs.pixel-composer.com/nodes/values/path/creator/path_smooth.html",
+    "files": {
+      "scripts/node_path_smooth/node_path_smooth.gml": "04b768b67d57eab9f91ad9d018cef480816a8e12e261899dc4abfa2cdae6afc0",
+      "scripts/__path/__path.gml": "5a3243e1bac128dfd342e6f4488d9e82e46ce4cada72e15677cd9b3cf4c7945d"
+    },
+    "licensed_runtime_parity": "unknown"
+  },
+  "physical_inputs": [
+    {
+      "index": 0,
+      "port": "loop",
+      "default": false
+    },
+    {
+      "index": 1,
+      "port": "round_anchor",
+      "default": false
+    },
+    {
+      "index": 2,
+      "port": "smoothness",
+      "default": 3
+    },
+    {
+      "index": 3,
+      "port": "sample_path",
+      "default": 0
+    },
+    {
+      "index": 4,
+      "port": "sample_mode",
+      "default": 0,
+      "choices": [
+        "Entire line",
+        "Segment"
+      ]
+    },
+    {
+      "index": 5,
+      "port": "normalized_length",
+      "default": true
+    }
+  ],
+  "dynamic_inputs": "grug take ordered anchor sockets as coordinate pairs or one level of coordinate rows. source depth follows the first child; deeper rows are ignored. linked numeric values duplicate into both coordinates. native Any arrays retain Vector3, Vector4 and Quaternion rows through saves; standalone typed arrays of those three kinds remain outside the authored native schema.",
+  "geometry": {
+    "rounding": "ties to even before generating handles",
+    "handles": "wrapped previous-to-next direction; adjacent distance divided by smoothness; open endpoint handles cleared; two anchors have zero handles",
+    "length_and_bounds": "32 points per segment at j/32 for j in [0,31]; omit the final subinterval and endpoint",
+    "entire_line": "signed frac(sample) times measured length; loop wraps distance, open path clamps distance to [0,length]",
+    "normalized": "walk measured segment lengths, then use the selected segment distance fraction",
+    "unnormalized": "map distance/length through anchor count, including the closing segment on open paths",
+    "segment": "floor(sample) and floor(sample)+1 use independent signed remainders; refuse undefined negative indices"
+  },
+  "state_and_cache": {
+    "empty_refresh": "retain previous Position output; fresh constructor starts at [0,0]",
+    "singleton": "Entire line returns origin; Segment samples the lone anchor",
+    "memo_key": "exact original distance before wrapping or clamping",
+    "memo_value": "sampled XY and the first caller's weight",
+    "memo_scope": "normalized-length sampling shares one evaluation-owned producer identity across consumers; unnormalized sampling does not cache",
+    "producer_refresh": "clear sample cache before the producer's initial Position query",
+    "native_persistence": "format 9 pm stores normalized-length policy and sorted finite unique distance snapshots; transient evaluation identities are excluded"
+  },
+  "bounds": {
+    "anchors": 1024,
+    "runtime_work": 64000000,
+    "memo_lookup_work": 16777216,
+    "memo_entries": 4096,
+    "bytes": "admit output clones, path runtime workspace, replay entries and memo storage before allocation",
+    "refusal": "malformed coordinates, nonfinite geometry and undefined selected zero-length segments refuse atomically"
+  },
+  "validation": {
+    "status": "accepted",
+    "receipt": "docs/pixel-composer-m0/native-smooth-path-validation-2026-10-08.json",
+    "batch": 80,
+    "results": {
+      "checks": 20,
+      "native_binary_cases": 6253,
+      "startup_cases": 1,
+      "python_cases": 116,
+      "cli_cases": 16,
+      "optimized_workload_cases": 41,
+      "optimized_workload_assertions": 2268481,
+      "bake": {
+        "cases": 161,
+        "assertions": 15997
+      },
+      "physics": {
+        "cases": 43,
+        "assertions": 715
+      },
+      "runner": {
+        "cases": 29,
+        "assertions": 296
+      },
+      "font": {
+        "cases": 43,
+        "assertions": 1845
+      },
+      "export": {
+        "cases": 95,
+        "assertions": 3401
+      },
+      "render": {
+        "cases": 33,
+        "assertions": 2006
+      },
+      "io": {
+        "cases": 422,
+        "assertions": 20016
+      },
+      "core": {
+        "cases": 3778,
+        "assertions": 4410752
+      },
+      "assetc": {
+        "cases": 49,
+        "assertions": 563
+      },
+      "client": {
+        "cases": 359,
+        "assertions": 23855
+      },
+      "studio": {
+        "cases": 1159,
+        "assertions": 51329
+      },
+      "nodegraph": {
+        "cases": 42,
+        "assertions": 410
+      },
+      "ui": {
+        "cases": 40,
+        "assertions": 704
+      },
+      "startup": {
+        "cases": 1,
+        "assertions": 5
+      }
+    },
+    "desktop_parity": "unknown",
+    "licensed_executable_parity": "unknown",
+    "live_studio": "not run",
+    "gpu_or_licensed_parity_claim": false
+  },
+  "native_references": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourceSmoothPathNodes.cpp",
+    "runtime": "mono.engine/imagegraph/src/nodes/Path.hpp",
+    "memo": "mono.engine/imagegraph/src/SourcePathShiftMemo.hpp",
+    "core_fixtures": [
+      "mono.engine/imagegraph/tests/SourceSmoothPath.cpp",
+      "mono.engine/imagegraph/tests/SourceSmoothPathWorkloads.cpp"
+    ],
+    "io_fixture": "mono.engine/imagegraphio/tests/PxcxSmoothPath.cpp"
+  }
+}

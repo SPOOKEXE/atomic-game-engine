@@ -2800,7 +2800,8 @@ namespace engine::imagegraphio {
 									return index;
 						}
 					}
-					if (entry->Type == "pc.hlsl" && port.ends_with(".bypass")) {
+					if ((entry->Type == "pc.hlsl" || entry->Type == "pc.path_smooth") &&
+						port.ends_with(".bypass")) {
 						const auto inputPort = port.substr(0, port.size() - 7);
 						const auto *owner = NativeNode(desired, record.value("id", ""));
 						size_t group = 0;

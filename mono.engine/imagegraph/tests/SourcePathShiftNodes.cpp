@@ -410,7 +410,7 @@ TEST_CASE(
 	detail::StripSourcePathShiftIdentities(value);
 	detail::SourcePathShiftRoute route;
 	size_t visited = 0;
-	auto check = [&](const SourcePathData2D &operation, const detail::SourcePathShiftRoute &) {
+	auto check = [&](const auto &operation, const detail::SourcePathShiftRoute &) {
 		CHECK(operation.EvaluationMemoId == 0);
 		++visited;
 		return true;

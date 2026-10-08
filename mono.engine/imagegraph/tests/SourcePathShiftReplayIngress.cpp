@@ -200,12 +200,12 @@ TEST_CASE(
 	);
 	size_t originals = 0, cleared = 0;
 	detail::SourcePathShiftRoute route;
-	auto before = [&](const SourcePathData2D &op, const detail::SourcePathShiftRoute &) {
+	auto before = [&](const auto &op, const detail::SourcePathShiftRoute &) {
 		CHECK(op.EvaluationMemoId == 17);
 		++originals;
 		return true;
 	};
-	auto after = [&](const SourcePathData2D &op, const detail::SourcePathShiftRoute &) {
+	auto after = [&](const auto &op, const detail::SourcePathShiftRoute &) {
 		CHECK(op.EvaluationMemoId == 0);
 		++cleared;
 		return true;

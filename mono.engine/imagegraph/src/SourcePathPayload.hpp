@@ -27,6 +27,22 @@ namespace engine::imagegraph::detail {
 				if (!std::isfinite(value)) return false;
 		for (const auto &weight : path.Weights)
 			if (!std::isfinite(weight.Position) || !std::isfinite(weight.Weight)) return false;
+		if (path.SourceSmooth) {
+			const auto &smooth = *path.SourceSmooth;
+			if (path.Segmented || path.SourceOperation ||
+				(!smooth.NormalizedLength && !smooth.Cache.empty()) ||
+				smooth.Cache.size() > Limits::MaximumArrayElements - *count)
+				return false;
+			*count += smooth.Cache.size();
+			// Ordered insertion makes duplicate checks bounded without temporary validation allocations.
+			for (size_t index = 0; index < smooth.Cache.size(); ++index) {
+				const auto &point = smooth.Cache[index];
+				if (!std::isfinite(point.Distance) || !std::isfinite(point.Position.X) ||
+					!std::isfinite(point.Position.Y) || !std::isfinite(point.Weight) ||
+					(index && !(smooth.Cache[index - 1].Distance < point.Distance)))
+					return false;
+			}
+		}
 		if (!path.SourceOperation) return true;
 		if (path.Loop || path.Segmented || !path.Anchors.empty() || !path.Weights.empty()) return false;
 		const auto &op = *path.SourceOperation;
@@ -204,6 +220,10 @@ namespace engine::imagegraph::detail {
 		if (depth > Limits::MaximumArrayDepth) return std::numeric_limits<uint64_t>::max();
 		uint64_t bytes = (Retained ? path.Anchors.capacity() : path.Anchors.size()) * sizeof(PathAnchor) +
 						 (Retained ? path.Weights.capacity() : path.Weights.size()) * sizeof(PathWeight);
+		if (path.SourceSmooth)
+			bytes += sizeof(SourceSmoothPathPolicy) +
+					 (Retained ? path.SourceSmooth->Cache.capacity() : path.SourceSmooth->Cache.size()) *
+						 sizeof(SourceSmoothPathCachePoint);
 		if (path.SourceOperation) {
 			const auto &op = *path.SourceOperation;
 			const uint64_t own = sizeof(op) +

@@ -3833,7 +3833,8 @@ namespace engine::imagegraphio {
 			// node_data.gml getOutputIndex: 1000 + n connects the bypass junction of input n.
 			if (index >= 1000) {
 				const uint32_t physical = index - 1000;
-				if (entry.Type == "pc.hlsl" && physical >= uint32_t(entry.DynamicFixedLength) &&
+				if ((entry.Type == "pc.hlsl" || entry.Type == "pc.path_smooth") &&
+					physical >= uint32_t(entry.DynamicFixedLength) &&
 					physical - uint32_t(entry.DynamicFixedLength) <
 						imagegraph::MaximumDynamicInputsForType(entry.Type)) {
 					const auto port = CatalogueInputPort(entry, physical);
@@ -3871,7 +3872,9 @@ namespace engine::imagegraphio {
 			bool admitCommon
 		) {
 			const auto declared = [&](uint32_t physical) {
-				if (entry.Type != "pc.hlsl" || physical < uint32_t(entry.DynamicFixedLength)) return true;
+				if ((entry.Type != "pc.hlsl" && entry.Type != "pc.path_smooth") ||
+					physical < uint32_t(entry.DynamicFixedLength))
+					return true;
 				const auto port = CatalogueInputPort(entry, physical);
 				return mappedNode && std::any_of(
 										 mappedNode->DynamicInputs.begin(),
@@ -3889,7 +3892,9 @@ namespace engine::imagegraphio {
 					 !declared(link.FromIndex - 1000)) ||
 					(link.ToNode == node.Id && !link.DestinationUpdateTrigger &&
 					 !declared(link.ToInputIndex))) {
-					reason = "HLSL link refers to an undeclared dynamic source input";
+					reason = entry.Type == "pc.hlsl"
+								 ? "HLSL link refers to an undeclared dynamic source input"
+								 : "Smooth Path link refers to an undeclared dynamic source input";
 					return false;
 				}
 				if (link.FromNode == node.Id && !ReservedSourceOutput(link) &&
