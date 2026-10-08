@@ -129,6 +129,67 @@ TEST_CASE(
 	CHECK(FindCatalogueInput(*FindCatalogueEntry("pc.argument"), "default_value")->Type == ValueType::Any);
 	CHECK(FindCatalogueEntry("pc.argument")->Outputs[0].Type == ValueType::Any);
 }
+TEST_CASE("Argument hex numbers round the complete source integer once", "[source_argument][argument_hex]") {
+	const std::vector<std::pair<std::string, double>> samples{
+		{"0x1000000000000081", 0x1.0000000000001p60},
+		{"0x100000000000007f", 0x1p60},
+		{"0x1000000000000080", 0x1p60},
+		{"0x1000000000000180", 0x1.0000000000002p60},
+		{"0x1000000000000181tail", 0x1.0000000000002p60},
+		{"0x20000000000001", 0x1p53},
+		{"0x20000000000003", 0x1.0000000000002p53},
+		{"0xAbCdEf", 11259375.},
+		{"0x0000000000000000", 0.},
+		{"0x", 0.},
+		{"0xjunk", 0.},
+		{"0x1.8", 1.},
+		{"0x1p12", 1.},
+		{"0x-1", 0.},
+		{"0x+1", 0.},
+		{"+0xff", 0.},
+		{"-0xff", -0.},
+		{"0Xff", 0.},
+		{" 0xff", 0.},
+		{"0x" + std::string(512, '0') + "1000000000000081suffix", 0x1.0000000000001p60},
+		{"0x" + std::string(13, 'f') + "8" + std::string(242, '0'), std::numeric_limits<double>::max()}
+	};
+	for (const auto &[text, expected] : samples) {
+		INFO(text);
+		auto host = Provider({{"name", text}});
+		for (bool supplied : {true, false}) {
+			const auto result = Evaluated(supplied ? Graph(1) : Graph(1, text, "absent"), &host);
+			REQUIRE(std::holds_alternative<double>(result));
+			CHECK(std::get<double>(result) == expected);
+			CHECK(std::signbit(std::get<double>(result)) == std::signbit(expected));
+		}
+	}
+}
+
+TEST_CASE(
+	"Argument hex overflow preserves the previous source observation", "[source_argument][argument_hex]"
+) {
+	const std::vector<std::string> samples{
+		"0x1" + std::string(256, '0'),
+		"0x" + std::string(256, 'f') + "suffix",
+		"0x" + std::string(512, '0') + "1" + std::string(256, '0')
+	};
+	for (const auto &text : samples) {
+		INFO(text);
+		auto host = Provider({{"name", text}});
+		for (bool supplied : {true, false}) {
+			auto d = supplied ? Graph(1) : Graph(1, text, "absent");
+			auto p = Compiled(d);
+			EvaluationRequest request;
+			request.HostProvider = &host;
+			EvaluatedValue output;
+			output.Data = int64_t{73};
+			const auto previous = output;
+			Diagnostic diagnostic;
+			CHECK(EvaluateValue(d, p, "out", request, output, diagnostic) == Status::UnsupportedExecution);
+			CHECK(output == previous);
+		}
+	}
+}
 TEST_CASE(
 	"Argument dynamic resolved Type changes mode without changing authored carrier", "[source_argument]"
 ) {

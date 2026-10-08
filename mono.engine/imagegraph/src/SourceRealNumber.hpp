@@ -16,18 +16,23 @@ namespace engine::imagegraph::detail {
 	inline std::optional<double> SourceRealTextNumber(std::string_view input) {
 		if (input.size() > Limits::MaximumTextBytes) return {};
 		if (input.starts_with("0x")) {
-			double number = 0;
+			input.remove_prefix(2);
 			size_t count = 0;
-			for (char c : input.substr(2)) {
-				int digit = c >= '0' && c <= '9'   ? c - '0'
-							: c >= 'a' && c <= 'f' ? c - 'a' + 10
-							: c >= 'A' && c <= 'F' ? c - 'A' + 10
-												   : -1;
-				if (digit < 0) break;
-				number = number * 16 + digit;
+			for (char digit : input) {
+				if (!((digit >= '0' && digit <= '9') || (digit >= 'a' && digit <= 'f') ||
+					  (digit >= 'A' && digit <= 'F')))
+					break;
 				++count;
 			}
-			return std::isfinite(number) ? std::optional<double>{count ? number : 0.} : std::nullopt;
+			if (!count) return 0.;
+			// parseInt rounds the whole integer once. Repeated digit arithmetic loses low rounding bits.
+			// Limit the hex grammar to its integer prefix, excluding dots and binary exponents.
+			double number = 0;
+			const auto parsed =
+				std::from_chars(input.data(), input.data() + count, number, std::chars_format::hex);
+			return parsed.ec == std::errc{} && parsed.ptr == input.data() + count && std::isfinite(number)
+					   ? std::optional<double>{number}
+					   : std::nullopt;
 		}
 		// grug match parseFloat leading whitespace without a locale or a Unicode database.
 		constexpr std::array<std::string_view, 19> unicodeSpaces{

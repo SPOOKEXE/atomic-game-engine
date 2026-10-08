@@ -111,6 +111,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Preserve source timeline endpoints through native saves, PXC edits and integral-frame exports; pass joined CPU validation.
 - [x] Verify real font decoding, Unicode Text pixels and font artifacts; profile all seven boundary workloads.
 - [x] Add separate/combine X/Y controls with processed input receipts, numeric tuple playback and atomic undo; pass headless gesture and save/reopen checks. Live Studio verification remains open.
+- [x] Round source hexadecimal arguments once; preserve prefix parsing and atomic overflow refusal.
 - [_] Add source-compatible argument handling.
 - [_] Bind cache playback and loading to selected animation-region bounds.
 - [_] Complete remaining Composer GPU checks.
@@ -123,6 +124,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Finish cache groups.
 - [_] Finish export formats.
 - [_] Finish feedback seek/reset and fractional-key playback.
+- [x] Preserve signed observed Cache clocks, Cache Array ranges and source resize ordering; pass joined checks.
 - [_] Finish fractional cache playback.
 - [_] Finish large-sequence playback.
 - [_] Finish mesh consumers and bindings.

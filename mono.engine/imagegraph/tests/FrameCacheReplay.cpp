@@ -8,6 +8,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <limits>
+
 TEST_SUITE_ID("engine.imagegraph.frame_cache_replay")
 using namespace engine::imagegraph;
 namespace {
@@ -529,16 +531,6 @@ TEST_CASE(
 	StatefulEvaluationResult r = initial;
 	Diagnostic e;
 	EvaluationRequest q;
-	q.DataReplay = &prior;
-	CHECK(EvaluateStateful(d, Compiled(d), "out", q, r, e) == Status::UnsupportedExecution);
-	SameOutput(r, initial);
-	CHECK(r.Data == initial.Data);
-	CHECK(r.Simulation == initial.Simulation);
-	CHECK(r.Surfaces == initial.Surfaces);
-	CHECK(r.Random == initial.Random);
-	CHECK(r.Rigid == initial.Rigid);
-	q = Clock(1);
-	q.NegativeFrame = true;
 	q.DataReplay = &prior;
 	CHECK(EvaluateStateful(d, Compiled(d), "out", q, r, e) == Status::UnsupportedExecution);
 	SameOutput(r, initial);
@@ -3227,4 +3219,248 @@ TEST_CASE(
 		);
 		CHECK(*request.DataReplay == captured);
 	}
+}
+
+TEST_CASE(
+	"Negative observed Cache clocks publish live inputs without storing magnitude slots",
+	"[imagegraph][source_frame_cache]"
+) {
+	auto document = Scene();
+	const auto captured = Run(document, Clock(1));
+	const auto original = captured.Data;
+	ColourAt(document, 99);
+	for (const FrameTime clock : {FrameTime{1, 0, true}, FrameTime{0, .25, true}, FrameTime{1, .75, true}}) {
+		for (const bool warm : {false, true}) {
+			EvaluationRequest request = Clock(clock.Tick);
+			request.Subframe = clock.Subframe;
+			request.NegativeFrame = true;
+			const auto played = Run(document, request, warm ? &captured.Data : nullptr);
+			CHECK(Red(played) == 99);
+			const auto &values = Row(played.Data).Values;
+			REQUIRE(values.size() == (warm ? 3 : 2));
+			if (warm) CHECK(values[2] == Row(original).Values[2]);
+			request.SourceCachePlayback->Playing = false;
+			const auto paused = Run(document, request, &played.Data);
+			CHECK(Red(paused) == 99);
+			CHECK(Row(paused.Data).Values == values);
+		}
+		CHECK(captured.Data == original);
+	}
+}
+TEST_CASE(
+	"Negative paused Cache retains last output and skips unread producer getters",
+	"[imagegraph][source_frame_cache]"
+) {
+	auto document = Scene();
+	const auto captured = Run(document, Clock(1));
+	AddUnreadableCacheGetters(document);
+	document.Links.pop_back();
+	document.Nodes.pop_back();
+	auto request = Clock(1, false);
+	request.Subframe = .5;
+	request.NegativeFrame = true;
+	const auto paused = Run(document, request, &captured.Data);
+	CHECK(Red(paused) == 10);
+	CHECK(Row(paused.Data).Values == Row(captured.Data).Values);
+	const auto cold = Run(document, request);
+	CHECK(std::get<int64_t>(std::get<EvaluatedValue>(cold.Output).Data) == -4);
+	CHECK(Row(cold.Data).Values.size() == 2);
+	request.SourceCachePlayback->Playing = true;
+	request.DataReplay = &captured.Data;
+	StatefulEvaluationResult refused = captured;
+	Diagnostic diagnostic;
+	CHECK(
+		EvaluateStateful(document, Compiled(document), "out", request, refused, diagnostic) ==
+		Status::UnsupportedExecution
+	);
+	SameOutput(refused, captured);
+	CHECK(refused.Data == captured.Data);
+}
+TEST_CASE(
+	"Negative Cache Array clocks compare signed ranges and preserve integer cache slots",
+	"[imagegraph][source_frame_cache]"
+) {
+	auto document = Scene(true);
+	const auto captured = Run(document, Clock(1));
+	const auto original = captured.Data;
+	ColourAt(document, 99);
+	for (const FrameTime clock : {FrameTime{1, 0, true}, FrameTime{0, .25, true}, FrameTime{1, .75, true}}) {
+		for (const bool playing : {false, true}) {
+			auto request = Clock(clock.Tick, playing);
+			request.Subframe = clock.Subframe;
+			request.NegativeFrame = true;
+			const auto retained = Run(document, request, &captured.Data);
+			CHECK(Slots(retained) == Slots(captured));
+			CHECK(Row(retained.Data).Values == Row(captured.Data).Values);
+			const auto cold = Run(document, request);
+			CHECK(Slots(cold).empty());
+			CHECK(Row(cold.Data).Values.size() == 2);
+		}
+	}
+	// Source Start frame zero admits [-1, stop), with a missing negative slot.
+	document.Nodes[1].Values[0].Data = int64_t{0};
+	auto request = Clock(0);
+	request.Subframe = .25;
+	request.NegativeFrame = true;
+	const auto expanded = Run(document, request, &captured.Data);
+	CHECK(Slots(expanded) == std::vector<int>{-1, -1, 10, -1, -1, -1, -1});
+	CHECK(Row(expanded.Data).Values.size() == Row(captured.Data).Values.size());
+	CHECK(Row(expanded.Data).Values[2] == Row(captured.Data).Values[2]);
+	request.Tick = 1;
+	request.Subframe = 0;
+	CHECK(Slots(Run(document, request, &captured.Data)) == Slots(expanded));
+	request.Subframe = .25;
+	CHECK(Slots(Run(document, request, &captured.Data)) == Slots(captured));
+	CHECK(captured.Data == original);
+}
+TEST_CASE(
+	"Negative Cache observations preserve decoded and native saved packets",
+	"[imagegraph][source_frame_cache]"
+) {
+	for (const bool array : {false, true})
+		for (const bool native : {false, true}) {
+			auto document = Scene(array);
+			const auto saved = CookRow(array);
+			DataReplayState loads{{saved}};
+			document.Nodes[1].SourceProperties =
+				native ? NativeNode(saved).SourceProperties
+					   : std::vector<AuthoredValue>{{"cache", saved.LoadedCacheData}};
+			const auto properties = document.Nodes[1].SourceProperties;
+			ColourAt(document, 99);
+			for (const bool playing : {false, true}) {
+				auto request = Clock(0, playing);
+				request.Subframe = .75;
+				request.NegativeFrame = true;
+				if (!native) request.SourceFrameCacheLoads = &loads;
+				const auto result = Run(document, request);
+				const auto &values = Row(result.Data).Values;
+				REQUIRE(values.size() == saved.Values.size());
+				CHECK(values[2] == saved.Values[2]);
+				CHECK(values[3] == saved.Values[3]);
+				if (array)
+					CHECK(Slots(result).empty());
+				else if (playing)
+					CHECK(Red(result) == 99);
+				else
+					CHECK(std::get<int64_t>(std::get<EvaluatedValue>(result.Output).Data) == -4);
+				CHECK(loads.Entries[0] == saved);
+				CHECK(document.Nodes[1].SourceProperties == properties);
+			}
+		}
+}
+TEST_CASE(
+	"Observed Cache host preserves positive slots through negative seeks and paused retries",
+	"[imagegraph][source_frame_cache]"
+) {
+	auto document = Scene();
+	const auto plan = Compiled(document);
+	CapturedFeedbackHost host;
+	Diagnostic diagnostic;
+	auto request = Clock(1);
+	REQUIRE(host.Prepare(document, plan, 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "out"));
+	const auto positive = *request.DataReplay;
+	request = Clock(0);
+	request.Subframe = .5;
+	request.NegativeFrame = true;
+	REQUIRE(host.Prepare(document, plan, 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "out"));
+	CHECK(Row(*request.DataReplay).Values == Row(positive).Values);
+	const auto negative = *request.DataReplay;
+	request = Clock(0, false);
+	request.Subframe = .5;
+	request.NegativeFrame = true;
+	REQUIRE(host.Prepare(document, plan, 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "out"));
+	CHECK(Row(*request.DataReplay).Values == Row(negative).Values);
+	request = Clock(1, false);
+	REQUIRE(host.Prepare(document, plan, 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "out"));
+	CHECK(Row(*request.DataReplay).Values == Row(positive).Values);
+	request = Clock(1, true, SourceCacheSampling::NativePlayedPrefix);
+	request.NegativeFrame = true;
+	REQUIRE_FALSE(
+		host.Prepare(document, plan, 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "out")
+	);
+	REQUIRE(request.DataReplay == nullptr);
+	request = Clock(1, false);
+	REQUIRE(host.Prepare(document, plan, 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "out"));
+	REQUIRE(request.DataReplay);
+	CHECK(Row(*request.DataReplay).Values == Row(positive).Values);
+}
+
+TEST_CASE(
+	"Negative Cache clocks retain source resize ordering without mutating saved receipts",
+	"[imagegraph][source_frame_cache]"
+) {
+	auto document = Scene();
+	const auto saved = CookRow();
+	DataReplayState loads{{saved}};
+	document.Nodes[1].SourceProperties = NativeNode(saved).SourceProperties;
+	const auto properties = document.Nodes[1].SourceProperties;
+	document.Timeline = TimelineSettings{1, 0, 0, "stop", 24};
+	auto request = Clock(0);
+	request.Subframe = .5;
+	request.NegativeFrame = true;
+	const auto loaded = Run(document, request);
+	REQUIRE(Row(loaded.Data).Values.size() == 3);
+	CHECK(Row(loaded.Data).Values[2] == saved.Values[2]);
+	const auto warm = Run(document, request, &loads);
+	REQUIRE(Row(warm.Data).Values.size() == 3);
+	CHECK(Row(warm.Data).Values[2] == saved.Values[2]);
+	CHECK(loads.Entries[0] == saved);
+	CHECK(document.Nodes[1].SourceProperties == properties);
+}
+TEST_CASE(
+	"Negative scoped Cache clocks respect selected project endpoint and loading group gates",
+	"[imagegraph][source_frame_cache][cache_group]"
+) {
+	for (const bool array : {false, true})
+		for (int gate = 0; gate < 4; ++gate) {
+			auto document = Scene(array);
+			document.Nodes[1].SourceProperties = {
+				{"cache_group", ArrayValue{ValueType::Text, {std::string{"input"}}}}
+			};
+			auto first = Clock(0);
+			first.SourceCacheProject = SourceFrameCacheProjectObservation{{0, 0, false}, 5, false, false};
+			const auto captured = Run(document, first);
+			const auto original = captured.Data;
+			auto request = Clock(0);
+			request.Subframe = .5;
+			request.NegativeFrame = true;
+			request.SourceCacheProject =
+				SourceFrameCacheProjectObservation{{5, 0, false}, gate == 3 ? 6. : 5., gate == 1, gate == 2};
+			const auto observed = Run(document, request, &captured.Data);
+			bool sawInput = false;
+			for (const auto &node : observed.Data.CacheGroups.Nodes)
+				if (node.NodeId == "input") {
+					sawInput = true;
+					CHECK(node.RenderActive == (gate != 0));
+				}
+			CHECK(sawInput);
+			CHECK(Row(observed.Data).Values.size() == Row(original).Values.size());
+			CHECK(Row(observed.Data).Values[2] == Row(original).Values[2]);
+			CHECK(captured.Data == original);
+		}
+}
+TEST_CASE(
+	"Signed Cache Array range arithmetic bounds oversized distances and strides",
+	"[imagegraph][source_frame_cache]"
+) {
+	auto document = Scene(true);
+	document.Nodes[1].Values[0].Data = int64_t{0};
+	document.Nodes[1].Values[1].Data = std::numeric_limits<int64_t>::max();
+	document.Nodes[1].Values[2].Data = std::numeric_limits<int64_t>::max();
+	auto request = Clock(0);
+	request.Subframe = .25;
+	request.NegativeFrame = true;
+	const auto wideStride = Run(document, request);
+	CHECK(Slots(wideStride) == std::vector<int>{-1, -1});
+	CHECK(Row(wideStride.Data).Values.size() == 2);
+	document.Nodes[1].Values[2].Data = int64_t{1};
+	StatefulEvaluationResult refused = wideStride;
+	Diagnostic diagnostic;
+	CHECK(
+		EvaluateStateful(document, Compiled(document), "out", request, refused, diagnostic) ==
+		Status::LimitExceeded
+	);
+	CHECK(diagnostic.Message == "Cache Array output count exceeds bounds");
+	SameOutput(refused, wideStride);
+	CHECK(refused.Data == wideStride.Data);
 }

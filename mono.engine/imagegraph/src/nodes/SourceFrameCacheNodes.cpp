@@ -73,10 +73,10 @@ namespace engine::imagegraph::detail {
 			nonemptyGroup = group && !group->Elements.empty();
 			if (serialize && saved && saved->empty())
 				return c.Fail(Status::InvalidValue, "enabled serialized source cache text is empty", "cache");
-			if (c.Request.NegativeFrame)
+			if (c.Request.NegativeFrame && observation.Sampling == SourceCacheSampling::NativePlayedPrefix)
 				return c.Fail(
 					Status::UnsupportedExecution,
-					"native frame-cache storage requires nonnegative source frames"
+					"native played-prefix sampling requires nonnegative source frames"
 				);
 			return true;
 		}
@@ -280,12 +280,13 @@ namespace engine::imagegraph::detail {
 			const Value empty = array ? Value{ArrayValue{ValueType::Any, {}}} : Value{int64_t{-4}};
 			const Value *output = previous ? SourceFrameCacheLastOutput(*previous) : &empty;
 			bool capture = false;
-			uint64_t count = 0, first = 0, last = 0, step = 1;
+			uint64_t count = 0;
+			int64_t first = 0, last = 0, step = 1;
 			// Cache loads exactly TOTAL_FRAMES slots. Cache Array restores every serialized slot.
 			const uint64_t loadLimit = loadedNow && !array ? total + 2 : UINT64_MAX;
 			// grug source arrays truncate nonnegative clocks. animation getters keep the full clock;
 			// the cache owns one integer slot for every containing frame.
-			const auto *hit = c.Request.Tick + 2 < loadLimit
+			const auto *hit = !c.Request.NegativeFrame && c.Request.Tick + 2 < loadLimit
 								  ? SourceFrameCacheExistingFrame(previous, c.Request.Tick)
 								  : nullptr;
 			double animated = previous ? previous->PreviousValue : 1;
@@ -314,13 +315,15 @@ namespace engine::imagegraph::detail {
 				if (end >= begin && stride > 0) {
 					if (!GroupActionAvailable(c, groupEnabled, true)) return false;
 				}
-				if (end >= begin && stride > 0 && int64_t(c.Request.Tick) >= begin &&
-					int64_t(c.Request.Tick) < end) {
+				const auto frame =
+					FrameTimeToReal({c.Request.Tick, c.Request.Subframe, c.Request.NegativeFrame});
+				if (end >= begin && stride > 0 && frame >= begin && frame < end) {
 
-					first = uint64_t(begin);
-					last = uint64_t(end);
-					step = uint64_t(stride);
-					count = (last - first - 1) / step + 1;
+					first = begin;
+					last = end;
+					step = stride;
+					// Unsigned distance also covers [-1, INT64_MAX) without signed overflow.
+					count = (uint64_t(last) - uint64_t(first) - 1) / uint64_t(step) + 1;
 					if (count > Limits::MaximumArrayElements)
 						return c.Fail(Status::LimitExceeded, "Cache Array output count exceeds bounds");
 					capture = true;
@@ -331,7 +334,8 @@ namespace engine::imagegraph::detail {
 			InputView input;
 			if (useInput && !ReadInput(c, input)) return false;
 			if (!array && useInput && !GroupActionAvailable(c, groupEnabled, true)) return false;
-			const bool writeFrame = capture && c.Request.Tick <= total;
+			// Negative source clocks may publish an input, but never own an array slot.
+			const bool writeFrame = capture && !c.Request.NegativeFrame && c.Request.Tick <= total;
 			// Auto-cache hits skip cacheCurrentFrame. Misses resize first, including paused misses
 			// and captures beyond the current duration; manual Cache Array resizes only on capture.
 			const uint64_t frameLimit = capture ? std::min(loadLimit, total + 3) : loadLimit;
@@ -409,8 +413,10 @@ namespace engine::imagegraph::detail {
 			} else if (capture) {
 				source_array::Items items;
 				items.reserve(size_t(count));
-				for (uint64_t frame = first; frame < last; frame += step) {
-					const Value *value = SourceFrameCacheExistingFrame(&state, frame);
+				int64_t frame = first;
+				for (uint64_t index = 0; index < count; ++index) {
+					const Value *value =
+						frame < 0 ? nullptr : SourceFrameCacheExistingFrame(&state, uint64_t(frame));
 					if (!value)
 						items.push_back({ElementValue{int64_t{-1}}});
 					else if (const auto *surface = std::get_if<SurfaceValue>(value))
@@ -419,6 +425,7 @@ namespace engine::imagegraph::detail {
 						items.push_back({source_array::FromValues(*members)});
 					else
 						items.push_back(source_array::SourceLeaf(*value));
+					if (index + 1 < count) frame += step;
 				}
 				ArrayValue value{ValueType::Any, {}};
 				value.Items = std::move(items);
