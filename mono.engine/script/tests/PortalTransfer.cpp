@@ -1626,6 +1626,17 @@ TEST_CASE(
 	"[script][portal-transfer][portal-observation][portal-catch-up]"
 ) {
 	Pair pair;
+	pair.Worlds.Enter(pair.Source, [&](ecs::Store &store) {
+		// This free-motion case needs an intangible hat, like the built-in limbs.
+		// A solid handle overlaps the root and correctly blocks the catch-up sweep.
+		const auto hat = store.FindFirstChild(scene::CharacterOf(store, pair.Player), "hat");
+		const auto handle = store.FindFirstChild(hat, "Handle");
+		REQUIRE(store.Has<scene::Collider>(handle));
+		auto collider = *store.Get<scene::Collider>(handle);
+		collider.Layer = spatial::LayerMask::None();
+		collider.Mask = spatial::LayerMask::None();
+		store.Set(handle, collider);
+	});
 	pair.Worlds.Enter(pair.Destination, [](ecs::Store &store) { physics::PreparePhysicsWorld(store); });
 	const auto id = pair.Begin();
 	pair.Tick(9);
