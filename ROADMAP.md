@@ -55,7 +55,7 @@ The milestone headings below are development labels. Not in line with project ve
 ### v0.26
 
 - [_] Create owned 2D images usable by `ParticleEmitter`, `ImageLabel` and existing image consumers, with basic 2D transform and composition nodes.
-- [_] Review the preserved full work on the `v0.26-imagegraph` branch before integration.
+- [_] Review the preserved full work on the `v0.26.5-imagegraph-full` branch before integration.
 - [_] Exclude 3D, audio and broad simulation features from the first integration.
 
 ### v0.27
