@@ -4,7 +4,7 @@
 
 `v0.25-fixes` is the fixes-only line based on `18e9028c`. Premature native and PXCX stubs were removed from this line.
 
-`v0.26-imagegraph-minimal` is the accepted first integration, being built and independently verified on its own branch. Its scope is owned 2D images for `ParticleEmitter`, `ImageLabel` and existing image consumers, with basic 2D transform and composition nodes. It excludes 3D, audio and broad simulation work.
+`v0.26-imagegraph-minimal` is the completed accepted first integration, built on the fixes branch and independently verified. Its scope is owned 2D images for `ParticleEmitter`, `ImageLabel` and existing image consumers, with basic 2D transform and composition nodes. It excludes 3D, audio and broad simulation work.
 
 ## Review commands
 
@@ -16,6 +16,7 @@ git diff --stat 18e9028c..v0.25-fixes
 git diff 18e9028c..v0.25-fixes -- ROADMAP.md VERSION docs/retired/ROADMAP.md
 git diff --stat 2ea709a9..v0.26-imagegraph
 git diff 2ea709a9..v0.26-imagegraph -- ROADMAP.md docs/retired/ROADMAP.md
+git diff --stat v0.25-fixes..v0.26-imagegraph-minimal
 git worktree list
 ```
 
