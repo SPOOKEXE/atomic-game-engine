@@ -42,6 +42,9 @@ mono_add_library(bake
 		# decoders below. `D00102`, and `bakegraph/CMakeLists.txt` carries the
 		# argument. What is left here is everything that touches a payload.
 		Engine::bakegraph
+
+		# Checked 2D image evaluation stays separate from foreign source decoders.
+		Engine::imagegraph
 	VENDOR
 		Vendor::cryptopp
 		Vendor::json

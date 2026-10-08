@@ -144,6 +144,7 @@ namespace studio {
 	struct ToolsProbe;
 	struct ViewportCameraProbe;
 	struct PlayedInputAdapter;
+	struct ImageComposerState;
 	class DataFactoryHost;
 
 	using engine::ecs::Entity;
@@ -6141,6 +6142,11 @@ namespace studio {
 		// `DrawNodeDemo` - so an editor nobody opens it in carries three empty
 		// containers and nothing else.
 		//@{
+		bool ShowImageComposer = false;
+		std::unique_ptr<ImageComposerState> ImageComposer;
+		void DrawImageComposer();
+		void ReleaseImageComposerPreview();
+
 		bool ShowNodeDemo = false;
 		nodegraph::Graph NodeDemoGraph;
 		nodegraph::Canvas NodeDemoCanvas;

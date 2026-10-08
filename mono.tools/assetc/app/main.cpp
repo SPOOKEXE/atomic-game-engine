@@ -47,6 +47,9 @@ int main(int argc, char **argv) {
 		"flipbook-side", "CELLS", "Mark ordinary image atlases as a 1, 2, 4, 8 or 16 cell-wide flipbook"
 	);
 	arguments.Value("flipbook-frames", "COUNT", "Populated static-atlas flipbook cells, up to side squared");
+	arguments.Value(
+		"imagegraph-output", "NAME", "Select an authored image graph output (required when there are several)"
+	);
 	arguments.Flag("no-mipmaps", "Skip the mip chain, leaving every texture one level");
 	arguments.Flag("no-copy", "Skip files this cannot bake instead of copying them across");
 	arguments.Flag("quiet", "Print the summary only, not a row per asset");
@@ -94,6 +97,9 @@ int main(int argc, char **argv) {
 		std::fputs(arguments.Help().c_str(), stdout);
 		return 2;
 	}
+
+	if (const auto selected = arguments.Get("imagegraph-output"))
+		settings.ImageGraphOutput = std::string(*selected);
 
 	settings.Input = std::filesystem::path(*input);
 	settings.Output = std::filesystem::path(*output);

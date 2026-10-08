@@ -452,6 +452,12 @@
       "uri": "atomic://agents/engine/gui"
     },
     {
+      "description": "The invariants specific to engine/imagegraph. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/imagegraph)",
+      "uri": "atomic://agents/engine/imagegraph"
+    },
+    {
       "description": "The invariants specific to engine/input. AGENTS.md rule: read this before changing anything in it.",
       "mimeType": "text/markdown",
       "name": "AGENTS.md (engine/input)",

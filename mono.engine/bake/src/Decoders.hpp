@@ -44,6 +44,15 @@ namespace engine::bake {
 	// @return `false` on anything malformed or unsupported.
 	bool ReadGif(std::span<const std::byte> bytes, assets::TextureData &out, std::string &failure);
 
+	// The same GIF parser, with host-specific admission before canvas and atlas allocation.
+	bool ReadGifBounded(
+		std::span<const std::byte> bytes,
+		uint32_t maximumDimension,
+		uint64_t maximumPixels,
+		assets::TextureData &out,
+		std::string &failure
+	);
+
 	// Decodes a Windows BMP into RGBA8.
 	//
 	// @param bytes   The file, `BM` included.

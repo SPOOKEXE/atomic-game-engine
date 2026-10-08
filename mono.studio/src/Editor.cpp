@@ -45,6 +45,8 @@
 #include <engine/ui/Theme.hpp>
 
 #include <SDL3/SDL.h>
+
+#include <studio/ImageComposer.hpp>
 // `Log.hpp` forward-declares `spdlog::logger` so that the rest of the tree does
 // not acquire spdlog for the sake of a log macro. This file is one of the two
 // that genuinely wants the type - `PanelSink` below installs itself into
@@ -956,6 +958,8 @@ namespace studio {
 	}
 
 	void Editor::Shutdown() {
+		ReleaseImageComposerPreview();
+		ImageComposer.reset();
 		// A prepared import owns no universe state, but its result fields belong
 		// to this editor and must outlive the worker writing them.
 		if (WorldImportWorker.joinable()) {
@@ -3595,6 +3599,7 @@ namespace studio {
 	}
 
 	void Editor::NewGame() {
+		ReleaseImageComposerPreview();
 		EndAllRuns();
 		StopAllPlaytestPlugins();
 
@@ -3777,6 +3782,7 @@ namespace studio {
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
+		ReleaseImageComposerPreview();
 		EndAllRuns();
 		StopAllPlaytestPlugins();
 

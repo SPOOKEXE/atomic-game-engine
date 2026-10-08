@@ -40,6 +40,7 @@ mono_add_library(studio
 		Engine::scripthost
 
 		Engine::graph
+		Engine::imagegraph
 
 		# L6, `shared`. The simulation. **Named here rather than reached
 		# through `Engine::script`**, which is where it was arriving from: since

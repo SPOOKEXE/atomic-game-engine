@@ -420,6 +420,13 @@ bakegraph-pipeline-set-bench samples="5":
     cmake --build --preset bench --target bench_bakegraph
     ./.cache/build/bench/bench/bench_bakegraph --suite engine.bakegraph.bench.pipeline-set --samples {{samples}}
 
+# Static 2D image composition with normal source copies, allocations and budget checks.
+# Report complete CPU evaluation cost per call; retain output only on the terminal.
+imagegraph-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_imagegraph
+    ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.evaluate --samples {{samples}}
+
 # Durable datastore cost for a complete snapshot, using a disposable SQLite file under the bench build.
 datastore-sqlite-bench samples="5":
     cmake --preset bench > /dev/null

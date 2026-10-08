@@ -4,6 +4,7 @@
 #include <engine/bake/GifSequence.hpp>
 #include <engine/bake/Graph.hpp>
 #include <engine/bake/Image.hpp>
+#include <engine/bake/ImageGraph.hpp>
 #include <engine/bake/Model.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <assetc/Bake.hpp>
+#include <assetc/ImageGraph.hpp>
 #include <cmath>
 #include <fstream>
 #include <map>
@@ -135,7 +137,13 @@ namespace assetc {
 		// stays in the caller's hands, and a second baker for the second case
 		// would be a second copy of all of it. `Settings::Output` carries the
 		// argument in full.
-		void Emit(const Settings &settings, Report &report, Baked &baked, std::span<const std::byte> bytes) {
+		void Emit(
+			const Settings &settings,
+			Report &report,
+			Baked &baked,
+			std::span<const std::byte> bytes,
+			bool atomic = false
+		) {
 			baked.Bytes = bytes.size();
 
 			if (settings.Output.empty()) {
@@ -144,8 +152,11 @@ namespace assetc {
 				return;
 			}
 
-			if (!WriteFile(settings.Output / baked.Output, bytes)) {
-				baked.Failure = "cannot write";
+			const bool written =
+				atomic ? PublishImageGraphTexture(settings.Output / baked.Output, bytes, baked.Failure)
+					   : WriteFile(settings.Output / baked.Output, bytes);
+			if (!written) {
+				if (baked.Failure.empty()) baked.Failure = "cannot write";
 				report.Failures++;
 				return;
 			}
@@ -298,7 +309,7 @@ namespace assetc {
 		if (IsModel(extension)) {
 			return WithoutExtension(path) + std::string(MESH_EXTENSION);
 		}
-		if (IsImage(extension)) {
+		if (IsImage(extension) || extension == ".imagegraph") {
 			return WithoutExtension(path) + std::string(TEXTURE_EXTENSION);
 		}
 		if (IsMaterial(extension)) {
@@ -348,7 +359,7 @@ namespace assetc {
 			if (!entry.is_regular_file()) {
 				continue;
 			}
-			sources.push_back(Slashed(fs::relative(entry.path(), settings.Input).generic_string()));
+			sources.push_back(Slashed(entry.path().lexically_relative(settings.Input).generic_string()));
 		}
 		std::sort(sources.begin(), sources.end());
 
@@ -402,6 +413,76 @@ namespace assetc {
 			Baked baked;
 			baked.Source = relative;
 			const std::string extension = ExtensionOf(relative);
+			if (extension == ".imagegraph") {
+				engine::imagegraph::Document document;
+				engine::imagegraph::Diagnostic diagnostic;
+				engine::assets::TextureData texture;
+				const fs::path project = settings.Input / relative;
+				const bool admitted = settings.Content.Allows(engine::assets::FormOfName(relative));
+				if (!admitted)
+					baked.Failure = "refused: image graph project content is turned off";
+				else if (numericTextures.contains(relative))
+					baked.Failure =
+						"image graph outputs are display images and cannot be numeric material maps";
+				else if (ReadImageGraphProject(settings.Input, project, document, baked.Failure)) {
+					std::error_code sizeError;
+					const auto projectBytes = fs::file_size(project, sizeError);
+					if (!sizeError) report.SourceBytes += projectBytes;
+					const auto resolver = [&](std::string_view reference,
+											  engine::imagegraph::Image &image,
+											  std::string &sourceFailure) {
+						return ReadImageGraphSourceFile(
+							settings.Input, project, reference, settings.Content, image, sourceFailure
+						);
+					};
+					if (!engine::bake::BakeImageGraph(
+							document, settings.ImageGraphOutput, resolver, texture, diagnostic
+						))
+						baked.Failure = diagnostic.Node.empty() ? diagnostic.Message
+																: diagnostic.Node + ": " + diagnostic.Message;
+				}
+				if (baked.Failure.empty() && settings.MaximumTexture > 0) {
+					const uint32_t longest = std::max(texture.Width, texture.Height);
+					if (longest > settings.MaximumTexture) {
+						const double scale = double(settings.MaximumTexture) / longest;
+						engine::assets::TextureData resized;
+						if (!engine::assets::ResizeImage(
+								texture,
+								std::max(1u, uint32_t(texture.Width * scale)),
+								std::max(1u, uint32_t(texture.Height * scale)),
+								resized
+							))
+							baked.Failure = "cannot resize image graph result";
+						else
+							texture = std::move(resized);
+					}
+				}
+				if (baked.Failure.empty() && staticFlipbook) {
+					texture.FlipbookSide = settings.FlipbookSide;
+					texture.FlipbookFrames = settings.FlipbookFrames;
+					texture.FlipbookFrameRate = settings.FlipbookFps;
+				}
+				if (baked.Failure.empty() && settings.Mipmaps && !engine::assets::BuildMipChain(texture))
+					baked.Failure = "cannot build image graph mip chain";
+				if (baked.Failure.empty()) {
+					engine::core::ByteWriter writer;
+					if (!engine::assets::Texture::Write(writer, texture))
+						baked.Failure = "image graph result cannot be serialized as a texture";
+					else {
+						baked.Output = BakedName(relative);
+						baked.Kind = AssetKind::Texture;
+						Emit(settings, report, baked, writer.Bytes(), true);
+						report.Assets.push_back(std::move(baked));
+						continue;
+					}
+				}
+				if (!admitted)
+					++report.Refused;
+				else
+					++report.Failures;
+				report.Assets.push_back(std::move(baked));
+				continue;
+			}
 			if (extension == ".gif") {
 				std::error_code sizeError;
 				const uintmax_t fileBytes = fs::file_size(settings.Input / relative, sizeError);

@@ -19,6 +19,9 @@ namespace assetc {
 	//
 	// @since v0.9
 	struct Settings {
+		// Empty selects the sole authored image graph output.
+		std::string ImageGraphOutput;
+
 		// The directory of source art to walk, recursively.
 		std::filesystem::path Input;
 

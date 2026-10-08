@@ -54,9 +54,11 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.26
 
-- [_] Create owned 2D images usable by `ParticleEmitter`, `ImageLabel` and existing image consumers, with basic 2D transform and composition nodes.
-- [_] Review the preserved full work on the `v0.26-imagegraph` branch before integration.
-- [_] Exclude 3D, audio and broad simulation features from the first integration.
+- [x] Create bounded static 2D images with Source, Solid, Resize, Crop, Transform, Flip and Blend nodes, durable projects and named outputs.
+- [x] Add Studio Image Composer editing, cached previews, undo/redo, save/open and ordinary `.atex` export; add `.imagegraph` baking to assetc.
+- [x] Verify exported images through ordinary signed content delivery in `ParticleEmitter` and `ImageLabel`, plus CPU, editor and sanitizer checks.
+
+The accepted implementation is `v0.26-imagegraph-minimal`. The preserved full Composer work remains on `v0.26-imagegraph` for user review.
 
 ### v0.27
 
