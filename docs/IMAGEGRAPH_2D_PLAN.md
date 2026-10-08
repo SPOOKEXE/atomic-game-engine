@@ -1,7 +1,7 @@
 Minimal ImageGraph implementation specification
 
 Evidence and cut point
-- Fixes baseline: v0.25.0-fixes. Full archive: archive/v0.26.0-imagegraph-full. Initial native commit: 8ec3532e.
+- Fixes baseline: v0.25.0-fixes. Full archive: v0.26.5-imagegraph-full. Initial native commit: 8ec3532e.
 - Whole initial native module is already excessive: Document.cpp has 6,522 lines and includes AudioCapture, TimelineSchedule, recursive array/value evaluation, and Transform3D.
 - Current PixelOpsBasicFilters/Blend/SpatialWarp include the enormous archived Document.hpp. Their local equations and independently expected pixel fixtures can be extracted, but whole-file imports are not a minimal dependency closure.
 - Ordinary assets::Texture, TexturePixel, Resample; bake::ReadImage; Studio nodegraph::Canvas; assetc bake pipeline already exist in fixes. Keep these.
