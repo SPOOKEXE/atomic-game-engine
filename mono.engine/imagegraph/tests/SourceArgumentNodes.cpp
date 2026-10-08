@@ -135,6 +135,47 @@ TEST_CASE(
 	}
 }
 TEST_CASE(
+	"Argument Area and Curve carriers catch real conversion and preserve raw String values",
+	"[source_argument]"
+) {
+	const Curve curve{{0, 1, 0, 0, 1, 0}, {{0, 0, 0, 0, 0, 0}, {0, 0, 1, 1, 0, 0}}};
+	Curve maximum = curve;
+	maximum.Anchors.resize(Limits::MaximumCurveAnchors);
+	maximum.Anchors.back() = curve.Anchors.back();
+	maximum.Anchors[128][0] = 1e200;
+	maximum.Anchors[128][4] = -1e200;
+	for (const Value &raw : {Value{Area{.25, -.75, .125, 1.5, 1, 2}}, Value{curve}, Value{maximum}}) {
+		auto host = Provider({{"name", raw}});
+		for (bool supplied : {true, false}) {
+			CAPTURE(raw.index(), supplied);
+			const auto number = Evaluated(supplied ? Graph(1) : Graph(1, raw, "absent"), &host);
+			REQUIRE(std::holds_alternative<double>(number));
+			CHECK(std::get<double>(number) == 0.);
+			CHECK(Evaluated(supplied ? Graph(0) : Graph(0, raw, "absent"), &host) == raw);
+		}
+	}
+}
+TEST_CASE(
+	"Argument Enum Number retains the exact integer and String retains the enum carrier", "[source_argument]"
+) {
+	for (int64_t integer :
+		 {int64_t{0},
+		  int64_t{-73},
+		  INT64_C(9007199254740993),
+		  std::numeric_limits<int64_t>::min(),
+		  std::numeric_limits<int64_t>::max()}) {
+		const Value raw{EnumValue{integer}};
+		auto host = Provider({{"name", raw}});
+		for (bool supplied : {true, false}) {
+			CAPTURE(integer, supplied);
+			const auto number = Evaluated(supplied ? Graph(1) : Graph(1, raw, "absent"), &host);
+			REQUIRE(std::holds_alternative<int64_t>(number));
+			CHECK(std::get<int64_t>(number) == integer);
+			CHECK(Evaluated(supplied ? Graph(0) : Graph(0, raw, "absent"), &host) == raw);
+		}
+	}
+}
+TEST_CASE(
 	"Argument String keeps full source array defaults and recorded raw alternatives", "[source_argument]"
 ) {
 	ArrayValue array;
@@ -276,6 +317,38 @@ TEST_CASE(
 	replacement = {{"x", 1.}, {"x", 2.}};
 	CHECK(host.Prepare(replacement, Limits::MaximumEvaluationBytes, diagnostic) == Status::DuplicateId);
 	CHECK(Evaluated(Graph(), &host) == Value{int64_t{7}});
+}
+TEST_CASE(
+	"Argument invalid Area and Curve replacements retain the previous observation table", "[source_argument]"
+) {
+	constexpr int64_t exact = INT64_C(9007199254740993);
+	auto host = Provider({{"name", exact}});
+	const auto retained = host.RetainedBytes();
+	Area nonfinite;
+	nonfinite.CenterX = std::numeric_limits<double>::infinity();
+	Area invalidShape;
+	invalidShape.Shape = 2;
+	const Curve valid{{0, 1, 0, 0, 1, 0}, {{0, 0, 0, 0, 0, 0}, {0, 0, 1, 1, 0, 0}}};
+	Curve oversized = valid;
+	oversized.Anchors.resize(Limits::MaximumCurveAnchors + 1);
+	Curve invalidHeader = valid;
+	invalidHeader.Header[0] = std::numeric_limits<double>::quiet_NaN();
+	Curve invalidAnchor = valid;
+	invalidAnchor.Anchors[1][3] = std::numeric_limits<double>::infinity();
+	for (const Value &invalid :
+		 {Value{nonfinite},
+		  Value{invalidShape},
+		  Value{oversized},
+		  Value{invalidHeader},
+		  Value{invalidAnchor}}) {
+		CAPTURE(invalid.index());
+		const std::vector<AuthoredValue> replacement{{"name", invalid}};
+		Diagnostic diagnostic;
+		CHECK(host.Prepare(replacement, Limits::MaximumEvaluationBytes, diagnostic) == Status::InvalidValue);
+		CHECK(host.RetainedBytes() == retained);
+		CHECK(Evaluated(Graph(1), &host) == Value{exact});
+		CHECK(Evaluated(Graph(0), &host) == Value{exact});
+	}
 }
 TEST_CASE(
 	"Argument host receipt byte refusal leaves previously captured observation intact", "[source_argument]"

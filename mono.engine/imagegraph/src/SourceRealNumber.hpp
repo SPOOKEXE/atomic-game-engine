@@ -90,10 +90,12 @@ namespace engine::imagegraph::detail {
 		if (std::holds_alternative<bool>(raw) || std::holds_alternative<int64_t>(raw) ||
 			std::holds_alternative<double>(raw))
 			return raw;
-		// Native numeric tuples encode source arrays, whose real conversion throws and is caught.
+		if (const auto *enumeration = std::get_if<EnumValue>(&raw)) return Value{enumeration->Value};
+		// Numeric tuples, areas and curves carry source arrays; real throws and toNumber catches it.
 		if (std::holds_alternative<ArrayValue>(raw) || std::holds_alternative<Vector2>(raw) ||
 			std::holds_alternative<Vector3>(raw) || std::holds_alternative<Vector4>(raw) ||
-			std::holds_alternative<Quaternion>(raw) || std::holds_alternative<UndefinedValue>(raw))
+			std::holds_alternative<Quaternion>(raw) || std::holds_alternative<Area>(raw) ||
+			std::holds_alternative<Curve>(raw) || std::holds_alternative<UndefinedValue>(raw))
 			return Value{0.};
 		const auto *text = std::get_if<std::string>(&raw);
 		if (!text) return {};

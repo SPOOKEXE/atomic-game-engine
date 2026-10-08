@@ -119,6 +119,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Add separate/combine X/Y controls with processed input receipts, numeric tuple playback and atomic undo; pass headless gesture and save/reopen checks. Live Studio verification remains open.
 - [x] Round source hexadecimal arguments once; preserve prefix parsing and atomic overflow refusal.
 - [x] Convert Number argument tuple carriers to source caught-array zero; preserve String values.
+- [x] Convert Area and Curve Number arguments to caught-array zero; preserve exact enum integers and raw String values.
 - [_] Add source-compatible argument handling.
 - [_] Bind cache playback and loading to selected animation-region bounds.
 - [_] Complete remaining Composer GPU checks.
