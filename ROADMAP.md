@@ -39,83 +39,23 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.25
 
-- [x] USER WORK: cleanup documents in `docs/`, maybe a `docs/systems` folder would be more suited for things like `RENDER-HOOKS.md`, `DEMOS.md`, `ECS_COMPONENTS.md`, `schema.toml` and `schema-data.toml`.
-- [x] simplify down RUNNING.md, should be minimal, shows each available `just` job, how to build each, etc. Should not contain lots of descriptive information about how those systems work, just short descriptions and what they are aimed at to do.
-- [x] improve `schema.toml` and `schema-data.toml` so its better laid out (schema is the general layout, schema-data is the actual useful information that we would grep and search specific classes, components and functions in). Like Roblox Studio Class API Reference.
-- [x] consolidate/improve `CONTRIBUTING.md`, `SECURITY.md`, `docs/THIRD_PARTY_NOTICES.md`, `CODE_ARCH.md`, `CODE_DOCUMENTING.md`, `CODE_FORMAT.md` and `CODE_QUALITY.md`, with small sentences at the start of the file describing what they contain in succinct detail.
-- [x] cleanup documentation doxy and layout
-- [x] update and prune old content in documentation (doxy). check each statement, update, remove or replace.
-- [x] check LOD is cleaned up when the mesh changes / is deleted / LOD properties are changed so they release and are recomputed
-- [x] fix multi-select multi-property editing (when i select multiple objects, it should check all objects for the same component and value im editing and match them).
-- [x] add a override LOD distance per-item with default value being set to preference one.
-- [x] separate the LOD component into LODAuto/LODCustom/LODSettings, LODCustom overlays LODAuto (so we can still have auto options but overriden by LODCustom options).
-- [x] rename preferences LOD distance to "Default Mesh LOD distances".
-- [x] fix camera detached in bladeborne aworld demo
-- [x] fix lights passing through portals not working
-- [x] add extensive (freecam) camera tests (like flying through portals)
-- [x] add extensive client character tests
-- [x] add extensive client character CAMERA tests (zooming out and projecting camera through portal)
-- [x] improve atomic-game-engine build file usage sizes. Takes over 100GB right now, needs to be reduced. Reduce hash for each mono repository to a reasonable size for each, cleanup old files, etc. Find what takes up all the space and try improve it.
-- [x] Prune `PLAN-procedural-planets.md`, `PORTAL-HANDOFF.md`, `RENDER-POST-HOOK-REFACTOR.md`, `RENDER-REFACTOR-TASKS.md`, `RENDER-REFACTOR.md` and `TORNADOSIM.md`.
-- [x] Prune old files in `docs/future-work/` as well. e.g. merge `FUTURE_COMPONENTS.md` components into relevent document files in `docs/future-work/`, then leave the remaining orphaned ones in `FUTURE_COMPONENTS.md`.
-- [x] review and plan a cleanup of the render pipeline. Write docs/v025-RENDER-PIPELINE-CLEANUP.md. This can be logic cleanup, better layout, components separation, merging, renaming, potential test points, areas to investigate logic (that seem wrong and need to be investigated), etc.
-- [x] plan a consolidation and cleanup for the MCP-ADDITIONS.md systems. Super big, needs to ensure its properly implemented and looks good. Maybe even isolating code to a separate folder and then using hooks to ingest (and make those hooks hot loadable and unloadable so we can disable when we don't need to use them). Write docs/v025-MCP-CLEANUP.md.
-- [x] create a "SkyGridPBR" demo of floating terrain balls with each one having one of 8 custom made shaders, then have the camera fly forward between the seams. this is a benchmark called BenchmarkSkyGrid.luau built-in demo example. We'll also use this as a performance profiler for editablemesh + terrain + etc.
-- [x] create two stress test demos: 100 unique 4k textures on material spheres with PBR (like the PBR demo), and 1 unique 4k texture on material spheres with PBR. tests instancing (for 1 duplicate item) and mem/compute usage for the uniques.
-- [x] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
-- [x] expose engine-owned MCP input automation and entity lifecycle tools through opt-in client, Studio, server, and launcher control surfaces, including headless host paths. CDN keeps its diagnostic control surface without UI or worlds.
-- [x] add typed, read-only physics observation hooks at declared fixed-tick boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Define whether each record observes pre-solve, completed-solver or post-integration state; retain exact tick, world, units and availability; and expose completed records to data-factory MCP without allowing a hook to mutate physics state.
-- [x] add typed, read-only replication observation hooks at declared exchange boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Preserve world, authority, client, baseline, tick and exchange-round identity; expose applied, rejected, repaired and dropped work without crossing a world boundary by pointer; and keep private payloads behind the existing permission boundary.
-- [x] optimise server startup time
-- [x] optimise and improve tests (particularly server and physics, can we add deterministic hooks so we can immediately wait for an update for a change instead of guessing with timestamps? test.solver, test.replication, etc)
-- [x] LOD system billboard render support
-- [x] /docs/future-work/ui-system.md
-- [x] plan how to fix portals so they are seamless. really plan out how to make them seamless and how to handle "standing in the middle" so objects are visually there on both sides of the portal with no seam especially during movement (and how to make replication seamless too). Write docs/v025-SEAMLESS-PORTALS.md.
-- [x] Fix client cleanup for rows after a visibility Forgotten message, with regression coverage.
-- [x] Optimize recovery-row serialization by moving the ByteWriter buffer. The recovery benchmark improved from 294±35 to 212±22 ns/item across 15 samples.
-- [x] Improve scoring performance by selecting the exact replication prefix with `nth_element` followed by `sort`. Controlled release A/B runs with 15 samples each measured baseline means of 2,427,371 and 2,315,204 ns/item, and candidate means of 2,122,163 and 2,147,329 ns/item, about 10% lower at the midpoint of the two run means. 138 affected dev suites pass, including packet-order coverage.
-- [x] add bloom, depth of field, god rays, shaped local fog volumes, and cloud and atmosphere authoring used by example scenes.
-- [x] create a weather demo with cloud and atmosphere lighting, local fog volumes, rain particles, and weather transitions.
-- [x] build a self-contained `TornadoSim.aworld` with reusable storm queries, in-game controls, damage interactions, audio, lightning, weather layers, and a GPU particle field.
-- [x] make Studio GUI Preview Controls hidden by default and interactive when enabled.
-- [x] remove the HarfBuzz configure notice from the Studio launcher build.
-- [x] validate combined lighting behavior with overlapping fog volumes, clouds, atmosphere, and god rays; expand compute shader tests and captures, and fix issues found.
-- [x] compare TornadoSim field samples, presets, lifecycle, damage, and matched default and mature-funnel captures against the C++ reference; finish GPU preset and failure-fallback validation.
-- [x] add a "light path visualiser" that shows a visualisation of the spatial casting of light emitters so i can see what path they take, what they hit, etc. basically blue for empty space it travels, red for end of light, orange for pass-through or reflections. Bounded blue influence, red termination, and orange pass-through or one surface-camera reflection are implemented and covered by focused tests.
-- [x] stress test large counts of each lighting object, including local lights and fog volumes, and optimize measured bottlenecks. The large-count scene and release measurements cover local light selection, a 16-volume GPU fixture, 600-frame fog capture, and a controlled zero-light fog optimization.
-- [x] exercise Studio dropdowns, object classes, editing, scene creation, and play behavior in a representative game scene. Live sessions created and edited Model, Part, PointLight, and Sound, played and stopped, verified restoration, then used MCP clicks to open the world dropdown and select MeshGrid.
-
-- [x] add a Studio virtual camera position lock with a visible frustum adornment. The inspection view stays free while culling, LOD, lighting, particles, and portal demand use the frozen position and live direction. Focused checks cover the implemented paths.
-- [_] audit the remaining camera-dependent behavior and pass a combined product capture gate for the virtual lock.
-- [x] extract render owners and the portal render operations facade from `docs/v025-RENDER-PIPELINE-CLEANUP.md`. The earlier full Vulkan render gate passed 150 cases. Focused lifetime, supersession, cancellation, and invalid-layer preflight checks also passed.
-- [_] finish the remaining render cleanup gates, including an actual failure after a portal import is staged and accepted changed-eye cancellation with a pending body job; rerun the full gate on the final tree.
-- [x] implement MCP cleanup stages 0 through 5 and the M6 PNG bundle tool, with owner-tagged hooks, typed contexts, product manifests, and headless control surfaces. Focused checks and a 128-cycle capture-hook soak passed.
-- [_] finish the MCP cleanup's quiet paired release timing, real renderer capture drain verification, and broad CI gate.
-- [x] audit stress and optimization candidates across the engine, listing at least five per module, and validate selected replication, physics, and MSL changes under parity. Large lighting, fog, and connected-client workloads have measured evidence.
-- [_] measure and implement the remaining stress candidates, including a matched 200-client Authority `RecoverRows` rerun with complete profiling evidence.
-- [x] implement the seamless portal plan's body splitting, transfer fences, dynamic island solving, and destination prediction seed. Focused portal adoption and client portal tests pass.
-- [_] fix the strict product crossing captures at 30 and 60 Hz, then pass the 30/60/144/240 frame-rate, network impairment, resolution, profiling, and GPU acceptance matrix in `docs/v025-SEAMLESS-PORTALS.md`.
-- [x] establish the Pixel Composer reference inventory from the supplied five PXC projects and captures, with 990 documented node rows. Five spatial warp nodes, a bounded audio capture parser, and `.aseq` sequence bake and GIF timing slices have focused passing tests.
-- [_] complete the native Pixel Composer graph, Studio workflow, documented node catalogue, animation, audio, simulation, 3D, PXC interchange, and engine output bindings through M0 to M7 in `docs/v026-pixel-composer.md`. Verify every documented row and product workflow. Exact executable parity remains unverified without a licensed reference build.
-
-The [v0.25 roadmap audit](docs/v025-roadmap-audit.md) records source evidence and verification limits for the original 49 items. Its 132-case GPU result and selected release benchmarks are historical gates; the final render, portal, MCP, stress, and Pixel Composer gates above remain open.
+- [x] Add typed physics, replication and portal observations with optional trace IDs, bounded per-world records and server JSONL export (physics and replication: `1dd7743d`).
+- [x] Finish the measured engine stress pass and matched 200-client `RecoverRows` profiling. Retain the 4 m physics grid default; cell-size results vary by scene. The recovery candidate was rejected without a demonstrated gain. See the [stress audit](docs/ENGINE_STRESS_AUDIT_2026-09-22.md).
+- [x] Validate the same-world follow-camera repair and extended tunnel walk with native presentation and render tests (`04315bcd`). Passed native dev/Vulkan validation on 2026-10-04: 32 presentation cases, the 64-frame tunnel sweep and 5 portal GPU cases.
+- [x] Fix Studio widgets that start unsnapped from their viewport slots.
+- [x] Allow Studio UI elements to move from the Studio screen to other screens.
+- [x] Carry forward completed portal traversal and camera fixes.
+- [x] Carry forward scheduler timing and Metrics fixes, plus physics, world, GUI and script fixes.
+- [x] Carry forward Studio dock and window fixes.
+- [x] Carry forward audio decode and mixer fixes.
+- [x] Carry forward texture format, material shader and sequence fixes.
+- [x] Carry forward benchmark reports and jobs.
 
 ### v0.26
 
-- [_] go through engine and consolidate and cleanup dead code branches. remove backport compatibilities with previous engine versions and ground this as the version.
-- [_] go over render system and consolidate/improve hooks, nodes, graph system and visualiser of graph system
-
-- [_] do heavy memory, cpu and gpu benchmarking and profiling and see if we can squash data into multi-channel representations, improve computations and memory usage, trade lower precision for tiny visual changes, etc.
-
-- [_] add typed render hooks at proven boundaries. `DataFactoryHookBind` registers and discovers twelve stable read-only data-capture hooks and the synchronous `view.camera` mutation hook. Data capture remains pinned to exact pipeline, revision, view, snapshot and node identity and returns bounded asynchronous readbacks. `view.camera` accepts owned one-shot camera-frame, camera, and projection patches only for an exact installed pipeline revision, world, snapshot, and view slot; conflicts, stale revisions, malformed values, cancellation, and generation reuse are explicit. The renderer copies only the matching view before capture preparation and never calls external code or exposes a mutable view. The release CPU lifecycle benchmark fell from 41.62 to 20.48 microseconds per 64 lifecycles after dispatch stopped copying the full graph snapshot; validated capture planes now take ownership of readback vectors instead of copying them. GPU and readback release profiling plus a second real consumer remain open. A hook is an observer node, declared node output, or this bounded typed pre-view patch, not a second callback graph beside it.
-  1. Inventory the current node output, resource lifetime, GPU submission and asynchronous readback boundaries, then choose one stable post-pass observation point.
-  2. Give each internal hook an enum value and a stable string name for discovery, manifests and MCP. Never serialize the enum number.
-  3. Give each hook its own typed immutable context. Do not use a generic `any` bag or an inheritance tree. A context states its valid lifetime, thread, resource access and unavailable fields.
-  4. Keep observation non-blocking and read-only. GPU hooks append bounded records or schedule bounded asynchronous readback; the client polls completed records later. They never wait for the CPU or call arbitrary external code from the render thread.
-  5. Apply render changes through CPU-owned scene or graph state before submission, then upload the normal delta. The bounded `view.camera` patch is the named exception: it is a synchronously consumed value record, not an observation callback.
-  6. Make the existing data-capture resource observation the first consumer. Expose supported hook names and limits through capability discovery, then verify snapshot, camera, frame, crop and resource identity remain aligned.
-  7. Profile record bytes, allocations, readback latency, dropped records and GPU work in a release capture before adding another hook point.
-  8. Design separate typed observation hooks for physics and replication only after the render hook has two real consumers. Reuse the naming, bounded queue and polling rules, while keeping each subsystem's own tick, thread and lifetime contract.
+- [_] Create owned 2D images usable by `ParticleEmitter`, `ImageLabel` and existing image consumers, with basic 2D transform and composition nodes.
+- [_] Review the preserved full work on the `v0.26-imagegraph` branch before integration.
+- [_] Exclude 3D, audio and broad simulation features from the first integration.
 
 ### v0.27
 
