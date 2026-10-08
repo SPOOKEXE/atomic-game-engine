@@ -2230,3 +2230,19 @@ imagegraph-frame-cache-loading-bench samples="5":
     cmake --build --preset profile --target test_imagegraph bench_imagegraph
     ./.cache/build/profile/tests/test_imagegraph '[frame_cache_loading],[native_frame_cache_loading_receipt]'
     ATOMIC_IMAGEGRAPH_LOADING_PRESET=profile ./.cache/build/profile/bench/bench_imagegraph --suite engine.imagegraph.bench.frame-cache-loading --samples {{samples}}
+
+# Primitive Argument tags and Number conversion through the real CPU provider. Profiles stay on stdout.
+imagegraph-argument-tags-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset profile -DMONO_BUILD_BENCH=ON -DMONO_BUILD_TESTS=ON > /dev/null
+    cmake --build --preset profile --target test_imagegraph bench_imagegraph
+    ./.cache/build/profile/tests/test_imagegraph '[argument_tag]'
+    ATOMIC_IMAGEGRAPH_ARGUMENT_PRESET=profile ./.cache/build/profile/bench/bench_imagegraph --suite engine.imagegraph.bench.argument-tags --samples {{samples}}
+
+# Exact empty annotation callback CPU profiles stay on stdout.
+imagegraph-source-common-empty-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset profile -DMONO_BUILD_BENCH=ON -DMONO_BUILD_TESTS=ON > /dev/null
+    cmake --build --preset profile --target test_imagegraph bench_imagegraph
+    ./.cache/build/profile/tests/test_imagegraph '[empty_override]'
+    ATOMIC_IMAGEGRAPH_EMPTY_PRESET=profile ./.cache/build/profile/bench/bench_imagegraph --suite engine.imagegraph.bench.source-common-empty --samples {{samples}}

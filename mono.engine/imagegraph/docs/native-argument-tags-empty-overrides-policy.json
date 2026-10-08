@@ -1,0 +1,35 @@
+{
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_sha256": {
+    "scripts/node_argument/node_argument.gml": "e1f81fb3a495a84b27034e8f8e480b93d0e283c868092115610bf41a76bcdcd9",
+    "scripts/node_value_text/node_value_text.gml": "eace1ad9eda7a00b4c2e4aca9ccca66f8e29ce7b0de438e6d372a25aa5a32e73",
+    "scripts/struct_functions/struct_functions.gml": "c34b2cecfc2bddac8034106dcd7b07cf6e4714beb7bf5ba7d23aa75401c81d3f",
+    "scripts/node_frame/node_frame.gml": "588738e6cb5bcc186d51977d79c3f92b20798b4671fe74bb2e3fc3ac5c4a0b55",
+    "scripts/node_display_text/node_display_text.gml": "559323cd2b010d863fa5cf1fd5def8f21b702c60a9a4285610f31e90d0d56a90"
+  },
+  "runtime_commit": "60e51be51ce7f3d52025ef18106cf172b8e22a00",
+  "runtime_sha256": {
+    "yyTypes.js": "10afe81c766f2cf932a37b3745f67f130acc919b67d60b096133fb8e99f153a1",
+    "yyVariable.js": "da5d6a2fba34a237e563de92df55a3db96999f34b762d59dbae969b6bd08deb0"
+  },
+  "argument_tags": {
+    "contract": "Raw linked primitive Tag is converted to a source struct key before direct lookup and underscore-to-space fallback.",
+    "real": "Finite signed-int32 integral values use integer text; other magnitudes below 1e21 use fixed two decimal digits with exact binary rounding. Larger values use shortest scientific text.",
+    "boolean": "true and false use 1 and 0.",
+    "string": "Borrow original bytes.",
+    "integer_carrier": "Native int64 carrier uses decimal spelling under the existing typed Long profile. This does not establish that every source integer producer creates Long.",
+    "unsupported": "Nonprimitive tags retain named refusal. Full object and caught-array Tag conversion is not claimed.",
+    "storage": "Fixed 48-byte stack scratch; existing provider work and receipt admission remains authoritative."
+  },
+  "empty_annotation_callbacks": {
+    "types": [
+      "Node_Frame",
+      "Node_Display_Text"
+    ],
+    "contract": "Pinned doUpdate and update overrides have empty bodies. Invoke exact bound owners without reading controls, writing output receipts, publishing Updated or Rendered, or applying ordinary SafeMode/update_graph wrappers.",
+    "step": "Inherited source Step still reads its Update getter, resets a triggered local animator, clears Updated and routes metadata under existing authoring and runtime observations.",
+    "identity": "Exact native, preserved opaque annotation or bounded internal group scratch identity only; no fabricated dynamic outputs or unknown callback capability.",
+    "capability": "No pixel executor is registered. Constructor output inventory is empty. Canvas drawing, layout, containment and onValueUpdate remain outside this callback contract."
+  },
+  "verification": "Joined batch93 passes: 6338 C++ cases, 89 optimized cases, 21 joined checks and baseline plus loading/argument/empty CPU profiles. See docs/pixel-composer-m0/native-argument-tags-empty-overrides-validation-2026-10-08.json. Shared worktree verification, not clean commit acceptance."
+}

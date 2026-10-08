@@ -11,6 +11,7 @@ namespace detail {
 				return {};
 			return SourceCommonDispatchProfile(owner.SourceType, true);
 		}
+		if (owner.NativeOwnerKind != SourceCommonNativeOwnerKind::Node) return {};
 		const auto node = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &n) {
 			return n.Id == owner.NativeOwnerId;
 		});
@@ -18,6 +19,10 @@ namespace detail {
 		const auto *entry = FindCatalogueEntry(node->Type);
 		const bool executable = entry && entry->SourceNode == owner.SourceType && FindExecutor(node->Type);
 		auto profile = SourceCommonDispatchProfile(owner.SourceType, true);
+		if (profile.Wrapper == SourceCommonWrapperKind::Empty) {
+			if (!SourceCommonEmptyOwnerMatches(*node, owner.SourceType)) return {};
+			return profile;
+		}
 		if (!executable) profile.Wrapper = SourceCommonWrapperKind::Unsupported;
 		return profile;
 	}
@@ -108,6 +113,30 @@ namespace detail {
 			};
 			return diagnostic.Code;
 		}
+		if (dispatch.Wrapper == SourceCommonWrapperKind::Empty) {
+			if (invocation != SourceCommonInvocationMode::DirectUpdate &&
+				invocation != SourceCommonInvocationMode::SourceDoUpdate) {
+				diagnostic = {
+					Status::InvalidValue,
+					owner.SourceOwnerId,
+					{},
+					"empty source callback invocation is invalid"
+				};
+				return diagnostic.Code;
+			}
+			if (candidate.Nodes.size() != document.Nodes.size() ||
+				candidate.Outputs.Nodes.size() != document.Nodes.size()) {
+				diagnostic = {
+					Status::InvalidValue,
+					owner.SourceOwnerId,
+					{},
+					"empty source callback requires initialized owner journals"
+				};
+				return diagnostic.Code;
+			}
+			diagnostic = {};
+			return Status::Ok;
+		}
 		if (invocation == SourceCommonInvocationMode::SourceDoUpdate) {
 			if (!request.SourceSafeMode) {
 				diagnostic = {
@@ -154,7 +183,12 @@ namespace detail {
 			}
 			if (purity->State == SourceGroupPurity::Nonpure) return Status::Ok;
 			for (size_t index = 0; index < document.Nodes.size(); ++index)
-				if (document.Nodes[index].GroupId == owner.NativeOwnerId) run[index] = 1;
+				if (document.Nodes[index].GroupId == owner.NativeOwnerId) {
+					const auto *child = CommonOwner(document, document.Nodes[index].Id);
+					if (child && SourceCommonEmptyOwnerMatches(document.Nodes[index], child->SourceType))
+						continue;
+					run[index] = 1;
+				}
 		}
 		if (owner.NativeOwnerKind == SourceCommonNativeOwnerKind::Group) {
 			if (!request.SourceSafeMode) {

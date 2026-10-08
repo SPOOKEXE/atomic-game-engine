@@ -50,13 +50,14 @@ TEST_CASE(
 	}
 }
 TEST_CASE(
-	"Custom empty wrappers and absent capabilities never acquire Full dispatch", "[source_common_dispatch]"
+	"Custom empty wrappers admit only exact annotations without Full dispatch", "[source_common_dispatch]"
 ) {
 	for (auto source : {"Node_Frame", "Node_Display_Text"}) {
 		INFO(source);
 		const auto profile = SourceCommonDispatchProfile(source, true);
 		CHECK(profile.Step == SourceCommonStepKind::NodeDataCommon);
-		CHECK(profile.Wrapper == SourceCommonWrapperKind::Unsupported);
+		CHECK(profile.Wrapper == SourceCommonWrapperKind::Empty);
+		CHECK(SourceCommonDispatchProfile(source, false) == profile);
 	}
 	CHECK(SourceCommonDispatchProfile("Node_Number") == SourceCommonDispatch{});
 	CHECK(SourceCommonDispatchProfile("Node_Number", false) == SourceCommonDispatch{});
@@ -82,7 +83,10 @@ TEST_CASE(
 			CHECK(profile.Step != SourceCommonStepKind::Unsupported);
 		} else {
 			++sourceOnly;
-			CHECK(profile == SourceCommonDispatch{});
+			if (entry.SourceNode == "Node_Frame" || entry.SourceNode == "Node_Display_Text")
+				CHECK(profile.Wrapper == SourceCommonWrapperKind::Empty);
+			else
+				CHECK(profile == SourceCommonDispatch{});
 		}
 	}
 	CHECK(native > 0);

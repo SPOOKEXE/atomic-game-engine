@@ -175,6 +175,8 @@ namespace engine::imagegraph {
 		const NodeSchema GROUP_CALLBACK_OPAQUE_SCHEMA{
 			detail::GroupCallbackOpaqueType, {}, GROUP_CALLBACK_OPAQUE_PROPERTIES
 		};
+		const NodeSchema FRAME_COMMON_OPAQUE_SCHEMA{"pxcx.opaque/Node_Frame", {}, {}};
+		const NodeSchema DISPLAY_TEXT_COMMON_OPAQUE_SCHEMA{"pxcx.opaque/Node_Display_Text", {}, {}};
 		constexpr std::array<PortSchema, 1> CAPTURED_IMAGE_PORTS{
 			{{"image", ValueType::Image, PortDirection::Output}}
 		};
@@ -2925,6 +2927,8 @@ namespace engine::imagegraph {
 
 	const NodeSchema *FindSchema(std::string_view type) {
 		if (type == GROUP_CALLBACK_OPAQUE_SCHEMA.Type) return &GROUP_CALLBACK_OPAQUE_SCHEMA;
+		if (type == FRAME_COMMON_OPAQUE_SCHEMA.Type) return &FRAME_COMMON_OPAQUE_SCHEMA;
+		if (type == DISPLAY_TEXT_COMMON_OPAQUE_SCHEMA.Type) return &DISPLAY_TEXT_COMMON_OPAQUE_SCHEMA;
 		if (type == CAPTURED_IMAGE_SCHEMA.Type) return &CAPTURED_IMAGE_SCHEMA;
 		if (const NodeSchema *schema = detail::FindValueNodeSchema(type)) return schema;
 		if (type == SOLID_SCHEMA.Type) return &SOLID_SCHEMA;
@@ -21369,6 +21373,7 @@ namespace engine::imagegraph {
 					const auto dispatch = detail::SourceCommonOwnerDispatch(
 						document, request, size_t(owner - document.SourceCommonOwners.data())
 					);
+					if (dispatch.Wrapper == SourceCommonWrapperKind::Empty) continue;
 					if (dispatch.Wrapper != SourceCommonWrapperKind::Unsupported) {
 						if (!request.SourceSafeMode)
 							return fail(

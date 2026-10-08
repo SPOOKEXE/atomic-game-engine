@@ -1,3 +1,4 @@
+#include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/SourceCommonDispatch.hpp>
 
 #include <algorithm>
@@ -235,8 +236,7 @@ namespace engine::imagegraph {
 			{"Node_Directory_Search", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Full}},
 			{"Node_Displace", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Full}},
 			{"Node_Display_Image", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Full}},
-			{"Node_Display_Text",
-			 {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Unsupported}},
+			{"Node_Display_Text", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Empty}},
 			{"Node_Dither", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Full}},
 			{"Node_Dither_Diffuse", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Full}},
 			{"Node_Dotted", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Full}},
@@ -279,7 +279,7 @@ namespace engine::imagegraph {
 			{"Node_Fold_Noise", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Full}},
 			{"Node_Font_Bitmap", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Full}},
 			{"Node_Font_Data", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Full}},
-			{"Node_Frame", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Unsupported}},
+			{"Node_Frame", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Empty}},
 			{"Node_Fur", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Full}},
 			{"Node_GMRoom", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Full}},
 			{"Node_Gabor_Noise", {SourceCommonStepKind::NodeDataCommon, SourceCommonWrapperKind::Full}},
@@ -1033,7 +1033,9 @@ namespace engine::imagegraph {
 	}
 	SourceCommonDispatch
 	SourceCommonDispatchProfile(std::string_view sourceType, bool nativeExecutable) noexcept {
-		if (!nativeExecutable && sourceType != "Node_Collection") return {};
+		if (!nativeExecutable && sourceType != "Node_Collection" && sourceType != "Node_Frame" &&
+			sourceType != "Node_Display_Text")
+			return {};
 		const auto found = std::lower_bound(
 			Dispatches.begin(),
 			Dispatches.end(),
@@ -1042,5 +1044,21 @@ namespace engine::imagegraph {
 		);
 		return found != Dispatches.end() && found->SourceType == sourceType ? found->Dispatch
 																			: SourceCommonDispatch{};
+	}
+	bool SourceCommonEmptyOwnerMatches(const Node &node, std::string_view sourceType) noexcept {
+		const auto native = sourceType == "Node_Frame"			? std::string_view{"pc.frame"}
+							: sourceType == "Node_Display_Text" ? std::string_view{"pc.display_text"}
+																: std::string_view{};
+		if (native.empty() || !node.DynamicOutputs.empty()) return false;
+		const auto matches = [&](std::string_view type) {
+			constexpr std::string_view prefix = "pxcx.opaque/";
+			return type == native || (type.starts_with(prefix) && type.substr(prefix.size()) == sourceType);
+		};
+		if (matches(node.Type)) return true;
+		if (node.Type != "internal.group_opaque" || node.Values.size() != 1 ||
+			node.Values.front().Port != "source_type")
+			return false;
+		const auto *type = std::get_if<std::string>(&node.Values.front().Data);
+		return type && matches(*type);
 	}
 }

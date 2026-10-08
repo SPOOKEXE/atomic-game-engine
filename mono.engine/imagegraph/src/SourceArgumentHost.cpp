@@ -1,3 +1,4 @@
+#include "SourceArgumentTag.hpp"
 #include "SourceChoice.hpp"
 #include "SourceRealNumber.hpp"
 #include "ValuePayload.hpp"
@@ -174,22 +175,22 @@ namespace engine::imagegraph {
 			return refuse("argument provider only admits pc.argument");
 		const auto *tagValue = Control(invocation, "tag"), *type = Control(invocation, "type"),
 				   *defaultValue = Control(invocation, "default_value");
-		const auto *tag = tagValue ? std::get_if<std::string>(tagValue) : nullptr;
+		const auto tag = tagValue ? detail::SourceArgumentTagText(*tagValue) : std::nullopt;
 		const auto rawMode = type ? SourceChoiceNumber(*type) : std::nullopt;
 		const auto *entry = FindCatalogueEntry("pc.argument");
 		const auto *slot = entry ? FindCatalogueInput(*entry, "type") : nullptr;
 		const auto mode = rawMode && slot ? NormalizeSourceChoice(*slot, *rawMode, false) : std::nullopt;
 		if (!tag || !defaultValue || !mode || (*mode != 0 && *mode != 1))
-			return refuse("argument controls need a string tag and resolved String or Number mode");
+			return refuse("argument controls need a source primitive tag and resolved String or Number mode");
 		const Value *value = nullptr;
 		for (const auto &argument : Arguments)
-			if (argument.Port == *tag && !std::holds_alternative<UndefinedValue>(argument.Data)) {
+			if (argument.Port == tag->View() && !std::holds_alternative<UndefinedValue>(argument.Data)) {
 				value = &argument.Data;
 				break;
 			}
 		if (!value)
 			for (const auto &argument : Arguments)
-				if (SpaceName(argument.Port, *tag) &&
+				if (SpaceName(argument.Port, tag->View()) &&
 					!std::holds_alternative<UndefinedValue>(argument.Data)) {
 					value = &argument.Data;
 					break;

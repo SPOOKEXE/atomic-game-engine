@@ -22,10 +22,14 @@ namespace engine::imagegraphio::detail {
 					return record.Id == nativeId;
 				});
 			if (node == document.Nodes.end()) return false;
-			const auto *entry = FindCatalogueEntry(node->Type);
-			if (!entry || entry->SourceNode != owner->SourceType || !HasNativeExecutor(node->Type))
-				return false;
-			profile = SourceCommonDispatchProfile(owner->SourceType, true);
+			const bool executable = HasNativeExecutor(node->Type);
+			profile = SourceCommonDispatchProfile(owner->SourceType, executable);
+			if (profile.Wrapper == SourceCommonWrapperKind::Empty) {
+				if (!SourceCommonEmptyOwnerMatches(*node, owner->SourceType)) return false;
+			} else {
+				const auto *entry = FindCatalogueEntry(node->Type);
+				if (!entry || entry->SourceNode != owner->SourceType || !executable) return false;
+			}
 		} else if (owner->NativeOwnerKind == SourceCommonNativeOwnerKind::Group) {
 			if ((owner->SourceType != "Node_Group" && owner->SourceType != "Node_Collection") ||
 				std::none_of(document.Groups.begin(), document.Groups.end(), [&](const auto &group) {
