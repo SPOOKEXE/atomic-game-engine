@@ -117,6 +117,24 @@ TEST_CASE(
 	CHECK(Evaluated(Graph(1), &host) == Value{0.});
 }
 TEST_CASE(
+	"Argument tuple carriers return real failure zero while String preserves their types", "[source_argument]"
+) {
+	for (const Value &raw :
+		 {Value{Vector2{1.25, -2.5}},
+		  Value{Vector3{1.25, -2.5, 3.75}},
+		  Value{Vector4{1.25, -2.5, 3.75, -4.5}},
+		  Value{Quaternion{.1, -.2, .3, -.4}}}) {
+		auto host = Provider({{"name", raw}});
+		for (bool supplied : {true, false}) {
+			CAPTURE(raw.index(), supplied);
+			const auto number = Evaluated(supplied ? Graph(1) : Graph(1, raw, "absent"), &host);
+			REQUIRE(std::holds_alternative<double>(number));
+			CHECK(std::get<double>(number) == 0.);
+			CHECK(Evaluated(supplied ? Graph(0) : Graph(0, raw, "absent"), &host) == raw);
+		}
+	}
+}
+TEST_CASE(
 	"Argument String keeps full source array defaults and recorded raw alternatives", "[source_argument]"
 ) {
 	ArrayValue array;
