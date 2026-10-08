@@ -49,6 +49,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] Carry forward Studio dock and window fixes.
 - [x] Carry forward audio decode and mixer fixes.
 - [x] Carry forward texture format, material shader and sequence fixes.
+- [x] Bound PNG inflation before excess output allocation; preserve accepted output on malformed streams.
 - [x] Carry forward benchmark reports and jobs.
 
 ### v0.26
