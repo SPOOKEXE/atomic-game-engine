@@ -30,6 +30,7 @@
 #include "nodes/SourceShape3DExecutor.hpp"
 #include "nodes/SourceShardNoise.hpp"
 #include "nodes/SourceStrandNoise.hpp"
+#include "nodes/SourceTileRandom.hpp"
 #include "nodes/SourceTileTransform.hpp"
 #include "nodes/SourceVoronoiExtra.hpp"
 #include "nodes/SourceWaveletNoise.hpp"
@@ -951,10 +952,11 @@ namespace engine::imagegraph::detail {
 			: (context.Authored.Type == "pc.perlin_cube" || context.Authored.Type == "pc.cellular_cube" ||
 			   context.Authored.Type == "pc.simplex_cube")
 				? AdmitSourceNoiseCube
-			: context.Authored.Type == "pc.polar"	  ? AdmitSourcePolar
-			: context.Authored.Type == "pc.shape_3_d" ? AdmitSourceShape3D
-			: context.Authored.Type == "pc.tile"	  ? AdmitSourceTileTransform
-													  : nullptr;
+			: context.Authored.Type == "pc.polar"		? AdmitSourcePolar
+			: context.Authored.Type == "pc.shape_3_d"	? AdmitSourceShape3D
+			: context.Authored.Type == "pc.tile_random" ? AdmitSourceTileRandom
+			: context.Authored.Type == "pc.tile"		? AdmitSourceTileTransform
+														: nullptr;
 		if (admission) {
 			uint64_t batchWork = 0;
 			for (size_t row = 0; row < count; ++row) {

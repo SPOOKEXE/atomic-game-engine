@@ -1,0 +1,100 @@
+{
+  "profile": "native-source-tile-random",
+  "source": {
+    "repository": "pixel-composer",
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "files": [
+      "scripts/node_tile_random/node_tile_random.gml",
+      "shaders/sh_tile_random/sh_tile_random.fsh"
+    ],
+    "oracle": "pinned source shader and node",
+    "licensed_reference_executable": "unavailable"
+  },
+  "source_node": "pc.tile_random",
+  "physical_inputs": [
+    {
+      "index": 0,
+      "port": "surface_in",
+      "kind": "surface",
+      "required": true
+    },
+    {
+      "index": 1,
+      "port": "dimension",
+      "kind": "vec2",
+      "default": [
+        1,
+        1
+      ],
+      "default_unit": "Project",
+      "unit_choices": [
+        "Pixel",
+        "Project"
+      ]
+    },
+    {
+      "index": 2,
+      "port": "randomness",
+      "kind": "slider",
+      "default": 0.5
+    }
+  ],
+  "routing": {
+    "mask": "unavailable; pinned node has no mask input or mask route",
+    "source_dimension_index": -1,
+    "attribute_process": "controls array processing, not an Active flag",
+    "outer_processor_arrays": "unprocessed and unsupported by this explicit native profile",
+    "scalar_execution": "executes when attribute_process is false and still uses fixed RGBA8 output"
+  },
+  "source_shader_behavior": {
+    "coordinate_scale": "v_vTexcoord * (dimension / input_surface_dimensions)",
+    "neighbor_kernel": {
+      "shape": "3x3",
+      "offsets": "i,j in [-1,1]",
+      "weight": "exp(-5 * dot(g - fract(uv) + hash4(floor(uv) + g).xy, same))"
+    },
+    "sample_coordinates": "fract(uv + randomness * hash4(floor(uv) + g).zw)",
+    "randomness": "raw scalar blend passed to the shader; source node declares no clamp",
+    "output": "mix(weighted sample mean, variance-adjusted color using mean 0.3, randomness) multiplied by vertex color"
+  },
+  "native_profile": {
+    "implementation": "CPU nearest-neighbor profile",
+    "profile_selection": "bounded native CPU arithmetic; no matched GPU arithmetic claim",
+    "gpu_implementation": false,
+    "licensed_parity_claim": false,
+    "supported_input_formats": [
+      "rgba8_unorm",
+      "rgba4_unorm",
+      "rgba16_float",
+      "rgba32_float",
+      "r8_unorm",
+      "r16_float",
+      "r32_float"
+    ],
+    "supported_input_format_count": 7,
+    "active_output_format": "rgba8_unorm",
+    "coordinates": "stretched draw uses vTex=(pixel+0.5)/raw_dimension, then scales by raw_dimension/input_physical_dimensions; clip pixel centers to the raw-dimension rectangle",
+    "work_cap": {
+      "value": 64000000,
+      "unit": "aggregated estimated work units",
+      "quoted_work_per_pixel": 576,
+      "accounting": "all nine taps plus math and validation cost are charged before output allocation",
+      "status": "validated aggregate admission before output allocation"
+    },
+    "limitations": [
+      "Atlas texture binding and unlinked Mask dimensions explicitly refuse execution.",
+      "With array processing disabled, scalar inputs still execute; unprocessed outer arrays explicitly refuse.",
+      "A licensed reference executable, matched GPU arithmetic and nondefault source draw-state captures remain unavailable."
+    ]
+  },
+  "validation": {
+    "status": "accepted batch59",
+    "tests_passed": true,
+    "build_passed": true,
+    "core_cases": 3692,
+    "io_cases": 385,
+    "optimized_preflight_cases": 5,
+    "receipt": "docs/pixel-composer-m0/native-tile-random-validation-2026-10-08.json",
+    "licensed_reference_comparison": "unavailable"
+  }
+}

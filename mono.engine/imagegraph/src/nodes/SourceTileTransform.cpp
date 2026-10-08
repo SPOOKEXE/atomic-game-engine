@@ -4,6 +4,7 @@
 #include "Families.hpp"
 #include "Sampler.hpp"
 #include "Source2DGenerator.hpp"
+#include "SourceTileRandom.hpp"
 
 #include <cmath>
 #include <numbers>
@@ -274,7 +275,9 @@ namespace engine::imagegraph::detail {
 			   QuoteTileTransform(context, inputs, work);
 	}
 	std::span<const ExecutorEntry> SourceTileTransformExecutors() {
-		static constexpr ExecutorEntry entries[] = {{"pc.tile", DrawSourceTileTransform, true}};
+		static constexpr ExecutorEntry entries[] = {
+			{"pc.tile", DrawSourceTileTransform, true}, {"pc.tile_random", DrawSourceTileRandom, true}
+		};
 		return entries;
 	}
 }
