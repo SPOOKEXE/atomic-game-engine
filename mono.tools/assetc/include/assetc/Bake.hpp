@@ -47,13 +47,6 @@ namespace assetc {
 		//
 		uint32_t MaximumTexture = 2048;
 
-		// Native image graph export. An empty output selects the sole named output;
-		// documents with several outputs require GraphOutput. Tick and seed are
-		// explicit inputs so a repeat bake selects the same image.
-		std::string GraphOutput;
-		uint64_t GraphTick = 0;
-		uint64_t GraphSeed = 0;
-
 		// The frame rate to stamp on every imported flipbook, overriding what
 		// the source said. Zero keeps what the source said.
 		//
@@ -67,8 +60,6 @@ namespace assetc {
 		// It applies to every flipbook in the run, because `assetc` bakes a
 		// tree and has no per-file switches. Re-timing one animation means
 		// baking it on its own.
-		// Native image-array outputs require an explicit positive FPS and derive
-		// their grid and frame count from the selected array.
 		//
 		// @since v0.10
 		float FlipbookFps = 0.0f;

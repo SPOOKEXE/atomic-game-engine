@@ -1,4 +1,5 @@
 #include <engine/assets/Texture.hpp>
+#include <engine/assets/TexturePixel.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
@@ -12,6 +13,7 @@
 #include <engine/ui/Metrics.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cfloat>
 #include <cmath>
 #include <cstddef>
@@ -24,6 +26,7 @@
 #include <limits>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <span>
 #include <sstream>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
@@ -2060,16 +2063,18 @@ namespace studio {
 								const std::byte *pixel =
 									image->Pixels.data() + (static_cast<size_t>(y) * image->Width + x) *
 															   engine::assets::BytesPerPixel(image->Format);
-								if (image->Format == engine::assets::TextureFormat::R8) {
-									red = green = blue =
-										static_cast<float>(std::to_integer<uint8_t>(*pixel)) / 255.0f;
-									alpha = 1.0f;
-								} else {
-									red = static_cast<float>(std::to_integer<uint8_t>(pixel[0])) / 255.0f;
-									green = static_cast<float>(std::to_integer<uint8_t>(pixel[1])) / 255.0f;
-									blue = static_cast<float>(std::to_integer<uint8_t>(pixel[2])) / 255.0f;
-									alpha = static_cast<float>(std::to_integer<uint8_t>(pixel[3])) / 255.0f;
-								}
+								std::array<float, 4> sampled{};
+								const size_t bytesPerPixel = engine::assets::BytesPerPixel(image->Format);
+								if (!engine::assets::LoadTexturePixelForDisplay(
+										image->Format,
+										std::span<const std::byte>(pixel, bytesPerPixel),
+										sampled
+									))
+									return false;
+								red = sampled[0];
+								green = sampled[1];
+								blue = sampled[2];
+								alpha = sampled[3];
 								return true;
 							};
 							images.ResolveViewport = [this](Entity instance) {

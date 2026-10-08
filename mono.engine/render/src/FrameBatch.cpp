@@ -167,7 +167,6 @@ namespace engine::render {
 			SDL_CancelGPUCommandBuffer(command);
 			return false;
 		}
-		RecordTransform3D(command);
 		return SubmitSceneCommand(command);
 	}
 

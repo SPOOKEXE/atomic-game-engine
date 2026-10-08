@@ -818,6 +818,8 @@ declare namespace Enum {
 		readonly Grid4x4: ParticleFlipbookLayout;
 		readonly Grid8x8: ParticleFlipbookLayout;
 		readonly Grid16x16: ParticleFlipbookLayout;
+		readonly Grid32x32: ParticleFlipbookLayout;
+		readonly Grid64x64: ParticleFlipbookLayout;
 	};
 	const ParticleFlipbookMode: {
 		readonly Loop: ParticleFlipbookMode;

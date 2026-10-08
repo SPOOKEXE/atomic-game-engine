@@ -140,6 +140,12 @@ namespace engine::effects {
 
 		// Two hundred and fifty-six.
 		Grid16x16 = 4,
+
+		// One thousand and twenty-four cells.
+		Grid32x32 = 5,
+
+		// Four thousand and ninety-six cells.
+		Grid64x64 = 6,
 	};
 
 	// How many cells a layout has on each side.
@@ -148,7 +154,7 @@ namespace engine::effects {
 	// per particle per frame inside the step.
 	//
 	// @param layout The layout.
-	// @return 1, 2, 4, 8 or 16.
+	// @return 1, 2, 4, 8, 16, 32 or 64.
 	constexpr uint32_t FlipbookSide(FlipbookLayout layout) {
 		return layout == FlipbookLayout::None ? 1u : 1u << static_cast<uint32_t>(layout);
 	}
@@ -156,7 +162,7 @@ namespace engine::effects {
 	// How many cells a layout has in total.
 	//
 	// @param layout The layout.
-	// @return 1, 4, 16, 64 or 256.
+	// @return 1, 4, 16, 64, 256, 1024 or 4096.
 	constexpr uint32_t FlipbookCells(FlipbookLayout layout) {
 		const uint32_t side = FlipbookSide(layout);
 		return side * side;
@@ -387,7 +393,7 @@ namespace engine::effects {
 		// carries it - and only a scene that knows better than both has to
 		// speak.
 		//
-		// A 16x16 sheet holds 256 frames, so the count needs two bytes.
+		// A 64x64 sheet holds 4096 frames, so the count needs two bytes.
 		uint16_t FlipbookFrames = 0;
 
 		// Whether every particle starts on a cell of its own choosing.
@@ -462,7 +468,7 @@ namespace engine::effects {
 		//
 		// Rotation in the low sixteen bits as a turn over 65,536, which is a
 		// hundredth of a degree - finer than a screen can show. The cell in the
-		// high sixteen, which supports all 256 cells of the widest grid.
+		// high sixteen, which supports all 4096 cells of the widest grid.
 		uint32_t RotationAndCell = 0;
 
 		// Its colour and alpha, as RGBA8.

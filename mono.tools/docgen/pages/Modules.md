@@ -24,6 +24,8 @@ a module that exists is listed. Run `just docs-pages` after adding one;
 - @subpage md_mono_8engine_2gui_2AGENTS
 - @subpage md_mono_8engine_2scene_2AGENTS
 - @subpage md_mono_8engine_2assets_2AGENTS
+- @subpage md_mono_8engine_2audiocodec_2AGENTS
+- @subpage md_mono_8engine_2audiocodec_2docs_2index
 - @subpage md_mono_8engine_2effects_2AGENTS
 - @subpage md_mono_8engine_2physics_2AGENTS
 - @subpage md_mono_8engine_2bake_2AGENTS

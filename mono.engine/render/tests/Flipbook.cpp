@@ -13,6 +13,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <cmath>
 
 TEST_SUITE_ID("engine.render.flipbook")
 
@@ -140,4 +141,11 @@ TEST_CASE("time before the clock started holds the first frame", "[render][flipb
 	// another - the worst kind of difference to be told about.
 	CHECK(FlipbookFrameAt(24, 10.0f, -5.0) == 0);
 	CHECK(FlipbookCellAt(4, 16, 10.0f, -5.0).OffsetU == 0.0f);
+}
+
+TEST_CASE("variable playback keeps its last frame immediately before wrap", "[render][flipbook]") {
+	const std::array<float, 3> ends{0.04f, 0.14f, 0.20f};
+	const double total = ends.back();
+	CHECK(FlipbookFrameAt(ends, std::nextafter(total, 0.0)) == 2);
+	CHECK(FlipbookFrameAt(ends, total) == 0);
 }

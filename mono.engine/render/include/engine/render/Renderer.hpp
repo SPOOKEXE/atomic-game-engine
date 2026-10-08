@@ -7,6 +7,7 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
+#include <engine/assets/TextureSequence.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/effects/ParticleSystem.hpp>
@@ -65,9 +66,6 @@ namespace engine::render {
 	// Distinguishes the two geometric refusals folded into PortalDemandStatus::Hidden.
 	enum class PortalDemandHiddenReason { None, Frustum, ClipPlane };
 
-	namespace test_support {
-		struct TransformImage3DResidentTestAccess;
-	}
 	struct TextureBatchImage;
 	class DataFactoryHookBind;
 	struct PackedMeshData;
@@ -1767,6 +1765,9 @@ namespace engine::render {
 		// @param seconds Seconds since the session began.
 		// @since v0.10
 		void SetAnimationTime(double seconds);
+
+		// Large sequences preserve cell dimensions and durations in one bounded atlas.
+		bool AddTextureSequence(core::Name name, assets::TextureSequenceData sequence, core::Name owner);
 
 		// Compiles and installs a named render graph for a view to select.
 		//

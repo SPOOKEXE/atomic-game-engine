@@ -5,6 +5,7 @@
 #include <AssetProfiler.hpp>
 #include <AssetProfilerSort.hpp>
 #include <array>
+#include <utility>
 
 TEST_SUITE_ID("studio.assetprofiler")
 
@@ -32,6 +33,29 @@ TEST_CASE("asset profiler counts every expanded texture mip on the gpu", "[studi
 	CHECK(footprint.DecodedBytes == 11);
 	CHECK(footprint.CpuResidentBytes == 0);
 	CHECK(footprint.GpuResidentBytes == (4 * 2 + 2 * 1 + 1 * 1) * 4);
+}
+
+TEST_CASE(
+	"asset profiler reports native float and expanded packed texture residency", "[studio][assetprofiler]"
+) {
+	const std::array formats{
+		std::pair{engine::assets::TextureFormat::RGBA4_UNORM, 4u},
+		std::pair{engine::assets::TextureFormat::RGBA4_SRGB, 4u},
+		std::pair{engine::assets::TextureFormat::RGBA16_FLOAT, 8u},
+		std::pair{engine::assets::TextureFormat::RGBA32_FLOAT, 16u},
+		std::pair{engine::assets::TextureFormat::R16_FLOAT, 2u},
+		std::pair{engine::assets::TextureFormat::R32_FLOAT, 4u},
+	};
+	for (const auto &[format, deviceStride] : formats) {
+		engine::assets::TextureData texture;
+		texture.Width = 4;
+		texture.Height = 2;
+		texture.Format = format;
+		const uint32_t sourceStride = engine::assets::BytesPerPixel(format);
+		texture.Pixels.resize(8 * sourceStride);
+		texture.Mips = {std::vector<std::byte>(2 * sourceStride), std::vector<std::byte>(sourceStride)};
+		CHECK(studio::TextureFootprint(texture).GpuResidentBytes == (8 + 2 + 1) * deviceStride);
+	}
 }
 
 TEST_CASE("asset profiler sorts every measured column", "[studio][assetprofiler]") {

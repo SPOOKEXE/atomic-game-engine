@@ -1495,3 +1495,30 @@ TEST_CASE("a disabled device burst renews retirement after clear", "[effects][de
 	CHECK(runtime.Idle == Catch::Approx(0.2f));
 	CHECK(runtime.Live > 0);
 }
+
+TEST_CASE("a 64 by 64 particle atlas reaches timed frame 4096", "[effects]") {
+	Store store("large_sequence_particles");
+	const Entity emitter = MakeEmitter(store);
+	const engine::core::Name texture("effects/maximum.aseq");
+	engine::scene::FlipbookFacts facts;
+	facts.Side = 64;
+	facts.Frames = 4096;
+	facts.FrameDurations.assign(4096, .125f);
+	REQUIRE(engine::scene::RecordTexture(store, texture, facts));
+	auto &settings = Settings(store, emitter);
+	settings.Texture = texture;
+	settings.Rate = 8;
+	settings.Lifetime = NumberRange{1024, 1024};
+	settings.Speed = NumberRange{0, 0};
+	settings.Flipbook = FlipbookLayout::Grid64x64;
+	settings.FlipbookPlayback = FlipbookMode::Loop;
+	Frame(store, .125f);
+	Settings(store, emitter).Rate = 0;
+	const auto *system = store.Resource<ParticleSystem>();
+	for (int frame = 0; frame < 4095; ++frame)
+		Frame(store, .125f);
+	REQUIRE(system->Instances.size() > 0);
+	CHECK((system->Instances[0].RotationAndCell >> 16) == 4095);
+	Frame(store, .125f);
+	CHECK((system->Instances[0].RotationAndCell >> 16) == 0);
+}

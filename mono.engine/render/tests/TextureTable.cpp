@@ -1,3 +1,4 @@
+#include "../src/TextureFormatSupport.hpp"
 #include "RenderFixture.hpp"
 
 #include <engine/assets/Builtin.hpp>
@@ -7,11 +8,100 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <utility>
 
 TEST_SUITE_ID("engine.render.texturetable")
 TEST_DEPENDS("engine.assets.texture")
 
 using namespace engine;
+
+TEST_CASE("texture upload mappings retain numeric layouts", "[render][texture-format]") {
+	using engine::render::detail::CopyPixelsForUpload;
+	using engine::render::detail::TextureFormatForUpload;
+	CHECK(
+		TextureFormatForUpload(assets::TextureFormat::RGBA8)->DeviceFormat ==
+		SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
+	);
+	CHECK(
+		TextureFormatForUpload(assets::TextureFormat::RGBA8_LINEAR)->DeviceFormat ==
+		SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+	);
+	CHECK(
+		TextureFormatForUpload(assets::TextureFormat::RGBA16_FLOAT)->DeviceFormat ==
+		SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT
+	);
+	CHECK(
+		TextureFormatForUpload(assets::TextureFormat::RGBA32_FLOAT)->DeviceFormat ==
+		SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT
+	);
+	CHECK(
+		TextureFormatForUpload(assets::TextureFormat::R16_FLOAT)->DeviceFormat ==
+		SDL_GPU_TEXTUREFORMAT_R16_FLOAT
+	);
+	CHECK(
+		TextureFormatForUpload(assets::TextureFormat::R32_FLOAT)->DeviceFormat ==
+		SDL_GPU_TEXTUREFORMAT_R32_FLOAT
+	);
+	CHECK(TextureFormatForUpload(assets::TextureFormat::RGBA4_UNORM)->UploadBytesPerPixel == 4);
+	CHECK(
+		TextureFormatForUpload(assets::TextureFormat::RGBA4_SRGB)->DeviceFormat ==
+		SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
+	);
+	CHECK_FALSE(TextureFormatForUpload(static_cast<assets::TextureFormat>(255)).has_value());
+	const std::array uploadStrides{
+		std::pair{assets::TextureFormat::RGBA8, 4u},
+		std::pair{assets::TextureFormat::RGBA8_LINEAR, 4u},
+		std::pair{assets::TextureFormat::R8, 4u},
+		std::pair{assets::TextureFormat::RGBA4_UNORM, 4u},
+		std::pair{assets::TextureFormat::RGBA4_SRGB, 4u},
+		std::pair{assets::TextureFormat::RGBA16_FLOAT, 8u},
+		std::pair{assets::TextureFormat::RGBA32_FLOAT, 16u},
+		std::pair{assets::TextureFormat::R16_FLOAT, 2u},
+		std::pair{assets::TextureFormat::R32_FLOAT, 4u},
+	};
+	for (const auto &[format, expectedBytes] : uploadStrides)
+		CHECK(engine::render::TextureUploadBytesPerPixel(format) == expectedBytes);
+	CHECK_FALSE(engine::render::TextureUploadBytesPerPixel(static_cast<assets::TextureFormat>(255)));
+
+	const std::array<std::byte, 2> red{std::byte{91}, std::byte{208}};
+	std::array<std::byte, 8> expandedRed{};
+	const std::array<std::byte, 8> expectedExpandedRed{
+		std::byte{91},
+		std::byte{91},
+		std::byte{91},
+		std::byte{255},
+		std::byte{208},
+		std::byte{208},
+		std::byte{208},
+		std::byte{255}
+	};
+	REQUIRE(CopyPixelsForUpload(assets::TextureFormat::R8, red, expandedRed));
+	CHECK(expandedRed == expectedExpandedRed);
+
+	const std::array<std::byte, 2> rgba4{std::byte{0x34}, std::byte{0x12}};
+	std::array<std::byte, 4> rgba8{};
+	const std::array<std::byte, 4> expectedRgba8{std::byte{68}, std::byte{51}, std::byte{34}, std::byte{17}};
+	REQUIRE(CopyPixelsForUpload(assets::TextureFormat::RGBA4_UNORM, rgba4, rgba8));
+	CHECK(rgba8 == expectedRgba8);
+	CHECK_FALSE(
+		engine::render::detail::CopyPixelsForUpload(
+			assets::TextureFormat::RGBA4_UNORM, rgba4, std::span<std::byte>(rgba8).first(3)
+		)
+	);
+	const std::array<std::byte, 8> halfWords{
+		std::byte{0x00},
+		std::byte{0x3c},
+		std::byte{0x00},
+		std::byte{0x40},
+		std::byte{0x00},
+		std::byte{0x42},
+		std::byte{0x00},
+		std::byte{0x44}
+	};
+	std::array<std::byte, 8> copied{};
+	REQUIRE(CopyPixelsForUpload(assets::TextureFormat::RGBA16_FLOAT, halfWords, copied));
+	CHECK(copied == halfWords);
+}
 
 TEST_CASE(
 	"texture table capacity is defaulted and enforced per renderer", "[render][texture-budget][gpu][.]"
@@ -91,7 +181,9 @@ TEST_CASE("resident replacement keeps owner-scoped last-good texture", "[render]
 	SDL_GPUTexture *replacement = SDL_CreateGPUTexture(device, &info);
 	REQUIRE(replacement != nullptr);
 	SDL_GPUTexture *retired = nullptr;
-	CHECK_FALSE(table.ReplaceAdopt(name, replacement, 4, 2, 32, first, retired));
+	CHECK_FALSE(
+		table.ReplaceAdopt(name, replacement, 4, 2, 32, first, retired, assets::TextureFormat::RGBA8)
+	);
 	CHECK(retired == nullptr);
 	CHECK(table.Find(name, first) != replacement);
 	CHECK(table.Find(name, second) != replacement);
@@ -101,12 +193,14 @@ TEST_CASE("resident replacement keeps owner-scoped last-good texture", "[render]
 	info.width = info.height = 2;
 	SDL_GPUTexture *success = SDL_CreateGPUTexture(device, &info);
 	REQUIRE(success != nullptr);
-	CHECK(table.ReplaceAdopt(name, success, 2, 2, 16, first, retired));
+	CHECK(table.ReplaceAdopt(name, success, 2, 2, 16, first, retired, assets::TextureFormat::RGBA8));
 	CHECK(retired == prior);
 	CHECK(table.Find(name, first) == success);
 	CHECK(table.Find(name, second) == otherOwner);
 	SDL_GPUTexture *sameRetired = nullptr;
-	CHECK_FALSE(table.ReplaceAdopt(name, success, 2, 2, 16, first, sameRetired));
+	CHECK_FALSE(
+		table.ReplaceAdopt(name, success, 2, 2, 16, first, sameRetired, assets::TextureFormat::RGBA8)
+	);
 	CHECK(sameRetired == nullptr);
 	SDL_WaitForGPUIdle(device);
 	SDL_ReleaseGPUTexture(device, retired);

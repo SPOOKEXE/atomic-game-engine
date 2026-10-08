@@ -1,4 +1,5 @@
 #include "GpuHeap.hpp"
+#include "TextureFormatSupport.hpp"
 
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
@@ -11,7 +12,9 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <new>
+#include <optional>
 #include <vector>
 
 namespace engine::render {
@@ -20,6 +23,28 @@ namespace engine::render {
 		uint64_t TextureKey(const core::Name &name, core::Name owner) {
 			return (uint64_t(owner.Id()) << 32) | name.Id();
 		}
+
+		std::optional<size_t> UploadedByteCount(const assets::TextureData &image) {
+			const auto format = detail::TextureFormatForUpload(image.Format);
+			if (!format) return std::nullopt;
+			uint64_t bytes = 0;
+			for (uint32_t level = 0; level < image.LevelCount(); level++) {
+				const uint64_t pixels =
+					uint64_t(assets::MipExtent(image.Width, level)) * assets::MipExtent(image.Height, level);
+				if (pixels > std::numeric_limits<uint64_t>::max() / format->UploadBytesPerPixel)
+					return std::nullopt;
+				const uint64_t levelBytes = pixels * format->UploadBytesPerPixel;
+				if (levelBytes > std::numeric_limits<size_t>::max() - bytes) return std::nullopt;
+				bytes += levelBytes;
+			}
+			return static_cast<size_t>(bytes);
+		}
+	}
+
+	std::optional<uint32_t> TextureUploadBytesPerPixel(assets::TextureFormat format) noexcept {
+		const auto support = detail::TextureFormatForUpload(format);
+		if (!support) return std::nullopt;
+		return support->UploadBytesPerPixel;
 	}
 
 	TextureTable::~TextureTable() {
@@ -142,6 +167,12 @@ namespace engine::render {
 
 	SDL_GPUTexture *
 	TextureTable::Upload(const assets::TextureData &image, std::string_view label, size_t &bytes) {
+		const auto format = detail::TextureFormatForUpload(image.Format);
+		const auto uploadSize = UploadedByteCount(image);
+		if (Device == nullptr || !image.IsValid() || !format || !uploadSize ||
+			*uploadSize > std::numeric_limits<uint32_t>::max() ||
+			!detail::SupportsTextureFormat(Device, image.Format))
+			return nullptr;
 		const uint32_t levels = image.LevelCount();
 
 		// **Every level staged back to back in one buffer**, so a chain costs one
@@ -151,35 +182,31 @@ namespace engine::render {
 		// alignment: SDL's backend inserts a staging copy for a level that lands
 		// unaligned, and paying that on the two or three smallest levels is
 		// cheaper than the padding on every level of every texture.
-		size_t uploadBytes = 0;
-		for (uint32_t level = 0; level < levels; level++) {
-			uploadBytes += static_cast<size_t>(assets::MipExtent(image.Width, level)) *
-						   assets::MipExtent(image.Height, level) * 4;
-		}
+		const size_t uploadBytes = *uploadSize;
 
-		// Expand R8 assets so every texture uses the pipeline's RGBA format.
-		std::vector<std::byte> staged(uploadBytes);
+		// R8 and packed RGBA4 expand explicitly; floating formats stay native.
+		std::vector<std::byte> staged;
+		try {
+			staged.resize(uploadBytes);
+		} catch (const std::bad_alloc &) {
+			return nullptr;
+		}
 		size_t written = 0;
 		for (uint32_t level = 0; level < levels; level++) {
 			const std::vector<std::byte> &source = level == 0 ? image.Pixels : image.Mips[level - 1];
-			if (image.Format == assets::TextureFormat::R8) {
-				for (size_t index = 0; index < source.size(); index++) {
-					staged[written + index * 4] = source[index];
-					staged[written + index * 4 + 1] = source[index];
-					staged[written + index * 4 + 2] = source[index];
-					staged[written + index * 4 + 3] = std::byte{255};
-				}
-				written += source.size() * 4;
-				continue;
-			}
-			std::memcpy(staged.data() + written, source.data(), source.size());
-			written += source.size();
+			const uint64_t pixels =
+				uint64_t(assets::MipExtent(image.Width, level)) * assets::MipExtent(image.Height, level);
+			const size_t destinationBytes = static_cast<size_t>(pixels * format->UploadBytesPerPixel);
+			if (!detail::CopyPixelsForUpload(
+					image.Format, source, std::span(staged).subspan(written, destinationBytes)
+				))
+				return nullptr;
+			written += destinationBytes;
 		}
 
 		SDL_GPUTextureCreateInfo info{};
 		info.type = SDL_GPU_TEXTURETYPE_2D;
-		info.format = assets::IsSRGB(image.Format) ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
-												   : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+		info.format = format->DeviceFormat;
 		info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		info.width = image.Width;
 		info.height = image.Height;
@@ -205,6 +232,11 @@ namespace engine::render {
 		}
 
 		void *mapped = SDL_MapGPUTransferBuffer(Device, transfer, false);
+		if (mapped == nullptr) {
+			gpu::ReleaseTransferBuffer(Device, transfer);
+			gpu::ReleaseTexture(Device, texture);
+			return nullptr;
+		}
 		std::memcpy(mapped, staged.data(), uploadBytes);
 		SDL_UnmapGPUTransferBuffer(Device, transfer);
 
@@ -230,7 +262,7 @@ namespace engine::render {
 			region.d = 1;
 
 			SDL_UploadToGPUTexture(copy, &source, &region, false);
-			offset += static_cast<size_t>(width) * height * 4;
+			offset += static_cast<size_t>(width) * height * format->UploadBytesPerPixel;
 		}
 
 		SDL_EndGPUCopyPass(copy);
@@ -326,10 +358,9 @@ namespace engine::render {
 		// The chain counts against the ceiling too - it is a third of a texture's
 		// device memory, and a pre-check that ignored it would let a full table
 		// take an upload it then could not afford.
-		size_t bytes = image.Pixels.size();
-		for (const std::vector<std::byte> &level : image.Mips) {
-			bytes += level.size();
-		}
+		const auto uploadSize = UploadedByteCount(image);
+		if (!uploadSize || !detail::SupportsTextureFormat(Device, image.Format)) return false;
+		const size_t bytes = *uploadSize;
 		const auto existing = Textures.find(TextureKey(name, owner));
 		const size_t oldBytes =
 			existing == Textures.end() ? 0 : std::min(UploadedBytes, existing->second.Bytes);
@@ -351,31 +382,31 @@ namespace engine::render {
 			return false;
 		}
 
-		// Release the old texture only after the replacement upload succeeds.
 		const bool retainSource = RetainSources && !sourceTooLarge && !retainedOverLimit;
-		if (existing != Textures.end()) {
-			gpu::ReleaseTexture(Device, existing->second.Texture);
+		Entry prepared;
+		Entry *destination = existing == Textures.end() ? nullptr : &existing->second;
+		try {
+			prepared = Describe(texture, uploadBytes, image, retainSource);
+			if (destination == nullptr)
+				destination = &Textures.try_emplace(TextureKey(name, owner)).first->second;
+		} catch (const std::bad_alloc &) {
+			gpu::ReleaseTexture(Device, texture);
+			return false;
+		}
+		if (!RetainSources)
+			prepared.CopyStatus = TextureCopyStatus::Unsupported;
+		else if (sourceTooLarge)
+			prepared.CopyStatus = TextureCopyStatus::OverLimit;
+		else if (retainedOverLimit)
+			prepared.CopyStatus = TextureCopyStatus::Unsupported;
 
-			// **The old size comes off before the new one goes on**, which it
-			// did not before: the total only ever grew, so a session that
-			// replaced textures drifted up until the ceiling refused an upload
-			// that would have fit.
-			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
-			existing->second = Describe(texture, uploadBytes, image, retainSource);
-		} else {
-			Textures.emplace(TextureKey(name, owner), Describe(texture, uploadBytes, image, retainSource));
-		}
-		Entry &entry = Textures.find(TextureKey(name, owner))->second;
+		// Build timing, source copies and the map slot before retiring accepted content.
+		// Moving the prepared vectors cannot allocate, so a refusal leaves the old entry intact.
+		if (destination->Texture != nullptr) gpu::ReleaseTexture(Device, destination->Texture);
+		*destination = std::move(prepared);
+		UploadedBytes -= oldBytes;
 		RetainedCopyBytes -= oldCopyBytes;
-		if (!RetainSources) {
-			entry.CopyStatus = TextureCopyStatus::Unsupported;
-		} else if (sourceTooLarge) {
-			entry.CopyStatus = TextureCopyStatus::OverLimit;
-		} else if (retainedOverLimit) {
-			entry.CopyStatus = TextureCopyStatus::Unsupported;
-		} else {
-			RetainedCopyBytes += entry.SourcePixels.size();
-		}
+		RetainedCopyBytes += destination->SourcePixels.size();
 
 		UploadedBytes += uploadBytes;
 
@@ -402,8 +433,7 @@ namespace engine::render {
 		for (size_t index = 0; index < images.size(); ++index) {
 			const TextureBatchImage &item = images[index];
 			if (!item.Name.IsValid() || item.Image == nullptr || !item.Image->IsValid() ||
-				(item.Image->Format != assets::TextureFormat::RGBA8 &&
-				 item.Image->Format != assets::TextureFormat::RGBA8_LINEAR))
+				!UploadedByteCount(*item.Image) || !detail::SupportsTextureFormat(Device, item.Image->Format))
 				return false;
 			pending[index].Key = TextureKey(item.Name, owner);
 			for (size_t earlier = 0; earlier < index; ++earlier)
@@ -416,11 +446,9 @@ namespace engine::render {
 		}
 		size_t newBytes = 0;
 		for (const TextureBatchImage &item : images) {
-			size_t bytes = item.Image->Pixels.size();
-			for (const auto &level : item.Image->Mips) {
-				if (level.size() > MaximumBytes - std::min(bytes, MaximumBytes)) return false;
-				bytes += level.size();
-			}
+			const auto uploaded = UploadedByteCount(*item.Image);
+			if (!uploaded) return false;
+			const size_t bytes = *uploaded;
 			if (residentBytes > MaximumBytes || newBytes > MaximumBytes - residentBytes ||
 				bytes > MaximumBytes - residentBytes - newBytes)
 				return false;
@@ -597,10 +625,13 @@ namespace engine::render {
 		uint32_t height,
 		size_t bytes,
 		core::Name owner,
-		SDL_GPUTexture *&retired
+		SDL_GPUTexture *&retired,
+		assets::TextureFormat format
 	) {
 		retired = nullptr;
-		if (Device == nullptr || !name.IsValid() || texture == nullptr) return false;
+		if (Device == nullptr || !name.IsValid() || texture == nullptr ||
+			!detail::TextureFormatForUpload(format))
+			return false;
 		const auto existing = Textures.find(TextureKey(name, owner));
 		if (existing != Textures.end() && existing->second.Texture == texture) return false;
 		const size_t oldBytes = existing == Textures.end() ? 0 : existing->second.Bytes;
@@ -611,6 +642,7 @@ namespace engine::render {
 		entry.Bytes = bytes;
 		entry.Width = width;
 		entry.Height = height;
+		entry.Format = format;
 		entry.CopyStatus = TextureCopyStatus::Unsupported;
 		if (existing != Textures.end()) {
 			retired = existing->second.Texture;

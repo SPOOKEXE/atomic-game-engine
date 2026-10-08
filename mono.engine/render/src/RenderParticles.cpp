@@ -759,7 +759,7 @@ namespace engine::render {
 			const core::Name owner = TextureContentOwner(batch.Texture, view.ContentOwner);
 			const uint64_t key = (uint64_t(owner.Id()) << 32) | batch.Texture.Id();
 			const std::span<const float> ends = Textures.TimingOf(batch.Texture, owner);
-			if (ends.size() != batch.Block->Frames || ends.empty() || ends.size() > 256) {
+			if (ends.size() != batch.Block->Frames || ends.empty() || ends.size() > 4096) {
 				ENGINE_WARN(
 					"particle timeline {}: texture timing does not match emitter frame count",
 					batch.Texture.Text()

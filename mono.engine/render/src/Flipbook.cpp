@@ -35,7 +35,7 @@ namespace engine::render {
 		if (cumulativeEnds.size() <= 1 || !(seconds > 0.0) || !std::isfinite(seconds)) return 0;
 		const double total = cumulativeEnds.back();
 		if (!(total > 0.0)) return 0;
-		const float position = static_cast<float>(std::fmod(seconds, total));
+		const double position = std::fmod(seconds, total);
 		return static_cast<uint32_t>(
 			std::upper_bound(cumulativeEnds.begin(), cumulativeEnds.end(), position) - cumulativeEnds.begin()
 		);

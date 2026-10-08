@@ -66,7 +66,6 @@
       "tier": "shared",
       "links": [
         "assets",
-        "audiocodec",
         "bake",
         "bakegraph",
         "core"
@@ -761,6 +760,7 @@
       "links": [
         "assets",
         "audio",
+        "audiocodec",
         "bakegraph",
         "collision",
         "control",
@@ -855,6 +855,7 @@
         "assetc",
         "assets",
         "audio",
+        "audiocodec",
         "bake",
         "bakegraph",
         "cdn",
@@ -898,6 +899,7 @@
       "links": [
         "assets",
         "audio",
+        "audiocodec",
         "bakegraph",
         "cdn",
         "client",

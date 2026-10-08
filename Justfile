@@ -378,19 +378,6 @@ fuzz-ui runs="1000" compiler="clang++-21":
         "$fuzz_build/fuzz/$target" "$corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$artifacts/"
     done
 
-# Coverage-guided parsing of bounded PXCX archives under AddressSanitizer and UBSan.
-bake-pxcx-fuzz runs="1000" compiler="clang++-21":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    fuzz_build=".cache/build/gui-fuzz"
-    cmake --preset server -B "$fuzz_build" -DCMAKE_CXX_COMPILER="{{compiler}}" -DCMAKE_C_COMPILER="${CC:-clang-21}" -DMONO_BUILD_TESTS=OFF -DMONO_TRACY=OFF -DMONO_HEAP_PROFILE=OFF -DMONO_FUZZ_GUI=ON -DMONO_FUZZ_BAKE=ON
-    cmake --build "$fuzz_build" --target fuzz_bake_pxcx -j 4
-    corpus="$fuzz_build/fuzz/fuzz_bake_pxcx-corpus"
-    artifacts="$fuzz_build/fuzz/fuzz_bake_pxcx-artifacts"
-    mkdir -p "$corpus" "$artifacts"
-    "$fuzz_build/fuzz/fuzz_bake_pxcx" --write-seeds "$corpus"
-    "$fuzz_build/fuzz/fuzz_bake_pxcx" "$corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=2048 -malloc_limit_mb=128 -artifact_prefix="$artifacts/"
-
 # Measure the benchmark suites a change could have affected.
 #
 # **The same selection as `just test`, over `bench/` instead of `tests/`.** A
@@ -450,41 +437,6 @@ scheduler-timing-bench samples="5":
         ATOMIC_SCHEDULER_TIMING_PROFILE=1 ATOMIC_SCHEDULER_TIMING_CASE="$scheduler_case" \
             ./.cache/build/bench/bench/bench_ecs --suite engine.ecs.bench.scheduler --samples {{samples}}
     done
-
-# Evaluate a fixed 256x256 three-octave imagegraph output on the CPU.
-imagegraph-evaluation-bench samples="5":
-    cmake --preset bench > /dev/null
-    cmake --build --preset bench --target bench_imagegraph
-    ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.evaluation --samples {{samples}}
-
-# Actual headless WAV inspector cache paths. Optional stdout capture:
-# ATOMIC_STUDIO_WAV_TIMELINE_PROFILE=1 just studio-wav-timeline-bench 5
-studio-wav-timeline-bench samples="5":
-    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
-    cmake --preset release-tests > /dev/null
-    cmake --build --preset release-tests --target test_studio
-    ./.cache/build/release-tests/tests/test_studio '[studio][wav_timeline]'
-    cmake --preset bench > /dev/null
-    cmake --build --preset bench --target bench_studio
-    ./.cache/build/bench/bench/bench_studio --suite studio.bench.wav-timeline --samples {{samples}}
-
-# Profile captured audio, gradient sampling, image batches and recursive array executors headlessly.
-imagegraph-source-family-bench samples="5":
-    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
-    cmake --preset release-tests > /dev/null
-    cmake --build --preset release-tests --target test_imagegraph
-    ./.cache/build/release-tests/tests/test_imagegraph '[imagegraph][source_family],[imagegraph][array_structure],[imagegraph][array_edit],[imagegraph][array_unique],[imagegraph][array_uniform],[imagegraph][array_rearrange]'
-    cmake --preset bench > /dev/null
-    cmake --build --preset bench --target bench_imagegraph
-    ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.source-families --samples {{samples}}
-    ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.array-structure --samples {{samples}}
-    ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.array-edit --samples {{samples}}
-
-# Project a generated PXCX chain while retaining its parsed source archive.
-imagegraphio-pxcx-import-bench samples="5":
-    cmake --preset bench > /dev/null
-    cmake --build --preset bench --target bench_imagegraphio
-    ./.cache/build/bench/bench/bench_imagegraphio --suite engine.imagegraphio.bench.pxcx-import --samples {{samples}}
 
 # Example orbit and spin systems over deterministic ECS fixtures.
 examples-motion-bench samples="5":

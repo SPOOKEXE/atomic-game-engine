@@ -325,6 +325,13 @@ namespace engine::control {
 				return "rgba8_unorm";
 			case assets::TextureFormat::R8:
 				return "r8_unorm";
+			case assets::TextureFormat::RGBA4_UNORM:
+			case assets::TextureFormat::RGBA4_SRGB:
+			case assets::TextureFormat::RGBA16_FLOAT:
+			case assets::TextureFormat::RGBA32_FLOAT:
+			case assets::TextureFormat::R16_FLOAT:
+			case assets::TextureFormat::R32_FLOAT:
+				return "unknown";
 			}
 			return "unknown";
 		}

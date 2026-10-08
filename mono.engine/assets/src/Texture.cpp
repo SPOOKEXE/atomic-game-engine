@@ -12,7 +12,8 @@ namespace engine::assets {
 			return false;
 		}
 		const uint32_t side = FlipbookSide;
-		if ((side != 0 && side != 1 && side != 2 && side != 4 && side != 8 && side != 16) ||
+		if ((side != 0 && side != 1 && side != 2 && side != 4 && side != 8 && side != 16 && side != 32 &&
+			 side != 64) ||
 			(side == 0 && FlipbookFrames != 0) ||
 			(side != 0 && (FlipbookFrames == 0 || FlipbookFrames > side * side))) {
 			return false;
@@ -68,7 +69,8 @@ namespace engine::assets {
 			return false;
 		}
 		const uint32_t side = data.FlipbookSide;
-		if ((side != 0 && side != 1 && side != 2 && side != 4 && side != 8 && side != 16) ||
+		if ((side != 0 && side != 1 && side != 2 && side != 4 && side != 8 && side != 16 && side != 32 &&
+			 side != 64) ||
 			(side == 0 && data.FlipbookFrames != 0) ||
 			(side != 0 && (data.FlipbookFrames == 0 || data.FlipbookFrames > side * side))) {
 			return false;
@@ -143,7 +145,7 @@ namespace engine::assets {
 		std::vector<float> durations;
 		if (version >= 5) {
 			const uint16_t count = reader.ReadUInt16();
-			if (reader.Failed() || count == 0 || count != frames || count > 256 || frameRate != 0.0f ||
+			if (reader.Failed() || count == 0 || count != frames || count > 4096 || frameRate != 0.0f ||
 				reader.Remaining() < static_cast<size_t>(count) * sizeof(float) + 1) {
 				return false;
 			}
@@ -173,7 +175,8 @@ namespace engine::assets {
 			return false;
 		}
 		if (version >= 4 &&
-			((side != 0 && side != 1 && side != 2 && side != 4 && side != 8 && side != 16) ||
+			((side != 0 && side != 1 && side != 2 && side != 4 && side != 8 && side != 16 && side != 32 &&
+			  side != 64) ||
 			 (side == 0 && frames != 0) || (side != 0 && (frames == 0 || frames > side * side)))) {
 			return false;
 		}

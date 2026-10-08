@@ -14,8 +14,8 @@ namespace engine::core {
 
 namespace engine::assets {
 	// Frames are full, equal-size RGBA8 images in playback order. The sequence
-	// remains a distinct asset because a 2D flipbook atlas cannot address more
-	// than 256 cells in the current particle draw.
+	// stores authored cells without atlas padding. The renderer packs them into
+	// a bounded timed atlas when the content arrives.
 	struct TextureSequenceData {
 		uint32_t Width = 0;
 		uint32_t Height = 0;

@@ -3,7 +3,7 @@
 # The importers and the node pipeline `ROADMAP.md` v0.9 asks for. `assets` is
 # what a baked mesh or texture *is*; this is the only thing in the engine that
 # reads a `.glb`, a `.pmx`, an `.obj`, a `.png`, a `.jpg`, a `.bmp`, an
-# `.svg`, an `.rbxm`, an `.rbxmx` or a `.pxc`, and it exists so
+# `.svg`, an `.rbxm` or an `.rbxmx`, and it exists so
 # that nothing else ever has to.
 #
 # **Nothing a shipped game links may link this.** `Texture.hpp` states the rule
@@ -25,8 +25,6 @@
 # `.rbxm` that a recent Studio wrote. None reaches a public header here - what
 # this module hands back is an `assets::MeshData`, an `assets::TextureData` or a
 # `RobloxModel`, and nothing that says what produced it.
-# PXCX reuses Crypto++ for its bounded zlib streams and nlohmann/json for strict
-# graph JSON parsing. The imported graph remains opaque to native evaluators.
 #
 # **The `.rbxm` reader inflates two framings and vendors one of them**, which is
 # a line worth having in the file that declares the dependency: an LZ4 block is
@@ -67,10 +65,4 @@ if(MONO_FUZZ_BAKE)
 	target_link_options(fuzz_bake_svg PRIVATE -fsanitize=fuzzer,address,undefined)
 	set_target_properties(fuzz_bake_svg PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/fuzz")
 
-	add_executable(fuzz_bake_pxcx fuzz/Pxcx.cpp src/Pxcx.cpp)
-	target_include_directories(fuzz_bake_pxcx PRIVATE include)
-	target_link_libraries(fuzz_bake_pxcx PRIVATE Vendor::cryptopp Vendor::json)
-	target_compile_options(fuzz_bake_pxcx PRIVATE ${bake_fuzz_options})
-	target_link_options(fuzz_bake_pxcx PRIVATE -fsanitize=fuzzer,address,undefined)
-	set_target_properties(fuzz_bake_pxcx PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/fuzz")
 endif()

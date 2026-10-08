@@ -2898,6 +2898,8 @@ as datatypes? we can do a 3D and 2D vector field and particles can read directly
 
 ### v0.25
 
+These retained validation records describe the original combined development tree. Checks for the fixes-only v0.25 line are reported in [VERSION_SPLIT.md](../VERSION_SPLIT.md).
+
 - [x] /docs/future-work/ui-system.md
 - [x] Can you make a just benchmark job that builds a docs/ENGINE_STRESS_TEST.md markdown file with the stress test components mentioned in "ENGINE_STRESS_AUDIT_2026-09-22.md" as one big table? I plan to remove this document and I think it would be good to have in general. Expand where appropriate to include more benchmark variants.
 - [x] Fix client cleanup for rows after a visibility Forgotten message, with regression coverage.

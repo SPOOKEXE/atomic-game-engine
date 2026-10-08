@@ -329,3 +329,25 @@ TEST_CASE("a selected skybox asks only for faces it names", "[client][contentdem
 	CHECK(Holds(wanted, "sky/up.atex"));
 	CHECK_FALSE(Holds(wanted, "sky/ignored.atex"));
 }
+
+TEST_CASE(
+	"cooked material shader names join content demand without fetching builtins", "[client][contentdemand]"
+) {
+	Store store = Fresh("contentdemand.cooked-shaders");
+	const auto material = store.Create();
+	store.Set(material, engine::scene::MaterialRef{.Asset = {}, .Shader = Name("material.ashader")});
+	const auto builtin = store.Create();
+	store.Set(builtin, engine::scene::MaterialRef{.Asset = {}, .Shader = Name("unlit")});
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+	REQUIRE(wanted.size() == 1);
+	CHECK(Holds(wanted, "material.ashader"));
+	CHECK_FALSE(Holds(wanted, "unlit"));
+	const auto revision = client::WantedContentRevision(store);
+	store.GetMutable<engine::scene::MaterialRef>(material)->Shader = Name("replacement.ashader");
+	CHECK(client::WantedContentRevision(store) != revision);
+	wanted.clear();
+	client::CollectWantedContent(store, wanted);
+	CHECK(Holds(wanted, "replacement.ashader"));
+	CHECK_FALSE(Holds(wanted, "material.ashader"));
+}
