@@ -5,7 +5,10 @@
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
+#include <filesystem>
 #include <imgui.h>
+#include <memory>
 #include <string>
 
 TEST_SUITE_ID("engine.ui.interface")
@@ -97,4 +100,170 @@ TEST_CASE("automation events retain their pointer position through a frame", "[u
 	CHECK(ImGui::GetMousePos().y == 240.0f);
 	CHECK(ImGui::IsMouseDown(ImGuiMouseButton_Left));
 	interface.End();
+}
+
+TEST_CASE("headless interfaces keep detached window requests on their virtual display", "[ui][headless]") {
+	engine::render::Renderer renderer;
+	engine::ui::Interface interface;
+	interface.PresentPlatformWindows();
+	CHECK_FALSE(interface.HasPlatformWindows());
+	engine::ui::InterfaceSettings settings;
+	settings.PlatformWindows = true;
+	REQUIRE(interface.Initialise(renderer, nullptr, settings));
+	CHECK((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) == 0);
+	interface.Begin(1.0f / 60.0f);
+	ImGui::Begin("Headless panel");
+	ImGui::TextUnformatted("No native display required");
+	ImGui::End();
+	interface.End();
+	interface.PresentPlatformWindows();
+	CHECK_FALSE(interface.HasPlatformWindows());
+	CHECK(interface.HasFocus());
+	interface.Shutdown();
+	interface.PresentPlatformWindows();
+	CHECK_FALSE(interface.HasPlatformWindows());
+}
+
+// Opt in on a native desktop. SDL's dummy video driver cannot create detached
+// desktop windows, and a headless GPU test cannot exercise their input lifecycle.
+TEST_CASE("detached interface windows render and close without closing the host", "[ui][desktop][.]") {
+	REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+	struct VideoLifetime {
+		~VideoLifetime() {
+			SDL_QuitSubSystem(SDL_INIT_VIDEO);
+		}
+	} videoLifetime;
+	std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> window(
+		SDL_CreateWindow("Interface window test", 320, 240, SDL_WINDOW_RESIZABLE), SDL_DestroyWindow
+	);
+	REQUIRE(window != nullptr);
+	engine::render::Renderer renderer;
+	REQUIRE(renderer.Initialise(window.get()));
+	engine::ui::Interface interface;
+	engine::ui::InterfaceSettings settings;
+	settings.PlatformWindows = true;
+	REQUIRE(interface.Initialise(renderer, window.get(), settings));
+	if ((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) == 0) {
+		SKIP("SDL display backend does not support desktop platform windows");
+	}
+	bool open = true;
+	const auto frame = [&] {
+		SDL_Event event;
+		while (SDL_PollEvent(&event))
+			interface.ProcessEvent(event);
+		interface.Begin(1.0f / 60.0f);
+		if (open) {
+			const ImGuiViewport *main = ImGui::GetMainViewport();
+			ImGui::SetNextWindowPos(ImVec2(main->Pos.x + main->Size.x + 32.0f, main->Pos.y));
+			ImGui::SetNextWindowSize(ImVec2(240.0f, 160.0f));
+			ImGui::Begin("Detached panel", &open, ImGuiWindowFlags_NoSavedSettings);
+			ImGui::TextUnformatted("Detached contents");
+			ImGui::End();
+		}
+		interface.End();
+		interface.PresentPlatformWindows();
+	};
+	frame();
+	frame();
+	frame();
+	REQUIRE(interface.HasPlatformWindows());
+	REQUIRE(ImGui::GetPlatformIO().Viewports.Size == 2);
+	ImGuiViewport *detached = ImGui::GetPlatformIO().Viewports[1];
+	const auto detachedId = static_cast<SDL_WindowID>(reinterpret_cast<intptr_t>(detached->PlatformHandle));
+	REQUIRE(SDL_GetWindowFromID(detachedId) != nullptr);
+	CHECK(detached->RendererUserData != nullptr);
+	SDL_Event close{};
+	close.type = SDL_EVENT_WINDOW_CLOSE_REQUESTED;
+	close.window.windowID = detachedId;
+	interface.ProcessEvent(close);
+	frame();
+	CHECK_FALSE(open);
+	frame();
+	frame();
+	CHECK_FALSE(interface.HasPlatformWindows());
+	CHECK(SDL_GetWindowFromID(detachedId) == nullptr);
+	CHECK(SDL_GetWindowFromID(SDL_GetWindowID(window.get())) == window.get());
+}
+
+TEST_CASE("interface owns its context beside a foreign host", "[ui][headless][context]") {
+	struct ForeignHost {
+		ImGuiContext *Previous = ImGui::GetCurrentContext();
+		ImGuiContext *Context = ImGui::CreateContext();
+		std::filesystem::path Directory =
+			std::filesystem::temp_directory_path() /
+			("mono-interface-owner-" +
+			 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+		ForeignHost() {
+			REQUIRE(std::filesystem::create_directory(Directory));
+			ImGui::SetCurrentContext(Context);
+			auto &io = ImGui::GetIO();
+			io.IniFilename = io.LogFilename = nullptr;
+			io.DisplaySize = {73, 41};
+			io.ConfigFlags = ImGuiConfigFlags_None;
+		}
+		~ForeignHost() {
+			ImGui::SetCurrentContext(Context);
+			ImGui::GetIO().IniFilename = ImGui::GetIO().LogFilename = nullptr;
+			ImGui::DestroyContext(Context);
+			ImGui::SetCurrentContext(Previous);
+			std::error_code ignored;
+			std::filesystem::remove_all(Directory, ignored);
+		}
+	} foreign;
+	engine::render::Renderer renderer;
+	engine::ui::Interface interface;
+	engine::ui::InterfaceSettings settings;
+	settings.DisplayWidth = 640;
+	settings.DisplayHeight = 480;
+	settings.LayoutPath = (foreign.Directory / "layout.ini").string();
+	const auto layout = settings.LayoutPath;
+	REQUIRE(interface.Initialise(renderer, nullptr, settings));
+	auto *owned = ImGui::GetCurrentContext();
+	CHECK(owned != foreign.Context);
+	ImGui::SetCurrentContext(foreign.Context);
+	CHECK(ImGui::GetIO().IniFilename == nullptr);
+	CHECK(ImGui::GetIO().DisplaySize.x == 73);
+	CHECK(ImGui::GetIO().ConfigFlags == ImGuiConfigFlags_None);
+	REQUIRE(owned != foreign.Context);
+	ImGui::SetCurrentContext(owned);
+	REQUIRE(ImGui::GetIO().IniFilename != nullptr);
+	CHECK(std::string(ImGui::GetIO().IniFilename) == layout);
+	settings.LayoutPath = "replaced";
+	CHECK(std::string(ImGui::GetIO().IniFilename) == layout);
+	ImGui::GetIO().WantCaptureMouse = true;
+	ImGui::GetIO().WantCaptureKeyboard = false;
+	ImGui::SetCurrentContext(foreign.Context);
+	ImGui::GetIO().WantCaptureMouse = false;
+	ImGui::GetIO().WantCaptureKeyboard = true;
+	CHECK(interface.WantsMouse());
+	CHECK_FALSE(interface.WantsKeyboard());
+	CHECK(ImGui::GetCurrentContext() == foreign.Context);
+	SDL_Event motion{};
+	motion.type = SDL_EVENT_MOUSE_MOTION;
+	motion.motion.x = 240;
+	motion.motion.y = 36;
+	interface.ProcessEvent(motion);
+	CHECK(ImGui::GetCurrentContext() == foreign.Context);
+	interface.Begin(1.f / 60);
+	CHECK(ImGui::GetCurrentContext() == owned);
+	CHECK(ImGui::GetMousePos().x == 240);
+	CHECK(ImGui::GetMousePos().y == 36);
+	ImGui::Begin("Owned host");
+	ImGui::TextUnformatted("Owned layout");
+	ImGui::End();
+	ImGui::SetCurrentContext(foreign.Context);
+	interface.End();
+	CHECK(ImGui::GetCurrentContext() == owned);
+	ImGui::SetCurrentContext(foreign.Context);
+	interface.PresentPlatformWindows();
+	CHECK_FALSE(interface.HasPlatformWindows());
+	CHECK(interface.HasFocus());
+	CHECK(ImGui::GetCurrentContext() == foreign.Context);
+	interface.Shutdown();
+	CHECK(ImGui::GetCurrentContext() == foreign.Context);
+	CHECK(ImGui::GetIO().IniFilename == nullptr);
+	CHECK(ImGui::GetIO().DisplaySize.x == 73);
+	CHECK(std::filesystem::is_regular_file(foreign.Directory / "layout.ini"));
+	CHECK_FALSE(interface.WantsMouse());
+	CHECK_FALSE(interface.WantsKeyboard());
 }

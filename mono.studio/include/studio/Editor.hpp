@@ -6622,6 +6622,9 @@ namespace studio {
 		// being walked.
 		bool ResetLayout = false;
 
+		// Startup repair belongs to this editor, not to the lifetime of the process.
+		bool DockLayoutInitialized = false;
+
 		// What the panels asked for this frame, applied by
 		// `ApplyPendingActions` once every `Universe::Enter` has been left.
 		//

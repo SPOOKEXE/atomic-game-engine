@@ -1,3 +1,5 @@
+#include "DockLayout.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
@@ -157,7 +159,8 @@ namespace studio {
 		) {
 			ImGui::DockBuilderRemoveNode(dockspace);
 			ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
-			ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->Size);
+			ImGui::DockBuilderSetNodePos(dockspace, ImGui::GetMainViewport()->WorkPos);
+			ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
 
 			// Studio's arrangement, and it is Studio's for a reason worth
 			// stating: the tree and the properties are one conversation - you
@@ -299,14 +302,8 @@ namespace studio {
 			}
 		}
 
-		// **Spanned, because it is not the free line it looks like.** The
-		// dockspace host is a full-window `Begin` and the splitter arithmetic for
-		// every node under it, and it sat in the same unmeasured gap the bars did.
-		ImGuiID dockspace = 0;
-		{
-			ENGINE_PROFILE_CAT("dockspace", engine::core::ProfileCategory::Render);
-			dockspace = ImGui::DockSpaceOverViewport(ImGui::GetID(DOCKSPACE), viewport);
-		}
+		const ImGuiID dockspace = ImGui::GetID(DOCKSPACE);
+		const bool hasSavedDockspace = ImGui::DockBuilderGetNode(dockspace) != nullptr;
 
 		// The panels the layout has to place, gathered once for either branch
 		// below. `ViewportState::Title` owns the strings; this is a view of
@@ -316,13 +313,12 @@ namespace studio {
 		for (const ViewportState &view : Extras) {
 			extraTitles.push_back(view.Title.c_str());
 		}
-		static bool built = false;
+		const bool repairLayout = !DockLayoutInitialized;
 		bool buildLayout = ResetLayout;
 		ResetLayout = false;
-		if (!built) {
-			built = true;
-			if (ImGui::DockBuilderGetNode(dockspace) == nullptr ||
-				ImGui::DockBuilderGetNode(dockspace)->IsLeafNode()) {
+		if (!DockLayoutInitialized) {
+			DockLayoutInitialized = true;
+			if (!hasSavedDockspace) {
 				buildLayout = true;
 			}
 		}
@@ -346,6 +342,43 @@ namespace studio {
 					return view.Open;
 				});
 			BuildDefaultLayout(dockspace, extraTitles, splitViewports, pluginWindows);
+		}
+
+		if (repairLayout && !buildLayout) {
+			// Resolve homes before repairing anything so a missing peer cannot bias
+			// the remaining panels toward the central fallback.
+			std::array<ImGuiID, 5> homes{};
+			for (size_t ordinal = 0; ordinal < homes.size(); ordinal++) {
+				const auto dock = static_cast<PluginDock>(ordinal);
+				std::vector<const char *> peers;
+				if (dock == PluginDock::Centre) peers.push_back(VIEWPORT);
+				for (const NativePanelDock &panel : NATIVE_PANEL_DOCKS)
+					if (panel.Dock == dock) peers.push_back(panel.Label);
+				homes[ordinal] = detail::PanelDockHome(dockspace, peers);
+			}
+			const auto homeFor = [&](PluginDock dock) { return homes[static_cast<size_t>(dock)]; };
+			detail::RepairPanelDock(VIEWPORT, homeFor(PluginDock::Centre));
+			for (const char *title : extraTitles)
+				detail::RepairPanelDock(title, homeFor(PluginDock::Centre));
+			for (const NativePanelDock &panel : NATIVE_PANEL_DOCKS)
+				detail::RepairPanelDock(panel.Label, homeFor(panel.Dock));
+			for (const PluginPresentation *plugin : Plugins) {
+				if (plugin == nullptr || !plugin->Running) continue;
+				for (const PluginWidget &widget : plugin->Widgets)
+					if (widget.BuiltinPanel == BuiltinStudioPanel::None &&
+						widget.Dock != PluginDock::Floating)
+						detail::RepairPanelDock(
+							PluginWidgetLabel(*plugin, widget).c_str(), homeFor(widget.Dock)
+						);
+			}
+		}
+
+		// Build and repair before submission, so the host sizes the final tree
+		// against its current work area on the very first frame too.
+		{
+			ENGINE_PROFILE_CAT("dockspace", engine::core::ProfileCategory::Render);
+			detail::FillEmptyCentralDock(dockspace);
+			ImGui::DockSpaceOverViewport(dockspace, viewport);
 		}
 
 		// Reset before any panel draws: the claim is a within-frame fact, not

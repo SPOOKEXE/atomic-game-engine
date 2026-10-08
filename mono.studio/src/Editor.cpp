@@ -714,6 +714,7 @@ namespace studio {
 
 		engine::ui::InterfaceSettings interfaceSettings;
 		interfaceSettings.Docking = true;
+		interfaceSettings.PlatformWindows = true;
 		interfaceSettings.DisplayWidth = Settings.Width;
 		interfaceSettings.DisplayHeight = Settings.Height;
 
@@ -1200,7 +1201,7 @@ namespace studio {
 					(void)FlushDataStore();
 					NextDataStoreFlush = engine::core::Clock::Seconds() + 1.0;
 				}
-				if (renderingActive) {
+				if (renderingActive || (presentationDue && Interface.HasPlatformWindows())) {
 					Present(PresentationDeltaSeconds);
 					PresentationDeltaSeconds = 0.0f;
 					Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
@@ -1636,6 +1637,7 @@ namespace studio {
 			ENGINE_PROFILE_CAT("present world", engine::core::ProfileCategory::Render);
 			PresentWorld(frameSeconds);
 		}
+		Interface.PresentPlatformWindows();
 
 		FinishControlAutomationFrame();
 	}
@@ -2104,7 +2106,7 @@ namespace studio {
 	}
 
 	float Editor::PacingCeiling() const {
-		const bool focused = Window == nullptr || (SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+		const bool focused = Interface.HasFocus();
 		const bool inputIdle = engine::core::Clock::Seconds() - LastInputSeconds > IDLE_AFTER_SECONDS;
 		return PresentationCeiling(
 			PresentationRates{
