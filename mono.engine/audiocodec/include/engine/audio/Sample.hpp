@@ -23,7 +23,7 @@
 // bank exists and the number says otherwise - `AGENTS.md` asks for a
 // measurement beside an algorithm choice, and this one has none yet.
 //
-// @tier L12 · client
+// @tier L8 · shared
 
 #include <cstddef>
 #include <cstdint>

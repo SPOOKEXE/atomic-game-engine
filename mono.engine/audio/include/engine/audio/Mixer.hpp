@@ -42,7 +42,7 @@ namespace engine::audio {
 		// Frames produced.
 		size_t Frames = 0;
 
-		// Commands applied.
+		// Commands dispatched, including owner-side refusals.
 		size_t Applied = 0;
 
 		// How many pieces the block was cut into. One means nothing was
@@ -72,34 +72,66 @@ namespace engine::audio {
 		uint64_t ObservationSerial = 0;
 	};
 
-	// One command as it actually landed in the most recently rendered block.
+	// Result of dispatching a copied playback command on the render owner.
+	enum class PlaybackStatus : uint8_t {
+		Applied,
+		InvalidCursor,
+		MissingSource,
+		OutOfRange,
+		StaleGeneration,
+		MissingTarget,
+		Refused,
+	};
+
+	// One attempted command dispatch and its outcome in the latest block.
 	//
 	// This is an internal-clock record. `NodeId` is deliberately kept here and
 	// translated to a stable source name by the observation boundary before the
 	// record leaves the process.
 	struct AppliedAudioCommand {
-		// Command kind applied by the mixer.
+		// Command kind dispatched by the mixer.
 		CommandKind Kind = CommandKind::None;
-		// Stable identifier for target.
+		// Process-local target node, translated to a durable name at capture.
 		NodeId Target;
-		// Stable identifier for related.
+		// Process-local related node, translated to a durable name at capture.
 		NodeId Related;
+		// Actual incarnation after dispatch (or before successful removal).
+		uint64_t PlaybackGeneration = 0;
+		// Incarnation supplied by the producer, including stale refusals.
+		uint64_t RequestedPlaybackGeneration = 0;
 		// Sample clock position requested by the game tick.
 		uint64_t RequestedSample = 0;
-		// Sample clock position where the mixer applied the command.
+		// Sample clock position where the mixer dispatched the command.
 		uint64_t AppliedSample = 0;
 		// Frame offset within the observed audio block.
 		size_t OffsetFrames = 0;
+		// Owner-side outcome; dispatch timing alone does not mean success.
+		PlaybackStatus Status = PlaybackStatus::Applied;
 	};
 
 	// A player that reached the end of its source during the latest block.
 	struct FinishedAudioSource {
-		// Stable identifier for source.
+		// Process-local source node, translated to a durable name at capture.
 		NodeId Source;
+		// Incarnation that naturally completed.
+		uint64_t PlaybackGeneration = 0;
 		// Sample clock position where the source completed.
 		uint64_t AtSample = 0;
 		// Frame offset within the observed audio block.
 		size_t OffsetFrames = 0;
+	};
+
+	// A copy of an existing command/finish record with the resulting player state.
+	// NaturalCompletion selects Finished; otherwise Applied selects the command.
+	struct PlaybackEvent {
+		bool NaturalCompletion = false;
+		AppliedAudioCommand Applied{};
+		FinishedAudioSource Finished{};
+		PlaybackStatus Status = PlaybackStatus::Applied;
+		uint64_t PlaybackGeneration = 0;
+		bool Present = false;
+		bool Playing = false;
+		double CursorFrames = 0.0;
 	};
 
 	// Runs the graph.
@@ -151,7 +183,7 @@ namespace engine::audio {
 			return Rendered;
 		}
 
-		// Commands applied by the most recent successful render.
+		// Commands dispatched by the latest successful render, with outcomes.
 		//
 		// The span remains valid until the next call to `Render` or
 		// `ApplyPending`. Storage is fixed so recording it never allocates on the
@@ -169,6 +201,28 @@ namespace engine::audio {
 		uint64_t ObservationSerial() const {
 			return CurrentObservationSerial;
 		}
+
+		// Configure only before the device starts or while its owner is paused.
+		void EnablePlaybackEvents(bool enabled = true) {
+			PlaybackEventsEnabled = enabled;
+		}
+
+		// One render producer and one host consumer. Copies never expose graph storage.
+		// Poll even when output is paused to receive acknowledged command bursts.
+		// State acknowledgements do not retire SoundRefs retained by render scratch;
+		// Keep host ownership until shutdown, or quiesce posts, pause the device,
+		// owner ApplyPending then Render an empty matching-format buffer with no
+		// new posts to clear Taken/Schedule. The old sound must also be unbound.
+		// Pausing alone does not clear retained or pending SetSound copies.
+		size_t PollPlaybackEvents(std::span<PlaybackEvent> into);
+
+		// A changed count means the host's state is incomplete. Rebind a fresh
+		// incarnation before trusting it; dropped acknowledgements are not success.
+		uint64_t PlaybackEventsDropped() const {
+			return MissedPlaybackEvents.load(std::memory_order_relaxed);
+		}
+
+		static constexpr size_t PLAYBACK_EVENT_CAPACITY = 2048;
 
 		// Renders one block.
 		//
@@ -199,7 +253,10 @@ namespace engine::audio {
 			size_t Offset = 0;
 		};
 
-		void Apply(const Command &command);
+		PlaybackStatus Apply(const Command &command);
+		void ApplyRecorded(const Command &command, size_t offset);
+		void FinishPlayer(NodeId id, Node &node, size_t offset);
+		void PublishPlaybackEvent(const PlaybackEvent &event);
 
 		// Mixes `frames` starting at `offset` in the output.
 		void MixSegment(SampleBuffer &out, size_t offset, size_t frames);
@@ -247,9 +304,20 @@ namespace engine::audio {
 		// event timing for an offline observation made after the block.
 		std::array<AppliedAudioCommand, CommandQueue::CAPACITY> AppliedCommands{};
 		size_t AppliedCommandCount = 0;
-		std::array<FinishedAudioSource, AudioGraph::MAXIMUM_NODES> FinishedSources{};
+		// A block may finish every player plus players restarted by its command ring.
+		std::array<FinishedAudioSource, AudioGraph::MAXIMUM_NODES + CommandQueue::CAPACITY> FinishedSources{};
 		size_t FinishedSourceCount = 0;
 		uint64_t CurrentObservationSerial = 0;
+
+		// Fixed SPSC copies share the same records as the owner-only trace.
+		bool PlaybackEventsEnabled = false;
+		std::array<PlaybackEvent, PLAYBACK_EVENT_CAPACITY> PlaybackEvents{};
+		std::atomic<size_t> PlaybackWrite{0};
+		std::atomic<size_t> PlaybackRead{0};
+		std::atomic<uint64_t> MissedPlaybackEvents{0};
+		static_assert(std::atomic<size_t>::is_always_lock_free);
+		static_assert(std::atomic<uint64_t>::is_always_lock_free);
+		static_assert((PLAYBACK_EVENT_CAPACITY & (PLAYBACK_EVENT_CAPACITY - 1)) == 0);
 
 		size_t FinishedThisBlock = 0;
 	};

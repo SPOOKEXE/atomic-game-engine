@@ -26,6 +26,8 @@ namespace engine::audio {
 				return "play";
 			case CommandKind::Stop:
 				return "stop";
+			case CommandKind::Seek:
+				return "seek";
 			case CommandKind::Rewind:
 				return "rewind";
 			case CommandKind::SetGain:
@@ -42,6 +44,26 @@ namespace engine::audio {
 				return "set_listener";
 			}
 			return "unknown";
+		}
+
+		const char *RefusalReason(PlaybackStatus status) {
+			switch (status) {
+			case PlaybackStatus::Applied:
+				return "";
+			case PlaybackStatus::InvalidCursor:
+				return "invalid_cursor";
+			case PlaybackStatus::MissingSource:
+				return "missing_source";
+			case PlaybackStatus::OutOfRange:
+				return "out_of_range";
+			case PlaybackStatus::StaleGeneration:
+				return "stale_generation";
+			case PlaybackStatus::MissingTarget:
+				return "missing_target";
+			case PlaybackStatus::Refused:
+				return "graph_refused";
+			}
+			return "unknown_outcome";
 		}
 
 		std::string StableId(NodeId node, std::span<const AudioSourceBinding> sources) {
@@ -148,6 +170,8 @@ namespace engine::audio {
 					.AppliedSample = applied.AppliedSample,
 					.OffsetFrames = applied.OffsetFrames,
 					.Timing = Timing(applied.RequestedSample, applied.AppliedSample),
+					.Status = applied.Status,
+					.RefusalReason = RefusalReason(applied.Status),
 				}
 			);
 		}
@@ -164,6 +188,7 @@ namespace engine::audio {
 					.AppliedSample = finished.AtSample,
 					.OffsetFrames = finished.OffsetFrames,
 					.Timing = "exact",
+					.RefusalReason = {},
 				}
 			);
 		}

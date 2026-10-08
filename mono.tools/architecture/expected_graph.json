@@ -57,7 +57,7 @@
     "other row changed: nothing links it.",
     "v0.17 adds `discord` - what a person's Discord profile says while an Atomic program is running. It is `shared` and links only `core`, which is why all five program rows gained it at once and no row gained anything else. The server row is still headless and the cdn row still configures on a machine with no Vulkan SDK: the module is a unix socket and a JSON writer, and it deliberately does not link `net` - Discord is a desktop application on the same box rather than a peer on a wire.",
     "v0.19 splits `script`. It was 33,157 lines across 88 source files and half of that was binding glue for two VMs held apart by a filename convention, checked by a sixty-line CMake closure walk in the module's own CMakeLists. There are four rows now: `script` at L9 with **no vendor at all** - the port, the object model glue and the services, all VM-free; `scriptluau` and `scriptjs` at L10, one adapter each and neither able to name the other; and `scripthost` at L11, which is the one switch on `Language` plus every suite that has to see both VMs to check that they agree. The closure walk is deleted: the tier and layer checks say the same thing for free. `game` and `examples` moved from L10 to L12 because both call `MakeRuntime` and the factory is now above the adapters; nothing but the program band links either, so the move cost two `layer` fields and no edge.",
-    "v0.19 adds `sourcecheck`, and its row links nothing for `shadercheck`'s reason: it reads first-party C++ as text, so it needs neither the engine nor a configured build, and it is `shared` and unconditional. It checks the four rules `docs/CODE_ARCH.md` §11 listed as convention until this version - a private copy of data the ECS owns, a pointer inside a type marked as crossing a world boundary, a `core::Name` serialised as its `Id()`, and a header under `include/` that nothing outside its module includes. No other row changed: nothing links it, and the tool's own executable links `core` for `Arguments` the way `linecount` does.",
+    "v0.19 adds `sourcecheck`, and its row links nothing for `shadercheck`'s reason: it reads first-party C++ as text, so it needs neither the engine nor a configured build, and it is `shared` and unconditional. It checks the four rules `docs/CODE_ARCH.md` \u00a711 listed as convention until this version - a private copy of data the ECS owns, a pointer inside a type marked as crossing a world boundary, a `core::Name` serialised as its `Id()`, and a header under `include/` that nothing outside its module includes. No other row changed: nothing links it, and the tool's own executable links `core` for `Arguments` the way `linecount` does.",
     "v0.19 gives `msl` its one first-party edge: `core`, for the log. It was the only module here linking nothing of ours, and the index assignment it exists to perform is invisible - a texture on the wrong `[[texture(n)]]` samples somebody else's map on macOS and draws correctly on Linux. Both callers already link `core` (`mono.tools/shadercross` names it directly), so no program closure changed and no other row moved. What the empty row was protecting was that nothing in `msl` has an opinion about shaders, and that still holds.",
     "v0.19 moves `nodegraph` out of `mono.engine` and into `mono.studio/nodegraph`, and its row loses its `layer` rather than gaining one. It is `client` tier, links nothing first-party, carries Dear ImGui and four concurrency headers, and exactly one target in the repository links it: `studio`. That is an editor widget library, and root `AGENTS.md` says `mono.engine` ships nothing on its own. Dropping the `layer` puts it in the program band, which is the half that is checked: `CheckTargetGraph.cmake` refuses an edge from anything that has a layer to anything that has not, so no engine module can start linking it without the check naming the edge. No other row changed - the closure was already `studio` alone."
   ],
@@ -66,6 +66,7 @@
       "tier": "shared",
       "links": [
         "assets",
+        "audiocodec",
         "bake",
         "bakegraph",
         "core"
@@ -82,6 +83,7 @@
       "tier": "client",
       "layer": 12,
       "links": [
+        "audiocodec",
         "core"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -122,6 +124,7 @@
       "links": [
         "assets",
         "audio",
+        "audiocodec",
         "bakegraph",
         "collision",
         "control",
@@ -600,6 +603,7 @@
         "assetc",
         "assets",
         "audio",
+        "audiocodec",
         "bake",
         "bakegraph",
         "cdn",
@@ -675,6 +679,7 @@
       "links": [
         "assets",
         "audio",
+        "audiocodec",
         "bakegraph",
         "cdn",
         "client",
@@ -717,6 +722,13 @@
         "core",
         "ecs",
         "parallel"
+      ]
+    },
+    "audiocodec": {
+      "tier": "shared",
+      "layer": 8,
+      "links": [
+        "core"
       ]
     }
   },

@@ -427,3 +427,92 @@ TEST_CASE("decoding is deterministic", "[audio][wav]") {
 		REQUIRE(first->Data()[index] == second->Data()[index]);
 	}
 }
+
+TEST_CASE(
+	"Pixel Composer WAV preserves unsigned PCM8 and exact signed PCM16 and PCM32",
+	"[audio][wav][pixel_composer_wav]"
+) {
+	using engine::audio::DecodePixelComposerWav;
+	WavBuilder wave;
+	wave.Bits = 8;
+	wave.Payload = {std::byte{0}, std::byte{128}, std::byte{255}};
+	const auto eight = DecodePixelComposerWav(wave.Build(), 3);
+	REQUIRE(eight);
+	CHECK(eight->Format.SampleRate == 48000);
+	CHECK(eight->Samples == std::vector<double>{0, 1, 255.0 / 128});
+	const auto nativeEight = DecodeWav(wave.Build());
+	REQUIRE(nativeEight);
+	CHECK(nativeEight->Data()[1] == 0);
+	const auto metadata = engine::audio::InspectWav(wave.Build());
+	REQUIRE(metadata);
+	CHECK(metadata->Samples == 3);
+	CHECK(metadata->Format.Channels == 1);
+	CHECK_FALSE(DecodeWav(wave.Build(), 2));
+	CHECK(DecodeWav(wave.Build(), 3));
+	CHECK_FALSE(DecodePixelComposerWav(wave.Build(), 2));
+	wave.Bits = 16;
+	wave.Payload = {std::byte{0}, std::byte{128}, std::byte{255}, std::byte{127}};
+	const auto sixteen = DecodePixelComposerWav(wave.Build(), 2);
+	REQUIRE(sixteen);
+	CHECK(sixteen->Samples == std::vector<double>{-1, 32767.0 / 32768});
+	wave.Bits = 32;
+	wave.Channels = 2;
+	wave.Payload = {
+		std::byte{0},
+		std::byte{0},
+		std::byte{0},
+		std::byte{128},
+		std::byte{255},
+		std::byte{255},
+		std::byte{255},
+		std::byte{127},
+		std::byte{1},
+		std::byte{0},
+		std::byte{0},
+		std::byte{0},
+		std::byte{255},
+		std::byte{255},
+		std::byte{255},
+		std::byte{255}
+	};
+	const auto thirtyTwo = DecodePixelComposerWav(wave.Build(), 4);
+	REQUIRE(thirtyTwo);
+	CHECK(thirtyTwo->Format.Channels == 2);
+	CHECK(
+		thirtyTwo->Samples ==
+		std::vector<double>{-1, 2147483647.0 / 2147483648, 1.0 / 2147483648, -1.0 / 2147483648}
+	);
+	CHECK_FALSE(DecodeWav(wave.Build()));
+}
+
+TEST_CASE(
+	"Pixel Composer WAV rejects unsupported encodings malformed bytes and aggregate exhaustion",
+	"[audio][wav][pixel_composer_wav]"
+) {
+	using engine::audio::DecodePixelComposerWav;
+	WavBuilder wave;
+	wave.Payload = {std::byte{0}, std::byte{0}};
+	CHECK_FALSE(DecodePixelComposerWav(wave.Build(), 0));
+	wave.Bits = 24;
+	wave.Payload = {std::byte{0}, std::byte{0}, std::byte{0}};
+	CHECK_FALSE(DecodePixelComposerWav(wave.Build(), 10));
+	CHECK(DecodeWav(wave.Build()).has_value());
+	wave.Encoding = 3;
+	wave.Bits = 32;
+	wave.Payload = {std::byte{0}, std::byte{0}, std::byte{128}, std::byte{63}};
+	CHECK_FALSE(DecodePixelComposerWav(wave.Build(), 10));
+	CHECK(DecodeWav(wave.Build()).has_value());
+	wave.Encoding = 1;
+	wave.Bits = 16;
+	wave.LieAboutDataSize = true;
+	CHECK_FALSE(DecodePixelComposerWav(wave.Build(), 10));
+	wave.LieAboutDataSize = false;
+	wave.Channels = 3;
+	CHECK_FALSE(DecodePixelComposerWav(wave.Build(), 10));
+	wave.Channels = 1;
+	wave.Payload.clear();
+	const auto empty = DecodePixelComposerWav(wave.Build(), 0);
+	REQUIRE(empty);
+	CHECK(empty->Samples.empty());
+	CHECK_FALSE(DecodePixelComposerWav({}, 10));
+}

@@ -119,6 +119,89 @@ namespace engine::audio {
 			}
 			return SampleBuffer(shape, samples);
 		}
+		struct ParsedWave {
+			WaveFormat Format;
+			std::span<const std::byte> Data;
+			uint32_t FormatBytes = 0;
+			uint16_t OriginalEncoding = 0;
+			uint16_t BlockAlign = 0;
+		};
+
+		std::optional<ParsedWave> ParseWave(std::span<const std::byte> bytes) {
+			if (bytes.size() > MAXIMUM_WAV_BYTES || !IsWav(bytes)) return std::nullopt;
+			ParsedWave parsed;
+			WaveFormat &format = parsed.Format;
+			bool haveFormat = false;
+			std::span<const std::byte> data;
+			bool haveData = false;
+
+			size_t at = RIFF_HEADER_BYTES;
+			while (at + CHUNK_HEADER_BYTES <= bytes.size()) {
+				const uint32_t declared = ReadU32(bytes, at + 4);
+				const size_t body = at + CHUNK_HEADER_BYTES;
+
+				// The check that matters. A chunk claiming to run past the end of
+				// what arrived is a refusal, not a clamp: clamping turns a
+				// truncated file into a shorter sound that plays, and the
+				// corruption is then inaudible until somebody wonders why a
+				// footstep got quieter.
+				if (declared > bytes.size() - body) {
+					return std::nullopt;
+				}
+
+				if (Tag(bytes, at, "fmt ")) {
+					if (declared < MINIMUM_FMT_BYTES) {
+						return std::nullopt;
+					}
+					parsed.FormatBytes = declared;
+					parsed.OriginalEncoding = ReadU16(bytes, body);
+					parsed.BlockAlign = ReadU16(bytes, body + 12);
+					format.Encoding = parsed.OriginalEncoding;
+					format.Channels = ReadU16(bytes, body + 2);
+					format.SampleRate = ReadU32(bytes, body + 4);
+					format.BitsPerSample = ReadU16(bytes, body + 14);
+
+					if (format.Encoding == FORMAT_EXTENSIBLE) {
+						// The real tag is the first two bytes of the extension's
+						// GUID. A file that says "extensible" and gives no
+						// extension is malformed rather than assumed to be PCM.
+						if (declared < 26) {
+							return std::nullopt;
+						}
+						format.Encoding = ReadU16(bytes, body + 24);
+					}
+					haveFormat = true;
+				} else if (Tag(bytes, at, "data")) {
+					data = bytes.subspan(body, declared);
+					haveData = true;
+				}
+
+				// Chunks are word-aligned: an odd length is followed by a pad byte
+				// that is not counted in the length. Missing this reads every
+				// subsequent chunk header one byte off, which looks like a corrupt
+				// file rather than a parser bug.
+				const size_t advance = declared + (declared % 2);
+				if (advance > bytes.size() - body) {
+					// The pad byte would be past the end. The file ends here
+					// legitimately, so stop rather than refuse - what has been
+					// collected is checked below.
+					break;
+				}
+				at = body + advance;
+			}
+
+			if (!haveFormat || !haveData) {
+				return std::nullopt;
+			}
+			const AudioFormat shape{.SampleRate = format.SampleRate, .Channels = format.Channels};
+			if (!shape.IsValid() || format.BitsPerSample == 0 || format.BitsPerSample % 8 != 0)
+				return std::nullopt;
+			const size_t frameBytes = (format.BitsPerSample / 8u) * format.Channels;
+			if (data.size() % frameBytes != 0) return std::nullopt;
+			parsed.Data = data;
+			return parsed;
+		}
+
 	}
 
 	bool IsWav(std::span<const std::byte> bytes) {
@@ -128,80 +211,29 @@ namespace engine::audio {
 		return Tag(bytes, 0, "RIFF") && Tag(bytes, 8, "WAVE");
 	}
 
+	std::optional<WavMetadata> InspectWav(std::span<const std::byte> bytes) {
+		const auto parsed = ParseWave(bytes);
+		if (!parsed) return std::nullopt;
+		return WavMetadata{
+			{parsed->Format.SampleRate, parsed->Format.Channels},
+			parsed->Data.size() / (parsed->Format.BitsPerSample / 8)
+		};
+	}
+
 	std::optional<SampleBuffer> DecodeWav(std::span<const std::byte> bytes) {
+		return DecodeWav(bytes, MAXIMUM_WAV_BYTES);
+	}
+
+	std::optional<SampleBuffer> DecodeWav(std::span<const std::byte> bytes, size_t maximumSamples) {
 		const auto refuse = []() -> std::optional<SampleBuffer> {
 			core::Metrics::Count("audio.wav.refused", 1.0);
 			return std::nullopt;
 		};
 
-		if (bytes.size() > MAXIMUM_WAV_BYTES || !IsWav(bytes)) {
-			return refuse();
-		}
-
-		// The RIFF size field is deliberately **not** trusted to bound the
-		// walk. It is a number in the file and the buffer's own length is a
-		// fact; believing the file over the fact is how a parser is made to
-		// read past its input.
-		WaveFormat format;
-		bool haveFormat = false;
-		std::span<const std::byte> data;
-		bool haveData = false;
-
-		size_t at = RIFF_HEADER_BYTES;
-		while (at + CHUNK_HEADER_BYTES <= bytes.size()) {
-			const uint32_t declared = ReadU32(bytes, at + 4);
-			const size_t body = at + CHUNK_HEADER_BYTES;
-
-			// The check that matters. A chunk claiming to run past the end of
-			// what arrived is a refusal, not a clamp: clamping turns a
-			// truncated file into a shorter sound that plays, and the
-			// corruption is then inaudible until somebody wonders why a
-			// footstep got quieter.
-			if (declared > bytes.size() - body) {
-				return refuse();
-			}
-
-			if (Tag(bytes, at, "fmt ")) {
-				if (declared < MINIMUM_FMT_BYTES) {
-					return refuse();
-				}
-				format.Encoding = ReadU16(bytes, body + 0);
-				format.Channels = ReadU16(bytes, body + 2);
-				format.SampleRate = ReadU32(bytes, body + 4);
-				format.BitsPerSample = ReadU16(bytes, body + 14);
-
-				if (format.Encoding == FORMAT_EXTENSIBLE) {
-					// The real tag is the first two bytes of the extension's
-					// GUID. A file that says "extensible" and gives no
-					// extension is malformed rather than assumed to be PCM.
-					if (declared < 26) {
-						return refuse();
-					}
-					format.Encoding = ReadU16(bytes, body + 24);
-				}
-				haveFormat = true;
-			} else if (Tag(bytes, at, "data")) {
-				data = bytes.subspan(body, declared);
-				haveData = true;
-			}
-
-			// Chunks are word-aligned: an odd length is followed by a pad byte
-			// that is not counted in the length. Missing this reads every
-			// subsequent chunk header one byte off, which looks like a corrupt
-			// file rather than a parser bug.
-			const size_t advance = declared + (declared % 2);
-			if (advance > bytes.size() - body) {
-				// The pad byte would be past the end. The file ends here
-				// legitimately, so stop rather than refuse - what has been
-				// collected is checked below.
-				break;
-			}
-			at = body + advance;
-		}
-
-		if (!haveFormat || !haveData) {
-			return refuse();
-		}
+		const auto parsed = ParseWave(bytes);
+		if (!parsed) return refuse();
+		const WaveFormat &format = parsed->Format;
+		const auto data = parsed->Data;
 		if (format.Encoding != FORMAT_PCM && format.Encoding != FORMAT_FLOAT) {
 			// A-law, µ-law, ADPCM and everything else with a codec behind it.
 			// Refused rather than guessed at: a decoder that guessed would
@@ -209,9 +241,8 @@ namespace engine::audio {
 			// subsystem has.
 			return refuse();
 		}
-		// Float is 32-bit and integer PCM is not. A file claiming 32-bit
-		// integer PCM or 16-bit float is inconsistent, and the two fields
-		// disagreeing is exactly the case where believing either one is wrong.
+		// The mixer decode contract supports float32, but not integer PCM32.
+		// Pixel Composer PCM32 uses the separate double-preserving decode path.
 		if (format.Encoding == FORMAT_FLOAT && format.BitsPerSample != 32) {
 			return refuse();
 		}
@@ -223,16 +254,8 @@ namespace engine::audio {
 			return refuse();
 		}
 
+		if (data.size() / (format.BitsPerSample / 8) > maximumSamples) return refuse();
 		const AudioFormat shape{.SampleRate = format.SampleRate, .Channels = format.Channels};
-		if (!shape.IsValid()) {
-			return refuse();
-		}
-
-		const size_t frameBytes = (format.BitsPerSample / 8u) * format.Channels;
-		if (frameBytes == 0 || data.size() % frameBytes != 0) {
-			return refuse();
-		}
-
 		std::optional<SampleBuffer> decoded = Convert(data, format, shape);
 		if (!decoded) {
 			return refuse();
@@ -240,4 +263,31 @@ namespace engine::audio {
 		core::Metrics::Count("audio.wav.decoded", 1.0);
 		return decoded;
 	}
+
+	std::optional<PixelComposerWav>
+	DecodePixelComposerWav(std::span<const std::byte> bytes, size_t maximumSamples) {
+		const auto parsed = ParseWave(bytes);
+		if (!parsed || parsed->FormatBytes != 16 || parsed->OriginalEncoding != FORMAT_PCM)
+			return std::nullopt;
+		const WaveFormat &format = parsed->Format;
+		if (format.BitsPerSample != 8 && format.BitsPerSample != 16 && format.BitsPerSample != 32)
+			return std::nullopt;
+		const size_t stride = format.BitsPerSample / 8;
+		if (parsed->BlockAlign != stride * format.Channels) return std::nullopt;
+		const size_t count = parsed->Data.size() / stride;
+		if (count > maximumSamples) return std::nullopt;
+		PixelComposerWav decoded{{format.SampleRate, format.Channels}, {}};
+		decoded.Samples.resize(count);
+		for (size_t index = 0; index < count; index++) {
+			const size_t offset = index * stride;
+			if (stride == 1)
+				decoded.Samples[index] = static_cast<uint8_t>(parsed->Data[offset]) / 128.0;
+			else if (stride == 2)
+				decoded.Samples[index] = static_cast<int16_t>(ReadU16(parsed->Data, offset)) / 32768.0;
+			else
+				decoded.Samples[index] = static_cast<int32_t>(ReadU32(parsed->Data, offset)) / 2147483648.0;
+		}
+		return decoded;
+	}
+
 }

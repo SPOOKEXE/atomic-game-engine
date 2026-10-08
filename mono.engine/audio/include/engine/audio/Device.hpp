@@ -53,6 +53,9 @@ namespace engine::audio {
 		// less time to finish; larger means the opposite. 512 at 48 kHz is
 		// 10.7 ms and is a compromise rather than a measurement.
 		size_t BlockFrames = DEFAULT_BLOCK_FRAMES;
+
+		// Enable bounded copied playback events before the callback starts.
+		bool PlaybackEvents = false;
 	};
 
 	// A sink for a mixer's output.
@@ -64,7 +67,7 @@ namespace engine::audio {
 
 		// The mixer feeding this device.
 		//
-		// **A tick talks to `Mixer::Commands()` and to nothing else on it.**
+		// **A tick posts to `Mixer::Commands()` and polls copied playback events.**
 		// Reaching for `Graph()` from the tick thread while a real device is
 		// running is a data race with the callback - the one mistake this whole
 		// arrangement is shaped to prevent, and the one the type system cannot
