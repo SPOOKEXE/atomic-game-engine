@@ -19,6 +19,7 @@
 #include "nodes/SourceGaussianNoise.hpp"
 #include "nodes/SourceGlow.hpp"
 #include "nodes/SourceJpeg.hpp"
+#include "nodes/SourceMarkovGradient.hpp"
 #include "nodes/SourceNoise.hpp"
 #include "nodes/SourceNoiseCube.hpp"
 #include "nodes/SourcePathWaveNodes.hpp"
@@ -605,7 +606,8 @@ namespace engine::imagegraph::detail {
 		const uint64_t budget = context.ByteBudget;
 		PendingOutputs pending{context};
 		SourceGetterProjection getters(context);
-		if (!getters.Prepare()) return false;
+		const bool markov = context.Entry.Type == "pc.markov_gradient";
+		if (!markov && !getters.Prepare()) return false;
 		struct RestoreBudget {
 			NodeContext &Context;
 			uint64_t Budget;
@@ -619,6 +621,16 @@ namespace engine::imagegraph::detail {
 				context.Fail(Status::UnsupportedExecution, "processor observer refused the selected row");
 			return false;
 		};
+		// Active is read before other getters: an inactive Markov copies the whole source array once.
+		if (markov) {
+			bool inactive = false;
+			if (!SourceRetainedProcessorInactive(context, inactive)) return false;
+			if (inactive) {
+				pending.Committed = observe() && CheckOutputs(context, budget);
+				return pending.Committed;
+			}
+			if (!getters.Prepare()) return false;
+		}
 		bool retainedInactive = false;
 		if (!SourceRetainedProcessorInactive(context, retainedInactive)) return false;
 		if (retainedInactive) {
@@ -952,6 +964,15 @@ namespace engine::imagegraph::detail {
 			for (size_t row = 0; row < count; ++row) {
 				uint64_t scratchOwned = 0;
 				if (!selectRow(row, scratchOwned) || !AdmitSourceCrossSection(context, batchWork, batchBytes))
+					return false;
+			}
+		}
+		if (context.Authored.Type == "pc.markov_gradient") {
+			uint64_t batchWork = 0, batchBytes = 0;
+			for (size_t row = 0; row < count; ++row) {
+				uint64_t scratchOwned = 0;
+				if (!selectRow(row, scratchOwned) ||
+					!AdmitSourceMarkovGradient(context, batchWork, batchBytes))
 					return false;
 			}
 		}

@@ -1,0 +1,206 @@
+{
+  "profile": "native-source-markov-gradient",
+  "node": "pc.markov_gradient",
+  "source": {
+    "repository": "pixel-composer",
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "files": [
+      {
+        "path": "scripts/node_markov_gradient/node_markov_gradient.gml",
+        "sha256": "ab8959ecd7dfbef37264bf5a33e36e64e06fbfe04621b9d3e6e40f746e1a2c05"
+      },
+      {
+        "path": "shaders/sh_markov_gradient/sh_markov_gradient.fsh",
+        "sha256": "d0d2c2655378f08225e7a54e614be217b01c238182dbacb68a8d547fb6ea6e96"
+      },
+      {
+        "path": "scripts/shader_functions/shader_functions.gml",
+        "sha256": "3fc33618476756eec19830b3e1ef62b521637a443cefe366000bb890372e1cc7"
+      },
+      {
+        "path": "scripts/random_function/random_function.gml",
+        "sha256": "a0ba588c5e89a7a87b5657eccd63345a733c831e3eb86e5a2c2332a457be4e0a"
+      },
+      {
+        "path": "scripts/node_value_palette/node_value_palette.gml",
+        "sha256": "c50dde2001bb67ad7c9d8154571375803e55cec0279acd13bff22371c382110b"
+      },
+      {
+        "path": "scripts/colToVec4/colToVec4.gml",
+        "sha256": "7fbda4983f1b43bb5503f643e9d968ccbdaf9dc750a3ef2c61823c321e06fdd9"
+      },
+      {
+        "path": "scripts/color_function/color_function.gml",
+        "sha256": "cbe9a62a8b56257756bd3fecf1c7eb9797eda9695d34b0b7b390d0bda0120177"
+      }
+    ],
+    "license": {
+      "path": "LICENSE",
+      "sha256": "b772b6b7cb58e3c62b228b1e3ba28abf3750d019a08a2fdd82ac71e0a1a19cc2",
+      "spdx": "MIT",
+      "copyright": "Copyright (c) 2023 Tanasart",
+      "full_text_verified": true
+    },
+    "source_oracle": "pinned node, shader, shader-function helpers, and palette/random constructors",
+    "reference_executable": "unavailable",
+    "licensed_numeric_backend_behavior": "unknown",
+    "gpu_parity": "unknown",
+    "live_runtime_parity": "unknown"
+  },
+  "physical_controls": [
+    {
+      "index": 0,
+      "port": "surface_in",
+      "display_name": "Surface In",
+      "kind": "surface",
+      "default": "runtime required input",
+      "required": true
+    },
+    {
+      "index": 1,
+      "port": "seed",
+      "display_name": "Seed",
+      "kind": "seed",
+      "default": "seed_random(6) at node construction",
+      "native_requirement": "an observed seed is required when Active is true; do not invent a fixed fallback"
+    },
+    {
+      "index": 2,
+      "port": "active",
+      "display_name": "Active",
+      "kind": "active",
+      "default": true
+    },
+    {
+      "index": 3,
+      "port": "colors",
+      "display_name": "Colors",
+      "kind": "palette",
+      "default": "copy of PROJ_PALETTE at source node construction; native unlinked/default resolution uses current durable project palette, while authored or linked palettes win"
+    },
+    {
+      "index": 4,
+      "port": "threshold",
+      "display_name": "Threshold",
+      "kind": "slider",
+      "default": 0.1
+    },
+    {
+      "index": 5,
+      "port": "replace_chance",
+      "display_name": "Replace Chance",
+      "kind": "slider",
+      "default": 1,
+      "mappable": true
+    },
+    {
+      "index": 6,
+      "port": "replace_chance_map",
+      "display_name": "Replace Chance Map",
+      "kind": "surface",
+      "default": "runtime optional mapped input"
+    }
+  ],
+  "synthetic_controls": {
+    "attribute_process": {
+      "default": true,
+      "role": "processor control"
+    },
+    "replace_chance_mapped": {
+      "default": false,
+      "role": "mappable value toggle",
+      "numeric_profile": "Finite numeric toggles use native nonzero truth; licensed runner coercion is unverified."
+    },
+    "replace_chance_map_range": {
+      "default": [
+        0,
+        1
+      ],
+      "role": "synthetic mapped endpoint range"
+    },
+    "attribute_array_process": {
+      "default": 0,
+      "role": "processor array behavior metadata"
+    }
+  },
+  "palette_contract": {
+    "source_constructor": "nodeValue_Palette copies the current PROJ_PALETTE when the node is constructed; this is dynamic, not a universal white/black default.",
+    "catalogue_capture": "The pinned catalogue capture shows white and black, but that capture is not a universal default project palette.",
+    "native_default_resolution": "For an unlinked catalogue-default palette, use the current durable document/project palette. Explicit or linked palette values take precedence. This is a native current-project policy; historical constructor-time palette state is not observable and parity is not claimed.",
+    "supported_shape": "Accept explicit flat depth-1 palettes, depth-2 palettes with processor-row axis selection, and singleton Color getter values.",
+    "shader_limit": 256,
+    "empty_palette": "Unsupported because an empty ambient shader uniform cannot be resolved deterministically.",
+    "over_limit": "Palettes larger than the 256-entry shader array are refused rather than truncated.",
+    "color_conversion": {
+      "source_helper": "colToVec4 distinguishes int64 packed colors (including packed alpha) from real colors (uses supplied/default alpha, normally 1).",
+      "pxcx_import": "PxcxImport PackedColour accepts finite integral JSON numbers in [0,UINT32_MAX], decodes low-byte R then G, B, high-byte A, and erases whether the JSON number was originally integer or real.",
+      "native_imported_profile": "Imported palette values follow the decoded packed-RGBA channels; this does not claim source numeric-token parity for int64-versus-real inputs."
+    },
+    "animation": "Source palette interpolation resamples flat colours with merge_color. Nested between-key colour arithmetic and palette driver arithmetic are unverified and explicitly unsupported. Undriven raw first-at-time-zero and final keys remain supported; saved key arrays are preserved."
+  },
+  "active_contract": {
+    "profile": "HTML5 active profile",
+    "accepted_values": "Typed booleans, or finite numeric values interpreted true only when greater than 0.5.",
+    "arrays": "Active arrays are refused.",
+    "inactive_behavior": {
+      "direct_inactive": "Direct inactive copy charges 16 estimated work units per output pixel and preserves the copied image format.",
+      "whole_tree_inactive": "Prebatch inactive path clones the complete source ImageArray once, preserving shape, order, and formats; it uses existing global tree-clone work/byte bounds, not the active kernel 64M cap.",
+      "effects": "Both inactive paths skip seed handling and effect-control arrays."
+    },
+    "numeric_backend": "This is a named native profile. Licensed runner numeric coercion behavior is unresolved; no parity claim is made.",
+    "image_pool": "Clone tree leaves by value in traversal order. Repeated image references become separate copied leaves; logical shape and pixels are preserved."
+  },
+  "seed_and_randomness": {
+    "source_seed_constructor": "seed_random(6) initializes the source node seed at construction; no fixed seed is declared by the source.",
+    "native_missing_seed": "Refuse active processing when no observed numeric seed is available; never supply an invented fixed fallback.",
+    "frame_seed": "Add the raw numeric authored/runtime seed to CURRENT_FRAME in double precision, then cast the sum to shader float. Do not add a local clock or processor-row offset.",
+    "shader_hash": "random(v_vTexcoord, seed) adds mod(seed,100000)/10 to UV coordinates, dots with (853.98598,78.2345543), then applies fract(sin(dot)*47.687523).",
+    "negative_values": "Preserve GLSL floor-based mod/fract behavior for negative floating values in the hash profile."
+  },
+  "pixel_contract": {
+    "active_output": "RGBA8 fixed output for active processing.",
+    "base_sampling": "Plain source draw path uses a bounded native nearest-sampling profile. A one-channel R source is sampled as raw R=(r,0,0,1), not through the grayscale channel helper. GPU/filter backend parity is unverified.",
+    "map_sampling": "Nearest sample at the output UV; compute raw mean of RGB only, ignoring map alpha. For an R-only sample profile (r,0,0,1), the mean is r/3.",
+    "chance_mapping": "Honor replace_chance_mapped and the synthetic replace_chance_map_range when enabled. PXC persistence retains the synthetic range, allows a missing stored physical Replace Chance when reconstructed by mapping state, and preserves linked raw Replace Chance precedence.",
+    "replacement": "Compare the original source RGB distance to palette RGB in order. On the first distance <= Threshold, replace the whole RGBA value with the next palette entry and stop. No chaining and no wrap from the final entry.",
+    "channels": "Threshold and Replace Chance are passed as raw numeric controls; do not clamp them unless source/widget rules explicitly require it.",
+    "output": "Write the selected/replaced source color to the fixed RGBA8 output."
+  },
+  "admission": {
+    "active_work_cap": 64000000,
+    "active_work_units": "Cumulative estimated units for all selected active processor rows.",
+    "active_work_per_output_pixel": "96 + 24 * (palette_count - 1) + (mapped_map_read ? 32 : 0)",
+    "active_output_bytes_per_pixel": 4,
+    "active_preflight": "Quote work, bytes, palette data, and finite controls for every selected row before allocation or publication.",
+    "direct_inactive_work_per_pixel": 16,
+    "whole_tree_inactive": "Uses existing global tree-clone bounds, not the active kernel cap.",
+    "finite_controls": "Reject nonfinite or out-of-range values before float conversion or shader-equation evaluation."
+  },
+  "native_references": {
+    "executor": {
+      "path": "mono.engine/imagegraph/src/nodes/SourceMarkovGradient.cpp",
+      "status": "passed joined batch71"
+    },
+    "core_fixture": {
+      "path": "mono.engine/imagegraph/tests/SourceMarkovGradient.cpp",
+      "status": "passed joined batch71"
+    },
+    "workload_fixture": {
+      "path": "mono.engine/imagegraph/tests/SourceMarkovGradientWorkloads.cpp",
+      "status": "passed joined batch71"
+    },
+    "io_fixture": {
+      "path": "mono.engine/imagegraphio/tests/SourceMarkovGradient.cpp",
+      "status": "passed joined batch71"
+    }
+  },
+  "validation": {
+    "status": "accepted joined batch71",
+    "desktop_runtime_parity": "unknown",
+    "licensed_numeric_backend_parity": "unknown",
+    "gpu_parity": "unknown",
+    "live_runtime_parity": "unknown",
+    "parity_claim": false,
+    "receipt": "docs/pixel-composer-m0/native-markov-gradient-validation-2026-10-08.json"
+  }
+}

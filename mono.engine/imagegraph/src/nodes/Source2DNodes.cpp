@@ -2,6 +2,7 @@
 #include "Processor.hpp"
 #include "Source2DMath.hpp"
 #include "SourceCrossSection.hpp"
+#include "SourceMarkovGradient.hpp"
 
 #include <array>
 #include <cmath>
@@ -326,6 +327,7 @@ namespace engine::imagegraph::detail {
 		static constexpr std::array ENTRIES{
 			ExecutorEntry{"pc.xdo_g_threshold", SourceXDoG, true},
 			ExecutorEntry{"pc.cross_section", DrawSourceCrossSection, true},
+			ExecutorEntry{"pc.markov_gradient", DrawSourceMarkovGradient, true},
 			ExecutorEntry{"pc.kuwahara", SourceKuwahara, true},
 			ExecutorEntry{"pc.blobify", SourceBlobify, true},
 			ExecutorEntry{"pc.mirror_polar", SourceMirrorPolar, true},

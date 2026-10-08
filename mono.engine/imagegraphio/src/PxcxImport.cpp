@@ -1054,7 +1054,8 @@ namespace engine::imagegraphio {
 			size_t depth,
 			size_t &count,
 			uint64_t &bytes,
-			detail::ImportBudget *budget
+			detail::ImportBudget *budget,
+			imagegraph::ValueType leafType = imagegraph::ValueType::Any
 		) {
 			using namespace imagegraph;
 			if (!value.is_array() || depth >= Limits::MaximumArrayDepth ||
@@ -1069,8 +1070,13 @@ namespace engine::imagegraphio {
 				SourceArrayItem item;
 				if (child.is_array()) {
 					std::vector<SourceArrayItem> nested;
-					if (!SourceArrayItems(child, nested, depth + 1, count, bytes, budget)) return false;
+					if (!SourceArrayItems(child, nested, depth + 1, count, bytes, budget, leafType))
+						return false;
 					item.Data = std::move(nested);
+				} else if (leafType == ValueType::Colour) {
+					Colour colour;
+					if (!PackedColour(child, colour)) return false;
+					item.Data = ElementValue{colour};
 				} else if (child.is_boolean())
 					item.Data = ElementValue{child.get<bool>()};
 				else if (child.is_number_unsigned()) {
@@ -1679,6 +1685,19 @@ namespace engine::imagegraphio {
 			detail::ImportBudget *budget
 		) {
 			using imagegraph::ValueType;
+			// Markov's processor consumes one complete palette per row. Preserve outer axes,
+			// including empty rows, instead of flattening their packed colours into one palette.
+			if (entry.Type == "pc.markov_gradient" && input.Id == "colors" && input.SourceIndex == 3 &&
+				input.SourceKind == "Palette" && input.Type == ValueType::Array && input.ArrayDepthKnown &&
+				input.ArrayDepth == 1 && imagegraph::FindCatalogueInput(entry, "attribute_process")) {
+				ArrayValue array{ValueType::Any, {}};
+				size_t count = 0;
+				uint64_t bytes = 0;
+				if (!SourceArrayItems(value, array.Items, 0, count, bytes, budget, ValueType::Colour))
+					return false;
+				out = std::move(array);
+				return true;
+			}
 			const ValueType leafType = input.Type == ValueType::Enum && input.SourceBehavior &&
 											   input.SourceBehavior->FractionalInterpolation == true
 										   ? ValueType::Scalar

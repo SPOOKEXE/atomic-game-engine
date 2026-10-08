@@ -788,6 +788,17 @@ namespace engine::imagegraph::detail {
 				const auto *sourceCatalogue = FindCatalogueEntry(sampled.Type);
 				const auto *sourceInput =
 					sourceCatalogue ? FindCatalogueInput(*sourceCatalogue, property.second) : nullptr;
+				// Palette endpoints return their raw arrays before source colour interpolation.
+				const bool markovPalette =
+					sampled.Type == "pc.markov_gradient" && property.second == "colors" && sourceInput &&
+					sourceInput->SourceIndex == 3 && sourceInput->SourceKind == "Palette" &&
+					sourceInput->Type == ValueType::Array;
+				const bool rawPaletteEndpoint =
+					(left == keys.front() && driverFrame <= 0) || (!right && left == keys.back());
+				if (markovPalette && rawPaletteEndpoint && !left->SourceDriver && !left->SineDriver) {
+					value = left->Data;
+					goto resolved_track_value;
+				}
 				const bool sourceEnum = sourceInput && sourceInput->Type == ValueType::Enum &&
 										sourceInput->SourceBehavior &&
 										sourceInput->SourceBehavior->FractionalInterpolation == true;

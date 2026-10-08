@@ -2,6 +2,7 @@
 
 #include "nodes/ArraySource.hpp"
 #include "nodes/Processor.hpp"
+#include "nodes/SourceMarkovGradient.hpp"
 
 #include <engine/imagegraph/DataReplay.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
@@ -67,6 +68,25 @@ namespace engine::imagegraph::detail {
 				array->Nested.empty())
 				return PublishImageTree(c, port, array->Items);
 			return c.Fail(Status::InvalidValue, "retained depth is not a surface or image array", port);
+		}
+		// ImageCost has already admitted the complete tree and checked every physical index.
+		bool MarkovArrayDimensions(
+			NodeContext &c, const ImageArray &array, const std::vector<ImageArrayItem> &items
+		) {
+			for (const auto &item : items) {
+				if (const auto *index = std::get_if<size_t>(&item.Data)) {
+					const Image &image = array.Images[*index];
+					if (image.Width > c.Request.MaximumImageDimension ||
+						image.Height > c.Request.MaximumImageDimension)
+						return c.Fail(
+							Status::LimitExceeded,
+							"inactive Markov array image exceeds the request dimension budget",
+							"surface_out"
+						);
+				} else if (!MarkovArrayDimensions(c, array, std::get<std::vector<ImageArrayItem>>(item.Data)))
+					return false;
+			}
+			return true;
 		}
 		const ImageArray *InputArray(const NodeContext &c, std::string_view port) {
 			for (const auto &[id, array] : c.ImageArrays)
@@ -163,22 +183,71 @@ namespace engine::imagegraph::detail {
 		return true;
 	}
 	bool SourceRetainedProcessorInactive(NodeContext &c, bool &handled) {
-		handled = c.Entry.Type == "pc.smear" && !c.Boolean("active", true);
+		const bool markov = c.Entry.Type == "pc.markov_gradient";
+		if (markov) {
+			bool active = true;
+			if (!ReadSourceMarkovActive(c, active)) return false;
+			handled = !active;
+		} else
+			handled = c.Entry.Type == "pc.smear" && !c.Boolean("active", true);
 		if (!handled) return true;
 		if (const auto *array = InputArray(c, "surface_in")) {
+			if (markov && (c.Request.MaximumImageDimension == 0 ||
+						   c.Request.MaximumImageDimension > Limits::MaximumDimension))
+				return c.Fail(
+					Status::InvalidValue,
+					"request image dimension budget is outside the supported range",
+					"surface_out"
+				);
 			source_array::TreeCost cost;
 			if (!source_array::ImageCost(*array, array->Items, cost, 1))
 				return c.Fail(
-					Status::LimitExceeded, "inactive Smear source array clone exceeds bounds", "surface_out"
+					Status::LimitExceeded,
+					markov ? "inactive Markov source array clone exceeds bounds"
+						   : "inactive Smear source array clone exceeds bounds",
+					"surface_out"
 				);
+			if (markov) {
+				if (!MarkovArrayDimensions(c, *array, array->Items)) return false;
+				const uint64_t outputBytes = cost.Bytes +
+											 cost.Nodes * (sizeof(Image) + sizeof(ImageArrayItem) +
+														   sizeof(std::vector<ImageArrayItem>)) +
+											 std::max<size_t>(11, std::string{}.capacity());
+				if (cost.Bytes > c.AvailableBytes() || outputBytes > c.AvailableBytes() - cost.Bytes)
+					return c.Fail(
+						Status::LimitExceeded,
+						"inactive Markov whole array clone exceeds live bytes",
+						"surface_out"
+					);
+			}
 			auto cloneCharge = c.ReserveWorkspace(cost.Bytes, "surface_out");
 			if (!cloneCharge) return false;
 			auto items = source_array::FromImages(*array, array->Items);
 			if (!PublishImageTree(c, "surface_out", items)) return false;
+		} else if (markov) {
+			const auto *value = c.Find("surface_in");
+			if (value && std::holds_alternative<AtlasValue>(*value))
+				return c.Fail(
+					Status::UnsupportedExecution, "inactive Markov Atlas copy is unrepresented", "surface_in"
+				);
+			const Image *source = c.Input("surface_in");
+			if (!source)
+				return c.Fail(
+					Status::UnsupportedExecution, "inactive Markov requires its source surface", "surface_in"
+				);
+			if (!ValidSurfaceLayout(*source, Limits::MaximumDimension, Limits::MaximumEvaluationBytes))
+				return c.Fail(
+					Status::InvalidValue, "inactive Markov source surface is invalid", "surface_in"
+				);
+			Image *output = c.NewImage("surface_out", source->Width, source->Height, source->Format);
+			if (!output) return false;
+			output->Pixels = source->Pixels;
+			output->Hash = source->Hash;
 		} else {
 			bool failed = false;
 			if (!CopyWhenInactive(c, failed) || failed) return false;
 		}
+		if (markov) return true;
 		const Value *depth = SourceRetainedField(c, "depth_pass");
 		if (c.FailureCode != Status::Ok) return false;
 		if (!depth || std::holds_alternative<UndefinedValue>(*depth))
