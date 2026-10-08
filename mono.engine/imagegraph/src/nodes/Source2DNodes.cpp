@@ -326,6 +326,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> Source2DExecutors() {
 		static constexpr std::array ENTRIES{
 			ExecutorEntry{"pc.xdo_g_threshold", SourceXDoG, true},
+			ExecutorEntry{"pc.point_sdf", SourcePointSdf, true},
 			ExecutorEntry{"pc.cross_section", DrawSourceCrossSection, true},
 			ExecutorEntry{"pc.markov_gradient", DrawSourceMarkovGradient, true},
 			ExecutorEntry{"pc.kuwahara", SourceKuwahara, true},

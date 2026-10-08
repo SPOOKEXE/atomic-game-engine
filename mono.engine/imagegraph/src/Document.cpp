@@ -1170,8 +1170,9 @@ namespace engine::imagegraph {
 					if (const auto *input =
 							FindCatalogueInput(*entry, id.substr(0, id.size() - BYPASS_SUFFIX.size())))
 						return input->Type;
-					// Source bypasses identify declared HLSL arguments and Smooth anchors.
-					if (node.Type == "pc.hlsl" || node.Type == "pc.path_smooth") {
+					// Source bypasses identify declared HLSL arguments and dynamic path inputs.
+					if (node.Type == "pc.hlsl" || node.Type == "pc.path_smooth" ||
+						node.Type == "pc.path_bridge") {
 						const auto inputId = id.substr(0, id.size() - BYPASS_SUFFIX.size());
 						for (const auto &input : node.DynamicInputs)
 							if (input.Id == inputId) return input.Type;
@@ -1425,6 +1426,11 @@ namespace engine::imagegraph {
 				if (operation.Kind == SourcePathOperationKind::Bake) {
 					stream << "bake ";
 					detail::WriteSourceBaked(stream, *operation.Baked);
+					return;
+				}
+				if (operation.Kind == SourcePathOperationKind::Bridge) {
+					stream << "bridge ";
+					detail::WriteSourceBridge(stream, *operation.Bridge);
 					return;
 				}
 				if (operation.Kind == SourcePathOperationKind::Shape) {
@@ -2435,6 +2441,17 @@ namespace engine::imagegraph {
 					auto &operation = path.SourceOperation.emplace();
 					operation.Kind = SourcePathOperationKind::Bake;
 					if (!detail::ReadSourceBaked(stream, operation.Baked.emplace(), admit)) return false;
+					value = std::move(path);
+					return true;
+				}
+				if (kind == "bridge") {
+					if (!admit(sizeof(SourcePathData2D) + sizeof(SourcePathBridgeData2D))) return false;
+					Path2D path;
+					auto &operation = path.SourceOperation.emplace();
+					operation.Kind = SourcePathOperationKind::Bridge;
+					if (!detail::ReadSourceBridge(stream, operation.Bridge.emplace(), admit) ||
+						!detail::ValidSourcePath2D(path))
+						return false;
 					value = std::move(path);
 					return true;
 				}

@@ -72,6 +72,15 @@ namespace engine::imagegraphio {
 			budget -= bytes;
 			return true;
 		}
+		bool RejectAuthoredPath(Diagnostic &diagnostic, std::string_view node, std::string_view port) {
+			return Reject(
+				diagnostic,
+				"PXC cannot serialize an authored path object; save the native document or connect a source "
+				"path node",
+				node,
+				port
+			);
+		}
 		bool SourceVec2Input(const CatalogueInput *input) {
 			return input && input->SourceIndex >= 0 && input->Type == ValueType::Vector2 &&
 				   (input->SourceKind == "Vec2" || input->SourceKind == "IVec2" ||
@@ -1359,6 +1368,10 @@ namespace engine::imagegraphio {
 			return Reject(diagnostic, "PXC edit count exceeds native limit");
 		size_t budget = Limits::MaximumArrayBytes;
 		for (const PxcxEdit &edit : edits) {
+			if (const auto *input = std::get_if<PxcxInputValueEdit>(&edit);
+				input && input->NodeId.size() <= Limits::MaximumTextBytes &&
+				input->Port.size() <= Limits::MaximumTextBytes && std::holds_alternative<Path2D>(input->Data))
+				return RejectAuthoredPath(diagnostic, input->NodeId, input->Port);
 			bool valid = std::visit(
 				[&](const auto &operation) {
 					using T = std::decay_t<decltype(operation)>;
@@ -2351,11 +2364,14 @@ namespace engine::imagegraphio {
 			for (const auto &output : node.DynamicOutputs)
 				if (!Spend(output.Id.size(), payloadBudget))
 					return Reject(diagnostic, "PXC authored outputs exceed the payload budget", node.Id);
-			for (const auto &value : node.Values)
+			for (const auto &value : node.Values) {
+				if (std::holds_alternative<Path2D>(value.Data))
+					return RejectAuthoredPath(diagnostic, node.Id, value.Port);
 				if (!Spend(value.Port.size(), payloadBudget) || !BoundedValue(value.Data, payloadBudget))
 					return Reject(
 						diagnostic, "PXC authored value exceeds its payload limit", node.Id, value.Port
 					);
+			}
 			for (const auto &property : node.SourceProperties)
 				if (!Spend(property.Port.size(), payloadBudget) ||
 					!BoundedValue(property.Data, payloadBudget))
@@ -2367,7 +2383,9 @@ namespace engine::imagegraphio {
 					return Reject(
 						diagnostic, "PXC source expressions exceed payload budget", node.Id, expression.Port
 					);
-			for (const auto &input : node.DynamicInputs)
+			for (const auto &input : node.DynamicInputs) {
+				if (input.Default && std::holds_alternative<Path2D>(*input.Default))
+					return RejectAuthoredPath(diagnostic, node.Id, input.Id);
 				if (!Spend(
 						input.Id.size() + input.SourceLayerName.size() + input.SourceInputId.size(),
 						payloadBudget
@@ -2379,6 +2397,7 @@ namespace engine::imagegraphio {
 						node.Id,
 						input.Id
 					);
+			}
 		}
 		size_t axisCount = authored.Keyframes.size();
 		for (const auto &node : authored.Nodes)
@@ -2800,7 +2819,8 @@ namespace engine::imagegraphio {
 									return index;
 						}
 					}
-					if ((entry->Type == "pc.hlsl" || entry->Type == "pc.path_smooth") &&
+					if ((entry->Type == "pc.hlsl" || entry->Type == "pc.path_smooth" ||
+						 entry->Type == "pc.path_bridge") &&
 						port.ends_with(".bypass")) {
 						const auto inputPort = port.substr(0, port.size() - 7);
 						const auto *owner = NativeNode(desired, record.value("id", ""));
@@ -3332,7 +3352,9 @@ namespace engine::imagegraphio {
 							record["attri"]["mapped"] = *mapped;
 							continue;
 						}
-						if ((node.Type == "pc.blobify" &&
+						if ((node.Type == "pc.point_sdf" && (value.Port == "max_distance_mapped" ||
+															 value.Port == "max_distance_map_range")) ||
+							(node.Type == "pc.blobify" &&
 							 (value.Port == "radius_mapped" || value.Port == "radius_map_range")) ||
 							(node.Type == "pc.kuwahara" &&
 							 (value.Port == "radius_mapped" || value.Port == "radius_map_range")) ||
@@ -3376,7 +3398,8 @@ namespace engine::imagegraphio {
 							  value.Port == "radius_mapped" || value.Port == "radius_map_range" ||
 							  value.Port == "shift_mapped" || value.Port == "shift_map_range" ||
 							  value.Port == "scale_mapped" || value.Port == "scale_map_range"))) {
-							const bool blobify = node.Type == "pc.blobify",
+							const bool pointSdf = node.Type == "pc.point_sdf",
+									   blobify = node.Type == "pc.blobify",
 									   kuwahara = node.Type == "pc.kuwahara",
 									   xdog = node.Type == "pc.xdo_g_threshold",
 									   herringbone = node.Type == "pc.herringbone_tile",
@@ -3386,7 +3409,8 @@ namespace engine::imagegraphio {
 									   refract = node.Type == "pc.refract", dotted = node.Type == "pc.dotted",
 									   stripe = node.Type == "pc.stripe";
 							const std::string_view numericId =
-								herringbone ? std::string_view(value.Port).substr(0, value.Port.find('_'))
+								pointSdf	  ? "max_distance"
+								: herringbone ? std::string_view(value.Port).substr(0, value.Port.find('_'))
 								: stripe
 									? (value.Port.starts_with("strip_ratio_")
 										   ? std::string_view("strip_ratio")
@@ -3404,7 +3428,7 @@ namespace engine::imagegraphio {
 							const std::string toggleId = std::string(numericId) + "_mapped";
 							const auto *height = FindCatalogueInput(*entry, numericId);
 							const int expectedIndex =
-								(kuwahara || blobify) ? 2
+								(pointSdf || kuwahara || blobify) ? 2
 								: xdog	  ? (numericId == "gamma" ? 9 : (numericId == "epsilon" ? 10 : 11))
 								: refract ? (numericId == "height"	   ? 9
 											 : numericId == "distance" ? 10
@@ -3427,9 +3451,10 @@ namespace engine::imagegraphio {
 								: occlusion && numericId == "height" ? 3
 																	 : 1;
 							const std::string_view expectedKind =
-								(kuwahara || blobify) ? "Int"
-								: xdog				  ? (numericId == "gamma" ? "Float" : "Slider")
-								: refract			  ? "Float"
+								pointSdf				? "Float"
+								: (kuwahara || blobify) ? "Int"
+								: xdog					? (numericId == "gamma" ? "Float" : "Slider")
+								: refract				? "Float"
 								: herringbone
 									? (numericId == "scale" ? "Vec2"
 															: (numericId == "angle" ? "Rotation" : "Slider"))
@@ -4337,23 +4362,23 @@ namespace engine::imagegraphio {
 							desired.Tracks.push_back(track);
 				}
 			}
-		// Appending a source socket creates the same compact static animator as a new source node.
+		// New source sockets retain static modes, including absent Bridge Path constructor slots.
 		for (auto &node : desired.Nodes) {
 			const auto *old = NativeNode(imported.Graph, node.Id);
 			const auto *saved = NativeNode(projected.Graph, node.Id);
 			if (!old || !saved || node.Type == "pc.global_scope") continue;
 			for (const auto &input : node.DynamicInputs) {
-				if (std::any_of(
-						old->DynamicInputs.begin(),
-						old->DynamicInputs.end(),
-						[&](const auto &v) { return v.Id == input.Id; }
-					) ||
-					!input.Default)
+				if (std::any_of(old->DynamicInputs.begin(), old->DynamicInputs.end(), [&](const auto &v) {
+						return v.Id == input.Id;
+					}))
 					continue;
+				const bool absentBridgePath =
+					node.Type == "pc.path_bridge" && input.Type == ValueType::Path2D && !input.Default;
+				if (!input.Default && !absentBridgePath) continue;
 				for (const auto &key : projected.Graph.Keyframes) {
 					if (key.NodeId != node.Id || key.Port != input.Id) continue;
 					if (key.Kind != KeyframeKind::Normal || GetFrameTime(key) != FrameTime{} ||
-						key.SourceDriver || key.Data != *input.Default)
+						key.SourceDriver || !input.Default || key.Data != *input.Default)
 						return Reject(
 							diagnostic,
 							"PXC appended socket animator changes authored execution",
@@ -4365,17 +4390,38 @@ namespace engine::imagegraphio {
 						}))
 						desired.Keyframes.push_back(key);
 				}
-				for (const auto &track : projected.Graph.Tracks)
+				for (const auto &track : projected.Graph.Tracks) {
+					if (absentBridgePath && track.NodeId == node.Id && track.Port == input.Id)
+						return Reject(
+							diagnostic,
+							"PXC absent Bridge slot creates an unexpected animator",
+							node.Id,
+							input.Id
+						);
 					if (track.NodeId == node.Id && track.Port == input.Id &&
 						std::none_of(desired.Tracks.begin(), desired.Tracks.end(), [&](const auto &v) {
 							return v.NodeId == node.Id && v.Port == input.Id;
 						}))
 						desired.Tracks.push_back(track);
+				}
 				if (std::find(saved->SourceStaticInputs.begin(), saved->SourceStaticInputs.end(), input.Id) !=
 						saved->SourceStaticInputs.end() &&
 					std::find(node.SourceStaticInputs.begin(), node.SourceStaticInputs.end(), input.Id) ==
-						node.SourceStaticInputs.end())
+						node.SourceStaticInputs.end()) {
+					if (!Spend(
+							(node.SourceStaticInputs.size() + 1) * sizeof(std::string) +
+								std::max(input.Id.size(), std::string{}.capacity()) + 1,
+							payloadBudget
+						))
+						return Reject(
+							diagnostic,
+							"PXC appended socket static mode exceeds payload budget",
+							node.Id,
+							input.Id
+						);
+					node.SourceStaticInputs.reserve(node.SourceStaticInputs.size() + 1);
 					node.SourceStaticInputs.push_back(input.Id);
+				}
 			}
 		}
 		// A new native catalogue node has no saved animator yet. A source compact animator adds

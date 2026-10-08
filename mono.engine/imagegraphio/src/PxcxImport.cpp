@@ -2645,6 +2645,10 @@ namespace engine::imagegraphio {
 					}
 					dynamic.Default = std::move(node.Values[value].Data);
 				}
+				// Source absent Path sockets are noone, not authored empty path objects.
+				if (entry.Type == "pc.path_bridge" && templateInput->SourceKind == "Path" &&
+					node.Values.size() == valuesBefore)
+					dynamic.Default.reset();
 				if (hlslMode &&
 					((dynamic.Default && !detail::HlslArgumentValue(*hlslMode, *dynamic.Default)) ||
 					 std::any_of(
@@ -3833,7 +3837,8 @@ namespace engine::imagegraphio {
 			// node_data.gml getOutputIndex: 1000 + n connects the bypass junction of input n.
 			if (index >= 1000) {
 				const uint32_t physical = index - 1000;
-				if ((entry.Type == "pc.hlsl" || entry.Type == "pc.path_smooth") &&
+				if ((entry.Type == "pc.hlsl" || entry.Type == "pc.path_smooth" ||
+					 entry.Type == "pc.path_bridge") &&
 					physical >= uint32_t(entry.DynamicFixedLength) &&
 					physical - uint32_t(entry.DynamicFixedLength) <
 						imagegraph::MaximumDynamicInputsForType(entry.Type)) {
@@ -3872,7 +3877,8 @@ namespace engine::imagegraphio {
 			bool admitCommon
 		) {
 			const auto declared = [&](uint32_t physical) {
-				if ((entry.Type != "pc.hlsl" && entry.Type != "pc.path_smooth") ||
+				if ((entry.Type != "pc.hlsl" && entry.Type != "pc.path_smooth" &&
+					 entry.Type != "pc.path_bridge") ||
 					physical < uint32_t(entry.DynamicFixedLength))
 					return true;
 				const auto port = CatalogueInputPort(entry, physical);
@@ -3894,7 +3900,9 @@ namespace engine::imagegraphio {
 					 !declared(link.ToInputIndex))) {
 					reason = entry.Type == "pc.hlsl"
 								 ? "HLSL link refers to an undeclared dynamic source input"
-								 : "Smooth Path link refers to an undeclared dynamic source input";
+							 : entry.Type == "pc.path_smooth"
+								 ? "Smooth Path link refers to an undeclared dynamic source input"
+								 : "Bridge Path link refers to an undeclared dynamic source input";
 					return false;
 				}
 				if (link.FromNode == node.Id && !ReservedSourceOutput(link) &&

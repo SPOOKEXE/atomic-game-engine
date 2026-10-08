@@ -1,0 +1,142 @@
+{
+  "source_pin": {
+    "repository_checkout": "/tmp/pixel-composer-source-b69eca232217360cf1502ef0223523d818606652",
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "path": "scripts/node_path_bridge/node_path_bridge.gml",
+    "sha256_raw_bytes": "559b69a11afc7e6d2477964be364295d7571c74eabcd6ca229411a2e74c508f3"
+  },
+  "controls": [
+    {
+      "input": 4,
+      "name": "seed",
+      "type": "seed",
+      "default": "nodeValueSeed()",
+      "display_order": 0
+    },
+    {
+      "input": 3,
+      "name": "distribution",
+      "type": "selector",
+      "choices": [
+        "Uniform",
+        "Random"
+      ],
+      "default_choice_index": 0,
+      "display_order": 1
+    },
+    {
+      "input": 1,
+      "name": "amount",
+      "type": "integer",
+      "default": 4,
+      "display_order": 2
+    },
+    {
+      "input": 2,
+      "name": "smooth",
+      "type": "boolean",
+      "default": false,
+      "display_order": 3
+    },
+    {
+      "input": 7,
+      "name": "loop",
+      "type": "boolean",
+      "default": false,
+      "display_order": 4
+    },
+    {
+      "input": 6,
+      "name": "range",
+      "type": "slider_range",
+      "default": [
+        0,
+        1
+      ],
+      "display_order": 5
+    },
+    {
+      "input": 5,
+      "name": "offset",
+      "type": "slider",
+      "default": 0,
+      "display_order": 6
+    },
+    {
+      "input": 0,
+      "name": "path",
+      "type": "path",
+      "default": null,
+      "display_order": 7
+    },
+    {
+      "input": "dynamic",
+      "name": "path",
+      "type": "path",
+      "default": null,
+      "display_order": "after_fixed_inputs_in_creation_order"
+    }
+  ],
+  "dynamic_lines": {
+    "creation": "append one visible path input; append its index to the display list",
+    "collection_order": "base path first, then dynamic inputs in input-array order; each path contributes line indices from zero upward",
+    "invalid_dynamic_path": "skip it",
+    "invalid_base_path": "update returns before rebuilding anchors"
+  },
+  "distribution_and_sampling": {
+    "uniform": "for amount == 1 use ratio 0.5; otherwise ratio = sample_index / (amount - (loop ? 0 : 1))",
+    "random": "call random_set_seed(seed) once before the sample loop; each sample ratio uses the source builtin random(1)",
+    "random_observation": "source establishes the seed call and builtin invocation only; exact sequence, endpoint inclusion, and cross-runtime equivalence are not specified here",
+    "unknown_distribution_index": "start ratio at zero",
+    "range": "lerp(range[0], range[1], ratio); reversed endpoints are not reordered",
+    "loop_and_offset": "only when loop is true, ratio becomes frac(frac(ratio + offset) + 1); offset is added after range mapping",
+    "source_path_sampling": "for every collected line, call that path's getPointRatio(clamp(ratio, 0, 0.999), line_index); copy x, y, and weight into the anchor",
+    "shared_point_output": "one _p object is reused across input lines and amount iterations; distance sampling resets x and y, but an invalid anchor index returns before setting weight, so weight can carry from an earlier sample",
+    "global_builtin_state": "source resets global builtin state even for Uniform; native captures do not publish that outgoing global state, so inter-node builtin RNG parity remains unverified"
+  },
+  "smooth_path": {
+    "handles": "for each interior anchor, direction runs from the previous anchor to the next; the previous-side handle is half the previous leg length behind the anchor and the next-side handle is half the next leg length ahead; first and last segment handles are set to their respective endpoint anchors",
+    "single_segment_control_quirk": "when there is one segment, first-start and last-end initialization both target _cnt[0]; the second assignment overwrites all four coordinates with the final anchor",
+    "weight": "interpolated linearly between segment endpoint weights using the segment parameter",
+    "length_approximation": "sum cubic-Bezier distances at k = 0, 1/32, ..., 31/32; the loop condition is k < 1, so it does not add a separate k = 1 sample",
+    "overlay": "draw each anchor's smoothed segment at j = 0, 1/32, ..., 1"
+  },
+  "distance_and_ratios": {
+    "ratio": "clamp ratio to [0, 1], multiply by that anchor set's computed length, then use distance sampling",
+    "segment_search": "choose the first cumulative length strictly greater than distance; equality advances to the next segment",
+    "interpolation": "derive local parameter from distance within that segment; use linear x/y when not smooth and cubic-Bezier x/y when smooth; interpolate weight linearly",
+    "outside_end": "if no cumulative entry is strictly greater, return anchor at index equal to the cumulative-length count",
+    "zero_distance": "return the first anchor directly",
+    "segment_count": "getSegmentCount(i) returns the safe length of anchors[i], which is the number of collected path lines, not the number of intervals",
+    "invalid_anchor_index": "distance sampling returns x=0 and y=0 in the output object"
+  },
+  "state_observations": {
+    "cached_pos": "cleared on update and written by distance sampling, but never read by this source; it is write-only cached state",
+    "boundary": "initialized to an empty array and exposed by getBoundary, but never assigned by update",
+    "length_total": "initialized to an empty array and not assigned by update"
+  },
+  "undefined_inputs": {
+    "policy": "refuse or report unsupported rather than infer behavior",
+    "defined_source_cases": [
+      "an invalid base path causes update to return early",
+      "an invalid dynamic path is skipped",
+      "an unrecognized distribution selector uses ratio zero before range mapping"
+    ],
+    "undefined_or_unguarded": [
+      "missing or malformed seed, range endpoints, amount, or path getter results",
+      "amount values that are not valid nonnegative array lengths",
+      "zero collected path lines: smooth setup indexes control entries without a guard",
+      "one collected path line: smooth setup writes control index -1 without a guard",
+      "failed path sampling or unavailable point weights"
+    ],
+    "early_return_state": "on invalid base path, source has already updated curr_smooth; it retains anchors, controls, lengths, cumulative lengths, boundary, and length_total, while getLineCount still reads the current Amount input. Native may sample retained state within bounds when every required anchor, cumulative length, and smooth control entry exists and is compatible; refuse only missing or incompatible required entries"
+  },
+  "verification": "source-derived policy record only; no parity or verification result claimed",
+  "source_boolean_conversion": {
+    "rule": "numeric input is true only when greater than 0.5",
+    "evidence": [
+      "scripts/node_value_bool/node_value_bool.gml",
+      "HTML5 runtime commit 60e51be51ce7f3d52025ef18106cf172b8e22a00, Function_String.js:161"
+    ]
+  }
+}

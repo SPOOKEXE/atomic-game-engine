@@ -1,5 +1,6 @@
 #pragma once
 #include "SourcePathBakePayload.hpp"
+#include "SourcePathBridgePayload.hpp"
 #include "SourcePathSequentialPayload.hpp"
 #include "SourcePathShape.hpp"
 #include "SourcePathSpiralPayload.hpp"
@@ -47,6 +48,7 @@ namespace engine::imagegraph::detail {
 		if (path.Loop || path.Segmented || !path.Anchors.empty() || !path.Weights.empty()) return false;
 		const auto &op = *path.SourceOperation;
 		if (op.Baked && op.Kind != SourcePathOperationKind::Bake) return false;
+		if (op.Bridge && op.Kind != SourcePathOperationKind::Bridge) return false;
 		if (op.Kind == SourcePathOperationKind::Spiral) {
 			if (!op.Spiral || !ValidSourceSpiral(*op.Spiral, *count) || op.Inputs.size() > 1 ||
 				(!op.Inputs.empty() && op.WeightInput3D))
@@ -177,6 +179,10 @@ namespace engine::imagegraph::detail {
 			return false;
 		if (op.Kind == SourcePathOperationKind::VerletMesh) return ValidSourceVerletPath(op);
 		if (op.Mesh || !op.CachedLengths.empty() || op.CachedTotalLength != 0) return false;
+		if (op.Kind == SourcePathOperationKind::Bridge)
+			return op.Bridge && op.Inputs.empty() && op.TrimRange == Vector2{0, 1} && !op.Mesh &&
+				   op.CachedLengths.empty() && op.CachedTotalLength == 0 &&
+				   ValidSourceBridge(*op.Bridge, *count);
 		if (op.Kind == SourcePathOperationKind::Bake)
 			return op.Baked && op.Inputs.empty() && op.TrimRange == Vector2{0, 1} &&
 				   ValidSourceBaked(*op.Baked, *count);
@@ -241,6 +247,7 @@ namespace engine::imagegraph::detail {
 			if (op.Baked && !add(SourceBakedBytes<Retained>(*op.Baked))) return UINT64_MAX;
 			if (op.Spiral && !add(SourceSpiralBytes<Retained>(*op.Spiral))) return UINT64_MAX;
 			if (op.Wave && !add(SourceWaveBytes<Retained>(*op.Wave))) return UINT64_MAX;
+			if (op.Bridge && !add(SourceBridgeBytes<Retained>(*op.Bridge))) return UINT64_MAX;
 			if (op.WeightInput3D && !add(SourceWeightInput3DBytes(*op.WeightInput3D, Retained, depth + 1)))
 				return std::numeric_limits<uint64_t>::max();
 			if (!add((Retained ? op.WeightCurve.capacity() : op.WeightCurve.size()) * sizeof(double)))

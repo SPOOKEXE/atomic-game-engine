@@ -9,6 +9,7 @@
 #include "SourceMappedInputs.hpp"
 #include "SourceRetainedImageOutputs.hpp"
 #include "ValuePayload.hpp"
+#include "nodes/Families.hpp"
 #include "nodes/SourceAnisoNoise.hpp"
 #include "nodes/SourceBend.hpp"
 #include "nodes/SourceCaustic.hpp"
@@ -956,6 +957,14 @@ namespace engine::imagegraph::detail {
 				uint64_t scratchOwned = 0;
 				if (!selectRow(row, scratchOwned) ||
 					!AdmitSourceRepeatTexture(context, batchWork, batchBytes))
+					return false;
+			}
+		}
+		if (context.Authored.Type == "pc.point_sdf") {
+			uint64_t batchWork = 0, batchBytes = 0;
+			for (size_t row = 0; row < count; ++row) {
+				uint64_t scratchOwned = 0;
+				if (!selectRow(row, scratchOwned) || !AdmitSourcePointSdf(context, batchWork, batchBytes))
 					return false;
 			}
 		}

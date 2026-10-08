@@ -110,6 +110,13 @@ namespace engine::imagegraph::detail {
 				replacement.StorageCharge = std::move(*charge);
 				replacement.Operation = operation.Kind;
 				replacement.SourceData = &operation;
+				if (operation.Kind == SourcePathOperationKind::Bridge) {
+					replacement.EvaluationContext = &context;
+					replacement.LengthTotal =
+						operation.Bridge->Lines.empty() ? 0 : operation.Bridge->Lines.front().Length;
+					Swap(replacement);
+					return true;
+				}
 				if (operation.Kind == SourcePathOperationKind::Bake) {
 					replacement.EvaluationContext = &context;
 					replacement.BakedSamples.reserve(Limits::MaximumArrayElements);
@@ -430,6 +437,7 @@ namespace engine::imagegraph::detail {
 			return nullptr;
 		}
 		size_t LineCount() const {
+			if (SourceData && SourceData->Bridge) return SourceData->Bridge->LineCount;
 			if (SourceData && SourceData->Baked) return SourceData->Baked->Lines.size();
 			if (SourceData && SourceData->Sequential && *Operation != SourcePathOperationKind::Smoothen)
 				return 1;
@@ -448,6 +456,14 @@ namespace engine::imagegraph::detail {
 			return count;
 		}
 		double Length(size_t line = 0) const {
+			if (SourceData && SourceData->Bridge) {
+				if (line < SourceData->Bridge->Lines.size()) return SourceData->Bridge->Lines[line].Length;
+				if (EvaluationContext)
+					EvaluationContext->Fail(
+						Status::InvalidValue, "Bridge Path length is undefined for this line", "path"
+					);
+				return NAN;
+			}
 			if (SourceData && SourceData->Baked)
 				return line < SourceData->Baked->Lines.size()
 						   ? SourceBakedLength(SourceData->Baked->Lines[line])
@@ -491,6 +507,10 @@ namespace engine::imagegraph::detail {
 						 : 0;
 		}
 		size_t SegmentCount(size_t line = 0) const {
+			if (SourceData && SourceData->Bridge)
+				return line < SourceData->Bridge->Lines.size()
+						   ? SourceData->Bridge->Lines[line].Anchors.size()
+						   : 0;
 			if (SourceData && SourceData->Baked)
 				return line < SourceData->Baked->Lines.size() ? SourceData->Baked->Lines[line].size() : 0;
 			if (SourceData && SourceData->Sequential && *Operation != SourcePathOperationKind::Smoothen)
@@ -736,6 +756,10 @@ namespace engine::imagegraph::detail {
 		}
 
 		size_t AccumulatedCount(size_t line = 0) const {
+			if (SourceData && SourceData->Bridge)
+				return line < SourceData->Bridge->Lines.size()
+						   ? SourceData->Bridge->Lines[line].Accumulated.size()
+						   : 0;
 			if (SourceData && SourceData->Baked)
 				return line < SourceData->Baked->Lines.size() && SourceData->Baked->Lines[line].size() >= 2
 						   ? SourceData->Baked->Lines[line].size()
@@ -762,6 +786,16 @@ namespace engine::imagegraph::detail {
 			return child ? child->AccumulatedCount(line) : 0;
 		}
 		double AccumulatedAt(size_t index, size_t line = 0) const {
+			if (SourceData && SourceData->Bridge) {
+				if (line < SourceData->Bridge->Lines.size() &&
+					index < SourceData->Bridge->Lines[line].Accumulated.size())
+					return SourceData->Bridge->Lines[line].Accumulated[index];
+				if (EvaluationContext)
+					EvaluationContext->Fail(
+						Status::InvalidValue, "Bridge Path accumulated length is undefined", "path"
+					);
+				return NAN;
+			}
 			if (SourceData && SourceData->Spiral) {
 				const double frequency = std::max(1., std::abs(SourceData->Spiral->Frequency));
 				const double base = WeightSpatial
@@ -1130,7 +1164,85 @@ namespace engine::imagegraph::detail {
 				BakedSamples.push_back({line, distance, out.Position});
 			return out;
 		}
+		PathPoint BridgePointDistance(double distance, size_t line, double weight = 1) const {
+			ENGINE_PROFILE("imagegraph.path.bridge.sample");
+			const auto &bridge = *SourceData->Bridge;
+			if (line >= bridge.Lines.size()) return {0, 0, weight};
+			const auto &data = bridge.Lines[line];
+			if (!std::isfinite(distance)) {
+				if (EvaluationContext)
+					EvaluationContext->Fail(
+						Status::InvalidValue, "Bridge Path sample distance is nonfinite", "path"
+					);
+				return {NAN, NAN, NAN};
+			}
+			if (distance == 0) return {data.Anchors[0].X, data.Anchors[0].Y, data.Anchors[0].Z};
+			size_t index = 0;
+			for (; index < data.Accumulated.size(); ++index) {
+				if (EvaluationContext && EvaluationContext->PathShiftMemo &&
+					!EvaluationContext->PathShiftMemo->Step(*EvaluationContext))
+					return {NAN, NAN, NAN};
+				if (distance < data.Accumulated[index]) break;
+			}
+			if (index == data.Accumulated.size()) {
+				const auto &point = data.Anchors[index];
+				return {point.X, point.Y, point.Z};
+			}
+			const double start = index ? data.Accumulated[index - 1] : 0;
+			const double length = data.Accumulated[index] - start;
+			if (!(length > 0)) {
+				if (EvaluationContext)
+					EvaluationContext->Fail(
+						Status::InvalidValue, "Bridge Path selected segment has zero length", "path"
+					);
+				return {NAN, NAN, NAN};
+			}
+			const double t = (distance - start) / length;
+			const auto &a = data.Anchors[index], &b = data.Anchors[index + 1];
+			PathPoint point{a.X + (b.X - a.X) * t, a.Y + (b.Y - a.Y) * t, a.Z + (b.Z - a.Z) * t};
+			if (bridge.Smooth) {
+				if (index >= data.Controls.size()) {
+					if (EvaluationContext)
+						EvaluationContext->Fail(
+							Status::UnsupportedExecution,
+							"Bridge Path retained smooth controls are undefined for this segment",
+							"path"
+						);
+					return {NAN, NAN, NAN};
+				}
+				const auto &control = data.Controls[index];
+				point.X = BezierComponent(t, a.X, b.X, control[0], control[2]);
+				point.Y = BezierComponent(t, a.Y, b.Y, control[1], control[3]);
+			}
+			if (!std::isfinite(point.X) || !std::isfinite(point.Y) || !std::isfinite(point.Weight)) {
+				if (EvaluationContext)
+					EvaluationContext->Fail(
+						Status::InvalidValue, "Bridge Path sampled point is nonfinite", "path"
+					);
+				return {NAN, NAN, NAN};
+			}
+			return point;
+		}
+		PathPoint BridgePointRatio(double ratio, size_t line, double weight = 1) const {
+			if (line >= SourceData->Bridge->Lines.size()) return {0, 0, weight};
+			if (!std::isfinite(ratio)) {
+				if (EvaluationContext)
+					EvaluationContext->Fail(
+						Status::InvalidValue, "Bridge Path sample ratio is nonfinite", "path"
+					);
+				return {NAN, NAN, NAN};
+			}
+			return BridgePointDistance(
+				std::clamp(ratio, 0., 1.) * SourceData->Bridge->Lines[line].Length, line, weight
+			);
+		}
 		SourcePathPointBuffer PointRatioInto(double ratio, size_t line, SourcePathPointBuffer &out) const {
+			if (SourceData && SourceData->Bridge) {
+				const auto point = BridgePointRatio(ratio, line, out.Weight);
+				out.Position = {point.X, point.Y};
+				out.Weight = point.Weight;
+				return out;
+			}
 			if (SourceSmooth) {
 				const auto point = SmoothPointDistance((ratio - std::trunc(ratio)) * LengthTotal, out.Weight);
 				out.Position = {point.X, point.Y};
@@ -1210,6 +1322,12 @@ namespace engine::imagegraph::detail {
 		}
 		SourcePathPointBuffer
 		PointDistanceInto(double distance, size_t line, SourcePathPointBuffer &out) const {
+			if (SourceData && SourceData->Bridge) {
+				const auto point = BridgePointDistance(distance, line, out.Weight);
+				out.Position = {point.X, point.Y};
+				out.Weight = point.Weight;
+				return out;
+			}
 			if (SourceSmooth) {
 				const auto point = SmoothPointDistance(distance, out.Weight);
 				out.Position = {point.X, point.Y};
@@ -1366,6 +1484,7 @@ namespace engine::imagegraph::detail {
 			return p;
 		}
 		PathPoint PointDistance(double distance, size_t line = 0) const {
+			if (SourceData && SourceData->Bridge) return BridgePointDistance(distance, line);
 			if (SourceSmooth) return SmoothPointDistance(distance);
 			if (Operation && *Operation == SourcePathOperationKind::Repeat)
 				return PointRatio(distance / Length(line), line);
@@ -1444,7 +1563,8 @@ namespace engine::imagegraph::detail {
 
 		bool HasSourceTangent() const {
 			if (!Operation) return true;
-			return *Operation != SourcePathOperationKind::Bake &&
+			return *Operation != SourcePathOperationKind::Bridge &&
+				   *Operation != SourcePathOperationKind::Bake &&
 				   *Operation != SourcePathOperationKind::Combine &&
 				   *Operation != SourcePathOperationKind::VerletMesh &&
 				   *Operation != SourcePathOperationKind::Join &&
@@ -1452,6 +1572,7 @@ namespace engine::imagegraph::detail {
 				   *Operation != SourcePathOperationKind::WeightAdjust;
 		}
 		PathPoint PointRatio(double ratio, size_t line = 0) const {
+			if (SourceData && SourceData->Bridge) return BridgePointRatio(ratio, line);
 			if (SourceSmooth) return SmoothPointDistance((ratio - std::trunc(ratio)) * LengthTotal);
 			if (Operation && *Operation == SourcePathOperationKind::Repeat) {
 				SourcePathPointBuffer point;

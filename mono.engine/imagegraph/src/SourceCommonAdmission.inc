@@ -384,8 +384,10 @@ namespace detail {
 			if (!metadata)
 				return Fail(diagnostic, Status::LimitExceeded, "common native metadata exceeds live bytes");
 			const uint64_t comparisons =
-				document.Nodes.size() *
-				uint64_t(prior.Nodes.size() + prior.Outputs.Nodes.size() + document.Groups.size());
+				document.Nodes.size() * uint64_t(
+											prior.Nodes.size() + prior.Outputs.Nodes.size() +
+											document.Groups.size() + document.Nodes.size()
+										);
 			if (comparisons > 16'000'000)
 				return Fail(
 					diagnostic, Status::LimitExceeded, "common native reconciliation work exceeds bounds"
@@ -420,20 +422,27 @@ namespace detail {
 					std::all_of(held->Outputs.begin(), held->Outputs.end(), [&](const auto &port) {
 						return GroupHeldPortCompatible(document, node, port);
 					});
-				if (retained) {
-					auto destination = std::find_if(
-						working.Outputs.Nodes.begin(), working.Outputs.Nodes.end(), [&](const auto &row) {
-							return row.NodeId == node.Id;
-						}
+				auto destination = std::find_if(
+					working.Outputs.Nodes.begin(), working.Outputs.Nodes.end(), [&](const auto &row) {
+						return row.NodeId == node.Id;
+					}
+				);
+				if (destination == working.Outputs.Nodes.end())
+					return Fail(
+						diagnostic, Status::InvalidValue, "common constructor output owner is absent"
 					);
-					if (destination == working.Outputs.Nodes.end())
-						return Fail(
-							diagnostic, Status::InvalidValue, "common constructor output owner is absent"
-						);
+				if (retained) {
 					// Refusal-only sockets are authoritative held state too; copying does not
 					// require Data.
 					CacheGroupReplayNode replacement = *held;
 					*destination = std::move(replacement);
+				} else {
+					// Constructor noone values keep the declared socket domain; receipts keep theirs.
+					for (auto &port : destination->Outputs) {
+						if (port.Domain) continue;
+						if (const auto type = FindPortType(node, port.Port, PortDirection::Output, &document))
+							port.Domain = SourceSocketDomain{*type, std::nullopt, std::nullopt};
+					}
 				}
 				same[index] = retained && old != prior.Nodes.end() && old->GroupId == node.GroupId &&
 							  old->InstanceBase == node.InstanceBase &&

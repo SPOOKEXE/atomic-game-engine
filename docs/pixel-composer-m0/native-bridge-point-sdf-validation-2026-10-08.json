@@ -1,0 +1,1711 @@
+{
+  "phase": "bounded-source-bridge-path-and-point-sdf",
+  "date": "2026-10-08",
+  "scope": "Bounded Bridge Path sampling and native persistence; Point SDF CPU surfaces, mapped controls, processor rows and common callbacks; supported PXC edits and explicit path-object save refusal.",
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "fixtures": [
+    "mono.engine/imagegraph/tests/SourceBridgePath.cpp",
+    "mono.engine/imagegraph/tests/SourceBridgePathWorkloads.cpp",
+    "mono.engine/imagegraph/tests/SourcePointSdf.cpp",
+    "mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp",
+    "mono.engine/imagegraphio/tests/PxcxBridgePath.cpp",
+    "mono.engine/imagegraphio/tests/PxcxPointSdf.cpp"
+  ],
+  "policies": {
+    "mono.engine/imagegraph/docs/native-bridge-path-policy.json": "4d777eed1f95c04cbbaa5e0b11c39bacc50a1f3dce68f972335ea721a9b6f4c5",
+    "mono.engine/imagegraph/docs/native-point-sdf-policy.json": "2daf9a9293495f368f3594196095562807babf6a23bde0ee48114122ebc4a567"
+  },
+  "behavior_contract": {
+    "bridge": [
+      "Ordered base and dynamic path lines; Uniform sampling and caller-observed Random draws.",
+      "Source loop/range/offset and boolean half threshold; strict-distance scan and source control quirks.",
+      "Owned payload preserves sampling through native v9 save/reopen; future replay comparison uses canonical time.",
+      "Absent PXC path slots stay absent; authored path objects are refused rather than serialized as noone.",
+      "Dense 64-row/eight-anchor fixture hash 15941574929047459686; borrowed payload uses no runtime workspace allocation."
+    ],
+    "point_sdf": [
+      "GLSL capacity of 256 points; float pixel-center distance with unclamped grayscale output.",
+      "Seven surface formats; mapped distance; source dimensions and bool conversion; typed and Any tuple points.",
+      "Held empty-point output requires matching receipt; cold or resized empty targets refuse.",
+      "Aggregate processor work and storage admitted before observations or publication.",
+      "Actual common callbacks cover held outputs and cold atomic refusal; PXC controls and mapping edits preserve outputs."
+    ]
+  },
+  "validation": {
+    "batch": 86,
+    "status": "accepted",
+    "acceptance": true,
+    "results": {
+      "checks": 20,
+      "native_binary_cases": 6292,
+      "startup_cases": 1,
+      "python_cases": 116,
+      "cli_cases": 16,
+      "optimized_workload_cases": 56,
+      "optimized_workload_assertions": 2272661,
+      "bake": {
+        "cases": 161,
+        "assertions": 15997
+      },
+      "physics": {
+        "cases": 43,
+        "assertions": 715
+      },
+      "runner": {
+        "cases": 29,
+        "assertions": 296
+      },
+      "font": {
+        "cases": 43,
+        "assertions": 1845
+      },
+      "export": {
+        "cases": 95,
+        "assertions": 3401
+      },
+      "render": {
+        "cases": 33,
+        "assertions": 2006
+      },
+      "io": {
+        "cases": 433,
+        "assertions": 21282
+      },
+      "core": {
+        "cases": 3806,
+        "assertions": 4415326
+      },
+      "assetc": {
+        "cases": 49,
+        "assertions": 563
+      },
+      "client": {
+        "cases": 359,
+        "assertions": 23853
+      },
+      "studio": {
+        "cases": 1159,
+        "assertions": 51329
+      },
+      "nodegraph": {
+        "cases": 42,
+        "assertions": 410
+      },
+      "ui": {
+        "cases": 40,
+        "assertions": 704
+      },
+      "startup": {
+        "cases": 1,
+        "assertions": 5
+      }
+    },
+    "source_stability": {
+      "paths": 4314,
+      "changed": []
+    },
+    "optimized_preflight": {
+      "command": [
+        ".cache/build/profile/tests/test_imagegraph",
+        "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads],[imagegraph][path_repeat_workloads],[imagegraph][tile_random_workloads],[imagegraph][path_wave_workloads],[imagegraph][repeat_texture_workloads],[imagegraph][cross_section_workloads],[imagegraph][markov_gradient_workloads],[imagegraph][path_smooth][workload],[imagegraph][path_bridge][workload],[imagegraph][source-point-sdf],[source_argument]"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 2.685,
+      "binary_sha256": "17a5f88579790f468ad856b0bbb6ceaffb29ecb4130b2309b103b6768cce1c32",
+      "binary_sha256_after": "17a5f88579790f468ad856b0bbb6ceaffb29ecb4130b2309b103b6768cce1c32",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch86.log",
+      "log_sha256": "b8487846a55823f9ef55e6829cba678b08ae01463ad528b4913817a32de580e4"
+    },
+    "checks": [
+      {
+        "name": "bake",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-bake-batch86.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_bake"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_bake",
+        "binary_sha256": "14ae7bda292487563e308c269c9372c2b0bd5dc22f8b008119e0b003b5462e97",
+        "exit_code": 0,
+        "assertions": 15997,
+        "cases": 161,
+        "binary_sha256_after": "14ae7bda292487563e308c269c9372c2b0bd5dc22f8b008119e0b003b5462e97",
+        "binary_changed_during_test": false,
+        "log_sha256": "702c774d0d9fc55456736f5a2d80dd5c7eafbfd40cc4b9ba8763f1b181618bac"
+      },
+      {
+        "name": "physics",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-physics-batch86.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphphysics"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+        "binary_sha256": "2a2116ed2a1722fb7f74aa8f117544fb477faa21fc07d036b969d6e4243d556d",
+        "exit_code": 0,
+        "assertions": 715,
+        "cases": 43,
+        "binary_sha256_after": "2a2116ed2a1722fb7f74aa8f117544fb477faa21fc07d036b969d6e4243d556d",
+        "binary_changed_during_test": false,
+        "log_sha256": "c23a5fb52ba1f9f7200006200b8d27d5b4aad5d64304f368f6fd578da716e906"
+      },
+      {
+        "name": "runner",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-runner-batch86.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph_runner"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+        "binary_sha256": "be3a700cd5d8d6226bb0dca4e90509a2392ec90e5b4fe74063c15698c375ccd0",
+        "exit_code": 0,
+        "assertions": 296,
+        "cases": 29,
+        "binary_sha256_after": "be3a700cd5d8d6226bb0dca4e90509a2392ec90e5b4fe74063c15698c375ccd0",
+        "binary_changed_during_test": false,
+        "log_sha256": "3a490480d6cdac2bb2854e754298f754983a47f397191fe26ac4b830eba47420"
+      },
+      {
+        "name": "font",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-font-batch86.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphfont"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+        "binary_sha256": "6d662ed825d07e56571ea96f2267cf616352a8d40ddd832a30c10de3e0b8e648",
+        "exit_code": 0,
+        "assertions": 1845,
+        "cases": 43,
+        "binary_sha256_after": "6d662ed825d07e56571ea96f2267cf616352a8d40ddd832a30c10de3e0b8e648",
+        "binary_changed_during_test": false,
+        "log_sha256": "62b99ed9d6e368b651a6196610620b4f1344972c53a4788c132b182236261e2c"
+      },
+      {
+        "name": "export",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-export-batch86.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphexport"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+        "binary_sha256": "6f2633794cf31195021ad66dbca0d3c5f42c67b7ca926af2f1e1946d49a5c2f1",
+        "exit_code": 0,
+        "assertions": 3401,
+        "cases": 95,
+        "binary_sha256_after": "6f2633794cf31195021ad66dbca0d3c5f42c67b7ca926af2f1e1946d49a5c2f1",
+        "binary_changed_during_test": false,
+        "log_sha256": "2da37d4d16d4399d118772a79befdd36c96ca9d093dab4c1f98d2f0c7406cd9f"
+      },
+      {
+        "name": "render",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-render-batch86.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_render",
+          "[gpu][imagegraph],[source-camera-host-gpu],[transform-host-gpu],[composer-gpu],[camera-queue-replacement-gpu],[source-skybox-group-gpu],[sdf-host-gpu],[source_sdf],[sdf-capture],[particle3d],*Transform Image 3D*"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_render",
+        "binary_sha256": "e491bd8f46c446de20c8a18cc971dac18d7f45d9e1106af66c20ed64618ec2ee",
+        "exit_code": 0,
+        "assertions": 2006,
+        "cases": 33,
+        "binary_sha256_after": "e491bd8f46c446de20c8a18cc971dac18d7f45d9e1106af66c20ed64618ec2ee",
+        "binary_changed_during_test": false,
+        "log_sha256": "4d6a131e5a142d5aaf6ffb8410debe17e6ac60cd7e212c342df05ea2b53d73ea"
+      },
+      {
+        "name": "cli",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-cli-batch86.log",
+        "command": [
+          "ctest",
+          "--test-dir",
+          ".cache/build/release-tests",
+          "-R",
+          "^(imagegraph_cli_|assetc_cli_)",
+          "--output-on-failure",
+          "-j8"
+        ],
+        "exit_code": 0,
+        "ctest_cases": 16,
+        "log_sha256": "9162525f4a860bebedee26aec7837187f70f77f658ca678cc62bd96e69c0c8c4"
+      },
+      {
+        "name": "io",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch86.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraphio"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+        "binary_sha256": "94488ebcf8a56fdd8969e3efb810c0588043800810b7086259937cf051544fcc",
+        "exit_code": 0,
+        "assertions": 21282,
+        "cases": 433,
+        "binary_sha256_after": "94488ebcf8a56fdd8969e3efb810c0588043800810b7086259937cf051544fcc",
+        "binary_changed_during_test": false,
+        "log_sha256": "e1bf9818c16a1a91fd83ee615c9debb04bd0d26fba82aeb4995696ad3ce20a08"
+      },
+      {
+        "name": "core",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch86.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_imagegraph"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_imagegraph",
+        "binary_sha256": "27573292e7826a91e53f822834135443ad2eba8c8b0ff9eae870b368e6b06da2",
+        "exit_code": 0,
+        "assertions": 4415326,
+        "cases": 3806,
+        "binary_sha256_after": "27573292e7826a91e53f822834135443ad2eba8c8b0ff9eae870b368e6b06da2",
+        "binary_changed_during_test": false,
+        "log_sha256": "1b44d61983fa6052c166a6f2fe806c2e9b00ae4d1c85d723dfe92c7246f69e57"
+      },
+      {
+        "name": "assetc",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-assetc-batch86.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_assetc"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_assetc",
+        "binary_sha256": "8830e63276fca66cbf65e318c8c026ca79b3c6e361ef75a8a36e5abf08eba334",
+        "exit_code": 0,
+        "assertions": 563,
+        "cases": 49,
+        "binary_sha256_after": "8830e63276fca66cbf65e318c8c026ca79b3c6e361ef75a8a36e5abf08eba334",
+        "binary_changed_during_test": false,
+        "log_sha256": "1149eab9bc593a4be215b6c90a7598092ce8e46a96ef2e631c497331a4c719f9"
+      },
+      {
+        "name": "client",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-client-batch86.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_client",
+          "~[.],[argument_binding][gpu],[argument-transform-gpu]",
+          "--rng-seed",
+          "1403467049"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_client",
+        "binary_sha256": "efda6139e7d21aacdfb2b43a630dd52206f5cd688da03a0ff765ebefb8c546d7",
+        "exit_code": 0,
+        "assertions": 23853,
+        "cases": 359,
+        "binary_sha256_after": "efda6139e7d21aacdfb2b43a630dd52206f5cd688da03a0ff765ebefb8c546d7",
+        "binary_changed_during_test": false,
+        "log_sha256": "f299379dcabf06f6ab5b81b94b2ff60d6e348b6f4758a181f56194d83e7c8a87"
+      },
+      {
+        "name": "studio",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-studio-batch86.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_studio"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_studio",
+        "binary_sha256": "0db4c36325690a6c25feaf5f015bac3cda35e191a8c2820ecb6857d14b590c9c",
+        "exit_code": 0,
+        "assertions": 51329,
+        "cases": 1159,
+        "binary_sha256_after": "0db4c36325690a6c25feaf5f015bac3cda35e191a8c2820ecb6857d14b590c9c",
+        "binary_changed_during_test": false,
+        "log_sha256": "1df83f9391b3e6fe1c2799516f2bf0d957d210cc2c48e3949fbe2cc932acb450"
+      },
+      {
+        "name": "nodegraph",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-nodegraph-batch86.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_nodegraph"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_nodegraph",
+        "binary_sha256": "d19323ed3d7ea072195cd77ed603a1be05e93c5d66d01c834e74b463d4ff748d",
+        "exit_code": 0,
+        "assertions": 410,
+        "cases": 42,
+        "binary_sha256_after": "d19323ed3d7ea072195cd77ed603a1be05e93c5d66d01c834e74b463d4ff748d",
+        "binary_changed_during_test": false,
+        "log_sha256": "eca1e9d60c3f4ef613a5eece3aeec00882151ff863c822ce15cc83e469d9a1b5"
+      },
+      {
+        "name": "ui",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-ui-batch86.log",
+        "command": [
+          ".cache/build/release-tests/tests/test_ui"
+        ],
+        "binary": ".cache/build/release-tests/tests/test_ui",
+        "binary_sha256": "d2b210bc285d601dfcac501adbbc354cda74f2fdfc99474da51dc643d5760697",
+        "exit_code": 0,
+        "assertions": 704,
+        "cases": 40,
+        "binary_sha256_after": "d2b210bc285d601dfcac501adbbc354cda74f2fdfc99474da51dc643d5760697",
+        "binary_changed_during_test": false,
+        "log_sha256": "9ffc8450bad03e661c1ee4a40e9a00d18cf559ff07b2e69a0877d7eb8b9cdc78"
+      },
+      {
+        "name": "startup",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-startup-batch86.log",
+        "command": [
+          "ctest",
+          "--test-dir",
+          ".cache/build/release-tests",
+          "-R",
+          "^studio_composer_startup_arguments$",
+          "-V"
+        ],
+        "exit_code": 0,
+        "assertions": 5,
+        "cases": 1,
+        "log_sha256": "9d277fe232a30189e4c96fe517f3c901a8eb8b4ddf40e242467d2c518b0aff8c"
+      },
+      {
+        "name": "lint",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-lint-batch86.log",
+        "command": [
+          "ruff",
+          "check",
+          "scripts/pixel-composer/generate-catalogue.py",
+          "scripts/tests/pixel_composer_catalogue_metadata_test.py",
+          "scripts/pixel-composer/extract-source.py",
+          "scripts/tests/pixel_composer_extract_source_test.py",
+          "scripts/pixel-composer/source_behavior.py",
+          "scripts/tests/pixel_composer_source_behavior_test.py"
+        ],
+        "exit_code": 0,
+        "log_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+      },
+      {
+        "name": "architecture",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-architecture-batch86.log",
+        "command": [
+          "cmake",
+          "-DGRAPH=.cache/build/release-tests/target-graph.json",
+          "-DEXPECTED=mono.tools/architecture/expected_graph.json",
+          "-P",
+          "mono.tools/architecture/CheckTargetGraph.cmake"
+        ],
+        "exit_code": 0,
+        "log_sha256": "e2920b48a3c7c18b9bb66b525c591a2eb61a1986c17204060ce321e87ea6ff4f"
+      },
+      {
+        "name": "python",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-python-batch86.log",
+        "command": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-s",
+          "scripts/tests",
+          "-p",
+          "pixel_composer_*_test.py"
+        ],
+        "exit_code": 0,
+        "python_cases": 116,
+        "log_sha256": "4d71e8ef12fb74339fa3ccb24803014221cfb71d48703645b21410f9063b08a8"
+      },
+      {
+        "name": "format",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-format-batch86.log",
+        "command": [
+          "/usr/bin/clang-format-21",
+          "--dry-run",
+          "--Werror",
+          "mono.studio/src/ImageGraphCacheBackground.hpp",
+          "mono.studio/src/ImageGraphCacheBackground.cpp",
+          "mono.studio/tests/ImageGraphCacheBackground.cpp",
+          "mono.studio/src/ImageGraphCacheControls.hpp",
+          "mono.studio/tests/ImageGraphCacheControls.cpp",
+          "mono.studio/nodegraph/include/nodegraph/Editor.hpp",
+          "mono.studio/nodegraph/src/Editor.cpp",
+          "mono.studio/nodegraph/tests/Editor.cpp",
+          "mono.studio/include/studio/ImageGraph.hpp",
+          "mono.studio/src/ImageGraph.cpp",
+          "mono.studio/tests/ImageGraph.cpp",
+          "mono.studio/src/ImageGraphCacheEditObservation.cpp",
+          "mono.studio/src/ImageGraphCacheEditObservation.hpp",
+          "mono.studio/tests/ImageGraphCacheEditObservation.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp",
+          "mono.engine/imagegraph/src/CacheGroupReplay.cpp",
+          "mono.engine/imagegraph/tests/CacheGroupReplay.cpp",
+          "mono.engine/imagegraph/tests/FeedbackHost.cpp",
+          "mono.engine/imagegraphio/tests/FrameCacheProperties.cpp",
+          "mono.engine/imagegraphio/tests/SourceFrameCache.cpp",
+          "mono.studio/src/ImageComposer.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/DataReplay.hpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp",
+          "mono.engine/imagegraph/src/DataReplay.cpp",
+          "mono.engine/imagegraph/src/Document.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/FrameCacheReplay.hpp",
+          "mono.engine/imagegraph/src/FrameCacheReplay.cpp",
+          "mono.engine/imagegraph/src/SourceFrameCacheInputs.hpp",
+          "mono.engine/imagegraph/src/SourceFrameCacheLookup.hpp",
+          "mono.engine/imagegraph/src/NativeFrameCacheReceipt.hpp",
+          "mono.engine/imagegraph/src/NativeFrameCacheReceipt.cpp",
+          "mono.engine/imagegraph/src/NodeExecutors.hpp",
+          "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp",
+          "mono.engine/imagegraph/src/CacheResultsReplay.cpp",
+          "mono.engine/imagegraph/tests/FrameCacheReplay.cpp",
+          "mono.engine/imagegraph/tests/CacheResultsReplay.cpp",
+          "mono.engine/imagegraph/src/SourcePathShiftVisit.hpp",
+          "mono.engine/imagegraph/tests/DataReplay.cpp",
+          "mono.engine/imagegraph/tests/SourcePathShiftReplayIngress.cpp",
+          "mono.engine/imagegraph/tests/SourcePathSequentialNodes.cpp",
+          "mono.engine/imagegraph/tests/StatefulOutputs.cpp",
+          "mono.engine/ui/src/Interface.cpp",
+          "mono.engine/ui/tests/Interface.cpp",
+          "mono.engine/ui/include/engine/ui/Interface.hpp",
+          "mono.engine/imagegraph/src/TimelineOverrides.hpp",
+          "mono.engine/imagegraph/src/TimelineOverrides.cpp",
+          "mono.engine/imagegraph/tests/TimelineOverrides.cpp",
+          "mono.engine/imagegraph/src/SourcePathPayload.hpp",
+          "mono.engine/imagegraph/src/nodes/Path.hpp",
+          "mono.engine/imagegraph/tests/Catalogue.cpp",
+          "mono.engine/imagegraph/src/CacheGroupReplayClone.hpp",
+          "mono.engine/imagegraph/src/PendingGraph.hpp",
+          "mono.engine/imagegraph/src/PendingGraph.cpp",
+          "mono.engine/imagegraph/tests/PendingGraph.cpp",
+          "mono.engine/imagegraph/tests/SourcePatternGeneratorIntegration.cpp",
+          "mono.studio/tests/ImageGraphPatternGroups.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceHilbertNodes.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp",
+          "mono.engine/imagegraph/src/SourceModeTransition.cpp",
+          "mono.engine/imagegraph/src/GroupReplay.cpp",
+          "mono.engine/imagegraph/src/BuiltinRandomCaptureCodec.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/BuiltinRandomCaptureCodec.hpp",
+          "mono.engine/imagegraph/tests/BuiltinRandomCaptureCodec.cpp",
+          "mono.engine/imagegraph/tests/SourceSeparatedVec2.cpp",
+          "mono.engine/imagegraph/tests/SourceMirrorPathProjection.cpp",
+          "mono.engine/imagegraphio/src/PxcxImport.cpp",
+          "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+          "mono.engine/imagegraphio/tests/PxcxMirrorPathRatio.cpp",
+          "mono.engine/imagegraph/src/SourceSeparatedVec2.hpp",
+          "mono.engine/imagegraph/src/SourceSeparatedVec2.cpp",
+          "mono.engine/imagegraph/src/SourceAnimatorIdentity.hpp",
+          "mono.engine/imagegraph/src/SourceMirrorAnimator.hpp",
+          "mono.engine/imagegraphio/tests/PxcxSeparatedVec2.cpp",
+          "mono.engine/imagegraph/src/SourceGetterProjection.cpp",
+          "mono.engine/imagegraph/tests/SourceGetterProjection.cpp",
+          "mono.engine/imagegraph/src/SourceInputSelection.hpp",
+          "mono.engine/imagegraph/src/SourceInputEvaluation.hpp",
+          "mono.engine/imagegraph/src/PcxControls.cpp",
+          "mono.engine/imagegraph/tests/SourceInputEvaluation.cpp",
+          "mono.engine/imagegraph/tests/SourceInputMoves.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/GroupReplay.hpp",
+          "mono.engine/imagegraph/src/PixelBuilderGroups.cpp",
+          "mono.engine/imagegraph/tests/GroupReplay.cpp",
+          "mono.engine/imagegraph/src/SourceAxisStorage.hpp",
+          "mono.engine/imagegraph/src/SourceVec2Defaults.hpp",
+          "mono.engine/imagegraph/src/SourceVec2Defaults.cpp",
+          "mono.engine/imagegraph/tests/SourceVec2Defaults.cpp",
+          "mono.engine/imagegraph/src/GroupClonePayload.cpp",
+          "mono.engine/imagegraph/src/SourceFont.cpp",
+          "mono.engine/imagegraph/src/SourceBuiltinRandom.cpp",
+          "mono.studio/src/SourceDynamicGroups.cpp",
+          "mono.studio/tests/ImageGraphSourceInputs.cpp",
+          "mono.engine/imagegraph/tests/SourceAxisInitialization.cpp",
+          "mono.engine/imagegraph/src/Catalogue.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp",
+          "mono.studio/src/ImageGraphGroupHost.hpp",
+          "mono.studio/tests/ImageGraphGroupHost.cpp",
+          "mono.engine/imagegraph/tests/SourceAxisReadRequests.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/SourceAxisTransition.hpp",
+          "mono.engine/imagegraph/src/SourceAxisTransition.cpp",
+          "mono.engine/imagegraph/tests/SourceAxisTransition.cpp",
+          "mono.studio/src/ImageGraphAxisControls.hpp",
+          "mono.studio/tests/ImageGraphAxisControls.cpp",
+          "mono.engine/imagegraph/src/GroupInstanceRecapture.cpp",
+          "mono.engine/imagegraph/src/SourceAnimatorPersistence.cpp",
+          "mono.engine/imagegraph/src/SourceAnimatorPersistence.hpp",
+          "mono.engine/imagegraphio/tests/SourceArtworkEdit.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/SourceKeyframeTransition.hpp",
+          "mono.engine/imagegraph/src/SourceKeyframeTransition.cpp",
+          "mono.engine/imagegraph/tests/SourceKeyframeTransition.cpp",
+          "mono.studio/src/ImageGraph.cpp",
+          "mono.studio/src/TimelineDopesheet.hpp",
+          "mono.studio/tests/TimelineSourceAliases.cpp",
+          "mono.studio/src/ImageGraphCapturedKeyEdit.hpp",
+          "mono.studio/src/TimelineEaseEditor.hpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/SourceTrackTransition.hpp",
+          "mono.engine/imagegraph/src/SourceTrackTransition.cpp",
+          "mono.engine/imagegraph/tests/SourceTrackTransition.cpp",
+          "mono.studio/src/TimelineKeyDelete.hpp",
+          "mono.studio/tests/TimelineKeyDelete.cpp",
+          "mono.studio/include/studio/ImageGraph.hpp",
+          "mono.studio/src/AnimationTrackPolicyEditor.hpp",
+          "mono.studio/src/ImageGraphSourceKeyEdit.hpp",
+          "mono.studio/src/ImageGraphKeyPinProjection.hpp",
+          "mono.studio/src/ImageComposer.cpp",
+          "mono.studio/src/KeyframeKindEditor.hpp",
+          "mono.studio/src/TimelineKeyEditor.hpp",
+          "mono.studio/tests/ImageGraphSourceKeyEdit.cpp",
+          "mono.studio/src/TimelineKeyActions.hpp",
+          "mono.studio/src/TimelineScalarKeys.hpp",
+          "mono.studio/tests/TimelineScalarKeys.cpp",
+          "mono.studio/tests/TimelineKeyEditor.cpp",
+          "mono.studio/tests/TimelineScalarDopesheet.cpp",
+          "mono.studio/tests/ComposerWorkflow.cpp",
+          "mono.studio/src/ImageGraphTimelineRead.hpp",
+          "mono.studio/tests/ImageGraphTimelineRead.cpp",
+          "mono.engine/imagegraph/src/GroupReplayInternal.hpp",
+          "mono.studio/tests/ImageGraph.cpp",
+          "mono.studio/tests/TimelineDopesheetActions.cpp",
+          "mono.studio/src/TimelineScalarKeyControls.hpp",
+          "mono.studio/src/KeyframeSourceDriverControls.hpp",
+          "mono.studio/tests/TimelineEaseEditor.cpp",
+          "mono.engine/imagegraphio/tests/PxcxSeparatedVec2.cpp",
+          "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+          "mono.studio/src/ImageGraphFilePublish.hpp",
+          "mono.studio/tests/ImageGraphFilePublish.cpp",
+          "mono.studio/src/PxcxSave.cpp",
+          "mono.engine/imagegraphio/include/engine/imagegraphio/PxcxAppend.hpp",
+          "mono.engine/imagegraphio/src/PxcxAppend.cpp",
+          "mono.engine/imagegraphio/tests/PxcxAppend.cpp",
+          "mono.studio/tests/ImageGraphSourceHistory.cpp",
+          "mono.studio/src/ImageGraphHistorySource.hpp",
+          "mono.studio/src/ImageGraphHistoryCanvas.hpp",
+          "mono.studio/src/ImageGraphAppendGroups.hpp",
+          "mono.studio/tests/ImageGraphAppendGroups.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/GroupReplay.hpp",
+          "mono.engine/imagegraph/src/Document.cpp",
+          "mono.engine/imagegraph/src/GroupCallbackDocument.cpp",
+          "mono.engine/imagegraph/src/GroupCallbackOpaque.hpp",
+          "mono.engine/imagegraph/tests/GroupCallbackDocument.cpp",
+          "mono.studio/src/ImageGraphAppendGroups.hpp",
+          "mono.studio/tests/ImageGraphAppendGroups.cpp",
+          "mono.engine/imagegraphio/include/engine/imagegraphio/PxcxAppend.hpp",
+          "mono.engine/imagegraphio/src/PxcxAppend.cpp",
+          "mono.engine/imagegraphio/tests/PxcxAppend.cpp",
+          "mono.studio/nodegraph/include/nodegraph/Graph.hpp",
+          "mono.studio/nodegraph/src/Graph.cpp",
+          "mono.studio/nodegraph/src/Layout.cpp",
+          "mono.studio/nodegraph/src/Serialize.cpp",
+          "mono.studio/nodegraph/src/Editor.cpp",
+          "mono.studio/nodegraph/tests/Graph.cpp",
+          "mono.studio/nodegraph/tests/Layout.cpp",
+          "mono.studio/nodegraph/tests/Serialize.cpp",
+          "mono.studio/src/ImageGraph.cpp",
+          "mono.studio/include/studio/ImageGraph.hpp",
+          "mono.studio/src/ImageGraphHistoryCanvas.hpp",
+          "mono.studio/tests/ImageGraph.cpp",
+          "mono.studio/tests/ImageGraphSourceHistory.cpp",
+          "mono.studio/src/ImageComposer.cpp",
+          "mono.studio/src/ImageGraphAppendProject.hpp",
+          "mono.engine/imagegraphio/tests/PxcxEdit.cpp",
+          "mono.studio/src/ImageGraphFileSetPublish.hpp",
+          "mono.studio/include/studio/PxcxSave.hpp",
+          "mono.studio/src/PxcxSave.cpp",
+          "mono.studio/src/ImageComposer.cpp",
+          "mono.studio/tests/PxcxSave.cpp",
+          "mono.studio/tests/ImageGraphFilePublish.cpp",
+          "mono.engine/imagegraphio/src/OrdinarySourceGroups.hpp",
+          "mono.engine/imagegraphio/tests/PxcxGroups.cpp",
+          "mono.engine/imagegraphexport/include/engine/imagegraphexport/PxcxCollectionFiles.hpp",
+          "mono.engine/imagegraphexport/src/PxcxCollectionFiles.cpp",
+          "mono.engine/imagegraphexport/tests/PxcxCollectionFiles.cpp",
+          "mono.studio/tests/ImageGraphFilePublish.cpp",
+          "mono.engine/imagegraphio/tests/PxcxCollectionLoad.cpp",
+          "mono.engine/imagegraphexport/include/engine/imagegraphexport/PxcxCollectionLoad.hpp",
+          "mono.engine/imagegraphexport/src/PxcxCollectionLoad.cpp",
+          "mono.engine/imagegraphexport/src/PxcxCodecHeap.hpp",
+          "mono.engine/imagegraphexport/tests/PxcxCollectionLoad.cpp",
+          "mono.engine/imagegraph/fuzz/FrameCache.cpp",
+          "mono.engine/imagegraph/src/HostCapture.cpp",
+          "mono.engine/imagegraph/src/nodes/Host.cpp",
+          "mono.engine/imagegraph/tests/SourceSdfHost.cpp",
+          "mono.engine/render/include/engine/render/SourceSdf.hpp",
+          "mono.engine/render/include/engine/render/Renderer.hpp",
+          "mono.engine/render/src/SourceSdf.hpp",
+          "mono.engine/render/src/SourceSdf.cpp",
+          "mono.engine/render/src/SourceSdfRequest.cpp",
+          "mono.engine/render/src/SourceSdfCapture.cpp",
+          "mono.engine/render/src/RendererComposer.cpp",
+          "mono.engine/render/src/RendererState.hpp",
+          "mono.engine/render/src/RenderTargets.cpp",
+          "mono.engine/render/src/ImageGraphTransform3DResident.cpp",
+          "mono.engine/render/tests/SourceSdfCapture.cpp",
+          "mono.engine/render/tests/SourceSdfHostGpu.cpp",
+          "mono.client/src/ImageGraphComposerAdapter.cpp",
+          "mono.client/src/ImageGraphSdfAdapter.cpp",
+          "mono.client/src/ImageGraphRuntime.cpp",
+          "mono.client/tests/SourceSdfGraphHost.cpp",
+          "mono.studio/src/ImageGraphComposerHost.hpp",
+          "mono.studio/src/ImageGraphHost.hpp",
+          "mono.studio/tests/SourceSdfGraphHost.cpp",
+          "mono.engine/imagegraph/src/SourceArgumentHost.cpp",
+          "mono.engine/imagegraph/tests/SourceArgumentNodes.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/SourceFont.hpp",
+          "mono.engine/imagegraph/src/Document.cpp",
+          "mono.engine/imagegraph/src/NodeExecutors.hpp",
+          "mono.engine/imagegraph/src/SourceFontObservationContext.hpp",
+          "mono.engine/imagegraphfont/include/engine/imagegraphfont/GraphFontHost.hpp",
+          "mono.engine/imagegraphfont/include/engine/imagegraphfont/GraphFontInputs.hpp",
+          "mono.engine/imagegraphfont/src/GraphFontHost.cpp",
+          "mono.engine/imagegraphfont/src/GraphFontInputs.cpp",
+          "mono.engine/imagegraphfont/tests/GraphFontHost.cpp",
+          "mono.engine/imagegraphfont/tests/GraphFontInputs.cpp",
+          "mono.engine/imagegraphfont/tests/WrappedFontBatch.cpp",
+          "mono.engine/imagegraphfont/tests/WrappedFontHost.cpp",
+          "mono.engine/imagegraphfont/tests/fixtures/FontHostBoundary.hpp",
+          "mono.studio/tests/ImageGraphExportIntent.cpp",
+          "mono.engine/imagegraphfont/tests/FontBoundaryWorkloads.cpp",
+          "mono.engine/imagegraphexport/tests/GraphMeshHost.cpp",
+          "mono.engine/imagegraphexport/src/GraphMeshHost.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceAreaWarp.cpp",
+          "mono.engine/imagegraph/tests/SourceAreaWarp.cpp",
+          "mono.engine/imagegraph/src/nodes/Families.hpp",
+          "mono.engine/imagegraph/src/NodeExecutors.cpp",
+          "mono.engine/imagegraph/src/ProcessorBatch.cpp",
+          "mono.engine/imagegraph/tests/SourceAreaWarpAtlas.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceBlendDepth.cpp",
+          "mono.engine/imagegraph/tests/SourceBlendDepth.cpp",
+          "mono.engine/imagegraph/src/nodes/Sampler.hpp",
+          "mono.engine/imagegraph/src/nodes/SourceRefractClean.hpp",
+          "mono.engine/imagegraph/tests/SourceChoiceAliases.cpp",
+          "mono.engine/imagegraph/src/SourceCommonAdmission.inc",
+          "mono.engine/imagegraph/src/nodes/SourceBend.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceBend.hpp",
+          "mono.engine/imagegraph/tests/SourceBend.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePixelMath.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePixelMath.hpp",
+          "mono.engine/imagegraph/tests/SourcePixelMath.cpp",
+          "mono.studio/nodegraph/include/nodegraph/Types.hpp",
+          "mono.studio/nodegraph/src/Types.cpp",
+          "mono.studio/nodegraph/src/Serialize.cpp",
+          "mono.studio/nodegraph/src/Graph.cpp",
+          "mono.studio/nodegraph/tests/Graph.cpp",
+          "mono.studio/nodegraph/tests/Serialize.cpp",
+          "mono.engine/imagegraph/include/engine/imagegraph/NoiseField.hpp",
+          "mono.engine/imagegraph/src/NoiseField.cpp",
+          "mono.engine/imagegraph/src/ValuePayload.hpp",
+          "mono.engine/imagegraph/src/ValueNodeSchemas.hpp",
+          "mono.engine/imagegraph/src/ValueNodeEval.hpp",
+          "mono.engine/imagegraph/tests/NoiseField.cpp",
+          "mono.studio/src/ImageGraphPorts.hpp",
+          "mono.studio/tests/ImageGraphNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceGlow.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceGlow.hpp",
+          "mono.engine/imagegraph/tests/SourceGlow.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePolar.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePolar.hpp",
+          "mono.engine/imagegraph/tests/SourcePolar.cpp",
+          "mono.engine/imagegraph/src/SourceMappedInputs.hpp",
+          "mono.engine/imagegraph/src/nodes/SourceTileTransform.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceTileTransform.hpp",
+          "mono.engine/imagegraph/tests/SourceTileTransform.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceDisplace.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceDisplace.hpp",
+          "mono.engine/imagegraph/tests/SourceDisplace.cpp",
+          "mono.engine/imagegraph/tests/SourceDisplaceBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceJpeg.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceJpeg.hpp",
+          "mono.engine/imagegraph/tests/SourceJpeg.cpp",
+          "mono.engine/imagegraph/tests/SourceJpegBatch.cpp",
+          "mono.engine/imagegraph/tests/NoiseModes.cpp",
+          "mono.studio/src/ImageGraphNoiseControls.hpp",
+          "mono.studio/tests/ImageGraphNoiseControls.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePixelSort.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePixelSort.hpp",
+          "mono.engine/imagegraph/tests/SourcePixelSort.cpp",
+          "mono.engine/imagegraph/tests/SourcePixelSortBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceNoise.hpp",
+          "mono.engine/imagegraph/tests/SourceNoise.cpp",
+          "mono.engine/imagegraph/tests/SourceNoiseBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceCaustic.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceCaustic.hpp",
+          "mono.engine/imagegraph/tests/SourceCaustic.cpp",
+          "mono.engine/imagegraph/tests/SourceCausticBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceCellular.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceCellular.hpp",
+          "mono.engine/imagegraph/tests/SourceCellular.cpp",
+          "mono.engine/imagegraph/tests/SourceCellularBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePerlin.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePerlin.hpp",
+          "mono.engine/imagegraph/tests/SourcePerlin.cpp",
+          "mono.engine/imagegraph/tests/SourcePerlinBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceVoronoiExtra.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceVoronoiExtra.hpp",
+          "mono.engine/imagegraph/tests/SourceVoronoiExtra.cpp",
+          "mono.engine/imagegraph/tests/SourceVoronoiExtraBatch.cpp",
+          "mono.engine/imagegraphexport/tests/GraphCommandHost.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceShardNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceShardNoise.hpp",
+          "mono.engine/imagegraph/tests/SourceShardNoise.cpp",
+          "mono.engine/imagegraph/tests/SourceShardNoiseBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceStrandNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceStrandNoise.hpp",
+          "mono.engine/imagegraph/tests/SourceStrandNoise.cpp",
+          "mono.engine/imagegraph/tests/SourceStrandNoiseBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceWeave.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceWeave.hpp",
+          "mono.engine/imagegraph/tests/SourceWeave.cpp",
+          "mono.engine/imagegraph/tests/SourceWeaveBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePytagoreanTile.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePytagoreanTile.hpp",
+          "mono.engine/imagegraph/src/nodes/SourceShaderGradient.hpp",
+          "mono.engine/imagegraph/tests/SourcePytagoreanTile.cpp",
+          "mono.engine/imagegraph/tests/SourcePytagoreanTileBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePerlinExtra.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePerlinExtra.hpp",
+          "mono.engine/imagegraph/tests/SourcePerlinExtra.cpp",
+          "mono.engine/imagegraph/tests/SourcePerlinExtraBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceNoiseCube.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceNoiseCube.hpp",
+          "mono.engine/imagegraph/tests/SourcePerlinCube.cpp",
+          "mono.engine/imagegraph/tests/SourcePerlinCubeBatch.cpp",
+          "mono.engine/imagegraph/tests/SourceCellularCube.cpp",
+          "mono.engine/imagegraph/tests/SourceCellularCubeBatch.cpp",
+          "mono.engine/imagegraph/tests/SourceSimplexCube.cpp",
+          "mono.engine/imagegraph/tests/SourceSimplexCubeBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceWaveletNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceWaveletNoise.hpp",
+          "mono.engine/imagegraph/tests/SourceWaveletNoise.cpp",
+          "mono.engine/imagegraph/tests/SourceWaveletNoiseBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceScratchNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceScratchNoise.hpp",
+          "mono.engine/imagegraph/tests/SourceScratchNoise.cpp",
+          "mono.engine/imagegraph/tests/SourceScratchNoiseBatch.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceFoldNoise.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceFoldNoise.hpp",
+          "mono.engine/imagegraph/tests/SourceFoldNoise.cpp",
+          "mono.engine/imagegraph/tests/SourceFoldNoiseBatch.cpp",
+          "mono.client/tests/ImageGraphArgumentBindings.cpp",
+          "mono.client/tests/ImageGraphRuntime.cpp",
+          "mono.engine/bake/include/engine/bake/SpriteCache.hpp",
+          "mono.engine/bake/src/SpriteCache.cpp",
+          "mono.engine/bake/tests/SpriteCache.cpp",
+          "mono.engine/imagegraph/src/SourcePathWeight.cpp",
+          "mono.engine/imagegraph/src/nodes/Source2DNodes.cpp",
+          "mono.engine/imagegraph/src/nodes/Values.cpp",
+          "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphExport.hpp",
+          "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphFileHost.hpp",
+          "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphImageCache.hpp",
+          "mono.engine/imagegraphexport/src/GraphAuthoredExport.cpp",
+          "mono.engine/imagegraphexport/src/GraphExport.cpp",
+          "mono.engine/imagegraphexport/src/GraphExportSession.cpp",
+          "mono.engine/imagegraphexport/src/GraphImageCacheHost.cpp",
+          "mono.engine/imagegraphexport/src/GraphRasterHost.hpp",
+          "mono.engine/imagegraphexport/src/Runner.cpp",
+          "mono.engine/imagegraphexport/tests/GraphExportSession.cpp",
+          "mono.engine/imagegraphexport/tests/GraphImageCache.cpp",
+          "mono.engine/imagegraphphysics/tests/CacheResultsClear.cpp",
+          "mono.engine/imagegraphphysics/tests/CacheResultsTransport.cpp",
+          "mono.engine/render/src/ImageGraphTransform3DResident.hpp",
+          "mono.engine/render/tests/ComposerSurfaceGpu.cpp",
+          "mono.studio/src/ImageGraphCacheClearAction.hpp",
+          "mono.studio/src/ImageGraphImageActions.hpp",
+          "mono.studio/tests/ImageComposerArguments.cpp",
+          "mono.studio/tests/ImageGraphCacheClearAction.cpp",
+          "mono.studio/tests/ImageGraphImageEdit.cpp",
+          "mono.studio/tests/UiAuthoring.cpp",
+          "mono.tools/assetc/app/main.cpp",
+          "mono.tools/assetc/tests/GraphImageCacheCli.cpp",
+          "mono.engine/imagegraph/src/SourcePathBridgePayload.hpp",
+          "mono.engine/imagegraph/src/nodes/SourceBridgePathNodes.cpp",
+          "mono.engine/imagegraph/src/nodes/SourcePointSdfNodes.cpp",
+          "mono.engine/imagegraph/tests/SourceBridgePath.cpp",
+          "mono.engine/imagegraph/tests/SourceBridgePathWorkloads.cpp",
+          "mono.engine/imagegraph/tests/SourcePointSdf.cpp",
+          "mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp",
+          "mono.engine/imagegraphexport/src/GraphFrameCacheCook.cpp",
+          "mono.engine/imagegraphfont/benchmarks/WrappedText.cpp",
+          "mono.engine/imagegraphfont/tests/WrappedTextWorkloads.cpp",
+          "mono.engine/imagegraphfont/tests/fixtures/WrappedTextBoundary.hpp",
+          "mono.engine/imagegraphio/include/engine/imagegraphio/SourceFrameCache.hpp",
+          "mono.engine/imagegraphio/src/SourceFrameCache.cpp",
+          "mono.engine/imagegraphio/tests/PxcxBridgePath.cpp",
+          "mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+          "mono.engine/render/tests/SourceSkyboxGroupGpu.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceTileRandom.cpp",
+          "mono.engine/imagegraph/src/nodes/SourceTileRandom.hpp",
+          "mono.engine/imagegraph/src/nodes/SourceTileTransform.cpp",
+          "mono.engine/imagegraph/src/ProcessorBatch.cpp",
+          "mono.engine/imagegraph/src/Document.cpp",
+          "mono.engine/imagegraph/tests/SourceTileRandom.cpp",
+          "mono.engine/imagegraph/tests/SourceTileRandomWorkloads.cpp",
+          "mono.engine/imagegraphio/tests/PxcxTileRandom.cpp"
+        ],
+        "exit_code": 0,
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "diff",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-diff-batch86.log",
+        "command": [
+          "git",
+          "diff",
+          "--check"
+        ],
+        "exit_code": 0,
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "builds": [
+      {
+        "preset": "release-tests",
+        "exit_code": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch86.log",
+        "sha256": "1e40b2e0cf0a6ec84f67ef4b6c2e2987b9fca39fdb3b968565eb50751c6b9cae",
+        "compiler_warnings": 3
+      },
+      {
+        "preset": "profile",
+        "exit_code": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch86.log",
+        "sha256": "7e6df2839c8b79d05d2d60ee3ea5be3d2cec478a96dc704a0b123e78cd8fa166",
+        "compiler_warnings": 1
+      }
+    ],
+    "limitations": [
+      "Live Studio verification was not run.",
+      "Licensed matched source-renderer parity remains open.",
+      "Source global builtin RNG state is not published by native captures; inter-node RNG parity remains unknown.",
+      "Source-undefined path inputs and unsupported PXC authored path objects are explicitly refused.",
+      "No performance speedup is claimed."
+    ],
+    "cpu_profile_validation": {
+      "variants": 26,
+      "status": "passed",
+      "preset": "profile",
+      "backend": "cpu",
+      "binary_sha256": "c8aff07ede10d6c37c8127c7f75fd6726a0ef340fcb0fb19037d1915b79ab731",
+      "validated_calls": 338,
+      "validated_spans": 50492,
+      "raw_timings_written": false,
+      "speedup_claimed": false
+    }
+  },
+  "failed_build_attempts": {
+    "builds": [
+      {
+        "preset": "release-tests",
+        "exit_code": 1,
+        "errors": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/nodes/SourceBridgePathNodes.cpp:83:70: error: no matching function for call to \u2018GetFrameTime(const engine::imagegraph::DataReplayEntry&)\u2019",
+          "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/ProcessorBatch.cpp:966:71: error: \u2018AdmitSourcePointSdf\u2019 was not declared in this scope; did you mean \u2018AdmitSourceNoise\u2019?"
+        ],
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch81.log"
+      },
+      {
+        "preset": "profile",
+        "exit_code": 1,
+        "errors": [
+          "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/nodes/SourceBridgePathNodes.cpp:83:70: error: no matching function for call to \u2018GetFrameTime(const engine::imagegraph::DataReplayEntry&)\u2019",
+          "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/ProcessorBatch.cpp:966:71: error: \u2018AdmitSourcePointSdf\u2019 was not declared in this scope; did you mean \u2018AdmitSourceNoise\u2019?"
+        ],
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch81.log"
+      }
+    ],
+    "runtime_checks": "not run: new binaries could not link",
+    "next": "repair both compile issues in one pass"
+  },
+  "failed_runtime_attempts": [
+    {
+      "failed_checks": [
+        {
+          "name": "io",
+          "exit_code": 42,
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch82.log",
+          "sha256": "5a74309cada9d48a54946142e1baecddab4c2849f55d843ffc94d13634ea3a1c",
+          "cases": [
+            {
+              "case": "PXC Bridge absent dynamic paths retain empty constructor slots",
+              "assertions": [
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp",
+                  "source_line": 336,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp:336: FAILED:\n  CHECK( actual[1] == expected[1] )\nwith expansion:\n  {?} == {?}"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp",
+                  "source_line": 337,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp:337: FAILED:\n  CHECK( actual[2] == expected[2] )\nwith expansion:\n  {?} == {?}"
+                }
+              ]
+            },
+            {
+              "case": "PXC Bridge grouped dynamic paths keep source order when links change",
+              "assertions": [
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp",
+                  "source_line": 156,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp:156: FAILED:\n  REQUIRE( saved )\nwith expansion:\n  false\nwith message:\n  PXC authored dynamic values exceed their payload limit"
+                }
+              ]
+            },
+            {
+              "case": "PXC Bridge dynamic path bypass survives native and source graph saves",
+              "assertions": [
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp",
+                  "source_line": 156,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp:156: FAILED:\n  REQUIRE( saved )\nwith expansion:\n  false\nwith message:\n  PXC authored dynamic values exceed their payload limit\n\nORIGINAL_SINK status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_EXPLICIT_REQUEST status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_DEFAULT_OVERLOAD status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nINVERT_DIAGNOSTIC_BEGIN saved-boundary status=0 message=\ninclude_alpha variant=0 bool=0\nchannel variant=1 integer=15\nmix variant=2 scalar=1\ninvert_mask variant=0 bool=0\nmask_feather variant=2 scalar=0\nEFFECTIVE_LINK filter:image -> output:value\nEFFECTIVE_LINK output:value -> sink:surface_in\nEFFECTIVE_LINK input:value -> filter:image\nEFFECTIVE_LINK root:image -> input:parent_value\nORDER root\nORDER input\nORDER filter\nORDER output\nORDER sink\nDIRECT_FILTER status=0 message= channel0"
+                }
+              ]
+            },
+            {
+              "case": "PXC Bridge saves seven controls and ordered dynamic paths with downstream fanout",
+              "assertions": [
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp",
+                  "source_line": 141,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp:141: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  '\\r' == 0\nwith messages:\n\n\n  Source builtin RNG draw observations are unavailable; source seed stream\n  remains unverified"
+                }
+              ]
+            },
+            {
+              "case": "PXC Point SDF physical controls edit and reopen in every surface format",
+              "assertions": [
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 2\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 284,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:284: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 2\n  { nested assertion failed }"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 2\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 295,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:295: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 2\n  { nested assertion failed }"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 3\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 284,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:284: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 3\n  { nested assertion failed }"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 3\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 295,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:295: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 3\n  { nested assertion failed }"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 4\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 284,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:284: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 4\n  { nested assertion failed }"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 4\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 295,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:295: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 4\n  { nested assertion failed }"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 5\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 284,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:284: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 5\n  { nested assertion failed }"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 5\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 295,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:295: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 5\n  { nested assertion failed }"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 6\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 284,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:284: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 6\n  { nested assertion failed }"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 6\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 295,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:295: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 6\n  { nested assertion failed }"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 7\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 284,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:284: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 7\n  { nested assertion failed }"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 7\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 295,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:295: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 7\n  { nested assertion failed }"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 8\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 284,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:284: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 8\n  { nested assertion failed }"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 8\n  structured value needs imagegraph v3"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 295,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:295: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 8\n  { nested assertion failed }\n\nORIGINAL_SINK status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_EXPLICIT_REQUEST status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_DEFAULT_OVERLOAD status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nINVERT_DIAGNOSTIC_BEGIN inherited-depth status=0 message=\ninclude_alpha variant=0 bool=0\nchannel variant=1 integer=15\nmix variant=2 scalar=1\ninvert_mask variant=0 bool=0\nmask_feather variant=2 scalar=0\nEFFECTIVE_LINK filter:image -> output:value\nEFFECTIVE_LINK output:value -> sink:surface_in\nEFFECTIVE_LINK input:value -> filter:image\nEFFECTIVE_LINK root:image -> input:parent_value\nORDER root\nORDER input\nORDER filter\nORDE"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "core",
+          "exit_code": 42,
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch82.log",
+          "sha256": "4ccfca2bbe48247def9a000b6e82d854a1eeca99ca5501f0cd09f7bcf57671a3",
+          "cases": [
+            {
+              "case": "Point SDF common callback publishes and retains output without render readiness",
+              "assertions": [
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp",
+                  "source_line": 56,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp:56: FAILED:\n  REQUIRE( Compile(d, p, diag) == Status::Ok )\nwith expansion:\n  7 == 0"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp",
+                  "source_line": 62,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp:62: FAILED:\n  REQUIRE( InitializeNativeSourceCommonRuntime(d, Checked(d), {}, SourceNodeInitialState::Loaded, s, diag) == Status::Ok )\ndue to unexpected exception with message:\n  { nested assertion failed }"
+                }
+              ]
+            },
+            {
+              "case": "Bridge dense line grid preserves source metadata and its independently derived sample hash",
+              "assertions": [
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceBridgePathWorkloads.cpp",
+                  "source_line": 102,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceBridgePathWorkloads.cpp:102: FAILED:\n  CHECK( budget.Used() > 0 )\nwith expansion:\n  0 > 0\nwith message:"
+                }
+              ]
+            },
+            {
+              "case": "Point SDF fresh empty common callback refuses atomically",
+              "assertions": [
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp",
+                  "source_line": 56,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp:56: FAILED:\n  REQUIRE( Compile(d, p, diag) == Status::Ok )\nwith expansion:\n  7 == 0"
+                },
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp",
+                  "source_line": 62,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp:62: FAILED:\n  REQUIRE( InitializeNativeSourceCommonRuntime(d, Checked(d), {}, SourceNodeInitialState::Loaded, s, diag) == Status::Ok )\ndue to unexpected exception with message:\n  { nested assertion failed }"
+                }
+              ]
+            },
+            {
+              "case": "Bridge future subframe replay is refused even when a large tick loses fractional double precision",
+              "assertions": [
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceBridgePath.cpp",
+                  "source_line": 88,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceBridgePath.cpp:88: FAILED:\n  CHECK( status == expected )\nwith expansion:\n  3 == 8\nwith message:\n  evaluation tick exceeds the fixed timeline limit :tick"
+                }
+              ]
+            },
+            {
+              "case": "Point SDF processor modes preserve point lists as one input and stage all rows",
+              "assertions": [
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp",
+                  "source_line": 232,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp:232: FAILED:\n  REQUIRE( Compile(d, plan, diag) == Status::Ok )\nwith expansion:\n  7 == 0"
+                }
+              ]
+            },
+            {
+              "case": "Point SDF source rows pad missing coordinates and ignore extras",
+              "assertions": [
+                {
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp",
+                  "source_line": 98,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp:98: FAILED:\n  REQUIRE( general.Ok )\nwith expansion:\n  false\n\n===============================================================================\ntest cases:    3805 |    3799 passed | 6 failed\nassertions: 4415233 | 4415225 passed | 8 failed"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "optimized_check": "Bridge dense fixture incorrectly requires workspace allocation; Point SDF tag filter needs its actual test tag",
+      "profiles": "all26 validators pass; no timing output saved"
+    },
+    {
+      "batch": 85,
+      "manifest": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch85-results.json",
+      "known_listener_baseline_cases": 21,
+      "failed_checks": [
+        {
+          "name": "io",
+          "exit_code": 42,
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch85.log",
+          "sha256": "ae7c56740804d0788f1e907fe813ba584ee3a15bb5b1d75ac80bbb7b9e56bb28",
+          "cases": [
+            {
+              "case": "PXC Bridge appends an absent path slot without creating a path object",
+              "assertions": [
+                {
+                  "log_line": 13,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp",
+                  "source_line": 172,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp:172: FAILED:\n  REQUIRE( saved )\nwith expansion:\n  false\nwith message:\n  PXC source inverse would change static source controls\n\n"
+                }
+              ]
+            },
+            {
+              "case": "PXC Point SDF physical controls edit and reopen in every surface format",
+              "assertions": [
+                {
+                  "log_line": 250,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 2\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 258,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 291,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 2\n  { nested assertion failed }"
+                },
+                {
+                  "log_line": 264,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 2\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 272,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 302,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 2\n  { nested assertion failed }"
+                },
+                {
+                  "log_line": 278,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 3\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 286,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 291,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 3\n  { nested assertion failed }"
+                },
+                {
+                  "log_line": 292,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 3\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 300,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 302,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 3\n  { nested assertion failed }"
+                },
+                {
+                  "log_line": 306,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 4\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 314,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 291,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 4\n  { nested assertion failed }"
+                },
+                {
+                  "log_line": 320,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 4\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 328,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 302,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 4\n  { nested assertion failed }"
+                },
+                {
+                  "log_line": 334,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 5\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 342,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 291,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 5\n  { nested assertion failed }"
+                },
+                {
+                  "log_line": 348,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 5\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 356,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 302,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 5\n  { nested assertion failed }"
+                },
+                {
+                  "log_line": 362,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 6\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 370,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 291,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 6\n  { nested assertion failed }"
+                },
+                {
+                  "log_line": 376,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 6\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 384,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 302,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 6\n  { nested assertion failed }"
+                },
+                {
+                  "log_line": 390,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 7\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 398,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 291,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 7\n  { nested assertion failed }"
+                },
+                {
+                  "log_line": 404,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 7\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 412,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 302,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 7\n  { nested assertion failed }"
+                },
+                {
+                  "log_line": 418,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 8\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 426,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 291,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 8\n  { nested assertion failed }"
+                },
+                {
+                  "log_line": 432,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 152,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 8\n  3D transform value needs imagegraph v6"
+                },
+                {
+                  "log_line": 440,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+                  "source_line": 302,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 8\n  { nested assertion failed }\n\n===============================================================================\ntest cases:   433 |   431 passed |  2 failed\nassertions: 21236 | 21207 passed | 29 failed"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "core",
+          "exit_code": 42,
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch85.log",
+          "sha256": "0fa7fbc3b0d6845e56a10aae8498ada4c8fc40a88160c23d162218c70c9b859f",
+          "cases": [
+            {
+              "case": "Bridge future subframe replay is refused when a real timestamp loses tiny fractions",
+              "assertions": [
+                {
+                  "log_line": 14,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceBridgePath.cpp",
+                  "source_line": 503,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceBridgePath.cpp:503: FAILED:\n  REQUIRE( FrameTimeToReal({TICK, EARLIER, false}) == FrameTimeToReal({TICK, LATER, false}) )\nwith expansion:\n  32 == 32"
+                }
+              ]
+            },
+            {
+              "case": "Point SDF processor modes preserve point lists as one input and stage all rows",
+              "assertions": [
+                {
+                  "log_line": 25,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp",
+                  "source_line": 245,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp:245: FAILED:\n  CHECK( Pixel(images.Images[row], 0, 1)[0] == Catch::Approx(expected) )\nwith expansion:\n  0.5 == Approx( 0.25 )\nwith messages:\n   port="
+                },
+                {
+                  "log_line": 33,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp",
+                  "source_line": 245,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp:245: FAILED:\n  CHECK( Pixel(images.Images[row], 0, 1)[0] == Catch::Approx(expected) )\nwith expansion:\n  0.25 == Approx( 0.5 )\nwith messages:\n   port="
+                },
+                {
+                  "log_line": 41,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp",
+                  "source_line": 245,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp:245: FAILED:\n  CHECK( Pixel(images.Images[row], 0, 1)[0] == Catch::Approx(expected) )\nwith expansion:\n  0.25 == Approx( 0.75 )\nwith messages:\n   port="
+                }
+              ]
+            },
+            {
+              "case": "Point SDF common callback publishes and retains output without render readiness",
+              "assertions": [
+                {
+                  "log_line": 55,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp",
+                  "source_line": 80,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp:80: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  8 == 0\nwith message:\n  common native readiness or held output membership is stale"
+                }
+              ]
+            },
+            {
+              "case": "Point SDF fresh empty common callback refuses atomically",
+              "assertions": [
+                {
+                  "log_line": 68,
+                  "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp",
+                  "source_line": 100,
+                  "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp:100: FAILED:\n  CHECK( status == Status::UnsupportedExecution )\nwith expansion:\n  8 == '\\r'\n\n===============================================================================\ntest cases:    3806 |    3802 passed | 4 failed\nassertions: 4415298 | 4415292 passed | 6 failed"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "core_io_failures": [
+        {
+          "unit": "io",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch85.log",
+          "case": "PXC Bridge appends an absent path slot without creating a path object",
+          "assertions": [
+            {
+              "log_line": 13,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp",
+              "source_line": 172,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxBridgePath.cpp:172: FAILED:\n  REQUIRE( saved )\nwith expansion:\n  false\nwith message:\n  PXC source inverse would change static source controls\n\nORIGINAL_SINK status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_EXPLICIT_REQUEST status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_DEFAULT_OVERLOAD status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nINVERT_DIAGNOSTIC_BEGIN inherited-depth status=0 message=\ninclude_alpha variant=0 bool=0\nchannel variant=1 integer=15\nmix variant=2 scalar=1\ninvert_mask variant=0 bool=0\nmask_feather variant=2 scalar=0\nEFFECTIVE_LINK filter:image -> output:value\nEFFECTIVE_LINK output:value -> sink:surface_in\nEFFECTIVE_LINK input:value -> filter:image\nEFFECTIVE_LINK root:image -> input:parent_value\nORDER root\nORDER input\nORDER filter\nORDER output\nORDER sink\nDIRECT_FILTER status=0 message= channel0=239 channel1=223 channel2=191 channel3=255\nHANDOFF_INPUT node=output status=0 message=\nHANDOFF_IMAGE node=output port=value channel0=239 channel1=223 channel2=191 channel3=255\nHANDOFF_INPUT node=sink status=0 message=\nHANDOFF_IMAGE node=sink port=surface_in channel0=239 channel1=223 channel2=191 channel3=255\nHANDOFF_OUTPUT node=input status=0 message= channel0=16 channel1=32 channel2=64 channel3=255\nHANDOFF_OUTPUT node=output status=0 message= channel0=239 channel1=223 channel2=191 channel3=255\nHANDOFF_SINK status=0 message= channel0=239 channel1=223 channel2=191 channel3=255\nimagegraph 11\nnode \"root\" \"image.solid\" \"\" 0 0\nvalue 0 \"root\" \"width\" i 2\nvalue 0 \"root\" \"height\" i 2\nvalue 0 \"root\" \"colour\" c 16 32 64 255\nvalue 0 \"root\" \"empty\" b 0\nvalue 0 \"root\" \"use_mask_dimension\" b 0\nvalue 0 \"root\" \"mask_alpha_only\" b 0\nnode \"input\" \"pc.group_input\" \"group\" 0 0\nsource_static \"input\" \"visible_condition\"\nsource_static \"input\" \"visible_check\"\nsource_static \"input\" \"visible_check_to\"\nsource_static \"input\" \"input_type\"\nsource_static \"input\" \"subtype\"\nsource_static \"input\" \"vector_size\"\nsource_static \"input\" \"range\"\nsource_static \"input\" \"step\"\nsource_static \"input\" \"enum_labels\"\nsource_static \"input\" \"button_label\"\nsource_static \"input\" \"order\"\nsource_static \"input\" \"display_preview_gizmo\"\nsource_static \"input\" \"gizmo_position\"\nsource_static \"input\" \"gizmo_scale\"\nsource_static \"input\" \"gizmo_rotation\"\nsource_static \"input\" \"gizmo_label\"\nsource_static \"input\" \"parent_value\"\nvalue 1 \"input\" \"subtype\" e 0\nvalue 1 \"input\" \"range\" v 0 1\nvalue 1 \"input\" \"input_type\" e 4\nnode \"output\" \"pc.group_output\" \"group\" 0 0\nsource_static \"output\" \"value\"\nnode \"sink\" \"pc.project_output\" \"\" 0 0\nsource_static \"sink\" \"surface_in\"\nsource_static \"sink\" \"animated\"\nnode \"filter\" \"image.invert\" \"group\" 0 0\nvalue 4 \"filter\" \"include_alpha\" b 0\nvalue 4 \"filter\" \"channel\" i 15\nvalue 4 \"filter\" \"mix\" d 1\nvalue 4 \"filter\" \"invert_mask\" b 0\nvalue 4 \"filter\" \"mask_feather\" d 0\nlink \"root\" \"image\" \"input/parent-value\" \"value\"\nlink \"filter\" \"image\" \"output\" \"value\"\nlink \"output/parent-value\" \"value\" \"sink\" \"surface_in\"\nlink \"input\" \"value\" \"filter\" \"image\"\nlink \"input/parent-value\" \"value\" \"input\" \"parent_value\"\nlink \"output\" \"value\" \"output/parent-value\" \"value\"\ngroup \"group\" \"Group\" \"\"\ngroup_source_position 0 \"group\" 0 0\ngroup_depth \"group\" rgba8\ngroup_sampling \"group\" 1 1\ngroup_port \"group\" \"input\" \"input/parent-value\" input\ngroup_boundary \"group\" \"input\" \"input\"\ngroup_port \"group\" \"output\" \"output/parent-value\" output\ngroup_boundary \"group\" \"output\" \"output\"\njunction \"input/parent-value\" \"group\" any 1 d -1\njunction \"output/parent-value\" \"group\" any 0\noutput \"sink\" \"output\" \"value\"\nkeyframe \"input\" \"subtype\" 0 \"source\" e 0\nkey_source_id \"input\" \"subtype\" 0 \"pxc:compact\"\nkey_ease \"input\" \"subtype\" 0 \"linear\" \"linear\" 0 1 0 0\nkeyframe \"input\" \"range\" 0 \"source\" v 0 1\nkey_source_id \"input\" \"range\" 0 \"pxc:compact\"\nkey_ease \"input\" \"range\" 0 \"linear\" \"linear\" 0 1 0 0\nkeyframe \"input\" \"input_type\" 0 \"source\" e 4\nkey_source_id \"input\" \"input_type\" 0 \"pxc:compact\"\nkey_ease \"input\" \"input_type\" 0 \"linear\" \"linear\" 0 1 0 0\nsource_common_owner \"root\" \"Node_Solid\" \"root\" \"\" \"root\" \"native:animator:0\" node 1 0 0 0 0 1\nsource_common_owner \"group\" \"Node_Group\" \"group\" \"\" \"group\" \"native:animator:1\" group 1 0 0 0 0 1\nsource_common_owner \"input\" \"Node_Group_Input\" \"input\" \"\" \"input\" \"native:animator:2\" node 1 0 0 0 0 1\nsource_common_owner \"output\" \"Node_Group_Output\" \"output\" \"\" \"output\" \"native:animator:3\" node 1 0 0 0 0 1\nsource_common_owner \"sink\" \"Node_Project_Output\" \"sink\" \"\" \"sink\" \"native:animator:4\" node 1 0 0 0 0 1\nsource_common_owner \"filter\" \"Node_Invert\" \"filter\" \"\" \"filter\" \"native:animator:5\" node 1 0 0 0 0 1\nsource_animators\nsource_detached \"root\" \"native:animator:0\" \"pxcx.update_in_trigger\" static boolean scalar\nsource_detached \"group\" \"native:animator:1\" \"pxcx.update_in_trigger\" static boolean scalar\nsource_detached \"input\" \"native:animator:2\" \"pxcx.update_in_trigger\" static boolean scalar\nsource_detached \"output\" \"native:animator:3\" \"pxcx.update_in_trigger\" static boolean scalar\nsource_detached \"sink\" \"native:animator:4\" \"pxcx.update_in_trigger\" static boolean scalar\nsource_detached \"filter\" \"native:animator:5\" \"pxcx.update_in_trigger\" static boolean scalar\nproject 2 2 0 3 2 255 255 255 255 0 0 0 255\npreview_grid 0 0 16 16\npreview_rulers 0 0\ntrack \"input\" \"subtype\" \"hold\" -1\ntrack \"input\" \"range\" \"hold\" -1\ntrack \"input\" \"input_type\" \"hold\" -1\nINVERT_DIAGNOSTIC_END\nORIGINAL_SINK status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_EXPLICIT_REQUEST status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nREPEAT_SINK_DEFAULT_OVERLOAD status=0 message= width=2 height=2 pixels=239,223,191,255,239,223,191,255,239,223,191,255,239,223,191,255\nINVERT_DIAGNOSTIC_BEGIN saved-boundary status=0 message=\ninclude_alpha variant=0 bool=0\nchannel variant=1 integer=15\nmix variant=2 scalar=1\ninvert_mask variant=0 bool=0\nmask_feather variant=2 scalar=0\nEFFECTIVE_LINK filter:image -> output:value\nEFFECTIVE_LINK output:value -> sink:surface_in\nEFFECTIVE_LINK input:value -> filter:image\nEFFECTIVE_LINK root:image -> input:parent_value\nORDER root\nORDER input\nORDER filter\nORDER output\nORDER sink\nDIRECT_FILTER status=0 message= channel0=239 channel1=223 channel2=191 channel3=255\nHANDOFF_INPUT node=output status=0 message=\nHANDOFF_IMAGE node=output port=value channel0=239 channel1=223 channel2=191 channel3=255\nHANDOFF_INPUT node=sink status=0 message=\nHANDOFF_IMAGE node=sink port=surface_in channel0=239 channel1=223 channel2=191 channel3=255\nHANDOFF_OUTPUT node=input status=0 message= channel0=16 channel1=32 channel2=64 channel3=255\nHANDOFF_OUTPUT node=output status=0 message= channel0=239 channel1=223 channel2=191 channel3=255\nHANDOFF_SINK status=0 message= channel0=239 channel1=223 channel2=191 channel3=255\nimagegraph 11\nnode \"root\" \"image.solid\" \"\" 0 0\nvalue 0 \"root\" \"width\" i 2\nvalue 0 \"root\" \"height\" i 2\nvalue 0 \"root\" \"colour\" c 16 32 64 255\nvalue 0 \"root\" \"empty\" b 0\nvalue 0 \"root\" \"use_mask_dimension\" b 0\nvalue 0 \"root\" \"mask_alpha_only\" b 0\nnode \"input\" \"pc.group_input\" \"group\" 0 0\nsource_static \"input\" \"visible_condition\"\nsource_static \"input\" \"visible_check\"\nsource_static \"input\" \"visible_check_to\"\nsource_static \"input\" \"input_type\"\nsource_static \"input\" \"subtype\"\nsource_static \"input\" \"vector_size\"\nsource_static \"input\" \"range\"\nsource_static \"input\" \"step\"\nsource_static \"input\" \"enum_labels\"\nsource_static \"input\" \"button_label\"\nsource_static \"input\" \"order\"\nsource_static \"input\" \"display_preview_gizmo\"\nsource_static \"input\" \"gizmo_position\"\nsource_static \"input\" \"gizmo_scale\"\nsource_static \"input\" \"gizmo_rotation\"\nsource_static \"input\" \"gizmo_label\"\nsource_static \"input\" \"parent_value\"\nvalue 1 \"input\" \"subtype\" e 0\nvalue 1 \"input\" \"range\" v 0 1\nvalue 1 \"input\" \"input_type\" e 4\nnode \"output\" \"pc.group_output\" \"group\" 0 0\nsource_static \"output\" \"value\"\nnode \"sink\" \"pc.project_output\" \"\" 0 0\nsource_static \"sink\" \"surface_in\"\nsource_static \"sink\" \"animated\"\nnode \"filter\" \"image.invert\" \"group\" 0 0\nvalue 4 \"filter\" \"include_alpha\" b 0\nvalue 4 \"filter\" \"channel\" i 15\nvalue 4 \"filter\" \"mix\" d 1\nvalue 4 \"filter\" \"invert_mask\" b 0\nvalue 4 \"filter\" \"mask_feather\" d 0\nlink \"root\" \"image\" \"input/parent-value\" \"value\"\nlink \"filter\" \"image\" \"output\" \"value\"\nlink \"output/parent-value\" \"value\" \"sink\" \"surface_in\"\nlink \"input\" \"value\" \"filter\" \"image\"\nlink \"input/parent-value\" \"value\" \"input\" \"parent_value\"\nlink \"output\" \"value\" \"output/parent-value\" \"value\"\ngroup \"group\" \"Group\" \"\"\ngroup_source_position 0 \"group\" 0 0\ngroup_depth \"group\" rgba8\ngroup_sampling \"group\" 1 1\ngroup_port \"group\" \"input\" \"input/parent-value\" input\ngroup_boundary \"group\" \"input\" \"input\"\ngroup_port \"group\" \"output\" \"output/parent-value\" output\ngroup_boundary \"group\" \"output\" \"output\"\njunction \"input/parent-value\" \"group\" any 1 d -1\njunction \"output/parent-value\" \"group\" any 0\noutput \"sink\" \"output\" \"value\"\nkeyframe \"input\" \"subtype\" 0 \"source\" e 0\nkey_source_id \"input\" \"subtype\" 0 \"pxc:compact\"\nkey_ease \"input\" \"subtype\" 0 \"linear\" \"linear\" 0 1 0 0\nkeyframe \"input\" \"range\" 0 \"source\" v 0 1\nkey_source_id \"input\" \"range\" 0 \"pxc:compact\"\nkey_ease \"input\" \"range\" 0 \"linear\" \"linear\" 0 1 0 0\nkeyframe \"input\" \"input_type\" 0 \"source\" e 4\nkey_source_id \"input\" \"input_type\" 0 \"pxc:compact\"\nkey_ease \"input\" \"input_type\" 0 \"linear\" \"linear\" 0 1 0 0\nsource_common_owner \"root\" \"Node_Solid\" \"root\" \"\" \"root\" \"native:animator:0\" node 1 0 0 0 0 1\nsource_common_owner \"group\" \"Node_Group\" \"group\" \"\" \"group\" \"native:animator:1\" group 1 0 0 0 0 1\nsource_common_owner \"input\" \"Node_Group_Input\" \"input\" \"\" \"input\" \"native:animator:2\" node 1 0 0 0 0 1\nsource_common_owner \"output\" \"Node_Group_Output\" \"output\" \"\" \"output\" \"native:animator:3\" node 1 0 0 0 0 1\nsource_common_owner \"sink\" \"Node_Project_Output\" \"sink\" \"\" \"sink\" \"native:animator:4\" node 1 0 0 0 0 1\nsource_common_owner \"filter\" \"Node_Invert\" \"filter\" \"\" \"filter\" \"native:animator:5\" node 1 0 0 0 0 1\nsource_animators\nsource_detached \"root\" \"native:animator:0\" \"pxcx.update_in_trigger\" static boolean scalar\nsource_detached \"group\" \"native:animator:1\" \"pxcx.update_in_trigger\" static boolean scalar\nsource_detached \"input\" \"native:animator:2\" \"pxcx.update_in_trigger\" static boolean scalar\nsource_detached \"output\" \"native:animator:3\" \"pxcx.update_in_trigger\" static boolean scalar\nsource_detached \"sink\" \"native:animator:4\" \"pxcx.update_in_trigger\" static boolean scalar\nsource_detached \"filter\" \"native:animator:5\" \"pxcx.update_in_trigger\" static boolean scalar\nproject 2 2 0 3 2 255 255 255 255 0 0 0 255\npreview_grid 0 0 16 16\npreview_rulers 0 0\ntrack \"input\" \"subtype\" \"hold\" -1\ntrack \"input\" \"range\" \"hold\" -1\ntrack \"input\" \"input_type\" \"hold\" -1\nINVERT_DIAGNOSTIC_END"
+            }
+          ]
+        },
+        {
+          "unit": "io",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch85.log",
+          "case": "PXC Point SDF physical controls edit and reopen in every surface format",
+          "assertions": [
+            {
+              "log_line": 250,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 2\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 258,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 291,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 2\n  { nested assertion failed }"
+            },
+            {
+              "log_line": 264,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 2\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 272,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 302,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 2\n  { nested assertion failed }"
+            },
+            {
+              "log_line": 278,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 3\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 286,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 291,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 3\n  { nested assertion failed }"
+            },
+            {
+              "log_line": 292,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 3\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 300,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 302,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 3\n  { nested assertion failed }"
+            },
+            {
+              "log_line": 306,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 4\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 314,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 291,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 4\n  { nested assertion failed }"
+            },
+            {
+              "log_line": 320,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 4\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 328,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 302,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 4\n  { nested assertion failed }"
+            },
+            {
+              "log_line": 334,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 5\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 342,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 291,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 5\n  { nested assertion failed }"
+            },
+            {
+              "log_line": 348,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 5\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 356,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 302,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 5\n  { nested assertion failed }"
+            },
+            {
+              "log_line": 362,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 6\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 370,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 291,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 6\n  { nested assertion failed }"
+            },
+            {
+              "log_line": 376,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 6\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 384,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 302,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 6\n  { nested assertion failed }"
+            },
+            {
+              "log_line": 390,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 7\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 398,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 291,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 7\n  { nested assertion failed }"
+            },
+            {
+              "log_line": 404,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 7\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 412,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 302,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 7\n  { nested assertion failed }"
+            },
+            {
+              "log_line": 418,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 8\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 426,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 291,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:291: FAILED:\n  CHECK( actual == Sample(Reference(3, 3, {1.5, 1.5}, 2, false, depth)) )\ndue to unexpected exception with messages:\n  depth := 8\n  { nested assertion failed }"
+            },
+            {
+              "log_line": 432,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 152,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:152: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  2 == 0\nwith messages:\n  depth := 8\n  3D transform value needs imagegraph v6"
+            },
+            {
+              "log_line": 440,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp",
+              "source_line": 302,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPointSdf.cpp:302: FAILED:\n  CHECK( Sample(reopened.Graph) == Sample(Reference(5, 3, {2.5, 1.5}, 4, true, depth)) )\ndue to unexpected exception with messages:\n  depth := 8\n  { nested assertion failed }\n\n===============================================================================\ntest cases:   433 |   431 passed |  2 failed\nassertions: 21236 | 21207 passed | 29 failed"
+            }
+          ]
+        },
+        {
+          "unit": "core",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch85.log",
+          "case": "Bridge future subframe replay is refused when a real timestamp loses tiny fractions",
+          "assertions": [
+            {
+              "log_line": 14,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceBridgePath.cpp",
+              "source_line": 503,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceBridgePath.cpp:503: FAILED:\n  REQUIRE( FrameTimeToReal({TICK, EARLIER, false}) == FrameTimeToReal({TICK, LATER, false}) )\nwith expansion:\n  32 == 32"
+            }
+          ]
+        },
+        {
+          "unit": "core",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch85.log",
+          "case": "Point SDF processor modes preserve point lists as one input and stage all rows",
+          "assertions": [
+            {
+              "log_line": 25,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp",
+              "source_line": 245,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp:245: FAILED:\n  CHECK( Pixel(images.Images[row], 0, 1)[0] == Catch::Approx(expected) )\nwith expansion:\n  0.5 == Approx( 0.25 )\nwith messages:\n   port="
+            },
+            {
+              "log_line": 33,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp",
+              "source_line": 245,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp:245: FAILED:\n  CHECK( Pixel(images.Images[row], 0, 1)[0] == Catch::Approx(expected) )\nwith expansion:\n  0.25 == Approx( 0.5 )\nwith messages:\n   port="
+            },
+            {
+              "log_line": 41,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp",
+              "source_line": 245,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdf.cpp:245: FAILED:\n  CHECK( Pixel(images.Images[row], 0, 1)[0] == Catch::Approx(expected) )\nwith expansion:\n  0.25 == Approx( 0.75 )\nwith messages:\n   port="
+            }
+          ]
+        },
+        {
+          "unit": "core",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch85.log",
+          "case": "Point SDF common callback publishes and retains output without render readiness",
+          "assertions": [
+            {
+              "log_line": 55,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp",
+              "source_line": 80,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp:80: FAILED:\n  REQUIRE( status == Status::Ok )\nwith expansion:\n  8 == 0\nwith message:\n  common native readiness or held output membership is stale"
+            }
+          ]
+        },
+        {
+          "unit": "core",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch85.log",
+          "case": "Point SDF fresh empty common callback refuses atomically",
+          "assertions": [
+            {
+              "log_line": 68,
+              "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp",
+              "source_line": 100,
+              "evidence": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointSdfCommon.cpp:100: FAILED:\n  CHECK( status == Status::UnsupportedExecution )\nwith expansion:\n  8 == '\\r'\n\n===============================================================================\ntest cases:    3806 |    3802 passed | 4 failed\nassertions: 4415298 | 4415292 passed | 6 failed"
+            }
+          ]
+        }
+      ],
+      "known_listener_failures": [],
+      "other_failures": []
+    }
+  ],
+  "review_corrections": [
+    {
+      "batch": 83,
+      "both_builds_passed": true,
+      "runtime_checks_run": false,
+      "reason": "Read review found authored empty path incorrectly encoded as absent source path. Corrected before runtime verification."
+    },
+    {
+      "batch": 84,
+      "both_builds_passed": true,
+      "runtime_checks_run": false,
+      "reason": "Source audit found linked numeric Point SDF map toggle used nonzero truth instead of greater-than-half. Corrected before runtime verification."
+    }
+  ]
+}

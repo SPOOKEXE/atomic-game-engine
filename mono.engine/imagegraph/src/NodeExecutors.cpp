@@ -82,6 +82,7 @@ namespace engine::imagegraph::detail {
 					  SourceMatrixExecutors(),
 					  SourcePathExecutors(),
 					  SourceSmoothPathExecutors(),
+					  SourceBridgePathExecutors(),
 					  SourcePathComposeExecutors(),
 					  SourcePathModifierExecutors(),
 					  SourcePathGeometryExecutors(),
@@ -139,6 +140,7 @@ namespace engine::imagegraph::detail {
 				if (type == "pc.tunnel_in" && port == "value_in") return true;
 				if (type == "pc.argument" && port == "default_value") return true;
 				if (type == "pc.points_triangulate" && port == "points") return true;
+				if (type == "pc.point_sdf" && port == "points") return true;
 				if ((type == "pc.path_sample" || type == "pc.path_smoothen" || type == "pc.path_spiral" ||
 					 type == "pc.path_wave") &&
 					port == "path")

@@ -1,0 +1,53 @@
+{
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "sources": [
+    {
+      "path": "scripts/node_points_sdf/node_points_sdf.gml",
+      "sha256": "06e2d9f56f8b644aa2f7cdcd260bbaa15b366b6c7d4e954edcc9aa7c3286d970"
+    },
+    {
+      "path": "shaders/sh_point_sdf/sh_point_sdf.fsh",
+      "sha256": "e11524fccf9c2c05434bea817d7142b05c0b5a1f739648968bbd5eee8388ca75"
+    }
+  ],
+  "physical_inputs": {
+    "0": "dimension",
+    "1": "points",
+    "2": "max_distance",
+    "3": "inverted",
+    "4": "max_distance_map"
+  },
+  "source_algorithm": {
+    "position": "texture coordinate multiplied by physical output dimension",
+    "minimum": "start at float 9999, take nearest point distance",
+    "mapped_distance": "lerp lower/upper max distance using mean map RGB; alpha ignored",
+    "result": "minimum/distance, or 1-result when inverted equals 1; grayscale RGB and alpha 1",
+    "point_uniform_limit": {
+      "GLSL": 256,
+      "HLSL11": 1024
+    },
+    "empty_points": "processData returns the preexisting output surface"
+  },
+  "native_limits": {
+    "profile": "GLSL point capacity, deterministic CPU pixel centers, nearest map sampling and white vertex colour",
+    "empty_points": "require a matching held output receipt; fresh or resized empty targets need explicit source observations",
+    "invalid_division": "reject zero or nonfinite mapped divisor before output publication",
+    "admission": "bound all selected processor rows, pixels, points and output storage before rendering"
+  },
+  "verification": "source facts and bounded native profile; validation evidence is recorded separately; licensed renderer parity remains open",
+  "comparison_gate": "exact source renderer vertex colour, texture state, primitive coverage and storage rounding require licensed matched captures",
+  "source_boolean_conversion": {
+    "rule": "numeric input is true only when greater than 0.5",
+    "evidence": [
+      "scripts/node_value_bool/node_value_bool.gml",
+      "HTML5 runtime commit 60e51be51ce7f3d52025ef18106cf172b8e22a00, Function_String.js:161"
+    ]
+  },
+  "mapped_condition_conversion": {
+    "rule": "Boolean identity; finite linked numeric conditions are true only above 0.5.",
+    "evidence": [
+      "scripts/shader_functions/shader_functions.gml:130",
+      "HTML5 runtime commit 60e51be51ce7f3d52025ef18106cf172b8e22a00, scripts/yyTypes.js:336"
+    ]
+  }
+}

@@ -6,6 +6,10 @@
 
 namespace engine::imagegraph::detail {
 	inline bool SourceMappedSynthetic(const CatalogueEntry &entry, const CatalogueInput &input) {
+		if (entry.Type == "pc.point_sdf" &&
+			((input.SourceKind == "MapToggle" && input.Id == "max_distance_mapped") ||
+			 (input.SourceKind == "MapRange" && input.Id == "max_distance_map_range")))
+			return true;
 		if (entry.Type == "pc.markov_gradient" &&
 			((input.SourceKind == "MapToggle" && input.Id == "replace_chance_mapped") ||
 			 (input.SourceKind == "MapRange" && input.Id == "replace_chance_map_range")))
@@ -250,6 +254,14 @@ namespace engine::imagegraph::detail {
 				  (input.Id == "iteration_map_range" || input.Id == "scale_map_range"))));
 	}
 	inline bool SourceRangeMapped(const NodeContext &context, std::string_view port) {
+		if (context.Entry.Type == "pc.point_sdf" && port == "max_distance") {
+			// Source numeric map conditions use > .5; native numeric links retain their raw value.
+			const Value *value = context.Find("max_distance_mapped");
+			if (!value) return false;
+			if (const auto *flag = std::get_if<bool>(value)) return *flag;
+			const auto number = SourceChoiceNumber(*value);
+			return number && *number > .5;
+		}
 		if (context.Entry.Type == "pc.markov_gradient" && port == "replace_chance")
 			return context.Boolean("replace_chance_mapped");
 		if (context.Entry.Type == "pc.noise_aniso" &&
@@ -325,6 +337,12 @@ namespace engine::imagegraph::detail {
 	// project the same source slot.
 	inline const Value *SourceMappedRange(const NodeContext &context, std::string_view port) {
 		const Value *value = context.Find(port);
+		if (context.Entry.Type == "pc.point_sdf" && port == "max_distance") {
+			if (SourceRangeMapped(context, port) && !context.IsLinked(port) &&
+				context.IsCatalogueDefault(port).value_or(false))
+				return context.Find("max_distance_map_range");
+			return value;
+		}
 		if (context.Entry.Type == "pc.markov_gradient" && port == "replace_chance") {
 			if (SourceRangeMapped(context, port) && !context.IsLinked(port) &&
 				context.IsCatalogueDefault(port).value_or(false))
@@ -497,6 +515,10 @@ namespace engine::imagegraph::detail {
 	}
 	inline bool ReadSourceMappedRange(NodeContext &context, std::string_view port, Vector2 &range) {
 		const Value *value = SourceMappedRange(context, port);
+		if (!value && context.Entry.Type == "pc.point_sdf" && port == "max_distance") {
+			range = SourceRangeMapped(context, port) ? Vector2{0, 16} : Vector2{16, 16};
+			return true;
+		}
 		if (!value && context.Entry.Type == "pc.markov_gradient" && port == "replace_chance") {
 			range = SourceRangeMapped(context, port) ? Vector2{0, 1} : Vector2{1, 1};
 			return true;
@@ -564,7 +586,8 @@ namespace engine::imagegraph::detail {
 									   : (port == "metalic" ? Vector2{} : Vector2{0, 1});
 			return true;
 		}
-		if ((context.Entry.Type == "pc.markov_gradient" && port == "replace_chance") ||
+		if ((context.Entry.Type == "pc.point_sdf" && port == "max_distance") ||
+			(context.Entry.Type == "pc.markov_gradient" && port == "replace_chance") ||
 			context.Entry.Type == "pc.noise_aniso" || context.Entry.Type == "pc.noise_scratch" ||
 			context.Entry.Type == "pc.wavelet_noise" || context.Entry.Type == "pc.perlin_extra" ||
 			context.Entry.Type == "pc.pytagorean_tile" || context.Entry.Type == "pc.shard_noise" ||

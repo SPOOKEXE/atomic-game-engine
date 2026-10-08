@@ -33,6 +33,22 @@ namespace engine::imagegraph::detail {
 					return total;
 				}
 				const auto &op = *p->SourceOperation;
+				if (op.Bridge) {
+					if (op.Bridge->LineCount > Limits::MaximumArrayElements ||
+						op.Bridge->Lines.size() > Limits::MaximumArrayElements ||
+						!add(op.Bridge->Lines.size()))
+						return {};
+					for (const auto &line : op.Bridge->Lines) {
+						if (line.Anchors.size() > Limits::MaximumPathAnchors ||
+							line.Controls.size() > Limits::MaximumArrayElements ||
+							line.Accumulated.size() > Limits::MaximumArrayElements ||
+							!add(
+								line.Anchors.size() * 128 + line.Controls.size() * 32 +
+								line.Accumulated.size()
+							))
+							return {};
+					}
+				}
 				if (op.Inputs.size() > Limits::MaximumArrayElements ||
 					op.CachedLengths.size() > Limits::MaximumArrayElements ||
 					op.WeightCurve.size() > Limits::MaximumArrayElements ||
