@@ -2,6 +2,7 @@
 
 #include <engine/imagegraph/CacheGroupReplay.hpp>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,13 @@ namespace engine::imagegraph {
 		uint64_t Frame = 0;
 		Value Data = double{0};
 		bool operator==(const DataReplayValueFrame &) const = default;
+	};
+	struct SourceFrameCacheLoadProgress {
+		uint64_t NextSlot = 0;
+		bool Loading = true;
+		bool NativeReceipt = false;
+		std::vector<DataReplayValueFrame> PendingSlots;
+		bool operator==(const SourceFrameCacheLoadProgress &) const = default;
 	};
 	// Each processor row owns its source scalar, trigger, or delayed value history.
 	struct DataReplayEntry {
@@ -28,6 +36,8 @@ namespace engine::imagegraph {
 		std::string LoadedCacheData;
 		// A selected frame-cache Clear suppresses constructor loading for every processor row.
 		bool FrameCacheConstructorCleared = false;
+		std::optional<uint64_t> SourceFrameCacheSerializedSlots;
+		std::optional<SourceFrameCacheLoadProgress> SourceFrameCacheLoading;
 		bool operator==(const DataReplayEntry &) const = default;
 	};
 	struct DataReplayState {

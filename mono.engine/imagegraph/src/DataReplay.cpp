@@ -1,3 +1,4 @@
+#include "DataReplayValidation.hpp"
 #include "MeshPayload.hpp"
 #include "ValuePayload.hpp"
 
@@ -15,6 +16,13 @@ namespace engine::imagegraph {
 		bytes = detail::MeshAddBytes(bytes, detail::MeshVectorBytes<true>(entry.Values));
 		for (const auto &frame : entry.Values)
 			bytes = detail::MeshAddBytes(bytes, detail::RetainedPayloadBytes(frame.Data));
+		if (entry.SourceFrameCacheLoading) {
+			bytes = detail::MeshAddBytes(
+				bytes, detail::MeshVectorBytes<true>(entry.SourceFrameCacheLoading->PendingSlots)
+			);
+			for (const auto &frame : entry.SourceFrameCacheLoading->PendingSlots)
+				bytes = detail::MeshAddBytes(bytes, detail::RetainedPayloadBytes(frame.Data));
+		}
 		return bytes;
 	}
 	uint64_t RetainedDataReplayBytes(const DataReplayState &state) {
@@ -47,6 +55,15 @@ namespace engine::imagegraph {
 			diagnostic.NodeId = node;
 			return code;
 		};
+		if (state.Entries.size() > Limits::MaximumArrayElements)
+			return refuse(Status::LimitExceeded, "data replay exceeds row bounds");
+		for (const auto &row : state.Entries)
+			if (row.Values.size() > Limits::MaximumArrayElements ||
+				(row.SourceFrameCacheLoading &&
+				 row.SourceFrameCacheLoading->PendingSlots.size() > Limits::MaximumArrayElements))
+				return refuse(
+					Status::LimitExceeded, "data replay inventory exceeds frame bounds", row.NodeId
+				);
 		if (state.Entries.size() > Limits::MaximumArrayElements ||
 			RetainedDataReplayBytes(state) > maximumBytes ||
 			RetainedDataReplayBytes(state) > Limits::MaximumEvaluationBytes)
@@ -73,39 +90,9 @@ namespace engine::imagegraph {
 				return refuse(Status::DuplicateId, "data replay repeats processor identity", second.NodeId);
 		}
 
-		for (size_t index = 0; index < state.Entries.size(); ++index) {
-			const auto &entry = state.Entries[index];
-			if (entry.NodeId.empty() || entry.NodeId.size() > Limits::MaximumTextBytes ||
-				!entry.Initialized || entry.Tick > Limits::MaximumTick || !std::isfinite(entry.Subframe) ||
-				entry.Subframe < 0 || entry.Subframe >= 1 ||
-				entry.ProcessorRow >= Limits::MaximumArrayElements || !std::isfinite(entry.PreviousValue) ||
-				!std::isfinite(entry.PreviousFrame))
-				return refuse(
-					Status::InvalidValue, "data replay identity or scalar state is invalid", entry.NodeId
-				);
-			if (entry.LoadedCacheData.size() > Limits::MaximumTextBytes)
-				return refuse(
-					Status::LimitExceeded, "loaded frame cache identity exceeds text bounds", entry.NodeId
-				);
-			if (entry.Values.size() > Limits::MaximumArrayElements)
-				return refuse(
-					Status::LimitExceeded, "data replay value history exceeds frame budget", entry.NodeId
-				);
-			uint64_t previousFrame = 0;
-			bool first = true;
-			for (const auto &frame : entry.Values) {
-				if (frame.Frame > Limits::MaximumTick || (!first && frame.Frame <= previousFrame) ||
-					!detail::ValidValuePayload(frame.Data, true))
-					return refuse(Status::InvalidValue, "data replay value history is invalid", entry.NodeId);
-				const auto clone = ValueClonePayloadBytes(frame.Data);
-				if (!clone || *clone > maximumBytes)
-					return refuse(
-						Status::LimitExceeded, "data replay value clone exceeds byte budget", entry.NodeId
-					);
-				first = false;
-				previousFrame = frame.Frame;
-			}
-		}
+		for (const auto &entry : state.Entries)
+			if (detail::ValidateReplayRow(entry, maximumBytes, diagnostic) != Status::Ok)
+				return diagnostic.Code;
 		return Status::Ok;
 	}
 }

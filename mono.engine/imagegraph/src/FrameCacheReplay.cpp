@@ -58,6 +58,10 @@ namespace engine::imagegraph {
 		if (bytes > Limits::MaximumEvaluationBytes) return UINT64_MAX;
 		bool found = false;
 		for (const auto &row : source.Entries) {
+			if (row.Values.size() > Limits::MaximumArrayElements ||
+				(row.SourceFrameCacheLoading &&
+				 row.SourceFrameCacheLoading->PendingSlots.size() > Limits::MaximumArrayElements))
+				return UINT64_MAX;
 			if (row.NodeId != node.Id) continue;
 			if (SourceFrameCacheRowType(row) != node.Type || row.LoadedCacheData != saved) return UINT64_MAX;
 			found = true;
@@ -340,6 +344,8 @@ namespace engine::imagegraph {
 			return fail(Status::LimitExceeded, "frame-cache source counts exceed work bounds");
 		for (const auto &row : source.Entries) {
 			if (row.Values.size() > Limits::MaximumArrayElements ||
+				(row.SourceFrameCacheLoading &&
+				 row.SourceFrameCacheLoading->PendingSlots.size() > Limits::MaximumArrayElements) ||
 				row.NodeId.size() > Limits::MaximumTextBytes ||
 				row.LoadedCacheData.size() > Limits::MaximumTextBytes ||
 				!charge(
@@ -353,6 +359,17 @@ namespace engine::imagegraph {
 				if (!clone) return fail(Status::InvalidValue, "frame-cache source value is malformed");
 				if (!charge(4, *clone))
 					return fail(Status::LimitExceeded, "frame-cache source values exceed work bounds");
+			}
+			if (row.SourceFrameCacheLoading) {
+				const auto &pending = row.SourceFrameCacheLoading->PendingSlots;
+				if (!charge(4, pending.size() * sizeof(DataReplayValueFrame)))
+					return fail(Status::LimitExceeded, "frame-cache pending rows exceed work bounds");
+				for (const auto &frame : pending) {
+					const auto clone = ValueClonePayloadBytes(frame.Data);
+					if (!clone) return fail(Status::InvalidValue, "frame-cache pending value is malformed");
+					if (!charge(4, *clone))
+						return fail(Status::LimitExceeded, "frame-cache pending values exceed work bounds");
+				}
 			}
 		}
 		if (!charge(2, detail::CacheGroupReplayCloneBytes(source.CacheGroups)))

@@ -4,13 +4,23 @@
 
 namespace engine::imagegraph::detail {
 	enum class SourceFrameCacheInputReads { All, ControlsOnly, None };
-	// Auto Cache hits bypass update entirely. Array checks playback and producer activity first.
+	// Complete receipts retain the native auto-cache shortcut. Source step loading runs Cache update
+	// controls before recovery, while Cache Array loading returns before every getter.
 	inline SourceFrameCacheInputReads SourceFrameCacheReadPolicy(
-		std::string_view type, bool playing, bool linked, bool active, bool cacheHit = false
+		std::string_view type,
+		bool playing,
+		bool linked,
+		bool active,
+		bool cacheHit = false,
+		bool sourceStepLoading = false,
+		bool loading = false
 	) {
-		if (type == "pc.cache" && cacheHit) return SourceFrameCacheInputReads::None;
+		if (sourceStepLoading && type == "pc.cache_array" && loading) return SourceFrameCacheInputReads::None;
+		if (type == "pc.cache" && cacheHit)
+			return sourceStepLoading ? SourceFrameCacheInputReads::ControlsOnly
+									 : SourceFrameCacheInputReads::None;
 		if (type != "pc.cache" && type != "pc.cache_array") return SourceFrameCacheInputReads::All;
-		if (playing && linked && active) return SourceFrameCacheInputReads::All;
+		if (playing && linked && active && !loading) return SourceFrameCacheInputReads::All;
 		return type == "pc.cache_array" ? SourceFrameCacheInputReads::None
 										: SourceFrameCacheInputReads::ControlsOnly;
 	}

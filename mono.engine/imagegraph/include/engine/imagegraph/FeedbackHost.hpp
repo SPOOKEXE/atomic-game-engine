@@ -1004,6 +1004,11 @@ namespace engine::imagegraph {
 			return bytes;
 		}
 
+		[[nodiscard]] bool HasSourceFrameCacheLoading() const noexcept {
+			return std::any_of(State.Data.Entries.begin(), State.Data.Entries.end(), [](const auto &row) {
+				return row.SourceFrameCacheLoading && row.SourceFrameCacheLoading->Loading;
+			});
+		}
 		// Borrow only for an immediate admitted copy while the matching published
 		// revision is ready.
 		const DataReplayState *PreparedData(uint64_t revision, uint64_t externalRevision) const noexcept {

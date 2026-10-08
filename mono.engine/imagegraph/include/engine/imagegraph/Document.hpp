@@ -1869,11 +1869,14 @@ namespace engine::imagegraph {
 	struct RandomEntropyCapture;
 	// ObservedFrame captures only actual observations. NativePlayedPrefix explicitly samples a seek prefix.
 	enum class SourceCacheSampling : uint8_t { ObservedFrame, NativePlayedPrefix };
+	enum class SourceCacheLoadMode : uint8_t { CompleteReceipt, SourceStepLoading };
 	struct SourceCachePlaybackObservation {
 		bool Playing = false;
 		SourceCacheSampling Sampling = SourceCacheSampling::ObservedFrame;
 		// Attests a synchronous CPU producer closure, without source cache-group/loading scheduler state.
 		bool SynchronousProducer = false;
+		// SourceStepLoading publishes one serialized slot only at an explicit source step.
+		SourceCacheLoadMode Loading = SourceCacheLoadMode::CompleteReceipt;
 		bool operator==(const SourceCachePlaybackObservation &) const = default;
 	};
 	// Authoritative project observations stay independent of a selected node's scoped clock.

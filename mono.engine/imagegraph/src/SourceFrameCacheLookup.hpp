@@ -58,6 +58,29 @@ namespace engine::imagegraph::detail {
 			return result;
 		}
 	};
+	inline bool SourceFrameCacheIsLoading(
+		const Node &node,
+		const EvaluationRequest &request,
+		const SourceFrameCacheInputIndex &current,
+		const SourceFrameCacheInputIndex &loads
+	) {
+		if (!request.SourceCachePlayback ||
+			request.SourceCachePlayback->Loading != SourceCacheLoadMode::SourceStepLoading ||
+			(node.Type != "pc.cache" && node.Type != "pc.cache_array"))
+			return false;
+		bool cleared = false;
+		if (const auto *row = current.Find(node, cleared))
+			return row->SourceFrameCacheLoading && row->SourceFrameCacheLoading->Loading;
+		if (cleared || SourceFrameCacheSavedText(node).empty()) return false;
+		for (const auto &property : node.SourceProperties)
+			if (property.Port == "serialize")
+				if (const auto *enabled = std::get_if<bool>(&property.Data); enabled && !*enabled)
+					return false;
+		bool ignored = false;
+		if (const auto *row = loads.Find(node, ignored); row && row->SourceFrameCacheLoading)
+			return row->SourceFrameCacheLoading->Loading;
+		return true;
+	}
 	inline bool SourceFrameCacheKnownHit(
 		const Node &node,
 		const EvaluationRequest &request,
@@ -71,9 +94,16 @@ namespace engine::imagegraph::detail {
 		if (!row && !cleared && !SourceFrameCacheSavedText(node).empty()) {
 			bool ignored = false, loadRowSeen = false;
 			row = loads.Find(node, ignored, &loadRowSeen);
+			if (request.SourceCachePlayback &&
+				request.SourceCachePlayback->Loading == SourceCacheLoadMode::SourceStepLoading && row &&
+				!row->SourceFrameCacheLoading)
+				return false;
 			if (request.Tick >= totalFrames || (row && (row->NegativeFrame || row->Subframe != 0)))
 				return false;
 			if (!row && !loadRowSeen) {
+				if (request.SourceCachePlayback &&
+					request.SourceCachePlayback->Loading == SourceCacheLoadMode::SourceStepLoading)
+					return false;
 				NativeFrameCacheReceiptInspection inspection;
 				return InspectNativeFrameCacheReceipt(node, request.Tick, inspection) == Status::Ok &&
 					   inspection.HasFrame;

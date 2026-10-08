@@ -2222,3 +2222,11 @@ metrics-lookup-bench:
     ATOMIC_METRICS_LOOKUP_PROFILE=1 timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_core --suite engine.core.bench.instrumentation --samples 5
 
 import 'scripts/demos/version-impact.just'
+
+# Progressive Cache and Cache Array native receipt CPU loading. Profiles stay on stdout.
+imagegraph-frame-cache-loading-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset profile -DMONO_BUILD_BENCH=ON -DMONO_BUILD_TESTS=ON > /dev/null
+    cmake --build --preset profile --target test_imagegraph bench_imagegraph
+    ./.cache/build/profile/tests/test_imagegraph '[frame_cache_loading],[native_frame_cache_loading_receipt]'
+    ATOMIC_IMAGEGRAPH_LOADING_PRESET=profile ./.cache/build/profile/bench/bench_imagegraph --suite engine.imagegraph.bench.frame-cache-loading --samples {{samples}}

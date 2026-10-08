@@ -5,6 +5,7 @@
 
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/imagegraph/FrameCacheReplay.hpp>
 #include <engine/imagegraph/SourceCommonRuntime.hpp>
 #include <engine/imagegraph/SourceCommonSockets.hpp>
 
@@ -37,6 +38,166 @@ namespace engine::imagegraph {
 			current.DataReplay = &candidate.Replay.Data;
 			current.RigidReplay = &candidate.Replay.Rigid;
 			return current;
+		}
+		Status StepCacheOwner(
+			const Document &document,
+			const Plan &plan,
+			const EvaluationRequest &request,
+			size_t ownerIndex,
+			GroupRenderSession &candidate,
+			detail::EvaluationBudget &budget,
+			detail::AllocationReservation &candidateCharge,
+			detail::SourceCommonAdmission &admission,
+			Diagnostic &diagnostic
+		) {
+			if (!request.SourceCachePlayback) return Status::Ok;
+			if (request.SourceCachePlayback->Loading == SourceCacheLoadMode::CompleteReceipt)
+				return Status::Ok;
+			if (request.SourceCachePlayback->Loading != SourceCacheLoadMode::SourceStepLoading)
+				return SourceCommonRuntimeFail(
+					diagnostic, Status::InvalidValue, "source cache loading profile is invalid"
+				);
+			if (!request.SourceCachePlayback->SynchronousProducer)
+				return SourceCommonRuntimeFail(
+					diagnostic,
+					Status::UnsupportedExecution,
+					"source cache loading requires synchronous producer observations"
+				);
+			const auto &owner = document.SourceCommonOwners[ownerIndex];
+			const auto node = std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &n) {
+				return n.Id == owner.NativeOwnerId;
+			});
+			if (node == document.Nodes.end())
+				return SourceCommonRuntimeFail(
+					diagnostic, Status::InvalidValue, "source cache step owner is absent", owner.SourceOwnerId
+				);
+			auto &rows = candidate.Replay.Data.Entries;
+			const auto identity = SourceFrameCacheIdentity(*node);
+			bool cleared = false;
+			for (const auto &row : rows)
+				if (row.NodeId == node->Id && row.LoadedCacheData == identity)
+					cleared |= row.FrameCacheConstructorCleared;
+			bool completed = false;
+			bool found = false;
+			const uint64_t total = document.Timeline ? document.Timeline->Frames : 1;
+			const auto advance = [&](const DataReplayEntry &source, DataReplayEntry &output) {
+				auto charge = budget.Reserve(budget.Available());
+				if (!charge || !charge->Bytes())
+					return SourceCommonRuntimeFail(
+						diagnostic,
+						Status::LimitExceeded,
+						"source cache loading has no live byte allowance",
+						node->Id
+					);
+				bool done = false;
+				const auto status = StepSourceFrameCacheLoading(
+					*node, total, source, output, done, diagnostic, charge->Bytes()
+				);
+				if (status != Status::Ok) return status;
+				if (!charge->Resize(RetainedDataReplayEntryBytes(output)))
+					return SourceCommonRuntimeFail(
+						diagnostic,
+						Status::LimitExceeded,
+						"source cache loading output exceeds live bytes",
+						node->Id
+					);
+				completed |= done;
+				if (!candidateCharge.Merge(std::move(*charge))) std::terminate();
+				return Status::Ok;
+			};
+			for (auto &row : rows) {
+				if (row.NodeId != node->Id || row.LoadedCacheData != identity) continue;
+				found = true;
+				if (!row.SourceFrameCacheLoading || !row.SourceFrameCacheLoading->Loading) continue;
+				const uint64_t oldBytes = RetainedDataReplayEntryBytes(row);
+				DataReplayEntry updated;
+				if (advance(row, updated) != Status::Ok) return diagnostic.Code;
+				row = std::move(updated);
+				if (!candidateCharge.Split(oldBytes)) std::terminate();
+			}
+			if (!found && !cleared && !SourceFrameCacheSavedText(*node).empty()) {
+				auto loadingCharge = budget.Reserve(budget.Available());
+				if (!loadingCharge || !loadingCharge->Bytes())
+					return SourceCommonRuntimeFail(
+						diagnostic,
+						Status::LimitExceeded,
+						"source cache constructor has no live byte allowance",
+						node->Id
+					);
+				const DataReplayEntry *decoded = nullptr;
+				if (request.SourceFrameCacheLoads)
+					for (const auto &row : request.SourceFrameCacheLoads->Entries)
+						if (row.NodeId == node->Id && row.ProcessorRow == 0 &&
+							row.LoadedCacheData == identity)
+							decoded = &row;
+				DataReplayEntry loading;
+				DataReplayEntry updated;
+				if (decoded && decoded->SourceFrameCacheLoading) {
+					loadingCharge.reset();
+					if (advance(*decoded, updated) != Status::Ok) return diagnostic.Code;
+				} else {
+					const auto status = decoded
+											? BeginSourceFrameCacheLoading(
+												  *node, *decoded, loading, diagnostic, loadingCharge->Bytes()
+											  )
+											: BeginNativeSourceFrameCacheLoading(
+												  *node, loading, diagnostic, loadingCharge->Bytes()
+											  );
+					if (status != Status::Ok) return status;
+					if (!loadingCharge->Resize(RetainedDataReplayEntryBytes(loading)))
+						return SourceCommonRuntimeFail(
+							diagnostic,
+							Status::LimitExceeded,
+							"source cache constructor exceeds live bytes",
+							node->Id
+						);
+					if (advance(loading, updated) != Status::Ok) return diagnostic.Code;
+				}
+				if (rows.size() >= Limits::MaximumArrayElements)
+					return SourceCommonRuntimeFail(
+						diagnostic, Status::LimitExceeded, "source cache row count exceeds bounds", node->Id
+					);
+				const auto oldCapacity = rows.capacity();
+				auto tableCharge = budget.Reserve(
+					rows.size() == oldCapacity ? (rows.size() + 1) * sizeof(DataReplayEntry) : 0
+				);
+				if (!tableCharge)
+					return SourceCommonRuntimeFail(
+						diagnostic,
+						Status::LimitExceeded,
+						"source cache row table exceeds live bytes",
+						node->Id
+					);
+				if (rows.size() == oldCapacity) rows.reserve(rows.size() + 1);
+				rows.push_back(std::move(updated));
+				if (!tableCharge->Resize(
+						rows.capacity() == oldCapacity ? 0 : rows.capacity() * sizeof(DataReplayEntry)
+					))
+					return SourceCommonRuntimeFail(
+						diagnostic,
+						Status::LimitExceeded,
+						"source cache retained table exceeds live bytes",
+						node->Id
+					);
+				if (!candidateCharge.Merge(std::move(*tableCharge))) std::terminate();
+				if (rows.capacity() != oldCapacity &&
+					!candidateCharge.Split(oldCapacity * sizeof(DataReplayEntry)))
+					std::terminate();
+			}
+			if (!completed) return Status::Ok;
+			const auto current = CandidateRequest(request, candidate);
+			return detail::InvokeSourceCommonCallback(
+				document,
+				plan,
+				current,
+				ownerIndex,
+				detail::SourceCommonInvocationMode::DirectUpdate,
+				candidate,
+				budget,
+				candidateCharge,
+				diagnostic,
+				&admission
+			);
 		}
 		Status Observations(
 			const Document &document,
@@ -419,6 +580,21 @@ namespace engine::imagegraph {
 			if (!owner.Active) continue;
 			const auto dispatch = detail::SourceCommonOwnerDispatch(document, request, index);
 			auto current = CandidateRequest(request, candidate);
+			if (dispatch.Step == SourceCommonStepKind::CacheOverride) {
+				if (StepCacheOwner(
+						document,
+						plan,
+						current,
+						index,
+						candidate,
+						budget,
+						candidateCharge,
+						admission,
+						diagnostic
+					) != Status::Ok)
+					return diagnostic.Code;
+				continue;
+			}
 			if (dispatch.Step == SourceCommonStepKind::CollectionOverride) {
 				const auto observed = std::find_if(
 					observations.Collections.begin(), observations.Collections.end(), [&](const auto &row) {

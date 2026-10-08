@@ -119,6 +119,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Preserve project-clock cache observations and refresh captured inputs without replacing cached frames; pass joined CPU validation.
 - [x] Preserve source timeline endpoints through native saves, PXC edits and integral-frame exports; pass joined CPU validation.
 - [x] Verify real font decoding, Unicode Text pixels and font artifacts; profile all seven boundary workloads.
+- [x] Add bounded source-Step Cache loading with original slot counts, paused progress, on-demand native pixels and atomic admission; pass joined checks and CPU profiles.
 - [x] Add separate/combine X/Y controls with processed input receipts, numeric tuple playback and atomic undo; pass headless gesture and save/reopen checks. Live Studio verification remains open.
 - [x] Round source hexadecimal arguments once; preserve prefix parsing and atomic overflow refusal.
 - [x] Convert Number argument tuple carriers to source caught-array zero; preserve String values.

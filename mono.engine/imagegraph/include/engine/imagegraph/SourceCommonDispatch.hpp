@@ -3,7 +3,7 @@
 #include <string_view>
 
 namespace engine::imagegraph {
-	enum class SourceCommonStepKind { Unsupported, NodeDataCommon, CollectionOverride };
+	enum class SourceCommonStepKind { Unsupported, NodeDataCommon, CollectionOverride, CacheOverride };
 	enum class SourceCommonWrapperKind { Unsupported, Full, Lite };
 	struct SourceCommonDispatch {
 		SourceCommonStepKind Step = SourceCommonStepKind::Unsupported;

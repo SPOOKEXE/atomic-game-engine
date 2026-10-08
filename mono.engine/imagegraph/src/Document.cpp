@@ -12860,6 +12860,9 @@ namespace engine::imagegraph {
 			detail::EvaluationAllocator<detail::SourceFrameCacheInputReads>(budget)
 		);
 		const bool cachePlaying = request.SourceCachePlayback && request.SourceCachePlayback->Playing;
+		const bool sourceStepLoading =
+			request.SourceCachePlayback &&
+			request.SourceCachePlayback->Loading == SourceCacheLoadMode::SourceStepLoading;
 		const auto refreshFrameCacheReads = [&] {
 			const auto *currentFrameCacheData = currentData ? currentData : request.DataReplay;
 			const detail::SourceFrameCacheInputIndex currentFrameCacheIndex(
@@ -12877,16 +12880,37 @@ namespace engine::imagegraph {
 					document.Timeline ? document.Timeline->Frames : 1
 				);
 				frameCacheInputReads[index] = detail::SourceFrameCacheReadPolicy(
-					document.Nodes[index].Type, cachePlaying, false, true, hit
+					document.Nodes[index].Type,
+					cachePlaying,
+					false,
+					true,
+					hit,
+					sourceStepLoading,
+					detail::SourceFrameCacheIsLoading(
+						document.Nodes[index], request, currentFrameCacheIndex, loadedFrameCacheIndex
+					)
 				);
 			}
 			for (const auto &link : plan.EffectiveLinks) {
 				if (frameCacheInputReads.empty() || link.ToPort != "surface_in") continue;
 				const size_t target = nodeIndices.at(link.ToNode), producer = nodeIndices.at(link.FromNode);
-				const bool hit = document.Nodes[target].Type == "pc.cache" &&
-								 frameCacheInputReads[target] == detail::SourceFrameCacheInputReads::None;
+				const bool hit = detail::SourceFrameCacheKnownHit(
+					document.Nodes[target],
+					request,
+					currentFrameCacheIndex,
+					loadedFrameCacheIndex,
+					document.Timeline ? document.Timeline->Frames : 1
+				);
 				frameCacheInputReads[target] = detail::SourceFrameCacheReadPolicy(
-					document.Nodes[target].Type, cachePlaying, true, !frozen[producer], hit
+					document.Nodes[target].Type,
+					cachePlaying,
+					true,
+					!frozen[producer],
+					hit,
+					sourceStepLoading,
+					detail::SourceFrameCacheIsLoading(
+						document.Nodes[target], request, currentFrameCacheIndex, loadedFrameCacheIndex
+					)
 				);
 			}
 		};

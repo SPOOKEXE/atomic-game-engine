@@ -1,0 +1,66 @@
+{
+  "source_pin": {
+    "repository_checkout": "/tmp/pixel-composer-source-b69eca232217360cf1502ef0223523d818606652",
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "sources": [
+      {
+        "path": "scripts/__node_cache/__node_cache.gml",
+        "sha256_raw_bytes": "527e8382130fd91f0040607b0d209585a0543d4156350a12180b46615515d2d9"
+      },
+      {
+        "path": "scripts/__node_cache_base/__node_cache_base.gml",
+        "sha256_raw_bytes": "08599a7a0da4ac8f8e697c573b63536cf93010c9bbca0f863916e4c4a9ed11eb"
+      },
+      {
+        "path": "scripts/node_cache/node_cache.gml",
+        "sha256_raw_bytes": "4f333ac660485560b57d86f99f87d767dff094a7d635e83383b155e83ebed71b"
+      },
+      {
+        "path": "scripts/node_cache_array/node_cache_array.gml",
+        "sha256_raw_bytes": "bd90b08058183361d0349a2c16f398a053b2391720c61970e6942da54fdd630b"
+      },
+      {
+        "path": "scripts/surface_functions/surface_functions.gml",
+        "sha256_raw_bytes": "d27420ab408d66568062005e91b79dfbfb2a2e2f044441417959803b2ea1bfb2"
+      }
+    ]
+  },
+  "source_behavior": {
+    "cache": {
+      "step": "when cache_loading is true, deserialize cache_content[cache_loading_progress] into cached_output at that same index, mark cache_result true, then increment progress by one",
+      "completion": "after increment, stop loading when progress equals the current TOTAL_FRAMES value, then call update() directly",
+      "count_basis": "current TOTAL_FRAMES, read at completion; source does not snapshot it when loading begins"
+    },
+    "cache_array": {
+      "step": "when cache_loading is true, deserialize cache_content[cache_loading_progress] into cached_output at that same index, mark cache_result true, then increment progress by one",
+      "completion": "after increment, stop loading when progress equals array_length(cache_content), then call update() directly",
+      "count_basis": "the length of the parsed cache content array"
+    },
+    "loading_and_update": "both nodes define their own step and update methods. Step processes one slot per invocation while loading and has no IS_PLAYING guard, so loading can continue while playback is paused. Cache Array update returns while loading or paused; Cache update attempts recoverCache while paused and returns. Cache completion calls update directly. Native dispatch must use the explicit source Step override and must not infer an inherited Update metadata gate.",
+    "clear": "clearCache clears/reinitializes cache storage under its source gates but does not reset cache_loading_progress, cache_content, or cache_loading",
+    "serialization": "surface_array_serialize recursively maps arrays; empty and nested arrays remain arrays. A surface leaf becomes a struct with width, height, and base64-encoded compressed buffer.",
+    "deserialization_holes": "surface-array deserialization recursively preserves nested and empty arrays. A non-array leaf that is not a struct with a buffer field returns noone. Cache loading still marks that slot's cache_result true and advances progress.",
+    "compressed_leaf": "a buffer leaf is base64-decoded, decompressed, then passed with width and height to surface_create_from_buffer"
+  },
+  "undefined_source_cases": {
+    "policy": "refuse malformed or out-of-range records explicitly; do not invent source fallback behavior or diagnostics",
+    "named_refusals": [
+      "Cache content shorter than the current TOTAL_FRAMES requirement: source indexes the next content entry before checking completion; out-of-range indexing behavior is undefined",
+      "Cache Array with empty content or progress outside the parsed content array: source indexes cache_content[progress] before checking completion; out-of-range indexing behavior is undefined",
+      "malformed base64, compressed bytes, or width/height in a buffer struct: the source calls its decoder and surface constructor without a local validation or recovery branch"
+    ],
+    "source_hole_is_defined": "a non-array value without a struct buffer field returns noone; this is distinct from malformed compressed data"
+  },
+  "native_profile": {
+    "cold_native_constructor": "initializes metadata and cursor without allocating future pixel slots",
+    "source_step": "Each actual source Step decodes only the selected slot, including while paused; evaluation reads do not advance loading.",
+    "prepared_decoded_inventories": "explicit caller observations of prepared decoded inventories are supported",
+    "progressive_evaluation": "progressive evaluation reads never advance the source cursor",
+    "completion": "completion calls update() directly",
+    "receipt_encoder": "refuses a part-loaded runtime journal, including retained tail inventory, as a complete constructor",
+    "refusal_behavior": "refuse the named undefined out-of-range and malformed compressed cases before publication",
+    "verification": "Accepted shared-working-tree joined batch89 and CPU profile validation. See docs/pixel-composer-m0/native-progressive-frame-cache-validation-2026-10-08.json; full source parity is not claimed.",
+    "receipt": "count-bearing v2 packet preserves the original serialized slot count, especially for Cache Array completion",
+    "progress": "caller-owned progress and pending-slot journal tracks the next slot and decoded-but-unpublished entries; publish the candidate state atomically"
+  }
+}

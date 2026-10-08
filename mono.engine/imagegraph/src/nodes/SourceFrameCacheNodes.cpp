@@ -15,6 +15,9 @@ namespace engine::imagegraph::detail {
 					"source frame cache requires explicit synchronous playback observations"
 				);
 			const auto &observation = *c.Request.SourceCachePlayback;
+			if (observation.Loading != SourceCacheLoadMode::CompleteReceipt &&
+				observation.Loading != SourceCacheLoadMode::SourceStepLoading)
+				return c.Fail(Status::InvalidValue, "invalid source frame-cache loading profile");
 			if (observation.Sampling != SourceCacheSampling::ObservedFrame &&
 				observation.Sampling != SourceCacheSampling::NativePlayedPrefix)
 				return c.Fail(Status::InvalidValue, "invalid source frame-cache sampling profile");
@@ -248,7 +251,43 @@ namespace engine::imagegraph::detail {
 			auto nativeCharge = c.ReserveWorkspace(0, "cache");
 			if (!nativeCharge) return false;
 			DataReplayEntry nativeRow;
-			if (loadSaved && !previous && !constructorCleared) {
+			const bool sourceStepLoading =
+				c.Request.SourceCachePlayback->Loading == SourceCacheLoadMode::SourceStepLoading;
+			if (sourceStepLoading && loadedNow && previous && !previous->SourceFrameCacheLoading) {
+				const uint64_t retained = RetainedDataReplayEntryBytes(*previous);
+				if (retained > Limits::MaximumEvaluationBytes / 4)
+					return c.Fail(
+						Status::LimitExceeded, "source cache staged receipt exceeds live byte budget", "cache"
+					);
+				// Bound borrowed receipt, staged clone and both row headers before Begin allocates.
+				const uint64_t bytes = retained * 4;
+				if (bytes > c.AvailableBytes() || !nativeCharge->Resize(bytes))
+					return c.Fail(
+						Status::LimitExceeded, "source cache staged receipt exceeds live byte budget", "cache"
+					);
+				Diagnostic diagnostic;
+				if (BeginSourceFrameCacheLoading(c.Authored, *previous, nativeRow, diagnostic, bytes) !=
+					Status::Ok)
+					return c.Fail(diagnostic);
+				previous = &nativeRow;
+			}
+			if (loadSaved && !previous && !constructorCleared && sourceStepLoading) {
+				Diagnostic diagnostic;
+				if (BeginNativeSourceFrameCacheLoading(
+						c.Authored, nativeRow, diagnostic, c.AvailableBytes()
+					) != Status::Ok)
+					return c.Fail(diagnostic);
+				nativeRow.ProcessorRow = c.ProcessorRow;
+				if (!nativeCharge->Resize(RetainedDataReplayEntryBytes(nativeRow)))
+					return c.Fail(
+						Status::LimitExceeded,
+						"source cache loading metadata exceeds live byte budget",
+						"cache"
+					);
+				previous = &nativeRow;
+				loadedNow = true;
+			}
+			if (loadSaved && !previous && !constructorCleared && !sourceStepLoading) {
 				uint64_t bytes = 0;
 				Diagnostic diagnostic;
 				const auto measured = MeasureSourceFrameCacheReceipt(c.Authored, bytes, diagnostic);
@@ -290,12 +329,15 @@ namespace engine::imagegraph::detail {
 								  ? SourceFrameCacheExistingFrame(previous, c.Request.Tick)
 								  : nullptr;
 			double animated = previous ? previous->PreviousValue : 1;
-			if (!array && !hit) {
+			if (!array &&
+				(!hit || c.Request.SourceCachePlayback->Loading == SourceCacheLoadMode::SourceStepLoading)) {
 				animated = c.Boolean("animated") ? 1 : 0;
 				if (c.FailureCode != Status::Ok) return false;
 				c.SetSourceUpdateOnFrame(animated != 0);
 			}
-			const bool enableGroup = (!hit || array) && c.Request.SourceCachePlayback->Playing &&
+			const bool loading = sourceStepLoading && previous && previous->SourceFrameCacheLoading &&
+								 previous->SourceFrameCacheLoading->Loading;
+			const bool enableGroup = !loading && (!hit || array) && c.Request.SourceCachePlayback->Playing &&
 									 c.FrameCacheSurfaceLinked && !c.FrameCacheProducerActive;
 			if (enableGroup && !GroupActionAvailable(c, groupEnabled, false)) return false;
 			const bool clearedHistory = c.FrameCacheGroupAction == CacheGroupReplayAction::Enable;
@@ -303,8 +345,10 @@ namespace engine::imagegraph::detail {
 				if (hit)
 					output = hit;
 				else
-					capture = true;
-			} else if (c.Request.SourceCachePlayback->Playing &&
+					capture =
+						!sourceStepLoading || (!loading && c.Request.SourceCachePlayback->Playing &&
+											   c.FrameCacheInputReads == SourceFrameCacheInputReads::All);
+			} else if (!loading && c.Request.SourceCachePlayback->Playing &&
 					   c.FrameCacheInputReads == SourceFrameCacheInputReads::All) {
 				const int64_t start = c.Integer("start_frame", -1), stop = c.Integer("stop_frame", -1),
 							  stride = c.Integer("step", 1);
@@ -336,8 +380,8 @@ namespace engine::imagegraph::detail {
 			if (!array && useInput && !GroupActionAvailable(c, groupEnabled, true)) return false;
 			// Negative source clocks may publish an input, but never own an array slot.
 			const bool writeFrame = capture && !c.Request.NegativeFrame && c.Request.Tick <= total;
-			// Auto-cache hits skip cacheCurrentFrame. Misses resize first, including paused misses
-			// and captures beyond the current duration; manual Cache Array resizes only on capture.
+			// Complete receipts retain the native paused-miss resize policy. Source step loading
+			// resizes only after an actual playing producer capture; loading and paused recovery do not.
 			const uint64_t frameLimit = capture ? std::min(loadLimit, total + 3) : loadLimit;
 			size_t records = 2 + (writeFrame ? 1 : 0);
 			if (previous && !clearedHistory)
@@ -387,6 +431,10 @@ namespace engine::imagegraph::detail {
 			state.Tick = c.Request.Tick;
 			state.Initialized = true;
 			state.FrameCacheConstructorCleared = constructorCleared || clearedHistory;
+			if (previous) {
+				state.SourceFrameCacheSerializedSlots = previous->SourceFrameCacheSerializedSlots;
+				state.SourceFrameCacheLoading = previous->SourceFrameCacheLoading;
+			}
 			state.PreviousValue = animated;
 			state.PreviousFrame = double(c.Request.Tick);
 			state.Values.reserve(records);

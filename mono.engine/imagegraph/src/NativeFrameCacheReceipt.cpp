@@ -16,6 +16,8 @@ namespace engine::imagegraph {
 		struct Shape {
 			uint64_t Encoded = 0, Decoded = 0;
 			size_t Nodes = 0;
+			std::optional<uint64_t> SerializedSlots;
+			uint64_t SelectedDecoded = 0;
 			bool Add(uint64_t bytes) {
 				if (bytes > Limits::MaximumArrayBytes - std::min(Encoded, Limits::MaximumArrayBytes))
 					return false;
@@ -176,10 +178,17 @@ namespace engine::imagegraph {
 			Shape &shape,
 			DataReplayEntry *row,
 			std::optional<uint64_t> requestedFrame = {},
-			bool *hasFrame = nullptr
+			bool *hasFrame = nullptr,
+			SourceArrayItem *selected = nullptr
 		) {
 			Cursor cursor{chunks.Elements, 0, 0, bytes};
-			if (cursor.UInt() != 1 || !cursor.Name(node.Type)) return false;
+			const auto version = cursor.UInt();
+			if ((version != 1 && version != 2) || !cursor.Name(node.Type)) return false;
+			if (version == 2) {
+				const auto slots = cursor.UInt();
+				if (!cursor.Good || slots > Limits::MaximumArrayElements) return false;
+				shape.SerializedSlots = slots;
+			}
 			const auto count = cursor.UInt();
 			if (!cursor.Good || count > Limits::MaximumArrayElements - 2) return false;
 			shape.Decoded = sizeof(DataReplayEntry) + node.Id.size() + SourceFrameCacheIdentity(node).size() +
@@ -189,6 +198,7 @@ namespace engine::imagegraph {
 				row->Initialized = true;
 				row->PreviousValue = 1;
 				row->LoadedCacheData = SourceFrameCacheIdentity(node);
+				row->SourceFrameCacheSerializedSlots = shape.SerializedSlots;
 				row->Values.reserve(count + 2);
 				row->Values.push_back({0, node.Type});
 				row->Values.push_back(
@@ -198,11 +208,17 @@ namespace engine::imagegraph {
 			uint32_t previous = 1;
 			for (uint32_t i = 0; i < count; ++i) {
 				const auto frame = cursor.UInt();
-				if (!cursor.Good || frame <= previous || frame >= Limits::MaximumArrayElements) return false;
+				if (!cursor.Good || frame <= previous ||
+					(shape.SerializedSlots ? uint64_t(frame) - 2 >= *shape.SerializedSlots
+										   : frame >= Limits::MaximumArrayElements))
+					return false;
 				previous = frame;
 				SourceArrayItem item;
 				uint8_t rootTag = 0;
-				if (!GetItem(cursor, row ? &item : nullptr, shape, 1, &rootTag)) return false;
+				const uint64_t before = shape.Decoded;
+				SourceArrayItem *destination = row ? &item : (requestedFrame == frame ? selected : nullptr);
+				if (!GetItem(cursor, destination, shape, 1, &rootTag)) return false;
+				if (requestedFrame == frame) shape.SelectedDecoded = shape.Decoded - before;
 				if (hasFrame && requestedFrame == frame && (rootTag == 1 || rootTag == 2)) *hasFrame = true;
 				if (!row) continue;
 				Value value;
@@ -287,9 +303,65 @@ namespace engine::imagegraph {
 		if (!Packet(*chunks, bytes, node, shape, nullptr, requestedFrame, &candidate.HasFrame))
 			return Status::Malformed;
 		candidate.DecodedBytes = shape.Decoded;
+		candidate.SerializedSlots = shape.SerializedSlots;
 		inspection = candidate;
 		return Status::Ok;
 	}
+	Status detail::DecodeSourceFrameCacheReceiptSlot(
+		const Node &node, uint64_t slot, Value &value, Diagnostic &diagnostic, uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("imagegraph.frame_cache.decode_receipt_slot");
+		const auto fail = [&](Status status, const char *message) {
+			diagnostic = {status, node.Id, std::string(SOURCE_FRAME_CACHE_NATIVE_DATA), message};
+			return status;
+		};
+		const ArrayValue *chunks;
+		uint64_t bytes;
+		const auto metadata = Metadata(node, chunks, bytes, &diagnostic);
+		if (metadata != Status::Ok) return metadata;
+		Shape measured;
+		const auto frame = slot <= UINT64_MAX - 2 ? std::optional<uint64_t>{slot + 2} : std::nullopt;
+		if (!Packet(*chunks, bytes, node, measured, nullptr, frame))
+			return fail(Status::Malformed, "native frame cache packet is malformed");
+		if (!measured.SerializedSlots)
+			return fail(
+				Status::UnsupportedExecution,
+				"progressive native loading requires original serialized slot count"
+			);
+		if (slot >= *measured.SerializedSlots)
+			return fail(
+				Status::InvalidValue, "native frame cache slot is outside original serialized inventory"
+			);
+		if (!detail::ValidRuntimeValue(value))
+			return fail(Status::InvalidValue, "prior native frame cache slot value is invalid");
+		const auto prior = ValueClonePayloadBytes(value);
+		if (!prior || maximumBytes > Limits::MaximumEvaluationBytes || *prior > maximumBytes ||
+			measured.SelectedDecoded + sizeof(Value) + 128 > maximumBytes - *prior)
+			return fail(Status::LimitExceeded, "native frame cache slot decoding exceeds byte budget");
+		SourceArrayItem item{ElementValue{int64_t{-4}}};
+		Shape decoded;
+		if (!Packet(*chunks, bytes, node, decoded, nullptr, frame, nullptr, &item))
+			return fail(Status::Malformed, "native frame cache packet changed during slot decoding");
+		Value candidate;
+		if (auto *image = std::get_if<Image>(&item.Data))
+			candidate = SurfaceValue{std::move(*image)};
+		else if (auto *items = std::get_if<std::vector<SourceArrayItem>>(&item.Data)) {
+			ArrayValue array{ValueType::Any, {}};
+			array.Items = std::move(*items);
+			candidate = std::move(array);
+		} else
+			candidate = std::get<int64_t>(std::get<ElementValue>(item.Data));
+		const auto retained = ValueClonePayloadBytes(candidate);
+		if (!detail::ValidRuntimeValue(candidate) || !retained || *retained > maximumBytes - *prior)
+			return fail(Status::LimitExceeded, "native frame cache slot capacities exceed byte budget");
+		value = std::move(candidate);
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		diagnostic = {Status::LimitExceeded, node.Id, {}, "native frame cache slot allocation failed"};
+		return diagnostic.Code;
+	}
+
 	Status EncodeSourceFrameCacheReceipt(
 		const DataReplayEntry &row, ArrayValue &chunks, Diagnostic &diagnostic, uint64_t maximumBytes
 	) try {
@@ -303,11 +375,22 @@ namespace engine::imagegraph {
 			row.LoadedCacheData.size() > Limits::MaximumTextBytes || type.empty() ||
 			row.Values.size() > Limits::MaximumArrayElements || row.LoadedCacheData.empty())
 			return fail(Status::InvalidValue, "native frame cache needs a decoded constructor row");
+		if (row.SourceFrameCacheLoading)
+			return fail(
+				Status::UnsupportedExecution, "native frame cache receipt needs completed constructor loading"
+			);
+		if (row.SourceFrameCacheSerializedSlots &&
+			*row.SourceFrameCacheSerializedSlots > Limits::MaximumArrayElements)
+			return fail(Status::LimitExceeded, "native frame cache serialized slot count exceeds bounds");
+		const uint64_t headerBytes = (row.SourceFrameCacheSerializedSlots ? 16 : 12) + type.size();
 		Shape shape;
-		shape.Encoded = 12 + type.size();
+		shape.Encoded = headerBytes;
 		uint64_t previous = 1;
 		for (size_t i = 2; i < row.Values.size(); ++i) {
-			if (row.Values[i].Frame <= previous || row.Values[i].Frame >= Limits::MaximumArrayElements ||
+			if (row.Values[i].Frame <= previous ||
+				(row.SourceFrameCacheSerializedSlots
+					 ? row.Values[i].Frame - 2 >= *row.SourceFrameCacheSerializedSlots
+					 : row.Values[i].Frame >= Limits::MaximumArrayElements) ||
 				!shape.Add(4) || !PutValue(row.Values[i].Data, shape, nullptr))
 				return fail(
 					Status::InvalidValue, "native frame cache surface tree or frame order is invalid"
@@ -328,11 +411,13 @@ namespace engine::imagegraph {
 			needed > maximumBytes - prior)
 			return fail(Status::LimitExceeded, "native frame cache encoding exceeds byte budget");
 		core::ByteWriter writer(shape.Encoded, shape.Encoded);
-		writer.WriteUInt32(1);
+		writer.WriteUInt32(row.SourceFrameCacheSerializedSlots ? 2 : 1);
 		writer.WriteString(type);
+		if (row.SourceFrameCacheSerializedSlots)
+			writer.WriteUInt32(uint32_t(*row.SourceFrameCacheSerializedSlots));
 		writer.WriteUInt32(uint32_t(row.Values.size() - 2));
 		Shape written;
-		written.Encoded = 12 + type.size();
+		written.Encoded = headerBytes;
 		for (size_t i = 2; i < row.Values.size(); ++i) {
 			writer.WriteUInt32(uint32_t(row.Values[i].Frame));
 			written.Add(4);

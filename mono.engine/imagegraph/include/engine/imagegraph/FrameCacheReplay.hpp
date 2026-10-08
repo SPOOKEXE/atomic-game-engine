@@ -10,6 +10,29 @@ namespace engine::imagegraph {
 	// Empty when serialization is disabled or no typed saved payload is authored.
 	std::string_view SourceFrameCacheSavedText(const Node &node);
 	const Value *SourceFrameCacheLastOutput(const DataReplayEntry &entry);
+	// Begin owns future inventory separately; only Step publishes an indexed source slot.
+	Status BeginSourceFrameCacheLoading(
+		const Node &node,
+		const DataReplayEntry &decoded,
+		DataReplayEntry &output,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
+	Status BeginNativeSourceFrameCacheLoading(
+		const Node &node,
+		DataReplayEntry &output,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
+	Status StepSourceFrameCacheLoading(
+		const Node &node,
+		uint64_t totalFrames,
+		const DataReplayEntry &source,
+		DataReplayEntry &output,
+		bool &completedNow,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+	);
 	// Force-clear captured slots, retaining latest output and exact saved-source identity.
 	// An empty constructor row prevents the authored receipt from loading again.
 	uint64_t ClearedSourceFrameCacheReplayBytes(const Node &node, const DataReplayState &source);
