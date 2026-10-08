@@ -35,7 +35,8 @@ namespace engine::imagegraph {
 			if (request.Scope != ComposerScope::Unrestricted && request.Scope != ComposerScope::ImageOnly)
 				return fail(Status::InvalidValue, "Composer scope is invalid");
 			if (request.Scope == ComposerScope::Unrestricted) return true;
-			if (document.Nodes.size() > Limits::MaximumNodes || outputs.size() > Limits::MaximumOutputs ||
+			if (document.Nodes.size() > Limits::MaximumNodes ||
+				document.Outputs.size() > Limits::MaximumOutputs || outputs.size() > Limits::MaximumOutputs ||
 				request.SimulationCacheCaptures.size() > Limits::MaximumNodes)
 				return fail(Status::LimitExceeded, "feedback scope cone exceeds bounds");
 			std::array<bool, Limits::MaximumNodes> visited{};
