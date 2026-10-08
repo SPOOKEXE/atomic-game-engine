@@ -141,7 +141,9 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Finish text layout and rendering.
 - [x] Add bounded source 3D recipe, geometry and projected raster stages.
 - [x] Render bounded Draw Shape 3D surface, depth and rim outputs with explicit native projection and texture-array scheduling.
-- [_] Integrate remaining 3D executors and verify licensed renderer parity.
+- [_] Disable 3D mesh, audio and video controls and execution in Image Composer while retaining saved nodes.
+- [_] Restore the full 2D Particle emitter lifecycle and image outputs.
+- [_] Implement the 2D Camera image compositor and its layer controls.
 - [x] Add bounded weighted Points Triangulate and preserve downstream corner weights.
 - [_] Implement remaining catalogue executors.
 - [_] Integrate Studio camera previews.
@@ -169,6 +171,8 @@ Isolated passes do not establish combined acceptance. See the [native validation
 - [_] fix so we can take ui elements out of the studio screen and onto other screens if possible
 
 ### v0.26
+
+- [_] Integrate remaining 3D executors and verify licensed renderer parity.
 
 - [_] Add custom profiles such as RenderPipeline: let RunProfileWorkflow select a workflow, expose its inputs and outputs as node ports, and open its inspector popup on double-click.
 - [_] Verify shared-alias Dopesheet workflows in live Studio.
