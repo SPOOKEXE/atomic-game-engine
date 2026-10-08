@@ -67,8 +67,10 @@
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/imagegraph/AudioCapture.hpp>
+#include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FeedbackHost.hpp>
+#include <engine/imagegraph/SourceCommonDispatch.hpp>
 #include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraph/WavPreview.hpp>
 #include <engine/imagegraphexport/GraphAuthoredExport.hpp>
@@ -154,6 +156,15 @@ namespace studio {
 			bool PendingClearFontObservations = false, PendingApplyFontInputs = false;
 		};
 
+		struct SourceCollectionHostState {
+			std::string OwnerId;
+			std::string SourceType;
+			std::string GroupId;
+			std::vector<std::string> Members;
+			bool RefreshNodesPending = false;
+			bool RefreshNodeDisplayPending = false;
+		};
+
 		struct State {
 			bool Initialized = false;
 			detail::ImageComposerPanels Panels;
@@ -185,6 +196,13 @@ namespace studio {
 			FontInputControls FontControls;
 			bool FontInputsActive = false;
 			bool LivePreview = true;
+			bool SourceSafeMode = false;
+			bool SourceCommonRuntimeInitialized = false;
+			engine::imagegraph::SourceNodeInitialState SourceCommonInitialState =
+				engine::imagegraph::SourceNodeInitialState::Constructed;
+			uint64_t SourceCommonRuntimeRevision = 0;
+			std::vector<engine::imagegraph::SourceCommonOwnerRecord> SourceCommonOwnerSnapshot;
+			std::vector<SourceCollectionHostState> SourceCollections;
 			bool PreviewDirty = true;
 			bool CanvasNeedsReload = false;
 			bool PreviewRequested = true;
@@ -252,6 +270,7 @@ namespace studio {
 			std::string WavSourceMessage;
 			std::string ValuePreviewPort;
 			std::string SelectedGroup;
+			std::string PendingGroupRender;
 			std::string RouteFromEndpoint;
 			std::string RouteFromPort;
 			std::string RouteToEndpoint;
@@ -297,6 +316,14 @@ namespace studio {
 			engine::core::Name RetiredPxcxThumbnailTexture;
 			uint8_t PxcxThumbnailTextureSlot = 1;
 		};
+
+		void ClearFeedbackHost(State &state) {
+			state.FeedbackHost.Clear();
+			state.SourceCommonRuntimeInitialized = false;
+			state.SourceCommonRuntimeRevision = 0;
+			state.SourceCommonOwnerSnapshot.clear();
+			state.SourceCollections.clear();
+		}
 
 		State &Composer() {
 			static State state;
@@ -462,6 +489,7 @@ namespace studio {
 			engine::imagegraph::SourceFontContext *heldFontContext = nullptr
 		) {
 			if (!RetryCacheEdit(state)) return false;
+			request.SourceSafeMode = state.SourceSafeMode;
 			const auto frame = GetImageGraphFrame(state.Playback);
 			const std::string project =
 				std::filesystem::path(state.PxcxPathDisplay.empty() ? state.GraphName : state.PxcxPathDisplay)
@@ -1117,7 +1145,7 @@ namespace studio {
 			state.FontControls.Message.clear();
 			CancelExportIntent(state, renderer);
 			CancelComposerPreview(state, renderer);
-			state.FeedbackHost.Clear();
+			ClearFeedbackHost(state);
 			state.PreviewCache.Clear();
 			state.PxcxCompletedPreview.reset();
 			if (++state.EvaluationInputRevision == 0) state.EvaluationInputRevision = 1;
@@ -1203,6 +1231,7 @@ namespace studio {
 				engine::imagegraph::EvaluationRequest request;
 				const auto &batch = *intent.Current;
 				batch.Observation.Pcx.Bind(request);
+				request.SourceSafeMode = state.SourceSafeMode;
 				detail::BindImageGraphRigid(request, rigid, batch.Observation.Playback);
 				std::unique_ptr<engine::imagegraphfont::GraphFontInputs> frozenFonts;
 				engine::imagegraph::SourceFontContext heldFontContext;
@@ -1992,6 +2021,8 @@ namespace studio {
 				return false;
 			}
 			state.Authored = std::move(candidate);
+			ClearFeedbackHost(state);
+			state.SourceCommonInitialState = engine::imagegraph::SourceNodeInitialState::Loaded;
 			state.ExportGrants.clear();
 			state.FileGrants.clear();
 			state.ImageCacheLayouts.clear();
@@ -2114,6 +2145,8 @@ namespace studio {
 			state.PxcxDiagnostics = std::move(imported.Diagnostics);
 			state.PxcxProjection = imported.Graph;
 			state.Authored = std::move(imported.Graph);
+			ClearFeedbackHost(state);
+			state.SourceCommonInitialState = engine::imagegraph::SourceNodeInitialState::Loaded;
 			state.ExportGrants.clear();
 			state.FileGrants.clear();
 			state.ImageCacheLayouts.clear();
@@ -2546,6 +2579,7 @@ namespace studio {
 				}
 				engine::imagegraphphysics::RigidProvider requestRigidProvider;
 				engine::imagegraph::EvaluationRequest request;
+				request.SourceSafeMode = state.SourceSafeMode;
 				detail::ImageGraphPreviewProvider previewProvider(
 					HostFor(state), state.PreviewObservations, request
 				);
@@ -2577,6 +2611,20 @@ namespace studio {
 					)) {
 					state.LastDiagnostic = std::move(diagnostic);
 					return;
+				}
+				if (!state.PendingGroupRender.empty()) {
+					if (!state.FeedbackHost.ForceGroup(
+							previewDocument,
+							plan,
+							state.PendingGroupRender,
+							request,
+							diagnostic,
+							previewAllowance
+						)) {
+						state.LastDiagnostic = std::move(diagnostic);
+						return;
+					}
+					state.PendingGroupRender.clear();
 				}
 				if (!detail::PrepareImageGraphAxisProcessingObservers(
 						previewDocument,
@@ -3408,6 +3456,7 @@ namespace studio {
 				state.CollectionManagers = state.History.CurrentCollections();
 			state.PublishedPxcx = {};
 			state.GroupHost.Clear();
+			state.PendingGroupRender.clear();
 			state.CacheEditBlocked = false;
 			state.CacheEditRetryKind = detail::ImageGraphCacheEditKind::AnimatorUndo;
 			PublishAuthoredDocumentChanged(state);
@@ -3646,6 +3695,8 @@ namespace studio {
 				fresh.Outputs.push_back({"output-main", "solid-1", "image"});
 				if (state.History.TryRecord(before, fresh)) {
 					state.Authored = std::move(fresh);
+					ClearFeedbackHost(state);
+					state.SourceCommonInitialState = engine::imagegraph::SourceNodeInitialState::Constructed;
 					state.ExportGrants.clear();
 					state.FileGrants.clear();
 					state.ImageCacheLayouts.clear();
@@ -3827,7 +3878,270 @@ namespace studio {
 			return true;
 		}
 
+		std::string_view SourceCollectionGroupId(
+			const engine::imagegraph::Document &document,
+			const engine::imagegraph::SourceCommonOwnerRecord &owner
+		) {
+			if (owner.NativeOwnerKind == engine::imagegraph::SourceCommonNativeOwnerKind::Group)
+				return owner.NativeOwnerId;
+			const auto group =
+				std::find_if(document.Groups.begin(), document.Groups.end(), [&](const auto &candidate) {
+					return candidate.OwnerNodeId == owner.NativeOwnerId;
+				});
+			return group == document.Groups.end() ? std::string_view{} : std::string_view(group->Id);
+		}
+
+		std::vector<std::string>
+		SourceCollectionMembers(const engine::imagegraph::Document &document, std::string_view groupId) {
+			std::vector<std::string> members;
+			for (const auto &node : document.Nodes)
+				if (node.GroupId == groupId) members.push_back(node.Id);
+			for (const auto &group : document.Groups)
+				if (group.ParentId == groupId) members.push_back(group.Id);
+			return members;
+		}
+
+		bool IsSourceCollectionOwner(
+			const engine::imagegraph::Document &document,
+			const engine::imagegraph::SourceCommonOwnerRecord &owner
+		) {
+			using namespace engine::imagegraph;
+			if (!owner.Active) return false;
+			if (owner.NativeOwnerKind == SourceCommonNativeOwnerKind::Group) {
+				if (owner.SourceType != "Node_Group" && owner.SourceType != "Node_Collection") return false;
+				const bool groupExists =
+					std::any_of(document.Groups.begin(), document.Groups.end(), [&](const auto &group) {
+						return group.Id == owner.NativeOwnerId;
+					});
+				// These are the exact native group dispatch identities accepted by
+				// SourceCommonOwnerDispatch.
+				return groupExists && SourceCommonDispatchProfile(owner.SourceType, true).Step ==
+										  SourceCommonStepKind::CollectionOverride;
+			}
+			const auto node =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &candidate) {
+					return candidate.Id == owner.NativeOwnerId;
+				});
+			if (node == document.Nodes.end()) return false;
+			const auto *entry = FindCatalogueEntry(node->Type);
+			// Core keeps CollectionOverride Step when its callback wrapper is unsupported.
+			return entry && entry->SourceNode == owner.SourceType &&
+				   SourceCommonDispatchProfile(owner.SourceType, true).Step ==
+					   SourceCommonStepKind::CollectionOverride;
+		}
+
+		void ReconcileSourceCollections(State &state) {
+			auto &collections = state.SourceCollections;
+			for (auto &collection : collections) {
+				const auto owner = std::find_if(
+					state.Authored.SourceCommonOwners.begin(),
+					state.Authored.SourceCommonOwners.end(),
+					[&](const auto &candidate) {
+						return candidate.SourceOwnerId == collection.OwnerId &&
+							   IsSourceCollectionOwner(state.Authored, candidate);
+					}
+				);
+				if (owner == state.Authored.SourceCommonOwners.end()) continue;
+				collection.SourceType = owner->SourceType;
+				const std::string_view groupId = SourceCollectionGroupId(state.Authored, *owner);
+				if (groupId.empty()) {
+					collection.OwnerId.clear();
+					continue;
+				}
+				auto members = SourceCollectionMembers(state.Authored, groupId);
+				if (collection.GroupId != groupId || collection.Members != members) {
+					collection.RefreshNodesPending = true;
+					collection.RefreshNodeDisplayPending = true;
+					collection.GroupId = groupId;
+					collection.Members = std::move(members);
+				}
+			}
+			collections.erase(
+				std::remove_if(
+					collections.begin(),
+					collections.end(),
+					[&](const auto &collection) {
+						return collection.OwnerId.empty() ||
+							   std::none_of(
+								   state.Authored.SourceCommonOwners.begin(),
+								   state.Authored.SourceCommonOwners.end(),
+								   [&](const auto &owner) {
+									   return owner.SourceOwnerId == collection.OwnerId &&
+											  IsSourceCollectionOwner(state.Authored, owner);
+								   }
+							   );
+					}
+				),
+				collections.end()
+			);
+			for (const auto &owner : state.Authored.SourceCommonOwners) {
+				if (!IsSourceCollectionOwner(state.Authored, owner)) continue;
+				if (std::any_of(collections.begin(), collections.end(), [&](const auto &item) {
+						return item.OwnerId == owner.SourceOwnerId;
+					}))
+					continue;
+				const std::string_view groupId = SourceCollectionGroupId(state.Authored, owner);
+				if (groupId.empty()) continue;
+				collections.push_back(
+					{owner.SourceOwnerId,
+					 owner.SourceType,
+					 std::string(groupId),
+					 SourceCollectionMembers(state.Authored, groupId),
+					 false,
+					 false}
+				);
+			}
+		}
+
+		bool AdvanceSourceCommonRuntime(
+			State &state,
+			engine::imagegraph::EvaluationRequest &request,
+			engine::imagegraph::Diagnostic &diagnostic
+		) try {
+			using namespace engine::imagegraph;
+			const bool hasCommonOwners = !state.Authored.SourceCommonOwners.empty();
+			if (!hasCommonOwners && !state.SourceCommonRuntimeInitialized &&
+				state.SourceCommonOwnerSnapshot.empty())
+				return true;
+			if (!hasCommonOwners && state.SourceCommonRuntimeInitialized &&
+				state.SourceCommonRuntimeRevision == state.DocumentRevision &&
+				state.SourceCommonOwnerSnapshot.empty())
+				return true;
+			Plan plan;
+			const auto compile = hasCommonOwners || state.Authored.Outputs.empty()
+									 ? CompileSourceCommonRuntime(state.Authored, plan, diagnostic)
+									 : Compile(state.Authored, plan, diagnostic);
+			if (compile != Status::Ok) return false;
+			request.GroupAuthoringRevision = state.DocumentRevision;
+			if (!state.SourceCommonRuntimeInitialized && hasCommonOwners) {
+				const auto status = state.FeedbackHost.InitializeSourceCommonRuntime(
+					state.Authored,
+					plan,
+					request,
+					state.SourceCommonInitialState,
+					diagnostic,
+					state.DocumentRevision,
+					state.EvaluationInputRevision
+				);
+				if (status != Status::Ok) return false;
+				state.SourceCommonRuntimeInitialized = true;
+				state.SourceCommonRuntimeRevision = state.DocumentRevision;
+				state.SourceCommonOwnerSnapshot = state.Authored.SourceCommonOwners;
+				ReconcileSourceCollections(state);
+			} else if (state.SourceCommonRuntimeRevision != state.DocumentRevision || !hasCommonOwners) {
+				std::vector<SourceCommonWriterIdentity> resetWriters;
+				const auto appendWriter = [&](std::string_view writer, std::string_view port) {
+					if (writer.empty() || port.empty()) return;
+					if (std::none_of(resetWriters.begin(), resetWriters.end(), [&](const auto &item) {
+							return item.OwnerId == writer && item.Port == port;
+						}))
+						resetWriters.push_back({writer, port});
+				};
+				for (const auto &owner : state.Authored.SourceCommonOwners) {
+					const auto previous = std::find_if(
+						state.SourceCommonOwnerSnapshot.begin(),
+						state.SourceCommonOwnerSnapshot.end(),
+						[&](const auto &candidate) { return candidate.SourceOwnerId == owner.SourceOwnerId; }
+					);
+					if (previous == state.SourceCommonOwnerSnapshot.end() ||
+						(previous->UpdateExpression == owner.UpdateExpression &&
+						 previous->UpdateOverrideInstance == owner.UpdateOverrideInstance &&
+						 previous->UpdateAnimatorOwnerId == owner.UpdateAnimatorOwnerId &&
+						 previous->UpdateAnimatorPort == owner.UpdateAnimatorPort))
+						continue;
+					appendWriter(previous->UpdateAnimatorOwnerId, previous->UpdateAnimatorPort);
+					appendWriter(owner.UpdateAnimatorOwnerId, owner.UpdateAnimatorPort);
+				}
+				for (const auto &previous : state.SourceCommonOwnerSnapshot) {
+					const auto current = std::find_if(
+						state.Authored.SourceCommonOwners.begin(),
+						state.Authored.SourceCommonOwners.end(),
+						[&](const auto &owner) { return owner.SourceOwnerId == previous.SourceOwnerId; }
+					);
+					if (current != state.Authored.SourceCommonOwners.end()) continue;
+					appendWriter(previous.UpdateAnimatorOwnerId, previous.UpdateAnimatorPort);
+				}
+				const SourceCommonRuntimeReconcile operation{
+					SourceNodeInitialState::Constructed, resetWriters
+				};
+				const auto status = state.FeedbackHost.ReconcileSourceCommonRuntime(
+					state.Authored,
+					plan,
+					request,
+					operation,
+					diagnostic,
+					state.DocumentRevision,
+					state.EvaluationInputRevision
+				);
+				if (status != Status::Ok) return false;
+				state.SourceCommonRuntimeInitialized = true;
+				state.SourceCommonRuntimeRevision = state.DocumentRevision;
+				state.SourceCommonOwnerSnapshot = state.Authored.SourceCommonOwners;
+				ReconcileSourceCollections(state);
+			}
+			if (!hasCommonOwners) return true;
+
+			bool refreshNodeDisplayHandled = true;
+			if (std::any_of(
+					state.SourceCollections.begin(), state.SourceCollections.end(), [](const auto &row) {
+						return row.RefreshNodeDisplayPending;
+					}
+				)) {
+				ReloadCanvas(state);
+				refreshNodeDisplayHandled = state.AdapterError.empty();
+			}
+			std::vector<std::array<std::string_view, 1>> refreshGroups;
+			std::vector<SourceCommonRuntimeCollectionStepObservation> collections;
+			refreshGroups.reserve(state.SourceCollections.size());
+			collections.reserve(state.SourceCollections.size());
+			for (const auto &row : state.SourceCollections) {
+				std::optional<SourcePurityRefresh> refresh;
+				if (row.RefreshNodesPending) {
+					refreshGroups.push_back({std::string_view(row.GroupId)});
+					refresh = SourcePurityRefresh{SourcePurityRefreshEvent::Membership, refreshGroups.back()};
+				}
+				collections.push_back(
+					{row.OwnerId,
+					 row.SourceType,
+					 row.RefreshNodesPending,
+					 row.RefreshNodeDisplayPending,
+					 row.RefreshNodeDisplayPending && refreshNodeDisplayHandled,
+					 std::move(refresh)}
+				);
+			}
+			const SourceCommonRuntimeObservations observations{{}, collections};
+			const auto status = state.FeedbackHost.StepSourceCommonRuntime(
+				state.Authored,
+				plan,
+				request,
+				observations,
+				diagnostic,
+				state.DocumentRevision,
+				state.EvaluationInputRevision
+			);
+			if (status != Status::Ok) return false;
+			for (auto &row : state.SourceCollections)
+				row.RefreshNodesPending = row.RefreshNodeDisplayPending = false;
+			return true;
+		} catch (const std::bad_alloc &) {
+			diagnostic = {
+				engine::imagegraph::Status::LimitExceeded,
+				{},
+				{},
+				"Studio source common observations exceed memory bounds"
+			};
+			return false;
+		}
+
 		void DrawProjectSettings(State &state) {
+			bool sourceSafeMode = state.SourceSafeMode;
+			if (ImGui::Checkbox("Safe mode (native source host)", &sourceSafeMode)) {
+				state.SourceSafeMode = sourceSafeMode;
+				if (++state.EvaluationInputRevision == 0) state.EvaluationInputRevision = 1;
+				RequestPreview(state, true);
+			}
+			ImGui::TextDisabled("Host policy only. It is not saved in the source project.");
+			ImGui::Separator();
 			if (!state.Authored.Project) {
 				ImGui::TextUnformatted("Fresh-project defaults");
 				ImGui::TextUnformatted("Surface 32 x 32");
@@ -5711,6 +6025,88 @@ namespace studio {
 			RequestPreview(state, true);
 		}
 
+		bool DrawSourceCommonOwnerControls(
+			State &state,
+			engine::imagegraph::SourceCommonNativeOwnerKind ownerKind,
+			std::string_view nativeOwnerId
+		) {
+			using namespace engine::imagegraph;
+			using engine::imagegraph::SourceCommonNativeOwnerKind;
+			const auto owner = std::find_if(
+				state.Authored.SourceCommonOwners.begin(),
+				state.Authored.SourceCommonOwners.end(),
+				[&](const auto &candidate) {
+					return candidate.NativeOwnerKind == ownerKind && candidate.NativeOwnerId == nativeOwnerId;
+				}
+			);
+			if (owner == state.Authored.SourceCommonOwners.end()) return false;
+			ImGui::Separator();
+			ImGui::TextUnformatted("Source common sockets");
+			bool showUpdate = owner->ShowUpdateTrigger;
+			bool outputMetadata = owner->OutMeta;
+			const bool updateChanged = ImGui::Checkbox("Show Update trigger", &showUpdate);
+			const bool metadataChanged = ImGui::Checkbox("Show Updated and metadata", &outputMetadata);
+			const bool changed = updateChanged || metadataChanged;
+			const std::string sourceOwnerId = owner->SourceOwnerId;
+			if (changed) {
+				const bool accepted = ApplyDocumentEdit(state, [&](Document &document) {
+					const auto target = std::find_if(
+						document.SourceCommonOwners.begin(),
+						document.SourceCommonOwners.end(),
+						[&](const auto &candidate) { return candidate.SourceOwnerId == sourceOwnerId; }
+					);
+					if (target != document.SourceCommonOwners.end()) {
+						target->ShowUpdateTrigger = showUpdate;
+						target->OutMeta = outputMetadata;
+					}
+				});
+				if (accepted) ReloadCanvas(state);
+				return accepted;
+			}
+			Plan plan;
+			Diagnostic planDiagnostic;
+			if (CompileSourceCommonRuntime(state.Authored, plan, planDiagnostic) != Status::Ok) {
+				ImGui::TextDisabled("Common getter state is unavailable.");
+				return false;
+			}
+			EvaluationRequest request;
+			request.SourceSafeMode = state.SourceSafeMode;
+			(void)SetFrameTime(request, GetImageGraphFrame(state.Playback));
+			const auto showValue = [&](SourceCommonSelector selector, const char *label) {
+				EvaluatedValue value;
+				Diagnostic diagnostic;
+				const auto status = state.FeedbackHost.ReadSourceCommonGetter(
+					state.Authored,
+					plan,
+					sourceOwnerId,
+					selector,
+					request,
+					value,
+					diagnostic,
+					state.DocumentRevision,
+					state.EvaluationInputRevision
+				);
+				if (status != Status::Ok) {
+					ImGui::TextDisabled("%s: unavailable", label);
+				} else if (const auto *boolean = std::get_if<bool>(&value.Data)) {
+					ImGui::Text("%s: %s", label, *boolean ? "true" : "false");
+				} else if (const auto *text = std::get_if<std::string>(&value.Data)) {
+					ImGui::Text("%s: %s", label, text->c_str());
+				} else if (const auto *position = std::get_if<Vector2>(&value.Data)) {
+					ImGui::Text("%s: (%.3f, %.3f)", label, position->X, position->Y);
+				} else {
+					ImGui::TextDisabled("%s: held value type is not displayed", label);
+				}
+			};
+			if (showUpdate) showValue(SourceCommonSelector::Update, "Update");
+			if (outputMetadata) {
+				showValue(SourceCommonSelector::Updated, "Updated");
+				showValue(SourceCommonSelector::Name, "Name");
+				showValue(SourceCommonSelector::Position, "Position");
+			}
+			return false;
+		}
+
 		void DrawInspector(
 			State &state,
 			engine::render::Renderer &renderer,
@@ -5726,6 +6122,10 @@ namespace studio {
 			ImGui::TextUnformatted(node->Type.c_str());
 			ImGui::SameLine();
 			ImGui::TextDisabled("%s", node->Id.c_str());
+			if (DrawSourceCommonOwnerControls(
+					state, engine::imagegraph::SourceCommonNativeOwnerKind::Node, node->Id
+				))
+				return;
 			const engine::imagegraph::NodeSchema *schema = engine::imagegraph::FindSchema(node->Type);
 			if (schema == nullptr) {
 				ImGui::TextDisabled("This node type is not registered in this build.");
@@ -6261,7 +6661,7 @@ namespace studio {
 				ImGui::TextUnformatted("Feedback starts with a transparent image at project size.");
 			}
 			if (state.FeedbackHost.Active() && ImGui::Button("Reset feedback preview")) {
-				state.FeedbackHost.Clear();
+				ClearFeedbackHost(state);
 				state.PreviewCache.Clear();
 				state.PreviewSequence.Invalidate();
 				RequestPreview(state, true);
@@ -6557,6 +6957,49 @@ namespace studio {
 			);
 			if (groupNow != state.Authored.Groups.end()) {
 				ImGui::Separator();
+				if (DrawSourceCommonOwnerControls(
+						state, engine::imagegraph::SourceCommonNativeOwnerKind::Group, groupNow->Id
+					))
+					return;
+				bool pureFunction = groupNow->PureFunction;
+				if (ImGui::Checkbox("Pure function", &pureFunction)) {
+					const std::string groupId = groupNow->Id;
+					ApplyDocumentEdit(state, [&](Document &document) {
+						const auto group = std::find_if(
+							document.Groups.begin(), document.Groups.end(), [&](const auto &candidate) {
+								return candidate.Id == groupId;
+							}
+						);
+						if (group != document.Groups.end()) {
+							document.FormatVersion = std::max(document.FormatVersion, uint32_t{10});
+							group->PureFunction = pureFunction;
+						}
+					});
+					return;
+				}
+				bool renderActive = groupNow->RenderActive;
+				if (ImGui::Checkbox("Automatic rendering", &renderActive)) {
+					const std::string groupId = groupNow->Id;
+					ApplyDocumentEdit(state, [&](Document &document) {
+						const auto group = std::find_if(
+							document.Groups.begin(), document.Groups.end(), [&](const auto &candidate) {
+								return candidate.Id == groupId;
+							}
+						);
+						if (group != document.Groups.end()) {
+							document.FormatVersion = std::max(document.FormatVersion, uint32_t{10});
+							group->RenderActive = renderActive;
+						}
+					});
+					return;
+				}
+				ImGui::SameLine();
+				if (ImGui::Button("Render group")) {
+					state.PendingGroupRender = groupNow->Id;
+					state.PreviewCache.Clear();
+					state.PreviewSequence.Invalidate();
+					RequestPreview(state, true);
+				}
 				ImGui::TextUnformatted("Group name");
 				ImGui::SameLine(92.0f);
 				ImGui::InputText("##group-name", state.GroupName.data(), state.GroupName.size());
@@ -6571,6 +7014,11 @@ namespace studio {
 							}
 						);
 						if (found != document.Groups.end()) found->Name = name;
+						for (auto &owner : document.SourceCommonOwners)
+							if (owner.NativeOwnerKind ==
+									engine::imagegraph::SourceCommonNativeOwnerKind::Group &&
+								owner.NativeOwnerId == id)
+								owner.DisplayNamePresent = true;
 					});
 					ReloadCanvas(state);
 					return;
@@ -8122,7 +8570,7 @@ namespace studio {
 			[&] {
 				CancelExportIntent(state, renderer);
 				CancelComposerPreview(state, renderer);
-				state.FeedbackHost.Clear();
+				ClearFeedbackHost(state);
 				state.Host.ResetFiles();
 				state.ComposerExports.Pending.clear();
 				state.ExportUpdate = {};
@@ -8239,18 +8687,24 @@ namespace studio {
 		engine::imagegraph::EvaluationRequest vectorRequest;
 		vectorRequest.HostProvider = &HostFor(state);
 		engine::imagegraph::SourceFontContext vectorRequestFontContext;
-		const bool vectorInputsBound = BindObservations(state, vectorRequest, &vectorRequestFontContext);
+		bool vectorInputsBound = BindObservations(state, vectorRequest, &vectorRequestFontContext);
 		if (vectorInputsBound) {
 			detail::BindImageGraphRigid(vectorRequest, vectorRequestRigidProvider, state.Playback);
 			(void)engine::imagegraph::SetFrameTime(vectorRequest, GetImageGraphFrame(state.Playback));
 			vectorRequest.AudioFrames = state.AudioFrames;
 			vectorRequest.AudioClips = state.AudioClips;
 			vectorRequest.MaximumImageDimension = PREVIEW_MAXIMUM_DIMENSION;
+			if (!AdvanceSourceCommonRuntime(state, vectorRequest, state.LastDiagnostic))
+				vectorInputsBound = false;
+			vectorRequest.GroupRender = state.FeedbackHost.PreparedGroups(
+				state.DocumentRevision, state.EvaluationInputRevision, GetImageGraphFrame(state.Playback)
+			);
 			state.VectorControls.Refresh(
 				state.Authored, vectorRequest, state.DocumentRevision, state.EvaluationInputRevision
 			);
 		}
-		if (vectorInputsBound && (state.LivePreview || state.PreviewRequested))
+		if (vectorInputsBound && (state.LivePreview || state.PreviewRequested) &&
+			(state.Authored.FormatVersion < 10 || state.Authored.Groups.empty() || vectorRequest.GroupRender))
 			state.NodePreviews.Refresh(
 				state.Authored,
 				vectorRequest,

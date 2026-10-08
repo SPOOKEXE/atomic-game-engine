@@ -397,6 +397,35 @@ TEST_CASE(
 	CHECK(result.Source.Links.back().ToNode == pin.Id);
 	Document isolated = result.Graph;
 	std::erase_if(isolated.Nodes, [&](const auto &node) { return node.Id != number.Id; });
+	std::vector<std::pair<std::string, std::string>> retiredCommonWriters;
+	for (const auto &owner : isolated.SourceCommonOwners)
+		if (owner.NativeOwnerKind == engine::imagegraph::SourceCommonNativeOwnerKind::Node &&
+			std::none_of(isolated.Nodes.begin(), isolated.Nodes.end(), [&](const auto &node) {
+				return node.Id == owner.NativeOwnerId;
+			}))
+			retiredCommonWriters.emplace_back(owner.UpdateAnimatorOwnerId, owner.UpdateAnimatorPort);
+	if (!retiredCommonWriters.empty()) {
+		REQUIRE(isolated.SourceAnimators);
+		const auto retiredCommonWriter = [&](std::string_view ownerId, std::string_view port) {
+			return std::any_of(
+				retiredCommonWriters.begin(), retiredCommonWriters.end(), [&](const auto &writer) {
+					return writer.first == ownerId && writer.second == port;
+				}
+			);
+		};
+		std::erase_if(isolated.SourceAnimators->Detached, [&](const auto &row) {
+			return retiredCommonWriter(row.OwnerId, row.Id);
+		});
+		std::erase_if(isolated.SourceAnimators->DetachedValues, [&](const auto &row) {
+			return retiredCommonWriter(row.NodeId, row.Port);
+		});
+	}
+	std::erase_if(isolated.SourceCommonOwners, [&](const auto &owner) {
+		return owner.NativeOwnerKind == engine::imagegraph::SourceCommonNativeOwnerKind::Node &&
+			   std::none_of(isolated.Nodes.begin(), isolated.Nodes.end(), [&](const auto &node) {
+				   return node.Id == owner.NativeOwnerId;
+			   });
+	});
 	std::erase_if(isolated.Keyframes, [&](const auto &key) { return key.NodeId != number.Id; });
 	std::erase_if(isolated.Tracks, [&](const auto &track) { return track.NodeId != number.Id; });
 	isolated.Links.clear();

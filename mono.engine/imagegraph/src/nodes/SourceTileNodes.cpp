@@ -326,6 +326,7 @@ namespace engine::imagegraph::detail {
 		bool TileConvert(NodeContext &context) {
 			const TilesetData *tileset = TileResource(context, "input_1");
 			const Image *source = context.Input("surface");
+			context.SetSourceUpdateOnFrame(context.Boolean("animated"));
 			if (!tileset || !TileSurface(context, source, "surface")) return false;
 			const auto layout = CheckedSurfaceLayout(
 						   source->Width,

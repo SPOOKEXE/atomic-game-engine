@@ -52,7 +52,17 @@ namespace engine::imagegraph {
 		std::string Failure;
 		std::optional<SourceCameraEvaluationPolicy> CameraPolicy{};
 		std::optional<uint32_t> CameraRow{};
+		// Final callback state. Missing observations cannot establish source Collection purity.
+		std::optional<bool> SourceUpdateOnFrame{};
 	};
+	constexpr bool HostObservesSourceUpdateOnFrame(std::string_view type) {
+		return type == "pc.lua_compute" || type == "pc.lua_global" || type == "pc.lua_surface" ||
+			   type == "pc.datetime_get" || type == "pc.ase_layer" || type == "pc.spout_receive";
+	}
+	inline bool ValidHostSourceFrameObservation(const HostNodeCapture &capture) {
+		return !capture.SourceUpdateOnFrame || (capture.State == HostCaptureState::Recorded &&
+												HostObservesSourceUpdateOnFrame(capture.Authored.Type));
+	}
 	// Resolve controls before host work, without executing the selected capability node.
 	// Failed preparation leaves the previous capture unchanged.
 	Status PrepareHostCapture(

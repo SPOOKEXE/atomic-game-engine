@@ -9,6 +9,7 @@
 namespace engine::imagegraph {
 	namespace {
 		std::optional<uint64_t> ReceiptBytes(const HostNodeCapture &receipt) {
+			if (!ValidHostSourceFrameObservation(receipt)) return {};
 			const auto node = NodeClonePayloadBytes(receipt.Authored);
 			if (!node) return {};
 			uint64_t bytes = sizeof(HostNodeCapture) + *node;
@@ -32,7 +33,13 @@ namespace engine::imagegraph {
 				return add(text.capacity() - std::max(text.size(), std::string{}.capacity()));
 			};
 			for (const auto *text :
-				 {&n.Id, &n.Type, &n.GroupId, &n.InstanceBase, &n.SourceDisplayName, &n.SourceInternalName})
+				 {&n.Id,
+				  &n.Type,
+				  &n.GroupId,
+				  &n.InstanceBase,
+				  &n.SourceParentInputBase,
+				  &n.SourceDisplayName,
+				  &n.SourceInternalName})
 				if (!textExtra(*text)) return {};
 			for (const auto *values : {&n.Values, &n.SourceProperties})
 				for (const auto &value : *values)

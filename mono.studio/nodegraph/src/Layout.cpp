@@ -266,6 +266,7 @@ namespace nodegraph {
 							true,
 							0.0f,
 							centre,
+							inputs[row].Visible,
 						}
 					);
 				}
@@ -277,6 +278,7 @@ namespace nodegraph {
 							false,
 							layout.Width,
 							centre,
+							outputs[row].Visible,
 						}
 					);
 				}
@@ -309,6 +311,7 @@ namespace nodegraph {
 						true,
 						0.0f,
 						centre,
+						inputs[row].Visible,
 					}
 				);
 			}
@@ -320,6 +323,7 @@ namespace nodegraph {
 						false,
 						layout.Width,
 						centre,
+						outputs[row].Visible,
 					}
 				);
 			}

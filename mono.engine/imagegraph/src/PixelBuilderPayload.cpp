@@ -33,7 +33,8 @@ namespace engine::imagegraph {
 					left.State,
 					left.Failure,
 					left.CameraPolicy,
-					left.CameraRow
+					left.CameraRow,
+					left.SourceUpdateOnFrame
 				) !=
 				std::tie(
 					right.Authored,
@@ -45,7 +46,8 @@ namespace engine::imagegraph {
 					right.State,
 					right.Failure,
 					right.CameraPolicy,
-					right.CameraRow
+					right.CameraRow,
+					right.SourceUpdateOnFrame
 				))
 				return false;
 			return SameSequence(
@@ -201,7 +203,8 @@ namespace engine::imagegraph::detail {
 			return true;
 		}
 		bool FrozenCapture(const HostNodeCapture &capture) {
-			if (ValidateNativeSamplerBindings(capture.Authored)) return false;
+			if (ValidateNativeSamplerBindings(capture.Authored) || !ValidHostSourceFrameObservation(capture))
+				return false;
 			if (!std::isfinite(capture.Subframe) || capture.Subframe < 0 || capture.Subframe >= 1 ||
 				uint8_t(capture.State) > uint8_t(HostCaptureState::Failed) ||
 				(capture.CameraPolicy && !ValidSourceCameraEvaluationPolicy(*capture.CameraPolicy)) ||

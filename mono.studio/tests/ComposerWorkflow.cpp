@@ -11,11 +11,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <fstream>
 #include <nodegraph/Editor.hpp>
 #include <studio/PxcxSave.hpp>
+#include <tuple>
 TEST_SUITE_ID("studio.composer_workflow")
 TEST_DEPENDS("studio.imagegraph")
 TEST_DEPENDS("studio.pxcxsave")
@@ -284,6 +286,15 @@ TEST_CASE(
 		key.SourceKeyId.clear();
 	for (auto &key : reloaded.Graph.Keyframes)
 		key.SourceKeyId.clear();
+	// PXC import keeps source socket order; dragging keys sorts their native addresses.
+	const auto canonicalizeKeys = [](Document &document) {
+		std::sort(document.Keyframes.begin(), document.Keyframes.end(), [](const auto &a, const auto &b) {
+			return std::tie(a.NodeId, a.Port, a.NegativeFrame, a.Tick, a.Subframe) <
+				   std::tie(b.NodeId, b.Port, b.NegativeFrame, b.Tick, b.Subframe);
+		});
+	};
+	canonicalizeKeys(semanticAuthored);
+	canonicalizeKeys(reloaded.Graph);
 	CHECK(reloaded.Graph == semanticAuthored);
 }
 

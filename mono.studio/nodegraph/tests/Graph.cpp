@@ -386,3 +386,31 @@ TEST_CASE("union ports accept every possible output member", "[nodegraph][union]
 	CHECK(graph.CanConnect(source, "Out", sink, "A") == LinkResult::TypeMismatch);
 	CHECK(graph.CanConnect(source, "Out", sink, "Extra") == LinkResult::Made);
 }
+
+TEST_CASE("Bounded wildcard leaves preserve strict union and unknown type checks", "[graph]") {
+	using namespace nodegraph;
+	DataType scalar;
+	scalar.Id = "fixture.bounded.scalar";
+	DataTypes::Register(scalar);
+	DataType nodeReference;
+	nodeReference.Id = "fixture.bounded.node_reference";
+	DataTypes::Register(nodeReference);
+	DataType wildcard;
+	wildcard.Id = "fixture.bounded.any";
+	wildcard.WildcardMembers = {scalar.Id, "fixture.bounded.unknown"};
+	DataTypes::Register(wildcard);
+	CHECK(DataTypes::CanConnect(scalar.Id, wildcard.Id));
+	CHECK(DataTypes::CanConnect(wildcard.Id, scalar.Id));
+	CHECK_FALSE(DataTypes::CanConnect(nodeReference.Id, wildcard.Id));
+	CHECK_FALSE(DataTypes::CanConnect(wildcard.Id, nodeReference.Id));
+	CHECK_FALSE(DataTypes::CanConnect("fixture.bounded.unknown", wildcard.Id));
+	CHECK_FALSE(DataTypes::CanConnect(wildcard.Id, "fixture.bounded.unknown"));
+	DataType unionType;
+	unionType.Id = "fixture.bounded.union";
+	unionType.Members = {scalar.Id};
+	DataTypes::Register(unionType);
+	CHECK_FALSE(DataTypes::CanConnect(wildcard.Id, unionType.Id));
+	CHECK_FALSE(DataTypes::CanConnect(unionType.Id, wildcard.Id));
+	CHECK(DataTypes::CanConnect(scalar.Id, unionType.Id));
+	CHECK(DataTypes::CanConnect(unionType.Id, scalar.Id));
+}

@@ -780,6 +780,7 @@ namespace nodegraph {
 		for (const auto &node : graph.Nodes()) {
 			if (!Visible(node)) continue;
 			for (const auto &port : Layout(node).Ports) {
+				if (!port.Visible) continue;
 				if (!DragPortAccepted(node.Id, port.Name, port.Input)) continue;
 				++count;
 				const auto candidate = text + "\n" + std::to_string(node.Id) + ":" + port.Name;
@@ -854,6 +855,7 @@ namespace nodegraph {
 		// a port on the first row is never painted over.
 		const float small = Look.Sizes.SmallSize * Scale;
 		for (const PlacedPort &port : layout.Ports) {
+			if (!port.Visible) continue;
 			ImVec2 at;
 			ToScreen(node.X + port.X, node.Y + port.Y, at.x, at.y);
 
@@ -1073,6 +1075,7 @@ namespace nodegraph {
 			}
 			const NodeLayout layout = Layout(*walk);
 			for (const PlacedPort &placed : layout.Ports) {
+				if (!placed.Visible) continue;
 				const float dx = graphX - (walk->X + placed.X);
 				const float dy = graphY - (walk->Y + placed.Y);
 				if (dx * dx + dy * dy <= reach * reach) {
@@ -2093,7 +2096,7 @@ namespace nodegraph {
 			for (const auto &node : graph.Nodes()) {
 				if (!Visible(node)) continue;
 				for (const auto &port : Layout(node).Ports)
-					if (DragCanConnect(graph, node.Id, port.Name, port.Input))
+					if (port.Visible && DragCanConnect(graph, node.Id, port.Name, port.Input))
 						DragAccepted[node.Id].insert((port.Input ? "i:" : "o:") + port.Name);
 			}
 		}

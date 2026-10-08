@@ -196,7 +196,7 @@ namespace engine::imagegraph {
 			document.Outputs.size() > Limits::MaximumOutputs)
 			return fail(Status::LimitExceeded, "instance recapture document counts exceed bounds");
 		for (const auto &node : document.Nodes) {
-			if (!name(node.Id) || !name(node.InstanceBase) ||
+			if (!name(node.Id) || !name(node.InstanceBase) || !name(node.SourceParentInputBase) ||
 				node.DynamicInputs.size() > MaximumDynamicInputsForNode(node) ||
 				node.Values.size() > Limits::MaximumArrayElements ||
 				node.SourceProperties.size() > Limits::MaximumPropertiesPerNode ||
@@ -260,7 +260,7 @@ namespace engine::imagegraph {
 				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &item) {
 					return item.Id == target.NodeId;
 				});
-			if (node == document.Nodes.end() || node->InstanceBase.empty() ||
+			if (node == document.Nodes.end() || detail::SourceInputInstanceBase(*node, target.Port).empty() ||
 				!detail::AliasedSourceInput(*node, target.Port) ||
 				!previous.Binding(target.NodeId, target.Port))
 				return fail(
@@ -321,7 +321,7 @@ namespace engine::imagegraph {
 					});
 				const auto base =
 					std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &item) {
-						return item.Id == node->InstanceBase;
+						return item.Id == detail::SourceInputInstanceBase(*node, target.Port);
 					});
 				if (base == document.Nodes.end())
 					return fail(
@@ -344,7 +344,8 @@ namespace engine::imagegraph {
 						return item.NodeId == base->Id && item.Port == target.Port;
 					}
 				);
-				if (!base->InstanceBase.empty() && source == candidate->Bindings.end())
+				if (!detail::SourceInputInstanceBase(*base, target.Port).empty() &&
+					source == candidate->Bindings.end())
 					return fail(
 						Status::InvalidGroup,
 						"instance recapture immediate base has no input alias",

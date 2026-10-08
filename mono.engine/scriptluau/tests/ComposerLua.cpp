@@ -57,6 +57,7 @@ TEST_CASE(
 	call.Request.Subframe = .5;
 	INFO(call.Failure);
 	REQUIRE(call.Run(*host));
+	CHECK_FALSE(call.Output.SourceUpdateOnFrame.has_value());
 	const auto &result = std::get<StructValue>(call.ValueAt("return_value"));
 	REQUIRE(result.Data);
 	REQUIRE(result.Data->Fields.size() == 3);
@@ -80,20 +81,27 @@ TEST_CASE("Composer Lua global sessions and frame scheduling retain explicit hos
 		{{"lua_code", std::string{"counter=10"}}, {"run_order", EnumValue{0}}}
 	};
 	REQUIRE(global.Run(*host));
+	CHECK(global.Output.SourceUpdateOnFrame == false);
+	global.Request.Tick = 1;
+	REQUIRE(global.Run(*host));
+	CHECK(global.Output.SourceUpdateOnFrame == false);
 	auto call = Compute("counter=counter+1 return counter");
 	call.Authored.Values.push_back({"execution_thread", global.ValueAt("execution_thread")});
 	call.Authored.Values.push_back({"execute_on_frame", false});
 	REQUIRE(call.Run(*host));
 	CHECK(std::get<double>(call.ValueAt("return_value")) == 11);
+	CHECK(call.Output.SourceUpdateOnFrame == false);
 	call.Request.Tick = 1;
 	REQUIRE(call.Run(*host));
 	CHECK(std::get<double>(call.ValueAt("return_value")) == 11);
 	call.Authored.Values.back().Data = true;
 	REQUIRE(call.Run(*host));
 	CHECK(std::get<double>(call.ValueAt("return_value")) == 12);
+	CHECK(call.Output.SourceUpdateOnFrame == true);
 	call.Request.Tick = 2;
 	REQUIRE(call.Run(*host));
 	CHECK(std::get<double>(call.ValueAt("return_value")) == 13);
+	CHECK(call.Output.SourceUpdateOnFrame == true);
 	host->Reset();
 	CHECK_FALSE(call.Run(*host));
 	CHECK(call.Failure.find("stale") != std::string::npos);

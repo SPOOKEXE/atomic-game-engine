@@ -297,3 +297,48 @@ TEST_CASE("Spiral source noone differs from an explicitly authored empty path", 
 	Runtime emptyRuntime(explicitEmpty.Run());
 	Near(emptyRuntime.Path.PointRatio(0), 0, -1, 1);
 }
+
+TEST_CASE(
+	"Spiral owned value identity includes controls tables buffers and cache", "[imagegraph][path_spiral]"
+) {
+	Graph graph;
+	const auto original = graph.Run();
+	REQUIRE(original.SourceOperation);
+	REQUIRE(original.SourceOperation->Spiral);
+	SECTION("Controls") {
+		auto changed = original;
+		changed.SourceOperation->Spiral->Frequency += 1;
+		CHECK(changed != original);
+		CHECK(original.SourceOperation->Spiral->Frequency == 1);
+	}
+	SECTION("Amplitude table") {
+		auto changed = original;
+		REQUIRE_FALSE(changed.SourceOperation->Spiral->AmplitudeCurve.empty());
+		changed.SourceOperation->Spiral->AmplitudeCurve[0] += .5;
+		CHECK(changed != original);
+		CHECK(original.SourceOperation->Spiral->AmplitudeCurve[0] == 1);
+	}
+	SECTION("Direction table") {
+		auto changed = original;
+		changed.SourceOperation->Spiral->DirectionCurve.assign(33, .5);
+		CHECK(changed != original);
+		CHECK(original.SourceOperation->Spiral->DirectionCurve.empty());
+	}
+	SECTION("Reusable buffers") {
+		auto changed = original;
+		changed.SourceOperation->Spiral->Buffers[1].Weight += 7;
+		CHECK(changed != original);
+		CHECK(original.SourceOperation->Spiral->Buffers[1].Weight == 1);
+	}
+	SECTION("Sample cache") {
+		auto changed = original;
+		changed.SourceOperation->Spiral->Cache.emplace_back();
+		CHECK(changed != original);
+		CHECK(original.SourceOperation->Spiral->Cache.empty());
+	}
+	SECTION("Evaluation memo handles are not durable identity") {
+		auto changed = original;
+		changed.SourceOperation->EvaluationMemoId += 17;
+		CHECK(changed == original);
+	}
+}

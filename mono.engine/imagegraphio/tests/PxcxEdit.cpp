@@ -49,6 +49,63 @@ namespace {
 	}
 	Value EvaluateNumber(const PxcxImport &imported, double frame = 0) {
 		Document graph = imported.Graph;
+		REQUIRE(graph.Groups.empty());
+		REQUIRE(graph.SourceAnimators);
+		CHECK(graph.SourceAnimators->Bindings.empty());
+		REQUIRE(graph.SourceCommonOwners.size() == 2);
+		const auto numberOwner = std::find_if(
+			graph.SourceCommonOwners.begin(), graph.SourceCommonOwners.end(), [](const auto &owner) {
+				return owner.NativeOwnerKind == SourceCommonNativeOwnerKind::Node &&
+					   owner.NativeOwnerId == "number";
+			}
+		);
+		REQUIRE(numberOwner != graph.SourceCommonOwners.end());
+		const std::pair numberWriter{numberOwner->UpdateAnimatorOwnerId, numberOwner->UpdateAnimatorPort};
+		const auto removedWriter = [&](std::string_view ownerId, std::string_view port) {
+			return std::any_of(
+				graph.SourceCommonOwners.begin(), graph.SourceCommonOwners.end(), [&](const auto &owner) {
+					return owner.NativeOwnerKind == SourceCommonNativeOwnerKind::Node &&
+						   owner.NativeOwnerId != "number" && owner.UpdateAnimatorOwnerId == ownerId &&
+						   owner.UpdateAnimatorPort == port;
+				}
+			);
+		};
+		CHECK(
+			std::count_if(
+				graph.SourceCommonOwners.begin(), graph.SourceCommonOwners.end(), [](const auto &owner) {
+					return owner.NativeOwnerKind == SourceCommonNativeOwnerKind::Node &&
+						   owner.NativeOwnerId != "number";
+				}
+			) == 1
+		);
+		std::erase_if(graph.SourceAnimators->Detached, [&](const auto &row) {
+			return removedWriter(row.OwnerId, row.Id);
+		});
+		std::erase_if(graph.SourceAnimators->DetachedValues, [&](const auto &row) {
+			return removedWriter(row.NodeId, row.Port);
+		});
+		std::erase_if(graph.SourceCommonOwners, [](const auto &owner) {
+			return owner.NativeOwnerKind == SourceCommonNativeOwnerKind::Node &&
+				   owner.NativeOwnerId != "number";
+		});
+		REQUIRE(
+			std::any_of(
+				graph.SourceAnimators->Detached.begin(),
+				graph.SourceAnimators->Detached.end(),
+				[&](const auto &row) {
+					return row.OwnerId == numberWriter.first && row.Id == numberWriter.second;
+				}
+			)
+		);
+		REQUIRE(
+			std::any_of(
+				graph.SourceAnimators->DetachedValues.begin(),
+				graph.SourceAnimators->DetachedValues.end(),
+				[&](const auto &row) {
+					return row.NodeId == numberWriter.first && row.Port == numberWriter.second;
+				}
+			)
+		);
 		std::erase_if(graph.Nodes, [](const auto &node) { return node.Id != "number"; });
 		REQUIRE(graph.Nodes.size() == 1);
 		const auto *entry = FindCatalogueEntry(graph.Nodes.front().Type);

@@ -8,6 +8,7 @@
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/NoiseField.hpp>
+#include <engine/imagegraph/PortCompatibility.hpp>
 #include <engine/imagegraph/SourceKeyframeTransition.hpp>
 #include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraph/SourceTrackTransition.hpp>
@@ -48,6 +49,64 @@ namespace studio {
 			"value.array",	   "value.array_get",	 "value.noise_field",	  "value.sample_noise"
 		};
 		constexpr std::string_view IMAGE_PORT_TYPE = "imagegraph.image";
+		constexpr std::string_view COMMON_TRIGGER_TYPE = "imagegraph.trigger";
+		constexpr std::string_view SOURCE_COMMON_UPDATE = "pxcx.update_in_trigger";
+		constexpr std::string_view SOURCE_COMMON_UPDATED = "pxcx.updated_out_trigger";
+		constexpr std::string_view SOURCE_COMMON_NAME = "pxcx.metadata.0";
+		constexpr std::string_view SOURCE_COMMON_POSITION = "pxcx.metadata.1";
+		std::string CanvasType(engine::imagegraph::ValueType type);
+
+		std::vector<nodegraph::PortSpec> SourceCommonInputs() {
+			return {{std::string(SOURCE_COMMON_UPDATE), std::string(COMMON_TRIGGER_TYPE)}};
+		}
+
+		std::vector<nodegraph::PortSpec> SourceCommonOutputs() {
+			using engine::imagegraph::ValueType;
+			return {
+				{std::string(SOURCE_COMMON_UPDATED), std::string(COMMON_TRIGGER_TYPE)},
+				{std::string(SOURCE_COMMON_NAME), CanvasType(ValueType::Text)},
+				{std::string(SOURCE_COMMON_POSITION), CanvasType(ValueType::Vector2)}
+			};
+		}
+
+		bool IsSourceCommonPort(std::string_view port) {
+			return port == SOURCE_COMMON_UPDATE || port == SOURCE_COMMON_UPDATED ||
+				   port == SOURCE_COMMON_NAME || port == SOURCE_COMMON_POSITION;
+		}
+
+		void
+		AppendSourceCommonPorts(nodegraph::Node &canvasNode, bool showUpdateTrigger, bool outputMetadata) {
+			const auto *type = nodegraph::NodeTypes::Find(canvasNode.Type);
+			std::vector<nodegraph::PortSpec> inputs = canvasNode.InputPorts ? *canvasNode.InputPorts
+													  : type				? type->Inputs
+															 : std::vector<nodegraph::PortSpec>{};
+			if (!canvasNode.InputPorts)
+				inputs.insert(inputs.end(), canvasNode.DynamicInputs.begin(), canvasNode.DynamicInputs.end());
+			auto commonInputs = SourceCommonInputs();
+			for (auto &port : commonInputs)
+				if (std::none_of(inputs.begin(), inputs.end(), [&](const auto &item) {
+						return item.Name == port.Name;
+					}))
+					inputs.push_back(std::move(port));
+			for (auto &port : inputs)
+				if (port.Name == SOURCE_COMMON_UPDATE) port.Visible = showUpdateTrigger;
+			canvasNode.InputPorts = std::move(inputs);
+
+			std::vector<nodegraph::PortSpec> outputs = canvasNode.OutputPorts ? *canvasNode.OutputPorts
+													   : type				  ? type->Outputs
+															  : std::vector<nodegraph::PortSpec>{};
+			auto commonOutputs = SourceCommonOutputs();
+			for (auto &port : commonOutputs)
+				if (std::none_of(outputs.begin(), outputs.end(), [&](const auto &item) {
+						return item.Name == port.Name;
+					}))
+					outputs.push_back(std::move(port));
+			for (auto &port : outputs)
+				if (port.Name == SOURCE_COMMON_UPDATED || port.Name == SOURCE_COMMON_NAME ||
+					port.Name == SOURCE_COMMON_POSITION)
+					port.Visible = outputMetadata;
+			canvasNode.OutputPorts = std::move(outputs);
+		}
 
 		bool ValidFramesPerSecond(double framesPerSecond) {
 			if (!std::isfinite(framesPerSecond) || framesPerSecond <= 0.0) return false;
@@ -60,26 +119,88 @@ namespace studio {
 			return "imagegraph." + std::string(engine::imagegraph::ValueTypeName(type));
 		}
 
-		std::string CanvasPortType(const engine::imagegraph::PortSchema &port) {
-			if (port.Alternatives.empty()) return CanvasType(port.Type);
+		std::string CatalogueOutputType(engine::imagegraph::ValueType type) {
+			if (type == engine::imagegraph::ValueType::Any) return "imagegraph.catalogue_any";
+			return "imagegraph.catalogue." + std::string(engine::imagegraph::ValueTypeName(type));
+		}
+
+		std::string StrictOutputType(engine::imagegraph::ValueType type) {
+			return "imagegraph.strict." + std::string(engine::imagegraph::ValueTypeName(type));
+		}
+
+		// Separate output leaves keep directional source casts out of native links and explicit unions.
+		std::string CanvasCataloguePortType(
+			const engine::imagegraph::PortSchema &port, bool catalogue, bool exact = false
+		) {
+			using namespace engine::imagegraph;
+			if (port.Direction == PortDirection::Output && port.Alternatives.empty())
+				return catalogue ? CatalogueOutputType(port.Type) : CanvasType(port.Type);
 			nodegraph::DataType type;
-			type.Id = "imagegraph.union";
-			type.Tint = nodegraph::Colour::Hex(0xffffff);
-			for (const auto member : port.Alternatives) {
-				type.Id += "." + std::string(engine::imagegraph::ValueTypeName(member));
-				if (!type.Label.empty()) type.Label += " / ";
-				type.Label += engine::imagegraph::ValueTypeName(member);
-				type.Members.push_back(CanvasType(member));
+			type.Id = "imagegraph.port.";
+			type.Id +=
+				port.Direction == PortDirection::Output
+					? "output.union"
+					: (!port.Alternatives.empty()
+						   ? "input.union"
+						   : (exact ? "input.exact" : (catalogue ? "input.catalogue" : "input.native")));
+			const auto *valueType = nodegraph::DataTypes::Find(CanvasType(port.Type));
+			if (!valueType) return CanvasType(port.Type);
+			type.Tint = port.Alternatives.empty() ? valueType->Tint : nodegraph::Colour::Hex(0xffffff);
+			if (port.Alternatives.empty()) type.Description = valueType->Description;
+			const auto add = [&](std::string member) {
+				if (std::find(type.Members.begin(), type.Members.end(), member) == type.Members.end())
+					type.Members.push_back(std::move(member));
+			};
+			if (!port.Alternatives.empty()) {
+				for (const auto member : port.Alternatives) {
+					type.Id += "." + std::string(ValueTypeName(member));
+					if (!type.Label.empty()) type.Label += " / ";
+					type.Label += ValueTypeName(member);
+					add(StrictOutputType(member));
+					if (port.Direction == PortDirection::Input) {
+						add(CanvasType(member));
+						add(CatalogueOutputType(member));
+					}
+				}
+			} else {
+				type.Id += "." + std::string(ValueTypeName(port.Type));
+				type.Label = valueType->Label;
+				add(CanvasType(port.Type));
+				add(StrictOutputType(port.Type));
+				for (size_t index = 0; index <= static_cast<size_t>(ValueType::Noise3DVector3); ++index) {
+					const auto source = static_cast<ValueType>(index);
+					if (exact ? source != port.Type : !CatalogueJunctionCompatible(source, port.Type))
+						continue;
+					add(CatalogueOutputType(source));
+					if (catalogue) add(CanvasType(source));
+				}
 			}
 			nodegraph::DataTypes::Register(type);
 			return type.Id;
 		}
 
+		std::string CanvasNoisePortType(
+			const engine::imagegraph::Node &node, const engine::imagegraph::PortSchema &port
+		) {
+			return CanvasCataloguePortType(
+				port, false, node.Type == "value.noise_field" && port.Id == "position"
+			);
+		}
+
 		std::optional<engine::imagegraph::ValueType> ValueTypeFromCanvas(std::string_view type) {
-			if (type == IMAGE_PORT_TYPE) return engine::imagegraph::ValueType::Image;
-			constexpr std::string_view PREFIX = "imagegraph.";
-			if (!type.starts_with(PREFIX)) return std::nullopt;
-			return engine::imagegraph::ParseValueTypeName(type.substr(PREFIX.size()));
+			using namespace engine::imagegraph;
+			if (type == IMAGE_PORT_TYPE) return ValueType::Image;
+			if (type == "imagegraph.catalogue_any") return ValueType::Any;
+			constexpr std::string_view prefixes[] = {
+				"imagegraph.port.input.native.",
+				"imagegraph.port.input.catalogue.",
+				"imagegraph.port.input.exact.",
+				"imagegraph.catalogue.",
+				"imagegraph."
+			};
+			for (const auto prefix : prefixes)
+				if (type.starts_with(prefix)) return ParseValueTypeName(type.substr(prefix.size()));
+			return std::nullopt;
 		}
 
 		nodegraph::Colour PortTint(engine::imagegraph::ValueType type) {
@@ -265,6 +386,7 @@ namespace studio {
 			using engine::imagegraph::ValueType;
 			uint32_t required = 1;
 			for (const Node &node : document.Nodes) {
+				if (!node.SourceParentInputBase.empty()) required = std::max(required, 10u);
 				if (!node.DynamicInputs.empty()) required = std::max(required, 2u);
 				if (!node.DynamicOutputs.empty() || !node.SourceProperties.empty())
 					required = std::max(required, 9u);
@@ -280,6 +402,7 @@ namespace studio {
 				}
 			}
 			for (const engine::imagegraph::Group &group : document.Groups) {
+				if (!group.RenderActive || !group.PureFunction) required = std::max(required, 10u);
 				if (!group.ParentId.empty() || !group.Ports.empty()) required = std::max(required, 2u);
 			}
 			if (!document.Junctions.empty()) required = std::max(required, 2u);
@@ -302,7 +425,7 @@ namespace studio {
 			for (const auto &track : document.Tracks)
 				if (track.QuaternionMode) required = std::max(required, 8u);
 			if (document.Timeline) required = std::max(required, 5u);
-			if (document.Timeline && document.Timeline->SourceBounds) required = 9;
+			if (document.Timeline && document.Timeline->SourceBounds) required = std::max(required, 9u);
 			if (document.Project) {
 				required = std::max(required, 7u);
 				const auto &project = *document.Project;
@@ -859,6 +982,32 @@ namespace studio {
 	}
 
 	void RegisterImageGraphNodeTypes() {
+		nodegraph::NodeType junctionView;
+		junctionView.Id = "studio.imagegraph.junction";
+		junctionView.Title = "Junction";
+		junctionView.Category = "Image Graph Interfaces";
+		junctionView.Hidden = true;
+		junctionView.Accent = nodegraph::Colour::Hex(0x262626);
+		nodegraph::NodeTypes::Register(junctionView);
+		nodegraph::DataType triggerType;
+		if (const auto *boolean =
+				nodegraph::DataTypes::Find(CanvasType(engine::imagegraph::ValueType::Boolean)))
+			triggerType = *boolean;
+		triggerType.Id = COMMON_TRIGGER_TYPE;
+		triggerType.Label = "Trigger";
+		triggerType.Description = "Boolean source trigger";
+		triggerType.Members = {CanvasType(engine::imagegraph::ValueType::Boolean)};
+		nodegraph::DataTypes::Register(triggerType);
+
+		nodegraph::NodeType commonGroupView;
+		commonGroupView.Id = "studio.imagegraph.source_common_group";
+		commonGroupView.Title = "Source common";
+		commonGroupView.Category = "Image Graph Interfaces";
+		commonGroupView.Hidden = true;
+		commonGroupView.Accent = nodegraph::Colour::Hex(0x3b3b3b);
+		commonGroupView.Inputs = SourceCommonInputs();
+		commonGroupView.Outputs = SourceCommonOutputs();
+		nodegraph::NodeTypes::Register(commonGroupView);
 		RegisterDataType(engine::imagegraph::ValueType::Boolean, "Boolean");
 		RegisterDataType(engine::imagegraph::ValueType::Integer, "Integer");
 		RegisterDataType(engine::imagegraph::ValueType::Scalar, "Scalar");
@@ -893,6 +1042,35 @@ namespace studio {
 			RegisterDataType(type, std::string(engine::imagegraph::ValueTypeName(type)).c_str());
 		}
 
+		for (size_t index = 0; index <= static_cast<size_t>(engine::imagegraph::ValueType::Noise3DVector3);
+			 ++index) {
+			const auto value = static_cast<engine::imagegraph::ValueType>(index);
+			// Include every schema leaf, including Font, before registering projected unions.
+			if (!nodegraph::DataTypes::Find(CanvasType(value)))
+				RegisterDataType(value, std::string(engine::imagegraph::ValueTypeName(value)).c_str());
+			for (const auto &id : {CatalogueOutputType(value), StrictOutputType(value)}) {
+				nodegraph::DataType leaf = *nodegraph::DataTypes::Find(CanvasType(value));
+				leaf.Id = id;
+				nodegraph::DataTypes::Register(leaf);
+			}
+		}
+
+		// Serialized per-node sockets must resolve before any native document has been loaded.
+		for (size_t index = 0; index <= static_cast<size_t>(engine::imagegraph::ValueType::Noise3DVector3);
+			 ++index) {
+			const auto value = static_cast<engine::imagegraph::ValueType>(index);
+			const engine::imagegraph::PortSchema port{"", value, engine::imagegraph::PortDirection::Input};
+			CanvasCataloguePortType(port, false);
+			CanvasCataloguePortType(port, true);
+		}
+		for (const auto value :
+			 {engine::imagegraph::ValueType::Scalar,
+			  engine::imagegraph::ValueType::Vector2,
+			  engine::imagegraph::ValueType::Vector3})
+			CanvasCataloguePortType(
+				{"position", value, engine::imagegraph::PortDirection::Input}, false, true
+			);
+
 		const auto registerSchema =
 			[](const engine::imagegraph::NodeSchema &schema, std::string title, std::string category) {
 				nodegraph::NodeType type;
@@ -901,7 +1079,12 @@ namespace studio {
 				type.Category = std::move(category);
 				type.Accent = nodegraph::Colour::Hex(0x262626);
 				for (const engine::imagegraph::PortSchema &port : schema.Ports) {
-					nodegraph::PortSpec socket{std::string(port.Id), CanvasPortType(port)};
+					nodegraph::PortSpec socket{
+						std::string(port.Id),
+						CanvasCataloguePortType(
+							port, engine::imagegraph::FindCatalogueEntry(schema.Type) != nullptr
+						)
+					};
 					if (port.Direction == engine::imagegraph::PortDirection::Input) {
 						socket.Suggest =
 							imagegraph_choices::Suggested(imagegraph_choices::Input(schema.Type, port.Id));
@@ -1089,6 +1272,11 @@ namespace studio {
 		ids = {};
 		error.clear();
 		RegisterImageGraphNodeTypes();
+		const size_t sourceGroupViews = std::count_if(
+			document.SourceCommonOwners.begin(), document.SourceCommonOwners.end(), [](const auto &owner) {
+				return owner.NativeOwnerKind == engine::imagegraph::SourceCommonNativeOwnerKind::Group;
+			}
+		);
 
 		if (document.Nodes.size() > engine::imagegraph::Limits::MaximumNodes ||
 			document.Links.size() > engine::imagegraph::Limits::MaximumLinks ||
@@ -1096,7 +1284,8 @@ namespace studio {
 			document.Junctions.size() > engine::imagegraph::Limits::MaximumJunctions ||
 			document.Outputs.size() > engine::imagegraph::Limits::MaximumOutputs ||
 			document.Keyframes.size() > engine::imagegraph::Limits::MaximumKeyframes ||
-			document.Nodes.size() >= std::numeric_limits<nodegraph::NodeId>::max()) {
+			document.Nodes.size() + document.Junctions.size() + sourceGroupViews >=
+				std::numeric_limits<nodegraph::NodeId>::max()) {
 			error = "image graph exceeds canvas limits";
 			return false;
 		}
@@ -1160,6 +1349,11 @@ namespace studio {
 		}
 		std::unordered_map<std::string, const Node *> nodesById;
 		nodesById.reserve(document.Nodes.size());
+		std::unordered_map<std::string, const engine::imagegraph::SourceCommonOwnerRecord *>
+			sourceCommonNodes;
+		for (const auto &owner : document.SourceCommonOwners)
+			if (owner.NativeOwnerKind == engine::imagegraph::SourceCommonNativeOwnerKind::Node)
+				sourceCommonNodes.emplace(owner.NativeOwnerId, &owner);
 		for (size_t index = 0; index < document.Nodes.size(); index++) {
 			const Node &authored = document.Nodes[index];
 			if (authored.DynamicInputs.size() >
@@ -1200,7 +1394,13 @@ namespace studio {
 			canvasNode.Y = static_cast<float>(authored.Position.Y);
 			canvasNode.DynamicInputs.reserve(authored.DynamicInputs.size());
 			for (const engine::imagegraph::DynamicInput &input : authored.DynamicInputs) {
-				canvasNode.DynamicInputs.push_back({input.Id, CanvasType(input.Type)});
+				canvasNode.DynamicInputs.push_back(
+					{input.Id,
+					 CanvasCataloguePortType(
+						 {input.Id, input.Type, engine::imagegraph::PortDirection::Input},
+						 engine::imagegraph::FindCatalogueEntry(authored.Type) != nullptr
+					 )}
+				);
 			}
 			if (physical == opaquePorts.end() &&
 				(authored.Type == "pc.array_split" || !authored.DynamicOutputs.empty() ||
@@ -1209,7 +1409,12 @@ namespace studio {
 				 engine::imagegraph::IsNoiseImageGenerator(authored.Type))) {
 				canvasNode.OutputPorts.emplace();
 				for (const auto &port : detail::ImageGraphOutputPorts(authored, &document))
-					canvasNode.OutputPorts->push_back({std::string(port.Id), CanvasType(port.Type)});
+					canvasNode.OutputPorts->push_back(
+						{std::string(port.Id),
+						 CanvasCataloguePortType(
+							 port, engine::imagegraph::FindCatalogueEntry(authored.Type) != nullptr
+						 )}
+					);
 			}
 			if (authored.Type == "value.noise_field" || authored.Type == "value.sample_noise") {
 				canvasNode.InputPorts.emplace();
@@ -1220,9 +1425,14 @@ namespace studio {
 							engine::imagegraph::NoiseNodePort(authored, port.Id, port.Direction);
 						if (instance)
 							canvasNode.InputPorts->push_back(
-								{std::string(instance->Id), CanvasPortType(*instance)}
+								{std::string(instance->Id), CanvasNoisePortType(authored, *instance)}
 							);
 					}
+			}
+			if (sourceCommonNodes.contains(authored.Id)) {
+				const auto *owner = sourceCommonNodes.at(authored.Id);
+				AppendSourceCommonPorts(canvasNode, owner->ShowUpdateTrigger, owner->OutMeta);
+				ids.SourceCommonNativeNodes.insert(canvasId);
 			}
 			if (const nodegraph::NodeType *type = nodegraph::NodeTypes::Find(authored.Type)) {
 				for (const nodegraph::WidgetSpec &widget : type->Widgets) {
@@ -1236,6 +1446,117 @@ namespace studio {
 			ids.OriginalPositions.emplace(authored.Id, authored.Position);
 			while (ids.IssuedNodeIds.contains("node-" + std::to_string(ids.NextNodeId)))
 				ids.NextNodeId++;
+		}
+		std::unordered_map<std::string, const engine::imagegraph::GroupPort *> boundaryPorts;
+		for (const auto &group : document.Groups) {
+			if (group.Ports.size() > engine::imagegraph::Limits::MaximumGroupPorts) {
+				error = "image graph group exceeds the interface socket limit";
+				graph.Clear();
+				ids = {};
+				return false;
+			}
+			for (const auto &port : group.Ports) {
+				if (port.Id.size() > engine::imagegraph::Limits::MaximumTextBytes ||
+					port.JunctionId.size() > engine::imagegraph::Limits::MaximumTextBytes ||
+					!boundaryPorts.emplace(port.JunctionId, &port).second) {
+					error = "image graph boundary socket identity is invalid or repeated";
+					graph.Clear();
+					ids = {};
+					return false;
+				}
+			}
+		}
+		// Junctions are canvas views of durable routes, never executable document Nodes.
+		for (size_t index = 0; index < document.Junctions.size(); ++index) {
+			const auto &junction = document.Junctions[index];
+			if (junction.Id.empty() || junction.Id.size() > engine::imagegraph::Limits::MaximumTextBytes ||
+				!engine::imagegraph::ParseValueTypeName(engine::imagegraph::ValueTypeName(junction.Type))
+					 .has_value() ||
+				ids.ToCanvas.contains(junction.Id)) {
+				error = "image graph junction identity or type is invalid";
+				graph.Clear();
+				ids = {};
+				return false;
+			}
+			nodegraph::Node view;
+			view.Id = static_cast<nodegraph::NodeId>(document.Nodes.size() + index + 1);
+			view.Type = "studio.imagegraph.junction";
+			view.Label = "Junction: " + junction.Id;
+			view.X = static_cast<float>((index % 16) * 240);
+			view.Y = static_cast<float>((index / 16) * 80);
+			const auto inputType = CanvasCataloguePortType(
+				{"value", junction.Type, engine::imagegraph::PortDirection::Input}, true
+			);
+			const auto outputType = CanvasCataloguePortType(
+				{"value", junction.Type, engine::imagegraph::PortDirection::Output}, true
+			);
+			view.InputPorts = std::vector<nodegraph::PortSpec>{{"value", inputType}};
+			view.OutputPorts = std::vector<nodegraph::PortSpec>{{"value", outputType}};
+			if (const auto socket = boundaryPorts.find(junction.Id); socket != boundaryPorts.end()) {
+				const auto *port = socket->second;
+				const bool input = port->Direction == engine::imagegraph::PortDirection::Input;
+				view.Label = std::string(input ? "Group input: " : "Group output: ") + port->Id;
+				const auto boundary = nodesById.find(port->ControlNodeId);
+				if (boundary != nodesById.end()) {
+					const double limit = std::numeric_limits<float>::max();
+					view.X = static_cast<float>(
+						std::clamp(boundary->second->Position.X + (input ? -240 : 240), -limit, limit)
+					);
+					view.Y = static_cast<float>(boundary->second->Position.Y);
+				}
+			}
+			graph.Adopt(view);
+			ids.ToCanvas.emplace(junction.Id, view.Id);
+			ids.ToDocument.emplace(view.Id, junction.Id);
+			ids.IssuedNodeIds.insert(junction.Id);
+		}
+		std::unordered_map<std::string, const engine::imagegraph::SourceCommonOwnerRecord *>
+			sourceCommonGroups;
+		for (const auto &owner : document.SourceCommonOwners)
+			if (owner.NativeOwnerKind == engine::imagegraph::SourceCommonNativeOwnerKind::Group)
+				sourceCommonGroups.emplace(owner.NativeOwnerId, &owner);
+		for (size_t index = 0; index < document.Groups.size(); ++index) {
+			const auto &group = document.Groups[index];
+			if (!sourceCommonGroups.contains(group.Id)) continue;
+			if (!std::isfinite(group.SourcePosition.X) || !std::isfinite(group.SourcePosition.Y) ||
+				std::abs(group.SourcePosition.X) > std::numeric_limits<float>::max() ||
+				std::abs(group.SourcePosition.Y) > std::numeric_limits<float>::max()) {
+				error = "source Group owner position is outside canvas range";
+				graph.Clear();
+				ids = {};
+				return false;
+			}
+			const auto owner = sourceCommonGroups.at(group.Id);
+			if (ids.ToCanvas.size() + 1 >= std::numeric_limits<nodegraph::NodeId>::max()) {
+				error = "image graph source owner views exceed canvas limits";
+				graph.Clear();
+				ids = {};
+				return false;
+			}
+			nodegraph::Node view;
+			view.Id =
+				static_cast<nodegraph::NodeId>(document.Nodes.size() + document.Junctions.size() + index + 1);
+			view.Type = "studio.imagegraph.source_common_group";
+			view.Label = owner->DisplayNamePresent ? group.Name : owner->SourceType;
+			view.X = static_cast<float>(group.SourcePosition.X);
+			view.Y = static_cast<float>(group.SourcePosition.Y);
+			AppendSourceCommonPorts(view, owner->ShowUpdateTrigger, owner->OutMeta);
+			graph.Adopt(view);
+			ids.SourceCommonGroupViews.emplace(owner->SourceOwnerId, view.Id);
+			ids.ToCanvas.emplace(owner->NativeOwnerId, view.Id);
+			ids.ToDocument.emplace(view.Id, owner->SourceOwnerId);
+			ids.SourceCommonNativeNodes.insert(view.Id);
+		}
+		for (const auto &[nativeId, owner] : sourceCommonNodes) {
+			const auto canvasNode = ids.ToCanvas.find(nativeId);
+			if (canvasNode != ids.ToCanvas.end())
+				ids.ToCanvas.emplace(owner->SourceOwnerId, canvasNode->second);
+		}
+		for (const auto &[nativeId, owner] : sourceCommonGroups) {
+			(void)nativeId;
+			const auto view = ids.SourceCommonGroupViews.find(owner->SourceOwnerId);
+			if (view != ids.SourceCommonGroupViews.end())
+				ids.ToCanvas.emplace(owner->SourceOwnerId, view->second);
 		}
 		for (const engine::imagegraph::Link &link : document.Links) {
 			ids.IssuedNodeIds.insert(link.FromNode);
@@ -1269,13 +1590,25 @@ namespace studio {
 			while (ids.IssuedGroupIds.contains("group-" + std::to_string(ids.NextGroupId)))
 				ids.NextGroupId++;
 			std::vector<nodegraph::NodeId> members;
+			bool hasDocumentMembers = false;
 			for (const Node &node : document.Nodes) {
-				if (node.GroupId == authored.Id) members.push_back(ids.ToCanvas.at(node.Id));
+				if (node.GroupId == authored.Id) {
+					members.push_back(ids.ToCanvas.at(node.Id));
+					hasDocumentMembers = true;
+				}
 			}
-			if (members.empty()) {
-				ids.EmptyGroups.insert(authored.Id);
-				continue;
+			for (const auto &junction : document.Junctions)
+				if (junction.GroupId == authored.Id) {
+					members.push_back(ids.ToCanvas.at(junction.Id));
+					hasDocumentMembers = true;
+				}
+			if (!hasDocumentMembers) ids.EmptyGroups.insert(authored.Id);
+			if (const auto sourceOwner = sourceCommonGroups.find(authored.Id);
+				sourceOwner != sourceCommonGroups.end()) {
+				const auto view = ids.SourceCommonGroupViews.find(sourceOwner->second->SourceOwnerId);
+				if (view != ids.SourceCommonGroupViews.end()) members.push_back(view->second);
 			}
+			if (members.empty()) continue;
 			const nodegraph::GroupId canvasId =
 				graph.Group(std::move(members), authored.Name, nodegraph::Colour::Hex(0x262626));
 			if (canvasId == nodegraph::NO_GROUP) {
@@ -1305,7 +1638,7 @@ namespace studio {
 		return true;
 	}
 
-	bool SaveImageGraphCanvas(
+	static bool SaveImageGraphCanvasCandidate(
 		const nodegraph::Graph &graph,
 		const engine::imagegraph::Document &basis,
 		ImageGraphCanvasIds &ids,
@@ -1313,7 +1646,9 @@ namespace studio {
 		std::string &error
 	) {
 		error.clear();
-		if (graph.Nodes().size() > engine::imagegraph::Limits::MaximumNodes ||
+		if (graph.Nodes().size() > engine::imagegraph::Limits::MaximumNodes +
+									   engine::imagegraph::Limits::MaximumJunctions +
+									   engine::imagegraph::Limits::MaximumGroups ||
 			graph.Links().size() + ids.UnmappedLinks.size() > engine::imagegraph::Limits::MaximumLinks ||
 			graph.Groups().size() > engine::imagegraph::Limits::MaximumGroups ||
 			basis.Junctions.size() > engine::imagegraph::Limits::MaximumJunctions ||
@@ -1333,8 +1668,20 @@ namespace studio {
 		for (const Node &node : basis.Nodes)
 			oldNodes.emplace(node.Id, &node);
 
+		std::unordered_set<std::string_view> junctionIds;
+		junctionIds.reserve(basis.Junctions.size());
+		for (const auto &junction : basis.Junctions)
+			junctionIds.insert(junction.Id);
 		std::unordered_set<std::string> liveDocumentIds;
 		liveDocumentIds.reserve(graph.Nodes().size());
+		std::unordered_map<nodegraph::NodeId, const engine::imagegraph::SourceCommonOwnerRecord *>
+			sourceCommonGroupViews;
+		for (const auto &owner : basis.SourceCommonOwners)
+			if (owner.NativeOwnerKind == engine::imagegraph::SourceCommonNativeOwnerKind::Group) {
+				const auto view = ids.SourceCommonGroupViews.find(owner.SourceOwnerId);
+				if (view != ids.SourceCommonGroupViews.end())
+					sourceCommonGroupViews.emplace(view->second, &owner);
+			}
 		for (const nodegraph::Node &canvasNode : graph.Nodes()) {
 			if (canvasNode.DynamicInputs.size() >
 				engine::imagegraph::MaximumDynamicInputsForType(canvasNode.Type)) {
@@ -1343,6 +1690,40 @@ namespace studio {
 			}
 			const std::string documentId = EnsureDocumentId(ids, canvasNode.Id);
 			liveDocumentIds.insert(documentId);
+			if (ids.SourceCommonNativeNodes.contains(canvasNode.Id))
+				for (const auto &owner : basis.SourceCommonOwners)
+					if (owner.NativeOwnerKind == engine::imagegraph::SourceCommonNativeOwnerKind::Node &&
+						owner.NativeOwnerId == documentId)
+						liveDocumentIds.insert(owner.SourceOwnerId);
+			if (const auto sourceView = sourceCommonGroupViews.find(canvasNode.Id);
+				sourceView != sourceCommonGroupViews.end()) {
+				if (canvasNode.Type != "studio.imagegraph.source_common_group") {
+					error = "source Group owner view changed its representation type";
+					return false;
+				}
+				const auto group =
+					std::find_if(basis.Groups.begin(), basis.Groups.end(), [&](const auto &candidate) {
+						return candidate.Id == sourceView->second->NativeOwnerId;
+					});
+				if (group == basis.Groups.end() || !std::isfinite(canvasNode.X) ||
+					!std::isfinite(canvasNode.Y)) {
+					error = "source Group owner view has no valid authored Group";
+					return false;
+				}
+				continue;
+			}
+			if (junctionIds.contains(documentId)) {
+				if (canvasNode.Type != "studio.imagegraph.junction") {
+					error = "canvas junction view changed its representation type";
+					return false;
+				}
+				continue;
+			}
+			if (canvasNode.Type == "studio.imagegraph.junction" ||
+				document.Nodes.size() >= engine::imagegraph::Limits::MaximumNodes) {
+				error = "canvas contains an unbound junction view or too many authored nodes";
+				return false;
+			}
 			Node authored;
 			if (const auto old = oldNodes.find(documentId); old != oldNodes.end()) {
 				authored = *old->second;
@@ -1357,6 +1738,7 @@ namespace studio {
 			if (!opaque) authored.DynamicInputs.clear();
 			authored.DynamicInputs.reserve(canvasNode.DynamicInputs.size());
 			for (const nodegraph::PortSpec &input : canvasNode.DynamicInputs) {
+				if (IsSourceCommonPort(input.Name)) continue;
 				if (opaque) continue;
 				const engine::imagegraph::NodeSchema *schema = engine::imagegraph::FindSchema(authored.Type);
 				const std::optional<engine::imagegraph::ValueType> valueType =
@@ -1387,6 +1769,7 @@ namespace studio {
 				}
 				authored.DynamicOutputs.clear();
 				for (const auto &port : *canvasNode.OutputPorts) {
+					if (IsSourceCommonPort(port.Name)) continue;
 					if (std::any_of(schema->Ports.begin(), schema->Ports.end(), [&](const auto &fixed) {
 							return fixed.Direction == engine::imagegraph::PortDirection::Output &&
 								   fixed.Id == port.Name;
@@ -1427,16 +1810,52 @@ namespace studio {
 			liveGroups.emplace(group.Id, &group);
 		std::unordered_set<nodegraph::GroupId> savedCanvasGroups;
 		for (const engine::imagegraph::Group &old : basis.Groups) {
-			if (ids.EmptyGroups.contains(old.Id)) {
+			const auto canvasId = ids.GroupsToCanvas.find(old.Id);
+			if (ids.EmptyGroups.contains(old.Id) && canvasId == ids.GroupsToCanvas.end()) {
 				document.Groups.push_back(old);
 				continue;
 			}
-			const auto canvasId = ids.GroupsToCanvas.find(old.Id);
 			if (canvasId == ids.GroupsToCanvas.end()) continue;
 			const auto current = liveGroups.find(canvasId->second);
 			if (current == liveGroups.end()) continue;
 			engine::imagegraph::Group authored = old;
 			authored.Name = current->second->Title;
+			if (const auto owner = std::find_if(
+					basis.SourceCommonOwners.begin(),
+					basis.SourceCommonOwners.end(),
+					[&](const auto &candidate) {
+						return candidate.NativeOwnerKind ==
+								   engine::imagegraph::SourceCommonNativeOwnerKind::Group &&
+							   candidate.NativeOwnerId == old.Id;
+					}
+				);
+				owner != basis.SourceCommonOwners.end()) {
+				const auto view = ids.SourceCommonGroupViews.find(owner->SourceOwnerId);
+				const auto canvasView =
+					view == ids.SourceCommonGroupViews.end()
+						? graph.Nodes().end()
+						: std::find_if(graph.Nodes().begin(), graph.Nodes().end(), [&](const auto &node) {
+							  return node.Id == view->second;
+						  });
+				const auto canvasFrame = ids.GroupsToCanvas.find(old.Id);
+				if (canvasView == graph.Nodes().end() || canvasFrame == ids.GroupsToCanvas.end() ||
+					graph.GroupOf(canvasView->Id) != canvasFrame->second) {
+					error = "source Group owner view must remain inside its authored frame";
+					return false;
+				}
+				authored.SourcePosition = {
+					static_cast<double>(canvasView->X), static_cast<double>(canvasView->Y)
+				};
+				if (authored.Name != old.Name) {
+					const auto authoredOwner = std::find_if(
+						document.SourceCommonOwners.begin(),
+						document.SourceCommonOwners.end(),
+						[&](const auto &candidate) { return candidate.SourceOwnerId == owner->SourceOwnerId; }
+					);
+					if (authoredOwner != document.SourceCommonOwners.end())
+						authoredOwner->DisplayNamePresent = true;
+				}
+			}
 			document.Groups.push_back(std::move(authored));
 			savedCanvasGroups.insert(canvasId->second);
 		}
@@ -1453,31 +1872,170 @@ namespace studio {
 			}
 		}
 
+		std::unordered_set<std::string> liveGroupIds;
+		for (const auto &group : document.Groups)
+			liveGroupIds.insert(group.Id);
+		const auto survivingScope = [&](std::string scope) {
+			for (size_t depth = 0; !scope.empty() && !liveGroupIds.contains(scope); ++depth) {
+				if (depth >= basis.Groups.size()) return std::string{};
+				const auto removed =
+					std::find_if(basis.Groups.begin(), basis.Groups.end(), [&](const auto &group) {
+						return group.Id == scope;
+					});
+				if (removed == basis.Groups.end()) return scope;
+				scope = removed->ParentId;
+			}
+			return scope;
+		};
+		// Keep routes and defaults: removing a scope must not change junction sampling.
+		for (auto &junction : document.Junctions) {
+			const auto mapped = ids.ToCanvas.find(junction.Id);
+			if (mapped == ids.ToCanvas.end() || !graph.Alive(mapped->second)) {
+				error = "junction removal requires updating its authored Group interface";
+				return false;
+			}
+			const auto frame = graph.GroupOf(mapped->second);
+			junction.GroupId = frame == nodegraph::NO_GROUP ? survivingScope(junction.GroupId)
+															: EnsureGroupDocumentId(ids, frame);
+		}
+		for (auto &group : document.Groups)
+			group.ParentId = survivingScope(group.ParentId);
+		for (auto &node : document.Nodes) {
+			if (!node.GroupId.empty()) continue;
+			const auto previous = oldNodes.find(node.Id);
+			if (previous == oldNodes.end() || previous->second->GroupId.empty() ||
+				liveGroupIds.contains(previous->second->GroupId))
+				continue;
+			node.GroupId = survivingScope(previous->second->GroupId);
+		}
+
+		const auto canonicalCommonLink = [&](engine::imagegraph::Link link) {
+			const auto nativeOwnerId = [&](std::string_view ownerId) -> std::string_view {
+				const auto nativeOwner = std::find_if(
+					basis.SourceCommonOwners.begin(),
+					basis.SourceCommonOwners.end(),
+					[&](const auto &candidate) { return candidate.NativeOwnerId == ownerId; }
+				);
+				if (nativeOwner != basis.SourceCommonOwners.end()) return ownerId;
+				const auto owner = std::find_if(
+					basis.SourceCommonOwners.begin(),
+					basis.SourceCommonOwners.end(),
+					[&](const auto &candidate) { return candidate.SourceOwnerId == ownerId; }
+				);
+				return owner == basis.SourceCommonOwners.end() ? ownerId
+															   : std::string_view(owner->NativeOwnerId);
+			};
+			if (IsSourceCommonPort(link.FromPort)) link.FromNode = nativeOwnerId(link.FromNode);
+			if (IsSourceCommonPort(link.ToPort)) link.ToNode = nativeOwnerId(link.ToNode);
+			return link;
+		};
+		const auto commonCanvasEndpoint = [&](nodegraph::NodeId canvasId, std::string_view documentId) {
+			const auto groupView = sourceCommonGroupViews.find(canvasId);
+			return groupView == sourceCommonGroupViews.end()
+					   ? documentId
+					   : std::string_view(groupView->second->NativeOwnerId);
+		};
 		std::vector<engine::imagegraph::Link> canvasLinks;
 		canvasLinks.reserve(graph.Links().size());
 		for (const nodegraph::Link &link : graph.Links()) {
 			const auto from = ids.ToDocument.find(link.From);
 			const auto to = ids.ToDocument.find(link.To);
 			if (from == ids.ToDocument.end() || to == ids.ToDocument.end()) continue;
-			canvasLinks.push_back({from->second, link.FromPort, to->second, link.ToPort});
+			const auto fromId = IsSourceCommonPort(link.FromPort)
+									? commonCanvasEndpoint(link.From, from->second)
+									: std::string_view(from->second);
+			const auto toId = IsSourceCommonPort(link.ToPort) ? commonCanvasEndpoint(link.To, to->second)
+															  : std::string_view(to->second);
+			canvasLinks.push_back({std::string(fromId), link.FromPort, std::string(toId), link.ToPort});
 		}
 		for (const engine::imagegraph::Link &old : basis.Links) {
+			const auto canonicalOld = canonicalCommonLink(old);
 			if (ids.UnmappedLinks.end() !=
 				std::find(ids.UnmappedLinks.begin(), ids.UnmappedLinks.end(), old)) {
-				document.Links.push_back(old);
+				document.Links.push_back(canonicalOld);
 				continue;
 			}
-			const auto from = ids.ToCanvas.find(old.FromNode);
-			const auto to = ids.ToCanvas.find(old.ToNode);
+			const auto from = ids.ToCanvas.find(canonicalOld.FromNode);
+			const auto to = ids.ToCanvas.find(canonicalOld.ToNode);
 			if (from == ids.ToCanvas.end() || to == ids.ToCanvas.end()) {
-				document.Links.push_back(old);
+				document.Links.push_back(canonicalOld);
 				continue;
 			}
-			const nodegraph::Link mapped{from->second, old.FromPort, to->second, old.ToPort};
-			if (HasLink(graph, mapped)) document.Links.push_back(old);
+			const nodegraph::Link mapped{
+				from->second, canonicalOld.FromPort, to->second, canonicalOld.ToPort
+			};
+			if (HasLink(graph, mapped)) document.Links.push_back(canonicalOld);
 		}
 		for (const engine::imagegraph::Link &link : canvasLinks) {
 			if (!HasAuthoredLink(document.Links, link)) document.Links.push_back(link);
+		}
+
+		const auto hasNativeOwner = [&](const engine::imagegraph::SourceCommonOwnerRecord &owner) {
+			if (owner.NativeOwnerKind == engine::imagegraph::SourceCommonNativeOwnerKind::Node)
+				return std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+					return node.Id == owner.NativeOwnerId;
+				});
+			return std::any_of(document.Groups.begin(), document.Groups.end(), [&](const auto &group) {
+				return group.Id == owner.NativeOwnerId;
+			});
+		};
+		std::unordered_set<std::string> removedSourceOwners;
+		std::unordered_set<std::string> removedNativeOwners;
+		for (const auto &owner : basis.SourceCommonOwners)
+			if (!hasNativeOwner(owner)) {
+				removedSourceOwners.insert(owner.SourceOwnerId);
+				removedNativeOwners.insert(owner.NativeOwnerId);
+			}
+		for (const auto &owner : basis.SourceCommonOwners) {
+			if (!hasNativeOwner(owner)) continue;
+			std::string base = owner.InstanceBase;
+			for (size_t depth = 0; !base.empty() && depth < basis.SourceCommonOwners.size(); ++depth) {
+				if (removedSourceOwners.contains(base)) {
+					error = "cannot remove a source common base while dependent native owners remain; detach "
+							"or delete dependent owners first";
+					return false;
+				}
+				const auto ancestor = std::find_if(
+					basis.SourceCommonOwners.begin(),
+					basis.SourceCommonOwners.end(),
+					[&](const auto &candidate) { return candidate.SourceOwnerId == base; }
+				);
+				if (ancestor == basis.SourceCommonOwners.end()) break;
+				base = ancestor->InstanceBase;
+			}
+		}
+		if (!removedSourceOwners.empty()) {
+			std::erase_if(document.SourceCommonOwners, [&](const auto &owner) {
+				return removedSourceOwners.contains(owner.SourceOwnerId);
+			});
+			std::erase_if(document.Links, [&](const auto &link) {
+				return (removedNativeOwners.contains(link.FromNode) && IsSourceCommonPort(link.FromPort)) ||
+					   (removedNativeOwners.contains(link.ToNode) && IsSourceCommonPort(link.ToPort));
+			});
+			if (document.SourceAnimators) {
+				std::unordered_set<std::string> retiredWriters;
+				for (const auto &owner : basis.SourceCommonOwners)
+					if (removedSourceOwners.contains(owner.SourceOwnerId) &&
+						!owner.UpdateAnimatorOwnerId.empty() && !owner.UpdateAnimatorPort.empty())
+						retiredWriters.insert(owner.UpdateAnimatorOwnerId + "\n" + owner.UpdateAnimatorPort);
+				const auto retainedWriter = [&](std::string_view nodeId, std::string_view port) {
+					return std::none_of(
+						document.SourceCommonOwners.begin(),
+						document.SourceCommonOwners.end(),
+						[&](const auto &owner) {
+							return owner.UpdateAnimatorOwnerId == nodeId && owner.UpdateAnimatorPort == port;
+						}
+					);
+				};
+				std::erase_if(document.SourceAnimators->Detached, [&](const auto &writer) {
+					return retiredWriters.contains(writer.OwnerId + "\n" + writer.Id) &&
+						   retainedWriter(writer.OwnerId, writer.Id);
+				});
+				std::erase_if(document.SourceAnimators->DetachedValues, [&](const auto &value) {
+					return retiredWriters.contains(value.NodeId + "\n" + value.Port) &&
+						   retainedWriter(value.NodeId, value.Port);
+				});
+			}
 		}
 
 		for (auto it = ids.ToCanvas.begin(); it != ids.ToCanvas.end();) {
@@ -1500,6 +2058,50 @@ namespace studio {
 		PromoteFormatVersion(document);
 
 		return true;
+	}
+
+	bool SaveImageGraphCanvas(
+		const nodegraph::Graph &graph,
+		const engine::imagegraph::Document &basis,
+		ImageGraphCanvasIds &ids,
+		engine::imagegraph::Document &document,
+		std::string &error
+	) try {
+		if (basis.Junctions.empty()) {
+			ImageGraphCanvasIds candidateIds = ids;
+			engine::imagegraph::Document candidate;
+			if (!SaveImageGraphCanvasCandidate(graph, basis, candidateIds, candidate, error)) return false;
+			ids = std::move(candidateIds);
+			document = std::move(candidate);
+			return true;
+		}
+		const auto basisBytes = engine::imagegraph::DocumentRetainedPayloadBytes(basis);
+		const auto outputBytes = engine::imagegraph::DocumentRetainedPayloadBytes(document);
+		if (!basisBytes || !outputBytes ||
+			*basisBytes > engine::imagegraph::Limits::MaximumEvaluationBytes / 2 ||
+			*outputBytes > engine::imagegraph::Limits::MaximumEvaluationBytes - *basisBytes * 2) {
+			error = "junction canvas save exceeds document clone bounds";
+			return false;
+		}
+		ImageGraphCanvasIds candidateIds = ids;
+		engine::imagegraph::Document candidate;
+		if (!SaveImageGraphCanvasCandidate(graph, basis, candidateIds, candidate, error)) return false;
+		if (std::all_of(candidate.Nodes.begin(), candidate.Nodes.end(), [](const auto &node) {
+				return engine::imagegraph::FindSchema(node.Type) != nullptr;
+			})) {
+			engine::imagegraph::Plan plan;
+			engine::imagegraph::Diagnostic diagnostic;
+			if (engine::imagegraph::Compile(candidate, plan, diagnostic) != engine::imagegraph::Status::Ok) {
+				error = diagnostic.Message + " node=" + diagnostic.NodeId + " port=" + diagnostic.Port;
+				return false;
+			}
+		}
+		ids = std::move(candidateIds);
+		document = std::move(candidate);
+		return true;
+	} catch (const std::bad_alloc &) {
+		error = "junction canvas save allocation refused";
+		return false;
 	}
 
 	bool CheckImageComposerPreviewBudget(
@@ -3733,11 +4335,27 @@ namespace studio {
 				error = "PXCX link references a node outside its imported graph";
 				return false;
 			}
+			if (fact.SourceTriggerIndexMinusOne &&
+				(fact.FromIndex != 0 || (fact.FromTag != -2 && fact.FromTag != -3))) {
+				error = "PXCX common trigger index has no matching source selector";
+				return false;
+			}
+			if (fact.DestinationUpdateTrigger && fact.ToInputIndex != 2) {
+				error = "PXCX common Update destination has no matching inspector index";
+				return false;
+			}
+			// Common sockets share positional indices with ordinary outputs; the tag selects the socket.
+			const std::string fromPort = fact.FromTag == -2	  ? "pxcx.update_in_trigger"
+										 : fact.FromTag == -3 ? "pxcx.updated_out_trigger"
+										 : fact.FromTag == -4
+											 ? "pxcx.metadata." + std::to_string(fact.FromIndex)
+											 : PxcxOutputPortId(fact.FromIndex);
 			candidate.Graph.Links.push_back(
 				{fact.FromNode,
-				 PxcxOutputPortId(fact.FromIndex),
+				 fromPort,
 				 fact.ToNode,
-				 PxcxInputPortId(fact.ToInputIndex)}
+				 fact.DestinationUpdateTrigger ? "pxcx.update_in_trigger"
+											   : PxcxInputPortId(fact.ToInputIndex)}
 			);
 		}
 		projection = std::move(candidate);

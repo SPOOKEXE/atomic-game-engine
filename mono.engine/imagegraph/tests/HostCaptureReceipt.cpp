@@ -1,3 +1,5 @@
+#include "PixelBuilderPayload.hpp"
+
 #include <engine/imagegraph/HostCapture.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -33,6 +35,7 @@ TEST_CASE(
 	REQUIRE(receipt.InputImages.size() == 1);
 	CHECK(receipt.InputImages[0].Hash == SurfaceHash(fixture.Base));
 	CHECK(receipt.Images.empty());
+	CHECK_FALSE(receipt.SourceUpdateOnFrame.has_value());
 	CHECK(bytes == *HostCaptureRetainedPayloadBytes(receipt));
 	const auto retained = receipt.Inputs;
 	const auto retainedBytes = bytes;
@@ -109,4 +112,38 @@ TEST_CASE(
 		Status::LimitExceeded
 	);
 	CHECK(receipt.Inputs == retained);
+}
+
+TEST_CASE("host frame observations require a recorded conditional callback", "[imagegraph][host-receipt]") {
+	HostNodeCapture receipt;
+	receipt.Authored.Type = "pc.lua_compute";
+	REQUIRE(HostCaptureRetainedPayloadBytes(receipt));
+	const auto unknown = receipt;
+	receipt.SourceUpdateOnFrame = false;
+	CHECK_FALSE(detail::PixelBuilderRecordingsEqual(receipt, unknown));
+	const auto stationary = receipt;
+	receipt.SourceUpdateOnFrame = true;
+	CHECK_FALSE(detail::PixelBuilderRecordingsEqual(receipt, stationary));
+	receipt.SourceUpdateOnFrame = false;
+	CHECK(ValidHostSourceFrameObservation(receipt));
+	CHECK(HostCaptureRetainedPayloadBytes(receipt));
+	receipt.State = HostCaptureState::Refused;
+	CHECK_FALSE(ValidHostSourceFrameObservation(receipt));
+	CHECK_FALSE(HostCaptureRetainedPayloadBytes(receipt));
+	receipt.State = HostCaptureState::Recorded;
+	receipt.Authored.Type = "pc.number";
+	CHECK_FALSE(ValidHostSourceFrameObservation(receipt));
+	receipt.SourceUpdateOnFrame.reset();
+	CHECK(ValidHostSourceFrameObservation(receipt));
+	Fixture fixture;
+	receipt.Authored.Type = "pc.lua_compute";
+	receipt.SourceUpdateOnFrame = true;
+	uint64_t bytes = 0;
+	Diagnostic diagnostic;
+	REQUIRE(
+		PrepareResolvedHostCapture(
+			fixture.Invocation, Limits::MaximumEvaluationBytes, receipt, bytes, diagnostic
+		) == Status::Ok
+	);
+	CHECK_FALSE(receipt.SourceUpdateOnFrame.has_value());
 }

@@ -265,15 +265,16 @@ namespace studio::detail {
 			candidate.Ids.NextGroupId = std::max(candidate.Ids.NextGroupId, oldIds.NextGroupId);
 			for (const auto &node : append.Nodes) {
 				if (node.TopLevel) {
-					const auto found = candidate.Ids.ToCanvas.find(node.NodeId);
-					if (found != candidate.Ids.ToCanvas.end())
-						candidate.Selection.push_back(found->second);
-					else if (std::any_of(
-								 candidate.Groups.Authored.Groups.begin(),
-								 candidate.Groups.Authored.Groups.end(),
-								 [&](const auto &group) { return same(group.Id, node.NodeId); }
-							 ))
+					const bool isGroup = std::any_of(
+						candidate.Groups.Authored.Groups.begin(),
+						candidate.Groups.Authored.Groups.end(),
+						[&](const auto &group) { return same(group.Id, node.NodeId); }
+					);
+					if (isGroup)
 						candidate.SelectedGroups.push_back(node.NodeId);
+					else if (const auto found = candidate.Ids.ToCanvas.find(node.NodeId);
+							 found != candidate.Ids.ToCanvas.end())
+						candidate.Selection.push_back(found->second);
 				}
 				const auto loaded = std::find_if(
 					candidate.Groups.Authored.Nodes.begin(),

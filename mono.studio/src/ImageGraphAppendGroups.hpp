@@ -57,13 +57,13 @@ namespace studio::detail {
 				return fail(
 					Status::LimitExceeded, "Studio append Group count, clock or budget is outside bounds"
 				);
+			const bool hasOrdinaryReplayBindings =
+				(live.SourceAnimators && !live.SourceAnimators->Bindings.empty()) ||
+				std::any_of(live.Nodes.begin(), live.Nodes.end(), [](const auto &node) {
+					return !node.InstanceBase.empty() || !node.SourceParentInputBase.empty();
+				});
 			if (previous.Replay.AuthoringRevision() != previous.Revision ||
-				((live.SourceAnimators || std::any_of(
-											  live.Nodes.begin(),
-											  live.Nodes.end(),
-											  [](const auto &node) { return !node.InstanceBase.empty(); }
-										  )) &&
-				 !previous.Replay.InstancesBound()))
+				(hasOrdinaryReplayBindings && !previous.Replay.InstancesBound()))
 				return fail(
 					Status::InvalidValue, "Studio append requires the prepared destination Group host"
 				);
@@ -123,6 +123,30 @@ namespace studio::detail {
 					});
 				};
 				return contains(live.Nodes) || contains(live.Groups) || contains(live.Junctions);
+			};
+			const auto retainCommonAnimators = [&](Document &candidate) {
+				if (!candidate.SourceAnimators) return true;
+				auto &state = *candidate.SourceAnimators;
+				state.Bindings.clear();
+				const auto registered = [&](std::string_view ownerId, std::string_view port) {
+					return std::any_of(
+						candidate.SourceCommonOwners.begin(),
+						candidate.SourceCommonOwners.end(),
+						[&](const auto &owner) {
+							return same(owner.UpdateAnimatorOwnerId, ownerId) &&
+								   same(owner.UpdateAnimatorPort, port);
+						}
+					);
+				};
+				std::erase_if(state.Detached, [&](const auto &animator) {
+					return !registered(animator.OwnerId, animator.Id);
+				});
+				std::erase_if(state.DetachedValues, [&](const auto &payload) {
+					return !registered(payload.NodeId, payload.Port);
+				});
+				if (!work) return false;
+				if (state.Detached.empty() && state.DetachedValues.empty()) candidate.SourceAnimators = {};
+				return true;
 			};
 			const Document &saved =
 				append.Project.GroupPrebinding ? *append.Project.GroupPrebinding : append.Project.Graph;
@@ -193,7 +217,10 @@ namespace studio::detail {
 					candidate->Keyframes.size() > Limits::MaximumKeyframes ||
 					candidate->Tracks.size() > Limits::MaximumTracks)
 					return fail(Status::LimitExceeded, "Studio append live topology exceeds count bounds");
-				candidate->SourceAnimators = {};
+				if (!retainCommonAnimators(*candidate))
+					return fail(
+						Status::LimitExceeded, "Studio append common animator selection exceeds work bounds"
+					);
 			}
 			if (!work)
 				return fail(Status::LimitExceeded, "Studio append Group reconciliation exceeds work bounds");
@@ -232,6 +259,40 @@ namespace studio::detail {
 					return fail(
 						Status::LimitExceeded, "Studio append incoming bindings exceed payload bounds"
 					);
+			// grug native Collection aliases may arrive without source archive binding metadata.
+			// existing bindings retain detached writers and constructor generations.
+			for (const auto &node : merged.Nodes) {
+				if (node.SourceParentInputBase.empty()) continue;
+				const bool bound = std::any_of(bindings.begin(), bindings.end(), [&](const auto &binding) {
+					return same(binding.NodeId, node.Id) && same(binding.Port, "parent_value");
+				});
+				if (!work)
+					return fail(
+						Status::LimitExceeded, "Studio append parent alias selection exceeds work bounds"
+					);
+				if (bound) continue;
+				const Node *owner = nullptr, *getter = nullptr;
+				if (!ImageGraphGroupHost::ParentInputAlias(merged, node, owner, getter, work, diagnostic))
+					return false;
+				const uint64_t names =
+					std::max(node.Id.size(), size_t{15}) + std::max(owner->Id.size(), size_t{15}) + 16 + 3;
+				const uint64_t temporaryBytes = names + sizeof(GroupSubtypeBinding);
+				if (!charge(temporaryBytes))
+					return fail(
+						Status::LimitExceeded, "Studio append parent alias names exceed payload bounds"
+					);
+				GroupSubtypeBinding binding{
+					node.Id,
+					owner->Id,
+					ImageGraphGroupHost::Mode(merged, *getter, "parent_value"),
+					ImageGraphGroupHost::Mode(merged, *owner, "parent_value"),
+					"parent_value"
+				};
+				if (!addBinding(binding))
+					return fail(Status::LimitExceeded, "Studio append parent aliases exceed payload bounds");
+				remaining += temporaryBytes;
+			}
+
 			if (!work)
 				return fail(Status::LimitExceeded, "Studio append binding selection exceeds work bounds");
 			const auto actualCallbacks = DocumentRetainedPayloadBytes(callbacks);
@@ -255,6 +316,51 @@ namespace studio::detail {
 			if (RebindGroupReplay(callbacks, previous.Replay, revision, rebound, diagnostic, remaining) !=
 				Status::Ok)
 				return false;
+			if (count && std::any_of(callbacks.Nodes.begin(), callbacks.Nodes.end(), [](const auto &node) {
+					return !node.SourceParentInputBase.empty();
+				})) {
+				// grug source prebinding omits incoming whole-instance bases until load finishes.
+				// explicit Collection parents need their animator before the load callback reads it.
+				uint64_t callbackBindingBytes = bindings.size() * sizeof(GroupSubtypeBinding);
+				for (const auto &binding : bindings)
+					callbackBindingBytes += binding.NodeId.capacity() + binding.OwnerId.capacity() +
+											binding.Port.capacity() + binding.AnimatorPort.capacity() +
+											binding.Axes.OwnerId.capacity() + binding.Axes.Port.capacity() +
+											binding.Axes.InstanceBase.capacity() + 7;
+				if (!charge(callbackBindingBytes))
+					return fail(
+						Status::LimitExceeded, "Studio append callback bindings exceed payload bounds"
+					);
+				std::vector<GroupSubtypeBinding> callbackBindings;
+				callbackBindings.reserve(bindings.size());
+				for (const auto &binding : bindings) {
+					const auto target =
+						std::find_if(callbacks.Nodes.begin(), callbacks.Nodes.end(), [&](const auto &node) {
+							return same(node.Id, binding.NodeId);
+						});
+					if (!work)
+						return fail(
+							Status::LimitExceeded, "Studio append callback binding lookup exceeds work bounds"
+						);
+					if (target == callbacks.Nodes.end()) continue;
+					const bool parent = target->Type == "pc.group_input" && binding.Port == "parent_value";
+					if (parent ? !target->SourceParentInputBase.empty() : !target->InstanceBase.empty())
+						callbackBindings.push_back(binding);
+				}
+				GroupReplayState preparedCallbacks;
+				if (BindGroupReplay(
+						callbacks,
+						callbackBindings,
+						rebound,
+						revision,
+						preparedCallbacks,
+						diagnostic,
+						remaining
+					) != Status::Ok)
+					return false;
+				rebound = std::move(preparedCallbacks);
+				remaining += callbackBindingBytes;
+			}
 			if (count) {
 				Plan plan;
 				if (rebound.RetainedBytes() >= remaining)

@@ -111,6 +111,7 @@ namespace engine::imagegraph::detail {
 					  TemporalExecutors(),
 					  SourceAnimationExecutors(),
 					  SourceRoutingExecutors(),
+					  SourceTunnelExecutors(),
 					  SourceSwitchExecutors(),
 					  SourceMiscExecutors(),
 					  SourceSequenceAnimationExecutors(),
@@ -134,6 +135,7 @@ namespace engine::imagegraph::detail {
 			if (found == Executors().end())
 				return context.Fail(Status::UnsupportedExecution, "executor is unavailable");
 			const auto acceptsGeneral = [](std::string_view type, std::string_view port) {
+				if (type == "pc.tunnel_in" && port == "value_in") return true;
 				if (type == "pc.argument" && port == "default_value") return true;
 				if (type == "pc.points_triangulate" && port == "points") return true;
 				if ((type == "pc.path_sample" || type == "pc.path_smoothen" || type == "pc.path_spiral") &&

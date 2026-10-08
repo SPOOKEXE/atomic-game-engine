@@ -238,7 +238,7 @@ namespace engine::imagegraph {
 		uint64_t maximumBytes = Limits::MaximumEvaluationBytes
 	);
 	// Edits source child input animators through their original owner and loaded
-	// Group parent animators locally without a refresh callback. Getter mode,
+	// Group parent animators through explicit aliases or a loaded local boundary. Getter mode,
 	// override flags and links do not change Animator.prop's writer mode. Events
 	// borrow their LocalValue and EditedPort; this performs no Group refresh.
 	Status ReplayGroupAnimatorEdits(

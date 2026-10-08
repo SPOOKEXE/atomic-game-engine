@@ -493,6 +493,7 @@ function colorMerge(a,b,t)return colorCreateRGB(lerp(colorGetRed(a),colorGetRed(
 				uint64_t Tick = 0;
 				double Subframe = 0;
 				bool Negative = false, Ready = false;
+				std::optional<bool> SourceUpdateOnFrame;
 				uint64_t RetainedBytes = 0;
 				Value Result = double{0};
 				Image Surface;
@@ -664,6 +665,7 @@ function colorMerge(a,b,t)return colorCreateRGB(lerp(colorGetRed(a),colorGetRed(
 								std::equal(
 									cache.Inputs.begin(), cache.Inputs.end(), invocation.Inputs.begin()
 								);
+							std::optional<bool> observedFrame;
 							bool frame = false;
 							if (type == "pc.lua_global") {
 								const auto *order = Find(invocation, "run_order");
@@ -671,8 +673,14 @@ function colorMerge(a,b,t)return colorCreateRGB(lerp(colorGetRed(a),colorGetRed(
 										((std::get_if<EnumValue>(order) &&
 										  std::get<EnumValue>(*order).Value == 1) ||
 										 (std::get_if<int64_t>(order) && std::get<int64_t>(*order) == 1));
-							} else
+								if (order && (std::get_if<EnumValue>(order) || std::get_if<int64_t>(order)))
+									observedFrame = frame;
+							} else {
 								frame = Boolean(invocation, "execute_on_frame", true);
+								const auto *value = Find(invocation, "execute_on_frame");
+								if (value)
+									if (const auto *flag = std::get_if<bool>(value)) observedFrame = *flag;
+							}
 							if (frame && (cache.Tick != invocation.Request.Tick ||
 										  cache.Subframe != invocation.Request.Subframe ||
 										  cache.Negative != invocation.Request.NegativeFrame))
@@ -712,7 +720,8 @@ function colorMerge(a,b,t)return colorCreateRGB(lerp(colorGetRed(a),colorGetRed(
 							lua_setfield(session.State, -2, "fps");
 							lua_pop(session.State, 1);
 							const auto authoredBytes = NodeClonePayloadBytes(invocation.Authored);
-							uint64_t controlBytes = authoredBytes.value_or(0);
+							uint64_t controlBytes =
+								authoredBytes.value_or(0) + sizeof(cache.SourceUpdateOnFrame);
 							if (!authoredBytes || invocation.Inputs.size() > Limits::MaximumLinks ||
 								invocation.Images.size() > Limits::MaximumLinks) {
 								failure = "Lua authored controls exceed native payload limits";
@@ -902,6 +911,7 @@ function colorMerge(a,b,t)return colorCreateRGB(lerp(colorGetRed(a),colorGetRed(
 								}
 								Memory.ExternalBytes -= cache.RetainedBytes;
 								cache.RetainedBytes = cacheCharge.Retain(retained);
+								cache.SourceUpdateOnFrame = observedFrame;
 								cache.Ready = true;
 							}
 							const auto resultBytes = ValueClonePayloadBytes(cache.Result);
@@ -918,6 +928,7 @@ function colorMerge(a,b,t)return colorCreateRGB(lerp(colorGetRed(a),colorGetRed(
 							captured.NegativeFrame = invocation.Request.NegativeFrame;
 							captured.Inputs.assign(invocation.Inputs.begin(), invocation.Inputs.end());
 							captured.InputImages = bindings;
+							captured.SourceUpdateOnFrame = cache.SourceUpdateOnFrame;
 							captured.Outputs.push_back({"execution_thread", ExecutionThreadValue{threadId}});
 							if (type == "pc.lua_compute")
 								captured.Outputs.push_back({"return_value", cache.Result});

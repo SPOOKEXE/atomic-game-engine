@@ -64,7 +64,7 @@ TEST_CASE(
 	auto imported = Import(Source(
 		Json{{"version", 1}, {"composer_cooked_shader", Name('a')}, {"future_engine", Json{{"opaque", 29}}}}
 	));
-	REQUIRE(imported.Graph.FormatVersion == 9);
+	REQUIRE(imported.Graph.FormatVersion == 11);
 	REQUIRE(
 		imported.Graph.Nodes[0].SourceProperties ==
 		std::vector<AuthoredValue>{{"composer_cooked_shader", Name('a')}}
@@ -122,7 +122,7 @@ TEST_CASE(
 ) {
 	auto imported = Import(Source());
 	auto desired = imported.Graph;
-	desired.FormatVersion = 9;
+	desired.FormatVersion = 11;
 	desired.Nodes[0].SourceProperties.push_back({"composer_cooked_shader", Name('c')});
 	Diagnostic diagnostic;
 	std::vector<std::byte> bytes;
@@ -180,7 +180,7 @@ TEST_CASE(
 	}
 	const auto retained = root["nodes"][0]["inputs"][10];
 	const auto imported = Import(root);
-	REQUIRE(imported.Graph.FormatVersion == 9);
+	REQUIRE(imported.Graph.FormatVersion == 11);
 	REQUIRE(imported.Graph.Nodes[0].DynamicInputs.size() == 6);
 	CHECK(imported.Graph.Nodes[0].DynamicInputs[5].SourceInputId == "pxc:input:10");
 	auto desired = imported.Graph;

@@ -121,6 +121,16 @@ namespace engine::imagegraphio::detail {
 				}
 				return {};
 			};
+			const auto groupClass = [&](std::string_view id) -> std::string_view {
+				for (size_t hop = 0; hop <= document.Groups.size(); ++hop) {
+					const auto source = sourceClasses.find(id);
+					if (source != sourceClasses.end()) return source->second;
+					const auto group = groupById(id);
+					if (group == document.Groups.end() || group->InstanceBase.empty()) return {};
+					id = group->InstanceBase;
+				}
+				return {};
+			};
 			const auto newId = [&](std::string_view group, std::string_view base, std::string &out) {
 				constexpr std::string_view marker = "/instance/";
 				if (group.size() > Limits::MaximumTextBytes - marker.size() ||
@@ -264,6 +274,17 @@ namespace engine::imagegraphio::detail {
 				auto target = groupById(targetId);
 				if (target == document.Groups.end()) return fail("instance group is missing");
 				if (target->InstanceBase.empty() || complete.contains(targetId)) return true;
+				// grug base Collection only binds attributes. Group owns child reconciliation.
+				if (groupClass(targetId) == "Node_Collection") {
+					const Group *current = &*target;
+					for (size_t hop = 0; !current->InstanceBase.empty(); ++hop) {
+						if (hop >= document.Groups.size()) return fail("group instance base cycle");
+						const auto base = groupById(current->InstanceBase);
+						if (base == document.Groups.end()) return fail("group instance base is missing");
+						current = &*base;
+					}
+					return true;
+				}
 				if (!holdText(targetId)) return fail("instance traversal names exceed operation bounds");
 				if (!active.insert(targetId).second) return fail("group instance base cycle");
 				if (!holdText(target->InstanceBase))
@@ -295,26 +316,49 @@ namespace engine::imagegraphio::detail {
 						const auto nestedBase = groupById(id);
 						if (nestedBase == document.Groups.end())
 							return fail("nested instance member is missing");
-						const auto kind = sourceClasses.find(id);
-						if (kind == sourceClasses.end())
-							return fail("nested instance source class is unrepresented");
+						const auto kind = groupClass(id);
+						if (kind.empty()) return fail("nested instance source class is unrepresented");
 						const auto match = std::find_if(
 							targetOrder.begin(), targetOrder.end(), [&](const std::string &candidate) {
 								const auto current = groupById(candidate);
-								const auto currentKind = sourceClasses.find(candidate);
 								return current != document.Groups.end() && !used.contains(candidate) &&
-									   currentKind != sourceClasses.end() &&
-									   currentKind->second == kind->second;
+									   groupClass(candidate) == kind;
 							}
 						);
-						if (match == targetOrder.end())
-							return fail(
-								"missing nested instance requires source shallow-clone "
-								"callback construction"
-							);
-						if (!holdText(*match) || !holdText(id))
+						std::string nestedTargetId;
+						if (match == targetOrder.end()) {
+							if (kind != "Node_Collection")
+								return fail(
+									"missing nested Group requires source shallow-clone callback construction"
+								);
+							// grug generic clone builds no children. saved child IDs create no new sockets.
+							if (!nestedBase->Ports.empty())
+								return fail(
+									"shallow Collection clone has no child sockets for its parent inputs"
+								);
+							if (document.Groups.size() == Limits::MaximumGroups ||
+								!newId(targetId, id, nestedTargetId) || !admit(sizeof(Group)) ||
+								!holdText(nestedTargetId) || !holdText(nestedBase->Name) ||
+								!holdText(targetId) || !holdText(id) ||
+								!reserve(document.Groups, document.Groups.size() + 1))
+								return fail("shallow Collection clone exceeds operation bounds");
+							const auto original = groupById(id);
+							Group copied{nestedTargetId, original->Name};
+							copied.ParentId = targetId;
+							copied.InstanceBase = id;
+							copied.ColorDepth = original->ColorDepth;
+							copied.Interpolation = original->Interpolation;
+							copied.Oversample = original->Oversample;
+							copied.RenderActive = original->RenderActive;
+							copied.PureFunction = original->PureFunction;
+							document.Groups.push_back(std::move(copied));
+						} else {
+							if (!holdText(*match))
+								return fail("nested instance binding names exceed operation bounds");
+							nestedTargetId = *match;
+						}
+						if (!holdText(id))
 							return fail("nested instance binding names exceed operation bounds");
-						const std::string nestedTargetId(*match);
 						std::string baseName(id);
 						groupById(nestedTargetId)->InstanceBase.swap(baseName);
 						if (!self(self, nestedTargetId)) return false;
@@ -336,6 +380,10 @@ namespace engine::imagegraphio::detail {
 								);
 								if (sourcePort == groupById(id)->Ports.end() ||
 									targetPort == groupById(nestedTargetId)->Ports.end()) {
+									// grug Collection keeps surplus local sockets; outer Group only walks
+									// base inputs.
+									if (kind == "Node_Collection" && sourcePort == groupById(id)->Ports.end())
+										break;
 									if (sourcePort != groupById(id)->Ports.end() ||
 										targetPort != groupById(nestedTargetId)->Ports.end())
 										return fail(
@@ -348,6 +396,16 @@ namespace engine::imagegraphio::detail {
 									!mapId(sourcePort->ControlNodeId, targetPort->ControlNodeId) ||
 									!useId(targetPort->JunctionId))
 									return fail("nested instance socket mapping exceeds operation bounds");
+								if (kind == "Node_Collection" && direction == PortDirection::Input) {
+									const auto control = nodeById(targetPort->ControlNodeId);
+									if (control == document.Nodes.end() ||
+										control->Type != "pc.group_input" ||
+										!holdText(sourcePort->ControlNodeId))
+										return fail(
+											"Collection parent input alias is unrepresented or exceeds bounds"
+										);
+									control->SourceParentInputBase = sourcePort->ControlNodeId;
+								}
 								++sourcePort;
 								++targetPort;
 							}
@@ -451,6 +509,8 @@ namespace engine::imagegraphio::detail {
 							scope.ColorDepth = originalScope->ColorDepth;
 							scope.Interpolation = originalScope->Interpolation;
 							scope.Oversample = originalScope->Oversample;
+							scope.RenderActive = originalScope->RenderActive;
+							scope.PureFunction = originalScope->PureFunction;
 							document.Groups.push_back(std::move(scope));
 							targetScope = groupById(copiedId);
 						}

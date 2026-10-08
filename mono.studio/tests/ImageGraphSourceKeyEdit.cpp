@@ -69,7 +69,30 @@ namespace {
 		REQUIRE(alias != imported.Graph.Nodes.end());
 		REQUIRE(alias->Type == "pc.invert");
 		REQUIRE(alias->InstanceBase == "owner");
-		REQUIRE_FALSE(imported.Graph.SourceAnimators);
+		REQUIRE(imported.Graph.SourceAnimators);
+		CHECK(imported.Graph.SourceAnimators->Bindings.empty());
+		REQUIRE(imported.Graph.SourceCommonOwners.size() == 3);
+		const auto &commonAnimators = *imported.Graph.SourceAnimators;
+		CHECK(commonAnimators.Detached.size() == imported.Graph.SourceCommonOwners.size());
+		CHECK(commonAnimators.DetachedValues.size() == imported.Graph.SourceCommonOwners.size());
+		for (const auto &owner : imported.Graph.SourceCommonOwners) {
+			CHECK(owner.UpdateAnimatorOwnerId == owner.SourceOwnerId);
+			const auto metadata = std::find_if(
+				commonAnimators.Detached.begin(), commonAnimators.Detached.end(), [&](const auto &row) {
+					return row.OwnerId == owner.UpdateAnimatorOwnerId && row.Id == owner.UpdateAnimatorPort;
+				}
+			);
+			REQUIRE(metadata != commonAnimators.Detached.end());
+			CHECK(metadata->OriginalPort == "pxcx.update_in_trigger");
+			const auto payload = std::find_if(
+				commonAnimators.DetachedValues.begin(),
+				commonAnimators.DetachedValues.end(),
+				[&](const auto &row) {
+					return row.NodeId == owner.UpdateAnimatorOwnerId && row.Port == owner.UpdateAnimatorPort;
+				}
+			);
+			REQUIRE(payload != commonAnimators.DetachedValues.end());
+		}
 		imported.Graph.Outputs = {{"result", "owner", "surface_out"}};
 		REQUIRE(
 			std::count_if(

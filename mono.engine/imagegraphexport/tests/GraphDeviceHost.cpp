@@ -72,6 +72,13 @@ TEST_CASE("Spout recordings bind receiver names and sender pixel receipts", "[as
 	REQUIRE(host.Capture({node, request, inputs, {}, 1048576}, capture, failure));
 	REQUIRE(capture.Images.size() == 1);
 	CHECK(capture.Images[0].Data == image);
+	CHECK_FALSE(capture.SourceUpdateOnFrame.has_value());
+	frames[0].SourceUpdateOnFrame = false;
+	REQUIRE(host.Capture({node, request, inputs, {}, 1048576}, capture, failure));
+	CHECK(capture.SourceUpdateOnFrame == false);
+	frames[0].SourceUpdateOnFrame = true;
+	REQUIRE(host.Capture({node, request, inputs, {}, 1048576}, capture, failure));
+	CHECK(capture.SourceUpdateOnFrame == true);
 	inputs[0].Data = std::string{"other"};
 	CHECK_FALSE(host.Capture({node, request, inputs, {}, 1048576}, capture, failure));
 	inputs[0] = {"sender_name", std::string{"named"}};
@@ -105,12 +112,18 @@ TEST_CASE(
 	Node node;
 	node.Id = "clock";
 	node.Type = "pc.datetime_get";
-	std::array<AuthoredValue, 1> inputs{{{"format", std::string("%y-%m-%dT%h:%n:%s/%w/%tm/%s")}}};
+	std::array<AuthoredValue, 2> inputs{
+		{{"format", std::string("%y-%m-%dT%h:%n:%s/%w/%tm/%s")}, {"update", false}}
+	};
 	EvaluationRequest request;
 	HostNodeCapture capture;
 	std::string failure;
 	REQUIRE(host.Capture({node, request, inputs, {}, 1048576}, capture, failure));
 	CHECK(std::get<std::string>(capture.Outputs[0].Data) == "2026-10-02T03:04:05/5/123456/05");
+	CHECK(capture.SourceUpdateOnFrame == false);
+	inputs[1].Data = true;
+	REQUIRE(host.Capture({node, request, inputs, {}, 1048576}, capture, failure));
+	CHECK(capture.SourceUpdateOnFrame == true);
 	request.Subframe = 0.5;
 	CHECK_FALSE(host.Capture({node, request, inputs, {}, 1048576}, capture, failure));
 	request.Subframe = 0;

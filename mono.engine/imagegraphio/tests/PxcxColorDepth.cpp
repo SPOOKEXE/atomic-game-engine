@@ -35,7 +35,7 @@ TEST_CASE(
 		REQUIRE(ImportPxcxImageGraph(archive, result, failure));
 		REQUIRE(result.Graph.Project);
 		CHECK(result.Graph.Project->ColorDepth == depth);
-		CHECK(result.Graph.FormatVersion == 9);
+		CHECK(result.Graph.FormatVersion == 11);
 		CHECK(result.Source.OriginalBytes == archive.OriginalBytes);
 		CHECK(result.Source.GraphJson == archive.GraphJson);
 		REQUIRE(result.Graph.Groups.size() == 1);

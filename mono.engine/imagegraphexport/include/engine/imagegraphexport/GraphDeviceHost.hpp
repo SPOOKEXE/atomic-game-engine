@@ -20,6 +20,8 @@ namespace engine::imagegraphexport {
 		engine::imagegraph::Image Surface;
 		bool Sending = false;
 		bool Accepted = true;
+		// Recorded final receive callback state, including its guarded assignment.
+		std::optional<bool> SourceUpdateOnFrame{};
 	};
 	struct GraphDateTimeFrame {
 		std::string NodeId;

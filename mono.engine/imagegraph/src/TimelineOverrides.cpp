@@ -411,6 +411,7 @@ namespace engine::imagegraph::detail {
 				if (!add(
 						CloneOwnedBytes(node.Id) + CloneOwnedBytes(node.Type) +
 						CloneOwnedBytes(node.GroupId) + CloneOwnedBytes(node.InstanceBase) +
+						CloneOwnedBytes(node.SourceParentInputBase) +
 						CloneOwnedBytes(node.SourceDisplayName) + CloneOwnedBytes(node.SourceInternalName) +
 						node.InstanceOverrides.size() * sizeof(std::string) +
 						node.SourceAnimatedInputs.size() * sizeof(std::string) +
@@ -492,6 +493,7 @@ namespace engine::imagegraph::detail {
 			}
 			Node copy{original.Id, original.Type, original.GroupId, original.Position, {}};
 			copy.InstanceBase = std::string(original.InstanceBase);
+			copy.SourceParentInputBase = std::string(original.SourceParentInputBase);
 			copy.InstanceOverrides = original.InstanceOverrides;
 			copy.SourceAnimatedInputs = original.SourceAnimatedInputs;
 			copy.SourceStaticInputs = original.SourceStaticInputs;

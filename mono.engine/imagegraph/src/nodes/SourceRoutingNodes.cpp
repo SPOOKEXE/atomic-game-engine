@@ -1,5 +1,7 @@
+#include "../SourceRealNumber.hpp"
 #include "ArraySource.hpp"
 #include "Families.hpp"
+#include "SourceComparison.hpp"
 
 #include <algorithm>
 #include <array>
@@ -37,37 +39,89 @@ namespace engine::imagegraph::detail {
 			context.SetValue(port, std::move(result));
 			return context.FailureCode == Status::Ok;
 		}
+		bool ConditionArrayOperand(NodeContext &context, std::string_view port) {
+			const auto *value = context.Find(port);
+			// Float getters expose source tuples, Matrix.to_real and surface dimensions as arrays.
+			if (context.Input(port) ||
+				(value &&
+				 (std::holds_alternative<ArrayValue>(*value) || std::holds_alternative<Vector2>(*value) ||
+				  std::holds_alternative<Vector3>(*value) || std::holds_alternative<Vector4>(*value) ||
+				  std::holds_alternative<Quaternion>(*value) || std::holds_alternative<MatrixValue>(*value))))
+				return true;
+			for (const auto &[id, images] : context.ImageArrays)
+				if (id == port && images) return true;
+			return false;
+		}
+		bool ConditionKey(
+			NodeContext &context, std::string_view port, SourceComparisonKey &key, bool number, uint64_t &work
+		) {
+			if (!SourceComparisonReadKey(context, port, key, !number)) return false;
+			if (key.Text.size() > SourceComparisonWorkLimit - work)
+				return context.Fail(Status::LimitExceeded, "condition comparison exceeds work limit", port);
+			work += key.Text.size();
+			const auto domain = context.InputDomain(port);
+			// Float.getValue converts a typed Text producer with toNumber; raw Any text stays raw.
+			if (number && key.Type == SourceComparisonKey::Kind::Text && domain &&
+				domain->Type == ValueType::Text) {
+				const auto converted = SourceRealTextNumber(key.Text);
+				if (!converted)
+					return context.Fail(
+						Status::UnsupportedExecution,
+						"condition typed Text real conversion requires a bounded finite source value",
+						port
+					);
+				key.Number = *converted;
+				key.Type = SourceComparisonKey::Kind::Number;
+				key.Text = {};
+			}
+			return true;
+		}
+		bool ConditionCompare(
+			NodeContext &context,
+			std::string_view leftPort,
+			std::string_view rightPort,
+			bool number,
+			double operation,
+			bool &result
+		) {
+			SourceComparisonKey left, right;
+			uint64_t work = 0;
+			if (!ConditionKey(context, leftPort, left, number, work) ||
+				!ConditionKey(context, rightPort, right, number, work))
+				return false;
+			if (operation == 0 || operation == 1) {
+				if (!SourceComparisonEqual(context, left, right, result, leftPort)) return false;
+				if (operation == 1) result = !result;
+				return true;
+			}
+			std::optional<int> order;
+			if (!SourceComparisonOrder(context, left, right, order, leftPort)) return false;
+			if (!order) return true;
+			if (operation == 2)
+				result = *order < 0;
+			else if (operation == 3)
+				result = *order <= 0;
+			else if (operation == 4)
+				result = *order > 0;
+			else if (operation == 5)
+				result = *order >= 0;
+			return true;
+		}
 		bool Condition(NodeContext &context) {
 			bool result = false;
 			const double mode = context.SourceChoice("eval_mode");
 			if (mode == 0)
 				result = context.Boolean("boolean");
 			else if (mode == 1) {
-				const auto *a = context.Find("check_value"), *b = context.Find("compare_to");
-				if (!(a && std::holds_alternative<ArrayValue>(*a)) &&
-					!(b && std::holds_alternative<ArrayValue>(*b))) {
-					const double x = context.Scalar("check_value"), y = context.Scalar("compare_to");
-					const double condition = context.SourceChoice("condition");
-					if (condition == 0)
-						result = x == y;
-					else if (condition == 1)
-						result = x != y;
-					else if (condition == 2)
-						result = x < y;
-					else if (condition == 3)
-						result = x <= y;
-					else if (condition == 4)
-						result = x > y;
-					else if (condition == 5)
-						result = x >= y;
+				if (!ConditionArrayOperand(context, "check_value") &&
+					!ConditionArrayOperand(context, "compare_to")) {
+					const double operation = context.SourceChoice("condition");
+					if (operation >= 0 && operation <= 5 && std::trunc(operation) == operation &&
+						!ConditionCompare(context, "check_value", "compare_to", true, operation, result))
+						return false;
 				}
-			} else if (mode == 2) {
-				const auto *a = context.Find("text_1"), *b = context.Find("text_2");
-				const auto *x = a ? std::get_if<std::string>(a) : nullptr,
-						   *y = b ? std::get_if<std::string>(b) : nullptr;
-				result = (x ? std::string_view(*x) : std::string_view{}) ==
-						 (y ? std::string_view(*y) : std::string_view{});
-			}
+			} else if (mode == 2 && !ConditionCompare(context, "text_1", "text_2", false, 0, result))
+				return false;
 			const auto selected = result ? "true" : "false";
 			if (const auto *image = context.Input(selected)) {
 				auto *output = context.NewImage("result", image->Width, image->Height, image->Format);

@@ -147,6 +147,32 @@ namespace engine::imagegraph {
 			}
 			return bytes;
 		}
+		bool ValidImageArrayPayload(const ArrayValue &array) {
+			size_t items = 0;
+			const auto element = [&](const ElementValue &value) {
+				return ++items <= Limits::MaximumArrayElements && std::holds_alternative<SurfaceValue>(value);
+			};
+			const auto item = [&](auto &&self, const SourceArrayItem &value, size_t depth) -> bool {
+				if (depth > Limits::MaximumArrayDepth || ++items > Limits::MaximumArrayElements) return false;
+				if (const auto *children = std::get_if<std::vector<SourceArrayItem>>(&value.Data)) {
+					for (const auto &child : *children)
+						if (!self(self, child, depth + 1)) return false;
+					return true;
+				}
+				if (std::holds_alternative<Image>(value.Data)) return true;
+				return std::holds_alternative<SurfaceValue>(std::get<ElementValue>(value.Data));
+			};
+			for (const auto &value : array.Items)
+				if (!item(item, value, 1)) return false;
+			for (const auto &row : array.Nested) {
+				if (++items > Limits::MaximumArrayElements) return false;
+				for (const auto &value : row)
+					if (!element(value)) return false;
+			}
+			for (const auto &value : array.Elements)
+				if (!element(value)) return false;
+			return true;
+		}
 		CacheGroupReplayChange
 		ValidateOutputs(std::span<const CacheGroupReplayOutput> outputs, std::string_view nodeId) {
 			if (outputs.size() > MAXIMUM_OUTPUTS_PER_NODE)
@@ -157,6 +183,15 @@ namespace engine::imagegraph {
 					return Refuse(Status::InvalidValue, "cache-group output port is invalid", nodeId);
 				if (output.Data && !ReplayValueCloneBytes(*output.Data))
 					return Refuse(Status::InvalidValue, "cache-group output payload is invalid", nodeId);
+				if (output.ImageArrayPayload) {
+					const auto *array = output.Data ? std::get_if<ArrayValue>(&*output.Data) : nullptr;
+					if (!array || !ValidImageArrayPayload(*array))
+						return Refuse(
+							Status::InvalidValue,
+							"cache-group image-array provenance has an invalid payload",
+							nodeId
+						);
+				}
 				if (output.Domain &&
 					(output.Domain->Type > ValueType::Font ||
 					 (output.Domain->Display && *output.Domain->Display > SourceValueDisplay::Curve) ||
@@ -494,7 +529,8 @@ namespace engine::imagegraph {
 		uint64_t maximumBytes,
 		Diagnostic &diagnostic,
 		std::optional<std::span<const std::string_view>> loadedOwners,
-		uint64_t &remainingWork
+		uint64_t &remainingWork,
+		bool allProducers = false
 	) try {
 		ENGINE_PROFILE("imagegraph.cache_group.initialize");
 		diagnostic = {};
@@ -536,10 +572,12 @@ namespace engine::imagegraph {
 		Indices records{detail::EvaluationAllocator<size_t>(budget)};
 		Indices ownerRecords{detail::EvaluationAllocator<size_t>(budget)};
 		Indices needed{detail::EvaluationAllocator<size_t>(budget)};
+		Indices missingOutputs{detail::EvaluationAllocator<size_t>(budget)};
 		sorted.resize(document.Nodes.size());
 		records.resize(document.Nodes.size(), SIZE_MAX);
 		ownerRecords.resize(document.Nodes.size(), SIZE_MAX);
 		needed.resize(document.Nodes.size(), 0);
+		missingOutputs.resize(document.Nodes.size(), 0);
 		uint64_t longest = 1;
 		for (size_t index = 0; index < document.Nodes.size(); ++index) {
 			const auto &node = document.Nodes[index];
@@ -680,23 +718,94 @@ namespace engine::imagegraph {
 					needed[found] = 1;
 				}
 		}
+		if (allProducers) std::fill(needed.begin(), needed.end(), 1);
 		size_t newNodes = 0, newOwners = 0;
 		uint64_t extra = 0;
 		for (size_t index = 0; index < needed.size(); ++index) {
 			if (!needed[index]) continue;
 			const auto &node = document.Nodes[index];
-			if (records[index] != SIZE_MAX) {
-				if (source.Nodes[records[index]].NodeType != node.Type)
+			const auto *entry = FindCatalogueEntry(node.Type);
+			const auto *nativeSchema = entry ? nullptr : FindSchema(node.Type);
+			const CacheGroupReplayNode *held =
+				records[index] == SIZE_MAX ? nullptr : &source.Nodes[records[index]];
+			if (held && held->NodeType != node.Type)
+				return refuse(
+					Status::InvalidValue,
+					"authored cache-group producer type changed; reconcile before loading",
+					node.Id
+				);
+			if (node.DynamicOutputs.size() > Limits::MaximumDynamicOutputsPerNode)
+				return refuse(Status::LimitExceeded, "declared dynamic outputs exceed bounds", node.Id);
+			uint64_t outputNameBytes = 1;
+			for (const auto &port : node.DynamicOutputs) {
+				if (!ValidText(port.Id) || ValueTypeName(port.Type).empty())
 					return refuse(
-						Status::InvalidValue,
-						"authored cache-group producer type changed; reconcile before loading",
-						node.Id
+						Status::InvalidValue, "declared dynamic output is invalid", node.Id, port.Id
 					);
+				outputNameBytes = std::max(outputNameBytes, uint64_t(port.Id.size() + 1));
+			}
+			if (held)
+				for (const auto &port : held->Outputs)
+					outputNameBytes = std::max(outputNameBytes, uint64_t(port.Port.size() + 1));
+			if (!spend(WorkProduct(
+					node.DynamicOutputs.size() *
+						(node.DynamicOutputs.size() * 2 + (held ? held->Outputs.size() * 3 : 0) +
+						 (entry ? entry->Outputs.size() : (nativeSchema ? nativeSchema->Ports.size() : 0))),
+					outputNameBytes
+				)))
+				return refuse(
+					Status::LimitExceeded, "dynamic output reconciliation exceeds comparison work", node.Id
+				);
+			for (size_t portIndex = 0; portIndex < node.DynamicOutputs.size(); ++portIndex) {
+				const auto &port = node.DynamicOutputs[portIndex];
+				if ((entry && std::any_of(
+								  entry->Outputs.begin(),
+								  entry->Outputs.end(),
+								  [&](const auto &fixed) { return fixed.Id == port.Id; }
+							  )) ||
+					(nativeSchema &&
+					 std::any_of(
+						 nativeSchema->Ports.begin(), nativeSchema->Ports.end(), [&](const auto &fixed) {
+							 return fixed.Direction == PortDirection::Output && fixed.Id == port.Id;
+						 }
+					 )))
+					return refuse(
+						Status::DuplicateId, "dynamic output collides with a fixed output", node.Id, port.Id
+					);
+				if (std::any_of(
+						node.DynamicOutputs.begin(),
+						node.DynamicOutputs.begin() + portIndex,
+						[&](const auto &prior) { return prior.Id == port.Id; }
+					))
+					return refuse(Status::DuplicateId, "declared dynamic output repeats", node.Id, port.Id);
+				if (!held || std::none_of(held->Outputs.begin(), held->Outputs.end(), [&](const auto &prior) {
+						return prior.Port == port.Id;
+					}))
+					++missingOutputs[index];
+			}
+			if (held) {
+				if (missingOutputs[index] > MAXIMUM_OUTPUTS_PER_NODE - held->Outputs.size())
+					return refuse(
+						Status::LimitExceeded, "reconciled producer exceeds output bounds", node.Id
+					);
+				if (missingOutputs[index]) {
+					// reserve temporarily overlaps the copied prior output buffer.
+					extra = MeshAddBytes(
+						extra, (held->Outputs.size() + missingOutputs[index]) * sizeof(CacheGroupReplayOutput)
+					);
+					for (const auto &port : node.DynamicOutputs)
+						if (std::none_of(held->Outputs.begin(), held->Outputs.end(), [&](const auto &prior) {
+								return prior.Port == port.Id;
+							}))
+							extra = MeshAddBytes(
+								extra,
+								std::max(port.Id.size(), std::string{}.capacity()) + node.Id.size() +
+									port.Id.size() + 128
+							);
+				}
 				continue;
 			}
 			++newNodes;
-			const auto *entry = FindCatalogueEntry(node.Type);
-			const auto *nativeSchema = entry ? nullptr : FindSchema(node.Type);
 			const size_t nativePorts =
 				nativeSchema ? std::count_if(
 								   nativeSchema->Ports.begin(),
@@ -759,11 +868,15 @@ namespace engine::imagegraph {
 		candidate.Owners.assign(source.Owners.begin(), source.Owners.end());
 		detail::AllocationReservation constructors;
 		for (size_t index = 0; index < needed.size(); ++index) {
-			if (!needed[index] || records[index] != SIZE_MAX) continue;
+			if (!needed[index] || (records[index] != SIZE_MAX && !missingOutputs[index])) continue;
 			const auto &node = document.Nodes[index];
-			CacheGroupReplayNode record;
-			record.NodeId = std::string(node.Id);
-			record.NodeType = std::string(node.Type);
+			const bool fresh = records[index] == SIZE_MAX;
+			CacheGroupReplayNode record =
+				fresh ? CacheGroupReplayNode{} : std::move(candidate.Nodes[records[index]]);
+			if (fresh) {
+				record.NodeId = std::string(node.Id);
+				record.NodeType = std::string(node.Type);
+			}
 			const auto *entry = FindCatalogueEntry(node.Type);
 			const auto *nativeSchema = entry ? nullptr : FindSchema(node.Type);
 			const size_t nativePorts =
@@ -774,13 +887,20 @@ namespace engine::imagegraph {
 							   )
 							 : 0;
 			record.Outputs.reserve(
-				(entry ? entry->Outputs.size() : nativePorts) + node.DynamicOutputs.size()
+				(fresh ? (entry ? entry->Outputs.size() : nativePorts) + node.DynamicOutputs.size()
+					   : record.Outputs.size() + missingOutputs[index])
 			);
-			const auto append =
-				[&](std::string_view id, std::string_view initial, std::string_view expression) -> Status {
+			const auto append = [&](std::string_view id,
+									std::string_view initial,
+									std::string_view expression,
+									bool sourceSplitZero = false) -> Status {
 				CacheGroupReplayOutput port;
 				port.Port = std::string(id);
-				if (!initial.empty()) {
+				if (sourceSplitZero) {
+					port.Data = 0.0;
+				} else if (allProducers && node.Type == "pc.group_output" && id == "value") {
+					port.Data = -1.0;
+				} else if (!initial.empty()) {
 					Value value;
 					const auto parsed = detail::ReadValueText(initial, value, budget, constructors);
 					if (parsed != Status::Ok)
@@ -844,20 +964,33 @@ namespace engine::imagegraph {
 				record.Outputs.push_back(std::move(port));
 				return Status::Ok;
 			};
-			if (entry)
+			if (fresh && entry)
 				for (const auto &port : entry->Outputs) {
 					if (append(port.Id, port.ConstructorDefault, port.ConstructorExpression) != Status::Ok)
 						return diagnostic.Code;
 				}
-			if (nativeSchema)
+			if (fresh && nativeSchema)
 				for (const auto &port : nativeSchema->Ports)
 					if (port.Direction == PortDirection::Output &&
 						append(port.Id, {}, "native node output") != Status::Ok)
 						return diagnostic.Code;
-			for (const auto &port : node.DynamicOutputs)
-				if (append(port.Id, {}, "dynamic output") != Status::Ok) return diagnostic.Code;
-			records[index] = candidate.Nodes.size();
-			candidate.Nodes.push_back(std::move(record));
+			for (const auto &port : node.DynamicOutputs) {
+				if (std::any_of(record.Outputs.begin(), record.Outputs.end(), [&](const auto &prior) {
+						return prior.Port == port.Id;
+					}))
+					continue;
+				// Array Split creates its deserialized sockets as Any with zero before updates.
+				const bool sourceSplitZero = node.Type == "pc.array_split" &&
+											 (port.Type == ValueType::Any || port.Type == ValueType::Scalar);
+				if (append(port.Id, {}, "dynamic output", sourceSplitZero) != Status::Ok)
+					return diagnostic.Code;
+			}
+			if (fresh) {
+				records[index] = candidate.Nodes.size();
+				candidate.Nodes.push_back(std::move(record));
+			} else {
+				candidate.Nodes[records[index]] = std::move(record);
+			}
 		}
 		for (const auto &plan : owners) {
 			const auto &node = document.Nodes[plan.Index];
@@ -914,6 +1047,19 @@ namespace engine::imagegraph {
 		uint64_t work = COMPARISON_WORK_LIMIT;
 		return InitializeLoadedCacheGroups(
 			document, source, output, maximumBytes, diagnostic, std::nullopt, work
+		);
+	}
+
+	Status detail::InitializeGroupRenderOutputs(
+		const Document &document,
+		const CacheGroupReplayState &source,
+		CacheGroupReplayState &output,
+		uint64_t maximumBytes,
+		Diagnostic &diagnostic
+	) {
+		uint64_t work = COMPARISON_WORK_LIMIT;
+		return InitializeLoadedCacheGroups(
+			document, source, output, maximumBytes, diagnostic, std::nullopt, work, true
 		);
 	}
 

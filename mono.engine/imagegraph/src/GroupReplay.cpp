@@ -3,6 +3,7 @@
 #include "GroupReplayInternal.hpp"
 #include "SourceAnimatorPersistence.hpp"
 #include "SourceAxisStorage.hpp"
+#include "SourceCommonAuthoring.hpp"
 #include "SourceLuaSockets.hpp"
 #include "SourceVec2Defaults.hpp"
 #include "ValuePayload.hpp"
@@ -184,6 +185,35 @@ namespace engine::imagegraph {
 		const auto ownerBudget =
 			AdmitGroupReplayDocument(document, previous, result, maximumBytes, diagnostic);
 		if (!ownerBudget) return diagnostic.Code;
+		uint64_t authoredAnimatorId = 0;
+		if (document.SourceAnimators) {
+			const auto &detached = document.SourceAnimators->Detached;
+			if (detached.size() > Limits::MaximumArrayElements)
+				return fail(Status::LimitExceeded, "authored animator identity count exceeds bounds");
+			uint64_t identityBytes = 0;
+			for (const auto &record : detached) {
+				if (record.Id.size() > Limits::MaximumTextBytes ||
+					record.Id.size() + 1 > 64'000'000 - identityBytes)
+					return fail(Status::LimitExceeded, "authored animator identity scan exceeds bounds");
+				identityBytes += record.Id.size() + 1;
+				constexpr std::string_view prefix = "native:animator:";
+				if (!record.Id.starts_with(prefix))
+					return fail(
+						Status::InvalidGroup,
+						"retained source animator has no native identity",
+						record.OwnerId
+					);
+				const auto digits = std::string_view(record.Id).substr(prefix.size());
+				uint64_t generation = 0;
+				const auto number = std::from_chars(digits.data(), digits.data() + digits.size(), generation);
+				if (digits.empty() || number.ec != std::errc{} ||
+					number.ptr != digits.data() + digits.size() || generation == UINT64_MAX)
+					return fail(
+						Status::InvalidGroup, "retained source animator identity is invalid", record.OwnerId
+					);
+				authoredAnimatorId = std::max(authoredAnimatorId, generation + 1);
+			}
+		}
 		constexpr size_t maximumBindings = Limits::MaximumNodes * Limits::MaximumArrayElements;
 		if (bindings.size() > maximumBindings)
 			return fail(Status::LimitExceeded, "source input binding count exceeds public bounds");
@@ -487,7 +517,8 @@ namespace engine::imagegraph {
 			}
 
 			const Node *target = nodeById(binding.NodeId);
-			if (!target || target->InstanceBase.empty() || !detail::AliasedSourceInput(*target, binding.Port))
+			if (!target || detail::SourceInputInstanceBase(*target, binding.Port).empty() ||
+				!detail::AliasedSourceInput(*target, binding.Port))
 				return fail(
 					Status::InvalidGroup, "Group binding target is not an instance input", binding.NodeId
 				);
@@ -498,10 +529,12 @@ namespace engine::imagegraph {
 			if (!validMode(binding.Getter) || !validMode(binding.Writer))
 				return fail(Status::InvalidValue, "Group binding animator mode is invalid", binding.NodeId);
 			const Node *owner = target;
-			for (size_t hop = 0; owner && !owner->InstanceBase.empty() && hop < document.Nodes.size(); ++hop)
-				owner = nodeById(owner->InstanceBase);
-			if (!owner || !owner->InstanceBase.empty() || owner->Id != binding.OwnerId ||
-				owner->Type != target->Type ||
+			for (size_t hop = 0; owner && !detail::SourceInputInstanceBase(*owner, binding.Port).empty() &&
+								 hop < document.Nodes.size();
+				 ++hop)
+				owner = nodeById(detail::SourceInputInstanceBase(*owner, binding.Port));
+			if (!owner || !detail::SourceInputInstanceBase(*owner, binding.Port).empty() ||
+				owner->Id != binding.OwnerId || owner->Type != target->Type ||
 				(!detail::AliasedSourceInput(*owner, animatorPort(binding)) &&
 				 !previous.DetachedAnimator(binding.OwnerId, animatorPort(binding))))
 				return fail(
@@ -516,6 +549,12 @@ namespace engine::imagegraph {
 					return binding.NodeId == node.Id && binding.Port == "subtype";
 				}))
 				return fail(Status::InvalidGroup, "Group binding omits an instance input", node.Id);
+		for (const auto &node : document.Nodes)
+			if (!node.SourceParentInputBase.empty() &&
+				std::none_of(bindings.begin(), bindings.end(), [&](const auto &binding) {
+					return binding.NodeId == node.Id && binding.Port == "parent_value";
+				}))
+				return fail(Status::InvalidGroup, "Group binding omits a parent input alias", node.Id);
 		auto candidate = detail::CloneGroupReplay(
 			previous,
 			bindings.size(),
@@ -525,6 +564,8 @@ namespace engine::imagegraph {
 			diagnostic
 		);
 		if (!candidate) return diagnostic.Code;
+		// Common writers stay authored, but reserve their IDs in the shared physical namespace.
+		candidate->NextAnimatorId = std::max(candidate->NextAnimatorId, authoredAnimatorId);
 		auto bindingCharge = candidate->Budget.Reserve(names);
 		if (!bindingCharge) return fail(Status::LimitExceeded, "Group binding exceeds live operation budget");
 		// A revision refresh replaces bindings while retaining frozen callback declarations.
@@ -587,6 +628,35 @@ namespace engine::imagegraph {
 				overlay.Fixed = std::move(entry.SubtypeStatic);
 				overlay.Keys = std::move(entry.SubtypeKeys);
 				entry.SubtypeStatic.reset();
+				candidate->SharedSubtypes.push_back(std::move(overlay));
+				if (!candidate->Charge.Merge(std::move(*nameCharge))) std::terminate();
+			}
+			const bool parentTarget = std::any_of(bindings.begin(), bindings.end(), [&](const auto &binding) {
+				return binding.NodeId == entry.NodeId && binding.Port == "parent_value";
+			});
+			const bool parentOwner = std::any_of(bindings.begin(), bindings.end(), [&](const auto &binding) {
+				return binding.OwnerId == entry.NodeId && binding.Port == "parent_value";
+			});
+			if (!retired && parentTarget) {
+				if (entry.ParentReset) removedBytes += detail::RetainedPayloadBytes(*entry.ParentReset);
+				removedBytes += entry.ParentKeys.capacity() * sizeof(Keyframe);
+				for (const auto &key : entry.ParentKeys)
+					removedBytes += *KeyframePayloadBytes(key) - sizeof(Keyframe);
+				entry.ParentReset.reset();
+				std::vector<Keyframe>{}.swap(entry.ParentKeys);
+			} else if (!retired && parentOwner && (entry.ParentReset || !entry.ParentKeys.empty())) {
+				auto nameCharge = candidate->Budget.Reserve(
+					std::max(entry.NodeId.size(), std::string{}.capacity()) + 1 +
+					std::max(size_t(12), std::string{}.capacity()) + 1
+				);
+				if (!nameCharge)
+					return fail(Status::LimitExceeded, "Group parent owner name exceeds operation budget");
+				GroupSubtypeOverlay overlay;
+				overlay.NodeId = entry.NodeId;
+				overlay.Port = "parent_value";
+				overlay.Fixed = std::move(entry.ParentReset);
+				overlay.Keys = std::move(entry.ParentKeys);
+				entry.ParentReset.reset();
 				candidate->SharedSubtypes.push_back(std::move(overlay));
 				if (!candidate->Charge.Merge(std::move(*nameCharge))) std::terminate();
 			}
@@ -758,7 +828,8 @@ namespace engine::imagegraph {
 			return fail(Status::InvalidGroup, "source input move cannot add or remove nodes");
 		for (const auto &node : original.Nodes) {
 			const auto *target = nodeIn(staged, node.Id);
-			if (!target || target->Type != node.Type || target->InstanceBase != node.InstanceBase)
+			if (!target || target->Type != node.Type || target->InstanceBase != node.InstanceBase ||
+				target->SourceParentInputBase != node.SourceParentInputBase)
 				return fail(Status::InvalidGroup, "source input move changes node ownership");
 		}
 		uint64_t work = 0;
@@ -1374,9 +1445,45 @@ namespace engine::imagegraph {
 				AllocationReservation lease,
 				bool sourceAnimator = false
 			) {
-				uint64_t oldBytes = entry.ParentReset ? RetainedPayloadBytes(*entry.ParentReset) : 0;
-				oldBytes += entry.ParentKeys.capacity() * sizeof(Keyframe);
-				for (const auto &key : entry.ParentKeys)
+				std::string_view animatorId = entry.NodeId;
+				auto *fixed = &entry.ParentReset;
+				auto *keys = &entry.ParentKeys;
+				const auto alias =
+					std::find_if(owner.Bindings.begin(), owner.Bindings.end(), [&](const auto &binding) {
+						return binding.NodeId == entry.NodeId && binding.Port == "parent_value";
+					});
+				const bool sharedOwner =
+					std::any_of(owner.Bindings.begin(), owner.Bindings.end(), [&](const auto &binding) {
+						return binding.OwnerId == entry.NodeId &&
+							   BindingAnimatorPort(binding) == "parent_value";
+					});
+				if (owner.Bound && (alias != owner.Bindings.end() || sharedOwner)) {
+					if (alias != owner.Bindings.end()) animatorId = alias->OwnerId;
+					auto overlay = std::find_if(
+						owner.SharedSubtypes.begin(), owner.SharedSubtypes.end(), [&](const auto &value) {
+							return value.NodeId == animatorId && value.Port == "parent_value";
+						}
+					);
+					if (overlay == owner.SharedSubtypes.end()) {
+						auto names = owner.Budget.Reserve(TextBytes(animatorId) + TextBytes("parent_value"));
+						if (!names || owner.SharedSubtypes.size() == owner.SharedSubtypes.capacity())
+							return context.Fail(
+								Status::LimitExceeded,
+								"parent alias reset exceeds operation budget",
+								"parent_value"
+							);
+						owner.SharedSubtypes.push_back({std::string(animatorId), {}, {}, "parent_value"});
+						if (!owner.Charge.Merge(std::move(*names))) std::terminate();
+						overlay = std::prev(owner.SharedSubtypes.end());
+					}
+					fixed = &overlay->Fixed;
+					keys = &overlay->Keys;
+				}
+				auto &parentFixed = *fixed;
+				auto &parentKeys = *keys;
+				uint64_t oldBytes = parentFixed ? RetainedPayloadBytes(*parentFixed) : 0;
+				oldBytes += parentKeys.capacity() * sizeof(Keyframe);
+				for (const auto &key : parentKeys)
 					oldBytes += *KeyframePayloadBytes(key) - sizeof(Keyframe);
 				if (!ValidRuntimeValue(replacement))
 					return context.Fail(
@@ -1386,7 +1493,7 @@ namespace engine::imagegraph {
 				std::vector<Keyframe> replacementKeys;
 				if (sourceAnimator) {
 					auto extra = owner.Budget.Reserve(
-						sizeof(Keyframe) + TextBytes(entry.NodeId) + TextBytes("parent_value") +
+						sizeof(Keyframe) + TextBytes(animatorId) + TextBytes("parent_value") +
 						TextBytes("source") + TextBytes("linear") * 2
 					);
 					if (!extra)
@@ -1395,18 +1502,18 @@ namespace engine::imagegraph {
 						);
 					keyCharge = std::move(*extra);
 					Keyframe key;
-					key.NodeId = std::string(entry.NodeId);
+					key.NodeId = std::string(animatorId);
 					key.Port = "parent_value";
 					key.Interpolation = "source";
 					key.Ease = KeyframeEase{};
 					key.Data = std::move(replacement);
 					replacementKeys.reserve(1);
 					replacementKeys.push_back(std::move(key));
-					entry.ParentReset.reset();
+					parentFixed.reset();
 				} else {
-					entry.ParentReset = std::move(replacement);
+					parentFixed = std::move(replacement);
 				}
-				entry.ParentKeys.swap(replacementKeys);
+				parentKeys.swap(replacementKeys);
 				std::vector<Keyframe>{}.swap(replacementKeys);
 				if (sourceAnimator && !owner.Charge.Merge(std::move(keyCharge))) std::terminate();
 				if (!owner.Charge.Merge(std::move(lease)) ||
@@ -1711,7 +1818,13 @@ namespace engine::imagegraph {
 						"source Trigger map requires a nonnegative integer frame",
 						port
 					);
-				if (trigger && !animated) {
+				const bool sharedParent =
+					owner.Bound &&
+					std::any_of(owner.Bindings.begin(), owner.Bindings.end(), [&](const auto &binding) {
+						return (binding.NodeId == entry.NodeId && binding.Port == port) ||
+							   (binding.OwnerId == entry.NodeId && BindingAnimatorPort(binding) == port);
+					});
+				if (trigger && !animated && !sharedParent) {
 					auto atZero = event;
 					(void)SetFrameTime(atZero.At, {});
 					return EditAnimator(
@@ -1729,7 +1842,7 @@ namespace engine::imagegraph {
 						true
 					);
 				}
-				if (port != "parent_value" && owner.Bound) {
+				if (owner.Bound && (port != "parent_value" || sharedParent)) {
 					std::string_view sourceId = entry.NodeId;
 					std::string_view sourcePort = port;
 					for (const auto &binding : owner.Bindings)
@@ -1775,7 +1888,8 @@ namespace engine::imagegraph {
 						sourcePort,
 						value,
 						animated,
-						true
+						true,
+						trigger
 					);
 				}
 				return EditAnimator(
@@ -2242,7 +2356,8 @@ namespace engine::imagegraph {
 			if (!EditSeparatedAnimator(context, event, owner, document, separated, axisWork)) return false;
 			if (separated) return true;
 
-			if (context.Authored.Type == "pc.group_input" && event.EditedPort == "parent_value") {
+			if (context.Authored.Type == "pc.group_input" && event.EditedPort == "parent_value" &&
+				context.Authored.SourceParentInputBase.empty()) {
 				auto parent =
 					std::find_if(owner.Entries.begin(), owner.Entries.end(), [&](const auto &entry) {
 						return entry.NodeId == event.NodeId;
@@ -2625,7 +2740,7 @@ namespace engine::imagegraph {
 					return node.Id == edit.NodeId;
 				});
 			const bool localParent = node != document.Nodes.end() && node->Type == "pc.group_input" &&
-									 edit.EditedPort == "parent_value";
+									 edit.EditedPort == "parent_value" && node->SourceParentInputBase.empty();
 			const auto *input = node == document.Nodes.end() ? nullptr
 								: localParent
 									? FindCatalogueInput(*FindCatalogueEntry(node->Type), edit.EditedPort)
@@ -2652,7 +2767,8 @@ namespace engine::imagegraph {
 					edit.NodeId,
 					edit.EditedPort
 				);
-			if (!localParent && !node->InstanceBase.empty() && !previous.Binding(node->Id, edit.EditedPort))
+			if (!localParent && !detail::SourceInputInstanceBase(*node, edit.EditedPort).empty() &&
+				!previous.Binding(node->Id, edit.EditedPort))
 				return fail(
 					Status::InvalidGroup,
 					"shared animator edit has no original owner binding",
@@ -2800,6 +2916,74 @@ namespace engine::imagegraph {
 		if (replay.InstancesBound() && !replay.Bindings().empty() &&
 			!add(replay.RetainedBytes() + sizeof(SourceAnimatorState)))
 			return fail(Status::LimitExceeded, "captured source animator snapshot exceeds projection budget");
+		if (detail::ValidateSourceCommonOwners(authored, diagnostic) != Status::Ok) return diagnostic.Code;
+		const auto commonIdentity = [&](std::string_view leftOwner,
+										std::string_view leftPort,
+										std::string_view rightOwner,
+										std::string_view rightPort) {
+			const uint64_t bytes = std::min(leftOwner.size(), rightOwner.size()) +
+								   std::min(leftPort.size(), rightPort.size()) + 2;
+			if (bytes > 64'000'000 - projectionWork) {
+				projectionWork = 64'000'000;
+				admitVisit();
+				return false;
+			}
+			projectionWork += bytes;
+			return leftOwner == rightOwner && leftPort == rightPort;
+		};
+		const auto commonWriter = [&](std::string_view ownerId, std::string_view port) {
+			for (const auto &owner : authored.SourceCommonOwners) {
+				if (!admitVisit()) return false;
+				if (commonIdentity(owner.UpdateAnimatorOwnerId, owner.UpdateAnimatorPort, ownerId, port))
+					return true;
+			}
+			return false;
+		};
+		size_t commonWriterCount = 0, commonKeys = 0;
+		uint64_t commonBytes = sizeof(SourceAnimatorState);
+		if (authored.SourceAnimators)
+			for (const auto &metadata : authored.SourceAnimators->Detached) {
+				if (!commonWriter(metadata.OwnerId, metadata.Id)) {
+					if (workExceeded) return diagnostic.Code;
+					continue;
+				}
+				++commonWriterCount;
+				const GroupSubtypeOverlay *payload = nullptr;
+				for (const auto &value : authored.SourceAnimators->DetachedValues) {
+					if (!admitVisit()) return diagnostic.Code;
+					if (commonIdentity(value.NodeId, value.Port, metadata.OwnerId, metadata.Id)) {
+						payload = &value;
+						break;
+					}
+				}
+				if (workExceeded) return diagnostic.Code;
+				if (!payload)
+					return fail(
+						Status::InvalidGroup,
+						"common writer projection payload is absent",
+						metadata.OwnerId,
+						metadata.Id
+					);
+				if (!detail::SourceAnimatorAdd(
+						commonBytes, sizeof(DetachedSourceAnimator) + sizeof(GroupSubtypeOverlay)
+					) ||
+					!detail::SourceAnimatorAdd(commonBytes, detail::DetachedAnimatorBytes(metadata)) ||
+					!detail::SourceAnimatorText(commonBytes, payload->NodeId, true) ||
+					!detail::SourceAnimatorText(commonBytes, payload->Port, true) ||
+					!detail::SourceAnimatorAdd(commonBytes, payload->Keys.size() * sizeof(Keyframe)))
+					return fail(Status::LimitExceeded, "common writer projection storage exceeds bounds");
+				if (payload->Fixed) {
+					const auto bytes = ValueClonePayloadBytes(*payload->Fixed);
+					if (!bytes || !detail::SourceAnimatorAdd(commonBytes, *bytes - sizeof(Value)))
+						return fail(Status::LimitExceeded, "common writer projection value exceeds bounds");
+				}
+				for (const auto &key : payload->Keys)
+					if (!detail::SourceAnimatorKey(commonBytes, key, true, commonKeys))
+						return fail(Status::LimitExceeded, "common writer projection keys exceed bounds");
+			}
+		if (commonWriterCount && !add(commonBytes))
+			return fail(Status::LimitExceeded, "common writer projection overlap exceeds bounds");
+
 		detail::EvaluationBudget budget(maximumBytes);
 		auto reservation = budget.Reserve(admitted);
 		if (!reservation) return fail(Status::LimitExceeded, "Group authored projection admission failed");
@@ -3254,25 +3438,52 @@ namespace engine::imagegraph {
 		if (workExceeded) return diagnostic.Code;
 		candidate.Keyframes.swap(finalKeys);
 		candidate.Tracks.swap(finalTracks);
-		if (replay.InstancesBound() && !replay.Bindings().empty()) {
+		const bool ordinarySnapshot = replay.InstancesBound() && !replay.Bindings().empty();
+		if (ordinarySnapshot || commonWriterCount) {
 			candidate.FormatVersion = std::max(candidate.FormatVersion, uint32_t{10});
 			candidate.SourceAnimators.emplace();
 			auto &state = *candidate.SourceAnimators;
-			state.Bindings.assign(replay.Bindings().begin(), replay.Bindings().end());
-			state.Detached.assign(replay.DetachedAnimators().begin(), replay.DetachedAnimators().end());
-			state.DetachedValues.reserve(state.Detached.size());
-			for (const auto &metadata : state.Detached) {
-				const auto *payload = replay.SharedSubtype(metadata.OwnerId, metadata.Id);
-				if (!payload)
-					return fail(
-						Status::InvalidGroup,
-						"captured retired animator has no payload",
-						metadata.OwnerId,
-						metadata.Id
-					);
-				state.DetachedValues.push_back(*payload);
-			}
-			if (detail::ValidateSourceAnimatorState(candidate, diagnostic) != Status::Ok)
+			if (ordinarySnapshot) state.Bindings.assign(replay.Bindings().begin(), replay.Bindings().end());
+			const size_t ordinaryCount = ordinarySnapshot ? replay.DetachedAnimators().size() : 0;
+			if (ordinaryCount > Limits::MaximumArrayElements - commonWriterCount)
+				return fail(Status::LimitExceeded, "projected physical writer count exceeds bounds");
+			state.Detached.reserve(commonWriterCount + ordinaryCount);
+			state.DetachedValues.reserve(commonWriterCount + ordinaryCount);
+			// Common local writers keep authored storage; group replay owns only its ordinary aliases.
+			if (authored.SourceAnimators)
+				for (const auto &metadata : authored.SourceAnimators->Detached) {
+					if (!commonWriter(metadata.OwnerId, metadata.Id)) {
+						if (workExceeded) return diagnostic.Code;
+						continue;
+					}
+					for (const auto &payload : authored.SourceAnimators->DetachedValues) {
+						if (!admitVisit()) return diagnostic.Code;
+						if (!commonIdentity(payload.NodeId, payload.Port, metadata.OwnerId, metadata.Id)) {
+							if (workExceeded) return diagnostic.Code;
+							continue;
+						}
+						state.Detached.push_back(metadata);
+						state.DetachedValues.push_back(payload);
+						break;
+					}
+				}
+			if (ordinarySnapshot)
+				for (const auto &metadata : replay.DetachedAnimators()) {
+					if (commonWriter(metadata.OwnerId, metadata.Id)) continue;
+					if (workExceeded) return diagnostic.Code;
+					const auto *payload = replay.SharedSubtype(metadata.OwnerId, metadata.Id);
+					if (!payload)
+						return fail(
+							Status::InvalidGroup,
+							"captured retired animator has no payload",
+							metadata.OwnerId,
+							metadata.Id
+						);
+					state.Detached.push_back(metadata);
+					state.DetachedValues.push_back(*payload);
+				}
+			if (detail::ValidateSourceAnimatorState(candidate, diagnostic) != Status::Ok ||
+				detail::ValidateSourceCommonOwners(candidate, diagnostic) != Status::Ok)
 				return diagnostic.Code;
 		} else
 			candidate.SourceAnimators = {};

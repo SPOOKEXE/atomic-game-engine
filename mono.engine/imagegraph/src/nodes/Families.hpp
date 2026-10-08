@@ -70,6 +70,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourcePcxExecutors();
 	std::span<const ExecutorEntry> SourceAnimationExecutors();
 	std::span<const ExecutorEntry> SourceRoutingExecutors();
+	std::span<const ExecutorEntry> SourceTunnelExecutors();
 	std::span<const ExecutorEntry> SourceSwitchExecutors();
 	std::span<const ExecutorEntry> SourceMiscExecutors();
 	std::span<const ExecutorEntry> SourceSequenceAnimationExecutors();

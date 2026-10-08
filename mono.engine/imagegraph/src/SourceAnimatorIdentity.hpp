@@ -7,6 +7,11 @@
 #include <cstdint>
 #include <optional>
 namespace engine::imagegraph::detail {
+	// Group parent sockets borrow independently of local controls and attributes.
+	inline std::string_view SourceInputInstanceBase(const Node &node, std::string_view port) noexcept {
+		if (node.Type == "pc.group_input" && port == "parent_value") return node.SourceParentInputBase;
+		return node.InstanceBase;
+	}
 	inline std::string_view BindingAnimatorPort(const GroupSubtypeBinding &binding) noexcept {
 		return binding.AnimatorPort.empty() ? std::string_view(binding.Port)
 											: std::string_view(binding.AnimatorPort);
@@ -59,10 +64,10 @@ namespace engine::imagegraph::detail {
 				std::any_of(document.Links.begin(), document.Links.end(), [&](const auto &link) {
 					return link.ToNode == selected->Id && link.ToPort == port;
 				});
-			if (selected->InstanceBase.empty() || override || linked) return selected;
+			if (SourceInputInstanceBase(*selected, port).empty() || override || linked) return selected;
 			const auto base =
 				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &item) {
-					return item.Id == selected->InstanceBase;
+					return item.Id == SourceInputInstanceBase(*selected, port);
 				});
 			if (base == document.Nodes.end()) return nullptr;
 			selected = &*base;

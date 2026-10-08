@@ -47,7 +47,7 @@ namespace engine::imagegraph {
 		};
 		if (!text(node.Id) || !text(node.SourceDisplayName) || !text(node.SourceInternalName) ||
 			!text(node.Type) || !text(node.GroupId) || !text(node.InstanceBase) ||
-			!add(node.Values.size() * sizeof(AuthoredValue)) ||
+			!text(node.SourceParentInputBase) || !add(node.Values.size() * sizeof(AuthoredValue)) ||
 			!add(node.SourceProperties.size() * sizeof(AuthoredValue)) ||
 			!add(node.DynamicInputs.size() * sizeof(DynamicInput)))
 			return std::nullopt;
@@ -97,7 +97,8 @@ namespace engine::imagegraph {
 			document.Keyframes.size() > Limits::MaximumKeyframes ||
 			document.Tracks.size() > Limits::MaximumTracks ||
 			document.Outputs.size() > Limits::MaximumOutputs ||
-			document.SliceStackActions.size() > Limits::MaximumNodes)
+			document.SliceStackActions.size() > Limits::MaximumNodes ||
+			document.SourceCommonOwners.size() > Limits::MaximumSourceCommonOwners)
 			return std::nullopt;
 		uint64_t bytes = sizeof(Document);
 		const auto add = [&](uint64_t amount) {
@@ -121,7 +122,8 @@ namespace engine::imagegraph {
 			!slots(document.Keyframes.capacity(), sizeof(Keyframe)) ||
 			!slots(document.Tracks.capacity(), sizeof(AnimationTrack)) ||
 			!slots(document.Outputs.capacity(), sizeof(Output)) ||
-			!slots(document.SliceStackActions.capacity(), sizeof(SliceStackAction)))
+			!slots(document.SliceStackActions.capacity(), sizeof(SliceStackAction)) ||
+			!slots(document.SourceCommonOwners.capacity(), sizeof(SourceCommonOwnerRecord)))
 			return std::nullopt;
 		for (const auto &action : document.SliceStackActions)
 			if (!text(action.NodeId) || !ValidFrameTime(action.Time) ||
@@ -149,7 +151,7 @@ namespace engine::imagegraph {
 				return std::nullopt;
 			if (!text(node.Id) || !text(node.SourceDisplayName) || !text(node.SourceInternalName) ||
 				!text(node.Type) || !text(node.GroupId) || !text(node.InstanceBase) ||
-				!slots(node.Values.capacity(), sizeof(AuthoredValue)) ||
+				!text(node.SourceParentInputBase) || !slots(node.Values.capacity(), sizeof(AuthoredValue)) ||
 				!slots(node.SourceProperties.capacity(), sizeof(AuthoredValue)) ||
 				!slots(node.DynamicInputs.capacity(), sizeof(DynamicInput)) ||
 				!slots(node.DynamicOutputs.capacity(), sizeof(DynamicOutput)) ||
@@ -180,7 +182,8 @@ namespace engine::imagegraph {
 		for (const auto &group : document.Groups) {
 			if (group.Ports.size() > Limits::MaximumGroupPorts || !text(group.Id) || !text(group.Name) ||
 				!text(group.ParentId) || !text(group.InstanceBase) || !text(group.OwnerNodeId) ||
-				!slots(group.Ports.capacity(), sizeof(GroupPort)))
+				!text(group.SourceInternalName) || !std::isfinite(group.SourcePosition.X) ||
+				!std::isfinite(group.SourcePosition.Y) || !slots(group.Ports.capacity(), sizeof(GroupPort)))
 				return std::nullopt;
 			for (const auto &port : group.Ports)
 				if (!text(port.Id) || !text(port.JunctionId) || !text(port.ControlNodeId))
@@ -226,6 +229,15 @@ namespace engine::imagegraph {
 		if (document.Project)
 			for (const AnimationRegion &region : document.Project->AnimationRegions)
 				if (!text(region.Label) || !text(region.SourceRegionId) || !add(1)) return std::nullopt;
+		for (const auto &owner : document.SourceCommonOwners) {
+			if (!text(owner.SourceOwnerId) || !text(owner.SourceType) || !text(owner.NativeOwnerId) ||
+				!text(owner.InstanceBase) || !text(owner.UpdateAnimatorOwnerId) ||
+				!text(owner.UpdateAnimatorPort))
+				return std::nullopt;
+			if (owner.UpdateExpression &&
+				(!text(owner.UpdateExpression->Port) || !text(owner.UpdateExpression->Code)))
+				return std::nullopt;
+		}
 		if (document.SourceAnimators) {
 			const auto animators = detail::SourceAnimatorStateBytes(*document.SourceAnimators, false);
 			if (!animators || !add(*animators)) return std::nullopt;

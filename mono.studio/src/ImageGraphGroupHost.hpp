@@ -71,6 +71,65 @@ namespace studio {
 					   : GroupSubtypeAnimator::Static;
 		}
 
+		// grug Collection copies share only the parent animator. other controls stay local.
+		static bool ParentInputAlias(
+			const engine::imagegraph::Document &document,
+			const engine::imagegraph::Node &node,
+			const engine::imagegraph::Node *&owner,
+			const engine::imagegraph::Node *&getter,
+			uint64_t &work,
+			engine::imagegraph::Diagnostic &error
+		) {
+			using namespace engine::imagegraph;
+			owner = getter = &node;
+			bool detached = false;
+			for (size_t hop = 0; !owner->SourceParentInputBase.empty(); ++hop) {
+				if (!detached &&
+					std::find(
+						owner->InstanceOverrides.begin(), owner->InstanceOverrides.end(), "parent_value"
+					) != owner->InstanceOverrides.end()) {
+					getter = owner;
+					detached = true;
+				}
+				if (hop >= document.Nodes.size()) {
+					error = {
+						Status::Cycle, node.Id, "parent_value", "Collection parent alias contains a cycle"
+					};
+					return false;
+				}
+				const Node *base = nullptr;
+				for (const auto &candidate : document.Nodes) {
+					const auto bytes = std::max(candidate.Id.size(), owner->SourceParentInputBase.size()) + 1;
+					if (bytes > work) {
+						error = {
+							Status::LimitExceeded,
+							node.Id,
+							"parent_value",
+							"Collection parent alias lookup exceeds work bounds"
+						};
+						return false;
+					}
+					work -= bytes;
+					if (candidate.Id == owner->SourceParentInputBase) {
+						base = &candidate;
+						break;
+					}
+				}
+				if (!base || base->Type != "pc.group_input") {
+					error = {
+						Status::InvalidValue,
+						node.Id,
+						"parent_value",
+						"Collection parent alias owner is missing or not a Group input"
+					};
+					return false;
+				}
+				owner = base;
+			}
+			if (!detached) getter = owner;
+			return true;
+		}
+
 		void Clear() {
 			Replay = {};
 			Revision = 0;
@@ -172,6 +231,8 @@ namespace studio {
 				const uint64_t scratchBudget = Budget(error, {&document}, {&Replay, &rebound});
 				if (!scratchBudget) return false;
 				uint64_t bindingNames = 0;
+				// grug bound string comparisons across every alias chain in this transaction.
+				uint64_t aliasWork = 64ull * 1024 * 1024;
 				const auto admits = [&](uint64_t bytes) {
 					if (bytes > scratchBudget) {
 						error = {
@@ -197,7 +258,7 @@ namespace studio {
 						}
 						fresh.push_back({node.Id, Mode(document, node, "subtype")});
 					}
-					if (node.InstanceBase.empty()) continue;
+					if (node.InstanceBase.empty() && node.SourceParentInputBase.empty()) continue;
 					const Node *owner = &node;
 					for (size_t hop = 0; !owner->InstanceBase.empty() && hop < document.Nodes.size(); ++hop) {
 						const auto found =
@@ -210,10 +271,16 @@ namespace studio {
 					const auto *entry = FindCatalogueEntry(node.Type);
 					if (!entry || !HasNativeExecutor(node.Type)) continue;
 					const auto append = [&](std::string_view port, int32_t sourceIndex) {
-						if (sourceIndex < 0 || (node.Type == "pc.group_input" && port == "parent_value"))
+						const bool parent = node.Type == "pc.group_input" && port == "parent_value";
+						if (sourceIndex < 0 && !parent) return true;
+						if (parent ? node.SourceParentInputBase.empty() : node.InstanceBase.empty())
 							return true;
+						const Node *inputOwner = owner;
+						const Node *getter = &node;
+						if (parent && !ParentInputAlias(document, node, inputOwner, getter, aliasWork, error))
+							return false;
 						const uint64_t names = std::max(node.Id.size(), size_t{15}) +
-											   std::max(owner->Id.size(), size_t{15}) +
+											   std::max(inputOwner->Id.size(), size_t{15}) +
 											   std::max(port.size(), size_t{15}) + 3;
 						const size_t capacity = bindings.size() == bindings.capacity()
 													? std::max(size_t{8}, bindings.capacity() * 2)
@@ -225,8 +292,8 @@ namespace studio {
 							return false;
 						if (capacity > bindings.capacity()) bindings.reserve(capacity);
 						bindingNames += names;
-						const Node *getter = &node;
-						for (size_t hop = 0; !getter->InstanceBase.empty() && hop < document.Nodes.size();
+						for (size_t hop = 0;
+							 !parent && !getter->InstanceBase.empty() && hop < document.Nodes.size();
 							 ++hop) {
 							if (std::find(
 									getter->InstanceOverrides.begin(), getter->InstanceOverrides.end(), port
@@ -242,9 +309,9 @@ namespace studio {
 						}
 						bindings.push_back(
 							{node.Id,
-							 owner->Id,
+							 inputOwner->Id,
 							 Mode(document, *getter, port),
-							 Mode(document, *owner, port),
+							 Mode(document, *inputOwner, port),
 							 std::string(port)}
 						);
 						return true;
@@ -262,17 +329,20 @@ namespace studio {
 				for (const auto &binding : bindings)
 					scratch +=
 						binding.NodeId.capacity() + binding.OwnerId.capacity() + binding.Port.capacity();
+				// Common Update writers do not capture ordinary input aliases.
+				const bool capturedAliases =
+					document.SourceAnimators && !document.SourceAnimators->Bindings.empty();
 				// grug restore callbacks need bound aliases, even when those aliases sit outside the
 				// callback. this is native restore; source append still owns its separate load callback
 				// order.
 				if (!fresh.empty() && !rebound.InstancesBound() &&
 					std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
-						return !node.InstanceBase.empty();
+						return !node.InstanceBase.empty() || !node.SourceParentInputBase.empty();
 					})) {
 					GroupReplayState callbackBindings;
 					const auto allowance = Budget(error, {}, {&Replay}, scratch);
 					const auto status =
-						document.SourceAnimators && !Replay.InstancesBound()
+						capturedAliases && !Replay.InstancesBound()
 							? RestoreSourceAnimatorBindings(
 								  document, rebound, revision, callbackBindings, error, allowance
 							  )
@@ -295,7 +365,7 @@ namespace studio {
 					) != Status::Ok)
 					return false;
 				rebound = {};
-				if (document.SourceAnimators && !Replay.InstancesBound()) {
+				if (capturedAliases && !Replay.InstancesBound()) {
 					if (RestoreSourceAnimatorBindings(
 							document, restored, revision, bound, error, Budget(error, {}, {&Replay}, scratch)
 						) != Status::Ok)

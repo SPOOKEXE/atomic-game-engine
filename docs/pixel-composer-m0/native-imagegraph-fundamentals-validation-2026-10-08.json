@@ -1,0 +1,3445 @@
+{
+  "phase": "scoped native imagegraph fundamentals verification",
+  "date": "2026-10-08",
+  "scope": [
+    "record the batch24 scoped baseline, batch25/27 fixture corrections, batch28 valid reproductions and batch29 final verification",
+    "verify group Any junction transport, static and dynamic port compatibility, computed coordinates, and ungroup ownership",
+    "record Spiral semantic equality and PXC source ownership, grouped cache clear, and workload profile metadata",
+    "retain commands, binary hashes and log hashes for final batch29 while keeping accepted batch19 unchanged",
+    "verify retained callback activity, explicit cached purity refresh, PureFunction, held image-array payloads, dynamic cold sockets and grouped host residency through batches32 to34",
+    "verify Collection clone reconciliation, source-compatible comparison/conversion, tunnel prior-registry getters and retained typed payloads, directional canvas casts and authored group junction views through batches35 to41",
+    "verify Collection clone reconciliation, source-compatible comparison/conversion, tunnel prior-registry getters and retained typed payloads, directional canvas casts and authored group junction views through batches35 to41",
+    "preserve reserved tag-over-index routes, distinct common Update destinations and opaque PXC saves; validate captured common phase prerequisites through batches42 to44",
+    "verify audited native common lifecycle, bounded PXC owner editing, scalar trigger clocks, ordered JSON inverse lookup and restored listener checks in accepted batch52"
+  ],
+  "acceptance_status": "Accepted batch52: both builds, all 20 checks, all 6,080 C++ cases, 116 Python checks, 16 CLI checks, 33 offscreen Vulkan cases and 26 CPU workload profiles pass. Previous listener failures pass after network permissions were restored. Supported native common lifecycle and PXC save/reopen pass; full catalogue callbacks, licensed reference parity and live Studio remain open.",
+  "preserved_receipt": {
+    "path": "docs/pixel-composer-m0/native-parallel-composer-validation-2026-10-07.json",
+    "sha256": "3599ca82d23500ca87991867dd2e2e6ba6131755aa201b3a188c7af4f929b70d",
+    "note": "Accepted batch19 receipt retained unchanged."
+  },
+  "summary": {
+    "batch": 52,
+    "builds": [
+      {
+        "preset": "release-tests",
+        "result": "passed",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch52.log",
+        "log_sha256": "b272e8be23573a888330cc30bfcbe2b10ccf5531aecd90e7fa3ca82bd00abe63"
+      },
+      {
+        "preset": "profile",
+        "result": "passed",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch52.log",
+        "log_sha256": "c2ed93ffd93c840755c0e91392ae593b1b52de9b7aaf6c208123feaceb1dde2e"
+      }
+    ],
+    "checks_total": 20,
+    "checks_passed": 20,
+    "checks_failed": 0,
+    "cpp_cases_including_startup": {
+      "total": 6080,
+      "passed": 6080,
+      "failed": 0
+    },
+    "python_cases": 116,
+    "cli_cases": 16,
+    "suite_summaries": [
+      {
+        "suite": "bake",
+        "total": 161,
+        "passed": 161,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-bake-batch52.log",
+        "log_sha256": "93d4367d1524653a4021ace28abe0b7648fea84ec45be4a92225a61e3de2f627"
+      },
+      {
+        "suite": "physics",
+        "total": 43,
+        "passed": 43,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-physics-batch52.log",
+        "log_sha256": "f46cc27eb9acd986c055764de2a5d3eb9c65c425b1ef82d770c8d41ed1a08c6c"
+      },
+      {
+        "suite": "runner",
+        "total": 29,
+        "passed": 29,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-runner-batch52.log",
+        "log_sha256": "246fbcb9659203eead89cb0e55fcaa5fbc7f64d82c522961737ecf07e747f452"
+      },
+      {
+        "suite": "font",
+        "total": 43,
+        "passed": 43,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-font-batch52.log",
+        "log_sha256": "dd5ad13fe1822dd121f7d96c5a2356f354c9ccb7b47684e6bb4fe18adf40b8c1"
+      },
+      {
+        "suite": "export",
+        "total": 95,
+        "passed": 95,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-export-batch52.log",
+        "log_sha256": "51a18015bc3b907f95125531a30eadfbc6a71e3781399c166d25d00cb0129642"
+      },
+      {
+        "suite": "render",
+        "total": 33,
+        "passed": 33,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-render-batch52.log",
+        "log_sha256": "386694cf4f745de47f5683441c3667f9c74821143997dcaaa99302cfc984f7a0"
+      },
+      {
+        "suite": "io",
+        "total": 376,
+        "passed": 376,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch52.log",
+        "log_sha256": "991fad775e305b345a42d4190865bce0f7276de8986e6e42f10906f23ad19069"
+      },
+      {
+        "suite": "core",
+        "total": 3650,
+        "passed": 3650,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch52.log",
+        "log_sha256": "335f6c75b30047a4fdbf2d519bfd3e62fc611252ad13f30381b575c7b9a8bdd5"
+      },
+      {
+        "suite": "assetc",
+        "total": 49,
+        "passed": 49,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-assetc-batch52.log",
+        "log_sha256": "2a5ae1f939bebd0bd382adfd600709c86622072765fbb181e61d0d300f5a1018"
+      },
+      {
+        "suite": "client",
+        "total": 359,
+        "passed": 359,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-client-batch52.log",
+        "log_sha256": "ba3dd118c0c4144d951f292c6de5340840a70c8b2e240338fe233bedbaba34fb"
+      },
+      {
+        "suite": "studio",
+        "total": 1159,
+        "passed": 1159,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-studio-batch52.log",
+        "log_sha256": "c5bb01387ccad2f445d98fc62686c545a15f0a4ef7173ad5fe657c4cb355af28"
+      },
+      {
+        "suite": "nodegraph",
+        "total": 42,
+        "passed": 42,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-nodegraph-batch52.log",
+        "log_sha256": "822bc5c39b12b928a63f60e34ebbb28e27a8fe0f80881d97c2e1575c12733970"
+      },
+      {
+        "suite": "ui",
+        "total": 40,
+        "passed": 40,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-ui-batch52.log",
+        "log_sha256": "715cc5252f77fa572e90dac07c7ddf4ba326648099c40c8363b21c065f5ceca3"
+      },
+      {
+        "suite": "startup",
+        "total": 1,
+        "passed": 1,
+        "failed": 0,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-startup-batch52.log",
+        "log_sha256": "d9632c7668a70bbc9270afdd6dc29a033621575e37cc528b2e210ba51cbd88b9"
+      }
+    ]
+  },
+  "targeted_checks": [
+    {
+      "name": "new core Any and computed-coordinate regressions",
+      "cases": 6,
+      "result": "passed",
+      "suite": "test_imagegraph"
+    },
+    {
+      "name": "new Studio group-port regressions",
+      "cases": 7,
+      "result": "passed",
+      "suite": "test_studio"
+    },
+    {
+      "name": "new nodegraph regression",
+      "cases": 1,
+      "result": "passed",
+      "suite": "test_nodegraph"
+    },
+    {
+      "name": "source-path Spiral core suite",
+      "cases": 12,
+      "result": "passed",
+      "suite": "test_imagegraph"
+    },
+    {
+      "name": "PXC Spiral suite",
+      "cases": 3,
+      "result": "passed",
+      "suite": "test_imagegraphio"
+    },
+    {
+      "name": "selected grouped cache clear wakes overlapping frozen groups and retires dependent Studio previews under source gates",
+      "cases": 1,
+      "result": "passed",
+      "suite": "test_studio"
+    },
+    {
+      "name": "profile preflight",
+      "cases": 3,
+      "assertions": 23,
+      "command": [
+        ".cache/build/profile/tests/test_imagegraph",
+        "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads]"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.846,
+      "binary_sha256": "a7964644a72b5602942ddc6b5c8b9e5ef03ac50c0feed729c7df777b2071a4c7",
+      "binary_sha256_after": "a7964644a72b5602942ddc6b5c8b9e5ef03ac50c0feed729c7df777b2071a4c7",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch52.log",
+      "log_sha256": "7837a933867eca9683aad1a68035e5310cfd59c46a4da7855f7dd7f0e197b7c4",
+      "preflight_log_sha256": "5125be503e1e1f6e9a1cf3b134f3b2879ca9c9be3c7c60baf6ab7110e7c1a8e5",
+      "verification_batch": 52
+    },
+    {
+      "name": "all imagegraph workload profiles",
+      "result": "passed",
+      "workload_profiles": 26,
+      "workload_calls": 338,
+      "observed_spans": 50492,
+      "execution": {
+        "heap_profile_mode": 1,
+        "warmups": 8,
+        "kept_samples": 5
+      },
+      "benchmark_sha256": "41474cedeb94a5c413d57db173430b68f71ceaed8fc267aa5e655341eaca6b6d",
+      "qualification": "All 26 CPU workloads rerun. Timing outputs checked in RAM only; no performance claim. Native lifecycle coverage comes from joined test suites, not the captured common-socket benchmark.",
+      "verification_batch": 52
+    },
+    {
+      "name": "eight-group retained scheduler profile",
+      "result": "passed",
+      "verification_batch": 43,
+      "unchanged_binary_verified_batch": 44,
+      "groups": 8,
+      "nodes": 24,
+      "operations_per_call": 17,
+      "workload_calls": 13,
+      "warmups": 8,
+      "kept_samples": 5,
+      "spans": 6006,
+      "heap_compiled": 1,
+      "benchmark_sha256": "6150961cd5050a37ad1501645adf68a278af56890b180494957b4ba10a4618cf",
+      "retained_bytes": [
+        17440,
+        17440
+      ]
+    },
+    {
+      "name": "native Hilbert and Kisrhombille generators, grouping, image formats and bounded execution",
+      "result": "passed",
+      "evidence": [
+        {
+          "test_source": "mono.engine/imagegraph/tests/SourcePatternGeneratorIntegration.cpp",
+          "source_sha256": "1dc60c7d80bbcc3af2930a7e903aa123d12de0e95ffd593fc698a02feb27dec2",
+          "suite": "core",
+          "cases": 7,
+          "covered_by_joined_batch": 34
+        },
+        {
+          "test_source": "mono.studio/tests/ImageGraphPatternGroups.cpp",
+          "source_sha256": "4a5760acb4a7e87f50362029d89c5ba39fc0ecfcc0d874fde7e9cc9c81565972",
+          "suite": "studio",
+          "cases": 2,
+          "covered_by_joined_batch": 34
+        }
+      ],
+      "scope": "native pixels, save/reopen, processor rows, seven colour depths, headless group/ungroup gestures and atomic bounded refusal; licensed GPU raster parity remains open"
+    },
+    {
+      "name": "sixteen tunnel sender-receiver pairs with prior-registry getters, frozen groups, resume and atomic work refusal",
+      "result": "passed",
+      "verification_batch": 40,
+      "unchanged_binary_verified_batch": 41,
+      "groups": 2,
+      "nodes": 64,
+      "operations_per_call": 7,
+      "workload_calls": 13,
+      "warmups": 8,
+      "kept_samples": 5,
+      "spans": 33995,
+      "retained_bytes": [
+        99128,
+        99128
+      ],
+      "heap_compiled": 1,
+      "benchmark_sha256": "6053958d2136dbedf3a0c78cee4cd17c2e2515b7e64b439adf9fecc49875e5f6",
+      "qualification": "CPU profiling stdout validated in RAM; timing outputs not saved."
+    },
+    {
+      "name": "sixteen tunnel sender-receiver pairs with prior-registry getters, frozen groups, resume and atomic work refusal",
+      "result": "passed",
+      "verification_batch": 40,
+      "unchanged_binary_verified_batch": 41,
+      "groups": 2,
+      "nodes": 64,
+      "operations_per_call": 7,
+      "workload_calls": 13,
+      "warmups": 8,
+      "kept_samples": 5,
+      "spans": 33995,
+      "retained_bytes": [
+        99128,
+        99128
+      ],
+      "heap_compiled": 1,
+      "benchmark_sha256": "6150961cd5050a37ad1501645adf68a278af56890b180494957b4ba10a4618cf",
+      "qualification": "CPU profiling stdout validated in RAM; timing outputs not saved."
+    },
+    {
+      "name": "captured source common-socket lifecycle base",
+      "result": "passed",
+      "verification_batch": 43,
+      "unchanged_binary_verified_batch": 44,
+      "cases": 9,
+      "workload_calls": 13,
+      "owners": 64,
+      "steps_per_call": 16,
+      "spans": 468,
+      "reset_receipts_per_call": 85,
+      "refusals_per_call": 2,
+      "state_fnv": 3059338748087447014,
+      "retained_bytes": [
+        11112,
+        11112
+      ],
+      "heap_compiled": 1,
+      "benchmark_sha256": "6150961cd5050a37ad1501645adf68a278af56890b180494957b4ba10a4618cf",
+      "qualification": "Explicit phase captures only; native callbacks, animator reset and reserved route resolution remain pending. CPU timing outputs validated in RAM only."
+    }
+  ],
+  "batch_failures": [],
+  "review_notes": [
+    "The batch24 record remains scoped historical evidence; batch25 and batch27 Any canvas failures came from invalid or incomplete fixtures, while batch25 also recorded a genuine Ungroup InvalidGroup failure.",
+    "Batch28 corrected fixtures established the real core and Studio feature failures before batch29 fixes.",
+    "Batch29 passes the seven new Studio group-port cases, six core Any and computed-coordinate cases, and one nodegraph regression.",
+    "Batch29 also passes the 12-case source-path Spiral core suite, 3-case PXC Spiral suite, selected grouped cache clear, profile preflight and all 23 workload profiles.",
+    "The full joined batch retains 21 listener-restricted C++ failures. Live Studio verification and licensed reference parity remain unverified.",
+    "Batch34 passes all native feature cases, source IO, asset cooking and 33 approved offscreen Vulkan cases. Batch33 validates all 24 workload profiles; the unchanged benchmark binary is verified in batch34. Audio, mesh and animation feature tracks remain paused pending broader imagegraph verification.",
+    "Batch40 passed all core/IO/Vulkan cases and 25 profiling workloads; four Studio fixture failures were repaired together in batch41 without weakening production validation.",
+    "Batch41 passed all native feature cases and both builds. Group junctions use adapter-only canvas views; border sockets and live visual acceptance are not established.",
+    "Reserved source trigger/metadata selectors still require ordered source project-step state; they are not inferred from native readiness or callback results.",
+    "Batch43 passed both builds, the captured lifecycle cases and all 26 profiles, but an old IO fixture attempted to publish malformed selector archives before testing native group refusal. Batch44 asserts those malformed refusals at bake validation while preserving native reserved-selector refusal checks.",
+    "Batch44 passed all native feature cases and both builds. Group junctions use adapter-only canvas views; border sockets and live visual acceptance are not established.",
+    "Reserved source trigger/metadata selectors still require ordered source project-step state; they are not inferred from native readiness or callback results.",
+    "Captured common phases are prerequisites only. Collection overrides the common step and uses Lite wrappers; Number also uses Lite. Actual callback dispatch and authored animator resets remain pending.",
+    "Read review of batch52 source repair confirmed ordered_json member growth can invalidate borrowed string views. Constructor positions are resolved before any mutation. Prior failed batches50 and51 remain in history; joined batch52 passes."
+  ],
+  "source_integrity": {
+    "paths": 4266,
+    "changed": [],
+    "source_stability_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-source-stability-batch52.json",
+    "source_stability_record_sha256": "4267ed1ad05850c9f2ed6950bce1c890ebb66d0718dac25d4af2ff83db1d7299",
+    "child_binaries_before": {
+      ".cache/build/release-tests/tools/assetc": "66f8fc8051d13ddb7d549d7a26c3ea74a909a696596e27016fe9f9071df9a86c",
+      ".cache/build/release-tests/tools/imagegraph": "d993fa3e0a873141e8cc081daa8381c81ac579b43280ac3f2cd0b979260c3857"
+    },
+    "child_binaries_after": {
+      ".cache/build/release-tests/tools/assetc": "66f8fc8051d13ddb7d549d7a26c3ea74a909a696596e27016fe9f9071df9a86c",
+      ".cache/build/release-tests/tools/imagegraph": "d993fa3e0a873141e8cc081daa8381c81ac579b43280ac3f2cd0b979260c3857"
+    },
+    "child_hashes_unchanged": true,
+    "all_suite_binaries_unchanged": true
+  },
+  "batch_result_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch52-results.json",
+  "batch_result_record_sha256": "7744377c2e231a77271511dd2d9b78c26f3aa2ca9782d00885c9e149fcfd68aa",
+  "results": [
+    {
+      "name": "bake",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-bake-batch52.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_bake"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "14ae7bda292487563e308c269c9372c2b0bd5dc22f8b008119e0b003b5462e97",
+      "exit_code": 0,
+      "elapsed_seconds": 0.314,
+      "assertions": 15997,
+      "cases": 161,
+      "binary_sha256_after": "14ae7bda292487563e308c269c9372c2b0bd5dc22f8b008119e0b003b5462e97",
+      "binary_changed_during_test": false,
+      "log_sha256": "93d4367d1524653a4021ace28abe0b7648fea84ec45be4a92225a61e3de2f627"
+    },
+    {
+      "name": "physics",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-physics-batch52.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphphysics"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "c695b9ce92247b5671c6349af2c0a98a1c93a8b6449ddd9f1b64d4e1dfce8f04",
+      "exit_code": 0,
+      "elapsed_seconds": 0.355,
+      "assertions": 715,
+      "cases": 43,
+      "binary_sha256_after": "c695b9ce92247b5671c6349af2c0a98a1c93a8b6449ddd9f1b64d4e1dfce8f04",
+      "binary_changed_during_test": false,
+      "log_sha256": "f46cc27eb9acd986c055764de2a5d3eb9c65c425b1ef82d770c8d41ed1a08c6c"
+    },
+    {
+      "name": "runner",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-runner-batch52.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph_runner"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "c8f98451879d8adb8db89fd138de7bf11111a56397a79e5b978deca4e4e87912",
+      "exit_code": 0,
+      "elapsed_seconds": 0.322,
+      "assertions": 296,
+      "cases": 29,
+      "binary_sha256_after": "c8f98451879d8adb8db89fd138de7bf11111a56397a79e5b978deca4e4e87912",
+      "binary_changed_during_test": false,
+      "log_sha256": "246fbcb9659203eead89cb0e55fcaa5fbc7f64d82c522961737ecf07e747f452"
+    },
+    {
+      "name": "font",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-font-batch52.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphfont"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "455c0423fb570dc1121881b7ebb41d288892bd0efa649fddfd9de9098fd60e85",
+      "exit_code": 0,
+      "elapsed_seconds": 0.585,
+      "assertions": 1845,
+      "cases": 43,
+      "binary_sha256_after": "455c0423fb570dc1121881b7ebb41d288892bd0efa649fddfd9de9098fd60e85",
+      "binary_changed_during_test": false,
+      "log_sha256": "dd5ad13fe1822dd121f7d96c5a2356f354c9ccb7b47684e6bb4fe18adf40b8c1"
+    },
+    {
+      "name": "export",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-export-batch52.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphexport"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "bbd7494b34e1f502a694fd7a08d25586bfb37c855dae89c8597908da43512712",
+      "exit_code": 0,
+      "elapsed_seconds": 0.636,
+      "assertions": 3401,
+      "cases": 95,
+      "binary_sha256_after": "bbd7494b34e1f502a694fd7a08d25586bfb37c855dae89c8597908da43512712",
+      "binary_changed_during_test": false,
+      "log_sha256": "51a18015bc3b907f95125531a30eadfbc6a71e3781399c166d25d00cb0129642"
+    },
+    {
+      "name": "render",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-render-batch52.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_render",
+        "[gpu][imagegraph],[source-camera-host-gpu],[transform-host-gpu],[composer-gpu],[camera-queue-replacement-gpu],[source-skybox-group-gpu],[sdf-host-gpu],[source_sdf],[sdf-capture],[particle3d],*Transform Image 3D*"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "efc1f48ad9ae45ba3edb9ecaa2ea4d48489debb4d5b44f8ea20d5cae626ee8a8",
+      "exit_code": 0,
+      "elapsed_seconds": 3.208,
+      "assertions": 2004,
+      "cases": 33,
+      "binary_sha256_after": "efc1f48ad9ae45ba3edb9ecaa2ea4d48489debb4d5b44f8ea20d5cae626ee8a8",
+      "binary_changed_during_test": false,
+      "log_sha256": "386694cf4f745de47f5683441c3667f9c74821143997dcaaa99302cfc984f7a0"
+    },
+    {
+      "name": "cli",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-cli-batch52.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^(imagegraph_cli_|assetc_cli_)",
+        "--output-on-failure",
+        "-j8"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 3.285,
+      "ctest_cases": 16,
+      "log_sha256": "6c2028bdcac82b44f51a9f50295b4562fdc6d7bc37fcd4f4f6ee4fdc7ab058b8"
+    },
+    {
+      "name": "io",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch52.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraphio"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "95a39fde61736fa4a2bbc3a76ced3ea2914a6b3fec4103ea156047ba779a1ce7",
+      "exit_code": 0,
+      "elapsed_seconds": 3.979,
+      "assertions": 15190,
+      "cases": 376,
+      "binary_sha256_after": "95a39fde61736fa4a2bbc3a76ced3ea2914a6b3fec4103ea156047ba779a1ce7",
+      "binary_changed_during_test": false,
+      "log_sha256": "991fad775e305b345a42d4190865bce0f7276de8986e6e42f10906f23ad19069"
+    },
+    {
+      "name": "core",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch52.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_imagegraph"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "ca6380fed8d8329488774cf868fb7aadc21f14823b7dc1a527bc74ff995d7518",
+      "exit_code": 0,
+      "elapsed_seconds": 4.419,
+      "assertions": 1986937,
+      "cases": 3650,
+      "binary_sha256_after": "ca6380fed8d8329488774cf868fb7aadc21f14823b7dc1a527bc74ff995d7518",
+      "binary_changed_during_test": false,
+      "log_sha256": "335f6c75b30047a4fdbf2d519bfd3e62fc611252ad13f30381b575c7b9a8bdd5"
+    },
+    {
+      "name": "assetc",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-assetc-batch52.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_assetc"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "cba801dff73b572ee5d79370379384ec3ec40561e8ca652144f8a2e11ecbb794",
+      "exit_code": 0,
+      "elapsed_seconds": 6.128,
+      "assertions": 563,
+      "cases": 49,
+      "binary_sha256_after": "cba801dff73b572ee5d79370379384ec3ec40561e8ca652144f8a2e11ecbb794",
+      "binary_changed_during_test": false,
+      "log_sha256": "2a5ae1f939bebd0bd382adfd600709c86622072765fbb181e61d0d300f5a1018"
+    },
+    {
+      "name": "client",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-client-batch52.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_client",
+        "~[.],[argument_binding][gpu],[argument-transform-gpu]",
+        "--rng-seed",
+        "1403467049"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "c69a1eb1b061284aa4934fa598e69b74a3c211846d62d073d922267cfca65c4a",
+      "exit_code": 0,
+      "elapsed_seconds": 4.727,
+      "assertions": 23853,
+      "cases": 359,
+      "binary_sha256_after": "c69a1eb1b061284aa4934fa598e69b74a3c211846d62d073d922267cfca65c4a",
+      "binary_changed_during_test": false,
+      "log_sha256": "ba3dd118c0c4144d951f292c6de5340840a70c8b2e240338fe233bedbaba34fb"
+    },
+    {
+      "name": "studio",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-studio-batch52.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_studio"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "fdc0345403784657de7d204e0c397f6e8fedddd7f0a4ba452b54af49729242f1",
+      "exit_code": 0,
+      "elapsed_seconds": 9.904,
+      "assertions": 51329,
+      "cases": 1159,
+      "binary_sha256_after": "fdc0345403784657de7d204e0c397f6e8fedddd7f0a4ba452b54af49729242f1",
+      "binary_changed_during_test": false,
+      "log_sha256": "c5bb01387ccad2f445d98fc62686c545a15f0a4ef7173ad5fe657c4cb355af28"
+    },
+    {
+      "name": "nodegraph",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-nodegraph-batch52.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_nodegraph"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_nodegraph",
+      "binary_sha256": "d19323ed3d7ea072195cd77ed603a1be05e93c5d66d01c834e74b463d4ff748d",
+      "exit_code": 0,
+      "elapsed_seconds": 1.328,
+      "assertions": 410,
+      "cases": 42,
+      "binary_sha256_after": "d19323ed3d7ea072195cd77ed603a1be05e93c5d66d01c834e74b463d4ff748d",
+      "binary_changed_during_test": false,
+      "log_sha256": "822bc5c39b12b928a63f60e34ebbb28e27a8fe0f80881d97c2e1575c12733970"
+    },
+    {
+      "name": "ui",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-ui-batch52.log",
+      "command": [
+        ".cache/build/release-tests/tests/test_ui"
+      ],
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "f397ce590b398320b41a3e943f8e4d6803fef178c75fcfd9f6574bc4431634e1",
+      "exit_code": 0,
+      "elapsed_seconds": 0.487,
+      "assertions": 704,
+      "cases": 40,
+      "binary_sha256_after": "f397ce590b398320b41a3e943f8e4d6803fef178c75fcfd9f6574bc4431634e1",
+      "binary_changed_during_test": false,
+      "log_sha256": "715cc5252f77fa572e90dac07c7ddf4ba326648099c40c8363b21c065f5ceca3"
+    },
+    {
+      "name": "startup",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-startup-batch52.log",
+      "command": [
+        "ctest",
+        "--test-dir",
+        ".cache/build/release-tests",
+        "-R",
+        "^studio_composer_startup_arguments$",
+        "-V"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.266,
+      "assertions": 5,
+      "cases": 1,
+      "log_sha256": "d9632c7668a70bbc9270afdd6dc29a033621575e37cc528b2e210ba51cbd88b9"
+    },
+    {
+      "name": "lint",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-lint-batch52.log",
+      "command": [
+        "ruff",
+        "check",
+        "scripts/pixel-composer/generate-catalogue.py",
+        "scripts/tests/pixel_composer_catalogue_metadata_test.py",
+        "scripts/pixel-composer/extract-source.py",
+        "scripts/tests/pixel_composer_extract_source_test.py",
+        "scripts/pixel-composer/source_behavior.py",
+        "scripts/tests/pixel_composer_source_behavior_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.013,
+      "log_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "name": "architecture",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-architecture-batch52.log",
+      "command": [
+        "cmake",
+        "-DGRAPH=.cache/build/release-tests/target-graph.json",
+        "-DEXPECTED=mono.tools/architecture/expected_graph.json",
+        "-P",
+        "mono.tools/architecture/CheckTargetGraph.cmake"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.423,
+      "log_sha256": "e2920b48a3c7c18b9bb66b525c591a2eb61a1986c17204060ce321e87ea6ff4f"
+    },
+    {
+      "name": "python",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-python-batch52.log",
+      "command": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "scripts/tests",
+        "-p",
+        "pixel_composer_*_test.py"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 2.207,
+      "python_cases": 116,
+      "log_sha256": "930542559dea7d0de9facbebee17bcce556e8df8b4869d0e73988982469559a7"
+    },
+    {
+      "name": "format",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-format-batch52.log",
+      "command": [
+        "/usr/bin/clang-format-21",
+        "--dry-run",
+        "--Werror",
+        "mono.studio/src/ImageGraphCacheBackground.hpp",
+        "mono.studio/src/ImageGraphCacheBackground.cpp",
+        "mono.studio/tests/ImageGraphCacheBackground.cpp",
+        "mono.studio/src/ImageGraphCacheControls.hpp",
+        "mono.studio/tests/ImageGraphCacheControls.cpp",
+        "mono.studio/nodegraph/include/nodegraph/Editor.hpp",
+        "mono.studio/nodegraph/src/Editor.cpp",
+        "mono.studio/nodegraph/tests/Editor.cpp",
+        "mono.studio/include/studio/ImageGraph.hpp",
+        "mono.studio/src/ImageGraph.cpp",
+        "mono.studio/tests/ImageGraph.cpp",
+        "mono.studio/src/ImageGraphCacheEditObservation.cpp",
+        "mono.studio/src/ImageGraphCacheEditObservation.hpp",
+        "mono.studio/tests/ImageGraphCacheEditObservation.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/CacheGroupReplay.hpp",
+        "mono.engine/imagegraph/src/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheGroupReplay.cpp",
+        "mono.engine/imagegraph/tests/FeedbackHost.cpp",
+        "mono.engine/imagegraphio/tests/FrameCacheProperties.cpp",
+        "mono.engine/imagegraphio/tests/SourceFrameCache.cpp",
+        "mono.studio/src/ImageComposer.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/DataReplay.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FeedbackHost.hpp",
+        "mono.engine/imagegraph/src/DataReplay.cpp",
+        "mono.engine/imagegraph/src/Document.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/FrameCacheReplay.hpp",
+        "mono.engine/imagegraph/src/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheInputs.hpp",
+        "mono.engine/imagegraph/src/SourceFrameCacheLookup.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.hpp",
+        "mono.engine/imagegraph/src/NativeFrameCacheReceipt.cpp",
+        "mono.engine/imagegraph/src/NodeExecutors.hpp",
+        "mono.engine/imagegraph/src/nodes/SourceFrameCacheNodes.cpp",
+        "mono.engine/imagegraph/src/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/tests/FrameCacheReplay.cpp",
+        "mono.engine/imagegraph/tests/CacheResultsReplay.cpp",
+        "mono.engine/imagegraph/src/SourcePathShiftVisit.hpp",
+        "mono.engine/imagegraph/tests/DataReplay.cpp",
+        "mono.engine/imagegraph/tests/SourcePathShiftReplayIngress.cpp",
+        "mono.engine/imagegraph/tests/SourcePathSequentialNodes.cpp",
+        "mono.engine/imagegraph/tests/StatefulOutputs.cpp",
+        "mono.engine/ui/src/Interface.cpp",
+        "mono.engine/ui/tests/Interface.cpp",
+        "mono.engine/ui/include/engine/ui/Interface.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.hpp",
+        "mono.engine/imagegraph/src/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/tests/TimelineOverrides.cpp",
+        "mono.engine/imagegraph/src/SourcePathPayload.hpp",
+        "mono.engine/imagegraph/src/nodes/Path.hpp",
+        "mono.engine/imagegraph/tests/Catalogue.cpp",
+        "mono.engine/imagegraph/src/CacheGroupReplayClone.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.hpp",
+        "mono.engine/imagegraph/src/PendingGraph.cpp",
+        "mono.engine/imagegraph/tests/PendingGraph.cpp",
+        "mono.engine/imagegraph/tests/SourcePatternGeneratorIntegration.cpp",
+        "mono.studio/tests/ImageGraphPatternGroups.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceHilbertNodes.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp",
+        "mono.engine/imagegraph/src/SourceModeTransition.cpp",
+        "mono.engine/imagegraph/src/GroupReplay.cpp",
+        "mono.engine/imagegraph/src/BuiltinRandomCaptureCodec.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/BuiltinRandomCaptureCodec.hpp",
+        "mono.engine/imagegraph/tests/BuiltinRandomCaptureCodec.cpp",
+        "mono.engine/imagegraph/tests/SourceSeparatedVec2.cpp",
+        "mono.engine/imagegraph/tests/SourceMirrorPathProjection.cpp",
+        "mono.engine/imagegraphio/src/PxcxImport.cpp",
+        "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+        "mono.engine/imagegraphio/tests/PxcxMirrorPathRatio.cpp",
+        "mono.engine/imagegraph/src/SourceSeparatedVec2.hpp",
+        "mono.engine/imagegraph/src/SourceSeparatedVec2.cpp",
+        "mono.engine/imagegraph/src/SourceAnimatorIdentity.hpp",
+        "mono.engine/imagegraph/src/SourceMirrorAnimator.hpp",
+        "mono.engine/imagegraphio/tests/PxcxSeparatedVec2.cpp",
+        "mono.engine/imagegraph/src/SourceGetterProjection.cpp",
+        "mono.engine/imagegraph/tests/SourceGetterProjection.cpp",
+        "mono.engine/imagegraph/src/SourceInputSelection.hpp",
+        "mono.engine/imagegraph/src/SourceInputEvaluation.hpp",
+        "mono.engine/imagegraph/src/PcxControls.cpp",
+        "mono.engine/imagegraph/tests/SourceInputEvaluation.cpp",
+        "mono.engine/imagegraph/tests/SourceInputMoves.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/GroupReplay.hpp",
+        "mono.engine/imagegraph/src/PixelBuilderGroups.cpp",
+        "mono.engine/imagegraph/tests/GroupReplay.cpp",
+        "mono.engine/imagegraph/src/SourceAxisStorage.hpp",
+        "mono.engine/imagegraph/src/SourceVec2Defaults.hpp",
+        "mono.engine/imagegraph/src/SourceVec2Defaults.cpp",
+        "mono.engine/imagegraph/tests/SourceVec2Defaults.cpp",
+        "mono.engine/imagegraph/src/GroupClonePayload.cpp",
+        "mono.engine/imagegraph/src/SourceFont.cpp",
+        "mono.engine/imagegraph/src/SourceBuiltinRandom.cpp",
+        "mono.studio/src/SourceDynamicGroups.cpp",
+        "mono.studio/tests/ImageGraphSourceInputs.cpp",
+        "mono.engine/imagegraph/tests/SourceAxisInitialization.cpp",
+        "mono.engine/imagegraph/src/Catalogue.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/Catalogue.hpp",
+        "mono.studio/src/ImageGraphGroupHost.hpp",
+        "mono.studio/tests/ImageGraphGroupHost.cpp",
+        "mono.engine/imagegraph/tests/SourceAxisReadRequests.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceAxisTransition.hpp",
+        "mono.engine/imagegraph/src/SourceAxisTransition.cpp",
+        "mono.engine/imagegraph/tests/SourceAxisTransition.cpp",
+        "mono.studio/src/ImageGraphAxisControls.hpp",
+        "mono.studio/tests/ImageGraphAxisControls.cpp",
+        "mono.engine/imagegraph/src/GroupInstanceRecapture.cpp",
+        "mono.engine/imagegraph/src/SourceAnimatorPersistence.cpp",
+        "mono.engine/imagegraph/src/SourceAnimatorPersistence.hpp",
+        "mono.engine/imagegraphio/tests/SourceArtworkEdit.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceKeyframeTransition.hpp",
+        "mono.engine/imagegraph/src/SourceKeyframeTransition.cpp",
+        "mono.engine/imagegraph/tests/SourceKeyframeTransition.cpp",
+        "mono.studio/src/ImageGraph.cpp",
+        "mono.studio/src/TimelineDopesheet.hpp",
+        "mono.studio/tests/TimelineSourceAliases.cpp",
+        "mono.studio/src/ImageGraphCapturedKeyEdit.hpp",
+        "mono.studio/src/TimelineEaseEditor.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceTrackTransition.hpp",
+        "mono.engine/imagegraph/src/SourceTrackTransition.cpp",
+        "mono.engine/imagegraph/tests/SourceTrackTransition.cpp",
+        "mono.studio/src/TimelineKeyDelete.hpp",
+        "mono.studio/tests/TimelineKeyDelete.cpp",
+        "mono.studio/include/studio/ImageGraph.hpp",
+        "mono.studio/src/AnimationTrackPolicyEditor.hpp",
+        "mono.studio/src/ImageGraphSourceKeyEdit.hpp",
+        "mono.studio/src/ImageGraphKeyPinProjection.hpp",
+        "mono.studio/src/ImageComposer.cpp",
+        "mono.studio/src/KeyframeKindEditor.hpp",
+        "mono.studio/src/TimelineKeyEditor.hpp",
+        "mono.studio/tests/ImageGraphSourceKeyEdit.cpp",
+        "mono.studio/src/TimelineKeyActions.hpp",
+        "mono.studio/src/TimelineScalarKeys.hpp",
+        "mono.studio/tests/TimelineScalarKeys.cpp",
+        "mono.studio/tests/TimelineKeyEditor.cpp",
+        "mono.studio/tests/TimelineScalarDopesheet.cpp",
+        "mono.studio/tests/ComposerWorkflow.cpp",
+        "mono.studio/src/ImageGraphTimelineRead.hpp",
+        "mono.studio/tests/ImageGraphTimelineRead.cpp",
+        "mono.engine/imagegraph/src/GroupReplayInternal.hpp",
+        "mono.studio/tests/ImageGraph.cpp",
+        "mono.studio/tests/TimelineDopesheetActions.cpp",
+        "mono.studio/src/TimelineScalarKeyControls.hpp",
+        "mono.studio/src/KeyframeSourceDriverControls.hpp",
+        "mono.studio/tests/TimelineEaseEditor.cpp",
+        "mono.engine/imagegraphio/tests/PxcxSeparatedVec2.cpp",
+        "mono.engine/imagegraphio/src/PxcxEdit.cpp",
+        "mono.studio/src/ImageGraphFilePublish.hpp",
+        "mono.studio/tests/ImageGraphFilePublish.cpp",
+        "mono.studio/src/PxcxSave.cpp",
+        "mono.engine/imagegraphio/include/engine/imagegraphio/PxcxAppend.hpp",
+        "mono.engine/imagegraphio/src/PxcxAppend.cpp",
+        "mono.engine/imagegraphio/tests/PxcxAppend.cpp",
+        "mono.studio/tests/ImageGraphSourceHistory.cpp",
+        "mono.studio/src/ImageGraphHistorySource.hpp",
+        "mono.studio/src/ImageGraphHistoryCanvas.hpp",
+        "mono.studio/src/ImageGraphAppendGroups.hpp",
+        "mono.studio/tests/ImageGraphAppendGroups.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/GroupReplay.hpp",
+        "mono.engine/imagegraph/src/Document.cpp",
+        "mono.engine/imagegraph/src/GroupCallbackDocument.cpp",
+        "mono.engine/imagegraph/src/GroupCallbackOpaque.hpp",
+        "mono.engine/imagegraph/tests/GroupCallbackDocument.cpp",
+        "mono.studio/src/ImageGraphAppendGroups.hpp",
+        "mono.studio/tests/ImageGraphAppendGroups.cpp",
+        "mono.engine/imagegraphio/include/engine/imagegraphio/PxcxAppend.hpp",
+        "mono.engine/imagegraphio/src/PxcxAppend.cpp",
+        "mono.engine/imagegraphio/tests/PxcxAppend.cpp",
+        "mono.studio/nodegraph/include/nodegraph/Graph.hpp",
+        "mono.studio/nodegraph/src/Graph.cpp",
+        "mono.studio/nodegraph/src/Layout.cpp",
+        "mono.studio/nodegraph/src/Serialize.cpp",
+        "mono.studio/nodegraph/src/Editor.cpp",
+        "mono.studio/nodegraph/tests/Graph.cpp",
+        "mono.studio/nodegraph/tests/Layout.cpp",
+        "mono.studio/nodegraph/tests/Serialize.cpp",
+        "mono.studio/src/ImageGraph.cpp",
+        "mono.studio/include/studio/ImageGraph.hpp",
+        "mono.studio/src/ImageGraphHistoryCanvas.hpp",
+        "mono.studio/tests/ImageGraph.cpp",
+        "mono.studio/tests/ImageGraphSourceHistory.cpp",
+        "mono.studio/src/ImageComposer.cpp",
+        "mono.studio/src/ImageGraphAppendProject.hpp",
+        "mono.engine/imagegraphio/tests/PxcxEdit.cpp",
+        "mono.studio/src/ImageGraphFileSetPublish.hpp",
+        "mono.studio/include/studio/PxcxSave.hpp",
+        "mono.studio/src/PxcxSave.cpp",
+        "mono.studio/src/ImageComposer.cpp",
+        "mono.studio/tests/PxcxSave.cpp",
+        "mono.studio/tests/ImageGraphFilePublish.cpp",
+        "mono.engine/imagegraphio/src/OrdinarySourceGroups.hpp",
+        "mono.engine/imagegraphio/tests/PxcxGroups.cpp",
+        "mono.engine/imagegraphexport/include/engine/imagegraphexport/PxcxCollectionFiles.hpp",
+        "mono.engine/imagegraphexport/src/PxcxCollectionFiles.cpp",
+        "mono.engine/imagegraphexport/tests/PxcxCollectionFiles.cpp",
+        "mono.studio/tests/ImageGraphFilePublish.cpp",
+        "mono.engine/imagegraphio/tests/PxcxCollectionLoad.cpp",
+        "mono.engine/imagegraphexport/include/engine/imagegraphexport/PxcxCollectionLoad.hpp",
+        "mono.engine/imagegraphexport/src/PxcxCollectionLoad.cpp",
+        "mono.engine/imagegraphexport/src/PxcxCodecHeap.hpp",
+        "mono.engine/imagegraphexport/tests/PxcxCollectionLoad.cpp",
+        "mono.engine/imagegraph/fuzz/FrameCache.cpp",
+        "mono.engine/imagegraph/src/HostCapture.cpp",
+        "mono.engine/imagegraph/src/nodes/Host.cpp",
+        "mono.engine/imagegraph/tests/SourceSdfHost.cpp",
+        "mono.engine/render/include/engine/render/SourceSdf.hpp",
+        "mono.engine/render/include/engine/render/Renderer.hpp",
+        "mono.engine/render/src/SourceSdf.hpp",
+        "mono.engine/render/src/SourceSdf.cpp",
+        "mono.engine/render/src/SourceSdfRequest.cpp",
+        "mono.engine/render/src/SourceSdfCapture.cpp",
+        "mono.engine/render/src/RendererComposer.cpp",
+        "mono.engine/render/src/RendererState.hpp",
+        "mono.engine/render/src/RenderTargets.cpp",
+        "mono.engine/render/src/ImageGraphTransform3DResident.cpp",
+        "mono.engine/render/tests/SourceSdfCapture.cpp",
+        "mono.engine/render/tests/SourceSdfHostGpu.cpp",
+        "mono.client/src/ImageGraphComposerAdapter.cpp",
+        "mono.client/src/ImageGraphSdfAdapter.cpp",
+        "mono.client/src/ImageGraphRuntime.cpp",
+        "mono.client/tests/SourceSdfGraphHost.cpp",
+        "mono.studio/src/ImageGraphComposerHost.hpp",
+        "mono.studio/src/ImageGraphHost.hpp",
+        "mono.studio/tests/SourceSdfGraphHost.cpp",
+        "mono.engine/imagegraph/src/SourceArgumentHost.cpp",
+        "mono.engine/imagegraph/tests/SourceArgumentNodes.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceFont.hpp",
+        "mono.engine/imagegraph/src/Document.cpp",
+        "mono.engine/imagegraph/src/NodeExecutors.hpp",
+        "mono.engine/imagegraph/src/SourceFontObservationContext.hpp",
+        "mono.engine/imagegraphfont/include/engine/imagegraphfont/GraphFontHost.hpp",
+        "mono.engine/imagegraphfont/include/engine/imagegraphfont/GraphFontInputs.hpp",
+        "mono.engine/imagegraphfont/src/GraphFontHost.cpp",
+        "mono.engine/imagegraphfont/src/GraphFontInputs.cpp",
+        "mono.engine/imagegraphfont/tests/GraphFontHost.cpp",
+        "mono.engine/imagegraphfont/tests/GraphFontInputs.cpp",
+        "mono.engine/imagegraphfont/tests/WrappedFontBatch.cpp",
+        "mono.engine/imagegraphfont/tests/WrappedFontHost.cpp",
+        "mono.engine/imagegraphfont/tests/fixtures/FontHostBoundary.hpp",
+        "mono.studio/tests/ImageGraphExportIntent.cpp",
+        "mono.engine/imagegraphfont/tests/FontBoundaryWorkloads.cpp",
+        "mono.engine/imagegraphexport/tests/GraphMeshHost.cpp",
+        "mono.engine/imagegraphexport/src/GraphMeshHost.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceAreaWarp.cpp",
+        "mono.engine/imagegraph/tests/SourceAreaWarp.cpp",
+        "mono.engine/imagegraph/src/nodes/Families.hpp",
+        "mono.engine/imagegraph/src/NodeExecutors.cpp",
+        "mono.engine/imagegraph/src/ProcessorBatch.cpp",
+        "mono.engine/imagegraph/tests/SourceAreaWarpAtlas.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceBlendDepth.cpp",
+        "mono.engine/imagegraph/tests/SourceBlendDepth.cpp",
+        "mono.engine/imagegraph/src/nodes/Sampler.hpp",
+        "mono.engine/imagegraph/src/nodes/SourceRefractClean.hpp",
+        "mono.engine/imagegraph/tests/SourceChoiceAliases.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceBend.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceBend.hpp",
+        "mono.engine/imagegraph/tests/SourceBend.cpp",
+        "mono.engine/imagegraph/src/nodes/SourcePixelMath.cpp",
+        "mono.engine/imagegraph/src/nodes/SourcePixelMath.hpp",
+        "mono.engine/imagegraph/tests/SourcePixelMath.cpp",
+        "mono.studio/nodegraph/include/nodegraph/Types.hpp",
+        "mono.studio/nodegraph/src/Types.cpp",
+        "mono.studio/nodegraph/src/Serialize.cpp",
+        "mono.studio/nodegraph/src/Graph.cpp",
+        "mono.studio/nodegraph/tests/Graph.cpp",
+        "mono.studio/nodegraph/tests/Serialize.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/NoiseField.hpp",
+        "mono.engine/imagegraph/src/NoiseField.cpp",
+        "mono.engine/imagegraph/src/ValuePayload.hpp",
+        "mono.engine/imagegraph/src/ValueNodeSchemas.hpp",
+        "mono.engine/imagegraph/src/ValueNodeEval.hpp",
+        "mono.engine/imagegraph/tests/NoiseField.cpp",
+        "mono.studio/src/ImageGraphPorts.hpp",
+        "mono.studio/tests/ImageGraphNoise.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceGlow.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceGlow.hpp",
+        "mono.engine/imagegraph/tests/SourceGlow.cpp",
+        "mono.engine/imagegraph/src/nodes/SourcePolar.cpp",
+        "mono.engine/imagegraph/src/nodes/SourcePolar.hpp",
+        "mono.engine/imagegraph/tests/SourcePolar.cpp",
+        "mono.engine/imagegraph/src/SourceMappedInputs.hpp",
+        "mono.engine/imagegraph/src/nodes/SourceTileTransform.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceTileTransform.hpp",
+        "mono.engine/imagegraph/tests/SourceTileTransform.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceDisplace.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceDisplace.hpp",
+        "mono.engine/imagegraph/tests/SourceDisplace.cpp",
+        "mono.engine/imagegraph/tests/SourceDisplaceBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceJpeg.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceJpeg.hpp",
+        "mono.engine/imagegraph/tests/SourceJpeg.cpp",
+        "mono.engine/imagegraph/tests/SourceJpegBatch.cpp",
+        "mono.engine/imagegraph/tests/NoiseModes.cpp",
+        "mono.studio/src/ImageGraphNoiseControls.hpp",
+        "mono.studio/tests/ImageGraphNoiseControls.cpp",
+        "mono.engine/imagegraph/src/nodes/SourcePixelSort.cpp",
+        "mono.engine/imagegraph/src/nodes/SourcePixelSort.hpp",
+        "mono.engine/imagegraph/tests/SourcePixelSort.cpp",
+        "mono.engine/imagegraph/tests/SourcePixelSortBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceNoise.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceNoise.hpp",
+        "mono.engine/imagegraph/tests/SourceNoise.cpp",
+        "mono.engine/imagegraph/tests/SourceNoiseBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceCaustic.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceCaustic.hpp",
+        "mono.engine/imagegraph/tests/SourceCaustic.cpp",
+        "mono.engine/imagegraph/tests/SourceCausticBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceCellular.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceCellular.hpp",
+        "mono.engine/imagegraph/tests/SourceCellular.cpp",
+        "mono.engine/imagegraph/tests/SourceCellularBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourcePerlin.cpp",
+        "mono.engine/imagegraph/src/nodes/SourcePerlin.hpp",
+        "mono.engine/imagegraph/tests/SourcePerlin.cpp",
+        "mono.engine/imagegraph/tests/SourcePerlinBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceVoronoiExtra.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceVoronoiExtra.hpp",
+        "mono.engine/imagegraph/tests/SourceVoronoiExtra.cpp",
+        "mono.engine/imagegraph/tests/SourceVoronoiExtraBatch.cpp",
+        "mono.engine/imagegraphexport/tests/GraphCommandHost.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceShardNoise.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceShardNoise.hpp",
+        "mono.engine/imagegraph/tests/SourceShardNoise.cpp",
+        "mono.engine/imagegraph/tests/SourceShardNoiseBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceStrandNoise.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceStrandNoise.hpp",
+        "mono.engine/imagegraph/tests/SourceStrandNoise.cpp",
+        "mono.engine/imagegraph/tests/SourceStrandNoiseBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceWeave.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceWeave.hpp",
+        "mono.engine/imagegraph/tests/SourceWeave.cpp",
+        "mono.engine/imagegraph/tests/SourceWeaveBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourcePytagoreanTile.cpp",
+        "mono.engine/imagegraph/src/nodes/SourcePytagoreanTile.hpp",
+        "mono.engine/imagegraph/src/nodes/SourceShaderGradient.hpp",
+        "mono.engine/imagegraph/tests/SourcePytagoreanTile.cpp",
+        "mono.engine/imagegraph/tests/SourcePytagoreanTileBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourcePerlinExtra.cpp",
+        "mono.engine/imagegraph/src/nodes/SourcePerlinExtra.hpp",
+        "mono.engine/imagegraph/tests/SourcePerlinExtra.cpp",
+        "mono.engine/imagegraph/tests/SourcePerlinExtraBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceNoiseCube.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceNoiseCube.hpp",
+        "mono.engine/imagegraph/tests/SourcePerlinCube.cpp",
+        "mono.engine/imagegraph/tests/SourcePerlinCubeBatch.cpp",
+        "mono.engine/imagegraph/tests/SourceCellularCube.cpp",
+        "mono.engine/imagegraph/tests/SourceCellularCubeBatch.cpp",
+        "mono.engine/imagegraph/tests/SourceSimplexCube.cpp",
+        "mono.engine/imagegraph/tests/SourceSimplexCubeBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceWaveletNoise.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceWaveletNoise.hpp",
+        "mono.engine/imagegraph/tests/SourceWaveletNoise.cpp",
+        "mono.engine/imagegraph/tests/SourceWaveletNoiseBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceScratchNoise.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceScratchNoise.hpp",
+        "mono.engine/imagegraph/tests/SourceScratchNoise.cpp",
+        "mono.engine/imagegraph/tests/SourceScratchNoiseBatch.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceFoldNoise.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceFoldNoise.hpp",
+        "mono.engine/imagegraph/tests/SourceFoldNoise.cpp",
+        "mono.engine/imagegraph/tests/SourceFoldNoiseBatch.cpp",
+        "mono.client/tests/ImageGraphArgumentBindings.cpp",
+        "mono.client/tests/ImageGraphRuntime.cpp",
+        "mono.engine/bake/include/engine/bake/Pxcx.hpp",
+        "mono.engine/bake/include/engine/bake/SpriteCache.hpp",
+        "mono.engine/bake/src/Pxcx.cpp",
+        "mono.engine/bake/src/SpriteCache.cpp",
+        "mono.engine/bake/tests/Pxcx.cpp",
+        "mono.engine/bake/tests/SpriteCache.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/HostCapture.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/StatefulTemporalCone.hpp",
+        "mono.engine/imagegraph/src/HostCaptureReceipt.cpp",
+        "mono.engine/imagegraph/src/PendingHostObservations.cpp",
+        "mono.engine/imagegraph/src/PixelBuilderPayload.cpp",
+        "mono.engine/imagegraph/src/SourceRetainedImageOutputs.cpp",
+        "mono.engine/imagegraph/src/nodes/CurveNodes.cpp",
+        "mono.engine/imagegraph/src/nodes/RandomNodes.cpp",
+        "mono.engine/imagegraph/src/nodes/Source2DSparkleNodes.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceRoutingNodes.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceSwitchNodes.cpp",
+        "mono.engine/imagegraph/src/nodes/SourceTileNodes.cpp",
+        "mono.engine/imagegraph/src/nodes/Values.cpp",
+        "mono.engine/imagegraph/tests/HostCaptureReceipt.cpp",
+        "mono.engine/imagegraph/tests/SourcePathSpiral.cpp",
+        "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphDeviceHost.hpp",
+        "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphExport.hpp",
+        "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphFileHost.hpp",
+        "mono.engine/imagegraphexport/include/engine/imagegraphexport/GraphImageCache.hpp",
+        "mono.engine/imagegraphexport/src/GraphAuthoredExport.cpp",
+        "mono.engine/imagegraphexport/src/GraphDeviceHost.cpp",
+        "mono.engine/imagegraphexport/src/GraphExport.cpp",
+        "mono.engine/imagegraphexport/src/GraphExportSession.cpp",
+        "mono.engine/imagegraphexport/src/GraphImageCacheHost.cpp",
+        "mono.engine/imagegraphexport/src/GraphRasterHost.hpp",
+        "mono.engine/imagegraphexport/src/GraphSpriteHost.cpp",
+        "mono.engine/imagegraphexport/src/Runner.cpp",
+        "mono.engine/imagegraphexport/tests/GraphDeviceHost.cpp",
+        "mono.engine/imagegraphexport/tests/GraphExportSession.cpp",
+        "mono.engine/imagegraphexport/tests/GraphImageCache.cpp",
+        "mono.engine/imagegraphexport/tests/GraphSpriteHost.cpp",
+        "mono.engine/imagegraphio/src/GroupInstances.hpp",
+        "mono.engine/imagegraphio/src/SourceImageEdit.cpp",
+        "mono.engine/imagegraphio/tests/PxcxColorDepth.cpp",
+        "mono.engine/imagegraphio/tests/PxcxCookedShaderAnnotation.cpp",
+        "mono.engine/imagegraphio/tests/PxcxHlslInputOrigin.cpp",
+        "mono.engine/imagegraphio/tests/PxcxImport.cpp",
+        "mono.engine/imagegraphio/tests/PxcxStructureEdit.cpp",
+        "mono.engine/imagegraphphysics/tests/CacheResultsClear.cpp",
+        "mono.engine/imagegraphphysics/tests/CacheResultsTransport.cpp",
+        "mono.engine/render/src/ImageGraphTransform3DResident.hpp",
+        "mono.engine/render/tests/ComposerSurfaceGpu.cpp",
+        "mono.engine/scriptluau/src/ComposerLua.cpp",
+        "mono.engine/scriptluau/tests/ComposerLua.cpp",
+        "mono.studio/nodegraph/include/nodegraph/Layout.hpp",
+        "mono.studio/src/ImageGraphCacheClearAction.hpp",
+        "mono.studio/src/ImageGraphImageActions.hpp",
+        "mono.studio/src/TimelineRegions.hpp",
+        "mono.studio/tests/ImageComposerArguments.cpp",
+        "mono.studio/tests/ImageGraphCacheClearAction.cpp",
+        "mono.studio/tests/ImageGraphImageEdit.cpp",
+        "mono.studio/tests/UiAuthoring.cpp",
+        "mono.tools/assetc/app/main.cpp",
+        "mono.tools/assetc/src/Bake.cpp",
+        "mono.tools/assetc/tests/GraphImageCacheCli.cpp",
+        "mono.engine/imagegraph/benchmarks/GroupRenderSession.cpp",
+        "mono.engine/imagegraph/benchmarks/SourceCommonSockets.cpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/GroupRenderSession.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/PortCompatibility.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceCommonAnimatorReset.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceCommonDispatch.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceCommonRuntime.hpp",
+        "mono.engine/imagegraph/include/engine/imagegraph/SourceCommonSockets.hpp",
+        "mono.engine/imagegraph/src/SourceCommonAdmission.inc",
+        "mono.engine/imagegraph/src/SourceCommonAnimatorReset.cpp",
+        "mono.engine/imagegraph/src/SourceCommonAnimatorResetInternal.hpp",
+        "mono.engine/imagegraph/src/SourceCommonAuthoring.hpp",
+        "mono.engine/imagegraph/src/SourceCommonDispatch.cpp",
+        "mono.engine/imagegraph/src/SourceCommonExecution.hpp",
+        "mono.engine/imagegraph/src/SourceCommonGetters.inc",
+        "mono.engine/imagegraph/src/SourceCommonInputMaps.inc",
+        "mono.engine/imagegraph/src/SourceCommonInputRead.inc",
+        "mono.engine/imagegraph/src/SourceCommonInvocation.inc",
+        "mono.engine/imagegraph/src/SourceCommonMembership.cpp",
+        "mono.engine/imagegraph/src/SourceCommonMembership.hpp",
+        "mono.engine/imagegraph/src/SourceCommonRuntime.cpp",
+        "mono.engine/imagegraph/src/SourceCommonSockets.cpp",
+        "mono.engine/imagegraph/src/SourceDecimalRange.hpp",
+        "mono.engine/imagegraph/src/SourceFrameActivitySeeds.inc",
+        "mono.engine/imagegraph/src/SourceRealNumber.hpp",
+        "mono.engine/imagegraph/src/SourceTunnel.hpp",
+        "mono.engine/imagegraph/src/SourceTunnelRegistry.hpp",
+        "mono.engine/imagegraph/src/nodes/SourceComparison.hpp",
+        "mono.engine/imagegraph/src/nodes/SourceTunnelNodes.cpp",
+        "mono.engine/imagegraph/tests/AnyJunction.cpp",
+        "mono.engine/imagegraph/tests/GroupImageArrayPayload.cpp",
+        "mono.engine/imagegraph/tests/GroupRenderDynamicOutputs.cpp",
+        "mono.engine/imagegraph/tests/GroupRenderSession.cpp",
+        "mono.engine/imagegraph/tests/PortCompatibility.cpp",
+        "mono.engine/imagegraph/tests/SourceCommonAdmission.cpp",
+        "mono.engine/imagegraph/tests/SourceCommonAnimatorReset.cpp",
+        "mono.engine/imagegraph/tests/SourceCommonAuthoring.cpp",
+        "mono.engine/imagegraph/tests/SourceCommonDispatch.cpp",
+        "mono.engine/imagegraph/tests/SourceCommonMembership.cpp",
+        "mono.engine/imagegraph/tests/SourceCommonRuntime.cpp",
+        "mono.engine/imagegraph/tests/SourceCommonSockets.cpp",
+        "mono.engine/imagegraph/tests/SourceConditionComparison.cpp",
+        "mono.engine/imagegraph/tests/SourceGroupParentAlias.cpp",
+        "mono.engine/imagegraph/tests/SourceTunnel.cpp",
+        "mono.engine/imagegraph/tests/SourceTunnelCallbackKey.cpp",
+        "mono.engine/imagegraph/tests/SourceTunnelFrozenDomains.cpp",
+        "mono.engine/imagegraph/tests/SourceTunnelObservation.cpp",
+        "mono.engine/imagegraph/tests/SourceTunnelReceiverSelector.cpp",
+        "mono.engine/imagegraph/tests/SourceTunnelRegistry.cpp",
+        "mono.engine/imagegraph/tests/SourceTunnelTransport.cpp",
+        "mono.engine/imagegraphexport/src/GraphFrameCacheCook.cpp",
+        "mono.engine/imagegraphfont/benchmarks/WrappedText.cpp",
+        "mono.engine/imagegraphfont/tests/WrappedTextWorkloads.cpp",
+        "mono.engine/imagegraphfont/tests/fixtures/WrappedTextBoundary.hpp",
+        "mono.engine/imagegraphio/include/engine/imagegraphio/SourceFrameCache.hpp",
+        "mono.engine/imagegraphio/src/SourceCommonAdmission.hpp",
+        "mono.engine/imagegraphio/src/SourceCommonEdit.inc",
+        "mono.engine/imagegraphio/src/SourceCommonProjection.inc",
+        "mono.engine/imagegraphio/src/SourceFrameCache.cpp",
+        "mono.engine/imagegraphio/tests/PxcxCollectionAliasAppend.cpp",
+        "mono.engine/imagegraphio/tests/PxcxCollectionInstances.cpp",
+        "mono.engine/imagegraphio/tests/PxcxCommonEditing.cpp",
+        "mono.engine/imagegraphio/tests/PxcxCommonOwners.cpp",
+        "mono.engine/imagegraphio/tests/PxcxGroupRenderActive.cpp",
+        "mono.engine/imagegraphio/tests/PxcxPathSpiral.cpp",
+        "mono.engine/imagegraphio/tests/PxcxReservedRoutes.cpp",
+        "mono.engine/render/tests/SourceSkyboxGroupGpu.cpp",
+        "mono.studio/tests/ImageGraphCollectionParentAliases.cpp",
+        "mono.studio/tests/ImageGraphDisabledGroups.cpp",
+        "mono.studio/tests/ImageGraphGroupPorts.cpp",
+        "mono.studio/tests/ImageGraphPortCasts.cpp",
+        "mono.studio/tests/ImageGraphSourceCommonSelectors.cpp",
+        "mono.tools/assetc/tests/GraphDisabledGroups.cpp"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 5.339,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "diff",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-diff-batch52.log",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.157,
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "artifacts_root": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05",
+  "history": {
+    "batch24": {
+      "status": "scoped pre-fix baseline",
+      "summary": {
+        "checks_total": 20,
+        "checks_passed": 17,
+        "checks_failed": 3,
+        "cpp_cases_including_startup": {
+          "total": 5865,
+          "passed": 5844,
+          "failed": 21
+        },
+        "python_cases": 116,
+        "cli_cases": 16,
+        "core_suite": {
+          "cases": 3521,
+          "assertions": 1982426,
+          "result": "passed"
+        },
+        "io_suite": {
+          "cases": 330,
+          "assertions": 13666,
+          "result": "passed"
+        },
+        "studio_suite": {
+          "cases": 1129,
+          "passed": 1112,
+          "failed": 17
+        }
+      },
+      "builds": [
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch24.log",
+          "log_sha256": "29406d4fd45541268e4a11b758eaeb0720ebddfb6ee5a9f5658f4007998d468b",
+          "result": "passed"
+        },
+        {
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch24.log",
+          "log_sha256": "c2ed93ffd93c840755c0e91392ae593b1b52de9b7aaf6c208123feaceb1dde2e",
+          "result": "passed"
+        }
+      ],
+      "targeted_checks": [
+        {
+          "name": "source-path Spiral core",
+          "cases": 12,
+          "result": "passed"
+        },
+        {
+          "name": "PXC Spiral",
+          "cases": 3,
+          "result": "passed"
+        },
+        {
+          "name": "selected grouped cache clear",
+          "result": "passed"
+        },
+        {
+          "name": "profile preflight",
+          "cases": 3,
+          "assertions": 23,
+          "result": "passed",
+          "binary_sha256": "8d7f2ffe7c32976b7b236db49d41ec42692ea57a510f06280d0cc600a60a9486",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch24.log",
+          "log_sha256": "1e1ff1a697d6be0e1cb457aeddaa17aa41047ea18383096a79bf5a4ddf146c0a"
+        },
+        {
+          "name": "profiles",
+          "workload_profiles": 23,
+          "workload_calls": 299,
+          "observed_spans": 10023,
+          "result": "root validator metadata only"
+        }
+      ],
+      "listener_failures": {
+        "export": 1,
+        "client": 3,
+        "studio": 17
+      },
+      "source_paths": 4178,
+      "source_changed_paths": [],
+      "child_hashes_unchanged": true,
+      "results_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch24-results.json",
+      "results_sha256": "ad84b1f7b80c6a2f6ee9d3f0ba12e1d6ae634490a798e27da8e8b063f44ac0b6"
+    },
+    "batch25": {
+      "results_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch25-results.json",
+      "results_sha256": "9c542c1072228e005c7cfd9933f5a1752177d3f4f977832bcb63bce597db7362",
+      "source_paths": 4179,
+      "source_changed_paths": [],
+      "child_hashes_unchanged": true,
+      "studio_cases": {
+        "total": 1132,
+        "passed": 1113,
+        "failed": 19
+      },
+      "findings": [
+        "Any link failure came from an invalid fixture requesting unregistered nativevalue.number/vector2 canvas ports; it is not a valid Any-group reproduction.",
+        "Ungroup produced a genuine InvalidGroup failure."
+      ]
+    },
+    "batch26": {
+      "build": {
+        "path": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch26.log",
+        "sha256": "9c2ae5b24132a9a55a62a04b0ecff8ec522bba2670be36de6d386dd07d0065ed"
+      },
+      "build_result": "passed",
+      "source_paths": 4179,
+      "source_changed_paths": [],
+      "runtime_checks": "not run; review found the dynamic Any projection issue before runtime verification"
+    },
+    "batch27": {
+      "build": {
+        "path": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch27.log",
+        "sha256": "c5a1c04ddd05ec1afda028c7eb2ee471caeb3ec4b8c3db4cc49311b5ffe2b06c"
+      },
+      "build_result": "passed",
+      "source_paths": 4179,
+      "source_hashes_unchanged": true,
+      "fixture_scope": "Core-only canvas fixtures lacked nativevalue.number/vector2 registration. A native core consumer identified casts, but that canvas fixture did not prove the full canvas path.",
+      "studio_feature_failures": 5
+    },
+    "batch28": {
+      "results_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch28-results.json",
+      "results_sha256": "e7736dbd54886f8947213910147e105011beba3bda5bfdcc5e695b2ba68f4eac",
+      "source_paths": 4180,
+      "source_changed_paths": [],
+      "core_cases": {
+        "total": 3527,
+        "passed": 3524,
+        "failed": 3
+      },
+      "studio_cases": {
+        "total": 1136,
+        "passed": 1114,
+        "failed": 22
+      },
+      "feature_failures": {
+        "core": 3,
+        "studio": 5,
+        "total": 8
+      },
+      "listener_failures": 21,
+      "finding": "Corrected fixtures exposed real Any-junction, dynamic Any and ungroup failures."
+    },
+    "batch30": {
+      "status": "joined verification found issues; repair in progress",
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch30.log",
+          "log_sha256": "d68cc73accdd262837d1c32ffe5742ace3e17d508c28fef2901389f8abafe656"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch30.log",
+          "log_sha256": "5aa885500c54dfd0f8acd0a0a6b65218beaf6ab7c45b79b8f2417bf62c2f7b0f"
+        }
+      ],
+      "results_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch30-results.json",
+      "results_sha256": "5d72fe3a3240abf688dd15cf3393df2f2aae175d3b922d9d81272a629ccdb140",
+      "issues_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-issues-batch30.json",
+      "issues_sha256": "3e74c5dab96925e7152e2d67c0ad06056f021042d9b9a2a75beab5f26afbebdc",
+      "feature_failed_cases": 9,
+      "listener_failed_cases": 21,
+      "source_paths": 4214,
+      "source_changed_paths": [],
+      "profiles": {
+        "workloads": 24,
+        "calls": 312,
+        "result": "passed",
+        "benchmark_binary_sha256": "a0d27de3f5f434d0767b2497d27e6dfc056e234aa1c62598a552c935ac3960e6"
+      },
+      "notes": [
+        "The current summary remains the verified batch29 result. Batch30 does not establish acceptance.",
+        "Nine failed cases span parent aliases, append identities, generic held image arrays, source JSON fixtures and Studio format fixtures. Each is being diagnosed before repair."
+      ]
+    },
+    "batch31": {
+      "status": "compile failure collected before runtime checks",
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "failed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch31.log",
+          "log_sha256": "cb038d3a8283c5816b981fa4f2205fd5c3c85775e52f17db0271e7fe1f600fae",
+          "failed_targets": [
+            "mono.engine/imagegraph/CMakeFiles/test_imagegraph.dir/tests/GroupImageArrayPayload.cpp.o "
+          ]
+        },
+        {
+          "preset": "profile",
+          "result": "failed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch31.log",
+          "log_sha256": "c8ea53e27ee5685ff8dcb5c9b779c9790abfa77fde605c6632ea56af2b114281",
+          "failed_targets": [
+            "mono.engine/imagegraph/CMakeFiles/test_imagegraph.dir/tests/GroupImageArrayPayload.cpp.o "
+          ]
+        }
+      ],
+      "source_paths": 4215,
+      "source_changed_paths": [],
+      "runtime_checks": "not run; no stale test binaries used",
+      "failure": "GroupImageArrayPayload.cpp compared ImageArray with an unsupported equality operator. Both keep-going builds collected no other failed compilation target.",
+      "repair": "Compare ordered array shape and individual image dimensions, format, hash and pixels; read review approved."
+    },
+    "batch32": {
+      "batch": 32,
+      "status": "builds passed; runtime repairs required",
+      "checks_total": 20,
+      "checks_passed": 15,
+      "checks_failed": 5,
+      "imagegraph_failed_cases": 10,
+      "known_listener_failed_cases": 21,
+      "format_failed_files": [
+        "mono.engine/imagegraph/src/nodes/Values.cpp"
+      ],
+      "profile_workloads_validated": 23,
+      "profile_calls_validated": 299,
+      "group_scheduler_profile": {
+        "validated": false,
+        "error": "animated compile refused"
+      },
+      "source_integrity": {
+        "paths": 4216,
+        "changed": []
+      },
+      "issue_log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-issues-batch32.json",
+      "issue_log_sha256": "8c5cc76b99b8e7c43489ced554eb0fc73d2415eaa8c5fa4ebd3521058e5eeda4",
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch32.log",
+          "log_sha256": "b36944fdf5214ceb186b55cbd8987e859d38553d2795d386582dd58c14c0e295"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch32.log",
+          "log_sha256": "1cf9af61217360a63d95ecfcb05bae95db365f58dfafba2ea19e495553f654a7"
+        }
+      ]
+    },
+    "host_budget_reproduction_before_batch33": {
+      "result": "failed as expected before repair",
+      "exit_code": 42,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-host-budget-repro-batch33.log",
+      "log_sha256": "e0969d79987e611f1d50c22c176b6cdff8397ddd624eb085f21bc51fe32d653d",
+      "original_binary_sha256": "daccd2b42e9c82e73572f81a5100d3b8eefcd8013e94a0ecfaa51246ac0291a4",
+      "original_header_sha256": "66d8ffad7950280fd67f62ad6f59b481dad1f830033e47c4ce461c02d3f630eb",
+      "finding": "Low-budget nongrouped feedback transition incorrectly succeeded and retired warm grouped journal; original binary and header unchanged during reproduction."
+    },
+    "batch33": {
+      "batch": 33,
+      "checks_total": 20,
+      "checks_passed": 16,
+      "checks_failed": 4,
+      "imagegraph_failed_cases": 4,
+      "known_listener_failed_cases": 21,
+      "profile_workloads_validated": 24,
+      "profile_calls_validated": 312,
+      "profile_spans_validated": 16029,
+      "group_scheduler_operations_per_call": 17,
+      "source_integrity": {
+        "paths": 4216,
+        "changed": []
+      },
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch33.log",
+          "log_sha256": "8100663760b9636a2ce916fc4fc28b7dd1ff6f7d2d58214e8a3318410bb12681"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch33.log",
+          "log_sha256": "7b688d7d29bebcc36e2448a2155bdb3ef6803162e05835a17f7ed190b8b91ddf"
+        }
+      ],
+      "issue_log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-issues-batch33.json",
+      "issue_log_sha256": "25803286b0f9895236b43ebd29b7c4c0c87d4c90de4734eb11d14ff4dced6c56"
+    },
+    "batch29_final": {
+      "summary": {
+        "batch": 29,
+        "builds": [
+          {
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch29.log",
+            "log_sha256": "ab9b30df11f06e13cc1dfc05a9193ec9a89b548b36600e2fce6de49749ad037e",
+            "result": "passed"
+          },
+          {
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch29.log",
+            "log_sha256": "44adaa4a18be9f6e63207910ee91bd0939249d92c5ce00805243aa2fdb43089a",
+            "result": "passed"
+          }
+        ],
+        "checks_total": 20,
+        "checks_passed": 17,
+        "checks_failed": 3,
+        "cpp_cases_including_startup": {
+          "total": 5879,
+          "passed": 5858,
+          "failed": 21
+        },
+        "python_cases": 116,
+        "cli_cases": 16,
+        "suite_summaries": [
+          {
+            "suite": "bake",
+            "total": 157,
+            "passed": 157,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-bake-batch29.log",
+            "log_sha256": "ea5865e128a10a27bb1b00ab61b707c0a8eecd3e5fb7cbbc6bf9aea76f35d296"
+          },
+          {
+            "suite": "physics",
+            "total": 43,
+            "passed": 43,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-physics-batch29.log",
+            "log_sha256": "5cd6327225cb49f984bfc054e4f9b07229e5bdcb436a794c257d792c2765a532"
+          },
+          {
+            "suite": "runner",
+            "total": 29,
+            "passed": 29,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-runner-batch29.log",
+            "log_sha256": "943b43c82a184236133be77b98e0ba7691aea15594f9209e7bb8304dc4ed8603"
+          },
+          {
+            "suite": "font",
+            "total": 43,
+            "passed": 43,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-font-batch29.log",
+            "log_sha256": "5d0910e1b4c998a89d467768ef39dcd7ce3281ec0f0007a691112f6003de4035"
+          },
+          {
+            "suite": "export",
+            "total": 95,
+            "passed": 94,
+            "failed": 1,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-export-batch29.log",
+            "log_sha256": "aa0183bc9334d6023ec46181b8b5b6032d96271d5b6ddefef350e40d5412bd18"
+          },
+          {
+            "suite": "render",
+            "total": 33,
+            "passed": 33,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-render-batch29.log",
+            "log_sha256": "c433e99a007a7f9f2a814f1a5297f507532e324b7533a509f87a5b192104d3b4"
+          },
+          {
+            "suite": "io",
+            "total": 330,
+            "passed": 330,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch29.log",
+            "log_sha256": "52f4a6056dccb9dad4c7ba646d65b02bfd046a639779686ff2fa183c6c3f027c"
+          },
+          {
+            "suite": "core",
+            "total": 3527,
+            "passed": 3527,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch29.log",
+            "log_sha256": "5e9b6923d864f49f1c9bb321ee7150d4da21b05d8f194042d74b642e4732026e"
+          },
+          {
+            "suite": "assetc",
+            "total": 45,
+            "passed": 45,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-assetc-batch29.log",
+            "log_sha256": "77dd7b1c5da1a78f388903ade85d0040e35775a859a6896af822777d845303a4"
+          },
+          {
+            "suite": "client",
+            "total": 359,
+            "passed": 356,
+            "failed": 3,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-client-batch29.log",
+            "log_sha256": "364423834a45bbb93dba018c9a54e0c14ff01398627721e130c33ec39928c56a"
+          },
+          {
+            "suite": "studio",
+            "total": 1136,
+            "passed": 1119,
+            "failed": 17,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-studio-batch29.log",
+            "log_sha256": "c391576250b165848a47fdbc7ae487d8b9d287c2cabb1f173d526a2a55fb10e2"
+          },
+          {
+            "suite": "nodegraph",
+            "total": 41,
+            "passed": 41,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-nodegraph-batch29.log",
+            "log_sha256": "fb4b58c5b84a4ee697d0e1f72a732e92afd834b585375a31ffd1b8dca61fbc85"
+          },
+          {
+            "suite": "ui",
+            "total": 40,
+            "passed": 40,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-ui-batch29.log",
+            "log_sha256": "44136f71aabbd0b6738f87dd1124c8b827d38c70e5720d23bf2680dc96d8fcf4"
+          },
+          {
+            "suite": "startup",
+            "total": 1,
+            "passed": 1,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-startup-batch29.log",
+            "log_sha256": "a662dfc7e666f190928fe3717cc53546a9f982736020fa64caddd13c49ce7a15"
+          }
+        ]
+      },
+      "targeted_checks": [
+        {
+          "name": "new core Any and computed-coordinate regressions",
+          "cases": 6,
+          "result": "passed",
+          "suite": "test_imagegraph"
+        },
+        {
+          "name": "new Studio group-port regressions",
+          "cases": 7,
+          "result": "passed",
+          "suite": "test_studio"
+        },
+        {
+          "name": "new nodegraph regression",
+          "cases": 1,
+          "result": "passed",
+          "suite": "test_nodegraph"
+        },
+        {
+          "name": "source-path Spiral core suite",
+          "cases": 12,
+          "result": "passed",
+          "suite": "test_imagegraph"
+        },
+        {
+          "name": "PXC Spiral suite",
+          "cases": 3,
+          "result": "passed",
+          "suite": "test_imagegraphio"
+        },
+        {
+          "name": "selected grouped cache clear wakes overlapping frozen groups and retires dependent Studio previews under source gates",
+          "cases": 1,
+          "result": "passed",
+          "suite": "test_studio"
+        },
+        {
+          "name": "profile preflight",
+          "cases": 3,
+          "assertions": 23,
+          "command": [
+            ".cache/build/profile/tests/test_imagegraph",
+            "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads]"
+          ],
+          "exit_code": 0,
+          "elapsed_seconds": 0.826,
+          "binary_sha256": "10cc50829e79e95935a35ac66db3e1824ba52c4f6f302e372fe3e4e7a00b4445",
+          "binary_sha256_after": "10cc50829e79e95935a35ac66db3e1824ba52c4f6f302e372fe3e4e7a00b4445",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch34.log",
+          "log_sha256": "f4ba207a98ce545be944ca95bd07ef6dc847de21bf4c93f3bbfcc3eaeeb5e1e1",
+          "preflight_log_sha256": "5125be503e1e1f6e9a1cf3b134f3b2879ca9c9be3c7c60baf6ab7110e7c1a8e5"
+        },
+        {
+          "name": "all imagegraph workload profiles",
+          "result": "passed",
+          "workload_profiles": 24,
+          "workload_calls": 312,
+          "observed_spans": 16029,
+          "execution": {
+            "heap_profile_mode": 1,
+            "warmups": 8,
+            "kept_samples": 5
+          },
+          "benchmark_sha256": "d31633264838a204c8bb5fb6523f0b1735f6aa2b233ff6dd601d29601828a4d6",
+          "qualification": "Aggregate metadata only. Timing outputs were not saved.",
+          "verification_batch": 33,
+          "unchanged_binary_verified_batch": 34
+        },
+        {
+          "name": "eight-group retained scheduler profile",
+          "result": "passed",
+          "verification_batch": 33,
+          "unchanged_binary_verified_batch": 34,
+          "groups": 8,
+          "nodes": 24,
+          "operations_per_call": 17,
+          "workload_calls": 13,
+          "warmups": 8,
+          "kept_samples": 5,
+          "spans": 6006,
+          "heap_compiled": 1,
+          "benchmark_sha256": "d31633264838a204c8bb5fb6523f0b1735f6aa2b233ff6dd601d29601828a4d6"
+        }
+      ],
+      "source_integrity": {
+        "tracked_paths": 4180,
+        "changed_paths": [],
+        "source_stability_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-source-stability-batch29.json",
+        "source_stability_record_sha256": "a6bed61415634ae9b07d6bb9a817e80070e4880bfd1fba31c91fd2bf282ffde8",
+        "child_binaries_before": {
+          ".cache/build/release-tests/tools/assetc": "7d278d0ccbaf942712071e2f9b5cc429b3d256a7f57dc3eb6b4e1c9c6f56c8fb",
+          ".cache/build/release-tests/tools/imagegraph": "a550fed4b0f8f5248d7d741e8f5b0da9d46da42d973ae052b5a813ecb73da455"
+        },
+        "child_binaries_after": {
+          ".cache/build/release-tests/tools/assetc": "7d278d0ccbaf942712071e2f9b5cc429b3d256a7f57dc3eb6b4e1c9c6f56c8fb",
+          ".cache/build/release-tests/tools/imagegraph": "a550fed4b0f8f5248d7d741e8f5b0da9d46da42d973ae052b5a813ecb73da455"
+        },
+        "child_hashes_unchanged": true
+      }
+    },
+    "batch34": {
+      "status": "native feature cases passed; known listener restrictions remain",
+      "summary": {
+        "batch": 34,
+        "builds": [
+          {
+            "preset": "release-tests",
+            "result": "passed",
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch34.log",
+            "log_sha256": "5256c576ddf91f0a6ce16df3f1e7033de3438bd0156e9335ed4f3b5018014bbc"
+          },
+          {
+            "preset": "profile",
+            "result": "passed",
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch34.log",
+            "log_sha256": "e65098b8615b2a14186545e6ee8dca886d1172fe2f2555a22439bba50ab65f7c"
+          }
+        ],
+        "checks_total": 20,
+        "checks_passed": 17,
+        "checks_failed": 3,
+        "cpp_cases_including_startup": {
+          "total": 5958,
+          "passed": 5937,
+          "failed": 21
+        },
+        "python_cases": 116,
+        "cli_cases": 16,
+        "suite_summaries": [
+          {
+            "suite": "bake",
+            "total": 157,
+            "passed": 157,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-bake-batch34.log",
+            "log_sha256": "c029d637eff1bf4f885e0735a48582b496e9ed8d8e1d1634a9232f8aa2c08fa8"
+          },
+          {
+            "suite": "physics",
+            "total": 43,
+            "passed": 43,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-physics-batch34.log",
+            "log_sha256": "27a8fb73552c96de0cf9319985bed74e4f1680bac30b8861767774170dc1f2a8"
+          },
+          {
+            "suite": "runner",
+            "total": 29,
+            "passed": 29,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-runner-batch34.log",
+            "log_sha256": "a99865423efeab07f57e2c199309c946bd5ba63161150be922cc62cecb5fe565"
+          },
+          {
+            "suite": "font",
+            "total": 43,
+            "passed": 43,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-font-batch34.log",
+            "log_sha256": "5472c53c046cd0eef0055bd7642001d26278f48a6d22d483f27fa3d766f8fe43"
+          },
+          {
+            "suite": "export",
+            "total": 95,
+            "passed": 94,
+            "failed": 1,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-export-batch34.log",
+            "log_sha256": "08af055054fe822050991228e7c504ebc4cc3b1e9cbfbb9fedb643de3a01e20d"
+          },
+          {
+            "suite": "render",
+            "total": 33,
+            "passed": 33,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-render-batch34.log",
+            "log_sha256": "4ece550f2910172be553133c698909ba9ab2fb5edacdd19b287de122d56f1a7e"
+          },
+          {
+            "suite": "io",
+            "total": 352,
+            "passed": 352,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch34.log",
+            "log_sha256": "1037d7d791e1ff34da03d797b3b4cf4fd0a0ef96736dbd00f1268d321b88e31c"
+          },
+          {
+            "suite": "core",
+            "total": 3569,
+            "passed": 3569,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch34.log",
+            "log_sha256": "fc14e5f75fdcc29772c6786742f25862f8690dbe3815814b6bb59f73f60469e5"
+          },
+          {
+            "suite": "assetc",
+            "total": 49,
+            "passed": 49,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-assetc-batch34.log",
+            "log_sha256": "e36b27a13accd535b83bbb60c759cd11eab42c60eba96585513a6a8ad4f2a797"
+          },
+          {
+            "suite": "client",
+            "total": 359,
+            "passed": 356,
+            "failed": 3,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-client-batch34.log",
+            "log_sha256": "5f57c827da416148a44ffd85d2506a6d25f4b6c20659ace9d6557fa7d022abde"
+          },
+          {
+            "suite": "studio",
+            "total": 1147,
+            "passed": 1130,
+            "failed": 17,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-studio-batch34.log",
+            "log_sha256": "1150c35d0ce588660e7213ffa8acf542ac6964a8bed342a8c670b02a92097bdd"
+          },
+          {
+            "suite": "nodegraph",
+            "total": 41,
+            "passed": 41,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-nodegraph-batch34.log",
+            "log_sha256": "551b7730319b783f4cd67e86680e9d78fe384ee5c491b99e04622e62df009bd8"
+          },
+          {
+            "suite": "ui",
+            "total": 40,
+            "passed": 40,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-ui-batch34.log",
+            "log_sha256": "c426467fc1e5b16e6ec515d760601e349c7eff98e9201b85eb9116a868a4f59e"
+          },
+          {
+            "suite": "startup",
+            "total": 1,
+            "passed": 1,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-startup-batch34.log",
+            "log_sha256": "da5f0593baf44ada35a74eba350c93587d66b6b4eadc246cb7ec62bba8472083"
+          }
+        ]
+      },
+      "source_integrity": {
+        "paths": 4216,
+        "changed": []
+      }
+    },
+    "batch35": {
+      "status": "reproduction build failed; no runtime checks executed",
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "failed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch35.log",
+          "log_sha256": "d0236b9946e21519fa673d73331a5377ce8294b8e306c574e93d02e5ea72cfd7"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch35.log",
+          "log_sha256": "f237059b41192dc6ef41d56e25762cbffb7049ea91739ab97d0f0c9fcb4b553b"
+        }
+      ],
+      "source_integrity": {
+        "paths": 4218,
+        "changed": []
+      },
+      "failure": "PxcxCollectionInstances.cpp:626 WritePxcxProjection undeclared, missing PxcxStructureEdit.hpp include"
+    },
+    "reproduction_batch36": {
+      "result": "red reproduction, not acceptance",
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch36.log",
+          "log_sha256": "37ffdd638b13251da0b878305a9592435c8b69c3e36ad20679e5efc7432b5380"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch36.log",
+          "log_sha256": "d06982f6a080319d4ac58b9555e2e881dfeb9b2f63ca038207dc87322cc65f6f"
+        }
+      ],
+      "source_integrity": {
+        "paths": 4220,
+        "changed": []
+      },
+      "batch_result_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch36-results.json",
+      "batch_result_record_sha256": "7efb0bd6e636bbc20cd8513170ada43d043c2f2bb958dbea76efa61aa5695025",
+      "passed_jobs": 15,
+      "total_jobs": 20,
+      "failures": [
+        {
+          "suite": "export",
+          "exit_code": 42,
+          "summary": [
+            "test cases:   95 |   94 passed | 1 failed",
+            "assertions: 3394 | 3393 passed | 1 failed"
+          ]
+        },
+        {
+          "suite": "io",
+          "exit_code": 42,
+          "summary": [
+            "test cases:   355 |   353 passed | 2 failed",
+            "assertions: 14615 | 14610 passed | 5 failed"
+          ]
+        },
+        {
+          "suite": "core",
+          "exit_code": 42,
+          "summary": [
+            "test cases:    3585 |    3571 passed | 14 failed",
+            "assertions: 1983527 | 1983443 passed | 84 failed"
+          ]
+        },
+        {
+          "suite": "client",
+          "exit_code": 42,
+          "summary": [
+            "test cases:   359 |   356 passed | 3 failed",
+            "assertions: 23151 | 23148 passed | 3 failed"
+          ]
+        },
+        {
+          "suite": "studio",
+          "exit_code": 42,
+          "summary": [
+            "test cases:  1147 |  1130 passed | 17 failed",
+            "assertions: 50253 | 50236 passed | 17 failed"
+          ]
+        }
+      ],
+      "issue_list": [
+        "Condition raw-number equality, comparison epsilon and adjacent int64 values are wrong",
+        "Condition reference identity and unproven Long-overflow comparisons need explicit atomic refusals",
+        "Argument finite decimal underflow refuses instead of yielding signed zero",
+        "Tunnel routing/execution missing; linked names, image arrays and disabled sender behavior remain red",
+        "Collection nested clone loses PureFunction; Pixel Builder scope loses RenderActive and PureFunction",
+        "Two test fixture defects: mixed homogeneous pc.array operands and SourceTunnel literal port admission",
+        "21 known listener-startup cases remain environment failures"
+      ],
+      "repair_state": "fixes pending joined validation; previous batch34 acceptance summary preserved"
+    },
+    "joined_build_batch37": {
+      "status": "both builds failed; runtime and profiling skipped because binaries are stale",
+      "source_paths": 4229,
+      "release_session": 83679,
+      "profile_session": 73050,
+      "compile_issue": "Document.cpp:10371 EvaluationNodeIndices is declared after ResolveSourceTunnelRegistry",
+      "pending_repair": "compile38 moves existing EvaluationNodeIndices before its first use; next joined batch validates repairs and remaining reproduction targets",
+      "known_reproduction_targets": [
+        "receiver current linked name versus pre-render sender registry",
+        "Condition Vector4, Quaternion and Matrix Float getter array behavior"
+      ],
+      "production_changes_not_yet_validated": [
+        "preserved nested Collection purity and Pixel Builder scheduling/purity",
+        "shared bounded real conversion with signed decimal underflow",
+        "raw Condition comparisons, epsilon, exact int64, atomic identity/overflow refusals",
+        "static/local/global tunnel routing and authored Any input admission",
+        "disabled sender getter-only capture and retained callback domain",
+        "bounded immutable prior-output registry and native pre-render expressions"
+      ],
+      "source_integrity": {
+        "paths": 4229,
+        "changed": []
+      },
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "failed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch37.log",
+          "log_sha256": "2f53aa7822b9e475ea941aabd8103ad638f5339feeb87b0d11736af6b0bda1c3",
+          "errors": [
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10371:23: error: \u2018EvaluationNodeIndices\u2019 does not name a type",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10476:40: error: \u2018indices\u2019 was not declared in this scope; did you mean \u2018index\u2019?",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10518:32: error: \u2018indices\u2019 was not declared in this scope; did you mean \u2018nice\u2019?",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10580:53: error: \u2018indices\u2019 was not declared in this scope; did you mean \u2018nice\u2019?",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10622:44: error: \u2018indices\u2019 was not declared in this scope; did you mean \u2018nice\u2019?",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10622:82: error: no matching function for call to \u2018std::pair<long unsigned int, std::__cxx11::basic_string<char> >::pair(<brace-enclosed initializer list>)\u2019",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10740:44: error: \u2018indices\u2019 was not declared in this scope; did you mean \u2018index\u2019?",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10748:61: error: \u2018indices\u2019 was not declared in this scope; did you mean \u2018nice\u2019?"
+          ]
+        },
+        {
+          "preset": "profile",
+          "result": "failed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch37.log",
+          "log_sha256": "85f348e9c9d7e3e7cb1cf6f19c0ba40bc15eb72e473ae40e4385a064885a49c6",
+          "errors": [
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10371:23: error: \u2018EvaluationNodeIndices\u2019 does not name a type",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10476:40: error: \u2018indices\u2019 was not declared in this scope; did you mean \u2018index\u2019?",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10518:32: error: \u2018indices\u2019 was not declared in this scope; did you mean \u2018nice\u2019?",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10580:53: error: \u2018indices\u2019 was not declared in this scope; did you mean \u2018nice\u2019?",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10622:44: error: \u2018indices\u2019 was not declared in this scope; did you mean \u2018nice\u2019?",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10622:82: error: no matching function for call to \u2018std::pair<long unsigned int, std::__cxx11::basic_string<char> >::pair(<brace-enclosed initializer list>)\u2019",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10740:44: error: \u2018indices\u2019 was not declared in this scope; did you mean \u2018index\u2019?",
+            "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/src/Document.cpp:10748:61: error: \u2018indices\u2019 was not declared in this scope; did you mean \u2018nice\u2019?"
+          ]
+        }
+      ]
+    },
+    "joined_build_batch38": {
+      "status": "joined reproduction pass complete; six core failures remain, not acceptance",
+      "source_paths": 4229,
+      "release_session": 63039,
+      "profile_session": 66208,
+      "repairs": [
+        "EvaluationNodeIndices declaration before first use",
+        "bounded tunnel registry temporary index and memo keys"
+      ],
+      "new_workload": "sixteen sender-receiver pairs, frozen groups and prior-registry resume",
+      "known_reproduction_targets": [
+        "receiver current linked name",
+        "Condition Vector4 Quaternion Matrix getter carriers"
+      ],
+      "source_integrity": {
+        "paths": 4229,
+        "changed": []
+      },
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch38.log",
+          "log_sha256": "059c0556a268b34dae641d8b11f569e1a8022a7f7dfbae25194e1b619e9ffe74"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch38.log",
+          "log_sha256": "b7db40c0536ffe08fff17ee51b289c5de1f49ae22b159a56f9da20bbf672695a"
+        }
+      ],
+      "batch_result_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch38-results.json",
+      "batch_result_record_sha256": "dfcf44f06c979f875722303dd3cad3c1d2671a93c46e1c68bb462786d6a16826",
+      "passed_jobs": 16,
+      "total_jobs": 20,
+      "core": {
+        "total": 3593,
+        "passed": 3587,
+        "failed": 6,
+        "assertions": 1983938,
+        "assertions_failed": 15
+      },
+      "io": {
+        "cases": 355,
+        "assertions": 14615,
+        "result": "passed"
+      },
+      "vulkan": {
+        "cases": 33,
+        "assertions": 2452,
+        "result": "passed"
+      },
+      "remaining_core_cases": [
+        "disabled tunnel reads held linked data while sender domain changes only in its callback",
+        "tunnel receiver uses current linked name against pre-render sender registry",
+        "tunnel keeps complete nested Any data and sender ordering across native save",
+        "Condition Number treats tuple and Matrix Float getter carriers as source arrays",
+        "global tunnel reads disabled sender input without processing its group",
+        "tunnel authored Any accepts source keys and rejects runtime surfaces atomically"
+      ]
+    },
+    "joined_build_batch39": {
+      "status": "joined reproduction complete; all six prior failures repaired; two cold setup fixtures and two canvas cases remain",
+      "source_paths": 4231,
+      "release_session": 40867,
+      "profile_session": 50878,
+      "repairs": [
+        "Condition Vector4 Quaternion Matrix Float array carriers",
+        "required source track in keyed Any fixture",
+        "heterogeneous tunnel input transport",
+        "current receiver key over immutable prior sender registry",
+        "getter-only disabled sender reads and callback domain retention"
+      ],
+      "new_checks": [
+        "cold receiver callback key and future-key atomic refusal",
+        "unconnected constructor defaults",
+        "canvas/core numeric compatibility reproduction"
+      ],
+      "source_leaf_order": "exact licensed project traversal remains an explicit unverified boundary",
+      "source_integrity": {
+        "paths": 4231,
+        "changed": []
+      },
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch39.log",
+          "log_sha256": "c69c2087121179dbdf5d533b1d372e1a4333f4c84ed0919c11966ca8f98316d2"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch39.log",
+          "log_sha256": "8e122592ab57dd23792f8560cb8c5d739387dd0fad0e06fc07f961ed688d17ac"
+        }
+      ],
+      "batch_result_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch39-results.json",
+      "batch_result_record_sha256": "c1be3a23cd18b90b26c33de941a29f7e26e5365d001a5eb198a57042f4ab0e2b",
+      "passed_jobs": 16,
+      "total_jobs": 20,
+      "core": {
+        "total": 3596,
+        "passed": 3594,
+        "failed": 2,
+        "assertions": 1984188,
+        "assertions_failed": 2
+      },
+      "io": {
+        "cases": 355,
+        "assertions": 14615,
+        "result": "passed"
+      },
+      "vulkan": {
+        "cases": 33,
+        "assertions": 2494,
+        "result": "passed"
+      },
+      "remaining_native_cases": [
+        "tunnel instance borrows payload getter without inheriting local sender link domain",
+        "tunnel preserves image-array provenance when its receiver group becomes disabled",
+        "Catalogue casts are directional and native endpoints stay strict",
+        "Catalogue junction casts stay visible and editable after save and reopen"
+      ],
+      "known_listener_cases": 21
+    },
+    "joined_build_batch40": {
+      "status": "both builds and all runtime/profile checks completed; four Studio fixture cases require repair",
+      "source_paths": 4233,
+      "release_session": 4704,
+      "profile_session": 23968,
+      "changes": [
+        "shared directional catalogue junction compatibility API",
+        "canvas input projections with strict explicit unions and computed coordinates",
+        "preregistered projected sockets and invalid type refusal",
+        "adapter-only typed junction views and atomic boundary edits",
+        "source-backed cold/warm fixture corrections"
+      ],
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch40.log",
+          "log_sha256": "72c9545ea21cc7c1364bc958758fb655c11a1d77d44d7130f68ace0d85259d38"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch40.log",
+          "log_sha256": "f30dcf5dcf4d9060620ba52eb0f70c52d6548d8207c4f2980a77c936c1577858"
+        }
+      ],
+      "passed_jobs": 17,
+      "total_jobs": 20,
+      "core": {
+        "cases": 3597,
+        "assertions": 1984551,
+        "result": "passed"
+      },
+      "io": {
+        "cases": 355,
+        "assertions": 14615,
+        "result": "passed"
+      },
+      "vulkan": {
+        "cases": 33,
+        "assertions": 2418,
+        "result": "passed"
+      },
+      "remaining_native_cases": [
+        "Group boundary junction routes edit through durable canvas sockets",
+        "Ungrouping a source surface output keeps native image consumers connected",
+        "Catalogue casts are directional and native endpoints stay strict",
+        "opaque canvas ports are per-node and save keeps authored dynamic definitions"
+      ],
+      "known_listener_cases": 21,
+      "profile_validation": {
+        "result": "passed",
+        "workloads": 25,
+        "calls": 325,
+        "spans": 50024,
+        "warmups_per_workload": 8,
+        "kept_samples_per_workload": 5,
+        "binary_sha256": "6053958d2136dbedf3a0c78cee4cd17c2e2515b7e64b439adf9fecc49875e5f6",
+        "group": {
+          "calls": 13,
+          "spans": 6006,
+          "operations_per_call": 17,
+          "retained_bytes": [
+            17440,
+            17440
+          ]
+        },
+        "tunnel": {
+          "calls": 13,
+          "spans": 33995,
+          "operations_per_call": 7,
+          "retained_bytes": [
+            99128,
+            99128
+          ]
+        },
+        "qualification": "Validated stdout in RAM. Timing outputs were not saved."
+      }
+    },
+    "joined_build_batch41": {
+      "status": "native feature cases passed; only 21 baseline listener-startup failures remain",
+      "source_paths": 4233,
+      "changes": [
+        "valid outputs on catalogue cast compile fixtures",
+        "valid root producer on group route edit fixture and explicit atomic bypass refusal",
+        "canvas counts include authored junction views and mapped links",
+        "fully initialized tunnel instance fixture"
+      ],
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch41.log",
+          "log_sha256": "5caa2d0aef12aabd9ad031da34f6f7635ba579c0a442384b9636b5032be782be"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch41.log",
+          "log_sha256": "ea90382e205a3575c031a765e33f019056e2c08894dbda9ca9a9ff4ae05d1d6a"
+        }
+      ],
+      "passed_jobs": 17,
+      "total_jobs": 20,
+      "cpp": {
+        "total": 5996,
+        "passed": 5975,
+        "failed": 21
+      },
+      "changed_paths": [],
+      "benchmark_binary_unchanged": true,
+      "profile_workloads_reused_from_batch40": 25
+    },
+    "joined_build_batch42": {
+      "status": "both builds failed; all compiler errors collected; runtime and profiles not run",
+      "source_paths": 4239,
+      "changes": [
+        "raw source selector tags and trigger sentinel preserve identity",
+        "inspectInputs[2] common Update input separate from ordinary input2",
+        "opaque IO and Studio routes preserve common sockets through position edits and native saves",
+        "bounded captured common-step and full-update lifecycle base with nine cases",
+        "sixty-four-owner common lifecycle CPU workload with exact state checksum"
+      ],
+      "scope_limit": "Native callbacks, animator resets, durable mixed-owner projection and executable reserved routes remain pending.",
+      "compiler_errors": [
+        "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/benchmarks/SourceCommonSockets.cpp:118:63: error: \u2018captures\u2019 was not declared in this scope",
+        "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxReservedRoutes.cpp:102:25: error: \u2018WritePxcxProjection\u2019 was not declared in this scope",
+        "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxReservedRoutes.cpp:145:21: error: \u2018WritePxcxProjection\u2019 was not declared in this scope",
+        "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxReservedRoutes.cpp:194:28: error: \u2018WritePxcxProjection\u2019 was not declared in this scope"
+      ],
+      "source_changed_paths": [],
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "failed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch42.log",
+          "log_sha256": "255335fb5cfa8edaef0de62f290ec3977f12710f2c7afa3aaaf2770526859d42"
+        },
+        {
+          "preset": "profile",
+          "result": "failed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch42.log",
+          "log_sha256": "03603c1fd24d3c87323bbef7fb0f20a932043ec8f5ed8e0b92985a60001fa3b6"
+        }
+      ]
+    },
+    "joined_build_batch43": {
+      "status": "all checks complete; one IO fixture case fails before import because the archive reader now rejects malformed source selector tags; 21 listener-startup cases remain",
+      "source_paths": 4239,
+      "changes": [
+        "common benchmark capture buffer survives step loop",
+        "reserved route tests include public source projection API header"
+      ],
+      "verification_pending": [],
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch43.log",
+          "log_sha256": "b3f6951eaf8f286dde522beac1edb974e17272bec7653cbffee306b704036b0b"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch43.log",
+          "log_sha256": "19f23ed816667b4478d35dbe36c0521118a3c0bf70d74e973f42957d2c300e7a"
+        }
+      ],
+      "passed_jobs": 16,
+      "total_jobs": 20,
+      "cpp": {
+        "total": 6017,
+        "passed": 5995,
+        "failed": 22
+      },
+      "feature_failures": [
+        {
+          "suite": "io",
+          "case": "Special and malformed group boundary tags refuse without replacing the projection",
+          "assertions": 32
+        }
+      ],
+      "changed_paths": [],
+      "profile_preflight": {
+        "command": [
+          ".cache/build/profile/tests/test_imagegraph",
+          "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads]"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.879,
+        "binary_sha256": "a3dc6b072540adfd10943541a02af993d580d9880e49a4fd3630a0411a8d6f71",
+        "binary_sha256_after": "a3dc6b072540adfd10943541a02af993d580d9880e49a4fd3630a0411a8d6f71",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch43.log",
+        "log_sha256": "dd36ca2f6d60cd64dced73980d9c03699815612227ba0757c1c7f74a9819ff76"
+      },
+      "profiles": {
+        "result": "passed",
+        "workloads": 26,
+        "calls": 338,
+        "spans": 50492,
+        "benchmark_sha256": "6150961cd5050a37ad1501645adf68a278af56890b180494957b4ba10a4618cf",
+        "common_sockets": {
+          "owners": 64,
+          "steps_per_call": 16,
+          "workload_calls": 13,
+          "spans": 468,
+          "refusals_per_call": 2,
+          "resets_per_call": 85,
+          "state_fnv": 3059338748087447014,
+          "retained_bytes": 11112,
+          "heap_compiled": 1
+        },
+        "qualification": "Raw CPU timing outputs validated in RAM only; aggregate metadata retained."
+      }
+    },
+    "joined_build_batch44": {
+      "status": "native feature cases passed; only 21 baseline listener-startup failures remain",
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch44.log",
+          "log_sha256": "1e886dd5e07989c147c43423a0c0752ff01cdf611058b5c2e7026cc6396a73eb"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch44.log",
+          "log_sha256": "c2ed93ffd93c840755c0e91392ae593b1b52de9b7aaf6c208123feaceb1dde2e"
+        }
+      ],
+      "passed_jobs": 17,
+      "total_jobs": 20,
+      "cpp": {
+        "total": 6017,
+        "passed": 5996,
+        "failed": 21
+      },
+      "source_paths": 4239,
+      "changed_paths": [],
+      "benchmark_binary_unchanged": true,
+      "profile_workloads_reused_from_batch43": 26,
+      "earlier_build_attempt": {
+        "result": "ccache filesystem refusal",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch44-ccache-refusal.log",
+        "log_sha256": "e34fa4226aaab5f2de0beba9bd91da8838670e68e7620fd3e08d16724857cc2c",
+        "repair": "Build repeated with required CCACHE_READONLY and writable CCACHE_TEMPDIR; source unchanged."
+      }
+    },
+    "joined_build_batch45": {
+      "status": "both builds failed; full eligible compiler failures collected before repairs",
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "failed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch45.log",
+          "log_sha256": "92588ff31f9d17434ca80a2db9bfe34ba24eef718056caa8453f5d5c3158e9c8",
+          "compiler_error_lines": 92,
+          "compiler_files": {
+            "mono.engine/imagegraph/src/SourceCommonRuntime.cpp": 20,
+            "mono.engine/imagegraph/src/SourceCommonSockets.cpp": 39,
+            "mono.engine/imagegraph/src/Document.cpp": 2,
+            "mono.engine/imagegraph/src/SourceCommonInvocation.inc": 2,
+            "mono.engine/imagegraph/tests/FeedbackHost.cpp": 2,
+            "mono.engine/imagegraph/tests/SourceCommonRuntime.cpp": 1,
+            "mono.engine/imagegraphio/tests/PxcxCommonEditing.cpp": 6,
+            "mono.engine/imagegraphio/tests/PxcxCommonOwners.cpp": 6,
+            "mono.studio/nodegraph/tests/Layout.cpp": 6,
+            "mono.studio/nodegraph/src/Editor.cpp": 4,
+            "mono.studio/nodegraph/src/Layout.cpp": 4
+          }
+        },
+        {
+          "preset": "profile",
+          "result": "failed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch45.log",
+          "log_sha256": "8b99ba9893ad7afa8bf4cd7b8b565aad9d7aeea012179984a28e4ddafe5bb7ce",
+          "compiler_error_lines": 66,
+          "compiler_files": {
+            "mono.engine/imagegraph/src/SourceCommonRuntime.cpp": 20,
+            "mono.engine/imagegraph/src/SourceCommonSockets.cpp": 39,
+            "mono.engine/imagegraph/src/Document.cpp": 2,
+            "mono.engine/imagegraph/src/SourceCommonInvocation.inc": 2,
+            "mono.engine/imagegraph/tests/FeedbackHost.cpp": 2,
+            "mono.engine/imagegraph/tests/SourceCommonRuntime.cpp": 1
+          }
+        }
+      ],
+      "source_integrity": {
+        "paths": 4266,
+        "changed": []
+      },
+      "static_checks": [
+        {
+          "name": "lint",
+          "exit": 0,
+          "seconds": 0.034,
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-static45-lint.log",
+          "log_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+        },
+        {
+          "name": "architecture",
+          "exit": 0,
+          "seconds": 0.824,
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-static45-architecture.log",
+          "log_sha256": "e2920b48a3c7c18b9bb66b525c591a2eb61a1986c17204060ce321e87ea6ff4f"
+        },
+        {
+          "name": "python",
+          "exit": 0,
+          "seconds": 6.144,
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-static45-python.log",
+          "log_sha256": "d05cd2ac2b9bd08a5dee9b1f0422eaa0c8bfd478ff91827eb9268547fd6c4890"
+        },
+        {
+          "name": "format",
+          "exit": 0,
+          "seconds": 12.28,
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-static45-format.log",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "name": "diff",
+          "exit": 0,
+          "seconds": 0.514,
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-static45-diff.log",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      ],
+      "runtime_checks": "not run: affected binaries were not successfully rebuilt",
+      "profile_checks": "not run: affected profile binaries were not successfully rebuilt",
+      "repairs_staged": "unity-local helper collisions, declaration order, owning frozen domains, iterator subtraction, invalid test payload APIs, missing port visibility field, reconciliation named outputs and inherited CollectionOverride observations"
+    },
+    "joined_build_batch46": {
+      "status": "both builds pass; runtime feature acceptance fails",
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch46.log",
+          "log_sha256": "453a19d9a13e2e609458a0daf971f30735489bed2cdc6551f997a0ba6c2c3037"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch46.log",
+          "log_sha256": "a67c12ecddd856bed6d84570b410840b8e5b1f958b70592ba0416efd7a5d89d2"
+        }
+      ],
+      "checks_total": 20,
+      "checks_passed": 15,
+      "checks_failed": 5,
+      "source_integrity": {
+        "paths": 4266,
+        "changed": []
+      },
+      "runtime_result_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch46-results.json",
+      "runtime_result_record_sha256": "bf30cbedb0b98eff4aeff7871c85c0a40d77c086a813f09f24cb34ca233c2fa9",
+      "core_io_failed_cases": 70,
+      "additional_failed_cases": 21,
+      "known_listener_failed_cases": 21,
+      "core_first_run": "aborted on SIGSEGV in new admission test; partial coverage",
+      "core_remainder": {
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-core-remainder-batch46.log",
+        "log_sha256": "ad0bb242d4eee753776cd37f3f84de197da7be371880592e3c6e2c3ff2ea5c74",
+        "cases": 3648,
+        "passed": 3647,
+        "failed": 1,
+        "excluded_case": "common admission imports canonical journals even when common state is explicitly cold",
+        "qualification": "diagnostic continuation after the recorded crash, not full-suite acceptance"
+      },
+      "profile_preflight": {
+        "command": [
+          ".cache/build/profile/tests/test_imagegraph",
+          "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads]"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.847,
+        "binary_sha256": "f570a3f08f10be0c67498b203b6bcf46333cdd9a4909460c5f144ede4b26cbb9",
+        "binary_sha256_after": "f570a3f08f10be0c67498b203b6bcf46333cdd9a4909460c5f144ede4b26cbb9",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch46.log",
+        "log_sha256": "2f0e315311d8ea0f203d88697a7fb34d7e92d387249b082841673ad5b22d1c91"
+      },
+      "profile_validation": {
+        "workloads": 26,
+        "calls": 338,
+        "spans": 50492,
+        "binary_sha256": "893eea1cba7cc2693ab19f7bfcd61b733a0c2bd3babe6842b64e6e0080f7f1c2",
+        "group_retained_bytes": 17608,
+        "tunnel_retained_bytes": 99296,
+        "common_retained_bytes": 11112,
+        "qualification": "All timing stdout validated in RAM only; no performance conclusion."
+      }
+    },
+    "joined_build_batch47": {
+      "status": "both builds pass; current runtime feature acceptance still fails",
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch47.log",
+          "log_sha256": "05ec1aaf4fec1dded85811b1e118b4db394e63a7a9bf1418512ad9af8c060711"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch47.log",
+          "log_sha256": "25d55f3076b5d31f48b79e82324065349d892523b2683d8bda7b5bec188acef3"
+        }
+      ],
+      "checks_total": 20,
+      "checks_passed": 15,
+      "checks_failed": 5,
+      "source_integrity": {
+        "paths": 4266,
+        "changed": []
+      },
+      "runtime_result_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch47-results.json",
+      "runtime_result_record_sha256": "612b49b25440691f988071c0dec1c0b8787fb81475ea4ef809f068404bbd87ab",
+      "core_io_failed_cases": 24,
+      "additional_failed_cases": 12,
+      "known_listener_failed_cases": 21,
+      "core_cases": 3650,
+      "core_passed": 3649,
+      "core_failed": 1,
+      "io_cases": 375,
+      "io_passed": 352,
+      "io_failed": 23,
+      "profile_preflight": {
+        "command": [
+          ".cache/build/profile/tests/test_imagegraph",
+          "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads]"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.905,
+        "binary_sha256": "989fed2c5f4688a7fb3d8db47f1ae7ba1df6da91850bb90a5a0013e59b4ae825",
+        "binary_sha256_after": "989fed2c5f4688a7fb3d8db47f1ae7ba1df6da91850bb90a5a0013e59b4ae825",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch47.log",
+        "log_sha256": "14de23f3be3a72dafcbf1c3a09f36db633a00e4b4a6168162509ea52a7f5ffa3"
+      },
+      "profile_validation": {
+        "workloads": 26,
+        "calls": 338,
+        "spans": 50492,
+        "binary_sha256": "f437af1469888d016b4b2462024c3862ec29cfbce1a3c8dcfeb649551d342d6a",
+        "group_retained_bytes": 17608,
+        "tunnel_retained_bytes": 99296,
+        "common_retained_bytes": 11112,
+        "qualification": "All timing stdout validated in RAM only; no performance conclusion."
+      }
+    },
+    "joined_build_batch48": {
+      "status": "both builds pass; current runtime feature acceptance still fails",
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch48.log",
+          "log_sha256": "df2ef7bbab0743008c6e9fd34659a14cb5b1afdf5013e61bf0c9dbcada38f564"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch48.log",
+          "log_sha256": "95f47c3728ec14f61899e164fc4c7bcf5cd352fa8363007b25acb50b13f63dd8"
+        }
+      ],
+      "checks_total": 20,
+      "checks_passed": 16,
+      "checks_failed": 4,
+      "source_integrity": {
+        "paths": 4266,
+        "changed": []
+      },
+      "runtime_result_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch48-results.json",
+      "core_io_failed_cases": 14,
+      "additional_failed_cases": 7,
+      "known_listener_failed_cases": 21,
+      "runtime_result_record_sha256": "7dac287004d2f155a2881e87bd5eda91b0e58e695eeab2244e3f65488d1f65c8",
+      "core_cases": 3650,
+      "core_passed": 3650,
+      "core_failed": 0,
+      "io_cases": 375,
+      "io_passed": 361,
+      "io_failed": 14,
+      "studio_cases": 1159,
+      "studio_passed": 1135,
+      "studio_failed": 24,
+      "profile_validation": {
+        "workloads": 26,
+        "calls": 338,
+        "spans": 50492,
+        "binary_sha256": "05b9fa2ba262fab2f248e5cea4a53871aba3297c23979fc2be27350bec26ec5c",
+        "group_retained_bytes": 17608,
+        "tunnel_retained_bytes": 99296,
+        "common_retained_bytes": 11112,
+        "qualification": "All timing stdout validated in RAM only; no performance conclusion."
+      },
+      "profile_preflight": {
+        "command": [
+          ".cache/build/profile/tests/test_imagegraph",
+          "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads]"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.845,
+        "binary_sha256": "4028c5b792ffb3f25842aef32568b0a82788aa666ed405dc86e6dec9a5ed4a13",
+        "binary_sha256_after": "4028c5b792ffb3f25842aef32568b0a82788aa666ed405dc86e6dec9a5ed4a13",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch48.log",
+        "log_sha256": "29685bdbd1ebc37baf8ce89c755849534e65151f83930bfb31a142bc7e61eb38"
+      }
+    },
+    "joined_build_batch49": {
+      "status": "both builds pass; three current IO failure cases remain",
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch49.log",
+          "log_sha256": "53456a576c72deb834b25abb56fdb48678b85f332762f29efc1e5360aa9090be"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch49.log",
+          "log_sha256": "e779946a29a127b3bd26b9468758802c8858e7ea0e992e58c51378923f976e41"
+        }
+      ],
+      "checks_total": 20,
+      "checks_passed": 16,
+      "checks_failed": 4,
+      "source_integrity": {
+        "paths": 4266,
+        "changed": []
+      },
+      "runtime_result_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch49-results.json",
+      "core_io_failed_cases": 3,
+      "additional_failed_cases": 0,
+      "known_listener_failed_cases": 21,
+      "runtime_result_record_sha256": "9995add6c5e4c09acd9124c4b2ceb4fbc7cbacf591bb09b694cb15b6a189694c",
+      "core_cases": 3650,
+      "core_passed": 3650,
+      "core_failed": 0,
+      "io_cases": 375,
+      "io_passed": 372,
+      "io_failed": 3,
+      "studio_cases": 1159,
+      "studio_passed": 1142,
+      "studio_failed": 17,
+      "profile_preflight": {
+        "command": [
+          ".cache/build/profile/tests/test_imagegraph",
+          "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads]"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.869,
+        "binary_sha256": "a7964644a72b5602942ddc6b5c8b9e5ef03ac50c0feed729c7df777b2071a4c7",
+        "binary_sha256_after": "a7964644a72b5602942ddc6b5c8b9e5ef03ac50c0feed729c7df777b2071a4c7",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch49.log",
+        "log_sha256": "fa8c065ae433975ff75d688efe1410e74639ed4e50b6f4b58ac4571b2c2f2ae6"
+      },
+      "profile_validation": {
+        "workloads": 26,
+        "calls": 338,
+        "spans": 50492,
+        "binary_sha256": "41474cedeb94a5c413d57db173430b68f71ceaed8fc267aa5e655341eaca6b6d",
+        "group_retained_bytes": 17608,
+        "tunnel_retained_bytes": 99296,
+        "common_retained_bytes": 11112,
+        "qualification": "All timing stdout validated in RAM only; no performance conclusion."
+      }
+    },
+    "joined_build_batch50": {
+      "status": "release build failed: CollectionLoad fixture needs FrameTime.hpp for GetFrameTime; all compiler failures collected",
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "failed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch50.log",
+          "log_sha256": "65036e59443a7bdedb161ff64676b0112774f3f51714c09001640a16fe62acde"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch50.log",
+          "log_sha256": "c2ed93ffd93c840755c0e91392ae593b1b52de9b7aaf6c208123feaceb1dde2e"
+        }
+      ],
+      "source_integrity": {
+        "paths": 4266,
+        "changed": []
+      },
+      "runtime_checks": "not run because IO test binary failed to rebuild"
+    },
+    "joined_build_batch51": {
+      "status": "both builds pass; one current IO regression remains; prior listener baseline now passes with restored network permissions",
+      "builds": [
+        {
+          "preset": "release-tests",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch51.log",
+          "log_sha256": "7bdaa968e4e2c8cdfa25573381f1ea5cd08b89ef8c982d1b8cf7b92fdd222a93"
+        },
+        {
+          "preset": "profile",
+          "result": "passed",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch51.log",
+          "log_sha256": "c2ed93ffd93c840755c0e91392ae593b1b52de9b7aaf6c208123feaceb1dde2e"
+        }
+      ],
+      "checks_total": 20,
+      "checks_passed": 19,
+      "checks_failed": 1,
+      "source_integrity": {
+        "paths": 4266,
+        "changed": []
+      },
+      "runtime_result_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-batch51-results.json",
+      "runtime_result_record_sha256": "1ef8281bca8a1b7c3b2be9638b695e7299f79c9ffa658294b22eddddb1608352",
+      "core_cases": 3650,
+      "core_passed": 3650,
+      "io_cases": 376,
+      "io_passed": 375,
+      "io_failed": 1,
+      "studio_cases": 1159,
+      "studio_passed": 1159,
+      "studio_failed": 0,
+      "known_listener_failed_cases": 0,
+      "profile_preflight": {
+        "command": [
+          ".cache/build/profile/tests/test_imagegraph",
+          "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads]"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.855,
+        "binary_sha256": "a7964644a72b5602942ddc6b5c8b9e5ef03ac50c0feed729c7df777b2071a4c7",
+        "binary_sha256_after": "a7964644a72b5602942ddc6b5c8b9e5ef03ac50c0feed729c7df777b2071a4c7",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch51.log",
+        "log_sha256": "6c76a61b9a4195d02ad73f51078c2f2659dc6dc1c8af92af48b36ad3c9428924"
+      },
+      "profile_validation": {
+        "workloads": 26,
+        "calls": 338,
+        "spans": 50492,
+        "binary_sha256": "41474cedeb94a5c413d57db173430b68f71ceaed8fc267aa5e655341eaca6b6d",
+        "group_retained_bytes": 17608,
+        "tunnel_retained_bytes": 99296,
+        "common_retained_bytes": 11112,
+        "qualification": "All timing stdout validated in RAM only; no performance conclusion."
+      }
+    },
+    "accepted_batch44_receipt_summary": {
+      "summary": {
+        "batch": 44,
+        "builds": [
+          {
+            "preset": "release-tests",
+            "result": "passed",
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch44.log",
+            "log_sha256": "1e886dd5e07989c147c43423a0c0752ff01cdf611058b5c2e7026cc6396a73eb"
+          },
+          {
+            "preset": "profile",
+            "result": "passed",
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch44.log",
+            "log_sha256": "c2ed93ffd93c840755c0e91392ae593b1b52de9b7aaf6c208123feaceb1dde2e"
+          }
+        ],
+        "checks_total": 20,
+        "checks_passed": 17,
+        "checks_failed": 3,
+        "cpp_cases_including_startup": {
+          "total": 6017,
+          "passed": 5996,
+          "failed": 21
+        },
+        "python_cases": 116,
+        "cli_cases": 16,
+        "suite_summaries": [
+          {
+            "suite": "bake",
+            "total": 161,
+            "passed": 161,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-bake-batch44.log",
+            "log_sha256": "d6e3df402216387060581fc45ca797d88987165d977adaec89aa27e9e6b806e1"
+          },
+          {
+            "suite": "physics",
+            "total": 43,
+            "passed": 43,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-physics-batch44.log",
+            "log_sha256": "7770453aa26c4c0bf54b3796f4cdba36a72996cd93e3ce3acf71fd4e619de7a1"
+          },
+          {
+            "suite": "runner",
+            "total": 29,
+            "passed": 29,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-runner-batch44.log",
+            "log_sha256": "e4f69dfc356f0487268d92164825b5949f648692254b884b3c43a9d926602f1f"
+          },
+          {
+            "suite": "font",
+            "total": 43,
+            "passed": 43,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-font-batch44.log",
+            "log_sha256": "dd68db093671d99018515886c012f99d7db4e188d26e7727d5878d49bd0693f2"
+          },
+          {
+            "suite": "export",
+            "total": 95,
+            "passed": 94,
+            "failed": 1,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-export-batch44.log",
+            "log_sha256": "9c46c6d9f3ef34b042a88ae45a7aae5ade0ece858207facf61f3c42b2f9f48bc"
+          },
+          {
+            "suite": "render",
+            "total": 33,
+            "passed": 33,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-render-batch44.log",
+            "log_sha256": "1aa6ad673a94fbfb2cce5eebc8c5b1c8f40eef3053843f8e33c038440eb0df76"
+          },
+          {
+            "suite": "io",
+            "total": 360,
+            "passed": 360,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch44.log",
+            "log_sha256": "1e0b33950ea0c150e472040ff19a1f33e692276265c9ae996e583b0d18d48d4b"
+          },
+          {
+            "suite": "core",
+            "total": 3606,
+            "passed": 3606,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch44.log",
+            "log_sha256": "a090e72996f89f895fbb10d29e0b23755b19aa7eb87bfedcafa95d5e30ccc629"
+          },
+          {
+            "suite": "assetc",
+            "total": 49,
+            "passed": 49,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-assetc-batch44.log",
+            "log_sha256": "c3deab49aa051d928b200e6bfd5606f89cf2a8fefbf04be1ef2169461832a563"
+          },
+          {
+            "suite": "client",
+            "total": 359,
+            "passed": 356,
+            "failed": 3,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-client-batch44.log",
+            "log_sha256": "31822f030f579857c82b39eff19ce38c8629f746caf2583a39d9a7998b6f9f60"
+          },
+          {
+            "suite": "studio",
+            "total": 1157,
+            "passed": 1140,
+            "failed": 17,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-studio-batch44.log",
+            "log_sha256": "b0100fa30e9276d316c6d6e7544e63e73c0d593fa4065b120bd27644dc474a08"
+          },
+          {
+            "suite": "nodegraph",
+            "total": 41,
+            "passed": 41,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-nodegraph-batch44.log",
+            "log_sha256": "19a88a2810a3349f08901c0903f4a531e1c8a97d32905e67a7fdc6a8d0d33f61"
+          },
+          {
+            "suite": "ui",
+            "total": 40,
+            "passed": 40,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-ui-batch44.log",
+            "log_sha256": "150e136240291211668dbbf0a1ddb9b7682ab8e6c80dcb5a1b0617a0671f21a0"
+          },
+          {
+            "suite": "startup",
+            "total": 1,
+            "passed": 1,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-startup-batch44.log",
+            "log_sha256": "dc70bfd555ac7ba4545a01bb6c527005ab389097f901494ef21bfd08ff3fd041"
+          }
+        ]
+      },
+      "batch_failures": [
+        {
+          "suite": "export",
+          "failed_cases": 1,
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-export-batch44.log",
+          "log_sha256": "9c46c6d9f3ef34b042a88ae45a7aae5ade0ece858207facf61f3c42b2f9f48bc",
+          "failed_test_cases": [
+            "Local HTTP host serves source GET POST and enforces byte limits"
+          ],
+          "cause": "Confirmed: local HTTP server socket creation raised PermissionError errno 1, Operation not permitted (EPERM)."
+        },
+        {
+          "suite": "client",
+          "failed_cases": 3,
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-client-batch44.log",
+          "log_sha256": "31822f030f579857c82b39eff19ce38c8629f746caf2583a39d9a7998b6f9f60",
+          "failed_test_cases": [
+            "client factory MCP surface is available",
+            "client normal MCP surface is available",
+            "client MCP listener restarts with its reviewed normal manifest"
+          ],
+          "observed": "Three MCP tests report open: Operation not permitted.",
+          "cause_assessment": "Permission denial is explicit; identifying the denied open as the listener operation is inferred from the MCP tests and export socket traceback."
+        },
+        {
+          "suite": "studio",
+          "failed_cases": 17,
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-studio-batch44.log",
+          "log_sha256": "b0100fa30e9276d316c6d6e7544e63e73c0d593fa4065b120bd27644dc474a08",
+          "failed_test_cases": [
+            "private edit streams require the invitation key after discovery",
+            "Studio factory MCP manifest is available",
+            "the assets panel lists what a listing origin holds",
+            "an origin with enumeration off says so rather than showing nothing",
+            "a listing origin refuses the wrong key, and the tab says which",
+            "hosting opens a session other editors can join",
+            "leaving takes the session and its socket down",
+            "the collaborator count only moves what it changes",
+            "Studio normal MCP manifest is available",
+            "Studio factory startup refuses an occupied required control port",
+            "Studio keeps its optional control surface after an occupied port",
+            "Studio Project ZIP contains every catalogue asset and hosts without source folders",
+            "a public session says so and carries no invitation",
+            "hosting produces a session and an invitation to pass on",
+            "the editor limit is enforced by the hosted stream",
+            "leaving takes the session back down",
+            "a hosted session carries an edit to a guest"
+          ],
+          "observed": "Logs report CDN could not bind port 0 and control could not listen on 127.0.0.1:0; TeamCreate and hosted-session tests then fail.",
+          "cause_assessment": "TeamCreate and hosted-session listener startup restriction is inferred from the bind failures. The Studio log does not show a PermissionError stack for every failed case."
+        }
+      ],
+      "targeted_checks": [
+        {
+          "name": "new core Any and computed-coordinate regressions",
+          "cases": 6,
+          "result": "passed",
+          "suite": "test_imagegraph"
+        },
+        {
+          "name": "new Studio group-port regressions",
+          "cases": 7,
+          "result": "passed",
+          "suite": "test_studio"
+        },
+        {
+          "name": "new nodegraph regression",
+          "cases": 1,
+          "result": "passed",
+          "suite": "test_nodegraph"
+        },
+        {
+          "name": "source-path Spiral core suite",
+          "cases": 12,
+          "result": "passed",
+          "suite": "test_imagegraph"
+        },
+        {
+          "name": "PXC Spiral suite",
+          "cases": 3,
+          "result": "passed",
+          "suite": "test_imagegraphio"
+        },
+        {
+          "name": "selected grouped cache clear wakes overlapping frozen groups and retires dependent Studio previews under source gates",
+          "cases": 1,
+          "result": "passed",
+          "suite": "test_studio"
+        },
+        {
+          "name": "profile preflight",
+          "cases": 3,
+          "assertions": 23,
+          "command": [
+            ".cache/build/profile/tests/test_imagegraph",
+            "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads]"
+          ],
+          "exit_code": 0,
+          "elapsed_seconds": 0.857,
+          "binary_sha256": "a3dc6b072540adfd10943541a02af993d580d9880e49a4fd3630a0411a8d6f71",
+          "binary_sha256_after": "a3dc6b072540adfd10943541a02af993d580d9880e49a4fd3630a0411a8d6f71",
+          "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch44.log",
+          "log_sha256": "c4379110146c1924700577f81569057ab0583fc22b9a1d78f8b97c8e8bbd2dc4",
+          "preflight_log_sha256": "5125be503e1e1f6e9a1cf3b134f3b2879ca9c9be3c7c60baf6ab7110e7c1a8e5",
+          "verification_batch": 44
+        },
+        {
+          "name": "all imagegraph workload profiles",
+          "result": "passed",
+          "workload_profiles": 26,
+          "workload_calls": 338,
+          "observed_spans": 50492,
+          "execution": {
+            "heap_profile_mode": 1,
+            "warmups": 8,
+            "kept_samples": 5
+          },
+          "benchmark_sha256": "6150961cd5050a37ad1501645adf68a278af56890b180494957b4ba10a4618cf",
+          "qualification": "Aggregate metadata only. Timing outputs were not saved.",
+          "verification_batch": 43,
+          "unchanged_binary_verified_batch": 44
+        },
+        {
+          "name": "eight-group retained scheduler profile",
+          "result": "passed",
+          "verification_batch": 43,
+          "unchanged_binary_verified_batch": 44,
+          "groups": 8,
+          "nodes": 24,
+          "operations_per_call": 17,
+          "workload_calls": 13,
+          "warmups": 8,
+          "kept_samples": 5,
+          "spans": 6006,
+          "heap_compiled": 1,
+          "benchmark_sha256": "6150961cd5050a37ad1501645adf68a278af56890b180494957b4ba10a4618cf",
+          "retained_bytes": [
+            17440,
+            17440
+          ]
+        },
+        {
+          "name": "native Hilbert and Kisrhombille generators, grouping, image formats and bounded execution",
+          "result": "passed",
+          "evidence": [
+            {
+              "test_source": "mono.engine/imagegraph/tests/SourcePatternGeneratorIntegration.cpp",
+              "source_sha256": "1dc60c7d80bbcc3af2930a7e903aa123d12de0e95ffd593fc698a02feb27dec2",
+              "suite": "core",
+              "cases": 7,
+              "covered_by_joined_batch": 34
+            },
+            {
+              "test_source": "mono.studio/tests/ImageGraphPatternGroups.cpp",
+              "source_sha256": "4a5760acb4a7e87f50362029d89c5ba39fc0ecfcc0d874fde7e9cc9c81565972",
+              "suite": "studio",
+              "cases": 2,
+              "covered_by_joined_batch": 34
+            }
+          ],
+          "scope": "native pixels, save/reopen, processor rows, seven colour depths, headless group/ungroup gestures and atomic bounded refusal; licensed GPU raster parity remains open"
+        },
+        {
+          "name": "sixteen tunnel sender-receiver pairs with prior-registry getters, frozen groups, resume and atomic work refusal",
+          "result": "passed",
+          "verification_batch": 40,
+          "unchanged_binary_verified_batch": 41,
+          "groups": 2,
+          "nodes": 64,
+          "operations_per_call": 7,
+          "workload_calls": 13,
+          "warmups": 8,
+          "kept_samples": 5,
+          "spans": 33995,
+          "retained_bytes": [
+            99128,
+            99128
+          ],
+          "heap_compiled": 1,
+          "benchmark_sha256": "6053958d2136dbedf3a0c78cee4cd17c2e2515b7e64b439adf9fecc49875e5f6",
+          "qualification": "CPU profiling stdout validated in RAM; timing outputs not saved."
+        },
+        {
+          "name": "sixteen tunnel sender-receiver pairs with prior-registry getters, frozen groups, resume and atomic work refusal",
+          "result": "passed",
+          "verification_batch": 40,
+          "unchanged_binary_verified_batch": 41,
+          "groups": 2,
+          "nodes": 64,
+          "operations_per_call": 7,
+          "workload_calls": 13,
+          "warmups": 8,
+          "kept_samples": 5,
+          "spans": 33995,
+          "retained_bytes": [
+            99128,
+            99128
+          ],
+          "heap_compiled": 1,
+          "benchmark_sha256": "6150961cd5050a37ad1501645adf68a278af56890b180494957b4ba10a4618cf",
+          "qualification": "CPU profiling stdout validated in RAM; timing outputs not saved."
+        },
+        {
+          "name": "captured source common-socket lifecycle base",
+          "result": "passed",
+          "verification_batch": 43,
+          "unchanged_binary_verified_batch": 44,
+          "cases": 9,
+          "workload_calls": 13,
+          "owners": 64,
+          "steps_per_call": 16,
+          "spans": 468,
+          "reset_receipts_per_call": 85,
+          "refusals_per_call": 2,
+          "state_fnv": 3059338748087447014,
+          "retained_bytes": [
+            11112,
+            11112
+          ],
+          "heap_compiled": 1,
+          "benchmark_sha256": "6150961cd5050a37ad1501645adf68a278af56890b180494957b4ba10a4618cf",
+          "qualification": "Explicit phase captures only; native callbacks, animator reset and reserved route resolution remain pending. CPU timing outputs validated in RAM only."
+        }
+      ]
+    },
+    "joined_build_batch52": {
+      "summary": {
+        "batch": 52,
+        "builds": [
+          {
+            "preset": "release-tests",
+            "result": "passed",
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch52.log",
+            "log_sha256": "b272e8be23573a888330cc30bfcbe2b10ccf5531aecd90e7fa3ca82bd00abe63"
+          },
+          {
+            "preset": "profile",
+            "result": "passed",
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch52.log",
+            "log_sha256": "c2ed93ffd93c840755c0e91392ae593b1b52de9b7aaf6c208123feaceb1dde2e"
+          }
+        ],
+        "checks_total": 20,
+        "checks_passed": 20,
+        "checks_failed": 0,
+        "cpp_cases_including_startup": {
+          "total": 6080,
+          "passed": 6080,
+          "failed": 0
+        },
+        "python_cases": 116,
+        "cli_cases": 16,
+        "suite_summaries": [
+          {
+            "suite": "bake",
+            "total": 161,
+            "passed": 161,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-bake-batch52.log",
+            "log_sha256": "93d4367d1524653a4021ace28abe0b7648fea84ec45be4a92225a61e3de2f627"
+          },
+          {
+            "suite": "physics",
+            "total": 43,
+            "passed": 43,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-physics-batch52.log",
+            "log_sha256": "f46cc27eb9acd986c055764de2a5d3eb9c65c425b1ef82d770c8d41ed1a08c6c"
+          },
+          {
+            "suite": "runner",
+            "total": 29,
+            "passed": 29,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-runner-batch52.log",
+            "log_sha256": "246fbcb9659203eead89cb0e55fcaa5fbc7f64d82c522961737ecf07e747f452"
+          },
+          {
+            "suite": "font",
+            "total": 43,
+            "passed": 43,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-font-batch52.log",
+            "log_sha256": "dd5ad13fe1822dd121f7d96c5a2356f354c9ccb7b47684e6bb4fe18adf40b8c1"
+          },
+          {
+            "suite": "export",
+            "total": 95,
+            "passed": 95,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-export-batch52.log",
+            "log_sha256": "51a18015bc3b907f95125531a30eadfbc6a71e3781399c166d25d00cb0129642"
+          },
+          {
+            "suite": "render",
+            "total": 33,
+            "passed": 33,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-render-batch52.log",
+            "log_sha256": "386694cf4f745de47f5683441c3667f9c74821143997dcaaa99302cfc984f7a0"
+          },
+          {
+            "suite": "io",
+            "total": 376,
+            "passed": 376,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch52.log",
+            "log_sha256": "991fad775e305b345a42d4190865bce0f7276de8986e6e42f10906f23ad19069"
+          },
+          {
+            "suite": "core",
+            "total": 3650,
+            "passed": 3650,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch52.log",
+            "log_sha256": "335f6c75b30047a4fdbf2d519bfd3e62fc611252ad13f30381b575c7b9a8bdd5"
+          },
+          {
+            "suite": "assetc",
+            "total": 49,
+            "passed": 49,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-assetc-batch52.log",
+            "log_sha256": "2a5ae1f939bebd0bd382adfd600709c86622072765fbb181e61d0d300f5a1018"
+          },
+          {
+            "suite": "client",
+            "total": 359,
+            "passed": 359,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-client-batch52.log",
+            "log_sha256": "ba3dd118c0c4144d951f292c6de5340840a70c8b2e240338fe233bedbaba34fb"
+          },
+          {
+            "suite": "studio",
+            "total": 1159,
+            "passed": 1159,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-studio-batch52.log",
+            "log_sha256": "c5bb01387ccad2f445d98fc62686c545a15f0a4ef7173ad5fe657c4cb355af28"
+          },
+          {
+            "suite": "nodegraph",
+            "total": 42,
+            "passed": 42,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-nodegraph-batch52.log",
+            "log_sha256": "822bc5c39b12b928a63f60e34ebbb28e27a8fe0f80881d97c2e1575c12733970"
+          },
+          {
+            "suite": "ui",
+            "total": 40,
+            "passed": 40,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-ui-batch52.log",
+            "log_sha256": "715cc5252f77fa572e90dac07c7ddf4ba326648099c40c8363b21c065f5ceca3"
+          },
+          {
+            "suite": "startup",
+            "total": 1,
+            "passed": 1,
+            "failed": 0,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-startup-batch52.log",
+            "log_sha256": "d9632c7668a70bbc9270afdd6dc29a033621575e37cc528b2e210ba51cbd88b9"
+          }
+        ]
+      },
+      "source_integrity": {
+        "paths": 4266,
+        "changed": [],
+        "source_stability_record": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-source-stability-batch52.json",
+        "source_stability_record_sha256": "4267ed1ad05850c9f2ed6950bce1c890ebb66d0718dac25d4af2ff83db1d7299",
+        "child_binaries_before": {
+          ".cache/build/release-tests/tools/assetc": "66f8fc8051d13ddb7d549d7a26c3ea74a909a696596e27016fe9f9071df9a86c",
+          ".cache/build/release-tests/tools/imagegraph": "d993fa3e0a873141e8cc081daa8381c81ac579b43280ac3f2cd0b979260c3857"
+        },
+        "child_binaries_after": {
+          ".cache/build/release-tests/tools/assetc": "66f8fc8051d13ddb7d549d7a26c3ea74a909a696596e27016fe9f9071df9a86c",
+          ".cache/build/release-tests/tools/imagegraph": "d993fa3e0a873141e8cc081daa8381c81ac579b43280ac3f2cd0b979260c3857"
+        },
+        "child_hashes_unchanged": true,
+        "all_suite_binaries_unchanged": true
+      },
+      "profile_preflight": {
+        "command": [
+          ".cache/build/profile/tests/test_imagegraph",
+          "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads]"
+        ],
+        "exit_code": 0,
+        "elapsed_seconds": 0.846,
+        "binary_sha256": "a7964644a72b5602942ddc6b5c8b9e5ef03ac50c0feed729c7df777b2071a4c7",
+        "binary_sha256_after": "a7964644a72b5602942ddc6b5c8b9e5ef03ac50c0feed729c7df777b2071a4c7",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch52.log",
+        "log_sha256": "7837a933867eca9683aad1a68035e5310cfd59c46a4da7855f7dd7f0e197b7c4"
+      },
+      "profile_counters": {
+        "exit_code": 0,
+        "results": [
+          {
+            "suite": "engine.imagegraph.bench.pixel-kernels",
+            "validated": true,
+            "profiles": 208,
+            "spans": 2067,
+            "sha_before": "41474cedeb94a5c413d57db173430b68f71ceaed8fc267aa5e655341eaca6b6d",
+            "sha_after": "41474cedeb94a5c413d57db173430b68f71ceaed8fc267aa5e655341eaca6b6d"
+          },
+          {
+            "suite": "engine.imagegraph.bench.path-particle",
+            "validated": true,
+            "profiles": 65,
+            "spans": 7449,
+            "sha_before": "41474cedeb94a5c413d57db173430b68f71ceaed8fc267aa5e655341eaca6b6d",
+            "sha_after": "41474cedeb94a5c413d57db173430b68f71ceaed8fc267aa5e655341eaca6b6d"
+          },
+          {
+            "suite": "engine.imagegraph.bench.shape-triangulate",
+            "validated": true,
+            "profiles": 26,
+            "spans": 507,
+            "sha_before": "41474cedeb94a5c413d57db173430b68f71ceaed8fc267aa5e655341eaca6b6d",
+            "sha_after": "41474cedeb94a5c413d57db173430b68f71ceaed8fc267aa5e655341eaca6b6d"
+          },
+          {
+            "validated": true,
+            "binary_sha256": "41474cedeb94a5c413d57db173430b68f71ceaed8fc267aa5e655341eaca6b6d",
+            "heap_compiled": 1,
+            "workloads": {
+              "group": {
+                "profiles": 13,
+                "spans": 6006,
+                "operations_per_call": 17,
+                "retained_bytes": [
+                  17608,
+                  17608,
+                  17608,
+                  17608,
+                  17608
+                ]
+              },
+              "tunnel": {
+                "profiles": 13,
+                "spans": 33995,
+                "operations_per_call": 7,
+                "retained_bytes": [
+                  99296,
+                  99296,
+                  99296,
+                  99296,
+                  99296
+                ]
+              }
+            }
+          },
+          {
+            "validated": true,
+            "binary_sha256": "41474cedeb94a5c413d57db173430b68f71ceaed8fc267aa5e655341eaca6b6d",
+            "preset": "profile",
+            "backend": "cpu",
+            "heap_compiled": 1,
+            "workload": {
+              "profiles": 13,
+              "spans": 468,
+              "owners": 64,
+              "steps_per_call": 16,
+              "completions_per_call": 16,
+              "refusals_per_call": 2,
+              "resets_per_call": 85,
+              "state_fnv": "3059338748087447014",
+              "retained_bytes": 11112
+            }
+          }
+        ],
+        "errors": [],
+        "stderr": ""
+      },
+      "failures": [],
+      "qualification": "Tests ran in the shared working tree, including unrelated pending changes. CPU timing output was checked in RAM and not saved; counters do not establish a performance claim."
+    }
+  },
+  "fixes_verified": [
+    "bounded wildcard leaves and catalogue Any alias on static and dynamic ports",
+    "core consumer-resolved Any junction transport across group boundaries",
+    "strict computed coordinates",
+    "ungroup reparenting of junctions, nodes and child groups",
+    "Spiral semantic equality and PXC source ownership through save and reopen",
+    "retained callback activity and explicit cached group purity refresh",
+    "source PureFunction serialization, import/save projection and Studio control",
+    "held typed image arrays remain distinct from raw heterogeneous values",
+    "new disabled Array Split Any/Scalar sockets receive source-compatible cold zero",
+    "grouped host journals remain admitted until atomic nongrouped publication",
+    "parent input aliases preserve Boolean payloads and detached static first-key getters",
+    "nested Collection and Group clones retain local callbacks and PixelBuilder ownership",
+    "bounded source decimal and hexadecimal-prefix text conversions and exact typed comparison rules",
+    "tunnel prior-registry selectors, instance-local domains and retained image-array provenance",
+    "directional catalogue canvas casts with strict native endpoints, explicit unions and computed coordinates",
+    "authored group junction views preserve routes through native save/reopen and refuse boundary bypasses atomically",
+    "nested Collection and Group clones retain local callbacks and PixelBuilder ownership",
+    "bounded source decimal and hexadecimal-prefix text conversions and exact typed comparison rules",
+    "tunnel prior-registry selectors, instance-local domains and retained image-array provenance",
+    "directional catalogue canvas casts with strict native endpoints, explicit unions and computed coordinates",
+    "authored group junction views preserve routes through native save/reopen and refuse boundary bypasses atomically",
+    "source tag-over-index precedence and distinct common Update destination archive facts",
+    "opaque reserved ports and common-route save/reopen retain exact source records",
+    "bounded captured common lifecycle reconstruction, ordered steps and actual full-wrapper completion receipts",
+    "scalar trigger clocks preserve source frame identity and typed Collection animator payloads",
+    "bounded indexed PXC common-owner editing refuses excessive lookup work atomically",
+    "resolve borrowed ordered JSON source identities before constructor growth or source reordering"
+  ]
+}

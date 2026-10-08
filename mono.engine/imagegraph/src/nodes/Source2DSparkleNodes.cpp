@@ -107,6 +107,7 @@ namespace engine::imagegraph::detail {
 			if (!std::holds_alternative<Colour>(item))
 				return context.Fail(Status::TypeMismatch, "MK Sparkle palette requires colors", "colors");
 		const bool array = context.Boolean("array");
+		context.SetSourceUpdateOnFrame(!array);
 		const int64_t lengthValue = array ? context.Integer("array_length", 1) : 1;
 		if (lengthValue < 0 || uint64_t(lengthValue) > Limits::MaximumArrayElements)
 			return context.Fail(

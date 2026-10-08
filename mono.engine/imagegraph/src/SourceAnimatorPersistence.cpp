@@ -1,6 +1,7 @@
 #include "SourceAnimatorPersistence.hpp"
 
 #include "GroupReplayInternal.hpp"
+#include "SourceCommonAuthoring.hpp"
 #include "ValuePayload.hpp"
 
 #include <engine/core/Profiling.hpp>
@@ -11,6 +12,8 @@
 namespace engine::imagegraph::detail {
 	struct AnimatorReferenceWorkExceeded {};
 	Status ValidateSourceAnimatorState(const Document &document, Diagnostic &diagnostic) try {
+		if (const auto common = ValidateSourceCommonOwners(document, diagnostic); common != Status::Ok)
+			return common;
 		if (!document.SourceAnimators) return Status::Ok;
 		const auto fail = [&](Status status,
 							  std::string_view message,
@@ -120,7 +123,15 @@ namespace engine::imagegraph::detail {
 					);
 			const auto *owner = nodeById(record.OwnerId);
 			const auto *value = payload(record.OwnerId, record.Id);
-			if (!owner || !value || record.OriginalPort.empty())
+			const bool commonOwner = std::any_of(
+				document.SourceCommonOwners.begin(),
+				document.SourceCommonOwners.end(),
+				[&](const auto &common) {
+					admit(1 + common.SourceOwnerId.size());
+					return common.SourceOwnerId == record.OwnerId;
+				}
+			);
+			if ((!owner && !commonOwner) || !value || record.OriginalPort.empty())
 				return fail(
 					Status::InvalidGroup,
 					"retained source animator owner or payload is absent",
@@ -140,6 +151,11 @@ namespace engine::imagegraph::detail {
 					record.Id
 				);
 			bool referenced = false;
+			for (const auto &common : document.SourceCommonOwners) {
+				if (matches(common.UpdateAnimatorOwnerId, record.OwnerId) &&
+					matches(common.UpdateAnimatorPort, record.Id))
+					referenced = true;
+			}
 			for (const auto &binding : state.Bindings) {
 				if ((matches(binding.OwnerId, record.OwnerId) &&
 					 matches(BindingAnimatorPort(binding), record.Id)) ||
@@ -179,8 +195,8 @@ namespace engine::imagegraph::detail {
 			const auto &binding = state.Bindings[index];
 			const auto *target = nodeById(binding.NodeId);
 			const auto *owner = nodeById(binding.OwnerId);
-			if (!target || !owner || target->InstanceBase.empty() || !sourceInput(*target, binding.Port) ||
-				owner->Type != target->Type)
+			if (!target || !owner || SourceInputInstanceBase(*target, binding.Port).empty() ||
+				!sourceInput(*target, binding.Port) || owner->Type != target->Type)
 				return fail(
 					Status::InvalidGroup,
 					"captured source binding is not an instance input",
@@ -245,9 +261,11 @@ namespace engine::imagegraph::detail {
 					);
 			}
 			const Node *root = target;
-			for (size_t hop = 0; root && !root->InstanceBase.empty() && hop < document.Nodes.size(); ++hop)
-				root = nodeById(root->InstanceBase);
-			if (!root || !root->InstanceBase.empty() || root != owner)
+			for (size_t hop = 0;
+				 root && !SourceInputInstanceBase(*root, binding.Port).empty() && hop < document.Nodes.size();
+				 ++hop)
+				root = nodeById(SourceInputInstanceBase(*root, binding.Port));
+			if (!root || !SourceInputInstanceBase(*root, binding.Port).empty() || root != owner)
 				return fail(
 					Status::InvalidGroup,
 					"captured combined owner disagrees with instance ancestry",

@@ -292,6 +292,7 @@ namespace engine::imagegraph::detail {
 			if (!array && !hit) {
 				animated = c.Boolean("animated") ? 1 : 0;
 				if (c.FailureCode != Status::Ok) return false;
+				c.SetSourceUpdateOnFrame(animated != 0);
 			}
 			const bool enableGroup = (!hit || array) && c.Request.SourceCachePlayback->Playing &&
 									 c.FrameCacheSurfaceLinked && !c.FrameCacheProducerActive;

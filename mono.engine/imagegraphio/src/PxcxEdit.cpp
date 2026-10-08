@@ -5,6 +5,7 @@
 #include "OrdinarySourceGroups.hpp"
 #include "PxcxKeyProvenance.hpp"
 #include "PxcxNativePorts.hpp"
+#include "SourceCommonAdmission.hpp"
 #include "SourceInputProvenance.hpp"
 #include "SourceNoiseFieldAnnotation.hpp"
 #include "SourceTimelineProjection.hpp"
@@ -2187,6 +2188,7 @@ namespace engine::imagegraphio {
 	}
 
 	namespace edit_detail {
+#include "SourceCommonEdit.inc"
 		// foreign saves may omit native capture records only when a fresh bind reconstructs them.
 		bool ReconstructsSourceAnimators(
 			const Document &authored, const Document &foreign, Diagnostic &diagnostic
@@ -2198,9 +2200,9 @@ namespace engine::imagegraphio {
 					"PXC cannot reconstruct captured animator generations; save the native document"
 				);
 			};
-			if (!authored.SourceAnimators->Detached.empty() ||
-				!authored.SourceAnimators->DetachedValues.empty())
-				return reject();
+			if (!HasOnlyCommonDetached(authored)) return reject();
+			// Common local writers are verified by the inverse comparison and need no ordinary replay bind.
+			if (authored.SourceAnimators->Bindings.empty()) return true;
 			const auto authoredBytes = DocumentRetainedPayloadBytes(authored);
 			const auto foreignBytes = DocumentRetainedPayloadBytes(foreign);
 			if (!authoredBytes || !foreignBytes || *authoredBytes > Limits::MaximumEvaluationBytes / 2 ||
@@ -3856,6 +3858,10 @@ namespace engine::imagegraphio {
 						Json::object()
 					);
 				}
+				if (old == working.Graph.Groups.end() || old->PureFunction != group.PureFunction)
+					(*source)["attri"]["pure_function"] = group.PureFunction;
+				if (old == working.Graph.Groups.end() || old->RenderActive != group.RenderActive)
+					(*source)["render"] = group.RenderActive;
 				if (old == working.Graph.Groups.end() || old->Name != group.Name)
 					(*source)["name"] = group.Name;
 				if (old == working.Graph.Groups.end() || old->ParentId != group.ParentId) {
@@ -4069,12 +4075,132 @@ namespace engine::imagegraphio {
 				Json *record = SourceNode(root, id);
 				return {record, record ? indexOf(*record, port, output) : std::nullopt};
 			};
+			if (!WriteSourceCommonOwners(root, desired, working.Graph, diagnostic, payloadBudget))
+				return false;
+			const auto commonPort = [](std::string_view port) {
+				return port == "pxcx.update_in_trigger" || port == "pxcx.updated_out_trigger" ||
+					   port.starts_with("pxcx.metadata.");
+			};
+			const auto commonLink = [&](const Link &link) {
+				return commonPort(link.FromPort) || link.ToPort == "pxcx.update_in_trigger";
+			};
+			bool commonChanged = false;
+			for (const auto &link : working.Graph.Links)
+				if (commonLink(link) &&
+					std::find(desired.Links.begin(), desired.Links.end(), link) == desired.Links.end())
+					commonChanged = true;
+			for (const auto &link : desired.Links)
+				if (commonLink(link) &&
+					std::find(working.Graph.Links.begin(), working.Graph.Links.end(), link) ==
+						working.Graph.Links.end())
+					commonChanged = true;
+			if (commonChanged) {
+				for (const auto &link : working.Graph.Links) {
+					if (!commonLink(link) ||
+						std::find(desired.Links.begin(), desired.Links.end(), link) != desired.Links.end())
+						continue;
+					if ((commonPort(link.FromPort) &&
+						 !detail::SourceCommonNativeAvailable(working.Graph, link.FromNode)) ||
+						(link.ToPort == "pxcx.update_in_trigger" &&
+						 !detail::SourceCommonNativeAvailable(working.Graph, link.ToNode)))
+						return Reject(
+							diagnostic,
+							"PXC common route has no attested native source callback",
+							link.FromNode,
+							link.FromPort
+						);
+				}
+				for (const auto &link : desired.Links) {
+					if ((commonPort(link.FromPort) &&
+						 !detail::SourceCommonNativeAvailable(desired, link.FromNode)) ||
+						(link.ToPort == "pxcx.update_in_trigger" &&
+						 !detail::SourceCommonNativeAvailable(desired, link.ToNode)))
+						return Reject(
+							diagnostic,
+							"PXC common route has no attested native source callback",
+							link.FromNode,
+							link.FromPort
+						);
+				}
+				Plan admitted;
+				if (CompileSourceCommonRuntime(
+						desired, admitted, diagnostic, imported.Options.MaximumOperationBytes
+					) != Status::Ok)
+					return false;
+			}
+			const auto commonOwner = [&](const Document &document, std::string_view id) -> Json * {
+				const auto owner = std::find_if(
+					document.SourceCommonOwners.begin(),
+					document.SourceCommonOwners.end(),
+					[&](const auto &record) { return record.NativeOwnerId == id; }
+				);
+				return owner == document.SourceCommonOwners.end() ? nullptr
+																  : SourceNode(root, owner->SourceOwnerId);
+			};
+			const auto destination = [&](const Document &document, const Link &link) -> Json * {
+				if (link.ToPort == "pxcx.update_in_trigger") {
+					auto *owner = commonOwner(document, link.ToNode);
+					if (!owner) return nullptr;
+					auto &inspect = (*owner)["inspectInputs"];
+					if (inspect.is_null()) inspect = Json::array();
+					if (!inspect.is_array()) return nullptr;
+					while (inspect.size() < 3)
+						inspect.push_back(Json::object());
+					if (!inspect[2].is_object()) return nullptr;
+					return &(*owner)["inspectInputs"][2];
+				}
+				const auto [target, input] = endpoint(document, link.ToNode, link.ToPort, false);
+				return target && input && target->contains("inputs") && (*target)["inputs"].is_array() &&
+							   *input < (*target)["inputs"].size()
+						   ? &(*target)["inputs"][*input]
+						   : nullptr;
+			};
+			struct CommonSelectorEncoding {
+				std::string_view FromNode, FromPort;
+				Json Index, Tag;
+			};
+			std::vector<CommonSelectorEncoding> commonSelectors;
+			const size_t selectorCount =
+				std::count_if(working.Graph.Links.begin(), working.Graph.Links.end(), [&](const auto &link) {
+					return commonPort(link.FromPort);
+				});
+			if (!Spend(selectorCount * sizeof(CommonSelectorEncoding), payloadBudget))
+				return Reject(diagnostic, "PXC common selector inverse exceeds payload bounds");
+			commonSelectors.reserve(selectorCount);
+			for (const auto &link : working.Graph.Links) {
+				if (!commonPort(link.FromPort)) continue;
+				const auto *record = destination(working.Graph, link);
+				if (!record || !record->contains("from_index") || !record->contains("from_tag"))
+					return Reject(
+						diagnostic,
+						"PXC common selector source record is absent",
+						link.FromNode,
+						link.FromPort
+					);
+				commonSelectors.push_back(
+					{link.FromNode, link.FromPort, record->at("from_index"), record->at("from_tag")}
+				);
+			}
 			// Boundary junctions map to their parent's source socket; synthetic routes are reconstructed.
 
 			for (const auto &link : working.Graph.Links) {
 				if (std::find(desired.Links.begin(), desired.Links.end(), link) != desired.Links.end())
 					continue;
 				if (syntheticRoute(working.Graph, link)) continue;
+				if (link.ToPort == "pxcx.update_in_trigger") {
+					auto *input = destination(working.Graph, link);
+					if (!input)
+						return Reject(
+							diagnostic,
+							"PXC removed common link has no source Update record",
+							link.ToNode,
+							link.ToPort
+						);
+					input->erase("from_node");
+					input->erase("from_index");
+					input->erase("from_tag");
+					continue;
+				}
 				const auto [target, index] = endpoint(working.Graph, link.ToNode, link.ToPort, false);
 				if (!target) continue;
 				if (!index || *index >= (*target)["inputs"].size())
@@ -4091,6 +4217,59 @@ namespace engine::imagegraphio {
 					working.Graph.Links.end())
 					continue;
 				if (syntheticRoute(desired, link)) continue;
+				if (commonLink(link)) {
+					auto *input = destination(desired, link);
+					if (!input)
+						return Reject(
+							diagnostic,
+							"PXC common link has no inverse destination socket",
+							link.ToNode,
+							link.ToPort
+						);
+					Json *producer = nullptr;
+					std::optional<size_t> output;
+					if (commonPort(link.FromPort))
+						producer = commonOwner(desired, link.FromNode);
+					else
+						std::tie(producer, output) = endpoint(desired, link.FromNode, link.FromPort, true);
+					if (!producer)
+						return Reject(
+							diagnostic,
+							"PXC common link has no inverse source owner",
+							link.FromNode,
+							link.FromPort
+						);
+					(*input)["from_node"] = (*producer)["id"];
+					if (link.FromPort == "pxcx.update_in_trigger" ||
+						link.FromPort == "pxcx.updated_out_trigger") {
+						(*input)["from_tag"] = link.FromPort == "pxcx.update_in_trigger" ? -2 : -3;
+						(*input)["from_index"] = -1;
+					} else if (link.FromPort == "pxcx.metadata.0" || link.FromPort == "pxcx.metadata.1") {
+						(*input)["from_tag"] = -4;
+						(*input)["from_index"] = link.FromPort == "pxcx.metadata.0" ? 0 : 1;
+					} else if (!commonPort(link.FromPort) && output && *output <= UINT32_MAX) {
+						(*input)["from_index"] = *output;
+						input->erase("from_tag");
+					} else
+						return Reject(
+							diagnostic,
+							"PXC common selector has no exact inverse",
+							link.FromNode,
+							link.FromPort
+						);
+					if (commonPort(link.FromPort)) {
+						const auto previousSelector = std::find_if(
+							commonSelectors.begin(), commonSelectors.end(), [&](const auto &record) {
+								return record.FromNode == link.FromNode && record.FromPort == link.FromPort;
+							}
+						);
+						if (previousSelector != commonSelectors.end()) {
+							(*input)["from_index"] = previousSelector->Index;
+							(*input)["from_tag"] = previousSelector->Tag;
+						}
+					}
+					continue;
+				}
 				const auto [target, input] = endpoint(desired, link.ToNode, link.ToPort, false);
 				const auto [producer, output] = endpoint(desired, link.FromNode, link.FromPort, true);
 				if (!target || !producer)
@@ -4284,7 +4463,9 @@ namespace engine::imagegraphio {
 			return Reject(diagnostic, "PXC numeric-pair comparison exceeds transaction work bounds");
 		compactWorkRemaining = pairComparisonWork;
 		if (!ReconstructsSourceAnimators(authored, projected.Graph, diagnostic)) return false;
-		desired.SourceAnimators = {};
+		if (!AdoptNewSourceCommonOwners(desired, projected.Graph, working.Graph, diagnostic, payloadBudget) ||
+			!RebaseSourceCommonComparison(desired, projected.Graph, diagnostic))
+			return false;
 		desired.FormatVersion = projected.Graph.FormatVersion;
 		if (projected.Graph != desired) {
 			std::string field = "document fields";

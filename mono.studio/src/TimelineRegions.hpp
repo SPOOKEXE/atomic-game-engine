@@ -138,7 +138,7 @@ namespace studio {
 			}
 			if (clear) {
 				regions.clear();
-				document.FormatVersion = 9;
+				document.FormatVersion = std::max(document.FormatVersion, 9u);
 				nextSelection.reset();
 				return true;
 			}
@@ -193,7 +193,7 @@ namespace studio {
 				sorted.push_back(std::move(regions[index]));
 			}
 			regions = std::move(sorted);
-			document.FormatVersion = 9;
+			document.FormatVersion = std::max(document.FormatVersion, 9u);
 			if (!ValidProjectAnimationRegions(*document.Project)) return false;
 			nextSelection = next;
 			error = {};

@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -56,12 +57,18 @@ namespace engine::bake {
 	struct PxcxLinkFact {
 		// Source node identifier.
 		std::string FromNode;
-		// Source format's positional output index, not a native port name.
+		// Source positional index. Ignored when SourceTriggerIndexMinusOne is true.
 		uint32_t FromIndex = 0;
 		// Destination node identifier.
 		std::string ToNode;
-		// Index into the destination node's authored inputs array.
+		// Index into inputs[], or inspectInputs[2] when DestinationUpdateTrigger is true.
 		uint32_t ToInputIndex = 0;
+		// Raw foreign selector tag, including whether the field was absent.
+		std::optional<int64_t> FromTag = {};
+		// The source common trigger's -1 index is separate from ordinary uint32 indices.
+		bool SourceTriggerIndexMinusOne = false;
+		// The source common Update input stays distinct from ordinary positional input 2.
+		bool DestinationUpdateTrigger = false;
 		bool operator==(const PxcxLinkFact &) const = default;
 	};
 

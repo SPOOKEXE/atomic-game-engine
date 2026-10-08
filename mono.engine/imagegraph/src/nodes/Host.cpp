@@ -130,6 +130,8 @@ namespace engine::imagegraph::detail {
 					"node needs explicit host capability input or a recorded host result; ambient execution "
 					"is unavailable"
 				);
+			if (!ValidHostSourceFrameObservation(*capture))
+				return context.Fail(Status::InvalidValue, "host source frame observation is invalid");
 			if (capture->CameraPolicy != cameraPolicy || capture->CameraRow != cameraRow)
 				return context.Fail(Status::InvalidValue, "host camera project or link policy is stale");
 			if (capture->Authored != context.Authored)
@@ -269,6 +271,8 @@ namespace engine::imagegraph::detail {
 				return context.Fail(
 					Status::LimitExceeded, "retained live host receipt exceeds the evaluation byte budget"
 				);
+			if (HostObservesSourceUpdateOnFrame(context.Authored.Type))
+				context.SetSourceUpdateOnFrame(capture->SourceUpdateOnFrame);
 			return true;
 		}
 		bool LayerSurface(NodeContext &context) {

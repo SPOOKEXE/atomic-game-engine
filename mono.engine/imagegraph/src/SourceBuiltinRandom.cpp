@@ -96,6 +96,7 @@ namespace engine::imagegraph {
 				  &node.Type,
 				  &node.GroupId,
 				  &node.InstanceBase,
+				  &node.SourceParentInputBase,
 				  &node.SourceDisplayName,
 				  &node.SourceInternalName})
 				if (!textSlack(*text)) return std::nullopt;

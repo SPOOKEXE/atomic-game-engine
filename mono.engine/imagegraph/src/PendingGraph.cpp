@@ -82,13 +82,24 @@ namespace engine::imagegraph::detail {
 		candidate.RemainingConsumers.resize(count, 0);
 		for (size_t index = 0; index < count; ++index)
 			candidate.Upstream.emplace_back(EvaluationAllocator<size_t>(Budget));
+		const auto frozenTunnelGetter = [&](size_t consumer) {
+			if (!frozen[consumer] || document.Nodes[consumer].Type != "pc.tunnel_in") return false;
+			const auto demanded = [&](const auto &routes) {
+				return std::any_of(routes.begin(), routes.end(), [&](const PcxNamedDependency &route) {
+					return route.Producer == consumer && route.Name == "$source.tunnel";
+				});
+			};
+			return demanded(plan.PcxNamedDependencies) || demanded(dynamicRoutes);
+		};
 		const auto policy = [&](size_t consumer) {
-			return reads.empty() ? SourceFrameCacheInputReads::All : reads[consumer];
+			return frozenTunnelGetter(consumer) || reads.empty() ? SourceFrameCacheInputReads::All
+																 : reads[consumer];
 		};
 		const auto append = [&](size_t producer, size_t consumer, bool surface) -> Status {
 			if (!visit()) return Status::LimitExceeded;
 			if (producer >= count || consumer >= count) return Status::UnknownNode;
-			if (cutInputs && (frozen[consumer] || policy(consumer) == SourceFrameCacheInputReads::None ||
+			if (cutInputs && ((frozen[consumer] && !frozenTunnelGetter(consumer)) ||
+							  policy(consumer) == SourceFrameCacheInputReads::None ||
 							  (surface && policy(consumer) == SourceFrameCacheInputReads::ControlsOnly)))
 				return Status::Ok;
 			auto &sources = candidate.Upstream[consumer];
@@ -107,6 +118,7 @@ namespace engine::imagegraph::detail {
 		for (const auto &link : plan.EffectiveLinks) {
 			const auto consumer = indexOf(link.ToNode);
 			if (!ReadsSourceInput(selection, consumer, link.ToPort)) continue;
+			if (cutInputs && frozenTunnelGetter(consumer) && link.ToPort != "value_in") continue;
 			const auto status = append(indexOf(link.FromNode), consumer, link.ToPort == "surface_in");
 			if (status != Status::Ok) return edgeFailure(status);
 		}

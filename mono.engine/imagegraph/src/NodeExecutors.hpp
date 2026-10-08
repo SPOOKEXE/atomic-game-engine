@@ -18,6 +18,7 @@
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/DataReplay.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/GroupRenderSession.hpp>
 #include <engine/imagegraph/GroupReplay.hpp>
 #include <engine/imagegraph/HostCapture.hpp>
 #include <engine/imagegraph/PcxExpression.hpp>
@@ -35,6 +36,15 @@
 #include <vector>
 
 namespace engine::imagegraph::detail {
+	struct SourceTunnelInput {
+		bool Matched = false;
+		bool DataImageArray = false;
+		const Value *Data = nullptr;
+		const Image *Surface = nullptr;
+		const ImageArray *Surfaces = nullptr;
+		std::optional<SourceSocketDomain> Domain;
+	};
+
 	struct SourcePathShiftMemo;
 	struct FontTextBatch;
 	struct HostCaptureReceiptSink;
@@ -75,8 +85,20 @@ namespace engine::imagegraph::detail {
 		const Node &Authored;
 		const CatalogueEntry &Entry;
 		const EvaluationRequest &Request;
+		SourceTunnelInput TunnelInput;
 		bool InputProvenanceResolved = false;
 		bool NoiseFieldRequested = false;
+		// Borrowed transactional process state. The same context survives ordered processor rows.
+		SourceFrameActivity *SourceActivity = nullptr;
+		void SetSourceUpdateOnFrame(std::optional<bool> value) {
+			if (SourceActivity)
+				*SourceActivity =
+					!value ? SourceFrameActivity::Unknown
+						   : (*value ? SourceFrameActivity::FrameDriven : SourceFrameActivity::Static);
+		}
+		void SetSourceUpdateOnFrame(bool value) {
+			SetSourceUpdateOnFrame(std::optional<bool>{value});
+		}
 		// Only the branch selecting a catalogue fallback marks a port. Empty payloads carry no identity.
 		std::vector<std::string_view> CatalogueDefaultInputs;
 		std::vector<std::pair<std::string_view, std::string_view>> InputOwnerIds;

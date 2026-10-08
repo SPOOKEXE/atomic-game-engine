@@ -140,6 +140,10 @@ namespace nodegraph {
 
 		// grug union names registered member types; empty means one concrete type.
 		std::vector<std::string> Members;
+
+		// A bounded wildcard accepts these registered concrete ids at either leaf endpoint.
+		// Explicit unions still require every source member to match without wildcard widening.
+		std::vector<std::string> WildcardMembers;
 	};
 
 	// The wildcard, spelled once.
@@ -248,6 +252,9 @@ namespace nodegraph {
 		std::string Type;
 		// Include this input in automatic node suggestions. Manual connection rules use Type only.
 		bool Suggest = true;
+		// Presentation only. Hidden ports retain their type and can keep saved links
+		// attached.
+		bool Visible = true;
 	};
 
 	// Registration helpers, so a node type reads as a declaration.

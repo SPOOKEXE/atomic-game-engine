@@ -304,7 +304,8 @@ namespace engine::imagegraph {
 					node.Ports.push_back({input.Id, input.Type, PortDirection::Input});
 					if (IsAuthoredValueType(input.Type) ||
 						(heads[index].Type == "pc.group_input" && input.Id == "parent_value") ||
-						(heads[index].Type == "pc.argument" && input.Id == "default_value"))
+						(heads[index].Type == "pc.argument" && input.Id == "default_value") ||
+						(heads[index].Type == "pc.tunnel_in" && input.Id == "value_in"))
 						node.Properties.push_back({input.Id, input.Type});
 				}
 				if (std::any_of(node.Outputs.begin(), node.Outputs.end(), [](const auto &output) {

@@ -156,9 +156,9 @@ namespace engine::imagegraph {
 			return false;
 		}
 		const auto bytes = HostCaptureRetainedPayloadBytes(observed);
-		if (!bytes || *bytes > bounded.MaximumOperationBytes || observed.Authored != expected.Authored ||
-			observed.Inputs != expected.Inputs || observed.CameraPolicy != expected.CameraPolicy ||
-			observed.CameraRow != expected.CameraRow ||
+		if (!ValidHostSourceFrameObservation(observed) || !bytes || *bytes > bounded.MaximumOperationBytes ||
+			observed.Authored != expected.Authored || observed.Inputs != expected.Inputs ||
+			observed.CameraPolicy != expected.CameraPolicy || observed.CameraRow != expected.CameraRow ||
 			!sameImages(observed.InputImages, expected.InputImages) || observed.Tick != request.Tick ||
 			observed.Subframe != request.Subframe || observed.NegativeFrame != request.NegativeFrame) {
 			failure = "Pending host result exceeds budget or differs from its resolved receipt";

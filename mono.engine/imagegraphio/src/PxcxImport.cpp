@@ -6,6 +6,7 @@
 #include "OrdinarySourceGroups.hpp"
 #include "PxcxKeyProvenance.hpp"
 #include "PxcxNativePorts.hpp"
+#include "SourceCommonAdmission.hpp"
 #include "SourceNoiseFieldAnnotation.hpp"
 #include "TileProperties.hpp"
 
@@ -20,6 +21,7 @@
 #include <cmath>
 #include <initializer_list>
 #include <limits>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <set>
 #include <string_view>
@@ -918,12 +920,30 @@ namespace engine::imagegraphio {
 			}
 			return {};
 		}
-		bool LinksRepresentable(const bake::PxcxArchive &archive, const bake::PxcxNodeFact &node) {
+		bool ReservedSourceOutput(const bake::PxcxLinkFact &link) {
+			return link.FromTag == -2 || link.FromTag == -3 || link.FromTag == -4;
+		}
+		bool CommonSourceRoute(const bake::PxcxLinkFact &link) {
+			return ReservedSourceOutput(link) || link.DestinationUpdateTrigger;
+		}
+		std::string ReservedSourceOutputPort(const bake::PxcxLinkFact &link) {
+			if (link.FromTag == -2) return "pxcx.update_in_trigger";
+			if (link.FromTag == -3) return "pxcx.updated_out_trigger";
+			return "pxcx.metadata." + std::to_string(link.FromIndex);
+		}
+		bool LinksRepresentable(
+			const bake::PxcxArchive &archive, const bake::PxcxNodeFact &node, bool admitCommon
+		) {
 			for (const bake::PxcxLinkFact &link : archive.Links) {
-				if (link.FromNode == node.Id &&
+				if (!admitCommon && CommonSourceRoute(link) &&
+					(link.FromNode == node.Id || link.ToNode == node.Id))
+					return false;
+				if (link.FromNode == node.Id && !ReservedSourceOutput(link) &&
 					detail::LegacyNativeOutputPort(node.Type, link.FromIndex).empty())
 					return false;
-				if (link.ToNode == node.Id && NativeInput(node.Type, link.ToInputIndex).empty()) return false;
+				if (link.ToNode == node.Id && !link.DestinationUpdateTrigger &&
+					NativeInput(node.Type, link.ToInputIndex).empty())
+					return false;
 			}
 			return true;
 		}
@@ -938,6 +958,16 @@ namespace engine::imagegraphio {
 				return false;
 			out = static_cast<int64_t>(number);
 			return true;
+		}
+
+		bool OrdinarySourceOutputTag(const Json &record) {
+			const auto tagged = record.find("from_tag");
+			if (tagged == record.end()) return true;
+			if (!tagged->is_number()) return false;
+			const double tag = tagged->get<double>();
+			if (!std::isfinite(tag) || std::trunc(tag) != tag) return false;
+			// Pinned getOutputIndex falls through for every tag except trigger and metadata selectors.
+			return tag != -2 && tag != -3 && tag != -4;
 		}
 
 		bool Numbers(const Json &value, size_t count, std::array<double, 4> &out) {
@@ -1552,13 +1582,15 @@ namespace engine::imagegraphio {
 			static constexpr std::array<std::string_view, 3> SIDES = {"linear", "bezier", "cut"};
 			size_t occurrence = 0;
 			for (const Json &record : records) {
-				if (!record.is_array() || record.size() < 8 || !record[0].is_array() || record[0].size() < 2)
-					return false;
+				if (!record.is_array() || record.size() < 8) return false;
+				const bool scalarTriggerTime =
+					input && input->SourceKind == "Trigger" && record[0].is_number();
+				if (!scalarTriggerTime && (!record[0].is_array() || record[0].size() < 2)) return false;
 				int64_t kind = 0, inType = 0, outType = 0;
 				imagegraph::FrameTime frame;
-				if (!WholeNumber(record[0][0], kind) || (kind != 0 && kind != 1) ||
-					!record[0][1].is_number() ||
-					!imagegraph::SplitFrameTime(record[0][1].get<double>(), frame))
+				const Json &time = scalarTriggerTime ? record[0] : record[0][1];
+				if ((!scalarTriggerTime && (!WholeNumber(record[0][0], kind) || (kind != 0 && kind != 1))) ||
+					!time.is_number() || !imagegraph::SplitFrameTime(time.get<double>(), frame))
 					return false;
 				if (!AdmitNativeText(nodeId, budget) || !AdmitNativeText(port, budget)) return false;
 				imagegraph::Value data;
@@ -2428,6 +2460,8 @@ namespace engine::imagegraphio {
 					   : std::nullopt;
 		}
 
+#include "SourceCommonProjection.inc"
+
 		bool CatalogueNode(
 			const Json &source,
 			const imagegraph::CatalogueEntry &entry,
@@ -2947,11 +2981,10 @@ namespace engine::imagegraphio {
 						!detail::IsOrdinarySourceGroup(producer->at("type").get_ref<const std::string &>()))
 						continue;
 
-					int64_t index = 0, tag = 0;
+					int64_t index = 0;
 					if (!producer ||
 						(record->contains("from_index") && !WholeNumber(record->at("from_index"), index)) ||
-						(record->contains("from_tag") && !WholeNumber(record->at("from_tag"), tag)) ||
-						index < 0 || index > UINT32_MAX || tag != 0 ||
+						!OrdinarySourceOutputTag(*record) || index < 0 || index > UINT32_MAX ||
 						Resolve(*producer, true, static_cast<uint32_t>(index)) != 3)
 						return false;
 				}
@@ -2975,11 +3008,10 @@ namespace engine::imagegraphio {
 						if (value && ((value->is_array() && value->empty()) || (*value == -4))) result = 3;
 						return false;
 					}
-					int64_t indexValue = 0, tag = 0;
+					int64_t indexValue = 0;
 					if ((record->contains("from_index") &&
 						 !WholeNumber(record->at("from_index"), indexValue)) ||
-						(record->contains("from_tag") && !WholeNumber(record->at("from_tag"), tag)) ||
-						indexValue < 0 || indexValue > UINT32_MAX || tag != 0)
+						!OrdinarySourceOutputTag(*record) || indexValue < 0 || indexValue > UINT32_MAX)
 						return false;
 					current = Find(*from);
 					outputIndex = static_cast<uint32_t>(indexValue);
@@ -3114,7 +3146,8 @@ namespace engine::imagegraphio {
 			const GroupSourceSet &canonicalGroups,
 			std::string &failure,
 			uint64_t previousDocumentBytes,
-			detail::ImportBudget &operationBudget
+			detail::ImportBudget &operationBudget,
+			bool admitCommon
 		) {
 			using imagegraph::Group;
 			using imagegraph::Junction;
@@ -3176,10 +3209,6 @@ namespace engine::imagegraphio {
 					const bool builder = source.at("type") == "Node_Pixel_Builder";
 					const auto &sourceType = source.at("type").get_ref<const std::string &>();
 					if (!detail::IsOrdinarySourceGroup(sourceType) && !builder) continue;
-					// grug base Collection has no Group instance post-load callback.
-					if (sourceType == "Node_Collection" && source.contains("instanceBase") &&
-						source.at("instanceBase") != "")
-						return Fail(failure, "base Collection instance callback is not represented");
 					if (builder &&
 						std::none_of(
 							result.Graph.Nodes.begin(), result.Graph.Nodes.end(), [&](const Node &node) {
@@ -3191,14 +3220,16 @@ namespace engine::imagegraphio {
 					if (result.Graph.Groups.size() == imagegraph::Limits::MaximumGroups)
 						return Fail(failure, "source group count exceeds the native limit");
 
-					if (source.contains("render") && source.at("render") != true)
-						return Fail(failure, "source disabled group rendering is not represented");
+					if (source.contains("render") && !source.at("render").is_boolean())
+						return Fail(failure, "source group render flag is not boolean");
 
 					Group group;
 					group.Id = source.at("id").get<std::string>();
+					group.RenderActive = source.value("render", true);
+					if (!group.RenderActive) result.Graph.FormatVersion = 10;
 					if (builder) {
 						group.OwnerNodeId = group.Id;
-						result.Graph.FormatVersion = 9;
+						result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 					}
 					if (!builder && source.contains("instanceBase")) {
 						if (!source.at("instanceBase").is_string() ||
@@ -3218,10 +3249,6 @@ namespace engine::imagegraphio {
 					if (group.Name.size() > imagegraph::Limits::MaximumTextBytes ||
 						!parentOf(source, group.ParentId))
 						return Fail(failure, "source group identity exceeds the native limits");
-					if (sourceType == "Node_Collection" && canonicalGroups.contains(group.ParentId))
-						return Fail(
-							failure, "base Collection inside an instance needs verified shallow callbacks"
-						);
 					const auto attributes = source.find("attri");
 					if (attributes != source.end()) {
 						if (!attributes->is_object())
@@ -3237,7 +3264,6 @@ namespace engine::imagegraphio {
 					}
 					if (attributes != source.end()) {
 						const Json defaults = {
-							{"pure_function", true},
 							{"lock_input", false},
 							{"always_topo", false},
 							{"node_width", 0},
@@ -3250,6 +3276,22 @@ namespace engine::imagegraphio {
 							{"array_process", 0}
 						};
 						for (const auto &[key, stored] : attributes->items()) {
+							if (key == "outp_meta" || key == "show_update_trigger" || key == "update_graph") {
+								if (!stored.is_boolean())
+									return Fail(
+										failure, "source group common attribute " + key + " is not boolean"
+									);
+								// Local lifecycle flags are captured once in the ordered common owner
+								// registry.
+								continue;
+							}
+							if (key == "pure_function") {
+								if (!stored.is_boolean())
+									return Fail(failure, "source group pure_function is not boolean");
+								group.PureFunction = stored.get<bool>();
+								if (!group.PureFunction) result.Graph.FormatVersion = 10;
+								continue;
+							}
 							// grug Collection path belongs to the file host. source retains it; importer
 							// never opens it.
 							if (key == "path") {
@@ -3566,16 +3608,18 @@ namespace engine::imagegraphio {
 					const auto &stored = result.Source.Links[index];
 					auto &link = result.Graph.Links[index];
 					const Json *record = Input(*sources.at(stored.ToNode), stored.ToInputIndex);
-					int64_t tag = 0;
 					const bool boundaryLink =
 						groups.contains(stored.FromNode) || groups.contains(stored.ToNode) ||
 						boundaries.contains(stored.FromNode) || boundaries.contains(stored.ToNode);
-					if (boundaryLink && record && record->contains("from_tag") &&
-						(!WholeNumber(record->at("from_tag"), tag) || tag != 0))
+					if (boundaryLink &&
+						((!admitCommon && CommonSourceRoute(stored)) ||
+						 (!ReservedSourceOutput(stored) && record && !OrdinarySourceOutputTag(*record))))
 						return Fail(failure, "source group boundary tag interpretation is not represented");
-					if (const auto boundary = boundaries.find(stored.FromNode); boundary != boundaries.end())
+					if (const auto boundary = boundaries.find(stored.FromNode);
+						!ReservedSourceOutput(stored) && boundary != boundaries.end())
 						link.FromPort = "value";
-					if (const auto boundary = boundaries.find(stored.ToNode); boundary != boundaries.end()) {
+					if (const auto boundary = boundaries.find(stored.ToNode);
+						!stored.DestinationUpdateTrigger && boundary != boundaries.end()) {
 						const auto *entry = imagegraph::FindCatalogueSource(
 							boundary->second.Direction == PortDirection::Input ? "Node_Group_Input"
 																			   : "Node_Group_Output"
@@ -3588,8 +3632,10 @@ namespace engine::imagegraphio {
 							return Fail(failure, "group control input index has no declared source mapping");
 						link.ToPort = input->Id;
 					}
-					if (!route(link.FromNode, link.FromPort, stored.FromIndex, true) ||
-						!route(link.ToNode, link.ToPort, stored.ToInputIndex, false))
+					if ((!ReservedSourceOutput(stored) &&
+						 !route(link.FromNode, link.FromPort, stored.FromIndex, true)) ||
+						(!stored.DestinationUpdateTrigger &&
+						 !route(link.ToNode, link.ToPort, stored.ToInputIndex, false)))
 						return Fail(failure, "source group socket connection index is not in its saved list");
 				}
 				if (boundaries.size() > (imagegraph::Limits::MaximumLinks - result.Graph.Links.size()) / 1)
@@ -3717,11 +3763,12 @@ namespace engine::imagegraphio {
 				});
 				if (std::any_of(
 						result.Graph.Groups.begin(), result.Graph.Groups.end(), [](const Group &group) {
-							return group.ColorDepth != 1;
+							return group.ColorDepth != 1 || !group.InstanceBase.empty();
 						}
 					))
-					result.Graph.FormatVersion = 9;
-				if (!boundaries.empty()) result.Graph.FormatVersion = 9;
+					result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
+				if (!boundaries.empty())
+					result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 
 				if (!detail::CaptureGroupPrebinding(
 						result.Graph, result.GroupPrebinding, previousDocumentBytes, operationBudget, failure
@@ -3748,7 +3795,8 @@ namespace engine::imagegraphio {
 			const bake::PxcxNodeFact &node,
 			const imagegraph::CatalogueEntry &entry,
 			std::string &reason,
-			const imagegraph::Node *mappedNode
+			const imagegraph::Node *mappedNode,
+			bool admitCommon
 		);
 
 		std::string CatalogueInputPort(const imagegraph::CatalogueEntry &entry, uint32_t index);
@@ -3800,7 +3848,8 @@ namespace engine::imagegraphio {
 			const bake::PxcxNodeFact &node,
 			const imagegraph::CatalogueEntry &entry,
 			std::string &reason,
-			const imagegraph::Node *mappedNode
+			const imagegraph::Node *mappedNode,
+			bool admitCommon
 		) {
 			const auto declared = [&](uint32_t physical) {
 				if (entry.Type != "pc.hlsl" || physical < uint32_t(entry.DynamicFixedLength)) return true;
@@ -3812,18 +3861,26 @@ namespace engine::imagegraphio {
 									 );
 			};
 			for (const bake::PxcxLinkFact &link : archive.Links) {
-				if ((link.FromNode == node.Id && link.FromIndex >= 1000 &&
+				if (!admitCommon && CommonSourceRoute(link) &&
+					(link.FromNode == node.Id || link.ToNode == node.Id)) {
+					reason = "common source socket lifecycle is not represented";
+					return false;
+				}
+				if ((link.FromNode == node.Id && !ReservedSourceOutput(link) && link.FromIndex >= 1000 &&
 					 !declared(link.FromIndex - 1000)) ||
-					(link.ToNode == node.Id && !declared(link.ToInputIndex))) {
+					(link.ToNode == node.Id && !link.DestinationUpdateTrigger &&
+					 !declared(link.ToInputIndex))) {
 					reason = "HLSL link refers to an undeclared dynamic source input";
 					return false;
 				}
-				if (link.FromNode == node.Id && CatalogueOutputPort(entry, link.FromIndex).empty()) {
+				if (link.FromNode == node.Id && !ReservedSourceOutput(link) &&
+					CatalogueOutputPort(entry, link.FromIndex).empty()) {
 					reason =
 						"output index " + std::to_string(link.FromIndex) + " is not in the source catalogue";
 					return false;
 				}
-				if (link.ToNode == node.Id && CatalogueInputPort(entry, link.ToInputIndex).empty()) {
+				if (link.ToNode == node.Id && !link.DestinationUpdateTrigger &&
+					CatalogueInputPort(entry, link.ToInputIndex).empty()) {
 					reason = "linked input index " + std::to_string(link.ToInputIndex) +
 							 " is not in the source catalogue";
 					return false;
@@ -3855,7 +3912,8 @@ namespace engine::imagegraphio {
 			if (attributes->contains("color_depth") && WholeNumber((*attributes)["color_depth"], mode) &&
 				mode >= 0 && mode <= 6)
 				project.ColorDepth = mode;
-			if (project.Shader3D != 0 || project.ColorDepth != 1) result.Graph.FormatVersion = 9;
+			if (project.Shader3D != 0 || project.ColorDepth != 1)
+				result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 			if (attributes->contains("interpolate") && WholeNumber((*attributes)["interpolate"], mode) &&
 				mode >= 0 && mode <= 6)
 				project.Interpolation = mode;
@@ -3916,7 +3974,7 @@ namespace engine::imagegraphio {
 			if (!imagegraph::ValidProjectAnimationRegions(project))
 				return Fail(failure, "source animation regions are invalid");
 			result.Graph.Project = std::move(project);
-			result.Graph.FormatVersion = 9;
+			result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 			return true;
 		}
 
@@ -3958,7 +4016,7 @@ namespace engine::imagegraphio {
 					opaque("previewGrid", imagegraph::Status::InvalidValue, "grid show/snap/size is invalid");
 				else {
 					result.Graph.Project = std::move(project);
-					result.Graph.FormatVersion = 9;
+					result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 				}
 			}
 			if (const auto rulers = root.find("previewRuler"); rulers != root.end()) {
@@ -3996,7 +4054,7 @@ namespace engine::imagegraphio {
 					result.Graph.Project.value_or(imagegraph::ProjectSettings{});
 				project.PreviewRulers = std::move(guides);
 				result.Graph.Project = std::move(project);
-				result.Graph.FormatVersion = 9;
+				result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 			}
 		}
 
@@ -4065,13 +4123,16 @@ namespace engine::imagegraphio {
 		return ImportPxcxImageGraph(archive, out, failure, {});
 	}
 
-	bool ImportPxcxImageGraph(
+	static bool ImportPxcxImageGraphCandidate(
 		const bake::PxcxArchive &archive,
 		PxcxImport &out,
 		std::string &failure,
-		const PxcxImportOptions &options
+		const PxcxImportOptions &options,
+		bool admitCommon,
+		bool &commonAdmissionRejected
 	) try {
 		failure.clear();
+		commonAdmissionRejected = false;
 		if (!options.MaximumOperationBytes ||
 			options.MaximumOperationBytes > imagegraph::Limits::MaximumEvaluationBytes)
 			return Fail(failure, "pxcx import operation byte limit is invalid");
@@ -4133,7 +4194,7 @@ namespace engine::imagegraphio {
 				if (!result.Graph.Project)
 					return Fail(failure, "source project color_depth needs represented project dimensions");
 				result.Graph.Project->ColorDepth = depth;
-				if (depth != 1) result.Graph.FormatVersion = 9;
+				if (depth != 1) result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 			}
 			PreviewSettings(root, result, options);
 			Timeline(root, result);
@@ -4185,7 +4246,7 @@ namespace engine::imagegraphio {
 				if (!AdmitNativeText(name, &operationBudget))
 					return Fail(failure, "source display name exceeds native projection bounds");
 				node.SourceDisplayName = name;
-				if (!name.empty()) result.Graph.FormatVersion = 9;
+				if (!name.empty()) result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 			}
 			const auto internalName = source.find("iname");
 			if (internalName != source.end() && internalName->is_string()) {
@@ -4193,10 +4254,11 @@ namespace engine::imagegraphio {
 				if (!AdmitNativeText(name, &operationBudget))
 					return Fail(failure, "source internal name exceeds native projection bounds");
 				node.SourceInternalName = name;
-				if (!name.empty()) result.Graph.FormatVersion = 9;
+				if (!name.empty()) result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 			}
 			bool mapped = false;
-			if (archive.MetadataNumber == SUPPORTED_VERSION && LinksRepresentable(archive, fact)) {
+			if (archive.MetadataNumber == SUPPORTED_VERSION &&
+				LinksRepresentable(archive, fact, admitCommon)) {
 				if (fact.Type == "Node_Solid")
 					mapped = Solid(root, source, node);
 				else if (fact.Type == "Node_Invert")
@@ -4271,7 +4333,7 @@ namespace engine::imagegraphio {
 			if (entry) {
 				imagegraph::Document animation;
 				if (CatalogueNode(source, *entry, fact.Id, node, animation, reason, &operationBudget) &&
-					CatalogueLinksRepresentable(archive, fact, *entry, reason, &node) &&
+					CatalogueLinksRepresentable(archive, fact, *entry, reason, &node, admitCommon) &&
 					(entry->SourceNode != "Node_Array_Split" ||
 					 std::all_of(archive.Links.begin(), archive.Links.end(), [&](const auto &link) {
 						 return link.FromNode != fact.Id || link.FromIndex <= node.DynamicOutputs.size();
@@ -4283,7 +4345,7 @@ namespace engine::imagegraphio {
 								return !input.SourceLayerName.empty() || !input.SourceInputId.empty();
 							}
 						))
-						result.Graph.FormatVersion = 9;
+						result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 					size_t axisCount = 0;
 					if (node.SourceSeparatedVec2Animators)
 						for (const auto &input : node.SourceSeparatedVec2Animators->Inputs)
@@ -4317,7 +4379,7 @@ namespace engine::imagegraphio {
 					for (imagegraph::Keyframe &keyframe : animation.Keyframes) {
 						if (keyframe.Subframe != 0 || keyframe.NegativeFrame ||
 							keyframe.Kind != imagegraph::KeyframeKind::Normal)
-							result.Graph.FormatVersion = 9;
+							result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 						result.Graph.Keyframes.push_back(std::move(keyframe));
 					}
 					for (imagegraph::AnimationTrack &track : animation.Tracks)
@@ -4362,7 +4424,7 @@ namespace engine::imagegraphio {
 											   : "source instance base is not a bounded durable name"
 					);
 				node.InstanceBase = base.get<std::string>();
-				result.Graph.FormatVersion = 9;
+				result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 			}
 			detail::SourceNoiseFieldAnnotation noiseField;
 			if (!detail::ReadSourceNoiseFieldAnnotation(source, node.Type, noiseField, failure)) return false;
@@ -4372,7 +4434,7 @@ namespace engine::imagegraphio {
 					!AdmitNativeText("output_type", &operationBudget))
 					return Fail(failure, "noise field annotation exceeds native import bounds");
 				node.Values.push_back({"output_type", imagegraph::EnumValue{*noiseField.OutputType}});
-				result.Graph.FormatVersion = 9;
+				result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 			}
 			if (noiseField.OverrideInstance) {
 				if (!AdmitNativeSlots(
@@ -4381,12 +4443,12 @@ namespace engine::imagegraphio {
 					!AdmitNativeText("output_type", &operationBudget))
 					return Fail(failure, "noise field override exceeds native import bounds");
 				node.InstanceOverrides.push_back("output_type");
-				result.Graph.FormatVersion = 9;
+				result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 			}
 			std::optional<std::string_view> cookedSelector;
 			if (!detail::ReadCookedAnnotation(source, node.Type, cookedSelector, failure)) return false;
 			if (node.Type == "pc.hlsl" && source.contains("atomic_game_engine"))
-				result.Graph.FormatVersion = 9;
+				result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 			if (cookedSelector) {
 				if (node.SourceProperties.size() >= imagegraph::Limits::MaximumPropertiesPerNode ||
 					!AdmitNativeSlots(
@@ -4398,7 +4460,7 @@ namespace engine::imagegraphio {
 				node.SourceProperties.push_back(
 					{std::string(detail::CookedSelector), std::string(*cookedSelector)}
 				);
-				result.Graph.FormatVersion = 9;
+				result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 			}
 			indexById.emplace(fact.Id, index);
 			result.Graph.Nodes.push_back(std::move(node));
@@ -4407,11 +4469,13 @@ namespace engine::imagegraphio {
 			const size_t from = indexById.at(link.FromNode);
 			const size_t to = indexById.at(link.ToNode);
 			const std::string fromPort =
-				native[from]
+				ReservedSourceOutput(link) ? ReservedSourceOutputPort(link)
+				: native[from]
 					? std::string(detail::LegacyNativeOutputPort(archive.Nodes[from].Type, link.FromIndex))
 				: catalogued[from] ? CatalogueOutputPort(*catalogued[from], link.FromIndex)
 								   : OutputPort(link.FromIndex);
-			std::string toPort = native[to]
+			std::string toPort = link.DestinationUpdateTrigger ? "pxcx.update_in_trigger"
+								 : native[to]
 									 ? std::string(NativeInput(archive.Nodes[to].Type, link.ToInputIndex))
 								 : catalogued[to] ? CatalogueInputPort(*catalogued[to], link.ToInputIndex)
 												  : std::string{};
@@ -4428,7 +4492,8 @@ namespace engine::imagegraphio {
 				result.Graph.Outputs.push_back(
 					{node.Id,
 					 link.FromNode,
-					 native[from]
+					 ReservedSourceOutput(link) ? ReservedSourceOutputPort(link)
+					 : native[from]
 						 ? std::string(
 							   detail::LegacyNativeOutputPort(archive.Nodes[from].Type, link.FromIndex)
 						   )
@@ -4439,7 +4504,10 @@ namespace engine::imagegraphio {
 					{imagegraph::Status::InvalidOutput,
 					 node.Id,
 					 {},
-					 "PXCX output is projected; animation and export settings remain in the source archive"}
+					 ReservedSourceOutput(link)
+						 ? "PXCX output uses a common source socket whose lifecycle is not represented"
+						 : "PXCX output is projected; animation and export settings remain in the source "
+						   "archive"}
 				);
 				break;
 			}
@@ -4472,7 +4540,7 @@ namespace engine::imagegraphio {
 					auto &modes = animated ? node.SourceAnimatedInputs : node.SourceStaticInputs;
 					modes.reserve(1);
 					modes.emplace_back(port);
-					result.Graph.FormatVersion = 9;
+					result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 					continue;
 				}
 				const auto eachSource = [&](const auto &visit) {
@@ -4516,7 +4584,7 @@ namespace engine::imagegraphio {
 						if (!operationBudget.Hold(std::max(port.size(), std::string{}.capacity()) + 1))
 							return Fail(failure, "source input animator modes exceed operation bounds");
 						(animated ? node.SourceAnimatedInputs : node.SourceStaticInputs).emplace_back(port);
-						result.Graph.FormatVersion = 9;
+						result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 						return true;
 					}))
 					return false;
@@ -4527,7 +4595,7 @@ namespace engine::imagegraphio {
 			return false;
 		if (archive.MetadataNumber == SUPPORTED_VERSION &&
 			!ProjectOrdinaryGroups(
-				root, result, canonicalGroups, failure, *previousDocumentBytes, operationBudget
+				root, result, canonicalGroups, failure, *previousDocumentBytes, operationBudget, admitCommon
 			))
 			return false;
 		if (archive.MetadataNumber == SUPPORTED_VERSION) {
@@ -4536,6 +4604,39 @@ namespace engine::imagegraphio {
 				!detail::ProjectInlineCollections(root, *result.GroupPrebinding, operationBudget, failure))
 				return false;
 		}
+		if (archive.MetadataNumber == SUPPORTED_VERSION &&
+			!ProjectSourceCommonOwners(root, result.Graph, operationBudget, failure))
+			return false;
+
+		if (archive.MetadataNumber == SUPPORTED_VERSION && result.GroupPrebinding &&
+			!ProjectSourceCommonOwners(root, *result.GroupPrebinding, operationBudget, failure))
+			return false;
+		if (admitCommon && std::any_of(archive.Links.begin(), archive.Links.end(), CommonSourceRoute)) {
+			for (const auto &link : result.Graph.Links) {
+				const bool sourceCommon = link.FromPort == "pxcx.update_in_trigger" ||
+										  link.FromPort == "pxcx.updated_out_trigger" ||
+										  link.FromPort.starts_with("pxcx.metadata.");
+				if ((sourceCommon && !detail::SourceCommonNativeAvailable(result.Graph, link.FromNode)) ||
+					(link.ToPort == "pxcx.update_in_trigger" &&
+					 !detail::SourceCommonNativeAvailable(result.Graph, link.ToNode))) {
+					commonAdmissionRejected = true;
+					return false;
+				}
+			}
+			imagegraph::Plan commonPlan;
+			imagegraph::Diagnostic commonDiagnostic;
+			const auto available = operationBudget.Available();
+			if (!available) return Fail(failure, "common route admission exceeds import operation bounds");
+			const auto status =
+				imagegraph::CompileSourceCommonRuntime(result.Graph, commonPlan, commonDiagnostic, available);
+			if (status != imagegraph::Status::Ok) {
+				if (status != imagegraph::Status::UnsupportedExecution)
+					return Fail(failure, commonDiagnostic.Message);
+				commonAdmissionRejected = true;
+				return false;
+			}
+		}
+
 		const auto &bootstrapGraph = result.GroupPrebinding ? *result.GroupPrebinding : result.Graph;
 		const size_t bootstrapCount =
 			std::count_if(bootstrapGraph.Nodes.begin(), bootstrapGraph.Nodes.end(), [](const Node &node) {
@@ -4599,6 +4700,15 @@ namespace engine::imagegraphio {
 					   ? imagegraph::GroupSubtypeAnimator::Animated
 					   : imagegraph::GroupSubtypeAnimator::Static;
 		};
+		const auto parentInputOwner = [&](const Node &node) -> const Node * {
+			const Node *owner = &node;
+			for (size_t hop = 0; owner && !owner->SourceParentInputBase.empty(); ++hop) {
+				if (hop >= result.Graph.Nodes.size()) return nullptr;
+				owner = nodeById(owner->SourceParentInputBase);
+				if (owner && owner->Type != "pc.group_input") return nullptr;
+			}
+			return owner;
+		};
 		size_t bindingCount = 0;
 		uint64_t bindingBytes = 0;
 		for (const auto &node : result.Graph.Nodes) {
@@ -4619,6 +4729,24 @@ namespace engine::imagegraphio {
 					return true;
 				}))
 				return Fail(failure, "source animator binding bytes overflow");
+		}
+		for (const auto &node : result.Graph.Nodes) {
+			if (node.SourceParentInputBase.empty()) continue;
+			const Node *owner = parentInputOwner(node);
+			if (node.Type != "pc.group_input" || !owner)
+				return Fail(failure, "source Collection parent input owner chain is invalid");
+			uint64_t bytes = sizeof(imagegraph::GroupSubtypeBinding);
+			for (const auto name :
+				 {std::string_view(node.Id), std::string_view(owner->Id), std::string_view("parent_value")}) {
+				const auto text = std::max(name.size(), std::string{}.capacity()) + 1;
+				if (text > UINT64_MAX - bytes)
+					return Fail(failure, "source Collection parent binding bytes overflow");
+				bytes += text;
+			}
+			if (bytes > UINT64_MAX - bindingBytes)
+				return Fail(failure, "source Collection parent binding bytes overflow");
+			bindingBytes += bytes;
+			++bindingCount;
 		}
 		if (!operationBudget.Hold(bindingBytes))
 			return Fail(failure, "source animator bindings exceed import operation bounds");
@@ -4649,11 +4777,19 @@ namespace engine::imagegraphio {
 				}))
 				return Fail(failure, "source animator getter provenance is absent");
 		}
+		for (const auto &node : result.Graph.Nodes) {
+			if (node.SourceParentInputBase.empty()) continue;
+			const Node *owner = parentInputOwner(node);
+			if (!owner) return Fail(failure, "source Collection parent input owner chain is invalid");
+			const auto mode = animatedMode(*owner, "parent_value");
+			result.GroupBindings.push_back({node.Id, owner->Id, mode, mode, "parent_value"});
+			result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 10u);
+		}
 
 		if (std::any_of(result.Graph.Keyframes.begin(), result.Graph.Keyframes.end(), [](const auto &key) {
 				return !key.SourceKeyId.empty();
 			}))
-			result.Graph.FormatVersion = 9;
+			result.Graph.FormatVersion = std::max(result.Graph.FormatVersion, 9u);
 		size_t finalKeys = result.Graph.Keyframes.size();
 		for (const auto &node : result.Graph.Nodes)
 			if (node.SourceSeparatedVec2Animators)
@@ -4671,6 +4807,19 @@ namespace engine::imagegraphio {
 		return true;
 	} catch (const std::bad_alloc &) {
 		return Fail(failure, "pxcx import allocation failed before installation");
+	}
+
+	bool ImportPxcxImageGraph(
+		const bake::PxcxArchive &archive,
+		PxcxImport &out,
+		std::string &failure,
+		const PxcxImportOptions &options
+	) {
+		bool rejected = false;
+		if (ImportPxcxImageGraphCandidate(archive, out, failure, options, true, rejected)) return true;
+		if (!rejected) return false;
+		// Unsupported source lifecycle stays opaque after the provisional candidate has been destroyed.
+		return ImportPxcxImageGraphCandidate(archive, out, failure, options, false, rejected);
 	}
 
 	PxcxSubgraph ExtractPxcxNativeSubgraph(const PxcxImport &imported, std::string_view nodeId) {

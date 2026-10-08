@@ -402,10 +402,9 @@ namespace engine::imagegraph::detail {
 			ArithmeticBudget budget;
 			ArithmeticShape shape;
 			if (!ArithmeticPreflight(context, operation, a, b, c, budget, shape)) return false;
-			const uint64_t payloadBytes =
-				shape.Depth ? budget.Leaves * sizeof(ElementValue) +
-							  budget.Rows * sizeof(std::vector<ElementValue>)
-							: 0;
+			const uint64_t payloadBytes = shape.Depth ? budget.Leaves * sizeof(ElementValue) +
+															budget.Rows * sizeof(std::vector<ElementValue>)
+													  : 0;
 			if (!ReserveValueOutput(context, payloadBytes, "result")) return false;
 			// To Integer changes only the source junction declaration, and Output Vector only its display.
 			Value result = ArithmeticBuild(operation, a, b, c);

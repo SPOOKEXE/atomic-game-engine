@@ -407,3 +407,119 @@ TEST_CASE("PXCX reader refuses malformed JSON and unvalidated topology", "[bake]
 	std::vector<uint8_t> oversizedThumbnail(PxcxLimits::ThumbnailRgbaBytes + 1, 23);
 	CHECK(Refuses(BuildFixture(GRAPH, true, std::move(oversizedThumbnail)).Bytes));
 }
+
+TEST_CASE("PXCX common source selectors retain exact tags and trigger sentinel", "[bake][pxcx]") {
+	const std::string graph =
+		R"JSON({"nodes":[{"id":"source","type":"vendor.unknown","x":0,"y":0,"inputs":[]},{"id":"sink","type":"vendor.unknown","x":1,"y":2,"inputs":[{"from_node":"source","from_index":-1,"from_tag":-2},{"from_node":"source","from_index":-1,"from_tag":-3},{"from_node":"source","from_index":1,"from_tag":-4},{"from_node":"source","from_index":4294967295},{"from_node":"source","from_index":0,"from_tag":0},{"from_node":"source","from_index":7,"from_tag":9223372036854775807},{"from_node":"source","from_index":5,"from_tag":-3},{"from_node":"source","from_index":-1,"from_tag":-3.0},{"from_node":"source","from_index":0,"from_tag":0.0},{"from_node":"source","from_index":2,"from_tag":9000000000000000.0},{"from_node":"source","from_index":0,"from_tag":9007199254740992.0},{"from_node":"source","from_index":0,"from_tag":9000000000000001.0},{"from_node":"source","from_index":0,"from_tag":-9223372036854775808.0}]}]})JSON";
+	const PxcxFixture fixture = BuildFixture(graph);
+	PxcxArchive archive;
+	std::string failure;
+	REQUIRE(ReadPxcx(fixture.Bytes, archive, failure));
+	REQUIRE(archive.Links.size() == 13);
+	CHECK((archive.Links[0] == PxcxLinkFact{"source", 0, "sink", 0, -2, true}));
+	CHECK((archive.Links[1] == PxcxLinkFact{"source", 0, "sink", 1, -3, true}));
+	CHECK((archive.Links[2] == PxcxLinkFact{"source", 1, "sink", 2, -4, false}));
+	CHECK((archive.Links[3] == PxcxLinkFact{"source", UINT32_MAX, "sink", 3}));
+	CHECK((archive.Links[4] == PxcxLinkFact{"source", 0, "sink", 4, 0, false}));
+	CHECK((archive.Links[5] == PxcxLinkFact{"source", 7, "sink", 5, INT64_MAX, false}));
+	CHECK((archive.Links[6] == PxcxLinkFact{"source", 5, "sink", 6, -3, false}));
+	CHECK((archive.Links[7] == PxcxLinkFact{"source", 0, "sink", 7, -3, true}));
+	CHECK((archive.Links[8] == PxcxLinkFact{"source", 0, "sink", 8, 0, false}));
+	CHECK((archive.Links[9] == PxcxLinkFact{"source", 2, "sink", 9, 9000000000000000ll, false}));
+	CHECK((archive.Links[10] == PxcxLinkFact{"source", 0, "sink", 10, 9007199254740992ll, false}));
+	CHECK((archive.Links[11] == PxcxLinkFact{"source", 0, "sink", 11, 9000000000000001ll, false}));
+	CHECK((archive.Links[12] == PxcxLinkFact{"source", 0, "sink", 12, INT64_MIN, false}));
+	std::vector<std::byte> written;
+	REQUIRE(WritePxcx(archive, written, failure));
+	CHECK(written == fixture.Bytes);
+	archive.MetadataNumber++;
+	REQUIRE(WritePxcx(archive, written, failure));
+	PxcxArchive reread;
+	REQUIRE(ReadPxcx(written, reread, failure));
+	CHECK(reread.Links == archive.Links);
+	CHECK(reread.GraphJson == archive.GraphJson);
+	const auto before = written;
+	archive.Links[0].SourceTriggerIndexMinusOne = false;
+	CHECK_FALSE(WritePxcx(archive, written, failure));
+	CHECK(written == before);
+}
+
+TEST_CASE("PXCX source selector rejects malformed tags and invalid negative indices", "[bake][pxcx]") {
+	for (const std::string_view fields :
+		 {"\"from_index\":-1",
+		  "\"from_index\":-1,\"from_tag\":0",
+		  "\"from_index\":-1,\"from_tag\":-4",
+		  "\"from_index\":-2,\"from_tag\":-3",
+		  "\"from_index\":4294967296,\"from_tag\":-3",
+		  "\"from_index\":-1.0,\"from_tag\":-3",
+		  "\"from_index\":0,\"from_tag\":null",
+		  "\"from_index\":0,\"from_tag\":true",
+		  "\"from_index\":0,\"from_tag\":\"-3\"",
+		  "\"from_index\":0,\"from_tag\":-3.5",
+		  "\"from_index\":0,\"from_tag\":9223372036854775808",
+		  "\"from_index\":0,\"from_tag\":9223372036854775808.0",
+		  "\"from_index\":0,\"from_tag\":-9223372036854777856.0"}) {
+		INFO(fields);
+		std::string graph =
+			R"JSON({"nodes":[{"id":"source","type":"vendor.unknown","x":0,"y":0,"inputs":[]},{"id":"sink","type":"vendor.unknown","x":0,"y":0,"inputs":[{"from_node":"source",)JSON";
+		graph += fields;
+		graph += "}]}]}";
+		CHECK(Refuses(BuildFixture(graph).Bytes));
+	}
+}
+
+TEST_CASE("PXCX common Update destination stays distinct from positional input two", "[bake][pxcx]") {
+	const auto fixture = BuildFixture(
+		R"JSON({"nodes":[{"id":"source","type":"vendor.unknown","x":0,"y":0,"inputs":[]},{"id":"sink","type":"vendor.unknown","x":0,"y":0,"inputs":[{},{},{"from_node":"source","from_index":0}],"inspectInputs":[{},{},{"from_node":"source","from_index":-1,"from_tag":-3},{},{}]}]})JSON"
+	);
+	PxcxArchive archive;
+	std::string failure;
+	REQUIRE(ReadPxcx(fixture.Bytes, archive, failure));
+	REQUIRE(archive.Links.size() == 2);
+	CHECK((archive.Links[0] == PxcxLinkFact{"source", 0, "sink", 2}));
+	CHECK((archive.Links[1] == PxcxLinkFact{"source", 0, "sink", 2, -3, true, true}));
+	std::vector<std::byte> written;
+	REQUIRE(WritePxcx(archive, written, failure));
+	CHECK(written == fixture.Bytes);
+	archive.MetadataNumber++;
+	REQUIRE(WritePxcx(archive, written, failure));
+	PxcxArchive reopened;
+	REQUIRE(ReadPxcx(written, reopened, failure));
+	CHECK(reopened.Links == archive.Links);
+	const auto before = written;
+	archive.Links[1].DestinationUpdateTrigger = false;
+	CHECK_FALSE(WritePxcx(archive, written, failure));
+	CHECK(written == before);
+}
+
+TEST_CASE(
+	"PXCX common Update records validate linked endpoints without reading other inspector sockets",
+	"[bake][pxcx]"
+) {
+	for (const std::string_view inspector : {"[]", "[{},{}]", "[{},{},{}]", "[{},{},{},null]"}) {
+		INFO(inspector);
+		std::string graph =
+			R"JSON({"nodes":[{"id":"sink","type":"vendor.unknown","x":0,"y":0,"inputs":[],"inspectInputs":)JSON";
+		graph += inspector;
+		graph += "}]}";
+		PxcxArchive archive;
+		std::string failure;
+		REQUIRE(ReadPxcx(BuildFixture(graph).Bytes, archive, failure));
+		CHECK(archive.Links.empty());
+	}
+	for (const std::string_view inspector :
+		 {"null",
+		  "{}",
+		  "[{},{},null]",
+		  "[{},{},{\"from_node\":\"source\"}]",
+		  "[{},{},{\"from_index\":0}]",
+		  "[{},{},{\"from_node\":\"missing\",\"from_index\":0}]",
+		  "[{},{},{\"from_node\":\"source\",\"from_index\":-1}]"}) {
+		INFO(inspector);
+		std::string graph =
+			R"JSON({"nodes":[{"id":"source","type":"vendor.unknown","x":0,"y":0,"inputs":[]},{"id":"sink","type":"vendor.unknown","x":0,"y":0,"inputs":[],"inspectInputs":)JSON";
+		graph += inspector;
+		graph += "}]}";
+		CHECK(Refuses(BuildFixture(graph).Bytes));
+	}
+}

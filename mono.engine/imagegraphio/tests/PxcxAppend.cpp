@@ -414,6 +414,35 @@ TEST_CASE(
 				   return node.Id == link.ToNode;
 			   });
 	});
+	std::vector<std::pair<std::string, std::string>> retiredCommonWriters;
+	for (const auto &owner : evaluated.SourceCommonOwners)
+		if (owner.NativeOwnerKind == engine::imagegraph::SourceCommonNativeOwnerKind::Node &&
+			std::none_of(evaluated.Nodes.begin(), evaluated.Nodes.end(), [&](const auto &node) {
+				return node.Id == owner.NativeOwnerId;
+			}))
+			retiredCommonWriters.emplace_back(owner.UpdateAnimatorOwnerId, owner.UpdateAnimatorPort);
+	if (!retiredCommonWriters.empty()) {
+		REQUIRE(evaluated.SourceAnimators);
+		const auto retiredCommonWriter = [&](std::string_view ownerId, std::string_view port) {
+			return std::any_of(
+				retiredCommonWriters.begin(), retiredCommonWriters.end(), [&](const auto &writer) {
+					return writer.first == ownerId && writer.second == port;
+				}
+			);
+		};
+		std::erase_if(evaluated.SourceAnimators->Detached, [&](const auto &row) {
+			return retiredCommonWriter(row.OwnerId, row.Id);
+		});
+		std::erase_if(evaluated.SourceAnimators->DetachedValues, [&](const auto &row) {
+			return retiredCommonWriter(row.NodeId, row.Port);
+		});
+	}
+	std::erase_if(evaluated.SourceCommonOwners, [&](const auto &owner) {
+		return owner.NativeOwnerKind == engine::imagegraph::SourceCommonNativeOwnerKind::Node &&
+			   std::none_of(evaluated.Nodes.begin(), evaluated.Nodes.end(), [&](const auto &node) {
+				   return node.Id == owner.NativeOwnerId;
+			   });
+	});
 	evaluated.Outputs = {{"selected", "placed/number", "number"}};
 	engine::imagegraph::Plan plan;
 	engine::imagegraph::Diagnostic evaluationDiagnostic;

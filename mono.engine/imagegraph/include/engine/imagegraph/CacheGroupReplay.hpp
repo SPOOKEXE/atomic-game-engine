@@ -20,6 +20,8 @@ namespace engine::imagegraph {
 		std::optional<Value> Data;
 		std::optional<SourceSocketDomain> Domain;
 		std::optional<Diagnostic> Refusal;
+		// grug keeps typed image-array provenance. Ordinary surface-valued arrays remain raw values.
+		bool ImageArrayPayload = false;
 		bool operator==(const CacheGroupReplayOutput &) const = default;
 	};
 	// Outputs start with the node's actual constructor values, then retain its latest published values.

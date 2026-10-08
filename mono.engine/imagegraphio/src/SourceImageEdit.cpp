@@ -212,7 +212,7 @@ namespace engine::imagegraphio {
 			set(detail::ImageCacheData, *prepared.EncodedCache);
 			set(detail::ImageCacheLayout, std::string(layout));
 			set(detail::ImageCacheHash, std::string(hash->data(), hash->size()));
-			candidate.FormatVersion = 9;
+			candidate.FormatVersion = std::max(candidate.FormatVersion, 9u);
 		}
 		const auto candidateBytes = DocumentRetainedPayloadBytes(candidate);
 		if (!candidateBytes || *candidateBytes > candidateAllowance)

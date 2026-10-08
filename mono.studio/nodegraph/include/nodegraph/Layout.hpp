@@ -62,6 +62,9 @@ namespace nodegraph {
 		float X = 0.0f;
 		float Y = 0.0f;
 		//@}
+
+		// Presentation-only visibility; a hidden port keeps its graph identity.
+		bool Visible = true;
 	};
 
 	// A widget, placed. The rectangle is the row it may be dragged in.

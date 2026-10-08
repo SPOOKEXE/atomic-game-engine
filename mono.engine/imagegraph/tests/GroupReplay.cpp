@@ -2388,3 +2388,114 @@ TEST_CASE(
 	CHECK(rebound.AuthoringRevision() == 2);
 	CHECK(rebound.RetainedBytes() == priorBytes);
 }
+
+TEST_CASE(
+	"Group projection preserves registered common local writers beside ordinary replay aliases",
+	"[imagegraph][groups][group_replay]"
+) {
+	for (const bool ordinary : {false, true}) {
+		INFO(ordinary);
+		Document authored = ordinary ? Boundary() : Document{};
+		authored.FormatVersion = 11;
+		for (size_t index = 0; index != 2; ++index) {
+			const std::string id = index ? "legacy-common" : "common";
+			const std::string port = "native:animator:" + std::to_string(900 + index);
+			authored.Nodes.push_back({id, "pc.boolean", {}, {}, {{"value", true}}});
+			authored.Outputs.push_back({id + "-value", id, "boolean"});
+			SourceCommonOwnerRecord owner;
+			owner.SourceOwnerId = id;
+			owner.NativeOwnerId = id;
+			owner.SourceType = index ? "Node_Unknown_Legacy" : "Node_Boolean";
+			owner.UpdateAnimatorOwnerId = id;
+			owner.UpdateAnimatorPort = port;
+			authored.SourceCommonOwners.push_back(owner);
+			if (!authored.SourceAnimators) authored.SourceAnimators.emplace();
+			DetachedSourceAnimator metadata;
+			metadata.OwnerId = id;
+			metadata.Id = port;
+			metadata.OriginalPort = "pxcx.update_in_trigger";
+			metadata.Type = ValueType::Boolean;
+			metadata.Writer = index ? GroupSubtypeAnimator::Static : GroupSubtypeAnimator::Animated;
+			if (!index) metadata.Track = AnimationTrack{id, port, "hold", -1};
+			authored.SourceAnimators->Detached.push_back(metadata);
+			GroupSubtypeOverlay payload;
+			payload.NodeId = id;
+			payload.Port = port;
+			if (index)
+				payload.Fixed = false;
+			else {
+				Keyframe key;
+				key.NodeId = id;
+				key.Port = port;
+				key.Tick = 7;
+				key.Data = false;
+				key.SourceKeyId = "original-false-trigger";
+				payload.Keys.push_back(key);
+			}
+			authored.SourceAnimators->DetachedValues.push_back(payload);
+		}
+		if (ordinary) {
+			authored.Nodes.push_back({"ordinary-owner", "pc.invert", {}, {}, {{"mix", .5}}});
+			authored.Nodes.back().SourceStaticInputs = {"mix"};
+			authored.Nodes.push_back({"ordinary-copy", "pc.invert", {}, {}, {{"mix", .25}}});
+			authored.Nodes.back().InstanceBase = "ordinary-owner";
+			authored.Nodes.back().SourceStaticInputs = {"mix"};
+		}
+
+		const auto unchanged = authored;
+		const auto originals = *authored.SourceAnimators;
+		Checked(authored);
+		GroupReplayState empty, local, replay;
+		Diagnostic diagnostic;
+		REQUIRE(RebindGroupReplay(authored, empty, 1, local, diagnostic) == Status::Ok);
+		if (ordinary) {
+			const GroupSubtypeBinding bindings[] = {
+				{"ordinary-copy",
+				 "ordinary-owner",
+				 GroupSubtypeAnimator::Static,
+				 GroupSubtypeAnimator::Static,
+				 "mix"}
+			};
+			REQUIRE(BindGroupReplay(authored, bindings, local, 1, replay, diagnostic) == Status::Ok);
+			REQUIRE_FALSE(replay.Bindings().empty());
+		} else
+			replay = std::move(local);
+		Document projected;
+		REQUIRE(ProjectGroupReplay(authored, replay, 1, projected, diagnostic) == Status::Ok);
+		REQUIRE(projected.SourceAnimators);
+		CHECK(projected.SourceCommonOwners == authored.SourceCommonOwners);
+		for (size_t index = 0; index != originals.Detached.size(); ++index) {
+			const auto &metadata = originals.Detached[index];
+			const auto found = std::find(
+				projected.SourceAnimators->Detached.begin(),
+				projected.SourceAnimators->Detached.end(),
+				metadata
+			);
+			REQUIRE(found != projected.SourceAnimators->Detached.end());
+			CHECK(
+				std::count(
+					projected.SourceAnimators->Detached.begin(),
+					projected.SourceAnimators->Detached.end(),
+					metadata
+				) == 1
+			);
+			CHECK(projected.SourceAnimators->DetachedValues[index] == originals.DetachedValues[index]);
+		}
+		if (ordinary) {
+			REQUIRE(replay.Binding("ordinary-copy", "mix"));
+			const std::vector<GroupSubtypeBinding> bindings(
+				replay.Bindings().begin(), replay.Bindings().end()
+			);
+			CHECK(projected.SourceAnimators->Bindings == bindings);
+		} else
+			CHECK(*projected.SourceAnimators == originals);
+		Checked(projected);
+		Document reopened;
+		REQUIRE(Read(Write(projected), reopened, diagnostic) == Status::Ok);
+		CHECK(reopened == projected);
+		const auto before = projected;
+		CHECK(ProjectGroupReplay(authored, replay, 1, projected, diagnostic, 1) == Status::LimitExceeded);
+		CHECK(projected == before);
+		CHECK(authored == unchanged);
+	}
+}

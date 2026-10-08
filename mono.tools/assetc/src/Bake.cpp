@@ -8,6 +8,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/SourceArgumentHost.hpp>
 
 #include <algorithm>
@@ -21,6 +22,7 @@
 #include <sstream>
 #include <string_view>
 #include <unordered_map>
+#include <variant>
 
 namespace assetc {
 
@@ -661,32 +663,75 @@ namespace assetc {
 								}
 							);
 						}
-						const engine::imagegraph::EvaluationRequest request{
+						engine::imagegraph::EvaluationRequest request{
 							.Tick = settings.GraphTick,
 							.Seed = settings.GraphSeed,
 							.HostProvider = arguments ? arguments : &emptyArguments
 						};
+						// grug borrows the published group socket so baking cannot schedule disabled children
+						// again.
+						engine::imagegraph::CapturedFeedbackHost groupHost;
+						const bool groupedProcessing =
+							document.FormatVersion >= 10 && !document.Groups.empty();
+						const engine::imagegraph::StatefulNamedOutput *preparedOutput = nullptr;
+						if (groupedProcessing) {
+							if (!groupHost.Prepare(
+									document,
+									plan,
+									1,
+									0,
+									request,
+									diagnostic,
+									engine::imagegraph::Limits::MaximumEvaluationBytes,
+									selected
+								))
+								baked.Failure = "image graph: " + diagnostic.Message;
+							else if (!groupHost.Active() || !(preparedOutput = groupHost.Value(selected)))
+								baked.Failure = "image graph: grouped output is unavailable";
+							else {
+								arrayOutput = std::holds_alternative<engine::imagegraph::ImageArray>(
+									preparedOutput->Output
+								);
+								if (!arrayOutput && !std::holds_alternative<engine::imagegraph::Image>(
+														preparedOutput->Output
+													))
+									baked.Failure =
+										"image graph: selected grouped output is not an image or image array";
+							}
+						}
 						engine::assets::TextureData texture;
 						engine::assets::TextureSequenceData sequence;
 						bool sequenceOutput = false;
-						if (arrayOutput) {
+						if (baked.Failure.empty() && arrayOutput) {
 							engine::imagegraph::ImageArray frames;
-							if (engine::imagegraph::EvaluateArray(
-									document, plan, selected, request, frames, diagnostic
-								) != engine::imagegraph::Status::Ok)
+							const auto *prepared =
+								preparedOutput
+									? std::get_if<engine::imagegraph::ImageArray>(&preparedOutput->Output)
+									: nullptr;
+							if (!prepared && engine::imagegraph::EvaluateArray(
+												 document, plan, selected, request, frames, diagnostic
+											 ) != engine::imagegraph::Status::Ok)
 								baked.Failure = "image graph: " + diagnostic.Message;
-							else if (frames.Items.size() > 256) {
-								sequenceOutput = true;
-								PackGraphSequence(frames, settings, sequence, baked.Failure);
-							} else
-								PackGraphFlipbook(frames, settings, texture, baked.Failure);
-						} else {
-							engine::imagegraph::Image evaluated;
-							if (engine::imagegraph::Evaluate(
-									document, plan, selected, request, evaluated, diagnostic
-								) != engine::imagegraph::Status::Ok) {
+							else {
+								const auto &evaluated = prepared ? *prepared : frames;
+								if (evaluated.Items.size() > 256) {
+									sequenceOutput = true;
+									PackGraphSequence(evaluated, settings, sequence, baked.Failure);
+								} else
+									PackGraphFlipbook(evaluated, settings, texture, baked.Failure);
+							}
+						} else if (baked.Failure.empty()) {
+							engine::imagegraph::Image image;
+							const auto *prepared =
+								preparedOutput
+									? std::get_if<engine::imagegraph::Image>(&preparedOutput->Output)
+									: nullptr;
+							if (!prepared && engine::imagegraph::Evaluate(
+												 document, plan, selected, request, image, diagnostic
+											 ) != engine::imagegraph::Status::Ok) {
 								baked.Failure = "image graph: " + diagnostic.Message;
 							} else {
+								const auto &evaluated = prepared ? *prepared : image;
 								texture.Width = evaluated.Width;
 								texture.Height = evaluated.Height;
 								texture.Pixels.assign(

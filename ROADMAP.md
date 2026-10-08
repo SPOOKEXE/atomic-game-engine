@@ -83,6 +83,14 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Integrate path extension, flattening and smoothing.
 - [x] Add bounded Path Bake with native save/reopen and downstream sampling; validate all 21 CPU workload profiles.
 - [x] Add bounded Mirror Polar CleanEdge sampling with source-derived pixel fixtures; validate all 22 CPU workload profiles.
+- [x] Add bounded source Spiral Path sampling with owned state and PXC edit, group and save/reopen checks.
+- [x] Preserve typed Any group ports and dynamic sockets; retain defaults, fanout, nesting and image pixels after ungroup and save/reopen.
+- [x] Verify grouped Cache Clear through the real Studio host across all eight source gates.
+- [x] Preserve native Collection instances, disabled-group lifecycle and ordinary tagged boundary routes.
+- [x] Preserve reserved source selectors, common Update destinations and opaque routes through PXC save/reopen; validate captured common-socket lifecycle.
+- [_] Execute all reserved source trigger and metadata routes with ordered native project-step state, including unsupported callbacks, wrapper profiles and required host observations.
+- [x] Verify audited native common lifecycle and PXC owner save/reopen with bounded work and atomic refusal.
+- [x] Expose authored group boundary sockets for canvas connections; preserve routes through save and reopen.
 - [x] Preserve canonical cold Nine Slice state through frozen groups, native saves and logical drawing.
 - [x] Preserve expression-backed Combine keys through PXC save/reopen and re-separation for supported vector ports.
 - [_] Finish Draw Line 2 Points with captured shared shader state and matched primitive coverage; see the [source-state audit](mono.engine/imagegraph/docs/source-line2points-state.md).
@@ -131,7 +139,7 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Load saved frame caches.
 - [_] Preserve X/Y animation through groups and PXC edits.
 - [x] Profile native wrapped-text measurement workloads.
-- [_] Validate Hilbert and Kisrhombille generators, grouping, image formats and bounded execution.
+- [x] Validate Hilbert and Kisrhombille generators, grouping, image formats and bounded execution.
 - [_] Validate all integrated changes with joined CPU tests.
 - [x] Validate signed Text trimming and whole-batch work limits with joined CPU tests.
 - [x] Verify Transform GPU pixels.
@@ -141,6 +149,8 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Verify skybox GPU pixels.
 
 The [joined parallel checks](docs/pixel-composer-m0/native-parallel-composer-validation-2026-10-07.json) include Mirror Polar CleanEdge, cold Nine Slice and Combine PXC persistence: 5,848 C++ cases, 116 Python checks, 16 CLI checks and all 22 CPU workload profiles pass. Remaining catalogue executors, live Studio verification and licensed parity stay open.
+
+The [imagegraph fundamentals batch](docs/pixel-composer-m0/native-imagegraph-fundamentals-validation-2026-10-08.json) passes all 6,080 C++ cases, including 3,650 core, 376 source IO, 1,159 Studio and 33 offscreen Vulkan cases, plus 116 Python checks, 16 CLI checks and all 26 CPU workload profiles. Supported native common lifecycle, PXC persistence, routing, comparison, Collection clones and editable group junctions pass joined checks. Previous listener failures now pass. Full catalogue callbacks, required host observations, live Studio and licensed parity remain open.
 
 The [October 5 continuation checks](docs/pixel-composer-m0/native-validation-2026-10-05.json) record joined CPU suites, native wrapped-text profiling and scoped Vulkan checks for Composer, Transform, cameras and grouped skyboxes. Licensed reference parity and live Studio remain open.
 

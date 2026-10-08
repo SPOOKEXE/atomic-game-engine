@@ -3,18 +3,234 @@
 #include <engine/imagegraph/CacheResultsReplay.hpp>
 #include <engine/imagegraph/FeedbackReplay.hpp>
 #include <engine/imagegraph/FrameCacheReplay.hpp>
+#include <engine/imagegraph/GroupRenderSession.hpp>
+#include <engine/imagegraph/SourceCommonRuntime.hpp>
 #include <engine/imagegraph/SourceFrameCacheProject.hpp>
 #include <engine/imagegraph/StatefulReplay.hpp>
 #include <engine/imagegraph/StatefulTemporalCone.hpp>
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <limits>
 #include <new>
+#include <tuple>
 #include <type_traits>
 
 namespace engine::imagegraph {
 	namespace feedback_detail {
+		struct GroupPurityLifecycle {
+			std::array<std::string, 5> Categories;
+			uint64_t RetainedBytes() const {
+				uint64_t bytes = sizeof(*this);
+				for (const auto &category : Categories)
+					bytes += category.capacity();
+				return bytes;
+			}
+		};
+		// grug compare callback-relevant authored facts, never ordinary values, key
+		// samples or canvas positions.
+		inline bool PrepareGroupPurityLifecycle(
+			const Document &document,
+			GroupPurityLifecycle &result,
+			uint64_t maximumBytes,
+			Diagnostic &diagnostic
+		) {
+			using KeyPort = std::pair<std::string_view, std::string_view>;
+			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "group callback signature cap exceeds bounds"};
+				return false;
+			}
+			uint64_t work = 64ull * 1024 * 1024;
+			std::vector<KeyPort> implicitModes;
+			const uint64_t modeCount = uint64_t(document.Keyframes.size()) + document.Tracks.size();
+			const uint64_t scratch = modeCount * sizeof(KeyPort);
+			if (scratch >= maximumBytes) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "group callback modes exceed byte bounds"};
+				return false;
+			}
+			implicitModes.reserve(modeCount);
+			const auto appendModes = [&](const auto &records) {
+				for (const auto &key : records) {
+					const Node *owner = nullptr;
+					for (const auto &node : document.Nodes) {
+						const auto bytes = std::max(node.Id.size(), key.NodeId.size()) + 1;
+						if (bytes > work) return false;
+						work -= bytes;
+						if (node.Id == key.NodeId) {
+							owner = &node;
+							break;
+						}
+					}
+					if (!owner) return false;
+					bool explicitMode = false;
+					for (const auto *ports : {&owner->SourceStaticInputs, &owner->SourceAnimatedInputs})
+						for (const auto &port : *ports) {
+							const auto bytes = std::max(port.size(), key.Port.size()) + 1;
+							if (bytes > work) return false;
+							work -= bytes;
+							explicitMode = explicitMode || port == key.Port;
+						}
+					if (!explicitMode) implicitModes.emplace_back(key.NodeId, key.Port);
+				}
+				return true;
+			};
+			if (!appendModes(document.Keyframes) || !appendModes(document.Tracks)) goto refused;
+			{
+				bool comparisonRefused = false;
+				std::sort(implicitModes.begin(), implicitModes.end(), [&](const auto &a, const auto &b) {
+					const auto bytes = std::max(a.first.size(), b.first.size()) +
+									   std::max(a.second.size(), b.second.size()) + 2;
+					if (bytes > work)
+						comparisonRefused = true;
+					else
+						work -= bytes;
+					return a < b;
+				});
+				if (comparisonRefused) goto refused;
+				implicitModes.erase(
+					std::unique(
+						implicitModes.begin(),
+						implicitModes.end(),
+						[&](const auto &a, const auto &b) {
+							const auto bytes = std::max(a.first.size(), b.first.size()) +
+											   std::max(a.second.size(), b.second.size()) + 2;
+							if (bytes > work)
+								comparisonRefused = true;
+							else
+								work -= bytes;
+							return a == b;
+						}
+					),
+					implicitModes.end()
+				);
+				if (comparisonRefused) goto refused;
+			}
+			{
+				std::array<uint64_t, 5> sizes{};
+				GroupPurityLifecycle candidate;
+				bool admitted = true;
+				const auto encode = [&](bool write) {
+					const auto number = [&](size_t category, uint64_t value) {
+						if (!write) {
+							sizes[category] += sizeof(value);
+							return;
+						}
+						for (unsigned byte = 0; byte < 8; ++byte)
+							candidate.Categories[category].push_back(static_cast<char>(value >> (byte * 8)));
+					};
+					const auto text = [&](size_t category, std::string_view value) {
+						number(category, value.size());
+						if (!write)
+							sizes[category] += value.size();
+						else
+							candidate.Categories[category].append(value);
+					};
+					number(0, document.Nodes.size());
+					for (const auto &node : document.Nodes) {
+						text(0, node.Id);
+						text(0, node.Type);
+						text(0, node.InstanceBase);
+						text(0, node.SourceParentInputBase);
+						text(1, node.Id);
+						text(1, node.GroupId);
+						text(2, node.Id);
+						for (const auto *ports : {
+								 &node.InstanceOverrides, &node.SourceStaticInputs, &node.SourceAnimatedInputs
+							 }) {
+							number(2, ports->size());
+							for (const auto &port : *ports)
+								text(2, port);
+						}
+						number(2, node.SourceInputExpressions.size());
+						for (const auto &expression : node.SourceInputExpressions) {
+							text(2, expression.Port);
+							number(2, expression.Enabled);
+						}
+						text(4, node.Id);
+						number(4, node.DynamicInputs.size());
+						for (const auto &port : node.DynamicInputs) {
+							text(4, port.Id);
+							number(4, uint64_t(port.Type));
+						}
+						number(4, node.DynamicOutputs.size());
+						for (const auto &port : node.DynamicOutputs) {
+							text(4, port.Id);
+							number(4, uint64_t(port.Type));
+						}
+						if (node.Type == "pc.group_input")
+							for (const auto &value : node.Values)
+								if (value.Port == "input_type" || value.Port == "subtype" ||
+									value.Port == "vector_size") {
+									text(4, value.Port);
+									number(4, value.Data.index());
+									if (const auto *choice = std::get_if<EnumValue>(&value.Data))
+										number(4, uint64_t(choice->Value));
+									else if (const auto *integer = std::get_if<int64_t>(&value.Data))
+										number(4, uint64_t(*integer));
+									else if (const auto *scalar = std::get_if<double>(&value.Data))
+										number(4, std::bit_cast<uint64_t>(*scalar));
+									else
+										admitted = false;
+								}
+					}
+					number(2, implicitModes.size());
+					for (const auto &[node, port] : implicitModes) {
+						text(2, node);
+						text(2, port);
+					}
+					number(0, document.Groups.size());
+					for (const auto &group : document.Groups) {
+						text(0, group.Id);
+						text(0, group.InstanceBase);
+						text(0, group.OwnerNodeId);
+						text(1, group.Id);
+						text(1, group.ParentId);
+						text(3, group.Id);
+						number(3, group.PureFunction);
+						text(4, group.Id);
+						number(4, group.Ports.size());
+						for (const auto &port : group.Ports) {
+							text(4, port.Id);
+							text(4, port.JunctionId);
+							text(4, port.ControlNodeId);
+							number(4, uint64_t(port.Direction));
+						}
+					}
+					number(0, document.Links.size());
+					for (const auto &link : document.Links) {
+						text(0, link.FromNode);
+						text(0, link.FromPort);
+						text(0, link.ToNode);
+						text(0, link.ToPort);
+					}
+					number(4, document.Junctions.size());
+					for (const auto &junction : document.Junctions) {
+						text(4, junction.Id);
+						text(4, junction.GroupId);
+						number(4, uint64_t(junction.Type));
+					}
+				};
+				encode(false);
+				uint64_t bytes = scratch + candidate.RetainedBytes();
+				for (const auto size : sizes) {
+					if (size > maximumBytes - std::min(bytes, maximumBytes)) goto refused;
+					bytes += size;
+				}
+				if (!admitted || bytes > maximumBytes) goto refused;
+				for (size_t index = 0; index < sizes.size(); ++index)
+					candidate.Categories[index].reserve(sizes[index]);
+				encode(true);
+				if (!admitted || scratch + candidate.RetainedBytes() > maximumBytes) goto refused;
+				result = std::move(candidate);
+				return true;
+			}
+		refused:
+			diagnostic = {
+				Status::LimitExceeded, {}, {}, "group callback signature exceeds work or byte bounds"
+			};
+			return false;
+		}
 		// Lua VM state belongs to its provider session, outside the replay checkpoint.
 		inline bool RefreshTouchesLua(
 			const Document &document,
@@ -208,6 +424,10 @@ namespace engine::imagegraph {
 		}
 		std::vector<RequestImageSource> Seeds, Inputs;
 		StatefulOutputEvaluationResult State;
+		GroupRenderSession Groups;
+		feedback_detail::GroupPurityLifecycle GroupLifecycle;
+		uint64_t GroupSeed = 0;
+		uint32_t GroupImageDimension = 0;
 		// The immutable journal before the current frame; current pixels are never
 		// duplicated here.
 		StatefulOutputEvaluationResult FrameStart;
@@ -222,7 +442,35 @@ namespace engine::imagegraph {
 		std::optional<SourceCachePlaybackObservation> CacheObservation;
 		std::optional<SourceFrameCacheProjectObservation> CacheProjectObservation;
 		bool Configured = false, Initialized = false, Stateful = false, HaveExternalSources = false;
+		FrameTime SourceCommonFrame{};
+		uint64_t SourceCommonDocumentRevision = 0, SourceCommonInputRevision = 0;
+		bool SourceCommonReady = false;
+		bool SourceCommonMemoInvalidated = false;
 
+		static bool RefreshGroupLifecycle(
+			const Document &document,
+			const Plan &plan,
+			const EvaluationRequest &request,
+			const feedback_detail::GroupPurityLifecycle &previous,
+			const feedback_detail::GroupPurityLifecycle &current,
+			GroupRenderSession &groups,
+			Diagnostic &diagnostic,
+			uint64_t maximumBytes
+		) {
+			constexpr std::array events{
+				SourcePurityRefreshEvent::LoadTopology,
+				SourcePurityRefreshEvent::Membership,
+				SourcePurityRefreshEvent::AnimationMode,
+				SourcePurityRefreshEvent::PureFunction,
+				SourcePurityRefreshEvent::InputOutput
+			};
+			for (size_t index = 0; index < events.size(); ++index)
+				if (groups.Purities.empty() || previous.Categories[index] != current.Categories[index])
+					return RefreshSourceGroupPurity(
+							   document, plan, request, {events[index]}, groups, diagnostic, maximumBytes
+						   ) == Status::Ok;
+			return true;
+		}
 		static uint64_t SourceBytes(const std::vector<RequestImageSource> &sources) {
 			uint64_t bytes = sources.capacity() * sizeof(RequestImageSource);
 			for (const auto &source : sources)
@@ -281,8 +529,8 @@ namespace engine::imagegraph {
 		}
 
 	  public:
-		// grug call after loaded nodes exist, before preparing the revised document. no input edit is
-		// invented.
+		// grug call after loaded nodes exist, before preparing the revised document.
+		// no input edit is invented.
 		[[nodiscard]] bool RefreshLoadedSourceCacheGroups(
 			const Document &document,
 			std::span<const std::string_view> owners,
@@ -294,7 +542,8 @@ namespace engine::imagegraph {
 			);
 		}
 		// grug source/history admission runs after both loaded journals are ready.
-		// refusal preserves current-frame and frame-start cache ownership and frozen producer outputs.
+		// refusal preserves current-frame and frame-start cache ownership and frozen
+		// producer outputs.
 		[[nodiscard]] bool RefreshLoadedSourceCacheGroups(
 			const Document &document,
 			std::span<const std::string_view> owners,
@@ -336,8 +585,9 @@ namespace engine::imagegraph {
 					   document, owners, journals, maximumBytes - resident + groups, diagnostic, admit
 				   ) == Status::Ok;
 		}
-		// grug admit history while candidates stay private. false or bad_alloc must preserve admission state.
-		// callback borrows documents; successful admission is followed only by no-throw moves.
+		// grug admit history while candidates stay private. false or bad_alloc must
+		// preserve admission state. callback borrows documents; successful admission
+		// is followed only by no-throw moves.
 		template <class Admission>
 			requires std::is_invocable_r_v<bool, const Admission &, const Document &, const Document &>
 		[[nodiscard]] bool ToggleSourceCacheGroupMember(
@@ -399,8 +649,9 @@ namespace engine::imagegraph {
 		const CacheGroupReplayState &SourceCacheGroups() const {
 			return State.Data.CacheGroups;
 		}
-		// grug synchronize native authored metadata and input edits before revision replay.
-		// both complete data journals publish together; metadata alone keeps rows and latest pixels.
+		// grug synchronize native authored metadata and input edits before revision
+		// replay. both complete data journals publish together; metadata alone keeps
+		// rows and latest pixels.
 		[[nodiscard]] bool NotifySourceAuthoredEdits(
 			const Document &document,
 			std::span<const std::string_view> editedNodes,
@@ -415,7 +666,8 @@ namespace engine::imagegraph {
 				diagnostic = {Status::LimitExceeded, {}, {}, "Source authored edit cap is outside bounds"};
 				return false;
 			}
-			// grug unconfigured cold journals have no captured rows or frozen members to wake.
+			// grug unconfigured cold journals have no captured rows or frozen members
+			// to wake.
 			if (!Configured) editedNodes = {};
 			if (editedNodes.empty() && membershipOwners.empty() && serializeOwners.empty()) {
 				diagnostic = {};
@@ -440,7 +692,8 @@ namespace engine::imagegraph {
 					   maximumWork
 				   ) == Status::Ok;
 		}
-		// Notify accepted input/connection edits before preparing the revised document.
+		// Notify accepted input/connection edits before preparing the revised
+		// document.
 		[[nodiscard]] bool NotifySourceInputEdits(
 			const Document &document,
 			std::span<const std::string_view> editedNodes,
@@ -449,8 +702,9 @@ namespace engine::imagegraph {
 		) {
 			return NotifySourceAuthoredEdits(document, editedNodes, {}, {}, diagnostic, maximumBytes);
 		}
-		// The observed source button frees slots without evaluating the graph. A fresh
-		// observation owns the next update; same-clock dependent previews are unavailable.
+		// The observed source button frees slots without evaluating the graph. A
+		// fresh observation owns the next update; same-clock dependent previews are
+		// unavailable.
 		bool ClearSourceCache(
 			const Document &document,
 			const Plan &plan,
@@ -494,8 +748,9 @@ namespace engine::imagegraph {
 					return l.FromNode;
 				});
 			uint64_t work = CLEAR_WORK_LIMIT;
-			// Each discovered link may perform a complete ID search. Charge the conservative
-			// node-times-link bound, including string lengths, before entering the walk.
+			// Each discovered link may perform a complete ID search. Charge the
+			// conservative node-times-link bound, including string lengths, before
+			// entering the walk.
 			if (!AdmitClearWork(work, 1, nodeNames) ||
 				!AdmitClearWork(work, document.Nodes.size(), linkNames) ||
 				!AdmitClearWork(work, document.Nodes.size() * plan.EffectiveLinks.size(), nodeNames) ||
@@ -528,7 +783,8 @@ namespace engine::imagegraph {
 					serialize = *value;
 					seenSerialize = true;
 				}
-				// Cache Array's nonforced clear is inert; admitted group enabling forces it.
+				// Cache Array's nonforced clear is inert; admitted group enabling forces
+				// it.
 				if (node->Type == "pc.cache_array" &&
 					(!serialize ||
 					 (CacheProjectObservation && (CacheProjectObservation->ProjectLoading ||
@@ -636,7 +892,8 @@ namespace engine::imagegraph {
 			names += ClearMetadataBytes() + std::max(nodeId.size(), std::string{}.capacity());
 			uint64_t live = OutputBytes(State) + LedgerBytes(FrameStart) + SourceBytes(FrameStartInputs) +
 							SourceBytes(Seeds) + SourceBytes(Inputs) + InputSnapshot.RetainedBytes() +
-							ClearMetadataBytes() + InputNode.capacity();
+							ClearMetadataBytes() + InputNode.capacity() +
+							RetainedGroupRenderSessionBytes(Groups);
 			live += Bindings.capacity() * sizeof(FeedbackBinding);
 			for (const auto &binding : Bindings)
 				live += binding.SourceId.capacity() + binding.OutputId.capacity();
@@ -702,9 +959,10 @@ namespace engine::imagegraph {
 			diagnostic = {Status::LimitExceeded, {}, {}, "Source cache clear allocation refused"};
 			return false;
 		}
-		// Export continuation can resume only a published clock from matching authored inputs.
+		// Export continuation can resume only a published clock from matching
+		// authored inputs.
 		std::optional<FrameTime> PreparedFrame(uint64_t revision, uint64_t externalRevision) const noexcept {
-			if (!Configured || !Initialized || DocumentRevision != revision ||
+			if (SourceCommonMemoInvalidated || !Configured || !Initialized || DocumentRevision != revision ||
 				InputRevision != externalRevision)
 				return {};
 			return FrameTime{Tick, Subframe, NegativeFrame};
@@ -730,6 +988,8 @@ namespace engine::imagegraph {
 			for (const auto *state : {&State, &FrameStart}) {
 				if (!add(RetainedStatefulOutputBytes(*state)) || !add(LedgerBytes(*state))) return UINT64_MAX;
 			}
+			if (!add(RetainedGroupRenderSessionBytes(Groups)) || !add(GroupLifecycle.RetainedBytes()))
+				return UINT64_MAX;
 			if (!sources(Seeds) || !sources(Inputs) || !sources(FrameStartInputs) ||
 				!add(InputSnapshot.RetainedBytes()) || !add(InputNode.capacity()) ||
 				!rows(Bindings.capacity(), sizeof(FeedbackBinding)))
@@ -744,12 +1004,151 @@ namespace engine::imagegraph {
 			return bytes;
 		}
 
-		// Borrow only for an immediate admitted copy while the matching published revision is ready.
+		// Borrow only for an immediate admitted copy while the matching published
+		// revision is ready.
 		const DataReplayState *PreparedData(uint64_t revision, uint64_t externalRevision) const noexcept {
-			if (!Configured || !Initialized || DocumentRevision != revision ||
+			if (SourceCommonMemoInvalidated || !Configured || !Initialized || DocumentRevision != revision ||
 				InputRevision != externalRevision)
 				return nullptr;
 			return &State.Data;
+		}
+		// grug thumbnail and inspector observers borrow the same completed source
+		// processor pulse.
+		const GroupRenderSession *
+		PreparedGroups(uint64_t revision, uint64_t externalRevision, FrameTime frame) const noexcept {
+			const bool prepared =
+				PreparedFrame(revision, externalRevision) == std::optional<FrameTime>{frame} &&
+				!Groups.Outputs.Nodes.empty();
+			const bool common = SourceCommonReady && SourceCommonDocumentRevision == revision &&
+								SourceCommonInputRevision == externalRevision && SourceCommonFrame == frame &&
+								!Groups.Common.Owners.empty();
+			return prepared || common ? &Groups : nullptr;
+		}
+		[[nodiscard]] Status InitializeSourceCommonRuntime(
+			const Document &document,
+			const Plan &plan,
+			const EvaluationRequest &request,
+			SourceNodeInitialState initialState,
+			Diagnostic &diagnostic,
+			uint64_t revision,
+			uint64_t externalRevision,
+			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+		) {
+			if (initialState != SourceNodeInitialState::Loaded &&
+				initialState != SourceNodeInitialState::Constructed) {
+				diagnostic = {Status::InvalidValue, {}, {}, "source common constructor policy is invalid"};
+				return diagnostic.Code;
+			}
+			if (document.SourceCommonOwners.empty())
+				return ReconcileSourceCommonRuntime(
+					document,
+					plan,
+					request,
+					{initialState},
+					diagnostic,
+					revision,
+					externalRevision,
+					maximumBytes
+				);
+			const auto allowance = SourceCommonAllowance(request, maximumBytes, diagnostic);
+			if (!allowance) return diagnostic.Code;
+			auto current = SourceCommonRequest(request);
+			const auto status = engine::imagegraph::InitializeNativeSourceCommonRuntime(
+				document, plan, current, initialState, Groups, diagnostic, *allowance
+			);
+			if (status != Status::Ok) return status;
+			CommitSourceCommonReplay();
+			SourceCommonFrame = GetFrameTime(current);
+			SourceCommonDocumentRevision = revision;
+			SourceCommonInputRevision = externalRevision;
+			SourceCommonReady = true;
+			return Status::Ok;
+		}
+		[[nodiscard]] Status ReconcileSourceCommonRuntime(
+			const Document &document,
+			const Plan &plan,
+			const EvaluationRequest &request,
+			const SourceCommonRuntimeReconcile &operation,
+			Diagnostic &diagnostic,
+			uint64_t revision,
+			uint64_t externalRevision,
+			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+		) {
+			const auto allowance = SourceCommonAllowance(request, maximumBytes, diagnostic);
+			if (!allowance) return diagnostic.Code;
+			auto current = SourceCommonRequest(request);
+			const auto status = engine::imagegraph::ReconcileNativeSourceCommonRuntime(
+				document, plan, current, operation, Groups, diagnostic, *allowance
+			);
+			if (status != Status::Ok) return status;
+			CommitSourceCommonReplay(!document.SourceCommonOwners.empty());
+			SourceCommonDocumentRevision = revision;
+			SourceCommonInputRevision = externalRevision;
+			SourceCommonReady = false;
+			return Status::Ok;
+		}
+		[[nodiscard]] Status StepSourceCommonRuntime(
+			const Document &document,
+			const Plan &plan,
+			const EvaluationRequest &request,
+			const SourceCommonRuntimeObservations &observations,
+			Diagnostic &diagnostic,
+			uint64_t revision,
+			uint64_t externalRevision,
+			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+		) {
+			if (document.SourceCommonOwners.empty()) {
+				if (!Groups.SourceCommonBindings.empty()) {
+					diagnostic = {
+						Status::InvalidValue,
+						{},
+						{},
+						"source common owner retirement requires explicit reconciliation"
+					};
+					return diagnostic.Code;
+				}
+				diagnostic = {};
+				return Status::Ok;
+			}
+			const auto allowance = SourceCommonAllowance(request, maximumBytes, diagnostic);
+			if (!allowance) return diagnostic.Code;
+			auto current = SourceCommonRequest(request);
+			const auto status = engine::imagegraph::NativeSourceStepBounded(
+				document, plan, current, observations, Groups, diagnostic, *allowance
+			);
+			if (status != Status::Ok) return status;
+			CommitSourceCommonReplay();
+			SourceCommonFrame = GetFrameTime(current);
+			SourceCommonDocumentRevision = revision;
+			SourceCommonInputRevision = externalRevision;
+			SourceCommonReady = true;
+			return Status::Ok;
+		}
+		[[nodiscard]] Status ReadSourceCommonGetter(
+			const Document &document,
+			const Plan &plan,
+			std::string_view ownerId,
+			SourceCommonSelector selector,
+			const EvaluationRequest &request,
+			EvaluatedValue &result,
+			Diagnostic &diagnostic,
+			uint64_t revision,
+			uint64_t externalRevision,
+			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+		) const {
+			if (!SourceCommonReady || SourceCommonDocumentRevision != revision ||
+				SourceCommonInputRevision != externalRevision || SourceCommonFrame != GetFrameTime(request)) {
+				diagnostic = {
+					Status::InvalidValue, std::string(ownerId), {}, "source common getter state is stale"
+				};
+				return diagnostic.Code;
+			}
+			const auto allowance = SourceCommonAllowance(request, maximumBytes, diagnostic);
+			if (!allowance) return diagnostic.Code;
+			const auto current = SourceCommonRequest(request);
+			return engine::imagegraph::ReadNativeSourceCommonGetter(
+				document, plan, ownerId, selector, current, Groups, result, diagnostic, *allowance
+			);
 		}
 		bool Active() const {
 			return Stateful || !Bindings.empty();
@@ -767,6 +1166,8 @@ namespace engine::imagegraph {
 			Seeds = {};
 			Inputs = {};
 			State = {};
+			Groups = {};
+			GroupLifecycle = {};
 			FrameStart = {};
 			FrameStartInputs = {};
 			FrameStartValid = false;
@@ -777,7 +1178,98 @@ namespace engine::imagegraph {
 			NegativeFrame = RigidPlaying = RigidFrameProgress = false;
 			CacheObservation.reset();
 			Configured = Initialized = Stateful = HaveExternalSources = false;
+			SourceCommonFrame = {};
+			SourceCommonDocumentRevision = SourceCommonInputRevision = 0;
+			SourceCommonReady = false;
+			SourceCommonMemoInvalidated = false;
 		}
+
+	  private:
+		// The engine charges Groups and the borrowed canonical journals. Admit all other host storage
+		// beside that shared operation, including retained preceding feedback pixels, without cloning it.
+		std::optional<uint64_t> SourceCommonAllowance(
+			const EvaluationRequest &request, uint64_t maximumBytes, Diagnostic &diagnostic
+		) const {
+			const auto held = RetainedBytes(), groups = RetainedGroupRenderSessionBytes(Groups),
+					   ledgers = LedgerBytes(State);
+			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || held == UINT64_MAX ||
+				groups > held || ledgers > held - groups) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "source common host residency exceeds bounds"};
+				return {};
+			}
+			uint64_t outside = held - groups - ledgers;
+			for (const auto *sources : {&Inputs, &Seeds, &FrameStartInputs})
+				if (!request.ImageSources.empty() && request.ImageSources.data() == sources->data() &&
+					request.ImageSources.size() == sources->size()) {
+					const auto borrowed = CaptureBytes(request.ImageSources);
+					if (borrowed > outside) {
+						diagnostic = {
+							Status::LimitExceeded, {}, {}, "source common image residency exceeds bounds"
+						};
+						return {};
+					}
+					outside -= borrowed;
+					break;
+				}
+			if (outside >= maximumBytes) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "source common host residency exceeds bounds"};
+				return {};
+			}
+			return maximumBytes - outside;
+		}
+		EvaluationRequest SourceCommonRequest(const EvaluationRequest &request) const {
+			auto current = request;
+			current.GroupRender = &Groups;
+			current.SourceCommon = &Groups.Common;
+			current.SourceCommonAnimators = &Groups.CommonAnimators;
+			current.SimulationReplay = &State.Simulation;
+			current.SurfaceReplay = &State.Surfaces;
+			current.RandomReplay = &State.Random;
+			current.DataReplay = &State.Data;
+			current.RigidReplay = &State.Rigid;
+			return current;
+		}
+		void CommitSourceCommonReplay(bool invalidateMemo = true) noexcept {
+			State.Simulation = std::move(Groups.Replay.Simulation);
+			State.Surfaces = std::move(Groups.Replay.Surfaces);
+			State.Random = std::move(Groups.Replay.Random);
+			State.Data = std::move(Groups.Replay.Data);
+			State.Rigid = std::move(Groups.Replay.Rigid);
+			Groups.Replay = {};
+			// Empty retirement validates and reconciles native membership while ordinary memo remains valid.
+			if (!invalidateMemo) return;
+			// Retain the preceding image generation for feedback bindings. Public memo reads stay hidden
+			// until Prepare publishes the next named outputs; the common held sockets remain readable.
+			InputSnapshot = {};
+			InputNode.clear();
+			SourceCommonMemoInvalidated = true;
+		}
+		void ClearPreservingSourceCommon() {
+			auto groups = std::move(Groups);
+			auto simulation = std::move(State.Simulation);
+			auto surfaces = std::move(State.Surfaces);
+			auto random = std::move(State.Random);
+			auto data = std::move(State.Data);
+			auto rigid = std::move(State.Rigid);
+			const auto sourceFrame = SourceCommonFrame;
+			const auto sourceDocumentRevision = SourceCommonDocumentRevision;
+			const auto sourceInputRevision = SourceCommonInputRevision;
+			const bool sourceReady = SourceCommonReady;
+			Clear();
+			Groups = std::move(groups);
+			State.Simulation = std::move(simulation);
+			State.Surfaces = std::move(surfaces);
+			State.Random = std::move(random);
+			State.Data = std::move(data);
+			State.Rigid = std::move(rigid);
+			SourceCommonFrame = sourceFrame;
+			SourceCommonDocumentRevision = sourceDocumentRevision;
+			SourceCommonInputRevision = sourceInputRevision;
+			SourceCommonReady = sourceReady;
+			SourceCommonMemoInvalidated = true;
+		}
+
+	  public:
 		bool Prepare(
 			const Document &document,
 			const Plan &plan,
@@ -864,24 +1356,44 @@ namespace engine::imagegraph {
 						}
 					);
 				});
-			stateful = authoredGroups || temporal.Simulation || temporal.SurfaceCaches != 0 ||
-					   temporal.RandomGenerators != 0 || temporal.DataProcessors != 0 ||
-					   !State.Simulation.Entries.empty() || !State.Surfaces.Entries.empty() ||
-					   !State.Random.Entries.empty() || !State.Data.Entries.empty() ||
-					   !State.Data.CacheGroups.Nodes.empty() || temporal.RigidActors != 0 ||
-					   !State.Rigid.Owners.empty();
-			const bool directData = temporal.DataProcessors != 0 && !temporal.FirstFrameData &&
-									!temporal.Simulation && !temporal.SurfaceCaches &&
-									!temporal.RandomGenerators && !temporal.RigidActors && bindings.empty() &&
+			// Common source owners retain constructor sockets even for stateless native kernels. Their
+			// ordinary render pass must publish current sockets before the final held-output observation.
+			const bool groupedProcessing = document.FormatVersion >= 10 &&
+										   (!document.Groups.empty() || !Groups.SourceCommonBindings.empty());
+			const auto *borrowedGroups =
+				groupedProcessing && request.GroupRender != &Groups ? request.GroupRender : nullptr;
+			stateful = groupedProcessing || authoredGroups || temporal.Simulation ||
+					   temporal.SurfaceCaches != 0 || temporal.RandomGenerators != 0 ||
+					   temporal.DataProcessors != 0 || !State.Simulation.Entries.empty() ||
+					   !State.Surfaces.Entries.empty() || !State.Random.Entries.empty() ||
+					   !State.Data.Entries.empty() || !State.Data.CacheGroups.Nodes.empty() ||
+					   temporal.RigidActors != 0 || !State.Rigid.Owners.empty();
+			const bool directData = (groupedProcessing || temporal.DataProcessors != 0) &&
+									!temporal.FirstFrameData && !temporal.Simulation &&
+									!temporal.SurfaceCaches && !temporal.RandomGenerators &&
+									!temporal.RigidActors && bindings.empty() &&
 									(!temporal.SourceFrameCaches ||
 									 (request.SourceCachePlayback && request.SourceCachePlayback->Sampling ==
 																		 SourceCacheSampling::ObservedFrame));
 			if (!stateful && bindings.empty()) {
 				if (changed || Stateful) {
-					Clear();
+					if (SourceCommonReady || !Groups.Common.Owners.empty())
+						ClearPreservingSourceCommon();
+					else
+						Clear();
 					Configured = true;
 					DocumentRevision = revision;
 					InputRevision = externalRevision;
+				}
+				if (SourceCommonReady) {
+					request.GroupRender = &Groups;
+					request.SourceCommon = &Groups.Common;
+					request.SourceCommonAnimators = &Groups.CommonAnimators;
+					request.SimulationReplay = &State.Simulation;
+					request.SurfaceReplay = &State.Surfaces;
+					request.RandomReplay = &State.Random;
+					request.DataReplay = &State.Data;
+					request.RigidReplay = &State.Rigid;
 				}
 				return true;
 			}
@@ -923,10 +1435,11 @@ namespace engine::imagegraph {
 			if (changed)
 				for (const auto &binding : Bindings)
 					oldConfigBytes += binding.SourceId.capacity() + binding.OutputId.capacity();
-			const uint64_t currentBytes = OutputBytes(State) + InputSnapshot.RetainedBytes() +
-										  InputNode.capacity() + SourceBytes(Inputs) + configBytes +
-										  oldConfigBytes + externalBytes + LedgerBytes(FrameStart) +
-										  SourceBytes(FrameStartInputs) + ClearMetadataBytes();
+			const uint64_t currentBytes =
+				OutputBytes(State) + InputSnapshot.RetainedBytes() + InputNode.capacity() +
+				SourceBytes(Inputs) + configBytes + oldConfigBytes + externalBytes + LedgerBytes(FrameStart) +
+				SourceBytes(FrameStartInputs) + ClearMetadataBytes() +
+				RetainedGroupRenderSessionBytes(Groups) + GroupLifecycle.RetainedBytes();
 			if (currentBytes >= maximumBytes)
 				return fail(Status::LimitExceeded, "stateful host residency exceeds byte bounds");
 			if (!CacheClearNodes.empty() || !CacheInvalidOutputs.empty() || !CacheInvalidInputs.empty()) {
@@ -1006,9 +1519,14 @@ namespace engine::imagegraph {
 					Status::UnsupportedExecution,
 					"playback frame refresh cannot replay Lua session side effects"
 				);
-			if (!changed && Initialized && !rigidObservationChanged && !cacheObservationChanged &&
-				Tick == request.Tick && Subframe == request.Subframe &&
+			if (!SourceCommonMemoInvalidated && !changed && Initialized && !rigidObservationChanged &&
+				!cacheObservationChanged && Tick == request.Tick && Subframe == request.Subframe &&
 				NegativeFrame == request.NegativeFrame && sameSelection &&
+				(!groupedProcessing ||
+				 (GroupSeed == request.Seed && GroupImageDimension == request.MaximumImageDimension &&
+				  CacheProjectObservation == request.SourceCacheProject &&
+				  CacheObservation == request.SourceCachePlayback && RigidPlaying == request.RigidPlaying &&
+				  RigidFrameProgress == request.RigidFrameProgress)) &&
 				request.SimulationCacheCaptures.empty()) {
 				if (!bindings.empty())
 					request.ImageSources = Tick || HaveExternalSources
@@ -1020,10 +1538,30 @@ namespace engine::imagegraph {
 				request.DataReplay = &State.Data;
 				request.RigidReplay = &State.Rigid;
 				request.RigidAuthoringRevision = revision;
+				request.GroupRender = borrowedGroups							 ? borrowedGroups
+									  : (groupedProcessing || SourceCommonReady) ? &Groups
+																				 : nullptr;
+				if (SourceCommonReady) {
+					request.SourceCommon = &Groups.Common;
+					request.SourceCommonAnimators = &Groups.CommonAnimators;
+				}
 				return true;
 			}
+			const bool reuseGroupPulse =
+				!SourceCommonMemoInvalidated && groupedProcessing && !borrowedGroups && !changed &&
+				Initialized && Tick == request.Tick && Subframe == request.Subframe &&
+				NegativeFrame == request.NegativeFrame && GroupSeed == request.Seed &&
+				GroupImageDimension == request.MaximumImageDimension &&
+				RigidPlaying == request.RigidPlaying && RigidFrameProgress == request.RigidFrameProgress &&
+				CacheObservation == request.SourceCachePlayback &&
+				CacheProjectObservation == request.SourceCacheProject &&
+				request.SimulationCacheCaptures.empty();
+			const bool commonFrameReady =
+				SourceCommonReady && SourceCommonDocumentRevision == revision &&
+				SourceCommonInputRevision == externalRevision &&
+				SourceCommonFrame == FrameTime{request.Tick, request.Subframe, request.NegativeFrame};
 			const bool contiguous =
-				directData || refreshFrame ||
+				reuseGroupPulse || directData || refreshFrame || commonFrameReady ||
 				(!changed && sameSelection && Initialized &&
 				 ((Tick < Limits::MaximumTick && Tick + 1 == request.Tick) ||
 				  (Tick == request.Tick && Subframe == request.Subframe &&
@@ -1036,18 +1574,39 @@ namespace engine::imagegraph {
 				request.SourceCachePlayback->Sampling == SourceCacheSampling::ObservedFrame)
 				return fail(
 					Status::UnsupportedExecution,
-					"mixed observed frame-cache seek needs a recorded scheduler or explicit native played "
+					"mixed observed frame-cache seek needs a recorded scheduler "
+					"or explicit native played "
 					"prefix"
 				);
 			if (!contiguous && request.Tick > 4096)
 				return fail(Status::LimitExceeded, "stateful seek exceeds the 4096-step bound");
 			std::string candidateNode(selectedNode);
+			GroupRenderSession candidateGroups;
+			feedback_detail::GroupPurityLifecycle candidateLifecycle;
+			const bool ownGroupCandidate = !borrowedGroups && (groupedProcessing || SourceCommonReady);
+			const bool lifecycleChanged = groupedProcessing && !borrowedGroups &&
+										  (!Configured || DocumentRevision != revision ||
+										   (!document.Groups.empty() && Groups.Purities.empty()));
+			if (ownGroupCandidate) {
+				const auto groupBytes = RetainedGroupRenderSessionBytes(Groups);
+				if (groupBytes >= maximumBytes - currentBytes)
+					return fail(Status::LimitExceeded, "group process history copy exceeds byte bounds");
+				candidateGroups = Groups;
+				if (lifecycleChanged) {
+					const auto signatureAllowance = maximumBytes - currentBytes - groupBytes;
+					if (!feedback_detail::PrepareGroupPurityLifecycle(
+							document, candidateLifecycle, signatureAllowance, diagnostic
+						))
+						return false;
+				}
+			}
 			StatefulOutputEvaluationResult candidate;
 			StatefulOutputEvaluationResult candidateStart;
 			std::vector<RequestImageSource> candidateStartInputs;
 			bool candidateStartValid = false, candidateStartResetSurfaces = false;
 			EvaluationSnapshot candidateSnapshot;
-			// Interlace caches survive edits and seeks; Time Remap clears on native revision changes.
+			// Interlace caches survive edits and seeks; Time Remap clears on native
+			// revision changes.
 			const auto retainCache = [&](const SimulationReplayEntry &entry) {
 				return entry.Cache && entry.State.AuthoringRevision == revision &&
 					   std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
@@ -1067,7 +1626,8 @@ namespace engine::imagegraph {
 			if (!contiguous && seedCopyBytes > maximumBytes - currentBytes)
 				return fail(Status::LimitExceeded, "stateful seek cache copy exceeds bounds");
 			if (!contiguous) {
-				// grug keep loaded owner order and frozen getters when frame history starts again.
+				// grug keep loaded owner order and frozen getters when frame history
+				// starts again.
 				candidate.Data.CacheGroups = State.Data.CacheGroups;
 				candidate.Surfaces = State.Surfaces;
 				if (changed)
@@ -1108,7 +1668,8 @@ namespace engine::imagegraph {
 					return !SourceFrameCacheRowType(row).empty();
 				});
 			if (retireBeforeEvaluation) {
-				// Retire old typed cache rows before another node with that ID can consume their state.
+				// Retire old typed cache rows before another node with that ID can
+				// consume their state.
 				const uint64_t copyBytes = LedgerBytes(State);
 				const uint64_t resident = currentBytes + OutputBytes(candidate);
 				if (resident >= maximumBytes || copyBytes >= maximumBytes - resident)
@@ -1131,6 +1692,11 @@ namespace engine::imagegraph {
 				EvaluationRequest clock = request;
 				clock.Tick = tick;
 				clock.ReuseSimulationFrame = false;
+				if (ownGroupCandidate) {
+					clock.GroupRender = &candidateGroups;
+					clock.SourceCommon = &candidateGroups.Common;
+					clock.SourceCommonAnimators = &candidateGroups.CommonAnimators;
+				}
 				clock.Subframe = tick == request.Tick ? request.Subframe : 0;
 				BindNativeSourceFrameCacheProjectPrefix(clock);
 				if (tick != request.Tick) clock.SimulationCacheCaptures = {};
@@ -1216,10 +1782,11 @@ namespace engine::imagegraph {
 				clock.RigidAuthoringRevision = revision;
 				const auto &generation = refreshFrame ? candidateStartInputs : tick == 0 ? seeds : previous;
 				if (contiguous && !refreshFrame) {
-					const bool sameFrameAction = Tick == request.Tick && Subframe == request.Subframe &&
-												 NegativeFrame == request.NegativeFrame &&
-												 (!request.SimulationCacheCaptures.empty() ||
-												  rigidObservationChanged || cacheObservationChanged);
+					const bool sameFrameAction =
+						Tick == request.Tick && Subframe == request.Subframe &&
+						NegativeFrame == request.NegativeFrame &&
+						(SourceCommonMemoInvalidated || !request.SimulationCacheCaptures.empty() ||
+						 rigidObservationChanged || cacheObservationChanged);
 					const auto sourceImage = [&](const FeedbackBinding &binding) -> const Image * {
 						if (sameFrameAction) {
 							const auto source =
@@ -1290,17 +1857,60 @@ namespace engine::imagegraph {
 					candidateStartValid = true;
 					candidateStartResetSurfaces = clock.ResetSurfaceReplay;
 				}
-				const uint64_t held = LedgerBytes(retiredPrior) + LedgerBytes(FrameStart) +
-									  SourceBytes(FrameStartInputs) + LedgerBytes(candidateStart) +
-									  SourceBytes(candidateStartInputs) + configBytes + oldConfigBytes +
-									  externalBytes + OutputBytes(State) + InputSnapshot.RetainedBytes() +
-									  candidateSnapshot.RetainedBytes() + SourceBytes(Inputs) +
-									  SourceBytes(previous) + SourceBytes(captures) + SourceBytes(inputs);
+				const uint64_t held =
+					LedgerBytes(retiredPrior) + LedgerBytes(FrameStart) + SourceBytes(FrameStartInputs) +
+					LedgerBytes(candidateStart) + SourceBytes(candidateStartInputs) + configBytes +
+					oldConfigBytes + externalBytes + RetainedGroupRenderSessionBytes(Groups) +
+					GroupLifecycle.RetainedBytes() + OutputBytes(State) + InputSnapshot.RetainedBytes() +
+					candidateSnapshot.RetainedBytes() + SourceBytes(Inputs) + SourceBytes(previous) +
+					SourceBytes(captures) + SourceBytes(inputs) +
+					(ownGroupCandidate ? RetainedGroupRenderSessionBytes(candidateGroups) +
+											 candidateLifecycle.RetainedBytes()
+									   : 0);
 				if (held >= maximumBytes)
 					return fail(Status::LimitExceeded, "stateful generation overlap exceeds byte bounds");
+				if (groupedProcessing && !borrowedGroups && !reuseGroupPulse) {
+					if (!RefreshGroupLifecycle(
+							document,
+							plan,
+							clock,
+							GroupLifecycle,
+							lifecycleChanged ? candidateLifecycle : GroupLifecycle,
+							candidateGroups,
+							diagnostic,
+							maximumBytes - held
+						))
+						return false;
+					if (ProcessGroupRender(
+							document,
+							plan,
+							clock,
+							{GroupRenderMode::AutomaticFull},
+							candidateGroups,
+							diagnostic,
+							maximumBytes - held
+						) != Status::Ok)
+						return false;
+					clock.GroupRender = &candidateGroups;
+					clock.SimulationReplay = &candidateGroups.Replay.Simulation;
+					clock.SurfaceReplay = &candidateGroups.Replay.Surfaces;
+					clock.RandomReplay = &candidateGroups.Replay.Random;
+					clock.DataReplay = &candidateGroups.Replay.Data;
+					clock.RigidReplay = &candidateGroups.Replay.Rigid;
+				}
+				if (reuseGroupPulse) clock.GroupRender = &candidateGroups;
+				if (clock.GroupRender) {
+					clock.ReuseSimulationFrame = true;
+					clock.ResetSurfaceReplay = false;
+				}
+				const auto groupHeld =
+					ownGroupCandidate ? RetainedGroupRenderSessionBytes(candidateGroups) : 0;
+				if (groupHeld >= maximumBytes - held)
+					return fail(Status::LimitExceeded, "group process observation exceeds byte bounds");
+				const auto observationAllowance = maximumBytes - held - groupHeld;
 				if (selectedNode.empty()) {
 					if (EvaluateStatefulOutputs(
-							document, plan, outputs, clock, candidate, diagnostic, maximumBytes - held
+							document, plan, outputs, clock, candidate, diagnostic, observationAllowance
 						) != Status::Ok)
 						return false;
 				} else {
@@ -1312,7 +1922,7 @@ namespace engine::imagegraph {
 							clock,
 							captured,
 							diagnostic,
-							maximumBytes - held,
+							observationAllowance,
 							outputs
 						) != Status::Ok)
 						return false;
@@ -1324,6 +1934,9 @@ namespace engine::imagegraph {
 					candidate.Rigid = std::move(captured.Rigid);
 					candidateSnapshot = std::move(captured.Inputs);
 				}
+				// grug one ledger owns processor history; the group journal keeps socket
+				// values and readiness.
+				candidateGroups.Replay = {};
 				if (refreshFrame) {
 					const uint64_t copyBytes = SourceBytes(candidateStartInputs);
 					if (held >= maximumBytes ||
@@ -1423,6 +2036,15 @@ namespace engine::imagegraph {
 					CacheInvalidInputs.clear();
 			}
 
+			GroupSeed = request.Seed;
+			GroupImageDimension = request.MaximumImageDimension;
+			if (lifecycleChanged) GroupLifecycle = std::move(candidateLifecycle);
+			if (!groupedProcessing) GroupLifecycle = {};
+			if (ownGroupCandidate)
+				Groups = std::move(candidateGroups);
+			else if (!SourceCommonReady && Groups.SourceCommonBindings.empty() &&
+					 Groups.Common.Owners.empty())
+				Groups = {};
 			State = std::move(candidate);
 			FrameStart = std::move(candidateStart);
 			FrameStartInputs = std::move(candidateStartInputs);
@@ -1453,9 +2075,80 @@ namespace engine::imagegraph {
 			request.DataReplay = &State.Data;
 			request.RigidReplay = &State.Rigid;
 			request.RigidAuthoringRevision = revision;
+			request.GroupRender = borrowedGroups							 ? borrowedGroups
+								  : (groupedProcessing || SourceCommonReady) ? &Groups
+																			 : nullptr;
+			if (SourceCommonReady) {
+				request.SourceCommon = &Groups.Common;
+				request.SourceCommonAnimators = &Groups.CommonAnimators;
+			}
+			SourceCommonMemoInvalidated = false;
 			return true;
 		} catch (const std::bad_alloc &) {
 			diagnostic = {Status::LimitExceeded, {}, {}, "stateful host allocation was refused"};
+			return false;
+		}
+		// grug force the selected wrapper without turning its automatic render flag
+		// on.
+		bool ForceGroup(
+			const Document &document,
+			const Plan &plan,
+			std::string_view groupId,
+			EvaluationRequest request,
+			Diagnostic &diagnostic,
+			uint64_t maximumBytes = Limits::MaximumEvaluationBytes
+		) try {
+			const auto groupBytes = RetainedGroupRenderSessionBytes(Groups);
+			const auto held = RetainedBytes();
+			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes || held >= maximumBytes ||
+				groupBytes >= maximumBytes - held) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "forced group host residency exceeds bounds"};
+				return false;
+			}
+			feedback_detail::GroupPurityLifecycle lifecycle;
+			if (!feedback_detail::PrepareGroupPurityLifecycle(
+					document, lifecycle, maximumBytes - held - groupBytes, diagnostic
+				))
+				return false;
+			const auto lifecycleBytes = lifecycle.RetainedBytes();
+			if (lifecycleBytes >= maximumBytes - held - groupBytes) {
+				diagnostic = {
+					Status::LimitExceeded, {}, {}, "forced group callback residency exceeds bounds"
+				};
+				return false;
+			}
+			GroupRenderSession prepared = Groups;
+			request.SimulationReplay = &State.Simulation;
+			request.SurfaceReplay = &State.Surfaces;
+			request.RandomReplay = &State.Random;
+			request.DataReplay = &State.Data;
+			request.RigidReplay = &State.Rigid;
+			const auto allowance = maximumBytes - held - lifecycleBytes;
+			if (!RefreshGroupLifecycle(
+					document, plan, request, GroupLifecycle, lifecycle, prepared, diagnostic, allowance
+				) ||
+				ProcessGroupRender(
+					document,
+					plan,
+					request,
+					{GroupRenderMode::ForceGroup, groupId},
+					prepared,
+					diagnostic,
+					allowance
+				) != Status::Ok)
+				return false;
+			State.Simulation = std::move(prepared.Replay.Simulation);
+			State.Surfaces = std::move(prepared.Replay.Surfaces);
+			State.Random = std::move(prepared.Replay.Random);
+			State.Data = std::move(prepared.Replay.Data);
+			State.Rigid = std::move(prepared.Replay.Rigid);
+			prepared.Replay = {};
+			Groups = std::move(prepared);
+			GroupLifecycle = std::move(lifecycle);
+			Initialized = false;
+			return true;
+		} catch (const std::bad_alloc &) {
+			diagnostic = {Status::LimitExceeded, {}, {}, "forced group callback allocation refused"};
 			return false;
 		}
 		bool PrepareNodeInputs(
@@ -1479,6 +2172,7 @@ namespace engine::imagegraph {
 			return InputSnapshot;
 		}
 		const StatefulNamedOutput *Value(std::string_view outputId) const {
+			if (SourceCommonMemoInvalidated) return nullptr;
 			if (std::find(CacheInvalidOutputs.begin(), CacheInvalidOutputs.end(), outputId) !=
 				CacheInvalidOutputs.end())
 				return nullptr;

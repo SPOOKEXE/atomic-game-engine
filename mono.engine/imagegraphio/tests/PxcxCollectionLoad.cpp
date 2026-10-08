@@ -1,3 +1,4 @@
+#include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraphio/PxcxAppend.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -85,6 +86,9 @@ namespace {
 				  Animated("inspect-5")}
 			 )}
 		};
+		// Update has Boolean Trigger keys; retain the generic fixture's source clocks and opaque tails.
+		for (auto &key : number["inspectInputs"][2]["r"])
+			key[1] = false;
 		Json compact = {
 			{"id", "compact"},
 			{"type", "Node_Number_Simple"},
@@ -185,7 +189,32 @@ TEST_CASE(
 
 	PxcxImport imported;
 	std::string failure;
-	REQUIRE(ImportPxcxImageGraph(archive, imported, failure));
+	const bool accepted = ImportPxcxImageGraph(archive, imported, failure);
+	INFO(failure);
+	REQUIRE(accepted);
+	const auto common = std::find_if(
+		imported.Graph.SourceCommonOwners.begin(),
+		imported.Graph.SourceCommonOwners.end(),
+		[](const auto &owner) { return owner.SourceOwnerId == "number"; }
+	);
+	REQUIRE(common != imported.Graph.SourceCommonOwners.end());
+	REQUIRE(bool(imported.Graph.SourceAnimators));
+	const auto update = std::find_if(
+		imported.Graph.SourceAnimators->DetachedValues.begin(),
+		imported.Graph.SourceAnimators->DetachedValues.end(),
+		[&](const auto &value) {
+			return value.NodeId == "number" && value.Port == common->UpdateAnimatorPort;
+		}
+	);
+	REQUIRE(update != imported.Graph.SourceAnimators->DetachedValues.end());
+	REQUIRE(update->Keys.size() == 4);
+	CHECK(update->Keys[2].Kind == engine::imagegraph::KeyframeKind::Normal);
+	CHECK(engine::imagegraph::GetFrameTime(update->Keys[2]).Tick == 0);
+	CHECK(update->Keys[3].Kind == engine::imagegraph::KeyframeKind::Normal);
+	CHECK(engine::imagegraph::GetFrameTime(update->Keys[3]).NegativeFrame);
+	CHECK(engine::imagegraph::GetFrameTime(update->Keys[3]).Tick == 2);
+	for (const auto &key : update->Keys)
+		CHECK(key.Data == engine::imagegraph::Value{false});
 	REQUIRE(imported.Graph.Groups.size() == 1);
 	CHECK(imported.Graph.Groups.front().Id == "root");
 	const auto child =
@@ -309,7 +338,9 @@ TEST_CASE(
 	options.Context = "destinationCollection";
 	PxcxAppendResult result;
 	Diagnostic diagnostic;
-	REQUIRE(AppendPxcxProject(destination, incoming, options, result, diagnostic));
+	const bool appended = AppendPxcxProject(destination, incoming, options, result, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(appended);
 	REQUIRE(result.Nodes.size() == 3);
 	CHECK(result.Nodes[0] == (PxcxAppendedNode{"root", "loaded/root", true}));
 	CHECK(result.Nodes[1] == (PxcxAppendedNode{"number", "loaded/number", false}));

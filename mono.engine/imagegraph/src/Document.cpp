@@ -43,6 +43,9 @@
 #include "SourceArgumentTransport.hpp"
 #include "SourceAtlasCodec.hpp"
 #include "SourceAxisStorage.hpp"
+#include "SourceCommonAuthoring.hpp"
+#include "SourceCommonExecution.hpp"
+#include "SourceCommonMembership.hpp"
 #include "SourceFontReceipts.hpp"
 #include "SourceFontTransport.hpp"
 #include "SourceFrameCacheLookup.hpp"
@@ -60,6 +63,8 @@
 #include "SourceRigidCodec.hpp"
 #include "SourceSeparatedVec2.hpp"
 #include "SourceTilesetCodec.hpp"
+#include "SourceTunnel.hpp"
+#include "SourceTunnelRegistry.hpp"
 #include "SourceVec2Defaults.hpp"
 #include "SourceVerletPathCodec.hpp"
 #include "StrandCodec.hpp"
@@ -71,15 +76,20 @@
 #include "ValueNodeSchemas.hpp"
 #include "ValuePayload.hpp"
 #include "ValueText.hpp"
+#include "nodes/ArraySource.hpp"
 #include "nodes/Families.hpp"
 
+#include <engine/core/Metrics.hpp>
 #include <engine/imagegraph/AudioCapture.hpp>
 #include <engine/imagegraph/Catalogue.hpp>
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/FrameTime.hpp>
+#include <engine/imagegraph/GroupRenderSession.hpp>
 #include <engine/imagegraph/NoiseField.hpp>
+#include <engine/imagegraph/PortCompatibility.hpp>
 #include <engine/imagegraph/SliceStackReplay.hpp>
 #include <engine/imagegraph/SourceBuiltinRandom.hpp>
+#include <engine/imagegraph/SourceCommonDispatch.hpp>
 #include <engine/imagegraph/SourceFont.hpp>
 #include <engine/imagegraph/SourceInputProcessingObserver.hpp>
 #include <engine/imagegraph/SourceTimeline.hpp>
@@ -91,6 +101,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <iomanip>
 #include <limits>
 #include <locale>
@@ -2767,6 +2778,10 @@ namespace engine::imagegraph {
 		}
 	} // namespace
 
+	bool CatalogueJunctionCompatible(ValueType from, ValueType to) {
+		return JunctionCompatible(from, to);
+	}
+
 	const NodeSchema *FindSchema(std::string_view type) {
 		if (type == GROUP_CALLBACK_OPAQUE_SCHEMA.Type) return &GROUP_CALLBACK_OPAQUE_SCHEMA;
 		if (type == CAPTURED_IMAGE_SCHEMA.Type) return &CAPTURED_IMAGE_SCHEMA;
@@ -2969,9 +2984,17 @@ namespace engine::imagegraph {
 	}
 
 	std::string Write(const Document &document) {
+		if (document.FormatVersion < 10 &&
+			std::any_of(
+				document.Groups.begin(),
+				document.Groups.end(),
+				[](const auto &group) { return !group.RenderActive || !group.PureFunction; }
+			))
+			return {};
 		Diagnostic sourceAnimatorDiagnostic;
 		if (detail::ValidateSourceAnimatorState(document, sourceAnimatorDiagnostic) != Status::Ok) return {};
 		for (const auto &node : document.Nodes) {
+			if (!node.SourceParentInputBase.empty() && document.FormatVersion < 10) return {};
 			if (detail::ValidateNativeSamplerBindings(node, document.FormatVersion)) return {};
 			Diagnostic defaultsDiagnostic;
 			if ((node.SourceVec2Defaults && document.FormatVersion < 9) ||
@@ -3004,6 +3027,13 @@ namespace engine::imagegraph {
 			stream << ' ';
 			WriteQuoted(stream, node.GroupId);
 			stream << ' ' << std::setprecision(17) << node.Position.X << ' ' << node.Position.Y << '\n';
+			if (document.FormatVersion >= 10 && !node.SourceParentInputBase.empty()) {
+				stream << "source_parent_input_base ";
+				WriteQuoted(stream, node.Id);
+				stream << ' ';
+				WriteQuoted(stream, node.SourceParentInputBase);
+				stream << '\n';
+			}
 			if (document.FormatVersion >= 9 && !node.InstanceBase.empty()) {
 				stream << "node_instance ";
 				WriteQuoted(stream, node.Id);
@@ -3150,7 +3180,8 @@ namespace engine::imagegraph {
 					WriteQuoted(stream, input.Port);
 					stream << ' ' << std::setprecision(17) << input.Data.X << ' ' << input.Data.Y << '\n';
 				}
-		for (const Group &group : document.Groups) {
+		for (size_t groupIndex = 0; groupIndex < document.Groups.size(); ++groupIndex) {
+			const Group &group = document.Groups[groupIndex];
 			stream << "group ";
 			WriteQuoted(stream, group.Id);
 			stream << ' ';
@@ -3160,12 +3191,37 @@ namespace engine::imagegraph {
 				WriteQuoted(stream, group.ParentId);
 			}
 			stream << '\n';
+			if (document.FormatVersion >= 11) {
+				stream << "group_source_position " << groupIndex << ' ';
+				WriteQuoted(stream, group.Id);
+				stream << ' ' << std::setprecision(17) << group.SourcePosition.X << ' '
+					   << group.SourcePosition.Y << '\n';
+			}
+			if (!group.SourceInternalName.empty()) {
+				if (document.FormatVersion < 11) return {};
+				stream << "group_source_internal_name " << groupIndex << ' ';
+				WriteQuoted(stream, group.Id);
+				stream << ' ';
+				WriteQuoted(stream, group.SourceInternalName);
+				stream << '\n';
+			}
+
 			if (document.FormatVersion >= 9 && !group.OwnerNodeId.empty()) {
 				stream << "group_owner ";
 				WriteQuoted(stream, group.Id);
 				stream << ' ';
 				WriteQuoted(stream, group.OwnerNodeId);
 				stream << '\n';
+			}
+			if (!group.PureFunction) {
+				stream << "group_pure ";
+				WriteQuoted(stream, group.Id);
+				stream << " 0\n";
+			}
+			if (!group.RenderActive) {
+				stream << "group_render ";
+				WriteQuoted(stream, group.Id);
+				stream << " 0\n";
 			}
 			if (document.FormatVersion >= 9 && !group.InstanceBase.empty()) {
 				stream << "group_instance ";
@@ -3264,6 +3320,32 @@ namespace engine::imagegraph {
 			}
 		}
 
+		for (const auto &owner : document.SourceCommonOwners) {
+			stream << "source_common_owner ";
+			for (const auto *name :
+				 {&owner.SourceOwnerId,
+				  &owner.SourceType,
+				  &owner.NativeOwnerId,
+				  &owner.InstanceBase,
+				  &owner.UpdateAnimatorOwnerId,
+				  &owner.UpdateAnimatorPort}) {
+				WriteQuoted(stream, *name);
+				stream << ' ';
+			}
+			stream << (owner.NativeOwnerKind == SourceCommonNativeOwnerKind::Node ? "node" : "group") << ' '
+				   << owner.Active << ' ' << owner.ShowUpdateTrigger << ' ' << owner.OutMeta << ' '
+				   << owner.DisplayNamePresent << ' ' << owner.UpdateOverrideInstance << ' '
+				   << owner.UpdateGraph << '\n';
+			if (owner.UpdateExpression) {
+				stream << "source_common_expression ";
+				WriteQuoted(stream, owner.SourceOwnerId);
+				stream << ' ';
+				WriteQuoted(stream, owner.UpdateExpression->Port);
+				stream << ' ';
+				WriteQuoted(stream, owner.UpdateExpression->Code);
+				stream << ' ' << owner.UpdateExpression->Enabled << '\n';
+			}
+		}
 		if (document.SourceAnimators) {
 			stream << "source_animators\n";
 			const auto mode = [](GroupSubtypeAnimator value) {
@@ -3595,7 +3677,7 @@ namespace engine::imagegraph {
 			);
 			return diagnostic.Code;
 		}
-		if (parsed.FormatVersion < 1 || parsed.FormatVersion > 10) {
+		if (parsed.FormatVersion < 1 || parsed.FormatVersion > 11) {
 			SetDiagnostic(diagnostic, Status::UnsupportedVersion, "unsupported imagegraph document version");
 			return diagnostic.Code;
 		}
@@ -3607,7 +3689,10 @@ namespace engine::imagegraph {
 		auto &setBudget = budget ? *budget : unboundedSetBudget;
 		auto setStringCharge = budget ? budget->Reserve(0) : std::optional<detail::AllocationReservation>{};
 		auto groupDepths = detail::MakeEvaluationSet<std::string>(setBudget);
+		auto groupRenderFlags = detail::MakeEvaluationSet<std::string>(setBudget);
+		auto groupPureFlags = detail::MakeEvaluationSet<std::string>(setBudget);
 		auto groupSampling = detail::MakeEvaluationSet<std::string>(setBudget);
+		auto groupSourcePositions = detail::MakeEvaluationSet<std::string>(setBudget);
 		auto keyTimes = detail::MakeEvaluationSet<size_t>(setBudget);
 		auto keyKinds = detail::MakeEvaluationSet<size_t>(setBudget);
 		auto keySourceIds = detail::MakeEvaluationSet<size_t>(setBudget);
@@ -4066,6 +4151,17 @@ namespace engine::imagegraph {
 				if (!reserveSlots(ports, ports.size() + 1)) goto limited;
 				ports.push_back(std::move(port));
 				remember(ports.back());
+			} else if (marker == "source_parent_input_base" && parsed.FormatVersion >= 10) {
+				std::string id, base;
+				if (!readQuoted(row, id) || !readQuoted(row, base) || base.empty() || HasTrailing(row))
+					goto malformed;
+				const auto found =
+					std::find_if(parsed.Nodes.begin(), parsed.Nodes.end(), [&](const Node &node) {
+						return node.Id == id;
+					});
+				if (found == parsed.Nodes.end() || !found->SourceParentInputBase.empty()) goto malformed;
+				found->SourceParentInputBase = std::move(base);
+				remember(found->SourceParentInputBase);
 			} else if ((marker == "node_instance" || marker == "group_instance") &&
 					   parsed.FormatVersion >= 9) {
 				std::string id, base;
@@ -4088,6 +4184,22 @@ namespace engine::imagegraph {
 					found->InstanceBase = std::move(base);
 					remember(found->InstanceBase);
 				}
+			} else if ((marker == "group_render" || marker == "group_pure") && parsed.FormatVersion >= 10) {
+				std::string id;
+				int active = -1;
+				if (!readQuoted(row, id) || !(row >> active) || (active != 0 && active != 1) ||
+					HasTrailing(row) ||
+					!insertString(marker == "group_render" ? groupRenderFlags : groupPureFlags, id))
+					goto malformed;
+				const auto group =
+					std::find_if(parsed.Groups.begin(), parsed.Groups.end(), [&](const Group &candidate) {
+						return candidate.Id == id;
+					});
+				if (group == parsed.Groups.end()) goto malformed;
+				if (marker == "group_render")
+					group->RenderActive = active != 0;
+				else
+					group->PureFunction = active != 0;
 			} else if (marker == "group_owner" && parsed.FormatVersion >= 9) {
 				std::string id, owner;
 				if (!readQuoted(row, id) || !readQuoted(row, owner) || owner.empty() || HasTrailing(row))
@@ -4346,6 +4458,77 @@ namespace engine::imagegraph {
 			} else if (marker == "source_vec2_axis_end" && parsed.FormatVersion >= 9) {
 				if (!axisKeys || detachedKeyBlock || HasTrailing(row)) goto malformed;
 				axisKeys = nullptr;
+			} else if (marker == "source_common_owner" && parsed.FormatVersion >= 11) {
+				SourceCommonOwnerRecord owner;
+				std::string kind;
+				int active = 0, show = 0, meta = 0, named = 0, override = 0, updateGraph = 0;
+				if (!readQuoted(row, owner.SourceOwnerId, Limits::MaximumTextBytes) ||
+					!readQuoted(row, owner.SourceType, Limits::MaximumTextBytes) ||
+					!readQuoted(row, owner.NativeOwnerId, Limits::MaximumTextBytes) ||
+					!readQuoted(row, owner.InstanceBase, Limits::MaximumTextBytes) ||
+					!readQuoted(row, owner.UpdateAnimatorOwnerId, Limits::MaximumTextBytes) ||
+					!readQuoted(row, owner.UpdateAnimatorPort, Limits::MaximumTextBytes) ||
+					!(row >> token(kind) >> active >> show >> meta >> named >> override >> updateGraph) ||
+					HasTrailing(row) || (kind != "node" && kind != "group") || (active != 0 && active != 1) ||
+					(show != 0 && show != 1) || (meta != 0 && meta != 1) || (named != 0 && named != 1) ||
+					(override != 0 && override != 1) || (updateGraph != 0 && updateGraph != 1))
+					goto malformed;
+				owner.NativeOwnerKind =
+					kind == "node" ? SourceCommonNativeOwnerKind::Node : SourceCommonNativeOwnerKind::Group;
+				owner.Active = active;
+				owner.ShowUpdateTrigger = show;
+				owner.OutMeta = meta;
+				owner.DisplayNamePresent = named;
+				owner.UpdateOverrideInstance = override;
+				owner.UpdateGraph = updateGraph;
+				if (parsed.SourceCommonOwners.size() >= Limits::MaximumSourceCommonOwners ||
+					!reserveSlots(parsed.SourceCommonOwners, parsed.SourceCommonOwners.size() + 1))
+					goto limited;
+				parsed.SourceCommonOwners.push_back(std::move(owner));
+				const auto &saved = parsed.SourceCommonOwners.back();
+				for (const auto *name :
+					 {&saved.SourceOwnerId,
+					  &saved.SourceType,
+					  &saved.NativeOwnerId,
+					  &saved.InstanceBase,
+					  &saved.UpdateAnimatorOwnerId,
+					  &saved.UpdateAnimatorPort})
+					remember(*name);
+			} else if (marker == "source_common_expression" && parsed.FormatVersion >= 11) {
+				std::string id;
+				SourceInputExpression expression;
+				int enabled = 0;
+				if (!readQuoted(row, id, Limits::MaximumTextBytes) ||
+					!readQuoted(row, expression.Port, Limits::MaximumTextBytes) ||
+					!readQuoted(row, expression.Code, Limits::MaximumTextBytes) || !(row >> enabled) ||
+					(enabled != 0 && enabled != 1) || HasTrailing(row) || parsed.SourceCommonOwners.empty() ||
+					parsed.SourceCommonOwners.back().SourceOwnerId != id ||
+					parsed.SourceCommonOwners.back().UpdateExpression)
+					goto malformed;
+				expression.Enabled = enabled;
+				parsed.SourceCommonOwners.back().UpdateExpression = std::move(expression);
+				remember(parsed.SourceCommonOwners.back().UpdateExpression->Port);
+				remember(parsed.SourceCommonOwners.back().UpdateExpression->Code);
+			} else if (marker == "group_source_internal_name" && parsed.FormatVersion >= 11) {
+				size_t index = 0;
+				std::string id, name;
+				if (!(row >> index) || !readQuoted(row, id, Limits::MaximumTextBytes) ||
+					!readQuoted(row, name, Limits::MaximumTextBytes) || HasTrailing(row) || name.empty() ||
+					index >= parsed.Groups.size() || parsed.Groups[index].Id != id ||
+					!parsed.Groups[index].SourceInternalName.empty())
+					goto malformed;
+				parsed.Groups[index].SourceInternalName = std::move(name);
+				remember(parsed.Groups[index].SourceInternalName);
+			} else if (marker == "group_source_position" && parsed.FormatVersion >= 11) {
+				size_t index = 0;
+				std::string id;
+				Vector2 position;
+				if (!(row >> index) || !readQuoted(row, id, Limits::MaximumTextBytes) ||
+					!(row >> position.X >> position.Y) || HasTrailing(row) || index >= parsed.Groups.size() ||
+					parsed.Groups[index].Id != id || !std::isfinite(position.X) ||
+					!std::isfinite(position.Y) || !insertString(groupSourcePositions, id))
+					goto malformed;
+				parsed.Groups[index].SourcePosition = position;
 			} else if (marker == "source_animators" && parsed.FormatVersion >= 10) {
 				if (parsed.SourceAnimators || HasTrailing(row)) goto malformed;
 				if (budget &&
@@ -5098,7 +5281,7 @@ namespace engine::imagegraph {
 	}
 
 	Status Migrate(Document &document, Diagnostic &diagnostic) {
-		if (document.FormatVersion < 1 || document.FormatVersion > 10) {
+		if (document.FormatVersion < 1 || document.FormatVersion > 11) {
 			SetDiagnostic(diagnostic, Status::UnsupportedVersion, "unsupported imagegraph document version");
 			return diagnostic.Code;
 		}
@@ -5179,18 +5362,24 @@ namespace engine::imagegraph {
 
 	static const Node *
 	EffectiveInputOwner(const Document &document, const Node &start, std::string_view port);
+#include "SourceCommonGetters.inc"
+
+	static bool AddBytes(uint64_t &total, uint64_t bytes);
+
 	static Status CompileWithBudget(
 		const Document &document,
 		Plan &plan,
 		Diagnostic &diagnostic,
 		detail::EvaluationBudget &budget,
-		detail::AllocationReservation &planCharge
+		detail::AllocationReservation &planCharge,
+		bool allowNoDeclaredOutputs = false
 	) try {
-		if (document.FormatVersion < 1 || document.FormatVersion > 10) {
+		if (document.FormatVersion < 1 || document.FormatVersion > 11) {
 			SetDiagnostic(diagnostic, Status::UnsupportedVersion, "unsupported imagegraph document version");
 			return diagnostic.Code;
 		}
 		if (detail::ValidateSourceAnimatorState(document, diagnostic) != Status::Ok) return diagnostic.Code;
+		if (detail::ValidateSourceCommonOwners(document, diagnostic) != Status::Ok) return diagnostic.Code;
 		if (document.Nodes.size() > Limits::MaximumNodes || document.Links.size() > Limits::MaximumLinks ||
 			document.Groups.size() > Limits::MaximumGroups ||
 			document.Junctions.size() > Limits::MaximumJunctions ||
@@ -5967,7 +6156,10 @@ namespace engine::imagegraph {
 											unionProperty->Alternatives.end(),
 											TypeOf(value.Data)
 										) != unionProperty->Alternatives.end();
-				if (TypeOf(value.Data) != property->Type && !unionValue &&
+				const bool tunnelLiteral = node.Type == "pc.tunnel_in" && value.Port == "value_in" &&
+										   property->Type == ValueType::Any &&
+										   detail::ValidValuePayload(value.Data, false);
+				if (TypeOf(value.Data) != property->Type && !unionValue && !tunnelLiteral &&
 					!(node.Type == "pc.group_input" && value.Port == "parent_value") &&
 					!detail::SourceArgumentAuthoredDefault(node, value.Port, value.Data) &&
 					!sourceArrayMatches && !sourceEnumMatches && !sourceEmptyMatches &&
@@ -6452,6 +6644,15 @@ namespace engine::imagegraph {
 		}
 
 		for (const Group &group : document.Groups) {
+			if ((!group.RenderActive || !group.PureFunction) && document.FormatVersion < 10) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnsupportedVersion,
+					"group rendering and purity flags need document version 10",
+					group.Id
+				);
+				return diagnostic.Code;
+			}
 			if (group.Interpolation < 0 || group.Interpolation > 7 || group.Oversample < 0 ||
 				group.Oversample > 13) {
 				SetDiagnostic(
@@ -6744,6 +6945,35 @@ namespace engine::imagegraph {
 				current = &document.Nodes[base->second];
 			}
 		}
+		for (const Node &node : document.Nodes) {
+			const Node *current = &node;
+			for (size_t hop = 0; !current->SourceParentInputBase.empty(); ++hop) {
+				if (document.FormatVersion < 10 || current->Type != "pc.group_input" ||
+					current->SourceParentInputBase.size() > Limits::MaximumTextBytes ||
+					hop >= document.Nodes.size()) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidGroup,
+						"parent input base is invalid or cyclic",
+						node.Id,
+						"parent_value"
+					);
+					return diagnostic.Code;
+				}
+				const auto base = nodeIndices.find(current->SourceParentInputBase);
+				if (base == nodeIndices.end() || document.Nodes[base->second].Type != "pc.group_input") {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidGroup,
+						"parent input base must name a Group input",
+						node.Id,
+						"parent_value"
+					);
+					return diagnostic.Code;
+				}
+				current = &document.Nodes[base->second];
+			}
+		}
 		for (const Group &group : document.Groups) {
 			const Group *current = &group;
 			for (size_t hop = 0; !current->InstanceBase.empty(); ++hop) {
@@ -6999,6 +7229,9 @@ namespace engine::imagegraph {
 						 ) != port->Alternatives.end())
 					keyedType = TypeOf(keyframe.Data);
 			}
+			if (keyNode.Type == "pc.tunnel_in" && keyframe.Port == "value_in" && property &&
+				property->Type == ValueType::Any && detail::ValidValuePayload(keyframe.Data, false))
+				keyedType = TypeOf(keyframe.Data);
 			if (document.FormatVersion >= 9 && keyframe.Interpolation == "source" &&
 				detail::SourceArgumentAuthoredDefault(
 					document.Nodes[node->second], keyframe.Port, keyframe.Data
@@ -7377,8 +7610,24 @@ namespace engine::imagegraph {
 			const auto to = nodeIndices.find(link.ToNode);
 			const auto fromJunction = junctionIndices.find(link.FromNode);
 			const auto toJunction = junctionIndices.find(link.ToNode);
-			if ((from == nodeIndices.end() && fromJunction == junctionIndices.end()) ||
-				(to == nodeIndices.end() && toJunction == junctionIndices.end())) {
+			const auto commonFromSelector = detail::CommonSelector(link.FromPort);
+			const auto commonToSelector = detail::CommonSelector(link.ToPort);
+			const auto *commonFrom =
+				commonFromSelector ? detail::CommonOwner(document, link.FromNode) : nullptr;
+			const auto *commonTo = commonToSelector ? detail::CommonOwner(document, link.ToNode) : nullptr;
+			if ((commonFromSelector && !commonFrom) ||
+				(commonToSelector && (!commonTo || *commonToSelector != SourceCommonSelector::Update))) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnknownPort,
+					"common route selector or owner is invalid",
+					link.ToNode,
+					link.ToPort
+				);
+				return diagnostic.Code;
+			}
+			if ((from == nodeIndices.end() && fromJunction == junctionIndices.end() && !commonFrom) ||
+				(to == nodeIndices.end() && toJunction == junctionIndices.end() && !commonTo)) {
 				SetDiagnostic(
 					diagnostic,
 					Status::InvalidOutput,
@@ -7388,12 +7637,14 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			const std::string &sourceGroup = from != nodeIndices.end()
-												 ? document.Nodes[from->second].GroupId
-												 : document.Junctions[fromJunction->second].GroupId;
-			const std::string &targetGroup = to != nodeIndices.end()
-												 ? document.Nodes[to->second].GroupId
-												 : document.Junctions[toJunction->second].GroupId;
+			const std::string_view sourceGroup = commonFrom ? detail::CommonOwnerScope(document, *commonFrom)
+												 : from != nodeIndices.end()
+													 ? document.Nodes[from->second].GroupId
+													 : document.Junctions[fromJunction->second].GroupId;
+			const std::string_view targetGroup = commonTo ? detail::CommonOwnerScope(document, *commonTo)
+												 : to != nodeIndices.end()
+													 ? document.Nodes[to->second].GroupId
+													 : document.Junctions[toJunction->second].GroupId;
 			const auto transparentScope = [&](std::string_view scope) {
 				for (size_t depth = 0; !scope.empty() && depth < document.Groups.size(); ++depth) {
 					const auto group =
@@ -7453,14 +7704,18 @@ namespace engine::imagegraph {
 				}
 			}
 			std::optional<ValueType> source;
-			if (from != nodeIndices.end())
+			if (commonFrom)
+				source = detail::CommonSelectorType(*commonFromSelector);
+			else if (from != nodeIndices.end())
 				source = FindPortType(
 					document.Nodes[from->second], link.FromPort, PortDirection::Output, &document
 				);
 			else if (link.FromPort == "value")
 				source = document.Junctions[fromJunction->second].Type;
 			std::optional<ValueType> target;
-			if (to != nodeIndices.end())
+			if (commonTo)
+				target = ValueType::Any;
+			else if (to != nodeIndices.end())
 				target = FindPortType(document.Nodes[to->second], link.ToPort, PortDirection::Input);
 			else if (link.ToPort == "value")
 				target = document.Junctions[toJunction->second].Type;
@@ -7570,9 +7825,13 @@ namespace engine::imagegraph {
 					});
 				});
 			};
-			const bool boundaryLink =
-				(fromJunction != junctionIndices.end() && dynamicBoundary(link.FromNode)) ||
-				(toJunction != junctionIndices.end() && dynamicBoundary(link.ToNode));
+			// Any junctions retain consumer-resolved transport when a source group is ungrouped.
+			const bool boundaryLink = (fromJunction != junctionIndices.end() &&
+									   (document.Junctions[fromJunction->second].Type == ValueType::Any ||
+										dynamicBoundary(link.FromNode))) ||
+									  (toJunction != junctionIndices.end() &&
+									   (document.Junctions[toJunction->second].Type == ValueType::Any ||
+										dynamicBoundary(link.ToNode)));
 			const bool catalogueLink =
 				(from != nodeIndices.end() && FindCatalogueEntry(document.Nodes[from->second].Type)) ||
 				(to != nodeIndices.end() && FindCatalogueEntry(document.Nodes[to->second].Type));
@@ -7642,7 +7901,8 @@ namespace engine::imagegraph {
 				!heightBlendArrayInput && !heightBlendArrayOutput && !catalogueArrayInput &&
 				!catalogueAtlasArrayInput && !catalogueStrandArrayInput && !sourceMaterialInput &&
 				!heightmapColourArrayInput && !sourceFontInput &&
-				!((catalogueLink || boundaryLink) && JunctionCompatible(sourceType, targetType))) {
+				!((catalogueLink || boundaryLink || commonFrom || commonTo) &&
+				  CatalogueJunctionCompatible(sourceType, targetType))) {
 				SetDiagnostic(
 					diagnostic,
 					Status::TypeMismatch,
@@ -7665,8 +7925,9 @@ namespace engine::imagegraph {
 			}
 			if (toJunction != junctionIndices.end()) junctionInputs.emplace(link.ToNode, &link);
 		}
-		const uint64_t planStorageBytes = (document.Nodes.size() + document.Outputs.size()) * sizeof(size_t) +
-										  document.Links.size() * (sizeof(Link) + sizeof(ResolvedInput));
+		const uint64_t planStorageBytes =
+			(document.Nodes.size() + document.Outputs.size()) * sizeof(size_t) +
+			document.Links.size() * (sizeof(Link) + sizeof(ResolvedInput) + sizeof(SourceCommonRoute));
 		auto storageCharge = budget.Reserve(planStorageBytes);
 		if (!storageCharge || !planCharge.Merge(std::move(*storageCharge))) {
 			SetDiagnostic(
@@ -7676,10 +7937,15 @@ namespace engine::imagegraph {
 		}
 		std::vector<Link> effectiveLinks;
 		std::vector<ResolvedInput> resolvedInputs;
+		std::vector<SourceCommonRoute> commonRoutes;
+		commonRoutes.reserve(document.Links.size());
 		effectiveLinks.reserve(document.Links.size());
 		resolvedInputs.reserve(document.Links.size());
 		for (const Link &link : document.Links) {
-			if (!nodeIndices.contains(link.ToNode)) continue;
+			if (!nodeIndices.contains(link.ToNode) &&
+				!(detail::CommonSelector(link.ToPort) == SourceCommonSelector::Update &&
+				  detail::CommonOwner(document, link.ToNode)))
+				continue;
 			std::string_view sourceNode = link.FromNode;
 			std::string_view sourcePort = link.FromPort;
 			auto visited = detail::MakeEvaluationHashSet<std::string_view>(budget);
@@ -7727,10 +7993,16 @@ namespace engine::imagegraph {
 				sourcePort = input->second->FromPort;
 			}
 			if (!usedDefault) {
-				const uint64_t nameBytes = std::max(sourceNode.size(), std::string{}.capacity()) +
-										   std::max(sourcePort.size(), std::string{}.capacity()) +
-										   std::max(link.ToNode.size(), std::string{}.capacity()) +
-										   std::max(link.ToPort.size(), std::string{}.capacity());
+				uint64_t nameBytes = std::max(sourceNode.size(), std::string{}.capacity()) +
+									 std::max(sourcePort.size(), std::string{}.capacity()) +
+									 std::max(link.ToNode.size(), std::string{}.capacity()) +
+									 std::max(link.ToPort.size(), std::string{}.capacity());
+				if ((detail::CommonSelector(sourcePort) && detail::CommonOwner(document, sourceNode)) ||
+					detail::CommonSelector(link.ToPort) == SourceCommonSelector::Update)
+					if (!AddBytes(nameBytes, std::max(sourcePort.size(), std::string{}.capacity()))) {
+						SetDiagnostic(diagnostic, Status::LimitExceeded, "common route name size overflows");
+						return diagnostic.Code;
+					}
 				auto routeCharge = budget.Reserve(nameBytes);
 				if (!routeCharge || !planCharge.Merge(std::move(*routeCharge))) {
 					SetDiagnostic(
@@ -7742,9 +8014,23 @@ namespace engine::imagegraph {
 					);
 					return diagnostic.Code;
 				}
-				effectiveLinks.push_back(
-					{std::string(sourceNode), std::string(sourcePort), link.ToNode, link.ToPort}
-				);
+				const auto selector = detail::CommonSelector(sourcePort);
+				const auto *commonOwner = selector ? detail::CommonOwner(document, sourceNode) : nullptr;
+				const bool updateDestination =
+					detail::CommonSelector(link.ToPort) == SourceCommonSelector::Update;
+				if (commonOwner || updateDestination) {
+					commonRoutes.push_back(
+						{commonOwner ? commonOwner->SourceOwnerId : std::string(sourceNode),
+						 selector.value_or(SourceCommonSelector::HeldOutput),
+						 link.ToNode,
+						 link.ToPort,
+						 updateDestination,
+						 std::string(sourcePort)}
+					);
+				} else
+					effectiveLinks.push_back(
+						{std::string(sourceNode), std::string(sourcePort), link.ToNode, link.ToPort}
+					);
 			}
 		}
 		// An unconnected source instance reads the nearest base input, including its link.
@@ -7760,9 +8046,9 @@ namespace engine::imagegraph {
 				if (linkedInputs.contains({current->Id, port}) ||
 					std::find(current->InstanceOverrides.begin(), current->InstanceOverrides.end(), port) !=
 						current->InstanceOverrides.end() ||
-					current->InstanceBase.empty())
+					detail::SourceInputInstanceBase(*current, port).empty())
 					return current;
-				const auto found = nodeIndices.find(current->InstanceBase);
+				const auto found = nodeIndices.find(detail::SourceInputInstanceBase(*current, port));
 				if (found == nodeIndices.end()) return nullptr;
 				current = &document.Nodes[found->second];
 			}
@@ -7772,7 +8058,7 @@ namespace engine::imagegraph {
 		uint64_t inheritedBytes = 0;
 		const auto visitInherited = [&](bool publish) -> bool {
 			for (const Node &node : document.Nodes) {
-				if (node.InstanceBase.empty()) continue;
+				if (node.InstanceBase.empty() && node.SourceParentInputBase.empty()) continue;
 				for (size_t routeIndex = 0; routeIndex < authoredRoutes + authoredDefaults; ++routeIndex) {
 					const bool isDefault = routeIndex >= authoredRoutes;
 					const size_t sourceIndex = isDefault ? routeIndex - authoredRoutes : routeIndex;
@@ -8322,6 +8608,130 @@ namespace engine::imagegraph {
 			downstream[producer].push_back(consumer);
 			return true;
 		};
+
+		uint64_t tunnelSelectorWork = 0;
+		const auto tunnelSelector = [&](const Node &node, std::string_view port, const Value *&value) {
+			const Node *owner = inputRouteOwner(node, port);
+			if (!owner) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"tunnel registry input owner exceeds bounded work",
+					node.Id,
+					std::string(port)
+				);
+				return false;
+			}
+			const uint64_t units = 1 + effectiveLinks.size() + resolvedInputs.size() +
+								   document.Keyframes.size() + owner->SourceInputExpressions.size() +
+								   owner->SourceAnimatedInputs.size() + owner->Values.size();
+			if (units > 64'000'000 - tunnelSelectorWork) {
+				SetDiagnostic(
+					diagnostic,
+					Status::LimitExceeded,
+					"tunnel registry getter traversal exceeds bounded work",
+					node.Id,
+					std::string(port)
+				);
+				return false;
+			}
+			tunnelSelectorWork += units;
+			const bool changing =
+				std::any_of(
+					effectiveLinks.begin(),
+					effectiveLinks.end(),
+					[&](const Link &link) { return link.ToNode == owner->Id && link.ToPort == port; }
+				) ||
+				std::any_of(
+					owner->SourceInputExpressions.begin(),
+					owner->SourceInputExpressions.end(),
+					[&](const auto &expression) { return expression.Port == port && expression.Enabled; }
+				) ||
+				std::find(owner->SourceAnimatedInputs.begin(), owner->SourceAnimatedInputs.end(), port) !=
+					owner->SourceAnimatedInputs.end();
+			if (changing) {
+				value = nullptr;
+				return true;
+			}
+			for (const auto &resolved : resolvedInputs)
+				if (resolved.NodeId == owner->Id && resolved.Port == port) {
+					value = &resolved.Data;
+					return true;
+				}
+			if (const auto *stored = FindValue(*owner, port)) {
+				value = &stored->Data;
+				return true;
+			}
+			for (const auto &key : document.Keyframes)
+				if (key.NodeId == owner->Id && key.Port == port) {
+					value = &key.Data;
+					return true;
+				}
+			value = nullptr;
+			return true;
+		};
+		bool dynamicTunnelRegistry = false;
+		for (const auto &node : document.Nodes) {
+			if (node.Type != "pc.tunnel_in" && node.Type != "pc.tunnel_out") continue;
+			for (const auto port : {std::string_view{"name"}, std::string_view{"scope"}}) {
+				if (port == "scope" && node.Type == "pc.tunnel_out") continue;
+				const Node *owner = inputRouteOwner(node, port);
+				if (!owner) {
+					SetDiagnostic(
+						diagnostic,
+						Status::InvalidValue,
+						"tunnel selector owner is unavailable",
+						node.Id,
+						std::string(port)
+					);
+					return diagnostic.Code;
+				}
+				const uint64_t selectorUnits = effectiveLinks.size() + owner->SourceInputExpressions.size() +
+											   owner->SourceAnimatedInputs.size() +
+											   owner->SourceProperties.size() + document.Keyframes.size();
+				if (selectorUnits > 64'000'000 - tunnelSelectorWork) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"tunnel selector checks exceed bounded work",
+						node.Id,
+						std::string(port)
+					);
+					return diagnostic.Code;
+				}
+				tunnelSelectorWork += selectorUnits;
+				dynamicTunnelRegistry |=
+					std::any_of(
+						effectiveLinks.begin(),
+						effectiveLinks.end(),
+						[&](const Link &link) { return link.ToNode == owner->Id && link.ToPort == port; }
+					) ||
+					std::any_of(
+						owner->SourceInputExpressions.begin(),
+						owner->SourceInputExpressions.end(),
+						[&](const auto &expression) { return expression.Port == port && expression.Enabled; }
+					) ||
+					std::find(owner->SourceAnimatedInputs.begin(), owner->SourceAnimatedInputs.end(), port) !=
+						owner->SourceAnimatedInputs.end() ||
+					std::any_of(
+						document.Keyframes.begin(),
+						document.Keyframes.end(),
+						[&](const auto &key) { return key.NodeId == owner->Id && key.Port == port; }
+					) ||
+					std::any_of(
+						owner->SourceProperties.begin(),
+						owner->SourceProperties.end(),
+						[&](const auto &property) {
+							const auto *expression = std::get_if<std::string>(&property.Data);
+							return port == "name" && property.Port == "nameExpression" && expression &&
+								   !expression->empty();
+						}
+					);
+			}
+		}
+		if (!dynamicTunnelRegistry &&
+			!detail::CompileSourceTunnelRoutes(document, tunnelSelector, addPcxRoute, diagnostic))
+			return diagnostic.Code;
 		for (size_t consumer = 0; consumer < document.Nodes.size(); ++consumer) {
 			const auto &authored = document.Nodes[consumer];
 			const auto *catalogue = FindCatalogueEntry(authored.Type);
@@ -8340,7 +8750,7 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			}
 			std::vector<std::string_view> expressionPorts;
-			std::vector<std::pair<std::string_view, bool>> programs;
+			std::vector<std::tuple<std::string_view, bool, bool>> programs;
 			for (const auto &expression : authored.SourceInputExpressions) {
 				if (expression.Port.size() > Limits::MaximumTextBytes ||
 					expression.Code.size() > Limits::MaximumTextBytes ||
@@ -8360,7 +8770,13 @@ namespace engine::imagegraph {
 				expressionPorts.push_back(expression.Port);
 				if (expression.Enabled) {
 					const auto *owner = EffectiveInputOwner(document, authored, expression.Port);
-					if (!owner || owner->Id == authored.Id) programs.emplace_back(expression.Code, true);
+					if (!owner || owner->Id == authored.Id)
+						programs.emplace_back(
+							expression.Code,
+							true,
+							(authored.Type == "pc.tunnel_in" || authored.Type == "pc.tunnel_out") &&
+								(expression.Port == "name" || expression.Port == "scope")
+						);
 				}
 			}
 			const auto appendInheritedProgram = [&](std::string_view port) {
@@ -8368,7 +8784,12 @@ namespace engine::imagegraph {
 				if (!owner || owner->Id == authored.Id) return;
 				for (const auto &expression : owner->SourceInputExpressions)
 					if (expression.Port == port && expression.Enabled)
-						programs.emplace_back(expression.Code, true);
+						programs.emplace_back(
+							expression.Code,
+							true,
+							(authored.Type == "pc.tunnel_in" || authored.Type == "pc.tunnel_out") &&
+								(expression.Port == "name" || expression.Port == "scope")
+						);
 			};
 			if (catalogue)
 				for (const auto &input : catalogue->Inputs)
@@ -8378,19 +8799,19 @@ namespace engine::imagegraph {
 			if (authored.Type == "pc.equation" || authored.Type == "pc.pcx_equation") {
 				if (const auto *value = FindValue(authored, "equation"))
 					if (const auto *text = std::get_if<std::string>(&value->Data))
-						programs.emplace_back(*text, false);
+						programs.emplace_back(*text, false, false);
 			}
 			if (authored.Type == "pc.equation" || authored.Type == "pc.pcx_equation")
 				for (const auto &key : document.Keyframes)
 					if (key.NodeId == authored.Id && key.Port == "equation")
 						if (const auto *code = std::get_if<std::string>(&key.Data))
-							programs.emplace_back(*code, false);
+							programs.emplace_back(*code, false, false);
 			if (authored.Type == "pc.globalvar" && !document.ProjectGlobalNodeId.empty()) {
 				const size_t producer = nodeIndices.at(document.ProjectGlobalNodeId);
 				for (const auto &input : document.Nodes[producer].DynamicInputs)
 					if (!addPcxRoute(consumer, producer, input.Id, input.Id, true)) return diagnostic.Code;
 			}
-			for (const auto &[code, program] : programs) {
+			for (const auto &[code, program, preRender] : programs) {
 				auto parserCharge = budget.Reserve(
 					code.size() * 8 + 4096 * sizeof(PcxInstruction) + 4 * Limits::MaximumArrayBytes
 				);
@@ -8412,6 +8833,7 @@ namespace engine::imagegraph {
 					diagnostic.NodeId = authored.Id;
 					return diagnostic.Code;
 				}
+				if (preRender) continue;
 				std::vector<size_t> consumers{consumer};
 				if (!program && authored.Type == "pc.pcx_equation") {
 					for (size_t position = 0; position < consumers.size(); ++position)
@@ -8453,6 +8875,7 @@ namespace engine::imagegraph {
 				for (const auto &instruction : tree.Data->Instructions) {
 					if (instruction.Operation != "name") continue;
 					const auto &name = std::get<std::string>(instruction.Literal);
+					if (detail::CommonNamed(document, name)) continue;
 					if (std::find(locals.begin(), locals.end(), name) != locals.end() ||
 						name.starts_with("self."))
 						continue;
@@ -8612,8 +9035,11 @@ namespace engine::imagegraph {
 				return diagnostic.Code;
 			}
 			const auto node = nodeIndices.find(output.NodeId);
+			const auto commonSelector = detail::CommonSelector(output.Port);
+			const auto *commonOwner = commonSelector ? detail::CommonOwner(document, output.NodeId) : nullptr;
 			const auto port =
-				node == nodeIndices.end()
+				commonOwner ? std::optional{detail::CommonSelectorType(*commonSelector)}
+				: node == nodeIndices.end()
 					? std::optional<ValueType>{}
 					: FindPortType(
 						  document.Nodes[node->second], output.Port, PortDirection::Output, &document
@@ -8628,9 +9054,11 @@ namespace engine::imagegraph {
 				);
 				return diagnostic.Code;
 			}
-			outputNodes.push_back(node->second);
+			outputNodes.push_back(
+				commonOwner && node == nodeIndices.end() ? document.Nodes.size() : node->second
+			);
 		}
-		if (document.Outputs.empty()) {
+		if (document.Outputs.empty() && !allowNoDeclaredOutputs) {
 			SetDiagnostic(diagnostic, Status::InvalidOutput, "document has no declared output");
 			return diagnostic.Code;
 		}
@@ -8642,10 +9070,12 @@ namespace engine::imagegraph {
 			if (indegree[index] == 0) ready.push(index);
 		}
 		Plan compiled;
+		compiled.SourceCommonRuntimeOnly = allowNoDeclaredOutputs;
 		compiled.NodeOrder.reserve(document.Nodes.size());
 		compiled.OutputNodes = std::move(outputNodes);
 		compiled.EffectiveLinks = std::move(effectiveLinks);
 		compiled.ResolvedInputs = std::move(resolvedInputs);
+		compiled.SourceCommonRoutes = std::move(commonRoutes);
 		compiled.GroupSurfaceDependencies = std::move(surfaceDependencies);
 		compiled.InlineOwnerDependencies = std::move(inlineDependencies);
 		compiled.InlineControlDependencies = std::move(inlineControlDependencies);
@@ -8677,6 +9107,24 @@ namespace engine::imagegraph {
 	} catch (const std::length_error &) {
 		SetDiagnostic(diagnostic, Status::LimitExceeded, "compile storage capacity exceeds native bounds");
 		return diagnostic.Code;
+	}
+
+	Status CompileSourceCommonRuntime(
+		const Document &document, Plan &plan, Diagnostic &diagnostic, uint64_t maximumBytes
+	) {
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "common runtime compile cap exceeds bounds");
+			return diagnostic.Code;
+		}
+		detail::EvaluationBudget budget(maximumBytes);
+		const auto bytes = DocumentRetainedPayloadBytes(document);
+		auto authored = bytes ? budget.Reserve(*bytes) : std::nullopt;
+		if (!authored) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "common authored document exceeds live bytes");
+			return diagnostic.Code;
+		}
+		detail::AllocationReservation charge;
+		return CompileWithBudget(document, plan, diagnostic, budget, charge, true);
 	}
 
 	Status Compile(const Document &document, Plan &plan, Diagnostic &diagnostic) {
@@ -8933,7 +9381,6 @@ namespace engine::imagegraph {
 			bytes += image.Pixels.size();
 		return bytes;
 	}
-	static bool AddBytes(uint64_t &total, uint64_t bytes);
 	static bool AddArrayBytes(uint64_t &total, size_t count, size_t elementBytes);
 	static uint64_t RetainedImageArrayBytes(const ImageArray &images) {
 		uint64_t bytes = 0;
@@ -9182,7 +9629,7 @@ namespace engine::imagegraph {
 				if (std::holds_alternative<SurfaceValue>(*port.Data)) {
 					++images;
 					if (!AddBytes(bytes, sizeof(std::pair<std::string, Image>))) return overflow();
-				} else if (node.Type == "value.array" && std::holds_alternative<ArrayValue>(*port.Data)) {
+				} else if (port.ImageArrayPayload && std::holds_alternative<ArrayValue>(*port.Data)) {
 					++arrays;
 					size_t arrayImages = 0, arrayItems = 0;
 					if (!MeasureFrozenImageArray(std::get<ArrayValue>(*port.Data), arrayImages, arrayItems)) {
@@ -9241,7 +9688,7 @@ namespace engine::imagegraph {
 			if (!port.Data) continue;
 			if (const auto *surface = std::get_if<SurfaceValue>(&*port.Data))
 				output.Images.emplace_back(port.Port, surface->Data);
-			else if (node.Type == "value.array" && std::holds_alternative<ArrayValue>(*port.Data)) {
+			else if (port.ImageArrayPayload && std::holds_alternative<ArrayValue>(*port.Data)) {
 				ArrayValue owned = std::get<ArrayValue>(*port.Data);
 				size_t arrayImages = 0, arrayItems = 0;
 				if (!MeasureFrozenImageArray(owned, arrayImages, arrayItems)) std::terminate();
@@ -9255,6 +9702,7 @@ namespace engine::imagegraph {
 	}
 
 	struct CacheGroupCaptureView {
+		bool ImageArrayPayload = false;
 		std::string_view Port;
 		const Value *Data = nullptr;
 		const Image *Surface = nullptr;
@@ -9380,6 +9828,7 @@ namespace engine::imagegraph {
 			auto *view = find(port.Port);
 			if (!view) return false;
 			view->Data = port.Data ? &*port.Data : nullptr;
+			view->ImageArrayPayload = port.ImageArrayPayload;
 			view->Domain = port.Domain;
 			view->Refusal = port.Refusal ? &*port.Refusal : nullptr;
 		}
@@ -9387,6 +9836,7 @@ namespace engine::imagegraph {
 			auto *view = find(port);
 			if (view && !view->Published) {
 				view->Data = nullptr;
+				view->ImageArrayPayload = false;
 				view->Refusal = nullptr;
 				view->Domain = FindOutputDomain(node, result, port);
 				view->Published = true;
@@ -9403,6 +9853,7 @@ namespace engine::imagegraph {
 				auto *view = publish(id);
 				if (!view) return false;
 				view->Images = &images;
+				view->ImageArrayPayload = true;
 			}
 			for (const auto &value : catalogue->Values) {
 				auto *view = publish(value.Port);
@@ -9437,6 +9888,7 @@ namespace engine::imagegraph {
 				if (!view) return false;
 				view->Surface = surface;
 				view->Images = images;
+				view->ImageArrayPayload = images != nullptr;
 			}
 		}
 		uint64_t bytes = views.size() * sizeof(CacheGroupReplayOutput);
@@ -9473,6 +9925,7 @@ namespace engine::imagegraph {
 				view.Data = nullptr;
 				view.Surface = nullptr;
 				view.Images = nullptr;
+				view.ImageArrayPayload = false;
 				payload = 0;
 			}
 			if (!AddBytes(bytes, *payload))
@@ -9490,6 +9943,7 @@ namespace engine::imagegraph {
 		for (const auto &view : views) {
 			CacheGroupReplayOutput output;
 			output.Port = view.Port;
+			output.ImageArrayPayload = view.ImageArrayPayload;
 			output.Domain = view.Domain;
 			if (view.Refusal) output.Refusal = *view.Refusal;
 			if (view.Data)
@@ -9546,6 +10000,7 @@ namespace engine::imagegraph {
 	};
 	struct PcxEvaluationNames final : PcxNameResolver {
 		size_t Consumer;
+		const EvaluationRequest *CommonRequest = nullptr;
 		const Plan &Compiled;
 		const Document &Authored;
 		const std::vector<NodeResult> &Results;
@@ -9664,6 +10119,31 @@ namespace engine::imagegraph {
 		bool Resolve(std::string_view name, Value &value, Diagnostic &diagnostic) const override {
 			if (name.starts_with("Project.") || name.starts_with("Program.") || name.starts_with("Device."))
 				return false;
+			if (const auto common = detail::CommonNamed(Authored, name)) {
+				if (!CommonRequest || !RouteBudget || !RouteCharge) {
+					diagnostic = {
+						Status::UnsupportedExecution,
+						common->Owner->SourceOwnerId,
+						{},
+						"common PCX getter needs borrowed runtime state"
+					};
+					return false;
+				}
+				detail::AllocationReservation charge;
+				const auto status = detail::ReadSourceCommonGetter(
+					Authored,
+					Compiled,
+					common->Owner->SourceOwnerId,
+					common->Selector,
+					*CommonRequest,
+					*RouteBudget,
+					value,
+					charge,
+					diagnostic
+				);
+				if (status == Status::Ok && !RouteCharge->Merge(std::move(charge))) std::terminate();
+				return status == Status::Ok;
+			}
 			const auto compiled = std::find_if(
 				Compiled.PcxNamedDependencies.begin(),
 				Compiled.PcxNamedDependencies.end(),
@@ -10052,21 +10532,23 @@ namespace engine::imagegraph {
 	static const Node *
 	EffectiveInputOwner(const Document &document, const Node &start, std::string_view port) {
 		const Node *current = &start;
-		if (port == "parent_value") return current;
 		for (size_t hop = 0; hop < document.Nodes.size(); ++hop) {
 			if (std::find(current->InstanceOverrides.begin(), current->InstanceOverrides.end(), port) !=
 				current->InstanceOverrides.end())
 				return current;
-			if (current->InstanceBase.empty()) return current;
+			if (detail::SourceInputInstanceBase(*current, port).empty()) return current;
 			const auto base =
 				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
-					return node.Id == current->InstanceBase && node.Type == current->Type;
+					return node.Id == detail::SourceInputInstanceBase(*current, port) &&
+						   node.Type == current->Type;
 				});
 			if (base == document.Nodes.end()) return nullptr;
 			current = &*base;
 		}
 		return nullptr;
 	}
+
+#include "SourceCommonInputMaps.inc"
 
 	static const Node *SourceExpressionOwner(
 		const Document &document,
@@ -10087,6 +10569,7 @@ namespace engine::imagegraph {
 		}
 		if (binding && detail::MovedSourceAnimator(*binding)) {
 			const bool linked =
+				detail::CommonInputRoute(document, plan, local.Id, port) ||
 				std::any_of(
 					plan.EffectiveLinks.begin(),
 					plan.EffectiveLinks.end(),
@@ -10098,6 +10581,931 @@ namespace engine::imagegraph {
 			owner = linked ? &local : EffectiveInputOwner(document, local, port);
 		}
 		return owner;
+	}
+
+	// Evaluation borrows durable names and keeps one exact-capacity index buffer.
+	class EvaluationNodeIndices {
+	  public:
+		explicit EvaluationNodeIndices(const Document &document) {
+			Entries.reserve(document.Nodes.size());
+			for (size_t index = 0; index < document.Nodes.size(); ++index)
+				Entries.emplace_back(document.Nodes[index].Id, index);
+			std::sort(Entries.begin(), Entries.end());
+		}
+		std::optional<size_t> find(std::string_view id) const {
+			const auto found = std::lower_bound(
+				Entries.begin(), Entries.end(), id, [](const auto &entry, std::string_view name) {
+					return entry.first < name;
+				}
+			);
+			return found == Entries.end() || found->first != id ? std::nullopt
+																: std::optional<size_t>{found->second};
+		}
+		size_t at(std::string_view id) const {
+			const auto found = std::lower_bound(
+				Entries.begin(), Entries.end(), id, [](const auto &entry, std::string_view name) {
+					return entry.first < name;
+				}
+			);
+			assert(found != Entries.end() && found->first == id);
+			return found->second;
+		}
+
+	  private:
+		std::vector<std::pair<std::string_view, size_t>> Entries;
+	};
+
+	// Source checkTunnels runs before this frame updates producer outputs.
+	static Status ResolveSourceTunnelRegistry(
+		const Document &document,
+		const EvaluationRequest &request,
+		Plan &plan,
+		detail::EvaluationBudget &budget,
+		detail::AllocationReservation &planCharge,
+		Diagnostic &diagnostic,
+		bool priorAlreadyAdmitted = false,
+		std::vector<SourceTunnelRegistryObservation> *registry = nullptr,
+		const Node *getterNode = nullptr,
+		CacheGroupReplayOutput *getterOutput = nullptr,
+		std::span<const NodeResult> getterResults = {},
+		std::span<const uint8_t> getterProduced = {},
+		DataReplayState *getterData = nullptr,
+		std::string_view getterPort = "value_in",
+		uint64_t *sharedWork = nullptr
+	) {
+		if (!detail::ValidateSourceTunnelRegistryObservations(
+				document, request.SourceTunnelRegistryObservations, diagnostic
+			))
+			return diagnostic.Code;
+		if (!std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
+				return node.Type == "pc.tunnel_in" || node.Type == "pc.tunnel_out";
+			}))
+			return Status::Ok;
+		const uint64_t indexBytes = document.Nodes.size() * sizeof(std::pair<std::string_view, size_t>);
+		auto indexCharge = budget.Reserve(indexBytes);
+		if (!indexCharge) {
+			diagnostic = {Status::LimitExceeded, {}, {}, "tunnel registry index exceeds live bytes"};
+			return diagnostic.Code;
+		}
+		const EvaluationNodeIndices indices(document);
+		uint64_t localWork = 0;
+		uint64_t &work = sharedWork ? *sharedWork : localWork;
+		const auto spend = [&](uint64_t count) {
+			if (count > 64'000'000 - work) {
+				diagnostic = {Status::LimitExceeded, {}, {}, "tunnel registry getter work exceeds bounds"};
+				return false;
+			}
+			work += count;
+			return true;
+		};
+		uint64_t observationBytes =
+			request.SourceTunnelRegistryObservations.size() * sizeof(SourceTunnelRegistryObservation);
+		for (const auto &row : request.SourceTunnelRegistryObservations)
+			observationBytes += row.NodeId.capacity() + 2 * row.Name.capacity();
+		auto observations = budget.Reserve(observationBytes);
+		if (!observations) {
+			diagnostic = {Status::LimitExceeded, {}, {}, "tunnel registry observations exceed live bytes"};
+			return diagnostic.Code;
+		}
+		const auto *prior = request.SourceTunnelPreviousOutputs;
+		if (!prior && request.GroupRender) prior = &request.GroupRender->Outputs;
+		if (!prior && request.DataReplay) prior = &request.DataReplay->CacheGroups;
+		detail::AllocationReservation priorCharge;
+		if (prior) {
+			if (ValidateCacheGroupReplay(*prior, budget.Available(), diagnostic) != Status::Ok)
+				return diagnostic.Code;
+			const bool alreadyAdmitted = priorAlreadyAdmitted ||
+										 (request.GroupRender && prior == &request.GroupRender->Outputs) ||
+										 (request.DataReplay && prior == &request.DataReplay->CacheGroups);
+			auto admitted = budget.Reserve(alreadyAdmitted ? 0 : RetainedCacheGroupReplayBytes(*prior));
+			if (!admitted) {
+				diagnostic = {
+					Status::LimitExceeded, {}, {}, "tunnel registry prior outputs exceed live bytes"
+				};
+				return diagnostic.Code;
+			}
+			priorCharge = std::move(*admitted);
+		}
+		if (request.DataReplay) {
+			auto validation = budget.Reserve(DataReplayValidationWorkspaceBytes(*request.DataReplay));
+			if (!validation) {
+				diagnostic = {
+					Status::LimitExceeded, {}, {}, "tunnel callback journal validation exceeds live bytes"
+				};
+				return diagnostic.Code;
+			}
+			if (ValidateDataReplay(*request.DataReplay, Limits::MaximumEvaluationBytes, diagnostic) !=
+				Status::Ok)
+				return diagnostic.Code;
+		}
+		CacheGroupReplayState constructors;
+		detail::AllocationReservation constructorCharge;
+		bool initialized = false;
+		const auto constructor =
+			[&](const Node &node, std::string_view port, Diagnostic &failure) -> const Value * {
+			if (!initialized) {
+				if (detail::InitializeGroupRenderOutputs(
+						document, {}, constructors, budget.Available(), failure
+					) != Status::Ok)
+					return nullptr;
+				auto admitted = budget.Reserve(RetainedCacheGroupReplayBytes(constructors));
+				if (!admitted) {
+					failure = {
+						Status::LimitExceeded,
+						node.Id,
+						std::string(port),
+						"tunnel constructor outputs exceed live bytes"
+					};
+					return nullptr;
+				}
+				constructorCharge = std::move(*admitted);
+				initialized = true;
+			}
+			for (const auto &row : constructors.Nodes) {
+				if (!spend(1 + row.Outputs.size() + std::min(row.NodeId.size(), node.Id.size())))
+					return nullptr;
+				if (row.NodeId != node.Id) continue;
+				for (const auto &output : row.Outputs) {
+					if (!spend(1 + std::min(output.Port.size(), port.size()))) return nullptr;
+					if (output.Port != port) continue;
+					if (output.Refusal) {
+						failure = *output.Refusal;
+						return nullptr;
+					}
+					if (output.Data) return &*output.Data;
+				}
+			}
+			failure = {
+				Status::UnsupportedExecution,
+				node.Id,
+				std::string(port),
+				"tunnel selector constructor needs a source observation"
+			};
+			return nullptr;
+		};
+		detail::EvaluationVector<uint8_t> needed(
+			document.Nodes.size(), 0, detail::EvaluationAllocator<uint8_t>(budget)
+		);
+		detail::EvaluationVector<uint8_t> getters(
+			document.Nodes.size(), 0, detail::EvaluationAllocator<uint8_t>(budget)
+		);
+		for (size_t index = 0; index < document.Nodes.size(); ++index) {
+			const auto &node = document.Nodes[index];
+			if (node.Type != "pc.tunnel_in" && node.Type != "pc.tunnel_out") continue;
+			getters[index] = needed[index] = 1;
+			for (const auto port : {std::string_view{"name"}, std::string_view{"scope"}}) {
+				if (port == "scope" && node.Type == "pc.tunnel_out") continue;
+				const Node *owner = SourceExpressionOwner(document, plan, node, port, request.GroupReplay);
+				if (!owner) {
+					diagnostic = {
+						Status::InvalidValue,
+						node.Id,
+						std::string(port),
+						"tunnel selector owner is unavailable"
+					};
+					return diagnostic.Code;
+				}
+				needed[indices.at(owner->Id)] = 1;
+			}
+		}
+		detail::TimelineOverrides timeline;
+		if (detail::ResolveTimelineOverrides(
+				document, needed, request, budget, timeline, diagnostic, {}, true, getters
+			) != Status::Ok)
+			return diagnostic.Code;
+		struct PreRenderNames final : PcxNameResolver {
+			std::function<bool(std::string_view, Value &, Diagnostic &)> Lookup;
+			bool Resolve(std::string_view name, Value &value, Diagnostic &failure) const override {
+				return Lookup(name, value, failure);
+			}
+		};
+		using InputKey = std::pair<size_t, std::string>;
+		using InputRow = std::pair<const InputKey, Value>;
+		std::map<InputKey, Value, std::less<InputKey>, detail::EvaluationAllocator<InputRow>> memo{
+			std::less<InputKey>{}, detail::EvaluationAllocator<InputRow>(budget)
+		};
+		std::set<InputKey, std::less<InputKey>, detail::EvaluationAllocator<InputKey>> active{
+			std::less<InputKey>{}, detail::EvaluationAllocator<InputKey>(budget)
+		};
+		detail::AllocationReservation memoPayload;
+		std::function<const Value *(const Node &, std::string_view)> readInput;
+		const auto observeOutput =
+			[&](const Node &node, std::string_view port, const Link &link) -> const Value * {
+			if (getterNode && !getterProduced.empty()) {
+				const auto source = indices.at(link.FromNode);
+				if (getterProduced[source]) {
+
+					// Tunnel dispatch keeps produced rows live until every receiver has read them.
+					const auto &result = getterResults[source];
+					if (const auto *failure = FindOutputDiagnostic(result, link.FromPort)) {
+						diagnostic = *failure;
+						return nullptr;
+					}
+					if (const auto *values = FindValueOutputs(result))
+						for (const auto &value : *values)
+							if (value.Port == link.FromPort) return &value.Data;
+					if (const auto *image = FindImageOutput(result, link.FromPort)) {
+						auto charge = budget.Reserve(
+							sizeof(Value) + image->Pixels.size() +
+							4 * (std::string_view{"$getter.surface."}.size() + link.FromPort.size())
+						);
+						if (!charge || !memoPayload.Merge(std::move(*charge))) {
+							diagnostic = {
+								Status::LimitExceeded,
+								node.Id,
+								std::string(port),
+								"getter surface snapshot exceeds live bytes"
+							};
+							return nullptr;
+						}
+						const InputKey key{source, "$getter.surface." + link.FromPort};
+						return &memo.insert_or_assign(key, SurfaceValue{*image}).first->second;
+					}
+					if (const auto *images = FindImageArrayOutput(result, link.FromPort)) {
+						detail::source_array::TreeCost cost;
+						if (images->Items.empty()) {
+							if (images->Images.size() > Limits::MaximumArrayElements) {
+								diagnostic = {
+									Status::LimitExceeded,
+									node.Id,
+									std::string(port),
+									"getter image-array shape exceeds bounds"
+								};
+								return nullptr;
+							}
+							cost.Nodes = images->Images.size();
+							cost.Bytes = cost.Nodes * sizeof(SourceArrayItem);
+							if (cost.Bytes > Limits::MaximumArrayBytes) {
+								diagnostic = {
+									Status::LimitExceeded,
+									node.Id,
+									std::string(port),
+									"getter image-array item storage exceeds bounds"
+								};
+								return nullptr;
+							}
+							for (const auto &image : images->Images) {
+								if (image.Pixels.size() > Limits::MaximumArrayBytes - cost.Bytes) {
+									diagnostic = {
+										Status::LimitExceeded,
+										node.Id,
+										std::string(port),
+										"getter image-array payload exceeds bounds"
+									};
+									return nullptr;
+								}
+								cost.Bytes += image.Pixels.size();
+							}
+						} else if (!detail::source_array::ImageCost(*images, images->Items, cost, 1)) {
+							diagnostic = {
+								Status::LimitExceeded,
+								node.Id,
+								std::string(port),
+								"getter image-array shape exceeds bounds"
+							};
+							return nullptr;
+						}
+						if (!spend(cost.Nodes)) return nullptr;
+						auto conversion = budget.Reserve(
+							2 * cost.Bytes + sizeof(Value) + sizeof(ArrayValue) +
+							4 * (std::string_view{"$getter.images."}.size() + link.FromPort.size())
+						);
+						if (!conversion) {
+							diagnostic = {
+								Status::LimitExceeded,
+								node.Id,
+								std::string(port),
+								"getter array conversion exceeds live bytes"
+							};
+							return nullptr;
+						}
+						Value array;
+						if (!PcxEvaluationNames::Images(*images, array, diagnostic)) return nullptr;
+						const InputKey key{source, "$getter.images." + link.FromPort};
+						const auto bytes = ValueClonePayloadBytes(array);
+						if (!bytes || !conversion->Resize(*bytes + 2 * key.second.capacity()) ||
+							!memoPayload.Merge(std::move(*conversion))) {
+							diagnostic = {
+								Status::LimitExceeded,
+								node.Id,
+								std::string(port),
+								"getter image-array snapshot exceeds live bytes"
+							};
+							return nullptr;
+						}
+						return &memo.insert_or_assign(key, std::move(array)).first->second;
+					}
+					diagnostic = {
+						Status::InvalidOutput,
+						link.FromNode,
+						link.FromPort,
+						"processed tunnel getter producer did not publish its port"
+					};
+					return nullptr;
+				}
+			}
+			return detail::FindSourceTunnelPriorValue(document, link, prior, constructor, diagnostic, work);
+		};
+		const auto rawInput = [&](const Node &node, std::string_view port) -> const Value * {
+			if (const auto *route = detail::CommonInputRoute(document, plan, node.Id, port)) {
+				Value held;
+				detail::AllocationReservation heldCharge;
+				if (detail::ReadSourceCommonGetter(
+						document,
+						plan,
+						route->OwnerId,
+						route->Selector,
+						request,
+						budget,
+						held,
+						heldCharge,
+						diagnostic
+					) != Status::Ok)
+					return nullptr;
+				auto identity =
+					budget.Reserve(std::max(port.size(), std::string{}.capacity()) + sizeof(InputKey));
+				if (!identity || !memoPayload.Merge(std::move(*identity)) ||
+					!memoPayload.Merge(std::move(heldCharge))) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"common pre-render getter exceeds live bytes",
+						node.Id,
+						std::string(port)
+					);
+					return nullptr;
+				}
+				return &memo.insert_or_assign(
+								InputKey{indices.at(node.Id), std::string(port)}, std::move(held)
+				)
+							.first->second;
+			}
+			const Node *owner = SourceExpressionOwner(document, plan, node, port, request.GroupReplay);
+			if (!owner) {
+				diagnostic = {
+					Status::InvalidValue, node.Id, std::string(port), "pre-render input owner is unavailable"
+				};
+				return nullptr;
+			}
+			if (!spend(plan.EffectiveLinks.size() + plan.ResolvedInputs.size())) return nullptr;
+			for (const auto &link : plan.EffectiveLinks) {
+				if ((link.ToNode != owner->Id && link.ToNode != node.Id) || link.ToPort != port) continue;
+				return observeOutput(node, port, link);
+			}
+			for (const auto &input : plan.ResolvedInputs)
+				if ((input.NodeId == node.Id || input.NodeId == owner->Id) && input.Port == port)
+					return &input.Data;
+			needed[indices.at(owner->Id)] = 1;
+			getters[indices.at(node.Id)] = 1;
+			if (detail::ExtendTimelineOverrides(
+					document, needed, request, budget, timeline, diagnostic, true, getters
+				) != Status::Ok)
+				return nullptr;
+			const auto &sampled = timeline.Find(indices.at(owner->Id), *owner);
+			if (const auto *stored = FindValue(sampled, port)) return &stored->Data;
+			return nullptr;
+		};
+		const auto copyMemo = [&](const InputKey &key, const Value &value) -> const Value * {
+			const auto bytes = ValueClonePayloadBytes(value);
+			auto admission = bytes ? budget.Reserve(*bytes + key.second.capacity()) : std::nullopt;
+			if (!admission || !memoPayload.Merge(std::move(*admission))) {
+				diagnostic = {
+					Status::LimitExceeded,
+					document.Nodes[key.first].Id,
+					std::string(key.second),
+					"pre-render input snapshots exceed live bytes"
+				};
+				return nullptr;
+			}
+			return &memo.emplace(key, value).first->second;
+		};
+		PreRenderNames names;
+		names.Lookup = [&](std::string_view name, Value &value, Diagnostic &failure) {
+			if (!spend(1 + name.size() + document.Nodes.size())) {
+				failure = diagnostic;
+				return false;
+			}
+			if (name.starts_with("Project.") || name.starts_with("Program.") || name.starts_with("Device."))
+				return false;
+			const auto first = name.find('.'),
+					   second = first == std::string_view::npos ? first : name.find('.', first + 1);
+			const Node *producer = nullptr;
+			std::string port;
+			bool input = false;
+			if (second != std::string_view::npos) {
+				const auto owner = name.substr(0, first);
+				std::string direction(name.substr(first + 1, second - first - 1));
+				port = name.substr(second + 1);
+				if (const auto extra = port.find('.'); extra != std::string::npos) port.resize(extra);
+				for (char &c : direction)
+					if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+				for (char &c : port)
+					if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+				input = direction == "input" || direction == "inputs";
+				if (!input && direction != "output" && direction != "outputs") {
+					value = double{0};
+					return true;
+				}
+				for (auto node = document.Nodes.rbegin(); node != document.Nodes.rend(); ++node) {
+					if (!spend(1 + std::min(owner.size(), node->SourceInternalName.size()))) {
+						failure = diagnostic;
+						return false;
+					}
+					if (!owner.empty() && node->SourceInternalName == owner) {
+						producer = &*node;
+						break;
+					}
+				}
+			} else if (first == std::string_view::npos && !document.ProjectGlobalNodeId.empty()) {
+				const auto global = indices.at(document.ProjectGlobalNodeId);
+				const auto &node = document.Nodes[global];
+				for (const auto &slot : node.DynamicInputs)
+					if (slot.Id == name) {
+						producer = &node;
+						port = slot.Id;
+						input = true;
+						break;
+					}
+			}
+			if (!producer) {
+				value = double{0};
+				return true;
+			}
+			const Value *observed = nullptr;
+			if (input)
+				observed = readInput(*producer, port);
+			else {
+				Link link{producer->Id, port, {}, {}};
+				observed = observeOutput(*producer, port, link);
+			}
+			if (!observed) {
+				failure = diagnostic;
+				if (diagnostic.Code == Status::Ok) value = double{0};
+				return diagnostic.Code == Status::Ok;
+			}
+			if (!PcxEvaluationNames::Copy(*observed, value, failure)) return false;
+			return true;
+		};
+		readInput = [&](const Node &node, std::string_view port) -> const Value * {
+			if (!spend(1 + port.size())) return nullptr;
+			auto identityCharge = budget.Reserve(2 * port.size() + sizeof(InputKey));
+			if (!identityCharge) {
+				diagnostic = {
+					Status::LimitExceeded,
+					node.Id,
+					std::string(port),
+					"pre-render getter identities exceed live bytes"
+				};
+				return nullptr;
+			}
+			const InputKey key{indices.at(node.Id), std::string(port)};
+			if (const auto found = memo.find(key); found != memo.end()) return &found->second;
+			if (active.size() >= 64 || active.contains(key)) {
+				diagnostic = {
+					Status::Cycle, node.Id, std::string(port), "pre-render input expressions form a cycle"
+				};
+				return nullptr;
+			}
+			active.insert(key);
+			const auto *entry = FindCatalogueEntry(node.Type);
+			if (!entry) {
+				const auto *raw = rawInput(node, port);
+				active.erase(key);
+				return raw ? copyMemo(key, *raw) : nullptr;
+			}
+			auto views = budget.Reserve(
+				(entry->Inputs.size() + node.DynamicInputs.size()) *
+				(sizeof(Value) + sizeof(std::pair<std::string_view, const Value *>))
+			);
+			if (!views) {
+				diagnostic = {
+					Status::LimitExceeded,
+					node.Id,
+					std::string(port),
+					"pre-render getter views exceed live bytes"
+				};
+				return nullptr;
+			}
+			detail::NodeContext context(node, *entry, request, budget);
+			context.EvaluationDocument = &document;
+			context.Timeline = document.Timeline ? &*document.Timeline : nullptr;
+			context.PcxNames = &names;
+			if (document.Project) {
+				context.Project.SurfaceWidth = document.Project->SurfaceWidth;
+				context.Project.SurfaceHeight = document.Project->SurfaceHeight;
+			}
+			context.InputProvenanceResolved = true;
+			const auto append = [&](std::string_view slot,
+									const CatalogueInput *declared,
+									const std::optional<Value> *fallback) {
+				const auto *raw = rawInput(node, slot);
+				if (!raw && diagnostic.Code != Status::Ok) return false;
+				if (raw)
+					context.ValueViews.emplace_back(slot, raw);
+				else if (fallback && *fallback)
+					context.Values.emplace_back(slot, **fallback);
+				else if (declared) {
+					if (auto value = CatalogueDefault(*declared))
+						context.Values.emplace_back(slot, std::move(*value));
+					else if ((node.Type == "pc.tunnel_in" || node.Type == "pc.tunnel_out") && slot == "name")
+						context.Values.emplace_back(slot, std::string{});
+					else if (node.Type == "pc.tunnel_in" && slot == "value_in")
+						context.Values.emplace_back(slot, int64_t{-4});
+					context.CatalogueDefaultInputs.push_back(slot);
+				}
+				if (const auto *route = detail::CommonInputRoute(document, plan, node.Id, slot)) {
+					context.LinkedValues.push_back(slot);
+					context.InputDomains.emplace_back(slot, detail::CommonSelectorDomain(route->Selector));
+				}
+				for (const auto &link : plan.EffectiveLinks)
+					if (link.ToNode == node.Id && link.ToPort == slot) {
+						context.LinkedValues.push_back(slot);
+						break;
+					}
+				return true;
+			};
+			const Node *owner = SourceExpressionOwner(document, plan, node, port, request.GroupReplay);
+			if (!owner) return nullptr;
+			const SourceInputExpression *expression = nullptr;
+			for (const auto &program : owner->SourceInputExpressions)
+				if (program.Port == port && program.Enabled) {
+					expression = &program;
+					break;
+				}
+			bool wholeInputMap = false;
+			if (expression && !expression->Code.empty()) {
+				auto parseCharge = budget.Reserve(
+					expression->Code.size() * 8 + 4096 * sizeof(PcxInstruction) +
+					4 * Limits::MaximumArrayBytes
+				);
+				if (!parseCharge) {
+					diagnostic = {
+						Status::LimitExceeded,
+						node.Id,
+						std::string(port),
+						"pre-render expression parsing exceeds live bytes"
+					};
+					return nullptr;
+				}
+				PcxExpressionValue tree;
+				if (CompilePcxProgram(expression->Code, tree, diagnostic) != Status::Ok) return nullptr;
+				for (const auto &instruction : tree.Data->Instructions) {
+					const auto *name = std::get_if<std::string>(&instruction.Literal);
+					wholeInputMap |= instruction.Operation == "name" && name &&
+									 (*name == "self" || name->starts_with("self.") ||
+									  *name == "node_values" || name->starts_with("node_values."));
+				}
+			}
+			for (const auto &slot : entry->Inputs)
+				if ((wholeInputMap || slot.Id == port) && !append(slot.Id, &slot, nullptr)) return nullptr;
+			for (const auto &slot : node.DynamicInputs)
+				if ((wholeInputMap || slot.Id == port) && !append(slot.Id, nullptr, &slot.Default))
+					return nullptr;
+			if (expression) {
+				const std::array programs{detail::PcxInputProgram{owner, expression}};
+				if (!detail::ApplyPcxInputExpressions(context, programs)) {
+					diagnostic = {context.FailureCode, node.Id, context.FailurePort, context.FailureMessage};
+					return nullptr;
+				}
+			}
+			detail::SourceGetterProjection projection(context);
+			if (!projection.Prepare()) {
+				diagnostic = {context.FailureCode, node.Id, context.FailurePort, context.FailureMessage};
+				return nullptr;
+			}
+			const auto *value = context.Find(port);
+			const Value *owned = value ? copyMemo(key, *value) : nullptr;
+			active.erase(key);
+			return owned;
+		};
+
+		if (getterNode) {
+			if (!getterOutput || getterResults.size() != document.Nodes.size() ||
+				getterProduced.size() != document.Nodes.size()) {
+				diagnostic = {
+					Status::InvalidValue,
+					getterNode->Id,
+					"value_in",
+					"getter snapshot masks do not match document"
+				};
+				return diagnostic.Code;
+			}
+			if (getterPort == "name") {
+				const Node *owner =
+					SourceExpressionOwner(document, plan, *getterNode, getterPort, request.GroupReplay);
+				if (owner)
+					for (const auto &property : owner->SourceProperties) {
+						const auto *code = std::get_if<std::string>(&property.Data);
+						if (property.Port != "nameExpression" || !code || code->empty()) continue;
+						for (const auto &observation : request.SourceTunnelRegistryObservations) {
+							if (!spend(1 + std::min(observation.NodeId.size(), getterNode->Id.size())))
+								return diagnostic.Code;
+							if (observation.NodeId != getterNode->Id) continue;
+							auto storage = budget.Reserve(sizeof(Value) + observation.Name.size());
+							if (!storage || !planCharge.Merge(std::move(*storage))) {
+								diagnostic = {
+									Status::LimitExceeded,
+									getterNode->Id,
+									"name",
+									"foreign receiver key exceeds live bytes"
+								};
+								return diagnostic.Code;
+							}
+							getterOutput->Port = "name";
+							getterOutput->Data = observation.Name;
+							return Status::Ok;
+						}
+						diagnostic = {
+							Status::UnsupportedExecution,
+							getterNode->Id,
+							"name",
+							"foreign receiver nameExpression needs a current source registry observation"
+						};
+						return diagnostic.Code;
+					}
+			}
+			const auto *value = readInput(*getterNode, getterPort);
+			if (!value) {
+				if (diagnostic.Code == Status::Ok)
+					diagnostic = {
+						Status::InvalidValue, getterNode->Id, "value_in", "source getter value is absent"
+					};
+				return diagnostic.Code;
+			}
+			const auto bytes = ValueClonePayloadBytes(*value);
+			auto output = bytes ? budget.Reserve(*bytes) : std::nullopt;
+			if (!output || !planCharge.Merge(std::move(*output))) {
+				diagnostic = {
+					Status::LimitExceeded,
+					getterNode->Id,
+					"value_in",
+					"source getter publication exceeds live bytes"
+				};
+				return diagnostic.Code;
+			}
+			getterOutput->Port = getterPort;
+			getterOutput->Data = *value;
+			const auto *entry = FindCatalogueEntry(getterNode->Type);
+			if (!entry) {
+				diagnostic = {
+					Status::UnknownNode,
+					getterNode->Id,
+					"value_in",
+					"source tunnel getter declaration is missing"
+				};
+				return diagnostic.Code;
+			}
+			detail::NodeContext context(*getterNode, *entry, request, budget);
+			context.CurrentData = getterData;
+			context.ByteBudget = budget.Available();
+			if (getterNode->Type != "pc.tunnel_in") return Status::Ok;
+			SourceSocketDomain domain;
+			if (!detail::SourceTunnelSenderDomain(context, false, domain)) {
+				diagnostic = {
+					context.FailureCode, getterNode->Id, context.FailurePort, context.FailureMessage
+				};
+				return diagnostic.Code;
+			}
+			getterOutput->Domain = domain;
+			const Node *owner =
+				SourceExpressionOwner(document, plan, *getterNode, "value_in", request.GroupReplay);
+			const bool expressed = owner && std::any_of(
+												owner->SourceInputExpressions.begin(),
+												owner->SourceInputExpressions.end(),
+												[](const auto &expression) {
+													return expression.Port == "value_in" &&
+														   expression.Enabled && !expression.Code.empty();
+												}
+											);
+			const auto marker = [&](const CacheGroupReplayState &state, const Link &link, bool &found) {
+				for (const auto &row : state.Nodes) {
+					if (!spend(1 + std::min(row.NodeId.size(), link.FromNode.size()) + row.NodeType.size()))
+						return false;
+					if (row.NodeId != link.FromNode ||
+						row.NodeType != document.Nodes[indices.at(link.FromNode)].Type)
+						continue;
+					for (const auto &port : row.Outputs) {
+						if (!spend(1 + std::min(port.Port.size(), link.FromPort.size()))) return false;
+						if (port.Port != link.FromPort) continue;
+						found = true;
+						getterOutput->ImageArrayPayload = port.ImageArrayPayload;
+						return true;
+					}
+				}
+				return true;
+			};
+			if (!expressed)
+				for (const auto &link : plan.EffectiveLinks) {
+					if (!spend(1 + link.ToPort.size() + link.ToNode.size())) return diagnostic.Code;
+					if (link.ToPort != "value_in" ||
+						(link.ToNode != getterNode->Id && (!owner || link.ToNode != owner->Id)))
+						continue;
+					const auto source = indices.at(link.FromNode);
+					if (getterProduced[source])
+						getterOutput->ImageArrayPayload =
+							FindImageArrayOutput(getterResults[source], link.FromPort) != nullptr;
+					else {
+						bool found = false;
+						if (prior && !marker(*prior, link, found)) return diagnostic.Code;
+						if (!found && initialized && !marker(constructors, link, found))
+							return diagnostic.Code;
+					}
+					break;
+				}
+			return Status::Ok;
+		}
+		// observations borrow caller strings; defaults and sampled rows outlive route construction.
+		detail::EvaluationVector<Value> observedValues(
+			2 * document.Nodes.size(), Value{int64_t{-4}}, detail::EvaluationAllocator<Value>(budget)
+		);
+		for (const auto &row : request.SourceTunnelRegistryObservations) {
+			const auto index = indices.at(row.NodeId);
+			observedValues[2 * index] = row.Name;
+			if (row.Scope) observedValues[2 * index + 1] = *row.Scope;
+		}
+		const auto selector = [&](const Node &node, std::string_view port, const Value *&value) {
+			if (node.Type == "pc.tunnel_out" && port == "name") {
+				value = nullptr;
+				if (!request.DataReplay) return true;
+				for (const auto &entry : request.DataReplay->Entries) {
+					if (!spend(1 + std::min(node.Id.size(), entry.NodeId.size()))) return false;
+					if (entry.NodeId != node.Id || entry.ProcessorRow != 0) continue;
+					if (entry.Values.size() != 1 || entry.Values.front().Frame != entry.Tick ||
+						CompareFrameTime(
+							{entry.Tick, entry.Subframe, entry.NegativeFrame},
+							{request.Tick, request.Subframe, request.NegativeFrame}
+						) > 0 ||
+						!std::holds_alternative<StructValue>(entry.Values.front().Data)) {
+						diagnostic = {
+							Status::InvalidValue,
+							node.Id,
+							"name",
+							"retained receiver key needs one typed callback record"
+						};
+						return false;
+					}
+					const auto &record = std::get<StructValue>(entry.Values.front().Data);
+					if (!record.Data || record.Data->Fields.size() != 3) {
+						diagnostic = {
+							Status::InvalidValue,
+							node.Id,
+							"name",
+							"retained receiver callback fields are invalid"
+						};
+						return false;
+					}
+					for (const auto &[field, data] : record.Data->Fields) {
+						if (field != "key") continue;
+						if (const auto *cold = std::get_if<int64_t>(&data); cold && *cold == -4) return true;
+						if (!std::holds_alternative<std::string>(data)) {
+							diagnostic = {
+								Status::InvalidValue,
+								node.Id,
+								"name",
+								"retained receiver key is neither text nor cold noone"
+							};
+							return false;
+						}
+						value = &data;
+						return true;
+					}
+					diagnostic = {Status::InvalidValue, node.Id, "name", "retained receiver key is absent"};
+					return false;
+				}
+				return true;
+			}
+
+			if (!spend(document.Nodes.size() + request.SourceTunnelRegistryObservations.size())) return false;
+			for (const auto &row : request.SourceTunnelRegistryObservations) {
+				if (row.NodeId != node.Id) continue;
+				value = &observedValues[2 * indices.at(node.Id) + (port == "scope")];
+				return true;
+			}
+			const Node *owner = SourceExpressionOwner(document, plan, node, port, request.GroupReplay);
+			if (!owner) return false;
+			if (!spend(
+					plan.EffectiveLinks.size() + plan.ResolvedInputs.size() +
+					owner->SourceInputExpressions.size() + owner->SourceProperties.size()
+				))
+				return false;
+
+			for (const auto &property : owner->SourceProperties) {
+				if (port != "name" || property.Port != "nameExpression") continue;
+				const auto *expression = std::get_if<std::string>(&property.Data);
+				if (expression && !expression->empty()) {
+					diagnostic = {
+						Status::UnsupportedExecution,
+						node.Id,
+						std::string(port),
+						"foreign tunnel nameExpression needs a source registry observation"
+					};
+					return false;
+				}
+			}
+			value = readInput(node, port);
+			return value != nullptr || diagnostic.Code == Status::Ok;
+		};
+		if (registry) {
+			for (const auto &sender : document.Nodes) {
+				if (sender.Type != "pc.tunnel_in") continue;
+				const Value *name = nullptr, *scope = nullptr;
+				if (!selector(sender, "name", name) || !selector(sender, "scope", scope))
+					return diagnostic.Code;
+				const auto *text = name ? std::get_if<std::string>(name) : nullptr;
+				const auto choice = scope ? detail::SourceChoiceNumber(*scope) : std::optional<double>{1};
+				if ((name && !text) || !choice) {
+					diagnostic = {
+						Status::InvalidValue,
+						sender.Id,
+						"name",
+						"tunnel registry selectors require text and source choice"
+					};
+					return diagnostic.Code;
+				}
+				auto storage = budget.Reserve(
+					2 * sizeof(SourceTunnelRegistryObservation) + sender.Id.size() + (text ? text->size() : 0)
+				);
+				if (!storage || !planCharge.Merge(std::move(*storage))) {
+					diagnostic = {
+						Status::LimitExceeded,
+						sender.Id,
+						"name",
+						"tunnel registry snapshots exceed live bytes"
+					};
+					return diagnostic.Code;
+				}
+				registry->push_back({sender.Id, text ? *text : std::string{}, choice});
+			}
+		}
+		std::erase_if(plan.PcxNamedDependencies, [](const PcxNamedDependency &route) {
+			return route.Name == detail::SourceTunnelRouteName;
+		});
+		const auto addRoute =
+			[&](size_t consumer, size_t producer, std::string_view name, std::string_view port, bool input) {
+				if (plan.PcxNamedDependencies.size() >= Limits::MaximumLinks) {
+					diagnostic = {
+						Status::LimitExceeded,
+						document.Nodes[consumer].Id,
+						"name",
+						"tunnel routes exceed graph bounds"
+					};
+					return false;
+				}
+				auto admitted = budget.Reserve(
+					2 * sizeof(PcxNamedDependency) + 4 * sizeof(size_t) + name.size() + port.size() + 64
+				);
+				if (!admitted || !planCharge.Merge(std::move(*admitted))) {
+					diagnostic = {
+						Status::LimitExceeded,
+						document.Nodes[consumer].Id,
+						"name",
+						"tunnel routes exceed live bytes"
+					};
+					return false;
+				}
+				plan.PcxNamedDependencies.push_back(
+					{consumer, producer, std::string(name), std::string(port), input}
+				);
+				return true;
+			};
+		if (!detail::CompileSourceTunnelRoutes(document, selector, addRoute, diagnostic))
+			return diagnostic.Code;
+		detail::PendingGraph graph(budget);
+		detail::EvaluationVector<const CacheGroupReplayNode *> frozen(
+			document.Nodes.size(), nullptr, detail::EvaluationAllocator<const CacheGroupReplayNode *>(budget)
+		);
+		detail::EvaluationVector<size_t> roots(
+			document.Nodes.size(), 0, detail::EvaluationAllocator<size_t>(budget)
+		);
+		for (size_t index = 0; index < roots.size(); ++index)
+			roots[index] = index;
+		if (graph.Rebuild(document, plan, {}, frozen, roots, {}, {}, false, work, diagnostic) != Status::Ok)
+			return diagnostic.Code;
+		detail::EvaluationVector<uint8_t> emitted(
+			document.Nodes.size(), 0, detail::EvaluationAllocator<uint8_t>(budget)
+		);
+		plan.NodeOrder.clear();
+		while (plan.NodeOrder.size() < document.Nodes.size()) {
+			bool progress = false;
+			for (size_t index = 0; index < document.Nodes.size(); ++index) {
+				if (emitted[index]) continue;
+				if (!spend(1 + graph.Upstream[index].size())) return diagnostic.Code;
+				if (!std::all_of(
+						graph.Upstream[index].begin(), graph.Upstream[index].end(), [&](size_t source) {
+							return emitted[source];
+						}
+					))
+					continue;
+				emitted[index] = 1;
+				plan.NodeOrder.push_back(index);
+				progress = true;
+			}
+			if (!progress) {
+				diagnostic = {Status::Cycle, {}, {}, "selected pre-render tunnel dependencies form a cycle"};
+				return diagnostic.Code;
+			}
+		}
+		return Status::Ok;
 	}
 
 	std::optional<std::string_view> SourceInputExpressionOwner(
@@ -10309,7 +11717,7 @@ namespace engine::imagegraph {
 		);
 		const auto localPort = [&](std::string_view port) {
 			if (replayState && replayState->Binding(local.Id, port)) return false;
-			if (port == "parent_value") return true;
+			if (port == "parent_value" && local.SourceParentInputBase.empty()) return true;
 			const auto *owner = document ? EffectiveInputOwner(*document, local, port) : nullptr;
 			return owner && owner->Id == local.Id;
 		};
@@ -10699,29 +12107,6 @@ namespace engine::imagegraph {
 		return true;
 	}
 
-	// Evaluation borrows durable names and keeps one exact-capacity index buffer.
-	class EvaluationNodeIndices {
-	  public:
-		explicit EvaluationNodeIndices(const Document &document) {
-			Entries.reserve(document.Nodes.size());
-			for (size_t index = 0; index < document.Nodes.size(); ++index)
-				Entries.emplace_back(document.Nodes[index].Id, index);
-			std::sort(Entries.begin(), Entries.end());
-		}
-		size_t at(std::string_view id) const {
-			const auto found = std::lower_bound(
-				Entries.begin(), Entries.end(), id, [](const auto &entry, std::string_view name) {
-					return entry.first < name;
-				}
-			);
-			assert(found != Entries.end() && found->first == id);
-			return found->second;
-		}
-
-	  private:
-		std::vector<std::pair<std::string_view, size_t>> Entries;
-	};
-
 	struct GroupRefreshCapture {
 		const GroupRefreshEvent *Event;
 		detail::GroupReplayAccess::Owner *Owner;
@@ -10740,6 +12125,19 @@ namespace engine::imagegraph {
 		std::span<const std::string> Ids;
 		std::vector<StatefulNamedOutput> *Outputs;
 		detail::AllocationReservation *Charge;
+	};
+
+	static bool GroupHeldPortCompatible(const Document &, const Node &, const CacheGroupReplayOutput &);
+	struct GroupProcessCapture {
+		std::span<const uint8_t> Run;
+		CacheGroupReplayState *Outputs;
+		std::vector<GroupRenderReadiness> *Nodes;
+		detail::AllocationReservation *Charge = nullptr;
+		detail::SourceCommonInvocationMode Invocation = detail::SourceCommonInvocationMode::SourceDoUpdate;
+		std::optional<size_t> DirectTarget{};
+		SourceCommonSocketSession *Common = nullptr;
+		detail::SourceCommonAdmission *CommonAdmission = nullptr;
+		GroupRenderSession *Session = nullptr;
 	};
 
 	template <class Entry>
@@ -10811,7 +12209,7 @@ namespace engine::imagegraph {
 
 	static Status EvaluateGraph(
 		const Document &document,
-		const Plan &plan,
+		const Plan &authoredPlan,
 		const std::string &outputId,
 		const EvaluationRequest &request,
 		NodeResult &outputValue,
@@ -10827,11 +12225,16 @@ namespace engine::imagegraph {
 		bool planAlreadyValidated = false,
 		GroupRefreshCapture *groupRefresh = nullptr,
 		SimulationCapture *simulation = nullptr,
-		StatefulOutputCapture *batch = nullptr
+		StatefulOutputCapture *batch = nullptr,
+		GroupProcessCapture *groupProcess = nullptr
 	) {
 
-		auto observerCharge =
-			budget.Reserve(request.SourceInputObserver ? request.SourceInputObserver->RetainedBytes() : 0);
+		const bool ownedRequestResidency = groupProcess && groupProcess->CommonAdmission;
+		auto observerCharge = budget.Reserve(
+			!ownedRequestResidency && request.SourceInputObserver
+				? request.SourceInputObserver->RetainedBytes()
+				: 0
+		);
 		if (!observerCharge) {
 			SetDiagnostic(
 				diagnostic, Status::LimitExceeded, "source processing receipt exceeds evaluation budget"
@@ -10947,7 +12350,7 @@ namespace engine::imagegraph {
 
 		const uint64_t loadBytes =
 			request.SourceFrameCacheLoads ? RetainedDataReplayBytes(*request.SourceFrameCacheLoads) : 0;
-		auto frameCacheLoadShadow = budget.Reserve(loadBytes);
+		auto frameCacheLoadShadow = budget.Reserve(ownedRequestResidency ? 0 : loadBytes);
 		if (!frameCacheLoadShadow) {
 			SetDiagnostic(
 				diagnostic,
@@ -10974,7 +12377,8 @@ namespace engine::imagegraph {
 		// Host ownership coexists with the held context and observations admitted below.
 		const uint64_t fontProviderBytes = request.FontProvider ? request.FontProvider->RetainedBytes() : 0;
 		auto fontHostShadow =
-			request.SourceFontHostResidentBytes > budget.Available() ||
+			ownedRequestResidency ? budget.Reserve(0)
+			: request.SourceFontHostResidentBytes > budget.Available() ||
 					fontProviderBytes > budget.Available() - request.SourceFontHostResidentBytes
 				? std::optional<detail::AllocationReservation>{}
 				: budget.Reserve(request.SourceFontHostResidentBytes + fontProviderBytes);
@@ -11053,7 +12457,7 @@ namespace engine::imagegraph {
 		);
 		if (builtinStatus != Status::Ok) return builtinStatus;
 		// Borrowed recordings remain live while evaluation owns its intermediate results.
-		auto builtinShadow = budget.Reserve(builtinBytes);
+		auto builtinShadow = budget.Reserve(ownedRequestResidency ? 0 : builtinBytes);
 		if (!builtinShadow) {
 			SetDiagnostic(
 				diagnostic, Status::LimitExceeded, "builtin random recordings exceed live evaluation budget"
@@ -11071,7 +12475,7 @@ namespace engine::imagegraph {
 		for (const auto &observation : request.FontObservations)
 			fontBytes +=
 				SourceFontObservationRetainedBytes(observation).value_or(Limits::MaximumEvaluationBytes);
-		auto fontShadow = budget.Reserve(fontBytes);
+		auto fontShadow = budget.Reserve(ownedRequestResidency ? 0 : fontBytes);
 		if (!fontShadow) {
 			SetDiagnostic(
 				diagnostic, Status::LimitExceeded, "font observations exceed live evaluation budget"
@@ -11086,7 +12490,9 @@ namespace engine::imagegraph {
 					*request.SliceStackReplay, Limits::MaximumEvaluationBytes, diagnostic
 				) != Status::Ok)
 				return diagnostic.Code;
-			auto charge = budget.Reserve(RetainedSliceStackReplayBytes(*request.SliceStackReplay));
+			auto charge = budget.Reserve(
+				ownedRequestResidency ? 0 : RetainedSliceStackReplayBytes(*request.SliceStackReplay)
+			);
 			if (!charge) {
 				SetDiagnostic(
 					diagnostic, Status::LimitExceeded, "slice replay owner exceeds live evaluation budget"
@@ -11099,7 +12505,7 @@ namespace engine::imagegraph {
 		if (request.GroupReplay) {
 			if (!request.GroupReplay->InstancesBound() &&
 				std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
-					return !node.InstanceBase.empty();
+					return !node.InstanceBase.empty() || !node.SourceParentInputBase.empty();
 				})) {
 				SetDiagnostic(
 					diagnostic, Status::InvalidValue, "Group instance animator binding has not been applied"
@@ -11116,7 +12522,8 @@ namespace engine::imagegraph {
 			}
 			if (!groupRefresh ||
 				detail::GroupReplayAccess::Get(*request.GroupReplay) != groupRefresh->Owner) {
-				auto shadow = budget.Reserve(request.GroupReplay->RetainedBytes());
+				auto shadow =
+					budget.Reserve(ownedRequestResidency ? 0 : request.GroupReplay->RetainedBytes());
 				if (!shadow) {
 					SetDiagnostic(
 						diagnostic,
@@ -11133,16 +12540,52 @@ namespace engine::imagegraph {
 		detail::AllocationReservation currentPlanCharge;
 		Plan currentPlan;
 		if (!planAlreadyValidated) {
-			const Status compileStatus =
-				CompileWithBudget(document, currentPlan, diagnostic, budget, currentPlanCharge);
+			const Status compileStatus = CompileWithBudget(
+				document,
+				currentPlan,
+				diagnostic,
+				budget,
+				currentPlanCharge,
+				authoredPlan.SourceCommonRuntimeOnly
+			);
 			if (compileStatus != Status::Ok) return compileStatus;
-			if (currentPlan != plan) {
+			if (currentPlan != authoredPlan) {
 				SetDiagnostic(
 					diagnostic, Status::InvalidOutput, "compile plan does not match the authored document"
 				);
 				return diagnostic.Code;
 			}
 		}
+		std::vector<SourceTunnelRegistryObservation> sourceTunnelRegistry;
+		uint64_t tunnelWork = 0;
+		const bool tunnelRegistry =
+			std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
+				return node.Type == "pc.tunnel_in" || node.Type == "pc.tunnel_out";
+			});
+		if (tunnelRegistry) {
+			if (planAlreadyValidated && CompileWithBudget(
+											document,
+											currentPlan,
+											diagnostic,
+											budget,
+											currentPlanCharge,
+											authoredPlan.SourceCommonRuntimeOnly
+										) != Status::Ok)
+				return diagnostic.Code;
+			if (ResolveSourceTunnelRegistry(
+					document,
+					request,
+					currentPlan,
+					budget,
+					currentPlanCharge,
+					diagnostic,
+					groupProcess != nullptr,
+					&sourceTunnelRegistry
+				) != Status::Ok)
+				return diagnostic.Code;
+		}
+		const Plan &plan = tunnelRegistry ? currentPlan : authoredPlan;
+
 		const auto findOutput = [&](std::string_view id) {
 			return std::find_if(
 				document.Outputs.begin(), document.Outputs.end(), [&](const Output &candidate) {
@@ -11155,7 +12598,7 @@ namespace engine::imagegraph {
 		const auto output = captureTarget ? document.Outputs.end() : findOutput(outputId);
 		const auto requiredOutput =
 			requiredOutputId.empty() ? document.Outputs.end() : findOutput(requiredOutputId);
-		if ((!captureTarget && output == document.Outputs.end()) ||
+		if ((!groupProcess && !captureTarget && output == document.Outputs.end()) ||
 			(!requiredOutputId.empty() && requiredOutput == document.Outputs.end())) {
 			SetDiagnostic(
 				diagnostic,
@@ -11165,6 +12608,43 @@ namespace engine::imagegraph {
 				captureTarget ? requiredOutputId : std::string_view(outputId)
 			);
 			return diagnostic.Code;
+		}
+		if (!groupProcess && !captureTarget && output != document.Outputs.end()) {
+			const auto selector = detail::CommonSelector(output->Port);
+			if (selector && detail::CommonOwner(document, output->NodeId)) {
+				Value data;
+				detail::AllocationReservation dataCharge;
+				if (detail::ReadSourceCommonGetter(
+						document,
+						plan,
+						detail::CommonOwner(document, output->NodeId)->SourceOwnerId,
+						*selector,
+						request,
+						budget,
+						data,
+						dataCharge,
+						diagnostic
+					) != Status::Ok)
+					return diagnostic.Code;
+				auto metadata = budget.Reserve(
+					sizeof(AuthoredValue) + std::max(output->Port.size(), std::string{}.capacity())
+				);
+				if (!metadata) {
+					SetDiagnostic(
+						diagnostic,
+						Status::LimitExceeded,
+						"common output metadata exceeds live bytes",
+						output->NodeId
+					);
+					return diagnostic.Code;
+				}
+				ValueOutputs values;
+				values.push_back({output->Port, std::move(data)});
+				outputValue = std::move(values);
+				if (!outputCharge.Merge(std::move(dataCharge)) || !outputCharge.Merge(std::move(*metadata)))
+					std::terminate();
+				return Status::Ok;
+			}
 		}
 		const uint64_t graphBytes =
 			document.Nodes.size() * (sizeof(std::pair<std::string_view, size_t>) + sizeof(uint8_t) +
@@ -11181,6 +12661,47 @@ namespace engine::imagegraph {
 		if (cacheGroups)
 			for (const auto &node : cacheGroups->Nodes)
 				if (!CacheGroupReplayShouldRun(node)) frozen[nodeIndices.at(node.NodeId)] = &node;
+		auto groupRenderShadow = budget.Reserve(
+			request.GroupRender && !groupProcess ? RetainedGroupRenderSessionBytes(*request.GroupRender) : 0
+		);
+		if (!groupRenderShadow) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "held group sockets exceed live bytes");
+			return diagnostic.Code;
+		}
+		const auto *heldGroups = groupProcess		   ? groupProcess->Outputs
+								 : request.GroupRender ? &request.GroupRender->Outputs
+													   : nullptr;
+		if (heldGroups) {
+			if (ValidateCacheGroupReplay(*heldGroups, Limits::MaximumEvaluationBytes, diagnostic) !=
+				Status::Ok)
+				return diagnostic.Code;
+			for (const auto &held : heldGroups->Nodes) {
+				const auto authored =
+					std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
+						return node.Id == held.NodeId && node.Type == held.NodeType;
+					});
+				if (authored == document.Nodes.end()) {
+					SetDiagnostic(
+						diagnostic, Status::InvalidValue, "held group producer is stale", held.NodeId
+					);
+					return diagnostic.Code;
+				}
+				for (const auto &port : held.Outputs)
+					if (!GroupHeldPortCompatible(document, *authored, port)) {
+						SetDiagnostic(
+							diagnostic,
+							Status::InvalidOutput,
+							"held group socket schema is stale",
+							held.NodeId,
+							port.Port
+						);
+						return diagnostic.Code;
+					}
+				const size_t index = nodeIndices.at(held.NodeId);
+				if (groupProcess ? !groupProcess->Run[index] : held.NodeId != targetNodeId)
+					frozen[index] = &held;
+			}
+		}
 		detail::EvaluationVector<CacheGroupReplayNode *> tracked(
 			currentData ? document.Nodes.size() : 0,
 			nullptr,
@@ -11227,9 +12748,19 @@ namespace engine::imagegraph {
 			}
 		};
 		refreshFrameCacheReads();
+		detail::EvaluationVector<uint8_t> demandedTunnelGetters(
+			document.Nodes.size(), 0, detail::EvaluationAllocator<uint8_t>(budget)
+		);
+		for (const auto &route : plan.PcxNamedDependencies)
+			if (route.Name == detail::SourceTunnelRouteName) demandedTunnelGetters[route.Producer] = 1;
+		const auto frozenTunnelGetter = [&](size_t index) {
+			return frozen[index] && document.Nodes[index].Type == "pc.tunnel_in" &&
+				   demandedTunnelGetters[index];
+		};
 		const auto frameCacheReads = [&](size_t index) {
-			return frameCacheInputReads.empty() ? detail::SourceFrameCacheInputReads::All
-												: frameCacheInputReads[index];
+			return frozenTunnelGetter(index) || frameCacheInputReads.empty()
+					   ? detail::SourceFrameCacheInputReads::All
+					   : frameCacheInputReads[index];
 		};
 		const auto targetNode =
 			std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
@@ -11241,7 +12772,8 @@ namespace engine::imagegraph {
 			);
 			return diagnostic.Code;
 		}
-		const size_t targetIndex = nodeIndices.at(captureTarget ? targetNodeId : output->NodeId);
+		const size_t targetIndex =
+			groupProcess ? 0 : nodeIndices.at(captureTarget ? targetNodeId : output->NodeId);
 		if (captureTarget && !frameCacheInputReads.empty())
 			frameCacheInputReads[targetIndex] = detail::SourceFrameCacheInputReads::All;
 		if (captureTarget && frozen[targetIndex]) {
@@ -11288,9 +12820,14 @@ namespace engine::imagegraph {
 				: detail::SourceInputSelection{};
 		uint64_t scheduleWork = 0;
 		detail::EvaluationVector<size_t> pendingRoots{detail::EvaluationAllocator<size_t>(budget)};
-		pendingRoots.push_back(
-			requiredOutput == document.Outputs.end() ? targetIndex : nodeIndices.at(requiredOutput->NodeId)
-		);
+		if (groupProcess) {
+			for (size_t index = 0; index < groupProcess->Run.size(); ++index)
+				if (groupProcess->Run[index]) pendingRoots.push_back(index);
+		} else
+			pendingRoots.push_back(
+				requiredOutput == document.Outputs.end() ? targetIndex
+														 : nodeIndices.at(requiredOutput->NodeId)
+			);
 		for (const auto *selected : selectedOutputs)
 			pendingRoots.push_back(nodeIndices.at(selected->NodeId));
 		for (const auto id : request.SimulationCacheCaptures)
@@ -11340,6 +12877,30 @@ namespace engine::imagegraph {
 				) != Status::Ok)
 				return diagnostic.Code;
 		}
+		if (!groupProcess && !request.GroupRender && !request.ForceGroupRender) {
+			for (size_t index = 0; index < document.Nodes.size(); ++index) {
+				if (!needed[index]) continue;
+				std::string_view scope = document.Nodes[index].GroupId;
+				for (size_t hop = 0; !scope.empty() && hop < document.Groups.size(); ++hop) {
+					const auto group = std::find_if(
+						document.Groups.begin(), document.Groups.end(), [&](const Group &candidate) {
+							return candidate.Id == scope;
+						}
+					);
+					if (group == document.Groups.end()) break;
+					if (!group->RenderActive) {
+						SetDiagnostic(
+							diagnostic,
+							Status::UnsupportedExecution,
+							"disabled group requires held process sockets or explicit rendering",
+							group->Id
+						);
+						return diagnostic.Code;
+					}
+					scope = group->ParentId;
+				}
+			}
+		}
 		detail::EvaluationVector<size_t> pending{detail::EvaluationAllocator<size_t>(budget)};
 		const bool deferredTimeline =
 			!nodeValues && cacheGroups &&
@@ -11368,7 +12929,8 @@ namespace engine::imagegraph {
 				return false;
 			std::copy(selected.begin(), selected.end(), timelineNeeded.begin());
 			for (size_t index = 0; index < frozen.size(); ++index)
-				if (frozen[index] || frameCacheReads(index) == detail::SourceFrameCacheInputReads::None)
+				if ((frozen[index] && !frozenTunnelGetter(index)) ||
+					frameCacheReads(index) == detail::SourceFrameCacheInputReads::None)
 					timelineNeeded[index] = 0;
 			// storage owners added below must not choose a getter mode for their borrowers.
 			for (size_t index = 0; index < timelineNeeded.size(); ++index)
@@ -11379,6 +12941,14 @@ namespace engine::imagegraph {
 					timelineNeeded[route.Owner] = timelineGetters[route.Owner] = 1;
 			for (size_t index = 0; index < needed.size(); ++index) {
 				if (!timelineNeeded[index]) continue;
+				const Node *parent = &document.Nodes[index];
+				for (size_t hop = 0; !parent->SourceParentInputBase.empty() && hop < document.Nodes.size();
+					 ++hop) {
+					if (deferredTimeline && !admitTimelineWork(1)) return false;
+					const size_t owner = nodeIndices.at(parent->SourceParentInputBase);
+					timelineNeeded[owner] = 1;
+					parent = &document.Nodes[owner];
+				}
 				const Node *current = &document.Nodes[index];
 				for (size_t hop = 0; !current->InstanceBase.empty() && hop < document.Nodes.size(); ++hop) {
 					if (deferredTimeline && !admitTimelineWork(1)) return false;
@@ -11442,7 +13012,8 @@ namespace engine::imagegraph {
 		}
 		const bool dynamicPcx =
 			std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const Node &node) {
-				return node.Type == "pc.equation" || node.Type.starts_with("pc.pcx_") ||
+				return node.Type == "pc.tunnel_in" || node.Type == "pc.tunnel_out" ||
+					   node.Type == "pc.equation" || node.Type.starts_with("pc.pcx_") ||
 					   std::any_of(
 						   node.SourceInputExpressions.begin(),
 						   node.SourceInputExpressions.end(),
@@ -11587,7 +13158,27 @@ namespace engine::imagegraph {
 			controls.Values.reserve(2);
 			controls.ValueViews.reserve(2);
 			controls.LinkedValues.reserve(2);
+			std::array<detail::AllocationReservation, 2> commonControlCharges;
+			size_t commonControlIndex = 0;
 			for (std::string_view port : {"dimension", "dimension_unit"}) {
+				if (const auto *common = detail::CommonInputRoute(document, plan, ownerNode.Id, port)) {
+					Value data;
+					if (detail::ReadSourceCommonGetter(
+							document,
+							plan,
+							common->OwnerId,
+							common->Selector,
+							request,
+							budget,
+							data,
+							commonControlCharges[commonControlIndex++],
+							diagnostic
+						) != Status::Ok)
+						return false;
+					controls.Values.emplace_back(port, std::move(data));
+					controls.LinkedValues.push_back(port);
+					continue;
+				}
 				const auto *input = FindCatalogueInput(*entry, port);
 				const auto link = std::find_if(
 					plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &item) {
@@ -11767,7 +13358,8 @@ namespace engine::imagegraph {
 			for (const auto &owner : cacheGroups->Owners)
 				if (!owner.Members.empty()) timelineBarriers[nodeIndices.at(owner.NodeId)] = 1;
 		const auto admitPendingTimeline = [&](size_t index, size_t position) -> bool {
-			if (!deferredTimeline || timelineAdmitted[index] || frozen[index] ||
+			if (!deferredTimeline || timelineAdmitted[index] ||
+				(frozen[index] && !frozenTunnelGetter(index)) ||
 				frameCacheReads(index) == detail::SourceFrameCacheInputReads::None)
 				return true;
 			ENGINE_PROFILE("imagegraph.timeline.dispatch_epoch");
@@ -11807,7 +13399,7 @@ namespace engine::imagegraph {
 			);
 			if (status != Status::Ok) return false;
 			for (size_t candidate = 0; candidate < timelineSelected.size(); ++candidate)
-				if (timelineSelected[candidate] && !frozen[candidate] &&
+				if (timelineSelected[candidate] && (!frozen[candidate] || frozenTunnelGetter(candidate)) &&
 					frameCacheReads(candidate) != detail::SourceFrameCacheInputReads::None)
 					timelineAdmitted[candidate] = 1;
 			return true;
@@ -11829,7 +13421,7 @@ namespace engine::imagegraph {
 				}
 				if (!needed[candidate] || (mutableDispatch && completed[candidate])) continue;
 				unfinished = true;
-				if (!mutableDispatch || frozen[candidate] ||
+				if (!mutableDispatch || (frozen[candidate] && !frozenTunnelGetter(candidate)) ||
 					std::all_of(upstream[candidate].begin(), upstream[candidate].end(), [&](size_t source) {
 						return completed[source] != 0;
 					})) {
@@ -11856,7 +13448,16 @@ namespace engine::imagegraph {
 			}
 			if (mutableDispatch) completed[index] = 1;
 			pendingPcxRoute.reset();
-			if (frozen[index]) {
+			const auto tunnelGetterRoute = [&](const auto &route) {
+				return route.Producer == index && route.Name == detail::SourceTunnelRouteName;
+			};
+			const bool frozenTunnelGetter =
+				frozen[index] && document.Nodes[index].Type == "pc.tunnel_in" &&
+				(std::any_of(
+					 plan.PcxNamedDependencies.begin(), plan.PcxNamedDependencies.end(), tunnelGetterRoute
+				 ) ||
+				 std::any_of(dynamicPcxRoutes.begin(), dynamicPcxRoutes.end(), tunnelGetterRoute));
+			if (frozen[index] && !frozenTunnelGetter) {
 				CatalogueOutputs restored;
 				if (!RestoreFrozenCacheGroupOutputs(
 						document.Nodes[index],
@@ -11885,7 +13486,77 @@ namespace engine::imagegraph {
 				continue;
 			}
 			if (!admitPendingTimeline(index, dispatchPosition)) return diagnostic.Code;
-			const Node &node = timelineOverrides.Find(index, document.Nodes[index]);
+			const Node &timelineNode = timelineOverrides.Find(index, document.Nodes[index]);
+			detail::AllocationReservation commonNodeCharge;
+			std::optional<Node> commonNode;
+			if (!FindCatalogueEntry(timelineNode.Type)) {
+				const auto *schema = FindSchema(timelineNode.Type);
+				if (schema)
+					for (const auto &port : schema->Ports) {
+						if (port.Direction != PortDirection::Input) continue;
+						const auto *common =
+							detail::CommonInputRoute(document, plan, timelineNode.Id, port.Id);
+						if (!common) continue;
+						if (!commonNode) {
+							const auto bytes = NodeClonePayloadBytes(timelineNode);
+							auto storage =
+								bytes ? budget.Reserve(
+											*bytes + (timelineNode.Values.size() + schema->Ports.size()) *
+														 sizeof(AuthoredValue)
+										)
+									  : std::nullopt;
+							if (!storage) {
+								SetDiagnostic(
+									diagnostic,
+									Status::LimitExceeded,
+									"common legacy input clone exceeds live bytes",
+									timelineNode.Id
+								);
+								return diagnostic.Code;
+							}
+							commonNode = timelineNode;
+							commonNode->Values.reserve(timelineNode.Values.size() + schema->Ports.size());
+							commonNodeCharge = std::move(*storage);
+						}
+						Value data;
+						detail::AllocationReservation dataCharge;
+						if (detail::ReadSourceCommonGetter(
+								document,
+								plan,
+								common->OwnerId,
+								common->Selector,
+								request,
+								budget,
+								data,
+								dataCharge,
+								diagnostic
+							) != Status::Ok)
+							return diagnostic.Code;
+						auto nameCharge = budget.Reserve(std::max(port.Id.size(), std::string{}.capacity()));
+						if (!nameCharge) {
+							SetDiagnostic(
+								diagnostic,
+								Status::LimitExceeded,
+								"common legacy input name exceeds live bytes",
+								timelineNode.Id
+							);
+							return diagnostic.Code;
+						}
+						const auto authored = std::find_if(
+							commonNode->Values.begin(), commonNode->Values.end(), [&](const auto &v) {
+								return v.Port == port.Id;
+							}
+						);
+						if (authored != commonNode->Values.end())
+							authored->Data = std::move(data);
+						else
+							commonNode->Values.push_back({std::string(port.Id), std::move(data)});
+						if (!commonNodeCharge.Merge(std::move(dataCharge)) ||
+							!commonNodeCharge.Merge(std::move(*nameCharge)))
+							std::terminate();
+					}
+			}
+			const Node &node = commonNode ? *commonNode : timelineNode;
 			size_t valuesIndex = index;
 			for (size_t hop = 0;
 				 !document.Nodes[valuesIndex].InstanceBase.empty() && hop < document.Nodes.size();
@@ -11914,7 +13585,9 @@ namespace engine::imagegraph {
 			// Only admitted connected getters propagate their refusals, including animator aliases.
 			for (const auto &link : plan.EffectiveLinks) {
 				if (link.ToNode != node.Id && inputOwner(link.ToPort).Id != link.ToNode) continue;
-				if (!detail::SourceFrameCacheReadsPort(frameCacheReads(index), link.ToPort)) continue;
+				if ((frozenTunnelGetter && link.ToPort != "value_in") ||
+					!detail::SourceFrameCacheReadsPort(frameCacheReads(index), link.ToPort))
+					continue;
 				const size_t producer = nodeIndices.at(link.FromNode);
 				if (!produced[producer]) continue;
 				if (const auto *refusal = FindOutputDiagnostic(results[producer], link.FromPort)) {
@@ -12107,8 +13780,16 @@ namespace engine::imagegraph {
 					detail::EvaluationAllocator<SchemaInputValue>(budget)
 				};
 				values.reserve(node.Values.size() + schema->Ports.size());
-				for (const auto &value : node.Values)
-					values.push_back({value.Port, &value.Data, false, std::nullopt});
+				for (const auto &value : node.Values) {
+					const auto *common = detail::CommonInputRoute(document, plan, node.Id, value.Port);
+					values.push_back(
+						{value.Port,
+						 &value.Data,
+						 common != nullptr,
+						 common ? std::optional{detail::CommonSelectorDomain(common->Selector)}
+								: std::nullopt}
+					);
+				}
 				for (const PortSchema &port : schema->Ports) {
 					if (port.Direction != PortDirection::Input || port.Type == ValueType::Image) continue;
 					const auto link = std::find_if(
@@ -12183,6 +13864,8 @@ namespace engine::imagegraph {
 					return diagnostic.Code;
 				}
 				detail::NodeContext context(node, *catalogueEntry, request, budget);
+				if (frozenTunnelGetter) context.SelectedSourceInput = "value_in";
+				if (groupProcess) context.SourceActivity = &(*groupProcess->Nodes)[index].FrameActivity;
 				context.NoiseFieldRequested =
 					(output != document.Outputs.end() && output->NodeId == node.Id &&
 					 output->Port == "field") ||
@@ -12199,7 +13882,8 @@ namespace engine::imagegraph {
 						}
 					);
 				context.EvaluationDocument = &document;
-				context.FontHostResidency = &*fontHostShadow;
+				context.FontHostResidency =
+					ownedRequestResidency ? &groupProcess->CommonAdmission->FontHost : &*fontHostShadow;
 				context.PathShiftMemo = &pathShiftMemo;
 				if (hostReceipts) {
 					context.HostReceipts = &*hostReceipts;
@@ -12221,6 +13905,7 @@ namespace engine::imagegraph {
 					&dynamicPcxCharge
 				);
 				pcxNames.Produced = produced;
+				pcxNames.CommonRequest = &request;
 				context.PcxNames = &pcxNames;
 				const bool sourceInputCapture = index == inputSelection.NodeIndex;
 				if (sourceInputCapture) {
@@ -12468,8 +14153,33 @@ namespace engine::imagegraph {
 					}
 				}
 				for (const CatalogueInput &input : catalogueEntry->Inputs) {
-					if (!detail::ReadsSourceInput(inputSelection, index, input.Id)) continue;
+					if ((frozenTunnelGetter && input.Id != "value_in") ||
+						!detail::ReadsSourceInput(inputSelection, index, input.Id))
+						continue;
 					if (!detail::SourceFrameCacheReadsPort(context.FrameCacheInputReads, input.Id)) continue;
+					if (const auto *common = detail::CommonInputRoute(document, plan, node.Id, input.Id)) {
+						Value value;
+						detail::AllocationReservation commonCharge;
+						if (detail::ReadSourceCommonGetter(
+								document,
+								plan,
+								common->OwnerId,
+								common->Selector,
+								request,
+								budget,
+								value,
+								commonCharge,
+								diagnostic
+							) != Status::Ok)
+							return diagnostic.Code;
+						context.Values.emplace_back(input.Id, std::move(value));
+						context.LinkedValues.emplace_back(input.Id);
+						context.InputDomains.emplace_back(
+							input.Id, detail::CommonSelectorDomain(common->Selector)
+						);
+						if (!scratchCharge.Merge(std::move(commonCharge))) std::terminate();
+						continue;
+					}
 					const auto link = std::find_if(
 						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &candidate) {
 							return candidate.ToNode == node.Id && candidate.ToPort == input.Id;
@@ -13368,14 +15078,13 @@ namespace engine::imagegraph {
 								return entry.NodeId == node.Id && entry.Port == input.Id;
 							}
 						);
-						// The generic group parent animator remains local when its boundary
-						// has no producer or routed junction default.
-						const AuthoredValue *localParent =
+						// Parent animators keep their local controls while explicit aliases borrow storage.
+						const AuthoredValue *parentAnimator =
 							node.Type == "pc.group_input" && input.Id == "parent_value"
-								? FindValue(node, input.Id)
+								? FindValue(inputOwner(input.Id), inputAnimatorPort(input.Id))
 								: nullptr;
-						if (localParent) {
-							value = &localParent->Data;
+						if (parentAnimator) {
+							value = &parentAnimator->Data;
 						} else if (resolved != plan.ResolvedInputs.end()) {
 							context.LinkedValues.emplace_back(input.Id);
 							value = &resolved->Data;
@@ -13538,8 +15247,33 @@ namespace engine::imagegraph {
 				// Dynamic group inputs follow the same order: a link, then the instance
 				// default.
 				for (const DynamicInput &input : node.DynamicInputs) {
-					if (!detail::ReadsSourceInput(inputSelection, index, input.Id)) continue;
+					if ((frozenTunnelGetter && input.Id != "value_in") ||
+						!detail::ReadsSourceInput(inputSelection, index, input.Id))
+						continue;
 					if (!detail::SourceFrameCacheReadsPort(context.FrameCacheInputReads, input.Id)) continue;
+					if (const auto *common = detail::CommonInputRoute(document, plan, node.Id, input.Id)) {
+						Value value;
+						detail::AllocationReservation commonCharge;
+						if (detail::ReadSourceCommonGetter(
+								document,
+								plan,
+								common->OwnerId,
+								common->Selector,
+								request,
+								budget,
+								value,
+								commonCharge,
+								diagnostic
+							) != Status::Ok)
+							return diagnostic.Code;
+						context.Values.emplace_back(input.Id, std::move(value));
+						context.LinkedValues.emplace_back(input.Id);
+						context.InputDomains.emplace_back(
+							input.Id, detail::CommonSelectorDomain(common->Selector)
+						);
+						if (!scratchCharge.Merge(std::move(commonCharge))) std::terminate();
+						continue;
+					}
 					const auto link = std::find_if(
 						plan.EffectiveLinks.begin(), plan.EffectiveLinks.end(), [&](const Link &candidate) {
 							return candidate.ToNode == node.Id && candidate.ToPort == input.Id;
@@ -13679,7 +15413,8 @@ namespace engine::imagegraph {
 					);
 				};
 				const auto separatedInput = [&](std::string_view port) -> detail::SourceAxisStorageView {
-					if (!detail::ReadsSourceInput(inputSelection, index, port) ||
+					if ((frozenTunnelGetter && port != "value_in") ||
+						!detail::ReadsSourceInput(inputSelection, index, port) ||
 						(node.Type == "pc.mirror_polar" && detail::SourceMirrorVectorIndex(port)) ||
 						context.IsLinked(port) ||
 						!detail::SourceFrameCacheReadsPort(context.FrameCacheInputReads, port) ||
@@ -13774,7 +15509,9 @@ namespace engine::imagegraph {
 				if (node.Type == "pc.mirror_polar") {
 					for (size_t i = 0; i < detail::SourceMirrorVectorPorts.size(); ++i) {
 						const auto port = detail::SourceMirrorVectorPorts[i];
-						if (!detail::ReadsSourceInput(inputSelection, index, port)) continue;
+						if ((frozenTunnelGetter && port != "value_in") ||
+							!detail::ReadsSourceInput(inputSelection, index, port))
+							continue;
 						const auto *binding = request.GroupReplay && request.GroupReplay->InstancesBound()
 												  ? request.GroupReplay->Binding(node.Id, port)
 												  : nullptr;
@@ -13911,7 +15648,12 @@ namespace engine::imagegraph {
 				};
 				pcxPrograms.reserve(inputCount);
 				const auto appendPcxProgram = [&](std::string_view port) {
-					if (!detail::ReadsSourceInput(inputSelection, index, port)) return;
+					if ((node.Type == "pc.tunnel_in" || (groupProcess && node.Type == "pc.tunnel_out")) &&
+						(port == "name" || port == "scope"))
+						return;
+					if ((frozenTunnelGetter && port != "value_in") ||
+						!detail::ReadsSourceInput(inputSelection, index, port))
+						return;
 					const Node *expressionOwner =
 						SourceExpressionOwner(document, plan, node, port, request.GroupReplay);
 					if (!expressionOwner) return;
@@ -13970,6 +15712,19 @@ namespace engine::imagegraph {
 					groupRefresh->Captured = true;
 					diagnostic = {};
 					return Status::Ok;
+				}
+				if (node.Type == "pc.tunnel_in") {
+					SourceSocketDomain domain;
+					if (!detail::SourceTunnelSenderDomain(context, !frozenTunnelGetter, domain)) {
+						diagnostic = {
+							context.FailureCode, node.Id, context.FailurePort, context.FailureMessage
+						};
+						return diagnostic.Code;
+					}
+					std::erase_if(context.InputDomains, [](const auto &entry) {
+						return entry.first == "value_in";
+					});
+					context.InputDomains.emplace_back("value_in", domain);
 				}
 				if ((dynamicPcx ||
 					 std::any_of(
@@ -14044,6 +15799,152 @@ namespace engine::imagegraph {
 					owner.Captured = true;
 				}
 
+				CacheGroupReplayOutput tunnelGetter, tunnelKey;
+				detail::AllocationReservation tunnelGetterCharge, tunnelKeyCharge;
+				if (node.Type == "pc.tunnel_out") {
+					std::string_view key;
+					if (groupProcess) {
+						EvaluationRequest keyRequest = request;
+						keyRequest.DataReplay = currentData;
+
+						if (ResolveSourceTunnelRegistry(
+								document,
+								keyRequest,
+								currentPlan,
+								budget,
+								tunnelKeyCharge,
+								diagnostic,
+								true,
+								nullptr,
+								&node,
+								&tunnelKey,
+								{results.data(), results.size()},
+								{produced.data(), produced.size()},
+								currentData,
+								"name",
+								&tunnelWork
+							) != Status::Ok)
+							return diagnostic.Code;
+						const auto *text = std::get_if<std::string>(&*tunnelKey.Data);
+						if (!text) {
+							diagnostic = {
+								Status::InvalidValue,
+								node.Id,
+								"name",
+								"current source tunnel key must be text"
+							};
+							return diagnostic.Code;
+						}
+						key = *text;
+						context.ValueViews.emplace_back("name", &*tunnelKey.Data);
+					} else if (const auto *value = context.Find("name")) {
+						const auto *text = std::get_if<std::string>(value);
+						if (!text) {
+							diagnostic = {
+								Status::TypeMismatch,
+								node.Id,
+								"name",
+								"current source tunnel key must be text"
+							};
+							return diagnostic.Code;
+						}
+						key = *text;
+					}
+					if (context.FailureCode != Status::Ok) {
+						diagnostic = {context.FailureCode, node.Id, "name", context.FailureMessage};
+						return diagnostic.Code;
+					}
+					std::optional<size_t> local, global;
+					for (const auto &sender : sourceTunnelRegistry) {
+						const uint64_t units =
+							1 + std::min(key.size(), sender.Name.size()) + sender.NodeId.size();
+						if (units > 64'000'000 - scheduleWork) {
+							diagnostic = {
+								Status::LimitExceeded,
+								node.Id,
+								"name",
+								"current tunnel lookup exceeds bounded text work"
+							};
+							return diagnostic.Code;
+						}
+						scheduleWork += units;
+						if (key.empty() || sender.Name != key) continue;
+						const auto producer = nodeIndices.at(sender.NodeId);
+						if (sender.Scope == 1.) {
+							const uint64_t groupUnits =
+								1 + std::min(document.Nodes[producer].GroupId.size(), node.GroupId.size());
+							if (groupUnits > 64'000'000 - scheduleWork) {
+								diagnostic = {
+									Status::LimitExceeded,
+									node.Id,
+									"name",
+									"current tunnel scope lookup exceeds bounded text work"
+								};
+								return diagnostic.Code;
+							}
+							scheduleWork += groupUnits;
+							if (document.Nodes[producer].GroupId == node.GroupId) local = producer;
+						} else
+							global = producer;
+					}
+					const auto selected = local ? local : global;
+					if (selected) {
+						const auto &captured = inlineInputs[*selected];
+						if (groupProcess) {
+							EvaluationRequest getterRequest = request;
+							getterRequest.DataReplay = currentData;
+
+							if (ResolveSourceTunnelRegistry(
+									document,
+									getterRequest,
+									currentPlan,
+									budget,
+									tunnelGetterCharge,
+									diagnostic,
+									true,
+									nullptr,
+									&document.Nodes[*selected],
+									&tunnelGetter,
+									{results.data(), results.size()},
+									{produced.data(), produced.size()},
+									currentData,
+									"value_in",
+									&tunnelWork
+								) != Status::Ok)
+								return diagnostic.Code;
+							context.TunnelInput.Matched = true;
+							context.TunnelInput.Data = &*tunnelGetter.Data;
+							context.TunnelInput.Domain = tunnelGetter.Domain;
+							context.TunnelInput.DataImageArray = tunnelGetter.ImageArrayPayload;
+						} else if (!captured.Captured) {
+							demandedTunnelGetters[*selected] = 1;
+							pcxNames.Await(
+								*selected, detail::SourceTunnelRouteName, "value_in", true, diagnostic
+							);
+							if (!stagePcxDependency()) return diagnostic.Code;
+							continue;
+						}
+						if (!groupProcess) {
+							context.TunnelInput.Matched = true;
+							for (const auto &input : captured.Values)
+								if (input.Port == "value_in") {
+									context.TunnelInput.Data = &input.Data;
+									context.TunnelInput.Domain = input.Domain;
+								}
+							for (const auto &input : captured.Images)
+								if (input.Port == "value_in") {
+									context.TunnelInput.Surface = &input.Data;
+									context.TunnelInput.Domain = input.Domain;
+								}
+							for (const auto &input : captured.ImageArrays)
+								if (input.Port == "value_in") {
+									context.TunnelInput.Surfaces = &input.Data;
+									context.TunnelInput.Domain = input.Domain;
+								}
+						}
+					}
+				}
+
 				if (nodeInputs && node.Id == nodeInputs->NodeId) {
 					const bool executeCaptured =
 						batch && (retainedTargets[index] || remainingConsumers[index] != 0);
@@ -14081,6 +15982,33 @@ namespace engine::imagegraph {
 						}
 						continue;
 					}
+				}
+				if (frozenTunnelGetter) {
+					CatalogueOutputs restored;
+					if (!RestoreFrozenCacheGroupOutputs(
+							document.Nodes[index],
+							*frozen[index],
+							request.MaximumImageDimension,
+							restored,
+							budget,
+							resultCharges[index],
+							diagnostic
+						))
+						return diagnostic.Code;
+					const uint64_t bytes = ResultBytes(restored);
+					if (bytes > Limits::MaximumEvaluationBytes - evaluationBytes) {
+						SetDiagnostic(
+							diagnostic,
+							Status::LimitExceeded,
+							"frozen tunnel outputs exceed intermediate budget",
+							node.Id
+						);
+						return diagnostic.Code;
+					}
+					evaluationBytes += bytes;
+					results[index] = std::move(restored);
+					produced[index] = 1;
+					continue;
 				}
 				if (!executor) {
 					SetDiagnostic(
@@ -14222,7 +16150,11 @@ namespace engine::imagegraph {
 					Diagnostic &Error;
 					FrameTime Frame;
 				} processingCapture{
-					request.SourceInputObserver, budget, *observerCharge, diagnostic, GetFrameTime(request)
+					request.SourceInputObserver,
+					budget,
+					ownedRequestResidency ? groupProcess->CommonAdmission->Observer : *observerCharge,
+					diagnostic,
+					GetFrameTime(request)
 				};
 				const auto observeProcessing = [](detail::NodeContext &row, void *opaque) {
 					auto &state = *static_cast<ProcessingCapture *>(opaque);
@@ -14286,7 +16218,56 @@ namespace engine::imagegraph {
 					}
 					return true;
 				};
-				if (!detail::RunProcessorBatch(context, executor, observeProcessing, &processingCapture) ||
+				if (groupProcess && groupProcess->Session) {
+					if (const auto *owner = detail::CommonOwner(document, node.Id)) {
+						const auto profile = detail::SourceCommonOwnerDispatch(
+							document, request, size_t(owner - document.SourceCommonOwners.data())
+						);
+						if (groupProcess->DirectTarget == index ||
+							profile.Wrapper == SourceCommonWrapperKind::Full) {
+							if (detail::CaptureSourceCommonInputMap(
+									context,
+									*owner,
+									*groupProcess->Session,
+									budget,
+									*groupProcess->Charge,
+									diagnostic
+								) != Status::Ok)
+								return diagnostic.Code;
+						}
+					}
+				}
+				const auto *commonWrapper = groupProcess && groupProcess->DirectTarget != index
+												? detail::CommonOwner(document, node.Id)
+												: nullptr;
+				const bool heldGraph =
+					commonWrapper && !commonWrapper->UpdateGraph &&
+					detail::SourceCommonOwnerDispatch(
+						document, request, size_t(commonWrapper - document.SourceCommonOwners.data())
+					)
+							.Wrapper != SourceCommonWrapperKind::Unsupported;
+				if (heldGraph) {
+					CatalogueOutputs held;
+					detail::AllocationReservation heldCharge;
+					if (!RestoreFrozenCacheGroupOutputs(
+							node,
+							groupProcess->Outputs->Nodes[index],
+							request.MaximumImageDimension,
+							held,
+							budget,
+							heldCharge,
+							diagnostic
+						))
+						return diagnostic.Code;
+					context.OutputImages = std::move(held.Images);
+					context.OutputImageArrays = std::move(held.ImageArrays);
+					context.OutputValues = std::move(held.Values);
+					catalogueResult.FrozenDomains = std::move(held.FrozenDomains);
+					context.OutputDiagnostics = std::move(held.Diagnostics);
+					if (!context.OutputCharge.Merge(std::move(heldCharge))) std::terminate();
+				}
+				if ((!heldGraph &&
+					 !detail::RunProcessorBatch(context, executor, observeProcessing, &processingCapture)) ||
 					!detail::StampSourcePathShiftProducedValues(context) ||
 					context.FailureCode != Status::Ok) {
 					if (pendingPcxRoute) {
@@ -17083,6 +19064,49 @@ namespace engine::imagegraph {
 				results[index] = std::move(result);
 			resultCharges[index] = std::move(currentCharge);
 			produced[index] = 1;
+			if (groupProcess && groupProcess->Run[index]) {
+				auto &snapshot = groupProcess->Outputs->Nodes[index];
+				if (!CaptureCacheGroupOutputs(
+						node,
+						results[index],
+						snapshot,
+						budget,
+						*groupProcess->Charge,
+						captureComparisonWork,
+						diagnostic
+					))
+					return diagnostic.Code;
+				const bool direct = groupProcess->DirectTarget == index;
+				if (!direct) (*groupProcess->Nodes)[index].Rendered = true;
+				if (groupProcess->Common && !direct) {
+					const auto *owner = detail::CommonOwner(document, node.Id);
+					if (owner) {
+						const auto profile = detail::SourceCommonOwnerDispatch(
+							document, request, size_t(owner - document.SourceCommonOwners.data())
+						);
+						if (profile.Wrapper == SourceCommonWrapperKind::Full) {
+							const auto socket = std::find_if(
+								groupProcess->Common->Owners.begin(),
+								groupProcess->Common->Owners.end(),
+								[&](const auto &row) {
+									return row.OwnerId == owner->SourceOwnerId &&
+										   row.OwnerType == owner->SourceType;
+								}
+							);
+							if (socket == groupProcess->Common->Owners.end()) {
+								SetDiagnostic(
+									diagnostic,
+									Status::InvalidValue,
+									"full update has no common socket owner",
+									node.Id
+								);
+								return diagnostic.Code;
+							}
+							socket->Updated = true;
+						}
+					}
+				}
+			}
 			if (!tracked.empty() && tracked[index] &&
 				!CaptureCacheGroupOutputs(
 					node,
@@ -17129,6 +19153,10 @@ namespace engine::imagegraph {
 								pathShiftMemo, value.Data, budget, resultCharges[i], diagnostic
 							))
 							return diagnostic.Code;
+		if (groupProcess) {
+			diagnostic = {};
+			return Status::Ok;
+		}
 		if (batch && nodeInputs && !inputsCaptured) {
 			SetDiagnostic(
 				diagnostic,
@@ -17638,6 +19666,8 @@ namespace engine::imagegraph {
 		return Status::Ok;
 	}
 
+#include "SourceCommonInputRead.inc"
+
 	namespace detail {
 		static Status EvaluateSourceInputImpl(
 			const Document &document,
@@ -17793,6 +19823,38 @@ namespace engine::imagegraph {
 		std::optional<std::span<const AuthoredValue>> observedInputs,
 		std::string_view observedInputOwner
 	) {
+		if (const auto selector = CommonSelector(port)) {
+			if (*selector != SourceCommonSelector::Update) {
+				diagnostic = {
+					Status::UnknownPort,
+					std::string(nodeId),
+					std::string(port),
+					"common source selector is not an input"
+				};
+				return diagnostic.Code;
+			}
+			const auto *owner = CommonOwner(document, nodeId);
+			if (!owner) {
+				SetDiagnostic(
+					diagnostic,
+					Status::UnknownNode,
+					"common input has no registered owner",
+					std::string(nodeId)
+				);
+				return diagnostic.Code;
+			}
+			return ReadSourceCommonGetter(
+				document,
+				plan,
+				owner->SourceOwnerId,
+				*selector,
+				request,
+				budget,
+				result,
+				resultCharge,
+				diagnostic
+			);
+		}
 		return EvaluateSourceInputImpl(
 			document,
 			plan,
@@ -18111,7 +20173,8 @@ namespace engine::imagegraph {
 		Diagnostic &diagnostic,
 		uint64_t maximumBytes,
 		std::span<const std::string> batchIds = {},
-		std::string_view inputNodeId = {}
+		std::string_view inputNodeId = {},
+		GroupProcessCapture *groupProcess = nullptr
 	) try {
 		constexpr bool inputSupport = std::is_same_v<ReplayResult, StatefulInputEvaluationResult>;
 		constexpr bool batchSupport = std::is_same_v<ReplayResult, StatefulOutputEvaluationResult>;
@@ -18134,12 +20197,19 @@ namespace engine::imagegraph {
 		if (validated != Status::Ok) return validated;
 		const auto cacheActions = ValidateSimulationCacheActions(document, request, diagnostic);
 		if (cacheActions != Status::Ok) return cacheActions;
+		std::array<std::string_view, Limits::MaximumNodes> processRoots{};
+		size_t processRootCount = 0;
+		if (groupProcess) {
+			for (size_t index = 0; index < groupProcess->Run.size(); ++index)
+				if (groupProcess->Run[index]) processRoots[processRootCount++] = document.Nodes[index].Id;
+		}
 		const auto cone = AnalyzeStatefulTemporalCone(
 			document,
 			plan,
 			inputSupport ? batchIds : (batchSupport ? batchIds : std::span<const std::string>(&outputId, 1)),
 			inputNodeId,
-			request.SimulationCacheCaptures
+			groupProcess ? std::span<const std::string_view>(processRoots.data(), processRootCount)
+						 : request.SimulationCacheCaptures
 		);
 		if (!cone.Valid) return fail(Status::InvalidOutput, "selected temporal closure is invalid");
 
@@ -18413,6 +20483,13 @@ namespace engine::imagegraph {
 			};
 		StatefulOutputCapture batch{batchIds, nullptr, &outputCharge};
 		if constexpr (batchSupport || inputSupport) batch.Outputs = &candidate.Outputs;
+		detail::AllocationReservation groupOutputsCharge;
+		if (groupProcess) {
+			auto held = budget.Reserve(RetainedCacheGroupReplayBytes(*groupProcess->Outputs));
+			if (!held) return fail(Status::LimitExceeded, "group output history exceeds live bytes");
+			groupOutputsCharge = std::move(*held);
+			groupProcess->Charge = &groupOutputsCharge;
+		}
 		const Status evaluated = EvaluateGraph(
 			document,
 			plan,
@@ -18431,7 +20508,8 @@ namespace engine::imagegraph {
 			false,
 			nullptr,
 			&capture,
-			(batchSupport || inputSupport) ? &batch : nullptr
+			!groupProcess && (batchSupport || inputSupport) ? &batch : nullptr,
+			groupProcess
 		);
 		if (evaluated != Status::Ok) return evaluated;
 		if constexpr (!batchSupport && !inputSupport) {
@@ -18545,6 +20623,755 @@ namespace engine::imagegraph {
 	) {
 		return EvaluateReplayInternal(document, plan, outputId, request, result, diagnostic, maximumBytes);
 	}
+	static bool
+	GroupHeldPortCompatible(const Document &document, const Node &node, const CacheGroupReplayOutput &held) {
+		const auto declared = FindPortType(node, held.Port, PortDirection::Output, &document);
+		if (!declared) return false;
+		if (!held.Data) return !held.Domain || held.Domain->Type == *declared || *declared == ValueType::Any;
+		ValueType actual =
+			held.Domain && held.Domain->Type != ValueType::Any ? held.Domain->Type : TypeOf(*held.Data);
+		std::span<const ValueType> alternatives{};
+		if (const auto *schema = FindPort(node.Type, held.Port, PortDirection::Output))
+			alternatives = schema->Alternatives;
+		if (node.Type == "value.noise_field" || node.Type == "value.sample_noise" ||
+			IsNoiseImageGenerator(node.Type)) {
+			const auto port = NoiseNodePort(node, held.Port, PortDirection::Output, &document);
+			if (port) alternatives = port->Alternatives;
+		}
+		if (!alternatives.empty())
+			return std::find(alternatives.begin(), alternatives.end(), actual) != alternatives.end();
+		return *declared == ValueType::Any || *declared == actual;
+	}
+
+	bool GroupRenderSession::Ready(std::string_view nodeId) const {
+		const auto found =
+			std::find_if(Nodes.begin(), Nodes.end(), [&](const auto &node) { return node.NodeId == nodeId; });
+		return found != Nodes.end() && found->Rendered;
+	}
+
+	uint64_t RetainedGroupRenderSessionBytes(const GroupRenderSession &session) {
+		uint64_t bytes = sizeof(session) + session.Nodes.capacity() * sizeof(GroupRenderReadiness);
+		const uint64_t commonBytes = detail::RetainedSourceCommonMembershipBytes(session);
+		const uint64_t embedded = sizeof(session.Common) + sizeof(session.CommonAnimators) +
+								  sizeof(session.SourceCommonWrites) + sizeof(session.SourceCommonBindings) +
+								  sizeof(session.SourceCommonInputs);
+		if (commonBytes < embedded || !AddBytes(bytes, commonBytes - embedded)) return UINT64_MAX;
+		if (!AddBytes(bytes, session.Purities.capacity() * sizeof(GroupRenderPurity))) return UINT64_MAX;
+		if (!AddBytes(bytes, RetainedCacheGroupReplayBytes(session.Outputs)) ||
+			!AddBytes(bytes, RetainedStatefulOutputBytes(session.Replay)) ||
+			!AddBytes(bytes, RetainedSimulationReplayBytes(session.Replay.Simulation)) ||
+			!AddBytes(bytes, RetainedSurfaceFrameReplayBytes(session.Replay.Surfaces)) ||
+			!AddBytes(bytes, RetainedRandomReplayBytes(session.Replay.Random)) ||
+			!AddBytes(bytes, RetainedDataReplayBytes(session.Replay.Data)) ||
+			!AddBytes(bytes, RetainedRigidReplayBytes(session.Replay.Rigid)))
+			return UINT64_MAX;
+		for (const auto &node : session.Nodes)
+			if (!AddBytes(bytes, node.NodeId.capacity()) || !AddBytes(bytes, node.GroupId.capacity()) ||
+				!AddBytes(bytes, node.InstanceBase.capacity()) ||
+				!AddBytes(bytes, node.SourceParentInputBase.capacity()))
+				return UINT64_MAX;
+		for (const auto &group : session.Purities)
+			if (!AddBytes(bytes, group.GroupId.capacity()) || !AddBytes(bytes, group.ParentId.capacity()) ||
+				!AddBytes(bytes, group.OwnerNodeId.capacity()) ||
+				!AddBytes(bytes, group.InstanceBase.capacity()))
+				return UINT64_MAX;
+		return bytes;
+	}
+
+	static bool GroupScopeDisabled(const Document &document, std::string_view scope) {
+		for (size_t hop = 0; !scope.empty() && hop < document.Groups.size(); ++hop) {
+			const auto group =
+				std::find_if(document.Groups.begin(), document.Groups.end(), [&](const Group &candidate) {
+					return candidate.Id == scope;
+				});
+			if (group == document.Groups.end()) return true;
+			if (!group->RenderActive) return true;
+			scope = group->ParentId;
+		}
+		return false;
+	}
+
+#include "SourceFrameActivitySeeds.inc"
+	static std::optional<bool> SourceNodeAnimated(
+		const Document &document,
+		const Node &local,
+		const GroupReplayState *replay,
+		std::span<const GroupRenderReadiness> observations
+	) {
+		const Node *node = &local;
+		bool unresolvedActivity = false;
+		for (size_t hop = 0; hop <= document.Nodes.size(); ++hop) {
+			const auto observation =
+				std::find_if(observations.begin(), observations.end(), [&](const auto &row) {
+					return row.NodeId == node->Id;
+				});
+			if (observation == observations.end() ||
+				observation->FrameActivity == SourceFrameActivity::Unknown)
+				unresolvedActivity = true;
+			else if (observation->FrameActivity == SourceFrameActivity::FrameDriven)
+				return true;
+			if (node->InstanceBase.empty()) break;
+			const auto base =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &candidate) {
+					return candidate.Id == node->InstanceBase;
+				});
+			if (base == document.Nodes.end() || hop == document.Nodes.size()) return std::nullopt;
+			node = &*base;
+		}
+		const auto animated = [&](std::string_view port, bool legacyKeyed = false) {
+			// The parent socket belongs to Collection.inputs, not the Group Input control's inputs.
+			if (node->Type == "pc.group_input" && port == "parent_value") return false;
+			const auto mode = detail::SourcePropertyGetterAnimated(document, *node, port, replay);
+			return mode.value_or(legacyKeyed);
+		};
+		for (const auto &port : node->SourceAnimatedInputs)
+			if (animated(port)) return true;
+		for (const auto &port : node->SourceStaticInputs)
+			if (animated(port)) return true;
+		if (const auto *catalogue = FindCatalogueEntry(node->Type))
+			for (const auto &port : catalogue->Inputs)
+				if (animated(port.Id)) return true;
+		for (const auto &port : node->DynamicInputs)
+			if (animated(port.Id)) return true;
+		if (replay && replay->InstancesBound())
+			for (const auto &binding : replay->Bindings())
+				if (binding.NodeId == node->Id && animated(binding.Port)) return true;
+		// Retained source keys do not change is_anim. Legacy native graphs have no source mode.
+		for (const auto &key : document.Keyframes)
+			if (key.NodeId == node->Id && animated(key.Port, true)) return true;
+		for (const auto &track : document.Tracks)
+			if (track.NodeId == node->Id && animated(track.Port, true)) return true;
+		return unresolvedActivity ? std::nullopt : std::optional<bool>{false};
+	}
+
+	static std::optional<bool> PureSourceGroup(
+		const Document &document,
+		std::string_view groupId,
+		const GroupReplayState *replay,
+		std::span<const GroupRenderReadiness> observations
+	) {
+		for (const auto &group : document.Groups) {
+			if (group.Id == groupId && !group.PureFunction) return false;
+			if (group.ParentId == groupId) return false;
+		}
+		bool unresolved = false;
+		for (const auto &node : document.Nodes) {
+			if (node.GroupId != groupId) continue;
+			const auto animated = SourceNodeAnimated(document, node, replay, observations);
+			if (!animated)
+				unresolved = true;
+			else if (*animated)
+				return false;
+			if (std::any_of(document.Groups.begin(), document.Groups.end(), [&](const auto &group) {
+					return group.OwnerNodeId == node.Id;
+				}))
+				return false;
+		}
+		return unresolved ? std::nullopt : std::optional<bool>{true};
+	}
+
+#include "SourceCommonAdmission.inc"
+#include "SourceCommonInvocation.inc"
+
+	Status ProcessGroupRender(
+		const Document &document,
+		const Plan &plan,
+		const EvaluationRequest &request,
+		const GroupRenderOperation &operation,
+		GroupRenderSession &session,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		ENGINE_PROFILE("imagegraph.group_process");
+		const auto fail = [&](Status code, const char *message) {
+			SetDiagnostic(diagnostic, code, message);
+			return code;
+		};
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes ||
+			document.Nodes.size() > Limits::MaximumNodes || session.Nodes.size() > Limits::MaximumNodes ||
+			operation.AffectedNodes.size() > Limits::MaximumNodes ||
+			session.Purities.size() > Limits::MaximumGroups ||
+			(operation.PurityRefresh && operation.PurityRefresh->Groups.size() > Limits::MaximumGroups))
+			return fail(Status::LimitExceeded, "group process records or byte cap exceed bounds");
+		if (ValidateEvaluationRequest(request, diagnostic) != Status::Ok) return diagnostic.Code;
+		const uint64_t comparisons =
+			document.Nodes.size() *
+			uint64_t(
+				document.Nodes.size() + document.Links.size() + document.Groups.size() +
+				session.Nodes.size() + session.Outputs.Nodes.size() + session.Purities.size() +
+				document.Groups.size()
+			);
+		const uint64_t purityWork =
+			operation.Mode == GroupRenderMode::RefreshPurity
+				? document.Nodes.size() *
+					  uint64_t(
+						  document.Keyframes.size() + document.Tracks.size() +
+						  (request.GroupReplay ? request.GroupReplay->Bindings().size() : 0)
+					  )
+				: 0;
+		if (comparisons > 16'000'000 || purityWork > 16'000'000 - comparisons)
+			return fail(Status::LimitExceeded, "group processing exceeds its comparison work cap");
+		if (operation.Mode != GroupRenderMode::AutomaticFull &&
+			operation.Mode != GroupRenderMode::AutomaticPartial &&
+			operation.Mode != GroupRenderMode::ForceGroup && operation.Mode != GroupRenderMode::RefreshPurity)
+			return fail(Status::InvalidValue, "group processing mode is invalid");
+		if (operation.InitialState != SourceNodeInitialState::Loaded &&
+			operation.InitialState != SourceNodeInitialState::Constructed)
+			return fail(Status::InvalidValue, "source initialization policy is invalid");
+		if ((operation.Mode == GroupRenderMode::RefreshPurity) != operation.PurityRefresh.has_value())
+			return fail(Status::InvalidValue, "purity refresh requires its explicit lifecycle operation");
+		if (operation.PurityRefresh) {
+			const auto &refresh = *operation.PurityRefresh;
+			if (refresh.Event != SourcePurityRefreshEvent::LoadTopology &&
+				refresh.Event != SourcePurityRefreshEvent::Membership &&
+				refresh.Event != SourcePurityRefreshEvent::AnimationMode &&
+				refresh.Event != SourcePurityRefreshEvent::PureFunction &&
+				refresh.Event != SourcePurityRefreshEvent::InputOutput)
+				return fail(Status::InvalidValue, "source purity refresh event is invalid");
+			for (size_t index = 0; index < refresh.Groups.size(); ++index) {
+				const auto id = refresh.Groups[index];
+				if (id.size() > Limits::MaximumTextBytes ||
+					std::find(refresh.Groups.begin(), refresh.Groups.begin() + index, id) !=
+						refresh.Groups.begin() + index ||
+					std::none_of(document.Groups.begin(), document.Groups.end(), [&](const auto &group) {
+						return group.Id == id;
+					}))
+					return fail(Status::InvalidGroup, "source purity refresh group is absent or duplicated");
+			}
+		}
+		if (operation.Mode == GroupRenderMode::ForceGroup) {
+			if (std::none_of(document.Groups.begin(), document.Groups.end(), [&](const Group &group) {
+					return group.Id == operation.GroupId;
+				}))
+				return fail(Status::InvalidGroup, "forced group does not exist");
+		} else if (!operation.GroupId.empty())
+			return fail(Status::InvalidGroup, "automatic process has no selected group");
+		if (operation.Mode != GroupRenderMode::AutomaticPartial && !operation.AffectedNodes.empty())
+			return fail(Status::InvalidValue, "only partial processing accepts explicit seed nodes");
+		for (const auto id : operation.AffectedNodes)
+			if (id.size() > Limits::MaximumTextBytes ||
+				std::none_of(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
+					return node.Id == id;
+				}))
+				return fail(Status::UnknownNode, "partial processing seed node is absent");
+		detail::EvaluationBudget budget(maximumBytes);
+		auto previous = budget.Reserve(RetainedGroupRenderSessionBytes(session));
+		const auto documentBytes = DocumentRetainedPayloadBytes(document);
+		auto authored = documentBytes ? budget.Reserve(*documentBytes) : std::nullopt;
+		if (!previous || !authored)
+			return fail(Status::LimitExceeded, "group process prior state exceeds live bytes");
+		detail::AllocationReservation sourceReplayCharge;
+		if (operation.Mode == GroupRenderMode::RefreshPurity && request.GroupReplay) {
+			if (request.GroupReplay->AuthoringRevision() != request.GroupAuthoringRevision ||
+				(!request.GroupReplay->InstancesBound() &&
+				 std::any_of(document.Nodes.begin(), document.Nodes.end(), [](const auto &node) {
+					 return !node.InstanceBase.empty() || !node.SourceParentInputBase.empty();
+				 })))
+				return fail(Status::InvalidValue, "source purity refresh animator owner is stale or unbound");
+			auto charge = budget.Reserve(request.GroupReplay->RetainedBytes());
+			if (!charge)
+				return fail(Status::LimitExceeded, "source purity refresh animator owner exceeds live bytes");
+			sourceReplayCharge = std::move(*charge);
+		}
+		detail::AllocationReservation planCharge;
+		Plan checked;
+		if (CompileWithBudget(
+				document, checked, diagnostic, budget, planCharge, plan.SourceCommonRuntimeOnly
+			) != Status::Ok)
+			return diagnostic.Code;
+		if (checked != plan) return fail(Status::InvalidOutput, "group process plan does not match document");
+		if (ValidateCacheGroupReplay(session.Outputs, maximumBytes, diagnostic) != Status::Ok)
+			return diagnostic.Code;
+		for (size_t index = 0; index < session.Nodes.size(); ++index) {
+			const auto &id = session.Nodes[index].NodeId;
+			if (id.empty() || id.size() > Limits::MaximumTextBytes ||
+				std::any_of(session.Nodes.begin(), session.Nodes.begin() + index, [&](const auto &node) {
+					return node.NodeId == id;
+				}))
+				return fail(Status::InvalidValue, "group readiness identity is invalid or duplicated");
+			if (session.Nodes[index].GroupId.size() > Limits::MaximumTextBytes ||
+				session.Nodes[index].InstanceBase.size() > Limits::MaximumTextBytes ||
+				session.Nodes[index].SourceParentInputBase.size() > Limits::MaximumTextBytes ||
+				(session.Nodes[index].FrameActivity != SourceFrameActivity::Unknown &&
+				 session.Nodes[index].FrameActivity != SourceFrameActivity::Static &&
+				 session.Nodes[index].FrameActivity != SourceFrameActivity::FrameDriven))
+				return fail(Status::InvalidValue, "source activity record is invalid");
+		}
+		for (size_t index = 0; index < session.Purities.size(); ++index) {
+			const auto &row = session.Purities[index];
+			if (row.GroupId.empty() || row.GroupId.size() > Limits::MaximumTextBytes ||
+				row.ParentId.size() > Limits::MaximumTextBytes ||
+				row.OwnerNodeId.size() > Limits::MaximumTextBytes ||
+				row.InstanceBase.size() > Limits::MaximumTextBytes ||
+				std::any_of(
+					session.Purities.begin(),
+					session.Purities.begin() + index,
+					[&](const auto &prior) { return prior.GroupId == row.GroupId; }
+				) ||
+				(row.State != SourceGroupPurity::Unknown && row.State != SourceGroupPurity::Nonpure &&
+				 row.State != SourceGroupPurity::Pure))
+				return fail(Status::InvalidValue, "cached source purity record is invalid");
+		}
+		auto survivorCharge = budget.Reserve(detail::CacheGroupReplayCloneBytes(session.Outputs));
+		if (!survivorCharge)
+			return fail(Status::LimitExceeded, "group process retained output clone exceeds live bytes");
+		CacheGroupReplayState surviving;
+		surviving.Nodes.reserve(session.Outputs.Nodes.size());
+		for (const auto &held : session.Outputs.Nodes)
+			if (std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
+					return node.Id == held.NodeId && node.Type == held.NodeType &&
+						   std::all_of(held.Outputs.begin(), held.Outputs.end(), [&](const auto &port) {
+							   return GroupHeldPortCompatible(document, node, port);
+						   });
+				}))
+				surviving.Nodes.push_back(held);
+		GroupRenderSession candidate;
+		auto commonHistoryCharge = budget.Reserve(detail::RetainedSourceCommonMembershipBytes(session));
+		if (!commonHistoryCharge)
+			return fail(Status::LimitExceeded, "common process history clone exceeds live bytes");
+		if (!session.SourceCommonBindings.empty()) {
+			if (session.SourceCommonBindings.size() != document.SourceCommonOwners.size() ||
+				session.Common.Owners.size() != document.SourceCommonOwners.size())
+				return fail(
+					Status::InvalidValue,
+					"common process history requires explicit initialization or reconciliation"
+				);
+			for (size_t index = 0; index < document.SourceCommonOwners.size(); ++index) {
+				const auto &owner = document.SourceCommonOwners[index];
+				const auto &binding = session.SourceCommonBindings[index];
+				if (binding.SourceOwnerId != owner.SourceOwnerId || binding.SourceType != owner.SourceType ||
+					binding.NativeOwnerKind != owner.NativeOwnerKind ||
+					binding.NativeOwnerId != owner.NativeOwnerId)
+					return fail(
+						Status::InvalidValue, "common process owner bindings require explicit reconciliation"
+					);
+			}
+			candidate.Common = session.Common;
+			candidate.CommonAnimators = session.CommonAnimators;
+			candidate.SourceCommonWrites = session.SourceCommonWrites;
+			candidate.SourceCommonBindings = session.SourceCommonBindings;
+			candidate.SourceCommonInputs = session.SourceCommonInputs;
+		}
+		if (detail::InitializeGroupRenderOutputs(
+				document, surviving, candidate.Outputs, budget.Available(), diagnostic
+			) != Status::Ok)
+			return diagnostic.Code;
+		std::array<bool, Limits::MaximumNodes> retainedSchema{};
+		for (size_t index = 0; index < document.Nodes.size(); ++index)
+			retainedSchema[index] =
+				std::any_of(surviving.Nodes.begin(), surviving.Nodes.end(), [&](const auto &row) {
+					return row.NodeId == document.Nodes[index].Id;
+				});
+		surviving = {};
+		survivorCharge->Reset();
+		auto snapshotCharge = budget.Reserve(RetainedCacheGroupReplayBytes(candidate.Outputs));
+		uint64_t metadataBytes = document.Nodes.size() *
+								 (sizeof(GroupRenderReadiness) + sizeof(uint8_t) +
+								  sizeof(CacheGroupReplayNode) + sizeof(std::pair<std::string_view, size_t>));
+		for (const auto &node : document.Nodes)
+			if (!AddBytes(metadataBytes, std::max(node.Id.size(), std::string{}.capacity())))
+				return fail(Status::LimitExceeded, "group readiness size overflows");
+		for (const auto &node : document.Nodes)
+			if (!AddBytes(metadataBytes, std::max(node.GroupId.size(), std::string{}.capacity())) ||
+				!AddBytes(metadataBytes, std::max(node.InstanceBase.size(), std::string{}.capacity())) ||
+				!AddBytes(
+					metadataBytes, std::max(node.SourceParentInputBase.size(), std::string{}.capacity())
+				))
+				return fail(Status::LimitExceeded, "source activity membership size overflows");
+		if (!AddBytes(metadataBytes, document.Groups.size() * sizeof(GroupRenderPurity)))
+			return fail(Status::LimitExceeded, "cached source purity size overflows");
+		for (const auto &group : document.Groups)
+			if (!AddBytes(metadataBytes, std::max(group.Id.size(), std::string{}.capacity())) ||
+				!AddBytes(metadataBytes, std::max(group.ParentId.size(), std::string{}.capacity())) ||
+				!AddBytes(metadataBytes, std::max(group.OwnerNodeId.size(), std::string{}.capacity())) ||
+				!AddBytes(metadataBytes, std::max(group.InstanceBase.size(), std::string{}.capacity())))
+				return fail(Status::LimitExceeded, "cached source purity identity size overflows");
+		auto metadataCharge = budget.Reserve(metadataBytes);
+		if (!snapshotCharge || !metadataCharge)
+			return fail(Status::LimitExceeded, "group socket and readiness metadata exceed live bytes");
+		// Align the journal once with the checked document; evaluator capture then has constant indexing.
+		CacheGroupReplayState ordered;
+		ordered.Nodes.reserve(document.Nodes.size());
+		candidate.Nodes.reserve(document.Nodes.size());
+		for (const auto &node : document.Nodes) {
+			const auto held = std::find_if(
+				candidate.Outputs.Nodes.begin(), candidate.Outputs.Nodes.end(), [&](const auto &record) {
+					return record.NodeId == node.Id;
+				}
+			);
+			const bool retained = std::any_of(
+				session.Outputs.Nodes.begin(), session.Outputs.Nodes.end(), [&](const auto &record) {
+					return record.NodeId == node.Id && record.NodeType == node.Type &&
+						   std::all_of(record.Outputs.begin(), record.Outputs.end(), [&](const auto &port) {
+							   return GroupHeldPortCompatible(document, node, port);
+						   });
+				}
+			);
+			for (auto &port : held->Outputs) {
+				if (port.Domain) continue;
+				if (const auto type = FindPortType(node, port.Port, PortDirection::Output, &document))
+					port.Domain = SourceSocketDomain{*type, std::nullopt, std::nullopt};
+			}
+			ordered.Nodes.push_back(std::move(*held));
+			const auto prior = std::find_if(session.Nodes.begin(), session.Nodes.end(), [&](const auto &row) {
+				return row.NodeId == node.Id;
+			});
+			const auto activity = retained && prior != session.Nodes.end()
+									  ? prior->FrameActivity
+									  : SourceInitialFrameActivity(node.Type, operation.InitialState);
+			candidate.Nodes.push_back(
+				{node.Id,
+				 operation.Mode != GroupRenderMode::AutomaticFull && retained && session.Ready(node.Id),
+				 activity,
+				 node.GroupId,
+				 node.InstanceBase,
+				 node.SourceParentInputBase}
+			);
+		}
+		candidate.Outputs = std::move(ordered);
+		std::array<bool, Limits::MaximumGroups> structureChanged{};
+		const auto changed = [&](std::string_view id) {
+			for (size_t index = 0; index < document.Groups.size(); ++index)
+				if (document.Groups[index].Id == id) structureChanged[index] = true;
+		};
+		const EvaluationNodeIndices structureIndices(document);
+		std::array<bool, Limits::MaximumNodes> sameNodeContract{};
+		for (size_t index = 0; index < document.Nodes.size(); ++index) {
+			const auto &node = document.Nodes[index];
+			const auto old = std::find_if(session.Nodes.begin(), session.Nodes.end(), [&](const auto &row) {
+				return row.NodeId == node.Id;
+			});
+			sameNodeContract[index] = retainedSchema[index] && old != session.Nodes.end() &&
+									  old->GroupId == node.GroupId &&
+									  old->InstanceBase == node.InstanceBase &&
+									  old->SourceParentInputBase == node.SourceParentInputBase;
+			if (!sameNodeContract[index]) {
+				changed(node.GroupId);
+				if (old != session.Nodes.end()) changed(old->GroupId);
+			}
+		}
+		// Invalidate the owning classification when a referenced base contract is replaced as well.
+		for (const auto &node : document.Nodes) {
+			const Node *base = &node;
+			for (size_t hop = 0; hop < document.Nodes.size(); ++hop) {
+				if (!sameNodeContract[structureIndices.at(base->Id)]) {
+					changed(node.GroupId);
+					break;
+				}
+				const auto alias = !base->InstanceBase.empty()
+									   ? std::string_view(base->InstanceBase)
+									   : std::string_view(base->SourceParentInputBase);
+				if (alias.empty()) break;
+				const auto next = structureIndices.find(alias);
+				if (!next) {
+					changed(node.GroupId);
+					break;
+				}
+				base = &document.Nodes[*next];
+			}
+		}
+		for (const auto &old : session.Nodes)
+			if (!structureIndices.find(old.NodeId)) changed(old.GroupId);
+		for (const auto &group : document.Groups) {
+			const auto old =
+				std::find_if(session.Purities.begin(), session.Purities.end(), [&](const auto &row) {
+					return row.GroupId == group.Id;
+				});
+			if (old == session.Purities.end() || old->ParentId != group.ParentId) {
+				changed(group.ParentId);
+				if (old != session.Purities.end()) changed(old->ParentId);
+			}
+			if (!group.OwnerNodeId.empty()) {
+				const auto owner = structureIndices.find(group.OwnerNodeId);
+				if (!owner || !sameNodeContract[*owner]) changed(group.Id);
+			}
+		}
+		for (const auto &old : session.Purities)
+			if (std::none_of(document.Groups.begin(), document.Groups.end(), [&](const auto &group) {
+					return group.Id == old.GroupId;
+				}))
+				changed(old.ParentId);
+		candidate.Purities.reserve(document.Groups.size());
+		for (size_t index = 0; index < document.Groups.size(); ++index) {
+			const auto &group = document.Groups[index];
+			const auto prior =
+				std::find_if(session.Purities.begin(), session.Purities.end(), [&](const auto &row) {
+					return row.GroupId == group.Id;
+				});
+			const bool sameStructure = prior != session.Purities.end() && !structureChanged[index] &&
+									   prior->ParentId == group.ParentId &&
+									   prior->OwnerNodeId == group.OwnerNodeId &&
+									   prior->InstanceBase == group.InstanceBase &&
+									   prior->AuthoredPureFunction == group.PureFunction;
+			const auto state = prior == session.Purities.end()
+								   ? SourceGroupPurity::Nonpure
+								   : (sameStructure ? prior->State : SourceGroupPurity::Unknown);
+			candidate.Purities.push_back(
+				{group.Id, group.ParentId, group.OwnerNodeId, group.InstanceBase, group.PureFunction, state}
+			);
+		}
+		if (operation.PurityRefresh) {
+			for (auto &row : candidate.Purities) {
+				const auto targets = operation.PurityRefresh->Groups;
+				if (!targets.empty() &&
+					std::find(targets.begin(), targets.end(), row.GroupId) == targets.end())
+					continue;
+				const auto pure =
+					PureSourceGroup(document, row.GroupId, request.GroupReplay, candidate.Nodes);
+				row.State = !pure ? SourceGroupPurity::Unknown
+								  : (*pure ? SourceGroupPurity::Pure : SourceGroupPurity::Nonpure);
+			}
+		}
+		if (operation.Mode == GroupRenderMode::RefreshPurity) {
+			if (ValidateSimulationReplay(session.Replay.Simulation, maximumBytes, diagnostic) != Status::Ok ||
+				ValidateSurfaceFrameReplay(session.Replay.Surfaces, maximumBytes, diagnostic) != Status::Ok ||
+				ValidateRandomReplay(session.Replay.Random, maximumBytes, diagnostic) != Status::Ok ||
+				ValidateDataReplay(session.Replay.Data, maximumBytes, diagnostic) != Status::Ok ||
+				ValidateRigidReplay(session.Replay.Rigid, maximumBytes, diagnostic) != Status::Ok)
+				return diagnostic.Code;
+			// The complete session-size gate includes every replay ledger before its bounded copy.
+			auto replayCharge = budget.Reserve(RetainedGroupRenderSessionBytes(session));
+			if (!replayCharge)
+				return fail(Status::LimitExceeded, "purity refresh replay clone exceeds live bytes");
+			candidate.Replay = session.Replay;
+			if (RetainedGroupRenderSessionBytes(candidate) >
+				maximumBytes - previous->Bytes() - authored->Bytes() - sourceReplayCharge.Bytes())
+				return fail(Status::LimitExceeded, "purity refresh publication exceeds live bytes");
+			core::Metrics::Count(
+				"imagegraph.group_process.purity_refreshes",
+				operation.PurityRefresh->Groups.empty() ? document.Groups.size()
+														: operation.PurityRefresh->Groups.size()
+			);
+			core::Metrics::SetGauge(
+				"imagegraph.group_process.retained_bytes", double(RetainedGroupRenderSessionBytes(candidate))
+			);
+			session = std::move(candidate);
+			diagnostic = {};
+			return Status::Ok;
+		}
+		if (document.Nodes.empty()) {
+			session = std::move(candidate);
+			diagnostic = {};
+			return Status::Ok;
+		}
+		EvaluationRequest tunnelRequest = request;
+		tunnelRequest.SourceTunnelPreviousOutputs = &session.Outputs;
+		if (!tunnelRequest.DataReplay) tunnelRequest.DataReplay = &session.Replay.Data;
+		if (ResolveSourceTunnelRegistry(
+				document, tunnelRequest, checked, budget, planCharge, diagnostic, true
+			) != Status::Ok)
+			return diagnostic.Code;
+		const Plan &processPlan = checked;
+		std::vector<uint8_t> run(document.Nodes.size(), 0);
+		const EvaluationNodeIndices indices(document);
+		const bool forced = operation.Mode == GroupRenderMode::ForceGroup;
+		const auto cached =
+			std::find_if(candidate.Purities.begin(), candidate.Purities.end(), [&](const auto &row) {
+				return row.GroupId == operation.GroupId;
+			});
+		const auto purity =
+			!forced ? std::optional<bool>{false}
+					: (cached == candidate.Purities.end() || cached->State == SourceGroupPurity::Unknown
+						   ? std::nullopt
+						   : std::optional<bool>{cached->State == SourceGroupPurity::Pure});
+		if (!purity)
+			return fail(
+				Status::UnsupportedExecution, "forced group requires an observed source purity refresh"
+			);
+		const bool pure = *purity;
+		for (const size_t index : processPlan.NodeOrder) {
+			const auto &node = document.Nodes[index];
+			if (!candidate.SourceCommonBindings.empty()) {
+				if (const auto *owner = detail::CommonOwner(document, node.Id)) {
+					const auto dispatch = detail::SourceCommonOwnerDispatch(
+						document, request, size_t(owner - document.SourceCommonOwners.data())
+					);
+					if (dispatch.Wrapper != SourceCommonWrapperKind::Unsupported) {
+						if (!request.SourceSafeMode)
+							return fail(
+								Status::UnsupportedExecution, "source wrapper needs an observed safe mode"
+							);
+						if (*request.SourceSafeMode) {
+							const auto prior =
+								std::find_if(session.Nodes.begin(), session.Nodes.end(), [&](const auto &n) {
+									return n.NodeId == node.Id;
+								});
+							if (prior != session.Nodes.end())
+								candidate.Nodes[index].Rendered = prior->Rendered;
+							continue;
+						}
+					}
+				}
+			}
+			if (forced) {
+				if (pure && node.GroupId == operation.GroupId) run[index] = 1;
+				continue;
+			}
+			if (GroupScopeDisabled(document, node.GroupId)) continue;
+			bool ready = true;
+			bool affected =
+				!candidate.Nodes[index].Rendered ||
+				candidate.Nodes[index].FrameActivity == SourceFrameActivity::FrameDriven ||
+				!node.InstanceBase.empty() ||
+				std::find(operation.AffectedNodes.begin(), operation.AffectedNodes.end(), node.Id) !=
+					operation.AffectedNodes.end();
+			for (const auto &link : processPlan.EffectiveLinks) {
+				if (link.ToNode != node.Id ||
+					FindPortType(node, link.ToPort, PortDirection::Input) == ValueType::NodeRef)
+					continue;
+				const size_t source = indices.at(link.FromNode);
+				affected = affected || run[source];
+				bool inactive = request.DataReplay &&
+								!CacheGroupReplayShouldRun(request.DataReplay->CacheGroups, link.FromNode);
+				if (!run[source] && !candidate.Nodes[source].Rendered && !inactive) {
+					ready = false;
+					break;
+				}
+			}
+
+			for (const auto &route : processPlan.PcxNamedDependencies) {
+				if (route.Consumer != index || route.Name != detail::SourceTunnelRouteName) continue;
+				affected = affected || run[route.Producer];
+				// Tunnel receivers read the sender getter even when its callback cannot run.
+			}
+			if (ready && (operation.Mode != GroupRenderMode::AutomaticPartial || affected)) run[index] = 1;
+		}
+		EvaluationRequest processing = request;
+		processing.GroupRender = nullptr;
+		processing.SourceTunnelPreviousOutputs = &session.Outputs;
+		processing.ForceGroupRender = true;
+		if (!processing.SimulationReplay) processing.SimulationReplay = &session.Replay.Simulation;
+		if (!processing.SurfaceReplay) processing.SurfaceReplay = &session.Replay.Surfaces;
+		if (!processing.RandomReplay) processing.RandomReplay = &session.Replay.Random;
+		if (!processing.DataReplay) processing.DataReplay = &session.Replay.Data;
+		if (!processing.RigidReplay) processing.RigidReplay = &session.Replay.Rigid;
+		GroupProcessCapture capture{run, &candidate.Outputs, &candidate.Nodes};
+		capture.Common = candidate.SourceCommonBindings.empty() ? nullptr : &candidate.Common;
+		capture.Session = candidate.SourceCommonBindings.empty() ? nullptr : &candidate;
+		processing.SourceCommon = capture.Common;
+		processing.SourceCommonAnimators = &candidate.CommonAnimators;
+		// Output storage is charged by the shared stateful evaluator while it grows the candidate.
+		snapshotCharge->Reset();
+		checked = {};
+		planCharge.Reset();
+		if (EvaluateReplayInternal(
+				document,
+				plan,
+				{},
+				processing,
+				candidate.Replay,
+				diagnostic,
+				budget.Available(),
+				{},
+				{},
+				&capture
+			) != Status::Ok)
+			return diagnostic.Code;
+		if (RetainedGroupRenderSessionBytes(candidate) > maximumBytes - previous->Bytes() - authored->Bytes())
+			return fail(Status::LimitExceeded, "group process publication exceeds live bytes");
+		core::Metrics::Count(
+			"imagegraph.group_process.nodes", std::count(run.begin(), run.end(), uint8_t{1})
+		);
+		core::Metrics::SetGauge(
+			"imagegraph.group_process.retained_bytes", double(RetainedGroupRenderSessionBytes(candidate))
+		);
+		session = std::move(candidate);
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		SetDiagnostic(diagnostic, Status::LimitExceeded, "group processing allocation refused");
+		return diagnostic.Code;
+	}
+
+	Status RefreshSourceGroupPurity(
+		const Document &document,
+		const Plan &plan,
+		const EvaluationRequest &request,
+		const SourcePurityRefresh &refresh,
+		GroupRenderSession &session,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) {
+		GroupRenderOperation operation;
+		operation.Mode = GroupRenderMode::RefreshPurity;
+		operation.PurityRefresh = refresh;
+		return ProcessGroupRender(document, plan, request, operation, session, diagnostic, maximumBytes);
+	}
+
+	Status ReadGroupRenderOutput(
+		const Document &document,
+		std::string_view outputId,
+		const GroupRenderSession &session,
+		CacheGroupReplayOutput &output,
+		Diagnostic &diagnostic,
+		uint64_t maximumBytes
+	) try {
+		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes ||
+			document.Outputs.size() > Limits::MaximumOutputs) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "group socket observation exceeds bounds");
+			return diagnostic.Code;
+		}
+		if (ValidateCacheGroupReplay(session.Outputs, maximumBytes, diagnostic) != Status::Ok)
+			return diagnostic.Code;
+		const auto selected =
+			std::find_if(document.Outputs.begin(), document.Outputs.end(), [&](const Output &record) {
+				return record.Id == outputId;
+			});
+		if (selected == document.Outputs.end()) {
+			SetDiagnostic(diagnostic, Status::InvalidOutput, "held group output selector is absent");
+			return diagnostic.Code;
+		}
+		const auto producer =
+			std::find_if(session.Outputs.Nodes.begin(), session.Outputs.Nodes.end(), [&](const auto &node) {
+				return node.NodeId == selected->NodeId;
+			});
+		const auto current =
+			std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
+				return node.Id == selected->NodeId;
+			});
+		if (producer == session.Outputs.Nodes.end() || current == document.Nodes.end() ||
+			producer->NodeType != current->Type ||
+			!FindPortType(*current, selected->Port, PortDirection::Output)) {
+			SetDiagnostic(
+				diagnostic, Status::InvalidOutput, "held group producer is absent", selected->NodeId
+			);
+			return diagnostic.Code;
+		}
+		const auto held =
+			std::find_if(producer->Outputs.begin(), producer->Outputs.end(), [&](const auto &port) {
+				return port.Port == selected->Port;
+			});
+		if (held == producer->Outputs.end() || !GroupHeldPortCompatible(document, *current, *held)) {
+			SetDiagnostic(
+				diagnostic,
+				Status::InvalidOutput,
+				"held group socket is absent",
+				selected->NodeId,
+				selected->Port
+			);
+			return diagnostic.Code;
+		}
+		if (held->Refusal) {
+			diagnostic = *held->Refusal;
+			return diagnostic.Code;
+		}
+		uint64_t bytes = RetainedGroupRenderSessionBytes(session);
+		if (!AddBytes(bytes, sizeof(output) + held->Port.capacity() + output.Port.capacity()) ||
+			(held->Data && !AddBytes(bytes, CacheGroupValueCloneBytes(*held->Data).value_or(UINT64_MAX))) ||
+			(output.Data && !AddBytes(bytes, detail::RetainedPayloadBytes(*output.Data))) ||
+			bytes > maximumBytes) {
+			SetDiagnostic(diagnostic, Status::LimitExceeded, "held group socket clone exceeds live bytes");
+			return diagnostic.Code;
+		}
+		CacheGroupReplayOutput observed = *held;
+		output = std::move(observed);
+		diagnostic = {};
+		return Status::Ok;
+	} catch (const std::bad_alloc &) {
+		SetDiagnostic(diagnostic, Status::LimitExceeded, "group socket observation allocation refused");
+		return diagnostic.Code;
+	}
+
 	Status EvaluateStateful(
 		const Document &document,
 		const Plan &plan,

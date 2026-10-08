@@ -39,7 +39,6 @@ namespace engine::imagegraph {
 		};
 		// Attributes have no source input index. They never join child animator aliases.
 		inline const CatalogueInput *AliasedSourceInput(const Node &node, std::string_view port) {
-			if (node.Type == "pc.group_input" && port == "parent_value") return nullptr;
 			const auto *entry = FindCatalogueEntry(node.Type);
 			// Cooked HLSL retains source input animators through its renderer host route.
 			if (!entry || (!HasNativeExecutor(node.Type) && node.Type != "pc.hlsl")) return nullptr;
@@ -52,7 +51,10 @@ namespace engine::imagegraph {
 					}))
 					return nullptr;
 			}
-			return input && input->SourceIndex >= 0 ? input : nullptr;
+			return input && (input->SourceIndex >= 0 ||
+							 (node.Type == "pc.group_input" && port == "parent_value"))
+					   ? input
+					   : nullptr;
 		}
 		inline uint64_t DetachedAnimatorBytes(const DetachedSourceAnimator &value) {
 			const auto text = [](std::string_view s) {

@@ -511,6 +511,22 @@ imagegraph-source-pipeline-bench samples="5":
     ./.cache/build/release-tests/tests/test_imagegraph '[imagegraph][source_pipeline_workloads]'
     ATOMIC_IMAGEGRAPH_PIPELINE_PRESET=release-tests ./.cache/build/release-tests/bench/bench_imagegraph --suite engine.imagegraph.bench.source-pipelines --samples {{samples}}
 
+# CPU source group lifecycle and sixteen tunnel pairs with prior-registry selectors. Profiles stay on stdout.
+imagegraph-group-render-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset profile -DMONO_BUILD_BENCH=ON -DMONO_BUILD_TESTS=ON > /dev/null
+    cmake --build --preset profile --target test_imagegraph bench_imagegraph
+    ./.cache/build/profile/tests/test_imagegraph '[imagegraph][group_render]'
+    ATOMIC_IMAGEGRAPH_GROUP_PRESET=profile ./.cache/build/profile/bench/bench_imagegraph --suite engine.imagegraph.bench.group-render --samples {{samples}}
+
+# Captured common sockets: ordered steps, held metadata and bounded refusal. Profiles stay on stdout.
+imagegraph-common-sockets-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset profile -DMONO_BUILD_BENCH=ON -DMONO_BUILD_TESTS=ON > /dev/null
+    cmake --build --preset profile --target test_imagegraph bench_imagegraph
+    ./.cache/build/profile/tests/test_imagegraph '[source_common]'
+    ATOMIC_IMAGEGRAPH_COMMON_PRESET=profile ./.cache/build/profile/bench/bench_imagegraph --suite engine.imagegraph.bench.common-sockets --samples {{samples}}
+
 # Native rigid CPU seek cost with contact and exact replay checks. Results stay on stdout.
 imagegraph-rigid-replay-bench samples="5":
     test "{{samples}}" -ge 1 -a "{{samples}}" -le 5

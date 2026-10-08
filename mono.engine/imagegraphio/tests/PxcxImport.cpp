@@ -595,7 +595,7 @@ TEST_CASE("PXCX known controls map while unknown source remains lossless", "[ima
 	CHECK(failure.empty());
 	CHECK(imported.Source.OriginalBytes == source.OriginalBytes);
 	CHECK(imported.Source.GraphJson == source.GraphJson);
-	CHECK(imported.Graph.FormatVersion == 9);
+	CHECK(imported.Graph.FormatVersion == 11);
 	CHECK_FALSE(imported.ReferencePreview().has_value());
 	CHECK(imported.NativeNodes == 3);
 	REQUIRE(imported.Graph.Nodes.size() == 5);
@@ -2109,7 +2109,7 @@ TEST_CASE(
 	CHECK(valueKeys[0]->Kind == KeyframeKind::Adder);
 	CHECK(valueKeys[1]->Kind == KeyframeKind::Normal);
 	CHECK(HasCanonicalStaticInput(imported.Graph, "number", "integer"));
-	CHECK(imported.Graph.FormatVersion == 9);
+	CHECK(imported.Graph.FormatVersion == 11);
 	CHECK(imported.Source.OriginalBytes == source.OriginalBytes);
 	std::vector<std::byte> bytes;
 	REQUIRE(WritePxcx(imported.Source, bytes, failure));
@@ -2306,7 +2306,7 @@ TEST_CASE(
 	std::string failure;
 	REQUIRE(ImportPxcxImageGraph(source, imported, failure));
 	REQUIRE(imported.Graph.Project);
-	CHECK(imported.Graph.FormatVersion == 9);
+	CHECK(imported.Graph.FormatVersion == 11);
 	CHECK(imported.Graph.Project->PreviewGrid.Show);
 	CHECK(imported.Graph.Project->PreviewGrid.Snap);
 	CHECK(imported.Graph.Project->PreviewGrid.Size == Vector2{0, 7.5});
@@ -2326,7 +2326,7 @@ TEST_CASE(
 	Diagnostic diagnostic;
 	REQUIRE(Read(Write(imported.Graph), restored, diagnostic) == Status::Ok);
 	CHECK(restored.Project == imported.Graph.Project);
-	CHECK(restored.FormatVersion == 9);
+	CHECK(restored.FormatVersion == 11);
 	Plan plan;
 	REQUIRE(Compile(restored, plan, diagnostic) == Status::Ok);
 	Image image;
@@ -2438,7 +2438,7 @@ TEST_CASE(
 	std::string failure;
 	REQUIRE(ImportPxcxImageGraph(source, result, failure));
 	CHECK_FALSE(result.Graph.Project);
-	CHECK(result.Graph.FormatVersion == 9);
+	CHECK(result.Graph.FormatVersion == 11);
 	CHECK(PreviewIssues(result).empty());
 	const ProjectSettings defaults;
 	CHECK(defaults.PreviewGrid == PreviewGridSettings{});
@@ -2460,7 +2460,7 @@ TEST_CASE(
 	REQUIRE(ImportPxcxImageGraph(source, imported, failure));
 	REQUIRE(imported.Graph.Nodes.size() == 1);
 	CHECK(imported.Graph.Nodes[0].Type == "pc.number");
-	CHECK(imported.Graph.FormatVersion == 9);
+	CHECK(imported.Graph.FormatVersion == 11);
 	const auto valueKeys = KeyframesFor(imported.Graph, "number", "value");
 	REQUIRE(valueKeys.size() == 2);
 	CHECK(GetFrameTime(*valueKeys[0]) == FrameTime{1, .5, true});
@@ -2617,7 +2617,7 @@ TEST_CASE("PXC known key kinds ignore archived time-data tails", "[imagegraphio]
 		CHECK(valueKeys[0]->Kind == expectedKind);
 		CHECK(valueKeys[0]->Tick == 2);
 		CHECK(HasCanonicalStaticInput(imported.Graph, "number", "integer"));
-		CHECK(imported.Graph.FormatVersion == 9);
+		CHECK(imported.Graph.FormatVersion == 11);
 		CHECK(imported.Source.GraphJson == source.GraphJson);
 		std::vector<std::byte> unchanged;
 		REQUIRE(WritePxcx(imported.Source, unchanged, failure));
@@ -2636,7 +2636,7 @@ TEST_CASE("PXC unknown key kind leaves the whole animated node opaque", "[imageg
 		CHECK(imported.Graph.Keyframes.empty());
 		CHECK(imported.Graph.Tracks.empty());
 		CHECK(imported.CatalogueNodes == 0);
-		CHECK(imported.Graph.FormatVersion == 9);
+		CHECK(imported.Graph.FormatVersion == 11);
 		REQUIRE(imported.Graph.Timeline);
 		REQUIRE(imported.Graph.Timeline->SourceBounds);
 		CHECK(*imported.Graph.Timeline->SourceBounds == engine::imagegraph::SourceAuthoringFrameBounds{});
@@ -2664,7 +2664,7 @@ TEST_CASE("PXC compact scalar values do not invent discarded key-kind metadata",
 	CHECK(imported.Graph.Keyframes.front().Data == engine::imagegraph::Value{4.0});
 	CHECK(imported.Graph.Keyframes.front().Tick == 0);
 	CHECK(imported.Graph.Tracks.size() == 1);
-	CHECK(imported.Graph.FormatVersion == 9);
+	CHECK(imported.Graph.FormatVersion == 11);
 	CHECK(imported.Graph.Nodes.front().SourceStaticInputs == std::vector<std::string>{"value"});
 	imported.Graph.Outputs = {{"number", "number", "number"}};
 	Plan plan;
@@ -2686,7 +2686,7 @@ TEST_CASE("PXC unsupported second key does not retain the preceding adder key", 
 	CHECK(imported.Graph.Keyframes.empty());
 	CHECK(imported.Graph.Tracks.empty());
 	CHECK(imported.CatalogueNodes == 0);
-	CHECK(imported.Graph.FormatVersion == 9);
+	CHECK(imported.Graph.FormatVersion == 11);
 	REQUIRE(imported.Graph.Timeline);
 	REQUIRE(imported.Graph.Timeline->SourceBounds);
 	CHECK(*imported.Graph.Timeline->SourceBounds == engine::imagegraph::SourceAuthoringFrameBounds{});

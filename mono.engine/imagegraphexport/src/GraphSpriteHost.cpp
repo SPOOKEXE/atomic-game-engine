@@ -518,6 +518,12 @@ namespace engine::imagegraphexport {
 				layer = Text(in, "layer_name");
 				if (layer.empty()) throw std::runtime_error("Aseprite layer name is empty");
 				auto l = doc.Layers.begin() + *sourceLayerIndex;
+				// setFrameCel extends the selected layer array through the authored frame index.
+				bool animated = false;
+				for (size_t f = 1; f < doc.Frames.size(); ++f)
+					for (const auto &cel : doc.Frames[f].Cels)
+						if (cel.Layer == *sourceLayerIndex) animated = true;
+				capture.SourceUpdateOnFrame = animated;
 				const auto requestedLayer = layer;
 				// The source map selects an index, while the codec selects a name. Use one bounded
 				// private unique selector so suffix collisions do not change the selected subtree.

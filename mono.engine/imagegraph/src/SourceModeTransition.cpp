@@ -200,7 +200,7 @@ namespace engine::imagegraph {
 		if (const auto *binding = replay.Binding(transition.NodeId, transition.Port)) {
 			ownerId = binding->OwnerId;
 			animatorPort = detail::BindingAnimatorPort(*binding);
-		} else if (!target->InstanceBase.empty() && transition.Port != "parent_value")
+		} else if (!detail::SourceInputInstanceBase(*target, transition.Port).empty())
 			return fail(Status::InvalidValue, "source instance mode requires its original animator binding");
 		auto owner = std::find_if(candidate.Nodes.begin(), candidate.Nodes.end(), [&](const Node &node) {
 			return node.Id == ownerId;

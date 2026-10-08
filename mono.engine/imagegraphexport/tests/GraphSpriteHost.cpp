@@ -110,10 +110,12 @@ TEST_CASE(
 	REQUIRE(host.Capture({derived, request, layerInputs, {}, 1024 * 1024}, extracted, failure));
 	CHECK(extracted.Images.front().Data.Width == 5);
 	CHECK(extracted.Images.front().Data.Height == 5);
+	CHECK(extracted.SourceUpdateOnFrame == true);
 	request.Tick = 2;
 	REQUIRE(host.Capture({derived, request, layerInputs, {}, 1024 * 1024}, extracted, failure));
 	CHECK(extracted.Images.front().Data.Width == 1);
 	CHECK(extracted.Images.front().Data.Pixels == std::vector<uint8_t>{0, 0, 0, 0});
+	CHECK(extracted.SourceUpdateOnFrame == true);
 	request.Tick = 0;
 
 	Document document;

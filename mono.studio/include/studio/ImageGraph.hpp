@@ -179,6 +179,9 @@ namespace studio {
 		std::unordered_map<std::string, nodegraph::GroupId> GroupsToCanvas;
 		std::unordered_map<nodegraph::GroupId, std::string> GroupsToDocument;
 		std::unordered_map<std::string, engine::imagegraph::Vector2> OriginalPositions;
+		// Group source common sockets use an inert view node inside the native frame.
+		std::unordered_map<std::string, nodegraph::NodeId> SourceCommonGroupViews;
+		std::unordered_set<nodegraph::NodeId> SourceCommonNativeNodes;
 		std::unordered_set<std::string> EmptyGroups;
 		std::unordered_set<std::string> IssuedNodeIds;
 		std::unordered_set<std::string> IssuedGroupIds;

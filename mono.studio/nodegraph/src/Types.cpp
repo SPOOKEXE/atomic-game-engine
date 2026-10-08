@@ -77,6 +77,15 @@ namespace nodegraph {
 		work = 0;
 		if (to != ANY_TYPE && !CollectMembers(to, inputs, path, work)) return false;
 		if (from == ANY_TYPE || to == ANY_TYPE) return true;
+		const auto *source = Find(from);
+		const auto *destination = Find(to);
+		if (source->Members.empty() && destination->Members.empty()) {
+			const auto accepts = [](const DataType &wildcard, const std::string &leaf) {
+				return std::find(wildcard.WildcardMembers.begin(), wildcard.WildcardMembers.end(), leaf) !=
+					   wildcard.WildcardMembers.end();
+			};
+			if (accepts(*source, to) || accepts(*destination, from)) return true;
+		}
 		return std::all_of(outputs.begin(), outputs.end(), [&](const auto &member) {
 			return std::find(inputs.begin(), inputs.end(), member) != inputs.end();
 		});

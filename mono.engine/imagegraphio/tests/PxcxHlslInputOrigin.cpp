@@ -133,7 +133,7 @@ TEST_CASE(
 		const auto original = Import({{"nodes", Json::array({shader})}});
 		REQUIRE(original.Graph.Nodes.front().Type == "pc.hlsl");
 		REQUIRE(original.Graph.Nodes.front().DynamicInputs.size() == 9);
-		CHECK(original.Graph.FormatVersion == 9);
+		CHECK(original.Graph.FormatVersion == 11);
 		const auto desired = Remove(original.Graph, 1);
 		const auto unchanged = desired;
 		CHECK(desired.Nodes.front().DynamicInputs[3].SourceInputId == "pxc:input:11");
@@ -466,6 +466,35 @@ TEST_CASE(
 	REQUIRE(imported.Graph.Keyframes.size() == 8 * 67 + 20003);
 	auto desired = imported.Graph;
 	desired.Nodes.pop_back();
+	std::vector<std::pair<std::string, std::string>> retiredCommonWriters;
+	for (const auto &owner : desired.SourceCommonOwners)
+		if (owner.NativeOwnerKind == engine::imagegraph::SourceCommonNativeOwnerKind::Node &&
+			std::none_of(desired.Nodes.begin(), desired.Nodes.end(), [&](const auto &node) {
+				return node.Id == owner.NativeOwnerId;
+			}))
+			retiredCommonWriters.emplace_back(owner.UpdateAnimatorOwnerId, owner.UpdateAnimatorPort);
+	if (!retiredCommonWriters.empty()) {
+		REQUIRE(desired.SourceAnimators);
+		const auto retiredCommonWriter = [&](std::string_view ownerId, std::string_view port) {
+			return std::any_of(
+				retiredCommonWriters.begin(), retiredCommonWriters.end(), [&](const auto &writer) {
+					return writer.first == ownerId && writer.second == port;
+				}
+			);
+		};
+		std::erase_if(desired.SourceAnimators->Detached, [&](const auto &row) {
+			return retiredCommonWriter(row.OwnerId, row.Id);
+		});
+		std::erase_if(desired.SourceAnimators->DetachedValues, [&](const auto &row) {
+			return retiredCommonWriter(row.NodeId, row.Port);
+		});
+	}
+	std::erase_if(desired.SourceCommonOwners, [&](const auto &owner) {
+		return owner.NativeOwnerKind == engine::imagegraph::SourceCommonNativeOwnerKind::Node &&
+			   std::none_of(desired.Nodes.begin(), desired.Nodes.end(), [&](const auto &node) {
+				   return node.Id == owner.NativeOwnerId;
+			   });
+	});
 	desired.Keyframes.clear();
 	std::erase_if(desired.Tracks, [](const auto &track) { return track.NodeId == "removed"; });
 	for (auto &node : desired.Nodes)

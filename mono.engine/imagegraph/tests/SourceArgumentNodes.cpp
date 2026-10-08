@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cmath>
 #include <limits>
 
 TEST_SUITE_ID("engine.imagegraph.source_argument")
@@ -518,5 +519,71 @@ TEST_CASE("Argument unicode whitespace preserves nonfinite receipt refusals", "[
 		CHECK(prior.Subframe == original.Subframe);
 		CHECK(prior.State == original.State);
 		CHECK(prior.Failure == original.Failure);
+	}
+}
+
+TEST_CASE(
+	"Argument Number rounds tiny decimal prefixes to zero through table and defaults",
+	"[source_argument][argument_underflow]"
+) {
+	const std::vector<std::pair<std::string, double>> samples{
+		{"1e-9999", 0.},
+		{"-1e-9999", -0.},
+		{" \t+1e-9999tail", 0.},
+		{"\xc2\xa0-1e-9999suffix", -0.},
+		{"1e-324", 0.},
+		{"-2e-324", -0.},
+		{"5e-324", std::numeric_limits<double>::denorm_min()},
+		{"-5e-324", -std::numeric_limits<double>::denorm_min()},
+		{"2.2250738585072014e-308", std::numeric_limits<double>::min()},
+		{std::string(512, '0') + "1e-9999", 0.},
+		{std::string(512, '9') + "e-9999", 0.},
+		{"1e-" + std::string(512, '9'), 0.}
+	};
+	for (const auto &[text, expected] : samples) {
+		INFO(text);
+		auto host = Provider({{"name", text}});
+		for (bool supplied : {true, false}) {
+			const auto result = Evaluated(supplied ? Graph(1) : Graph(1, text, "absent"), &host);
+			REQUIRE(std::holds_alternative<double>(result));
+			CHECK(std::get<double>(result) == expected);
+			CHECK(std::signbit(std::get<double>(result)) == std::signbit(expected));
+		}
+	}
+	auto host = Provider({});
+	CHECK(Evaluated(Graph(1), &host) == Value{0.});
+	auto constructor = Graph(1);
+	constructor.Nodes[0].Values.pop_back();
+	CHECK(Evaluated(constructor, &host) == Value{0.});
+	SourceArgumentHost options;
+	Diagnostic diagnostic;
+	const std::string_view text[] = {"name=1e-9999suffix"};
+	REQUIRE(
+		options.PrepareOptions({text, {}, {}, {}}, Limits::MaximumEvaluationBytes, diagnostic) == Status::Ok
+	);
+	CHECK(Evaluated(Graph(1), &options) == Value{0.});
+}
+TEST_CASE(
+	"Argument Number overflow remains an atomic unsupported observation",
+	"[source_argument][argument_underflow]"
+) {
+	const std::vector<std::string> samples{
+		"1e9999", "-1e9999suffix", "Infinity", "-Infinity", "1e+" + std::string(512, '9')
+	};
+	for (const auto &text : samples) {
+		INFO(text);
+		auto host = Provider({{"name", text}});
+		for (bool supplied : {true, false}) {
+			auto d = supplied ? Graph(1) : Graph(1, text, "absent");
+			auto p = Compiled(d);
+			EvaluationRequest request;
+			request.HostProvider = &host;
+			EvaluatedValue output;
+			output.Data = int64_t{73};
+			const auto previous = output;
+			Diagnostic diagnostic;
+			CHECK(EvaluateValue(d, p, "out", request, output, diagnostic) == Status::UnsupportedExecution);
+			CHECK(output == previous);
+		}
 	}
 }

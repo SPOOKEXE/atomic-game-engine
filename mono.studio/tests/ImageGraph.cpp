@@ -1443,7 +1443,11 @@ TEST_CASE(
 	studio::ImageGraphCanvasIds candidateIds;
 	CHECK_FALSE(studio::LoadImageGraphCanvas(invalid, candidateCanvas, candidateIds, error));
 	CHECK(canvas.Signature() == originalSignature);
-	CHECK(canvas.Nodes().size() == source.Nodes.size());
+	CHECK(canvas.Nodes().size() == source.Nodes.size() + source.Junctions.size());
+	CHECK(saved.Nodes.size() == source.Nodes.size());
+	CHECK(std::none_of(saved.Nodes.begin(), saved.Nodes.end(), [](const auto &node) {
+		return node.Type == "studio.imagegraph.junction";
+	}));
 	CHECK(ids.ToCanvas == originalMapping);
 	CHECK(nodegraph::NodeTypes::Find(std::string(opaqueType)) == nullptr);
 }
@@ -1544,7 +1548,7 @@ TEST_CASE("Studio PXCX Open adapter maps supported nodes and retains source byte
 		engine::imagegraph::Migrate(imported.Graph, migrationDiagnostic) == engine::imagegraph::Status::Ok
 	);
 	// Migration retains imported project settings in the current native grammar.
-	CHECK(imported.Graph.FormatVersion == 9);
+	CHECK(imported.Graph.FormatVersion == 11);
 
 	nodegraph::Graph canvas;
 	studio::ImageGraphCanvasIds ids;

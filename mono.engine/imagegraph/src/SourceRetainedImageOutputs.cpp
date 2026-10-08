@@ -78,7 +78,9 @@ namespace engine::imagegraph::detail {
 		const auto *prior = PriorMetadata(c);
 		if (!prior) return nullptr;
 		const auto &record = std::get<StructValue>(prior->Values.front().Data);
-		const size_t requiredFields = c.Entry.Type == "pc.smear" ? 1 : 2;
+		const size_t requiredFields = c.Entry.Type == "pc.smear"		? 1
+									  : c.Entry.Type == "pc.tunnel_out" ? 3
+																		: 2;
 		if (!record.Data || record.Data->Fields.size() != requiredFields) {
 			c.Fail(Status::InvalidValue, "retained image metadata record has an invalid field count");
 			return nullptr;

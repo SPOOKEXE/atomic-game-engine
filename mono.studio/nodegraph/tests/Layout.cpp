@@ -11,6 +11,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <nodegraph/Graph.hpp>
 #include <nodegraph/Layout.hpp>
 #include <nodegraph/Types.hpp>
@@ -68,6 +69,37 @@ TEST_CASE("a node whose type is missing still has a body", "[nodegraph]") {
 	CHECK(broken.Width > 0.0f);
 	CHECK(broken.Height > 0.0f);
 	CHECK(broken.Ports.empty());
+}
+
+TEST_CASE("a hidden socket keeps its route anchor and remains type compatible", "[nodegraph]") {
+	RegisterFixtureNodes();
+	Graph graph;
+	const NodeId source = graph.Add("field.source", 0.0f, 0.0f);
+	const NodeId sinkId = graph.Add("field.blend", 260.0f, 0.0f);
+	REQUIRE(source != NO_NODE);
+	REQUIRE(sinkId != NO_NODE);
+	Node *sink = graph.Find(sinkId);
+	REQUIRE(sink != nullptr);
+	sink->InputPorts = InputsOf(*sink);
+	const auto input = std::find_if(sink->InputPorts->begin(), sink->InputPorts->end(), [](const auto &port) {
+		return port.Name == "A";
+	});
+	REQUIRE(input != sink->InputPorts->end());
+	input->Visible = false;
+
+	const NodeLayout hidden = LayoutOf(*sink);
+	const PlacedPort *anchor = PortIn(hidden, "A", true);
+	REQUIRE(anchor != nullptr);
+	CHECK_FALSE(anchor->Visible);
+	CHECK(graph.CanConnect(source, "Out", sinkId, "A") == LinkResult::Made);
+	CHECK(graph.Connect(source, "Out", sinkId, "A") == LinkResult::Made);
+	REQUIRE(graph.LinkInto(sinkId, "A") != nullptr);
+
+	input->Visible = true;
+	const NodeLayout visible = LayoutOf(*sink);
+	const PlacedPort *revealed = PortIn(visible, "A", true);
+	REQUIRE(revealed != nullptr);
+	CHECK(revealed->Visible);
 }
 
 TEST_CASE("a collapsed node keeps its ports and loses its body", "[nodegraph]") {

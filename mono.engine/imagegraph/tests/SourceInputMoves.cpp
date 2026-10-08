@@ -622,6 +622,30 @@ TEST_CASE(
 	auto original = MakeGradientPointMoveGraph();
 	const bool separated = GENERATE(false, true);
 	original.Nodes[1].SourceSeparatedVec2Animators->Inputs[0].Separated = separated;
+	const bool commonWriter = GENERATE(false, true);
+	if (commonWriter) {
+		original.FormatVersion = 11;
+		original.Nodes.push_back({"common", "pc.boolean", {}, {}, {{"value", true}}});
+		SourceCommonOwnerRecord owner;
+		owner.SourceOwnerId = "common";
+		owner.SourceType = "Node_Boolean";
+		owner.NativeOwnerId = "common";
+		owner.UpdateAnimatorOwnerId = "common";
+		owner.UpdateAnimatorPort = "native:animator:0";
+		original.SourceCommonOwners = {owner};
+		original.SourceAnimators.emplace();
+		DetachedSourceAnimator writer;
+		writer.OwnerId = "common";
+		writer.Id = owner.UpdateAnimatorPort;
+		writer.OriginalPort = "pxcx.update_in_trigger";
+		writer.Type = ValueType::Boolean;
+		original.SourceAnimators->Detached = {writer};
+		GroupSubtypeOverlay payload;
+		payload.NodeId = writer.OwnerId;
+		payload.Port = writer.Id;
+		payload.Fixed = false;
+		original.SourceAnimators->DetachedValues = {payload};
+	}
 	Diagnostic error;
 	GroupReplayState empty, initial, bound;
 	REQUIRE(RebindGroupReplay(original, empty, 1, initial, error) == Status::Ok);
@@ -651,6 +675,8 @@ TEST_CASE(
 	CHECK(refused.DetachedAnimators().empty());
 	CHECK(refused.Binding("copy", Point0)->AnimatorPort == bound.Binding("copy", Point0)->AnimatorPort);
 	const auto identity = detached.DetachedAnimators().front().Id;
+	CHECK(identity == (commonWriter ? "native:animator:1" : "native:animator:0"));
+	CHECK(bound.DetachedAnimators().empty());
 	const auto *detachedBinding = detached.Binding("copy", Point0);
 	REQUIRE(detachedBinding);
 	CHECK(detachedBinding->OwnerId == "base");
@@ -676,6 +702,14 @@ TEST_CASE(
 	REQUIRE(ProjectGroupReplay(staged, rebound, 3, projected, error, 1) == Status::LimitExceeded);
 	CHECK(Write(projected) == saved);
 	REQUIRE(ProjectGroupReplay(staged, rebound, 3, projected, error) == Status::Ok);
+	if (commonWriter) {
+		REQUIRE(projected.SourceAnimators);
+		CHECK(projected.SourceAnimators->Detached.size() == 2);
+		CHECK(
+			projected.SourceAnimators->DetachedValues.front() ==
+			original.SourceAnimators->DetachedValues.front()
+		);
+	}
 	const auto &projectedAxes = projected.Nodes[1].SourceSeparatedVec2Animators->Inputs[0];
 	CHECK(projectedAxes.Separated == separated);
 	for (const auto &axis : projectedAxes.Axes)

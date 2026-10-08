@@ -1,4 +1,5 @@
 #include "SourceChoice.hpp"
+#include "SourceRealNumber.hpp"
 #include "ValuePayload.hpp"
 
 #include <engine/core/Profiling.hpp>
@@ -41,78 +42,6 @@ namespace engine::imagegraph {
 			for (size_t i = 0; i < tag.size(); ++i)
 				if (stored[i] != (tag[i] == '_' ? ' ' : tag[i])) return false;
 			return true;
-		}
-		// Explicit HTML5 primitive real() profile. Object/reference conversion needs a final source receipt.
-		std::optional<Value> Number(const Value &raw) {
-			if (std::holds_alternative<bool>(raw) || std::holds_alternative<int64_t>(raw) ||
-				std::holds_alternative<double>(raw))
-				return raw;
-			if (std::holds_alternative<ArrayValue>(raw) || std::holds_alternative<UndefinedValue>(raw))
-				return Value{0.};
-			const auto *text = std::get_if<std::string>(&raw);
-			if (!text) return {};
-			std::string_view input = *text;
-			if (input.starts_with("0x")) {
-				double number = 0;
-				size_t count = 0;
-				for (char c : input.substr(2)) {
-					int digit = c >= '0' && c <= '9'   ? c - '0'
-								: c >= 'a' && c <= 'f' ? c - 'a' + 10
-								: c >= 'A' && c <= 'F' ? c - 'A' + 10
-													   : -1;
-					if (digit < 0) break;
-					number = number * 16 + digit;
-					++count;
-				}
-				return std::isfinite(number) ? std::optional<Value>{count ? number : 0.} : std::nullopt;
-			}
-			// grug match parseFloat leading whitespace without a locale or a Unicode database.
-			constexpr std::array<std::string_view, 19> unicodeSpaces{
-				"\xc2\xa0",
-				"\xe1\x9a\x80",
-				"\xe2\x80\x80",
-				"\xe2\x80\x81",
-				"\xe2\x80\x82",
-				"\xe2\x80\x83",
-				"\xe2\x80\x84",
-				"\xe2\x80\x85",
-				"\xe2\x80\x86",
-				"\xe2\x80\x87",
-				"\xe2\x80\x88",
-				"\xe2\x80\x89",
-				"\xe2\x80\x8a",
-				"\xe2\x80\xa8",
-				"\xe2\x80\xa9",
-				"\xe2\x80\xaf",
-				"\xe2\x81\x9f",
-				"\xe3\x80\x80",
-				"\xef\xbb\xbf"
-			};
-			while (!input.empty()) {
-				if (input.front() == ' ' || (input.front() >= '\t' && input.front() <= '\r')) {
-					input.remove_prefix(1);
-					continue;
-				}
-				const auto space = std::find_if(unicodeSpaces.begin(), unicodeSpaces.end(), [&](auto prefix) {
-					return input.starts_with(prefix);
-				});
-				if (space == unicodeSpaces.end()) break;
-				input.remove_prefix(space->size());
-			}
-			if (input.starts_with('+')) {
-				input.remove_prefix(1);
-				if (input.starts_with('-')) return Value{0.};
-			}
-			if (input.starts_with("Infinity") || input.starts_with("-Infinity")) return {};
-			const auto numeric = input.starts_with('-') ? input.substr(1) : input;
-			if (numeric.empty() ||
-				((numeric.front() < '0' || numeric.front() > '9') && numeric.front() != '.'))
-				return Value{0.};
-			double number = 0;
-			const auto parsed = std::from_chars(input.data(), input.data() + input.size(), number);
-			if (parsed.ec == std::errc::result_out_of_range) return {};
-			if (parsed.ec == std::errc::invalid_argument) return Value{0.};
-			return std::isfinite(number) ? std::optional<Value>{number} : std::nullopt;
 		}
 	}
 	uint64_t SourceArgumentHost::RetainedBytes() const {
@@ -275,7 +204,7 @@ namespace engine::imagegraph {
 			return refuse("argument output replacement exceeds operation budget");
 		std::optional<Value> converted;
 		if (*mode == 1) {
-			converted = Number(*value);
+			converted = detail::SourceRealNumber(*value);
 			if (!converted)
 				return refuse(
 					"argument Number conversion requires a bounded primitive or final source recording"

@@ -37,6 +37,7 @@ namespace engine::imagegraph::detail {
 					if (entry.NodeId == context.Authored.Id && entry.ProcessorRow == context.ProcessorRow)
 						previous = &entry;
 			const bool shuffle = context.Boolean("shuffle");
+			context.SetSourceUpdateOnFrame(shuffle);
 			const double smoothing = context.SourceChoice("smoothing");
 			if (previous && (previous->Tick > request.Tick ||
 							 (previous->Tick == request.Tick && previous->Subframe > request.Subframe)))

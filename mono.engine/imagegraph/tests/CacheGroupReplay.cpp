@@ -10,6 +10,7 @@
 #include <array>
 #include <limits>
 #include <new>
+#include <utility>
 
 TEST_SUITE_ID("engine.imagegraph.cache_group_replay")
 using namespace engine::imagegraph;
@@ -673,7 +674,7 @@ TEST_CASE(
 	array.Items = {
 		{std::vector<SourceArrayItem>{{Image{1, 1, {1, 2, 3, 255}}}}}, {Image{1, 1, {4, 5, 6, 255}}}
 	};
-	auto prior = FrozenNode("frozen", "value.array", {{"array", Value{array}, {}, {}}});
+	auto prior = FrozenNode("frozen", "value.array", {{"array", Value{array}, {}, {}, true}});
 	EvaluationRequest request;
 	request.DataReplay = &prior;
 	Plan plan;
@@ -2035,4 +2036,72 @@ TEST_CASE(
 	CHECK(prepared->Authored != document);
 	CHECK_FALSE(prepared->Journals[0].Nodes.empty());
 	CHECK(prepared->Journals[0] == prepared->Journals[1]);
+}
+
+TEST_CASE(
+	"Cache-group image-array provenance retains empty and nested image payloads",
+	"[imagegraph][frame_cache_groups][group_render]"
+) {
+	ArrayValue array{ValueType::Any, {}};
+	const Image image{1, 1, {9, 8, 7, 255}};
+	SECTION("empty typed image array") {}
+	SECTION("owned image items") {
+		array.Items = {{image}};
+	}
+	SECTION("surface elements") {
+		array.ElementType = ValueType::Image;
+		array.Elements = {SurfaceValue{image}};
+	}
+	SECTION("nested surface elements") {
+		array.ElementType = ValueType::Image;
+		array.Nested = {{SurfaceValue{image}}};
+	}
+	SECTION("nested image items") {
+		array.Items = {{std::vector<SourceArrayItem>{{image}}}};
+	}
+	CacheGroupReplayOutput output{"frames", Value{array}, {}, {}, true};
+	CacheGroupReplayState state;
+	const auto result =
+		RetainCacheGroupReplayNode(state, "producer", "pc.group_output", {&output, 1}, BYTE_BUDGET);
+	INFO(result.Error.Message);
+	REQUIRE(result.Code == Status::Ok);
+	REQUIRE(state.Nodes.size() == 1);
+	CHECK(state.Nodes.front().Outputs.front() == output);
+	CHECK(state.Nodes.front().Outputs.front().ImageArrayPayload);
+	Diagnostic diagnostic;
+	CHECK(ValidateCacheGroupReplay(state, BYTE_BUDGET, diagnostic) == Status::Ok);
+}
+
+TEST_CASE(
+	"Cache-group invalid image-array provenance cannot replace retained output",
+	"[imagegraph][frame_cache_groups][group_render][atomic]"
+) {
+	CacheGroupReplayOutput output{"frames", Value{ArrayValue{ValueType::Any, {}}}, {}, {}, true};
+	SECTION("absent payload") {
+		output.Data.reset();
+	}
+	SECTION("scalar payload") {
+		output.Data = 3.0;
+	}
+	SECTION("single image is not an image array") {
+		output.Data = SurfaceValue{Image{1, 1, {9, 8, 7, 255}}};
+	}
+	SECTION("scalar array leaf") {
+		output.Data = ArrayValue{ValueType::Scalar, {2.0}};
+	}
+	SECTION("nested scalar array leaf") {
+		ArrayValue array{ValueType::Any, {}};
+		array.Items = {{std::vector<SourceArrayItem>{{ElementValue{2.0}}}}};
+		output.Data = std::move(array);
+	}
+	SECTION("nested scalar row") {
+		ArrayValue array{ValueType::Scalar, {}};
+		array.Nested = {{2.0}};
+		output.Data = std::move(array);
+	}
+	auto state = Journal();
+	const auto previous = state;
+	const auto result = RetainCacheGroupReplayNode(state, "producer", "fixture", {&output, 1}, BYTE_BUDGET);
+	CHECK(result.Code == Status::InvalidValue);
+	CHECK(state == previous);
 }

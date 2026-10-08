@@ -3,6 +3,13 @@
 #include <engine/imagegraph/CacheGroupReplay.hpp>
 
 namespace engine::imagegraph::detail {
+	Status InitializeGroupRenderOutputs(
+		const Document &document,
+		const CacheGroupReplayState &source,
+		CacheGroupReplayState &output,
+		uint64_t maximumBytes,
+		Diagnostic &diagnostic
+	);
 	// Reconciliation admits value clone storage beside embedded output records.
 	uint64_t CacheGroupReplayCloneBytes(const CacheGroupReplayState &state);
 	uint64_t CacheGroupReplayComparisonWork(const CacheGroupReplayState &state);

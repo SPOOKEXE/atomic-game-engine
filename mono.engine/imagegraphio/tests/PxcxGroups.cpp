@@ -17,6 +17,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.imagegraphio.pxcx_groups")
@@ -420,17 +421,40 @@ TEST_CASE("Base Collection does not infer instance callbacks", "[imagegraphio][g
 	const auto priorSource = imported.Source.OriginalBytes;
 	const auto priorGraph = engine::imagegraph::Write(imported.Graph);
 	auto source = Graph();
-	SECTION("base has no Group instance callback") {
+	SECTION("base Collection binds attributes without replacing local children") {
 		source["nodes"][1]["type"] = "Node_Collection";
-		source["nodes"][1]["instanceBase"] = "group";
+		source["nodes"][1]["instanceBase"] = "base";
+		source["nodes"].push_back(Node("base", "Node_Collection"));
+		REQUIRE(ImportPxcxImageGraph(Archive(source), imported, failure));
+		const auto group =
+			std::find_if(imported.Graph.Groups.begin(), imported.Graph.Groups.end(), [](const auto &entry) {
+				return entry.Id == "group";
+			});
+		REQUIRE(group != imported.Graph.Groups.end());
+		CHECK(group->InstanceBase == "base");
+		CHECK(group->Ports.size() == 2);
+		CHECK(std::any_of(imported.Graph.Nodes.begin(), imported.Graph.Nodes.end(), [](const auto &entry) {
+			return entry.Id == "filter" && entry.GroupId == "group";
+		}));
+		return;
 	}
-	SECTION("enclosing Group instances need verified shallow Collection callbacks") {
+	SECTION("enclosing Group creates a shallow Collection without cloning its children") {
 		auto nested = Node("nested", "Node_Collection");
 		nested["group"] = "group";
 		source["nodes"].push_back(nested);
 		auto instance = Node("instance", "Node_Group");
 		instance["instanceBase"] = "group";
 		source["nodes"].push_back(instance);
+		REQUIRE(ImportPxcxImageGraph(Archive(source), imported, failure));
+		const auto copied =
+			std::find_if(imported.Graph.Groups.begin(), imported.Graph.Groups.end(), [](const auto &entry) {
+				return entry.Id == "instance/instance/nested";
+			});
+		REQUIRE(copied != imported.Graph.Groups.end());
+		CHECK(copied->InstanceBase == "nested");
+		CHECK(copied->ParentId == "instance");
+		CHECK(copied->Ports.empty());
+		return;
 	}
 	SECTION("path is a host field with a text bound") {
 		source["nodes"][1]["type"] = "Node_Collection";
@@ -515,7 +539,7 @@ TEST_CASE(
 			graph["nodes"][2]["inputs"][2] = {
 				{"anim", true}, {"r", Json::array({Json::array({0, 33}), Json::array({1, 33})})}
 			};
-		if (mode == 8) graph["nodes"][1]["inputs"][0]["from_tag"] = 1;
+		if (mode == 8) graph["nodes"][1]["inputs"][0]["from_tag"] = -4;
 		if (mode == 9) {
 			auto sibling = Node("sibling", "Node_Group");
 			sibling["attri"] = Json::object();
@@ -634,6 +658,125 @@ TEST_CASE("A group does not change unrelated source tag admission", "[imagegraph
 	REQUIRE(edge != grouped.Graph.Links.end());
 	REQUIRE(ordinary.Graph.Links.size() == 1);
 	CHECK(*edge == ordinary.Graph.Links.front());
+}
+
+TEST_CASE(
+	"Fallback group boundary tags preserve routes depth and saved source records", "[imagegraphio][groups]"
+) {
+	using namespace engine::imagegraph;
+	auto ordinary = Graph();
+	ordinary["nodes"][1]["attri"]["color_depth"] = 0;
+	PxcxImport baseline;
+	std::string failure;
+	REQUIRE(ImportPxcxImageGraph(Archive(ordinary), baseline, failure));
+	auto tagged = ordinary;
+	const std::array<std::pair<size_t, int64_t>, 4> tags{{{1, 1}, {3, -1}, {4, -5}, {5, 9}}};
+	for (const auto &[nodeIndex, tag] : tags)
+		tagged["nodes"][nodeIndex]["inputs"][0]["from_tag"] = tag;
+	const auto archive = Archive(tagged);
+	PxcxImport imported;
+	const bool projected = ImportPxcxImageGraph(archive, imported, failure);
+	INFO(failure);
+	REQUIRE(projected);
+	CHECK(imported.Source.GraphJson == archive.GraphJson);
+	CHECK(imported.Source.OriginalBytes == archive.OriginalBytes);
+	CHECK(imported.Graph == baseline.Graph);
+	REQUIRE(imported.Graph.Groups.size() == 1);
+	CHECK(imported.Graph.Groups.front().ColorDepth == 0);
+	const auto evaluate = [](const Document &document) {
+		Plan plan;
+		Diagnostic diagnostic;
+		const auto compiled = Compile(document, plan, diagnostic);
+		INFO(diagnostic.Message << " node=" << diagnostic.NodeId << " port=" << diagnostic.Port);
+		REQUIRE(compiled == Status::Ok);
+		Image image;
+		const auto evaluated = Evaluate(document, plan, "sink", image, diagnostic);
+		INFO(diagnostic.Message);
+		REQUIRE(evaluated == Status::Ok);
+		CheckPixels(image, {239, 223, 191, 255});
+	};
+	evaluate(imported.Graph);
+	Diagnostic diagnostic;
+	Document nativeReopened;
+	REQUIRE(Read(Write(imported.Graph), nativeReopened, diagnostic) == Status::Ok);
+	CHECK(nativeReopened == imported.Graph);
+	evaluate(nativeReopened);
+	auto authored = imported.Graph;
+	REQUIRE(Migrate(authored, diagnostic) == Status::Ok);
+	authored.Groups.front().Name = "Tagged group";
+	std::vector<std::byte> bytes;
+	const bool saved = WritePxcxProjection(imported, authored, {}, bytes, diagnostic);
+	INFO(diagnostic.Message);
+	REQUIRE(saved);
+	engine::bake::PxcxArchive savedArchive;
+	REQUIRE(engine::bake::ReadPxcx(bytes, savedArchive, failure));
+	const auto savedGraph = Json::parse(savedArchive.GraphJson.c_str());
+	for (const auto &[nodeIndex, tag] : tags) {
+		const auto id = tagged["nodes"][nodeIndex]["id"].get<std::string>();
+		const auto node =
+			std::find_if(savedGraph["nodes"].begin(), savedGraph["nodes"].end(), [&](const Json &item) {
+				return item["id"] == id;
+			});
+		REQUIRE(node != savedGraph["nodes"].end());
+		CHECK((*node)["inputs"][0]["from_tag"] == tag);
+	}
+	PxcxImport reopened;
+	REQUIRE(ImportPxcxImageGraph(savedArchive, reopened, failure));
+	REQUIRE(reopened.Graph.Groups.size() == 1);
+	CHECK(reopened.Graph.Groups.front().Name == "Tagged group");
+	evaluate(reopened.Graph);
+}
+
+TEST_CASE(
+	"Special and malformed group boundary tags refuse without replacing the projection",
+	"[imagegraphio][groups]"
+) {
+	PxcxImport imported;
+	std::string failure;
+	REQUIRE(ImportPxcxImageGraph(Archive(Graph()), imported, failure));
+	const auto previous = imported.Graph;
+	const auto previousBytes = imported.Source.OriginalBytes;
+	SECTION("valid common selectors refuse native group boundary projection") {
+		const std::array<Json, 3> unsupported{Json(-2), Json(-3), Json(-4)};
+		const std::array<std::pair<size_t, std::string_view>, 4> expected{{
+			{1, "source group boundary tag interpretation is not represented"},
+			{3, "source group boundary tag interpretation is not represented"},
+			{4, "link connects incompatible port types"},
+			{5, "link connects incompatible port types"},
+		}};
+		for (const auto &[nodeIndex, expectedFailure] : expected) {
+			for (const auto &tag : unsupported) {
+				CAPTURE(nodeIndex, tag, expectedFailure);
+				auto graph = Graph();
+				graph["nodes"][nodeIndex]["inputs"][0]["from_tag"] = tag;
+				CHECK_FALSE(ImportPxcxImageGraph(Archive(graph), imported, failure));
+				CHECK(failure == expectedFailure);
+				CHECK(imported.Graph == previous);
+				CHECK(imported.Source.OriginalBytes == previousBytes);
+			}
+		}
+	}
+	SECTION("malformed selectors refuse archive publication before native projection") {
+		const std::array<Json, 4> malformed{Json(1.5), Json("1"), Json(true), Json(nullptr)};
+		for (size_t nodeIndex : {size_t{1}, size_t{3}, size_t{4}, size_t{5}}) {
+			for (const auto &tag : malformed) {
+				CAPTURE(nodeIndex, tag);
+				auto graph = Graph();
+				graph["nodes"][nodeIndex]["inputs"][0]["from_tag"] = tag;
+				engine::bake::PxcxArchive source;
+				source.MetadataNumber = 121092;
+				source.MetadataText = "1.22.10.201";
+				source.GraphJson = graph.dump() + '\0';
+				auto bytes = previousBytes;
+				CHECK_FALSE(engine::bake::WritePxcx(source, bytes, failure));
+				CHECK(
+					failure == "pxcx: graph connection endpoint is invalid: " +
+								   graph["nodes"][nodeIndex]["id"].get<std::string>()
+				);
+				CHECK(bytes == previousBytes);
+			}
+		}
+	}
 }
 
 TEST_CASE(
@@ -2642,6 +2785,14 @@ TEST_CASE(
 		authored.Groups.front().Name = "Renamed builder";
 		for (auto &node : authored.Nodes)
 			if (node.Id == "group") node.SourceDisplayName = "Renamed builder";
+		const auto builderOwner = std::find_if(
+			authored.SourceCommonOwners.begin(), authored.SourceCommonOwners.end(), [](const auto &owner) {
+				return owner.NativeOwnerKind == SourceCommonNativeOwnerKind::Node &&
+					   owner.NativeOwnerId == "group";
+			}
+		);
+		REQUIRE(builderOwner != authored.SourceCommonOwners.end());
+		builderOwner->DisplayNamePresent = true;
 		std::vector<std::byte> bytes;
 		const bool saved = WritePxcxProjection(imported, authored, {}, bytes, diagnostic);
 		INFO(diagnostic.Message);

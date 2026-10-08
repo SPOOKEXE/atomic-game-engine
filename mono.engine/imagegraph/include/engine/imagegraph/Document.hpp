@@ -429,6 +429,7 @@ namespace engine::imagegraph {
 					   WeightInput3D,
 					   Sequential,
 					   Baked,
+					   Spiral,
 					   WeightCurve,
 					   WeightValue,
 					   WeightDirection,
@@ -469,6 +470,7 @@ namespace engine::imagegraph {
 					   other.WeightInput3D,
 					   other.Sequential,
 					   other.Baked,
+					   other.Spiral,
 					   other.WeightCurve,
 					   other.WeightValue,
 					   other.WeightDirection,
@@ -1217,6 +1219,8 @@ namespace engine::imagegraph {
 		std::vector<NativeSamplerBinding> NativeSamplerBindings{};
 		// saved local constructor pairs do not initialize or share scalar axes.
 		OwnedPayload3D<SourceVec2DefaultsData> SourceVec2Defaults{};
+		// Nested Collection parent socket borrows only this Group input animator.
+		std::string SourceParentInputBase{};
 		// Compares all authored node fields.
 		bool operator==(const Node &) const = default;
 	};
@@ -1264,6 +1268,14 @@ namespace engine::imagegraph {
 		int64_t Oversample = 0;
 		// Collection wrapper owning this transparent inline scope, or empty for an ordinary group.
 		std::string OwnerNodeId{};
+		// Automatic source rendering is instance-local; forced updates bypass this flag.
+		bool RenderActive = true;
+		// grug stores the authored local purity switch separately from runtime cached purity.
+		bool PureFunction = true;
+		// Authored source owner coordinates for a group-only projection.
+		Vector2 SourcePosition{};
+		// Source iname remains independent of the group display name.
+		std::string SourceInternalName{};
 		// Compares authored group data.
 		bool operator==(const Group &) const = default;
 	};
@@ -1562,7 +1574,7 @@ namespace engine::imagegraph {
 		GroupSubtypeAnimator Getter = GroupSubtypeAnimator::Static;
 		// Animator.prop remains the original property after its animator is aliased.
 		GroupSubtypeAnimator Writer = GroupSubtypeAnimator::Static;
-		// Actual source child input. Group.inputs parent_value remains local.
+		// Actual source child input; parent_value aliases only an explicit parent input base.
 		std::string Port = "subtype";
 		// The retained animator can keep its original socket after a physical input move.
 		// Empty uses Port. An admitted detached animator uses its native Id.
@@ -1599,6 +1611,29 @@ namespace engine::imagegraph {
 		std::vector<GroupSubtypeOverlay> DetachedValues;
 		bool operator==(const SourceAnimatorState &) const = default;
 	};
+	// Native owner kind is encoded with stable node/group text in authored documents.
+	enum class SourceCommonNativeOwnerKind : uint8_t { Node, Group };
+	// One source lifecycle owner in its authored project order, without runtime socket values.
+	struct SourceCommonOwnerRecord {
+		std::string SourceOwnerId;
+		std::string SourceType;
+		SourceCommonNativeOwnerKind NativeOwnerKind = SourceCommonNativeOwnerKind::Node;
+		std::string NativeOwnerId;
+		bool Active = true;
+		bool ShowUpdateTrigger = false;
+		bool OutMeta = false;
+		std::string InstanceBase{};
+		// Name payload lives on Node.SourceDisplayName or Group.Name, including an empty saved name.
+		bool DisplayNamePresent = false;
+		// Local writer identity selects the sole retained animator payload, independently of getters.
+		std::string UpdateAnimatorOwnerId{};
+		std::string UpdateAnimatorPort{};
+		bool UpdateOverrideInstance = false;
+		std::optional<SourceInputExpression> UpdateExpression{};
+		// Source full wrappers read this local flag; direct common updates bypass it.
+		bool UpdateGraph = true;
+		bool operator==(const SourceCommonOwnerRecord &) const = default;
+	};
 	// The versioned, lossless authored graph document.
 	struct Document {
 		// Text format version.
@@ -1625,6 +1660,8 @@ namespace engine::imagegraph {
 		std::optional<ProjectSettings> Project;
 		std::vector<SliceStackAction> SliceStackActions;
 		OwnedPayload3D<SourceAnimatorState> SourceAnimators{};
+		// Source project order survives separating the native Nodes and Groups projections.
+		std::vector<SourceCommonOwnerRecord> SourceCommonOwners{};
 		// Compares the complete authored document.
 		bool operator==(const Document &) const = default;
 	};
@@ -1643,6 +1680,8 @@ namespace engine::imagegraph {
 		static constexpr size_t MaximumLinks = 8192;
 		// Maximum group count.
 		static constexpr size_t MaximumGroups = 1024;
+		// Source owner order can contain both node and group-only projections.
+		static constexpr size_t MaximumSourceCommonOwners = MaximumNodes + MaximumGroups;
 		static constexpr size_t MaximumGroupPorts = 64;
 		static constexpr size_t MaximumJunctions = 8192;
 		static constexpr size_t MaximumDynamicInputsPerNode = 64;
@@ -1766,6 +1805,9 @@ namespace engine::imagegraph {
 	struct SourceBuiltinRandomCapture;
 	class HostNodeProvider;
 	class GroupReplayState;
+	struct GroupRenderSession;
+	struct SourceCommonSocketSession;
+	struct CacheGroupReplayState;
 	struct SimulationReplayState;
 	struct SurfaceFrameReplayState;
 	struct RandomReplayState;
@@ -1789,6 +1831,12 @@ namespace engine::imagegraph {
 		double ProjectLastFrame = 0;
 		bool ProjectLoading = false, ProjectAppending = false;
 		bool operator==(const SourceFrameCacheProjectObservation &) const = default;
+	};
+	// Recorded foreign selectors: senders at pre-render, receivers at their callback.
+	// Native getters need no recording; rows are keyed by the actual tunnel node ID.
+	struct SourceTunnelRegistryObservation {
+		std::string NodeId, Name;
+		std::optional<double> Scope;
 	};
 	// Fixed evaluation inputs. Seed is reserved for deterministic random nodes.
 	struct EvaluationRequest {
@@ -1822,6 +1870,18 @@ namespace engine::imagegraph {
 		std::string_view ProjectName{};
 		// Borrowed for this synchronous operation; the caller retains the immutable replay owner.
 		const GroupReplayState *GroupReplay = nullptr;
+		// Held process outputs for observation and input inspection without rerunning producers.
+		const GroupRenderSession *GroupRender = nullptr;
+		// Borrowed common getters and local animator storage for this synchronous evaluation.
+		const SourceCommonSocketSession *SourceCommon = nullptr;
+		const SourceAnimatorState *SourceCommonAnimators = nullptr;
+		// Explicit project observation for source full/lite wrappers, never serialized.
+		std::optional<bool> SourceSafeMode{};
+		// Immutable outputs from before preRender. Separate from automatic held-output policy.
+		const CacheGroupReplayState *SourceTunnelPreviousOutputs = nullptr;
+		std::span<const SourceTunnelRegistryObservation> SourceTunnelRegistryObservations{};
+		// Explicit demand execution bypasses automatic group activity, like source renderList.
+		bool ForceGroupRender = false;
 		uint64_t GroupAuthoringRevision = 0;
 		// grug borrow immutable previous tick; evaluator returns updates only after every node succeeds.
 		const SimulationReplayState *SimulationReplay = nullptr;
@@ -1941,6 +2001,16 @@ namespace engine::imagegraph {
 		bool Input = false;
 		bool operator==(const PcxNamedDependency &) const = default;
 	};
+	// Common source selectors describe getter reads without scheduling a producer callback.
+	enum class SourceCommonSelector : uint8_t { Update, Updated, Name, Position, HeldOutput };
+	struct SourceCommonRoute {
+		std::string OwnerId;
+		SourceCommonSelector Selector = SourceCommonSelector::Update;
+		std::string NodeId, Port;
+		bool DestinationUpdate = false;
+		std::string SourcePort{};
+		bool operator==(const SourceCommonRoute &) const = default;
+	};
 	// A stable order and selected output index produced by Compile.
 	struct Plan {
 		// Node indices in deterministic execution order.
@@ -1955,6 +2025,10 @@ namespace engine::imagegraph {
 		std::vector<InlineOwnerDependency> InlineOwnerDependencies;
 		std::vector<InlineControlDependency> InlineControlDependencies;
 		std::vector<PcxNamedDependency> PcxNamedDependencies;
+		// Validated common getter routes are separate from ordinary producer dependencies.
+		std::vector<SourceCommonRoute> SourceCommonRoutes{};
+		// Explicit common-runtime compilation permits an authored scalar-only source graph.
+		bool SourceCommonRuntimeOnly = false;
 		// Compares the compiled order and output mapping.
 		bool operator==(const Plan &) const = default;
 	};
@@ -2113,6 +2187,14 @@ namespace engine::imagegraph {
 
 	// Checks limits, identities, schemas, links, outputs and cycles.
 	Status Compile(const Document &document, Plan &plan, Diagnostic &diagnostic);
+	// Compiles common getter routes without requiring a declared image output. An empty owner set
+	// permits explicit retirement after the last common owner is removed.
+	Status CompileSourceCommonRuntime(
+		const Document &document,
+		Plan &plan,
+		Diagnostic &diagnostic,
+		uint64_t maximumWorkspaceBytes = Limits::MaximumEvaluationBytes
+	);
 	// Caps transient compiler work and new plan storage. Callers account separately
 	// for their retained document and previous plan. Failure preserves the previous plan.
 	Status

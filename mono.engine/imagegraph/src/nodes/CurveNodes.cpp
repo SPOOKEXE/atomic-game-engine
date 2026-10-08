@@ -108,7 +108,8 @@ namespace engine::imagegraph::detail {
 					Status::UnsupportedExecution, "curve display mode is unresolved", "display_type"
 				);
 			double progress = context.Scalar("progress");
-			if (context.Boolean("animated")) {
+			const bool animated = context.Boolean("animated");
+			if (animated) {
 				if (!context.Timeline || context.Timeline->Frames <= 1)
 					return context.Fail(
 						Status::InvalidValue,
@@ -131,6 +132,7 @@ namespace engine::imagegraph::detail {
 			const double output = CurveLerp(minimum, maximum, EvalCurveX(*curve, progress));
 			if (!std::isfinite(output))
 				return context.Fail(Status::InvalidValue, "curve sample exceeded finite range", "curve");
+			context.SetSourceUpdateOnFrame(animated);
 			if (!context.ReserveOutput(std::string{}.capacity(), "curve")) return false;
 			context.SetValue("curve", output);
 			return true;

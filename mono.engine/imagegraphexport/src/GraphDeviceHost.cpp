@@ -94,6 +94,8 @@ namespace engine::imagegraphexport {
 				}
 			}
 			capture.Outputs.push_back({"data", std::move(result)});
+			if (const auto *value = Input(invocation, "update"))
+				if (const auto *flag = std::get_if<bool>(value)) capture.SourceUpdateOnFrame = *flag;
 			output = std::move(capture);
 			failure.clear();
 			return true;
@@ -241,6 +243,7 @@ namespace engine::imagegraphexport {
 				}
 			}
 			capture.Images.push_back({"surface", selected->Surface});
+			if (!sending) capture.SourceUpdateOnFrame = selected->SourceUpdateOnFrame;
 		} else {
 			failure = "device host does not support this node type";
 			return false;

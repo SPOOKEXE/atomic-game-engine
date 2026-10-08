@@ -276,7 +276,7 @@ namespace engine::imagegraph {
 		if (!stagedReplayCharge)
 			return fail(Status::LimitExceeded, "source axis replay stage exceeds budget");
 		detail::AllocationReservation mutationCharge;
-		staged.FormatVersion = 9;
+		staged.FormatVersion = std::max(staged.FormatVersion, uint32_t{9});
 		if (wasSeparated != transition.Separated && transition.SetValue) {
 			const SourceAxisInitialization initialization{transition.NodeId, transition.Port};
 			status = InitializeSourceVec2Axes(
@@ -556,7 +556,7 @@ namespace engine::imagegraph {
 			))
 			return fail(Status::LimitExceeded, "source axis local flag exceeds budget");
 		// the physical arrays can be detached; the selected property's local flag always remains authored.
-		staged.FormatVersion = 9;
+		staged.FormatVersion = std::max(staged.FormatVersion, uint32_t{9});
 		const auto changedBytes = DocumentRetainedPayloadBytes(staged);
 		if (!changedBytes || !stagedCharge->Resize(*changedBytes) ||
 			!stagedReplayCharge->Resize(stagedReplay.RetainedBytes()))

@@ -201,6 +201,34 @@ namespace engine::bake {
 			return true;
 		}
 
+		bool ReadSourceSelector(const Json &input, const Json &index, PxcxLinkFact &out) {
+			const auto tag = input.find("from_tag");
+			if (tag != input.end()) {
+				if (tag->is_number_unsigned()) {
+					const uint64_t raw = tag->get<uint64_t>();
+					if (raw > static_cast<uint64_t>(INT64_MAX)) return false;
+					out.FromTag = static_cast<int64_t>(raw);
+				} else if (tag->is_number_integer()) {
+					out.FromTag = tag->get<int64_t>();
+				} else if (tag->is_number_float()) {
+					const double raw = tag->get<double>();
+					if (!std::isfinite(raw) || std::trunc(raw) != raw || raw < -0x1p63 || raw >= 0x1p63)
+						return false;
+					out.FromTag = static_cast<int64_t>(raw);
+				} else {
+					return false;
+				}
+			}
+			// Pinned getOutputIndex chooses common triggers by tag before reading index.
+			const bool commonTrigger = out.FromTag == -2 || out.FromTag == -3;
+			if (commonTrigger && index.is_number_integer() && !index.is_number_unsigned() &&
+				index.get<int64_t>() == -1) {
+				out.SourceTriggerIndexMinusOne = true;
+				return true;
+			}
+			return ReadIndex(index, out.FromIndex);
+		}
+
 		bool ReadGraphFacts(std::string_view graphJson, PxcxArchive &out, std::string &failure) {
 			if (graphJson.empty() || graphJson.back() != '\0') {
 				return Fail(failure, "pxcx: graph JSON does not end with its required NUL byte");
@@ -284,8 +312,7 @@ namespace engine::bake {
 					return Fail(failure, "pxcx: graph node input count exceeds its limit: " + fact.Id);
 				}
 
-				for (size_t inputIndex = 0; inputIndex < inputs->size(); inputIndex++) {
-					const Json &input = (*inputs)[inputIndex];
+				const auto readConnection = [&](const Json &input, uint32_t inputIndex, bool commonUpdate) {
 					if (!input.is_object())
 						return Fail(failure, "pxcx: graph input is not an object: " + fact.Id);
 					const auto fromNode = input.find("from_node");
@@ -295,23 +322,39 @@ namespace engine::bake {
 							failure, "pxcx: graph connection has only one endpoint field: " + fact.Id
 						);
 					}
-					if (fromNode == input.end()) continue;
+					if (fromNode == input.end()) return true;
 
 					if (!fromNode->is_string()) {
 						return Fail(failure, "pxcx: graph connection source id is not text: " + fact.Id);
 					}
 					std::string sourceId = fromNode->get<std::string>();
-					uint32_t sourceIndex = 0;
+					PxcxLinkFact link;
 					if (sourceId.empty() || sourceId.size() > PxcxLimits::MaximumNodeTextBytes ||
-						!HasNoNul(sourceId) || !ValidUtf8(sourceId) || !ReadIndex(*fromIndex, sourceIndex)) {
+						!HasNoNul(sourceId) || !ValidUtf8(sourceId) ||
+						!ReadSourceSelector(input, *fromIndex, link)) {
 						return Fail(failure, "pxcx: graph connection endpoint is invalid: " + fact.Id);
 					}
 					if (pendingLinks.size() >= PxcxLimits::MaximumLinks) {
 						return Fail(failure, "pxcx: graph link count exceeds its limit");
 					}
-					pendingLinks.push_back(
-						{{std::move(sourceId), sourceIndex, fact.Id, static_cast<uint32_t>(inputIndex)}}
-					);
+					link.FromNode = std::move(sourceId);
+					link.ToNode = fact.Id;
+					link.ToInputIndex = inputIndex;
+					link.DestinationUpdateTrigger = commonUpdate;
+					pendingLinks.push_back({std::move(link)});
+					return true;
+				};
+				for (size_t inputIndex = 0; inputIndex < inputs->size(); inputIndex++)
+					if (!readConnection((*inputs)[inputIndex], static_cast<uint32_t>(inputIndex), false))
+						return false;
+				const auto inspectInputs = node.find("inspectInputs");
+				if (inspectInputs != node.end()) {
+					if (!inspectInputs->is_array() ||
+						inspectInputs->size() > PxcxLimits::MaximumInputsPerNode)
+						return Fail(failure, "pxcx: graph common input records are invalid: " + fact.Id);
+					// NodeData saves Update separately from its positional inputs.
+					if (inspectInputs->size() > 2 && !readConnection((*inspectInputs)[2], 2, true))
+						return false;
 				}
 				out.Nodes.push_back(std::move(fact));
 			}
