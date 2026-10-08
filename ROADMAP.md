@@ -58,7 +58,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] Add Studio Image Composer editing, cached previews, undo/redo, save/open and ordinary `.atex` export; add `.imagegraph` baking to assetc.
 - [x] Verify exported images through ordinary signed content delivery in `ParticleEmitter` and `ImageLabel`, plus CPU, editor and sanitizer checks.
 
-The accepted implementation is `v0.26-imagegraph-minimal`. The preserved full Composer work remains on `v0.26-imagegraph` for user review.
+The accepted implementation is `v0.26.0-imagegraph-minimal`. The preserved full Composer work remains on `archive/v0.26.0-imagegraph-full` for user review.
 
 ### v0.27
 

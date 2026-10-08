@@ -1,22 +1,25 @@
 # Version split
 
-`v0.26-imagegraph` preserves the full ImageGraph checkpoint from `2ea709a9` for review. That preserved work is not the accepted minimal implementation.
+`archive/v0.26.0-imagegraph-full` preserves the full ImageGraph checkpoint from `2ea709a9` for review. This preserved work is not the accepted minimal implementation.
 
-`v0.25-fixes` is the fixes-only line based on `18e9028c`. Premature native and PXCX stubs were removed from this line.
+`v0.25.0-fixes` is the fixes-only line based on `18e9028c`. Premature native and PXCX stubs were removed from this line.
 
-`v0.26-imagegraph-minimal` is the completed accepted first integration, built on the fixes branch and independently verified. Its scope is owned 2D images for `ParticleEmitter`, `ImageLabel` and existing image consumers, with basic 2D transform and composition nodes. It excludes 3D, audio and broad simulation work.
+`v0.26.0-imagegraph-minimal` is the completed accepted first integration, built on `v0.25.0-fixes` and independently verified. Its scope is owned 2D images for `ParticleEmitter`, `ImageLabel` and existing image consumers, with basic 2D transform and composition nodes. It excludes 3D, audio and broad simulation work.
+
+Release progression runs from `v0.25.0-fixes` to `v0.26.0-imagegraph-minimal`. `archive/v0.25.0-before-split` and `archive/v0.26.0-imagegraph-full` are preserved snapshots outside that progression.
 
 ## Review commands
 
 Run these from the repository root:
 
 ```sh
+git show --stat --oneline archive/v0.25.0-before-split
 git show --stat --oneline 2ea709a9
-git diff --stat 18e9028c..v0.25-fixes
-git diff 18e9028c..v0.25-fixes -- ROADMAP.md VERSION docs/retired/ROADMAP.md
-git diff --stat 2ea709a9..v0.26-imagegraph
-git diff 2ea709a9..v0.26-imagegraph -- ROADMAP.md docs/retired/ROADMAP.md
-git diff --stat v0.25-fixes..v0.26-imagegraph-minimal
+git diff --stat 18e9028c..v0.25.0-fixes
+git diff 18e9028c..v0.25.0-fixes -- ROADMAP.md VERSION docs/retired/ROADMAP.md
+git show --stat --oneline archive/v0.26.0-imagegraph-full
+git diff --stat v0.25.0-fixes..v0.26.0-imagegraph-minimal
+git diff v0.25.0-fixes..v0.26.0-imagegraph-minimal -- ROADMAP.md VERSION docs/retired/ROADMAP.md
 git worktree list
 ```
 
