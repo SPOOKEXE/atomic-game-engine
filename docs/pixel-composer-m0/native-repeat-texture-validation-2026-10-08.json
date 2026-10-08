@@ -1,0 +1,716 @@
+{
+  "phase": "bounded-source-repeat-texture",
+  "date": "2026-10-08",
+  "profile": "native-source-repeat-texture",
+  "node": "pc.repeat_texture",
+  "acceptance": {
+    "batch": 65,
+    "accepted": true,
+    "status": "accepted joined batch65",
+    "scope": "shared working tree, owned Repeat Texture changes with other existing uncommitted work",
+    "native_binary_cases": 6177,
+    "startup_cases": 1,
+    "python_cases": 116,
+    "cli_cases": 16
+  },
+  "source": {
+    "repository": "pixel-composer",
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "provenance": "Pinned source repository, commit, paths, and SHA-256 hashes are recorded.",
+    "files": {
+      "scripts/node_repeat_texture/node_repeat_texture.gml": "333863842af03694778fb5e9cf98ec2bfb3cd0e0bf95b5f525fc8db0127672b6",
+      "shaders/sh_texture_repeat/sh_texture_repeat.fsh": "5e652beae7cb6a95836a0ed0890ee77d875c7826337aa30427f06efc07899e18"
+    },
+    "shader_notice": "The pinned shader preserves the header notice Copyright © 2015 Inigo Quilez. No additional shader license grant is asserted.",
+    "shader_license_grant_applicability": "unknown; applicability of a third-party shader license grant is unresolved",
+    "oracle": "pinned source node and shader",
+    "licensed_reference_executable": "unavailable",
+    "desktop_runtime_parity": "unknown",
+    "licensed_gpu_parity": "unknown",
+    "live_runtime_parity": "unknown"
+  },
+  "summary": "Bounded Repeat Texture native nearest CPU pixels for all three modes, five source controls, whole-batch work/byte admission and native/PXC persistence. Joined batch65 passes; no licensed or GPU pixel-parity claim.",
+  "coverage": {
+    "physical_controls": [
+      {
+        "index": 0,
+        "port": "surface_in",
+        "kind": "physical surface",
+        "required": true,
+        "native_limit": "Atlas input execution is unsupported."
+      },
+      {
+        "index": 1,
+        "port": "target_dimension",
+        "kind": "Vector2 with scalar compatibility",
+        "default": [
+          1,
+          1
+        ],
+        "unit_port": "target_dimension_unit",
+        "unit_default": 1,
+        "units": {
+          "0": "Pixel; raw dimension values",
+          "1": "Project; multiply by project surface width and height",
+          "2": "Mask; unsupported because the source node has no Mask getter"
+        },
+        "linked_behavior": "A linked numeric dimension getter is used directly; the authored unit choice is applied only when the dimension is unlinked."
+      },
+      {
+        "index": 2,
+        "port": "type",
+        "kind": "enum",
+        "default": 1,
+        "modes": {
+          "0": "Tile",
+          "1": "Scatter",
+          "2": "Cell"
+        },
+        "native_domain": "Only source menu values 0 through 2 are supported."
+      },
+      {
+        "index": 3,
+        "port": "seed",
+        "kind": "runtime seed",
+        "default": "runtime seed",
+        "native_limit": "Scatter and Cell require an observed source seed. Tile does not use the seed."
+      },
+      {
+        "index": 4,
+        "port": "randomness",
+        "kind": "scalar slider",
+        "default": 1,
+        "native_behavior": "Finite scalar converted to native float and used raw in hash offsets. No source clamp is declared."
+      }
+    ],
+    "synthetic_attributes": {
+      "attribute_process": {
+        "default": true,
+        "role": "Node processing flag, not a physical input."
+      },
+      "attribute_color_depth": {
+        "default": 0,
+        "role": "Scalar output-format selection only; not array-routed.",
+        "formats": {
+          "0": "Inherit the first original Surface In array leaf format before processor row selection.",
+          "1": "Inherited context/project surface format. The workload fixture sets RGBA32Float; this is not a universal fixed format.",
+          "2": "rgba4_unorm",
+          "3": "rgba8_unorm",
+          "4": "rgba16_float",
+          "5": "rgba32_float",
+          "6": "r8_unorm",
+          "7": "r16_float",
+          "8": "r32_float"
+        }
+      },
+      "attribute_array_process": {
+        "default": 0,
+        "role": "Scalar array-processing metadata; no depth-array routing is implemented."
+      },
+      "array_behavior": "The processor batch aggregates array-valued target_dimension, randomness, type, and seed rows with Surface In rows. Inherited depth remains a scalar attribute and comes from the first original Surface In leaf."
+    },
+    "shader_contract": {
+      "output_extent": "Round each raw target dimension using source half-even rounding with a minimum allocated extent of one. Validate request and native dimension limits before allocation.",
+      "coordinate_mapping": "For each output pixel center, normalize by the allocated target extent, then multiply by the raw target dimension divided by physical input dimensions. Project units first scale raw target dimensions by project surface dimensions.",
+      "tile": "Mode 0 samples the source at fract of the mapped coordinate using nearest CPU sampling.",
+      "scatter": "Mode 1 hashes the four corners of floor of the mapped coordinate, applies raw randomness to hash values, derives signed axis flips, samples four transformed tiles, and smoothstep-blends by fractional coordinates.",
+      "cell": "Mode 2 visits a 3 by 3 neighborhood, uses raw-randomness hash offsets, weights samples by exp(-5*d), normalizes RGB, and sets output alpha to one.",
+      "seeded_hash": "The pinned shader uses fract(sin(seed-shifted coordinate dot products) * 103) with four fixed coefficient pairs.",
+      "native_sampling": "The bounded native profile uses nearest CPU sampling. Matched GPU arithmetic, texture filtering, and licensed executable parity are not claimed.",
+      "mode_normalization": "Scalar source widget choices clamp into [0,2] before the native integral-mode check. Array getter choices bypass widget clamping; unsupported or fractional normalized modes refuse before allocation."
+    },
+    "aggregate_admission": {
+      "work_cap": 64000000,
+      "work_units": "Estimated across the complete processor batch before output allocation.",
+      "per_output_pixel": {
+        "Tile": 64,
+        "Scatter": 256,
+        "Cell": 576
+      },
+      "byte_admission": "Aggregate output surface layouts across selected formats are checked against available evaluation bytes before output allocation.",
+      "preflight": "The complete processor batch is quoted before row observers or outputs are published. Refusal must leave outputs and admitted bytes unchanged."
+    },
+    "independent_oracle": {
+      "source": "mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+      "method": "Separate nearest-CPU reference implementation of the pinned shader equations, compared pixel by pixel with the native executor.",
+      "covered_dimensions": "Tile, Scatter, and Cell modes; multiple seeds and raw randomness values; rounded, fractional, zero, and negative raw dimensions; source and explicit output formats.",
+      "scope_limit": "This oracle does not establish GPU floating-point, licensed executable, desktop runtime, or live runtime parity."
+    },
+    "workload_and_refusal_coverage": {
+      "workload_source": "mono.engine/imagegraph/tests/SourceRepeatTextureWorkloads.cpp",
+      "workload_matrix": "Mixed processor rows cover three output sizes, three modes, three randomness values, three seed values, three input formats, and scalar color-depth selections 0 through 8.",
+      "workload_observations": "The workload checks deterministic repeated output pixels, dimensions, row order, output formats, finite values, retained payload bytes, image allocation counts, and profile span names and categories.",
+      "refusal_cases": [
+        "Aggregate Cell work exceeds the work cap across rows that are individually admissible.",
+        "Aggregate selected-format output bytes exceed available evaluation bytes.",
+        "A later nonfinite processor-row control is rejected during batch preflight.",
+        "A one-byte budget refuses before allocation and publishes no output.",
+        "The refusal workload checks that row observers do not run and that no render span follows admission refusal.",
+        "Core cases cover missing or invalid physical surfaces, Atlas input, malformed dimensions, undefined modes or units, missing random-mode seed, nonfinite values, and dimension or byte limits."
+      ],
+      "io_source": "mono.engine/imagegraphio/tests/PxcxRepeatTexture.cpp",
+      "io_coverage": "PXC cases cover all modes, selected formats and both supported units through physical edits and save/reopen; defaults, linked and grouped dimensions, animated randomness, exact processor-array seeds and image order, preservation of synthetic attributes, and atomic refusal for unsupported edits or malformed source controls."
+    },
+    "core_repeat_texture_cases": 14,
+    "optimized_repeat_texture_workload_cases": 1,
+    "io_repeat_texture_cases": 6
+  },
+  "native_profile": {
+    "implementation": "bounded native CPU profile",
+    "supported_modes": [
+      0,
+      1,
+      2
+    ],
+    "output_depth": {
+      "0": "Inherits the first original Surface In array leaf format before processor row selection.",
+      "1": "Uses the inherited context/project surface format. The workload fixture sets RGBA32Float; this is not a universal fixed format.",
+      "2-8": "Selects the explicit scalar formats recorded under coverage.synthetic_attributes.attribute_color_depth.formats."
+    },
+    "unsupported": [
+      "Mask dimension getter",
+      "Atlas source surface",
+      "Unsupported source menu values",
+      "Missing observed seed for Scatter or Cell",
+      "Output dimension, work, byte, or finite-storage limit violations"
+    ],
+    "parity_claim": false
+  },
+  "owned_source_hashes": {
+    "mono.engine/imagegraph/src/Document.cpp": "b773e9b0c7f6300eb72276387be89f408ae7df11f031f2189bc9568e31553a0d",
+    "mono.engine/imagegraph/src/ProcessorBatch.cpp": "4308a7b2c26342592138ebbeb1a4a29675568bfe70b864d4a39598c7123b015d",
+    "mono.engine/imagegraph/src/nodes/SourceTileTransform.cpp": "64f5c4989880626611bc3707952b5610177b6e6a5df3d90dd12851d793aedfb7",
+    "mono.engine/imagegraph/src/nodes/SourceRepeatTexture.cpp": "35a753aa07688632d9057652219a206acedd572bc038a6f18355feccb9852387",
+    "mono.engine/imagegraph/src/nodes/SourceRepeatTexture.hpp": "8c533d1834ee6659c3b022627fede1ec78fc75862dc9584b2e930ef41832af6d",
+    "mono.engine/imagegraph/tests/SourceRepeatTexture.cpp": "121e577c7d937c18f8b7ea3cb1c5c420ea76efb03c0e7958869797a8cad5df47",
+    "mono.engine/imagegraph/tests/SourceRepeatTextureWorkloads.cpp": "eca53a2a01659cad6ab0cc223a1b2f4598db03fdabdf760bf2786a2e3d21b478",
+    "mono.engine/imagegraphio/tests/PxcxRepeatTexture.cpp": "ddf6c72d40b074bc99e7ce27a9673f844c19e93711b7b635c49df3dea929b64b"
+  },
+  "validation": {
+    "status": "accepted joined batch65",
+    "receipt": "docs/pixel-composer-m0/native-repeat-texture-validation-2026-10-08.json",
+    "acceptance": true,
+    "builds": [
+      {
+        "batch": 62,
+        "preset": "release-tests",
+        "exit_code": 0,
+        "elapsed_seconds": 146.39,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch62.log",
+        "log_sha256": "9542d0f2019fff019ceb22d0e0df6c541227925dd654e13a4db11ba90d726892",
+        "keep_going": true
+      },
+      {
+        "batch": 62,
+        "preset": "profile",
+        "exit_code": 0,
+        "elapsed_seconds": 155.63,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch62.log",
+        "log_sha256": "046c2e7e7865f6e1db2916a183e9e81a464446a8a71e9549f53412a206a52eac",
+        "keep_going": true
+      },
+      {
+        "batch": 63,
+        "preset": "release-tests",
+        "exit_code": 0,
+        "elapsed_seconds": 84.79,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch63.log",
+        "log_sha256": "5efbbe6f8cb875add73711eacaacbef57fbb94a6633961792fac5d1293533c44",
+        "keep_going": true
+      },
+      {
+        "batch": 63,
+        "preset": "profile",
+        "exit_code": 0,
+        "elapsed_seconds": 85.14,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch63.log",
+        "log_sha256": "56601de40757235887654b63de6af3f52b23bf978e9f580635fd2a8b2c8695d3",
+        "keep_going": true
+      },
+      {
+        "batch": 64,
+        "preset": "release-tests",
+        "exit_code": 0,
+        "elapsed_seconds": 85.56,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch64.log",
+        "log_sha256": "cd975c521f5cd3d84148db5de9a89774715100d6d1d4647c60c4838dd427b1e9",
+        "keep_going": true
+      },
+      {
+        "batch": 64,
+        "preset": "profile",
+        "exit_code": 0,
+        "elapsed_seconds": 86.14,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch64.log",
+        "log_sha256": "ded2ec09aeec25c4a473ad7ca7c733b7ba25076f36c2ffc1b909d4bcaf77cdeb",
+        "keep_going": true
+      },
+      {
+        "batch": 65,
+        "preset": "release-tests",
+        "exit_code": 0,
+        "elapsed_seconds": 24.11,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch65.log",
+        "log_sha256": "349d16036efcf4901c64139de0ea2da6ee729343677d1949f976993b59435f38",
+        "keep_going": true
+      },
+      {
+        "batch": 65,
+        "preset": "profile",
+        "exit_code": 0,
+        "elapsed_seconds": 24.22,
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch65.log",
+        "log_sha256": "f695e8d67ec2fd85095379cc9d07329636eecead253798b4737911a8202c0693",
+        "keep_going": true
+      }
+    ],
+    "checks": [
+      {
+        "name": "bake",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-bake-batch65.log",
+        "binary": ".cache/build/release-tests/tests/test_bake",
+        "binary_sha256": "14ae7bda292487563e308c269c9372c2b0bd5dc22f8b008119e0b003b5462e97",
+        "exit_code": 0,
+        "assertions": 15997,
+        "cases": 161,
+        "binary_sha256_after": "14ae7bda292487563e308c269c9372c2b0bd5dc22f8b008119e0b003b5462e97",
+        "binary_changed_during_test": false,
+        "log_sha256": "1e1e98b15bd2c2cde61d2ece56a7c2a0e8f2611bf9d0a50812bc6e83e184c969"
+      },
+      {
+        "name": "physics",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-physics-batch65.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+        "binary_sha256": "5e6be4c803bd0a79a77ca15268a065f798ab5a33c5f17481b1064f3e327a5526",
+        "exit_code": 0,
+        "assertions": 715,
+        "cases": 43,
+        "binary_sha256_after": "5e6be4c803bd0a79a77ca15268a065f798ab5a33c5f17481b1064f3e327a5526",
+        "binary_changed_during_test": false,
+        "log_sha256": "a48ed11732d4c7890591b01366377ae0bbd071f69c52d3349f25e54b14002d41"
+      },
+      {
+        "name": "runner",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-runner-batch65.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+        "binary_sha256": "f317fc51b33746e024749c829ea0064ef98d8fad7422561b041883e7d985bfa2",
+        "exit_code": 0,
+        "assertions": 296,
+        "cases": 29,
+        "binary_sha256_after": "f317fc51b33746e024749c829ea0064ef98d8fad7422561b041883e7d985bfa2",
+        "binary_changed_during_test": false,
+        "log_sha256": "454aa67332ac377dbeff0bb1f9382d401dd5865fd0f8f705a485ec8104f63e9b"
+      },
+      {
+        "name": "font",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-font-batch65.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+        "binary_sha256": "e0133ba1d0270feea1fca07360fc31391b90bb2860d99883135775918b19c204",
+        "exit_code": 0,
+        "assertions": 1845,
+        "cases": 43,
+        "binary_sha256_after": "e0133ba1d0270feea1fca07360fc31391b90bb2860d99883135775918b19c204",
+        "binary_changed_during_test": false,
+        "log_sha256": "0cda4cf4cc9bba32cf0b11996a136dbbd95243885fc5157047597ee504874b44"
+      },
+      {
+        "name": "export",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-export-batch65.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+        "binary_sha256": "24278ddae745d462778d676ae80f2cac17df8b6fce3a1ca3d8017f525c5fbaec",
+        "exit_code": 0,
+        "assertions": 3401,
+        "cases": 95,
+        "binary_sha256_after": "24278ddae745d462778d676ae80f2cac17df8b6fce3a1ca3d8017f525c5fbaec",
+        "binary_changed_during_test": false,
+        "log_sha256": "a5da2a1f93926153c4e17e62c879e58a634b0bf15e380767cb05d9c89df2b07c"
+      },
+      {
+        "name": "render",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-render-batch65.log",
+        "binary": ".cache/build/release-tests/tests/test_render",
+        "binary_sha256": "5941c68c50524aa3afcdcb51fdb19119062f9f4fe9fd8a4899b0ba4c8cc7c111",
+        "exit_code": 0,
+        "assertions": 2005,
+        "cases": 33,
+        "binary_sha256_after": "5941c68c50524aa3afcdcb51fdb19119062f9f4fe9fd8a4899b0ba4c8cc7c111",
+        "binary_changed_during_test": false,
+        "log_sha256": "6a08bc430df5b09e85d40776b3255a480372895a092289c4651008ad805e8871"
+      },
+      {
+        "name": "cli",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-cli-batch65.log",
+        "exit_code": 0,
+        "ctest_cases": 16,
+        "log_sha256": "91a8acadcc599b8fe2de3cf323cd357f87db998377caba4f70b616f3d2dd32d4"
+      },
+      {
+        "name": "io",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch65.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+        "binary_sha256": "e093b13343f40139b7c10d0b5a5c0e88861c73dfd35a7635480fa35634ca94d7",
+        "exit_code": 0,
+        "assertions": 18206,
+        "cases": 396,
+        "binary_sha256_after": "e093b13343f40139b7c10d0b5a5c0e88861c73dfd35a7635480fa35634ca94d7",
+        "binary_changed_during_test": false,
+        "log_sha256": "28d422b62b9cff06878e08761eacaeeb6feeafcc90c1cfb8dcd2a6a3fd78d3ea"
+      },
+      {
+        "name": "core",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch65.log",
+        "binary": ".cache/build/release-tests/tests/test_imagegraph",
+        "binary_sha256": "db042ec84eaf11665fc0f090832255b191a8cea012ee63c5109ce7a806a6799c",
+        "exit_code": 0,
+        "assertions": 2863498,
+        "cases": 3728,
+        "binary_sha256_after": "db042ec84eaf11665fc0f090832255b191a8cea012ee63c5109ce7a806a6799c",
+        "binary_changed_during_test": false,
+        "log_sha256": "976bff42451865f3921fe76cfacb9c0778434bb41e46c224dbc6f7d346522940"
+      },
+      {
+        "name": "assetc",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-assetc-batch65.log",
+        "binary": ".cache/build/release-tests/tests/test_assetc",
+        "binary_sha256": "2dbf823ed20ef1729a843306b0e4bd34b5b7eda06676977cd226b9e93f20f41b",
+        "exit_code": 0,
+        "assertions": 563,
+        "cases": 49,
+        "binary_sha256_after": "2dbf823ed20ef1729a843306b0e4bd34b5b7eda06676977cd226b9e93f20f41b",
+        "binary_changed_during_test": false,
+        "log_sha256": "0ed2b21c9c794e6de0d604965ea31782a1f5c8a6ceeef3d06d36c0f80754c891"
+      },
+      {
+        "name": "client",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-client-batch65.log",
+        "binary": ".cache/build/release-tests/tests/test_client",
+        "binary_sha256": "70b2c3f4b0df23b5a2b8612d3467c17787741da16f4fde5a68b3f0654107e9a8",
+        "exit_code": 0,
+        "assertions": 23853,
+        "cases": 359,
+        "binary_sha256_after": "70b2c3f4b0df23b5a2b8612d3467c17787741da16f4fde5a68b3f0654107e9a8",
+        "binary_changed_during_test": false,
+        "log_sha256": "15587a910e218fcae8ed306cdbc875d12c897df497de05e93080e1564f1791fd"
+      },
+      {
+        "name": "studio",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-studio-batch65.log",
+        "binary": ".cache/build/release-tests/tests/test_studio",
+        "binary_sha256": "deba1c38370e89f1820689c10f70a80cb5de4a7654bd9d694b0c0b67e5a5be38",
+        "exit_code": 0,
+        "assertions": 51329,
+        "cases": 1159,
+        "binary_sha256_after": "deba1c38370e89f1820689c10f70a80cb5de4a7654bd9d694b0c0b67e5a5be38",
+        "binary_changed_during_test": false,
+        "log_sha256": "1df202d597ed74c5c23e11e46b14c00aa93571ef4e14b6726fc1dff9b5217710"
+      },
+      {
+        "name": "nodegraph",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-nodegraph-batch65.log",
+        "binary": ".cache/build/release-tests/tests/test_nodegraph",
+        "binary_sha256": "d19323ed3d7ea072195cd77ed603a1be05e93c5d66d01c834e74b463d4ff748d",
+        "exit_code": 0,
+        "assertions": 410,
+        "cases": 42,
+        "binary_sha256_after": "d19323ed3d7ea072195cd77ed603a1be05e93c5d66d01c834e74b463d4ff748d",
+        "binary_changed_during_test": false,
+        "log_sha256": "f3c3f6baf9ccbb8a1b24266cb605c04575a7ed8258f815904b89d1bb90b1a35c"
+      },
+      {
+        "name": "ui",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-ui-batch65.log",
+        "binary": ".cache/build/release-tests/tests/test_ui",
+        "binary_sha256": "2a1f91127eb0d899576e0a38a8b6df95167370974130054fdb7155fae96aa659",
+        "exit_code": 0,
+        "assertions": 704,
+        "cases": 40,
+        "binary_sha256_after": "2a1f91127eb0d899576e0a38a8b6df95167370974130054fdb7155fae96aa659",
+        "binary_changed_during_test": false,
+        "log_sha256": "db8b5dd83d63a675252bc994bd701468ebc77efe8c752ba72f8ded544ac39f3c"
+      },
+      {
+        "name": "startup",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-startup-batch65.log",
+        "exit_code": 0,
+        "assertions": 5,
+        "cases": 1,
+        "log_sha256": "948d843ccb6fb3ba4df08040b6e52b3f1172dcf46f9e24ea9e5d542593bbde40"
+      },
+      {
+        "name": "lint",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-lint-batch65.log",
+        "exit_code": 0,
+        "log_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+      },
+      {
+        "name": "architecture",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-architecture-batch65.log",
+        "exit_code": 0,
+        "log_sha256": "e2920b48a3c7c18b9bb66b525c591a2eb61a1986c17204060ce321e87ea6ff4f"
+      },
+      {
+        "name": "python",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-python-batch65.log",
+        "exit_code": 0,
+        "python_cases": 116,
+        "log_sha256": "b4df0ec5d1a71db145205648bf3e46346432ebe583e33f710ba32f4d910920c1"
+      },
+      {
+        "name": "format",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-format-batch65.log",
+        "exit_code": 0,
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "name": "diff",
+        "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-diff-batch65.log",
+        "exit_code": 0,
+        "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "optimized_preflight": {
+      "command": [
+        ".cache/build/profile/tests/test_imagegraph",
+        "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads],[imagegraph][path_repeat_workloads],[imagegraph][tile_random_workloads],[imagegraph][path_wave_workloads],[imagegraph][repeat_texture_workloads]"
+      ],
+      "exit_code": 0,
+      "binary_sha256": "5439323c56f7f641c183fe961bb431b8bcbd98342ce48f2d245c0045944453a8",
+      "binary_sha256_after": "5439323c56f7f641c183fe961bb431b8bcbd98342ce48f2d245c0045944453a8",
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch65.log",
+      "log_sha256": "0795e6c577eedd4b615c70fb905822fca262c0931c055ed3c1e44ffd356663e1",
+      "assertions": 739180,
+      "cases": 7
+    },
+    "workload_counters": {
+      "exit_code": 0,
+      "results": [
+        {
+          "suite": "engine.imagegraph.bench.pixel-kernels",
+          "validated": true,
+          "profiles": 208,
+          "spans": 2067,
+          "sha_before": "b7b971f488359c08626ee3d8b9184940dd61853153d3f0c020285a1555d3de82",
+          "sha_after": "b7b971f488359c08626ee3d8b9184940dd61853153d3f0c020285a1555d3de82"
+        },
+        {
+          "suite": "engine.imagegraph.bench.path-particle",
+          "validated": true,
+          "profiles": 65,
+          "spans": 7449,
+          "sha_before": "b7b971f488359c08626ee3d8b9184940dd61853153d3f0c020285a1555d3de82",
+          "sha_after": "b7b971f488359c08626ee3d8b9184940dd61853153d3f0c020285a1555d3de82"
+        },
+        {
+          "suite": "engine.imagegraph.bench.shape-triangulate",
+          "validated": true,
+          "profiles": 26,
+          "spans": 507,
+          "sha_before": "b7b971f488359c08626ee3d8b9184940dd61853153d3f0c020285a1555d3de82",
+          "sha_after": "b7b971f488359c08626ee3d8b9184940dd61853153d3f0c020285a1555d3de82"
+        },
+        {
+          "validated": true,
+          "binary_sha256": "b7b971f488359c08626ee3d8b9184940dd61853153d3f0c020285a1555d3de82",
+          "heap_compiled": 1,
+          "workloads": {
+            "group": {
+              "profiles": 13,
+              "spans": 6006,
+              "operations_per_call": 17,
+              "retained_bytes": [
+                17608,
+                17608,
+                17608,
+                17608,
+                17608
+              ]
+            },
+            "tunnel": {
+              "profiles": 13,
+              "spans": 33995,
+              "operations_per_call": 7,
+              "retained_bytes": [
+                99296,
+                99296,
+                99296,
+                99296,
+                99296
+              ]
+            }
+          }
+        },
+        {
+          "validated": true,
+          "binary_sha256": "b7b971f488359c08626ee3d8b9184940dd61853153d3f0c020285a1555d3de82",
+          "preset": "profile",
+          "backend": "cpu",
+          "heap_compiled": 1,
+          "workload": {
+            "profiles": 13,
+            "spans": 468,
+            "owners": 64,
+            "steps_per_call": 16,
+            "completions_per_call": 16,
+            "refusals_per_call": 2,
+            "resets_per_call": 85,
+            "state_fnv": "3059338748087447014",
+            "retained_bytes": 11112
+          }
+        }
+      ],
+      "errors": [],
+      "stderr": "",
+      "workload_variants": 26,
+      "profile_calls": 338,
+      "total_spans": 50492,
+      "timing_output": "kept in memory only; no benchmark timing file"
+    },
+    "source_stability": {
+      "paths": 4291,
+      "changed": []
+    },
+    "child_binary_stability": {
+      "before": {
+        ".cache/build/release-tests/tools/assetc": "9cacb82fa9e38eff6ce4f8b1f6676c39643b03e6fa75e6a2d8f15851af8b604b",
+        ".cache/build/release-tests/tools/imagegraph": "ac0f00648ef747653c8c23b2d3b75da6858a571e8e818e78ba6ae0973c1f041e"
+      },
+      "after": {
+        ".cache/build/release-tests/tools/assetc": "9cacb82fa9e38eff6ce4f8b1f6676c39643b03e6fa75e6a2d8f15851af8b604b",
+        ".cache/build/release-tests/tools/imagegraph": "ac0f00648ef747653c8c23b2d3b75da6858a571e8e818e78ba6ae0973c1f041e"
+      }
+    },
+    "failed_predecessors": [
+      {
+        "batch": 62,
+        "accepted": false,
+        "failed_checks": [
+          {
+            "name": "core",
+            "exit_code": 42,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch62.log",
+            "log_sha256": "bb2926f5c1b60f4efd490794c9c639eef1e05035050d1afca9ecd5c3fcaf53c0",
+            "cases": [
+              {
+                "case": "Repeat Texture refuses unavailable bindings and nonfinite shader controls",
+                "assertions": [
+                  {
+                    "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+                    "line": 469
+                  },
+                  {
+                    "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+                    "line": 470
+                  },
+                  {
+                    "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+                    "line": 471
+                  },
+                  {
+                    "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+                    "line": 469
+                  },
+                  {
+                    "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+                    "line": 470
+                  },
+                  {
+                    "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+                    "line": 471
+                  }
+                ]
+              },
+              {
+                "case": "Repeat Texture surface rows inherit the original first leaf depth",
+                "assertions": [
+                  {
+                    "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+                    "line": 562
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "root_cause": "The fixture expected scalar mode values 3 and -0.5 to refuse. Source widget normalization clamps them to 2 and 0. These are valid source scalar behavior. Fractional 0.5 after normalization already refuses.",
+        "repairs": [
+          "Preserve source widget mode clamping; compare clamped scalar pixels and reject unnormalized out-of-range/fractional array getter modes.",
+          "Supply real ordered ImageArray row indices in first-original-leaf depth fixture."
+        ],
+        "optimized_preflight_passed": true,
+        "existing_26_profiles_passed": true
+      },
+      {
+        "batch": 63,
+        "accepted": false,
+        "failed_checks": [
+          {
+            "name": "core",
+            "exit_code": 42,
+            "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch63.log",
+            "log_sha256": "36e37e382face6cc1231fb43a1735ef6f57e336f974f33de512bff2688ef97a0",
+            "cases": [
+              {
+                "case": "Repeat Texture refuses unavailable bindings and nonfinite shader controls",
+                "assertions": [
+                  {
+                    "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+                    "line": 469
+                  },
+                  {
+                    "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+                    "line": 470
+                  },
+                  {
+                    "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+                    "line": 471
+                  },
+                  {
+                    "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+                    "line": 469
+                  },
+                  {
+                    "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+                    "line": 470
+                  },
+                  {
+                    "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+                    "line": 471
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "root_cause": "The fixture expected scalar mode values 3 and -0.5 to refuse. Source widget normalization clamps them to 2 and 0. These are valid source scalar behavior. Fractional 0.5 after normalization already refuses.",
+        "repairs": [
+          "Preserve source widget mode clamping; compare clamped scalar pixels and reject unnormalized out-of-range/fractional array getter modes."
+        ],
+        "optimized_preflight_passed": true,
+        "existing_26_profiles_passed": true
+      }
+    ],
+    "desktop_runtime_parity": "unknown",
+    "licensed_gpu_parity": "unknown",
+    "live_runtime_parity": "unknown",
+    "parity_claim": false,
+    "build_warnings": [
+      "Batch62 profile build emitted existing SourceCommonGetters.inc:367 missing ProjectName initializer warning; this file is outside owned Repeat Texture changes."
+    ],
+    "warning_cleanup": {
+      "batch": 64,
+      "all_checks_passed": 20,
+      "optimized_cases_passed": 7,
+      "existing_profiles_passed": 26,
+      "owned_warning": "SourceRepeatTexture.cpp range-loop structured pair copied; changed binding to const reference before final batch65.",
+      "final_builds_warning_free": true
+    }
+  },
+  "limitations": [
+    "Third-party Repeat Texture shader license applicability remains unresolved; source copyright attribution is retained.",
+    "Nearest CPU source-derived behavior does not establish licensed executable or GPU arithmetic parity.",
+    "Whole-input array processing with attribute_process=false, physical Atlas surfaces and unlinked Mask dimension units are unsupported.",
+    "Random modes require observed source seeds; no constructor seed is invented.",
+    "Live Studio verification was not run. Offscreen Vulkan checks were previously authorized.",
+    "Other uncommitted work exists in the shared tree. The isolated committed tree was not separately rebuilt."
+  ]
+}

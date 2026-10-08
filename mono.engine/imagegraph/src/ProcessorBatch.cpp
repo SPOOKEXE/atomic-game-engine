@@ -27,6 +27,7 @@
 #include "nodes/SourcePixelSort.hpp"
 #include "nodes/SourcePolar.hpp"
 #include "nodes/SourcePytagoreanTile.hpp"
+#include "nodes/SourceRepeatTexture.hpp"
 #include "nodes/SourceScratchNoise.hpp"
 #include "nodes/SourceShape3DExecutor.hpp"
 #include "nodes/SourceShardNoise.hpp"
@@ -933,6 +934,15 @@ namespace engine::imagegraph::detail {
 			for (size_t row = 0; row < count; ++row) {
 				uint64_t scratchOwned = 0;
 				if (!selectRow(row, scratchOwned) || !AdmitSourcePathWave(context, batchWork, batchBytes))
+					return false;
+			}
+		}
+		if (context.Authored.Type == "pc.repeat_texture") {
+			uint64_t batchWork = 0, batchBytes = 0;
+			for (size_t row = 0; row < count; ++row) {
+				uint64_t scratchOwned = 0;
+				if (!selectRow(row, scratchOwned) ||
+					!AdmitSourceRepeatTexture(context, batchWork, batchBytes))
 					return false;
 			}
 		}

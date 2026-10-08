@@ -14911,19 +14911,21 @@ namespace engine::imagegraph {
 							   input.Id == "character_range")) ||
 							 (simpleShape && (input.Id == "center" || input.Id == "half_size")));
 						// Dimension projects surfaces before processor selection. Equal sizes collapse.
-						if ((simpleShape || node.Type == "pc.tile_random" || node.Type == "pc.flow_noise" ||
-							 node.Type == "pc.noise_bubble" || node.Type == "pc.noise_cristal" ||
-							 node.Type == "pc.gradient_cube" || node.Type == "pc.cellular" ||
-							 node.Type == "pc.perlin" || node.Type == "pc.voronoi_extra" ||
-							 node.Type == "pc.shard_noise" || node.Type == "pc.noise_strand" ||
-							 node.Type == "pc.weave" || node.Type == "pc.pytagorean_tile" ||
-							 node.Type == "pc.perlin_extra" || node.Type == "pc.wavelet_noise" ||
-							 node.Type == "pc.noise_scratch" || node.Type == "pc.fold_noise" ||
-							 node.Type == "pc.noise_gaussian" || node.Type == "pc.noise_aniso" ||
-							 node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
-							 node.Type == "pc.simplex_cube") &&
-							input.Id == "dimension" && input.SourceKind == "Dimension" &&
-							produced[sourceIndex]) {
+						const bool surfaceDimension =
+							((simpleShape || node.Type == "pc.tile_random" || node.Type == "pc.flow_noise" ||
+							  node.Type == "pc.noise_bubble" || node.Type == "pc.noise_cristal" ||
+							  node.Type == "pc.gradient_cube" || node.Type == "pc.cellular" ||
+							  node.Type == "pc.perlin" || node.Type == "pc.voronoi_extra" ||
+							  node.Type == "pc.shard_noise" || node.Type == "pc.noise_strand" ||
+							  node.Type == "pc.weave" || node.Type == "pc.pytagorean_tile" ||
+							  node.Type == "pc.perlin_extra" || node.Type == "pc.wavelet_noise" ||
+							  node.Type == "pc.noise_scratch" || node.Type == "pc.fold_noise" ||
+							  node.Type == "pc.noise_gaussian" || node.Type == "pc.noise_aniso" ||
+							  node.Type == "pc.perlin_cube" || node.Type == "pc.cellular_cube" ||
+							  node.Type == "pc.simplex_cube") &&
+							 input.Id == "dimension") ||
+							(node.Type == "pc.repeat_texture" && input.Id == "target_dimension");
+						if (surfaceDimension && input.SourceKind == "Dimension" && produced[sourceIndex]) {
 							if (const ImageArray *images =
 									FindImageArrayOutput(results[sourceIndex], link->FromPort)) {
 								if (images->Items.size() > Limits::MaximumArrayElements) {

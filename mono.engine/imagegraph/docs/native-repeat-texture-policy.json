@@ -1,0 +1,210 @@
+{
+  "profile": "native-source-repeat-texture",
+  "node": "pc.repeat_texture",
+  "source": {
+    "repository": "pixel-composer",
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "files": [
+      {
+        "path": "scripts/node_repeat_texture/node_repeat_texture.gml",
+        "sha256": "333863842af03694778fb5e9cf98ec2bfb3cd0e0bf95b5f525fc8db0127672b6"
+      },
+      {
+        "path": "shaders/sh_texture_repeat/sh_texture_repeat.fsh",
+        "sha256": "5e652beae7cb6a95836a0ed0890ee77d875c7826337aa30427f06efc07899e18"
+      }
+    ],
+    "shader_notice": "The pinned shader preserves the header notice “Copyright © 2015 Inigo Quilez.” Third-party shader license applicability is unresolved; the repository MIT notice is not attributed to this shader.",
+    "oracle": "pinned source node and shader",
+    "licensed_reference_executable": "unavailable",
+    "desktop_runtime_parity": "unknown",
+    "licensed_gpu_parity": "unknown",
+    "live_runtime_parity": "unknown"
+  },
+  "physical_inputs": [
+    {
+      "index": 0,
+      "port": "surface_in",
+      "display_name": "Surface In",
+      "kind": "surface",
+      "default": "runtime input",
+      "required": true
+    },
+    {
+      "index": 1,
+      "port": "target_dimension",
+      "display_name": "Target Dimension",
+      "kind": "vec2",
+      "default": [
+        1,
+        1
+      ],
+      "unit_port": "target_dimension_unit",
+      "unit_default": 1,
+      "unit_choices": [
+        "Pixel",
+        "Project",
+        "Mask"
+      ],
+      "unsupported_unit": "Mask: source node has no Mask getter and native profile refuses it"
+    },
+    {
+      "index": 2,
+      "port": "type",
+      "display_name": "Type",
+      "kind": "enum",
+      "default": 1,
+      "choices": [
+        "Tile",
+        "Scatter",
+        "Cell"
+      ],
+      "shader_values": {
+        "Tile": 0,
+        "Scatter": 1,
+        "Cell": 2
+      }
+    },
+    {
+      "index": 3,
+      "port": "seed",
+      "display_name": "Seed",
+      "kind": "seed",
+      "default": "runtime seed"
+    },
+    {
+      "index": 4,
+      "port": "randomness",
+      "display_name": "Randomness",
+      "kind": "slider",
+      "default": 1
+    }
+  ],
+  "synthetic_attributes": {
+    "attribute_process": {
+      "default": true,
+      "role": "node processing flag; not a sixth physical input"
+    },
+    "attribute_color_depth": {
+      "default": 0,
+      "kind": "scalar selection only",
+      "role": "output depth selection; source calls attribute_surface_depth(); it is not an array-routed control",
+      "native_formats": {
+        "0": "inherit the first original Surface In array leaf format",
+        "1": "inherit the resolved context/project surface format (the workload fixture explicitly supplies rgba32_float)",
+        "2": "rgba4_unorm",
+        "3": "rgba8_unorm",
+        "4": "rgba16_float",
+        "5": "rgba32_float",
+        "6": "r8_unorm",
+        "7": "r16_float",
+        "8": "r32_float"
+      }
+    },
+    "attribute_array_process": {
+      "default": 0,
+      "kind": "scalar flag",
+      "role": "array-processing metadata; no depth-array routing is implemented"
+    },
+    "arrays": "The native profile aggregates array-valued target_dimension, randomness, type, and seed processor rows with Surface In arrays. Inherited depth is selected from the first original Surface In array leaf before row selection. Depth remains a scalar attribute; no per-row depth array is accepted or routed."
+  },
+  "shader_contract": {
+    "coordinate_mapping": "Allocate output using the rounded target extent (minimum 1). For each output pixel center, v_vTexcoord=(pixel+0.5)/allocated_target_extent; then posRat=v_vTexcoord*raw_target_dimension/input_surface_physical_dimensions. For an unlinked target dimension, Pixel units use the raw pair and Project units multiply it by project surface dimensions; a linked target dimension is used directly without unit conversion.",
+    "tile_mode_0": "Sample the input at fract(posRat).",
+    "scatter_mode_1": "Hash the four corners of floor(posRat), multiply hash components by the raw randomness input, derive signed axis flips from hash z/w, sample four transformed tiles and smoothstep-blend by the fractional coordinates.",
+    "cell_mode_2": "Visit the 3x3 neighborhood around floor(posRat), use hash offsets multiplied by raw randomness, weight samples by exp(-5*d), and normalize the weighted RGB sum; shader sets output alpha to 1.",
+    "seeded_hash": "The source shader hash is fract(sin(seed-shifted dot products of cell coordinates) * 103) with four fixed coefficient pairs. No source-side clamp of the randomness value is declared.",
+    "mode_domain": "The pinned node menu has three choices, Tile=0, Scatter=1, Cell=2; the shader also contains an unexposed type-3 onion branch. The type widget uses FractionalInterpolation=true and ChoiceClamp=Default with RawCount=3. Scalar SourceChoice values clamp to [0,2] before native execution (for example, -0.5 to 0 and 3 to 2); fractional values such as 0.5 remain fractional and the native integral-mode profile refuses them. Array getter values bypass widget clamping: native accepts integral 0..2 and refuses type 3. This does not claim source runtime parity for array values.",
+    "sampling_and_precision": "Pinned shader behavior is documented as the oracle. The native CPU implementation is a separately named profile; matched GPU floating-point and texture-filter behavior are not claimed."
+  },
+  "native_profile": {
+    "implementation": "bounded native CPU profile",
+    "supported_modes": {
+      "scalar_after_source_widget_normalization": [
+        0,
+        1,
+        2
+      ],
+      "array_values": [
+        0,
+        1,
+        2
+      ],
+      "fractional_mode": "unsupported after source widget normalization",
+      "array_type_3": "unsupported and refused"
+    },
+    "output_depth": "Scalar attribute_color_depth only. Value 0 inherits the first original Surface In array leaf format; values 1..8 select rgba32_float, rgba4_unorm, rgba8_unorm, rgba16_float, rgba32_float, r8_unorm, r16_float, r32_float respectively. No depth-array routing; output is not fixed to RGBA8.",
+    "work_and_bytes": {
+      "aggregate_work_cap": 64000000,
+      "units": "estimated work units across the complete processor batch",
+      "per_output_pixel": {
+        "Tile (mode 0)": 64,
+        "Scatter (mode 1)": 256,
+        "Cell (mode 2)": 576
+      },
+      "byte_admission": "Aggregate output byte layouts for the selected formats against available evaluation bytes before NewImage allocation.",
+      "dimension_admission": "Validate rounded output dimensions and request/evaluation dimension limits before output allocation."
+    },
+    "atlas": "Atlas input execution is explicitly unsupported by the native profile.",
+    "scope": "Native source-derived CPU behavior only; not desktop, licensed GPU, or live runtime parity.",
+    "seed_requirements": {
+      "Tile (mode 0)": "Seed is unused and may be missing.",
+      "Scatter (mode 1)": "Requires an observed source seed; a missing seed is refused.",
+      "Cell (mode 2)": "Requires an observed source seed; a missing seed is refused."
+    },
+    "randomness": "Finite scalar converted to native float and used raw in hash offsets; no source clamp is declared.",
+    "arrays": "Surface In selects the first original array leaf for inherited depth, then each processor row uses its selected source leaf. Color depth stays scalar and is not routed by row."
+  },
+  "native_references": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourceRepeatTexture.cpp",
+    "core_fixtures": [
+      "mono.engine/imagegraph/tests/SourceRepeatTexture.cpp",
+      "mono.engine/imagegraph/tests/SourceRepeatTextureWorkloads.cpp"
+    ]
+  },
+  "validation": {
+    "status": "accepted joined batch65",
+    "receipt": "docs/pixel-composer-m0/native-repeat-texture-validation-2026-10-08.json",
+    "batch": 65,
+    "checks": 20,
+    "results": {
+      "native_binary_cases": 6177,
+      "startup_cases": 1,
+      "python_cases": 116,
+      "cli_cases": 16,
+      "core_cases": 3728,
+      "core_assertions": 2863498,
+      "io_cases": 396,
+      "io_assertions": 18206,
+      "studio_cases": 1159,
+      "studio_assertions": 51329,
+      "offscreen_vulkan_render_cases": 33,
+      "offscreen_vulkan_render_assertions": 2005,
+      "repeat_texture_core_cases": 14,
+      "repeat_texture_optimized_workload_cases": 1,
+      "repeat_texture_io_cases": 6,
+      "optimized_preflight_cases": 7,
+      "optimized_preflight_assertions": 739180,
+      "workload_variants": 26,
+      "profile_calls": 338,
+      "total_spans": 50492
+    },
+    "supported_domain": {
+      "physical_inputs": 5,
+      "modes": [
+        0,
+        1,
+        2
+      ],
+      "formats": "Scalar output-depth selections 0..8; all three modes, bounded output dimensions, array processor rows, and PXC persistence covered by the receipt.",
+      "source_contract": "Pinned node and shader behavior only; native nearest CPU sampling profile.",
+      "limitations": "Atlas surfaces, unlinked Mask dimensions, missing random-mode seeds, and unsupported/fractional array mode values refuse."
+    },
+    "desktop_runtime_parity": "unknown",
+    "licensed_gpu_parity": "unknown",
+    "live_runtime_parity": "unknown",
+    "third_party_shader_license_applicability": "unknown; applicability of a third-party shader license grant remains unresolved",
+    "licensed_reference_executable": "unavailable",
+    "parity_claim": false
+  }
+}

@@ -4,6 +4,7 @@
 #include "Families.hpp"
 #include "Sampler.hpp"
 #include "Source2DGenerator.hpp"
+#include "SourceRepeatTexture.hpp"
 #include "SourceTileRandom.hpp"
 
 #include <cmath>
@@ -276,7 +277,9 @@ namespace engine::imagegraph::detail {
 	}
 	std::span<const ExecutorEntry> SourceTileTransformExecutors() {
 		static constexpr ExecutorEntry entries[] = {
-			{"pc.tile", DrawSourceTileTransform, true}, {"pc.tile_random", DrawSourceTileRandom, true}
+			{"pc.tile", DrawSourceTileTransform, true},
+			{"pc.tile_random", DrawSourceTileRandom, true},
+			{"pc.repeat_texture", DrawSourceRepeatTexture, true}
 		};
 		return entries;
 	}
