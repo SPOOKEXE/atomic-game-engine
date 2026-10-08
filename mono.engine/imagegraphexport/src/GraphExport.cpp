@@ -5,6 +5,7 @@
 #include <engine/imagegraph/HostCapture.hpp>
 #include <engine/imagegraphexport/BuiltinRandomFile.hpp>
 #include <engine/imagegraphexport/GraphExport.hpp>
+#include <engine/imagegraphexport/GraphImageCache.hpp>
 #include <engine/imagegraphexport/GraphInputs.hpp>
 #include <engine/imagegraphexport/Runner.hpp>
 #include <engine/imagegraphphysics/RigidReplay.hpp>
@@ -104,6 +105,10 @@ namespace engine::imagegraphexport {
 	) {
 		arguments.clear();
 		executable.clear();
+		if (!engine::imagegraph::ComposerExportEnabled(target.extension().string(), settings.Scope)) {
+			failure = "Video and audio exports are disabled in the image composer";
+			return false;
+		}
 		if (frameCount == 0 || frameCount > 4096 || settings.GifBatchSize > 4096 ||
 			settings.FrameMilliseconds == 0 || settings.Quality > 100 ||
 			!std::isfinite(settings.MegabitsPerSecond) || settings.MegabitsPerSecond <= 0 ||
@@ -282,6 +287,25 @@ namespace engine::imagegraphexport {
 		const engine::imagegraph::EvaluationRequest *liveRequest
 	) {
 		failure.clear();
+		const auto scope =
+			liveRequest && liveRequest->Scope != engine::imagegraph::ComposerScope::Unrestricted
+				? liveRequest->Scope
+				: settings.Scope;
+		if (!engine::imagegraph::ComposerExportEnabled(settings.Output.extension().string(), scope)) {
+			failure = "Video and audio exports are disabled in the image composer";
+			return false;
+		}
+		if (settings.FrameCacheLayouts.size() > 64) {
+			failure = "saved cache layout count exceeds export bounds";
+			return false;
+		}
+		for (const auto &receipt : settings.FrameCacheLayouts)
+			if (receipt.NodeId.empty() || receipt.NodeId.size() > 512 || receipt.DataHash.size() != 64 ||
+				bake::SpriteCacheLayoutName(receipt.Layout).empty() ||
+				receipt.NodeId.size() + 66 + bake::SpriteCacheLayoutName(receipt.Layout).size() > 512) {
+				failure = "saved cache layout identity exceeds export bounds";
+				return false;
+			}
 		size_t frameCount = 0;
 		engine::imagegraph::Diagnostic diagnostic;
 		if (engine::imagegraph::ValidateTickRange(settings.Frames, frameCount, diagnostic) !=
@@ -317,6 +341,10 @@ namespace engine::imagegraphexport {
 				failure = "builtin random capture must differ from graph input and output";
 				return false;
 			}
+		}
+		if (!engine::imagegraph::ComposerExportEnabled(output.extension().string(), scope)) {
+			failure = "Video and audio exports are disabled in the image composer";
+			return false;
 		}
 		const auto parent = output.parent_path();
 		std::filesystem::create_directories(parent, error);
@@ -391,6 +419,13 @@ namespace engine::imagegraphexport {
 					values.end(), {"--builtin-random-capture", settings.BuiltinRandomCapture.string()}
 				);
 			if (settings.RigidPlaying) values.push_back("--rigid-playing");
+			for (const auto &receipt : settings.FrameCacheLayouts)
+				values.insert(
+					values.end(),
+					{"--saved-cache-layout",
+					 receipt.NodeId + ":" + receipt.DataHash + "=" +
+						 std::string(bake::SpriteCacheLayoutName(receipt.Layout))}
+				);
 			if (settings.RigidFrameProgress) values.push_back("--rigid-frame-progress");
 			if (settings.ArrayIndex)
 				values.insert(values.end(), {"--array-index", std::to_string(*settings.ArrayIndex)});
@@ -424,6 +459,7 @@ namespace engine::imagegraphexport {
 			int result = 0;
 			if (liveDocument && livePlan && liveRequest) {
 				auto request = *liveRequest;
+				request.Scope = scope;
 				if (!imageSources.empty()) {
 					if (!request.ImageSources.empty()) {
 						failure = "Live exports require decoded source grants in the request or ImageInputs, "
@@ -451,7 +487,8 @@ namespace engine::imagegraphexport {
 					errors,
 					imageSources,
 					settings.HostCaptures,
-					settings.HostProvider
+					settings.HostProvider,
+					scope
 				);
 			}
 			if (result == 0) return true;
@@ -741,6 +778,21 @@ namespace engine::imagegraphexport {
 			return false;
 		}
 		EvaluationRequest request;
+		request.Scope = settings.Scope;
+		DataReplayState frameCacheLoads;
+		if (imagegraphio::DecodeSourceFrameCaches(
+				document,
+				settings.FrameCacheLayouts,
+				frameCacheLoads,
+				diagnostic,
+				Limits::MaximumEvaluationBytes / 8
+			) != Status::Ok) {
+			failure = diagnostic.Message;
+			return false;
+		}
+		request.SourceFrameCacheLoads = &frameCacheLoads;
+		request.SourceCachePlayback =
+			SourceCachePlaybackObservation{true, SourceCacheSampling::NativePlayedPrefix, true};
 		std::vector<SourceBuiltinRandomCapture> builtinRandomCaptures;
 		if (!settings.BuiltinRandomCapture.empty()) {
 			if (!LoadBuiltinRandomCaptureFile(
@@ -781,10 +833,16 @@ namespace engine::imagegraphexport {
 			return false;
 		}
 		Diagnostic diagnostic;
+		if (CheckComposerNodeScope(*node, request.Scope, diagnostic) != Status::Ok) {
+			failure = diagnostic.Message;
+			return false;
+		}
 		engine::imagegraphphysics::RigidProvider rigidProvider;
 		auto evaluationRequest = request;
 		if (!evaluationRequest.RigidProvider) evaluationRequest.RigidProvider = &rigidProvider;
 		CapturedFeedbackHost replayHost;
+		if (request.Scope == ComposerScope::ImageOnly)
+			(void)replayHost.SetFeedbackSamplingProfile(FeedbackSamplingProfile::NativeFractional);
 		StatefulInputEvaluationResult prepared;
 		EvaluationSnapshot directSnapshot;
 		const EvaluationSnapshot *resolved = &directSnapshot;
@@ -840,6 +898,11 @@ namespace engine::imagegraphexport {
 		});
 		if (node == document.Nodes.end()) {
 			failure = "selected prepared host node does not exist";
+			return false;
+		}
+		Diagnostic scopeDiagnostic;
+		if (CheckComposerNodeScope(*node, request.Scope, scopeDiagnostic) != Status::Ok) {
+			failure = scopeDiagnostic.Message;
 			return false;
 		}
 		if (!snapshot.ImageArrays().empty()) {

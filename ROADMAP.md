@@ -42,9 +42,9 @@ Milestone labels describe development scope, not release versions.
 - [x] Finish the measured engine stress pass and matched 200-client `RecoverRows` profiling. Retain the 4 m physics grid default; cell-size results vary by scene. The recovery candidate was rejected without a demonstrated gain. See the [stress audit](docs/ENGINE_STRESS_AUDIT_2026-09-22.md).
 - [x] Validate the same-world follow-camera repair and extended tunnel walk with native presentation and render tests (`04315bcd`). Passed native dev/Vulkan validation on 2026-10-04: 32 presentation cases, the 64-frame tunnel sweep and 5 portal GPU cases.
 
+- [x] fix on startup the studio widgets are unsnapped from studio viewport slots
+- [x] fix so we can take ui elements out of the studio screen and onto other screens if possible
 
-- [_] fix on startup the studio widgets are unsnapped from studio viewport slots
-- [_] fix so we can take ui elements out of the studio screen and onto other screens if possible
 ### v0.26
 
 Priority: Keep image-only work in v0.26. Audio, mesh, animation and custom-profile work is scheduled for v0.27.
@@ -101,12 +101,10 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Verify grouped Cache Clear through the real Studio host across all eight source gates.
 - [x] Preserve native Collection instances, disabled-group lifecycle and ordinary tagged boundary routes.
 - [x] Preserve reserved source selectors, common Update destinations and opaque routes through PXC save/reopen; validate captured common-socket lifecycle.
-- [_] Execute all reserved source trigger and metadata routes with ordered native project-step state, including unsupported callbacks, wrapper profiles and required host observations.
 - [x] Verify audited native common lifecycle and PXC owner save/reopen with bounded work and atomic refusal.
 - [x] Expose authored group boundary sockets for canvas connections; preserve routes through save and reopen.
 - [x] Preserve canonical cold Nine Slice state through frozen groups, native saves and logical drawing.
 - [x] Preserve expression-backed Combine keys through PXC save/reopen and re-separation for supported vector ports.
-- [_] Finish Draw Line 2 Points with captured shared shader state and matched primitive coverage; see the [source-state audit](mono.engine/imagegraph/docs/source-line2points-state.md).
 - [x] Profile bounded source-family workloads in an optimized build with allocation and byte counters.
 - [x] Save completed image previews as PXC thumbnails with atomic publication.
 - [x] Preserve separate Mirror X/Y animators through group replay and PXC edits.
@@ -124,45 +122,54 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [x] Preserve source timeline endpoints through native saves, PXC edits and integral-frame exports; pass joined CPU validation.
 - [x] Verify real font decoding, Unicode Text pixels and font artifacts; profile all seven boundary workloads.
 - [x] Add bounded source-Step Cache loading with original slot counts, paused progress, on-demand native pixels and atomic admission; pass joined checks and CPU profiles.
+- [x] Cook saved frame caches into bounded native constructor receipts; verify sparse and nested CPU playback without foreign decoders.
+- [x] Correct saved-cache load extents, noone recovery and resize timing; verify selected endpoints with source rounding in joined tests.
+- [x] Decode bounded sparse saved frame caches with explicit byte-layout receipts; retain owned frames in Pixel Builder, native export sessions and Studio host previews. Pass joined release-tests verification.
+- [x] Extend selected Clear to Cache and Cache Array with bounded slot clearing, source gates and saved-reload suppression; pass joined CPU and Vulkan checks.
+- [x] Load saved frame caches through explicit CLI layout receipts in selected-output and authored exports; verify real PNG pixels and stale-receipt preservation.
+- [x] Preserve source output constructor expressions and bounded literal defaults in catalogue metadata.
+- [x] Profile native wrapped-text measurement workloads.
+- [x] Publish cooked native cache graphs through assetc; verify sparse CLI PNG output, client file playback, atomic refusal and bounded parser mutations in joined tests.
+- [x] Validate signed Text trimming and whole-batch work limits with joined CPU tests.
+- [x] Verify Transform GPU pixels.
+- [x] Verify skybox GPU pixels.
 - [x] Add separate/combine X/Y controls with processed input receipts, numeric tuple playback and atomic undo; pass headless gesture and save/reopen checks. Live Studio verification remains open.
 - [x] Round source hexadecimal arguments once; preserve prefix parsing and atomic overflow refusal.
 - [x] Convert Number argument tuple carriers to source caught-array zero; preserve String values.
 - [x] Convert Area and Curve Number arguments to caught-array zero; preserve exact enum integers and raw String values.
+- [x] Verify shared-alias Dopesheet drag, Delete, copy, fractional scale, collisions, cancellation and undo/redo in headless gestures.
+- [x] Preserve signed observed Cache clocks, Cache Array ranges and source resize ordering; pass joined checks.
+- [x] Add bounded source 3D recipe, geometry and projected raster stages.
+- [x] Render bounded Draw Shape 3D surface, depth and rim outputs with explicit native projection and texture-array scheduling.
+- [x] Add bounded weighted Points Triangulate and preserve downstream corner weights.
+- [x] Validate Hilbert and Kisrhombille generators, grouping, image formats and bounded execution.
+- [_] Execute all reserved source trigger and metadata routes with ordered native project-step state, including unsupported callbacks, wrapper profiles and required host observations.
+- [_] Finish Draw Line 2 Points with captured shared shader state and matched primitive coverage; see the [source-state audit](mono.engine/imagegraph/docs/source-line2points-state.md).
 - [_] Add source-compatible argument handling.
 - [_] Bind cache playback and loading to selected animation-region bounds.
 - [_] Complete remaining Composer GPU checks.
 - [_] Establish exact parity with a licensed reference build and matched captures.
 - [_] Finish Composer font loading.
-- [x] Verify shared-alias Dopesheet drag, Delete, copy, fractional scale, collisions, cancellation and undo/redo in headless gestures.
 - [_] Finish Studio host workflows.
 - [_] Finish cache groups.
 - [_] Finish export formats.
 - [_] Finish feedback seek/reset and fractional-key playback.
-- [x] Preserve signed observed Cache clocks, Cache Array ranges and source resize ordering; pass joined checks.
 - [_] Finish fractional cache playback.
 - [_] Finish large-sequence playback.
 - [_] Finish remaining PXC edits.
-- [x] Finish selected-cache Clear.
+- [_] Finish selected-cache Clear, including cache-group reactivation.
 - [_] Finish text layout and rendering.
-- [x] Add bounded source 3D recipe, geometry and projected raster stages.
-- [x] Render bounded Draw Shape 3D surface, depth and rim outputs with explicit native projection and texture-array scheduling.
 - [_] Disable 3D mesh, audio and video controls and execution in Image Composer while retaining saved nodes.
 - [_] Restore the full 2D Particle emitter lifecycle and image outputs.
 - [_] Implement the 2D Camera image compositor and its layer controls.
-- [x] Add bounded weighted Points Triangulate and preserve downstream corner weights.
 - [_] Implement remaining catalogue executors.
-- [_] Integrate Studio camera previews.
+- [_] Integrate Studio camera previews
 - [_] Integrate camera rendering.
 - [_] Load saved frame caches.
-- [x] Profile native wrapped-text measurement workloads.
-- [x] Validate Hilbert and Kisrhombille generators, grouping, image formats and bounded execution.
 - [_] Validate all integrated changes with joined CPU tests.
-- [x] Validate signed Text trimming and whole-batch work limits with joined CPU tests.
-- [x] Verify Transform GPU pixels.
 - [_] Verify catalogue controls, errors, animation and parity evidence.
 - [_] Verify live Studio workflows.
 - [_] Verify modified-project compatibility.
-- [x] Verify skybox GPU pixels.
 
 The [joined parallel checks](docs/pixel-composer-m0/native-parallel-composer-validation-2026-10-07.json) include Mirror Polar CleanEdge, cold Nine Slice and Combine PXC persistence: 5,848 C++ cases, 116 Python checks, 16 CLI checks and all 22 CPU workload profiles pass. Remaining catalogue executors, live Studio verification and licensed parity stay open.
 
@@ -171,6 +178,8 @@ The [imagegraph fundamentals batch](docs/pixel-composer-m0/native-imagegraph-fun
 The [October 5 continuation checks](docs/pixel-composer-m0/native-validation-2026-10-05.json) record joined CPU suites, native wrapped-text profiling and scoped Vulkan checks for Composer, Transform, cameras and grouped skyboxes. Licensed reference parity and live Studio remain open.
 
 Isolated passes do not establish combined acceptance. See the [native validation ledger](docs/pixel-composer-m0/native-validation-2026-10-02.json) and [reference gate](docs/pixel-composer-m0/reference-gate.md). Retained integration evidence: `.cache/build/dev/evidence/`.
+
+- [x] make image composer sidewidgets detachable like standard studio
 
 ### v0.27
 
@@ -181,7 +190,6 @@ Isolated passes do not establish combined acceptance. See the [native validation
 - [_] Finish audio workflows.
 - [_] Finish mesh consumers and bindings.
 - [_] Preserve X/Y animation through groups and PXC edits.
-- [_] Check whether shaderc needs glslang's deprecated HLSL front-end; disable `ENABLE_HLSL` if unused.
 - [_] Check whether shaderc needs glslang's deprecated HLSL front-end; disable `ENABLE_HLSL` if unused.
 - [_] Remove dead engine code and obsolete compatibility paths.
 - [_] Consolidate render hooks, nodes, graphs and graph visualization.

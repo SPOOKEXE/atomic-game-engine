@@ -568,6 +568,16 @@ imagegraphfont-boundary-bench samples="5":
     cmake --build --preset bench --target bench_imagegraphfont
     ./.cache/build/bench/bench/bench_imagegraphfont --suite engine.imagegraphfont.bench.boundaries --samples {{samples}}
 
+# Profile native wrapped measurement and signed trimming using real decoded BDF advances.
+imagegraphfont-wrapped-text-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset release-tests > /dev/null
+    cmake --build --preset release-tests --target test_imagegraphfont
+    ./.cache/build/release-tests/tests/test_imagegraphfont '[wrapped_text_workloads]'
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_imagegraphfont
+    ./.cache/build/bench/bench/bench_imagegraphfont --suite engine.imagegraphfont.bench.wrapped-text --samples {{samples}}
+
 # Project a generated PXCX chain while retaining its parsed source archive.
 imagegraphio-pxcx-import-bench samples="5":
     cmake --preset bench > /dev/null
@@ -2246,3 +2256,19 @@ imagegraph-source-common-empty-bench samples="5":
     cmake --build --preset profile --target test_imagegraph bench_imagegraph
     ./.cache/build/profile/tests/test_imagegraph '[empty_override]'
     ATOMIC_IMAGEGRAPH_EMPTY_PRESET=profile ./.cache/build/profile/bench/bench_imagegraph --suite engine.imagegraph.bench.source-common-empty --samples {{samples}}
+
+# Packed Colour argument CPU profiles stay on stdout.
+imagegraph-argument-colour-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset profile -DMONO_BUILD_BENCH=ON -DMONO_BUILD_TESTS=ON > /dev/null
+    cmake --build --preset profile --target test_imagegraph bench_imagegraph
+    ./.cache/build/profile/tests/test_imagegraph '[argument_colour]'
+    ATOMIC_IMAGEGRAPH_ARGUMENT_PRESET=profile ./.cache/build/profile/bench/bench_imagegraph --suite engine.imagegraph.bench.argument-colour --samples {{samples}}
+
+# Layered 2D Camera CPU profiles stay on stdout.
+imagegraph-source-camera-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset profile -DMONO_BUILD_BENCH=ON -DMONO_BUILD_TESTS=ON > /dev/null
+    cmake --build --preset profile --target test_imagegraph bench_imagegraph
+    ./.cache/build/profile/tests/test_imagegraph '[source_camera]'
+    ATOMIC_IMAGEGRAPH_CAMERA_PRESET=profile ./.cache/build/profile/bench/bench_imagegraph --suite engine.imagegraph.bench.source-camera --samples {{samples}}

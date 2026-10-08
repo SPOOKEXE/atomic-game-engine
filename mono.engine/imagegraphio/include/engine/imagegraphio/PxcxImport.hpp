@@ -5,6 +5,7 @@
 #include <engine/bake/Pxcx.hpp>
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/GroupReplay.hpp>
+#include <engine/imagegraphio/SourceFrameCache.hpp>
 
 #include <optional>
 #include <span>
@@ -26,6 +27,8 @@ namespace engine::imagegraphio {
 		// restore.
 		bool SavePreviewSettings = true;
 		uint64_t MaximumOperationBytes = imagegraph::Limits::MaximumEvaluationBytes;
+		// Explicit layouts bind source constructor loading to exact saved cache text.
+		std::vector<SourceFrameCacheLayoutObservation> FrameCacheLayouts{};
 	};
 
 	struct PxcxGroupBootstrapRecord {

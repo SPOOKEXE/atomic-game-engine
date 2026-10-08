@@ -6,8 +6,284 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <limits>
 TEST_SUITE_ID("engine.imagegraph.feedback_host")
 using namespace engine::imagegraph;
+
+namespace {
+	Document CommonBoolean(bool grouped) {
+		Document document;
+		document.FormatVersion = 11;
+		document.Nodes = {{"first", "pc.boolean", grouped ? "frame" : "", {}, {{"value", true}}}};
+		document.Outputs = {{"first-value", "first", "boolean"}};
+		if (grouped) document.Groups = {{"frame", "Frame"}};
+		SourceCommonOwnerRecord owner;
+		owner.SourceOwnerId = "first";
+		owner.SourceType = "Node_Boolean";
+		owner.NativeOwnerId = "first";
+		owner.UpdateAnimatorOwnerId = "first";
+		owner.UpdateAnimatorPort = "native:animator:1";
+		document.SourceCommonOwners = {owner};
+		document.SourceAnimators.emplace();
+		DetachedSourceAnimator animator;
+		animator.OwnerId = "first";
+		animator.Id = "native:animator:1";
+		animator.OriginalPort = "pxcx.update_in_trigger";
+		animator.Type = ValueType::Boolean;
+		document.SourceAnimators->Detached = {animator};
+		GroupSubtypeOverlay payload;
+		payload.NodeId = "first";
+		payload.Port = animator.Id;
+		payload.Fixed = false;
+		document.SourceAnimators->DetachedValues = {payload};
+		return document;
+	}
+}
+
+TEST_CASE(
+	"native common steps survive normal feedback preparation and failed replacement",
+	"[imagegraph][feedback][source_common]"
+) {
+	const auto exercise = [](bool grouped) {
+		Document document = CommonBoolean(grouped);
+		Plan plan;
+		Diagnostic diagnostic;
+		REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+		CapturedFeedbackHost host;
+		EvaluationRequest request;
+		request.SourceSafeMode = false;
+		REQUIRE(
+			host.InitializeSourceCommonRuntime(
+				document, plan, request, SourceNodeInitialState::Loaded, diagnostic, 1, 1
+			) == Status::Ok
+		);
+		const SourceCommonRuntimeObservations observations{};
+		REQUIRE(
+			host.StepSourceCommonRuntime(document, plan, request, observations, diagnostic, 1, 1) ==
+			Status::Ok
+		);
+		EvaluatedValue held;
+		REQUIRE(
+			host.ReadSourceCommonGetter(
+				document, plan, "first", SourceCommonSelector::Update, request, held, diagnostic, 1, 1
+			) == Status::Ok
+		);
+		CHECK(std::get<bool>(held.Data) == false);
+
+		request = {};
+		request.SourceSafeMode = false;
+		REQUIRE(host.Prepare(
+			document, plan, 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "first-value"
+		));
+		CHECK(host.Value("first-value") != nullptr);
+		REQUIRE(request.GroupRender != nullptr);
+		CHECK(request.SourceCommon == &request.GroupRender->Common);
+		CHECK(request.SourceCommonAnimators == &request.GroupRender->CommonAnimators);
+		CHECK(request.SimulationReplay != nullptr);
+		CHECK(request.SurfaceReplay != nullptr);
+		CHECK(request.RandomReplay != nullptr);
+		CHECK(request.DataReplay != nullptr);
+		CHECK(request.RigidReplay != nullptr);
+		const auto prepared = host.PreparedGroups(1, 1, {});
+		REQUIRE(prepared != nullptr);
+		REQUIRE(prepared->Common.Owners.size() == 1);
+		CHECK(prepared->Common.Owners.front().OwnerId == "first");
+		REQUIRE(
+			host.ReadSourceCommonGetter(
+				document, plan, "first", SourceCommonSelector::Update, request, held, diagnostic, 1, 1
+			) == Status::Ok
+		);
+		CHECK(std::get<bool>(held.Data) == false);
+
+		const auto before = *prepared;
+		CHECK(
+			host.StepSourceCommonRuntime(document, plan, request, observations, diagnostic, 1, 1, 1) ==
+			Status::LimitExceeded
+		);
+		const auto after = host.PreparedGroups(1, 1, {});
+		REQUIRE(after != nullptr);
+		CHECK(after->Common == before.Common);
+		CHECK(after->CommonAnimators == before.CommonAnimators);
+		CHECK(after->SourceCommonWrites == before.SourceCommonWrites);
+	};
+
+	SECTION("ungrouped graph") {
+		exercise(false);
+	}
+	SECTION("grouped graph") {
+		exercise(true);
+	}
+}
+
+TEST_CASE(
+	"native common steps retain the preceding feedback image without exposing stale named outputs",
+	"[imagegraph][feedback][source_common]"
+) {
+	Document document = CommonBoolean(false);
+	document.Project = ProjectSettings{};
+	document.Project->SurfaceWidth = document.Project->SurfaceHeight = 1;
+	document.Nodes.push_back(
+		{"prior", "image.captured", {}, {}, {{"source_id", std::string{"feedback:out"}}}}
+	);
+	document.Nodes.push_back({"invert", "image.invert", {}, {}, {{"include_alpha", false}}});
+	document.Links = {{"prior", "image", "invert", "image"}};
+	document.Outputs = {{"out", "invert", "image"}};
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	CapturedFeedbackHost host;
+	EvaluationRequest request;
+	request.SourceSafeMode = false;
+	REQUIRE(host.Prepare(document, plan, 1, 1, request, diagnostic));
+	REQUIRE(host.Output("out") != nullptr);
+	REQUIRE(host.Output("out")->Pixels.front() == 255);
+	REQUIRE(
+		host.InitializeSourceCommonRuntime(
+			document, plan, request, SourceNodeInitialState::Loaded, diagnostic, 1, 1
+		) == Status::Ok
+	);
+	request = {};
+	request.Tick = 1;
+	request.SourceSafeMode = false;
+	REQUIRE(host.StepSourceCommonRuntime(document, plan, request, {}, diagnostic, 1, 1) == Status::Ok);
+	CHECK(host.Value("out") == nullptr);
+	CHECK_FALSE(host.PreparedFrame(1, 1).has_value());
+	CHECK(host.PreparedData(1, 1) == nullptr);
+	EvaluatedValue held;
+	REQUIRE(
+		host.ReadSourceCommonGetter(
+			document, plan, "first", SourceCommonSelector::Update, request, held, diagnostic, 1, 1
+		) == Status::Ok
+	);
+	const auto common = host.PreparedGroups(1, 1, {1, 0, false});
+	REQUIRE(common != nullptr);
+	const auto before = common->Common;
+	CHECK_FALSE(host.Prepare(document, plan, 1, 1, request, diagnostic, 1));
+	CHECK(host.Value("out") == nullptr);
+	REQUIRE(host.PreparedGroups(1, 1, {1, 0, false}) != nullptr);
+	CHECK(host.PreparedGroups(1, 1, {1, 0, false})->Common == before);
+	REQUIRE(host.Prepare(document, plan, 1, 1, request, diagnostic));
+	REQUIRE(host.Output("out") != nullptr);
+	CHECK(host.Output("out")->Pixels.front() == 0);
+	REQUIRE(request.ImageSources.size() == 1);
+	CHECK(request.ImageSources.front().Data.Pixels.front() == 255);
+	const FrameTime publishedFrame{1, 0, false};
+	CHECK(host.PreparedFrame(1, 1) == std::optional<FrameTime>{publishedFrame});
+	// Repeating the same frame after a common pulse still consumes tick zero's image, not tick one's.
+	request = {};
+	request.Tick = 1;
+	request.SourceSafeMode = false;
+	REQUIRE(host.StepSourceCommonRuntime(document, plan, request, {}, diagnostic, 1, 1) == Status::Ok);
+	REQUIRE(host.Prepare(document, plan, 1, 1, request, diagnostic));
+	REQUIRE(host.Output("out") != nullptr);
+	CHECK(host.Output("out")->Pixels.front() == 0);
+}
+
+TEST_CASE(
+	"empty common owner initialization retires membership while preserving ordinary host outputs",
+	"[imagegraph][feedback][source_common]"
+) {
+	auto document = CommonBoolean(true);
+	Plan plan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	CapturedFeedbackHost host;
+	EvaluationRequest request;
+	request.SourceSafeMode = false;
+	REQUIRE(
+		host.InitializeSourceCommonRuntime(
+			document, plan, request, SourceNodeInitialState::Loaded, diagnostic, 1, 1
+		) == Status::Ok
+	);
+	REQUIRE(host.StepSourceCommonRuntime(document, plan, request, {}, diagnostic, 1, 1) == Status::Ok);
+	REQUIRE(
+		host.Prepare(document, plan, 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "first-value")
+	);
+	const auto value = host.Value("first-value");
+	REQUIRE(value != nullptr);
+	const auto savedOutput = std::get<EvaluatedValue>(value->Output);
+	const auto prepared = host.PreparedGroups(1, 1, {});
+	REQUIRE(prepared != nullptr);
+	const auto outputs = prepared->Outputs;
+	const auto readiness = prepared->Nodes;
+	const auto simulation = *request.SimulationReplay;
+	const auto data = *request.DataReplay;
+	document.SourceCommonOwners.clear();
+	document.SourceAnimators = {};
+	REQUIRE(Compile(document, plan, diagnostic) == Status::Ok);
+	// Owner retirement still validates the supplied plan and frame before replacing any history.
+	const auto common = prepared->Common;
+	const auto animators = prepared->CommonAnimators;
+	const auto bindings = prepared->SourceCommonBindings;
+	const auto inputs = prepared->SourceCommonInputs;
+	const auto writes = prepared->SourceCommonWrites;
+	const auto retained = host.RetainedBytes();
+	const auto unchanged = [&] {
+		CHECK(prepared->Common == common);
+		CHECK(prepared->CommonAnimators == animators);
+		CHECK(prepared->SourceCommonBindings == bindings);
+		CHECK(prepared->SourceCommonInputs == inputs);
+		CHECK(prepared->SourceCommonWrites == writes);
+		CHECK(prepared->Outputs == outputs);
+		CHECK(prepared->Nodes == readiness);
+		REQUIRE(host.Value("first-value") != nullptr);
+		CHECK(std::get<EvaluatedValue>(host.Value("first-value")->Output) == savedOutput);
+		CHECK(host.RetainedBytes() == retained);
+	};
+	auto invalidPlan = plan;
+	invalidPlan.NodeOrder.clear();
+	CHECK(
+		host.InitializeSourceCommonRuntime(
+			document, invalidPlan, request, SourceNodeInitialState::Loaded, diagnostic, 2, 1
+		) == Status::InvalidOutput
+	);
+	unchanged();
+	auto invalidClock = request;
+	invalidClock.Subframe = std::numeric_limits<double>::quiet_NaN();
+	CHECK(
+		host.ReconcileSourceCommonRuntime(document, plan, invalidClock, {}, diagnostic, 2, 1) ==
+		Status::InvalidValue
+	);
+	unchanged();
+	auto invalidDocument = document;
+	invalidDocument.Nodes.front().Type = "absent.type";
+	CHECK(
+		host.InitializeSourceCommonRuntime(
+			invalidDocument, plan, request, SourceNodeInitialState::Loaded, diagnostic, 2, 1
+		) == Status::UnknownNode
+	);
+	unchanged();
+	CHECK(
+		host.InitializeSourceCommonRuntime(
+			document, plan, request, SourceNodeInitialState::Loaded, diagnostic, 2, 1, 1
+		) == Status::LimitExceeded
+	);
+	CHECK(prepared->Common.Owners.size() == 1);
+	REQUIRE(
+		host.InitializeSourceCommonRuntime(
+			document, plan, request, SourceNodeInitialState::Loaded, diagnostic, 2, 1
+		) == Status::Ok
+	);
+	CHECK(prepared->Common.Owners.empty());
+	CHECK(prepared->CommonAnimators.Detached.empty());
+	CHECK(prepared->CommonAnimators.DetachedValues.empty());
+	CHECK(prepared->SourceCommonBindings.empty());
+	CHECK(prepared->SourceCommonInputs.empty());
+	CHECK(prepared->SourceCommonWrites.empty());
+	CHECK(prepared->Outputs == outputs);
+	CHECK(prepared->Nodes == readiness);
+	REQUIRE(host.Value("first-value") != nullptr);
+	CHECK(std::get<EvaluatedValue>(host.Value("first-value")->Output) == savedOutput);
+	CHECK(*request.SimulationReplay == simulation);
+	CHECK(*request.DataReplay == data);
+	EvaluatedValue unavailable;
+	CHECK(
+		host.ReadSourceCommonGetter(
+			document, plan, "first", SourceCommonSelector::Update, request, unavailable, diagnostic, 2, 1
+		) == Status::InvalidValue
+	);
+}
+
 TEST_CASE(
 	"Feedback host persists authored output binding and preserves generations on failed steps",
 	"[imagegraph][feedback]"
@@ -551,4 +827,69 @@ TEST_CASE(
 	request.SourceCachePlayback->Sampling = SourceCacheSampling::ObservedFrame;
 	REQUIRE(host.Prepare(document, plan, 2, 1, request, error, Limits::MaximumEvaluationBytes, "out"));
 	checkOwnership(2);
+}
+
+TEST_CASE(
+	"Grouped host journals remain admitted while publishing a nongrouped feedback revision",
+	"[imagegraph][feedback][group_render][budget]"
+) {
+	Document grouped;
+	grouped.FormatVersion = 10;
+	grouped.Groups = {{"group", "Group"}};
+	grouped.Nodes = {
+		{"number", "pc.number_simple", "group", {}, {{"value", 7.0}}},
+		{"surface",
+		 "image.solid",
+		 "group",
+		 {},
+		 {{"width", int64_t{256}}, {"height", int64_t{256}}, {"colour", Colour{12, 34, 56, 255}}}}
+	};
+	grouped.Outputs = {{"result", "number", "number"}};
+	Plan groupedPlan;
+	Diagnostic diagnostic;
+	REQUIRE(Compile(grouped, groupedPlan, diagnostic) == Status::Ok);
+	CapturedFeedbackHost host;
+	EvaluationRequest request;
+	REQUIRE(host.Prepare(
+		grouped, groupedPlan, 1, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "result"
+	));
+	const auto *heldGroups = host.PreparedGroups(1, 1, {});
+	REQUIRE(heldGroups);
+	const auto groupBytes = RetainedGroupRenderSessionBytes(*heldGroups);
+	REQUIRE(groupBytes > 256 * 256 * 4);
+	const auto retained = host.RetainedBytes();
+	const auto heldOutput = *host.Value("result");
+	const auto nodes = heldGroups->Outputs.Nodes.size();
+	Document feedback;
+	feedback.FormatVersion = 9;
+	feedback.Project = ProjectSettings{};
+	feedback.Project->SurfaceWidth = feedback.Project->SurfaceHeight = 1;
+	feedback.Nodes = {
+		{"prior", "image.captured", "", {}, {{"source_id", std::string{"feedback:out"}}}},
+		{"invert", "image.invert", "", {}, {{"include_alpha", false}}}
+	};
+	feedback.Links = {{"prior", "image", "invert", "image"}};
+	feedback.Outputs = {{"out", "invert", "image"}};
+	Plan feedbackPlan;
+	REQUIRE(Compile(feedback, feedbackPlan, diagnostic) == Status::Ok);
+	request = {};
+	CHECK_FALSE(host.Prepare(feedback, feedbackPlan, 2, 1, request, diagnostic, groupBytes / 2, "out"));
+	CHECK(diagnostic.Code == Status::LimitExceeded);
+	CHECK(host.RetainedBytes() == retained);
+	REQUIRE(host.PreparedGroups(1, 1, {}));
+	CHECK(host.PreparedGroups(1, 1, {})->Outputs.Nodes.size() == nodes);
+	REQUIRE(host.Value("result"));
+	CHECK(
+		std::get<EvaluatedValue>(host.Value("result")->Output) == std::get<EvaluatedValue>(heldOutput.Output)
+	);
+	CHECK_FALSE(host.PreparedFrame(2, 1));
+	request = {};
+	REQUIRE(
+		host.Prepare(feedback, feedbackPlan, 2, 1, request, diagnostic, Limits::MaximumEvaluationBytes, "out")
+	);
+	REQUIRE(host.Output("out"));
+	CHECK(host.Output("out")->Pixels[0] == 255);
+	CHECK_FALSE(host.PreparedGroups(1, 1, {}));
+	CHECK(host.PreparedGroups(2, 1, {}) == nullptr);
+	CHECK(host.RetainedBytes() < retained);
 }

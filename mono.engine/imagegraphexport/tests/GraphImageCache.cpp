@@ -207,3 +207,104 @@ TEST_CASE(
 	CHECK(frames[0].Pixels == std::vector<uint8_t>{12, 34, 56, 78});
 	CHECK(frames[1].Pixels == std::vector<uint8_t>{200, 10, 40, 0, 255, 128, 64, 255});
 }
+
+TEST_CASE(
+	"Saved cache layout receipts admit bounded literal assignments atomically", "[imagegraph][image_cache]"
+) {
+	using namespace engine::imagegraphexport;
+	std::vector<GraphImageCacheLayoutObservation> observations;
+	std::string failure;
+	const std::string valid = "node:original:" + std::string(64, 'a') + "=rgba8-top-down";
+	REQUIRE(AddGraphImageCacheLayoutObservation(valid, observations, failure));
+	REQUIRE(observations.size() == 1);
+	CHECK(observations[0].NodeId == "node:original");
+	const auto previous = observations;
+	for (const auto &invalid : std::vector<std::string>{
+			 valid,
+			 "missing",
+			 "node:" + std::string(64, 'A') + "=rgba8-top-down",
+			 "node:" + std::string(64, 'a') + "=guess",
+			 std::string(513, 'x')
+		 }) {
+		CHECK_FALSE(AddGraphImageCacheLayoutObservation(invalid, observations, failure));
+		CHECK(observations.size() == previous.size());
+		CHECK(observations[0].NodeId == previous[0].NodeId);
+		CHECK(observations[0].DataHash == previous[0].DataHash);
+		CHECK(observations[0].Layout == previous[0].Layout);
+	}
+	observations.resize(64);
+	CHECK_FALSE(AddGraphImageCacheLayoutObservation(
+		"other:" + std::string(64, 'b') + "=bgra8-bottom-up", observations, failure
+	));
+	CHECK(observations.size() == 64);
+}
+
+TEST_CASE(
+	"Frame cache artifact publication preserves exact source and existing destination",
+	"[imagegraph][source_frame_cache]"
+) {
+	using namespace engine::imagegraph;
+	using namespace engine::imagegraphexport;
+	Folder folder;
+	Document source;
+	source.FormatVersion = 9;
+	source.Nodes = {
+		{"input",
+		 "image.solid",
+		 "",
+		 {},
+		 {{"width", int64_t{1}}, {"height", int64_t{1}}, {"colour", Colour{1, 2, 3, 255}}}},
+		{"cache", "pc.cache", "", {}, {{"animated", false}}}
+	};
+	source.Nodes[1].SourceProperties = {{"cache", std::string(TwoFrames)}};
+	source.Links = {{"input", "image", "cache", "surface_in"}};
+	source.Outputs = {{"image", "cache", "cache_surface"}};
+	const auto input = folder.Path / "source.graph", output = folder.Path / "cooked.graph";
+	const auto sourceText = Write(source);
+	{
+		std::ofstream stream(input, std::ios::binary);
+		stream << sourceText;
+	}
+	const auto read = [](const auto &file) {
+		std::ifstream stream(file, std::ios::binary);
+		return std::string(std::istreambuf_iterator<char>(stream), {});
+	};
+	GraphImageCacheLayoutObservation receipt{
+		"cache", Identity(TwoFrames), engine::bake::SpriteCacheLayout::Bgra8TopDown
+	};
+	std::string failure;
+	REQUIRE(CookGraphSourceFrameCaches(input, output, std::span(&receipt, 1), {}, failure));
+	const auto artifact = read(output);
+	CHECK(read(input) == sourceText);
+	Document cooked;
+	Diagnostic diagnostic;
+	REQUIRE(Read(artifact, cooked, diagnostic) == Status::Ok);
+	DataReplayEntry row;
+	REQUIRE(DecodeSourceFrameCacheReceipt(cooked.Nodes[1], row, diagnostic) == Status::Ok);
+	CHECK(std::get<SurfaceValue>(row.Values[2].Data).Data.Pixels == std::vector<uint8_t>{56, 34, 12, 78});
+	CHECK_FALSE(CookGraphSourceFrameCaches(input, output, std::span(&receipt, 1), {}, failure, 4096));
+	CHECK(read(output) == artifact);
+	CHECK_FALSE(CookGraphSourceFrameCaches(input, input, std::span(&receipt, 1), {}, failure));
+	CHECK(read(input) == sourceText);
+	engine::assets::ContentPolicy denied;
+	denied.Allow(engine::assets::FormOfName(input.string()), false);
+	CHECK_FALSE(CookGraphSourceFrameCaches(input, output, std::span(&receipt, 1), denied, failure));
+	CHECK(read(output) == artifact);
+	CHECK_FALSE(CookGraphSourceFrameCaches(input, output, {}, {}, failure));
+	CHECK(read(output) == artifact);
+	const auto alias = folder.Path / "alias.graph";
+	std::error_code error;
+	std::filesystem::create_hard_link(input, alias, error);
+	if (!error) {
+		CHECK_FALSE(CookGraphSourceFrameCaches(input, alias, std::span(&receipt, 1), {}, failure));
+		CHECK(read(input) == sourceText);
+	}
+	{
+		std::ofstream stream(input, std::ios::binary | std::ios::trunc);
+		stream << "invalid document";
+	}
+	CHECK_FALSE(CookGraphSourceFrameCaches(input, output, std::span(&receipt, 1), {}, failure));
+	CHECK(read(output) == artifact);
+	for (const auto &entry : std::filesystem::directory_iterator(folder.Path))
+		CHECK(entry.path().filename().string().find(".graph-file-") != 0);
+}

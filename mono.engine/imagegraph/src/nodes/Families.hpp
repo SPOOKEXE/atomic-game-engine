@@ -26,6 +26,7 @@ namespace engine::imagegraph::detail {
 	std::span<const ExecutorEntry> SourcePathBakeExecutors();
 	std::span<const ExecutorEntry> SourceShape3DExecutors();
 	std::span<const ExecutorEntry> SourceParticle3DExecutors();
+	std::span<const ExecutorEntry> SourceParticle2DExecutors();
 	std::span<const ExecutorEntry> SourcePathSpiralExecutors();
 	std::span<const ExecutorEntry> OutlineExecutors();
 	std::span<const ExecutorEntry> BlurExecutors();

@@ -50,7 +50,7 @@ TEST_CASE(
 	const auto before = *clock.RigidReplay;
 	REQUIRE(before.Owners.size() == 1);
 	REQUIRE(before.Owners[0].History.Frames.size() >= 3);
-	REQUIRE(host.ClearCacheResults(document, plan, "cache", 7, 11, diagnostic));
+	REQUIRE(host.ClearSourceCache(document, plan, "cache", 7, 11, diagnostic));
 	const auto cleared = *clock.DataReplay;
 	clock.Subframe = .5;
 	clock.RigidPlaying = clock.RigidFrameProgress = false;

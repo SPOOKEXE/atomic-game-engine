@@ -13606,6 +13606,8 @@ namespace engine::imagegraph {
 				SetDiagnostic(diagnostic, Status::Cycle, "computed PCX dependencies form a cycle");
 				return diagnostic.Code;
 			}
+			if (CheckComposerNodeScope(document.Nodes[index], request.Scope, diagnostic) != Status::Ok)
+				return diagnostic.Code;
 			// grug refuse before frozen replay, input capture or placeholder values can stand in for source
 			// behavior.
 			if (detail::IsGroupCallbackOpaque(document.Nodes[index])) {

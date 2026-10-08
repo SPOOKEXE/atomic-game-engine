@@ -199,6 +199,8 @@ mono_add_program(studio
 # The product MCP contract suite speaks the loopback wire directly.
 if(TARGET test_studio)
 	target_link_libraries(test_studio PRIVATE Vendor::asio Vendor::json)
+	# Startup preparation must precede the process-wide Composer initialized by panel tests.
+	add_test(NAME studio_composer_startup_arguments COMMAND test_studio "[.composer-startup]")
 endif()
 
 # --- the studio's own panels, authored in TypeScript --------------------------

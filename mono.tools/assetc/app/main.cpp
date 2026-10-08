@@ -121,6 +121,10 @@ int main(int argc, char **argv) {
 	);
 	arguments.Value("execute-node", "NODE", "Execute one explicitly granted host file node");
 	arguments.Value("export-graph", "PATH", "Export a named imagegraph output instead of baking a tree");
+	arguments.Flag(
+		"cook-frame-caches",
+		"Cook explicit saved-cache receipts into --output native .graph; requires --export-graph"
+	);
 	arguments.Value(
 		"export-frames", "FIRST:LAST[:STEP]", "Export an animation over this explicit tick range"
 	);
@@ -160,6 +164,32 @@ int main(int argc, char **argv) {
 	if (parsed.DescribeRequested) {
 		std::fputs(arguments.Describe().c_str(), stdout);
 		return 0;
+	}
+
+	if (arguments.Has("cook-frame-caches")) {
+		if (!arguments.Has("export-graph") || !arguments.Has("output") ||
+			!arguments.Has("graph-image-cache-layout")) {
+			std::fputs(
+				"assetc: cache cooking requires --export-graph, --output and explicit "
+				"--graph-image-cache-layout receipts\n",
+				stderr
+			);
+			return 2;
+		}
+		for (const auto option :
+			 {"export-node",
+			  "execute-node",
+			  "prepare-builtin-random",
+			  "export-frames",
+			  "graph-output",
+			  "graph-tick",
+			  "builtin-random-capture",
+			  "rigid-playing",
+			  "rigid-frame-progress"})
+			if (arguments.Has(option)) {
+				std::fprintf(stderr, "assetc: --cook-frame-caches cannot be combined with --%s\n", option);
+				return 2;
+			}
 	}
 
 	if (arguments.Has("graph-image-cache-layout") && !arguments.Has("export-graph")) {
@@ -237,7 +267,7 @@ int main(int argc, char **argv) {
 		const auto output = arguments.Get("output");
 		const auto selected = arguments.Get("graph-output");
 		if ((!output || !selected) && !arguments.Has("execute-node") &&
-			!arguments.Has("prepare-builtin-random")) {
+			!arguments.Has("prepare-builtin-random") && !arguments.Has("cook-frame-caches")) {
 			ENGINE_ERROR("assetc: graph export requires --output and --graph-output");
 			return 2;
 		}
@@ -368,30 +398,25 @@ int main(int argc, char **argv) {
 		}
 		std::vector<engine::imagegraphexport::GraphImageCacheLayoutObservation> imageCaches;
 		for (const auto assignment : arguments.GetAll("graph-image-cache-layout")) {
-			const auto separator = assignment.find('=');
-			const auto colon = assignment.rfind(':', separator);
-			if (assignment.size() > 512 || separator == std::string_view::npos ||
-				colon == std::string_view::npos || !colon || separator - colon != 65 ||
-				imageCaches.size() == 64) {
-				ENGINE_ERROR("assetc: image cache layout requires bounded NODE:HASH=LAYOUT");
+			std::string failure;
+			if (!engine::imagegraphexport::AddGraphImageCacheLayoutObservation(
+					assignment, imageCaches, failure
+				)) {
+				ENGINE_ERROR("assetc: {}", failure);
 				return 2;
 			}
-			const auto node = assignment.substr(0, colon);
-			const auto hash = assignment.substr(colon + 1, 64);
-			const auto layout = engine::bake::ParseSpriteCacheLayoutName(assignment.substr(separator + 1));
-			if (!layout ||
-				std::any_of(
-					hash.begin(),
-					hash.end(),
-					[](char byte) { return !(byte >= '0' && byte <= '9') && !(byte >= 'a' && byte <= 'f'); }
-				) ||
-				std::any_of(imageCaches.begin(), imageCaches.end(), [&](const auto &record) {
-					return record.NodeId == node;
-				})) {
-				ENGINE_ERROR("assetc: image cache layout, lowercase hash or unique node identity is invalid");
-				return 2;
+		}
+		exportSettings.FrameCacheLayouts = imageCaches;
+		if (arguments.Has("cook-frame-caches")) {
+			std::string failure;
+			if (!engine::imagegraphexport::CookGraphSourceFrameCaches(
+					exportSettings.Input, exportSettings.Output, imageCaches, exportSettings.Content, failure
+				)) {
+				ENGINE_ERROR("assetc: {}", failure);
+				return EXIT_FAILURE;
 			}
-			imageCaches.push_back({std::string(node), std::string(hash), *layout});
+			ENGINE_INFO("assetc: cooked saved frame caches into {}", exportSettings.Output.string());
+			return EXIT_SUCCESS;
 		}
 		assetc::GraphFileHost fileHost(fileGrants, exportSettings.Content, directoryGrants, imageCaches);
 		engine::imagegraphexport::GraphDirectoryHost directoryHost(

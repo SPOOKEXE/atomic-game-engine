@@ -22,8 +22,12 @@ namespace engine::bake {
 		struct ShapeFailure {};
 		struct Budget {
 			uint64_t Available;
+			SurfaceCacheFailure *FailureKind = nullptr;
 			bool Spend(uint64_t bytes) {
-				if (bytes > Available) return false;
+				if (bytes > Available) {
+					if (FailureKind) *FailureKind = SurfaceCacheFailure::LimitExceeded;
+					return false;
+				}
 				Available -= bytes;
 				return true;
 			}
@@ -131,6 +135,91 @@ namespace engine::bake {
 			result = uint64_t(raw);
 			return true;
 		}
+		bool ReadCacheSurface(
+			const nlohmann::json &record,
+			SpriteCacheLayout layout,
+			SpriteCacheFrame &frame,
+			Budget &budget,
+			uint64_t &totalPixels,
+			std::string &failure
+		) {
+			uint64_t width = 0, height = 0;
+			if (!record.is_object() || !record.contains("width") || !record.contains("height") ||
+				!record.contains("buffer") || !record["buffer"].is_string() ||
+				!Number(record["width"], width) || !Number(record["height"], height))
+				return Fail(failure, "frame shape has no supported source surface");
+			const auto size = PixelBytes(width, height);
+			if (!size || width * height > SpriteCacheLimits::MaximumPixels - totalPixels)
+				return Fail(failure, "aggregate pixels exceed the native limit");
+			totalPixels += width * height;
+			const auto &encoded = record["buffer"].get_ref<const std::string &>();
+			std::vector<uint8_t> compressed;
+			if (!Reserve(compressed, encoded.size() / 4 * 3, budget))
+				return Fail(failure, "compressed frame exceeds the byte limit");
+			if (!Decode64(encoded, compressed)) return Fail(failure, "frame base64 is not canonical");
+			frame.Width = uint32_t(width);
+			frame.Height = uint32_t(height);
+			if (!Reserve(frame.Rgba, size_t(*size), budget))
+				return Fail(failure, "decoded frame exceeds the byte limit");
+			CryptoPP::ZlibDecompressor decoder(new VectorSink(frame.Rgba, size_t(*size)), false);
+			decoder.Put(compressed.data(), compressed.size());
+			decoder.MessageEnd();
+			if (frame.Rgba.size() != *size)
+				return Fail(failure, "decompressed bytes disagree with frame dimensions");
+			engine::core::Metrics::Count("source sprite cache frames decoded", 1);
+			engine::core::Metrics::Count(
+				"source sprite cache pixels decoded bytes", double(frame.Rgba.size())
+			);
+			Convert(frame.Rgba, frame.Width, frame.Height, layout);
+			return true;
+		}
+		bool RetainCacheTree(
+			const std::vector<SurfaceCacheItem> &items, Budget &budget, uint64_t &count, size_t depth = 0
+		) {
+			if (depth > SurfaceCacheLimits::MaximumDepth ||
+				items.size() > SurfaceCacheLimits::MaximumItems - count)
+				return false;
+			count += items.size();
+			if (!budget.Spend(items.capacity() * sizeof(SurfaceCacheItem))) return false;
+			for (const auto &item : items)
+				if (!budget.Spend(item.Surface.Rgba.capacity()) ||
+					!RetainCacheTree(item.Elements, budget, count, depth + 1))
+					return false;
+			return true;
+		}
+		bool ReadCacheTree(
+			const nlohmann::json &array,
+			SpriteCacheLayout layout,
+			std::vector<SurfaceCacheItem> &items,
+			Budget &budget,
+			uint64_t &count,
+			uint64_t &pixels,
+			std::string &failure,
+			size_t depth = 0
+		) {
+			if (depth > SurfaceCacheLimits::MaximumDepth ||
+				array.size() > SurfaceCacheLimits::MaximumItems - count)
+				return Fail(failure, "surface tree exceeds its item or depth limit");
+			count += array.size();
+			if (!Reserve(items, array.size(), budget))
+				return Fail(failure, "surface tree table exceeds the byte limit");
+			for (const auto &record : array) {
+				SurfaceCacheItem item;
+				if (record.is_array()) {
+					item.IsArray = true;
+					if (!ReadCacheTree(
+							record, layout, item.Elements, budget, count, pixels, failure, depth + 1
+						))
+						return false;
+				} else if (record.is_object() && record.contains("buffer")) {
+					if (!ReadCacheSurface(record, layout, item.Surface, budget, pixels, failure))
+						return false;
+				}
+				items.push_back(std::move(item));
+			}
+			return true;
+		}
+
 	}
 	std::string_view SpriteCacheLayoutName(SpriteCacheLayout layout) {
 		switch (layout) {
@@ -205,35 +294,8 @@ namespace engine::bake {
 			uint64_t totalPixels = 0;
 			for (size_t index = 0; index < count; index++) {
 				const auto &record = shape == SpriteCacheShape::Array ? source[index] : source;
-				uint64_t width = 0, height = 0;
-				if (!record.is_object() || !record.contains("width") || !record.contains("height") ||
-					!record.contains("buffer") || !record["buffer"].is_string() ||
-					!Number(record["width"], width) || !Number(record["height"], height))
-					return Fail(failure, "frame shape has no supported source surface");
-				const auto size = PixelBytes(width, height);
-				if (!size || width * height > SpriteCacheLimits::MaximumPixels - totalPixels)
-					return Fail(failure, "aggregate pixels exceed the native limit");
-				totalPixels += width * height;
-				const auto &encoded = record["buffer"].get_ref<const std::string &>();
-				std::vector<uint8_t> compressed;
-				if (!Reserve(compressed, encoded.size() / 4 * 3, budget))
-					return Fail(failure, "compressed frame exceeds the byte limit");
-				if (!Decode64(encoded, compressed)) return Fail(failure, "frame base64 is not canonical");
 				SpriteCacheFrame frame;
-				frame.Width = uint32_t(width);
-				frame.Height = uint32_t(height);
-				if (!Reserve(frame.Rgba, size_t(*size), budget))
-					return Fail(failure, "decoded frame exceeds the byte limit");
-				CryptoPP::ZlibDecompressor decoder(new VectorSink(frame.Rgba, size_t(*size)), false);
-				decoder.Put(compressed.data(), compressed.size());
-				decoder.MessageEnd();
-				if (frame.Rgba.size() != *size)
-					return Fail(failure, "decompressed bytes disagree with frame dimensions");
-				engine::core::Metrics::Count("source sprite cache frames decoded", 1);
-				engine::core::Metrics::Count(
-					"source sprite cache pixels decoded bytes", double(frame.Rgba.size())
-				);
-				Convert(frame.Rgba, frame.Width, frame.Height, layout);
+				if (!ReadCacheSurface(record, layout, frame, budget, totalPixels, failure)) return false;
 				candidate.push_back(std::move(frame));
 			}
 			result = std::move(candidate);
@@ -252,6 +314,65 @@ namespace engine::bake {
 			return Fail(failure, "owned allocation failed");
 		}
 	}
+	bool ReadSurfaceCache(
+		std::string_view text,
+		SpriteCacheLayout layout,
+		std::vector<SurfaceCacheItem> &result,
+		std::string &failure,
+		uint64_t maximumBytes,
+		SurfaceCacheFailure *failureKind
+	) {
+		ENGINE_PROFILE_CAT("source surface cache decode", engine::core::ProfileCategory::Engine);
+		failure.clear();
+		if (failureKind) *failureKind = SurfaceCacheFailure::Malformed;
+		if (!LayoutValid(layout)) return Fail(failure, "an explicit supported byte layout is required");
+		if (text.size() > SpriteCacheLimits::MaximumEncodedBytes)
+			return Fail(failure, "encoded text exceeds its native limit");
+		Budget budget{maximumBytes, failureKind};
+		uint64_t retainedCount = 0;
+		if (!budget.Spend(CodecWorkspace) || !RetainCacheTree(result, budget, retainedCount))
+			return Fail(failure, "prior surface tree and workspace exceed their bounds");
+		try {
+			std::array<bool, SurfaceCacheLimits::MaximumDepth + 2> arrayParents{};
+			uint64_t parsedItems = 0;
+			const auto source = nlohmann::json::parse(
+				text, [&](int depth, nlohmann::json::parse_event_t event, nlohmann::json &) {
+					using Event = nlohmann::json::parse_event_t;
+					if (depth < 0 || depth > int(SurfaceCacheLimits::MaximumDepth + 1)) throw ShapeFailure{};
+					if ((event == Event::array_start || event == Event::object_start ||
+						 event == Event::value) &&
+						depth && arrayParents[size_t(depth - 1)] &&
+						++parsedItems > SurfaceCacheLimits::MaximumItems)
+						throw ShapeFailure{};
+					if (event == Event::array_start || event == Event::object_start)
+						arrayParents[size_t(depth)] = event == Event::array_start;
+					return true;
+				}
+			);
+			if (!source.is_array()) return Fail(failure, "surface cache root must be an indexed array");
+			std::vector<SurfaceCacheItem> candidate;
+			uint64_t count = 0, pixels = 0;
+			if (!ReadCacheTree(source, layout, candidate, budget, count, pixels, failure)) return false;
+			engine::core::Metrics::Count("source surface cache items decoded", double(count));
+			result = std::move(candidate);
+			if (failureKind) *failureKind = SurfaceCacheFailure::None;
+			return true;
+		} catch (const ShapeFailure &) {
+			return Fail(failure, "surface cache JSON nesting exceeds its source profile");
+		} catch (const LimitFailure &) {
+			return Fail(failure, "decompressed frame exceeds its exact surface size");
+		} catch (const StreamFailure &) {
+			return Fail(failure, "compressed frame contains trailing bytes");
+		} catch (const CryptoPP::Exception &) {
+			return Fail(failure, "compressed frame is invalid");
+		} catch (const nlohmann::json::exception &) {
+			return Fail(failure, "cache JSON is invalid");
+		} catch (const std::bad_alloc &) {
+			if (failureKind) *failureKind = SurfaceCacheFailure::LimitExceeded;
+			return Fail(failure, "owned allocation failed");
+		}
+	}
+
 	bool WriteSpriteCache(
 		std::span<const SpriteCacheFrame> frames,
 		SpriteCacheLayout layout,

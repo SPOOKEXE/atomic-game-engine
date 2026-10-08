@@ -15,16 +15,19 @@ namespace studio::detail {
 		const Action &action,
 		const Changed &changed
 	) {
-		if (!SourceImageType(node.Type)) return;
+		const bool frameCache = node.Type == "pc.cache" || node.Type == "pc.cache_array";
+		if (!SourceImageType(node.Type) && !frameCache) return;
 
-		if (ImGui::Button("Cache live images")) action(engine::imagegraphio::SourceImageAction::Cache);
-		ImGui::SameLine();
-		if (ImGui::Button("Remove cache")) action(engine::imagegraphio::SourceImageAction::RemoveCache);
-		if (node.Type == "pc.image_animated" && ImGui::Button("Match live image count"))
-			action(engine::imagegraphio::SourceImageAction::MatchLength);
+		if (!frameCache) {
+			if (ImGui::Button("Cache live images")) action(engine::imagegraphio::SourceImageAction::Cache);
+			ImGui::SameLine();
+			if (ImGui::Button("Remove cache")) action(engine::imagegraphio::SourceImageAction::RemoveCache);
+			if (node.Type == "pc.image_animated" && ImGui::Button("Match live image count"))
+				action(engine::imagegraphio::SourceImageAction::MatchLength);
+		}
 		const auto data =
-			std::find_if(node.SourceProperties.begin(), node.SourceProperties.end(), [](const auto &value) {
-				return value.Port == "cache_data";
+			std::find_if(node.SourceProperties.begin(), node.SourceProperties.end(), [&](const auto &value) {
+				return value.Port == (frameCache ? "cache" : "cache_data");
 			});
 		const bool nativeLayout =
 			std::any_of(node.SourceProperties.begin(), node.SourceProperties.end(), [](const auto &value) {

@@ -14,6 +14,7 @@
 #include <engine/imagegraph/FrameTime.hpp>
 #include <engine/imagegraph/SourceTimeline.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
+#include <engine/imagegraphio/SourceFrameCacheLoading.hpp>
 
 #include <algorithm>
 #include <array>
@@ -925,6 +926,22 @@ namespace engine::imagegraphio {
 		}
 		bool CommonSourceRoute(const bake::PxcxLinkFact &link) {
 			return ReservedSourceOutput(link) || link.DestinationUpdateTrigger;
+		}
+		bool SourceSolidCommonLifecycle(
+			const Json &source, const bake::PxcxArchive &archive, std::string_view nodeId
+		) {
+			const auto attributes = source.find("attri");
+			if (attributes != source.end() && attributes->is_object()) {
+				for (const auto key : {"show_update_trigger", "outp_meta", "update_graph"}) {
+					const auto flag = attributes->find(key);
+					if (flag != attributes->end() && flag->is_boolean() &&
+						flag->get<bool>() == (std::string_view(key) != "update_graph"))
+						return true;
+				}
+			}
+			return std::any_of(archive.Links.begin(), archive.Links.end(), [&](const auto &link) {
+				return CommonSourceRoute(link) && (link.FromNode == nodeId || link.ToNode == nodeId);
+			});
 		}
 		std::string ReservedSourceOutputPort(const bake::PxcxLinkFact &link) {
 			if (link.FromTag == -2) return "pxcx.update_in_trigger";
@@ -2841,9 +2858,17 @@ namespace engine::imagegraphio {
 				if (!attributes->contains("color_depth") &&
 					imagegraph::FindCatalogueInput(entry, "attribute_color_depth"))
 					node.Values.push_back({"attribute_color_depth", imagegraph::EnumValue{3}});
-				if (entry.Type == "pc.ase_file_read") {
+				if (entry.Type == "pc.ase_file_read" || entry.Type == "pc.camera") {
 					if (const auto visible = attributes->find("layer_visible");
 						visible != attributes->end()) {
+						if (entry.Type == "pc.camera" &&
+							(!visible->is_array() || visible->size() != node.DynamicInputs.size() / 6 ||
+							 std::any_of(visible->begin(), visible->end(), [](const auto &item) {
+								 return !item.is_boolean();
+							 }))) {
+							reason = "Camera visibility requires one boolean per source layer";
+							return false;
+						}
 						imagegraph::Value value;
 						if (!CatalogueValue(
 								*visible,
@@ -2857,7 +2882,7 @@ namespace engine::imagegraphio {
 								node.SourceProperties, node.SourceProperties.size() + 1, budget
 							) ||
 							!AdmitNativeTextSize(13, budget)) {
-							reason = "Aseprite visibility metadata exceeds native boolean array bounds";
+							reason = "Layer visibility metadata exceeds native boolean array bounds";
 							return false;
 						}
 						node.SourceProperties.push_back({"layer_visible", std::move(value)});
@@ -4194,6 +4219,39 @@ namespace engine::imagegraphio {
 			if (!priorAdd(binding.NodeId.capacity() + 1) || !priorAdd(binding.OwnerId.capacity() + 1) ||
 				!priorAdd(binding.Port.capacity() + 1))
 				return Fail(failure, "previous Group binding names overflow");
+		if (options.FrameCacheLayouts.size() > 64 || out.Options.FrameCacheLayouts.size() > 64)
+			return Fail(failure, "source frame-cache layout observations exceed import bounds");
+		if (out.Options.FrameCacheLayouts.capacity() >
+				UINT64_MAX / sizeof(SourceFrameCacheLayoutObservation) ||
+			!priorAdd(out.Options.FrameCacheLayouts.capacity() * sizeof(SourceFrameCacheLayoutObservation)))
+			return Fail(failure, "previous source frame-cache observations overflow");
+		for (const auto &observation : out.Options.FrameCacheLayouts)
+			if (!priorAdd(observation.NodeId.capacity() + 1) ||
+				!priorAdd(observation.DataHash.capacity() + 1))
+				return Fail(failure, "previous source frame-cache observation text overflows");
+		uint64_t layoutBytes = options.FrameCacheLayouts.size() * sizeof(SourceFrameCacheLayoutObservation);
+		for (size_t index = 0; index < options.FrameCacheLayouts.size(); ++index) {
+			const auto &observation = options.FrameCacheLayouts[index];
+			if (observation.NodeId.empty() ||
+				observation.NodeId.size() > imagegraph::Limits::MaximumTextBytes ||
+				observation.DataHash.size() != 64 ||
+				bake::SpriteCacheLayoutName(observation.Layout).empty() ||
+				!std::all_of(observation.DataHash.begin(), observation.DataHash.end(), [](char value) {
+					return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'f');
+				}))
+				return Fail(failure, "source frame-cache layout observation has invalid identity or layout");
+			for (size_t prior = 0; prior < index; ++prior)
+				if (options.FrameCacheLayouts[prior].NodeId == observation.NodeId)
+					return Fail(failure, "source frame-cache layout observation is duplicated");
+			const uint64_t textBytes = std::max(observation.NodeId.size(), std::string{}.capacity()) +
+									   std::max(observation.DataHash.size(), std::string{}.capacity()) + 2;
+			if (textBytes > UINT64_MAX - layoutBytes)
+				return Fail(failure, "source frame-cache layout observation bytes overflow");
+			layoutBytes += textBytes;
+		}
+		if (*previousDocumentBytes > options.MaximumOperationBytes ||
+			layoutBytes > options.MaximumOperationBytes - *previousDocumentBytes)
+			return Fail(failure, "source frame-cache layout copies exceed import operation bounds");
 		if (*previousDocumentBytes > options.MaximumOperationBytes)
 			return Fail(failure, "previous native Group state exceeds import operation bounds");
 		if (archive.OriginalBytes.empty())
@@ -4232,7 +4290,7 @@ namespace engine::imagegraphio {
 			Timeline(root, result);
 		}
 		detail::ImportBudget operationBudget(options.MaximumOperationBytes);
-		if (!operationBudget.Hold(*previousDocumentBytes))
+		if (!operationBudget.Hold(*previousDocumentBytes) || !operationBudget.Hold(layoutBytes))
 			return Fail(failure, "existing import document exceeds native projection operation bounds");
 		if (archive.MetadataNumber == SUPPORTED_VERSION &&
 			!ProjectRegions(root, result, operationBudget, failure))
@@ -4290,7 +4348,9 @@ namespace engine::imagegraphio {
 			}
 			bool mapped = false;
 			if (archive.MetadataNumber == SUPPORTED_VERSION &&
-				LinksRepresentable(archive, fact, admitCommon)) {
+				LinksRepresentable(archive, fact, admitCommon) &&
+				!(admitCommon && fact.Type == "Node_Solid" &&
+				  SourceSolidCommonLifecycle(source, archive, fact.Id))) {
 				if (fact.Type == "Node_Solid")
 					mapped = Solid(root, source, node);
 				else if (fact.Type == "Node_Invert")
@@ -4835,6 +4895,24 @@ namespace engine::imagegraphio {
 							);
 						finalKeys += axis.Keys.size();
 					}
+		if (!options.FrameCacheLayouts.empty()) {
+			const auto cook = [&](imagegraph::Document &graph) {
+				const auto before = imagegraph::DocumentRetainedPayloadBytes(graph);
+				if (!before) return Fail(failure, "source frame-cache projection payload is invalid");
+				graph.FormatVersion = std::max(graph.FormatVersion, 9u);
+				imagegraph::Diagnostic diagnostic;
+				const auto status = CookSourceFrameCachesLoading(
+					graph, options.FrameCacheLayouts, graph, diagnostic, operationBudget.Available()
+				);
+				if (status != imagegraph::Status::Ok) return Fail(failure, diagnostic.Message);
+				const auto after = imagegraph::DocumentRetainedPayloadBytes(graph);
+				if (!after || (*after > *before && !operationBudget.Hold(*after - *before)))
+					return Fail(failure, "source frame-cache receipts exceed import operation bounds");
+				return true;
+			};
+			if (!cook(result.Graph) || (result.GroupPrebinding && !cook(*result.GroupPrebinding)))
+				return false;
+		}
 		out = std::move(result);
 		return true;
 	} catch (const std::bad_alloc &) {

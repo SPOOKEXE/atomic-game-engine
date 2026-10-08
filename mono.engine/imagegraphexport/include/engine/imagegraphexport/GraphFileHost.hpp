@@ -8,9 +8,13 @@
 #include <span>
 #include <string>
 
+namespace engine::imagegraphio {
+	struct SourceFrameCacheLayoutObservation;
+}
+
 namespace engine::imagegraphexport {
 	struct GraphDirectoryGrant;
-	struct GraphImageCacheLayoutObservation;
+	using GraphImageCacheLayoutObservation = imagegraphio::SourceFrameCacheLayoutObservation;
 	struct GraphFileGrant {
 		std::string NodeId;
 		std::filesystem::path File;

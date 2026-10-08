@@ -1,5 +1,6 @@
 #include "ImageGraphCapturedKeyEdit.hpp"
 #include "ImageGraphChoices.hpp"
+#include "ImageGraphComposerScope.hpp"
 #include "ImageGraphInputs.hpp"
 #include "ImageGraphPorts.hpp"
 #include "ImageGraphPreview.hpp"
@@ -1077,6 +1078,7 @@ namespace studio {
 				type.Id = std::string(schema.Type);
 				type.Title = schema.Type == "pc.graph_preview" ? "Image Preview" : std::move(title);
 				type.Category = std::move(category);
+				type.Hidden = !detail::ImageGraphComposerTypeVisible(schema.Type);
 				type.Accent = nodegraph::Colour::Hex(0x262626);
 				for (const engine::imagegraph::PortSchema &port : schema.Ports) {
 					nodegraph::PortSpec socket{

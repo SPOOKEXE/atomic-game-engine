@@ -1,9 +1,11 @@
 #include "StillExport.hpp"
 
 #include <engine/bake/Image.hpp>
+#include <engine/imagegraph/FeedbackHost.hpp>
 #include <engine/imagegraph/SourceFrameCacheProject.hpp>
 #include <engine/imagegraph/Surface.hpp>
 #include <engine/imagegraphexport/GraphExportSession.hpp>
+#include <engine/imagegraphio/SourceFrameCache.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -575,4 +577,63 @@ TEST_CASE(
 	CHECK_FALSE(std::filesystem::exists(f.Root / "tile2.png"));
 	CHECK_FALSE(session.NextFrame());
 	f.NoStaging();
+}
+
+TEST_CASE("range export freezes saved source frame cache receipts", "[imagegraph][export-session]") {
+	Fixture f;
+	constexpr std::string_view text =
+		R"cache([{"width":1,"height":1,"buffer":"eJzjUbLwAwABWAC1"},{"width":1,"height":1,"buffer":"eJzjUbLwAwABWAC1"}])cache";
+	f.Graph.Nodes[0] = {
+		"image",
+		"image.solid",
+		"",
+		{},
+		{{"width", int64_t{1}}, {"height", int64_t{1}}, {"colour", Colour{255, 0, 0, 255}}}
+	};
+	f.Graph.Nodes.push_back({"cache", "pc.cache", "", {}, {{"animated", false}}});
+	f.Graph.Nodes.back().SourceProperties = {{"cache", std::string(text)}};
+	f.Graph.Links = {
+		{"image", "image", "cache", "surface_in"},
+		{"cache", "cache_surface", "shader", "base_texture"},
+		{"shader", "surface", "export", "surface"}
+	};
+	const auto hash = engine::bake::SpriteCacheDataHash(text);
+	REQUIRE(hash);
+	engine::imagegraphio::SourceFrameCacheLayoutObservation layout{
+		"cache", std::string(hash->data(), hash->size()), engine::bake::SpriteCacheLayout::Rgba8TopDown
+	};
+	DataReplayState loads;
+	Diagnostic diagnostic;
+	REQUIRE(
+		engine::imagegraphio::DecodeSourceFrameCaches(f.Graph, std::span(&layout, 1), loads, diagnostic) ==
+		Status::Ok
+	);
+	f.Request.SourceCachePlayback =
+		SourceCachePlaybackObservation{true, SourceCacheSampling::NativePlayedPrefix, true};
+	f.Request.SourceFrameCacheLoads = &loads;
+	REQUIRE(Compile(f.Graph, f.Compiled, diagnostic) == Status::Ok);
+	CapturedFeedbackHost prepare;
+	REQUIRE(prepare.Prepare(
+		f.Graph, f.Compiled, 1, 2, f.Request, diagnostic, Limits::MaximumEvaluationBytes, "preview"
+	));
+	REQUIRE(EvaluateNodeInputs(f.Graph, f.Compiled, "export", f.Request, f.Inputs, diagnostic) == Status::Ok);
+	GraphExportSession session;
+	std::string failure;
+	REQUIRE(session.BeginAuthored(f.Graph, f.Inputs, f.Request, f.Grants, "export", f.Generation, failure));
+	loads.Entries.clear();
+	f.Request.SourceFrameCacheLoads = nullptr;
+	for (size_t frame = 0; frame < 2; ++frame) {
+		const auto progress = f.Resume(session, true, failure);
+		INFO(failure);
+		REQUIRE(progress == GraphExportProgress::Progress);
+	}
+	REQUIRE(f.Resume(session, true, failure) == GraphExportProgress::Complete);
+	for (size_t frame = 0; frame < 2; ++frame) {
+		engine::assets::TextureData image;
+		const auto bytes = Read(f.Root / ("tile" + std::to_string(frame + 1) + ".png"));
+		REQUIRE(engine::bake::ReadImage(std::as_bytes(std::span(bytes)), image, failure));
+		CHECK(
+			image.Pixels == std::vector<std::byte>{std::byte{12}, std::byte{34}, std::byte{56}, std::byte{78}}
+		);
+	}
 }

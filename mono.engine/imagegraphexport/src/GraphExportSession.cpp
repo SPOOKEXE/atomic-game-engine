@@ -25,11 +25,13 @@ namespace engine::imagegraphexport {
 		};
 		engine::imagegraph::Document Document;
 		engine::imagegraph::Plan Plan;
+		engine::imagegraph::ComposerScope Scope = engine::imagegraph::ComposerScope::Unrestricted;
 		std::vector<GraphExportSettings> Exports;
 		std::vector<Frame> Frames;
 		std::filesystem::path Directory;
 		engine::imagegraph::CapturedFeedbackHost Replay;
 		engine::imagegraph::PendingHostObservations Observations;
+		engine::imagegraph::DataReplayState FrameCacheLoads;
 		GraphExportGeneration Generation;
 		size_t Target = 0;
 		uint64_t Tick = 0, SelectedTick = 0, StagedBytes = 0, Seed = 0;
@@ -239,6 +241,10 @@ namespace engine::imagegraphexport {
 	) try {
 		ENGINE_PROFILE("image composer export session admission");
 		using namespace engine::imagegraph;
+		if (!ComposerExportEnabled(".png", request.Scope) || !ComposerExportEnabled(".png", grants.Scope)) {
+			failure = "Composer scope is invalid";
+			return false;
+		}
 		if (Inside) {
 			failure = "cancel the prior export session before admitting another intent";
 			return false;
@@ -252,9 +258,29 @@ namespace engine::imagegraphexport {
 			return false;
 		}
 		auto candidate = std::make_unique<State>();
+		candidate->Scope =
+			request.Scope == ComposerScope::ImageOnly || grants.Scope == ComposerScope::ImageOnly
+				? ComposerScope::ImageOnly
+				: ComposerScope::Unrestricted;
+		if (candidate->Scope == ComposerScope::ImageOnly)
+			(void)candidate->Replay.SetFeedbackSamplingProfile(FeedbackSamplingProfile::NativeFractional);
 		if (snapshot.RetainedBytes() > Limits::MaximumEvaluationBytes / 8) {
 			failure = "export session prepared controls exceed their admission budget";
 			return false;
+		}
+		if (request.SourceFrameCacheLoads) {
+			Diagnostic diagnostic;
+			if (ValidateDataReplay(
+					*request.SourceFrameCacheLoads, Limits::MaximumEvaluationBytes / 8, diagnostic
+				) != Status::Ok) {
+				failure = diagnostic.Message;
+				return false;
+			}
+			candidate->FrameCacheLoads = *request.SourceFrameCacheLoads;
+			if (RetainedDataReplayBytes(candidate->FrameCacheLoads) > Limits::MaximumEvaluationBytes / 8) {
+				failure = "export session saved frame cache clone exceeds byte bounds";
+				return false;
+			}
 		}
 		candidate->Document = document;
 		auto resolvedGrants = grants;
@@ -304,6 +330,11 @@ namespace engine::imagegraphexport {
 		size_t count = 0;
 		Diagnostic diagnostic;
 		for (auto &settings : candidate->Exports) {
+			settings.Scope = candidate->Scope;
+			if (!ComposerExportEnabled(settings.Output.extension().string(), settings.Scope)) {
+				failure = "Video and audio exports are disabled in the image composer";
+				return false;
+			}
 			size_t frames = 0;
 			if (ValidateTickRange(settings.Frames, frames, diagnostic) != Status::Ok ||
 				frames > Limits::MaximumRangeFrames - std::min(count, Limits::MaximumRangeFrames)) {
@@ -314,6 +345,7 @@ namespace engine::imagegraphexport {
 			settings.HostProvider = nullptr;
 			settings.HostCaptures = {};
 			settings.ImageInputs.clear();
+			settings.FrameCacheLayouts = {};
 			settings.BuiltinRandomCapture.clear();
 		}
 		if (!count) {
@@ -447,6 +479,7 @@ namespace engine::imagegraphexport {
 		if (state.Complete) return GraphExportProgress::Complete;
 		if (state.Target < state.Exports.size()) {
 			auto request = observations;
+			request.Scope = state.Scope;
 			state.Observations.BeginAttempt();
 			State::Observer observer(state, host, request);
 			request.Tick = state.Tick;
@@ -463,6 +496,7 @@ namespace engine::imagegraphexport {
 			request.SurfaceReplay = nullptr;
 			request.RandomReplay = nullptr;
 			request.DataReplay = nullptr;
+			request.SourceFrameCacheLoads = &state.FrameCacheLoads;
 			request.RigidReplay = nullptr;
 			request.ReuseSimulationFrame = false;
 			engine::imagegraphphysics::RigidProvider rigid;
@@ -569,6 +603,7 @@ namespace engine::imagegraphexport {
 			item.HostProvider = &provider;
 		}
 		EvaluationRequest request;
+		request.Scope = state.Scope;
 		request.MaximumImageDimension = state.MaximumDimension;
 		request.HostProvider = &provider;
 		const auto select = [](void *context, size_t target) {

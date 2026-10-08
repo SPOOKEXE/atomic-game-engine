@@ -3,6 +3,7 @@
 #include "GroupBoundary.hpp"
 #include "SourceFontTransport.hpp"
 #include "nodes/Families.hpp"
+#include "nodes/SourceCameraNodes.hpp"
 
 #include <unordered_map>
 
@@ -30,6 +31,7 @@ namespace engine::imagegraph::detail {
 					  SourcePathBakeExecutors(),
 					  SourceShape3DExecutors(),
 					  SourceParticle3DExecutors(),
+					  SourceParticle2DExecutors(),
 					  SourcePathSpiralExecutors(),
 					  OutlineExecutors(),
 					  BlurExecutors(),
@@ -124,6 +126,7 @@ namespace engine::imagegraph::detail {
 					  SourceColourFilterExecutors()})
 					for (const ExecutorEntry &entry : family)
 						merged.emplace(entry.Type, entry);
+				merged.emplace("pc.camera", ExecutorEntry{"pc.camera", Camera, true});
 				merged.emplace("pc.group_input", ExecutorEntry{"pc.group_input", ExecuteGroupBoundary, true});
 				merged.emplace(
 					"pc.group_output", ExecutorEntry{"pc.group_output", ExecuteGroupBoundary, true}

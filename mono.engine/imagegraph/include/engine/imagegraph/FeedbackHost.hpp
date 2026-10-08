@@ -19,6 +19,93 @@
 
 namespace engine::imagegraph {
 	namespace feedback_detail {
+		// Scope admission precedes memo reads and follows the same compiled dependency union as replay.
+		inline bool CheckScopeCone(
+			const Document &document,
+			const Plan &plan,
+			std::span<const std::string> outputs,
+			std::string_view selectedNode,
+			const EvaluationRequest &request,
+			Diagnostic &diagnostic
+		) {
+			const auto fail = [&](Status status, const char *message) {
+				diagnostic = {status, {}, {}, message};
+				return false;
+			};
+			if (request.Scope != ComposerScope::Unrestricted && request.Scope != ComposerScope::ImageOnly)
+				return fail(Status::InvalidValue, "Composer scope is invalid");
+			if (request.Scope == ComposerScope::Unrestricted) return true;
+			if (document.Nodes.size() > Limits::MaximumNodes || outputs.size() > Limits::MaximumOutputs ||
+				request.SimulationCacheCaptures.size() > Limits::MaximumNodes)
+				return fail(Status::LimitExceeded, "feedback scope cone exceeds bounds");
+			std::array<bool, Limits::MaximumNodes> visited{};
+			std::array<size_t, Limits::MaximumNodes> pending{};
+			size_t count = 0;
+			bool valid = true;
+			bool limited = false;
+			uint64_t work = 64ull * 1024 * 1024;
+			const auto addIndex = [&](size_t index) {
+				if (index >= document.Nodes.size()) {
+					valid = false;
+					return;
+				}
+				if (!visited[index]) {
+					visited[index] = true;
+					pending[count++] = index;
+				}
+			};
+			const auto addNode = [&](std::string_view id) {
+				for (size_t index = 0; index < document.Nodes.size(); ++index) {
+					if (!work) {
+						valid = false;
+						limited = true;
+						return;
+					}
+					--work;
+					if (document.Nodes[index].Id == id) {
+						addIndex(index);
+						return;
+					}
+				}
+				valid = false;
+			};
+			if (!selectedNode.empty()) addNode(selectedNode);
+			for (const auto id : request.SimulationCacheCaptures)
+				addNode(id);
+			for (const auto &output : document.Outputs)
+				if ((outputs.empty() && selectedNode.empty()) ||
+					std::find(outputs.begin(), outputs.end(), output.Id) != outputs.end())
+					addNode(output.NodeId);
+			for (const auto &id : outputs)
+				if (std::none_of(document.Outputs.begin(), document.Outputs.end(), [&](const auto &out) {
+						return out.Id == id;
+					}))
+					valid = false;
+			while (count && valid) {
+				const size_t index = pending[--count];
+				const auto &node = document.Nodes[index];
+				if (CheckComposerNodeScope(node, request.Scope, diagnostic) != Status::Ok) return false;
+				const uint64_t cost = plan.EffectiveLinks.size() + plan.GroupSurfaceDependencies.size() +
+									  plan.InlineOwnerDependencies.size() +
+									  plan.InlineControlDependencies.size() +
+									  plan.PcxNamedDependencies.size();
+				if (cost > work)
+					return fail(Status::LimitExceeded, "feedback scope cone work exceeds bounds");
+				work -= cost;
+				for (const auto &link : plan.EffectiveLinks)
+					if (link.ToNode == node.Id) addNode(link.FromNode);
+				for (const auto &dependency : plan.GroupSurfaceDependencies)
+					if (dependency.Consumer == index) addIndex(dependency.Producer);
+				for (const auto &dependency : plan.InlineOwnerDependencies)
+					if (dependency.Consumer == index && !dependency.ControlsOnly) addIndex(dependency.Owner);
+				for (const auto &dependency : plan.InlineControlDependencies)
+					if (dependency.Consumer == index) addIndex(dependency.Producer);
+				for (const auto &dependency : plan.PcxNamedDependencies)
+					if (dependency.Consumer == index) addIndex(dependency.Producer);
+			}
+			if (limited) return fail(Status::LimitExceeded, "feedback scope cone work exceeds bounds");
+			return valid || fail(Status::InvalidOutput, "feedback scope output cone is invalid");
+		}
 		struct GroupPurityLifecycle {
 			std::array<std::string, 5> Categories;
 			uint64_t RetainedBytes() const {
@@ -296,10 +383,12 @@ namespace engine::imagegraph {
 		}
 
 	} // namespace feedback_detail
+	enum class FeedbackSamplingProfile : uint8_t { LegacyFixedTicks, NativeFractional };
 	// One host owns feedback generations and source processor state. All
 	// selected/bound outputs share one evaluated closure per tick, so a simulation
 	// or cached processor executes once.
 	class CapturedFeedbackHost {
+		FeedbackSamplingProfile SamplingProfile = FeedbackSamplingProfile::LegacyFixedTicks;
 		std::vector<FeedbackBinding> Bindings;
 		std::vector<std::string> CacheClearNodes, CacheInvalidOutputs, CacheInvalidInputs;
 		FrameTime CacheClearClock{};
@@ -436,6 +525,7 @@ namespace engine::imagegraph {
 		EvaluationSnapshot InputSnapshot;
 		std::string InputNode;
 		uint64_t DocumentRevision = 0, InputRevision = 0, Tick = 0;
+		ComposerScope GenerationScope = ComposerScope::Unrestricted;
 		double Subframe = 0;
 		bool NegativeFrame = false;
 		bool RigidPlaying = false, RigidFrameProgress = false;
@@ -1179,6 +1269,7 @@ namespace engine::imagegraph {
 			InputSnapshot = {};
 			InputNode.clear();
 			DocumentRevision = InputRevision = Tick = 0;
+			GenerationScope = ComposerScope::Unrestricted;
 			Subframe = 0;
 			NegativeFrame = RigidPlaying = RigidFrameProgress = false;
 			CacheObservation.reset();
@@ -1275,6 +1366,22 @@ namespace engine::imagegraph {
 		}
 
 	  public:
+		// Native fractional previews sample a canonical integer-prefix generation. Source group feedback
+		// instead retains every rendered observation; inline feedback requires an exact one-frame step.
+		// Changing the native profile retires generations rather than reinterpreting existing pixels.
+		bool SetFeedbackSamplingProfile(FeedbackSamplingProfile profile) {
+			if (profile != FeedbackSamplingProfile::LegacyFixedTicks &&
+				profile != FeedbackSamplingProfile::NativeFractional)
+				return false;
+			if (profile != SamplingProfile) {
+				Clear();
+				SamplingProfile = profile;
+			}
+			return true;
+		}
+		FeedbackSamplingProfile FeedbackProfile() const noexcept {
+			return SamplingProfile;
+		}
 		bool Prepare(
 			const Document &document,
 			const Plan &plan,
@@ -1292,8 +1399,8 @@ namespace engine::imagegraph {
 			};
 			if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes)
 				return fail(Status::LimitExceeded, "feedback host byte cap is outside bounds");
-			const bool changed =
-				!Configured || DocumentRevision != revision || InputRevision != externalRevision;
+			const bool changed = !Configured || DocumentRevision != revision ||
+								 InputRevision != externalRevision || GenerationScope != request.Scope;
 			std::vector<FeedbackBinding> declarations;
 			std::vector<RequestImageSource> blanks;
 			bool stateful = Stateful;
@@ -1344,6 +1451,8 @@ namespace engine::imagegraph {
 			if (!selectedOutput.empty() &&
 				std::find(outputs.begin(), outputs.end(), selectedOutput) == outputs.end())
 				outputs.emplace_back(selectedOutput);
+			if (!feedback_detail::CheckScopeCone(document, plan, outputs, selectedNode, request, diagnostic))
+				return false;
 			const auto temporal = AnalyzeStatefulTemporalCone(
 				document, plan, outputs, selectedNode, request.SimulationCacheCaptures
 			);
@@ -1389,6 +1498,7 @@ namespace engine::imagegraph {
 					Configured = true;
 					DocumentRevision = revision;
 					InputRevision = externalRevision;
+					GenerationScope = request.Scope;
 				}
 				if (SourceCommonReady) {
 					request.GroupRender = &Groups;
@@ -1402,8 +1512,11 @@ namespace engine::imagegraph {
 				}
 				return true;
 			}
+			const bool fractionalFeedback =
+				SamplingProfile == FeedbackSamplingProfile::NativeFractional && !bindings.empty();
 			if ((request.NegativeFrame && !directData) ||
-				((temporal.FixedSimulationSteps || temporal.SurfaceCaches || !bindings.empty()) &&
+				((temporal.FixedSimulationSteps || temporal.SurfaceCaches ||
+				  (!bindings.empty() && !fractionalFeedback)) &&
 				 request.Subframe != 0))
 				return fail(Status::InvalidValue, "stateful replay requires an integer nonnegative frame");
 			if (outputs.empty() && selectedNode.empty())
@@ -1512,7 +1625,7 @@ namespace engine::imagegraph {
 			const bool refreshFrame =
 				!changed && Initialized && sameSelection && Tick == request.Tick &&
 				NegativeFrame == request.NegativeFrame &&
-				(cacheObservationChanged ||
+				((fractionalFeedback && Subframe != request.Subframe) || cacheObservationChanged ||
 				 (temporal.RigidActors && (rigidObservationChanged || Subframe != request.Subframe ||
 										   !request.SimulationCacheCaptures.empty())));
 			if (refreshFrame && !FrameStartValid)
@@ -1568,7 +1681,8 @@ namespace engine::imagegraph {
 			const bool contiguous =
 				reuseGroupPulse || directData || refreshFrame || commonFrameReady ||
 				(!changed && sameSelection && Initialized &&
-				 ((Tick < Limits::MaximumTick && Tick + 1 == request.Tick) ||
+				 ((Tick < Limits::MaximumTick && Tick + 1 == request.Tick &&
+				   (!fractionalFeedback || Subframe == 0)) ||
 				  (Tick == request.Tick && Subframe == request.Subframe &&
 				   NegativeFrame == request.NegativeFrame &&
 				   (!request.SimulationCacheCaptures.empty() || rigidObservationChanged ||
@@ -1845,7 +1959,8 @@ namespace engine::imagegraph {
 						clock.ImageSources = generation;
 				}
 				if (refreshFrame) clock.ImageSources = candidateStartInputs;
-				if (tick == request.Tick && (temporal.RigidActors || temporal.SourceFrameCaches) &&
+				if (tick == request.Tick &&
+					(temporal.RigidActors || temporal.SourceFrameCaches || fractionalFeedback) &&
 					!refreshFrame) {
 					const uint64_t copyBytes = LedgerBytes(prior) + CaptureBytes(clock.ImageSources);
 					const uint64_t resident = currentBytes + OutputBytes(candidate) +
@@ -2060,6 +2175,7 @@ namespace engine::imagegraph {
 			Inputs = std::move(inputs);
 			DocumentRevision = revision;
 			InputRevision = externalRevision;
+			GenerationScope = request.Scope;
 			Tick = request.Tick;
 			Subframe = request.Subframe;
 			NegativeFrame = request.NegativeFrame;

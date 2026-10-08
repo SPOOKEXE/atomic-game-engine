@@ -964,6 +964,8 @@ TEST_CASE(
 			CHECK(exported["inputs"][0]["r"][index][field] == node["inputs"][0]["r"][index][field]);
 	CHECK(exported["inputs"][1]["r"]["d"] == Json::array({2, 4, 8}));
 	CHECK(exported["inputs"][2]["r"][0][0][1].get<double>() == Catch::Approx(1.0));
+	CHECK(exported["inputs"][2]["r"][1][0][0] == 1);
+	CHECK(exported["inputs"][2]["r"][1][0][1].get<double>() == Catch::Approx(2.0));
 	CHECK(exported["inputs"][2]["animators"][0][0][0][1].get<double>() == Catch::Approx(0.25));
 	CHECK(exported["inspectInputs"][0]["r"][0][0][1].get<double>() == Catch::Approx(0.1));
 	CHECK(exported["inspectInputs"][1]["r"][0][0][1].get<double>() == Catch::Approx(0.3));

@@ -8,6 +8,10 @@
 #include <string>
 #include <vector>
 
+namespace engine::imagegraphio {
+	struct SourceFrameCacheLayoutObservation;
+}
+
 namespace engine::imagegraphexport {
 	struct GraphImageInput {
 		std::string SourceId;
@@ -21,6 +25,8 @@ namespace engine::imagegraphexport {
 		std::filesystem::path BuiltinRandomCapture;
 		std::string OutputId;
 		std::vector<GraphImageInput> ImageInputs;
+		// Exact saved-text layout receipts, borrowed throughout synchronous file-backed exports.
+		std::span<const imagegraphio::SourceFrameCacheLayoutObservation> FrameCacheLayouts;
 		std::span<const engine::imagegraph::HostNodeCapture> HostCaptures;
 		engine::imagegraph::HostNodeProvider *HostProvider = nullptr;
 		engine::assets::ContentPolicy Content =
@@ -52,6 +58,7 @@ namespace engine::imagegraphexport {
 		std::filesystem::path ImageEncoder;
 		std::filesystem::path VideoEncoder;
 		std::chrono::milliseconds EncoderTimeout{30000};
+		engine::imagegraph::ComposerScope Scope = engine::imagegraph::ComposerScope::Unrestricted;
 	};
 
 	// Build argv without shell parsing. ExportGraph uses the same plan for its real subprocess.

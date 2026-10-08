@@ -17,6 +17,7 @@
 #include "ImageGraphComposerCadence.hpp"
 #include "ImageGraphComposerExports.hpp"
 #include "ImageGraphComposerHost.hpp"
+#include "ImageGraphComposerScope.hpp"
 #include "ImageGraphCookAction.hpp"
 #include "ImageGraphDocumentEdit.hpp"
 #include "ImageGraphExportIntent.hpp"
@@ -80,6 +81,7 @@
 #include <engine/imagegraphfont/GraphFontInputs.hpp>
 #include <engine/imagegraphio/PxcxImport.hpp>
 #include <engine/imagegraphio/PxcxStructureEdit.hpp>
+#include <engine/imagegraphio/SourceFrameCacheLoading.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scripthost/ComposerLua.hpp>
 #include <engine/ui/Metrics.hpp>
@@ -188,6 +190,8 @@ namespace studio {
 			std::vector<engine::imagegraphexport::GraphFileGrant> FileGrants;
 			std::vector<engine::imagegraphexport::GraphDirectoryGrant> DirectoryGrants;
 			std::vector<engine::imagegraphexport::GraphImageCacheLayoutObservation> ImageCacheLayouts;
+			engine::imagegraph::DataReplayState SavedFrameCacheLoads;
+			uint64_t SavedFrameCacheDocumentRevision = 0, SavedFrameCacheInputRevision = 0;
 			std::vector<FileReadControls> FileControls;
 			std::unique_ptr<engine::imagegraphfont::GraphFontInputs> FontInputs =
 				std::make_unique<engine::imagegraphfont::GraphFontInputs>();
@@ -373,7 +377,9 @@ namespace studio {
 			std::erase_if(state.ImageCacheLayouts, [&](const auto &observation) {
 				return std::none_of(
 					state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [&](const auto &node) {
-						return node.Id == observation.NodeId && detail::SourceImageType(node.Type);
+						return node.Id == observation.NodeId &&
+							   (detail::SourceImageType(node.Type) || node.Type == "pc.cache" ||
+								node.Type == "pc.cache_array");
 					}
 				);
 			});
@@ -488,8 +494,26 @@ namespace studio {
 			engine::imagegraph::EvaluationRequest &request,
 			engine::imagegraph::SourceFontContext *heldFontContext = nullptr
 		) {
+			request.Scope = detail::IMAGE_COMPOSER_SCOPE;
+			(void)state.FeedbackHost.SetFeedbackSamplingProfile(
+				engine::imagegraph::FeedbackSamplingProfile::NativeFractional
+			);
 			if (!RetryCacheEdit(state)) return false;
 			request.SourceSafeMode = state.SourceSafeMode;
+			if (state.SavedFrameCacheDocumentRevision != state.DocumentRevision ||
+				state.SavedFrameCacheInputRevision != state.EvaluationInputRevision) {
+				if (engine::imagegraphio::DecodeSourceFrameCachesLoading(
+						state.Authored,
+						state.ImageCacheLayouts,
+						state.SavedFrameCacheLoads,
+						state.LastDiagnostic,
+						engine::imagegraph::Limits::MaximumEvaluationBytes / 8
+					) != Status::Ok)
+					return false;
+				state.SavedFrameCacheDocumentRevision = state.DocumentRevision;
+				state.SavedFrameCacheInputRevision = state.EvaluationInputRevision;
+			}
+			request.SourceFrameCacheLoads = &state.SavedFrameCacheLoads;
 			const auto frame = GetImageGraphFrame(state.Playback);
 			const std::string project =
 				std::filesystem::path(state.PxcxPathDisplay.empty() ? state.GraphName : state.PxcxPathDisplay)
@@ -1566,6 +1590,7 @@ namespace studio {
 						failed = true;
 					} else {
 						engine::imagegraphexport::GraphExportSettings settings;
+						settings.Scope = detail::IMAGE_COMPOSER_SCOPE;
 						settings.Input = target->ProjectPath;
 						settings.Output = target->Root;
 						settings.ImageEncoder = target->ImageEncoder;
@@ -3999,6 +4024,8 @@ namespace studio {
 			engine::imagegraph::Diagnostic &diagnostic
 		) try {
 			using namespace engine::imagegraph;
+			request.Scope = detail::IMAGE_COMPOSER_SCOPE;
+			(void)state.FeedbackHost.SetFeedbackSamplingProfile(FeedbackSamplingProfile::NativeFractional);
 			const bool hasCommonOwners = !state.Authored.SourceCommonOwners.empty();
 			if (!hasCommonOwners && !state.SourceCommonRuntimeInitialized &&
 				state.SourceCommonOwnerSnapshot.empty())
@@ -4110,6 +4137,7 @@ namespace studio {
 				);
 			}
 			const SourceCommonRuntimeObservations observations{{}, collections};
+			const bool cacheLoading = state.FeedbackHost.HasSourceFrameCacheLoading();
 			const auto status = state.FeedbackHost.StepSourceCommonRuntime(
 				state.Authored,
 				plan,
@@ -4120,6 +4148,11 @@ namespace studio {
 				state.EvaluationInputRevision
 			);
 			if (status != Status::Ok) return false;
+			if (cacheLoading || state.FeedbackHost.HasSourceFrameCacheLoading()) {
+				state.PreviewCache.Clear();
+				state.PreviewSequence.Clear();
+				RequestPreview(state, true);
+			}
 			for (auto &row : state.SourceCollections)
 				row.RefreshNodesPending = row.RefreshNodeDisplayPending = false;
 			return true;
@@ -5626,6 +5659,30 @@ namespace studio {
 			}
 			auto &controls = *found;
 			const auto *selectedNode = FindNode(state.Authored, nodeId);
+			const auto changed = [&] {
+				state.Host.RefreshFile(nodeId);
+				state.PreviewCache.Clear();
+				state.PreviewSequence.Invalidate();
+				if (++state.EvaluationInputRevision == 0) state.EvaluationInputRevision = 1;
+				RequestPreview(state, true);
+			};
+			if (selectedNode &&
+				(selectedNode->Type == "pc.cache" || selectedNode->Type == "pc.cache_array")) {
+				detail::DrawImageGraphImageActions(
+					*selectedNode,
+					controls.CacheLayout,
+					controls.Message,
+					state.ImageCacheLayouts,
+					[](engine::imagegraphio::SourceImageAction) {},
+					[&] {
+						// A new layout must seed fresh history rather than reuse old decoded pixels.
+						ClearFeedbackHost(state);
+						changed();
+					}
+				);
+				if (!controls.Message.empty()) ImGui::TextWrapped("%s", controls.Message.c_str());
+				return;
+			}
 			const bool writing = selectedNode && detail::ImageGraphFileWriteType(selectedNode->Type);
 			ImGui::InputTextWithHint(
 				"##read-file",
@@ -5640,13 +5697,7 @@ namespace studio {
 					controls.Resource.data(),
 					controls.Resource.size()
 				);
-			const auto changed = [&] {
-				state.Host.RefreshFile(nodeId);
-				state.PreviewCache.Clear();
-				state.PreviewSequence.Invalidate();
-				if (++state.EvaluationInputRevision == 0) state.EvaluationInputRevision = 1;
-				RequestPreview(state, true);
-			};
+
 			if (selectedNode && selectedNode->Type == "pc.directory_search") {
 				ImGui::InputTextWithHint(
 					"##directory-root",
@@ -5906,12 +5957,14 @@ namespace studio {
 				grant.ImageEncoder.data(),
 				grant.ImageEncoder.size()
 			);
+			ImGui::BeginDisabled(!detail::ImageGraphComposerExportEnabled(".mp4"));
 			ImGui::InputTextWithHint(
 				"##export-video-encoder",
 				"Video encoder executable (optional)",
 				grant.VideoEncoder.data(),
 				grant.VideoEncoder.size()
 			);
+			ImGui::EndDisabled();
 			ImGui::BeginDisabled(grant.Root.empty());
 			if (ImGui::Button("Export"))
 				RunAuthoredExports(state, detail::ImageGraphExportEvent::Update, nodeId);
@@ -6122,6 +6175,13 @@ namespace studio {
 			ImGui::TextUnformatted(node->Type.c_str());
 			ImGui::SameLine();
 			ImGui::TextDisabled("%s", node->Id.c_str());
+			Diagnostic scopeDiagnostic;
+			if (engine::imagegraph::CheckComposerNodeScope(
+					*node, detail::IMAGE_COMPOSER_SCOPE, scopeDiagnostic
+				) != Status::Ok) {
+				ImGui::TextWrapped("%s", scopeDiagnostic.Message.c_str());
+				return;
+			}
 			if (DrawSourceCommonOwnerControls(
 					state, engine::imagegraph::SourceCommonNativeOwnerKind::Node, node->Id
 				))
@@ -6359,10 +6419,12 @@ namespace studio {
 				schema = engine::imagegraph::FindSchema(node->Type);
 				if (!schema) return;
 			}
-			if (node->Type == "pc.cache_results" && ImGui::Button("Clear cache")) {
+			if ((node->Type == "pc.cache_results" || node->Type == "pc.cache" ||
+				 node->Type == "pc.cache_array") &&
+				ImGui::Button("Clear cache")) {
 				engine::imagegraph::Plan plan;
 				if (engine::imagegraph::Compile(state.Authored, plan, state.LastDiagnostic) == Status::Ok &&
-					detail::ApplyImageGraphCacheResultsClear(
+					detail::ApplyImageGraphSourceCacheClear(
 						state.Authored,
 						plan,
 						state.FeedbackHost,
@@ -6409,7 +6471,8 @@ namespace studio {
 				}
 			}
 			if (node->Type == "pc.export") DrawExportGrant(state, nodeId);
-			if ((detail::ImageGraphFileReadType(node->Type) || detail::ImageGraphFileWriteType(node->Type)) &&
+			if ((detail::ImageGraphFileReadType(node->Type) || detail::ImageGraphFileWriteType(node->Type) ||
+				 node->Type == "pc.cache" || node->Type == "pc.cache_array") &&
 				!detail::ImageGraphFileUsesOwnedContent(node->Type))
 				DrawFileGrants(state, nodeId);
 			if (schema->Properties.empty() && !schema->DynamicInputs) {
@@ -7529,7 +7592,7 @@ namespace studio {
 				if (state.Playback.CurrentTick >= state.Playback.EndTick && !state.Playback.Loop &&
 					!state.Playback.PingPong)
 					(void)SeekSourceBound(state, true);
-				if (!state.Playback.Playing &&
+				if (detail::ImageGraphComposerTypeVisible("pc.wav_file_read") && !state.Playback.Playing &&
 					std::any_of(
 						state.Authored.Nodes.begin(), state.Authored.Nodes.end(), [](const Node &node) {
 							return node.Type == "pc.wav_file_read";
@@ -8031,87 +8094,93 @@ namespace studio {
 			ImGui::TextUnformatted("Image assets");
 			ImGui::TextDisabled("No external image inputs are declared by the available node schemas.");
 			ImGui::Separator();
-			ImGui::TextUnformatted("WAV sources");
-			ImGui::InputTextWithHint(
-				"##wav-source-name",
-				"Source name matching the node path",
-				state.WavSourceId,
-				sizeof(state.WavSourceId)
-			);
-			ImGui::InputTextWithHint(
-				"##wav-file-path", "WAV file path", state.WavFilePath, sizeof(state.WavFilePath)
-			);
-			if (ImGui::Button("Load or replace WAV")) {
-				Diagnostic diagnostic;
-				if (state.WavAudio.LoadSource(
-						state.AudioClips, state.PreviewCache, state.WavSourceId, state.WavFilePath, diagnostic
-					)) {
-					state.WavSourceMessage = "loaded " + std::string(state.WavSourceId);
-					++state.EvaluationInputRevision;
-					state.LastDiagnostic = {};
-					RequestPreview(state, true);
-				} else {
-					state.WavSourceMessage = diagnostic.Message;
-				}
-			}
-			if (!state.WavSourceMessage.empty()) ImGui::TextWrapped("%s", state.WavSourceMessage.c_str());
-			for (size_t index = 0; index < state.AudioClips.size();) {
-				const auto &source = state.AudioClips[index];
-				const auto &data = source.Data;
-				const size_t channels = data.Channels.empty() ? 1 : data.Channels.size();
-				const size_t samples =
-					data.Channels.empty() ? data.Samples.size() : data.Channels.front().size();
-				ImGui::PushID(source.SourceId.c_str());
-				ImGui::TextWrapped(
-					"%s | %.0f Hz | %zu channels | %.3f s",
-					source.SourceId.c_str(),
-					data.SampleRate,
-					channels,
-					data.SampleRate > 0 ? samples / data.SampleRate : 0
+			if (detail::ImageGraphComposerTypeVisible("pc.wav_file_read")) {
+				ImGui::TextUnformatted("WAV sources");
+				ImGui::InputTextWithHint(
+					"##wav-source-name",
+					"Source name matching the node path",
+					state.WavSourceId,
+					sizeof(state.WavSourceId)
 				);
-				const bool remove = ImGui::Button("Remove WAV");
-				ImGui::PopID();
-				if (remove) {
+				ImGui::InputTextWithHint(
+					"##wav-file-path", "WAV file path", state.WavFilePath, sizeof(state.WavFilePath)
+				);
+				if (ImGui::Button("Load or replace WAV")) {
 					Diagnostic diagnostic;
-					if (state.WavAudio.RemoveSource(
-							state.AudioClips, state.PreviewCache, source.SourceId, diagnostic
+					if (state.WavAudio.LoadSource(
+							state.AudioClips,
+							state.PreviewCache,
+							state.WavSourceId,
+							state.WavFilePath,
+							diagnostic
 						)) {
+						state.WavSourceMessage = "loaded " + std::string(state.WavSourceId);
 						++state.EvaluationInputRevision;
+						state.LastDiagnostic = {};
 						RequestPreview(state, true);
 					} else {
 						state.WavSourceMessage = diagnostic.Message;
-						++index;
 					}
-				} else
-					index++;
+				}
+				if (!state.WavSourceMessage.empty()) ImGui::TextWrapped("%s", state.WavSourceMessage.c_str());
+				for (size_t index = 0; index < state.AudioClips.size();) {
+					const auto &source = state.AudioClips[index];
+					const auto &data = source.Data;
+					const size_t channels = data.Channels.empty() ? 1 : data.Channels.size();
+					const size_t samples =
+						data.Channels.empty() ? data.Samples.size() : data.Channels.front().size();
+					ImGui::PushID(source.SourceId.c_str());
+					ImGui::TextWrapped(
+						"%s | %.0f Hz | %zu channels | %.3f s",
+						source.SourceId.c_str(),
+						data.SampleRate,
+						channels,
+						data.SampleRate > 0 ? samples / data.SampleRate : 0
+					);
+					const bool remove = ImGui::Button("Remove WAV");
+					ImGui::PopID();
+					if (remove) {
+						Diagnostic diagnostic;
+						if (state.WavAudio.RemoveSource(
+								state.AudioClips, state.PreviewCache, source.SourceId, diagnostic
+							)) {
+							++state.EvaluationInputRevision;
+							RequestPreview(state, true);
+						} else {
+							state.WavSourceMessage = diagnostic.Message;
+							++index;
+						}
+					} else
+						index++;
+				}
+				ImGui::Separator();
+				ImGui::TextUnformatted("Recorded audio");
+				ImGui::InputTextWithHint(
+					"##image-audio-capture-path",
+					"Path to audio-capture 1 document",
+					state.AudioCapturePath,
+					sizeof(state.AudioCapturePath)
+				);
+				if (ImGui::Button("Load audio capture")) OpenAudioCapture(state);
+				ImGui::SameLine();
+				if (ImGui::Button("Clear audio capture")) {
+					ClearImageGraphAudioCapture(state.AudioFrames, state.PreviewCache);
+					++state.EvaluationInputRevision;
+					state.AudioCapturePathDisplay.clear();
+					state.AudioCaptureMessage = "no recorded audio loaded";
+					RequestPreview(state, true);
+				}
+				if (!state.AudioCapturePathDisplay.empty())
+					ImGui::TextWrapped("Capture: %s", state.AudioCapturePathDisplay.c_str());
+				if (!state.AudioCaptureMessage.empty())
+					ImGui::TextWrapped("Audio input: %s", state.AudioCaptureMessage.c_str());
+				ImGui::TextDisabled(
+					"Audio source selects one exact source ID and tick. Live "
+					"devices are not read by the "
+					"evaluator."
+				);
+				ImGui::Separator();
 			}
-			ImGui::Separator();
-			ImGui::TextUnformatted("Recorded audio");
-			ImGui::InputTextWithHint(
-				"##image-audio-capture-path",
-				"Path to audio-capture 1 document",
-				state.AudioCapturePath,
-				sizeof(state.AudioCapturePath)
-			);
-			if (ImGui::Button("Load audio capture")) OpenAudioCapture(state);
-			ImGui::SameLine();
-			if (ImGui::Button("Clear audio capture")) {
-				ClearImageGraphAudioCapture(state.AudioFrames, state.PreviewCache);
-				++state.EvaluationInputRevision;
-				state.AudioCapturePathDisplay.clear();
-				state.AudioCaptureMessage = "no recorded audio loaded";
-				RequestPreview(state, true);
-			}
-			if (!state.AudioCapturePathDisplay.empty())
-				ImGui::TextWrapped("Capture: %s", state.AudioCapturePathDisplay.c_str());
-			if (!state.AudioCaptureMessage.empty())
-				ImGui::TextWrapped("Audio input: %s", state.AudioCaptureMessage.c_str());
-			ImGui::TextDisabled(
-				"Audio source selects one exact source ID and tick. Live "
-				"devices are not read by the "
-				"evaluator."
-			);
-			ImGui::Separator();
 			ImGui::TextUnformatted("Composer source");
 			ImGui::InputTextWithHint(
 				"##image-pxcx-path", "Path to .pxcx, .pxcc or .pxz", state.PxcxPath, sizeof(state.PxcxPath)
@@ -8618,7 +8687,8 @@ namespace studio {
 			}
 		} pendingSignal{state, composerHost};
 
-		if (state.WavCheckerHostFrame != std::numeric_limits<uint64_t>::max()) {
+		if (detail::ImageGraphComposerTypeVisible("pc.wav_file_read") &&
+			state.WavCheckerHostFrame != std::numeric_limits<uint64_t>::max()) {
 			engine::imagegraphphysics::RigidProvider checkerRigidProvider;
 			engine::imagegraph::EvaluationRequest checkerRequest;
 			checkerRequest.HostProvider = &HostFor(state);
@@ -8837,19 +8907,21 @@ namespace studio {
 			);
 		}
 
-		Diagnostic audioDiagnostic;
-		if (!state.WavAudio.Update(
-				state.Authored,
-				state.AudioClips,
-				state.AudioFrames,
-				state.Playback,
-				state.DocumentRevision,
-				state.EvaluationInputRevision,
-				audioDiagnostic
-			))
-			state.WavAudioMessage = audioDiagnostic.Message;
-		else if (state.WavAudio.Enabled())
-			state.WavAudioMessage.clear();
+		if (detail::ImageGraphComposerTypeVisible("pc.wav_file_read")) {
+			Diagnostic audioDiagnostic;
+			if (!state.WavAudio.Update(
+					state.Authored,
+					state.AudioClips,
+					state.AudioFrames,
+					state.Playback,
+					state.DocumentRevision,
+					state.EvaluationInputRevision,
+					audioDiagnostic
+				))
+				state.WavAudioMessage = audioDiagnostic.Message;
+			else if (state.WavAudio.Enabled())
+				state.WavAudioMessage.clear();
+		}
 		state.VectorControls.FinishPointer(
 			ImGui::IsMouseDown(ImGuiMouseButton_Left), ImGui::IsMouseDown(ImGuiMouseButton_Middle)
 		);

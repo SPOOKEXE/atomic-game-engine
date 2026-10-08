@@ -543,6 +543,8 @@ namespace engine::imagegraph {
 		uint64_t maximumBytes
 	) try {
 		ENGINE_PROFILE("imagegraph.source_common.step");
+		if (request.Scope != ComposerScope::Unrestricted && request.Scope != ComposerScope::ImageOnly)
+			return SourceCommonRuntimeFail(diagnostic, Status::InvalidValue, "Composer scope is invalid");
 		if (!maximumBytes || maximumBytes > Limits::MaximumEvaluationBytes)
 			return SourceCommonRuntimeFail(
 				diagnostic, Status::LimitExceeded, "source common step cap is invalid"
@@ -578,6 +580,14 @@ namespace engine::imagegraph {
 		for (size_t index = 0; index < document.SourceCommonOwners.size(); ++index) {
 			const auto &owner = document.SourceCommonOwners[index];
 			if (!owner.Active) continue;
+			if (request.Scope == ComposerScope::ImageOnly &&
+				owner.NativeOwnerKind == SourceCommonNativeOwnerKind::Node) {
+				const auto node =
+					std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &entry) {
+						return entry.Id == owner.NativeOwnerId;
+					});
+				if (node != document.Nodes.end() && !ComposerNodeEnabled(*node, request.Scope)) continue;
+			}
 			const auto dispatch = detail::SourceCommonOwnerDispatch(document, request, index);
 			auto current = CandidateRequest(request, candidate);
 			if (dispatch.Step == SourceCommonStepKind::CacheOverride) {

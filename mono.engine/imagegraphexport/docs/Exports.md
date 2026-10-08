@@ -179,3 +179,40 @@ exports resolve controls from the snapshot and reconstruct their full requested
 range with one fresh replay owner. The supplied current-frame journals remain
 unchanged. Authored export scopes report logical captured image clone bytes and
 operation counts at the actual copy boundary.
+
+## Saved frame-cache cooking
+
+Assetc can publish a separate native `.graph` carrying owned constructor packets
+for explicitly observed saved frame caches:
+
+```sh
+assetc --export-graph source.graph --cook-frame-caches --output cooked.graph \
+  --graph-image-cache-layout 'cache:HASH=rgba8-top-down'
+```
+
+Replace `cache` with the durable node ID and `HASH` with the 64-character lowercase
+result of `bake::SpriteCacheDataHash` for its exact saved cache text. Supply one
+receipt per saved node to cook. The layout records the actual foreign byte order
+and row order; it is never inferred from pixel values. Other supported layouts
+are `rgba8-bottom-up`, `bgra8-top-down` and `bgra8-bottom-up`.
+
+The cooker validates the source graph, decodes sparse and nested saved frames,
+and retains the original foreign text alongside the native packet. It checks the
+complete serialized document before staging and publication. Input aliases,
+stale receipts, invalid payloads and exceeded budgets fail without replacing the
+source or a prior output. Cooking cannot be combined with rendering or callbacks.
+
+The client and native exporters can play these packets without foreign decoders
+or external layout receipts. Changing the saved source text invalidates the
+packet. Cache Array still records its live input while playing, following its
+source overwrite behavior. Cache restores saved slots below the full project
+frame count; Cache Array restores every serialized slot. Recovery preserves
+existing storage, while a capture resizes it to the project frame count plus
+one. A saved `noone` slot remains a miss. Selected animation regions change
+playback endpoints, preserving these full-duration storage rules and the default
+Cache Array range. The source last-frame predicate compares the rounded project
+current frame with the unrounded resolved endpoint, using
+[the documented ties-to-even rounding](https://manual.gamemaker.io/lts/en/GameMaker_Language/GML_Reference/Maths_And_Numbers/Number_Functions/round.htm).
+
+Cache-group scheduling, fractional cache keys and incremental source loading
+remain separate implementation and parity gates.

@@ -421,6 +421,7 @@ namespace engine::imagegraph::detail {
 		// node_project_output.gml update: copies the input surface.
 		bool ProjectOutput(NodeContext &context) {
 			const Image *source = context.Input("surface_in");
+			context.SetSourceUpdateOnFrame(context.Boolean("animated"));
 			if (!source) return context.Fail(Status::InvalidValue, "image input is missing", "surface_in");
 			Image *out = context.NewImage("surface_out", source->Width, source->Height);
 			if (!out) return false;

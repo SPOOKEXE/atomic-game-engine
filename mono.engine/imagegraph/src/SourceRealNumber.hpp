@@ -91,6 +91,12 @@ namespace engine::imagegraph::detail {
 			std::holds_alternative<double>(raw))
 			return raw;
 		if (const auto *enumeration = std::get_if<EnumValue>(&raw)) return Value{enumeration->Value};
+		if (const auto *colour = std::get_if<Colour>(&raw)) {
+			// Source colour constructors pack RGBA into a positive int64, including the alpha byte.
+			const uint32_t packed = uint32_t(colour->Red) | (uint32_t(colour->Green) << 8) |
+									(uint32_t(colour->Blue) << 16) | (uint32_t(colour->Alpha) << 24);
+			return Value{int64_t(packed)};
+		}
 		// Numeric tuples, areas and curves carry source arrays; real throws and toNumber catches it.
 		if (std::holds_alternative<ArrayValue>(raw) || std::holds_alternative<Vector2>(raw) ||
 			std::holds_alternative<Vector3>(raw) || std::holds_alternative<Vector4>(raw) ||

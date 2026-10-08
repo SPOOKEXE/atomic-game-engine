@@ -47,7 +47,7 @@ TEST_CASE(
 	REQUIRE(before.Owners.size() == 1);
 	REQUIRE(before.Owners.front().History.Frames.size() >= 2);
 	const auto firstFrame = before.Owners.front().History.Frames.front();
-	REQUIRE(host.ClearCacheResults(d, p, "cache", 17, 29, diagnostic));
+	REQUIRE(host.ClearSourceCache(d, p, "cache", 17, 29, diagnostic));
 	CHECK(IsFreedCacheResultsSlot(std::get<ArrayValue>(cache().Values[0].Data).Elements[0]));
 	request.RigidPlaying = request.RigidFrameProgress = false;
 	CHECK_FALSE(host.Prepare(d, p, 17, 29, request, diagnostic, Limits::MaximumEvaluationBytes, "image"));

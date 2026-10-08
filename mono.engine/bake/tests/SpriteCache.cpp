@@ -3,7 +3,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <nlohmann/json.hpp>
+#include <utility>
 TEST_SUITE_ID("engine.bake.spritecache")
 using namespace engine::bake;
 namespace {
@@ -154,4 +156,112 @@ TEST_CASE("Sprite byte layout observations use explicit durable names", "[sprite
 	CHECK_FALSE(ParseSpriteCacheLayoutName("rgba"));
 	CHECK_FALSE(ParseSpriteCacheLayoutName("0"));
 	CHECK(SpriteCacheLayoutName(static_cast<SpriteCacheLayout>(255)).empty());
+}
+
+TEST_CASE("Source surface cache preserves sparse nested surface array ordering", "[sprite_cache]") {
+	constexpr std::string_view Nested =
+		R"cache([[{"width":1,"height":1,"buffer":"eJzjUbLwAwABWAC1"},0,null],[],false,"skip",{"future":1},{"width":2,"height":1,"buffer":"eJw7waXB8L/B4T8ADnkDuQ=="}])cache";
+	std::vector<SurfaceCacheItem> items;
+	std::string failure;
+	REQUIRE(ReadSurfaceCache(Nested, SpriteCacheLayout::Rgba8TopDown, items, failure, Bytes));
+	REQUIRE(items.size() == 6);
+	REQUIRE(items[0].IsArray);
+	REQUIRE(items[0].Elements.size() == 3);
+	CHECK(items[0].Elements[0].Surface == Expected().front());
+	CHECK(items[0].Elements[1].Surface.Width == 0);
+	CHECK(items[0].Elements[2].Surface.Height == 0);
+	CHECK(items[1].IsArray);
+	CHECK(items[1].Elements.empty());
+	for (size_t index = 2; index < 5; ++index) {
+		CHECK_FALSE(items[index].IsArray);
+		CHECK(items[index].Surface.Width == 0);
+		CHECK(items[index].Elements.empty());
+	}
+	CHECK(items[5].Surface == Expected()[1]);
+}
+
+TEST_CASE("Source surface cache decodes each explicit byte layout", "[sprite_cache]") {
+	constexpr std::string_view Vertical =
+		R"cache([{"width":1,"height":2,"buffer":"eJzjEpHTSMmraAIABqwCMQ=="}])cache";
+	const auto expected = Expected();
+	const std::array<std::pair<SpriteCacheLayout, bool>, 4> layouts{
+		{{SpriteCacheLayout::Rgba8TopDown, false},
+		 {SpriteCacheLayout::Bgra8TopDown, true},
+		 {SpriteCacheLayout::Rgba8BottomUp, false},
+		 {SpriteCacheLayout::Bgra8BottomUp, true}}
+	};
+	for (const auto &[layout, bgra] : layouts) {
+		std::vector<SurfaceCacheItem> items;
+		std::string failure;
+		REQUIRE(ReadSurfaceCache(Rgba, layout, items, failure, Bytes));
+		REQUIRE(items.size() == expected.size());
+		for (size_t index = 0; index < expected.size(); ++index) {
+			auto wanted = expected[index];
+			if (bgra)
+				for (size_t pixel = 0; pixel < wanted.Rgba.size(); pixel += 4)
+					std::swap(wanted.Rgba[pixel], wanted.Rgba[pixel + 2]);
+			CHECK(items[index].Surface == wanted);
+		}
+	}
+	const std::array<std::pair<SpriteCacheLayout, std::vector<uint8_t>>, 4> verticalLayouts{
+		{{SpriteCacheLayout::Rgba8TopDown, {10, 20, 30, 40, 100, 110, 120, 130}},
+		 {SpriteCacheLayout::Bgra8TopDown, {30, 20, 10, 40, 120, 110, 100, 130}},
+		 {SpriteCacheLayout::Rgba8BottomUp, {100, 110, 120, 130, 10, 20, 30, 40}},
+		 {SpriteCacheLayout::Bgra8BottomUp, {120, 110, 100, 130, 30, 20, 10, 40}}}
+	};
+	for (const auto &[layout, expectedBytes] : verticalLayouts) {
+		std::vector<SurfaceCacheItem> items;
+		std::string failure;
+		REQUIRE(ReadSurfaceCache(Vertical, layout, items, failure, Bytes));
+		REQUIRE(items.size() == 1);
+		CHECK(items[0].Surface.Width == 1);
+		CHECK(items[0].Surface.Height == 2);
+		CHECK(items[0].Surface.Rgba == expectedBytes);
+	}
+}
+
+TEST_CASE("Source surface cache malformed size and zlib refusals retain prior tree", "[sprite_cache]") {
+	constexpr std::string_view Nested =
+		R"cache([[{"width":1,"height":1,"buffer":"eJzjUbLwAwABWAC1"},null],[]])cache";
+	auto items = std::vector<SurfaceCacheItem>{};
+	std::string failure;
+	REQUIRE(ReadSurfaceCache(Nested, SpriteCacheLayout::Rgba8TopDown, items, failure, Bytes));
+	const auto prior = items;
+	for (const auto invalid :
+		 {std::string_view{"[}"},
+		  Short,
+		  Long,
+		  Trailing,
+		  std::string_view{R"cache([{"width":0,"height":1,"buffer":"AA=="}])cache"},
+		  std::string_view{R"cache([{"width":1,"height":1,"buffer":"===="}])cache"}}) {
+		CHECK_FALSE(ReadSurfaceCache(invalid, SpriteCacheLayout::Rgba8TopDown, items, failure, Bytes));
+		CHECK(items == prior);
+		CHECK_FALSE(failure.empty());
+	}
+	CHECK_FALSE(ReadSurfaceCache(Rgba, static_cast<SpriteCacheLayout>(255), items, failure, Bytes));
+	CHECK(items == prior);
+	CHECK_FALSE(ReadSurfaceCache(Rgba, SpriteCacheLayout::Rgba8TopDown, items, failure, 64));
+	CHECK(items == prior);
+}
+
+TEST_CASE("Source surface cache item and nesting bounds retain prior tree", "[sprite_cache]") {
+	constexpr std::string_view Nested =
+		R"cache([[{"width":1,"height":1,"buffer":"eJzjUbLwAwABWAC1"},null],[]])cache";
+	auto items = std::vector<SurfaceCacheItem>{};
+	std::string failure;
+	REQUIRE(ReadSurfaceCache(Nested, SpriteCacheLayout::Rgba8TopDown, items, failure, Bytes));
+	const auto prior = items;
+	std::string tooMany{"["};
+	for (uint32_t index = 0; index <= SurfaceCacheLimits::MaximumItems; ++index) {
+		if (index) tooMany += ',';
+		tooMany += "null";
+	}
+	tooMany += ']';
+	CHECK_FALSE(ReadSurfaceCache(tooMany, SpriteCacheLayout::Rgba8TopDown, items, failure, Bytes));
+	CHECK(items == prior);
+	std::string tooDeep(SurfaceCacheLimits::MaximumDepth + 2, '[');
+	tooDeep += "null";
+	tooDeep.append(SurfaceCacheLimits::MaximumDepth + 2, ']');
+	CHECK_FALSE(ReadSurfaceCache(tooDeep, SpriteCacheLayout::Rgba8TopDown, items, failure, Bytes));
+	CHECK(items == prior);
 }

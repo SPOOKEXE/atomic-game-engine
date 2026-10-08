@@ -349,3 +349,52 @@ TEST_CASE(
 	CHECK(device.Render.SourceOutputStatus(program.Owner, name, 4) == SourceTextureStatus::Absent);
 	CHECK(Access::PublishedTexture(device.Render, program.Owner, name) == nullptr);
 }
+
+TEST_CASE(
+	"camera replacement retires completed Composer display staging resources",
+	"[render][gpu][camera-queue-replacement-gpu][.]"
+) {
+	test::FixtureDevice device;
+	device.Initialise();
+	FixtureProgram program("output.color=gm_BaseTextureObject.Sample(gm_BaseTexture,input.uv);");
+	program.Install(device.Render);
+	const core::Name name("composer.gpu.camera-replacement");
+	const auto baseline = device.Render.MemoryStatistics();
+	REQUIRE(
+		device.Render.QueueComposerSurface({program.Owner, name, 1, program.Request(device.Render, true)}) ==
+		render::imagegraph::TransformImage3DQueueResult::Queued
+	);
+	Drive(device.Render, [&] {
+		const auto slots = Access::Slots(device.Render);
+		return std::any_of(slots.begin(), slots.end(), [&](const auto &slot) {
+			return slot.Owner == program.Owner && slot.Name == name && slot.Phase == Phase::Queued &&
+				   slot.ScratchBytes > 0;
+		});
+	});
+	CHECK(Access::ScratchBytes(device.Render) > 0);
+	CHECK(device.Render.MemoryStatistics().LiveBytes > baseline.LiveBytes);
+	render::imagegraph::SourceCamera3DRequest camera;
+	camera.Width = camera.Height = 4;
+	camera.CullMode = 0;
+	camera.View = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+	camera.Projection = camera.View;
+	ig::MeshValue3D mesh;
+	auto &data = mesh.Data.emplace();
+	data.LocalTransforms.emplace_back();
+	data.Materials.emplace_back();
+	ig::MeshPart3D part;
+	for (const ig::Vector3 position :
+		 {ig::Vector3{-1, -1, .5}, ig::Vector3{3, -1, .5}, ig::Vector3{-1, 3, .5}})
+		part.Vertices.push_back({position, {0, 0, -1}, {0, 0}, {255, 0, 0, 255}});
+	data.Parts.push_back(std::move(part));
+	camera.Scene.Data.emplace().Objects.push_back({std::move(mesh)});
+	REQUIRE(
+		device.Render.QueueSourceCamera3D({program.Owner, name, 2, std::move(camera)}) ==
+		render::imagegraph::TransformImage3DQueueResult::Replaced
+	);
+	CHECK(Access::ScratchBytes(device.Render) == 0);
+	CHECK(device.Render.MemoryStatistics().LiveBytes == baseline.LiveBytes);
+	CHECK(device.Render.MemoryStatistics().TransferBuffers == baseline.TransferBuffers);
+	CHECK(device.Render.MemoryStatistics().Textures == baseline.Textures);
+	device.Render.ForgetWorld(1, program.Owner);
+}

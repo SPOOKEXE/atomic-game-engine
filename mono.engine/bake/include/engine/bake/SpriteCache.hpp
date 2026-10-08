@@ -22,6 +22,30 @@ namespace engine::bake {
 		static constexpr uint64_t MaximumPixels = 16 * 1024 * 1024;
 		static constexpr uint64_t MaximumEncodedBytes = 1024 * 1024;
 	};
+	// A missing source leaf keeps its index. Empty arrays are valid cached array values.
+	struct SurfaceCacheItem {
+		SpriteCacheFrame Surface;
+		std::vector<SurfaceCacheItem> Elements;
+		bool IsArray = false;
+		bool operator==(const SurfaceCacheItem &) const = default;
+	};
+	struct SurfaceCacheLimits {
+		static constexpr uint32_t MaximumItems = 4096;
+		static constexpr uint32_t MaximumDepth = 64;
+	};
+	enum class SurfaceCacheFailure : uint8_t { None, Malformed, LimitExceeded };
+	// Decode the source's sparse, nested surface array without renumbering frame slots.
+	// Layout remains an explicit host observation; refusal preserves the previous tree.
+	// Owned tree capacities share maximumBytes. Vendor JSON residency is separately
+	// bounded by the encoded text, nesting and parse-time item limits.
+	bool ReadSurfaceCache(
+		std::string_view text,
+		SpriteCacheLayout layout,
+		std::vector<SurfaceCacheItem> &result,
+		std::string &failure,
+		uint64_t maximumBytes,
+		SurfaceCacheFailure *failureKind = nullptr
+	);
 	std::string_view SpriteCacheLayoutName(SpriteCacheLayout layout);
 	std::optional<SpriteCacheLayout> ParseSpriteCacheLayoutName(std::string_view name);
 

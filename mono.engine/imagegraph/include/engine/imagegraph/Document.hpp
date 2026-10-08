@@ -5,6 +5,7 @@
 // Identifiers in this format are durable text. Plans and pixels are derived
 // data and never become part of the saved document.
 
+#include <engine/imagegraph/ComposerScope.hpp>
 #include <engine/imagegraph/FluidDomain.hpp>
 #include <engine/imagegraph/Particle.hpp>
 #include <engine/imagegraph/Particle3D.hpp>
@@ -1968,6 +1969,8 @@ namespace engine::imagegraph {
 		std::optional<SourceFrameCacheProjectObservation> SourceCacheProject{};
 		// Borrowed only during synchronous evaluation; never retained in replay state.
 		SourceInputProcessingObserver *SourceInputObserver = nullptr;
+		// grug host policy never becomes saved authoring data.
+		ComposerScope Scope = ComposerScope::Unrestricted;
 	};
 
 	// Why parsing, compilation or evaluation failed.

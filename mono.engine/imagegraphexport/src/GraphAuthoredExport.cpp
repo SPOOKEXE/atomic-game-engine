@@ -8,6 +8,7 @@
 #include <engine/imagegraphexport/BuiltinRandomFile.hpp>
 #include <engine/imagegraphexport/GraphAuthoredExport.hpp>
 #include <engine/imagegraphexport/GraphInputs.hpp>
+#include <engine/imagegraphio/SourceFrameCache.hpp>
 #include <engine/imagegraphphysics/RigidReplay.hpp>
 
 #include <algorithm>
@@ -935,6 +936,20 @@ namespace engine::imagegraphexport {
 		std::vector<RequestImageSource> sources;
 		if (!LoadGraphImageInputs(grants, sources, failure)) return false;
 		EvaluationRequest request;
+		DataReplayState frameCacheLoads;
+		if (imagegraphio::DecodeSourceFrameCaches(
+				document,
+				grants.FrameCacheLayouts,
+				frameCacheLoads,
+				diagnostic,
+				Limits::MaximumEvaluationBytes / 8
+			) != Status::Ok) {
+			failure = diagnostic.Message;
+			return false;
+		}
+		request.SourceFrameCacheLoads = &frameCacheLoads;
+		request.SourceCachePlayback =
+			SourceCachePlaybackObservation{true, SourceCacheSampling::NativePlayedPrefix, true};
 		std::vector<SourceBuiltinRandomCapture> builtinRandomCaptures;
 		if (!grants.BuiltinRandomCapture.empty()) {
 			if (!LoadBuiltinRandomCaptureFile(
@@ -951,6 +966,7 @@ namespace engine::imagegraphexport {
 		request.ImageSources = sources;
 		auto liveGrants = grants;
 		liveGrants.ImageInputs.clear();
+		liveGrants.FrameCacheLayouts = {};
 		return ExportAuthoredGraphImpl(
 			document, plan, request, liveGrants, nodeId, regions, failure, retainedTemporaryDirectories
 		);

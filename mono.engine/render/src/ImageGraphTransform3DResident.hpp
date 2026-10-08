@@ -28,6 +28,7 @@ namespace engine::render::test_support {
 	struct TransformImage3DResidentTestAccess {
 		static std::array<TransformImage3DQueueSlotSnapshot, 4> Slots(const Renderer &renderer);
 		static uint64_t SourceBytes(const Renderer &renderer);
+		static uint64_t ScratchBytes(const Renderer &renderer);
 		static bool SetPhase(Renderer &renderer, size_t slot, TransformImage3DQueuePhase phase);
 		static bool SetCancelled(Renderer &renderer, size_t slot, bool cancelled);
 		static bool RecordAndSubmit(Renderer &renderer);

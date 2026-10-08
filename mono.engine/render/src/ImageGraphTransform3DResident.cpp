@@ -187,8 +187,7 @@ namespace engine::render {
 		};
 		if (queuedReplacement != nullptr && hasBudget(queuedReplacement->SourceBytes)) {
 			auto &slot = *queuedReplacement;
-			State->GraphResources.Transform3DSourceBytes -= slot.SourceBytes;
-			slot = {};
+			State->ReleaseTransform3D(slot);
 			slot.Phase = Impl::GraphResourceCache::Transform3DPhase::Queued;
 			slot.Owner = request.Owner;
 			slot.Name = request.Name;
@@ -297,8 +296,12 @@ namespace engine::render {
 			if (destination->CameraBindings.size() >= 7) return Result::Full;
 			destination->CameraBindings.push_back({request.Name, request.Generation, output, false});
 		} else {
-			State->GraphResources.Transform3DSourceBytes -= replacement ? replacement->SourceBytes : 0;
-			*destination = {};
+			// Queued Composer work can retain completed display staging between fences.
+			// Retire that ownership before replacing it with a camera request.
+			if (replacement)
+				State->ReleaseTransform3D(*replacement);
+			else
+				*destination = {};
 			destination->CameraBindings = std::move(freshBindings);
 			destination->Phase = Phase::Queued;
 			destination->Owner = request.Owner;
@@ -456,6 +459,9 @@ namespace engine::render {
 		return result;
 	}
 
+	uint64_t test_support::TransformImage3DResidentTestAccess::ScratchBytes(const Renderer &renderer) {
+		return renderer.State ? renderer.State->GraphResources.Transform3DScratchBytes : 0;
+	}
 	uint64_t test_support::TransformImage3DResidentTestAccess::SourceBytes(const Renderer &renderer) {
 		return renderer.State ? renderer.State->GraphResources.Transform3DSourceBytes : 0;
 	}

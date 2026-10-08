@@ -3940,6 +3940,24 @@
         "mimeType": "text/markdown",
         "name": "AGENTS.md (tools/pxcimport)",
         "uri": "atomic://agents/tools/pxcimport"
+      },
+      "atomic://agents/engine/audiocodec": {
+        "description": "The invariants specific to engine/audiocodec. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/audiocodec)",
+        "uri": "atomic://agents/engine/audiocodec"
+      },
+      "atomic://agents/engine/imagegraphfont": {
+        "description": "The invariants specific to engine/imagegraphfont. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphfont)",
+        "uri": "atomic://agents/engine/imagegraphfont"
+      },
+      "atomic://agents/engine/imagegraphphysics": {
+        "description": "The invariants specific to engine/imagegraphphysics. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphphysics)",
+        "uri": "atomic://agents/engine/imagegraphphysics"
       }
     },
     "tools": {
@@ -8394,6 +8412,24 @@
         "mimeType": "text/markdown",
         "name": "AGENTS.md (tools/pxcimport)",
         "uri": "atomic://agents/tools/pxcimport"
+      },
+      "atomic://agents/engine/audiocodec": {
+        "description": "The invariants specific to engine/audiocodec. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/audiocodec)",
+        "uri": "atomic://agents/engine/audiocodec"
+      },
+      "atomic://agents/engine/imagegraphfont": {
+        "description": "The invariants specific to engine/imagegraphfont. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphfont)",
+        "uri": "atomic://agents/engine/imagegraphfont"
+      },
+      "atomic://agents/engine/imagegraphphysics": {
+        "description": "The invariants specific to engine/imagegraphphysics. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/imagegraphphysics)",
+        "uri": "atomic://agents/engine/imagegraphphysics"
       }
     },
     "tools": {

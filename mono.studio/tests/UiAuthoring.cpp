@@ -54,7 +54,9 @@ namespace {
 	  public:
 		Context() {
 			IMGUI_CHECKVERSION();
+			Previous = ImGui::GetCurrentContext();
 			Handle = ImGui::CreateContext();
+			ImGui::SetCurrentContext(Handle);
 			ImGuiIO &io = ImGui::GetIO();
 			io.DisplaySize = ImVec2(1280.0f, 720.0f);
 			io.DeltaTime = 1.0f / 60.0f;
@@ -66,10 +68,12 @@ namespace {
 
 		~Context() {
 			ImGui::DestroyContext(Handle);
+			ImGui::SetCurrentContext(Previous);
 		}
 
 	  private:
 		ImGuiContext *Handle = nullptr;
+		ImGuiContext *Previous = nullptr;
 	};
 
 	class Jobs {

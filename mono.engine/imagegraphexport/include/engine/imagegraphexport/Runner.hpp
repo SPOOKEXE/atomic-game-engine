@@ -2,6 +2,8 @@
 
 // Executes bounded imagegraph still, sequence and animation exports from command-line arguments.
 
+#include <engine/imagegraph/ComposerScope.hpp>
+
 #include <filesystem>
 #include <iosfwd>
 #include <span>
@@ -43,7 +45,8 @@ namespace engine::imagegraphexport::runner {
 		std::ostream &errors,
 		std::span<const engine::imagegraph::RequestImageSource> imageSources,
 		std::span<const engine::imagegraph::HostNodeCapture> captures,
-		engine::imagegraph::HostNodeProvider *provider
+		engine::imagegraph::HostNodeProvider *provider,
+		engine::imagegraph::ComposerScope scope = engine::imagegraph::ComposerScope::Unrestricted
 	);
 	// Adds one explicitly owned font namespace, recording set and exact read capability.
 	int RunWithHostInputs(
@@ -54,7 +57,8 @@ namespace engine::imagegraphexport::runner {
 		std::span<const engine::imagegraph::RequestImageSource> imageSources,
 		std::span<const engine::imagegraph::HostNodeCapture> captures,
 		engine::imagegraph::HostNodeProvider *provider,
-		imagegraphfont::GraphFontInputs &fontInputs
+		imagegraphfont::GraphFontInputs &fontInputs,
+		engine::imagegraph::ComposerScope scope = engine::imagegraph::ComposerScope::Unrestricted
 	);
 
 	// Executes an immutable in-memory document and plan without reading the --input context path.

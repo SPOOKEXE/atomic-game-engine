@@ -1,0 +1,36 @@
+{
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_sha256": {
+    "scripts/color_function/color_function.gml": "cbe9a62a8b56257756bd3fecf1c7eb9797eda9695d34b0b7b390d0bda0120177",
+    "scripts/globals/globals.gml": "833bfc44078933cac824a5cd48d6eebb2c06d85590de4775af5dd6d053afd3e3",
+    "scripts/node_color/node_color.gml": "5b65d8c1b68a5005ae4f981f8ffd98a2d12744a76bc841c799a10d4d72e7f294",
+    "scripts/node_value_color/node_value_color.gml": "8f2a958e1e3c7259fde2a5fb92b279ed971e83da5020a7e7ce699a9e4f142640",
+    "scripts/string_decimal/string_decimal.gml": "af0de0cfd52934d5b17e1492eb9177292c85fc209ea32157fbb31443f83b7557"
+  },
+  "runtime": {
+    "repository": "https://github.com/YoYoGames/GameMaker-HTML5",
+    "commit": "60e51be51ce7f3d52025ef18106cf172b8e22a00",
+    "path": "scripts/functions/Function_Maths.js",
+    "url": "https://raw.githubusercontent.com/YoYoGames/GameMaker-HTML5/60e51be51ce7f3d52025ef18106cf172b8e22a00/scripts/functions/Function_Maths.js",
+    "sha256": "673b03e5f2cab870d145141911c1ec2dc767dbb59252d41d01fd8ef3f6eee005",
+    "lines": [
+      2290,
+      2313
+    ],
+    "contract": "yyfbitshiftleft promotes a number operand to Long, then calls Long.shiftLeft. Colour alpha shifting therefore preserves positive 64-bit bits instead of truncating to signed JavaScript int32."
+  },
+  "source_contract": {
+    "color_function.gml:11": "cola returns int64 of RGB low24 plus alpha byte shifted24.",
+    "color_function.gml:37": "make_color_rgba packs ascending R,G,B,A bytes and returns int64.",
+    "globals.gml:163": "ca_white is cola(c_white).",
+    "node_color.gml:9": "processData returns its raw colour input.",
+    "node_value_color.gml:14-21": "Colour getter preserves raw input.",
+    "string_decimal.gml:39-42": "toNumber preserves existing int64 without real conversion."
+  },
+  "native_profile": {
+    "carrier": "Colour byte fields Red, Green, Blue, Alpha reconstruct one exact int64 between 0 and 4294967295.",
+    "conversion": "R | G<<8 | B<<16 | A<<24 using uint32 intermediates, followed by lossless int64 conversion.",
+    "scope": "Argument Number mode converts bounded native Colour. String mode retains Colour unchanged. This does not recover arbitrary original numeric colour bits outside uint32 or claim source surface handle identity."
+  },
+  "verification": "Source-backed implementation and tests prepared; no validation run recorded here."
+}

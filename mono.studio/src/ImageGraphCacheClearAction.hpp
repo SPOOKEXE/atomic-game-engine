@@ -5,7 +5,7 @@
 
 namespace studio::detail {
 	// Source Clear is runtime state, not a document edit or playback restart.
-	inline bool ApplyImageGraphCacheResultsClear(
+	inline bool ApplyImageGraphSourceCacheClear(
 		const engine::imagegraph::Document &document,
 		const engine::imagegraph::Plan &plan,
 		engine::imagegraph::CapturedFeedbackHost &host,
@@ -22,20 +22,18 @@ namespace studio::detail {
 				engine::imagegraph::Status::InvalidValue,
 				std::string(nodeId),
 				{},
-				"Cache Results selection changed before Clear"
+				"Source cache selection changed before Clear"
 			};
 			return false;
 		}
-		if (!host.ClearCacheResults(
-				document, plan, nodeId, revision, inputRevision, diagnostic, maximumBytes
-			))
+		if (!host.ClearSourceCache(document, plan, nodeId, revision, inputRevision, diagnostic, maximumBytes))
 			return false;
 		for (size_t index = 0; index < document.Outputs.size(); ++index)
 			if (std::find(
-					host.CacheResultsInvalidatedOutputs().begin(),
-					host.CacheResultsInvalidatedOutputs().end(),
+					host.CacheInvalidatedOutputs().begin(),
+					host.CacheInvalidatedOutputs().end(),
 					document.Outputs[index].Id
-				) != host.CacheResultsInvalidatedOutputs().end())
+				) != host.CacheInvalidatedOutputs().end())
 				previews.InvalidateOutput(index);
 		return true;
 	}

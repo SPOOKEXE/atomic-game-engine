@@ -3602,7 +3602,8 @@ namespace engine::imagegraphio {
 						record["r"]["d"] = std::move(*encoded);
 					}
 				}
-				if (node.Type == "pc.ase_file_read") {
+				if (node.Type == "pc.ase_file_read" || node.Type == "pc.camera") {
+					bool cameraVisibilitySeen = false;
 					for (const auto &property : node.SourceProperties) {
 						if (property.Port != "layer_visible")
 							return Reject(
@@ -3617,6 +3618,30 @@ namespace engine::imagegraphio {
 								node.Id,
 								property.Port
 							);
+						if (node.Type == "pc.camera") {
+							if (cameraVisibilitySeen ||
+								array->Elements.size() != node.DynamicInputs.size() / 6 ||
+								std::any_of(
+									array->Elements.begin(), array->Elements.end(), [](const auto &value) {
+										return !std::holds_alternative<bool>(value);
+									}
+								))
+								return Reject(
+									diagnostic,
+									"Camera visibility requires one boolean per source layer",
+									node.Id,
+									property.Port
+								);
+							cameraVisibilitySeen = true;
+							if (!source->contains("attri")) (*source)["attri"] = Json::object();
+							if (!(*source)["attri"].is_object())
+								return Reject(
+									diagnostic,
+									"Camera source attributes are malformed",
+									node.Id,
+									property.Port
+								);
+						}
 						const auto encoded = EncodeValue(property.Data, Json::array());
 						if (!encoded)
 							return Reject(

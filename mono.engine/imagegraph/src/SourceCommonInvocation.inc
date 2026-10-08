@@ -103,6 +103,20 @@ namespace detail {
 			return diagnostic.Code;
 		}
 		const auto &owner = document.SourceCommonOwners[ownerIndex];
+		if (request.Scope != ComposerScope::Unrestricted && request.Scope != ComposerScope::ImageOnly) {
+			diagnostic = {Status::InvalidValue, owner.SourceOwnerId, {}, "Composer scope is invalid"};
+			return diagnostic.Code;
+		}
+		if (request.Scope == ComposerScope::ImageOnly &&
+			owner.NativeOwnerKind == SourceCommonNativeOwnerKind::Node) {
+			const auto node =
+				std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &entry) {
+					return entry.Id == owner.NativeOwnerId;
+				});
+			if (node != document.Nodes.end() &&
+				CheckComposerNodeScope(*node, request.Scope, diagnostic) != Status::Ok)
+				return diagnostic.Code;
+		}
 		const auto dispatch = SourceCommonOwnerDispatch(document, request, ownerIndex);
 		if (dispatch.Wrapper == SourceCommonWrapperKind::Unsupported) {
 			diagnostic = {

@@ -10,6 +10,38 @@
 
 namespace engine::imagegraphexport {
 	using namespace imagegraph;
+	bool AddGraphImageCacheLayoutObservation(
+		std::string_view assignment,
+		std::vector<GraphImageCacheLayoutObservation> &observations,
+		std::string &failure
+	) {
+		const auto separator = assignment.find('=');
+		const auto colon = assignment.rfind(':', separator);
+		if (assignment.size() > 512 || separator == std::string_view::npos ||
+			colon == std::string_view::npos || !colon || separator - colon != 65 ||
+			observations.size() >= 64) {
+			failure = "saved cache layout requires bounded NODE:HASH=LAYOUT";
+			return false;
+		}
+		const auto node = assignment.substr(0, colon);
+		const auto hash = assignment.substr(colon + 1, 64);
+		const auto layout = bake::ParseSpriteCacheLayoutName(assignment.substr(separator + 1));
+		if (!layout ||
+			std::any_of(
+				hash.begin(),
+				hash.end(),
+				[](char byte) { return !(byte >= '0' && byte <= '9') && !(byte >= 'a' && byte <= 'f'); }
+			) ||
+			std::any_of(observations.begin(), observations.end(), [&](const auto &record) {
+				return record.NodeId == node;
+			})) {
+			failure = "saved cache layout, lowercase hash or unique node identity is invalid";
+			return false;
+		}
+		observations.push_back({std::string(node), std::string(hash), *layout});
+		failure.clear();
+		return true;
+	}
 	bool ReadGraphSavedImageCache(
 		const HostNodeInvocation &in,
 		std::span<const GraphImageCacheLayoutObservation> observations,

@@ -1,6 +1,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/imagegraph/FrameCacheReplay.hpp>
 #include <engine/imagegraphphysics/RigidReplay.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/TextureTable.hpp>
@@ -212,6 +213,79 @@ TEST_CASE("saved keyframes produce different frames by selected tick", "[client]
 		client::LoadImageGraphFrame(file.Assets, GRAPH, engine::core::Name("missing"), 0).Status ==
 		engine::imagegraph::Status::InvalidOutput
 	);
+}
+
+TEST_CASE(
+	"Client loads sparse cooked source-cache frames through its native runtime path",
+	"[client][source_frame_cache]"
+) {
+	using namespace engine::imagegraph;
+	GraphFile file;
+	const engine::core::Name graph("cooked-source-cache"), output("final");
+	constexpr std::string_view saved =
+		R"cache([{"width":1,"height":1,"buffer":"eJzjUbLwAwABWAC1"},null,{"width":2,"height":1,"buffer":"eJw7waXB8L/B4T8ADnkDuQ=="}])cache";
+	Document document;
+	document.FormatVersion = 9;
+	document.Timeline = TimelineSettings{3, 0, 2, "loop", 24};
+	document.Nodes = {
+		{"solid",
+		 "image.solid",
+		 "",
+		 {},
+		 {{"width", int64_t{2}}, {"height", int64_t{1}}, {"colour", Colour{1, 2, 3, 255}}}},
+		{"cache", "pc.cache", "", {}, {{"animated", false}}}
+	};
+	document.Nodes[1].SourceProperties = {{"serialize", true}, {"cache", std::string(saved)}};
+	document.Links = {{"solid", "image", "cache", "surface_in"}};
+	document.Outputs = {{"final", "cache", "cache_surface"}};
+	DataReplayEntry row;
+	row.NodeId = "cache";
+	row.Initialized = true;
+	row.PreviousValue = 1;
+	row.LoadedCacheData = saved;
+	Image first{1, 1, {12, 34, 56, 78}};
+	first.Hash = SurfaceHash(first);
+	Image second{2, 1, {200, 10, 40, 0, 255, 128, 64, 255}};
+	second.Hash = SurfaceHash(second);
+	row.Values = {
+		{0, std::string("pc.cache")}, {1, int64_t{-4}}, {2, SurfaceValue{first}}, {4, SurfaceValue{second}}
+	};
+	ArrayValue packet;
+	Diagnostic diagnostic;
+	REQUIRE(EncodeSourceFrameCacheReceipt(row, packet, diagnostic) == Status::Ok);
+	document.Nodes[1].SourceProperties.push_back(
+		{std::string(SOURCE_FRAME_CACHE_NATIVE_TEXT), std::string(saved)}
+	);
+	document.Nodes[1].SourceProperties.push_back(
+		{std::string(SOURCE_FRAME_CACHE_NATIVE_DATA), std::move(packet)}
+	);
+	const auto path = client::ImageGraphDocumentPath(file.Assets, graph);
+	{
+		std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+		stream << Write(document);
+		REQUIRE(stream.good());
+	}
+	const auto cachedFirst = client::LoadImageGraphFrame(file.Assets, graph, output, 0);
+	INFO(cachedFirst.Diagnostic.Message);
+	REQUIRE(cachedFirst.Status == Status::Ok);
+	CHECK(cachedFirst.Image.Pixels == std::vector<uint8_t>{12, 34, 56, 78});
+	const auto liveHole = client::LoadImageGraphFrame(file.Assets, graph, output, 1);
+	INFO(liveHole.Diagnostic.Message);
+	REQUIRE(liveHole.Status == Status::Ok);
+	CHECK(liveHole.Image.Width == 2);
+	CHECK(liveHole.Image.Pixels == std::vector<uint8_t>{1, 2, 3, 255, 1, 2, 3, 255});
+	const auto cachedLast = client::LoadImageGraphFrame(file.Assets, graph, output, 2);
+	INFO(cachedLast.Diagnostic.Message);
+	REQUIRE(cachedLast.Status == Status::Ok);
+	CHECK(cachedLast.Image.Pixels == std::vector<uint8_t>{200, 10, 40, 0, 255, 128, 64, 255});
+	std::get<std::string>(document.Nodes[1].SourceProperties[1].Data).push_back(' ');
+	{
+		std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+		stream << Write(document);
+		REQUIRE(stream.good());
+	}
+	const auto stale = client::LoadImageGraphFrame(file.Assets, graph, output, 0);
+	CHECK(stale.Status == Status::InvalidValue);
 }
 
 TEST_CASE("host refuses oversized and malformed saved documents", "[client][imagegraph]") {

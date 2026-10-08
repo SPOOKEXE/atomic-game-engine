@@ -156,7 +156,7 @@ TEST_CASE(
 }
 TEST_CASE(
 	"Composer startup parses four typed option spans during synchronous ownership",
-	"[studio][source_arguments]"
+	"[studio][source_arguments][.composer-startup]"
 ) {
 	using namespace engine::imagegraph;
 	engine::core::Arguments arguments("studio-arguments", "typed Composer inputs");

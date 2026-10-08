@@ -8,6 +8,7 @@
 #include <engine/imagegraph/SourceArgumentHost.hpp>
 #include <engine/imagegraph/WavClip.hpp>
 #include <engine/imagegraphexport/BuiltinRandomFile.hpp>
+#include <engine/imagegraphexport/GraphImageCache.hpp>
 #include <engine/imagegraphexport/Runner.hpp>
 #include <engine/imagegraphfont/GraphFontInputs.hpp>
 #include <engine/imagegraphphysics/RigidReplay.hpp>
@@ -1167,7 +1168,8 @@ namespace engine::imagegraphexport::runner {
 		const engine::imagegraph::Document *liveDocument,
 		const engine::imagegraph::Plan *livePlan,
 		const engine::imagegraph::EvaluationRequest *liveRequest,
-		GraphFontInputs *ownedFontInputs
+		GraphFontInputs *ownedFontInputs,
+		engine::imagegraph::ComposerScope scope
 	);
 
 	int Run(int argc, char **argv, std::ostream &output, std::ostream &errors) {
@@ -1191,10 +1193,11 @@ namespace engine::imagegraphexport::runner {
 		std::ostream &errors,
 		std::span<const engine::imagegraph::RequestImageSource> images,
 		std::span<const engine::imagegraph::HostNodeCapture> captures,
-		engine::imagegraph::HostNodeProvider *provider
+		engine::imagegraph::HostNodeProvider *provider,
+		engine::imagegraph::ComposerScope scope
 	) {
 		return RunImpl(
-			argc, argv, output, errors, images, captures, provider, nullptr, nullptr, nullptr, nullptr
+			argc, argv, output, errors, images, captures, provider, nullptr, nullptr, nullptr, nullptr, scope
 		);
 	}
 	int RunWithHostInputs(
@@ -1205,10 +1208,22 @@ namespace engine::imagegraphexport::runner {
 		std::span<const engine::imagegraph::RequestImageSource> images,
 		std::span<const engine::imagegraph::HostNodeCapture> captures,
 		engine::imagegraph::HostNodeProvider *provider,
-		GraphFontInputs &fontInputs
+		GraphFontInputs &fontInputs,
+		engine::imagegraph::ComposerScope scope
 	) {
 		return RunImpl(
-			argc, argv, output, errors, images, captures, provider, nullptr, nullptr, nullptr, &fontInputs
+			argc,
+			argv,
+			output,
+			errors,
+			images,
+			captures,
+			provider,
+			nullptr,
+			nullptr,
+			nullptr,
+			&fontInputs,
+			scope
 		);
 	}
 	int RunWithDocument(
@@ -1231,7 +1246,8 @@ namespace engine::imagegraphexport::runner {
 			&document,
 			&plan,
 			&request,
-			nullptr
+			nullptr,
+			request.Scope
 		);
 	}
 
@@ -1246,8 +1262,14 @@ namespace engine::imagegraphexport::runner {
 		const engine::imagegraph::Document *liveDocument,
 		const engine::imagegraph::Plan *livePlan,
 		const engine::imagegraph::EvaluationRequest *liveRequest,
-		GraphFontInputs *ownedFontInputs
+		GraphFontInputs *ownedFontInputs,
+		engine::imagegraph::ComposerScope scope
 	) {
+		if (scope != engine::imagegraph::ComposerScope::Unrestricted &&
+			scope != engine::imagegraph::ComposerScope::ImageOnly) {
+			errors << "error status=InvalidValue message=\"Composer scope is invalid\"\n";
+			return 1;
+		}
 		engine::core::Arguments arguments(
 			"imagegraph",
 			"Evaluates an imagegraph output at one authored frame or a streamed tick range, writing "
@@ -1273,6 +1295,9 @@ namespace engine::imagegraphexport::runner {
 			"Finite real graph argument; repeatable"
 		);
 		arguments.Value("input", "PATH", "Authored imagegraph text document");
+		arguments.Value(
+			"saved-cache-layout", "NODE:HASH=LAYOUT", "Exact saved frame-cache layout; repeatable"
+		);
 		arguments.Value("output-id", "ID", "Durable output ID to evaluate");
 		arguments.Value("output", "PATH", "PNG, BMP or EXR path, or JSON image-array manifest path");
 		arguments.Flag("rigid-playing", "Capture source rigid playback as active");
@@ -1752,6 +1777,30 @@ namespace engine::imagegraphexport::runner {
 			return 1;
 		}
 		AnimationStage animationStage;
+		std::vector<GraphImageCacheLayoutObservation> frameCacheLayouts;
+		for (const auto assignment : arguments.GetAll("saved-cache-layout")) {
+			if (!AddGraphImageCacheLayoutObservation(assignment, frameCacheLayouts, fileFailure)) {
+				errors << "error status=Arguments message=" << std::quoted(fileFailure) << '\n';
+				return 2;
+			}
+		}
+		engine::imagegraph::DataReplayState frameCacheLoads;
+		if (!frameCacheLayouts.empty()) {
+			if (liveRequest && liveRequest->SourceFrameCacheLoads) {
+				errors << "error status=Arguments message=\"Saved cache loads require one receipt owner\"\n";
+				return 2;
+			}
+			if (imagegraphio::DecodeSourceFrameCaches(
+					document,
+					frameCacheLayouts,
+					frameCacheLoads,
+					diagnostic,
+					Limits::MaximumEvaluationBytes / 8
+				) != Status::Ok) {
+				PrintDiagnostic(errors, diagnostic);
+				return 1;
+			}
+		}
 		BundleStage bundleStage;
 		if (bundleOutput && !BeginBundle(bundleDirectory, bundleStage, fileFailure)) {
 			errors << "error status=OutputError message=" << std::quoted(fileFailure) << '\n';
@@ -1763,11 +1812,17 @@ namespace engine::imagegraphexport::runner {
 		uint64_t tick = tickRange.First;
 		engine::imagegraphphysics::RigidProvider rigidProvider;
 		engine::imagegraph::CapturedFeedbackHost replayHost;
+		if (scope == engine::imagegraph::ComposerScope::ImageOnly)
+			(void)replayHost.SetFeedbackSamplingProfile(
+				engine::imagegraph::FeedbackSamplingProfile::NativeFractional
+			);
 		for (size_t frameIndex = 0; frameIndex < frameCount; frameIndex++) {
 			const std::filesystem::path framePath =
 				bundleOutput ? FramePath(bundleStage.Directory / "frame.png", tick)
 							 : (renderRange ? FramePath(outputFile, tick) : outputFile);
 			auto request = liveRequest ? *liveRequest : engine::imagegraph::EvaluationRequest{};
+			request.Scope = scope;
+			if (!frameCacheLayouts.empty()) request.SourceFrameCacheLoads = &frameCacheLoads;
 			if (!request.RigidProvider) request.RigidProvider = &rigidProvider;
 			if (!request.SourceCachePlayback)
 				request.SourceCachePlayback = engine::imagegraph::SourceCachePlaybackObservation{

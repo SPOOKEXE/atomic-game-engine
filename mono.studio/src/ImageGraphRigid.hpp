@@ -35,7 +35,10 @@ namespace studio::detail {
 		request.RigidProvider = &provider;
 		request.RigidPlaying = playback.Playing;
 		request.SourceCachePlayback = engine::imagegraph::SourceCachePlaybackObservation{
-			playback.Playing, engine::imagegraph::SourceCacheSampling::ObservedFrame, true
+			playback.Playing,
+			engine::imagegraph::SourceCacheSampling::ObservedFrame,
+			true,
+			engine::imagegraph::SourceCacheLoadMode::SourceStepLoading
 		};
 		request.RigidFrameProgress = playback.FrameProgress;
 		request.SourceCacheProject = engine::imagegraph::SourceFrameCacheProjectObservation{

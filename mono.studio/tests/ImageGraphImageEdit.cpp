@@ -502,6 +502,15 @@ TEST_CASE(
 	);
 	REQUIRE(cache != ui.Doc.Nodes.front().SourceProperties.end());
 	cache->Data = *prepared.EncodedCache;
+	SECTION("source sprites") {}
+	SECTION("source frame cache") {
+		ui.Doc.Nodes.front().Type = "pc.cache";
+		cache->Port = "cache";
+	}
+	SECTION("source frame cache array") {
+		ui.Doc.Nodes.front().Type = "pc.cache_array";
+		cache->Port = "cache";
+	}
 	const auto before = ui.Doc;
 	const auto retained = ui.Replay.RetainedBytes();
 	ui.Activate("Saved cache layout");

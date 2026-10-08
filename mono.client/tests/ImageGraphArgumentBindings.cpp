@@ -1,3 +1,7 @@
+#include "../../mono.engine/render/src/GpuHeap.hpp"
+#include "../../mono.engine/render/src/ImageGraphTransform3DResident.hpp"
+
+#include <engine/core/Paths.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/imagegraph/Document.hpp>
 #include <engine/imagegraph/SourceArgumentHost.hpp>
@@ -11,23 +15,88 @@
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <chrono>
 #include <client/ImageGraphRuntime.hpp>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 
 TEST_SUITE_ID("client.imagegraph_argument_bindings")
 TEST_DEPENDS("engine.imagegraph.source_argument")
 TEST_DEPENDS("engine.scene.imagegraphbinding")
 TEST_DEPENDS("engine.render.liveimagepublisher")
+TEST_DEPENDS("engine.render.sourcetransformimage3d")
 
 namespace {
 	using namespace engine::imagegraph;
 	const engine::core::Name GRAPH{"argument-binding"}, OUTPUT{"image"}, TEXTURE{"argument-binding-texture"},
 		OWNER{"argument-binding-owner"};
+	struct StagedShaderPaths {
+		std::filesystem::path Previous = engine::core::Paths::Assets();
+		StagedShaderPaths() {
+			engine::core::Paths::SetAssetsOverride({});
+		}
+		~StagedShaderPaths() {
+			engine::core::Paths::SetAssetsOverride(Previous);
+		}
+	};
+	// Device fixtures read uploaded bytes directly; ordinary clients do not retain CPU texture copies.
+	engine::assets::TextureData DownloadBinding(engine::render::Renderer &renderer) {
+		engine::assets::TextureData image;
+		REQUIRE(renderer.TextureSize(TEXTURE, image.Width, image.Height, OWNER));
+		REQUIRE(image.Width <= 4);
+		REQUIRE(image.Height == 1);
+		auto *device = static_cast<SDL_GPUDevice *>(renderer.Backend().Device);
+		auto *texture = static_cast<SDL_GPUTexture *>(renderer.TextureHandle(TEXTURE, OWNER));
+		REQUIRE(device);
+		REQUIRE(texture);
+		SDL_GPUTransferBufferCreateInfo info{};
+		info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+		info.size = 256;
+		const auto releaseTransfer = [device](SDL_GPUTransferBuffer *buffer) {
+			engine::render::gpu::ReleaseTransferBuffer(device, buffer);
+		};
+		std::unique_ptr<SDL_GPUTransferBuffer, decltype(releaseTransfer)> transfer(
+			engine::render::gpu::CreateTransferBuffer(device, &info), releaseTransfer
+		);
+		REQUIRE(transfer);
+		const auto cancelCommand = [](SDL_GPUCommandBuffer *command) { SDL_CancelGPUCommandBuffer(command); };
+		std::unique_ptr<SDL_GPUCommandBuffer, decltype(cancelCommand)> command(
+			SDL_AcquireGPUCommandBuffer(device), cancelCommand
+		);
+		REQUIRE(command);
+		auto *copy = SDL_BeginGPUCopyPass(command.get());
+		REQUIRE(copy);
+		SDL_GPUTextureRegion source{};
+		source.texture = texture;
+		source.w = image.Width;
+		source.h = source.d = 1;
+		SDL_GPUTextureTransferInfo destination{};
+		destination.transfer_buffer = transfer.get();
+		destination.pixels_per_row = 64;
+		destination.rows_per_layer = 1;
+		SDL_DownloadFromGPUTexture(copy, &source, &destination);
+		SDL_EndGPUCopyPass(copy);
+		const auto releaseFence = [device](SDL_GPUFence *fence) { SDL_ReleaseGPUFence(device, fence); };
+		std::unique_ptr<SDL_GPUFence, decltype(releaseFence)> fence(
+			SDL_SubmitGPUCommandBufferAndAcquireFence(command.release()), releaseFence
+		);
+		REQUIRE(fence);
+		const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (!SDL_QueryGPUFence(device, fence.get()) && std::chrono::steady_clock::now() < end)
+			SDL_Delay(1);
+		REQUIRE(SDL_QueryGPUFence(device, fence.get()));
+		const auto *bytes =
+			static_cast<const std::byte *>(SDL_MapGPUTransferBuffer(device, transfer.get(), false));
+		REQUIRE(bytes);
+		image.Pixels.assign(bytes, bytes + image.Width * 4);
+		SDL_UnmapGPUTransferBuffer(device, transfer.get());
+		return image;
+	}
 	struct GraphFile {
 		std::filesystem::path Assets =
 			std::filesystem::temp_directory_path() / "atomic-argument-binding-fixture";
-		GraphFile(bool transform = false) {
+		GraphFile(bool transform = false, bool sourceDownstream = false) {
 			std::filesystem::remove_all(Assets);
 			std::filesystem::create_directories(Assets / "imagegraphs");
 			Document document;
@@ -55,7 +124,7 @@ namespace {
 			if (transform) {
 				document.Nodes.push_back(
 					{"transform",
-					 "image.transform_3d",
+					 sourceDownstream ? "pc.3_d_transform_image" : "image.transform_3d",
 					 "",
 					 {},
 					 {{"position", Vector3{}},
@@ -70,6 +139,11 @@ namespace {
 				);
 				document.Links.push_back({"solid", "surface_out", "transform", "surface"});
 				document.Outputs = {{"image", "transform", "rendered"}};
+				if (sourceDownstream) {
+					document.Nodes.push_back({"invert", "image.invert", "", {}, {{"include_alpha", false}}});
+					document.Links.push_back({"transform", "rendered", "invert", "image"});
+					document.Outputs = {{"image", "invert", "image"}};
+				}
 			}
 			std::ofstream output(client::ImageGraphDocumentPath(Assets, GRAPH));
 			output << Write(document);
@@ -159,6 +233,7 @@ TEST_CASE(
 	"Published cached binding replaces same-tick pixels and retires the prior argument generation",
 	"[client][source_argument][argument_binding][gpu][.]"
 ) {
+	StagedShaderPaths shaders;
 	GraphFile file;
 	engine::scene::RegisterSceneComponents();
 	engine::ecs::Store store("argument-device-binding");
@@ -185,10 +260,7 @@ TEST_CASE(
 	const auto modified = std::filesystem::last_write_time(path);
 	const auto fileBytes = std::filesystem::file_size(path);
 	const auto copy = [&](uint32_t expectedWidth) {
-		engine::assets::TextureData image;
-		REQUIRE(
-			renderer.CopyTexture(TEXTURE, image, 1024, OWNER) == engine::render::TextureCopyStatus::Copied
-		);
+		const auto image = DownloadBinding(renderer);
 		CHECK(image.Width == expectedWidth);
 		CHECK(image.Height == 1);
 		REQUIRE(image.Pixels.size() == expectedWidth * 4);
@@ -303,4 +375,87 @@ TEST_CASE(
 	CHECK(store.Time().Tick == tick);
 	runtime.Clear(renderer);
 	CHECK_FALSE(renderer.CancelTransformImage3D(OWNER, TEXTURE, 2));
+}
+
+TEST_CASE(
+	"source argument replacement crosses real async Transform and downstream image binding",
+	"[client][source_argument][argument-transform-gpu][gpu][.]"
+) {
+	StagedShaderPaths shaders;
+	using Access = engine::render::test_support::TransformImage3DResidentTestAccess;
+	GraphFile file(true, true);
+	engine::scene::RegisterSceneComponents();
+	engine::ecs::Store store("argument-transform-device");
+	Bind(store);
+	REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+	struct Video {
+		~Video() {
+			SDL_QuitSubSystem(SDL_INIT_VIDEO);
+		}
+	} video;
+	engine::render::Renderer renderer;
+	REQUIRE(renderer.Initialise(nullptr));
+	client::ImageGraphRuntime runtime;
+	struct Retire {
+		client::ImageGraphRuntime &Runtime;
+		engine::render::Renderer &Renderer;
+		~Retire() {
+			Runtime.Clear(Renderer);
+			Renderer.Shutdown();
+		}
+	} retire{runtime, renderer};
+	const auto tick = store.Time().Tick;
+	const auto drive = [&](uint32_t width) {
+		const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		bool published = false;
+		while (std::chrono::steady_clock::now() < end) {
+			Access::Poll(renderer);
+			runtime.BeginFrame();
+			const auto updated = runtime.Refresh(store, renderer, OWNER, file.Assets);
+			INFO(runtime.LastError());
+			if (updated) {
+				published = true;
+				break;
+			}
+			REQUIRE(Access::RecordAndSubmit(renderer));
+			SDL_Delay(1);
+		}
+		INFO(runtime.LastError());
+		INFO("expected width " << width);
+		REQUIRE(published);
+		const auto copied = DownloadBinding(renderer);
+		REQUIRE(copied.Width == width);
+		REQUIRE(copied.Height == 1);
+		REQUIRE(copied.Pixels.size() == width * 4);
+		for (size_t i = 0; i < width; ++i) {
+			CHECK(copied.Pixels[i * 4] == std::byte{224});
+			CHECK(copied.Pixels[i * 4 + 1] == std::byte{208});
+			CHECK(copied.Pixels[i * 4 + 2] == std::byte{196});
+			CHECK(copied.Pixels[i * 4 + 3] == std::byte{255});
+		}
+	};
+	drive(2);
+	Diagnostic diagnostic;
+	const std::string_view three[] = {"width=3"}, four[] = {"width=4"}, bad[] = {"width=4tail"};
+	REQUIRE(runtime.PrepareArguments({{}, {}, three, {}}, renderer, diagnostic) == Status::Ok);
+	runtime.BeginFrame();
+	CHECK(runtime.Refresh(store, renderer, OWNER, file.Assets) == 0);
+	REQUIRE(Access::RecordAndSubmit(renderer));
+	// Replace after submission, so the old width-three fence can complete only as cancelled work.
+	REQUIRE(runtime.PrepareArguments({{}, {}, four, {}}, renderer, diagnostic) == Status::Ok);
+	drive(4);
+	const auto generation = runtime.ArgumentGeneration();
+	CHECK(runtime.PrepareArguments({{}, {}, bad, {}}, renderer, diagnostic) == Status::InvalidValue);
+	CHECK(runtime.PrepareArguments({{}, {}, three, {}}, renderer, diagnostic, 1) == Status::LimitExceeded);
+	CHECK(runtime.ArgumentGeneration() == generation);
+	runtime.BeginFrame();
+	CHECK(runtime.Refresh(store, renderer, OWNER, file.Assets) == 0);
+	const auto retained = DownloadBinding(renderer);
+	CHECK(retained.Width == 4);
+	REQUIRE(runtime.PrepareArguments({}, renderer, diagnostic) == Status::Ok);
+	drive(2);
+	CHECK(store.Time().Tick == tick);
+	runtime.Clear(renderer);
+	uint32_t width = 0, height = 0;
+	CHECK_FALSE(renderer.TextureSize(TEXTURE, width, height, OWNER));
 }
