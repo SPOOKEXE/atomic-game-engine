@@ -49,6 +49,8 @@ Milestone labels describe development scope, not release versions.
 
 Priority: Keep image-only work in v0.26. Audio, mesh, animation and custom-profile work is scheduled for v0.27.
 
+This branch preserves the full ImageGraph checkpoint for review. The intended first integration creates 2D images consumable by particles, ImageLabels and existing image consumers, with basic image transform and composition nodes. 3D, audio and broad simulation features are excluded from that first integration. The preserved full work is not the accepted minimal implementation.
+
 Pixel Composer foundations:
 
 - [x] Retain the source licence, pinned metadata, enum choices and typed shader inputs; preserve static selectors and source records; save instance ports, graph selectors and cooked-shader references.
