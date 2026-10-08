@@ -38,9 +38,8 @@ Milestone labels describe development scope, not release versions.
 
 ### v0.25
 
-Priority: Finish the imagegraph fundamental system first. Pause separate audio, mesh and animation work until it is complete, then revisit those tracks.
+Priority: Finish the imagegraph fundamental system in v0.25. Separate audio, mesh, animation and custom-profile work is scheduled for v0.26.
 
-- [_] Add custom profiles such as RenderPipeline: let RunProfileWorkflow select a workflow, expose its inputs and outputs as node ports, and open its inspector popup on double-click.
 
 Pixel Composer foundations:
 
@@ -130,16 +129,13 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Establish exact parity with a licensed reference build and matched captures.
 - [_] Finish Composer font loading.
 - [x] Verify shared-alias Dopesheet drag, Delete, copy, fractional scale, collisions, cancellation and undo/redo in headless gestures.
-- [_] Verify shared-alias Dopesheet workflows in live Studio.
 - [_] Finish Studio host workflows.
-- [_] Finish audio workflows.
 - [_] Finish cache groups.
 - [_] Finish export formats.
 - [_] Finish feedback seek/reset and fractional-key playback.
 - [x] Preserve signed observed Cache clocks, Cache Array ranges and source resize ordering; pass joined checks.
 - [_] Finish fractional cache playback.
 - [_] Finish large-sequence playback.
-- [_] Finish mesh consumers and bindings.
 - [_] Finish remaining PXC edits.
 - [x] Finish selected-cache Clear.
 - [_] Finish text layout and rendering.
@@ -151,7 +147,6 @@ Pixel Composer [M0 to M7](docs/to-delete/v026-pixel-composer.md):
 - [_] Integrate Studio camera previews.
 - [_] Integrate camera rendering.
 - [_] Load saved frame caches.
-- [_] Preserve X/Y animation through groups and PXC edits.
 - [x] Profile native wrapped-text measurement workloads.
 - [x] Validate Hilbert and Kisrhombille generators, grouping, image formats and bounded execution.
 - [_] Validate all integrated changes with joined CPU tests.
@@ -175,6 +170,11 @@ Isolated passes do not establish combined acceptance. See the [native validation
 
 ### v0.26
 
+- [_] Add custom profiles such as RenderPipeline: let RunProfileWorkflow select a workflow, expose its inputs and outputs as node ports, and open its inspector popup on double-click.
+- [_] Verify shared-alias Dopesheet workflows in live Studio.
+- [_] Finish audio workflows.
+- [_] Finish mesh consumers and bindings.
+- [_] Preserve X/Y animation through groups and PXC edits.
 - [_] Check whether shaderc needs glslang's deprecated HLSL front-end; disable `ENABLE_HLSL` if unused.
 - [_] Check whether shaderc needs glslang's deprecated HLSL front-end; disable `ENABLE_HLSL` if unused.
 - [_] Remove dead engine code and obsolete compatibility paths.
