@@ -221,6 +221,7 @@ namespace client {
 				for (const char *name :
 					 {"poll_capture",
 					  "get_resource",
+					  "save_resource",
 					  "release_capture",
 					  "cancel_capture",
 					  "poll_view_camera_mutation",

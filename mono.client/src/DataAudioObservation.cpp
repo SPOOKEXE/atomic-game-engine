@@ -180,9 +180,12 @@ namespace client {
 				{"source_state", "a retained voice ended before this completed mixer block"}
 			);
 		}
-		bool omittedEvents = false;
+		const auto refused = std::find_if(audio.Events.begin(), audio.Events.end(), [](const auto &event) {
+			return event.Status != engine::audio::PlaybackStatus::Applied;
+		});
+		bool omittedEvents = refused != audio.Events.end();
 		for (const auto &event : audio.Events) {
-			if (incompleteSources) {
+			if (incompleteSources || refused != audio.Events.end()) {
 				omittedEvents = true;
 				break;
 			}
@@ -206,11 +209,15 @@ namespace client {
 		}
 		if (omittedEvents) {
 			// The record contract represents event completeness as all or missing.
-			// Retaining only the named subset would look complete to a trainer.
+			// Version 1 cannot label refused dispatches. Retaining only accepted or
+			// named events would claim a complete history that was never captured.
 			observation.Events.clear();
-			observation.Missing.push_back(
-				{"events", "unidentified internal graph command was omitted from the durable record"}
-			);
+			const std::string reason =
+				refused != audio.Events.end()
+					? "audio command " + refused->Kind + " refused: " + refused->RefusalReason +
+						  "; audio_observation/v1 does not encode dispatch outcomes"
+					: "unidentified internal graph command was omitted from the durable record";
+			observation.Missing.push_back({"events", reason});
 		}
 		if (!engine::script::ValidateDataAudioObservation(observation, detail)) return false;
 		std::scoped_lock lock(Mutex);

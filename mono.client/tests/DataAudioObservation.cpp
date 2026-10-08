@@ -706,3 +706,217 @@ TEST_CASE(
 	CHECK(stale.at("status") == "version_conflict");
 	CHECK(stale.at("current_world_version") == current.WorldVersion + 1);
 }
+
+TEST_CASE(
+	"captured seek events retain durable names through the audio observation JSON handoff",
+	"[client][audio][data-factory][seek_observation]"
+) {
+	client::DataAudioObservationHost host;
+	Rendered rendered = RenderTone();
+	auto &mixer = rendered.Device->Mixer();
+	const uint64_t beginSample = rendered.Device->Rendered();
+	engine::audio::Command command;
+	command.Kind = engine::audio::CommandKind::SetSound;
+	command.Target = rendered.Player;
+	command.AtSample = beginSample;
+	command.PlaybackGeneration = 9;
+	command.Sound =
+		std::make_shared<const engine::audio::SampleBuffer>(mixer.Format(), std::vector<float>(2048, 0.25f));
+	REQUIRE(mixer.Commands().Post(command));
+	command = {};
+	command.Kind = engine::audio::CommandKind::Seek;
+	command.Target = rendered.Player;
+	command.AtSample = beginSample + 3;
+	command.CursorFrames = 1.5;
+	command.PlaybackGeneration = 9;
+	REQUIRE(mixer.Commands().Post(command));
+	command.Kind = engine::audio::CommandKind::Play;
+	REQUIRE(mixer.Commands().Post(command));
+	REQUIRE(rendered.Device->Advance() > 0);
+	CHECK(rendered.Device->LastBlock().Frame(2)[0] == 0.0f);
+	CHECK(rendered.Device->LastBlock().Frame(3)[0] == 0.25f);
+
+	std::string detail;
+	host.ResetTickClock(ClockAt(0), 48'000);
+	const std::vector<client::AudioObservationSourceBinding> sources{
+		{"fixture/seek-source", rendered.Player}
+	};
+	const bool published =
+		host.Publish(Clock(), mixer, rendered.Device->LastBlock(), Report(rendered), sources, detail);
+	INFO(detail);
+	REQUIRE(published);
+	engine::script::DataAudioObservationBridgeResult captured;
+	REQUIRE(host.Capture("data-audio.world", captured, detail));
+	REQUIRE(captured.Status == "ok");
+	REQUIRE(engine::script::ValidateDataAudioObservation(captured.Observation, detail));
+	const auto seek = std::find_if(
+		captured.Observation.Events.begin(), captured.Observation.Events.end(), [](const auto &event) {
+			return event.Kind == "seek";
+		}
+	);
+	REQUIRE(seek != captured.Observation.Events.end());
+	CHECK(seek->SourceId == "fixture/seek-source");
+	CHECK(seek->RequestedSample == beginSample + 3);
+	CHECK(seek->AppliedSample == beginSample + 3);
+	CHECK(seek->SampleOffsetFrames == 3);
+	CHECK(seek->Timing == "exact");
+	CHECK(seek->FinishProvenance.empty());
+
+	const nlohmann::json wire =
+		nlohmann::json::parse(engine::control::audio_observation_detail::Record(captured.Observation).dump());
+	const auto &events = wire.at("events");
+	const auto wireSeek = std::find_if(events.begin(), events.end(), [](const auto &event) {
+		return event.at("kind") == "seek";
+	});
+	REQUIRE(wireSeek != events.end());
+	CHECK(wireSeek->at("source_id") == "fixture/seek-source");
+	CHECK(wireSeek->at("requested_sample") == beginSample + 3);
+	CHECK(wireSeek->at("applied_sample") == beginSample + 3);
+	CHECK(wireSeek->at("sample_offset_frames") == 3);
+	CHECK(wireSeek->at("related_source_id").is_null());
+	CHECK(wireSeek->at("finish_provenance").is_null());
+	CHECK(wireSeek->size() == 9);
+	CHECK_FALSE(wireSeek->contains("status"));
+	CHECK_FALSE(wireSeek->contains("node_id"));
+	CHECK_FALSE(wireSeek->contains("target"));
+	CHECK_FALSE(wireSeek->contains("playback_generation"));
+
+	std::vector<std::byte> waveform;
+	REQUIRE(host.ReadWaveform(
+		"data-audio.world",
+		captured.Observation.Waveform.ResourceId,
+		captured.Observation.Waveform.Sha256,
+		0,
+		static_cast<size_t>(captured.Observation.Waveform.ByteLength),
+		waveform,
+		detail
+	));
+	CHECK(waveform.size() == captured.Observation.Waveform.ByteLength);
+}
+
+TEST_CASE(
+	"audio observation version one marks the whole event history missing after refusals",
+	"[client][audio][data-factory][refused_capture]"
+) {
+	client::DataAudioObservationHost host;
+	Rendered rendered = RenderTone();
+	auto &mixer = rendered.Device->Mixer();
+	const uint64_t beginSample = rendered.Device->Rendered();
+	engine::audio::Command command;
+	command.Kind = engine::audio::CommandKind::SetSound;
+	command.Target = rendered.Player;
+	command.AtSample = beginSample;
+	command.PlaybackGeneration = 2;
+	command.Sound =
+		std::make_shared<const engine::audio::SampleBuffer>(mixer.Format(), std::vector<float>(2048, 0.25f));
+	REQUIRE(mixer.Commands().Post(command));
+	command.Sound.reset();
+	command.Kind = engine::audio::CommandKind::Play;
+	REQUIRE(mixer.Commands().Post(command));
+	command.Kind = engine::audio::CommandKind::Seek;
+	command.AtSample = beginSample + 3;
+	command.CursorFrames = -1.0;
+	REQUIRE(mixer.Commands().Post(command));
+	command.AtSample = beginSample + 4;
+	command.CursorFrames = 2.0;
+	command.PlaybackGeneration = 1;
+	REQUIRE(mixer.Commands().Post(command));
+	command.Kind = engine::audio::CommandKind::SetGain;
+	command.Value = 0.0f;
+	command.AtSample = beginSample + 5;
+	REQUIRE(mixer.Commands().Post(command));
+	command.Kind = engine::audio::CommandKind::Stop;
+	command.AtSample = beginSample + 6;
+	command.PlaybackGeneration = 2;
+	REQUIRE(mixer.Commands().Post(command));
+	REQUIRE(rendered.Device->Advance() > 0);
+	CHECK(rendered.Device->LastBlock().Frame(5)[0] == 0.25f);
+	CHECK(rendered.Device->LastBlock().Frame(6)[0] == 0.0f);
+
+	std::string detail;
+	host.ResetTickClock(ClockAt(0), 48'000);
+	const std::vector<client::AudioObservationSourceBinding> sources{
+		{"fixture/refused-source", rendered.Player}
+	};
+	const bool published =
+		host.Publish(Clock(), mixer, rendered.Device->LastBlock(), Report(rendered), sources, detail);
+	INFO(detail);
+	REQUIRE(published);
+	engine::script::DataAudioObservationBridgeResult captured;
+	REQUIRE(host.Capture("data-audio.world", captured, detail));
+	REQUIRE(engine::script::ValidateDataAudioObservation(captured.Observation, detail));
+	CHECK(captured.Observation.Events.empty());
+	REQUIRE(captured.Observation.Sources.size() == 1);
+	CHECK(captured.Observation.Sources[0].SourceId == "fixture/refused-source");
+	CHECK_FALSE(captured.Observation.Sources[0].Playing);
+	CHECK(captured.Observation.Sources[0].Gain == 1.0);
+	CHECK(captured.Observation.Waveform.Available);
+	const auto missing = std::find_if(
+		captured.Observation.Missing.begin(), captured.Observation.Missing.end(), [](const auto &item) {
+			return item.Field == "events";
+		}
+	);
+	REQUIRE(missing != captured.Observation.Missing.end());
+	CHECK(
+		missing->Reason ==
+		"audio command seek refused: invalid_cursor; audio_observation/v1 does not encode dispatch outcomes"
+	);
+	CHECK(missing->Reason.size() < engine::script::MAX_AUDIO_OBSERVATION_STRING_BYTES);
+	const auto wire =
+		nlohmann::json::parse(engine::control::audio_observation_detail::Record(captured.Observation).dump());
+	CHECK(wire.at("events").empty());
+	CHECK(wire.at("sources").size() == 1);
+	std::vector<std::byte> waveform;
+	REQUIRE(host.ReadWaveform(
+		"data-audio.world",
+		captured.Observation.Waveform.ResourceId,
+		captured.Observation.Waveform.Sha256,
+		0,
+		static_cast<size_t>(captured.Observation.Waveform.ByteLength),
+		waveform,
+		detail
+	));
+	CHECK(waveform.size() == captured.Observation.Waveform.ByteLength);
+
+	// A later accepted block regains a complete history; refusal missingness is local.
+	command = {};
+	command.Target = rendered.Player;
+	command.AtSample = rendered.Device->Rendered();
+	command.PlaybackGeneration = 2;
+	command.Kind = engine::audio::CommandKind::Rewind;
+	REQUIRE(mixer.Commands().Post(command));
+	command.Kind = engine::audio::CommandKind::Play;
+	REQUIRE(mixer.Commands().Post(command));
+	command.Kind = engine::audio::CommandKind::Seek;
+	command.AtSample += 3;
+	command.CursorFrames = 2.5;
+	REQUIRE(mixer.Commands().Post(command));
+	REQUIRE(rendered.Device->Advance() > 0);
+	const bool laterPublished =
+		host.Publish(ClockAt(8), mixer, rendered.Device->LastBlock(), Report(rendered), sources, detail);
+	INFO(detail);
+	REQUIRE(laterPublished);
+	engine::script::DataAudioObservationBridgeResult later;
+	REQUIRE(host.Capture("data-audio.world", later, detail));
+	REQUIRE(engine::script::ValidateDataAudioObservation(later.Observation, detail));
+	CHECK(later.Observation.Events.size() == 3);
+	CHECK(
+		std::none_of(
+			later.Observation.Missing.begin(), later.Observation.Missing.end(), [](const auto &item) {
+				return item.Field == "events";
+			}
+		)
+	);
+	CHECK(captured.Observation.Events.empty());
+	std::vector<std::byte> retainedWaveform;
+	REQUIRE(host.ReadWaveform(
+		"data-audio.world",
+		captured.Observation.Waveform.ResourceId,
+		captured.Observation.Waveform.Sha256,
+		0,
+		static_cast<size_t>(captured.Observation.Waveform.ByteLength),
+		retainedWaveform,
+		detail
+	));
+	CHECK(retainedWaveform == waveform);
+}
