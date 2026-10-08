@@ -1,0 +1,606 @@
+{
+  "phase": "bounded-source-path-wave",
+  "date": "2026-10-08",
+  "acceptance": {
+    "batch": 61,
+    "accepted": true,
+    "scope": "shared working tree, owned Wave changes with other existing uncommitted work",
+    "native_binary_cases": 6156,
+    "startup_cases": 1,
+    "python_cases": 116,
+    "cli_cases": 16
+  },
+  "source_commit": "b69eca232217360cf1502ef0223523d818606652",
+  "source_scripts": {
+    "scripts/node_path_wave/node_path_wave.gml": "2dbf6031262d5082bac64c6df55048ee58375f05cc4908fb3118f1bb7cf99872",
+    "scripts/random_function/random_function.gml": "a0ba588c5e89a7a87b5657eccd63345a733c831e3eb86e5a2c2332a457be4e0a"
+  },
+  "summary": "Bounded native Wave Path controls, sampled getters, owned replay buffers/cache, native/PXC persistence and optimized workload validation. No licensed or GPU pixel-parity claim.",
+  "coverage": {
+    "core_wave_cases": 15,
+    "rng_source_fixture_cases": 5,
+    "optimized_wave_workload_cases": 1,
+    "io_wave_cases": 5,
+    "physical_inputs": 25,
+    "iteration_profile": [
+      0,
+      4096
+    ],
+    "rng_profile": "admitted HTML5 random functions and pinned source helpers",
+    "controls": "source curves, range gates, modes, normal/fixed direction, weights, seeds and processor rows",
+    "state": "six-decimal cache identity, retained point classes/Z, buffer refresh, atomic refusal and signed fractional replay ordering",
+    "io": "all physical bindings preserved; native/PXC save and reopen, animation edits, groups, arrays, linked controls, malformed descriptor refusal"
+  },
+  "owned_source_hashes": {
+    "mono.engine/imagegraph/include/engine/imagegraph/Document.hpp": "fd99f70ec708a9543538b396ea6c1ab63e86cbe92b45d40c4837750bdf23f7e4",
+    "mono.engine/imagegraph/include/engine/imagegraph/StatefulTemporalCone.hpp": "07cee81d66354b520bac17372a6d3f403d46286ea3d80f0f99ffde0d1498e9da",
+    "mono.engine/imagegraph/src/Document.cpp": "02789b5652a259def0f528a1d9096a47a536ec16cf95d0889a2be3ef3a743336",
+    "mono.engine/imagegraph/src/NodeExecutors.cpp": "0ef220970402765500c5df9ba053d149133aa57231079fa1d6f98ccbe04a80bb",
+    "mono.engine/imagegraph/src/ProcessorBatch.cpp": "41a8fae51947b04c7208f2055d109c746d22555bbd33596fa855dee71ec33ed4",
+    "mono.engine/imagegraph/src/SourceMappedInputs.hpp": "8783007e2570174e3104b51db97178e4b7aaaa5df91473d1ee18c866ceb927c1",
+    "mono.engine/imagegraph/src/SourcePathPayload.hpp": "5b7257126c5fffd7ef2426d22aad84bb89652b23805280972d8bbefc8659c169",
+    "mono.engine/imagegraph/src/SourcePathSequentialSync.cpp": "906664ba6c2c3f6f483413f40ae2922a93817917f06eb44e43e22e3a09d854c9",
+    "mono.engine/imagegraph/src/SourcePathShiftMemo.hpp": "c8da98c8972d1d298b8b0614402e73aa240c35c6a718df2b81af87ddf7aaf7bb",
+    "mono.engine/imagegraph/src/SourcePathShiftVisit.hpp": "8b5b4914585cc27f18da1e7acbc2cb0cbb2cd1cc62d43ee464618fc41b65b4ac",
+    "mono.engine/imagegraph/src/SourcePathWeight.cpp": "eb6220acc70b2015cdee6f134e706cf43492229b43229e7a444fc9cf5b52866b",
+    "mono.engine/imagegraph/src/SourcePathWaveCodec.hpp": "e71485affc038d413b7b864458f5cffb07aa7ddf855aed861ecc0962f81a3aa8",
+    "mono.engine/imagegraph/src/SourcePathWavePayload.hpp": "9e9d241522d47d59187f1083c055c3401497310d6be0c81acebe21cc7cac1409",
+    "mono.engine/imagegraph/src/SourcePathWaveRandom.hpp": "330d46422e9b30b5a8f1175c08556cb33af3f9969701bae85788a3a6a3c8370e",
+    "mono.engine/imagegraph/src/SourcePathWaveRuntime.hpp": "0b336325a3ccfb4b79a39609757d2dbe795bca303c51112759509fc98f3da761",
+    "mono.engine/imagegraph/src/nodes/Path.hpp": "9c3a8eda1e223a218b2660622b5970fb65a14490291bcde784e46fdad9c8bbbb",
+    "mono.engine/imagegraph/src/nodes/SourcePathGeometryNodes.cpp": "43ceeeb5937e50c8c917197d1e01091c6ebf193435cbfeaa8391b4105aa4abec",
+    "mono.engine/imagegraph/src/nodes/SourcePathWaveNodes.cpp": "c5b1788ad7b547390c9bf60aa0dedeb511eee6985ed848b956a62ab8524b8bf1",
+    "mono.engine/imagegraph/src/nodes/SourcePathWaveNodes.hpp": "24f9a2ba9401b1c4a33581012cacc7ec8e3ef966566c47825bac584ace299fba",
+    "mono.engine/imagegraph/tests/SourcePathWave.cpp": "61b17e985546458569c67a8130787d60ffc0f3a8b3b2558f7cd0dfdaae35b0f9",
+    "mono.engine/imagegraph/tests/SourcePathWaveRandom.cpp": "59528ecadcdf0a0e84fff220a4052a3543d63771dcf14210a544985db6638034",
+    "mono.engine/imagegraph/tests/SourcePathWaveWorkloads.cpp": "2fe84228f29e21e5664f3138235efe132975f40ce85d80f84715a29d5c06c74e",
+    "mono.engine/imagegraphio/tests/PxcxPathWave.cpp": "632820cd405eae7ee565edbd7ee7efd8d26088bde12ed44f210203d060986289"
+  },
+  "builds": [
+    {
+      "batch": 60,
+      "preset": "release-tests",
+      "exit_code": 0,
+      "elapsed_seconds": 986.27,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch60.log",
+      "log_sha256": "79b203fa45cfff5ddcb1ae314de396914d5a14114d8ef7e4440e5cb462ac0db9",
+      "keep_going": true
+    },
+    {
+      "batch": 60,
+      "preset": "profile",
+      "exit_code": 0,
+      "elapsed_seconds": 1036.85,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch60.log",
+      "log_sha256": "7723ab7744c821e0188fb401e569adeb2a16fae0cecea9780c91b185974ccb6c",
+      "keep_going": true
+    },
+    {
+      "batch": 61,
+      "preset": "release-tests",
+      "exit_code": 0,
+      "elapsed_seconds": 610.13,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-release-tests-build-batch61.log",
+      "log_sha256": "c3343f763ea5db3cf1a77edba9e21af1a058d30ebfef0ec7be9b384b86cb5c60",
+      "keep_going": true
+    },
+    {
+      "batch": 61,
+      "preset": "profile",
+      "exit_code": 0,
+      "elapsed_seconds": 849.3,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-build-batch61.log",
+      "log_sha256": "7b0dd3829278f1857f602dcde2ceab2f8cf3b3b4ce9c2127fa34eb669726b13e",
+      "keep_going": true
+    }
+  ],
+  "checks": [
+    {
+      "name": "bake",
+      "exit_code": 0,
+      "cases": 161,
+      "assertions": 15997,
+      "binary": ".cache/build/release-tests/tests/test_bake",
+      "binary_sha256": "14ae7bda292487563e308c269c9372c2b0bd5dc22f8b008119e0b003b5462e97",
+      "binary_sha256_after": "14ae7bda292487563e308c269c9372c2b0bd5dc22f8b008119e0b003b5462e97",
+      "binary_changed_during_test": false,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-bake-batch61.log",
+      "log_sha256": "294051319da280211b6d6ccde0fd11d01dfb0711e3fd5d8d718cc11c862ef3b1"
+    },
+    {
+      "name": "physics",
+      "exit_code": 0,
+      "cases": 43,
+      "assertions": 715,
+      "binary": ".cache/build/release-tests/tests/test_imagegraphphysics",
+      "binary_sha256": "2e8f73071027618906c5cc0592cc1cdde3ef38094f1771a288ab81c3575a2861",
+      "binary_sha256_after": "2e8f73071027618906c5cc0592cc1cdde3ef38094f1771a288ab81c3575a2861",
+      "binary_changed_during_test": false,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-physics-batch61.log",
+      "log_sha256": "837019d3612715863c06b1bf734f0187d49909bdacf44ca6614934eb9eecc2a5"
+    },
+    {
+      "name": "runner",
+      "exit_code": 0,
+      "cases": 29,
+      "assertions": 296,
+      "binary": ".cache/build/release-tests/tests/test_imagegraph_runner",
+      "binary_sha256": "91ac6b1db0c951c6e9463e9874ca76ef56459837317d5def402e90ab4632788b",
+      "binary_sha256_after": "91ac6b1db0c951c6e9463e9874ca76ef56459837317d5def402e90ab4632788b",
+      "binary_changed_during_test": false,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-runner-batch61.log",
+      "log_sha256": "414f3db51713988d120fc41d88342814a2cb036a4339f88ae05371549abd10fb"
+    },
+    {
+      "name": "font",
+      "exit_code": 0,
+      "cases": 43,
+      "assertions": 1845,
+      "binary": ".cache/build/release-tests/tests/test_imagegraphfont",
+      "binary_sha256": "f413d913d7daac2009886c5122f8989ede9f34abc12a04d53ef66909241d7221",
+      "binary_sha256_after": "f413d913d7daac2009886c5122f8989ede9f34abc12a04d53ef66909241d7221",
+      "binary_changed_during_test": false,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-font-batch61.log",
+      "log_sha256": "e1f255998f242058fdab256143a0ab3065e03789976e219c208a28cad210742a"
+    },
+    {
+      "name": "export",
+      "exit_code": 0,
+      "cases": 95,
+      "assertions": 3401,
+      "binary": ".cache/build/release-tests/tests/test_imagegraphexport",
+      "binary_sha256": "d5b4a5caccfc927528a12fd6d4356c4ad6311c17cf1f6e8d31d180cf207cebda",
+      "binary_sha256_after": "d5b4a5caccfc927528a12fd6d4356c4ad6311c17cf1f6e8d31d180cf207cebda",
+      "binary_changed_during_test": false,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-export-batch61.log",
+      "log_sha256": "9d594f3ccc9be954ae3cbd2c9d0caec0bcf415dc847e0be82ad94a2de14cb139"
+    },
+    {
+      "name": "render",
+      "exit_code": 0,
+      "cases": 33,
+      "assertions": 2005,
+      "binary": ".cache/build/release-tests/tests/test_render",
+      "binary_sha256": "0a5e100849469144e6771c969ed9608bb86f77e8359b3c9ebe9626f321ce8fdc",
+      "binary_sha256_after": "0a5e100849469144e6771c969ed9608bb86f77e8359b3c9ebe9626f321ce8fdc",
+      "binary_changed_during_test": false,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-render-batch61.log",
+      "log_sha256": "510a94872c3d4b32f61418c1cb827ec24892f856ec26a9323f30a91544d5373d"
+    },
+    {
+      "name": "cli",
+      "exit_code": 0,
+      "ctest_cases": 16,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-cli-batch61.log",
+      "log_sha256": "07081aeb37711110c1da9e16ca287d1b490d3da1816e36b21856852d4902dbf7"
+    },
+    {
+      "name": "io",
+      "exit_code": 0,
+      "cases": 390,
+      "assertions": 16911,
+      "binary": ".cache/build/release-tests/tests/test_imagegraphio",
+      "binary_sha256": "4fe79b1aef468e3c1e32a514888c6a63fd7a75797004cd562a82c8aab4248c67",
+      "binary_sha256_after": "4fe79b1aef468e3c1e32a514888c6a63fd7a75797004cd562a82c8aab4248c67",
+      "binary_changed_during_test": false,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-io-batch61.log",
+      "log_sha256": "0a7fb2ef2fe0b6bf43bd53cd0dd4536bd203d2b9f3686ab49148e039f9525011"
+    },
+    {
+      "name": "core",
+      "exit_code": 0,
+      "cases": 3713,
+      "assertions": 2359828,
+      "binary": ".cache/build/release-tests/tests/test_imagegraph",
+      "binary_sha256": "08e3df6c4e5661347dfa3a6fd48ef5aa1fa03b0925162f852936874047acab23",
+      "binary_sha256_after": "08e3df6c4e5661347dfa3a6fd48ef5aa1fa03b0925162f852936874047acab23",
+      "binary_changed_during_test": false,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-core-batch61.log",
+      "log_sha256": "cb5ebf789415a0b457cffa11825a7b94665e0eb8a9b6ce17cc7dbbaed3917e72"
+    },
+    {
+      "name": "assetc",
+      "exit_code": 0,
+      "cases": 49,
+      "assertions": 563,
+      "binary": ".cache/build/release-tests/tests/test_assetc",
+      "binary_sha256": "255bcfa1a4cae4757fc6ca2b4036867c160268d696e09cf90bb732942734a050",
+      "binary_sha256_after": "255bcfa1a4cae4757fc6ca2b4036867c160268d696e09cf90bb732942734a050",
+      "binary_changed_during_test": false,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-assetc-batch61.log",
+      "log_sha256": "ca23d3c913e2ab7f08069a04a464b9331a0f9cb12515efaf648ed7d05b0138e4"
+    },
+    {
+      "name": "client",
+      "exit_code": 0,
+      "cases": 359,
+      "assertions": 23853,
+      "binary": ".cache/build/release-tests/tests/test_client",
+      "binary_sha256": "9a67dfbfb003ac6db807499b9bae38c1a42c0d7348bb53c44ce2fd3e72352346",
+      "binary_sha256_after": "9a67dfbfb003ac6db807499b9bae38c1a42c0d7348bb53c44ce2fd3e72352346",
+      "binary_changed_during_test": false,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-client-batch61.log",
+      "log_sha256": "fd98a2682cef62d72ff24af1b8d1b3839d5deb71071f65fa8064b92c14774949"
+    },
+    {
+      "name": "studio",
+      "exit_code": 0,
+      "cases": 1159,
+      "assertions": 51329,
+      "binary": ".cache/build/release-tests/tests/test_studio",
+      "binary_sha256": "68580473350a14ac82f8969dc6c0b7944d84f6372be3ff99f0985b751200a3d7",
+      "binary_sha256_after": "68580473350a14ac82f8969dc6c0b7944d84f6372be3ff99f0985b751200a3d7",
+      "binary_changed_during_test": false,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-studio-batch61.log",
+      "log_sha256": "e36faff7d49cdcdbfc2ab35f99cf9f6d9f44ab80d44988f9e04c8ca21ac83845"
+    },
+    {
+      "name": "nodegraph",
+      "exit_code": 0,
+      "cases": 42,
+      "assertions": 410,
+      "binary": ".cache/build/release-tests/tests/test_nodegraph",
+      "binary_sha256": "d19323ed3d7ea072195cd77ed603a1be05e93c5d66d01c834e74b463d4ff748d",
+      "binary_sha256_after": "d19323ed3d7ea072195cd77ed603a1be05e93c5d66d01c834e74b463d4ff748d",
+      "binary_changed_during_test": false,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-nodegraph-batch61.log",
+      "log_sha256": "45641d1c35f026d01bd2747619931a3dc8136df99c236b2e187a05a27574b1fb"
+    },
+    {
+      "name": "ui",
+      "exit_code": 0,
+      "cases": 40,
+      "assertions": 704,
+      "binary": ".cache/build/release-tests/tests/test_ui",
+      "binary_sha256": "c8f0e14bc7df069a82ebdb2fb8bff0f1cb68ed1b8f06d1d7dbcd01e3cc4a60b6",
+      "binary_sha256_after": "c8f0e14bc7df069a82ebdb2fb8bff0f1cb68ed1b8f06d1d7dbcd01e3cc4a60b6",
+      "binary_changed_during_test": false,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-ui-batch61.log",
+      "log_sha256": "2b6ce1947a9007f1563caf15112ab35196caab2f7b43d016e660e24bc6e07c43"
+    },
+    {
+      "name": "startup",
+      "exit_code": 0,
+      "cases": 1,
+      "assertions": 5,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-startup-batch61.log",
+      "log_sha256": "dee997f8c50a8cfbfdb41cda82e45ce28b0bc20c0237cadbae3bb6a3150bb68b"
+    },
+    {
+      "name": "lint",
+      "exit_code": 0,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-lint-batch61.log",
+      "log_sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "name": "architecture",
+      "exit_code": 0,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-architecture-batch61.log",
+      "log_sha256": "e2920b48a3c7c18b9bb66b525c591a2eb61a1986c17204060ce321e87ea6ff4f"
+    },
+    {
+      "name": "python",
+      "exit_code": 0,
+      "python_cases": 116,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-python-batch61.log",
+      "log_sha256": "11954b50465a7e2dca279d9bae0b540ac614427ac1f6b21c110e828daf4f67fe"
+    },
+    {
+      "name": "format",
+      "exit_code": 0,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-format-batch61.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "name": "diff",
+      "exit_code": 0,
+      "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-cpu-diff-batch61.log",
+      "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "optimized_preflight": {
+    "command": [
+      ".cache/build/profile/tests/test_imagegraph",
+      "[imagegraph][path_particle_workloads],[imagegraph][shape_triangulate_workloads],[imagegraph][pixel_kernel_workloads],[imagegraph][path_repeat_workloads],[imagegraph][tile_random_workloads],[imagegraph][path_wave_workloads]"
+    ],
+    "exit_code": 0,
+    "binary_sha256": "479cbb2162362617326fb7792669a293697c1b9aa89c65df91429e74cd2926f2",
+    "binary_sha256_after": "479cbb2162362617326fb7792669a293697c1b9aa89c65df91429e74cd2926f2",
+    "log": ".cache/build/release-tests/evidence/composer-continuation-2026-10-05/parallel-composer-profile-preflight-batch61.log",
+    "log_sha256": "bb404218131a15b314294b647f67722d3f2c73cdf92cc0e51f84ee6d29dfe1ff",
+    "cases": 6,
+    "assertions": 349478
+  },
+  "existing_workload_counter_receipts": {
+    "exit_code": 0,
+    "results": [
+      {
+        "suite": "engine.imagegraph.bench.pixel-kernels",
+        "validated": true,
+        "profiles": 208,
+        "spans": 2067,
+        "sha_before": "98ab5c2975c0da39dc341842c98d54f11dbcce0277ecf1eb4555370c05529254",
+        "sha_after": "98ab5c2975c0da39dc341842c98d54f11dbcce0277ecf1eb4555370c05529254"
+      },
+      {
+        "suite": "engine.imagegraph.bench.path-particle",
+        "validated": true,
+        "profiles": 65,
+        "spans": 7449,
+        "sha_before": "98ab5c2975c0da39dc341842c98d54f11dbcce0277ecf1eb4555370c05529254",
+        "sha_after": "98ab5c2975c0da39dc341842c98d54f11dbcce0277ecf1eb4555370c05529254"
+      },
+      {
+        "suite": "engine.imagegraph.bench.shape-triangulate",
+        "validated": true,
+        "profiles": 26,
+        "spans": 507,
+        "sha_before": "98ab5c2975c0da39dc341842c98d54f11dbcce0277ecf1eb4555370c05529254",
+        "sha_after": "98ab5c2975c0da39dc341842c98d54f11dbcce0277ecf1eb4555370c05529254"
+      },
+      {
+        "validated": true,
+        "binary_sha256": "98ab5c2975c0da39dc341842c98d54f11dbcce0277ecf1eb4555370c05529254",
+        "heap_compiled": 1,
+        "workloads": {
+          "group": {
+            "profiles": 13,
+            "spans": 6006,
+            "operations_per_call": 17,
+            "retained_bytes": [
+              17608,
+              17608,
+              17608,
+              17608,
+              17608
+            ]
+          },
+          "tunnel": {
+            "profiles": 13,
+            "spans": 33995,
+            "operations_per_call": 7,
+            "retained_bytes": [
+              99296,
+              99296,
+              99296,
+              99296,
+              99296
+            ]
+          }
+        }
+      },
+      {
+        "validated": true,
+        "binary_sha256": "98ab5c2975c0da39dc341842c98d54f11dbcce0277ecf1eb4555370c05529254",
+        "preset": "profile",
+        "backend": "cpu",
+        "heap_compiled": 1,
+        "workload": {
+          "profiles": 13,
+          "spans": 468,
+          "owners": 64,
+          "steps_per_call": 16,
+          "completions_per_call": 16,
+          "refusals_per_call": 2,
+          "resets_per_call": 85,
+          "state_fnv": "3059338748087447014",
+          "retained_bytes": 11112
+        }
+      }
+    ],
+    "errors": [],
+    "stderr": "",
+    "workload_variants": 26,
+    "profile_calls": 338,
+    "total_spans": 50492,
+    "timing_output": "kept in memory only; no benchmark timing file"
+  },
+  "source_stability": {
+    "paths": 4286,
+    "changed": []
+  },
+  "failed_predecessor": {
+    "batch": 60,
+    "failed_checks": [
+      {
+        "name": "io",
+        "exit_code": 42,
+        "cases": [
+          {
+            "case": "PXC Wave maps complete controls and preserves compound edits through reopen",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPathWave.cpp",
+                "line": 217
+              }
+            ]
+          },
+          {
+            "case": "PXC Wave linked and array ranges retain grouping and seeded replay",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraphio/tests/PxcxPathWave.cpp",
+                "line": 453
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "core",
+        "exit_code": 42,
+        "cases": [
+          {
+            "case": "Point UV mapping compiles and evaluates authored source coordinate arrays",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePointsNodes.cpp",
+                "line": 110
+              }
+            ]
+          },
+          {
+            "case": "Captured Array Sample calls preserve selected values through durable replay",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/ArraySampleBuiltin.cpp",
+                "line": 69
+              }
+            ]
+          },
+          {
+            "case": "Owned tileset arrays retain order through persisted Any group boundaries and budget refusal",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceTileNodes.cpp",
+                "line": 398
+              }
+            ]
+          },
+          {
+            "case": "Authored WAV channels survive graph resolution and export interleaved samples",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/WavExport.cpp",
+                "line": 260
+              },
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/WavExport.cpp",
+                "line": 260
+              }
+            ]
+          },
+          {
+            "case": "Wave stateful refresh clears sampled positions and preserves child getter buffers",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePathWave.cpp",
+                "line": 387
+              }
+            ]
+          },
+          {
+            "case": "Area Warp typed control arrays retain nested payloads and reject mismatched leaves",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceAreaWarp.cpp",
+                "line": 370
+              }
+            ]
+          },
+          {
+            "case": "Source simple shape enabled array rows retain selected centres through persistence",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSimpleShapeNodes.cpp",
+                "line": 202
+              }
+            ]
+          },
+          {
+            "case": "Wave multiline processor workload records deterministic seeded samples and cache hits",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePathWaveWorkloads.cpp",
+                "line": 279
+              }
+            ]
+          },
+          {
+            "case": "Wave metrics use range endpoints and distance divides by line zero length",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourcePathWave.cpp",
+                "line": 196
+              }
+            ]
+          },
+          {
+            "case": "HLSL vector array captures preserve numeric uniform rows",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceHlslSockets.cpp",
+                "line": 317
+              }
+            ]
+          },
+          {
+            "case": "Source simple shape Reference vectors use the first Dimension getter row",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSimpleShapeNodes.cpp",
+                "line": 340
+              }
+            ]
+          },
+          {
+            "case": "Source shape Dimension surface arrays project before Reference units",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceSimpleShapeNodes.cpp",
+                "line": 400
+              }
+            ]
+          },
+          {
+            "case": "Source mapped bevel selects nested rows without rounding the source depth-two input",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.engine/imagegraph/tests/SourceBevelNodes.cpp",
+                "line": 215
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "studio",
+        "exit_code": 42,
+        "cases": [
+          {
+            "case": "nested Boolean array inspector edits leaf and restores exact shape with undo",
+            "assertions": [
+              {
+                "source": "/home/declan/Documents/GitHub/atomic-game-engine/mono.studio/tests/ImageGraphArrayEditor.cpp",
+                "line": 140
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "format",
+        "exit_code": 1,
+        "cases": []
+      }
+    ],
+    "additional_issues": [
+      "optimized Wave fixture uses unsupported Enum arrays instead of integer source-choice rows",
+      "two new signedness warnings in workload span counters"
+    ],
+    "optimized_preflight": {
+      "cases": 6,
+      "passed": 5,
+      "failed": 1,
+      "assertions": 338855,
+      "failed_assertions": 1
+    },
+    "repairs": [
+      "Restore the accidentally changed generic nested-array ReadValue flag; existing array save/reopen and Studio undo behavior passes again.",
+      "Use supported Integer arrays for source enum controls in the workload fixture.",
+      "Correct source line-zero bounds and the Wave-plus-sampler temporal processor count in tests.",
+      "Keep synthetic curve-toggle edits outside the physical socket edit API; test atomic refusal and preservation of source attributes.",
+      "Replace incidental positional inequality with exact row control/seed and save/reopen checks.",
+      "Format all owned C++ paths and correct signedness in workload counters."
+    ],
+    "accepted": false
+  },
+  "limitations": [
+    "Negative iteration behavior in the pinned executable is unverified and is explicitly refused by this bounded profile.",
+    "Source constructor seed observation is required unless an explicit numeric seed is authored.",
+    "PxcxInputValueEdit does not invert synthetic amplitude_curved/angle_curved attributes; those edits refuse atomically and saved source attributes remain preserved.",
+    "Desktop RNG and licensed executable parity are unverified.",
+    "Live Studio verification was not run; offscreen Vulkan checks were previously authorized.",
+    "Other uncommitted work exists in the shared tree. The isolated committed tree was not separately rebuilt."
+  ]
+}

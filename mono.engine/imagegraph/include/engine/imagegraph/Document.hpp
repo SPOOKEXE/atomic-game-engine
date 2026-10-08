@@ -280,7 +280,8 @@ namespace engine::imagegraph {
 		Smoothen,
 		Bake,
 		Spiral,
-		Repeat
+		Repeat,
+		Wave
 	};
 	// Shape ratio samples preserve the source analytic curve independently of
 	// sampled chord lengths.
@@ -365,6 +366,19 @@ namespace engine::imagegraph {
 		std::vector<SourcePathSequentialCachePoint> Cache;
 		bool operator==(const SourcePathSpiralData2D &) const = default;
 	};
+	struct SourcePathWaveData2D {
+		Vector2 Range{0, 1}, Frequency{4, 4}, Amplitude{4, 4}, Phase{}, DirectionRange{},
+			WiggleAmplitude{-2, 2}, WeightRange{0, 1};
+		double Seed = 0, AmplitudeShift = 0, IterationFrequency = 2, IterationAmplitude = .7,
+			   IterationShift = 0, WiggleFrequency = 8;
+		int64_t Iteration = 1;
+		bool ClampCurve = false, Loop = false, Wiggle = false, UseWeight = false;
+		uint8_t Direction = 0, Mode = 0, Post = 0, WeightMode = 0;
+		std::vector<double> AmplitudeCurve, DirectionCurve;
+		std::array<SourcePathPointBuffer, 3> Buffers{};
+		std::vector<SourcePathSequentialCachePoint> Cache;
+		bool operator==(const SourcePathWaveData2D &) const = default;
+	};
 	struct SourcePathData2D {
 		SourcePathOperationKind Kind = SourcePathOperationKind::Reverse;
 		std::vector<Path2D> Inputs;
@@ -390,6 +404,7 @@ namespace engine::imagegraph {
 		OwnedPayload3D<SourcePathSequentialData2D> Sequential;
 		OwnedPayload3D<SourcePathBakedData2D> Baked;
 		OwnedPayload3D<SourcePathSpiralData2D> Spiral;
+		OwnedPayload3D<SourcePathWaveData2D> Wave;
 		std::vector<double> WeightCurve;
 		double WeightValue = 0, WeightDirection = 0;
 		Vector2 WeightRange{0, 1};
@@ -431,6 +446,7 @@ namespace engine::imagegraph {
 					   Sequential,
 					   Baked,
 					   Spiral,
+					   Wave,
 					   WeightCurve,
 					   WeightValue,
 					   WeightDirection,
@@ -472,6 +488,7 @@ namespace engine::imagegraph {
 					   other.Sequential,
 					   other.Baked,
 					   other.Spiral,
+					   other.Wave,
 					   other.WeightCurve,
 					   other.WeightValue,
 					   other.WeightDirection,

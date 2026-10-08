@@ -14,6 +14,8 @@ namespace engine::imagegraph::detail {
 			bool SequentialInitialized = false;
 			std::array<SourcePathPointBuffer, 3> SpiralBuffers{};
 			bool SpiralInitialized = false;
+			std::array<SourcePathPointBuffer, 3> WaveBuffers{};
+			bool WaveInitialized = false;
 		};
 		struct Entry {
 			uint64_t OwnerId = 0;
@@ -119,6 +121,32 @@ namespace engine::imagegraph::detail {
 				if (!ValidationProbe) owner.SpiralInitialized = true;
 			}
 			return &owner;
+		}
+		Owner *WaveOwner(NodeContext &context, const SourcePathData2D &operation) {
+			if (!operation.EvaluationMemoId || operation.EvaluationMemoId > Owners.size()) {
+				context.Fail(Status::InvalidValue, "Source Wave path lacks evaluation identity", "path");
+				return nullptr;
+			}
+			const size_t ownerIndex = operation.EvaluationMemoId - 1;
+			if (!Owners[ownerIndex].WaveInitialized) {
+				Owners[ownerIndex].WaveBuffers = operation.Wave->Buffers;
+				if (!ValidationProbe) {
+					for (const auto &point : operation.Wave->Cache) {
+						const auto key = SourceShiftRatioKey(point.Coordinate);
+						if (!key || !Store(
+										context,
+										operation.EvaluationMemoId,
+										*key,
+										point.Line,
+										{point.Point.Position.X, point.Point.Position.Y, point.Point.Weight},
+										point.Coordinate
+									))
+							return nullptr;
+					}
+					Owners[ownerIndex].WaveInitialized = true;
+				}
+			}
+			return &Owners[ownerIndex];
 		}
 		Owner *SequentialOwner(NodeContext &context, const SourcePathData2D &operation) {
 			if (!operation.EvaluationMemoId || operation.EvaluationMemoId > Owners.size()) {

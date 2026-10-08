@@ -20,6 +20,7 @@
 #include "nodes/SourceJpeg.hpp"
 #include "nodes/SourceNoise.hpp"
 #include "nodes/SourceNoiseCube.hpp"
+#include "nodes/SourcePathWaveNodes.hpp"
 #include "nodes/SourcePerlin.hpp"
 #include "nodes/SourcePerlinExtra.hpp"
 #include "nodes/SourcePixelMath.hpp"
@@ -292,7 +293,7 @@ namespace engine::imagegraph::detail {
 					(leaf == ValueType::Font && SourceFontInput(context.Entry.Type, port)) ||
 					(leaf == ValueType::Path3D && port == "path" &&
 					 (context.Entry.Type == "pc.path_sample" || context.Entry.Type == "pc.path_smoothen" ||
-					  context.Entry.Type == "pc.path_spiral")) ||
+					  context.Entry.Type == "pc.path_spiral" || context.Entry.Type == "pc.path_wave")) ||
 					(leaf == ValueType::Atlas && input.Type == ValueType::Image) ||
 					(numeric && (input.Type == ValueType::Scalar || input.Type == ValueType::Integer ||
 								 input.Type == ValueType::Enum || input.Type == ValueType::Boolean ||
@@ -850,7 +851,7 @@ namespace engine::imagegraph::detail {
 						!(kind == ValueType::Path3D && input.Port == "path" &&
 						  (context.Entry.Type == "pc.path_sample" ||
 						   context.Entry.Type == "pc.path_smoothen" ||
-						   context.Entry.Type == "pc.path_spiral")) &&
+						   context.Entry.Type == "pc.path_spiral" || context.Entry.Type == "pc.path_wave")) &&
 						!(kind == ValueType::Atlas && input.Type == ValueType::Image &&
 						  (context.Entry.Type == "pc.wrap_area" || context.Entry.Type == "pc.bend" ||
 						   context.Entry.Type == "pc.pixel_math") &&
@@ -926,6 +927,14 @@ namespace engine::imagegraph::detail {
 			if (!source)
 				return context.Fail(Status::InvalidValue, "Displace requires Surface In", "surface_in");
 			context.DisplaceReferenceDimension = Vector2{double(source->Width), double(source->Height)};
+		}
+		if (context.Authored.Type == "pc.path_wave") {
+			uint64_t batchWork = 0, batchBytes = 0;
+			for (size_t row = 0; row < count; ++row) {
+				uint64_t scratchOwned = 0;
+				if (!selectRow(row, scratchOwned) || !AdmitSourcePathWave(context, batchWork, batchBytes))
+					return false;
+			}
 		}
 		const auto admission =
 			context.Authored.Type == "pc.bend"				? AdmitSourceBend

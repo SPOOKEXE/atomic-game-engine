@@ -124,7 +124,8 @@ namespace engine::imagegraph::detail {
 			if (value.SourceOperation) {
 				auto &op = *value.SourceOperation;
 				if ((op.Kind == SourcePathOperationKind::Shift ||
-					 op.Kind == SourcePathOperationKind::Spiral || SourceSequentialKind(op.Kind)) &&
+					 op.Kind == SourcePathOperationKind::Spiral || op.Kind == SourcePathOperationKind::Wave ||
+					 SourceSequentialKind(op.Kind)) &&
 					!callback(op, route))
 					return false;
 				for (size_t i = 0; i < op.Inputs.size(); ++i)

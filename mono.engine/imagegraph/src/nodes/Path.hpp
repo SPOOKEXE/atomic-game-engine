@@ -9,6 +9,7 @@
 #include "../SourcePathPayload.hpp"
 #include "../SourcePathSequentialMath.hpp"
 #include "../SourcePathShiftMemo.hpp"
+#include "../SourcePathWaveRuntime.hpp"
 #include "../SourcePathWeight.hpp"
 
 #include <engine/core/Metrics.hpp>
@@ -78,12 +79,15 @@ namespace engine::imagegraph::detail {
 			const auto bytes = StorageBytes(path);
 			if (!bytes)
 				return context.Fail(Status::LimitExceeded, "path exceeds the anchor or weight limit", "path");
-			if (path.SourceOperation && path.SourceOperation->Kind == SourcePathOperationKind::Spiral) {
+			if (path.SourceOperation && (path.SourceOperation->Kind == SourcePathOperationKind::Spiral ||
+										 path.SourceOperation->Kind == SourcePathOperationKind::Wave)) {
 				const auto work = SourceWeightRuntimeWork(&path, nullptr);
 				if (!work || *work > 64000000 / std::max<size_t>(context.ProcessorCount, 1))
 					return context.Fail(
 						Status::LimitExceeded,
-						"Source Spiral runtime exceeds whole processor work bounds",
+						path.SourceOperation->Kind == SourcePathOperationKind::Wave
+							? "Source Wave runtime exceeds whole processor work bounds"
+							: "Source Spiral runtime exceeds whole processor work bounds",
 						"path"
 					);
 			}
@@ -224,7 +228,8 @@ namespace engine::imagegraph::detail {
 				if ((operation.Kind == SourcePathOperationKind::Shift ||
 					 operation.Kind == SourcePathOperationKind::WeightAdjust ||
 					 operation.Kind == SourcePathOperationKind::Smoothen ||
-					 operation.Kind == SourcePathOperationKind::Spiral) &&
+					 operation.Kind == SourcePathOperationKind::Spiral ||
+					 operation.Kind == SourcePathOperationKind::Wave) &&
 					replacement.Inputs.empty() && !replacement.WeightSpatial) {
 					replacement.MinX = replacement.MinY = 0;
 					replacement.MaxX = replacement.MaxY = 1;
@@ -314,6 +319,7 @@ namespace engine::imagegraph::detail {
 						replacement.MaxY = value[3];
 					}
 				}
+				if (operation.Wave && context.FailureCode != Status::Ok) return false;
 				Swap(replacement);
 				return true;
 			}
@@ -435,6 +441,14 @@ namespace engine::imagegraph::detail {
 				const double base = WeightSpatial ? WeightSpatial->Length(line)
 												  : (Inputs.empty() ? 0 : Inputs[0].Length(line));
 				return base * frequency * std::sqrt(std::abs(SourceData->Spiral->Amplitude) + 1 / frequency);
+			}
+			if (SourceData && SourceData->Wave) {
+				const double base = WeightSpatial ? WeightSpatial->Length(line)
+												  : (Inputs.empty() ? 0 : Inputs[0].Length(line));
+				const double length = base * SourceWaveLengthMultiplier(*SourceData->Wave);
+				if (!std::isfinite(length) && EvaluationContext)
+					EvaluationContext->Fail(Status::InvalidValue, "Source Wave length is nonfinite", "path");
+				return length;
 			}
 			if (WeightSpatial) return WeightSpatial->Length(line);
 			if (Shape) return LengthTotal;
@@ -591,6 +605,17 @@ namespace engine::imagegraph::detail {
 										? WeightSpatial->AccumulatedAt(index, line)
 										: (Inputs.empty() ? 0 : Inputs[0].AccumulatedAt(index, line));
 				return base * frequency * std::sqrt(std::abs(SourceData->Spiral->Amplitude) + 1 / frequency);
+			}
+			if (SourceData && SourceData->Wave) {
+				const double base = WeightSpatial
+										? WeightSpatial->AccumulatedAt(index, line)
+										: (Inputs.empty() ? 0 : Inputs[0].AccumulatedAt(index, line));
+				const double length = base * SourceWaveLengthMultiplier(*SourceData->Wave);
+				if (!std::isfinite(length) && EvaluationContext)
+					EvaluationContext->Fail(
+						Status::InvalidValue, "Source Wave accumulated length is nonfinite", "path"
+					);
+				return length;
 			}
 			if (SourceData && SourceData->Baked) {
 				if (index >= AccumulatedCount(line)) return 0;
@@ -902,6 +927,21 @@ namespace engine::imagegraph::detail {
 			}
 			return out;
 		}
+		SourcePathPointBuffer WavePointInto(double ratio, size_t line, SourcePathPointBuffer &out) const {
+			out.Position = {};
+			if (Inputs.empty() && !WeightSpatial) return out;
+			return SampleSourceWavePath(
+				*EvaluationContext,
+				*SourceData,
+				ratio,
+				line,
+				out,
+				[&](double position, size_t childLine, SourcePathPointBuffer &buffer) {
+					return WeightSpatial ? WeightSpatial->RatioInto(position, childLine, buffer)
+										 : Inputs[0].PointRatioInto(position, childLine, buffer);
+				}
+			);
+		}
 		SourcePathPointBuffer BakedPointInto(double distance, size_t line, SourcePathPointBuffer &out) const {
 			out.Position = {};
 			if (line >= SourceData->Baked->Lines.size()) return out;
@@ -965,6 +1005,7 @@ namespace engine::imagegraph::detail {
 				out.Position = {point.X, point.Y};
 				return out;
 			}
+			if (SourceData && SourceData->Wave) return WavePointInto(ratio, line, out);
 			if (SourceData && SourceData->Spiral) return SpiralPointInto(ratio, line, out);
 			if (SourceData && SourceData->Sequential) return SequentialPoint(ratio, line, false, out);
 			if (SourceData && SourceData->Baked) return BakedPointInto(ratio * Length(line), line, out);
@@ -1002,6 +1043,7 @@ namespace engine::imagegraph::detail {
 		PointDistanceInto(double distance, size_t line, SourcePathPointBuffer &out) const {
 			if (Operation && *Operation == SourcePathOperationKind::Repeat)
 				return PointRatioInto(distance / Length(line), line, out);
+			if (SourceData && SourceData->Wave) return WavePointInto(distance / Length(), line, out);
 			if (SourceData && SourceData->Spiral) return SpiralPointInto(distance / Length(), line, out);
 			if (SourceData && SourceData->Baked) return BakedPointInto(distance, line, out);
 			if (Operation && *Operation == SourcePathOperationKind::Join && Inputs.empty()) return out;
@@ -1151,6 +1193,11 @@ namespace engine::imagegraph::detail {
 		PathPoint PointDistance(double distance, size_t line = 0) const {
 			if (Operation && *Operation == SourcePathOperationKind::Repeat)
 				return PointRatio(distance / Length(line), line);
+			if (SourceData && SourceData->Wave) {
+				SourcePathPointBuffer point;
+				WavePointInto(distance / Length(), line, point);
+				return {point.Position.X, point.Position.Y, point.Weight};
+			}
 			if (SourceData && SourceData->Spiral) {
 				SourcePathPointBuffer p;
 				SpiralPointInto(distance / Length(), line, p);
@@ -1232,6 +1279,11 @@ namespace engine::imagegraph::detail {
 			if (Operation && *Operation == SourcePathOperationKind::Repeat) {
 				SourcePathPointBuffer point;
 				PointRatioInto(ratio, line, point);
+				return {point.Position.X, point.Position.Y, point.Weight};
+			}
+			if (SourceData && SourceData->Wave) {
+				SourcePathPointBuffer point;
+				WavePointInto(ratio, line, point);
 				return {point.Position.X, point.Position.Y, point.Weight};
 			}
 			if (SourceData && SourceData->Spiral) {

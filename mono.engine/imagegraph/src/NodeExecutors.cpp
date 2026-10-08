@@ -138,7 +138,8 @@ namespace engine::imagegraph::detail {
 				if (type == "pc.tunnel_in" && port == "value_in") return true;
 				if (type == "pc.argument" && port == "default_value") return true;
 				if (type == "pc.points_triangulate" && port == "points") return true;
-				if ((type == "pc.path_sample" || type == "pc.path_smoothen" || type == "pc.path_spiral") &&
+				if ((type == "pc.path_sample" || type == "pc.path_smoothen" || type == "pc.path_spiral" ||
+					 type == "pc.path_wave") &&
 					port == "path")
 					return true;
 				if (SourceFontInput(type, port)) return true;

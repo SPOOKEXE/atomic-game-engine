@@ -58,6 +58,17 @@ namespace engine::imagegraph::detail {
 						return {};
 					repeats = q.Direction == 0 ? 6 : 4;
 				}
+				if (op.Wave) {
+					const auto &wave = *op.Wave;
+					if (wave.Iteration < 0 || wave.Iteration > int64_t(Limits::MaximumArrayElements) ||
+						wave.Cache.size() > Limits::MaximumArrayElements ||
+						!add(
+							wave.AmplitudeCurve.size() + wave.DirectionCurve.size() +
+							wave.Cache.size() * wave.Cache.size() + uint64_t(wave.Iteration) * 16 + 4096 + 256
+						))
+						return {};
+					repeats = wave.Direction == 0 ? 3 : 1;
+				}
 				if (op.Baked) {
 					if (!add(4096 + op.Baked->Lines.size())) return {};
 					for (const auto &line : op.Baked->Lines)

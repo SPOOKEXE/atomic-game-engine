@@ -91,14 +91,15 @@ namespace engine::imagegraph {
 								   node.Type == "pc.path_skew" || node.Type == "pc.path_map_area" ||
 								   node.Type == "pc.path_shape_3_d" || node.Type == "pc.path_extends" ||
 								   node.Type == "pc.path_flattern" || node.Type == "pc.path_smoothen" ||
-								   node.Type == "pc.path_spiral" || node.Type == "pc.path_sample" ||
-								   node.Type == "pc.crop_content" || node.Type == "pc.smear" ||
-								   node.Type == "pc.tunnel_in" || node.Type == "pc.tunnel_out";
+								   node.Type == "pc.path_spiral" || node.Type == "pc.path_wave" ||
+								   node.Type == "pc.path_sample" || node.Type == "pc.crop_content" ||
+								   node.Type == "pc.smear" || node.Type == "pc.tunnel_in" ||
+								   node.Type == "pc.tunnel_out";
 			cone.FirstFrameData |= node.Type == "pc.3_d_particle" || node.Type == "pc.3_d_affector" ||
 								   node.Type == "pc.crop_content" || node.Type == "pc.smear" ||
 								   node.Type == "pc.path_extends" || node.Type == "pc.path_flattern" ||
 								   node.Type == "pc.path_smoothen" || node.Type == "pc.path_sample" ||
-								   node.Type == "pc.path_spiral";
+								   node.Type == "pc.path_spiral" || node.Type == "pc.path_wave";
 			cone.Simulation |= node.Type == "image.verlet_simple" ||
 							   (node.Type.starts_with("pc.strand_") || node.Type.starts_with("pc.verlet_") ||
 								node.Type.starts_with("pc.flip_"));

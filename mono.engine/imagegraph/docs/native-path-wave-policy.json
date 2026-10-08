@@ -1,0 +1,164 @@
+{
+  "profile": "native-source-path-wave",
+  "node": "pc.path_wave",
+  "source": {
+    "repository": "pixel-composer",
+    "commit": "b69eca232217360cf1502ef0223523d818606652",
+    "files": [
+      {
+        "path": "scripts/node_path_wave/node_path_wave.gml",
+        "sha256": "2dbf6031262d5082bac64c6df55048ee58375f05cc4908fb3118f1bb7cf99872"
+      },
+      {
+        "path": "scripts/random_function/random_function.gml",
+        "sha256": "a0ba588c5e89a7a87b5657eccd63345a733c831e3eb86e5a2c2332a457be4e0a"
+      }
+    ],
+    "oracle_profile": "pinned source and admitted HTML5 RNG behavior",
+    "desktop_runtime_parity": "unknown",
+    "licensed_runtime_parity": "unknown",
+    "live_runtime_parity": "unknown"
+  },
+  "physical_inputs": [
+    {"index": 0, "port": "path", "default": "noone", "role": "source path"},
+    {"index": 1, "port": "frequency", "default": [4, 4]},
+    {"index": 2, "port": "amplitude", "default": [4, 4], "curve_attribute_index": 9, "shift_index": 17},
+    {"index": 3, "port": "phase", "default": [0, 0]},
+    {"index": 4, "port": "mode", "default": 0, "choices": ["Zigzag", "Sine", "Square"]},
+    {"index": 5, "port": "seed", "default": "runtime seed"},
+    {"index": 6, "port": "wiggle", "default": false},
+    {"index": 7, "port": "wiggle_amplitude", "default": [-2, 2]},
+    {"index": 8, "port": "wiggle_frequency", "default": 8},
+    {"index": 9, "port": "amplitude_curve", "kind": "curve attribute on amplitude", "source_precision": 128, "native_samples": 129},
+    {"index": 10, "port": "post_fn", "default": 0, "choices": ["None", "Absolute", "Clamp"]},
+    {"index": 11, "port": "range", "default": [0, 1]},
+    {"index": 12, "port": "clamp_curve", "default": false},
+    {"index": 13, "port": "iteration", "default": 1},
+    {"index": 14, "port": "freqency", "default": 2, "source_spelling": true},
+    {"index": 15, "port": "amplitude_2", "default": 0.7},
+    {"index": 16, "port": "shift_2", "default": 0},
+    {"index": 17, "port": "shift", "default": 0, "role": "amplitude curve offset"},
+    {"index": 18, "port": "loop", "default": false},
+    {"index": 19, "port": "use_weight", "default": false},
+    {"index": 20, "port": "weight_mode", "default": 0, "choices": ["Replace", "Additive", "Multiplicative"]},
+    {"index": 21, "port": "range_2", "default": [0, 1], "role": "weight range"},
+    {"index": 22, "port": "direction", "default": 0, "choices": ["Path Normal", "Fixed"]},
+    {"index": 23, "port": "angle", "default": [0, 0], "curve_attribute_index": 24},
+    {"index": 24, "port": "angle_curve", "kind": "curve attribute on angle", "conditional": "used only when angle_curved is true", "source_precision": 32, "native_samples": 33}
+  ],
+  "curve_behavior": {
+    "amplitude_curve": "required represented curve; sampled at 129 points from 0 through 1",
+    "direction_curve": "optional represented curve when angle_curved is true; sampled at 33 points from 0 through 1",
+    "sampling": "clamp table coordinate to [0,1] and linearly interpolate neighboring samples",
+    "amplitude_coordinate": "when clamp_curve is true normalize (ratio-range.min)/(range.max-range.min), add shift, then apply source frac wrapping; otherwise start from ratio, add shift, then source frac wrapping",
+    "direction_coordinate": "fixed direction uses angle curve at ratio when present, otherwise ratio"
+  },
+  "sampling": {
+    "range_gate": "outside Range, forward the child sample without wave displacement or weight change",
+    "non_loop_ratio": "clamp active ratio and normal probes to [0,0.99]",
+    "loop_ratio": "source pfract wrapping for active ratio and normal probes",
+    "path_normal": "sample child at ratio-0.01, ratio, ratio+0.01; point direction of after-before plus 90 degrees",
+    "fixed_direction": "lerp Angle endpoints using angle curve value or ratio",
+    "modes": {
+      "zigzag": "(abs(frac(time)*2-1)-0.5)*2",
+      "sine": "cos(time*2*pi)",
+      "square": "frac(time)>0.5 ? 1 : -1"
+    },
+    "iteration": "sum each mode value times current amplitude scale; add iterative frequency, multiply iterative amplitude, and add shift plus one continuing random draw to phase per iteration",
+    "post_functions": ["identity", "absolute value", "max(value,0)"],
+    "displacement": "offset the child point along the selected direction by randomized amplitude times curved progress",
+    "weight": "preserve child weight unless enabled; then replace, add, or multiply by lerp(weight range, progress)"
+  },
+  "rng": {
+    "admitted_profile": "HTML5 InitRandom/randReal behavior exercised by pinned source fixtures",
+    "seeded_range": "seed floor(seed), draw random(1), reseed floor(seed)+1, draw random(1), interpolate draws by frac(seed), then interpolate the requested endpoints",
+    "seed_conversion": "finite numeric seed wraps through signed 32-bit truncation semantics before reseeding or frac",
+    "row_and_line_seed": "processor row is added to authored runtime seed; sample line is added for local seed; amplitude, phase, and frequency draws add line again, with phase and frequency offsets of one and two; wiggle uses the row-plus-line seed",
+    "wiggle": "one-octave perlin1D profile, smoothstep interpolation between two seeded noise draws, remapped to Wiggle Amplitude",
+    "iteration_stream": "with wiggle disabled, continue from the final reseeded frequency range stream; with wiggle enabled, continue from the final two-draw Noise stream; consume one draw for every iteration, including the final iteration",
+    "other_runtime_profiles": "desktop, licensed executable, and live runtime behavior remain unknown"
+  },
+  "path_metrics": {
+    "line_count_segment_count_boundary": "delegate to the child path",
+    "length_multiplier": "max(1, abs(max(frequency endpoints))) * sqrt(abs(max(amplitude endpoints)) + 1/max(1, abs(max(frequency endpoints))))",
+    "accumulated_length": "multiply each child accumulated length by the same length multiplier",
+    "distance_sampling": "source getPointDistance divides by getLength() before ratio sampling"
+  },
+  "state_and_cache": {
+    "processor_arrays": "process each selected row independently; add processor row to seed and store a row-specific data replay value",
+    "buffers": "three reusable child point buffers for path-normal probes, one center buffer for fixed direction; point buffers retain position, weight, point class, and optional Z",
+    "memo_lifetime": "evaluation-owned path memo, keyed by node, port, route, line, and six-decimal ratio key",
+    "cache_behavior": "source processData clears cached_pos on every producer update while retaining the three point buffers; saved getter descriptors can import saved cache entries into the evaluation memo; only commit a completed sample and its key; memo does not outlive one graph evaluation",
+    "metrics": [
+      "imagegraph.path.wave.cache_hits",
+      "imagegraph.path.wave.cache_misses",
+      "imagegraph.path.wave.child_samples",
+      "imagegraph.path.wave.iterations"
+    ]
+  },
+  "admission_and_bounds": {
+    "wave_batch_work_limit": 16777216,
+    "work_accounting": "pre-admit each processor row; include iteration allowance, amplitude and optional direction curve generation, child path runtime work multiplied by three for path-normal or one for fixed direction, retained previous getter payload traversal and validation twice for preflight plus execution, and replay entries",
+    "runtime_path_work_limit": 64000000,
+    "runtime_path_work_accounting": "estimate nested Wave curves, cache comparisons, iterations, and child sampling before PathRuntime initialization; divide by processor count",
+    "memo_lookup_step_limit": 16777216,
+    "memo_limit_scope": "per evaluation across identity lookup, cache lookup, child samples, and iteration steps",
+    "payload": "finite controls and curve samples; iteration in [0,4096]; amplitude curve exactly 129 samples; optional direction curve exactly 33; bounded unique cache keys per line",
+    "bytes": "admit cloned path, wave controls and tables, data replay entry, and processor-row aggregate against MaximumEvaluationBytes before output publication"
+  },
+  "native_references": {
+    "executor": "mono.engine/imagegraph/src/nodes/SourcePathWaveNodes.cpp",
+    "runtime": "mono.engine/imagegraph/src/SourcePathWaveRuntime.hpp",
+    "rng": "mono.engine/imagegraph/src/SourcePathWaveRandom.hpp",
+    "core_fixtures": [
+      "mono.engine/imagegraph/tests/SourcePathWave.cpp",
+      "mono.engine/imagegraph/tests/SourcePathWaveRandom.cpp",
+      "mono.engine/imagegraph/tests/SourcePathWaveWorkloads.cpp"
+    ],
+    "io_fixture": "mono.engine/imagegraphio/tests/PxcxPathWave.cpp"
+  },
+  "pxcx_io_contract": {
+    "physical_controls": "all 25 physical controls are preserved on import and reopen",
+    "edits": "PxcxInputValueEdit supports physical socket values only",
+    "synthetic_attribute_flags": {
+      "amplitude_curved": "no inverse attribute edit API; explicit toggle edits are atomically refused",
+      "angle_curved": "no inverse attribute edit API; explicit toggle edits are atomically refused",
+      "preservation": "refused edits preserve the original curve attributes"
+    }
+  },
+  "validation": {
+    "status": "accepted",
+    "receipt": "docs/pixel-composer-m0/native-path-wave-validation-2026-10-08.json",
+    "batch": 61,
+    "checks": 20,
+    "results": {
+      "native_binary_cases": 6156,
+      "startup_cases": 1,
+      "python_cases": 116,
+      "cli_cases": 16,
+      "core_cases": 3713,
+      "core_assertions": 2359828,
+      "io_cases": 390,
+      "io_assertions": 16911,
+      "studio_cases": 1159,
+      "studio_assertions": 51329,
+      "render_cases": 33,
+      "render_assertions": 2005,
+      "optimized_workload_cases": 6,
+      "optimized_workload_assertions": 349478
+    },
+    "supported_domain": {
+      "physical_inputs": 25,
+      "iteration_profile": [0, 4096],
+      "rng": "admitted HTML5 random functions and pinned source helpers",
+      "coverage": "source curves, range gates, modes, direction modes, weights, seeds, processor rows, cache/buffer refresh, native and PXC persistence, animation edits, groups, arrays, linked controls, malformed descriptor refusal",
+      "negative_iteration": "unverified in the pinned executable and explicitly refused by the bounded profile",
+      "seed_requirement": "source constructor seed observation required unless an explicit numeric seed is authored"
+    },
+    "desktop_parity": "unknown",
+    "licensed_executable_parity": "unknown",
+    "live_runtime_parity": "unknown",
+    "live_studio_verification": "not run",
+    "gpu_or_licensed_parity_claim": false
+  }
+}
