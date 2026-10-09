@@ -118,6 +118,9 @@ namespace client {
 			if (control != nullptr && control->Mode == engine::scene::CameraMode::Scriptable) {
 				return;
 			}
+			if (engine::scene::CameraSubjectRoot(store, active->Entity) != engine::ecs::NULL_ENTITY) {
+				return;
+			}
 
 			// Read out before anything is written: `Set` may move the row this
 			// resource's entity handle resolves to, and holding a pointer

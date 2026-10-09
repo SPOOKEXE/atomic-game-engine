@@ -35,6 +35,7 @@
 #include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/GpuParticleField.hpp>
@@ -44,9 +45,11 @@
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Wire.hpp>
+#include <engine/script/PlayerGui.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -63,6 +66,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string_view>
+#include <vector>
 
 TEST_SUITE_ID("client.scene.tick")
 TEST_DEPENDS("engine.ecs.scheduler")
@@ -1339,6 +1343,7 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 	std::shared_ptr<engine::script::Runtime> runtime;
 	universe.Enter(id, [&](Store &store, Scheduler &systems) {
 		client::InstallPresentation(store, systems);
+		(void)client::InstallDefaultCamera(store, systems);
 		const engine::ecs::Entity localPlayer = client::EnsureLocalPlayer(store);
 		REQUIRE(localPlayer != engine::ecs::NULL_ENTITY);
 
@@ -1352,6 +1357,63 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 		REQUIRE(runtime != nullptr);
 		REQUIRE(runtime->Costs().size() == BLADEBORNE_STARTUP_SCRIPT_COUNT);
 		CHECK(std::ranges::all_of(runtime->Costs(), &engine::script::ScriptCost::Completed));
+		(void)engine::script::ResetPlayerGui(store, localPlayer);
+
+		const engine::ecs::Entity players = engine::scene::PlayersOf(store);
+		const auto *playerSettings = store.Get<engine::scene::PlayersServiceComponent>(players);
+		REQUIRE(playerSettings != nullptr);
+		CHECK(playerSettings->CharacterAutoLoads);
+		CHECK(engine::scene::CharacterOf(store, localPlayer) == engine::ecs::NULL_ENTITY);
+		auto *mutableSettings = store.GetMutable<engine::scene::PlayersServiceComponent>(players);
+		REQUIRE(mutableSettings != nullptr);
+		mutableSettings->CharacterAutoLoads = false;
+		std::vector<engine::ecs::Entity> spawned;
+		CHECK(engine::scene::UpdateRespawns(store, spawned) == 0);
+		CHECK(spawned.empty());
+		CHECK(engine::scene::CharacterOf(store, localPlayer) == engine::ecs::NULL_ENTITY);
+		mutableSettings->CharacterAutoLoads = true;
+		REQUIRE(engine::scene::LoadCharacter(store, localPlayer) != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity firstCharacter = engine::scene::CharacterOf(store, localPlayer);
+		REQUIRE(firstCharacter != engine::ecs::NULL_ENTITY);
+		CHECK(CountNamedDescendants(store, engine::scene::WorkspaceOf(store), "Player") == 1);
+		const auto *firstRig = store.Get<engine::scene::Character>(firstCharacter);
+		REQUIRE(firstRig != nullptr);
+		systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		REQUIRE(active != nullptr);
+		const auto *subject = store.Get<engine::scene::CameraSubject>(active->Entity);
+		REQUIRE(subject != nullptr);
+		CHECK(subject->Target == firstRig->Humanoid);
+		CHECK(engine::scene::CameraSubjectRoot(store, active->Entity) == firstRig->Root);
+		const auto *firstCameraTransform = store.Get<Transform>(active->Entity);
+		REQUIRE(firstCameraTransform != nullptr);
+		const engine::core::Vector3 firstCameraPosition = firstCameraTransform->Frame.Position;
+		systems.RunPhases(store, Phase::Simulation, Phase::Simulation);
+		const auto *simulatedCameraTransform = store.Get<Transform>(active->Entity);
+		REQUIRE(simulatedCameraTransform != nullptr);
+		CHECK(simulatedCameraTransform->Frame.Position == firstCameraPosition);
+
+		CHECK(engine::scene::RemoveCharacter(store, localPlayer));
+		CHECK(engine::scene::CharacterOf(store, localPlayer) == engine::ecs::NULL_ENTITY);
+		REQUIRE(engine::scene::LoadCharacter(store, localPlayer) != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity respawnedCharacter = engine::scene::CharacterOf(store, localPlayer);
+		REQUIRE(respawnedCharacter != engine::ecs::NULL_ENTITY);
+		CHECK(respawnedCharacter != firstCharacter);
+		CHECK(CountNamedDescendants(store, engine::scene::WorkspaceOf(store), "Player") == 1);
+		systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+		const auto *respawnedRig = store.Get<engine::scene::Character>(respawnedCharacter);
+		REQUIRE(respawnedRig != nullptr);
+		const auto *respawnedSubject = store.Get<engine::scene::CameraSubject>(active->Entity);
+		REQUIRE(respawnedSubject != nullptr);
+		CHECK(respawnedSubject->Target == respawnedRig->Humanoid);
+		CHECK(engine::scene::CameraSubjectRoot(store, active->Entity) == respawnedRig->Root);
+		const auto *respawnedCameraTransform = store.Get<Transform>(active->Entity);
+		REQUIRE(respawnedCameraTransform != nullptr);
+		const engine::core::Vector3 respawnedCameraPosition = respawnedCameraTransform->Frame.Position;
+		systems.RunPhases(store, Phase::Simulation, Phase::Simulation);
+		const auto *simulatedRespawnCamera = store.Get<Transform>(active->Entity);
+		REQUIRE(simulatedRespawnCamera != nullptr);
+		CHECK(simulatedRespawnCamera->Frame.Position == respawnedCameraPosition);
 
 		const engine::script::SourceCache *sources = store.Resource<engine::script::SourceCache>();
 		REQUIRE(sources != nullptr);

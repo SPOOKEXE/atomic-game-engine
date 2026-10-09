@@ -1103,6 +1103,19 @@ namespace client {
 					)
 				);
 				(void)engine::script::ResetPlayerGui(store, localPlayer);
+
+				// Startup scripts get the first say over `Players.CharacterAutoLoads`.
+				// Match the server join path, but only for this local authority world;
+				// a replica learns its character from the snapshot instead.
+				if (!engine::world::Postbox(store).IsReplica()) {
+					const engine::ecs::Entity players = engine::scene::PlayersOf(store);
+					const auto *settings = store.Get<engine::scene::PlayersServiceComponent>(players);
+					const bool autoLoads = settings == nullptr || settings->CharacterAutoLoads;
+					if (autoLoads &&
+						engine::scene::CharacterOf(store, localPlayer) == engine::ecs::NULL_ENTITY) {
+						(void)engine::scene::LoadCharacter(store, localPlayer);
+					}
+				}
 			});
 
 			if (!failure.empty()) {
