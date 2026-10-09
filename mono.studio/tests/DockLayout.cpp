@@ -13,7 +13,7 @@ namespace {
 	struct Context {
 		ImGuiContext *Previous = ImGui::GetCurrentContext();
 		ImGuiContext *Handle = ImGui::CreateContext();
-		Context() {
+		explicit Context(bool beginFrame = true) {
 			ImGui::SetCurrentContext(Handle);
 			ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 			ImGui::GetIO().IniFilename = nullptr;
@@ -22,7 +22,7 @@ namespace {
 			ImGui::GetIO().Fonts->AddFontDefault();
 			ImGui::GetIO().Fonts->Build();
 			ImGui::GetIO().DisplaySize = ImVec2(1280, 720);
-			ImGui::NewFrame();
+			if (beginFrame) ImGui::NewFrame();
 		}
 		~Context() {
 			if (Handle->WithinFrameScope) ImGui::EndFrame();
@@ -42,6 +42,42 @@ namespace {
 			ImGui::DockBuilderDockWindow("Explorer", Left);
 			ImGui::DockBuilderDockWindow("Viewport 1", Centre);
 			ImGui::DockBuilderFinish(Root);
+		}
+	};
+
+	struct Desktop {
+		Desktop() {
+			ImGuiIO &io = ImGui::GetIO();
+			io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+			io.BackendFlags |=
+				ImGuiBackendFlags_PlatformHasViewports | ImGuiBackendFlags_RendererHasViewports;
+			ImGuiPlatformIO &platform = ImGui::GetPlatformIO();
+			platform.Platform_CreateWindow = [](ImGuiViewport *viewport) {
+				viewport->PlatformHandle = viewport;
+			};
+			platform.Platform_DestroyWindow = [](ImGuiViewport *viewport) {
+				viewport->PlatformHandle = nullptr;
+			};
+			platform.Platform_ShowWindow = [](ImGuiViewport *) {};
+			platform.Platform_SetWindowPos = [](ImGuiViewport *, ImVec2) {};
+			platform.Platform_GetWindowPos = [](ImGuiViewport *viewport) { return viewport->Pos; };
+			platform.Platform_SetWindowSize = [](ImGuiViewport *, ImVec2) {};
+			platform.Platform_GetWindowSize = [](ImGuiViewport *viewport) { return viewport->Size; };
+			platform.Platform_SetWindowTitle = [](ImGuiViewport *, const char *) {};
+			platform.Platform_SetWindowAlpha = [](ImGuiViewport *, float) {};
+			platform.Platform_GetWindowFocus = [](ImGuiViewport *) { return true; };
+			platform.Platform_GetWindowMinimized = [](ImGuiViewport *) { return false; };
+			ImGuiPlatformMonitor monitor;
+			monitor.MainPos = monitor.WorkPos = ImVec2(0, 0);
+			monitor.MainSize = monitor.WorkSize = ImVec2(4000, 3000);
+			monitor.DpiScale = 1.0f;
+			platform.Monitors.push_back(monitor);
+			ImGui::GetMainViewport()->PlatformHandle = ImGui::GetCurrentContext();
+			ImGui::GetMainViewport()->Pos = ImVec2(300, 100);
+		}
+		~Desktop() {
+			ImGui::DestroyPlatformWindows();
+			ImGui::GetMainViewport()->PlatformHandle = nullptr;
 		}
 	};
 }
@@ -209,4 +245,71 @@ TEST_CASE("an empty central slot does not reserve a blank half below Output", "[
 	REQUIRE(output != nullptr);
 	CHECK(output->DockIsActive);
 	CHECK(output->Size.y == ImGui::GetMainViewport()->WorkSize.y);
+}
+
+TEST_CASE("viewport drag keeps host targets still and docks on release", "[studio][dock-layout]") {
+	Context context(false);
+	Desktop desktop;
+	ImGui::NewFrame();
+	Layout layout;
+	ImGui::EndFrame();
+	ImGui::UpdatePlatformWindows();
+	const auto draw = [&] {
+		ImGui::NewFrame();
+		studio::detail::SubmitStudioDockSpace(layout.Root);
+		ImGui::Begin("Explorer");
+		ImGui::TextUnformatted("tree");
+		ImGui::End();
+		ImGui::Begin("Scene###Viewport 1");
+		ImGui::TextUnformatted("scene");
+		ImGui::End();
+		ImGui::Render();
+		ImGui::UpdatePlatformWindows();
+	};
+	for (int frame = 0; frame < 3; frame++)
+		draw();
+	ImGuiWindow *viewport = ImGui::FindWindowByName("###Viewport 1");
+	REQUIRE(viewport != nullptr);
+	REQUIRE(viewport->DockId == layout.Centre);
+	ImGuiDockNode *centre = ImGui::DockBuilderGetNode(layout.Centre);
+	REQUIRE(centre != nullptr);
+	const ImRect destination = centre->Rect();
+	ImGuiIO &io = ImGui::GetIO();
+	io.AddMousePosEvent(viewport->Pos.x + 35, viewport->Pos.y + 10);
+	draw();
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+	draw();
+	io.AddMousePosEvent(2000, 600);
+	for (int frame = 0; frame < 3; frame++)
+		draw();
+	REQUIRE(viewport->DockId == 0);
+	REQUIRE(viewport->Viewport != ImGui::GetMainViewport());
+	REQUIRE(context.Handle->MovingWindow == viewport);
+	const ImVec2 target = destination.GetCenter();
+	for (const float offset : std::array{-6.0f, 6.0f, 0.0f}) {
+		io.AddMousePosEvent(target.x + offset, target.y);
+		draw();
+		draw();
+		centre = ImGui::DockBuilderGetNode(layout.Centre);
+		REQUIRE(centre != nullptr);
+		CHECK(centre->Pos.x == destination.Min.x);
+		CHECK(centre->Pos.y == destination.Min.y);
+		CHECK(centre->Pos.x + centre->Size.x == destination.Max.x);
+		CHECK(centre->Pos.y + centre->Size.y == destination.Max.y);
+		CHECK(context.Handle->DragDropActive);
+		CHECK(context.Handle->HoveredWindowUnderMovingWindow != viewport);
+		const ImDrawList *sourceGuides = static_cast<ImGuiViewportP *>(viewport->Viewport)->BgFgDrawLists[1];
+		CHECK((sourceGuides == nullptr || sourceGuides->VtxBuffer.empty()));
+		const ImDrawList *hostGuides =
+			static_cast<ImGuiViewportP *>(ImGui::GetMainViewport())->BgFgDrawLists[1];
+		REQUIRE(hostGuides != nullptr);
+		CHECK_FALSE(hostGuides->VtxBuffer.empty());
+	}
+	io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	for (int frame = 0; frame < 3; frame++)
+		draw();
+	CHECK(viewport->DockId == layout.Centre);
+	CHECK(viewport->DockIsActive);
+	CHECK(viewport->Viewport == ImGui::GetMainViewport());
+	CHECK_FALSE(context.Handle->DragDropActive);
 }

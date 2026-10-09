@@ -107,4 +107,11 @@ namespace studio::detail {
 		root->CentralNode = occupied;
 		ImGui::MarkIniSettingsDirty();
 	}
+
+	inline void SubmitStudioDockSpace(ImGuiID dockspace, const ImGuiViewport *viewport = nullptr) {
+		// snap guides stay on host. a second copy moves inside dragged window.
+		ImGui::GetIO().ConfigDockingTransparentPayload = true;
+		FillEmptyCentralDock(dockspace);
+		ImGui::DockSpaceOverViewport(dockspace, viewport);
+	}
 }

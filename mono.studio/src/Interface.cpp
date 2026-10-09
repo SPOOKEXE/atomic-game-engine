@@ -378,8 +378,7 @@ namespace studio {
 		// against its current work area on the very first frame too.
 		{
 			ENGINE_PROFILE_CAT("dockspace", engine::core::ProfileCategory::Render);
-			detail::FillEmptyCentralDock(dockspace);
-			ImGui::DockSpaceOverViewport(dockspace, viewport);
+			detail::SubmitStudioDockSpace(dockspace, viewport);
 		}
 
 		// Reset before any panel draws: the claim is a within-frame fact, not
