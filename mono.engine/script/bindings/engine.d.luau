@@ -1532,6 +1532,11 @@ declare extern type Instance with
 	-- Buffers above the 64 MiB image ceiling raise before the image changes.
 	function ToBuffer(self): buffer
 	function FromBuffer(self, buffer: buffer): boolean
+	-- Bounded 1920x1080 imports; malformed data leaves the image unchanged.
+	function FromBase64(self, encoded: string, format: "rgba8" | "png" | "jpeg"): boolean
+	function FromEncodedBuffer(self, buffer: buffer, format: "png" | "jpeg"): boolean
+	-- Raw RGBA8 bytes in the current image space; empty string on export refusal.
+	function ToBase64(self): string
 	function GetAttribute(self, name: string): EngineAttribute?
 	function SetAttribute(self, name: string, value: EngineAttribute?): ()
 	-- ImageGraph overrides; nil restores the graph default.
@@ -2145,6 +2150,8 @@ declare extern type EditableMesh extends Instance with
 end
 
 declare extern type EditableImage extends Instance with
+	read ColorSpace: string
+	write ColorSpace: string?
 	read ContentId: string
 	PackingAttributes: number
 	read PackingFormat: string

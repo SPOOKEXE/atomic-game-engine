@@ -15,6 +15,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/effects/Particles.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
@@ -1663,6 +1664,72 @@ TEST_CASE("the gui interaction scene mounts labels, images, and emulated buttons
 	const engine::gui::Resolved *placed = store.Get<engine::gui::Resolved>(panel);
 	REQUIRE(placed != nullptr);
 	CHECK(placed->Rendered);
+}
+
+TEST_CASE(
+	"the image buffer demo imports formats into GUI, part and particle slots", "[examples][scene][image]"
+) {
+	const StagedAssets assets;
+	Store store("image.buffers");
+	Scheduler systems;
+	std::shared_ptr<engine::script::Runtime> runtime;
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("ImageBuffers.luau"), error, &runtime));
+	INFO(error);
+	REQUIRE(runtime != nullptr);
+	CHECK(runtime->LastError().empty());
+	const Entity rawImage = InScene(store, "RawBuffer");
+	REQUIRE(rawImage != engine::ecs::NULL_ENTITY);
+	const engine::scene::EditableImage *rawPixels = store.Get<engine::scene::EditableImage>(rawImage);
+	REQUIRE(rawPixels != nullptr);
+	CHECK(rawPixels->Width == 64);
+	CHECK(rawPixels->Height == 64);
+	CHECK(rawPixels->Space == engine::scene::EditableImageSpace::SRGB);
+	const Entity pngImage = InScene(store, "PngBase64");
+	REQUIRE(pngImage != engine::ecs::NULL_ENTITY);
+	const engine::scene::EditableImage *pngPixels = store.Get<engine::scene::EditableImage>(pngImage);
+	REQUIRE(pngPixels != nullptr);
+	CHECK(pngPixels->Width == 2);
+	CHECK(pngPixels->Height == 1);
+	CHECK(pngPixels->Space == engine::scene::EditableImageSpace::SRGB);
+	const Entity jpegImage = InScene(store, "JpegBase64");
+	REQUIRE(jpegImage != engine::ecs::NULL_ENTITY);
+	const engine::scene::EditableImage *jpegPixels = store.Get<engine::scene::EditableImage>(jpegImage);
+	REQUIRE(jpegPixels != nullptr);
+	CHECK(jpegPixels->Width == 16);
+	CHECK(jpegPixels->Height == 16);
+	CHECK(jpegPixels->Space == engine::scene::EditableImageSpace::SRGB);
+
+	for (const char *name : {"RGBA export", "PNG Base64", "PNG buffer", "JPEG Base64", "JPEG buffer"}) {
+		const Entity imageLabel = FirstElement(store, name);
+		REQUIRE(imageLabel != engine::ecs::NULL_ENTITY);
+		const engine::gui::Picture *picture = store.Get<engine::gui::Picture>(imageLabel);
+		REQUIRE(picture != nullptr);
+		CHECK(picture->Image.Text().starts_with("editable-image://"));
+	}
+
+	const Entity mesh = InScene(store, "PngMeshPart");
+	REQUIRE(mesh != engine::ecs::NULL_ENTITY);
+	const engine::scene::SurfaceAppearance *meshAppearance =
+		store.Get<engine::scene::SurfaceAppearance>(mesh);
+	REQUIRE(meshAppearance != nullptr);
+	CHECK(meshAppearance->ColourMap.Text().starts_with("editable-image://"));
+
+	const Entity texturedPart = InScene(store, "RawTexturePart");
+	REQUIRE(texturedPart != engine::ecs::NULL_ENTITY);
+	const Entity texture = store.FindFirstChild(texturedPart, "RawRGBA");
+	REQUIRE(texture != engine::ecs::NULL_ENTITY);
+	Name textureContent;
+	REQUIRE(store.GetProperty(texture, Name("Texture"), &textureContent, sizeof(textureContent)));
+	CHECK(textureContent.Text().starts_with("editable-image://"));
+
+	const Entity particleHost = InScene(store, "JpegParticleHost");
+	REQUIRE(particleHost != engine::ecs::NULL_ENTITY);
+	const Entity emitter = store.FindFirstChild(particleHost, "JpegParticles");
+	REQUIRE(emitter != engine::ecs::NULL_ENTITY);
+	const engine::effects::ParticleEmitter *particles = store.Get<engine::effects::ParticleEmitter>(emitter);
+	REQUIRE(particles != nullptr);
+	CHECK(particles->Texture.Text().starts_with("editable-image://"));
 }
 
 TEST_CASE("the world interface scene contains every collector and a nested scene", "[examples][scene][gui]") {

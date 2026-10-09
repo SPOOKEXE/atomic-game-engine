@@ -28,7 +28,9 @@ namespace engine::render {
 		engine::assets::TextureData built;
 		built.Width = image.Width;
 		built.Height = image.Height;
-		built.Format = engine::assets::TextureFormat::RGBA8;
+		built.Format = image.Space == engine::scene::EditableImageSpace::SRGB
+						   ? engine::assets::TextureFormat::RGBA8
+						   : engine::assets::TextureFormat::RGBA8_LINEAR;
 
 		// **A copy, not a conversion** - `scene::EditableImage::Pixels` is
 		// already row-major RGBA8 top row first, `assets::TextureData::
@@ -56,7 +58,9 @@ namespace engine::render {
 
 		store.Each<const engine::scene::EditableImage>([&](engine::ecs::Entity entity,
 														   const engine::scene::EditableImage &image) {
-			const UploadScope::Revision revision{image.Revision, image.Packing.Revision};
+			const UploadScope::Revision revision{
+				image.Revision, image.Packing.Revision, static_cast<uint8_t>(image.Space)
+			};
 			const auto found = uploadedRevisions.find(entity.Id);
 			if (found != uploadedRevisions.end() && found->second == revision) {
 				return;

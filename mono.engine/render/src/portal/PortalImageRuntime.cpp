@@ -3268,8 +3268,11 @@ namespace engine::render {
 			}
 			frame.InterfaceReady = state.Render.InitialiseInterface(frame.Interface);
 			frame.Interface.SetImageSource([&state, source = &frame](const core::Name &name) {
+				const auto text = name.Text();
 				const core::Name owner =
-					name.Text().starts_with("imagegraph-instance://") ? state.OwnerName : state.ContentOwner;
+					text.starts_with("imagegraph-instance://") || text.starts_with("editable-image://")
+						? state.OwnerName
+						: state.ContentOwner;
 				InterfaceImage image;
 				image.Texture = state.Render.TextureHandle(name, owner);
 				image.SampledSRGB = state.Render.RendererRef().TextureSamplesSRGB(name, owner);

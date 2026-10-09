@@ -1,5 +1,8 @@
 #include <engine/imagegraph/Reference.hpp>
 
+#include <charconv>
+#include <cstdint>
+
 namespace engine::imagegraph {
 	bool IsReferenceToken(std::string_view value) noexcept {
 		if (value.empty() || value.size() > 128 || value == "." || value == "..") return false;
@@ -23,6 +26,15 @@ namespace engine::imagegraph {
 			if (value.empty()) return false;
 		}
 		return false;
+	}
+	bool IsEditableImageReference(std::string_view value) noexcept {
+		constexpr std::string_view prefix = "editable-image://";
+		if (!value.starts_with(prefix)) return false;
+		value.remove_prefix(prefix.size());
+		if (value.empty() || value.size() > 20 || (value.size() > 1 && value.front() == '0')) return false;
+		uint64_t id = 0;
+		const auto parsed = std::from_chars(value.data(), value.data() + value.size(), id);
+		return parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size() && id != 0;
 	}
 	bool IsRuntimeTexture(std::string_view value) noexcept {
 		return value.ends_with(".atex") && PortableAsset(value);

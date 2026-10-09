@@ -59,6 +59,8 @@ namespace engine::render {
 	// when neither carries an identity.
 	std::string PortalBodyPlayer(const ecs::Store &store);
 
+	// Encodes retained and crossing-body draw rows for a destination eye.
+	// Refusal leaves `out` unchanged and explains the reason in `error`.
 	bool CollectPortalEyeGeometry(
 		ecs::Store &store,
 		core::Name destination,

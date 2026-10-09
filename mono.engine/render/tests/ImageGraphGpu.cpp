@@ -1,7 +1,11 @@
 #include "RenderFixture.hpp"
 
 #include <engine/assets/Texture.hpp>
+#include <engine/ecs/Store.hpp>
 #include <engine/imagegraph/Document.hpp>
+#include <engine/render/EditableImages.hpp>
+#include <engine/scene/EditableImage.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <array>
@@ -12,6 +16,7 @@
 TEST_SUITE_ID("engine.render.imagegraph_gpu")
 TEST_DEPENDS("engine.imagegraph.evaluate")
 TEST_DEPENDS("engine.render.fixtures")
+TEST_DEPENDS("engine.render.editableimages")
 
 namespace {
 	using namespace engine;
@@ -350,6 +355,101 @@ TEST_CASE(
 		1.0 / 255
 	);
 	Same(fixture.Render, dataOutput, owner, expectedData);
+}
+
+TEST_CASE(
+	"GPU graph sources follow editable image ownership revisions and storage intent",
+	"[render][gpu][imagegraph][editable-source][.]"
+) {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	scene::RegisterSceneClasses();
+	ecs::Store store("gpu-imagegraph-editable-source");
+	const auto entity = store.CreateInstance(scene::EditableImageClass(), "source");
+	const core::Name owner("gpu-imagegraph-editable-source"), graph("editable-graph"),
+		colourOutput("imagegraph-instance://editable#colour"),
+		dataOutput("imagegraph-instance://editable#data");
+	const auto source = scene::EditableImageContentName(store, entity);
+	const auto grey = Pixels(1, 1, {{128, 128, 128, 73}});
+	REQUIRE(
+		scene::SetEditableImagePixels(store, entity, 1, 1, grey.Pixels, scene::EditableImageSpace::Linear)
+	);
+	render::EditableImageUploader uploader;
+	REQUIRE(uploader.Refresh(store, fixture.Render, owner) == 1);
+	REQUIRE(fixture.Render.AddTexture(source, Pixels(1, 1, {GREEN})));
+	REQUIRE(fixture.Render.TextureHandle(source, owner) != fixture.Render.TextureHandle(source));
+	CHECK_FALSE(fixture.Render.TextureSamplesSRGB(source, owner));
+	const std::string path(source.Text());
+	const std::array bindings{
+		render::ImageGraphSourceBinding{path, source, owner, imagegraph::SourceInterpretation::Colour},
+		render::ImageGraphSourceBinding{path, source, owner, imagegraph::SourceInterpretation::Data}
+	};
+	imagegraph::Document document{
+		.Nodes =
+			{{"colour", imagegraph::Source{path, imagegraph::SourceInterpretation::Colour}, {}, {}},
+			 {"data", imagegraph::Source{path, imagegraph::SourceInterpretation::Data}, {}, {}}},
+		.Outputs =
+			{{"colour", "colour", imagegraph::OutputSpace::SRGB},
+			 {"data", "data", imagegraph::OutputSpace::Linear}},
+		.Parameters = {},
+		.Bindings = {}
+	};
+	imagegraph::Diagnostic diagnostic;
+	REQUIRE(fixture.Render.SetImageGraph(owner, graph, document, bindings, diagnostic));
+	REQUIRE(
+		fixture.Render.EvaluateImageGraph(owner, graph, "colour", colourOutput, diagnostic) ==
+		render::ImageGraphEvaluation::Updated
+	);
+	REQUIRE(
+		fixture.Render.EvaluateImageGraph(owner, graph, "data", dataOutput, diagnostic) ==
+		render::ImageGraphEvaluation::Updated
+	);
+	Same(fixture.Render, colourOutput, owner, Pixels(1, 1, {{188, 188, 188, 73}}), 1.0 / 255);
+	Same(fixture.Render, dataOutput, owner, grey);
+	const auto colourHandle = fixture.Render.TextureHandle(colourOutput, owner);
+	const auto dataHandle = fixture.Render.TextureHandle(dataOutput, owner);
+	const auto cached = fixture.Render.ImageGraphProfile();
+	REQUIRE(
+		fixture.Render.EvaluateImageGraph(owner, graph, "data", dataOutput, diagnostic) ==
+		render::ImageGraphEvaluation::Reused
+	);
+	Unchanged(cached, fixture.Render.ImageGraphProfile());
+	// Identical bytes imported from a codec carry encoded intent, which changes only colour interpretation.
+	REQUIRE(scene::SetEditableImagePixels(store, entity, 1, 1, grey.Pixels, scene::EditableImageSpace::SRGB));
+	REQUIRE(uploader.Refresh(store, fixture.Render, owner) == 1);
+	CHECK(fixture.Render.TextureSamplesSRGB(source, owner));
+	REQUIRE(
+		fixture.Render.EvaluateImageGraph(owner, graph, "colour", colourOutput, diagnostic) ==
+		render::ImageGraphEvaluation::Updated
+	);
+	REQUIRE(
+		fixture.Render.EvaluateImageGraph(owner, graph, "data", dataOutput, diagnostic) ==
+		render::ImageGraphEvaluation::Updated
+	);
+	Same(fixture.Render, colourOutput, owner, grey, 1.0 / 255);
+	Same(fixture.Render, dataOutput, owner, grey, 1.0 / 255);
+	CHECK(fixture.Render.TextureHandle(colourOutput, owner) == colourHandle);
+	CHECK(fixture.Render.TextureHandle(dataOutput, owner) == dataHandle);
+	const auto red = Pixels(1, 1, {RED});
+	REQUIRE(
+		scene::SetEditableImagePixels(store, entity, 1, 1, red.Pixels, scene::EditableImageSpace::Linear)
+	);
+	REQUIRE(uploader.Refresh(store, fixture.Render, owner) == 1);
+	REQUIRE(
+		fixture.Render.EvaluateImageGraph(owner, graph, "data", dataOutput, diagnostic) ==
+		render::ImageGraphEvaluation::Updated
+	);
+	Same(fixture.Render, dataOutput, owner, red);
+	CHECK(fixture.Render.TextureHandle(dataOutput, owner) == dataHandle);
+	REQUIRE(fixture.Render.DropTexture(source, owner));
+	REQUIRE(fixture.Render.TextureHandle(source) != nullptr);
+	CHECK(
+		fixture.Render.EvaluateImageGraph(owner, graph, "data", dataOutput, diagnostic) ==
+		render::ImageGraphEvaluation::Refused
+	);
+	CHECK_FALSE(diagnostic.Message.empty());
+	Same(fixture.Render, dataOutput, owner, red);
 }
 
 TEST_CASE(

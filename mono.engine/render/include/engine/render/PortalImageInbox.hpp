@@ -95,8 +95,11 @@ namespace engine::render {
 		uint64_t StaleRejections = 0;
 		// This inbox's configured queue capacities.
 		size_t PendingCapacity = 0;
+		// Maximum retained completed image count.
 		size_t HeldCapacity = 0;
+		// Maximum bytes owned by pending requests.
 		size_t PendingByteCapacity = 0;
+		// Maximum bytes owned by retained images.
 		size_t HeldByteCapacity = 0;
 	};
 

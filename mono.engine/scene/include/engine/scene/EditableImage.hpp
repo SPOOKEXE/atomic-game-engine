@@ -12,19 +12,11 @@
 //
 // ## What is here and what is not
 //
-// Roblox's `EditableImage` reads and writes raw pixels through a Luau
-// `buffer`, which this engine's script surface has no marshalling for yet -
-// `ScriptCall` carries a fixed set of argument and return kinds, and `buffer`
-// is not one of them. So the door onto the pixels is the drawing primitives
-// rather than the buffer itself: `DrawRectangle`, `DrawLine` and `DrawCircle`
-// cover what a script can put on the image, and `docs/DEFERRED.md` is where a
-// `WritePixelsBuffer` would be opened once that marshalling exists.
+// Raw pixel buffers and drawing primitives share this storage. Encoded image
+// imports are decoded above scene, then replace the complete row atomically.
 //
-// **Fixed size, chosen at creation.** Roblox's own `EditableImage` is the
-// same - `AssetService:CreateEditableImage({Size = ...})` sets it once - and
-// `Resize` here is the escape hatch for a script that decides differently
-// later; it clears the image, because there is no resampling rule that is
-// obviously right for content nothing published.
+// Resize chooses dimensions and clears pixels. Encoded imports infer dimensions
+// and replace the complete image; neither path resamples previous content.
 //
 // @tier L7 · shared
 
@@ -57,18 +49,28 @@ namespace engine::scene {
 	// a script drawing UI or a decal should need; the ceiling exists so a
 	// mistyped `Resize` cannot allocate an unbounded buffer.
 	inline constexpr uint32_t MAXIMUM_EDITABLE_IMAGE_PIXELS = 16u * 1024u * 1024u;
+	// Maximum width for bounded whole-image imports and base64 export.
+	inline constexpr uint32_t MAXIMUM_EDITABLE_IMAGE_IMPORT_WIDTH = 1920;
+	// Maximum height for bounded whole-image imports and base64 export.
+	inline constexpr uint32_t MAXIMUM_EDITABLE_IMAGE_IMPORT_HEIGHT = 1080;
+	// Maximum raw or encoded byte payload for the bounded import surface.
+	inline constexpr size_t MAXIMUM_EDITABLE_IMAGE_IMPORT_BYTES = 8294400;
+	// RGB byte interpretation; alpha remains straight UNORM8 in either space.
+	enum class EditableImageSpace : uint8_t { Linear, SRGB };
 
 	// Row-major RGBA8, top row first - `assets::TextureData::Pixels`'s own
 	// layout, so `engine::render::BuildTextureData` is a copy and not a conversion.
 	//
 	// @since v0.18
 	struct EditableImage {
-		// The image's size in pixels. `Resize` is what changes these, so that
-		// `Pixels` below cannot disagree with them.
+		// The image's size in pixels. Resize and whole-image import change these
+		// together with Pixels, so dimensions and storage cannot disagree.
 		//@{
 		uint32_t Width = DEFAULT_EDITABLE_IMAGE_SIZE;
 		uint32_t Height = DEFAULT_EDITABLE_IMAGE_SIZE;
 		//@}
+		// RGB byte interpretation; alpha remains straight UNORM8 in either space.
+		EditableImageSpace Space = EditableImageSpace::Linear;
 
 		// `Width * Height * 4` bytes, R-G-B-A per pixel.
 		//
@@ -122,7 +124,7 @@ namespace engine::scene {
 	bool ResizeEditableImage(ecs::Store &store, ecs::Entity instance, uint32_t width, uint32_t height);
 
 	// Returns an owned copy of the image's tightly packed pixels. The bytes are
-	// row-major with the top row first, R-G-B-A UNORM8 in the engine's linear
+	// row-major with the top row first, R-G-B-A UNORM8 in the image's declared
 	// colour space, and straight alpha. An invalid or internally malformed image
 	// returns an empty buffer rather than exposing storage the drawing methods
 	// cannot safely index.
@@ -142,6 +144,21 @@ namespace engine::scene {
 	// @param pixels   Exactly `Width * Height * 4` RGBA8 bytes.
 	// @return `false` for an invalid image or malformed byte count.
 	bool EditableImageFromBuffer(ecs::Store &store, ecs::Entity instance, std::span<const std::byte> pixels);
+
+	// Bounded whole-image import. Refusal preserves dimensions, pixels, space and
+	// revision; identical imports stay quiet. Existing raw buffer APIs keep their
+	// larger ceiling. Decoders above scene supply RGBA8 bytes and their RGB space.
+	bool SetEditableImagePixels(
+		ecs::Store &store,
+		ecs::Entity instance,
+		uint32_t width,
+		uint32_t height,
+		std::span<const std::byte> pixels,
+		EditableImageSpace space = EditableImageSpace::Linear
+	);
+	// Changes how existing RGB bytes are interpreted without converting them.
+	// Same-value writes stay quiet; invalid spaces and replica writes are refused.
+	bool SetEditableImageSpace(ecs::Store &store, ecs::Entity instance, EditableImageSpace space);
 
 	// Updates image export packing after validating supported colour and alpha
 	// attributes. Leaves pixels unchanged and advances both packing and image revisions.

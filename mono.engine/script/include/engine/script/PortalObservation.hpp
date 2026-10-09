@@ -46,13 +46,16 @@ namespace engine::script {
 
 	// Bounded, null-terminated text copied into a record.
 	template <size_t Bytes> struct ObservationText {
+		// Fixed storage, always terminated after Assign.
 		std::array<char, Bytes> Value{};
+		// Copies as much text as fits and terminates the stored value.
 		void Assign(std::string_view text) {
 			const size_t copied = text.size() < Bytes - 1 ? text.size() : Bytes - 1;
 			for (size_t index = 0; index < copied; ++index)
 				Value[index] = text[index];
 			Value[copied] = '\0';
 		}
+		// Views the stored null-terminated text.
 		std::string_view View() const {
 			return Value.data();
 		}
@@ -72,6 +75,7 @@ namespace engine::script {
 
 	// A body's path met a pane and the source tried to start a transfer.
 	struct PortalCrossingRecord {
+		// Tick, trace and subject identifying this observation.
 		PortalObservationStamp Stamp;
 		// True when a transfer began; false when `Reason` says why it did not.
 		bool Begun = false;
@@ -82,21 +86,29 @@ namespace engine::script {
 		uint64_t Transfer = 0;
 		// Signed distances from the pane plane before and after the step.
 		float PriorOffset = 0;
+		// Signed distance from the pane plane after the step.
 		float CurrentOffset = 0;
+		// Body position before the crossing check.
 		core::Vector3 Prior;
+		// Body position after the crossing check.
 		core::Vector3 Current;
+		// Authored destination, when known.
 		ObservationText<65> Destination;
+		// Explanation when a transfer did not begin.
 		ObservationText<97> Reason;
 	};
 
 	// The destination admitted a transferred body.
 	struct PortalArrivalRecord {
+		// Tick, trace and subject identifying this observation.
 		PortalObservationStamp Stamp;
+		// Transfer sequence that admitted the body.
 		uint64_t Transfer = 0;
 		// Where the body was placed after the destination suffix resolved.
 		core::Vector3 Position;
 		// Input the committed baseline already includes.
 		uint64_t BaselineInputTick = 0;
+		// World from which the body arrived.
 		ObservationText<65> Source;
 	};
 
@@ -117,7 +129,9 @@ namespace engine::script {
 
 	// One player input applied or skipped.
 	struct PortalInputRecord {
+		// Tick, trace and subject identifying this observation.
 		PortalObservationStamp Stamp;
+		// How this input was applied or skipped.
 		PortalInputRoute Route = PortalInputRoute::Native;
 		// Client input tick.
 		uint64_t InputTick = 0;
@@ -151,8 +165,11 @@ namespace engine::script {
 
 	// One handoff stage change.
 	struct PortalHandoffRecord {
+		// Tick, trace and subject identifying this observation.
 		PortalObservationStamp Stamp;
+		// Stage reached by the transfer.
 		PortalHandoffEvent Event = PortalHandoffEvent::Offered;
+		// Transfer sequence whose stage changed.
 		uint64_t Transfer = 0;
 		// Input tick the event concerns: the sealed baseline's for Sealed and
 		// Committed, the last applied for InputClosed, zero otherwise.
@@ -163,12 +180,14 @@ namespace engine::script {
 
 	// Stable text for records that leave the process.
 	std::string_view Describe(PortalInputRoute route);
+	// Returns stable text for a transfer handoff stage.
 	std::string_view Describe(PortalHandoffEvent event);
 
 	// Per-world, overwrite-on-full storage with one ring per hook. A fixed capacity
 	// keeps observation from becoming a backlog when no consumer is reading.
 	template <class Record, size_t Capacity> class PortalObservationRing {
 	  public:
+		// Adds a record, overwriting the oldest when the ring is full.
 		void Append(const Record &record) {
 			if (Count == Capacity) {
 				First = (First + 1) % Capacity;
@@ -178,6 +197,7 @@ namespace engine::script {
 			Records[(First + Count) % Capacity] = record;
 			++Count;
 		}
+		// Copies retained records in production order.
 		std::vector<Record> Copy() const {
 			std::vector<Record> copied;
 			copied.reserve(Count);
@@ -185,6 +205,7 @@ namespace engine::script {
 				copied.push_back(Records[(First + index) % Capacity]);
 			return copied;
 		}
+		// Number of records overwritten since this ring was created.
 		uint64_t Overwritten() const {
 			return OverwrittenRecords;
 		}
@@ -205,18 +226,27 @@ namespace engine::script {
 
 		// Trace id for records whose subject carries none.
 		uint64_t DefaultTrace = 0;
+		// Sequence assigned to the next record.
 		uint64_t NextSequence = 1;
+		// Retained body crossings.
 		PortalObservationRing<PortalCrossingRecord, EVENT_CAPACITY> Crossings;
+		// Retained destination arrivals.
 		PortalObservationRing<PortalArrivalRecord, EVENT_CAPACITY> Arrivals;
+		// Retained player input routes.
 		PortalObservationRing<PortalInputRecord, INPUT_CAPACITY> Inputs;
+		// Retained transfer handoff changes.
 		PortalObservationRing<PortalHandoffRecord, EVENT_CAPACITY> Handoffs;
 	};
 
 	// Value copies of every retained record, each list in production order.
 	struct PortalObservationCopy {
+		// Crossing records in production order.
 		std::vector<PortalCrossingRecord> Crossings;
+		// Arrival records in production order.
 		std::vector<PortalArrivalRecord> Arrivals;
+		// Input records in production order.
 		std::vector<PortalInputRecord> Inputs;
+		// Handoff records in production order.
 		std::vector<PortalHandoffRecord> Handoffs;
 		// Records lost because a ring was full, summed over the four hooks.
 		uint64_t Overwritten = 0;

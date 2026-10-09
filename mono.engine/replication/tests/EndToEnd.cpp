@@ -5,11 +5,14 @@
 #include <engine/net/Wire.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
+#include <engine/scene/EditableImage.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <vector>
 
@@ -22,6 +25,86 @@ using engine::net::MakeLoopbackTransport;
 using engine::net::Transport;
 
 using namespace replication_wire;
+
+TEST_CASE(
+	"editable image space and pixels survive encrypted snapshot and observed delta",
+	"[replication][editableimage][import]"
+) {
+	using namespace engine::scene;
+	RegisterSceneClasses();
+	uint32_t width = 2;
+	uint32_t height = 1;
+	SECTION("small imported image") {}
+	SECTION("full 1080p imported image") {
+		width = MAXIMUM_EDITABLE_IMAGE_IMPORT_WIDTH;
+		height = MAXIMUM_EDITABLE_IMAGE_IMPORT_HEIGHT;
+	}
+	Wire wire;
+	wire.Authority_.Replicate(Name("scene.EditableImage"), engine::replication::ChangeDetection::Observed);
+	wire.Server.Observe<EditableImage>();
+	const auto entity = wire.Server.CreateInstance(EditableImageClass(), "ReplicatedImage");
+	const auto owner = wire.Server.Create();
+	wire.Server.Set<Spot>(owner, Spot{42.0f, 17.0f});
+	const std::array sample{
+		std::byte{128},
+		std::byte{64},
+		std::byte{32},
+		std::byte{127},
+		std::byte{255},
+		std::byte{0},
+		std::byte{0},
+		std::byte{255}
+	};
+	std::vector<std::byte> pixels(static_cast<size_t>(width) * height * 4);
+	for (size_t offset = 0; offset < pixels.size(); offset += sample.size())
+		std::copy(sample.begin(), sample.end(), pixels.begin() + static_cast<ptrdiff_t>(offset));
+	REQUIRE(SetEditableImagePixels(wire.Server, entity, width, height, pixels, EditableImageSpace::SRGB));
+	// Default pacing carries eight 1024-byte chunks per tick, so 1080p spans more than 1000 ticks.
+	REQUIRE(wire.Join(2048));
+	const auto *received = wire.Client.Get<EditableImage>(entity);
+	REQUIRE(received != nullptr);
+	CHECK(received->Width == width);
+	CHECK(received->Height == height);
+	CHECK(received->Space == EditableImageSpace::SRGB);
+	const bool snapshotPixelsMatch = EditableImageToBuffer(wire.Client, entity) == pixels;
+	CHECK(snapshotPixelsMatch);
+	CHECK(EditableImageContentName(wire.Client, entity) == EditableImageContentName(wire.Server, entity));
+	const auto oversizedBefore = wire.Authority_.Stats().Oversized;
+	const auto prefacedBefore = wire.Replica_.Stats().Prefaces;
+	auto changed = pixels;
+	changed.front() = std::byte{55};
+	changed[1] = std::byte{13};
+	changed[2] = std::byte{4};
+	changed.back() = std::byte{19};
+	REQUIRE(SetEditableImagePixels(wire.Server, entity, width, height, changed, EditableImageSpace::Linear));
+	for (int tick = 0; tick < 2048; ++tick) {
+		wire.Tick();
+		received = wire.Client.Get<EditableImage>(entity);
+		if (received != nullptr && received->Space == EditableImageSpace::Linear) break;
+	}
+	received = wire.Client.Get<EditableImage>(entity);
+	REQUIRE(received != nullptr);
+	CHECK(received->Width == width);
+	CHECK(received->Height == height);
+	CHECK(received->Space == EditableImageSpace::Linear);
+	const bool changedPixelsMatch = EditableImageToBuffer(wire.Client, entity) == changed;
+	CHECK(changedPixelsMatch);
+	if (width == MAXIMUM_EDITABLE_IMAGE_IMPORT_WIDTH) {
+		CHECK(wire.Authority_.Stats().Oversized > oversizedBefore);
+		CHECK(wire.Replica_.Stats().Prefaces > prefacedBefore);
+	} else {
+		CHECK(wire.Replica_.Stats().Deltas > 0);
+	}
+	const auto *receivedOwner = wire.Client.Get<Spot>(owner);
+	REQUIRE(receivedOwner != nullptr);
+	CHECK(receivedOwner->X == 42.0f);
+	CHECK(receivedOwner->Y == 17.0f);
+	CHECK(wire.ServerSide->Stats().Undeliverable == 0);
+	wire.Client.SetAdoptOnly(true);
+	CHECK_FALSE(SetEditableImagePixels(wire.Client, entity, width, height, pixels, EditableImageSpace::SRGB));
+	CHECK_FALSE(SetEditableImageSpace(wire.Client, entity, EditableImageSpace::SRGB));
+	CHECK(received->Space == EditableImageSpace::Linear);
+}
 
 TEST_CASE("a client joins over a real transport", "[replication]") {
 	Wire wire;

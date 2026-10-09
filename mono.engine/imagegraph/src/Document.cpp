@@ -1,5 +1,7 @@
 #include "Inputs.hpp"
 
+#include <engine/imagegraph/Reference.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -22,6 +24,7 @@ namespace engine::imagegraph {
 				   });
 		}
 		bool SourceValid(std::string_view path) {
+			if (IsEditableImageReference(path)) return true;
 			if (path.empty() || path.size() > 4096 || path.front() == '/' ||
 				path.find('\\') != std::string_view::npos || path.find(':') != std::string_view::npos)
 				return false;

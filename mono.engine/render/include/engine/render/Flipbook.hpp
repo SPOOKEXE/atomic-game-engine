@@ -83,6 +83,7 @@ namespace engine::render {
 	// @param seconds How long the animation has been running.
 	// @return The transform. The identity for anything that is not a sheet.
 	FlipbookCell FlipbookCellAt(uint8_t side, uint16_t frames, float rate, double seconds);
+	// Selects a variable-duration frame and maps it into the sheet grid.
 	FlipbookCell FlipbookCellAt(uint8_t side, std::span<const float> cumulativeEnds, double seconds);
 
 	// What a sheet that states no rate is played at.

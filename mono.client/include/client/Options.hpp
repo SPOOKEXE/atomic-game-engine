@@ -497,18 +497,26 @@ namespace client {
 		// RoundTripSeconds models that round trip for request and reply pairs.
 		// Every decision is drawn from the arrival number and Seed.
 		struct NetworkImpairment {
+			// Added round-trip delay, in seconds.
 			double RoundTripSeconds = 0.0;
+			// Maximum seeded timing variation, in seconds.
 			double JitterSeconds = 0.0;
+			// Probability that a received packet is dropped.
 			float LossChance = 0.0f;
+			// Probability that a received packet is delivered twice.
 			float DuplicateChance = 0.0f;
+			// Probability that a received packet is delayed behind a later packet.
 			float ReorderChance = 0.0f;
+			// Seed used to make impairment decisions repeatable.
 			uint32_t Seed = 0;
 
+			// Whether any impairment setting changes packet delivery.
 			bool Active() const {
 				return RoundTripSeconds > 0.0 || JitterSeconds > 0.0 || LossChance > 0.0f ||
 					   DuplicateChance > 0.0f || ReorderChance > 0.0f;
 			}
 		};
+		// Network conditions applied by the acceptance-run receive path.
 		NetworkImpairment Impairment;
 	};
 }

@@ -2881,19 +2881,32 @@ namespace studio {
 		// A retry with an already resident verified root must not decode, upload or
 		// invalidate the scene again.
 		ContentResidency ContentResident;
+		// Signed image graph documents admitted from the current content session.
 		engine::imagegraph::Content ImageGraphContent;
+		// Graph references gathered from content-bearing instances by ECS row.
 		std::unordered_map<uint32_t, std::vector<engine::core::Name>> ImageGraphReferences;
+		// Revisions last applied for each live graph asset.
 		struct AppliedImageGraph {
+			// World that owns the graph.
 			engine::core::Name Owner;
+			// Graph name within its owner.
 			engine::core::Name Name;
+			// Image asset containing the graph document.
 			engine::core::Name Asset;
+			// Content revision last applied.
 			uint64_t ContentRevision = 0;
+			// Input revision last applied.
 			uint64_t InputRevision = 0;
+			// Graph outputs currently requested by the owner.
 			std::vector<engine::core::Name> Outputs;
+			// Whether the graph appeared in the latest live scan.
 			bool Seen = false;
 		};
+		// Previously applied graph state, keyed by its stable runtime identity.
 		std::unordered_map<uint64_t, AppliedImageGraph> AppliedImageGraphs;
+		// Finds the live graph document for a content asset.
 		const engine::imagegraph::Document *FindLiveImageGraph(engine::core::Name asset) const;
+		// Rebuilds live graph state after content or input revisions change.
 		bool RefreshLiveImageGraphs();
 
 		// Last content-reference revision scanned per open world. This is a
@@ -6164,18 +6177,29 @@ namespace studio {
 		void ReleaseImageComposerPreview();
 		void ApplyImageComposerPending();
 		void DrawImageGraphInstanceInputs(engine::ecs::Store &, Entity);
+		// Input override edit queued for application to an instance.
 		struct PendingImageGraphInput {
+			// World containing the target instance.
 			WorldId World;
+			// Instance whose graph input will change.
 			Entity Instance;
+			// Input override to apply.
 			engine::imagegraph::InputOverride Input;
+			// Whether to clear the override instead of setting it.
 			bool Reset = false;
 		};
 		std::vector<PendingImageGraphInput> ImageGraphInputEdits;
+		// Composer output assignment queued for the selected instances.
 		struct PendingComposerApply {
+			// World containing the selected instances.
 			WorldId World;
+			// Instances receiving the composer output.
 			std::vector<Entity> Instances;
+			// Property that will reference the output.
 			engine::core::Name Property;
+			// Image graph asset to apply.
 			engine::core::Name Graph;
+			// Named output within the graph.
 			engine::core::Name Output;
 		};
 		PendingComposerApply ComposerApply;
@@ -6504,7 +6528,9 @@ namespace studio {
 
 			// `ImGui::GetTime()` at which the next publish is due.
 			double NextPublish = 0.0;
+			// Latest image graph evaluation totals included in this view.
 			engine::render::ImageGraphStatistics ImageGraphProfile{};
+			// Time the next image graph profile snapshot is due.
 			double NextImageGraphProfile = 0.0;
 
 			// The published snapshot - what is drawn.

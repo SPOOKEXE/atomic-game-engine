@@ -366,8 +366,11 @@ namespace engine::effects {
 		// Variable timing is resolved from the world's texture catalogue. The
 		// name remains stable across content replacement and world boundaries.
 		core::Name FlipbookTexture;
+		// Multiplier applied to variable frame durations.
 		float FlipbookTimelineScale = 1.0f;
+		// Whether the texture uses per-frame durations instead of a fixed rate.
 		bool VariableFlipbookTiming = false;
+		// Set when authored variable timing could not be resolved or validated.
 		bool InvalidFlipbookTiming = false;
 	};
 

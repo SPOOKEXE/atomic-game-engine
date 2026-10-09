@@ -1,3 +1,5 @@
+#include "AssetPublication.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -555,10 +557,13 @@ TEST_CASE(
 	CHECK(studio::CanApplyLiveImageComposer(state));
 	const auto key = state.PublishedKey;
 	host.LivePublish = [](const Document &, std::string_view, std::string &, std::string &failure) {
-		failure = "signature refused";
-		return false;
+		return studio::ReadAssetPublishingKey(
+				   std::string(64, '1'), studio::ContentSources::Default(), failure
+		)
+			.has_value();
 	};
 	CHECK_FALSE(studio::PublishLiveImageComposer(state, host, "replacement.aimagegraph"));
+	CHECK(state.Error == "signing key does not match the configured content publisher");
 	CHECK(state.PublishedGraph == "published.aimagegraph");
 	CHECK(state.PublishedKey == key);
 	CHECK(studio::CanApplyLiveImageComposer(state));

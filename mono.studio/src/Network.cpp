@@ -818,6 +818,7 @@ namespace studio {
 		// A built-in now enters `ContentAsked` on its first sight, which is six
 		// extra ids and no change in what is fetched: the check below still
 		// refuses it before anything is requested.
+		if (asset.IsValid() && engine::imagegraph::IsEditableImageReference(asset.Text())) return false;
 		if (asset.IsValid() && engine::imagegraph::IsReference(asset.Text())) {
 			engine::imagegraph::Reference reference;
 			if (!engine::imagegraph::ParseReference(asset.Text(), reference) ||
@@ -887,6 +888,11 @@ namespace studio {
 		Universe->EachWorld([&](world::WorldId world) {
 			openWorlds.push_back(world.Index);
 			const auto owner = Universe->NameOf(world);
+			// Upload local pixels before graph evaluation observes their revisions.
+			if (ModeOf(world) != RunMode::Play || ClientSettings.EnableEditableImages)
+				Universe->Enter(world, [&](ecs::Store &store) {
+					changed = EditableImages.Refresh(store, Renderer, owner) > 0 || changed;
+				});
 			const auto references = ImageGraphReferences.find(world.Index);
 			if (references != ImageGraphReferences.end()) {
 				for (const auto uri : references->second) {
@@ -1000,7 +1006,12 @@ namespace studio {
 								   binding.Interpretation == source->Interpretation;
 						}))
 						continue;
-					bindings.push_back({source->Path, core::Name(source->Path), {}, source->Interpretation});
+					bindings.push_back(
+						{source->Path,
+						 core::Name(source->Path),
+						 imagegraph::IsEditableImageReference(source->Path) ? demand.Owner : core::Name{},
+						 source->Interpretation}
+					);
 				}
 				if (!Renderer.SetImageGraph(demand.Owner, demand.Name, resolved, bindings, diagnostic))
 					continue;

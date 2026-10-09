@@ -844,20 +844,35 @@ namespace client {
 			// Capture-only snapshot of the facts that kept a crossed successor image-only.
 			std::shared_ptr<PortalReadinessEvidence> CapturedReadiness;
 			std::shared_ptr<PortalReadiness> CapturedReadinessDecision;
+			// Captured IDs and slot state used to explain which portal eye was probed.
 			struct EyeProbe {
+				// World chosen by the successor route.
 				std::string SelectedWorld;
+				// World resolved for the eye being captured.
 				std::string EyeWorld;
+				// Key used to address the eye's retained image.
 				std::string ImageKey;
+				// World currently associated with that image slot.
 				std::string BoundWorld;
+				// Whether the slot was prepared for capture.
 				bool Prepared = false;
+				// Retained portal image slot.
 				size_t Slot = 0;
+				// Image selected when the probe was captured.
 				uint64_t Image = 0;
+				// Image currently published by the slot.
 				uint64_t CurrentImage = 0;
+				// Image observed when capture was requested.
 				uint64_t CaptureImage = 0;
+				// World tick associated with the capture.
 				uint64_t CaptureTick = 0;
+				// Number of producer submissions observed by the probe.
 				size_t Submitted = 0;
+				// Whether the image producer passed its validity checks.
 				bool ProducerValid = false;
+				// Retained images for the two viewport destinations.
 				std::array<uint64_t, 2> ViewportImages{};
+				// Destination worlds associated with the viewport images.
 				std::array<std::string, 2> ViewportDestinations{};
 			};
 			std::optional<EyeProbe> CapturedEyeProbe;
@@ -964,13 +979,21 @@ namespace client {
 			engine::imagegraph::Content GraphContent;
 			// Reader caches, rebuilt from content-bearing ECS columns when they change.
 			std::unordered_map<uint32_t, std::vector<engine::core::Name>> GraphReferences;
+			// Snapshot used to avoid reapplying unchanged image graph content.
 			struct AppliedGraph {
+				// World that owns the graph.
 				engine::core::Name Owner;
+				// Graph name within its owner.
 				engine::core::Name Name;
+				// Content asset backing the graph.
 				engine::core::Name Asset;
+				// Content revision last applied.
 				uint64_t ContentRevision = 0;
+				// Input revision last applied.
 				uint64_t InputRevision = 0;
+				// Outputs requested from the graph.
 				std::vector<engine::core::Name> Outputs;
+				// Whether this graph appeared in the latest scan.
 				bool Seen = false;
 			};
 			std::unordered_map<uint64_t, AppliedGraph> AppliedGraphs;

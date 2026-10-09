@@ -4192,6 +4192,7 @@ namespace client {
 		// press was picked correctly, produced the right event, and was handed to
 		// a VM that was not the one the button's script was in.
 		const engine::world::WorldId interfaceWorld = InterfaceWorld();
+		bool editableImagesChanged = false;
 		const auto prepareEditable = [&](engine::world::WorldId world) {
 			const auto owner = Universe_->NameOf(world);
 			Universe_->Enter(world, [&](engine::ecs::Store &store) {
@@ -4200,6 +4201,7 @@ namespace client {
 										: EditableMeshes.RefreshLods(store, Renderer, owner);
 				const auto images =
 					Settings.EnableEditableImages ? EditableImages.Refresh(store, Renderer, owner) : 0;
+				editableImagesChanged = images > 0 || editableImagesChanged;
 				VisualResourcesChanged = meshes > 0 || images > 0 || VisualResourcesChanged;
 			});
 		};
@@ -4209,6 +4211,7 @@ namespace client {
 				prepareEditable(world);
 			if (ReportedJoin) prepareEditable(Replicated);
 		}
+		if (editableImagesChanged) RefreshImageGraphs(*ContentState, ContentWorlds);
 
 		if (interfaceWorld.IsValid() && DataFactoryRenderOnly.AllowsInteractiveGui(factoryPaused)) {
 			ENGINE_HEAP_SCOPE("client.interface");

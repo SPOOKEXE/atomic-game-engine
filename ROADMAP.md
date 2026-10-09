@@ -61,7 +61,16 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] Define strict document v2 named parameters and bindings, backward v1 reads, pure input resolution and bounded selected-output preparation for the seven 2D nodes.
 - [x] Add the keyed L7 per-world `ImageGraph` owner and Luau `SetInput`, `GetInput` and `GetImage` paths using stable imagegraph references.
 - [x] Add L12 GPU evaluation, dirty-cone caching and transactional publication through ordinary `TextureTable` images; preserve last-good output on refusal.
-- [x] Add Studio live inputs, bindings, GPU preview and publish/apply, then verify signed cooking, real-device parity, consumers, profiling, server safety, layers, CI and docs.
+- [x] Add Studio live inputs, bindings, GPU preview and publish/apply to ordinary image slots.
+- [x] Add bounded raw RGBA8, PNG and JPEG imports, raw Base64 export, `ContentId` consumers and the `ImageBuffers` sample.
+- [x] Add a staged demo runner that captures each top-level script and world, checks client diagnostics and validates BMP output.
+- [x] Verify the encrypted 1080p EditableImage snapshot and observed update preserve dimensions, full byte payload, colour space, `ContentId` and unrelated replica rows across default chunk and pacing limits (18,302 assertions).
+- [x] Verify viewport checks (29 cases, 449 assertions) and final native viewport drag/resnap; repeat Play/Stop coverage passed 228 assertions in the strict-CI binary.
+- [x] Pass `just preset=dev docs-check` with zero malformed comments and no undocumented public entities.
+- [x] Finish three consecutive interactive Studio Play/Stop checks; restored orange graph output appears in ImageLabel and ParticleEmitter.
+- [x] Verify isolated signed GUI Publish/Apply and mismatched-key refusal; six SHA values stayed unchanged, the candidate was absent and the previous Apply remained enabled.
+- [x] Pass fresh strict CI with stable fixes: 664 suites, 0 skipped and 0 failed; architecture has 50 modules, 6 programs and 36 layered modules.
+- [_] Non-acceptance follow-up: audit aggregate replica snapshot and staged-byte ceilings for large EditableImage rows. The current path has a `uint32_t` total cap but no explicit assembled-image budget; per-image bounds and windowed staging are tested.
 
 The accepted implementation is `v0.26.0-imagegraph-minimal`. The preserved full Composer work remains on `v0.26.5-imagegraph-full` for user review.
 

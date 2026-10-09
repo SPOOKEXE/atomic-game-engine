@@ -44,8 +44,10 @@ namespace engine::imagegraph {
 			const auto &node = document.Nodes[index];
 			const auto *source = std::get_if<Source>(&node.Value);
 			if (!source) continue;
-			if (!IsRuntimeTexture(source->Path)) {
-				diagnostic = {node.Id, "runtime source must name an exact portable .atex asset"};
+			if (!IsRuntimeTexture(source->Path) && !IsEditableImageReference(source->Path)) {
+				diagnostic = {
+					node.Id, "runtime source must name an exact .atex asset or local editable image"
+				};
 				return false;
 			}
 			if (std::find(candidate.begin(), candidate.end(), source->Path) == candidate.end())
@@ -79,6 +81,21 @@ namespace engine::imagegraph {
 		if (!Read(encoded, authored, diagnostic) || !ResolveInputs(authored, {}, resolved, diagnostic) ||
 			!RuntimeSources(resolved, sources, diagnostic))
 			return false;
+		for (const auto &node : authored.Nodes) {
+			const auto *source = std::get_if<Source>(&node.Value);
+			if (source && IsEditableImageReference(source->Path)) {
+				diagnostic = {
+					node.Id, "published graph sources cannot reference world-local editable images"
+				};
+				return false;
+			}
+		}
+		for (const auto &source : sources) {
+			if (IsEditableImageReference(source)) {
+				diagnostic = {{}, "published graph defaults cannot reference world-local editable images"};
+				return false;
+			}
+		}
 		for (const auto &output : authored.Outputs) {
 			if (!IsReferenceToken(output.Name)) {
 				diagnostic = {{}, "runtime output must use a portable reference token"};

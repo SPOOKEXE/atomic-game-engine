@@ -8,9 +8,9 @@ layer stack it describes is what decides which of these a module may read.
 The engine bottom to top, then the programs, then the tooling. A module carrying
 prose of its own beyond its invariants has it listed underneath.
 
-**Generated.** `mono.tools/architecture/WriteModulePages.cmake` walks the tree
-for every `AGENTS.md` and orders them by the layers in `expected_graph.json`, so
-a module that exists is listed. Run `just docs-pages` after adding one;
+**Generated.** `mono.tools/architecture/WriteModulePages.cmake` walks `AGENTS.md`
+files and prose in graph modules, ordering modules by the layers in
+`expected_graph.json`. Run `just docs-pages` after adding either;
 `just docs-pages-check` is what fails when it has not been run.
 
 - @subpage md_mono_8engine_2AGENTS
@@ -27,6 +27,7 @@ a module that exists is listed. Run `just docs-pages` after adding one;
 - @subpage md_mono_8engine_2audiocodec_2AGENTS
 - @subpage md_mono_8engine_2audiocodec_2docs_2index
 - @subpage md_mono_8engine_2effects_2AGENTS
+- @subpage md_mono_8engine_2imagecodec_2docs_2ImageCodec
 - @subpage md_mono_8engine_2physics_2AGENTS
 - @subpage md_mono_8engine_2bake_2AGENTS
 - @subpage md_mono_8engine_2bakegraph_2AGENTS

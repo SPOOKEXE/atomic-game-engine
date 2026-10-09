@@ -2395,6 +2395,13 @@ declare task: {
 				out << "\t-- Buffers above the 64 MiB image ceiling raise before the image changes.\n";
 				out << "\tfunction ToBuffer(self): buffer\n";
 				out << "\tfunction FromBuffer(self, buffer: buffer): boolean\n";
+				out << "\t-- Bounded 1920x1080 imports; malformed data leaves the image unchanged.\n";
+				out << "\tfunction FromBase64(self, encoded: string, format: \"rgba8\" | \"png\" | "
+					   "\"jpeg\"): boolean\n";
+				out << "\tfunction FromEncodedBuffer(self, buffer: buffer, format: \"png\" | \"jpeg\"): "
+					   "boolean\n";
+				out << "\t-- Raw RGBA8 bytes in the current image space; empty string on export refusal.\n";
+				out << "\tfunction ToBase64(self): string\n";
 
 				out << "\tfunction GetAttribute(self, name: string): EngineAttribute?\n";
 				out << "\tfunction SetAttribute(self, name: string, value: EngineAttribute?): ()\n";
@@ -4111,6 +4118,11 @@ declare const task: {
 				out << "\t * Buffers above the 64 MiB image ceiling raise before the image changes. */\n";
 				out << "\tToBuffer(): ArrayBuffer;\n";
 				out << "\tFromBuffer(buffer: ArrayBuffer): boolean;\n";
+				out << "\t/** Bounded 1920x1080 imports; malformed data leaves the image unchanged. */\n";
+				out << "\tFromBase64(encoded: string, format: 'rgba8' | 'png' | 'jpeg'): boolean;\n";
+				out << "\tFromEncodedBuffer(buffer: ArrayBuffer, format: 'png' | 'jpeg'): boolean;\n";
+				out << "\t/** Raw RGBA8 bytes in current image space; empty string on export refusal. */\n";
+				out << "\tToBase64(): string;\n";
 
 				// Attributes, matching the Luau half. The union is the same
 				// closed set and for the same reason.

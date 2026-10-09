@@ -45,8 +45,11 @@ namespace bus_routing_bench {
 		total.LiveBlocks += node.LiveBlocks;
 		total.PeakBytes += node.PeakBytes;
 	}
+	// Heap totals attributed to routing phases and the enclosing tick.
 	struct HeapReading {
+		// Exclusive totals for each entry in PHASES, including the residual.
 		std::array<HeapNodeView, 6> Exclusive{};
+		// Aggregate totals for nodes beneath Universe::Tick.
 		HeapNodeView Tick;
 	};
 	inline HeapReading ReadHeap() {
@@ -85,15 +88,21 @@ namespace bus_routing_bench {
 		}
 		return result;
 	}
+	// Restores frame-graph collection to its prior state on scope exit.
 	struct RestoreProfile {
+		// Collector setting captured when the diagnostic scope begins.
 		bool Previous = FrameGraph::IsEnabled();
 		~RestoreProfile() {
 			FrameGraph::SetEnabled(Previous);
 		}
 	};
+	// Stateful benchmark hook retaining its parity oracle and call count.
 	struct Diagnostic {
+		// Canonical routing oracle advanced alongside each measured batch.
 		bus_routing_fixture::ChattyOracle Oracle;
+		// Number of batches used to enforce warmup and sample limits.
 		unsigned Calls = 0;
+		// Starts the oracle against the universe being profiled.
 		explicit Diagnostic(engine::world::Universe &universe) : Oracle(universe) {}
 		void Batch(engine::world::Universe &universe) {
 			const bool capture = ProfileEnabled(), canonical = CanonicalEnabled();

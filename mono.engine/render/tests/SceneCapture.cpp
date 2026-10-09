@@ -8,7 +8,9 @@
 // driver requirement.
 
 #include "GpuHeap.hpp"
+#include "RenderFixture.hpp"
 
+#include <engine/assets/Texture.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/ParticleSystem.hpp>
@@ -23,10 +25,12 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 
 TEST_SUITE_ID("engine.render.scenecapture")
+TEST_DEPENDS("engine.render.fixtures")
 
 namespace {
 	struct VideoSubsystem {
@@ -240,6 +244,89 @@ TEST_CASE("headless Vulkan runs resource, particle, capture, and readback paths"
 
 	renderer.Shutdown();
 	CHECK(renderer.MemoryStatistics().LiveBytes == 0);
+}
+
+TEST_CASE(
+	"live image particle textures resolve their world namespace before ordinary content aliases",
+	"[render][gpu][particle-image-owner][.]"
+) {
+	using namespace engine;
+	const core::Name textureName(
+		GENERATE("imagegraph-instance://scope#image", "editable-image://4294967297")
+	);
+	const bool foreignContentOwner = GENERATE(false, true);
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDocument(), pipeline, offender) == graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipelineName("particle-image-owner-pipeline"), worldName("particle-image-world");
+	const core::Name contentOwner = foreignContentOwner ? core::Name("foreign-asset-alias") : core::Name{};
+	INFO("live texture=" << textureName.Text() << " ordinary owner=" << contentOwner.Text());
+	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
+	assets::TextureData image;
+	image.Width = image.Height = 1;
+	image.Format = assets::TextureFormat::RGBA8_LINEAR;
+	image.Pixels = {std::byte{255}, std::byte{0}, std::byte{0}, std::byte{255}};
+	REQUIRE(renderer.AddTexture(textureName, image, contentOwner));
+	image.Pixels = {std::byte{0}, std::byte{0}, std::byte{255}, std::byte{255}};
+	REQUIRE(renderer.AddTexture(textureName, image, worldName));
+	REQUIRE(
+		renderer.TextureHandle(textureName, worldName) != renderer.TextureHandle(textureName, contentOwner)
+	);
+	effects::EmitterBlock block;
+	block.Frame.Position = {0, 0, -4};
+	block.Capacity = 1;
+	block.ParticleLimit = 1;
+	for (size_t index = 0; index < effects::CURVE_SAMPLES; index++) {
+		block.Curves.Size[index] = 2;
+		block.Curves.Alpha[index] = 1;
+		block.Curves.Colour[index] = 0x00FFFFFFu;
+	}
+	effects::EmitterSpawnState spawn;
+	spawn.Speed = core::NumberRange{0};
+	spawn.Lifetime = core::NumberRange{10};
+	effects::EmitterRuntime runtime;
+	runtime.Requested = 1;
+	render::ParticleBatch particle;
+	particle.Block = &block;
+	particle.Spawn = &spawn;
+	particle.Runtime = &runtime;
+	particle.Texture = textureName;
+	particle.LightEmission = 1;
+	particle.LightInfluence = 0;
+	const std::array particles{particle};
+	const render::SceneTarget target{64, 64};
+	render::View view;
+	view.Target = &target;
+	view.World = 797;
+	view.WorldName = worldName;
+	view.ContentOwner = contentOwner;
+	view.Pipeline = pipelineName;
+	view.Particles = particles;
+	view.ParticleBlocks = 1;
+	view.ParticlePool = 1;
+	view.ParticleRevision = view.ParticleLayoutRevision = view.ParticleResidentRevision = 1;
+	view.ParticleDelta = 1.0f / 60;
+	render::OverlayImage overlay;
+	const auto frame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(frame.Submitted);
+	REQUIRE(frame.ComputeDispatches > 0);
+	REQUIRE(frame.ParticlesDrawn > 0);
+	const auto captured = render::test::CaptureResource(
+		renderer, core::Name("composed-image"), 0, 64, 64, render::test::ImageFormat::Bgra8Unorm
+	);
+	const size_t centre = 32 * captured.RowStrideBytes + 32 * 4;
+	const auto red = std::to_integer<uint8_t>(captured.Bytes[centre + 2]);
+	const auto green = std::to_integer<uint8_t>(captured.Bytes[centre + 1]);
+	const auto blue = std::to_integer<uint8_t>(captured.Bytes[centre]);
+	INFO("particle centre RGB=" << unsigned(red) << ',' << unsigned(green) << ',' << unsigned(blue));
+	CHECK(blue > 128);
+	CHECK(red < 16);
+	CHECK(blue > green + 64);
 }
 
 TEST_CASE("headless Vulkan particle pools grow to the host ceiling and release", "[render][gpu][.]") {

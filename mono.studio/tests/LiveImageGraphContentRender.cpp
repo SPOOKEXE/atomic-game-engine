@@ -314,3 +314,155 @@ end
 	CHECK(CountPixels(surface.get(), PixelColour::Cyan, 20, 20, 68, 68) > 2000);
 	CHECK(CountPixels(surface.get(), PixelColour::Cyan, 80, 20, 128, 68) == 0);
 }
+
+TEST_CASE(
+	"signed graph buffer source updates reach labels and particles on the same Heartbeat frame",
+	"[studio][imagegraph][live][editable][sameframe][gpu][.]"
+) {
+	using namespace engine;
+	const auto root = core::Paths::Base() / "live-imagegraph-editable-sameframe";
+	std::filesystem::remove_all(root);
+	std::filesystem::create_directories(root / "baked");
+	imagegraph::Document document;
+	document.Nodes = {{"source", imagegraph::Source{"default.atex"}, {}, {}}};
+	document.Outputs = {{"image", "source"}};
+	document.Parameters = {{"pixels", std::string("default.atex")}};
+	document.Bindings = {{"source", "path", "pixels"}};
+	imagegraph::Diagnostic diagnostic;
+	std::string encoded;
+	REQUIRE(imagegraph::Write(document, encoded, diagnostic));
+	{
+		std::ofstream output(root / "baked/buffer.aimagegraph", std::ios::binary);
+		output.write(encoded.data(), static_cast<std::streamsize>(encoded.size()));
+		REQUIRE(output.good());
+	}
+	assets::TextureData texture;
+	texture.Width = texture.Height = 8;
+	texture.Format = assets::TextureFormat::RGBA8_LINEAR;
+	texture.Pixels.resize(8 * 8 * 4, std::byte{255});
+	core::ByteWriter writer;
+	REQUIRE(assets::Texture::Write(writer, texture));
+	{
+		std::ofstream output(root / "baked/default.atex", std::ios::binary);
+		output.write(
+			reinterpret_cast<const char *>(writer.Bytes().data()),
+			static_cast<std::streamsize>(writer.Bytes().size())
+		);
+		REQUIRE(output.good());
+	}
+	const auto key = assets::SigningKey::FromSeed(std::array<std::byte, 32>{});
+	REQUIRE(key);
+	cdn::PublishSettings publication;
+	publication.TrainDictionary = false;
+	const auto published = cdn::Publish(root / "baked", root / "store", *key, publication);
+	REQUIRE(published);
+	REQUIRE(published->Assets == 2);
+	const auto script = root / "sameframe.luau";
+	{
+		std::ofstream output(script);
+		REQUIRE(output.good());
+		output << R"(
+local pixels = Instance.new("EditableImage")
+pixels:Resize(8, 8)
+pixels.Parent = workspace
+local graph = Instance.new("ImageGraph")
+graph.InstanceKey = "buffer-source"
+graph.Graph = "buffer.aimagegraph"
+graph.Parent = workspace
+graph:SetInput("pixels", pixels.ContentId)
+local screen = Instance.new("ScreenGui")
+screen.Parent = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
+local label = Instance.new("ImageLabel")
+label.Position = UDim2.new(0, 20, 0, 20)
+label.Size = UDim2.new(0, 48, 0, 48)
+label.BackgroundTransparency = 1
+label.BorderSizePixel = 0
+label.Image = graph:GetImage("image")
+label.Parent = screen
+local marker = Instance.new("Frame")
+marker.Position = UDim2.new(0, 80, 0, 20)
+marker.Size = UDim2.new(0, 32, 0, 32)
+marker.BorderSizePixel = 0
+marker.Parent = screen
+local function paint(red, green, blue)
+    local bytes = buffer.create(8 * 8 * 4)
+    for offset = 0, buffer.len(bytes) - 4, 4 do
+        buffer.writeu8(bytes, offset, red)
+        buffer.writeu8(bytes, offset + 1, green)
+        buffer.writeu8(bytes, offset + 2, blue)
+        buffer.writeu8(bytes, offset + 3, 255)
+    end
+    assert(pixels:FromBuffer(bytes))
+    marker.BackgroundColor3 = Color3.fromRGB(red, green, blue)
+end
+paint(0, 255, 255)
+local part = Instance.new("Part")
+part.Anchored = true
+part.Transparency = 1
+part.CFrame = CFrame.new(2.5, 0, 0)
+part.Parent = workspace
+local emitter = Instance.new("ParticleEmitter")
+emitter.Texture = graph:GetImage("image")
+emitter.Rate = 60
+emitter.Lifetime = NumberRange.new(10)
+emitter.Speed = NumberRange.new(0)
+emitter.Size = NumberSequence.new(1.5)
+emitter.Color = ColorSequence.new(Color3.new(1, 0, 1))
+emitter.Parent = part
+local camera = Instance.new("Camera")
+camera.FieldOfView = 60
+camera.CFrame = CFrame.lookAt(Vector3.new(0, 0, 8), Vector3.new(0, 0, 0))
+camera.Parent = workspace
+workspace.CurrentCamera = camera
+local beat = 0
+game:GetService("RunService").Heartbeat:Connect(function()
+    beat += 1
+    if beat == 25 then paint(255, 255, 0) end
+end)
+)";
+	}
+	client::Options options;
+	options.Headless = true;
+	options.Width = WIDTH;
+	options.Height = HEIGHT;
+	options.MaximumFrames = 70;
+	options.MaximumFrameRate = 60;
+	options.Uncapped = true;
+	options.ScriptPath = script.string();
+	options.ContentSources = {"dir:" + (root / "store").string()};
+	options.ContentPublisherKey = key->Public().ToHex();
+	options.CaptureSequence = root / "frames";
+	client::Client player;
+	REQUIRE(player.Initialise(options));
+	REQUIRE(player.Run() == 0);
+	bool sawCyan = false, sawYellow = false;
+	// The marker changes in the same callback as the buffer. Compare every frame,
+	// rather than assuming a simulation tick and capture index are identical.
+	for (int frame = 15; frame < 65; ++frame) {
+		CAPTURE(frame);
+		const auto surface = ReadFrame(options.CaptureSequence, frame);
+		Uint8 red = 0, green = 0, blue = 0, alpha = 0;
+		REQUIRE(SDL_ReadSurfacePixel(surface.get(), 90, 30, &red, &green, &blue, &alpha));
+		REQUIRE(green > 240);
+		REQUIRE(((red < 10 && blue > 240) || (red > 240 && blue < 10)));
+		const bool yellow = red > 240;
+		sawYellow |= yellow;
+		sawCyan |= !yellow;
+		CHECK(
+			CountPixels(surface.get(), yellow ? PixelColour::Yellow : PixelColour::Cyan, 20, 20, 68, 68) >
+			2000
+		);
+		CHECK(
+			CountPixels(
+				surface.get(),
+				yellow ? PixelColour::Red : PixelColour::Blue,
+				WIDTH / 2,
+				0,
+				WIDTH,
+				HEIGHT * 2 / 3
+			) > 100
+		);
+	}
+	CHECK(sawCyan);
+	CHECK(sawYellow);
+}

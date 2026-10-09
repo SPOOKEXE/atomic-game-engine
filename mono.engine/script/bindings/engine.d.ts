@@ -1284,6 +1284,11 @@ declare interface Instance {
 	 * Buffers above the 64 MiB image ceiling raise before the image changes. */
 	ToBuffer(): ArrayBuffer;
 	FromBuffer(buffer: ArrayBuffer): boolean;
+	/** Bounded 1920x1080 imports; malformed data leaves the image unchanged. */
+	FromBase64(encoded: string, format: 'rgba8' | 'png' | 'jpeg'): boolean;
+	FromEncodedBuffer(buffer: ArrayBuffer, format: 'png' | 'jpeg'): boolean;
+	/** Raw RGBA8 bytes in current image space; empty string on export refusal. */
+	ToBase64(): string;
 	GetAttribute(name: string): EngineAttribute | null;
 	SetAttribute(name: string, value: EngineAttribute | null): void;
 	/** ImageGraph overrides; null restores the graph default. */
@@ -1854,6 +1859,7 @@ declare interface EditableMesh extends Instance {
 }
 
 declare interface EditableImage extends Instance {
+	ColorSpace: string;
 	readonly ContentId: string;
 	PackingAttributes: number;
 	PackingFormat: string;

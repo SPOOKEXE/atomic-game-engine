@@ -1,6 +1,6 @@
 # live ImageGraph plan
 
-status: implemented and verified on `v0.26.0-imagegraph-minimal`. The seven-node 2D layer includes document v2, named world inputs, script controls, signed content, GPU evaluation and Studio editing. Strict CI passed on implementation commit `7d6c3c0e`: 661 suites run, none skipped or failed. Full dev and server CTest, focused Vulkan checks, sanitizers, profiling and real Studio checks passed. Static ImageGraph evidence remains in `IMAGEGRAPH_2D.md` and `IMAGEGRAPH_2D_PLAN.md`.
+status: implemented on `v0.26.0-imagegraph-minimal`. The seven-node 2D layer includes document v2, named world inputs, script controls, signed content, GPU evaluation and Studio editing. Historical strict CI on `7d6c3c0e` passed 661 suites; current strict CI passed 664 suites with none skipped or failed. Current architecture covers 50 modules, 6 programs and 36 layered modules. Full dev and server CTest, focused Vulkan checks, sanitizers, profiling and real Studio checks passed on the implementation snapshots. Static ImageGraph evidence remains in `IMAGEGRAPH_2D.md` and `IMAGEGRAPH_2D_PLAN.md`.
 
 The first live layer stays small: seven 2D nodes, ordinary image outputs, no 3D, audio or broad simulation work. Engine code decides graph meaning. The world owns named inputs. Render owns GPU images. Studio edits and previews through those same paths.
 
@@ -57,7 +57,7 @@ Studio exposes parameter values and bindings, previews the selected output on GP
 
 ## implementation sequence
 
-All ten implementation and verification steps below are complete.
+The implementation and current strict CI steps are complete. Earlier and current verification results are recorded below.
 
 1. Freeze v1 behavior and v2 schema with strict parser cases.
 2. Add typed parameters and bindings to the authored document.
@@ -78,16 +78,22 @@ These verification results passed:
 - GPU renderer: 8 cases and 788 assertions, including literal R8, R16 and R32 data parity and the 1,405-byte output path. Texture GPU: 8 cases and 228 assertions.
 - `InterfacePass` target/encoding and portal ownership checks: 2 cases and 1,059 assertions. Capture, adopted-UNORM and texture-owner checks: 7 cases and 230 assertions.
 - Composer and dock CPU suites: 22 cases and 469 assertions, excluding asset suites.
-- Real Studio Vulkan/SDL/XTest dock check passed two complete undock/resnap cycles. Initial origins were (0, 0) and (300, 100); final dock id was `00000003` (original); process exit was 0.
-- Real Composer GPU check changed a named output from 64 to 32 pixels. Save/open retained the v2 binding, default input and authored sRGB output. Setting width to 0 showed a diagnostic and kept last-good preview; reopening restored the saved graph. Publish without a signing key refused without writes; process exit was 0.
-- The Studio preview mid-tone bug displayed byte 64 as 13. The preview adapter now uses temporary linear storage while authored and exported data stay sRGB; a CPU fixture covers that path. Successful GUI publish/apply/export was skipped to avoid writing to the default user content store. No user config was touched; CPU and signed live integration checks cover successful publication and apply.
+- Real Studio Vulkan/SDL/XTest dock check passed two complete undock/resnap cycles. Initial origins were (0, 0) and (300, 100); final dock id was `00000003` (original); process exit was 0. The freed-central dock cache issue has since been fixed.
+- Final native viewport drag/resnap passed: floating Hallway at 1214 by 610 snapped to the stable central guide, then resnapped to a 1214 by 871 docked viewport. The floating window disappeared and both ImageLabel and ParticleEmitter showed the orange output. Captures are under `.cache/build/dev/composer-publish-verify/`.
+- Real Composer GPU check changed a named output from 64 to 32 pixels. Save/open retained the v2 binding, default input and authored sRGB output. Setting width to 0 showed a diagnostic and kept last-good preview; reopening restored the saved graph. A publish signing key that differs from the effective `Content.ToSettings.Publisher` is now refused before cooking or publication, and the previously accepted graph remains in place.
+- The Studio preview mid-tone bug displayed byte 64 as 13. The preview adapter now uses temporary linear storage while authored and exported data stay sRGB; a CPU fixture covers that path. Current isolated Studio checks passed signed publish and apply. A mismatched signing key was refused without writes: six expected SHA values stayed unchanged, the candidate asset was absent and the previous Apply remained enabled. The task store ran in a sandbox and the default user store stayed untouched.
+- Three consecutive real Studio Play/Stop checks passed. Restored graph trees retained the expected orange result in both ImageLabel and ParticleEmitter.
 - Shared Luau and JavaScript API: 1 case and 24 assertions. Client and server property audits each passed 1 case and 1 assertion.
 - Scene: 4 cases and 128 assertions. Replication: 12 cases and 84 assertions.
 - Full client retry: 300 cases and 16,091 assertions passed. ImageGraph ASan and UBSan: 30 cases and 963 assertions passed with leak checking enabled.
 - Server-only build passed. Architecture: 38 modules, 1 program and 29 layered modules, with no graphics stack. Server reports version `0.26.0`.
 - Full CTest covered 52 dev and 41 server test executables. Physics passed in both. Initial property-contract failures were fixed; SQLite fixtures collided because both presets used the same temporary directory. Required CTest retries then passed all three affected dev executables and both affected server executables. Sequential datastore suites each passed 10 cases and 70 assertions.
 - Strict `just preset=ci check` passed on `7d6c3c0e`: 661 suites run, 0 skipped and 0 failed. It also passed formatting, build profile, architecture, source rules, shader contracts, generated bindings, component documentation, both script type checks, determinism, replay, headless client interaction and orphan checks. Development architecture covers 49 modules, 6 programs and 35 layered modules.
-- Component catalogue check passed for 235 components. Module pages check passed for 44 pages.
+- The 661-suite CI result above is historical for `7d6c3c0e`. Current strict CI passed 664 suites with 0 skipped and 0 failed; architecture covers 50 modules, 6 programs and 36 layered modules. Full output is in `.cache/build/image-buffer-final-ci.log`.
+- Component catalogue check passed for 235 components. The earlier module page
+  check covered 44 pages; the current generated-page check passed for 45.
+- `just preset=dev docs-check` passed with zero malformed comments and no
+  undocumented public entities.
 
 ## measured GPU profile
 
@@ -103,6 +109,6 @@ At both extents, 1,000 unchanged cache hits measured 88 ns per call and recorded
 
 ## verification limits
 
-Successful GUI publish/apply/export was not exercised because it writes to the default user content store. CPU publication/apply tests and signed live rendering cover the successful paths. Native GUI verification covered live controls, preview colour, save/open, last-good refusal, missing signing key and viewport undock/resnap without changing user configuration.
+An earlier editor snapshot skipped successful GUI publication and apply to protect the default user store. Current checks passed signed publish and apply through an isolated task store; the default store and user configuration stayed untouched. GUI export was not part of that check. Three consecutive Play/Stop checks and the final viewport drag/resnap check passed.
 
 Real-device checks used Linux Vulkan. Windows and macOS execution were not run. Shader contract checks include generated SPIR-V and MSL.

@@ -31,6 +31,7 @@ mono_add_library(script
 		Engine::core
 		Engine::ecs
 		Engine::effects
+		Engine::imagecodec
 		Engine::scene
 
 		# L7, `shared`. **The same edge as `scene`, one dimension down.** A

@@ -159,11 +159,13 @@ namespace client {
 		const core::Vector2 extent{float(width), float(height)};
 		uint64_t nativeEyeRig = 0;
 		uint64_t storeIdentity = 0;
+		bool editableImagesChanged = false;
 		const auto entered = Universe_->Enter(world, [&](ecs::Store &store) {
 			const auto owner = Universe_->NameOf(world);
 			storeIdentity = store.Identity();
 			const auto images =
 				Settings.EnableEditableImages ? EditableImages.Refresh(store, Renderer, owner) : 0;
+			editableImagesChanged = images > 0;
 			const auto meshes = Settings.EnableEditableMeshes
 									? EditableMeshes.Refresh(store, Renderer, owner)
 									: EditableMeshes.RefreshLods(store, Renderer, owner);
@@ -186,6 +188,12 @@ namespace client {
 			packet.SurfaceLimit = uint32_t(std::max(scene::SurfaceLimitOf(store), 0));
 		});
 		if (entered != world::WorldStatus::Ok) return false;
+		if (editableImagesChanged) {
+			if (PortalPrevious && PortalPrevious->World == world && PortalPrevious->Content)
+				RefreshImageGraphs(*PortalPrevious->Content, std::span(&world, 1));
+			if (PortalNext && PortalNext->World == world && PortalNext->Content)
+				RefreshImageGraphs(*PortalNext->Content, std::span(&world, 1));
+		}
 		auto &frame = packet.Frame;
 		const size_t nativeRows = frame.Instances.size();
 		AppendForeignPortalClones(*Universe_, world, frame.Instances, &frame.Joints);

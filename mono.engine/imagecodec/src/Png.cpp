@@ -7,18 +7,13 @@
 #include <cryptopp/zlib.h>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <vector>
 
-namespace engine::bake {
+namespace engine::imagecodec {
 
 	namespace {
 		constexpr std::array<uint8_t, 8> SIGNATURE{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
-
-		// The largest compressed stream this will inflate.
-		//
-		// Input and inflated output both bounded. Many compressed bytes can cost
-		// work even when the header permits only a small image.
-		constexpr size_t MAXIMUM_COMPRESSED_BYTES = 128u * 1024u * 1024u;
 
 		// PNG colour types, as the specification numbers them.
 		enum : uint8_t {
@@ -173,7 +168,7 @@ namespace engine::bake {
 		}
 	}
 
-	bool ReadPng(std::span<const std::byte> bytes, assets::TextureData &out, std::string &failure) {
+	bool DecodePng(std::span<const std::byte> bytes, Image &out, std::string &failure, const Limits &limits) {
 		if (bytes.size() < SIGNATURE.size()) {
 			failure = "png: shorter than the signature";
 			return false;
@@ -190,6 +185,9 @@ namespace engine::bake {
 		uint8_t depth = 0;
 		uint8_t colourType = 0;
 		bool haveHeader = false;
+		bool haveEnd = false;
+		bool haveTransparency = false;
+		std::array<uint16_t, 3> transparentColour{};
 
 		std::vector<uint8_t> palette;
 		std::vector<uint8_t> paletteAlpha;
@@ -246,12 +244,13 @@ namespace engine::bake {
 			};
 
 			if (is("IHDR")) {
-				if (length != 13) {
+				if (length != 13 || haveHeader || offset != SIGNATURE.size()) {
 					failure = "png: malformed header chunk";
 					return false;
 				}
 				width = ReadBigEndian32(data, 0);
 				height = ReadBigEndian32(data, 4);
+				if (!ValidateExtent(width, height, limits, failure)) return false;
 				depth = static_cast<uint8_t>(data[8]);
 				colourType = static_cast<uint8_t>(data[9]);
 
@@ -270,17 +269,51 @@ namespace engine::bake {
 				}
 				haveHeader = true;
 			} else if (is("PLTE")) {
+				if (!haveHeader || length == 0 || length > 768 || length % 3 != 0) {
+					failure = "png: malformed palette";
+					return false;
+				}
 				palette.assign(
 					reinterpret_cast<const uint8_t *>(data.data()),
 					reinterpret_cast<const uint8_t *>(data.data()) + data.size()
 				);
 			} else if (is("tRNS")) {
-				paletteAlpha.assign(
-					reinterpret_cast<const uint8_t *>(data.data()),
-					reinterpret_cast<const uint8_t *>(data.data()) + data.size()
-				);
+				if (!haveHeader || haveTransparency || !compressed.empty()) {
+					failure = "png: misplaced or duplicate transparency";
+					return false;
+				}
+				if (colourType == PALETTE) {
+					if (length == 0 || length > palette.size() / 3) {
+						failure = "png: palette transparency exceeds entries";
+						return false;
+					}
+					paletteAlpha.assign(
+						reinterpret_cast<const uint8_t *>(data.data()),
+						reinterpret_cast<const uint8_t *>(data.data()) + data.size()
+					);
+				} else if (colourType == GREY || colourType == RGB) {
+					const size_t samples = colourType == GREY ? 1 : 3;
+					if (length != samples * 2 || (depth != 8 && depth != 16)) {
+						failure = "png: malformed colour-key transparency";
+						return false;
+					}
+					for (size_t channel = 0; channel < samples; channel++) {
+						transparentColour[channel] = static_cast<uint16_t>(
+							(static_cast<uint16_t>(data[channel * 2]) << 8) |
+							static_cast<uint16_t>(data[channel * 2 + 1])
+						);
+						if (depth == 8 && transparentColour[channel] > 255) {
+							failure = "png: transparency sample exceeds bit depth";
+							return false;
+						}
+					}
+				} else {
+					failure = "png: transparency chunk forbidden for alpha colour type";
+					return false;
+				}
+				haveTransparency = true;
 			} else if (is("IDAT")) {
-				if (compressed.size() + length > MAXIMUM_COMPRESSED_BYTES) {
+				if (!haveHeader || length > limits.MaximumEncodedBytes - compressed.size()) {
 					failure = "png: compressed stream is implausibly large";
 					return false;
 				}
@@ -290,19 +323,23 @@ namespace engine::bake {
 					reinterpret_cast<const uint8_t *>(data.data()) + data.size()
 				);
 			} else if (is("IEND")) {
+				if (length != 0) {
+					failure = "png: malformed end chunk";
+					return false;
+				}
+				haveEnd = true;
 				break;
 			}
 
 			offset += 12 + static_cast<size_t>(length);
 		}
 
-		if (!haveHeader) {
-			failure = "png: no header chunk";
+		if (!haveEnd) {
+			failure = "png: missing end chunk";
 			return false;
 		}
-		if (width == 0 || height == 0 || width > assets::Texture::MAXIMUM_DIMENSION ||
-			height > assets::Texture::MAXIMUM_DIMENSION) {
-			failure = "png: dimensions are zero or past the ceiling";
+		if (!haveHeader) {
+			failure = "png: no header chunk";
 			return false;
 		}
 		if (depth != 8 && depth != 16) {
@@ -335,8 +372,14 @@ namespace engine::bake {
 
 		const size_t bytesPerSample = depth / 8;
 		const size_t bytesPerPixel = channels * bytesPerSample;
-		const size_t rowBytes = static_cast<size_t>(width) * bytesPerPixel;
-		const size_t expected = (rowBytes + 1) * static_cast<size_t>(height);
+		const uint64_t rowCount = static_cast<uint64_t>(width) * bytesPerPixel;
+		const uint64_t inflatedCount = (rowCount + 1) * height;
+		if (inflatedCount > std::numeric_limits<size_t>::max()) {
+			failure = "png: inflated rows exceed addressable bytes";
+			return false;
+		}
+		const size_t rowBytes = static_cast<size_t>(rowCount);
+		const size_t expected = static_cast<size_t>(inflatedCount);
 
 		std::vector<uint8_t> raw;
 		if (!Inflate(compressed, expected, raw, failure)) {
@@ -346,10 +389,9 @@ namespace engine::bake {
 			return false;
 		}
 
-		assets::TextureData decoded;
+		Image decoded;
 		decoded.Width = width;
 		decoded.Height = height;
-		decoded.Format = assets::TextureFormat::RGBA8;
 		decoded.Pixels.resize(static_cast<size_t>(width) * height * 4);
 
 		for (uint32_t row = 0; row < height; row++) {
@@ -364,16 +406,29 @@ namespace engine::bake {
 				// layout, and dithering a colour ramp at bake time would be a
 				// decision about *appearance* taken by a decoder.
 				const auto sample = [&](size_t channel) { return pixel[channel * bytesPerSample]; };
+				// grug compare full sample before 16-bit channel loses low byte.
+				const auto completeSample = [&](size_t channel) -> uint16_t {
+					const size_t offset = channel * bytesPerSample;
+					return depth == 8 ? pixel[offset]
+									  : static_cast<uint16_t>(
+											(static_cast<uint16_t>(pixel[offset]) << 8) | pixel[offset + 1]
+										);
+				};
 
 				uint8_t red = 0, green = 0, blue = 0, alpha = 255;
 				switch (colourType) {
 				case GREY:
 					red = green = blue = sample(0);
+					if (haveTransparency && completeSample(0) == transparentColour[0]) alpha = 0;
 					break;
 				case RGB:
 					red = sample(0);
 					green = sample(1);
 					blue = sample(2);
+					if (haveTransparency && completeSample(0) == transparentColour[0] &&
+						completeSample(1) == transparentColour[1] &&
+						completeSample(2) == transparentColour[2])
+						alpha = 0;
 					break;
 				case PALETTE: {
 					const size_t entry = sample(0);
@@ -410,6 +465,7 @@ namespace engine::bake {
 		}
 
 		out = std::move(decoded);
+		failure.clear();
 		return true;
 	}
 }

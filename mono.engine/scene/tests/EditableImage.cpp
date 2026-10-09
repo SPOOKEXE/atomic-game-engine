@@ -21,6 +21,97 @@
 
 TEST_SUITE_ID("engine.scene.editableimage")
 
+TEST_CASE("bounded image replacement keeps space and pixels atomic", "[scene][editableimage][import]") {
+	using namespace engine::scene;
+	EditableImageClass();
+	engine::ecs::Store store("editable-image.import");
+	const auto image = store.CreateInstance(EditableImageClass(), "Imported");
+	const auto content = EditableImageContentName(store, image);
+	const std::array bytes{
+		std::byte{128},
+		std::byte{64},
+		std::byte{32},
+		std::byte{127},
+		std::byte{255},
+		std::byte{0},
+		std::byte{0},
+		std::byte{255}
+	};
+	store.Observe<EditableImage>();
+	REQUIRE(SetEditableImagePixels(store, image, 2, 1, bytes, EditableImageSpace::SRGB));
+	const auto *held = store.Get<EditableImage>(image);
+	CHECK(held->Width == 2);
+	CHECK(held->Height == 1);
+	CHECK(held->Space == EditableImageSpace::SRGB);
+	CHECK(EditableImageToBuffer(store, image) == std::vector<std::byte>(bytes.begin(), bytes.end()));
+	const auto revision = held->Revision;
+	store.ClearChanges();
+	REQUIRE(SetEditableImagePixels(store, image, 2, 1, bytes, EditableImageSpace::SRGB));
+	CHECK_FALSE(store.Changed<EditableImage>(image));
+	CHECK_FALSE(SetEditableImagePixels(store, image, 1921, 1, bytes));
+	CHECK_FALSE(SetEditableImagePixels(store, image, 1, 1081, bytes));
+	CHECK_FALSE(SetEditableImagePixels(store, image, 0, 1, bytes));
+	CHECK_FALSE(SetEditableImagePixels(store, image, 1, 1, bytes));
+	CHECK_FALSE(SetEditableImagePixels(store, image, 2, 1, bytes, static_cast<EditableImageSpace>(255)));
+	CHECK(held->Revision == revision);
+	CHECK(held->Space == EditableImageSpace::SRGB);
+	CHECK_FALSE(store.Changed<EditableImage>(image));
+	CHECK(EditableImageContentName(store, image) == content);
+	store.SetAdoptOnly(true);
+	CHECK_FALSE(SetEditableImagePixels(store, image, 2, 1, bytes, EditableImageSpace::Linear));
+	CHECK(held->Revision == revision);
+	store.SetAdoptOnly(false);
+	REQUIRE(SetEditableImagePixels(store, image, 2, 1, bytes, EditableImageSpace::Linear));
+	CHECK(held->Revision == revision + 1);
+	std::vector<std::byte> maximum(MAXIMUM_EDITABLE_IMAGE_IMPORT_BYTES, std::byte{42});
+	REQUIRE(SetEditableImagePixels(store, image, 1920, 1080, maximum));
+	CHECK(EditableImageToBuffer(store, image) == maximum);
+}
+
+TEST_CASE("drawing into encoded image bytes blends in linear light", "[scene][editableimage][import]") {
+	using namespace engine::scene;
+	EditableImageClass();
+	engine::ecs::Store store("editable-image.space");
+	const auto image = store.CreateInstance(EditableImageClass(), "Encoded");
+	const std::array bytes{std::byte{128}, std::byte{128}, std::byte{128}, std::byte{255}};
+	REQUIRE(SetEditableImagePixels(store, image, 1, 1, bytes, EditableImageSpace::SRGB));
+	REQUIRE(DrawRectangle(store, image, {0, 0}, {1, 1}, engine::core::Color3::FromLinear(0, 0, 0), .5f));
+	CHECK(store.Get<EditableImage>(image)->Pixels == std::vector<uint8_t>{92, 92, 92, 255});
+	REQUIRE(DrawRectangle(store, image, {0, 0}, {1, 1}, engine::core::Color3::FromLinear(.5f, .5f, .5f)));
+	CHECK(store.Get<EditableImage>(image)->Pixels == std::vector<uint8_t>{188, 188, 188, 255});
+	REQUIRE(ResizeEditableImage(store, image, 1, 1));
+	CHECK(store.Get<EditableImage>(image)->Space == EditableImageSpace::Linear);
+}
+
+TEST_CASE(
+	"image space reflection marks writes while native no-op stays quiet", "[scene][editableimage][import]"
+) {
+	using namespace engine::scene;
+	EditableImageClass();
+	engine::ecs::Store store("editable-image.space.property");
+	const auto image = store.CreateInstance(EditableImageClass(), "Space");
+	store.Observe<EditableImage>();
+	const engine::core::Name linear("linear"), srgb("srgb"), bad("unknown");
+	engine::core::Name actual;
+	REQUIRE(store.GetProperty(image, engine::core::Name("ColorSpace"), &actual, sizeof(actual)));
+	CHECK(actual == linear);
+	store.ClearChanges();
+	REQUIRE(SetEditableImageSpace(store, image, EditableImageSpace::Linear));
+	CHECK_FALSE(store.Changed<EditableImage>(image));
+	REQUIRE(store.SetProperty(image, engine::core::Name("ColorSpace"), &linear, sizeof(linear)));
+	CHECK(store.Changed<EditableImage>(image));
+	CHECK(store.Get<EditableImage>(image)->Revision == 0);
+	store.ClearChanges();
+	CHECK_FALSE(store.SetProperty(image, engine::core::Name("ColorSpace"), &bad, sizeof(bad)));
+	CHECK_FALSE(store.Changed<EditableImage>(image));
+	REQUIRE(store.SetProperty(image, engine::core::Name("ColorSpace"), &srgb, sizeof(srgb)));
+	CHECK(store.Get<EditableImage>(image)->Space == EditableImageSpace::SRGB);
+	CHECK(store.Get<EditableImage>(image)->Revision == 1);
+	store.SetAdoptOnly(true);
+	CHECK_FALSE(SetEditableImageSpace(store, image, EditableImageSpace::Linear));
+	CHECK(store.Get<EditableImage>(image)->Space == EditableImageSpace::SRGB);
+}
+
 using Catch::Approx;
 using engine::core::Color3;
 using engine::core::Name;

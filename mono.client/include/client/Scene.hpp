@@ -146,10 +146,15 @@ namespace client {
 	// An explicitly admitted, snapshot-ready replica may replace its remote
 	// producer. Merely discovering or staging a replica does not select it.
 	struct PortalImageWorldSelection {
+		// World used to resolve portal topology and authored destinations.
 		engine::world::WorldId TopologyOwner;
+		// Destination admitted for presentation after its snapshot is ready.
 		engine::world::WorldId AdmittedDestination;
+		// Destination actually selected for this viewport.
 		engine::world::WorldId PresentedDestination;
 	};
+	// Updates retained portal images and appends their view claims for one viewport.
+	// Caller spans must be refreshed after this function changes the portal lists.
 	bool UpdatePortalImages(
 		engine::world::Universe &universe,
 		engine::render::PortalImageHost &images,

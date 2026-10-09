@@ -32,9 +32,8 @@ namespace engine::scene {
 }
 
 namespace engine::render {
-	// TextureTable currently samples only native RGBA8/R8 content. Keeping this
-	// result explicit prevents an authored compact image policy from silently
-	// changing channel interpretation while the renderer still uploads RGBA8.
+	// Editable pixels currently use native RGBA8 storage. Keeping this result
+	// explicit prevents compact policies from silently changing channel interpretation.
 	enum class EditableImagePackingSupport : uint8_t {
 		NativeRGBA8,
 		UnsupportedFormat,
@@ -44,8 +43,7 @@ namespace engine::render {
 	// Reports whether TextureTable can upload this image without changing its packing.
 	EditableImagePackingSupport EditableImagePackingSupportOf(const engine::scene::EditableImage &image);
 
-	// Converts the raw pixel buffer into the format `render::TextureTable`
-	// takes.
+	// Copies the raw pixel buffer with the format matching its RGB interpretation.
 	//
 	// **Free and device-free**, `BuildMeshData`'s own reason: the
 	// layouts already agree byte for byte, so this is a copy rather than a
@@ -58,8 +56,7 @@ namespace engine::render {
 	// @since v0.18
 	engine::assets::TextureData BuildTextureData(const engine::scene::EditableImage &image);
 
-	// Uploads every `scene::EditableImage` whose revision has moved since
-	// the last call.
+	// Uploads editable images whose pixels, packing or RGB storage intent changed.
 	//
 	// @since v0.18
 	class EditableImageUploader {
@@ -86,14 +83,16 @@ namespace engine::render {
 		struct UploadScope {
 			uint64_t World = 0;
 			core::Name Owner;
-			// Source revisions that jointly determine the uploaded image bytes.
+			// Source edits and policies that determine the resident texture.
 			struct Revision {
 				// Editable pixel revision last uploaded.
 				uint32_t Image = 0;
 				// Image packing policy revision last uploaded.
 				uint32_t Packing = 0;
+				// Sampling intent also determines the resident texture format.
+				uint8_t Space = 0;
 
-				// Compares both upload-relevant revisions.
+				// Compares the pixel, packing and sampling intent stamp.
 				bool operator==(const Revision &) const = default;
 			};
 			std::unordered_map<uint64_t, Revision> Revisions;

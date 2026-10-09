@@ -31,3 +31,22 @@ TEST_CASE("live image references retain portable asset and instance identities",
 		CHECK(reference.Name == "Panel_1");
 	}
 }
+
+TEST_CASE(
+	"editable image source references use canonical bounded local identities", "[imagegraph][reference]"
+) {
+	CHECK(IsEditableImageReference("editable-image://1"));
+	CHECK(IsEditableImageReference("editable-image://18446744073709551615"));
+	for (const auto invalid :
+		 {"editable-image://",
+		  "editable-image://01",
+		  "editable-image://-1",
+		  "editable-image://+1",
+		  "editable-image://0",
+		  "editable-image://18446744073709551616",
+		  "editable-image://1#image",
+		  "editable-image://1/path",
+		  "editable-image://1 ",
+		  "data:image/png;base64,AA=="})
+		CHECK_FALSE(IsEditableImageReference(invalid));
+}

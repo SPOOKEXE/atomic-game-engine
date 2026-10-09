@@ -313,3 +313,45 @@ TEST_CASE("viewport drag keeps host targets still and docks on release", "[studi
 	CHECK(viewport->Viewport == ImGui::GetMainViewport());
 	CHECK_FALSE(context.Handle->DragDropActive);
 }
+
+TEST_CASE("closing a split play viewport retains the central host", "[studio][dock-layout]") {
+	Context context;
+	Layout layout;
+	ImGui::EndFrame();
+	const auto draw = [&](bool play) {
+		ImGui::NewFrame();
+		studio::detail::SubmitStudioDockSpace(layout.Root);
+		ImGui::Begin("Explorer");
+		ImGui::End();
+		ImGui::Begin("Scene###Viewport 1");
+		ImGui::End();
+		if (play) {
+			ImGui::Begin("Client###Viewport 2");
+			ImGui::End();
+		}
+		ImGui::Render();
+	};
+	for (int frame = 0; frame < 3; frame++)
+		draw(false);
+	for (int cycle = 0; cycle < 3; cycle++) {
+		ImGuiWindow *scene = ImGui::FindWindowByName("###Viewport 1");
+		REQUIRE(scene != nullptr);
+		const ImGuiID sceneDock = scene->DockId;
+		const ImGuiID clientDock =
+			ImGui::DockBuilderSplitNode(sceneDock, ImGuiDir_Right, 0.5f, nullptr, nullptr);
+		ImGui::DockBuilderDockWindow("Viewport 2", clientDock);
+		for (int frame = 0; frame < 3; frame++)
+			draw(true);
+		CHECK(scene->Size.x < ImGui::GetMainViewport()->WorkSize.x * 0.5f);
+		ImGui::DockBuilderDockWindow("Viewport 2", 0);
+		// stop folds both split leaves into their parent before the next dockspace submission.
+		CHECK(ImGui::DockBuilderGetNode(clientDock) == nullptr);
+		CHECK(ImGui::DockBuilderGetNode(sceneDock)->IsLeafNode());
+		for (int frame = 0; frame < 3; frame++)
+			draw(false);
+		CHECK(scene->DockIsActive);
+		CHECK(scene->DockId == sceneDock);
+		CHECK(scene->Size.x > ImGui::GetMainViewport()->WorkSize.x * 0.5f);
+		CHECK(ImGui::DockBuilderGetCentralNode(layout.Root)->ID == sceneDock);
+	}
+}

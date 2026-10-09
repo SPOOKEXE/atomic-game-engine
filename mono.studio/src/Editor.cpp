@@ -771,8 +771,9 @@ namespace studio {
 		GameInterface.SetImageSource([this](const engine::core::Name &name) {
 			engine::render::InterfaceImage image;
 			engine::imagegraph::Reference reference;
-			const auto owner = engine::imagegraph::ParseReference(name.Text(), reference) &&
-									   reference.Kind == engine::imagegraph::ReferenceKind::Instance
+			const auto owner = (engine::imagegraph::ParseReference(name.Text(), reference) &&
+								reference.Kind == engine::imagegraph::ReferenceKind::Instance) ||
+									   engine::imagegraph::IsEditableImageReference(name.Text())
 								   ? GameInterfaceImageOwner
 								   : engine::core::Name{};
 			image.Texture = Renderer.TextureHandle(name, owner);
@@ -2482,6 +2483,7 @@ namespace studio {
 		// panel is empty.
 		Surfaces.clear();
 		bool particleFrameCollected = false;
+		bool editableImagesChanged = false;
 		RibbonVertices.clear();
 		RibbonRuns.clear();
 		Lights.clear();
@@ -2753,7 +2755,10 @@ namespace studio {
 					{
 						ENGINE_PROFILE_CAT("editable images", engine::core::ProfileCategory::Assets);
 						if (!clientPresentation || ClientSettings.EnableEditableImages) {
-							VisualResourceRevision += EditableImages.Refresh(store, Renderer) > 0 ? 1u : 0u;
+							const auto uploaded =
+								EditableImages.Refresh(store, Renderer, Universe->NameOf(visual));
+							editableImagesChanged = uploaded > 0;
+							VisualResourceRevision += uploaded > 0 ? 1u : 0u;
 						}
 					}
 
@@ -2779,6 +2784,7 @@ namespace studio {
 				}
 			});
 		}
+		if (editableImagesChanged) (void)RefreshLiveImageGraphs();
 		if (!particleFrameCollected) {
 			Particles.Clear();
 		}
@@ -5244,6 +5250,11 @@ namespace studio {
 
 	void Editor::ReleaseWorldResidency(WorldId world) {
 		if (Universe == nullptr || !world.IsValid()) return;
+		// Replacement remints entity handles, so a surviving camera handle may
+		// name authored content in the new Store even when Alive returns true.
+		for (ViewerCamera &viewer : Viewers) {
+			if (viewer.World == world) viewer = {};
+		}
 		ReleaseWorldPresentation(world);
 		Universe->Enter(world, [](Store &store) { store.RemoveResource<engine::effects::ParticleSystem>(); });
 	}

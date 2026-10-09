@@ -11,6 +11,9 @@
 // acceptable: the cost is a missing convenience, and it is pinned rather than
 // left to be discovered.
 
+#include "AssetPublication.hpp"
+
+#include <engine/assets/LocalStore.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -19,9 +22,53 @@
 #include <studio/Assets.hpp>
 
 TEST_SUITE_ID("studio.assets")
+TEST_DEPENDS("engine.assets.signature")
+TEST_DEPENDS("studio.contentsources")
 
 using engine::assets::AssetKind;
 using studio::ContentKindOfProperty;
+
+TEST_CASE("asset publication uses the effective delivery publisher", "[studio][assets]") {
+	const std::string developmentSeed = "a70e1c9d54338b62f1402ad67718bc0593ee6f214cb80d7a35c2998650fb1348";
+	studio::ContentSources content = studio::ContentSources::Default();
+	std::string failure = "previous refusal";
+	const auto signing = studio::ReadAssetPublishingKey(developmentSeed, content, failure);
+	REQUIRE(signing);
+	CHECK(signing->Public() == engine::assets::DevelopmentPublisher());
+	CHECK(failure.empty());
+	CHECK_FALSE(studio::ReadAssetPublishingKey(std::string(64, '1'), content, failure));
+	CHECK(failure == "signing key does not match the configured content publisher");
+	CHECK(content.PublisherKey == engine::assets::DevelopmentPublisher().ToHex());
+
+	std::array<std::byte, engine::assets::SigningKey::SEED_BYTES> otherSeed{};
+	otherSeed.fill(std::byte{0x11});
+	const auto otherSigning = engine::assets::SigningKey::FromSeed(otherSeed);
+	REQUIRE(otherSigning);
+	content.UniversePublisherKey = otherSigning->Public().ToHex();
+	CHECK_FALSE(studio::ReadAssetPublishingKey(developmentSeed, content, failure));
+	REQUIRE(studio::ReadAssetPublishingKey(std::string(64, '1'), content, failure));
+	CHECK(failure.empty());
+	CHECK(content.PublisherKey == engine::assets::DevelopmentPublisher().ToHex());
+	content.UniversePublisherKey = "invalid publisher";
+	CHECK_FALSE(studio::ReadAssetPublishingKey(std::string(64, '1'), content, failure));
+	CHECK(failure == "configure a content publisher before publishing");
+	content.UniversePublisherKey.clear();
+	content.PublisherKey.clear();
+	CHECK_FALSE(studio::ReadAssetPublishingKey(developmentSeed, content, failure));
+}
+
+TEST_CASE("asset publication refuses malformed signing seeds", "[studio][assets]") {
+	const studio::ContentSources content = studio::ContentSources::Default();
+	std::string failure;
+	CHECK_FALSE(studio::ReadAssetPublishingKey({}, content, failure));
+	CHECK(failure == "the signing key is 64 hex characters");
+	CHECK_FALSE(studio::ReadAssetPublishingKey(std::string(63, '1'), content, failure));
+	for (const auto pair : {"+1", " 1", "1g", "g1"}) {
+		const std::string seed = std::string(pair) + std::string(62, '1');
+		CHECK_FALSE(studio::ReadAssetPublishingKey(seed, content, failure));
+		CHECK(failure == "the signing key is not hex");
+	}
+}
 
 TEST_CASE("the properties that name content are the ones that get a picker", "[studio][assets]") {
 	// **Both spellings of both aliases, which is what this case is really

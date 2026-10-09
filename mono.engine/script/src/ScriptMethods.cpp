@@ -56,6 +56,7 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/effects/ParticleSystem.hpp>
+#include <engine/imagecodec/Image.hpp>
 #include <engine/physics/BodyMotion.hpp>
 #include <engine/scene/Accessories.hpp>
 #include <engine/scene/Animation.hpp>
@@ -1185,6 +1186,85 @@ namespace engine::script {
 			call.ReturnBoolean(scene::EditableImageFromBuffer(call.World(), call.Subject(), pixels));
 		}
 
+		bool ImageEncodedFormat(std::string_view name, imagecodec::Format &format) {
+			if (name == "png")
+				format = imagecodec::Format::Png;
+			else if (name == "jpeg")
+				format = imagecodec::Format::Jpeg;
+			else
+				return false;
+			return true;
+		}
+		bool
+		ImportEncodedImage(ScriptCall &call, std::span<const std::byte> bytes, imagecodec::Format format) {
+			imagecodec::Image decoded;
+			std::string failure;
+			if (!imagecodec::Decode(bytes, format, decoded, failure)) return false;
+			return scene::SetEditableImagePixels(
+				call.World(),
+				call.Subject(),
+				decoded.Width,
+				decoded.Height,
+				decoded.Pixels,
+				scene::EditableImageSpace::SRGB
+			);
+		}
+		void EditableImageFromBase64(ScriptCall &call) {
+			RequireEditableImage(call, "FromBase64");
+			const auto formatName = call.AsBoundedString(1, 16);
+			imagecodec::Format format = imagecodec::Format::Png;
+			if (call.World().AdoptOnly() ||
+				(formatName != "rgba8" && !ImageEncodedFormat(formatName, format))) {
+				call.ReturnBoolean(false);
+				return;
+			}
+			const auto *held = call.World().Get<scene::EditableImage>(call.Subject());
+			if (formatName == "rgba8" && (held->Width == 0 || held->Height == 0 ||
+										  held->Width > scene::MAXIMUM_EDITABLE_IMAGE_IMPORT_WIDTH ||
+										  held->Height > scene::MAXIMUM_EDITABLE_IMAGE_IMPORT_HEIGHT)) {
+				call.ReturnBoolean(false);
+				return;
+			}
+			const auto text = call.AsBoundedString(0, 11059200);
+			std::vector<std::byte> bytes;
+			std::string failure;
+			if (!imagecodec::DecodeBase64(text, bytes, failure)) {
+				call.ReturnBoolean(false);
+				return;
+			}
+			if (formatName == "rgba8") {
+				call.ReturnBoolean(
+					scene::SetEditableImagePixels(
+						call.World(), call.Subject(), held->Width, held->Height, bytes, held->Space
+					)
+				);
+				return;
+			}
+			call.ReturnBoolean(ImportEncodedImage(call, bytes, format));
+		}
+		void EditableImageFromEncodedBuffer(ScriptCall &call) {
+			RequireEditableImage(call, "FromEncodedBuffer");
+			imagecodec::Format format = imagecodec::Format::Png;
+			if (call.World().AdoptOnly() || !ImageEncodedFormat(call.AsBoundedString(1, 16), format)) {
+				call.ReturnBoolean(false);
+				return;
+			}
+			const auto bytes = call.AsBytes(0, scene::MAXIMUM_EDITABLE_IMAGE_IMPORT_BYTES);
+			call.ReturnBoolean(ImportEncodedImage(call, bytes, format));
+		}
+		void EditableImageToBase64(ScriptCall &call) {
+			RequireEditableImage(call, "ToBase64");
+			const auto *held = call.World().Get<scene::EditableImage>(call.Subject());
+			std::string encoded;
+			if (held->Width <= scene::MAXIMUM_EDITABLE_IMAGE_IMPORT_WIDTH &&
+				held->Height <= scene::MAXIMUM_EDITABLE_IMAGE_IMPORT_HEIGHT) {
+				const auto bytes = scene::EditableImageToBuffer(call.World(), call.Subject());
+				std::string failure;
+				(void)imagecodec::EncodeBase64(bytes, encoded, failure);
+			}
+			call.ReturnString(encoded);
+		}
+
 		// `editableImage:DrawRectangle(position, size, colour, transparency?)`
 		void EditableImageDrawRectangle(ScriptCall &call) {
 			RequireEditableImage(call, "DrawRectangle");
@@ -1314,7 +1394,7 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 75> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 78> SCRIPT_METHODS{{
 			{"SetInput", ImageGraphSetInput},
 			{"GetInput", ImageGraphGetInput},
 			{"GetImage", ImageGraphGetImage},
@@ -1353,6 +1433,9 @@ namespace engine::script {
 			{"Resize", EditableImageResize},
 			{"ToBuffer", EditableImageToBuffer},
 			{"FromBuffer", EditableImageFromBuffer},
+			{"FromBase64", EditableImageFromBase64},
+			{"FromEncodedBuffer", EditableImageFromEncodedBuffer},
+			{"ToBase64", EditableImageToBase64},
 			{"DrawRectangle", EditableImageDrawRectangle},
 			{"DrawLine", EditableImageDrawLine},
 			{"DrawCircle", EditableImageDrawCircle},

@@ -327,6 +327,14 @@ namespace engine::script {
 				return std::string(text, length);
 			}
 
+			std::string AsBoundedString(size_t index, size_t maximum) override {
+				if (lua_type(State, Slot(index)) != LUA_TSTRING) Raise("expected a string");
+				size_t length = 0;
+				const char *text = luaL_checklstring(State, Slot(index), &length);
+				if (length > maximum) Raise("string is too large");
+				return std::string(text, length);
+			}
+
 			std::vector<std::byte> AsBytes(size_t index, size_t maximum) override {
 				size_t length = 0;
 				const void *data = luaL_checkbuffer(State, Slot(index), &length);

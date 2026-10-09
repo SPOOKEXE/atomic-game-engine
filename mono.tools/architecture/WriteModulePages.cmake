@@ -11,11 +11,10 @@
 # and it is the same data `just test-architecture` already checks - so the page
 # is now a walk of the tree ordered by the graph.
 #
-# **The tree decides what is listed and the graph decides the order.** A glob
-# finds every `AGENTS.md`, so a module that exists is listed whether or not it is
-# in the expectation; the layers put them bottom upward, which is the order the
-# dependency rule reads in. A directory the graph does not know goes last rather
-# than being dropped, because a page missing an entry is the bug being fixed.
+# **The graph decides which modules are ordered.** Modules with an `AGENTS.md`
+# or nonempty prose under `docs/*.md` are listed, with graph modules ordered by
+# layer. Directories outside the graph that carry an `AGENTS.md` go last rather
+# than being dropped.
 #
 # `-DCHECK=YES` compares instead of writing, which is what `just docs-check-pages`
 # runs. Rule 6: a rule the build does not check is documentation, and "this page
@@ -114,6 +113,26 @@ endforeach()
 list(SORT MONO_PRESENT)
 list(REMOVE_DUPLICATES MONO_PRESENT)
 
+_graph_keys(modules module_names)
+foreach(name IN LISTS module_names)
+	_directory_of("${name}" directory)
+	if(directory STREQUAL "")
+		continue()
+	endif()
+
+	file(GLOB prose "${ROOT}/${directory}/docs/*.md")
+	foreach(file IN LISTS prose)
+		file(READ "${file}" contents)
+		string(STRIP "${contents}" contents)
+		if(NOT contents STREQUAL "")
+			list(APPEND MONO_PRESENT "${directory}")
+			break()
+		endif()
+	endforeach()
+endforeach()
+list(SORT MONO_PRESENT)
+list(REMOVE_DUPLICATES MONO_PRESENT)
+
 # The order: the engine's own table, then the layers bottom upward, then the
 # programs, then the tooling, then whatever the graph did not name.
 set(MONO_ORDER "")
@@ -128,7 +147,6 @@ endmacro()
 
 _take("mono.engine")
 
-_graph_keys(modules module_names)
 _graph_keys(programs program_names)
 
 # Layer by layer rather than sorting pairs, because CMake has no sort key and a
@@ -213,15 +231,17 @@ layer stack it describes is what decides which of these a module may read.
 The engine bottom to top, then the programs, then the tooling. A module carrying
 prose of its own beyond its invariants has it listed underneath.
 
-**Generated.** `mono.tools/architecture/WriteModulePages.cmake` walks the tree
-for every `AGENTS.md` and orders them by the layers in `expected_graph.json`, so
-a module that exists is listed. Run `just docs-pages` after adding one;
+**Generated.** `mono.tools/architecture/WriteModulePages.cmake` walks `AGENTS.md`
+files and prose in graph modules, ordering modules by the layers in
+`expected_graph.json`. Run `just docs-pages` after adding either;
 `just docs-pages-check` is what fails when it has not been run.
 ")
 
 foreach(directory IN LISTS MONO_ORDER)
-	_page_id("${directory}/AGENTS.md" id)
-	string(APPEND MONO_PAGE "\n- @subpage ${id}")
+	if(EXISTS "${ROOT}/${directory}/AGENTS.md")
+		_page_id("${directory}/AGENTS.md" id)
+		string(APPEND MONO_PAGE "\n- @subpage ${id}")
+	endif()
 
 	# The prose a module keeps beside its invariants. `docs/` only: a markdown
 	# file anywhere else under a module is data for a tool or a fixture's
@@ -258,7 +278,7 @@ if(CHECK)
 		message(FATAL_ERROR
 			"${OUT} is stale.\n"
 			"  It is generated from mono.tools/architecture/expected_graph.json and the "
-			"AGENTS.md files in the tree. Run `just docs-pages` and commit the result.")
+			"AGENTS.md and docs/*.md files in the tree. Run `just docs-pages` and commit the result.")
 	endif()
 
 	list(LENGTH MONO_ORDER entries)

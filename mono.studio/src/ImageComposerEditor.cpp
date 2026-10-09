@@ -1,7 +1,11 @@
+#include "AssetPublication.hpp"
+
 #include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/LocalStore.hpp>
 #include <engine/bake/ImageGraph.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/imagegraph/Reference.hpp>
+#include <engine/scene/EditableImage.hpp>
 
 #include <algorithm>
 #include <assetc/ImageGraph.hpp>
@@ -44,10 +48,33 @@ namespace studio {
 				engine::core::Name("studio.composer/graph"), engine::core::Name("studio.composer/output")
 			};
 		}
+		const auto sourceWorld = SelectionWorld.IsValid() ? SelectionWorld : Active;
+		const auto sourceOwner =
+			Universe && sourceWorld.IsValid() ? Universe->NameOf(sourceWorld) : engine::core::Name{};
+		engine::imagegraph::Document sourceDocument;
+		engine::imagegraph::Diagnostic sourceDiagnostic;
+		if (SaveImageComposerDocument(*ImageComposer, sourceDocument, sourceDiagnostic) &&
+			std::any_of(sourceDocument.Nodes.begin(), sourceDocument.Nodes.end(), [](const auto &node) {
+				const auto *source = std::get_if<engine::imagegraph::Source>(&node.Value);
+				return source && engine::imagegraph::IsEditableImageReference(source->Path);
+			})) {
+			uint64_t version = 0;
+			if (Universe && sourceWorld.IsValid())
+				Universe->Enter(sourceWorld, [&](engine::ecs::Store &store) {
+					store.Observe<engine::scene::EditableImage>();
+					version = store.ComponentChangeVersion<engine::scene::EditableImage>();
+				});
+			if (ImageComposer->LocalSourceWorld != sourceOwner ||
+				ImageComposer->LocalSourceVersion != version) {
+				ImageComposer->LocalSourceWorld = sourceOwner;
+				ImageComposer->LocalSourceVersion = version;
+				ReloadImageComposerSources(*ImageComposer);
+			}
+		}
 		ImageComposerHost host;
 		host.BakedRoot = paths.Baked;
 		if (Renderer.Backend().Device != nullptr)
-			host.Gpu = [this](
+			host.Gpu = [this, sourceOwner](
 						   const engine::imagegraph::Document &document,
 						   std::string_view output,
 						   const engine::imagegraph::TypedSourceResolver &sources,
@@ -85,12 +112,27 @@ namespace studio {
 				std::vector<render::ImageGraphSourceBinding> bindings;
 				std::unordered_set<std::string> bound;
 				for (size_t index = 0; index < document.Nodes.size(); ++index) {
-					if (!needed[index]) continue;
 					const auto *source = std::get_if<imagegraph::Source>(&document.Nodes[index].Value);
 					if (source == nullptr) continue;
 					const auto key =
 						std::to_string(static_cast<unsigned>(source->Interpretation)) + ":" + source->Path;
 					if (!bound.insert(key).second) continue;
+					if (imagegraph::IsEditableImageReference(source->Path)) {
+						bindings.push_back(
+							{source->Path, core::Name(source->Path), sourceOwner, source->Interpretation}
+						);
+						continue;
+					}
+					if (!wanted.contains(key)) {
+						bindings.push_back(
+							{source->Path,
+							 core::Name(source->Path),
+							 state.PreviewOwner,
+							 source->Interpretation}
+						);
+						continue;
+					}
+
 					imagegraph::Image image;
 					std::string failure;
 					if (!sources(*source, image, failure)) {
@@ -179,6 +221,7 @@ namespace studio {
 				failure = "enter a signing key in Assets before publishing";
 				return false;
 			}
+			if (!ReadAssetPublishingKey(AssetSigningKey, Content, failure)) return false;
 			engine::bake::CookedImageGraph cooked;
 			const auto &state = *ImageComposer;
 			const auto project = state.SourceRoot / ".imagegraph-source-context";

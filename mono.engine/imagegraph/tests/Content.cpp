@@ -105,3 +105,36 @@ TEST_CASE(
 	REQUIRE(RuntimeSources(document, sources, diagnostic));
 	CHECK(sources == std::vector<std::string>{"a.atex", "b.atex", "unused.atex"});
 }
+
+TEST_CASE(
+	"local editable sources bind runtime controls but cannot enter signed defaults", "[imagegraph][content]"
+) {
+	Document document{
+		.Nodes = {{"source", Source{"default.atex"}, {}, {}}},
+		.Outputs = {{"image", "source"}},
+		.Parameters = {{"texture", std::string("default.atex")}},
+		.Bindings = {{"source", "path", "texture"}}
+	};
+	Diagnostic diagnostic;
+	Content content;
+	std::string encoded;
+	REQUIRE(Write(document, encoded, diagnostic));
+	REQUIRE(content.Admit("panel.aimagegraph", "signed-root", encoded, diagnostic));
+	const auto revision = content.Find("panel.aimagegraph")->Revision;
+	const InputOverride input{"texture", std::string("editable-image://42")};
+	Document resolved;
+	REQUIRE(ResolveInputs(document, std::span(&input, 1), resolved, diagnostic));
+	std::vector<std::string> sources;
+	REQUIRE(RuntimeSources(resolved, sources, diagnostic));
+	CHECK(sources == std::vector<std::string>{"editable-image://42"});
+	document.Parameters[0].Default = std::string("editable-image://42");
+	REQUIRE(Write(document, encoded, diagnostic));
+	CHECK_FALSE(content.Admit("panel.aimagegraph", "changed-root", encoded, diagnostic));
+	CHECK(content.Find("panel.aimagegraph")->Revision == revision);
+	document.Parameters.clear();
+	document.Bindings.clear();
+	document.Nodes[0].Value = Source{"editable-image://42"};
+	REQUIRE(Write(document, encoded, diagnostic));
+	CHECK_FALSE(content.Admit("panel.aimagegraph", "changed-root", encoded, diagnostic));
+	CHECK(content.Find("panel.aimagegraph")->Root == "signed-root");
+}

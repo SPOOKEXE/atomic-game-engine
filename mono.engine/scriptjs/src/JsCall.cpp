@@ -248,6 +248,26 @@ namespace engine::script {
 				return value;
 			}
 
+			std::string AsBoundedString(size_t index, size_t maximum) override {
+				if (index >= Argc || !JS_IsString(Argv[index])) Raise("expected a string");
+				const JSValue size = JS_GetPropertyStr(Context, Argv[index], "length");
+				int64_t characters = 0;
+				const int read = JS_ToInt64(Context, &characters, size);
+				JS_FreeValue(Context, size);
+				if (read < 0 || characters < 0 || static_cast<uint64_t>(characters) > maximum)
+					Raise("string is too large");
+				size_t length = 0;
+				const char *text = JS_ToCStringLen(Context, &length, Argv[index]);
+				if (text == nullptr) Raise("expected a string");
+				if (length > maximum) {
+					JS_FreeCString(Context, text);
+					Raise("string is too large");
+				}
+				std::string value(text, length);
+				JS_FreeCString(Context, text);
+				return value;
+			}
+
 			std::vector<std::byte> AsBytes(size_t index, size_t maximum) override {
 				if (index >= Argc || !JS_IsArrayBuffer(Argv[index])) {
 					Raise("expected an ArrayBuffer");

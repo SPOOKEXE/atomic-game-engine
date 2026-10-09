@@ -1279,8 +1279,11 @@ namespace engine::render {
 
 	core::Name Renderer::Impl::TextureContentOwner(core::Name name, core::Name owner, core::Name world) {
 		static const core::Name checker(assets::BuiltinName(assets::BuiltinTexture::Checker));
-		// Studio keeps imported assets shared, but live controls belong to their world.
-		if (name.Text().starts_with("imagegraph-instance://") && world.IsValid()) return world;
+		// Generated images belong to their world; Studio keeps imported assets shared.
+		const auto text = name.Text();
+		if (world.IsValid() &&
+			(text.starts_with("imagegraph-instance://") || text.starts_with("editable-image://")))
+			return world;
 		return name == checker ? core::Name{} : owner;
 	}
 

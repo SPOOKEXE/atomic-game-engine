@@ -293,6 +293,13 @@ namespace engine::bake {
 			const auto normalize = [&](const imagegraph::Source &source,
 									   std::string_view node,
 									   std::string &name) {
+				if (source.Path.starts_with("editable-image://")) {
+					diagnostic = {
+						std::string(node),
+						"local editable image cannot be cooked; bind its ContentId at runtime"
+					};
+					return false;
+				}
 				const SourceKey key{source.Path, source.Interpretation};
 				if (const auto found = names.find(key); found != names.end()) {
 					name = found->second;

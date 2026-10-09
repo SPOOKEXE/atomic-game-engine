@@ -480,3 +480,29 @@ TEST_CASE("Live graph cook refuses incompatible extents and path interpretation 
 	CHECK(diagnostic.Message.find("one interpretation") != std::string::npos);
 	CHECK(cooked.Text == "previous");
 }
+
+TEST_CASE("Live graph cook refuses local editable sources and bound defaults", "[imagegraph]") {
+	using namespace engine;
+	imagegraph::Document graph;
+	graph.Nodes = {{"source", imagegraph::Source{"editable-image://17"}, {}}};
+	graph.Outputs = {{"image", "source"}};
+	bake::CookedImageGraph cooked;
+	cooked.Text = "last good";
+	imagegraph::Diagnostic diagnostic;
+	size_t resolved = 0;
+	const auto resolver = [&](const imagegraph::Source &, imagegraph::Image &image, std::string &) {
+		resolved++;
+		image = {2, 1, Source().Pixels};
+		return true;
+	};
+	CHECK_FALSE(bake::CookImageGraph(graph, "live.aimagegraph", resolver, cooked, diagnostic));
+	CHECK(resolved == 0);
+	CHECK(cooked.Text == "last good");
+	CHECK(diagnostic.Message.find("runtime") != std::string::npos);
+	std::get<imagegraph::Source>(graph.Nodes[0].Value).Path = "disk.atex";
+	graph.Parameters = {{"sourceImage", std::string("editable-image://17")}};
+	graph.Bindings = {{"source", "path", "sourceImage"}};
+	CHECK_FALSE(bake::CookImageGraph(graph, "live.aimagegraph", resolver, cooked, diagnostic));
+	CHECK(resolved == 1);
+	CHECK(cooked.Text == "last good");
+}

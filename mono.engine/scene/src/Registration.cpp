@@ -961,20 +961,37 @@ namespace engine::scene {
 				writer.WriteFloat(image.Packing.Maximum);
 				writer.WriteUInt32(image.Packing.Revision);
 				writer.WriteUInt32(image.Revision);
+				writer.WriteString(
+					image.Space == EditableImageSpace::Linear ? "linear"
+					: image.Space == EditableImageSpace::SRGB ? "srgb"
+															  : "invalid"
+				);
 			}
 		}
 
 		void ReadEditableImages(core::ByteReader &reader, void *destination, size_t count) {
 			auto *images = static_cast<EditableImage *>(destination);
 			for (size_t index = 0; index < count; index++) {
-				EditableImage &image = images[index];
-				image.Width = reader.ReadUInt32();
-				image.Height = reader.ReadUInt32();
+				const uint32_t width = reader.ReadUInt32();
+				const uint32_t height = reader.ReadUInt32();
 				const uint32_t bytes = reader.ReadUInt32();
-				image.Pixels.assign(bytes, 0);
-				if (bytes > 0) {
-					reader.ReadRaw(image.Pixels.data(), bytes);
+				const uint64_t pixels = static_cast<uint64_t>(width) * height;
+				if (reader.Failed() || width == 0 || height == 0 || pixels > MAXIMUM_EDITABLE_IMAGE_PIXELS ||
+					bytes != pixels * 4 || bytes > reader.Remaining()) {
+					reader.Fail();
+					return;
 				}
+				// Validate the declaration before allocating, then publish only a complete image.
+				EditableImage image{
+					.Width = width,
+					.Height = height,
+					.Space = EditableImageSpace::Linear,
+					.Pixels = {},
+					.Packing = {},
+					.Revision = 0
+				};
+				image.Pixels.resize(bytes);
+				reader.ReadRaw(image.Pixels.data(), bytes);
 				const std::string_view format = reader.ReadString();
 				EditablePacking packing;
 				const bool knownPacking = ParseEditablePackingFormat(format, packing.Format);
@@ -984,6 +1001,13 @@ namespace engine::scene {
 				packing.Revision = reader.ReadUInt32();
 				image.Packing = knownPacking ? packing : EditablePacking{};
 				image.Revision = reader.ReadUInt32();
+				const auto space = reader.ReadString();
+				if (reader.Failed() || (space != "linear" && space != "srgb")) {
+					reader.Fail();
+					return;
+				}
+				image.Space = space == "linear" ? EditableImageSpace::Linear : EditableImageSpace::SRGB;
+				images[index] = std::move(image);
 			}
 		}
 
@@ -1422,7 +1446,10 @@ namespace engine::scene {
 		// counterpart for the identical reason.** A written pair because it
 		// holds a `std::vector<uint8_t>` of raw pixels.
 		ecs::Components::Register<EditableImage>(
-			"scene.EditableImage", WriteEditableImages, ReadEditableImages
+			"scene.EditableImage",
+			WriteEditableImages,
+			ReadEditableImages,
+			MAXIMUM_EDITABLE_IMAGE_PIXELS * 4 + 128
 		);
 		ecs::Components::Register<ImageGraph>(
 			"scene.ImageGraph", detail::WriteImageGraphs, detail::ReadImageGraphs

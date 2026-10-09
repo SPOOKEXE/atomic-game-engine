@@ -33,7 +33,9 @@ namespace engine::render {
 	// One named image in a texture-table transaction. The caller owns Image
 	// through the synchronous AddBatch call.
 	struct TextureBatchImage {
+		// Stable name used to register and look up the image.
 		core::Name Name;
+		// Borrowed decoded pixels, valid through the synchronous batch call.
 		const assets::TextureData *Image = nullptr;
 	};
 
@@ -346,6 +348,7 @@ namespace engine::render {
 		// Empty for a fixed-rate sheet or missing name. The span remains valid
 		// until this texture is replaced or dropped.
 		std::span<const float> TimingOf(const core::Name &name, core::Name owner = {}) const;
+		// Changes when registered animation timing data changes.
 		uint64_t TimingRevision() const {
 			return TimingGeneration;
 		}

@@ -846,12 +846,13 @@ source-check: (build "sourcecheck")
 
     ./{{build}}/tools/sourcecheck .
 
-# The module index for the API reference, from the graph and the AGENTS.md files.
+# The module index for the API reference, from the graph, AGENTS.md files and
+# prose under module docs/ directories.
 #
 # `mono.tools/docgen/pages/Modules.md` was hand-maintained and listed ten of the
 # engine's twenty-nine modules, which is what a hand-maintained list of a
 # generated fact always becomes. It is now a walk of the tree ordered by the
-# layers, so a module that exists is on the page.
+# layers, so graph modules with invariants or prose are on the page.
 docs-pages:
     cmake -DEXPECTED=mono.tools/architecture/expected_graph.json \
           -DROOT="$(pwd)" \
@@ -1270,6 +1271,11 @@ run *args: (build "client")
 # Run the ECS demo scene with both debug panels open.
 demo: (build "client")
     ./{{build}}/client/client --stats --graph
+
+# Run every staged top-level script and world, then validate its BMP capture.
+# Large stress scenes get a longer timeout; 4K textures need a larger budget.
+demo-check frames="120": (build "client")
+    python3 scripts/demos/check-demos.py --build "{{build}}" --frames "{{frames}}"
 
 # Run the editor. `just edit --game My.agame` passes flags straight through.
 #
@@ -2092,3 +2098,9 @@ metrics-lookup-bench:
     ATOMIC_METRICS_LOOKUP_PROFILE=1 timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_core --suite engine.core.bench.instrumentation --samples 5
 
 import 'scripts/demos/version-impact.just'
+
+# grug measure CPU imports at 1080p. flat grey fixtures, no benchmark file.
+imagecodec-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_imagecodec
+    ./.cache/build/bench/bench/bench_imagecodec --suite engine.imagecodec.bench.image --samples {{samples}}

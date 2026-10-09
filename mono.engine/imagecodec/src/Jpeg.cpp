@@ -16,13 +16,10 @@
 // refuses to have, for `Png.cpp`'s reason about interlacing.
 //
 // The IDCT here is the separable float one out of the definition rather than a
-// fast integer approximation. This is a publishing step that runs once per
-// texture on somebody's build machine; buying a few milliseconds by introducing
-// a rounding difference from every other decoder in the world would be a bad
-// trade, and "our bake output differs from the artist's preview by one level"
-// is an expensive bug to chase.
+// fast integer approximation. grug keep bake and runtime pixel rounding same;
+// no second decoder with slightly different preview colours.
 
-namespace engine::bake {
+namespace engine::imagecodec {
 
 	namespace {
 		// The zig-zag order a quantisation table and a coefficient block are
@@ -207,8 +204,9 @@ namespace engine::bake {
 					// Level shift by 128 and clamp: the transform's output is
 					// centred on zero and a sharp edge legitimately overshoots
 					// past both ends of the byte range.
-					const int value = static_cast<int>(std::lround(total)) + 128;
-					out[y * 8 + x] = static_cast<uint8_t>(std::clamp(value, 0, 255));
+					// grug clamp before integer narrowing; hostile coefficients can be huge.
+					const long value = std::lround(std::clamp(total, -128.0f, 127.0f)) + 128;
+					out[y * 8 + x] = static_cast<uint8_t>(value);
 				}
 			}
 		}
@@ -300,7 +298,8 @@ namespace engine::bake {
 		}
 	}
 
-	bool ReadJpeg(std::span<const std::byte> bytes, assets::TextureData &out, std::string &failure) {
+	bool
+	DecodeJpeg(std::span<const std::byte> bytes, Image &out, std::string &failure, const Limits &limits) {
 		if (bytes.size() < 4 || static_cast<uint8_t>(bytes[0]) != 0xFF ||
 			static_cast<uint8_t>(bytes[1]) != 0xD8) {
 			failure = "jpeg: wrong signature";
@@ -364,6 +363,8 @@ namespace engine::bake {
 				height = (static_cast<uint32_t>(segment[1]) << 8) | static_cast<uint32_t>(segment[2]);
 				width = (static_cast<uint32_t>(segment[3]) << 8) | static_cast<uint32_t>(segment[4]);
 
+				if (!ValidateExtent(width, height, limits, failure)) return false;
+
 				const size_t count = static_cast<uint8_t>(segment[5]);
 				if (count != 1 && count != 3) {
 					// Four components is CMYK or YCCK, which needs an Adobe
@@ -410,7 +411,7 @@ namespace engine::bake {
 					const uint8_t identifier = static_cast<uint8_t>(segment[cursor]);
 					const uint8_t slot = identifier & 0x0F;
 					const bool alternating = (identifier >> 4) != 0;
-					if (slot > 3) {
+					if (slot > 3 || (identifier >> 4) > 1) {
 						failure = "jpeg: huffman table index out of range";
 						return false;
 					}
@@ -424,6 +425,10 @@ namespace engine::bake {
 						table.Offset[bitLength] = static_cast<int32_t>(total);
 						table.Minimum[bitLength] = code;
 						table.Maximum[bitLength] = count == 0 ? -1 : code + static_cast<int32_t>(count) - 1;
+						if (code + static_cast<int32_t>(count) > (1 << bitLength)) {
+							failure = "jpeg: oversubscribed huffman table";
+							return false;
+						}
 						code += static_cast<int32_t>(count);
 						total += count;
 						code <<= 1;
@@ -449,7 +454,7 @@ namespace engine::bake {
 					const uint8_t identifier = static_cast<uint8_t>(segment[cursor++]);
 					const uint8_t slot = identifier & 0x0F;
 					const bool sixteenBit = (identifier >> 4) != 0;
-					if (slot > 3) {
+					if (slot > 3 || (identifier >> 4) > 1) {
 						failure = "jpeg: quantisation table index out of range";
 						return false;
 					}
@@ -481,18 +486,20 @@ namespace engine::bake {
 					failure = "jpeg: scan before frame header";
 					return false;
 				}
-				if (width == 0 || height == 0 || width > assets::Texture::MAXIMUM_DIMENSION ||
-					height > assets::Texture::MAXIMUM_DIMENSION) {
-					failure = "jpeg: dimensions are zero or past the ceiling";
-					return false;
-				}
 
 				const size_t scanComponents = segment.empty() ? 0 : static_cast<uint8_t>(segment[0]);
-				if (scanComponents != components.size() || segment.size() < 1 + scanComponents * 2) {
+				if (scanComponents != components.size() || segment.size() != 4 + scanComponents * 2) {
 					// A scan covering fewer components than the frame is the
 					// shape a progressive file has; a baseline one is a single
 					// interleaved scan over all of them.
 					failure = "jpeg: only single interleaved scans are supported";
+					return false;
+				}
+
+				if (segment[1 + scanComponents * 2] != std::byte{0} ||
+					segment[2 + scanComponents * 2] != std::byte{63} ||
+					segment[3 + scanComponents * 2] != std::byte{0}) {
+					failure = "jpeg: unsupported scan progression";
 					return false;
 				}
 
@@ -535,6 +542,7 @@ namespace engine::bake {
 				BitReader reader(bytes, offset + length);
 				bool failed = false;
 				uint32_t sinceRestart = 0;
+				uint8_t restartIndex = 0;
 
 				for (uint32_t row = 0; row < blocksDown && !failed; row++) {
 					for (uint32_t column = 0; column < blocksAcross && !failed; column++) {
@@ -545,15 +553,21 @@ namespace engine::bake {
 							// interval.
 							reader.Align();
 							size_t position = reader.Position();
-							while (position + 1 < bytes.size()) {
-								const uint8_t first = static_cast<uint8_t>(bytes[position]);
-								const uint8_t second = static_cast<uint8_t>(bytes[position + 1]);
-								if (first == 0xFF && second >= 0xD0 && second <= 0xD7) {
-									reader.Seek(position + 2);
-									break;
-								}
-								position++;
+							// grug never search ahead: missing markers must cost one check,
+							// not another scan of the remaining file for every MCU.
+							if (position >= bytes.size() || bytes[position] != std::byte{0xff}) {
+								failure = "jpeg: missing or out-of-sequence restart marker";
+								return false;
 							}
+							while (position < bytes.size() && bytes[position] == std::byte{0xff})
+								position++;
+							if (position >= bytes.size() ||
+								static_cast<uint8_t>(bytes[position]) != 0xd0 + restartIndex) {
+								failure = "jpeg: missing or out-of-sequence restart marker";
+								return false;
+							}
+							reader.Seek(position + 1);
+							restartIndex = (restartIndex + 1) % 8;
 							for (Component &component : components) {
 								component.Predictor = 0;
 							}
@@ -578,12 +592,20 @@ namespace engine::bake {
 										failed = true;
 										break;
 									}
-									component.Predictor += Extend(
-										reader.Bits(static_cast<int>(magnitude)), static_cast<int>(magnitude)
-									);
-									block[0] =
-										component.Predictor *
-										static_cast<int32_t>(quantisation[component.QuantisationTable][0]);
+									const int64_t predictor = static_cast<int64_t>(component.Predictor) +
+															  Extend(
+																  reader.Bits(static_cast<int>(magnitude)),
+																  static_cast<int>(magnitude)
+															  );
+									const int64_t dcValue =
+										predictor * quantisation[component.QuantisationTable][0];
+									if (predictor < INT32_MIN || predictor > INT32_MAX ||
+										dcValue < INT32_MIN || dcValue > INT32_MAX) {
+										failed = true;
+										break;
+									}
+									component.Predictor = static_cast<int32_t>(predictor);
+									block[0] = static_cast<int32_t>(dcValue);
 
 									for (int index = 1; index < 64;) {
 										const int32_t symbol = DecodeHuffman(reader, ac, failed);
@@ -646,8 +668,21 @@ namespace engine::bake {
 					}
 				}
 
-				if (failed) {
+				if (failed || reader.Done()) {
 					failure = "jpeg: malformed entropy-coded data";
+					return false;
+				}
+
+				reader.Align();
+				size_t end = reader.Position();
+				if (end >= bytes.size() || bytes[end] != std::byte{0xff}) {
+					failure = "jpeg: missing end marker";
+					return false;
+				}
+				while (end < bytes.size() && bytes[end] == std::byte{0xff})
+					end++;
+				if (end >= bytes.size() || bytes[end] != std::byte{0xd9}) {
+					failure = "jpeg: missing end marker";
 					return false;
 				}
 
@@ -660,10 +695,9 @@ namespace engine::bake {
 					planes.push_back(Upsample(component, width, height, maximumHorizontal, maximumVertical));
 				}
 
-				assets::TextureData decoded;
+				Image decoded;
 				decoded.Width = width;
 				decoded.Height = height;
-				decoded.Format = assets::TextureFormat::RGBA8;
 				decoded.Pixels.resize(static_cast<size_t>(width) * height * 4);
 
 				for (size_t pixel = 0; pixel < static_cast<size_t>(width) * height; pixel++) {
@@ -689,6 +723,7 @@ namespace engine::bake {
 				}
 
 				out = std::move(decoded);
+				failure.clear();
 				return true;
 			}
 			default:

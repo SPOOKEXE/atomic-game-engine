@@ -124,13 +124,21 @@ namespace engine::audio {
 	// A copy of an existing command/finish record with the resulting player state.
 	// NaturalCompletion selects Finished; otherwise Applied selects the command.
 	struct PlaybackEvent {
+		// Selects the natural-finish record instead of the command record.
 		bool NaturalCompletion = false;
+		// Command dispatch details when NaturalCompletion is false.
 		AppliedAudioCommand Applied{};
+		// Source completion details when NaturalCompletion is true.
 		FinishedAudioSource Finished{};
+		// Outcome associated with the resulting player state.
 		PlaybackStatus Status = PlaybackStatus::Applied;
+		// Player incarnation represented by this event.
 		uint64_t PlaybackGeneration = 0;
+		// Whether the target player still exists after the event.
 		bool Present = false;
+		// Whether the target player is playing after the event.
 		bool Playing = false;
+		// Player cursor after dispatch, measured in source frames.
 		double CursorFrames = 0.0;
 	};
 
@@ -222,6 +230,7 @@ namespace engine::audio {
 			return MissedPlaybackEvents.load(std::memory_order_relaxed);
 		}
 
+		// Fixed event capacity so render-side publication does not allocate.
 		static constexpr size_t PLAYBACK_EVENT_CAPACITY = 2048;
 
 		// Renders one block.

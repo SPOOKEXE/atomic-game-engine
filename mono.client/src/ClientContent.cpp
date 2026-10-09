@@ -806,6 +806,7 @@ namespace client {
 		ContentSession &content, const engine::core::Name &texture, engine::core::Name requestingOwner
 	) {
 		if (!texture.IsValid()) return;
+		if (engine::imagegraph::IsEditableImageReference(texture.Text())) return;
 		if (engine::imagegraph::IsReference(texture.Text())) {
 			engine::imagegraph::Reference reference;
 			if (!engine::imagegraph::ParseReference(texture.Text(), reference)) return;

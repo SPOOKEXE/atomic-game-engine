@@ -278,6 +278,7 @@ namespace engine::assets {
 		// The decoded cap includes fixed storage and nested owned growth. Input bytes and the
 		// previous destination are separate caller-owned residency and must be reserved by the caller.
 		static bool Read(core::ByteReader &reader, ShaderData &out);
+		// Reads one container with a caller-supplied decoded allocation limit.
 		static bool Read(core::ByteReader &reader, ShaderData &out, uint64_t maximumBytes);
 
 		// Hashes canonical stage/resource/member/input/output/local-size metadata, not code or labels.

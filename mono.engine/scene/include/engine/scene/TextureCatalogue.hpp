@@ -64,6 +64,7 @@ namespace engine::scene {
 
 		// Derived once when recorded. Each endpoint is strictly increasing.
 		std::vector<float> CumulativeEnds;
+		// Sum of all populated frame durations in seconds.
 		float TotalDuration = 0.0f;
 
 		// Whether this describes an animation at all.

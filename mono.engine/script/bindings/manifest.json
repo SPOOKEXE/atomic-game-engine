@@ -1459,6 +1459,7 @@
 			"constructible": true,
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.EditableImage"],
 			"properties": [
+				{"name": "ColorSpace", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.EditableImage"], "writes": ["scene.EditableImage"]},
 				{"name": "ContentId", "type": "Name", "kind": "field", "bytes": 4, "writable": false, "reads": ["scene.EditableImage"], "writes": []},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "PackingAttributes", "type": "int32", "kind": "field", "bytes": 4, "writable": true, "reads": ["scene.EditableImage"], "writes": ["scene.EditableImage"]},

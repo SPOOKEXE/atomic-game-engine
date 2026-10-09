@@ -68,14 +68,19 @@ namespace engine::audio {
 
 	// Structural metadata without allocating samples. Decoding still checks its encoding policy.
 	struct WavMetadata {
+		// Sample rate and channel layout declared by the WAV file.
 		AudioFormat Format;
+		// Total interleaved samples described by the file.
 		size_t Samples = 0;
 	};
+	// Reads structural WAV metadata without allocating or decoding samples.
 	std::optional<WavMetadata> InspectWav(std::span<const std::byte> bytes);
 
 	// Pinned Pixel Composer PCM semantics use doubles and leave unsigned 8-bit samples uncentered.
 	struct PixelComposerWav {
+		// Sample rate and channel layout declared by the WAV file.
 		AudioFormat Format;
+		// Interleaved PCM values using Pixel Composer sample semantics.
 		std::vector<double> Samples;
 	};
 

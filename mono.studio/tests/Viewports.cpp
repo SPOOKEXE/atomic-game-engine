@@ -943,3 +943,52 @@ TEST_CASE("stopping the last Play run refocuses Worlds", "[studio][viewports][wo
 
 	editor.Shutdown();
 }
+
+TEST_CASE(
+	"repeated Play restores authored content after viewport camera handles remint",
+	"[studio][viewports][camera][worlds]"
+) {
+	using namespace engine;
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	const core::Name worldName = editor.Universe->NameOf(editor.Active);
+	const auto originalCameras = studio::ViewportCameraProbe::CreateTwo(editor, editor.Active);
+
+	// These children precede services in the saved tree, moving restored
+	// services into handles previously occupied by the transient cameras.
+	editor.Universe->Enter(editor.Active, [&](ecs::Store &store) {
+		for (int index = 0; index < 24; ++index) {
+			const auto part = store.CreateInstance(scene::PartClass(), "Authored" + std::to_string(index));
+			REQUIRE(part != ecs::NULL_ENTITY);
+			REQUIRE(store.SetParent(part, scene::WorkspaceOf(store)));
+		}
+	});
+
+	for (int cycle = 0; cycle < 3; ++cycle) {
+		INFO("Play/Stop cycle " << cycle);
+		REQUIRE(studio::ViewportCameraProbe::StartPlay(editor).IsValid());
+		studio::ViewportCameraProbe::Stop(editor);
+		const WorldId restored = editor.Universe->Find(worldName);
+		REQUIRE(restored.IsValid());
+		studio::ViewportCameraProbe::Show(editor, restored);
+		const auto cameras = studio::ViewportCameraProbe::CreateTwo(editor, restored);
+		editor.Universe->Enter(restored, [&](const ecs::Store &store) {
+			for (const auto camera : cameras) {
+				REQUIRE(store.Get<scene::Camera>(camera) != nullptr);
+				CHECK(store.Has<scene::TransientComponent>(camera));
+			}
+			CHECK(RuntimeCameraOf(store) == cameras[1]);
+			for (int index = 0; index < 24; ++index) {
+				const auto part =
+					store.FindFirstChild(scene::WorkspaceOf(store), "Authored" + std::to_string(index));
+				REQUIRE(part != ecs::NULL_ENTITY);
+				CHECK(store.Get<scene::Camera>(part) == nullptr);
+			}
+			if (cycle == 0) {
+				CHECK(store.Alive(originalCameras[0]));
+				CHECK(store.Get<scene::Camera>(originalCameras[0]) == nullptr);
+			}
+		});
+	}
+	editor.Shutdown();
+}

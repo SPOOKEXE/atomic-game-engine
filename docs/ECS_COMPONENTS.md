@@ -198,7 +198,7 @@ state until v0.19.
 | `scene.Color3Value` | 12 | 4 | yes | yes | . | . | The colour stored by a `Color3Value` instance. |
 | `scene.Constraint` | 120 | 8 | yes | yes | . | . | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row. |
 | `scene.ControllerState` | 512 | 4 | yes | yes | . | . | Resource: this host's mapped gamepad and raw joystick state for up to eight local devices, including connection changes and sticky button edges consumed by gameplay and scripts. |
-| `scene.EditableImage` | 56 | 8 | yes | . | . | . | Script-drawable RGBA8 pixels with dimensions, presentation packing policy and a revision the client watches for upload changes. |
+| `scene.EditableImage` | 64 | 8 | yes | . | . | . | Script-drawable RGBA8 pixels with dimensions, presentation packing policy and a revision the client watches for upload changes. |
 | `scene.EditableMesh` | 176 | 8 | yes | . | . | . | Script-built geometry with presentation packing policy and a revision the client watches for upload changes; authored arrays remain canonical for editing and collision. |
 | `scene.EditableMeshCollision` | 24 | 8 | yes | . | . | . | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick. |
 | `scene.GpuParticleField` | 72 | 4 | yes | . | . | . | Authored request for a deterministic analytical storm particle field, including enabled layers, normalized count, reset seed, and per-layer colour, opacity and size. |

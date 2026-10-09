@@ -118,6 +118,7 @@ Examples: `just test engine.ecs`, `just test-all`, and
 | `host [args...]` | Run the headless server. |
 | `serve [args...]` | Run the content origin. |
 | `materials [count]` | Fetch and publish PBR materials. Default: `100`. |
+| `demo-check [frames]` | Run staged scripts and worlds headlessly, then validate BMP captures. Default: `120`. |
 | `mcp [port] [args...]` | Run Studio's MCP bridge. Defaults: `8738`, `--width 1600`. |
 | `luau-lsp` | Build the vendored Luau language server. |
 | `unified [args...]` | Run unified client/server arrangements. |
@@ -150,6 +151,7 @@ directory. Use the `bench` preset for comparable measurements.
 | `bench [args...]` | Run selected affected benchmarks. |
 | `bench-all [args...]` | Run every benchmark. |
 | `bench-accept [args...]` | Accept benchmark baselines. |
+| `imagecodec-bench [samples]` | Measure CPU image imports at 1080p and print results to stdout. Default: `5`. |
 | `render-preparation-bench [samples]` | Measure render-preparation work. Default: `5`. |
 | `volume-light-stress [frames]` | Check lighting stress scene, selection costs, and Vulkan fog stress. Default: `120`. |
 | `lighting-stress-scene [frames]` | Run the 256 point, 256 spot, 256 fog volume scene. Default: `720`. |

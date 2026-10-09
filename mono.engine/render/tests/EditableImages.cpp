@@ -10,6 +10,7 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 TEST_SUITE_ID("engine.render.editableimages")
 TEST_DEPENDS("engine.scene.editableimage")
@@ -41,8 +42,16 @@ TEST_CASE("editable image uploads follow store and owner lifetimes", "[render][g
 	const auto secondHandle = fixture.Render.TextureHandle(name, secondOwner);
 	REQUIRE(secondHandle != nullptr);
 	CHECK(fixture.Render.TextureHandle(name, firstOwner) != secondHandle);
+	CHECK_FALSE(fixture.Render.TextureSamplesSRGB(name, firstOwner));
 	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
 	CHECK(uploader.Refresh(second, fixture.Render, secondOwner) == 0);
+	auto *colourImage = first.GetMutable<scene::EditableImage>(firstImage);
+	REQUIRE(colourImage != nullptr);
+	colourImage->Space = scene::EditableImageSpace::SRGB;
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 1);
+	CHECK(fixture.Render.TextureSamplesSRGB(name, firstOwner));
+	CHECK_FALSE(fixture.Render.TextureSamplesSRGB(name, secondOwner));
+	CHECK(uploader.Refresh(first, fixture.Render, firstOwner) == 0);
 	auto *unsupported = first.GetMutable<scene::EditableImage>(firstImage);
 	REQUIRE(unsupported != nullptr);
 	unsupported->Packing.Attributes = static_cast<uint8_t>(scene::EditablePackingAttribute::Colour);
@@ -84,13 +93,15 @@ TEST_CASE("a fresh EditableImage converts to a valid, matching TextureData", "[r
 
 	CHECK(built.Width == image.Width);
 	CHECK(built.Height == image.Height);
-	CHECK(built.Format == engine::assets::TextureFormat::RGBA8);
+	CHECK(built.Format == engine::assets::TextureFormat::RGBA8_LINEAR);
 	REQUIRE(built.Pixels.size() == image.Pixels.size());
 	CHECK(built.IsValid());
 }
 
 TEST_CASE("the pixel bytes cross unchanged", "[render][editableimages]") {
 	EditableImage image;
+	image.Space =
+		GENERATE(engine::scene::EditableImageSpace::Linear, engine::scene::EditableImageSpace::SRGB);
 	image.Width = 2;
 	image.Height = 1;
 	image.Pixels.assign(2 * 1 * 4, 0);
@@ -98,6 +109,11 @@ TEST_CASE("the pixel bytes cross unchanged", "[render][editableimages]") {
 	image.Pixels[7] = 77;  // A of the second pixel
 
 	const engine::assets::TextureData built = engine::render::BuildTextureData(image);
+	CHECK(
+		built.Format == (image.Space == engine::scene::EditableImageSpace::SRGB
+							 ? engine::assets::TextureFormat::RGBA8
+							 : engine::assets::TextureFormat::RGBA8_LINEAR)
+	);
 
 	REQUIRE(built.Pixels.size() == image.Pixels.size());
 	CHECK(static_cast<uint8_t>(built.Pixels[0]) == 200);

@@ -63,9 +63,18 @@ namespace engine::scene {
 			}
 
 			const auto mix = [&](uint8_t under, float over) {
-				const float dstColour = static_cast<float>(under) / 255.0f;
+				const float dstColour = image.Space == EditableImageSpace::SRGB
+											? core::Color3::FromRGB(under, 0, 0).R
+											: static_cast<float>(under) / 255.0f;
 				const float outColour =
 					(over * srcAlpha + dstColour * dstAlpha * (1.0f - srcAlpha)) / outAlpha;
+				if (image.Space == EditableImageSpace::SRGB) {
+					const float linear = std::clamp(outColour, 0.0f, 1.0f);
+					const float encoded = linear <= .0031308f
+											  ? linear * 12.92f
+											  : 1.055f * std::pow(linear, 1.0f / 2.4f) - .055f;
+					return static_cast<uint8_t>(std::lround(encoded * 255.0f));
+				}
 				return static_cast<uint8_t>(std::clamp(outColour * 255.0f, 0.0f, 255.0f));
 			};
 			image.Pixels[offset + 0] = mix(image.Pixels[offset + 0], colour.R);
@@ -113,6 +122,35 @@ namespace engine::scene {
 			return property;
 		}
 
+		ecs::PropertyDescriptor ColorSpaceProperty() {
+			ecs::PropertyDescriptor property;
+			property.Name = core::Name("ColorSpace");
+			property.Type = ecs::PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Reads = property.Writes =
+				&ecs::ComponentSet::Intern({ecs::Components::Of<EditableImage>()});
+			property.Get = [](const ecs::Store &store, ecs::Entity entity, void *out) {
+				const auto *image = store.Get<EditableImage>(entity);
+				if (image == nullptr ||
+					(image->Space != EditableImageSpace::Linear && image->Space != EditableImageSpace::SRGB))
+					return false;
+				*static_cast<core::Name *>(out) =
+					core::Name(image->Space == EditableImageSpace::SRGB ? "srgb" : "linear");
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity entity, const void *value) {
+				const auto name = static_cast<const core::Name *>(value)->Text();
+				if (name != "linear" && name != "srgb") return false;
+				if (!SetEditableImageSpace(
+						store, entity, name == "srgb" ? EditableImageSpace::SRGB : EditableImageSpace::Linear
+					))
+					return false;
+				(void)store.GetMutable<EditableImage>(entity);
+				return true;
+			};
+			return property;
+		}
+
 		ecs::ClassId RegisterEditableImageClass() {
 			EnsureClassTree();
 			const ecs::ClassId instance = ecs::Classes::Find(core::Name("Instance"));
@@ -124,6 +162,7 @@ namespace engine::scene {
 
 			ecs::Classes::Computed(editableImage, SizeProperty());
 			ecs::Classes::Computed(editableImage, ContentIdProperty());
+			ecs::Classes::Computed(editableImage, ColorSpaceProperty());
 			for (auto &property : detail::PackingProperties<EditableImage, SetEditableImagePacking>())
 				ecs::Classes::Computed(editableImage, std::move(property));
 			return editableImage;
@@ -151,6 +190,7 @@ namespace engine::scene {
 
 		image->Width = width;
 		image->Height = height;
+		image->Space = EditableImageSpace::Linear;
 		image->Pixels.assign(static_cast<size_t>(width) * height * 4, 0);
 		image->Revision++;
 		return true;
@@ -190,6 +230,56 @@ namespace engine::scene {
 			return std::to_integer<uint8_t>(byte);
 		});
 		image->Revision++;
+		return true;
+	}
+
+	bool SetEditableImagePixels(
+		ecs::Store &store,
+		ecs::Entity instance,
+		uint32_t width,
+		uint32_t height,
+		std::span<const std::byte> pixels,
+		EditableImageSpace space
+	) {
+		if (store.AdoptOnly() || width == 0 || height == 0 || width > MAXIMUM_EDITABLE_IMAGE_IMPORT_WIDTH ||
+			height > MAXIMUM_EDITABLE_IMAGE_IMPORT_HEIGHT ||
+			(space != EditableImageSpace::Linear && space != EditableImageSpace::SRGB) ||
+			pixels.size() != static_cast<size_t>(width) * height * 4 ||
+			pixels.size() > MAXIMUM_EDITABLE_IMAGE_IMPORT_BYTES)
+			return false;
+		const auto *held = store.Get<EditableImage>(instance);
+		if (held == nullptr) return false;
+		if (held->Width == width && held->Height == height && held->Space == space &&
+			std::equal(
+				pixels.begin(),
+				pixels.end(),
+				held->Pixels.begin(),
+				held->Pixels.end(),
+				[](std::byte source, uint8_t stored) { return std::to_integer<uint8_t>(source) == stored; }
+			))
+			return true;
+		std::vector<uint8_t> replacement(pixels.size());
+		std::transform(pixels.begin(), pixels.end(), replacement.begin(), [](std::byte byte) {
+			return std::to_integer<uint8_t>(byte);
+		});
+		auto *image = store.GetMutable<EditableImage>(instance);
+		image->Width = width;
+		image->Height = height;
+		image->Space = space;
+		image->Pixels = std::move(replacement);
+		++image->Revision;
+		return true;
+	}
+
+	bool SetEditableImageSpace(ecs::Store &store, ecs::Entity instance, EditableImageSpace space) {
+		if (store.AdoptOnly() || (space != EditableImageSpace::Linear && space != EditableImageSpace::SRGB))
+			return false;
+		const auto *held = store.Get<EditableImage>(instance);
+		if (held == nullptr) return false;
+		if (held->Space == space) return true;
+		auto *image = store.GetMutable<EditableImage>(instance);
+		image->Space = space;
+		++image->Revision;
 		return true;
 	}
 

@@ -29,6 +29,8 @@
 // this editor already use. Keeping a text field beside a browser would be two
 // places to say the same thing.
 
+#include "AssetPublication.hpp"
+
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Mesh.hpp>
@@ -1133,28 +1135,8 @@ namespace studio {
 	}
 
 	bool Editor::PublishAssets(const std::string &hexSeed) {
-		if (hexSeed.size() != 64) {
-			AssetStatus = "the signing key is 64 hex characters";
-			return false;
-		}
-
-		std::array<std::byte, 32> seed{};
-		for (size_t index = 0; index < seed.size(); index++) {
-			const std::string byte = hexSeed.substr(index * 2, 2);
-			char *end = nullptr;
-			const long value = std::strtol(byte.c_str(), &end, 16);
-			if (end != byte.c_str() + 2) {
-				AssetStatus = "the signing key is not hex";
-				return false;
-			}
-			seed[index] = static_cast<std::byte>(value);
-		}
-
-		const auto signing = engine::assets::SigningKey::FromSeed(seed);
-		if (!signing.has_value()) {
-			AssetStatus = "that is not a usable signing key";
-			return false;
-		}
+		const auto signing = ReadAssetPublishingKey(hexSeed, Content, AssetStatus);
+		if (!signing) return false;
 
 		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
 		const auto report = cdn::PublishLocal(paths, *signing, NowSeconds());
