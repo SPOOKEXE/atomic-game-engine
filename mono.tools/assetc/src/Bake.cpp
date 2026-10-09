@@ -409,10 +409,45 @@ namespace assetc {
 			}
 		}
 
+		const auto textureName =
+			[&](const std::string &resolved, bool numeric, std::string &name, std::string &reason) {
+				if (!settings.LiveImageGraphs || ExtensionOf(resolved) != ".imagegraph") {
+					name = BakedName(resolved);
+					return true;
+				}
+				engine::imagegraph::Document graph;
+				if (!ReadImageGraphProject(settings.Input, settings.Input / resolved, graph, reason))
+					return false;
+				const auto output =
+					std::find_if(graph.Outputs.begin(), graph.Outputs.end(), [&](const auto &candidate) {
+						return settings.ImageGraphOutput.empty()
+								   ? graph.Outputs.size() == 1
+								   : candidate.Name == settings.ImageGraphOutput;
+					});
+				if (output == graph.Outputs.end()) {
+					reason = "material or model live graph reference needs one selected output";
+					return false;
+				}
+				const auto expected =
+					numeric ? engine::imagegraph::OutputSpace::Linear : engine::imagegraph::OutputSpace::SRGB;
+				if (output->Space != expected) {
+					reason = "live graph output space does not match material or model map";
+					return false;
+				}
+				name = "imagegraph://" + WithoutExtension(resolved) + ".aimagegraph#" + output->Name;
+				return true;
+			};
+
 		for (const std::string &relative : sources) {
 			Baked baked;
 			baked.Source = relative;
 			const std::string extension = ExtensionOf(relative);
+			if (settings.LiveImageGraphs && relative.starts_with("__imagegraph_sources/")) {
+				baked.Failure = "source art cannot use the reserved live graph dependency directory";
+				++report.Failures;
+				report.Assets.push_back(std::move(baked));
+				continue;
+			}
 			if (extension == ".imagegraph") {
 				engine::imagegraph::Document document;
 				engine::imagegraph::Diagnostic diagnostic;
@@ -421,25 +456,84 @@ namespace assetc {
 				const bool admitted = settings.Content.Allows(engine::assets::FormOfName(relative));
 				if (!admitted)
 					baked.Failure = "refused: image graph project content is turned off";
-				else if (numericTextures.contains(relative))
-					baked.Failure =
-						"image graph outputs are display images and cannot be numeric material maps";
 				else if (ReadImageGraphProject(settings.Input, project, document, baked.Failure)) {
 					std::error_code sizeError;
 					const auto projectBytes = fs::file_size(project, sizeError);
 					if (!sizeError) report.SourceBytes += projectBytes;
-					const auto resolver = [&](std::string_view reference,
+					if (settings.LiveImageGraphs) {
+						engine::bake::CookedImageGraph cooked;
+						const auto name = WithoutExtension(relative) + ".aimagegraph";
+						if (CookImageGraphProject(
+								settings.Input,
+								project,
+								document,
+								name,
+								settings.Content,
+								cooked,
+								baked.Failure
+							)) {
+							if (!settings.Output.empty() &&
+								!PublishCookedImageGraph(settings.Output, cooked, baked.Failure)) {
+								++report.Failures;
+								report.Assets.push_back(std::move(baked));
+								continue;
+							}
+							for (const auto &source : cooked.Sources) {
+								if (std::any_of(
+										report.Assets.begin(), report.Assets.end(), [&](const auto &row) {
+											return row.Output == source.Name && row.Failure.empty();
+										}
+									))
+									continue;
+								engine::core::ByteWriter writer;
+								if (!engine::assets::Texture::Write(writer, source.Texture)) {
+									baked.Failure = "live graph texture closure cannot be serialized";
+									break;
+								}
+								Baked dependency;
+								dependency.Source = relative;
+								dependency.Output = source.Name;
+								dependency.Kind = AssetKind::Texture;
+								dependency.Bytes = writer.Bytes().size();
+								if (settings.Output.empty())
+									dependency.Payload.assign(writer.Bytes().begin(), writer.Bytes().end());
+								report.OutputBytes += dependency.Bytes;
+								report.Assets.push_back(std::move(dependency));
+							}
+							if (baked.Failure.empty()) {
+								baked.Output = cooked.Name;
+								baked.Kind = AssetKind::ImageGraph;
+								baked.Bytes = cooked.Text.size();
+								if (settings.Output.empty()) {
+									const auto bytes =
+										std::as_bytes(std::span(cooked.Text.data(), cooked.Text.size()));
+									baked.Payload.assign(bytes.begin(), bytes.end());
+								}
+								report.OutputBytes += baked.Bytes;
+								report.Assets.push_back(std::move(baked));
+								continue;
+							}
+						}
+						++report.Failures;
+						report.Assets.push_back(std::move(baked));
+						continue;
+					}
+					const auto resolver = [&](const engine::imagegraph::Source &source,
 											  engine::imagegraph::Image &image,
 											  std::string &sourceFailure) {
-						return ReadImageGraphSourceFile(
-							settings.Input, project, reference, settings.Content, image, sourceFailure
+						return ReadImageGraphSourceFileTyped(
+							settings.Input, project, source, settings.Content, image, sourceFailure
 						);
 					};
-					if (!engine::bake::BakeImageGraph(
+					if (!engine::bake::BakeImageGraphTyped(
 							document, settings.ImageGraphOutput, resolver, texture, diagnostic
 						))
 						baked.Failure = diagnostic.Node.empty() ? diagnostic.Message
 																: diagnostic.Node + ": " + diagnostic.Message;
+					else if (numericTextures.contains(relative) && engine::assets::IsSRGB(texture.Format))
+						baked.Failure = "image graph numeric material maps need an explicit linear output";
+					else if (displayTextures.contains(relative) && !engine::assets::IsSRGB(texture.Format))
+						baked.Failure = "image graph display material maps need an explicit sRGB output";
 				}
 				if (baked.Failure.empty() && settings.MaximumTexture > 0) {
 					const uint32_t longest = std::max(texture.Width, texture.Height);
@@ -546,6 +640,7 @@ namespace assetc {
 				// fails exactly as a colour map does. Written as a loop over
 				// pointers rather than five copies for that reason: five copies
 				// is five places for the rule to drift.
+				bool liveReferenceRefused = false;
 				const std::pair<const std::string *, std::string *> maps[] = {
 					{&keys.Colour, &material.ColourMap},
 					{&keys.Normal, &material.NormalMap},
@@ -564,7 +659,11 @@ namespace assetc {
 
 					std::string resolved;
 					if (Resolve(directory, *named, resolved)) {
-						into->assign(BakedName(resolved));
+						const bool numeric = into != &material.ColourMap && into != &material.EmissiveMap;
+						if (!textureName(resolved, numeric, *into, baked.Failure)) {
+							liveReferenceRefused = true;
+							++report.Failures;
+						}
 					} else {
 						// Refuse references outside the input tree, exactly as a
 						// model's are refused. An untextured material is a real
@@ -597,6 +696,10 @@ namespace assetc {
 					}
 				}
 
+				if (liveReferenceRefused) {
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
 				engine::core::ByteWriter writer;
 				if (!engine::assets::Material::Write(writer, material)) {
 					baked.Failure = "the material is not one the format can hold";
@@ -884,9 +987,16 @@ namespace assetc {
 						continue;
 					}
 
-					submesh.Texture = BakedName(resolved);
+					if (!textureName(resolved, false, submesh.Texture, baked.Failure)) {
+						++report.Failures;
+						break;
+					}
 				}
 
+				if (!baked.Failure.empty()) {
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
 				// Serialised directly rather than through a write node, because
 				// the rewriting happened outside the graph and feeding a mesh
 				// back into one would need a node kind whose only job is to

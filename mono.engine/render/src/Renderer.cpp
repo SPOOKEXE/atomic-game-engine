@@ -792,6 +792,7 @@ namespace engine::render {
 		// finished. Waiting once here is simpler and no slower than tracking
 		// per-resource fences for a shutdown path.
 		SDL_WaitForGPUIdle(device);
+		State->ImageGraphs.Shutdown(device, State->Textures);
 		if (State->PortalTreeJob.Fence) {
 			SDL_ReleaseGPUFence(device, State->PortalTreeJob.Fence);
 			State->PortalTreeJob.Fence = nullptr;
@@ -1276,8 +1277,10 @@ namespace engine::render {
 		return std::find(builtins.begin(), builtins.end(), name) != builtins.end() ? core::Name{} : owner;
 	}
 
-	core::Name Renderer::Impl::TextureContentOwner(core::Name name, core::Name owner) {
+	core::Name Renderer::Impl::TextureContentOwner(core::Name name, core::Name owner, core::Name world) {
 		static const core::Name checker(assets::BuiltinName(assets::BuiltinTexture::Checker));
+		// Studio keeps imported assets shared, but live controls belong to their world.
+		if (name.Text().starts_with("imagegraph-instance://") && world.IsValid()) return world;
 		return name == checker ? core::Name{} : owner;
 	}
 
@@ -1340,6 +1343,16 @@ namespace engine::render {
 
 	void Renderer::DropContentOwner(core::Name owner) {
 		if (State == nullptr || !owner.IsValid()) return;
+		for (auto graph = State->ImageGraphs.Documents.begin();
+			 graph != State->ImageGraphs.Documents.end();) {
+			if (graph->second.Owner != owner) {
+				++graph;
+				continue;
+			}
+			State->ImageGraphs.ReleaseDocument(State->Device, State->Textures, graph->second);
+			graph = State->ImageGraphs.Documents.erase(graph);
+			++State->ResourceEpoch;
+		}
 		for (auto &refusals : State->ShaderRefusals)
 			std::erase_if(refusals, [&](const auto &entry) {
 				return static_cast<uint32_t>(entry.first >> 32) == owner.Id();
@@ -1638,6 +1651,13 @@ namespace engine::render {
 			return nullptr;
 		}
 		return State->Textures.Find(name, Impl::TextureContentOwner(name, owner));
+	}
+
+	bool Renderer::TextureSamplesSRGB(const core::Name &name, core::Name owner) const {
+		assets::TextureFormat format{};
+		return State != nullptr &&
+			   State->Textures.FormatOf(name, format, Impl::TextureContentOwner(name, owner)) &&
+			   assets::IsSRGB(format);
 	}
 
 	bool
@@ -2529,7 +2549,13 @@ namespace engine::render {
 		// walked past by whoever captures the most.
 		const size_t bytes = static_cast<size_t>(source.DrawnWidth) * source.DrawnHeight * 4;
 
-		if (!State->Textures.Adopt(name, copy, source.DrawnWidth, source.DrawnHeight, bytes)) {
+		const bool sampledSRGB = info.format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB ||
+								 info.format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB;
+		const auto capturedFormat =
+			sampledSRGB ? assets::TextureFormat::RGBA8 : assets::TextureFormat::RGBA8_LINEAR;
+		if (!State->Textures.Adopt(
+				name, copy, source.DrawnWidth, source.DrawnHeight, bytes, {}, capturedFormat
+			)) {
 			// Refused, so the texture is still ours to release - `Adopt` says so.
 			gpu::ReleaseTexture(State->Device, copy);
 			return false;

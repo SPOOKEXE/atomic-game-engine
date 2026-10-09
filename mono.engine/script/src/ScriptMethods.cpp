@@ -65,6 +65,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
@@ -360,6 +361,110 @@ namespace engine::script {
 			}
 
 			call.ReturnStrings(spellings);
+		}
+
+		Name ImageGraphArgumentName(ScriptCall &call, size_t index) {
+			const auto text = call.AsString(index);
+			if (!scene::ImageGraphTokenValid(text))
+				call.Raise("image graph names must be bounded portable tokens");
+			return Name(text);
+		}
+		void RequireImageGraph(ScriptCall &call) {
+			if (call.World().Get<scene::ImageGraph>(call.Subject()) == nullptr)
+				call.Raise("method needs an ImageGraph");
+		}
+		void ImageGraphSetInput(ScriptCall &call) {
+			RequireImageGraph(call);
+			const Name name = ImageGraphArgumentName(call, 0);
+			const uint32_t revision = call.World().Get<scene::ImageGraph>(call.Subject())->Revision;
+			bool accepted = false;
+			if (call.IsNil(1))
+				accepted = scene::ResetImageGraphInput(call.World(), call.Subject(), name);
+			else {
+				AttributeValue value;
+				call.ReadAttribute(1, value);
+				scene::ImageGraphInput input;
+				input.Name = name;
+				switch (value.Type) {
+				case ecs::PropertyType::Bool:
+					input.Kind = scene::ImageGraphInputKind::Boolean;
+					input.Boolean = value.Bool;
+					break;
+				case ecs::PropertyType::Int32:
+					input.Number = value.Int32;
+					break;
+				case ecs::PropertyType::Int64:
+					input.Number = static_cast<double>(value.Int64);
+					break;
+				case ecs::PropertyType::Float:
+					input.Number = value.Float;
+					break;
+				case ecs::PropertyType::Double:
+					input.Number = value.Double;
+					break;
+				case ecs::PropertyType::Color3: {
+					input.Kind = scene::ImageGraphInputKind::Colour;
+					const std::array channels{value.Color3.R, value.Color3.G, value.Color3.B};
+					for (size_t channel = 0; channel < channels.size(); ++channel) {
+						const double channelValue = channels[channel];
+						if (!std::isfinite(channelValue) || channelValue < 0 || channelValue > 1)
+							call.Raise("image graph colours must be finite and within 0..1");
+						input.Colour[channel] = static_cast<uint8_t>(std::lround(channelValue * 255));
+					}
+					break;
+				}
+				case ecs::PropertyType::String:
+					input.Kind = scene::ImageGraphInputKind::String;
+					input.String = std::move(value.String);
+					break;
+				default:
+					call.Raise("image graph inputs accept number, boolean, Color3 or string");
+				}
+				accepted = scene::SetImageGraphInput(call.World(), call.Subject(), input);
+			}
+			if (!accepted) call.Raise("image graph input write refused");
+			if (call.World().Get<scene::ImageGraph>(call.Subject())->Revision != revision)
+				call.Changes().Record(call.Subject(), Name("Inputs"));
+		}
+		void ImageGraphGetInput(ScriptCall &call) {
+			RequireImageGraph(call);
+			scene::ImageGraphInput input;
+			if (!scene::GetImageGraphInput(
+					call.World(), call.Subject(), ImageGraphArgumentName(call, 0), input
+				)) {
+				call.ReturnNil();
+				return;
+			}
+			AttributeValue value;
+			switch (input.Kind) {
+			case scene::ImageGraphInputKind::Number:
+				value.Type = ecs::PropertyType::Double;
+				value.Double = input.Number;
+				break;
+			case scene::ImageGraphInputKind::Boolean:
+				value.Type = ecs::PropertyType::Bool;
+				value.Bool = input.Boolean;
+				break;
+			case scene::ImageGraphInputKind::Colour:
+				value.Type = ecs::PropertyType::Color3;
+				value.Color3 = core::Color3::FromLinear(
+					input.Colour[0] / 255.0f, input.Colour[1] / 255.0f, input.Colour[2] / 255.0f
+				);
+				break;
+			case scene::ImageGraphInputKind::String:
+				value.Type = ecs::PropertyType::String;
+				value.String = input.String;
+				break;
+			}
+			call.ReturnAttribute(value);
+		}
+		void ImageGraphGetImage(ScriptCall &call) {
+			RequireImageGraph(call);
+			const auto output = call.IsNil(0) ? Name{} : ImageGraphArgumentName(call, 0);
+			const auto image = scene::ImageGraphContentName(call.World(), call.Subject(), output);
+			if (!image.IsValid())
+				call.Raise("image graph has an invalid asset, output or duplicate instance key");
+			call.ReturnString(image.Text());
 		}
 
 		// --- the attributes ----------------------------------------------------
@@ -1209,7 +1314,10 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 72> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 75> SCRIPT_METHODS{{
+			{"SetInput", ImageGraphSetInput},
+			{"GetInput", ImageGraphGetInput},
+			{"GetImage", ImageGraphGetImage},
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},

@@ -756,7 +756,7 @@ namespace engine::render {
 				incomplete = true;
 				continue;
 			}
-			const core::Name owner = TextureContentOwner(batch.Texture, view.ContentOwner);
+			const core::Name owner = TextureContentOwner(batch.Texture, view.ContentOwner, view.WorldName);
 			const uint64_t key = (uint64_t(owner.Id()) << 32) | batch.Texture.Id();
 			const std::span<const float> ends = Textures.TimingOf(batch.Texture, owner);
 			if (ends.size() != batch.Block->Frames || ends.empty() || ends.size() > 4096) {
@@ -1376,7 +1376,8 @@ namespace engine::render {
 						residentIncomplete = true;
 						continue;
 					}
-					const core::Name owner = TextureContentOwner(batch.Texture, view.ContentOwner);
+					const core::Name owner =
+						TextureContentOwner(batch.Texture, view.ContentOwner, view.WorldName);
 					const uint64_t key = (uint64_t(owner.Id()) << 32) | batch.Texture.Id();
 					const auto found = Particles.TimelineOffsets.find(key);
 					if (found == Particles.TimelineOffsets.end() || found->second == 0 ||
@@ -1741,7 +1742,8 @@ namespace engine::render {
 			};
 			SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
 
-			const core::Name textureOwner = TextureContentOwner(state.Texture, ActiveContentOwner);
+			const core::Name textureOwner =
+				TextureContentOwner(state.Texture, ActiveContentOwner, ActiveImageGraphWorld);
 			SDL_GPUTexture *const texture = Textures.Find(state.Texture, textureOwner);
 			const TextureChoice choice = ChooseTexture(
 				texture != nullptr, state.Texture.IsValid(), Textures.Expecting(state.Texture, textureOwner)
@@ -2193,8 +2195,9 @@ namespace engine::render {
 				uniforms.Options = glm::vec4{run.ZOffset, 0.0f, 0.0f, 0.0f};
 				SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
 
-				SDL_GPUTexture *const texture =
-					Textures.Find(run.Texture, TextureContentOwner(run.Texture, ActiveContentOwner));
+				SDL_GPUTexture *const texture = Textures.Find(
+					run.Texture, TextureContentOwner(run.Texture, ActiveContentOwner, ActiveImageGraphWorld)
+				);
 
 				RibbonMaterial material{};
 				material.Flags =

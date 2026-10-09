@@ -11,6 +11,7 @@
 // acceptable: the cost is a missing convenience, and it is pinned rather than
 // left to be discovered.
 
+#include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -89,4 +90,20 @@ TEST_CASE("the match is exact and not a prefix", "[studio][assets]") {
 	// stores it - a lookup that lowercased would match a property nobody
 	// declared.
 	CHECK(ContentKindOfProperty("mesh") == AssetKind::Unknown);
+}
+
+TEST_CASE("image slots include GUI states, scrolling bars and typed sky faces", "[studio][assets]") {
+	engine::scene::RegisterSceneClasses();
+	for (const std::string_view property :
+		 {"HoverImage", "PressedImage", "TopImage", "MidImage", "BottomImage", "PackedPbrMap"})
+		CHECK(ContentKindOfProperty(property) == AssetKind::Texture);
+	const auto sky = engine::ecs::Classes::Find(engine::core::Name("SkyboxTextures"));
+	const auto part = engine::ecs::Classes::Find(engine::core::Name("Part"));
+	REQUIRE(sky.IsValid());
+	REQUIRE(part.IsValid());
+	for (const std::string_view face : {"Front", "Back", "Left", "Right", "Up", "Down"}) {
+		CHECK(ContentKindOfProperty(sky, face) == AssetKind::Texture);
+		CHECK(ContentKindOfProperty(part, face) == AssetKind::Unknown);
+		CHECK(ContentKindOfProperty(face) == AssetKind::Unknown);
+	}
 }

@@ -15,25 +15,44 @@
 #include <nodegraph/Serialize.hpp>
 #include <studio/ImageComposer.hpp>
 #include <system_error>
+#include <type_traits>
 
 namespace studio {
 	namespace {
 		using namespace engine::imagegraph;
 		constexpr size_t HISTORY = 64;
-		std::string Message(const Diagnostic &diagnostic) {
+		std::string ImageComposerDiagnosticMessage(const Diagnostic &diagnostic) {
 			return diagnostic.Node.empty() ? diagnostic.Message : diagnostic.Node + ": " + diagnostic.Message;
 		}
 		ImageComposerSnapshot Snapshot(const ImageComposerState &state) {
-			return {state.Graph, state.Outputs, state.SelectedOutput, state.SourceRoot};
+			return {
+				state.Graph,
+				state.Outputs,
+				state.SelectedOutput,
+				state.SourceRoot,
+				state.Parameters,
+				state.Bindings
+			};
 		}
 		bool Same(const ImageComposerSnapshot &left, const ImageComposerSnapshot &right) {
 			if (nodegraph::Save(left.Graph) != nodegraph::Save(right.Graph) ||
 				left.SelectedOutput != right.SelectedOutput || left.Outputs.size() != right.Outputs.size() ||
-				left.SourceRoot != right.SourceRoot)
+				left.SourceRoot != right.SourceRoot || left.Parameters.size() != right.Parameters.size() ||
+				left.Bindings.size() != right.Bindings.size())
 				return false;
 			for (size_t i = 0; i < left.Outputs.size(); ++i)
 				if (left.Outputs[i].Name != right.Outputs[i].Name ||
-					left.Outputs[i].Node != right.Outputs[i].Node)
+					left.Outputs[i].Node != right.Outputs[i].Node ||
+					left.Outputs[i].Space != right.Outputs[i].Space)
+					return false;
+			for (size_t i = 0; i < left.Parameters.size(); ++i)
+				if (left.Parameters[i].Name != right.Parameters[i].Name ||
+					left.Parameters[i].Default != right.Parameters[i].Default)
+					return false;
+			for (size_t i = 0; i < left.Bindings.size(); ++i)
+				if (left.Bindings[i].Node != right.Bindings[i].Node ||
+					left.Bindings[i].Property != right.Bindings[i].Property ||
+					left.Bindings[i].Input != right.Bindings[i].Input)
 					return false;
 			return true;
 		}
@@ -41,6 +60,8 @@ namespace studio {
 			// Native graph copies retain document identities and incomplete editing state.
 			state.Graph = saved.Graph;
 			state.Outputs = saved.Outputs;
+			state.Parameters = saved.Parameters;
+			state.Bindings = saved.Bindings;
 			state.SelectedOutput = saved.SelectedOutput;
 			if (state.SourceRoot != saved.SourceRoot) ReloadImageComposerSources(state);
 			state.SourceRoot = saved.SourceRoot;
@@ -55,10 +76,9 @@ namespace studio {
 				path.has_parent_path() ? path : std::filesystem::current_path() / path, bytes, state.Error
 			);
 		}
-		bool ResolveFile(
-			const ImageComposerState &state, std::string_view source, Image &out, std::string &failure
-		) {
-			return assetc::ReadImageGraphSourceFile(
+		bool
+		ResolveFile(const ImageComposerState &state, const Source &source, Image &out, std::string &failure) {
+			return assetc::ReadImageGraphSourceFileTyped(
 				state.SourceRoot,
 				state.SourceRoot / ".imagegraph-source-context",
 				source,
@@ -66,6 +86,9 @@ namespace studio {
 				out,
 				failure
 			);
+		}
+		std::string SourceKey(const Source &source) {
+			return std::to_string(static_cast<unsigned>(source.Interpretation)) + ":" + source.Path;
 		}
 		std::string RevisionKey(const ImageComposerState &state) {
 			std::string key;
@@ -113,6 +136,26 @@ namespace studio {
 			for (const auto &output : state.Outputs) {
 				append(output.Name);
 				append(output.Node);
+				bits(output.Space);
+			}
+			for (const auto &parameter : state.Parameters) {
+				append(parameter.Name);
+				bits(parameter.Default.index());
+				std::visit(
+					[&](const auto &value) {
+						using T = std::decay_t<decltype(value)>;
+						if constexpr (std::is_same_v<T, std::string>)
+							append(value);
+						else
+							bits(value);
+					},
+					parameter.Default
+				);
+			}
+			for (const auto &binding : state.Bindings) {
+				append(binding.Node);
+				append(binding.Property);
+				append(binding.Input);
 			}
 			return key;
 		}
@@ -128,6 +171,16 @@ namespace studio {
 			ImGui::TextUnformatted(type->Title.c_str());
 			bool immediate = false, finished = false;
 			for (const auto &spec : type->Widgets) {
+				const auto identity = node->Widgets.find("__composer.id");
+				const auto binding =
+					std::find_if(state.Bindings.begin(), state.Bindings.end(), [&](const Binding &item) {
+						return identity != node->Widgets.end() && item.Node == identity->second.Text &&
+							   item.Property == spec.Key;
+					});
+				if (binding != state.Bindings.end()) {
+					ImGui::Text("%s: %s", spec.Label.c_str(), binding->Input.c_str());
+					continue;
+				}
 				auto value = nodegraph::ValueOf(state.Graph, id, spec);
 				bool changed = false;
 				ImGui::PushID(spec.Key.c_str());
@@ -186,7 +239,45 @@ namespace studio {
 			ImGui::InputText("Output name", state.OutputName.data(), state.OutputName.size());
 			if (ImGui::Button("Bind selected node"))
 				SetImageComposerOutput(state, state.OutputName.data(), id);
+			ImGui::InputText("Input name", state.InputName.data(), state.InputName.size());
+			if (ImGui::BeginCombo("Property", state.BindingProperty.c_str())) {
+				for (const auto &spec : type->Widgets) {
+					if (spec.Key == "interpretation") continue;
+					if (ImGui::Selectable(spec.Label.c_str(), state.BindingProperty == spec.Key))
+						state.BindingProperty = spec.Key;
+				}
+				ImGui::EndCombo();
+			}
+			if (ImGui::Button("Bind named input")) {
+				Diagnostic diagnostic;
+				if (!BindImageComposerInput(
+						state, id, state.BindingProperty, state.InputName.data(), diagnostic
+					))
+					state.Error = ImageComposerDiagnosticMessage(diagnostic);
+			}
 		}
+	}
+
+	bool DrawImageComposerInput(const char *label, InputValue &value) {
+		if (auto *number = std::get_if<double>(&value))
+			return ImGui::InputDouble(label, number, 1, 10, "%.3f");
+		if (auto *flag = std::get_if<bool>(&value)) return ImGui::Checkbox(label, flag);
+		if (auto *colour = std::get_if<std::array<uint8_t, 4>>(&value)) {
+			float rgba[4];
+			for (size_t channel = 0; channel < 4; ++channel)
+				rgba[channel] = (*colour)[channel] / 255.f;
+			if (!ImGui::ColorEdit4(label, rgba, ImGuiColorEditFlags_NoInputs)) return false;
+			for (size_t channel = 0; channel < 4; ++channel)
+				(*colour)[channel] =
+					static_cast<uint8_t>(std::lround(std::clamp(rgba[channel], 0.f, 1.f) * 255.f));
+			return true;
+		}
+		std::array<char, 4097> text{};
+		auto &string = std::get<std::string>(value);
+		std::snprintf(text.data(), text.size(), "%s", string.c_str());
+		if (!ImGui::InputText(label, text.data(), text.size())) return false;
+		string = text.data();
+		return true;
 	}
 
 	void InitialiseImageComposer(ImageComposerState &state) {
@@ -197,7 +288,7 @@ namespace studio {
 		document.Outputs.push_back({"image", "solid"});
 		Diagnostic diagnostic;
 		if (!LoadImageComposerGraph(document, state.Graph, diagnostic)) {
-			state.Error = Message(diagnostic);
+			state.Error = ImageComposerDiagnosticMessage(diagnostic);
 			return;
 		}
 		state.Outputs = document.Outputs;
@@ -246,6 +337,7 @@ namespace studio {
 	}
 	void ReloadImageComposerSources(ImageComposerState &state) {
 		state.Sources.clear();
+		state.SourceVersions.clear();
 		state.SourceBytes = 0;
 		++state.SourceRevision;
 	}
@@ -265,32 +357,38 @@ namespace studio {
 		ENGINE_PROFILE_CAT("image composer evaluate", engine::core::ProfileCategory::Assets);
 		Document document;
 		Diagnostic diagnostic;
-		if (!SaveImageComposerGraph(state.Graph, state.Outputs, document, diagnostic)) {
-			return refuse(Message(diagnostic));
+		if (!SaveImageComposerDocument(state, document, diagnostic)) {
+			return refuse(ImageComposerDiagnosticMessage(diagnostic));
 		}
+		Document resolved;
+		if (!ResolveInputs(document, {}, resolved, diagnostic))
+			return refuse(ImageComposerDiagnosticMessage(diagnostic));
+		document = std::move(resolved);
 		// Evict sources no longer referenced. Changing one source must not retain every prior file.
 		for (auto held = state.Sources.begin(); held != state.Sources.end();) {
 			const bool wanted =
 				std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
 					const auto *source = std::get_if<Source>(&node.Value);
-					return source != nullptr && source->Path == held->first;
+					return source != nullptr && SourceKey(*source) == held->first;
 				});
 			if (wanted) {
 				++held;
 				continue;
 			}
 			state.SourceBytes -= held->second.Pixels.size();
+			state.SourceVersions.erase(held->first);
 			held = state.Sources.erase(held);
 		}
-		const SourceResolver sources = [&](std::string_view path, Image &out, std::string &failure) {
-			const std::string name(path);
+		const TypedSourceResolver sources = [&](const Source &source, Image &out, std::string &failure) {
+			const std::string name = SourceKey(source);
 			if (const auto found = state.Sources.find(name); found != state.Sources.end()) {
 				out = found->second;
 				return true;
 			}
 			Image decoded;
-			if (!(host.Sources ? host.Sources(path, decoded, failure)
-							   : ResolveFile(state, path, decoded, failure)))
+			if (!(host.TypedSources ? host.TypedSources(source, decoded, failure)
+				  : host.Sources	? host.Sources(source.Path, decoded, failure)
+									: ResolveFile(state, source, decoded, failure)))
 				return false;
 			if (!decoded.IsValid() ||
 				decoded.Pixels.size() > Limits::MaximumRetainedBytes - state.SourceBytes) {
@@ -298,15 +396,34 @@ namespace studio {
 				return false;
 			}
 			const auto [held, inserted] = state.Sources.emplace(name, std::move(decoded));
-			if (inserted) state.SourceBytes += held->second.Pixels.size();
+			if (inserted) {
+				state.SourceBytes += held->second.Pixels.size();
+				state.SourceVersions[name] = ++state.SourceVersion;
+			}
 			out = held->second;
 			return true;
 		};
+		if (host.Gpu) {
+			// ImGui draws into an UNORM target. Preserve stored channels rather than applying sRGB sampling.
+			for (auto &output : document.Outputs)
+				if (output.Name == state.SelectedOutput) output.Space = OutputSpace::Linear;
+			ImageComposerPreview preview;
+			if (!host.Gpu(document, state.SelectedOutput, sources, preview, diagnostic))
+				return refuse(ImageComposerDiagnosticMessage(diagnostic));
+			if (preview.Width == 0 || preview.Height == 0) return refuse("GPU preview has no extent");
+			state.PreviewHandle = preview.Handle;
+			state.PreviewWidth = preview.Width;
+			state.PreviewHeight = preview.Height;
+			state.GpuPreview = true;
+			++state.PreviewRevision;
+			state.Error.clear();
+			return true;
+		}
 		Plan plan;
 		Image candidate;
 		if (!Compile(document, plan, diagnostic) ||
-			!Evaluate(document, plan, state.SelectedOutput, sources, candidate, diagnostic)) {
-			return refuse(Message(diagnostic));
+			!EvaluateTyped(document, plan, state.SelectedOutput, sources, candidate, diagnostic)) {
+			return refuse(ImageComposerDiagnosticMessage(diagnostic));
 		}
 		engine::assets::TextureData texture;
 		std::string failure;
@@ -320,6 +437,10 @@ namespace studio {
 		state.Preview = std::move(candidate);
 		state.PreviewTexture = std::move(texture);
 		state.PreviewHandle = handle;
+		state.PreviewWidth = state.Preview.Width;
+		state.PreviewHeight = state.Preview.Height;
+		state.GpuPreview = false;
+		++state.PreviewRevision;
 		state.Error.clear();
 		return true;
 	}
@@ -331,11 +452,13 @@ namespace studio {
 		const auto parent = path.has_parent_path() ? path.parent_path() : std::filesystem::current_path();
 		if (!assetc::ReadImageGraphProject(parent, path, document, state.Error)) return false;
 		if (!LoadImageComposerGraph(document, graph, diagnostic)) {
-			state.Error = Message(diagnostic);
+			state.Error = ImageComposerDiagnosticMessage(diagnostic);
 			return false;
 		}
 		state.Graph = std::move(graph);
 		state.Outputs = std::move(document.Outputs);
+		state.Parameters = std::move(document.Parameters);
+		state.Bindings = std::move(document.Bindings);
 		state.SelectedOutput = state.Outputs.front().Name;
 		state.SourceRoot = path.has_parent_path() ? path.parent_path() : std::filesystem::current_path();
 		std::snprintf(state.ProjectPath.data(), state.ProjectPath.size(), "%s", path.string().c_str());
@@ -354,8 +477,8 @@ namespace studio {
 		Document document;
 		Diagnostic diagnostic;
 		std::string encoded;
-		if (!SaveImageComposerGraph(state.Graph, state.Outputs, document, diagnostic)) {
-			state.Error = Message(diagnostic);
+		if (!SaveImageComposerDocument(state, document, diagnostic)) {
+			state.Error = ImageComposerDiagnosticMessage(diagnostic);
 			return false;
 		}
 		// Source paths remain project-relative after Save As. Refuse moves that would require escape paths.
@@ -367,29 +490,41 @@ namespace studio {
 			return false;
 		}
 		bool changedReferences = false;
-		for (auto &node : document.Nodes)
-			if (auto *source = std::get_if<Source>(&node.Value)) {
-				const auto original =
-					std::filesystem::weakly_canonical(state.SourceRoot / source->Path, error);
-				if (error) {
-					state.Error = "invalid source path";
-					return false;
-				}
-				const auto relative = original.lexically_relative(root);
-				if (relative.empty() || *relative.begin() == "..") {
-					state.Error = "save the project in a directory containing its source images";
-					return false;
-				}
-				changedReferences = changedReferences || source->Path != relative.generic_string();
-				source->Path = relative.generic_string();
+		auto rebase = [&](std::string &reference) {
+			const auto original = std::filesystem::weakly_canonical(state.SourceRoot / reference, error);
+			if (error) {
+				state.Error = "invalid source path";
+				return false;
 			}
+			const auto relative = original.lexically_relative(root);
+			if (relative.empty() || *relative.begin() == "..") {
+				state.Error = "save the project in a directory containing its source images";
+				return false;
+			}
+			changedReferences = changedReferences || reference != relative.generic_string();
+			reference = relative.generic_string();
+			return true;
+		};
+		for (auto &node : document.Nodes)
+			if (auto *source = std::get_if<Source>(&node.Value))
+				if (!rebase(source->Path)) return false;
+		for (auto &parameter : document.Parameters) {
+			const bool sourcePath =
+				std::any_of(document.Bindings.begin(), document.Bindings.end(), [&](const Binding &binding) {
+					if (binding.Input != parameter.Name || binding.Property != "path") return false;
+					return std::any_of(document.Nodes.begin(), document.Nodes.end(), [&](const Node &node) {
+						return node.Id == binding.Node && std::holds_alternative<Source>(node.Value);
+					});
+				});
+			if (sourcePath && !rebase(std::get<std::string>(parameter.Default))) return false;
+		}
 		if (!Write(document, encoded, diagnostic)) {
-			state.Error = Message(diagnostic);
+			state.Error = ImageComposerDiagnosticMessage(diagnostic);
 			return false;
 		}
 		nodegraph::Graph accepted;
 		if (!LoadImageComposerGraph(document, accepted, diagnostic)) {
-			state.Error = Message(diagnostic);
+			state.Error = ImageComposerDiagnosticMessage(diagnostic);
 			return false;
 		}
 		if (!PublishFile(state, path, std::as_bytes(std::span(encoded)))) return false;
@@ -397,6 +532,7 @@ namespace studio {
 		state.SourceRoot = root;
 		if (changedReferences) {
 			state.Graph = std::move(accepted);
+			state.Parameters = document.Parameters;
 			state.Canvas.Select(nodegraph::NO_NODE);
 			ReloadImageComposerSources(state);
 		}
@@ -417,6 +553,33 @@ namespace studio {
 		}
 		if (!asset.ends_with(".atex")) asset += ".atex";
 		if (!RefreshImageComposer(state, host)) return false;
+		if (state.GpuPreview) {
+			Document document, resolved;
+			Diagnostic diagnostic;
+			if (!SaveImageComposerDocument(state, document, diagnostic) ||
+				!ResolveInputs(document, {}, resolved, diagnostic)) {
+				state.Error = ImageComposerDiagnosticMessage(diagnostic);
+				return false;
+			}
+			const TypedSourceResolver sources = [&](const Source &source, Image &out, std::string &failure) {
+				const auto held = state.Sources.find(SourceKey(source));
+				if (held != state.Sources.end()) {
+					out = held->second;
+					return true;
+				}
+				return host.TypedSources ? host.TypedSources(source, out, failure)
+					   : host.Sources	 ? host.Sources(source.Path, out, failure)
+										 : ResolveFile(state, source, out, failure);
+			};
+			engine::assets::TextureData texture;
+			if (!engine::bake::BakeImageGraphTyped(
+					resolved, state.SelectedOutput, sources, texture, diagnostic
+				)) {
+				state.Error = ImageComposerDiagnosticMessage(diagnostic);
+				return false;
+			}
+			state.PreviewTexture = std::move(texture);
+		}
 		engine::core::ByteWriter encoded;
 		if (!engine::assets::Texture::Write(encoded, state.PreviewTexture)) {
 			state.Error = "output is not an ordinary texture";
@@ -432,6 +595,35 @@ namespace studio {
 		state.Notice = "Exported " + asset;
 		return true;
 	}
+	bool CanApplyLiveImageComposer(const ImageComposerState &state) {
+		return !state.PublishedGraph.empty() && !state.TargetProperty.empty() &&
+			   state.PublishedKey == RevisionKey(state) + std::to_string(state.SourceRevision);
+	}
+	bool PublishLiveImageComposer(
+		ImageComposerState &state, const ImageComposerHost &host, std::string_view name
+	) {
+		if (!host.LivePublish) {
+			state.Error = "live publication is unavailable";
+			return false;
+		}
+		Document document;
+		Diagnostic diagnostic;
+		if (!SaveImageComposerDocument(state, document, diagnostic)) {
+			state.Error = ImageComposerDiagnosticMessage(diagnostic);
+			return false;
+		}
+		std::string accepted, failure;
+		if (!host.LivePublish(document, name, accepted, failure)) {
+			state.Error = failure;
+			return false;
+		}
+		state.PublishedGraph = std::move(accepted);
+		state.PublishedKey = RevisionKey(state) + std::to_string(state.SourceRevision);
+		state.Error.clear();
+		state.Notice = "Published " + state.PublishedGraph;
+		return true;
+	}
+
 	void DrawImageComposer(ImageComposerState &state, bool &open, const ImageComposerHost &host) {
 		if (!open) return;
 		InitialiseImageComposer(state);
@@ -479,6 +671,24 @@ namespace studio {
 				ImGui::EndTable();
 			}
 			Inspector(state);
+			if (!state.Parameters.empty()) ImGui::SeparatorText("Named inputs");
+			for (size_t input = 0; input < state.Parameters.size();) {
+				auto &parameter = state.Parameters[input];
+				ImGui::PushID(static_cast<int>(input));
+				ImGui::SetNextItemWidth(std::max(80.f, ImGui::GetContentRegionAvail().x - 100.f));
+				const bool changed = DrawImageComposerInput(parameter.Name.c_str(), parameter.Default);
+				if ((changed && (parameter.Default.index() == 1 || parameter.Default.index() == 2)) ||
+					ImGui::IsItemDeactivatedAfterEdit())
+					CommitImageComposer(state);
+				if (ImGui::SmallButton("Remove input")) {
+					const auto name = parameter.Name;
+					std::erase_if(state.Bindings, [&](const auto &binding) { return binding.Input == name; });
+					state.Parameters.erase(state.Parameters.begin() + static_cast<std::ptrdiff_t>(input));
+					CommitImageComposer(state);
+				} else
+					++input;
+				ImGui::PopID();
+			}
 			ImGui::Separator();
 			if (ImGui::BeginCombo("Preview output", state.SelectedOutput.c_str())) {
 				for (const auto &output : state.Outputs)
@@ -488,19 +698,58 @@ namespace studio {
 					}
 				ImGui::EndCombo();
 			}
+			const auto output =
+				std::find_if(state.Outputs.begin(), state.Outputs.end(), [&](const auto &item) {
+					return item.Name == state.SelectedOutput;
+				});
+			if (output != state.Outputs.end()) {
+				const bool linear = output->Space == OutputSpace::Linear;
+				if (ImGui::BeginCombo("Output space", linear ? "Linear data" : "sRGB colour")) {
+					if (ImGui::Selectable("sRGB colour", !linear)) {
+						output->Space = OutputSpace::SRGB;
+						CommitImageComposer(state);
+					}
+					if (ImGui::Selectable("Linear data", linear)) {
+						output->Space = OutputSpace::Linear;
+						CommitImageComposer(state);
+					}
+					ImGui::EndCombo();
+				}
+			}
 			(void)RefreshImageComposer(state, host);
-			if (state.Preview.IsValid()) {
-				ImGui::Text("%u x %u", state.Preview.Width, state.Preview.Height);
+			if (state.PreviewWidth != 0 && state.PreviewHeight != 0) {
+				ImGui::Text("%u x %u", state.PreviewWidth, state.PreviewHeight);
 				if (state.PreviewHandle != nullptr) {
 					const float width = std::min(ImGui::GetContentRegionAvail().x, 256.f);
 					ImGui::Image(
 						ImTextureRef(state.PreviewHandle),
-						ImVec2(width, width * state.Preview.Height / state.Preview.Width)
+						ImVec2(width, width * state.PreviewHeight / state.PreviewWidth)
 					);
 				}
 			}
 			ImGui::InputText("Asset", state.AssetName.data(), state.AssetName.size());
 			if (ImGui::Button("Export .atex")) ExportImageComposer(state, host, state.AssetName.data());
+			if (host.LivePublish) {
+				ImGui::InputText("Live asset", state.LiveAssetName.data(), state.LiveAssetName.size());
+				if (ImGui::Button("Publish live graph"))
+					PublishLiveImageComposer(state, host, state.LiveAssetName.data());
+				if (host.Apply) {
+					if (ImGui::BeginCombo("Image slot", state.TargetProperty.c_str())) {
+						for (const auto &slot : host.ImageSlots)
+							if (ImGui::Selectable(slot.c_str(), state.TargetProperty == slot))
+								state.TargetProperty = slot;
+						ImGui::EndCombo();
+					}
+					ImGui::BeginDisabled(
+						!CanApplyLiveImageComposer(state) ||
+						std::find(host.ImageSlots.begin(), host.ImageSlots.end(), state.TargetProperty) ==
+							host.ImageSlots.end()
+					);
+					if (ImGui::Button("Apply to selection"))
+						host.Apply(state.PublishedGraph, state.SelectedOutput, state.TargetProperty);
+					ImGui::EndDisabled();
+				}
+			}
 			if (host.Publish) {
 				ImGui::SameLine();
 				if (ImGui::Button("Publish assets")) host.Publish();

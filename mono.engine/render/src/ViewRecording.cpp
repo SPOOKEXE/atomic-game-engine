@@ -155,6 +155,7 @@ namespace engine::render {
 		const size_t targetSlot = Request.TargetSlot;
 		const View &source = *Request.Source;
 		State->ActiveContentOwner = source.ContentOwner;
+		State->ActiveImageGraphWorld = source.WorldName;
 		ContentSignature = scene::MixSignature(State->ResourceEpoch, source.ContentOwner.Id());
 		ContentSignature =
 			scene::MixSignature(ContentSignature, source.LensContentOwner.value_or(source.ContentOwner).Id());
@@ -1977,6 +1978,7 @@ namespace engine::render {
 		State->SlotMesh.resize(uploadCount);
 		State->SlotTexture.resize(uploadCount);
 		State->SlotContentOwner.resize(uploadCount);
+		State->SlotImageGraphWorld.resize(uploadCount);
 		State->SlotNormalMap.resize(uploadCount);
 		State->SlotRoughnessMap.resize(uploadCount);
 		State->SlotOcclusionMap.resize(uploadCount);
@@ -2020,6 +2022,8 @@ namespace engine::render {
 				State->SlotMesh[drawSlot] = mesh;
 				State->SlotTexture[drawSlot] = instance.Texture;
 				State->SlotContentOwner[drawSlot] = Request.Source->ContentOwnerOf(instance.SourceWorld);
+				State->SlotImageGraphWorld[drawSlot] =
+					instance.SourceWorld.IsValid() ? instance.SourceWorld : viewWorld;
 				State->SlotNormalMap[drawSlot] = instance.NormalMap;
 				State->SlotRoughnessMap[drawSlot] = instance.RoughnessMap;
 				State->SlotOcclusionMap[drawSlot] = instance.OcclusionMap;
@@ -2231,6 +2235,7 @@ namespace engine::render {
 						State->SlotMesh[drawSlot] = State->SlotMesh[sceneSlot];
 						State->SlotTexture[drawSlot] = State->SlotTexture[sceneSlot];
 						State->SlotContentOwner[drawSlot] = State->SlotContentOwner[sceneSlot];
+						State->SlotImageGraphWorld[drawSlot] = State->SlotImageGraphWorld[sceneSlot];
 						State->SlotNormalMap[drawSlot] = State->SlotNormalMap[sceneSlot];
 						State->SlotRoughnessMap[drawSlot] = State->SlotRoughnessMap[sceneSlot];
 						State->SlotOcclusionMap[drawSlot] = State->SlotOcclusionMap[sceneSlot];
@@ -2286,8 +2291,9 @@ namespace engine::render {
 				uint32_t levelCount = 1;
 				const uint32_t wanted = std::clamp<uint32_t>(instance.LodLevels, 1u, scene::LOD_LEVELS);
 				const core::Name billboard = instance.LodBillboard;
-				const core::Name billboardOwner =
-					Impl::TextureContentOwner(billboard, State->SlotContentOwner[slot]);
+				const core::Name billboardOwner = Impl::TextureContentOwner(
+					billboard, State->SlotContentOwner[slot], State->SlotImageGraphWorld[slot]
+				);
 				const bool billboardResident =
 					billboard.IsValid() && State->Textures.Find(billboard, billboardOwner) != nullptr;
 				const MeshEntry *billboardMesh = nullptr;

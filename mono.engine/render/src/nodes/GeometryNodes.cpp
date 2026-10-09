@@ -282,8 +282,11 @@ namespace engine::render {
 				const TessellationMaterial source =
 					TessellationMaterialFor(*mesh, entry.Material, State->SlotTexture[entry.Instance]);
 				const core::Name texture = source.Texture;
-				const core::Name owner =
-					State->TextureContentOwner(texture, State->SlotContentOwner[entry.Instance]);
+				const core::Name owner = State->TextureContentOwner(
+					texture,
+					State->SlotContentOwner[entry.Instance],
+					State->SlotImageGraphWorld[entry.Instance]
+				);
 				SDL_GPUTexture *found = State->Textures.Find(texture, owner);
 				const TextureChoice choice = ChooseTexture(
 					found != nullptr, texture.IsValid(), State->Textures.Expecting(texture, owner)
@@ -293,8 +296,11 @@ namespace engine::render {
 																			 : State->Textures.Default();
 				const bool absent = choice == TextureChoice::Missing;
 				const auto dataMap = [&](core::Name name) {
-					const core::Name mapOwner =
-						State->TextureContentOwner(name, State->SlotContentOwner[entry.Instance]);
+					const core::Name mapOwner = State->TextureContentOwner(
+						name,
+						State->SlotContentOwner[entry.Instance],
+						State->SlotImageGraphWorld[entry.Instance]
+					);
 					SDL_GPUTexture *map = State->Textures.Find(name, mapOwner);
 					if (map != nullptr) return map;
 					if (name.IsValid() && !State->Textures.Expecting(name, mapOwner))
@@ -312,7 +318,9 @@ namespace engine::render {
 				SDL_GPUTexture *packedPbr = State->Textures.Find(
 					State->SlotPackedPbrMap[entry.Instance],
 					State->TextureContentOwner(
-						State->SlotPackedPbrMap[entry.Instance], State->SlotContentOwner[entry.Instance]
+						State->SlotPackedPbrMap[entry.Instance],
+						State->SlotContentOwner[entry.Instance],
+						State->SlotImageGraphWorld[entry.Instance]
 					)
 				);
 				SDL_GPUSampler *sampler =

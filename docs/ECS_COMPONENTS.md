@@ -204,6 +204,7 @@ state until v0.19.
 | `scene.GpuParticleField` | 72 | 4 | yes | . | . | . | Authored request for a deterministic analytical storm particle field, including enabled layers, normalized count, reset seed, and per-layer colour, opacity and size. |
 | `scene.Gravity` | 12 | 4 | yes | yes | . | . | Per-world gravity acceleration applied to dynamic simulated bodies before physics integrates them; omitting the resource disables gravity, while `PrepareGravity` supplies Earth's default. |
 | `scene.Humanoid` | 48 | 8 | yes | yes | . | . | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick. |
+| `scene.ImageGraph` | 48 | 8 | yes | . | . | . | On an `ImageGraph` instance: the signed graph asset, world-unique key, selected output, typed input overrides and local revision the client watches to resolve ordinary image outputs. |
 | `scene.InputState` | 56 | 8 | yes | yes | . | . | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's. |
 | `scene.IntValue` | 8 | 8 | yes | yes | . | . | The signed 64-bit integer stored by an `IntValue` instance. |
 | `scene.JointInstance` | 80 | 8 | yes | yes | . | . | The two parts, local C0 and C1 frames, and enabled state shared by legacy rigid joints such as Weld. |
@@ -311,4 +312,4 @@ state until v0.19.
 
 ---
 
-234 components registered by the engine, 0 without a purpose line.
+235 components registered by the engine, 0 without a purpose line.

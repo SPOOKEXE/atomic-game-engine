@@ -284,6 +284,7 @@ namespace engine::render {
 		Entry entry{
 			.Texture = texture,
 			.Bytes = bytes,
+			.Revision = 0,
 			.Width = image.Width,
 			.Height = image.Height,
 			.Format = image.Format,
@@ -404,6 +405,7 @@ namespace engine::render {
 		// Moving the prepared vectors cannot allocate, so a refusal leaves the old entry intact.
 		if (destination->Texture != nullptr) gpu::ReleaseTexture(Device, destination->Texture);
 		*destination = std::move(prepared);
+		destination->Revision = ++ContentGeneration;
 		UploadedBytes -= oldBytes;
 		RetainedCopyBytes -= oldCopyBytes;
 		RetainedCopyBytes += destination->SourcePixels.size();
@@ -502,6 +504,7 @@ namespace engine::render {
 			Entry &old = Textures.find(pending[index].Key)->second;
 			if (old.Texture != nullptr) gpu::ReleaseTexture(Device, old.Texture);
 			old = std::move(pending[index].Prepared);
+			old.Revision = ++ContentGeneration;
 			pending[index].Texture = nullptr;
 			Awaiting.erase(pending[index].Key);
 		}
@@ -542,6 +545,12 @@ namespace engine::render {
 		return true;
 	}
 
+	uint64_t TextureTable::RevisionOf(const core::Name &name, core::Name owner) const {
+		if (!name.IsValid()) return 0;
+		const auto found = Textures.find(TextureKey(name, owner));
+		return found == Textures.end() ? 0 : found->second.Revision;
+	}
+
 	TextureCopyStatus TextureTable::Copy(
 		const core::Name &name, assets::TextureData &out, size_t byteLimit, core::Name owner
 	) const {
@@ -571,9 +580,11 @@ namespace engine::render {
 		uint32_t width,
 		uint32_t height,
 		size_t bytes,
-		core::Name owner
+		core::Name owner,
+		assets::TextureFormat format
 	) {
-		if (Device == nullptr || !name.IsValid() || texture == nullptr) {
+		if (Device == nullptr || !name.IsValid() || texture == nullptr ||
+			!detail::TextureFormatForUpload(format)) {
 			return false;
 		}
 
@@ -589,8 +600,10 @@ namespace engine::render {
 		Entry entry;
 		entry.Texture = texture;
 		entry.Bytes = bytes;
+		entry.Revision = ++ContentGeneration;
 		entry.Width = width;
 		entry.Height = height;
+		entry.Format = format;
 		entry.CopyStatus = TextureCopyStatus::Unsupported;
 
 		// No flipbook fields: a rendered picture is one frame by construction,
@@ -640,6 +653,7 @@ namespace engine::render {
 		Entry entry;
 		entry.Texture = texture;
 		entry.Bytes = bytes;
+		entry.Revision = ++ContentGeneration;
 		entry.Width = width;
 		entry.Height = height;
 		entry.Format = format;

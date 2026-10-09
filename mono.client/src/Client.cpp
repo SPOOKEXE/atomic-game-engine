@@ -4162,6 +4162,7 @@ namespace client {
 				const auto owner = Universe_->NameOf(InterfaceWorld());
 				engine::render::InterfaceImage image;
 				image.Texture = Renderer.TextureHandle(name, owner);
+				image.SampledSRGB = Renderer.TextureSamplesSRGB(name, owner);
 				if (image.Texture == nullptr) {
 					return image;
 				}
@@ -4842,7 +4843,7 @@ namespace client {
 				engine::render::ScenePresentationState{
 					.Lighting = visualLighting,
 					.Animation = Renderer.TextureAnimationSignature(visualSeconds),
-					.Resources = spatialSignature,
+					.Resources = spatialSignature ^ Renderer.ResourceRevision(),
 					.SurfaceBounces = visualSurfaceBounces,
 					.SurfaceLimit = visualSurfaceLimit,
 					.PostProcess = LastPostProcessShader,
@@ -4854,7 +4855,8 @@ namespace client {
 		const bool gameInterfacePresent = hook != nullptr && !InterfaceList.Commands().Commands.empty();
 		const engine::render::PresentationSignatures presentationSignatures{
 			.Scene = scenePresentationSignatures,
-			.GameInterface = gameInterfacePresent ? InterfaceList.Signature() : 0,
+			.GameInterface =
+				gameInterfacePresent ? InterfaceList.Signature() ^ Renderer.ResourceRevision() : 0,
 			.HostInterface = 0,
 			.Viewport = viewportSignature,
 		};

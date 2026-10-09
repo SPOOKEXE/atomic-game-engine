@@ -1,3 +1,4 @@
+#include <engine/assets/Material.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/imagegraph/Document.hpp>
@@ -5,6 +6,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <assetc/Bake.hpp>
 #include <assetc/ImageGraph.hpp>
 #include <filesystem>
@@ -294,4 +296,226 @@ TEST_CASE(
 	CHECK(refused.Failures == 1);
 	CHECK(refused.Assets[0].Failure.find("numeric material maps") != std::string::npos);
 	CHECK(Bytes(settings.Output / "sprite.atex") == before);
+}
+
+TEST_CASE("Live assetc cook includes exact texture closure for one selected graph", "[imagegraph]") {
+	Scratch scratch("live-closure");
+	auto settings = scratch.Settings();
+	settings.LiveImageGraphs = true;
+	settings.MaximumTexture = 1;
+	settings.Mipmaps = true;
+	Bitmap(settings.Input / "source.bmp");
+	Project(settings.Input / "sprite.imagegraph", "source.bmp", true);
+	std::string failure;
+	const auto report = assetc::Bake(settings, failure);
+	REQUIRE(failure.empty());
+	REQUIRE(report.Failures == 0);
+	REQUIRE(report.Assets.size() == 2);
+	const auto graphRow = std::find_if(report.Assets.begin(), report.Assets.end(), [](const auto &row) {
+		return row.Kind == engine::assets::AssetKind::ImageGraph;
+	});
+	REQUIRE(graphRow != report.Assets.end());
+	CHECK(graphRow->Output == "sprite.aimagegraph");
+	const auto graphBytes = Bytes(settings.Output / graphRow->Output);
+	engine::imagegraph::Document graph;
+	engine::imagegraph::Diagnostic diagnostic;
+	REQUIRE(
+		engine::imagegraph::Read(
+			std::string_view(reinterpret_cast<const char *>(graphBytes.data()), graphBytes.size()),
+			graph,
+			diagnostic
+		)
+	);
+	CHECK(graph.Outputs.size() == 2);
+	const auto sourceName = std::get<engine::imagegraph::Source>(graph.Nodes[0].Value).Path;
+	CHECK(sourceName.starts_with("__imagegraph_sources/"));
+	const auto sourceBytes = Bytes(settings.Output / sourceName);
+	engine::core::ByteReader reader(sourceBytes);
+	engine::assets::TextureData source;
+	REQUIRE(engine::assets::Texture::Read(reader, source));
+	CHECK(source.Width == 2);
+	CHECK(source.Height == 1);
+	CHECK(source.Mips.empty());
+	CHECK_FALSE(fs::exists(settings.Output / "source.atex"));
+	CHECK_FALSE(fs::exists(settings.Output / "sprite.atex"));
+	CHECK(assetc::Bake(settings, failure).Failures == 0);
+	CHECK(Bytes(settings.Output / graphRow->Output) == graphBytes);
+	settings.Output.clear();
+	const auto memory = assetc::Bake(settings, failure);
+	REQUIRE(memory.Failures == 0);
+	REQUIRE(memory.Assets.size() == 2);
+	CHECK(memory.Assets[0].Payload == sourceBytes);
+	CHECK(memory.Assets[1].Payload == graphBytes);
+}
+
+TEST_CASE(
+	"Live graph publication keeps last graph on source failure or addressed-byte collision", "[imagegraph]"
+) {
+	Scratch scratch("live-preserve");
+	auto settings = scratch.Settings();
+	settings.LiveImageGraphs = true;
+	Bitmap(settings.Input / "source.bmp");
+	Project(settings.Input / "sprite.imagegraph");
+	std::string failure;
+	REQUIRE(assetc::Bake(settings, failure).Failures == 0);
+	const auto before = Bytes(settings.Output / "sprite.aimagegraph");
+	Project(settings.Input / "sprite.imagegraph", "missing.bmp");
+	CHECK(assetc::Bake(settings, failure).Failures == 1);
+	CHECK(Bytes(settings.Output / "sprite.aimagegraph") == before);
+	Project(settings.Input / "sprite.imagegraph");
+	engine::imagegraph::Document document;
+	REQUIRE(assetc::ReadImageGraphProject(settings.Input, settings.Input / settings.Only, document, failure));
+	engine::bake::CookedImageGraph cooked;
+	REQUIRE(
+		assetc::CookImageGraphProject(
+			settings.Input,
+			settings.Input / settings.Only,
+			document,
+			"sprite.aimagegraph",
+			settings.Content,
+			cooked,
+			failure
+		)
+	);
+	REQUIRE(cooked.Sources.size() == 1);
+	auto dangling = cooked;
+	dangling.Sources.clear();
+	CHECK_FALSE(assetc::PublishCookedImageGraph(settings.Output, dangling, failure));
+	CHECK(Bytes(settings.Output / "sprite.aimagegraph") == before);
+	Text(settings.Output / cooked.Sources[0].Name, "corrupted");
+	CHECK_FALSE(assetc::PublishCookedImageGraph(settings.Output, cooked, failure));
+	CHECK(failure.find("different bytes") != std::string::npos);
+	CHECK(Bytes(settings.Output / "sprite.aimagegraph") == before);
+	CHECK(Bytes(settings.Output / cooked.Sources[0].Name).size() == 9);
+}
+
+TEST_CASE("Live graph source defaults are normalized and output writes remain confined", "[imagegraph]") {
+	Scratch scratch("live-paths");
+	auto settings = scratch.Settings();
+	Bitmap(settings.Input / "source.bmp");
+	Bitmap(settings.Input / "alternate.bmp");
+	engine::imagegraph::Document graph;
+	graph.Nodes = {{"source", engine::imagegraph::Source{"source.bmp"}, {}}};
+	graph.Outputs = {{"image", "source"}};
+	graph.Parameters = {{"sheet", std::string("alternate.bmp")}};
+	graph.Bindings = {{"source", "path", "sheet"}};
+	engine::bake::CookedImageGraph cooked;
+	std::string failure;
+	REQUIRE(
+		assetc::CookImageGraphProject(
+			settings.Input,
+			settings.Input / "unsaved.imagegraph",
+			graph,
+			"effects/live.aimagegraph",
+			settings.Content,
+			cooked,
+			failure
+		)
+	);
+	CHECK(std::get<std::string>(cooked.Graph.Parameters[0].Default).starts_with("__imagegraph_sources/"));
+	CHECK(cooked.Sources.size() == 1);
+	REQUIRE(assetc::PublishCookedImageGraph(settings.Output, cooked, failure));
+	const auto before = Bytes(settings.Output / cooked.Name);
+	graph.Parameters[0].Default = std::string("../outside.bmp");
+	Bitmap(scratch.Root / "outside.bmp");
+	CHECK_FALSE(
+		assetc::CookImageGraphProject(
+			settings.Input,
+			settings.Input / "unsaved.imagegraph",
+			graph,
+			"effects/live.aimagegraph",
+			settings.Content,
+			cooked,
+			failure
+		)
+	);
+	CHECK(Bytes(settings.Output / cooked.Name) == before);
+	cooked.Name = "../escape.aimagegraph";
+	CHECK_FALSE(assetc::PublishCookedImageGraph(settings.Output, cooked, failure));
+	CHECK_FALSE(fs::exists(scratch.Root / "escape.aimagegraph"));
+	cooked.Name = "effects/live.aimagegraph";
+	fs::create_directory(scratch.Root / "elsewhere");
+	std::error_code error;
+	fs::remove_all(settings.Output / "effects", error);
+	fs::create_directory_symlink(scratch.Root / "elsewhere", settings.Output / "effects", error);
+	if (!error) {
+		CHECK_FALSE(assetc::PublishCookedImageGraph(settings.Output, cooked, failure));
+		CHECK_FALSE(fs::exists(scratch.Root / "elsewhere" / "live.aimagegraph"));
+	}
+}
+
+TEST_CASE("Explicit linear graph outputs can bake and bind numeric material maps", "[imagegraph]") {
+	Scratch scratch("live-numeric-map");
+	auto settings = scratch.Settings();
+	Bitmap(settings.Input / "source.bmp");
+	engine::imagegraph::Document graph;
+	graph.Nodes = {
+		{"source",
+		 engine::imagegraph::Source{"source.bmp", engine::imagegraph::SourceInterpretation::Data},
+		 {}}
+	};
+	graph.Outputs = {{"normal", "source", engine::imagegraph::OutputSpace::Linear}};
+	engine::imagegraph::Diagnostic diagnostic;
+	std::string project;
+	REQUIRE(engine::imagegraph::Write(graph, project, diagnostic));
+	Text(settings.Input / settings.Only, project);
+	Text(settings.Input / "material.mat", "normal = sprite.imagegraph\n");
+	REQUIRE(Bake(settings).Failures == 0);
+	const auto encoded = Bytes(settings.Output / "sprite.atex");
+	engine::core::ByteReader reader(encoded);
+	engine::assets::TextureData texture;
+	REQUIRE(engine::assets::Texture::Read(reader, texture));
+	CHECK(texture.Format == engine::assets::TextureFormat::RGBA8_LINEAR);
+	settings.LiveImageGraphs = true;
+	settings.Only.clear();
+	std::string failure;
+	const auto live = assetc::Bake(settings, failure);
+	REQUIRE(failure.empty());
+	REQUIRE(live.Failures == 0);
+	const auto materialBytes = Bytes(settings.Output / "material.amat");
+	engine::core::ByteReader materialReader(materialBytes);
+	engine::assets::MaterialData material;
+	REQUIRE(engine::assets::Material::Read(materialReader, material));
+	CHECK(material.NormalMap == "imagegraph://sprite.aimagegraph#normal");
+}
+
+TEST_CASE(
+	"Live graph cook gates runtime graph and normalized texture content before source lookup", "[imagegraph]"
+) {
+	Scratch scratch("live-content-policy");
+	auto settings = scratch.Settings();
+	Bitmap(settings.Input / "source.bmp");
+	engine::imagegraph::Document document;
+	document.Nodes = {{"source", engine::imagegraph::Source{"source.bmp"}, {}}};
+	document.Outputs = {{"image", "source"}};
+	engine::bake::CookedImageGraph cooked;
+	cooked.Text = "old";
+	std::string failure;
+	settings.Content.Allow(engine::assets::ContentForm::ATex, false);
+	CHECK_FALSE(
+		assetc::CookImageGraphProject(
+			settings.Input,
+			settings.Input / "unsaved.imagegraph",
+			document,
+			"live.aimagegraph",
+			settings.Content,
+			cooked,
+			failure
+		)
+	);
+	CHECK(cooked.Text == "old");
+	settings.Content.Allow(engine::assets::ContentForm::ATex, true);
+	settings.Content.Allow(engine::assets::FormOfName("live.aimagegraph"), false);
+	CHECK_FALSE(
+		assetc::CookImageGraphProject(
+			settings.Input,
+			settings.Input / "unsaved.imagegraph",
+			document,
+			"live.aimagegraph",
+			settings.Content,
+			cooked,
+			failure
+		)
+	);
+	CHECK(cooked.Text == "old");
 }

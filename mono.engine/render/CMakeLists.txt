@@ -22,6 +22,9 @@ mono_add_library(render
 		# Scene data and culling decisions are shared with headless hosts.
 		Engine::graph
 
+		# The GPU adapter consumes the immutable bounded L9 image document and plan.
+		Engine::imagegraph
+
 		# Shared interface draw data; the client does not link Engine::ui.
 		Engine::gui
 

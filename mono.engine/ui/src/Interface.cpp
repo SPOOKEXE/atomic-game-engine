@@ -258,6 +258,7 @@ namespace engine::ui {
 		State->Spatial.SetImageSource([this, &renderer](const core::Name &name) {
 			render::InterfaceImage image;
 			image.Texture = renderer.TextureHandle(name);
+			image.SampledSRGB = renderer.TextureSamplesSRGB(name);
 			if (image.Texture == nullptr) {
 				return image;
 			}

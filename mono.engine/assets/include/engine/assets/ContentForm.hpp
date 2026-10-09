@@ -130,6 +130,10 @@ namespace engine::assets {
 
 		// Bounded cooked shader bundle with backend payloads and reflection metadata.
 		AShader,
+
+		// Authored composition and its cooked runtime document.
+		ImageGraph,
+		AImageGraph,
 	};
 
 	// The lowercase name for a form, which is also its canonical extension.

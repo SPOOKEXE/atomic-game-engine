@@ -5,6 +5,9 @@
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/ImageGraph.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 
 #include <client/ContentDemand.hpp>
 #include <unordered_set>
@@ -44,6 +47,10 @@ namespace client {
 		ObserveRevision<engine::scene::Sound>(store, revision);
 		ObserveRevision<engine::scene::SurfaceAppearance>(store, revision);
 		ObserveRevision<engine::gui::Picture>(store, revision);
+		ObserveRevision<engine::gui::Scrolling>(store, revision);
+		ObserveRevision<engine::scene::LODAuto>(store, revision);
+		ObserveRevision<engine::scene::LODCustom>(store, revision);
+		ObserveRevision<engine::scene::ImageGraph>(store, revision);
 		ObserveRevision<engine::effects::ParticleEmitter>(store, revision);
 		ObserveRevision<engine::effects::Beam>(store, revision);
 		ObserveRevision<engine::effects::Trail>(store, revision);
@@ -68,9 +75,21 @@ namespace client {
 			}
 		}
 
-		store.Each<const engine::scene::Visual>([&out, &seen](
-													engine::ecs::Entity, const engine::scene::Visual &visual
-												) { Want(out, seen, visual.Mesh); });
+		store.Each<const engine::scene::ImageGraph>(
+			[&out, &seen](engine::ecs::Entity, const engine::scene::ImageGraph &graph) {
+				Want(out, seen, graph.Graph);
+			}
+		);
+
+		const auto *meshes = store.Resource<engine::scene::MeshCatalogue>();
+		store.Each<const engine::scene::Visual>(
+			[&out, &seen, meshes](engine::ecs::Entity, const engine::scene::Visual &visual) {
+				Want(out, seen, visual.Mesh);
+				if (meshes)
+					for (const auto texture : meshes->Sheets(visual.Mesh))
+						Want(out, seen, texture);
+			}
+		);
 
 		store.Each<const engine::scene::MaterialRef>(
 			[&out, &seen](engine::ecs::Entity, const engine::scene::MaterialRef &material) {
@@ -111,6 +130,22 @@ namespace client {
 				Want(out, seen, picture.Image);
 				Want(out, seen, picture.HoverImage);
 				Want(out, seen, picture.PressedImage);
+			}
+		);
+
+		store.Each<const engine::gui::Scrolling>(
+			[&out, &seen](engine::ecs::Entity, const engine::gui::Scrolling &scrolling) {
+				Want(out, seen, scrolling.TopImage);
+				Want(out, seen, scrolling.MidImage);
+				Want(out, seen, scrolling.BottomImage);
+			}
+		);
+		store.Each<const engine::scene::LODAuto>([&out, &seen](
+													 engine::ecs::Entity, const engine::scene::LODAuto &lod
+												 ) { Want(out, seen, lod.Billboard); });
+		store.Each<const engine::scene::LODCustom>(
+			[&out, &seen](engine::ecs::Entity, const engine::scene::LODCustom &lod) {
+				Want(out, seen, lod.Billboard);
 			}
 		);
 

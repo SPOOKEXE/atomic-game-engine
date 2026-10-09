@@ -11,6 +11,7 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/examples/PackagedAssets.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/imagegraph/Reference.hpp>
 #include <engine/render/Animation.hpp>
 #include <engine/render/AutomaticMeshLod.hpp>
 #include <engine/scene/CollisionShapes.hpp>
@@ -294,6 +295,7 @@ namespace client {
 			}
 		}
 		if (!content.Client) {
+			RefreshImageGraphs(content, worlds);
 			return;
 		}
 
@@ -402,7 +404,15 @@ namespace client {
 			const engine::core::Name name(asset->Name);
 			engine::core::ByteReader reader(asset->Bytes);
 
-			if (asset->Kind == engine::assets::AssetKind::Mesh) {
+			if (asset->Kind == engine::assets::AssetKind::ImageGraph) {
+				engine::imagegraph::Diagnostic diagnostic;
+				const std::string_view encoded(
+					reinterpret_cast<const char *>(asset->Bytes.data()), asset->Bytes.size()
+				);
+				if (!content.GraphContent.Admit(asset->Name, asset->Root.ToHex(), encoded, diagnostic) &&
+					!diagnostic.Message.empty())
+					ENGINE_WARN("content: graph {} refused: {}", asset->Name, diagnostic.Message);
+			} else if (asset->Kind == engine::assets::AssetKind::Mesh) {
 				engine::assets::MeshData mesh;
 				{
 					ENGINE_PROFILE_CAT("mesh decode", engine::core::ProfileCategory::Assets);
@@ -431,6 +441,8 @@ namespace client {
 				if (uploaded) {
 					VisualResourcesChanged = true;
 					ContentMeshes++;
+					// Newly admitted submesh references must join the next ECS demand scan.
+					content.ScannedAtRevision.clear();
 
 					const auto generated =
 						engine::render::BuildAutomaticMeshLods(*Universe_, worlds, name, mesh);
@@ -679,6 +691,7 @@ namespace client {
 				}
 			}
 		}
+		RefreshImageGraphs(content, worlds);
 		content.Pending.resize(kept);
 
 		// Appended after the walk, never during it. See `RequestTexture`.
@@ -749,7 +762,8 @@ namespace client {
 			return;
 		}
 
-		Universe_->Enter(world, [&content, world](engine::ecs::Store &store) {
+		const auto owner = Universe_->NameOf(world);
+		Universe_->Enter(world, [&content, world, owner](engine::ecs::Store &store) {
 			// **The gate, and it is a small fixed set of integer compares.**
 			// `CollectWantedContent`
 			// is several walks of the store, and this used to run all of them on
@@ -768,6 +782,7 @@ namespace client {
 			content.ScannedAtRevision[world.Index] = revision;
 
 			CollectWantedContent(store, content.Wanted);
+			content.GraphReferences[owner.Id()].clear();
 		});
 	}
 
@@ -790,7 +805,21 @@ namespace client {
 	void Client::RequestAsset(
 		ContentSession &content, const engine::core::Name &texture, engine::core::Name requestingOwner
 	) {
-		if (!content.Client || !texture.IsValid()) return;
+		if (!texture.IsValid()) return;
+		if (engine::imagegraph::IsReference(texture.Text())) {
+			engine::imagegraph::Reference reference;
+			if (!engine::imagegraph::ParseReference(texture.Text(), reference)) return;
+			for (const auto owner : content.Owners) {
+				if (requestingOwner.IsValid() && owner != requestingOwner) continue;
+				auto &references = content.GraphReferences[owner.Id()];
+				if (std::find(references.begin(), references.end(), texture) == references.end())
+					references.push_back(texture);
+			}
+			if (reference.Kind == engine::imagegraph::ReferenceKind::Asset)
+				RequestAsset(content, engine::core::Name(reference.Name), requestingOwner);
+			return;
+		}
+		if (!content.Client) return;
 		// Attempts are remembered per owner, including failures. A later world can
 		// demand an already-seen name without making old worlds fetch it again.
 		const auto alreadyAsked = [&](engine::core::Name owner) {

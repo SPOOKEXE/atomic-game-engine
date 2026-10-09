@@ -80,6 +80,10 @@ namespace engine::render {
 		uint32_t Width = 0;
 		uint32_t Height = 0;
 		//@}
+
+		// Hardware sampling decodes this texture's RGB from sRGB. Screen UNORM
+		// composition restores encoded RGB; spatial/HDR composition keeps it linear.
+		bool SampledSRGB = false;
 	};
 
 	// The device-pixel target that contains one isolated CanvasGroup. Bounds are

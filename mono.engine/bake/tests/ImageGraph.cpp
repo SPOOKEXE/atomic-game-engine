@@ -339,3 +339,144 @@ TEST_CASE("Image graph GIF admission refuses an over-wide atlas in the decoder",
 	CHECK(failure.find("flipbook") != std::string::npos);
 	CHECK(previous.Pixels == before);
 }
+
+TEST_CASE("Live image graph cook keeps exact named inputs and normalized source closure", "[imagegraph]") {
+	using namespace engine;
+	imagegraph::Document document;
+	document.Nodes = {
+		{"source", imagegraph::Source{"base.atex"}, {}},
+		{"other", imagegraph::Source{"base.atex"}, {}},
+		{"move", imagegraph::Transform{2, 1}, {"source"}}
+	};
+	document.Outputs = {{"image", "move"}, {"original", "other"}};
+	document.Parameters = {
+		{"sheet", std::string("alternate.atex")}, {"shift", 1.0}, {"sampling", std::string("nearest")}
+	};
+	document.Bindings = {
+		{"source", "path", "sheet"}, {"move", "translate_x", "shift"}, {"move", "filter", "sampling"}
+	};
+	const auto resolver = [](const imagegraph::Source &source, imagegraph::Image &image, std::string &) {
+		image = {2, 1, Source().Pixels};
+		if (source.Path == "alternate.atex") image.Pixels[0] = std::byte{37};
+		return true;
+	};
+	bake::CookedImageGraph cooked;
+	imagegraph::Diagnostic diagnostic;
+	REQUIRE(bake::CookImageGraph(document, "effects/live.aimagegraph", resolver, cooked, diagnostic));
+	CHECK(cooked.Name == "effects/live.aimagegraph");
+	REQUIRE(cooked.Sources.size() == 2);
+	for (const auto &source : cooked.Sources) {
+		CHECK(source.Name.starts_with("__imagegraph_sources/"));
+		CHECK(source.Name.ends_with(".atex"));
+		CHECK(source.Texture.Width == 2);
+		CHECK(source.Texture.Height == 1);
+		CHECK(source.Texture.Mips.empty());
+		CHECK(source.Texture.Format == assets::TextureFormat::RGBA8);
+	}
+	CHECK(
+		std::get<imagegraph::Source>(cooked.Graph.Nodes[0].Value).Path ==
+		std::get<imagegraph::Source>(cooked.Graph.Nodes[1].Value).Path
+	);
+	CHECK(
+		std::get<std::string>(cooked.Graph.Parameters[0].Default) !=
+		std::get<imagegraph::Source>(cooked.Graph.Nodes[0].Value).Path
+	);
+	CHECK(std::get<double>(cooked.Graph.Parameters[1].Default) == 1.0);
+	CHECK(cooked.Graph.Bindings.size() == 3);
+	CHECK(std::get<std::string>(cooked.Graph.Parameters[2].Default) == "nearest");
+	imagegraph::Document read;
+	REQUIRE(imagegraph::Read(cooked.Text, read, diagnostic));
+	CHECK(read.Parameters.size() == 3);
+	CHECK(read.Outputs.size() == 2);
+	bake::CookedImageGraph again;
+	REQUIRE(bake::CookImageGraph(document, "effects/live.aimagegraph", resolver, again, diagnostic));
+	CHECK(again.Text == cooked.Text);
+	CHECK(again.Sources[0].Name == cooked.Sources[0].Name);
+	const auto before = cooked.Text;
+	CHECK_FALSE(bake::CookImageGraph(document, "../escape.aimagegraph", resolver, cooked, diagnostic));
+	CHECK(cooked.Text == before);
+	CHECK_FALSE(bake::CookImageGraph(document, "space name.aimagegraph", resolver, cooked, diagnostic));
+	CHECK(cooked.Text == before);
+	document.Outputs[0].Name = "space name";
+	CHECK_FALSE(bake::CookImageGraph(document, "live.aimagegraph", resolver, cooked, diagnostic));
+	CHECK(cooked.Text == before);
+	document.Outputs[0].Name = "image";
+	const auto missing = [](const imagegraph::Source &, imagegraph::Image &, std::string &failure) {
+		failure = "source missing";
+		return false;
+	};
+	CHECK_FALSE(bake::CookImageGraph(document, "effects/live.aimagegraph", missing, cooked, diagnostic));
+	CHECK(cooked.Text == before);
+}
+
+TEST_CASE("Live graph numeric source preserves raw channels and linear output", "[imagegraph]") {
+	using namespace engine;
+	assets::TextureData texture;
+	texture.Width = texture.Height = 1;
+	texture.Format = assets::TextureFormat::RGBA8_LINEAR;
+	texture.Pixels = {std::byte{128}, std::byte{64}, std::byte{32}, std::byte{192}};
+	core::ByteWriter writer;
+	REQUIRE(assets::Texture::Write(writer, texture));
+	imagegraph::Image image;
+	std::string failure;
+	const imagegraph::Source source{"numeric.atex", imagegraph::SourceInterpretation::Data};
+	REQUIRE(bake::DecodeImageGraphSourceTyped(source, writer.Bytes(), image, failure));
+	CHECK(image.Pixels == texture.Pixels);
+	CHECK(image.Space == imagegraph::OutputSpace::Linear);
+	assets::TextureData exported;
+	REQUIRE(bake::ImageGraphTexture(image, exported, failure));
+	CHECK(exported.Format == assets::TextureFormat::RGBA8_LINEAR);
+	CHECK(exported.Pixels == texture.Pixels);
+	texture.Format = assets::TextureFormat::R8;
+	texture.Pixels = {std::byte{128}};
+	core::ByteWriter grey;
+	REQUIRE(assets::Texture::Write(grey, texture));
+	REQUIRE(bake::DecodeImageGraphSourceTyped(source, grey.Bytes(), image, failure));
+	CHECK(image.Pixels == std::vector<std::byte>{std::byte{128}, std::byte{0}, std::byte{0}, std::byte{255}});
+	imagegraph::Document document;
+	document.Nodes = {{"source", source, {}}};
+	document.Outputs = {{"normal", "source", imagegraph::OutputSpace::Linear}};
+	const auto resolver = [&](const imagegraph::Source &node, imagegraph::Image &out, std::string &reason) {
+		return bake::DecodeImageGraphSourceTyped(node, writer.Bytes(), out, reason);
+	};
+	imagegraph::Diagnostic diagnostic;
+	REQUIRE(bake::BakeImageGraphTyped(document, "normal", resolver, exported, diagnostic));
+	CHECK(exported.Format == assets::TextureFormat::RGBA8_LINEAR);
+	CHECK(
+		exported.Pixels ==
+		std::vector<std::byte>{std::byte{128}, std::byte{64}, std::byte{32}, std::byte{192}}
+	);
+	bake::CookedImageGraph cooked;
+	REQUIRE(bake::CookImageGraph(document, "normal.aimagegraph", resolver, cooked, diagnostic));
+	REQUIRE(cooked.Sources.size() == 1);
+	CHECK(cooked.Sources[0].Texture.Format == assets::TextureFormat::RGBA8_LINEAR);
+}
+
+TEST_CASE("Live graph cook refuses incompatible extents and path interpretation bindings", "[imagegraph]") {
+	using namespace engine;
+	imagegraph::Document graph;
+	graph.Nodes = {
+		{"first", imagegraph::Source{"first.atex"}, {}},
+		{"second", imagegraph::Source{"second.atex", imagegraph::SourceInterpretation::Data}, {}},
+		{"blend", imagegraph::Blend{}, {"first", "second"}}
+	};
+	graph.Outputs = {{"image", "blend"}};
+	const auto resolver = [](const imagegraph::Source &source, imagegraph::Image &image, std::string &) {
+		image = {2, 1, Source().Pixels};
+		if (source.Path == "second.atex") {
+			image.Width = 1;
+			image.Pixels.resize(4);
+		}
+		return true;
+	};
+	bake::CookedImageGraph cooked;
+	cooked.Text = "previous";
+	imagegraph::Diagnostic diagnostic;
+	CHECK_FALSE(bake::CookImageGraph(graph, "live.aimagegraph", resolver, cooked, diagnostic));
+	CHECK(cooked.Text == "previous");
+	graph.Parameters = {{"sheet", std::string("first.atex")}};
+	graph.Bindings = {{"first", "path", "sheet"}, {"second", "path", "sheet"}};
+	CHECK_FALSE(bake::CookImageGraph(graph, "live.aimagegraph", resolver, cooked, diagnostic));
+	CHECK(diagnostic.Message.find("one interpretation") != std::string::npos);
+	CHECK(cooked.Text == "previous");
+}

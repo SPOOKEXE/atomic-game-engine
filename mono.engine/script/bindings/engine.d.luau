@@ -1534,6 +1534,10 @@ declare extern type Instance with
 	function FromBuffer(self, buffer: buffer): boolean
 	function GetAttribute(self, name: string): EngineAttribute?
 	function SetAttribute(self, name: string, value: EngineAttribute?): ()
+	-- ImageGraph overrides; nil restores the graph default.
+	function SetInput(self, name: string, value: (number | boolean | Color3 | string)?): ()
+	function GetInput(self, name: string): (number | boolean | Color3 | string)?
+	function GetImage(self, output: string?): string
 	function GetAttributes(self): { [string]: EngineAttribute }
 	function GetAttributeChangedSignal(self, name: string): PropertyChangedSignal
 	function SetComponent(self, component: string, values: { [string]: any }): ()
@@ -2148,6 +2152,15 @@ declare extern type EditableImage extends Instance with
 	PackingMaximum: number
 	PackingMinimum: number
 	read Size: Vector2
+end
+
+declare extern type ImageGraph extends Instance with
+	read Graph: string
+	write Graph: string?
+	read InstanceKey: string
+	write InstanceKey: string?
+	read Output: string
+	write Output: string?
 end
 
 declare extern type LuaSourceContainer extends Instance with
@@ -3653,6 +3666,7 @@ type CreatableInstances = {
 	LensShader: LensShader,
 	EditableMesh: EditableMesh,
 	EditableImage: EditableImage,
+	ImageGraph: ImageGraph,
 	Script: Script,
 	LocalScript: LocalScript,
 	ModuleScript: ModuleScript,

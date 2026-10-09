@@ -17,6 +17,7 @@
 #include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
+#include <engine/imagegraph/Document.hpp>
 #include <engine/render/Capabilities.hpp>
 #include <engine/render/DataCapture.hpp>
 #include <engine/render/Flipbook.hpp>
@@ -48,6 +49,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
@@ -59,7 +61,46 @@ namespace engine::graph {
 	class PipelineDocument;
 }
 
+namespace engine::imagegraph {
+	struct Document;
+	struct Diagnostic;
+}
+
 namespace engine::render {
+	// Exact resident source for one authored relative path. No owner fallback occurs.
+	struct ImageGraphSourceBinding {
+		// Authored source path, matched together with Interpretation.
+		std::string Path;
+		// Ordinary resident texture name and its exact residency namespace.
+		core::Name Texture;
+		core::Name Owner;
+		// Colour imports encoded colour; Data preserves normalized numeric channels.
+		imagegraph::SourceInterpretation Interpretation = imagegraph::SourceInterpretation::Colour;
+	};
+
+	// Accepted GPU update, unchanged resident output, or last-good output retained.
+	enum class ImageGraphEvaluation : uint8_t { Updated, Reused, Refused };
+
+	// Cumulative traffic and the latest completed GPU evaluation measurement.
+	struct ImageGraphStatistics {
+		// Submitted evaluations and unchanged calls since renderer initialization.
+		uint64_t Evaluations = 0;
+		uint64_t CacheHits = 0;
+		// Actual recorded compute work and successfully submitted command buffers.
+		uint64_t ComputeDispatches = 0;
+		uint64_t CommandBuffers = 0;
+		// Logical graph texture allocations, publications and current residency.
+		uint64_t AllocatedBytes = 0;
+		uint64_t CopiedBytes = 0;
+		uint64_t ResidentBytes = 0;
+		// Sequence of the latest completed nonblocking device measurement.
+		uint64_t GpuTimingSequence = 0;
+		// Latest changed evaluation recording cost and completed device duration.
+		double CpuRecordingMicroseconds = 0;
+		double GpuMicroseconds = 0;
+		// Device timestamp support, independent of whether a result has completed.
+		bool HasGpuTimings = false;
+	};
 	// Planner outcome recorded with a portal view for capture diagnostics.
 	enum class PortalDemandStatus { Ready, Hidden, Invalid, Unsupported };
 
@@ -1724,6 +1765,33 @@ namespace engine::render {
 		//         upload.
 		bool AddTexture(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
 
+		// Installs a bounded authored graph and exact resident source bindings. A refused
+		// installation preserves the previous graph and every published output.
+		bool SetImageGraph(
+			core::Name owner,
+			core::Name name,
+			const imagegraph::Document &document,
+			std::span<const ImageGraphSourceBinding> sources,
+			imagegraph::Diagnostic &diagnostic
+		);
+
+		// Evaluates only the selected dirty dependency cone before consumers record.
+		// Publishes an ordinary texture in `owner`; unchanged calls submit no work.
+		// Same-size updates preserve TextureHandle. Refusal retains accepted pixels.
+		ImageGraphEvaluation EvaluateImageGraph(
+			core::Name owner,
+			core::Name name,
+			std::string_view output,
+			core::Name publishedTexture,
+			imagegraph::Diagnostic &diagnostic
+		);
+
+		// Releases this graph's intermediates and outputs without touching its sources.
+		bool DropImageGraph(core::Name owner, core::Name name);
+
+		// Polls completed timestamp queries without waiting and returns traffic totals.
+		ImageGraphStatistics ImageGraphProfile();
+
 		// Says that content is on its way under this name, and that it is not.
 		//
 		// **The fact the renderer cannot learn for itself.** It knows what it
@@ -2269,6 +2337,10 @@ namespace engine::render {
 		//         given.
 		// @since v0.10
 		void *TextureHandle(const core::Name &name, core::Name owner = {}) const;
+
+		// Whether TextureHandle's RGB is decoded from sRGB during hardware sampling.
+		// Missing textures return false, with the same exact owner lookup as the handle.
+		bool TextureSamplesSRGB(const core::Name &name, core::Name owner = {}) const;
 
 		// Where a texture's current animation cell sits.
 		//

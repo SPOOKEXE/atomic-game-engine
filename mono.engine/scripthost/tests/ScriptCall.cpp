@@ -32,6 +32,7 @@
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
@@ -61,6 +62,85 @@ using engine::script::InstanceMethod;
 using engine::script::Language;
 using engine::script::MakeRuntime;
 using engine::script::NeutralInstanceMethods;
+
+TEST_CASE(
+	"live image graph methods preserve typed inputs and stable names in both VMs", "[script][imagegraph]"
+) {
+	for (const auto language : {Language::Luau, Language::JavaScript}) {
+		engine::scene::RegisterSceneClasses();
+		Store store("scriptcall.imagegraph");
+		const auto runtime = MakeRuntime(store, language);
+		const std::string source = language == Language::Luau ? R"(
+local graph = Instance.new('ImageGraph')
+graph.Name = 'LiveGraph'
+graph.Parent = workspace
+graph.InstanceKey = 'script-weather'
+graph.Graph = 'graphs/weather.aimagegraph'
+graph:SetInput('opacity', .5)
+graph:SetInput('opacity', .5)
+graph:SetInput('enabled', true)
+graph:SetInput('tint', Color3.fromRGB(128, 64, 32))
+graph:SetInput('source', 'textures/cloud.png')
+graph:SetInput('temporary', 1)
+graph:SetInput('temporary', nil)
+graph:SetInput('temporary', nil)
+assert(graph:GetInput('opacity') == .5)
+assert(graph:GetInput('enabled') == true)
+assert(graph:GetInput('source') == 'textures/cloud.png')
+assert(math.abs(graph:GetInput('tint').R - Color3.fromRGB(128, 64, 32).R) < 1e-6)
+assert(graph:GetInput('temporary') == nil)
+assert(graph:GetImage() == 'imagegraph-instance://script-weather#image')
+assert(graph:GetImage('mask') == 'imagegraph-instance://script-weather#mask')
+)"
+															  : R"(
+let graph = Instance.new('ImageGraph');
+graph.Name = 'LiveGraph';
+graph.Parent = workspace;
+graph.InstanceKey = 'script-weather';
+graph.Graph = 'graphs/weather.aimagegraph';
+graph.SetInput('opacity', .5);
+graph.SetInput('opacity', .5);
+graph.SetInput('enabled', true);
+graph.SetInput('tint', Color3.fromRGB(128, 64, 32));
+graph.SetInput('source', 'textures/cloud.png');
+graph.SetInput('temporary', 1);
+graph.SetInput('temporary', null);
+graph.SetInput('temporary', null);
+if (graph.GetInput('opacity') !== .5 || graph.GetInput('enabled') !== true ||
+    graph.GetInput('source') !== 'textures/cloud.png' || graph.GetInput('temporary') !== null ||
+    Math.abs(graph.GetInput('tint').R - Color3.fromRGB(128, 64, 32).R) > 1e-6 ||
+    graph.GetImage() !== 'imagegraph-instance://script-weather#image' ||
+    graph.GetImage('mask') !== 'imagegraph-instance://script-weather#mask') throw new Error('graph mismatch');
+)";
+		const bool ran = runtime->Run(source, "imagegraph-parity");
+		INFO(runtime->LastError());
+		REQUIRE(ran);
+		const auto entity = store.FindFirstChild(engine::scene::WorkspaceOf(store), "LiveGraph");
+		const auto *graph = store.Get<engine::scene::ImageGraph>(entity);
+		REQUIRE(graph != nullptr);
+		CHECK(graph->Revision == 8);
+		CHECK(graph->Inputs.size() == 4);
+		engine::scene::ImageGraphInput tint;
+		REQUIRE(engine::scene::GetImageGraphInput(store, entity, engine::core::Name("tint"), tint));
+		CHECK(tint.Colour == std::array<uint8_t, 4>{128, 64, 32, 255});
+		const auto before = graph->Revision;
+		const std::string receiver = language == Language::Luau
+										 ? "local graph = workspace:FindFirstChild('LiveGraph')\n"
+										 : "var held = workspace.FindFirstChild('LiveGraph');\n";
+		const std::string object = language == Language::Luau ? "graph:" : "held.";
+		CHECK_FALSE(runtime->Run(receiver + object + "SetInput('opacity', 1 / 0)", "imagegraph-nonfinite"));
+		CHECK(store.Get<engine::scene::ImageGraph>(entity)->Revision == before);
+		CHECK_FALSE(runtime->Run(
+			receiver + object + "SetInput('opacity', Instance.new('Part'))", "imagegraph-unsupported"
+		));
+		CHECK(store.Get<engine::scene::ImageGraph>(entity)->Revision == before);
+		store.SetAdoptOnly(true);
+		CHECK_FALSE(
+			runtime->Run(receiver + object + "SetInput('opacity', .9)", "imagegraph-replica-refusal")
+		);
+		CHECK(store.Get<engine::scene::ImageGraph>(entity)->Revision == before);
+	}
+}
 
 namespace {
 	const std::vector<Language> LANGUAGES = {Language::Luau, Language::JavaScript};

@@ -3009,6 +3009,41 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 		CHECK(restored.PixelHash == before.PixelHash);
 		CHECK(restored.ContentRevision == before.ContentRevision);
 	}
+	SECTION("live instance pictures use the world namespace while assets use a content alias") {
+		if (!spatialImage) return;
+		const core::Name owner = worlds.Universe.NameOf(worlds.Destination);
+		REQUIRE(owner != contentOwner);
+		const core::Name graphName("Signal"), imageName("imagegraph-instance://Signal#image");
+		imagegraph::Document graph{
+			.Nodes = {{"blue", imagegraph::Solid{1, 1, {0, 0, 255, 255}}, {}, {}}},
+			.Outputs = {{"image", "blue"}},
+			.Parameters = {},
+			.Bindings = {}
+		};
+		imagegraph::Diagnostic diagnostic;
+		REQUIRE(fixture.Render.SetImageGraph(owner, graphName, graph, {}, diagnostic));
+		REQUIRE(
+			fixture.Render.EvaluateImageGraph(owner, graphName, "image", imageName, diagnostic) ==
+			ImageGraphEvaluation::Updated
+		);
+		assets::TextureData wrongNamespace;
+		wrongNamespace.Width = wrongNamespace.Height = 1;
+		wrongNamespace.Pixels = {std::byte{255}, std::byte{0}, std::byte{0}, std::byte{255}};
+		REQUIRE(fixture.Render.AddTexture(imageName, wrongNamespace, contentOwner));
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+			store.GetMutable<gui::Picture>(pictureEntity)->Image = imageName;
+		});
+		const auto captured = capture();
+		REQUIRE(captured.Width == 8);
+		REQUIRE(captured.Height == 8);
+		core::ByteReader pixel(std::span(captured.Pixels).subspan(4 * captured.RowStride + 4 * 8, 8));
+		const auto redGreen = glm::unpackHalf2x16(pixel.ReadUInt32());
+		const auto blueAlpha = glm::unpackHalf2x16(pixel.ReadUInt32());
+		CHECK(redGreen.x < .01f);
+		CHECK(redGreen.y < .01f);
+		CHECK(blueAlpha.x > .5f);
+		CHECK(blueAlpha.y > .99f);
+	}
 	SECTION("retiring a hosted world removes its content binding") {
 		if (host) {
 			host->RemoveWorld(worlds.Destination);

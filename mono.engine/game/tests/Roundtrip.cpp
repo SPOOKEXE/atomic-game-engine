@@ -12,6 +12,7 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -25,6 +26,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -49,6 +51,52 @@ using engine::game::XmlStatus;
 using engine::world::Universe;
 using engine::world::WorldId;
 using engine::world::WorldSettings;
+
+TEST_CASE(
+	"authored live image graph properties preserve typed overrides and references", "[game][imagegraph]"
+) {
+	engine::scene::RegisterSceneClasses();
+	Store source("game.imagegraph.source");
+	const auto entity = source.CreateInstance(engine::scene::ImageGraphClass(), "WeatherGraph");
+	REQUIRE(engine::scene::SetImageGraphInstanceKey(source, entity, Name("weather")));
+	REQUIRE(engine::scene::SetImageGraphAsset(source, entity, Name("graphs/weather.aimagegraph")));
+	REQUIRE(engine::scene::SetImageGraphOutput(source, entity, Name("mask")));
+	std::array<engine::scene::ImageGraphInput, 4> inputs;
+	inputs[0].Name = Name("opacity");
+	inputs[0].Number = .75;
+	inputs[1].Name = Name("enabled");
+	inputs[1].Kind = engine::scene::ImageGraphInputKind::Boolean;
+	inputs[1].Boolean = true;
+	inputs[2].Name = Name("tint");
+	inputs[2].Kind = engine::scene::ImageGraphInputKind::Colour;
+	inputs[2].Colour = {12, 34, 56, 78};
+	inputs[3].Name = Name("source");
+	inputs[3].Kind = engine::scene::ImageGraphInputKind::String;
+	inputs[3].String = "textures/cloud.png";
+	REQUIRE(engine::scene::SetImageGraphInputs(source, entity, inputs));
+	const auto encoded = engine::game::WriteInstanceDocument(source, entity);
+	CHECK(encoded.find("Inputs") != std::string::npos);
+	Store restored("game.imagegraph.restored");
+	std::string error;
+	const auto reopened = engine::game::ReadInstanceDocument(restored, encoded, NULL_ENTITY, error);
+	INFO(error);
+	REQUIRE(reopened != NULL_ENTITY);
+	REQUIRE(restored.Get<engine::scene::ImageGraph>(reopened) != nullptr);
+	CHECK(
+		restored.Get<engine::scene::ImageGraph>(reopened)->Inputs ==
+		source.Get<engine::scene::ImageGraph>(entity)->Inputs
+	);
+	CHECK(
+		engine::scene::ImageGraphContentName(restored, reopened).Text() ==
+		"imagegraph-instance://weather#mask"
+	);
+	const auto duplicate = engine::game::ReadInstanceDocument(restored, encoded, NULL_ENTITY, error);
+	CHECK(duplicate == NULL_ENTITY);
+	CHECK(
+		engine::scene::ImageGraphContentName(restored, reopened).Text() ==
+		"imagegraph-instance://weather#mask"
+	);
+}
 
 namespace {
 	// Everything a document can name has to be registered before one is read,

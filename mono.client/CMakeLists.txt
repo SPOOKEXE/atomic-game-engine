@@ -34,6 +34,7 @@ mono_add_library(client
 		# the render node kinds. Undeclared until v0.19, arriving through
 		# `Engine::render`.
 		Engine::graph
+		Engine::imagegraph
 
 		Engine::render
 

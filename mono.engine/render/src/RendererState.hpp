@@ -15,6 +15,7 @@
 // public header is what confines it to `src/`.
 
 #include "GpuHeap.hpp"
+#include "ImageGraphGpu.hpp"
 #include "IndexResidency.hpp"
 #include "InstanceResidency.hpp"
 #include "LodSelection.hpp"
@@ -87,6 +88,8 @@ namespace engine::render {
 		SDL_GPUDevice *Device = nullptr;
 		RenderStageProbe StageProbe;
 		DeviceCaps Caps;
+		ImageGraphGpuState ImageGraphs;
+		bool EnsureImageGraphPipelines();
 
 		using InstalledPipeline = engine::render::InstalledPipeline;
 		using PipelineCompilation = engine::render::PipelineCompilation;
@@ -1128,8 +1131,9 @@ namespace engine::render {
 		// Named resources can change without changing any submitted draw row.
 		// Active view scope for native environment, particle and ribbon texture bindings.
 		core::Name ActiveContentOwner;
+		core::Name ActiveImageGraphWorld;
 		static core::Name MeshContentOwner(core::Name name, core::Name owner);
-		static core::Name TextureContentOwner(core::Name name, core::Name owner);
+		static core::Name TextureContentOwner(core::Name name, core::Name owner, core::Name world = {});
 
 		uint64_t ResourceEpoch = 0;
 
@@ -1245,6 +1249,7 @@ namespace engine::render {
 		std::vector<const MeshEntry *> SlotMesh;
 		std::vector<core::Name> SlotTexture;
 		std::vector<core::Name> SlotContentOwner;
+		std::vector<core::Name> SlotImageGraphWorld;
 		std::vector<core::Name> SlotNormalMap;
 		std::vector<core::Name> SlotRoughnessMap;
 		std::vector<core::Name> SlotOcclusionMap;
@@ -1470,6 +1475,7 @@ namespace engine::render {
 			return SlotLod[next] == SlotLod[slot] && SlotMesh[next] == SlotMesh[slot] &&
 				   SlotTexture[next] == SlotTexture[slot] &&
 				   SlotContentOwner[next] == SlotContentOwner[slot] &&
+				   SlotImageGraphWorld[next] == SlotImageGraphWorld[slot] &&
 				   SlotNormalMap[next] == SlotNormalMap[slot] &&
 				   SlotRoughnessMap[next] == SlotRoughnessMap[slot] &&
 				   SlotOcclusionMap[next] == SlotOcclusionMap[slot] &&

@@ -295,6 +295,7 @@ TEST_CASE("a serialiser is not enough to cross, and the two that say so", "[repl
 	// them here is the whole of the wiring - `Authority::Survey` observes them.
 	CHECK(engine::replication::CannotBeSigned("scene.TextContent"));
 	CHECK(engine::replication::CannotBeSigned("scene.ShaderSource"));
+	CHECK(engine::replication::CannotBeSigned("scene.ImageGraph"));
 	CHECK(engine::replication::CannotBeSigned("gui.NodeCanvasNode"));
 	CHECK(engine::replication::CannotBeSigned("gui.NodeCanvasGroup"));
 	CHECK(engine::replication::CannotBeSigned("gui.VirtualCollection"));

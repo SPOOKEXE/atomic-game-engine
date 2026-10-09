@@ -1174,6 +1174,16 @@ namespace engine::render {
 		SDL_BindGPUIndexBuffer(pass, &index, SDL_GPU_INDEXELEMENTSIZE_16BIT);
 
 		auto *atlas = static_cast<SDL_GPUTexture *>(AtlasTexture);
+		const auto targetFormat = static_cast<SDL_GPUTextureFormat>(SwapchainFormat);
+		// Screen tint and blending use encoded values on UNORM attachments. Other
+		// target formats retain their existing hardware transfer or HDR semantics.
+		const bool encodedTarget = targetFormat == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM ||
+								   targetFormat == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM ||
+								   targetFormat == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UNORM ||
+								   targetFormat == SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM ||
+								   targetFormat == SDL_GPU_TEXTUREFORMAT_B5G6R5_UNORM ||
+								   targetFormat == SDL_GPU_TEXTUREFORMAT_B5G5R5A1_UNORM ||
+								   targetFormat == SDL_GPU_TEXTUREFORMAT_B4G4R4A4_UNORM;
 
 		// **Rebound per batch only when it changes.** A bind is cheap and a
 		// redundant one is not free; tracking the last one is four lines against
@@ -1244,6 +1254,7 @@ namespace engine::render {
 			}
 
 			SDL_GPUTexture *texture = atlas;
+			bool sampledSRGB = false;
 			if (batch.ShapedPage != UINT16_MAX && batch.ShapedPage < ShapedAtlasTextures.size()) {
 				texture = static_cast<SDL_GPUTexture *>(ShapedAtlasTextures[batch.ShapedPage]);
 			}
@@ -1258,6 +1269,7 @@ namespace engine::render {
 				);
 				if (found != ResolvedImages.end() && found->Value.Texture != nullptr) {
 					texture = static_cast<SDL_GPUTexture *>(found->Value.Texture);
+					sampledSRGB = found->Value.SampledSRGB;
 				} else {
 				}
 				// **An unresolved name falls back to the atlas**, which draws
@@ -1284,7 +1296,8 @@ namespace engine::render {
 				boundSampler = sampler;
 			}
 
-			const FragmentUniforms uniforms = FragmentUniformsFor(batch);
+			FragmentUniforms uniforms = FragmentUniformsFor(batch);
+			uniforms.MaskCount[2] = encodedTarget && sampledSRGB ? 1.0f : 0.0f;
 			SDL_PushGPUFragmentUniformData(
 				static_cast<SDL_GPUCommandBuffer *>(commandBuffer), 0, &uniforms, sizeof(uniforms)
 			);

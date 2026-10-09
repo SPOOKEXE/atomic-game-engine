@@ -25,6 +25,7 @@
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
@@ -2397,6 +2398,11 @@ declare task: {
 
 				out << "\tfunction GetAttribute(self, name: string): EngineAttribute?\n";
 				out << "\tfunction SetAttribute(self, name: string, value: EngineAttribute?): ()\n";
+				out << "\t-- ImageGraph overrides; nil restores the graph default.\n";
+				out << "\tfunction SetInput(self, name: string, value: (number | boolean | Color3 | "
+					   "string)?): ()\n";
+				out << "\tfunction GetInput(self, name: string): (number | boolean | Color3 | string)?\n";
+				out << "\tfunction GetImage(self, output: string?): string\n";
 				out << "\tfunction GetAttributes(self): { [string]: EngineAttribute }\n";
 				out << "\tfunction GetAttributeChangedSignal(self, name: string): "
 					   "PropertyChangedSignal\n";
@@ -4110,6 +4116,10 @@ declare const task: {
 				// closed set and for the same reason.
 				out << "\tGetAttribute(name: string): EngineAttribute | null;\n";
 				out << "\tSetAttribute(name: string, value: EngineAttribute | null): void;\n";
+				out << "\t/** ImageGraph overrides; null restores the graph default. */\n";
+				out << "\tSetInput(name: string, value: number | boolean | Color3 | string | null): void;\n";
+				out << "\tGetInput(name: string): number | boolean | Color3 | string | null;\n";
+				out << "\tGetImage(output?: string): string;\n";
 				out << "\tGetAttributes(): { [name: string]: EngineAttribute };\n";
 				out << "\tGetAttributeChangedSignal(name: string): PropertyChangedSignal;\n";
 
@@ -4394,6 +4404,7 @@ int main(int argc, char **argv) {
 	(void)engine::scene::LensShaderClass();
 	(void)engine::scene::EditableMeshClass();
 	(void)engine::scene::EditableImageClass();
+	(void)engine::scene::ImageGraphClass();
 
 	// The script classes too. A manifest that described `Part` and not `Script`
 	// would be describing what a script can *build* and not what a world can

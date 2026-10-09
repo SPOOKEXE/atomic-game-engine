@@ -427,6 +427,13 @@ imagegraph-bench samples="5":
     cmake --build --preset bench --target bench_imagegraph
     ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.evaluate --samples {{samples}}
 
+# grug measures cold, source-edit, control-edit and cache-hit work on real Vulkan.
+# timestamp cost and fence-completed latency stay separate. output stays on stdout.
+gpu-imagegraph-bench samples="1":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    MONO_GPU_IMAGEGRAPH_REPORT=1 ./.cache/build/bench/bench/bench_render --suite engine.render.bench.imagegraph_gpu --samples {{samples}}
+
 # Durable datastore cost for a complete snapshot, using a disposable SQLite file under the bench build.
 datastore-sqlite-bench samples="5":
     cmake --preset bench > /dev/null

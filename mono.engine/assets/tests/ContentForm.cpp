@@ -47,6 +47,8 @@ namespace {
 		{"pmx", ContentForm::Pmx, AssetKind::Mesh, true},
 		{"aanim", ContentForm::AAnim, AssetKind::Animation, false},
 		{"ashader", ContentForm::AShader, AssetKind::Shader, false},
+		{"imagegraph", ContentForm::ImageGraph, AssetKind::ImageGraph, true},
+		{"aimagegraph", ContentForm::AImageGraph, AssetKind::ImageGraph, false},
 
 		{"atex", ContentForm::ATex, AssetKind::Texture, false},
 		{"aseq", ContentForm::ASeq, AssetKind::Animation, false},

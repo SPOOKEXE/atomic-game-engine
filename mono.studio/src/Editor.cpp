@@ -13,6 +13,7 @@
 #include <engine/graph/Cull.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/imagegraph/Reference.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/Settings.hpp>
@@ -769,12 +770,18 @@ namespace studio {
 		}
 		GameInterface.SetImageSource([this](const engine::core::Name &name) {
 			engine::render::InterfaceImage image;
-			image.Texture = Renderer.TextureHandle(name);
+			engine::imagegraph::Reference reference;
+			const auto owner = engine::imagegraph::ParseReference(name.Text(), reference) &&
+									   reference.Kind == engine::imagegraph::ReferenceKind::Instance
+								   ? GameInterfaceImageOwner
+								   : engine::core::Name{};
+			image.Texture = Renderer.TextureHandle(name, owner);
+			image.SampledSRGB = Renderer.TextureSamplesSRGB(name, owner);
 			if (image.Texture == nullptr) {
 				return image;
 			}
-			image.Cell = Renderer.TextureCell(name, AnimationSeconds);
-			(void)Renderer.TextureSize(name, image.Width, image.Height);
+			image.Cell = Renderer.TextureCell(name, AnimationSeconds, owner);
+			(void)Renderer.TextureSize(name, image.Width, image.Height, owner);
 			return image;
 		});
 		GameInterface.SetViewportSource([this](engine::ecs::Entity instance) {
@@ -2776,6 +2783,7 @@ namespace studio {
 			Particles.Clear();
 		}
 
+		GameInterfaceImageOwner = shown.IsValid() ? Universe->NameOf(shown) : engine::core::Name{};
 		const bool viewportGuiPresent =
 			shown.IsValid() &&
 			ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown)) != ViewportGuiSource::None;
@@ -2786,7 +2794,12 @@ namespace studio {
 				// closes; only copied draw rows leave the boundary.
 				if (viewportGuiPresent && viewport < GuiLists.size() && target.IsValid()) {
 					(void)ViewportImages.Render(
-						Renderer, store, GuiLists[viewport].Commands(), PreviewSlot() + 1
+						Renderer,
+						store,
+						GuiLists[viewport].Commands(),
+						PreviewSlot() + 1,
+						{},
+						GameInterfaceImageOwner
 					);
 					// Canvas points and target pixels differ on a scaled display.
 					GameInterface.Submit(
@@ -2971,7 +2984,10 @@ namespace studio {
 										  !GuiLists[viewport].Commands().Commands.empty();
 		const uint64_t gameInterfaceSignature =
 			gameInterfacePresent
-				? engine::scene::MixSignature(GuiLists[viewport].Signature(), animationSignature)
+				? engine::scene::MixSignature(
+					  engine::scene::MixSignature(GuiLists[viewport].Signature(), animationSignature),
+					  Renderer.ResourceRevision()
+				  )
 				: 0;
 		engine::render::ScenePresentationSignatures scenePresentationSignatures;
 		{
@@ -2981,7 +2997,8 @@ namespace studio {
 				engine::render::ScenePresentationState{
 					.Lighting = visualLighting,
 					.Animation = animationSignature,
-					.Resources = VisualResourceRevision,
+					.Resources =
+						engine::scene::MixSignature(VisualResourceRevision, Renderer.ResourceRevision()),
 					.SurfaceBounces = visualSurfaceBounces,
 					.SurfaceLimit = visualSurfaceLimit,
 					.PostProcess = LastPostProcessShader,
@@ -2993,7 +3010,7 @@ namespace studio {
 		const engine::render::PresentationSignatures presentationSignatures{
 			.Scene = scenePresentationSignatures,
 			.GameInterface = gameInterfaceSignature,
-			.HostInterface = Interface.Signature(),
+			.HostInterface = engine::scene::MixSignature(Interface.Signature(), Renderer.ResourceRevision()),
 			.Viewport = engine::render::ViewportPresentationSignature(target.Width, target.Height),
 		};
 		engine::render::PresentationDamage damage =

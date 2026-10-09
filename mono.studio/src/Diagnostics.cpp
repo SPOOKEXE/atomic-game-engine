@@ -980,6 +980,40 @@ namespace studio {
 				ImGui::EndTable();
 			}
 
+			const double now = ImGui::GetTime();
+			if (now >= view.NextImageGraphProfile || view.NextImageGraphProfile - now > 0.25) {
+				view.ImageGraphProfile = Renderer.ImageGraphProfile();
+				view.NextImageGraphProfile = now + 0.25;
+			}
+			ImGui::Separator();
+			ImGui::Text("live image graphs (all worlds)");
+			ImGui::TextDisabled("lifetime traffic and sampled residency");
+			if (view.ImageGraphProfile.Evaluations == 0 && view.ImageGraphProfile.CacheHits == 0) {
+				ImGui::TextDisabled("writes n/a | hits n/a");
+			} else {
+				ImGui::Text(
+					"writes %" PRIu64 " | hits %" PRIu64,
+					view.ImageGraphProfile.Evaluations,
+					view.ImageGraphProfile.CacheHits
+				);
+			}
+			ImGui::Text(
+				"dispatches %" PRIu64 " | commands %" PRIu64,
+				view.ImageGraphProfile.ComputeDispatches,
+				view.ImageGraphProfile.CommandBuffers
+			);
+			ImGui::Text(
+				"allocated %" PRIu64 " B | copied %" PRIu64 " B | resident %" PRIu64 " B",
+				view.ImageGraphProfile.AllocatedBytes,
+				view.ImageGraphProfile.CopiedBytes,
+				view.ImageGraphProfile.ResidentBytes
+			);
+			if (view.ImageGraphProfile.HasGpuTimings) {
+				ImGui::Text("GPU %.3f us", view.ImageGraphProfile.GpuMicroseconds);
+			} else {
+				ImGui::TextDisabled("GPU timing unavailable");
+			}
+
 			ImGui::End();
 			return;
 		}

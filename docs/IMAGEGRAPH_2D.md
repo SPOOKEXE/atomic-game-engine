@@ -8,6 +8,15 @@ The game loads that texture without evaluating the graph. Graph outputs are
 display images; using a `.imagegraph` project as a numeric material map, such as
 a normal or roughness map, is refused.
 
+Live `.aimagegraph` use is a separate implemented path with named inputs and
+runtime image outputs. Signed headless Vulkan content/render integration,
+focused GPU tests, optimized profiling and real Studio checks have passed. The
+signed ImageLabel, portal ownership and adopted-texture checks have passed.
+Strict CI and full-physics CTest have no final result yet.
+See the [live ImageGraph guide](IMAGEGRAPH_LIVE.md) for its frozen document
+contract and current status. Static export remains the verified workflow
+described on this page.
+
 ## Studio
 
 Open **View > Image Composer**. The initial graph contains a white Solid node

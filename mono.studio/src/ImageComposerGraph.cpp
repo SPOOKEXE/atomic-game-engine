@@ -71,7 +71,12 @@ namespace studio {
 			std::visit(
 				[&](const auto &op) {
 					using T = std::decay_t<decltype(op)>;
-					if constexpr (std::is_same_v<T, Source>) Text(node, "path", op.Path);
+					if constexpr (std::is_same_v<T, Source>) {
+						Text(node, "path", op.Path);
+						auto &choice = node.Widgets["interpretation"];
+						choice.Kind = nodegraph::WidgetKind::Select;
+						choice.Text = op.Interpretation == SourceInterpretation::Colour ? "colour" : "data";
+					}
 					if constexpr (std::is_same_v<T, Solid> || std::is_same_v<T, Resize> ||
 								  std::is_same_v<T, Crop> || std::is_same_v<T, Transform>) {
 						Real(node, "width", op.Width);
@@ -170,9 +175,14 @@ namespace studio {
 				else if (chosen != "nearest")
 					return fail("unsupported sampling option");
 			}
-			if (node.Type == "image.source")
-				out = Source{Value(node, "path").Text};
-			else if (node.Type == "image.solid") {
+			if (node.Type == "image.source") {
+				const auto chosen = Value(node, "interpretation").Text;
+				if (chosen != "colour" && chosen != "data") return fail("unsupported source interpretation");
+				out = Source{
+					Value(node, "path").Text,
+					chosen == "colour" ? SourceInterpretation::Colour : SourceInterpretation::Data
+				};
+			} else if (node.Type == "image.solid") {
 				const auto colour = Value(node, "colour").Tint;
 				const std::array<float, 4> rgba{colour.R, colour.G, colour.B, colour.A};
 				Solid solid{width, height};
@@ -256,7 +266,13 @@ namespace studio {
 		const auto filter = [] {
 			return nodegraph::Select("filter", "Sampling", {"nearest", "bilinear"}, 0);
 		};
-		registerType("image.source", "Source Image", 0, {nodegraph::Text("path", "Source", "source.png")});
+		registerType(
+			"image.source",
+			"Source Image",
+			0,
+			{nodegraph::Text("path", "Source", "source.png"),
+			 nodegraph::Select("interpretation", "Interpretation", {"colour", "data"}, 0)}
+		);
 		auto solid = dimensions();
 		nodegraph::WidgetSpec colour;
 		colour.Key = "colour";
@@ -376,6 +392,79 @@ namespace studio {
 		out = std::move(candidate);
 		return true;
 	}
+	bool SaveImageComposerDocument(const ImageComposerState &state, Document &out, Diagnostic &diagnostic) {
+		Document candidate;
+		if (!SaveImageComposerGraph(state.Graph, state.Outputs, candidate, diagnostic)) return false;
+		candidate.Parameters = state.Parameters;
+		candidate.Bindings = state.Bindings;
+		Plan plan;
+		if (!Compile(candidate, plan, diagnostic)) return false;
+		out = std::move(candidate);
+		return true;
+	}
+	bool BindImageComposerInput(
+		ImageComposerState &state,
+		nodegraph::NodeId id,
+		std::string_view property,
+		std::string_view input,
+		Diagnostic &diagnostic
+	) {
+		AssignImageComposerIdentities(state.Graph, state.Outputs);
+		const auto *node = state.Graph.Find(id);
+		if (node == nullptr || input.empty()) {
+			diagnostic = {{}, "select a node and name its input"};
+			return false;
+		}
+		Operation operation;
+		if (!ReadOperation(*node, operation, diagnostic)) return false;
+		const int kind = engine::imagegraph::PropertyType(operation, property);
+		if (kind < 0) {
+			diagnostic = {Id(*node), "property cannot be bound"};
+			return false;
+		}
+		const auto value = Value(*node, std::string(property));
+		InputValue initial;
+		switch (kind) {
+		case 0:
+			initial = value.Number;
+			break;
+		case 1:
+			initial = value.Flag;
+			break;
+		case 2: {
+			std::array<uint8_t, 4> colour{};
+			const std::array<float, 4> rgba{value.Tint.R, value.Tint.G, value.Tint.B, value.Tint.A};
+			for (size_t channel = 0; channel < colour.size(); ++channel)
+				colour[channel] = static_cast<uint8_t>(std::lround(rgba[channel] * 255.f));
+			initial = colour;
+			break;
+		}
+		case 3:
+			initial = value.Text;
+			break;
+		default:
+			return false;
+		}
+		Document candidate;
+		if (!SaveImageComposerDocument(state, candidate, diagnostic)) return false;
+		if (std::none_of(
+				candidate.Parameters.begin(), candidate.Parameters.end(), [&](const auto &parameter) {
+					return parameter.Name == input;
+				}
+			))
+			candidate.Parameters.push_back({std::string(input), std::move(initial)});
+		std::erase_if(candidate.Bindings, [&](const auto &binding) {
+			return binding.Node == Id(*node) && binding.Property == property;
+		});
+		candidate.Bindings.push_back({Id(*node), std::string(property), std::string(input)});
+		Plan plan;
+		if (!Compile(candidate, plan, diagnostic)) return false;
+		state.Parameters = std::move(candidate.Parameters);
+		state.Bindings = std::move(candidate.Bindings);
+		CommitImageComposer(state);
+		return true;
+	}
+
 	bool SetImageComposerOutput(ImageComposerState &state, std::string_view name, nodegraph::NodeId id) {
 		const auto *node = state.Graph.Find(id);
 		if (node == nullptr || name.empty()) return false;

@@ -243,7 +243,7 @@ namespace engine::replication {
 			   component == "gui.NodeCanvasGroup" || component == "gui.VirtualCollection" ||
 			   component == "script.Program" || component == "scene.EditableMesh" ||
 			   component == "scene.EditableImage" || component == "scene.TextContent" ||
-			   component == "scene.ShaderSource";
+			   component == "scene.ShaderSource" || component == "scene.ImageGraph";
 	}
 
 	bool LocalToTheClient(std::string_view component) {

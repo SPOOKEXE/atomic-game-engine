@@ -58,6 +58,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] Add Studio Image Composer editing, cached previews, undo/redo, save/open and ordinary `.atex` export; add `.imagegraph` baking to assetc.
 - [x] Verify exported images through ordinary signed content delivery in `ParticleEmitter` and `ImageLabel`, plus CPU, editor and sanitizer checks.
 
+- [_] Define strict document v2 named parameters and bindings, backward v1 reads, pure input resolution and bounded selected-output preparation for the seven 2D nodes.
+- [_] Add the keyed L7 per-world `ImageGraph` owner and Luau `SetInput`, `GetInput` and `GetImage` paths using stable imagegraph references.
+- [_] Add L12 GPU evaluation, dirty-cone caching and transactional publication through ordinary `TextureTable` images; preserve last-good output on refusal.
+- [_] Add Studio live inputs, bindings, GPU preview and publish/apply, then verify signed cooking, real-device parity, consumers, profiling, server safety, layers, CI and docs.
+
 The accepted implementation is `v0.26.0-imagegraph-minimal`. The preserved full Composer work remains on `v0.26.5-imagegraph-full` for user review.
 
 ### v0.27

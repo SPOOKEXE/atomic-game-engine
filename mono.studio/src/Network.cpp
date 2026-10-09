@@ -41,7 +41,9 @@
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/Uploader.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/imagegraph/Reference.hpp>
 #include <engine/render/Animation.hpp>
+#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
@@ -339,6 +341,7 @@ namespace studio {
 			}
 			DrainContent();
 		}
+		(void)RefreshLiveImageGraphs();
 		PumpAssetExport();
 
 		if (ContentUploads) {
@@ -498,7 +501,18 @@ namespace studio {
 			ContentBudget.Spend(asset->Bytes.size());
 			engine::core::ByteReader reader(asset->Bytes);
 
-			if (asset->Kind == engine::assets::AssetKind::Mesh) {
+			if (asset->Kind == engine::assets::AssetKind::ImageGraph) {
+				engine::imagegraph::Diagnostic diagnostic;
+				const std::string_view encoded(
+					reinterpret_cast<const char *>(asset->Bytes.data()), asset->Bytes.size()
+				);
+				if (ImageGraphContent.Admit(asset->Name, asset->Root.ToHex(), encoded, diagnostic)) {
+					ContentResident.Remember(name, asset->Kind, asset->Root);
+				} else if (!diagnostic.Message.empty()) {
+					RecordContentAssetFailure(name);
+					ENGINE_WARN("content: graph {} refused: {}", asset->Name, diagnostic.Message);
+				}
+			} else if (asset->Kind == engine::assets::AssetKind::Mesh) {
 				engine::assets::MeshData mesh;
 				if (!engine::assets::Mesh::Read(reader, mesh)) {
 					RecordContentAssetFailure(name);
@@ -521,6 +535,7 @@ namespace studio {
 					);
 					VisualResourceRevision++;
 					ContentMeshes++;
+					ContentScannedAtRevision.clear();
 					ContentResident.Remember(name, asset->Kind, asset->Root);
 
 					// **The sheets its submeshes name, recorded where they are
@@ -759,7 +774,16 @@ namespace studio {
 						return;
 					}
 					ContentScannedAtRevision[world.Index] = revision;
-					client::CollectWantedContent(store, wanted);
+					std::vector<engine::core::Name> references;
+					client::CollectWantedContent(store, references);
+					auto &graphs = ImageGraphReferences[world.Index];
+					graphs.clear();
+					for (const auto name : references) {
+						if (engine::imagegraph::IsReference(name.Text()))
+							graphs.push_back(name);
+						else
+							wanted.push_back(name);
+					}
 				});
 			});
 		}
@@ -794,6 +818,13 @@ namespace studio {
 		// A built-in now enters `ContentAsked` on its first sight, which is six
 		// extra ids and no change in what is fetched: the check below still
 		// refuses it before anything is requested.
+		if (asset.IsValid() && engine::imagegraph::IsReference(asset.Text())) {
+			engine::imagegraph::Reference reference;
+			if (!engine::imagegraph::ParseReference(asset.Text(), reference) ||
+				reference.Kind != engine::imagegraph::ReferenceKind::Asset)
+				return false;
+			return RequestContentAsset(engine::core::Name(reference.Name));
+		}
 		if (!ContentClient || !asset.IsValid() || !ContentAsked.insert(asset.Id()).second) {
 			return false;
 		}
@@ -830,6 +861,171 @@ namespace studio {
 		// request finishing rather than on it succeeding.
 		Renderer.ExpectTexture(asset);
 		return true;
+	}
+
+	const engine::imagegraph::Document *Editor::FindLiveImageGraph(engine::core::Name asset) const {
+		const auto *record = ImageGraphContent.Find(asset.Text());
+		return record ? &record->Authored : nullptr;
+	}
+
+	bool Editor::RefreshLiveImageGraphs() {
+		ENGINE_PROFILE_CAT("content.imagegraphs", engine::core::ProfileCategory::Assets);
+		using namespace engine;
+		bool changed = false;
+		struct Demand {
+			core::Name Owner;
+			core::Name Name;
+			core::Name Asset;
+			std::vector<core::Name> Outputs;
+			std::vector<imagegraph::InputOverride> Inputs;
+			uint64_t Revision = 0;
+		};
+		std::vector<Demand> demands;
+		std::vector<uint32_t> openWorlds;
+		for (auto &[key, applied] : AppliedImageGraphs)
+			applied.Seen = false;
+		Universe->EachWorld([&](world::WorldId world) {
+			openWorlds.push_back(world.Index);
+			const auto owner = Universe->NameOf(world);
+			const auto references = ImageGraphReferences.find(world.Index);
+			if (references != ImageGraphReferences.end()) {
+				for (const auto uri : references->second) {
+					imagegraph::Reference reference;
+					if (!imagegraph::ParseReference(uri.Text(), reference) ||
+						reference.Kind != imagegraph::ReferenceKind::Asset)
+						continue;
+					const core::Name graphName("imagegraph://" + reference.Name);
+					auto found = std::find_if(demands.begin(), demands.end(), [&](const Demand &demand) {
+						return !demand.Owner.IsValid() && demand.Name == graphName;
+					});
+					if (found == demands.end()) {
+						demands.push_back({{}, graphName, core::Name(reference.Name), {uri}, {}, 0});
+					} else
+						found->Outputs.push_back(uri);
+				}
+			}
+			// Copy controls while entering the world. GPU work runs after leaving it.
+			Universe->Enter(world, [&](ecs::Store &store) {
+				store.Observe<scene::ImageGraph>();
+				const uint64_t inputVersion = store.ComponentChangeVersion<scene::ImageGraph>();
+				store.Each<const scene::ImageGraph>([&](ecs::Entity, const scene::ImageGraph &graph) {
+					if (!imagegraph::IsReferenceToken(graph.InstanceKey.Text()) ||
+						!imagegraph::IsRuntimeAsset(graph.Graph.Text()))
+						return;
+					Demand demand{
+						owner,
+						core::Name("imagegraph-instance://" + std::string(graph.InstanceKey.Text())),
+						graph.Graph,
+						{},
+						{},
+						inputVersion
+					};
+					if (references != ImageGraphReferences.end()) {
+						for (const auto uri : references->second) {
+							imagegraph::Reference reference;
+							if (imagegraph::ParseReference(uri.Text(), reference) &&
+								reference.Kind == imagegraph::ReferenceKind::Instance &&
+								reference.Name == graph.InstanceKey.Text())
+								demand.Outputs.push_back(uri);
+						}
+					}
+					if (demand.Outputs.empty()) return;
+					for (const auto &input : graph.Inputs) {
+						imagegraph::InputValue value;
+						switch (input.Kind) {
+						case scene::ImageGraphInputKind::Number:
+							value = input.Number;
+							break;
+						case scene::ImageGraphInputKind::Boolean:
+							value = input.Boolean;
+							break;
+						case scene::ImageGraphInputKind::Colour:
+							value = input.Colour;
+							break;
+						case scene::ImageGraphInputKind::String:
+							value = input.String;
+							break;
+						}
+						demand.Inputs.push_back({std::string(input.Name.Text()), std::move(value)});
+					}
+					demands.push_back(std::move(demand));
+				});
+			});
+		});
+		std::erase_if(ImageGraphReferences, [&](const auto &entry) {
+			return std::find(openWorlds.begin(), openWorlds.end(), entry.first) == openWorlds.end();
+		});
+		for (Demand &demand : demands) {
+			std::sort(demand.Outputs.begin(), demand.Outputs.end(), [](auto a, auto b) {
+				return a.Id() < b.Id();
+			});
+			demand.Outputs.erase(
+				std::unique(demand.Outputs.begin(), demand.Outputs.end()), demand.Outputs.end()
+			);
+			(void)RequestContentAsset(demand.Asset);
+			const uint64_t key = (uint64_t(demand.Owner.Id()) << 32) | demand.Name.Id();
+			auto &applied = AppliedImageGraphs[key];
+			applied.Seen = true;
+			applied.Owner = demand.Owner;
+			applied.Name = demand.Name;
+			const auto *record = ImageGraphContent.Find(demand.Asset.Text());
+			if (!record || std::count_if(demands.begin(), demands.end(), [&](const Demand &other) {
+							   return other.Owner == demand.Owner && other.Name == demand.Name;
+						   }) != 1)
+				continue;
+
+			imagegraph::Diagnostic diagnostic;
+			if (applied.Asset != demand.Asset || applied.ContentRevision != record->Revision ||
+				applied.InputRevision != demand.Revision || applied.Outputs != demand.Outputs) {
+				imagegraph::Document resolved;
+				std::vector<std::string> sources;
+				std::vector<std::string_view> selectedOutputs;
+				for (const auto uri : demand.Outputs) {
+					const auto text = uri.Text();
+					selectedOutputs.push_back(text.substr(text.find('#') + 1));
+				}
+				if (!imagegraph::ResolveInputs(record->Authored, demand.Inputs, resolved, diagnostic) ||
+					!imagegraph::RuntimeSources(resolved, sources, diagnostic, selectedOutputs))
+					continue;
+				for (const auto &source : sources) {
+					const core::Name texture(source);
+					(void)RequestContentAsset(texture);
+				}
+				// Each output admits its own sources; an unavailable cone must not stall another.
+				std::vector<render::ImageGraphSourceBinding> bindings;
+				for (const auto &node : resolved.Nodes) {
+					const auto *source = std::get_if<imagegraph::Source>(&node.Value);
+					if (!source || std::any_of(bindings.begin(), bindings.end(), [&](const auto &binding) {
+							return binding.Path == source->Path &&
+								   binding.Interpretation == source->Interpretation;
+						}))
+						continue;
+					bindings.push_back({source->Path, core::Name(source->Path), {}, source->Interpretation});
+				}
+				if (!Renderer.SetImageGraph(demand.Owner, demand.Name, resolved, bindings, diagnostic))
+					continue;
+				applied.Asset = demand.Asset;
+				applied.ContentRevision = record->Revision;
+				applied.InputRevision = demand.Revision;
+				applied.Outputs = demand.Outputs;
+			}
+			for (const auto output : demand.Outputs) {
+				imagegraph::Reference reference;
+				if (!imagegraph::ParseReference(output.Text(), reference)) continue;
+				if (Renderer.EvaluateImageGraph(
+						demand.Owner, demand.Name, reference.Output, output, diagnostic
+					) == render::ImageGraphEvaluation::Updated)
+					changed = true;
+			}
+		}
+		std::erase_if(AppliedImageGraphs, [&](const auto &entry) {
+			const auto &applied = entry.second;
+			if (applied.Seen) return false;
+			changed = Renderer.DropImageGraph(applied.Owner, applied.Name) || changed;
+			return true;
+		});
+		if (changed) ++VisualResourceRevision;
+		return changed;
 	}
 
 	void Editor::UploadStore() {

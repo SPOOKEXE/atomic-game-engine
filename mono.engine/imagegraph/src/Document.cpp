@@ -1,4 +1,4 @@
-#include <engine/imagegraph/Document.hpp>
+#include "Inputs.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -53,6 +53,9 @@ namespace engine::imagegraph {
 				[](const auto &value) -> std::string {
 					using T = std::decay_t<decltype(value)>;
 					if constexpr (std::is_same_v<T, Source>) {
+						if (value.Interpretation != SourceInterpretation::Colour &&
+							value.Interpretation != SourceInterpretation::Data)
+							return "unsupported source interpretation";
 						if (!SourceValid(value.Path))
 							return "source must use a bounded relative path without parent segments";
 					} else if constexpr (std::is_same_v<T, Solid> || std::is_same_v<T, Resize> ||
@@ -126,10 +129,21 @@ namespace engine::imagegraph {
 			if (name == "bilinear") return Sampling::Bilinear;
 			throw std::runtime_error("unsupported sampling filter");
 		}
-		Operation DecodeOperation(std::string_view kind, const json &properties) {
+		Operation DecodeOperation(std::string_view kind, const json &properties, bool live) {
 			if (kind == "image.source") {
-				Fields(properties, {"path"});
-				return Source{properties.at("path").get<std::string>()};
+				if (live)
+					Fields(properties, {"path", "interpretation"});
+				else
+					Fields(properties, {"path"});
+				Source source{properties.at("path").get<std::string>()};
+				if (live) {
+					const auto name = properties.at("interpretation").get<std::string>();
+					if (name != "colour" && name != "data")
+						throw std::runtime_error("unsupported source interpretation");
+					source.Interpretation =
+						name == "colour" ? SourceInterpretation::Colour : SourceInterpretation::Data;
+				}
+				return source;
 			}
 			if (kind == "image.solid") {
 				Fields(properties, {"width", "height", "colour"});
@@ -195,11 +209,17 @@ namespace engine::imagegraph {
 			}
 			throw std::runtime_error("unsupported node kind: " + std::string(kind));
 		}
-		json EncodeOperation(const Operation &operation) {
+		json EncodeOperation(const Operation &operation, bool live) {
 			return std::visit(
-				[](const auto &value) -> json {
+				[live](const auto &value) -> json {
 					using T = std::decay_t<decltype(value)>;
-					if constexpr (std::is_same_v<T, Source>) return {{"path", value.Path}};
+					if constexpr (std::is_same_v<T, Source>) {
+						json result{{"path", value.Path}};
+						if (live)
+							result["interpretation"] =
+								value.Interpretation == SourceInterpretation::Colour ? "colour" : "data";
+						return result;
+					}
 					if constexpr (std::is_same_v<T, Solid>)
 						return {{"width", value.Width}, {"height", value.Height}, {"colour", value.Colour}};
 					if constexpr (std::is_same_v<T, Resize>)
@@ -259,7 +279,8 @@ namespace engine::imagegraph {
 	}
 
 	bool Image::IsValid() const noexcept {
-		return Dimensions(Width, Height) && Pixels.size() == uint64_t(Width) * Height * 4;
+		return (Space == OutputSpace::SRGB || Space == OutputSpace::Linear) && Dimensions(Width, Height) &&
+			   Pixels.size() == uint64_t(Width) * Height * 4;
 	}
 	std::string_view Kind(const Operation &operation) noexcept {
 		constexpr std::array<std::string_view, 7> kinds{
@@ -282,7 +303,7 @@ namespace engine::imagegraph {
 		}
 		return {};
 	}
-	bool Compile(const Document &document, Plan &out, Diagnostic &diagnostic) {
+	bool detail::CompileResolved(const Document &document, Plan &out, Diagnostic &diagnostic) {
 		if (document.Nodes.empty() || document.Nodes.size() > Limits::MaximumNodes ||
 			document.Outputs.empty() || document.Outputs.size() > Limits::MaximumOutputs)
 			return Fail(diagnostic, {}, "graph node or output count exceeds limits");
@@ -326,6 +347,8 @@ namespace engine::imagegraph {
 			}
 			std::unordered_set<std::string_view> outputs;
 			for (const auto &output : document.Outputs) {
+				if (output.Space != OutputSpace::SRGB && output.Space != OutputSpace::Linear)
+					return Fail(diagnostic, output.Node, "unsupported output space");
 				if (!NameValid(output.Name) || !NameValid(output.Node) ||
 					!outputs.emplace(output.Name).second)
 					return Fail(diagnostic, output.Node, "output identity is empty, invalid or duplicated");
@@ -383,9 +406,11 @@ namespace engine::imagegraph {
 				return true;
 			});
 			if (duplicateField) return Fail(diagnostic, {}, "duplicate project object field");
-			Fields(root, {"version", "nodes", "outputs"});
-			if (Integer(root.at("version"), 1, 1) != 1)
-				return Fail(diagnostic, {}, "unsupported project version");
+			const bool live = Integer(root.at("version"), 1, 2) == 2;
+			if (live)
+				Fields(root, {"version", "nodes", "outputs", "parameters", "bindings"});
+			else
+				Fields(root, {"version", "nodes", "outputs"});
 			const auto &nodes = root.at("nodes");
 			const auto &outputs = root.at("outputs");
 			if (!nodes.is_array() || nodes.empty() || nodes.size() > Limits::MaximumNodes ||
@@ -397,8 +422,9 @@ namespace engine::imagegraph {
 				nodeId = encodedNode.at("id").get<std::string>();
 				Node node;
 				node.Id = nodeId;
-				node.Value =
-					DecodeOperation(encodedNode.at("kind").get<std::string>(), encodedNode.at("properties"));
+				node.Value = DecodeOperation(
+					encodedNode.at("kind").get<std::string>(), encodedNode.at("properties"), live
+				);
 				const auto &inputs = encodedNode.at("inputs");
 				const auto &position = encodedNode.at("position");
 				if (!inputs.is_array() || inputs.size() > 2 || !position.is_array() || position.size() != 2)
@@ -409,10 +435,59 @@ namespace engine::imagegraph {
 				document.Nodes.push_back(std::move(node));
 			}
 			for (const auto &encodedOutput : outputs) {
-				Fields(encodedOutput, {"name", "node"});
-				document.Outputs.push_back(
-					{encodedOutput.at("name").get<std::string>(), encodedOutput.at("node").get<std::string>()}
-				);
+				if (live)
+					Fields(encodedOutput, {"name", "node", "space"});
+				else
+					Fields(encodedOutput, {"name", "node"});
+				Output output{
+					encodedOutput.at("name").get<std::string>(), encodedOutput.at("node").get<std::string>()
+				};
+				if (live) {
+					const auto space = encodedOutput.at("space").get<std::string>();
+					if (space != "srgb" && space != "linear")
+						throw std::runtime_error("unsupported output space");
+					output.Space = space == "srgb" ? OutputSpace::SRGB : OutputSpace::Linear;
+				}
+				document.Outputs.push_back(std::move(output));
+			}
+			if (live) {
+				const auto &parameters = root.at("parameters");
+				const auto &bindings = root.at("bindings");
+				if (!parameters.is_array() || parameters.size() > Limits::MaximumParameters ||
+					!bindings.is_array() || bindings.size() > Limits::MaximumBindings)
+					throw std::runtime_error("input or binding count exceeds limits");
+				for (const auto &parameter : parameters) {
+					Fields(parameter, {"name", "type", "default"});
+					const auto type = parameter.at("type").get<std::string>();
+					const auto &value = parameter.at("default");
+					InputValue decoded;
+					if (type == "number")
+						decoded = Number(value);
+					else if (type == "boolean")
+						decoded = value.get<bool>();
+					else if (type == "string")
+						decoded = value.get<std::string>();
+					else if (type == "colour") {
+						if (!value.is_array() || value.size() != 4)
+							throw std::runtime_error("input colour requires four channels");
+						std::array<uint8_t, 4> colour{};
+						for (size_t channel = 0; channel < 4; ++channel)
+							colour[channel] = static_cast<uint8_t>(Integer(value[channel], 0, 255));
+						decoded = colour;
+					} else
+						throw std::runtime_error("unsupported input type");
+					document.Parameters.push_back(
+						{parameter.at("name").get<std::string>(), std::move(decoded)}
+					);
+				}
+				for (const auto &binding : bindings) {
+					Fields(binding, {"node", "property", "input"});
+					document.Bindings.push_back(
+						{binding.at("node").get<std::string>(),
+						 binding.at("property").get<std::string>(),
+						 binding.at("input").get<std::string>()}
+					);
+				}
 			}
 			Plan plan;
 			if (!Compile(document, plan, diagnostic)) return false;
@@ -426,18 +501,59 @@ namespace engine::imagegraph {
 	bool Write(const Document &document, std::string &out, Diagnostic &diagnostic) {
 		Plan plan;
 		if (!Compile(document, plan, diagnostic)) return false;
+		std::string_view activeNode;
 		try {
-			json root{{"version", 1}, {"nodes", json::array()}, {"outputs", json::array()}};
-			for (const auto &node : document.Nodes)
+			const bool live =
+				!document.Parameters.empty() || !document.Bindings.empty() ||
+				std::any_of(
+					document.Nodes.begin(),
+					document.Nodes.end(),
+					[](const Node &node) {
+						const auto *source = std::get_if<Source>(&node.Value);
+						return source && source->Interpretation != SourceInterpretation::Colour;
+					}
+				) ||
+				std::any_of(document.Outputs.begin(), document.Outputs.end(), [](const Output &output) {
+					return output.Space != OutputSpace::SRGB;
+				});
+			json root{{"version", live ? 2 : 1}, {"nodes", json::array()}, {"outputs", json::array()}};
+			for (const auto &node : document.Nodes) {
+				activeNode = node.Id;
+				json properties = EncodeOperation(node.Value, live);
+				// A binding may replace an invalid fallback in a transient snapshot. Never
+				// save a fallback that the strict project reader could not reconstruct.
+				(void)DecodeOperation(Kind(node.Value), properties, live);
 				root["nodes"].push_back(
 					{{"id", node.Id},
 					 {"kind", Kind(node.Value)},
 					 {"inputs", node.Inputs},
 					 {"position", node.Position},
-					 {"properties", EncodeOperation(node.Value)}}
+					 {"properties", std::move(properties)}}
 				);
-			for (const auto &output : document.Outputs)
-				root["outputs"].push_back({{"name", output.Name}, {"node", output.Node}});
+			}
+			for (const auto &output : document.Outputs) {
+				json encoded{{"name", output.Name}, {"node", output.Node}};
+				if (live) encoded["space"] = output.Space == OutputSpace::SRGB ? "srgb" : "linear";
+				root["outputs"].push_back(std::move(encoded));
+			}
+			if (live) {
+				root["parameters"] = json::array();
+				root["bindings"] = json::array();
+				constexpr std::array<std::string_view, 4> types{"number", "boolean", "colour", "string"};
+				for (const auto &parameter : document.Parameters) {
+					json value =
+						std::visit([](const auto &input) -> json { return input; }, parameter.Default);
+					root["parameters"].push_back(
+						{{"name", parameter.Name},
+						 {"type", types[parameter.Default.index()]},
+						 {"default", std::move(value)}}
+					);
+				}
+				for (const auto &binding : document.Bindings)
+					root["bindings"].push_back(
+						{{"node", binding.Node}, {"property", binding.Property}, {"input", binding.Input}}
+					);
+			}
 			std::string encoded = root.dump(2);
 			if (encoded.size() > Limits::MaximumDocumentBytes)
 				return Fail(diagnostic, {}, "encoded project exceeds byte limit");
@@ -445,7 +561,7 @@ namespace engine::imagegraph {
 			diagnostic = {};
 			return true;
 		} catch (const std::exception &error) {
-			return Fail(diagnostic, {}, error.what());
+			return Fail(diagnostic, activeNode, error.what());
 		}
 	}
 }

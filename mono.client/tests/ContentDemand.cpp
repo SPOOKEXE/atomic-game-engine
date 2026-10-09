@@ -24,7 +24,10 @@
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/ImageGraph.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Materials.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
@@ -146,6 +149,40 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 	CHECK(Holds(wanted, "oak.amat"));
 	CHECK(Holds(wanted, "theme.mp3"));
 	CHECK(Holds(wanted, "walk.aanim"));
+}
+
+TEST_CASE(
+	"scrollbar and LOD image references join demand and change its revision", "[client][contentdemand]"
+) {
+	Store store = Fresh("contentdemand.additional.images");
+	const auto scroll = store.Create();
+	engine::gui::Scrolling scrolling;
+	scrolling.TopImage = Name("imagegraph://scroll.aimagegraph#top");
+	scrolling.MidImage = Name("imagegraph://scroll.aimagegraph#middle");
+	scrolling.BottomImage = Name("imagegraph://scroll.aimagegraph#bottom");
+	store.Set(scroll, scrolling);
+	const auto automatic = store.Create();
+	engine::scene::LODAuto generated;
+	generated.Billboard = Name("imagegraph://lod.aimagegraph#automatic");
+	store.Set(automatic, generated);
+	const auto custom = store.Create();
+	engine::scene::LODCustom authored;
+	authored.Billboard = Name("imagegraph://lod.aimagegraph#custom");
+	store.Set(custom, authored);
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+	CHECK(wanted.size() == 5);
+	CHECK(Holds(wanted, "imagegraph://scroll.aimagegraph#top"));
+	CHECK(Holds(wanted, "imagegraph://scroll.aimagegraph#middle"));
+	CHECK(Holds(wanted, "imagegraph://scroll.aimagegraph#bottom"));
+	CHECK(Holds(wanted, "imagegraph://lod.aimagegraph#automatic"));
+	CHECK(Holds(wanted, "imagegraph://lod.aimagegraph#custom"));
+	const auto before = client::WantedContentRevision(store);
+	store.GetMutable<engine::gui::Scrolling>(scroll)->MidImage = Name("replacement.atex");
+	const auto changed = client::WantedContentRevision(store);
+	CHECK(changed != before);
+	store.GetMutable<engine::scene::LODCustom>(custom)->Billboard = Name("replacement-lod.atex");
+	CHECK(client::WantedContentRevision(store) != changed);
 }
 
 TEST_CASE("a world names nothing it does not use", "[client][contentdemand]") {
@@ -350,4 +387,47 @@ TEST_CASE(
 	client::CollectWantedContent(store, wanted);
 	CHECK(Holds(wanted, "replacement.ashader"));
 	CHECK_FALSE(Holds(wanted, "material.ashader"));
+}
+
+TEST_CASE("mesh submesh image references survive reconstruction of demand", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.mesh.images");
+	const auto entity = store.Create();
+	engine::scene::Visual visual;
+	visual.Mesh = Name("mesh.amesh");
+	store.Set(entity, visual);
+	const Name sheet("imagegraph://material.aimagegraph#image");
+	REQUIRE(engine::scene::RecordMesh(store, visual.Mesh, 2, std::span(&sheet, 1)));
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+	CHECK(Holds(wanted, "imagegraph://material.aimagegraph#image"));
+	wanted.clear();
+	client::CollectWantedContent(store, wanted);
+	CHECK(Holds(wanted, "imagegraph://material.aimagegraph#image"));
+}
+
+TEST_CASE(
+	"image graph instance source assets and wire input replacements invalidate demand",
+	"[client][contentdemand]"
+) {
+	Store store = Fresh("contentdemand.graph.instance");
+	const auto entity = store.Create();
+	engine::scene::ImageGraph graph;
+	graph.InstanceKey = Name("instance");
+	graph.Graph = Name("live.aimagegraph");
+	store.Set(entity, graph);
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+	CHECK(Holds(wanted, "live.aimagegraph"));
+	const auto before = client::WantedContentRevision(store);
+	graph.Inputs.push_back(
+		{.Name = Name("opacity"),
+		 .Kind = engine::scene::ImageGraphInputKind::Number,
+		 .Number = 0.25,
+		 .Boolean = false,
+		 .Colour = {},
+		 .String = {}}
+	);
+	store.Set(entity, graph);
+	CHECK(graph.Revision == 0);
+	CHECK(client::WantedContentRevision(store) != before);
 }

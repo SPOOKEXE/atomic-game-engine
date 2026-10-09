@@ -147,6 +147,7 @@ namespace client {
 				const auto owner = Universe_->NameOf(world);
 				render::InterfaceImage image;
 				image.Texture = Renderer.TextureHandle(name, owner);
+				image.SampledSRGB = Renderer.TextureSamplesSRGB(name, owner);
 				image.Cell = Renderer.TextureCell(name, captured->Frame.Seconds, owner);
 				Renderer.TextureSize(name, image.Width, image.Height, owner);
 				return image;

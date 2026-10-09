@@ -3268,10 +3268,13 @@ namespace engine::render {
 			}
 			frame.InterfaceReady = state.Render.InitialiseInterface(frame.Interface);
 			frame.Interface.SetImageSource([&state, source = &frame](const core::Name &name) {
+				const core::Name owner =
+					name.Text().starts_with("imagegraph-instance://") ? state.OwnerName : state.ContentOwner;
 				InterfaceImage image;
-				image.Texture = state.Render.TextureHandle(name, state.ContentOwner);
-				image.Cell = state.Render.TextureCell(name, source->PresentationSeconds, state.ContentOwner);
-				state.Render.TextureSize(name, image.Width, image.Height, state.ContentOwner);
+				image.Texture = state.Render.TextureHandle(name, owner);
+				image.SampledSRGB = state.Render.RendererRef().TextureSamplesSRGB(name, owner);
+				image.Cell = state.Render.TextureCell(name, source->PresentationSeconds, owner);
+				state.Render.TextureSize(name, image.Width, image.Height, owner);
 				return image;
 			});
 		}

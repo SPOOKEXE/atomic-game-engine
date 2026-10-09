@@ -1,3 +1,4 @@
+#include "Execution.hpp"
 #include "Pixels.hpp"
 
 #include <engine/core/Metrics.hpp>
@@ -15,27 +16,6 @@ namespace engine::imagegraph {
 			diagnostic = {std::string(node.substr(0, 128)), std::string(message.substr(0, 4096))};
 			return false;
 		}
-		std::pair<uint32_t, uint32_t> Extent(const Operation &operation, const Image *input) {
-			return std::visit(
-				[&](const auto &value) -> std::pair<uint32_t, uint32_t> {
-					using T = std::decay_t<decltype(value)>;
-					if constexpr (std::is_same_v<T, Solid> || std::is_same_v<T, Resize> ||
-								  std::is_same_v<T, Crop> || std::is_same_v<T, Transform>)
-						return {value.Width, value.Height};
-					else
-						return {input->Width, input->Height};
-				},
-				operation
-			);
-		}
-		uint64_t WorkPerPixel(const Operation &operation) {
-			if (std::holds_alternative<Blend>(operation)) return 2;
-			if (const auto *resize = std::get_if<Resize>(&operation))
-				return resize->Filter == Sampling::Bilinear ? 4 : 1;
-			if (const auto *transform = std::get_if<Transform>(&operation))
-				return transform->Filter == Sampling::Bilinear ? 4 : 1;
-			return 1;
-		}
 		// Count declared work and retained results before any resolver or pixel allocation.
 		// Source extents remain unknown until decoded and are checked by the execution gate.
 		bool Preflight(
@@ -49,17 +29,18 @@ namespace engine::imagegraph {
 			uint64_t work = 0;
 			for (size_t index : plan.Order) {
 				if (!needed[index] || std::holds_alternative<Source>(document.Nodes[index].Value)) continue;
-				Image input;
+				ImageExtent input;
 				if (!plan.Inputs[index].empty()) {
 					const auto [width, height] = extents[plan.Inputs[index][0]];
 					input.Width = width;
 					input.Height = height;
 				}
-				const auto extent = Extent(document.Nodes[index].Value, &input);
-				extents[index] = extent;
-				const auto [width, height] = extent;
+				const auto extent = detail::Extent(document.Nodes[index].Value, input);
+				extents[index] = {extent.Width, extent.Height};
+				const auto width = extent.Width, height = extent.Height;
 				const size_t bytes = static_cast<size_t>(width) * height * 4;
-				const uint64_t pixels = uint64_t(width) * height * WorkPerPixel(document.Nodes[index].Value);
+				const uint64_t pixels =
+					uint64_t(width) * height * detail::WorkPerPixel(document.Nodes[index].Value);
 				if (bytes > Limits::MaximumRetainedBytes - retained)
 					return EvaluationFailure(
 						diagnostic, document.Nodes[index].Id, "retained image budget exceeded"
@@ -126,6 +107,106 @@ namespace engine::imagegraph {
 			);
 		}
 	}
+	bool EvaluateTyped(
+		const Document &authored,
+		const Plan &plan,
+		std::string_view output,
+		const TypedSourceResolver &sources,
+		Image &out,
+		Diagnostic &diagnostic
+	) {
+		ENGINE_PROFILE("imagegraph 2d evaluation");
+		Document resolved;
+		const Document *document = &authored;
+		if (!authored.Parameters.empty() || !authored.Bindings.empty()) {
+			if (!ResolveInputs(authored, {}, resolved, diagnostic)) return false;
+			document = &resolved;
+		}
+		Plan checked;
+		if (!Compile(*document, checked, diagnostic)) return false;
+		if (checked != plan)
+			return EvaluationFailure(diagnostic, {}, "compile plan does not match the document");
+		size_t selected = 0;
+		if (output.empty()) {
+			if (document->Outputs.size() != 1)
+				return EvaluationFailure(diagnostic, {}, "select one named output explicitly");
+		} else {
+			const auto found =
+				std::find_if(document->Outputs.begin(), document->Outputs.end(), [&](const Output &binding) {
+					return binding.Name == output;
+				});
+			if (found == document->Outputs.end())
+				return EvaluationFailure(diagnostic, {}, "selected output does not exist");
+			selected = static_cast<size_t>(found - document->Outputs.begin());
+		}
+		std::string_view activeNode;
+		try {
+			const size_t target = plan.Outputs[selected];
+			std::vector<uint8_t> needed(document->Nodes.size());
+			needed[target] = 1;
+			for (auto node = plan.Order.rbegin(); node != plan.Order.rend(); ++node)
+				if (needed[*node])
+					for (size_t input : plan.Inputs[*node])
+						needed[input] = 1;
+			if (!Preflight(*document, plan, needed, diagnostic)) return false;
+			std::vector<std::optional<Image>> results(document->Nodes.size());
+			std::vector<SourceExtent> extents;
+			size_t retainedSources = 0;
+			// Decode only reachable sources first. Exact metadata then admits the whole
+			// execution before allocating any derived pixel buffer, just as GPU hosts do.
+			for (size_t index : plan.Order) {
+				if (!needed[index]) continue;
+				const auto &node = document->Nodes[index];
+				const auto *source = std::get_if<Source>(&node.Value);
+				if (!source) continue;
+				activeNode = node.Id;
+				if (!sources) return EvaluationFailure(diagnostic, node.Id, "source resolver is unavailable");
+				if (retainedSources > Limits::MaximumRetainedBytes - Limits::MaximumImageBytes)
+					return EvaluationFailure(
+						diagnostic, node.Id, "source reservation exceeds retained image budget"
+					);
+				Image image;
+				std::string failure;
+				if (!sources(*source, image, failure))
+					return EvaluationFailure(
+						diagnostic, node.Id, failure.empty() ? "source is unavailable" : failure
+					);
+				if (!image.IsValid())
+					return EvaluationFailure(
+						diagnostic, node.Id, "source dimensions and RGBA8 bytes are inconsistent"
+					);
+				retainedSources += image.Pixels.size();
+				extents.push_back({node.Id, image.Width, image.Height});
+				core::Metrics::Count("imagegraph.source_decoded_bytes", image.Pixels.size());
+				results[index] = std::move(image);
+			}
+			ExecutionPlan execution;
+			if (!Prepare(*document, plan, output, extents, execution, diagnostic)) return false;
+			for (size_t index : execution.Order) {
+				const auto &node = document->Nodes[index];
+				activeNode = node.Id;
+				if (!results[index]) {
+					const auto &extent = execution.Extents[index];
+					Image image{extent.Width, extent.Height, {}};
+					image.Pixels.resize(extent.Bytes);
+					const Image *input =
+						plan.Inputs[index].empty() ? nullptr : &*results[plan.Inputs[index][0]];
+					const Image *foreground =
+						plan.Inputs[index].size() == 2 ? &*results[plan.Inputs[index][1]] : nullptr;
+					Compose(node.Value, input, foreground, image);
+					core::Metrics::Count("imagegraph.allocated_pixel_bytes", extent.Bytes);
+					results[index] = std::move(image);
+				}
+				core::Metrics::Count("imagegraph.evaluated_nodes", 1);
+			}
+			results[target]->Space = document->Outputs[selected].Space;
+			out = std::move(*results[target]);
+			diagnostic = {};
+			return true;
+		} catch (const std::exception &error) {
+			return EvaluationFailure(diagnostic, activeNode, error.what());
+		}
+	}
 	bool Evaluate(
 		const Document &document,
 		const Plan &plan,
@@ -134,96 +215,15 @@ namespace engine::imagegraph {
 		Image &out,
 		Diagnostic &diagnostic
 	) {
-		ENGINE_PROFILE("imagegraph 2d evaluation");
-		Plan checked;
-		if (!Compile(document, checked, diagnostic)) return false;
-		if (checked != plan)
-			return EvaluationFailure(diagnostic, {}, "compile plan does not match the document");
-		size_t selected = 0;
-		if (output.empty()) {
-			if (document.Outputs.size() != 1)
-				return EvaluationFailure(diagnostic, {}, "select one named output explicitly");
-		} else {
-			const auto found =
-				std::find_if(document.Outputs.begin(), document.Outputs.end(), [&](const Output &binding) {
-					return binding.Name == output;
-				});
-			if (found == document.Outputs.end())
-				return EvaluationFailure(diagnostic, {}, "selected output does not exist");
-			selected = static_cast<size_t>(found - document.Outputs.begin());
-		}
-		std::string_view activeNode;
-		try {
-			const size_t target = plan.Outputs[selected];
-			std::vector<uint8_t> needed(document.Nodes.size());
-			needed[target] = 1;
-			for (auto node = plan.Order.rbegin(); node != plan.Order.rend(); ++node)
-				if (needed[*node])
-					for (size_t input : plan.Inputs[*node])
-						needed[input] = 1;
-			if (!Preflight(document, plan, needed, diagnostic)) return false;
-			std::vector<std::optional<Image>> results(document.Nodes.size());
-			size_t retained = 0;
-			uint64_t work = 0;
-			for (size_t index : plan.Order) {
-				if (!needed[index]) continue;
-				const Node &node = document.Nodes[index];
-				activeNode = node.Id;
-				Image image;
-				if (const auto *source = std::get_if<Source>(&node.Value)) {
-					if (!sources)
-						return EvaluationFailure(diagnostic, node.Id, "source resolver is unavailable");
-					// Reserve the resolver's complete bounded allowance before it may allocate.
-					if (retained > Limits::MaximumRetainedBytes - Limits::MaximumImageBytes)
-						return EvaluationFailure(
-							diagnostic, node.Id, "source reservation exceeds retained image budget"
-						);
-					std::string failure;
-					if (!sources(source->Path, image, failure))
-						return EvaluationFailure(
-							diagnostic, node.Id, failure.empty() ? "source is unavailable" : failure
-						);
-					if (!image.IsValid())
-						return EvaluationFailure(
-							diagnostic, node.Id, "source dimensions and RGBA8 bytes are inconsistent"
-						);
-					core::Metrics::Count("imagegraph.source_decoded_bytes", image.Pixels.size());
-				} else {
-					const Image *input =
-						plan.Inputs[index].empty() ? nullptr : &*results[plan.Inputs[index][0]];
-					const Image *foreground =
-						plan.Inputs[index].size() == 2 ? &*results[plan.Inputs[index][1]] : nullptr;
-					if (foreground &&
-						(input->Width != foreground->Width || input->Height != foreground->Height))
-						return EvaluationFailure(
-							diagnostic, node.Id, "blend inputs require matching canvas dimensions"
-						);
-					const auto [width, height] = Extent(node.Value, input);
-					const size_t bytes = static_cast<size_t>(width) * height * 4;
-					if (bytes > Limits::MaximumRetainedBytes - retained)
-						return EvaluationFailure(diagnostic, node.Id, "retained image budget exceeded");
-					const uint64_t pixels = uint64_t(width) * height * WorkPerPixel(node.Value);
-					if (pixels > Limits::MaximumPixelWork - work)
-						return EvaluationFailure(diagnostic, node.Id, "pixel work budget exceeded");
-					image.Width = width;
-					image.Height = height;
-					image.Pixels.resize(bytes);
-					core::Metrics::Count("imagegraph.allocated_pixel_bytes", bytes);
-					Compose(node.Value, input, foreground, image);
+		TypedSourceResolver typed;
+		if (sources)
+			typed = [&](const Source &source, Image &image, std::string &failure) {
+				if (source.Interpretation != SourceInterpretation::Colour) {
+					failure = "data sources require a typed source resolver";
+					return false;
 				}
-				const uint64_t pixels = uint64_t(image.Width) * image.Height * WorkPerPixel(node.Value);
-				if (pixels > Limits::MaximumPixelWork - work)
-					return EvaluationFailure(diagnostic, node.Id, "pixel work budget exceeded");
-				work += pixels;
-				retained += image.Pixels.size();
-				results[index] = std::move(image);
-				core::Metrics::Count("imagegraph.evaluated_nodes", 1);
-			}
-			out = std::move(*results[target]);
-			diagnostic = {};
-			return true;
-		} catch (const std::exception &error) {
-			return EvaluationFailure(diagnostic, activeNode, error.what());
-		}
+				return sources(source.Path, image, failure);
+			};
+		return EvaluateTyped(document, plan, output, typed, out, diagnostic);
 	}
 }

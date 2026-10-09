@@ -20,6 +20,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/imagegraph/Content.hpp>
 #include <engine/input/Translate.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/net/Wire.hpp>
@@ -288,6 +289,7 @@ namespace client {
 		void LoadPackagedExampleTextures(ContentSession &content);
 		void LoadPackagedAudio();
 		void PumpContent(ContentSession &content, std::span<const engine::world::WorldId> worlds);
+		void RefreshImageGraphs(ContentSession &, std::span<const engine::world::WorldId>);
 
 		// Hands the session's worlds the mesh names its store published.
 		//
@@ -959,6 +961,19 @@ namespace client {
 			std::vector<engine::delivery::RequestId> Pending;
 			std::vector<engine::delivery::RequestId> Issued;
 			std::unordered_set<uint64_t> Asked;
+			engine::imagegraph::Content GraphContent;
+			// Reader caches, rebuilt from content-bearing ECS columns when they change.
+			std::unordered_map<uint32_t, std::vector<engine::core::Name>> GraphReferences;
+			struct AppliedGraph {
+				engine::core::Name Owner;
+				engine::core::Name Name;
+				engine::core::Name Asset;
+				uint64_t ContentRevision = 0;
+				uint64_t InputRevision = 0;
+				std::vector<engine::core::Name> Outputs;
+				bool Seen = false;
+			};
+			std::unordered_map<uint64_t, AppliedGraph> AppliedGraphs;
 			std::unordered_map<uint32_t, uint64_t> ScannedAtRevision;
 			std::vector<engine::core::Name> Wanted;
 			std::vector<engine::core::Name> Owners;

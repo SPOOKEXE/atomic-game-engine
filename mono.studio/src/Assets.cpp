@@ -1132,10 +1132,10 @@ namespace studio {
 		ImportAssetPath(path);
 	}
 
-	void Editor::PublishAssets(const std::string &hexSeed) {
+	bool Editor::PublishAssets(const std::string &hexSeed) {
 		if (hexSeed.size() != 64) {
 			AssetStatus = "the signing key is 64 hex characters";
-			return;
+			return false;
 		}
 
 		std::array<std::byte, 32> seed{};
@@ -1145,7 +1145,7 @@ namespace studio {
 			const long value = std::strtol(byte.c_str(), &end, 16);
 			if (end != byte.c_str() + 2) {
 				AssetStatus = "the signing key is not hex";
-				return;
+				return false;
 			}
 			seed[index] = static_cast<std::byte>(value);
 		}
@@ -1153,14 +1153,14 @@ namespace studio {
 		const auto signing = engine::assets::SigningKey::FromSeed(seed);
 		if (!signing.has_value()) {
 			AssetStatus = "that is not a usable signing key";
-			return;
+			return false;
 		}
 
 		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
 		const auto report = cdn::PublishLocal(paths, *signing, NowSeconds());
 		if (!report.has_value()) {
 			AssetStatus = "the publish failed - see the output panel";
-			return;
+			return false;
 		}
 
 		AssetStatus = std::to_string(report->Assets) + " asset(s) in " + std::to_string(report->Bundles) +
@@ -1171,5 +1171,6 @@ namespace studio {
 		// what fills the picker, and a picker that still said "nothing
 		// published" straight after would read as the publish having failed.
 		RefreshStoreContents();
+		return true;
 	}
 }

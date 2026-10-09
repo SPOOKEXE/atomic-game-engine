@@ -143,12 +143,21 @@ TEST_CASE("texture replacement reuses its resident budget", "[render][texture-bu
 	image.Width = image.Height = 2;
 	image.Pixels.assign(16, std::byte{1});
 	const core::Name name("live-image"), owner("live-image-owner");
+	CHECK(table.RevisionOf(name, owner) == 0);
 	REQUIRE(table.Add(name, image, owner));
+	const uint64_t firstRevision = table.RevisionOf(name, owner);
+	CHECK(firstRevision > 0);
+	CHECK(table.RevisionOf(name) == 0);
 	const size_t residentBytes = table.Bytes();
 	const size_t residentCount = table.Count();
 
 	image.Pixels.assign(16, std::byte{2});
 	CHECK(table.Add(name, image, owner));
+	CHECK(table.RevisionOf(name, owner) > firstRevision);
+	const uint64_t replacementRevision = table.RevisionOf(name, owner);
+	image.Width = 0;
+	CHECK_FALSE(table.Add(name, image, owner));
+	CHECK(table.RevisionOf(name, owner) == replacementRevision);
 	CHECK(table.Bytes() == residentBytes);
 	CHECK(table.Count() == residentCount);
 	table.Shutdown();
@@ -585,6 +594,9 @@ TEST_CASE(
 	REQUIRE(table.Adopt(name, adopted.get(), 1, 1, 4, first));
 	const auto adoptedHandle = adopted.release();
 	CHECK(table.Find(name, first) == adoptedHandle);
+	assets::TextureFormat adoptedFormat{};
+	REQUIRE(table.FormatOf(name, adoptedFormat, first));
+	CHECK(adoptedFormat == assets::TextureFormat::RGBA8_LINEAR);
 	CHECK(table.Find(name) == shared);
 	CHECK(table.Bytes() == initialBytes + 20);
 	CHECK(table.DropOwner(first) == 1);

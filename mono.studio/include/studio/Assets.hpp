@@ -20,17 +20,14 @@
 // convenience and never a wrong value - the field still writes the same name,
 // and a scene authored through it is identical.
 //
-// **Keyed on the property's spelling alone, not on its class.** Every content
-// property in the engine is unambiguous by name - `Mesh`, `TextureID`,
-// `Texture`, `SoundId`, `Image` - and adding the class would mean five more
-// rows to name `Texture` on `ParticleEmitter`, `Beam` and `Trail` separately,
-// each of which is the same answer. If a class ever wants a `Name` property
-// called `Mesh` that is not a mesh, this is where that stops being true and the
-// key grows.
+// Most content properties have an unambiguous spelling. Sky faces use ordinary
+// directional names, so the owner-aware overload limits those to SkyboxTextures.
+// Property types are checked by the caller before a name-valued picker is drawn.
 //
 // @tier client
 
 #include <engine/assets/AssetKind.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/game/Values.hpp>
 
 #include <string_view>
@@ -47,6 +44,9 @@ namespace studio {
 	//         the panel.
 	// @since v0.10
 	engine::assets::AssetKind ContentKindOfProperty(std::string_view property);
+
+	// Directional sky face names are image slots only on their declared class.
+	engine::assets::AssetKind ContentKindOfProperty(engine::ecs::ClassId owner, std::string_view property);
 
 	// The property write a confirmed content picker produces.
 	//

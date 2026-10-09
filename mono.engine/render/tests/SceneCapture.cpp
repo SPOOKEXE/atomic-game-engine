@@ -203,6 +203,7 @@ TEST_CASE("headless Vulkan runs resource, particle, capture, and readback paths"
 	const uint64_t texturesBeforeCapture = renderer.MemoryStatistics().Textures;
 	REQUIRE(renderer.CaptureSceneTexture(0, captureName));
 	CHECK(renderer.TextureHandle(captureName) != nullptr);
+	CHECK_FALSE(renderer.TextureSamplesSRGB(captureName));
 	CHECK(renderer.MemoryStatistics().Textures == texturesBeforeCapture + 1);
 
 	renderer.Inspect({});

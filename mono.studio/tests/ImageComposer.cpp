@@ -381,3 +381,234 @@ TEST_CASE(
 	REQUIRE(studio::RefreshImageComposer(prior, host));
 	CHECK(prior.Preview.Width == 2);
 }
+
+TEST_CASE("composer named controls roundtrip defaults bindings and undo", "[studio][imagecomposer]") {
+	studio::ImageComposerState state;
+	studio::InitialiseImageComposer(state);
+	const auto solid = state.Graph.Nodes().front().Id;
+	Diagnostic diagnostic;
+	REQUIRE(studio::BindImageComposerInput(state, solid, "width", "size", diagnostic));
+	REQUIRE(studio::BindImageComposerInput(state, solid, "height", "size", diagnostic));
+	REQUIRE(studio::BindImageComposerInput(state, solid, "colour", "tint", diagnostic));
+	const auto bindings = state.Bindings.size();
+	CHECK_FALSE(studio::BindImageComposerInput(state, solid, "colour", "size", diagnostic));
+	CHECK(state.Bindings.size() == bindings);
+	CHECK_FALSE(studio::BindImageComposerInput(state, solid, "width", "bad/name", diagnostic));
+	Document document;
+	REQUIRE(studio::SaveImageComposerDocument(state, document, diagnostic));
+	CHECK(document.Parameters.size() == 2);
+	CHECK(document.Bindings.size() == 3);
+	state.Parameters[0].Default = 2.;
+	state.Parameters[1].Default = std::array<uint8_t, 4>{2, 30, 100, 255};
+	studio::CommitImageComposer(state);
+	studio::ImageComposerHost host;
+	REQUIRE(studio::RefreshImageComposer(state, host));
+	CHECK(state.Preview.Width == 2);
+	CHECK(state.Preview.Pixels.front() == std::byte{2});
+	REQUIRE(studio::UndoImageComposer(state));
+	CHECK(std::get<double>(state.Parameters[0].Default) == 256.);
+	REQUIRE(studio::RedoImageComposer(state));
+	CHECK(std::get<double>(state.Parameters[0].Default) == 2.);
+	Directory directory;
+	REQUIRE(studio::SaveImageComposerProject(state, directory.Path / "named.imagegraph"));
+	studio::ImageComposerState reopened;
+	REQUIRE(studio::OpenImageComposerProject(reopened, directory.Path / "named.imagegraph"));
+	REQUIRE(studio::SaveImageComposerDocument(reopened, document, diagnostic));
+	CHECK(document.Parameters.size() == 2);
+	CHECK(document.Bindings.size() == 3);
+	REQUIRE(studio::RefreshImageComposer(reopened, host));
+	CHECK(reopened.Preview.Pixels == state.Preview.Pixels);
+	Context context;
+	context.Frame(reopened, host);
+}
+
+TEST_CASE(
+	"composer GPU adapter caches edits and retains last good output without CPU pixels",
+	"[studio][imagecomposer]"
+) {
+	studio::ImageComposerState state;
+	studio::InitialiseImageComposer(state);
+	state.Graph.Nodes().front().Widgets["colour"].Tint = {1.f, 64.f / 255.f, 0.f, 1.f};
+	Directory directory;
+	studio::ImageComposerHost host;
+	host.BakedRoot = directory.Path;
+	size_t calls = 0, uploads = 0;
+	bool refuse = false;
+	host.Gpu = [&](const Document &document,
+				   std::string_view output,
+				   const TypedSourceResolver &,
+				   studio::ImageComposerPreview &preview,
+				   Diagnostic &diagnostic) {
+		++calls;
+		CHECK(output == "image");
+		CHECK(document.Parameters.empty());
+		CHECK(document.Outputs.front().Space == OutputSpace::Linear);
+		CHECK(
+			std::get<Solid>(document.Nodes.front().Value).Colour == (std::array<uint8_t, 4>{255, 64, 0, 255})
+		);
+		if (refuse) {
+			diagnostic = {{}, "GPU budget refused"};
+			return false;
+		}
+		preview = {reinterpret_cast<void *>(uintptr_t{7}), 16, 16};
+		return true;
+	};
+	host.Upload = [&](const engine::assets::TextureData &, void *&, std::string &) {
+		++uploads;
+		return true;
+	};
+	REQUIRE(studio::RefreshImageComposer(state, host));
+	CHECK_FALSE(state.Preview.IsValid());
+	CHECK(state.PreviewTexture.Pixels.empty());
+	CHECK(state.PreviewWidth == 16);
+	Document authored;
+	Diagnostic authoredDiagnostic;
+	REQUIRE(studio::SaveImageComposerDocument(state, authored, authoredDiagnostic));
+	CHECK(authored.Outputs.front().Space == OutputSpace::SRGB);
+	CHECK(uploads == 0);
+	const auto handle = state.PreviewHandle;
+	state.Graph.Nodes().front().X += 33;
+	REQUIRE(studio::RefreshImageComposer(state, host));
+	CHECK(calls == 1);
+	REQUIRE(studio::ExportImageComposer(state, host, "static.atex"));
+	CHECK(state.PreviewTexture.Width == 256);
+	CHECK(state.PreviewTexture.Pixels[1] == std::byte{64});
+	CHECK(state.PreviewTexture.Format == engine::assets::TextureFormat::RGBA8);
+	CHECK(state.PreviewHandle == handle);
+	CHECK(calls == 1);
+	refuse = true;
+	Number(state.Graph, state.Graph.Nodes().front().Id, "width", 3);
+	CHECK_FALSE(studio::RefreshImageComposer(state, host));
+	CHECK(state.PreviewHandle == handle);
+	CHECK(state.PreviewWidth == 16);
+	CHECK_FALSE(studio::ExportImageComposer(state, host, "refused.atex"));
+	CHECK_FALSE(std::filesystem::exists(directory.Path / "refused.atex"));
+	CHECK(calls == 2);
+}
+
+TEST_CASE(
+	"composer typed GPU sources distinguish colour data and explicit reload", "[studio][imagecomposer]"
+) {
+	studio::ImageComposerState state;
+	studio::InitialiseImageComposer(state);
+	Document document;
+	document.Nodes = {
+		{"colour", Source{"same.png", SourceInterpretation::Colour}, {}, {}},
+		{"data", Source{"same.png", SourceInterpretation::Data}, {}, {}}
+	};
+	document.Outputs = {{"image", "colour"}, {"data", "data", OutputSpace::Linear}};
+	Diagnostic diagnostic;
+	REQUIRE(studio::LoadImageComposerGraph(document, state.Graph, diagnostic));
+	state.Outputs = document.Outputs;
+	size_t decodes = 0;
+	studio::ImageComposerHost host;
+	host.TypedSources = [&](const Source &source, Image &image, std::string &) {
+		++decodes;
+		image = {
+			1,
+			1,
+			{std::byte{128}, std::byte{128}, std::byte{128}, std::byte{255}},
+			source.Interpretation == SourceInterpretation::Colour ? OutputSpace::SRGB : OutputSpace::Linear
+		};
+		return true;
+	};
+	host.Gpu = [&](const Document &resolved,
+				   std::string_view output,
+				   const TypedSourceResolver &sources,
+				   studio::ImageComposerPreview &preview,
+				   Diagnostic &) {
+		Image image;
+		std::string failure;
+		const auto &source = std::get<Source>(resolved.Nodes[output == "image" ? 0 : 1].Value);
+		REQUIRE(sources(source, image, failure));
+		CHECK(image.Space == (output == "image" ? OutputSpace::SRGB : OutputSpace::Linear));
+		preview = {nullptr, 1, 1};
+		return true;
+	};
+	REQUIRE(studio::RefreshImageComposer(state, host));
+	CHECK(decodes == 1);
+	state.SelectedOutput = "data";
+	REQUIRE(studio::RefreshImageComposer(state, host));
+	CHECK(decodes == 2);
+	CHECK(state.SourceVersions.size() == 2);
+	state.SelectedOutput = "image";
+	REQUIRE(studio::RefreshImageComposer(state, host));
+	CHECK(decodes == 2);
+	studio::ReloadImageComposerSources(state);
+	REQUIRE(studio::RefreshImageComposer(state, host));
+	CHECK(decodes == 3);
+}
+
+TEST_CASE(
+	"live composer publication commits accepted graph identity only after host success",
+	"[studio][imagecomposer]"
+) {
+	studio::ImageComposerState state;
+	studio::InitialiseImageComposer(state);
+	studio::ImageComposerHost host;
+	host.LivePublish = [](const Document &, std::string_view name, std::string &accepted, std::string &) {
+		accepted = name;
+		return true;
+	};
+	REQUIRE(studio::PublishLiveImageComposer(state, host, "published.aimagegraph"));
+	state.TargetProperty = "Image";
+	CHECK(studio::CanApplyLiveImageComposer(state));
+	const auto key = state.PublishedKey;
+	host.LivePublish = [](const Document &, std::string_view, std::string &, std::string &failure) {
+		failure = "signature refused";
+		return false;
+	};
+	CHECK_FALSE(studio::PublishLiveImageComposer(state, host, "replacement.aimagegraph"));
+	CHECK(state.PublishedGraph == "published.aimagegraph");
+	CHECK(state.PublishedKey == key);
+	CHECK(studio::CanApplyLiveImageComposer(state));
+	studio::ReloadImageComposerSources(state);
+	CHECK_FALSE(studio::CanApplyLiveImageComposer(state));
+	host.LivePublish = [](const Document &, std::string_view name, std::string &accepted, std::string &) {
+		accepted = name;
+		return true;
+	};
+	REQUIRE(studio::PublishLiveImageComposer(state, host, "published.aimagegraph"));
+	CHECK(state.PublishedKey != key);
+}
+
+TEST_CASE("source and toggle controls preserve binding defaults across Save As", "[studio][imagecomposer]") {
+	Directory directory;
+	const auto nested = directory.Path / "nested";
+	REQUIRE(std::filesystem::create_directory(nested));
+	std::ofstream(directory.Path / "input.png") << "path rebase fixture";
+	studio::ImageComposerState state;
+	studio::InitialiseImageComposer(state);
+	state.SourceRoot = directory.Path;
+	Document document;
+	document.Nodes = {
+		{"source", Source{"input.png", SourceInterpretation::Data}, {}, {}},
+		{"flip", Flip{true, false}, {"source"}, {}}
+	};
+	document.Outputs = {{"image", "flip", OutputSpace::Linear}};
+	Diagnostic diagnostic;
+	REQUIRE(studio::LoadImageComposerGraph(document, state.Graph, diagnostic));
+	state.Outputs = document.Outputs;
+	const auto source = state.Graph.Nodes()[0].Id;
+	const auto flip = state.Graph.Nodes()[1].Id;
+	REQUIRE(studio::BindImageComposerInput(state, source, "path", "source", diagnostic));
+	REQUIRE(studio::BindImageComposerInput(state, flip, "horizontal", "reverse", diagnostic));
+	CHECK(std::get<bool>(state.Parameters[1].Default));
+	CHECK_FALSE(studio::SaveImageComposerProject(state, nested / "escape.imagegraph"));
+	CHECK(std::get<std::string>(state.Parameters[0].Default) == "input.png");
+	state.SourceRoot = nested;
+	nodegraph::Value sourcePath;
+	sourcePath.Kind = nodegraph::WidgetKind::Text;
+	sourcePath.Text = "sub/input.png";
+	nodegraph::SetValue(state.Graph, source, "path", sourcePath);
+	state.Parameters[0].Default = std::string("sub/input.png");
+	REQUIRE(studio::SaveImageComposerProject(state, directory.Path / "rebased.imagegraph"));
+	CHECK(std::get<std::string>(state.Parameters[0].Default) == "nested/sub/input.png");
+	studio::ImageComposerState reopened;
+	REQUIRE(studio::OpenImageComposerProject(reopened, directory.Path / "rebased.imagegraph"));
+	REQUIRE(studio::SaveImageComposerDocument(reopened, document, diagnostic));
+	CHECK(std::get<Source>(document.Nodes[0].Value).Interpretation == SourceInterpretation::Data);
+	CHECK(document.Outputs[0].Space == OutputSpace::Linear);
+	CHECK(std::get<std::string>(document.Parameters[0].Default) == "nested/sub/input.png");
+	CHECK(std::get<bool>(document.Parameters[1].Default));
+}

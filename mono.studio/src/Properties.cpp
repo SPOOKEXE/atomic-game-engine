@@ -6,6 +6,7 @@
 #include <engine/ecs/Schema.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/render/ShaderCompiler.hpp>
+#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/ui/Metrics.hpp>
@@ -916,7 +917,8 @@ namespace studio {
 
 				for (const SelectionPropertyRow &row : group.Rows) {
 					const PropertyDescriptor *descriptor = row.Descriptor;
-					if (descriptor == nullptr) {
+					if (descriptor == nullptr || (group.Owner == engine::scene::ImageGraphClass() &&
+												  descriptor->Name == Name("Inputs"))) {
 						continue;
 					}
 					if (!PropertyFilter.empty()) {
@@ -1205,7 +1207,8 @@ namespace studio {
 						// has not streamed in yet looks like. Every other `Name`
 						// property is an ordinary label, and a modal over one
 						// would be a dialog in the way.
-						const engine::assets::AssetKind content = ContentKindOfProperty(descriptor->Spelling);
+						const engine::assets::AssetKind content =
+							ContentKindOfProperty(group.Owner, descriptor->Spelling);
 
 						if (content == engine::assets::AssetKind::Unknown) {
 							if (TextField("##v", text)) {
@@ -1318,6 +1321,8 @@ namespace studio {
 
 				ImGui::EndTable();
 			}
+			if (Selection.size() == 1 && store.Get<engine::scene::ImageGraph>(Selection.front()) != nullptr)
+				DrawImageGraphInstanceInputs(store, Selection.front());
 		});
 		if (selectedShader) {
 			DrawShaderCapabilities(selectedShader->Instance, selectedShader->Source, selectedShader->Label);
@@ -1670,7 +1675,10 @@ namespace studio {
 										  )
 										: std::array<float, 3>{};
 						for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
-							if (property.Reads == nullptr || !property.Reads->Contains(component)) continue;
+							if (property.Reads == nullptr || !property.Reads->Contains(component) ||
+								(component == Components::Of<engine::scene::ImageGraph>() &&
+								 property.Name == Name("Inputs")))
+								continue;
 							ImGui::TableNextRow();
 							ImGui::TableSetColumnIndex(0);
 							ImGui::AlignTextToFramePadding();

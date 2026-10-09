@@ -113,6 +113,7 @@ scene.Gravity | Per-world gravity acceleration applied to dynamic simulated bodi
 scene.GpuParticleField | Authored request for a deterministic analytical storm particle field, including enabled layers, normalized count, reset seed, and per-layer colour, opacity and size.
 scene.Humanoid | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick.
 scene.InputState | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's.
+scene.ImageGraph | On an `ImageGraph` instance: the signed graph asset, world-unique key, selected output, typed input overrides and local revision the client watches to resolve ordinary image outputs.
 scene.Light | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms.
 scene.LightingService | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude.
 scene.LODAuto | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, projected quad-area target, and optional final billboard texture.

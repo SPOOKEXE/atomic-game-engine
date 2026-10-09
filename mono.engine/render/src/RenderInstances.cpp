@@ -229,7 +229,8 @@ namespace engine::render {
 				shadowUniformsDirty = false;
 			}
 
-			const core::Name textureOwner = TextureContentOwner(texture, SlotContentOwner[slot]);
+			const core::Name textureOwner =
+				TextureContentOwner(texture, SlotContentOwner[slot], SlotImageGraphWorld[slot]);
 			if (lighting != nullptr) {
 				// **The default, not the fallback texel, and not "do not
 				// sample".** A drawable naming no texture is not a drawable with
@@ -276,13 +277,16 @@ namespace engine::render {
 						// exactly what makes a shape hard to see.
 						return static_cast<SDL_GPUTexture *>(nullptr);
 					}
-					SDL_GPUTexture *foundMap =
-						Textures.Find(name, TextureContentOwner(name, SlotContentOwner[slot]));
+					SDL_GPUTexture *foundMap = Textures.Find(
+						name, TextureContentOwner(name, SlotContentOwner[slot], SlotImageGraphWorld[slot])
+					);
 					if (foundMap != nullptr) {
 						return foundMap;
 					}
 					if (name.IsValid() &&
-						!Textures.Expecting(name, TextureContentOwner(name, SlotContentOwner[slot]))) {
+						!Textures.Expecting(
+							name, TextureContentOwner(name, SlotContentOwner[slot], SlotImageGraphWorld[slot])
+						)) {
 						return Textures.Missing();
 					}
 					return static_cast<SDL_GPUTexture *>(nullptr);
@@ -299,7 +303,9 @@ namespace engine::render {
 				// them with magenta-channel values.
 				SDL_GPUTexture *const packedPbr = Textures.Find(
 					SlotPackedPbrMap[slot],
-					TextureContentOwner(SlotPackedPbrMap[slot], SlotContentOwner[slot])
+					TextureContentOwner(
+						SlotPackedPbrMap[slot], SlotContentOwner[slot], SlotImageGraphWorld[slot]
+					)
 				);
 				SDL_GPUSampler *const materialSampler =
 					SlotResample[slot] == scene::SurfaceResampleMode::Pixelated ? Textures.PixelSampler()

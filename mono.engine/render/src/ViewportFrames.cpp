@@ -72,7 +72,12 @@ namespace engine::render {
 	}
 
 	size_t ViewportFrames::Render(
-		Renderer &renderer, ecs::Store &store, const gui::DrawList &list, size_t firstSlot, core::Name owner
+		Renderer &renderer,
+		ecs::Store &store,
+		const gui::DrawList &list,
+		size_t firstSlot,
+		core::Name owner,
+		core::Name worldOwner
 	) {
 		Entries.clear();
 		std::vector<std::vector<scene::DrawInstance>> instances;
@@ -151,7 +156,9 @@ namespace engine::render {
 			// frames in the same Store are not two cameras on one world, so their
 			// world-scoped shadow work must not be shared.
 			view.World = command.Source.Id;
-			view.WorldName = core::Name("render.viewport-frame");
+			view.WorldName = worldOwner.IsValid() ? worldOwner
+							 : owner.IsValid()	  ? owner
+												  : core::Name("render.viewport-frame");
 			view.ContentOwner = owner;
 			view.Lighting = baseLighting;
 			view.Lighting.Direction = viewport->LightDirection;

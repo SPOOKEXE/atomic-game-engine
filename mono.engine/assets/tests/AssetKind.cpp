@@ -105,7 +105,7 @@ TEST_CASE("a dot in a directory is not an extension", "[assets]") {
 TEST_CASE("every kind has a name and the name parses back", "[assets]") {
 	// The round trip is what a command line, a studio panel and a log line all
 	// depend on - AGENTS.md rule 4, a name crosses and a number does not.
-	for (uint8_t value = 0; value <= static_cast<uint8_t>(AssetKind::Data); ++value) {
+	for (uint8_t value = 0; value <= static_cast<uint8_t>(AssetKind::ImageGraph); ++value) {
 		const auto kind = static_cast<AssetKind>(value);
 		const std::string name = Describe(kind);
 		CHECK_FALSE(name.empty());
@@ -127,6 +127,7 @@ TEST_CASE("unknown is zero so an unwritten field makes no claim", "[assets]") {
 	CHECK(static_cast<uint8_t>(AssetKind::Unknown) == 0);
 	CHECK(static_cast<uint8_t>(AssetKind::Mesh) == 1);
 	CHECK(static_cast<uint8_t>(AssetKind::Animation) == 10);
+	CHECK(static_cast<uint8_t>(AssetKind::ImageGraph) == 11);
 	CHECK(static_cast<uint8_t>(AssetKind::Texture) == 2);
 	CHECK(static_cast<uint8_t>(AssetKind::Audio) == 3);
 }

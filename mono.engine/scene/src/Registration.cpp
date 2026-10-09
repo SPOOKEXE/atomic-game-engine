@@ -1,3 +1,5 @@
+#include "ImageGraphRegistration.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
@@ -18,6 +20,7 @@
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Gravity.hpp>
+#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Materials.hpp>
@@ -1421,6 +1424,9 @@ namespace engine::scene {
 		ecs::Components::Register<EditableImage>(
 			"scene.EditableImage", WriteEditableImages, ReadEditableImages
 		);
+		ecs::Components::Register<ImageGraph>(
+			"scene.ImageGraph", detail::WriteImageGraphs, detail::ReadImageGraphs
+		);
 
 		// The render gate, at the end for the reason this list opens with.
 		//
@@ -1946,5 +1952,6 @@ namespace engine::scene {
 		(void)LensShaderClass();
 		(void)EditableMeshClass();
 		(void)EditableImageClass();
+		(void)ImageGraphClass();
 	}
 }

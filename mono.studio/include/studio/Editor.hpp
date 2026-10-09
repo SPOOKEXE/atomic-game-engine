@@ -52,6 +52,7 @@
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/gui/SettingsMenu.hpp>
+#include <engine/imagegraph/Content.hpp>
 #include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/EditableImages.hpp>
@@ -2158,7 +2159,7 @@ namespace studio {
 		// Publishes `raw/` into `processed/`.
 		//
 		// @param hexSeed 64 hex characters of Ed25519 seed. Not stored.
-		void PublishAssets(const std::string &hexSeed);
+		bool PublishAssets(const std::string &hexSeed);
 
 		// A modal listing the store's published assets of one kind.
 		//
@@ -2880,6 +2881,20 @@ namespace studio {
 		// A retry with an already resident verified root must not decode, upload or
 		// invalidate the scene again.
 		ContentResidency ContentResident;
+		engine::imagegraph::Content ImageGraphContent;
+		std::unordered_map<uint32_t, std::vector<engine::core::Name>> ImageGraphReferences;
+		struct AppliedImageGraph {
+			engine::core::Name Owner;
+			engine::core::Name Name;
+			engine::core::Name Asset;
+			uint64_t ContentRevision = 0;
+			uint64_t InputRevision = 0;
+			std::vector<engine::core::Name> Outputs;
+			bool Seen = false;
+		};
+		std::unordered_map<uint64_t, AppliedImageGraph> AppliedImageGraphs;
+		const engine::imagegraph::Document *FindLiveImageGraph(engine::core::Name asset) const;
+		bool RefreshLiveImageGraphs();
 
 		// Last content-reference revision scanned per open world. This is a
 		// reader watermark, not a second copy of the world's asset references.
@@ -3622,6 +3637,7 @@ namespace studio {
 		bool ShowClientSettings = false;
 		engine::render::OverlayImage Overlay;
 		engine::render::InterfacePass GameInterface;
+		engine::core::Name GameInterfaceImageOwner;
 		engine::ui::Interface Interface;
 		engine::render::ViewportFrames ViewportImages;
 		engine::core::FrameClock Clock;
@@ -6146,6 +6162,24 @@ namespace studio {
 		std::unique_ptr<ImageComposerState> ImageComposer;
 		void DrawImageComposer();
 		void ReleaseImageComposerPreview();
+		void ApplyImageComposerPending();
+		void DrawImageGraphInstanceInputs(engine::ecs::Store &, Entity);
+		struct PendingImageGraphInput {
+			WorldId World;
+			Entity Instance;
+			engine::imagegraph::InputOverride Input;
+			bool Reset = false;
+		};
+		std::vector<PendingImageGraphInput> ImageGraphInputEdits;
+		struct PendingComposerApply {
+			WorldId World;
+			std::vector<Entity> Instances;
+			engine::core::Name Property;
+			engine::core::Name Graph;
+			engine::core::Name Output;
+		};
+		PendingComposerApply ComposerApply;
+		uint64_t ComposerInstanceSerial = 0;
 
 		bool ShowNodeDemo = false;
 		nodegraph::Graph NodeDemoGraph;
@@ -6470,6 +6504,8 @@ namespace studio {
 
 			// `ImGui::GetTime()` at which the next publish is due.
 			double NextPublish = 0.0;
+			engine::render::ImageGraphStatistics ImageGraphProfile{};
+			double NextImageGraphProfile = 0.0;
 
 			// The published snapshot - what is drawn.
 			//@{

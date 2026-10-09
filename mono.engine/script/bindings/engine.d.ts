@@ -1286,6 +1286,10 @@ declare interface Instance {
 	FromBuffer(buffer: ArrayBuffer): boolean;
 	GetAttribute(name: string): EngineAttribute | null;
 	SetAttribute(name: string, value: EngineAttribute | null): void;
+	/** ImageGraph overrides; null restores the graph default. */
+	SetInput(name: string, value: number | boolean | Color3 | string | null): void;
+	GetInput(name: string): number | boolean | Color3 | string | null;
+	GetImage(output?: string): string;
 	GetAttributes(): { [name: string]: EngineAttribute };
 	GetAttributeChangedSignal(name: string): PropertyChangedSignal;
 	SetComponent(component: string, values: { [field: string]: any }): void;
@@ -1856,6 +1860,12 @@ declare interface EditableImage extends Instance {
 	PackingMaximum: number;
 	PackingMinimum: number;
 	readonly Size: Vector2;
+}
+
+declare interface ImageGraph extends Instance {
+	Graph: string;
+	InstanceKey: string;
+	Output: string;
 }
 
 declare interface LuaSourceContainer extends Instance {
@@ -3186,6 +3196,7 @@ declare const Instance: {
 		(className: "LensShader", parent?: Instance): LensShader;
 		(className: "EditableMesh", parent?: Instance): EditableMesh;
 		(className: "EditableImage", parent?: Instance): EditableImage;
+		(className: "ImageGraph", parent?: Instance): ImageGraph;
 		(className: "Script", parent?: Instance): Script;
 		(className: "LocalScript", parent?: Instance): LocalScript;
 		(className: "ModuleScript", parent?: Instance): ModuleScript;
