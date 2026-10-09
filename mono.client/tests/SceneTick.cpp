@@ -29,7 +29,6 @@
 #include <engine/gui/Typing.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Pipeline.hpp>
-#include <engine/physics/Storm.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/WorldPresentation.hpp>
@@ -58,6 +57,7 @@
 #include <algorithm>
 #include <array>
 #include <client/Scene.hpp>
+#include <client/WorldSystems.hpp>
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
@@ -96,11 +96,11 @@ using engine::scene::WorldBounds;
 namespace {
 	constexpr uint32_t ENTITIES = 512;
 	constexpr float STEP = 1.0f / 60.0f;
-	// The authored world has one server script, two StarterPlayerScripts, and
-	// a local-player copy of each StarterPlayerScript in a combined host.
-	constexpr size_t BLADEBORNE_STARTUP_SCRIPT_COUNT = 5;
+	// The authored world has one server script, one StarterPlayerScript, and
+	// its local-player copy in a combined host.
+	constexpr size_t BLADEBORNE_STARTUP_SCRIPT_COUNT = 2;
 	// The world loader puts each <Source> child in this cache.
-	constexpr size_t BLADEBORNE_SOURCE_COUNT = 15;
+	constexpr size_t BLADEBORNE_SOURCE_COUNT = 14;
 
 	// A world and the scheduler that ticks it. Nothing else - which is the
 	// point: after the scene loads, everything the tick reads and writes is
@@ -954,13 +954,10 @@ TEST_CASE("alpha zero draws the previous tick exactly", "[demo]") {
 	// boundary sits.
 	const auto drawn = session.Drawn()[3].Frame.Position;
 
-	engine::core::Vector3 previous;
-	int seen = 0;
-	session.World.Each<const PreviousTransform>([&](engine::ecs::Entity, const PreviousTransform &transform) {
-		if (seen++ == 3) {
-			previous = transform.Frame.Position;
-		}
-	});
+	const engine::ecs::Entity rendered(session.Drawn()[3].Source);
+	const auto *previousTransform = session.World.Get<PreviousTransform>(rendered);
+	REQUIRE(previousTransform != nullptr);
+	const auto previous = previousTransform->Frame.Position;
 
 	REQUIRE(drawn.X == Approx(previous.X).margin(1e-4));
 	REQUIRE(drawn.Z == Approx(previous.Z).margin(1e-4));
@@ -1366,16 +1363,13 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 
 		const engine::ecs::Entity starterGui = store.FindFirstRoot(engine::gui::STARTER_GUI);
 		REQUIRE(starterGui != engine::ecs::NULL_ENTITY);
-		const engine::ecs::Entity templateHud = store.FindFirstChild(starterGui, "BladeborneHUD");
-		REQUIRE(templateHud != engine::ecs::NULL_ENTITY);
-		CHECK(CountNamedDescendants(store, templateHud, "Ability1") == 1);
-		CHECK(CountNamedDescendants(store, templateHud, "Minimap") == 1);
+		CHECK(store.FindFirstChild(starterGui, "BladeborneHUD") == engine::ecs::NULL_ENTITY);
 
-		CHECK(engine::gui::ResetPlayerGui(store, localPlayer) == 1);
 		const engine::ecs::Entity playerGui = store.FindFirstChild(localPlayer, engine::gui::PLAYER_GUI);
 		REQUIRE(playerGui != engine::ecs::NULL_ENTITY);
 		const engine::ecs::Entity liveHud = store.FindFirstChild(playerGui, "BladeborneHUD");
 		REQUIRE(liveHud != engine::ecs::NULL_ENTITY);
+		CHECK(engine::scene::InPlayerGui(store, liveHud, localPlayer));
 		CHECK(CountNamedDescendants(store, liveHud, "Ability1") == 1);
 		CHECK(CountNamedDescendants(store, liveHud, "Minimap") == 1);
 		CHECK(CountNamedDescendants(store, liveHud, "HotbarSlot1") == 2);
@@ -1390,6 +1384,11 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 		request.Viewer = localPlayer;
 		engine::gui::Compiled compiled;
 		REQUIRE(compiled.Rebuild(store, request));
+		CHECK(compiled.Commands().Elements > 0);
+		CHECK(std::ranges::any_of(compiled.Commands().Commands, [&](const auto &command) {
+			return command.Kind == engine::gui::DrawKind::Text && !command.Text.empty() &&
+				   store.IsDescendantOf(command.Source, liveHud);
+		}));
 		const bool opaqueScreenCover =
 			std::ranges::any_of(compiled.Commands().Commands, [&](const auto &command) {
 				return command.Kind == engine::gui::DrawKind::Rectangle && command.Transparency == 0.0f &&
@@ -1450,8 +1449,8 @@ TEST_CASE(
 
 	universe.Enter(id, [&](Store &store, Scheduler &systems) {
 		client::InstallPresentation(store, systems);
-		engine::physics::PreparePhysicsWorld(store);
-		engine::physics::RegisterPhysicsSystems(systems);
+		REQUIRE(client::InstallDefaultCamera(store, systems));
+		client::InstallClientWorldSystems(store, systems);
 		const engine::ecs::Entity localPlayer = client::EnsureLocalPlayer(store);
 		REQUIRE(localPlayer != engine::ecs::NULL_ENTITY);
 
@@ -1478,48 +1477,34 @@ TEST_CASE(
 		CHECK(CountNamedDescendants(store, environment, "Cell Roof Panel 2") == 25);
 		CHECK(CountNamedDescendants(store, environment, "Cell Chase Vehicle") > 0);
 
-		size_t stormBodies = 0;
-		store.Each<const engine::physics::StormResponse>(
-			[&](engine::ecs::Entity, const engine::physics::StormResponse &) { stormBodies++; }
-		);
-		size_t stormLinks = 0;
-		store.Each<const engine::physics::StormLink>(
-			[&](engine::ecs::Entity, const engine::physics::StormLink &) { stormLinks++; }
-		);
-		CHECK(stormBodies >= 80);
-		CHECK(stormLinks >= 60);
-
-		const engine::physics::Storm *storm = engine::physics::StormOf(store);
-		REQUIRE(storm != nullptr);
-		CHECK(storm->State.Parameters.Energy == Approx(0.72f));
-		CHECK(storm->State.Parameters.CoreRadius == Approx(34.0f));
-		CHECK(storm->State.Parameters.InfluenceRadius == Approx(260.0f));
-		CHECK(storm->State.Parameters.PeakTangentialSpeed == Approx(92.0f));
-		CHECK(storm->State.Parameters.PeakInflowSpeed == Approx(34.0f));
-		CHECK(storm->State.Parameters.PeakUpdraftSpeed == Approx(58.0f));
-		CHECK(storm->State.Parameters.PeakDowndraftSpeed == Approx(32.0f));
-		CHECK(storm->State.Parameters.SurfaceOutflowSpeed == Approx(28.0f));
-		CHECK(storm->State.Parameters.PressureDrop == Approx(72.0f));
-		CHECK(storm->State.Parameters.Humidity == Approx(.82f));
-		CHECK(storm->State.Parameters.RainRate == Approx(.68f));
-		CHECK(storm->State.Parameters.Turbulence == Approx(13.0f));
-		CHECK(storm->State.Parameters.GroundFriction == Approx(.28f));
-		CHECK(storm->State.Parameters.DebrisDensity == Approx(.65f));
-		CHECK(storm->State.Parameters.VortexTightness == Approx(2.25f));
-		CHECK(storm->State.Parameters.TopHeight == Approx(360.0f));
-		CHECK((storm->State.Parameters.UpperWind == engine::core::Vector3{18.0f, 0.0f, -6.0f}));
-		CHECK((storm->State.Parameters.TranslationVelocity == engine::core::Vector3{4.0f, 0.0f, 1.5f}));
+		REQUIRE(runtime->Run(R"(
+			assert(World:Count("Tornado.Response") >= 80)
+			assert(World:Count("Tornado.Link") >= 60)
+			local state = workspace:FindFirstChild("StormAnchor", true):GetComponent("Tornado.State")
+			assert(state ~= nil)
+			local expected = {
+				Energy = 0.72, CoreRadius = 34, InfluenceRadius = 260,
+				PeakTangentialSpeed = 92, PeakInflowSpeed = 34, PeakUpdraftSpeed = 58,
+				PeakDowndraftSpeed = 32, SurfaceOutflowSpeed = 28, PressureDrop = 72,
+				Humidity = 0.82, RainRate = 0.68, Turbulence = 13, GroundFriction = 0.28,
+				DebrisDensity = 0.65, VortexTightness = 2.25, TopHeight = 360,
+			}
+			for field, wanted in expected do
+				assert(math.abs(state[field] - wanted) < 0.0001, field)
+			end
+			assert(state.UpperWind == Vector3.new(18, 0, -6))
+			assert(state.TranslationVelocity == Vector3.new(4, 0, 1.5))
+		)"));
 
 		REQUIRE(runtime->Run(R"(
 			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"motion","x":-15,"y":5,"z":25}')
 			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"rotation","counterClockwise":false}')
 		)"));
-		storm = engine::physics::StormOf(store);
-		REQUIRE(storm != nullptr);
-		CHECK(storm->State.Parameters.TranslationVelocity.X == Approx(-15.0f));
-		CHECK(storm->State.Parameters.TranslationVelocity.Y == Approx(5.0f));
-		CHECK(storm->State.Parameters.TranslationVelocity.Z == Approx(25.0f));
-		CHECK_FALSE(storm->State.Parameters.CounterClockwise);
+		REQUIRE(runtime->Run(R"(
+			local state = workspace:FindFirstChild("StormAnchor", true):GetComponent("Tornado.State")
+			assert(state.TranslationVelocity == Vector3.new(-15, 5, 25))
+			assert(not state.CounterClockwise)
+		)"));
 
 		const engine::ecs::Entity playerGui = store.FindFirstChild(localPlayer, engine::gui::PLAYER_GUI);
 		REQUIRE(playerGui != engine::ecs::NULL_ENTITY);
@@ -1577,20 +1562,19 @@ TEST_CASE(
 		REQUIRE(field != nullptr);
 		CHECK_FALSE(condensation->Enabled);
 		CHECK(condensation->Rate == Approx(0.0f));
-		CHECK_FALSE(
-			engine::scene::HasGpuParticleLayer(*field, engine::scene::GpuParticleLayer::Condensation)
-		);
+		CHECK_FALSE(engine::scene::HasGpuParticleLayer(*field, engine::scene::GpuParticleLayer::First));
 
 		REQUIRE(runtime->Run(R"(
 			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"preset","name":"EF5"}')
 		)"));
-		storm = engine::physics::StormOf(store);
-		REQUIRE(storm != nullptr);
-		CHECK(storm->State.Parameters.CoreRadius == Approx(45.0f));
+		REQUIRE(runtime->Run(R"(
+			local state = workspace:FindFirstChild("StormAnchor", true):GetComponent("Tornado.State")
+			assert(math.abs(state.CoreRadius - 45) < 0.0001)
+		)"));
 		systems.Tick(store, STEP);
-		storm = engine::physics::StormOf(store);
-		REQUIRE(storm != nullptr);
-		CHECK(storm->State.ElapsedSeconds > 0.0f);
+		REQUIRE(runtime->Run(R"(
+			assert(workspace:FindFirstChild("StormAnchor", true):GetComponent("Tornado.State").ElapsedSeconds > 0)
+		)"));
 
 		// The first fixed step delivers the user-lane request after the server
 		// heartbeat. The second consumes its refresh flag without a long physics run.
@@ -1623,9 +1607,9 @@ TEST_CASE(
 		REQUIRE(runtime->Run(R"(
 			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"reset"}')
 		)"));
-		storm = engine::physics::StormOf(store);
-		REQUIRE(storm != nullptr);
-		CHECK(storm->State.ElapsedSeconds == Approx(0.0f));
+		REQUIRE(runtime->Run(R"(
+			assert(workspace:FindFirstChild("StormAnchor", true):GetComponent("Tornado.State").ElapsedSeconds == 0)
+		)"));
 		systems.Tick(store, STEP);
 
 		CHECK(childCount(environment) == 26);
@@ -1637,9 +1621,10 @@ TEST_CASE(
 		CHECK(
 			FirstNamedDescendant(store, resetInteraction, "Wood Sign Wind Link") != engine::ecs::NULL_ENTITY
 		);
-		storm = engine::physics::StormOf(store);
-		REQUIRE(storm != nullptr);
-		CHECK(storm->State.Parameters.Energy == Approx(0.72f));
-		CHECK(storm->State.Parameters.CoreRadius == Approx(34.0f));
+		REQUIRE(runtime->Run(R"(
+			local state = workspace:FindFirstChild("StormAnchor", true):GetComponent("Tornado.State")
+			assert(math.abs(state.Energy - 0.72) < 0.0001)
+			assert(math.abs(state.CoreRadius - 34) < 0.0001)
+		)"));
 	});
 }

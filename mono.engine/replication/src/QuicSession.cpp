@@ -29,6 +29,7 @@ namespace engine::replication {
 		// things whose loss is visible as an absence, and datagrams for the one
 		// whose loss is covered by the next one arriving.
 		switch (kind) {
+		case MessageKind::Schemas:
 		case MessageKind::SnapshotChunk:
 			// **The one that pays for the whole exercise.** A join snapshot is
 			// megabytes and it must not stall a door opening.

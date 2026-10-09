@@ -182,3 +182,32 @@ TEST_CASE("an unregistered class describes as empty rather than crashing", "[ecs
 	REQUIRE(Classes::Describe(ClassId{0xFFFF'FFF0u}).Set == nullptr);
 	REQUIRE_FALSE(Classes::Find(Name("test.never.registered")).IsValid());
 }
+
+TEST_CASE("runtime locality belongs to an exact class and its owned tree", "[ecs]") {
+	const Tree &tree = ClassTree();
+	const ClassId viewer = Classes::Register("test.ViewerLocal", tree.Instance, {});
+	const ClassId surface = Classes::Register("test.AuthoredSurface", viewer, {});
+	Classes::SetRuntimeLocal(viewer, true);
+	CHECK(Classes::Describe(viewer).RuntimeLocal);
+	CHECK_FALSE(Classes::Describe(surface).RuntimeLocal);
+	Store store("classes.runtime-local");
+	const auto camera = store.CreateInstance(viewer, "Camera");
+	REQUIRE(store.IsPredicted(camera));
+	CHECK(store.Has<engine::ecs::ClientLocal>(camera));
+	const auto descendant = store.CreateInstance(tree.Part, "Child");
+	const auto authored = store.CreateInstance(surface, "Surface");
+	CHECK_FALSE(store.IsPredicted(authored));
+	REQUIRE(store.SetParent(descendant, camera));
+	CHECK(engine::ecs::IsClientLocalInstance(store, camera));
+	CHECK(engine::ecs::IsClientLocalInstance(store, descendant));
+	CHECK_FALSE(engine::ecs::IsClientLocalInstance(store, authored));
+	const auto local = store.CreatePredictedInstance(tree.Part, "Local");
+	store.Set(local, engine::ecs::ClientLocal{});
+	CHECK(engine::ecs::IsClientLocalInstance(store, local));
+	store.SetAdoptOnly(true);
+	const auto replicaCamera = store.CreateInstance(viewer, "Camera");
+	REQUIRE(store.Alive(replicaCamera));
+	CHECK(store.IsPredicted(replicaCamera));
+	CHECK(store.Has<engine::ecs::ClientLocal>(replicaCamera));
+	CHECK(store.CreateInstance(surface, "Surface") == engine::ecs::NULL_ENTITY);
+}

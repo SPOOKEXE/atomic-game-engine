@@ -6,6 +6,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
@@ -126,6 +127,93 @@ namespace {
 		collider.Shape = shape;
 		collider.Extent = extent;
 		return collider;
+	}
+}
+
+TEST_CASE("client local colliders stay outside shared authority physics", "[physics][query]") {
+	using namespace engine::ecs;
+	const auto instance = Classes::RegisterInstanceRoot();
+	for (const bool replica : {false, true}) {
+		for (const bool moving : {false, true}) {
+			Store store("local-collider");
+			PreparePhysicsWorld(store, 4.0f);
+			const Entity authority = store.CreateInstance(instance, "Authority");
+			store.Set(authority, Transform{CFrame{Vector3::Zero}});
+			store.Set(authority, Collider{});
+			store.Set(authority, Motion{});
+			const Entity localRoot = store.CreateInstance(instance, "LocalRoot");
+			const Entity local = store.CreateInstance(instance, "LocalCollider");
+			REQUIRE(store.SetParent(local, localRoot));
+			store.Set(local, Transform{CFrame{Vector3{0.25f, 0.0f, 0.0f}}});
+			store.Set(local, Collider{});
+			if (moving) store.Set(local, Motion{});
+			store.SetAdoptOnly(replica);
+			Index(store);
+			store.Set(localRoot, ClientLocal{});
+			const Ray ray{Vector3{5.0f, 0.0f, 0.0f}, -Vector3::XAxis};
+			const auto indexedHit = Raycast(store, ray, 10.0f);
+			REQUIRE(indexedHit.has_value());
+			CHECK(indexedHit->Owner == (replica ? local : authority));
+			store.Set(local, ClientLocal{});
+			Index(store);
+			const auto freshHit = Raycast(store, ray, 10.0f);
+			REQUIRE(freshHit.has_value());
+			CHECK(freshHit->Owner == (replica ? local : authority));
+			const auto *world = store.Resource<PhysicsWorld>();
+			REQUIRE(world != nullptr);
+			CHECK(world->Pairs().empty() == !replica);
+			const Entity bareLocal = store.CreatePredicted();
+			store.Set(bareLocal, ClientLocal{});
+			store.Set(bareLocal, Collider{});
+			store.Set(bareLocal, Transform{CFrame{Vector3{30.0f, 0.0f, 0.0f}}});
+			Index(store);
+			const auto bareHit = Raycast(store, Ray{Vector3{35.0f, 0.0f, 0.0f}, -Vector3::XAxis}, 10.0f);
+			CHECK(bareHit.has_value() == replica);
+			if (bareHit.has_value()) CHECK(bareHit->Owner == bareLocal);
+		}
+	}
+}
+
+TEST_CASE("same sized local ownership changes refresh cached static colliders", "[physics][query]") {
+	using namespace engine::ecs;
+	const auto instance = Classes::RegisterInstanceRoot();
+	for (const bool replica : {false, true}) {
+		Store store("local-static-membership");
+		PreparePhysicsWorld(store, 4.0f);
+		const Entity firstRoot = store.CreateInstance(instance, "FirstRoot");
+		const Entity secondRoot = store.CreateInstance(instance, "SecondRoot");
+		const Entity first = store.CreateInstance(instance, "First");
+		const Entity second = store.CreateInstance(instance, "Second");
+		REQUIRE(store.SetParent(first, firstRoot));
+		REQUIRE(store.SetParent(second, secondRoot));
+		Collider box;
+		box.Extent = Vector3{0.5f, 0.5f, 0.5f};
+		for (const Entity owner : {first, second})
+			store.Set(owner, box);
+		store.Set(first, Transform{CFrame{Vector3{1.0f, 0.0f, 0.0f}}});
+		store.Set(second, Transform{CFrame{Vector3{-1.0f, 0.0f, 0.0f}}});
+		store.Set(firstRoot, ClientLocal{});
+		const Entity body = store.CreateInstance(instance, "Body");
+		box.Extent.X = 2.0f;
+		store.Set(body, box);
+		store.Set(body, Transform{CFrame{Vector3{0.0f, 0.75f, 0.0f}}});
+		store.Set(body, Motion{});
+		store.SetAdoptOnly(replica);
+		const auto check = [&](Entity sharedHit) {
+			Index(store);
+			const auto hit = Raycast(store, Ray{Vector3{5.0f, 0.0f, 0.0f}, -Vector3::XAxis}, 10.0f);
+			REQUIRE(hit.has_value());
+			CHECK(hit->Owner == (replica ? first : sharedHit));
+			CHECK(store.Resource<PhysicsWorld>()->Pairs().size() == (replica ? 2 : 1));
+			store.ClearChanges();
+		};
+		check(second);
+		store.Remove<ClientLocal>(firstRoot);
+		store.Set(secondRoot, ClientLocal{});
+		check(first);
+		REQUIRE(store.SetParent(first, secondRoot));
+		REQUIRE(store.SetParent(second, firstRoot));
+		check(second);
 	}
 }
 

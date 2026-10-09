@@ -499,13 +499,14 @@ print(string.format(
 -- floor. A camera looking up from underneath sees the half of the ball whose
 -- mirrors are all reflecting the ground.
 
-local camera = Instance.new("Camera")
-camera.Name = "Camera"
-camera.FieldOfView = 60
-camera.FarPlaneZ = 600
-camera.CFrame = CFrame.lookAt(Vector3.new(0, HEIGHT + 4, 46), Vector3.new(0, HEIGHT, 0))
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+demoCamera:SetAttribute('Name', 'Camera')
+demoCamera:SetAttribute('FieldOfView', 60)
+demoCamera:SetAttribute('FarPlaneZ', 600)
+demoCamera:SetAttribute('CFrame', CFrame.lookAt(Vector3.new(0, HEIGHT + 4, 46), Vector3.new(0, HEIGHT, 0)))
 
 -- --- the turn ----------------------------------------------------------------
 --

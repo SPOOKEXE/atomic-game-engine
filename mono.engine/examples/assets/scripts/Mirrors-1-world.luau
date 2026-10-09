@@ -295,12 +295,13 @@ end
 --
 -- An identity rotation looks down -Z, so this faces the north wall - the one
 -- built first and therefore the one that reflects.
-local view = Instance.new("Camera")
-view.Name = "Viewer"
-view.CFrame = CFrame.new(EYE)
-view.FieldOfView = EYE_FOV
-view.Parent = workspace
-workspace.CurrentCamera = view
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+demoCamera:SetAttribute('Name', 'Viewer')
+demoCamera:SetAttribute('CFrame', CFrame.new(EYE))
+demoCamera:SetAttribute('FieldOfView', EYE_FOV)
 
 -- The casters bob, so the shadows move and the reflection moves with them.
 -- Motion is what makes both legible: a still shadow reads as painted-on

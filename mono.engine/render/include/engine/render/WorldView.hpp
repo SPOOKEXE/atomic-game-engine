@@ -10,7 +10,6 @@
 #include <engine/gui/Compile.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/render/WorldPresentation.hpp>
-#include <engine/scene/Storm.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
 #include <array>
@@ -88,13 +87,9 @@ namespace engine::render {
 		float ParticleDelta = 0.0f;
 		// Camera-independent lighting copied from the world.
 		scene::WorldLighting Lighting;
-		// Packed cloud-density snapshot copied from the storm field.
+		// Packed generic cloud-density snapshot supplied by the presentation host.
 		std::optional<scene::CloudDensitySnapshot> CloudDensity;
-		// Field inputs used to invalidate the cached density when a preset changes.
-		std::optional<scene::TornadoParameters> CloudParameters;
-		// Last density rebuild in world time; the volume moves every tick while
-		// its expensive local density pattern changes only four times a second.
-		double CloudBuiltSeconds = -1.0;
+
 		// Renderable instances in presentation order.
 		std::vector<scene::DrawInstance> Instances;
 		// Object labels for capture output.
@@ -119,7 +114,7 @@ namespace engine::render {
 		std::vector<PortalView> Portals;
 		// Detached particle data owned by this packet.
 		ParticleFrame Particles;
-		// Device-local analytical particles. This is a copied request and field,
+		// Device-local generic particles. This is a copied request and field,
 		// never a borrowed ECS row.
 		std::optional<GpuParticleFieldView> GpuParticles;
 	};

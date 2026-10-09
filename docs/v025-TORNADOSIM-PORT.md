@@ -1,36 +1,27 @@
-# TornadoSim engine port plan
+# TornadoSim demo and GPU particle field
 
-## Target
+## Scope
 
-Port the C++ program at `/home/declan/Documents/GitHub/TornadoSim` as closely as the engine renderer and hardware allow. Keep its analytical wind field, simulation behavior, storm controls, audio, and visual layers. The wind and damage systems must be reusable by ordinary engine scenes. The reference's buildings, vegetation, vehicles, and terrain belong to a built-in Luau scripted `.aworld` demo, loaded like `BladeborneDemo.aworld`. Its controls appear in an in-game panel.
+The original port plan targeted a close native port of a C++ tornado simulation: reusable analytical wind, fixed-tick body and joint damage, cloud and audio layers, and reference captures. The current implementation is a scripted `.aworld` demonstration with a generic GPU particle field. The old plan's proposed engine-wide storm model and native physics components are not the interface the demo uses.
 
-The existing `TornadoSim.luau` is a smaller demonstration. It has three EF presets, a simplified field, particle emitters, placed volumes, clouds, rain, lightning, and a short status panel. It does not implement the reference's full EF0 to EF5 and Q0 to Q5 controls, two-cell field, structure connectivity, material damage, spatial collision, cloud density octree, spatial audio, environment streaming, or million-scale GPU particle simulation.
+## Current demo
 
-## Implementation
+[`TornadoSim.aworld`](../mono.engine/examples/assets/worlds/TornadoSim.aworld) carries its server, client, shared Luau modules, authored scene, and controls. `StormControls` defines presets and parameter bounds. `StormField` owns the script-side storm state and sampling functions. The server validates control requests, advances the field, applies body forces and scenery damage through script component schemas, and publishes `Tornado.State` on the authored storm anchor. The world marks that schema as replicated. The client uses the replicated state for presentation, field visualization, audio, camera response, and controls.
 
-1. Record the reference baseline. Build the C++ repository, run its CTest and smoke tests, capture its default and mature-funnel views, and record the 1M and available larger-preset profiles on the current GPU. Keep generated profiles under build directories.
-2. Add the reusable storm model under `mono.engine`: sanitized parameters, EF and Q presets, a prepared two-cell analytical field, lifecycle, visibility and damage queries, and deterministic turbulence. Match the reference equations and tests. Expose authored storm parameters and read-only field queries to Luau so the scene script can configure and query them while the engine runs fixed-tick physics.
-3. Connect the field to engine physics and effects. Apply mass, area, and drag-based forces to affected bodies at a fixed tick; implement attachment failure, material joints, structure connectivity, broadphase contacts, bounces, and vegetation bend. Keep the simulation deterministic and avoid world-crossing pointers.
-4. Port the visible storm layers. Use engine particle emitters for rain, dirt, debris, and mist; use placed fog volumes and cloud/atmosphere lighting for condensation and the anvil. Add a reusable GPU compute particle field for the reference's optional 262k through 50M cosmetic presets, 12 depth slices, and device-local simulation without CPU readback. The default remains 1M. Failed allocation retains the previous working preset; integrated GPUs may use the reference's phased background update. Keep all backend work in the engine's SDL GPU path.
-5. Port cloud density generation as sparse, adaptive data that can feed the renderer and gameplay visibility queries. Reuse the same analytical wind sample for clouds, rain, debris, damage, the vector inset, and audio. Add procedural wind, rain, debris, circulation, and delayed thunder audio through the engine audio graph.
-6. Add `TornadoSim.aworld` with embedded server, client, and shared Luau sources in the same format as `BladeborneDemo.aworld`. The scripts author the reference scene and its in-game controls: EF0 to EF5, Q0 to Q5, Custom, parameter sliders, layer switches, pause/reset/lifecycle, camera movement and shake, streamed scenery, three material-aware buildings, trees, signs, roof panels, vehicles, and a field/vector inset. Preserve the original's default camera and storm composition for visual comparison. Retire the smaller standalone `TornadoSim.luau` after the world replaces it.
+The demo's force, joint, and vegetation records are ordinary script-defined components named `Tornado.Response`, `Tornado.Link`, and `Tornado.Vegetation`. Luau reads and writes those records directly; the world does not depend on native storm component registration or a native storm force pass.
+
+## Generic GPU particles
+
+The storm visuals use the general `scene::GpuParticleField` component and its `GpuParticleField` instance class. The API accepts a layer mask, requested population, local bounds, velocity response, and three generic visual styles. Each style has a colour, opacity, size, and constant acceleration.
+
+`SetSpawnSamples` accepts a packed buffer of bounded initial conditions: local-space position, lifetime, velocity, and layer index. These samples seed and recycle the device-local population. The authored samples and style settings are saved; live particle positions stay on the GPU and are not written into world snapshots. The same API can drive effects unrelated to tornadoes.
 
 ## Validation
 
-- Compare field samples, presets, lifecycle, damage, cloud density, and fixed-step outcomes against the C++ reference with deterministic fixtures.
-- Test overlapping local volumes, clouds, sun rays, lightning, rain, and debris in scene captures. Compile and execute the compute shader path, including preset resizing, failure fallback, and zero readback.
-- Run headless smoke and GPU tests at supported presets, plus the existing reference visual capture and matched engine camera captures. Compare the funnel shape, motion, cloud deck, rain veil, ground mist, lightning, and scenery in default and mature views.
-- Add a `just` job for every new benchmark, print benchmark results to the terminal, and keep build artifacts under the build directory. Measure CPU fixed-step, collision scaling, GPU compute, frame time, and memory in `release` with the device and preset named.
-- Use Studio to open, edit, run, and play the completed demo. Exercise storm controls and object classes, then fix issues the session reproduces.
+The world-level suite `engine.examples.tornado-sim` checks that the authored asset carries its script sources, controls, scenery, audio, and GPU field setup. `engine.scene.gpuparticlefield` covers authored field validation, spawn-sample encoding, and supported population presets. `engine.render.gpuparticlefieldgpu` covers device execution and rendering behavior.
 
-## Review gates
+GPU population size depends on device memory. The demo exposes fixed presets and the field retains its previous working population if a requested allocation cannot be made. Visual comparison with the original standalone Vulkan program remains renderer- and hardware-dependent.
 
-The original uses direct Vulkan while the engine uses SDL GPU. The same appearance and behavior are the target, but exact pixels and identical GPU timings are not portable across these renderers. The 50M preset requires about 1.6 GiB in the reference and must stay optional with a clear allocation failure path.
+## Historical comparison note
 
-The user approved this plan. Lighting capabilities and their stress tests are tracked separately.
-
-## Verification record
-
-The C++ reference passes all three CTest suites. Engine fixtures cover field samples, EF and Q presets, lifecycle, damage, and the 1M default. The Vulkan particle test covers depth-sliced drawing, preset resizing, and a forced 50M allocation failure that retains the previous working field without a CPU particle readback.
-
-Default and mature funnel captures were compared; the matched mature capture used 1200 frames at 1440 by 900 pixels. The mature engine camera was aligned to the reference horizon and funnel framing. Bounded, depth-ordered condensation drawing and broader billow blending removed the detached cap and made the middle of the funnel more continuous. The remaining silhouette texture and scenery differ between the SDL GPU engine scene and the direct Vulkan reference.
+An earlier comparison recorded a 1200-frame mature-funnel capture at 1440 by 900 pixels. It found differences in silhouette texture and scenery between the standalone Vulkan reference and the engine renderer. That note records the earlier comparison target; it does not claim pixel parity for the current scripted world.

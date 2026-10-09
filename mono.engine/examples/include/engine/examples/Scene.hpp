@@ -31,6 +31,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace engine::script {
@@ -110,6 +111,15 @@ namespace engine::examples {
 	// @return How many top-level modules were mounted.
 	// @since v0.17
 	size_t MountSceneLibraries(ecs::Store &store, ecs::Entity script, std::string_view scene);
+
+	// Mounts a demo's matching client camera script under StarterPlayerScripts.
+	// The template stays inert until a player's local script copy runs. Its
+	// source is filed with the world so saved demos can move between machines.
+	//
+	// @param store The furnished world receiving the inert template.
+	// @param builderPath The demo builder's source path.
+	// @return The template, or null when no companion or container exists.
+	ecs::Entity MountDemoCamera(ecs::Store &store, std::string_view builderPath);
 
 	// Declares the components the example scenes' own systems read.
 	//

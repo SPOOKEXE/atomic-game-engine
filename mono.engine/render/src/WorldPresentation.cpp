@@ -274,6 +274,7 @@ namespace engine::render {
 
 		uint64_t ContentOwnerSignature(const View &view) {
 			uint64_t signature = FoldPresentation(0, view.ContentOwner.Id());
+			signature = FoldPresentation(signature, view.ImageGraphWorldName.Id());
 			signature = FoldPresentation(signature, view.ForeignContentOwners.size());
 			for (const auto &binding : view.ForeignContentOwners) {
 				signature = FoldPresentation(signature, binding.World.Id());
@@ -346,6 +347,44 @@ namespace engine::render {
 				  frame.QuaternionW})
 				signature = FoldPresentationObject(signature, value == 0 ? 0.0f : value);
 			return signature;
+		}
+
+		uint64_t FoldGpuParticleField(uint64_t signature, const GpuParticleFieldView &packet) {
+			const auto &field = packet.Field;
+			signature = FoldPresentation(signature, packet.Source.Id);
+			signature = FoldPresentation(signature, packet.DefinitionRevision);
+			signature = FoldPresentationObject(signature, packet.Seconds);
+			signature = FoldCFrame(signature, packet.Frame);
+			signature = FoldPresentation(signature, field.Enabled);
+			signature = FoldPresentation(signature, field.Layers);
+			signature = FoldPresentation(signature, field.RequestedCount);
+			signature = FoldPresentation(signature, field.Seed);
+			signature = FoldPresentationObject(signature, field.HalfExtent);
+			signature = FoldPresentationObject(signature, field.VelocityResponse);
+			for (const auto &style : field.Styles) {
+				signature = FoldPresentationObject(signature, style.Colour);
+				signature = FoldPresentationObject(signature, style.Alpha);
+				signature = FoldPresentationObject(signature, style.Size);
+				signature = FoldPresentationObject(signature, style.Acceleration);
+			}
+			signature = FoldPresentation(signature, field.SpawnSamples.size());
+			// Collected packets carry the ECS epoch. Hand-built views have no such
+			// owner and must sign their samples directly to notice authored edits.
+			if (packet.DefinitionRevision == 0)
+				signature = FoldPresentationSpan(
+					signature, std::span<const scene::GpuParticleSpawnSample>(field.SpawnSamples)
+				);
+			const auto &flow = packet.ForceField;
+			signature = FoldCFrame(signature, flow.Frame);
+			signature = FoldPresentationObject(signature, flow.Vector);
+			signature = FoldPresentationObject(signature, flow.HalfExtent);
+			signature = FoldPresentationObject(signature, flow.Axis);
+			signature = FoldPresentation(signature, flow.Source.Id);
+			signature = FoldPresentationObject(signature, flow.Radial);
+			signature = FoldPresentationObject(signature, flow.Tangential);
+			signature = FoldPresentationObject(signature, flow.Falloff);
+			signature = FoldPresentation(signature, flow.LocalSpace);
+			return FoldPresentation(signature, flow.TwoDimensional);
 		}
 
 		uint64_t FoldVolumeState(uint64_t signature, const scene::VolumeState &volume) {
@@ -465,7 +504,7 @@ namespace engine::render {
 	}
 
 	uint64_t ParticleVisibilitySignature(const View &view) {
-		if (view.Particles.empty() && view.RibbonRuns.empty()) {
+		if (view.Particles.empty() && view.RibbonRuns.empty() && !view.GpuParticles) {
 			return 0;
 		}
 
@@ -474,11 +513,15 @@ namespace engine::render {
 		signature = FoldPresentation(signature, ProjectionSignature(view));
 		signature = FoldPresentation(signature, view.World);
 		signature = FoldPresentation(signature, view.WorldName.Id());
+		signature = FoldPresentation(signature, view.ParticleWorld);
+		signature = FoldPresentation(signature, view.ParticleWorldName.Id());
 		signature = FoldPresentation(signature, ContentOwnerSignature(view));
 		signature = FoldPresentation(signature, view.ParticleLayoutRevision);
 		signature = FoldPresentation(signature, view.ParticleResidentRevision);
 		signature = FoldPresentation(signature, view.Particles.size());
 		signature = FoldPresentation(signature, view.ParticleSeams.empty() ? 0u : 1u);
+		// Device positions can enter the frustum without changing CPU residency.
+		if (view.GpuParticles) signature = FoldGpuParticleField(signature, *view.GpuParticles);
 		return signature;
 	}
 
@@ -594,15 +637,26 @@ namespace engine::render {
 		}
 
 		uint64_t &particles = signatures.Particles;
-		const bool particleLayer = !view.Particles.empty() || !view.RibbonRuns.empty();
+		const bool particleLayer =
+			!view.Particles.empty() || !view.RibbonRuns.empty() || view.GpuParticles.has_value();
 		if (particleLayer) {
 			particles = FoldPresentation(particles, projection);
 			particles = FoldPresentation(particles, contentOwners);
+			particles = FoldPresentation(particles, view.ParticleWorld);
+			particles = FoldPresentation(particles, view.ParticleWorldName.Id());
 			particles = FoldPresentation(particles, view.ParticleRevision);
 			particles = FoldPresentation(particles, view.ParticleLayoutRevision);
 			particles = FoldPresentation(particles, view.ParticleResidentRevision);
 			particles = FoldPresentationSpan(particles, view.RibbonRuns);
 			particles = FoldPresentationSpan(particles, view.RibbonVertices);
+			if (view.GpuParticles) {
+				particles = FoldPresentation(particles, view.World);
+				particles = FoldPresentation(particles, view.WorldName.Id());
+				particles = FoldCFrame(particles, view.CameraFrame);
+				particles = FoldPresentationObject(particles, view.Camera);
+				particles = FoldWorldLighting(particles, lighting);
+				particles = FoldGpuParticleField(particles, *view.GpuParticles);
+			}
 		}
 
 		uint64_t &portals = signatures.Portals;
@@ -1312,6 +1366,7 @@ namespace engine::render {
 				batch.Runtime = &system->RuntimeStates[slot.Index];
 				batch.Index = slot.Index;
 				batch.Texture = emitter.Texture;
+				batch.SourceWorld = sourceWorld;
 				batch.FlipbookSide = static_cast<float>(effects::FlipbookSide(emitter.Flipbook));
 				batch.ZOffset = emitter.ZOffset;
 				batch.LightEmission = emitter.LightEmission;

@@ -31,7 +31,7 @@ namespace engine::script {
 	// Format version for the framed request.
 	inline constexpr uint16_t REMOTE_EVENT_VERSION = 1;
 
-	// Encodes one client request. An empty event path or an over-limit payload
+	// Encodes one client request. An empty event path or an over-limit frame
 	// is refused before it reaches a transport outbox.
 	// @param event Full path of the target RemoteEvent.
 	// @param payload Application bytes to copy into the envelope.

@@ -11,6 +11,8 @@
 #include <engine/scene/Part.hpp>
 #include <engine/script/DataScriptPackage.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
+#include <engine/script/Instances.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/DataFactory.hpp>
@@ -175,13 +177,30 @@ namespace {
 			});
 		}
 
-		engine::script::DataScriptPackageTransactionDependencies ProductDependencies() {
+		engine::script::DataScriptPackageTransactionDependencies
+		ProductDependencies(std::string cameraProgram = {}) {
 			auto dependencies = Dependencies();
-			dependencies.InstallSystems = [](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+			dependencies.InstallSystems = [cameraProgram = std::move(cameraProgram)](
+											  engine::ecs::Store &store, engine::ecs::Scheduler &systems
+										  ) {
 				client::InstallPresentation(store, systems);
 				(void)client::RestoreDefaultCameraMovement(store, systems);
 				(void)client::InstallDefaultCamera(store, systems);
 				client::InstallClientWorldSystems(store, systems);
+				if (!cameraProgram.empty()) {
+					const engine::core::Name path("package-viewer.client.luau");
+					if (!store.HasResource<engine::script::SourceCache>())
+						store.SetResource(engine::script::SourceCache{});
+					store.ResourceMutable<engine::script::SourceCache>()->Set(path, cameraProgram);
+					const auto source =
+						store.CreatePredictedInstance(engine::script::LocalScriptClass(), "PackageViewer");
+					store.Set(source, engine::ecs::ClientLocal{});
+					engine::script::SetSourcePath(store, source, path);
+					const auto runtime = engine::script::MakeRuntime(store, engine::script::Language::Luau);
+					const bool ran = runtime->RunInstance(source);
+					INFO(runtime->LastError());
+					REQUIRE(ran);
+				}
 			};
 			return dependencies;
 		}
@@ -384,12 +403,12 @@ TEST_CASE(
 }
 
 TEST_CASE(
-	"client transaction leaves a package-authored active camera fixed after system install",
+	"client transaction installs a local presentation camera after authoritative package work",
 	"[client][data-script-package]"
 ) {
 	Fixture fixture;
 	fixture.PrepareClientWorld();
-	const std::string source = R"(
+	const std::string cameraProgram = R"(
 local workspace = game:GetService("Workspace")
 local camera = Instance.new("Camera")
 camera.CFrame = CFrame.new(1, 2, 3)
@@ -399,7 +418,7 @@ workspace.CurrentCamera = camera
 return
 )";
 	const DataScriptResult result = engine::script::ExecuteDataScriptPackageTransaction(
-		fixture.ProductDependencies(), fixture.Request(source, true)
+		fixture.ProductDependencies(cameraProgram), fixture.Request("return", true)
 	);
 	REQUIRE(result.Ran);
 	fixture.Worlds.Enter(
@@ -412,7 +431,8 @@ return
 			CHECK(before->Frame.Position.X == 1.0f);
 			CHECK(before->Frame.Position.Y == 2.0f);
 			CHECK(before->Frame.Position.Z == 3.0f);
-			CHECK_FALSE(systems.HasSystem("move-camera", engine::ecs::Phase::Simulation));
+			CHECK(store.IsPredicted(active->Entity));
+			CHECK(engine::ecs::IsClientLocalInstance(store, active->Entity));
 
 			systems.Tick(store, 1.0f / 60.0f);
 			const auto *after = store.Get<engine::scene::Transform>(active->Entity);
@@ -430,13 +450,16 @@ TEST_CASE(
 ) {
 	Fixture fixture;
 	fixture.PrepareClientWorld();
-	const std::string source = R"(
+	const std::string cameraProgram = R"(
 local workspace = game:GetService("Workspace")
 local camera = Instance.new("Camera")
 camera.CFrame = CFrame.new(4, 5, 6)
 camera.Parent = workspace
 workspace.CurrentCamera = camera
-
+return
+)";
+	const std::string source = R"(
+local workspace = game:GetService("Workspace")
 local part = Instance.new("Part")
 part.Name = "FencePart"
 part.CFrame = CFrame.new(1, 2, 3)
@@ -447,8 +470,9 @@ part.Parent = workspace
 return
 )";
 	const DataScriptRequest request = fixture.Request(source, true);
-	const DataScriptResult result =
-		engine::script::ExecuteDataScriptPackageTransaction(fixture.ProductDependencies(), request);
+	const DataScriptResult result = engine::script::ExecuteDataScriptPackageTransaction(
+		fixture.ProductDependencies(cameraProgram), request
+	);
 	REQUIRE(result.Ran);
 	CHECK(result.Lifecycle.Clock.Tick == request.ExpectedTick);
 

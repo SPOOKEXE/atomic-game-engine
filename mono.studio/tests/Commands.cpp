@@ -122,13 +122,12 @@ namespace {
 			return count;
 		}
 
-		// The first child of a parent, which is how a rebuilt root is reached -
-		// the handle it had before the rebuild is not the handle it has now.
-		Entity FirstChild(Entity parent) {
+		// Finds a named child after undo rebuilds it with a new handle.
+		Entity FindChild(Entity parent, std::string_view name) {
 			Entity first = NULL_ENTITY;
 			Worlds.Enter(Scene, [&](Store &store) {
-				store.EachChild(parent, [&first](Entity child) {
-					if (first == NULL_ENTITY) {
+				store.EachChild(parent, [&first, &store, name](Entity child) {
+					if (first == NULL_ENTITY && store.InstanceNameOf(child) == Name(name)) {
 						first = child;
 					}
 				});
@@ -218,16 +217,16 @@ TEST_CASE("redoing an insert brings it back under the same parent", "[studio][co
 	const Entity workspace = fixture.Workspace();
 	const Entity part = fixture.Insert(workspace, "Part");
 
-	REQUIRE(fixture.ChildCount(workspace) == 1);
+	REQUIRE(fixture.ChildCount(workspace) == 2);
 	REQUIRE(fixture.Log.Undo());
-	REQUIRE(fixture.ChildCount(workspace) == 0);
+	REQUIRE(fixture.ChildCount(workspace) == 1);
 
 	REQUIRE(fixture.Log.Redo());
 
 	// **The count, not the handle.** A rebuild produces a new entity, which is
 	// the whole reason the log does not hold one - asserting the old handle came
 	// back would be asserting something the design says is impossible.
-	CHECK(fixture.ChildCount(workspace) == 1);
+	CHECK(fixture.ChildCount(workspace) == 2);
 	CHECK_FALSE(fixture.Alive(part));
 }
 
@@ -241,14 +240,14 @@ TEST_CASE("undoing a delete rebuilds the subtree, children and all", "[studio][c
 	REQUIRE(fixture.ChildCount(parent) == 2);
 
 	fixture.Destroy(parent, "Parent");
-	REQUIRE(fixture.ChildCount(workspace) == 0);
-
-	REQUIRE(fixture.Log.Undo());
 	REQUIRE(fixture.ChildCount(workspace) == 1);
 
-	// The rebuilt root is a new handle, so the children are counted through the
-	// parent the workspace now has rather than through the one that was deleted.
-	const Entity rebuilt = fixture.FirstChild(workspace);
+	REQUIRE(fixture.Log.Undo());
+	REQUIRE(fixture.ChildCount(workspace) == 2);
+
+	// The rebuilt root is a new handle. Resolve it by name, skipping the
+	// protected Terrain child that remains under Workspace throughout the edit.
+	const Entity rebuilt = fixture.FindChild(workspace, "Parent");
 
 	REQUIRE(rebuilt != NULL_ENTITY);
 	CHECK(fixture.ChildCount(rebuilt) == 2);
@@ -541,7 +540,7 @@ TEST_CASE("a recording is one step however many edits are in it", "[studio][comm
 	fixture.Insert(workspace, "A");
 	fixture.Insert(workspace, "B");
 	fixture.Insert(workspace, "C");
-	REQUIRE(fixture.ChildCount(workspace) == 3);
+	REQUIRE(fixture.ChildCount(workspace) == 4);
 
 	REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Commit));
 	CHECK_FALSE(fixture.Log.IsRecordingInProgress());
@@ -550,11 +549,11 @@ TEST_CASE("a recording is one step however many edits are in it", "[studio][comm
 	// Ctrl+Z for one action, and three messages on the wire for one action.
 	CHECK(fixture.Log.Depth() == 3);
 	REQUIRE(fixture.Log.Undo());
-	CHECK(fixture.ChildCount(workspace) == 0);
+	CHECK(fixture.ChildCount(workspace) == 1);
 	CHECK_FALSE(fixture.Log.CanUndo());
 
 	REQUIRE(fixture.Log.Redo());
-	CHECK(fixture.ChildCount(workspace) == 3);
+	CHECK(fixture.ChildCount(workspace) == 4);
 	CHECK_FALSE(fixture.Log.CanRedo());
 }
 
@@ -582,21 +581,21 @@ TEST_CASE("cancelling a recording puts back what it changed", "[studio][commands
 	const Entity workspace = fixture.Workspace();
 
 	fixture.Insert(workspace, "Kept");
-	REQUIRE(fixture.ChildCount(workspace) == 1);
+	REQUIRE(fixture.ChildCount(workspace) == 2);
 	const size_t before = fixture.Log.Depth();
 
 	const auto recording = fixture.Log.TryBeginRecording("Insert two");
 	REQUIRE(recording.has_value());
 	fixture.Insert(workspace, "A");
 	fixture.Insert(workspace, "B");
-	REQUIRE(fixture.ChildCount(workspace) == 3);
+	REQUIRE(fixture.ChildCount(workspace) == 4);
 
 	// **The identifier is ignored for a cancel**, which is Roblox's rule and is
 	// the one case where not having kept it is the normal situation: a plugin
 	// abandoning its own edit knows it has one open.
 	REQUIRE(fixture.Log.FinishRecording({}, studio::FinishOperation::Cancel));
 
-	CHECK(fixture.ChildCount(workspace) == 1);
+	CHECK(fixture.ChildCount(workspace) == 2);
 	CHECK(fixture.Log.Depth() == before);
 
 	// Nothing on the redo stack. A cancel is "this never happened", not "step
@@ -605,7 +604,7 @@ TEST_CASE("cancelling a recording puts back what it changed", "[studio][commands
 
 	// And the edit before it is still reachable.
 	REQUIRE(fixture.Log.Undo());
-	CHECK(fixture.ChildCount(workspace) == 0);
+	CHECK(fixture.ChildCount(workspace) == 1);
 }
 
 TEST_CASE("appending folds a recording into the step before it", "[studio][commands]") {
@@ -620,13 +619,13 @@ TEST_CASE("appending folds a recording into the step before it", "[studio][comma
 	fixture.Insert(workspace, "Third");
 	REQUIRE(fixture.Log.FinishRecording(*recording, studio::FinishOperation::Append));
 
-	REQUIRE(fixture.ChildCount(workspace) == 3);
+	REQUIRE(fixture.ChildCount(workspace) == 4);
 	CHECK(fixture.Log.Depth() == 3);
 
 	// One undo, because the recording was folded into the waypoint before it -
 	// which is what a drag that resumes should feel like.
 	REQUIRE(fixture.Log.Undo());
-	CHECK(fixture.ChildCount(workspace) == 0);
+	CHECK(fixture.ChildCount(workspace) == 1);
 	CHECK_FALSE(fixture.Log.CanUndo());
 }
 
@@ -643,7 +642,7 @@ TEST_CASE("a waypoint merges everything since the previous cut", "[studio][comma
 	CHECK(fixture.Log.NextUndo() == "Insert two parts");
 
 	REQUIRE(fixture.Log.Undo());
-	CHECK(fixture.ChildCount(workspace) == 0);
+	CHECK(fixture.ChildCount(workspace) == 1);
 	CHECK_FALSE(fixture.Log.CanUndo());
 
 	// **The editor never calls it, and is unaffected.** Two inserts with no cut
@@ -654,7 +653,7 @@ TEST_CASE("a waypoint merges everything since the previous cut", "[studio][comma
 	uncut.Insert(theirs, "A");
 	uncut.Insert(theirs, "B");
 	REQUIRE(uncut.Log.Undo());
-	CHECK(uncut.ChildCount(theirs) == 1);
+	CHECK(uncut.ChildCount(theirs) == 2);
 }
 
 TEST_CASE("a cut cannot merge across an undo", "[studio][commands]") {
@@ -671,7 +670,7 @@ TEST_CASE("a cut cannot merge across an undo", "[studio][commands]") {
 	// waypoint that no longer holds what it did when it was made.
 	fixture.Log.SetWaypoint("Insert C");
 	REQUIRE(fixture.Log.Undo());
-	CHECK(fixture.ChildCount(workspace) == 1);
+	CHECK(fixture.ChildCount(workspace) == 2);
 }
 
 TEST_CASE("resetting collapses the history and reverts nothing", "[studio][commands]") {
@@ -690,7 +689,7 @@ TEST_CASE("resetting collapses the history and reverts nothing", "[studio][comma
 	CHECK_FALSE(fixture.Log.CanRedo());
 
 	// A floor rather than a restore. What is on screen is what was on screen.
-	CHECK(fixture.ChildCount(workspace) == 1);
+	CHECK(fixture.ChildCount(workspace) == 2);
 }
 
 TEST_CASE("a disabled log records nothing and forgets what it had", "[studio][commands]") {
@@ -790,7 +789,7 @@ TEST_CASE("a cancelled recording is never published", "[studio][commands]") {
 	// to apply - and telling them would be telling them about a state that
 	// never existed anywhere.
 	CHECK(commits == 0);
-	CHECK(fixture.ChildCount(workspace) == 0);
+	CHECK(fixture.ChildCount(workspace) == 1);
 }
 
 TEST_CASE("a foreign waypoint lands without entering this author's history", "[studio][commands]") {
@@ -825,7 +824,7 @@ TEST_CASE("a foreign waypoint lands without entering this author's history", "[s
 	}
 
 	CHECK(peer.Log.ApplyForeign(sent) == 2);
-	CHECK(peer.ChildCount(peer.Workspace()) == 2);
+	CHECK(peer.ChildCount(peer.Workspace()) == 3);
 
 	// **Applied and not recorded.** Ctrl+Z is a promise about what you did, and
 	// an editor that reversed a colleague's change because you pressed it once

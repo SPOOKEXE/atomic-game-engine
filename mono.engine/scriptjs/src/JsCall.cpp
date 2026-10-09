@@ -24,6 +24,8 @@
 #include "JsBindings.hpp"
 
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Instance.hpp>
+#include <engine/script/InstanceShim.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/Subtree.hpp>
 
@@ -180,7 +182,7 @@ namespace engine::script {
 			}
 
 			const HostRole &Role() const override {
-				return JsOf(Context).Role;
+				return JsExecutionRole(Context);
 			}
 
 			const std::shared_ptr<DataCaptureBridge> &DataCapture() const override {
@@ -734,10 +736,12 @@ namespace engine::script {
 
 			void ReturnInstances(std::span<const Entity> values) override {
 				JSValue array = JS_NewArray(Context);
-				for (size_t index = 0; index < values.size(); index++) {
-					JS_SetPropertyUint32(
-						Context, array, static_cast<uint32_t>(index), MakeJsInstance(Context, values[index])
-					);
+				uint32_t written = 0;
+				const auto &role = Role();
+				const bool client = role.Client && !role.Server;
+				for (const Entity value : values) {
+					if (!InstanceVisibleToScript(World(), value, client)) continue;
+					JS_SetPropertyUint32(Context, array, written++, MakeJsInstance(Context, value));
 				}
 				Set(array);
 			}
@@ -809,6 +813,8 @@ namespace engine::script {
 			}
 
 			void ReturnInstance(ecs::Entity value) override {
+				const auto &role = Role();
+				value = InstanceForScriptRead(World(), value, role.Client && !role.Server);
 				// Nil for a null, which this language spells `null` - see the
 				// interface. `MakeJsInstance` makes the same call.
 				Set(MakeJsInstance(Context, value));
@@ -975,6 +981,10 @@ namespace engine::script {
 				if (call.Subject() == ecs::NULL_ENTITY) {
 					call.Raise("not an instance");
 				}
+				const auto &role = call.Role();
+				const bool client = call.World().AdoptOnly() || (role.Client && !role.Server);
+				if (!client && ecs::IsClientLocalInstance(call.World(), call.Subject()))
+					call.Raise("client-owned instances are private to client execution");
 				NeutralInstanceMethods()[static_cast<size_t>(magic)].Function(call);
 			} catch (const JsRaised &) {
 				return JS_EXCEPTION;
@@ -1157,7 +1167,7 @@ namespace engine::script {
 			const bool accepted = completion.Result == scene::EditableMeshCommit::Applied ||
 								  completion.Result == scene::EditableMeshCommit::Unchanged;
 			JSValue argument = JS_NewBool(context, accepted);
-			JSValue result = JS_Call(context, Held(context, resolver), JS_UNDEFINED, 1, &argument);
+			JSValue result = InvokeJsCallback(context, resolver, 1, &argument);
 			JS_FreeValue(context, argument);
 			if (JS_IsException(result) && firstError.empty()) {
 				firstError = "a resumed EditableMesh.SetGeometry failed";
@@ -1203,7 +1213,7 @@ namespace engine::script {
 				firstError = completion.Error;
 			}
 
-			JSValue result = JS_Call(context, Held(context, resolver), JS_UNDEFINED, 1, &value);
+			JSValue result = InvokeJsCallback(context, resolver, 1, &value);
 			JS_FreeValue(context, value);
 			if (JS_IsException(result) && firstError.empty()) {
 				firstError = "a resumed compute job failed";

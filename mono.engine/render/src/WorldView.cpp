@@ -1,11 +1,11 @@
 #include "EnvironmentModes.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/gui/Components.hpp>
-#include <engine/physics/Storm.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/SpatialCanvas.hpp>
@@ -143,6 +143,8 @@ namespace engine::render {
 		view.RibbonRuns = camera.Ribbons.Runs;
 		view.Particles = frame.Particles.Batches;
 		view.ParticleSeams = frame.Particles.Seams;
+		view.ParticleWorld = binding.World;
+		view.ParticleWorldName = frame.Name;
 		view.ParticleRevision = frame.Particles.Revision;
 		view.ParticleLayoutRevision = frame.Particles.LayoutRevision;
 		view.ParticleResidentRevision = frame.Particles.ResidentRevision;
@@ -150,6 +152,11 @@ namespace engine::render {
 		view.ParticleDelta = frame.ParticleDelta;
 		view.ParticleBlocks = frame.Particles.BlockCount;
 		view.GpuParticles = frame.GpuParticles;
+		if (view.GpuParticles)
+			core::Metrics::Count(
+				"render.gpu_particle_field.sample_bind_bytes",
+				view.GpuParticles->Field.SpawnSamples.size() * sizeof(scene::GpuParticleSpawnSample)
+			);
 		view.Portals = frame.Portals;
 		view.EyeImage = 0;
 		view.EyeTransparentImages = {};
@@ -173,62 +180,36 @@ namespace engine::render {
 		frame.Tick = time.Tick;
 		frame.Seconds = time.Elapsed;
 		frame.ParticleDelta = advanced ? time.Delta : 0.0f;
-		frame.GpuParticles.reset();
-		frame.Lighting = scene::LightingOf(store);
-		if (newWorld) {
-			frame.CloudDensity.reset();
-			frame.CloudParameters.reset();
-		}
-		if (const auto *storm = physics::StormOf(store)) {
-			bool cloudInputsChanged = false;
-			if (frame.CloudParameters) {
-				auto previous = *frame.CloudParameters;
-				previous.Energy = storm->State.Parameters.Energy;
-				const float energyChange =
-					std::abs(frame.CloudParameters->Energy - storm->State.Parameters.Energy);
-				// Lifecycle energy evolves every tick. Rebuild immediately for a
-				// changed preset or a paused edit, and at a visible energy step.
-				cloudInputsChanged = previous != storm->State.Parameters || energyChange >= 0.05f ||
-									 (frame.CloudBuiltSeconds == time.Elapsed && energyChange > 0.0f);
-			}
-			store.Each<const scene::GpuParticleField>([&](ecs::Entity, const scene::GpuParticleField &field) {
-				if (!frame.GpuParticles.has_value()) {
-					frame.GpuParticles = GpuParticleFieldView{
-						field, storm->State.Parameters, storm->State.Position, storm->State.ElapsedSeconds
-					};
-				}
-			});
-			if (!frame.CloudDensity || cloudInputsChanged || time.Elapsed < frame.CloudBuiltSeconds ||
-				time.Elapsed - frame.CloudBuiltSeconds >= 0.25) {
-				ENGINE_PROFILE_CAT("storm cloud density build", core::ProfileCategory::Render);
-				frame.CloudBuiltSeconds = time.Elapsed;
-				frame.CloudParameters = storm->State.Parameters;
-				frame.CloudDensity.reset();
-				const scene::PreparedTornadoField field = scene::PrepareTornadoField(storm->State.Parameters);
-				const float extent = field.Parameters.InfluenceRadius;
-				const scene::CloudDensityOctreeConfig config{
-					.RootMinimum = {-extent, 0.0f, -extent},
-					.RootSize = {extent * 2.0f, field.Parameters.TopHeight * 1.16f, extent * 2.0f},
-					.MaximumDepth = 6,
-				};
-				if (auto tree = scene::CloudDensityOctree::Create(config)) {
-					const scene::CloudDensityBuildStats built = scene::BuildCloudDensity(
-						*tree, field, storm->State.ElapsedSeconds, {.CoarseDepth = 4, .FineDepth = 6}
+		bool fieldCollected = false;
+		store.Observe<scene::GpuParticleField>();
+		store.Each<const scene::GpuParticleField, const scene::Transform>(
+			[&](ecs::Entity instance,
+				const scene::GpuParticleField &field,
+				const scene::Transform &transform) {
+				if (!fieldCollected && field.Enabled && !field.SpawnSamples.empty() &&
+					scene::ValidGpuParticleField(field)) {
+					// Refresh the owned packet in place so its sample capacity survives each tick.
+					if (!frame.GpuParticles) frame.GpuParticles.emplace();
+					auto &packet = *frame.GpuParticles;
+					packet.Field = field;
+					packet.Frame = transform.Frame;
+					packet.ForceField = scene::ResolveVectorField(store, instance);
+					packet.Source = instance;
+					packet.DefinitionRevision = store.ComponentChangeVersion<scene::GpuParticleField>() + 1;
+					packet.Seconds = time.Elapsed;
+					fieldCollected = true;
+					core::Metrics::Count(
+						"render.gpu_particle_field.sample_collect_bytes",
+						field.SpawnSamples.size() * sizeof(scene::GpuParticleSpawnSample)
 					);
-					if (built.Nodes != 0) {
-						frame.CloudDensity = scene::CloudDensitySnapshot{
-							.Centre = storm->State.Position,
-							.Config = config,
-							.Nodes = tree->GpuNodes(),
-						};
-					}
 				}
 			}
-			if (frame.CloudDensity) frame.CloudDensity->Centre = storm->State.Position;
-		} else {
-			frame.CloudDensity.reset();
-			frame.CloudParameters.reset();
-		}
+		);
+		if (!fieldCollected) frame.GpuParticles.reset();
+
+		frame.Lighting = scene::LightingOf(store);
+		if (newWorld) frame.CloudDensity.reset();
+
 		// An inactive cloud clock cannot change the captured pixels.
 		if (EnvironmentModesOf(frame.Lighting.EnvironmentState).Clouds == 0 ||
 			frame.Lighting.EnvironmentState.CloudLayer.WindSpeed <= 0)

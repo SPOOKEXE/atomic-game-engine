@@ -56,6 +56,8 @@ namespace engine::script {
 		// @param callback The VM's name for the callable. The table takes it and
 		//                 the caller must not release it.
 		void Add(std::string_view topic, CallbackRef callback);
+		// stop a source-owned listener while the world may keep its bus subscription.
+		bool DropCallback(CallbackRef callback);
 
 		// Who is listening to one topic, in subscription order.
 		//
@@ -69,12 +71,6 @@ namespace engine::script {
 		bool Empty() const {
 			return Topics.empty();
 		}
-
-		// **There is no `Clear` and no release walk**, unlike `SignalTable` and
-		// `TaskQueue`. A subscription lasts as long as the VM does - there is no
-		// unsubscribe for the same reason - so the only moment every reference
-		// would be handed back is the one where the whole VM is being freed and
-		// the registry goes with it.
 
 	  private:
 		// Keyed by topic, because that is what a delivery carries: a hash per

@@ -3,7 +3,6 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -29,7 +28,6 @@ namespace {
 		explicit RuntimeFixture(const size_t operations) : Operations(operations) {
 			engine::scene::EnsureClassTree();
 			engine::scene::RegisterSceneComponents();
-			engine::physics::RegisterPhysicsClasses();
 			Runtime = engine::script::MakeJavaScriptRuntime(World);
 			if (!Runtime->Run(
 					"globalThis.benchPart = Instance.new('Part'); "

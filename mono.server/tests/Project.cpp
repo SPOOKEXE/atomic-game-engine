@@ -33,7 +33,7 @@ namespace {
 	namespace fs = std::filesystem;
 
 	// The world loader puts each <Source> child in this cache.
-	constexpr size_t BLADEBORNE_SOURCE_COUNT = 15;
+	constexpr size_t BLADEBORNE_SOURCE_COUNT = 14;
 
 	struct Tree {
 		fs::path Root;

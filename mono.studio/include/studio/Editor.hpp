@@ -3651,6 +3651,7 @@ namespace studio {
 		engine::render::OverlayImage Overlay;
 		engine::render::InterfacePass GameInterface;
 		engine::core::Name GameInterfaceImageOwner;
+		engine::core::Name GameInterfaceImageFallbackOwner;
 		engine::ui::Interface Interface;
 		engine::render::ViewportFrames ViewportImages;
 		engine::core::FrameClock Clock;

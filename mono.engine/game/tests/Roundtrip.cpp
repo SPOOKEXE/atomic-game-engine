@@ -17,6 +17,8 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/scene/Terrain.hpp>
+#include <engine/script/InstanceShim.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
@@ -761,6 +763,68 @@ TEST_CASE("a viewer's own instances are not written into the file", "[game][roun
 	});
 }
 
+TEST_CASE("legacy Workspace terrain properties import onto Workspace.Terrain", "[game][roundtrip][terrain]") {
+	RegisterEverything();
+	Universe universe;
+	const std::string legacy = R"(<World format="3" name="LegacyTerrain">
+		<Item class="Workspace" name="Workspace" id="1">
+			<Property name="TerrainEnabled" type="bool">true</Property>
+			<Property name="TerrainGenerator" type="string">terrain_test.Legacy</Property>
+			<Property name="TerrainSeed" type="int64">-7</Property>
+			<Property name="TerrainChunkSize" type="float">48</Property>
+			<Property name="TerrainViewDistance" type="float">900</Property>
+		</Item>
+	</World>)";
+	std::string error;
+	const WorldId world = engine::game::ReadWorldDocument(universe, legacy, Name("LegacyTerrain"), error);
+	REQUIRE(world.IsValid());
+
+	universe.Enter(world, [](Store &store) {
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		REQUIRE(workspace != NULL_ENTITY);
+		engine::scene::InstallServices(store);
+		Entity terrain = NULL_ENTITY;
+		REQUIRE(store.GetProperty(workspace, Name("Terrain"), &terrain, sizeof(terrain)));
+		REQUIRE(terrain != NULL_ENTITY);
+		const auto *recipe = store.Get<engine::scene::Terrain>(terrain);
+		REQUIRE(recipe != nullptr);
+		CHECK(recipe->Enabled);
+		CHECK(recipe->Generator == Name("terrain_test.Legacy"));
+		CHECK(recipe->Seed == static_cast<uint64_t>(-7));
+		CHECK(recipe->ChunkExtent == 48.0f);
+		CHECK(recipe->ViewDistance == 900.0f);
+		CHECK_FALSE(store.HasResource<engine::scene::Terrain>());
+	});
+}
+
+TEST_CASE(
+	"explicit Workspace.Terrain wins over legacy Workspace terrain properties", "[game][roundtrip][terrain]"
+) {
+	RegisterEverything();
+	Universe universe;
+	const std::string mixed = R"(<World format="3" name="MixedTerrain">
+		<Item class="Workspace" name="Workspace" id="1">
+			<Property name="TerrainEnabled" type="bool">true</Property>
+			<Item class="Terrain" name="Terrain" id="2">
+				<Property name="Enabled" type="bool">false</Property>
+			</Item>
+		</Item>
+	</World>)";
+	std::string error;
+	const WorldId world = engine::game::ReadWorldDocument(universe, mixed, Name("MixedTerrain"), error);
+	REQUIRE(world.IsValid());
+
+	universe.Enter(world, [](Store &store) {
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		engine::scene::InstallServices(store);
+		Entity terrain = NULL_ENTITY;
+		REQUIRE(store.GetProperty(workspace, Name("Terrain"), &terrain, sizeof(terrain)));
+		REQUIRE(terrain != NULL_ENTITY);
+		CHECK_FALSE(store.Get<engine::scene::Terrain>(terrain)->Enabled);
+		CHECK_FALSE(store.HasResource<engine::scene::Terrain>());
+	});
+}
+
 TEST_CASE("a format 1 file keeps its own settings", "[game][roundtrip]") {
 	// **The compatibility that makes the move safe.** A file written before
 	// the settings became an element has them on `<World>`, and a reader that
@@ -1249,7 +1313,58 @@ TEST_CASE("a renamed world keeps its handle and its place", "[game][roundtrip]")
 }
 
 TEST_CASE(
-	"camera follow selection survives documents and internal clone remapping",
+	"imported ordinary cameras stay local while surface cameras remain authored",
+	"[game][roundtrip][camera-local]"
+) {
+	RegisterEverything();
+	Store store("imported-local-camera");
+	std::string error;
+	const Entity rig = engine::game::ReadInstanceDocument(
+		store,
+		R"(<Instance format="3"><Item class="Model" name="Rig" id="1">
+<Item class="Camera" name="Camera" id="2"><Item class="Part" name="LocalChild" id="3" /></Item>
+<Item class="SurfaceCamera" name="Surface" id="4" />
+</Item></Instance>)",
+		NULL_ENTITY,
+		error
+	);
+	INFO(error);
+	REQUIRE(store.Alive(rig));
+	const Entity camera = store.FindFirstChild(rig, "Camera");
+	const Entity surface = store.FindFirstChild(rig, "Surface");
+	REQUIRE(store.IsPredicted(camera));
+	CHECK(store.Has<engine::ecs::ClientLocal>(camera));
+	const Entity localChild = store.FindFirstChild(camera, "LocalChild");
+	REQUIRE(store.IsPredicted(localChild));
+	CHECK(store.Has<engine::ecs::ClientLocal>(localChild));
+	const auto *placement = engine::script::ScriptableProperty(store, localChild, "CFrame");
+	REQUIRE(placement != nullptr);
+	const CFrame pose(Vector3{2.0f, 3.0f, 4.0f});
+	REQUIRE(engine::script::WriteInstanceProperty(store, localChild, *placement, &pose, sizeof(pose), true));
+	CFrame observed;
+	REQUIRE(store.GetProperty(localChild, *placement, &observed, sizeof(observed)));
+	CHECK(observed.Position == pose.Position);
+	REQUIRE(store.Alive(surface));
+	CHECK_FALSE(store.IsPredicted(surface));
+	CHECK_FALSE(engine::ecs::IsClientLocalInstance(store, surface));
+
+	const std::string authored = engine::game::WriteInstanceDocument(store, rig);
+	CHECK(authored.find("class=\"Camera\"") == std::string::npos);
+	CHECK(authored.find("LocalChild") == std::string::npos);
+	CHECK(authored.find("class=\"SurfaceCamera\"") != std::string::npos);
+
+	Store restored("restored-surface-camera");
+	const Entity reopened = engine::game::ReadInstanceDocument(restored, authored, NULL_ENTITY, error);
+	INFO(error);
+	REQUIRE(restored.Alive(reopened));
+	CHECK(restored.FindFirstChild(reopened, "Camera") == NULL_ENTITY);
+	const Entity retained = restored.FindFirstChild(reopened, "Surface");
+	REQUIRE(restored.Alive(retained));
+	CHECK(restored.ClassOf(retained) == engine::ecs::Classes::Find(Name("SurfaceCamera")));
+}
+
+TEST_CASE(
+	"surface camera follow selection survives documents and internal clone remapping",
 	"[game][roundtrip][camera-subject]"
 ) {
 	const bool humanoidTarget = GENERATE(false, true);
@@ -1272,7 +1387,8 @@ TEST_CASE(
 			for (const bool selected : {false, true}) {
 				const std::string name =
 					std::string(automatic ? "Automatic" : "Explicit") + (selected ? "Target" : "Nil");
-				const Entity camera = store.CreateInstance(engine::scene::CameraClass(), name);
+				const Entity camera =
+					store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), name);
 				store.SetParent(camera, group);
 				const Entity target = selected ? subject : NULL_ENTITY;
 				REQUIRE(store.SetProperty(camera, Name("CameraSubject"), &target, sizeof(target)));

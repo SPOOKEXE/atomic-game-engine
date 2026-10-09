@@ -25,6 +25,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
@@ -37,6 +38,8 @@
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Teams.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/scene/VectorField.hpp>
+#include <engine/scene/Volume.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/PortalTransfer.hpp>
@@ -771,12 +774,16 @@ namespace studio {
 		GameInterface.SetImageSource([this](const engine::core::Name &name) {
 			engine::render::InterfaceImage image;
 			engine::imagegraph::Reference reference;
-			const auto owner = (engine::imagegraph::ParseReference(name.Text(), reference) &&
-								reference.Kind == engine::imagegraph::ReferenceKind::Instance) ||
-									   engine::imagegraph::IsEditableImageReference(name.Text())
-								   ? GameInterfaceImageOwner
-								   : engine::core::Name{};
+			auto owner = (engine::imagegraph::ParseReference(name.Text(), reference) &&
+						  reference.Kind == engine::imagegraph::ReferenceKind::Instance) ||
+								 engine::imagegraph::IsEditableImageReference(name.Text())
+							 ? GameInterfaceImageOwner
+							 : engine::core::Name{};
 			image.Texture = Renderer.TextureHandle(name, owner);
+			if (image.Texture == nullptr && owner.IsValid() && GameInterfaceImageFallbackOwner.IsValid()) {
+				owner = GameInterfaceImageFallbackOwner;
+				image.Texture = Renderer.TextureHandle(name, owner);
+			}
 			image.SampledSRGB = Renderer.TextureSamplesSRGB(name, owner);
 			if (image.Texture == nullptr) {
 				return image;
@@ -1540,7 +1547,12 @@ namespace studio {
 					}
 				}
 			}
-			PlayLink::StepMany(*Universe, ActivePlayLinks);
+			PlayLink::StepMany(
+				*Universe, ActivePlayLinks, [this](WorldId world) -> engine::script::Runtime * {
+					const WorldRun *run = RunOf(world);
+					return run != nullptr ? run->Runtime.get() : nullptr;
+				}
+			);
 		}
 
 		Advancing = true;
@@ -1721,6 +1733,7 @@ namespace studio {
 		// has no trace of `MagicCore` in it, and a brand-new game's tree is
 		// empty rather than carrying a demo's modules.
 		(void)engine::examples::MountSceneLibraries(store, script, file);
+		(void)engine::examples::MountDemoCamera(store, Label(located));
 	}
 
 	bool Editor::AddExampleWorld(const engine::examples::DemoEntry &demo) {
@@ -1893,19 +1906,9 @@ namespace studio {
 			}
 
 			if (viewer.Instance == NULL_ENTITY) {
-				// **Named per panel, because they share a workspace.** Four
-				// instances called `Camera` in one explorer is four rows nobody
-				// can tell apart, and `FindFirstChild` would hand every panel
-				// the first of them - which is the shared camera this replaces,
-				// reached by a different route.
-				const std::string name =
-					viewport == 0 ? std::string("Camera") : "Camera" + std::to_string(viewport + 1);
-
-				const Entity camera = store.CreateInstance(engine::scene::CameraClass(), name);
+				// Viewports own local eyes even when their world is authoritative.
+				const Entity camera = store.CreatePredictedInstance(engine::scene::CameraClass(), "Camera");
 				if (camera == NULL_ENTITY) {
-					// A replica refuses to mint an authoritative entity. That is
-					// not a failure here - `client::AimReplicaViewer` is the path
-					// for those, and it puts a predicted camera in instead.
 					return;
 				}
 
@@ -1916,10 +1919,12 @@ namespace studio {
 				// into the game file, which is the whole thing this component
 				// exists to stop.
 				store.Set(camera, engine::scene::TransientComponent{});
+				store.Set(camera, engine::ecs::ClientLocal{});
 
 				viewer.World = world;
 				viewer.Instance = camera;
 			}
+			if (store.ParentOf(viewer.Instance) != workspace) store.SetParent(viewer.Instance, workspace);
 
 			// **Named every frame, not once at creation.** It used to be set
 			// only when the instance was minted, so a script assigning
@@ -2489,6 +2494,7 @@ namespace studio {
 		Lights.clear();
 
 		engine::scene::WorldLighting visualLighting;
+		std::optional<engine::render::GpuParticleFieldView> gpuParticles;
 		uint32_t visualSurfaceBounces = Renderer.SurfaceBounces();
 		uint32_t visualSurfaceLimit = Renderer.SurfaceLimit();
 		const bool particleWorldRunning = visual.IsValid() && IsRunning(visual);
@@ -2503,6 +2509,22 @@ namespace studio {
 				// service changes this viewport on the same frame.
 				visualLighting = engine::scene::LightingOf(store);
 				Renderer.SetLighting(visualLighting);
+				// sample definitions remain authority-owned; device state never enters the replica.
+				store.Observe<engine::scene::GpuParticleField>();
+				store.Each<const engine::scene::GpuParticleField, const engine::scene::Transform>(
+					[&](Entity instance, const auto &field, const auto &transform) {
+						if (particlesEnabled && !gpuParticles && field.Enabled &&
+							!field.SpawnSamples.empty() && engine::scene::ValidGpuParticleField(field))
+							gpuParticles = engine::render::GpuParticleFieldView{
+								field,
+								transform.Frame,
+								engine::scene::ResolveVectorField(store, instance),
+								instance,
+								store.ComponentChangeVersion<engine::scene::GpuParticleField>() + 1,
+								store.Time().Elapsed
+							};
+					}
+				);
 
 				if (const auto *list = store.Resource<engine::render::DrawList>()) {
 					// Copied out rather than borrowed. The renderer's call
@@ -2589,31 +2611,6 @@ namespace studio {
 						const std::span<const engine::effects::RibbonRun> runs =
 							engine::effects::RibbonRuns(store);
 						RibbonRuns.assign(runs.begin(), runs.end());
-					}
-
-					{
-						ENGINE_PROFILE_CAT("effect lights", engine::core::ProfileCategory::Render);
-						// Lights are selected against the culled receiver rows, so an
-						// offscreen local light stays when its range reaches visible geometry.
-						static thread_local std::vector<uint32_t> visibleLightRows;
-						static thread_local std::vector<engine::core::AABB> lightReceivers;
-						lightReceivers.clear();
-						if (target.IsValid() && target.Width > 0 && target.Height > 0) {
-							(void)engine::render::CullForCamera(
-								DrawnInstances,
-								cullingEye,
-								lens,
-								static_cast<float>(target.Width) / static_cast<float>(target.Height),
-								visibleLightRows
-							);
-							lightReceivers.reserve(visibleLightRows.size());
-							for (const uint32_t row : visibleLightRows) {
-								lightReceivers.push_back(engine::graph::BoundsOf(DrawnInstances[row]));
-							}
-						}
-						(void)engine::render::CollectLights(
-							store, cullingEye.Position, lightReceivers, Lights
-						);
 					}
 				}
 
@@ -2784,17 +2781,35 @@ namespace studio {
 				}
 			});
 		}
+		// A play viewport presents authority geometry but consumes images created
+		// in its displayed client world. Upload that store under its own residency
+		// name so local ImageGraph source bindings see the pixels the client wrote.
+		if (shown.IsValid() && shown != visual && IsReplicaWorld(shown) &&
+			ClientSettings.EnableEditableImages) {
+			Universe->Enter(shown, [&](Store &store) {
+				const auto uploaded = EditableImages.Refresh(store, Renderer, Universe->NameOf(shown));
+				editableImagesChanged = uploaded > 0 || editableImagesChanged;
+				VisualResourceRevision += uploaded > 0 ? 1u : 0u;
+			});
+		}
 		if (editableImagesChanged) (void)RefreshLiveImageGraphs();
 		if (!particleFrameCollected) {
 			Particles.Clear();
 		}
 
 		GameInterfaceImageOwner = shown.IsValid() ? Universe->NameOf(shown) : engine::core::Name{};
+		GameInterfaceImageFallbackOwner = visual.IsValid() ? Universe->NameOf(visual) : engine::core::Name{};
 		const bool viewportGuiPresent =
 			shown.IsValid() &&
 			ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown)) != ViewportGuiSource::None;
 		if (shown.IsValid()) {
 			Universe->Enter(shown, [&](Store &store) {
+				if (shown != visual && IsReplicaWorld(shown)) {
+					// Lighting and skybox bindings are properties of the displayed
+					// client world, even when its geometry comes from authority.
+					visualLighting = engine::scene::LightingOf(store);
+					Renderer.SetLighting(visualLighting);
+				}
 				// The interface is client-local even when its scene is authority-backed.
 				// It is submitted from the replica store before that store boundary
 				// closes; only copied draw rows leave the boundary.
@@ -2823,14 +2838,50 @@ namespace studio {
 
 				if (shown != visual && !remoteEye) {
 					if (const auto *list = store.Resource<engine::render::DrawList>()) {
-						ENGINE_PROFILE_CAT("merge client visuals", engine::core::ProfileCategory::Render);
-						AppendReplicaVisualInstances(
-							Universe->NameOf(shown),
-							list->Instances,
-							DrawnInstances,
-							list->JointFrames,
-							&jointFrames
-						);
+						ENGINE_PROFILE_CAT("client visuals", engine::core::ProfileCategory::Render);
+						if (IsReplicaWorld(shown) && visual == VisualWorldOf(shown)) {
+							// a client draws its interpolated scene and local effects. the
+							// authority still supplies authored programs and GPU sample tables.
+							DrawnInstances = list->Instances;
+							for (auto &instance : DrawnInstances)
+								if (!instance.SourceWorld.IsValid())
+									instance.SourceWorld = Universe->NameOf(shown);
+							jointFrames = list->JointFrames;
+							(void)CollectStudioParticleBatches(store, Particles, particlesEnabled);
+							Particles.Detach();
+							store.Observe<engine::scene::GpuParticleField>();
+							bool localFieldCollected = false;
+							store.Each<const engine::scene::GpuParticleField, const engine::scene::Transform>(
+								[&](Entity instance, const auto &field, const auto &transform) {
+									if (particlesEnabled && !localFieldCollected && field.Enabled &&
+										!field.SpawnSamples.empty() &&
+										engine::scene::ValidGpuParticleField(field)) {
+										gpuParticles = engine::render::GpuParticleFieldView{
+											field,
+											transform.Frame,
+											engine::scene::ResolveVectorField(store, instance),
+											instance,
+											store.ComponentChangeVersion<engine::scene::GpuParticleField>() +
+												1,
+											store.Time().Elapsed
+										};
+										localFieldCollected = true;
+									}
+								}
+							);
+							const auto vertices = engine::effects::RibbonStream(store);
+							RibbonVertices.assign(vertices.begin(), vertices.end());
+							const auto runs = engine::effects::RibbonRuns(store);
+							RibbonRuns.assign(runs.begin(), runs.end());
+						} else {
+							AppendReplicaVisualInstances(
+								Universe->NameOf(shown),
+								list->Instances,
+								DrawnInstances,
+								list->JointFrames,
+								&jointFrames
+							);
+						}
 					}
 				}
 			});
@@ -2907,12 +2958,11 @@ namespace studio {
 			view.ParticlePool = Particles.Pool;
 			view.ParticleBlocks = Particles.BlockCount;
 			// Every surface and nested camera in this render reads the same prepared
-			// authority pool. `Renderer::PrepareParticles` consumes the delta on the
+			// displayed pool. `Renderer::PrepareParticles` consumes the delta on the
 			// first view for this logical world and reuses that result for the rest.
 			view.ParticleDelta = frameSeconds;
 			view.RibbonVertices = RibbonVertices;
 			view.RibbonRuns = RibbonRuns;
-			view.Lights = Lights;
 			view.Target = drawingWorld && target.IsValid() ? &target : nullptr;
 			view.Slot = viewport;
 			view.Portals = Portals;
@@ -2921,6 +2971,38 @@ namespace studio {
 			view.EnableLODCulling = Prefs.EnableLODCulling;
 			view.World = visual.IsValid() ? visual.Index : 0;
 			view.WorldName = visual.IsValid() ? Universe->NameOf(visual) : engine::core::Name{};
+			view.ImageGraphWorldName = IsReplicaWorld(shown) ? Universe->NameOf(shown) : view.WorldName;
+			view.GpuParticles = std::move(gpuParticles);
+			const WorldId layers = IsReplicaWorld(shown) && visual == VisualWorldOf(shown) ? shown : visual;
+			view.ParticleWorld = layers.IsValid() ? layers.Index : 0;
+			view.ParticleWorldName = layers.IsValid() ? Universe->NameOf(layers) : engine::core::Name{};
+			if (layers.IsValid() && !Universe->IsRemote(layers)) {
+				Universe->Enter(layers, [&](Store &store) {
+					ENGINE_PROFILE_CAT("effect lights and volumes", engine::core::ProfileCategory::Render);
+					static thread_local std::vector<uint32_t> visible;
+					static thread_local std::vector<engine::core::AABB> receivers;
+					receivers.clear();
+					if (target.IsValid() && target.Width > 0 && target.Height > 0) {
+						(void)engine::render::CullForCamera(
+							DrawnInstances,
+							cullingEye,
+							lens,
+							static_cast<float>(target.Width) / static_cast<float>(target.Height),
+							visible
+						);
+						receivers.reserve(visible.size());
+						for (const uint32_t row : visible)
+							receivers.push_back(engine::graph::BoundsOf(DrawnInstances[row]));
+					}
+					(void)engine::render::CollectLights(store, cullingEye.Position, receivers, Lights);
+					visualLighting.VolumeCount = engine::scene::ResolveVolumes(
+						store, cullingEye.Position, receivers, visualLighting.Volumes
+					);
+				});
+			}
+			view.Lights = Lights;
+			view.Lighting = visualLighting;
+			view.OverrideLighting = true;
 
 			// **The grid is drawn by the renderer now and not by the overlay**, so
 			// that the geometry in front of it hides it. `ConfigureGroundGrid`
@@ -3021,7 +3103,7 @@ namespace studio {
 		};
 		engine::render::PresentationDamage damage =
 			ViewportPresentations[viewport].Inspect(presentationSignatures);
-		const bool particleLayerPresent = !view.Particles.empty();
+		const bool particleLayerPresent = !view.Particles.empty() || view.GpuParticles.has_value();
 		const bool ribbonLayerPresent = !view.RibbonRuns.empty();
 		const uint64_t particleVisibilitySignature = engine::render::ParticleVisibilitySignature(view);
 		auto &particleVisibility = ViewportParticleVisibility[viewport];
@@ -3031,7 +3113,7 @@ namespace studio {
 		damage.Overlay = Overlay.IsDirty();
 		const engine::render::PresentationCacheApplicability cacheApplicability{
 			.Objects = !view.Instances.empty() || view.Grid.Enabled,
-			.Particles = !view.Particles.empty() || !view.RibbonRuns.empty(),
+			.Particles = particleLayerPresent || ribbonLayerPresent,
 			.Environment = engine::render::EnvironmentLayerPresent(visualLighting),
 			.Portals = view.EyeImageKey.IsValid() || !view.Portals.empty() || !view.Surfaces.empty(),
 			.GameInterface = gameInterfacePresent,
@@ -4693,11 +4775,13 @@ namespace studio {
 
 		Universe->Enter(world, [&](Store &store) {
 			const engine::ecs::ClassInfo &info = engine::ecs::Classes::Describe(klass);
-			created = authoritative ? store.CreateInstance(klass, Label(info.Name))
-									: store.CreatePredictedInstance(klass, Label(info.Name));
+			const bool local = !authoritative || engine::ecs::IsClientLocalInstance(store, parent);
+			created = local ? store.CreatePredictedInstance(klass, Label(info.Name))
+							: store.CreateInstance(klass, Label(info.Name));
 			if (created == NULL_ENTITY) {
 				return;
 			}
+			if (local) store.Set(created, engine::ecs::ClientLocal{});
 
 			// **Nothing selected means `Workspace`, except a `ScreenGui` belongs in
 			// `StarterGui`.** An instance with no parent is an orphan: it is not in
@@ -5141,11 +5225,15 @@ namespace studio {
 		run.Mode = mode;
 		std::string failure;
 
-		// The runtime starts with its own transient camera after the snapshot, so
-		// scripts never borrow an authored camera and Stop cannot restore it.
+		// Reuse the viewport's local eye; mint a fallback only when no native
+		// camera exists. Neither camera belongs to the authored snapshot.
 		const ViewportCameraPose runtimePose = DefaultViewportCamera();
 		Universe->Enter(world, [&](Store &store) {
-			if (CreateRuntimeCamera(store, "ServerCamera", runtimePose) == NULL_ENTITY) {
+			const Entity existing = RuntimeCameraOf(store);
+			if (existing != NULL_ENTITY && store.Has<engine::ecs::ClientLocal>(existing) &&
+				store.Has<engine::scene::TransientComponent>(existing))
+				return;
+			if (CreateRuntimeCamera(store, runtimePose) == NULL_ENTITY) {
 				failure = "could not create the server runtime camera";
 			}
 		});

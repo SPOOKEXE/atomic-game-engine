@@ -293,6 +293,66 @@ TEST_CASE("component changes survive a snapshot streamed across ticks", "[replic
 	CHECK(pair.Authority_.Stats().Resnapshots == 0);
 }
 
+TEST_CASE(
+	"oversized child snapshots preserve their surrounding instance tree", "[replication][oversize-parent]"
+) {
+	bool moveParent = false;
+	bool includeParent = false;
+	SECTION("unchanged parent") {}
+	SECTION("changed parent") {
+		moveParent = true;
+	}
+	SECTION("parent and child are both oversized") {
+		includeParent = true;
+	}
+	AuthoritySettings settings;
+	settings.ChunkBytes = 512;
+	settings.ChunksPerTick = 1;
+	settings.ResnapshotAfterTicks = 4096;
+	Pair pair;
+	pair.Authority_ = Authority(settings);
+	pair.Handle = pair.Authority_.Admit();
+	for (const auto name :
+		 {"ecs.Hierarchy", "ecs.InstanceName", "ecs.InstanceClass", "replication_test.SnapshotPayload"})
+		pair.Authority_.Replicate(Name(name), ChangeDetection::Observed);
+	const auto parent = pair.Server.CreateInstance(HolderClass(), "PlayerScripts");
+	const auto target = pair.Server.CreateInstance(HolderClass(), "OtherScripts");
+	const auto before = pair.Server.CreateInstance(CarriedClass(), "Before");
+	const auto source = pair.Server.CreateInstance(CarriedClass(), "LargeProgram");
+	const auto after = pair.Server.CreateInstance(CarriedClass(), "After");
+	REQUIRE(pair.Server.SetParent(before, parent));
+	REQUIRE(pair.Server.SetParent(source, parent));
+	REQUIRE(pair.Server.SetParent(after, parent));
+	pair.Server.Set(source, SnapshotPayload{});
+	if (includeParent) pair.Server.Set(parent, SnapshotPayload{});
+	REQUIRE(pair.Join(128));
+	for (int tick = 0; tick < 4; ++tick)
+		pair.Tick();
+	REQUIRE(pair.Client.ParentOf(source) == parent);
+	const auto local = pair.Client.CreatePredictedInstance(CarriedClass(), "LocalGui");
+	REQUIRE(local != Entity{});
+	REQUIRE(pair.Client.SetParent(local, parent));
+	pair.Server.GetMutable<SnapshotPayload>(source)->Bytes[0] = 'b';
+	if (includeParent) pair.Server.GetMutable<SnapshotPayload>(parent)->Bytes[0] = 'b';
+	if (moveParent) REQUIRE(pair.Server.SetParent(source, target));
+	const auto oversizedBefore = pair.Authority_.Stats().Oversized;
+	for (int tick = 0; tick < 100; ++tick)
+		pair.Tick();
+	REQUIRE(pair.Authority_.Stats().Oversized > oversizedBefore);
+	REQUIRE(pair.Client.Get<SnapshotPayload>(source) != nullptr);
+	CHECK(pair.Client.Get<SnapshotPayload>(source)->Bytes[0] == 'b');
+	CHECK(pair.Client.ParentOf(source) == (moveParent ? target : parent));
+	CHECK(pair.Client.ParentOf(before) == parent);
+	CHECK(pair.Client.ParentOf(after) == parent);
+	CHECK(pair.Client.ParentOf(local) == parent);
+	std::vector<Entity> children;
+	pair.Client.EachChild(parent, [&](Entity child) { children.push_back(child); });
+	const std::vector<Entity> expected = moveParent ? std::vector<Entity>{before, after, local}
+													: std::vector<Entity>{before, source, after, local};
+	CHECK(children == expected);
+	if (moveParent) CHECK(pair.Client.FindFirstChild(target, "LargeProgram") == source);
+}
+
 // --- joining -----------------------------------------------------------------
 
 TEST_CASE("a client joins by full snapshot and sees the world", "[replication]") {
@@ -1879,6 +1939,95 @@ namespace replication_test {
 		WriteMessage(writer, structure);
 		return std::vector<std::byte>(writer.Bytes().begin(), writer.Bytes().end());
 	}
+}
+
+TEST_CASE(
+	"a recycled authority child preserves reachable local siblings", "[replication][structure][reused-index]"
+) {
+	Pair pair;
+	const Entity parent = pair.Server.Create();
+	const Entity persistent = pair.Server.Create();
+	const Entity previous = pair.Server.Create();
+	for (const Entity entity : {parent, persistent, previous})
+		pair.Server.Set(entity, Spot{});
+	REQUIRE(pair.Join());
+	for (const Entity entity : {parent, persistent, previous})
+		pair.Client.Set(entity, engine::ecs::Hierarchy{});
+	REQUIRE(pair.Client.SetParent(persistent, parent));
+	REQUIRE(pair.Client.SetParent(previous, parent));
+	const Entity local = pair.Client.CreatePredicted();
+	pair.Client.Set(local, engine::ecs::Hierarchy{});
+	REQUIRE(pair.Client.SetParent(local, parent));
+	const Entity localDescendant = pair.Client.CreatePredicted();
+	pair.Client.Set(localDescendant, engine::ecs::Hierarchy{});
+	REQUIRE(pair.Client.SetParent(localDescendant, previous));
+	pair.Server.Destroy(previous);
+	const Entity replacement = pair.Server.Create();
+	REQUIRE(static_cast<uint32_t>(replacement.Id) == static_cast<uint32_t>(previous.Id));
+	REQUIRE(replacement != previous);
+
+	engine::replication::Structure structure;
+	structure.Tick = ++pair.Now;
+	structure.Created.push_back(replacement);
+	structure.Destroyed.push_back(previous);
+	engine::core::ByteWriter message;
+	SECTION("one combined structure") {
+		WriteMessage(message, structure);
+		REQUIRE(pair.Replica_.Receive(pair.Client, message.Bytes()) == ApplyStatus::Ok);
+	}
+	SECTION("authority emits creation before retirement in separate structures") {
+		engine::replication::Structure created;
+		created.Tick = structure.Tick;
+		created.Created = structure.Created;
+		WriteMessage(message, created);
+		REQUIRE(pair.Replica_.Receive(pair.Client, message.Bytes()) == ApplyStatus::Ok);
+		engine::core::ByteWriter retired;
+		engine::replication::Structure destroyed;
+		destroyed.Tick = structure.Tick;
+		destroyed.Destroyed = structure.Destroyed;
+		WriteMessage(retired, destroyed);
+		REQUIRE(pair.Replica_.Receive(pair.Client, retired.Bytes()) == ApplyStatus::Ok);
+	}
+	REQUIRE(
+		pair.Replica_.Receive(
+			pair.Client, replication_test::ParentPart(pair.Now, 0, true, replacement, parent)
+		) == ApplyStatus::Ok
+	);
+	CHECK_FALSE(pair.Client.Alive(previous));
+	CHECK(pair.Client.Alive(replacement));
+	CHECK(pair.Client.ParentOf(local) == parent);
+	CHECK(pair.Client.Alive(localDescendant));
+	CHECK(pair.Client.ParentOf(localDescendant) == Entity{});
+	CHECK(pair.Client.CountMatching<Spot>() == 2);
+	std::vector<Entity> children;
+	pair.Client.EachChild(parent, [&](Entity child) { children.push_back(child); });
+	CHECK(children == std::vector<Entity>{persistent, local, replacement});
+}
+
+TEST_CASE(
+	"a structure cannot both create and destroy the same generation", "[replication][structure][reused-index]"
+) {
+	Pair pair;
+	const Entity parent = pair.Server.Create();
+	const Entity child = pair.Server.Create();
+	for (const Entity entity : {parent, child})
+		pair.Server.Set(entity, Spot{});
+	REQUIRE(pair.Join());
+	for (const Entity entity : {parent, child})
+		pair.Client.Set(entity, engine::ecs::Hierarchy{});
+	REQUIRE(pair.Client.SetParent(child, parent));
+	engine::replication::Structure structure;
+	structure.Tick = ++pair.Now;
+	structure.Created.push_back(child);
+	structure.Destroyed.push_back(child);
+	engine::core::ByteWriter message;
+	WriteMessage(message, structure);
+	CHECK(pair.Replica_.Receive(pair.Client, message.Bytes()) == ApplyStatus::Malformed);
+	CHECK(pair.Client.Alive(child));
+	CHECK(pair.Client.ParentOf(child) == parent);
+	std::vector<Entity> children;
+	pair.Client.EachChild(parent, [&](Entity entity) { children.push_back(entity); });
+	CHECK(children == std::vector<Entity>{child});
 }
 
 // **The flash, at the far end of the wire.** A spawn crosses as a `Structure`

@@ -18,7 +18,6 @@ namespace engine::script {
 		struct ScopePayload {
 			ScopeHandle Handle;
 			CallbackRef ErrorHandler = 0;
-			std::vector<ScopeItem> Items;
 		};
 
 		ScopePayload &CheckScope(lua_State *state, int index) {
@@ -32,9 +31,9 @@ namespace engine::script {
 		void
 		ReportFailure(lua_State *state, ScopePayload &scope, const char *operation, std::string message) {
 			if (scope.ErrorHandler != 0) {
-				lua_getref(state, scope.ErrorHandler);
+				PushLuauValue(state, scope.ErrorHandler);
 				lua_pushlstring(state, message.data(), message.size());
-				if (lua_pcall(state, 1, 0, 0) == LUA_OK) {
+				if (CallLuauValue(state, 1, 0, 0) == LUA_OK) {
 					return;
 				}
 				const char *handlerError = lua_tostring(state, -1);
@@ -49,36 +48,39 @@ namespace engine::script {
 		}
 
 		void RunCallback(lua_State *state, ScopePayload &scope, CallbackRef reference) {
-			lua_getref(state, reference);
-			if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
+			PushLuauValue(state, reference);
+			if (CallLuauValue(state, 0, 0, 0) != LUA_OK) {
 				const char *message = lua_tostring(state, -1);
 				ReportFailure(
 					state, scope, "callback cleanup", message != nullptr ? message : "non-string error"
 				);
 				lua_pop(state, 1);
 			}
-			lua_unref(state, reference);
+			ReleaseLuauValue(state, reference);
 		}
 
 		void CancelThread(lua_State *state, LuauContext &context, CallbackRef reference) {
-			lua_getref(state, reference);
+			PushLuauValue(state, reference);
 			if (lua_isthread(state, -1)) {
 				lua_State *thread = lua_tothread(state, -1);
 				const auto found = context.Threads.find(thread);
 				if (found != context.Threads.end() && context.Tasks.Cancel(found->second)) {
 					context.WaitTicks.erase(thread);
 					context.PendingArguments.erase(thread);
-					lua_unref(state, found->second);
+					ReleaseLuauValue(state, found->second);
 					context.Threads.erase(found);
 				}
 			}
 			lua_pop(state, 1);
-			lua_unref(state, reference);
+			ReleaseLuauValue(state, reference);
 		}
 
 		void RunObject(lua_State *state, ScopePayload &scope, CallbackRef reference) {
 			static constexpr const char *METHODS[] = {"Destroy", "Disconnect", "Cancel"};
-			lua_getref(state, reference);
+			if (!PushLuauValue(state, reference)) {
+				lua_pop(state, 1);
+				return;
+			}
 			for (const char *method : METHODS) {
 				lua_getfield(state, -1, method);
 				if (lua_isnil(state, -1)) {
@@ -86,17 +88,17 @@ namespace engine::script {
 					continue;
 				}
 				lua_pushvalue(state, -2);
-				if (lua_pcall(state, 1, 0, 0) != LUA_OK) {
+				if (CallLuauValue(state, 1, 0, 0) != LUA_OK) {
 					const char *message = lua_tostring(state, -1);
 					ReportFailure(state, scope, method, message != nullptr ? message : "non-string error");
 					lua_pop(state, 1);
 				}
 				lua_pop(state, 1);
-				lua_unref(state, reference);
+				ReleaseLuauValue(state, reference);
 				return;
 			}
 			lua_pop(state, 1);
-			lua_unref(state, reference);
+			ReleaseLuauValue(state, reference);
 			ENGINE_WARN("[script] Scope ignored an object without Destroy, Disconnect, or Cancel");
 		}
 
@@ -129,7 +131,7 @@ namespace engine::script {
 				item.Kind = ScopeItemKind::Custom;
 			}
 			lua_pushvalue(state, index);
-			item.Value = static_cast<uint64_t>(lua_ref(state, -1));
+			item.Value = static_cast<uint64_t>(RetainLuauValue(state, -1));
 			lua_pop(state, 1);
 			return item;
 		}
@@ -143,7 +145,6 @@ namespace engine::script {
 			luaL_checkany(state, 2);
 			const ScopeItem item = RetainItem(state, 2);
 			ContextOf(state).Scopes.Add(scope.Handle, item);
-			scope.Items.push_back(item);
 			lua_pushvalue(state, 1);
 			return 1;
 		}
@@ -165,7 +166,6 @@ namespace engine::script {
 				const ScopeItem item = RetainItem(state, -1);
 				lua_pop(state, 1);
 				ContextOf(state).Scopes.Add(scope.Handle, item);
-				scope.Items.push_back(item);
 			}
 			lua_pushvalue(state, 1);
 			return 1;
@@ -173,15 +173,15 @@ namespace engine::script {
 
 		int ScopeRemove(lua_State *state) {
 			ScopePayload &scope = CheckScope(state, 1);
-			for (auto item = scope.Items.begin(); item != scope.Items.end(); ++item) {
-				lua_getref(state, static_cast<CallbackRef>(item->Value));
-				const bool same = lua_rawequal(state, -1, 2) != 0;
+			LuauContext &context = ContextOf(state);
+			for (const ScopeItem item : context.Scopes.Items(scope.Handle)) {
+				const bool live = PushLuauValue(state, static_cast<CallbackRef>(item.Value));
+				const bool same = live && lua_rawequal(state, -1, 2) != 0;
 				lua_pop(state, 1);
 				if (!same) continue;
-				ContextOf(state).Scopes.Remove(scope.Handle, *item);
-				lua_unref(state, static_cast<CallbackRef>(item->Value));
-				scope.Items.erase(item);
-				lua_pushboolean(state, 1);
+				const bool removed = context.Scopes.Remove(scope.Handle, item);
+				if (removed) ReleaseLuauValue(state, static_cast<CallbackRef>(item.Value));
+				lua_pushboolean(state, removed);
 				return 1;
 			}
 			lua_pushboolean(state, 0);
@@ -193,7 +193,6 @@ namespace engine::script {
 			std::vector<ScopeItem> items;
 			if (ContextOf(state).Scopes.Clean(scope.Handle, items)) {
 				Dispose(state, scope, items);
-				scope.Items.clear();
 			}
 			lua_pushboolean(state, 1);
 			return 1;
@@ -204,7 +203,6 @@ namespace engine::script {
 			std::vector<ScopeItem> items;
 			if (ContextOf(state).Scopes.Destroy(scope.Handle, items)) {
 				Dispose(state, scope, items);
-				scope.Items.clear();
 			}
 			lua_pushboolean(state, 1);
 			return 1;
@@ -226,10 +224,10 @@ namespace engine::script {
 			ScopePayload &scope = CheckScope(state, 1);
 			luaL_checktype(state, 2, LUA_TFUNCTION);
 			if (scope.ErrorHandler != 0) {
-				lua_unref(state, scope.ErrorHandler);
+				ReleaseLuauValue(state, scope.ErrorHandler);
 			}
 			lua_pushvalue(state, 2);
-			scope.ErrorHandler = lua_ref(state, -1);
+			scope.ErrorHandler = RetainLuauValue(state, -1);
 			lua_pop(state, 1);
 			lua_pushvalue(state, 1);
 			return 1;
@@ -240,10 +238,9 @@ namespace engine::script {
 			std::vector<ScopeItem> items;
 			if (ContextOf(state).Scopes.Destroy(scope.Handle, items)) {
 				Dispose(state, scope, items);
-				scope.Items.clear();
 			}
 			if (scope.ErrorHandler != 0) {
-				lua_unref(state, scope.ErrorHandler);
+				ReleaseLuauValue(state, scope.ErrorHandler);
 				scope.ErrorHandler = 0;
 			}
 			scope.~ScopePayload();

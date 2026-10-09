@@ -2,29 +2,22 @@
 <World format="3" name="Bladeborne Demo">
 	<WorldProperties tickRate="60" idleTickRate="2" physicsTickRate="60" scriptTickRate="60" replicationTickRate="20" globalSimulatedNetworkLatency="0" faultLimit="3" isolation="Shared" renderingProfile="Default PBR" />
 	<Sources>
-		<Source path="scripts/client/BladeborneCamera.client.luau"><![CDATA[--!strict
--- This HUD world owns its view instead of inheriting the fallback camera the
--- client creates before authored local scripts start. Automatic tracking keeps
--- the view attached when the local character is spawned or respawned.
-
-local Workspace = game:GetService("Workspace")
-
-local camera = Instance.new("Camera")
-camera.Name = "BladeborneCamera"
-camera.CameraSubjectAutomatic = true
-camera.Parent = Workspace
-Workspace.CurrentCamera = camera
-]]></Source>
 		<Source path="scripts/client/BladeborneHud.client.luau"><![CDATA[--!strict
 -- Bladeborne HUD bootstrap. UI ownership stays in the same widget modules as
 -- BLADEBORNE_UNIFIED/game/src; this scene only supplies local player fixtures.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local StarterGui = game:GetService("StarterGui")
+local Players = game:GetService("Players")
 
--- StarterPlayerScripts is copied to the local player before the world starts.
--- The template may also be selected by a combined host, so one authored HUD wins.
-if StarterGui:FindFirstChild("BladeborneHUD") then
+-- StarterPlayerScripts runs per client, so its HUD belongs to that player's GUI.
+local player = Players.LocalPlayer
+assert(player ~= nil, "Bladeborne HUD requires a local player")
+local playerGui = player:WaitForChild("PlayerGui", 20)
+assert(
+	playerGui ~= nil and playerGui.Name == "PlayerGui" and playerGui.Parent == player,
+	"Bladeborne HUD needs the local PlayerGui"
+)
+if playerGui:FindFirstChild("BladeborneHUD") then
 	return
 end
 
@@ -41,7 +34,7 @@ local MusicWidget = require(Modules.Widgets.MusicWidget)
 local TabWidget = require(Modules.Widgets.TabWidget)
 
 local gui = Common.new("ScreenGui", { Name = "BladeborneHUD", ResetOnSpawn = false }) :: ScreenGui
-gui.Parent = StarterGui
+gui.Parent = playerGui
 
 local context = { Gui = gui, Data = Data, Fusion = Fusion, HUDCommon = Common }
 local tabWidget = TabWidget.Build(context)
@@ -535,9 +528,6 @@ marker.Parent = arena
 		<Item class="StarterPlayerScripts" name="StarterPlayerScripts" id="24">
 			<Item class="LocalScript" name="BladeborneHud" id="25">
 				<Property name="Source" type="string">scripts/client/BladeborneHud.client.luau</Property>
-			</Item>
-			<Item class="LocalScript" name="BladeborneCamera" id="29">
-				<Property name="Source" type="string">scripts/client/BladeborneCamera.client.luau</Property>
 			</Item>
 		</Item>
 	</Item>

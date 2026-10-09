@@ -68,12 +68,12 @@ part.Parent = workspace
 -- sliver a few pixels wide, and a picture of a red sliver reads as "the texture
 -- did not apply". It had applied the whole time. Square to the front face, close
 -- enough that the rings fill the frame.
-local eye = Instance.new("Camera")
-eye.Name = "Viewer"
-eye.FieldOfView = 55
-eye.CFrame = CFrame.lookAt(Vector3.new(0, 2.5, 7), Vector3.new(0, 2.5, 0))
-eye.Parent = workspace
-workspace.CurrentCamera = eye
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local eye = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+eye:SetAttribute("Name", "Viewer")
+eye:SetAttribute("FieldOfView", 55)
+eye:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(0, 2.5, 7), Vector3.new(0, 2.5, 0)))
 
 -- **Live editing.** A crosshair sweeps across the rings on
 -- `RunService.Heartbeat`, through `DrawLine` calls that bump `EditableImage.

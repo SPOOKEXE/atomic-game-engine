@@ -1,3 +1,5 @@
+#include "PlayerGuiState.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/gui/Animation.hpp>
@@ -945,5 +947,6 @@ namespace engine::gui {
 		// Appended because component identifiers are durable. A mask is authored
 		// and serialisable, while its resolved operation is compile output.
 		ecs::Components::Register<Mask>("gui.Mask");
+		RegisterPlayerGuiComponents();
 	}
 }

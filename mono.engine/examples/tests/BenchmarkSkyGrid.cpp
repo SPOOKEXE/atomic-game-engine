@@ -71,9 +71,11 @@ TEST_CASE("SkyGrid PBR is a deterministic eight-variant terrain course", "[examp
 	Store store("benchmark.skygrid");
 	Scheduler systems;
 	std::shared_ptr<engine::script::Runtime> runtime;
+	engine::script::RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfBoth();
 	std::string error;
 	const bool loaded = engine::examples::LoadScene(
-		store, systems, engine::examples::ExamplePath("BenchmarkSkyGrid.luau"), error, &runtime
+		store, systems, engine::examples::ExamplePath("BenchmarkSkyGrid.luau"), error, &runtime, &limits
 	);
 	INFO(error);
 	REQUIRE(loaded);

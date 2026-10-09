@@ -3,6 +3,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Binding.hpp>
+#include <engine/gui/PlayerGui.hpp>
 
 #include <utility>
 #include <vector>
@@ -135,7 +136,9 @@ namespace engine::gui {
 
 	size_t EvaluateBindings(ecs::Store &store) {
 		std::vector<ecs::Entity> bindings;
-		store.Each<const Binding>([&](ecs::Entity entity, const Binding &) { bindings.push_back(entity); });
+		store.Each<const Binding>([&](ecs::Entity entity, const Binding &) {
+			if (!IsPlayerGuiSource(store, entity)) bindings.push_back(entity);
+		});
 
 		size_t changed = 0;
 		for (const ecs::Entity entity : bindings) {

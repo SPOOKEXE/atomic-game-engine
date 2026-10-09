@@ -223,12 +223,13 @@ for (let index = 0; index < 24; index++) {
 // The camera the scene is watched through. An identity rotation looks down -Z,
 // so this faces the north wall - the one built first and therefore the one that
 // reflects.
-const view = Instance.new("Camera");
-view.Name = "Viewer";
-view.CFrame = CFrame.new(EYE.X, EYE.Y, EYE.Z);
-view.FieldOfView = EYE_FOV;
-view.Parent = workspace;
-workspace.CurrentCamera = view;
+const starterPlayerScripts = game.GetService('StarterPlayer').FindFirstChild('StarterPlayerScripts');
+if (starterPlayerScripts == null) throw new Error('StarterPlayerScripts is missing');
+const demoCamera = starterPlayerScripts.FindFirstChild('DemoCamera');
+if (demoCamera == null) throw new Error('DemoCamera is missing');
+demoCamera.SetAttribute('Name', 'Viewer');
+demoCamera.SetAttribute('CFrame', CFrame.new(EYE.X, EYE.Y, EYE.Z));
+demoCamera.SetAttribute('FieldOfView', EYE_FOV);
 
 RunService.Heartbeat.Connect((deltaTime: number) => {
 	for (const caster of casters) {

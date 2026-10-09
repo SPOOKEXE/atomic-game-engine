@@ -450,6 +450,7 @@ namespace {
 				toml << "writable = " << (property.Writable ? "true" : "false") << "\n";
 				toml << "predicted_writable = " << (property.PredictedWritable ? "true" : "false") << "\n";
 				toml << "scriptable = " << (property.Scriptable ? "true" : "false") << "\n";
+				toml << "nullable = " << (property.Nullable ? "true" : "false") << "\n";
 				toml << "reads = ";
 				WriteComponentSet(toml, property.Reads, componentNames);
 				toml << "\n";

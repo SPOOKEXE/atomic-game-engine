@@ -202,12 +202,13 @@ end
 -- client renders the world it was given first and the second exists to be looked
 -- into.
 if not IS_SECOND then
-	local view = Instance.new("Camera")
-	view.Name = "Viewer"
-	view.FieldOfView = 70
-	view.CFrame = CFrame.lookAt(Vector3.new(0, 5, 16), Vector3.new(0, 4, 0))
-	view.Parent = workspace
-	workspace.CurrentCamera = view
+	local view = assert(
+		assert(game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")):FindFirstChild("DemoCamera"),
+		"the demo camera companion is missing"
+	)
+	view:SetAttribute("Name", "Viewer")
+	view:SetAttribute("FieldOfView", 70)
+	view:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(0, 5, 16), Vector3.new(0, 4, 0)))
 end
 
 print("cross-world seam: this is '" .. THIS_WORLD .. "', the hole leads to '" .. DESTINATION .. "'")

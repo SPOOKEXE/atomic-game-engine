@@ -337,3 +337,21 @@ TEST_CASE("clearing hands back every scheduled thread", "[signals][task]") {
 	CHECK(released.size() == 3);
 	CHECK(queue.Pending() == 0);
 }
+
+TEST_CASE("source cancellation removes all matching callbacks during a fire", "[signals][lifetime]") {
+	SignalTable table;
+	const auto first = table.Connect(SignalKind::Heartbeat, NULL_ENTITY, 10);
+	const auto stale = table.Connect(SignalKind::Heartbeat, NULL_ENTITY, 20);
+	table.Connect(SignalKind::Changed, Entity{1}, 20);
+	table.Connect(SignalKind::Heartbeat, NULL_ENTITY, 30);
+	std::vector<CallbackRef> fired;
+	table.Fire(SignalKind::Heartbeat, NULL_ENTITY, [&](const Connection &connection) {
+		fired.push_back(connection.Callback);
+		if (connection.Id == first) CHECK(table.DropCallback(20));
+	});
+	CHECK(fired == std::vector<CallbackRef>{10, 30});
+	CHECK_FALSE(table.Connected(stale));
+	CHECK(FiredOn(table, SignalKind::Changed, Entity{1}).empty());
+	CHECK_FALSE(table.DropCallback(20));
+	CHECK(FiredOn(table, SignalKind::Heartbeat, NULL_ENTITY) == std::vector<CallbackRef>{10, 30});
+}

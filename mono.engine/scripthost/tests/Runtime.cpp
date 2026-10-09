@@ -276,22 +276,26 @@ TEST_CASE("an endless loop is cut off rather than hanging the world", "[script]"
 	CHECK(runtime->LastError().find("step budget") != std::string::npos);
 }
 
-TEST_CASE("a replica refuses a script's writes", "[script]") {
+TEST_CASE("a replica keeps local creation separate from adopted writes", "[script]") {
 	RegisterClasses();
 	Store store("script_test");
+	engine::scene::InstallServices(store);
 	const Entity part = engine::scene::MakePart(store, engine::scene::PartDesc{});
 	REQUIRE(part != engine::ecs::NULL_ENTITY);
-
+	REQUIRE(store.SetInstanceName(part, "Authority"));
+	REQUIRE(store.SetParent(part, engine::scene::WorkspaceOf(store)));
 	store.SetAdoptOnly(true);
-
 	const auto runtime = MakeRuntime(store, Language::Luau);
-
-	// The authority owns these rows. A script that appeared to write them would
-	// present as "my script works sometimes", which is the worst way to learn
-	// about replication.
-	CHECK_FALSE(runtime->Run(R"(
-		local part = Instance.new('Part')
+	REQUIRE(runtime->Run(R"(
+		local part = Instance.new('Part', workspace)
+		part.Name = 'Local'
+		part.Position = Vector3.new(1, 2, 3)
 	)"));
+	const Entity local = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Local");
+	REQUIRE(local != engine::ecs::NULL_ENTITY);
+	CHECK(Store::IsPredicted(local));
+	CHECK_FALSE(runtime->Run("workspace.Authority.Position = Vector3.new(9, 9, 9)"));
+	CHECK(store.Get<Transform>(part)->Frame.Position == engine::core::Vector3{});
 }
 
 // --- the second VM ----------------------------------------------------------
@@ -841,8 +845,8 @@ TEST_CASE("workspace is an instance in the world", "[script]") {
 	REQUIRE(runtime->Run("assert(game.Workspace == workspace)"));
 	REQUIRE(runtime->Run("assert(game:GetService('Workspace') == workspace)"));
 
-	// The part, the Workspace, and the thirteen other services `InstallServices`
-	// puts in every world - `Teams` is the one v0.15 added. A phantom row
+	// The part, the Workspace, its generated Terrain, and the thirteen other
+	// services `InstallServices` puts in every world. A phantom row
 	// standing for the world is exactly what there is still none of -
 	// `workspace` names something that was already there.
 	//
@@ -853,7 +857,10 @@ TEST_CASE("workspace is an instance in the world", "[script]") {
 	store.Each<const engine::ecs::InstanceClass>([&](Entity, const engine::ecs::InstanceClass &) {
 		instances++;
 	});
-	CHECK(instances == 15);
+	CHECK(instances == 16);
+	const Entity terrain = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Terrain");
+	REQUIRE(terrain != engine::ecs::NULL_ENTITY);
+	CHECK(store.ClassOf(terrain) == engine::ecs::Classes::Find(engine::core::Name("Terrain")));
 }
 
 // **The rule the render gate rests on**, stated from the script side: an

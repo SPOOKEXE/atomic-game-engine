@@ -1,6 +1,11 @@
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Components.hpp>
+#include <engine/gui/PlayerGui.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/script/ChildWaiters.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/testing/Suite.hpp>
@@ -87,9 +92,10 @@ TEST_CASE(
 	CHECK(parts == 0);
 
 	store.SetAdoptOnly(true);
-	const auto refusedStore = CreateScriptInstance(store, "Part");
-	CHECK_FALSE(refusedStore);
-	CHECK(refusedStore.Failure == InstanceCreateFailure::StoreRefused);
+	const auto local = CreateScriptInstance(store, "Part");
+	REQUIRE(local);
+	CHECK(Store::IsPredicted(local.Instance));
+	CHECK(store.Has<engine::ecs::ClientLocal>(local.Instance));
 }
 
 TEST_CASE("the instance shim is the only scriptable property door", "[script][instance-shim]") {
@@ -125,4 +131,135 @@ TEST_CASE("the instance shim is the only scriptable property door", "[script][in
 	CHECK(std::none_of(visible.begin(), visible.end(), [](const auto *property) {
 		return property->Spelling == "LuaSource" || property->Spelling == "JavaScriptSource";
 	}));
+}
+
+TEST_CASE(
+	"client instance fields stay local while authority and resources stay owned", "[script][instance-shim]"
+) {
+	engine::scene::EnsureClassTree();
+	Store store("instance_shim_ownership");
+	const auto authority = CreateScriptInstance(store, "Part");
+	const auto local = CreateScriptInstance(store, "Part", engine::ecs::NULL_ENTITY, true);
+	REQUIRE(authority);
+	REQUIRE(local);
+	const bool value = false;
+	const auto *field = ScriptableProperty(store, local.Instance, "CanCollide");
+	REQUIRE(field != nullptr);
+	CHECK(WriteInstanceProperty(store, local.Instance, *field, &value, sizeof(value), true));
+	CHECK_FALSE(WriteInstanceProperty(store, local.Instance, *field, &value, sizeof(value), false));
+	CHECK_FALSE(engine::script::InstanceVisibleToScript(store, local.Instance, false));
+	CHECK(engine::script::InstanceVisibleToScript(store, local.Instance, true));
+	CHECK(engine::script::CloneScriptInstance(store, local.Instance, false) == engine::ecs::NULL_ENTITY);
+	CHECK_FALSE(CreateScriptInstance(store, "Camera", engine::ecs::NULL_ENTITY, false));
+
+	CHECK_FALSE(WriteInstanceProperty(store, authority.Instance, *field, &value, sizeof(value), true));
+	store.SetAdoptOnly(true);
+	CHECK(WriteInstanceProperty(store, local.Instance, *field, &value, sizeof(value), true));
+	CHECK_FALSE(WriteInstanceProperty(store, authority.Instance, *field, &value, sizeof(value), true));
+	const auto copy = engine::script::CloneScriptInstance(store, authority.Instance, true);
+	REQUIRE(copy != engine::ecs::NULL_ENTITY);
+	CHECK(Store::IsPredicted(copy));
+	CHECK(store.Has<engine::ecs::ClientLocal>(copy));
+	const auto camera = CreateScriptInstance(store, "Camera");
+	REQUIRE(camera);
+	CHECK(Store::IsPredicted(camera.Instance));
+	CHECK(engine::ecs::Classes::Describe(store.ClassOf(camera.Instance)).RuntimeLocal);
+	CHECK_FALSE(
+		engine::ecs::Classes::Describe(engine::ecs::Classes::Find(engine::core::Name("SurfaceCamera")))
+			.RuntimeLocal
+	);
+}
+
+TEST_CASE("GUI tree reads isolate server sources from local copies", "[script][instance-shim][playergui]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
+	Store store("instance_shim_gui_views");
+	scene::InstallServices(store);
+	const auto player = scene::AddPlayer(store, "Ada", true);
+	const auto container = store.FindFirstChild(player, "PlayerGui");
+	const auto source = store.CreateInstance(gui::GuiClass("ScreenGui"), "Hud");
+	REQUIRE(store.SetParent(source, container));
+	const auto label = store.CreateInstance(gui::GuiClass("TextLabel"), "Status");
+	REQUIRE(store.SetParent(label, source));
+	store.GetMutable<gui::Label>(label)->Text = "server";
+	REQUIRE(gui::RefreshPlayerGuiProjection(store, player, {}) == 1);
+	const auto copy = gui::FindPlayerGuiCopy(store, source);
+	const auto localLabel = gui::FindPlayerGuiCopy(store, label);
+	REQUIRE(store.Alive(copy));
+	REQUIRE(store.Alive(localLabel));
+	REQUIRE(store.SetInstanceName(copy, "LocalHud"));
+	store.GetMutable<gui::Label>(localLabel)->Text = "client";
+
+	std::vector<Entity> serverChildren, clientChildren;
+	script::EachInstanceChild(store, container, [&](Entity entity) { serverChildren.push_back(entity); });
+	script::EachInstanceChild(
+		store, container, [&](Entity entity) { clientChildren.push_back(entity); }, true
+	);
+	CHECK(serverChildren == std::vector<Entity>{source});
+	CHECK(clientChildren == std::vector<Entity>{copy});
+	CHECK(FindInstanceChild(store, container, "Hud") == source);
+	CHECK(FindInstanceChild(store, container, "Hud", false, true) == ecs::NULL_ENTITY);
+	CHECK(FindInstanceChild(store, container, "LocalHud", false, true) == copy);
+	CHECK(FindInstanceChild(store, source, "Status", false, true) == localLabel);
+	CHECK(FindInstanceChild(store, container, "Status", true, true) == localLabel);
+	CHECK(FindInstanceChild(store, container, "Status", true, false) == label);
+	CHECK(script::InstanceForScriptRead(store, source, true) == copy);
+	CHECK(script::InstanceForScriptRead(store, copy, false) == ecs::NULL_ENTITY);
+	std::vector<Entity> descendants;
+	script::EachInstanceDescendant(
+		store, container, [&](Entity entity) { descendants.push_back(entity); }, true
+	);
+	CHECK(descendants == std::vector<Entity>{copy, localLabel});
+
+	const auto *text = ScriptableProperty(store, label, "Text");
+	REQUIRE(text != nullptr);
+	std::string read;
+	REQUIRE(ReadInstanceProperty(store, label, *text, &read, sizeof(read), true));
+	CHECK(read == "client");
+	REQUIRE(ReadInstanceProperty(store, label, *text, &read, sizeof(read), false));
+	CHECK(read == "server");
+	CHECK_FALSE(ReadInstanceProperty(store, localLabel, *text, &read, sizeof(read), false));
+	const auto *parent = ScriptableProperty(store, label, "Parent");
+	REQUIRE(parent != nullptr);
+	Entity parentRead;
+	REQUIRE(ReadInstanceProperty(store, label, *parent, &parentRead, sizeof(parentRead), true));
+	CHECK(parentRead == copy);
+
+	const auto local = script::CreateScriptInstance(store, "ScreenGui", container, true);
+	REQUIRE(local);
+	CHECK_FALSE(script::InstanceVisibleToScript(store, local.Instance, false));
+	CHECK(script::InstanceVisibleToScript(store, local.Instance, true));
+	store.DestroyInstance(copy);
+	CHECK(script::InstanceForScriptRead(store, source, true) == ecs::NULL_ENTITY);
+	CHECK(FindInstanceChild(store, container, "Hud", false, true) == ecs::NULL_ENTITY);
+	CHECK(store.Alive(source));
+}
+
+TEST_CASE("shared host child waits retain their originating GUI view", "[script][instance-shim][playergui]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
+	Store store("instance_shim_gui_waits");
+	scene::InstallServices(store);
+	const auto player = scene::AddPlayer(store, "Ada", true);
+	const auto container = store.FindFirstChild(player, "PlayerGui");
+	script::ChildWaiters waits;
+	const auto server = waits.Add(container, "Hud", 10, false);
+	const auto client = waits.Add(container, "Hud", 10, true);
+	std::vector<script::ChildWaiters::Resumption> ready;
+	waits.Advance(store, 1, ready);
+	CHECK(ready.empty());
+	const auto source = store.CreateInstance(gui::GuiClass("ScreenGui"), "Hud");
+	REQUIRE(store.SetParent(source, container));
+	REQUIRE(gui::RefreshPlayerGuiProjection(store, player, {}) == 1);
+	const auto copy = gui::FindPlayerGuiCopy(store, source);
+	REQUIRE(store.Alive(copy));
+	waits.Advance(store, 2, ready);
+	REQUIRE(ready.size() == 2);
+	CHECK(ready[0].Waiter == server);
+	CHECK(ready[0].Child == source);
+	CHECK(ready[1].Waiter == client);
+	CHECK(ready[1].Child == copy);
+	CHECK(waits.Empty());
 }

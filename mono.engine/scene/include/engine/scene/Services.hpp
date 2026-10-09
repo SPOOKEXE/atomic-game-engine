@@ -589,4 +589,8 @@ namespace engine::scene {
 
 	// Which player's private container owns this instance, or a null entity.
 	ecs::Entity PrivatePlayerOwning(const ecs::Store &store, ecs::Entity instance);
+
+	// True only below this player's direct PlayerGui container. The container
+	// itself and other players' interfaces do not grant local GUI write access.
+	bool InPlayerGui(const ecs::Store &store, ecs::Entity instance, ecs::Entity player);
 }

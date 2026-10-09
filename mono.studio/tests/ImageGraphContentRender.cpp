@@ -124,13 +124,26 @@ emitter.Size = NumberSequence.new(1.5)
 emitter.Transparency = NumberSequence.new(0)
 emitter.Color = ColorSequence.new(Color3.new(1, 1, 1))
 emitter.Parent = part
-
+)";
+	}
+	const auto cameras = root / "client/DemoCameras";
+	std::filesystem::create_directories(cameras);
+	{
+		std::ofstream output(cameras / "consumers.client.luau");
+		REQUIRE(output.good());
+		output << R"(
 local camera = Instance.new("Camera")
 camera.FieldOfView = 60
 camera.CFrame = CFrame.lookAt(Vector3.new(0, 0, 8), Vector3.new(0, 0, 0))
+camera.CameraSubject = nil
 camera.Parent = workspace
 workspace.CurrentCamera = camera
+camera.CameraType = Enum.CameraType.Scriptable
+local owned = Instance.new("ObjectValue", script)
+owned.Name = "PublishedCamera"
+owned.Value = camera
 )";
+		REQUIRE(output.good());
 	}
 
 	client::Options options;

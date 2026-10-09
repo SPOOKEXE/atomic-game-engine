@@ -506,17 +506,18 @@ print(
 
 -- --- the camera --------------------------------------------------------------
 
-local camera = Instance.new("Camera")
-camera.Name = "Camera"
-camera.FieldOfView = 70
-camera.FarPlaneZ = 4000
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+demoCamera:SetAttribute('Name', 'Camera')
+demoCamera:SetAttribute('FieldOfView', 70)
+demoCamera:SetAttribute('FarPlaneZ', 4000)
 
 -- **Low and looking along the bays into the field.** Overdraw is what a
 -- particle system is limited by, so a camera looking down at the whole plane
 -- would measure the upload and the simulation while measuring almost no fill.
-camera.CFrame = CFrame.lookAt(Vector3.new(0, 9, -20), Vector3.new(0, 4, BAY_ROW_Z))
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+demoCamera:SetAttribute('CFrame', CFrame.lookAt(Vector3.new(0, 9, -20), Vector3.new(0, 4, BAY_ROW_Z)))
 
 -- --- the one moving thing, and the one blinking thing ------------------------
 --

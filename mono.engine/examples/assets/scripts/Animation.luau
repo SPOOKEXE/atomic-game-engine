@@ -92,8 +92,8 @@ makeRig("AnimatedRig", -4, Color3.new(1.0, 0.28, 0.08), 0)
 makeRig("AnimatedRigMiddle", 0, Color3.new(1.0, 0.68, 0.08), 0.67)
 makeRig("AnimatedRigRight", 4, Color3.new(0.25, 0.72, 1.0), 1.33)
 
-local camera = Instance.new("Camera")
-camera.Name = "Camera"
-camera.CFrame = CFrame.lookAt(Vector3.new(13, 7, 17), Vector3.new(0, 3, 0))
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local camera = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+camera:SetAttribute("Name", "Camera")
+camera:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(13, 7, 17), Vector3.new(0, 3, 0)))

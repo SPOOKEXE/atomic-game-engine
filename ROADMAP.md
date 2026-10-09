@@ -69,8 +69,13 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] Pass `just preset=dev docs-check` with zero malformed comments and no undocumented public entities.
 - [x] Finish three consecutive interactive Studio Play/Stop checks; restored orange graph output appears in ImageLabel and ParticleEmitter.
 - [x] Verify isolated signed GUI Publish/Apply and mismatched-key refusal; six SHA values stayed unchanged, the candidate was absent and the previous Apply remained enabled.
-- [x] Pass fresh strict CI with stable fixes: 664 suites, 0 skipped and 0 failed; architecture has 50 modules, 6 programs and 36 layered modules.
+- [x] Initial minimal ImageGraph baseline: strict CI passed 664 suites, 0 skipped and 0 failed; architecture had 50 modules, 6 programs and 36 layered modules.
+- [x] Keep LocalScript-created objects and `Workspace` camera descendants local, unsaved and unreplicated; give each player private `StarterGui` copies with independent `ResetOnSpawn`.
+- [x] Add protected generated `Workspace.Terrain` with helper and migration paths, opt-in `AuthoredAffordance`, cameras without a `SurfaceCamera` facet, `RenderEffects` None-default dropdowns and an authored portal/mirror grid.
+- [x] Build the Tornado demo in pure world Luau over generic GPU field, particle, volume and force systems; verify the 50M-particle server/client run through the Studio HUD button and Bladeborne's character-following local camera with HUD visible.
+- [x] Capture and pass all 77 top-level demos; pass GPU renderer checks (9 cases, 902 assertions) and consumer checks (4 cases, 617 assertions), and verify native viewport float and resnap behavior.
 - [_] Non-acceptance follow-up: audit aggregate replica snapshot and staged-byte ceilings for large EditableImage rows. The current path has a `uint32_t` total cap but no explicit assembled-image budget; per-image bounds and windowed staging are tested.
+- [_] Security follow-up: audit dynamic schema and component-codec acceptance, plus client-local provenance and descendant filtering across replication and authored game saves.
 
 The accepted implementation is `v0.26.0-imagegraph-minimal`. The preserved full Composer work remains on `v0.26.5-imagegraph-full` for user review.
 

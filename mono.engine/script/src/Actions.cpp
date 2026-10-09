@@ -157,6 +157,12 @@ namespace engine::script {
 		return true;
 	}
 
+	bool ActionStack::DropCallback(CallbackRef callback) {
+		const size_t previous = Bound.size();
+		std::erase_if(Bound, [callback](const BoundAction &action) { return action.Callback == callback; });
+		return Bound.size() != previous;
+	}
+
 	void ActionStack::UnbindAll(std::vector<CallbackRef> &released) {
 		for (const BoundAction &action : Bound) {
 			released.push_back(action.Callback);

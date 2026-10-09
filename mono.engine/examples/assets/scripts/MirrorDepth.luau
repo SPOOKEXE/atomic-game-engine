@@ -94,14 +94,15 @@ mirror("PaneA", CFrame.new(Vector3.new(-22, 4.5, 6)) * CFrame.Angles(0, math.rad
 mirror("PaneB", CFrame.new(Vector3.new(16, 4.5, -2)) * CFrame.Angles(0, math.rad(-110), 0))
 mirror("PaneC", CFrame.new(Vector3.new(2, 4.5, 26)) * CFrame.Angles(0, math.rad(180), 0))
 
-local view = Instance.new("Camera")
-view.Name = "TurnedCamera"
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+demoCamera:SetAttribute('Name', 'TurnedCamera')
 
 -- **Turned rather than moved.** The whole point is that the eye stays where it
 -- was and only its facing changes, because that is what the report described
 -- and what the frustum test is sensitive to.
-view.CFrame = CFrame.new(Vector3.new(0, 6, 18)) * CFrame.Angles(0, math.rad(YAW), 0)
-view.Parent = workspace
-workspace.CurrentCamera = view
+demoCamera:SetAttribute('CFrame', CFrame.new(Vector3.new(0, 6, 18)) * CFrame.Angles(0, math.rad(YAW), 0))
 
 print(`mirrordepth: camera turned {YAW} degrees, three panes chained A -> B -> C`)

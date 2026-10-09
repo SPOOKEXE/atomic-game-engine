@@ -73,13 +73,14 @@ makeBay(2, "Loop", Enum.ParticleFlipbookMode.Loop, Color3.new(0.18, 0.62, 0.95),
 makeBay(3, "PingPong", Enum.ParticleFlipbookMode.PingPong, Color3.new(0.34, 0.9, 0.4), true, 6)
 makeBay(4, "Random", Enum.ParticleFlipbookMode.Random, Color3.new(0.82, 0.42, 0.92), false, 0)
 
-local camera = Instance.new("Camera")
-camera.Name = "FlipbookCamera"
-camera.FieldOfView = 62
-camera.FarPlaneZ = 500
-camera.CFrame = CFrame.lookAt(Vector3.new(0, 9, 30), Vector3.new(0, 4, 0))
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+demoCamera:SetAttribute('Name', 'FlipbookCamera')
+demoCamera:SetAttribute('FieldOfView', 62)
+demoCamera:SetAttribute('FarPlaneZ', 500)
+demoCamera:SetAttribute('CFrame', CFrame.lookAt(Vector3.new(0, 9, 30), Vector3.new(0, 4, 0)))
 
 local checked = false
 RunService.Heartbeat:Connect(function()

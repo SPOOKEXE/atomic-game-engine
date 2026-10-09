@@ -1,3 +1,4 @@
+#include <engine/ecs/Schema.hpp>
 #include <engine/replication/Protocol.hpp>
 
 #include <utility>
@@ -73,6 +74,8 @@ namespace engine::replication {
 			return "group signatures";
 		case MessageKind::Disputed:
 			return "disputed";
+		case MessageKind::Schemas:
+			return "schemas";
 		}
 		return "?";
 	}
@@ -81,6 +84,14 @@ namespace engine::replication {
 		WriteFront(writer, MessageKind::Identify);
 		writer.WriteRaw(identify.Key.Value.data(), identify.Key.Value.size());
 		writer.WriteRaw(identify.Signature.Value.data(), identify.Signature.Value.size());
+	}
+
+	void WriteMessage(core::ByteWriter &writer, const SchemaChunk &chunk) {
+		WriteFront(writer, MessageKind::Schemas);
+		writer.WriteName(chunk.Component);
+		writer.WriteUInt32(chunk.TotalBytes);
+		writer.WriteUInt32(chunk.Offset);
+		WriteBytes(writer, chunk.Bytes);
 	}
 
 	void WriteMessage(core::ByteWriter &writer, const SnapshotChunk &chunk) {
@@ -128,7 +139,7 @@ namespace engine::replication {
 		const uint16_t version = reader.ReadUInt16();
 		const uint8_t kind = reader.ReadUInt8();
 		if (reader.Failed() || version != PROTOCOL_VERSION ||
-			kind > static_cast<uint8_t>(MessageKind::Disputed)) {
+			kind > static_cast<uint8_t>(MessageKind::Schemas)) {
 			return std::nullopt;
 		}
 		return static_cast<MessageKind>(kind);
@@ -177,7 +188,7 @@ namespace engine::replication {
 		}
 
 		const uint8_t kind = reader.ReadUInt8();
-		if (reader.Failed() || kind > static_cast<uint8_t>(MessageKind::Disputed)) {
+		if (reader.Failed() || kind > static_cast<uint8_t>(MessageKind::Schemas)) {
 			return false;
 		}
 
@@ -185,6 +196,24 @@ namespace engine::replication {
 		read.Kind = static_cast<MessageKind>(kind);
 
 		switch (read.Kind) {
+		case MessageKind::Schemas: {
+			const std::string_view name = reader.ReadString();
+			read.Schema.TotalBytes = reader.ReadUInt32();
+			read.Schema.Offset = reader.ReadUInt32();
+			const uint32_t count = reader.ReadUInt32();
+			if (reader.Failed() || name.empty() ||
+				name.size() > ecs::Schemas::MAXIMUM_DEFINITION_NAME_BYTES ||
+				read.Schema.TotalBytes < sizeof(uint32_t) ||
+				read.Schema.TotalBytes > ecs::Schemas::MAXIMUM_DEFINITION_BYTES || count == 0 ||
+				count > reader.Remaining() ||
+				static_cast<uint64_t>(read.Schema.Offset) + count > read.Schema.TotalBytes)
+				return false;
+			read.Schema.Bytes.resize(count);
+			reader.ReadRaw(read.Schema.Bytes.data(), count);
+			read.Schema.Component = core::Name(name);
+			break;
+		}
+
 		case MessageKind::SnapshotChunk: {
 			// Range-checked here rather than cast blindly, for the reason this
 			// module's `AGENTS.md` gives about `MessageKind`: a value outside

@@ -960,6 +960,7 @@ namespace engine::render {
 		// behind a wall. Null when the shader failed to build, which disables
 		// the grid and nothing else.
 		SDL_GPUGraphicsPipeline *GridPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *HdrGridPipeline = nullptr;
 
 		// --- shader variants --------------------------------------------------
 		//
@@ -1132,8 +1133,20 @@ namespace engine::render {
 		// Active view scope for native environment, particle and ribbon texture bindings.
 		core::Name ActiveContentOwner;
 		core::Name ActiveImageGraphWorld;
+		core::Name ActiveLocalImageGraphWorld;
 		static core::Name MeshContentOwner(core::Name name, core::Name owner);
 		static core::Name TextureContentOwner(core::Name name, core::Name owner, core::Name world = {});
+		core::Name TextureContentOwnerWithFallback(
+			core::Name name, core::Name owner, core::Name world, core::Name authoredWorld
+		) const {
+			const core::Name local = TextureContentOwner(name, owner, world);
+			if (!authoredWorld.IsValid() || authoredWorld == world || Textures.Find(name, local) != nullptr)
+				return local;
+			return TextureContentOwner(name, owner, authoredWorld);
+		}
+		core::Name ParticleTextureOwner(
+			core::Name name, core::Name contentOwner, core::Name sourceWorld, core::Name authoredWorld
+		) const;
 
 		uint64_t ResourceEpoch = 0;
 
@@ -1250,6 +1263,7 @@ namespace engine::render {
 		std::vector<core::Name> SlotTexture;
 		std::vector<core::Name> SlotContentOwner;
 		std::vector<core::Name> SlotImageGraphWorld;
+		std::vector<core::Name> SlotImageGraphFallbackWorld;
 		std::vector<core::Name> SlotNormalMap;
 		std::vector<core::Name> SlotRoughnessMap;
 		std::vector<core::Name> SlotOcclusionMap;
@@ -1476,6 +1490,7 @@ namespace engine::render {
 				   SlotTexture[next] == SlotTexture[slot] &&
 				   SlotContentOwner[next] == SlotContentOwner[slot] &&
 				   SlotImageGraphWorld[next] == SlotImageGraphWorld[slot] &&
+				   SlotImageGraphFallbackWorld[next] == SlotImageGraphFallbackWorld[slot] &&
 				   SlotNormalMap[next] == SlotNormalMap[slot] &&
 				   SlotRoughnessMap[next] == SlotRoughnessMap[slot] &&
 				   SlotOcclusionMap[next] == SlotOcclusionMap[slot] &&
@@ -1534,10 +1549,9 @@ namespace engine::render {
 		SDL_GPUComputePipeline *ParticleEmit = nullptr;
 		SDL_GPUComputePipeline *ParticleScatter = nullptr;
 
-		// The analytical storm field shares no allocation or simulation path with
-		// authored emitters. Its one state row is both compute storage and the
-		// vertex stream. A bounded front cohort feeds the depth-sliced cloud draw,
-		// so even fifty million particles remain device-local.
+		// Authored initial conditions seed device-local state. Only a bounded draw
+		// cohort crosses the raster pipeline; the full requested population stays
+		// resident and is stepped on the device.
 		SDL_GPUComputePipeline *GpuParticleFieldStep = nullptr;
 		SDL_GPUGraphicsPipeline *GpuParticleFieldPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *HdrGpuParticleFieldPipeline = nullptr;
@@ -1550,11 +1564,14 @@ namespace engine::render {
 			uint32_t RequestedCount = 0;
 			uint32_t Seed = 0;
 			uint8_t Layers = 0;
-			float TopHeight = 1.0f;
-			float CentreY = 0.0f;
-			core::Vector3 Centre;
-			float CoreRadius = 1.0f;
-			float InfluenceRadius = 1.0f;
+			SDL_GPUBuffer *Samples = nullptr;
+			SDL_GPUTransferBuffer *SampleTransfer = nullptr;
+			uint32_t SampleCapacity = 0;
+			bool SamplesDirty = true;
+			bool SampleUploadPending = false;
+			core::CFrame Frame;
+			scene::VectorFieldSample ForceField;
+
 			scene::GpuParticleField Field;
 			scene::WorldLighting Lighting;
 			bool ResetPending = true;
@@ -2184,7 +2201,9 @@ namespace engine::render {
 				world.StateInitialisationPending = false;
 			}
 			for (GpuParticleFieldWorld &world : GpuParticleFieldWorlds) {
-				if (!world.SubmissionPending) continue;
+				if (!world.SubmissionPending && !world.SampleUploadPending) continue;
+				if (!submitted && world.SampleUploadPending) world.SamplesDirty = true;
+				world.SampleUploadPending = false;
 				// A command buffer that never submitted cannot have initialized the
 				// replacement buffer. Re-run the device-only reset next frame.
 				if (!submitted) world.ResetPending = true;

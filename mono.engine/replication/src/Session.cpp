@@ -23,6 +23,7 @@ namespace engine::replication {
 		case MessageKind::Disputed:
 			return net::ChannelKind::Unreliable;
 
+		case MessageKind::Schemas:
 		case MessageKind::SnapshotChunk:
 		case MessageKind::Structure:
 		case MessageKind::Input:

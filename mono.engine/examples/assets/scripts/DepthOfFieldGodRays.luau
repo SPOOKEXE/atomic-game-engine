@@ -44,8 +44,8 @@ for index = 1, 18 do
 	pillar.Parent = workspace
 end
 
-local camera = Instance.new("Camera")
-camera.CFrame = CFrame.lookAt(Vector3.new(13, 8, 29), Vector3.new(0, 7, -30))
-camera.FieldOfView = 55
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local camera = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+camera:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(13, 8, 29), Vector3.new(0, 7, -30)))
+camera:SetAttribute("FieldOfView", 55)

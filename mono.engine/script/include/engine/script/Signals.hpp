@@ -417,6 +417,9 @@ namespace engine::script {
 		// @return `false` when the handle names nothing live.
 		bool Disconnect(ConnectionId id, CallbackRef &released);
 
+		// forget registrations when their source script stops; the VM releases the value.
+		bool DropCallback(CallbackRef callback);
+
 		// Reports whether a handle names a live connection.
 		//
 		// @param id The handle to test.

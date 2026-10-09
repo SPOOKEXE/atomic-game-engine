@@ -118,6 +118,13 @@ namespace engine::script {
 			if (message.empty()) {
 				return "the script failed";
 			}
+			for (const auto &[atom, origin] : JsOf(context).SourceOrigins) {
+				size_t position = 0;
+				while ((position = message.find(origin.CompiledName, position)) != std::string::npos) {
+					message.replace(position, origin.CompiledName.size(), origin.OriginalName);
+					position += origin.OriginalName.size();
+				}
+			}
 
 			// **The frames name what the author wrote, when a map says what that
 			// was.** A `.ts` scene is transpiled before it ever reaches this VM,
@@ -291,6 +298,7 @@ namespace engine::script {
 		OpenJsBindings(Context, Store, limits.Role, limits.EffectiveCapabilities());
 		JsOf(Context).DataCapture = limits.DataCapture;
 		JsOf(Context).DataLifecycle = limits.DataLifecycle;
+		JsOf(Context).RemoteEventSender = limits.RemoteEventSender;
 		OpenJsSurface(Context);
 		OpenJsScopes(Context);
 
@@ -312,6 +320,16 @@ namespace engine::script {
 			JS_FreeAtom(Context, name);
 			JS_FreeValue(Context, global);
 		}
+	}
+
+	bool JavaScriptRuntime::DeliverRemoteEvent(std::span<const std::byte> message, ecs::Entity sender) {
+		Runtime::StackGuard guard(*this);
+		if (!guard) return false;
+		if (auto *budget = static_cast<Budget *>(JS_GetRuntimeOpaque(Vm)); budget != nullptr)
+			budget->Base = budget->Taken;
+		ReapJsScripts(Context);
+		if (!DeliverJsRemoteEvent(Context, message, sender, Error)) return false;
+		return DrainJobs();
 	}
 
 	JavaScriptRuntime::~JavaScriptRuntime() {
@@ -416,6 +434,7 @@ namespace engine::script {
 		}
 
 		Error.clear();
+		ReapJsScripts(Context);
 		if (auto *budget = static_cast<Budget *>(JS_GetRuntimeOpaque(Vm)); budget != nullptr) {
 			budget->Base = budget->Taken;
 		}
@@ -431,6 +450,12 @@ namespace engine::script {
 	}
 
 	bool JavaScriptRuntime::Run(std::string_view source, std::string_view name) {
+		return RunSource(source, name, Role(), ecs::NULL_ENTITY);
+	}
+
+	bool JavaScriptRuntime::RunSource(
+		std::string_view source, std::string_view name, const HostRole &execution, ecs::Entity instance
+	) {
 		MarkWorldSwapUsed();
 		Runtime::StackGuard guard(*this);
 		if (!guard) {
@@ -447,7 +472,16 @@ namespace engine::script {
 			budget->Base = budget->Taken;
 		}
 
-		const std::string chunkName(name);
+		ReapJsScripts(Context);
+		const std::string chunkName = RegisterJsSource(Context, name, execution, instance);
+		std::string scoped;
+		if (instance != ecs::NULL_ENTITY) {
+			// Function parameters become lexical bindings retained by callbacks and async continuations.
+			scoped = "(function(Instance,script){";
+			scoped.append(source);
+			scoped += "\n})";
+			source = scoped;
+		}
 		// **Strict mode, and it is load-bearing rather than tidy.** An instance
 		// is made non-extensible so a script cannot bolt a field onto it, and
 		// in sloppy mode assigning to a non-extensible object *silently does
@@ -461,6 +495,17 @@ namespace engine::script {
 			chunkName.c_str(),
 			JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_STRICT
 		);
+		if (!JS_IsException(result) && instance != ecs::NULL_ENTITY) {
+			JSValue arguments[]{
+				MakeJsInstanceConstructor(Context, execution.Client && !execution.Server),
+				MakeJsInstance(Context, instance)
+			};
+			JSValue invoked = JS_Call(Context, result, JS_UNDEFINED, 2, arguments);
+			JS_FreeValue(Context, arguments[0]);
+			JS_FreeValue(Context, arguments[1]);
+			JS_FreeValue(Context, result);
+			result = invoked;
+		}
 
 		if (JS_IsException(result)) {
 			Error = ExceptionText(Context);
@@ -523,28 +568,9 @@ namespace engine::script {
 			return false;
 		}
 
-		// `script` names the instance, for the reason the Luau side gives.
-		//
-		// **A global rather than a per-chunk scope, and that difference is
-		// real**: `JS_Eval` with `JS_EVAL_TYPE_GLOBAL` shares one global object
-		// across every chunk, where `luaL_sandboxthread` gives each Luau chunk
-		// its own. So `script` is rebound before each and cleared after, and two
-		// JavaScript scripts in one world can see each other's globals - which
-		// is JavaScript's own model rather than something this engine chose.
-		{
-			JSValue global = JS_GetGlobalObject(Context);
-			JS_SetPropertyStr(Context, global, "script", MakeJsInstance(Context, instance));
-			JS_FreeValue(Context, global);
-		}
-
-		const bool ok = Run(program, std::string(path.Text()));
-
-		{
-			JSValue global = JS_GetGlobalObject(Context);
-			JS_SetPropertyStr(Context, global, "script", JS_NULL);
-			JS_FreeValue(Context, global);
-		}
-		return ok;
+		const bool client = Store.IsA(instance, LocalScriptClass());
+		const HostRole execution{!client, client, Role().Studio};
+		return RunSource(program, path.Text(), execution, instance);
 	}
 
 	bool JavaScriptRuntime::Heartbeat(float delta) {
@@ -573,6 +599,7 @@ namespace engine::script {
 		// over, so mirroring at the end would put every client a tick behind
 		// every save.
 		MirrorSourcePrograms(Store, Mirrored);
+		ReapJsScripts(Context);
 
 		Error = PumpJsComputeJobs(Context);
 		const std::string editableMeshError = PumpJsEditableMeshJobs(Context);

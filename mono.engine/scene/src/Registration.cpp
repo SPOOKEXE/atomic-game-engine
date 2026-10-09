@@ -56,47 +56,52 @@ namespace engine::scene {
 		void WriteGpuParticleFields(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *fields = static_cast<const GpuParticleField *>(source);
 			for (size_t index = 0; index < count; ++index) {
-				writer.WriteBool(fields[index].Enabled);
-				writer.WriteUInt8(fields[index].Layers);
-				writer.WriteUInt16(fields[index].Reserved);
-				writer.WriteUInt32(fields[index].RequestedCount);
-				writer.WriteUInt32(fields[index].Seed);
-				for (const core::Color3 colour :
-					 {fields[index].CondensationColor, fields[index].RainColor, fields[index].DebrisColor}) {
-					writer.WriteFloat(colour.R);
-					writer.WriteFloat(colour.G);
-					writer.WriteFloat(colour.B);
-				}
-				writer.WriteFloat(fields[index].CondensationAlpha);
-				writer.WriteFloat(fields[index].RainAlpha);
-				writer.WriteFloat(fields[index].DebrisAlpha);
-				writer.WriteFloat(fields[index].CondensationSize);
-				writer.WriteFloat(fields[index].RainSize);
-				writer.WriteFloat(fields[index].DebrisSize);
+				const auto &field = fields[index];
+				// A marker refuses the previous specialized field layout instead of
+				// silently treating its weather controls as generic initial conditions.
+				writer.WriteUInt32(0x32465047);
+				writer.WriteBool(field.Enabled);
+				writer.WriteUInt8(field.Layers);
+				writer.WriteUInt32(field.RequestedCount);
+				writer.WriteUInt32(field.Seed);
+				writer.WriteFloat(field.HalfExtent.X);
+				writer.WriteFloat(field.HalfExtent.Y);
+				writer.WriteFloat(field.HalfExtent.Z);
+				writer.WriteFloat(field.VelocityResponse);
+				writer.WriteString(GpuParticleDefinition(field));
 			}
 		}
-
 		void ReadGpuParticleFields(core::ByteReader &reader, void *destination, size_t count) {
+			if (count > reader.Remaining() / 34) {
+				reader.Fail();
+				return;
+			}
 			auto *fields = static_cast<GpuParticleField *>(destination);
+			std::vector<GpuParticleField> candidate;
+			candidate.reserve(count);
 			for (size_t index = 0; index < count; ++index) {
+				if (reader.ReadUInt32() != 0x32465047) {
+					reader.Fail();
+					return;
+				}
 				GpuParticleField field;
-				field.Enabled = reader.ReadBool();
+				const uint8_t enabled = reader.ReadUInt8();
+				field.Enabled = enabled != 0;
 				field.Layers = reader.ReadUInt8();
-				field.Reserved = reader.ReadUInt16();
 				field.RequestedCount = reader.ReadUInt32();
 				field.Seed = reader.ReadUInt32();
-				field.CondensationColor = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
-				field.RainColor = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
-				field.DebrisColor = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
-				field.CondensationAlpha = reader.ReadFloat();
-				field.RainAlpha = reader.ReadFloat();
-				field.DebrisAlpha = reader.ReadFloat();
-				field.CondensationSize = reader.ReadFloat();
-				field.RainSize = reader.ReadFloat();
-				field.DebrisSize = reader.ReadFloat();
-				if ((field.Layers & ~GPU_PARTICLE_ALL_LAYERS) != 0 || field.Reserved != 0) reader.Fail();
-				fields[index] = field;
+				field.HalfExtent = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				field.VelocityResponse = reader.ReadFloat();
+				const auto definition = reader.ReadString();
+				if (enabled > 1 || reader.Failed() || !ReadGpuParticleDefinition(definition, field) ||
+					!ValidGpuParticleField(field)) {
+					reader.Fail();
+					return;
+				}
+				candidate.push_back(std::move(field));
 			}
+			for (size_t index = 0; index < count; ++index)
+				fields[index] = std::move(candidate[index]);
 		}
 
 		void WritePortals(core::ByteWriter &writer, const void *source, size_t count) {
@@ -1876,8 +1881,8 @@ namespace engine::scene {
 		ecs::Components::Register<Clouds>("scene.Clouds");
 		ecs::Components::Register<Volume>("scene.Volume");
 
-		// **A resource, and a hand-written pair because it holds the generator's
-		// name.**
+		// **A durable component with a hand-written codec because it holds the
+		// generator's stable name.**
 		//
 		// **The recipe crosses and the ground it makes never can.** A chunked
 		// world is gigabytes; both ends run the same graph over the same seed and
@@ -1886,9 +1891,8 @@ namespace engine::scene {
 		// at four fewer orders of magnitude: sending a conclusion instead of its
 		// input hands an attacker the half they get to choose.
 		//
-		// Registered rather than left to be minted by the first `SetResource`,
-		// which takes the compiler's spelling of the type and aborts once the
-		// table is sealed.
+		// Registered before the class table and component table are sealed so the
+		// generated Terrain class can carry this same snapshot and wire row.
 		ecs::Components::Register<Terrain>("scene.Terrain", WriteTerrains, ReadTerrains);
 
 		// Appended because component ids are registration order. Every format is
@@ -1947,11 +1951,10 @@ namespace engine::scene {
 		// Appended because component ids are registration order.
 		ecs::Components::Register<LODSettings>("scene.LODSettings", WriteLodSettings, ReadLodSettings);
 
-		// This is a compact authored request rather than particle state. Its
-		// fixed twelve-byte format keeps saves and replicas independent of struct
-		// padding while the renderer owns all device-local particles.
+		// Bounded authored initial conditions cross saves and replicas. The much
+		// larger live population remains device-local.
 		ecs::Components::Register<GpuParticleField>(
-			"scene.GpuParticleField", WriteGpuParticleFields, ReadGpuParticleFields
+			"scene.GpuParticleField", WriteGpuParticleFields, ReadGpuParticleFields, 525000
 		);
 	}
 

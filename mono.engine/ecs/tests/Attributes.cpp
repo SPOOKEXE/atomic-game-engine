@@ -14,11 +14,14 @@
 
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -182,6 +185,96 @@ namespace attributes_test {
 }
 
 using namespace attributes_test;
+
+TEST_CASE("selected attribute exports include only visible authority owners", "[ecs][attributes]") {
+	using namespace engine::ecs;
+	RegisterAttributeComponents();
+	Store source("attribute-export");
+	const auto instanceClass = Classes::RegisterInstanceRoot();
+	const Entity visible = source.CreateInstance(instanceClass, "Visible");
+	const Entity hidden = source.CreateInstance(instanceClass, "Hidden");
+	const Entity localRoot = source.CreateInstance(instanceClass, "ClientLocal");
+	const Entity localChild = source.CreateInstance(instanceClass, "LocalChild");
+	REQUIRE(source.SetParent(localChild, localRoot));
+	source.Set(localRoot, ClientLocal{});
+	const Entity predicted = source.CreatePredictedInstance(instanceClass, "Predicted");
+	const auto values = EveryType();
+	for (const Entity owner : {visible, hidden, localRoot, localChild, predicted}) {
+		for (const auto &value : values)
+			REQUIRE(SetAttribute(source, owner, KeyFor(value.Type), value));
+	}
+	const std::array owners{visible, localRoot, localChild, predicted, visible, NULL_ENTITY};
+	AttributeTable selected = SelectAttributes(source, owners);
+	REQUIRE(selected.Entities.size() == 1);
+	CHECK(selected.Entities.contains(visible.Id));
+	CHECK(selected.Revisions.empty());
+	AttributeValue changed;
+	changed.Type = PropertyType::String;
+	changed.String = "server edit after capture";
+	REQUIRE(SetAttribute(source, visible, KeyFor(changed.Type), changed));
+	Store exported("exported");
+	REQUIRE(exported.CreateAt(visible));
+	exported.SetResource(selected);
+	ByteWriter writer;
+	REQUIRE(exported.Save(writer));
+	Store restored("restored");
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	for (const auto &value : values) {
+		AttributeValue actual;
+		REQUIRE(GetAttribute(restored, visible, KeyFor(value.Type), actual));
+		CHECK(Same(value, actual));
+		for (const Entity omitted : {hidden, localRoot, localChild, predicted})
+			CHECK_FALSE(GetAttribute(restored, omitted, KeyFor(value.Type), actual));
+	}
+}
+
+TEST_CASE("instance clones preserve independent attributes throughout their subtree", "[ecs][attributes]") {
+	RegisterAttributeComponents();
+	const auto instanceClass = engine::ecs::Classes::RegisterInstanceRoot();
+	for (const bool predicted : {false, true}) {
+		Store store("clone-attributes");
+		const Entity source = store.CreateInstance(instanceClass, "Source");
+		const Entity child = store.CreateInstance(instanceClass, "Child");
+		REQUIRE(store.SetParent(child, source));
+		const auto values = EveryType();
+		for (const auto &value : values) {
+			REQUIRE(SetAttribute(store, source, KeyFor(value.Type), value));
+			REQUIRE(SetAttribute(store, child, KeyFor(value.Type), value));
+		}
+		const Name textKey = KeyFor(PropertyType::String);
+		const auto sourceRevision = AttributeRevision(store, source, textKey);
+		store.SetAdoptOnly(predicted);
+		const Entity copy = predicted ? store.ClonePredictedInstance(source) : store.CloneInstance(source);
+		REQUIRE(copy != engine::ecs::NULL_ENTITY);
+		CHECK(Store::IsPredicted(copy) == predicted);
+		const Entity copiedChild = store.FindFirstChild(copy, "Child");
+		REQUIRE(copiedChild != engine::ecs::NULL_ENTITY);
+		CHECK(Store::IsPredicted(copiedChild) == predicted);
+		for (const auto &value : values) {
+			INFO(engine::ecs::Describe(value.Type));
+			for (const Entity cloned : {copy, copiedChild}) {
+				AttributeValue back;
+				REQUIRE(GetAttribute(store, cloned, KeyFor(value.Type), back));
+				CHECK(Same(value, back));
+			}
+		}
+		CHECK(AttributeRevision(store, source, textKey) == sourceRevision);
+		CHECK(AttributeRevision(store, copy, textKey) != 0);
+		AttributeValue changed;
+		changed.Type = PropertyType::String;
+		changed.String = "copy text";
+		REQUIRE(SetAttribute(store, copy, textKey, changed));
+		AttributeValue original;
+		REQUIRE(GetAttribute(store, source, textKey, original));
+		CHECK(original.String != changed.String);
+		store.DestroyInstance(source);
+		AttributeValue retained;
+		REQUIRE(GetAttribute(store, copiedChild, textKey, retained));
+		CHECK(retained.String == original.String);
+		CHECK(store.Alive(copy));
+	}
+}
 
 TEST_CASE("every attribute type a world may hold survives a save", "[ecs][attributes]") {
 	// **The case this file exists for.** An attribute reaches a save file

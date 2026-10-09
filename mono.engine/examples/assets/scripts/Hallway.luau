@@ -313,30 +313,12 @@ elseif WHICH == "plain" then
 	viewpoint = CFrame.new(Vector3.new(0, 12, 60)) * CFrame.Angles(-0.15, 0, 0)
 end
 
-if viewpoint ~= nil then
-	local view = Instance.new("Camera")
-	view.Name = "Viewer"
-	view.FieldOfView = 70
-	view.CFrame = viewpoint
-	view.Parent = WORLD
-	WORLD.CurrentCamera = view
-
-	if WHICH == "fly" then
-		local CAMERA_SPEED = 9
-		local cameraHeading = -1
-		RunService.Heartbeat:Connect(function(deltaTime: number)
-			local frame = view.CFrame
-			if frame.Position.Z <= -(LONG / 2 + 8) then
-				cameraHeading = 1
-			elseif frame.Position.Z >= LONG / 2 + 8 then
-				cameraHeading = -1
-			end
-			local forward = Vector3.new(0, 0, cameraHeading)
-			local eye = frame.Position + forward * CAMERA_SPEED * deltaTime
-			view.CFrame = CFrame.lookAt(eye, eye + forward)
-		end)
-	end
-end
+local cameraTemplates = assert(game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts"), "the camera template container is missing")
+local cameraScript = assert(cameraTemplates:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+cameraScript:SetAttribute("View", WHICH)
+cameraScript:SetAttribute("InitialFrame", viewpoint)
+cameraScript:SetAttribute("LongLength", LONG)
+cameraScript:SetAttribute("CameraSpeed", 9)
 
 -- An actual controller-driven character takes the same route a few metres in
 -- front of the camera. `CrossPortals` carries its root and movement intent;

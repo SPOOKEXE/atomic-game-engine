@@ -1,3 +1,5 @@
+#include "EffectsPresentation.hpp"
+
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -5,6 +7,7 @@
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
@@ -27,6 +30,7 @@
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Interpolation.hpp>
@@ -40,6 +44,7 @@
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Wire.hpp>
+#include <engine/script/PlayerGui.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -106,6 +111,11 @@ namespace client {
 			const ActiveCamera *active = store.Resource<ActiveCamera>();
 			if (active == nullptr || active->Entity == engine::ecs::NULL_ENTITY ||
 				!store.Alive(active->Entity) || !store.Has<FallbackCameraMarker>(active->Entity)) {
+				return;
+			}
+
+			const auto *control = store.Resource<engine::scene::CameraController>();
+			if (control != nullptr && control->Mode == engine::scene::CameraMode::Scriptable) {
 				return;
 			}
 
@@ -210,7 +220,16 @@ namespace client {
 
 	namespace {
 		Entity InstallCamera(Store &store) {
-			const Entity camera = store.Create();
+			const Entity camera = store.CreatePredictedInstance(engine::scene::CameraClass(), "Camera");
+			if (camera == engine::ecs::NULL_ENTITY) {
+				return camera;
+			}
+			store.Set(camera, engine::ecs::ClientLocal{});
+			store.Set(camera, engine::scene::TransientComponent{});
+			const Entity workspace = engine::scene::WorkspaceOf(store);
+			if (workspace != engine::ecs::NULL_ENTITY) {
+				store.SetParent(camera, workspace);
+			}
 			store.Set<Transform>(camera, Transform{});
 			store.Set<engine::scene::Camera>(camera, engine::scene::Camera{});
 			store.Set<engine::scene::CameraSubject>(camera, {});
@@ -947,6 +966,10 @@ namespace client {
 		constexpr uint32_t MAXIMUM_PARTICLE_POOL = 1048576;
 	}
 
+	void InstallEffectsPresentation(Store &store, Scheduler &scheduler) {
+		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL, MAXIMUM_PARTICLE_POOL);
+	}
+
 	bool BuildScriptedWorld(
 		Store &store,
 		Scheduler &scheduler,
@@ -990,12 +1013,46 @@ namespace client {
 		// argument.
 		InstallInputResources(store);
 
+		// Startup source receives the same local eye as a replicated client.
+		Entity startupFallback = engine::ecs::NULL_ENTITY;
+		const auto *initial = store.Resource<ActiveCamera>();
+		if (initial == nullptr || initial->Entity == engine::ecs::NULL_ENTITY ||
+			!store.Alive(initial->Entity)) {
+			const Entity camera = InstallCamera(store);
+			if (camera == engine::ecs::NULL_ENTITY) {
+				ENGINE_ERROR("could not establish the local camera");
+				return false;
+			}
+			store.SetResource(ActiveCamera{camera});
+			startupFallback = camera;
+		}
+
 		// The scene, the components and the systems that move it are the
 		// engine's and every program's. What follows is the client's half.
 		std::string error;
-		if (!engine::examples::LoadScene(store, scheduler, path, error, runtime, limits)) {
+		engine::script::RuntimeLimits standalone;
+		standalone.Role = engine::script::HostRole::OfBoth();
+		if (!engine::examples::LoadScene(
+				store, scheduler, path, error, runtime, limits != nullptr ? limits : &standalone
+			)) {
 			ENGINE_ERROR("script '{}' failed:\n{}", path, error);
 			return false;
+		}
+		if (const auto *active = store.Resource<ActiveCamera>();
+			startupFallback != engine::ecs::NULL_ENTITY && active != nullptr &&
+			active->Entity != startupFallback && store.Has<FallbackCameraMarker>(startupFallback)) {
+			bool retained = false;
+			const auto scripts = store.FindFirstChild(localPlayer, "PlayerScripts");
+			const auto companion = store.FindFirstChild(scripts, "DemoCamera");
+			store.EachChild(companion, [&](Entity marker) {
+				Entity published{};
+				if (store.InstanceNameOf(marker) == engine::core::Name("PublishedCamera") &&
+					store.GetProperty(marker, engine::core::Name("Value"), &published, sizeof(published)))
+					retained |= published == startupFallback;
+			});
+			// Only this call's temporary native eye is retired. A companion may
+			// explicitly retain it among named views even while another is active.
+			if (!retained) store.DestroyInstance(startupFallback);
 		}
 
 		// A standalone scripted client is an authority, not a passive replica.
@@ -1021,21 +1078,13 @@ namespace client {
 			store.EachChild(starterGui, [&hasTemplate](Entity) { hasTemplate = true; });
 		}
 		if (hasTemplate) {
-			(void)engine::gui::ResetPlayerGui(store, localPlayer);
+			(void)engine::script::ResetPlayerGui(store, localPlayer);
 		}
 
 		const float extent = store.Resource<WorldBounds>()->HalfExtent;
 
-		// **A scene that placed its own camera keeps it.** `MoveCamera` is this
-		// client's placeholder - it orbits whatever `ActiveCamera` names so that
-		// a scene with no camera of its own is still looked at from somewhere -
-		// and running it beside a script that aimed one is two things writing
-		// one `Transform`, the second winning silently every tick.
-		//
-		// That is not hypothetical: `Mirrors-1-world.luau` computes its
-		// reflection camera from where the eye stands, so an orbiting eye makes
-		// the reflection correct for a position the viewer is no longer at. The
-		// mirror looked broken and the camera was the reason.
+		// Scripts can replace the initial local eye. Only the marked native
+		// fallback receives orbit updates, and Scriptable mode suspends them.
 		const auto *existing = store.Resource<ActiveCamera>();
 		const bool scripted = existing != nullptr && existing->Entity != engine::ecs::NULL_ENTITY &&
 							  store.Alive(existing->Entity);
@@ -1043,7 +1092,7 @@ namespace client {
 		const Entity camera = scripted ? existing->Entity : InstallCamera(store);
 		InstallResources(store, camera, extent, std::max<uint32_t>(reserve, 1));
 
-		if (!scripted) {
+		if (store.Has<FallbackCameraMarker>(camera)) {
 			store.SetResource(
 				FallbackCameraState{
 					engine::scene::FindSpawn(store).Position != Vector3::Zero,
@@ -1078,7 +1127,7 @@ namespace client {
 		// phase", `physics::RegisterCharacterSystems` says the pose runs before
 		// the draw list is built, and `camera-control` says `PlaceCamera` sees
 		// this frame's distance.
-		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL, MAXIMUM_PARTICLE_POOL);
+		InstallEffectsPresentation(store, scheduler);
 		InstallControls(store, scheduler);
 		scheduler.Add("advance-animation-tracks", Phase::Simulation, [](Store &world) {
 			(void)engine::scene::AdvanceAnimationTracks(world);
@@ -1127,6 +1176,9 @@ namespace client {
 
 		ActiveCamera live;
 		live.Entity = InstallCamera(store);
+		if (live.Entity == engine::ecs::NULL_ENTITY) {
+			return false;
+		}
 		store.SetResource(live);
 		store.SetResource(
 			FallbackCameraState{
@@ -1238,6 +1290,7 @@ namespace client {
 
 	void InstallPresentation(Store &store, Scheduler &scheduler, uint32_t reserve) {
 		RegisterClientComponents();
+		store.Observe<engine::scene::GpuParticleField>();
 
 		// Game-file and studio worlds need the same built-in metadata.
 		RecordBuiltinMeshes(store);
@@ -1341,7 +1394,7 @@ namespace client {
 		// **And before the collection, for the reason `BuildScriptedWorld`
 		// gives at length**: what these install in `PreRender` is what the draw
 		// list is built from. The collection dependencies state that order.
-		InstallEffects(store, scheduler, DEFAULT_PARTICLE_POOL, MAXIMUM_PARTICLE_POOL);
+		InstallEffectsPresentation(store, scheduler);
 		InstallControls(store, scheduler);
 		scheduler.Add("advance-animation-tracks", Phase::Simulation, [](Store &world) {
 			(void)engine::scene::AdvanceAnimationTracks(world);

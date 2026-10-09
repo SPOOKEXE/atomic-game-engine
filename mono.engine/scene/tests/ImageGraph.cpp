@@ -1,6 +1,7 @@
 #include "ImageGraphRegistration.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ImageGraph.hpp>
 #include <engine/testing/Suite.hpp>
@@ -55,11 +56,20 @@ TEST_CASE("live image graphs use durable unique names and refuse unsafe referenc
 	REQUIRE(SetImageGraphInstanceKey(store, second, Name("other")));
 	const auto copy = store.CloneInstance(graph);
 	REQUIRE(copy != engine::ecs::NULL_ENTITY);
+	store.Set(copy, engine::ecs::InstanceProjection{graph, true});
+	CHECK(ImageGraphContentName(store, graph).IsValid());
+	CHECK(ImageGraphContentName(store, copy).IsValid());
+	REQUIRE(SetImageGraphInstanceKey(store, copy, Name("weather")));
+	const auto duplicate = store.CloneInstance(graph);
+	REQUIRE(duplicate != engine::ecs::NULL_ENTITY);
 	CHECK_FALSE(ImageGraphContentName(store, graph).IsValid());
 	CHECK_FALSE(ImageGraphContentName(store, copy).IsValid());
-	REQUIRE(SetImageGraphInstanceKey(store, copy, Name("weather-copy")));
+	CHECK_FALSE(ImageGraphContentName(store, duplicate).IsValid());
+	REQUIRE(SetImageGraphInstanceKey(store, duplicate, Name("weather-copy")));
 	CHECK(ImageGraphContentName(store, graph).IsValid());
-	CHECK(ImageGraphContentName(store, copy).Text() == "imagegraph-instance://weather-copy#image");
+	CHECK(ImageGraphContentName(store, copy).Text() == "imagegraph-instance://weather#image");
+	CHECK(ImageGraphContentName(store, duplicate).Text() == "imagegraph-instance://weather-copy#image");
+	CHECK(ImageGraphContentName(store, duplicate).IsValid());
 }
 
 TEST_CASE("typed image graph input changes are bounded atomic and quiet on no-op", "[scene][imagegraph]") {
@@ -220,4 +230,24 @@ TEST_CASE(
 	engine::scene::detail::ReadImageGraphs(badReader, &destination, 1);
 	CHECK(badReader.Failed());
 	CHECK(destination.Inputs == accepted);
+}
+
+TEST_CASE("replica graph controls require predicted local ownership", "[scene][imagegraph]") {
+	ImageGraphClass();
+	Store store("local-graphs");
+	const auto authority = Make(store);
+	const auto local = store.CreatePredictedInstance(ImageGraphClass(), "Local");
+	store.Set(authority, engine::ecs::ClientLocal{});
+	store.SetAdoptOnly(true);
+	CHECK_FALSE(SetImageGraphInput(store, authority, Number("opacity", .5)));
+	CHECK_FALSE(SetImageGraphInput(store, local, Number("opacity", .5)));
+	store.Set(local, engine::ecs::ClientLocal{});
+	REQUIRE(SetImageGraphInstanceKey(store, local, Name("local-graph")));
+	REQUIRE(SetImageGraphAsset(store, local, Name("graphs/local.aimagegraph")));
+	REQUIRE(SetImageGraphOutput(store, local, Name("mask")));
+	REQUIRE(SetImageGraphInput(store, local, Number("opacity", .5)));
+	CHECK(ImageGraphContentName(store, local).Text() == "imagegraph-instance://local-graph#mask");
+	CHECK_FALSE(SetImageGraphAsset(store, local, Name("../unsafe.aimagegraph")));
+	REQUIRE(ResetImageGraphInput(store, local, Name("opacity")));
+	CHECK(store.Get<ImageGraph>(authority)->Inputs.empty());
 }

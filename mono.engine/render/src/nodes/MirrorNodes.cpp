@@ -360,6 +360,7 @@ namespace engine::render {
 						);
 					}
 
+					recording.DrawGroundGrid(pass, matrices.ViewProjection, eye.Frame, captureTarget);
 					if (drawInterface) {
 						result.DrawCalls += gameInterfaceHook->RecordWorld(
 							command,
@@ -767,6 +768,9 @@ namespace engine::render {
 						};
 
 						drawMirrors(false);
+						recording.DrawGroundGrid(
+							pass, state.ViewProjection, capturedView.Frame, captureTarget
+						);
 
 						if (drawInterface && accepted[index].View->InstanceCount == 0) {
 							result.DrawCalls += gameInterfaceHook->RecordWorld(

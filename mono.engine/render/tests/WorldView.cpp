@@ -5,7 +5,6 @@
 #include <engine/graph/Frustum.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/physics/Storm.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -46,28 +45,85 @@ namespace {
 	}
 }
 
-TEST_CASE("retained cloud density follows a frozen storm preset change", "[render][world-view][cloud]") {
-	ecs::Store store("frozen-cloud");
-	physics::Storm storm;
-	physics::SetStorm(store, storm);
+TEST_CASE(
+	"generic GPU fields collect owned samples and nearest vector fields", "[render][world-view][particles]"
+) {
+	RegisterViewClasses();
+	ecs::Store store("generic-field");
+	const auto vector = store.CreateInstance(ecs::Classes::Find(core::Name("VectorField3D")), "Wind");
+	scene::VectorField3D wind;
+	wind.Vector = {3, 4, 5};
+	store.Set(vector, wind);
+	const auto field = store.CreateInstance(ecs::Classes::Find(core::Name("GpuParticleField")), "Particles");
+	REQUIRE(store.SetParent(field, vector));
+	scene::GpuParticleField authored;
+	authored.SpawnSamples.push_back({{1, 2, 3}, 10, {4, 5, 6}, 1});
+	store.Set(field, authored);
+	store.Set(field, scene::Transform{core::CFrame{core::Vector3{7, 8, 9}}});
 	render::WorldViewFrame frame;
-	render::CollectWorldView(store, core::Name("frozen-cloud"), frame);
-	REQUIRE(frame.CloudDensity.has_value());
-	const float originalWidth = frame.CloudDensity->Config.RootSize.X;
-	const auto *originalNodes = frame.CloudDensity->Nodes.data();
-	render::CollectWorldView(store, core::Name("frozen-cloud"), frame);
-	CHECK(frame.CloudDensity->Nodes.data() == originalNodes);
+	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	REQUIRE(frame.GpuParticles);
+	CHECK(frame.GpuParticles->Frame.Position == core::Vector3{7, 8, 9});
+	CHECK(frame.GpuParticles->ForceField.Source == vector);
+	CHECK(frame.GpuParticles->ForceField.Vector == core::Vector3{3, 4, 5});
+	CHECK(frame.GpuParticles->Field.SpawnSamples == authored.SpawnSamples);
+	CHECK(frame.GpuParticles->Source == field);
+	REQUIRE(frame.GpuParticles->DefinitionRevision != 0);
+	render::View view;
+	view.GpuParticles = frame.GpuParticles;
+	const auto signature = [&] { return render::ScenePresentationSignaturesOf(view, {}).Particles; };
+	const auto original = signature();
+	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	view.GpuParticles = frame.GpuParticles;
+	CHECK(signature() == original);
+	authored.SpawnSamples[0].Position.X = 99;
+	store.Set(field, authored);
+	CHECK(frame.GpuParticles->Field.SpawnSamples[0].Position.X == 1);
+	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	CHECK(frame.GpuParticles->Field.SpawnSamples[0].Position.X == 99);
+	CHECK(view.GpuParticles->Field.SpawnSamples[0].Position.X == 1);
+	view.GpuParticles = frame.GpuParticles;
+	CHECK(signature() != original);
+	const auto editedSamples = signature();
+	auto style = authored.Styles[0];
+	style.Size = 5;
+	REQUIRE(scene::SetGpuParticleStyle(store, field, 0, style));
+	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	view.GpuParticles = frame.GpuParticles;
+	CHECK(signature() != editedSamples);
+	const auto editedStyle = signature();
+	wind.Tangential = 50;
+	store.Set(vector, wind);
+	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	view.GpuParticles = frame.GpuParticles;
+	CHECK(signature() != editedStyle);
+	const auto editedFlow = signature();
+	store.AdvanceTick(1.0f / 60.0f);
+	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	view.GpuParticles = frame.GpuParticles;
+	CHECK(signature() != editedFlow);
+	const auto advanced = signature();
+	store.SetFrame(1.0f / 60.0f, 1);
+	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	view.GpuParticles = frame.GpuParticles;
+	CHECK(signature() == advanced);
 
-	storm.State.Parameters.InfluenceRadius *= 1.5f;
-	physics::SetStorm(store, storm);
-	render::CollectWorldView(store, core::Name("frozen-cloud"), frame);
-	REQUIRE(frame.CloudDensity.has_value());
-	CHECK(frame.CloudDensity->Config.RootSize.X == originalWidth * 1.5f);
-	storm.State.Parameters.Energy += 0.01f;
-	physics::SetStorm(store, storm);
-	render::CollectWorldView(store, core::Name("frozen-cloud"), frame);
-	REQUIRE(frame.CloudParameters.has_value());
-	CHECK(frame.CloudParameters->Energy == storm.State.Parameters.Energy);
+	auto currentField = *store.Get<scene::GpuParticleField>(field);
+	currentField.Enabled = false;
+	store.Set(field, currentField);
+	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	CHECK_FALSE(frame.GpuParticles);
+	REQUIRE(view.GpuParticles);
+	CHECK(view.GpuParticles->Field.Enabled);
+	CHECK(view.GpuParticles->Field.SpawnSamples[0].Position.X == 99);
+
+	currentField.Enabled = true;
+	store.Set(field, currentField);
+	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	REQUIRE(frame.GpuParticles);
+	CHECK(frame.GpuParticles->Field.SpawnSamples == currentField.SpawnSamples);
+	CHECK(frame.GpuParticles->Field.Styles[0].Size == 5);
+	CHECK(frame.GpuParticles->ForceField.Tangential == 50);
 }
 
 TEST_CASE(
@@ -266,6 +322,7 @@ TEST_CASE("world view owns a published replica pose and particle inputs", "[rend
 		store.AdvanceTick(.1);
 		render::CollectWorldView(store, core::Name("source"), frame);
 		REQUIRE(frame.Particles.Batches.size() == 1);
+		CHECK(frame.Particles.Batches[0].SourceWorld == core::Name(store.Name()));
 		CHECK(frame.Particles.Detached);
 		CHECK(frame.Particles.Batches[0].Block == &frame.Particles.Blocks[0]);
 		CHECK(frame.Particles.Batches[0].Block != &store.Resource<effects::ParticleSystem>()->Blocks[0]);

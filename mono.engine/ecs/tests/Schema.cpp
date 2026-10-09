@@ -660,3 +660,65 @@ TEST_CASE("a described component with fields is data and a fieldless one is a ta
 	CHECK(empty.Kind == engine::ecs::ComponentKind::Tag);
 	CHECK(empty.Size == 0);
 }
+
+TEST_CASE(
+	"schema definitions preserve field layout without sharing registration ids", "[schema][definition]"
+) {
+	const auto source = Schemas::Register(
+		Unique("definitionSource"),
+		std::array{
+			FieldSpec{"Energy", PropertyType::Double},
+			FieldSpec{"Ratio", PropertyType::Float, {}, FieldPacking::UFloat8},
+			FieldSpec{"Active", PropertyType::Bool},
+			FieldSpec{"Label", PropertyType::String},
+		}
+	);
+	REQUIRE(source.Why == Schemas::Status::Ok);
+	engine::core::ByteWriter definition;
+	REQUIRE(Schemas::WriteDefinition(source.Id, definition));
+	const Name destination(Unique("definitionReceiver"));
+	REQUIRE_FALSE(Components::Find(destination).IsValid());
+	engine::core::ByteReader reader(definition.Bytes());
+	REQUIRE(Schemas::ReadDefinition(destination, reader));
+	const Schema *decoded = Schemas::Find(destination);
+	REQUIRE(decoded != nullptr);
+	CHECK(decoded->Size() == Schemas::Of(source.Id)->Size());
+	CHECK(decoded->Find("Ratio")->Packing == FieldPacking::UFloat8);
+	CHECK(decoded->Find("Active")->Packing == FieldPacking::Bool);
+	CHECK(decoded->Find("Label")->Type == PropertyType::String);
+	CHECK(Components::Find(destination) != source.Id);
+}
+
+TEST_CASE("invalid schema descriptions do not consume registrations", "[schema][definition]") {
+	const auto encoded = [](std::string_view type, std::string_view packing, bool suffix) {
+		engine::core::ByteWriter writer;
+		writer.WriteUInt32(1);
+		writer.WriteString("Value");
+		writer.WriteString(type);
+		writer.WriteString(packing);
+		writer.WriteString("");
+		if (suffix) writer.WriteUInt8(1);
+		return writer.TakeBytes();
+	};
+	for (const auto &bytes :
+		 {encoded("NotAType", "native", false),
+		  encoded("float", "BadPacking", false),
+		  encoded("float", "native", true),
+		  encoded("Enum", "native", false)}) {
+		const Name name(Unique("badDefinition"));
+		const size_t count = Components::Count();
+		const uint64_t revision = Schemas::Revision();
+		engine::core::ByteReader reader(bytes);
+		CHECK_FALSE(Schemas::ReadDefinition(name, reader));
+		CHECK_FALSE(Components::Find(name).IsValid());
+		CHECK(Components::Count() == count);
+		CHECK(Schemas::Revision() == revision);
+	}
+	const auto existing =
+		Schemas::Register(Unique("definitionConflict"), std::array{FieldSpec{"Value", PropertyType::Int32}});
+	REQUIRE(existing.Why == Schemas::Status::Ok);
+	const auto conflicting = encoded("float", "native", false);
+	engine::core::ByteReader reader(conflicting);
+	CHECK_FALSE(Schemas::ReadDefinition(Components::Describe(existing.Id).Name, reader));
+	CHECK(Schemas::Of(existing.Id)->Find("Value")->Type == PropertyType::Int32);
+}

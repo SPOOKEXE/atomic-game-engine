@@ -19,6 +19,10 @@
 #include <unordered_set>
 #include <vector>
 
+namespace engine::ecs {
+	class Schema;
+}
+
 namespace engine::replication {
 	class ReplicationObservations;
 
@@ -217,6 +221,13 @@ namespace engine::replication {
 		// business receiving - a server-side AI's scratch state, a pending bus
 		// request - and a default of "everything" makes leaking one the
 		// consequence of forgetting rather than of deciding.
+		//
+		// Script-defined schemas also opt in through the `replicated` component
+		// tag, including schemas declared after clients join. Publish discovers
+		// them as observed rows and reliably sends bounded field definitions
+		// before values. Interest still controls which rows and definitions cross.
+		// Removing the tag retires automatic replication; an explicit declaration
+		// here takes precedence over the tag.
 		//
 		// @param component The component's registered name.
 		// @param detection How changes are detected.
@@ -880,6 +891,8 @@ namespace engine::replication {
 		//
 		struct Carried {
 			size_t SnapshotOffset = NOWHERE;
+			size_t SchemaIndex = NOWHERE;
+			size_t SchemaOffset = 0;
 
 			// Which blob that offset is into. A refusal that rewound the wrong
 			// cursor is the `applied=184 refused=17865` failure with an extra
@@ -938,6 +951,19 @@ namespace engine::replication {
 			// cursors rather than one because a snapshot's chunking has no other
 			// place ordering could live - see `SetPreface`.
 			std::array<Staged, STAGES> Snapshots;
+
+			// Component definition queued for reliable transfer to this client.
+			struct PendingSchema {
+				// Registered component described by this schema entry.
+				core::Name Component;
+				// Encoded definition and this client's stream cursor.
+				Staged Definition;
+			};
+			std::vector<PendingSchema> Schemas;
+			std::unordered_set<core::Name> KnownSchemas;
+			std::unordered_set<core::Name> ActiveSchemas;
+			size_t SchemaIndex = 0;
+			uint64_t SchemaRevision = 0;
 
 			std::unordered_set<uint64_t> Known;
 
@@ -1003,6 +1029,9 @@ namespace engine::replication {
 			// captures exactly these into the same staged blob a preface uses.
 			// See `Statistics::Oversized`.
 			std::vector<uint64_t> Oversize;
+			// Reliable resource overlays already queued, by encoded value. The
+			// resource path is checked every tick, so unchanged bytes need no retry.
+			std::vector<std::optional<uint64_t>> OversizeResourceHashes;
 		};
 
 		// One entity's value for one component, built and waiting for a place
@@ -1089,6 +1118,8 @@ namespace engine::replication {
 			// tick anyway, because a slot is allowed to resolve later than the
 			// authority that declared it.
 			const ecs::TypeDescriptor *Descriptor = nullptr;
+			const ecs::Schema *Description = nullptr;
+			std::vector<std::byte> Definition;
 
 			// Whether a row of this component may go into a delta at all: it is
 			// registered, it has a serialisation, and its widest stored value
@@ -1389,12 +1420,21 @@ namespace engine::replication {
 
 		// Bytes of a join still owed to a client, across both blobs.
 		static size_t Owed(const Client &client);
+		void DiscoverSchemas();
+		void StageSchemas(Client &client, const ecs::Store &store, std::span<const ecs::Entity> visible);
+		void StreamSchemas(Client &client);
 
 		// Saves `entities` and the values a client would decode for them.
 		//
 		// Empty means the world could not be written at all: a `Save` of a store
 		// with nothing in it still writes a header.
-		std::vector<std::byte> Capture(ecs::Store &store, std::span<const ecs::Entity> entities) const;
+		std::vector<std::byte> Capture(
+			ecs::Store &store,
+			std::span<const ecs::Entity> entities,
+			bool overlay = false,
+			std::optional<std::span<const ecs::Entity>> resourceOwners = std::nullopt,
+			std::span<std::optional<uint64_t>> resourceHashes = {}
+		) const;
 
 		void BeginSnapshot(Lane &lane, Client &client, ecs::Store &store, uint64_t tick);
 
@@ -1410,7 +1450,7 @@ namespace engine::replication {
 		// re-snapshot would have cost - measured at 81 ticks of streaming on a
 		// scene of a hundred entities, twice, for three module scripts nothing
 		// had edited.
-		void StageOversize(Client &client, ecs::Store &store, uint64_t tick);
+		void StageOversize(Lane &lane, ClientId handle, Client &client, ecs::Store &store, uint64_t tick);
 
 		void StreamSnapshot(Client &client);
 		// Filters `BearingEntities` through the host's interest selector into
@@ -1491,6 +1531,10 @@ namespace engine::replication {
 
 		std::vector<ChangeDetection> Detection;
 		std::vector<bool> Resources;
+		std::vector<bool> Automatic;
+		std::vector<bool> Enabled;
+		uint64_t ObservedSchemaRevision = 0;
+		uint64_t SchemaRevision = 1;
 
 		// Per slot, the tag whose presence suppresses that component's deltas for
 		// one entity, or an invalid name for none. See `SuppressWhenTagged`.

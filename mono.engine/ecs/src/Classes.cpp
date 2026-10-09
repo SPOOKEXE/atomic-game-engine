@@ -326,6 +326,15 @@ namespace engine::ecs {
 		table.Entries[id.Index].Info.Creatable = creatable;
 	}
 
+	void Classes::SetRuntimeLocal(ClassId id, bool local) {
+		auto &table = Get();
+		std::lock_guard lock(table.Guard);
+		if (!id.IsValid() || id.Index >= table.Entries.size()) {
+			return;
+		}
+		table.Entries[id.Index].Info.RuntimeLocal = local;
+	}
+
 	void Classes::SetKind(ClassId id, ClassKind kind) {
 		auto &table = Get();
 		std::lock_guard lock(table.Guard);

@@ -155,18 +155,20 @@ namespace engine::script {
 		// second answer to what is armed.
 		Debugger *Breakpoints = nullptr;
 
-		// What each `ModuleScript` evaluated to, by entity id.
-		//
-		// **A registry ref per module, and the module runs once.** Roblox's rule:
-		// every `require` of one module hands back the same value, so a module
-		// with a side effect at its top level has that side effect once - on
-		// whichever script required it first. A map that re-ran would make
-		// module order something an author had to reason about.
-		//
-		// Keyed by `Entity::Id` rather than by path, because two instances may
-		// name one file and they are two modules. That is what makes a module a
-		// thing in the tree rather than a thing on disk.
+		// one registry value per module and execution side. a combined host must
+		// keep client factories separate from callbacks compiled for the server.
+		// entity ids distinguish two module instances sharing one source file.
 		std::unordered_map<uint64_t, int> Modules;
+		std::unordered_map<uint64_t, int> ClientModules;
+
+		// compiled source keeps ownership when callbacks run after their script returns.
+		struct SourceHash {
+			using is_transparent = void;
+			size_t operator()(std::string_view source) const {
+				return std::hash<std::string_view>{}(source);
+			}
+		};
+		std::unordered_map<std::string, HostRole, SourceHash, std::equal_to<>> SourceRoles;
 
 		// Modules part way through evaluating, innermost last.
 		//
@@ -175,14 +177,6 @@ namespace engine::script {
 		// surfaces as a crash with no line number rather than as a script error
 		// naming the two files.
 		std::vector<ecs::Entity> Loading;
-
-		// The script currently being run by `RunInstance`, so a captured hit can
-		// say which one it came from.
-		//
-		// Set around one run and cleared after it. Null during a heartbeat,
-		// which is honest - the connection that is running was made by a script
-		// and nothing records which, so naming one would be a guess.
-		ecs::Entity RunningScript;
 
 		// The script instance the next chunk belongs to.
 		//
@@ -200,6 +194,16 @@ namespace engine::script {
 		// possible at all. Keyed on the thread's `lua_State *`, which is its
 		// identity for as long as the ref keeps it alive.
 		std::unordered_map<lua_State *, CallbackRef> Threads;
+
+		// Registry slots recycle; opaque handles keep stale scope/connection values harmless.
+		struct RetainedValue {
+			int Registry = LUA_NOREF;
+			ecs::Entity Source;
+		};
+		std::unordered_map<CallbackRef, RetainedValue> RetainedValues;
+		CallbackRef NextRetainedValue = 0;
+		std::unordered_map<lua_State *, ecs::Entity> ThreadSources;
+		std::unordered_map<lua_State *, ecs::Entity> InvocationSources;
 
 		// How many ticks a `task.wait` asked for, so the resume can report how
 		// long it actually waited.
@@ -304,6 +308,14 @@ namespace engine::script {
 	// @param state The VM, or one of its threads.
 	// @return The context.
 	LuauContext &ContextOf(lua_State *state);
+	HostRole ExecutionRole(lua_State *state);
+	ecs::Entity ExecutionSource(lua_State *state);
+	CallbackRef RetainLuauValue(lua_State *state, int index);
+	bool PushLuauValue(lua_State *state, CallbackRef reference);
+	void ReleaseLuauValue(lua_State *state, CallbackRef reference);
+	int CallLuauValue(lua_State *state, int arguments, int results, int errorFunction);
+	void ReapLuauSources(lua_State *state);
+	void TrackLuauThread(lua_State *parent, lua_State *thread);
 
 	// The context on a bound function's first upvalue.
 	//
@@ -327,6 +339,11 @@ namespace engine::script {
 	// resume goes through the two hooks, including a coroutine resumed by a
 	// task, signal, delivery or compute completion.
 	inline int ResumeProfiledLua(lua_State *state, lua_State *from, int arguments) {
+		const ecs::Entity source = ExecutionSource(state);
+		if (source != ecs::NULL_ENTITY && !ContextOf(state).World->Alive(source)) {
+			lua_pop(state, arguments);
+			return LUA_OK;
+		}
 		PrepareProfiledResume(state, from);
 		const int status = lua_resume(state, from, arguments);
 		FinishProfiledResume(state, status);
@@ -761,11 +778,6 @@ namespace engine::script {
 	//
 	// Called after `OpenWorkspace`, because it adds to the world's method table.
 	void OpenQueries(lua_State *state);
-
-	// Installs the authored storm resource and its read-only analytical queries.
-	// The service owns no copy of the field: every call reads or writes the
-	// physics world's one `physics::Storm` resource.
-	void OpenStorm(lua_State *state);
 
 	// Installs `World`, and the component methods every instance gains.
 	//

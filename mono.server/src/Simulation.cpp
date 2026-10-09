@@ -14,6 +14,7 @@
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Wire.hpp>
+#include <engine/script/PlayerGui.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -212,7 +213,7 @@ namespace server {
 		// **The respawn loop, and it is here rather than in `physics` because
 		// half of it is `gui`'s.** A spawn is two things: a new body, which is
 		// `scene::UpdateRespawns`, and a fresh copy of `StarterGui` in the
-		// player's own `PlayerGui`, which is `gui::ResetPlayerGui` - and `scene`
+		// player's own `PlayerGui`, which is `script::ResetPlayerGui` - and `scene`
 		// may not link `gui`, so the two meet in whoever hosts. That is the same
 		// split `ResetPlayerGui`'s own header states from the other side, and it
 		// is why the pass hands back who it spawned instead of doing it all.
@@ -235,7 +236,7 @@ namespace server {
 				}
 
 				for (const engine::ecs::Entity player : spawned) {
-					(void)engine::gui::ResetPlayerGui(store, player);
+					(void)engine::script::ResetPlayerGui(store, player);
 				}
 			},
 			SystemOrder{{}, {"character.link"}}

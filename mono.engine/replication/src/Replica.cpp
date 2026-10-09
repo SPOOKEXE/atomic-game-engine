@@ -1,11 +1,13 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Schema.hpp>
 #include <engine/replication/Observation.hpp>
 #include <engine/replication/Replica.hpp>
 #include <engine/replication/Submission.hpp>
 
 #include <algorithm>
+#include <unordered_set>
 
 namespace engine::replication {
 
@@ -29,6 +31,25 @@ namespace engine::replication {
 
 	size_t Replica::SnapshotOutstanding() const {
 		return Assembling ? Outstanding : 0;
+	}
+
+	uint64_t Replica::ResourceTick(core::Name component) const {
+		const auto found =
+			std::find_if(ResourceTicks.begin(), ResourceTicks.end(), [component](const auto &entry) {
+				return entry.first == component;
+			});
+		return found == ResourceTicks.end() ? 0 : found->second;
+	}
+
+	void Replica::RememberResource(core::Name component, uint64_t tick) {
+		const auto found =
+			std::find_if(ResourceTicks.begin(), ResourceTicks.end(), [component](const auto &entry) {
+				return entry.first == component;
+			});
+		if (found == ResourceTicks.end())
+			ResourceTicks.emplace_back(component, tick);
+		else
+			found->second = std::max(found->second, tick);
 	}
 
 	void Replica::SetObservations(
@@ -83,6 +104,39 @@ namespace engine::replication {
 		return true;
 	}
 
+	ApplyStatus Replica::Apply(const SchemaChunk &chunk) {
+		if (chunk.TotalBytes < sizeof(uint32_t) ||
+			chunk.TotalBytes > ecs::Schemas::MAXIMUM_DEFINITION_BYTES ||
+			static_cast<uint64_t>(chunk.Offset) + chunk.Bytes.size() > chunk.TotalBytes)
+			return ApplyStatus::BadChunk;
+		if (SchemaComponent != chunk.Component || SchemaBytes.size() != chunk.TotalBytes) {
+			if (SchemaOutstanding != 0) return ApplyStatus::BadChunk;
+			SchemaComponent = chunk.Component;
+			SchemaBytes.assign(chunk.TotalBytes, std::byte{0});
+			SchemaReceived.assign(chunk.TotalBytes, false);
+			SchemaOutstanding = chunk.TotalBytes;
+		}
+		for (size_t index = 0; index < chunk.Bytes.size(); ++index) {
+			const size_t at = chunk.Offset + index;
+			if (SchemaReceived[at] && SchemaBytes[at] != chunk.Bytes[index]) return ApplyStatus::Malformed;
+		}
+		for (size_t index = 0; index < chunk.Bytes.size(); ++index) {
+			const size_t at = chunk.Offset + index;
+			if (!SchemaReceived[at]) {
+				SchemaReceived[at] = true;
+				--SchemaOutstanding;
+			}
+			SchemaBytes[at] = chunk.Bytes[index];
+		}
+		if (SchemaOutstanding != 0) return ApplyStatus::Ok;
+		core::ByteReader definition(SchemaBytes);
+		const bool accepted = ecs::Schemas::ReadDefinition(chunk.Component, definition);
+		SchemaComponent = {};
+		SchemaBytes.clear();
+		SchemaReceived.clear();
+		return accepted ? ApplyStatus::Ok : ApplyStatus::Malformed;
+	}
+
 	ApplyStatus Replica::Apply(ecs::Store &store, const SnapshotChunk &chunk) {
 		ENGINE_PROFILE_CAT("replica.snapshot", core::ProfileCategory::Network);
 
@@ -128,12 +182,19 @@ namespace engine::replication {
 		// is the entire world the client already holds, wiped a moment before
 		// being sent it again.
 		const bool preface = Stage == SnapshotStage::Preface;
+		std::vector<core::Name> resources;
 
 		core::ByteReader reader(Snapshot);
 		if (!store.Apply(
 				reader,
 				preface ? ecs::ApplyMode::Overlay : ecs::ApplyMode::Authoritative,
-				ecs::ApplyClock::PreserveLocal
+				ecs::ApplyClock::PreserveLocal,
+				[&](ecs::ComponentId id) {
+					const core::Name component = ecs::Components::Describe(id).Name;
+					if (ResourceTick(component) > SnapshotTick) return false;
+					resources.push_back(component);
+					return true;
+				}
 			)) {
 			// Apply through the store's scratch path to avoid partial state.
 			ENGINE_ERROR("replication: the joining snapshot could not be restored.");
@@ -142,6 +203,8 @@ namespace engine::replication {
 			Received.clear();
 			return ApplyStatus::BadSnapshot;
 		}
+		for (const auto component : resources)
+			RememberResource(component, SnapshotTick);
 
 		Assembling = false;
 		Snapshot.clear();
@@ -203,9 +266,18 @@ namespace engine::replication {
 		// **The write itself is shared with the inbound direction**, which is
 		// what `Submission.hpp` is for: a delta going up the wire is the same
 		// bytes as one coming down, and the only difference is whether the
-		// sender was allowed to say it. No filter here - the sender is the
-		// authority.
-		const WriteOutcome outcome = WriteComponents(store, delta);
+		// sender was allowed to say it. Authority entity values are accepted;
+		// resource values must also respect the reliable channel's accepted tick.
+		std::vector<core::Name> resources;
+		const WriteOutcome outcome = WriteComponents(store, delta, {}, [&](core::Name component) {
+			if (ResourceTick(component) > delta.Tick) return false;
+			resources.push_back(component);
+			return true;
+		});
+		// Submission preserves completed writes when a later row is malformed.
+		// Their freshness must survive that same partial application.
+		for (const auto component : resources)
+			RememberResource(component, delta.Tick);
 		if (outcome.Status != ApplyStatus::Ok) {
 			return outcome.Status;
 		}
@@ -336,7 +408,24 @@ namespace engine::replication {
 			Stats_.Stale++;
 			return ApplyStatus::Stale;
 		}
+		if (!structure.Created.empty() && !structure.Destroyed.empty()) {
+			const std::unordered_set<ecs::Entity> created(structure.Created.begin(), structure.Created.end());
+			if (std::ranges::any_of(structure.Destroyed, [&](ecs::Entity entity) {
+					return created.contains(entity);
+				}))
+				return ApplyStatus::Malformed;
+		}
 
+		// A replacement can reuse the index of a destroyed child in this message.
+		// Unlink the old generation before adopting the new directory entry.
+		for (const ecs::Entity entity : structure.Destroyed) {
+			store.SetParent(entity, ecs::NULL_ENTITY);
+			store.Destroy(entity);
+
+			// Nothing to give a parent back to. Left in the list it would be a
+			// `SetParent` on a dead handle every time a tick completed.
+			std::erase_if(Arriving_, [entity](const Arrival &arriving) { return arriving.Entity == entity; });
+		}
 		for (const ecs::Entity entity : structure.Created) {
 			// One poll can drain a forget and a later reappearance. The newest
 			// structure says this row is visible again. Discard its old row before
@@ -353,14 +442,6 @@ namespace engine::replication {
 			// entity exists, because the delta that parents it may be the very
 			// next message.
 			Arriving_.push_back(Arrival{entity, ecs::NULL_ENTITY, Stats_.Deltas});
-		}
-		for (const ecs::Entity entity : structure.Destroyed) {
-			store.SetParent(entity, ecs::NULL_ENTITY);
-			store.Destroy(entity);
-
-			// Nothing to give a parent back to. Left in the list it would be a
-			// `SetParent` on a dead handle every time a tick completed.
-			std::erase_if(Arriving_, [entity](const Arrival &arriving) { return arriving.Entity == entity; });
 		}
 		Forgotten_.insert(Forgotten_.end(), structure.Forgotten.begin(), structure.Forgotten.end());
 
@@ -444,6 +525,10 @@ namespace engine::replication {
 		bool tickAvailable = false;
 		bool baselineAvailable = false;
 		switch (read.Kind) {
+		case MessageKind::Schemas:
+			result = Apply(read.Schema);
+			break;
+
 		case MessageKind::SnapshotChunk:
 			tick = read.Chunk.Tick;
 			tickAvailable = true;

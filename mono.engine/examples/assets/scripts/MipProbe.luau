@@ -72,11 +72,11 @@ end
 -- frame rather than sitting in a band, shallow enough that the far tiles are a
 -- few pixels each - which is where a sampler clamped to level zero has nothing
 -- to average and picks one texel of many.
-local view = Instance.new("Camera")
-view.Name = "GrazingCamera"
-view.CFrame = CFrame.lookAt(Vector3.new(0, 9, 10), Vector3.new(0, 0, -TILES_DEEP * TILE))
-view.Parent = workspace
-workspace.CurrentCamera = view
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local view = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+view:SetAttribute("Name", "GrazingCamera")
+view:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(0, 9, 10), Vector3.new(0, 0, -TILES_DEEP * TILE)))
 
 -- **One marker near the camera, and it is the control.** If a change smoothed
 -- the whole frame - a resolution change, a blur, a texture that stopped

@@ -182,8 +182,8 @@ declare extern type ChangedSignal with
 end
 
 declare extern type RemoteEventSignal with
-	function Connect(self, handler: (payload: string) -> ()): RBXScriptConnection
-	function Once(self, handler: (payload: string) -> ()): RBXScriptConnection
+	function Connect(self, handler: (payload: string, sender: Player?) -> ()): RBXScriptConnection
+	function Once(self, handler: (payload: string, sender: Player?) -> ()): RBXScriptConnection
 end
 
 -- --- input ------------------------------------------------------------------
@@ -812,6 +812,7 @@ declare Enum: {
 		LockFirstPerson: Enum_CameraType,
 		ShiftLock: Enum_CameraType,
 		Scriptable: Enum_CameraType,
+		Custom: Enum_CameraType,
 	},
 	CloudComputeShader: {
 		Cumulus: Enum_CloudComputeShader,
@@ -1507,6 +1508,8 @@ declare extern type Instance with
 	function ApplyImpulse(self, impulse: Vector3): ()
 	function SetAppliedForce(self, force: Vector3): ()
 	function SetAppliedTorque(self, torque: Vector3): ()
+	function SetSpawnSamples(self, samples: buffer): boolean
+	function SetLayer(self, index: number, colour: Color3, alpha: number, size: number, acceleration: Vector3): boolean
 	function Break(self): number
 	function SetLocalTransparency(self, value: number): ()
 	function AddVertex(self, position: Vector3, normal: Vector3?, uv: Vector2?): number
@@ -1608,20 +1611,13 @@ declare extern type VectorField3D extends PVInstance with
 	Vector: Vector3
 end
 
-declare extern type GpuParticleField extends Instance with
-	CondensationAlpha: number
-	CondensationColor: Color3
-	CondensationSize: number
-	DebrisAlpha: number
-	DebrisColor: Color3
-	DebrisSize: number
+declare extern type GpuParticleField extends PVInstance with
+	Bounds: Vector3
 	Enabled: boolean
 	Layers: number
-	RainAlpha: number
-	RainColor: Color3
-	RainSize: number
 	RequestedCount: number
 	Seed: number
+	VelocityResponse: number
 end
 
 declare extern type BasePart extends PVInstance with
@@ -1667,15 +1663,6 @@ declare extern type BasePart extends PVInstance with
 end
 
 declare extern type Part extends BasePart with
-	StormDragCoefficient: number
-	StormEnabled: boolean
-	StormExposedArea: number
-	StormForceScale: number
-	StormMaximumBendRadians: number
-	StormResponsePerSecond: number
-	StormRestFrame: CFrame
-	StormVegetationEnabled: boolean
-	StormWindSpeedForMaximumBend: number
 end
 
 declare extern type SpawnLocation extends Part with
@@ -1783,8 +1770,9 @@ declare extern type SkinnedMeshPart extends MeshPart with
 end
 
 declare extern type Camera extends PVInstance with
-	CameraSubject: Instance
+	CameraSubject: Instance?
 	CameraSubjectAutomatic: boolean
+	CameraType: Enum_CameraType
 	FarPlaneZ: number
 	FieldOfView: number
 	ImageHeight: number
@@ -2109,11 +2097,6 @@ declare extern type JointInstance extends Instance with
 end
 
 declare extern type Weld extends JointInstance with
-	StormBreakForce: number
-	StormDamageRate: number
-	StormIntegrity: number
-	StormLinkEnabled: boolean
-	StormMaterialStrength: number
 end
 
 declare extern type WeldConstraint extends Instance with
@@ -2121,11 +2104,6 @@ declare extern type WeldConstraint extends Instance with
 	Enabled: boolean
 	Part0: Instance
 	Part1: Instance
-	StormBreakForce: number
-	StormDamageRate: number
-	StormIntegrity: number
-	StormLinkEnabled: boolean
-	StormMaterialStrength: number
 end
 
 declare extern type ShaderScript extends Instance with
@@ -2877,12 +2855,7 @@ declare extern type Workspace extends WorldRoot with
 	CurrentCamera: Instance
 	MaxSurfaces: number
 	SurfaceBounces: number
-	TerrainChunkSize: number
-	TerrainEnabled: boolean
-	read TerrainGenerator: string
-	write TerrainGenerator: string?
-	TerrainSeed: number
-	TerrainViewDistance: number
+	read Terrain: Terrain
 	function OverlapBox(self, centre: Vector3, size: Vector3, params: RaycastParams?): { Instance }
 	function OverlapSphere(self, centre: Vector3, radius: number, params: RaycastParams?): { Instance }
 	function BlockCast(self, from: CFrame, size: Vector3, motion: Vector3, params: RaycastParams?): { Instance }
@@ -2997,6 +2970,17 @@ end
 
 declare extern type Team extends Instance with
 	TeamColor: Color3
+end
+
+declare extern type Terrain extends Instance with
+	ChunkExtent: number
+	ChunkResolution: number
+	Enabled: boolean
+	read Generator: string
+	write Generator: string?
+	Seed: number
+	VerticalExtent: number
+	ViewDistance: number
 end
 
 -- --- the bus services ------------------------------------------------------

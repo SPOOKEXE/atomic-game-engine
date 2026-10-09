@@ -115,10 +115,11 @@ mirror("PaneFar", CFrame.new(Vector3.new(0, 4, -SEPARATION / 2)) * CFrame.Angles
 --
 -- Inside the width, each pane's frustum covers the other and the corridor
 -- telescopes both ways, which is what a depth measurement needs.
-local view = Instance.new("Camera")
-view.Name = "CorridorCamera"
-view.CFrame = CFrame.lookAt(Vector3.new(4, 5, 6), Vector3.new(0, 4, -SEPARATION / 2))
-view.Parent = workspace
-workspace.CurrentCamera = view
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+demoCamera:SetAttribute('Name', 'CorridorCamera')
+demoCamera:SetAttribute('CFrame', CFrame.lookAt(Vector3.new(4, 5, 6), Vector3.new(0, 4, -SEPARATION / 2)))
 
 print("mirrorcorridor: two panes facing across " .. SEPARATION .. " studs")

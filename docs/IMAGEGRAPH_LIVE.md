@@ -87,6 +87,16 @@ local image = graph:GetImage("image")
 
 Assign `image` to an ordinary image slot. The stable reference is `imagegraph-instance://fire#image`; the world supplies the scope. A direct asset output uses `imagegraph://effects/fire.aimagegraph#image`.
 
+The graph instance reference can be used anywhere the engine accepts a texture
+content name. Common slots include `ImageLabel.Image`, `ImageButton.Image`,
+`MeshPart.TextureID`, `Texture.Texture` and `ParticleEmitter.Texture`. In Studio,
+the **Image slot** list contains writable texture properties shared by the
+current selection. **Publish live graph** cooks and publishes the graph and its
+normalized source textures through signed content. **Apply to selection** then
+creates a world-owned `ImageGraph` and assigns its selected output reference to
+that property on each selected instance. The live output remains evaluated at
+runtime; static export instead bakes one ordinary `.atex` texture.
+
 `SetInput` changes an authored parameter override. `GetInput` returns that explicit override, or `nil` when the graph default is in use. Passing `nil` to `SetInput` resets the override. Inputs accept numbers, booleans, `Color3` and strings. `Color3` becomes encoded RGBA8 with alpha 255. For example, update the transform binding from a heartbeat:
 
 ```lua

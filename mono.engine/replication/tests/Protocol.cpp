@@ -1,4 +1,5 @@
 #include <engine/core/Random.hpp>
+#include <engine/ecs/Schema.hpp>
 #include <engine/replication/Protocol.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -47,6 +48,24 @@ TEST_CASE("a replication message refuses a trailing byte", "[replication][protoc
 	ByteReader reader(bytes);
 	Message message = Sentinel();
 	CHECK_FALSE(ReadMessage(reader, message));
+	CheckSentinel(message);
+}
+
+TEST_CASE("a schema chunk refuses an oversized payload before reading it", "[replication][protocol]") {
+	const std::vector<std::byte> payload(engine::ecs::Schemas::MAXIMUM_DEFINITION_BYTES + 1);
+	ByteWriter writer;
+	writer.WriteUInt16(engine::replication::PROTOCOL_VERSION);
+	writer.WriteUInt8(static_cast<uint8_t>(MessageKind::Schemas));
+	writer.WriteString("test.SchemaPayloadBound");
+	writer.WriteUInt32(sizeof(uint32_t));
+	writer.WriteUInt32(0);
+	writer.WriteUInt32(static_cast<uint32_t>(payload.size()));
+	writer.WriteRaw(payload.data(), payload.size());
+
+	ByteReader reader(writer.Bytes());
+	Message message = Sentinel();
+	CHECK_FALSE(ReadMessage(reader, message));
+	CHECK(reader.Remaining() == payload.size());
 	CheckSentinel(message);
 }
 

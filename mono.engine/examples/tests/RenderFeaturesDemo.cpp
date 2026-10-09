@@ -13,6 +13,7 @@
 #include <engine/scene/RenderFeatures.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -139,11 +140,13 @@ TEST_CASE("the render features scene authors policies attachments and LOD fallba
 	const StagedAssets assets;
 	Store store("render_features_demo");
 	engine::ecs::Scheduler systems;
+	engine::script::RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfBoth();
 	std::string error;
 	INFO(error);
 	REQUIRE(
 		engine::examples::LoadScene(
-			store, systems, engine::examples::ExamplePath("RenderFeaturesDemo.luau"), error
+			store, systems, engine::examples::ExamplePath("RenderFeaturesDemo.luau"), error, nullptr, &limits
 		)
 	);
 

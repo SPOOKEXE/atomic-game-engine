@@ -245,11 +245,7 @@ local function tileFloor(
 
 	for row = 0, steps - 1 do
 		for column = 0, steps - 1 do
-			local offset = Vector3.new(
-				(column + 0.5) * tile - extent / 2,
-				0,
-				(row + 0.5) * tile - extent / 2
-			)
+			local offset = Vector3.new((column + 0.5) * tile - extent / 2, 0, (row + 0.5) * tile - extent / 2)
 
 			if keepOut ~= nil and math.abs(offset.X) < keepOut and math.abs(offset.Z) < keepOut then
 				continue
@@ -279,12 +275,7 @@ local function tileWall(name: string, at: Vector3, axis: Vector3, tile: Vector3,
 				continue
 			end
 
-			block(
-				name,
-				tile,
-				at + axis * along + Vector3.new(0, height, 0),
-				shadeOf(shade, column + row)
-			)
+			block(name, tile, at + axis * along + Vector3.new(0, height, 0), shadeOf(shade, column + row))
 		end
 	end
 end
@@ -306,14 +297,7 @@ tileFloor("Ground", Vector3.new(0, -0.5 + GROUND_LIFT, 0), GROUND, GROUND_TILE, 
 
 for _, room in ROOMS do
 	tileFloor(room.Name .. "Floor", room.Centre + Vector3.new(0, -0.5 + GROUND_LIFT, 0), ROOM, TILE, 1, room.Floor)
-	tileFloor(
-		room.Name .. "Ceiling",
-		room.Centre + Vector3.new(0, WALL_HEIGHT + 0.5, 0),
-		ROOM,
-		TILE,
-		1,
-		ROOF
-	)
+	tileFloor(room.Name .. "Ceiling", room.Centre + Vector3.new(0, WALL_HEIGHT + 0.5, 0), ROOM, TILE, 1, ROOF)
 
 	-- **A lamp per room, and it is a pool of light rather than room lighting.**
 	-- A world's `Lighting` service round-trips and nothing reads it -
@@ -546,17 +530,15 @@ local function heading(route: Route, at: Vector3): Vector3
 	end
 end
 
-local view = Instance.new("Camera")
-view.Name = "Viewer"
-view.FieldOfView = 70
-view.Parent = workspace
-workspace.CurrentCamera = view
-
-view.CFrame = CFrame.lookAt(
-	Vector3.new(-OUTER - 30, EYE, -HALF),
-	Vector3.new(-OUTER - 29, EYE, -HALF)
+local view = assert(
+	assert(game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")):FindFirstChild("DemoCamera"),
+	"the demo camera companion is missing"
 )
-local cameraRoute: Route = { Stage = 1 }
+view:SetAttribute("Name", "Viewer")
+view:SetAttribute("FieldOfView", 70)
+view:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(-OUTER - 30, EYE, -HALF), Vector3.new(-OUTER - 29, EYE, -HALF)))
+view:SetAttribute("Half", HALF)
+view:SetAttribute("Pace", PACE)
 
 local walker = Instance.new("Player")
 walker.Name = "PortalWalker"
@@ -569,10 +551,7 @@ if character ~= nil then
 	root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 	humanoid = character:FindFirstChild("Humanoid") :: Humanoid?
 	if root ~= nil then
-		root.CFrame = CFrame.lookAt(
-			Vector3.new(-OUTER - 22, 3, -HALF),
-			Vector3.new(-OUTER, 3, -HALF)
-		)
+		root.CFrame = CFrame.lookAt(Vector3.new(-OUTER - 22, 3, -HALF), Vector3.new(-OUTER, 3, -HALF))
 	end
 	if humanoid ~= nil then
 		humanoid.WalkSpeed = PACE
@@ -587,15 +566,9 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 		drifter.Part.CFrame *= CFrame.Angles(0, drifter.Rate * deltaTime, 0)
 	end
 
-	local cameraHeading = heading(cameraRoute, view.CFrame.Position)
-	local eye = view.CFrame.Position + cameraHeading * PACE * deltaTime
-	view.CFrame = CFrame.lookAt(eye, eye + cameraHeading)
-
 	if root ~= nil and humanoid ~= nil then
 		humanoid.MoveDirection = heading(characterRoute, root.Position)
 	end
 end)
 
-print(
-	`portals: one building, four quarters, three rooms - a lap of three right angles that closes`
-)
+print(`portals: one building, four quarters, three rooms - a lap of three right angles that closes`)

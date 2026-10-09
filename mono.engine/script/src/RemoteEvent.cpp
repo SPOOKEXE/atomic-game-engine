@@ -7,6 +7,9 @@ namespace engine::script {
 	) {
 		out.clear();
 		if (event.empty() || payload.size() > REMOTE_EVENT_MAXIMUM_PAYLOAD_BYTES) return false;
+		// Refuse before ByteWriter raises: callers use false to reject oversized requests.
+		constexpr size_t FRAMING_BYTES = 14;
+		if (event.size() > REMOTE_EVENT_MAXIMUM_MESSAGE_BYTES - FRAMING_BYTES - payload.size()) return false;
 		core::ByteWriter writer(0, REMOTE_EVENT_MAXIMUM_MESSAGE_BYTES);
 		writer.WriteUInt32(REMOTE_EVENT_MAGIC);
 		writer.WriteUInt16(REMOTE_EVENT_VERSION);

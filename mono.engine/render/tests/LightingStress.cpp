@@ -9,6 +9,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Visibility.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -37,11 +38,13 @@ TEST_CASE("lighting stress scene reaches bounded camera lighting payloads", "[re
 	const StagedAssets assets;
 	engine::ecs::Store store("render.lighting.stress");
 	engine::ecs::Scheduler systems;
+	engine::script::RuntimeLimits limits;
+	limits.Role = {.Server = true, .Client = true};
 	std::string error;
 	INFO(error);
 	REQUIRE(
 		engine::examples::LoadScene(
-			store, systems, engine::examples::ExamplePath("LightingStress.luau"), error
+			store, systems, engine::examples::ExamplePath("LightingStress.luau"), error, nullptr, &limits
 		)
 	);
 
@@ -54,6 +57,7 @@ TEST_CASE("lighting stress scene reaches bounded camera lighting payloads", "[re
 	const auto *active = store.Resource<engine::scene::ActiveCamera>();
 	REQUIRE(draw != nullptr);
 	REQUIRE(active != nullptr);
+	REQUIRE(engine::ecs::Store::IsPredicted(active->Entity));
 	const auto *transform = store.Get<engine::scene::Transform>(active->Entity);
 	const auto *camera = store.Get<engine::scene::Camera>(active->Entity);
 	REQUIRE(transform != nullptr);

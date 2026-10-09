@@ -2,9 +2,11 @@
 
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
+#include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/gui/VirtualCollection.hpp>
@@ -444,7 +446,7 @@ namespace engine::gui {
 		(void)Focus(store, ecs::NULL_ENTITY);
 	}
 
-	size_t ResetPlayerGui(Store &store, Entity player) {
+	size_t ResetPlayerGui(Store &store, Entity player, PlayerGuiClonePrepare prepare) {
 		// The player's own container, which `scene::AddPlayer` makes beside
 		// every player. Absent means a host built this player some other way;
 		// there is nowhere to put anything, so nothing is done.
@@ -465,6 +467,7 @@ namespace engine::gui {
 		std::unordered_set<core::Name> surviving;
 
 		store.EachChild(target, [&](Entity existing) {
+			if (ecs::IsClientLocalInstance(store, existing)) return;
 			const Layer *layer = store.Get<Layer>(existing);
 			if (layer != nullptr && layer->ResetOnSpawn) {
 				clearing.push_back(existing);
@@ -508,6 +511,16 @@ namespace engine::gui {
 			}
 
 			store.SetParent(copy, target);
+			store.Set(
+				copy,
+				PlayerGuiTemplateOrigin{
+					core::Name(std::string("StarterGui/") + std::string(store.InstanceNameOf(source).Text()))
+				}
+			);
+			if (prepare != nullptr && !prepare(store, source, copy)) {
+				store.DestroyInstance(copy);
+				continue;
+			}
 			cloned++;
 		}
 

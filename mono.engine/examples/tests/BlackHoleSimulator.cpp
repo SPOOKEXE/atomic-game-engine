@@ -9,6 +9,7 @@
 #include <engine/graph/Frustum.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -39,12 +40,14 @@ TEST_CASE("the black-hole camera keeps close visual detail beyond its near plane
 	const StagedAssets assets;
 	engine::ecs::Store store("black-hole");
 	engine::ecs::Scheduler systems;
+	engine::script::RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfBoth();
 
 	std::string error;
 	INFO(error);
 	REQUIRE(
 		engine::examples::LoadScene(
-			store, systems, engine::examples::ExamplePath("BlackHoleSimulator.luau"), error
+			store, systems, engine::examples::ExamplePath("BlackHoleSimulator.luau"), error, nullptr, &limits
 		)
 	);
 

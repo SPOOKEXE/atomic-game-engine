@@ -76,6 +76,12 @@ TEST_CASE("a furnished world has every fixture, once", "[scene][services]") {
 	CHECK(Classes::Describe(Classes::Find(Name("WorldModel"))).Creatable);
 	CHECK_FALSE(Classes::Describe(store.ClassOf(workspace)).Creatable);
 	CHECK_FALSE(Classes::Describe(Classes::Find(Name("Lighting"))).Creatable);
+	const Entity terrain = store.FindFirstChild(workspace, "Terrain");
+	REQUIRE(terrain != NULL_ENTITY);
+	CHECK_FALSE(Classes::Describe(Classes::Find(Name("Terrain"))).Creatable);
+	CHECK(store.Protected(terrain));
+	CHECK_FALSE(store.DestroyAuthored(terrain));
+	CHECK(store.Alive(terrain));
 
 	for (const std::string_view name :
 		 {"Workspace",

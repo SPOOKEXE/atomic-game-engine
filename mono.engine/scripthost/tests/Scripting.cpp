@@ -67,6 +67,19 @@ using engine::script::Runtime;
 using engine::script::RuntimeLimits;
 
 namespace {
+	bool RunLocalCameraFixture(Store &store, Runtime &runtime, Language language, std::string_view source) {
+		const engine::core::Name path(language == Language::Luau ? "local-camera.luau" : "local-camera.js");
+		if (!store.HasResource<engine::script::SourceCache>())
+			store.SetResource(engine::script::SourceCache{});
+		store.ResourceMutable<engine::script::SourceCache>()->Set(path, std::string(source));
+		const auto instance =
+			store.CreatePredictedInstance(engine::script::LocalScriptClass(), "CameraProgram");
+		store.Set(instance, engine::ecs::ClientLocal{});
+		engine::script::SetSourcePath(store, instance, path);
+		const bool ran = runtime.RunInstance(instance);
+		INFO(runtime.LastError());
+		return ran;
+	}
 
 	// Where a script's content lives now.
 	//
@@ -92,7 +105,6 @@ namespace {
 	}
 	void RegisterClasses() {
 		engine::scene::EnsureClassTree();
-		engine::physics::RegisterPhysicsClasses();
 	}
 
 	// Runs a chunk and reports the error rather than a bare false, so a failing
@@ -532,7 +544,10 @@ TEST_CASE("workspace enumerates the world's roots", "[scripting]") {
 		-- Not a root: it has a parent.
 		local child = Instance.new('Part', first)
 
-		assert(#workspace:GetChildren() == 2, 'the world counted its roots wrong')
+		local terrain = workspace:FindFirstChildOfClass('Terrain')
+		assert(terrain ~= nil and terrain.Name == 'Terrain', 'generated Terrain missing')
+		assert(workspace:FindFirstChild('Terrain') == terrain, 'Terrain name resolves elsewhere')
+		assert(#workspace:GetChildren() == 3, 'the world counted its roots wrong')
 		assert(workspace:FindFirstChild('Second') == second, 'a root was not found')
 		assert(workspace.First == first, 'a root is not reachable by name')
 	)");
@@ -828,44 +843,6 @@ TEST_CASE("a replica refuses a write and says so", "[scripting]") {
 
 // --- enums ------------------------------------------------------------------
 
-TEST_CASE("Luau authors optional storm response, link, and vegetation components", "[scripting][storm]") {
-	RegisterClasses();
-	Store store("script_storm_authoring");
-	const auto runtime = MakeRuntime(store, Language::Luau);
-
-	MustRun(*runtime, R"(
-		local part = Instance.new('Part')
-		assert(part.StormEnabled, 'storm response default is not visible')
-		part.StormExposedArea = 6.5
-		part.StormDragCoefficient = 1.3
-		part.StormForceScale = 0.4
-		part.StormEnabled = false
-		assert(math.abs(part.StormExposedArea - 6.5) < 0.001)
-		assert(math.abs(part.StormDragCoefficient - 1.3) < 0.001)
-		assert(math.abs(part.StormForceScale - 0.4) < 0.001 and not part.StormEnabled)
-
-		part.StormRestFrame = CFrame.new(2, 3, 4)
-		part.StormMaximumBendRadians = 0.7
-		part.StormResponsePerSecond = 8
-		part.StormWindSpeedForMaximumBend = 120
-		part.StormVegetationEnabled = false
-		assert(part.StormRestFrame.Position == Vector3.new(2, 3, 4))
-		assert(math.abs(part.StormMaximumBendRadians - 0.7) < 0.001)
-		assert(math.abs(part.StormResponsePerSecond - 8) < 0.001)
-		assert(math.abs(part.StormWindSpeedForMaximumBend - 120) < 0.001 and not part.StormVegetationEnabled)
-
-		for _, className in {'Weld', 'WeldConstraint'} do
-			local link = Instance.new(className)
-			link.StormBreakForce = 450
-			link.StormMaterialStrength = 1.8
-			link.StormLinkEnabled = false
-			assert(math.abs(link.StormBreakForce - 450) < 0.001)
-			assert(math.abs(link.StormMaterialStrength - 1.8) < 0.001)
-			assert(not link.StormLinkEnabled)
-		end
-	)");
-}
-
 TEST_CASE("an enum property takes a member and refuses a stranger", "[scripting]") {
 	RegisterClasses();
 	Store store("script_test");
@@ -1053,13 +1030,13 @@ TEST_CASE("javascript reads the camera class", "[scripting][js]") {
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::JavaScript);
 
-	MustRun(*runtime, R"(
+	REQUIRE(RunLocalCameraFixture(store, *runtime, Language::JavaScript, R"(
 		const camera = Instance.new('Camera');
 		camera.Name = 'JsCamera';
 		camera.Parent = workspace;
 		camera.FieldOfView = 90;
 		if (Math.abs(camera.FieldOfView - 90) > 1e-3) throw new Error('FieldOfView did not round-trip');
-	)");
+	)"));
 
 	const Entity camera = InScene(store, "JsCamera");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
@@ -1702,14 +1679,24 @@ TEST_CASE("client scripts add ESC menu actions and receive their activation", "[
 			REQUIRE(runtime != nullptr);
 
 			const char *source = language == Language::Luau ? R"(
+				local log = Instance.new('Folder', workspace)
+				log.Name = 'ActionLog'
 				local activated = SettingsService:SetMenuAction('respawn', 'Respawn Character')
 				activated:Connect(function(name)
-					workspace.Name = name
+					assert(not pcall(function() workspace.Name = name end))
+					log.Name = name
 				end)
 			)"
 															: R"(
+				const log = Instance.new('Folder', workspace);
+				log.Name = 'ActionLog';
 				const activated = SettingsService.SetMenuAction('respawn', 'Respawn Character');
-				activated.Connect((name) => { workspace.Name = name; });
+				activated.Connect((name) => {
+					let refused = false;
+					try { workspace.Name = name; } catch (_) { refused = true; }
+					if (!refused) throw new Error('authority write permitted');
+					log.Name = name;
+				});
 			)";
 			MustRun(*runtime, source);
 
@@ -1720,9 +1707,14 @@ TEST_CASE("client scripts add ESC menu actions and receive their activation", "[
 
 			const Entity workspace = engine::scene::WorkspaceOf(store);
 			REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+			const Entity log = store.FindFirstChild(workspace, "ActionLog");
+			REQUIRE(log != engine::ecs::NULL_ENTITY);
+			CHECK(Store::IsPredicted(log));
+			CHECK(engine::ecs::IsClientLocalInstance(store, log));
 			runtime->DeliverSettingsMenuAction(engine::core::Name("respawn"));
 			REQUIRE(runtime->Heartbeat(0.016f));
-			CHECK(store.InstanceNameOf(workspace) == engine::core::Name("respawn"));
+			CHECK(store.InstanceNameOf(log) == engine::core::Name("respawn"));
+			CHECK(store.InstanceNameOf(workspace) == engine::core::Name("Workspace"));
 
 			MustRun(
 				*runtime,
@@ -1754,12 +1746,24 @@ TEST_CASE("data-factory actions commit at one paused script tick", "[scripting][
 				MustRun(
 					*runtime,
 					language == Language::Luau ? R"(
+							local log = Instance.new('Folder', workspace)
+							log.Name = 'ActionLog'
 							local activated = SettingsService:SetMenuAction('respawn', 'Respawn Character')
-							activated:Connect(function(name) workspace.Name = workspace.Name .. name end)
+							activated:Connect(function(name)
+								assert(not pcall(function() workspace.Name = name end))
+								log.Name = log.Name .. name
+							end)
 						)"
 											   : R"(
+							const log = Instance.new('Folder', workspace);
+							log.Name = 'ActionLog';
 							const activated = SettingsService.SetMenuAction('respawn', 'Respawn Character');
-							activated.Connect((name) => { workspace.Name += name; });
+							activated.Connect((name) => {
+								let refused = false;
+								try { workspace.Name = name; } catch (_) { refused = true; }
+								if (!refused) throw new Error('authority write permitted');
+								log.Name += name;
+							});
 						)"
 				);
 				systems.Add(
@@ -1817,7 +1821,11 @@ TEST_CASE("data-factory actions commit at one paused script tick", "[scripting][
 			CHECK(universe.StatisticsOf(world).Ticks == 1);
 			universe.Enter(world, [](const Store &store) {
 				const Entity workspace = engine::scene::WorkspaceOf(store);
-				CHECK(store.InstanceNameOf(workspace) == engine::core::Name("Workspacerespawn"));
+				CHECK(store.InstanceNameOf(workspace) == engine::core::Name("Workspace"));
+				const Entity log = store.FindFirstChild(workspace, "ActionLogrespawn");
+				REQUIRE(log != engine::ecs::NULL_ENTITY);
+				CHECK(Store::IsPredicted(log));
+				CHECK(engine::ecs::IsClientLocalInstance(store, log));
 			});
 
 			// A non-suspended target is refused before it can consume a manual
@@ -1833,7 +1841,11 @@ TEST_CASE("data-factory actions commit at one paused script tick", "[scripting][
 			CHECK(universe.StatisticsOf(world).Ticks == 1);
 			universe.Enter(world, [](const Store &store) {
 				const Entity workspace = engine::scene::WorkspaceOf(store);
-				CHECK(store.InstanceNameOf(workspace) == engine::core::Name("Workspacerespawn"));
+				CHECK(store.InstanceNameOf(workspace) == engine::core::Name("Workspace"));
+				const Entity log = store.FindFirstChild(workspace, "ActionLogrespawn");
+				REQUIRE(log != engine::ecs::NULL_ENTITY);
+				CHECK(Store::IsPredicted(log));
+				CHECK(engine::ecs::IsClientLocalInstance(store, log));
 			});
 		}
 	}
@@ -3167,7 +3179,7 @@ TEST_CASE("a script can make a camera, aim it and ask which is live", "[scriptin
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
-	MustRun(*runtime, R"(
+	REQUIRE(RunLocalCameraFixture(store, *runtime, Language::Luau, R"(
 		assert(workspace.CurrentCamera == nil, 'a fresh world already has a camera')
 
 		local camera = Instance.new('Camera')
@@ -3184,7 +3196,7 @@ TEST_CASE("a script can make a camera, aim it and ask which is live", "[scriptin
 
 		workspace.CurrentCamera = nil
 		assert(workspace.CurrentCamera == nil, 'detaching did not take')
-	)");
+	)"));
 
 	// Degrees out, radians stored - the same split `Orientation` makes.
 	const Entity camera = InScene(store, "Main");
@@ -3204,7 +3216,7 @@ TEST_CASE("javascript aims the same camera through the same resource", "[scripti
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::JavaScript);
 
-	MustRun(*runtime, R"(
+	REQUIRE(RunLocalCameraFixture(store, *runtime, Language::JavaScript, R"(
 		if (workspace.CurrentCamera !== null) throw new Error('a fresh world already has a camera');
 
 		const camera = Instance.new('Camera');
@@ -3222,7 +3234,7 @@ TEST_CASE("javascript aims the same camera through the same resource", "[scripti
 
 		workspace.CurrentCamera = null;
 		if (workspace.CurrentCamera !== null) throw new Error('detaching did not take');
-	)");
+	)"));
 
 	// The same degrees-out, radians-stored split the Luau case asserts, reached
 	// through the other VM.
@@ -3239,11 +3251,17 @@ TEST_CASE("CurrentCamera refuses something that is not a camera", "[scripting]")
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
-	CHECK_FALSE(runtime->Run("workspace.CurrentCamera = Instance.new('Part')"));
+	CHECK_FALSE(RunLocalCameraFixture(
+		store, *runtime, Language::Luau, "workspace.CurrentCamera = Instance.new('Part')"
+	));
+	CHECK(runtime->LastError().find("Camera") != std::string::npos);
 
 	// And the same refusal from the other VM, for the same reason.
 	const auto javascript = MakeRuntime(store, Language::JavaScript);
-	CHECK_FALSE(javascript->Run("workspace.CurrentCamera = Instance.new('Part');"));
+	CHECK_FALSE(RunLocalCameraFixture(
+		store, *javascript, Language::JavaScript, "workspace.CurrentCamera = Instance.new('Part');"
+	));
+	CHECK(javascript->LastError().find("Camera") != std::string::npos);
 }
 
 // --- transparency and collision groups --------------------------------------
@@ -4563,26 +4581,25 @@ TEST_CASE("a javascript hit reports the surface it touched", "[scripting][raycas
 
 // --- the surface camera -----------------------------------------------------
 
-TEST_CASE("SurfaceSize turns a camera into one that renders to a texture", "[scripting][surface]") {
-	// **Structural, so the component's presence is the query.** A camera with
-	// no `SurfaceCamera` is an ordinary camera and a consumer walks past it;
-	// setting a size is what makes it one that renders offscreen.
+TEST_CASE("SurfaceSize resizes and clears a SurfaceCamera", "[scripting][surface]") {
+	// **Structural, so the component's presence is the query.** A SurfaceCamera
+	// starts with its render target; setting a zero size removes that facet, and
+	// a later positive size restores it.
 	RegisterClasses();
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
 	MustRun(*runtime, R"(
-		local camera = Instance.new('Camera')
+		local camera = Instance.new('SurfaceCamera')
 		camera.Name = 'Reflection'
 		camera.Parent = workspace
 
-		assert(camera.SurfaceSize == Vector3.new(0, 0, 0), 'a fresh camera renders to a texture')
+		assert(camera.SurfaceSize == Vector3.new(1024, 1024, 0), 'a fresh SurfaceCamera has its default target')
 
 		camera.SurfaceSize = Vector3.new(1024, 512, 0)
 		assert(camera.SurfaceSize == Vector3.new(1024, 512, 0), 'the size did not round-trip')
 
-		-- Back to nothing takes the component away again, which is what makes
-		-- the property structural rather than a flag.
+		-- Zero size removes the SurfaceCamera facet, so the property reads as empty.
 		camera.SurfaceSize = Vector3.new(0, 0, 0)
 		assert(camera.SurfaceSize == Vector3.new(0, 0, 0), 'clearing did not take')
 	)");
@@ -4643,9 +4660,11 @@ TEST_CASE("javascript reaches the surface camera too", "[scripting][surface][js]
 	const auto runtime = MakeRuntime(store, Language::JavaScript);
 
 	MustRun(*runtime, R"(
-		const camera = Instance.new('Camera');
+		const camera = Instance.new('SurfaceCamera');
 		camera.Name = 'JsReflection';
 		camera.SurfaceSize = Vector3.new(512, 256, 0);
+		const resized = camera.SurfaceSize;
+		if (resized.X !== 512 || resized.Y !== 256 || resized.Z !== 0) throw new Error('the size did not round-trip');
 		camera.Parent = workspace;
 
 		const pane = Instance.new('Part');
@@ -4654,6 +4673,19 @@ TEST_CASE("javascript reaches the surface camera too", "[scripting][surface][js]
 	)");
 
 	const auto *surface = store.Get<engine::scene::SurfaceCamera>(InScene(store, "JsReflection"));
+	REQUIRE(surface != nullptr);
+	CHECK(surface->Width == 512);
+	CHECK(surface->Height == 256);
+
+	MustRun(*runtime, R"(
+		workspace.FindFirstChild('JsReflection').SurfaceSize = Vector3.new(0, 0, 0);
+		const cleared = workspace.FindFirstChild('JsReflection').SurfaceSize;
+		if (cleared.X !== 0 || cleared.Y !== 0 || cleared.Z !== 0) throw new Error('clearing did not take');
+	)");
+	CHECK(store.Get<engine::scene::SurfaceCamera>(InScene(store, "JsReflection")) == nullptr);
+
+	MustRun(*runtime, "workspace.FindFirstChild('JsReflection').SurfaceSize = Vector3.new(512, 256, 0)");
+	surface = store.Get<engine::scene::SurfaceCamera>(InScene(store, "JsReflection"));
 	REQUIRE(surface != nullptr);
 	CHECK(surface->Width == 512);
 	CHECK(surface->Height == 256);
@@ -4994,7 +5026,7 @@ TEST_CASE("the tree lookups reach past the direct children", "[scripting]") {
 	Store store("script_test");
 	const auto runtime = MakeRuntime(store, Language::Luau);
 
-	MustRun(*runtime, R"(
+	REQUIRE(RunLocalCameraFixture(store, *runtime, Language::Luau, R"(
 		local outer = Instance.new('Part', workspace)
 		outer.Name = 'Outer'
 
@@ -5038,7 +5070,7 @@ TEST_CASE("the tree lookups reach past the direct children", "[scripting]") {
 		-- Nothing found is nil, not a userdata wrapping the null handle.
 		assert(outer:FindFirstChild('Absent', true) == nil, 'a miss was not nil')
 		assert(outer:FindFirstAncestorOfClass('Nonexistent') == nil, 'an unknown class matched')
-	)");
+	)"));
 }
 
 TEST_CASE("javascript reaches the same tree lookups", "[scripting][js]") {

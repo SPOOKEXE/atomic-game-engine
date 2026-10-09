@@ -698,12 +698,15 @@ TEST_CASE("DataSceneService reports complete authored camera calibration in both
 		engine::scene::EnsureClassTree();
 		engine::scene::RegisterSceneComponents();
 		engine::ecs::Store store("data_scene_camera");
-		const auto runtime = Runtime(store, language);
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfClient();
+		const auto runtime = engine::script::MakeRuntime(store, language, limits);
 		REQUIRE(runtime != nullptr);
 
 		if (language == engine::script::Language::Luau) {
 			Run(*runtime, R"(
-				local camera = Instance.new("Camera")
+				local camera = Instance.new("Camera", workspace)
+				camera.Name = "DataCamera"
 				camera:SetAttribute("DataFactoryId", "fixture/camera")
 				camera.CFrame = CFrame.new(1, 2, 3)
 				camera.FieldOfView = 60
@@ -723,7 +726,8 @@ TEST_CASE("DataSceneService reports complete authored camera calibration in both
 			)");
 		} else {
 			Run(*runtime, R"(
-				const camera = Instance.new("Camera");
+				const camera = Instance.new("Camera", workspace);
+				camera.Name = "DataCamera";
 				camera.SetAttribute("DataFactoryId", "fixture/camera");
 				camera.CFrame = CFrame.new(1, 2, 3);
 				camera.FieldOfView = 60;
@@ -742,6 +746,10 @@ TEST_CASE("DataSceneService reports complete authored camera calibration in both
 				if (data.camera_axes !== "x_right_y_up_negative_z_forward" || data.clip_depth_range !== "zero_to_one") throw new Error("coordinates");
 			)");
 		}
+		const auto camera = store.FindFirstChild(store.FindFirstRoot("Workspace"), "DataCamera");
+		REQUIRE(camera != engine::ecs::NULL_ENTITY);
+		CHECK(engine::ecs::Store::IsPredicted(camera));
+		CHECK(engine::ecs::IsClientLocalInstance(store, camera));
 	}
 }
 
@@ -1374,6 +1382,80 @@ TEST_CASE("DataSceneService queries exact prepared collider geometry in both VMs
 				if (service.OverlapAABB({minimum: Vector3.new(1, 1, 1), maximum: Vector3.new(-1, -1, -1)}).status !== "invalid_aabb_query") throw new Error("invalid bounds accepted");
 				if (service.Raycast({origin: Vector3.new(0, 0, 0), direction: Vector3.new(0, 0, 0), max_distance_metres: 1}).status !== "invalid_raycast_query") throw new Error("zero ray accepted");
 			)");
+		}
+	}
+}
+
+TEST_CASE(
+	"explicit part affordances export through both VMs after cloning and snapshot restoration",
+	"[scripting][data][affordance][optional]"
+) {
+	for (const auto language : {engine::script::Language::Luau, engine::script::Language::JavaScript}) {
+		engine::scene::EnsureClassTree();
+		engine::scene::RegisterSceneComponents();
+		engine::ecs::Store store("optional-affordances");
+		{
+			const auto runtime = Runtime(store, language);
+			REQUIRE(runtime);
+			if (language == engine::script::Language::Luau) {
+				Run(*runtime, R"(
+local plain = Instance.new("Part")
+plain.Name = "Plain"
+assert(plain.AffordanceId == nil)
+assert(plain.AffordanceKind.Name == "None")
+assert(plain.AffordanceEnabled == false)
+plain.AffordanceId = ""
+plain.AffordanceKind = Enum.AuthoredAffordanceKind.None
+plain.AffordanceEnabled = false
+assert(#game:GetService("DataSceneService"):GetAuthoredAffordances({limit = 8}).affordances == 0)
+local tagged = Instance.new("Part")
+tagged.AffordanceId = "door/a"
+tagged.AffordanceKind = Enum.AuthoredAffordanceKind.Interactable
+tagged.AffordanceEnabled = true
+local copy = tagged:Clone()
+copy.AffordanceId = "door/b"
+local entries = game:GetService("DataSceneService"):GetAuthoredAffordances({limit = 8}).affordances
+assert(#entries == 2 and entries[1].id == "door/a" and entries[2].id == "door/b")
+assert(entries[1].kind == "interactable" and entries[2].kind == "interactable")
+)");
+			} else {
+				Run(*runtime, R"(
+const plain = Instance.new("Part");
+plain.Name = "Plain";
+if (plain.AffordanceId !== null || plain.AffordanceKind.Name !== "None" || plain.AffordanceEnabled !== false) throw new Error("optional defaults wrong");
+plain.AffordanceId = "";
+plain.AffordanceKind = Enum.AuthoredAffordanceKind.None;
+plain.AffordanceEnabled = false;
+if (game.GetService("DataSceneService").GetAuthoredAffordances({limit: 8}).affordances.length !== 0) throw new Error("plain part exported");
+const tagged = Instance.new("Part");
+tagged.AffordanceId = "door/a";
+tagged.AffordanceKind = Enum.AuthoredAffordanceKind.Interactable;
+tagged.AffordanceEnabled = true;
+const copy = tagged.Clone();
+copy.AffordanceId = "door/b";
+const entries = game.GetService("DataSceneService").GetAuthoredAffordances({limit: 8}).affordances;
+if (entries.length !== 2 || entries[0].id !== "door/a" || entries[1].id !== "door/b" || entries[0].kind !== "interactable" || entries[1].kind !== "interactable") throw new Error("authored export wrong");
+)");
+			}
+		}
+		engine::core::ByteWriter writer;
+		REQUIRE(store.Save(writer));
+		engine::ecs::Store restored("optional-affordances-restored");
+		engine::core::ByteReader reader(writer.Bytes());
+		REQUIRE(restored.Load(reader));
+		const auto runtime = Runtime(restored, language);
+		REQUIRE(runtime);
+		if (language == engine::script::Language::Luau) {
+			Run(*runtime, R"(
+local entries = game:GetService("DataSceneService"):GetAuthoredAffordances({limit = 8}).affordances
+assert(#entries == 2 and entries[1].id == "door/a" and entries[2].id == "door/b")
+assert(entries[1].kind == "interactable" and entries[2].kind == "interactable")
+)");
+		} else {
+			Run(*runtime, R"(
+const entries = game.GetService("DataSceneService").GetAuthoredAffordances({limit: 8}).affordances;
+if (entries.length !== 2 || entries[0].id !== "door/a" || entries[1].id !== "door/b" || entries[0].kind !== "interactable" || entries[1].kind !== "interactable") throw new Error("restored authored export wrong");
+)");
 		}
 	}
 }

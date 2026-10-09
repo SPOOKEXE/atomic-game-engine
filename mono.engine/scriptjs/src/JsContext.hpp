@@ -68,6 +68,20 @@ namespace engine::script {
 
 		// What the host is, for `RunService.IsServer()` and friends.
 		HostRole Role;
+		std::function<bool(std::span<const std::byte>)> RemoteEventSender;
+
+		// Bytecode filenames identify immutable script side even after a callback resumes.
+		struct SourceOrigin {
+			HostRole Role;
+			std::string OriginalName;
+			std::string CompiledName;
+			ecs::Entity Source;
+		};
+		std::unordered_map<JSAtom, SourceOrigin> SourceOrigins;
+		HostRole ClientFallback{false, true, false};
+		bool HasClientSource = false;
+		// Host result marshalling retains returned functions after their JS frame has unwound.
+		ecs::Entity RetainingSource;
 
 		// The services this runtime may reach.
 		ScriptCapabilities Access = ScriptCapabilities::None;
@@ -208,7 +222,12 @@ namespace engine::script {
 		// Slots are recycled through `FreeRefs` rather than the vector growing
 		// without bound: a game that connects and disconnects every frame would
 		// otherwise leak an index per frame for the life of the world.
-		std::vector<JSValue> Callables;
+		struct Callable {
+			JSValue Value = JS_UNDEFINED;
+			ecs::Entity Source;
+			uint64_t Generation = 1;
+		};
+		std::vector<Callable> Callables;
 		std::vector<CallbackRef> FreeRefs;
 
 		// One prototype per ECS class, built the first time an instance of it

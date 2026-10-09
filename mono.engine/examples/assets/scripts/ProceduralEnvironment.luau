@@ -57,9 +57,9 @@ for index = 0, 11 do
 	marker.Parent = workspace
 end
 
-local eye = Instance.new("Camera")
-eye.Name = "ProceduralEnvironmentCamera"
-eye.FieldOfView = 70
-eye.CFrame = CFrame.lookAt(Vector3.new(26, 15, 24), Vector3.new(0, 5, -24))
-eye.Parent = workspace
-workspace.CurrentCamera = eye
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local eye = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+eye:SetAttribute("Name", "ProceduralEnvironmentCamera")
+eye:SetAttribute("FieldOfView", 70)
+eye:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(26, 15, 24), Vector3.new(0, 5, -24)))

@@ -30,6 +30,8 @@
 #include <engine/examples/Shooting.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>
+#include <engine/gui/Components.hpp>
+#include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/net/Wire.hpp>
@@ -45,6 +47,9 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tools.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/RemoteEvent.hpp>
+#include <engine/script/Runtime.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -56,8 +61,10 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <numbers>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -96,7 +103,7 @@ namespace server_replication_test {
 	// every time. Registering the shared set is what removes the second
 	// declaration rather than renaming around the collision.
 	void RegisterTypes() {
-		engine::scene::RegisterSceneComponents();
+		engine::scene::RegisterSceneClasses();
 
 		// **And the two sets that started crossing at v0.15**, because this
 		// replica is a client and a client is what receives them. A snapshot
@@ -1645,4 +1652,199 @@ TEST_CASE(
 	CHECK(engine::scene::CharacterOf(remote.World, player) == character);
 	std::error_code ignored;
 	std::filesystem::remove(path, ignored);
+}
+
+TEST_CASE(
+	"server GUI copies retain client state and callbacks across scripted respawn", "[server][playergui]"
+) {
+	using namespace engine;
+	if (!ServerAvailable()) SKIP("the server program is not built into this preset");
+	const auto directory = std::filesystem::temp_directory_path();
+	const auto bootstrap = directory / "server_playergui_bootstrap.luau";
+	const auto scenePath = directory / "server_playergui_lifecycle.aworld";
+	struct RemoveFiles {
+		std::array<std::filesystem::path, 2> Paths;
+		~RemoveFiles() {
+			for (const auto &path : Paths) {
+				std::error_code ignored;
+				std::filesystem::remove(path, ignored);
+			}
+		}
+	} cleanup{{bootstrap, scenePath}};
+	{
+		std::ofstream file(bootstrap);
+		REQUIRE(file);
+		file << R"(
+local root = script.Parent
+root.Status.Text = game:GetService('Players').LocalPlayer.Name
+root.Counter.Text = '0'
+local calls = 0
+root.Status:GetPropertyChangedSignal('Text'):Connect(function()
+    calls += 1
+    root.Counter.Text = tostring(calls)
+end)
+)";
+	}
+	{
+		std::ofstream file(scenePath);
+		REQUIRE(file);
+		file << R"(<World format="3" name="GuiLifecycle">
+<Sources><Source path="gui-command.luau"><![CDATA[
+local command = game:GetService('ReplicatedStorage'):WaitForChild('GuiCommand')
+command.OnServerEvent:Connect(function(payload)
+    for _, player in game:GetService('Players'):GetPlayers() do
+        if payload == 'respawn' then
+            player:LoadCharacter()
+        else
+            player.PlayerGui.Persistent.Status.Text = 'server-update'
+        end
+    end
+end)
+]]></Source></Sources>
+<Item class="StarterGui" name="StarterGui" id="1">
+)";
+		uint64_t item = 2;
+		for (const bool reset : {false, true}) {
+			file << "<Item class=\"ScreenGui\" name=\"" << (reset ? "Hud" : "Persistent") << "\" id=\""
+				 << item++ << "\"><Property name=\"ResetOnSpawn\" type=\"bool\">"
+				 << (reset ? "true" : "false") << "</Property>\n";
+			for (const char *name : {"Status", "Counter"})
+				file << "<Item class=\"TextLabel\" name=\"" << name << "\" id=\"" << item++
+					 << "\"><Property name=\"Text\" type=\"string\">template</Property></Item>\n";
+			file << "<Item class=\"LocalScript\" name=\"Bootstrap\" id=\"" << item++
+				 << "\"><Property name=\"Source\" type=\"string\">" << bootstrap.string()
+				 << "</Property></Item></Item>\n";
+		}
+		file << R"(</Item>
+<Item class="ReplicatedStorage" name="ReplicatedStorage" id="20"><Item class="RemoteEvent" name="GuiCommand" id="21" /></Item>
+<Item class="ServerScriptService" name="ServerScriptService" id="22"><Item class="Script" name="GuiCommands" id="23"><Property name="Source" type="string">gui-command.luau</Property></Item></Item>
+</World>)";
+	}
+	Remote first;
+	REQUIRE(first.Start(0, scenePath.string()));
+	REQUIRE(first.Join(400));
+	Remote second;
+	REQUIRE(second.Connect(first.Port));
+	REQUIRE(second.Join(400));
+	Settle(first);
+	Settle(second);
+	std::array<Remote *, 2> clients{&first, &second};
+	std::array<std::shared_ptr<script::Runtime>, 2> runtimes;
+	std::array<Entity, 2> persistent;
+	std::array<Entity, 2> oldHud;
+	for (size_t index = 0; index < clients.size(); ++index) {
+		auto &client = *clients[index];
+		client.World.SetAdoptOnly(true);
+		script::RuntimeLimits limits;
+		limits.Role = script::HostRole::OfClient();
+		runtimes[index] = script::MakeRuntime(client.World, script::Language::Luau, limits);
+		(void)gui::RefreshPlayerGuiProjection(
+			client.World, client.Mine, scene::CharacterOf(client.World, client.Mine)
+		);
+		const auto started = runtimes[index]->RunNewScripts(script::ClientScriptsIn(client.World));
+		INFO(runtimes[index]->LastError());
+		REQUIRE(started == 2);
+		const auto target = client.World.FindFirstChild(client.Mine, "PlayerGui");
+		persistent[index] =
+			gui::FindPlayerGuiCopy(client.World, client.World.FindFirstChild(target, "Persistent"));
+		oldHud[index] = gui::FindPlayerGuiCopy(client.World, client.World.FindFirstChild(target, "Hud"));
+		REQUIRE(persistent[index] != ecs::NULL_ENTITY);
+		REQUIRE(oldHud[index] != ecs::NULL_ENTITY);
+		CHECK(client.World.FindFirstChild(clients[1 - index]->Mine, "PlayerGui") == ecs::NULL_ENTITY);
+		const auto status = client.World.FindFirstChild(persistent[index], "Status");
+		CHECK(
+			client.World.Get<gui::Label>(status)->Text ==
+			std::string(client.World.InstanceNameOf(client.Mine).Text())
+		);
+		REQUIRE(
+			runtimes[index]->Run(
+				"game:GetService('Players').LocalPlayer.PlayerGui.Persistent.Status.Text = 'local-state'"
+			)
+		);
+		client.World.FlushSignals();
+		REQUIRE(runtimes[index]->Heartbeat(1.0f / 60.0f));
+	}
+	const auto refresh = [&] {
+		for (size_t index = 0; index < clients.size(); ++index) {
+			auto &client = *clients[index];
+			(void)gui::RefreshPlayerGuiProjection(
+				client.World, client.Mine, scene::CharacterOf(client.World, client.Mine)
+			);
+			(void)runtimes[index]->RunNewScripts(script::ClientScriptsIn(client.World));
+			client.World.FlushSignals();
+			REQUIRE(runtimes[index]->Heartbeat(1.0f / 60.0f));
+		}
+	};
+	const auto command = [&](std::string_view payload) {
+		std::vector<std::byte> bytes;
+		REQUIRE(
+			script::EncodeRemoteEvent(
+				"ReplicatedStorage.GuiCommand",
+				std::as_bytes(std::span(payload.data(), payload.size())),
+				bytes
+			)
+		);
+		REQUIRE(first.Link->SendUser(bytes, core::Clock::Seconds()));
+	};
+	const std::array audits{first.Link->ReplicaStats().Audits, second.Link->ReplicaStats().Audits};
+	REQUIRE(first.Wait(
+		[&] {
+			second.Tick();
+			refresh();
+			return first.Link->ReplicaStats().Audits >= audits[0] + 2 &&
+				   second.Link->ReplicaStats().Audits >= audits[1] + 2;
+		},
+		1200
+	));
+	for (size_t index = 0; index < clients.size(); ++index) {
+		CHECK(
+			clients[index]
+				->World.Get<gui::Label>(clients[index]->World.FindFirstChild(persistent[index], "Status"))
+				->Text == "local-state"
+		);
+	}
+	command("respawn");
+	REQUIRE(first.Wait(
+		[&] {
+			second.Tick();
+			refresh();
+			return !first.World.Alive(oldHud[0]) && !second.World.Alive(oldHud[1]);
+		},
+		1200
+	));
+	for (size_t index = 0; index < clients.size(); ++index) {
+		auto &client = *clients[index];
+		const auto target = client.World.FindFirstChild(client.Mine, "PlayerGui");
+		CHECK(
+			gui::FindPlayerGuiCopy(client.World, client.World.FindFirstChild(target, "Persistent")) ==
+			persistent[index]
+		);
+		CHECK(
+			gui::FindPlayerGuiCopy(client.World, client.World.FindFirstChild(target, "Hud")) != oldHud[index]
+		);
+		CHECK(
+			client.World.Get<gui::Label>(client.World.FindFirstChild(persistent[index], "Status"))->Text ==
+			"local-state"
+		);
+	}
+	command("server-edit");
+	REQUIRE(first.Wait(
+		[&] {
+			second.Tick();
+			refresh();
+			return first.World.Get<gui::Label>(first.World.FindFirstChild(persistent[0], "Status"))->Text ==
+					   "server-update" &&
+				   second.World.Get<gui::Label>(second.World.FindFirstChild(persistent[1], "Status"))->Text ==
+					   "server-update";
+		},
+		1200
+	));
+	for (size_t index = 0; index < clients.size(); ++index) {
+		REQUIRE(runtimes[index]->Heartbeat(1.0f / 60.0f));
+		CHECK(
+			clients[index]
+				->World.Get<gui::Label>(clients[index]->World.FindFirstChild(persistent[index], "Counter"))
+				->Text != "0"
+		);
+	}
 }

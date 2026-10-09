@@ -29,6 +29,23 @@
 
 namespace engine::ecs {
 
+	class Store;
+
+	// Client-created state stays in this viewer and never becomes authored content.
+	struct ClientLocal {};
+
+	// A viewer-local projection paired with the authored instance it presents.
+	// It is metadata for exact source/copy identity checks and never crosses a save or wire.
+	struct InstanceProjection {
+		// Authored instance represented by this viewer-local row.
+		Entity Source;
+		// Whether this row currently participates in the source/copy pairing.
+		bool Active = false;
+	};
+
+	// Local ownership includes descendants of a local instance or viewer-only class.
+	bool IsClientLocalInstance(const Store &store, Entity instance);
+
 	// A dense process-local handle for one registered class.
 	//
 	// @since v0.2

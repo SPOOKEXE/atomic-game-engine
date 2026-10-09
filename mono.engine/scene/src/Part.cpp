@@ -5,6 +5,7 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Accessories.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Attachments.hpp>
@@ -656,6 +657,7 @@ namespace engine::scene {
 			property.Name = core::Name("CameraSubject");
 			property.PredictedWritable = true;
 			property.Type = PropertyType::Reference;
+			property.Nullable = true;
 			property.Kind = PropertyKind::Computed;
 			property.Size = sizeof(ecs::Entity);
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<CameraSubject>()});
@@ -675,6 +677,51 @@ namespace engine::scene {
 					return false;
 				}
 				store.GetMutable<CameraSubject>(camera)->Automatic = false;
+				return true;
+			};
+			return property;
+		}
+
+		constexpr std::array<std::string_view, 4> CAMERA_TYPE_NAMES{
+			"Custom", "LockFirstPerson", "ShiftLock", "Scriptable"
+		};
+
+		// Only the current eye controls the keyboard camera's world-local mode.
+		PropertyDescriptor CameraTypeProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("CameraType");
+			property.PredictedWritable = true;
+			property.Type = PropertyType::Enum;
+			property.EnumName = core::Name("CameraType");
+			property.Kind = PropertyKind::Resource;
+			property.Size = sizeof(core::Name);
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<CameraController>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity camera, void *out) -> bool {
+				const auto *active = store.Resource<ActiveCamera>();
+				const auto *controller = store.Resource<CameraController>();
+				*static_cast<core::Name *>(out) = core::Name("Custom");
+				if (active == nullptr || active->Entity != camera || controller == nullptr) return true;
+				const size_t index = static_cast<size_t>(controller->Mode);
+				if (index >= CAMERA_TYPE_NAMES.size()) return false;
+				*static_cast<core::Name *>(out) = core::Name(CAMERA_TYPE_NAMES[index]);
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity camera, const void *value) -> bool {
+				const auto *active = store.Resource<ActiveCamera>();
+				const auto *controller = store.Resource<CameraController>();
+				if (active == nullptr || active->Entity != camera || controller == nullptr) return false;
+				const core::Name named = *static_cast<const core::Name *>(value);
+				size_t index = 0;
+				if (named != core::Name("Classic")) {
+					for (; index < CAMERA_TYPE_NAMES.size(); ++index) {
+						if (named == core::Name(CAMERA_TYPE_NAMES[index])) break;
+					}
+				}
+				if (index >= CAMERA_TYPE_NAMES.size()) return false;
+				const auto mode = static_cast<CameraMode>(index);
+				if (controller->Mode == mode) return true;
+				store.ResourceMutable<CameraController>()->Mode = mode;
 				return true;
 			};
 			return property;
@@ -789,6 +836,53 @@ namespace engine::scene {
 		const core::Name &AuthoredAffordanceKindEnum() {
 			static const core::Name name("AuthoredAffordanceKind");
 			return name;
+		}
+
+		// Defaults remain readable without allocating gameplay metadata on ordinary parts.
+		template <auto Member, PropertyType Type>
+		PropertyDescriptor AuthoredAffordanceProperty(std::string_view name) {
+			using Field = std::remove_cvref_t<decltype(AuthoredAffordance{}.*Member)>;
+			using Value = std::conditional_t<Type == PropertyType::Enum, core::Name, Field>;
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = Type;
+			property.Size = sizeof(Value);
+			property.Kind = PropertyKind::Structural;
+			if constexpr (Type == PropertyType::Enum) property.EnumName = AuthoredAffordanceKindEnum();
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<AuthoredAffordance>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				if (!store.Alive(instance)) return false;
+				const auto *existing = store.Get<AuthoredAffordance>(instance);
+				const auto value = existing ? existing->*Member : AuthoredAffordance{}.*Member;
+				if constexpr (Type == PropertyType::Enum)
+					*static_cast<Value *>(out) =
+						ecs::EnumTable::MemberAt(AuthoredAffordanceKindEnum(), static_cast<size_t>(value));
+				else
+					*static_cast<Value *>(out) = value;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				if (!store.Alive(instance)) return false;
+				AuthoredAffordance authored;
+				if (const auto *existing = store.Get<AuthoredAffordance>(instance)) authored = *existing;
+				if constexpr (Type == PropertyType::Enum) {
+					size_t ordinal = 0;
+					if (!ecs::EnumTable::OrdinalOf(
+							AuthoredAffordanceKindEnum(), *static_cast<const Value *>(value), ordinal
+						))
+						return false;
+					authored.*Member = static_cast<Field>(ordinal);
+				} else
+					authored.*Member = *static_cast<const Value *>(value);
+				if (!authored.Id.IsValid() && authored.Kind == AuthoredAffordanceKind::None &&
+					!authored.Enabled)
+					store.Remove<AuthoredAffordance>(instance);
+				else
+					store.Set(instance, authored);
+				return true;
+			};
+			return property;
 		}
 
 		template <class Component, auto Member, const core::Name &(*EnumName)()>
@@ -2608,12 +2702,11 @@ namespace engine::scene {
 			const ecs::ClassId vectorField3D =
 				ecs::Classes::Register("VectorField3D", pvInstance, vectorField3DSet);
 
-			// A field holds only the renderer request. The renderer derives every
-			// particle from the authoritative storm copied into its view, so no
-			// device-local particle position can enter an authored world.
+			// A field owns bounded initial conditions and styles. Device-local live
+			// particle positions do not enter authored worlds or ECS snapshots.
 			const std::array gpuParticleField{ecs::Components::Of<GpuParticleField>()};
 			const ecs::ClassId gpuParticleFieldClass =
-				ecs::Classes::Register("GpuParticleField", instance, gpuParticleField);
+				ecs::Classes::Register("GpuParticleField", pvInstance, gpuParticleField);
 
 			const std::array base{
 				ecs::Components::Of<Bounds>(),
@@ -2667,11 +2760,6 @@ namespace engine::scene {
 				// description. Forty bytes on every part, which is the trade
 				// the two entries above already make.
 				ecs::Components::Of<RigidBody>(),
-
-				// Data-factory reads become a column scan because every BasePart has
-				// this eight-byte record. The fixed cost keeps one authoring surface
-				// and avoids a structural join for the bounded affordance query.
-				ecs::Components::Of<AuthoredAffordance>(),
 
 				// **`Simulated` is deliberately not here, and that is the safe
 				// default rather than an omission.** A part is static until
@@ -2798,6 +2886,7 @@ namespace engine::scene {
 				ecs::Components::Of<CameraSubject>()
 			};
 			const ecs::ClassId cameraClass = ecs::Classes::Register("Camera", pvInstance, camera);
+			ecs::Classes::SetRuntimeLocal(cameraClass, true);
 
 			// **A surface camera is a camera you parent to a part**, and that is
 			// the whole of the class.
@@ -2963,7 +3052,9 @@ namespace engine::scene {
 			ecs::EnumTable::Register("ListenerType", listeners);
 			ecs::EnumTable::Register(
 				"CameraType",
-				std::array<std::string_view, 4>{"Classic", "LockFirstPerson", "ShiftLock", "Scriptable"}
+				std::array<std::string_view, 5>{
+					"Classic", "LockFirstPerson", "ShiftLock", "Scriptable", "Custom"
+				}
 			);
 
 			const std::array bulb{ecs::Components::Of<Light>()};
@@ -3260,41 +3351,53 @@ namespace engine::scene {
 				gpuParticleFieldClass, "RequestedCount"
 			);
 			ecs::Classes::Property<&GpuParticleField::Seed>(gpuParticleFieldClass, "Seed");
-			ecs::Classes::Property<&GpuParticleField::CondensationColor>(
-				gpuParticleFieldClass, "CondensationColor"
+			ecs::Classes::Property<&GpuParticleField::HalfExtent>(gpuParticleFieldClass, "Bounds");
+			ecs::Classes::ClampedProperty<&GpuParticleField::VelocityResponse, 0.0f, 1000.0f>(
+				gpuParticleFieldClass, "VelocityResponse"
 			);
-			ecs::Classes::Property<&GpuParticleField::RainColor>(gpuParticleFieldClass, "RainColor");
-			ecs::Classes::Property<&GpuParticleField::DebrisColor>(gpuParticleFieldClass, "DebrisColor");
-			ecs::Classes::ClampedProperty<&GpuParticleField::CondensationAlpha, 0.0f, 1.0f>(
-				gpuParticleFieldClass, "CondensationAlpha"
-			);
-			ecs::Classes::ClampedProperty<&GpuParticleField::RainAlpha, 0.0f, 1.0f>(
-				gpuParticleFieldClass, "RainAlpha"
-			);
-			ecs::Classes::ClampedProperty<&GpuParticleField::DebrisAlpha, 0.0f, 1.0f>(
-				gpuParticleFieldClass, "DebrisAlpha"
-			);
-			ecs::Classes::ClampedProperty<&GpuParticleField::CondensationSize, 0.0f, 64.0f>(
-				gpuParticleFieldClass, "CondensationSize"
-			);
-			ecs::Classes::ClampedProperty<&GpuParticleField::RainSize, 0.0f, 64.0f>(
-				gpuParticleFieldClass, "RainSize"
-			);
-			ecs::Classes::ClampedProperty<&GpuParticleField::DebrisSize, 0.0f, 64.0f>(
-				gpuParticleFieldClass, "DebrisSize"
-			);
+			ecs::PropertyDescriptor definition;
+			definition.Name = core::Name("Definition");
+			definition.Type = PropertyType::String;
+			definition.Size = sizeof(std::string);
+			definition.Scriptable = false;
+			definition.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<GpuParticleField>()});
+			definition.Writes = definition.Reads;
+			definition.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) {
+				const auto *field = store.Get<GpuParticleField>(instance);
+				if (field == nullptr) return false;
+				*static_cast<std::string *>(out) = GpuParticleDefinition(*field);
+				return true;
+			};
+			definition.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) {
+				const auto *field = store.Get<GpuParticleField>(instance);
+				if (field == nullptr || (store.AdoptOnly() && !(ecs::Store::IsPredicted(instance) &&
+																ecs::IsClientLocalInstance(store, instance))))
+					return false;
+				auto candidate = *field;
+				if (!ReadGpuParticleDefinition(*static_cast<const std::string *>(value), candidate))
+					return false;
+				store.Set(instance, std::move(candidate));
+				return true;
+			};
+			ecs::Classes::Computed(gpuParticleFieldClass, definition);
 
 			ecs::Classes::Computed(basePart, PartSizeProperty());
 			ecs::Classes::Computed(basePart, CanCollideProperty());
 			ecs::Classes::Property<&Collider::CanQuery>(basePart, "CanQuery");
-			ecs::Classes::Property<&AuthoredAffordance::Id>(basePart, "AffordanceId");
 			ecs::Classes::Computed(
 				basePart,
-				EnumFieldProperty<AuthoredAffordance, &AuthoredAffordance::Kind, AuthoredAffordanceKindEnum>(
-					"AffordanceKind"
+				AuthoredAffordanceProperty<&AuthoredAffordance::Id, PropertyType::Name>("AffordanceId")
+			);
+			ecs::Classes::Computed(
+				basePart,
+				AuthoredAffordanceProperty<&AuthoredAffordance::Kind, PropertyType::Enum>("AffordanceKind")
+			);
+			ecs::Classes::Computed(
+				basePart,
+				AuthoredAffordanceProperty<&AuthoredAffordance::Enabled, PropertyType::Bool>(
+					"AffordanceEnabled"
 				)
 			);
-			ecs::Classes::Property<&AuthoredAffordance::Enabled>(basePart, "AffordanceEnabled");
 			ecs::Classes::Computed(basePart, AnchoredProperty());
 			ecs::Classes::Computed(basePart, KinematicProperty());
 
@@ -3595,8 +3698,14 @@ namespace engine::scene {
 			// than a match. `SpawnLocation::Forced` carries the argument.
 			ecs::Classes::Property<&SpawnLocation::Forced>(spawnLocation, "Forced");
 
-			ecs::Classes::Computed(cameraClass, FieldOfViewProperty());
+			// Local cameras may be scripted without granting writes to replicated eyes.
+			for (auto property :
+				 {CFrameProperty(), PositionProperty(), OrientationProperty(), FieldOfViewProperty()}) {
+				property.PredictedWritable = true;
+				ecs::Classes::Computed(cameraClass, property);
+			}
 			ecs::Classes::Computed(cameraClass, CameraSubjectProperty());
+			ecs::Classes::Computed(cameraClass, CameraTypeProperty());
 			ecs::Classes::Property<&CameraSubject::Automatic>(cameraClass, "CameraSubjectAutomatic");
 			ecs::Classes::Property<&Camera::NearPlane>(cameraClass, "NearPlaneZ");
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");

@@ -72,6 +72,9 @@ TEST_CASE("the instance components are registered under explicit names", "[ecs][
 	REQUIRE(Components::Find(Name("ecs.InstanceClass")) == Components::Of<InstanceClass>());
 	REQUIRE(Components::Find(Name("ecs.Hierarchy")) == Components::Of<Hierarchy>());
 	REQUIRE(Components::Find(Name("ecs.InstanceName")) == Components::Of<engine::ecs::InstanceName>());
+	REQUIRE(
+		Components::Find(Name("ecs.InstanceProjection")) == Components::Of<engine::ecs::InstanceProjection>()
+	);
 
 	// Not the compiler's spelling, which is what they had before.
 	REQUIRE_FALSE(Components::Find(Name("Hierarchy")).IsValid());
@@ -108,6 +111,26 @@ TEST_CASE("an instance name crosses a snapshot as text", "[ecs][instance]") {
 	REQUIRE(restored.InstanceNameOf(child) == Name("Wheel"));
 	REQUIRE_FALSE(restored.InstanceNameOf(anonymous).IsValid());
 	REQUIRE(restored.FindFirstChild(model, "Wheel") == child);
+}
+
+TEST_CASE("instance projection links are cleared by snapshots", "[ecs][instance]") {
+	const Tree &tree = ClassTree();
+	Store source("projection-snapshot");
+	const Entity model = source.CreateInstance(tree.Model, "Model");
+	const Entity child = source.CreateInstance(tree.Part, "Child");
+	source.SetParent(child, model);
+	source.Set(child, engine::ecs::InstanceProjection{model, true});
+
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+
+	Store restored("projection-restored");
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	const auto *projection = restored.Get<engine::ecs::InstanceProjection>(child);
+	REQUIRE(projection != nullptr);
+	CHECK(projection->Source == NULL_ENTITY);
+	CHECK_FALSE(projection->Active);
 }
 
 TEST_CASE("an instance class crosses as its registered name", "[ecs][instance]") {

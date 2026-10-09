@@ -2,7 +2,6 @@
 // and with sparse keyboard edges, through both VM adapters.
 
 #include <engine/ecs/Store.hpp>
-#include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Part.hpp>
@@ -87,7 +86,6 @@ namespace {
 		if (fixtures[index] == nullptr) {
 			engine::scene::EnsureClassTree();
 			engine::scene::RegisterSceneComponents();
-			engine::physics::RegisterPhysicsClasses();
 			fixtures[index] = std::make_unique<RuntimeFixture>(
 				language == Language::Luau ? "bench.input.luau" : "bench.input.javascript", language
 			);

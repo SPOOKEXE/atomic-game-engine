@@ -474,6 +474,14 @@ namespace engine::render {
 			WorldColourTarget target = WorldColourTarget::Display
 		);
 
+		// Draws the requested editor grid after opaque depth, using this capture's camera and clip.
+		void DrawGroundGrid(
+			SDL_GPURenderPass *pass,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &cameraFrame,
+			WorldColourTarget target
+		);
+
 		// The world minus every pane, drawn into whatever pass is open.
 		//
 		// @param pass          The open pass.

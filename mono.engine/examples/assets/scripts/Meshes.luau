@@ -173,16 +173,12 @@ groupCamera.Face = Enum.NormalId.Front
 groupCamera.TagFilter = "Imported"
 groupCamera.Parent = redirected
 
-local view = Instance.new("Camera")
-view.Name = "Eye"
-view.CFrame = CFrame.lookAt(Vector3.new(0, 5, 18), Vector3.new(0, 2.5, 0))
-view.Parent = workspace
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local view = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+view:SetAttribute("Name", "Eye")
+view:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(0, 5, 18), Vector3.new(0, 2.5, 0)))
 
--- **Parenting a camera is not aiming with it.** `ActiveCamera` names the live
--- one, so a camera that is only parented is a row nothing reads and the client
--- keeps orbiting its own placeholder - which is what was happening here, and it
--- looks like bad framing rather than a missing line.
-workspace.CurrentCamera = view
 
 -- **The imported meshes appear as they arrive.** Content is fetched over
 -- frames, so nothing published is in this world when the chunk above runs -

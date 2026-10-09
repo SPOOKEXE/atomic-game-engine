@@ -246,8 +246,8 @@ gpu-texture-atlas-bench samples="1":
     fi
 
 # Release-optimised compute, draw, timestamp and logical-memory measurement
-# for every supported analytical storm field preset. Allocation refusal remains
-# a reported result so modest GPUs still document their supported ceiling.
+# for generic GPU field presets plus CPU world collection and camera binding.
+# Allocation refusal remains a reported result so modest GPUs document their ceiling.
 gpu-particle-field-bench samples="1":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1088,7 +1088,7 @@ bindings-check: (build "bindings")
 typecheck: (build "scriptcheck")
     #!/usr/bin/env bash
     set -euo pipefail
-    ./{{build}}/tools/scriptcheck mono.engine/examples/assets/scripts/*.luau
+    ./{{build}}/tools/scriptcheck mono.engine/examples/assets/scripts/*.luau mono.engine/examples/assets/scripts/client/DemoCameras/*.luau
 
     if command -v bun > /dev/null; then
         bun install --silent
@@ -1120,7 +1120,7 @@ typecheck: (build "scriptcheck")
 # 11 minutes of CPU, 39 s wall on 24 cores, once. Afterwards the dependency is a
 # no-op.
 typecheck-editor: luau-lsp
-    ./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/assets/scripts/*.luau
+    ./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/assets/scripts/*.luau mono.engine/examples/assets/scripts/client/DemoCameras/*.luau
     @echo "typecheck-editor ok - every example agrees with the language server"
 
 # The editor, with its control surface open for a Model Context Protocol client.
@@ -2104,3 +2104,10 @@ imagecodec-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target bench_imagecodec
     ./.cache/build/bench/bench/bench_imagecodec --suite engine.imagecodec.bench.image --samples {{samples}}
+
+# Measure ordinary GUI copy refresh with a real 1080p EditableImage payload.
+# Heap counters cover C++ allocations; reports remain on the terminal.
+playergui-projection-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_script
+    MONO_PLAYERGUI_PROJECTION_REPORT=1 ./.cache/build/bench/bench/bench_script --suite engine.script.bench.playergui --samples {{samples}}

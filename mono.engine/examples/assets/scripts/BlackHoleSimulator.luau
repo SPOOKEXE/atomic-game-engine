@@ -182,15 +182,13 @@ for index = 0, PHOTON_RING_COUNT - 1 do
 	visualParts[partIndex].EmissiveStrength = 16
 end
 
-local camera = Instance.new("Camera")
-camera.Name = "Black Hole Camera"
-camera.FieldOfView = 46
--- The horizon is intended for close inspection. The default 0.1 m plane
--- clips the nearby field while the lens pass still leaves the horizon mask.
-camera.NearPlaneZ = CAMERA_NEAR_PLANE
-camera.FarPlaneZ = 300
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local cameraTemplates = assert(game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts"), "the camera template container is missing")
+local cameraScript = assert(cameraTemplates:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+cameraScript:SetAttribute("CameraName", "Black Hole Camera")
+cameraScript:SetAttribute("FieldOfView", 46)
+-- The horizon is intended for close inspection.
+cameraScript:SetAttribute("NearPlaneZ", CAMERA_NEAR_PLANE)
+cameraScript:SetAttribute("FarPlaneZ", 300)
 
 local elapsedSeconds = 0
 
@@ -239,8 +237,4 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 	end
 
 	workspace:BulkMoveTo(movingParts, placements)
-
-	local cameraAngle = elapsedSeconds * 0.075
-	local cameraPosition = Vector3.new(math.sin(cameraAngle) * 8, 14, 39 + math.cos(cameraAngle) * 3)
-	camera.CFrame = CFrame.lookAt(cameraPosition, Vector3.new(0, 0, 0))
 end)

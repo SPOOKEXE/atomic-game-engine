@@ -7,6 +7,7 @@
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Style.hpp>
 #include <engine/gui/VirtualCollection.hpp>
@@ -637,6 +638,91 @@ TEST_CASE("screen interfaces are compiled from the selected viewer root", "[gui]
 	world.Request.Viewer = engine::ecs::NULL_ENTITY;
 	REQUIRE(world.Rebuild());
 	CHECK(world.List.Commands().Elements == 0);
+}
+
+TEST_CASE(
+	"PlayerGui source trees stay untouched while only their copy draws and routes", "[gui][compile][input]"
+) {
+	World world("gui_compile.player_gui_source");
+	const Entity player = world.Data.CreateInstance(Classes::Find(Name("Instance")), "Player");
+	const Entity playerGui = world.Data.CreateInstance(Classes::Find(Name("Instance")), "PlayerGui");
+	REQUIRE(world.Data.SetParent(playerGui, player));
+	const Entity sourceScreen = world.Make("ScreenGui", playerGui);
+	const Entity sourceButton = world.Make("TextButton", sourceScreen);
+	const Entity sourceLabel = world.Make("TextLabel", sourceScreen);
+	const Entity sourceBinding = world.Make("UIBinding", sourceLabel);
+	const Entity sourceData = world.Data.CreateInstance(Classes::Find(Name("Instance")), "Source");
+	engine::ecs::AttributeValue sourceValue;
+	sourceValue.Type = PropertyType::String;
+	sourceValue.String = "updated";
+	REQUIRE(engine::ecs::SetAttribute(world.Data, sourceData, Name("Value"), sourceValue));
+	Binding binding;
+	binding.SourcePath = "Source";
+	binding.Attribute = Name("Value");
+	world.Data.Set(sourceBinding, binding);
+	BindingOutput output;
+	output.Value = "unchanged";
+	output.EvaluationCount = 7;
+	world.Data.Set(sourceBinding, output);
+	world.Data.Set(sourceBinding, BindingDependency{});
+
+	PlayerGuiSource sourceTag;
+	sourceTag.Active = true;
+	world.Data.Set(sourceScreen, sourceTag);
+	Label authoredText;
+	authoredText.Text = "source authored text";
+	world.Data.Set(sourceLabel, authoredText);
+	ScrollMotion sourceMotion;
+	sourceMotion.Held = true;
+	sourceMotion.Pull = Vector2{8.0f, 5.0f};
+	world.Data.Set(sourceButton, sourceMotion);
+	Resolved sourceResolved;
+	sourceResolved.Rendered = true;
+	sourceResolved.AbsolutePosition = Vector2{12.0f, 34.0f};
+	sourceResolved.AbsoluteSize = Vector2{80.0f, 40.0f};
+	world.Data.Set(sourceButton, sourceResolved);
+
+	const Entity copyScreen = world.Make("ScreenGui", playerGui);
+	const Entity copyButton = world.Make("TextButton", copyScreen);
+	Element copyElement = *world.Data.Get<Element>(copyButton);
+	copyElement.Size = UDim2{0.0f, 80.0f, 0.0f, 40.0f};
+	copyElement.Active = true;
+	world.Data.Set(copyButton, copyElement);
+
+	world.Request.ScreenGuis = ScreenGuiSource::PlayerGui;
+	world.Request.Viewer = player;
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Commands().Elements == 1);
+	REQUIRE(!world.List.Commands().Commands.empty());
+	CHECK(
+		std::all_of(
+			world.List.Commands().Commands.begin(),
+			world.List.Commands().Commands.end(),
+			[&](const DrawCommand &command) { return command.Source == copyButton; }
+		)
+	);
+	CHECK(world.Data.Get<Label>(sourceLabel)->Text == "source authored text");
+	CHECK(world.Data.Get<BindingOutput>(sourceBinding)->EvaluationCount == 7);
+	CHECK(world.Data.Get<ScrollMotion>(sourceButton)->Held);
+	CHECK(world.Data.Get<ScrollMotion>(sourceButton)->Overshoot == Vector2::Zero);
+	CHECK(world.Data.Get<Resolved>(sourceButton)->Rendered);
+	CHECK(world.Data.Get<Resolved>(sourceButton)->AbsolutePosition == Vector2{12.0f, 34.0f});
+	CHECK(world.Data.Get<Resolved>(copyButton) != nullptr);
+	CHECK(world.Data.Get<Resolved>(copyButton)->Rendered);
+	CHECK(world.Data.Get<Resolved>(copyButton)->AbsoluteSize == Vector2{80.0f, 40.0f});
+	std::vector<Entity> found;
+	CHECK(ElementsAt(world.Data, playerGui, Vector2{20.0f, 50.0f}, found) == 0);
+	CHECK(ElementsAt(world.Data, playerGui, Vector2{10.0f, 10.0f}, found) == 1);
+	CHECK(found.front() == copyButton);
+
+	Router router;
+	Pointer pointer;
+	pointer.Position = Vector2{10.0f, 10.0f};
+	pointer.Down = true;
+	const std::span<const GuiEvent> events = router.Update(world.Data, world.List.Commands(), pointer);
+	CHECK(std::any_of(events.begin(), events.end(), [&](const GuiEvent &event) {
+		return event.Kind == EventKind::InputBegan && event.Instance == copyButton;
+	}));
 }
 
 TEST_CASE("every declared property moves the signature", "[gui][compile]") {

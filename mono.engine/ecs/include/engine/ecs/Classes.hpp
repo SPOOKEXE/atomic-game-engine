@@ -375,6 +375,15 @@ namespace engine::ecs {
 		// is the same reason `Classes` merges inherited properties lazily.
 		core::Name EnumName;
 
+		// The concrete class returned by a `Reference` property, when known.
+		// Empty keeps the general `Instance` script type. This is declaration
+		// metadata only; runtime references remain entity handles.
+		core::Name ReferenceClass;
+
+		// True when a Reference property's value may be NULL_ENTITY. Binding
+		// declarations and schema consumers use this without changing storage.
+		bool Nullable = false;
+
 		// The components the getter reads and the setter touches.
 		//
 		// Not decoration. The manifest reports them, a future editor needs to
@@ -458,6 +467,10 @@ namespace engine::ecs {
 		// This flag is not inherited. A virtual base such as `BasePart` is not
 		// creatable while its concrete `Part` child is.
 		bool Creatable = true;
+
+		// This exact class belongs to a viewer, including its descendants.
+		// Derived classes choose separately so authored surface cameras stay content.
+		bool RuntimeLocal = false;
 
 		// Whether Studio may offer this class for insertion. A class can remain
 		// part of `IsA` while being absent from authoring surfaces.
@@ -622,6 +635,9 @@ namespace engine::ecs {
 		// @param id        The registered class.
 		// @param creatable Whether creation is allowed.
 		static void SetCreatable(ClassId id, bool creatable);
+
+		// Declares viewer ownership for this exact class, without inheriting it.
+		static void SetRuntimeLocal(ClassId id, bool local);
 
 		// Changes the object-model role of one exact class.
 		//

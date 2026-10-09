@@ -77,6 +77,33 @@ namespace engine::script {
 		return false;
 	}
 
+	bool SignalTable::DropCallback(CallbackRef callback) {
+		bool removed = false;
+		for (auto &[key, connections] : Lists) {
+			for (Connection &connection : connections) {
+				if (!connection.Live || connection.Callback != callback) continue;
+				connection.Live = false;
+				Owners.erase(connection.Id);
+				removed = true;
+			}
+			if (Firing == 0) Compact(connections);
+		}
+		if (Firing == 0) {
+			for (auto found = Lists.begin(); found != Lists.end();) {
+				if (!found->second.empty()) {
+					++found;
+					continue;
+				}
+				const uint8_t kind = static_cast<uint8_t>(found->first >> 56);
+				const ecs::Entity subject{found->first & 0x00FFFFFFFFFFFFFFull};
+				if (const auto order = SubjectOrder.find(kind); order != SubjectOrder.end())
+					std::erase(order->second, subject);
+				found = Lists.erase(found);
+			}
+		}
+		return removed;
+	}
+
 	bool SignalTable::Connected(ConnectionId id) const {
 		const auto owner = Owners.find(id);
 		if (owner == Owners.end()) {

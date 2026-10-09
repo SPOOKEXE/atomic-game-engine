@@ -903,6 +903,8 @@ namespace engine::render {
 			  State->HdrAdditiveRibbonPipeline,
 			  State->HdrOpaquePipeline,
 			  State->HdrTransparentPipeline,
+			  State->GridPipeline,
+			  State->HdrGridPipeline,
 			  State->HdrWireframeOpaquePipeline,
 			  State->HdrWireframeTransparentPipeline,
 			  State->GBufferPipeline,
@@ -1247,6 +1249,20 @@ namespace engine::render {
 				}
 			}
 		}
+		for (Impl::GpuParticleFieldWorld &resident : State->GpuParticleFieldWorlds) {
+			if (!sameWorld(resident)) continue;
+			if (resident.States != nullptr) gpu::ReleaseBuffer(State->Device, resident.States);
+			if (resident.Samples != nullptr) gpu::ReleaseBuffer(State->Device, resident.Samples);
+			if (resident.SampleTransfer != nullptr)
+				gpu::ReleaseTransferBuffer(State->Device, resident.SampleTransfer);
+		}
+		State->GpuParticleFieldWorlds.erase(
+			std::remove_if(
+				State->GpuParticleFieldWorlds.begin(), State->GpuParticleFieldWorlds.end(), sameWorld
+			),
+			State->GpuParticleFieldWorlds.end()
+		);
+		State->ActiveGpuParticleFieldWorld = nullptr;
 		State->PendingInstanceUploads.erase(
 			std::remove_if(
 				State->PendingInstanceUploads.begin(), State->PendingInstanceUploads.end(), sameWorld

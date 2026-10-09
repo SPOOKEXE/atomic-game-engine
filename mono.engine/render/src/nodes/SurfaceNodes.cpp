@@ -260,6 +260,8 @@ namespace engine::render {
 					const auto &run = Plan.Runs[slot];
 					drawPane(slot, run.OpaqueFirst, run.OpaqueCount);
 				}
+				// Each recursive capture owns its transformed eye and oblique aperture clip.
+				DrawGroundGrid(pass, entry.Matrices.ViewProjection, entry.Frame, WorldColourTarget::Hdr);
 				const auto drawInterface = [&](bool onTop) {
 					if (DrawInterface) {
 						Result.DrawCalls += Request.GameInterfaceHook->RecordWorld(

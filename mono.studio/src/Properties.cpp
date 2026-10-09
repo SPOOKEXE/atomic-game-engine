@@ -5,6 +5,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Shaders.hpp>
@@ -92,6 +93,94 @@ namespace studio {
 			if (property == Name("Lod2Distance")) return 1;
 			if (property == Name("Lod3Distance")) return 2;
 			return std::nullopt;
+		}
+
+		enum class RenderEffectStage : uint8_t { Compute, PostProcess };
+
+		std::optional<RenderEffectStage> RenderEffectStageOf(Name property) {
+			if (property == Name("ComputeEffectNode")) return RenderEffectStage::Compute;
+			if (property == Name("PostProcessEffectNode")) return RenderEffectStage::PostProcess;
+			return std::nullopt;
+		}
+
+		std::optional<RenderEffectStage> RenderEffectStageOf(const PropertyDescriptor &property) {
+			return RenderEffectStageOf(property.Name);
+		}
+
+		struct RenderEffectChoices {
+			std::vector<Name> Compute;
+			std::vector<Name> PostProcess;
+		};
+
+		RenderEffectChoices RenderEffectNodes(const engine::graph::PipelineDocument *document) {
+			RenderEffectChoices choices;
+			if (document == nullptr) return choices;
+
+			struct AuthoredNode {
+				Name NodeName;
+				Name NodeKind;
+				bool Visual = false;
+				bool Enabled = true;
+			};
+			std::vector<AuthoredNode> nodes;
+			Name nodeName;
+			Name nodeKind;
+			bool visualAttachment = false;
+			bool building = false;
+			const auto appendNode = [&] {
+				if (building) {
+					nodes.push_back({nodeName, nodeKind, visualAttachment});
+					building = false;
+				}
+			};
+			for (const engine::graph::Edit &edit : document->Edits()) {
+				if (edit.Kind == engine::graph::EditKind::AddNode) {
+					appendNode();
+					nodeName = edit.Name;
+					nodeKind = edit.NodeKind;
+					visualAttachment = false;
+					building = true;
+				} else if (edit.Kind == engine::graph::EditKind::AddResource) {
+					appendNode();
+				} else if (edit.Kind == engine::graph::EditKind::Enable) {
+					appendNode();
+					for (AuthoredNode &node : nodes) {
+						if (node.NodeName == edit.Name) node.Enabled = edit.Enabled;
+					}
+				} else if (edit.Kind == engine::graph::EditKind::Set && building &&
+						   edit.Key == Name("attachment")) {
+					visualAttachment = edit.Value == "visual";
+				}
+			}
+			appendNode();
+			for (const AuthoredNode &node : nodes) {
+				if (!node.NodeName.IsValid() || !node.Enabled || !node.Visual) continue;
+				if (node.NodeKind == Name("dispatch")) choices.Compute.push_back(node.NodeName);
+				if (node.NodeKind == Name("raster")) choices.PostProcess.push_back(node.NodeName);
+			}
+			return choices;
+		}
+
+		bool DrawRenderEffectNode(Name &value, std::span<const Name> choices, bool mixed = false) {
+			const std::string preview = mixed			  ? "Multiple values"
+										: value.IsValid() ? std::string(value.Text())
+														  : std::string("None");
+			bool changed = false;
+			if (!ImGui::BeginCombo("##v", preview.c_str())) return false;
+			if (ImGui::Selectable("None", !mixed && !value.IsValid())) {
+				value = {};
+				changed = true;
+			}
+			for (const Name choice : choices) {
+				const bool selected = !mixed && choice == value;
+				const std::string label(choice.Text());
+				if (ImGui::Selectable(label.c_str(), selected)) {
+					value = choice;
+					changed = true;
+				}
+			}
+			ImGui::EndCombo();
+			return changed;
 		}
 
 		bool ReadSchemaValue(const void *component, const FieldDescriptor &field, PropertyValue &value) {
@@ -836,6 +925,9 @@ namespace studio {
 		std::optional<SelectedShader> selectedShader;
 
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
+		const engine::world::WorldSettings worldSettings = Universe->SettingsOf(SelectionWorld);
+		const RenderEffectChoices effectChoices =
+			RenderEffectNodes(RenderingProfiles.Find(worldSettings.RenderingProfile));
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			const auto primary = std::find_if(Selection.begin(), Selection.end(), [&](Entity instance) {
 				return store.Alive(instance) && store.ClassOf(instance).IsValid();
@@ -981,6 +1073,7 @@ namespace studio {
 
 					PropertyValue changed = value;
 					bool wrote = false;
+					const std::optional<RenderEffectStage> effectStage = RenderEffectStageOf(*descriptor);
 
 					if (mixed && descriptor->Type != PropertyType::Reference &&
 						descriptor->Type != PropertyType::Opaque) {
@@ -988,18 +1081,25 @@ namespace studio {
 						// field says that directly and accepts the same textual form a
 						// scene file does; once valid, the one value is written to every
 						// selected instance that actually declares this property.
-						std::string text;
-						TextField("##v", text);
-						if (ImGui::IsItemDeactivatedAfterEdit()) {
-							PropertyValue parsed;
-							std::string reason;
-							if (ParseValue(descriptor->Type, text, parsed, reason)) {
-								changed = parsed;
-								wrote = true;
+						if (effectStage) {
+							const std::vector<Name> &choices = *effectStage == RenderEffectStage::Compute
+																   ? effectChoices.Compute
+																   : effectChoices.PostProcess;
+							wrote = DrawRenderEffectNode(changed.Name, choices, true);
+						} else {
+							std::string text;
+							TextField("##v", text);
+							if (ImGui::IsItemDeactivatedAfterEdit()) {
+								PropertyValue parsed;
+								std::string reason;
+								if (ParseValue(descriptor->Type, text, parsed, reason)) {
+									changed = parsed;
+									wrote = true;
+								}
 							}
-						}
-						if (ImGui::IsItemHovered()) {
-							ImGui::SetTooltip("selected instances have different values");
+							if (ImGui::IsItemHovered()) {
+								ImGui::SetTooltip("selected instances have different values");
+							}
 						}
 						ImGui::EndDisabled();
 						if (wrote && !locked) {
@@ -1195,6 +1295,13 @@ namespace studio {
 					}
 
 					case PropertyType::Name: {
+						if (effectStage) {
+							const std::vector<Name> &choices = *effectStage == RenderEffectStage::Compute
+																   ? effectChoices.Compute
+																   : effectChoices.PostProcess;
+							wrote = DrawRenderEffectNode(changed.Name, choices);
+							break;
+						}
 						std::string text =
 							changed.Name.IsValid() ? std::string(Label(changed.Name)) : std::string{};
 
@@ -1495,6 +1602,9 @@ namespace studio {
 		std::optional<PropertyEdit> propertyEdit;
 		CollectionTagEdit tagEdit;
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
+		const engine::world::WorldSettings worldSettings = Universe->SettingsOf(SelectionWorld);
+		const RenderEffectChoices effectChoices =
+			RenderEffectNodes(RenderingProfiles.Find(worldSettings.RenderingProfile));
 		std::optional<PanelProjection> focusedProjection;
 		if (FocusedViewport < Overlays.size() && ViewportWorld(FocusedViewport) == SelectionWorld) {
 			// ProjectionFor may enter a replica world. Finish that work before the
@@ -1551,7 +1661,15 @@ namespace studio {
 				ImGui::SetNextItemWidth(-1.0f);
 				const std::string key =
 					std::string(componentType.Name.Text()) + "." + std::string(field.Spelling);
-				if (DrawSchemaValue(store, field, value, ComponentConfigDrafts[key])) {
+				const std::optional<RenderEffectStage> effectStage = RenderEffectStageOf(field.Name);
+				const bool changed =
+					effectStage ? DrawRenderEffectNode(
+									  value.Name,
+									  *effectStage == RenderEffectStage::Compute ? effectChoices.Compute
+																				 : effectChoices.PostProcess
+								  )
+								: DrawSchemaValue(store, field, value, ComponentConfigDrafts[key]);
+				if (changed) {
 					componentEdit = ComponentEdit{component, field.Name, value, true};
 				}
 				ImGui::PopID();
@@ -1599,17 +1717,8 @@ namespace studio {
 			}
 			tagEdit = DrawCollectionTags(store, Selection, CollectionTagDraft);
 
-			// Structural properties must remain reachable after removing their backing tag.
 			const auto attached = store.ComponentsOf(instance);
-			std::vector<ComponentId> inspected(attached.begin(), attached.end());
-			for (const auto &property : store.PropertiesOf(instance)) {
-				if (!property.Reads) continue;
-				for (const auto component : property.Reads->Ids()) {
-					if (std::find(inspected.begin(), inspected.end(), component) == inspected.end())
-						inspected.push_back(component);
-				}
-			}
-			for (const ComponentId component : inspected) {
+			for (const ComponentId component : attached) {
 				const TypeDescriptor &descriptor = Components::Describe(component);
 				int score = 0;
 				if (!ComponentFilter.empty() && !FuzzyMatch(ComponentFilter, Label(descriptor.Name), score)) {
@@ -1705,8 +1814,18 @@ namespace studio {
 							field.Type = property.Type;
 							field.Enum = property.EnumName;
 							const std::string key = "property:" + std::string(property.Spelling);
-							if (DrawSchemaValue(store, field, value, ComponentConfigDrafts[key]) &&
-								property.Writable) {
+							const std::optional<RenderEffectStage> effectStage =
+								RenderEffectStageOf(property.Name);
+							const bool changed =
+								effectStage
+									? DrawRenderEffectNode(
+										  value.Name,
+										  *effectStage == RenderEffectStage::Compute
+											  ? effectChoices.Compute
+											  : effectChoices.PostProcess
+									  )
+									: DrawSchemaValue(store, field, value, ComponentConfigDrafts[key]);
+							if (changed && property.Writable) {
 								propertyEdit = PropertyEdit{
 									property.Name,
 									DeclaringPropertyClass(store.ClassOf(instance), property.Name),

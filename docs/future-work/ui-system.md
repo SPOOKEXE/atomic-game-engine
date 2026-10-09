@@ -88,6 +88,33 @@ routes input into that same world, and delivers resulting events to that
 world's runtime. Studio compiles `StarterGui` while editing and `PlayerGui`
 while running. This viewer policy remains part of the compile key.
 
+### StarterGui templates and per-player copies
+
+`StarterGui` holds authored collector templates. When a player is initialized
+or respawns, its `StarterGui` collectors are copied into that player's
+`PlayerGui`. The server-owned rows remain the canonical source. Each client
+maintains a predicted `ClientLocal` projection for its own player, and the GUI
+compiler, input router, and client scripts use that player's projection rather
+than drawing or mutating the canonical source rows. Client scripts cannot
+observe the source row directly: resolving a source instance or traversing its
+children redirects to the corresponding local copy. Server scripts continue
+to address the canonical rows, while server-side script reads exclude the
+client-local projection.
+
+`ResetOnSpawn` is a per-collector lifetime choice read from the local projected
+collector. When it is enabled, respawn clears that projection and copies the
+current source again. When disabled, the local copy keeps its entity identity
+and local state across respawn, even if the server replaces the canonical source
+entity. Later authored source changes still update the existing copy; local
+settings and edits remain local. Non-collector containers such as a `Folder`
+are not cleared by this collector lifetime setting.
+
+Client-created instances are predicted and tagged `ecs.ClientLocal`; server
+script creation is authoritative unless it is parented under local ownership
+or its class is runtime-local. Local ownership follows ancestry, so the
+instance and its descendants stay out of authority replication and authored
+game saves. Only predicted rows may be mutated as client-local state.
+
 ### Existing limitations to remove
 
 The current system has deliberate provisional edges:

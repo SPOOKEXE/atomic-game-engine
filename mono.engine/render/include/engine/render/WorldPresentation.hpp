@@ -160,8 +160,9 @@ namespace engine::render {
 	LightingPresentationSignature(const scene::WorldLighting &lighting, std::span<const SceneLight> lights);
 
 	// Signs inputs that can move an invisible particle layer back into a camera.
-	// Simulation time is deliberately absent, so an off-camera resident pool can
-	// advance without invalidating pixels that remain unchanged.
+	// CPU simulation time is absent, so an off-camera resident pool can advance
+	// without invalidating pixels. GPU fields include their clock because live
+	// device positions have no retained host bounds to prove they remain invisible.
 	uint64_t ParticleVisibilitySignature(const View &view);
 
 	// Whether the selected Lighting children produce an environment layer.

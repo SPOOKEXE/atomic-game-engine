@@ -23,6 +23,7 @@ files and prose in graph modules, ordering modules by the layers in
 - @subpage md_mono_8engine_2spatial_2AGENTS
 - @subpage md_mono_8engine_2gui_2AGENTS
 - @subpage md_mono_8engine_2scene_2AGENTS
+- @subpage md_mono_8engine_2scene_2docs_2GpuParticleField
 - @subpage md_mono_8engine_2assets_2AGENTS
 - @subpage md_mono_8engine_2audiocodec_2AGENTS
 - @subpage md_mono_8engine_2audiocodec_2docs_2index
@@ -44,6 +45,7 @@ files and prose in graph modules, ordering modules by the layers in
 - @subpage md_mono_8engine_2scripthost_2AGENTS
 - @subpage md_mono_8engine_2audio_2AGENTS
 - @subpage md_mono_8engine_2datastore_2AGENTS
+- @subpage md_mono_8engine_2examples_2docs_2TornadoSim
 - @subpage md_mono_8engine_2game_2AGENTS
 - @subpage md_mono_8engine_2input_2AGENTS
 - @subpage md_mono_8network_2AGENTS

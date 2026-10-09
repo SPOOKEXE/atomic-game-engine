@@ -49,6 +49,7 @@
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/gui/VirtualCollection.hpp>
+#include <engine/script/InstanceShim.hpp>
 #include <engine/script/ScriptCall.hpp>
 
 #include <algorithm>
@@ -147,7 +148,12 @@ namespace engine::script {
 			};
 
 			std::vector<Entity> found;
-			gui::ElementsAt(call.World(), call.Subject(), point, found);
+			const bool client = call.Role().Client && !call.Role().Server;
+			const Entity subject = InstanceForScriptRead(call.World(), call.Subject(), client);
+			gui::ElementsAt(call.World(), subject, point, found);
+			std::erase_if(found, [&](Entity instance) {
+				return !InstanceVisibleToScript(call.World(), instance, client);
+			});
 			call.ReturnInstances(found);
 		}
 
@@ -652,7 +658,9 @@ namespace engine::script {
 				call.ReturnBoolean(false);
 				return;
 			}
-			table.CancelFor(target);
+			const bool clientExecution =
+				call.World().AdoptOnly() || (call.Role().Client && !call.Role().Server);
+			table.CancelFor(target, clientExecution);
 
 			// Sorted by spelling, which is `TweenService:Create`'s rule and is
 			// why it matters here too: `TweenSizeAndPosition` writes two goals,
@@ -662,7 +670,8 @@ namespace engine::script {
 			});
 
 			std::vector<Entity> dropped;
-			const Entity tween = table.Create(call.World(), target, info, std::move(goals), dropped);
+			const Entity tween =
+				table.Create(call.World(), target, info, std::move(goals), dropped, clientExecution);
 
 			// The connections go before the row does - only a VM knows what a
 			// `CallbackRef` means, which is why the release is a request.

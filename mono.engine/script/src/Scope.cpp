@@ -32,6 +32,16 @@ namespace engine::script {
 		return true;
 	}
 
+	void ScopeTable::DropCallback(uint64_t reference, bool includeTasks) {
+		for (auto &row : Rows) {
+			std::erase_if(row.Items, [reference, includeTasks](const ScopeItem &item) {
+				return item.Value == reference &&
+					   (item.Kind == ScopeItemKind::Callback || item.Kind == ScopeItemKind::Custom ||
+						(includeTasks && item.Kind == ScopeItemKind::Task));
+			});
+		}
+	}
+
 	bool ScopeTable::Remove(ScopeHandle handle, ScopeItem item) {
 		Row *row = Find(handle);
 		if (row == nullptr) {
@@ -52,6 +62,11 @@ namespace engine::script {
 	size_t ScopeTable::Count(ScopeHandle handle) const {
 		const Row *row = Find(handle);
 		return row == nullptr ? 0 : row->Items.size();
+	}
+
+	std::span<const ScopeItem> ScopeTable::Items(ScopeHandle handle) const {
+		const Row *row = Find(handle);
+		return row == nullptr ? std::span<const ScopeItem>{} : std::span<const ScopeItem>(row->Items);
 	}
 
 	bool ScopeTable::Clean(ScopeHandle handle, std::vector<ScopeItem> &items) {

@@ -49,6 +49,7 @@
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/Codec.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
+#include <engine/script/PlayerGui.hpp>
 #include <engine/script/PortalObservation.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/scripthost/Runtime.hpp>
@@ -2012,7 +2013,7 @@ namespace server {
 				// nobody else's.
 				// **The player's own interface, copied from the world's
 				// template.** `StarterGui` is a template and what a player sees
-				// is their copy - see `gui::ResetPlayerGui`, which also carries
+				// is their copy - see `script::ResetPlayerGui`, which also carries
 				// why a `ResetOnSpawn = false` collector survives a death. The
 				// copies are ordinary world content on this authority, so they
 				// replicate to exactly one client: `SetInterest` above hides
@@ -2022,7 +2023,7 @@ namespace server {
 				// reaches for from a spawn handler has to exist by the time the
 				// handler runs, and `LoadCharacter` is what a game hangs that
 				// handler on.
-				(void)engine::gui::ResetPlayerGui(store, player);
+				(void)engine::script::ResetPlayerGui(store, player);
 
 				// **Unless the game says it spawns its own occupants.**
 				// `Players.CharacterAutoLoads` is what a lobby sets to false,
@@ -2055,9 +2056,12 @@ namespace server {
 				if (ReceivePlayerPresentation(client, payload)) return;
 				engine::script::RemoteEventMessage remote;
 				if (engine::script::DecodeRemoteEvent(payload, remote)) {
-					Worlds().Enter(PrimaryWorld, [this, payload](engine::ecs::Store &) {
+					const auto assigned = Players.find(client.Index);
+					if (assigned == Players.end() || assigned->second.Generation != client.Generation) return;
+					const engine::ecs::Entity sender = assigned->second.Instance;
+					Worlds().Enter(PrimaryWorld, [this, payload, sender](engine::ecs::Store &) {
 						if (engine::script::Runtime *runtime = RuntimeOf(PrimaryWorld); runtime != nullptr) {
-							if (!runtime->DeliverRemoteEvent(payload)) {
+							if (!runtime->DeliverRemoteEvent(payload, sender)) {
 								ENGINE_WARN("server: refused RemoteEvent payload");
 							}
 						}

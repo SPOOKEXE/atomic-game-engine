@@ -157,7 +157,7 @@ namespace engine::scene {
 		EditableImageSpace space = EditableImageSpace::Linear
 	);
 	// Changes how existing RGB bytes are interpreted without converting them.
-	// Same-value writes stay quiet; invalid spaces and replica writes are refused.
+	// Same-value writes stay quiet; invalid spaces and writes to authority-owned replica images are refused.
 	bool SetEditableImageSpace(ecs::Store &store, ecs::Entity instance, EditableImageSpace space);
 
 	// Updates image export packing after validating supported colour and alpha

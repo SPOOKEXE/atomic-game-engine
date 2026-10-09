@@ -218,17 +218,14 @@ namespace studio {
 	// @since v0.19
 	ViewportCameraPose DefaultViewportCamera();
 
-	// Creates this Studio run's camera in one authoritative world and makes it
-	// the world camera. Runtime cameras are transient, so Play starts with an
-	// eye without putting one into the authored snapshot.
+	// Creates this Studio run's local Camera and makes it the world camera.
+	// Its reserved local identity is neither saved nor replicated.
 	//
 	// @param store The running server world.
-	// @param name  The generated instance name.
 	// @param pose  The initial runtime camera placement.
 	// @return The new camera, or `NULL_ENTITY` when the world has no workspace.
 	// @since v0.25
-	engine::ecs::Entity
-	CreateRuntimeCamera(engine::ecs::Store &store, std::string_view name, const ViewportCameraPose &pose);
+	engine::ecs::Entity CreateRuntimeCamera(engine::ecs::Store &store, const ViewportCameraPose &pose);
 
 	// Finds this world's usable current camera. Each runtime world owns a
 	// separate `ActiveCamera`; a viewport only reads the one belonging to the

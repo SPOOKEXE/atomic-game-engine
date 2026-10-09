@@ -41,6 +41,7 @@
 #include <engine/delivery/Client.hpp>
 #include <engine/delivery/Uploader.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/gui/PlayerGui.hpp>
 #include <engine/imagegraph/Reference.hpp>
 #include <engine/render/Animation.hpp>
 #include <engine/scene/ImageGraph.hpp>
@@ -914,7 +915,11 @@ namespace studio {
 			Universe->Enter(world, [&](ecs::Store &store) {
 				store.Observe<scene::ImageGraph>();
 				const uint64_t inputVersion = store.ComponentChangeVersion<scene::ImageGraph>();
-				store.Each<const scene::ImageGraph>([&](ecs::Entity, const scene::ImageGraph &graph) {
+				store.Each<const scene::ImageGraph>([&](ecs::Entity instance,
+														const scene::ImageGraph &graph) {
+					// PlayerGui keeps canonical templates beside the live local copy.
+					// Only the copy owns the imagegraph-instance reference at runtime.
+					if (gui::IsPlayerGuiSource(store, instance)) return;
 					if (!imagegraph::IsReferenceToken(graph.InstanceKey.Text()) ||
 						!imagegraph::IsRuntimeAsset(graph.Graph.Text()))
 						return;

@@ -270,7 +270,7 @@ namespace engine::ecs {
 		// them apart. The failure is not a crash: it is two different things
 		// quietly becoming one, discovered later and somewhere else.
 		//
-		// Set, `Create` and `CreateInstance` return `NULL_ENTITY` and say so
+		// Set, `Create` and authoritative `CreateInstance` return `NULL_ENTITY` and say so
 		// once. Two things are deliberately unaffected:
 		//
 		//   - **`CreatePredicted`**, because the predicted range is exactly the
@@ -1110,7 +1110,8 @@ namespace engine::ecs {
 		// A column copy per component rather than a constructor call, which is
 		// also what makes `Clone` need no separate machinery.
 		//
-		// Mints an **authoritative** entity, so an adopt-only store refuses it
+		// Exact classes marked RuntimeLocal mint a predicted, ClientLocal instance.
+		// Other classes mint an authoritative entity, so an adopt-only store refuses it
 		// exactly as it refuses `Create`. That check used to be missing here,
 		// and `scene::MakePart` carried a copy of it because this path walked
 		// straight past the flag - one minting path honouring the rule and one
@@ -1120,7 +1121,7 @@ namespace engine::ecs {
 		// @param id   The class to instantiate.
 		// @param name The instance's name, which need not be unique.
 		// @return The new instance, NULL_ENTITY for an invalid class, or
-		//         NULL_ENTITY in an adopt-only store.
+		//         NULL_ENTITY for an authoritative class in an adopt-only store.
 		Entity CreateInstance(ClassId id, std::string_view name = {});
 
 		// Creates a locally predicted instance from a class prototype.
@@ -2134,8 +2135,15 @@ namespace engine::ecs {
 		// @param reader The snapshot to apply.
 		// @param mode   What to do with entities the snapshot does not mention.
 		// @param clock  Restore saved time, or preserve this world's clock for replicated state.
+		// @param resourceAllow Optional resource filter, called after the snapshot validates.
+		//                      A false result retains the current resource without affecting entities.
 		// @return `false` when the snapshot could not be read.
-		bool Apply(core::ByteReader &reader, ApplyMode mode, ApplyClock clock = ApplyClock::RestoreSnapshot);
+		bool Apply(
+			core::ByteReader &reader,
+			ApplyMode mode,
+			ApplyClock clock = ApplyClock::RestoreSnapshot,
+			const std::function<bool(ComponentId)> &resourceAllow = {}
+		);
 
 		// Empties the world: every entity, table, resource and name.
 		//

@@ -16,7 +16,9 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/script/Tweens.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
@@ -150,6 +152,91 @@ namespace {
 				   "TweenService" + std::string(language == Language::Luau ? ":" : ".") + "Create(part, " +
 					   std::string(info) + ", { Position" + (language == Language::Luau ? " = " : ": ") +
 					   "Vector3.new(0, 10, 0) })");
+	}
+}
+
+TEST_CASE("queued tween writes retain their creating script side in shared hosts", "[scripting][tween]") {
+	using namespace engine;
+	for (const auto language : LANGUAGES) {
+		Store store = Fresh("tween.creating-side");
+		scene::InstallServices(store);
+		const auto workspace = scene::WorkspaceOf(store);
+		for (const auto name : {"ClientTarget", "ClientConvenience", "ServerTarget", "ServerConvenience"}) {
+			const auto part = store.CreateInstance(scene::PartClass(), name);
+			REQUIRE(store.SetParent(part, workspace));
+		}
+		const char *source = language == Language::Luau ? R"(
+local server = game:GetService('RunService'):IsServer()
+local prefix = server and 'Server' or 'Client'
+local target = workspace:FindFirstChild(prefix .. 'Target')
+local convenience = workspace:FindFirstChild(prefix .. 'Convenience')
+if not server then
+    assert(not pcall(function() target.Position = Vector3.new(0, 99, 0) end))
+end
+local owned = Instance.new('Part', workspace)
+owned.Name = prefix .. 'Owned'
+local info = TweenInfo.new(0.1, Enum.EasingStyle.Linear, Enum.EasingDirection.In)
+local tween = TweenService:Create(target, info, {Position = Vector3.new(0, 10, 0)})
+tween:Play()
+local localTween = TweenService:Create(owned, info, {Position = Vector3.new(0, 20, 0)})
+localTween:Play()
+assert(convenience:TweenPosition(Vector3.new(0, 30, 0), Enum.EasingDirection.In,
+    Enum.EasingStyle.Linear, 0.1, true))
+if not server then
+    assert(workspace:FindFirstChild('ServerTarget'):TweenPosition(Vector3.new(0, 99, 0), Enum.EasingDirection.In,
+        Enum.EasingStyle.Linear, 0.1, true))
+end
+)"
+														: R"(
+const server = game.GetService('RunService').IsServer();
+const prefix = server ? 'Server' : 'Client';
+const target = workspace.FindFirstChild(prefix + 'Target');
+const convenience = workspace.FindFirstChild(prefix + 'Convenience');
+if (!server) {
+    let refused = false;
+    try { target.Position = Vector3.new(0, 99, 0); } catch (_) { refused = true; }
+    if (!refused) throw new Error('direct client write escaped');
+}
+const owned = Instance.new('Part', workspace);
+owned.Name = prefix + 'Owned';
+const info = TweenInfo.new(0.1, Enum.EasingStyle.Linear, Enum.EasingDirection.In);
+const tween = TweenService.Create(target, info, {Position: Vector3.new(0, 10, 0)});
+tween.Play();
+const localTween = TweenService.Create(owned, info, {Position: Vector3.new(0, 20, 0)});
+localTween.Play();
+if (!convenience.TweenPosition(Vector3.new(0, 30, 0), Enum.EasingDirection.In,
+    Enum.EasingStyle.Linear, 0.1, true)) throw new Error('convenience tween refused');
+if (!server && !workspace.FindFirstChild('ServerTarget').TweenPosition(Vector3.new(0, 99, 0), Enum.EasingDirection.In,
+    Enum.EasingStyle.Linear, 0.1, true)) throw new Error('client override refused');
+)";
+		const auto path = language == Language::Luau ? "tween-side.luau" : "tween-side.js";
+		const auto client = script::MakeScript(store, path, "Client", true);
+		const auto server = script::MakeScript(store, path, "Server", false);
+		for (const auto instance : {client, server}) {
+			REQUIRE(store.SetParent(instance, workspace));
+			store.Set(instance, script::Program{core::Name(path), source});
+		}
+		const auto runtime = MakeRuntime(store, language, {.Role = script::HostRole::OfBoth()});
+		REQUIRE(runtime != nullptr);
+		const bool serverRan = runtime->RunInstance(server);
+		INFO(runtime->LastError());
+		REQUIRE(serverRan);
+		const bool clientRan = runtime->RunInstance(client);
+		INFO(runtime->LastError());
+		REQUIRE(clientRan);
+		for (int beat = 0; beat < 8; beat++)
+			REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+		const auto height = [&](const char *name) {
+			const auto part = store.FindFirstChild(workspace, name);
+			REQUIRE(part != NULL_ENTITY);
+			return store.Get<scene::Transform>(part)->Frame.Position.Y;
+		};
+		CHECK(height("ClientTarget") == 0.0f);
+		CHECK(height("ClientConvenience") == 0.0f);
+		CHECK(height("ServerTarget") == 10.0f);
+		CHECK(height("ServerConvenience") == 30.0f);
+		CHECK(height("ClientOwned") == 20.0f);
+		CHECK(height("ServerOwned") == 20.0f);
 	}
 }
 

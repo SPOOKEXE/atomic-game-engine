@@ -1,10 +1,10 @@
 #pragma once
 
-// Sparse adaptive storage for normalized storm-cloud density.
+// Sparse adaptive storage for normalized volume density.
 //
-// The tree is in tornado-local coordinates and only retains occupied paths.
-// Its compact packed form is renderer-ready data, while gameplay reads remain
-// deterministic through `WindLineCloudDensity` in CloudDensity.hpp.
+// The tree uses authored local coordinates and only retains occupied paths.
+// Callers supply density values through SetDensity and consume either point
+// samples or an owned packed snapshot.
 //
 // @tier L7 · shared
 
@@ -20,7 +20,7 @@ namespace engine::scene {
 
 	// Bounds and precision limits for a normalized cloud-density octree.
 	struct CloudDensityOctreeConfig {
-		// Minimum corner of the root bounds in tornado-local coordinates.
+		// Minimum corner of the root bounds in authored local coordinates.
 		core::Vector3 RootMinimum{-512.0f, 0.0f, -512.0f};
 		// Positive width, height, and depth of the root bounds.
 		core::Vector3 RootSize{1024.0f, 512.0f, 1024.0f};

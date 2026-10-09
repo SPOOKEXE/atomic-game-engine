@@ -54,6 +54,24 @@ file(GLOB example_scenes CONFIGURE_DEPENDS
 	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*.js"
 	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*.ts")
 
+# Client camera programs retain their template path alongside each builder.
+file(GLOB_RECURSE demo_camera_scripts CONFIGURE_DEPENDS
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/client/DemoCameras/*.luau"
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/client/DemoCameras/*.js")
+foreach(companion IN LISTS demo_camera_scripts)
+	file(RELATIVE_PATH companion_relative "${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts" "${companion}")
+	set(companion_staged "${MONO_STAGE_ROOT}/assets/examples/scripts/${companion_relative}")
+	get_filename_component(companion_directory "${companion_staged}" DIRECTORY)
+	add_custom_command(
+		OUTPUT "${companion_staged}"
+		COMMAND ${CMAKE_COMMAND} -E make_directory "${companion_directory}"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different "${companion}" "${companion_staged}"
+		DEPENDS "${companion}"
+		COMMENT "Staging demo camera ${companion_relative}"
+		VERBATIM)
+	list(APPEND staged_scenes "${companion_staged}")
+endforeach()
+
 # **A `.ts` file is staged as stripped JavaScript, not copied.**
 #
 # `script/Runtime.hpp` has always said a `.ts` file "is expected to have been

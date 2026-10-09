@@ -1,5 +1,6 @@
 #include "Instances.hpp"
 
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -357,6 +358,26 @@ namespace engine::ecs {
 				}
 			}
 		);
+		Components::Register<ClientLocal>("ecs.ClientLocal");
+		Components::Register<InstanceProjection>(
+			"ecs.InstanceProjection",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *values = static_cast<InstanceProjection *>(destination);
+				for (size_t index = 0; index < count; ++index)
+					values[index] = {};
+			}
+		);
+	}
+
+	bool IsClientLocalInstance(const Store &store, Entity instance) {
+		for (size_t depth = 0; instance != NULL_ENTITY && depth < MAXIMUM_DEPTH; ++depth) {
+			if (store.Has<ClientLocal>(instance) || Classes::Describe(store.ClassOf(instance)).RuntimeLocal) {
+				return true;
+			}
+			instance = store.ParentOf(instance);
+		}
+		return false;
 	}
 
 	ClassId Classes::RegisterInstanceRoot() {

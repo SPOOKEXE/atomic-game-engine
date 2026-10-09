@@ -13,6 +13,7 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Integrate.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
@@ -96,6 +97,7 @@ namespace engine::physics {
 			}
 
 			const ecs::Entity owner = records[at].Owner;
+			if (!store.AdoptOnly() && ecs::IsClientLocalInstance(store, owner)) return QueryCandidate{};
 			const scene::Transform *transform = store.Get<scene::Transform>(owner);
 			const scene::Collider *collider = store.Get<scene::Collider>(owner);
 			if (transform == nullptr || collider == nullptr) {

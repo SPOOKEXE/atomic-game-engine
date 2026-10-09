@@ -8,6 +8,8 @@
 // replace it outright, which is the whole difference between "painting" and
 // "stamping."
 
+#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/Registration.hpp>
@@ -383,4 +385,29 @@ TEST_CASE("editable image packing authoring validates attributes and revisions",
 	CHECK(changed->Packing.Revision == 1);
 	policy.Attributes = static_cast<uint8_t>(engine::scene::EditablePackingAttribute::Position);
 	CHECK_FALSE(engine::scene::SetEditableImagePacking(store, image, policy));
+}
+
+TEST_CASE("replica image edits require predicted local ownership", "[scene][editableimage]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	ecs::Store store("local-images");
+	const auto authority = store.CreateInstance(scene::EditableImageClass(), "Authority");
+	const auto local = store.CreatePredictedInstance(scene::EditableImageClass(), "Local");
+	const auto camera = store.CreatePredictedInstance(ecs::Classes::Find(core::Name("Camera")), "Camera");
+	const auto child = store.CreatePredictedInstance(scene::EditableImageClass(), "CameraImage");
+	REQUIRE(store.SetParent(child, camera));
+	store.Set(authority, ecs::ClientLocal{});
+	store.SetAdoptOnly(true);
+	const std::array pixels{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{255}};
+	CHECK_FALSE(scene::SetEditableImagePixels(store, authority, 1, 1, pixels));
+	CHECK_FALSE(scene::SetEditableImagePixels(store, local, 1, 1, pixels));
+	CHECK_FALSE(scene::ResizeEditableImage(store, authority, 1, 1));
+	CHECK_FALSE(scene::DrawRectangle(store, authority, {}, {1, 1}, {1, 0, 0}));
+	store.Set(local, ecs::ClientLocal{});
+	REQUIRE(scene::SetEditableImagePixels(store, local, 1, 1, pixels));
+	REQUIRE(scene::SetEditableImageSpace(store, local, scene::EditableImageSpace::SRGB));
+	REQUIRE(scene::EditableImageFromBuffer(store, local, pixels));
+	CHECK(scene::EditableImageToBuffer(store, local) == std::vector<std::byte>(pixels.begin(), pixels.end()));
+	REQUIRE(scene::SetEditableImagePixels(store, child, 1, 1, pixels));
+	CHECK(store.Get<scene::EditableImage>(authority)->Revision == 0);
 }

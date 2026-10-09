@@ -1,9 +1,13 @@
+#include "EffectsPresentation.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Broadphase.hpp>
@@ -56,6 +60,18 @@ namespace client {
 	using engine::scene::Visual;
 
 	namespace {
+		void ParentReplicaCamera(Store &store) {
+			const auto *active = store.Resource<engine::scene::ActiveCamera>();
+			if (active == nullptr || !store.Alive(active->Entity) || !Store::IsPredicted(active->Entity) ||
+				!store.Has<engine::ecs::ClientLocal>(active->Entity) ||
+				!store.Has<engine::scene::TransientComponent>(active->Entity) ||
+				store.ClassOf(active->Entity) != engine::scene::CameraClass())
+				return;
+			const Entity workspace = engine::scene::WorkspaceOf(store);
+			if (workspace != engine::ecs::NULL_ENTITY && store.ParentOf(active->Entity) != workspace)
+				store.SetParent(active->Entity, workspace);
+		}
+
 		// Local prediction is transient client state. A saved replica must
 		// restart from an authority tick instead of resuming a stale input run.
 		void WriteLocalPlayerPredictions(engine::core::ByteWriter &, const void *, size_t) {}
@@ -563,25 +579,9 @@ namespace client {
 		store.SetResource(engine::scene::ControllerState{});
 		store.SetResource(engine::scene::CameraController{});
 
-		// **First in the phase, because everything below is derived from it.**
-		// A replica never ticks a simulation, so the `PreSimulation` copy every
-		// other host installs has nothing to hang off - this is the replica's
-		// only resolve, and without it `Attachment::WorldFrame` stayed at the
-		// identity for the whole session. What that looked like was a
-		// `PointLight` parented to an attachment lighting the world origin
-		// rather than the lamp it hangs from: `engine::render::CollectLights` reads the
-		// cache and there was nobody to fill it. The script surface was never
-		// affected - `Attachment.WorldCFrame` is a computed property that
-		// resolves on the spot - but its *change signal* was, for the reason
-		// `server::PrepareSimulation` gives.
-		//
-		// **Resolved again here rather than trusted from the wire.** The
-		// authority's answer arrives a tick old and against uninterpolated
-		// transforms; this world draws from interpolated ones, so a lamp placed
-		// from the wire would sit where its part was at the last snapshot.
-		scheduler.Add("resolve-attachments", Phase::PreRender, [](Store &store) {
-			(void)engine::scene::ResolveAttachments(store);
-		});
+		// Scripts create local emitters and trails here. Use the same device
+		// requests and attachment/ribbon passes as other displayed worlds.
+		InstallEffectsPresentation(store, scheduler);
 
 		// PreRender derives draw data and mirror aim; the replica does not simulate.
 		//
@@ -591,6 +591,7 @@ namespace client {
 		// the body that arrived over the wire - a client never calls
 		// `LoadCharacter`, so there is no spawn moment for it to hook.
 		scheduler.Add("replica-camera", Phase::PreRender, [](Store &store) {
+			ParentReplicaCamera(store);
 			AdvancePositionCorrection(store);
 			(void)engine::scene::UpdateCameraControl(store);
 			(void)engine::scene::FollowOwnCharacter(store);
@@ -639,6 +640,11 @@ namespace client {
 		// before the join.
 		scheduler.Add("replica-gui-services", Phase::PreSimulation, [](Store &world) {
 			(void)engine::gui::InstallGuiServices(world);
+			const auto *local = world.Resource<engine::scene::LocalPlayer>();
+			if (local != nullptr)
+				(void)engine::gui::RefreshPlayerGuiProjection(
+					world, local->Instance, engine::scene::CharacterOf(world, local->Instance)
+				);
 		});
 
 		// **A client's VM, over a world it does not own.** The role is what
@@ -670,6 +676,7 @@ namespace client {
 		// `RunService.Heartbeat` in time to be beaten on the same tick, which is
 		// the ordering every other loader already gives.
 		scheduler.Add("replica-scripts", Phase::PreSimulation, [runtime](Store &world) {
+			ParentReplicaCamera(world);
 			(void)runtime->RunNewScripts(engine::script::ClientScriptsIn(world));
 		});
 
@@ -681,22 +688,24 @@ namespace client {
 		Entity camera = active != nullptr ? active->Entity : engine::ecs::NULL_ENTITY;
 
 		if (camera == engine::ecs::NULL_ENTITY || !store.Alive(camera)) {
-			// **Predicted, not authoritative.** The high range is the client's
-			// own and the authority never allocates from it, so this camera
-			// cannot become the same entity as something the server made.
-			camera = store.CreatePredictedInstance(engine::scene::CameraClass(), "ReplicaViewer");
+			// The reserved local range cannot collide with received authored rows.
+			camera = store.CreatePredictedInstance(engine::scene::CameraClass(), "Camera");
 			if (camera == engine::ecs::NULL_ENTITY) {
 				return camera;
 			}
 
+			store.Set(camera, engine::ecs::ClientLocal{});
+			store.Set(camera, engine::scene::TransientComponent{});
 			store.Set(camera, engine::scene::Transform{frame});
 			store.Set(camera, lens);
 
 			engine::scene::ActiveCamera live;
 			live.Entity = camera;
 			store.SetResource(live);
+			ParentReplicaCamera(store);
 			return camera;
 		}
+		ParentReplicaCamera(store);
 
 		// The local world's pose is only a fallback while automatic follow waits
 		// for a subject. Explicit selections and scripted cameras own their pose.

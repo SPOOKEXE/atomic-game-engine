@@ -9,6 +9,9 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/PlayerGui.hpp>
+#include <engine/script/RemoteEvent.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -61,6 +64,7 @@ namespace studio {
 			error = "this link is already running";
 			return false;
 		}
+		ReplicaRuntime_.reset();
 
 		if (!authority.IsValid() || universe.IsRemote(authority)) {
 			error = "there is no local world to be the authority";
@@ -105,9 +109,27 @@ namespace studio {
 
 		engine::replication::InterpolationSettings interpolation;
 		interpolation.TickRate = tickRate;
+		RemoteEvents_.clear();
+		RemoteEventBytes_ = 0;
+		engine::script::RuntimeLimits limits;
+		limits.RemoteEventSender = [this](std::span<const std::byte> message) {
+			constexpr size_t maximumMessages = 64;
+			constexpr size_t maximumBytes =
+				maximumMessages * engine::script::REMOTE_EVENT_MAXIMUM_MESSAGE_BYTES;
+			if (!IsRunning() || Player_ == engine::ecs::NULL_ENTITY || message.empty() ||
+				message.size() > engine::script::REMOTE_EVENT_MAXIMUM_MESSAGE_BYTES ||
+				RemoteEvents_.size() >= maximumMessages || message.size() > maximumBytes - RemoteEventBytes_)
+				return false;
+			RemoteEvents_.push_back({Handle, std::vector<std::byte>(message.begin(), message.end())});
+			RemoteEventBytes_ += message.size();
+			return true;
+		};
 
 		universe.Enter(
-			replica, [&interpolation, authorityName, label](Store &store, engine::ecs::Scheduler &systems) {
+			replica,
+			[this, &interpolation, &limits, authorityName, label](
+				Store &store, engine::ecs::Scheduler &systems
+			) {
 				// **Both refusals first, because the build now asks about them.**
 				// Replicas cannot publish bus writes or mint authoritative entities,
 				// and `BuildReplicatedWorld` opens a VM and installs `GuiService` -
@@ -128,7 +150,7 @@ namespace studio {
 				// Replicas present received state and run the client's own scripts;
 				// they do not simulate. The runtime is held by the scheduler, which
 				// drops it with the world.
-				(void)client::BuildReplicatedWorld(store, systems, interpolation);
+				ReplicaRuntime_ = client::BuildReplicatedWorld(store, systems, interpolation, limits);
 			}
 		);
 
@@ -143,13 +165,14 @@ namespace studio {
 		});
 		if (!cameraCreated) {
 			error = "could not create the client runtime camera";
+			ReplicaRuntime_.reset();
 			(void)universe.Destroy(replica);
 			return false;
 		}
 
 		for (const engine::replication::ReplicatedComponent &component :
 			 engine::replication::DefaultReplicatedComponents()) {
-			Server.Replicate(Name(component.Name), component.Detection);
+			Server.Replicate(Name(component.Name), component.Detection, component.Resource);
 
 			// After `Replicate`, which is what declares the slot this names. The
 			// editor applies the same filter as a real server, or playing in the
@@ -164,9 +187,18 @@ namespace studio {
 		// that alone would still admit the camera's instance, transform and lens
 		// into a joining client's snapshot. Filter the entity before structure and
 		// component replication so each replica keeps only its predicted viewer.
-		Server.SetInterest([](engine::replication::ClientId, engine::ecs::Entity entity, const Store &store) {
-			return !store.Has<engine::scene::TransientComponent>(entity);
-		});
+		Server.SetInterest(
+			[this](engine::replication::ClientId, engine::ecs::Entity entity, const Store &store) {
+				if (store.Has<engine::scene::TransientComponent>(entity) ||
+					engine::ecs::IsClientLocalInstance(store, entity))
+					return false;
+				// Bare stores are useful link fixtures; service worlds use real server visibility.
+				if (engine::scene::PlayersOf(store) == engine::ecs::NULL_ENTITY) return true;
+				if (!engine::scene::VisibleToClients(store, entity)) return false;
+				const auto owner = engine::scene::PrivatePlayerOwning(store, entity);
+				return owner == engine::ecs::NULL_ENTITY || owner == Player_;
+			}
+		);
 
 		Handle = Server.Admit();
 
@@ -208,8 +240,8 @@ namespace studio {
 				// order and for its reason**: a `ScreenGui` a script reaches
 				// for from a spawn handler has to exist by the time the handler
 				// runs. `StarterGui` is a template and what a player sees is
-				// their own copy - see `gui::ResetPlayerGui`.
-				(void)engine::gui::ResetPlayerGui(store, Player_);
+				// their own copy - see `script::ResetPlayerGui`.
+				(void)engine::script::ResetPlayerGui(store, Player_);
 				(void)engine::scene::LoadCharacter(store, Player_);
 			}
 		});
@@ -341,12 +373,14 @@ namespace studio {
 		return std::move(PortalSuccessor_);
 	}
 
-	void PlayLink::Step(engine::world::Universe &universe) {
+	void PlayLink::Step(engine::world::Universe &universe, const RuntimeLookup &runtimeOf) {
 		PlayLink *link = this;
-		StepMany(universe, std::span<PlayLink *const>(&link, 1));
+		StepMany(universe, std::span<PlayLink *const>(&link, 1), runtimeOf);
 	}
 
-	void PlayLink::StepMany(engine::world::Universe &universe, std::span<PlayLink *const> links) {
+	void PlayLink::StepMany(
+		engine::world::Universe &universe, std::span<PlayLink *const> links, const RuntimeLookup &runtimeOf
+	) {
 		ENGINE_PROFILE("play links (batched)");
 
 		struct Pending {
@@ -397,7 +431,17 @@ namespace studio {
 					hasInput = engine::game::DecodeMoveInput(engine::game::EncodeMoveInput(wanted), arrived);
 				}
 
-				universe.Enter(link->Authority_, [link, hasInput, &arrived](Store &store) {
+				universe.Enter(link->Authority_, [link, hasInput, &arrived, &runtimeOf](Store &store) {
+					// Identity comes from this admitted link, never replica state or event payload.
+					if (store.Alive(link->Player_) &&
+						store.IsA(link->Player_, engine::scene::PlayerClass()) && runtimeOf) {
+						if (auto *runtime = runtimeOf(link->Authority_); runtime != nullptr)
+							for (const auto &message : link->RemoteEvents_)
+								if (message.Sender == link->Handle)
+									(void)runtime->DeliverRemoteEvent(message.Bytes, link->Player_);
+					}
+					link->RemoteEvents_.clear();
+					link->RemoteEventBytes_ = 0;
 					if (hasInput) {
 						(void)engine::game::ApplyMoveInput(store, link->Player_, arrived);
 					}
@@ -407,7 +451,7 @@ namespace studio {
 						return;
 					}
 					for (const engine::ecs::Entity player : spawned) {
-						(void)engine::gui::ResetPlayerGui(store, player);
+						(void)engine::script::ResetPlayerGui(store, player);
 					}
 				});
 			}
@@ -477,7 +521,16 @@ namespace studio {
 		}
 	}
 
+	bool PlayLink::DeliverGuiEvents(std::span<const engine::gui::GuiEvent> events) {
+		if (!IsRunning()) return false;
+		const auto runtime = ReplicaRuntime_.lock();
+		if (runtime == nullptr) return false;
+		runtime->DeliverGuiEvents(events);
+		return true;
+	}
+
 	void PlayLink::Stop(engine::world::Universe &universe) {
+		ReplicaRuntime_.reset();
 		if (!IsRunning()) {
 			return;
 		}
@@ -515,5 +568,7 @@ namespace studio {
 		Server = engine::replication::Authority{};
 		Client = engine::replication::Replica{};
 		Handle = engine::replication::ClientId{};
+		RemoteEvents_.clear();
+		RemoteEventBytes_ = 0;
 	}
 }

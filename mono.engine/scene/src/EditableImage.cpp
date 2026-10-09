@@ -3,6 +3,7 @@
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/EditableImage.hpp>
@@ -18,6 +19,10 @@
 namespace engine::scene {
 
 	namespace {
+		bool EditableImageMutationAllowed(const ecs::Store &store, ecs::Entity instance) {
+			return !store.AdoptOnly() ||
+				   (ecs::Store::IsPredicted(instance) && ecs::IsClientLocalInstance(store, instance));
+		}
 		bool PixelByteCount(const EditableImage &image, size_t &bytes) {
 			if (image.Width == 0 || image.Height == 0) {
 				return false;
@@ -177,6 +182,7 @@ namespace engine::scene {
 	}
 
 	bool ResizeEditableImage(ecs::Store &store, ecs::Entity instance, uint32_t width, uint32_t height) {
+		if (!EditableImageMutationAllowed(store, instance)) return false;
 		EditableImage *image = store.GetMutable<EditableImage>(instance);
 		if (image == nullptr) {
 			return false;
@@ -211,6 +217,7 @@ namespace engine::scene {
 	}
 
 	bool EditableImageFromBuffer(ecs::Store &store, ecs::Entity instance, std::span<const std::byte> pixels) {
+		if (!EditableImageMutationAllowed(store, instance)) return false;
 		EditableImage *image = store.GetMutable<EditableImage>(instance);
 		size_t expected = 0;
 		if (image == nullptr || !PixelByteCount(*image, expected) || pixels.size() != expected) {
@@ -241,8 +248,8 @@ namespace engine::scene {
 		std::span<const std::byte> pixels,
 		EditableImageSpace space
 	) {
-		if (store.AdoptOnly() || width == 0 || height == 0 || width > MAXIMUM_EDITABLE_IMAGE_IMPORT_WIDTH ||
-			height > MAXIMUM_EDITABLE_IMAGE_IMPORT_HEIGHT ||
+		if (!EditableImageMutationAllowed(store, instance) || width == 0 || height == 0 ||
+			width > MAXIMUM_EDITABLE_IMAGE_IMPORT_WIDTH || height > MAXIMUM_EDITABLE_IMAGE_IMPORT_HEIGHT ||
 			(space != EditableImageSpace::Linear && space != EditableImageSpace::SRGB) ||
 			pixels.size() != static_cast<size_t>(width) * height * 4 ||
 			pixels.size() > MAXIMUM_EDITABLE_IMAGE_IMPORT_BYTES)
@@ -272,7 +279,8 @@ namespace engine::scene {
 	}
 
 	bool SetEditableImageSpace(ecs::Store &store, ecs::Entity instance, EditableImageSpace space) {
-		if (store.AdoptOnly() || (space != EditableImageSpace::Linear && space != EditableImageSpace::SRGB))
+		if (!EditableImageMutationAllowed(store, instance) ||
+			(space != EditableImageSpace::Linear && space != EditableImageSpace::SRGB))
 			return false;
 		const auto *held = store.Get<EditableImage>(instance);
 		if (held == nullptr) return false;
@@ -284,6 +292,7 @@ namespace engine::scene {
 	}
 
 	bool SetEditableImagePacking(ecs::Store &store, ecs::Entity instance, const EditablePacking &packing) {
+		if (!EditableImageMutationAllowed(store, instance)) return false;
 		EditableImage *image = store.GetMutable<EditableImage>(instance);
 		constexpr uint8_t attributes = static_cast<uint8_t>(EditablePackingAttribute::Colour) |
 									   static_cast<uint8_t>(EditablePackingAttribute::Alpha);
@@ -312,6 +321,7 @@ namespace engine::scene {
 		const core::Color3 &colour,
 		float transparency
 	) {
+		if (!EditableImageMutationAllowed(store, instance)) return false;
 		EditableImage *image = store.GetMutable<EditableImage>(instance);
 		if (image == nullptr) {
 			return false;
@@ -342,6 +352,7 @@ namespace engine::scene {
 		const core::Color3 &colour,
 		float transparency
 	) {
+		if (!EditableImageMutationAllowed(store, instance)) return false;
 		EditableImage *image = store.GetMutable<EditableImage>(instance);
 		if (image == nullptr) {
 			return false;
@@ -391,6 +402,7 @@ namespace engine::scene {
 		const core::Color3 &colour,
 		float transparency
 	) {
+		if (!EditableImageMutationAllowed(store, instance)) return false;
 		EditableImage *image = store.GetMutable<EditableImage>(instance);
 		if (image == nullptr) {
 			return false;

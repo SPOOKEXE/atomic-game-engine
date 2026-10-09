@@ -599,6 +599,9 @@ namespace engine::render {
 						// **`panesFollow` is false here**, because this level's panes
 						// were drawn with the opaque head above - nothing follows that
 						// needs the transparent pipeline bound for it.
+						recording.DrawGroundGrid(
+							pass, sub.Matrices.ViewProjection, sub.Frame, WorldColourTarget::Hdr
+						);
 						if (drawInterface) {
 							result.DrawCalls += gameInterfaceHook->RecordWorld(
 								command,

@@ -6,7 +6,7 @@
 return require(script.StormControls)
 ]]></Source>
 		<Source path="scripts/shared/TornadoSim/StormControls.luau"><![CDATA[--!strict
--- One controls vocabulary for the server's storm resource and the local panel.
+-- Shared parameter and button definitions for the authoritative field and local panel.
 local Controls = {}
 
 Controls.presets = {
@@ -67,18 +67,164 @@ local Debris = game:GetService("Debris")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
+local Field = require(ReplicatedStorage.TornadoSim.StormField)
 local controlEvent = ReplicatedStorage.TornadoControl
+local Lighting = game:GetService("Lighting")
 
--- The fixed-step physics resource owns lifecycle and force application.
-Storm.Configure(Controls.default)
-Storm.Preset("EF3")
-Storm.Configure(Controls.default)
+local stormAnchor = workspace:FindFirstChild("StormAnchor", true)
+assert(stormAnchor ~= nil and stormAnchor:IsA("Part"), "TornadoSim needs its authored StormAnchor")
+local state = Field.new(Controls.default, Controls.default.Position)
+local particleField = workspace:FindFirstChild("TornadoParticles", true)
+assert(particleField ~= nil, "TornadoSim needs its authored TornadoParticles field")
+local visualField = particleField :: any
+
+-- The original sparse world rows remain for simulation compatibility. Hide
+-- their placeholder surfaces before constructing the visible scene, otherwise
+-- the coplanar white terrain intermittently wins the depth test.
+local authoredWorld = workspace:FindFirstChild("TornadoSimWorld")
+if authoredWorld then
+	local placeholderTerrain = authoredWorld:FindFirstChild("Terrain")
+	if placeholderTerrain then placeholderTerrain.Visible = false end
+	local placeholderTrees = authoredWorld:FindFirstChild("TreeLine")
+	if placeholderTrees then placeholderTrees.Visible = false end
+	local placeholderSign = authoredWorld:FindFirstChild("RoadSign")
+	if placeholderSign then placeholderSign.Visible = false end
+	local placeholderVehicle = authoredWorld:FindFirstChild("ChaseVehicle")
+	if placeholderVehicle then placeholderVehicle.Visible = false end
+	for _, name in ipairs({"Farmhouse", "Barn", "Workshop"}) do
+		local structure = authoredWorld:FindFirstChild(name)
+		local roof = if structure then structure:FindFirstChild("RoofPanel") else nil
+		if roof then roof.Visible = false end
+	end
+end
+
+
+local vectorField = Instance.new("VectorField3D")
+vectorField.Name = "Tornado Vector Field"
+vectorField.Position = state.Position
+vectorField.Bounds = Vector3.new(state.Parameters.InfluenceRadius, state.Parameters.TopHeight, state.Parameters.InfluenceRadius)
+vectorField.Axis = Vector3.yAxis
+vectorField.LocalSpace = false
+vectorField.Parent = workspace
+visualField.Position = state.Position
+visualField.Bounds = vectorField.Bounds
+visualField.VelocityResponse = 1
+visualField.Parent = vectorField
+
+local function setVisualLayer(index: number, colour: Color3, alpha: number, size: number, acceleration: Vector3)
+	assert(visualField:SetLayer(index, colour, alpha, size, acceleration), "TornadoSim particle layer was refused")
+end
+
+setVisualLayer(0, Color3.fromRGB(132, 135, 132), 0.12, 11.5, Vector3.zero)
+setVisualLayer(1, Color3.fromRGB(41, 51, 56), 0.10, 0.30, Vector3.new(8, -49, 3))
+setVisualLayer(2, Color3.fromRGB(56, 38, 23), 0.16, 0.8, Vector3.new(0, -4, 0))
+
+local function particleSamples(): buffer
+	local sampleCount = 8192
+	local result = buffer.create(sampleCount * 32)
+	local seed = math.max(math.floor(visualField.Seed), 1) % 2147483647
+	local function random(): number
+		seed = (seed * 16807) % 2147483647
+		return (seed - 1) / 2147483646
+	end
+	for index = 0, sampleCount - 1 do
+		local layer = if index % 8 < 5 then 0 elseif index % 8 < 7 then 1 else 2
+		local angle = random() * math.pi * 2
+		local radiusScale = if layer == 1 then 2.8 + random() * 2.0 else random() * 2.4
+		local radius = radiusScale * state.Parameters.CoreRadius
+		local height = if layer == 2 then random() * 24 else random() * state.Parameters.TopHeight
+		local localPosition = Vector3.new(math.cos(angle) * radius, height, math.sin(angle) * radius)
+		local worldPosition = state.Position + localPosition
+		local velocity = Field.sample(state.Parameters, state.Position, worldPosition, state.ElapsedSeconds).Velocity
+		local lifetime = if layer == 0 then 24 + random() * 18 elseif layer == 1 then 2 + random() * 4 else 1.8 + random() * 2.2
+		local offset = index * 32
+		buffer.writef32(result, offset, localPosition.X)
+		buffer.writef32(result, offset + 4, localPosition.Y)
+		buffer.writef32(result, offset + 8, localPosition.Z)
+		buffer.writef32(result, offset + 12, lifetime)
+		buffer.writef32(result, offset + 16, velocity.X)
+		buffer.writef32(result, offset + 20, velocity.Y)
+		buffer.writef32(result, offset + 24, velocity.Z)
+		buffer.writeu32(result, offset + 28, layer)
+	end
+	return result
+end
+
+assert(visualField:SetSpawnSamples(particleSamples()), "TornadoSim spawn samples were refused")
+
+local function updateVisualField()
+	local p = state.Parameters
+	local bounds = Vector3.new(p.InfluenceRadius, p.TopHeight, p.InfluenceRadius)
+	stormAnchor.Position = state.Position
+	vectorField.Position = state.Position
+	if vectorField.Bounds ~= bounds then vectorField.Bounds = bounds end
+	vectorField.Vector = p.TranslationVelocity + p.UpperWind
+	vectorField.Radial = -p.PeakInflowSpeed
+	vectorField.Tangential = (if p.CounterClockwise then 1 else -1) * p.PeakTangentialSpeed
+	vectorField.Falloff = 0.18
+	visualField.Position = state.Position
+	if visualField.Bounds ~= bounds then visualField.Bounds = bounds end
+end
+
+local function installStormLighting()
+	Lighting.ClockTime = 17.2
+	Lighting.GeographicLatitude = 35
+	Lighting.Brightness = 0.06
+	Lighting.Ambient = Color3.fromRGB(10, 13, 15)
+	Lighting.OutdoorAmbient = Color3.fromRGB(13, 15, 16)
+	Lighting.BloomThreshold = 1.1
+	Lighting.BloomIntensity = 0.45
+	Lighting.BloomRadius = 6
+	Lighting.GodRayIntensity = 0.16
+	Lighting.GodRayThreshold = 1.1
+	Lighting.GodRayRadius = 46
+	local sky = Instance.new("SkyboxCompute")
+	sky.Name = "Tornado Storm Sky"
+	sky.Shader = Enum.SkyboxComputeShader.Night
+	sky.SunSize = 0.01
+	sky.Seed = 401
+	sky.Parent = Lighting
+	local atmosphere = Instance.new("AtmosphereProcedural")
+	atmosphere.Name = "Tornado Storm Atmosphere"
+	atmosphere.Shader = Enum.AtmosphereProceduralShader.Earth
+	atmosphere.Color = Color3.fromRGB(27, 33, 38)
+	atmosphere.Decay = Color3.fromRGB(7, 10, 12)
+	atmosphere.Density = 0.12
+	atmosphere.Haze = 1.1
+	atmosphere.Glare = 0.04
+	atmosphere.Samples = 16
+	atmosphere.Parent = Lighting
+	local clouds = Instance.new("CloudCompute")
+	clouds.Name = "Tornado Anvil Cloud Deck"
+	clouds.Shader = Enum.CloudComputeShader.Storm
+	clouds.Color = Color3.fromRGB(27, 29, 28)
+	clouds.Cover = 0.98
+	clouds.Density = 0.98
+	clouds.WindSpeed = 19
+	clouds.WindDirection = Vector2.new(0.85, 0.34)
+	clouds.CellSize = 0.19
+	clouds.Detail = 0.9
+	clouds.Height = 0.54
+	clouds.Thickness = 0.58
+	clouds.Steps = 32
+	clouds.Seed = 957
+	clouds.Parent = Lighting
+end
+
+installStormLighting()
+
+local function publishState()
+	stormAnchor:SetComponent("Tornado.State", Field.toComponent(state))
+end
+
+publishState()
 
 local validPreset = {}
 for _, preset in ipairs(Controls.presets) do validPreset[preset] = true end
 local validParticleCount = {
 	[262144] = true,
 	[524288] = true,
+	[1000000] = true,
 	[1048576] = true,
 	[2000000] = true,
 	[5000000] = true,
@@ -102,22 +248,44 @@ controlEvent.OnServerEvent:Connect(function(payload: string)
 	if not decoded then return end
 	if type(request) ~= "table" then return end
 	if request.kind == "preset" and type(request.name) == "string" and validPreset[request.name] then
-		Storm.Preset(request.name)
+		Field.preset(state, request.name)
 	elseif request.kind == "custom" and type(request.energy) == "number" and type(request.radius) == "number"
 		and request.energy >= 0 and request.energy <= 1 and request.radius >= 1 and request.radius <= 300 then
-		Storm.Configure({ Energy = request.energy, CoreRadius = request.radius })
+		Field.configure(state, { Energy = request.energy, CoreRadius = request.radius })
 	elseif request.kind == "particles" and particleField ~= nil and type(request.count) == "number"
 		and validParticleCount[request.count] then
 		particleField.RequestedCount = request.count
 	elseif request.kind == "layers" and particleField ~= nil and type(request.mask) == "number"
 		and request.mask >= 0 and request.mask <= 7 and request.mask % 1 == 0 then
-		particleField.Layers = request.mask
+		visualField.Layers = request.mask
+		local cloudDeck = Lighting:FindFirstChild("Tornado Anvil Cloud Deck")
+		if cloudDeck then
+			cloudDeck.Cover = if request.mask == 1 then 0 else 0.98
+			cloudDeck.Density = if request.mask == 1 then 0 else 0.98
+		end
+		local rainOpacity = if type(request.rainOpacity) == "number" then math.clamp(request.rainOpacity, 0, 1) else 1
+		local rainDensity = if type(request.rainDensity) == "number" then math.clamp(request.rainDensity, 0, 1) else 1
+		setVisualLayer(1, Color3.fromRGB(41, 51, 56), 0.10 * rainOpacity * rainDensity, 0.30, Vector3.new(8, -49, 3))
+	elseif request.kind == "environment" and type(request.value) == "boolean" then
+		for _, object in ipairs(workspace:GetDescendants()) do
+			if not object:IsA("Part") and not object:IsA("Volume") then continue end
+			local name = object.Name
+			local environmentObject = string.find(name, "Storm Prairie") or string.find(name, "Storm Chase Road")
+				or string.find(name, "Road Mark") or string.find(name, "Prairie Grid") or string.find(name, "Farmhouse")
+				or string.find(name, "Barn") or string.find(name, "Workshop") or string.find(name, "Hay Bale")
+				or string.find(name, "Tree ") or string.find(name, "Fence ") or string.find(name, "Storm Cell")
+				or string.find(name, "Cell ") or string.find(name, "Tornado Chase") or string.find(name, "StormInteraction")
+				or string.find(name, "WoodenSign") or string.find(name, "SteelPanel") or string.find(name, "WindBentTree")
+			if environmentObject then
+				if object:IsA("Part") then object.Visible = request.value else (object :: Volume).Enabled = request.value end
+			end
+		end
 	elseif request.kind == "motion" and type(request.x) == "number" and type(request.y) == "number"
 		and type(request.z) == "number" and math.abs(request.x) <= 60 and math.abs(request.y) <= 60
 		and math.abs(request.z) <= 60 then
-		Storm.Configure({ TranslationVelocity = Vector3.new(request.x, request.y, request.z) })
+		Field.configure(state, { TranslationVelocity = Vector3.new(request.x, request.y, request.z) })
 	elseif request.kind == "rotation" and type(request.counterClockwise) == "boolean" then
-		Storm.Configure({ CounterClockwise = request.counterClockwise })
+		Field.configure(state, { CounterClockwise = request.counterClockwise })
 	elseif request.kind == "parameters" and type(request.values) == "table" then
 		local configuration: { [string]: number } = {}
 		for name, value in pairs(request.values) do
@@ -126,20 +294,21 @@ controlEvent.OnServerEvent:Connect(function(payload: string)
 				configuration[name] = value
 			end
 		end
-		if next(configuration) ~= nil then Storm.Configure(configuration) end
+		if next(configuration) ~= nil then Field.configure(state, configuration) end
 	elseif request.kind == "enabled" and type(request.value) == "boolean" then
-		Storm.Configure({ Enabled = request.value })
+		Field.configure(state, { Enabled = request.value })
 	elseif request.kind == "reset" then
-		Storm.Configure({ ElapsedSeconds = 0 })
-		Storm.Configure(Controls.default)
+		Field.configure(state, { ElapsedSeconds = 0 })
+		Field.configure(state, Controls.default)
 		environmentResetRequested = true
 	elseif request.kind == "observer" and type(request.x) == "number" and type(request.z) == "number"
 		and math.abs(request.x) <= 4096 and math.abs(request.z) <= 4096 then
 		environmentObserverPosition = Vector3.new(request.x, 0, request.z)
 		environmentRefreshRequested = true
 	elseif request.kind == "lifecycle" and type(request.value) == "boolean" then
-		Storm.Configure({ LifecycleEnabled = request.value })
+		Field.configure(state, { LifecycleEnabled = request.value })
 	end
+	publishState()
 end)
 
 local interactionConnections: { RBXScriptConnection } = {}
@@ -155,6 +324,37 @@ local function interactionPart(name: string, position: Vector3, size: Vector3, c
 	return part
 end
 
+local function response(part: Part, area: number, drag: number, forceScale: number, enabled: boolean?)
+	part:SetComponent("Tornado.Response", {
+		Enabled = if enabled == nil then true else enabled,
+		ExposedArea = area,
+		DragCoefficient = drag,
+		ForceScale = forceScale,
+	})
+end
+
+local function linkDamage(joint: Instance, breakForce: number, strength: number, damageRate: number)
+	joint:SetComponent("Tornado.Link", {
+		Enabled = true,
+		BreakForce = breakForce,
+		MaterialStrength = strength,
+		Integrity = 1.0,
+		DamageRate = damageRate,
+	})
+end
+
+local function vegetation(part: Part, maximumBend: number, responseRate: number, maximumWind: number)
+	part:SetComponent("Tornado.Vegetation", {
+		Enabled = true,
+		RestFrame = part.CFrame,
+		BendRadians = 0,
+		BendDirectionRadians = 0,
+		MaximumBendRadians = maximumBend,
+		ResponsePerSecond = responseRate,
+		WindSpeedForMaximumBend = maximumWind,
+	})
+end
+
 local function rebuildInteraction()
 	for _, connection in ipairs(interactionConnections) do connection:Disconnect() end
 	interactionConnections = {}
@@ -168,24 +368,16 @@ local function rebuildInteraction()
 	local steelPanel = interactionPart("SteelPanel", Vector3.new(-25.8, 3.5, -12), Vector3.new(3.2, 2.1, 0.2), Color3.fromRGB(87, 92, 94), false, interaction)
 	local tree = interactionPart("WindBentTree", Vector3.new(13.630354, 7, -15.45179), Vector3.new(1.1, 14, 1.1), Color3.fromRGB(69, 51, 31), true, interaction)
 
-	woodenSign.StormExposedArea = 12.0
-	woodenSign.StormDragCoefficient = 1.15
-	woodenSign.StormForceScale = 1.0
-	steelPanel.StormExposedArea = 7.0
-	steelPanel.StormDragCoefficient = 1.05
-	steelPanel.StormForceScale = 0.7
-	tree.StormRestFrame = tree.CFrame
-	tree.StormMaximumBendRadians = 0.52
-	tree.StormResponsePerSecond = 5.0
-	tree.StormWindSpeedForMaximumBend = 72.0
+	response(woodenSign, 12.0, 1.15, 1.0)
+	response(steelPanel, 7.0, 1.05, 0.7)
+	vegetation(tree, 0.52, 5.0, 72.0)
 
 	local function stormLink(name: string, part: Part, breakForce: number, strength: number): WeldConstraint
 		local link = Instance.new("WeldConstraint")
 		link.Name = name
 		link.Part0 = mast
 		link.Part1 = part
-		link.StormBreakForce = breakForce
-		link.StormMaterialStrength = strength
+		linkDamage(link, breakForce, strength, 1.0)
 		link.Parent = interaction
 		return link
 	end
@@ -195,7 +387,7 @@ local function rebuildInteraction()
 		table.insert(interactionConnections, RunService.Heartbeat:Connect(function()
 			if retired or link.Enabled then return end
 			retired = true
-			local damage = Storm.Damage(part.Position)
+			local damage = Field.damage(state, part.Position)
 			Debris:AddItem(part, if damage.Potential > 0.5 then 5.0 else 10.0)
 			Debris:AddItem(link, 10.0)
 		end))
@@ -228,9 +420,7 @@ local function structuralPart(name: string, frame: CFrame, size: Vector3, profil
 	part.Size = size
 	part.Color = profile.Colour
 	part.Anchored = anchored
-	part.StormExposedArea = size.X * size.Y
-	part.StormDragCoefficient = 1.08
-	part.StormForceScale = 0.82
+	response(part, size.X * size.Y, 1.08, 0.82)
 	part.Parent = parent
 	return part
 end
@@ -240,10 +430,7 @@ local function stormJoint(name: string, first: Part, second: Part, profile: any,
 	joint.Name = name
 	joint.Part0 = first
 	joint.Part1 = second
-	joint.StormBreakForce = profile.BreakForce
-	joint.StormMaterialStrength = profile.Strength
-	joint.StormIntegrity = 1.0
-	joint.StormDamageRate = profile.DamageRate
+	linkDamage(joint, profile.BreakForce, profile.Strength, profile.DamageRate)
 	joint.Parent = parent
 	return joint
 end
@@ -297,9 +484,7 @@ local function vehiclePart(name: string, frame: CFrame, size: Vector3, colour: C
 	part.Color = colour
 	part.Anchored = false
 	part.CanCollide = true
-	part.StormExposedArea = size.X * size.Y
-	part.StormDragCoefficient = 1.04
-	part.StormForceScale = 0.62
+	response(part, size.X * size.Y, 1.04, 0.62)
 	part.Parent = parent
 	return part
 end
@@ -309,9 +494,7 @@ local function vehicleJoint(name: string, first: Part, second: Part, parent: Ins
 	joint.Name = name
 	joint.Part0 = first
 	joint.Part1 = second
-	joint.StormBreakForce = 24000
-	joint.StormMaterialStrength = 1.45
-	joint.StormDamageRate = 0.5
+	linkDamage(joint, 24000, 1.45, 0.5)
 	joint.Parent = parent
 	return joint
 end
@@ -322,17 +505,16 @@ local function chaseVehicle(name: string, position: Vector3, yaw: number, parent
 	vehicle.Parent = parent
 	local frame = CFrame.new(position) * CFrame.Angles(0, yaw, 0)
 	local chassis = vehiclePart(name .. " Chassis", frame * CFrame.new(0, 1.55, 0), Vector3.new(2.35, 0.65, 4.9), Color3.fromRGB(49, 62, 67), vehicle)
-	chassis.StormExposedArea = 10.6
-	chassis.StormForceScale = 0.72
+	response(chassis, 10.6, 1.04, 0.72)
 	local cabin = vehiclePart(name .. " Cabin", frame * CFrame.new(0, 2.35, -0.28), Vector3.new(2.15, 1.12, 2.35), Color3.fromRGB(77, 92, 96), vehicle)
-	cabin.StormExposedArea = 7.2
+	response(cabin, 7.2, 1.04, 0.62)
 	vehicleJoint(name .. " Cabin Mount", chassis, cabin, vehicle)
 	for _, wheelOffset in ipairs({
 		Vector3.new(-1.32, 0.75, -1.55), Vector3.new(1.32, 0.75, -1.55),
 		Vector3.new(-1.32, 0.75, 1.55), Vector3.new(1.32, 0.75, 1.55),
 	}) do
 		local wheel = vehiclePart(name .. " Wheel", frame * CFrame.new(wheelOffset), Vector3.new(0.5, 1.08, 1.08), Color3.fromRGB(24, 26, 25), vehicle)
-		wheel.StormEnabled = false
+		response(wheel, 0, 1.04, 0.62, false)
 		vehicleJoint(name .. " Wheel Mount", chassis, wheel, vehicle)
 	end
 
@@ -344,9 +526,7 @@ local function chaseVehicle(name: string, position: Vector3, yaw: number, parent
 	anchor.Visible = false
 	anchor.Parent = vehicle
 	local tieDown = vehicleJoint(name .. " Storm Tie Down", anchor, chassis, vehicle)
-	tieDown.StormBreakForce = 4300
-	tieDown.StormMaterialStrength = 0.88
-	tieDown.StormDamageRate = 1.35
+	linkDamage(tieDown, 4300, 0.88, 1.35)
 end
 
 -- This follows the reference's 160 metre deterministic scenery cells. At most
@@ -381,13 +561,11 @@ end
 
 local function weatherAttachedScenery(name: string, position: Vector3, size: Vector3, colour: Color3, breakForce: number, parent: Instance): Part
 	local part = vehiclePart(name, CFrame.new(position), size, colour, parent)
-	part.StormExposedArea = size.X * size.Y
+	response(part, size.X * size.Y, 1.04, 0.62)
 	local anchor = environmentalPart(name .. " Anchor", position - Vector3.new(0, size.Y * 0.5, 0), Vector3.new(0.25, 0.25, 0.25), Color3.fromRGB(0, 0, 0), parent)
 	anchor.Visible = false
 	local link = vehicleJoint(name .. " Wind Link", anchor, part, parent)
-	link.StormBreakForce = breakForce
-	link.StormMaterialStrength = 0.72
-	link.StormDamageRate = 1.2
+	linkDamage(link, breakForce, 0.72, 1.2)
 	return part
 end
 
@@ -404,10 +582,7 @@ local function appendEnvironmentCell(cellX: number, cellZ: number)
 		local z = origin.Z + ((index * 71 + cellX * 23) % 130) - 65
 		if index % 3 == 0 then
 			local tree = environmentalPart("Cell Tree " .. index, Vector3.new(x, 5.5, z), Vector3.new(1.05, 11, 1.05), Color3.fromRGB(67, 55, 36), cell)
-			tree.StormRestFrame = tree.CFrame
-			tree.StormMaximumBendRadians = 0.46
-			tree.StormResponsePerSecond = 4.2
-			tree.StormWindSpeedForMaximumBend = 78.0
+			vegetation(tree, 0.46, 4.2, 78.0)
 		elseif index % 3 == 1 then
 			weatherAttachedScenery("Cell Sign " .. index, Vector3.new(x, 2.1, z), Vector3.new(3.6, 1.8, 0.2), Color3.fromRGB(137, 87, 42), 980, cell)
 		else
@@ -420,14 +595,11 @@ local function appendEnvironmentCell(cellX: number, cellZ: number)
 		environmentalPart("Cell Windbreak", origin + Vector3.new(28, 1.2, -24), Vector3.new(7.5, 2.4, 0.3), Color3.fromRGB(91, 76, 52), cell)
 	end
 	local panel = vehiclePart("Cell Loose Roof Panel", CFrame.new(origin + Vector3.new(34, 2.0, -32)), Vector3.new(4.8, 0.16, 2.9), Color3.fromRGB(83, 57, 42), cell)
-	panel.StormExposedArea = 13.9
-	panel.StormForceScale = 0.9
+	response(panel, 13.9, 1.04, 0.9)
 	local panelAnchor = environmentalPart("Cell Roof Anchor", origin + Vector3.new(34, 0.45, -32), Vector3.new(0.25, 0.25, 0.25), Color3.fromRGB(0, 0, 0), cell)
 	panelAnchor.Visible = false
 	local panelLink = vehicleJoint("Cell Roof Wind Link", panelAnchor, panel, cell)
-	panelLink.StormBreakForce = 1900
-	panelLink.StormMaterialStrength = 0.65
-	panelLink.StormDamageRate = 1.6
+	linkDamage(panelLink, 1900, 0.65, 1.6)
 end
 
 local function streamEnvironmentCells(position: Vector3)
@@ -505,18 +677,145 @@ RunService.Heartbeat:Connect(function(delta: number)
 	streamEnvironmentCells(environmentObserverPosition)
 	cleanupRetainedCells(environmentElapsed)
 end)
+
+local function bodyArea(part: Part, response: any): number
+	if response.ExposedArea > 0 then return response.ExposedArea end
+	local size = part.Size
+	return math.max(size.X * size.Y, size.X * size.Z, size.Y * size.Z)
+end
+
+local function quadraticDrag(sample: any, part: Part, response: any): Vector3
+	if not response.Enabled or part.Anchored then return Vector3.zero end
+	return Field.rawDragForce(
+		sample.Velocity,
+		part:GetLinearVelocity(),
+		bodyArea(part, response),
+		response.DragCoefficient,
+		response.ForceScale
+	)
+end
+
+local function dragForce(sample: any, part: Part, response: any, delta: number): Vector3
+	if not response.Enabled or part.Anchored then return Vector3.zero end
+	return Field.dragForce(
+		sample.Velocity,
+		part:GetLinearVelocity(),
+		bodyArea(part, response),
+		response.DragCoefficient,
+		response.ForceScale,
+		delta,
+		part.Mass
+	)
+end
+
+local function linkedLoad(part: Instance?): number
+	if part == nil or not part:IsA("BasePart") then return 0 end
+	local response = part:GetComponent("Tornado.Response")
+	if response == nil then return 0 end
+	local sample = Field.sample(state.Parameters, state.Position, part.Position, state.ElapsedSeconds)
+	return quadraticDrag(sample, part, response).Magnitude
+end
+
+local function applyVegetation(delta: number)
+	for _, part in ipairs(World:Query("Tornado.Vegetation")) do
+		if not part:IsA("BasePart") or not part.Anchored then continue end
+		local held = part:GetComponent("Tornado.Vegetation")
+		if held == nil or not held.Enabled or held.MaximumBendRadians < 0 or held.ResponsePerSecond <= 0
+			or held.WindSpeedForMaximumBend <= 0 then continue end
+		local sample = Field.sample(state.Parameters, state.Position, part.Position, state.ElapsedSeconds)
+		held.BendRadians, held.BendDirectionRadians = Field.vegetationStep(
+			held.BendRadians,
+			held.BendDirectionRadians,
+			sample.Velocity,
+			held.MaximumBendRadians,
+			held.ResponsePerSecond,
+			held.WindSpeedForMaximumBend,
+			delta
+		)
+		local restUp = held.RestFrame:VectorToWorldSpace(Vector3.yAxis).Unit
+		if restUp == Vector3.zero then continue end
+		local direction = Vector3.new(math.cos(held.BendDirectionRadians), 0, math.sin(held.BendDirectionRadians))
+		local targetUp = (restUp * math.cos(held.BendRadians) + direction * math.sin(held.BendRadians)).Unit
+		local correction = CFrame.fromRotationBetweenVectors(restUp, targetUp)
+		part.CFrame = CFrame.new(part.Position) * (correction * held.RestFrame.Rotation).Rotation
+		part:SetComponent("Tornado.Vegetation", held)
+	end
+end
+
+local function applyLinkDamage(delta: number)
+	for _, joint in ipairs(World:Query("Tornado.Link")) do
+		if not joint:IsA("JointInstance") and not joint:IsA("WeldConstraint") then continue end
+		local link = joint:GetComponent("Tornado.Link")
+		if link == nil or not link.Enabled or not joint.Enabled or link.BreakForce <= 0 or link.MaterialStrength <= 0
+			or link.DamageRate < 0 then continue end
+		local load = math.max(linkedLoad(joint.Part0), linkedLoad(joint.Part1))
+		local broken = false
+		link.Integrity, broken = Field.linkDamage(
+			link.Integrity,
+			load,
+			link.BreakForce,
+			link.MaterialStrength,
+			link.DamageRate,
+			delta,
+			link.Enabled
+		)
+		if broken then
+			joint.Enabled = false
+			link.Enabled = false
+		end
+		joint:SetComponent("Tornado.Link", link)
+	end
+end
+
+local function applyBodyForces(delta: number)
+	for _, part in ipairs(World:Query("Tornado.Response")) do
+		if not part:IsA("BasePart") then continue end
+		local response = part:GetComponent("Tornado.Response")
+		if response == nil or part.Anchored then continue end
+		local force = Vector3.zero
+		if state.Enabled then
+			local sample = Field.sample(state.Parameters, state.Position, part.Position, state.ElapsedSeconds)
+			force = dragForce(sample, part, response, delta)
+		end
+		part:SetAppliedForce(force)
+	end
+end
+
+RunService.Heartbeat:Connect(function(delta: number)
+	if state.Enabled then
+		Field.advance(state, delta)
+		applyVegetation(delta)
+		applyLinkDamage(delta)
+	end
+	applyBodyForces(delta)
+	updateVisualField()
+	publishState()
+end)
 ]]></Source>
 		<Source path="scripts/client/TornadoClient.client.luau"><![CDATA[--!strict
-local StarterGui = game:GetService("StarterGui")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
-local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
-local Lighting = game:GetService("Lighting")
+local STARTUP_WAIT_SECONDS = 20
+local tornadoPackage = ReplicatedStorage:WaitForChild("TornadoSim", STARTUP_WAIT_SECONDS)
+assert(tornadoPackage ~= nil and tornadoPackage:IsA("ModuleScript"), "TornadoSim needs its replicated modules")
+local packageScript = tornadoPackage :: ModuleScript
+local controlsSource = packageScript:WaitForChild("StormControls", STARTUP_WAIT_SECONDS)
+assert(controlsSource ~= nil and controlsSource:IsA("ModuleScript"), "TornadoSim needs StormControls")
+local fieldSource = packageScript:WaitForChild("StormField", STARTUP_WAIT_SECONDS)
+assert(fieldSource ~= nil and fieldSource:IsA("ModuleScript"), "TornadoSim needs StormField")
+local Controls = require(controlsSource :: ModuleScript)
+local Field = require(fieldSource :: ModuleScript)
+local controlEvent = ReplicatedStorage:WaitForChild("TornadoControl", STARTUP_WAIT_SECONDS)
+assert(controlEvent ~= nil and controlEvent:IsA("RemoteEvent"), "TornadoSim needs its TornadoControl remote")
+local tornadoWorld = Workspace:WaitForChild("TornadoSimWorld", STARTUP_WAIT_SECONDS)
+assert(tornadoWorld ~= nil and tornadoWorld:IsA("Model"), "TornadoSim needs its replicated world model")
+local stormAnchor = tornadoWorld:WaitForChild("StormAnchor", STARTUP_WAIT_SECONDS)
+assert(stormAnchor ~= nil and stormAnchor:IsA("Part"), "TornadoSim needs its replicated StormAnchor")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
-local controlEvent = ReplicatedStorage.TornadoControl
+local clientVisuals: { [Instance]: boolean } = {}
 
 local function makePart(name: string, size: Vector3, position: Vector3, colour: Color3): Part
 	local part = Instance.new("Part")
@@ -526,6 +825,7 @@ local function makePart(name: string, size: Vector3, position: Vector3, colour: 
 	part.Position = position
 	part.Color = colour
 	part.Parent = Workspace
+	clientVisuals[part] = true
 	return part
 end
 
@@ -545,75 +845,8 @@ local function makeVolume(name: string, position: Vector3, bounds: Vector3, dens
 	volume.ShadowSteps = 12
 	volume.Seed = #name * 41
 	volume.Parent = Workspace
+	clientVisuals[volume] = true
 	return volume
-end
-
--- A computed sky and a dark cloud deck keep the pale funnel visible. A black
--- clear colour removes its silhouette before any particle system can help.
-Lighting.ClockTime = 17.2
-Lighting.GeographicLatitude = 35
-Lighting.Brightness = 0.06
-Lighting.Ambient = Color3.fromRGB(10, 13, 15)
-Lighting.OutdoorAmbient = Color3.fromRGB(13, 15, 16)
-Lighting.BloomThreshold = 1.1
-Lighting.BloomIntensity = 0.45
-Lighting.BloomRadius = 6
-Lighting.GodRayIntensity = 0.16
-Lighting.GodRayThreshold = 1.1
-Lighting.GodRayRadius = 46
-
-local sky = Instance.new("SkyboxCompute")
-sky.Name = "Tornado Storm Sky"
-sky.Shader = Enum.SkyboxComputeShader.Night
-sky.SunSize = 0.01
-sky.Seed = 401
-sky.Parent = Lighting
-
-local atmosphere = Instance.new("AtmosphereProcedural")
-atmosphere.Name = "Tornado Storm Atmosphere"
-atmosphere.Shader = Enum.AtmosphereProceduralShader.Earth
-atmosphere.Color = Color3.fromRGB(27, 33, 38)
-atmosphere.Decay = Color3.fromRGB(7, 10, 12)
-atmosphere.Density = 0.12
-atmosphere.Haze = 1.1
-atmosphere.Glare = 0.04
-atmosphere.Samples = 16
-atmosphere.Parent = Lighting
-
-local clouds = Instance.new("CloudCompute")
-clouds.Name = "Tornado Anvil Cloud Deck"
-clouds.Shader = Enum.CloudComputeShader.Storm
-clouds.Color = Color3.fromRGB(27, 29, 28)
-clouds.Cover = 0.98
-clouds.Density = 0.98
-clouds.WindSpeed = 19
-clouds.WindDirection = Vector2.new(0.85, 0.34)
-clouds.CellSize = 0.19
-clouds.Detail = 0.9
-clouds.Height = 0.54
-clouds.Thickness = 0.58
-clouds.Steps = 32
-clouds.Seed = 957
-clouds.Parent = Lighting
-
--- The original sparse world rows remain for simulation compatibility. Hide
--- their placeholder surfaces before constructing the visible scene, otherwise
--- the coplanar white terrain intermittently wins the depth test.
-local authoredWorld = Workspace:FindFirstChild("TornadoSimWorld")
-if authoredWorld then
-	local placeholderTerrain = authoredWorld:FindFirstChild("Terrain")
-	if placeholderTerrain then placeholderTerrain.Visible = false end
-	local placeholderTrees = authoredWorld:FindFirstChild("TreeLine")
-	if placeholderTrees then placeholderTrees.Visible = false end
-	local placeholderSign = authoredWorld:FindFirstChild("RoadSign")
-	if placeholderSign then placeholderSign.Visible = false end
-	local placeholderVehicle = authoredWorld:FindFirstChild("ChaseVehicle")
-	if placeholderVehicle then placeholderVehicle.Visible = false end
-	for _, name in ipairs({"Farmhouse", "Barn", "Workshop"}) do
-		local structure = authoredWorld:FindFirstChild(name)
-		local roof = if structure then structure:FindFirstChild("RoofPanel") else nil
-		if roof then roof.Visible = false end
-	end
 end
 
 local ground = makePart("Storm Prairie", Vector3.new(1450, 3, 1450), Vector3.new(0, -2.0, 80), Color3.fromRGB(66, 59, 38))
@@ -746,9 +979,9 @@ end
 -- Five local overlapping cells form a condensation funnel. The broad dirty
 -- base and the upper anvil feed preserve the reference's multi-layer shape.
 local stormOrigin = Vector3.new(0, 0, 95)
-local stormVisuals: { { Object: any, Origin: Vector3 } } = {}
-local function followStorm(object: any)
-	table.insert(stormVisuals, { Object = object, Origin = object.Position })
+local stormVisuals: { { Object: any, Origin: Vector3, BaseDensity: number? } } = {}
+local function followStorm(object: any, cloudDensity: boolean?)
+	table.insert(stormVisuals, { Object = object, Origin = object.Position, BaseDensity = if cloudDensity then object.Density else nil })
 end
 local funnelVolumes = {
 	makeVolume("Funnel Ground Spray", Vector3.new(0, 10, 95), Vector3.new(46, 12, 46), 0.10),
@@ -764,11 +997,11 @@ funnelVolumes[3].Color = Color3.fromRGB(126, 124, 116)
 funnelVolumes[4].Color = Color3.fromRGB(92, 99, 105)
 funnelVolumes[5].Color = Color3.fromRGB(67, 76, 86)
 funnelVolumes[5].Density = 0.055
-for _, volume in ipairs(funnelVolumes) do followStorm(volume) end
+for _, volume in ipairs(funnelVolumes) do followStorm(volume, true) end
 local rainBank = makeVolume("Rain Curtain", Vector3.new(-34, 38, 44), Vector3.new(120, 46, 105), 0.035)
 rainBank.Color = Color3.fromRGB(112, 129, 140)
 rainBank.Falloff = 0.72
-followStorm(rainBank)
+followStorm(rainBank, true)
 
 -- A shallow stack makes the storm's wall cloud recede behind the funnel. The
 -- distant layers use fewer march steps because they only establish silhouette.
@@ -779,7 +1012,7 @@ local cloudShelf = {
 	makeVolume("Anvil Back Shelf", Vector3.new(28, 260, 246), Vector3.new(455, 54, 220), 0.017),
 }
 for index, shelf in ipairs(cloudShelf) do
-	followStorm(shelf)
+	followStorm(shelf, true)
 	shelf.Color = Color3.fromRGB(47 + index * 3, 53 + index * 3, 57 + index * 4)
 	shelf.Falloff = 0.68
 	shelf.NoiseScale = 0.22
@@ -841,7 +1074,7 @@ local audioEnabled = true
 local thunderRevision = 0
 
 local function updateStormAudio(snapshot: any, observer: Vector3)
-	local sample = Storm.Sample(observer)
+	local sample = Field.sample(snapshot.Parameters, snapshot.Position, observer, snapshot.ElapsedSeconds)
 	local horizontalWind = Vector3.new(sample.Velocity.X, 0, sample.Velocity.Z).Magnitude
 	local parameters = snapshot.Parameters
 	local wind = math.clamp(horizontalWind / 105, 0, 1)
@@ -1052,33 +1285,6 @@ for _, layer in ipairs({
 	condensationLayer("Funnel Anvil Wisps", 176, 82, 80, Color3.fromRGB(43, 45, 44)),
 }) do table.insert(condensationEmitters, layer) end
 
--- Layers is a field mask. Preserve condensation with rain and debris: omitting
--- bit one leaves only a thin spray column, even with a million GPU particles.
-local gpuField = Workspace:FindFirstChild("TornadoParticles", true)
-if gpuField == nil then
-	local fieldAnchor = makePart("Tornado Particle Anchor", Vector3.one, Vector3.new(0, 0, 95), Color3.new(1, 1, 1))
-	fieldAnchor.Visible = false
-	followStorm(fieldAnchor)
-	gpuField = Instance.new("GpuParticleField")
-	gpuField.Name = "TornadoParticles"
-	local visualField = gpuField :: any
-	visualField.RequestedCount = 1048576
-	visualField.Seed = 123456789
-	visualField.CondensationColor = Color3.fromRGB(132, 135, 132)
-	visualField.CondensationAlpha = 0.12
-	visualField.CondensationSize = 11.5
-	visualField.RainColor = Color3.fromRGB(41, 51, 56)
-	visualField.RainAlpha = 0.10
-	visualField.RainSize = 0.30
-	visualField.DebrisColor = Color3.fromRGB(56, 38, 23)
-	visualField.DebrisAlpha = 0.16
-	visualField.DebrisSize = 0.8
-	gpuField.Parent = fieldAnchor
-end
-local visualField = gpuField :: any
-visualField.Layers = 7
-local authoredAnchor = Workspace:FindFirstChild("StormAnchor", true)
-if authoredAnchor and authoredAnchor:IsA("Part") then followStorm(authoredAnchor) end
 for x = -2, 2 do
 	for z = -2, 2 do
 		local host = makePart("Rain Host " .. x .. "/" .. z, Vector3.one, Vector3.new(x * 34, 74, 55 + z * 34), Color3.new(1, 1, 1))
@@ -1095,8 +1301,10 @@ for x = -2, 2 do
 	end
 end
 
-camera = Instance.new("Camera")
-camera.Name = "TornadoChaseCamera"
+local activeCamera = Workspace.CurrentCamera
+assert(activeCamera ~= nil and activeCamera:IsA("Camera"), "TornadoSim needs the active client camera")
+camera = activeCamera :: Camera
+camera.CameraType = Enum.CameraType.Scriptable
 camera.FieldOfView = 68
 camera.FarPlaneZ = 1500
 -- Frame the mature EF3 column beside the control panel. The lower aim and
@@ -1118,8 +1326,6 @@ local function cameraFrame(target: Vector3): CFrame
 	return CFrame.lookAt(eye, target)
 end
 camera.CFrame = cameraFrame(cameraTarget)
-camera.Parent = Workspace
-Workspace.CurrentCamera = camera
 
 local function request(change: { [string]: any })
 	controlEvent:FireServer(HttpService:JSONEncode(change))
@@ -1129,7 +1335,13 @@ local gui = Instance.new("ScreenGui")
 gui.Name = "TornadoSimPanel"
 gui.ResetOnSpawn = false
 local player = Players.LocalPlayer
-gui.Parent = if player and player:FindFirstChild("PlayerGui") then player.PlayerGui else StarterGui
+assert(player ~= nil, "TornadoSim HUD requires a local player")
+local playerGui = player:WaitForChild("PlayerGui", STARTUP_WAIT_SECONDS)
+assert(
+	playerGui ~= nil and playerGui.Name == "PlayerGui" and playerGui.Parent == player,
+	"TornadoSim HUD needs the local PlayerGui"
+)
+gui.Parent = playerGui
 
 local panel = Instance.new("ScrollingFrame")
 panel.Name = "StormControls"
@@ -1223,7 +1435,7 @@ local function setEmitterLayer(emitters: { ParticleEmitter }, enabled: boolean, 
 	end
 end
 local function updateLayers()
-	request({ kind = "layers", mask = activeLayers })
+	request({ kind = "layers", mask = activeLayers, rainOpacity = rainOpacity, rainDensity = rainDensity })
 	rainBank.Enabled = layerActive(activeLayers, 2)
 	for bit, control in pairs(layerButtons) do
 		local enabled = layerActive(activeLayers, bit)
@@ -1232,7 +1444,6 @@ local function updateLayers()
 	setEmitterLayer(condensationEmitters, layerActive(activeLayers, 1) and activeLayers ~= 1, 1)
 	setEmitterLayer(rainEmitters, layerActive(activeLayers, 2), rainDensity)
 	setEmitterLayer(debrisEmitters, layerActive(activeLayers, 4), 1)
-	visualField.RainAlpha = 0.10 * rainOpacity * rainDensity
 end
 
 
@@ -1252,8 +1463,6 @@ end
 local funnelOnlyControl: TextButton
 funnelOnlyControl = button("FUNNEL", 119, 810, function()
 	activeLayers = if activeLayers == 1 then 7 else 1
-	clouds.Cover = if activeLayers == 1 then 0 else 0.98
-	clouds.Density = if activeLayers == 1 then 0 else 0.98
 	for _, volume in ipairs(funnelVolumes) do volume.Enabled = activeLayers ~= 1 end
 	for _, shelf in ipairs(cloudShelf) do shelf.Enabled = activeLayers ~= 1 end
 	updateLayers()
@@ -1422,6 +1631,7 @@ local lightningControl: TextButton
 local function setEnvironmentVisible(visible: boolean)
 	environmentEnabled = visible
 	for _, object in ipairs(Workspace:GetDescendants()) do
+		if clientVisuals[object] ~= true then continue end
 		if not object:IsA("Part") and not object:IsA("Volume") then continue end
 		local name = object.Name
 		local environmentObject = string.find(name, "Storm Prairie") or string.find(name, "Storm Chase Road")
@@ -1434,6 +1644,7 @@ local function setEnvironmentVisible(visible: boolean)
 			if object:IsA("Part") then object.Visible = visible else (object :: Volume).Enabled = visible end
 		end
 	end
+	request({ kind = "environment", value = visible })
 end
 local function setStormMotion(change: Vector3)
 	stormMotion = Vector3.new(
@@ -1500,7 +1711,14 @@ RunService.Heartbeat:Connect(function(delta: number)
 		end
 	end
 	if #damageScenery == 0 then damageSceneryBound = false end
-	local snapshot = Storm.Snapshot()
+	local stateRow = stormAnchor:GetComponent("Tornado.State")
+	local snapshot = if stateRow ~= nil then Field.snapshot(Field.fromComponent(stateRow)) else Field.new(Controls.default, Controls.default.Position)
+	for _, visual in ipairs(stormVisuals) do
+		if visual.BaseDensity ~= nil then
+			local localPosition = visual.Object.Position - snapshot.Position
+			visual.Object.Density = visual.BaseDensity * (0.55 + 0.45 * Field.cloudDensity(snapshot.Parameters, localPosition, snapshot.ElapsedSeconds))
+		end
+	end
 	if snapshot.Parameters.TranslationVelocity then
 		stormMotion = snapshot.Parameters.TranslationVelocity
 	end
@@ -1524,9 +1742,7 @@ RunService.Heartbeat:Connect(function(delta: number)
 		resetLightning()
 	end
 	lastStormElapsed = snapshot.ElapsedSeconds
-	-- A replica starts without the server resource. Keep the authored origin
-	-- until its first fixed-step snapshot arrives, then move every local effect
-	-- from the same value that drives gameplay and GPU cloud presentation.
+	-- Move local presentation from the same replicated state that drives gameplay.
 	if snapshot.ElapsedSeconds > 0 then
 		local nextOffset = snapshot.Position - stormOrigin
 		if nextOffset.X ~= stormOffset.X or nextOffset.Y ~= stormOffset.Y or nextOffset.Z ~= stormOffset.Z then
@@ -1578,7 +1794,7 @@ RunService.Heartbeat:Connect(function(delta: number)
 	if cameraShake then
 		-- Sample at the observer's eye so the optional camera response grows with
 		-- the same field and damage potential the reference program uses.
-		local observerField = Storm.Sample(observerPosition + Vector3.new(0, 1, 0))
+		local observerField = Field.sample(snapshot.Parameters, snapshot.Position, observerPosition + Vector3.new(0, 1, 0), snapshot.ElapsedSeconds)
 		local horizontalWind = Vector3.new(observerField.Velocity.X, 0, observerField.Velocity.Z).Magnitude
 		local shake = clamp(horizontalWind / 115 + observerField.DamagePotential * 0.45, 0, 1)
 		local phase = elapsed * (9 + horizontalWind * 0.035)
@@ -1607,22 +1823,717 @@ RunService.Heartbeat:Connect(function(delta: number)
 		setLightningVisible(false, 0)
 	end
 	local samplePoint = Vector3.new(0, 15, 30) + stormOffset
-	local sample = Storm.Sample(samplePoint)
-	local visibility = Storm.Visibility(samplePoint, 500)
-	local damage = Storm.Damage(samplePoint)
+	local sample = Field.sample(snapshot.Parameters, snapshot.Position, samplePoint, snapshot.ElapsedSeconds)
+	local visibility = Field.visibility(snapshot, samplePoint, 500)
+	local damage = Field.damage(snapshot, samplePoint)
 	for index, point in ipairs(vectorPoints) do
-		local field = Storm.Sample(point + stormOffset)
+		local field = Field.sample(snapshot.Parameters, snapshot.Position, point + stormOffset, snapshot.ElapsedSeconds)
 		local velocity = field.Velocity
 		local angle = math.atan(velocity.Z, velocity.X)
 		local arrow = arrows[(math.floor((angle + math.pi / 8) / (math.pi / 4)) % 8) + 1]
 		vectorLabels[index].Text = string.format("%s %.0f / %.0f", arrow, velocity.Magnitude, velocity.Y)
 	end
 	readout.Text = string.format(
-		"MATURE MULTI-CELL TORNADO\nWind %.0f / %.0f / %.0f m/s\nVisibility %.0f m   Damage %.2f\nGPU: 262K  524K  1M  2M  5M  10M  15M  20M  50M\nLayers: condensation, rain, dust\nField band %d",
+		"MATURE MULTI-CELL TORNADO\nWind %.0f / %.0f / %.0f m/s\nVisibility %.0f m   Damage %.2f\nGPU: 262K  524K  1M  2M  5M  10M  15M  20M  50M\nLayers: condensation, rain, dust\nField band %s",
 		sample.Velocity.X, sample.Velocity.Y, sample.Velocity.Z,
 		visibility.EffectiveDistance, damage.Potential, damage.Band
 	)
 end)
+]]></Source>
+		<Source path="scripts/shared/TornadoSim/StormField.luau"><![CDATA[--!strict
+-- The tornado field is pure data and math. The server owns its state; clients
+-- sample the replicated values for presentation.
+local Field = {}
+
+export type Parameters = {
+	Energy: number,
+	CoreRadius: number,
+	InfluenceRadius: number,
+	PeakTangentialSpeed: number,
+	PeakInflowSpeed: number,
+	PeakUpdraftSpeed: number,
+	PeakDowndraftSpeed: number,
+	SurfaceOutflowSpeed: number,
+	UpperWind: Vector3,
+	PressureDrop: number,
+	Humidity: number,
+	RainRate: number,
+	Turbulence: number,
+	TranslationVelocity: Vector3,
+	GroundFriction: number,
+	DebrisDensity: number,
+	VortexTightness: number,
+	TopHeight: number,
+	CounterClockwise: boolean,
+}
+
+export type State = {
+	Parameters: Parameters,
+	Position: Vector3,
+	ElapsedSeconds: number,
+	LifecycleEnabled: boolean,
+	Enabled: boolean,
+}
+
+export type Sample = {
+	Velocity: Vector3,
+	PressureDeficit: number,
+	TangentialSpeed: number,
+	InflowSpeed: number,
+	UpdraftSpeed: number,
+	DowndraftSpeed: number,
+	OutflowSpeed: number,
+	UpperOutflowSpeed: number,
+	VerticalSpeed: number,
+	ShearVelocity: Vector3,
+	Influence: number,
+	Condensation: number,
+	DamagePotential: number,
+}
+
+local function saturate(value: number): number
+	return math.clamp(value, 0, 1)
+end
+
+local function noise(x: number, y: number, z: number): number
+	return math.sin(x * 1.37 + math.sin(y * 0.73) + z * 0.41) * math.cos(z * 1.11 - x * 0.29 + y * 0.53)
+end
+
+local function defaultParameters(): Parameters
+	return {
+		Energy = 0.72,
+		CoreRadius = 34,
+		InfluenceRadius = 260,
+		PeakTangentialSpeed = 92,
+		PeakInflowSpeed = 34,
+		PeakUpdraftSpeed = 58,
+		PeakDowndraftSpeed = 32,
+		SurfaceOutflowSpeed = 28,
+		UpperWind = Vector3.new(18, 0, -6),
+		PressureDrop = 72,
+		Humidity = 0.82,
+		RainRate = 0.68,
+		Turbulence = 13,
+		TranslationVelocity = Vector3.new(4, 0, 1.5),
+		GroundFriction = 0.28,
+		DebrisDensity = 0.65,
+		VortexTightness = 2.25,
+		TopHeight = 360,
+		CounterClockwise = true,
+	}
+end
+
+local function sanitize(parameters: Parameters): Parameters
+	local result = table.clone(parameters)
+	result.Energy = saturate(result.Energy)
+	result.CoreRadius = math.max(result.CoreRadius, 1)
+	result.InfluenceRadius = math.max(result.InfluenceRadius, result.CoreRadius * 1.25)
+	result.PeakTangentialSpeed = math.max(result.PeakTangentialSpeed, 0)
+	result.PeakInflowSpeed = math.max(result.PeakInflowSpeed, 0)
+	result.PeakUpdraftSpeed = math.max(result.PeakUpdraftSpeed, 0)
+	result.PeakDowndraftSpeed = math.max(result.PeakDowndraftSpeed, 0)
+	result.SurfaceOutflowSpeed = math.max(result.SurfaceOutflowSpeed, 0)
+	result.UpperWind = Vector3.new(result.UpperWind.X, 0, result.UpperWind.Z)
+	result.PressureDrop = math.max(result.PressureDrop, 0)
+	result.Humidity = saturate(result.Humidity)
+	result.RainRate = saturate(result.RainRate)
+	result.Turbulence = math.max(result.Turbulence, 0)
+	result.GroundFriction = saturate(result.GroundFriction)
+	result.DebrisDensity = saturate(result.DebrisDensity)
+	result.VortexTightness = math.clamp(result.VortexTightness, 0.75, 18)
+	result.TopHeight = math.max(result.TopHeight, 50)
+	return result
+end
+
+local function prepare(parameters: Parameters)
+	local p = sanitize(parameters)
+	local pressure = p.PressureDrop * (0.30 + 0.70 * p.Energy)
+	local upperLength = Vector3.new(p.UpperWind.X, 0, p.UpperWind.Z).Magnitude
+	return {
+		Parameters = p,
+		EnergyScale = math.sqrt(p.Energy),
+		PressureDrive = math.clamp(0.55 + 0.45 * math.sqrt(pressure / 72), 0.55, 1.45),
+		RotationSign = if p.CounterClockwise then 1 else -1,
+		InverseCoreRadius = 1 / p.CoreRadius,
+		InverseInfluenceRadius = 1 / p.InfluenceRadius,
+		InverseTopHeight = 1 / p.TopHeight,
+		UpperWindLength = upperLength,
+		InverseUpperWindLength = if upperLength > 1e-5 then 1 / upperLength else 0,
+	}
+end
+
+local function influence(field: any, radius: number): number
+	return 1 / (1 + (radius * field.InverseInfluenceRadius) ^ field.Parameters.VortexTightness)
+end
+
+local function eyeDecay(field: any, radius: number): number
+	local ratio = math.max(radius, 0) * field.InverseCoreRadius / 0.34
+	return math.exp(-(ratio * ratio))
+end
+
+local function tangential(field: any, radius: number, amount: number): number
+	local x = math.max(radius, 0) * field.InverseCoreRadius
+	return field.Parameters.PeakTangentialSpeed * field.EnergyScale * (2 * x) / (1 + x * x) * amount
+end
+
+local function inflow(field: any, radius: number, amount: number): number
+	local x = math.max(radius, 0) * field.InverseCoreRadius / 2.15
+	return field.Parameters.PeakInflowSpeed * field.EnergyScale * field.PressureDrive * x * math.exp(1 - x) * amount
+end
+
+local function updraft(field: any, radius: number, height: number, eyeGate: number): number
+	local ratio = radius * field.InverseCoreRadius / 1.9
+	local radial = math.exp(-(ratio * ratio)) * eyeGate
+	local ramp = 0.22 + 0.78 * saturate(height / 18)
+	local fraction = math.max(height, 0) * field.InverseTopHeight
+	return field.Parameters.PeakUpdraftSpeed * field.EnergyScale * radial * ramp * saturate(1 - fraction ^ 3)
+end
+
+local function coreSubsidence(field: any, height: number, decay: number): number
+	local feed = saturate((math.max(height, 0) - 12) / 45)
+	local fraction = math.max(height, 0) * field.InverseTopHeight
+	return field.Parameters.PeakDowndraftSpeed * field.EnergyScale * 0.18 * decay * feed * saturate(1 - fraction ^ 3)
+end
+
+local function downdraftColumn(field: any, radius: number, height: number, amount: number): number
+	local center = field.Parameters.CoreRadius * 4.2
+	local width = field.Parameters.CoreRadius * 1.7
+	local ratio = (radius - center) / width
+	local cloud = 0.35 + 0.65 * saturate((saturate(math.max(height, 0) * field.InverseTopHeight) - 0.16) / 0.56)
+	return field.Parameters.PeakDowndraftSpeed * field.EnergyScale * math.exp(-(ratio * ratio)) * amount * cloud
+end
+
+local function outflow(field: any, radius: number, height: number, amount: number): number
+	local center = field.Parameters.CoreRadius * 4.2
+	local width = field.Parameters.CoreRadius * 1.9
+	local ratio = (radius - center) / width
+	local surface = 1 - saturate((math.max(height, 0) - 4) / 34)
+	return field.Parameters.SurfaceOutflowSpeed * field.EnergyScale * math.exp(-(ratio * ratio)) * amount * surface
+end
+
+function Field.samplePrepared(field: any, center: Vector3, position: Vector3, timeSeconds: number): Sample
+	local p = field.Parameters
+	local offset = position - center
+	local radius = Vector3.new(offset.X, 0, offset.Z).Magnitude
+	local radial = if radius > 1e-5 then Vector3.new(offset.X / radius, 0, offset.Z / radius) else Vector3.xAxis
+	local tangent = Vector3.new(-radial.Z * field.RotationSign, 0, radial.X * field.RotationSign)
+	local amount = influence(field, radius)
+	local pressureRatio = radius * field.InverseCoreRadius / 1.25
+	local decay = eyeDecay(field, radius)
+	local eyeGate = 1 - decay
+	local pressureDeficit = p.PressureDrop * p.Energy * math.exp(-(pressureRatio * pressureRatio)) * amount
+	local tangentialSpeed = tangential(field, radius, amount)
+	local inflowSpeed = inflow(field, radius, amount)
+	local updraftSpeed = updraft(field, radius, offset.Y, eyeGate)
+	local flank = 1
+	if field.UpperWindLength > 1e-5 then
+		local alignment = (radial.X * p.UpperWind.X + radial.Z * p.UpperWind.Z) * field.InverseUpperWindLength
+		local downshear = saturate(alignment * 0.5 + 0.5)
+		flank = 0.08 + 0.92 * downshear * downshear
+	end
+	local clearance = saturate(math.max(offset.Y, 0) / 18)
+	local downdraftSpeed = downdraftColumn(field, radius, offset.Y, amount) * clearance * flank
+		+ coreSubsidence(field, offset.Y, decay)
+	local outflowSpeed = outflow(field, radius, offset.Y, amount) * flank
+	local verticalSpeed = updraftSpeed - downdraftSpeed
+	local height = saturate(math.max(offset.Y, 0) * field.InverseTopHeight)
+	local upper = saturate((height - 0.72) / 0.22)
+	local upperSmooth = upper * upper * (3 - 2 * upper)
+	local upperOutflowSpeed = p.PeakUpdraftSpeed
+		* field.EnergyScale
+		* 0.65
+		* upperSmooth
+		* amount
+		* (0.35 + 0.65 * eyeGate)
+	local shear = saturate((height - 0.18) / 0.64)
+	local shearSmooth = shear * shear * (3 - 2 * shear)
+	local shearVelocity = p.UpperWind * (field.EnergyScale * shearSmooth)
+	local condensation =
+		saturate(p.Humidity * (p.PressureDrop / 100) * (updraftSpeed / math.max(p.PeakUpdraftSpeed, 1)) * 1.65)
+	local destructive = tangentialSpeed * tangentialSpeed + inflowSpeed * inflowSpeed
+	local damagePotential = saturate((destructive / (105 * 105)) * 0.86 + (pressureDeficit / 120) * 0.14)
+	local phase = timeSeconds * 1.7
+	local turbulence = Vector3.new(
+		noise(position.Z * 0.026, position.Y * 0.026, phase),
+		noise(position.X * 0.026 + 11, position.Z * 0.026, phase * 0.71),
+		noise(position.Y * 0.026, position.X * 0.026 - 7, phase * 1.13)
+	)
+	local nearGround = 1 - p.GroundFriction * (1 - saturate(offset.Y / 22))
+	local coreTurbulence = 0.12 + 0.88 * eyeGate
+	local boundary = saturate(math.max(offset.Y, 0) / 18)
+	local variation = math.sin(position.X * 0.031 + timeSeconds * 1.7) * math.cos(position.Z * 0.027 - timeSeconds)
+	local rollPhase = radius * 0.075 - timeSeconds * 0.9 + variation * 1.4
+	local rollSpeed = (p.Turbulence * amount * 1.10 + outflowSpeed * 0.65) * (1 - boundary) * (1 - boundary)
+	local radialRoll = math.sin(rollPhase) * math.cos(math.pi * boundary) * rollSpeed
+	local verticalRoll = -math.cos(rollPhase) * math.sin(math.pi * boundary) * rollSpeed * 1.25
+	local wallDepth = math.max(p.GroundFriction * 8, 0.05)
+	local wall = saturate(math.max(offset.Y, 0) / wallDepth)
+	local slip = wall * wall * (3 - 2 * wall)
+	local horizontal = (tangent * tangentialSpeed - radial * inflowSpeed) * nearGround
+	horizontal += radial * (outflowSpeed + radialRoll + upperOutflowSpeed)
+	local velocity = horizontal * slip
+		+ Vector3.new(0, verticalSpeed + verticalRoll, 0)
+		+ shearVelocity
+		+ turbulence * (p.Turbulence * amount * coreTurbulence)
+		+ p.TranslationVelocity
+	return {
+		Velocity = velocity,
+		PressureDeficit = pressureDeficit,
+		TangentialSpeed = tangentialSpeed,
+		InflowSpeed = inflowSpeed,
+		UpdraftSpeed = updraftSpeed,
+		DowndraftSpeed = downdraftSpeed,
+		OutflowSpeed = outflowSpeed,
+		UpperOutflowSpeed = upperOutflowSpeed,
+		VerticalSpeed = verticalSpeed,
+		ShearVelocity = shearVelocity,
+		Influence = amount,
+		Condensation = condensation,
+		DamagePotential = damagePotential,
+	}
+end
+
+function Field.sample(parameters: Parameters, center: Vector3, position: Vector3, timeSeconds: number): Sample
+	return Field.samplePrepared(prepare(parameters), center, position, timeSeconds)
+end
+
+function Field.cloudDensity(parameters: Parameters, localPosition: Vector3, timeSeconds: number): number
+	local p = sanitize(parameters)
+	local height = localPosition.Y
+	if height < 0 or height > p.TopHeight * 1.16 then
+		return 0
+	end
+	local radius = Vector3.new(localPosition.X, 0, localPosition.Z).Magnitude
+	local prepared = prepare(p)
+	local sample = Field.samplePrepared(prepared, Vector3.zero, localPosition, timeSeconds)
+	local pressureMoisture = saturate(p.Humidity * (0.30 + p.PressureDrop / 100) * math.sqrt(p.Energy))
+	local windNormalizer = math.max(p.PeakInflowSpeed + p.PeakUpdraftSpeed * 0.75 + p.PeakTangentialSpeed * 0.18, 1)
+	local windLineDensity = saturate(
+		(sample.InflowSpeed + math.max(sample.VerticalSpeed, 0) * 0.75 + sample.TangentialSpeed * 0.18)
+			/ windNormalizer
+			* 2.2
+	)
+	local normalizedHeight = saturate(height / p.TopHeight)
+	local lowerColumn = 1 - saturate((normalizedHeight - 0.78) / 0.24)
+	local funnel = sample.Condensation * lowerColumn * (0.38 + windLineDensity * 0.78)
+	local wallRadius = (radius - p.CoreRadius * 1.8) / math.max(p.CoreRadius * 1.7, 1)
+	local wallCloud = pressureMoisture
+		* math.exp(-(wallRadius * wallRadius))
+		* math.exp(-(((normalizedHeight - 0.24) / 0.22) ^ 2))
+		* (0.32 + windLineDensity * 0.78)
+	local phase = math.atan2(localPosition.Z, localPosition.X) * 5 * prepared.RotationSign
+		+ radius / p.CoreRadius * 1.45
+		- normalizedHeight * 5.2
+		- timeSeconds * (0.28 + p.Turbulence * 0.006) * prepared.RotationSign
+	local streamlineBands = 0.62 + 0.38 * (0.5 + 0.5 * math.sin(phase))
+	local cellularVariation = 0.82
+		+ 0.18 * math.sin(localPosition.X * 0.043 + height * 0.029 - localPosition.Z * 0.037 + timeSeconds * 0.11)
+	return saturate(math.max(funnel, wallCloud) * streamlineBands * cellularVariation)
+end
+
+local AIR_DENSITY = 1.225
+
+local function finite(value: number): boolean
+	return value == value and math.abs(value) < math.huge
+end
+
+function Field.rawDragForce(
+	windVelocity: Vector3,
+	bodyVelocity: Vector3,
+	area: number,
+	dragCoefficient: number,
+	forceScale: number
+): Vector3
+	if
+		not finite(area)
+		or not finite(dragCoefficient)
+		or not finite(forceScale)
+		or area <= 0
+		or dragCoefficient <= 0
+		or forceScale <= 0
+	then
+		return Vector3.zero
+	end
+	local relative = windVelocity - bodyVelocity
+	local speed = relative.Magnitude
+	if not finite(speed) or speed <= 0 then
+		return Vector3.zero
+	end
+	return relative * (0.5 * AIR_DENSITY * dragCoefficient * area * speed * forceScale)
+end
+
+function Field.dragForce(
+	windVelocity: Vector3,
+	bodyVelocity: Vector3,
+	area: number,
+	dragCoefficient: number,
+	forceScale: number,
+	delta: number,
+	mass: number
+): Vector3
+	local force = Field.rawDragForce(windVelocity, bodyVelocity, area, dragCoefficient, forceScale)
+	local relativeSpeed = (windVelocity - bodyVelocity).Magnitude
+	if
+		not finite(delta)
+		or not finite(mass)
+		or delta <= 0
+		or mass <= 0
+		or relativeSpeed <= 0
+		or force == Vector3.zero
+	then
+		return Vector3.zero
+	end
+	local impulseSpeed = force.Magnitude * delta / mass
+	if impulseSpeed <= 0 then
+		return Vector3.zero
+	end
+	return force * math.min(1, relativeSpeed / impulseSpeed)
+end
+
+function Field.linkDamage(
+	integrity: number,
+	load: number,
+	breakForce: number,
+	materialStrength: number,
+	damageRate: number,
+	delta: number,
+	enabled: boolean
+): (number, boolean)
+	if
+		not enabled
+		or not finite(load)
+		or not finite(breakForce)
+		or not finite(materialStrength)
+		or not finite(integrity)
+		or not finite(damageRate)
+		or not finite(delta)
+		or breakForce <= 0
+		or materialStrength <= 0
+		or damageRate < 0
+		or delta < 0
+	then
+		return integrity, false
+	end
+	local capacity = breakForce * materialStrength
+	local overload = math.max(load / capacity - 0.55, 0)
+	local updated = math.clamp(integrity - overload * damageRate * delta, 0, 1)
+	return updated, updated <= 0
+end
+
+local function wrapRadians(value: number): number
+	while value > math.pi do
+		value -= math.pi * 2
+	end
+	while value < -math.pi do
+		value += math.pi * 2
+	end
+	return value
+end
+
+function Field.vegetationStep(
+	bend: number,
+	direction: number,
+	windVelocity: Vector3,
+	maximumBend: number,
+	responsePerSecond: number,
+	windSpeedForMaximumBend: number,
+	delta: number
+): (number, number)
+	if
+		not finite(maximumBend)
+		or not finite(responsePerSecond)
+		or not finite(windSpeedForMaximumBend)
+		or not finite(delta)
+		or maximumBend < 0
+		or responsePerSecond <= 0
+		or windSpeedForMaximumBend <= 0
+		or delta <= 0
+	then
+		return bend, direction
+	end
+	local horizontal = Vector3.new(windVelocity.X, 0, windVelocity.Z)
+	local speed = horizontal.Magnitude
+	local targetBend = math.min(maximumBend, speed / windSpeedForMaximumBend * maximumBend)
+	local follow = math.min(delta * responsePerSecond, 1)
+	local nextBend = bend + (targetBend - bend) * follow
+	local nextDirection = direction
+	if speed > 1e-5 then
+		nextDirection += wrapRadians(math.atan2(horizontal.Z, horizontal.X) - direction) * follow
+	end
+	return nextBend, nextDirection
+end
+
+function Field.lifecycleEnergy(elapsedSeconds: number): number
+	local phase = math.fmod(math.max(elapsedSeconds, 0), 90) / 90
+	if phase < 0.18 then
+		local x = phase / 0.18
+		return 0.12 + 0.63 * x * x * (3 - 2 * x)
+	end
+	if phase < 0.68 then
+		local x = (phase - 0.18) / 0.50
+		return 0.75 + 0.18 * math.sin(x * math.pi)
+	end
+	local x = (phase - 0.68) / 0.32
+	return 0.75 * (1 - x) + 0.08 * x
+end
+
+function Field.advance(state: State, delta: number)
+	local tick = math.max(delta, 0)
+	state.Position += state.Parameters.TranslationVelocity * tick
+	state.ElapsedSeconds += tick
+	if state.LifecycleEnabled then
+		state.Parameters.Energy = Field.lifecycleEnergy(state.ElapsedSeconds)
+	end
+end
+
+function Field.visibility(state: State, position: Vector3, viewDistance: number)
+	local distance = math.clamp(viewDistance, 0, 5000)
+	local sample = Field.sample(state.Parameters, state.Position, position, state.ElapsedSeconds)
+	local p = sanitize(state.Parameters)
+	local rain = saturate(p.RainRate * p.Humidity * (0.28 + sample.Influence * 0.72))
+	local condensation = saturate(sample.Condensation * (0.45 + sample.Influence * 0.55))
+	local obscuration = saturate((rain * 0.42 + condensation * 0.72) * (1 - math.exp(-distance / 240)))
+	local clarity = 1 - math.min(obscuration, 0.96)
+	return {
+		Clarity = clarity,
+		EffectiveDistance = distance * clarity,
+		RainObscuration = rain,
+		CondensationObscuration = condensation,
+	}
+end
+
+function Field.damage(state: State, position: Vector3)
+	local sample = Field.sample(state.Parameters, state.Position, position, state.ElapsedSeconds)
+	local pressure = 0.5 * 1.225 * sample.Velocity:Dot(sample.Velocity)
+	local band = "Safe"
+	if sample.DamagePotential >= 0.82 or pressure >= 6200 then
+		band = "Catastrophic"
+	elseif sample.DamagePotential >= 0.52 or pressure >= 3200 then
+		band = "Destructive"
+	elseif sample.DamagePotential >= 0.20 or pressure >= 900 then
+		band = "Caution"
+	end
+	return { Velocity = sample.Velocity, Pressure = pressure, Potential = sample.DamagePotential, Band = band }
+end
+
+local function copyParameters(parameters: Parameters): Parameters
+	return table.clone(parameters)
+end
+
+function Field.new(parameters: Parameters, position: Vector3): State
+	return {
+		Parameters = sanitize(copyParameters(parameters)),
+		Position = position,
+		ElapsedSeconds = 0,
+		LifecycleEnabled = false,
+		Enabled = true,
+	}
+end
+
+function Field.configure(state: State, changes: { [string]: any })
+	local parameters = state.Parameters :: any
+	for name, value in pairs(changes) do
+		if name == "Position" then
+			state.Position = value
+		elseif name == "ElapsedSeconds" then
+			state.ElapsedSeconds = math.max(value, 0)
+		elseif name == "LifecycleEnabled" then
+			state.LifecycleEnabled = value
+		elseif name == "Enabled" then
+			state.Enabled = value
+		elseif parameters[name] ~= nil then
+			parameters[name] = value
+		end
+	end
+	state.Parameters = sanitize(state.Parameters)
+end
+
+function Field.snapshot(state: State)
+	return {
+		Parameters = copyParameters(state.Parameters),
+		Position = state.Position,
+		ElapsedSeconds = state.ElapsedSeconds,
+		LifecycleEnabled = state.LifecycleEnabled,
+		Enabled = state.Enabled,
+	}
+end
+
+function Field.fromComponent(row: { [string]: any }): State
+	local parameters: Parameters = {
+		Energy = row.Energy,
+		CoreRadius = row.CoreRadius,
+		InfluenceRadius = row.InfluenceRadius,
+		PeakTangentialSpeed = row.PeakTangentialSpeed,
+		PeakInflowSpeed = row.PeakInflowSpeed,
+		PeakUpdraftSpeed = row.PeakUpdraftSpeed,
+		PeakDowndraftSpeed = row.PeakDowndraftSpeed,
+		SurfaceOutflowSpeed = row.SurfaceOutflowSpeed,
+		UpperWind = row.UpperWind,
+		PressureDrop = row.PressureDrop,
+		Humidity = row.Humidity,
+		RainRate = row.RainRate,
+		Turbulence = row.Turbulence,
+		TranslationVelocity = row.TranslationVelocity,
+		GroundFriction = row.GroundFriction,
+		DebrisDensity = row.DebrisDensity,
+		VortexTightness = row.VortexTightness,
+		TopHeight = row.TopHeight,
+		CounterClockwise = row.CounterClockwise,
+	}
+	return {
+		Parameters = sanitize(parameters),
+		Position = row.Position,
+		ElapsedSeconds = row.ElapsedSeconds,
+		LifecycleEnabled = row.LifecycleEnabled,
+		Enabled = row.Enabled,
+	}
+end
+
+function Field.toComponent(state: State): { [string]: any }
+	local p = state.Parameters
+	return {
+		Enabled = state.Enabled,
+		Energy = p.Energy,
+		CoreRadius = p.CoreRadius,
+		InfluenceRadius = p.InfluenceRadius,
+		PeakTangentialSpeed = p.PeakTangentialSpeed,
+		PeakInflowSpeed = p.PeakInflowSpeed,
+		PeakUpdraftSpeed = p.PeakUpdraftSpeed,
+		PeakDowndraftSpeed = p.PeakDowndraftSpeed,
+		SurfaceOutflowSpeed = p.SurfaceOutflowSpeed,
+		UpperWind = p.UpperWind,
+		PressureDrop = p.PressureDrop,
+		Humidity = p.Humidity,
+		RainRate = p.RainRate,
+		Turbulence = p.Turbulence,
+		TranslationVelocity = p.TranslationVelocity,
+		GroundFriction = p.GroundFriction,
+		DebrisDensity = p.DebrisDensity,
+		VortexTightness = p.VortexTightness,
+		TopHeight = p.TopHeight,
+		CounterClockwise = p.CounterClockwise,
+		Position = state.Position,
+		ElapsedSeconds = state.ElapsedSeconds,
+		LifecycleEnabled = state.LifecycleEnabled,
+	}
+end
+
+-- Preset rows keep the field parameters in one fixed order for EF and Q scales.
+local EF = {
+	{ 0.30, 22, 170, 33.5, 12, 25, 14, 12, 10, -3, 25, 0.65, 0.35, 5, 3, 1, 0.34, 0.18, 1.45, 240 },
+	{ 0.42, 26, 200, 43.8, 17, 32, 18, 15, 13, -4, 38, 0.70, 0.45, 7, 3.5, 1, 0.32, 0.28, 1.70, 280 },
+	{ 0.56, 30, 230, 55, 23, 42, 23, 20, 16, -5, 54, 0.76, 0.55, 9.5, 4, 1.2, 0.30, 0.42, 1.95, 320 },
+	{ 0.70, 34, 270, 67.5, 30, 55, 30, 27, 20, -7, 72, 0.82, 0.68, 13, 4.5, 1.5, 0.28, 0.60, 2.25, 370 },
+	{ 0.84, 39, 320, 81.8, 39, 69, 38, 34, 25, -9, 92, 0.88, 0.78, 17, 5.5, 1.8, 0.25, 0.78, 2.65, 430 },
+	{ 1.00, 45, 520, 98.3, 49, 84, 47, 42, 30, -11, 115, 0.93, 0.88, 22, 7, 2.2, 0.22, 0.95, 3.10, 500 },
+}
+local Q = {
+	{ 1, 60, 650, 123, 65, 110, 65, 58, 40, -15, 140, 0.95, 0.90, 30, 10, 3, 0.20, 0.96, 3.60, 650 },
+	{ 1, 80, 800, 156.5, 85, 145, 85, 75, 52, -20, 175, 0.96, 0.92, 42, 15, 4, 0.18, 0.97, 4.20, 800 },
+	{ 1, 105, 950, 201.2, 110, 185, 110, 95, 65, -26, 215, 0.97, 0.94, 55, 20, 6, 0.16, 0.98, 5, 1000 },
+	{ 1, 140, 1120, 257.1, 140, 225, 140, 120, 78, -32, 260, 0.98, 0.96, 70, 28, 8, 0.14, 0.99, 6.5, 1220 },
+	{ 1, 190, 1340, 335.3, 175, 265, 175, 150, 92, -38, 310, 0.99, 0.98, 88, 40, 11, 0.12, 1, 9, 1500 },
+	{ 1, 250, 1560, 447, 210, 300, 210, 180, 105, -45, 360, 1, 1, 105, 55, 15, 0.10, 1, 12, 1800 },
+}
+
+local function presetParameters(row: { number }): Parameters
+	local parameters = defaultParameters()
+	parameters.Energy = row[1]
+	parameters.CoreRadius = row[2]
+	parameters.InfluenceRadius = row[3]
+	parameters.PeakTangentialSpeed = row[4]
+	parameters.PeakInflowSpeed = row[5]
+	parameters.PeakUpdraftSpeed = row[6]
+	parameters.PeakDowndraftSpeed = row[7]
+	parameters.SurfaceOutflowSpeed = row[8]
+	parameters.UpperWind = Vector3.new(row[9], 0, row[10])
+	parameters.PressureDrop = row[11]
+	parameters.Humidity = row[12]
+	parameters.RainRate = row[13]
+	parameters.Turbulence = row[14]
+	parameters.TranslationVelocity = Vector3.new(row[15], 0, row[16])
+	parameters.GroundFriction = row[17]
+	parameters.DebrisDensity = row[18]
+	parameters.VortexTightness = row[19]
+	parameters.TopHeight = row[20]
+	return parameters
+end
+
+function Field.preset(state: State, name: string): boolean
+	local isEf = string.sub(name, 1, 2) == "EF"
+	local index = tonumber(string.sub(name, if isEf then 3 else 2, if isEf then 3 else 2))
+	if index == nil or index < 0 or index > 5 then
+		return false
+	end
+	if isEf then
+		state.Parameters = presetParameters(EF[index + 1])
+	elseif string.sub(name, 1, 1) == "Q" then
+		state.Parameters = presetParameters(Q[index + 1])
+	else
+		return false
+	end
+	return true
+end
+
+-- The authority declares schemas before publishing them. Client copies of this
+-- shared math module consume the replicated schema metadata sent by the server.
+if game:GetService("RunService"):IsServer() then
+	-- Custom script state shares the same per-world ECS store as parts and joints.
+	World:DefineComponent("Tornado.State", {
+		Enabled = "bool",
+		Energy = "number",
+		CoreRadius = "number",
+		InfluenceRadius = "number",
+		PeakTangentialSpeed = "number",
+		PeakInflowSpeed = "number",
+		PeakUpdraftSpeed = "number",
+		PeakDowndraftSpeed = "number",
+		SurfaceOutflowSpeed = "number",
+		UpperWind = "Vector3",
+		PressureDrop = "number",
+		Humidity = "number",
+		RainRate = "number",
+		Turbulence = "number",
+		TranslationVelocity = "Vector3",
+		GroundFriction = "number",
+		DebrisDensity = "number",
+		VortexTightness = "number",
+		TopHeight = "number",
+		CounterClockwise = "bool",
+		Position = "Vector3",
+		ElapsedSeconds = "number",
+		LifecycleEnabled = "bool",
+	})
+	World:DefineComponent("Tornado.Response", {
+		Enabled = "bool",
+		ExposedArea = "number",
+		DragCoefficient = "number",
+		ForceScale = "number",
+	})
+	World:DefineComponent("Tornado.Link", {
+		Enabled = "bool",
+		BreakForce = "number",
+		MaterialStrength = "number",
+		Integrity = "number",
+		DamageRate = "number",
+	})
+	World:DefineComponent("Tornado.Vegetation", {
+		Enabled = "bool",
+		RestFrame = "CFrame",
+		BendRadians = "number",
+		BendDirectionRadians = "number",
+		MaximumBendRadians = "number",
+		ResponsePerSecond = "number",
+		WindSpeedForMaximumBend = "number",
+	})
+
+	World:SetComponentTags("Tornado.State", { "replicated" })
+end
+
+Field.defaultParameters = defaultParameters
+Field.prepare = prepare
+Field.sanitize = sanitize
+return Field
 ]]></Source>
 	</Sources>
 	<Item class="Workspace" name="Workspace" id="1">
@@ -1639,7 +2550,7 @@ end)
 			<Item class="Part" name="RoadSign" id="10"><Property name="Size" type="Vector3">4,8,1</Property><Property name="Position" type="Vector3">-18,6,4</Property></Item>
 			<Item class="Part" name="ChaseVehicle" id="11"><Property name="Size" type="Vector3">4,2,8</Property><Property name="Position" type="Vector3">-10,2,-55</Property></Item>
 			<Item class="Part" name="StormAnchor" id="12"><Property name="Position" type="Vector3">0,0,95</Property>
-		<Item class="GpuParticleField" name="TornadoParticles" id="20"><Property name="Enabled" type="bool">true</Property><Property name="Layers" type="int">7</Property><Property name="RequestedCount" type="int">1048576</Property><Property name="Seed" type="int">123456789</Property><Property name="CondensationColor" type="Color3">0.34,0.27,0.20</Property><Property name="CondensationAlpha" type="float">0.16</Property><Property name="CondensationSize" type="float">8.5</Property><Property name="RainColor" type="Color3">0.16,0.20,0.22</Property><Property name="RainAlpha" type="float">0.10</Property><Property name="RainSize" type="float">0.30</Property><Property name="DebrisColor" type="Color3">0.22,0.15,0.09</Property><Property name="DebrisAlpha" type="float">0.16</Property><Property name="DebrisSize" type="float">0.8</Property></Item>
+		<Item class="GpuParticleField" name="TornadoParticles" id="20"><Property name="Enabled" type="bool">true</Property><Property name="Layers" type="int">7</Property><Property name="RequestedCount" type="int">1048576</Property><Property name="Seed" type="int">123456789</Property></Item>
 			</Item>
 		</Item>
 		<Item class="Model" name="StormInteraction" id="25">
@@ -1674,6 +2585,7 @@ end)
 		<Item class="ModuleScript" name="TornadoSim" id="17">
 			<Property name="Source" type="string">scripts/shared/TornadoSim/init.luau</Property>
 			<Item class="ModuleScript" name="StormControls" id="18"><Property name="Source" type="string">scripts/shared/TornadoSim/StormControls.luau</Property></Item>
+			<Item class="ModuleScript" name="StormField" id="32"><Property name="Source" type="string">scripts/shared/TornadoSim/StormField.luau</Property></Item>
 		</Item>
 	</Item>
 	<Item class="StarterPlayer" name="StarterPlayer" id="19"><Item class="StarterPlayerScripts" name="StarterPlayerScripts" id="20"><Item class="LocalScript" name="TornadoClient" id="21"><Property name="Source" type="string">scripts/client/TornadoClient.client.luau</Property></Item></Item></Item>

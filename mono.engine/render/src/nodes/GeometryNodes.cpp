@@ -282,10 +282,11 @@ namespace engine::render {
 				const TessellationMaterial source =
 					TessellationMaterialFor(*mesh, entry.Material, State->SlotTexture[entry.Instance]);
 				const core::Name texture = source.Texture;
-				const core::Name owner = State->TextureContentOwner(
+				const core::Name owner = State->TextureContentOwnerWithFallback(
 					texture,
 					State->SlotContentOwner[entry.Instance],
-					State->SlotImageGraphWorld[entry.Instance]
+					State->SlotImageGraphWorld[entry.Instance],
+					State->SlotImageGraphFallbackWorld[entry.Instance]
 				);
 				SDL_GPUTexture *found = State->Textures.Find(texture, owner);
 				const TextureChoice choice = ChooseTexture(
@@ -296,10 +297,11 @@ namespace engine::render {
 																			 : State->Textures.Default();
 				const bool absent = choice == TextureChoice::Missing;
 				const auto dataMap = [&](core::Name name) {
-					const core::Name mapOwner = State->TextureContentOwner(
+					const core::Name mapOwner = State->TextureContentOwnerWithFallback(
 						name,
 						State->SlotContentOwner[entry.Instance],
-						State->SlotImageGraphWorld[entry.Instance]
+						State->SlotImageGraphWorld[entry.Instance],
+						State->SlotImageGraphFallbackWorld[entry.Instance]
 					);
 					SDL_GPUTexture *map = State->Textures.Find(name, mapOwner);
 					if (map != nullptr) return map;
@@ -317,10 +319,11 @@ namespace engine::render {
 				// loading or is absent. `dataMap` would turn that state into a marker.
 				SDL_GPUTexture *packedPbr = State->Textures.Find(
 					State->SlotPackedPbrMap[entry.Instance],
-					State->TextureContentOwner(
+					State->TextureContentOwnerWithFallback(
 						State->SlotPackedPbrMap[entry.Instance],
 						State->SlotContentOwner[entry.Instance],
-						State->SlotImageGraphWorld[entry.Instance]
+						State->SlotImageGraphWorld[entry.Instance],
+						State->SlotImageGraphFallbackWorld[entry.Instance]
 					)
 				);
 				SDL_GPUSampler *sampler =
@@ -1105,7 +1108,6 @@ namespace engine::render {
 			const uint32_t particleCount = recording.ParticleCount;
 			const uint32_t ribbonCount = recording.RibbonCount;
 			const scene::CameraMatrices &matrices = recording.Matrices;
-			const View::GroundGrid &groundGrid = recording.Request.Source->Grid;
 			SDL_GPUColorTargetInfo &colourTarget = recording.ColourTarget;
 			SDL_GPUDepthStencilTargetInfo &depthTarget = recording.DepthTarget;
 			const bool drawInterface = recording.DrawInterface;
@@ -1256,52 +1258,8 @@ namespace engine::render {
 			const SDL_Rect scissor{0, 0, static_cast<int>(sceneWidth), static_cast<int>(sceneHeight)};
 			SDL_SetGPUScissor(pass, &scissor);
 
-			// **The ground grid, first in this pass and nowhere else.** It is
-			// here rather than in a node of its own because a node would need
-			// the depth as a *sampler* and this pass already has it as an
-			// attachment - so the hardware does the occluding and the grid
-			// costs one triangle. First, so a transparent pane blends over it
-			// the way it blends over the floor.
-			//
-			// Off unless a view asked, which is the studio asking for an edited
-			// world. A client pays one branch.
-			if (groundGrid.Enabled && State->GridPipeline != nullptr) {
-				ENGINE_PROFILE_CAT("ground grid", core::ProfileCategory::Render);
-
-				GridUniforms gridUniforms;
-				gridUniforms.ViewProjection = matrices.ViewProjection;
-				gridUniforms.InverseViewProjection = glm::inverse(matrices.ViewProjection);
-				gridUniforms.Eye = glm::vec4{
-					visibilityCameraFrame.Position.X,
-					visibilityCameraFrame.Position.Y,
-					visibilityCameraFrame.Position.Z,
-					0.0f
-				};
-				gridUniforms.Params =
-					glm::vec4{groundGrid.Step, groundGrid.Major, groundGrid.Reach, groundGrid.Strength};
-				gridUniforms.Offset = glm::vec4{groundGrid.Offset.X, groundGrid.Offset.Z, 0.0f, 0.0f};
-				gridUniforms.Colour = glm::vec4{
-					groundGrid.Colour.R, groundGrid.Colour.G, groundGrid.Colour.B, groundGrid.Alpha
-				};
-				gridUniforms.AxisX = glm::vec4{
-					groundGrid.AxisX.R, groundGrid.AxisX.G, groundGrid.AxisX.B, groundGrid.AxisAlpha
-				};
-				gridUniforms.AxisZ = glm::vec4{
-					groundGrid.AxisZ.R, groundGrid.AxisZ.G, groundGrid.AxisZ.B, groundGrid.AxisAlpha
-				};
-
-				SDL_BindGPUGraphicsPipeline(pass, State->GridPipeline);
-				SDL_PushGPUFragmentUniformData(command, 0, &gridUniforms, sizeof(gridUniforms));
-				SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
-				result.DrawCalls++;
-
-				// **Bound directly rather than through `BindPipeline`, so the
-				// tracked one is cleared by hand.** `DrawSlots` reads
-				// `ActivePipeline` to know what to return to after a shader
-				// variant, and leaving the grid there would send an instance
-				// draw back to a fullscreen triangle's pipeline.
-				State->ActivePipeline = nullptr;
-			}
+			// The grid shares opaque depth and precedes every transparent draw.
+			recording.DrawGroundGrid(pass, matrices.ViewProjection, visibilityCameraFrame, worldTarget);
 
 			if (haveInstances || drawInterface || particleCount > 0 || ribbonCount > 0) {
 				State->BindPipeline(

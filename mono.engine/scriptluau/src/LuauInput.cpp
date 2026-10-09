@@ -196,10 +196,10 @@ namespace engine::script {
 					return;
 				}
 
-				lua_getref(state, connection.Callback);
+				PushLuauValue(state, connection.Callback);
 				const int arguments = push();
 
-				if (lua_pcall(state, arguments, 0, 0) != LUA_OK) {
+				if (CallLuauValue(state, arguments, 0, 0) != LUA_OK) {
 					if (firstError.empty()) {
 						const char *message = lua_tostring(state, -1);
 						firstError = message != nullptr ? message : "an input listener failed";
@@ -223,7 +223,7 @@ namespace engine::script {
 			for (const ConnectionId id : spent) {
 				CallbackRef released = 0;
 				if (live.Signals.Disconnect(id, released)) {
-					lua_unref(state, released);
+					ReleaseLuauValue(state, released);
 				}
 			}
 		}
@@ -261,7 +261,7 @@ namespace engine::script {
 					return;
 				}
 
-				lua_getref(state, action->Callback);
+				PushLuauValue(state, action->Callback);
 				lua_pushstring(state, action->Name.c_str());
 				PushEnumItem(state, core::Name("UserInputState"), report.State);
 
@@ -272,7 +272,7 @@ namespace engine::script {
 				// got nil. A behaviour change, and a stated one.
 				PushInputObject(state, report);
 
-				if (lua_pcall(state, 3, 1, 0) != LUA_OK) {
+				if (CallLuauValue(state, 3, 1, 0) != LUA_OK) {
 					if (firstError.empty()) {
 						const char *message = lua_tostring(state, -1);
 						firstError = message != nullptr ? message : "a bound action failed";

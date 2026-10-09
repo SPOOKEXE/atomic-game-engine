@@ -58,14 +58,24 @@
 #include <engine/world/World.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace engine::world {
 	class Universe;
+}
+
+namespace engine::script {
+	class Runtime;
+}
+
+namespace engine::gui {
+	struct GuiEvent;
 }
 
 namespace studio {
@@ -135,6 +145,8 @@ namespace studio {
 	// @since v0.7
 	class PlayLink {
 	  public:
+		// A host lookup borrowed only during Step, inside the authority's world scope.
+		using RuntimeLookup = std::function<engine::script::Runtime *(engine::world::WorldId)>;
 		PlayLink();
 		~PlayLink() = default;
 
@@ -228,11 +240,23 @@ namespace studio {
 		// Does nothing when the link was never started.
 		//
 		// @param universe The editor's universe.
-		void Step(engine::world::Universe &universe);
+		// @param runtimeOf Scoped authority runtime lookup for copied client events.
+		void Step(engine::world::Universe &universe, const RuntimeLookup &runtimeOf = {});
 
 		// Steps independent in-process clients together. Their authority signing
 		// work is submitted as one engine batch across all served scenes.
-		static void StepMany(engine::world::Universe &universe, std::span<PlayLink *const> links);
+		static void StepMany(
+			engine::world::Universe &universe,
+			std::span<PlayLink *const> links,
+			const RuntimeLookup &runtimeOf = {}
+		);
+
+		// Copies viewport input into this replica's local script queue.
+		// The replica scheduler owns the runtime; this link never prolongs its lifetime.
+		//
+		// @param events Events from this replica's compiled GUI.
+		// @return Whether a live replica runtime accepted the events.
+		bool DeliverGuiEvents(std::span<const engine::gui::GuiEvent> events);
 
 		// Destroys the replica world and forgets the client.
 		//
@@ -286,6 +310,15 @@ namespace studio {
 		engine::replication::Authority Server;
 		engine::replication::Replica Client;
 		engine::replication::ClientId Handle;
+		std::weak_ptr<engine::script::Runtime> ReplicaRuntime_;
+
+		// Copied client envelopes, drained at the next authority script barrier.
+		struct PendingRemoteEvent {
+			engine::replication::ClientId Sender;
+			std::vector<std::byte> Bytes;
+		};
+		std::vector<PendingRemoteEvent> RemoteEvents_;
+		size_t RemoteEventBytes_ = 0;
 
 		// The player this client was given, in the authority's world.
 		engine::ecs::Entity Player_;

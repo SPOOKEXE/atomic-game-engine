@@ -8,10 +8,12 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Schema.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/RenderFeatures.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -25,6 +27,7 @@
 #include <string>
 #include <string_view>
 #include <studio/Editor.hpp>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("studio.component-panel")
@@ -56,6 +59,9 @@ namespace studio {
 		}
 		static void Draw(Editor &editor) {
 			editor.DrawComponents();
+		}
+		static void AddRenderingProfile(Editor &editor, Name name, engine::graph::PipelineDocument document) {
+			editor.RenderingProfiles.Set(name, std::move(document));
 		}
 		static void
 		SeedSurface(Editor &editor, WorldId world, Entity entity, const engine::core::CFrame &before) {
@@ -324,7 +330,7 @@ TEST_CASE("the Components panel shows metadata and edits exposed values", "[stud
 	CHECK(changed);
 }
 
-TEST_CASE("native component edits survive structural changes and support undo", "[studio][components]") {
+TEST_CASE("structural property edits survive component changes and support undo", "[studio][components]") {
 	Context context;
 	Jobs jobs;
 	studio::Editor editor;
@@ -340,10 +346,7 @@ TEST_CASE("native component edits survive structural changes and support undo", 
 	});
 	editor.SelectionWorld = world;
 	editor.Selection = {selected};
-	editor.ShowComponents = true;
-	studio::ComponentPanelProbe::Filter(
-		editor, std::string(Components::Describe(Components::Of<engine::scene::Simulated>()).Name.Text())
-	);
+	editor.ShowProperties = true;
 	const auto anchored = [&] {
 		bool result = false;
 		editor.Universe->Enter(world, [&](Store &store) {
@@ -353,27 +356,44 @@ TEST_CASE("native component edits survive structural changes and support undo", 
 	};
 	const auto toggle = [&] {
 		const bool before = anchored();
-		Frame(editor);
-		Frame(editor);
-		const auto component = Components::Of<engine::scene::Simulated>();
-		const auto window = ImGui::FindWindowByName("Components");
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 500.0f), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Properties(editor, "Anchored");
+		ImGui::Render();
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 500.0f), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Properties(editor, "Anchored");
+		ImGui::Render();
+		const auto window = ImGui::FindWindowByName("Properties");
 		REQUIRE(window != nullptr);
-		const ImGuiID componentId = ImHashData(&component.Index, sizeof(component.Index), window->ID);
-		const ImGuiID tableId = ImHashStr("##native-properties", 0, componentId);
+		const ImGuiID tableId = ImHashStr("BasePart", 0, window->ID);
 		const ImGuiTable *table = GImGui->Tables.GetByKey(tableId);
 		REQUIRE(table != nullptr);
-		const float x = table->Columns[1].WorkMinX + 5;
+		const float x = table->Columns[1].WorkMinX + 12;
 		const float y = table->OuterRect.Min.y + ImGui::GetFrameHeight() * 0.5f;
-		Frame(editor, Mouse{.X = x, .Y = y});
-		Frame(editor, Mouse{.X = x, .Y = y, .Down = true});
-		Frame(editor, Mouse{.X = x, .Y = y});
+		auto &io = ImGui::GetIO();
+		const auto frame = [&] {
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+			ImGui::SetNextWindowSize(ImVec2(600.0f, 500.0f), ImGuiCond_Always);
+			studio::ComponentPanelProbe::Properties(editor, "Anchored");
+			ImGui::Render();
+		};
+		io.AddMousePosEvent(x, y);
+		frame();
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+		frame();
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+		frame();
 		REQUIRE(anchored() != before);
 	};
 	ImGui::NewFrame();
 	ImGui::LogToBuffer();
 	ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
 	ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
-	studio::ComponentPanelProbe::Draw(editor);
+	studio::ComponentPanelProbe::Properties(editor, "Anchored");
 	const std::string panelText = GImGui->LogBuffer.c_str();
 	ImGui::LogFinish();
 	ImGui::Render();
@@ -387,6 +407,252 @@ TEST_CASE("native component edits survive structural changes and support undo", 
 	CHECK(anchored() != initial);
 	toggle();
 	CHECK(anchored() == initial);
+}
+
+TEST_CASE("component rows show attached storage and render effects default to None", "[studio][components]") {
+	Context context;
+	Jobs jobs;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
+	engine::scene::RegisterSceneClasses();
+	WorldSettings settings;
+	settings.Name = Name("AttachedComponentRows");
+	const WorldId world = editor.Universe->Create(settings);
+	Entity part;
+	Entity camera;
+	Entity surfaceCamera;
+	editor.Universe->Enter(world, [&](Store &store) {
+		part = store.CreateInstance(engine::scene::PartClass(), "Part");
+		camera = store.CreateInstance(engine::ecs::Classes::Find(Name("Camera")), "Camera");
+		surfaceCamera =
+			store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "SurfaceCamera");
+		REQUIRE(part != NULL_ENTITY);
+		REQUIRE(camera != NULL_ENTITY);
+		REQUIRE(surfaceCamera != NULL_ENTITY);
+		store.Set(part, engine::scene::RenderEffects{});
+	});
+	editor.SelectionWorld = world;
+	editor.ShowComponents = true;
+	editor.ShowProperties = true;
+
+	const auto drawLog = [&](Entity selected, std::string filter, bool properties = false) {
+		editor.Selection = {selected};
+		studio::ComponentPanelProbe::Filter(editor, std::move(filter));
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
+		if (properties) {
+			studio::ComponentPanelProbe::Properties(editor, "ComputeEffectNode");
+		} else {
+			studio::ComponentPanelProbe::Draw(editor);
+		}
+		const std::string log = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return log;
+	};
+
+	const std::string absentStorm = drawLog(part, {});
+	CHECK(absentStorm.find("StormResponse") == std::string::npos);
+	const std::string absentVegetation = drawLog(part, {});
+	CHECK(absentVegetation.find("Vegetation") == std::string::npos);
+	const std::string absentSurfaceCamera = drawLog(camera, {});
+	CHECK(absentSurfaceCamera.find("SurfaceCamera") == std::string::npos);
+	const std::string attachedSurfaceCamera = drawLog(surfaceCamera, {});
+	CHECK(attachedSurfaceCamera.find("SurfaceCamera") != std::string::npos);
+	const std::string attachedRenderEffects = drawLog(part, {});
+	CHECK(attachedRenderEffects.find("RenderEffects") != std::string::npos);
+	const std::string defaultEffect = drawLog(part, {}, true);
+	CHECK(defaultEffect.find("ComputeEffectNode") != std::string::npos);
+	CHECK(defaultEffect.find("None") != std::string::npos);
+}
+
+TEST_CASE("component and property effect pickers save only matching graph nodes", "[studio][components]") {
+	Context context;
+	Jobs jobs;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
+	engine::scene::RegisterSceneClasses();
+	const Name profileName("EffectPickerProfile");
+	engine::graph::PipelineDocument document;
+	const auto addVisualNode = [&](Name nodeName, Name kind) {
+		document.Record({.Kind = engine::graph::EditKind::AddNode, .Name = nodeName, .NodeKind = kind});
+		document.Record({.Kind = engine::graph::EditKind::Set, .Key = Name("attachment"), .Value = "visual"});
+	};
+	addVisualNode(Name("compute.only"), Name("dispatch"));
+	addVisualNode(Name("raster.only"), Name("raster"));
+	const Name disabledName("compute.disabled");
+	addVisualNode(disabledName, Name("dispatch"));
+	document.Record({.Kind = engine::graph::EditKind::Enable, .Name = disabledName, .Enabled = false});
+	addVisualNode(Name("other.kind"), Name("sample"));
+	studio::ComponentPanelProbe::AddRenderingProfile(editor, profileName, std::move(document));
+	WorldSettings settings;
+	settings.Name = Name("EffectPickerWorld");
+	settings.RenderingProfile = profileName;
+	const WorldId world = editor.Universe->Create(settings);
+	Entity part;
+	const ComponentId renderEffects = Components::Of<engine::scene::RenderEffects>();
+	editor.Universe->Enter(world, [&](Store &store) {
+		part = store.CreateInstance(engine::scene::PartClass(), "Part");
+		REQUIRE(part != NULL_ENTITY);
+		store.Set(part, engine::scene::RenderEffects{});
+	});
+	editor.SelectionWorld = world;
+	editor.Selection = {part};
+	editor.ShowComponents = true;
+	editor.ShowProperties = true;
+	studio::ComponentPanelProbe::Filter(editor, "RenderEffects");
+
+	const auto panelFrame = [&](bool log = false) {
+		ImGui::NewFrame();
+		if (log) ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 500.0f), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Draw(editor);
+		const std::string result = log ? GImGui->LogBuffer.c_str() : std::string{};
+		if (log) ImGui::LogFinish();
+		ImGui::Render();
+		return result;
+	};
+	const auto readAttachment = [&](size_t index) {
+		engine::scene::RenderEffectAttachment attachment;
+		editor.Universe->Enter(world, [&](Store &store) {
+			const auto *effects = store.Get<engine::scene::RenderEffects>(part);
+			REQUIRE(effects != nullptr);
+			attachment = effects->Attachments[index];
+		});
+		return attachment;
+	};
+	const auto comboLocation = [&](size_t row) {
+		panelFrame();
+		const ImGuiWindow *window = ImGui::FindWindowByName("Components");
+		REQUIRE(window != nullptr);
+		const ImGuiID componentId = ImHashData(&renderEffects.Index, sizeof(renderEffects.Index), window->ID);
+		const ImGuiTable *table = GImGui->Tables.GetByKey(ImHashStr("##native-properties", 0, componentId));
+		REQUIRE(table != nullptr);
+		return ImVec2(
+			table->Columns[1].WorkMinX + 12.0f,
+			table->OuterRect.Min.y + ImGui::GetFrameHeight() * (0.5f + static_cast<float>(row))
+		);
+	};
+	const auto click = [&](ImVec2 point) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(point.x, point.y);
+		panelFrame();
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+		panelFrame();
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+		panelFrame();
+	};
+	const auto openPicker = [&](size_t row) {
+		const ImVec2 position = comboLocation(row);
+		click(position);
+		const std::string choices = panelFrame(true);
+		REQUIRE(!GImGui->OpenPopupStack.empty());
+		REQUIRE(GImGui->OpenPopupStack.back().Window != nullptr);
+		const ImVec2 start = GImGui->OpenPopupStack.back().Window->DC.CursorStartPos;
+		return std::pair<std::string, ImVec2>{choices, start};
+	};
+	const auto choose = [&](ImVec2 start, size_t row) {
+		click(ImVec2(
+			start.x + 12.0f, start.y + ImGui::GetTextLineHeightWithSpacing() * static_cast<float>(row) + 5.0f
+		));
+	};
+
+	const auto [computeChoices, computeMenu] = openPicker(0);
+	CHECK(computeChoices.find("compute.only") != std::string::npos);
+	CHECK(computeChoices.find("raster.only") == std::string::npos);
+	CHECK(computeChoices.find("compute.disabled") == std::string::npos);
+	CHECK(computeChoices.find("other.kind") == std::string::npos);
+	choose(computeMenu, 1);
+	CHECK(readAttachment(0).Node == Name("compute.only"));
+	CHECK(readAttachment(0).Enabled);
+
+	const auto [postChoices, postMenu] = openPicker(1);
+	CHECK(postChoices.find("raster.only") != std::string::npos);
+	choose(postMenu, 1);
+	CHECK(readAttachment(1).Node == Name("raster.only"));
+	CHECK(readAttachment(1).Enabled);
+
+	// The log also contains the selected compute name outside this popup. Try
+	// the third row directly to prove the incompatible node is not selectable.
+	const auto [postPanelLog, filteredPostMenu] = openPicker(1);
+	CHECK(postPanelLog.find("raster.only") != std::string::npos);
+	choose(filteredPostMenu, 2);
+	CHECK(readAttachment(1).Node == Name("raster.only"));
+
+	const auto [clearChoices, clearMenu] = openPicker(0);
+	CHECK(clearChoices.find("compute.only") != std::string::npos);
+	choose(clearMenu, 0);
+	CHECK_FALSE(readAttachment(0).Node.IsValid());
+	CHECK_FALSE(readAttachment(0).Enabled);
+
+	const auto propertyFrame = [&](bool log = false) {
+		ImGui::NewFrame();
+		if (log) ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 500.0f), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Properties(editor, "PostProcessEffectNode");
+		const std::string result = log ? GImGui->LogBuffer.c_str() : std::string{};
+		if (log) ImGui::LogFinish();
+		ImGui::Render();
+		return result;
+	};
+	propertyFrame();
+	propertyFrame();
+	const ImGuiWindow *propertiesWindow = ImGui::FindWindowByName("Properties");
+	REQUIRE(propertiesWindow != nullptr);
+	const ImGuiTable *propertiesTable =
+		GImGui->Tables.GetByKey(ImHashStr("BasePart", 0, propertiesWindow->ID));
+	REQUIRE(propertiesTable != nullptr);
+	const ImVec2 propertyPicker(
+		propertiesTable->Columns[1].WorkMinX + 12.0f,
+		propertiesTable->OuterRect.Min.y + ImGui::GetFrameHeight() * 0.5f
+	);
+	const auto clickProperty = [&](ImVec2 point) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(point.x, point.y);
+		propertyFrame();
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+		propertyFrame();
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+		propertyFrame();
+	};
+	const auto openPropertyPicker = [&] {
+		clickProperty(propertyPicker);
+		const std::string choices = propertyFrame(true);
+		REQUIRE(!GImGui->OpenPopupStack.empty());
+		REQUIRE(GImGui->OpenPopupStack.back().Window != nullptr);
+		return std::pair<std::string, ImVec2>{
+			choices, GImGui->OpenPopupStack.back().Window->DC.CursorStartPos
+		};
+	};
+	const auto chooseProperty = [&](ImVec2 menu, size_t row) {
+		clickProperty(ImVec2(
+			menu.x + 12.0f, menu.y + ImGui::GetTextLineHeightWithSpacing() * static_cast<float>(row) + 5.0f
+		));
+	};
+	const auto [propertyChoices, initialMenu] = openPropertyPicker();
+	CHECK(propertyChoices.find("raster.only") != std::string::npos);
+	CHECK(propertyChoices.find("compute.only") == std::string::npos);
+	chooseProperty(initialMenu, 0);
+	CHECK_FALSE(readAttachment(1).Node.IsValid());
+	CHECK_FALSE(readAttachment(1).Enabled);
+
+	const auto [reselectedChoices, reselectMenu] = openPropertyPicker();
+	CHECK(reselectedChoices.find("raster.only") != std::string::npos);
+	chooseProperty(reselectMenu, 1);
+	CHECK(readAttachment(1).Node == Name("raster.only"));
+	CHECK(readAttachment(1).Enabled);
+
+	const auto [finalChoices, finalMenu] = openPropertyPicker();
+	CHECK(finalChoices.find("raster.only") != std::string::npos);
+	chooseProperty(finalMenu, 0);
+	CHECK_FALSE(readAttachment(1).Node.IsValid());
+	CHECK_FALSE(readAttachment(1).Enabled);
 }
 
 namespace {

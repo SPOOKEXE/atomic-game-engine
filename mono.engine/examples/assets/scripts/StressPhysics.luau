@@ -230,16 +230,17 @@ print(string.format("stressphysics: %d blocks in a %.0f metre tray", total, TRAY
 -- put the near wall across half the frame; straight down would flatten the
 -- sliding into a texture that shimmers.
 
-local camera = Instance.new("Camera")
-camera.Name = "Camera"
-camera.FieldOfView = 70
-camera.FarPlaneZ = 2000
-camera.CFrame = CFrame.lookAt(
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+demoCamera:SetAttribute('Name', 'Camera')
+demoCamera:SetAttribute('FieldOfView', 70)
+demoCamera:SetAttribute('FarPlaneZ', 2000)
+demoCamera:SetAttribute('CFrame', CFrame.lookAt(
 	Vector3.new(TRAY * 0.75, TRAY * 0.45, TRAY * 0.75),
 	Vector3.new(0, 0, 0)
-)
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+))
 
 -- --- the lean ----------------------------------------------------------------
 --

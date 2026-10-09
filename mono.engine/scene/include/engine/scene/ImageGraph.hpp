@@ -49,6 +49,7 @@ namespace engine::scene {
 		bool operator==(const ImageGraphInput &) const = default;
 	};
 	// Durable graph reference and user overrides attached to a scene instance.
+	// Replica hosts may edit only predicted viewer-local instances.
 	struct ImageGraph {
 		// Explicit durable identity, unique within a world. Clones must be rekeyed.
 		core::Name InstanceKey;

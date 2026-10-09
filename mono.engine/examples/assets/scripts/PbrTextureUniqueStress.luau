@@ -94,11 +94,11 @@ Lighting.ClockTime = 14
 Lighting.Ambient = Color3.fromRGB(24, 28, 38)
 Lighting.OutdoorAmbient = Color3.fromRGB(42, 48, 62)
 
-local camera = Instance.new("Camera")
-camera.Name = "UniquePbrStressCamera"
-camera.FieldOfView = 48
-camera.CFrame = CFrame.lookAt(Vector3.new(0, 38, 62), Vector3.new(0, 2, 0))
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local camera = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+camera:SetAttribute("Name", "UniquePbrStressCamera")
+camera:SetAttribute("FieldOfView", 48)
+camera:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(0, 38, 62), Vector3.new(0, 2, 0)))
 
 print(`pbr unique texture stress: {SPHERE_COUNT} {TEXTURE_SIZE}x{TEXTURE_SIZE} images ready`)

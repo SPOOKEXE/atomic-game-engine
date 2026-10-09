@@ -80,13 +80,15 @@ namespace engine::render {
 			environment.Textures.Down,
 		};
 		std::array<SDL_GPUTexture *, 6> faces{};
+		std::array<core::Name, 6> faceOwners{};
 		uint32_t faceMask = 0;
 		const EnvironmentUniformModes modes = EnvironmentModesOf(environment);
 		for (size_t index = 0; index < faces.size(); index++) {
 			if (modes.Skybox == 1) {
-				faces[index] = Textures.Find(
-					names[index], TextureContentOwner(names[index], ActiveContentOwner, ActiveImageGraphWorld)
+				faceOwners[index] = TextureContentOwnerWithFallback(
+					names[index], ActiveContentOwner, ActiveLocalImageGraphWorld, ActiveImageGraphWorld
 				);
+				faces[index] = Textures.Find(names[index], faceOwners[index]);
 				if (names[index].IsValid() && faces[index] != nullptr) {
 					faceMask |= 1u << index;
 				}
@@ -98,12 +100,7 @@ namespace engine::render {
 		signature = scene::MixSignature(signature, modes.Atmosphere);
 		for (size_t index = 0; index < faces.size(); index++) {
 			signature = scene::MixSignature(signature, names[index].Id());
-			signature = scene::MixSignature(
-				signature,
-				Textures.RevisionOf(
-					names[index], TextureContentOwner(names[index], ActiveContentOwner, ActiveImageGraphWorld)
-				)
-			);
+			signature = scene::MixSignature(signature, Textures.RevisionOf(names[index], faceOwners[index]));
 			signature = scene::MixSignature(
 				signature, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(faces[index]))
 			);

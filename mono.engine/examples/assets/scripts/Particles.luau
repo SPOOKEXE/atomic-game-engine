@@ -430,16 +430,17 @@ print(string.format("particles: %d emitters, pool reserve %d", made, POOL_RESERV
 
 -- --- the camera and the one moving thing -------------------------------------
 
-local camera = Instance.new("Camera")
-camera.Name = "Camera"
-camera.FieldOfView = 70
-camera.FarPlaneZ = 4000
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+demoCamera:SetAttribute('Name', 'Camera')
+demoCamera:SetAttribute('FieldOfView', 70)
+demoCamera:SetAttribute('FarPlaneZ', 4000)
 -- Low and close, so the near grid fills the frame. **Overdraw is what a
 -- particle system is actually limited by**, and a camera looking down at the
 -- whole plane measures upload and simulation while measuring almost no fill.
-camera.CFrame = CFrame.lookAt(Vector3.new(0, 6, 40), Vector3.new(0, 3, -30))
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+demoCamera:SetAttribute('CFrame', CFrame.lookAt(Vector3.new(0, 6, 40), Vector3.new(0, 3, -30)))
 
 -- The swinger, so the trail has something to trace. Everything else is static
 -- on purpose: a scene where the parts move too would be measuring the physics

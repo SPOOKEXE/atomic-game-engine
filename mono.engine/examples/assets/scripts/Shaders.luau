@@ -107,11 +107,11 @@ surfaceCamera.SurfaceSize = Vector3.new(1024, 640, 0)
 surfaceCamera.Face = Enum.NormalId.Front
 surfaceCamera.Parent = pane
 
-local camera = Instance.new("Camera")
-camera.Name = "ShaderCamera"
-camera.CFrame = CFrame.lookAt(Vector3.new(0, 5, 14), Vector3.new(0, 2, 0))
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local camera = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+camera:SetAttribute("Name", "ShaderCamera")
+camera:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(0, 5, 14), Vector3.new(0, 2, 0)))
 
 local lighting = game:GetService("Lighting")
 lighting.PostProcessShader = postShader.Name

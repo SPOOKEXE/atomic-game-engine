@@ -284,13 +284,14 @@ lightningFlash.Range = 110
 lightningFlash.Brightness = 0
 lightningFlash.Parent = lightningBottom
 
-local camera = Instance.new("Camera")
-camera.Name = "Weather Camera"
-camera.FieldOfView = 62
-camera.FarPlaneZ = 550
-camera.CFrame = CFrame.lookAt(Vector3.new(43, 18, 42), Vector3.new(0, 7, -42))
-camera.Parent = Workspace
-Workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+demoCamera:SetAttribute('Name', 'Weather Camera')
+demoCamera:SetAttribute('FieldOfView', 62)
+demoCamera:SetAttribute('FarPlaneZ', 550)
+demoCamera:SetAttribute('CFrame', CFrame.lookAt(Vector3.new(43, 18, 42), Vector3.new(0, 7, -42)))
 
 local screen = Instance.new("ScreenGui")
 screen.Name = "Weather Controls"

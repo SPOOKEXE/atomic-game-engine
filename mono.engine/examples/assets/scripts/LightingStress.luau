@@ -137,10 +137,11 @@ for index = 0, VOLUME_COUNT - 1 do
 	volume.Parent = workspace
 end
 
-local camera = Instance.new("Camera")
-camera.Name = "Lighting Stress Camera"
-camera.CFrame = CFrame.lookAt(Vector3.new(48, 20, 54), Vector3.new(0, 7, -96))
-camera.FieldOfView = 62
-camera.FarPlaneZ = 600
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+demoCamera:SetAttribute('Name', 'Lighting Stress Camera')
+demoCamera:SetAttribute('CFrame', CFrame.lookAt(Vector3.new(48, 20, 54), Vector3.new(0, 7, -96)))
+demoCamera:SetAttribute('FieldOfView', 62)
+demoCamera:SetAttribute('FarPlaneZ', 600)

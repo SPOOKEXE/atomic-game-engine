@@ -641,6 +641,34 @@ namespace engine::render {
 		return pass;
 	}
 
+	void ViewRecording::DrawGroundGrid(
+		SDL_GPURenderPass *pass,
+		const glm::mat4 &viewProjection,
+		const core::CFrame &cameraFrame,
+		WorldColourTarget target
+	) {
+		const auto &grid = Request.Source->Grid;
+		if (!grid.Enabled) return;
+		auto *pipeline = target == WorldColourTarget::Hdr ? State->HdrGridPipeline : State->GridPipeline;
+		if (pipeline == nullptr) return;
+		ENGINE_PROFILE_CAT("ground grid", core::ProfileCategory::Render);
+		GridUniforms uniforms;
+		uniforms.ViewProjection = viewProjection;
+		uniforms.InverseViewProjection = glm::inverse(viewProjection);
+		uniforms.Eye = {cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 0};
+		uniforms.Params = {grid.Step, grid.Major, grid.Reach, grid.Strength};
+		uniforms.Offset = {grid.Offset.X, grid.Offset.Z, 0, 0};
+		uniforms.Colour = {grid.Colour.R, grid.Colour.G, grid.Colour.B, grid.Alpha};
+		uniforms.AxisX = {grid.AxisX.R, grid.AxisX.G, grid.AxisX.B, grid.AxisAlpha};
+		uniforms.AxisZ = {grid.AxisZ.R, grid.AxisZ.G, grid.AxisZ.B, grid.AxisAlpha};
+		SDL_BindGPUGraphicsPipeline(pass, pipeline);
+		SDL_PushGPUFragmentUniformData(Command, 0, &uniforms, sizeof(uniforms));
+		SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+		++Result.DrawCalls;
+		// Fullscreen state must not become the pipeline DrawSlots restores after a material variant.
+		State->ActivePipeline = nullptr;
+	}
+
 	void ViewRecording::DrawWorldInto(
 		SDL_GPURenderPass *pass, const LightingUniforms &plainLighting, uint32_t filter, bool omitCharacters
 	) {

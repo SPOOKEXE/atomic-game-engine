@@ -33,9 +33,9 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/GpuParticleField.hpp>
-#include <engine/scene/Storm.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/VectorField.hpp>
 
 // `SurfaceView::Projection` is a matrix. glm has always arrived here through
 // `core/types/CFrame.hpp` and `graph/Frustum.hpp`, but a header that names a
@@ -73,6 +73,7 @@ namespace engine::render {
 		std::string Path;
 		// Ordinary resident texture name and its exact residency namespace.
 		core::Name Texture;
+
 		// Content namespace used to resolve this exact resident texture.
 		core::Name Owner;
 		// Colour imports encoded colour; Data preserves normalized numeric channels.
@@ -663,6 +664,10 @@ namespace engine::render {
 		// visible flat square rather than nothing.
 		core::Name Texture;
 
+		// Store namespace that owns generated images used by this emitter.
+		// Missing local images fall back to the view's authored image namespace.
+		core::Name SourceWorld;
+
 		// How many cells the flipbook has on each side. One is not a flipbook.
 		//
 		// **A side rather than a layout enum**, because that is what the shader
@@ -746,17 +751,21 @@ namespace engine::render {
 		core::Name Owner;
 	};
 
-	// An owned copy of the authored request and analytical field that one frame
-	// gives to the device. No renderer path retains or dereferences a world row.
+	// An owned copy of authored initial conditions and the generic force field.
+	// No renderer path retains or dereferences a world row.
 	struct GpuParticleFieldView {
 		// The authored enable, layer, count and seed request.
 		scene::GpuParticleField Field;
-		// Analytical wind and geometry values that drive particle motion.
-		scene::TornadoParameters Storm;
-		// World-space position of the storm centre.
-		core::Vector3 Centre;
-		// Elapsed seconds in the storm state copied for this view.
-		float Seconds = 0.0f;
+		// Transform mapping authored local samples into world coordinates.
+		core::CFrame Frame;
+		// Generic nearest-ancestor vector field retained without an ECS pointer.
+		scene::VectorFieldSample ForceField;
+		// Source identity and observed definition epoch, including sample/style writes.
+		ecs::Entity Source = ecs::NULL_ENTITY;
+		// Component version used to invalidate retained particle images.
+		uint64_t DefinitionRevision = 0;
+		// Source-world time keeps retained images current while device positions advance.
+		double Seconds = 0;
 	};
 
 	// One camera invocation in a graph-owned frame.
@@ -876,6 +885,9 @@ namespace engine::render {
 		// handles and particle block indices collide between stores, so both the
 		// instance rows and particle pool use this with `World`.
 		core::Name WorldName;
+		// World-local generated image lookup context. Studio may draw authority
+		// geometry with lighting and generated images from the displayed replica.
+		core::Name ImageGraphWorldName;
 
 		// Native rows use ContentOwner; copied rows select by SourceWorld.
 		// Unbound worlds retain the shared namespace for callers without scoped content.
@@ -916,6 +928,13 @@ namespace engine::render {
 		// Empty in a scene with no portals, which is nearly all of them. See
 		// `ParticleSeam`.
 		std::span<const ParticleSeam> ParticleSeams;
+
+		// Optional source-store identity for CPU and GPU particle residency.
+		// A client can share authored image/program ownership with its authority
+		// while its local emitter indices and device populations remain independent.
+		// An absent name uses World and WorldName.
+		uint64_t ParticleWorld = 0;
+		core::Name ParticleWorldName;
 
 		// Which simulation revision produced the particle blocks and seams. An
 		// unchanged value needs only another device step for the new

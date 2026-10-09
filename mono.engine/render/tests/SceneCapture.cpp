@@ -454,3 +454,115 @@ TEST_CASE("headless Vulkan particle pools grow to the host ceiling and release",
 	renderer.Shutdown();
 	CHECK(renderer.MemoryStatistics().LiveBytes == 0);
 }
+
+TEST_CASE(
+	"client particle pools sharing authored images remain independent", "[render][gpu][particle-source][.]"
+) {
+	using namespace engine;
+	const bool genericField = GENERATE(false, true);
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDocument(), pipeline, offender) == graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipelineName("replica-particle-source");
+	REQUIRE(fixture.Render.SetPipeline(pipelineName, pipeline));
+	const core::Name authoredWorld("replica-particle-authority");
+	const core::Name texture(
+		GENERATE("editable-image://particle-source", "imagegraph-instance://particle-source")
+	);
+	assets::TextureData image;
+	image.Width = image.Height = 1;
+	image.Format = assets::TextureFormat::RGBA8_LINEAR;
+	image.Pixels = {std::byte{255}, std::byte{255}, std::byte{255}, std::byte{255}};
+	REQUIRE(fixture.Render.AddTexture(texture, image, authoredWorld));
+	std::array<effects::EmitterBlock, 3> blocks;
+	std::array<effects::EmitterSpawnState, 3> spawn;
+	std::array<effects::EmitterRuntime, 3> runtime;
+	std::array<render::ParticleBatch, 3> batches;
+	std::array<render::View, 3> views;
+	const render::SceneTarget target{64, 64};
+	for (size_t index = 0; index < views.size(); ++index) {
+		auto &block = blocks[index];
+		block.Frame.Position = {0, 0, -4};
+		block.Capacity = block.ParticleLimit = 1;
+		for (size_t curve = 0; curve < effects::CURVE_SAMPLES; ++curve) {
+			block.Curves.Size[curve] = 2;
+			block.Curves.Alpha[curve] = 1;
+			block.Curves.Colour[curve] = index == 2 ? 0x0000FF00u : 0x00FFFFFFu;
+		}
+		spawn[index].Speed = core::NumberRange{0};
+		spawn[index].Lifetime = core::NumberRange{10};
+		runtime[index].Requested = 1;
+		auto &batch = batches[index];
+		batch.Block = &block;
+		batch.Spawn = &spawn[index];
+		batch.Runtime = &runtime[index];
+		batch.Texture = texture;
+		batch.LightEmission = 1;
+		batch.LightInfluence = 0;
+		auto &view = views[index];
+		view.Target = &target;
+		view.Slot = index;
+		view.World = 790;
+		view.WorldName = authoredWorld;
+		view.Pipeline = pipelineName;
+		view.ParticleWorld = 791 + index;
+		view.ParticleWorldName = core::Name(
+			index == 0	 ? "replica-particle-ada"
+			: index == 1 ? "replica-particle-grace"
+						 : "replica-particle-sam"
+		);
+		batch.SourceWorld = view.ParticleWorldName;
+		if (index != 2) {
+			image.Pixels =
+				index == 0
+					? std::vector<std::byte>{std::byte{255}, std::byte{0}, std::byte{0}, std::byte{255}}
+					: std::vector<std::byte>{std::byte{0}, std::byte{0}, std::byte{255}, std::byte{255}};
+			REQUIRE(fixture.Render.AddTexture(texture, image, batch.SourceWorld));
+		}
+		view.Particles = std::span(&batch, 1);
+		view.ParticleBlocks = view.ParticlePool = 1;
+		view.ParticleRevision = view.ParticleLayoutRevision = view.ParticleResidentRevision = 1;
+		view.ParticleDelta = 1.0f / 60;
+		if (genericField) {
+			view.Particles = {};
+			view.GpuParticles.emplace();
+			auto &field = view.GpuParticles->Field;
+			field.RequestedCount = 262144;
+			field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::First);
+			field.VelocityResponse = 0;
+			field.Styles[0].Colour = index == 0	  ? core::Color3{1, 0, 0}
+									 : index == 1 ? core::Color3{0, 0, 1}
+												  : core::Color3{0, 1, 0};
+			field.Styles[0].Alpha = .8f;
+			field.Styles[0].Size = .4f;
+			field.SpawnSamples.push_back({{0, 0, -4}, 15, {}, 0});
+			view.Lighting.Ambient = {1, 1, 1};
+			view.OverrideLighting = true;
+		}
+	}
+	render::OverlayImage overlay;
+	const auto frame = fixture.Render.Render(views, overlay, nullptr, false);
+	REQUIRE(frame.Submitted);
+	CHECK(frame.ComputeDispatches >= 3);
+	if (genericField) CHECK(fixture.Render.MemoryStatistics().BufferBytes >= 3ull * 262144 * 32);
+	for (size_t index = 0; index < views.size(); ++index) {
+		// Frame composition runs only for the final view; compare each view's scene output.
+		const auto captured = render::test::CaptureResource(
+			fixture.Render, core::Name("tonemapped"), index, 64, 64, render::test::ImageFormat::Rgba8Unorm
+		);
+		const size_t centre = 32 * captured.RowStrideBytes + 32 * 4;
+		const int red = std::to_integer<uint8_t>(captured.Bytes[centre]);
+		const int blue = std::to_integer<uint8_t>(captured.Bytes[centre + 2]);
+		const int green = std::to_integer<uint8_t>(captured.Bytes[centre + 1]);
+		INFO("client=" << index << " red=" << red << " blue=" << blue);
+		CHECK(
+			(index == 0	  ? red > blue + 64
+			 : index == 1 ? blue > red + 64
+						  : green > red + 64 && green > blue + 64)
+		);
+	}
+}

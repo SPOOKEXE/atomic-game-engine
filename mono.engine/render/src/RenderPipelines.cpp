@@ -531,6 +531,15 @@ namespace engine::render {
 				if (GridPipeline == nullptr) {
 					ENGINE_WARN("ground grid pipeline unavailable: {}", SDL_GetError());
 				}
+				if (hdrSupported) {
+					SDL_GPUColorTargetDescription hdrGridTarget = blendedTarget;
+					hdrGridTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+					grid.target_info.color_target_descriptions = &hdrGridTarget;
+					HdrGridPipeline = SDL_CreateGPUGraphicsPipeline(Device, &grid);
+					if (HdrGridPipeline == nullptr) {
+						ENGINE_WARN("HDR ground grid pipeline unavailable: {}", SDL_GetError());
+					}
+				}
 				SDL_ReleaseGPUShader(Device, gridFragment);
 			}
 		}

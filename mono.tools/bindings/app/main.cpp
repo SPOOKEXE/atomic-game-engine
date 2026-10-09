@@ -22,7 +22,6 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/physics/Pipeline.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/ImageGraph.hpp>
@@ -128,6 +127,10 @@ namespace {
 	// said `EnumItem`, which is the shape and not the type - and would have
 	// given an author completion for every enum in the engine at once.
 	std::string LuauType(const PropertyDescriptor &property) {
+		if (property.Type == PropertyType::Reference && property.ReferenceClass.IsValid()) {
+			return std::string(property.ReferenceClass.Text());
+		}
+
 		if (property.Type == PropertyType::Enum) {
 			// **`Enum.Material`, the same as the TypeScript half**, and getting
 			// here took a correction worth recording rather than editing out.
@@ -205,6 +208,10 @@ namespace {
 	}
 
 	std::string TypeScriptType(const PropertyDescriptor &property) {
+		if (property.Type == PropertyType::Reference && property.ReferenceClass.IsValid()) {
+			return std::string(property.ReferenceClass.Text());
+		}
+
 		if (property.Type == PropertyType::Enum) {
 			// **`Enum.Material`, which is what a Roblox script spells**, and this
 			// is the half of `ROADMAP.md` v0.10's rename that a type system can
@@ -509,10 +516,17 @@ namespace {
 				const PropertyDescriptor &described = properties[property];
 				out << "\t\t\t\t{";
 				out << "\"name\": \"" << described.Name.Text() << "\", ";
-				out << "\"type\": \"" << TypeName(described.Type) << "\", ";
+				out << "\"type\": \"";
+				if (described.Type == PropertyType::Reference && described.ReferenceClass.IsValid()) {
+					out << described.ReferenceClass.Text();
+				} else {
+					out << TypeName(described.Type);
+				}
+				out << "\", ";
 				out << "\"kind\": \"" << KindName(described.Kind) << "\", ";
 				out << "\"bytes\": " << described.Size << ", ";
 				out << "\"writable\": " << (described.Writable ? "true" : "false") << ", ";
+				out << "\"nullable\": " << (described.Nullable ? "true" : "false") << ", ";
 				if (described.Type == PropertyType::Enum) {
 					// Only on an enum property, so the shape of every other row
 					// is unchanged and the diff of this file reads as what
@@ -768,8 +782,8 @@ declare extern type ChangedSignal with
 end
 
 declare extern type RemoteEventSignal with
-	function Connect(self, handler: (payload: string) -> ()): RBXScriptConnection
-	function Once(self, handler: (payload: string) -> ()): RBXScriptConnection
+	function Connect(self, handler: (payload: string, sender: Player?) -> ()): RBXScriptConnection
+	function Once(self, handler: (payload: string, sender: Player?) -> ()): RBXScriptConnection
 end
 
 -- --- input ------------------------------------------------------------------
@@ -2139,7 +2153,9 @@ declare task: {
 					out << "read ";
 				}
 
-				out << property.Name.Text() << ": " << LuauType(property) << "\n";
+				out << property.Name.Text() << ": " << LuauType(property);
+				if (property.Nullable && property.Type == PropertyType::Reference) out << "?";
+				out << "\n";
 			}
 
 			// **The host members, which project onto no component and never
@@ -2325,6 +2341,9 @@ declare task: {
 				out << "\tfunction ApplyImpulse(self, impulse: Vector3): ()\n";
 				out << "\tfunction SetAppliedForce(self, force: Vector3): ()\n";
 				out << "\tfunction SetAppliedTorque(self, torque: Vector3): ()\n";
+				out << "\tfunction SetSpawnSamples(self, samples: buffer): boolean\n";
+				out << "\tfunction SetLayer(self, index: number, colour: Color3, alpha: number, size: "
+					   "number, acceleration: Vector3): boolean\n";
 				out << "\tfunction Break(self): number\n";
 
 				// **The one door onto `LocalTransparency`, for the same reason
@@ -2924,8 +2943,8 @@ declare interface ChangedSignal {
 }
 
 declare interface RemoteEventSignal {
-	Connect(handler: (payload: string) => void): RBXScriptConnection;
-	Once(handler: (payload: string) => void): RBXScriptConnection;
+	Connect(handler: (payload: string, sender: Player | null) => void): RBXScriptConnection;
+	Once(handler: (payload: string, sender: Player | null) => void): RBXScriptConnection;
 }
 
 // The instance tree's signals, matching the Luau half - undeclared until v0.13
@@ -3970,7 +3989,9 @@ declare const task: {
 				if (!property.Writable) {
 					out << "readonly ";
 				}
-				out << property.Name.Text() << ": " << TypeScriptType(property) << ";\n";
+				out << property.Name.Text() << ": " << TypeScriptType(property);
+				if (property.Nullable && property.Type == PropertyType::Reference) out << " | null";
+				out << ";\n";
 			}
 
 			// The host members, for the reason the Luau half states: they
@@ -4075,6 +4096,9 @@ declare const task: {
 				out << "\tApplyImpulse(impulse: Vector3): void;\n";
 				out << "\tSetAppliedForce(force: Vector3): void;\n";
 				out << "\tSetAppliedTorque(torque: Vector3): void;\n";
+				out << "\tSetSpawnSamples(samples: ArrayBuffer): boolean;\n";
+				out << "\tSetLayer(index: number, colour: Color3, alpha: number, size: number, acceleration: "
+					   "Vector3): boolean;\n";
 				out << "\tBreak(): number;\n";
 
 				// The one door onto `LocalTransparency`, matching the Luau half
@@ -4402,7 +4426,6 @@ int main(int argc, char **argv) {
 	// from an empty table would be a valid file describing nothing, and its
 	// drift check would pass forever.
 	(void)engine::scene::PartClass();
-	engine::physics::RegisterPhysicsClasses();
 
 	// **`ShaderScript` and `EditableMesh`, which `PartClass` does not reach.**
 	// Both self-register through their own accessor rather than through

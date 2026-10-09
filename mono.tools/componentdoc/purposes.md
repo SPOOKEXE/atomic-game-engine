@@ -25,10 +25,12 @@ the fact a reader most needs and the one the table cannot show.
 ecs.WorldTime | Per-world singleton clock: simulated seconds elapsed, the fixed tick delta, completed ticks, and the frame's wall delta and interpolation alpha.
 ecs.DirtyBits | One row's changed-component bits, one bit per column position in its archetype's sorted set, so marking a write is an index the store already holds.
 ecs.NotArchivable | A tag meaning this instance is left out of a save. `Archivable` is `!Has<NotArchivable>`, which is the same fact read the cheap way round.
+ecs.ClientLocal | Viewer-owned provenance for predicted instances; replication and game saves exclude the tagged instance and its descendants, and client mutation is allowed only on predicted rows.
 ecs.AttributeTable | Per-world singleton holding every instance attribute a game has set, as a map per entity keyed by interned attribute name.
 ecs.Hierarchy | Parent, first and last child and both sibling links for one instance, which is how the instance tree is stored rather than as a child vector per node.
 ecs.InstanceClass | Which registered class an entity was created as, so `ClassName` and `:IsA` are a column read rather than a lookup in a side index.
 ecs.InstanceName | An instance's name, interned, so a thousand parts called "Part" cost one string and comparing two names is an integer compare. Names are not unique.
+ecs.InstanceProjection | Viewer-local source identity for a projected instance, used to remap reads between a canonical row and its local copy; restored metadata is inactive until rebuilt.
 effects.Beam | An authored beam drawn between two attachments: colour and transparency along its length, the texture and its scroll, end widths and curve control.
 effects.Decal | A single image projected onto one face of its parent BasePart, with colour, transparency and draw order.
 effects.EmitterSlot | Which row of the particle pool's block table an emitter owns, kept on the emitter's own row so the per-frame passes read a column instead of a hash map.
@@ -45,10 +47,6 @@ physics.CopiedDynamicContactCache | Per-world per-tick cache of copied dynamic f
 physics.PoppercamState | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else.
 physics.PhysicsClock | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is.
 physics.PhysicsWorld | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks.
-physics.Storm | Per-world authored analytical tornado field and its fixed-tick trajectory, sampled by the physics force pass when enabled.
-physics.StormLink | Per-joint wind failure rating, material strength and accumulated fatigue, read before rigid-joint connectivity is rebuilt.
-physics.StormResponse | Per-rigid-body aerodynamic area, drag and force settings that the storm pass uses to apply wind loads.
-physics.StormVegetation | Per-static-part rest pose and wind-bend settings used to flex authored vegetation in the storm field.
 physics.observation-log | Per-world bounded log of completed physics-step summaries at the post-integration, pre-solve, and completed-solver boundaries.
 replication.SnapshotBuffer | Per-world singleton on a replicated world: a ring of received poses per entity plus the render clock, sampled at a fixed delay behind the newest tick.
 script.PortalContactRequests | Per-tick portal contact requests pairing local roots with seam transforms for applying copied destination contacts.
@@ -72,7 +70,7 @@ world.Replica | Marks a world as a mirror of one the server owns, naming the wor
 ## `scene`
 
 scene.CameraPortalView | Eye-world presentation history and seam mapping, independent of the camera subject world and rebased when the body crosses.
-scene.AuthoredAffordance | Explicit bounded gameplay semantics on a BasePart, read by data-scene affordance queries without inferring meaning from geometry.
+scene.AuthoredAffordance | Opt-in bounded gameplay semantics on a BasePart, read by data-scene affordance queries without inferring meaning from geometry; ordinary parts do not allocate the row.
 scene.CameraCharacterHold | Local character and Humanoid camera hold while the source rig retires and the successor rig is pending.
 scene.CameraBodyPose | Local last-presented body rows, joint palette and root pose retained while a replica's source rows retire.
 scene.ActiveCamera | Resource: which entity the world is currently looked through, and the aspect ratio of whatever is drawing it. The matrices are not here: every consumer builds them against its own target with `ResolveCamera`.
@@ -87,7 +85,7 @@ scene.AudioState | Resource: the world's one ear and master gain - listener mode
 scene.AwakeWorld | Held by an entity that wants the world to keep ticking, with a required `Reason` naming why. `world::DecideLifecycle` walks these rows.
 scene.Bounds | Half the extent of a part on each local axis. Render culling reads it every frame, the broad phase every tick, and the `Size` property writes it.
 scene.Bone | One joint of a rig on a `Bone` instance: its rest frame, the animated offset on top of it, its inverse bind frame, its resolved world frame, and its palette slot and parent slot.
-scene.Camera | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world.
+scene.Camera | The lens: vertical field of view, near plane and far plane. It deliberately holds no aspect ratio, because that is a fact about a window and not about the world; plain Camera instances are local to their viewer.
 scene.CameraSubject | The camera's follow target, chosen explicitly or automatically from the local player's Humanoid. Each camera keeps its own selection before and after becoming current.
 scene.Clouds | A cloud layer authored under `Lighting`: its lit colour, how much sky it covers and how opaque that is, and the speed and heading it drifts at. Presentation only.
 scene.CloudCompute | Voxel-like cloud generation controls on a `CloudCompute` instance: cell and layer dimensions, fractal detail, deterministic seed and bounded ray-march quality for the resident environment texture.
@@ -110,7 +108,7 @@ scene.PortalCrossing | Portal-only state for one canonical body: its reference a
 scene.PortalRim | The four invisible static colliders preserving an open portal pane's physical perimeter while its aperture becomes a trigger.
 scene.EditableMeshCollision | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick.
 scene.Gravity | Per-world gravity acceleration applied to dynamic simulated bodies before physics integrates them; omitting the resource disables gravity, while `PrepareGravity` supplies Earth's default.
-scene.GpuParticleField | Authored request for a deterministic analytical storm particle field, including enabled layers, normalized count, reset seed, and per-layer colour, opacity and size.
+scene.GpuParticleField | Authored configuration for a generic device-local particle field, including spawn samples, bounds, velocity response, visual layers and styles; live particle positions stay on the GPU.
 scene.Humanoid | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick.
 scene.InputState | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's.
 scene.ImageGraph | On an `ImageGraph` instance: the signed graph asset, world-unique key, selected output, typed input overrides and local revision the client watches to resolve ordinary image outputs.
@@ -119,7 +117,7 @@ scene.LightingService | On the single `Lighting` service instance: ambient and o
 scene.LODAuto | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, projected quad-area target, and optional final billboard texture.
 scene.LODCustom | Per-level authored mesh overrides and an optional final billboard texture. Nil fields inherit the matching `scene.LODAuto` field and valid fields take precedence.
 scene.LODSettings | Per-item LOD distance floors. An all-zero row inherits the active view's default mesh LOD distances.
-scene.RenderEffects | A bounded list of compute and post-processing graph nodes attached to one visual, with selection masks, ordering, revisions, stages, and enabled state.
+scene.RenderEffects | A bounded list of compute and post-processing graph nodes attached to one visual, with selection masks, ordering, revisions, stages, and enabled state; Studio offers compatible enabled visual nodes from the active profile plus `None` to clear a slot.
 scene.LocalPlayer | Resource: the `Player` this host is looking through, or null on a server. It backs the `Players.LocalPlayer` property.
 scene.LocalTransparency | A per-viewer override of `Visual::Transparency`, written only through `SetLocalTransparency`, that fades a part standing between the camera and what it is watching.
 scene.MaterialCatalogue | Resource: the derived table of texture sets per material name, filled by the content pump and read by `ResolveMaterials`. It is not authored and not saved.
@@ -159,7 +157,7 @@ scene.Surface | The physical material name a part feels like, resolved against t
 scene.Sun | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses.
 scene.SurfaceAppearance | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it.
 scene.SurfaceBounces | Resource: how deep a mirror may show another mirror, or zero to let the engine decide. Set through the `workspace.SurfaceBounces` property.
-scene.SurfaceCamera | On a mirror or portal pane: render-texture size, redraw cap, tag filter, post-grade, which face it projects off and which surface slot it writes.
+scene.SurfaceCamera | Authored camera subtype for a mirror or portal pane: render-texture size, redraw cap, tag filter, post-grade, projection face and surface slot; unlike a plain Camera, it is not a viewer-local runtime class.
 scene.SurfaceLens | The off-axis frustum, oblique clip plane and pane mapping `AimSurfaceCameras` fits to a mirror or portal every frame. Derived from where the local eye stands, never authored.
 scene.SurfaceLimit | Resource: how many surface panes may be drawn at once, from zero upward. Set through the `workspace.MaxSurfaces` property.
 scene.SurfaceTable | Resource: the world's material table, mapping a `Surface::Material` name to the friction and restitution the narrow phase combines with.
@@ -174,12 +172,12 @@ scene.IntValue | The signed 64-bit integer stored by an `IntValue` instance.
 scene.NumberValue | The double-precision number stored by a `NumberValue` instance.
 scene.ObjectValue | The entity reference stored by an `ObjectValue` instance.
 scene.Vector3Value | The vector stored by a `Vector3Value` instance.
-scene.Terrain | Resource: how a world's ground is generated - the node graph, the seed, chunk extent and resolution, vertical extent and how far chunks are kept. The recipe is stored and the ground it makes never is.
+scene.Terrain | Component: the authored recipe on the generated Terrain instance under Workspace. It stores the graph, seed, chunk extent and resolution, vertical extent and view distance, while generated ground remains derived.
 scene.TextureCatalogue | Resource: the flipbook facts - grid, frame count and rate - the content pump learned about each loaded texture.
 scene.Tool | On a `Tool` instance: where its handle sits relative to the grip point. `EquipTool` and the grip pose read it, and it decides where a held handle is drawn.
 scene.Accessory | On an accessory: the matching handle and character attachment references. The hierarchy determines equip state; the pose pass carries its handle as one CharacterLimb.
 scene.Transform | Where a thing is: a world-space CFrame, never relative to a parent. The component almost every system reads.
-scene.Transient | Marks an instance made by whoever is looking rather than by the world's author, so the game-file writer leaves it out of a saved `.agame`.
+scene.Transient | Marks a viewer-owned subtree omitted from authored game saves, so local viewport state cannot become shared world content.
 scene.VectorField2D | A planar vector field over its local XZ plane: constant, radial and tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor.
 scene.VectorField3D | A three-dimensional vector field: constant, radial and axis-directed tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor.
 scene.Visual | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame.
@@ -234,6 +232,7 @@ gui.Padding | `UIPadding`: space held back inside the parent element on each of 
 gui.PageLayout | `UIPageLayout`: shows one of the parent's children at a time and slides the rest aside, with a tween time, easing curve and circular wrap.
 gui.PageMotion | Engine state for a sliding `UIPageLayout`: which pages it is between, when the slide began, and how far along the eased curve it is.
 gui.Picture | The image an `ImageLabel` or `ImageButton` shows: the asset name, tint, scale mode, slice and tile settings, and the hover and pressed swaps.
+gui.PlayerGuiTemplateOrigin | Stable path from a StarterGui template, used to reconnect a retained local collector when the server replaces its source rows.
 gui.PresentationState | The local, derived override sample of an `AnimationPlayback`, rebuilt from the caller's explicit UI timeline and never saved or replicated.
 gui.Resolved | Where the layout pass actually put a 2D element: absolute position, size and rotation, the clip rectangle, the drawn text size and the paint order.
 gui.ResolvedStyle | Viewer-local result of resolving theme tokens, class rules, interaction state and direct properties.
@@ -260,6 +259,9 @@ gui.Viewport | What a `ViewportFrame` renders into itself: the camera to render 
 gui.VirtualAnchorState | Viewer-local keyed scroll anchor preserved while a virtual page changes.
 gui.VirtualCollection | A bounded keyed data page, total item count, extent policy and overscan for one virtual scrolling collection.
 gui.VirtualFocusState | Viewer-local stable key and index used to restore focus after virtual row recycling.
+
+playergui.Projection | Per-player runtime state mapping canonical GUI collectors to local copies and tracking character changes and locally destroyed copies until respawn.
+playergui.Source | Marks an authoritative GUI source and links it to its viewer-local copy; the mapping is cleared when snapshot data is restored.
 
 script.PortalObservationLog | Resource: bounded rings of portal crossing, arrival, input and handoff records, stamped with each subject's trace id. Hooks and the server observation sink read them; the oldest rows are overwritten and counted.
 script.PortalPlayerInput | Per-player forwarded input clock and bounded native movement queue. Preserves control timing across route adoption and reports physics-applied input; character replacement invalidates the queue.

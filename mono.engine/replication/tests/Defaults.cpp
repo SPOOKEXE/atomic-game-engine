@@ -296,6 +296,7 @@ TEST_CASE("a serialiser is not enough to cross, and the two that say so", "[repl
 	CHECK(engine::replication::CannotBeSigned("scene.TextContent"));
 	CHECK(engine::replication::CannotBeSigned("scene.ShaderSource"));
 	CHECK(engine::replication::CannotBeSigned("scene.ImageGraph"));
+	CHECK(engine::replication::CannotBeSigned("scene.GpuParticleField"));
 	CHECK(engine::replication::CannotBeSigned("gui.NodeCanvasNode"));
 	CHECK(engine::replication::CannotBeSigned("gui.NodeCanvasGroup"));
 	CHECK(engine::replication::CannotBeSigned("gui.VirtualCollection"));
@@ -375,7 +376,9 @@ TEST_CASE("the set is derived, and never contradicts the exclusions", "[replicat
 							  component.Name == "script.JavaScriptSourceContainer" ||
 							  component.Name == "script.CodeSourceContainerSelector" ||
 							  component.Name == "script.Disabled" || component.Name == "script.Program";
-		CHECK((prefixed || instance || scripted));
+		const bool attributes = component.Name == "ecs.AttributeTable";
+		CHECK((prefixed || instance || scripted || attributes));
+		CHECK(component.Resource == attributes);
 	}
 }
 
@@ -429,11 +432,6 @@ TEST_CASE("every ecs component is classified rather than left to a prefix", "[re
 		// about and decided against, which is a different thing from one nobody
 		// looked at.
 		//
-		// - `ecs.AttributeTable` holds a map, so it is not trivially copyable
-		//   and cannot be *signed*. A non-trivial component that should cross
-		//   needs `Observed` and a matching `Store::Observe`, which is a
-		//   decision per component and belongs in the host that wants it.
-		//
 		// - `ecs.DirtyBits` is each store's own bookkeeping about its own
 		//   writes, one bit per column position in *its* archetype. The far
 		//   side's archetypes are its own, so the bits would not even mean the
@@ -449,15 +447,22 @@ TEST_CASE("every ecs component is classified rather than left to a prefix", "[re
 		//   file reads it. A client does not save, and the studio owns the
 		//   world it saves rather than replicating it back.
 		//
+		// - `ecs.ClientLocal` marks a viewer-owned tree, which the authority
+		//   excludes before either its structure or values enter the stream.
+		//
+		// - `ecs.InstanceProjection` maps a viewer-owned copy to its local
+		//   canonical source, so neither peer can use that mapping.
+		//
 		// The three after the first were invisible to this loop until v0.19,
 		// because they registered under the compiler's spelling of their type
 		// rather than a name - so they did not start with `ecs.` and this walk
 		// skipped them. Naming them is what let this test ask the question.
 		constexpr std::string_view NEVER_CROSSES[] = {
-			"ecs.AttributeTable",
 			"ecs.DirtyBits",
 			"ecs.WorldTime",
 			"ecs.NotArchivable",
+			"ecs.ClientLocal",
+			"ecs.InstanceProjection",
 		};
 
 		bool excluded = false;
@@ -546,7 +551,7 @@ TEST_CASE("only what a system writes or a hash cannot cover is observed", "[repl
 			(component.Name == "scene.Transform" || component.Name == "scene.Motion" ||
 			 component.Name == "gui.Label" || component.Name == "gui.Entry" ||
 			 component.Name == "gui.NodeCanvasNode" || component.Name == "gui.NodeCanvasGroup" ||
-			 component.Name == "script.Program")
+			 component.Name == "script.Program" || component.Name == "ecs.AttributeTable")
 		);
 	}
 }

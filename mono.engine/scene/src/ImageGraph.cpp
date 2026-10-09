@@ -1,5 +1,6 @@
 #include "ImageGraphRegistration.hpp"
 
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ImageGraph.hpp>
@@ -13,6 +14,10 @@
 
 namespace engine::scene {
 	namespace {
+		bool ImageGraphMutationAllowed(const ecs::Store &store, ecs::Entity instance) {
+			return !store.AdoptOnly() ||
+				   (ecs::Store::IsPredicted(instance) && ecs::IsClientLocalInstance(store, instance));
+		}
 		bool Token(std::string_view text) {
 			return !text.empty() && text.size() <= 128 && text != "." && text != ".." &&
 				   std::all_of(text.begin(), text.end(), [](unsigned char ch) {
@@ -40,9 +45,19 @@ namespace engine::scene {
 		}
 		bool Unique(const ecs::Store &store, ecs::Entity instance, core::Name key) {
 			bool unique = true;
+			const auto paired = [&](ecs::Entity other) {
+				const auto *instanceProjection = store.Get<ecs::InstanceProjection>(instance);
+				if (instanceProjection != nullptr && instanceProjection->Active &&
+					instanceProjection->Source == other)
+					return true;
+				const auto *otherProjection = store.Get<ecs::InstanceProjection>(other);
+				return otherProjection != nullptr && otherProjection->Active &&
+					   otherProjection->Source == instance;
+			};
 			const auto check = [&](ecs::Entity other) {
 				const auto *graph = store.Get<ImageGraph>(other);
-				if (other != instance && graph != nullptr && graph->InstanceKey == key) unique = false;
+				if (other != instance && !paired(other) && graph != nullptr && graph->InstanceKey == key)
+					unique = false;
 			};
 			store.EachRoot([&](ecs::Entity root) {
 				check(root);
@@ -258,7 +273,7 @@ namespace engine::scene {
 		return Token(text);
 	}
 	bool SetImageGraphInstanceKey(ecs::Store &store, ecs::Entity instance, core::Name key) {
-		if (store.AdoptOnly()) return false;
+		if (!ImageGraphMutationAllowed(store, instance)) return false;
 		const auto *held = store.Get<ImageGraph>(instance);
 		if (held == nullptr) return false;
 		if (!key.IsValid()) return !held->InstanceKey.IsValid();
@@ -270,7 +285,7 @@ namespace engine::scene {
 		return true;
 	}
 	bool SetImageGraphAsset(ecs::Store &store, ecs::Entity instance, core::Name asset) {
-		if (store.AdoptOnly()) return false;
+		if (!ImageGraphMutationAllowed(store, instance)) return false;
 		const auto *held = store.Get<ImageGraph>(instance);
 		if (held == nullptr) return false;
 		if (!asset.IsValid()) return !held->Graph.IsValid();
@@ -282,7 +297,7 @@ namespace engine::scene {
 		return true;
 	}
 	bool SetImageGraphOutput(ecs::Store &store, ecs::Entity instance, core::Name output) {
-		if (store.AdoptOnly() || !Token(output.Text())) return false;
+		if (!ImageGraphMutationAllowed(store, instance) || !Token(output.Text())) return false;
 		const auto *held = store.Get<ImageGraph>(instance);
 		if (held == nullptr) return false;
 		if (held->Output == output) return true;
@@ -293,7 +308,7 @@ namespace engine::scene {
 	}
 	bool
 	SetImageGraphInputs(ecs::Store &store, ecs::Entity instance, std::span<const ImageGraphInput> inputs) {
-		if (store.AdoptOnly() || !InputsValid(inputs)) return false;
+		if (!ImageGraphMutationAllowed(store, instance) || !InputsValid(inputs)) return false;
 		const auto *held = store.Get<ImageGraph>(instance);
 		if (held == nullptr) return false;
 		std::vector<ImageGraphInput> candidate;
@@ -307,7 +322,7 @@ namespace engine::scene {
 		return true;
 	}
 	bool SetImageGraphInput(ecs::Store &store, ecs::Entity instance, const ImageGraphInput &input) {
-		if (store.AdoptOnly() || !InputValid(input)) return false;
+		if (!ImageGraphMutationAllowed(store, instance) || !InputValid(input)) return false;
 		const auto *held = store.Get<ImageGraph>(instance);
 		if (held == nullptr || !InputsValid(held->Inputs)) return false;
 		const auto normalized = Canonical(input);
@@ -326,7 +341,7 @@ namespace engine::scene {
 		return SetImageGraphInputs(store, instance, candidate);
 	}
 	bool ResetImageGraphInput(ecs::Store &store, ecs::Entity instance, core::Name name) {
-		if (store.AdoptOnly() || !Token(name.Text())) return false;
+		if (!ImageGraphMutationAllowed(store, instance) || !Token(name.Text())) return false;
 		const auto *held = store.Get<ImageGraph>(instance);
 		if (held == nullptr || !InputsValid(held->Inputs)) return false;
 		if (std::none_of(held->Inputs.begin(), held->Inputs.end(), [&](const auto &value) {

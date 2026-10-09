@@ -16,10 +16,12 @@
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/WorldView.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/generators/catch_generators.hpp>
@@ -31,6 +33,7 @@
 #include <iostream>
 #include <optional>
 #include <sstream>
+#include <utility>
 
 TEST_SUITE_ID("engine.render.portalfixtures")
 TEST_DEPENDS("engine.render.imagecomparison")
@@ -77,8 +80,66 @@ namespace {
 		return instance;
 	}
 
-	graph::PipelineDocument InstallPortalFixture(render::Renderer &renderer, bool hdr = false) {
-		auto document = hdr ? graph::DefaultWorldHdrDocument() : graph::DefaultPbrDocument();
+	graph::PipelineDocument InstallPortalFixture(
+		render::Renderer &renderer,
+		bool hdr = false,
+		bool separateCaptures = false,
+		bool flatMirrorFeedback = false
+	) {
+		const auto basis = hdr ? graph::DefaultWorldHdrDocument() : graph::DefaultPbrDocument();
+		graph::PipelineDocument document;
+		bool replacingCapture = false;
+		for (const auto &edit : basis.Edits()) {
+			if (edit.Kind == graph::EditKind::AddNode) {
+				replacingCapture = separateCaptures && edit.NodeKind == core::Name("surface-capture");
+				if (replacingCapture) {
+					for (const char *kind : {"mirror-capture", "portal-capture"}) {
+						document.Record(
+							{.Kind = graph::EditKind::AddNode,
+							 .Name = core::Name(kind),
+							 .NodeKind = core::Name(kind),
+							 .Scope = graph::NodeScope::View}
+						);
+						for (const auto &input :
+							 {std::pair{"shadow", "shadow"},
+							  std::pair{"ordered-entities", "entities"},
+							  std::pair{"lod-instances", "instances"}})
+							document.Record(
+								{.Kind = graph::EditKind::Reads,
+								 .Target = core::Name(input.first),
+								 .Key = core::Name(input.second)}
+							);
+						if (core::Name(kind) == core::Name("mirror-capture")) {
+							if (flatMirrorFeedback)
+								document.Record(
+									{.Kind = graph::EditKind::Set,
+									 .Key = core::Name("feedback"),
+									 .Value = "flat"}
+								);
+							document.Record(
+								{.Kind = graph::EditKind::Reads,
+								 .Target = core::Name("world-entities"),
+								 .Key = core::Name("world-state")}
+							);
+							document.Record(
+								{.Kind = graph::EditKind::Writes,
+								 .Target = core::Name("mirror-views"),
+								 .Key = core::Name("surface")}
+							);
+						} else {
+							for (const auto &output :
+								 {std::pair{"portal-image", "portal"}, std::pair{"portal-light", "light"}})
+								document.Record(
+									{.Kind = graph::EditKind::Writes,
+									 .Target = core::Name(output.first),
+									 .Key = core::Name(output.second)}
+								);
+						}
+					}
+				}
+			}
+			if (!replacingCapture) document.Record(edit);
+		}
 		const core::Name captureKind("portal-fixture-capture-boundary");
 		graph::NodeKindSpec capture;
 		capture.Kind = captureKind;
@@ -1642,6 +1703,242 @@ TEST_CASE("interface shaders follow the submitted content owner", "[render][gpu]
 	CHECK(lagging.RefreshShaders(demand, library, first) == 1);
 	CHECK_FALSE(lagging.HasShaderVariant(name, first));
 	CHECK(CompareImages(missing.View(), capture(&lagging).View()).Passed());
+}
+
+TEST_CASE("device particles reach portal and mirror captures", "[render][gpu][surface-particles][.]") {
+	const bool mirror = GENERATE(false, true);
+	const bool separateCaptures = GENERATE(false, true);
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallPortalFixture(fixture.Render, true, separateCaptures);
+	const render::SceneTarget target{WIDTH, HEIGHT};
+	// Mirrors multiply the captured image by their pane tint; portals preserve its colour.
+	auto pane = Plane(1, {0, 1, 0}, HALF_WIDTH, HALF_HEIGHT, mirror ? core::Color3{1, 1, 1} : core::Color3{});
+	pane.Surface = 0;
+	const std::array instances{pane};
+	render::PortalView portal;
+	portal.Centre = pane.Frame.Position;
+	portal.Normal = {0, 0, 1};
+	portal.First = {HALF_WIDTH, 0, 0};
+	portal.Second = {0, HALF_HEIGHT, 0};
+	portal.Warp.Frame.Position = {DESTINATION_X, 0, 0};
+	render::SurfaceView surface;
+	surface.PaneCentre = portal.Centre;
+	surface.PaneNormal = portal.Normal;
+	surface.PaneFirst = portal.First;
+	surface.PaneSecond = portal.Second;
+	surface.Width = WIDTH;
+	surface.Height = HEIGHT;
+	render::View view;
+	view.World = 14901;
+	view.WorldName = core::Name("portal.fixture.device-particles");
+	view.Pipeline = core::Name("portal.fixture.pbr");
+	view.Target = &target;
+	view.CameraFrame = core::CFrame::LookAt({0, 1, 4}, {0, 1, 0});
+	view.Camera.NearPlane = .1f;
+	view.Camera.FarPlane = 256;
+	view.Instances = instances;
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {1, 1, 1};
+	view.Lighting.OutdoorAmbient = view.Lighting.Ambient;
+	view.Lighting.Direct = {};
+	if (mirror) {
+		const scene::SurfacePane geometry{
+			.Centre = portal.Centre, .Normal = portal.Normal, .First = portal.First, .Second = portal.Second
+		};
+		const auto reflected = scene::ReflectCamera(geometry, view.CameraFrame, {});
+		REQUIRE(reflected.Renders);
+		surface.Frame = reflected.Frame;
+		surface.Projection = scene::SurfaceProjection(reflected.Lens, reflected.Frame);
+		view.Surfaces = std::span(&surface, 1);
+		fixture.Render.SetSurfaceBounces(1);
+	} else {
+		view.Portals = std::span(&portal, 1);
+	}
+	render::OverlayImage overlay;
+	const auto capture = [&] {
+		view.Damage.Scene = true;
+		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		CHECK((mirror ? frame.SurfacePasses > 0 : frame.PortalPasses > 0));
+		return CaptureResource(
+			fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+		);
+	};
+	const auto empty = capture();
+	view.GpuParticles.emplace();
+	auto &field = view.GpuParticles->Field;
+	field.RequestedCount = 262144;
+	field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::First);
+	field.VelocityResponse = 0;
+	field.Styles[0].Colour = {1, 0, 0};
+	field.Styles[0].Alpha = .8f;
+	field.Styles[0].Size = .25f;
+	// The source is behind the primary eye for a mirror and outside its
+	// frustum for a portal, so only a real capture can add aperture pixels.
+	for (uint32_t sample = 0; sample < 64; ++sample) {
+		const core::Vector3 position{
+			(mirror ? 0 : DESTINATION_X) + static_cast<float>(sample % 8) * .16f - .56f,
+			.44f + static_cast<float>(sample / 8) * .16f,
+			mirror ? 6.0f : -2.0f
+		};
+		field.SpawnSamples.push_back({position, 15, {}, 0});
+	}
+	const auto populated = capture();
+	size_t redPixels = 0;
+	for (uint32_t y = 32; y < 65; ++y) {
+		for (uint32_t x = 35; x < 95; ++x) {
+			const size_t at = y * populated.RowStrideBytes + x * 4;
+			const int red = std::to_integer<int>(populated.Bytes[at]);
+			const int green = std::to_integer<int>(populated.Bytes[at + 1]);
+			const int before = std::to_integer<int>(empty.Bytes[at]);
+			if (red > green + 10 && red > before + 10) ++redPixels;
+		}
+	}
+	INFO("mirror=" << mirror << " separate=" << separateCaptures << " particle pixels=" << redPixels);
+	CHECK(redPixels > 30);
+}
+
+TEST_CASE("editor ground grid reaches portal and mirror captures", "[render][gpu][surface-grid][.]") {
+	const bool mirror = GENERATE(false, true);
+	const bool separateCaptures = GENERATE(false, true);
+	FixtureDevice fixture;
+	fixture.Initialise();
+	// Exact roundtrips cover current-frame recursion, without prior-frame feedback at the cutoff.
+	InstallPortalFixture(fixture.Render, true, separateCaptures, true);
+	const render::SceneTarget target{WIDTH, HEIGHT};
+	auto pane = Plane(1, {0, 1, 0}, HALF_WIDTH, HALF_HEIGHT, mirror ? core::Color3{1, 1, 1} : core::Color3{});
+	pane.Surface = 0;
+	std::vector instances{pane};
+	std::vector<render::SurfaceView> mirrors;
+	render::PortalView portal;
+	portal.Centre = pane.Frame.Position;
+	portal.Normal = {0, 0, 1};
+	portal.First = {HALF_WIDTH, 0, 0};
+	portal.Second = {0, HALF_HEIGHT, 0};
+	portal.Warp.Frame.Position = {DESTINATION_X, 0, 0};
+	render::SurfaceView surface;
+	surface.PaneCentre = portal.Centre;
+	surface.PaneNormal = portal.Normal;
+	surface.PaneFirst = portal.First;
+	surface.PaneSecond = portal.Second;
+	surface.Width = WIDTH;
+	surface.Height = HEIGHT;
+	render::View view;
+	view.Pipeline = core::Name("portal.fixture.pbr");
+	view.Target = &target;
+	view.CameraFrame = core::CFrame::LookAt({0, 2, 4}, {0, 1, 0});
+	view.Camera.FieldOfViewRadians = 1.0471975512f;
+	view.Camera.NearPlane = .1f;
+	view.Camera.FarPlane = 256;
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {.1f, .1f, .1f};
+	view.Lighting.OutdoorAmbient = view.Lighting.Ambient;
+	view.Lighting.Direct = {};
+	view.Instances = instances;
+	if (mirror) {
+		const scene::SurfacePane geometry{
+			.Centre = portal.Centre, .Normal = portal.Normal, .First = portal.First, .Second = portal.Second
+		};
+		const auto reflected = scene::ReflectCamera(geometry, view.CameraFrame, {});
+		REQUIRE(reflected.Renders);
+		surface.Frame = reflected.Frame;
+		surface.Projection = scene::SurfaceProjection(reflected.Lens, reflected.Frame);
+		mirrors.push_back(surface);
+		// Behind the primary eye, but visible from the first reflected eye.
+		auto opposite = geometry;
+		opposite.Centre.Z = 6;
+		opposite.Normal = {0, 0, -1};
+		opposite.First = {.45f, 0, 0};
+		opposite.Second = {0, .45f, 0};
+		const auto secondEye = scene::ReflectCamera(opposite, view.CameraFrame, {});
+		REQUIRE(secondEye.Renders);
+		auto secondView = surface;
+		secondView.Index = 1;
+		secondView.Frame = secondEye.Frame;
+		secondView.Projection = scene::SurfaceProjection(secondEye.Lens, secondEye.Frame);
+		secondView.PaneCentre = opposite.Centre;
+		secondView.PaneNormal = opposite.Normal;
+		secondView.PaneFirst = opposite.First;
+		secondView.PaneSecond = opposite.Second;
+		mirrors.push_back(secondView);
+		auto secondPane = Plane(2, opposite.Centre, .45f, .45f, {1, 1, 1});
+		secondPane.Surface = 1;
+		instances.push_back(secondPane);
+		view.Instances = instances;
+		view.Surfaces = mirrors;
+		fixture.Render.SetSurfaceBounces(2);
+	} else {
+		view.Portals = std::span(&portal, 1);
+	}
+	view.Grid.Step = 1;
+	view.Grid.Major = 4;
+	view.Grid.Reach = 128;
+	view.Grid.Colour = {1, 0, 1};
+	view.Grid.Alpha = 1;
+	view.Grid.AxisAlpha = 0;
+	view.Grid.Offset = {mirror ? .3f : DESTINATION_X + .3f, 0, .4f};
+	render::OverlayImage overlay;
+	const auto capture = [&] {
+		view.Damage.Scene = true;
+		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		CHECK((mirror ? frame.SurfacePasses >= 2 : frame.PortalPasses > 0));
+		return CaptureResource(
+			fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+		);
+	};
+	const auto disabled = capture();
+	view.Grid.Enabled = true;
+	const auto enabled = capture();
+	size_t gridPixels = 0;
+	// Only the aperture interior counts. The primary grid is behind this opaque pane.
+	for (uint32_t y = 50; y < 62; ++y) {
+		for (uint32_t x = 45; x < 84; ++x) {
+			const size_t at = y * enabled.RowStrideBytes + x * 4;
+			const int red = std::to_integer<int>(enabled.Bytes[at]);
+			const int before = std::to_integer<int>(disabled.Bytes[at]);
+			if (red > before + 10) ++gridPixels;
+		}
+	}
+	INFO("mirror=" << mirror << " separate=" << separateCaptures << " grid pixels=" << gridPixels);
+	CHECK(gridPixels > 30);
+	view.Grid.Enabled = false;
+	const auto restored = capture();
+	const bool noGridLeak = restored.Bytes == disabled.Bytes;
+	CHECK(noGridLeak);
+	view.Grid.Enabled = true;
+	view.Grid.Strength = 0;
+	const auto muted = capture();
+	const bool zeroStrengthHidesGrid = muted.Bytes == disabled.Bytes;
+	CHECK(zeroStrengthHidesGrid);
+	view.Grid.Strength = 1;
+	if (!mirror) {
+		instances.push_back(Plane(3, {DESTINATION_X, 1, -.4f}, 2, 2, {0, 1, 0}));
+		view.Instances = instances;
+		view.Grid.Enabled = false;
+		const auto blockedWithoutGrid = capture();
+		view.Grid.Enabled = true;
+		const auto blockedWithGrid = capture();
+		bool wallHidesGrid = true;
+		size_t wallPixels = 0;
+		for (uint32_t y = 50; y < 62; ++y) {
+			for (uint32_t x = 45; x < 84; ++x) {
+				const size_t at = y * blockedWithGrid.RowStrideBytes + x * 4;
+				for (size_t channel = 0; channel < 3; ++channel)
+					wallHidesGrid = wallHidesGrid && blockedWithGrid.Bytes[at + channel] ==
+														 blockedWithoutGrid.Bytes[at + channel];
+				if (std::to_integer<int>(blockedWithGrid.Bytes[at + 1]) >
+					std::to_integer<int>(blockedWithGrid.Bytes[at]) + 10)
+					++wallPixels;
+			}
+		}
+		CHECK(wallPixels > 30);
+		CHECK(wallHidesGrid);
+		// The same wall on the eye side of the mapped mouth must be clipped from the capture.
+		instances.back().Frame.Position.Z = .5f;
+		const auto clipped = capture();
+		const bool nearSideWallClipped = clipped.Bytes == enabled.Bytes;
+		CHECK(nearSideWallClipped);
+	}
 }
 
 TEST_CASE("interface pass matches the reference raster coverage", "[render][gpu][interface-reference][.]") {

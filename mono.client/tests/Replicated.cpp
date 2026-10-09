@@ -2,6 +2,7 @@
 
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Play.hpp>
@@ -551,6 +552,10 @@ TEST_CASE("a replica keeps its third-person camera inside received walls", "[cli
 	const Entity camera = client::AimReplicaViewer(replica.World, CFrame{}, engine::scene::Camera{});
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
 	CHECK(replica.World.ClassOf(camera) == engine::ecs::Classes::Find(engine::core::Name("Camera")));
+	CHECK(Store::IsPredicted(camera));
+	CHECK(replica.World.InstanceNameOf(camera) == engine::core::Name("Camera"));
+	CHECK(replica.World.Has<engine::ecs::ClientLocal>(camera));
+	CHECK(replica.World.Has<engine::scene::TransientComponent>(camera));
 
 	auto *controller = replica.World.ResourceMutable<engine::scene::CameraController>();
 	REQUIRE(controller != nullptr);

@@ -7,6 +7,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Broadphase.hpp>
@@ -26,6 +27,26 @@
 namespace engine::physics {
 
 	namespace {
+		struct LocalColliderCounts {
+			size_t Total = 0;
+			size_t Dynamic = 0;
+		};
+
+		LocalColliderCounts CountLocalColliders(ecs::Store &store) {
+			LocalColliderCounts counts;
+			if (store.AdoptOnly()) return counts;
+			const auto count = [&](ecs::Entity entity) {
+				if (!store.Has<scene::Transform>(entity) || !store.Has<scene::Collider>(entity)) return;
+				counts.Total++;
+				counts.Dynamic += store.Has<scene::Motion>(entity);
+			};
+			store.Each<const ecs::ClientLocal>([&](ecs::Entity root, const ecs::ClientLocal &) {
+				if (ecs::IsClientLocalInstance(store, store.ParentOf(root))) return;
+				count(root);
+				store.EachDescendant(root, count);
+			});
+			return counts;
+		}
 		// A world that had to fall back to the grid re-enters the tree after
 		// several low-motion gathers. One frame is often the pause between two
 		// bursts; three keeps the recovery deterministic without rebuilding both
@@ -128,12 +149,19 @@ namespace engine::physics {
 			if (staticCount != PipelineInternals::StaticRecords(world).size()) {
 				return true;
 			}
-
 			const uint64_t version = store.ChangeVersion();
 			if (version == PipelineInternals::StaticChangeVersion(world)) {
 				return false;
 			}
 			PipelineInternals::StaticChangeVersion(world) = version;
+			bool ownershipChanged = false;
+			store.EachChanged<ecs::Hierarchy>([&](ecs::Entity, ecs::Hierarchy &) {
+				ownershipChanged = true;
+			});
+			store.EachChanged<ecs::ClientLocal>([&](ecs::Entity, ecs::ClientLocal &) {
+				ownershipChanged = true;
+			});
+			if (ownershipChanged) return true;
 
 			// A row with a `Motion` is in the other index and its change is
 			// nothing to do with this one.
@@ -160,6 +188,8 @@ namespace engine::physics {
 			return;
 		}
 		const float deltaSeconds = PhysicsStepSeconds(store);
+		store.Observe<ecs::ClientLocal>();
+		store.Observe<ecs::Hierarchy>();
 
 		// Gather once into retained rows, then choose exactly one dynamic index.
 		// The grid remains rebuild-only; a tree may synchronise a stable row order
@@ -181,6 +211,10 @@ namespace engine::physics {
 		// Resolved once for the walk rather than per collider, which is the same
 		// decision the solver makes about `scene::SurfaceTable`.
 		const scene::CollisionShapes *baked = scene::CollisionShapesOf(store);
+		const LocalColliderCounts localCounts = CountLocalColliders(store);
+		const auto admitted = [&](ecs::Entity entity) {
+			return localCounts.Total == 0 || !ecs::IsClientLocalInstance(store, entity);
+		};
 
 		{
 			// Gathering has one deterministic stream. That keeps the records, tight
@@ -206,7 +240,8 @@ namespace engine::physics {
 			// this costs a rebuild that was not already happening.
 			spatial::DynamicBvh &tree = PipelineInternals::DynamicTree(*world);
 			const size_t dynamicCount =
-				store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Count();
+				store.Query<const scene::Transform, const scene::Collider, const scene::Motion>().Count() -
+				localCounts.Dynamic;
 			const bool recoveryProbe =
 				!treeWasActive && PipelineInternals::DynamicTreeSettledFrames(*world) <= 1;
 			const bool gatherProxies = treeWasActive || tree.ProxyCount() == 0;
@@ -231,6 +266,7 @@ namespace engine::physics {
 							const scene::Transform &transform,
 							const scene::Collider &collider,
 							const scene::Motion &motion) {
+							if (!admitted(entity)) return;
 							speculativeBounds[written] = WriteEntry(
 								proxies[written],
 								static_cast<uint64_t>(written),
@@ -264,6 +300,7 @@ namespace engine::physics {
 						const scene::Transform &transform,
 						const scene::Collider &collider,
 						const scene::Motion &motion) {
+						if (!admitted(entity)) return;
 						if (compareRecovery) {
 							topologyChanged = topologyChanged ||
 											  (previousOwnersCompatible && previousOwners[written] != entity);
@@ -439,7 +476,7 @@ namespace engine::physics {
 		size_t colliders = 0;
 		{
 			ENGINE_PROFILE_CAT("physics.count-colliders", core::ProfileCategory::Physics);
-			colliders = store.CountMatching<scene::Transform, scene::Collider>();
+			colliders = store.CountMatching<scene::Transform, scene::Collider>() - localCounts.Total;
 		}
 		const size_t staticCount = colliders - dynamicRecords.size();
 
@@ -467,7 +504,7 @@ namespace engine::physics {
 			spatial::HashGrid &index = PipelineInternals::StaticIndex(*world);
 			index.RebuildGenerated(
 				staticCount,
-				[&store, &staticRecords, &staticShapes, baked](std::span<spatial::Proxy> proxies) {
+				[&store, &staticRecords, &staticShapes, &admitted, baked](std::span<spatial::Proxy> proxies) {
 					size_t written = 0;
 					store.Each<const scene::Transform, const scene::Collider>(
 						[&](ecs::Entity entity,
@@ -476,7 +513,7 @@ namespace engine::physics {
 							// The per-row question the ECS cannot express as a query term.
 							// It costs a sparse-set lookup per collider, and it is paid when
 							// the static set changes rather than once a tick.
-							if (store.Has<scene::Motion>(entity)) {
+							if (store.Has<scene::Motion>(entity) || !admitted(entity)) {
 								return;
 							}
 							(void)WriteEntry(

@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <string_view>
 
 TEST_SUITE_ID("studio.imagegraph.live.content.render")
 TEST_DEPENDS("engine.imagegraph.document")
@@ -64,6 +65,26 @@ namespace {
 		REQUIRE(surface->w == WIDTH);
 		REQUIRE(surface->h == HEIGHT);
 		return surface;
+	}
+
+	void WriteLiveConsumerCamera(const std::filesystem::path &builder, std::string_view heartbeat = {}) {
+		const auto directory = builder.parent_path() / "client/DemoCameras";
+		std::filesystem::create_directories(directory);
+		std::ofstream output(directory / (builder.stem().string() + ".client.luau"));
+		REQUIRE(output.good());
+		output << R"(
+local camera = Instance.new("Camera")
+camera.FieldOfView = 60
+camera.CFrame = CFrame.lookAt(Vector3.new(0, 0, 8), Vector3.new(0, 0, 0))
+camera.CameraSubject = nil
+camera.Parent = workspace
+workspace.CurrentCamera = camera
+camera.CameraType = Enum.CameraType.Scriptable
+local owned = Instance.new("ObjectValue", script)
+owned.Name = "PublishedCamera"
+owned.Value = camera
+)" << heartbeat;
+		REQUIRE(output.good());
 	}
 }
 
@@ -164,11 +185,17 @@ sky.Up = image
 sky.Down = image
 sky.Parent = game:GetService("Lighting")
 
-local camera = Instance.new("Camera")
-camera.FieldOfView = 60
-camera.CFrame = CFrame.lookAt(Vector3.new(0, 0, 8), Vector3.new(0, 0, 0))
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local beat = 0
+game:GetService("RunService").Heartbeat:Connect(function()
+    beat += 1
+    if beat == 45 then
+        graph:SetInput("tint", Color3.new(1, 1, 0))
+        assert(graph:GetInput("tint") == Color3.new(1, 1, 0))
+    end
+end)
+)";
+	}
+	WriteLiveConsumerCamera(script, R"(
 local directions = {
     Vector3.new(0, 0, -1), Vector3.new(0, 0, 1),
     Vector3.new(-1, 0, 0), Vector3.new(1, 0, 0),
@@ -177,18 +204,13 @@ local directions = {
 local beat = 0
 game:GetService("RunService").Heartbeat:Connect(function()
     beat += 1
-    if beat == 45 then
-        graph:SetInput("tint", Color3.new(1, 1, 0))
-        assert(graph:GetInput("tint") == Color3.new(1, 1, 0))
-    end
     if beat >= 80 then
         local face = math.min(6, math.floor((beat - 80) / 10) + 1)
         local up = face >= 5 and Vector3.new(0, 0, 1) or Vector3.new(0, 1, 0)
         camera.CFrame = CFrame.lookAt(Vector3.new(0, 0, 8), Vector3.new(0, 0, 8) + directions[face], up)
     end
 end)
-)";
-	}
+)");
 	client::Options options;
 	options.Headless = true;
 	options.Width = WIDTH;
@@ -409,11 +431,6 @@ emitter.Speed = NumberRange.new(0)
 emitter.Size = NumberSequence.new(1.5)
 emitter.Color = ColorSequence.new(Color3.new(1, 0, 1))
 emitter.Parent = part
-local camera = Instance.new("Camera")
-camera.FieldOfView = 60
-camera.CFrame = CFrame.lookAt(Vector3.new(0, 0, 8), Vector3.new(0, 0, 0))
-camera.Parent = workspace
-workspace.CurrentCamera = camera
 local beat = 0
 game:GetService("RunService").Heartbeat:Connect(function()
     beat += 1
@@ -421,6 +438,7 @@ game:GetService("RunService").Heartbeat:Connect(function()
 end)
 )";
 	}
+	WriteLiveConsumerCamera(script);
 	client::Options options;
 	options.Headless = true;
 	options.Width = WIDTH;

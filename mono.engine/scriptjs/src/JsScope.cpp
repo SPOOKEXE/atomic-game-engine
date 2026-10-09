@@ -13,7 +13,7 @@ namespace engine::script {
 		struct ScopePayload {
 			ScopeHandle Handle;
 			CallbackRef ErrorHandler = 0;
-			std::vector<ScopeItem> Items;
+			uint64_t ErrorHandlerGeneration = 0;
 		};
 
 		ScopePayload *ScopeOf(JSContext *context, JSValueConst value) {
@@ -38,10 +38,10 @@ namespace engine::script {
 
 		void
 		Report(JSContext *context, ScopePayload &scope, const char *operation, const std::string &message) {
-			if (scope.ErrorHandler != 0) {
+			if (scope.ErrorHandlerGeneration != 0 &&
+				scope.ErrorHandlerGeneration == JsCallbackGeneration(context, scope.ErrorHandler)) {
 				JSValue argument = JS_NewStringLen(context, message.data(), message.size());
-				JSValue result =
-					JS_Call(context, Held(context, scope.ErrorHandler), JS_UNDEFINED, 1, &argument);
+				JSValue result = InvokeJsCallback(context, scope.ErrorHandler, 1, &argument);
 				JS_FreeValue(context, argument);
 				if (JS_IsException(result)) {
 					ENGINE_WARN("[script] Scope error handler failed: {}", Exception(context));
@@ -56,9 +56,14 @@ namespace engine::script {
 		void Dispose(JSContext *context, ScopePayload &scope, std::vector<ScopeItem> &items) {
 			static constexpr const char *METHODS[] = {"Destroy", "Disconnect", "Cancel"};
 			for (auto item = items.rbegin(); item != items.rend(); ++item) {
+				if (!JsCallbackAlive(context, static_cast<CallbackRef>(item->Value))) {
+					Release(context, static_cast<CallbackRef>(item->Value));
+					continue;
+				}
 				JSValueConst held = Held(context, static_cast<CallbackRef>(item->Value));
 				if (item->Kind == ScopeItemKind::Callback) {
-					JSValue result = JS_Call(context, held, JS_UNDEFINED, 0, nullptr);
+					JSValue result =
+						InvokeJsCallback(context, static_cast<CallbackRef>(item->Value), 0, nullptr);
 					if (JS_IsException(result)) {
 						Report(context, scope, "callback cleanup", Exception(context));
 					} else {
@@ -90,7 +95,6 @@ namespace engine::script {
 				}
 				Release(context, static_cast<CallbackRef>(item->Value));
 			}
-			scope.Items.clear();
 		}
 
 		JSValue ScopeAdd(JSContext *context, JSValueConst self, int argc, JSValueConst *argv) {
@@ -105,7 +109,6 @@ namespace engine::script {
 				static_cast<uint64_t>(reference)
 			};
 			JsOf(context).Scopes.Add(scope->Handle, item);
-			scope->Items.push_back(item);
 			return JS_DupValue(context, self);
 		}
 
@@ -138,13 +141,11 @@ namespace engine::script {
 			ScopePayload *scope = ScopeOf(context, self);
 			if (scope == nullptr) return JS_EXCEPTION;
 			if (argc < 1) return JS_FALSE;
-			for (auto item = scope->Items.begin(); item != scope->Items.end(); ++item) {
-				if (JS_IsStrictEqual(
-						context, Held(context, static_cast<CallbackRef>(item->Value)), argv[0]
-					)) {
-					JsOf(context).Scopes.Remove(scope->Handle, *item);
-					Release(context, static_cast<CallbackRef>(item->Value));
-					scope->Items.erase(item);
+			for (const auto &item : JsOf(context).Scopes.Items(scope->Handle)) {
+				if (JS_IsStrictEqual(context, Held(context, static_cast<CallbackRef>(item.Value)), argv[0])) {
+					const auto reference = static_cast<CallbackRef>(item.Value);
+					if (!JsOf(context).Scopes.Remove(scope->Handle, item)) return JS_FALSE;
+					Release(context, reference);
 					return JS_TRUE;
 				}
 			}
@@ -184,8 +185,11 @@ namespace engine::script {
 			if (scope == nullptr) return JS_EXCEPTION;
 			if (argc < 1 || !JS_IsFunction(context, argv[0]))
 				return JS_ThrowTypeError(context, "Scope.SetErrorHandler expects a function");
-			if (scope->ErrorHandler != 0) Release(context, scope->ErrorHandler);
+			if (scope->ErrorHandlerGeneration != 0 &&
+				scope->ErrorHandlerGeneration == JsCallbackGeneration(context, scope->ErrorHandler))
+				Release(context, scope->ErrorHandler);
 			scope->ErrorHandler = Retain(context, argv[0]);
+			scope->ErrorHandlerGeneration = JsCallbackGeneration(context, scope->ErrorHandler);
 			return JS_DupValue(context, self);
 		}
 

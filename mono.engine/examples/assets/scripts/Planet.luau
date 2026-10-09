@@ -1196,19 +1196,57 @@ end
 local desired: { [string]: Node } = {}
 local pending: { Node } = {}
 
-local function ActiveCameraPosition(): Vector3
-	local current = workspace.CurrentCamera
-	return if current ~= nil then (current :: Camera).CFrame.Position else Vector3.new(0, 0, ORBIT_RADIUS)
+local MAX_VIEW_DISTANCE = 10000
+-- Each admitted player supplies only a bounded view pose, never geometry or identity.
+local HttpService = game:GetService("HttpService")
+local poseRemote = Instance.new("RemoteEvent")
+poseRemote.Name = "DemoViewPose"
+poseRemote.Parent = game:GetService("ReplicatedStorage")
+type ViewPose = { Position: Vector3, Look: Vector3, Fov: number, Tick: number }
+local viewPoses: { [Instance]: ViewPose } = {}
+local poseTick = 0
+RunService.Heartbeat:Connect(function() poseTick += 1 end)
+
+local function Finite(value: unknown): boolean
+	return typeof(value) == "number" and value == value and math.abs(value) < math.huge
 end
 
-local function ActiveCameraLook(): Vector3
-	local current = workspace.CurrentCamera
-	return if current ~= nil then (current :: Camera).CFrame.LookVector else Vector3.new(0, 0, -1)
+poseRemote.OnServerEvent:Connect(function(payload: string, sender: Player?)
+	if sender == nil or sender.Parent == nil or not sender.Parent:IsA("Players") or #payload > 512 then return end
+	local previous = viewPoses[sender]
+	if previous ~= nil and poseTick - previous.Tick < 3 then return end
+	local ok, decoded = pcall(function() return HttpService:JSONDecode(payload) end)
+	if not ok or typeof(decoded) ~= "table" then return end
+	for _, key in { "x", "y", "z", "lx", "ly", "lz", "fov" } do
+		if not Finite(decoded[key]) then return end
+	end
+	local position = Vector3.new(decoded.x, decoded.y, decoded.z)
+	local look = Vector3.new(decoded.lx, decoded.ly, decoded.lz)
+	if position.Magnitude > MAX_VIEW_DISTANCE or look.Magnitude < 0.5 or look.Magnitude > 1.5
+		or decoded.fov < 1 or decoded.fov > 120 then return end
+	viewPoses[sender] = { Position = position, Look = look.Unit, Fov = decoded.fov, Tick = poseTick }
+end)
+
+local function NearestView(origin: Vector3): ViewPose?
+	local nearest: ViewPose? = nil
+	local distance = math.huge
+	local nearestName = ""
+	for player, pose in viewPoses do
+		if player.Parent == nil or poseTick - pose.Tick > 120 then
+			viewPoses[player] = nil
+		else
+			local squared = (pose.Position - origin):Dot(pose.Position - origin)
+			if squared < distance or (squared == distance and player.Name < nearestName) then
+				distance, nearest, nearestName = squared, pose, player.Name
+			end
+		end
+	end
+	return nearest
 end
 
+local selectionFov = 58
 local function ActiveCameraFov(): number
-	local current = workspace.CurrentCamera
-	return if current ~= nil then (current :: Camera).FieldOfView else 58
+	return selectionFov
 end
 
 -- Projected geometric error selection. Error is a span heuristic, ten percent
@@ -1275,9 +1313,11 @@ local function PlanSelection()
 	end
 
 	local leaves: { Node } = {}
-	local cameraPosition = ActiveCameraPosition()
-	local cameraLook = ActiveCameraLook()
-	for bodyIndex, _ in Bodies do
+	for bodyIndex, body in Bodies do
+		local pose = NearestView(body.Centre)
+		local cameraPosition = if pose ~= nil then pose.Position else Vector3.new(0, ORBIT_HEIGHT, ORBIT_RADIUS)
+		local cameraLook = if pose ~= nil then pose.Look else -cameraPosition.Unit
+		selectionFov = if pose ~= nil then pose.Fov else 58
 		for _, face in faces do
 			if FaceEnabled(face) then
 				SelectLeaves(bodyIndex, RootNode(bodyIndex, face), cameraPosition, cameraLook, leaves)
@@ -1408,16 +1448,12 @@ local function CountLive(bodyIndex: number): number
 	return count
 end
 
-local eye = Instance.new("Camera")
-eye.Name = "PlanetCamera"
-eye.FieldOfView = 58
-eye.FarPlaneZ = 1500
-eye.CFrame = CFrame.lookAt(
-	Vector3.new(0, ORBIT_HEIGHT, ORBIT_RADIUS),
-	Vector3.new(0, 0, 0)
-)
-eye.Parent = workspace
-workspace.CurrentCamera = eye
+local templates = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(templates ~= nil, "the demo camera template folder is missing")
+local demoCamera = templates:FindFirstChild("DemoCamera")
+assert(demoCamera ~= nil, "the demo camera companion is missing")
+demoCamera:SetAttribute("OrbitRadius", ORBIT_RADIUS)
+demoCamera:SetAttribute("OrbitHeight", ORBIT_HEIGHT)
 
 Lighting.Brightness = 0.75
 Lighting.ClockTime = 14.5
@@ -1689,21 +1725,8 @@ end
 local tick = 0
 local reconciling = false
 
-local function MoveDemoCamera()
-	-- Tick time, not wall time: the camera chooses the leaf set, so a clock here
-	-- would make two recorded runs generate different worlds.
-	local angle = tick * 0.0025
-	local position = Vector3.new(
-		math.sin(angle) * ORBIT_RADIUS,
-		ORBIT_HEIGHT + math.sin(angle * 0.7) * 16,
-		math.cos(angle) * ORBIT_RADIUS
-	)
-	eye.CFrame = CFrame.lookAt(position, Vector3.new(0, 0, 0))
-end
-
 RunService.Heartbeat:Connect(function()
 	tick += 1
-	MoveDemoCamera()
 	TurnGasGiant(tick)
 
 	-- Wave and foam time as a tint phase: one cheap property write per ocean

@@ -5,8 +5,6 @@
 -- Both ends use Back (+Z locally), with the far face aimed into its room.
 -- The engine applies the same seam transform to views, bodies and cameras.
 
-local RunService = game:GetService("RunService")
-
 -- Twenty-six directed surfaces fit the default budget of thirty-two.
 local GATE_SIZE = Vector3.new(768, 768)
 
@@ -82,6 +80,7 @@ local function surface(from: Part, to: Part, name: string)
 	portal.Parent = from
 	holes += 1
 	table.insert(entrances, from)
+	from:SetAttribute("DemoTourEntranceIndex", #entrances)
 end
 
 local function link(from: Part, to: Part, name: string)
@@ -441,129 +440,16 @@ block(
 	Color3.fromRGB(40, 110, 200)
 )
 
--- Where the scene is watched from.
---
--- **It moves, and that is not decoration.** Every hole is placed from wherever
--- this camera is, every frame, so it is the parallax of the far side sliding
--- against the near side that says "hole" instead of "picture". A still of any of
--- these proves nothing, which is the honest thing to say about a screenshot of a
--- portal.
-local view = Instance.new("Camera")
-view.Name = "Viewer"
-view.CFrame = CFrame.new(Vector3.new(0, 5, 16))
-view.FieldOfView = 70
-view.Parent = workspace
-workspace.CurrentCamera = view
-
-local LAST = STAGE_STEP * 5
-local PACE = 7
-local elapsed = 0
-local lastMode = "overview"
-
-type TourShot = { Direction: Vector3, Near: boolean?, Away: boolean?, Roll: number? }
-local shots: { TourShot } = {}
-for _, elevation in { -30, 0, 30 } do
-	for _, azimuth in { -175, -135, -95, -85, -45, -5, 5, 45, 85, 95, 135, 175 } do
-		local yaw = math.rad(azimuth)
-		local pitch = math.rad(elevation)
-		table.insert(shots, {
-			Direction = Vector3.new(
-				math.sin(yaw) * math.cos(pitch), math.sin(pitch), math.cos(yaw) * math.cos(pitch)
-			),
-		})
-	end
-end
-for _, shot: TourShot in {
-	{ Direction = Vector3.new(0, 0, 1) },
-	{ Direction = Vector3.new(0, 0, -1) },
-	{ Direction = Vector3.new(1, 0.25, 2).Unit, Roll = 0.4 },
-	{ Direction = Vector3.new(0.35, 0.1, 0.02), Near = true },
-	{ Direction = Vector3.new(0.35, 0.1, -0.02), Near = true },
-	{ Direction = Vector3.new(0.6, 0.2, 1).Unit },
-	{ Direction = Vector3.new(0.6, 0.2, -1).Unit },
-	{ Direction = Vector3.new(0, 0, 1), Away = true },
-	{ Direction = Vector3.new(0, 0, -1), Away = true },
-} do
-	table.insert(shots, shot)
-end
-
--- These attributes are editable in the inspector. A nonnegative sample seeks
--- one fixed shot; pause holds automatic playback and step advances one shot.
-view:SetAttribute("TourMode", "overview")
-view:SetAttribute("TourSample", -1)
-view:SetAttribute("TourPaused", false)
-view:SetAttribute("TourStep", 0)
-view:SetAttribute("TourCount", #shots * #entrances)
-
-local function angleShot(sample: number)
-	local index = sample % (#shots * #entrances)
-	local pane = entrances[math.floor(index / #shots) + 1]
-	local shot = shots[index % #shots + 1]
-	local size = pane.Size
-	local frame = pane.CFrame
-	local centre = frame:PointToWorldSpace(Vector3.new(0, 0, size.Z / 2))
-	local offset = if shot.Near
-		then Vector3.new(shot.Direction.X * size.X, shot.Direction.Y * size.Y, shot.Direction.Z)
-		else shot.Direction * math.max(size.X, size.Y)
-	local eye = frame:PointToWorldSpace(Vector3.new(0, 0, size.Z / 2) + offset)
-	local toward = if shot.Away then eye + (eye - centre) else centre
-	local pose = CFrame.lookAt(eye, toward) * CFrame.Angles(0, 0, shot.Roll or 0)
-	if not view.CFrame:FuzzyEq(pose, 1e-6) then
-		-- A seek is a camera cut. It cannot masquerade as a walk through every
-		-- portal between two independently authored shots.
-		view:CutTo(pose)
-	end
-	if view:GetAttribute("TourPane") ~= pane.Name then
-		view:SetAttribute("TourPane", pane.Name)
-	end
-end
-
-RunService.Heartbeat:Connect(function(deltaTime: number)
-	-- Play owns its humanoid camera. The preview tour never takes it back.
-	local current = workspace.CurrentCamera
-	if current == nil or not current:Equals(view) then
-		return
-	end
-	if view:GetAttribute("TourPaused") ~= true then
-		elapsed += deltaTime
-	end
-	if view:GetAttribute("TourMode") == "angles" then
-		local count = #shots * #entrances
-		local selected = view:GetAttribute("TourSample")
-		local sample = if typeof(selected) == "number" and selected >= 0 and selected < math.huge
-			then math.floor(selected) % count else math.floor(elapsed * 2) % count
-		local step = view:GetAttribute("TourStep")
-		if typeof(step) == "number" and step == step and math.abs(step) < math.huge then
-			sample += math.floor(step) % count
-		end
-		angleShot(sample)
-		lastMode = "angles"
-		return
-	end
-
-	-- A sweep along the row and back, seen from three-quarters on.
-	--
-	-- **Not square on, and that is what makes half of these legible.** The first
-	-- two exhibits are about how long a tunnel *looks* from outside, which a
-	-- camera staring straight down the mouth cannot show - it sees the hole and
-	-- none of the shell. Standing off to one side puts the outside and the
-	-- inside in one frame, which is the comparison every one of them is making.
-	local travelled = elapsed * PACE
-	local lap = travelled % (LAST * 2)
-	local along = if lap > LAST then LAST * 2 - lap else lap
-	local sway = math.sin(travelled * 0.05) * 6
-
-	local pose = CFrame.lookAt(
-		Vector3.new(along + 15 + sway, 8 + math.sin(travelled * 0.031) * 2, 21),
-		Vector3.new(along, 3.5, -7)
-	)
-	if lastMode == "angles" then
-		view:CutTo(pose)
-	else
-		view.CFrame = pose
-	end
-	lastMode = "overview"
-end)
+-- The server authors geometry and copied tour metadata; the companion owns the camera.
+local templates = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(templates ~= nil, "the demo camera template folder is missing")
+local demoCamera = templates:FindFirstChild("DemoCamera")
+assert(demoCamera ~= nil, "the demo camera companion is missing")
+demoCamera:SetAttribute("Name", "Viewer")
+demoCamera:SetAttribute("CFrame", CFrame.new(Vector3.new(0, 5, 16)))
+demoCamera:SetAttribute("FieldOfView", 70)
+demoCamera:SetAttribute("LastStage", STAGE_STEP * 5)
+demoCamera:SetAttribute("EntranceCount", #entrances)
 
 print(
 	`non-euclidean: 6 exhibits, {holes} holes - shorter inside, longer inside, a room that is not there, a pillar with no end, a hill climbed downwards, and four times the volume in one room`

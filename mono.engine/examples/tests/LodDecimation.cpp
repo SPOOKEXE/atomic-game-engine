@@ -11,6 +11,7 @@
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -58,11 +59,13 @@ TEST_CASE(
 	const StagedAssets assets;
 	Store store("examples.lod_decimation");
 	engine::ecs::Scheduler systems;
+	engine::script::RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfBoth();
 	std::string error;
 	INFO(error);
 	REQUIRE(
 		engine::examples::LoadScene(
-			store, systems, engine::examples::ExamplePath("LodDecimation.luau"), error
+			store, systems, engine::examples::ExamplePath("LodDecimation.luau"), error, nullptr, &limits
 		)
 	);
 

@@ -610,16 +610,11 @@ local cameraFrames = {
 	),
 }
 
--- Named cameras remain available to separate Studio viewports without making
--- any one of them the player's camera. The capture mode selects one explicitly.
-local cameras: { [string]: Camera } = {}
+local cameraTemplates = assert(game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts"), "the camera template container is missing")
+local cameraScript = assert(cameraTemplates:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+cameraScript:SetAttribute("NamedCameras", true)
 for name, frame in cameraFrames do
-	local camera = Instance.new("Camera")
-	camera.Name = name
-	camera.FieldOfView = 70
-	camera.CFrame = frame
-	camera.Parent = WORLD
-	cameras[name] = camera
+	cameraScript:SetAttribute(name, frame)
 end
 
 if WHICH == "long" then
@@ -635,17 +630,8 @@ elseif WHICH == "plain" then
 	viewpoint = CFrame.new(Vector3.new(0, 12, 62)) * CFrame.Angles(-0.14, 0, 0)
 end
 
-if viewpoint ~= nil then
-	local view = cameras[WHICH :: string]
-	if view == nil then
-		view = Instance.new("Camera")
-		view.Name = "Viewer"
-		view.FieldOfView = 70
-		view.CFrame = viewpoint
-		view.Parent = WORLD
-	end
-	WORLD.CurrentCamera = view
-end
+cameraScript:SetAttribute("View", WHICH)
+cameraScript:SetAttribute("InitialFrame", viewpoint)
 
 print(
 	"tunnels: west is " .. LONG .. " studs of building and " .. (LONG - SKIP * 2) .. " of walk; "

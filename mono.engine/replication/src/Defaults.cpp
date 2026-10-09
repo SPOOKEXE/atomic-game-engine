@@ -1,4 +1,5 @@
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Schema.hpp>
 #include <engine/ecs/TypeDescriptor.hpp>
 #include <engine/replication/Defaults.hpp>
 
@@ -145,15 +146,6 @@ namespace engine::replication {
 			return false;
 		}
 
-		constexpr std::string_view WORLD_RESOURCES[] = {"physics.Storm"};
-
-		bool IsSharedWorldResource(std::string_view component) {
-			for (const std::string_view named : WORLD_RESOURCES) {
-				if (component == named) return true;
-			}
-			return false;
-		}
-
 		// The two written by a system every tick, so the dirty bits already
 		// know.
 		//
@@ -234,6 +226,8 @@ namespace engine::replication {
 		// Label arguments and bindings also own bounded strings. They are
 		// authored rows, so excluding them would make localized labels and
 		// binding declarations disappear from replicas.
+		// GPU particle fields own bounded spawn samples. Their codec carries
+		// authored emitter data; observation avoids hashing vector addresses.
 		//
 		// They are the same shape as `script.Program` one row up: an author
 		// writes the text and then leaves it alone for the life of the world, so
@@ -243,10 +237,12 @@ namespace engine::replication {
 			   component == "gui.NodeCanvasGroup" || component == "gui.VirtualCollection" ||
 			   component == "script.Program" || component == "scene.EditableMesh" ||
 			   component == "scene.EditableImage" || component == "scene.TextContent" ||
-			   component == "scene.ShaderSource" || component == "scene.ImageGraph";
+			   component == "scene.ShaderSource" || component == "scene.ImageGraph" ||
+			   component == "scene.GpuParticleField";
 	}
 
 	bool LocalToTheClient(std::string_view component) {
+		if (component == "ecs.ClientLocal" || component == "ecs.InstanceProjection") return true;
 		// **The client makes its own main camera, and the component that says
 		// *which* camera that is, is the one to keep local.** `ActiveCamera`
 		// names the live one and `client::AimReplicaViewer` mints a predicted
@@ -475,13 +471,16 @@ namespace engine::replication {
 			std::vector<ReplicatedComponent> found;
 
 			for (size_t index = 0; index < ecs::Components::Count(); index++) {
+				if (ecs::Schemas::Of(ecs::ComponentId{static_cast<uint32_t>(index)}) != nullptr) continue;
 				const ecs::TypeDescriptor &type =
 					ecs::Components::Describe(ecs::ComponentId{static_cast<uint32_t>(index)});
 
 				const std::string_view name = type.Name.Text();
-				const bool resource = IsSharedWorldResource(name);
+				// Attributes have a bounded owning codec and are selected by visible
+				// owner before either snapshots or resource updates cross.
+				const bool resource = name == "ecs.AttributeTable";
 				const bool shared =
-					UnderASharedPrefix(name) || PartOfAnInstance(name) || PartOfAScript(name) || resource;
+					resource || UnderASharedPrefix(name) || PartOfAnInstance(name) || PartOfAScript(name);
 				if (!shared || LocalToTheClient(name)) {
 					continue;
 				}
@@ -524,7 +523,7 @@ namespace engine::replication {
 				// prefix can infer - and `CannotBeSigned` is where the three
 				// that have been made are written down, one line from the
 				// argument for each.
-				const bool observed = WrittenEveryTick(name) || CannotBeSigned(name);
+				const bool observed = resource || WrittenEveryTick(name) || CannotBeSigned(name);
 				if (!type.Trivial && !observed) {
 					continue;
 				}

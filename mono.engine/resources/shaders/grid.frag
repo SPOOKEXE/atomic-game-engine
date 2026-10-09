@@ -77,13 +77,14 @@ void main() {
 
 	const vec4 nearPoint = grid.InverseViewProjection * vec4(ndc, 0.0, 1.0);
 	const vec4 farPoint = grid.InverseViewProjection * vec4(ndc, 1.0, 1.0);
-	if (nearPoint.w == 0.0 || farPoint.w == 0.0) {
+	if (nearPoint.w == 0.0) {
 		discard;
 	}
 
 	const vec3 from = nearPoint.xyz / nearPoint.w;
-	const vec3 to = farPoint.xyz / farPoint.w;
-	const vec3 along = to - from;
+	// An oblique far plane can cross infinity. Keep the forward ray in
+	// homogeneous form instead of reversing it through a negative far `w`.
+	const vec3 along = farPoint.xyz * nearPoint.w - nearPoint.xyz * farPoint.w;
 
 	// **Parallel to the ground is not "somewhere very far away", it is
 	// nowhere.** A ray within a hair of the plane produces an intersection
@@ -93,17 +94,17 @@ void main() {
 		discard;
 	}
 
-	// The plane is `y = 0`. Outside `0..1` the intersection is behind the near
-	// plane or past the far one, which is a pixel the grid does not reach.
+	// The plane is `y = 0`. Negative intersections are behind the near plane;
+	// the projected depth below also bounds the far plane for oblique views.
 	const float step = -from.y / along.y;
-	if (step < 0.0 || step > 1.0) {
+	if (step < 0.0) {
 		discard;
 	}
 
 	const vec3 ground = from + along * step;
 
 	const vec4 clip = grid.ViewProjection * vec4(ground, 1.0);
-	if (clip.w <= 0.0) {
+	if (clip.w <= 0.0 || clip.z < 0.0 || clip.z > clip.w) {
 		discard;
 	}
 

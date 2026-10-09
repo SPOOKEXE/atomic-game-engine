@@ -55,6 +55,7 @@
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/script/DataSceneService.hpp>
+#include <engine/script/PlayerGui.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/world/HostLink.hpp>
@@ -1093,16 +1094,15 @@ namespace client {
 					return;
 				}
 
-				// The scripts before the camera, so a scene that aimed one of
-				// its own keeps it - see `InstallDefaultCamera`.
+				// Startup source can control the local eye or replace CurrentCamera.
+				InstallDefaultCamera(store, systems);
 				Runtimes.emplace_back(
 					id,
 					engine::game::StartWorldScripts(
 						store, systems, limits, failure, nullptr, worldSettings.ScriptTickRate
 					)
 				);
-				(void)engine::gui::ResetPlayerGui(store, localPlayer);
-				InstallDefaultCamera(store, systems);
+				(void)engine::script::ResetPlayerGui(store, localPlayer);
 			});
 
 			if (!failure.empty()) {

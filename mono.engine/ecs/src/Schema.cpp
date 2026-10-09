@@ -7,6 +7,7 @@
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Schema.hpp>
 
 #include <algorithm>
@@ -418,6 +419,7 @@ namespace engine::ecs {
 
 		struct SchemaRegistry {
 			std::mutex Guard;
+			std::atomic<uint64_t> Revision{1};
 
 			// A deque because `Of` hands back a pointer and registration
 			// continues afterwards - `Components`' own descriptor table is a
@@ -1034,6 +1036,7 @@ namespace engine::ecs {
 
 		registry.ByName.emplace(key.Id(), index);
 		registry.ByComponent.emplace(id.Index, index);
+		registry.Revision.fetch_add(1, std::memory_order_release);
 
 		return {id, Status::Ok, true};
 	}
@@ -1074,6 +1077,7 @@ namespace engine::ecs {
 				schema.TagNames.emplace_back(tag);
 			}
 		}
+		registry.Revision.fetch_add(1, std::memory_order_release);
 		return true;
 	}
 
@@ -1171,5 +1175,76 @@ namespace engine::ecs {
 		registry.Entries.clear();
 		registry.ByName.clear();
 		registry.ByComponent.clear();
+		registry.Revision.fetch_add(1, std::memory_order_release);
+	}
+
+	uint64_t Schemas::Revision() {
+		return SchemaRegistryOf().Revision.load(std::memory_order_acquire);
+	}
+
+	bool Schemas::WriteDefinition(ComponentId component, core::ByteWriter &writer) {
+		const Schema *schema = Of(component);
+		if (schema == nullptr || schema->Fields().size() > MAXIMUM_DEFINITION_FIELDS) return false;
+		size_t bytes = sizeof(uint32_t);
+		for (const FieldDescriptor &field : schema->Fields()) {
+			if (field.Spelling.size() > MAXIMUM_DEFINITION_NAME_BYTES ||
+				field.Enum.Text().size() > MAXIMUM_DEFINITION_NAME_BYTES)
+				return false;
+			bytes += 4 * sizeof(uint32_t) + field.Spelling.size() +
+					 std::string_view(Describe(field.Type)).size() +
+					 std::string_view(Describe(field.Packing)).size() + field.Enum.Text().size();
+			if (bytes > MAXIMUM_DEFINITION_BYTES) return false;
+		}
+		core::ByteWriter definition(bytes, MAXIMUM_DEFINITION_BYTES);
+		definition.WriteUInt32(static_cast<uint32_t>(schema->Fields().size()));
+		for (const FieldDescriptor &field : schema->Fields()) {
+			definition.WriteString(field.Spelling);
+			definition.WriteString(Describe(field.Type));
+			definition.WriteString(Describe(field.Packing));
+			definition.WriteString(field.Enum.Text());
+		}
+		writer.WriteRaw(definition.Bytes().data(), definition.Size());
+		return true;
+	}
+
+	bool Schemas::ReadDefinition(core::Name component, core::ByteReader &reader) {
+		if (!component.IsValid() || component.Text().size() > MAXIMUM_DEFINITION_NAME_BYTES ||
+			reader.Remaining() > MAXIMUM_DEFINITION_BYTES)
+			return false;
+		const uint32_t count = reader.ReadUInt32();
+		if (reader.Failed() || count > MAXIMUM_DEFINITION_FIELDS) return false;
+		std::vector<FieldSpec> fields;
+		fields.reserve(count);
+		for (uint32_t index = 0; index < count; ++index) {
+			FieldSpec field;
+			field.Name = reader.ReadString();
+			const std::string_view type = reader.ReadString();
+			const std::string_view packing = reader.ReadString();
+			field.Enum = reader.ReadString();
+			if (reader.Failed() || field.Name.empty() || field.Name.size() > MAXIMUM_DEFINITION_NAME_BYTES ||
+				type.size() > MAXIMUM_DEFINITION_NAME_BYTES ||
+				packing.size() > MAXIMUM_DEFINITION_NAME_BYTES ||
+				field.Enum.size() > MAXIMUM_DEFINITION_NAME_BYTES)
+				return false;
+			if (type == "Enum")
+				field.Type = PropertyType::Enum;
+			else if (!TypeNamed(type, field.Type))
+				return false;
+			bool packingFound = false;
+			for (uint8_t candidate = 0; candidate <= static_cast<uint8_t>(FieldPacking::Bool); ++candidate) {
+				const auto representation = static_cast<FieldPacking>(candidate);
+				if (packing == Describe(representation)) {
+					field.Packing = representation;
+					packingFound = true;
+					break;
+				}
+			}
+			if (!packingFound ||
+				(field.Type == PropertyType::Enum && !EnumTable::Known(core::Name(field.Enum))))
+				return false;
+			fields.push_back(field);
+		}
+		if (reader.Failed() || !reader.AtEnd()) return false;
+		return Register(component.Text(), fields).Why == Status::Ok;
 	}
 }

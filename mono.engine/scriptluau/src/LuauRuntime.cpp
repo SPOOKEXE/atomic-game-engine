@@ -6,6 +6,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/Instances.hpp>
@@ -134,6 +135,17 @@ namespace engine::script {
 			return value;
 		}
 
+		std::string_view AuthoredSource(const char *source) {
+			std::string_view name = source != nullptr ? source : "";
+			for (const std::string_view suffix : {" [client]", " [server]", " [host]"}) {
+				if (name.ends_with(suffix)) {
+					name.remove_suffix(suffix.size());
+					break;
+				}
+			}
+			return name;
+		}
+
 		// Walks the stack into a hit record.
 		//
 		// **Innermost frame first**, which is the order a stack is read in and
@@ -148,7 +160,7 @@ namespace engine::script {
 				}
 
 				DebugFrame frame;
-				frame.Source = info.short_src != nullptr ? info.short_src : "";
+				frame.Source = AuthoredSource(info.short_src);
 				frame.Function = info.name != nullptr ? info.name : "";
 				frame.Line = info.currentline;
 
@@ -225,7 +237,7 @@ namespace engine::script {
 					continue;
 				}
 				stack[count++] = ScriptProfileFrame{
-					.Source = info.short_src != nullptr ? info.short_src : "",
+					.Source = AuthoredSource(info.short_src),
 					.Function = info.name != nullptr ? info.name : "",
 					.Line = info.currentline,
 				};
@@ -251,7 +263,7 @@ namespace engine::script {
 				return;
 			}
 
-			const char *source = here.short_src != nullptr ? here.short_src : "";
+			const std::string source(AuthoredSource(here.short_src));
 			Breakpoint *point = debug->Match(source, here.currentline);
 			if (point == nullptr) {
 				return;
@@ -272,7 +284,7 @@ namespace engine::script {
 			DebugHit hit;
 			hit.Source = source;
 			hit.Line = here.currentline;
-			hit.Instance = bounds.Context.RunningScript;
+			hit.Instance = ExecutionSource(state);
 			Capture(state, hit);
 			debug->Record(std::move(hit));
 
@@ -280,7 +292,7 @@ namespace engine::script {
 				// An ordinary script error, which the host already knows how to
 				// report - rather than a new state the runtime would have to
 				// learn to be in.
-				luaL_errorL(state, "stopped at a breakpoint: %s:%d", source, here.currentline);
+				luaL_errorL(state, "stopped at a breakpoint: %s:%d", source.c_str(), here.currentline);
 			}
 		}
 
@@ -451,6 +463,25 @@ namespace engine::script {
 		return BoundsOf(state).Context;
 	}
 
+	HostRole ExecutionRole(lua_State *state) {
+		LuauContext &context = ContextOf(state);
+		lua_Debug frame{};
+		for (int level = 0; lua_getinfo(state, level, "s", &frame) != 0; ++level) {
+			if (frame.what == nullptr || std::strcmp(frame.what, "C") == 0 || frame.source == nullptr)
+				continue;
+			const auto found = context.SourceRoles.find(frame.source);
+			if (found != context.SourceRoles.end()) return found->second;
+		}
+		return context.Role;
+	}
+
+	std::string ExecutionChunkName(LuauContext &context, std::string_view name, HostRole role) {
+		const std::string chunk =
+			"=" + std::string(name) + (role.Server ? (role.Client ? " [host]" : " [server]") : " [client]");
+		context.SourceRoles.insert_or_assign(chunk, role);
+		return chunk;
+	}
+
 	LuauContext &UpvalueContext(lua_State *state) {
 		return *static_cast<LuauContext *>(lua_tolightuserdata(state, lua_upvalueindex(2)));
 	}
@@ -579,7 +610,6 @@ namespace engine::script {
 		InstallLuauServices(State, ServiceAvailability::Always, bounds->Context.Access, IsPackageOnly());
 
 		OpenQueries(State);
-		OpenStorm(State);
 
 		// After `OpenInstances`, whose method table this adds the component
 		// half of the ECS surface to.
@@ -599,6 +629,7 @@ namespace engine::script {
 		OpenRequire(State);
 
 		lua_callbacks(State)->interrupt = Interrupt;
+		lua_callbacks(State)->userthread = TrackLuauThread;
 
 		// **The step callback is installed, single-step mode is not.** Luau only
 		// calls this while stepping is enabled, and `Run` enables it for exactly
@@ -622,17 +653,24 @@ namespace engine::script {
 		luaL_sandbox(State);
 	}
 
-	bool LuauRuntime::DeliverRemoteEvent(std::span<const std::byte> bytes) {
+	bool LuauRuntime::DeliverRemoteEvent(std::span<const std::byte> bytes, ecs::Entity sender) {
+		Runtime::StackGuard guard(*this);
+		if (!guard) return false;
 		if (!Role().Server) return false;
+		if (sender != ecs::NULL_ENTITY && (!Store.Alive(sender) || !Store.IsA(sender, scene::PlayerClass())))
+			return false;
 
 		RemoteEventMessage message;
 		if (!DecodeRemoteEvent(bytes, message)) return false;
+		ReapLuauSources(State);
 
 		const ecs::ClassId remoteEvent = ecs::Classes::Find(core::Name("RemoteEvent"));
 		ecs::Entity subject = ecs::NULL_ENTITY;
 		bool ambiguous = false;
 		Store.Each<const ecs::InstanceClass>([&](ecs::Entity entity, const ecs::InstanceClass &) {
-			if (ambiguous) return;
+			if (ambiguous || !InstanceVisibleToScript(Store, entity, false) ||
+				scene::ScopeOfInstance(Store, entity) == scene::ServiceScope::Server)
+				return;
 			if (Store.IsA(entity, remoteEvent) && Store.GetFullName(entity) == message.Event) {
 				if (subject != ecs::NULL_ENTITY) {
 					ambiguous = true;
@@ -642,11 +680,17 @@ namespace engine::script {
 			}
 		});
 		if (subject == ecs::NULL_ENTITY || ambiguous) return false;
+		// Each host delivery gets one budget shared by all of its callbacks.
+		BoundsOf(State).StepsBase = BoundsOf(State).StepsTaken;
 
 		lua_pushlstring(
 			State, reinterpret_cast<const char *>(message.Payload.data()), message.Payload.size()
 		);
-		Error = FireSignal(State, SignalKind::RemoteEvent, subject, 1);
+		if (sender == ecs::NULL_ENTITY)
+			lua_pushnil(State);
+		else
+			PushInstanceValue(State, sender);
+		Error = FireSignal(State, SignalKind::RemoteEvent, subject, 2);
 		return Error.empty();
 	}
 
@@ -679,6 +723,7 @@ namespace engine::script {
 
 	bool LuauRuntime::Run(std::string_view source, std::string_view name) {
 		MarkWorldSwapUsed();
+		ReapLuauSources(State);
 		Runtime::StackGuard guard(*this);
 		if (!guard) {
 			return false;
@@ -720,6 +765,15 @@ namespace engine::script {
 		// its own: assigning a global in one chunk does not leak into the next.
 		lua_State *thread = lua_newthread(State);
 		luaL_sandboxthread(thread);
+		LuauContext &executionContext = ContextOf(State);
+		executionContext.ThreadSources.insert_or_assign(thread, executionContext.PendingScript);
+		HostRole role = executionContext.Role;
+		if (executionContext.PendingScript != ecs::NULL_ENTITY) {
+			const bool client =
+				executionContext.World->IsA(executionContext.PendingScript, LocalScriptClass());
+			role.Server = !client;
+			role.Client = client;
+		}
 		OpenDataPackage(thread);
 
 		// **`script` goes on the thread, after the sandbox.** The state's global
@@ -733,7 +787,7 @@ namespace engine::script {
 
 		// `=` tells Luau to use the name as-is rather than decorating it, so a
 		// traceback reads as the path somebody can open.
-		const std::string chunkName = "=" + std::string(name);
+		const std::string chunkName = ExecutionChunkName(executionContext, name, role);
 		const int loaded = luau_load(thread, chunkName.c_str(), bytecode, bytecodeSize, 0);
 		std::free(bytecode);
 
@@ -876,7 +930,9 @@ namespace engine::script {
 			// **Already evaluated: hand back the same value.** Not a fresh copy -
 			// two scripts requiring one module must see one table, or a module
 			// used to share state silently shares nothing.
-			if (const auto found = context.Modules.find(module.Id); found != context.Modules.end()) {
+			const HostRole callerRole = ExecutionRole(state);
+			auto &modules = callerRole.Client && !callerRole.Server ? context.ClientModules : context.Modules;
+			if (const auto found = modules.find(module.Id); found != modules.end()) {
 				lua_getref(state, found->second);
 				return 1;
 			}
@@ -926,7 +982,7 @@ namespace engine::script {
 			PushInstanceValue(thread, module);
 			lua_setglobal(thread, "script");
 
-			const std::string chunkName = "=" + std::string(modulePath.Text());
+			const std::string chunkName = ExecutionChunkName(context, modulePath.Text(), callerRole);
 			const int loaded = luau_load(thread, chunkName.c_str(), bytecode, bytecodeSize, 0);
 			std::free(bytecode);
 
@@ -973,7 +1029,7 @@ namespace engine::script {
 			// Referenced before it is handed over, so the cache owns a value the
 			// collector cannot take while a script is still holding it.
 			lua_pushvalue(state, -1);
-			context.Modules[module.Id] = lua_ref(state, -1);
+			modules[module.Id] = lua_ref(state, -1);
 			lua_pop(state, 1);
 
 			return 1;
@@ -1024,11 +1080,6 @@ namespace engine::script {
 			return false;
 		}
 
-		// Which script a captured hit came from. Cleared after the run, because
-		// a heartbeat connection is not attributable to one - see
-		// `LuauContext::RunningScript`.
-		ContextOf(State).RunningScript = instance;
-
 		// **`script` names the instance, and it is set before the chunk runs.**
 		// That is the whole difference from `RunFile`: a chunk run this way can
 		// reach its own parent and its own siblings, which is what makes a game
@@ -1045,6 +1096,7 @@ namespace engine::script {
 	}
 
 	bool LuauRuntime::Heartbeat(float delta) {
+		ReapLuauSources(State);
 		Runtime::StackGuard guard(*this);
 		if (!guard) {
 			return false;

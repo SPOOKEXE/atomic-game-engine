@@ -5,6 +5,7 @@
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/gui/Modal.hpp>
+#include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 
@@ -281,6 +282,7 @@ namespace engine::gui {
 		while (!pending.empty()) {
 			const Entity node = pending.back();
 			pending.pop_back();
+			if (IsPlayerGuiSource(store, node)) continue;
 
 			// **Descended into before it is tested**, because a container that
 			// misses is not a reason to skip what it holds - a `Frame` sized to

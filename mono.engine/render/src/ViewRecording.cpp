@@ -156,6 +156,8 @@ namespace engine::render {
 		const View &source = *Request.Source;
 		State->ActiveContentOwner = source.ContentOwner;
 		State->ActiveImageGraphWorld = source.WorldName;
+		State->ActiveLocalImageGraphWorld =
+			source.ImageGraphWorldName.IsValid() ? source.ImageGraphWorldName : source.WorldName;
 		ContentSignature = scene::MixSignature(State->ResourceEpoch, source.ContentOwner.Id());
 		ContentSignature =
 			scene::MixSignature(ContentSignature, source.LensContentOwner.value_or(source.ContentOwner).Id());
@@ -178,6 +180,7 @@ namespace engine::render {
 		}
 		ContentSignature = scene::MixSignature(ContentSignature, source.World);
 		ContentSignature = scene::MixSignature(ContentSignature, source.WorldName.Id());
+		ContentSignature = scene::MixSignature(ContentSignature, source.ImageGraphWorldName.Id());
 		// Replacing a graph releases its targets even when world inputs stay unchanged.
 		if (const auto *installed = State->PipelineFor(Request.Pipeline))
 			ContentSignature = scene::MixSignature(ContentSignature, installed->Revision);
@@ -1979,6 +1982,7 @@ namespace engine::render {
 		State->SlotTexture.resize(uploadCount);
 		State->SlotContentOwner.resize(uploadCount);
 		State->SlotImageGraphWorld.resize(uploadCount);
+		State->SlotImageGraphFallbackWorld.resize(uploadCount);
 		State->SlotNormalMap.resize(uploadCount);
 		State->SlotRoughnessMap.resize(uploadCount);
 		State->SlotOcclusionMap.resize(uploadCount);
@@ -2024,6 +2028,7 @@ namespace engine::render {
 				State->SlotContentOwner[drawSlot] = Request.Source->ContentOwnerOf(instance.SourceWorld);
 				State->SlotImageGraphWorld[drawSlot] =
 					instance.SourceWorld.IsValid() ? instance.SourceWorld : viewWorld;
+				State->SlotImageGraphFallbackWorld[drawSlot] = viewWorld;
 				State->SlotNormalMap[drawSlot] = instance.NormalMap;
 				State->SlotRoughnessMap[drawSlot] = instance.RoughnessMap;
 				State->SlotOcclusionMap[drawSlot] = instance.OcclusionMap;
@@ -2236,6 +2241,8 @@ namespace engine::render {
 						State->SlotTexture[drawSlot] = State->SlotTexture[sceneSlot];
 						State->SlotContentOwner[drawSlot] = State->SlotContentOwner[sceneSlot];
 						State->SlotImageGraphWorld[drawSlot] = State->SlotImageGraphWorld[sceneSlot];
+						State->SlotImageGraphFallbackWorld[drawSlot] =
+							State->SlotImageGraphFallbackWorld[sceneSlot];
 						State->SlotNormalMap[drawSlot] = State->SlotNormalMap[sceneSlot];
 						State->SlotRoughnessMap[drawSlot] = State->SlotRoughnessMap[sceneSlot];
 						State->SlotOcclusionMap[drawSlot] = State->SlotOcclusionMap[sceneSlot];
@@ -2291,8 +2298,11 @@ namespace engine::render {
 				uint32_t levelCount = 1;
 				const uint32_t wanted = std::clamp<uint32_t>(instance.LodLevels, 1u, scene::LOD_LEVELS);
 				const core::Name billboard = instance.LodBillboard;
-				const core::Name billboardOwner = Impl::TextureContentOwner(
-					billboard, State->SlotContentOwner[slot], State->SlotImageGraphWorld[slot]
+				const core::Name billboardOwner = State->TextureContentOwnerWithFallback(
+					billboard,
+					State->SlotContentOwner[slot],
+					State->SlotImageGraphWorld[slot],
+					State->SlotImageGraphFallbackWorld[slot]
 				);
 				const bool billboardResident =
 					billboard.IsValid() && State->Textures.Find(billboard, billboardOwner) != nullptr;

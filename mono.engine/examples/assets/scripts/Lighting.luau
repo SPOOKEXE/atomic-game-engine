@@ -44,9 +44,9 @@ Lighting.FogColor = Color3.fromRGB(72, 118, 175)
 Lighting.FogStart = 24
 Lighting.FogEnd = 82
 
-local eye = Instance.new("Camera")
-eye.Name = "LightingCamera"
-eye.FieldOfView = 62
-eye.CFrame = CFrame.lookAt(Vector3.new(20, 15, 22), Vector3.new(0, 3, -35))
-eye.Parent = workspace
-workspace.CurrentCamera = eye
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local eye = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+eye:SetAttribute("Name", "LightingCamera")
+eye:SetAttribute("FieldOfView", 62)
+eye:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(20, 15, 22), Vector3.new(0, 3, -35)))

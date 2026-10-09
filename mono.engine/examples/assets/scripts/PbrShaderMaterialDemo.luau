@@ -11,6 +11,7 @@
 --     client --script PbrShaderMaterialDemo.luau
 
 local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local IMAGE_SIZE = 256
 -- Seven 256-square RGBA maps use 1.75 MiB. This keeps individual chipped faces
@@ -28,6 +29,7 @@ type PbrMaps = {
 local function NewImage(name: string): EditableImage
 	local image = Instance.new("EditableImage")
 	image.Name = name
+	image.Parent = ReplicatedStorage
 	assert(image:Resize(IMAGE_SIZE, IMAGE_SIZE), `{name} size was refused`)
 	return image
 end
@@ -100,8 +102,20 @@ local function PaintMaps(): PbrMaps
 			local left = StoneHeight((u - 1 / IMAGE_SIZE + 1) % 1, v)
 			local up = StoneHeight(u, math.max(v - 1 / IMAGE_SIZE, 0))
 			local offset = (y * IMAGE_SIZE + x) * 4
-			put(pixels.Colour, offset, 16 + rock * 62 + grain * 24, 15 + rock * 58 + grain * 20, 13 + rock * 52 + grain * 16)
-			put(pixels.Normal, offset, 128 + (rock - left) * 300 + grain * 20, 128 + (rock - up) * 300 + grain * 20, 255)
+			put(
+				pixels.Colour,
+				offset,
+				16 + rock * 62 + grain * 24,
+				15 + rock * 58 + grain * 20,
+				13 + rock * 52 + grain * 16
+			)
+			put(
+				pixels.Normal,
+				offset,
+				128 + (rock - left) * 300 + grain * 20,
+				128 + (rock - up) * 300 + grain * 20,
+				255
+			)
 			local roughness = 135 + (1 - rock) * 95 + grain * 32
 			put(pixels.Roughness, offset, roughness, roughness, roughness)
 			local occlusion = 125 + rock * 130
@@ -132,6 +146,7 @@ end
 local function RockMesh(name: string, position: Vector3): MeshPart
 	local mesh = Instance.new("EditableMesh")
 	mesh.Name = `{name}_ReliefMesh`
+	mesh.Parent = ReplicatedStorage
 	local vertices = {}
 	local indices = {}
 	local rings = 84
@@ -142,7 +157,8 @@ local function RockMesh(name: string, position: Vector3): MeshPart
 		for segment = 0, segments do
 			local u = segment / segments
 			local phi = u * math.pi * 2
-			local direction = Vector3.new(math.sin(theta) * math.cos(phi), math.cos(theta), math.sin(theta) * math.sin(phi))
+			local direction =
+				Vector3.new(math.sin(theta) * math.cos(phi), math.cos(theta), math.sin(theta) * math.sin(phi))
 			local radius = 2.75 + (StoneHeight(u, v) - 0.5) * 0.24
 			table.insert(vertices, { Position = direction * radius, Normal = direction, UV = Vector2.new(u, v) })
 		end
@@ -172,6 +188,13 @@ local function RockMesh(name: string, position: Vector3): MeshPart
 	part.Parent = workspace
 	return part
 end
+
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local camera = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+camera:SetAttribute("Name", "PbrShaderMaterialCamera")
+camera:SetAttribute("FieldOfView", 40)
+camera:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(-5, 4.8, 10), Vector3.new(-5, 3.0, 0)))
 
 -- Default PBR is left without a Material child. It therefore proves the
 -- deferred route directly from MeshPart map properties.
@@ -246,12 +269,5 @@ Lighting.OutdoorAmbient = Color3.fromRGB(38, 42, 48)
 Lighting.FogColor = Color3.fromRGB(2, 4, 9)
 Lighting.FogStart = 80
 Lighting.FogEnd = 120
-
-local camera = Instance.new("Camera")
-camera.Name = "PbrShaderMaterialCamera"
-camera.FieldOfView = 40
-camera.CFrame = CFrame.lookAt(Vector3.new(-5, 4.8, 10), Vector3.new(-5, 3.0, 0))
-camera.Parent = workspace
-workspace.CurrentCamera = camera
 
 print("pbr shader material demo: procedural stone relief and local lights ready")

@@ -733,90 +733,85 @@ local function CharacterRoot(): Instance?
 	return nil
 end
 
--- --- the camera ------------------------------------------------------------
---
--- **A flight rather than an orbit, because there is nothing to orbit.** The
--- scene this replaced circled a 512-stud island and looked in at it. An endless
--- field has no middle, so the camera goes somewhere instead: forward at a
--- walking pace, holding its height above whatever ground is under it, which is
--- the view that shows chunks arriving ahead and falling away behind.
---
--- **It flies until the character moves, and then it is the character's.** That
--- is one test for the question this scene cannot ask directly - `IsServer` and
--- `IsClient` report the same thing in a standalone client as in a dedicated
--- server, so a script cannot ask whether a host solves. A body that has moved
--- has been solved by something; a body still on its pad has not, and a scene
--- that stood still there would show nothing of what it is about.
+-- Terrain sampling stays authoritative; the local companion owns its camera.
+local MAX_VIEW_DISTANCE = 1000000
+-- Each admitted player supplies only a bounded view pose, never geometry or identity.
+local HttpService = game:GetService("HttpService")
+local poseRemote = Instance.new("RemoteEvent")
+poseRemote.Name = "DemoViewPose"
+poseRemote.Parent = game:GetService("ReplicatedStorage")
+type ViewPose = { Position: Vector3, Look: Vector3, Fov: number, Tick: number }
+local viewPoses: { [Instance]: ViewPose } = {}
+local poseTick = 0
+RunService.Heartbeat:Connect(function() poseTick += 1 end)
+
+local function Finite(value: unknown): boolean
+	return typeof(value) == "number" and value == value and math.abs(value) < math.huge
+end
+
+poseRemote.OnServerEvent:Connect(function(payload: string, sender: Player?)
+	if sender == nil or sender.Parent == nil or not sender.Parent:IsA("Players") or #payload > 512 then return end
+	local previous = viewPoses[sender]
+	if previous ~= nil and poseTick - previous.Tick < 3 then return end
+	local ok, decoded = pcall(function() return HttpService:JSONDecode(payload) end)
+	if not ok or typeof(decoded) ~= "table" then return end
+	for _, key in { "x", "y", "z", "lx", "ly", "lz", "fov" } do
+		if not Finite(decoded[key]) then return end
+	end
+	local position = Vector3.new(decoded.x, decoded.y, decoded.z)
+	local look = Vector3.new(decoded.lx, decoded.ly, decoded.lz)
+	if position.Magnitude > MAX_VIEW_DISTANCE or look.Magnitude < 0.5 or look.Magnitude > 1.5
+		or decoded.fov < 1 or decoded.fov > 120 then return end
+	viewPoses[sender] = { Position = position, Look = look.Unit, Fov = decoded.fov, Tick = poseTick }
+end)
+
+local function NearestView(origin: Vector3): ViewPose?
+	local nearest: ViewPose? = nil
+	local distance = math.huge
+	local nearestName = ""
+	for player, pose in viewPoses do
+		if player.Parent == nil or poseTick - pose.Tick > 120 then
+			viewPoses[player] = nil
+		else
+			local squared = (pose.Position - origin):Dot(pose.Position - origin)
+			if squared < distance or (squared == distance and player.Name < nearestName) then
+				distance, nearest, nearestName = squared, pose, player.Name
+			end
+		end
+	end
+	return nearest
+end
+
+local templates = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(templates ~= nil, "the demo camera template folder is missing")
+local demoCamera = templates:FindFirstChild("DemoCamera")
+assert(demoCamera ~= nil, "the demo camera companion is missing")
 local FLIGHT_SPEED = 26
 local FLIGHT_HEIGHT = 46
 local FLIGHT_LOOK = 90
-
-local eye = Instance.new("Camera")
-eye.Name = "Flyer"
-eye.FieldOfView = 62
-eye.FarPlaneZ = VIEW * CHUNK * 4
-eye.CFrame = CFrame.lookAt(
-	Vector3.new(0, SPAWN_HEIGHT + FLIGHT_HEIGHT, 0),
-	Vector3.new(FLIGHT_LOOK, SPAWN_HEIGHT, 0)
-)
-eye.Parent = workspace
-workspace.CurrentCamera = eye
-
-local flying = true
-local spawned: Vector3? = nil
-
--- **Ticks rather than `time()`, because two runs of this scene have to build
--- the same world.** The flight decides which chunks exist, so a camera placed
--- from the wall clock would put a different set of meshes in the world on every
--- run - and `HeightAt` being a pure function of its seed would stop being
--- something anybody could check. `examples/tests/Scene.cpp` checks it.
+local flightGuide = Instance.new("CFrameValue")
+flightGuide.Name = "DemoFlightGuide"
+flightGuide.Value = CFrame.lookAt(Vector3.new(0, SPAWN_HEIGHT + FLIGHT_HEIGHT, 0), Vector3.new(FLIGHT_LOOK, SPAWN_HEIGHT, 0))
+flightGuide.Parent = game:GetService("ReplicatedStorage")
+demoCamera:SetAttribute("FarPlaneZ", VIEW * CHUNK * 4)
 local flown = 0
-
-local function FlyCamera()
-	local root = CharacterRoot()
-	if root ~= nil then
-		local at = (root :: any).Position
-		if spawned == nil then
-			spawned = at
-		elseif ((at - (spawned :: Vector3)).Magnitude) > 0.25 then
-			-- Something is solving. Stop writing the camera and let whatever
-			-- follows the character have it - two writers and the last one
-			-- wins, which reads as a camera fighting itself.
-			flying = false
-			return
-		end
-	end
-
+local function AdvanceFlightGuide()
 	flown += 1
 	local travelled = flown * FLIGHT_SPEED / 60
 	local ahead = travelled + FLIGHT_LOOK
-
-	-- Above the ground rather than at a fixed altitude, so a mountain does not
-	-- swallow the camera and a valley does not leave it in the sky.
 	local ground = math.max(HeightAt(travelled, 0), SEA_LEVEL)
 	local aim = math.max(HeightAt(ahead, 0), SEA_LEVEL)
-
-	eye.CFrame = CFrame.lookAt(
+	flightGuide.Value = CFrame.lookAt(
 		Vector3.new(travelled, ground + FLIGHT_HEIGHT, 0),
 		Vector3.new(ahead, aim + FLIGHT_HEIGHT * 0.25, 0)
 	)
 end
 
--- What the streaming follows: the character once something is moving it, and
--- the camera until then.
 local function SubjectPosition(): Vector3
-	if not flying then
-		local root = CharacterRoot()
-		if root ~= nil then
-			return (root :: any).Position
-		end
-	end
-
-	-- Studio owns one transient camera per viewport and makes the camera for the
-	-- view being drawn current. Resolving it here keeps chunks around what is
-	-- actually visible instead of around `eye` after Studio has replaced it.
-	local current = workspace.CurrentCamera
-	return if current ~= nil then (current :: Camera).CFrame.Position else eye.CFrame.Position
+	local root = CharacterRoot() :: BasePart?
+	local origin = if root ~= nil then root.Position else flightGuide.Value.Position
+	local pose = NearestView(origin)
+	return if pose ~= nil then pose.Position else origin
 end
 
 -- --- streaming --------------------------------------------------------------
@@ -956,9 +951,7 @@ local function CountChunks(): number
 end
 
 RunService.Heartbeat:Connect(function()
-	if flying then
-		FlyCamera()
-	end
+	AdvanceFlightGuide()
 
 	Settle()
 	if not streaming then

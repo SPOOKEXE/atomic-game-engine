@@ -1141,6 +1141,38 @@ TEST_CASE(
 	CHECK(engine::render::ParticleVisibilitySignature(view) != original);
 }
 
+TEST_CASE("device particle cache follows source input and simulation time", "[render][presentation][cache]") {
+	using namespace engine;
+	render::View view;
+	const auto absent = render::ScenePresentationSignaturesOf(view, {});
+	view.GpuParticles.emplace();
+	view.GpuParticles->Field.SpawnSamples.push_back({{1, 2, 3}, 10, {}, 0});
+	const auto present = render::ScenePresentationSignaturesOf(view, {});
+	CHECK(present.Particles != absent.Particles);
+	CHECK(present.Objects == absent.Objects);
+	CHECK(present.Environment == absent.Environment);
+	const auto visibility = render::ParticleVisibilitySignature(view);
+	render::ParticleLayerVisibility cache;
+	cache.Commit(visibility, false);
+	CHECK_FALSE(cache.RequiresImage(true, false, visibility));
+	view.GpuParticles->Seconds = 1.0 / 60;
+	CHECK(render::ScenePresentationSignaturesOf(view, {}).Particles != present.Particles);
+	CHECK(cache.RequiresImage(true, false, render::ParticleVisibilitySignature(view)));
+	const auto signature = [&] { return render::ScenePresentationSignaturesOf(view, {}).Particles; };
+	const auto advanced = signature();
+	view.GpuParticles->Field.SpawnSamples[0].Position.X = 7;
+	CHECK(signature() != advanced);
+	const auto editedSamples = signature();
+	view.GpuParticles->ForceField.Tangential = 20;
+	CHECK(signature() != editedSamples);
+	const auto editedFlow = signature();
+	view.CameraFrame.Position.Z = 20;
+	CHECK(signature() != editedFlow);
+	view.GpuParticles.reset();
+	CHECK(render::ScenePresentationSignaturesOf(view, {}).Particles == absent.Particles);
+	CHECK(render::ParticleVisibilitySignature(view) == 0);
+}
+
 TEST_CASE("fitted projection changes invalidate every present image cause", "[render][presentation][cache]") {
 	engine::render::View view;
 	engine::scene::DrawInstance instance;

@@ -157,9 +157,12 @@ if (!wide.Resize(1921,1) || wide.ToBase64() !== '' || wide.FromBase64('AA==','rg
 		));
 		store.SetAdoptOnly(true);
 		const auto refusal = std::string(method) + "FromBase64('" + std::string(PNG) + "','png')";
-		const auto authority = language == script::Language::Luau
-								   ? "assert(not " + refusal + ")"
-								   : "if (" + refusal + ") throw new Error('replica write');";
+		const auto authority =
+			language == script::Language::Luau
+				? "assert(not pcall(function() " + refusal + " end), 'authority import permitted')"
+				: "let refused = false; try { " + refusal +
+					  "; } catch (_) { refused = true; } if (!refused) throw new Error('authority import "
+					  "permitted');";
 		REQUIRE(runtime->Run(std::string(receiver) + authority, "image-authority"));
 		CHECK(image->Pixels == before.Pixels);
 		CHECK(image->Revision == before.Revision);

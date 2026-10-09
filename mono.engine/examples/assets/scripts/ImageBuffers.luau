@@ -186,8 +186,8 @@ emitter.SpreadAngle = Vector2.new(25, 25)
 emitter.Size = NumberSequence.new(0.7)
 emitter.Parent = particleHost
 
-local camera = Instance.new("Camera")
-camera.Name = "ImageBuffersCamera"
-camera.CFrame = CFrame.lookAt(Vector3.new(0, 3.5, 12), Vector3.new(0, 1.5, 0))
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local camera = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+camera:SetAttribute("Name", "ImageBuffersCamera")
+camera:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(0, 3.5, 12), Vector3.new(0, 1.5, 0)))

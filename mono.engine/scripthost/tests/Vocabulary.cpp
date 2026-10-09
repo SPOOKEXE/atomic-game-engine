@@ -154,6 +154,10 @@ TEST_CASE("every offered instance member resolves on a real instance", "[script]
 		// both languages.
 		std::string source =
 			luau ? "local subject = Instance.new(\"Part\")\n" : "var subject = Instance.new(\"Part\");\n";
+		source += luau ? "assert(not pcall(function() return subject.OnServerEvent end))\n"
+						 "assert(not pcall(function() return subject.FireServer end))\n"
+					   : "if (subject.OnServerEvent !== undefined || subject.FireServer !== undefined) "
+						 "throw new Error('RemoteEvent members leaked onto Part');\n";
 
 		for (const std::string &member : surface.InstanceMembers) {
 			if (luau) {

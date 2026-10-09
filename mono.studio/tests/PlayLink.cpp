@@ -13,6 +13,7 @@
 
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/examples/DemosLoader.hpp>
@@ -216,6 +217,10 @@ namespace {
 				engine::script::MakeScript(store, engine::examples::ExamplePath(script), script) !=
 				engine::ecs::NULL_ENTITY
 			);
+			REQUIRE(
+				engine::examples::MountDemoCamera(store, engine::examples::ExamplePath(script)) !=
+				engine::ecs::NULL_ENTITY
+			);
 			engine::script::RuntimeLimits limits;
 			limits.Role = engine::script::HostRole{.Server = true, .Client = true, .Studio = true};
 			std::string error;
@@ -280,6 +285,9 @@ TEST_CASE("studio play carries procedural PBR content into its replica", "[studi
 		CHECK(link.Report().Bytes <= 50 * 1024);
 	}
 	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
+		const Entity sharedAssets =
+			engine::scene::ServiceOf(store, engine::ecs::Classes::Find(Name("ReplicatedStorage")));
+		REQUIRE(sharedAssets != engine::ecs::NULL_ENTITY);
 		const std::array maps{
 			"PbrDemo_Colour",
 			"PbrDemo_Normal",
@@ -290,8 +298,9 @@ TEST_CASE("studio play carries procedural PBR content into its replica", "[studi
 		};
 		std::array<Name, std::tuple_size_v<decltype(maps)>> mapContent{};
 		for (size_t index = 0; index < maps.size(); index++) {
-			const Entity imageEntity = InScene(store, maps[index]);
+			const Entity imageEntity = store.FindFirstChild(sharedAssets, maps[index]);
 			REQUIRE(imageEntity != engine::ecs::NULL_ENTITY);
+			CHECK(store.ParentOf(imageEntity) == sharedAssets);
 			const auto *image = store.Get<engine::scene::EditableImage>(imageEntity);
 			REQUIRE(image != nullptr);
 			CHECK(image->Width == 256);
@@ -302,8 +311,10 @@ TEST_CASE("studio play carries procedural PBR content into its replica", "[studi
 		}
 
 		for (const char *partName : {"DefaultPbr", "CoolStonePbr", "FillStonePbr", "WarmStonePbr"}) {
-			const Entity meshEntity = InScene(store, std::string(partName) + "_ReliefMesh");
+			const Entity meshEntity =
+				store.FindFirstChild(sharedAssets, std::string(partName) + "_ReliefMesh");
 			REQUIRE(meshEntity != engine::ecs::NULL_ENTITY);
+			CHECK(store.ParentOf(meshEntity) == sharedAssets);
 			const auto *mesh = store.Get<engine::scene::EditableMesh>(meshEntity);
 			REQUIRE(mesh != nullptr);
 			CHECK(mesh->Positions.size() == 85 * 113);
@@ -364,6 +375,12 @@ TEST_CASE(
 			store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, link.Player()));
 		REQUIRE(active != nullptr);
 		REQUIRE(character != nullptr);
+		CHECK(store.ParentOf(active->Entity) == engine::scene::WorkspaceOf(store));
+		size_t cameraCount = 0;
+		store.Each<const engine::scene::Camera>([&](Entity entity, const engine::scene::Camera &) {
+			if (store.ClassOf(entity) == engine::scene::CameraClass()) ++cameraCount;
+		});
+		CHECK(cameraCount == 1);
 		const auto *subject = store.Get<engine::scene::CameraSubject>(active->Entity);
 		REQUIRE(subject != nullptr);
 		CHECK(subject->Automatic);
@@ -499,7 +516,7 @@ TEST_CASE("server and client viewport cameras stay local through a play link", "
 	serverPose.Frame.Position = Vector3{31.0f, 17.0f, -9.0f};
 	Entity serverCamera;
 	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
-		serverCamera = studio::CreateRuntimeCamera(store, "ServerCamera", serverPose);
+		serverCamera = studio::CreateRuntimeCamera(store, serverPose);
 	});
 	REQUIRE(serverCamera != engine::ecs::NULL_ENTITY);
 
@@ -509,10 +526,21 @@ TEST_CASE("server and client viewport cameras stay local through a play link", "
 	fixture.Step(link, 32);
 
 	Entity clientCamera;
-	fixture.Worlds.Enter(link.ReplicaWorld(), [&](const Store &store) {
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
 		clientCamera = studio::RuntimeCameraOf(store);
 		REQUIRE(clientCamera != engine::ecs::NULL_ENTITY);
-		CHECK_FALSE(store.Alive(serverCamera));
+		// Entity numbers are local to each store; count and inspect this client's own eye.
+		size_t cameras = 0;
+		store.Each<const engine::scene::Camera>([&](Entity entity, const engine::scene::Camera &) {
+			if (store.ClassOf(entity) == engine::scene::CameraClass()) {
+				++cameras;
+				CHECK(entity == clientCamera);
+			}
+		});
+		CHECK(cameras == 1);
+		CHECK(Store::IsPredicted(clientCamera));
+		CHECK(store.InstanceNameOf(clientCamera) == Name("Camera"));
+		CHECK(store.Has<engine::ecs::ClientLocal>(clientCamera));
 		CHECK(store.Get<Transform>(clientCamera)->Frame.Position != serverPose.Frame.Position);
 	});
 
@@ -523,12 +551,19 @@ TEST_CASE("server and client viewport cameras stay local through a play link", "
 	focusedPose.Frame.Position = Vector3{8.0f, 41.0f, -16.0f};
 	Entity focusedCamera;
 	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
-		focusedCamera = studio::CreateRuntimeCamera(store, "FocusedServerCamera", focusedPose);
+		focusedCamera = studio::CreateRuntimeCamera(store, focusedPose);
 	});
 	REQUIRE(focusedCamera != engine::ecs::NULL_ENTITY);
 	fixture.Step(link, 4);
-	fixture.Worlds.Enter(link.ReplicaWorld(), [&](const Store &store) {
-		CHECK_FALSE(store.Alive(focusedCamera));
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+		size_t cameras = 0;
+		store.Each<const engine::scene::Camera>([&](Entity entity, const engine::scene::Camera &) {
+			if (store.ClassOf(entity) == engine::scene::CameraClass()) {
+				++cameras;
+				CHECK(entity == clientCamera);
+			}
+		});
+		CHECK(cameras == 1);
 		CHECK(store.Get<Transform>(clientCamera)->Frame.Position != focusedPose.Frame.Position);
 	});
 
@@ -946,6 +981,8 @@ TEST_CASE(
 		}
 		destinationImage = store.CreateInstance(engine::scene::EditableImageClass(), "ArrivalImage");
 		REQUIRE(destinationImage != engine::ecs::NULL_ENTITY);
+		REQUIRE(store.SetParent(destinationImage, WorkspaceOf(store)));
+		REQUIRE(VisibleToClients(store, destinationImage));
 		REQUIRE(engine::scene::ResizeEditableImage(store, destinationImage, 1024, 1024));
 		auto *image = store.GetMutable<engine::scene::EditableImage>(destinationImage);
 		REQUIRE(image != nullptr);
@@ -1063,6 +1100,15 @@ TEST_CASE(
 		CHECK(image->Width == 1024);
 		CHECK(image->Height == 1024);
 		CHECK(image->Pixels.size() == 1024u * 1024u * 4u);
+		CHECK(store.ParentOf(destinationImage) == WorkspaceOf(store));
+		bool pixelsMatch = true;
+		for (size_t index = 0; index < image->Pixels.size(); ++index) {
+			if (image->Pixels[index] != static_cast<uint8_t>(index)) {
+				pixelsMatch = false;
+				break;
+			}
+		}
+		CHECK(pixelsMatch);
 	});
 	CHECK(arriving.Player() == arrival->Player);
 	CHECK(arriving.ReplicaWorld() != resident.ReplicaWorld());
@@ -2988,6 +3034,10 @@ WalkTunnelsPortal(bool gpu, bool authorityVisual = false, bool diagonal = true, 
 		engine::scene::RegisterOwnershipSystem(systems);
 		REQUIRE(
 			engine::script::MakeScript(store, engine::examples::ExamplePath("Tunnels.luau"), "Tunnels") !=
+			engine::ecs::NULL_ENTITY
+		);
+		REQUIRE(
+			engine::examples::MountDemoCamera(store, engine::examples::ExamplePath("Tunnels.luau")) !=
 			engine::ecs::NULL_ENTITY
 		);
 		engine::script::RuntimeLimits limits;

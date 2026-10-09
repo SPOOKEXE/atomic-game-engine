@@ -79,6 +79,9 @@ namespace engine::replication {
 		//
 		// @since v0.15
 		Disputed,
+
+		// A bounded script-defined component schema, sent before its values.
+		Schemas,
 	};
 
 	// Returns a stable, human-readable name for a message kind.
@@ -136,7 +139,20 @@ namespace engine::replication {
 	// their ten-byte shape.** A peer on the old grid would decode the same
 	// sixteen-bit codes at different coordinates, so the unchanged length is
 	// exactly why the version has to reject the mismatch at admission.
-	inline constexpr uint16_t PROTOCOL_VERSION = 13;
+	// Schema descriptions precede snapshots on the reliable bulk channel.
+	inline constexpr uint16_t PROTOCOL_VERSION = 14;
+
+	// One piece of one immutable script-defined component description.
+	struct SchemaChunk {
+		// Stable component name, never the sender's registration index.
+		core::Name Component;
+		// Total encoded definition bytes, bounded before receiver allocation.
+		uint32_t TotalBytes = 0;
+		// Byte position in that definition.
+		uint32_t Offset = 0;
+		// This piece of the definition.
+		std::vector<std::byte> Bytes;
+	};
 
 	// Which half of a join a snapshot chunk belongs to.
 	//
@@ -398,6 +414,8 @@ namespace engine::replication {
 	// @param chunk  The chunk to write.
 	// @since v0.3
 	void WriteMessage(core::ByteWriter &writer, const SnapshotChunk &chunk);
+	// Writes a bounded component definition chunk.
+	void WriteMessage(core::ByteWriter &writer, const SchemaChunk &chunk);
 
 	// Writes a delta.
 	//
@@ -469,6 +487,7 @@ namespace engine::replication {
 		// other than `Kind` is reading a value no sender sent.
 		//@{
 		SnapshotChunk Chunk;
+		SchemaChunk Schema;
 		replication::Delta Delta;
 		replication::Structure Structure;
 		replication::Input Input;

@@ -210,6 +210,8 @@ namespace engine::script {
 		// @param dropped Appended with a reclaimed tween's entity, if the table
 		//        was full. The caller drops its connections and destroys it,
 		//        because only a VM can release a callable.
+		// @param clientExecution The creating caller's effective client side,
+		//        retained when later ticks run outside its VM stack frame.
 		// @return The tween's entity, or `NULL_ENTITY` when every record is
 		//         still live.
 		ecs::Entity Create(
@@ -217,7 +219,8 @@ namespace engine::script {
 			ecs::Entity target,
 			const core::TweenInfo &info,
 			std::vector<TweenGoal> goals,
-			std::vector<ecs::Entity> &dropped
+			std::vector<ecs::Entity> &dropped,
+			bool clientExecution = false
 		);
 
 		// Starts or resumes one, capturing where its properties are now.
@@ -277,8 +280,9 @@ namespace engine::script {
 		// the new motion, not to be told the old one arrived.
 		//
 		// @param target The instance whose tweens stop.
+		// @param clientExecution Restricts a client override to client-created records.
 		// @return How many were stopped.
-		size_t CancelFor(ecs::Entity target);
+		size_t CancelFor(ecs::Entity target, bool clientExecution = false);
 
 		// What a tween is doing.
 		//
@@ -328,6 +332,9 @@ namespace engine::script {
 			// What it drives. Checked for life on every step, because an
 			// instance destroyed mid-flight is ordinary.
 			ecs::Entity Target;
+
+			// Captured at creation, never inferred from a later barrier's caller.
+			bool ClientExecution = false;
 
 			core::TweenInfo Info;
 

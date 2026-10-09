@@ -1,128 +1,73 @@
 #version 450
 
-// Device-local cosmetic particles driven by the same analytical quantities as
-// the storm resource. One row is position/kind and velocity/age, exactly 32
-// bytes, which keeps the optional 50M preset near 1.6 GiB.
-
+// Generic device-local particles consume authored initial conditions and the
+// same bounded vector-field sampling contract as ordinary particle emitters.
 layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
-
+layout(set = 0, binding = 0, std430) readonly buffer Samples { vec4 rows[]; } samples;
 layout(set = 1, binding = 0, std430) buffer States { vec4 rows[]; } states;
-
 layout(set = 2, binding = 0) uniform Field {
-	// centre.xyz, elapsed seconds
-	vec4 centreTime;
-	// core radius, influence radius, top height, tick seconds
-	vec4 radii;
-	// tangential, inflow, updraft, rain rate
-	vec4 wind;
-	// active rows, seed, reset, visible layer mask
-	vec4 control;
+	vec4 centreDelta;
+	vec4 rotation;
+	vec4 bounds;
+	uvec4 control;
+	uvec4 sampleOptions;
+	vec4 accelerations[3];
+	vec4 fieldCentre;
+	vec4 fieldRotation;
+	vec4 fieldVector;
+	vec4 fieldHalf;
+	vec4 fieldAxis;
 } field;
 
-uint Mix(uint value) {
-	value ^= value >> 16u;
-	value *= 0x7feb352du;
-	value ^= value >> 15u;
-	value *= 0x846ca68bu;
-	return value ^ (value >> 16u);
+uint Mix(uint value) { value ^= value >> 16u; value *= 0x7feb352du; value ^= value >> 15u; value *= 0x846ca68bu; value ^= value >> 16u; return value; }
+vec3 TurnedBy(vec4 turn, vec3 value) { return value + 2.0 * cross(turn.xyz, cross(turn.xyz, value) + turn.w * value); }
+vec3 FieldUnit(vec3 value) { float squared = dot(value, value); return squared > 0.0 ? value * inversesqrt(squared) : vec3(0.0); }
+float FieldAxisWeight(float coordinate, float extent, float falloff) {
+	if (!(extent > 0.0)) return 1.0;
+	float distance = extent - abs(coordinate);
+	if (!(distance >= 0.0)) return 0.0;
+	return falloff > 0.0 ? clamp(distance / falloff, 0.0, 1.0) : 1.0;
 }
-
-float Unit(uint value) { return float(Mix(value) >> 8u) * (1.0 / 16777216.0); }
-
-float FunnelRadiusAt(float height) {
-	float heightScale = min(1.0, 500.0 / max(field.radii.z, 1.0));
-	return max(field.radii.x, 1.0) * (0.48 + 0.0024 * max(height, 0.0) * heightScale);
-}
-
-uint DrawBudget(uint activeCount) {
-	return activeCount <= 1000000u ? 18000u
-		: (activeCount <= 2000000u ? 36000u
-		: (activeCount <= 5000000u ? 64000u
-		: (activeCount <= 10000000u ? 96000u
-		: (activeCount <= 15000000u ? 128000u : 160000u))));
-}
-
-float ParticleKind(uint index) {
-	const uint drawBudget = DrawBudget(uint(field.control.x));
-	// Keep small, contiguous cohorts at the front of the device-only simulation
-	// buffer. The graphics pass can draw these without copying or reading back
-	// the full field, then place every parcel in one ordered depth slice.
-	if (index < drawBudget) return 0.0;
-	if (index < drawBudget * 2u) return 1.0;
-	uint lane = (index - drawBudget * 2u) % 16u;
-	// Nine lanes match the tornado-family proportion used by the reference
-	// simulation. More overlapping condensation billows keep the funnel from
-	// breaking into isolated puffs at the one-million-particle preset.
-	return float(lane < 9u ? 0u : (lane < 14u ? 1u : (lane < 15u ? 2u : 3u)));
-}
-
-void Reset(uint index, uint cycle) {
-	float kind = ParticleKind(index);
-	uint layer = 1u << uint(kind);
-	if ((uint(field.control.w) & layer) == 0u) kind = 3.0;
-	uint randomCycle = cycle + uint(field.control.y);
-	float angle = Unit(index * 5u + randomCycle + 1u) * 6.28318530718;
-	float radialSample = Unit(index * 5u + randomCycle + 2u);
-	float heightSample = Unit(index * 5u + randomCycle + 3u);
-	// Condensation is recycled before the anvil. Letting parcels hover at the
-	// zero-lift ceiling accumulates an opaque rectangular cap.
-	float height = kind < 0.5 ? 0.25 + pow(heightSample, 1.25) * field.radii.z * 0.65
-		: (kind < 1.5 ? 80.0 + heightSample * max(field.radii.z - 80.0, 1.0)
-		: (kind < 2.5 ? 0.5 + pow(heightSample, 1.6) * 7.0
-					  : 0.5 + pow(heightSample, 1.3) * 14.0));
-	float radius = kind < 0.5
-		? FunnelRadiusAt(height) * (0.55 + sqrt(radialSample) * 0.45)
-		: (kind < 1.5 ? sqrt(radialSample) * field.radii.y * 1.32
-		: (kind < 2.5 ? min(field.radii.x * (3.4 + radialSample * 2.2), field.radii.y * 0.95)
-					  : field.radii.y * (0.58 + radialSample * 0.37)));
-	// The fixed lanes keep the layer mix stable while the hashed cycle lets a
-	// recycled parcel rejoin a different soft billow on the same annulus.
-	if (kind < 0.5) {
-		float billow =
-			0.5 + 0.5 * sin(angle * 3.0 + Unit(index + randomCycle + 4u) * 6.28318530718);
-		radius = clamp(radius * mix(0.90, 1.08, billow), FunnelRadiusAt(height) * 0.55,
-			FunnelRadiusAt(height));
-	}
-	states.rows[index * 2u] = vec4(
-		field.centreTime.xyz + vec3(cos(angle) * radius, height, sin(angle) * radius), kind
-	);
-	states.rows[index * 2u + 1u] =
-		vec4(0.0, 0.0, 0.0, Unit(index * 7u + randomCycle + 4u) * 15.0);
+vec3 FieldVelocity(vec3 worldPosition) {
+	uint flags = uint(field.fieldVector.w);
+	if ((flags & 1u) == 0u) return vec3(0.0);
+	bool localSpace = (flags & 2u) != 0u, twoDimensional = (flags & 4u) != 0u;
+	vec3 offset = worldPosition - field.fieldCentre.xyz;
+	vec3 point = localSpace ? TurnedBy(vec4(-field.fieldRotation.xyz, field.fieldRotation.w), offset) : offset;
+	float weight = min(FieldAxisWeight(point.x, field.fieldHalf.x, field.fieldCentre.w), FieldAxisWeight(point.z, field.fieldHalf.z, field.fieldCentre.w));
+	if (!twoDimensional) weight = min(weight, FieldAxisWeight(point.y, field.fieldHalf.y, field.fieldCentre.w));
+	if (!(weight > 0.0)) return vec3(0.0);
+	vec3 direction = point; if (twoDimensional) direction.y = 0.0;
+	vec3 radial = FieldUnit(direction), axis = twoDimensional ? vec3(0.0, 1.0, 0.0) : FieldUnit(field.fieldAxis.xyz);
+	vec3 velocity = field.fieldVector.xyz + radial * field.fieldHalf.w + FieldUnit(cross(axis, radial)) * field.fieldAxis.w;
+	return (localSpace ? TurnedBy(field.fieldRotation, velocity) : velocity) * weight;
 }
 
 void main() {
 	uint index = gl_GlobalInvocationID.x;
-	uint activeCount = uint(field.control.x);
-	if (index >= activeCount) return;
-	if (field.control.z > 0.5) {
-		Reset(index, 0u);
-		return;
+	if (index >= field.control.x || field.sampleOptions.x == 0u) return;
+	uint sampleIndex = Mix(index + field.control.y) % field.sampleOptions.x;
+	vec4 positionLifetime = samples.rows[sampleIndex * 2u];
+	vec4 velocityLayer = samples.rows[sampleIndex * 2u + 1u];
+	uint layer = floatBitsToUint(velocityLayer.w);
+	if (layer >= 3u) return;
+	bool reset = field.control.z != 0u;
+	vec4 position = vec4(0.0), velocity = vec4(0.0);
+	if (!reset) { position = states.rows[index * 2u]; velocity = states.rows[index * 2u + 1u]; }
+	if (!reset) {
+		float delta = field.centreDelta.w;
+		if ((uint(field.fieldVector.w) & 1u) != 0u)
+			velocity.xyz += (FieldVelocity(position.xyz) - velocity.xyz) * min(delta * field.bounds.w, 1.0);
+		velocity.xyz += field.accelerations[layer].xyz * delta;
+		position.xyz += velocity.xyz * delta;
+		velocity.w += delta;
+		vec3 local = TurnedBy(vec4(-field.rotation.xyz, field.rotation.w), position.xyz - field.centreDelta.xyz);
+		reset = velocity.w >= positionLifetime.w || any(greaterThan(abs(local), field.bounds.xyz)) || any(isnan(position)) || any(isinf(position)) || any(isnan(velocity)) || any(isinf(velocity));
 	}
-
-	vec4 positionKind = states.rows[index * 2u];
-	vec4 velocityAge = states.rows[index * 2u + 1u];
-	vec3 offset = positionKind.xyz - field.centreTime.xyz;
-	float radius = max(length(offset.xz), 0.001);
-	vec3 radial = vec3(offset.x / radius, 0.0, offset.z / radius);
-	vec3 tangent = vec3(-radial.z, 0.0, radial.x);
-	float core = max(field.radii.x, 1.0);
-	float influence = 1.0 / (1.0 + pow(radius / max(field.radii.y, core), 2.25));
-	float turn = field.wind.x * (2.0 * radius / core) / (1.0 + radius * radius / (core * core));
-	float inward = field.wind.y * (radius / core) * exp(1.0 - radius / core) * influence;
-	float heightFraction = clamp(offset.y / max(field.radii.z, 1.0), 0.0, 1.0);
-	float lift = field.wind.z * exp(-pow((radius - core) / core, 2.0)) * (1.0 - heightFraction);
-	vec3 target = tangent * turn * influence - radial * inward + vec3(0.0, lift, 0.0);
-	if (positionKind.w > 0.5) target += vec3(0.0, -field.wind.w * 22.0, 0.0);
-	velocityAge.xyz += (target - velocityAge.xyz) * min(field.radii.w * 2.5, 1.0);
-	positionKind.xyz += velocityAge.xyz * field.radii.w;
-	velocityAge.w += field.radii.w;
-	if (length(positionKind.xyz - field.centreTime.xyz) > field.radii.y * 1.25 ||
-		positionKind.y < 0.0 || positionKind.y > field.radii.z ||
-		(positionKind.w < 0.5 && offset.y > field.radii.z * 0.70)) {
-		Reset(index, uint(max(velocityAge.w, 0.0) * 31.0) + 1u);
+	if (reset) {
+		position = vec4(field.centreDelta.xyz + TurnedBy(field.rotation, positionLifetime.xyz), float(layer));
+		float age = field.control.z != 0u ? float(Mix(index ^ field.control.y) >> 8u) * (1.0 / 16777216.0) * positionLifetime.w : 0.0;
+		velocity = vec4(TurnedBy(field.rotation, velocityLayer.xyz), age);
 	}
-	else {
-		states.rows[index * 2u] = positionKind;
-		states.rows[index * 2u + 1u] = velocityAge;
-	}
+	states.rows[index * 2u] = position; states.rows[index * 2u + 1u] = velocity;
 }

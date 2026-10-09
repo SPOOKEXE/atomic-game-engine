@@ -15,7 +15,6 @@
 -- fixed: changing its count or layout makes frame captures incomparable.
 
 local Lighting = game:GetService("Lighting")
-local RunService = game:GetService("RunService")
 
 local BALL_COUNT = 8
 local BALL_RADIUS = 9.5
@@ -55,9 +54,21 @@ local STYLES: { ShaderStyle } = {
 	{ Name = "SkyGridAmber", Tint = Color3.fromRGB(205, 132, 62), Frequency = 7.0, Contour = 0.18, Metalness = 0.08 },
 	{ Name = "SkyGridVerdant", Tint = Color3.fromRGB(76, 161, 105), Frequency = 9.0, Contour = 0.10, Metalness = 0.02 },
 	{ Name = "SkyGridCobalt", Tint = Color3.fromRGB(70, 127, 210), Frequency = 11.0, Contour = 0.22, Metalness = 0.15 },
-	{ Name = "SkyGridViolet", Tint = Color3.fromRGB(155, 100, 204), Frequency = 13.0, Contour = 0.16, Metalness = 0.06 },
+	{
+		Name = "SkyGridViolet",
+		Tint = Color3.fromRGB(155, 100, 204),
+		Frequency = 13.0,
+		Contour = 0.16,
+		Metalness = 0.06,
+	},
 	{ Name = "SkyGridCopper", Tint = Color3.fromRGB(190, 109, 71), Frequency = 15.0, Contour = 0.24, Metalness = 0.34 },
-	{ Name = "SkyGridGlacier", Tint = Color3.fromRGB(120, 190, 214), Frequency = 17.0, Contour = 0.08, Metalness = 0.10 },
+	{
+		Name = "SkyGridGlacier",
+		Tint = Color3.fromRGB(120, 190, 214),
+		Frequency = 17.0,
+		Contour = 0.08,
+		Metalness = 0.10,
+	},
 	{ Name = "SkyGridEmber", Tint = Color3.fromRGB(212, 84, 66), Frequency = 19.0, Contour = 0.20, Metalness = 0.18 },
 }
 
@@ -118,7 +129,13 @@ local function PaintMaps(): PbrMaps
 			local up = TerrainSample(u, math.max(v - 1 / MAP_SIZE, 0))
 			local grain = Hash(x, y) - 0.5
 			local offset = (y * MAP_SIZE + x) * 4
-			Put(pixels.Colour, offset, 34 + height * 86 + grain * 18, 45 + height * 104 + grain * 16, 36 + height * 73 + grain * 14)
+			Put(
+				pixels.Colour,
+				offset,
+				34 + height * 86 + grain * 18,
+				45 + height * 104 + grain * 16,
+				36 + height * 73 + grain * 14
+			)
 			Put(pixels.Normal, offset, 128 + (height - left) * 470, 128 + (height - up) * 470, 255)
 			local roughness = 102 + (1 - height) * 116 + grain * 14
 			Put(pixels.Roughness, offset, roughness, roughness, roughness)
@@ -137,7 +154,8 @@ local function PaintMaps(): PbrMaps
 end
 
 local function ShaderSource(style: ShaderStyle): string
-	return string.format([[
+	return string.format(
+		[[
 #version 450
 
 layout(location = 0) in vec3 inNormal;
@@ -277,7 +295,15 @@ void main() {
 	lit += texture(emissiveMap, inTexCoord).rgb * (0.15 + contour * 0.35);
 	outColour = vec4(lit, max(inColour.a, lighting.Flags.w));
 }
-]], style.Tint.R, style.Tint.G, style.Tint.B, style.Metalness, style.Contour, style.Frequency, style.Frequency * 0.63)
+]],
+		style.Tint.R,
+		style.Tint.G,
+		style.Tint.B,
+		style.Metalness,
+		style.Contour,
+		style.Frequency,
+		style.Frequency * 0.63
+	)
 end
 
 local function CreateShaders()
@@ -320,7 +346,8 @@ local function BuildTerrainBall(index: number, maps: PbrMaps)
 		for segment = 0, MESH_SEGMENTS do
 			local u = segment / MESH_SEGMENTS
 			local phi = u * math.pi * 2
-			local direction = Vector3.new(math.sin(theta) * math.cos(phi), math.cos(theta), math.sin(theta) * math.sin(phi))
+			local direction =
+				Vector3.new(math.sin(theta) * math.cos(phi), math.cos(theta), math.sin(theta) * math.sin(phi))
 			local terraces = TerrainSample((u + phase) % 1, v)
 			local crags = math.sin(phi * (5 + index % 4) + theta * 3.0) * math.sin(theta * 8.0 - phase * 9.0)
 			local radius = BALL_RADIUS + (terraces - 0.5) * 1.9 + crags * 0.36
@@ -360,6 +387,18 @@ local function BuildTerrainBall(index: number, maps: PbrMaps)
 	material.Parent = part
 end
 
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local demoCamera = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+demoCamera:SetAttribute("Name", "SkyGridBenchmarkCamera")
+demoCamera:SetAttribute("FieldOfView", 66)
+demoCamera:SetAttribute("FarPlaneZ", 260)
+demoCamera:SetAttribute("BallRadius", BALL_RADIUS)
+demoCamera:SetAttribute("CameraHeight", CAMERA_HEIGHT)
+demoCamera:SetAttribute("CameraSpeed", CAMERA_SPEED)
+demoCamera:SetAttribute("CameraLookAhead", CAMERA_LOOK_AHEAD)
+demoCamera:SetAttribute("FlightPeriodTicks", FLIGHT_PERIOD_TICKS)
+
 local maps = PaintMaps()
 CreateShaders()
 for index = 1, BALL_COUNT do
@@ -376,13 +415,6 @@ key.Color = Color3.fromRGB(90, 190, 255)
 key.EmissiveTint = key.Color
 key.EmissiveStrength = 1.8
 key.Parent = workspace
-
-local camera = Instance.new("Camera")
-camera.Name = "SkyGridBenchmarkCamera"
-camera.FieldOfView = 66
-camera.FarPlaneZ = 260
-camera.Parent = workspace
-workspace.CurrentCamera = camera
 
 Lighting.Brightness = 0.8
 Lighting.ClockTime = 14
@@ -408,18 +440,9 @@ light.Brightness = 420
 light.Range = 60
 light.Parent = sun
 
--- A tick counter makes this course reproducible. A wall-clock camera would
--- choose a different culling state each run, which defeats its use as a trace.
-local flightTicks = 0
 -- Ten simulated seconds keeps the reset outside the close inspection region,
--- while an integer tick period lets a capture replay the exact same cull path.
-local flightLength = CAMERA_SPEED * FLIGHT_PERIOD_TICKS / 60
+-- while the integer tick period keeps each capture on the same course cadence.
 
-RunService.Heartbeat:Connect(function()
-	flightTicks += 1
-	local travelled = (flightTicks * CAMERA_SPEED / 60) % flightLength - BALL_RADIUS
-	local eye = Vector3.new(0, CAMERA_HEIGHT, travelled)
-	camera.CFrame = CFrame.lookAt(eye, Vector3.new(0, CAMERA_HEIGHT - 1.5, travelled + CAMERA_LOOK_AHEAD))
-end)
-
-print(`benchmark skygrid: {BALL_COUNT} terrain meshes, {#STYLES} shader variants, {MESH_RINGS}x{MESH_SEGMENTS} terrain resolution`)
+print(
+	`benchmark skygrid: {BALL_COUNT} terrain meshes, {#STYLES} shader variants, {MESH_RINGS}x{MESH_SEGMENTS} terrain resolution`
+)

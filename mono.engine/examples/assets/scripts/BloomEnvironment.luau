@@ -56,9 +56,9 @@ for index = 1, 512 do
 	orb.Parent = workspace
 end
 
-local camera = Instance.new("Camera")
-camera.Name = "Bloom Camera"
-camera.CFrame = CFrame.lookAt(Vector3.new(24, 13, 35), Vector3.new(0, 4, -8))
-camera.FieldOfView = 58
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local camera = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+camera:SetAttribute("Name", "Bloom Camera")
+camera:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(24, 13, 35), Vector3.new(0, 4, -8)))
+camera:SetAttribute("FieldOfView", 58)

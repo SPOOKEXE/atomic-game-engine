@@ -179,8 +179,8 @@ declare interface ChangedSignal {
 }
 
 declare interface RemoteEventSignal {
-	Connect(handler: (payload: string) => void): RBXScriptConnection;
-	Once(handler: (payload: string) => void): RBXScriptConnection;
+	Connect(handler: (payload: string, sender: Player | null) => void): RBXScriptConnection;
+	Once(handler: (payload: string, sender: Player | null) => void): RBXScriptConnection;
 }
 
 // The instance tree's signals, matching the Luau half - undeclared until v0.13
@@ -588,6 +588,7 @@ declare namespace Enum {
 		readonly LockFirstPerson: CameraType;
 		readonly ShiftLock: CameraType;
 		readonly Scriptable: CameraType;
+		readonly Custom: CameraType;
 	};
 	const CloudComputeShader: {
 		readonly Cumulus: CloudComputeShader;
@@ -1259,6 +1260,8 @@ declare interface Instance {
 	ApplyImpulse(impulse: Vector3): void;
 	SetAppliedForce(force: Vector3): void;
 	SetAppliedTorque(torque: Vector3): void;
+	SetSpawnSamples(samples: ArrayBuffer): boolean;
+	SetLayer(index: number, colour: Color3, alpha: number, size: number, acceleration: Vector3): boolean;
 	Break(): number;
 	SetLocalTransparency(value: number): void;
 	AddVertex(position: Vector3, normal?: Vector3, uv?: Vector2): number;
@@ -1360,20 +1363,13 @@ declare interface VectorField3D extends PVInstance {
 	Vector: Vector3;
 }
 
-declare interface GpuParticleField extends Instance {
-	CondensationAlpha: number;
-	CondensationColor: Color3;
-	CondensationSize: number;
-	DebrisAlpha: number;
-	DebrisColor: Color3;
-	DebrisSize: number;
+declare interface GpuParticleField extends PVInstance {
+	Bounds: Vector3;
 	Enabled: boolean;
 	Layers: number;
-	RainAlpha: number;
-	RainColor: Color3;
-	RainSize: number;
 	RequestedCount: number;
 	Seed: number;
+	VelocityResponse: number;
 }
 
 declare interface BasePart extends PVInstance {
@@ -1414,15 +1410,6 @@ declare interface BasePart extends PVInstance {
 }
 
 declare interface Part extends BasePart {
-	StormDragCoefficient: number;
-	StormEnabled: boolean;
-	StormExposedArea: number;
-	StormForceScale: number;
-	StormMaximumBendRadians: number;
-	StormResponsePerSecond: number;
-	StormRestFrame: CFrame;
-	StormVegetationEnabled: boolean;
-	StormWindSpeedForMaximumBend: number;
 }
 
 declare interface SpawnLocation extends Part {
@@ -1508,8 +1495,9 @@ declare interface SkinnedMeshPart extends MeshPart {
 }
 
 declare interface Camera extends PVInstance {
-	CameraSubject: Instance;
+	CameraSubject: Instance | null;
 	CameraSubjectAutomatic: boolean;
+	CameraType: Enum.CameraType;
 	FarPlaneZ: number;
 	FieldOfView: number;
 	ImageHeight: number;
@@ -1819,11 +1807,6 @@ declare interface JointInstance extends Instance {
 }
 
 declare interface Weld extends JointInstance {
-	StormBreakForce: number;
-	StormDamageRate: number;
-	StormIntegrity: number;
-	StormLinkEnabled: boolean;
-	StormMaterialStrength: number;
 }
 
 declare interface WeldConstraint extends Instance {
@@ -1831,11 +1814,6 @@ declare interface WeldConstraint extends Instance {
 	Enabled: boolean;
 	Part0: Instance;
 	Part1: Instance;
-	StormBreakForce: number;
-	StormDamageRate: number;
-	StormIntegrity: number;
-	StormLinkEnabled: boolean;
-	StormMaterialStrength: number;
 }
 
 declare interface ShaderScript extends Instance {
@@ -2548,11 +2526,7 @@ declare interface Workspace extends WorldRoot {
 	CurrentCamera: Instance;
 	MaxSurfaces: number;
 	SurfaceBounces: number;
-	TerrainChunkSize: number;
-	TerrainEnabled: boolean;
-	TerrainGenerator: string;
-	TerrainSeed: number;
-	TerrainViewDistance: number;
+	readonly Terrain: Terrain;
 	Raycast(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
 	RaycastThroughPortals(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
 	OverlapBox(centre: Vector3, size: Vector3, params?: RaycastParams): Instance[];
@@ -2641,6 +2615,16 @@ declare interface Player extends Instance {
 
 declare interface Team extends Instance {
 	TeamColor: Color3;
+}
+
+declare interface Terrain extends Instance {
+	ChunkExtent: number;
+	ChunkResolution: number;
+	Enabled: boolean;
+	Generator: string;
+	Seed: number;
+	VerticalExtent: number;
+	ViewDistance: number;
 }
 
 // --- the bus services ------------------------------------------------------

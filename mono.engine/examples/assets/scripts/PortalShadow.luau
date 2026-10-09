@@ -82,8 +82,7 @@ local function floor(name: string, centre: Vector3, first: Color3, second: Color
 	local count = math.floor(ROOM * 2 / TILE)
 	for x = 0, count - 1 do
 		for z = 0, count - 1 do
-			local at =
-				centre + Vector3.new((x + 0.5) * TILE - ROOM, -0.5 + GROUND_LIFT, (z + 0.5) * TILE - ROOM)
+			local at = centre + Vector3.new((x + 0.5) * TILE - ROOM, -0.5 + GROUND_LIFT, (z + 0.5) * TILE - ROOM)
 			local shade = if (x + z) % 2 == 0 then first else second
 			block(name .. x .. "_" .. z, Vector3.new(TILE, 1, TILE), CFrame.new(at), shade)
 		end
@@ -202,12 +201,13 @@ elseif WHICH == "far" then
 end
 
 if viewpoint ~= nil then
-	local view = Instance.new("Camera")
-	view.Name = "Viewer"
-	view.FieldOfView = 70
-	view.CFrame = viewpoint
-	view.Parent = WORLD
-	WORLD.CurrentCamera = view
+	local view = assert(
+		assert(game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")):FindFirstChild("DemoCamera"),
+		"the demo camera companion is missing"
+	)
+	view:SetAttribute("Name", "Viewer")
+	view:SetAttribute("FieldOfView", 70)
+	view:SetAttribute("CFrame", viewpoint)
 end
 
 print("portal shadow: near room at origin, far room at x=" .. GAP .. " through a quarter-turn pair")

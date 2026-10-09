@@ -2,6 +2,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
@@ -646,158 +647,87 @@ namespace engine::scene {
 			return property;
 		}
 
-		// --- the terrain recipe, on `workspace` ------------------------------
-		//
-		// **`SurfaceBouncesProperty`'s exact shape, five times over.**
-		// `scene::Terrain` is a resource for `WorldBounds`' reason - authored, one
-		// per world, and nothing derives it - so `instance` is unread here as it
-		// is there, and the resource is the only storage.
-		//
-		// **On `workspace` rather than on a `Terrain` instance**, which is where
-		// Roblox puts it. Roblox's `Terrain` is a `BasePart` singleton that
-		// `Instance.new` refuses to make a second of, and this engine has no way to
-		// register a class that cannot be constructed; a resource is one per world
-		// by construction, which is the property that mattered. `Terrain.hpp`
-		// carries the whole argument, including why the chunks the recipe produces
-		// are never stored.
-		//
-		// **Read through `TerrainSettings` and written through `TerrainOf`**, so a
-		// world that has never had terrain answers the defaults rather than
-		// acquiring a resource from inside a read - which is `TrianglesOf`'s split
-		// against `MeshesOf`, and it matters here for the same reason: a getter
-		// that made a structural write would make one on every properties-panel
-		// refresh.
-
-		PropertyDescriptor TerrainGeneratorProperty() {
+		// `Workspace.Terrain` resolves the one generated Terrain child. Keeping
+		// the reference as a tree lookup avoids storing an entity handle beside
+		// the hierarchy that already owns the relationship.
+		PropertyDescriptor WorkspaceTerrainProperty() {
 			PropertyDescriptor property;
-			property.Name = core::Name("TerrainGenerator");
-			property.Type = PropertyType::Name;
-			property.Size = sizeof(core::Name);
-			property.Kind = PropertyKind::Resource;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Terrain>()});
-			property.Writes = property.Reads;
-
-			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
-				*static_cast<core::Name *>(out) = TerrainSettings(store).Generator;
+			property.Name = core::Name("Terrain");
+			property.Type = PropertyType::Reference;
+			property.ReferenceClass = core::Name("Terrain");
+			property.Size = sizeof(Entity);
+			property.Kind = PropertyKind::Computed;
+			property.Writable = false;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<ecs::Hierarchy>()});
+			property.Writes = &ecs::ComponentSet::Intern({});
+			property.Get = [](const Store &store, Entity workspace, void *out) -> bool {
+				const ClassId terrain = Classes::Find(core::Name("Terrain"));
+				*static_cast<Entity *>(out) =
+					terrain.IsValid() ? store.FindFirstChildWhichIsA(workspace, terrain) : NULL_ENTITY;
 				return true;
 			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
-				TerrainOf(store).Generator = *static_cast<const core::Name *>(value);
-				return true;
-			};
-
 			return property;
 		}
 
-		PropertyDescriptor TerrainSeedProperty() {
+		template <auto Member> PropertyDescriptor TerrainExtentProperty(const char *name) {
 			PropertyDescriptor property;
-			property.Name = core::Name("TerrainSeed");
-			property.Type = PropertyType::Int64;
-			property.Size = sizeof(int64_t);
-			property.Kind = PropertyKind::Resource;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Terrain>()});
-			property.Writes = property.Reads;
-
-			// **`Int64` and not `Int32`, and the reinterpretation is the point.**
-			// The field is a `uint64_t` because a seed is a bit pattern rather than
-			// a quantity, and `PropertyType` has no unsigned member - so a seed a
-			// script wrote as a negative number has to come back as the same
-			// negative number rather than as something clamped.
-			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
-				*static_cast<int64_t *>(out) = static_cast<int64_t>(TerrainSettings(store).Seed);
-				return true;
-			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
-				TerrainOf(store).Seed = static_cast<uint64_t>(*static_cast<const int64_t *>(value));
-				return true;
-			};
-
-			return property;
-		}
-
-		PropertyDescriptor TerrainEnabledProperty() {
-			PropertyDescriptor property;
-			property.Name = core::Name("TerrainEnabled");
-			property.Type = PropertyType::Bool;
-			property.Size = sizeof(bool);
-			property.Kind = PropertyKind::Resource;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Terrain>()});
-			property.Writes = property.Reads;
-
-			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
-				*static_cast<bool *>(out) = TerrainSettings(store).Enabled;
-				return true;
-			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
-				TerrainOf(store).Enabled = *static_cast<const bool *>(value);
-				return true;
-			};
-
-			return property;
-		}
-
-		// The two distances, and both are clamped rather than refused.
-		//
-		// `TerrainSettings` clamps on read regardless - the values arrive from a
-		// file and a wire as often as from here - so refusing a large one at the
-		// setter would be a second statement of the same rule that only covered
-		// the script door. What the setter owes is that a negative number does not
-		// reach the row at all, which is `SurfaceBouncesProperty`'s refusal: too
-		// large is a world asking for more than a machine will allocate, and below
-		// zero is a world asking for something the word does not mean.
-
-		PropertyDescriptor TerrainChunkSizeProperty() {
-			PropertyDescriptor property;
-			property.Name = core::Name("TerrainChunkSize");
+			property.Name = core::Name(name);
 			property.Type = PropertyType::Float;
 			property.Size = sizeof(float);
-			property.Kind = PropertyKind::Resource;
+			property.Kind = PropertyKind::Computed;
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Terrain>()});
 			property.Writes = property.Reads;
-
-			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
-				*static_cast<float *>(out) = TerrainSettings(store).ChunkExtent;
-				return true;
-			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
-				const float metres = *static_cast<const float *>(value);
-				if (!(metres >= 0.0f)) {
-					return false;
+			property.Get = [](const Store &store, Entity instance, void *out) -> bool {
+				const Terrain *terrain = store.Get<Terrain>(instance);
+				if (terrain == nullptr) return false;
+				float value = terrain->*Member;
+				if constexpr (Member == &Terrain::ChunkExtent) {
+					value = std::clamp(value, 0.0f, MAX_CHUNK_EXTENT);
+				} else {
+					value = std::max(value, 0.0f);
 				}
-				TerrainOf(store).ChunkExtent = std::min(metres, MAX_CHUNK_EXTENT);
+				*static_cast<float *>(out) = value;
 				return true;
 			};
-
+			property.Set = [](Store &store, Entity instance, const void *value) -> bool {
+				const float authored = *static_cast<const float *>(value);
+				if (!(authored >= 0.0f)) return false;
+				Terrain *terrain = store.GetMutable<Terrain>(instance);
+				if (terrain == nullptr) return false;
+				if constexpr (Member == &Terrain::ChunkExtent) {
+					terrain->*Member = std::min(authored, MAX_CHUNK_EXTENT);
+				} else {
+					terrain->*Member = authored;
+				}
+				return true;
+			};
 			return property;
 		}
 
-		PropertyDescriptor TerrainViewDistanceProperty() {
+		PropertyDescriptor TerrainChunkResolutionProperty() {
 			PropertyDescriptor property;
-			property.Name = core::Name("TerrainViewDistance");
-			property.Type = PropertyType::Float;
-			property.Size = sizeof(float);
-			property.Kind = PropertyKind::Resource;
+			property.Name = core::Name("ChunkResolution");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Computed;
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Terrain>()});
 			property.Writes = property.Reads;
-
-			property.Get = [](const ecs::Store &store, ecs::Entity, void *out) -> bool {
-				*static_cast<float *>(out) = TerrainSettings(store).ViewDistance;
+			property.Get = [](const Store &store, Entity instance, void *out) -> bool {
+				const Terrain *terrain = store.Get<Terrain>(instance);
+				if (terrain == nullptr) return false;
+				*static_cast<int32_t *>(out) =
+					std::min<int32_t>(terrain->ChunkResolution, MAX_CHUNK_RESOLUTION);
 				return true;
 			};
-
-			property.Set = [](ecs::Store &store, ecs::Entity, const void *value) -> bool {
-				const float metres = *static_cast<const float *>(value);
-				if (!(metres >= 0.0f)) {
-					return false;
-				}
-				TerrainOf(store).ViewDistance = metres;
+			property.Set = [](Store &store, Entity instance, const void *value) -> bool {
+				const int32_t authored = *static_cast<const int32_t *>(value);
+				if (authored < 0) return false;
+				Terrain *terrain = store.GetMutable<Terrain>(instance);
+				if (terrain == nullptr) return false;
+				terrain->ChunkResolution =
+					static_cast<uint16_t>(std::min<int32_t>(authored, MAX_CHUNK_RESOLUTION));
 				return true;
 			};
-
 			return property;
 		}
 
@@ -949,19 +879,18 @@ namespace engine::scene {
 			Classes::Computed(workspace, SurfaceBouncesProperty());
 			Classes::Computed(workspace, MaxSurfacesProperty());
 
-			// **The terrain recipe, beside the two above and for their reason.**
-			// A statement about the scene rather than a quality setting a session
-			// picks: which graph makes this world's ground, and with what seed, is
-			// what the world *is*. `TerrainResolution` and `TerrainHeight` are
-			// deliberately not here - both are numbers a generator is authored
-			// against rather than dials an author turns while playing, and a
-			// property surface that offered every field would be six ways to make
-			// a world that does not come back the same.
-			Classes::Computed(workspace, TerrainEnabledProperty());
-			Classes::Computed(workspace, TerrainGeneratorProperty());
-			Classes::Computed(workspace, TerrainSeedProperty());
-			Classes::Computed(workspace, TerrainChunkSizeProperty());
-			Classes::Computed(workspace, TerrainViewDistanceProperty());
+			Classes::Computed(workspace, WorkspaceTerrainProperty());
+
+			const ClassId terrain =
+				Classes::Register("Terrain", instance, std::array{ecs::Components::Of<Terrain>()});
+			Classes::SetCreatable(terrain, false);
+			Classes::Property<&Terrain::Seed>(terrain, "Seed");
+			Classes::Property<&Terrain::Generator>(terrain, "Generator");
+			Classes::Property<&Terrain::Enabled>(terrain, "Enabled");
+			Classes::Computed(terrain, TerrainExtentProperty<&Terrain::ChunkExtent>("ChunkExtent"));
+			Classes::Computed(terrain, TerrainExtentProperty<&Terrain::VerticalExtent>("VerticalExtent"));
+			Classes::Computed(terrain, TerrainExtentProperty<&Terrain::ViewDistance>("ViewDistance"));
+			Classes::Computed(terrain, TerrainChunkResolutionProperty());
 
 			const ClassId players = Classes::Find(core::Name("Players"));
 			Classes::Computed(players, LocalPlayerProperty());
@@ -1125,6 +1054,7 @@ namespace engine::scene {
 	}
 
 	bool VisibleToClients(const Store &store, Entity instance) {
+		if (ecs::IsClientLocalInstance(store, instance)) return false;
 		Entity at = instance;
 		// ServiceComponent is the fixture fact. Workspace is a WorldRoot in the
 		// class tree, so using `IsA("Service")` here would make its entire scene
@@ -1196,6 +1126,14 @@ namespace engine::scene {
 			at = parent;
 		}
 		return NULL_ENTITY;
+	}
+
+	bool InPlayerGui(const Store &store, Entity instance, Entity player) {
+		if (!store.Alive(instance) || !store.Alive(player) || !store.IsA(player, PlayerClass())) {
+			return false;
+		}
+		const Entity container = store.FindFirstChild(player, PLAYER_GUI_NAME);
+		return container != NULL_ENTITY && instance != container && store.IsDescendantOf(instance, container);
 	}
 
 	ecs::ClassId PlayerClass() {
@@ -1440,6 +1378,72 @@ namespace engine::scene {
 
 			if (desc.Name == "Workspace") {
 				workspace = existing;
+			}
+		}
+
+		// Terrain is a singleton content instance rather than a service. Keep it
+		// directly under Workspace so both the tree and `Workspace.Terrain` name it.
+		const ClassId terrainClass = Classes::Find(core::Name("Terrain"));
+		if (workspace != NULL_ENTITY && terrainClass.IsValid()) {
+			std::vector<Entity> terrains;
+			std::vector<Entity> namedLegacyContent;
+			store.Each<ecs::Hierarchy>([&](Entity entity, const ecs::Hierarchy &) {
+				if (store.IsA(entity, terrainClass)) {
+					terrains.push_back(entity);
+				} else if (store.ParentOf(entity) == workspace &&
+						   store.InstanceNameOf(entity) == core::Name("Terrain")) {
+					namedLegacyContent.push_back(entity);
+				}
+			});
+			std::sort(terrains.begin(), terrains.end(), [](Entity left, Entity right) {
+				return left.Id < right.Id;
+			});
+
+			bool createdTerrain = false;
+			Entity terrain = terrains.empty() ? NULL_ENTITY : terrains.front();
+			if (terrain == NULL_ENTITY) {
+				terrain = store.CreateInstance(terrainClass, "Terrain");
+				if (terrain != NULL_ENTITY) {
+					store.SetParent(terrain, workspace);
+					createdTerrain = true;
+				} else {
+					ENGINE_WARN("Terrain fixture could not be created");
+				}
+			}
+
+			if (terrain != NULL_ENTITY) {
+				if (store.ParentOf(terrain) != workspace) store.SetParent(terrain, workspace);
+				store.SetInstanceName(terrain, "Terrain");
+
+				// Old terrain helpers used a Folder named Terrain. Nest that authored
+				// container under the new singleton so it no longer shadows the class.
+				for (const Entity legacy : namedLegacyContent) {
+					if (!store.SetParent(legacy, terrain)) {
+						store.SetInstanceName(legacy, "LegacyTerrain");
+						ENGINE_WARN("legacy Terrain content could not be nested under the Terrain fixture");
+					}
+				}
+
+				// Resolve duplicate imported singletons by the lowest entity id. Move
+				// their children before deleting them so nested authored content survives.
+				for (size_t index = 1; index < terrains.size(); ++index) {
+					const Entity duplicate = terrains[index];
+					std::vector<Entity> children;
+					store.EachChild(duplicate, [&](Entity child) { children.push_back(child); });
+					for (const Entity child : children)
+						store.SetParent(child, terrain);
+					ENGINE_WARN("duplicate Terrain fixture removed from Workspace");
+					store.DestroyInstance(duplicate);
+				}
+
+				if (const Terrain *legacy = store.Resource<Terrain>(); legacy != nullptr) {
+					if (createdTerrain || store.Get<Terrain>(terrain) == nullptr) {
+						store.Set(terrain, *legacy);
+					}
+					store.RemoveResource<Terrain>();
+				}
+
+				store.Protect(terrain);
 			}
 		}
 
