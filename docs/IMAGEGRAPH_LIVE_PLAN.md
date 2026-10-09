@@ -1,6 +1,6 @@
 # live ImageGraph plan
 
-status: implementation and focused validation complete; acceptance remains open. The v2 parser, per-world graph owner, Luau API, render cache and Studio paths are implemented. Static 2D ImageGraph and its evidence are in `IMAGEGRAPH_2D.md` and `IMAGEGRAPH_2D_PLAN.md`. Signed headless Vulkan consumer integration, GPU tests, optimized benchmark, server-only build, layer check and real Studio checks passed. Signed ImageLabel color, portal ownership and adopted-texture checks now pass. Strict CI and full-physics CTest remain pending.
+status: implemented and verified on `v0.26.0-imagegraph-minimal`. The seven-node 2D layer includes document v2, named world inputs, script controls, signed content, GPU evaluation and Studio editing. Strict CI passed on implementation commit `7d6c3c0e`: 661 suites run, none skipped or failed. Full dev and server CTest, focused Vulkan checks, sanitizers, profiling and real Studio checks passed. Static ImageGraph evidence remains in `IMAGEGRAPH_2D.md` and `IMAGEGRAPH_2D_PLAN.md`.
 
 The first live layer stays small: seven 2D nodes, ordinary image outputs, no 3D, audio or broad simulation work. Engine code decides graph meaning. The world owns named inputs. Render owns GPU images. Studio edits and previews through those same paths.
 
@@ -57,7 +57,7 @@ Studio exposes parameter values and bindings, previews the selected output on GP
 
 ## implementation sequence
 
-Steps 1 through 9 below are implemented. Step 10 remains open while CI finishes.
+All ten implementation and verification steps below are complete.
 
 1. Freeze v1 behavior and v2 schema with strict parser cases.
 2. Add typed parameters and bindings to the authored document.
@@ -72,7 +72,7 @@ Steps 1 through 9 below are implemented. Step 10 remains open while CI finishes.
 
 ## verification results
 
-These focused results passed:
+These verification results passed:
 
 - Signed live integration and independent output fixture: 2 cases and 76 assertions total. `LiveImageGraphContentRender` is 1 case and 61 assertions: Luau changes tint on a signed graph, then checks ImageLabel, particles, `MeshPart.TextureID`, `EmissiveMap` and all six sky faces over 150 frames. The authored sample `[255, 64, 0]` now captures green byte 64 after the `SampledSRGB` boundary change. The missing-source fixture once captured 0 cyan pixels against a threshold above 2,000; it passes after the loader fix.
 - GPU renderer: 8 cases and 788 assertions, including literal R8, R16 and R32 data parity and the 1,405-byte output path. Texture GPU: 8 cases and 228 assertions.
@@ -81,12 +81,12 @@ These focused results passed:
 - Real Studio Vulkan/SDL/XTest dock check passed two complete undock/resnap cycles. Initial origins were (0, 0) and (300, 100); final dock id was `00000003` (original); process exit was 0.
 - Real Composer GPU check changed a named output from 64 to 32 pixels. Save/open retained the v2 binding, default input and authored sRGB output. Setting width to 0 showed a diagnostic and kept last-good preview; reopening restored the saved graph. Publish without a signing key refused without writes; process exit was 0.
 - The Studio preview mid-tone bug displayed byte 64 as 13. The preview adapter now uses temporary linear storage while authored and exported data stay sRGB; a CPU fixture covers that path. Successful GUI publish/apply/export was skipped to avoid writing to the default user content store. No user config was touched; CPU and signed live integration checks cover successful publication and apply.
-- The Studio preview mid-tone correction keeps temporary linear preview storage separate from authored and exported sRGB. The signed ImageLabel capture verifies the authored byte survives the render boundary.
-- Shared Luau and JavaScript API: 1 case and 24 assertions. Client/server property audits: 1 case and 1 assertion.
+- Shared Luau and JavaScript API: 1 case and 24 assertions. Client and server property audits each passed 1 case and 1 assertion.
 - Scene: 4 cases and 128 assertions. Replication: 12 cases and 84 assertions.
 - Full client retry: 300 cases and 16,091 assertions passed. ImageGraph ASan and UBSan: 30 cases and 963 assertions passed with leak checking enabled.
 - Server-only build passed. Architecture: 38 modules, 1 program and 29 layered modules, with no graphics stack. Server reports version `0.26.0`.
-- Sequential dev and server physics-suite retries each passed 10 cases and 70 assertions after concurrent preset attempts collided on SQLite. Full dev/server physics CTest runs remain active.
+- Full CTest covered 52 dev and 41 server test executables. Physics passed in both. Initial property-contract failures were fixed; SQLite fixtures collided because both presets used the same temporary directory. Required CTest retries then passed all three affected dev executables and both affected server executables. Sequential datastore suites each passed 10 cases and 70 assertions.
+- Strict `just preset=ci check` passed on `7d6c3c0e`: 661 suites run, 0 skipped and 0 failed. It also passed formatting, build profile, architecture, source rules, shader contracts, generated bindings, component documentation, both script type checks, determinism, replay, headless client interaction and orphan checks. Development architecture covers 49 modules, 6 programs and 35 layered modules.
 - Component catalogue check passed for 235 components. Module pages check passed for 44 pages.
 
 ## measured GPU profile
@@ -101,8 +101,8 @@ Five samples ran on an RTX 4090, driver 580.173.02, Vulkan, using the optimized 
 
 At both extents, 1,000 unchanged cache hits measured 88 ns per call and recorded zero GPU commands, uploads or device allocations. The 1024 graph retained 16 MiB. A transform edit made zero device allocations. GPU timestamps above are the latest sample, not medians. Wall medians include benchmark-only 1 ms fence polling; the live path uses nonblocking GPU work and does not poll that fence.
 
-## remaining acceptance gates
+## verification limits
 
-- The prior strict `just preset=ci check` run ended with SIGTERM 143 and no assertion failure. Its pre-stable rerun was intentionally canceled because it used code from before the latest fixes. Run strict CI against the stable implementation commit; no final result exists yet.
-- Full dev and server physics CTest runs remain active. Earlier concurrent preset attempts collided on SQLite; sequential physics-suite retries passed 10 cases and 70 assertions each.
-- Keep the v0.26 live roadmap items open until stable-code strict CI and full physics CTest pass. Successful GUI publish/apply/export was intentionally skipped because it targets the default user content store; CPU and signed live integration tests cover those paths.
+Successful GUI publish/apply/export was not exercised because it writes to the default user content store. CPU publication/apply tests and signed live rendering cover the successful paths. Native GUI verification covered live controls, preview colour, save/open, last-good refusal, missing signing key and viewport undock/resnap without changing user configuration.
+
+Real-device checks used Linux Vulkan. Windows and macOS execution were not run. Shader contract checks include generated SPIR-V and MSL.

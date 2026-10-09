@@ -12,7 +12,8 @@ Live `.aimagegraph` use is a separate implemented path with named inputs and
 runtime image outputs. Signed headless Vulkan content/render integration,
 focused GPU tests, optimized profiling and real Studio checks have passed. The
 signed ImageLabel, portal ownership and adopted-texture checks have passed.
-Strict CI and full-physics CTest have no final result yet.
+Strict CI passed all 661 suites. Full dev and server CTest passed after the
+required retries.
 See the [live ImageGraph guide](IMAGEGRAPH_LIVE.md) for its frozen document
 contract and current status. Static export remains the verified workflow
 described on this page.

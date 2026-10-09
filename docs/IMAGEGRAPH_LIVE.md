@@ -104,4 +104,4 @@ Set inputs in the authoritative world. For a replicated controller, use a server
 
 ## Studio status
 
-Studio provides parameter and binding controls, GPU preview, `PublishLive` and `Apply` into ordinary image slots. Real-editor checks passed graph sizing, v2 save/open, diagnostic and last-good behavior, missing-key refusal, and two undock/resnap cycles. Successful GUI publish/apply/export was skipped to avoid writing to the default user content store; separate CPU and signed integration tests cover those paths. Strict CI and full-physics CTest remain open. See the live plan for details.
+Studio provides parameter and binding controls, GPU preview, `PublishLive` and `Apply` into ordinary image slots. Real-editor checks passed graph sizing, v2 save/open, diagnostic and last-good behavior, missing-key refusal, and two undock/resnap cycles. Successful GUI publish/apply/export was skipped to avoid writing to the default user content store; separate CPU and signed integration tests cover those paths. Strict CI passed all 661 suites; full dev and server CTest passed after required retries. See the live plan for measured results and verification limits.
