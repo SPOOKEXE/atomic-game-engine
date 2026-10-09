@@ -407,8 +407,9 @@ namespace engine::control {
 			std::string safe;
 			safe.reserve(text.size());
 			for (const char character : text) {
-				const bool plain = (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') ||
-								   (character >= '0' && character <= '9') || character == '-' || character == '_';
+				const bool plain =
+					(character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') ||
+					(character >= '0' && character <= '9') || character == '-' || character == '_';
 				safe.push_back(plain ? character : '_');
 			}
 			return safe;
@@ -424,7 +425,8 @@ namespace engine::control {
 		// One plane's file name. PathComponent can map two resource names onto one
 		// string, so the name's hash keeps them apart.
 		inline std::string ResourceFileName(std::string_view resource) {
-			return PathComponent(resource) + "-" + std::to_string(std::hash<std::string_view>{}(resource)) + ".bin";
+			return PathComponent(resource) + "-" + std::to_string(std::hash<std::string_view>{}(resource)) +
+				   ".bin";
 		}
 
 		// Encodes retained binary bytes for the JSON-only MCP transport.
@@ -1576,7 +1578,9 @@ namespace engine::control {
 				std::filesystem::create_directories(directory, created);
 				const std::filesystem::path file = directory / ResourceFileName(resource);
 				std::ofstream output(file, std::ios::binary | std::ios::trunc);
-				output.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+				output.write(
+					reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size())
+				);
 				output.close();
 				if (created || !output) {
 					failure = Error("resource_unavailable", "could not write " + file.string());
@@ -1605,7 +1609,8 @@ namespace engine::control {
 						{"instance_id", "ticket", "operation_id"}
 					);
 				},
-				[bridge, ledger, captureFiles, name, release](const json &values, std::string &failure) -> json {
+				[bridge, ledger, captureFiles, name, release](const json &values, std::string &failure)
+					-> json {
 					if (!Only(values, {"instance_id", "ticket", "operation_id"}, failure)) return nullptr;
 					const json *field = nullptr;
 					std::string instance, operation;
@@ -1635,7 +1640,8 @@ namespace engine::control {
 						// The retained bytes are gone, so any files save_resource wrote
 						// for this ticket go with them.
 						if (ok && !captureFiles->empty()) {
-							const std::filesystem::path directory = TicketDirectory(*captureFiles, instance, ticket);
+							const std::filesystem::path directory =
+								TicketDirectory(*captureFiles, instance, ticket);
 							std::error_code ignored;
 							std::filesystem::remove_all(directory, ignored);
 							// remove() refuses a directory that still holds another

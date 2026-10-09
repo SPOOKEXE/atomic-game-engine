@@ -366,7 +366,8 @@ namespace engine::scene {
 		ENGINE_LOG(
 			core::LogLevel::Info,
 			"scene",
-			"DIAG PlaceCamera subjectEntity={} rigRoot={} diagRigRoot=({},{},{}) transit={} pred={} subject=({},{},{}) dist={} occluded={} orbit=({},{},{}) final=({},{},{})",
+			"DIAG PlaceCamera subjectEntity={} rigRoot={} diagRigRoot=({},{},{}) transit={} pred={} "
+			"subject=({},{},{}) dist={} occluded={} orbit=({},{},{}) final=({},{},{})",
 			diagSubject.Id,
 			diagChar != nullptr ? diagChar->Root.Id : 0u,
 			diagChar != nullptr && store.Get<Transform>(diagChar->Root) != nullptr
