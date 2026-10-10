@@ -20,6 +20,7 @@
 // when somebody asks for exactness.
 
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/ui/Theme.hpp>
 
@@ -117,12 +118,22 @@ namespace studio {
 				continue;
 			}
 
-			const std::string text = engine::game::FormatValue(value);
+			// Interned text already has stable storage. Formatting every rejected
+			// Name allocates a string before the predicate has found any result.
+			std::string formatted;
+			std::string_view text;
+			if (value.Type == engine::ecs::PropertyType::Name ||
+				value.Type == engine::ecs::PropertyType::Enum)
+				text = value.Name.IsValid() ? value.Name.Text() : std::string_view{};
+			else {
+				formatted = engine::game::FormatValue(value);
+				text = formatted;
+			}
 
 			if (query.Value.empty()) {
 				// Property named, no value asked for: having the property at all
 				// is the match.
-				matched = std::string(Label(descriptor.Name)) + " = " + text;
+				matched = std::string(Label(descriptor.Name)) + " = " + std::string(text);
 				return true;
 			}
 
@@ -140,7 +151,7 @@ namespace studio {
 			}
 
 			if (hit) {
-				matched = std::string(Label(descriptor.Name)) + " = " + text;
+				matched = std::string(Label(descriptor.Name)) + " = " + std::string(text);
 				return true;
 			}
 		}
@@ -149,11 +160,65 @@ namespace studio {
 	}
 
 	void Editor::RunFind() {
-		FindResults.clear();
-
 		if (Universe == nullptr) {
+			FindResults.clear();
+			FindFingerprintReady = false;
 			return;
 		}
+		ENGINE_PROFILE("explorer property search");
+		const auto worlds = Universe->Worlds();
+		const bool sameQuery = LastFind.Class == Find.Class && LastFind.Name == Find.Name &&
+							   LastFind.Property == Find.Property && LastFind.Value == Find.Value &&
+							   LastFind.Exact == Find.Exact && LastFindWorld == ExplorerWorld;
+		bool cacheable = Find.Property.empty() && Find.Value.empty();
+		const auto wanted = Find.Class.empty() ? engine::ecs::ClassId{} : Classes::Find(Name(Find.Class));
+		const auto rootId = Classes::Find(Name("Instance"));
+		if (!cacheable && rootId.IsValid()) {
+			const auto &root = Classes::Describe(rootId);
+			const auto canonical =
+				std::find_if(root.Properties.begin(), root.Properties.end(), [](const auto &property) {
+					return property.Spelling == "Name";
+				});
+			cacheable = !Find.Property.empty() && canonical != root.Properties.end();
+			for (size_t index = 0; cacheable && index < Classes::Count(); ++index) {
+				const engine::ecs::ClassId klass{static_cast<uint32_t>(index)};
+				if (!Find.Class.empty() && (!wanted.IsValid() || !Classes::IsA(klass, wanted))) continue;
+				for (const auto &property : Classes::Describe(klass).Properties) {
+					if (!Contains(Label(property.Name), Find.Property)) continue;
+					if (property.Name != canonical->Name || property.Get != canonical->Get ||
+						property.Kind != engine::ecs::PropertyKind::Field) {
+						cacheable = false;
+						break;
+					}
+				}
+			}
+		}
+		uint64_t fingerprint = 1469598103934665603ull;
+		const auto fold = [&](uint64_t value) { fingerprint = (fingerprint ^ value) * 1099511628211ull; };
+		if (cacheable) {
+			fold(Classes::Count());
+			for (const WorldId world : worlds) {
+				if (ExplorerWorld.IsValid() && ExplorerWorld != world) continue;
+				fold(world.Index);
+				Universe->Enter(world, [&](Store &store) {
+					fold(reinterpret_cast<uintptr_t>(&store));
+					store.EachEntity([&](Entity entity) {
+						const auto klass = store.ClassOf(entity);
+						fold(entity.Id);
+						fold(store.InstanceNameOf(entity).Id());
+						fold(klass.Index);
+					});
+				});
+			}
+		}
+		if (cacheable && sameQuery && FindFingerprintReady && fingerprint == FindFingerprint) return;
+		LastFind = Find;
+		LastFindWorld = ExplorerWorld;
+		FindFingerprint = fingerprint;
+		FindFingerprintReady = cacheable;
+		FindResults.clear();
+		FindUniformRows = true;
+		FindRows.Dirty = true;
 
 		// **Bounded, and it says so when it stops.** A predicate that matches
 		// everything in a large place would otherwise build a list nobody can
@@ -162,7 +227,7 @@ namespace studio {
 		// complete.
 		FindTruncated = false;
 
-		for (const WorldId world : Universe->Worlds()) {
+		for (const WorldId world : worlds) {
 			if (ExplorerWorld.IsValid() && ExplorerWorld != world) {
 				continue;
 			}
@@ -184,6 +249,8 @@ namespace studio {
 					result.Name = Label(store.InstanceNameOf(instance));
 					result.Class = Label(Classes::Describe(store.ClassOf(instance)).Name);
 					result.Matched = std::move(matched);
+					FindUniformRows = FindUniformRows && result.Name.find('\n') == std::string::npos &&
+									  result.Class.find('\n') == std::string::npos;
 					FindResults.push_back(std::move(result));
 				});
 			});

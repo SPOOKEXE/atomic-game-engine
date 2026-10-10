@@ -4153,6 +4153,52 @@ namespace studio {
 		// appended at the back, which is the one shape a vector is bad at.
 		std::deque<Message> Output;
 
+		// Messages are immutable after append. Serial bounds invalidate this owned
+		// display index after append, front trimming or Clear.
+		struct OutputDisplay {
+			// One filtered message with its cached vertical placement and height.
+			struct Row {
+				// Index into the output deque for the message this row displays.
+				size_t MessageIndex = 0;
+				// Row's vertical offset from the start of the panel.
+				float Offset = 0;
+				// Text extent measured with the active output font.
+				float Height = 0;
+			};
+			// Visible rows after applying the level toggles and text filter.
+			std::vector<Row> Rows;
+			// Text filter used to build `Rows`.
+			std::string Filter;
+			// Serial of the first output message when `Rows` was built.
+			uint64_t First = 0;
+			// Serial of the last output message when `Rows` was built.
+			uint64_t Last = 0;
+			// Output message count when `Rows` was built.
+			size_t Count = 0;
+			// Font identity used to measure the displayed rows.
+			const void *Font = nullptr;
+			// Font bake used to measure the displayed rows.
+			uint32_t FontBake = 0;
+			// Font size used to measure the displayed rows.
+			float FontSize = 0;
+			// Vertical spacing used between displayed rows.
+			float Spacing = 0;
+			// Total vertical extent of the displayed rows.
+			float TotalHeight = 0;
+			// Screen-space origin used to place rows after scrolling.
+			float LayoutOrigin = 0;
+			// Widest displayed row, used to size the content region.
+			float MaximumWidth = 0;
+			// Whether row offsets and total height are current for `LayoutOrigin`.
+			bool LayoutReady = false;
+			// Level toggles used to build `Rows`.
+			uint8_t Levels = 0;
+			// Whether `Rows` matches the current output and display settings.
+			bool Ready = false;
+		};
+		// Owned display index for the retained Output messages.
+		OutputDisplay OutputRows;
+
 		// The engine log, teed into that panel. See `PanelSink` in `Editor.cpp`:
 		// a script's `print` and the error that stopped it are the two things an
 		// author actually wants there, and both arrive through the logger rather
@@ -6346,8 +6392,34 @@ namespace studio {
 		// empty one is "do not filter on this" rather than "match nothing".
 		FindQuery Find;
 
-		// What matched, rebuilt every frame the panel is open.
+		// What matched. Class/name-only predicates reuse this display copy after
+		// validating a full live-name fingerprint; computed predicates stay live.
 		std::vector<FindResult> FindResults;
+		// Newline labels need the original variable-height row submission.
+		bool FindUniformRows = true;
+		// Font-dependent label extent retained between unchanged searches.
+		struct FindDisplay {
+			// Font whose metrics produced the label extent.
+			const void *Font = nullptr;
+			// Identifies a replacement bake of the same font.
+			uint32_t FontBake = 0;
+			// Effective font size used to measure labels.
+			float FontSize = 0;
+			// Widest formatted Name/Class label, excluding the leading spacing.
+			float MaximumTextWidth = 0;
+			// A result rebuild invalidates the retained label extent.
+			bool Dirty = true;
+		};
+		// Metrics for the current search result labels.
+		FindDisplay FindRows;
+		// Query that produced `FindResults`.
+		FindQuery LastFind;
+		// Explorer world used to produce `FindResults`.
+		WorldId LastFindWorld;
+		// Fingerprint of the matching worlds' entity names and classes.
+		uint64_t FindFingerprint = 0;
+		// Whether the cached fingerprint can validate the current result list.
+		bool FindFingerprintReady = false;
 
 		// Whether the walk stopped early. Reported, never silent.
 		bool FindTruncated = false;

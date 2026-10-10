@@ -309,11 +309,6 @@ namespace studio {
 		// The panels the layout has to place, gathered once for either branch
 		// below. `ViewportState::Title` owns the strings; this is a view of
 		// them, and it lives no longer than the two calls under it.
-		std::vector<const char *> extraTitles;
-		extraTitles.reserve(Extras.size());
-		for (const ViewportState &view : Extras) {
-			extraTitles.push_back(view.Title.c_str());
-		}
 		const bool repairLayout = !DockLayoutInitialized;
 		bool buildLayout = ResetLayout;
 		ResetLayout = false;
@@ -322,6 +317,12 @@ namespace studio {
 			if (!hasSavedDockspace) {
 				buildLayout = true;
 			}
+		}
+		std::vector<const char *> extraTitles;
+		if (buildLayout || repairLayout) {
+			extraTitles.reserve(Extras.size());
+			for (const ViewportState &view : Extras)
+				extraTitles.push_back(view.Title.c_str());
 		}
 
 		if (buildLayout) {
@@ -2554,24 +2555,86 @@ namespace studio {
 				engine::ui::Typeface::Monospace, engine::ui::TextSize::Small, OutputZoom
 			);
 
-			size_t shown = 0;
+			auto &display = OutputRows;
+			const uint64_t firstSerial = Output.empty() ? 0 : Output.front().Serial;
+			const uint64_t lastSerial = Output.empty() ? 0 : Output.back().Serial;
+			const uint8_t levels =
+				static_cast<uint8_t>((ShowInfo ? 1 : 0) | (ShowWarnings ? 2 : 0) | (ShowErrors ? 4 : 0));
+			const float spacing = ImGui::GetStyle().ItemSpacing.y;
+			const auto *font = ImGui::GetFont();
+			const float fontSize = ImGui::GetFontSize();
+			const uint32_t fontBake = ImGui::GetFontBaked()->BakedId;
+			if (!display.Ready || display.First != firstSerial || display.Last != lastSerial ||
+				display.Count != Output.size() || display.Filter != OutputFilter ||
+				display.Levels != levels || display.Font != font || display.FontSize != fontSize ||
+				display.Spacing != spacing || display.FontBake != fontBake) {
+				ENGINE_PROFILE("output display index");
+				display.Rows.clear();
+				display.TotalHeight = 0;
+				display.MaximumWidth = 0;
+				for (size_t index = 0; index < Output.size(); ++index) {
+					const Message &message = Output[index];
+					const bool isError = message.Level == LogLevel::Error;
+					const bool isWarning = message.Level == LogLevel::Warning;
 
-			for (const Message &message : Output) {
-				const bool isError = message.Level == LogLevel::Error;
-				const bool isWarning = message.Level == LogLevel::Warning;
-
-				if (isError ? !ShowErrors : isWarning ? !ShowWarnings : !ShowInfo) {
-					continue;
-				}
-
-				if (!OutputFilter.empty()) {
-					int score = 0;
-					if (!FuzzyMatch(OutputFilter, message.Text, score)) {
+					if (isError ? !ShowErrors : isWarning ? !ShowWarnings : !ShowInfo) {
 						continue;
 					}
-				}
 
-				shown++;
+					if (!OutputFilter.empty()) {
+						int score = 0;
+						if (!FuzzyMatch(OutputFilter, message.Text, score)) {
+							continue;
+						}
+					}
+
+					const ImVec2 extent = ImGui::CalcTextSize(message.Text.c_str(), nullptr, true);
+					display.Rows.push_back({index, 0, extent.y});
+					display.MaximumWidth = std::max(display.MaximumWidth, extent.x);
+				}
+				display.First = firstSerial;
+				display.Last = lastSerial;
+				display.Count = Output.size();
+				display.Filter = OutputFilter;
+				display.Levels = levels;
+				display.Font = font;
+				display.FontBake = fontBake;
+				display.FontSize = fontSize;
+				display.Spacing = spacing;
+				display.Ready = true;
+				display.LayoutReady = false;
+			}
+			const size_t shown = display.Rows.size();
+			ImGuiWindow *window = ImGui::GetCurrentWindow();
+			const float originY = ImGui::GetCursorScreenPos().y;
+			const float originLocalY = ImGui::GetCursorPosY();
+			if (!display.LayoutReady || display.LayoutOrigin != originY) {
+				// Match ItemSize's screen-coordinate rounding, including fractional
+				// spacing and rows above the viewport after scrolling.
+				float cursor = originY;
+				for (auto &row : display.Rows) {
+					row.Offset = cursor - originY;
+					cursor = std::trunc(cursor + row.Height + spacing);
+				}
+				display.TotalHeight = cursor - originY;
+				display.LayoutOrigin = originY;
+				display.LayoutReady = true;
+			}
+			const float clipFirst = window->ClipRect.Min.y - originY - spacing;
+			const float clipEnd = window->ClipRect.Max.y - originY + spacing;
+			auto begin = std::lower_bound(
+				display.Rows.begin(),
+				display.Rows.end(),
+				clipFirst,
+				[spacing](const auto &row, float position) {
+					return row.Offset + row.Height + spacing < position;
+				}
+			);
+			for (auto row = begin; row != display.Rows.end() && row->Offset <= clipEnd; ++row) {
+				const Message &message = Output[row->MessageIndex];
+				ImGui::SetCursorPosY(originLocalY + row->Offset);
+				const bool isError = message.Level == LogLevel::Error;
+				const bool isWarning = message.Level == LogLevel::Warning;
 
 				const unsigned int colour = isError		? engine::ui::ErrorColour()
 											: isWarning ? engine::ui::WarningColour()
@@ -2612,6 +2675,17 @@ namespace studio {
 				if (colour != 0u) {
 					ImGui::PopStyleColor();
 				}
+			}
+			if (!display.Rows.empty()) {
+				// Submit the skipped extent too. This preserves scroll ranges, the
+				// following filter footer and the last-row tail target.
+				ImGui::SetCursorPosY(originLocalY + display.TotalHeight - spacing);
+				ImGui::Dummy(ImVec2(display.MaximumWidth, 0));
+				// SetScrollHereY uses the last item's original end, not its rounded
+				// next cursor. Restore it as ImGui's list clipper does after seeking.
+				const auto &last = display.Rows.back();
+				window->DC.CursorPosPrevLine.y = originY + last.Offset;
+				window->DC.PrevLineSize.y = last.Height;
 			}
 
 			// **Says what is hidden, not just what is shown.** A filtered log

@@ -812,17 +812,55 @@ namespace studio {
 			WorldId pickWorld;
 			Entity pick = NULL_ENTITY;
 			if (ImGui::BeginChild("##explorer-search-results", ImVec2(0.0f, 120.0f))) {
-				for (size_t index = 0; index < FindResults.size(); index++) {
-					const FindResult &result = FindResults[index];
-					ImGui::PushID(static_cast<int>(index));
-					const bool selected = SelectionWorld == result.World && IsSelected(result.Instance);
-					if (ImGui::Selectable("##result", selected)) {
-						pickWorld = result.World;
-						pick = result.Instance;
+				auto &metrics = FindRows;
+				const auto *font = ImGui::GetFont();
+				const uint32_t fontBake = ImGui::GetFontBaked()->BakedId;
+				const float fontSize = ImGui::GetFontSize();
+				if (metrics.Dirty || metrics.Font != font || metrics.FontBake != fontBake ||
+					metrics.FontSize != fontSize) {
+					metrics.MaximumTextWidth = 0;
+					std::string text;
+					for (const auto &result : FindResults) {
+						text = result.Name.c_str();
+						text += " (";
+						text += result.Class.c_str();
+						text += ')';
+						metrics.MaximumTextWidth =
+							std::max(metrics.MaximumTextWidth, ImGui::CalcTextSize(text.c_str()).x);
 					}
-					ImGui::SameLine();
-					ImGui::Text("%s (%s)", result.Name.c_str(), result.Class.c_str());
-					ImGui::PopID();
+					metrics.Font = font;
+					metrics.FontBake = fontBake;
+					metrics.FontSize = fontSize;
+					metrics.Dirty = false;
+				}
+				const auto drawResults = [&](int first, int last) {
+					for (int index = first; index < last; index++) {
+						const FindResult &result = FindResults[static_cast<size_t>(index)];
+						ImGui::PushID(static_cast<int>(index));
+						const bool selected = SelectionWorld == result.World && IsSelected(result.Instance);
+						if (ImGui::Selectable("##result", selected)) {
+							pickWorld = result.World;
+							pick = result.Instance;
+						}
+						ImGui::SameLine();
+						ImGui::Text("%s (%s)", result.Name.c_str(), result.Class.c_str());
+						ImGui::PopID();
+					}
+				};
+				if (FindUniformRows) {
+					ImGuiListClipper clipper;
+					clipper.Begin(static_cast<int>(FindResults.size()));
+					while (clipper.Step())
+						drawResults(clipper.DisplayStart, clipper.DisplayEnd);
+				} else {
+					drawResults(0, static_cast<int>(FindResults.size()));
+				}
+				if (!FindResults.empty()) {
+					// Clipped labels still determine the complete horizontal extent.
+					// Keep the existing next-row position and vertical scroll range.
+					const auto spacing = ImGui::GetStyle().ItemSpacing;
+					ImGui::SetCursorPosY(ImGui::GetCursorPosY() - spacing.y);
+					ImGui::Dummy({metrics.MaximumTextWidth + spacing.x, 0});
 				}
 			}
 			ImGui::EndChild();

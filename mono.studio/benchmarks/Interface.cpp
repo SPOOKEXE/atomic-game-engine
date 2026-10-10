@@ -26,6 +26,7 @@
 #include <string_view>
 #include <studio/Editor.hpp>
 #include <studio/Plugins.hpp>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("studio.bench.interface")
@@ -99,6 +100,64 @@ namespace studio {
 
 		static void DrawSettings(Editor &editor) {
 			editor.DrawSettings();
+		}
+
+		static void PrepareExplorerSearch(Editor &editor, size_t instances) {
+			engine::scene::RegisterSceneClasses();
+			editor.Universe = std::make_unique<engine::world::Universe>();
+			editor.Active = editor.Universe->Create({.Name = engine::core::Name("studio-search-bench")});
+			editor.ExplorerWorld = editor.Active;
+			editor.SelectionWorld = editor.Active;
+			editor.ShowExplorer = true;
+			editor.Find.Class = "Folder";
+			editor.Find.Property = "Name";
+			editor.Find.Value = "search-hit";
+			const auto folderClass = engine::ecs::Classes::Find(engine::core::Name("Folder"));
+			editor.Universe->Enter(editor.Active, [&](engine::ecs::Store &store) {
+				engine::scene::InstallServices(store);
+				const auto workspace = engine::scene::WorkspaceOf(store);
+				for (size_t index = 0; index < instances; ++index) {
+					const auto folder = store.CreateInstance(folderClass);
+					const std::string name = (index % 100 == 0 ? "search-hit-folder-" : "ordinary-folder-") +
+											 std::to_string(index);
+					if (!store.SetParent(folder, workspace) || !store.SetInstanceName(folder, name))
+						throw std::runtime_error("search benchmark folder could not be configured");
+				}
+			});
+		}
+
+		static void DrawExplorerSearch(Editor &editor) {
+			editor.DrawExplorer();
+		}
+
+		static size_t SearchMatches(const Editor &editor) {
+			return editor.FindResults.size();
+		}
+
+		static void PrepareOutput(Editor &editor, size_t messages, bool mixed, bool filtered) {
+			editor.ShowOutput = true;
+			editor.ShowInfo = true;
+			editor.ShowWarnings = true;
+			editor.ShowErrors = true;
+			editor.OutputFilter = filtered ? "needle" : "";
+			for (size_t index = 0; index < messages; ++index) {
+				std::string text = (index % 2 == 0 ? "needle " : "ordinary ") + std::to_string(index);
+				if (mixed && index % 128 == 0) text.append(64u * 1024u, 'x');
+				if (mixed && index % 16 == 0)
+					text += "\nstack frame one\nstack frame two\n\nstack frame four\nend of message";
+				const auto level = index % 3 == 0	? engine::core::LogLevel::Error
+								   : index % 3 == 1 ? engine::core::LogLevel::Warning
+													: engine::core::LogLevel::Info;
+				editor.Output.push_back({std::move(text), level, index + 1});
+			}
+		}
+
+		static void DrawOutput(Editor &editor) {
+			editor.DrawOutput();
+		}
+
+		static size_t RetainedOutput(const Editor &editor) {
+			return editor.Output.size();
 		}
 
 		static void DrawGeneralSettings(Editor &editor) {
@@ -238,6 +297,11 @@ namespace {
 		std::vector<PanelMetric> PausedDenseFrameGraphEveryFrame;
 		std::vector<PanelMetric> PausedDense2048FrameGraphAverage;
 		std::vector<PanelMetric> PausedDense2048FrameGraphEveryFrame;
+		std::vector<PanelMetric> ExplorerSearch;
+		std::vector<PanelMetric> OutputOrdinary;
+		std::vector<PanelMetric> OutputFiltered;
+		std::vector<PanelMetric> OutputMixed;
+		std::vector<PanelMetric> OutputMixedFiltered;
 
 		~Metrics() {
 			Print("toolbar", Toolbar);
@@ -251,6 +315,11 @@ namespace {
 			Print("frame_graph_paused_every_frame_dense", PausedDenseFrameGraphEveryFrame);
 			Print("frame_graph_paused_average_dense_2048", PausedDense2048FrameGraphAverage);
 			Print("frame_graph_paused_every_frame_dense_2048", PausedDense2048FrameGraphEveryFrame);
+			Print("explorer_property_search_10000", ExplorerSearch);
+			Print("output_1024_ordinary_tail", OutputOrdinary);
+			Print("output_1024_filtered_middle", OutputFiltered);
+			Print("output_1024_mixed_tail", OutputMixed);
+			Print("output_1024_mixed_filtered_middle", OutputMixedFiltered);
 		}
 
 		static void Print(const char *panel, const std::vector<PanelMetric> &metrics) {
@@ -469,6 +538,89 @@ namespace {
 			EndFrame();
 		}
 	};
+
+	enum class ListPanel { ExplorerSearch, Output };
+
+	struct ListPanelFixture {
+		BenchmarkConfiguration Configuration;
+		Context ImGuiContext;
+		studio::Editor Editor;
+		ListPanel Panel;
+		bool PinnedTail = true;
+		ImGuiWindow *OutputLines = nullptr;
+		bool SearchOpened = false;
+
+		ListPanelFixture(ListPanel panel, bool mixed = false, bool filtered = false, bool pinnedTail = true)
+			: Panel(panel), PinnedTail(pinnedTail) {
+			if (Panel == ListPanel::ExplorerSearch)
+				studio::ToolsProbe::PrepareExplorerSearch(Editor, 10000);
+			else
+				studio::ToolsProbe::PrepareOutput(Editor, 1024, mixed, filtered);
+			for (size_t frame = 0; frame < WARM_FRAMES; ++frame)
+				DrawFrame();
+			if (Panel == ListPanel::ExplorerSearch && studio::ToolsProbe::SearchMatches(Editor) != 100)
+				throw std::runtime_error("production Explorer search did not show its 100 fixture matches");
+			if (Panel == ListPanel::Output && (OutputLines == nullptr || OutputLines->ScrollMax.y <= 0 ||
+											   studio::ToolsProbe::RetainedOutput(Editor) != 1024))
+				throw std::runtime_error(
+					"production Output did not retain its scrollable 1024-message fixture"
+				);
+		}
+
+		void DrawFrame(uint64_t *scopeNanoseconds = nullptr, PanelMetric *allocations = nullptr) {
+			ImGui::SetCurrentContext(ImGuiContext.Handle);
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos(ImVec2(40.0f, 100.0f), ImGuiCond_Always);
+			ImGui::SetNextWindowSize(ImVec2(760.0f, 650.0f), ImGuiCond_Always);
+			if (OutputLines != nullptr)
+				ImGui::SetScrollY(OutputLines, OutputLines->ScrollMax.y * (PinnedTail ? 1.0f : 0.5f));
+			const bool sampleAllocations = allocations != nullptr && HeapProfile::IsCompiledIn();
+			if (allocations != nullptr) allocations->HeapProfileEnabled = HeapProfile::IsCompiledIn();
+			const HeapTotals before = sampleAllocations ? HeapProfile::Totals() : HeapTotals{};
+			const auto started = Clock::now();
+			if (Panel == ListPanel::ExplorerSearch)
+				studio::ToolsProbe::DrawExplorerSearch(Editor);
+			else
+				studio::ToolsProbe::DrawOutput(Editor);
+			const auto ended = Clock::now();
+			if (scopeNanoseconds != nullptr)
+				*scopeNanoseconds += static_cast<uint64_t>(
+					std::chrono::duration_cast<std::chrono::nanoseconds>(ended - started).count()
+				);
+			if (sampleAllocations) {
+				const HeapTotals after = HeapProfile::Totals();
+				allocations->FrameAllocations = after.TotalBlocks - before.TotalBlocks;
+				allocations->FrameAllocatedBytes = after.TotalBytes - before.TotalBytes;
+			}
+			ImGui::Render();
+			if (ImGui::GetDrawData()->TotalVtxCount == 0)
+				throw std::runtime_error("production list panel benchmark submitted no visible geometry");
+			if (Panel == ListPanel::ExplorerSearch && !SearchOpened) {
+				if (auto *window = ImGui::FindWindowByName("Explorer")) {
+					window->StateStorage.SetInt(window->GetID("Property search"), 1);
+					SearchOpened = true;
+				}
+			}
+			if (Panel == ListPanel::Output && OutputLines == nullptr) {
+				if (auto *window = ImGui::FindWindowByName("Output")) {
+					for (ImGuiWindow *child : window->DC.ChildWindows)
+						if (child->ChildId == window->GetID("##lines")) OutputLines = child;
+				}
+			}
+		}
+	};
+
+	void MeasureListPanel(ListPanelFixture &fixture, std::vector<PanelMetric> &metrics) {
+		uint64_t scopeNanoseconds = 0;
+		PanelMetric allocations;
+		for (size_t frame = 0; frame < FRAMES_PER_SAMPLE; ++frame) {
+			const bool sample = frame + 1 == FRAMES_PER_SAMPLE;
+			fixture.DrawFrame(&scopeNanoseconds, sample ? &allocations : nullptr);
+		}
+		allocations.MeanScopeNanoseconds = scopeNanoseconds / FRAMES_PER_SAMPLE;
+		metrics.push_back(allocations);
+		Consume(allocations.MeanScopeNanoseconds);
+	}
 
 	struct FrameGraphFixture {
 		BenchmarkConfiguration Configuration;
@@ -740,6 +892,31 @@ BENCH("empty ImGui frame", FRAMES_PER_SAMPLE) {
 	for (size_t frame = 0; frame < FRAMES_PER_SAMPLE; frame++) {
 		EmptyFrame();
 	}
+}
+
+BENCH("Explorer unchanged Property search 10000 instances", FRAMES_PER_SAMPLE) {
+	static ListPanelFixture fixture(ListPanel::ExplorerSearch);
+	MeasureListPanel(fixture, Observed().ExplorerSearch);
+}
+
+BENCH("Output 1024 ordinary messages pinned tail", FRAMES_PER_SAMPLE) {
+	static ListPanelFixture fixture(ListPanel::Output);
+	MeasureListPanel(fixture, Observed().OutputOrdinary);
+}
+
+BENCH("Output 1024 filtered ordinary messages middle scroll", FRAMES_PER_SAMPLE) {
+	static ListPanelFixture fixture(ListPanel::Output, false, true, false);
+	MeasureListPanel(fixture, Observed().OutputFiltered);
+}
+
+BENCH("Output 1024 mixed long multiline messages pinned tail", FRAMES_PER_SAMPLE) {
+	static ListPanelFixture fixture(ListPanel::Output, true);
+	MeasureListPanel(fixture, Observed().OutputMixed);
+}
+
+BENCH("Output 1024 filtered long multiline messages middle scroll", FRAMES_PER_SAMPLE) {
+	static ListPanelFixture fixture(ListPanel::Output, true, true, false);
+	MeasureListPanel(fixture, Observed().OutputMixedFiltered);
 }
 
 BENCH("frame graph Average 250 ms retained ImGui panel", FRAMES_PER_SAMPLE) {
