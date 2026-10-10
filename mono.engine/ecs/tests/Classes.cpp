@@ -13,6 +13,9 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <algorithm>
+#include <string_view>
+
 #include <catch2/catch_test_macros.hpp>
 
 TEST_SUITE_ID("engine.ecs.classes")
@@ -147,6 +150,40 @@ TEST_CASE("a derived class inherits its base's properties", "[ecs]") {
 	REQUIRE(Classes::Describe(tree.Part).Properties.size() == 6);
 	REQUIRE(Classes::Describe(tree.PVInstance).Properties.size() == 2);
 	REQUIRE(Classes::Describe(tree.Instance).Properties.empty());
+}
+
+TEST_CASE("property presentation tags follow inheritance and class-local overrides", "[ecs]") {
+	const Tree &tree = ClassTree();
+	const ClassId overrideClass = Classes::Register("test.TagOverride", tree.BasePart, {});
+	const ClassId childClass = Classes::Register("test.TagOverrideChild", overrideClass, {});
+	Classes::Property<&ecs_test::Bounds::HalfExtent>(overrideClass, "HalfExtent");
+
+	const Name transformTag("Transform");
+	const Name geometryTag("Geometry");
+	CHECK(Classes::SetPropertiesTag(tree.BasePart, "HalfExtent", transformTag));
+
+	const auto findTag = [](ClassId owner, std::string_view name) {
+		const auto &properties = Classes::Describe(owner).Properties;
+		const auto found = std::find_if(properties.begin(), properties.end(), [name](const auto &property) {
+			return property.Spelling == name;
+		});
+		return found == properties.end() ? Name{} : found->PropertiesTag;
+	};
+
+	CHECK(findTag(tree.Part, "HalfExtent") == transformTag);
+	CHECK(findTag(overrideClass, "HalfExtent") == transformTag);
+	CHECK(findTag(childClass, "HalfExtent") == transformTag);
+	CHECK_FALSE(Classes::SetPropertiesTag(tree.Part, "HalfExtent", geometryTag));
+
+	CHECK(Classes::SetPropertiesTag(overrideClass, "HalfExtent", geometryTag));
+	CHECK(findTag(tree.BasePart, "HalfExtent") == transformTag);
+	CHECK(findTag(tree.Part, "HalfExtent") == transformTag);
+	CHECK(findTag(overrideClass, "HalfExtent") == geometryTag);
+	CHECK(findTag(childClass, "HalfExtent") == geometryTag);
+
+	CHECK(Classes::SetPropertiesTag(overrideClass, "HalfExtent", Name{}));
+	CHECK(findTag(overrideClass, "HalfExtent") == transformTag);
+	CHECK(findTag(childClass, "HalfExtent") == transformTag);
 }
 
 TEST_CASE(

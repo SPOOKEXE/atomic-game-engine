@@ -110,7 +110,11 @@ namespace engine::ecs {
 						[&property](const PropertyDescriptor &held) { return held.Name == property.Name; }
 					);
 					if (existing != entry.Merged.end()) {
-						*existing = property;
+						PropertyDescriptor replacement = property;
+						if (!replacement.PropertiesTag.IsValid()) {
+							replacement.PropertiesTag = existing->PropertiesTag;
+						}
+						*existing = replacement;
 					} else {
 						entry.Merged.push_back(property);
 					}
@@ -230,6 +234,33 @@ namespace engine::ecs {
 		// Every merged list in the table is now potentially stale, including
 		// ones built for classes registered before this declaration.
 		table.Revision++;
+	}
+
+	bool Classes::SetPropertiesTag(ClassId owner, std::string_view propertyName, core::Name tag) {
+		auto &table = Get();
+		std::lock_guard lock(table.Guard);
+
+		if (!owner.IsValid() || owner.Index >= table.Entries.size()) {
+			return false;
+		}
+
+		Entry &entry = table.Entries[owner.Index];
+		const auto property = std::find_if(
+			entry.Declared.begin(), entry.Declared.end(), [propertyName](const PropertyDescriptor &candidate) {
+				return candidate.Spelling == propertyName;
+			}
+		);
+		if (property == entry.Declared.end()) {
+			return false;
+		}
+
+		if (property->PropertiesTag == tag) {
+			return true;
+		}
+
+		property->PropertiesTag = tag;
+		table.Revision++;
+		return true;
 	}
 
 	void Classes::SetDefault(ClassId owner, ComponentId component, const void *value) {

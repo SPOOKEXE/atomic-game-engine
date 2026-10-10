@@ -285,6 +285,9 @@ namespace engine::ecs {
 		// The property's name, as scripts and files spell it.
 		core::Name Name;
 
+		// Studio's presentation group. An invalid name leaves the property unassigned.
+		core::Name PropertiesTag;
+
 		// That same name's text, resolved once when the property is declared.
 		//
 		// **`core::Name::Text()` takes the process-wide name registry's lock**,
@@ -654,6 +657,16 @@ namespace engine::ecs {
 		// @param id      The registered class.
 		// @param visible Whether Studio may offer the class.
 		static void SetStudioVisible(ClassId id, bool visible);
+
+		// Assigns a presentation group to a property declared by one exact class.
+		// Descendants receive the tag through the merged descriptor; a derived
+		// declaration can assign its own tag independently.
+		//
+		// @param owner        The class that declares the property.
+		// @param propertyName The declared property name.
+		// @param tag          The presentation group, or invalid to leave it unassigned.
+		// @return Whether that exact class declares the property.
+		static bool SetPropertiesTag(ClassId owner, std::string_view propertyName, core::Name tag);
 
 		// Reports whether `derived` is `base` or descends from it.
 		//
