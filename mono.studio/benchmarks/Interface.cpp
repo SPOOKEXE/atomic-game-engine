@@ -14,6 +14,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <imgui.h>
@@ -22,6 +23,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <studio/Editor.hpp>
 #include <studio/Plugins.hpp>
 #include <vector>
@@ -111,11 +113,51 @@ namespace studio {
 			editor.DrawFrameGraph();
 		}
 
-		static void PrepareFrameGraph(Editor &editor) {
+		static void PrepareFrameGraph(
+			Editor &editor, DiagnosticAggregation mode = DiagnosticAggregation::Average, int interval = 1
+		) {
 			editor.ShowFrameGraph = true;
-			editor.FrameGraphState.Interval = 1;
-			editor.FrameGraphState.Mode = DiagnosticAggregation::Average;
+			editor.FrameGraphState.Interval = interval;
+			editor.FrameGraphState.Mode = mode;
 			editor.FrameGraphState.NextPublish = 0.0;
+		}
+
+		static void PauseFrameGraph(Editor &editor) {
+			editor.FrameGraphState.Paused = true;
+		}
+
+		static size_t PublishedFrameGraphSpanCount(Editor &editor) {
+			return editor.FrameGraphState.Spans.size();
+		}
+
+		static bool FrameGraphPaused(Editor &editor) {
+			return editor.FrameGraphState.Paused;
+		}
+
+		static std::vector<DiagnosticSpan> PublishedFrameGraphSnapshot(Editor &editor) {
+			return editor.FrameGraphState.Spans;
+		}
+
+		static bool
+		PublishedFrameGraphSnapshotMatches(Editor &editor, const std::vector<DiagnosticSpan> &expected) {
+			const auto &actual = editor.FrameGraphState.Spans;
+			if (actual.size() != expected.size()) {
+				return false;
+			}
+			for (size_t index = 0; index < actual.size(); index++) {
+				const DiagnosticSpan &left = actual[index];
+				const DiagnosticSpan &right = expected[index];
+				if (left.Name != right.Name || left.Depth != right.Depth || left.Parent != right.Parent ||
+					left.StartMilliseconds != right.StartMilliseconds ||
+					left.Milliseconds != right.Milliseconds ||
+					left.SelfMilliseconds != right.SelfMilliseconds ||
+					left.IdleMilliseconds != right.IdleMilliseconds || left.Category != right.Category ||
+					left.Owner != right.Owner || left.Reported != right.Reported ||
+					left.Occurrences != right.Occurrences) {
+					return false;
+				}
+			}
+			return true;
 		}
 
 		static void Finish(Editor &editor, LoadedCppPlugin &plugin) noexcept {
@@ -135,6 +177,8 @@ namespace {
 	using Clock = std::chrono::steady_clock;
 	constexpr size_t FRAMES_PER_SAMPLE = 600;
 	constexpr size_t WARM_FRAMES = 24;
+	constexpr size_t BENCHMARK_WORLD_COUNT = 8;
+	constexpr size_t DENSE_2048_PHASES_PER_WORLD = 256;
 
 	struct PanelMetric {
 		uint64_t MeanScopeNanoseconds = 0;
@@ -143,12 +187,57 @@ namespace {
 		bool HeapProfileEnabled = false;
 	};
 
+	struct WorkSpan {
+		std::string_view Name;
+		engine::core::ProfileCategory Category;
+	};
+
+	constexpr std::array<WorkSpan, 27> DENSE_WORK_SPANS{{
+		{"input.poll", engine::core::ProfileCategory::Engine},
+		{"input.route", engine::core::ProfileCategory::Engine},
+		{"command.apply", engine::core::ProfileCategory::ECS},
+		{"transform.propagate", engine::core::ProfileCategory::ECS},
+		{"behavior.step", engine::core::ProfileCategory::Script},
+		{"physics.broadphase", engine::core::ProfileCategory::Physics},
+		{"physics.narrowphase", engine::core::ProfileCategory::Physics},
+		{"physics.solve", engine::core::ProfileCategory::Physics},
+		{"physics.publish", engine::core::ProfileCategory::Physics},
+		{"scene.visibility", engine::core::ProfileCategory::ECS},
+		{"scene.lod", engine::core::ProfileCategory::ECS},
+		{"scene.resolve", engine::core::ProfileCategory::Assets},
+		{"assets.lookup", engine::core::ProfileCategory::Assets},
+		{"assets.decode", engine::core::ProfileCategory::Assets},
+		{"assets.upload", engine::core::ProfileCategory::Assets},
+		{"render.prepare", engine::core::ProfileCategory::Render},
+		{"render.cull", engine::core::ProfileCategory::Render},
+		{"render.pipeline", engine::core::ProfileCategory::Render},
+		{"render.encode", engine::core::ProfileCategory::Render},
+		{"render.submit", engine::core::ProfileCategory::Render},
+		{"replication.diff", engine::core::ProfileCategory::Network},
+		{"replication.encode", engine::core::ProfileCategory::Network},
+		{"replication.send", engine::core::ProfileCategory::Network},
+		{"audio.mix", engine::core::ProfileCategory::Engine},
+		{"audio.submit", engine::core::ProfileCategory::Engine},
+		{"ui.layout", engine::core::ProfileCategory::Render},
+		{"ui.widgets", engine::core::ProfileCategory::Render},
+	}};
+	constexpr size_t DENSE_MINIMUM_SPANS = 1 + BENCHMARK_WORLD_COUNT * (1 + DENSE_WORK_SPANS.size() + 1 + 2);
+	constexpr size_t DENSE_2048_MINIMUM_SPANS =
+		1 + BENCHMARK_WORLD_COUNT * (1 + DENSE_2048_PHASES_PER_WORLD + 1 + 2);
+	constexpr size_t CURRENT_MINIMUM_SPANS = 1 + BENCHMARK_WORLD_COUNT * (3 + 2);
+
 	struct Metrics {
 		std::vector<PanelMetric> Toolbar;
 		std::vector<PanelMetric> PreferencesGeneral;
 		std::vector<PanelMetric> GeneralSettings;
 		std::vector<PanelMetric> DefaultWorlds;
 		std::vector<PanelMetric> FrameGraph;
+		std::vector<PanelMetric> PausedFrameGraphAverage;
+		std::vector<PanelMetric> PausedFrameGraphEveryFrame;
+		std::vector<PanelMetric> PausedDenseFrameGraphAverage;
+		std::vector<PanelMetric> PausedDenseFrameGraphEveryFrame;
+		std::vector<PanelMetric> PausedDense2048FrameGraphAverage;
+		std::vector<PanelMetric> PausedDense2048FrameGraphEveryFrame;
 
 		~Metrics() {
 			Print("toolbar", Toolbar);
@@ -156,6 +245,12 @@ namespace {
 			Print("general_settings_contents", GeneralSettings);
 			Print("default_worlds", DefaultWorlds);
 			Print("frame_graph_average", FrameGraph);
+			Print("frame_graph_paused_average_current", PausedFrameGraphAverage);
+			Print("frame_graph_paused_every_frame_current", PausedFrameGraphEveryFrame);
+			Print("frame_graph_paused_average_dense", PausedDenseFrameGraphAverage);
+			Print("frame_graph_paused_every_frame_dense", PausedDenseFrameGraphEveryFrame);
+			Print("frame_graph_paused_average_dense_2048", PausedDense2048FrameGraphAverage);
+			Print("frame_graph_paused_every_frame_dense_2048", PausedDense2048FrameGraphEveryFrame);
 		}
 
 		static void Print(const char *panel, const std::vector<PanelMetric> &metrics) {
@@ -380,10 +475,52 @@ namespace {
 		Context ImGuiContext;
 		studio::Editor Editor;
 		const bool WasEnabled = engine::core::FrameGraph::IsEnabled();
+		bool Dense = false;
+		bool Paused = false;
+		size_t PublishedSpanCount = 0;
+		size_t DensePhasesPerWorld = DENSE_WORK_SPANS.size();
+		std::vector<studio::DiagnosticSpan> PublishedSnapshot;
 
-		FrameGraphFixture() {
-			studio::ToolsProbe::PrepareFrameGraph(Editor);
+		FrameGraphFixture(
+			studio::DiagnosticAggregation mode = studio::DiagnosticAggregation::Average,
+			int interval = 1,
+			bool dense = false,
+			bool paused = false,
+			size_t densePhasesPerWorld = DENSE_WORK_SPANS.size()
+		)
+			: Dense(dense), Paused(paused), DensePhasesPerWorld(densePhasesPerWorld) {
+			studio::ToolsProbe::PrepareFrameGraph(Editor, mode, interval);
 			engine::core::FrameGraph::SetEnabled(true);
+			if (!Paused) {
+				return;
+			}
+
+			if (Dense) {
+				RecordDenseFrame(DensePhasesPerWorld);
+			} else {
+				RecordFrame();
+			}
+			const size_t minimumSpans =
+				Dense ? (DensePhasesPerWorld == DENSE_2048_PHASES_PER_WORLD ? DENSE_2048_MINIMUM_SPANS
+																			: DENSE_MINIMUM_SPANS)
+					  : CURRENT_MINIMUM_SPANS;
+			if (engine::core::FrameGraph::Spans().size() < minimumSpans) {
+				throw std::runtime_error("frame graph benchmark fixture recorded too few spans");
+			}
+			DrawPanelFrame();
+			PublishedSpanCount = studio::ToolsProbe::PublishedFrameGraphSpanCount(Editor);
+			if (PublishedSpanCount < minimumSpans) {
+				DrawPanelFrame();
+				PublishedSpanCount = studio::ToolsProbe::PublishedFrameGraphSpanCount(Editor);
+			}
+			if (PublishedSpanCount < minimumSpans) {
+				throw std::runtime_error("paused frame graph benchmark did not publish its warm frame");
+			}
+			PublishedSnapshot = studio::ToolsProbe::PublishedFrameGraphSnapshot(Editor);
+			studio::ToolsProbe::PauseFrameGraph(Editor);
+			for (size_t frame = 0; frame < WARM_FRAMES; frame++) {
+				DrawPausedFrame(nullptr, nullptr, true);
+			}
 		}
 
 		~FrameGraphFixture() {
@@ -409,6 +546,37 @@ namespace {
 			FrameGraph::EndFrame();
 		}
 
+		void RecordDenseFrame(size_t phasesPerWorld) {
+			using engine::core::FrameGraph;
+			using engine::core::ProfileCategory;
+			FrameGraph::BeginFrame();
+			{
+				FrameGraph::Scope application("application", ProfileCategory::Engine);
+				for (size_t world = 0; world < BENCHMARK_WORLD_COUNT; world++) {
+					FrameGraph::Scope worldScope("world", ProfileCategory::ECS);
+					for (size_t phaseIndex = 0; phaseIndex < phasesPerWorld; phaseIndex++) {
+						const WorkSpan &work = DENSE_WORK_SPANS[phaseIndex % DENSE_WORK_SPANS.size()];
+						FrameGraph::Scope phase(work.Name, work.Category);
+					}
+					{
+						FrameGraph::Scope submit("renderer.executegraph", ProfileCategory::Render);
+						FrameGraph::Report("gpu skybox-compute", ProfileCategory::Gpu, 0.018f);
+						FrameGraph::Report("jobs.join.assigned", ProfileCategory::ECS, 0.012f);
+					}
+				}
+			}
+			FrameGraph::EndFrame();
+		}
+
+		void DrawPanelFrame() {
+			ImGui::SetCurrentContext(ImGuiContext.Handle);
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos(ImVec2(40.0f, 100.0f));
+			ImGui::SetNextWindowSize(ImVec2(900.0f, 700.0f));
+			studio::ToolsProbe::DrawFrameGraph(Editor);
+			ImGui::Render();
+		}
+
 		void DrawFrame(uint64_t *scopeNanoseconds = nullptr) {
 			RecordFrame();
 			ImGui::NewFrame();
@@ -421,6 +589,52 @@ namespace {
 				*scopeNanoseconds += static_cast<uint64_t>(
 					std::chrono::duration_cast<std::chrono::nanoseconds>(ended - started).count()
 				);
+			}
+			ImGui::Render();
+		}
+
+		void DrawPausedFrame(
+			uint64_t *scopeNanoseconds = nullptr,
+			PanelMetric *allocations = nullptr,
+			bool validateSnapshot = false
+		) {
+			using engine::core::FrameGraph;
+			if (Dense) {
+				RecordFrame();
+			} else {
+				RecordDenseFrame(DENSE_WORK_SPANS.size());
+			}
+			const size_t minimumLiveSpans = Dense ? CURRENT_MINIMUM_SPANS : DENSE_MINIMUM_SPANS;
+			if (FrameGraph::Spans().size() < minimumLiveSpans ||
+				!studio::ToolsProbe::FrameGraphPaused(Editor) ||
+				FrameGraph::Spans().size() == PublishedSpanCount) {
+				throw std::runtime_error("paused frame graph benchmark did not change the live fixture");
+			}
+			ImGui::SetCurrentContext(ImGuiContext.Handle);
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos(ImVec2(40.0f, 100.0f));
+			ImGui::SetNextWindowSize(ImVec2(900.0f, 700.0f));
+			const bool sampleAllocations = allocations != nullptr && HeapProfile::IsCompiledIn();
+			if (allocations != nullptr) {
+				allocations->HeapProfileEnabled = HeapProfile::IsCompiledIn();
+			}
+			const HeapTotals before = sampleAllocations ? HeapProfile::Totals() : HeapTotals{};
+			const auto started = Clock::now();
+			studio::ToolsProbe::DrawFrameGraph(Editor);
+			const auto ended = Clock::now();
+			if (scopeNanoseconds != nullptr) {
+				*scopeNanoseconds += static_cast<uint64_t>(
+					std::chrono::duration_cast<std::chrono::nanoseconds>(ended - started).count()
+				);
+			}
+			if (sampleAllocations) {
+				const HeapTotals after = HeapProfile::Totals();
+				allocations->FrameAllocations = after.TotalBlocks - before.TotalBlocks;
+				allocations->FrameAllocatedBytes = after.TotalBytes - before.TotalBytes;
+			}
+			if (validateSnapshot &&
+				!studio::ToolsProbe::PublishedFrameGraphSnapshotMatches(Editor, PublishedSnapshot)) {
+				throw std::runtime_error("paused frame graph benchmark changed its published snapshot");
 			}
 			ImGui::Render();
 		}
@@ -449,6 +663,23 @@ namespace {
 	void EmptyFrame() {
 		ImGui::NewFrame();
 		ImGui::Render();
+	}
+
+	void MeasurePausedFrameGraph(FrameGraphFixture &fixture, std::vector<PanelMetric> &metrics) {
+		uint64_t scopeNanoseconds = 0;
+		PanelMetric allocations;
+		for (size_t frame = 0; frame < FRAMES_PER_SAMPLE; frame++) {
+			const bool sample = frame + 1 == FRAMES_PER_SAMPLE;
+			fixture.DrawPausedFrame(&scopeNanoseconds, sample ? &allocations : nullptr);
+		}
+		if (!studio::ToolsProbe::PublishedFrameGraphSnapshotMatches(
+				fixture.Editor, fixture.PublishedSnapshot
+			)) {
+			throw std::runtime_error("paused frame graph benchmark changed its published snapshot");
+		}
+		allocations.MeanScopeNanoseconds = scopeNanoseconds / FRAMES_PER_SAMPLE;
+		metrics.push_back(allocations);
+		Consume(allocations.MeanScopeNanoseconds);
 	}
 }
 
@@ -520,6 +751,40 @@ BENCH("frame graph Average 250 ms retained ImGui panel", FRAMES_PER_SAMPLE) {
 	const uint64_t meanScopeNanoseconds = scopeNanoseconds / FRAMES_PER_SAMPLE;
 	Observed().FrameGraph.push_back(PanelMetric{.MeanScopeNanoseconds = meanScopeNanoseconds});
 	Consume(meanScopeNanoseconds);
+}
+
+BENCH("Frame Graph paused average · current fixture", FRAMES_PER_SAMPLE) {
+	static FrameGraphFixture fixture(studio::DiagnosticAggregation::Average, 1, false, true);
+	MeasurePausedFrameGraph(fixture, Observed().PausedFrameGraphAverage);
+}
+
+BENCH("Frame Graph paused every frame · current fixture", FRAMES_PER_SAMPLE) {
+	static FrameGraphFixture fixture(studio::DiagnosticAggregation::Latest, 0, false, true);
+	MeasurePausedFrameGraph(fixture, Observed().PausedFrameGraphEveryFrame);
+}
+
+BENCH("Frame Graph paused average · dense 240 spans", FRAMES_PER_SAMPLE) {
+	static FrameGraphFixture fixture(studio::DiagnosticAggregation::Average, 1, true, true);
+	MeasurePausedFrameGraph(fixture, Observed().PausedDenseFrameGraphAverage);
+}
+
+BENCH("Frame Graph paused every frame · dense 240 spans", FRAMES_PER_SAMPLE) {
+	static FrameGraphFixture fixture(studio::DiagnosticAggregation::Latest, 0, true, true);
+	MeasurePausedFrameGraph(fixture, Observed().PausedDenseFrameGraphEveryFrame);
+}
+
+BENCH("Frame Graph paused average · dense 2048 CPU spans", FRAMES_PER_SAMPLE) {
+	static FrameGraphFixture fixture(
+		studio::DiagnosticAggregation::Average, 1, true, true, DENSE_2048_PHASES_PER_WORLD
+	);
+	MeasurePausedFrameGraph(fixture, Observed().PausedDense2048FrameGraphAverage);
+}
+
+BENCH("Frame Graph paused every frame · dense 2048 CPU spans", FRAMES_PER_SAMPLE) {
+	static FrameGraphFixture fixture(
+		studio::DiagnosticAggregation::Latest, 0, true, true, DENSE_2048_PHASES_PER_WORLD
+	);
+	MeasurePausedFrameGraph(fixture, Observed().PausedDense2048FrameGraphEveryFrame);
 }
 
 BENCH("idle content.demand.scan · 10 furnished worlds", 1000) {
