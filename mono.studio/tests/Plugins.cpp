@@ -86,9 +86,11 @@ namespace {
 					));
 			std::filesystem::remove_all(Root);
 			std::filesystem::create_directories(Root);
+			studio::SetConfigRoot(Root / "config");
 		}
 
 		~Folder() {
+			studio::SetConfigRoot({});
 			std::filesystem::remove_all(Root);
 		}
 
@@ -612,6 +614,29 @@ TEST_CASE("toolbar composition uses stable overrides", "[studio][plugins]") {
 		CHECK(std::none_of(items.begin(), items.end(), [&](const auto &item) { return item.Key == hidden; }));
 	}
 	CHECK_FALSE(composed.PinnedRows.empty());
+}
+
+TEST_CASE("composed toolbar tooltips own plugin metadata", "[studio][plugins]") {
+	studio::PluginPresentation plugin = DefaultPresentation();
+	REQUIRE_FALSE(plugin.Toolbars.empty());
+	REQUIRE_FALSE(plugin.Toolbars.front().Buttons.empty());
+	plugin.Toolbars.front().Buttons.front().Tooltip = "before reload";
+	std::vector<studio::PluginPresentation *> plugins = {&plugin};
+
+	auto composed = ComposeToolbar(plugins, {});
+	REQUIRE_FALSE(composed.PinnedRows.empty());
+	REQUIRE_FALSE(composed.PinnedRows.front().Cells.empty());
+	REQUIRE_FALSE(composed.PinnedRows.front().Cells.front().Items.empty());
+	const std::string &ownedTooltip = composed.PinnedRows.front().Cells.front().Items.front().Tooltip;
+	CHECK(ownedTooltip == "before reload");
+
+	plugin.Toolbars.front().Buttons.front().Tooltip = "after reload";
+	CHECK(ownedTooltip == "before reload");
+	composed = ComposeToolbar(plugins, {});
+	REQUIRE_FALSE(composed.PinnedRows.empty());
+	REQUIRE_FALSE(composed.PinnedRows.front().Cells.empty());
+	REQUIRE_FALSE(composed.PinnedRows.front().Cells.front().Items.empty());
+	CHECK(composed.PinnedRows.front().Cells.front().Items.front().Tooltip == "after reload");
 }
 
 TEST_CASE("toolbar preferences round trip by stable text keys", "[studio][plugins]") {

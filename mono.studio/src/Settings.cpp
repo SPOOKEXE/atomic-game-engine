@@ -1133,8 +1133,9 @@ namespace studio {
 			ImGui::PushID(entry.Key.data(), entry.Key.data() + entry.Key.size());
 
 			bool enabled = DefaultWorldEnabled(entry.Key);
-			const std::string label(entry.World);
-			if (ImGui::Checkbox(label.c_str(), &enabled)) {
+			// Catalogue views point into string literals, so their data stays
+			// null-terminated without a per-frame label allocation.
+			if (ImGui::Checkbox(entry.World.data(), &enabled)) {
 				SetDefaultWorldEnabled(entry.Key, enabled);
 			}
 
@@ -1143,7 +1144,7 @@ namespace studio {
 			// under each row: thirteen paragraphs stacked is a page nobody reads
 			// the top of.
 			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip("%s", std::string(entry.Note).c_str());
+				ImGui::SetTooltip("%s", entry.Note.data());
 			}
 
 			// The scene that builds it, dimmed on the same row - an annotation

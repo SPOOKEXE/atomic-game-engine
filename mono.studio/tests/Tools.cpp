@@ -11,6 +11,7 @@
 // locking a wall is for - and the version that filters the hit passes every
 // simpler test.
 
+#include <engine/core/Paths.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/ecs/Store.hpp>
@@ -23,7 +24,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <optional>
+#include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 #include <vector>
 
@@ -49,6 +52,28 @@ namespace studio {
 			editor.DrawHomeTools();
 		}
 
+		static void PrepareTransport(Editor &editor) {
+			editor.Universe = std::make_unique<engine::world::Universe>();
+			editor.Active = editor.Universe->Create({.Name = Name("toolbar-transport-test")});
+		}
+
+		static void SetTransportRunning(Editor &editor, bool paused) {
+			editor.Runs.clear();
+			editor.Runs.emplace_back();
+			editor.Runs.back().World = editor.Active;
+			editor.Runs.back().Mode = RunMode::Server;
+			editor.Runs.back().Paused = paused;
+		}
+
+		static void FinishTransport(Editor &editor) {
+			editor.Runs.clear();
+		}
+
+		static void DrawTransport(Editor &editor, BuiltinStudioTool tool) {
+			editor.DrawingBuiltinTool = tool;
+			editor.DrawTransportTools();
+		}
+
 		static bool IsInactive(const Editor &editor) {
 			return editor.CurrentTool == Editor::ToolMode::None;
 		}
@@ -60,6 +85,15 @@ namespace studio {
 		static void SetMove(Editor &editor) {
 			editor.CurrentTool = Editor::ToolMode::Move;
 		}
+
+		static void AddPlugin(Editor &editor, LoadedCppPlugin &plugin) {
+			editor.Plugins.push_back(&plugin);
+			editor.ToolbarLayoutDirty = true;
+		}
+
+		static void DrawPluginToolbar(Editor &editor) {
+			editor.DrawPluginToolbar();
+		}
 	};
 }
 
@@ -67,6 +101,7 @@ namespace {
 	class Context {
 	  public:
 		Context() {
+			studio::SetConfigRoot(engine::core::Paths::Base() / "studio-tools-config");
 			IMGUI_CHECKVERSION();
 			Handle = ImGui::CreateContext();
 			ImGuiIO &io = ImGui::GetIO();
@@ -81,6 +116,7 @@ namespace {
 
 		~Context() {
 			ImGui::DestroyContext(Handle);
+			studio::SetConfigRoot({});
 		}
 
 		Context(const Context &) = delete;
@@ -111,6 +147,19 @@ namespace {
 		DrawTool(editor, tool, point, false);
 		DrawTool(editor, tool, point, true);
 		DrawTool(editor, tool, point, false);
+	}
+
+	void DrawPluginToolbar(studio::Editor &editor, ImVec2 mouse, bool down) {
+		ImGuiIO &io = ImGui::GetIO();
+		io.AddMousePosEvent(mouse.x, mouse.y);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 140.0f), ImGuiCond_Always);
+		ImGui::Begin("Plugin toolbar callback test");
+		studio::ToolsProbe::DrawPluginToolbar(editor);
+		ImGui::End();
+		ImGui::Render();
 	}
 
 	// A part at a place, one stud on a side.
@@ -180,6 +229,77 @@ TEST_CASE("active toolbar tools can leave the viewport to the running game", "[s
 	studio::ToolsProbe::SetMove(editor);
 	ClickTool(editor, studio::BuiltinStudioTool::MoveMode);
 	CHECK(studio::ToolsProbe::IsInactive(editor));
+}
+
+TEST_CASE("transport controls read a run changed between controls", "[studio][tools][transport]") {
+	Context context;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareTransport(editor);
+	ImGui::NewFrame();
+	ImGui::Begin("Transport test");
+
+	studio::ToolsProbe::DrawTransport(editor, studio::BuiltinStudioTool::Stop);
+	CHECK((ImGui::GetCurrentContext()->LastItemData.ItemFlags & ImGuiItemFlags_Disabled) != 0);
+
+	studio::ToolsProbe::SetTransportRunning(editor, true);
+	studio::ToolsProbe::DrawTransport(editor, studio::BuiltinStudioTool::Stop);
+	CHECK((ImGui::GetCurrentContext()->LastItemData.ItemFlags & ImGuiItemFlags_Disabled) == 0);
+
+	studio::ToolsProbe::DrawTransport(editor, studio::BuiltinStudioTool::Pause);
+	CHECK(ImGui::GetCurrentContext()->LastItemData.ID == ImGui::GetID("Resume"));
+	studio::ToolsProbe::SetTransportRunning(editor, false);
+	studio::ToolsProbe::DrawTransport(editor, studio::BuiltinStudioTool::Pause);
+	CHECK(ImGui::GetCurrentContext()->LastItemData.ID == ImGui::GetID("Pause"));
+
+	studio::ToolsProbe::FinishTransport(editor);
+	studio::ToolsProbe::DrawTransport(editor, studio::BuiltinStudioTool::Stop);
+	CHECK((ImGui::GetCurrentContext()->LastItemData.ItemFlags & ImGuiItemFlags_Disabled) != 0);
+	ImGui::End();
+	ImGui::Render();
+}
+
+TEST_CASE("a toolbar callback may unload its plugin after drawing", "[studio][tools][plugins]") {
+	Context context;
+	studio::Editor editor;
+	studio::LoadedCppPlugin plugin;
+	plugin.Manifest.Id = "toolbar-unload-test";
+	plugin.Manifest.Name = "Toolbar unload test";
+	plugin.Native = true;
+	plugin.Running = true;
+
+	studio::PluginToolbar toolbar;
+	toolbar.Name = "Actions";
+	toolbar.Id = "actions";
+	toolbar.Placement = studio::PluginToolbarPlacement::Pinned;
+	toolbar.Rows.push_back(studio::PluginToolbarTrack{"row-1"});
+	toolbar.Columns.push_back(studio::PluginToolbarTrack{"action"});
+
+	studio::PluginButton button;
+	button.Name = "Unload";
+	button.Id = "unload";
+	button.Kind = studio::PluginControlKind::Button;
+	button.Tooltip = "unloads after the toolbar frame";
+	button.Width = 360.0f;
+	button.Row = "row-1";
+	button.Column = "action";
+	int callbacks = 0;
+	button.NativeOnClick = [&](engine::script::HostArguments) {
+		callbacks++;
+		editor.Plugins.clear();
+		plugin.Toolbars.clear();
+	};
+	toolbar.Buttons.push_back(std::move(button));
+	plugin.Toolbars.push_back(std::move(toolbar));
+	studio::ToolsProbe::AddPlugin(editor, plugin);
+
+	DrawPluginToolbar(editor, ImVec2(-1.0f, -1.0f), false);
+	DrawPluginToolbar(editor, ImVec2(100.0f, 60.0f), false);
+	DrawPluginToolbar(editor, ImVec2(100.0f, 60.0f), true);
+	DrawPluginToolbar(editor, ImVec2(100.0f, 60.0f), false);
+
+	CHECK(callbacks == 1);
+	CHECK(editor.Plugins.empty());
+	CHECK(plugin.Toolbars.empty());
 }
 
 TEST_CASE("Locked is a property that survives a write and a read", "[studio][tools]") {

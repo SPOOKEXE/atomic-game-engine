@@ -568,6 +568,7 @@ namespace studio {
 						width,
 						order,
 						button.Name + "###control",
+						button.Tooltip,
 					};
 
 					if (preference != nullptr && !preference->Tab.empty() && preference->Tab != defaultTab) {
@@ -2261,6 +2262,7 @@ namespace studio {
 
 	void Editor::DrawPluginToolbar() {
 		if (ToolbarLayoutDirty) {
+			ENGINE_PROFILE_CAT("toolbar compose layout", engine::core::ProfileCategory::Render);
 			ToolbarLayout = ComposeToolbar(Plugins, ToolbarPrefs);
 			ToolbarLayoutDirty = false;
 		}
@@ -2348,83 +2350,111 @@ namespace studio {
 			}
 			PluginButton &button = toolbar.Buttons[location.Item];
 			const PluginControlKind kind = button.Kind;
-			// A callback may unload its plugin. Keep the post-callback UI state
-			// outside that plugin's toolbar storage before it can be invalidated.
-			const std::string tooltip = button.Tooltip;
+			std::function<void()> callback;
 
 			ImGui::PushID(location.Key.c_str());
 			if (kind == PluginControlKind::Builtin) {
-				DrawBuiltinStudioTool(button.Builtin);
-			} else {
-				if (kind == PluginControlKind::Button) {
-					const bool pressed =
-						button.Active
-							? ImGui::Selectable(
-								  location.ControlLabel.c_str(), true, 0, ImVec2(location.Width, 0.0f)
-							  )
-							: ImGui::Button(location.ControlLabel.c_str(), ImVec2(location.Width, 0.0f));
-					if (pressed) {
-						if (button.NativeOnClick) {
-							button.NativeOnClick({});
-						} else if (LoadedPlugin *script = ScriptOwner(plugin); script != nullptr) {
-							InvokePlugin(*script, button.OnClick, false);
-						}
-					}
-				} else if (kind == PluginControlKind::Toggle) {
-					const bool before = button.Active;
-					ImGui::Checkbox(location.ControlLabel.c_str(), &button.Active);
-					if (before != button.Active) {
-						const engine::script::HostValue value = engine::script::HostValue::Of(button.Active);
-						const engine::script::HostArguments arguments(&value, 1);
-						if (button.NativeOnChanged) {
-							button.NativeOnChanged(arguments);
-						} else if (LoadedPlugin *script = ScriptOwner(plugin); script != nullptr) {
-							InvokePlugin(*script, button.OnChanged, false, arguments);
-						}
-					}
-				} else if (kind == PluginControlKind::Dropdown) {
-					ImGui::SetNextItemWidth(location.Width);
-					const char *preview = button.Selected < button.Options.size()
-											  ? button.Options[button.Selected].c_str()
-											  : "(none)";
-					if (ImGui::BeginCombo(location.ControlLabel.c_str(), preview)) {
-						for (size_t option = 0; option < button.Options.size(); option++) {
-							if (!ImGui::Selectable(
-									button.Options[option].c_str(), option == button.Selected
-								)) {
-								continue;
-							}
-							button.Selected = option;
-							const engine::script::HostValue arguments[] = {
-								engine::script::HostValue::Of(static_cast<double>(option + 1)),
-								engine::script::HostValue::Of(std::string_view(button.Options[option])),
-							};
-							const engine::script::HostArguments values(arguments, 2);
-							if (button.NativeOnChanged) {
-								button.NativeOnChanged(values);
-							} else if (LoadedPlugin *script = ScriptOwner(plugin); script != nullptr) {
-								InvokePlugin(*script, button.OnChanged, false, values);
-							}
-							break;
-						}
-						ImGui::EndCombo();
-					}
-				} else if (kind == PluginControlKind::Label) {
-					ImGui::TextUnformatted(button.Name.c_str());
+				const BuiltinStudioTool builtin = button.Builtin;
+				DrawBuiltinStudioTool(builtin);
+				if (!location.Tooltip.empty() && ImGui::IsItemHovered()) {
+					ImGui::SetTooltip("%s", location.Tooltip.c_str());
 				}
+				ImGui::PopID();
+				return;
 			}
 
-			const bool hovered = ImGui::IsItemHovered();
-			const float renderedWidth = ImGui::GetItemRectSize().x;
-			if (!tooltip.empty() && hovered) {
-				ImGui::SetTooltip("%s", tooltip.c_str());
+			if (kind == PluginControlKind::Button) {
+				const bool pressed =
+					button.Active
+						? ImGui::Selectable(
+							  location.ControlLabel.c_str(), true, 0, ImVec2(location.Width, 0.0f)
+						  )
+						: ImGui::Button(location.ControlLabel.c_str(), ImVec2(location.Width, 0.0f));
+				if (pressed) {
+					if (button.NativeOnClick) {
+						const auto native = button.NativeOnClick;
+						callback = [native] { native({}); };
+					} else if (LoadedPlugin *script = ScriptOwner(plugin); script != nullptr) {
+						const engine::script::HostCallback scripted = button.OnClick;
+						callback = [this, script, scripted] { InvokePlugin(*script, scripted, false); };
+					}
+				}
+			} else if (kind == PluginControlKind::Toggle) {
+				const bool before = button.Active;
+				ImGui::Checkbox(location.ControlLabel.c_str(), &button.Active);
+				if (before != button.Active) {
+					const bool active = button.Active;
+					if (button.NativeOnChanged) {
+						const auto native = button.NativeOnChanged;
+						callback = [native, active] {
+							const engine::script::HostValue value = engine::script::HostValue::Of(active);
+							native(engine::script::HostArguments(&value, 1));
+						};
+					} else if (LoadedPlugin *script = ScriptOwner(plugin); script != nullptr) {
+						const engine::script::HostCallback scripted = button.OnChanged;
+						callback = [this, script, scripted, active] {
+							const engine::script::HostValue value = engine::script::HostValue::Of(active);
+							InvokePlugin(*script, scripted, false, engine::script::HostArguments(&value, 1));
+						};
+					}
+				}
+			} else if (kind == PluginControlKind::Dropdown) {
+				ImGui::SetNextItemWidth(location.Width);
+				const char *preview = button.Selected < button.Options.size()
+										  ? button.Options[button.Selected].c_str()
+										  : "(none)";
+				if (ImGui::BeginCombo(location.ControlLabel.c_str(), preview)) {
+					for (size_t option = 0; option < button.Options.size(); option++) {
+						if (!ImGui::Selectable(button.Options[option].c_str(), option == button.Selected)) {
+							continue;
+						}
+						button.Selected = option;
+						const size_t selected = option;
+						const std::string selectedName = button.Options[option];
+						if (button.NativeOnChanged) {
+							const auto native = button.NativeOnChanged;
+							callback = [native, selected, selectedName] {
+								const engine::script::HostValue arguments[] = {
+									engine::script::HostValue::Of(static_cast<double>(selected + 1)),
+									engine::script::HostValue::Of(std::string_view(selectedName)),
+								};
+								native(engine::script::HostArguments(arguments, 2));
+							};
+						} else if (LoadedPlugin *script = ScriptOwner(plugin); script != nullptr) {
+							const engine::script::HostCallback scripted = button.OnChanged;
+							callback = [this, script, scripted, selected, selectedName] {
+								const engine::script::HostValue arguments[] = {
+									engine::script::HostValue::Of(static_cast<double>(selected + 1)),
+									engine::script::HostValue::Of(std::string_view(selectedName)),
+								};
+								InvokePlugin(
+									*script, scripted, false, engine::script::HostArguments(arguments, 2)
+								);
+							};
+						}
+						break;
+					}
+					ImGui::EndCombo();
+				}
+			} else if (kind == PluginControlKind::Label) {
+				ImGui::TextUnformatted(button.Name.c_str());
+			}
+
+			if (!location.Tooltip.empty() && ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("%s", location.Tooltip.c_str());
 			}
 			if ((kind == PluginControlKind::Toggle || kind == PluginControlKind::Label) &&
-				location.Width > renderedWidth) {
-				ImGui::SameLine(0.0f, 0.0f);
-				ImGui::Dummy(ImVec2(location.Width - renderedWidth, ImGui::GetFrameHeight()));
+				location.Width > 0.0f) {
+				const float renderedWidth = ImGui::GetItemRectSize().x;
+				if (location.Width > renderedWidth) {
+					ImGui::SameLine(0.0f, 0.0f);
+					ImGui::Dummy(ImVec2(location.Width - renderedWidth, ImGui::GetFrameHeight()));
+				}
 			}
 			ImGui::PopID();
+			if (callback) {
+				callback();
+			}
 		};
 
 		const auto drawRows = [&](const std::vector<ToolbarRowView> &rows, size_t begin) {
@@ -2450,6 +2480,7 @@ namespace studio {
 		};
 
 		if (!ToolbarLayout.PinnedRows.empty()) {
+			ENGINE_PROFILE_CAT("toolbar pinned controls", engine::core::ProfileCategory::Render);
 			const ToolbarRowView &first = ToolbarLayout.PinnedRows.front();
 			bool shown = false;
 			for (const ToolbarCellView &cell : first.Cells) {
@@ -2471,73 +2502,78 @@ namespace studio {
 		}
 
 		int selected = -1;
-		if (!ToolbarLayout.Tabs.empty() &&
-			ImGui::BeginTabBar("ribbon", ImGuiTabBarFlags_FittingPolicyScroll)) {
-			for (size_t index = 0; index < ToolbarLayout.Tabs.size(); index++) {
-				const ToolbarTabView &tab = ToolbarLayout.Tabs[index];
-				if (ImGui::BeginTabItem(tab.Label.c_str())) {
-					selected = static_cast<int>(index);
-					ImGui::EndTabItem();
-				}
-				if (ImGui::BeginPopupContextItem(tab.Context.c_str())) {
-					for (size_t order = 0; order < ToolbarLayout.Tabs.size(); order++) {
-						ensureTabPreference(ToolbarLayout.Tabs[order], order).Order = order;
+		{
+			ENGINE_PROFILE_CAT("toolbar tab strip", engine::core::ProfileCategory::Render);
+			if (!ToolbarLayout.Tabs.empty() &&
+				ImGui::BeginTabBar("ribbon", ImGuiTabBarFlags_FittingPolicyScroll)) {
+				for (size_t index = 0; index < ToolbarLayout.Tabs.size(); index++) {
+					const ToolbarTabView &tab = ToolbarLayout.Tabs[index];
+					if (ImGui::BeginTabItem(tab.Label.c_str())) {
+						selected = static_cast<int>(index);
+						ImGui::EndTabItem();
 					}
-					ToolbarTabPreference &preference = ensureTabPreference(tab, index);
-					if (ToolbarRenamingTab != tab.Id) {
-						ToolbarRenamingTab = tab.Id;
-						std::snprintf(
-							ToolbarRenameDraft, sizeof(ToolbarRenameDraft), "%s", preference.Name.c_str()
-						);
-					}
-					ImGui::SetNextItemWidth(engine::ui::Scaled(180.0f));
-					ImGui::InputText("##rename-toolbar-tab", ToolbarRenameDraft, sizeof(ToolbarRenameDraft));
-					if (ImGui::MenuItem("Apply Rename", nullptr, false, ToolbarRenameDraft[0] != '\0')) {
-						preference.Name = ToolbarRenameDraft;
-						savePreferences();
-					}
-
-					if (ImGui::MenuItem("Move Left", nullptr, false, index > 0)) {
-						ToolbarTabPreference &left =
-							ensureTabPreference(ToolbarLayout.Tabs[index - 1], index - 1);
-						std::swap(preference.Order, left.Order);
-						savePreferences();
-					}
-					if (ImGui::MenuItem(
-							"Move Right", nullptr, false, index + 1 < ToolbarLayout.Tabs.size()
-						)) {
-						ToolbarTabPreference &right =
-							ensureTabPreference(ToolbarLayout.Tabs[index + 1], index + 1);
-						std::swap(preference.Order, right.Order);
-						savePreferences();
-					}
-					ImGui::Separator();
-					const char *removeLabel = preference.UserCreated ? "Delete Tab" : "Hide Tab";
-					if (ImGui::MenuItem(removeLabel)) {
-						for (ToolbarItemPreference &item : ToolbarPrefs.Items) {
-							if (item.Tab == tab.Id) {
-								item.Tab.clear();
-							}
+					if (ImGui::BeginPopupContextItem(tab.Context.c_str())) {
+						for (size_t order = 0; order < ToolbarLayout.Tabs.size(); order++) {
+							ensureTabPreference(ToolbarLayout.Tabs[order], order).Order = order;
 						}
-						if (preference.UserCreated) {
-							ToolbarPrefs.Tabs.erase(
-								std::find_if(
-									ToolbarPrefs.Tabs.begin(),
-									ToolbarPrefs.Tabs.end(),
-									[&](const ToolbarTabPreference &candidate) {
-										return candidate.Id == tab.Id;
-									}
-								)
+						ToolbarTabPreference &preference = ensureTabPreference(tab, index);
+						if (ToolbarRenamingTab != tab.Id) {
+							ToolbarRenamingTab = tab.Id;
+							std::snprintf(
+								ToolbarRenameDraft, sizeof(ToolbarRenameDraft), "%s", preference.Name.c_str()
 							);
-						} else {
-							preference.Visible = false;
 						}
-						savePreferences();
+						ImGui::SetNextItemWidth(engine::ui::Scaled(180.0f));
+						ImGui::InputText(
+							"##rename-toolbar-tab", ToolbarRenameDraft, sizeof(ToolbarRenameDraft)
+						);
+						if (ImGui::MenuItem("Apply Rename", nullptr, false, ToolbarRenameDraft[0] != '\0')) {
+							preference.Name = ToolbarRenameDraft;
+							savePreferences();
+						}
+
+						if (ImGui::MenuItem("Move Left", nullptr, false, index > 0)) {
+							ToolbarTabPreference &left =
+								ensureTabPreference(ToolbarLayout.Tabs[index - 1], index - 1);
+							std::swap(preference.Order, left.Order);
+							savePreferences();
+						}
+						if (ImGui::MenuItem(
+								"Move Right", nullptr, false, index + 1 < ToolbarLayout.Tabs.size()
+							)) {
+							ToolbarTabPreference &right =
+								ensureTabPreference(ToolbarLayout.Tabs[index + 1], index + 1);
+							std::swap(preference.Order, right.Order);
+							savePreferences();
+						}
+						ImGui::Separator();
+						const char *removeLabel = preference.UserCreated ? "Delete Tab" : "Hide Tab";
+						if (ImGui::MenuItem(removeLabel)) {
+							for (ToolbarItemPreference &item : ToolbarPrefs.Items) {
+								if (item.Tab == tab.Id) {
+									item.Tab.clear();
+								}
+							}
+							if (preference.UserCreated) {
+								ToolbarPrefs.Tabs.erase(
+									std::find_if(
+										ToolbarPrefs.Tabs.begin(),
+										ToolbarPrefs.Tabs.end(),
+										[&](const ToolbarTabPreference &candidate) {
+											return candidate.Id == tab.Id;
+										}
+									)
+								);
+							} else {
+								preference.Visible = false;
+							}
+							savePreferences();
+						}
+						ImGui::EndPopup();
 					}
-					ImGui::EndPopup();
 				}
+				ImGui::EndTabBar();
 			}
-			ImGui::EndTabBar();
 		}
 		if (ImGui::BeginPopupContextWindow(
 				"toolbar-strip-context", ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems
@@ -2548,17 +2584,24 @@ namespace studio {
 			ImGui::EndPopup();
 		}
 
-		ImGui::BeginChild("toolbar-rows", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_HorizontalScrollbar);
-		if (ToolbarLayout.PinnedRows.size() > 1) {
-			drawRows(ToolbarLayout.PinnedRows, 1);
+		{
+			ENGINE_PROFILE_CAT("toolbar selected controls", engine::core::ProfileCategory::Render);
+			const bool visible = ImGui::BeginChild(
+				"toolbar-rows", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_HorizontalScrollbar
+			);
+			if (visible) {
+				if (ToolbarLayout.PinnedRows.size() > 1) {
+					drawRows(ToolbarLayout.PinnedRows, 1);
+				}
+				if (selected < 0 && !ToolbarLayout.Tabs.empty()) {
+					selected = 0;
+				}
+				if (selected >= 0) {
+					drawRows(ToolbarLayout.Tabs[static_cast<size_t>(selected)].Rows, 0);
+				}
+			}
+			ImGui::EndChild();
 		}
-		if (selected < 0 && !ToolbarLayout.Tabs.empty()) {
-			selected = 0;
-		}
-		if (selected >= 0) {
-			drawRows(ToolbarLayout.Tabs[static_cast<size_t>(selected)].Rows, 0);
-		}
-		ImGui::EndChild();
 	}
 
 	void Editor::DrawPluginTools() {
