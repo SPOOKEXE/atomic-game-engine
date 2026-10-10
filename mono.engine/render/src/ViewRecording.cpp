@@ -622,7 +622,7 @@ namespace engine::render {
 			MAX_PORTAL_DEPTH
 		);
 
-		const bool sharedCaptures = GraphEnabled(core::Name("surface-capture"));
+		const bool sharedCaptures = graphEnabled(core::Name("surface-capture"));
 		for (const SurfaceView &view : surfaces) {
 			if (view.Index < 0 || static_cast<size_t>(view.Index) >= scene::MAX_SURFACES) {
 				ENGINE_WARN(
@@ -1733,16 +1733,10 @@ namespace engine::render {
 										  uint32_t &outWidth,
 										  uint32_t &outHeight,
 										  core::Name port = {}) {
+			ENGINE_PROFILE_CAT("resolve pipeline output extent", core::ProfileCategory::Render);
 			outWidth = sceneWidth;
 			outHeight = sceneHeight;
-			const graph::Node *node = nullptr;
-			for (uint32_t value = 1; value <= selectedPipeline->Graph.Count(); value++) {
-				const graph::Node *candidate = selectedPipeline->Graph.Find(graph::NodeId{value});
-				if (candidate != nullptr && candidate->Kind == kind) {
-					node = candidate;
-					break;
-				}
-			}
+			const graph::Node *node = selectedPipeline->NodeLookup.First(selectedPipeline->Graph, kind);
 			if (node == nullptr) return;
 			if (port.IsValid()) {
 				const auto found = std::find(node->WritePorts.begin(), node->WritePorts.end(), port);

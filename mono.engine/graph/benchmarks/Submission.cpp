@@ -30,14 +30,17 @@
 // is in the resource relations and a chain has almost none.
 
 #include <engine/graph/ExecutionPlan.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -139,6 +142,22 @@ namespace submission_bench {
 		return pipeline;
 	}
 
+	const Pipeline &InstalledDefaultPipeline() {
+		static const Pipeline pipeline = [] {
+			Pipeline built;
+			const PipelineDocument document = DefaultPbrDocument();
+			Name offender;
+			if (Build(document, built.Graph, offender) != PipelineDocumentStatus::Ok) {
+				throw std::runtime_error("default PBR pipeline document did not build");
+			}
+			if (CompileSchedule(built.Graph, built.Schedule, offender) != ScheduleStatus::Ok) {
+				throw std::runtime_error("default PBR pipeline schedule did not compile");
+			}
+			return built;
+		}();
+		return pipeline;
+	}
+
 	// One world key per view. Repeated keys share world-scoped resources, which
 	// is what a split-screen frame looks like and what a multi-world studio
 	// frame does not.
@@ -179,6 +198,22 @@ namespace submission_bench {
 			invocations += wave.Invocations.size();
 		}
 		return invocations + plan.Transfers.size();
+	}
+
+	uint64_t PlanLikeFrameBatch(const Pipeline &pipeline, const std::vector<uint64_t> &worlds) {
+		FrameExecutionPlan plan;
+		Name offender;
+		if (PlanFrame(pipeline.Graph, pipeline.Schedule, worlds, WIDTH, HEIGHT, plan, offender) !=
+			ExecutionPlanStatus::Ok) {
+			throw std::runtime_error("default PBR frame planning failed");
+		}
+		const size_t concurrentWaves = static_cast<size_t>(
+			std::count_if(plan.Waves.begin(), plan.Waves.end(), [](const PlannedWave &wave) {
+				return wave.ConcurrentQueues;
+			})
+		);
+		// These are the plan fields FrameBatch reads after PlanFrame returns.
+		return plan.ReadBytes + plan.WriteBytes + plan.QueueTransferBytes + concurrentWaves;
 	}
 }
 
@@ -286,6 +321,32 @@ BENCH("PlanFrame · 64 passes · 4 views · 4 worlds", 200) {
 	const std::vector<uint64_t> &worlds = Views(4, 4);
 	for (size_t frame = 0; frame < 200; frame++) {
 		Consume(Plan(pipeline, worlds));
+	}
+}
+
+BENCH("PlanFrame · installed default PBR · 1 view · 1 world", 1000) {
+	// The renderer installs this document at construction. Build and compile it
+	// before timing so the row measures the same per-frame planner work only.
+	const Pipeline &pipeline = InstalledDefaultPipeline();
+	const std::vector<uint64_t> &worlds = Views(1, 1);
+	for (size_t frame = 0; frame < 1000; frame++) {
+		Consume(PlanLikeFrameBatch(pipeline, worlds));
+	}
+}
+
+BENCH("PlanFrame · installed default PBR · 4 views · 1 world", 500) {
+	const Pipeline &pipeline = InstalledDefaultPipeline();
+	const std::vector<uint64_t> &worlds = Views(4, 1);
+	for (size_t frame = 0; frame < 500; frame++) {
+		Consume(PlanLikeFrameBatch(pipeline, worlds));
+	}
+}
+
+BENCH("PlanFrame · installed default PBR · 4 views · 4 worlds", 500) {
+	const Pipeline &pipeline = InstalledDefaultPipeline();
+	const std::vector<uint64_t> &worlds = Views(4, 4);
+	for (size_t frame = 0; frame < 500; frame++) {
+		Consume(PlanLikeFrameBatch(pipeline, worlds));
 	}
 }
 

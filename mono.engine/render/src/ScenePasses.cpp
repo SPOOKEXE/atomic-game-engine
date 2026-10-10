@@ -45,18 +45,7 @@ namespace engine::render {
 
 	const graph::Node *ViewRecording::GraphNode(core::Name kind) const {
 		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
-
-		for (size_t index = 0; index < selectedPipeline->Graph.Count(); index++) {
-			const graph::Node *node =
-				selectedPipeline->Graph.Find(graph::NodeId{static_cast<uint32_t>(index + 1)});
-			if (node != nullptr && node->Enabled && node->Kind == kind) {
-				return node;
-			}
-		}
-		if (kind == core::Name("mirror-capture") || kind == core::Name("portal-capture")) {
-			return GraphNode(core::Name("surface-capture"));
-		}
-		return nullptr;
+		return selectedPipeline->NodeLookup.Enabled(selectedPipeline->Graph, kind);
 	}
 
 	bool ViewRecording::GraphEnabled(core::Name kind) const {

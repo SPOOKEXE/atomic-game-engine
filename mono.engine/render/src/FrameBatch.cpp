@@ -6,6 +6,7 @@
 #include "VulkanTimestamps.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/graph/ExecutionPlan.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>
 
@@ -259,6 +260,7 @@ namespace engine::render {
 			Renderer &Render;
 			const scene::WorldLighting &Previous;
 			~RestoreLightingOnExit() {
+				ENGINE_PROFILE_CAT("FrameBatch::restore lighting", core::ProfileCategory::Render);
 				Render.SetLighting(Previous);
 			}
 		} restoreLighting{Render, previousLighting};
@@ -370,122 +372,140 @@ namespace engine::render {
 
 		std::vector<const Renderer::Impl::InstalledPipeline *> plannedPipelines;
 		plannedPipelines.reserve(groups.size());
-		for (const FrameViewGroup &group : groups) {
-			const auto *named =
-				static_cast<const Renderer::Impl::InstalledPipeline *>(group.Identity.Pipeline);
-			if (named == nullptr || std::find(plannedPipelines.begin(), plannedPipelines.end(), named) !=
-										plannedPipelines.end()) {
-				continue;
-			}
-			plannedPipelines.push_back(named);
-			uint32_t planWidth = width;
-			uint32_t planHeight = height;
-			std::vector<uint64_t> worlds;
-			worlds.reserve(views.size());
-			for (const View &view : views) {
-				if (Render.State->PipelineFor(view.Pipeline) != named) {
+		{
+			ENGINE_PROFILE_CAT("FrameBatch::plan pipelines", core::ProfileCategory::Render);
+			for (const FrameViewGroup &group : groups) {
+				const auto *named =
+					static_cast<const Renderer::Impl::InstalledPipeline *>(group.Identity.Pipeline);
+				if (named == nullptr || std::find(plannedPipelines.begin(), plannedPipelines.end(), named) !=
+											plannedPipelines.end()) {
 					continue;
 				}
-				worlds.push_back(view.World);
-				if (view.Target != nullptr && view.Target->IsValid()) {
-					planWidth = std::max(planWidth, view.Target->Width);
-					planHeight = std::max(planHeight, view.Target->Height);
-				}
-			}
-			planWidth = std::max(planWidth, 1u);
-			planHeight = std::max(planHeight, 1u);
-
-			graph::FrameExecutionPlan plan;
-			core::Name offender;
-			if (graph::PlanFrame(
-					named->Graph, named->Schedule, worlds, planWidth, planHeight, plan, offender
-				) == graph::ExecutionPlanStatus::Ok) {
-				frame.ScheduledReadBytes += plan.ReadBytes;
-				frame.ScheduledWriteBytes += plan.WriteBytes;
-				frame.QueueTransferBytes += plan.QueueTransferBytes;
-				frame.ConcurrentWaves += static_cast<uint32_t>(
-					std::count_if(plan.Waves.begin(), plan.Waves.end(), [](const graph::PlannedWave &wave) {
-						return wave.ConcurrentQueues;
-					})
-				);
-				frame.TrafficCommandBuffers += static_cast<uint32_t>(named->Buffers.size());
-			}
-		}
-
-		if (Render.State->BatchSubmit.OwnsCommand()) {
-			// The partial command still submits to release its device ownership.
-			// Its images retain their fences but cannot certify a completed graph.
-			if (!graphCompleted) {
-				for (Renderer::Impl::ResourceImageSlot &image : Render.State->GraphResources.Images) {
-					if (image.Phase == Renderer::Impl::ResourceImagePhase::Recorded) {
-						image.Image.Status = ResourceImageStatus::Failed;
-					} else if (image.Phase == Renderer::Impl::ResourceImagePhase::Queued &&
-							   std::any_of(views.begin(), views.end(), [&](const View &view) {
-								   const auto *pipeline = Render.State->PipelineFor(view.Pipeline);
-								   return pipeline && pipeline->Name == image.Image.Request.Pipeline &&
-										  view.Slot == image.Image.Request.ViewSlot;
-							   })) {
-						// A failed earlier node may prevent capture from recording at all.
-						// No device work owns this slot, so its failure is ready immediately.
-						image.Image.Status = ResourceImageStatus::Failed;
-						image.Phase = Renderer::Impl::ResourceImagePhase::Ready;
+				plannedPipelines.push_back(named);
+				uint32_t planWidth = width;
+				uint32_t planHeight = height;
+				std::vector<uint64_t> worlds;
+				worlds.reserve(views.size());
+				for (const View &view : views) {
+					if (Render.State->PipelineFor(view.Pipeline) != named) {
+						continue;
+					}
+					worlds.push_back(view.World);
+					if (view.Target != nullptr && view.Target->IsValid()) {
+						planWidth = std::max(planWidth, view.Target->Width);
+						planHeight = std::max(planHeight, view.Target->Height);
 					}
 				}
+				planWidth = std::max(planWidth, 1u);
+				planHeight = std::max(planHeight, 1u);
+
+				core::Name offender;
+				const FramePlanDiagnosticResult diagnostics = ResolveFramePlanDiagnostics(
+					named->Graph,
+					named->Schedule,
+					named->Revision,
+					worlds,
+					planWidth,
+					planHeight,
+					static_cast<uint32_t>(named->Buffers.size()),
+					named->PlanDiagnostics,
+					offender
+				);
+				if (diagnostics.Status == graph::ExecutionPlanStatus::Ok) {
+					frame.ScheduledReadBytes += diagnostics.Totals.ReadBytes;
+					frame.ScheduledWriteBytes += diagnostics.Totals.WriteBytes;
+					frame.QueueTransferBytes += diagnostics.Totals.QueueTransferBytes;
+					frame.ConcurrentWaves += diagnostics.Totals.ConcurrentWaves;
+					frame.TrafficCommandBuffers += diagnostics.Totals.CommandBuffers;
+				}
 			}
-			const bool submitted = Render.State->SubmitFrameBatchCommand(Render.State->BatchSubmit.Command);
-			Render.State->BatchSubmit.Status = submitted ? Renderer::Impl::BatchSubmitStatus::Submitted
-														 : Renderer::Impl::BatchSubmitStatus::Failed;
-			frame.Submitted = submitted;
 		}
 
-		const bool submitted =
-			Render.State->BatchSubmit.Status == Renderer::Impl::BatchSubmitStatus::Submitted;
-		const bool completed = graphCompleted && submitted;
-		SDL_GPUCommandBuffer *const terminalCommand = Render.State->BatchSubmit.Command;
-		if (completed) {
-			Render.State->VisibilityCompleted = Render.State->VisibilityWorking.Snapshot();
-			Render.State->CommitPendingGraphHistoryWrites(terminalCommand);
-			for (const ViewMutationIdentity &identity : restorations)
-				Render.HookBind->CompleteViewMutationRestore(identity);
-		} else {
-			Render.State->VisibilityWorking.Invalidate();
-			Render.State->VisibilityCompleted = {};
-			Render.State->DiscardPendingGraphHistoryWrites(terminalCommand);
-			Render.State->Timestamps.Abandon(Render.State->BatchTimingSlot);
-			if (Render.State->BatchTimingSlot < VulkanTimestamps::SLOTS) {
-				Render.State->PendingMarks[Render.State->BatchTimingSlot].clear();
-				Render.State->AbandonCaptureTimings(Render.State->BatchTimingSlot);
+		{
+			ENGINE_PROFILE_CAT("FrameBatch::submit command", core::ProfileCategory::Render);
+			if (Render.State->BatchSubmit.OwnsCommand()) {
+				// The partial command still submits to release its device ownership.
+				// Its images retain their fences but cannot certify a completed graph.
+				if (!graphCompleted) {
+					for (Renderer::Impl::ResourceImageSlot &image : Render.State->GraphResources.Images) {
+						if (image.Phase == Renderer::Impl::ResourceImagePhase::Recorded) {
+							image.Image.Status = ResourceImageStatus::Failed;
+						} else if (image.Phase == Renderer::Impl::ResourceImagePhase::Queued &&
+								   std::any_of(views.begin(), views.end(), [&](const View &view) {
+									   const auto *pipeline = Render.State->PipelineFor(view.Pipeline);
+									   return pipeline && pipeline->Name == image.Image.Request.Pipeline &&
+											  view.Slot == image.Image.Request.ViewSlot;
+								   })) {
+							// A failed earlier node may prevent capture from recording at all.
+							// No device work owns this slot, so its failure is ready immediately.
+							image.Image.Status = ResourceImageStatus::Failed;
+							image.Phase = Renderer::Impl::ResourceImagePhase::Ready;
+						}
+					}
+				}
+				const bool submitted =
+					Render.State->SubmitFrameBatchCommand(Render.State->BatchSubmit.Command);
+				Render.State->BatchSubmit.Status = submitted ? Renderer::Impl::BatchSubmitStatus::Submitted
+															 : Renderer::Impl::BatchSubmitStatus::Failed;
+				frame.Submitted = submitted;
 			}
-			Render.State->DropDownloads();
 		}
-		if (Render.State->BatchSubmit.Status == Renderer::Impl::BatchSubmitStatus::Failed) {
-			Render.State->StageProbe.Clear(Render.State->Device);
-			ENGINE_ERROR("SDL_SubmitGPUCommandBuffer (view batch): {}", SDL_GetError());
-		}
-		Render.State->ClearSubmittedGraphHistoryWrites();
-		Render.State->CompleteResidentUploads(submitted);
 
-		const FrameBatchOutcome outcome = completed	  ? FrameBatchOutcome::Submitted
-										  : submitted ? FrameBatchOutcome::SubmittedAfterViewFailure
-													  : FrameBatchOutcome::Aborted;
-		Render.State->StageProbe.Flush(Render.State->Device);
-		Render.State->BatchActive = false;
-		Render.State->BatchFirst = false;
-		Render.State->BatchFinal = false;
-		Render.State->BatchShared = false;
-		Render.State->PreparedScopes.Clear();
-		Render.State->BatchFailed = false;
-		Render.State->BatchSwapchain = nullptr;
-		Render.State->BatchWidth = 0;
-		Render.State->BatchHeight = 0;
-		Render.State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
-		Render.State->BatchCaptureTimingRequested = false;
-		Render.State->BatchSubmit = {};
-		if (gameInterfaceHook != nullptr) {
-			gameInterfaceHook->CompleteFrame(frame.Submitted);
+		bool submitted = false;
+		FrameBatchOutcome outcome = FrameBatchOutcome::Aborted;
+		{
+			ENGINE_PROFILE_CAT("FrameBatch::settle", core::ProfileCategory::Render);
+			submitted = Render.State->BatchSubmit.Status == Renderer::Impl::BatchSubmitStatus::Submitted;
+			const bool completed = graphCompleted && submitted;
+			SDL_GPUCommandBuffer *const terminalCommand = Render.State->BatchSubmit.Command;
+			if (completed) {
+				Render.State->VisibilityCompleted = Render.State->VisibilityWorking.Snapshot();
+				Render.State->CommitPendingGraphHistoryWrites(terminalCommand);
+				for (const ViewMutationIdentity &identity : restorations)
+					Render.HookBind->CompleteViewMutationRestore(identity);
+			} else {
+				Render.State->VisibilityWorking.Invalidate();
+				Render.State->VisibilityCompleted = {};
+				Render.State->DiscardPendingGraphHistoryWrites(terminalCommand);
+				Render.State->Timestamps.Abandon(Render.State->BatchTimingSlot);
+				if (Render.State->BatchTimingSlot < VulkanTimestamps::SLOTS) {
+					Render.State->PendingMarks[Render.State->BatchTimingSlot].clear();
+					Render.State->AbandonCaptureTimings(Render.State->BatchTimingSlot);
+				}
+				Render.State->DropDownloads();
+			}
+			if (Render.State->BatchSubmit.Status == Renderer::Impl::BatchSubmitStatus::Failed) {
+				Render.State->StageProbe.Clear(Render.State->Device);
+				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer (view batch): {}", SDL_GetError());
+			}
+			Render.State->ClearSubmittedGraphHistoryWrites();
+			Render.State->CompleteResidentUploads(submitted);
+
+			outcome = completed	  ? FrameBatchOutcome::Submitted
+					  : submitted ? FrameBatchOutcome::SubmittedAfterViewFailure
+								  : FrameBatchOutcome::Aborted;
+			Render.State->StageProbe.Flush(Render.State->Device);
+			Render.State->BatchActive = false;
+			Render.State->BatchFirst = false;
+			Render.State->BatchFinal = false;
+			Render.State->BatchShared = false;
+			Render.State->PreparedScopes.Clear();
+			Render.State->BatchFailed = false;
+			Render.State->BatchSwapchain = nullptr;
+			Render.State->BatchWidth = 0;
+			Render.State->BatchHeight = 0;
+			Render.State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
+			Render.State->BatchCaptureTimingRequested = false;
+			Render.State->BatchSubmit = {};
 		}
-		if (hostOverlayHook != nullptr && hostOverlayHook != gameInterfaceHook) {
-			hostOverlayHook->CompleteFrame(frame.Submitted);
+		{
+			ENGINE_PROFILE_CAT("FrameBatch::complete hooks", core::ProfileCategory::Render);
+			if (gameInterfaceHook != nullptr) {
+				gameInterfaceHook->CompleteFrame(frame.Submitted);
+			}
+			if (hostOverlayHook != nullptr && hostOverlayHook != gameInterfaceHook) {
+				hostOverlayHook->CompleteFrame(frame.Submitted);
+			}
 		}
 		return {.Frame = frame, .Outcome = outcome};
 	}

@@ -562,6 +562,8 @@ namespace engine::render {
 		std::vector<graph::NodeId> entityNodes = EntityNodesOf(pipeline, compiled);
 		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
+		detail::EnabledNodeIndex nodeLookup;
+		nodeLookup.Rebuild(pipeline);
 		result.Package = InstalledPipeline{
 			.Name = name,
 			.Graph = pipeline,
@@ -572,6 +574,8 @@ namespace engine::render {
 			.Schedule = std::move(schedule),
 			.Aliases = std::move(aliases),
 			.Buffers = std::move(buffers),
+			.NodeLookup = std::move(nodeLookup),
+			.PlanDiagnostics = {},
 		};
 		return result;
 	}

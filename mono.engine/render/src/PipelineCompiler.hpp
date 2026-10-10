@@ -2,6 +2,9 @@
 
 // The immutable pipeline package and diagnostics produced at admission.
 
+#include "FramePlanDiagnostics.hpp"
+#include "PipelineNodeLookup.hpp"
+
 #include <engine/core/Name.hpp>
 #include <engine/graph/ExecutionPlan.hpp>
 #include <engine/graph/PipelineProfile.hpp>
@@ -43,6 +46,8 @@ namespace engine::render {
 		// SDL currently submits these buffers in order on one unified queue.
 		std::vector<graph::PlannedCommandBuffer> Buffers;
 		uint64_t Revision = 0;
+		detail::EnabledNodeIndex NodeLookup;
+		mutable FramePlanDiagnosticCache PlanDiagnostics;
 	};
 
 	struct PipelineCompilation {

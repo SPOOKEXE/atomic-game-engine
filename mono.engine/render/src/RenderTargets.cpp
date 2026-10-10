@@ -263,31 +263,49 @@ namespace engine::render {
 
 	bool Renderer::Impl::SubmitSceneCommand(SDL_GPUCommandBuffer *command) {
 		PendingSceneSubmission submission;
-		for (uint32_t index = 0; index < GraphResources.Images.size(); index++) {
-			if (GraphResources.Images[index].Phase == ResourceImagePhase::Recorded) {
-				submission.Images[submission.ImageCount++] = index;
+		{
+			ENGINE_PROFILE_CAT("submit.scene gather staged images", core::ProfileCategory::Render);
+			for (uint32_t index = 0; index < GraphResources.Images.size(); index++) {
+				if (GraphResources.Images[index].Phase == ResourceImagePhase::Recorded) {
+					submission.Images[submission.ImageCount++] = index;
+				}
 			}
 		}
 		if (GraphResources.StagedSceneFrames.empty() && submission.ImageCount == 0) {
-			const bool submitted = SDL_SubmitGPUCommandBuffer(command);
-			FinishPortalImports(command, submitted);
+			bool submitted = false;
+			{
+				ENGINE_PROFILE_CAT("submit.scene SDL handoff", core::ProfileCategory::Render);
+				submitted = SDL_SubmitGPUCommandBuffer(command);
+			}
+			{
+				ENGINE_PROFILE_CAT("submit.scene publish state", core::ProfileCategory::Render);
+				FinishPortalImports(command, submitted);
+			}
 			return submitted;
 		}
 
-		SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+		SDL_GPUFence *fence = nullptr;
+		{
+			ENGINE_PROFILE_CAT("submit.scene SDL handoff", core::ProfileCategory::Render);
+			fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+		}
 		if (fence == nullptr) {
+			ENGINE_PROFILE_CAT("submit.scene publish state", core::ProfileCategory::Render);
 			DropStagedSceneFrames();
 			return false;
 		}
 
-		FinishPortalImports(command, true);
-		submission.Fence = fence;
-		submission.Frames = std::move(GraphResources.StagedSceneFrames);
-		for (uint32_t index = 0; index < submission.ImageCount; index++) {
-			GraphResources.Images[submission.Images[index]].Phase = ResourceImagePhase::Submitted;
+		{
+			ENGINE_PROFILE_CAT("submit.scene publish state", core::ProfileCategory::Render);
+			FinishPortalImports(command, true);
+			submission.Fence = fence;
+			submission.Frames = std::move(GraphResources.StagedSceneFrames);
+			for (uint32_t index = 0; index < submission.ImageCount; index++) {
+				GraphResources.Images[submission.Images[index]].Phase = ResourceImagePhase::Submitted;
+			}
+			GraphResources.PendingSceneSubmissions.push_back(std::move(submission));
+			GraphResources.StagedSceneFrames.clear();
 		}
-		GraphResources.PendingSceneSubmissions.push_back(std::move(submission));
-		GraphResources.StagedSceneFrames.clear();
 		return true;
 	}
 
