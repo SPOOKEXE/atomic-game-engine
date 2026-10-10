@@ -124,6 +124,53 @@ TEST_CASE("mirror capture preserves declared HDR radiance", "[render][gpu][mirro
 	view.Lighting.Direct = {};
 	view.Lighting.RenderFeatures.Disable |= scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
 
+	SECTION("wide mirror slots preserve the reflected screen image") {
+		renderer.SetSurfaceLimit(scene::MAX_SURFACES);
+		renderer.SetSurfaceBounces(1);
+		render::test::CapturedImage expected;
+		for (const int16_t slot :
+			 {int16_t{0},
+			  int16_t{127},
+			  int16_t{128},
+			  int16_t{255},
+			  int16_t{256},
+			  int16_t{319},
+			  int16_t{511}}) {
+			INFO("surface " << slot);
+			REQUIRE(static_cast<size_t>(slot) < scene::MAX_SURFACES);
+			instances[0].Surface = slot;
+			surface.Index = slot;
+			render::OverlayImage overlay;
+			const auto frame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+			REQUIRE(frame.SurfacePasses > 0);
+			const auto image = render::test::CaptureResource(
+				renderer,
+				core::Name("scene-image"),
+				view.Slot,
+				target.Width,
+				target.Height,
+				render::test::ImageFormat::Bgra8Unorm
+			);
+			if (slot == 0) {
+				expected = image;
+				const auto centre = expected.Bytes.data() + (target.Height / 2) * expected.RowStrideBytes +
+									(target.Width / 2) * 4;
+				CHECK(std::to_integer<uint8_t>(centre[2]) > 128);
+				CHECK(std::to_integer<uint8_t>(centre[0]) < 32);
+				CHECK(std::to_integer<uint8_t>(centre[1]) < 32);
+			} else {
+				render::test::CheckImage(
+					renderer,
+					"wide-mirror-slots",
+					"scene-image",
+					"only the surface slot changes",
+					expected.View(),
+					image.View()
+				);
+			}
+		}
+	}
+
 	SECTION("primary body selection preserves reflected pixels and cache hits") {
 		const bool imported = GENERATE(false, true);
 		const std::array<uint32_t, 1> hiddenRows{1};

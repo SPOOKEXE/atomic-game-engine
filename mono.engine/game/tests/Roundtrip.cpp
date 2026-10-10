@@ -6,7 +6,9 @@
 // a second one, and asks whether something specific survived: the tree, the
 // values, the references, the script text, the world settings.
 
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/scene/Characters.hpp>
@@ -17,6 +19,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Terrain.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/Instances.hpp>
@@ -188,6 +191,73 @@ TEST_CASE("a universe of worlds survives a save and a load", "[game][roundtrip]"
 	CHECK(found);
 
 	std::filesystem::remove(path);
+}
+
+TEST_CASE("workspace surface budgets survive a game save and load", "[game][roundtrip][surfacebudget]") {
+	RegisterEverything();
+
+	Universe source;
+	const WorldId world = AddWorld(source, "SurfaceBudget");
+	source.Enter(world, [](Store &store) {
+		engine::scene::InstallServices(store);
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		int32_t panes = 320;
+		int32_t bounces = 1;
+		REQUIRE(store.SetProperty(workspace, Name("MaxSurfaces"), &panes, sizeof(panes)));
+		REQUIRE(store.SetProperty(workspace, Name("SurfaceBounces"), &bounces, sizeof(bounces)));
+	});
+
+	const auto path = ScratchFile("engine-game-surface-budget.agame");
+	std::string error;
+	REQUIRE(SaveGame(source, Name("SurfaceBudget"), path, error));
+
+	Universe loaded;
+	GameInfo info;
+	REQUIRE(LoadGame(loaded, path, info, error));
+	const WorldId restored = loaded.Find(Name("SurfaceBudget"));
+	REQUIRE(restored.IsValid());
+	loaded.Enter(restored, [](Store &store) {
+		engine::scene::InstallServices(store);
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		CHECK(PropertyOf<int32_t>(store, workspace, "MaxSurfaces") == 320);
+		CHECK(PropertyOf<int32_t>(store, workspace, "SurfaceBounces") == 1);
+	});
+	std::filesystem::remove(path);
+}
+
+TEST_CASE(
+	"workspace surface resources survive an ECS snapshot", "[game][roundtrip][surfacebudget][snapshot]"
+) {
+	RegisterEverything();
+	Store source("game.surfacebudget.snapshot.source");
+	source.SetResource(engine::scene::SurfaceLimit{320});
+	source.SetResource(engine::scene::SurfaceBounces{1});
+	engine::core::ByteWriter writer;
+	REQUIRE(source.Save(writer));
+
+	Store restored("game.surfacebudget.snapshot.restored");
+	engine::core::ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	REQUIRE(restored.Resource<engine::scene::SurfaceLimit>() != nullptr);
+	REQUIRE(restored.Resource<engine::scene::SurfaceBounces>() != nullptr);
+	CHECK(restored.Resource<engine::scene::SurfaceLimit>()->Panes == 320);
+	CHECK(restored.Resource<engine::scene::SurfaceBounces>()->Levels == 1);
+}
+
+TEST_CASE("workspace surface resource readers reject negative values", "[game][roundtrip][surfacebudget]") {
+	RegisterEverything();
+	const auto checkRejected = [](engine::ecs::ComponentId component, void *value) {
+		engine::core::ByteWriter writer;
+		writer.WriteInt32(-1);
+		engine::core::ByteReader reader(writer.Bytes());
+		engine::ecs::Components::Describe(component).Read(reader, value, 1);
+		CHECK(reader.Failed());
+	};
+
+	engine::scene::SurfaceLimit limit;
+	engine::scene::SurfaceBounces bounces;
+	checkRejected(engine::ecs::Components::Of<engine::scene::SurfaceLimit>(), &limit);
+	checkRejected(engine::ecs::Components::Of<engine::scene::SurfaceBounces>(), &bounces);
 }
 
 TEST_CASE("a multi-file universe restores authored settings and shader scripts", "[game][roundtrip]") {

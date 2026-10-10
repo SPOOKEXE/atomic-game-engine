@@ -476,9 +476,10 @@ namespace engine::replication {
 					ecs::Components::Describe(ecs::ComponentId{static_cast<uint32_t>(index)});
 
 				const std::string_view name = type.Name.Text();
-				// Attributes have a bounded owning codec and are selected by visible
-				// owner before either snapshots or resource updates cross.
-				const bool resource = name == "ecs.AttributeTable";
+				// Attributes are selected by visible owner. Workspace surface budgets
+				// have no owning entity, so their two values cross as world resources.
+				const bool resource = name == "ecs.AttributeTable" || name == "scene.SurfaceBounces" ||
+									  name == "scene.SurfaceLimit";
 				const bool shared =
 					resource || UnderASharedPrefix(name) || PartOfAnInstance(name) || PartOfAScript(name);
 				if (!shared || LocalToTheClient(name)) {

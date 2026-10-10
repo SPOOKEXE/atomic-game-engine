@@ -160,11 +160,11 @@ namespace engine::render {
 			// ask again: the depth would sit oscillating between two values for as
 			// long as the viewer stood still.
 			//
-			// Up to sixteen frustum tests and a reflection, once per pane at the
-			// bottom level only, beside a scene render each.
-			const auto wouldDescend = [&](const glm::mat4 &from, const core::CFrame &frame, int8_t skip) {
+			// Frustum tests and a reflection for each occupied slot at the bottom
+			// level only, beside a scene render each.
+			const auto wouldDescend = [&](const glm::mat4 &from, const core::CFrame &frame, int16_t skip) {
 				for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
-					if (!havePanes[slot] || static_cast<int8_t>(slot) == skip) {
+					if (!havePanes[slot] || static_cast<int16_t>(slot) == skip) {
 						continue;
 					}
 
@@ -194,11 +194,11 @@ namespace engine::render {
 			// @param skip    The pane this camera is *on*. Nothing sees itself in its
 			//                own reflection, and descending into it would put the pane
 			//                in front of its own camera.
-			std::function<void(const glm::mat4 &, const core::CFrame &, uint32_t, int8_t)> fillMirror;
+			std::function<void(const glm::mat4 &, const core::CFrame &, uint32_t, int16_t)> fillMirror;
 
-			fillMirror = [&](const glm::mat4 &from, const core::CFrame &frame, uint32_t level, int8_t skip) {
+			fillMirror = [&](const glm::mat4 &from, const core::CFrame &frame, uint32_t level, int16_t skip) {
 				for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
-					if (!havePanes[slot] || static_cast<int8_t>(slot) == skip) {
+					if (!havePanes[slot] || static_cast<int16_t>(slot) == skip) {
 						continue;
 					}
 
@@ -248,11 +248,11 @@ namespace engine::render {
 					// inside its own picture; whether that is the end of the chain or
 					// the end of the allowance is exactly `wouldDescend`.
 					if (level > 0) {
-						fillMirror(matrices.ViewProjection, eye.Frame, level - 1, static_cast<int8_t>(slot));
+						fillMirror(matrices.ViewProjection, eye.Frame, level - 1, static_cast<int16_t>(slot));
 					} else {
 						surfaceDepth.Deeper =
 							surfaceDepth.Deeper ||
-							wouldDescend(matrices.ViewProjection, eye.Frame, static_cast<int8_t>(slot));
+							wouldDescend(matrices.ViewProjection, eye.Frame, static_cast<int16_t>(slot));
 					}
 
 					// **The authored size, with no screen-coverage scaling.** A pane's
@@ -527,13 +527,13 @@ namespace engine::render {
 								accepted[index].ViewProjection,
 								accepted[index].View->Frame,
 								mirrorLevels - 1,
-								static_cast<int8_t>(self)
+								static_cast<int16_t>(self)
 							);
 						} else if (havePanes[self]) {
 							surfaceDepth.Deeper = surfaceDepth.Deeper || wouldDescend(
 																			 accepted[index].ViewProjection,
 																			 accepted[index].View->Frame,
-																			 static_cast<int8_t>(self)
+																			 static_cast<int16_t>(self)
 																		 );
 						}
 

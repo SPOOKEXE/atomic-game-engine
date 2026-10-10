@@ -3125,19 +3125,11 @@ TEST_CASE("the recursive mirror demo moves through a bounded history corridor", 
 // where the passes go as `panes x (panes - 1) ^ (levels - 1)` - 3,600 of them at
 // sixteen panes. A change that dropped the `workspace.SurfaceBounces = 1` line
 // would turn this scene from slow into a hang.
-TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes", "[examples][scene]") {
-	// **Two of these claims were false and both read as the mirrors being
-	// broken.** The scene authored sixteen cameras over eighty facets because
-	// sixteen is what `scene::MAX_SURFACES` used to compile in - so five sixths
-	// of a *mirror ball* were not mirrors - and it cut each facet as a square
-	// 0.62 of an edge across, which is smaller than the triangle it sits on. A
-	// square cannot fill a triangle, so the tiles never met and the ball was a
-	// shell of loose plates with the dark core showing at every seam.
-	//
-	// The budget is the world's since v0.17 and the scene states it. Asking is
-	// still the scene's, and every facet asks: what the panes over budget cost
-	// is the whole point of a stress scene, so a change that quietly caps the
-	// asking again is a regression rather than a saving.
+TEST_CASE(
+	"the mirror ball mirrors every facet, faces them out and has no holes", "[examples][scene][mirrors]"
+) {
+	// Every facet is eligible to resolve. The surrounding room must remain
+	// reflected when rotation reveals panes that began behind the ball.
 	const StagedAssets assets;
 
 	Store store("mirrorball");
@@ -3169,14 +3161,14 @@ TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes"
 	);
 	CHECK(facets == 320);
 
-	// **A camera on every one of them, which is what makes it a mirror ball.**
-	// The world draws `workspace.MaxSurfaces` of them - the ones covering the
-	// most screen - and the rest reach no screen at all; that cost is the finding
-	// this scene exists to produce, and capping the asking to hide it would be
-	// hiding the finding.
+	// The authored budget and renderer slots both cover all facets.
 	static thread_local std::vector<engine::scene::SurfacePane> panes;
 	REQUIRE(engine::scene::GatherSurfacePanes(store, panes) == facets);
-	CHECK(engine::scene::SurfaceLimitOf(store) == 32);
+	CHECK(engine::scene::SurfaceLimitOf(store) == static_cast<int32_t>(facets));
+	std::vector<engine::scene::SurfaceSlot> slots;
+	REQUIRE(engine::scene::GatherSurfaceSlots(store, slots) == facets);
+	for (const auto &slot : slots)
+		CHECK(slot.Index >= 0);
 	for (const engine::scene::SurfacePane &pane : panes) {
 		REQUIRE(store.Get<engine::scene::SurfaceCamera>(pane.Camera) != nullptr);
 		CHECK(store.Get<engine::scene::SurfaceCamera>(pane.Camera)->FPS == Approx(60.0f));
@@ -3193,7 +3185,12 @@ TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes"
 	// few per cent to sit under the plates.
 	float cored = 0.0f;
 	size_t meshes = 0;
-	store.Each<const engine::scene::EditableMesh>([&](Entity, const engine::scene::EditableMesh &mesh) {
+	const Entity sharedAssets =
+		engine::scene::ServiceOf(store, engine::ecs::Classes::Find(Name("ReplicatedStorage")));
+	REQUIRE(sharedAssets != engine::ecs::NULL_ENTITY);
+	store.Each<const engine::scene::EditableMesh>([&](Entity entity,
+													  const engine::scene::EditableMesh &mesh) {
+		CHECK(store.ParentOf(entity) == sharedAssets);
 		meshes++;
 		for (size_t at = 0; at + 2 < mesh.Indices.size(); at += 3) {
 			const engine::core::Vector3 &a = mesh.Positions[mesh.Indices[at]];
@@ -3224,6 +3221,10 @@ TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes"
 		const engine::core::Vector3 outward = pane.Centre - hub->Frame.Position;
 		CHECK(outward.Magnitude() > 0.0f);
 		CHECK(outward.Dot(pane.Normal) > 0.0f);
+		const auto eye = pane.Centre + pane.Normal * 8.0f;
+		const auto reflection = engine::scene::ReflectCamera(pane, engine::core::CFrame{eye}, {});
+		CHECK(reflection.Renders);
+		CHECK((reflection.Frame.Position - (pane.Centre - pane.Normal * 8.0f)).Magnitude() < 0.0001f);
 	}
 
 	CHECK(engine::scene::SurfaceBouncesOf(store) == 1);

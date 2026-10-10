@@ -53,6 +53,40 @@
 namespace engine::scene {
 
 	namespace {
+		void WriteSurfaceBounces(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *values = static_cast<const SurfaceBounces *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				writer.WriteInt32(values[index].Levels);
+			}
+		}
+
+		void ReadSurfaceBounces(core::ByteReader &reader, void *destination, size_t count) {
+			auto *values = static_cast<SurfaceBounces *>(destination);
+			for (size_t index = 0; index < count; ++index) {
+				values[index].Levels = reader.ReadInt32();
+				if (values[index].Levels < 0) {
+					reader.Fail();
+				}
+			}
+		}
+
+		void WriteSurfaceLimits(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *values = static_cast<const SurfaceLimit *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				writer.WriteInt32(values[index].Panes);
+			}
+		}
+
+		void ReadSurfaceLimits(core::ByteReader &reader, void *destination, size_t count) {
+			auto *values = static_cast<SurfaceLimit *>(destination);
+			for (size_t index = 0; index < count; ++index) {
+				values[index].Panes = reader.ReadInt32();
+				if (values[index].Panes < 0) {
+					reader.Fail();
+				}
+			}
+		}
+
 		void WriteGpuParticleFields(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *fields = static_cast<const GpuParticleField *>(source);
 			for (size_t index = 0; index < count; ++index) {
@@ -1729,12 +1763,14 @@ namespace engine::scene {
 		// is being registered - and a type that reaches `Components::Of` before
 		// an explicit name arrives keeps the compiler's spelling and aborts when
 		// the real one turns up. Appended, for this list's standing reason.
-		ecs::Components::Register<SurfaceBounces>("scene.SurfaceBounces");
+		ecs::Components::Register<SurfaceBounces>(
+			"scene.SurfaceBounces", WriteSurfaceBounces, ReadSurfaceBounces
+		);
 
 		// `workspace.MaxSurfaces`, beside the depth and for the same reason: a
 		// declared property has to resolve a component id, and a resource is
 		// keyed by one like anything else.
-		ecs::Components::Register<SurfaceLimit>("scene.SurfaceLimit");
+		ecs::Components::Register<SurfaceLimit>("scene.SurfaceLimit", WriteSurfaceLimits, ReadSurfaceLimits);
 
 		// **The three the team pipeline added, appended for this list's
 		// standing reason**: a component id is registration order, an archetype

@@ -79,7 +79,7 @@ namespace engine::render {
 		for (const PortalView &portal : request.Portals) {
 			signature = scene::MixSignature(signature, static_cast<uint16_t>(portal.Index));
 			signature = scene::MixSignature(signature, portal.ExternalImage);
-			signature = scene::MixSignature(signature, static_cast<uint8_t>(portal.Partner));
+			signature = scene::MixSignature(signature, static_cast<uint16_t>(portal.Partner));
 			signature = MixCaptureVector(signature, portal.Centre);
 			signature = MixCaptureVector(signature, portal.Normal);
 			signature = MixCaptureVector(signature, portal.First);
@@ -168,6 +168,11 @@ namespace engine::render {
 							   uint32_t depth,
 							   int16_t arrival,
 							   uint16_t parent) -> void {
+			// A terminal capture has no children. Keep scanning only for a root
+			// request with zero depth, which must still refuse visible captures.
+			if (depth == 0 && parent != NO_SURFACE_CAPTURE) {
+				return;
+			}
 			const glm::mat4 viewProjection = projection * glm::inverse(frame.ToMatrix());
 			for (size_t slot = 0; slot < sources.size() && status == SurfaceCaptureStatus::Ok; ++slot) {
 				const Source source = sources[slot];

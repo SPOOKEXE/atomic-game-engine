@@ -423,13 +423,13 @@ namespace engine::render {
 				// The depth is bounded by `MAX_PORTAL_DEPTH`, so the recursion is four
 				// deep at worst and the indirection is paid once per hole per level
 				// beside a whole scene render.
-				std::function<void(const scene::CameraMatrices &, const core::CFrame &, uint32_t, int8_t)>
+				std::function<void(const scene::CameraMatrices &, const core::CFrame &, uint32_t, int16_t)>
 					fillLevel;
 
 				fillLevel = [&](const scene::CameraMatrices &from,
 								const core::CFrame &fromFrame,
 								uint32_t level,
-								int8_t skip) {
+								int16_t skip) {
 					for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
 						if (portalOf[slot] == nullptr) {
 							continue;

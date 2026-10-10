@@ -1,124 +1,18 @@
 --!strict
--- A mirror ball: an ico-sphere whose every facet is a flat mirror.
+-- A rotating mirror ball with one outward reflecting pane on every ico-sphere facet.
+-- Coloured pillars and the floor give every facet surrounding geometry to reflect.
+-- The world's surface budget covers every facet, including those revealed as the ball turns.
+-- One bounce reflects the room without multiplying the work into mirror-in-mirror views.
 --
--- **`ROADMAP.md` v0.17 asks for an ico-sphere mirror ball with subdivisions and
--- a radius, to stress the mirror path.** `MirrorCorridor.luau` and
--- `MirrorDepth.luau` are the two correctness scenes - one asks how deep the
--- chain resolves, the other asks whether visibility follows it - and both are
--- built out of two or three panes because that is what those questions need.
--- This asks the third question, which is what happens when a scene wants far
--- more mirrors than the engine has.
---
--- ## The answer, up front, because it is the finding rather than a caveat
---
--- **The number of mirrors is the world's, and it is `workspace.MaxSurfaces`.**
--- A surface slot owns a ping-ponged texture pair and a whole render of the world
--- into it, so the count is a budget rather than a free parameter - and until
--- v0.17 it was not a parameter at all: `scene::MAX_SURFACES` was compiled in at
--- sixteen and a scene with seventeen mirrors quietly lost one. The budget
--- defaults to thirty-two now, this scene states its own below, and
--- `scene::MAX_SURFACES` is a bound on an allocation rather than a design cap.
---
--- **Every facet asks anyway, and that is the stress.** A mirror ball is a ball
--- whose surface is mirror, not a ball with thirty-two mirrors on it, so this scene
--- puts a `SurfaceCamera` on all three hundred and twenty and lets the budget do
--- the refusing. The rest are gathered, placed and reflected every frame and
--- reach no screen: that is the cost of asking for more panes than are drawn, and
--- it is the reading this scene exists to produce. `MIRROR_LIMIT` caps the asking
--- for the cheap version.
---
--- **What that looks like changed at v0.17, and the change is the feature.**
--- Slots used to be spent in walk order, so the sixteen that resolved were
--- sixteen *adjacent* facets - the ball read as a mirror ball with one bright
--- patch on it, wherever the walk happened to start, and turning the ball did not
--- move the patch. The budget is spent on the panes covering the most screen now,
--- so the facets that reflect are the ones pointing at the viewer and the patch
--- follows the camera. That is the whole argument for ranking by coverage rather
--- than by list order: a scene author cannot see walk order and can see where
--- they are standing.
---
--- Set `MIRROR_LIMIT = 1` to see the ball underneath with nothing reflecting at
--- all, or raise `workspace.MaxSurfaces` to watch the frame time climb - a pane
--- is a whole scene render, so the curve is linear in the budget and this is the
--- scene to read it off.
---
--- ## The ball is filled, not tiled
---
--- The facets used to be squares 0.62 of an edge across, dropped at each
--- triangle's middle. A square cannot fill a triangle, so they never met: the
--- ball came out as loose plates over a dark core with a hole at every seam. A
--- reflection has to be read *across* a surface, and half of that surface being
--- core is half the mirrors missing.
---
--- Each tile is now the triangle's own bounding box in the triangle's own plane,
--- turned to the triangle's own axes. A `Part` is a box and cannot be a
--- triangle, so neighbours overlap across the edge they share rather than
--- leaving it open - two plates crossing at the dihedral angle, which is what a
--- real ball of glued mirror tiles looks like at the seams anyway.
---
--- ## Why the depth is stated
---
--- `workspace.SurfaceBounces = 1
-
--- `workspace.SurfaceBounces = 1`, and without it this scene is a hang rather
--- than a slow frame. Left alone the renderer measures the depth it reached and
--- goes one level deeper next frame while any pane at the bottom still had
--- somewhere to descend into - and on a ball *every* pane can see most of the
--- others, so it says yes at every level and climbs to `MAX_SURFACE_DEPTH`. The
--- cost of a level multiplies rather than adds: `Renderer.cpp` states it as
--- `panes x (panes - 1) ^ (levels - 1)`, which at the thirty-two panes this scene
--- budgets for is 32 passes at one level, 992 at two and **30,752** at three.
---
--- One level is a mirror ball that reflects the room. Two is a mirror ball that
--- reflects the room and the other facets, at thirty-one times the cost. Both are
--- worth looking at and only one of them is a default.
---
--- **`MaxSurfaces` and `SurfaceBounces` multiply**, which is why both are stated
--- here and why raising one means re-reading the other.
---
--- ## Run it
---
---     client --script StressMirrors.luau
---     client --script StressMirrors.luau --frames 120 --capture out.bmp
---     client --script StressMirrors.luau --surface-bounces 2
---
--- In the studio it is `World -> New Scene from Example...`. The ball turns, so
--- two captures of one build are not identical - `--frames N` fixes the frame and
--- makes them so.
---
--- ## The two knobs the roadmap names
---
--- `SUBDIVISIONS` and `RADIUS`.
---
--- Subdivisions are what an ico-sphere is parameterised by: 0 is the bare
--- icosahedron at 20 facets, 1 is 80, 2 is 320, 3 is 1,280. Every level
--- quadruples the facet count *and* the core mesh's triangles, so it is the knob
--- that stresses the `EditableMesh` upload as well as the mirrors.
---
--- **Two is the default, and the reason is the tiles rather than the mesh.** A
--- facet's mirror is a box circumscribing a triangle, so it is about twice the
--- triangle's area whatever the level - and at level 0 that is a plate twelve
--- studs across on a ball twelve studs in radius, which reads as a shattered
--- crystal rather than as a ball. The overlap shrinks with the facet: at level 2
--- the plates are three studs across and the ball is a mirror ball.
---
--- The radius scales the whole ball, and the facets with it - a tile is measured
--- from its own triangle rather than from a constant, so a ball of any size and
--- any subdivision comes out covered edge to edge.
+-- Run with client --script StressMirrors.luau, or import it from Studio's example menu.
+-- SUBDIVISIONS controls the facet count: 20, 80, 320, then 1,280. RADIUS scales the ball.
+-- The default two subdivisions keep the circumscribed mirror plates small enough to overlap
+-- at their seams while retaining a spherical silhouette.
 
 local SUBDIVISIONS = 2
 local RADIUS = 12
 
--- How many facets get a camera. **Zero means every one of them**, which is what
--- this scene is for: a ball of mirrors asks for a camera per facet and the world
--- draws `workspace.MaxSurfaces` of them, so every other camera is gathered,
--- placed and reflected every frame and reaches no screen. That is the cost of
--- asking for more panes than are drawn, and it is the reading this scene exists
--- to produce.
---
--- Set it to the same number as `MaxSurfaces` below for the cheap version, which
--- is a ball whose every camera actually resolves and whose remaining facets are
--- plain tiles.
+-- Zero mirrors every facet. A positive count limits cameras for a smaller stress scene.
 local MIRROR_LIMIT = 0
 
 -- The texture each mirror renders into. Square, because a facet is as tall as
@@ -133,22 +27,12 @@ local HEIGHT = RADIUS + 10
 local SPIN = 0.35
 
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- **One level, and the header carries the whole argument.** A ball is the worst
 -- shape there is for the automatic rule: every pane can see most of the others,
 -- so the measurement says "deeper" at every level and the passes multiply.
 workspace.SurfaceBounces = 1
-
--- **How many of the three hundred and twenty facets actually reflect.** Stated
--- rather than left at `scene::DEFAULT_SURFACE_LIMIT` because this is the scene
--- the number exists to be read off: a pane is a whole render of the world into a
--- texture, so the frame time is linear in this and a ball is the scene that
--- makes that visible. Thirty-two is the ordinary bound now; the interesting
--- experiment is turning it up until the close-up target cost becomes visible.
---
--- The budget is spent on the facets covering the most screen, so the ones that
--- reflect are the ones facing the viewer however the ball is turned.
-workspace.MaxSurfaces = 32
 
 -- --- the ico-sphere ----------------------------------------------------------
 --
@@ -243,6 +127,8 @@ for index, at in vertices do
 	vertices[index] = at.Unit * RADIUS
 end
 
+workspace.MaxSurfaces = #faces
+
 -- --- the core mesh -----------------------------------------------------------
 --
 -- **A solid ball behind the facets, and it is not decoration.** A shell of
@@ -257,6 +143,7 @@ end
 -- `EditableMesh.luau` demonstrates at five vertices.
 
 local mesh = Instance.new("EditableMesh")
+mesh.Parent = ReplicatedStorage
 
 -- How far in the core sits, as a fraction of the radius.
 --
@@ -423,10 +310,7 @@ for index, face in faces do
 	-- The box's own middle, which is not the triangle's - a triangle is not
 	-- symmetric about its centroid - lifted half a thickness so the tile's
 	-- inner face rests on the plane rather than straddling it.
-	local at = centre
-		+ acrossX * ((leastX + mostX) / 2)
-		+ acrossY * ((leastY + mostY) / 2)
-		+ normal * (thickness / 2)
+	local at = centre + acrossX * ((leastX + mostX) / 2) + acrossY * ((leastY + mostY) / 2) + normal * (thickness / 2)
 
 	local frame = CFrame.lookAt(at, at + normal, acrossY)
 
@@ -485,12 +369,7 @@ for index = 1, PILLARS do
 	pillar.Parent = workspace
 end
 
-print(string.format(
-	"stressmirrors: %d facets at subdivision %d, %d of them mirrors",
-	#faces,
-	SUBDIVISIONS,
-	mirrored
-))
+print(string.format("stressmirrors: %d facets at subdivision %d, %d of them mirrors", #faces, SUBDIVISIONS, mirrored))
 
 -- --- the camera --------------------------------------------------------------
 --
@@ -499,14 +378,14 @@ print(string.format(
 -- floor. A camera looking up from underneath sees the half of the ball whose
 -- mirrors are all reflecting the ground.
 
-local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
-assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
-local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
-assert(demoCamera ~= nil, 'DemoCamera is missing')
-demoCamera:SetAttribute('Name', 'Camera')
-demoCamera:SetAttribute('FieldOfView', 60)
-demoCamera:SetAttribute('FarPlaneZ', 600)
-demoCamera:SetAttribute('CFrame', CFrame.lookAt(Vector3.new(0, HEIGHT + 4, 46), Vector3.new(0, HEIGHT, 0)))
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "StarterPlayerScripts is missing")
+local demoCamera = starterPlayerScripts:FindFirstChild("DemoCamera")
+assert(demoCamera ~= nil, "DemoCamera is missing")
+demoCamera:SetAttribute("Name", "Camera")
+demoCamera:SetAttribute("FieldOfView", 60)
+demoCamera:SetAttribute("FarPlaneZ", 600)
+demoCamera:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(0, HEIGHT + 4, 46), Vector3.new(0, HEIGHT, 0)))
 
 -- --- the turn ----------------------------------------------------------------
 --

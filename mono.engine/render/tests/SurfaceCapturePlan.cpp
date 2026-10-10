@@ -83,6 +83,49 @@ TEST_CASE("surface capture cache reuses only an unchanged retained scene", "[ren
 }
 
 TEST_CASE(
+	"surface capture signatures retain wide portal partners", "[render][surface-capture-plan][surface-wide]"
+) {
+	MixedCaptures scene;
+	REQUIRE(sizeof(scene.Portals[0].Partner) >= sizeof(int16_t));
+	scene.Portals[0].Partner = 0;
+	const auto zero = SurfaceCaptureSignature(scene.Request);
+	scene.Portals[0].Partner = static_cast<decltype(scene.Portals[0].Partner)>(256);
+	CHECK(SurfaceCaptureSignature(scene.Request) != zero);
+	scene.Portals[0].Partner = static_cast<decltype(scene.Portals[0].Partner)>(255);
+	const auto positive = SurfaceCaptureSignature(scene.Request);
+	scene.Portals[0].Partner = -1;
+	CHECK(SurfaceCaptureSignature(scene.Request) != positive);
+}
+
+TEST_CASE("surface captures preserve all 320 root slots", "[render][surface-capture-plan][surface-wide]") {
+	constexpr size_t FACETS = 320;
+	REQUIRE(engine::scene::MAX_SURFACES >= FACETS);
+	MixedCaptures scene;
+	std::vector<SurfaceView> mirrors(FACETS, scene.Mirrors[0]);
+	for (size_t index = 0; index < mirrors.size(); ++index) {
+		mirrors[index].Index = static_cast<int16_t>(index);
+		mirrors[index].Width = 4;
+		mirrors[index].Height = 2;
+	}
+	scene.Request.Mirrors = mirrors;
+	scene.Request.Portals = {};
+	scene.Request.Depth = 1;
+	scene.Request.PixelBudget = FACETS * 8;
+	SurfaceCapturePlan plan;
+	REQUIRE(PlanSurfaceCaptures(scene.Request, plan) == SurfaceCaptureStatus::Ok);
+	CHECK(plan.Entries.size() == FACETS);
+	CHECK(plan.Pixels == scene.Request.PixelBudget);
+	for (size_t index = 0; index < FACETS; ++index) {
+		INFO("surface " << index);
+		REQUIRE(plan.Roots[index] != NO_SURFACE_CAPTURE);
+		const auto &entry = plan.Entries[plan.Roots[index]];
+		CHECK(entry.Slot == static_cast<int16_t>(index));
+		CHECK(entry.Arrival == static_cast<int16_t>(index));
+		CHECK(entry.RootSlot == static_cast<int16_t>(index));
+	}
+}
+
+TEST_CASE(
 	"mixed surface cameras execute in postorder with each parent's fitted lens",
 	"[render][surface-capture-plan]"
 ) {

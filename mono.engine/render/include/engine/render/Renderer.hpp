@@ -419,7 +419,7 @@ namespace engine::render {
 		// own clip plane: rendering through it produces a scene that is then
 		// entirely clipped away, at the cost of a full sub-render. Cheaper to
 		// name it than to draw it and throw it away.
-		int8_t Partner = -1;
+		int16_t Partner = -1;
 
 		// The pane's plane and rectangle in world space, exactly as
 		// `scene::PortalSeam` states them: `Centre ± First ± Second` is the four

@@ -534,6 +534,44 @@ TEST_CASE("a surface index past the cap is dropped", "[scene][drawinstance]") {
 	CHECK(plan.Runs[0].OpaqueCount == 1);
 }
 
+TEST_CASE("surface runs retain every facet of a 320-pane scene", "[scene][drawinstance][surface-wide]") {
+	constexpr size_t FACETS = 320;
+	REQUIRE(MAX_SURFACES >= FACETS);
+	std::vector<DrawInstance> instances(FACETS * 2);
+	for (size_t index = 0; index < FACETS; ++index) {
+		const auto surface = static_cast<int16_t>(FACETS - index - 1);
+		instances[index].Surface = surface;
+		instances[index].CastShadow = true;
+		instances[FACETS + index].Surface = surface;
+		instances[FACETS + index].Transparency = .5f;
+	}
+	std::vector<uint32_t> order;
+	const auto plan = OrderScene(instances, Vector3::Zero, order);
+	CHECK(plan.Surfaces == FACETS);
+	CHECK(plan.TransparentSurfaces == FACETS);
+	for (size_t index = 0; index < FACETS; ++index) {
+		INFO("surface " << index);
+		const auto &run = plan.Runs[index];
+		REQUIRE(run.OpaqueCount == 1);
+		CHECK(run.OpaqueCasters == 1);
+		REQUIRE(run.BlendedCount == 1);
+		CHECK(instances[order[run.OpaqueFirst]].Surface == static_cast<int16_t>(index));
+		CHECK(instances[order[run.BlendedFirst]].Surface == static_cast<int16_t>(index));
+	}
+}
+
+TEST_CASE("surface signatures include the full slot width", "[scene][drawinstance][surface-wide]") {
+	DrawInstance instance;
+	instance.Surface = 0;
+	const auto zero = engine::scene::SignatureOf(std::span(&instance, 1));
+	instance.Surface = 256;
+	CHECK(engine::scene::SignatureOf(std::span(&instance, 1)) != zero);
+	instance.Surface = 255;
+	const auto positive = engine::scene::SignatureOf(std::span(&instance, 1));
+	instance.Surface = -1;
+	CHECK(engine::scene::SignatureOf(std::span(&instance, 1)) != positive);
+}
+
 TEST_CASE("a signature is stable for a list that has not changed", "[scene][drawinstance]") {
 	// **The property the whole thing rests on.** `render::Renderer` skips a
 	// surface pass when this number matches the one its texture was drawn with,

@@ -153,6 +153,7 @@ directory. Use the `bench` preset for comparable measurements.
 | `bench-accept [args...]` | Accept benchmark baselines. |
 | `imagecodec-bench [samples]` | Measure CPU image imports at 1080p and print results to stdout. Default: `5`. |
 | `render-preparation-bench [samples]` | Measure render-preparation work. Default: `5`. |
+| `surface-capture-plan-bench [samples] [build_preset]` | Measure CPU planning for 320 visible mirror roots with one bounce and retained buffers. Defaults: `3`, `bench`; no GPU work is included. |
 | `keep-loaded-filter-bench [samples]` | Compare copying 100,000 default Parts with retaining their draw span, plus resident and missing named meshes. Default: `5`. |
 | `ordinary-particle-bench [samples]` | Measure ordinary emitter preparation, actual upload bytes, dispatch lanes, and delayed Vulkan pass timings. Default: `1`; waits are outside CPU recording spans. |
 | `volume-light-stress [frames]` | Check lighting stress scene, selection costs, and Vulkan fog stress. Default: `120`. |

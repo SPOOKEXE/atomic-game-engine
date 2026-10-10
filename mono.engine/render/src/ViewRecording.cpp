@@ -693,7 +693,7 @@ namespace engine::render {
 			pane.Normal = view.PaneNormal;
 			pane.First = view.PaneFirst;
 			pane.Second = view.PaneSecond;
-			pane.Surface = static_cast<int8_t>(accepted[index].Index);
+			pane.Surface = static_cast<int16_t>(accepted[index].Index);
 			pane.TagFilter = view.TagFilter;
 			pane.NearPlane = view.PaneNear;
 			pane.FarPlane = view.PaneFar;
@@ -749,7 +749,11 @@ namespace engine::render {
 			const uint64_t captureSignature = SurfaceCaptureSignature(keyedCaptureRequest);
 			if (bank.CaptureCache.NeedsRefresh(captureSignature)) {
 				result.SurfaceCapturePlanWrite = true;
-				const auto captureStatus = PlanSurfaceCaptures(keyedCaptureRequest, bank.CapturePlan);
+				SurfaceCaptureStatus captureStatus;
+				{
+					ENGINE_PROFILE_CAT("plan surface captures", core::ProfileCategory::Render);
+					captureStatus = PlanSurfaceCaptures(keyedCaptureRequest, bank.CapturePlan);
+				}
 				if (captureStatus == SurfaceCaptureStatus::Invalid) {
 					EndIncompleteView();
 					return ViewStart::Abandoned;

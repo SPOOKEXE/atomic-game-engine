@@ -488,6 +488,12 @@ ui-headless-bench samples="5":
     cmake --build --preset bench --target bench_ui
     ./.cache/build/bench/bench/bench_ui --suite engine.ui.bench.headless-interface --samples {{samples}}
 
+# CPU capture planning for 320 visible mirrors with one terminal bounce.
+surface-capture-plan-bench samples="3" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.surface-capture-plan --samples {{samples}}
+
 # Portal reply encoding and decoding, per complete batch. No GPU or process transport.
 # Run the binary directly so measurements stay on the terminal.
 portal-exchange-bench samples="5":

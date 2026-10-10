@@ -25,6 +25,7 @@
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/replication/Defaults.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
@@ -690,6 +691,62 @@ TEST_CASE("a value written after the join crosses too", "[studio][playlink]") {
 	// this arrived as a change rather than in a fresh snapshot.
 	CHECK(link.Report().Applied > 0);
 	CHECK(link.Report().TotalMessages > 1);
+}
+
+TEST_CASE("workspace surface resources cross snapshots and deltas", "[studio][playlink][surfacebudget]") {
+	Fixture fixture;
+	engine::scene::RegisterSceneClasses();
+	const auto replicated = engine::replication::DefaultReplicatedComponents();
+	const auto limitRow = std::find_if(replicated.begin(), replicated.end(), [](const auto &component) {
+		return component.Name == "scene.SurfaceLimit";
+	});
+	const auto bouncesRow = std::find_if(replicated.begin(), replicated.end(), [](const auto &component) {
+		return component.Name == "scene.SurfaceBounces";
+	});
+	REQUIRE(limitRow != replicated.end());
+	REQUIRE(bouncesRow != replicated.end());
+	CHECK(limitRow->Resource);
+	CHECK(bouncesRow->Resource);
+	Entity workspace = engine::ecs::NULL_ENTITY;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		engine::scene::InstallServices(store);
+		workspace = engine::scene::WorkspaceOf(store);
+		int32_t panes = 320;
+		int32_t bounces = 1;
+		REQUIRE(store.SetProperty(workspace, Name("MaxSurfaces"), &panes, sizeof(panes)));
+		REQUIRE(store.SetProperty(workspace, Name("SurfaceBounces"), &bounces, sizeof(bounces)));
+	});
+
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	fixture.Step(link, 32);
+
+	auto replicaValues = [&]() {
+		std::pair<int32_t, int32_t> values{};
+		fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+			const auto *limit = store.Resource<engine::scene::SurfaceLimit>();
+			const auto *depth = store.Resource<engine::scene::SurfaceBounces>();
+			if (limit != nullptr) {
+				values.first = limit->Panes;
+			}
+			if (depth != nullptr) {
+				values.second = depth->Levels;
+			}
+		});
+		return values;
+	};
+
+	CHECK((replicaValues() == std::pair<int32_t, int32_t>{320, 1}));
+
+	fixture.Worlds.Enter(fixture.Authority, [workspace](Store &store) {
+		int32_t panes = 96;
+		int32_t bounces = 2;
+		REQUIRE(store.SetProperty(workspace, Name("MaxSurfaces"), &panes, sizeof(panes)));
+		REQUIRE(store.SetProperty(workspace, Name("SurfaceBounces"), &bounces, sizeof(bounces)));
+	});
+	fixture.Step(link, 4);
+	CHECK((replicaValues() == std::pair<int32_t, int32_t>{96, 2}));
 }
 
 TEST_CASE("stopping takes the client view away with it", "[studio][playlink]") {
