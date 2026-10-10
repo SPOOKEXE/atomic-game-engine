@@ -39,6 +39,7 @@
 #include <engine/world/TickExchange.hpp>
 #include <engine/world/World.hpp>
 
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -76,6 +77,8 @@ namespace engine::world {
 		// ownership of the worker pool. The estimate is the previous measured tick
 		// cost multiplied by ticks owed. Below this floor the driver runs the batch
 		// directly and leaves the pool available to systems inside each world.
+		// Joined tick-exchange stages use their own previous body cost instead of
+		// charging each bookkeeping dispatch for the entire world's simulation.
 		//
 		// The O0 to O3 simulation sweep measures an empty worker dispatch at 8 to
 		// 58 microseconds on the development machine. Fifty microseconds keeps tiny
@@ -865,11 +868,30 @@ namespace engine::world {
 		bool TickExchangeFrameOpen() const;
 
 	  private:
+		enum class ExchangeWork : uint8_t {
+			Input,
+			Collect,
+			Serve,
+			Apply,
+			Simulation,
+			Commit,
+			BarrierCollect,
+			BarrierApply,
+			Cancel,
+			Count
+		};
+		bool ExchangeUsesWorkers(ExchangeWork work) const;
 		// Returns whether the body ran on workers. The caller owns any worker
 		// timing report, after the join has made its measurements safe to read.
 		bool DispatchExchangeWorlds(
-			const std::function<void(size_t)> &body, std::span<float> worldMilliseconds = {}
+			ExchangeWork work,
+			const std::function<void(size_t)> &body,
+			std::span<float> worldMilliseconds = {}
 		);
+		// A costly simulation stage must not send cheap exchange bookkeeping to
+		// the pool. Retain joined body cost separately for each dispatch stage.
+		std::array<float, static_cast<size_t>(ExchangeWork::Count)> ExchangeWorkMilliseconds{};
+		std::vector<float> ExchangeWorldMilliseconds;
 		void CompleteExchangeFrame();
 		enum class ExchangePhase : uint8_t {
 			Closed,

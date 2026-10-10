@@ -219,6 +219,7 @@ namespace engine::world {
 	bool World::AdvanceExchangeRoundToPhysics() {
 		if (!ExchangeOpen) return false;
 		Store_.BindToCallingThread();
+		const uint64_t began = core::Clock::Nanoseconds();
 		try {
 			Scheduler_.RunPhases(Store_, ecs::Phase::Simulation, ecs::Phase::Simulation);
 		} catch (const std::exception &failure) {
@@ -227,6 +228,7 @@ namespace engine::world {
 		} catch (...) {
 			CancelExchangeRound();
 		}
+		Stats.LastTickMilliseconds += static_cast<float>(core::Clock::Nanoseconds() - began) / 1'000'000;
 		return State_ != WorldState::Faulted;
 	}
 
