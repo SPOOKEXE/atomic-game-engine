@@ -82,6 +82,11 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] Freeze paused Frame Graph counters and draw data, stop recorder collection while paused unless another profiling consumer needs it, reuse retained clipped flame indices and theme palette, and fit structural averages by actual parent relationships so child order does not hide gaps.
 - [x] Admit tick exchange workers using each stage's measured cost, wake only workers selected for the active batch and report worker bodies only when they own tasks.
 - [x] Replace inactive DOF, god rays, bloom, lenses, sky, fog and empty overlays with output-preserving copies or clears; skip empty G-buffer shader draws, depth linearisation, SSAO and deferred lighting only when cleared texture contents prove the result. Retain disabled environment outputs without compute, copy matching presentation images and omit cleared game UI blends. GPU fixtures cover active transitions, authored writes, retained UI, lighting captures and authored zero-depth exports.
+- [x] Preserve cleared component write epochs for skipped presentation consumers, rebuild cached portal cuts and omit capture-label scans when no attribute rows exist.
+- [x] Reuse render-batch scratch and dirty ranges, step shared GPU particle fields once per frame and keep inactive inputs out of environment cache keys.
+- [x] Index capture surfaces by slot, avoid redundant ribbon restoration uploads and omit zero-strength ground-grid draws.
+- [x] Preserve opaque depth in transparent passes when empty surface overlays skip rendering, and refuse failed image publications or pass starts in transparent geometry, mirror and portal capture paths without exporting retained stale images.
+- [x] Retain Output filtering and text extents, clip visible rows and cache canonical Explorer searches while keeping computed-property searches live; preserve multiline layout and selection behavior.
 - [_] Non-acceptance follow-up: audit aggregate replica snapshot and staged-byte ceilings for large EditableImage rows. The current path has a `uint32_t` total cap but no explicit assembled-image budget; per-image bounds and windowed staging are tested.
 - [_] Security follow-up: audit dynamic schema and component-codec acceptance, plus client-local provenance and descendant filtering across replication and authored game saves.
 
