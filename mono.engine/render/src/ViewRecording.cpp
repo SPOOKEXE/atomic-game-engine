@@ -799,9 +799,14 @@ namespace engine::render {
 		size_t visibleCount = instances.size();
 		opaqueCount = 0;
 		core::Name orderedEntities;
-		State->VisibilityWorking.Begin(State->FrameCounter, Request.TargetSlot, Request.Source->WorldName);
-		for (const scene::DrawInstance &instance : instances) {
-			State->VisibilityWorking.Observe(instance);
+		{
+			ENGINE_PROFILE_CAT("observe scene visibility", core::ProfileCategory::Render);
+			State->VisibilityWorking.Begin(
+				State->FrameCounter, Request.TargetSlot, Request.Source->WorldName
+			);
+			for (const scene::DrawInstance &instance : instances) {
+				State->VisibilityWorking.Observe(instance);
+			}
 		}
 
 		// **The whole CPU half of the pipeline, and it had no span.** Frustum
@@ -1418,23 +1423,26 @@ namespace engine::render {
 			State->SceneJointFrames.assign(Request.JointFrames.begin(), Request.JointFrames.end());
 		}
 		ownCount = static_cast<uint32_t>(State->SceneInstances.size());
-		State->SceneInstances.insert(State->SceneInstances.end(), foreign.begin(), foreign.end());
-		const uint32_t foreignJointBase = static_cast<uint32_t>(State->SceneJointFrames.size());
-		State->SceneJointFrames.insert(
-			State->SceneJointFrames.end(),
-			Request.ForeignJointFrames.begin(),
-			Request.ForeignJointFrames.end()
-		);
-		for (uint32_t index = 0; index < State->SceneInstances.size(); index++) {
-			scene::DrawInstance &instance = State->SceneInstances[index];
-			const size_t available =
-				index < ownCount ? Request.JointFrames.size() : Request.ForeignJointFrames.size();
-			const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
-			if (instance.SkinCount == 0 || end > available) {
-				instance.SkinFirst = 0;
-				instance.SkinCount = 0;
-			} else if (index >= ownCount) {
-				instance.SkinFirst += foreignJointBase;
+		{
+			ENGINE_PROFILE_CAT("append/validate scene skins", core::ProfileCategory::Render);
+			State->SceneInstances.insert(State->SceneInstances.end(), foreign.begin(), foreign.end());
+			const uint32_t foreignJointBase = static_cast<uint32_t>(State->SceneJointFrames.size());
+			State->SceneJointFrames.insert(
+				State->SceneJointFrames.end(),
+				Request.ForeignJointFrames.begin(),
+				Request.ForeignJointFrames.end()
+			);
+			for (uint32_t index = 0; index < State->SceneInstances.size(); index++) {
+				scene::DrawInstance &instance = State->SceneInstances[index];
+				const size_t available =
+					index < ownCount ? Request.JointFrames.size() : Request.ForeignJointFrames.size();
+				const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
+				if (instance.SkinCount == 0 || end > available) {
+					instance.SkinFirst = 0;
+					instance.SkinCount = 0;
+				} else if (index >= ownCount) {
+					instance.SkinFirst += foreignJointBase;
+				}
 			}
 		}
 
@@ -1989,43 +1997,49 @@ namespace engine::render {
 			State->InstanceWorldFor(Request.Source->World, Request.Source->WorldName);
 		State->ActiveInstanceWorld = &residentWorld;
 		InstanceResidency &residency = residentWorld.Instances;
-		residency.BeginFrame(State->FrameCounter);
-		target.InstanceIndices.resize(uploadCount);
+		{
+			ENGINE_PROFILE_CAT("begin instance residency", core::ProfileCategory::Render);
+			residency.BeginFrame(State->FrameCounter);
+		}
+		{
+			ENGINE_PROFILE_CAT("prepare instance metadata", core::ProfileCategory::Render);
+			target.InstanceIndices.resize(uploadCount);
 
-		State->SlotMesh.resize(uploadCount);
-		State->SlotTexture.resize(uploadCount);
-		State->SlotContentOwner.resize(uploadCount);
-		State->SlotImageGraphWorld.resize(uploadCount);
-		State->SlotImageGraphFallbackWorld.resize(uploadCount);
-		State->SlotNormalMap.resize(uploadCount);
-		State->SlotRoughnessMap.resize(uploadCount);
-		State->SlotOcclusionMap.resize(uploadCount);
-		State->SlotHeightMap.resize(uploadCount);
-		State->SlotMetalnessMap.resize(uploadCount);
-		State->SlotEmissiveMap.resize(uploadCount);
-		State->SlotPackedPbrMap.resize(uploadCount);
-		State->SlotSpecularFactor.resize(uploadCount);
-		State->SlotTransmissionFactor.resize(uploadCount);
-		State->SlotIndexOfRefraction.resize(uploadCount);
-		State->SlotThickness.resize(uploadCount);
-		State->SlotPackedPbrChannels.resize(uploadCount);
-		State->SlotResample.resize(uploadCount);
-		State->SlotShadowDetail.resize(uploadCount);
-		State->SlotTwoSided.resize(uploadCount);
-		State->SlotShader.resize(uploadCount);
-		State->SlotTags.resize(uploadCount);
-		State->SlotRig.resize(uploadCount);
-		State->SlotSeam.resize(uploadCount);
-		State->SlotSeamFirst.resize(uploadCount);
-		State->SlotSeamSecond.resize(uploadCount);
-		State->SlotSeamCentre.resize(uploadCount);
-		State->SlotSeamLight.resize(uploadCount);
-		State->SlotInstanceKey.resize(sceneCount);
-		State->SlotInstanceCurrent.resize(sceneCount);
-		State->SlotLod.assign(uploadCount, NO_LOD_DRAW);
-		State->SceneSlotOfSource.resize(ownCount);
-		State->LodFrame.Clear();
-		State->Lod.Ready = false;
+			State->SlotMesh.resize(uploadCount);
+			State->SlotTexture.resize(uploadCount);
+			State->SlotContentOwner.resize(uploadCount);
+			State->SlotImageGraphWorld.resize(uploadCount);
+			State->SlotImageGraphFallbackWorld.resize(uploadCount);
+			State->SlotNormalMap.resize(uploadCount);
+			State->SlotRoughnessMap.resize(uploadCount);
+			State->SlotOcclusionMap.resize(uploadCount);
+			State->SlotHeightMap.resize(uploadCount);
+			State->SlotMetalnessMap.resize(uploadCount);
+			State->SlotEmissiveMap.resize(uploadCount);
+			State->SlotPackedPbrMap.resize(uploadCount);
+			State->SlotSpecularFactor.resize(uploadCount);
+			State->SlotTransmissionFactor.resize(uploadCount);
+			State->SlotIndexOfRefraction.resize(uploadCount);
+			State->SlotThickness.resize(uploadCount);
+			State->SlotPackedPbrChannels.resize(uploadCount);
+			State->SlotResample.resize(uploadCount);
+			State->SlotShadowDetail.resize(uploadCount);
+			State->SlotTwoSided.resize(uploadCount);
+			State->SlotShader.resize(uploadCount);
+			State->SlotTags.resize(uploadCount);
+			State->SlotRig.resize(uploadCount);
+			State->SlotSeam.resize(uploadCount);
+			State->SlotSeamFirst.resize(uploadCount);
+			State->SlotSeamSecond.resize(uploadCount);
+			State->SlotSeamCentre.resize(uploadCount);
+			State->SlotSeamLight.resize(uploadCount);
+			State->SlotInstanceKey.resize(sceneCount);
+			State->SlotInstanceCurrent.resize(sceneCount);
+			State->SlotLod.assign(uploadCount, NO_LOD_DRAW);
+			State->SceneSlotOfSource.resize(ownCount);
+			State->LodFrame.Clear();
+			State->Lod.Ready = false;
+		}
 		const bool haveOwnSources = target.InstanceSourcesReady && target.InstanceSources.size() == ownCount;
 		const bool rebuildOwnSources = Request.Damage.Objects || !haveOwnSources;
 		bool sourceOrderRetained = false;
@@ -2490,132 +2504,143 @@ namespace engine::render {
 			return;
 		}
 
-		target.SkinOffsets.assign(std::max<uint32_t>(residency.SlotCount(), 1), UINT32_MAX);
-		const auto assignSkin = [&](uint32_t drawSlot, const scene::DrawInstance &instance) {
-			const uint32_t residentSlot = target.InstanceIndices[drawSlot];
-			const MeshEntry *mesh = State->SlotMesh[drawSlot];
-			const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
-			if (residentSlot < target.SkinOffsets.size() && mesh != nullptr && instance.SkinCount != 0 &&
-				mesh->JointCount == instance.SkinCount && end <= State->SceneJointFrames.size()) {
-				target.SkinOffsets[residentSlot] = instance.SkinFirst;
+		{
+			ENGINE_PROFILE_CAT("prepare skin palettes", core::ProfileCategory::Render);
+			target.SkinOffsets.assign(std::max<uint32_t>(residency.SlotCount(), 1), UINT32_MAX);
+			const auto assignSkin = [&](uint32_t drawSlot, const scene::DrawInstance &instance) {
+				const uint32_t residentSlot = target.InstanceIndices[drawSlot];
+				const MeshEntry *mesh = State->SlotMesh[drawSlot];
+				const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
+				if (residentSlot < target.SkinOffsets.size() && mesh != nullptr && instance.SkinCount != 0 &&
+					mesh->JointCount == instance.SkinCount && end <= State->SceneJointFrames.size()) {
+					target.SkinOffsets[residentSlot] = instance.SkinFirst;
+				}
+			};
+			for (uint32_t drawSlot = 0; drawSlot < ownCount; drawSlot++) {
+				assignSkin(drawSlot, State->SceneInstances[State->SceneOrder[drawSlot]]);
 			}
-		};
-		for (uint32_t drawSlot = 0; drawSlot < ownCount; drawSlot++) {
-			assignSkin(drawSlot, State->SceneInstances[State->SceneOrder[drawSlot]]);
-		}
-		for (uint32_t drawSlot = ownCount; drawSlot < sceneCount; drawSlot++) {
-			assignSkin(drawSlot, State->SceneInstances[drawSlot]);
-		}
-		uint64_t skinOffsetSignature = scene::MixSignature(1, target.SkinOffsets.size());
-		for (const uint32_t offset : target.SkinOffsets) {
-			skinOffsetSignature = scene::MixSignature(skinOffsetSignature, offset);
-		}
-		target.SkinOffsetsDirty = target.SkinOffsetsDirty || !target.SkinOffsetsReady ||
-								  target.SkinOffsetSignature != skinOffsetSignature;
-		target.SkinOffsetSignature = skinOffsetSignature;
-		target.SkinOffsetsReady = true;
+			for (uint32_t drawSlot = ownCount; drawSlot < sceneCount; drawSlot++) {
+				assignSkin(drawSlot, State->SceneInstances[drawSlot]);
+			}
+			uint64_t skinOffsetSignature = scene::MixSignature(1, target.SkinOffsets.size());
+			for (const uint32_t offset : target.SkinOffsets) {
+				skinOffsetSignature = scene::MixSignature(skinOffsetSignature, offset);
+			}
+			target.SkinOffsetsDirty = target.SkinOffsetsDirty || !target.SkinOffsetsReady ||
+									  target.SkinOffsetSignature != skinOffsetSignature;
+			target.SkinOffsetSignature = skinOffsetSignature;
+			target.SkinOffsetsReady = true;
 
-		target.JointWords.assign(
-			std::max<size_t>(State->SceneJointFrames.size() * GPU_JOINT_WORDS, GPU_JOINT_WORDS), 0
-		);
-		for (size_t index = 0; index < State->SceneJointFrames.size(); index++) {
-			const core::CFrame &frame = State->SceneJointFrames[index];
-			const PackedRotation rotation = PackRotation(frame.Rotation());
-			const size_t word = index * GPU_JOINT_WORDS;
-			target.JointWords[word] = std::bit_cast<uint32_t>(frame.Position.X);
-			target.JointWords[word + 1] = std::bit_cast<uint32_t>(frame.Position.Y);
-			target.JointWords[word + 2] = std::bit_cast<uint32_t>(frame.Position.Z);
-			target.JointWords[word + 3] = rotation.Words[0];
-			target.JointWords[word + 4] = rotation.Words[1];
-			target.JointWords[word + 5] = rotation.Words[2];
-			target.JointWords[word + 6] = rotation.Words[3];
-		}
-		uint64_t jointWordSignature = scene::MixSignature(1, target.JointWords.size());
-		for (const uint32_t word : target.JointWords) {
-			jointWordSignature = scene::MixSignature(jointWordSignature, word);
-		}
-		target.JointWordsDirty = target.JointWordsDirty || !target.JointWordsReady ||
-								 target.JointWordSignature != jointWordSignature;
-		target.JointWordSignature = jointWordSignature;
-		target.JointWordsReady = true;
+			target.JointWords.assign(
+				std::max<size_t>(State->SceneJointFrames.size() * GPU_JOINT_WORDS, GPU_JOINT_WORDS), 0
+			);
+			for (size_t index = 0; index < State->SceneJointFrames.size(); index++) {
+				const core::CFrame &frame = State->SceneJointFrames[index];
+				const PackedRotation rotation = PackRotation(frame.Rotation());
+				const size_t word = index * GPU_JOINT_WORDS;
+				target.JointWords[word] = std::bit_cast<uint32_t>(frame.Position.X);
+				target.JointWords[word + 1] = std::bit_cast<uint32_t>(frame.Position.Y);
+				target.JointWords[word + 2] = std::bit_cast<uint32_t>(frame.Position.Z);
+				target.JointWords[word + 3] = rotation.Words[0];
+				target.JointWords[word + 4] = rotation.Words[1];
+				target.JointWords[word + 5] = rotation.Words[2];
+				target.JointWords[word + 6] = rotation.Words[3];
+			}
+			uint64_t jointWordSignature = scene::MixSignature(1, target.JointWords.size());
+			for (const uint32_t word : target.JointWords) {
+				jointWordSignature = scene::MixSignature(jointWordSignature, word);
+			}
+			target.JointWordsDirty = target.JointWordsDirty || !target.JointWordsReady ||
+									 target.JointWordSignature != jointWordSignature;
+			target.JointWordSignature = jointWordSignature;
+			target.JointWordsReady = true;
 
-		const auto ensureSkinBuffer = [&](SDL_GPUBuffer *&buffer,
-										  SDL_GPUTransferBuffer *&transfer,
-										  uint32_t &capacity,
-										  uint32_t words,
-										  const char *label,
-										  bool &dirty) {
-			if (buffer != nullptr && transfer != nullptr && capacity >= words) {
+			const auto ensureSkinBuffer = [&](SDL_GPUBuffer *&buffer,
+											  SDL_GPUTransferBuffer *&transfer,
+											  uint32_t &capacity,
+											  uint32_t words,
+											  const char *label,
+											  bool &dirty) {
+				if (buffer != nullptr && transfer != nullptr && capacity >= words) {
+					return true;
+				}
+				uint32_t grown = capacity == 0 ? 256 : capacity;
+				while (grown < words) {
+					grown *= 2;
+				}
+				if (buffer != nullptr) {
+					gpu::ReleaseBuffer(State->Device, buffer);
+				}
+				if (transfer != nullptr) {
+					gpu::ReleaseTransferBuffer(State->Device, transfer);
+				}
+				SDL_GPUBufferCreateInfo bufferInfo{};
+				bufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+				bufferInfo.size = grown * sizeof(uint32_t);
+				buffer = gpu::CreateBuffer(State->Device, &bufferInfo);
+				SDL_GPUTransferBufferCreateInfo transferInfo{};
+				transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+				transferInfo.size = bufferInfo.size;
+				transfer = gpu::CreateTransferBuffer(State->Device, &transferInfo);
+				if (buffer == nullptr || transfer == nullptr) {
+					ENGINE_ERROR("{} buffer of {} words: {}", label, grown, SDL_GetError());
+					capacity = 0;
+					return false;
+				}
+				capacity = grown;
+				dirty = true;
 				return true;
+			};
+			if (!ensureSkinBuffer(
+					target.SkinOffsetBuffer,
+					target.SkinOffsetTransfer,
+					target.SkinOffsetCapacity,
+					static_cast<uint32_t>(target.SkinOffsets.size()),
+					"skin offset",
+					target.SkinOffsetsDirty
+				) ||
+				!ensureSkinBuffer(
+					target.JointBuffer,
+					target.JointTransfer,
+					target.JointWordCapacity,
+					static_cast<uint32_t>(target.JointWords.size()),
+					"joint palette",
+					target.JointWordsDirty
+				)) {
+				return;
 			}
-			uint32_t grown = capacity == 0 ? 256 : capacity;
-			while (grown < words) {
-				grown *= 2;
-			}
-			if (buffer != nullptr) {
-				gpu::ReleaseBuffer(State->Device, buffer);
-			}
-			if (transfer != nullptr) {
-				gpu::ReleaseTransferBuffer(State->Device, transfer);
-			}
-			SDL_GPUBufferCreateInfo bufferInfo{};
-			bufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-			bufferInfo.size = grown * sizeof(uint32_t);
-			buffer = gpu::CreateBuffer(State->Device, &bufferInfo);
-			SDL_GPUTransferBufferCreateInfo transferInfo{};
-			transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-			transferInfo.size = bufferInfo.size;
-			transfer = gpu::CreateTransferBuffer(State->Device, &transferInfo);
-			if (buffer == nullptr || transfer == nullptr) {
-				ENGINE_ERROR("{} buffer of {} words: {}", label, grown, SDL_GetError());
-				capacity = 0;
-				return false;
-			}
-			capacity = grown;
-			dirty = true;
-			return true;
-		};
-		if (!ensureSkinBuffer(
-				target.SkinOffsetBuffer,
-				target.SkinOffsetTransfer,
-				target.SkinOffsetCapacity,
-				static_cast<uint32_t>(target.SkinOffsets.size()),
-				"skin offset",
-				target.SkinOffsetsDirty
-			) ||
-			!ensureSkinBuffer(
-				target.JointBuffer,
-				target.JointTransfer,
-				target.JointWordCapacity,
-				static_cast<uint32_t>(target.JointWords.size()),
-				"joint palette",
-				target.JointWordsDirty
-			)) {
-			return;
-		}
 
-		if (target.SkinOffsetsDirty) {
-			void *skinMapped = SDL_MapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer, true);
-			if (skinMapped == nullptr) {
-				ENGINE_ERROR("skin offsets: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
-				return;
+			{
+				ENGINE_PROFILE_CAT("stage skin palettes", core::ProfileCategory::Render);
+				if (target.SkinOffsetsDirty) {
+					void *skinMapped =
+						SDL_MapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer, true);
+					if (skinMapped == nullptr) {
+						ENGINE_ERROR("skin offsets: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+						return;
+					}
+					std::memcpy(
+						skinMapped, target.SkinOffsets.data(), target.SkinOffsets.size() * sizeof(uint32_t)
+					);
+					SDL_UnmapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer);
+				}
+				if (target.JointWordsDirty) {
+					void *jointMapped = SDL_MapGPUTransferBuffer(State->Device, target.JointTransfer, true);
+					if (jointMapped == nullptr) {
+						ENGINE_ERROR("joint palettes: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+						return;
+					}
+					std::memcpy(
+						jointMapped, target.JointWords.data(), target.JointWords.size() * sizeof(uint32_t)
+					);
+					SDL_UnmapGPUTransferBuffer(State->Device, target.JointTransfer);
+				}
 			}
-			std::memcpy(skinMapped, target.SkinOffsets.data(), target.SkinOffsets.size() * sizeof(uint32_t));
-			SDL_UnmapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer);
+			State->SkinOffsetBuffer = target.SkinOffsetBuffer;
+			State->SkinOffsetTransfer = target.SkinOffsetTransfer;
+			State->JointBuffer = target.JointBuffer;
+			State->JointTransfer = target.JointTransfer;
 		}
-		if (target.JointWordsDirty) {
-			void *jointMapped = SDL_MapGPUTransferBuffer(State->Device, target.JointTransfer, true);
-			if (jointMapped == nullptr) {
-				ENGINE_ERROR("joint palettes: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
-				return;
-			}
-			std::memcpy(jointMapped, target.JointWords.data(), target.JointWords.size() * sizeof(uint32_t));
-			SDL_UnmapGPUTransferBuffer(State->Device, target.JointTransfer);
-		}
-		State->SkinOffsetBuffer = target.SkinOffsetBuffer;
-		State->SkinOffsetTransfer = target.SkinOffsetTransfer;
-		State->JointBuffer = target.JointBuffer;
-		State->JointTransfer = target.JointTransfer;
 
 		bool rowsReallocated = false;
 		bool indicesReallocated = false;
