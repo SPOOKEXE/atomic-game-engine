@@ -1,5 +1,6 @@
 // Device-free checks for the shared world-to-renderer presentation boundary.
 
+#include "PresentationSourceDamage.hpp"
 #include "ViewportFrameScene.hpp"
 
 #include <engine/core/Bytes.hpp>
@@ -19,6 +20,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -525,6 +527,91 @@ TEST_CASE("data-factory object labels sort stable ids by bytes", "[render][prese
 	CHECK(draw->PartLabels[0].StableId == "fixture/part/changed");
 }
 
+TEST_CASE("empty attribute tables clear and restore cached capture labels", "[render][presentation][cache]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::RegisterPresentationComponents();
+	ecs::Store store("empty-capture-attributes");
+	store.SetResource(render::DrawList{});
+	const ecs::Entity workspace = scene::InstallServices(store);
+	scene::PartDesc paneDesc;
+	paneDesc.Size = {16.0f, 9.0f, .4f};
+	const ecs::Entity pane = scene::MakePart(store, paneDesc);
+	REQUIRE(store.SetParent(pane, workspace));
+	paneDesc.Frame.Position.Z = -20.0f;
+	const ecs::Entity destination = scene::MakePart(store, paneDesc);
+	const ecs::Entity surface = store.CreateInstance(ecs::Classes::Find(Name("SurfaceCamera")), "Mouth");
+	REQUIRE(store.SetParent(surface, pane));
+	scene::SurfaceCamera camera;
+	camera.Face = scene::NormalId::Front;
+	camera.Surface = 0;
+	store.Set(surface, camera);
+	store.Set(surface, scene::Portal{destination});
+	scene::PartDesc bodyDesc;
+	bodyDesc.Frame.Position.Z = -.2f;
+	bodyDesc.Simulated = true;
+	const ecs::Entity body = scene::MakePart(store, bodyDesc);
+	REQUIRE(store.SetParent(body, workspace));
+	constexpr std::array names{"DataFactoryId", "DataFactorySemanticId", "DataFactoryPartId"};
+	const auto authorLabels = [&] {
+		for (const char *name : names) {
+			ecs::AttributeValue value;
+			value.Type = ecs::PropertyType::String;
+			value.String = std::string("fixture/") + name;
+			REQUIRE(ecs::SetAttribute(store, body, Name(name), value));
+		}
+	};
+	const auto checkLabels = [&](bool present) {
+		const auto *draw = store.Resource<render::DrawList>();
+		REQUIRE(draw != nullptr);
+		CHECK(draw->ObjectLabelsValid);
+		CHECK(draw->SemanticLabelsValid);
+		CHECK(draw->PartLabelsValid);
+		CHECK(draw->ObjectLabels.size() == (present ? 1 : 0));
+		CHECK(draw->SemanticLabels.size() == (present ? 1 : 0));
+		CHECK(draw->PartLabels.size() == (present ? 1 : 0));
+		size_t bodyRows = 0;
+		for (const auto &row : draw->Instances) {
+			const uint32_t label = present && row.Source == body.Id ? 1 : 0;
+			CHECK(row.ObjectLabel == label);
+			CHECK(row.SemanticLabel == label);
+			CHECK(row.PartLabel == label);
+			bodyRows += row.Source == body.Id;
+		}
+		// The near row and its portal copy must carry the same authored labels.
+		CHECK(bodyRows == 2);
+	};
+	authorLabels();
+	REQUIRE(scene::SyncRendered(store) == 2);
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	checkLabels(true);
+	store.ClearChanges();
+	SECTION("removing the resource during a pose update clears both halves") {
+		store.RemoveResource<ecs::AttributeTable>();
+		auto placement = *store.Get<scene::Transform>(body);
+		placement.Frame.Position.X = .2f;
+		store.Set(body, placement);
+	}
+	SECTION("replacing the resource with an empty table clears reused rows") {
+		store.SetResource(ecs::AttributeTable{});
+	}
+	SECTION("removing the last attributes leaves an empty table") {
+		for (const char *name : names)
+			REQUIRE(ecs::SetAttribute(store, body, Name(name), ecs::AttributeValue{}));
+		const auto *attributes = store.Resource<ecs::AttributeTable>();
+		REQUIRE(attributes != nullptr);
+		REQUIRE(attributes->Entities.empty());
+	}
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	checkLabels(false);
+	store.ClearChanges();
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	checkLabels(false);
+	authorLabels();
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	checkLabels(true);
+}
+
 TEST_CASE("ambiguous data-factory ids refuse an object label table", "[render][presentation]") {
 	engine::scene::RegisterSceneClasses();
 	engine::render::RegisterPresentationComponents();
@@ -606,6 +693,149 @@ TEST_CASE("irrelevant transform writes do not hide visible source changes", "[re
 	engine::render::CollectInstances(store);
 	REQUIRE(drawList->Instances.size() == 1);
 	CHECK(drawList->Instances.front().Tint.R == 0.25f);
+}
+
+TEST_CASE("presentation retains visible changes across unpresented ticks", "[render][presentation][cache]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::RegisterPresentationComponents();
+	ecs::Store store("unpresented-source-changes");
+	store.SetResource(render::DrawList{});
+	const ecs::Entity workspace = scene::InstallServices(store);
+	const ecs::Entity visible = scene::MakePart(store, scene::PartDesc{});
+	const ecs::Entity hidden = scene::MakePart(store, scene::PartDesc{});
+	REQUIRE(store.SetParent(visible, workspace));
+	REQUIRE(scene::SyncRendered(store) == 1);
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	store.ClearChanges();
+
+	SECTION("a later hidden pose write does not mask the earlier visible pose") {
+		auto placement = *store.Get<scene::Transform>(visible);
+		placement.Frame.Position.X = 10.0f;
+		store.Set(visible, placement);
+		// A simulation tick can clear row bits without presenting this world.
+		// Both entities already exist, so membership stays unchanged.
+		store.ClearChanges();
+		placement = *store.Get<scene::Transform>(hidden);
+		placement.Frame.Position.X = 2.0f;
+		store.Set(hidden, placement);
+		render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+		const auto *draw = store.Resource<render::DrawList>();
+		REQUIRE(draw->Instances.size() == 1);
+		CHECK(draw->Instances[0].Source == visible.Id);
+		CHECK(draw->Instances[0].Frame.Position.X == 10.0f);
+	}
+	SECTION("a later hidden tint write does not mask the earlier visible tint") {
+		auto visual = *store.Get<scene::Visual>(visible);
+		visual.Tint.R = .25f;
+		store.Set(visible, visual);
+		store.ClearChanges();
+		visual = *store.Get<scene::Visual>(hidden);
+		visual.Tint.R = .75f;
+		store.Set(hidden, visual);
+		render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+		const auto *draw = store.Resource<render::DrawList>();
+		REQUIRE(draw->Instances.size() == 1);
+		CHECK(draw->Instances[0].Source == visible.Id);
+		CHECK(draw->Instances[0].Tint.R == .25f);
+	}
+	SECTION("multiple retained hidden writes preserve the source fast path") {
+		auto placement = *store.Get<scene::Transform>(hidden);
+		placement.Frame.Position.X = 2.0f;
+		store.Set(hidden, placement);
+		placement.Frame.Position.X = 3.0f;
+		store.Set(hidden, placement);
+		auto *draw = store.ResourceMutable<render::DrawList>();
+		const auto damage = render::CollectPresentationSourceDamage(store, *draw, 1, 0, 0);
+		CHECK_FALSE(damage.Pose);
+		CHECK_FALSE(damage.Full);
+		store.ClearChanges();
+		placement.Frame.Position.X = 4.0f;
+		store.Set(hidden, placement);
+		const auto afterClear = render::CollectPresentationSourceDamage(store, *draw, 1, 0, 0);
+		CHECK_FALSE(afterClear.Pose);
+		CHECK_FALSE(afterClear.Full);
+	}
+}
+
+TEST_CASE("cached presentation discards obsolete portal cuts", "[render][presentation][cache][portal]") {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	render::RegisterPresentationComponents();
+	ecs::Store store("cached-portal-cuts");
+	store.SetResource(render::DrawList{});
+	const ecs::Entity workspace = scene::InstallServices(store);
+	scene::PartDesc paneDesc;
+	paneDesc.Size = {16.0f, 9.0f, .4f};
+	const ecs::Entity pane = scene::MakePart(store, paneDesc);
+	REQUIRE(store.SetParent(pane, workspace));
+	paneDesc.Frame.Position.Z = -20.0f;
+	const ecs::Entity destination = scene::MakePart(store, paneDesc);
+	const ecs::Entity surface = store.CreateInstance(ecs::Classes::Find(Name("SurfaceCamera")), "Mouth");
+	REQUIRE(store.SetParent(surface, pane));
+	scene::SurfaceCamera camera;
+	camera.Face = scene::NormalId::Front;
+	camera.Surface = 0;
+	store.Set(surface, camera);
+	scene::Portal portal{destination};
+	portal.DestinationWorld = Name("other-room");
+	store.Set(surface, portal);
+	scene::PartDesc bodyDesc;
+	bodyDesc.Frame.Position.Z = -.2f;
+	bodyDesc.Simulated = true;
+	const ecs::Entity body = scene::MakePart(store, bodyDesc);
+	REQUIRE(store.SetParent(body, workspace));
+	REQUIRE(scene::SyncRendered(store) == 2);
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	const auto bodyRow = [&]() -> const scene::DrawInstance & {
+		const auto *draw = store.Resource<render::DrawList>();
+		for (const auto &row : draw->Instances) {
+			if (row.Source == body.Id) return row;
+		}
+		FAIL("the presented body is missing");
+		return draw->Instances.front();
+	};
+	REQUIRE(bodyRow().SeamMask == 1);
+	REQUIRE(bodyRow().SeamNormal.Magnitude() > .9f);
+	store.ClearChanges();
+	SECTION("the body leaves the aperture through a pose-only update") {
+		auto placement = *store.Get<scene::Transform>(body);
+		placement.Frame.Position.X = 30.0f;
+		store.Set(body, placement);
+	}
+	SECTION("the portal stops participating while geometry is unchanged") {
+		portal.Enabled = false;
+		store.Set(surface, portal);
+	}
+	SECTION("the aperture moves away while the body stays still") {
+		auto placement = *store.Get<scene::Transform>(pane);
+		placement.Frame.Position.X = 30.0f;
+		store.Set(pane, placement);
+	}
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	CHECK(bodyRow().SeamMask == 0);
+	CHECK(bodyRow().SeamNormal.Magnitude() == 0.0f);
+	CHECK(bodyRow().SeamOffset == 0.0f);
+	CHECK(bodyRow().SeamFirst.Magnitude() == 0.0f);
+	CHECK(bodyRow().SeamSecond.Magnitude() == 0.0f);
+	CHECK(bodyRow().SeamCentre.Magnitude() == 0.0f);
+
+	// Reusing a restored source must derive the original cut again.
+	auto placement = *store.Get<scene::Transform>(body);
+	placement.Frame = bodyDesc.Frame;
+	store.Set(body, placement);
+	placement = *store.Get<scene::Transform>(pane);
+	placement.Frame = {};
+	store.Set(pane, placement);
+	portal.Enabled = true;
+	store.Set(surface, portal);
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	CHECK(bodyRow().SeamMask == 1);
+	CHECK(bodyRow().SeamNormal.Magnitude() > .9f);
+	store.ClearChanges();
+	render::CollectInstances(store, render::DrawCollectionTime::CurrentTick);
+	CHECK(bodyRow().SeamMask == 1);
+	CHECK(bodyRow().SeamNormal.Magnitude() > .9f);
 }
 
 TEST_CASE("pose-only presentation preserves static draw metadata", "[render][presentation][cache]") {

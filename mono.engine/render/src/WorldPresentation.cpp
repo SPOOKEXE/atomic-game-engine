@@ -134,6 +134,30 @@ namespace engine::render {
 			);
 		}
 
+		bool ClearAbsentCaptureLabels(const ecs::Store &store, DrawList &drawList) {
+			const auto *attributes = store.Resource<ecs::AttributeTable>();
+			if (attributes != nullptr && !attributes->Entities.empty()) return false;
+
+			// Clear retained rows once when their authored tables disappear. Fresh
+			// source rows and seam copies then keep their zero label defaults.
+			if (!drawList.ObjectLabels.empty() || !drawList.SemanticLabels.empty() ||
+				!drawList.PartLabels.empty()) {
+				ENGINE_PROFILE_CAT("clear absent capture labels", core::ProfileCategory::Simulation);
+				for (scene::DrawInstance &instance : drawList.Instances) {
+					instance.ObjectLabel = 0;
+					instance.SemanticLabel = 0;
+					instance.PartLabel = 0;
+				}
+				drawList.ObjectLabels.clear();
+				drawList.SemanticLabels.clear();
+				drawList.PartLabels.clear();
+			}
+			drawList.ObjectLabelsValid = true;
+			drawList.SemanticLabelsValid = true;
+			drawList.PartLabelsValid = true;
+			return true;
+		}
+
 		void AssignObjectLabels(ecs::Store &store, DrawList &drawList) {
 			drawList.ObjectLabelsValid = true;
 			const core::Name attributeName("DataFactoryId");
@@ -845,8 +869,9 @@ namespace engine::render {
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 			{
 				ENGINE_PROFILE_CAT("reuse draw list.seams", engine::core::ProfileCategory::Simulation);
-				(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+				AppendPresentationSeamRows(store, *drawList);
 			}
+			if (ClearAbsentCaptureLabels(store, *drawList)) return;
 			{
 				ENGINE_PROFILE_CAT(
 					"reuse draw list.object labels", engine::core::ProfileCategory::Simulation
@@ -896,8 +921,9 @@ namespace engine::render {
 				}
 				{
 					ENGINE_PROFILE_CAT("update draw frames.seams", engine::core::ProfileCategory::Simulation);
-					(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+					AppendPresentationSeamRows(store, *drawList);
 				}
+				if (ClearAbsentCaptureLabels(store, *drawList)) return;
 				{
 					ENGINE_PROFILE_CAT(
 						"update draw frames.object labels", engine::core::ProfileCategory::Simulation
@@ -1185,6 +1211,7 @@ namespace engine::render {
 		// whole copies straddling two panes. The same call serves a replica,
 		// which has a draw list and no simulation behind it.
 		AppendPresentationSeamRows(store, *drawList);
+		if (ClearAbsentCaptureLabels(store, *drawList)) return;
 		AssignObjectLabels(store, *drawList);
 		AssignAuthoredLabels(
 			store,

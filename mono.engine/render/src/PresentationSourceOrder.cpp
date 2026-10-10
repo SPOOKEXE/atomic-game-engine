@@ -30,6 +30,17 @@ namespace engine::render {
 	}
 
 	void AppendPresentationSeamRows(ecs::Store &store, DrawList &drawList) {
+		// Source rows survive between collections; the cut from the previous
+		// presentation does not. Recompute it even when the last mouth vanished.
+		for (scene::DrawInstance &instance : drawList.Instances) {
+			if (instance.SeamMask == 0) continue;
+			instance.SeamNormal = {};
+			instance.SeamOffset = 0.0f;
+			instance.SeamFirst = {};
+			instance.SeamSecond = {};
+			instance.SeamCentre = {};
+			instance.SeamMask = 0;
+		}
 		(void)scene::CutAndCloneSeams(store, drawList.Instances);
 	}
 }

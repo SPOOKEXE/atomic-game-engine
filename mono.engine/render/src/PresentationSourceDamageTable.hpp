@@ -62,16 +62,15 @@ namespace engine::render {
 					if (writes == seen.Writes) {
 						return;
 					}
+					// Cleared records can include visible writes even when today's
+					// changed set contains only irrelevant rows.
+					changed = store.ComponentClearedChangeVersion<Component>() > seen.Writes;
 					seen.Writes = writes;
-
-					bool visited = false;
-					store.EachChanged<Component>([&](Entity entity, Component &) {
-						visited = true;
-						changed |= relevant(entity);
-					});
-					// Epochs survive an unpresented tick, row bits do not. An empty
-					// walk therefore means the cached rows may be stale.
-					changed |= !visited;
+					if (!changed) {
+						store.EachChanged<Component>([&](Entity entity, Component &) {
+							changed |= relevant(entity);
+						});
+					}
 				} else {
 					changed = writes != seen.Writes;
 					seen.Writes = writes;
