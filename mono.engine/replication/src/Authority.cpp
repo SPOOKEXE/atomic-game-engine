@@ -149,7 +149,7 @@ namespace engine::replication {
 		}
 
 		for (const uint64_t entity : entities) {
-			Rows.push_back(Row{entity, Outstanding{}});
+			Rows.push_back(Row{entity, Outstanding{.Initial = true}});
 		}
 
 		// **Stable, and that is what keeps an existing row.** Everything already
@@ -1348,12 +1348,21 @@ namespace engine::replication {
 			if (urgentFirst != urgentSecond) {
 				return urgentFirst;
 			}
+			// Older updates retain their deadline even under continuous creation.
+			if (urgentFirst && waitedFirst != waitedSecond) return waitedFirst > waitedSecond;
+			if (first.Initial != second.Initial) return first.Initial;
 
 			if (!urgentFirst && first.Hint != second.Hint) {
 				return first.Hint > second.Hint;
 			}
 			if (waitedFirst != waitedSecond) {
 				return waitedFirst > waitedSecond;
+			}
+
+			// Initial columns share packet headers. Interleaving every component of
+			// each new instance repeatedly spends the same entry overhead.
+			if (first.Initial && first.Entry != second.Entry) {
+				return first.Entry < second.Entry;
 			}
 
 			if (first.Entity.Id != second.Entity.Id) {
@@ -1560,6 +1569,7 @@ namespace engine::replication {
 
 				bytes += encoded.size();
 				messages++;
+				const size_t firstValue = placed.Values;
 				placed.Values += rows;
 
 				emittedAt = client.Outgoing.size();
@@ -1567,6 +1577,14 @@ namespace engine::replication {
 
 				Carried carried;
 				carried.Values = true;
+				carried.ValueFirst = static_cast<uint32_t>(client.ValueEdits.size());
+				carried.ValueCount = static_cast<uint32_t>(rows);
+				for (size_t position = firstValue; position < placed.Values; ++position) {
+					const Candidate &candidate = lane.Candidates[lane.Order[position]];
+					client.ValueEdits.push_back(
+						{lane.SourceSlot[candidate.Entry], candidate.Entity.Id, candidate.WaitingSince}
+					);
+				}
 				client.Carried_.push_back(carried);
 				emitted = std::move(piece);
 			}
@@ -2039,7 +2057,8 @@ namespace engine::replication {
 						entity,
 						pending.WaitingSince,
 						NOWHERE,
-						0.0f
+						0.0f,
+						pending.Initial
 					}
 				);
 				component.Entities.push_back(entity);
@@ -2342,6 +2361,14 @@ namespace engine::replication {
 				lane.Order[position] = static_cast<uint32_t>(position);
 			}
 
+			// A transport can admit fewer messages than the authority budget.
+			// Preserved refusal ages must order that next pass even if Pack fits it all.
+			const bool prioritised = client.TransportRefusedValues;
+			if (prioritised) {
+				Prioritise(lane, handle, tick);
+				client.TransportRefusedValues = false;
+			}
+
 			Placement placed;
 			{
 				const Lane::Timed timed(lane, Lane::Phase::Pack);
@@ -2352,8 +2379,9 @@ namespace engine::replication {
 				client.Outgoing.resize(structureMessages);
 				client.Carried_.resize(structureMessages);
 				client.Edits.resize(structureEdits);
+				client.ValueEdits.clear();
 
-				Prioritise(lane, handle, tick);
+				if (!prioritised) Prioritise(lane, handle, tick);
 
 				const Lane::Timed repacked(lane, Lane::Phase::Pack);
 				placed = Pack(lane, client, delta, Settings_.MessagesPerTick);
@@ -2559,6 +2587,7 @@ namespace engine::replication {
 				client.Outgoing.clear();
 				client.Carried_.clear();
 				client.Edits.clear();
+				client.ValueEdits.clear();
 
 				// Released a tick after the cursor reached the end, because
 				// `Unsent` is called after `Publish` has returned and may put it
@@ -2892,7 +2921,16 @@ namespace engine::replication {
 		}
 
 		if (carried.Values) {
+			found->TransportRefusedValues = true;
 			found->Streamed = found->StreamedBefore;
+			// Packing is not transport admission. A refused row keeps its age
+			// so repeated backpressure cannot permanently favour the same prefix.
+			for (uint32_t at = carried.ValueFirst; at < carried.ValueFirst + carried.ValueCount; ++at) {
+				const ValueEdit &edit = found->ValueEdits[at];
+				Outstanding &pending = found->Unconfirmed[edit.Slot][edit.Entity];
+				pending.SentAt = 0;
+				pending.WaitingSince = edit.WaitingSince;
+			}
 		}
 
 		// A question that was never asked may not be answered. Without this a

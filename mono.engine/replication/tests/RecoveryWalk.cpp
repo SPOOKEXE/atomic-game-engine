@@ -10,11 +10,17 @@
 // was serialising two thousand rows a component to fill a link that took forty.
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/types/CFrame.hpp>
+#include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/replication/Authority.hpp>
+#include <engine/replication/Defaults.hpp>
 #include <engine/replication/Protocol.hpp>
 #include <engine/replication/Replica.hpp>
+#include <engine/scene/Components.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -50,6 +56,12 @@ namespace recovery_walk_test {
 		}();
 		(void)once;
 	}
+
+	// The immutable host policy may first be consumed by another suite.
+	[[maybe_unused]] const bool SceneRegistered = [] {
+		engine::scene::RegisterSceneClasses();
+		return true;
+	}();
 
 	struct Pair {
 		explicit Pair(size_t recoveryRows) : Server("recovery_server"), Client("recovery_client") {
@@ -266,4 +278,271 @@ TEST_CASE("recovery retires removed components and destroyed entities", "[replic
 	CHECK(pair.Client.Get<Tally>(replacement)->X == 11.0f);
 	REQUIRE(pair.Client.Get<Tally>(surviving) != nullptr);
 	CHECK(pair.Client.Get<Tally>(surviving)->X == 17.0f);
+}
+
+TEST_CASE("transport-refused recovery rows retain their turn", "[replication][recovery]") {
+	RegisterTypes();
+	Store server("refused-recovery-server");
+	Store client("refused-recovery-client");
+	AuthoritySettings settings;
+	settings.ChunkBytes = 256;
+	settings.MessagesPerTick = 8;
+	settings.RecoveryRowsPerTick = 32;
+	Authority authority(settings);
+	authority.Replicate(Name("recovery_walk_test.Tally"));
+	server.Observe<Tally>();
+	const ClientId handle = authority.Admit();
+	Replica replica;
+	uint64_t now = 0;
+	for (int attempt = 0; attempt < 32 && !replica.Joined(); ++attempt) {
+		authority.Publish(server, ++now);
+		for (const auto &message : authority.Outgoing(handle))
+			replica.Receive(client, message);
+		authority.Receive(handle, replica.Acknowledge());
+	}
+	REQUIRE(replica.Joined());
+	std::vector<Entity> made;
+	for (int index = 0; index < 128; ++index) {
+		const auto entity = server.Create();
+		server.Set<Tally>(entity, {7.0f});
+		made.push_back(entity);
+	}
+	size_t refused = 0;
+	// Keep multipart ACKs incomplete, as on a saturated datagram link.
+	// Only the first delta fits, while structural messages still arrive.
+	for (int tick = 0; tick < 64; ++tick) {
+		authority.Publish(server, ++now);
+		bool acceptedDelta = false;
+		const auto messages = authority.Outgoing(handle);
+		for (size_t index = 0; index < messages.size(); ++index) {
+			const auto kind = engine::replication::PeekMessageKind(messages[index]);
+			if (kind == engine::replication::MessageKind::Delta && acceptedDelta) {
+				authority.Unsent(handle, index);
+				++refused;
+				continue;
+			}
+			if (kind == engine::replication::MessageKind::Delta) acceptedDelta = true;
+			replica.Receive(client, messages[index]);
+		}
+		server.ClearChanges();
+	}
+	REQUIRE(refused > 0);
+	for (const auto entity : made) {
+		REQUIRE(client.Alive(entity));
+		const auto *value = client.Get<Tally>(entity);
+		REQUIRE(value != nullptr);
+		CHECK(value->X == 7.0f);
+	}
+}
+
+TEST_CASE("dirty transforms beyond one column chunk reach their replicas", "[replication][recovery]") {
+	bool completeParts = false;
+	SECTION("the observed Transform alone") {}
+	SECTION("complete Part creation competes with movement") {
+		completeParts = true;
+	}
+	engine::scene::RegisterSceneClasses();
+	Store server("many-transform-server");
+	Store client("many-transform-client");
+	AuthoritySettings settings;
+	settings.MessagesPerTick = 8;
+	Authority authority(settings);
+	if (completeParts) {
+		bool transformRegistered = false;
+		for (const auto &component : engine::replication::DefaultReplicatedComponents()) {
+			transformRegistered |= component.Name == "scene.Transform";
+			authority.Replicate(Name(component.Name), component.Detection, component.Resource);
+		}
+		REQUIRE(transformRegistered);
+	} else {
+		authority.Replicate(Name("scene.Transform"));
+	}
+	server.Observe<engine::scene::Transform>();
+	const auto handle = authority.Admit();
+	Replica replica;
+	uint64_t now = 0;
+	for (int attempt = 0; attempt < 32 && !replica.Joined(); ++attempt) {
+		authority.Publish(server, ++now);
+		for (const auto &message : authority.Outgoing(handle))
+			replica.Receive(client, message);
+		authority.Receive(handle, replica.Acknowledge());
+	}
+	REQUIRE(replica.Joined());
+	std::vector<Entity> made;
+	for (int index = 0; index < 1536; ++index) {
+		const auto entity =
+			completeParts ? server.CreateInstance(engine::scene::PartClass()) : server.Create();
+		server.Set<engine::scene::Transform>(entity, {});
+		made.push_back(entity);
+	}
+	size_t initialPayload = 0;
+	if (completeParts) {
+		for (const auto &component : engine::replication::DefaultReplicatedComponents()) {
+			const auto id = engine::ecs::Components::Find(Name(component.Name));
+			const auto *value = server.GetComponent(made.front(), id);
+			if (value == nullptr) continue;
+			const auto &descriptor = engine::ecs::Components::Describe(id);
+			engine::core::ByteWriter writer;
+			if (descriptor.Size != 0) {
+				if (descriptor.Wire.Present())
+					descriptor.Wire.Write(writer, value, 1);
+				else
+					descriptor.Write(writer, value, 1);
+			}
+			initialPayload += sizeof(uint64_t) + writer.Bytes().size();
+		}
+	}
+	INFO("one complete Part initial value payload bytes=" << initialPayload);
+	std::string progress;
+	for (int tick = 0; tick < 256; ++tick) {
+		for (size_t index = 0; index < made.size(); ++index) {
+			server.Set<engine::scene::Transform>(
+				made[index],
+				{engine::core::CFrame(
+					engine::core::Vector3{static_cast<float>(index % 100), static_cast<float>(tick % 2), 0.0f}
+				)}
+			);
+		}
+		size_t changed = 0;
+		server.EachChangedRuns(
+			engine::ecs::Components::Of<engine::scene::Transform>(),
+			[&](const Entity *, void *, size_t rows) { changed += rows; }
+		);
+		REQUIRE(changed == made.size());
+		authority.Publish(server, ++now);
+		size_t emittedTransforms = 0;
+		for (const auto &message : authority.Outgoing(handle)) {
+			engine::core::ByteReader reader(message);
+			engine::replication::Message decoded;
+			if (engine::replication::ReadMessage(reader, decoded) &&
+				decoded.Kind == engine::replication::MessageKind::Delta)
+				for (const auto &component : decoded.Delta.Components)
+					if (component.Component == Name("scene.Transform"))
+						emittedTransforms += component.Entities.size();
+			replica.Receive(client, message);
+		}
+		authority.Receive(handle, replica.Acknowledge());
+		server.ClearChanges();
+		if ((tick + 1) % 32 == 0) {
+			size_t present = 0;
+			for (const auto entity : made)
+				present += client.Has<engine::scene::Transform>(entity);
+			progress += " tick=" + std::to_string(tick + 1) + " transforms=" + std::to_string(present) +
+						" emitted=" + std::to_string(emittedTransforms) +
+						" deferred=" + std::to_string(authority.Stats().Deferred) +
+						" oldest=" + std::to_string(authority.Stats().Stalest) +
+						" oversized=" + std::to_string(authority.Stats().Oversized) +
+						" prefaces=" + std::to_string(replica.Stats().Prefaces);
+		}
+	}
+	size_t received = 0;
+	for (const auto entity : made)
+		received += client.Has<engine::scene::Transform>(entity);
+	INFO(progress);
+	CHECK(received == made.size());
+}
+
+TEST_CASE("initial values arrive before higher-priority continuing changes", "[replication][recovery]") {
+	RegisterTypes();
+	Store server("initial-priority-server");
+	Store client("initial-priority-client");
+	AuthoritySettings settings;
+	settings.ChunkBytes = 192;
+	settings.MessagesPerTick = 1;
+	settings.BytesPerTick = 192;
+	settings.RecoveryRowsPerTick = 8;
+	Authority authority(settings);
+	authority.Replicate(Name("recovery_walk_test.Tally"));
+	server.Observe<Tally>();
+	const auto handle = authority.Admit();
+	Replica replica;
+	std::vector<Entity> existing;
+	for (int index = 0; index < 8; ++index) {
+		const auto entity = server.Create();
+		server.Set<Tally>(entity, {});
+		existing.push_back(entity);
+	}
+	uint64_t now = 0;
+	const auto deliver = [&] {
+		authority.Publish(server, ++now);
+		for (const auto &message : authority.Outgoing(handle))
+			replica.Receive(client, message);
+		authority.Receive(handle, replica.Acknowledge());
+		server.ClearChanges();
+	};
+	for (int attempt = 0; attempt < 32 && !replica.Joined(); ++attempt)
+		deliver();
+	REQUIRE(replica.Joined());
+	authority.SetPriority([last = existing.back()](ClientId, Entity entity) {
+		return entity.Id <= last.Id ? 100.0f : 0.0f;
+	});
+	std::vector<Entity> created;
+	for (int index = 0; index < 8; ++index) {
+		const auto entity = server.Create();
+		server.Set<Tally>(entity, {7.0f});
+		created.push_back(entity);
+	}
+	for (int tick = 0; tick < 8; ++tick) {
+		for (const auto entity : existing)
+			server.Set<Tally>(entity, {static_cast<float>(tick)});
+		deliver();
+	}
+	for (const auto entity : created) {
+		const auto *value = client.Get<Tally>(entity);
+		REQUIRE(value != nullptr);
+		CHECK(value->X == 7.0f);
+	}
+}
+
+TEST_CASE("continuing births preserve the deadline of an ordinary update", "[replication][recovery]") {
+	RegisterTypes();
+	Store server("birth-pressure-server");
+	Store client("birth-pressure-client");
+	AuthoritySettings settings;
+	settings.ChunkBytes = 192;
+	settings.MessagesPerTick = 2;
+	settings.BytesPerTick = 384;
+	settings.RecoveryRowsPerTick = 512;
+	settings.StarvationTicks = 8;
+	Authority authority(settings);
+	authority.Replicate(Name("recovery_walk_test.Tally"));
+	server.Observe<Tally>();
+	const Entity existing = server.Create();
+	server.Set<Tally>(existing, {});
+	const auto handle = authority.Admit();
+	Replica replica;
+	uint64_t now = 0;
+	const auto deliver = [&] {
+		authority.Publish(server, ++now);
+		for (const auto &message : authority.Outgoing(handle))
+			replica.Receive(client, message);
+		authority.Receive(handle, replica.Acknowledge());
+		server.ClearChanges();
+	};
+	for (int attempt = 0; attempt < 32 && !replica.Joined(); ++attempt)
+		deliver();
+	REQUIRE(replica.Joined());
+
+	std::vector<Entity> births;
+	uint64_t firstUpdate = 0;
+	// A structure message leaves one value packet, holding two Tally rows.
+	// Four births every tick therefore keep initial values over capacity.
+	for (uint64_t tick = 1; tick <= 40; ++tick) {
+		for (int index = 0; index < 4; ++index) {
+			const Entity entity = server.Create();
+			server.Set<Tally>(entity, {1000.0f});
+			births.push_back(entity);
+		}
+		server.Set<Tally>(existing, {static_cast<float>(tick)});
+		deliver();
+		const auto *value = client.Get<Tally>(existing);
+		REQUIRE(value != nullptr);
+		if (value->X > 0.0f && firstUpdate == 0) firstUpdate = tick;
+	}
+	CHECK(authority.Stats().Deferred > 0);
+	REQUIRE(firstUpdate > 0);
+	CHECK(firstUpdate <= settings.StarvationTicks + 3);
+	CHECK(client.Get<Tally>(existing)->X >= 16.0f);
+	for (const Entity entity : births)
+		CHECK(client.Alive(entity));
 }

@@ -204,6 +204,9 @@ namespace engine::replication {
 		}
 
 		const net::ChannelKind channel = ChannelFor(read.Kind);
+		// Due reliable creations must spend the bounded packet budget before
+		// newer deltas, or a saturated link can postpone them indefinitely.
+		RetryReliable(nowSeconds);
 		if (channel == net::ChannelKind::Reliable && !Sender.HasRoom()) {
 			return false;
 		}
@@ -211,11 +214,8 @@ namespace engine::replication {
 		return Emit(channel, message, nowSeconds);
 	}
 
-	size_t Session::Flush(double nowSeconds) {
-		ENGINE_PROFILE_CAT("replica.flush", core::ProfileCategory::Network);
-
-		size_t sent = FlushDelayed(nowSeconds);
-
+	size_t Session::RetryReliable(double nowSeconds) {
+		size_t sent = 0;
 		for (const net::ReliableSender::Unacknowledged &waiting : Sender.Due(nowSeconds)) {
 			if (!Link_.Reserve(waiting.Payload.size())) {
 				continue;
@@ -235,6 +235,14 @@ namespace engine::replication {
 			Stats_.Retransmissions++;
 			sent++;
 		}
+		return sent;
+	}
+
+	size_t Session::Flush(double nowSeconds) {
+		ENGINE_PROFILE_CAT("replica.flush", core::ProfileCategory::Network);
+
+		size_t sent = FlushDelayed(nowSeconds);
+		sent += RetryReliable(nowSeconds);
 
 		// **A packet carrying only an acknowledgement, when nothing else is
 		// going.** `net::Link` has described this since v0.3 - "a connection

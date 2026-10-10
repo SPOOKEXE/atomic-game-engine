@@ -7,12 +7,9 @@
 // value that crosses in the studio and not on a server". By v0.13 the diagnostic
 // harness had drifted by three rows and nothing had noticed.
 //
-// **This suite tests the rule and not `scene`'s component list**, because
-// `replication` does not link `scene` and must not: the whole property that
-// keeps `net` and `replication` separable is that neither knows what a component
-// *is*. So the components below are registered here, under `scene.` names, to
-// exercise the prefix, the exclusions and the detector - and what the real scene
-// holds is `scene`'s business, asserted where both are linked.
+// The prefix and detector rules use this suite's own component spellings.
+// The test binary also registers real scene and GUI types for integration cases;
+// policy probes must not claim those names or depend on case execution order.
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
@@ -39,8 +36,8 @@ namespace defaults_test {
 	};
 
 	// One that should not, and for a reason the derivation checks rather than
-	// guesses: everything but the two tick-written components is signature
-	// detected, and a signature is a hash of the bytes - which a type holding a
+	// guesses: a component without an explicit observed codec is signature
+	// detected, and a signature is a hash of the bytes, which a type holding a
 	// `std::string` does not have. The three scene catalogues are exactly this
 	// shape and were a warning per host per run before the filter existed.
 	struct Bulky {
@@ -79,18 +76,10 @@ namespace defaults_test {
 		std::string Text;
 	};
 
-	// **Registered by this suite, which is what makes the cases below say
-	// anything.** The table is a function-local static built on first use, so in
-	// a host it is built after start-up registered everything and here it is
-	// built by whichever case runs first - which is why every case calls this
-	// and why the names are this suite's own.
-	//
-	// They are `scene.`-prefixed because the prefix is the rule under test.
-	// Nothing in this binary registers a real `scene.` name - `replication` does
-	// not link `scene` and must not - so there is no collision to have. An
-	// earlier version of this suite registered stand-ins under the *real* names
-	// and aborted the binary in suite order, which is the mistake these
-	// spellings avoid rather than a style preference.
+	// Register probes before any test executes: the default table is immutable
+	// after its first use, and integration cases may consume it before this suite.
+	// Suite-specific scene and GUI names exercise the shared-prefix policy
+	// without colliding with real component registrations in the same binary.
 	void Ready() {
 		engine::ecs::Components::Register<Shared>(
 			"scene.DefaultsTestShared",
@@ -162,6 +151,11 @@ namespace defaults_test {
 		// `ecs.AttributeTable`, which is the whole set the case has to classify.
 		engine::ecs::Classes::RegisterInstanceRoot();
 	}
+
+	[[maybe_unused]] const bool ProbesRegistered = [] {
+		Ready();
+		return true;
+	}();
 }
 
 namespace {
@@ -377,8 +371,10 @@ TEST_CASE("the set is derived, and never contradicts the exclusions", "[replicat
 							  component.Name == "script.CodeSourceContainerSelector" ||
 							  component.Name == "script.Disabled" || component.Name == "script.Program";
 		const bool attributes = component.Name == "ecs.AttributeTable";
+		const bool worldResource =
+			component.Name == "scene.SurfaceBounces" || component.Name == "scene.SurfaceLimit";
 		CHECK((prefixed || instance || scripted || attributes));
-		CHECK(component.Resource == attributes);
+		CHECK(component.Resource == (attributes || worldResource));
 	}
 }
 
@@ -535,10 +531,10 @@ TEST_CASE("only what a system writes or a hash cannot cover is observed", "[repl
 	//
 	// **And the third reason, which is not about how often a value is written.**
 	// A signature hashes the object representation, and a `std::string`'s object
-	// representation is a pointer - so `gui.Label`, `gui.Entry`, the two
-	// node-canvas records and `script.Program` cannot be signed at all and are
-	// observed instead. That is the mechanism `Authority::Resign` already names
-	// when it declines a non-trivial component rather than another detector.
+	// representation is a pointer. Text, shader source, editable content, graph
+	// definitions, particle samples and GUI records therefore use their bounded
+	// codecs with observed changes. Attributes and surface budgets are world
+	// resources, so they also use the observed resource path.
 	//
 	// Asserted as a closed set rather than as a count, because the list depends
 	// on what this process registered and the *rule* does not.
@@ -549,6 +545,10 @@ TEST_CASE("only what a system writes or a hash cannot cover is observed", "[repl
 		INFO("component: " << component.Name);
 		CHECK(
 			(component.Name == "scene.Transform" || component.Name == "scene.Motion" ||
+			 component.Name == "scene.TextContent" || component.Name == "scene.ShaderSource" ||
+			 component.Name == "scene.EditableMesh" || component.Name == "scene.EditableImage" ||
+			 component.Name == "scene.ImageGraph" || component.Name == "scene.GpuParticleField" ||
+			 component.Name == "scene.SurfaceBounces" || component.Name == "scene.SurfaceLimit" ||
 			 component.Name == "gui.Label" || component.Name == "gui.Entry" ||
 			 component.Name == "gui.NodeCanvasNode" || component.Name == "gui.NodeCanvasGroup" ||
 			 component.Name == "script.Program" || component.Name == "ecs.AttributeTable")

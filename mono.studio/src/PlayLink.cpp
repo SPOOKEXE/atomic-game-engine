@@ -187,18 +187,35 @@ namespace studio {
 		// that alone would still admit the camera's instance, transform and lens
 		// into a joining client's snapshot. Filter the entity before structure and
 		// component replication so each replica keeps only its predicted viewer.
-		Server.SetInterest(
-			[this](engine::replication::ClientId, engine::ecs::Entity entity, const Store &store) {
+		Server.SetInterestBatch([this](
+									engine::replication::ClientId,
+									const Store &store,
+									std::span<const engine::ecs::Entity> entities,
+									std::span<uint8_t> accepted
+								) {
+			// Service lookup walks the hierarchy. Resolve it once for this pass,
+			// rather than once per entity, and keep all visibility checks live.
+			const bool furnished = engine::scene::PlayersOf(store) != engine::ecs::NULL_ENTITY;
+			for (size_t index = 0; index < entities.size(); ++index) {
+				const auto entity = entities[index];
 				if (store.Has<engine::scene::TransientComponent>(entity) ||
-					engine::ecs::IsClientLocalInstance(store, entity))
-					return false;
+					engine::ecs::IsClientLocalInstance(store, entity)) {
+					accepted[index] = 0;
+					continue;
+				}
 				// Bare stores are useful link fixtures; service worlds use real server visibility.
-				if (engine::scene::PlayersOf(store) == engine::ecs::NULL_ENTITY) return true;
-				if (!engine::scene::VisibleToClients(store, entity)) return false;
+				if (!furnished) {
+					accepted[index] = 1;
+					continue;
+				}
+				if (!engine::scene::VisibleToClients(store, entity)) {
+					accepted[index] = 0;
+					continue;
+				}
 				const auto owner = engine::scene::PrivatePlayerOwning(store, entity);
-				return owner == engine::ecs::NULL_ENTITY || owner == Player_;
+				accepted[index] = owner == engine::ecs::NULL_ENTITY || owner == Player_;
 			}
-		);
+		});
 
 		Handle = Server.Admit();
 

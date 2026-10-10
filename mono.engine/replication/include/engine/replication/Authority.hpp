@@ -763,6 +763,9 @@ namespace engine::replication {
 		// One entity's value for one component, from the sender's side.
 		//
 		struct Outstanding {
+			// Initial state keeps priority until an admitted value is acknowledged.
+			bool Initial = false;
+
 			uint64_t SentAt = 0;
 
 			uint64_t WaitingSince = 0;
@@ -887,6 +890,12 @@ namespace engine::replication {
 			bool Restore = false;
 		};
 
+		struct ValueEdit {
+			size_t Slot = 0;
+			uint64_t Entity = 0;
+			uint64_t WaitingSince = 0;
+		};
+
 		// What one outgoing message moved, so a refusal can move it back.
 		//
 		struct Carried {
@@ -903,6 +912,8 @@ namespace engine::replication {
 			uint32_t Count = 0;
 
 			bool Values = false;
+			uint32_t ValueFirst = 0;
+			uint32_t ValueCount = 0;
 
 			// Whether this message was the tick's audit. A refused one leaves
 			// the client with nothing to answer, so the record of what it owes
@@ -996,6 +1007,8 @@ namespace engine::replication {
 			std::vector<Carried> Carried_;
 
 			std::vector<Edit> Edits;
+			std::vector<ValueEdit> ValueEdits;
+			bool TransportRefusedValues = false;
 
 			// The audit this client owes an answer to, and the tick the last
 			// one went out on.
@@ -1063,6 +1076,7 @@ namespace engine::replication {
 			size_t BearingSlot = NOWHERE;
 
 			float Hint = 0.0f;
+			bool Initial = false;
 		};
 
 		// How much of a delta a packing pass got onto the wire.
