@@ -388,7 +388,6 @@ namespace client {
 		using namespace engine;
 		scene::CameraPortalView history;
 		ecs::Entity camera = ecs::NULL_ENTITY;
-		std::optional<scene::SeamTransform> carriedArm;
 		std::optional<core::CFrame> armInput;
 		bool subjectFollowing = false;
 		universe.Enter(inputWorld, [&](Store &store) {
@@ -416,7 +415,6 @@ namespace client {
 					if ((placed.Position - eye.Position).Magnitude() < .001f &&
 						placed.LookVector().Dot(eye.LookVector()) > .9999f &&
 						placed.UpVector().Dot(eye.UpVector()) > .9999f) {
-						carriedArm = pane;
 						// **The mapped arm, and the reason is the guard above.** The
 						// comparison only passes when `PlaceCamera` already produced
 						// exactly this pose, so the authored input for the route has to
@@ -447,9 +445,9 @@ namespace client {
 				   (leftAtOrigin.Position - rightAtOrigin.Position).Magnitude() < .001f &&
 				   std::abs(glm::dot(leftAtOrigin.Rotation(), rightAtOrigin.Rotation())) > .9999f;
 		};
-		// A physical blocker can shorten a local arm before it reaches a pane. With no
-		// active route that eye belongs with its subject, rather than a stale projection.
-		if (subjectFollowing && !carriedArm && history.Route.empty() && history.Started &&
+		// Following placement has already resolved its arm. After body continuation,
+		// an empty local route must drop its old map instead of carrying that eye twice.
+		if (subjectFollowing && history.Route.empty() && history.Started &&
 			history.World == authored.Text() && !sameMap(history.FromInput, {}))
 			history = {};
 		// A route can start before a replica learns its authored name, and then

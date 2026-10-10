@@ -2004,6 +2004,7 @@ TEST_CASE("foreground portal bodies come from the viewer's replica", "[client][p
 }
 
 TEST_CASE("a mapped follow arm keeps the pose the camera already has", "[client][camera-portal-world]") {
+	const bool rebased = GENERATE(false, true);
 	// **The arm and the eye are one decision, and this is where they came apart.**
 	// A follow camera whose subject has just walked through a same-world mouth
 	// swings its arm back out through the mouth it came in by, and `PlaceCamera`
@@ -2026,13 +2027,25 @@ TEST_CASE("a mapped follow arm keeps the pose the camera already has", "[client]
 		REQUIRE(engine::scene::GatherPortalSeams(store, seams) == 2);
 		REQUIRE(engine::scene::PlaceCamera(store));
 		placed = store.Get<engine::scene::Transform>(pair.Camera)->Frame;
+		if (rebased) {
+			engine::scene::CameraPortalView history;
+			REQUIRE(
+				engine::scene::StepCameraPortalView(
+					history, universe.NameOf(pair.World).Text(), placed, {}
+				) == engine::scene::CameraPortalStep::Settled
+			);
+			REQUIRE(
+				engine::scene::RebaseCameraPortalView(history, engine::scene::SeamMapping(seams.front()))
+			);
+			REQUIRE(history.Route.empty());
+			REQUIRE((history.FromInput.Place({}).Position).Magnitude() > 1.0f);
+			store.Set(pair.Camera, history);
+		}
 	});
 
 	// The arm really did cross, and the map is what carried it: the eye is in
 	// the plain's chart, twelve studs out from the mouth, rather than up the
 	// corridor where the orbit was. A case that stopped here would prove nothing.
-	const engine::core::CFrame orbit = placed * engine::core::CFrame{}.Inverse();
-	(void)orbit;
 	CHECK(placed.Position.X == Catch::Approx(0.0f).margin(0.5f));
 	CHECK(placed.Position.Z == Catch::Approx(12.0f).margin(0.5f));
 
@@ -2043,7 +2056,7 @@ TEST_CASE("a mapped follow arm keeps the pose the camera already has", "[client]
 	resolved = client::ResolveCameraPortalWorld(universe, pair.World, pair.World, eye, lens);
 
 	// The world is unchanged - one world holds both charts - and the pose is
-	// untouched, because the route has no map of its own to compose onto it.
+	// untouched. A body-rebased empty route must discard its previous input map.
 	CHECK(resolved == pair.World);
 	CHECK(eye.FuzzyEq(placed, .0001f));
 }

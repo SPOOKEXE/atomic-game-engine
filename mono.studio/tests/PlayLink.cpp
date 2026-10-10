@@ -28,6 +28,7 @@
 #include <engine/replication/Defaults.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
+#include <engine/scene/CameraPortalView.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -2659,6 +2660,45 @@ TEST_CASE(
 }
 
 namespace {
+	WorldId ResolvePortalWalkEye(
+		Universe &worlds,
+		const PlayLink &link,
+		WorldId visual,
+		CFrame &eye,
+		engine::scene::Camera &lens,
+		bool check
+	) {
+		std::string before;
+		worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+			const auto *active = store.Resource<engine::scene::ActiveCamera>();
+			REQUIRE(active != nullptr);
+			if (const auto *control = store.Resource<engine::scene::CameraController>())
+				before = "mode=" + std::to_string(static_cast<int>(control->Mode)) + " ";
+			if (const auto *history = store.Get<engine::scene::CameraPortalView>(active->Entity)) {
+				before += "route depth=" + std::to_string(history->Route.size()) +
+						  " history world=" + history->World +
+						  " map x=" + std::to_string(history->FromInput.Frame.Position.X) +
+						  " z=" + std::to_string(history->FromInput.Frame.Position.Z);
+			}
+		});
+		const CFrame storedEye = eye;
+		const WorldId resolved =
+			client::ResolveCameraPortalWorld(worlds, link.ReplicaWorld(), visual, eye, lens);
+		if (check) {
+			INFO(before);
+			INFO(
+				"stored eye " << storedEye.Position.X << "," << storedEye.Position.Y << ","
+							  << storedEye.Position.Z
+			);
+			INFO("resolved eye " << eye.Position.X << "," << eye.Position.Y << "," << eye.Position.Z);
+			CHECK(resolved == link.AuthorityWorld());
+			CHECK((eye.Position - storedEye.Position).Magnitude() <= WIRE_POSITION_TOLERANCE_METRES);
+			CHECK(eye.LookVector().Dot(storedEye.LookVector()) > .9999f);
+			CHECK(eye.UpVector().Dot(storedEye.UpVector()) > .9999f);
+		}
+		return resolved;
+	}
+
 	struct PortalWalkImages {
 		engine::render::Renderer Render;
 		engine::render::PortalImageHost Images;
@@ -2739,22 +2779,15 @@ namespace {
 			for (auto world : worlds.Worlds()) {
 				if (!worlds.IsRemote(world)) worlds.Present(world, 0, 1);
 			}
-			const CFrame storedEye = view.CameraFrame;
-			visual = client::ResolveCameraPortalWorld(
-				worlds, link.ReplicaWorld(), visual, view.CameraFrame, view.Camera
+			INFO("image frame " << Frame);
+			visual = ResolvePortalWalkEye(
+				worlds,
+				link,
+				visual,
+				view.CameraFrame,
+				view.Camera,
+				AssertResolvedEye && Frame >= 27 && Frame <= 80
 			);
-			if (AssertResolvedEye && Frame >= 27 && Frame <= 80) {
-				CHECK(visual == link.AuthorityWorld());
-				// The replica eye is decoded from the position wire grid before its
-				// route is reconciled with the authority world.  A valid handoff may
-				// therefore differ by the documented wire-position bound.
-				CHECK(
-					(view.CameraFrame.Position - storedEye.Position).Magnitude() <=
-					WIRE_POSITION_TOLERANCE_METRES
-				);
-				CHECK(view.CameraFrame.LookVector().Dot(storedEye.LookVector()) > .9999f);
-				CHECK(view.CameraFrame.UpVector().Dot(storedEye.UpVector()) > .9999f);
-			}
 			REQUIRE(visual.IsValid());
 			view.World = visual.Index;
 			view.WorldName = worlds.NameOf(visual);
@@ -3168,7 +3201,20 @@ WalkTunnelsPortal(bool gpu, bool authorityVisual = false, bool diagonal = true, 
 		input->Focused = true;
 		input->Down.Set(engine::scene::KeyCode::W, true);
 	});
-	if (images) {
+	const auto resolveCpuEye = [&](bool check) {
+		CFrame eye;
+		engine::scene::Camera lens;
+		fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+			const auto *active = store.Resource<engine::scene::ActiveCamera>();
+			REQUIRE(active != nullptr);
+			eye = store.Get<Transform>(active->Entity)->Frame;
+			lens = *store.Get<engine::scene::Camera>(active->Entity);
+		});
+		for (const auto world : fixture.Worlds.Worlds())
+			if (!fixture.Worlds.IsRemote(world)) fixture.Worlds.Present(world, 0, 1);
+		(void)ResolvePortalWalkEye(fixture.Worlds, link, link.AuthorityWorld(), eye, lens, check);
+	};
+	{
 		fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
 			auto *control = store.ResourceMutable<engine::scene::CameraController>();
 			REQUIRE(control != nullptr);
@@ -3178,7 +3224,10 @@ WalkTunnelsPortal(bool gpu, bool authorityVisual = false, bool diagonal = true, 
 			REQUIRE(engine::scene::PlaceCamera(store));
 		});
 		fixture.Worlds.Present(link.ReplicaWorld(), FRAME_SECONDS, 1.0f);
-		images->Draw(fixture.Worlds, link, false, false, true);
+		if (images)
+			images->Draw(fixture.Worlds, link, false, false, true);
+		else
+			resolveCpuEye(false);
 		fixture.Worlds.Enter(link.ReplicaWorld(), [diagonal, shortTunnel](Store &store) {
 			auto *control = store.ResourceMutable<engine::scene::CameraController>();
 			REQUIRE(control != nullptr);
@@ -3195,9 +3244,13 @@ WalkTunnelsPortal(bool gpu, bool authorityVisual = false, bool diagonal = true, 
 	Vector3 crossingPosition;
 	float lowestY = 1000.0f;
 	for (int tick = 0; tick < 240 && (!crossed || tick < crossedTick + 60); ++tick) {
+		INFO("walk tick " << tick);
 		fixture.Step(link);
 		fixture.Worlds.Present(link.ReplicaWorld(), FRAME_SECONDS, 1.0f);
-		if (images) images->Draw(fixture.Worlds, link, false, false, !crossed);
+		if (images)
+			images->Draw(fixture.Worlds, link, false, false, !crossed);
+		else
+			resolveCpuEye(tick + 1 >= 27 && tick + 1 <= 80);
 		fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
 			const auto *placement = store.Get<Transform>(root);
 			REQUIRE(placement != nullptr);
