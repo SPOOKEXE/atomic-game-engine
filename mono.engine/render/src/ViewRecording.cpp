@@ -2915,12 +2915,14 @@ namespace engine::render {
 				Request.Damage.Scene ||
 				(context.Node.Value != 0 && context.Node.Value <= Pipeline->RetainedNodes.size() &&
 				 Pipeline->RetainedNodes[context.Node.Value - 1] != 0);
-			if (enabled &&
-				(EmptyGBufferNormals || EmptyHardwareDepth != nullptr || FarLinearDepth != nullptr)) {
+			if (enabled && (EmptyGBufferNormals || EmptyHardwareDepth != nullptr ||
+							FarLinearDepth != nullptr || OpaqueSkyTexture != nullptr ||
+							ClearedInterfaceTexture != nullptr || !this->State->Environments.empty())) {
 				// Authored handlers can write attachments without calling GraphTexture.
 				for (const auto resource : context.Writes) {
 					const auto target = ResourceTexture(resource, GraphTextureSlot(context), false);
-					InvalidateBackgroundTexture(target.Texture);
+					const auto *node = Pipeline->Graph.Find(context.Node);
+					InvalidateBackgroundTexture(target.Texture, node != nullptr ? node->Kind : core::Name{});
 				}
 			}
 			return enabled;

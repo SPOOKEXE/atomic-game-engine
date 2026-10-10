@@ -2,6 +2,7 @@
 #include "GpuHeap.hpp"
 #include "RendererState.hpp"
 
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/scene/DrawInstance.hpp>
 
@@ -52,7 +53,8 @@ namespace engine::render {
 		SDL_GPUTexture *destinationTexture,
 		uint32_t width,
 		uint32_t height,
-		uint32_t &dispatches
+		uint32_t &dispatches,
+		const std::function<void()> &beginWork
 	) {
 		ENGINE_PROFILE_CAT("environment compute", core::ProfileCategory::Render);
 		if (EnvironmentSkyCompute == nullptr || command == nullptr || destinationTexture == nullptr ||
@@ -98,18 +100,41 @@ namespace engine::render {
 		uint64_t signature = scene::MixSignature(1, ActiveContentOwner.Id());
 		signature = scene::MixSignature(signature, modes.Skybox);
 		signature = scene::MixSignature(signature, modes.Atmosphere);
-		for (size_t index = 0; index < faces.size(); index++) {
-			signature = scene::MixSignature(signature, names[index].Id());
-			signature = scene::MixSignature(signature, Textures.RevisionOf(names[index], faceOwners[index]));
-			signature = scene::MixSignature(
-				signature, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(faces[index]))
-			);
+		if (modes.Skybox != 0 || modes.Atmosphere != 0) {
+			for (size_t index = 0; index < faces.size(); index++) {
+				signature = scene::MixSignature(signature, names[index].Id());
+				signature =
+					scene::MixSignature(signature, Textures.RevisionOf(names[index], faceOwners[index]));
+				signature = scene::MixSignature(
+					signature, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(faces[index]))
+				);
+			}
+			signature = Fold(signature, environment.SkyCompute);
+			signature = Fold(signature, environment.Air);
+			signature = Fold(signature, EnvironmentAtmosphereComputeOf(environment));
+			signature = Fold(signature, Sun);
 		}
-		signature = Fold(signature, environment.SkyCompute);
-		signature = Fold(signature, environment.Air);
-		signature = Fold(signature, EnvironmentAtmosphereComputeOf(environment));
-		signature = Fold(signature, Sun);
 		if (cache->Sky.Matches(signature, command)) return true;
+		beginWork();
+		if (modes.Skybox == 0 && modes.Atmosphere == 0) {
+			SDL_GPUColorTargetInfo clear{};
+			clear.texture = destinationTexture;
+			clear.clear_color = {0, 0, 0, 1};
+			clear.load_op = SDL_GPU_LOADOP_CLEAR;
+			clear.store_op = SDL_GPU_STOREOP_STORE;
+			clear.cycle = true;
+			auto *pass = SDL_BeginGPURenderPass(command, &clear, 1, nullptr);
+			if (pass == nullptr) return false;
+			SDL_EndGPURenderPass(pass);
+			cache->Sky.Stage(signature, command);
+			core::Metrics::Count("render.empty_environment.clears", 1);
+			core::Metrics::Count("render.colour_clear.commands", 1);
+			core::Metrics::Count(
+				"render.colour_clear.bytes",
+				SDL_CalculateGPUTextureFormatSize(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, width, height, 1)
+			);
+			return true;
+		}
 		SDL_GPUStorageTextureReadWriteBinding destination{};
 		destination.texture = destinationTexture;
 		// The history target may still be sampled by an earlier submitted command
@@ -191,7 +216,9 @@ namespace engine::render {
 		SDL_GPUTexture *destinationTexture,
 		uint32_t width,
 		uint32_t height,
-		uint32_t &dispatches
+		uint32_t &dispatches,
+		bool opaqueSkySource,
+		const std::function<void()> &beginWork
 	) {
 		ENGINE_PROFILE_CAT("cloud environment compute", core::ProfileCategory::Render);
 		if (EnvironmentCloudCompute == nullptr || command == nullptr || source == nullptr ||
@@ -237,12 +264,33 @@ namespace engine::render {
 			}
 		}
 		signature = scene::MixSignature(signature, modes.Clouds);
-		signature = Fold(signature, environment.CloudLayer);
-		signature = Fold(signature, EnvironmentCloudComputeOf(environment));
-		if (environment.CloudLayer.WindSpeed > 0.0f) {
-			signature = Fold(signature, environment.CloudTime);
+		signature = scene::MixSignature(signature, opaqueSkySource);
+		if (modes.Clouds != 0) {
+			signature = Fold(signature, environment.CloudLayer);
+			signature = Fold(signature, EnvironmentCloudComputeOf(environment));
+			if (environment.CloudLayer.WindSpeed > 0.0f) {
+				signature = Fold(signature, environment.CloudTime);
+			}
 		}
-		if (cache->Cloud.Matches(signature, command)) return true;
+		// Arbitrary authored inputs can change in place and can contain signed RGB or alpha.
+		if (opaqueSkySource && cache->Cloud.Matches(signature, command)) return true;
+		beginWork();
+		if (modes.Clouds == 0 && opaqueSkySource && source != destinationTexture) {
+			auto *copy = SDL_BeginGPUCopyPass(command);
+			if (copy == nullptr) return false;
+			SDL_GPUTextureLocation from{}, to{};
+			from.texture = source;
+			to.texture = destinationTexture;
+			SDL_CopyGPUTextureToTexture(copy, &from, &to, width, height, 1, true);
+			SDL_EndGPUCopyPass(copy);
+			cache->Cloud.Stage(signature, command);
+			core::Metrics::Count("render.identity_environment_copy.commands", 1);
+			core::Metrics::Count(
+				"render.identity_environment_copy.bytes",
+				SDL_CalculateGPUTextureFormatSize(SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT, width, height, 1)
+			);
+			return true;
+		}
 		const EnvironmentUniforms uniforms{
 			.Zenith = Colour(sky.Zenith, sky.StarDensity),
 			.Horizon = Colour(sky.Horizon, sky.SunSize),

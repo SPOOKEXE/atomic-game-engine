@@ -5,16 +5,20 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/ShaderCompiler.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <glm/gtc/packing.hpp>
 
+#include <array>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <span>
 #include <string>
+#include <tuple>
 #include <vector>
 TEST_SUITE_ID("engine.render.compositordemogpu")
 TEST_DEPENDS("engine.graph.pipelinedocument")
@@ -28,6 +32,114 @@ namespace {
 			if (counter.Name == core::Name(name)) return counter.Value;
 		return 0;
 	}
+
+	void InstallBoundary(
+		Renderer &renderer,
+		graph::RenderGraph &pipeline,
+		const char *name,
+		std::span<const graph::ResourceId> resources,
+		graph::NodeScope scope = graph::NodeScope::View
+	) {
+		const core::Name sinkKind(std::string(name) + "-sink");
+		graph::NodeKindSpec spec;
+		spec.Kind = sinkKind;
+		spec.Scope = scope;
+		spec.Queue = graph::ExecutionQueue::Cpu;
+		spec.Category = graph::NodeCategory::Output;
+		for (const auto resource : resources)
+			spec.Inputs.push_back(
+				{.Name = pipeline.FindResource(resource)->Name, .Kind = graph::ResourceKind::Texture}
+			);
+		REQUIRE(graph::RegisterNodeKind(std::move(spec)));
+		REQUIRE(renderer.InstallNodeHandler(sinkKind, [](const graph::RunContext &) { return true; }));
+		graph::Node sink;
+		sink.Name = sinkKind;
+		sink.Kind = sinkKind;
+		sink.Scope = scope;
+		sink.Reads.assign(resources.begin(), resources.end());
+		REQUIRE(pipeline.AddNode(std::move(sink)).IsValid());
+		REQUIRE(renderer.SetPipeline(core::Name(name), pipeline));
+	}
+
+	bool Constant16(
+		std::span<const std::byte> image,
+		uint32_t width,
+		uint32_t height,
+		const std::array<float, 4> &expected
+	) {
+		const size_t stride = (size_t(width) * 8 + 255) / 256 * 256;
+		for (uint32_t y = 0; y < height; ++y)
+			for (uint32_t x = 0; x < width; ++x)
+				for (size_t channel = 0; channel < 4; ++channel) {
+					uint16_t bits = 0;
+					std::memcpy(&bits, image.data() + y * stride + x * 8 + channel * 2, 2);
+					if (glm::unpackHalf1x16(bits) != expected[channel]) return false;
+				}
+		return true;
+	}
+
+	// Real shader commands in the engine's interface pass, so retained GUI pixels
+	// are checked independently of the backend's per-frame readiness callback.
+	struct SolidInterface : FrameOverlayHook {
+		SDL_GPUDevice *Device = nullptr;
+		SDL_GPUGraphicsPipeline *Pipeline = nullptr;
+		bool Ready = true;
+		uint32_t Records = 0;
+		explicit SolidInterface(Renderer &renderer)
+			: Device(static_cast<SDL_GPUDevice *>(renderer.Backend().Device)) {
+			ShaderCompiler compiler;
+			const auto vertex = compiler.Compile(
+				R"(#version 450
+void main(){ vec2 p=vec2((gl_VertexIndex<<1)&2,gl_VertexIndex&2); gl_Position=vec4(p*2.0-1.0,0.0,1.0); })",
+				ShaderStage::Vertex
+			);
+			const auto fragment = compiler.Compile(
+				R"(#version 450
+layout(location=0) out vec4 colour;
+void main(){ colour=vec4(0.25,0.0,0.0,0.5); })",
+				ShaderStage::Fragment
+			);
+			REQUIRE_FALSE(vertex.Failed);
+			REQUIRE_FALSE(fragment.Failed);
+			const auto shader = [&](const ShaderCompilation &code, SDL_GPUShaderStage stage) {
+				SDL_GPUShaderCreateInfo info{};
+				info.code = reinterpret_cast<const uint8_t *>(code.SpirV.data());
+				info.code_size = code.SpirV.size() * sizeof(uint32_t);
+				info.entrypoint = "main";
+				info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+				info.stage = stage;
+				return SDL_CreateGPUShader(Device, &info);
+			};
+			auto *vertexShader = shader(vertex, SDL_GPU_SHADERSTAGE_VERTEX);
+			auto *fragmentShader = shader(fragment, SDL_GPU_SHADERSTAGE_FRAGMENT);
+			REQUIRE(vertexShader);
+			REQUIRE(fragmentShader);
+			SDL_GPUColorTargetDescription target{};
+			target.format = static_cast<SDL_GPUTextureFormat>(renderer.Backend().ColourFormat);
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertexShader;
+			info.fragment_shader = fragmentShader;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.target_info.color_target_descriptions = &target;
+			info.target_info.num_color_targets = 1;
+			Pipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			SDL_ReleaseGPUShader(Device, vertexShader);
+			SDL_ReleaseGPUShader(Device, fragmentShader);
+			REQUIRE(Pipeline);
+		}
+		~SolidInterface() override {
+			SDL_ReleaseGPUGraphicsPipeline(Device, Pipeline);
+		}
+		bool Prepare(void *) override {
+			return Ready;
+		}
+		void Record(void *, void *renderPass) override {
+			auto *pass = static_cast<SDL_GPURenderPass *>(renderPass);
+			SDL_BindGPUGraphicsPipeline(pass, Pipeline);
+			SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+			++Records;
+		}
+	};
 
 	std::string Solid() {
 		return R"(#version 450
@@ -319,6 +431,29 @@ void main(){ float blocked=step(0.40,inUv.x)*step(inUv.x,0.60)*step(0.40,inUv.y)
 			}
 		return n;
 	}
+	// Authored RGBA sRGB is sampled into the headless native BGRA unorm target.
+	// Permit one code value for the GPU's storage conversion rounding.
+	size_t NativeConversionMismatch(const CapturedImage &source, const CapturedImage &native) {
+		size_t different = 0;
+		for (uint32_t y = 0; y < source.Height; ++y)
+			for (uint32_t x = 0; x < source.Width; ++x) {
+				const size_t from = y * source.RowStrideBytes + x * 4;
+				const size_t to = y * native.RowStrideBytes + x * 4;
+				bool mismatch = false;
+				for (size_t channel = 0; channel < 3; ++channel) {
+					const float encoded =
+						float(std::to_integer<uint8_t>(source.Bytes[from + channel])) / 255.f;
+					const float linear =
+						encoded <= 0.04045f ? encoded / 12.92f : std::pow((encoded + 0.055f) / 1.055f, 2.4f);
+					const int expected = int(std::round(linear * 255.f));
+					const int actual = std::to_integer<uint8_t>(native.Bytes[to + 2 - channel]);
+					mismatch |= std::abs(expected - actual) > 1;
+				}
+				different += mismatch;
+			}
+		return different;
+	}
+
 }
 
 size_t Different(const CapturedImage &a, const CapturedImage &b) {
@@ -545,4 +680,361 @@ TEST_CASE("god rays stop at linear-depth occluders on Vulkan", "[render][gpu][go
 	const auto blocked =
 		Capture16(blockedFixture.Render, core::Name("effect-result"), blockedView.Slot, 41, 31);
 	CHECK(Diff16(unobscured, blocked, 41, 31) > 1.0);
+}
+
+TEST_CASE(
+	"disabled environment stages preserve histories across provider transitions",
+	"[render][gpu][inactive-environment]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	graph::RenderGraph pipeline;
+	const auto history = [&](const char *name) {
+		return pipeline.AddResource(
+			{.Name = core::Name(name),
+			 .Kind = graph::ResourceKind::Storage,
+			 .Format = graph::ResourceFormat::RGBA16F,
+			 .Width = 32,
+			 .Height = 16,
+			 .Lifetime = graph::ResourceLifetime::History}
+		);
+	};
+	const auto sky = history("environment-sky"), clouds = history("environment-clouds");
+	REQUIRE(sky.IsValid());
+	REQUIRE(clouds.IsValid());
+	for (const auto &[name, reads, writes] : std::array{
+			 std::tuple{"skybox-compute", std::vector<graph::ResourceId>{}, std::vector{sky}},
+			 std::tuple{"clouds-compute", std::vector{sky}, std::vector{clouds}}
+		 }) {
+		graph::Node node;
+		node.Name = core::Name(name);
+		node.Kind = node.Name;
+		node.Scope = graph::NodeScope::World;
+		node.Reads = reads;
+		node.Writes = writes;
+		REQUIRE(pipeline.AddNode(std::move(node)).IsValid());
+	}
+	InstallBoundary(fixture.Render, pipeline, "inactive-environment", std::array{sky, clouds});
+	SceneTarget target{32, 16};
+	View view;
+	view.World = 17;
+	view.Pipeline = core::Name("inactive-environment");
+	view.Target = &target;
+	view.OverrideLighting = true;
+	auto &environment = view.Lighting.EnvironmentState;
+	OverlayImage overlay;
+	const auto render = [&] { return fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false); };
+	const auto skyImage = [&] {
+		return Capture16(fixture.Render, core::Name("environment-sky"), view.Slot, 32, 16);
+	};
+	const auto cloudImage = [&] {
+		return Capture16(fixture.Render, core::Name("environment-clouds"), view.Slot, 32, 16);
+	};
+	const auto copiesBefore = CounterValue("render.identity_environment_copy.commands");
+	const auto clearBefore = CounterValue("render.empty_environment.clears");
+	CHECK(render().ComputeDispatches == 0);
+	CHECK(CounterValue("render.empty_environment.clears") - clearBefore == 1);
+	const auto dark = skyImage();
+	CHECK(Constant16(dark, 32, 16, {0.f, 0.f, 0.f, 1.f}));
+	CHECK(Diff16(dark, cloudImage(), 32, 16) == 0);
+	CHECK(CounterValue("render.identity_environment_copy.commands") - copiesBefore == 1);
+	// An unchanged disabled provider keeps both completed outputs.
+	const auto cachedCopies = CounterValue("render.identity_environment_copy.commands");
+	const auto cachedClears = CounterValue("render.empty_environment.clears");
+	environment.CloudTime = 91;
+	environment.SkyCompute.Zenith = {0.3f, 0.2f, 0.1f};
+	CHECK(render().ComputeDispatches == 0);
+	CHECK(CounterValue("render.identity_environment_copy.commands") == cachedCopies);
+	CHECK(CounterValue("render.empty_environment.clears") == cachedClears);
+	// An atmosphere remains a live provider even without a selected skybox.
+	environment.HasAtmosphere = true;
+	CHECK(render().ComputeDispatches == 1);
+	environment.HasAtmosphere = false;
+	CHECK(render().ComputeDispatches == 0);
+	CHECK(Constant16(skyImage(), 32, 16, {0.f, 0.f, 0.f, 1.f}));
+
+	environment.Skybox = scene::SkyboxSource::Compute;
+	CHECK(render().ComputeDispatches == 1);
+	const auto activeSky = skyImage();
+	CHECK(Diff16(activeSky, dark, 32, 16) > 1);
+	CHECK(Diff16(activeSky, cloudImage(), 32, 16) == 0);
+	environment.HasClouds = true;
+	environment.CloudLayer.WindSpeed = 0;
+	environment.CloudLayer.Cover = 1;
+	environment.CloudLayer.Density = 1;
+	CHECK(render().ComputeDispatches == 1);
+	const auto activeClouds = cloudImage();
+	CHECK(Diff16(activeSky, activeClouds, 32, 16) > 1);
+	CHECK(render().ComputeDispatches == 0);
+
+	environment.Skybox = scene::SkyboxSource::None;
+	environment.HasClouds = false;
+	CHECK(render().ComputeDispatches == 0);
+	CHECK(Constant16(skyImage(), 32, 16, {0.f, 0.f, 0.f, 1.f}));
+	CHECK(Constant16(cloudImage(), 32, 16, {0.f, 0.f, 0.f, 1.f}));
+	environment.Skybox = scene::SkyboxSource::Compute;
+	environment.HasClouds = true;
+	CHECK(render().ComputeDispatches == 2);
+	CHECK(Diff16(activeSky, skyImage(), 32, 16) == 0);
+	CHECK(Diff16(activeClouds, cloudImage(), 32, 16) == 0);
+}
+
+TEST_CASE(
+	"disabled clouds retain clamp and alpha semantics for authored input",
+	"[render][gpu][inactive-environment]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	graph::RenderGraph pipeline;
+	const auto source = pipeline.AddResource(
+		{.Name = core::Name("authored-sky"),
+		 .Kind = graph::ResourceKind::Storage,
+		 .Format = graph::ResourceFormat::RGBA16F}
+	);
+	const auto result = pipeline.AddResource(
+		{.Name = core::Name("authored-cloud-result"),
+		 .Kind = graph::ResourceKind::Storage,
+		 .Format = graph::ResourceFormat::RGBA16F}
+	);
+	// A builtin producer proves an opaque sky, then the authored writer below
+	// replaces those actual texels and must invalidate both proof and cache.
+	graph::Node sky;
+	sky.Name = core::Name("authored-sky-generator");
+	sky.Kind = core::Name("skybox-compute");
+	sky.Scope = graph::NodeScope::World;
+	sky.Writes = {source};
+	REQUIRE(pipeline.AddNode(std::move(sky)).IsValid());
+	graph::Node authoredSky;
+	authoredSky.Name = core::Name("authored-sky-pass");
+	authoredSky.Kind = core::Name("dispatch");
+	authoredSky.Scope = graph::NodeScope::World;
+	authoredSky.Writes = {source};
+	authoredSky.Parameters.push_back({core::Name("source"), R"(#version 450
+layout(local_size_x=8,local_size_y=8,local_size_z=1) in;
+layout(set=1,binding=0,rgba16f) writeonly uniform image2D targetImage;
+void main(){
+    ivec2 pixel=ivec2(gl_GlobalInvocationID.xy);
+    if(any(greaterThanEqual(pixel,imageSize(targetImage)))) return;
+    imageStore(targetImage,pixel,vec4(-2.0,4.0,0.5,0.25));
+})"});
+	REQUIRE(pipeline.AddNode(std::move(authoredSky)).IsValid());
+	graph::Node clouds;
+	clouds.Name = core::Name("authored-clouds");
+	clouds.Kind = core::Name("clouds-compute");
+	clouds.Scope = graph::NodeScope::World;
+	clouds.Reads = {source};
+	clouds.Writes = {result};
+	REQUIRE(pipeline.AddNode(std::move(clouds)).IsValid());
+	InstallBoundary(fixture.Render, pipeline, "authored-clouds", std::array{source, result});
+	SceneTarget target{32, 16};
+	View view;
+	view.World = 18;
+	view.Pipeline = core::Name("authored-clouds");
+	view.Target = &target;
+	OverlayImage overlay;
+	const auto clearsBefore = CounterValue("render.empty_environment.clears");
+	CHECK(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).ComputeDispatches == 2);
+	CHECK(CounterValue("render.empty_environment.clears") - clearsBefore == 1);
+	CHECK(Constant16(
+		Capture16(fixture.Render, core::Name("authored-sky"), view.Slot, 32, 16),
+		32,
+		16,
+		{-2.f, 4.f, 0.5f, 0.25f}
+	));
+	CHECK(Constant16(
+		Capture16(fixture.Render, core::Name("authored-cloud-result"), view.Slot, 32, 16),
+		32,
+		16,
+		{0.f, 4.f, 0.5f, 1.f}
+	));
+	const auto repeatedClears = CounterValue("render.empty_environment.clears");
+	CHECK(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).ComputeDispatches == 2);
+	CHECK(CounterValue("render.empty_environment.clears") - repeatedClears == 1);
+	CHECK(Constant16(
+		Capture16(fixture.Render, core::Name("authored-cloud-result"), view.Slot, 32, 16),
+		32,
+		16,
+		{0.f, 4.f, 0.5f, 1.f}
+	));
+}
+
+TEST_CASE(
+	"output composition skips cleared UI but retains drawn and authored interfaces",
+	"[render][gpu][inactive-output]"
+) {
+	for (const auto &[authoredInterface, copyOverlay] : std::array{
+			 std::pair{false, false}, std::pair{true, false}, std::pair{false, true}, std::pair{true, true}
+		 }) {
+		CAPTURE(authoredInterface, copyOverlay);
+		FixtureDevice fixture;
+		fixture.Initialise();
+		graph::PipelineDocument document;
+		for (const char *name :
+			 {"output-authored-source",
+			  "output-source",
+			  "output-interface",
+			  "output-unused-interface",
+			  "output-composed",
+			  "output-presented"})
+			document.Record(
+				{.Kind = graph::EditKind::AddResource,
+				 .Name = core::Name(name),
+				 .Resource = graph::ResourceKind::Colour,
+				 .Format = graph::ResourceFormat::RGBA8_SRGB}
+			);
+		Raster(document, "output-source-pass", copyOverlay ? "output-authored-source" : "output-source");
+		if (authoredInterface)
+			Raster(document, "authored-interface-pass", "output-interface", R"(#version 450
+layout(location=0) out vec4 colour;
+void main(){ colour=vec4(0.25,0.0,0.0,0.5); })");
+		if (copyOverlay) {
+			// Convert authored raster colour once into the native presentation format;
+			// the following overlay can then copy without another present node.
+			document.Record(
+				{.Kind = graph::EditKind::AddNode,
+				 .Name = core::Name("output-colour-convert"),
+				 .NodeKind = core::Name("present"),
+				 .Scope = graph::NodeScope::Frame}
+			);
+			document.Record(
+				{.Kind = graph::EditKind::Reads,
+				 .Target = core::Name("output-authored-source"),
+				 .Key = core::Name("source")}
+			);
+			document.Record(
+				{.Kind = graph::EditKind::Writes,
+				 .Target = core::Name("output-source"),
+				 .Key = core::Name("colour")}
+			);
+		}
+		document.Record(
+			{.Kind = graph::EditKind::AddNode,
+			 .Name = core::Name("output-interface-pass"),
+			 .NodeKind = core::Name("interface"),
+			 .Scope = graph::NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = graph::EditKind::Writes,
+			 .Target = core::Name(authoredInterface ? "output-unused-interface" : "output-interface"),
+			 .Key = core::Name("colour")}
+		);
+
+		document.Record(
+			{.Kind = graph::EditKind::AddNode,
+			 .Name = core::Name("output-overlay-pass"),
+			 .NodeKind = core::Name("overlay"),
+			 .Scope = graph::NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = graph::EditKind::Reads,
+			 .Target = core::Name("output-source"),
+			 .Key = core::Name("scene")}
+		);
+		document.Record(
+			{.Kind = graph::EditKind::Reads,
+			 .Target = core::Name("output-interface"),
+			 .Key = core::Name("interface")}
+		);
+		document.Record(
+			{.Kind = graph::EditKind::Writes,
+			 .Target = core::Name("output-composed"),
+			 .Key = core::Name("colour")}
+		);
+		if (!copyOverlay) {
+			document.Record(
+				{.Kind = graph::EditKind::AddNode,
+				 .Name = core::Name("output-present-pass"),
+				 .NodeKind = core::Name("present"),
+				 .Scope = graph::NodeScope::Frame}
+			);
+			document.Record(
+				{.Kind = graph::EditKind::Reads,
+				 .Target = core::Name("output-composed"),
+				 .Key = core::Name("source")}
+			);
+			document.Record(
+				{.Kind = graph::EditKind::Writes,
+				 .Target = core::Name("output-presented"),
+				 .Key = core::Name("colour")}
+			);
+		}
+		graph::RenderGraph pipeline;
+		core::Name offender;
+		REQUIRE(graph::Build(document, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
+		std::vector<graph::ResourceId> retained;
+		for (uint32_t value = 1; value <= pipeline.ResourceCount(); ++value) {
+			const graph::ResourceId resource{value};
+			const auto name = pipeline.FindResource(resource)->Name;
+			if (name == core::Name("output-source") || name == core::Name("output-interface") ||
+				name == core::Name("output-composed") ||
+				(!copyOverlay && name == core::Name("output-presented")))
+				retained.push_back(resource);
+		}
+		const char *pipelineName = authoredInterface
+									   ? (copyOverlay ? "authored-output-copy" : "authored-output-convert")
+									   : (copyOverlay ? "inactive-output-copy" : "inactive-output-convert");
+		InstallBoundary(fixture.Render, pipeline, pipelineName, retained, graph::NodeScope::Frame);
+		SceneTarget target{41, 31};
+		View view;
+		view.World = 19;
+		view.Pipeline = core::Name(pipelineName);
+		view.Target = &target;
+		OverlayImage overlay;
+		const auto copiesBefore = CounterValue("render.identity_copy.commands");
+		const auto empty = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		const auto source = CaptureResource(
+			fixture.Render, core::Name("output-source"), view.Slot, 41, 31, ImageFormat::Rgba8Unorm
+		);
+		const auto composed = CaptureResource(
+			fixture.Render, core::Name("output-composed"), view.Slot, 41, 31, ImageFormat::Rgba8Unorm
+		);
+		CHECK(empty.DrawCalls == (authoredInterface ? 4 : 2));
+		CHECK(CounterValue("render.identity_copy.commands") - copiesBefore == 1);
+		const auto changedPixels =
+			copyOverlay ? Different(source, composed) : NativeConversionMismatch(source, composed);
+		if (authoredInterface)
+			CHECK(changedPixels > 1);
+		else
+			CHECK(changedPixels == 0);
+		if (!copyOverlay)
+			CHECK(
+				Different(
+					composed,
+					CaptureResource(
+						fixture.Render,
+						core::Name("output-presented"),
+						view.Slot,
+						41,
+						31,
+						ImageFormat::Rgba8Unorm
+					)
+				) == 0
+			);
+		if (!authoredInterface) {
+			SolidInterface interface(fixture.Render);
+			CHECK(fixture.Render.Render(std::span(&view, 1), overlay, &interface, false).DrawCalls == 4);
+			REQUIRE(interface.Records == 1);
+			const auto withGui = CaptureResource(
+				fixture.Render, core::Name("output-composed"), view.Slot, 41, 31, ImageFormat::Rgba8Unorm
+			);
+			CHECK((copyOverlay ? Different(source, withGui) : NativeConversionMismatch(source, withGui)) > 1);
+			view.Damage.GameInterface = false;
+			interface.Ready = false;
+			CHECK(fixture.Render.Render(std::span(&view, 1), overlay, &interface, false).DrawCalls == 3);
+			CHECK(interface.Records == 1);
+			CHECK(
+				Different(
+					withGui,
+					CaptureResource(
+						fixture.Render,
+						core::Name("output-composed"),
+						view.Slot,
+						41,
+						31,
+						ImageFormat::Rgba8Unorm
+					)
+				) == 0
+			);
+		}
+	}
 }

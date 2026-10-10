@@ -1214,9 +1214,13 @@ namespace engine::render {
 				target.Texture,
 				target.Width,
 				target.Height,
-				Result.ComputeDispatches
+				Result.ComputeDispatches,
+				[this, name = context.Name] { EnterNamedPass(name); }
 			);
-			if (recorded) StageHistoryWrites(context, Command);
+			if (recorded) {
+				OpaqueSkyTexture = target.Texture;
+				StageHistoryWrites(context, Command);
+			}
 			return recorded;
 		});
 
@@ -1268,7 +1272,9 @@ namespace engine::render {
 				target.Texture,
 				target.Width,
 				target.Height,
-				Result.ComputeDispatches
+				Result.ComputeDispatches,
+				OpaqueSkyTexture == source.Texture,
+				[this, name = context.Name] { EnterNamedPass(name); }
 			);
 			if (!recorded) {
 				ENGINE_ERROR("clouds compute '{}' could not record its compute pass", context.Name.Text());

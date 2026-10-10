@@ -1136,11 +1136,19 @@ namespace engine::render {
 		return selectsView ? node->Integer(core::Name("view"), 0) : Request.TargetSlot;
 	}
 
-	void ViewRecording::InvalidateBackgroundTexture(SDL_GPUTexture *texture) {
+	void ViewRecording::InvalidateBackgroundTexture(SDL_GPUTexture *texture, core::Name writerKind) {
 		if (texture == nullptr) return;
 		if (Pbr != nullptr && texture == Pbr->Normal) EmptyGBufferNormals = false;
 		if (texture == EmptyHardwareDepth) EmptyHardwareDepth = nullptr;
 		if (texture == FarLinearDepth) FarLinearDepth = nullptr;
+		if (texture == OpaqueSkyTexture) OpaqueSkyTexture = nullptr;
+		if (texture == ClearedInterfaceTexture) ClearedInterfaceTexture = nullptr;
+		for (auto &environment : State->Environments) {
+			if (texture == environment.SkyTarget && writerKind != core::Name("skybox-compute"))
+				environment.Sky = {};
+			if (texture == environment.CloudTarget && writerKind != core::Name("clouds-compute"))
+				environment.Cloud = {};
+		}
 	}
 
 	Renderer::Impl::NamedTexture ViewRecording::GraphTexture(
@@ -1150,7 +1158,10 @@ namespace engine::render {
 		SDL_GPUCommandBuffer *readCommand
 	) {
 		const auto texture = ResourceTexture(resource, GraphTextureSlot(context), make, readCommand);
-		if (make) InvalidateBackgroundTexture(texture.Texture);
+		if (make) {
+			const auto *node = Pipeline->Graph.Find(context.Node);
+			InvalidateBackgroundTexture(texture.Texture, node != nullptr ? node->Kind : core::Name{});
+		}
 		return texture;
 	}
 
@@ -1303,6 +1314,7 @@ namespace engine::render {
 		if (!source.IsValid() || !target.IsValid()) {
 			return false;
 		}
+		if (!State->EnsureSurfaceSampler()) return false;
 		SDL_GPUColorTargetInfo colour{};
 		colour.texture = target.Texture;
 		colour.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f};
@@ -1310,6 +1322,7 @@ namespace engine::render {
 		colour.store_op = SDL_GPU_STOREOP_STORE;
 		colour.cycle = load == SDL_GPU_LOADOP_CLEAR;
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
+		if (pass == nullptr) return false;
 		State->BindPipeline(pass, State->ImagePipeline, Impl::PipelineFamily::Other);
 		SetImageTargetArea(pass, target);
 		const SDL_GPUTextureSamplerBinding binding{source.Texture, State->SurfaceSampler};

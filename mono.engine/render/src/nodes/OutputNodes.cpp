@@ -286,8 +286,10 @@ namespace engine::render {
 			interfaceTarget.store_op = SDL_GPU_STOREOP_STORE;
 			interfaceTarget.cycle = true;
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &interfaceTarget, 1, nullptr);
+			if (pass == nullptr) return false;
 			if (!drawInterface) {
 				SDL_EndGPURenderPass(pass);
+				recording.ClearedInterfaceTexture = target.Texture;
 				return true;
 			}
 			ENGINE_PROFILE_CAT("interface pass", core::ProfileCategory::Render);
@@ -323,7 +325,6 @@ namespace engine::render {
 					return recording.DrawOverlayImage(source, target, load);
 				};
 
-			enterNamedPass(context.Name);
 			Impl::NamedTexture sceneImage;
 			Impl::NamedTexture interfaceImage;
 			Impl::NamedTexture target;
@@ -339,7 +340,13 @@ namespace engine::render {
 					break;
 				}
 			}
-			if (!drawImage(sceneImage, target, SDL_GPU_LOADOP_CLEAR)) {
+			const bool exactCopy = sceneImage.IsValid() && target.IsValid() &&
+								   sceneImage.Format == target.Format && sceneImage.Width == target.Width &&
+								   sceneImage.Height == target.Height;
+			if (!exactCopy || sceneImage.Texture == target.Texture) enterNamedPass(context.Name);
+			const bool published = exactCopy ? recording.CopyImage(context.Name, sceneImage, target)
+											 : drawImage(sceneImage, target, SDL_GPU_LOADOP_CLEAR);
+			if (!published) {
 				ENGINE_WARN("'{}' has no scene image to compose", context.Name.Text());
 				return true;
 			}
@@ -348,7 +355,8 @@ namespace engine::render {
 				ENGINE_PROFILE_CAT("debug image overlay", core::ProfileCategory::Render);
 				drawOverlayImage(State->OverlayTexture, target, SDL_GPU_LOADOP_LOAD);
 			}
-			if (graphEnabled(core::Name("interface")) && interfaceImage.IsValid()) {
+			if (graphEnabled(core::Name("interface")) && interfaceImage.IsValid() &&
+				interfaceImage.Texture != recording.ClearedInterfaceTexture) {
 				drawOverlayImage(interfaceImage.Texture, target, SDL_GPU_LOADOP_LOAD);
 			}
 			return true;
@@ -373,7 +381,6 @@ namespace engine::render {
 									   bool reverseSpectrum = false
 								   ) { return recording.DrawImage(source, target, load, reverseSpectrum); };
 
-			enterNamedPass(context.Name);
 			Impl::NamedTexture source;
 			Impl::NamedTexture target;
 			for (const graph::ResourceId resource : context.Reads) {
@@ -388,7 +395,12 @@ namespace engine::render {
 					break;
 				}
 			}
-			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
+			const bool exactCopy = source.IsValid() && target.IsValid() && source.Format == target.Format &&
+								   source.Width == target.Width && source.Height == target.Height;
+			if (!exactCopy || source.Texture == target.Texture) enterNamedPass(context.Name);
+			const bool published = exactCopy ? recording.CopyImage(context.Name, source, target)
+											 : drawImage(source, target, SDL_GPU_LOADOP_CLEAR);
+			if (!published) {
 				ENGINE_WARN("'{}' needs one readable image and one writable image", context.Name.Text());
 			}
 			return true;

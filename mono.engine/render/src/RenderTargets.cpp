@@ -777,16 +777,21 @@ namespace engine::render {
 		}
 
 		bool presentationImage = false;
+		bool clearableSky = false;
+		bool haveWriter = false;
 		for (uint32_t value = 1; value <= pipeline.Graph.Count(); value++) {
 			const graph::Node *writer = pipeline.Graph.Find(graph::NodeId{value});
 			if (writer == nullptr ||
 				std::find(writer->Writes.begin(), writer->Writes.end(), resource) == writer->Writes.end()) {
 				continue;
 			}
-			presentationImage = writer->Kind == core::Name("present") ||
-								writer->Kind == core::Name("interface") ||
-								writer->Kind == core::Name("overlay");
-			break;
+			if (!haveWriter) {
+				presentationImage = writer->Kind == core::Name("present") ||
+									writer->Kind == core::Name("interface") ||
+									writer->Kind == core::Name("overlay");
+				haveWriter = true;
+			}
+			clearableSky |= writer->Kind == core::Name("skybox-compute");
 		}
 		if (desc->External && desc->Lifetime == graph::ResourceLifetime::External && !presentationImage) {
 			return {};
@@ -822,6 +827,7 @@ namespace engine::render {
 			info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
 			if (desc->Kind == graph::ResourceKind::Storage) {
 				info.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+				if (clearableSky) info.usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 			} else if (desc->Kind == graph::ResourceKind::Depth) {
 				info.usage |= SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
 			} else {

@@ -59,6 +59,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <span>
@@ -658,7 +659,8 @@ namespace engine::render {
 			SDL_GPUTexture *destination,
 			uint32_t width,
 			uint32_t height,
-			uint32_t &dispatches
+			uint32_t &dispatches,
+			const std::function<void()> &beginWork
 		);
 		bool RecordEnvironmentClouds(
 			const scene::Environment &environment,
@@ -667,7 +669,9 @@ namespace engine::render {
 			SDL_GPUTexture *destination,
 			uint32_t width,
 			uint32_t height,
-			uint32_t &dispatches
+			uint32_t &dispatches,
+			bool opaqueSkySource,
+			const std::function<void()> &beginWork
 		);
 		void ReleaseEnvironments();
 		void CommitEnvironmentWrites(SDL_GPUCommandBuffer *command);

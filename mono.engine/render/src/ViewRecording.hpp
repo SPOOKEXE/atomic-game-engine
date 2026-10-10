@@ -234,7 +234,9 @@ namespace engine::render {
 		bool EmptyGBufferNormals = false;
 		SDL_GPUTexture *EmptyHardwareDepth = nullptr;
 		SDL_GPUTexture *FarLinearDepth = nullptr;
-		void InvalidateBackgroundTexture(SDL_GPUTexture *texture);
+		SDL_GPUTexture *OpaqueSkyTexture = nullptr;
+		SDL_GPUTexture *ClearedInterfaceTexture = nullptr;
+		void InvalidateBackgroundTexture(SDL_GPUTexture *texture, core::Name writerKind = {});
 		bool HaveOverlay = false;
 		bool UploadOverlay = false;
 		bool HaveShadow = false;
