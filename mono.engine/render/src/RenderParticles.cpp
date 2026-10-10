@@ -30,6 +30,7 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace engine::render {
@@ -648,7 +649,7 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::Impl::ReserveParticleStaging(uint32_t workItems, uint32_t seams) {
+	bool Renderer::Impl::ReserveParticleStaging(uint32_t workItems, uint32_t emitters, uint32_t seams) {
 		ParticlePool &Particles = ActiveParticleWorld->Pool;
 		// One shape for each transient upload: a read-only storage buffer and the
 		// transfer beside it, grown in powers of two and never shrunk.
@@ -710,6 +711,14 @@ namespace engine::render {
 				std::max(workItems, 1u),
 				PARTICLE_WORK_WORDS * word,
 				"work list"
+			) ||
+			!grow(
+				Particles.EmitWork,
+				Particles.EmitWorkStaging,
+				Particles.EmitWorkCapacity,
+				std::max(emitters, 1u),
+				PARTICLE_WORK_WORDS * word,
+				"emission work list"
 			) ||
 			!grow(
 				Particles.Seams,
@@ -838,7 +847,6 @@ namespace engine::render {
 		pool.Timeline = next;
 		pool.TimelineOffsets = std::move(offsets);
 		pool.TimelineRevision = Textures.TimingRevision();
-		pool.TimelineLayoutRevision = view.ParticleLayoutRevision;
 		pool.TimelineResidentRevision = view.ParticleResidentRevision;
 		pool.TimelineIncomplete = incomplete;
 		pool.TimelineOwner = view.ContentOwner;
@@ -853,6 +861,7 @@ namespace engine::render {
 				 {&world.Buffer,
 				  &Particles.States,
 				  &Particles.Work,
+				  &Particles.EmitWork,
 				  &Particles.Params,
 				  &Particles.Curves,
 				  &Particles.EmitterRuntime,
@@ -868,6 +877,7 @@ namespace engine::render {
 			for (SDL_GPUTransferBuffer **staging :
 				 {&Particles.StateStaging,
 				  &Particles.WorkStaging,
+				  &Particles.EmitWorkStaging,
 				  &Particles.ParamStaging,
 				  &Particles.CurveStaging,
 				  &Particles.SeamStaging,
@@ -903,17 +913,15 @@ namespace engine::render {
 		uint32_t dispatches = 0;
 
 		const uint32_t word = static_cast<uint32_t>(sizeof(uint32_t));
-		const bool upload = Particles.WorkUpdates > 0 || Particles.SeamCount > 0 ||
-							Particles.ParamUpdates > 0 || Particles.CurveUpdates > 0;
+		const bool upload = Particles.WorkUpdates > 0 || Particles.EmitWorkUpdates > 0 ||
+							Particles.SeamCount > 0 || Particles.ParamUpdates > 0 ||
+							Particles.CurveUpdates > 0;
 
 		// Changed uploads share one copy pass. All are cycled: this is each
 		// buffer's first touch of the command, so the previous frame's dispatch
 		// keeps the version it bound.
-		//
-		// **The table updates are two regions of one buffer, from its two ends.**
-		// `PrepareParticles` fills parameters from the front and curves from the
-		// back, so a frame that changed neither uploads nothing rather than a
-		// zero-length copy the driver still has to look at.
+		// Parameter and curve scatter records have separate staging buffers;
+		// unchanged tables and work lists upload nothing.
 		if (upload) {
 			SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
 			if (copy == nullptr) {
@@ -926,7 +934,8 @@ namespace engine::render {
 								  SDL_GPUBuffer *to,
 								  uint32_t offset,
 								  uint32_t bytes,
-								  bool cycle
+								  bool cycle,
+								  std::string_view metric
 							  ) {
 				if (bytes == 0) {
 					return;
@@ -934,6 +943,7 @@ namespace engine::render {
 				const SDL_GPUTransferBufferLocation source{from, offset};
 				const SDL_GPUBufferRegion destination{to, offset, bytes};
 				SDL_UploadToGPUBuffer(copy, &source, &destination, cycle);
+				core::Metrics::Count(metric, bytes);
 			};
 
 			send(
@@ -941,32 +951,43 @@ namespace engine::render {
 				Particles.Work,
 				0,
 				Particles.WorkUpdates * PARTICLE_WORK_WORDS * word,
-				true
+				true,
+				"render.particles.work_upload_bytes"
+			);
+			send(
+				Particles.EmitWorkStaging,
+				Particles.EmitWork,
+				0,
+				Particles.EmitWorkUpdates * PARTICLE_WORK_WORDS * word,
+				true,
+				"render.particles.emit_work_upload_bytes"
 			);
 			send(
 				Particles.SeamStaging,
 				Particles.Seams,
 				0,
 				Particles.SeamCount * PARTICLE_SEAM_WORDS * word,
-				true
+				true,
+				"render.particles.seam_upload_bytes"
 			);
 
-			// **Not cycled, because the two ends are two copies of one buffer**
-			// and cycling the second would give it a fresh version with the first
-			// copy's bytes missing.
+			// Each destination is touched once before its scatter pass, so cycling
+			// preserves the table updates bound by an earlier queued frame.
 			send(
 				Particles.ParamStaging,
 				Particles.ParamUpdateBuffer,
 				0,
 				Particles.ParamUpdates * (PARTICLE_PARAM_WORDS + 1) * word,
-				true
+				true,
+				"render.particles.parameter_upload_bytes"
 			);
 			send(
 				Particles.CurveStaging,
 				Particles.CurveUpdateBuffer,
 				0,
 				Particles.CurveUpdates * (PARTICLE_CURVE_WORDS + 1) * word,
-				true
+				true,
+				"render.particles.curve_upload_bytes"
 			);
 			SDL_EndGPUCopyPass(copy);
 		}
@@ -1045,11 +1066,15 @@ namespace engine::render {
 				return {false, dispatches};
 			}
 			SDL_BindGPUComputePipeline(pass, ParticleEmit);
-			SDL_GPUBuffer *const reads[2] = {Particles.Work, Particles.Params};
+			SDL_GPUBuffer *const reads[2] = {Particles.EmitWork, Particles.Params};
 			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 2);
-			const float emission[4] = {Particles.Delta, static_cast<float>(Particles.WorkItems), 0.0f, 0.0f};
+			const float emission[4] = {
+				Particles.Delta, static_cast<float>(Particles.EmitWorkItems), 0.0f, 0.0f
+			};
 			SDL_PushGPUComputeUniformData(command, 0, emission, sizeof(emission));
-			SDL_DispatchGPUCompute(pass, ParticleWorkgroups(Particles.WorkItems), 1, 1);
+			const uint32_t groups = ParticleWorkgroups(Particles.EmitWorkItems);
+			SDL_DispatchGPUCompute(pass, groups, 1, 1);
+			core::Metrics::Count("render.particles.emission_dispatch_lanes", groups * 64);
 			SDL_EndGPUComputePass(pass);
 			dispatches++;
 		}
@@ -1082,6 +1107,9 @@ namespace engine::render {
 			// The resident work list lets lanes continue into the next emitter
 			// instead of wasting most of a 64-wide group on small blocks.
 			SDL_DispatchGPUCompute(pass, ParticleWorkgroups(Particles.WorkItems), 1, 1);
+			core::Metrics::Count(
+				"render.particles.integration_dispatch_lanes", ParticleWorkgroups(Particles.WorkItems) * 64
+			);
 			SDL_EndGPUComputePass(pass);
 			dispatches++;
 		}
@@ -1150,6 +1178,34 @@ namespace engine::render {
 		}
 	}
 
+	ParticleWorkBlock ParticleWorkBlockOf(const ParticleBatch &batch) {
+		ParticleWorkBlock result;
+		result.Index = batch.Index;
+		result.Ready = batch.Block != nullptr && batch.Spawn != nullptr && batch.Runtime != nullptr;
+		if (batch.Block != nullptr) {
+			result.First = batch.Block->First;
+			result.Capacity = batch.Block->Capacity;
+			result.Frames = batch.Block->Frames;
+			result.VariableTiming = batch.Block->VariableFlipbookTiming;
+			result.InvalidTiming = batch.Block->InvalidFlipbookTiming;
+		}
+		return result;
+	}
+
+	bool ParticleLayoutMatches(
+		std::span<const ParticleBatch> current,
+		std::span<const ParticleBatch> prepared,
+		std::span<const ParticleWorkBlock> work
+	) {
+		if (current.size() != prepared.size() || current.size() != work.size()) return false;
+		for (size_t index = 0; index < current.size(); ++index) {
+			if (ParticleWorkBlockOf(current[index]) != work[index] ||
+				!SameParticleState(current[index], prepared[index]))
+				return false;
+		}
+		return true;
+	}
+
 	Renderer::Impl::ParticlePreparation Renderer::Impl::PrepareParticles(
 		const render::View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot
 	) {
@@ -1157,9 +1213,10 @@ namespace engine::render {
 			view.ParticleWorldName.IsValid() ? view.ParticleWorld : view.World,
 			view.ParticleWorldName.IsValid() ? view.ParticleWorldName : view.WorldName
 		);
+		auto &ParticleGroups = ActiveParticleWorld->PreparedGroups;
+		auto &ParticleSpans = ActiveParticleWorld->PreparedSpans;
+		auto &ParticleOrder = ActiveParticleWorld->PreparedOrder;
 		if (ActiveParticleWorld->PreparedFrame == FrameCounter) {
-			ParticleGroups = ActiveParticleWorld->PreparedGroups;
-			ParticleSpans = ActiveParticleWorld->PreparedSpans;
 			return {ActiveParticleWorld->PreparedCount, 0};
 		}
 
@@ -1169,6 +1226,8 @@ namespace engine::render {
 			ParticleGroups.clear();
 			Particles.WorkItems = 0;
 			Particles.WorkUpdates = 0;
+			Particles.EmitWorkItems = 0;
+			Particles.EmitWorkUpdates = 0;
 			Particles.SeamCount = 0;
 			Particles.ParamUpdates = 0;
 			Particles.CurveUpdates = 0;
@@ -1180,6 +1239,8 @@ namespace engine::render {
 			ActiveParticleWorld->ResidentRefreshPending = false;
 			ActiveParticleWorld->PreparedCount = 0;
 			ActiveParticleWorld->PreparedBatches.clear();
+			ActiveParticleWorld->PreparedWorkBlocks.clear();
+			ActiveParticleWorld->VariableTimeline = false;
 			ActiveParticleWorld->PreparedGroups.clear();
 			ActiveParticleWorld->PreparedSpans.clear();
 			ActiveParticleWorld->PreparedOrder.clear();
@@ -1187,10 +1248,25 @@ namespace engine::render {
 			ActiveParticleWorld->DrawPlanStamp.Valid = false;
 			return {};
 		}
-		const bool variableTimeline =
-			std::any_of(batches.begin(), batches.end(), [](const ParticleBatch &batch) {
-				return batch.Block != nullptr && batch.Block->VariableFlipbookTiming;
-			});
+		const bool sourceLayoutChanged =
+			!ActiveParticleWorld->PreparedRevisionValid ||
+			ActiveParticleWorld->PreparedLayoutRevision != view.ParticleLayoutRevision ||
+			ActiveParticleWorld->PreparedBatches.size() != batches.size();
+		const bool sourceResidentChanged =
+			ActiveParticleWorld->ResidentRefreshPending ||
+			ActiveParticleWorld->PreparedResidentRevision != view.ParticleResidentRevision;
+		const bool layoutChanged =
+			sourceLayoutChanged &&
+			!ParticleLayoutMatches(
+				batches, ActiveParticleWorld->PreparedBatches, ActiveParticleWorld->PreparedWorkBlocks
+			);
+		if (sourceLayoutChanged || sourceResidentChanged) {
+			ActiveParticleWorld->VariableTimeline =
+				std::any_of(batches.begin(), batches.end(), [](const ParticleBatch &batch) {
+					return batch.Block != nullptr && batch.Block->VariableFlipbookTiming;
+				});
+		}
+		const bool variableTimeline = ActiveParticleWorld->VariableTimeline;
 		const bool timelineHasData = Particles.TimelineIncomplete || !Particles.TimelineOffsets.empty();
 		const bool authoredTimelineChanged =
 			Particles.TimelineResidentRevision != view.ParticleResidentRevision &&
@@ -1200,15 +1276,12 @@ namespace engine::render {
 		const bool timingChanged =
 			Particles.Timeline == nullptr ||
 			((timelineHasData || variableTimeline) &&
-			 (Particles.TimelineRevision != Textures.TimingRevision() ||
-			  Particles.TimelineLayoutRevision != view.ParticleLayoutRevision ||
+			 (Particles.TimelineRevision != Textures.TimingRevision() || layoutChanged ||
 			  Particles.TimelineOwner != view.ContentOwner || authoredTimelineChanged));
 		if (timingChanged && !PrepareParticleTimeline(view, command)) return {};
 
 		const bool rebuildLayout =
-			timingChanged || !ActiveParticleWorld->PreparedRevisionValid ||
-			ActiveParticleWorld->PreparedLayoutRevision != view.ParticleLayoutRevision ||
-			ActiveParticleWorld->PreparedBatches.size() != batches.size();
+			timingChanged || !ActiveParticleWorld->PreparedRevisionValid || layoutChanged;
 		// A resident pool still has to advance when no authored emitter value did.
 		// `PreparedFrame` above limits this to one dispatch for this world each
 		// renderer frame, while ParticleDelta carries all simulation time owed since
@@ -1217,9 +1290,8 @@ namespace engine::render {
 							 ActiveParticleWorld->PreparedRevision != view.ParticleRevision ||
 							 view.ParticleDelta > 0.0f;
 		if (!refresh) {
-			ParticleGroups = ActiveParticleWorld->PreparedGroups;
-			ParticleSpans = ActiveParticleWorld->PreparedSpans;
 			Particles.WorkUpdates = 0;
+			Particles.EmitWorkUpdates = 0;
 			Particles.SeamCount = 0;
 			Particles.ParamUpdates = 0;
 			Particles.CurveUpdates = 0;
@@ -1231,16 +1303,15 @@ namespace engine::render {
 		const bool refreshResident =
 			rebuildLayout || ActiveParticleWorld->ResidentRefreshPending ||
 			ActiveParticleWorld->PreparedResidentRevision != view.ParticleResidentRevision;
-		if (!rebuildLayout) {
-			ParticleOrder = ActiveParticleWorld->PreparedOrder;
-		}
 
 		if (rebuildLayout) {
 			ParticleGroups.clear();
 			ParticleSpans.clear();
 			Particles.WorkItems = 0;
+			Particles.EmitWorkItems = 0;
 		}
 		Particles.WorkUpdates = 0;
+		Particles.EmitWorkUpdates = 0;
 		Particles.SeamCount = 0;
 		Particles.ParamUpdates = 0;
 		Particles.CurveUpdates = 0;
@@ -1326,7 +1397,9 @@ namespace engine::render {
 			!ReserveParticleTables(view.ParticleBlocks, command)) {
 			return {};
 		}
-		if (!ReserveParticleStaging(total, static_cast<uint32_t>(view.ParticleSeams.size()))) {
+		if (!ReserveParticleStaging(
+				total, static_cast<uint32_t>(batches.size()), static_cast<uint32_t>(view.ParticleSeams.size())
+			)) {
 			return {};
 		}
 
@@ -1338,14 +1411,19 @@ namespace engine::render {
 			refreshResident
 				? static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.ParamStaging, true))
 				: nullptr;
+		auto *emitWork = rebuildLayout ? static_cast<ParticleWorkItem *>(
+											 SDL_MapGPUTransferBuffer(Device, Particles.EmitWorkStaging, true)
+										 )
+									   : nullptr;
 		auto *changedCurves =
 			refreshResident
 				? static_cast<uint32_t *>(SDL_MapGPUTransferBuffer(Device, Particles.CurveStaging, true))
 				: nullptr;
-		if ((rebuildLayout && work == nullptr) ||
+		if ((rebuildLayout && (work == nullptr || emitWork == nullptr)) ||
 			(refreshResident && (changedParams == nullptr || changedCurves == nullptr))) {
 			for (auto [mapped, buffer] : {
 					 std::pair{work, Particles.WorkStaging},
+					 std::pair{reinterpret_cast<uint32_t *>(emitWork), Particles.EmitWorkStaging},
 					 std::pair{changedParams, Particles.ParamStaging},
 					 std::pair{changedCurves, Particles.CurveStaging},
 				 }) {
@@ -1366,18 +1444,15 @@ namespace engine::render {
 		// upload removes the steady cost of one mostly empty workgroup per small
 		// emitter.
 		//
-		// The parameter and curve updates share one staging buffer, filled from
-		// the front for parameters and from the back for curves, so a frame that
-		// changed neither writes nothing at all.
+		// Each table stages only changed rows. Simulation time advances without
+		// rebuilding its work mapping or copying the retained host draw plan.
 		if (rebuildLayout) {
 			ParticleGroups.clear();
 			ParticleSpans.clear();
-		} else {
-			ParticleGroups = ActiveParticleWorld->PreparedGroups;
-			ParticleSpans = ActiveParticleWorld->PreparedSpans;
 		}
 
 		uint32_t written = rebuildLayout ? 0 : ActiveParticleWorld->PreparedCount;
+		uint32_t emitters = rebuildLayout ? 0 : Particles.EmitWorkItems;
 		uint32_t params = 0;
 		uint32_t curves = 0;
 		bool residentIncomplete = false;
@@ -1441,15 +1516,18 @@ namespace engine::render {
 				}
 
 				auto &record = Particles.CullRecords[batch.Index];
-				const ParticleDrawBounds bounds = BoundsForParticleDraw(block, *batch.Spawn, batch.ZOffset);
-				record.Observe(
-					bounds,
-					block.Generation,
-					block.Revision,
-					block.CurveRevision,
-					batch.Spawn->Lifetime.Maximum,
-					Particles.SimulatedSeconds
-				);
+				if (rebuildLayout || !record.Matches(block.Generation, block.Revision, block.CurveRevision)) {
+					const ParticleDrawBounds bounds =
+						BoundsForParticleDraw(block, *batch.Spawn, batch.ZOffset);
+					record.Observe(
+						bounds,
+						block.Generation,
+						block.Revision,
+						block.CurveRevision,
+						batch.Spawn->Lifetime.Maximum,
+						Particles.SimulatedSeconds
+					);
+				}
 
 				if (rebuildLayout) {
 					if (ParticleGroups.empty() ||
@@ -1471,6 +1549,7 @@ namespace engine::render {
 					);
 
 					auto *const items = reinterpret_cast<ParticleWorkItem *>(work);
+					emitWork[emitters++] = ParticleWorkItem{batch.Index, block.First};
 					for (uint32_t local = 0; local < block.Capacity; local++) {
 						items[written + local] = ParticleWorkItem{batch.Index, block.First + local};
 					}
@@ -1516,6 +1595,7 @@ namespace engine::render {
 
 		if (rebuildLayout) {
 			SDL_UnmapGPUTransferBuffer(Device, Particles.WorkStaging);
+			SDL_UnmapGPUTransferBuffer(Device, Particles.EmitWorkStaging);
 		}
 		if (refreshResident) {
 			SDL_UnmapGPUTransferBuffer(Device, Particles.ParamStaging);
@@ -1523,6 +1603,8 @@ namespace engine::render {
 		}
 		Particles.WorkItems = written;
 		Particles.WorkUpdates = rebuildLayout ? written : 0;
+		Particles.EmitWorkItems = emitters;
+		Particles.EmitWorkUpdates = rebuildLayout ? emitters : 0;
 		Particles.ParamUpdates = params;
 		Particles.CurveUpdates = curves;
 		Particles.Delta = ParticleStepDelta(view.ParticleDelta, ActiveParticleWorld->CarriedDelta);
@@ -1572,10 +1654,14 @@ namespace engine::render {
 		ActiveParticleWorld->PreparedCount = written;
 		if (rebuildLayout) {
 			ActiveParticleWorld->PreparedBatches.assign(batches.begin(), batches.end());
-			ActiveParticleWorld->PreparedOrder = ParticleOrder;
+			ActiveParticleWorld->PreparedWorkBlocks.resize(batches.size());
+			std::transform(
+				batches.begin(),
+				batches.end(),
+				ActiveParticleWorld->PreparedWorkBlocks.begin(),
+				ParticleWorkBlockOf
+			);
 		}
-		ActiveParticleWorld->PreparedGroups = ParticleGroups;
-		ActiveParticleWorld->PreparedSpans = ParticleSpans;
 		ActiveParticleWorld->PreparedCullingSafe = view.ParticleSeams.empty();
 		if (rebuildLayout || refreshResident) {
 			// An incomplete resident refresh can change the prepared groups before
@@ -1607,7 +1693,8 @@ namespace engine::render {
 			selectedPipeline = ParticleLayerColourPipeline;
 			selectedAdditive = AdditiveParticleLayerColourPipeline;
 		}
-		if (selectedPipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
+		if (selectedPipeline == nullptr || ActiveParticleWorld == nullptr ||
+			ActiveParticleWorld->PreparedGroups.empty()) {
 			return layer == TransparentLayerPhase::None
 					   ? DrawGpuParticleField(
 							 command, pass, viewProjection, eye, triangles, particlesDrawn, target
@@ -1615,6 +1702,8 @@ namespace engine::render {
 					   : 0;
 		}
 		ENGINE_PROFILE_CAT("draw particles", core::ProfileCategory::Render);
+		const auto &ParticleGroups = ActiveParticleWorld->PreparedGroups;
+		const auto &ParticleSpans = ActiveParticleWorld->PreparedSpans;
 		const std::span<const render::ParticleBatch> batches = ActiveParticleWorld->PreparedBatches;
 
 		// The camera's axes, once for the frame rather than once per group: a

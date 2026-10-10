@@ -1224,6 +1224,7 @@ namespace engine::render {
 				 {&resident.Buffer,
 				  &pool.States,
 				  &pool.Work,
+				  &pool.EmitWork,
 				  &pool.Params,
 				  &pool.Curves,
 				  &pool.EmitterRuntime,
@@ -1239,6 +1240,7 @@ namespace engine::render {
 			for (SDL_GPUTransferBuffer **staging :
 				 {&pool.StateStaging,
 				  &pool.WorkStaging,
+				  &pool.EmitWorkStaging,
 				  &pool.ParamStaging,
 				  &pool.CurveStaging,
 				  &pool.SeamStaging,

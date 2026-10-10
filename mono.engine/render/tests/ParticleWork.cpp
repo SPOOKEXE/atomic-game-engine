@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <ParticleWork.hpp>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -173,4 +174,104 @@ TEST_CASE(
 	CHECK(ParticleDrawVisible(material, true, true, frustum));
 	CHECK_FALSE(ParticleDrawVisible(behind, true, true, frustum));
 	CHECK(ParticleDrawVisible(ahead, true, true, frustum));
+}
+
+TEST_CASE(
+	"particle work residency survives source revisions until its layout changes",
+	"[render][particles][layout]"
+) {
+	using engine::render::ParticleBatch;
+	using engine::render::ParticleLayoutMatches;
+	using engine::render::ParticleWorkBlockOf;
+	engine::effects::EmitterBlock block;
+	block.First = 32;
+	block.Capacity = 6;
+	block.Generation = 1;
+	block.Revision = 5;
+	block.CurveRevision = 7;
+	engine::effects::EmitterSpawnState spawn;
+	engine::effects::EmitterRuntime runtime;
+	ParticleBatch batch;
+	batch.Block = &block;
+	batch.Spawn = &spawn;
+	batch.Runtime = &runtime;
+	batch.Index = 3;
+	batch.Texture = engine::core::Name("smoke");
+	batch.SourceWorld = engine::core::Name("first-world");
+	const std::array prepared{batch};
+	const std::array work{ParticleWorkBlockOf(batch)};
+	const auto matches = [&] { return ParticleLayoutMatches(std::span(&batch, 1), prepared, work); };
+	REQUIRE(matches());
+
+	SECTION("acceleration and curves preserve the work mapping") {
+		block.Acceleration = {3, -9, 0};
+		block.Revision++;
+		block.Curves.Size[0] = 2;
+		block.CurveRevision++;
+		CHECK(matches());
+	}
+	SECTION("a copied source packet rebinds without another work upload") {
+		auto copiedBlock = block;
+		auto copiedSpawn = spawn;
+		auto copiedRuntime = runtime;
+		batch.Block = &copiedBlock;
+		batch.Spawn = &copiedSpawn;
+		batch.Runtime = &copiedRuntime;
+		CHECK(matches());
+	}
+	SECTION("texture and generated-image owner change material groups") {
+		batch.Texture = engine::core::Name("fire");
+		CHECK_FALSE(matches());
+		batch = prepared[0];
+		batch.SourceWorld = engine::core::Name("second-world");
+		CHECK_FALSE(matches());
+	}
+	SECTION("camera offset and soft masking change material groups") {
+		batch.ZOffset = 3;
+		CHECK_FALSE(matches());
+		batch = prepared[0];
+		batch.SoftParticles = !batch.SoftParticles;
+		CHECK_FALSE(matches());
+	}
+	SECTION("block ranges and membership change work destinations") {
+		block.First++;
+		CHECK_FALSE(matches());
+		block.First--;
+		block.Capacity++;
+		CHECK_FALSE(matches());
+		block.Capacity--;
+		batch.Index++;
+		CHECK_FALSE(matches());
+		batch = prepared[0];
+		batch.Runtime = nullptr;
+		CHECK_FALSE(matches());
+		CHECK_FALSE(ParticleLayoutMatches({}, prepared, work));
+	}
+	SECTION("variable timing changes invalidate the resident timeline") {
+		block.VariableFlipbookTiming = true;
+		CHECK_FALSE(matches());
+		block.VariableFlipbookTiming = false;
+		block.Frames++;
+		CHECK_FALSE(matches());
+		block.Frames--;
+		block.InvalidFlipbookTiming = true;
+		CHECK_FALSE(matches());
+	}
+}
+
+TEST_CASE(
+	"particle culling bounds refresh only for their emitter's source changes", "[render][particles][culling]"
+) {
+	ParticleCullRecord record;
+	const engine::render::ParticleDrawBounds bounds{{{-2, -3, -4}, {2, 3, 4}}, true};
+	record.Observe(bounds, 1, 7, 11, 3, 10);
+	CHECK(record.Matches(1, 7, 11));
+	CHECK_FALSE(record.Matches(2, 7, 11));
+	CHECK_FALSE(record.Matches(1, 8, 11));
+	CHECK_FALSE(record.Matches(1, 7, 12));
+	CHECK(record.Ready(10));
+	record.Observe(bounds, 1, 8, 11, 3, 11);
+	CHECK(record.Matches(1, 8, 11));
+	CHECK_FALSE(record.Ready(13.999));
+	CHECK(record.Ready(14));
 }

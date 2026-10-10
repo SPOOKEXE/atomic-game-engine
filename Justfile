@@ -2111,3 +2111,15 @@ playergui-projection-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target bench_script
     MONO_PLAYERGUI_PROJECTION_REPORT=1 ./.cache/build/bench/bench/bench_script --suite engine.script.bench.playergui --samples {{samples}}
+
+# Actual ordinary-emitter CPU recording/self cost, GPU timestamps and residency.
+# Device waits are outside CPU recording spans, so these numbers are not FPS.
+ordinary-particle-bench samples="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    if ! MONO_ORDINARY_PARTICLE_REPORT=1 timeout --foreground --kill-after=10s 300s ./.cache/build/bench/bench/bench_render --suite engine.render.bench.particles --samples {{samples}}; then
+        echo "ordinary-particle-bench failed or exceeded its 300s device deadline" >&2
+        exit 1
+    fi

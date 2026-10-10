@@ -1705,14 +1705,6 @@ namespace engine::render {
 			TransparentLayerPhase layer = TransparentLayerPhase::None
 		);
 
-		// This frame's groups, and the batch order they were built from.
-		//
-		// Members rather than locals, so the capacity survives the frame - the
-		// same argument `DrawOrder` makes one screen up.
-		std::vector<ParticleGroup> ParticleGroups;
-		std::vector<ParticleCullSpan> ParticleSpans;
-		std::vector<uint32_t> ParticleOrder;
-
 		// --- the device-resident pool -----------------------------------------
 		//
 		// **The particles live here and are simulated here.** Until v0.17 the
@@ -1742,6 +1734,12 @@ namespace engine::render {
 			SDL_GPUTransferBuffer *WorkStaging = nullptr;
 			uint32_t WorkCapacity = 0;
 			//@}
+
+			// Emission runs once per admitted emitter, while integration visits
+			// every slot. Both lists derive from the same prepared layout.
+			SDL_GPUBuffer *EmitWork = nullptr;
+			SDL_GPUTransferBuffer *EmitWorkStaging = nullptr;
+			uint32_t EmitWorkCapacity = 0;
 
 			// The two tables the step reads by block index, and the one staging
 			// staging records that feed them.
@@ -1804,7 +1802,6 @@ namespace engine::render {
 			SDL_GPUBuffer *Timeline = nullptr;
 			std::unordered_map<uint64_t, uint32_t> TimelineOffsets;
 			uint64_t TimelineRevision = 0;
-			uint64_t TimelineLayoutRevision = 0;
 			uint64_t TimelineResidentRevision = 0;
 			bool TimelineIncomplete = false;
 			core::Name TimelineOwner;
@@ -1813,6 +1810,8 @@ namespace engine::render {
 			//@{
 			uint32_t WorkItems = 0;
 			uint32_t WorkUpdates = 0;
+			uint32_t EmitWorkItems = 0;
+			uint32_t EmitWorkUpdates = 0;
 			uint32_t SeamCount = 0;
 			uint32_t ParamUpdates = 0;
 			uint32_t CurveUpdates = 0;
@@ -1845,6 +1844,8 @@ namespace engine::render {
 			std::vector<ParticleGroup> PreparedGroups;
 			std::vector<ParticleCullSpan> PreparedSpans;
 			std::vector<uint32_t> PreparedOrder;
+			std::vector<ParticleWorkBlock> PreparedWorkBlocks;
+			bool VariableTimeline = false;
 			bool PreparedCullingSafe = true;
 
 			// Emitter bounds and their folded runs are host facts. Keep the last
@@ -1896,7 +1897,7 @@ namespace engine::render {
 		bool ReserveParticlePool(uint32_t slots, SDL_GPUCommandBuffer *command);
 		bool PrepareParticleTimeline(const View &view, SDL_GPUCommandBuffer *command);
 		bool ReserveParticleTables(uint32_t blocks, SDL_GPUCommandBuffer *command);
-		bool ReserveParticleStaging(uint32_t workItems, uint32_t seams);
+		bool ReserveParticleStaging(uint32_t workItems, uint32_t emitters, uint32_t seams);
 		//@}
 
 		// Runs changed-state uploads, emission and integration in the frame's

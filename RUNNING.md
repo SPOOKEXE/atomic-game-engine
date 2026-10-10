@@ -153,6 +153,7 @@ directory. Use the `bench` preset for comparable measurements.
 | `bench-accept [args...]` | Accept benchmark baselines. |
 | `imagecodec-bench [samples]` | Measure CPU image imports at 1080p and print results to stdout. Default: `5`. |
 | `render-preparation-bench [samples]` | Measure render-preparation work. Default: `5`. |
+| `ordinary-particle-bench [samples]` | Measure ordinary emitter preparation, actual upload bytes, dispatch lanes, and delayed Vulkan pass timings. Default: `1`; waits are outside CPU recording spans. |
 | `volume-light-stress [frames]` | Check lighting stress scene, selection costs, and Vulkan fog stress. Default: `120`. |
 | `lighting-stress-scene [frames]` | Run the 256 point, 256 spot, 256 fog volume scene. Default: `720`. |
 | `data-capture-hook-bench [samples]` | Measure renderer data-capture hooks. Default: `5`. |
