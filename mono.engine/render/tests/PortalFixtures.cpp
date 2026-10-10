@@ -6,6 +6,7 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
@@ -1884,17 +1885,30 @@ TEST_CASE("editor ground grid reaches portal and mirror captures", "[render][gpu
 	view.Grid.AxisAlpha = 0;
 	view.Grid.Offset = {mirror ? .3f : DESTINATION_X + .3f, 0, .4f};
 	render::OverlayImage overlay;
+	uint32_t capturedDrawCalls = 0;
+	double capturedRasterPasses = 0;
+	const auto rasterPasses = [] {
+		const core::Name name("render.transparent.raster_passes");
+		for (const auto &counter : core::Metrics::Snapshot().Counters)
+			if (counter.Name == name) return counter.Value;
+		return 0.0;
+	};
 	const auto capture = [&] {
 		view.Damage.Scene = true;
+		const auto rasterPassesBefore = rasterPasses();
 		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		capturedDrawCalls = frame.DrawCalls;
+		capturedRasterPasses = rasterPasses() - rasterPassesBefore;
 		CHECK((mirror ? frame.SurfacePasses >= 2 : frame.PortalPasses > 0));
 		return CaptureResource(
 			fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
 		);
 	};
 	const auto disabled = capture();
+	CHECK(capturedRasterPasses == 0);
 	view.Grid.Enabled = true;
 	const auto enabled = capture();
+	CHECK(capturedRasterPasses == 1);
 	size_t gridPixels = 0;
 	// Only the aperture interior counts. The primary grid is behind this opaque pane.
 	for (uint32_t y = 50; y < 62; ++y) {
@@ -1909,6 +1923,8 @@ TEST_CASE("editor ground grid reaches portal and mirror captures", "[render][gpu
 	CHECK(gridPixels > 30);
 	view.Grid.Enabled = false;
 	const auto restored = capture();
+	CHECK(capturedRasterPasses == 0);
+	const auto disabledDrawCalls = capturedDrawCalls;
 	const bool noGridLeak = restored.Bytes == disabled.Bytes;
 	CHECK(noGridLeak);
 	view.Grid.Enabled = true;
@@ -1916,7 +1932,12 @@ TEST_CASE("editor ground grid reaches portal and mirror captures", "[render][gpu
 	const auto muted = capture();
 	const bool zeroStrengthHidesGrid = muted.Bytes == disabled.Bytes;
 	CHECK(zeroStrengthHidesGrid);
+	CHECK(capturedDrawCalls == disabledDrawCalls);
+	CHECK(capturedRasterPasses == 0);
 	view.Grid.Strength = 1;
+	const auto reactivated = capture();
+	CHECK(capturedRasterPasses == 1);
+	CHECK(reactivated.Bytes == enabled.Bytes);
 	if (!mirror) {
 		instances.push_back(Plane(3, {DESTINATION_X, 1, -.4f}, 2, 2, {0, 1, 0}));
 		view.Instances = instances;

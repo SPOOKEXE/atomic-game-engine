@@ -1220,8 +1220,10 @@ namespace engine::render {
 				}
 			}
 
-			if (!recording.Request.Source->Grid.Enabled && plainTransparent == 0 && !drawInterface &&
-				particleCount == 0 && ribbonCount == 0) {
+			const auto &grid = recording.Request.Source->Grid;
+			const bool drawGrid = grid.Enabled && grid.Strength != 0.0f;
+			if (!drawGrid && plainTransparent == 0 && !drawInterface && particleCount == 0 &&
+				ribbonCount == 0) {
 				State->RefractionTexture = nullptr;
 				State->RefractionSampler = nullptr;
 				State->RefractionGuardTexture = nullptr;
@@ -1238,6 +1240,7 @@ namespace engine::render {
 
 			recording.InvalidateBackgroundTexture(depthTarget.texture);
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
+			if (pass != nullptr) core::Metrics::Count("render.transparent.raster_passes", 1);
 			// **The light set, pushed once for the whole pass.** Uniform state
 			// on a command buffer persists until it is replaced, so one push
 			// before the draws serves every one of them - which is the whole

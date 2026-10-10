@@ -638,7 +638,7 @@ namespace engine::render {
 		WorldColourTarget target
 	) {
 		const auto &grid = Request.Source->Grid;
-		if (!grid.Enabled) return;
+		if (!grid.Enabled || grid.Strength == 0.0f) return;
 		auto *pipeline = target == WorldColourTarget::Hdr ? State->HdrGridPipeline : State->GridPipeline;
 		if (pipeline == nullptr) return;
 		ENGINE_PROFILE_CAT("ground grid", core::ProfileCategory::Render);

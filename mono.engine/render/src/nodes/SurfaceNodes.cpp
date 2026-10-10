@@ -1,6 +1,7 @@
 #include "PortalImageSampling.hpp"
 #include "ViewRecording.hpp"
 
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/graph/Cull.hpp>
@@ -25,6 +26,17 @@ namespace engine::render {
 				return false;
 			}
 			const auto &captures = bank.CapturePlan;
+			uint64_t surfaceLookupProbes = 0;
+			std::array<const SurfaceView *, scene::MAX_SURFACES> surfaceOf{};
+			{
+				ENGINE_PROFILE_CAT("index capture surfaces", core::ProfileCategory::Render);
+				for (const auto &surface : Request.Surfaces) {
+					if (surface.Index >= 0 && size_t(surface.Index) < surfaceOf.size() &&
+						surfaceOf[surface.Index] == nullptr) {
+						surfaceOf[surface.Index] = &surface;
+					}
+				}
+			}
 			std::array<bool, scene::MAX_SURFACES> refresh{};
 			for (const auto &portal : Request.Portals) {
 				refresh[portal.Index] = true;
@@ -32,6 +44,7 @@ namespace engine::render {
 			for (size_t index = 0; index < AcceptedCount; ++index) {
 				refresh[Accepted[index].Index] = Accepted[index].Refresh;
 			}
+			bool captureUploadedRibbons = false;
 			const auto uploadRibbons = [&](std::span<const effects::RibbonVertex> vertices) {
 				if (vertices.empty()) {
 					return true;
@@ -51,6 +64,7 @@ namespace engine::render {
 				SDL_UploadToGPUBuffer(copy, &source, &destination, true);
 				SDL_EndGPUCopyPass(copy);
 				Result.UploadedBytes += destination.size;
+				captureUploadedRibbons = true;
 				return true;
 			};
 			const auto textureOf = [&](const SurfaceCaptureEntry &entry) -> SDL_GPUTexture * {
@@ -176,12 +190,8 @@ namespace engine::render {
 					const PortalView *portal = PortalOf[slot];
 					const SurfaceView *surface = nullptr;
 					if (portal == nullptr) {
-						for (const auto &candidate : Request.Surfaces) {
-							if (candidate.Index == int16_t(slot)) {
-								surface = &candidate;
-								break;
-							}
-						}
+						++surfaceLookupProbes;
+						surface = surfaceOf[slot];
 					}
 					if (portal == nullptr && surface == nullptr) {
 						SDL_PushGPUVertexUniformData(Command, 0, &frame, sizeof(frame));
@@ -256,9 +266,12 @@ namespace engine::render {
 						Result.Triangles
 					);
 				};
-				for (size_t slot = 0; slot < scene::MAX_SURFACES; ++slot) {
-					const auto &run = Plan.Runs[slot];
-					drawPane(slot, run.OpaqueFirst, run.OpaqueCount);
+				{
+					ENGINE_PROFILE_CAT("compose capture opaque panes", core::ProfileCategory::Render);
+					for (size_t slot = 0; slot < scene::MAX_SURFACES; ++slot) {
+						const auto &run = Plan.Runs[slot];
+						drawPane(slot, run.OpaqueFirst, run.OpaqueCount);
+					}
 				}
 				// Each recursive capture owns its transformed eye and oblique aperture clip.
 				DrawGroundGrid(pass, entry.Matrices.ViewProjection, entry.Frame, WorldColourTarget::Hdr);
@@ -363,7 +376,10 @@ namespace engine::render {
 					SurfaceDepth.Resolved = std::max(SurfaceDepth.Resolved, entry.Depth);
 				}
 			}
-			if (RibbonCount > 0 && !uploadRibbons(Request.RibbonVertices)) {
+			// Count actual lookup reads: the slot index replaces per-candidate scan comparisons.
+			core::Metrics::Count("render.surface_lookup.probes", static_cast<double>(surfaceLookupProbes));
+			// The initial source upload remains valid when no capture replaced the shared buffer.
+			if (captureUploadedRibbons && !uploadRibbons(Request.RibbonVertices)) {
 				return false;
 			}
 			return CaptureSeamLights(WorldColourTarget::Hdr);
