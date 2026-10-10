@@ -23,7 +23,10 @@
 #include <engine/parallel/Jobs.hpp>
 #include <engine/render/PortalImageDemand.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -78,6 +81,12 @@ namespace studio {
 
 		static void Present(Editor &editor, size_t viewport) {
 			editor.PresentViewport(viewport, 1.0f / 60.0f);
+		}
+
+		static engine::render::VisibilitySnapshot BodyVisibility(Editor &editor) {
+			editor.WorldTarget = {96, 96};
+			Present(editor, 0);
+			return editor.Renderer.Visibility();
 		}
 
 		static void SetFieldOfView(Editor &editor, size_t viewport, float fieldOfView) {
@@ -755,6 +764,101 @@ TEST_CASE(
 	CHECK(client.Frames == 64);
 	CHECK(client.FrameRate > 23.0f);
 	CHECK(client.FrameRate < 25.0f);
+}
+
+TEST_CASE(
+	"Studio first person hides only the displayed player's body",
+	"[studio][viewports][camera][first-person-body][gpu][.]"
+) {
+	using namespace engine;
+	const SavedGameScratch scratch;
+	struct ConfigRestore {
+		std::filesystem::path Previous = studio::ConfigRoot();
+		~ConfigRestore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore;
+	studio::SetConfigRoot(scratch.Root);
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	const auto authority = editor.Universe->Create({.Name = core::Name("FirstPersonBody")});
+	editor.PrepareWorldIn(authority);
+	editor.Universe->Enter(authority, [&](ecs::Store &store) {
+		const auto observer = scene::AddPlayer(store, "observer", false, 91);
+		REQUIRE(observer != ecs::NULL_ENTITY);
+		const auto model = scene::LoadCharacter(store, observer);
+		const auto *character = store.Get<scene::Character>(model);
+		REQUIRE(character != nullptr);
+		store.Set(character->Root, scene::Transform{core::CFrame(core::Vector3{0, 0, -3})});
+	});
+	studio::ViewportCameraProbe::Show(editor, authority);
+	const WorldId replica = studio::ViewportCameraProbe::StartPlay(editor);
+	studio::ViewportCameraProbe::TickPlay(editor);
+	studio::ViewportCameraProbe::Show(editor, replica);
+	std::vector<uint64_t> body;
+	std::vector<uint64_t> otherBody;
+	const auto setMode = [&](scene::CameraMode mode) {
+		editor.Universe->Enter(replica, [&](ecs::Store &store) {
+			(void)scene::FollowOwnCharacter(store);
+			const auto *local = store.Resource<scene::LocalPlayer>();
+			REQUIRE(local != nullptr);
+			const auto *character = store.Get<scene::Character>(scene::CharacterOf(store, local->Instance));
+			REQUIRE(character != nullptr);
+			const auto *active = store.Resource<scene::ActiveCamera>();
+			REQUIRE(active != nullptr);
+			REQUIRE(scene::CameraSubjectRoot(store, active->Entity) == character->Root);
+			auto *control = store.ResourceMutable<scene::CameraController>();
+			REQUIRE(control != nullptr);
+			control->Angles = {-.8f, 0};
+			control->Mode = mode;
+			control->Distance = mode == scene::CameraMode::LockFirstPerson ? 0 : 5;
+			control->OccludedDistance = -1;
+			REQUIRE(scene::PlaceCamera(store));
+		});
+	};
+	setMode(scene::CameraMode::Classic);
+	const auto classic = studio::ViewportCameraProbe::BodyVisibility(editor);
+	REQUIRE(classic.Valid);
+	editor.Universe->Enter(replica, [&](const ecs::Store &store) {
+		const auto *active = store.Resource<scene::ActiveCamera>();
+		REQUIRE(active != nullptr);
+		const auto root = scene::CameraSubjectRoot(store, active->Entity);
+		REQUIRE(root != ecs::NULL_ENTITY);
+		const auto *drawn = store.Resource<render::DrawList>();
+		REQUIRE(drawn != nullptr);
+		const auto observer = store.FindFirstChild(scene::PlayersOf(store), "observer");
+		const auto *other = store.Get<scene::Character>(scene::CharacterOf(store, observer));
+		REQUIRE(other != nullptr);
+		for (const auto &row : drawn->Instances) {
+			if (row.Variant != 0) continue;
+			if (row.Rig == root.Id || row.Source == root.Id) body.push_back(row.Source);
+			if (row.Rig == other->Root.Id || row.Source == other->Root.Id) otherBody.push_back(row.Source);
+		}
+	});
+	REQUIRE_FALSE(body.empty());
+	REQUIRE_FALSE(otherBody.empty());
+	const auto submittedBody = [&](const render::VisibilitySnapshot &snapshot,
+								   const std::vector<uint64_t> &entities) {
+		size_t count = 0;
+		for (const auto &row : snapshot.Observations) {
+			if (std::find(entities.begin(), entities.end(), row.Entity) == entities.end()) continue;
+			if (row.State == render::VisibilityState::SubmittedOpaqueOrMasked ||
+				row.State == render::VisibilityState::SubmittedBlended ||
+				row.State == render::VisibilityState::GpuIndirectCandidate)
+				++count;
+		}
+		return count;
+	};
+	CHECK(submittedBody(classic, body) > 0);
+	setMode(scene::CameraMode::LockFirstPerson);
+	const auto first = studio::ViewportCameraProbe::BodyVisibility(editor);
+	REQUIRE(first.Valid);
+	CHECK(submittedBody(first, body) == 0);
+	CHECK(submittedBody(first, otherBody) > 0);
+	setMode(scene::CameraMode::Classic);
+	const auto restored = studio::ViewportCameraProbe::BodyVisibility(editor);
+	REQUIRE(restored.Valid);
+	CHECK(submittedBody(restored, body) > 0);
 }
 
 TEST_CASE(

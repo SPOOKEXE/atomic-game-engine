@@ -2986,6 +2986,7 @@ namespace studio {
 			}
 		}
 		engine::render::View view;
+		std::vector<uint32_t> hiddenEyeRows;
 		{
 			ENGINE_PROFILE_CAT("build render view", engine::core::ProfileCategory::Render);
 			diagnostics.ApplyCameraFrames(view, eye, cullingEye);
@@ -3016,6 +3017,26 @@ namespace studio {
 			view.World = visual.IsValid() ? visual.Index : 0;
 			view.WorldName = visual.IsValid() ? Universe->NameOf(visual) : engine::core::Name{};
 			view.ImageGraphWorldName = IsReplicaWorld(shown) ? Universe->NameOf(shown) : view.WorldName;
+			if (IsReplicaWorld(shown)) {
+				Universe->Enter(shown, [&](const Store &store) {
+					engine::render::SelectFirstPersonBody(store, view);
+				});
+				const uint64_t inputEyeRig = view.EyeRig;
+				if (visual != shown && view.EyePlayer) {
+					// A mapped eye hides the same player in the displayed world's rig.
+					if (visual.IsValid() && !remoteEye)
+						Universe->Enter(visual, [&](Store &store) {
+							engine::render::ResolveEyeBody(store, view);
+						});
+					const auto inputWorld = Universe->NameOf(shown);
+					for (size_t index = 0; index < view.Instances.size(); ++index) {
+						const auto &row = view.Instances[index];
+						if (row.Rig == inputEyeRig && row.SourceWorld == inputWorld)
+							hiddenEyeRows.push_back(static_cast<uint32_t>(index));
+					}
+					view.EyeHiddenRows = hiddenEyeRows;
+				}
+			}
 			view.GpuParticles = std::move(gpuParticles);
 			const WorldId layers = IsReplicaWorld(shown) && visual == VisualWorldOf(shown) ? shown : visual;
 			view.ParticleWorld = layers.IsValid() ? layers.Index : 0;
@@ -3071,6 +3092,7 @@ namespace studio {
 			engine::render::View remote;
 			diagnostics.ApplyCameraFrames(remote, eye, cullingEye);
 			remote.Camera = lens;
+			remote.EyePlayer = view.EyePlayer;
 			remote.Target = view.Target;
 			remote.Slot = view.Slot;
 			remote.LodMinimumDistances = view.LodMinimumDistances;
