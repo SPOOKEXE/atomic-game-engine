@@ -1,3 +1,5 @@
+#include "DrawSignature.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/render/InterfacePass.hpp>
@@ -75,54 +77,6 @@ namespace engine::ui {
 			}
 		}
 
-		uint64_t FoldBytes(uint64_t hash, const void *data, size_t size) {
-			constexpr uint64_t PRIME = 1099511628211ull;
-			const auto *bytes = static_cast<const std::byte *>(data);
-			hash = (hash ^ size) * PRIME;
-
-			// One dependent multiply per machine word rather than per byte. The
-			// signature is process-local, and folding the byte count first keeps a
-			// short buffer distinct from a longer one with a zero tail.
-			size_t index = 0;
-			for (; index + sizeof(uint64_t) <= size; index += sizeof(uint64_t)) {
-				uint64_t word = 0;
-				std::memcpy(&word, bytes + index, sizeof(word));
-				hash = (hash ^ word) * PRIME;
-			}
-			if (index < size) {
-				uint64_t word = 0;
-				std::memcpy(&word, bytes + index, size - index);
-				hash = (hash ^ word) * PRIME;
-			}
-			return hash;
-		}
-
-		uint64_t DrawGeometrySignature(const ImDrawData *draw) {
-			if (draw == nullptr) {
-				return 0;
-			}
-
-			uint64_t hash = 1469598103934665603ull;
-			hash = FoldBytes(hash, &draw->DisplayPos, sizeof(draw->DisplayPos));
-			hash = FoldBytes(hash, &draw->DisplaySize, sizeof(draw->DisplaySize));
-			hash = FoldBytes(hash, &draw->FramebufferScale, sizeof(draw->FramebufferScale));
-			for (const ImDrawList *list : draw->CmdLists) {
-				hash = FoldBytes(hash, list->VtxBuffer.Data, list->VtxBuffer.Size * sizeof(ImDrawVert));
-				hash = FoldBytes(hash, list->IdxBuffer.Data, list->IdxBuffer.Size * sizeof(ImDrawIdx));
-				for (const ImDrawCmd &command : list->CmdBuffer) {
-					hash = FoldBytes(hash, &command.ClipRect, sizeof(command.ClipRect));
-					// The unresolved atlas pointer is the texture's identity in a
-					// headless frame. GetTexID asserts until a graphics backend uploads
-					// it, while this pair is valid in both headed and headless hosts.
-					hash = FoldBytes(hash, &command.TexRef, sizeof(command.TexRef));
-					hash = FoldBytes(hash, &command.ElemCount, sizeof(command.ElemCount));
-					hash = FoldBytes(hash, &command.IdxOffset, sizeof(command.IdxOffset));
-					hash = FoldBytes(hash, &command.VtxOffset, sizeof(command.VtxOffset));
-					hash = FoldBytes(hash, &command.UserCallback, sizeof(command.UserCallback));
-				}
-			}
-			return hash;
-		}
 	}
 
 	struct Interface::Impl {
@@ -477,7 +431,7 @@ namespace engine::ui {
 		State->Draw = ImGui::GetDrawData();
 		{
 			ENGINE_PROFILE_CAT("ui.signature", core::ProfileCategory::Render);
-			State->DrawSignature = DrawGeometrySignature(State->Draw);
+			State->DrawSignature = draw_signature_detail::DrawGeometrySignature(State->Draw);
 		}
 	}
 

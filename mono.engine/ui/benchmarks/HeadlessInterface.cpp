@@ -1,5 +1,7 @@
 // Measures headless editor widget layout and the retained geometry signature.
 
+#include "DrawSignature.hpp"
+
 #include <engine/render/Renderer.hpp>
 #include <engine/testing/Bench.hpp>
 #include <engine/ui/Interface.hpp>
@@ -7,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <imgui.h>
+#include <iostream>
 #include <stdexcept>
 
 TEST_SUITE_ID("engine.ui.bench.headless-interface")
@@ -61,8 +64,44 @@ namespace {
 		static InterfaceFixture fixture;
 		return fixture;
 	}
+
+	struct FrozenDrawFixture {
+		InterfaceFixture Host;
+		const ImDrawData *Draw = nullptr;
+
+		FrozenDrawFixture() {
+			for (size_t frame = 0; frame < 3; ++frame)
+				Host.Frame(96);
+			Draw = ImGui::GetDrawData();
+			if (Draw == nullptr || Draw->CmdListsCount == 0)
+				throw std::runtime_error("frozen UI signature benchmark has no draw data");
+			size_t commands = 0;
+			size_t bytes =
+				sizeof(Draw->DisplayPos) + sizeof(Draw->DisplaySize) + sizeof(Draw->FramebufferScale);
+			for (const ImDrawList *list : Draw->CmdLists) {
+				commands += list->CmdBuffer.Size;
+				bytes += list->VtxBuffer.Size * sizeof(ImDrawVert) + list->IdxBuffer.Size * sizeof(ImDrawIdx);
+				bytes += list->CmdBuffer.Size * (sizeof(ImVec4) + sizeof(ImTextureRef) +
+												 3 * sizeof(unsigned int) + sizeof(ImDrawCallback));
+			}
+			std::cout << "ui-signature-fixture vertices=" << Draw->TotalVtxCount
+					  << " indices=" << Draw->TotalIdxCount << " commands=" << commands
+					  << " input_bytes=" << bytes << '\n';
+		}
+	};
+
+	const FrozenDrawFixture &Frozen() {
+		static FrozenDrawFixture fixture;
+		return fixture;
+	}
 }
 
 BENCH_PER_ITEM("headless UI frame and geometry signature, 96 asset controls", 96) {
 	engine::testing::Consume(Fixture().Frame(96));
+}
+
+BENCH("frozen ImGui draw geometry signature, 96 asset controls", 1000) {
+	const ImDrawData *draw = Frozen().Draw;
+	for (size_t iteration = 0; iteration < 1000; ++iteration)
+		engine::testing::Consume(engine::ui::draw_signature_detail::DrawGeometrySignature(draw));
 }
