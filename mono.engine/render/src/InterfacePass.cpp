@@ -1892,7 +1892,12 @@ namespace engine::render {
 					fullbright + influence * ambient.B + scene,
 					1.0f,
 				},
-				glm::vec4{spatial.Size.X, spatial.Size.Y, 0.0f, 0.0f},
+				glm::vec4{
+					spatial.Size.X,
+					spatial.Size.Y,
+					spatial.Kind == gui::SpatialCanvasKind::Surface && !spatial.AlwaysOnTop ? 1.0f : 0.0f,
+					0.0f
+				},
 				glm::vec4{transformOrigin.X, transformOrigin.Y, transformScale.X, transformScale.Y},
 			};
 			SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));

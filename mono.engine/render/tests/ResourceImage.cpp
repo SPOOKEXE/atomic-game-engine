@@ -11,8 +11,10 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/EditableMeshes.hpp>
+#include <engine/render/InterfacePass.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/render/PortalImageImport.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
@@ -3828,6 +3830,136 @@ TEST_CASE(
 	CHECK(renderer.PortalImageUsage().Images == 0);
 	CHECK(renderer.PortalImageUsage().TextureBytes == 0);
 	CHECK(renderer.PortalImageUsage().CachedTextureBytes == 0);
+}
+
+TEST_CASE(
+	"oblique portal captures retain a depth-tested floor canvas",
+	"[render][gpu][resourceimage][portal-floor-canvas][.]"
+) {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	InstallImageCapture(renderer, "lens-b", true);
+	gui::RegisterGuiClasses();
+	ecs::Store world("floor-canvas-capture");
+	const auto collector = world.CreateInstance(gui::GuiClass("SurfaceGui"), "FloorCanvas");
+	gui::SpatialCanvas canvas;
+	canvas.Size = {100, 100};
+	canvas.Origin = {-50, .001f, -50};
+	canvas.AxisX = {100, 0, 0};
+	canvas.AxisY = {0, 0, 100};
+	canvas.Normal = {0, 1, 0};
+	world.Set(collector, canvas);
+	gui::DrawCommand paint;
+	paint.Collector = collector;
+	paint.Spatial = true;
+	paint.Bounds = {{0, 0}, {100, 100}};
+	paint.Clip = paint.Bounds;
+	paint.Tint = {0, 0, 1};
+	gui::DrawList list;
+	render::InterfacePass interface;
+	REQUIRE(interface.Initialise(renderer.Backend().Device, renderer.Backend().ColourFormat));
+	const bool authored = GENERATE(false, true);
+	CAPTURE(authored);
+	if (authored) {
+		render::ShaderCompiler compiler;
+		const auto compiled = compiler.Compile(
+			"#version 450\nlayout(location=0) out vec4 colour;\n"
+			"void main(){colour=vec4(0,0,1,1);}",
+			render::ShaderStage::Fragment
+		);
+		REQUIRE_FALSE(compiled.Failed);
+		paint.Shader = core::Name("FloorBlue");
+		REQUIRE(interface.AddShaderVariant(paint.Shader, compiled.SpirV));
+	}
+	list.Commands.push_back(paint);
+	interface.Submit(list, {128, 128}, {128, 128}, world);
+	scene::DrawInstance floor;
+	floor.Source = 1;
+	floor.Frame.Position = {0, -1, 0};
+	floor.HalfExtent = {50, 1, 50};
+	render::SceneTarget target{128, 128};
+	render::View view;
+	view.Pipeline = core::Name("image-export-pipeline");
+	view.World = 1;
+	view.WorldName = core::Name("floor-canvas-capture");
+	view.Target = &target;
+	view.Instances = std::span(&floor, 1);
+	const bool oblique = GENERATE(false, true);
+	CAPTURE(oblique);
+	render::PortalCaptureCamera camera;
+	camera.Position = {-1.3462248f, 3.9990549f, -3.1353846f};
+	camera.Orientation = {0, .14647098f, 0, -.98921496f};
+	camera.Frustum = {-.013879966f, .013879966f, -.013879966f, .013879966f, .019859195f, 500};
+	if (oblique) camera.ClipPlane = {-8.7422777e-8f, 0, -1, -3.1552439f};
+	REQUIRE(
+		render::ResolvePortalCaptureCamera(
+			camera, oblique ? render::PortalImageProjection::Seam : render::PortalImageProjection::Eye, view
+		)
+	);
+	render::OverlayImage overlay;
+	const auto capture = [&](render::FrameOverlayHook *hook) {
+		const auto token = renderer.QueueResourceImage(view.Pipeline, core::Name("image-export"));
+		REQUIRE(token != 0);
+		REQUIRE(renderer.Render(std::span(&view, 1), overlay, hook, false).Ran(core::Name("image-export")));
+		return AwaitImage(renderer, token);
+	};
+	const auto bare = capture(nullptr);
+	const auto painted = capture(&interface);
+	REQUIRE(interface.LastBatchCount() > 0);
+	const auto pixel = [](const render::ResourceImage &image, uint32_t x, uint32_t y) {
+		core::ByteReader bytes(std::span(image.Pixels).subspan(size_t(y) * image.RowStride + x * 8, 8));
+		const auto rg = glm::unpackHalf2x16(bytes.ReadUInt32());
+		const auto ba = glm::unpackHalf2x16(bytes.ReadUInt32());
+		return glm::vec4(rg.x, rg.y, ba.x, ba.y);
+	};
+	for (uint32_t x : {16u, 48u, 80u, 112u}) {
+		const auto before = pixel(bare, x, 126), after = pixel(painted, x, 126);
+		CAPTURE(x, before.r, before.g, before.b, after.r, after.g, after.b);
+		REQUIRE(before.r > .1f);
+		CHECK(after.b > .9f);
+		CHECK(after.r < .01f);
+		CHECK(after.g < .01f);
+	}
+	const auto matrices = view.Projection ? scene::ResolveSurfaceCamera(view.CameraFrame, *view.Projection)
+										  : scene::ResolveCamera(view.CameraFrame, view.Camera, 1);
+	const glm::dmat4 projection(matrices.ViewProjection), inverse = glm::inverse(projection);
+	const glm::dvec3 eye(
+		view.CameraFrame.Position.X, view.CameraFrame.Position.Y, view.CameraFrame.Position.Z
+	);
+	for (const float top : {.011f, .3f}) {
+		std::array occluded{floor, floor};
+		occluded[1].Source = 2;
+		occluded[1].Frame.Position.Y = top - .1f;
+		occluded[1].HalfExtent.Y = .1f;
+		occluded[1].Tint = {1, 0, 0};
+		view.Instances = occluded;
+		const auto blocker = capture(nullptr);
+		const auto hidden = capture(&interface);
+		for (uint32_t x : {16u, 48u, 80u, 112u}) {
+			const auto visible = pixel(blocker, x, 126);
+			core::ByteReader floorDepth(std::span(bare.Depth).subspan((126 * bare.Width + x) * 4, 4));
+			core::ByteReader blockerDepth(std::span(blocker.Depth).subspan((126 * blocker.Width + x) * 4, 4));
+			const float floorDistance = floorDepth.ReadFloat(), blockerDistance = blockerDepth.ReadFloat();
+			const glm::dvec4 near =
+				inverse * glm::dvec4(2 * (double(x) + .5) / 128 - 1, 1 - 2 * 126.5 / 128, 0, 1);
+			const glm::dvec3 ray = glm::dvec3(near) / near.w - eye;
+			const auto rawAt = [&](double height) {
+				const glm::dvec3 position = eye + ray * ((height - eye.y) / ray.y);
+				const glm::dvec4 clip = projection * glm::dvec4(position, 1);
+				return clip.z / clip.w;
+			};
+			const double rawGap = rawAt(.001) - rawAt(top);
+			CAPTURE(top, x, visible.r, visible.g, visible.b, floorDistance, blockerDistance, rawGap);
+			REQUIRE(rawGap > 1.0 / 524288.0);
+			REQUIRE(visible.r > visible.b * 2);
+			REQUIRE(blockerDistance < floorDistance - .001f);
+			const auto colour = pixel(hidden, x, 126);
+			CAPTURE(colour.r, colour.g, colour.b);
+			CHECK(colour.r > colour.b * 2);
+		}
+	}
 }
 
 TEST_CASE(

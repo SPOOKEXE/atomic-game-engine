@@ -32,4 +32,10 @@ void main() {
 	const vec2 local = (spatial.Transform.xy + inPosition * spatial.Transform.zw) / size;
 	const vec3 world = spatial.Origin.xyz + spatial.AxisX.xyz * local.x + spatial.AxisY.xyz * local.y;
 	gl_Position = spatial.ViewProjection * vec4(world, 1.0);
+	// Depth-tested surface canvases win within a chosen decal priority band:
+	// 32 D32 steps below normalized depth 1. This is a tolerance, not an error bound.
+	if (spatial.Canvas.z > 0.0 && !isinf(gl_Position.z) && !isnan(gl_Position.z) && !isinf(gl_Position.w) && !isnan(gl_Position.w)) {
+		const float depthTolerance = 1.0 / 524288.0;
+		gl_Position.z -= depthTolerance * gl_Position.w;
+	}
 }
