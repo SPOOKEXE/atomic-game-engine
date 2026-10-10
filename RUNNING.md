@@ -146,14 +146,29 @@ Documentation is written to `.cache/build/<preset>/docs/`; use
 Benchmark output is printed to the terminal unless a recipe names an output
 directory. Use the `bench` preset for comparable measurements.
 
+Frame Graph's `250 ms` setting is the aggregation window, not a frame duration.
+Structural averages can place CPU spans at overlapping mean positions; separate
+rows preserve those values without claiming parallel execution. GPU queries use
+a separate duration scale because their results can arrive several frames late
+and have no correlated CPU start. `submit.scene SDL handoff` identifies time in
+the backend submission call separately from engine submission bookkeeping.
+
 | Recipe | Purpose |
 |---|---|
 | `bench [args...]` | Run selected affected benchmarks. |
 | `bench-all [args...]` | Run every benchmark. |
 | `bench-accept [args...]` | Accept benchmark baselines. |
 | `imagecodec-bench [samples]` | Measure CPU image imports at 1080p and print results to stdout. Default: `5`. |
-| `render-preparation-bench [samples]` | Measure render-preparation work. Default: `5`. |
+| `ui-headless-bench [samples]` | Measure ImGui layout and frozen draw signatures without a GPU. Default: `5`. |
+| `studio-interface-bench [samples] [build_preset]` | Measure toolbar, Preferences, retained 250 ms Frame Graph, and idle content scans without a window or GPU. Defaults: `5`, `bench`; use `bench-o0` for unoptimized engine costs. |
+| `studio-replication-stress-bench [samples] [build_preset]` | Measure the actual Studio link with 20,000 moving Parts, replica delivery, and acknowledgements. Defaults: `3`, `bench`. |
+| `client-frame-bench [samples] [build_preset]` | Measure idle content demand, visibility and actual PreRender systems. Defaults: `5`, `bench`; use `bench-o0` for unoptimized costs. |
+| `view-graph-lookup-bench [samples] [build_preset]` | Compare pipeline node scans and indexed lookup. Defaults: `5`, `bench`; use `bench-o0` for unoptimized costs. |
+| `instance-packing-bench [samples] [build_preset]` | Measure instance conversion and residency with centered and off-center meshes. Defaults: `5`, `bench`; inline conversion is optimized in the benchmark translation unit. |
 | `surface-capture-plan-bench [samples] [build_preset]` | Measure CPU planning for 320 visible mirror roots with one bounce and retained buffers. Defaults: `3`, `bench`; no GPU work is included. |
+| `frame-plan-bench [samples]` | Measure CPU frame planning, including the default PBR pipeline. Default: `5`. |
+| `frame-plan-cache-bench [samples]` | Compare installed-pipeline diagnostic cache misses and hits. Default: `5`. |
+| `render-preparation-bench [samples]` | Measure render-preparation work. Default: `5`. |
 | `keep-loaded-filter-bench [samples]` | Compare copying 100,000 default Parts with retaining their draw span, plus resident and missing named meshes. Default: `5`. |
 | `ordinary-particle-bench [samples]` | Measure ordinary emitter preparation, actual upload bytes, dispatch lanes, and delayed Vulkan pass timings. Default: `1`; waits are outside CPU recording spans. |
 | `volume-light-stress [frames]` | Check lighting stress scene, selection costs, and Vulkan fog stress. Default: `120`. |

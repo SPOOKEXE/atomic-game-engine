@@ -48,13 +48,17 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/scene/Visibility.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <array>
 #include <client/ContentDemand.hpp>
 #include <client/Scene.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -139,6 +143,68 @@ namespace frame_bench {
 		return built.back();
 	}
 
+	// Ten furnished worlds with no drawable instances model an idle editor.
+	// Nonvisual descendants expose service lookup cost separately from drawing.
+	struct IdlePresented {
+		size_t FoldersPerWorld = 0;
+		std::array<Presented, 10> Worlds;
+	};
+
+	IdlePresented &IdleWorlds(size_t folders) {
+		static std::vector<std::unique_ptr<IdlePresented>> built;
+		for (const auto &held : built)
+			if (held->FoldersPerWorld == folders) return *held;
+
+		engine::scene::RegisterSceneClasses();
+		auto made = std::make_unique<IdlePresented>();
+		made->FoldersPerWorld = folders;
+		const auto folderClass = engine::ecs::Classes::Find(engine::core::Name("Folder"));
+		for (Presented &world : made->Worlds) {
+			world.World = std::make_unique<Store>("client.bench.frame.idle");
+			world.Systems = std::make_unique<Scheduler>();
+			engine::scene::InstallServices(*world.World);
+			const Entity workspace = engine::scene::WorkspaceOf(*world.World);
+			for (size_t index = 0; index < folders; ++index) {
+				const Entity folder = world.World->CreateInstance(folderClass);
+				if (!world.World->SetParent(folder, workspace))
+					throw std::runtime_error("idle benchmark folder could not be parented");
+			}
+			client::InstallPresentation(*world.World, *world.Systems, 1);
+			(void)client::WantedContentRevision(*world.World);
+			world.Systems->RunPhases(*world.World, Phase::PreRender, Phase::PreRender);
+			if (engine::scene::SyncRendered(*world.World) != 0)
+				throw std::runtime_error("idle benchmark unexpectedly contains drawable instances");
+			const auto *draw = world.World->Resource<engine::render::DrawList>();
+			if (draw == nullptr || !draw->Instances.empty())
+				throw std::runtime_error("idle benchmark unexpectedly produced draw geometry");
+		}
+		built.push_back(std::move(made));
+		return *built.back();
+	}
+
+	void IdleDemand(size_t folders) {
+		IdlePresented &scene = IdleWorlds(folders);
+		for (size_t iteration = 0; iteration < 1000; ++iteration)
+			for (Presented &world : scene.Worlds)
+				Consume(client::WantedContentRevision(*world.World));
+	}
+
+	void IdleVisibility(size_t folders) {
+		IdlePresented &scene = IdleWorlds(folders);
+		for (size_t iteration = 0; iteration < 1000; ++iteration)
+			for (Presented &world : scene.Worlds)
+				Consume(engine::scene::SyncRendered(*world.World));
+	}
+
+	void IdlePreRender(size_t folders) {
+		IdlePresented &scene = IdleWorlds(folders);
+		for (size_t iteration = 0; iteration < 100; ++iteration)
+			for (Presented &world : scene.Worlds) {
+				world.Systems->RunPhases(*world.World, Phase::PreRender, Phase::PreRender);
+				Consume(world.World->Resource<engine::render::DrawList>()->Instances.size());
+			}
+	}
+
 	// A world whose particles are running, built once per emitter count.
 	//
 	// **Emitters rather than particles, because since v0.17 the device owns the
@@ -219,6 +285,30 @@ BENCH("PreRender · 100,000 parts", 1) {
 	// and before anything is uploaded - all of which are measured elsewhere and
 	// all of which take this list as their input.
 	Consume(Present(Scene(MEDIUM)));
+}
+
+BENCH("Idle demand revision · 10 furnished worlds", 1000) {
+	IdleDemand(0);
+}
+
+BENCH("Idle demand revision · 10 worlds with 1,000 folders each", 1000) {
+	IdleDemand(1000);
+}
+
+BENCH("Idle visibility sync · 10 furnished worlds", 1000) {
+	IdleVisibility(0);
+}
+
+BENCH("Idle visibility sync · 10 worlds with 1,000 folders each", 1000) {
+	IdleVisibility(1000);
+}
+
+BENCH("Idle PreRender · 10 furnished worlds", 100) {
+	IdlePreRender(0);
+}
+
+BENCH("Idle PreRender · 10 worlds with 1,000 folders each", 100) {
+	IdlePreRender(1000);
 }
 
 // --- what runs beside it ------------------------------------------------------

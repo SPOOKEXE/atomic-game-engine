@@ -488,11 +488,47 @@ ui-headless-bench samples="5":
     cmake --build --preset bench --target bench_ui
     ./.cache/build/bench/bench/bench_ui --suite engine.ui.bench.headless-interface --samples {{samples}}
 
+# Real Studio toolbar and Preferences widgets, without a window or GPU device.
+studio-interface-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_studio
+    ./.cache/build/{{build_preset}}/bench/bench_studio --suite studio.bench.interface --samples {{samples}}
+
+# Actual idle content demand, visibility sync, and client presentation systems.
+client-frame-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_client
+    ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.frame --samples {{samples}}
+
+# Node-kind resolution for installed pipelines, preserving declaration order.
+view-graph-lookup-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.pipeline-node-lookup --samples {{samples}}
+
+# CPU instance packing and residency, including centered and off-center meshes.
+instance-packing-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.instances --samples {{samples}}
+
 # CPU capture planning for 320 visible mirrors with one terminal bounce.
 surface-capture-plan-bench samples="3" build_preset="bench":
     cmake --preset {{build_preset}} > /dev/null
     cmake --build --preset {{build_preset}} --target bench_render
     ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.surface-capture-plan --samples {{samples}}
+
+# CPU planning used after render views, including the installed default pipeline.
+frame-plan-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_graph
+    ./.cache/build/bench/bench/bench_graph --suite engine.graph.bench.submission --samples {{samples}}
+
+# Installed-pipeline diagnostic totals, comparing cache misses with steady hits.
+frame-plan-cache-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    ./.cache/build/bench/bench/bench_render --suite engine.render.bench.frameplan --samples {{samples}}
 
 # Portal reply encoding and decoding, per complete batch. No GPU or process transport.
 # Run the binary directly so measurements stay on the terminal.
@@ -2123,6 +2159,12 @@ playergui-projection-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target bench_script
     MONO_PLAYERGUI_PROJECTION_REPORT=1 ./.cache/build/bench/bench/bench_script --suite engine.script.bench.playergui --samples {{samples}}
+
+# Actual Studio replication interest with the all-moving demo population.
+studio-replication-stress-bench samples="3" build_preset="bench":
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCHMARKS=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_studio
+    ./.cache/build/{{build_preset}}/bench/bench_studio --suite studio.bench.replicationstress --samples {{samples}}
 
 # Actual ordinary-emitter CPU recording/self cost, GPU timestamps and residency.
 # Device waits are outside CPU recording spans, so these numbers are not FPS.
