@@ -3,10 +3,13 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/render/EditableImages.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/EditableImage.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <SDL3/SDL_init.h>
 #include <catch2/catch_test_macros.hpp>
 
 #include <client/ContentDemand.hpp>
@@ -108,6 +111,77 @@ TEST_CASE("An origin-free portal promotes empty demand but refuses named assets"
 	evidence.AssetsResident = false;
 	CHECK_FALSE(client::ApplyAssetlessReadiness(evidence, namedRevision, wanted.size()));
 	CHECK(readiness.Evaluate(evidence).ImageOnly == client::PortalImageOnlyReason::Assets);
+}
+
+TEST_CASE("origin-free content accepts only canonical local references", "[client][portalreadiness]") {
+	using client::PortalOriginFreeContent;
+	CHECK(client::OriginFreePortalContent("engine.Cube") == PortalOriginFreeContent::Mesh);
+	CHECK(client::OriginFreePortalContent("editable-image://4294967322") == PortalOriginFreeContent::Texture);
+	CHECK(
+		client::OriginFreePortalContent("imagegraph-instance://live#colour") ==
+		PortalOriginFreeContent::Texture
+	);
+	CHECK(
+		client::OriginFreePortalContent("imagegraph://graphs/live.aimagegraph#colour") ==
+		PortalOriginFreeContent::Texture
+	);
+	for (const char *name :
+		 {"remote.atex",
+		  "remote.amesh",
+		  "engine.Unknown",
+		  "editable-image://0",
+		  "editable-image://01",
+		  "editable-image://x",
+		  "imagegraph-instance://live",
+		  "imagegraph-instance://../live#colour",
+		  "imagegraph-instance://live#",
+		  "imagegraph://../live.aimagegraph#colour"}) {
+		CAPTURE(name);
+		CHECK(client::OriginFreePortalContent(name) == PortalOriginFreeContent::External);
+	}
+}
+
+TEST_CASE(
+	"origin-free portal images require actual owner-scoped residency", "[client][portalreadiness][gpu][.]"
+) {
+	using namespace engine;
+	REQUIRE(SDL_Init(SDL_INIT_VIDEO));
+	struct QuitVideo {
+		~QuitVideo() {
+			SDL_QuitSubSystem(SDL_INIT_VIDEO);
+		}
+	} quitVideo;
+	render::Renderer renderer;
+	REQUIRE(renderer.Initialise(nullptr));
+	scene::RegisterSceneClasses();
+	ecs::Store store("portal.runtime-assets");
+	const auto entity = store.CreateInstance(scene::EditableImageClass(), "image");
+	const auto name = scene::EditableImageContentName(store, entity);
+	const core::Name owner("portal.runtime-owner"), otherOwner("portal.other-owner");
+	CHECK_FALSE(client::OriginFreePortalContentResident(name, renderer, owner));
+	CHECK_FALSE(client::OriginFreePortalContentResident(core::Name("editable-image://0"), renderer, owner));
+	CHECK(client::OriginFreePortalContentResident(core::Name("engine.Cube"), renderer, owner));
+	scene::EditableImage image;
+	image.Width = image.Height = 2;
+	image.Pixels.assign(16, 255);
+	store.Set(entity, image);
+	render::EditableImageUploader uploader;
+	const uint64_t beforeUpload = renderer.ResourceRevision();
+	REQUIRE(uploader.Refresh(store, renderer, owner) == 1);
+	CHECK(renderer.ResourceRevision() != beforeUpload);
+	CHECK(client::OriginFreePortalContentResident(name, renderer, owner));
+	CHECK_FALSE(client::OriginFreePortalContentResident(name, renderer, otherOwner));
+	CHECK_FALSE(client::OriginFreePortalContentResident(core::Name("remote.atex"), renderer, owner));
+	const core::Name graph("imagegraph-instance://live#colour");
+	CHECK_FALSE(client::OriginFreePortalContentResident(graph, renderer, owner));
+	REQUIRE(renderer.AddTexture(graph, render::BuildTextureData(image), owner));
+	CHECK(client::OriginFreePortalContentResident(graph, renderer, owner));
+	CHECK_FALSE(client::OriginFreePortalContentResident(graph, renderer, otherOwner));
+	const uint64_t beforeDrop = renderer.ResourceRevision();
+	renderer.DropContentOwner(owner);
+	CHECK(renderer.ResourceRevision() != beforeDrop);
+	CHECK_FALSE(client::OriginFreePortalContentResident(name, renderer, owner));
+	CHECK_FALSE(client::OriginFreePortalContentResident(graph, renderer, owner));
 }
 
 TEST_CASE("Arrived portal eye uses bound geometry or a completed foreign image") {

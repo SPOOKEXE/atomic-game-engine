@@ -840,6 +840,7 @@ namespace client {
 			// receipt, asset, pose and capacity fact needed for live presentation.
 			std::shared_ptr<PortalReadinessController> Readiness;
 			std::optional<uint64_t> EmptyContentDemandRevision;
+			uint64_t EmptyContentResourceRevision = 0;
 			size_t UndeliverableAssetNames = 0;
 			// Capture-only snapshot of the facts that kept a crossed successor image-only.
 			std::shared_ptr<PortalReadinessEvidence> CapturedReadiness;

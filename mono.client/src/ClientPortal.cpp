@@ -1075,6 +1075,7 @@ namespace client {
 				next.CapturedReadiness.reset();
 				next.CapturedReadinessDecision.reset();
 				next.EmptyContentDemandRevision.reset();
+				next.EmptyContentResourceRevision = 0;
 				next.UndeliverableAssetNames = 0;
 				next.Failure.clear();
 				next.ReconnectAt = nowSeconds + .5;
@@ -1321,16 +1322,26 @@ namespace client {
 				evidence.ResidentAssetRevision = evidence.AssetsResident ? scanned->second : 0;
 			}
 			if (!next.Content->Client) {
-				// A game with no content origin can still have an asset-free successor.
-				// Prove that from the replicated rows, and repeat only when their asset
-				// references change. A named asset without a client remains image-only.
+				// Embedded images must reach owner-scoped residency before adoption;
+				// no external origin is needed to upload their replicated pixels.
 				Universe_->Enter(next.World, [&](ecs::Store &store) {
+					const auto owner = Universe_->NameOf(next.World);
+					if (Settings.EnableEditableImages)
+						VisualResourcesChanged =
+							EditableImages.Refresh(store, Renderer, owner) > 0 || VisualResourcesChanged;
 					const uint64_t revision = WantedContentRevision(store);
-					if (next.EmptyContentDemandRevision != revision) {
+					const uint64_t resourceRevision = Renderer.ResourceRevision();
+					if (next.EmptyContentDemandRevision != revision ||
+						next.EmptyContentResourceRevision != resourceRevision) {
 						std::vector<core::Name> wanted;
 						CollectWantedContent(store, wanted);
-						next.UndeliverableAssetNames = wanted.size();
+						next.UndeliverableAssetNames = static_cast<size_t>(
+							std::count_if(wanted.begin(), wanted.end(), [&](core::Name name) {
+								return !OriginFreePortalContentResident(name, Renderer, owner);
+							})
+						);
 						next.EmptyContentDemandRevision = revision;
+						next.EmptyContentResourceRevision = resourceRevision;
 					}
 					(void)ApplyAssetlessReadiness(evidence, revision, next.UndeliverableAssetNames);
 				});
