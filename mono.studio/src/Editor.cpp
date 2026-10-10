@@ -1,6 +1,7 @@
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -1436,7 +1437,11 @@ namespace studio {
 			}
 
 			SDL_Event event;
-			while (SDL_PollEvent(&event)) {
+			const auto poll = [&event] {
+				ENGINE_PROFILE("SDL event queue");
+				return SDL_PollEvent(&event);
+			};
+			while (poll()) {
 				process(event);
 			}
 		}
@@ -1661,7 +1666,10 @@ namespace studio {
 			ENGINE_PROFILE_CAT("present world", engine::core::ProfileCategory::Render);
 			PresentWorld(frameSeconds);
 		}
-		Interface.PresentPlatformWindows();
+		{
+			ENGINE_PROFILE_CAT("present platform windows", engine::core::ProfileCategory::Render);
+			Interface.PresentPlatformWindows();
+		}
 
 		FinishControlAutomationFrame();
 	}
@@ -2354,6 +2362,7 @@ namespace studio {
 			}
 
 			behaviourEye = diagnostics.ResolveBehaviourFrame(eye, [&](engine::core::CFrame &frame) {
+				ENGINE_PROFILE_CAT("viewport resolve portals", engine::core::ProfileCategory::ECS);
 				if (shown.IsValid() && IsReplicaWorld(shown)) {
 					visual = client::ResolveCameraPortalWorld(
 						*Universe, shown, visual, frame, lens, PortalImages.get()
@@ -2363,93 +2372,96 @@ namespace studio {
 			if (visual.IsValid() && Universe->IsRemote(visual)) {
 				ReleaseViewerCamera(viewport);
 			} else if (visual.IsValid()) {
-				const bool runtimeVisual = IsRunning(visual) || IsReplicaWorld(visual);
-				if (runtimeVisual) {
-					// A viewport's aspect and a client panel's presentation eye are
-					// frame-local facts. Restore the runtime camera after PreRender so
-					// server scripts and other client panels keep their own state.
-					Universe->Enter(visual, [&](Store &store) {
-						if (const auto *active = store.Resource<engine::scene::ActiveCamera>();
-							active != nullptr) {
-							restoreRuntimeCamera = *active;
-						}
-					});
-				}
-
-				if (!runtimeVisual || visual != shown || !IsReplicaWorld(shown)) {
-					// An edit viewport owns this generated camera outright. A client
-					// viewport uses the same per-panel camera only while the authority
-					// prepares its camera-dependent surface views.
-					EnsureViewerCamera(
-						viewport, visual, behaviourEye, lens, runtimeVisual ? NULL_ENTITY : follow
-					);
-
-					if (!IsReplicaWorld(shown)) {
-						// `EnsureViewerCamera` leaves an authored lens intact. Read it
-						// back before building this panel's target and projection,
-						// otherwise the rendered view keeps the default lens from before
-						// the camera was prepared and FieldOfView appears to have no
-						// effect. A replica panel instead owns its lens through its local
-						// runtime camera; this generated authority camera only prepares
-						// that world's surface views.
+				{
+					ENGINE_PROFILE_CAT("viewport prepare camera", engine::core::ProfileCategory::ECS);
+					const bool runtimeVisual = IsRunning(visual) || IsReplicaWorld(visual);
+					if (runtimeVisual) {
+						// A viewport's aspect and a client panel's presentation eye are
+						// frame-local facts. Restore the runtime camera after PreRender so
+						// server scripts and other client panels keep their own state.
 						Universe->Enter(visual, [&](Store &store) {
-							const ViewerCamera &viewer = Viewers[viewport];
-							if (viewer.World != visual || !store.Alive(viewer.Instance)) {
-								return;
-							}
-							if (const auto *component = store.Get<engine::scene::Camera>(viewer.Instance)) {
-								lens = *component;
+							if (const auto *active = store.Resource<engine::scene::ActiveCamera>();
+								active != nullptr) {
+								restoreRuntimeCamera = *active;
 							}
 						});
 					}
-				}
 
-				// The requested panel extent belongs to this camera resource. Write
-				// it after `EnsureViewerCamera`, which replaces the whole resource,
-				// and before portal fitting reads its aspect ratio.
-				if (target.IsValid()) {
-					Universe->Enter(visual, [&](Store &store) {
-						(void)engine::scene::SetViewportSize(store, target.Width, target.Height);
-					});
-				}
+					if (!runtimeVisual || visual != shown || !IsReplicaWorld(shown)) {
+						// An edit viewport owns this generated camera outright. A client
+						// viewport uses the same per-panel camera only while the authority
+						// prepares its camera-dependent surface views.
+						EnsureViewerCamera(
+							viewport, visual, behaviourEye, lens, runtimeVisual ? NULL_ENTITY : follow
+						);
 
-				// **The render gate rides along with it**, because
-				// `client::InstallPresentation` registers `sync-rendered` in this
-				// same phase. That is what makes an edited world work at all: it
-				// never ticks, so a gate maintained by the simulation would leave a
-				// part dragged into `Workspace` invisible until somebody pressed
-				// play. See `scene/Visibility.hpp`.
-				// **A world that is not being ticked is presented at one, not at
-				// its accumulator.** Alpha is where *between* two ticks to draw,
-				// and a world nothing advances has no next tick to draw towards -
-				// its accumulator stops wherever it stopped, which is usually zero,
-				// and zero means "draw the previous frame". `capture-previous` is a
-				// `PreSimulation` system and `Present` runs `PreRender` alone, so
-				// that previous frame is wherever each part was created: an edited
-				// world drew every part at its birthplace while the selection
-				// outline followed the real transform.
-				//
-				// **This asked `StateOf` alone and that was wrong for Edit mode**,
-				// which is where an author spends most of their time.
-				// `SyncWorldStates` leaves every world `Active` when nothing is
-				// running, so the state said "ticking" while `Simulate` was
-				// returning before the tick. `studio::PresentationAlpha` carries
-				// the whole argument and is where it is now decided, because
-				// nothing in this class is reachable from a test.
-				// **After the world has been asked for its picture, so the bounds
-				// are this frame's.** The queue is empty on every frame but the one
-				// after a scene first builds itself, so this is a walk of an empty
-				// vector.
-				for (size_t index = 0; index < PendingFrame.size(); index++) {
-					if (PendingFrame[index] != visual) {
-						continue;
+						if (!IsReplicaWorld(shown)) {
+							// `EnsureViewerCamera` leaves an authored lens intact. Read it
+							// back before building this panel's target and projection,
+							// otherwise the rendered view keeps the default lens from before
+							// the camera was prepared and FieldOfView appears to have no
+							// effect. A replica panel instead owns its lens through its local
+							// runtime camera; this generated authority camera only prepares
+							// that world's surface views.
+							Universe->Enter(visual, [&](Store &store) {
+								const ViewerCamera &viewer = Viewers[viewport];
+								if (viewer.World != visual || !store.Alive(viewer.Instance)) {
+									return;
+								}
+								if (const auto *component =
+										store.Get<engine::scene::Camera>(viewer.Instance)) {
+									lens = *component;
+								}
+							});
+						}
 					}
-					if (FrameWorldContents(visual)) {
-						PendingFrame.erase(PendingFrame.begin() + static_cast<ptrdiff_t>(index));
-					}
-					break;
-				}
 
+					// The requested panel extent belongs to this camera resource. Write
+					// it after `EnsureViewerCamera`, which replaces the whole resource,
+					// and before portal fitting reads its aspect ratio.
+					if (target.IsValid()) {
+						Universe->Enter(visual, [&](Store &store) {
+							(void)engine::scene::SetViewportSize(store, target.Width, target.Height);
+						});
+					}
+
+					// **The render gate rides along with it**, because
+					// `client::InstallPresentation` registers `sync-rendered` in this
+					// same phase. That is what makes an edited world work at all: it
+					// never ticks, so a gate maintained by the simulation would leave a
+					// part dragged into `Workspace` invisible until somebody pressed
+					// play. See `scene/Visibility.hpp`.
+					// **A world that is not being ticked is presented at one, not at
+					// its accumulator.** Alpha is where *between* two ticks to draw,
+					// and a world nothing advances has no next tick to draw towards -
+					// its accumulator stops wherever it stopped, which is usually zero,
+					// and zero means "draw the previous frame". `capture-previous` is a
+					// `PreSimulation` system and `Present` runs `PreRender` alone, so
+					// that previous frame is wherever each part was created: an edited
+					// world drew every part at its birthplace while the selection
+					// outline followed the real transform.
+					//
+					// **This asked `StateOf` alone and that was wrong for Edit mode**,
+					// which is where an author spends most of their time.
+					// `SyncWorldStates` leaves every world `Active` when nothing is
+					// running, so the state said "ticking" while `Simulate` was
+					// returning before the tick. `studio::PresentationAlpha` carries
+					// the whole argument and is where it is now decided, because
+					// nothing in this class is reachable from a test.
+					// **After the world has been asked for its picture, so the bounds
+					// are this frame's.** The queue is empty on every frame but the one
+					// after a scene first builds itself, so this is a walk of an empty
+					// vector.
+					for (size_t index = 0; index < PendingFrame.size(); index++) {
+						if (PendingFrame[index] != visual) {
+							continue;
+						}
+						if (FrameWorldContents(visual)) {
+							PendingFrame.erase(PendingFrame.begin() + static_cast<ptrdiff_t>(index));
+						}
+						break;
+					}
+				}
 				ENGINE_PROFILE_CAT("world present", engine::core::ProfileCategory::ECS);
 				Universe->Present(
 					visual,
@@ -2459,6 +2471,7 @@ namespace studio {
 			}
 		}
 		if (restoreRuntimeCamera.has_value() && visual.IsValid() && !Universe->IsRemote(visual)) {
+			ENGINE_PROFILE_CAT("viewport restore camera", engine::core::ProfileCategory::ECS);
 			Universe->Enter(visual, [&](Store &store) { store.SetResource(*restoreRuntimeCamera); });
 		}
 
@@ -2502,37 +2515,59 @@ namespace studio {
 		const bool particlesEnabled =
 			ShowParticleEmitters && (!clientPresentation || ClientSettings.EnableParticles);
 		if (visual.IsValid() && !remoteEye) {
+			ENGINE_PROFILE_CAT("viewport collect scene", engine::core::ProfileCategory::Render);
 			const Name selectedProfile = Universe->SettingsOf(visual).RenderingProfile;
 			Universe->Enter(visual, [&, selectedProfile](Store &store) {
-				// Lighting is authored per world and Studio presents worlds without
-				// going through client::Client. Resolve it here so editing the
-				// service changes this viewport on the same frame.
-				visualLighting = engine::scene::LightingOf(store);
-				Renderer.SetLighting(visualLighting);
-				// sample definitions remain authority-owned; device state never enters the replica.
-				store.Observe<engine::scene::GpuParticleField>();
-				store.Each<const engine::scene::GpuParticleField, const engine::scene::Transform>(
-					[&](Entity instance, const auto &field, const auto &transform) {
-						if (particlesEnabled && !gpuParticles && field.Enabled &&
-							!field.SpawnSamples.empty() && engine::scene::ValidGpuParticleField(field))
-							gpuParticles = engine::render::GpuParticleFieldView{
-								field,
-								transform.Frame,
-								engine::scene::ResolveVectorField(store, instance),
-								instance,
-								store.ComponentChangeVersion<engine::scene::GpuParticleField>() + 1,
-								store.Time().Elapsed
-							};
-					}
-				);
+				{
+					ENGINE_PROFILE_CAT("viewport world sources", engine::core::ProfileCategory::Render);
+					// Lighting is authored per world and Studio presents worlds without
+					// going through client::Client. Resolve it here so editing the
+					// service changes this viewport on the same frame.
+					visualLighting = engine::scene::LightingOf(store);
+					Renderer.SetLighting(visualLighting);
+					// sample definitions remain authority-owned; device state never enters the replica.
+					store.Observe<engine::scene::GpuParticleField>();
+					store.Each<const engine::scene::GpuParticleField, const engine::scene::Transform>(
+						[&](Entity instance, const auto &field, const auto &transform) {
+							if (particlesEnabled && !gpuParticles && field.Enabled &&
+								!field.SpawnSamples.empty() && engine::scene::ValidGpuParticleField(field))
+								gpuParticles = engine::render::GpuParticleFieldView{
+									field,
+									transform.Frame,
+									engine::scene::ResolveVectorField(store, instance),
+									instance,
+									store.ComponentChangeVersion<engine::scene::GpuParticleField>() + 1,
+									store.Time().Elapsed
+								};
+						}
+					);
 
-				if (const auto *list = store.Resource<engine::render::DrawList>()) {
-					// Copied out rather than borrowed. The renderer's call
-					// happens outside `Enter`, and a span into a store nobody
-					// is inside is a pointer across a boundary that rule 3
-					// exists to keep closed.
-					DrawnInstances = list->Instances;
-					jointFrames = list->JointFrames;
+					if (const auto *list = store.Resource<engine::render::DrawList>()) {
+						// Copied out rather than borrowed. The renderer's call
+						// happens outside `Enter`, and a span into a store nobody
+						// is inside is a pointer across a boundary that rule 3
+						// exists to keep closed.
+						{
+							ENGINE_PROFILE_CAT(
+								"viewport copy instances", engine::core::ProfileCategory::Render
+							);
+							DrawnInstances = list->Instances;
+							engine::core::Metrics::Count(
+								"studio.viewport.instance_copy_bytes",
+								static_cast<double>(
+									list->Instances.size() * sizeof(engine::scene::DrawInstance)
+								)
+							);
+						}
+						{
+							ENGINE_PROFILE_CAT("viewport copy joints", engine::core::ProfileCategory::Render);
+							jointFrames = list->JointFrames;
+							engine::core::Metrics::Count(
+								"studio.viewport.joint_copy_bytes",
+								static_cast<double>(list->JointFrames.size() * sizeof(engine::core::CFrame))
+							);
+						}
+					}
 				}
 
 				// **The surface cameras, which the studio was never asking
@@ -2803,6 +2838,7 @@ namespace studio {
 			shown.IsValid() &&
 			ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown)) != ViewportGuiSource::None;
 		if (shown.IsValid()) {
+			ENGINE_PROFILE_CAT("viewport collect local scene", engine::core::ProfileCategory::Render);
 			Universe->Enter(shown, [&](Store &store) {
 				if (shown != visual && IsReplicaWorld(shown)) {
 					// Lighting and skybox bindings are properties of the displayed
@@ -2891,6 +2927,7 @@ namespace studio {
 		if (visual.IsValid() && !remoteEye) {
 			// Foreground clones need destination presentation before they join this
 			// world's rows. The image host reuses those completed presentations.
+			ENGINE_PROFILE_CAT("viewport portal geometry", engine::core::ProfileCategory::Render);
 			PresentPortalDestinations(visual, frameSeconds);
 			(void)client::AppendForeignPortalClones(*Universe, visual, DrawnInstances, &jointFrames);
 
@@ -3023,6 +3060,7 @@ namespace studio {
 		}
 
 		if (PortalImages && drawingWorld && remoteEye && shown.IsValid() && target.IsValid()) {
+			ENGINE_PROFILE_CAT("viewport portal images", engine::core::ProfileCategory::Render);
 			engine::render::View remote;
 			diagnostics.ApplyCameraFrames(remote, eye, cullingEye);
 			remote.Camera = lens;
@@ -3101,8 +3139,11 @@ namespace studio {
 			.HostInterface = engine::scene::MixSignature(Interface.Signature(), Renderer.ResourceRevision()),
 			.Viewport = engine::render::ViewportPresentationSignature(target.Width, target.Height),
 		};
-		engine::render::PresentationDamage damage =
-			ViewportPresentations[viewport].Inspect(presentationSignatures);
+		engine::render::PresentationDamage damage;
+		{
+			ENGINE_PROFILE_CAT("viewport damage check", engine::core::ProfileCategory::Render);
+			damage = ViewportPresentations[viewport].Inspect(presentationSignatures);
+		}
 		const bool particleLayerPresent = !view.Particles.empty() || view.GpuParticles.has_value();
 		const bool ribbonLayerPresent = !view.RibbonRuns.empty();
 		const uint64_t particleVisibilitySignature = engine::render::ParticleVisibilitySignature(view);

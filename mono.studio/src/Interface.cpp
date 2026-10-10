@@ -1042,46 +1042,52 @@ namespace studio {
 			extra->DockInto = 0;
 		}
 
-		// No padding, so the image is the panel rather than a picture inside it.
-		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-		const bool shown =
-			ImGui::Begin(title, open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-		ImGui::PopStyleVar();
+		bool shown = false;
+		{
+			ENGINE_PROFILE_CAT("viewport window and tabs", engine::core::ProfileCategory::Render);
+			// No padding, so the image is the panel rather than a picture inside it.
+			ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+			shown =
+				ImGui::Begin(title, open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+			ImGui::PopStyleVar();
 
-		// **A `+` at the end of the tabs this panel is docked in.** Another view
-		// of what you are looking at is the commonest thing to want and was two
-		// clicks through a menu; here it is one, in the place a browser has put
-		// it for twenty years.
-		//
-		// `DockNodeBeginAmendTabBar` is imgui's own supported way to put an item
-		// on a dock node's tab bar - the alternative is a strip of our own above
-		// the image, which would sit *under* the tabs and read as belonging to
-		// the wrong thing.
-		//
-		// **Once per node per frame.** Every viewport sharing a node would
-		// otherwise each add one, and the strip would grow a `+` per tab.
-		if (shown) {
-			if (ImGuiDockNode *node = ImGui::GetWindowDockNode(); node != nullptr) {
-				const bool first =
-					std::find(TabbedNodes.begin(), TabbedNodes.end(), node->ID) == TabbedNodes.end();
+			// **A `+` at the end of the tabs this panel is docked in.** Another view
+			// of what you are looking at is the commonest thing to want and was two
+			// clicks through a menu; here it is one, in the place a browser has put
+			// it for twenty years.
+			//
+			// `DockNodeBeginAmendTabBar` is imgui's own supported way to put an item
+			// on a dock node's tab bar - the alternative is a strip of our own above
+			// the image, which would sit *under* the tabs and read as belonging to
+			// the wrong thing.
+			//
+			// **Once per node per frame.** Every viewport sharing a node would
+			// otherwise each add one, and the strip would grow a `+` per tab.
+			if (shown) {
+				if (ImGuiDockNode *node = ImGui::GetWindowDockNode(); node != nullptr) {
+					const bool first =
+						std::find(TabbedNodes.begin(), TabbedNodes.end(), node->ID) == TabbedNodes.end();
 
-				if (first && ImGui::DockNodeBeginAmendTabBar(node)) {
-					TabbedNodes.push_back(node->ID);
+					if (first && ImGui::DockNodeBeginAmendTabBar(node)) {
+						TabbedNodes.push_back(node->ID);
 
-					if (ImGui::TabItemButton("+", ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip)) {
-						// **Recorded, not done here.** This is inside an amended
-						// tab bar and inside this panel's `Begin`; opening a
-						// window from in here would nest one window inside
-						// another. `ApplyPendingActions`' rule, applied to
-						// imgui's stack rather than to the store's.
-						PendingViewport = index + 1;
-						PendingViewportDock = node->ID;
+						if (ImGui::TabItemButton(
+								"+", ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip
+							)) {
+							// **Recorded, not done here.** This is inside an amended
+							// tab bar and inside this panel's `Begin`; opening a
+							// window from in here would nest one window inside
+							// another. `ApplyPendingActions`' rule, applied to
+							// imgui's stack rather than to the store's.
+							PendingViewport = index + 1;
+							PendingViewportDock = node->ID;
+						}
+						if (ImGui::IsItemHovered()) {
+							ImGui::SetTooltip("Another view of this scene");
+						}
+
+						ImGui::DockNodeEndAmendTabBar();
 					}
-					if (ImGui::IsItemHovered()) {
-						ImGui::SetTooltip("Another view of this scene");
-					}
-
-					ImGui::DockNodeEndAmendTabBar();
 				}
 			}
 		}
@@ -1171,6 +1177,7 @@ namespace studio {
 		ViewportResults[index].Triangles = triangles;
 		ViewportImageRect imageRect{glm::vec2(0.0f), glm::vec2(size.x, size.y)};
 		if (texture != nullptr && extent.DrawnWidth > 0 && extent.DrawnHeight > 0) {
+			ENGINE_PROFILE_CAT("viewport retained image", engine::core::ProfileCategory::Render);
 			// Keep the last complete frame visible while the new target is being
 			// allocated. It is fitted uniformly inside the panel, so a resize can
 			// letterbox for one frame but cannot stretch either the world or its UI.
@@ -1190,125 +1197,128 @@ namespace studio {
 			ImGui::Dummy(size);
 		}
 
-		// **The thing the camera is actually driven from, and its absence was
-		// why the camera could not be driven at all.** `ImGui::Image` is not an
-		// interactive item: it has no id, it is never hovered *as an item* in a
-		// way that survives, and `IsItemActive` is false for it forever. So the
-		// look condition - "the viewport is active, or hovered and imgui does
-		// not want the mouse" - could only ever be satisfied by the fallback
-		// path that ran on the first frame after a resize.
-		//
-		// A button laid over the image gives the panel an id, so a right-drag
-		// *captures*: `IsItemActive` stays true while the button is held even
-		// when the pointer leaves the panel, which is what makes a fast turn
-		// keep turning instead of stopping at the edge.
-		//
-		// Right and middle only. Left is deliberately not claimed - it belongs
-		// to selecting things in the world, and a button that swallowed it
-		// would be in the way of the first feature added here.
-		// What the overlay pass needs, kept rather than drawn now. See
-		// `Editor::OverlaySlot`: the camera has not been driven yet, so
-		// anything projected here would be a frame behind the pixels under it.
-		if (index < Overlays.size()) {
-			OverlaySlot &slot = Overlays[index];
-			slot.List = ImGui::GetWindowDrawList();
-			slot.X = origin.x + imageRect.Min.x;
-			slot.Y = origin.y + imageRect.Min.y;
-			slot.Width = imageRect.Size.x;
-			slot.Height = imageRect.Size.y;
-			slot.RenderWidth = extent.DrawnWidth > 0 ? extent.DrawnWidth : target.Width;
-			slot.RenderHeight = extent.DrawnHeight > 0 ? extent.DrawnHeight : target.Height;
-			slot.Drawn = true;
-		}
-
-		// The full-image surface is a button so it can capture camera drags and
-		// picks. Submit the controls first so that button cannot claim their
-		// press before ImGui reaches them.
-		const bool previewControlsCapture = DrawViewportGuiControls(
-			index,
-			GuiPreviewControlsPosition(glm::vec2{origin.x + imageRect.Min.x, origin.y + imageRect.Min.y})
-		);
-
-		ImGui::SetCursorScreenPos(origin);
-
-		// **Left is claimed now, and the comment below used to say it was
-		// deliberately not.** It was reserved for "selecting things in the
-		// world", which is this. Right and middle still drive the camera; a
-		// left click picks, and ctrl-click adds - the modifier the explorer
-		// already uses, because two ways to extend one selection is two things
-		// to learn.
-		ImGui::InvisibleButton(
-			"##surface",
-			size,
-			ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
-				ImGuiButtonFlags_MouseButtonMiddle
-		);
-
-		// Recorded rather than acted on: picking enters the store, and a panel
-		// acts from outside `Universe::Enter` - the rule at the top of
-		// `Editor.hpp`. `DrawViewportOverlays` runs it after the camera moves,
-		// which is also when the projection it needs is correct.
-		if (CurrentTool != ToolMode::None && ImGui::IsItemDeactivated() &&
-			ImGui::IsMouseReleased(ImGuiMouseButton_Left) && SurfaceGesture.Active &&
-			SurfaceGesture.Viewport == index && SurfaceGesture.World == ViewportWorld(index) &&
-			!SurfaceGesture.Dragging) {
-			const ImVec2 at = ImGui::GetIO().MousePos;
-			if (ImGui::GetIO().KeyAlt) {
-				PendingCursor.Viewport = index;
-				PendingCursor.X = at.x;
-				PendingCursor.Y = at.y;
-				PendingCursor.Wanted = true;
-			} else {
-				PendingPick.Viewport = index;
-				PendingPick.X = at.x;
-				PendingPick.Y = at.y;
-				PendingPick.Add = ImGui::GetIO().KeyCtrl;
-				PendingPick.Wanted = true;
+		{
+			ENGINE_PROFILE_CAT("viewport input", engine::core::ProfileCategory::Render);
+			// **The thing the camera is actually driven from, and its absence was
+			// why the camera could not be driven at all.** `ImGui::Image` is not an
+			// interactive item: it has no id, it is never hovered *as an item* in a
+			// way that survives, and `IsItemActive` is false for it forever. So the
+			// look condition - "the viewport is active, or hovered and imgui does
+			// not want the mouse" - could only ever be satisfied by the fallback
+			// path that ran on the first frame after a resize.
+			//
+			// A button laid over the image gives the panel an id, so a right-drag
+			// *captures*: `IsItemActive` stays true while the button is held even
+			// when the pointer leaves the panel, which is what makes a fast turn
+			// keep turning instead of stopping at the edge.
+			//
+			// Right and middle only. Left is deliberately not claimed - it belongs
+			// to selecting things in the world, and a button that swallowed it
+			// would be in the way of the first feature added here.
+			// What the overlay pass needs, kept rather than drawn now. See
+			// `Editor::OverlaySlot`: the camera has not been driven yet, so
+			// anything projected here would be a frame behind the pixels under it.
+			if (index < Overlays.size()) {
+				OverlaySlot &slot = Overlays[index];
+				slot.List = ImGui::GetWindowDrawList();
+				slot.X = origin.x + imageRect.Min.x;
+				slot.Y = origin.y + imageRect.Min.y;
+				slot.Width = imageRect.Size.x;
+				slot.Height = imageRect.Size.y;
+				slot.RenderWidth = extent.DrawnWidth > 0 ? extent.DrawnWidth : target.Width;
+				slot.RenderHeight = extent.DrawnHeight > 0 ? extent.DrawnHeight : target.Height;
+				slot.Drawn = true;
 			}
-		}
 
-		if (second) {
-			extra->Hovered = !previewControlsCapture && ImGui::IsItemHovered();
-			extra->Active = ImGui::IsItemActive();
-		} else {
-			ViewportHovered = !previewControlsCapture && ImGui::IsItemHovered();
-			ViewportActive = ImGui::IsItemActive();
-		}
+			// The full-image surface is a button so it can capture camera drags and
+			// picks. Submit the controls first so that button cannot claim their
+			// press before ImGui reaches them.
+			const bool previewControlsCapture = DrawViewportGuiControls(
+				index,
+				GuiPreviewControlsPosition(glm::vec2{origin.x + imageRect.Min.x, origin.y + imageRect.Min.y})
+			);
 
-		// **This panel's hover, not the first panel's.** Reading
-		// `ViewportHovered` here made an extra viewport's claim below depend on
-		// whether the *main* one was hovered, so a right-drag over Viewport 2
-		// was handed to whatever sat behind it and the camera did not turn.
-		const bool hovered = second ? extra->Hovered : ViewportHovered;
+			ImGui::SetCursorScreenPos(origin);
 
-		// **The image is not a button, so a click over it has to be claimed
-		// explicitly** or the panel behind would get it. Right was always
-		// claimed, because a right-drag is how the camera is aimed. Left is
-		// claimed for one more reason: clicking a picture is how a person says
-		// "this is the viewport I am working in", and imgui does not focus a
-		// window from a click on a non-interactive item - so without this the
-		// toolbar went on describing whichever panel imgui happened to focus
-		// last, which is exactly what it did. See `FocusedViewport`.
-		if (hovered &&
-			(ImGui::IsMouseClicked(ImGuiMouseButton_Right) || ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
-			ImGui::SetWindowFocus();
-			EditThroughViewport(index);
+			// **Left is claimed now, and the comment below used to say it was
+			// deliberately not.** It was reserved for "selecting things in the
+			// world", which is this. Right and middle still drive the camera; a
+			// left click picks, and ctrl-click adds - the modifier the explorer
+			// already uses, because two ways to extend one selection is two things
+			// to learn.
+			ImGui::InvisibleButton(
+				"##surface",
+				size,
+				ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
+					ImGuiButtonFlags_MouseButtonMiddle
+			);
 
-			if (CurrentTool != ToolMode::None && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+			// Recorded rather than acted on: picking enters the store, and a panel
+			// acts from outside `Universe::Enter` - the rule at the top of
+			// `Editor.hpp`. `DrawViewportOverlays` runs it after the camera moves,
+			// which is also when the projection it needs is correct.
+			if (CurrentTool != ToolMode::None && ImGui::IsItemDeactivated() &&
+				ImGui::IsMouseReleased(ImGuiMouseButton_Left) && SurfaceGesture.Active &&
+				SurfaceGesture.Viewport == index && SurfaceGesture.World == ViewportWorld(index) &&
+				!SurfaceGesture.Dragging) {
 				const ImVec2 at = ImGui::GetIO().MousePos;
-				SurfaceGesture = ViewportGesture{
-					.Active = true,
-					.Viewport = index,
-					.World = ViewportWorld(index),
-					.Start = glm::vec2(at.x, at.y),
-					.StartedAt = ImGui::GetTime(),
-					.Add = ImGui::GetIO().KeyCtrl,
-				};
+				if (ImGui::GetIO().KeyAlt) {
+					PendingCursor.Viewport = index;
+					PendingCursor.X = at.x;
+					PendingCursor.Y = at.y;
+					PendingCursor.Wanted = true;
+				} else {
+					PendingPick.Viewport = index;
+					PendingPick.X = at.x;
+					PendingPick.Y = at.y;
+					PendingPick.Add = ImGui::GetIO().KeyCtrl;
+					PendingPick.Wanted = true;
+				}
 			}
 
-			// Held for the rest of the frame so a later panel's stale
-			// `IsWindowFocused` cannot take it back. See the note above.
-			ViewportClaimed = true;
+			if (second) {
+				extra->Hovered = !previewControlsCapture && ImGui::IsItemHovered();
+				extra->Active = ImGui::IsItemActive();
+			} else {
+				ViewportHovered = !previewControlsCapture && ImGui::IsItemHovered();
+				ViewportActive = ImGui::IsItemActive();
+			}
+
+			// **This panel's hover, not the first panel's.** Reading
+			// `ViewportHovered` here made an extra viewport's claim below depend on
+			// whether the *main* one was hovered, so a right-drag over Viewport 2
+			// was handed to whatever sat behind it and the camera did not turn.
+			const bool hovered = second ? extra->Hovered : ViewportHovered;
+
+			// **The image is not a button, so a click over it has to be claimed
+			// explicitly** or the panel behind would get it. Right was always
+			// claimed, because a right-drag is how the camera is aimed. Left is
+			// claimed for one more reason: clicking a picture is how a person says
+			// "this is the viewport I am working in", and imgui does not focus a
+			// window from a click on a non-interactive item - so without this the
+			// toolbar went on describing whichever panel imgui happened to focus
+			// last, which is exactly what it did. See `FocusedViewport`.
+			if (hovered && (ImGui::IsMouseClicked(ImGuiMouseButton_Right) ||
+							ImGui::IsMouseClicked(ImGuiMouseButton_Left))) {
+				ImGui::SetWindowFocus();
+				EditThroughViewport(index);
+
+				if (CurrentTool != ToolMode::None && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+					const ImVec2 at = ImGui::GetIO().MousePos;
+					SurfaceGesture = ViewportGesture{
+						.Active = true,
+						.Viewport = index,
+						.World = ViewportWorld(index),
+						.Start = glm::vec2(at.x, at.y),
+						.StartedAt = ImGui::GetTime(),
+						.Add = ImGui::GetIO().KeyCtrl,
+					};
+				}
+
+				// Held for the rest of the frame so a later panel's stale
+				// `IsWindowFocused` cannot take it back. See the note above.
+				ViewportClaimed = true;
+			}
 		}
 
 		// **An extra viewport used to stop here, behind a scene dropdown drawn
@@ -1335,6 +1345,7 @@ namespace studio {
 		ImGui::BeginGroup();
 		{
 			const engine::ui::ScopedFont small(engine::ui::Typeface::Interface, engine::ui::TextSize::Small);
+			ENGINE_PROFILE_CAT("viewport readout", engine::core::ProfileCategory::Render);
 			const engine::render::FrameResult frame =
 				index < ViewportResults.size() ? ViewportResults[index] : engine::render::FrameResult{};
 			if (ViewportStatistics.size() <= index) {
@@ -1380,7 +1391,10 @@ namespace studio {
 		// GUI-preview controls are widgets, so they must be submitted while this
 		// viewport owns the current ImGui window. Drawing them after `End` makes
 		// ImGui create its fallback Debug window and detaches them from the image.
-		DrawViewportGui(index, ProjectionFor(index));
+		{
+			ENGINE_PROFILE_CAT("viewport interface", engine::core::ProfileCategory::Render);
+			DrawViewportGui(index, ProjectionFor(index));
+		}
 		ImGui::End();
 	}
 
@@ -2117,13 +2131,66 @@ namespace studio {
 	}
 
 	void Editor::DrawTransportTools() {
+		if (DrawingBuiltinTool == BuiltinStudioTool::ViewportName ||
+			DrawingBuiltinTool == BuiltinStudioTool::SceneSelector ||
+			DrawingBuiltinTool == BuiltinStudioTool::WorldState) {
+			const size_t reporting = FocusedViewport;
+			const WorldId shown = ViewportWorld(reporting);
+			if (DrawingBuiltinTool == BuiltinStudioTool::ViewportName) {
+				ImGui::TextDisabled("Viewport %zu", reporting + 1);
+				return;
+			}
+			if (DrawingBuiltinTool == BuiltinStudioTool::SceneSelector) {
+				ImGui::SetNextItemWidth(180.0f * Settings.Scale);
+				const Name shownName = Universe->NameOf(shown);
+				const auto selectorLabel = [&](WorldId world, const Name &name) {
+					return WorldSelectorLabel(
+						name.IsValid() ? Label(name) : std::string_view{},
+						world.IsValid() && IsActivelyRunning(world)
+					);
+				};
+				const bool shownActive = shown.IsValid() && IsActivelyRunning(shown);
+				const std::string activeShownLabel =
+					shownActive ? WorldSelectorLabel(Label(shownName, "?"), true) : std::string{};
+				const char *shownLabel = !shown.IsValid() ? "(no scene)"
+										 : shownActive	  ? activeShownLabel.c_str()
+														  : Label(shownName, "?");
+				if (ImGui::BeginCombo("##scene", shownLabel)) {
+					for (const WorldId id : Universe->Worlds()) {
+						const Name name = Universe->NameOf(id);
+						const std::string itemLabel = selectorLabel(id, name);
+						if (ImGui::Selectable(itemLabel.c_str(), id == shown)) {
+							RetargetEditingViewport(reporting, id);
+						}
+					}
+					ImGui::EndCombo();
+				}
+				return;
+			}
+			if (DrawingBuiltinTool == BuiltinStudioTool::WorldState) {
+				if (shown.IsValid()) {
+					const engine::world::WorldState state = Universe->StateOf(shown);
+					const bool healthy = state == engine::world::WorldState::Active;
+					ImGui::PushStyleColor(
+						ImGuiCol_Text, healthy ? engine::ui::MutedColour() : engine::ui::WarningColour()
+					);
+					ImGui::TextUnformatted(engine::world::Describe(state));
+					ImGui::PopStyleColor();
+				} else {
+					ImGui::TextDisabled("no scene");
+				}
+			}
+			return;
+		}
+
 		const WorldId focused = ViewportWorld(FocusedViewport);
+		// Resolve again per control: an earlier toolbar action can start or stop a run.
 		const WorldRun *owner = RunOwning(focused);
-		const bool client = IsReplicaWorld(focused);
+		const bool client = owner != nullptr && owner->World != focused;
 		const WorldId scope = client && owner != nullptr ? owner->World : focused;
-		const RunMode mode = ModeOf(scope);
+		const RunMode mode = owner != nullptr ? owner->Mode : RunMode::Edit;
 		const bool running = mode != RunMode::Edit;
-		const bool paused = IsPaused(scope);
+		const bool paused = owner != nullptr && owner->Paused;
 		const size_t players = owner == nullptr ? 0 : owner->Links.size();
 
 		if (DrawingBuiltinTool == BuiltinStudioTool::Play) {
@@ -2215,49 +2282,6 @@ namespace studio {
 			ImGui::TextDisabled("%zu player%s", players, players == 1 ? "" : "s");
 			return;
 		}
-
-		const size_t reporting = FocusedViewport;
-		const WorldId shown = ViewportWorld(reporting);
-		if (DrawingBuiltinTool == BuiltinStudioTool::ViewportName) {
-			ImGui::TextDisabled("Viewport %zu", reporting + 1);
-			return;
-		}
-		if (DrawingBuiltinTool == BuiltinStudioTool::SceneSelector) {
-			ImGui::SetNextItemWidth(180.0f * Settings.Scale);
-			const Name shownName = Universe->NameOf(shown);
-			const auto selectorLabel = [&](WorldId world, const Name &name) {
-				return WorldSelectorLabel(
-					name.IsValid() ? Label(name) : std::string_view{},
-					world.IsValid() && IsActivelyRunning(world)
-				);
-			};
-			const std::string shownLabel =
-				shown.IsValid() ? selectorLabel(shown, shownName) : std::string("(no scene)");
-			if (ImGui::BeginCombo("##scene", shownLabel.c_str())) {
-				for (const WorldId id : Universe->Worlds()) {
-					const Name name = Universe->NameOf(id);
-					const std::string itemLabel = selectorLabel(id, name);
-					if (ImGui::Selectable(itemLabel.c_str(), id == shown)) {
-						RetargetEditingViewport(reporting, id);
-					}
-				}
-				ImGui::EndCombo();
-			}
-			return;
-		}
-		if (DrawingBuiltinTool == BuiltinStudioTool::WorldState) {
-			if (shown.IsValid()) {
-				const engine::world::WorldState state = Universe->StateOf(shown);
-				const bool healthy = state == engine::world::WorldState::Active;
-				ImGui::PushStyleColor(
-					ImGuiCol_Text, healthy ? engine::ui::MutedColour() : engine::ui::WarningColour()
-				);
-				ImGui::TextUnformatted(engine::world::Describe(state));
-				ImGui::PopStyleColor();
-			} else {
-				ImGui::TextDisabled("no scene");
-			}
-		}
 	}
 
 	void Editor::DrawToolbar() {
@@ -2282,6 +2306,7 @@ namespace studio {
 		// control row. Counting that row explicitly keeps `NoScrollbar` from
 		// silently clipping the final plugin row.
 		if (ToolbarLayoutDirty) {
+			ENGINE_PROFILE_CAT("toolbar compose layout", engine::core::ProfileCategory::Render);
 			ToolbarLayout = ComposeToolbar(Plugins, ToolbarPrefs);
 			ToolbarLayoutDirty = false;
 		}
