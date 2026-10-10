@@ -19,6 +19,19 @@ local RunService = game:GetService("RunService")
 
 players.MaxPlayers = 16
 
+local ground = Instance.new("Part")
+ground.Name = "Ground"
+ground.Size = Vector3.new(128, 1, 80)
+ground.Position = Vector3.new(0, -0.5, 0)
+ground.Anchored = true
+ground.Parent = workspace
+
+local spawn = Instance.new("SpawnLocation")
+spawn.Size = Vector3.new(8, 1, 8)
+spawn.Position = Vector3.new(0, 0.5, 32)
+spawn.Anchored = true
+spawn.Parent = workspace
+
 local movers: {Instance} = {}
 local positions: {number} = {}
 local directions: {number} = {}
