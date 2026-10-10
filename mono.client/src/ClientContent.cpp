@@ -771,7 +771,7 @@ namespace client {
 			// explicit that this is work that should not happen rather than
 			// work to parallelise. `WantedContentRevision` watches only columns
 			// that can carry an asset name. Its monotonic component versions survive
-			// `ClearChanges`, and live row counts cover removals, so the reader
+			// `ClearChanges`, and membership epochs cover removals, so the reader
 			// cannot miss a write between pumps. Particle simulation, transforms,
 			// ticks, and additional cameras leave it unchanged.
 			const uint64_t revision = WantedContentRevision(store);

@@ -23,9 +23,9 @@ namespace client {
 		template <class T> void ObserveRevision(engine::ecs::Store &store, uint64_t &revision) {
 			store.Observe<T>();
 			revision = Fold(revision, store.ComponentChangeVersion<T>());
-			// Removal changes the answer too. The change channel records writes and
-			// additions; the live count covers a row that disappeared entirely.
-			revision = Fold(revision, store.CountMatching<T>());
+			// Membership epochs include removals, destruction and replacements
+			// with unchanged counts, without querying matching archetypes.
+			revision = Fold(revision, store.ComponentMembershipVersion<T>());
 		}
 
 		// Appends one name if it is a name at all.

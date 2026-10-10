@@ -158,17 +158,17 @@ namespace engine::scene {
 	// was paid in full on every frame of a scene where nothing had moved.
 	//
 	// So `SyncRendered` first compares the ECS's component-specific monotonic
-	// revisions and live row counts. The revisions cover writes and additions;
-	// counts cover removals. The steady path is constant in scene size.
+	// mutation and membership epochs. These cover writes, additions, removals
+	// and destruction without resolving Workspace or counting matching rows.
 	//
 	// ## What the signature covers, which is the whole correctness argument
 	//
 	// | Folded in | Why it has to be |
 	// |---|---|
-	// | Which entity `WorkspaceOf` resolves to | It is the root the walk starts from |
-	// | `ecs::Hierarchy` component revision and count | Every link write and every added or removed tree row
-	// | | `Visual` component revision and count | Visibility writes and drawable rows appearing or
-	// disappearing |
+	// | `ecs::Hierarchy` mutation and membership epochs | Link writes and tree rows appearing or disappearing
+	// | | `Visual` mutation and membership epochs | Visibility writes and drawable rows appearing or
+	// disappearing | | `ecs::InstanceClass` mutation and membership epochs | Changes to the class-based
+	// Workspace selection |
 	//
 	// **A `Hierarchy`-only signature is unsafe** and is the mistake to refuse:
 	// it leaves a part that a script hid still drawing, and it leaves a part

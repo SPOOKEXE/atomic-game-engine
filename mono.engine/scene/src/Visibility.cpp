@@ -60,85 +60,53 @@ namespace engine::scene {
 			return value;
 		}
 
-		// Folds one term in, order included.
-		//
-		// **Order-dependent deliberately.** Two archetypes that swap their rows
-		// hold the same instances and would walk to the same answer, so an
-		// order-independent fold would be the more accurate one - and would
-		// also collide far more readily, because commutative folds do. A
-		// reshuffle costs one walk nobody sees; a collision is a hidden part
-		// still drawing.
+		// The order distinguishes component channels; a commutative combine
+		// would let identical changes in different channels cancel.
 		constexpr uint64_t Fold(uint64_t running, uint64_t term) {
 			return (running ^ Scramble(term)) * GOLDEN;
 		}
 
-		constexpr uint64_t Fold(uint64_t running, Entity value) {
-			return Fold(running, value.Id);
-		}
-
-		// Everything the walk's answer depends on, in two linear column scans.
-		//
-		// **No store address folded in, unlike `gui` and `studio`.** Both of
-		// those keep their stamp in an object a caller can point at either
-		// world, so they have to tell the worlds apart. This one lives on the
-		// world it describes, so there is no second world to confuse it with -
-		// and an address is precisely the term that differs between two runs of
-		// one scene, which is what `just determinism` compares. Folding one in
-		// would buy nothing and make the *decision* run-dependent.
-		//
-		// A collision keeps a stale answer and a spurious change costs one
-		// walk, so everything here leans towards folding more rather than less:
-		// the `Visual` pass covers rows that are not in `Workspace` at all, and
-		// the `Hierarchy` pass covers every instance in the world rather than
-		// only the drawable ones. Restricting either would be an ancestry test
-		// per row, which is the cost this exists to avoid.
-		//
-		// @param store     The world.
-		// @param workspace What `WorkspaceOf` resolved to, folded because the
-		//        walk starts there and a world that gains or loses a
-		//        `Workspace` changes every answer at once.
-		// @return The fold.
-		uint64_t Signature(Store &store, Entity workspace) {
-			uint64_t stamp = Fold(uint64_t{0}, workspace);
-
-			// Component epochs are monotonic and are not cleared with per-tick
-			// dirty bits. Counts cover removals, which have no surviving row on
-			// which to leave a write bit. This turns the steady path from two full
-			// column scans into four integer reads without maintaining a second
-			// copy of the tree.
+		// Every input to the walk and to Workspace's class-based root lookup.
+		// The memo is world-owned, so no store address belongs in its key.
+		uint64_t Signature(Store &store) {
 			store.Observe<Hierarchy>();
 			store.Observe<Visual>();
-			stamp = Fold(stamp, store.ComponentChangeVersion<Hierarchy>());
-			stamp = Fold(stamp, store.CountMatching<Hierarchy>());
-			stamp = Fold(stamp, store.ComponentChangeVersion<Visual>());
-			stamp = Fold(stamp, store.CountMatching<Visual>());
+			store.Observe<ecs::InstanceClass>();
 
+			// Epochs survive ClearChanges. Membership catches destruction and
+			// same-count replacement; class writes can change the chosen service
+			// without changing a hierarchy link. Class ancestry is immutable.
+			uint64_t stamp = 0;
+			stamp = Fold(stamp, store.ComponentChangeVersion<Hierarchy>());
+			stamp = Fold(stamp, store.ComponentMembershipVersion<Hierarchy>());
+			stamp = Fold(stamp, store.ComponentChangeVersion<Visual>());
+			stamp = Fold(stamp, store.ComponentMembershipVersion<Visual>());
+			stamp = Fold(stamp, store.ComponentChangeVersion<ecs::InstanceClass>());
+			stamp = Fold(stamp, store.ComponentMembershipVersion<ecs::InstanceClass>());
 			return stamp;
 		}
+
 	}
 
 	size_t SyncRendered(Store &store) {
 		ENGINE_PROFILE_CAT("sync rendered", engine::core::ProfileCategory::ECS);
 
-		Entity workspace = NULL_ENTITY;
 		uint64_t stamp = 0;
 		{
 			ENGINE_PROFILE_CAT("sync rendered.revision", engine::core::ProfileCategory::ECS);
-			workspace = WorkspaceOf(store);
-			stamp = Signature(store, workspace);
+			stamp = Signature(store);
 		}
 
 		// --- the early-out: has anything the answer depends on moved? --------
 		//
-		// On almost every frame this is all that happens. Two linear passes
-		// over packed columns, no random lookups and no `std::function`, and
-		// what they produce is a number to compare against the last one.
+		// On a steady frame the epochs settle this before Workspace lookup,
+		// which otherwise scans every hierarchy row to find the service.
 		//
 		// **A memo, not a hook.** `scene/AGENTS.md` argues that this tag is
 		// derived by a sweep rather than maintained at every reparent, because
 		// ancestry is not local and no set of hooks is ever complete. Nothing
 		// here maintains anything: the walk below runs in full the moment the
-		// tree or a `Visual` moves, and what is skipped is a walk that would
+		// tree, a `Visual` or a class moves, and what is skipped is a walk that would
 		// have written back exactly the rows already present. The argument
 		// survives, which is the thing a reviewer should check first.
 		//
@@ -166,6 +134,7 @@ namespace engine::scene {
 			return store.CountMatching<Rendered>();
 		}
 
+		const Entity workspace = WorkspaceOf(store);
 		memo.Stamp = stamp;
 		memo.Fresh = 1;
 

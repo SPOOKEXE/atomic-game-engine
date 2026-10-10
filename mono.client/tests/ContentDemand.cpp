@@ -288,6 +288,42 @@ TEST_CASE("removing a content-bearing row advances demand revision", "[client][c
 	CHECK(client::WantedContentRevision(store) != before);
 }
 
+TEST_CASE("demand revisions cover destruction and equal-count replacement", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.revision.membership");
+	const Entity first = store.Create();
+	engine::effects::ParticleEmitter settings;
+	settings.Texture = Name("first.atex");
+	store.Set(first, settings);
+	const uint64_t initial = client::WantedContentRevision(store);
+	const uint64_t writes = store.ComponentChangeVersion<engine::effects::ParticleEmitter>();
+	store.Destroy(first);
+	store.ClearChanges();
+	CHECK(store.ComponentChangeVersion<engine::effects::ParticleEmitter>() == writes);
+	CHECK(client::WantedContentRevision(store) != initial);
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+	CHECK(wanted.empty());
+
+	const Entity second = store.Create();
+	store.Set(second, settings);
+	const uint64_t restored = client::WantedContentRevision(store);
+	const auto count = store.CountMatching<engine::effects::ParticleEmitter>();
+	const Entity replacement = store.Create();
+	settings.Texture = Name("replacement.atex");
+	store.Remove<engine::effects::ParticleEmitter>(second);
+	store.Set(replacement, settings);
+	store.ClearChanges();
+	REQUIRE(store.CountMatching<engine::effects::ParticleEmitter>() == count);
+	CHECK(client::WantedContentRevision(store) != restored);
+	client::CollectWantedContent(store, wanted);
+	REQUIRE(wanted.size() == 1);
+	CHECK(Holds(wanted, "replacement.atex"));
+	CHECK_FALSE(Holds(wanted, "first.atex"));
+	const uint64_t settled = client::WantedContentRevision(store);
+	store.ClearChanges();
+	CHECK(client::WantedContentRevision(store) == settled);
+}
+
 TEST_CASE("many emitters share one demanded texture name", "[client][contentdemand]") {
 	Store store = Fresh("contentdemand.shared.texture");
 	for (size_t index = 0; index < 4096; index++) {
