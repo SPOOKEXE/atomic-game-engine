@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -264,6 +265,10 @@ namespace engine::script {
 			ecs::Classes::Computed(container, LanguageProperty());
 
 			ecs::Classes::Computed(container, DisabledProperty());
+			for (const ecs::PropertyDescriptor &property : ecs::Classes::Describe(container).Properties)
+				(void)ecs::Classes::SetPropertiesTag(container, property.Spelling, core::Name("Scripting"));
+			for (const std::string_view property : {"Language", "Disabled"})
+				(void)ecs::Classes::SetPropertiesTag(container, property, core::Name("Behavior"));
 			return script;
 		}
 	}

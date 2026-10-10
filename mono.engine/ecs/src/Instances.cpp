@@ -406,6 +406,7 @@ namespace engine::ecs {
 		// which is a fact about ancestry and is derived per frame.
 		PropertyDescriptor parent;
 		parent.Name = core::Name("Parent");
+		parent.PropertiesTag = core::Name("Identity");
 		parent.Type = PropertyType::Reference;
 		parent.Size = sizeof(Entity);
 		parent.Kind = PropertyKind::Computed;
@@ -433,6 +434,7 @@ namespace engine::ecs {
 		// a binding, which is the drift this stopped: it was special-cased in
 		// the Luau binding and absent from the JavaScript one.
 		Classes::Property<&InstanceName::Value>(instance, "Name");
+		(void)Classes::SetPropertiesTag(instance, "Name", core::Name("Identity"));
 
 		return instance;
 	}

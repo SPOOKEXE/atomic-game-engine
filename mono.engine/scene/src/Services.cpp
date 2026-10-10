@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -756,6 +757,20 @@ namespace engine::scene {
 			return property;
 		}
 
+		void TagDeclaredProperties(ClassId owner, core::Name tag) {
+			const auto properties = Classes::Describe(owner).Properties;
+			for (const PropertyDescriptor &property : properties) {
+				(void)Classes::SetPropertiesTag(owner, property.Spelling, tag);
+			}
+		}
+
+		void TagProperty(ClassId owner, std::string_view property, std::string_view tag) {
+			const bool tagged = Classes::SetPropertiesTag(owner, property, core::Name(tag));
+			if (!tagged) {
+				assert(tagged && "property group must name a declaration on its owner class");
+			}
+		}
+
 		ClassId RegisterServiceTree() {
 			// The root of everything, and the components these classes are sets
 			// of, both through `PartClass`. A service derives from `Instance`,
@@ -954,6 +969,60 @@ namespace engine::scene {
 				LightingRenderFeatureMaskProperty<&RenderFeaturePolicy::Disable>("RenderFeatureDisableMask")
 			);
 			Classes::Computed(lighting, PostProcessShaderProperty());
+
+			TagDeclaredProperties(service, core::Name("Behavior"));
+			TagDeclaredProperties(workspace, core::Name("World"));
+			TagDeclaredProperties(player, core::Name("Player"));
+			TagDeclaredProperties(team, core::Name("Player"));
+			TagDeclaredProperties(terrain, core::Name("Terrain"));
+			TagDeclaredProperties(players, core::Name("Player"));
+			TagDeclaredProperties(lighting, core::Name("Lighting"));
+			TagProperty(player, "Character", "Character");
+			for (const std::string_view property : {"PlayerGui", "PlayerScripts", "Backpack", "StarterGear"})
+				TagProperty(player, property, "Identity");
+			for (const std::string_view property :
+				 {"DisplayName", "UserId", "Team", "RespawnTime", "LocalSimulatedNetworkLatency"})
+				TagProperty(player, property, "Player");
+			for (const std::string_view property :
+				 {"MaxPlayers", "RespawnTime", "CharacterAutoLoads", "LocalPlayer", "NumPlayers"})
+				TagProperty(players, property, "Player");
+			for (const std::string_view property :
+				 {"Seed",
+				  "Generator",
+				  "Enabled",
+				  "ChunkExtent",
+				  "VerticalExtent",
+				  "ViewDistance",
+				  "ChunkResolution"})
+				TagProperty(terrain, property, property == "Enabled" ? "Behavior" : "Terrain");
+			for (const std::string_view property :
+				 {"Ambient",
+				  "OutdoorAmbient",
+				  "FogColor",
+				  "FogStart",
+				  "FogEnd",
+				  "Brightness",
+				  "ClockTime",
+				  "GeographicLatitude",
+				  "GodRayIntensity",
+				  "GodRayThreshold",
+				  "GodRayRadius"})
+				TagProperty(lighting, property, "Lighting");
+			for (const std::string_view property :
+				 {"BloomThreshold",
+				  "BloomIntensity",
+				  "BloomRadius",
+				  "DepthOfFieldIntensity",
+				  "DepthOfFieldFocusDistance",
+				  "DepthOfFieldFocusRange",
+				  "DepthOfFieldRadius",
+				  "RenderFeatureEnableMask",
+				  "RenderFeatureDisableMask",
+				  "PostProcessShader"})
+				TagProperty(lighting, property, "Rendering");
+			for (const std::string_view property :
+				 {"CurrentCamera", "SurfaceBounces", "MaxSurfaces", "Terrain"})
+				TagProperty(workspace, property, property == "CurrentCamera" ? "Camera" : "Rendering");
 
 			return service;
 		}

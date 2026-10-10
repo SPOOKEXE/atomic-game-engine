@@ -264,7 +264,12 @@ TEST_CASE("the class tree registers every promised class", "[gui][registration]"
 
 	for (const std::string_view name : GuiClassNames()) {
 		INFO("class: " << name);
-		CHECK(GuiClass(name).IsValid());
+		const ClassId owner = GuiClass(name);
+		REQUIRE(owner.IsValid());
+		for (const engine::ecs::PropertyDescriptor &property : Classes::Describe(owner).Properties) {
+			INFO("property: " << property.Spelling);
+			CHECK(property.PropertiesTag.IsValid());
+		}
 	}
 	CHECK_FALSE(Classes::Describe(GuiClass("GuiService")).Creatable);
 

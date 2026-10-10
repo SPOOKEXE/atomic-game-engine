@@ -1,3 +1,4 @@
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/PlayerGui.hpp>
@@ -18,6 +19,7 @@
 TEST_SUITE_ID("engine.script.instanceshim")
 TEST_DEPENDS("engine.scene.part")
 
+using engine::ecs::Classes;
 using engine::ecs::Entity;
 using engine::ecs::Store;
 using engine::script::CreateScriptInstance;
@@ -28,10 +30,23 @@ using engine::script::InstanceCreateFailure;
 using engine::script::InstanceIsA;
 using engine::script::InstanceNameOf;
 using engine::script::InstanceParentOf;
+using engine::script::LocalScriptClass;
+using engine::script::ModuleScriptClass;
 using engine::script::ReadInstanceProperty;
 using engine::script::ScriptableProperties;
 using engine::script::ScriptableProperty;
+using engine::script::ScriptClass;
 using engine::script::WriteInstanceProperty;
+
+TEST_CASE("built-in script properties have inspector groups", "[script][instance-shim][properties]") {
+	for (const engine::ecs::ClassId owner : {ScriptClass(), LocalScriptClass(), ModuleScriptClass()}) {
+		REQUIRE(owner.IsValid());
+		for (const auto &property : Classes::Describe(owner).Properties) {
+			INFO(property.Spelling);
+			CHECK(property.PropertiesTag.IsValid());
+		}
+	}
+}
 
 TEST_CASE("the instance shim creates and parents ECS instances", "[script][instance-shim]") {
 	engine::scene::EnsureClassTree();

@@ -17,6 +17,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -188,6 +189,107 @@ TEST_CASE("registering classes registers the components first", "[scene][registr
 
 	CHECK(Classes::Find(Name("Part")).IsValid());
 	CHECK(Components::Find(Name("scene.Collider")).IsValid());
+}
+
+TEST_CASE("built-in scene properties have inspector groups", "[scene][registration][properties]") {
+	RegisterSceneClasses();
+	const std::vector<std::string_view> classes{
+		"Instance",
+		"PVInstance",
+		"VectorField2D",
+		"VectorField3D",
+		"GpuParticleField",
+		"BasePart",
+		"Part",
+		"MeshPart",
+		"SkinnedMeshPart",
+		"SpawnLocation",
+		"Camera",
+		"SurfaceCamera",
+		"Portal",
+		"Sound",
+		"Attachment",
+		"Material",
+		"Humanoid",
+		"Tool",
+		"Light",
+		"SpotLight",
+		"SurfaceLight",
+		"ValueBase",
+		"StringValue",
+		"LocalizationTable",
+		"BoolValue",
+		"CFrameValue",
+		"Color3Value",
+		"IntValue",
+		"NumberValue",
+		"ObjectValue",
+		"Vector3Value",
+		"Bone",
+		"RigKeypoint",
+		"AnimationBuffer",
+		"Animation",
+		"Animator",
+		"AnimationTrack",
+		"Atmosphere",
+		"AtmosphereComponent",
+		"AtmosphereProcedural",
+		"Clouds",
+		"CloudProcedural",
+		"CloudCompute",
+		"Volume",
+		"ShaderLens",
+		"GravitationalLens",
+		"SkyboxTextures",
+		"SkyboxCompute",
+		"Constraint",
+		"BallSocketConstraint",
+		"HingeConstraint",
+		"PrismaticConstraint",
+		"CylindricalConstraint",
+		"RopeConstraint",
+		"SpringConstraint",
+		"JointInstance",
+		"Weld",
+		"WeldConstraint",
+		"Service",
+		"Workspace",
+		"Lighting",
+		"Players",
+		"Player",
+		"Team",
+		"Terrain",
+		"EditableMesh",
+		"EditableImage",
+		"ImageGraph",
+		"ShaderScript",
+		"LensShader"
+	};
+	for (const std::string_view name : classes) {
+		const auto owner = Classes::Find(Name(name));
+		INFO(name);
+		REQUIRE(owner.IsValid());
+		for (const auto &property : Classes::Describe(owner).Properties) {
+			INFO(property.Spelling);
+			CHECK(property.PropertiesTag.IsValid());
+		}
+	}
+	const auto tagOf = [](std::string_view className, std::string_view propertyName) {
+		const auto owner = Classes::Find(Name(className));
+		const auto properties = Classes::Describe(owner).Properties;
+		const auto found = std::find_if(properties.begin(), properties.end(), [&](const auto &property) {
+			return property.Spelling == propertyName;
+		});
+		return found == properties.end() ? Name{} : found->PropertiesTag;
+	};
+	CHECK(tagOf("MeshPart", "CustomLod1MeshId") == Name("LOD"));
+	CHECK(tagOf("MeshPart", "AutoLodStrategy") == Name("LOD"));
+	CHECK(tagOf("MeshPart", "PackedRoughnessChannel") == Name("PBR"));
+	CHECK(tagOf("MeshPart", "TransmissionFactor") == Name("PBR"));
+	CHECK(tagOf("BasePart", "CanCollide") == Name("Physics"));
+	CHECK(tagOf("BasePart", "Anchored") == Name("Physics"));
+	CHECK(tagOf("Lighting", "ClockTime") == Name("Lighting"));
+	CHECK(tagOf("Lighting", "BloomIntensity") == Name("Rendering"));
 }
 
 TEST_CASE("everything registered here can be snapshotted", "[scene][registration]") {

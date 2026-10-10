@@ -170,6 +170,11 @@ namespace engine::scene {
 			ecs::Classes::Computed(editableImage, ColorSpaceProperty());
 			for (auto &property : detail::PackingProperties<EditableImage, SetEditableImagePacking>())
 				ecs::Classes::Computed(editableImage, std::move(property));
+			for (const ecs::PropertyDescriptor &property : ecs::Classes::Describe(editableImage).Properties)
+				(void)ecs::Classes::SetPropertiesTag(editableImage, property.Spelling, core::Name("Image"));
+			(void)ecs::Classes::SetPropertiesTag(editableImage, "Size", core::Name("Geometry"));
+			(void)ecs::Classes::SetPropertiesTag(editableImage, "ContentId", core::Name("Identity"));
+			(void)ecs::Classes::SetPropertiesTag(editableImage, "ColorSpace", core::Name("Image"));
 			return editableImage;
 		}
 	}

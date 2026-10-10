@@ -12,7 +12,9 @@
 #include <engine/gui/VirtualCollection.hpp>
 
 #include <array>
+#include <cassert>
 #include <cstddef>
+#include <initializer_list>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -29,6 +31,20 @@ namespace engine::gui {
 		using ecs::PropertyDescriptor;
 		using ecs::PropertyKind;
 		using ecs::PropertyType;
+
+		void TagDeclaredProperties(ClassId owner, core::Name tag) {
+			const auto properties = Classes::Describe(owner).Properties;
+			for (const PropertyDescriptor &property : properties) {
+				(void)Classes::SetPropertiesTag(owner, property.Spelling, tag);
+			}
+		}
+
+		void TagProperty(ClassId owner, std::string_view property, std::string_view tag) {
+			const bool tagged = Classes::SetPropertiesTag(owner, property, core::Name(tag));
+			if (!tagged) {
+				assert(tagged && "property group must name a declaration on its owner class");
+			}
+		}
 
 		// --- naming the enum sets --------------------------------------------
 		//
@@ -1408,6 +1424,166 @@ namespace engine::gui {
 			(void)coneHandle;
 			(void)handles;
 			(void)arcHandles;
+
+			// Every builtin declaration gets a stable inspector section here;
+			// focused overrides keep mixed classes grouped by what each property means.
+			for (const ClassId owner : {guiService, uiDragDetector, uiModalScope, layerCollector})
+				TagDeclaredProperties(owner, core::Name("Behavior"));
+			for (const ClassId owner :
+				 {guiBase2d,
+				  guiObject,
+				  scrollingFrame,
+				  uiPadding,
+				  uiListLayout,
+				  uiGridLayout,
+				  uiTableLayout,
+				  uiPageLayout,
+				  uiAspect,
+				  uiSize,
+				  uiTextSize,
+				  screenGui})
+				TagDeclaredProperties(owner, core::Name("Layout"));
+			for (const ClassId owner :
+				 {pvAdornment,
+				  selectionBox,
+				  selectionSphere,
+				  canvasGroup,
+				  uiMask,
+				  uiCorner,
+				  uiStroke,
+				  uiGradient})
+				TagDeclaredProperties(owner, core::Name("Appearance"));
+			for (const ClassId owner :
+				 {handleAdornment,
+				  boxHandle,
+				  sphereHandle,
+				  cylinderHandle,
+				  lineHandle,
+				  coneHandle,
+				  handles,
+				  arcHandles})
+				TagDeclaredProperties(owner, core::Name("Geometry"));
+			for (const ClassId owner : {textButton, textLabel, textBox})
+				TagDeclaredProperties(owner, core::Name("Text"));
+			for (const ClassId owner : {imageButton, imageLabel})
+				TagDeclaredProperties(owner, core::Name("Image"));
+			for (const ClassId owner : {layerCollector, surfaceGui, billboardGui, viewportFrame})
+				TagDeclaredProperties(owner, core::Name("Rendering"));
+			for (const ClassId owner :
+				 {nodeCanvasClass,
+				  nodeCanvasNode,
+				  nodeCanvasGroup,
+				  nodeCanvasPort,
+				  nodeCanvasLink,
+				  uiBinding,
+				  uiVirtualCollection})
+				TagDeclaredProperties(owner, core::Name("Data"));
+			for (const ClassId owner : {uiScale, uiFlexItem})
+				TagDeclaredProperties(owner, core::Name("Layout"));
+			TagDeclaredProperties(uiAnimation, core::Name("Animation"));
+			TagDeclaredProperties(Classes::Find(core::Name("UITheme")), core::Name("Appearance"));
+			TagDeclaredProperties(Classes::Find(core::Name("UIStyle")), core::Name("Data"));
+
+			for (const std::string_view property : {"AbsolutePosition", "AbsoluteSize", "AbsoluteRotation"})
+				TagProperty(guiBase2d, property, "Layout");
+			for (const ClassId owner : {guiObject}) {
+				for (const std::string_view property :
+					 {"Visible",
+					  "Active",
+					  "Selectable",
+					  "Interactable",
+					  "NextSelectionUp",
+					  "NextSelectionDown",
+					  "NextSelectionLeft",
+					  "NextSelectionRight",
+					  "SelectionOrder"})
+					TagProperty(owner, property, "Behavior");
+				for (const std::string_view property :
+					 {"BackgroundColor3",
+					  "BackgroundTransparency",
+					  "BorderColor3",
+					  "BorderSizePixel",
+					  "BorderMode",
+					  "SelectionImageObject"})
+					TagProperty(owner, property, "Appearance");
+			}
+			TagProperty(layerCollector, "Theme", "Appearance");
+			TagProperty(guiButton, "AutoButtonColor", "Appearance");
+			TagProperty(guiObject, "ZIndex", "Rendering");
+			TagProperty(guiObject, "LayoutOrder", "Layout");
+			TagProperty(guiObject, "ClipsDescendants", "Behavior");
+			for (const std::string_view property : {"ReferenceResolution", "ScaleMode"})
+				TagProperty(layerCollector, property, "Layout");
+			for (const std::string_view property :
+				 {"Enabled", "DisplayOrder", "ResetOnSpawn", "ZIndexBehavior"})
+				TagProperty(layerCollector, property, "Behavior");
+			TagProperty(screenGui, "IgnoreGuiInset", "Layout");
+			TagProperty(uiMask, "CornerRadius", "Geometry");
+			TagProperty(uiMask, "Enabled", "Behavior");
+			TagProperty(uiStroke, "Enabled", "Behavior");
+			TagProperty(uiGradient, "Enabled", "Behavior");
+			for (const std::string_view property :
+				 {"ScrollingEnabled", "ElasticBehavior", "ScrollingDirection"})
+				TagProperty(scrollingFrame, property, "Behavior");
+			TagProperty(scrollingFrame, "ScrollBarThickness", "Geometry");
+			TagProperty(pvAdornment, "Adornee", "Geometry");
+			TagProperty(pvAdornment, "Visible", "Rendering");
+			TagProperty(pvAdornment, "AlwaysOnTop", "Rendering");
+			TagProperty(pvAdornment, "ZIndex", "Rendering");
+			TagProperty(pvAdornment, "InteractionEnabled", "Behavior");
+			for (const ClassId owner : {selectionBox, selectionSphere})
+				TagProperty(owner, "LineThickness", "Geometry");
+			for (const ClassId owner : {textButton, textLabel, textBox}) {
+				for (const std::string_view property :
+					 {"TextColor3", "TextTransparency", "TextStrokeColor3", "TextStrokeTransparency"})
+					TagProperty(owner, property, "Appearance");
+			}
+			TagProperty(textBox, "PlaceholderColor3", "Appearance");
+			for (const ClassId owner : {imageButton, imageLabel})
+				for (const std::string_view property : {"ImageColor3", "ImageTransparency"})
+					TagProperty(owner, property, "Appearance");
+			for (const std::string_view property :
+				 {"ScrollBarImageColor3",
+				  "ScrollBarImageTransparency",
+				  "TopImage",
+				  "MidImage",
+				  "BottomImage"})
+				TagProperty(scrollingFrame, property, "Appearance");
+			for (const std::string_view property :
+				 {"CanvasPosition", "Zoom", "MinimumZoom", "MaximumZoom", "GridSize", "GridVisible"})
+				TagProperty(nodeCanvasClass, property, "Layout");
+			TagProperty(viewportFrame, "CurrentCamera", "Camera");
+			TagProperty(viewportFrame, "ResolutionScale", "Rendering");
+			for (const std::string_view property : {"Ambient", "LightColor", "LightDirection"})
+				TagProperty(viewportFrame, property, "Lighting");
+			for (const std::string_view property : {"ImageColor3", "ImageTransparency"})
+				TagProperty(viewportFrame, property, "Appearance");
+			for (const std::string_view property :
+				 {"UpdateMode", "UpdateEveryFrames", "InvalidationRevision"})
+				TagProperty(viewportFrame, property, "Rendering");
+			for (const std::string_view property : {"AlwaysOnTop", "LightInfluence", "Brightness"}) {
+				TagProperty(surfaceGui, property, "Lighting");
+				TagProperty(billboardGui, property, "Lighting");
+			}
+			for (const std::string_view property : {"ClipsDescendants", "Active"}) {
+				TagProperty(surfaceGui, property, "Behavior");
+				TagProperty(billboardGui, property, "Behavior");
+			}
+			TagProperty(billboardGui, "PlayerToHideFrom", "Player");
+			for (const std::string_view property :
+				 {"Adornee", "PixelsPerStud", "CanvasSize", "ZOffset", "MaxDistance", "SizingMode", "Face"})
+				TagProperty(surfaceGui, property, "Layout");
+			for (const std::string_view property :
+				 {"Adornee",
+				  "Size",
+				  "StudsOffset",
+				  "StudsOffsetWorldSpace",
+				  "ExtentsOffset",
+				  "ExtentsOffsetWorldSpace",
+				  "SizeOffset",
+				  "MaxDistance",
+				  "DistanceStep"})
+				TagProperty(billboardGui, property, "Layout");
 
 			return guiObject;
 		}

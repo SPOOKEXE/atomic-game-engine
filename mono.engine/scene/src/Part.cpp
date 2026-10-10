@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <numbers>
 #include <string>
@@ -2602,6 +2603,20 @@ namespace engine::scene {
 		// reads an id from it and cannot be registered twice. Classes are
 		// process-wide and never unregister, exactly as components are, so
 		// there is nothing to tear down.
+		void TagDeclaredProperties(ecs::ClassId owner, core::Name tag) {
+			const auto properties = ecs::Classes::Describe(owner).Properties;
+			for (const ecs::PropertyDescriptor &property : properties) {
+				(void)ecs::Classes::SetPropertiesTag(owner, property.Spelling, tag);
+			}
+		}
+
+		void TagProperty(ecs::ClassId owner, std::string_view property, std::string_view tag) {
+			const bool tagged = ecs::Classes::SetPropertiesTag(owner, property, core::Name(tag));
+			if (!tagged) {
+				assert(tagged && "property group must name a declaration on its owner class");
+			}
+		}
+
 		ecs::ClassId RegisterTree() {
 			RegisterSceneComponents();
 
@@ -4068,6 +4083,213 @@ namespace engine::scene {
 			// rubber floor may share a surface and never a material. Binding both
 			// under one script name would make one of them unreachable and the
 			// other ambiguous.
+			TagDeclaredProperties(pvInstance, core::Name("Transform"));
+			for (const ecs::ClassId owner : {basePart, part, meshPart, skinnedMeshPart, spawnLocation})
+				TagDeclaredProperties(owner, core::Name("Geometry"));
+			TagDeclaredProperties(skinnedMeshPart, core::Name("Animation"));
+			TagDeclaredProperties(cameraClass, core::Name("Camera"));
+			TagDeclaredProperties(surfaceCameraClass, core::Name("Rendering"));
+			TagDeclaredProperties(portalClass, core::Name("Geometry"));
+			TagDeclaredProperties(soundClass, core::Name("Audio"));
+			TagDeclaredProperties(attachmentClass, core::Name("Transform"));
+			TagDeclaredProperties(materialClass, core::Name("PBR"));
+			TagDeclaredProperties(humanoidClass, core::Name("Character"));
+			TagDeclaredProperties(toolClass, core::Name("Behavior"));
+			for (const ecs::ClassId owner : {lightClass, spotLightClass, surfaceLightClass})
+				TagDeclaredProperties(owner, core::Name("Lighting"));
+			for (const ecs::ClassId owner :
+				 {valueBase,
+				  stringValue,
+				  localizationTable,
+				  boolValue,
+				  cframeValue,
+				  color3Value,
+				  intValue,
+				  numberValue,
+				  objectValue,
+				  vector3Value})
+				TagDeclaredProperties(owner, core::Name("Data"));
+			for (const ecs::ClassId owner :
+				 {boneClass,
+				  rigKeypointClass,
+				  animationBufferClass,
+				  animationClass,
+				  animatorClass,
+				  trackClass})
+				TagDeclaredProperties(owner, core::Name("Animation"));
+			for (const ecs::ClassId owner :
+				 {atmosphereClass,
+				  atmosphereComponentClass,
+				  atmosphereProceduralClass,
+				  cloudsClass,
+				  cloudProceduralClass,
+				  cloudComputeClass,
+				  skyboxTexturesClass,
+				  skyboxComputeClass})
+				TagDeclaredProperties(owner, core::Name("Environment"));
+			for (const ecs::ClassId owner : {volumeClass, shaderLensClass, gravitationalLensClass})
+				TagDeclaredProperties(owner, core::Name("Rendering"));
+			for (const ecs::ClassId owner :
+				 {constraintClass,
+				  ballClass,
+				  hingeClass,
+				  prismaticClass,
+				  cylindricalClass,
+				  ropeClass,
+				  springClass,
+				  jointInstanceClass,
+				  weldClass,
+				  weldConstraintClass})
+				TagDeclaredProperties(owner, core::Name("Physics"));
+			TagDeclaredProperties(vectorField2D, core::Name("Physics"));
+			TagDeclaredProperties(vectorField3D, core::Name("Physics"));
+			TagDeclaredProperties(gpuParticleFieldClass, core::Name("Particles"));
+
+			for (const std::string_view property : {"CFrame", "Position", "Orientation", "PivotOffset"})
+				TagProperty(pvInstance, property, "Transform");
+			TagProperty(basePart, "Size", "Geometry");
+			for (const std::string_view property : {"Color", "Transparency", "LocalTransparency"})
+				TagProperty(basePart, property, "Appearance");
+			for (const std::string_view property :
+				 {"AffordanceId", "AffordanceKind", "AffordanceEnabled", "Locked"})
+				TagProperty(basePart, property, "Behavior");
+			for (const std::string_view property :
+				 {"Visible",
+				  "RenderFeatureEnableMask",
+				  "RenderFeatureDisableMask",
+				  "ComputeEffectNode",
+				  "PostProcessEffectNode",
+				  "CastShadow"})
+				TagProperty(basePart, property, "Rendering");
+			for (const std::string_view property :
+				 {"CanCollide",
+				  "CanQuery",
+				  "Anchored",
+				  "Kinematic",
+				  "CollisionGroup",
+				  "CollisionShape",
+				  "CollisionGeometry",
+				  "Mass",
+				  "CustomPhysicalProperties",
+				  "Density",
+				  "Friction",
+				  "Elasticity",
+				  "LinearDamping",
+				  "AngularDamping"})
+				TagProperty(basePart, property, "Physics");
+			for (const std::string_view property :
+				 {"AlphaCutoff", "AlphaMode", "SurfaceColor", "EmissiveTint", "EmissiveStrength"})
+				TagProperty(basePart, property, "PBR");
+			TagProperty(basePart, "ResampleMode", "Rendering");
+
+			for (const std::string_view property :
+				 {"TextureID",
+				  "NormalMap",
+				  "RoughnessMap",
+				  "MetalnessMap",
+				  "OcclusionMap",
+				  "HeightMap",
+				  "EmissiveMap",
+				  "PackedPbrMap",
+				  "SpecularFactor",
+				  "TransmissionFactor",
+				  "IndexOfRefraction",
+				  "Thickness",
+				  "PackedRoughnessChannel",
+				  "PackedOcclusionChannel",
+				  "PackedHeightChannel",
+				  "PackedMetalnessChannel"})
+				TagProperty(meshPart, property, "PBR");
+			for (const std::string_view property : {"MeshId", "TrianglesCount"})
+				TagProperty(meshPart, property, "Geometry");
+			for (const std::string_view property :
+				 {"Lod1MeshId",
+				  "Lod2MeshId",
+				  "Lod3MeshId",
+				  "Lod1Ratio",
+				  "Lod2Ratio",
+				  "Lod3Ratio",
+				  "LodTargetQuadArea",
+				  "LodBillboardTexture",
+				  "Lod1Distance",
+				  "Lod2Distance",
+				  "Lod3Distance",
+				  "AutoLod1MeshId",
+				  "AutoLod2MeshId",
+				  "AutoLod3MeshId",
+				  "AutoLod1Ratio",
+				  "AutoLod2Ratio",
+				  "AutoLod3Ratio",
+				  "AutoLodTargetQuadArea",
+				  "AutoLodBillboardTexture",
+				  "AutoLodLevels",
+				  "AutoLodStrategy",
+				  "CustomLod1MeshId",
+				  "CustomLod2MeshId",
+				  "CustomLod3MeshId",
+				  "CustomLod1Ratio",
+				  "CustomLod2Ratio",
+				  "CustomLod3Ratio",
+				  "CustomLodTargetQuadArea",
+				  "CustomLodBillboardTexture",
+				  "CustomLodLevels"})
+				TagProperty(meshPart, property, "LOD");
+			for (const std::string_view property : {"TeamColor", "Forced"})
+				TagProperty(spawnLocation, property, "Player");
+			for (const std::string_view property : {"Neutral", "Enabled"})
+				TagProperty(spawnLocation, property, "Behavior");
+
+			for (const std::string_view property :
+				 {"CameraSubject",
+				  "CameraType",
+				  "CameraSubjectAutomatic",
+				  "NearPlaneZ",
+				  "FarPlaneZ",
+				  "MaxImageWidth",
+				  "MaxImageHeight",
+				  "ImageWidth",
+				  "ImageHeight"})
+				TagProperty(cameraClass, property, "Camera");
+			for (const std::string_view property : {"RenderFeatureEnableMask", "RenderFeatureDisableMask"})
+				TagProperty(cameraClass, property, "Rendering");
+			TagProperty(cameraClass, "SurfaceSize", "Geometry");
+			TagProperty(surfaceCameraClass, "ImageTransparency", "Appearance");
+			TagProperty(surfaceCameraClass, "FPS", "Rendering");
+			for (const std::string_view property : {"Face", "Effect"})
+				TagProperty(surfaceCameraClass, property, "Rendering");
+			TagProperty(surfaceCameraClass, "TagFilter", "Behavior");
+			for (const std::string_view property : {"Destination", "DestinationWorld"})
+				TagProperty(portalClass, property, "Identity");
+			for (const std::string_view property : {"Enabled", "Bidirectional"})
+				TagProperty(portalClass, property, "Behavior");
+			TagProperty(materialClass, "MaterialId", "Identity");
+			TagProperty(materialClass, "Shader", "Rendering");
+			for (const std::string_view property : {"Enabled", "Shadows"})
+				TagProperty(lightClass, property, "Behavior");
+			for (const std::string_view property : {"Angle", "Face"}) {
+				TagProperty(spotLightClass, property, "Lighting");
+				TagProperty(surfaceLightClass, property, "Lighting");
+			}
+			TagProperty(toolClass, "Grip", "Transform");
+			for (const std::string_view property : {"RigId", "JointCount"})
+				TagProperty(skinnedMeshPart, property, "Animation");
+			for (const std::string_view property : {"Color"}) {
+				TagProperty(atmosphereClass, property, "Lighting");
+				TagProperty(cloudsClass, property, "Lighting");
+			}
+			for (const std::string_view property : {"Enabled"}) {
+				TagProperty(cloudsClass, property, "Behavior");
+				TagProperty(skyboxTexturesClass, property, "Behavior");
+				TagProperty(skyboxComputeClass, property, "Behavior");
+				TagProperty(cloudComputeClass, "ComputeEnabled", "Behavior");
+				TagProperty(volumeClass, property, "Behavior");
+				TagProperty(shaderLensClass, property, "Behavior");
+				TagProperty(atmosphereProceduralClass, "ProceduralEnabled", "Behavior");
+			}
+			for (const std::string_view property : {"ZenithColor", "HorizonColor", "GroundColor"})
+				TagProperty(skyboxComputeClass, property, "Lighting");
+			TagProperty(volumeClass, "Bounds", "Geometry");
+
 			return part;
 		}
 	}

@@ -407,6 +407,10 @@ namespace engine::scene {
 				return true;
 			};
 			ecs::Classes::Computed(type, inputs);
+			for (const ecs::PropertyDescriptor &property : ecs::Classes::Describe(type).Properties)
+				(void)ecs::Classes::SetPropertiesTag(type, property.Spelling, core::Name("Data"));
+			(void)ecs::Classes::SetPropertiesTag(type, "Graph", core::Name("Image"));
+			(void)ecs::Classes::SetPropertiesTag(type, "Output", core::Name("Rendering"));
 			return type;
 		}();
 		return klass;
