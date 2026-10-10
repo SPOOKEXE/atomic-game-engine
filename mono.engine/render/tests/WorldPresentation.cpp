@@ -482,6 +482,47 @@ TEST_CASE("data-factory object labels sort stable ids by bytes", "[render][prese
 	CHECK(draw->ObjectLabels[0].StableId == "aardvark");
 	for (const auto &instance : draw->Instances)
 		if (instance.Source == later.Id) CHECK(instance.ObjectLabel == 1);
+
+	// Transform writes and label edits arrive together. Collection must refresh
+	// the pose and all three label tables, including a removed authored label.
+	auto moved = *store.Get<engine::scene::Transform>(later);
+	moved.Frame.Position = {4, 5, 6};
+	store.Set(later, moved);
+	const auto setStringAttribute =
+		[&](engine::ecs::Entity entity, std::string_view name, std::string value) {
+			engine::ecs::AttributeValue attribute;
+			attribute.Type = engine::ecs::PropertyType::String;
+			attribute.String = std::move(value);
+			REQUIRE(engine::ecs::SetAttribute(store, entity, Name(name), attribute));
+		};
+	setStringAttribute(later, "DataFactoryId", "bravo");
+	setStringAttribute(later, "DataFactorySemanticId", "fixture/changed-box");
+	setStringAttribute(later, "DataFactoryPartId", "fixture/part/changed");
+	engine::ecs::AttributeValue remove;
+	remove.Type = engine::ecs::PropertyType::Opaque;
+	REQUIRE(engine::ecs::SetAttribute(store, earlier, Name("DataFactoryPartId"), remove));
+	engine::render::CollectInstances(store, engine::render::DrawCollectionTime::CurrentTick);
+	REQUIRE(draw->Instances.size() == 2);
+	for (const auto &instance : draw->Instances) {
+		if (instance.Source == later.Id) {
+			CHECK((instance.Frame.Position == engine::core::Vector3{4, 5, 6}));
+			CHECK(instance.ObjectLabel == 2);
+			CHECK(instance.SemanticLabel == 2);
+			CHECK(instance.PartLabel == 1);
+		}
+		if (instance.Source == earlier.Id) {
+			CHECK(instance.PartLabel == 0);
+		}
+	}
+	REQUIRE(draw->ObjectLabelsValid);
+	REQUIRE(draw->ObjectLabels.size() == 2);
+	CHECK(draw->ObjectLabels[0].StableId == "alpha");
+	CHECK(draw->ObjectLabels[1].StableId == "bravo");
+	REQUIRE(draw->SemanticLabelsValid);
+	REQUIRE(draw->SemanticLabels.size() == 2);
+	REQUIRE(draw->PartLabelsValid);
+	REQUIRE(draw->PartLabels.size() == 1);
+	CHECK(draw->PartLabels[0].StableId == "fixture/part/changed");
 }
 
 TEST_CASE("ambiguous data-factory ids refuse an object label table", "[render][presentation]") {

@@ -94,6 +94,8 @@ namespace engine::render {
 
 		// One row per visible scene instance.
 		std::vector<scene::DrawInstance> Instances;
+		// Sorted entity IDs for the world-drawable rows, before transparent rows are filtered.
+		std::vector<uint64_t> DrawableSourceIds;
 		// Stable object identities indexed by captured object-id values.
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
 		// Stable semantic identities indexed by captured class values.
@@ -125,6 +127,8 @@ namespace engine::render {
 		size_t BoneCount = 0;
 		// Whether source rows are ready for collection.
 		bool SourcesReady = false;
+		// Whether DrawableSourceIds describes the current source rows.
+		bool DrawableSourcesReady = false;
 		// Whether the draw list was built from interpolated tick state.
 		bool HasInterpolation = false;
 		// Whether any source rows use a visibility filter.

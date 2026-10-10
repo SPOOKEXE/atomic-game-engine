@@ -11,6 +11,17 @@ namespace engine::render {
 		for (scene::DrawInstance &instance : drawList.Instances) {
 			PresentationSource::ApplyOptionalRenderState(store, ecs::Entity(instance.Source), instance);
 		}
+		drawList.DrawableSourceIds.clear();
+		drawList.DrawableSourceIds.reserve(drawList.Instances.size());
+		for (const scene::DrawInstance &instance : drawList.Instances) {
+			drawList.DrawableSourceIds.push_back(instance.Source);
+		}
+		std::sort(drawList.DrawableSourceIds.begin(), drawList.DrawableSourceIds.end());
+		drawList.DrawableSourceIds.erase(
+			std::unique(drawList.DrawableSourceIds.begin(), drawList.DrawableSourceIds.end()),
+			drawList.DrawableSourceIds.end()
+		);
+		drawList.DrawableSourcesReady = true;
 		if (removeFullyTransparent) {
 			std::erase_if(drawList.Instances, [](const scene::DrawInstance &instance) {
 				return instance.Transparency >= 1.0f;

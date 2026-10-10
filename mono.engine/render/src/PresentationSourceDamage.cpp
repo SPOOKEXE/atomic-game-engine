@@ -7,6 +7,7 @@
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/Visibility.hpp>
 
+#include <algorithm>
 #include <tuple>
 
 namespace engine::render {
@@ -17,7 +18,12 @@ namespace engine::render {
 		PresentationSourceDamage damage;
 		damage.Full = !drawList.SourcesReady || matching != drawList.SourceEntityCount ||
 					  skeletons != drawList.SkeletonCount || bones != drawList.BoneCount;
-		const auto drawable = [&store](ecs::Entity entity) {
+		const auto drawable = [&store, &drawList](ecs::Entity entity) {
+			if (drawList.DrawableSourcesReady) {
+				return std::binary_search(
+					drawList.DrawableSourceIds.begin(), drawList.DrawableSourceIds.end(), entity.Id
+				);
+			}
 			return PresentationSource::IsWorldDrawable(store, entity);
 		};
 		std::apply(
@@ -28,6 +34,7 @@ namespace engine::render {
 		drawList.SkeletonCount = skeletons;
 		drawList.BoneCount = bones;
 		drawList.SourcesReady = true;
+		if (damage.Full) drawList.DrawableSourcesReady = false;
 		return damage;
 	}
 }

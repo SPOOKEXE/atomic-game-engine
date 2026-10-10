@@ -136,13 +136,12 @@ namespace engine::render {
 
 		void AssignObjectLabels(ecs::Store &store, DrawList &drawList) {
 			drawList.ObjectLabelsValid = true;
+			const core::Name attributeName("DataFactoryId");
 			std::vector<std::pair<uint64_t, std::string>> identifiers;
 			identifiers.reserve(drawList.Instances.size());
 			for (const scene::DrawInstance &instance : drawList.Instances) {
 				ecs::AttributeValue attribute;
-				if (!ecs::GetAttribute(
-						store, ecs::Entity(instance.Source), core::Name("DataFactoryId"), attribute
-					) ||
+				if (!ecs::GetAttribute(store, ecs::Entity(instance.Source), attributeName, attribute) ||
 					attribute.Type != ecs::PropertyType::String || attribute.String.empty())
 					continue;
 				if (attribute.String.size() > 256 || attribute.String.find('\0') != std::string::npos ||
@@ -204,12 +203,11 @@ namespace engine::render {
 			bool allowShared
 		) {
 			valid = true;
+			const core::Name name(attributeName);
 			std::vector<std::pair<uint64_t, std::string>> identifiers;
 			for (const scene::DrawInstance &instance : drawList.Instances) {
 				ecs::AttributeValue attribute;
-				if (!ecs::GetAttribute(
-						store, ecs::Entity(instance.Source), core::Name(attributeName), attribute
-					) ||
+				if (!ecs::GetAttribute(store, ecs::Entity(instance.Source), name, attribute) ||
 					attribute.Type != ecs::PropertyType::String || attribute.String.empty())
 					continue;
 				if (attribute.String.size() > 256 || attribute.String.find('\0') != std::string::npos ||
@@ -896,26 +894,44 @@ namespace engine::render {
 				} else {
 					CollectSkinPalettes(store, *drawList);
 				}
-				(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
-				AssignObjectLabels(store, *drawList);
-				AssignAuthoredLabels(
-					store,
-					*drawList,
-					"DataFactorySemanticId",
-					drawList->SemanticLabels,
-					drawList->SemanticLabelsValid,
-					&scene::DrawInstance::SemanticLabel,
-					true
-				);
-				AssignAuthoredLabels(
-					store,
-					*drawList,
-					"DataFactoryPartId",
-					drawList->PartLabels,
-					drawList->PartLabelsValid,
-					&scene::DrawInstance::PartLabel,
-					false
-				);
+				{
+					ENGINE_PROFILE_CAT("update draw frames.seams", engine::core::ProfileCategory::Simulation);
+					(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+				}
+				{
+					ENGINE_PROFILE_CAT(
+						"update draw frames.object labels", engine::core::ProfileCategory::Simulation
+					);
+					AssignObjectLabels(store, *drawList);
+				}
+				{
+					ENGINE_PROFILE_CAT(
+						"update draw frames.semantic labels", engine::core::ProfileCategory::Simulation
+					);
+					AssignAuthoredLabels(
+						store,
+						*drawList,
+						"DataFactorySemanticId",
+						drawList->SemanticLabels,
+						drawList->SemanticLabelsValid,
+						&scene::DrawInstance::SemanticLabel,
+						true
+					);
+				}
+				{
+					ENGINE_PROFILE_CAT(
+						"update draw frames.part labels", engine::core::ProfileCategory::Simulation
+					);
+					AssignAuthoredLabels(
+						store,
+						*drawList,
+						"DataFactoryPartId",
+						drawList->PartLabels,
+						drawList->PartLabelsValid,
+						&scene::DrawInstance::PartLabel,
+						false
+					);
+				}
 				return;
 			}
 			// A source query changed shape without a matching component epoch. The
@@ -1536,6 +1552,8 @@ namespace engine::render {
 					lists[index].SkeletonCount = 0;
 					lists[index].BoneCount = 0;
 					lists[index].SourcesReady = false;
+					lists[index].DrawableSourcesReady = false;
+					lists[index].DrawableSourceIds.clear();
 					lists[index].HasInterpolation = false;
 				}
 			}

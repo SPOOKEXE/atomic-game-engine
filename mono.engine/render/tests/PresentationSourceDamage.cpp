@@ -1,4 +1,5 @@
 #include "PresentationSourceDamageTable.hpp"
+#include "PresentationSourceOrder.hpp"
 
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Part.hpp>
@@ -9,9 +10,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <tuple>
 #include <type_traits>
+#include <vector>
 
 TEST_SUITE_ID("engine.render.presentationsourcedamage")
 TEST_DEPENDS("engine.scene.services")
@@ -98,6 +101,14 @@ namespace {
 			CHECK_FALSE(steadyAfterRemove.Pose);
 		}
 	}
+
+	template <class Descriptor> void SeedRevision(engine::ecs::Store &store, engine::render::DrawList &draw) {
+		using Component = typename Descriptor::ComponentType;
+		store.Observe<Component>();
+		auto &revision = draw.Revisions.*Descriptor::RevisionMember;
+		revision.Writes = store.ComponentChangeVersion<Component>();
+		revision.Membership = store.ComponentMembershipVersion<Component>();
+	}
 }
 
 TEST_CASE(
@@ -120,4 +131,96 @@ TEST_CASE(
 	for (size_t left = 0; left < revisions.size(); ++left)
 		for (size_t right = left + 1; right < revisions.size(); ++right)
 			CHECK(revisions[left] != revisions[right]);
+}
+
+TEST_CASE(
+	"presentation damage uses the rebuilt drawable index until source membership changes",
+	"[render][presentation][damage]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	ecs::Store store("presentation-source-index");
+	const ecs::Entity workspace = scene::InstallServices(store);
+	const ecs::Entity visible = scene::MakePart(store, scene::PartDesc{});
+	REQUIRE(visible != ecs::NULL_ENTITY);
+	REQUIRE(store.SetParent(visible, workspace));
+	scene::SyncRendered(store);
+	REQUIRE(store.Has<scene::Rendered>(visible));
+	const ecs::Entity unparented = scene::MakePart(store, scene::PartDesc{});
+	REQUIRE(unparented != ecs::NULL_ENTITY);
+
+	render::DrawList draw;
+	draw.Instances.emplace_back();
+	draw.Instances.back().Source = visible.Id;
+	draw.Instances.back().Transparency = 1.0f;
+	render::FinalizePresentationSourceRows(store, draw, true);
+	CHECK(draw.Instances.empty());
+	REQUIRE(draw.DrawableSourcesReady);
+	REQUIRE(draw.DrawableSourceIds == std::vector<uint64_t>{visible.Id});
+
+	std::apply(
+		[&](const auto &...source) {
+			(SeedRevision<std::remove_cvref_t<decltype(source)>>(store, draw), ...);
+		},
+		SOURCE_TABLE
+	);
+	draw.SourceEntityCount = render::PresentationSource::CountWorldDrawables(store);
+	draw.SkeletonCount = store.CountMatching<scene::Skeleton>();
+	draw.BoneCount = draw.SkeletonCount == 0 ? 0 : store.CountMatching<scene::Bone>();
+	draw.SourcesReady = true;
+	store.ClearChanges();
+
+	store.Set<scene::Transform>(visible, scene::Transform{});
+	const auto visiblePose = render::CollectPresentationSourceDamage(
+		store, draw, draw.SourceEntityCount, draw.SkeletonCount, draw.BoneCount
+	);
+	CHECK(visiblePose.Pose);
+	CHECK_FALSE(visiblePose.Full);
+	store.ClearChanges();
+
+	store.Set<scene::Transform>(unparented, scene::Transform{});
+	const auto unrelatedPose = render::CollectPresentationSourceDamage(
+		store, draw, draw.SourceEntityCount, draw.SkeletonCount, draw.BoneCount
+	);
+	CHECK_FALSE(unrelatedPose.Pose);
+	CHECK_FALSE(unrelatedPose.Full);
+	store.ClearChanges();
+
+	const ecs::Entity added = scene::MakePart(store, scene::PartDesc{});
+	REQUIRE(added != ecs::NULL_ENTITY);
+	REQUIRE(store.SetParent(added, workspace));
+	scene::SyncRendered(store);
+	REQUIRE(store.Has<scene::Rendered>(added));
+	const auto addition = render::CollectPresentationSourceDamage(
+		store,
+		draw,
+		render::PresentationSource::CountWorldDrawables(store),
+		draw.SkeletonCount,
+		draw.BoneCount
+	);
+	CHECK(addition.Full);
+	CHECK_FALSE(draw.DrawableSourcesReady);
+
+	draw.Instances.clear();
+	draw.Instances.resize(2);
+	draw.Instances[0].Source = visible.Id;
+	draw.Instances[1].Source = added.Id;
+	render::FinalizePresentationSourceRows(store, draw, false);
+	REQUIRE(draw.DrawableSourcesReady);
+	std::vector<uint64_t> expectedSources{visible.Id, added.Id};
+	std::sort(expectedSources.begin(), expectedSources.end());
+	CHECK(draw.DrawableSourceIds == expectedSources);
+
+	REQUIRE(store.SetParent(added, ecs::NULL_ENTITY));
+	scene::SyncRendered(store);
+	CHECK_FALSE(store.Has<scene::Rendered>(added));
+	const auto removal = render::CollectPresentationSourceDamage(
+		store,
+		draw,
+		render::PresentationSource::CountWorldDrawables(store),
+		draw.SkeletonCount,
+		draw.BoneCount
+	);
+	CHECK(removal.Full);
+	CHECK_FALSE(draw.DrawableSourcesReady);
 }

@@ -17,10 +17,13 @@
 #include <engine/testing/Bench.hpp>
 
 #include <cstddef>
+#include <vector>
 
 TEST_SUITE_ID("engine.render.bench.presentation")
 
 namespace presentation_bench {
+	constexpr size_t MOVING_PART_COUNT = 100'000;
+
 	struct StaticParts {
 		engine::ecs::Store World{"bench.presentation"};
 		engine::ecs::Entity First;
@@ -43,6 +46,44 @@ namespace presentation_bench {
 		}
 	};
 
+	struct MovingParts {
+		engine::ecs::Store World{"bench.presentation.moving"};
+		std::vector<engine::ecs::Entity> Parts;
+
+		MovingParts() {
+			engine::scene::RegisterSceneClasses();
+			engine::render::RegisterPresentationComponents();
+			World.SetResource(engine::render::DrawList{});
+			const engine::ecs::Entity workspace = engine::scene::InstallServices(World);
+			Parts.reserve(MOVING_PART_COUNT);
+			for (size_t index = 0; index < MOVING_PART_COUNT; index++) {
+				engine::scene::PartDesc desc;
+				desc.Simulated = true;
+				desc.Frame.Position = {
+					static_cast<float>(index % 160) * 1.5f,
+					static_cast<float>((index / 25'600) % 4) * 1.5f,
+					static_cast<float>((index / 160) % 160) * 1.5f,
+				};
+				const engine::ecs::Entity part = engine::scene::MakePart(World, desc);
+				(void)World.SetParent(part, workspace);
+				Parts.push_back(part);
+			}
+			(void)engine::scene::SyncRendered(World);
+			engine::render::CollectInstances(World);
+			World.ClearChanges();
+		}
+
+		void AdvanceAndCollect() {
+			for (const engine::ecs::Entity part : Parts) {
+				auto transform = *World.Get<engine::scene::Transform>(part);
+				transform.Frame.Position.X += 0.001f;
+				World.Set(part, transform);
+			}
+			engine::render::CollectInstances(World);
+			World.ClearChanges();
+		}
+	};
+
 	StaticParts &CachedWorld() {
 		static StaticParts world;
 		return world;
@@ -50,6 +91,11 @@ namespace presentation_bench {
 
 	StaticParts &RebuiltWorld() {
 		static StaticParts world;
+		return world;
+	}
+
+	MovingParts &StressPhysicsWorld() {
+		static MovingParts world;
 		return world;
 	}
 }
@@ -77,4 +123,9 @@ BENCH("CollectInstances · 1,024 static parts, pose epoch", 1'000) {
 		bench.World.MarkChanged<engine::scene::Transform>(bench.First);
 		engine::render::CollectInstances(bench.World);
 	}
+}
+
+// Models the presentation input writes, not physics integration or GPU residency.
+BENCH("StressPhysics presentation · 100,000 transform writes plus collection", 1) {
+	presentation_bench::StressPhysicsWorld().AdvanceAndCollect();
 }
