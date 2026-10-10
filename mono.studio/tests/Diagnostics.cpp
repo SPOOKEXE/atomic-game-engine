@@ -44,6 +44,73 @@ using studio::LayoutDiagnosticRows;
 using studio::SelectHeapHistorySnapshot;
 using studio::ShouldReplaceDiagnosticSnapshot;
 
+TEST_CASE("frame graph recording serves live consumers while its panel is paused", "[studio][diagnostics]") {
+	using studio::frame_graph_detail::ShouldRecordFrameGraph;
+	CHECK_FALSE(ShouldRecordFrameGraph(false, false, false));
+	CHECK_FALSE(ShouldRecordFrameGraph(false, true, false));
+	CHECK(ShouldRecordFrameGraph(true, false, false));
+	CHECK_FALSE(ShouldRecordFrameGraph(true, true, false));
+	for (const bool visible : {false, true}) {
+		for (const bool paused : {false, true}) {
+			CHECK(ShouldRecordFrameGraph(visible, paused, true));
+		}
+	}
+}
+
+TEST_CASE(
+	"pausing frame graph collection retains the owned snapshot and resumes a clean history",
+	"[studio][diagnostics]"
+) {
+	using studio::frame_graph_detail::ShouldRecordFrameGraph;
+	struct RestoreRecording {
+		bool Enabled = FrameGraph::IsEnabled();
+		~RestoreRecording() {
+			FrameGraph::SetEnabled(Enabled);
+		}
+	};
+	const RestoreRecording restore;
+	FrameGraph::SetEnabled(false);
+	FrameGraph::SetEnabled(ShouldRecordFrameGraph(true, false, false));
+	FrameGraph::BeginFrame();
+	{ ENGINE_PROFILE("owned before pause"); }
+	FrameGraph::EndFrame();
+	REQUIRE(FrameGraph::HistoryFrames() == 1);
+
+	std::vector<DiagnosticSpan> owned;
+	AccumulateDiagnosticSpans(FrameGraph::Spans(), owned);
+	FinishDiagnosticAverage(owned, 1);
+	REQUIRE(owned.size() == 1);
+	const float retainedMilliseconds = owned.front().Milliseconds;
+
+	// A separate consumer keeps collecting without changing the panel's copy.
+	FrameGraph::SetEnabled(ShouldRecordFrameGraph(true, true, true));
+	FrameGraph::BeginFrame();
+	{ ENGINE_PROFILE("other live consumer"); }
+	FrameGraph::EndFrame();
+	CHECK(FrameGraph::HistoryFrames() == 2);
+	CHECK(owned.front().Name == "owned before pause");
+	CHECK(owned.front().Milliseconds == retainedMilliseconds);
+
+	FrameGraph::SetEnabled(ShouldRecordFrameGraph(true, true, false));
+	FrameGraph::BeginFrame();
+	{ ENGINE_PROFILE("discarded while paused"); }
+	FrameGraph::EndFrame();
+	CHECK_FALSE(FrameGraph::IsEnabled());
+	CHECK(FrameGraph::Spans().empty());
+	CHECK(FrameGraph::HistoryFrames() == 0);
+	CHECK(owned.front().Name == "owned before pause");
+	CHECK(owned.front().Milliseconds == retainedMilliseconds);
+
+	FrameGraph::SetEnabled(ShouldRecordFrameGraph(true, false, false));
+	FrameGraph::BeginFrame();
+	{ ENGINE_PROFILE("fresh after resume"); }
+	FrameGraph::EndFrame();
+	REQUIRE(FrameGraph::Spans().size() == 1);
+	CHECK(FrameGraph::Spans().front().Name == "fresh after resume");
+	CHECK(FrameGraph::HistoryFrames() == 1);
+	CHECK(FrameGraph::RecentMaximum("owned before pause") == 0.0f);
+}
+
 TEST_CASE("frame graph counters freeze while paused and refresh on resume", "[studio][diagnostics]") {
 	engine::render::FrameStatistics statistics;
 	statistics.Record(1.0, 1.0f / 60.0f);

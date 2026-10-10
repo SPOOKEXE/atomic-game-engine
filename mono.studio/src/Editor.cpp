@@ -1,3 +1,5 @@
+#include "FrameGraphSnapshot.hpp"
+
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
@@ -2021,10 +2023,11 @@ namespace studio {
 				Settings.FixedAnimationStep > 0.0 ? Settings.FixedAnimationStep : frameSeconds;
 		Renderer.SetAnimationTime(AnimationSeconds);
 
-		// **The frame graph is only collected while it is being read.**
+		// **The frame graph is only collected while it is being read live.**
 		// Recording every span of every frame costs real time, and the whole
 		// reason to look at that panel is that time is scarce. The client's
 		// overlay makes the same trade.
+		// A paused panel owns its snapshot and does not need new recordings.
 		//
 		// A snapshot at the end of the run counts as reading it, and is the
 		// only way to profile something - a window drag - that occupies the
@@ -2035,8 +2038,12 @@ namespace studio {
 		// which is exactly what `profile_frame` did until it had a flag of its
 		// own to set.
 		engine::core::FrameGraph::SetEnabled(
-			ShowFrameGraph || ShowScriptProfile || ShowScripting || ShowPhysicsSolver || ShowNetwork ||
-			ControlWantsProfile || !Settings.ProfileSnapshot.empty()
+			frame_graph_detail::ShouldRecordFrameGraph(
+				ShowFrameGraph,
+				FrameGraphState.Paused,
+				ShowScriptProfile || ShowScripting || ShowPhysicsSolver || ShowNetwork ||
+					ControlWantsProfile || !Settings.ProfileSnapshot.empty()
+			)
 		);
 
 		// The source profiler is opt-in at the VM boundary. It uses Luau's step

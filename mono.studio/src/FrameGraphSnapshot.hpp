@@ -6,6 +6,10 @@
 #include <utility>
 
 namespace studio::frame_graph_detail {
+	constexpr bool ShouldRecordFrameGraph(bool visible, bool paused, bool otherConsumer) {
+		return (visible && !paused) || otherConsumer;
+	}
+
 	template <class ReadDroppedMarks>
 	void UpdateFrameGraphCounters(
 		engine::render::FrameSummary &presentation,
