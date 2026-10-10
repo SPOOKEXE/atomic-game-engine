@@ -37,6 +37,25 @@
 #include <vector>
 
 namespace studio {
+	namespace {
+		struct GpuDurationDisplay {
+			double Value = 0.0;
+			int Precision = 2;
+			const char *Unit = "us";
+		};
+
+		GpuDurationDisplay DisplayGpuDuration(float milliseconds) {
+			const double duration = std::isfinite(milliseconds) ? std::max(milliseconds, 0.0f) : 0.0;
+			if (duration < 0.001) {
+				return {.Value = duration * 1'000'000.0, .Precision = 1, .Unit = "ns"};
+			}
+			if (duration < 1.0) {
+				return {.Value = duration * 1'000.0, .Precision = 2, .Unit = "us"};
+			}
+			return {.Value = duration, .Precision = 3, .Unit = "ms"};
+		}
+	}
+
 	bool ShouldReplaceDiagnosticSnapshot(
 		DiagnosticAggregation mode, bool hasSelected, float selectedMilliseconds, float candidateMilliseconds
 	) {
@@ -115,8 +134,8 @@ namespace studio {
 			return "Keeps the Rendered tag aligned with visible descendants of Workspace.";
 		}
 		if (name == "sync rendered.revision") {
-			return "Checks Hierarchy and Visual revisions before deciding whether a visibility walk is "
-				   "needed.";
+			return "Checks hierarchy, visual and class mutation/membership epochs before resolving "
+				   "Workspace or walking visibility.";
 		}
 		if (name == "sync rendered.walk") {
 			return "Walks the Workspace hierarchy and marks visible drawable descendants.";
@@ -136,8 +155,24 @@ namespace studio {
 		if (name == "frame graph layout") {
 			return "Builds display rows and synthetic unaccounted gaps after a snapshot changes.";
 		}
+		if (name == "SDL event queue") {
+			return "Polls the platform event queue, including the empty-queue pump.";
+		}
+		if (name == "submit.scene SDL handoff") {
+			return "Hands recorded scene commands to SDL; this is backend CPU time, not GPU execution.";
+		}
+		if (name == "submit.scene gather staged images") {
+			return "Collects recorded image resources that this scene submission will publish.";
+		}
+		if (name == "submit.scene publish state") {
+			return "Publishes submitted image/import state and retains completion fences.";
+		}
+		if (category == engine::core::ProfileCategory::Gpu) {
+			return "Completed GPU query duration; samples can arrive late and have no correlated CPU "
+				   "start time.";
+		}
 		if (reported) {
-			return "Work measured on another worker or device and projected into its parent's timeline.";
+			return "Producer work measured on another worker and projected into its parent's timeline.";
 		}
 
 		switch (category) {
@@ -203,7 +238,8 @@ namespace studio {
 					source.Parent < index ? targets[source.Parent] : engine::core::FrameGraph::NO_PARENT;
 				const DiagnosticSpan &target = totals[targetIndex];
 				if (target.Name != source.Name || target.Depth != source.Depth || target.Parent != parent ||
-					target.Owner != source.Owner) {
+					target.Owner != source.Owner || target.Category != source.Category ||
+					target.Reported != source.Reported) {
 					sameStructure = false;
 					break;
 				}
@@ -220,6 +256,8 @@ namespace studio {
 			uint32_t Parent = engine::core::FrameGraph::NO_PARENT;
 			std::string_view Name;
 			engine::core::ProfileOwner Owner = engine::core::ProfileOwner::Engine;
+			engine::core::ProfileCategory Category = engine::core::ProfileCategory::Engine;
+			bool Reported = false;
 
 			bool operator==(const SiblingKey &) const = default;
 		};
@@ -233,7 +271,8 @@ namespace studio {
 		struct SiblingHash {
 			size_t operator()(const SiblingKey &key) const {
 				return std::hash<std::string_view>{}(key.Name) ^ (static_cast<size_t>(key.Parent) << 1) ^
-					   (static_cast<size_t>(key.Owner) << 9);
+					   (static_cast<size_t>(key.Owner) << 9) ^ (static_cast<size_t>(key.Category) << 13) ^
+					   (static_cast<size_t>(key.Reported) << 17);
 			}
 		};
 		struct StructuralHash {
@@ -258,7 +297,7 @@ namespace studio {
 
 		for (size_t index = 0; index < totals.size(); index++) {
 			const DiagnosticSpan &span = totals[index];
-			const SiblingKey sibling{span.Parent, span.Name, span.Owner};
+			const SiblingKey sibling{span.Parent, span.Name, span.Owner, span.Category, span.Reported};
 			const uint32_t ordinal = ordinals[sibling]++;
 			targetByKey.emplace(
 				StructuralKey{.Sibling = sibling, .Depth = span.Depth, .Ordinal = ordinal},
@@ -275,7 +314,7 @@ namespace studio {
 			// The ordinal is local to one parent. Three worlds can each contain an
 			// `ecs.systems`; they are three children of three different parents, not
 			// the first, second and third occurrence of one global name.
-			const SiblingKey sibling{parent, source.Name, source.Owner};
+			const SiblingKey sibling{parent, source.Name, source.Owner, source.Category, source.Reported};
 			const uint32_t ordinal = ordinals[sibling]++;
 			const StructuralKey key{.Sibling = sibling, .Depth = source.Depth, .Ordinal = ordinal};
 
@@ -401,9 +440,11 @@ namespace studio {
 		for (DiagnosticSpan &span : spans) {
 			const float occurrences = static_cast<float>(std::max(span.Occurrences, 1u));
 			span.StartMilliseconds /= occurrences;
-			span.Milliseconds /= frameCount;
-			span.SelfMilliseconds /= frameCount;
-			span.IdleMilliseconds /= frameCount;
+			const float durationCount =
+				span.Category == engine::core::ProfileCategory::Gpu ? occurrences : frameCount;
+			span.Milliseconds /= durationCount;
+			span.SelfMilliseconds /= durationCount;
+			span.IdleMilliseconds /= durationCount;
 		}
 	}
 
@@ -412,6 +453,9 @@ namespace studio {
 		const size_t count = spans.size();
 		for (size_t parentIndex = 0; parentIndex < count; parentIndex++) {
 			DiagnosticSpan &parent = spans[parentIndex];
+			if (parent.Category == engine::core::ProfileCategory::Gpu) {
+				continue;
+			}
 			const float parentStart = std::clamp(parent.StartMilliseconds, 0.0f, frameEnd);
 			const float parentEnd =
 				std::clamp(parent.StartMilliseconds + parent.Milliseconds, parentStart, frameEnd);
@@ -426,7 +470,8 @@ namespace studio {
 				if (child.Depth <= parent.Depth) {
 					break;
 				}
-				if (child.Parent == parentIndex && child.Reported) {
+				if (child.Parent == parentIndex && child.Reported &&
+					child.Category != engine::core::ProfileCategory::Gpu) {
 					reportedTotal += std::max(child.Milliseconds, 0.0f);
 					reportedCount++;
 				}
@@ -472,7 +517,8 @@ namespace studio {
 				if (child.Depth <= parent.Depth) {
 					break;
 				}
-				if (child.Parent != parentIndex || !child.Reported) {
+				if (child.Parent != parentIndex || !child.Reported ||
+					child.Category == engine::core::ProfileCategory::Gpu) {
 					continue;
 				}
 
@@ -492,7 +538,8 @@ namespace studio {
 		// `presentation` sibling even though those scopes never overlapped.
 		for (size_t index = 0; index < spans.size(); index++) {
 			DiagnosticSpan &span = spans[index];
-			if (span.Parent >= index) {
+			if (span.Parent >= index || span.Category == engine::core::ProfileCategory::Gpu ||
+				spans[span.Parent].Category == engine::core::ProfileCategory::Gpu) {
 				continue;
 			}
 
@@ -632,13 +679,47 @@ namespace studio {
 			return 0;
 		}
 
+		struct RowIntervals {
+			std::vector<std::pair<std::pair<float, size_t>, float>> ByStart;
+		};
+		static thread_local std::array<std::vector<RowIntervals>, 2> occupied;
+		for (std::vector<RowIntervals> &lane : occupied) {
+			for (RowIntervals &row : lane) {
+				row.ByStart.clear();
+			}
+		}
+
 		uint32_t rowCount = 1;
 		for (size_t index = 0; index < spans.size(); index++) {
 			const DiagnosticSpan &span = spans[index];
-			if (span.Parent < index) {
-				rows[index] = rows[span.Parent] + 1;
+			const size_t lane = span.Category == engine::core::ProfileCategory::Gpu ? 1 : 0;
+			const bool sameLaneParent =
+				span.Parent < index &&
+				(spans[span.Parent].Category == engine::core::ProfileCategory::Gpu) == (lane == 1);
+			const uint32_t firstRow = sameLaneParent ? rows[span.Parent] + 1 : 0;
+			const float start = span.StartMilliseconds;
+			const float end = start + std::max(span.Milliseconds, 0.0f);
+			uint32_t row = firstRow;
+			for (;; row++) {
+				if (occupied[lane].size() <= row) {
+					occupied[lane].resize(static_cast<size_t>(row) + 1);
+				}
+				auto &intervals = occupied[lane][row].ByStart;
+				const auto key = std::pair{start, size_t{0}};
+				const auto next = std::lower_bound(
+					intervals.begin(), intervals.end(), key, [](const auto &interval, const auto &candidate) {
+						return interval.first < candidate;
+					}
+				);
+				const bool overlapsNext = next != intervals.end() && next->first.first < end;
+				const bool overlapsPrevious = next != intervals.begin() && std::prev(next)->second > start;
+				if (!overlapsNext && !overlapsPrevious) {
+					intervals.insert(next, std::pair{std::pair{start, index}, end});
+					break;
+				}
 			}
-			rowCount = std::max(rowCount, rows[index] + 1);
+			rows[index] = row;
+			rowCount = std::max(rowCount, row + 1);
 		}
 		return rowCount;
 	}
@@ -1029,41 +1110,10 @@ namespace studio {
 		// happens. Drawing the live buffer directly is what made the panel
 		// hard to use for its one job: at sixty frames a second a bar is gone
 		// before the pointer reaches it.
-		const std::vector<FrameSpan> &live = FrameGraph::Spans();
 		const double now = ImGui::GetTime();
 
 		const int chosen = std::clamp(view.Interval, 0, static_cast<int>(FRAME_GRAPH_INTERVALS.size()) - 1);
 		const float interval = FRAME_GRAPH_INTERVALS[static_cast<size_t>(chosen)];
-
-		// One frame's spans, names copied - see `DiagnosticSpan`.
-		const auto snapshot = [&live](std::vector<DiagnosticSpan> &into) {
-			into.clear();
-			into.reserve(live.size());
-			for (const FrameSpan &span : live) {
-				into.push_back(
-					DiagnosticSpan{
-						std::string(span.Name),
-						span.Depth,
-						span.Parent,
-						span.StartMilliseconds,
-						span.Milliseconds,
-						span.SelfMilliseconds,
-						span.IdleMilliseconds,
-						span.Category,
-						span.Owner,
-						span.Reported,
-					}
-				);
-			}
-		};
-
-		const auto readScalars = [&view]() {
-			view.FrameMilliseconds = FrameGraph::FrameMilliseconds();
-			view.IdleMilliseconds = FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
-			view.UnmarkedMilliseconds = FrameGraph::UnmarkedMilliseconds();
-			view.Dropped = FrameGraph::Dropped();
-		};
-
 		const auto forget = [&view]() {
 			view.Summed.clear();
 			view.SummedFrameMilliseconds = 0.0f;
@@ -1075,101 +1125,135 @@ namespace studio {
 			view.HasExtreme = false;
 		};
 
-		// **The graph pauses itself on the frame the rule fired**, which is the
-		// frame worth reading. What is taken here is that frame rather than
-		// whatever an interval was accumulating: a mean over 250 ms with one bad
-		// frame in it is exactly the picture the rule exists to replace.
-		if (!view.Paused) {
-			if (const engine::core::FrameTriggerHit *hit = FrameGraph::Triggered(); hit != nullptr) {
-				snapshot(view.Spans);
-				view.DisplayDirty = true;
-				readScalars();
-				view.PublishedFrames = 1;
-				forget();
-				view.Paused = true;
-				view.PausedByRule = true;
-				view.Fired = *hit;
-			}
-		}
+		{
+			ENGINE_PROFILE_CAT("frame graph sampling", engine::core::ProfileCategory::Engine);
+			const std::vector<FrameSpan> &live = FrameGraph::Spans();
 
-		if (!view.Paused) {
-			if (interval <= 0.0f) {
-				// Every frame, which is what this panel always did.
-				snapshot(view.Spans);
-				view.DisplayDirty = true;
-				readScalars();
-				view.PublishedFrames = 1;
-				forget();
-			} else {
-				if (view.Mode == DiagnosticAggregation::Average) {
-					ENGINE_PROFILE_CAT("frame graph.average", engine::core::ProfileCategory::Engine);
-					// Structural matching keeps repeated world and phase trees
-					// separate. Matching only name and depth collapses all of their
-					// bars onto one time range.
-					{
-						ENGINE_PROFILE_CAT(
-							"frame graph.average.spans", engine::core::ProfileCategory::Engine
-						);
-						AccumulateDiagnosticSpans(live, view.Summed);
-					}
-					{
-						ENGINE_PROFILE_CAT(
-							"frame graph.average.scalars", engine::core::ProfileCategory::Engine
-						);
-						view.SummedFrameMilliseconds += FrameGraph::FrameMilliseconds();
-						view.SummedIdleMilliseconds +=
-							FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
-						view.SummedUnmarkedMilliseconds += FrameGraph::UnmarkedMilliseconds();
-						view.SummedDropped += FrameGraph::Dropped();
-					}
-					view.Frames++;
-				} else if (view.Mode != DiagnosticAggregation::Latest) {
-					const float frame = FrameGraph::FrameMilliseconds();
-					if (ShouldReplaceDiagnosticSnapshot(
-							view.Mode, view.HasExtreme, view.ExtremeFrameMilliseconds, frame
-						)) {
-						snapshot(view.Extreme);
-						view.ExtremeFrameMilliseconds = frame;
-						view.ExtremeIdleMilliseconds =
-							FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
-						view.ExtremeUnmarkedMilliseconds = FrameGraph::UnmarkedMilliseconds();
-						view.ExtremeDropped = FrameGraph::Dropped();
-						view.HasExtreme = true;
-					}
+			// One frame's spans, names copied - see `DiagnosticSpan`.
+			const auto snapshot = [&live](std::vector<DiagnosticSpan> &into) {
+				into.clear();
+				into.reserve(live.size());
+				for (const FrameSpan &span : live) {
+					into.push_back(
+						DiagnosticSpan{
+							std::string(span.Name),
+							span.Depth,
+							span.Parent,
+							span.StartMilliseconds,
+							span.Milliseconds,
+							span.SelfMilliseconds,
+							span.IdleMilliseconds,
+							span.Category,
+							span.Owner,
+							span.Reported,
+						}
+					);
 				}
+			};
 
-				// **Also on the first frame the panel is open**, whatever the
-				// interval says. Waiting five seconds to draw anything at all
-				// reads as a panel that does not work.
-				if (now >= view.NextPublish || view.Spans.empty()) {
-					ENGINE_PROFILE_CAT("frame graph.publish", engine::core::ProfileCategory::Engine);
-					if (view.Mode == DiagnosticAggregation::Average && view.Frames > 0) {
-						const float frames = static_cast<float>(view.Frames);
-						view.Spans = view.Summed;
-						FinishDiagnosticAverage(view.Spans, view.Frames);
-						view.FrameMilliseconds = view.SummedFrameMilliseconds / frames;
-						view.IdleMilliseconds = view.SummedIdleMilliseconds / frames;
-						view.UnmarkedMilliseconds = view.SummedUnmarkedMilliseconds / frames;
-						// A window with one lost span is partial even when its per-frame
-						// mean rounds to zero. Keep the window total for that warning.
-						view.Dropped = view.SummedDropped;
-						view.PublishedFrames = view.Frames;
-					} else if (view.HasExtreme) {
-						view.Spans = view.Extreme;
-						view.FrameMilliseconds = view.ExtremeFrameMilliseconds;
-						view.IdleMilliseconds = view.ExtremeIdleMilliseconds;
-						view.UnmarkedMilliseconds = view.ExtremeUnmarkedMilliseconds;
-						view.Dropped = view.ExtremeDropped;
-						view.PublishedFrames = 1;
-					} else {
-						snapshot(view.Spans);
-						readScalars();
-						view.PublishedFrames = 1;
+			const auto readScalars = [&view]() {
+				view.FrameMilliseconds = FrameGraph::FrameMilliseconds();
+				view.IdleMilliseconds = FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
+				view.UnmarkedMilliseconds = FrameGraph::UnmarkedMilliseconds();
+				view.Dropped = FrameGraph::Dropped();
+			};
+
+			// **The graph pauses itself on the frame the rule fired**, which is the
+			// frame worth reading. What is taken here is that frame rather than
+			// whatever an interval was accumulating: a mean over 250 ms with one bad
+			// frame in it is exactly the picture the rule exists to replace.
+			if (!view.Paused) {
+				if (const engine::core::FrameTriggerHit *hit = FrameGraph::Triggered(); hit != nullptr) {
+					snapshot(view.Spans);
+					view.DisplayDirty = true;
+					readScalars();
+					view.PublishedFrames = 1;
+					forget();
+					view.Paused = true;
+					view.PausedByRule = true;
+					view.Fired = *hit;
+				}
+			}
+
+			if (!view.Paused) {
+				if (interval <= 0.0f) {
+					// Every frame, which is what this panel always did.
+					snapshot(view.Spans);
+					view.DisplayDirty = true;
+					readScalars();
+					view.PublishedFrames = 1;
+					forget();
+				} else {
+					if (view.Mode == DiagnosticAggregation::Average) {
+						ENGINE_PROFILE_CAT("frame graph.average", engine::core::ProfileCategory::Engine);
+						// Structural matching keeps repeated world and phase trees
+						// separate. Matching only name and depth collapses all of their
+						// bars onto one time range.
+						{
+							ENGINE_PROFILE_CAT(
+								"frame graph.average.spans", engine::core::ProfileCategory::Engine
+							);
+							AccumulateDiagnosticSpans(live, view.Summed);
+						}
+						{
+							ENGINE_PROFILE_CAT(
+								"frame graph.average.scalars", engine::core::ProfileCategory::Engine
+							);
+							view.SummedFrameMilliseconds += FrameGraph::FrameMilliseconds();
+							view.SummedIdleMilliseconds +=
+								FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
+							view.SummedUnmarkedMilliseconds += FrameGraph::UnmarkedMilliseconds();
+							view.SummedDropped += FrameGraph::Dropped();
+						}
+						view.Frames++;
+					} else if (view.Mode != DiagnosticAggregation::Latest) {
+						const float frame = FrameGraph::FrameMilliseconds();
+						if (ShouldReplaceDiagnosticSnapshot(
+								view.Mode, view.HasExtreme, view.ExtremeFrameMilliseconds, frame
+							)) {
+							snapshot(view.Extreme);
+							view.ExtremeFrameMilliseconds = frame;
+							view.ExtremeIdleMilliseconds =
+								FrameGraph::CategoryMilliseconds(ProfileCategory::Idle);
+							view.ExtremeUnmarkedMilliseconds = FrameGraph::UnmarkedMilliseconds();
+							view.ExtremeDropped = FrameGraph::Dropped();
+							view.HasExtreme = true;
+						}
 					}
 
-					view.DisplayDirty = true;
-					view.NextPublish = now + static_cast<double>(interval);
-					forget();
+					// **Also on the first frame the panel is open**, whatever the
+					// interval says. Waiting five seconds to draw anything at all
+					// reads as a panel that does not work.
+					if (now >= view.NextPublish || view.Spans.empty()) {
+						ENGINE_PROFILE_CAT("frame graph.publish", engine::core::ProfileCategory::Engine);
+						if (view.Mode == DiagnosticAggregation::Average && view.Frames > 0) {
+							const float frames = static_cast<float>(view.Frames);
+							view.Spans = view.Summed;
+							FinishDiagnosticAverage(view.Spans, view.Frames);
+							view.FrameMilliseconds = view.SummedFrameMilliseconds / frames;
+							view.IdleMilliseconds = view.SummedIdleMilliseconds / frames;
+							view.UnmarkedMilliseconds = view.SummedUnmarkedMilliseconds / frames;
+							// A window with one lost span is partial even when its per-frame
+							// mean rounds to zero. Keep the window total for that warning.
+							view.Dropped = view.SummedDropped;
+							view.PublishedFrames = view.Frames;
+						} else if (view.HasExtreme) {
+							view.Spans = view.Extreme;
+							view.FrameMilliseconds = view.ExtremeFrameMilliseconds;
+							view.IdleMilliseconds = view.ExtremeIdleMilliseconds;
+							view.UnmarkedMilliseconds = view.ExtremeUnmarkedMilliseconds;
+							view.Dropped = view.ExtremeDropped;
+							view.PublishedFrames = 1;
+						} else {
+							snapshot(view.Spans);
+							readScalars();
+							view.PublishedFrames = 1;
+						}
+
+						view.DisplayDirty = true;
+						view.NextPublish = now + static_cast<double>(interval);
+						forget();
+					}
 				}
 			}
 		}
@@ -1183,6 +1267,9 @@ namespace studio {
 			ENGINE_PROFILE_CAT("frame graph layout", engine::core::ProfileCategory::Engine);
 			view.OwnerMilliseconds.fill(0.0f);
 			for (const DiagnosticSpan &span : view.Spans) {
+				if (span.Category == ProfileCategory::Gpu) {
+					continue;
+				}
 				view.OwnerMilliseconds[static_cast<size_t>(ProfileOwner::All)] += span.SelfMilliseconds;
 				const auto owner = static_cast<size_t>(span.Owner);
 				if (owner > static_cast<size_t>(ProfileOwner::All) &&
@@ -1256,7 +1343,13 @@ namespace studio {
 		}
 		ImGui::PopStyleColor();
 		ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-		ImGui::TextUnformatted("owner self");
+		ImGui::TextUnformatted("owner self + reported work");
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Sums named self work, including reported producer durations. Overlapping producers can "
+				"exceed frame wall time."
+			);
+		}
 		for (size_t index = static_cast<size_t>(ProfileOwner::Engine);
 			 index < static_cast<size_t>(ProfileOwner::Count);
 			 index++) {
@@ -1278,115 +1371,118 @@ namespace studio {
 
 		// --- the controls ----------------------------------------------------
 
-		if (ImGui::Button(view.Paused ? "Resume" : "Pause")) {
-			view.Paused = !view.Paused;
+		{
+			ENGINE_PROFILE_CAT("frame graph controls", engine::core::ProfileCategory::Render);
+			if (ImGui::Button(view.Paused ? "Resume" : "Pause")) {
+				view.Paused = !view.Paused;
 
-			// Resuming disarms the latch, so the next matching frame stops the
-			// graph again. Pausing by hand clears the label rather than leaving
-			// a stale rule named beside a pause nobody's rule took.
-			view.PausedByRule = false;
-			FrameGraph::ClearTrigger();
+				// Resuming disarms the latch, so the next matching frame stops the
+				// graph again. Pausing by hand clears the label rather than leaving
+				// a stale rule named beside a pause nobody's rule took.
+				view.PausedByRule = false;
+				FrameGraph::ClearTrigger();
 
-			// Resuming starts the next interval from now rather than from
-			// whenever it was due when the pause began - otherwise a graph
-			// paused for a minute republishes on the frame it is resumed and
-			// the freeze appears not to have ended cleanly.
-			view.NextPublish = now + static_cast<double>(interval);
-			forget();
-		}
-
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"Freeze what is on screen. Nothing is sampled while paused, so the\n"
-				"numbers below are exactly the ones that were there when it was pressed."
-			);
-		}
-
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(engine::ui::Scaled(120.0f));
-		if (ImGui::BeginCombo("update", FRAME_GRAPH_INTERVAL_NAMES[static_cast<size_t>(chosen)])) {
-			for (int index = 0; index < static_cast<int>(FRAME_GRAPH_INTERVALS.size()); index++) {
-				const bool selected = index == chosen;
-				if (ImGui::Selectable(FRAME_GRAPH_INTERVAL_NAMES[static_cast<size_t>(index)], selected)) {
-					view.Interval = index;
-					view.NextPublish =
-						now + static_cast<double>(FRAME_GRAPH_INTERVALS[static_cast<size_t>(index)]);
-					forget();
-				}
-				if (selected) {
-					ImGui::SetItemDefaultFocus();
-				}
+				// Resuming starts the next interval from now rather than from
+				// whenever it was due when the pause began - otherwise a graph
+				// paused for a minute republishes on the frame it is resumed and
+				// the freeze appears not to have ended cleanly.
+				view.NextPublish = now + static_cast<double>(interval);
+				forget();
 			}
-			ImGui::EndCombo();
-		}
 
-		ImGui::SameLine();
-		ImGui::SetNextItemWidth(engine::ui::Scaled(92.0f));
-		const std::string ownerName(engine::core::GetProfileOwnerName(view.OwnerFilter));
-		if (ImGui::BeginCombo("owner", ownerName.c_str())) {
-			for (size_t index = 0; index < static_cast<size_t>(ProfileOwner::Count); index++) {
-				const auto owner = static_cast<ProfileOwner>(index);
-				const std::string name(engine::core::GetProfileOwnerName(owner));
-				if (ImGui::Selectable(name.c_str(), owner == view.OwnerFilter)) {
-					view.OwnerFilter = owner;
-					view.DisplayDirty = true;
-				}
-			}
-			ImGui::EndCombo();
-		}
-
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"Show all nested application work, or only spans submitted by one product layer."
-			);
-		}
-
-		ImGui::SameLine();
-
-		// **Disabled at "every frame", because there is no interval to select
-		// from.** Greyed rather than hidden: a control that disappears when a
-		// neighbouring one changes is a control nobody finds again.
-		ImGui::BeginDisabled(interval <= 0.0f);
-		ImGui::SetNextItemWidth(engine::ui::Scaled(92.0f));
-		constexpr std::array<const char *, 4> MODE_NAMES{"latest", "average", "max", "min"};
-		const auto mode = static_cast<size_t>(view.Mode);
-		if (ImGui::BeginCombo("mode", MODE_NAMES[mode])) {
-			for (size_t index = 0; index < MODE_NAMES.size(); index++) {
-				if (ImGui::Selectable(MODE_NAMES[index], index == mode)) {
-					view.Mode = static_cast<DiagnosticAggregation>(index);
-					forget();
-				}
-			}
-			ImGui::EndCombo();
-		}
-		ImGui::EndDisabled();
-
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
-				"Latest takes the current frame. Average builds a structural mean.\n"
-				"Max and Min select one complete frame by total frame time, preserving\n"
-				"the actual hierarchy instead of combining unrelated bars."
-			);
-		}
-
-		if (view.Paused) {
-			ImGui::SameLine();
-			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-			if (view.PausedByRule) {
-				ImGui::Text(
-					"- stopped: %s was %.2f ms",
-					view.Fired.Subject.c_str(),
-					static_cast<double>(view.Fired.Reading)
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Freeze what is on screen. Nothing is sampled while paused, so the\n"
+					"numbers below are exactly the ones that were there when it was pressed."
 				);
-			} else {
-				ImGui::TextUnformatted("- paused");
 			}
-			ImGui::PopStyleColor();
-		} else if (interval > 0.0f && view.Mode == DiagnosticAggregation::Average) {
+
 			ImGui::SameLine();
-			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-			ImGui::Text("- mean of %u frame(s)", view.PublishedFrames);
-			ImGui::PopStyleColor();
+			ImGui::SetNextItemWidth(engine::ui::Scaled(120.0f));
+			if (ImGui::BeginCombo("update", FRAME_GRAPH_INTERVAL_NAMES[static_cast<size_t>(chosen)])) {
+				for (int index = 0; index < static_cast<int>(FRAME_GRAPH_INTERVALS.size()); index++) {
+					const bool selected = index == chosen;
+					if (ImGui::Selectable(FRAME_GRAPH_INTERVAL_NAMES[static_cast<size_t>(index)], selected)) {
+						view.Interval = index;
+						view.NextPublish =
+							now + static_cast<double>(FRAME_GRAPH_INTERVALS[static_cast<size_t>(index)]);
+						forget();
+					}
+					if (selected) {
+						ImGui::SetItemDefaultFocus();
+					}
+				}
+				ImGui::EndCombo();
+			}
+
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth(engine::ui::Scaled(92.0f));
+			const std::string ownerName(engine::core::GetProfileOwnerName(view.OwnerFilter));
+			if (ImGui::BeginCombo("owner", ownerName.c_str())) {
+				for (size_t index = 0; index < static_cast<size_t>(ProfileOwner::Count); index++) {
+					const auto owner = static_cast<ProfileOwner>(index);
+					const std::string name(engine::core::GetProfileOwnerName(owner));
+					if (ImGui::Selectable(name.c_str(), owner == view.OwnerFilter)) {
+						view.OwnerFilter = owner;
+						view.DisplayDirty = true;
+					}
+				}
+				ImGui::EndCombo();
+			}
+
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Show all nested application work, or only spans submitted by one product layer."
+				);
+			}
+
+			ImGui::SameLine();
+
+			// **Disabled at "every frame", because there is no interval to select
+			// from.** Greyed rather than hidden: a control that disappears when a
+			// neighbouring one changes is a control nobody finds again.
+			ImGui::BeginDisabled(interval <= 0.0f);
+			ImGui::SetNextItemWidth(engine::ui::Scaled(92.0f));
+			constexpr std::array<const char *, 4> MODE_NAMES{"latest", "average", "max", "min"};
+			const auto mode = static_cast<size_t>(view.Mode);
+			if (ImGui::BeginCombo("mode", MODE_NAMES[mode])) {
+				for (size_t index = 0; index < MODE_NAMES.size(); index++) {
+					if (ImGui::Selectable(MODE_NAMES[index], index == mode)) {
+						view.Mode = static_cast<DiagnosticAggregation>(index);
+						forget();
+					}
+				}
+				ImGui::EndCombo();
+			}
+			ImGui::EndDisabled();
+
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"Latest takes the current frame. Average builds a structural mean.\n"
+					"Max and Min select one complete frame by total frame time, preserving\n"
+					"the actual hierarchy instead of combining unrelated bars."
+				);
+			}
+
+			if (view.Paused) {
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+				if (view.PausedByRule) {
+					ImGui::Text(
+						"- stopped: %s was %.2f ms",
+						view.Fired.Subject.c_str(),
+						static_cast<double>(view.Fired.Reading)
+					);
+				} else {
+					ImGui::TextUnformatted("- paused");
+				}
+				ImGui::PopStyleColor();
+			} else if (interval > 0.0f && view.Mode == DiagnosticAggregation::Average) {
+				ImGui::SameLine();
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+				ImGui::Text("- mean of %u frame(s)", view.PublishedFrames);
+				ImGui::PopStyleColor();
+			}
 		}
 
 		// **The share is of busy, not of the frame.** With vsync on, fifteen of
@@ -1425,19 +1521,8 @@ namespace studio {
 		// Said whenever it is on rather than only when spans are dropped,
 		// because the whole risk of the switch is reading a number taken with it
 		// and treating it as the engine's real cost.
-		// **Ahead of the serial-compute line, because it is the larger of the
-		// two and neither excuses the other.** `just studio` builds the `dev`
-		// preset, which compiles the engine at `-O0` and leaves the vendored
-		// code at `-O2` - the right trade for a build somebody iterates on, and
-		// the wrong one to read a profile from. Measured on one scene, one
-		// display, one frame, `dev` against `release`: `convert instances`
-		// 11.99 ms against 0.179, `graph.light-bounds` 10.18 against 0.120,
-		// `sync rendered` 26.5 against 0.74.
-		//
-		// Nothing said so, so the panel looked like a normal frame with a
-		// plausible distribution and every conclusion drawn from it was about
-		// the compiler rather than the engine. `preset=release just studio` is
-		// the fix, and this is the line that says to.
+		// An unoptimised profile still helps locate work, but its timings do not
+		// describe the release preset. Keep that distinction visible in the panel.
 #if defined(__OPTIMIZE__) || (defined(_MSC_VER) && defined(NDEBUG))
 		constexpr bool optimised = true;
 #else
@@ -1445,7 +1530,7 @@ namespace studio {
 #endif
 		if (!optimised) {
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-			ImGui::TextUnformatted("unoptimised build - every figure here is tens of times its shipped cost");
+			ImGui::TextUnformatted("unoptimised engine build (-O0); release timings differ");
 			ImGui::PopStyleColor();
 		}
 
@@ -1632,7 +1717,8 @@ namespace studio {
 		// what was expensive; a flame graph says what was expensive *and* what
 		// it happened inside, which is the question when a frame is slow for a
 		// reason nobody wrote down. `StartMilliseconds` and `Depth` are exactly
-		// the two axes.
+		// the two axes. Device samples have no CPU start and use the duration
+		// lane below.
 
 		{
 			ENGINE_PROFILE_CAT("frame graph flame", engine::core::ProfileCategory::Render);
@@ -1651,24 +1737,54 @@ namespace studio {
 			const bool focused = view.FocusRoot != FrameGraph::NO_PARENT;
 			const std::vector<DiagnosticSpan> &visibleSpans = focused ? view.FocusedSpans : graphSpans;
 			const std::vector<uint32_t> &visibleRows = focused ? view.FocusedRows : view.Rows;
-			const uint32_t visibleRowCount = focused ? view.FocusedDisplayRows : view.DisplayRows;
 			const float rowHeight =
 				std::max(std::floor(engine::ui::Scaled(engine::ui::Size::Row) * 0.72f), 1.0f);
+			uint32_t cpuRowCount = 0;
+			uint32_t gpuRowCount = 0;
+			float gpuMaximumMilliseconds = 0.0f;
+			uint32_t gpuMaximumSamples = 0;
+			bool hasAverageOverlap = false;
+			for (size_t index = 0; index < visibleSpans.size(); index++) {
+				const DiagnosticSpan &span = visibleSpans[index];
+				if (span.Category == ProfileCategory::Gpu) {
+					gpuRowCount = std::max(gpuRowCount, visibleRows[index] + 1);
+					if (span.Milliseconds > gpuMaximumMilliseconds) {
+						gpuMaximumMilliseconds = span.Milliseconds;
+						gpuMaximumSamples = span.Occurrences;
+					}
+					continue;
+				}
+				cpuRowCount = std::max(cpuRowCount, visibleRows[index] + 1);
+				hasAverageOverlap |=
+					view.Mode == DiagnosticAggregation::Average && visibleRows[index] > span.Depth;
+			}
+			if (hasAverageOverlap) {
+				ImGui::TextDisabled("overlap in a structural mean does not prove parallel CPU work");
+			}
 			const ImVec2 origin = ImGui::GetCursorScreenPos();
 			const float graphWidth = std::max(ImGui::GetContentRegionAvail().x, 1.0f);
 			const float scale = frameMs > 0.0001f ? graphWidth / frameMs : 0.0f;
-			const float graphHeight = rowHeight * static_cast<float>(visibleRowCount);
+			const float graphHeight = rowHeight * static_cast<float>(cpuRowCount);
 			const ImVec2 graphLower(origin.x + graphWidth, origin.y + graphHeight);
 			const bool mouseInGraph = ImGui::IsMouseHoveringRect(origin, graphLower);
 			const float labelMinimumWidth = engine::ui::Scaled(34.0f);
 
 			ImDrawList *draw = ImGui::GetWindowDrawList();
+			const ImVec2 clipMinimum = draw->GetClipRectMin();
+			const ImVec2 clipMaximum = draw->GetClipRectMax();
+			const auto intersectsWindowClip = [&](const ImVec2 &upper, const ImVec2 &lower) {
+				return upper.x < clipMaximum.x && lower.x > clipMinimum.x && upper.y < clipMaximum.y &&
+					   lower.y > clipMinimum.y;
+			};
 			const DiagnosticSpan *hovered = nullptr;
 			uint32_t hoveredSource = FrameGraph::NO_PARENT;
 			uint32_t clickedSource = FrameGraph::NO_PARENT;
 
 			const auto drawSpan = [&](size_t index) {
 				const DiagnosticSpan &span = visibleSpans[index];
+				if (span.Category == ProfileCategory::Gpu) {
+					return;
+				}
 				// **Clamped to the graph, whatever the arithmetic above produced.**
 				// An averaged span can still exceed the averaged frame - a span that
 				// ran in only some of the frames divides by all of them for its
@@ -1684,6 +1800,9 @@ namespace studio {
 
 				const ImVec2 upper(left, top);
 				const ImVec2 lower(left + width, top + rowHeight);
+				if (!intersectsWindowClip(upper, lower)) {
+					return;
+				}
 
 				const ImU32 colour =
 					span.Name == "unaccounted" ? IM_COL32(94, 99, 112, 210) : ColourOf(span.Category);
@@ -1701,14 +1820,17 @@ namespace studio {
 				// Only where the label fits. Text clipped mid-word is noise, and a
 				// flame graph is read as shape first.
 				if (width > labelMinimumWidth) {
-					draw->PushClipRect(upper, lower, true);
+					const ImVec4 labelClip(upper.x, upper.y, lower.x, lower.y);
 					draw->AddText(
+						nullptr,
+						0.0f,
 						ImVec2(left + 3.0f, top + 1.0f),
 						IM_COL32(16, 18, 22, 235),
 						span.Name.data(),
-						span.Name.data() + span.Name.size()
+						span.Name.data() + span.Name.size(),
+						0.0f,
+						&labelClip
 					);
-					draw->PopClipRect();
 				}
 			};
 
@@ -1721,26 +1843,103 @@ namespace studio {
 				return source >= spans.size();
 			};
 			for (size_t index = 0; index < visibleSpans.size(); index++) {
-				if (isAccounting(index)) {
+				if (visibleSpans[index].Category != ProfileCategory::Gpu && isAccounting(index)) {
 					drawSpan(index);
 				}
 			}
 			for (size_t index = 0; index < visibleSpans.size(); index++) {
-				if (!isAccounting(index)) {
+				if (visibleSpans[index].Category != ProfileCategory::Gpu && !isAccounting(index)) {
 					drawSpan(index);
 				}
 			}
 
 			ImGui::Dummy(ImVec2(graphWidth, graphHeight));
-			if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
-				view.FocusRoot != FrameGraph::NO_PARENT) {
+			const bool cpuGraphHovered = ImGui::IsItemHovered();
+			const bool cpuGraphRightClick = cpuGraphHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+			const bool cpuGraphLeftClick = cpuGraphHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+
+			bool gpuGraphRightClick = false;
+			bool gpuGraphLeftClick = false;
+			if (gpuRowCount > 0) {
+				ImGui::Spacing();
+				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
+				const GpuDurationDisplay maximum = DisplayGpuDuration(gpuMaximumMilliseconds);
+				if (view.Mode == DiagnosticAggregation::Average) {
+					ImGui::Text(
+						"GPU duration scale: longest mean %.*f %s from %u timestamp samples; samples may "
+						"arrive late",
+						maximum.Precision,
+						maximum.Value,
+						maximum.Unit,
+						gpuMaximumSamples
+					);
+				} else {
+					ImGui::Text(
+						"GPU duration scale: longest query %.*f %s; samples may arrive several frames late",
+						maximum.Precision,
+						maximum.Value,
+						maximum.Unit
+					);
+				}
+				ImGui::PopStyleColor();
+				const ImVec2 gpuOrigin = ImGui::GetCursorScreenPos();
+				const float gpuHeight = rowHeight * static_cast<float>(gpuRowCount);
+				const ImVec2 gpuLower(gpuOrigin.x + graphWidth, gpuOrigin.y + gpuHeight);
+				const bool mouseInGpuGraph = ImGui::IsMouseHoveringRect(gpuOrigin, gpuLower);
+				for (size_t index = 0; index < visibleSpans.size(); index++) {
+					const DiagnosticSpan &span = visibleSpans[index];
+					if (span.Category != ProfileCategory::Gpu) {
+						continue;
+					}
+					const float duration = std::max(span.Milliseconds, 0.0f);
+					const float width =
+						gpuMaximumMilliseconds > 0.0f
+							? std::clamp(duration / gpuMaximumMilliseconds * graphWidth, 1.0f, graphWidth)
+							: 1.0f;
+					const float top = gpuOrigin.y + static_cast<float>(visibleRows[index]) * rowHeight;
+					const ImVec2 upper(gpuOrigin.x, top);
+					const ImVec2 lower(gpuOrigin.x + width, top + rowHeight);
+					if (!intersectsWindowClip(upper, lower)) {
+						continue;
+					}
+					draw->AddRectFilled(upper, lower, ColourOf(span.Category));
+					if (mouseInGpuGraph && ImGui::IsMouseHoveringRect(upper, lower)) {
+						hovered = &span;
+						hoveredSource =
+							focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
+						if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+							clickedSource = hoveredSource;
+						}
+						draw->AddRect(upper, lower, engine::ui::BrightColour());
+					}
+					if (width > labelMinimumWidth) {
+						const ImVec4 labelClip(upper.x, upper.y, lower.x, lower.y);
+						draw->AddText(
+							nullptr,
+							0.0f,
+							ImVec2(upper.x + 3.0f, top + 1.0f),
+							IM_COL32(16, 18, 22, 235),
+							span.Name.data(),
+							span.Name.data() + span.Name.size(),
+							0.0f,
+							&labelClip
+						);
+					}
+				}
+				ImGui::Dummy(ImVec2(graphWidth, gpuHeight));
+				const bool gpuGraphHovered = ImGui::IsItemHovered();
+				gpuGraphRightClick = gpuGraphHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+				gpuGraphLeftClick = gpuGraphHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+			}
+
+			if ((cpuGraphRightClick || gpuGraphRightClick) && view.FocusRoot != FrameGraph::NO_PARENT) {
 				focus(graphSpans[view.FocusRoot].Parent);
 			} else if (clickedSource != FrameGraph::NO_PARENT) {
 				// Keep the selected frame stable while its subtree is inspected.
 				view.Paused = true;
 				view.PausedByRule = false;
 				focus(clickedSource);
-			} else if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+			} else if (cpuGraphLeftClick || gpuGraphLeftClick) {
 				focus(FrameGraph::NO_PARENT);
 			}
 
@@ -1748,12 +1947,29 @@ namespace studio {
 				ImGui::BeginTooltip();
 				ImGui::TextUnformatted(hovered->Name.c_str());
 				ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-				ImGui::Text(
-					"%.3f ms   self %.3f   idle %.3f",
-					static_cast<double>(hovered->Milliseconds),
-					static_cast<double>(hovered->SelfMilliseconds),
-					static_cast<double>(hovered->IdleMilliseconds)
-				);
+				if (hovered->Category == ProfileCategory::Gpu) {
+					const GpuDurationDisplay duration = DisplayGpuDuration(hovered->Milliseconds);
+					if (view.Mode == DiagnosticAggregation::Average) {
+						ImGui::Text(
+							"%.*f %s mean from %u timestamp samples",
+							duration.Precision,
+							duration.Value,
+							duration.Unit,
+							hovered->Occurrences
+						);
+					} else {
+						ImGui::Text(
+							"%.*f %s device duration", duration.Precision, duration.Value, duration.Unit
+						);
+					}
+				} else {
+					ImGui::Text(
+						"%.3f ms   self %.3f   idle %.3f",
+						static_cast<double>(hovered->Milliseconds),
+						static_cast<double>(hovered->SelfMilliseconds),
+						static_cast<double>(hovered->IdleMilliseconds)
+					);
+				}
 				ImGui::Spacing();
 				const std::string_view description =
 					DescribeDiagnosticSpan(hovered->Name, hovered->Category, hovered->Reported);
@@ -1762,7 +1978,10 @@ namespace studio {
 					"%s owner   %s%s",
 					GetProfileOwnerName(hovered->Owner).data(),
 					GetCategoryName(hovered->Category).data(),
-					hovered->Reported ? "   (reported from another thread)" : ""
+					hovered->Reported
+						? (hovered->Category == ProfileCategory::Gpu ? "   (reported device duration)"
+																	 : "   (reported from another thread)")
+						: ""
 				);
 				ImGui::PopStyleColor();
 				if (hovered->Name == "jobs.join.assigned") {
@@ -1807,11 +2026,20 @@ namespace studio {
 						ImGui::TextUnformatted(span.Name.data(), span.Name.data() + span.Name.size());
 						ImGui::Unindent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
 
-						const float spanBusy = std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
-						const float share = busyMs > 0.0001f ? (spanBusy / busyMs) * 100.0f : 0.0f;
+						const bool deviceDuration = span.Category == ProfileCategory::Gpu;
+						const float spanBusy =
+							deviceDuration ? std::max(span.Milliseconds, 0.0f)
+										   : std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
+						const float share =
+							!deviceDuration && busyMs > 0.0001f ? (spanBusy / busyMs) * 100.0f : 0.0f;
 
 						ImGui::TableSetColumnIndex(1);
-						ImGui::Text(millisecondsFormat, static_cast<double>(spanBusy));
+						if (deviceDuration) {
+							const GpuDurationDisplay duration = DisplayGpuDuration(spanBusy);
+							ImGui::Text("%.*f %s", duration.Precision, duration.Value, duration.Unit);
+						} else {
+							ImGui::Text(millisecondsFormat, static_cast<double>(spanBusy));
+						}
 
 						ImGui::TableSetColumnIndex(2);
 						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
@@ -1825,7 +2053,36 @@ namespace studio {
 						ImGui::TableSetColumnIndex(3);
 						// The expensive rows in the warning colour, so the thing worth
 						// looking at is the thing that catches the eye.
-						if (share >= 25.0f) {
+						if (deviceDuration) {
+							ImGui::TextUnformatted("device");
+							if (ImGui::IsItemHovered()) {
+								const GpuDurationDisplay duration = DisplayGpuDuration(spanBusy);
+								if (view.Mode == DiagnosticAggregation::Average) {
+									ImGui::SetTooltip(
+										"%.*f %s from %u timestamp sample(s); not a CPU busy-time share",
+										duration.Precision,
+										duration.Value,
+										duration.Unit,
+										span.Occurrences
+									);
+								} else {
+									ImGui::SetTooltip(
+										"%.*f %s device duration; not a CPU busy-time share",
+										duration.Precision,
+										duration.Value,
+										duration.Unit
+									);
+								}
+							}
+						} else if (span.Reported) {
+							ImGui::TextUnformatted("-");
+							if (ImGui::IsItemHovered()) {
+								ImGui::SetTooltip(
+									"Producer duration may overlap measured CPU work and other workers; no "
+									"exclusive busy share."
+								);
+							}
+						} else if (share >= 25.0f) {
 							ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
 							ImGui::Text("%.1f%%", static_cast<double>(share));
 							ImGui::PopStyleColor();

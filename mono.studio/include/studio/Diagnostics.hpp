@@ -74,26 +74,27 @@ namespace studio {
 		bool Reported = false;
 		//@}
 
-		// How many frames contributed to this structural occurrence. Repeated
-		// siblings get separate rows, so this is at most the interval's frame
-		// count rather than the number of times a name appeared anywhere.
+		// How many samples contributed to this structural occurrence. Repeated
+		// siblings get separate rows, so this counts only matching samples rather
+		// than every appearance of the name in the tree.
 		uint32_t Occurrences = 0;
 	};
 
 	// Adds one recorded frame to a structural average.
 	//
-	// Spans are matched by parent, name and same-name sibling ordinal. That
-	// preserves separate world and phase trees when the same scheduler names
-	// occur more than once in a frame.
+	// Spans are matched by parent, name, category, producer kind and same-name
+	// sibling ordinal. That keeps CPU spans distinct from same-named device
+	// reports and preserves repeated world and phase trees.
 	void AccumulateDiagnosticSpans(
 		std::span<const engine::core::FrameSpan> frame, std::vector<DiagnosticSpan> &totals
 	);
 
 	// Converts accumulated totals to one average frame.
 	//
-	// Durations divide by all frames so an intermittent span contributes only
-	// when it ran. Starts divide by occurrences because an absent span has no
-	// meaningful start position.
+	// CPU durations divide by all frames so an intermittent span contributes
+	// only when it ran. GPU durations divide by timestamp samples because those
+	// queries arrive asynchronously. Starts divide by occurrences because an
+	// absent span has no meaningful start position.
 	void FinishDiagnosticAverage(std::vector<DiagnosticSpan> &spans, uint32_t frames);
 
 	// Copies one owner view while retaining a valid tree. A matching span whose
@@ -117,15 +118,15 @@ namespace studio {
 		std::vector<uint32_t> &sourceIndices
 	);
 
-	// Fits reported worker work into the measured timeline used for drawing.
+	// Fits reported CPU worker work into the measured timeline used for drawing.
 	//
 	// Reported durations are CPU work totals and may exceed wall time when
 	// workers overlap. Direct reported children are scaled into their measured
 	// parent's largest uncovered interval, then their descendants are fitted
 	// proportionally inside that logical bar. Descendants are finally clipped to
 	// their parent, so a projected subtree cannot overlap the next measured
-	// sibling. Call this on a display copy: the table and tooltip must retain the
-	// producer's actual milliseconds.
+	// sibling. GPU spans remain duration-only for a separate device-time scale.
+	// Call this on a display copy: the table and tooltip retain producer time.
 	void FitReportedDiagnosticTimeline(std::vector<DiagnosticSpan> &spans, float frameMilliseconds);
 
 	// Adds display-only children for time inside a span that none of its direct
@@ -135,13 +136,12 @@ namespace studio {
 	// indices remain valid.
 	void AppendUnaccountedDiagnosticSpans(std::vector<DiagnosticSpan> &spans);
 
-	// Assigns one stable display row to each hierarchy level.
+	// Assigns display rows that preserve parent order and separate overlapping
+	// intervals. GPU rows use their own time lane.
 	//
-	// A valid child is always exactly one row below its parent. Timing overlap
-	// does not create another row: reported worker summaries intentionally share
-	// wall time with the measured wait that contains them, and pixel-sized bars
-	// may overlap after scaling. Turning either into a lane makes every deeper
-	// span jump vertically when the frame timing changes.
+	// Parent rows stay above children. Overlapping intervals move to a sibling
+	// row without changing their measured positions or durations, so an average
+	// can show overlap without claiming the work ran in parallel.
 	//
 	// @return How many rows the graph needs.
 	uint32_t LayoutDiagnosticRows(std::span<const DiagnosticSpan> spans, std::vector<uint32_t> &rows);
