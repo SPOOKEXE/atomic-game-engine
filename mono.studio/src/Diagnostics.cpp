@@ -13,6 +13,7 @@
 // menu, and they read exactly the same `core::FrameGraph` the client's overlay
 // does - the data is shared even though the drawing is not.
 
+#include "FrameGraphFlame.hpp"
 #include "FrameGraphSnapshot.hpp"
 #include "ProfilerFlame.hpp"
 
@@ -775,81 +776,6 @@ namespace studio {
 			"latest sample", "5 s", "30 s", "1 min", "5 min"
 		};
 
-		// A colour per category, so a flame graph is readable as shape rather
-		// than as a list of names.
-		//
-		// **Derived from the palette's accent rather than fixed**, because the
-		// editor has seven themes and a bar chart in another theme's colours
-		// reads as a foreign window. The hues are spread around the accent so
-		// that the categories stay distinguishable in all of them.
-		unsigned int ColourOf(ProfileCategory category) {
-			const ImVec4 accent = ImGui::ColorConvertU32ToFloat4(engine::ui::AccentColour());
-
-			float hue = 0.0f;
-			float saturation = 0.0f;
-			float value = 0.0f;
-			ImGui::ColorConvertRGBtoHSV(accent.x, accent.y, accent.z, hue, saturation, value);
-
-			// Idle is the one that must not compete: a vsynced frame is mostly
-			// idle, and a bright bar across the whole graph is the thing a
-			// reader's eye lands on first for no reason at all.
-			if (category == ProfileCategory::Idle) {
-				return IM_COL32(70, 74, 86, 190);
-			}
-
-			// One turn per category, in enum order, spread around the circle so
-			// that neighbours in the list are not neighbours in hue.
-			//
-			// **Positional, and sized from the enum rather than from a literal
-			// count.** This was indexed with a hand-written `< 6`, so a
-			// seventh category did not overflow - it silently took engine's
-			// hue and drew two subsystems in one colour, which is the one
-			// failure a colour key cannot survive. The array is now short by
-			// construction if a category is added without a turn, and the
-			// assert below says so at build time.
-			constexpr float TURN[] = {
-				0.00f, // engine
-				0.52f, // render
-
-				// The widest gap the wheel had left, and it needs to be: this
-				// is the device and `render` above it is the CPU recording for
-				// it, so the one comparison a reader makes on this panel is
-				// between those two bars. Neighbouring hues would make that
-				// comparison the hardest one instead of the easiest.
-				0.22f, // GPU
-
-				0.14f, // ECS
-				0.86f, // physics
-				0.72f, // simulation
-				0.30f, // script
-				0.42f, // network
-				0.62f, // assets
-				0.00f, // idle - returned above, and here so the array lines up
-			};
-			static_assert(
-				std::size(TURN) == static_cast<size_t>(ProfileCategory::Count),
-				"A ProfileCategory was added without a hue turn in TURN."
-			);
-
-			const auto index = static_cast<size_t>(category);
-			hue += TURN[index < std::size(TURN) ? index : 0];
-			hue -= static_cast<float>(static_cast<int>(hue));
-
-			float red = 0.0f;
-			float green = 0.0f;
-			float blue = 0.0f;
-			ImGui::ColorConvertHSVtoRGB(
-				hue, std::max(saturation, 0.45f), std::max(value, 0.70f), red, green, blue
-			);
-
-			return IM_COL32(
-				static_cast<int>(red * 255.0f),
-				static_cast<int>(green * 255.0f),
-				static_cast<int>(blue * 255.0f),
-				235
-			);
-		}
-
 		// One row of a label and a value, which is most of the statistics panel.
 		void Row(const char *label, const char *format, ...) {
 			ImGui::TableNextRow();
@@ -1322,6 +1248,9 @@ namespace studio {
 			FitReportedDiagnosticTimeline(graphSpans, frameMs);
 			AppendUnaccountedDiagnosticSpans(graphSpans);
 			view.DisplayRows = LayoutDiagnosticRows(graphSpans, view.Rows);
+			frame_graph_detail::BuildFlameCache(
+				graphSpans, view.Rows, {}, selected.size(), view.DisplayRows, view.Flame
+			);
 			view.FocusRoot = FrameGraph::NO_PARENT;
 			view.FocusedSpans.clear();
 			view.FocusedRows.clear();
@@ -1768,31 +1697,26 @@ namespace studio {
 				}
 				FocusDiagnosticSpans(graphSpans, root, view.FocusedSpans, view.FocusedSourceIndices);
 				view.FocusedDisplayRows = LayoutDiagnosticRows(view.FocusedSpans, view.FocusedRows);
+				frame_graph_detail::BuildFlameCache(
+					view.FocusedSpans,
+					view.FocusedRows,
+					view.FocusedSourceIndices,
+					spans.size(),
+					view.FocusedDisplayRows,
+					view.FocusedFlame
+				);
 			};
 			const bool focused = view.FocusRoot != FrameGraph::NO_PARENT;
 			const std::vector<DiagnosticSpan> &visibleSpans = focused ? view.FocusedSpans : graphSpans;
 			const std::vector<uint32_t> &visibleRows = focused ? view.FocusedRows : view.Rows;
 			const float rowHeight =
 				std::max(std::floor(engine::ui::Scaled(engine::ui::Size::Row) * 0.72f), 1.0f);
-			uint32_t cpuRowCount = 0;
-			uint32_t gpuRowCount = 0;
-			float gpuMaximumMilliseconds = 0.0f;
-			uint32_t gpuMaximumSamples = 0;
-			bool hasAverageOverlap = false;
-			for (size_t index = 0; index < visibleSpans.size(); index++) {
-				const DiagnosticSpan &span = visibleSpans[index];
-				if (span.Category == ProfileCategory::Gpu) {
-					gpuRowCount = std::max(gpuRowCount, visibleRows[index] + 1);
-					if (span.Milliseconds > gpuMaximumMilliseconds) {
-						gpuMaximumMilliseconds = span.Milliseconds;
-						gpuMaximumSamples = span.Occurrences;
-					}
-					continue;
-				}
-				cpuRowCount = std::max(cpuRowCount, visibleRows[index] + 1);
-				hasAverageOverlap |=
-					view.Mode == DiagnosticAggregation::Average && visibleRows[index] > span.Depth;
-			}
+			auto &flame = focused ? view.FocusedFlame : view.Flame;
+			const uint32_t cpuRowCount = flame.CpuRows;
+			const uint32_t gpuRowCount = flame.GpuRows;
+			const float gpuMaximumMilliseconds = flame.GpuMaximumMilliseconds;
+			const uint32_t gpuMaximumSamples = flame.GpuMaximumSamples;
+			const bool hasAverageOverlap = view.Mode == DiagnosticAggregation::Average && flame.HasOverlap;
 			if (hasAverageOverlap) {
 				ImGui::TextDisabled("overlap in a structural mean does not prove parallel CPU work");
 			}
@@ -1815,11 +1739,13 @@ namespace studio {
 			uint32_t hoveredSource = FrameGraph::NO_PARENT;
 			uint32_t clickedSource = FrameGraph::NO_PARENT;
 
+			const auto &palette = frame_graph_detail::FlameCategoryPalette(engine::ui::AccentColour());
+			const auto colourOf = [&palette](ProfileCategory category) {
+				const auto index = static_cast<size_t>(category);
+				return palette[index < palette.size() ? index : 0];
+			};
 			const auto drawSpan = [&](size_t index) {
 				const DiagnosticSpan &span = visibleSpans[index];
-				if (span.Category == ProfileCategory::Gpu) {
-					return;
-				}
 				// **Clamped to the graph, whatever the arithmetic above produced.**
 				// An averaged span can still exceed the averaged frame - a span that
 				// ran in only some of the frames divides by all of them for its
@@ -1840,7 +1766,7 @@ namespace studio {
 				}
 
 				const ImU32 colour =
-					span.Name == "unaccounted" ? IM_COL32(94, 99, 112, 210) : ColourOf(span.Category);
+					span.Name == "unaccounted" ? IM_COL32(94, 99, 112, 210) : colourOf(span.Category);
 				draw->AddRectFilled(upper, lower, colour);
 
 				if (mouseInGraph && ImGui::IsMouseHoveringRect(upper, lower)) {
@@ -1872,20 +1798,11 @@ namespace studio {
 			// Accounting is the background of the timeline. Reported worker work is
 			// deliberately fitted into the measured wall-time gap that waited for it,
 			// so drawing synthetic gaps last would cover the useful worker bars.
-			const auto isAccounting = [&](size_t index) {
-				const uint32_t source =
-					focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
-				return source >= spans.size();
-			};
-			for (size_t index = 0; index < visibleSpans.size(); index++) {
-				if (visibleSpans[index].Category != ProfileCategory::Gpu && isAccounting(index)) {
+			for (const size_t kind : {frame_graph_detail::ACCOUNTING_PASS, frame_graph_detail::CPU_PASS}) {
+				auto &pass = flame.Passes[kind];
+				frame_graph_detail::PrepareFlameRows(pass, origin.y, rowHeight, clipMinimum.y, clipMaximum.y);
+				for (const uint32_t index : pass.Visible)
 					drawSpan(index);
-				}
-			}
-			for (size_t index = 0; index < visibleSpans.size(); index++) {
-				if (visibleSpans[index].Category != ProfileCategory::Gpu && !isAccounting(index)) {
-					drawSpan(index);
-				}
 			}
 
 			ImGui::Dummy(ImVec2(graphWidth, graphHeight));
@@ -1921,11 +1838,12 @@ namespace studio {
 				const float gpuHeight = rowHeight * static_cast<float>(gpuRowCount);
 				const ImVec2 gpuLower(gpuOrigin.x + graphWidth, gpuOrigin.y + gpuHeight);
 				const bool mouseInGpuGraph = ImGui::IsMouseHoveringRect(gpuOrigin, gpuLower);
-				for (size_t index = 0; index < visibleSpans.size(); index++) {
+				auto &gpuPass = flame.Passes[frame_graph_detail::GPU_PASS];
+				frame_graph_detail::PrepareFlameRows(
+					gpuPass, gpuOrigin.y, rowHeight, clipMinimum.y, clipMaximum.y
+				);
+				for (const uint32_t index : gpuPass.Visible) {
 					const DiagnosticSpan &span = visibleSpans[index];
-					if (span.Category != ProfileCategory::Gpu) {
-						continue;
-					}
 					const float duration = std::max(span.Milliseconds, 0.0f);
 					const float width =
 						gpuMaximumMilliseconds > 0.0f
@@ -1937,7 +1855,7 @@ namespace studio {
 					if (!intersectsWindowClip(upper, lower)) {
 						continue;
 					}
-					draw->AddRectFilled(upper, lower, ColourOf(span.Category));
+					draw->AddRectFilled(upper, lower, colourOf(span.Category));
 					if (mouseInGpuGraph && ImGui::IsMouseHoveringRect(upper, lower)) {
 						hovered = &span;
 						hoveredSource =

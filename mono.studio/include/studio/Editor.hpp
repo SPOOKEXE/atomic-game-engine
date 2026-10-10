@@ -6555,6 +6555,32 @@ namespace studio {
 			std::vector<uint32_t> FocusedSourceIndices;
 			uint32_t FocusRoot = engine::core::FrameGraph::NO_PARENT;
 			uint32_t FocusedDisplayRows = 0;
+			// Flat row buckets and retained clipped indices for one flame paint pass.
+			struct FlamePass {
+				//@{
+				std::vector<uint32_t> RowOffsets;
+				std::vector<uint32_t> WriteOffsets;
+				std::vector<uint32_t> Indices;
+				std::vector<uint32_t> OriginalIndices;
+				std::vector<uint32_t> Visible;
+				uint32_t FirstRow = 0;
+				uint32_t EndRow = 0;
+				bool Prepared = false;
+				//@}
+			};
+			// Snapshot metadata is rebuilt with layout, rather than rescanned during paint.
+			struct FlameCache {
+				//@{
+				std::array<FlamePass, 3> Passes;
+				uint32_t CpuRows = 0;
+				uint32_t GpuRows = 0;
+				float GpuMaximumMilliseconds = 0;
+				uint32_t GpuMaximumSamples = 0;
+				bool HasOverlap = false;
+				//@}
+			};
+			FlameCache Flame;
+			FlameCache FocusedFlame;
 			bool DisplayDirty = true;
 			engine::core::ProfileOwner OwnerFilter = engine::core::ProfileOwner::All;
 			std::array<float, static_cast<size_t>(engine::core::ProfileOwner::Count)> OwnerMilliseconds{};
