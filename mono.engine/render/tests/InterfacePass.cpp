@@ -15,6 +15,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <utility>
 
 TEST_SUITE_ID("engine.render.interfacepass")
 TEST_DEPENDS("engine.render.fixtures")
@@ -25,8 +26,13 @@ namespace {
 
 	// Record the actual interface backend into an owned attachment. Only the
 	// center pixel is downloaded; padded pitch still exercises SDL transfer layout.
-	std::array<float, 4>
-	InterfacePixel(Renderer &renderer, InterfacePass &interface, SDL_GPUTextureFormat format, bool spatial) {
+	std::array<float, 4> InterfacePixel(
+		Renderer &renderer,
+		InterfacePass &interface,
+		SDL_GPUTextureFormat format,
+		bool spatial,
+		size_t expectedBatches = 1
+	) {
 		constexpr uint32_t EXTENT = 8, PITCH_BYTES = 256;
 		auto *device = static_cast<SDL_GPUDevice *>(renderer.Backend().Device);
 		const auto releaseTexture = [device](SDL_GPUTexture *texture) {
@@ -98,7 +104,7 @@ namespace {
 			);
 		} else {
 			interface.Record(command.get(), pass);
-			CHECK(interface.LastBatchCount() == 1);
+			CHECK(interface.LastBatchCount() == expectedBatches);
 		}
 		SDL_EndGPURenderPass(pass);
 		auto *copy = SDL_BeginGPUCopyPass(command.get());
@@ -211,6 +217,69 @@ TEST_CASE(
 	CHECK(std::abs(sampled[1] - (spatial ? .05126946f : 64.0f / 255)) < (spatial ? .0001f : .5f / 255));
 	CHECK(sampled[2] == 0);
 	CHECK(std::abs(sampled[3] - 1) < .001f);
+}
+
+TEST_CASE(
+	"retained collector ranges keep paint order and resolve live images", "[render][gpu][interfacepass][.]"
+) {
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	const core::Name imageName("interface.live-range"), owner("interface.live-range-owner");
+	for (const auto &[name, colour] : std::array{
+			 std::pair{core::Name("interface.live-blue"), std::array<uint8_t, 4>{0, 0, 255, 255}},
+			 std::pair{core::Name("interface.live-green"), std::array<uint8_t, 4>{0, 255, 0, 255}},
+		 }) {
+		assets::TextureData image;
+		image.Width = image.Height = 1;
+		image.Format = assets::TextureFormat::RGBA8;
+		for (uint8_t channel : colour)
+			image.Pixels.push_back(std::byte{channel});
+		REQUIRE(fixture.Render.AddTexture(name, image, owner));
+	}
+
+	core::Name currentImage("interface.live-blue");
+	InterfacePass interface;
+	REQUIRE(interface.Initialise(fixture.Render.Backend().Device, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM));
+	interface.SetImageSource([&](const core::Name &) {
+		InterfaceImage resolved;
+		resolved.Texture = fixture.Render.TextureHandle(currentImage, owner);
+		resolved.Width = resolved.Height = 1;
+		resolved.SampledSRGB = true;
+		return resolved;
+	});
+	ecs::Store world("interface.live-range-fixture");
+	const ecs::Entity cachedCollector(1), directCollector(2);
+	gui::DrawCommand cached;
+	cached.Kind = gui::DrawKind::Rectangle;
+	cached.Collector = cachedCollector;
+	cached.Bounds = cached.Clip = {{0, 0}, {8, 8}};
+	cached.Tint = {1, 0, 0};
+	gui::DrawCommand direct;
+	direct.Kind = gui::DrawKind::Image;
+	direct.Collector = directCollector;
+	direct.Bounds = direct.Clip = {{0, 0}, {8, 8}};
+	direct.Image = imageName;
+	gui::DrawList list;
+	list.Commands = {cached, direct};
+	list.CollectorRanges = {
+		{.Collector = cachedCollector, .First = 0, .Count = 1},
+		{.Collector = directCollector, .First = 1, .Count = 1},
+	};
+
+	interface.Submit(list, {8, 8}, {8, 8}, world, 1, true, {});
+	const auto blue =
+		InterfacePixel(fixture.Render, interface, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, false, 2);
+	CHECK(blue[0] == 0);
+	CHECK(blue[1] == 0);
+	CHECK(blue[2] == 1);
+
+	currentImage = core::Name("interface.live-green");
+	interface.Submit(list, {8, 8}, {8, 8}, world, 1, true, {});
+	const auto green =
+		InterfacePixel(fixture.Render, interface, SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, false, 2);
+	CHECK(green[0] == 0);
+	CHECK(green[1] == 1);
+	CHECK(green[2] == 0);
 }
 
 TEST_CASE("canvas group target bounds are clipped before device sizing", "[render][interfacepass]") {

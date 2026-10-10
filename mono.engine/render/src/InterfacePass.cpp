@@ -1658,18 +1658,18 @@ namespace engine::render {
 		}
 		const uint32_t width = static_cast<uint32_t>(std::max(TargetPixels.X, Canvas.X));
 		const uint32_t height = static_cast<uint32_t>(std::max(TargetPixels.Y, Canvas.Y));
-		const std::vector<InterfaceTargetComposite> composites = Targets.Composite(Pending, 0, width, height);
+		// PrepareRetainedTargets appends direct keys while traversing these same
+		// paint-ordered, nonempty screen ranges, so one cursor replaces per-range scans.
+		size_t directRange = 0;
 		for (const gui::CollectorRange &range : Pending.CollectorRanges) {
 			if (range.Spatial || range.Count == 0) continue;
 			const InterfaceTargetKey key{range.Collector, 0, width, height, range.First, range.Count, false};
-			const bool forceDirect = std::find(DirectTargetRanges.begin(), DirectTargetRanges.end(), key) !=
-									 DirectTargetRanges.end();
-			const auto found = std::find_if(composites.begin(), composites.end(), [&](const auto &entry) {
-				return entry.Range.Collector == range.Collector && entry.Range.First == range.First &&
-					   entry.Range.Count == range.Count && entry.Range.Spatial == range.Spatial;
-			});
-			if (!forceDirect && found != composites.end()) {
-				RecordComposite(commandBuffer, renderPass, found->Target, {{0.0f, 0.0f}, Canvas});
+			const bool forceDirect =
+				directRange < DirectTargetRanges.size() && DirectTargetRanges[directRange] == key;
+			if (forceDirect) directRange++;
+			void *target = forceDirect ? nullptr : Targets.ReadyTarget(key);
+			if (target != nullptr) {
+				RecordComposite(commandBuffer, renderPass, target, {{0.0f, 0.0f}, Canvas});
 			} else {
 				RecordScreenRange(commandBuffer, renderPass, range.First, range.Count, nullptr);
 			}

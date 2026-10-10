@@ -68,14 +68,18 @@ TEST_CASE(
 	int target = 0;
 	const auto key = Key(7);
 	REQUIRE(cache.Attach(key, &target, 128, {}));
+	CHECK(cache.Target(key) == &target);
+	CHECK(cache.ReadyTarget(key) == nullptr);
 	cache.Begin(key, 1, true, {});
 	cache.Complete(key, true);
 	REQUIRE(cache.Target(key) == &target);
+	CHECK(cache.ReadyTarget(key) == &target);
 
 	const auto damage = Damage(7, 1, 2, 8, 9);
 	REQUIRE(cache.Begin(key, 2, true, {&damage, 1}).Work == InterfaceTargetWork::Partial);
 	cache.Complete(key, false);
 	CHECK(cache.Target(key) == &target);
+	CHECK(cache.ReadyTarget(key) == &target);
 	CHECK(cache.Begin(key, 2, true, {}).Work == InterfaceTargetWork::Partial);
 	cache.Complete(key, true);
 	CHECK(cache.Begin(key, 2, true, {}).Work == InterfaceTargetWork::Skip);
@@ -101,7 +105,7 @@ TEST_CASE("unchanged collector adopts a newer shared compile signature", "[rende
 }
 
 TEST_CASE(
-	"interface targets are bounded and composite collector ranges in paint order",
+	"interface targets are bounded and ready lookups preserve collector paint order",
 	"[render][interface-target-cache]"
 ) {
 	InterfaceTargetCache cache({.Count = 3, .Bytes = 384});
@@ -126,11 +130,14 @@ TEST_CASE(
 	};
 	cache.Begin(Key(2, 1, 100, 50, 3, 1), 1, true, {});
 	cache.Complete(Key(2, 1, 100, 50, 3, 1), true);
-	const auto composition = cache.Composite(list, 1, 100, 50);
-	REQUIRE(composition.size() == 3);
-	CHECK(composition[0].Target == &first);
-	CHECK(composition[1].Target == &second);
-	CHECK(composition[2].Target == &third);
+	std::vector<void *> selected;
+	for (const auto &range : list.CollectorRanges) {
+		selected.push_back(cache.ReadyTarget(Key(range.Collector.Id, 1, 100, 50, range.First, range.Count)));
+	}
+	REQUIRE(selected.size() == 3);
+	CHECK(selected[0] == &first);
+	CHECK(selected[1] == &second);
+	CHECK(selected[2] == &third);
 }
 
 TEST_CASE("planned target records stay within the target count bound", "[render][interface-target-cache]") {
