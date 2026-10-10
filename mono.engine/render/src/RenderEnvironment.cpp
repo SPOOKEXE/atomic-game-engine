@@ -100,7 +100,7 @@ namespace engine::render {
 		uint64_t signature = scene::MixSignature(1, ActiveContentOwner.Id());
 		signature = scene::MixSignature(signature, modes.Skybox);
 		signature = scene::MixSignature(signature, modes.Atmosphere);
-		if (modes.Skybox != 0 || modes.Atmosphere != 0) {
+		if (modes.Skybox == 1) {
 			for (size_t index = 0; index < faces.size(); index++) {
 				signature = scene::MixSignature(signature, names[index].Id());
 				signature =
@@ -109,9 +109,19 @@ namespace engine::render {
 					signature, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(faces[index]))
 				);
 			}
+		}
+		// Texture skies use the procedural colours for missing faces. Disabled
+		// providers do not consume their authored values in environment.comp.
+		if (modes.Skybox != 0) {
 			signature = Fold(signature, environment.SkyCompute);
+		}
+		if (modes.Atmosphere != 0) {
 			signature = Fold(signature, environment.Air);
+		}
+		if (modes.Atmosphere == 2) {
 			signature = Fold(signature, EnvironmentAtmosphereComputeOf(environment));
+		}
+		if (modes.Skybox != 0 || modes.Atmosphere != 0) {
 			signature = Fold(signature, Sun);
 		}
 		if (cache->Sky.Matches(signature, command)) return true;

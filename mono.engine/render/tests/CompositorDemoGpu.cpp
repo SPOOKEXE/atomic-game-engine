@@ -749,6 +749,10 @@ TEST_CASE(
 	// An atmosphere remains a live provider even without a selected skybox.
 	environment.HasAtmosphere = true;
 	CHECK(render().ComputeDispatches == 1);
+	const auto atmosphereOnly = skyImage();
+	environment.SkyCompute.Seed += 1;
+	CHECK(render().ComputeDispatches == 0);
+	CHECK(Diff16(atmosphereOnly, skyImage(), 32, 16) == 0);
 	environment.HasAtmosphere = false;
 	CHECK(render().ComputeDispatches == 0);
 	CHECK(Constant16(skyImage(), 32, 16, {0.f, 0.f, 0.f, 1.f}));
@@ -758,6 +762,24 @@ TEST_CASE(
 	const auto activeSky = skyImage();
 	CHECK(Diff16(activeSky, dark, 32, 16) > 1);
 	CHECK(Diff16(activeSky, cloudImage(), 32, 16) == 0);
+	// The procedural sky does not consume a disabled atmosphere's values.
+	environment.Air.Colour = {0.9f, 0.1f, 0.3f};
+	environment.Air.Glare = 4;
+	CHECK(render().ComputeDispatches == 0);
+	CHECK(Diff16(activeSky, skyImage(), 32, 16) == 0);
+	CHECK(Diff16(activeSky, cloudImage(), 32, 16) == 0);
+	// Enabling the edited provider must regenerate both outputs immediately.
+	environment.HasAtmosphere = true;
+	CHECK(render().ComputeDispatches == 1);
+	const auto atmosphereSky = skyImage();
+	CHECK(Diff16(activeSky, atmosphereSky, 32, 16) > 1);
+	CHECK(Diff16(atmosphereSky, cloudImage(), 32, 16) == 0);
+	environment.AirCompute.Rayleigh = 3;
+	CHECK(render().ComputeDispatches == 0);
+	CHECK(Diff16(atmosphereSky, skyImage(), 32, 16) == 0);
+	environment.HasAtmosphere = false;
+	CHECK(render().ComputeDispatches == 1);
+	CHECK(Diff16(activeSky, skyImage(), 32, 16) == 0);
 	environment.HasClouds = true;
 	environment.CloudLayer.WindSpeed = 0;
 	environment.CloudLayer.Cover = 1;
