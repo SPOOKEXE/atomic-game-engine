@@ -336,8 +336,18 @@ TEST_CASE("dedicated tessellation expands and draws a GPU mesh", "[render][gpu][
 	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 	REQUIRE(frame.Ran(core::Name("hard-adaptive-tessellation")));
 	REQUIRE(frame.Ran(core::Name("hard-tessellated-draw")));
-	CHECK(frame.ComputeDispatches > 0);
-	CHECK(frame.ComputeDispatches == 3);
+	// Tessellation is the only compute work; the disabled environment clears
+	// and copies its outputs without dispatching sky or cloud shaders.
+	CHECK(frame.ComputeDispatches == 1);
+	CHECK(
+		PositiveRadiance(
+			CaptureRgba16(
+				fixture.Render, core::Name("hard-tessellated-colour"), view.Slot, target.Width, target.Height
+			),
+			target.Width,
+			target.Height
+		) > 0
+	);
 }
 
 TEST_CASE("bounded GI and raytrace write retained GPU images", "[render][gpu][hard-render][.]") {

@@ -1237,6 +1237,11 @@ namespace engine::render {
 			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			colourTarget.store_op = SDL_GPU_STOREOP_STORE;
 			colourTarget.cycle = false;
+			// Empty mirror and portal overlays may skip their passes entirely.
+			// Load opaque depth here instead of inheriting their attachment state.
+			depthTarget.load_op = SDL_GPU_LOADOP_LOAD;
+			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
+			depthTarget.cycle = false;
 
 			recording.InvalidateBackgroundTexture(depthTarget.texture);
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);

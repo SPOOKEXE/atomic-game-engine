@@ -85,7 +85,14 @@ namespace {
 		const auto token = renderer.QueueResourceImage(view.Pipeline, Name(node));
 		REQUIRE(token != 0);
 		render::OverlayImage overlay;
-		REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(Name(node)));
+		// No surface host can keep opaque depth alive as a side effect of an
+		// overlay pass. Transparent drawing must preserve that depth itself.
+		REQUIRE(view.Surfaces.empty());
+		REQUIRE(view.Portals.empty());
+		const auto frame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(frame.Ran(Name(node)));
+		CHECK(frame.SurfacePasses == 0);
+		CHECK(frame.PortalPasses == 0);
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
 		while (std::chrono::steady_clock::now() < deadline) {
 			if (auto image = renderer.TakeResourceImage(token)) {
