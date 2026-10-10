@@ -204,9 +204,7 @@ namespace engine::render {
 			stretch(instance.HalfExtent.Z, mesh.Extent.Z),
 		};
 
-		GpuInstance gpu;
-		gpu.Rotation = PackRotation(instance.Frame.Rotation());
-		gpu.Scale = scale;
+		const PackedRotation rotation = PackRotation(instance.Frame.Rotation());
 
 		// **Centred after scaling, in the part's own space.** A model
 		// authored off its origin would otherwise hang away from the part by
@@ -219,24 +217,34 @@ namespace engine::render {
 		// the offset that cancels the mesh's own centre has to be taken through
 		// the same rotation or the correction misses by the rounding error.
 		const glm::vec3 centre{mesh.Centre.X, mesh.Centre.Y, mesh.Centre.Z};
-		gpu.Position =
-			glm::vec3{instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z} -
-			UnpackRotation(gpu.Rotation) * (scale * centre);
+		glm::vec3 position{instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z};
+		// Zero translation components retain the correction's signed-zero behaviour.
+		const bool centred = centre.x == 0.0f && centre.y == 0.0f && centre.z == 0.0f &&
+							 std::isfinite(scale.x) && std::isfinite(scale.y) && std::isfinite(scale.z) &&
+							 position.x != 0.0f && position.y != 0.0f && position.z != 0.0f &&
+							 std::isfinite(position.x) && std::isfinite(position.y) &&
+							 std::isfinite(position.z);
+		if (!centred) position -= UnpackRotation(rotation) * (scale * centre);
 
 		// Convert author-facing transparency to shader alpha.
-		gpu.Colour = PackColour(
-			glm::vec4{instance.Tint.R, instance.Tint.G, instance.Tint.B, 1.0f - instance.Transparency}
-		);
-		gpu.Appearance = PackAppearance(instance.Alpha, instance.AlphaCutoff, instance.Resample);
-		gpu.SurfaceColour = PackColour(
-			glm::vec4{instance.SurfaceColour.R, instance.SurfaceColour.G, instance.SurfaceColour.B, 1.0f}
-		);
-		gpu.Emission = PackEmission(instance.EmissiveTint, instance.EmissiveStrength);
-		gpu.FeatureEnable = instance.RenderFeatures.Enable & scene::ALL_RENDER_FEATURES;
-		gpu.FeatureDisable = instance.RenderFeatures.Disable & scene::ALL_RENDER_FEATURES;
-		gpu.ObjectLabel = instance.ObjectLabel;
-		gpu.SemanticLabel = instance.SemanticLabel;
-		gpu.PartLabel = instance.PartLabel;
-		return gpu;
+		return GpuInstance{
+			.Position = position,
+			.Colour = PackColour(
+				glm::vec4{instance.Tint.R, instance.Tint.G, instance.Tint.B, 1.0f - instance.Transparency}
+			),
+			.Rotation = rotation,
+			.Scale = scale,
+			.Appearance = PackAppearance(instance.Alpha, instance.AlphaCutoff, instance.Resample),
+			.SurfaceColour = PackColour(
+				glm::vec4{instance.SurfaceColour.R, instance.SurfaceColour.G, instance.SurfaceColour.B, 1.0f}
+			),
+			.Emission = PackEmission(instance.EmissiveTint, instance.EmissiveStrength),
+			.FeatureEnable = instance.RenderFeatures.Enable & scene::ALL_RENDER_FEATURES,
+			.FeatureDisable = instance.RenderFeatures.Disable & scene::ALL_RENDER_FEATURES,
+			.ObjectLabel = instance.ObjectLabel,
+			.SemanticLabel = instance.SemanticLabel,
+			.PartLabel = instance.PartLabel,
+			.LabelReserved = 0,
+		};
 	}
 }

@@ -36,6 +36,40 @@ using engine::scene::DrawInstance;
 using engine::testing::Consume;
 
 namespace instance_bench {
+	// Frozen packing oracle makes the candidate and its baseline share fixtures.
+	GpuInstance LegacyToGpu(const DrawInstance &instance, const MeshEntry &mesh) {
+		const auto stretch = [](float half, float extent) {
+			return extent > 1e-6f ? half / extent : half * 2.0f;
+		};
+		const glm::vec3 scale{
+			stretch(instance.HalfExtent.X, mesh.Extent.X),
+			stretch(instance.HalfExtent.Y, mesh.Extent.Y),
+			stretch(instance.HalfExtent.Z, mesh.Extent.Z),
+		};
+		GpuInstance gpu;
+		gpu.Rotation = engine::render::PackRotation(instance.Frame.Rotation());
+		gpu.Scale = scale;
+		gpu.Position =
+			glm::vec3{instance.Frame.Position.X, instance.Frame.Position.Y, instance.Frame.Position.Z} -
+			engine::render::UnpackRotation(gpu.Rotation) *
+				(scale * glm::vec3{mesh.Centre.X, mesh.Centre.Y, mesh.Centre.Z});
+		gpu.Colour = engine::render::PackColour(
+			glm::vec4{instance.Tint.R, instance.Tint.G, instance.Tint.B, 1.0f - instance.Transparency}
+		);
+		gpu.Appearance =
+			engine::render::PackAppearance(instance.Alpha, instance.AlphaCutoff, instance.Resample);
+		gpu.SurfaceColour = engine::render::PackColour(
+			glm::vec4{instance.SurfaceColour.R, instance.SurfaceColour.G, instance.SurfaceColour.B, 1.0f}
+		);
+		gpu.Emission = engine::render::PackEmission(instance.EmissiveTint, instance.EmissiveStrength);
+		gpu.FeatureEnable = instance.RenderFeatures.Enable & engine::scene::ALL_RENDER_FEATURES;
+		gpu.FeatureDisable = instance.RenderFeatures.Disable & engine::scene::ALL_RENDER_FEATURES;
+		gpu.ObjectLabel = instance.ObjectLabel;
+		gpu.SemanticLabel = instance.SemanticLabel;
+		gpu.PartLabel = instance.PartLabel;
+		return gpu;
+	}
+
 	struct Rows {
 		std::vector<DrawInstance> Source;
 		std::vector<DrawInstance> Previous;
@@ -80,6 +114,30 @@ namespace instance_bench {
 		static Rows thousand(1'000);
 		static Rows tenThousand(10'000);
 		return count == 1'000 ? thousand : tenThousand;
+	}
+
+	Rows &RotatedRows(bool centred) {
+		static Rows centredRows(10'000);
+		static Rows offsetRows(10'000);
+		static const bool prepared = [] {
+			offsetRows.Mesh.Centre = {6.0f, -2.0f, 3.0f};
+			for (Rows *rows : {&centredRows, &offsetRows}) {
+				for (size_t index = 0; index < rows->Source.size(); ++index) {
+					rows->Source[index].Frame = engine::core::CFrame(
+						engine::core::Vector3{
+							1.0f + static_cast<float>(index % 100),
+							-1.0f - static_cast<float>((index / 100) % 100),
+							3.0f,
+						},
+						glm::quat{0.5f, 0.5f, -0.5f, 0.5f}
+					);
+					rows->Source[index].HalfExtent = {1.0f, 2.0f, 3.0f};
+				}
+			}
+			return true;
+		}();
+		(void)prepared;
+		return centred ? centredRows : offsetRows;
 	}
 }
 
@@ -130,6 +188,30 @@ BENCH("ToGpu · 10,000 unchanged instance rows", 10'000) {
 	for (size_t index = 0; index < rows.Source.size(); index++) {
 		Consume(ToGpu(rows.Source[index], rows.Mesh));
 	}
+}
+
+BENCH("ToGpu · 10,000 rotated centred instance rows", 10'000) {
+	Rows &rows = RotatedRows(true);
+	for (const DrawInstance &instance : rows.Source)
+		Consume(ToGpu(instance, rows.Mesh));
+}
+
+BENCH("ToGpu · 10,000 rotated off-centre instance rows", 10'000) {
+	Rows &rows = RotatedRows(false);
+	for (const DrawInstance &instance : rows.Source)
+		Consume(ToGpu(instance, rows.Mesh));
+}
+
+BENCH("Legacy ToGpu · 10,000 rotated centred instance rows", 10'000) {
+	Rows &rows = RotatedRows(true);
+	for (const DrawInstance &instance : rows.Source)
+		Consume(LegacyToGpu(instance, rows.Mesh));
+}
+
+BENCH("Legacy ToGpu · 10,000 rotated off-centre instance rows", 10'000) {
+	Rows &rows = RotatedRows(false);
+	for (const DrawInstance &instance : rows.Source)
+		Consume(LegacyToGpu(instance, rows.Mesh));
 }
 
 BENCH("Signature · 10,000 unchanged instance rows", 10'000) {
