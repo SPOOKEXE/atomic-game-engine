@@ -41,6 +41,11 @@ namespace engine::parallel {
 			bool TookTask = false;
 		};
 
+		struct WorkerWake {
+			std::condition_variable Available;
+			uint64_t Generation = 0;
+		};
+
 		// One batch may use the pool; competing dispatches run inline.
 		struct Batch {
 			Pool *Owner = nullptr;
@@ -82,8 +87,9 @@ namespace engine::parallel {
 			std::vector<platform::Processor> WorkerProcessors;
 			std::vector<uint8_t> WorkerPinned;
 			std::vector<AssignedReading> AssignedReadings;
+			std::vector<std::unique_ptr<WorkerWake>> WorkerWakes;
+			std::vector<unsigned> SignaledWorkers;
 			std::mutex Guard;
-			std::condition_variable Available;
 			std::condition_variable Finished;
 			std::condition_variable ReadyCondition;
 
@@ -240,6 +246,7 @@ namespace engine::parallel {
 			ENGINE_HEAP_SCOPE("jobs.worker");
 
 			uint64_t seen = 0;
+			WorkerWake &wake = *pool.WorkerWakes[workerIndex];
 
 			const bool pinned = platform::PinCurrentThread(pool.WorkerProcessors[workerIndex]);
 			{
@@ -253,12 +260,14 @@ namespace engine::parallel {
 				Batch *batch = nullptr;
 				{
 					std::unique_lock lock(pool.Guard);
-					pool.Available.wait(lock, [&] { return pool.Stopping || pool.Generation != seen; });
+					wake.Available.wait(lock, [&] { return pool.Stopping || wake.Generation != seen; });
 					if (pool.Stopping) {
 						return;
 					}
-					seen = pool.Generation;
-					batch = pool.Current;
+					seen = wake.Generation;
+					// A generic batch may finish before a signaled worker wakes. Its
+					// stale notification must not enter a later, unassigned batch.
+					batch = seen == pool.Generation ? pool.Current : nullptr;
 
 					// Count the worker while holding the lock that protects Current.
 					if (batch != nullptr) {
@@ -289,7 +298,8 @@ namespace engine::parallel {
 				}
 				pool.Stopping = true;
 			}
-			pool.Available.notify_all();
+			for (const auto &wake : pool.WorkerWakes)
+				wake->Available.notify_one();
 
 			for (std::thread &worker : pool.Workers) {
 				worker.join();
@@ -299,6 +309,8 @@ namespace engine::parallel {
 			pool.Workers.clear();
 			pool.WorkerProcessors.clear();
 			pool.WorkerPinned.clear();
+			pool.WorkerWakes.clear();
+			pool.SignaledWorkers.clear();
 			pool.Ready = 0;
 			pool.PinnedWorkers = 0;
 		}
@@ -329,6 +341,13 @@ namespace engine::parallel {
 		pool.Workers.reserve(workers);
 		pool.WorkerProcessors.resize(workers);
 		pool.WorkerPinned.assign(workers, 0);
+		{
+			ENGINE_HEAP_SCOPE("jobs.worker.wakes");
+			pool.WorkerWakes.reserve(workers);
+			pool.SignaledWorkers.reserve(workers);
+			for (unsigned index = 0; index < workers; ++index)
+				pool.WorkerWakes.push_back(std::make_unique<WorkerWake>());
+		}
 		{
 			ENGINE_HEAP_SCOPE("jobs.assigned.readings");
 			pool.AssignedReadings.resize(workers);
@@ -451,6 +470,7 @@ namespace engine::parallel {
 		const uint64_t dispatched = core::Clock::Nanoseconds();
 
 		const size_t ranges = (count + grain - 1) / grain;
+		const size_t signaled = std::min(workers, ranges - 1);
 
 		Batch &batch = pool.Slot;
 
@@ -474,16 +494,18 @@ namespace engine::parallel {
 
 			pool.Current = &batch;
 			pool.Generation++;
+			pool.SignaledWorkers.clear();
+			for (unsigned worker = 0; worker < signaled; ++worker) {
+				pool.WorkerWakes[worker]->Generation = pool.Generation;
+				pool.SignaledWorkers.push_back(worker);
+			}
 		}
 
 		// Wake no more workers than the remaining ranges require.
-		if (ranges > workers) {
-			pool.Available.notify_all();
-		} else {
-			for (size_t woken = 1; woken < ranges; woken++) {
-				pool.Available.notify_one();
-			}
-		}
+		for (const unsigned worker : pool.SignaledWorkers)
+			pool.WorkerWakes[worker]->Available.notify_one();
+		if (core::FrameGraph::IsEnabled())
+			core::Metrics::Count("jobs.signaled_workers", pool.SignaledWorkers.size());
 
 		{
 			ENGINE_PROFILE_CAT("jobs.drain", core::ProfileCategory::Engine);
@@ -606,9 +628,18 @@ namespace engine::parallel {
 
 			pool.Current = &batch;
 			pool.Generation++;
+			pool.SignaledWorkers.clear();
+			for (const unsigned worker : workerByIndex) {
+				WorkerWake &wake = *pool.WorkerWakes[worker];
+				if (wake.Generation == pool.Generation) continue;
+				wake.Generation = pool.Generation;
+				pool.SignaledWorkers.push_back(worker);
+			}
 		}
 
-		pool.Available.notify_all();
+		for (const unsigned worker : pool.SignaledWorkers)
+			pool.WorkerWakes[worker]->Available.notify_one();
+		if (batch.CaptureAssigned) core::Metrics::Count("jobs.signaled_workers", pool.SignaledWorkers.size());
 
 		{
 			ENGINE_PROFILE_CAT("jobs.join.assigned", core::ProfileCategory::Idle);

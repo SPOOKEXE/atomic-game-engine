@@ -69,8 +69,12 @@ Two asymmetries against `For`, both deliberate and both easy to trip over:
   there the join never finishes. This is why `Jobs::Stop` must not race a
   dispatch, and the rule is a convention rather than a check.
 
-`ForWorkers` also wakes the whole pool, not the named prefix, so the unnamed
-workers pay a wake and two lock acquisitions to find no task of their own.
+`ForWorkers` signals only the distinct workers named by its mapping. Each
+worker owns a wake condition and generation under `Pool::Guard`; a shared
+condition variable cannot select pinned workers with `notify_one`. Generic
+`For` signals a bounded prefix. A delayed generic wake may enter `Current` only
+when its private generation matches the active batch, so it cannot join a later
+assignment that did not select it. Shutdown signals every worker before joining.
 
 ## Grain is the whole game, and the default is for cheap bodies
 
@@ -234,8 +238,8 @@ threads until the process exits, which is what a process exit is for.
 
 **It is never destroyed, and that is what makes forgetting harmless.** `Get()`
 holds a leaked `Pool *`, the same shape `ecs::Components` and `ecs::ChunkPool`
-use and for a problem of the same kind. Destroying the pool destroys four
-condition variables with every worker still parked on `Available`, and
+use and for a problem of the same kind. Destroying the pool destroys
+condition variables with every worker still parked on its wake gate, and
 `pthread_cond_destroy` waits for the last waiter: before v0.19 a process that
 called `Jobs::Start` and did not call `Jobs::Stop` returned zero from `main` and
 then hung in `exit` for ever, after every test had already reported passing.
