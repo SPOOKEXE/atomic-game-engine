@@ -48,6 +48,8 @@ namespace engine::render {
 		uint32_t Width = 0;
 		uint32_t Height = 0;
 		uint32_t Depth = 0;
+		// Mirror captures along one path; the total path remains bounded by Depth.
+		uint32_t MirrorDepth = 32;
 	};
 
 	struct CaptureBlendSlot {

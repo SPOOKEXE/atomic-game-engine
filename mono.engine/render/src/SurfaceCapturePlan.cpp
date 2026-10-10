@@ -61,6 +61,7 @@ namespace engine::render {
 		signature = scene::MixSignature(signature, request.Width);
 		signature = scene::MixSignature(signature, request.Height);
 		signature = scene::MixSignature(signature, request.Depth);
+		signature = scene::MixSignature(signature, request.MirrorDepth);
 		signature = scene::MixSignature(signature, request.Mirrors.size());
 		for (const SurfaceView &mirror : request.Mirrors) {
 			signature = scene::MixSignature(signature, static_cast<uint16_t>(mirror.Index));
@@ -136,8 +137,8 @@ namespace engine::render {
 		plan.Postorder.clear();
 		plan.Roots.fill(NO_SURFACE_CAPTURE);
 		plan.Pixels = 0;
-		if (request.Width == 0 || request.Height == 0 || request.Depth > 32 || !Finite(request.Projection) ||
-			!Finite(request.Frame.ToMatrix())) {
+		if (request.Width == 0 || request.Height == 0 || request.Depth > 32 || request.MirrorDepth > 32 ||
+			!Finite(request.Projection) || !Finite(request.Frame.ToMatrix())) {
 			return SurfaceCaptureStatus::Invalid;
 		}
 		std::array<Source, scene::MAX_SURFACES> sources;
@@ -166,6 +167,7 @@ namespace engine::render {
 							   uint32_t width,
 							   uint32_t height,
 							   uint32_t depth,
+							   uint32_t mirrorDepth,
 							   int16_t arrival,
 							   uint16_t parent) -> void {
 			// A terminal capture has no children. Keep scanning only for a root
@@ -177,6 +179,9 @@ namespace engine::render {
 			for (size_t slot = 0; slot < sources.size() && status == SurfaceCaptureStatus::Ok; ++slot) {
 				const Source source = sources[slot];
 				if (source.Index == NO_SURFACE_CAPTURE || int16_t(slot) == arrival) {
+					continue;
+				}
+				if (source.Kind == SurfaceCaptureKind::Mirror && mirrorDepth == 0) {
 					continue;
 				}
 				SurfaceCaptureEntry entry;
@@ -273,6 +278,7 @@ namespace engine::render {
 					entry.Width,
 					entry.Height,
 					depth - 1,
+					mirrorDepth - uint32_t(source.Kind == SurfaceCaptureKind::Mirror),
 					entry.Arrival,
 					index
 				);
@@ -286,6 +292,7 @@ namespace engine::render {
 			request.Width,
 			request.Height,
 			request.Depth,
+			request.MirrorDepth,
 			-1,
 			NO_SURFACE_CAPTURE
 		);

@@ -124,6 +124,36 @@ TEST_CASE("mirror capture preserves declared HDR radiance", "[render][gpu][mirro
 	view.Lighting.Direct = {};
 	view.Lighting.RenderFeatures.Disable |= scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
 
+	SECTION("one authored mirror bounce is independent of the portal depth default") {
+		constexpr size_t FACETS = 320;
+		renderer.SetSurfaceLimit(FACETS);
+		renderer.SetSurfaceBounces(1);
+		std::vector<render::SurfaceView> surfaces(FACETS, surface);
+		for (size_t index = 0; index < surfaces.size(); ++index) {
+			surfaces[index].Index = static_cast<int16_t>(index);
+			surfaces[index].Width = 4;
+			surfaces[index].Height = 2;
+		}
+		view.Surfaces = surfaces;
+		render::OverlayImage overlay;
+		const auto frame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE_FALSE(frame.SurfaceBudgetExceeded);
+		CHECK(frame.SurfacePasses == FACETS);
+		const auto image = render::test::CaptureResource(
+			renderer,
+			core::Name("scene-image"),
+			view.Slot,
+			target.Width,
+			target.Height,
+			render::test::ImageFormat::Bgra8Unorm
+		);
+		const auto centre =
+			image.Bytes.data() + (target.Height / 2) * image.RowStrideBytes + (target.Width / 2) * 4;
+		CHECK(std::to_integer<uint8_t>(centre[2]) > 128);
+		CHECK(std::to_integer<uint8_t>(centre[0]) < 32);
+		CHECK(std::to_integer<uint8_t>(centre[1]) < 32);
+	}
+
 	SECTION("wide mirror slots preserve the reflected screen image") {
 		renderer.SetSurfaceLimit(scene::MAX_SURFACES);
 		renderer.SetSurfaceBounces(1);

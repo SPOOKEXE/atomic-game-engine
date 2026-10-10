@@ -744,7 +744,10 @@ namespace engine::render {
 				.PixelBudget = capturePixels,
 				.Width = sceneWidth,
 				.Height = sceneHeight,
-				.Depth = budget.Depth
+				.Depth = budget.Depth,
+				// An explicit capture budget owns the whole path. Otherwise the
+				// authored mirror count must not inherit the portal depth default.
+				.MirrorDepth = source.SurfaceBudget || State->SurfaceBounces == 0 ? 32 : State->SurfaceBounces
 			};
 			const uint64_t captureSignature = SurfaceCaptureSignature(keyedCaptureRequest);
 			if (bank.CaptureCache.NeedsRefresh(captureSignature)) {
