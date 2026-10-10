@@ -1306,7 +1306,13 @@ namespace engine::render {
 				input.Texture == scratch.Texture || output.Texture == scratch.Texture)
 				return false;
 			SDL_GPUTexture *source = input.Texture;
-			SDL_GPUTexture *target = scratch.Texture;
+			struct LensPass {
+				const ViewRecording::LensGroup *Group = nullptr;
+				SDL_GPUGraphicsPipeline *Pipeline = nullptr;
+			};
+			std::array<LensPass, ViewRecording::MAX_LENS_SHADER_RUNS> passes{};
+			if (recording.LensGroupCount > passes.size()) return false;
+			size_t passCount = 0;
 
 			for (size_t index = 0; index < recording.LensGroupCount; index++) {
 				const ViewRecording::LensGroup &group = recording.LensGroups[index];
@@ -1335,6 +1341,15 @@ namespace engine::render {
 					if (authored != State->LensPipelines.end()) pipeline = authored->second.Pipeline;
 				}
 				if (!pipeline || group.Count == 0) continue;
+				passes[passCount++] = LensPass{&group, pipeline};
+			}
+
+			// Select the first target so the last effective pass always publishes
+			// directly to output. Only the empty chain needs a copy.
+			SDL_GPUTexture *target = passCount % 2 == 0 ? scratch.Texture : output.Texture;
+			for (size_t index = 0; index < passCount; ++index) {
+				const LensPass &pass = passes[index];
+				const ViewRecording::LensGroup &group = *pass.Group;
 				LensPassUniforms &uniforms = recording.LensPassData;
 				std::copy_n(recording.LensEntries.begin() + group.First, group.Count, uniforms.Lenses);
 				uniforms.TimeCount.y = static_cast<float>(group.Count);
@@ -1344,7 +1359,7 @@ namespace engine::render {
 				};
 				recording.Fullscreen(
 					context.Name,
-					pipeline,
+					pass.Pipeline,
 					target,
 					output.Width,
 					output.Height,

@@ -838,7 +838,10 @@ TEST_CASE(
 	);
 }
 
-TEST_CASE("lens pipelines stay within each view's content owner", "[render][gpu][lens-owner-draw][.]") {
+TEST_CASE(
+	"lens pipelines stay within each view's content owner and compose across skipped passes",
+	"[render][gpu][lens-owner-draw][lens-chain-parity][.]"
+) {
 	FixtureDevice fixture;
 	fixture.Initialise();
 	const auto lensDocument = InstallPortalFixture(fixture.Render);
@@ -1025,6 +1028,9 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 	};
 	const std::string scale = "value=value*0.5+vec3(0.125,0.25,0.375);\n";
 	const std::string swizzle = "value=value.brg*0.5+vec3(0.5,0.125,0);\n";
+	const core::Name missingName("lens.chain.missing");
+	const std::array chainShaders{scaleName, missingName, swizzleName, scaleName};
+	const std::array<std::string_view, 4> operations{scale, "", swizzle, scale};
 	REQUIRE(fixture.Render.AddLensShader(scaleName, compileSample(scale)));
 	REQUIRE(fixture.Render.AddLensShader(swizzleName, compileSample(swizzle)));
 	const auto install = [&](const graph::PipelineDocument &document) {
@@ -1083,12 +1089,12 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 				edit.Target = core::Name("lens-repeat-colour");
 			chainDocument.Record(edit);
 		}
-		for (uint32_t count = 0; count <= 3; ++count) {
+		for (size_t count = 0; count <= chainShaders.size(); ++count) {
 			CAPTURE(repeated, count);
 			std::string fused;
-			for (uint32_t pass = 0; pass < (repeated ? 2u : 1u); ++pass)
-				for (uint32_t lens = 0; lens < count; ++lens)
-					fused += lens == 1 ? swizzle : scale;
+			for (size_t pass = 0; pass < (repeated ? size_t{2} : size_t{1}); ++pass)
+				for (size_t lens = 0; lens < count; ++lens)
+					fused += operations[lens];
 			REQUIRE(fixture.Render.AddLensShader(fusedName, compileSample(fused)));
 			auto &view = views[0];
 			view.ContentOwner = {};
@@ -1097,10 +1103,10 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 			install(lensDocument);
 			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 			const auto expected = capture(0);
-			view.Lighting.ShaderLensCount = count;
-			for (uint32_t lens = 0; lens < count; ++lens) {
+			view.Lighting.ShaderLensCount = static_cast<uint32_t>(count);
+			for (size_t lens = 0; lens < count; ++lens) {
 				view.Lighting.ShaderLenses[lens] = view.Lighting.ShaderLenses[0];
-				view.Lighting.ShaderLenses[lens].Shader = lens == 1 ? swizzleName : scaleName;
+				view.Lighting.ShaderLenses[lens].Shader = chainShaders[lens];
 			}
 			install(chainDocument);
 			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
