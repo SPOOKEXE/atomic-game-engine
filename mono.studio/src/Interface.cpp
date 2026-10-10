@@ -975,12 +975,6 @@ namespace studio {
 			CameraPitch = cameraPose.Pitch;
 		}
 
-		// imgui remembers a window by its title, so a panel's title is minted
-		// once when the panel is and then never changes - a name that moved
-		// would be a panel the saved layout has never heard of. See
-		// `ViewportState::Title`.
-		const std::string label = ViewportLabel(index);
-		const char *title = label.c_str();
 		bool *open = second ? &extra->Open : &ShowViewport;
 		engine::render::SceneTarget &target = second ? extra->Target : WorldTarget;
 
@@ -1015,6 +1009,11 @@ namespace studio {
 			}
 			return;
 		}
+
+		// The visible world name may change; the ### suffix keeps the saved
+		// window identity stable. Closed panels need neither label string.
+		const std::string label = ViewportLabel(index);
+		const char *title = label.c_str();
 
 		// Reopened, so the next close undocks again.
 		if (extra != nullptr) {
@@ -2630,9 +2629,37 @@ namespace studio {
 					return row.Offset + row.Height + spacing < position;
 				}
 			);
-			for (auto row = begin; row != display.Rows.end() && row->Offset <= clipEnd; ++row) {
-				const Message &message = Output[row->MessageIndex];
-				ImGui::SetCursorPosY(originLocalY + row->Offset);
+			auto end =
+				std::upper_bound(begin, display.Rows.end(), clipEnd, [](float position, const auto &row) {
+					return position < row.Offset;
+				});
+			const auto &context = *GImGui;
+			const bool navigation = context.NavWindow != nullptr &&
+									context.NavWindow->RootWindowForNav == window->RootWindowForNav &&
+									(context.NavMoveScoringItems || context.NavInitRequest);
+			if (navigation) {
+				// ItemAdd scores navigation before clipping. Rare keyboard moves
+				// need offscreen candidates, including variable-height successors.
+				begin = display.Rows.begin();
+				end = display.Rows.end();
+			}
+			auto focused = display.Rows.end();
+			if (!navigation && context.NavId != 0 && window->NavLastIds[0] == context.NavId) {
+				// Keep the focused item alive after scrolling it out of view, as
+				// ImGuiListClipper does, without submitting the intervening rows.
+				const float focusY = window->Pos.y + window->NavRectRel[0].GetCenter().y - originY;
+				focused = std::lower_bound(
+					display.Rows.begin(),
+					display.Rows.end(),
+					focusY,
+					[spacing](const auto &row, float position) {
+						return row.Offset + row.Height + spacing < position;
+					}
+				);
+			}
+			const auto submit = [&](const auto &row) {
+				const Message &message = Output[row.MessageIndex];
+				ImGui::SetCursorPosY(originLocalY + row.Offset);
 				const bool isError = message.Level == LogLevel::Error;
 				const bool isWarning = message.Level == LogLevel::Warning;
 
@@ -2675,7 +2702,11 @@ namespace studio {
 				if (colour != 0u) {
 					ImGui::PopStyleColor();
 				}
-			}
+			};
+			if (focused < begin) submit(*focused);
+			for (auto row = begin; row != end; ++row)
+				submit(*row);
+			if (focused != display.Rows.end() && focused >= end) submit(*focused);
 			if (!display.Rows.empty()) {
 				// Submit the skipped extent too. This preserves scroll ranges, the
 				// following filter footer and the last-row tail target.

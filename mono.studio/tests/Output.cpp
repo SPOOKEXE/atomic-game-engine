@@ -63,7 +63,7 @@ namespace studio {
 			ImGui::SetNextWindowSize({980, 600}, ImGuiCond_Always);
 			if (!full) {
 				// Child scroll is applied by BeginChild on this frame.
-				if (auto *window = ImGui::FindWindowByName("Output")) {
+				if (auto *window = ImGui::FindWindowByName("Output"); window != nullptr && scroll >= 0) {
 					for (auto *child : window->DC.ChildWindows)
 						if (child->ChildId == window->GetID("##lines")) ImGui::SetScrollY(child, scroll);
 				}
@@ -71,7 +71,7 @@ namespace studio {
 			} else {
 				ImGui::Begin("Output");
 				ImGui::SetCursorScreenPos(childPos);
-				ImGui::SetNextWindowScroll({0, scroll});
+				if (scroll >= 0) ImGui::SetNextWindowScroll({0, scroll});
 				if (ImGui::BeginChild("##lines", childSize, ImGuiChildFlags_None)) {
 					const engine::ui::ScopedFont font(
 						engine::ui::Typeface::Monospace, engine::ui::TextSize::Small, editor.OutputZoom
@@ -137,6 +137,21 @@ namespace studio {
 			return {
 				child->InnerRect.Min.x + 40, editor.OutputRows.LayoutOrigin + row.Offset + row.Height * .5f
 			};
+		}
+		static float OutputNavigationScroll(const Editor &editor, size_t rowIndex) {
+			const auto *child = OutputChild();
+			const auto &row = editor.OutputRows.Rows.at(rowIndex);
+			// Put the lower clip boundary halfway through a multiline row. Its
+			// successor must participate in navigation while still offscreen.
+			return child->Scroll.y + editor.OutputRows.LayoutOrigin + row.Offset + row.Height * .5f -
+				   child->ClipRect.Max.y;
+		}
+		static ImGuiID OutputRowId(const Editor &editor, size_t rowIndex) {
+			const auto *child = OutputChild();
+			const auto &message = editor.Output[editor.OutputRows.Rows.at(rowIndex).MessageIndex];
+			const int serial = static_cast<int>(message.Serial);
+			const ImGuiID scope = ImHashData(&serial, sizeof(serial), child->IDStack.back());
+			return ImHashStr(message.Text.c_str(), 0, scope);
 		}
 		static uint64_t OutputRowSerial(const Editor &editor, size_t visibleRow) {
 			return editor.Output[editor.OutputRows.Rows.at(visibleRow).MessageIndex].Serial;
@@ -267,4 +282,92 @@ TEST_CASE("Output mouse selection and copying keep filtered serial identity", "[
 	io.AddKeyEvent(ImGuiMod_Shift, false);
 	CHECK(studio::ToolsProbe::OutputCopy(editor) == 3);
 	CHECK(std::string(ImGui::GetClipboardText()) == "needle 2\nneedle 4\nneedle 6");
+}
+
+TEST_CASE(
+	"Output keyboard navigation scores offscreen variable-height rows", "[studio][output][navigation]"
+) {
+	struct NavigationResult {
+		ImGuiID Id = 0;
+		float Scroll = 0;
+	};
+	const auto navigate = [](bool full) {
+		OutputFixture fixture;
+		auto &editor = fixture.Editor;
+		auto &io = ImGui::GetIO();
+		REQUIRE((io.ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard) != 0);
+		for (int warm = 0; warm < 4; ++warm)
+			studio::ToolsProbe::OutputDraw(editor, 0);
+		constexpr size_t rowIndex = 49;
+		const float scroll = studio::ToolsProbe::OutputNavigationScroll(editor, rowIndex);
+		REQUIRE(scroll > 0);
+		for (int warm = 0; warm < 4; ++warm)
+			studio::ToolsProbe::OutputDraw(editor, scroll, full);
+		const auto *child = studio::ToolsProbe::OutputChild();
+		const auto rowPoint = studio::ToolsProbe::OutputRowPoint(editor, rowIndex);
+		const float visibleBottom = std::min(
+			{child->ClipRect.Max.y, child->InnerRect.Max.y, child->OuterRectClipped.Max.y, io.DisplaySize.y}
+		);
+		const ImVec2 point(rowPoint.x, visibleBottom - 4);
+		REQUIRE(point.y > child->ClipRect.Min.y);
+		io.AddMousePosEvent(point.x, point.y);
+		for (int hover = 0; hover < 3; ++hover)
+			studio::ToolsProbe::OutputDraw(editor, scroll, full);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+		studio::ToolsProbe::OutputDraw(editor, scroll, full);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+		studio::ToolsProbe::OutputDraw(editor, scroll, full);
+		INFO("full reference: " << full);
+		INFO("display: " << io.DisplaySize.x << ", " << io.DisplaySize.y);
+		INFO(
+			"child: " << child->Pos.x << ", " << child->Pos.y << "; size: " << child->Size.x << ", "
+					  << child->Size.y
+		);
+		INFO(
+			"child clip: " << child->ClipRect.Min.y << ".." << child->ClipRect.Max.y
+						   << "; inner: " << child->InnerRect.Min.y << ".." << child->InnerRect.Max.y
+						   << "; outer clipped: " << child->OuterRectClipped.Min.y << ".."
+						   << child->OuterRectClipped.Max.y
+		);
+		INFO("row centre: " << rowPoint.y);
+
+		INFO(
+			"click: " << point.x << ", " << point.y << "; input: " << io.MousePos.x << ", " << io.MousePos.y
+		);
+		INFO("hovered window: " << (GImGui->HoveredWindow ? GImGui->HoveredWindow->Name : "none"));
+		INFO("navigation window: " << (GImGui->NavWindow ? GImGui->NavWindow->Name : "none"));
+		INFO(
+			"row focus id: " << studio::ToolsProbe::OutputRowId(editor, rowIndex)
+							 << "; actual: " << GImGui->NavId
+		);
+		REQUIRE(GImGui->NavWindow == studio::ToolsProbe::OutputChild());
+		REQUIRE(GImGui->NavId == studio::ToolsProbe::OutputRowId(editor, rowIndex));
+		io.AddMousePosEvent(-100, -100);
+		io.AddKeyEvent(ImGuiKey_DownArrow, true);
+		studio::ToolsProbe::OutputDraw(editor, -1, full);
+		io.AddKeyEvent(ImGuiKey_DownArrow, false);
+		for (int settle = 0; settle < 3; ++settle)
+			studio::ToolsProbe::OutputDraw(editor, -1, full);
+		CHECK(GImGui->NavWindow == studio::ToolsProbe::OutputChild());
+		CHECK(GImGui->NavId == studio::ToolsProbe::OutputRowId(editor, rowIndex + 1));
+		const NavigationResult result{GImGui->NavId, studio::ToolsProbe::OutputChild()->Scroll.y};
+		// Wheel/programmatic scrolling may hide the focused row without a
+		// navigation request. It must still survive for the next key press.
+		for (int settle = 0; settle < 3; ++settle)
+			studio::ToolsProbe::OutputDraw(editor, 0, full);
+		CHECK(GImGui->NavId == result.Id);
+		CHECK(GImGui->NavIdIsAlive);
+		io.AddKeyEvent(ImGuiKey_UpArrow, true);
+		studio::ToolsProbe::OutputDraw(editor, -1, full);
+		io.AddKeyEvent(ImGuiKey_UpArrow, false);
+		for (int settle = 0; settle < 3; ++settle)
+			studio::ToolsProbe::OutputDraw(editor, -1, full);
+		CHECK(GImGui->NavId == studio::ToolsProbe::OutputRowId(editor, rowIndex));
+		CHECK(GImGui->NavIdIsAlive);
+		return result;
+	};
+	const auto reference = navigate(true);
+	const auto indexed = navigate(false);
+	CHECK(indexed.Id == reference.Id);
+	CHECK(indexed.Scroll == reference.Scroll);
 }

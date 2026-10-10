@@ -6401,7 +6401,7 @@ namespace studio {
 		struct FindDisplay {
 			// Font whose metrics produced the label extent.
 			const void *Font = nullptr;
-			// Identifies a replacement bake of the same font.
+			// Font bake identity used to measure labels.
 			uint32_t FontBake = 0;
 			// Effective font size used to measure labels.
 			float FontSize = 0;
