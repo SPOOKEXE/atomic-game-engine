@@ -2732,6 +2732,9 @@ namespace {
 			mesh.Indices = {0, 1, 2, 0, 2, 3, 2, 1, 0, 3, 2, 0};
 			mesh.ComputeBounds();
 			REQUIRE(Render.AddMesh(Name("walk-marker"), mesh));
+			Vector3 extent;
+			REQUIRE(Render.MeshExtentOf(Name("walk-marker"), extent));
+			REQUIRE_FALSE(Render.MeshExtentOf(Name("walk-marker"), extent, Name("OtherRoom")));
 			engine::assets::TextureData white;
 			white.Width = white.Height = 1;
 			white.Format = engine::assets::TextureFormat::RGBA8;
@@ -2777,7 +2780,10 @@ namespace {
 				});
 			}
 			for (auto world : worlds.Worlds()) {
-				if (!worlds.IsRemote(world)) worlds.Present(world, 0, 1);
+				if (worlds.IsRemote(world)) continue;
+				// This fixture's custom assets share the renderer's global residency.
+				Images.SetContentOwner(world, {});
+				worlds.Present(world, 0, 1);
 			}
 			INFO("image frame " << Frame);
 			visual = ResolvePortalWalkEye(
@@ -2932,21 +2938,26 @@ static void WalkPortalReplicas(bool gpu) {
 			pane.Size = {16, 9, .4f};
 			pane.Frame = CFrame({0, 4.5f, -6});
 			const auto near = MakePart(store, pane);
+			store.SetInstanceName(near, "NearMouth");
 			store.SetParent(near, WorkspaceOf(store));
 			pane.Frame = CFrame({0, 4.5f, -5.6f}) * CFrame::Angles(0, std::numbers::pi_v<float>, 0);
 			const auto far = MakePart(store, pane);
+			store.SetInstanceName(far, "FarMouth");
 			store.SetParent(far, WorkspaceOf(store));
-			store.GetMutable<Collider>(far)->Trigger = true;
-			store.GetMutable<Visual>(far)->Transparency = 1;
+			// Each receiving mouth carries the exact inverse of the source seam.
+			const auto mouth = world == destination ? far : near;
+			const auto proxy = world == destination ? near : far;
+			store.GetMutable<Collider>(proxy)->Trigger = true;
+			store.GetMutable<Visual>(proxy)->Transparency = 1;
 			const auto hole = store.CreateInstance(engine::ecs::Classes::Find(Name("Portal")), "Door");
 			SurfaceCamera surface;
 			surface.Face = NormalId::Back;
 			store.Set(hole, surface);
 			Portal portal;
-			portal.Destination = far;
+			portal.Destination = proxy;
 			portal.DestinationWorld = Name(world == destination ? "Scene" : "OtherRoom");
 			store.Set(hole, portal);
-			store.SetParent(hole, near);
+			store.SetParent(hole, mouth);
 			if (gpu) {
 				PartDesc marker;
 				marker.Mesh = Name("walk-marker");
