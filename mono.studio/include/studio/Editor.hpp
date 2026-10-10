@@ -6558,24 +6558,38 @@ namespace studio {
 			// Flat row buckets and retained clipped indices for one flame paint pass.
 			struct FlamePass {
 				//@{
+				// Prefix offsets that group span indices by display row.
 				std::vector<uint32_t> RowOffsets;
+				// Per-row cursors used while filling the row buckets.
 				std::vector<uint32_t> WriteOffsets;
+				// Span indices arranged by row for clipped painting.
 				std::vector<uint32_t> Indices;
+				// Span indices in their original order for this pass.
 				std::vector<uint32_t> OriginalIndices;
+				// Retained span indices inside the current clipped row range.
 				std::vector<uint32_t> Visible;
+				// First row included by the last clipping pass.
 				uint32_t FirstRow = 0;
+				// Exclusive end row included by the last clipping pass.
 				uint32_t EndRow = 0;
+				// Whether `Visible` matches the stored clipped row range.
 				bool Prepared = false;
 				//@}
 			};
 			// Snapshot metadata is rebuilt with layout, rather than rescanned during paint.
 			struct FlameCache {
 				//@{
+				// Row buckets for accounting, CPU and GPU flame spans.
 				std::array<FlamePass, 3> Passes;
+				// Number of rows occupied by non-GPU spans.
 				uint32_t CpuRows = 0;
+				// Number of rows occupied by GPU spans.
 				uint32_t GpuRows = 0;
+				// Longest GPU span in the retained snapshot.
 				float GpuMaximumMilliseconds = 0;
+				// Sample count belonging to the longest retained GPU span.
 				uint32_t GpuMaximumSamples = 0;
+				// Whether any non-GPU span was moved below its tree depth to avoid overlap.
 				bool HasOverlap = false;
 				//@}
 			};
