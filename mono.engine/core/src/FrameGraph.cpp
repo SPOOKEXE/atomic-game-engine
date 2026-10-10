@@ -810,13 +810,18 @@ namespace engine::core {
 		state.Open.clear();
 		state.Depth = 0;
 
-		// Reported spans are reconstructed after their worker has joined. Their
-		// wall-clock start is therefore the tiny call that builds the report, not
-		// where the work belongs in its parent. Place reported children after the
-		// preceding direct child so scheduler phases and systems remain adjacent.
+		// Reported worker spans are reconstructed after their join, so place them
+		// after the preceding direct child in the logical CPU tree. Device samples
+		// have duration but no CPU start; keep them on their own time axis and do
+		// not let them move later CPU reports.
 		state.ReportedChildEnds.assign(state.Building.size(), 0.0f);
 		for (size_t index = 0; index < state.Building.size(); index++) {
 			FrameSpan &span = state.Building[index];
+			if (span.Reported && span.Category == ProfileCategory::Gpu) {
+				span.StartMilliseconds = 0.0f;
+				state.ReportedChildEnds[index] = 0.0f;
+				continue;
+			}
 			if (span.Parent < index) {
 				FrameSpan &parent = state.Building[span.Parent];
 				float &childEnd = state.ReportedChildEnds[span.Parent];
