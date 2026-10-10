@@ -87,6 +87,10 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] Index capture surfaces by slot, avoid redundant ribbon restoration uploads and omit zero-strength ground-grid draws.
 - [x] Preserve opaque depth in transparent passes when empty surface overlays skip rendering, and refuse failed image publications or pass starts in transparent geometry, mirror and portal capture paths without exporting retained stale images.
 - [x] Retain Output filtering and text extents, clip visible rows and cache canonical Explorer searches while keeping computed-property searches live; preserve multiline layout and selection behavior.
+- [x] Resolve built-in and runtime image references through the correct content owner before portal promotion, and refresh readiness when renderer resource revisions change.
+- [x] Fit mandatory nested portal images to their existing fair pixel budget and regenerate their camera keys after sizing; keep optional seam radiance separate.
+- [x] Hide only the displayed local player's body in Studio first-person and restore it in third-person; the real viewport GPU fixture also checks another player's visibility.
+- [x] Preserve depth-tested SurfaceGui pixels through oblique captures with a bounded decal depth tolerance; GPU checks cover ordinary and authored shaders, close occluders and portal adoption.
 - [_] Non-acceptance follow-up: audit aggregate replica snapshot and staged-byte ceilings for large EditableImage rows. The current path has a `uint32_t` total cap but no explicit assembled-image budget; per-image bounds and windowed staging are tested.
 - [_] Security follow-up: audit dynamic schema and component-codec acceptance, plus client-local provenance and descendant filtering across replication and authored game saves.
 
