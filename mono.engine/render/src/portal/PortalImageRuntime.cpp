@@ -3593,23 +3593,42 @@ namespace engine::render {
 				}
 				const uint64_t remaining =
 					ownPixels <= job.Request.PixelBudget ? job.Request.PixelBudget - ownPixels : 0;
+				const bool hasLocalShare =
+					!job.Request.OrderedLayers && !state.Frames[index].Surfaces.empty();
+				const uint32_t childPixelMultiplier = job.Request.OrderedLayers ? 4u : 1u;
+				const size_t mandatoryCount = static_cast<size_t>(
+					std::count_if(job.Children.begin(), job.Children.end(), [](const auto &child) {
+						return !child.Demand.SeamRadiance;
+					})
+				);
+				const size_t mandatoryShares = mandatoryCount + (hasLocalShare ? 1u : 0u);
+				const uint64_t mandatoryBudget = mandatoryShares == 0 ? 0 : remaining / mandatoryShares;
+				// Fit visible children to their fair slice before the planner applies its refusal rule.
 				std::vector<PortalChildBudget> budgets;
 				budgets.reserve(job.Children.size());
-				for (const auto &child : job.Children) {
-					budgets.push_back(
-						{uint64_t(child.Demand.Request.Width) * child.Demand.Request.Height *
-							 (job.Request.OrderedLayers ? 4u : 1u),
-						 child.Demand.SeamRadiance}
-					);
+				std::vector<PortalChildExtentFit> childFits(job.Children.size());
+				bool fitPossible = true;
+				for (size_t childIndex = 0; childIndex < job.Children.size(); ++childIndex) {
+					const auto &child = job.Children[childIndex];
+					const auto &request = child.Demand.Request;
+					uint64_t pixels = uint64_t(request.Width) * request.Height * childPixelMultiplier;
+					if (!child.Demand.SeamRadiance && child.RequestId == 0) {
+						const bool fitted = FitPortalChildExtent(
+							request.Width,
+							request.Height,
+							mandatoryBudget,
+							childPixelMultiplier,
+							childFits[childIndex]
+						);
+						fitPossible = fitPossible && fitted;
+						if (fitted) pixels = childFits[childIndex].Pixels;
+					}
+					budgets.push_back({pixels, child.Demand.SeamRadiance});
 				}
 				uint32_t childBudget = 0;
-				if (!PlanPortalChildBudgets(
-						budgets,
-						remaining,
-						!job.Request.OrderedLayers && !state.Frames[index].Surfaces.empty(),
-						childBudget,
-						job.LocalPixels
-					)) {
+				const bool budgetsPlanned =
+					PlanPortalChildBudgets(budgets, remaining, hasLocalShare, childBudget, job.LocalPixels);
+				if (!fitPossible || !budgetsPlanned) {
 					job.Failure = "nested portal pixel budget exceeded";
 					job.FailureStatus = PortalImageStatus::BudgetExceeded;
 				}
@@ -3624,14 +3643,60 @@ namespace engine::render {
 						portal.LightOutward = {};
 					}
 					job.Children.erase(job.Children.begin() + selected);
+					childFits.erase(childFits.begin() + selected);
+					budgets.erase(budgets.begin() + selected);
 				}
-				for (auto &child : job.Children) {
+				auto &view = job.Viewpoint;
+				const auto &seams = state.WorldFrame.Seams;
+				for (size_t childIndex = 0; childIndex < job.Children.size(); ++childIndex) {
+					auto &child = job.Children[childIndex];
 					if (!job.Failure.empty()) break;
 					auto &demand = child.Demand;
 					const auto destination = state.Universe.Find(demand.DestinationWorld);
 					const auto producer =
 						state.Universe.LookupPresentation(destination, PORTAL_REQUEST_CHANNEL);
 					if (child.RequestId == 0) {
+						if (!budgets[childIndex].Accepted) continue;
+						if (!demand.SeamRadiance) {
+							auto original = std::move(demand);
+							auto &originalRequest = original.Request;
+							const auto seam =
+								std::find_if(seams.begin(), seams.end(), [&](const auto &candidate) {
+									return candidate.Surface == original.Portal.Index;
+								});
+							PortalImageDemand fitted;
+							PortalImageDemandSettings settings;
+							settings.Width = originalRequest.Width;
+							settings.Height = originalRequest.Height;
+							settings.MaximumExtent = childFits[childIndex].MaximumExtent;
+							settings.RecursionDepth = originalRequest.RecursionDepth;
+							settings.PixelBudget = childBudget;
+							if (seam == seams.end() ||
+								BuildPortalImageDemand(
+									*seam, original.Binding.Portal, view, view.Slot, settings, fitted
+								) != PortalDemandStatus::Ready) {
+								job.Failure = "nested portal demand could not fit its pixel budget";
+								job.FailureStatus = PortalImageStatus::BudgetExceeded;
+								break;
+							}
+							fitted.Portal = original.Portal;
+							fitted.Request.Geometry = std::move(originalRequest.Geometry);
+							fitted.Request.KnownImage = originalRequest.KnownImage;
+							fitted.Request.Scope = originalRequest.Scope;
+							fitted.Request.EyePlayer = std::move(originalRequest.EyePlayer);
+							fitted.Request.RetainedBodyPlayer = std::move(originalRequest.RetainedBodyPlayer);
+							fitted.Request.OrderedLayers = originalRequest.OrderedLayers;
+							fitted.Request.TransferEye = originalRequest.TransferEye;
+							if (originalRequest.Entrance && fitted.Request.Entrance)
+								fitted.Request.Entrance->SourceWorld = originalRequest.Entrance->SourceWorld;
+							fitted.Binding.ExpectedScope = original.Binding.ExpectedScope;
+							fitted.Binding.ExpectedProjection = original.Binding.ExpectedProjection;
+							fitted.Binding.Layer = original.Binding.Layer;
+							demand = std::move(fitted);
+						} else {
+							demand.Request.PixelBudget = childBudget;
+						}
+
 						if (uint64_t(demand.Request.Width) * demand.Request.Height *
 								(job.Request.OrderedLayers ? 4 : 1) >
 							childBudget) {
@@ -3643,7 +3708,6 @@ namespace engine::render {
 							job.Waiting = true;
 							continue;
 						}
-						demand.Request.PixelBudget = childBudget;
 						const auto key = core::Name(
 							std::string(NESTED_REPLY_CHANNEL) + std::to_string(job.Slot) + "/" +
 							std::to_string(demand.Portal.Index)
