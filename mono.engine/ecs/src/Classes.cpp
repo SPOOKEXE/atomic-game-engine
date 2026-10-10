@@ -246,9 +246,9 @@ namespace engine::ecs {
 
 		Entry &entry = table.Entries[owner.Index];
 		const auto property = std::find_if(
-			entry.Declared.begin(), entry.Declared.end(), [propertyName](const PropertyDescriptor &candidate) {
-				return candidate.Spelling == propertyName;
-			}
+			entry.Declared.begin(),
+			entry.Declared.end(),
+			[propertyName](const PropertyDescriptor &candidate) { return candidate.Spelling == propertyName; }
 		);
 		if (property == entry.Declared.end()) {
 			return false;
