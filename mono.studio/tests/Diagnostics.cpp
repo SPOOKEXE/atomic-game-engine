@@ -1,3 +1,4 @@
+#include "FrameGraphSnapshot.hpp"
 #include "PhysicsProfiler.hpp"
 #include "ProfilerFlame.hpp"
 #include "TimelineBar.hpp"
@@ -42,6 +43,40 @@ using studio::FocusDiagnosticSpans;
 using studio::LayoutDiagnosticRows;
 using studio::SelectHeapHistorySnapshot;
 using studio::ShouldReplaceDiagnosticSnapshot;
+
+TEST_CASE("frame graph counters freeze while paused and refresh on resume", "[studio][diagnostics]") {
+	engine::render::FrameStatistics statistics;
+	statistics.Record(1.0, 1.0f / 60.0f);
+
+	engine::render::FrameSummary presentation{};
+	bool hasPresentation = false;
+	size_t droppedGpuMarks = 0;
+	size_t droppedMarkReads = 0;
+	const auto readDroppedMarks = [&droppedMarkReads] { return ++droppedMarkReads; };
+
+	studio::frame_graph_detail::UpdateFrameGraphCounters(
+		presentation, hasPresentation, droppedGpuMarks, false, statistics, readDroppedMarks
+	);
+	REQUIRE(hasPresentation);
+	CHECK(presentation.CurrentMilliseconds == Catch::Approx(1000.0f / 60.0f));
+	CHECK(droppedGpuMarks == 1);
+	CHECK(droppedMarkReads == 1);
+
+	statistics.Record(2.0, 0.001f);
+	studio::frame_graph_detail::UpdateFrameGraphCounters(
+		presentation, hasPresentation, droppedGpuMarks, true, statistics, readDroppedMarks
+	);
+	CHECK(presentation.CurrentMilliseconds == Catch::Approx(1000.0f / 60.0f));
+	CHECK(droppedGpuMarks == 1);
+	CHECK(droppedMarkReads == 1);
+
+	studio::frame_graph_detail::UpdateFrameGraphCounters(
+		presentation, hasPresentation, droppedGpuMarks, false, statistics, readDroppedMarks
+	);
+	CHECK(presentation.CurrentMilliseconds == Catch::Approx(1.0f));
+	CHECK(droppedGpuMarks == 2);
+	CHECK(droppedMarkReads == 2);
+}
 
 TEST_CASE("timeline bars fit at the right edge and in narrow panels", "[studio][diagnostics]") {
 	for (const float width : {0.0f, 0.5f, 1.0f, 100.0f}) {
@@ -613,6 +648,88 @@ TEST_CASE("reported trees cannot overlap the next measured sibling", "[studio][d
 	CHECK(spans[2].StartMilliseconds + spans[2].Milliseconds <= simulationEnd);
 	CHECK(spans[3].StartMilliseconds + spans[3].Milliseconds <= simulationEnd);
 	CHECK(spans[4].StartMilliseconds >= simulationEnd);
+}
+
+TEST_CASE("reported children use chronological measured gaps", "[studio][diagnostics]") {
+	std::vector spans{
+		DiagnosticSpan{.Name = "Application", .Depth = 0, .Milliseconds = 10.0f},
+		DiagnosticSpan{
+			.Name = "late measured span",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 7.0f,
+			.Milliseconds = 2.0f,
+		},
+		DiagnosticSpan{
+			.Name = "early appended span",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 1.0f,
+			.Milliseconds = 2.0f,
+		},
+		DiagnosticSpan{
+			.Name = "reported child",
+			.Depth = 1,
+			.Parent = 0,
+			.Milliseconds = 1.0f,
+			.Reported = true,
+		},
+	};
+
+	FitReportedDiagnosticTimeline(spans, 10.0f);
+
+	CHECK(spans[3].StartMilliseconds == 3.0f);
+	CHECK(spans[3].Milliseconds == 4.0f);
+}
+
+TEST_CASE("averaged late worker reports fit around earlier parent siblings", "[studio][diagnostics]") {
+	const std::array first{
+		FrameSpan{.Name = "application", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .Milliseconds = 10.0f},
+		FrameSpan{.Name = "simulation", .Depth = 1, .Parent = 0, .Milliseconds = 4.0f},
+		FrameSpan{.Name = "dispatch", .Depth = 2, .Parent = 1, .Milliseconds = 1.0f},
+		FrameSpan{
+			.Name = "presentation", .Depth = 1, .Parent = 0, .StartMilliseconds = 4.0f, .Milliseconds = 6.0f
+		},
+	};
+	const std::array second{
+		FrameSpan{.Name = "application", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .Milliseconds = 10.0f},
+		FrameSpan{.Name = "simulation", .Depth = 1, .Parent = 0, .Milliseconds = 4.0f},
+		FrameSpan{.Name = "dispatch", .Depth = 2, .Parent = 1, .Milliseconds = 1.0f},
+		FrameSpan{
+			.Name = "worker",
+			.Depth = 2,
+			.Parent = 1,
+			.StartMilliseconds = 1.0f,
+			.Milliseconds = 8.0f,
+			.Reported = true,
+		},
+		FrameSpan{
+			.Name = "task",
+			.Depth = 3,
+			.Parent = 3,
+			.StartMilliseconds = 1.0f,
+			.Milliseconds = 2.0f,
+			.Reported = true,
+		},
+		FrameSpan{
+			.Name = "presentation", .Depth = 1, .Parent = 0, .StartMilliseconds = 4.0f, .Milliseconds = 6.0f
+		},
+	};
+
+	std::vector<DiagnosticSpan> totals;
+	AccumulateDiagnosticSpans(first, totals);
+	AccumulateDiagnosticSpans(second, totals);
+	FinishDiagnosticAverage(totals, 2);
+	FitReportedDiagnosticTimeline(totals, 10.0f);
+
+	REQUIRE(totals.size() == 6);
+	CHECK(totals[3].Name == "presentation");
+	CHECK(totals[4].Name == "worker");
+	CHECK(totals[4].StartMilliseconds == Catch::Approx(1.0f));
+	CHECK(totals[4].Milliseconds == Catch::Approx(3.0f));
+	CHECK(totals[5].Name == "task");
+	CHECK(totals[5].StartMilliseconds == Catch::Approx(1.0f));
+	CHECK(totals[5].Milliseconds == Catch::Approx(3.0f));
 }
 
 TEST_CASE("GPU reports keep their producer duration outside CPU timeline fitting", "[studio][diagnostics]") {

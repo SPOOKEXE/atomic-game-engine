@@ -13,6 +13,7 @@
 // menu, and they read exactly the same `core::FrameGraph` the client's overlay
 // does - the data is shared even though the drawing is not.
 
+#include "FrameGraphSnapshot.hpp"
 #include "ProfilerFlame.hpp"
 
 #include <engine/core/FrameGraph.hpp>
@@ -451,6 +452,25 @@ namespace studio {
 	void FitReportedDiagnosticTimeline(std::vector<DiagnosticSpan> &spans, float frameMilliseconds) {
 		const float frameEnd = std::max(frameMilliseconds, 0.0f);
 		const size_t count = spans.size();
+		static thread_local std::vector<size_t> firstChild;
+		static thread_local std::vector<size_t> nextSibling;
+		static thread_local std::vector<size_t> lastChild;
+		firstChild.assign(count, count);
+		nextSibling.assign(count, count);
+		lastChild.assign(count, count);
+		for (size_t childIndex = 0; childIndex < count; childIndex++) {
+			const size_t parentIndex = spans[childIndex].Parent;
+			if (parentIndex >= childIndex) {
+				continue;
+			}
+			if (firstChild[parentIndex] == count) {
+				firstChild[parentIndex] = childIndex;
+			} else {
+				nextSibling[lastChild[parentIndex]] = childIndex;
+			}
+			lastChild[parentIndex] = childIndex;
+		}
+
 		for (size_t parentIndex = 0; parentIndex < count; parentIndex++) {
 			DiagnosticSpan &parent = spans[parentIndex];
 			if (parent.Category == engine::core::ProfileCategory::Gpu) {
@@ -465,13 +485,10 @@ namespace studio {
 
 			float reportedTotal = 0.0f;
 			size_t reportedCount = 0;
-			for (size_t childIndex = parentIndex + 1; childIndex < count; childIndex++) {
+			for (size_t childIndex = firstChild[parentIndex]; childIndex < count;
+				 childIndex = nextSibling[childIndex]) {
 				const DiagnosticSpan &child = spans[childIndex];
-				if (child.Depth <= parent.Depth) {
-					break;
-				}
-				if (child.Parent == parentIndex && child.Reported &&
-					child.Category != engine::core::ProfileCategory::Gpu) {
+				if (child.Reported && child.Category != engine::core::ProfileCategory::Gpu) {
 					reportedTotal += std::max(child.Milliseconds, 0.0f);
 					reportedCount++;
 				}
@@ -485,24 +502,38 @@ namespace studio {
 			if (!parent.Reported) {
 				float coveredUntil = parentStart;
 				float widest = -1.0f;
-				for (size_t childIndex = parentIndex + 1; childIndex < count; childIndex++) {
+				struct ChildInterval {
+					float Start = 0.0f;
+					float End = 0.0f;
+				};
+				static thread_local std::vector<ChildInterval> measuredChildren;
+				measuredChildren.clear();
+				for (size_t childIndex = firstChild[parentIndex]; childIndex < count;
+					 childIndex = nextSibling[childIndex]) {
 					const DiagnosticSpan &child = spans[childIndex];
-					if (child.Depth <= parent.Depth) {
-						break;
-					}
-					if (child.Parent != parentIndex || child.Reported || child.Milliseconds <= 0.0f) {
+					if (child.Reported || child.Milliseconds <= 0.0f) {
 						continue;
 					}
 
 					const float childStart = std::clamp(child.StartMilliseconds, parentStart, parentEnd);
 					const float childEnd =
 						std::clamp(child.StartMilliseconds + child.Milliseconds, childStart, parentEnd);
-					if (childStart - coveredUntil > widest) {
-						widest = childStart - coveredUntil;
-						gapStart = coveredUntil;
-						gapEnd = childStart;
+					measuredChildren.push_back({childStart, childEnd});
+				}
+				std::sort(
+					measuredChildren.begin(),
+					measuredChildren.end(),
+					[](const ChildInterval &left, const ChildInterval &right) {
+						return left.Start == right.Start ? left.End < right.End : left.Start < right.Start;
 					}
-					coveredUntil = std::max(coveredUntil, childEnd);
+				);
+				for (const ChildInterval &child : measuredChildren) {
+					if (child.Start - coveredUntil > widest) {
+						widest = child.Start - coveredUntil;
+						gapStart = coveredUntil;
+						gapEnd = child.Start;
+					}
+					coveredUntil = std::max(coveredUntil, child.End);
 				}
 				if (parentEnd - coveredUntil > widest) {
 					gapStart = coveredUntil;
@@ -512,13 +543,10 @@ namespace studio {
 
 			const float gap = std::max(gapEnd - gapStart, 0.0f);
 			float cursor = gapStart;
-			for (size_t childIndex = parentIndex + 1; childIndex < count; childIndex++) {
+			for (size_t childIndex = firstChild[parentIndex]; childIndex < count;
+				 childIndex = nextSibling[childIndex]) {
 				DiagnosticSpan &child = spans[childIndex];
-				if (child.Depth <= parent.Depth) {
-					break;
-				}
-				if (child.Parent != parentIndex || !child.Reported ||
-					child.Category == engine::core::ProfileCategory::Gpu) {
+				if (!child.Reported || child.Category == engine::core::ProfileCategory::Gpu) {
 					continue;
 				}
 
@@ -952,11 +980,19 @@ namespace studio {
 		}
 
 		FrameGraphView &view = FrameGraphState;
-		if (Renderer.DroppedProfileMarks() > 0) {
+		frame_graph_detail::UpdateFrameGraphCounters(
+			view.PresentationSummary,
+			view.HasPresentationSummary,
+			view.DroppedGpuMarks,
+			view.Paused,
+			Statistics,
+			[this] { return Renderer.DroppedProfileMarks(); }
+		);
+		if (view.DroppedGpuMarks > 0) {
 			ImGui::TextColored(
 				ImVec4(1.0f, 0.55f, 0.2f, 1.0f),
 				"%zu GPU timestamp marks dropped; device rows are partial",
-				Renderer.DroppedProfileMarks()
+				view.DroppedGpuMarks
 			);
 		}
 		if (ImGui::RadioButton("Frame timings", !view.ShowCascadedCaches)) {
@@ -1320,14 +1356,13 @@ namespace studio {
 		}
 		ImGui::PopStyleColor();
 
-		if (Statistics.HasSamples()) {
-			const engine::render::FrameSummary presentation = Statistics.Summarise();
+		if (view.HasPresentationSummary) {
 			ImGui::SameLine();
 			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
 			ImGui::Text(
 				"present %.2f ms / %.0f fps",
-				static_cast<double>(presentation.CurrentMilliseconds),
-				static_cast<double>(presentation.Current)
+				static_cast<double>(view.PresentationSummary.CurrentMilliseconds),
+				static_cast<double>(view.PresentationSummary.Current)
 			);
 			ImGui::PopStyleColor();
 		}

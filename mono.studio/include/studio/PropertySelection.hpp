@@ -20,9 +20,10 @@
 namespace studio {
 	// One property shared by every selected live instance.
 	struct SelectionPropertyRow {
-		// Descriptor, representative value, coverage counts, and disagreement state.
+		// Descriptor and declaring owner, representative value, coverage counts, and disagreement state.
 		//@{
 		const engine::ecs::PropertyDescriptor *Descriptor = nullptr;
+		engine::ecs::ClassId Owner;
 		engine::game::PropertyValue Value;
 		size_t Applicable = 0;
 		size_t Readable = 0;
@@ -30,11 +31,12 @@ namespace studio {
 		//@}
 	};
 
-	// Shared properties grouped beneath the class that first declared them.
+	// Shared properties projected by declaring class or by inspector tag.
 	struct SelectionPropertyGroup {
-		// Declaring class, applicable selection count, and projected rows.
+		// Declaring class for owner groups, inspector tag for tagged groups, coverage and rows.
 		//@{
 		engine::ecs::ClassId Owner;
+		engine::core::Name PropertiesTag;
 		size_t Applicable = 0;
 		std::vector<SelectionPropertyRow> Rows;
 		//@}
@@ -54,4 +56,8 @@ namespace studio {
 	// Builds the root-first intersection of properties exposed by every selected live instance.
 	std::vector<SelectionPropertyGroup>
 	BuildPropertySelection(const engine::ecs::Store &store, std::span<const engine::ecs::Entity> instances);
+	// Groups the shared property surface by explicit inspector metadata. Row owners stay unchanged.
+	std::vector<SelectionPropertyGroup> BuildTaggedPropertySelection(
+		const engine::ecs::Store &store, std::span<const engine::ecs::Entity> instances
+	);
 }

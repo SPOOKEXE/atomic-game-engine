@@ -5126,6 +5126,10 @@ namespace studio {
 		bool FocusFind = false;
 		std::string ComponentFilter;
 		std::string CollectionTagDraft;
+		engine::core::Name CollectionTagOriginal;
+		bool CollectionTagEditing = false;
+		bool CollectionTagFocus = false;
+		uint64_t CollectionTagContext = 0;
 		//@}
 
 		// What the output panel is showing, and what it is searching for.
@@ -6558,6 +6562,9 @@ namespace studio {
 			float IdleMilliseconds = 0.0f;
 			float UnmarkedMilliseconds = 0.0f;
 			size_t Dropped = 0;
+			engine::render::FrameSummary PresentationSummary{};
+			size_t DroppedGpuMarks = 0;
+			bool HasPresentationSummary = false;
 			// Frames represented by the published snapshot. Kept apart from the
 			// next interval's running count so the label does not jump back to zero
 			// immediately after publishing a mean.

@@ -4,10 +4,26 @@
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/world/Universe.hpp>
 
+#include <span>
 #include <string_view>
 
 namespace studio {
+	class CommandLog;
+	// A selection-scoped membership edit. Rename only moves memberships that carry Before.
+	struct CollectionTagEdit {
+		engine::core::Name Before;
+		engine::core::Name After;
+		bool Wanted = false;
+	};
+	bool ApplyCollectionTagEdit(
+		engine::ecs::Store &store,
+		engine::world::WorldId world,
+		std::span<const engine::ecs::Entity> selection,
+		const CollectionTagEdit &edit,
+		CommandLog *commands
+	);
 	// Identifies both current and legacy property spellings that configure an
 	// automatically generated mesh LOD's retained-triangle fraction.
 	bool IsAutomaticLodRatioProperty(std::string_view spelling);
