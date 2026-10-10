@@ -264,10 +264,10 @@ state until v0.19.
 | `scene.Sun` | 24 | 4 | yes | yes | . | . | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses. |
 | `scene.Surface` | 4 | 4 | yes | . | . | . | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like. |
 | `scene.SurfaceAppearance` | 96 | 4 | yes | . | yes | . | The seven texture maps, shader name, alpha mode and cutoff a drawable is rendered with. `ResolveMaterials` writes it and the PBR paths read it. |
-| `scene.SurfaceBounces` | 4 | 4 | yes | yes | . | . | Resource: how deep a mirror may show another mirror, or zero to let the engine decide. Set through the `workspace.SurfaceBounces` property. |
+| `scene.SurfaceBounces` | 4 | 4 | yes | . | . | . | Resource: how deep a mirror may show another mirror, or zero to let the engine decide. Set through the `workspace.SurfaceBounces` property. |
 | `scene.SurfaceCamera` | 20 | 4 | yes | yes | . | . | Authored camera subtype for a mirror or portal pane: render-texture size, redraw cap, tag filter, post-grade, projection face and surface slot; unlike a plain Camera, it is not a viewer-local runtime class. |
 | `scene.SurfaceLens` | 84 | 4 | yes | yes | . | . | The off-axis frustum, oblique clip plane and pane mapping `AimSurfaceCameras` fits to a mirror or portal every frame. Derived from where the local eye stands, never authored. |
-| `scene.SurfaceLimit` | 4 | 4 | yes | yes | . | . | Resource: how many surface panes may be drawn at once, from zero upward. Set through the `workspace.MaxSurfaces` property. |
+| `scene.SurfaceLimit` | 4 | 4 | yes | . | . | . | Resource: how many surface panes may be drawn at once, from zero upward. Set through the `workspace.MaxSurfaces` property. |
 | `scene.SurfaceTable` | 24 | 8 | yes | . | . | . | Resource: the world's material table, mapping a `Surface::Material` name to the friction and restitution the narrow phase combines with. |
 | `scene.TagTable` | 24 | 8 | yes | . | . | . | Resource: the registered tag names, at most thirty-two, whose index is the bit `Tags::Mask` sets. A mask means nothing without the table beside it. |
 | `scene.Tags` | 4 | 4 | yes | yes | . | . | One bit per registered tag, named by the world's `TagTable`. Read by tag-filtered surface cameras and by every `CollectionService:GetTagged` call. |
