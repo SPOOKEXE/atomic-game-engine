@@ -78,6 +78,10 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] Reuse drawable-source membership during presentation updates and hoist label-name lookup out of per-instance loops (`443e4588`).
 - [x] Bound mirror captures by authored bounce depth; the one-bounce GPU fixture renders all 320 mirror-ball facets independently of portal depth (`956e76e9`, `cf75b379`).
 - [x] Preserve complete instance births through transport pressure and loss; the stress test checks all 1,536 instances converge to the final changing value after one join (`813fd045`).
+- [x] Group all built-in reflected properties with inherited `PropertiesTag` metadata and an `Unassigned` fallback; put collection tag add, rename, remove and undo in the Properties footer. See [Studio properties](docs/STUDIO_PROPERTIES.md).
+- [x] Freeze paused Frame Graph counters and draw data, and fit structural averages by actual parent relationships so child order does not hide gaps.
+- [x] Admit tick exchange workers using each stage's measured cost, wake only workers selected for the active batch and report worker bodies only when they own tasks.
+- [x] Replace inactive DOF, god rays, bloom, lenses, sky, fog and empty overlays with output-preserving copies or clears; skip empty G-buffer shader draws, depth linearisation, SSAO and deferred lighting only when cleared texture contents prove the result. GPU fixtures cover inactive effects, active transitions, lighting captures and authored zero-depth exports.
 - [_] Non-acceptance follow-up: audit aggregate replica snapshot and staged-byte ceilings for large EditableImage rows. The current path has a `uint32_t` total cap but no explicit assembled-image budget; per-image bounds and windowed staging are tested.
 - [_] Security follow-up: audit dynamic schema and component-codec acceptance, plus client-local provenance and descendant filtering across replication and authored game saves.
 
