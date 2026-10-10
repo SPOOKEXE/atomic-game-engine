@@ -1,5 +1,7 @@
 #include "ThreadAffinity.hpp"
 
+#include <engine/core/FrameGraph.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
@@ -216,6 +218,55 @@ TEST_CASE("assigned tasks sharing a worker run serially", "[jobs]") {
 
 	CHECK(overlap.load(std::memory_order_relaxed) == 0);
 	CHECK(Jobs::LastBatch().Participants == 1);
+}
+
+TEST_CASE("assigned profiling reports task owners rather than the whole pool", "[jobs][profiling]") {
+	Pool pool{4};
+	if (Jobs::PinnedWorkerCount() < 2) {
+		SUCCEED("this platform exposes fewer than two pinned workers");
+		return;
+	}
+	struct Collecting {
+		bool Previous = engine::core::FrameGraph::IsEnabled();
+		Collecting() {
+			engine::core::FrameGraph::SetEnabled(true);
+		}
+		~Collecting() {
+			engine::core::FrameGraph::SetEnabled(Previous);
+		}
+	} collecting;
+	const auto before = engine::core::Metrics::Get("jobs.assigned.empty_workers");
+	std::atomic<unsigned> visits{0};
+	const unsigned assignments[]{0, 1};
+	engine::core::FrameGraph::BeginFrame();
+	Jobs::ForWorkers(assignments, [&](size_t begin, size_t end) {
+		visits.fetch_add(static_cast<unsigned>(end - begin), std::memory_order_relaxed);
+	});
+	engine::core::FrameGraph::EndFrame();
+	CHECK(visits.load() == 2);
+	CHECK(Jobs::LastBatch().Participants == 2);
+
+	unsigned workerReports = 0;
+	unsigned bodyReports = 0;
+	unsigned emptyReports = 0;
+	bool joinIdle = false;
+	for (const auto &span : engine::core::FrameGraph::Spans()) {
+		if (span.Name == "jobs.assigned.worker") workerReports++;
+		if (span.Name == "jobs.assigned.body") bodyReports++;
+		if (span.Name == "jobs.assigned.empty workers") emptyReports++;
+		if (span.Name == "jobs.join.assigned")
+			joinIdle = span.Category == engine::core::ProfileCategory::Idle;
+	}
+	CHECK(workerReports == 2);
+	CHECK(bodyReports == 2);
+	CHECK(joinIdle);
+	const auto after = engine::core::Metrics::Get("jobs.assigned.empty_workers");
+	REQUIRE(after.has_value());
+	const double emptyWorkers = after->Value - (before ? before->Value : 0.0);
+	CHECK(emptyWorkers >= 0);
+	CHECK(emptyWorkers <= Jobs::WorkerCount() - 2);
+	CHECK(after->Samples == (before ? before->Samples : 0) + 1);
+	CHECK(emptyReports == (emptyWorkers > 0 ? 1 : 0));
 }
 
 TEST_CASE("an assigned worker exception reaches the caller and releases the pool", "[jobs]") {

@@ -3,6 +3,7 @@
 #include <engine/core/Clock.hpp>
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/parallel/Jobs.hpp>
 
@@ -37,6 +38,7 @@ namespace engine::parallel {
 			uint64_t InclusiveNanoseconds = 0;
 			uint64_t BusyNanoseconds = 0;
 			bool Entered = false;
+			bool TookTask = false;
 		};
 
 		// One batch may use the pool; competing dispatches run inline.
@@ -224,7 +226,7 @@ namespace engine::parallel {
 			if (batch.CaptureAssigned) {
 				// Published before Inside retires, including workers that found no assigned task.
 				batch.Owner->AssignedReadings[workerIndex] = {
-					core::Clock::Nanoseconds() - started, busy, true
+					core::Clock::Nanoseconds() - started, busy, true, took
 				};
 			}
 		}
@@ -629,8 +631,15 @@ namespace engine::parallel {
 		LastTiming.Participants = batch.Participants.load(std::memory_order_relaxed);
 
 		if (batch.CaptureAssigned) {
+			uint64_t emptyNanoseconds = 0;
+			unsigned emptyWorkers = 0;
 			for (const AssignedReading &reading : pool.AssignedReadings) {
 				if (!reading.Entered) continue;
+				if (!reading.TookTask) {
+					emptyNanoseconds += reading.InclusiveNanoseconds;
+					emptyWorkers++;
+					continue;
+				}
 				// Producer self time includes scanning, retirement and timer overhead, not wake/lock time.
 				core::FrameGraph::ReportedScope worker(
 					"jobs.assigned.worker",
@@ -641,6 +650,15 @@ namespace engine::parallel {
 					"jobs.assigned.body",
 					core::ProfileCategory::Engine,
 					static_cast<float>(static_cast<double>(reading.BusyNanoseconds) / 1e6)
+				);
+			}
+			// Preserve observed empty-worker scan overhead without per-worker trees.
+			core::Metrics::Count("jobs.assigned.empty_workers", emptyWorkers);
+			if (emptyWorkers > 0) {
+				core::FrameGraph::Report(
+					"jobs.assigned.empty workers",
+					core::ProfileCategory::Engine,
+					static_cast<float>(static_cast<double>(emptyNanoseconds) / 1e6)
 				);
 			}
 		}
