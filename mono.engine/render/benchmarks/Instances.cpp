@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstring>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 TEST_SUITE_ID("engine.render.bench.instances")
@@ -270,4 +271,55 @@ BENCH("Stage contiguous · whole 10,000-row pool", 1) {
 	const std::span<const GpuInstance> packed = rows.Residency.PackedRows();
 	std::memcpy(rows.Staged.data(), packed.data(), packed.size_bytes());
 	Consume(rows.Staged.data());
+}
+
+BENCH("DirtyRanges · 10,000 dirty rows · repeated metric stage upload reads", 300) {
+	static Rows rows(10'000);
+	rows.Residency.MarkAllDirty();
+	for (size_t sync = 0; sync < 100; ++sync) {
+		for (size_t reader = 0; reader < 3; ++reader) {
+			const auto ranges = rows.Residency.DirtyRanges();
+			if (ranges.size() != 1 || ranges.front().First != 0 || ranges.front().Count != 10'000)
+				throw std::runtime_error("dirty residency range did not cover the full pool");
+			Consume(ranges.size());
+			Consume(ranges.data());
+		}
+	}
+	rows.Residency.AcknowledgeDirty();
+}
+
+BENCH("DirtyRanges · 10,000 resident rows · repeated resync", 300) {
+	static Rows rows(10'000);
+	for (size_t sync = 0; sync < 100; ++sync) {
+		rows.Residency.MarkAllDirty();
+		for (size_t reader = 0; reader < 3; ++reader) {
+			const auto ranges = rows.Residency.DirtyRanges();
+			if (ranges.size() != 1 || ranges.front().First != 0 || ranges.front().Count != 10'000)
+				throw std::runtime_error("resynced residency range did not cover the full pool");
+			Consume(ranges.size());
+			Consume(ranges.data());
+		}
+		rows.Residency.AcknowledgeDirty();
+	}
+}
+
+BENCH("DirtyRanges · later camera adds a dirty row between reads", 600) {
+	static Rows rows(10'000);
+	for (size_t sync = 0; sync < 100; ++sync) {
+		rows.Residency.AcknowledgeDirty();
+		for (const size_t index : {size_t{255}, size_t{513}}) {
+			rows.Source[index].Frame.Position.X = rows.Source[index].Frame.Position.X == 0.0f ? 1.0f : 0.0f;
+			rows.Packed[index] = ToGpu(rows.Source[index], rows.Mesh);
+			Consume(rows.Residency.Upsert(rows.Keys[index], rows.Packed[index]));
+			for (size_t reader = 0; reader < 3; ++reader) {
+				const auto ranges = rows.Residency.DirtyRanges();
+				const size_t expected = index == 255 ? 1 : 2;
+				if (ranges.size() != expected || ranges.back().First != index || ranges.back().Count != 1)
+					throw std::runtime_error("later camera dirty row missing from residency ranges");
+				Consume(ranges.size());
+				Consume(ranges.data());
+			}
+		}
+	}
+	rows.Residency.AcknowledgeDirty();
 }

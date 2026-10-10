@@ -481,6 +481,7 @@ namespace engine::render {
 		imagegraph::Diagnostic &diagnostic
 	) {
 		RequireOwningThread("EvaluateImageGraph");
+		ENGINE_PROFILE_CAT("imagegraph evaluation", core::ProfileCategory::Render);
 		using namespace imagegraph_gpu_detail;
 		const auto refuse = [&](std::string_view node, std::string_view message) {
 			Refuse(diagnostic, node, message);
@@ -578,7 +579,6 @@ namespace engine::render {
 		);
 		if (pending == state.PendingSubmissions.end())
 			return refuse({}, "GPU imagegraph queue is full; retry after completion");
-		ENGINE_PROFILE_CAT("imagegraph gpu evaluation", core::ProfileCategory::Render);
 		const auto started = std::chrono::steady_clock::now();
 		std::array<SDL_GPUTexture *, imagegraph::Limits::MaximumNodes> textures{};
 		std::array<ImageGraphGpuUniforms, imagegraph::Limits::MaximumNodes> uniforms{};

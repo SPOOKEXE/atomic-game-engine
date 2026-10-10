@@ -336,6 +336,28 @@ namespace engine::render {
 			}
 		};
 		BatchSubmitResult BatchSubmit;
+		struct FrameBatchScratch {
+			std::vector<FrameViewIdentity> Identities;
+			std::vector<FrameViewGroup> Groups;
+			std::vector<size_t> Order;
+			std::vector<ViewMutationIdentity> Restorations;
+			std::vector<const InstalledPipeline *> PlannedPipelines;
+			std::vector<uint64_t> Worlds;
+
+			void Clear() {
+				Identities.clear();
+				Order.clear();
+				Restorations.clear();
+				PlannedPipelines.clear();
+				Worlds.clear();
+				// Keep nested capacities without retaining borrowed pipeline identities.
+				for (FrameViewGroup &group : Groups) {
+					group.Identity = {};
+					group.Views.clear();
+				}
+			}
+		};
+		FrameBatchScratch BatchScratch;
 		bool BatchActive = false;
 		bool BatchFirst = false;
 		bool BatchFinal = false;
@@ -1580,6 +1602,10 @@ namespace engine::render {
 			scene::WorldLighting Lighting;
 			bool ResetPending = true;
 			bool SubmissionPending = false;
+			uint64_t PreparedFrame = std::numeric_limits<uint64_t>::max();
+			ecs::Entity DefinitionSource = ecs::NULL_ENTITY;
+			uint64_t DefinitionRevision = 0;
+			bool DefinitionValid = false;
 		};
 		std::vector<GpuParticleFieldWorld> GpuParticleFieldWorlds;
 		GpuParticleFieldWorld *ActiveGpuParticleFieldWorld = nullptr;
@@ -1595,7 +1621,11 @@ namespace engine::render {
 			return GpuParticleFieldWorlds.back();
 		}
 		bool ReserveGpuParticleField(uint32_t count);
-		bool PrepareGpuParticleField(const View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot);
+		struct GpuParticleFieldPreparation {
+			uint32_t Dispatches = 0;
+		};
+		GpuParticleFieldPreparation
+		PrepareGpuParticleField(const View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot);
 		uint32_t DrawGpuParticleField(
 			SDL_GPUCommandBuffer *command,
 			SDL_GPURenderPass *pass,

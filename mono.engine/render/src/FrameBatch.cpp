@@ -192,14 +192,27 @@ namespace engine::render {
 		Render.State->VisibilityWorking.Invalidate();
 		Render.State->PollSceneFrames();
 
-		std::vector<FrameViewIdentity> identities;
+		auto &scratch = Render.State->BatchScratch;
+		scratch.Clear();
+		struct ClearScratchOnExit {
+			Renderer::Impl::FrameBatchScratch *Scratch;
+			void Clear() {
+				if (Scratch == nullptr) return;
+				Scratch->Clear();
+				Scratch = nullptr;
+			}
+			~ClearScratchOnExit() {
+				Clear();
+			}
+		} clearScratch{&scratch};
+		auto &identities = scratch.Identities;
 		identities.reserve(views.size());
 		for (const View &view : views) {
 			identities.push_back({view.World, Render.State->PipelineFor(view.Pipeline)});
 		}
-		const std::vector<FrameViewGroup> groups = GroupFrameViews(identities, present);
+		const auto groups = GroupFrameViews(identities, present, scratch.Groups);
 
-		std::vector<size_t> order;
+		auto &order = scratch.Order;
 		order.reserve(views.size());
 		for (const FrameViewGroup &group : groups) {
 			order.insert(order.end(), group.Views.begin(), group.Views.end());
@@ -295,7 +308,7 @@ namespace engine::render {
 			}
 		);
 
-		std::vector<ViewMutationIdentity> restorations;
+		auto &restorations = scratch.Restorations;
 		size_t position = 0;
 		for (size_t groupIndex = 0; groupIndex < groups.size() && !Render.State->BatchFailed; groupIndex++) {
 			if (FailBeforeGroupForTests(groupIndex)) {
@@ -370,7 +383,7 @@ namespace engine::render {
 		}
 		const bool graphCompleted = frame.Submitted && !Render.State->BatchFailed;
 
-		std::vector<const Renderer::Impl::InstalledPipeline *> plannedPipelines;
+		auto &plannedPipelines = scratch.PlannedPipelines;
 		plannedPipelines.reserve(groups.size());
 		{
 			ENGINE_PROFILE_CAT("FrameBatch::plan pipelines", core::ProfileCategory::Render);
@@ -384,7 +397,8 @@ namespace engine::render {
 				plannedPipelines.push_back(named);
 				uint32_t planWidth = width;
 				uint32_t planHeight = height;
-				std::vector<uint64_t> worlds;
+				auto &worlds = scratch.Worlds;
+				worlds.clear();
 				worlds.reserve(views.size());
 				for (const View &view : views) {
 					if (Render.State->PipelineFor(view.Pipeline) != named) {
@@ -498,6 +512,8 @@ namespace engine::render {
 			Render.State->BatchCaptureTimingRequested = false;
 			Render.State->BatchSubmit = {};
 		}
+		// Completion callbacks may start another batch after BatchActive is cleared.
+		clearScratch.Clear();
 		{
 			ENGINE_PROFILE_CAT("FrameBatch::complete hooks", core::ProfileCategory::Render);
 			if (gameInterfaceHook != nullptr) {

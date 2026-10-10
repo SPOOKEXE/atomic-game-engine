@@ -382,3 +382,61 @@ TEST_CASE("token residency retires rows after the whole camera batch omits them"
 	CHECK(rows.LiveCount() == 1);
 	CHECK(rows.PackedRows().size() == 1);
 }
+
+TEST_CASE("materialized upload ranges follow later camera edits and resets", "[render][residency]") {
+	InstanceResidency rows;
+	rows.BeginFrame(1);
+	for (uint64_t source = 1; source <= 4; source++)
+		rows.Upsert(Key(source), Row(1.0f));
+	REQUIRE(rows.DirtyRanges().size() == 1);
+	CHECK(rows.DirtyRanges()[0].Count == 4);
+	rows.AcknowledgeDirty();
+	CHECK(rows.DirtyRanges().empty());
+
+	rows.Upsert(Key(1), Row(2.0f));
+	REQUIRE(rows.DirtyRanges().size() == 1);
+	CHECK(rows.DirtyRanges()[0].Count == 1);
+	rows.BeginFrame(1);
+	rows.Upsert(Key(4), Row(2.0f));
+	REQUIRE(rows.DirtyRanges().size() == 2);
+	CHECK(rows.DirtyRanges()[1].First == 3);
+	rows.Upsert(Key(2), Row(2.0f));
+	REQUIRE(rows.DirtyRanges().size() == 2);
+	CHECK(rows.DirtyRanges()[0].Count == 2);
+	rows.Upsert(Key(3), Row(2.0f));
+	REQUIRE(rows.DirtyRanges().size() == 1);
+	CHECK(rows.DirtyRanges()[0].Count == 4);
+	rows.Upsert(Key(3), Row(3.0f));
+	CHECK(rows.DirtyRanges()[0].Count == 4);
+	rows.AcknowledgeDirty();
+	CHECK(rows.DirtyRanges().empty());
+	rows.MarkAllDirty();
+	REQUIRE(rows.DirtyRanges().size() == 1);
+	CHECK(rows.DirtyRanges()[0].Count == 4);
+	rows.BeginFrame();
+	CHECK(rows.DirtyRanges().empty());
+}
+
+TEST_CASE("materialized upload ranges remove retired rows before slot reuse", "[render][residency]") {
+	InstanceResidency rows;
+	rows.BeginFrame(1);
+	const uint32_t first = rows.Upsert(Key(1), Row(1.0f));
+	rows.Upsert(Key(2), Row(2.0f));
+	rows.Upsert(Key(3), Row(3.0f));
+	REQUIRE(rows.DirtyRanges().size() == 1);
+	CHECK(rows.DirtyRanges()[0].Count == 3);
+	rows.BeginFrame(2);
+	rows.Touch(first);
+	rows.BeginFrame(3);
+	REQUIRE(rows.DirtyRanges().size() == 1);
+	CHECK(rows.DirtyRanges()[0].First == first);
+	CHECK(rows.DirtyRanges()[0].Count == 1);
+	CHECK(rows.PackedRows().size() == 1);
+	rows.Touch(first);
+	CHECK(rows.Upsert(Key(4), Row(4.0f)) == 1);
+	CHECK(rows.DirtyRanges()[0].Count == 2);
+	rows.BeginFrame(4);
+	rows.BeginFrame(5);
+	CHECK(rows.DirtyRanges().empty());
+	CHECK(rows.DirtyRanges().empty());
+}

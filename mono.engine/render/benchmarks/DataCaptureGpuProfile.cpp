@@ -1,6 +1,7 @@
 // A repeatable, headless Vulkan capture profile for the v0.25 Stage 4 gate.
 
 #include <engine/assets/Mesh.hpp>
+#include <engine/core/FrameGraph.hpp>
 #include <engine/core/HeapProfile.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/Renderer.hpp>
@@ -318,8 +319,133 @@ namespace {
 		if (fixture.Report.Drops != 0 || fixture.Report.Samples.empty())
 			throw std::runtime_error("GPU capture profile completed with drops or no captures");
 	}
+
+	struct CachedBatchFixture {
+		bool VideoReady = SDL_Init(SDL_INIT_VIDEO);
+		render::Renderer Renderer;
+		render::SceneTarget Target{64, 64};
+		render::OverlayImage Overlay;
+		std::vector<scene::DrawInstance> Instances = std::vector<scene::DrawInstance>(1024);
+		std::vector<render::View> Views;
+
+		explicit CachedBatchFixture(size_t count) {
+			if (!VideoReady || !Renderer.Initialise(nullptr))
+				throw std::runtime_error("cached render batch device unavailable");
+			Renderer.SetProfiling(render::ProfilingTier::Off);
+			for (size_t row = 0; row < Instances.size(); ++row) {
+				auto &instance = Instances[row];
+				instance.Source = row + 1;
+				instance.Frame.Position = {
+					static_cast<float>(row % 32) - 16.0f,
+					static_cast<float>(row / 32) - 16.0f,
+					-40.0f,
+				};
+			}
+			Views.resize(count);
+			for (size_t index = 0; index < count; ++index) {
+				auto &view = Views[index];
+				view.Target = &Target;
+				view.Slot = index;
+				view.World = 1;
+				view.WorldName = core::Name("cached-render-batch-world");
+				view.SnapshotId = "cached-render-batch-snapshot";
+				view.Instances = Instances;
+				view.Camera.FarPlane = 100;
+			}
+			for (size_t frame = 0; frame < 6; ++frame) {
+				Wait();
+				if (!Renderer.Render(Views, Overlay, nullptr, false).Submitted)
+					throw std::runtime_error("cached batch warm-up failed");
+			}
+			for (auto &view : Views)
+				view.Damage = {};
+		}
+
+		~CachedBatchFixture() {
+			Renderer.Shutdown();
+			if (VideoReady) SDL_QuitSubSystem(SDL_INIT_VIDEO);
+		}
+
+		void Wait() {
+			if (!SDL_WaitForGPUIdle(static_cast<SDL_GPUDevice *>(Renderer.Backend().Device)))
+				throw std::runtime_error(SDL_GetError());
+		}
+	};
+
+	template <size_t Count> void RunCachedBatch() {
+		if (std::getenv("MONO_DATA_CAPTURE_PROFILE") == nullptr)
+			throw std::runtime_error("set MONO_DATA_CAPTURE_PROFILE=1 to opt in to the GPU batch profile");
+		const bool recording = core::FrameGraph::IsEnabled();
+		struct RestoreRecording {
+			bool Enabled;
+			~RestoreRecording() {
+				core::FrameGraph::SetEnabled(Enabled);
+			}
+		} restore{recording};
+		core::FrameGraph::SetEnabled(true);
+		static CachedBatchFixture fixture(Count);
+		// Fill diagnostic name/history storage before counting steady allocations.
+		for (size_t warm = 0; warm < 6; ++warm) {
+			fixture.Wait();
+			core::FrameGraph::BeginFrame();
+			if (!fixture.Renderer.Render(fixture.Views, fixture.Overlay, nullptr, false).Submitted)
+				throw std::runtime_error("cached batch diagnostic warm-up failed");
+			core::FrameGraph::EndFrame();
+		}
+		constexpr size_t FRAMES = 16;
+		uint64_t cpuNanoseconds = 0;
+		uint64_t allocatedBlocks = 0;
+		uint64_t allocatedBytes = 0;
+		uint64_t uploadedBytes = 0;
+		double beginMilliseconds = 0;
+		double beginSelfMilliseconds = 0;
+		const auto gpuBefore = fixture.Renderer.MemoryStatistics();
+		for (size_t frame = 0; frame < FRAMES; ++frame) {
+			fixture.Wait();
+			core::FrameGraph::BeginFrame();
+			const auto heapBefore = core::HeapProfile::Totals();
+			const auto started = Clock::now();
+			const auto result = fixture.Renderer.Render(fixture.Views, fixture.Overlay, nullptr, false);
+			cpuNanoseconds += Elapsed(started);
+			const auto heapAfter = core::HeapProfile::Totals();
+			core::FrameGraph::EndFrame();
+			if (!result.Submitted || result.InstanceRowsDirty != 0)
+				throw std::runtime_error("cached batch failed or dirtied settled instance rows");
+			allocatedBlocks += heapAfter.TotalBlocks - heapBefore.TotalBlocks;
+			allocatedBytes += heapAfter.TotalBytes - heapBefore.TotalBytes;
+			uploadedBytes += result.UploadedBytes;
+			for (const auto &span : core::FrameGraph::Spans()) {
+				if (span.Name != "ViewRecording::Begin") continue;
+				beginMilliseconds += span.Milliseconds;
+				beginSelfMilliseconds += span.SelfMilliseconds;
+			}
+		}
+		fixture.Wait();
+		const auto gpuAfter = fixture.Renderer.MemoryStatistics();
+		std::cout << "cached-render-batch backend=" << fixture.Renderer.BackendName() << " views=" << Count
+				  << " worlds=1 rows=1024 extent=64x64 frames=" << FRAMES
+				  << " renderer_profile=off frame_graph=on cpu_record_ns=" << cpuNanoseconds / FRAMES
+				  << " begin_us=" << beginMilliseconds * 1000 / FRAMES
+				  << " begin_self_us=" << beginSelfMilliseconds * 1000 / FRAMES
+				  << " cpu_heap_available=" << core::HeapProfile::IsCompiledIn()
+				  << " cpu_allocations=" << allocatedBlocks / FRAMES
+				  << " cpu_allocated_bytes=" << allocatedBytes / FRAMES
+				  << " uploaded_bytes=" << uploadedBytes / FRAMES
+				  << " gpu_allocated_bytes=" << gpuAfter.AllocatedBytes - gpuBefore.AllocatedBytes << '\n';
+		engine::testing::Consume(cpuNanoseconds);
+	}
 }
 
 BENCH("Vulkan data capture | queue render poll and release", 1) {
 	RunProfile();
+}
+
+BENCH("GPU Render batch | 1 cached view | 1024 static rows", 16) {
+	RunCachedBatch<1>();
+}
+BENCH("GPU Render batch | 8 cached views | 1024 static rows", 16) {
+	RunCachedBatch<8>();
+}
+BENCH("GPU Render batch | 32 cached views | 1024 static rows", 16) {
+	RunCachedBatch<32>();
 }

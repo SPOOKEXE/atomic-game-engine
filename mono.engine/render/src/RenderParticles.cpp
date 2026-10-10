@@ -1941,7 +1941,7 @@ namespace engine::render {
 		return true;
 	}
 
-	bool Renderer::Impl::PrepareGpuParticleField(
+	Renderer::Impl::GpuParticleFieldPreparation Renderer::Impl::PrepareGpuParticleField(
 		const View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot
 	) {
 		ENGINE_PROFILE_CAT("gpu particle field", core::ProfileCategory::Render);
@@ -1949,20 +1949,51 @@ namespace engine::render {
 		if (!view.GpuParticles || !view.GpuParticles->Field.Enabled ||
 			view.GpuParticles->Field.SpawnSamples.empty() || command == nullptr ||
 			GpuParticleFieldStep == nullptr)
-			return true;
+			return {};
 		const auto &source = *view.GpuParticles;
-		if (!scene::ValidGpuParticleField(source.Field)) return false;
 		ActiveGpuParticleFieldWorld = &GpuParticleFieldWorldFor(
 			view.ParticleWorldName.IsValid() ? view.ParticleWorld : view.World,
 			view.ParticleWorldName.IsValid() ? view.ParticleWorldName : view.WorldName
 		);
 		auto &state = *ActiveGpuParticleFieldWorld;
+		const bool definitionCurrent =
+			state.DefinitionValid && source.Source != ecs::NULL_ENTITY && source.DefinitionRevision != 0 &&
+			state.DefinitionSource == source.Source && state.DefinitionRevision == source.DefinitionRevision;
+		if (!definitionCurrent && !scene::ValidGpuParticleField(source.Field)) {
+			ActiveGpuParticleFieldWorld = nullptr;
+			return {};
+		}
+		state.Lighting = view.Lighting;
+		// Cameras in one world consume its shared field snapshot. Validate
+		// manual or changed packets first, then apply the world's delta once.
+		if (state.PreparedFrame == FrameCounter) return {};
 		const uint32_t requested = scene::NormalizeGpuParticleCount(source.Field.RequestedCount);
 		if ((state.States == nullptr || state.RequestedCount != requested) &&
 			!ReserveGpuParticleField(requested))
-			return state.States != nullptr;
-		const bool samplesChanged = state.SamplesDirty || state.Samples == nullptr ||
-									state.Field.SpawnSamples != source.Field.SpawnSamples;
+			return {};
+		const bool samplesChanged =
+			state.SamplesDirty || state.Samples == nullptr ||
+			(!definitionCurrent && state.Field.SpawnSamples != source.Field.SpawnSamples);
+		const bool definitionChanged =
+			!state.DefinitionValid || samplesChanged ||
+			(!definitionCurrent &&
+			 (state.Field.Enabled != source.Field.Enabled || state.Field.Layers != source.Field.Layers ||
+			  state.Field.RequestedCount != source.Field.RequestedCount ||
+			  state.Field.Seed != source.Field.Seed || state.Field.HalfExtent != source.Field.HalfExtent ||
+			  state.Field.VelocityResponse != source.Field.VelocityResponse ||
+			  state.Field.Styles != source.Field.Styles));
+		const auto sameFrame = [](const core::CFrame &a, const core::CFrame &b) {
+			return a.Position == b.Position && a.Rotation() == b.Rotation();
+		};
+		const auto &oldForce = state.ForceField;
+		const auto &force = source.ForceField;
+		const bool poseChanged =
+			!sameFrame(state.Frame, source.Frame) || !sameFrame(oldForce.Frame, force.Frame) ||
+			oldForce.Source != force.Source || oldForce.Vector != force.Vector ||
+			oldForce.HalfExtent != force.HalfExtent || oldForce.Axis != force.Axis ||
+			oldForce.Radial != force.Radial || oldForce.Tangential != force.Tangential ||
+			oldForce.Falloff != force.Falloff || oldForce.LocalSpace != force.LocalSpace ||
+			oldForce.TwoDimensional != force.TwoDimensional;
 		if (samplesChanged) {
 			core::ByteWriter writer;
 			for (const auto &sample : source.Field.SpawnSamples) {
@@ -1987,13 +2018,13 @@ namespace engine::render {
 			if (replacement == nullptr || staging == nullptr) {
 				if (replacement) gpu::ReleaseBuffer(Device, replacement);
 				if (staging) gpu::ReleaseTransferBuffer(Device, staging);
-				return false;
+				return {};
 			}
 			void *mapped = SDL_MapGPUTransferBuffer(Device, staging, false);
 			if (mapped == nullptr) {
 				gpu::ReleaseBuffer(Device, replacement);
 				gpu::ReleaseTransferBuffer(Device, staging);
-				return false;
+				return {};
 			}
 			std::memcpy(mapped, writer.Bytes().data(), bytes);
 			SDL_UnmapGPUTransferBuffer(Device, staging);
@@ -2001,7 +2032,7 @@ namespace engine::render {
 			if (copy == nullptr) {
 				gpu::ReleaseBuffer(Device, replacement);
 				gpu::ReleaseTransferBuffer(Device, staging);
-				return false;
+				return {};
 			}
 			const SDL_GPUTransferBufferLocation input{staging, 0};
 			const SDL_GPUBufferRegion output{replacement, 0, bytes};
@@ -2021,14 +2052,24 @@ namespace engine::render {
 		state.RequestedCount = requested;
 		state.Seed = source.Field.Seed;
 		state.Layers = source.Field.Layers;
-		state.Field = source.Field;
-		core::Metrics::Count(
-			"render.gpu_particle_field.sample_prepare_bytes",
-			source.Field.SpawnSamples.size() * sizeof(scene::GpuParticleSpawnSample)
-		);
+		if (definitionChanged) {
+			state.Field = source.Field;
+			core::Metrics::Count(
+				"render.gpu_particle_field.sample_prepare_bytes",
+				source.Field.SpawnSamples.size() * sizeof(scene::GpuParticleSpawnSample)
+			);
+		}
+		state.DefinitionSource = source.Source;
+		state.DefinitionRevision = source.DefinitionRevision;
+		state.DefinitionValid = true;
 		state.Frame = source.Frame;
 		state.ForceField = source.ForceField;
-		state.Lighting = view.Lighting;
+		// Zero time still applies changed bounds, samples and reset requests.
+		// Only an initialized, identical paused population can skip its dispatch.
+		if (!state.ResetPending && !definitionChanged && !poseChanged && view.ParticleDelta <= 0) {
+			state.PreparedFrame = FrameCounter;
+			return {};
+		}
 		struct FieldUniforms {
 			glm::vec4 CentreDelta, Rotation, Bounds;
 			glm::uvec4 Control, Samples;
@@ -2064,7 +2105,7 @@ namespace engine::render {
 		const uint32_t opened =
 			timingSlot < VulkanTimestamps::SLOTS ? Timestamps.Mark(command) : VulkanTimestamps::MARKS;
 		auto *pass = SDL_BeginGPUComputePass(command, nullptr, 0, &output, 1);
-		if (pass == nullptr) return false;
+		if (pass == nullptr) return {};
 		SDL_BindGPUComputePipeline(pass, GpuParticleFieldStep);
 		SDL_BindGPUComputeStorageBuffers(pass, 0, &state.Samples, 1);
 		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
@@ -2077,7 +2118,8 @@ namespace engine::render {
 		}
 		state.ResetPending = false;
 		state.SubmissionPending = true;
-		return true;
+		state.PreparedFrame = FrameCounter;
+		return {1};
 	}
 
 	uint32_t Renderer::Impl::DrawGpuParticleField(

@@ -799,6 +799,7 @@ namespace engine::render {
 		size_t visibleCount = instances.size();
 		opaqueCount = 0;
 		core::Name orderedEntities;
+		const bool profileCpuNodes = State->ProfileTier != ProfilingTier::Off;
 		{
 			ENGINE_PROFILE_CAT("observe scene visibility", core::ProfileCategory::Render);
 			State->VisibilityWorking.Begin(
@@ -832,7 +833,8 @@ namespace engine::render {
 						}
 					}
 				}
-				const auto started = std::chrono::steady_clock::now();
+				const auto started = profileCpuNodes ? std::chrono::steady_clock::now()
+													 : std::chrono::steady_clock::time_point{};
 				const graph::EntityNodeRun run = graph::RunEntityNode(
 					selectedPipeline->Graph,
 					*node,
@@ -867,9 +869,11 @@ namespace engine::render {
 					opaqueCount = run.Opaque;
 					orderedEntities = run.Output;
 				}
-				const auto ended = std::chrono::steady_clock::now();
-				cpuNodeWall[node->Name.Id()] +=
-					std::chrono::duration<double, std::micro>(ended - started).count();
+				if (profileCpuNodes) {
+					cpuNodeWall[node->Name.Id()] +=
+						std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - started)
+							.count();
+				}
 			}
 		}
 		if (!sceneBoundsReady) {
@@ -1459,16 +1463,19 @@ namespace engine::render {
 		// so it would also move the very rows a surface has already named.
 		{
 			ENGINE_PROFILE_CAT("order scene", core::ProfileCategory::Render);
-			const auto started = std::chrono::steady_clock::now();
+			const auto started =
+				profileCpuNodes ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 			plan = scene::OrderScene(
 				std::span<const scene::DrawInstance>(State->SceneInstances).first(ownCount),
 				sceneEye,
 				State->SceneOrder
 			);
-			if (const graph::Node *worldNode = graphNode(core::Name("world")); worldNode != nullptr) {
-				cpuNodeWall[worldNode->Name.Id()] +=
-					std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - started)
-						.count();
+			if (profileCpuNodes) {
+				if (const graph::Node *worldNode = graphNode(core::Name("world")); worldNode != nullptr) {
+					cpuNodeWall[worldNode->Name.Id()] +=
+						std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - started)
+							.count();
+				}
 			}
 		}
 
@@ -1588,14 +1595,13 @@ namespace engine::render {
 			const Impl::ParticlePreparation prepared =
 				effectsVisible ? State->PrepareParticles(source, command, timingSlot)
 							   : Impl::ParticlePreparation{};
-			const bool fieldPrepared =
-				effectsVisible ? State->PrepareGpuParticleField(source, command, timingSlot) : true;
+			const Impl::GpuParticleFieldPreparation fieldPrepared =
+				effectsVisible ? State->PrepareGpuParticleField(source, command, timingSlot)
+							   : Impl::GpuParticleFieldPreparation{};
 			particleCount = prepared.Count + (State->ActiveGpuParticleFieldWorld == nullptr
 												  ? 0
 												  : State->ActiveGpuParticleFieldWorld->ActiveCount);
-			result.ComputeDispatches +=
-				prepared.Dispatches +
-				(fieldPrepared && State->ActiveGpuParticleFieldWorld != nullptr ? 1 : 0);
+			result.ComputeDispatches += prepared.Dispatches + fieldPrepared.Dispatches;
 			result.Particles = particleCount;
 
 			ribbonCount = effectsVisible ? State->PrepareRibbons(ribbonVertices) : 0;
@@ -2663,16 +2669,16 @@ namespace engine::render {
 				Result.InstanceRows = residency.LiveCount();
 				residentWorld.MetricFrame = State->FrameCounter;
 			}
-			std::vector<bool> dirtyChunks(residentChunks, false);
+			uint32_t dirtyChunks = 0;
+			uint32_t coveredChunkEnd = 0;
 			for (const InstanceUploadRange &range : residency.DirtyRanges()) {
-				const uint32_t last = range.First + range.Count - 1;
-				for (uint32_t chunk = range.First / METRIC_CHUNK_ROWS; chunk <= last / METRIC_CHUNK_ROWS;
-					 chunk++) {
-					dirtyChunks[chunk] = true;
-				}
+				const uint32_t first = range.First / METRIC_CHUNK_ROWS;
+				const uint32_t end = (range.First + range.Count - 1) / METRIC_CHUNK_ROWS + 1;
+				// Ordered ranges can share a metric chunk even though their rows do not overlap.
+				dirtyChunks += end - std::max(first, coveredChunkEnd);
+				coveredChunkEnd = end;
 			}
-			Result.InstanceChunksDirty =
-				static_cast<uint32_t>(std::count(dirtyChunks.begin(), dirtyChunks.end(), true));
+			Result.InstanceChunksDirty = dirtyChunks;
 			Result.InstanceRowsDirty = residency.DirtyCount();
 			target.ResidentIndices.Plan(
 				static_cast<uint32_t>(State->FrameCounter % IndexResidency::VERSIONS),
