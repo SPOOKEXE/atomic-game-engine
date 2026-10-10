@@ -1156,7 +1156,7 @@ namespace engine::render {
 											 : drawImage(source, target, SDL_GPU_LOADOP_CLEAR);
 			if (!published) {
 				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
-				return true;
+				return false;
 			}
 			bool hasTransmission = false;
 			for (uint32_t index = 0; index < plainTransparent; ++index) {
@@ -1245,7 +1245,13 @@ namespace engine::render {
 
 			recording.InvalidateBackgroundTexture(depthTarget.texture);
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
-			if (pass != nullptr) core::Metrics::Count("render.transparent.raster_passes", 1);
+			if (pass == nullptr) {
+				State->RefractionTexture = nullptr;
+				State->RefractionSampler = nullptr;
+				State->RefractionGuardTexture = nullptr;
+				return false;
+			}
+			core::Metrics::Count("render.transparent.raster_passes", 1);
 			// **The light set, pushed once for the whole pass.** Uniform state
 			// on a command buffer persists until it is replaced, so one push
 			// before the draws serves every one of them - which is the whole

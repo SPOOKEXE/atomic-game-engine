@@ -4033,6 +4033,21 @@ void main() {
 	CHECK(capture().Status == render::ResourceImageStatus::Failed);
 	std::swap(view.EyeTransparentImages[0], view.EyeTransparentImages[1]);
 	CHECK(capture().Pixels == result.Pixels);
+	const uint64_t retainedTransparent = view.EyeTransparentImages[0];
+	view.EyeTransparentImages[0] = 0;
+	const uint64_t refusedResident = renderer.QueueResourceImage(
+		pipeline, core::Name("export"), 0, render::ResourceImageDelivery::Resident
+	);
+	REQUIRE(refusedResident != 0);
+	const auto refused = capture();
+	CHECK(refused.Status == render::ResourceImageStatus::Failed);
+	CHECK(refused.Pixels.empty());
+	CHECK(refused.Width == 0);
+	CHECK(refused.Height == 0);
+	CHECK(renderer.AdoptResourceImage(refusedResident, binding) == 0);
+	CHECK(renderer.CancelResourceImage(refusedResident));
+	view.EyeTransparentImages[0] = retainedTransparent;
+	CHECK(capture().Pixels == result.Pixels);
 	const float movedDepth = bodyDepth == 1 ? 7.f : 1.f;
 	body.Frame = view.CameraFrame * core::CFrame(core::Vector3{0, 0, -movedDepth});
 	const auto moved = capture();

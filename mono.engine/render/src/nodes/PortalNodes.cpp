@@ -799,7 +799,7 @@ namespace engine::render {
 											 : drawImage(source, target, SDL_GPU_LOADOP_CLEAR);
 			if (!published) {
 				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
-				return true;
+				return false;
 			}
 
 			if (!haveInstances || !recording.HavePortals) return true;
@@ -815,6 +815,7 @@ namespace engine::render {
 			depthTarget.cycle = false;
 			recording.InvalidateBackgroundTexture(depthTarget.texture);
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &portalTarget, 1, &depthTarget);
+			if (pass == nullptr) return false;
 			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
 			SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
 			SDL_SetGPUViewport(pass, &sceneViewport);

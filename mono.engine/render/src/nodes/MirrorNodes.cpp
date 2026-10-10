@@ -929,7 +929,7 @@ namespace engine::render {
 											 : drawImage(source, target, SDL_GPU_LOADOP_CLEAR);
 			if (!published) {
 				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
-				return true;
+				return false;
 			}
 
 			if (!haveInstances || (surfaceInCamera == 0 && transparentSurfaces == 0)) return true;
@@ -945,6 +945,7 @@ namespace engine::render {
 
 			recording.InvalidateBackgroundTexture(depthTarget.texture);
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
+			if (pass == nullptr) return false;
 			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
 			SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
 			SDL_SetGPUViewport(pass, &sceneViewport);
