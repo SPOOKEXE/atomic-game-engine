@@ -74,6 +74,10 @@ The milestone headings below are development labels. Not in line with project ve
 - [x] Add protected generated `Workspace.Terrain` with helper and migration paths, opt-in `AuthoredAffordance`, cameras without a `SurfaceCamera` facet, `RenderEffects` None-default dropdowns and an authored portal/mirror grid.
 - [x] Build the Tornado demo in pure world Luau over generic GPU field, particle, volume and force systems; verify the 50M-particle server/client run through the Studio HUD button and Bladeborne's character-following local camera with HUD visible.
 - [x] Capture and pass all 77 top-level demos; pass GPU renderer checks (9 cases, 902 assertions) and consumer checks (4 cases, 617 assertions), and verify native viewport float and resnap behavior.
+- [x] Keep GPU timing averages sample-aware and separate from CPU placement: sparse device spans average over returned samples, and late query durations stay on the GPU timing axis (`82ba4842`, `da06e334`).
+- [x] Reuse drawable-source membership during presentation updates and hoist label-name lookup out of per-instance loops (`443e4588`).
+- [x] Bound mirror captures by authored bounce depth; the one-bounce GPU fixture renders all 320 mirror-ball facets independently of portal depth (`956e76e9`, `cf75b379`).
+- [x] Preserve complete instance births through transport pressure and loss; the stress test checks all 1,536 instances converge to the final changing value after one join (`813fd045`).
 - [_] Non-acceptance follow-up: audit aggregate replica snapshot and staged-byte ceilings for large EditableImage rows. The current path has a `uint32_t` total cap but no explicit assembled-image budget; per-image bounds and windowed staging are tested.
 - [_] Security follow-up: audit dynamic schema and component-codec acceptance, plus client-local provenance and descendant filtering across replication and authored game saves.
 
