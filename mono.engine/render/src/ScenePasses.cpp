@@ -19,6 +19,7 @@
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 
 #include <algorithm>
@@ -1135,13 +1136,22 @@ namespace engine::render {
 		return selectsView ? node->Integer(core::Name("view"), 0) : Request.TargetSlot;
 	}
 
+	void ViewRecording::InvalidateBackgroundTexture(SDL_GPUTexture *texture) {
+		if (texture == nullptr) return;
+		if (Pbr != nullptr && texture == Pbr->Normal) EmptyGBufferNormals = false;
+		if (texture == EmptyHardwareDepth) EmptyHardwareDepth = nullptr;
+		if (texture == FarLinearDepth) FarLinearDepth = nullptr;
+	}
+
 	Renderer::Impl::NamedTexture ViewRecording::GraphTexture(
 		graph::ResourceId resource,
 		const graph::RunContext &context,
 		bool make,
 		SDL_GPUCommandBuffer *readCommand
 	) {
-		return ResourceTexture(resource, GraphTextureSlot(context), make, readCommand);
+		const auto texture = ResourceTexture(resource, GraphTextureSlot(context), make, readCommand);
+		if (make) InvalidateBackgroundTexture(texture.Texture);
+		return texture;
 	}
 
 	void ViewRecording::StageHistoryWrites(const graph::RunContext &context, SDL_GPUCommandBuffer *command) {
@@ -1237,6 +1247,49 @@ namespace engine::render {
 		}
 	}
 
+	bool ViewRecording::CopyImage(
+		core::Name name, const Impl::NamedTexture &source, const Impl::NamedTexture &target
+	) {
+		if (!source.IsValid() || !target.IsValid() || source.Format != target.Format ||
+			source.Width != target.Width || source.Height != target.Height)
+			return false;
+		if (source.Texture == target.Texture) return true;
+		EnterNamedPass(name);
+		auto *copy = SDL_BeginGPUCopyPass(Command);
+		if (copy == nullptr) return false;
+		SDL_GPUTextureLocation from{}, to{};
+		from.texture = source.Texture;
+		to.texture = target.Texture;
+		SDL_CopyGPUTextureToTexture(copy, &from, &to, target.Width, target.Height, 1, true);
+		SDL_EndGPUCopyPass(copy);
+		core::Metrics::Count("render.identity_copy.commands", 1);
+		core::Metrics::Count(
+			"render.identity_copy.bytes",
+			SDL_CalculateGPUTextureFormatSize(target.Format, target.Width, target.Height, 1)
+		);
+		return true;
+	}
+
+	bool ViewRecording::ClearImage(core::Name name, const Impl::NamedTexture &target, SDL_FColor colour) {
+		if (!target.IsValid()) return false;
+		EnterNamedPass(name);
+		SDL_GPUColorTargetInfo attachment{};
+		attachment.texture = target.Texture;
+		attachment.clear_color = colour;
+		attachment.load_op = SDL_GPU_LOADOP_CLEAR;
+		attachment.store_op = SDL_GPU_STOREOP_STORE;
+		attachment.cycle = true;
+		auto *pass = SDL_BeginGPURenderPass(Command, &attachment, 1, nullptr);
+		if (pass == nullptr) return false;
+		SDL_EndGPURenderPass(pass);
+		core::Metrics::Count("render.colour_clear.commands", 1);
+		core::Metrics::Count(
+			"render.colour_clear.bytes",
+			SDL_CalculateGPUTextureFormatSize(target.Format, target.Width, target.Height, 1)
+		);
+		return true;
+	}
+
 	bool ViewRecording::DrawImage(
 		const Impl::NamedTexture &source,
 		const Impl::NamedTexture &target,
@@ -1306,6 +1359,11 @@ namespace engine::render {
 		clearAo.cycle = true;
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &clearAo, 1, nullptr);
 		SDL_EndGPURenderPass(pass);
+		core::Metrics::Count("render.occlusion_clear.commands", 1);
+		core::Metrics::Count(
+			"render.occlusion_clear.bytes",
+			uint64_t(PbrDimensions.OcclusionWidth) * PbrDimensions.OcclusionHeight
+		);
 
 		pbr.OcclusionProvenance = {
 			.SourceState = sourceState,

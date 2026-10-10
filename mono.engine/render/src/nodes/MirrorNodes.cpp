@@ -910,7 +910,6 @@ namespace engine::render {
 								   ) { return recording.DrawImage(source, target, load, reverseSpectrum); };
 
 			ENGINE_PROFILE_CAT("mirror overlay pass", core::ProfileCategory::Render);
-			enterNamedPass(context.Name);
 
 			Impl::NamedTexture source;
 			Impl::NamedTexture target;
@@ -923,10 +922,17 @@ namespace engine::render {
 					break;
 				}
 			}
-			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
+			const bool exactCopy = source.IsValid() && target.IsValid() && source.Format == target.Format &&
+								   source.Width == target.Width && source.Height == target.Height;
+			if (!exactCopy || source.Texture == target.Texture) enterNamedPass(context.Name);
+			const bool published = exactCopy ? recording.CopyImage(context.Name, source, target)
+											 : drawImage(source, target, SDL_GPU_LOADOP_CLEAR);
+			if (!published) {
 				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
 				return true;
 			}
+
+			if (!haveInstances || (surfaceInCamera == 0 && transparentSurfaces == 0)) return true;
 
 			const bool hdr = target.Format == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 			colourTarget.texture = target.Texture;
@@ -937,6 +943,7 @@ namespace engine::render {
 			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
 			depthTarget.cycle = false;
 
+			recording.InvalidateBackgroundTexture(depthTarget.texture);
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
 			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
 			SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));

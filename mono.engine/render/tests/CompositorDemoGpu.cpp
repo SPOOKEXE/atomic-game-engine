@@ -1,5 +1,6 @@
 #include "RenderFixture.hpp"
 
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/RenderGraph.hpp>
@@ -21,6 +22,13 @@ namespace {
 	using namespace engine;
 	using namespace engine::render;
 	using namespace engine::render::test;
+	double CounterValue(std::string_view name) {
+		const auto snapshot = core::Metrics::Snapshot();
+		for (const auto &counter : snapshot.Counters)
+			if (counter.Name == core::Name(name)) return counter.Value;
+		return 0;
+	}
+
 	std::string Solid() {
 		return R"(#version 450
 layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
@@ -392,7 +400,12 @@ TEST_CASE("bloom spreads HDR highlights before tone mapping on Vulkan", "[render
 	lighting.BloomThreshold = 0.5f;
 	lighting.BloomRadius = 6.0f;
 	fixture.Render.SetLighting(lighting);
-	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto clearBefore = CounterValue("render.colour_clear.commands");
+	const auto clearBytesBefore = CounterValue("render.colour_clear.bytes");
+	const auto inactiveFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(CounterValue("render.colour_clear.commands") - clearBefore == 1);
+	CHECK(CounterValue("render.colour_clear.bytes") - clearBytesBefore == 41 * 31 * 8);
+	CHECK(inactiveFrame.DrawCalls == 2);
 	const auto withoutBloom =
 		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Rgba8Unorm);
 
@@ -408,6 +421,20 @@ TEST_CASE("bloom spreads HDR highlights before tone mapping on Vulkan", "[render
 		std::to_integer<uint8_t>(withBloom.Bytes[neighbour]) >
 		std::to_integer<uint8_t>(withoutBloom.Bytes[neighbour])
 	);
+	lighting.BloomIntensity = 0;
+	fixture.Render.SetLighting(lighting);
+	CHECK(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).DrawCalls == 2);
+	const auto reset =
+		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Rgba8Unorm);
+	CHECK(Different(withoutBloom, reset) == 0);
+	const auto bloom = Capture16(fixture.Render, core::Name("bloom-result"), view.Slot, 41, 31);
+	bool clearedPixels = true;
+	const size_t row = (41 * 8 + 255) / 256 * 256;
+	for (uint32_t y = 0; y < 31; ++y)
+		for (uint32_t x = 0; x < 41; ++x)
+			for (size_t channel = 0; channel < 8; ++channel)
+				clearedPixels = clearedPixels && bloom[y * row + x * 8 + channel] == std::byte{};
+	CHECK(clearedPixels);
 }
 
 TEST_CASE("depth of field preserves focus and blurs distant HDR detail on Vulkan", "[render][gpu][dof]") {
@@ -431,6 +458,53 @@ TEST_CASE("depth of field preserves focus and blurs distant HDR detail on Vulkan
 	const auto blurred = Capture16(fixture.Render, core::Name("effect-result"), view.Slot, 41, 31);
 	CHECK(Diff16Region(source, blurred, 41, 31, 0, 20) < 0.01);
 	CHECK(Diff16Region(source, blurred, 41, 31, 21, 41) > 10.0);
+}
+
+TEST_CASE(
+	"inactive lighting effects preserve HDR pixels without effect draws", "[render][gpu][inactive-effects]"
+) {
+	for (const auto &[name, kind] :
+		 std::array{std::pair{"inactive-dof", "dof"}, std::pair{"inactive-god-rays", "god-rays"}}) {
+		INFO(kind);
+		FixtureDevice fixture;
+		fixture.Initialise();
+		InstallEffect(fixture.Render, name, kind, Solid(), FocusDepth());
+		SceneTarget target{41, 31};
+		View view;
+		view.World = 1;
+		view.Pipeline = core::Name(name);
+		view.Target = &target;
+		OverlayImage overlay;
+		scene::WorldLighting lighting;
+		lighting.Direction = {0, 0, 1};
+		const auto expectIdentity = [&] {
+			fixture.Render.SetLighting(lighting);
+			const auto copiesBefore = CounterValue("render.identity_copy.commands");
+			const auto bytesBefore = CounterValue("render.identity_copy.bytes");
+			const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+			CHECK(frame.DrawCalls == 2);
+			CHECK(frame.ComputeDispatches == 0);
+			CHECK(CounterValue("render.identity_copy.commands") - copiesBefore == 1);
+			CHECK(CounterValue("render.identity_copy.bytes") - bytesBefore == 41 * 31 * 8);
+			const auto source = Capture16(fixture.Render, core::Name("effect-source"), view.Slot, 41, 31);
+			const auto output = Capture16(fixture.Render, core::Name("effect-result"), view.Slot, 41, 31);
+			CHECK(Diff16(source, output, 41, 31) == 0);
+		};
+		expectIdentity();
+		lighting.DepthOfFieldIntensity = 1;
+		lighting.GodRayIntensity = 1;
+		fixture.Render.SetLighting(lighting);
+		CHECK(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).DrawCalls == 3);
+		// An active image must be replaced when the same output becomes inactive.
+		lighting.DepthOfFieldRadius = 0;
+		lighting.GodRayRadius = 0;
+		expectIdentity();
+		if (std::string_view(kind) == "god-rays") {
+			lighting.GodRayRadius = 16;
+			lighting.Direction = {0, 0, -1};
+			expectIdentity();
+		}
+	}
 }
 
 TEST_CASE("god rays stop at linear-depth occluders on Vulkan", "[render][gpu][god-rays]") {

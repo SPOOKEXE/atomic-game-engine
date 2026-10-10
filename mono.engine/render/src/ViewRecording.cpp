@@ -2911,9 +2911,19 @@ namespace engine::render {
 			}
 		};
 		RetainedRunner retained(frameRunner, [this](const graph::RunContext &context) {
-			if (Request.Damage.Scene) return true;
-			return context.Node.Value != 0 && context.Node.Value <= Pipeline->RetainedNodes.size() &&
-				   Pipeline->RetainedNodes[context.Node.Value - 1] != 0;
+			const bool enabled =
+				Request.Damage.Scene ||
+				(context.Node.Value != 0 && context.Node.Value <= Pipeline->RetainedNodes.size() &&
+				 Pipeline->RetainedNodes[context.Node.Value - 1] != 0);
+			if (enabled &&
+				(EmptyGBufferNormals || EmptyHardwareDepth != nullptr || FarLinearDepth != nullptr)) {
+				// Authored handlers can write attachments without calling GraphTexture.
+				for (const auto resource : context.Writes) {
+					const auto target = ResourceTexture(resource, GraphTextureSlot(context), false);
+					InvalidateBackgroundTexture(target.Texture);
+				}
+			}
+			return enabled;
 		});
 
 		State->StageProbe.ActivateView(

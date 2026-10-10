@@ -2,10 +2,9 @@
 // built from it, ambient occlusion, the deferred lighting resolve, and the
 // grade that turns the result into a display image.
 //
-// **All five are fullscreen triangles, and they all go through
-// `ViewRecording::Fullscreen`.** One function opens the pass, binds the
-// samplers, pushes the uniforms and sets the viewport, so a node added here
-// cannot forget the scissor and scribble outside its own rectangle.
+// Fullscreen effects share pass setup through `ViewRecording::Fullscreen`.
+// Inactive effects publish their outputs with copies or clears, preserving
+// graph resources without running a shader over every pixel.
 
 #include "../SeamLightSelection.hpp"
 #include "../SsaoSettings.hpp"
@@ -392,6 +391,18 @@ namespace engine::render {
 			PbrUniforms uniforms = recording.Uniforms;
 			uniforms.Direction.w = zeroBackground ? 1.f : 0.f;
 			const auto &depthBindings = recording.DepthBindings;
+			if (recording.EmptyHardwareDepth != nullptr &&
+				depthBindings.front().texture == recording.EmptyHardwareDepth) {
+				if (!recording.ClearImage(
+						context.Name,
+						target,
+						SDL_FColor{zeroBackground ? 0.f : drawCamera.FarPlane, 0.f, 0.f, 0.f}
+					))
+					return false;
+				if (!zeroBackground) recording.FarLinearDepth = target.Texture;
+				core::Metrics::Count("render.empty_depth.clears", 1);
+				return true;
+			}
 			const auto fullscreen = [&recording](
 										core::Name name,
 										SDL_GPUGraphicsPipeline *pipeline,
@@ -600,6 +611,11 @@ namespace engine::render {
 			};
 			const auto depth = read("depth"), normal = read("normal");
 			if (!depth.IsValid() || !normal.IsValid()) return false;
+			if (recording.EmptyGBufferNormals && normal.Texture == pbr.Normal) {
+				recording.EnterNamedPass(context.Name);
+				recording.ClearOcclusion(AmbientOcclusionSourceState::ClearedNoPass, true);
+				return true;
+			}
 			const std::array aoBindings = {
 				SDL_GPUTextureSamplerBinding{depth.Texture, sampler},
 				SDL_GPUTextureSamplerBinding{normal.Texture, sampler},
@@ -791,6 +807,8 @@ namespace engine::render {
 				node->WritePorts.begin(), node->WritePorts.end(), core::Name("directional-response")
 			);
 			const bool directionalRequested = directionalPort != node->WritePorts.end();
+			const bool emptyLighting = recording.FarLinearDepth != nullptr &&
+									   lightingBindings[4].texture == recording.FarLinearDepth;
 			if (directionalRequested && baselinePort == node->WritePorts.end()) {
 				ENGINE_ERROR(
 					"deferred lighting '{}' requires lighting-baseline when directional-response is "
@@ -962,26 +980,44 @@ namespace engine::render {
 					target.store_op = SDL_GPU_STOREOP_STORE;
 					target.cycle = true;
 				}
+				if (emptyLighting) {
+					const SDL_FColor background{
+						uniforms.FogColour.r, uniforms.FogColour.g, uniforms.FogColour.b, 1.f
+					};
+					targets[0].clear_color = background;
+					targets[1].clear_color = background;
+					targets[2].clear_color = SDL_FColor{0.f, 0.f, 0.f, 1.f};
+				}
 				auto *pass = SDL_BeginGPURenderPass(Command, targets, directionalRequested ? 3 : 2, nullptr);
 				if (!pass) return false;
-				SDL_BindGPUGraphicsPipeline(
-					pass,
-					directionalRequested ? State->DeferredLightingDirectionalPipeline
-										 : State->DeferredLightingBaselinePipeline
-				);
-				SDL_BindGPUFragmentSamplers(
-					pass, 0, spillBindings.data(), static_cast<uint32_t>(spillBindings.size())
-				);
-				SDL_PushGPUFragmentUniformData(Command, 0, &uniforms, sizeof(uniforms));
-				SDL_PushGPUFragmentUniformData(Command, 1, &lightUniforms, sizeof(lightUniforms));
-				SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
 				const SDL_GPUViewport viewport{0, 0, float(baseline.Width), float(baseline.Height), 0, 1};
 				const SDL_Rect scissor{0, 0, int(baseline.Width), int(baseline.Height)};
-				SDL_SetGPUViewport(pass, &viewport);
-				SDL_SetGPUScissor(pass, &scissor);
-				SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
-				SDL_EndGPURenderPass(pass);
-				++Result.DrawCalls;
+				if (emptyLighting) {
+					SDL_EndGPURenderPass(pass);
+					core::Metrics::Count("render.empty_lighting.clears", 1);
+					core::Metrics::Count("render.colour_clear.commands", 1);
+					core::Metrics::Count(
+						"render.colour_clear.bytes",
+						uint64_t(baseline.Width) * baseline.Height * (directionalRequested ? 40 : 24)
+					);
+				} else {
+					SDL_BindGPUGraphicsPipeline(
+						pass,
+						directionalRequested ? State->DeferredLightingDirectionalPipeline
+											 : State->DeferredLightingBaselinePipeline
+					);
+					SDL_BindGPUFragmentSamplers(
+						pass, 0, spillBindings.data(), static_cast<uint32_t>(spillBindings.size())
+					);
+					SDL_PushGPUFragmentUniformData(Command, 0, &uniforms, sizeof(uniforms));
+					SDL_PushGPUFragmentUniformData(Command, 1, &lightUniforms, sizeof(lightUniforms));
+					SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
+					SDL_SetGPUViewport(pass, &viewport);
+					SDL_SetGPUScissor(pass, &scissor);
+					SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+					SDL_EndGPURenderPass(pass);
+					++Result.DrawCalls;
+				}
 				core::Metrics::Count(
 					"render.lighting_baseline.output_bytes", uint64_t(baseline.Width) * baseline.Height * 16
 				);
@@ -1032,7 +1068,7 @@ namespace engine::render {
 						visibilityTarget.Format != SDL_GPU_TEXTUREFORMAT_R8_UNORM ||
 						visibilityTarget.Width != target.Width || visibilityTarget.Height != target.Height)
 						return false;
-					if (!recording.LocalLightCaptureMatched[index]) {
+					if (emptyLighting || !recording.LocalLightCaptureMatched[index]) {
 						SDL_GPUColorTargetInfo emptyTargets[2]{};
 						emptyTargets[0].texture = target.Texture;
 						emptyTargets[1].texture = visibilityTarget.Texture;
@@ -1044,6 +1080,10 @@ namespace engine::render {
 						auto *emptyPass = SDL_BeginGPURenderPass(Command, emptyTargets, 2, nullptr);
 						if (!emptyPass) return false;
 						SDL_EndGPURenderPass(emptyPass);
+						core::Metrics::Count("render.colour_clear.commands", 1);
+						core::Metrics::Count(
+							"render.colour_clear.bytes", uint64_t(target.Width) * target.Height * 17
+						);
 						continue;
 					}
 					const uint32_t lightRow = static_cast<uint32_t>(row - recording.SceneLightIds.begin());
@@ -1128,7 +1168,21 @@ namespace engine::render {
 						SDL_EndGPURenderPass(localPass);
 					}
 				}
-				if (!applyLocalShadowCorrections()) return false;
+				if (!emptyLighting && !applyLocalShadowCorrections()) return false;
+				return true;
+			}
+
+			if (emptyLighting) {
+				if (!recording.ClearImage(
+						context.Name,
+						{pbr.Lit,
+						 pbrDimensions.LitWidth,
+						 pbrDimensions.LitHeight,
+						 SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT},
+						SDL_FColor{uniforms.FogColour.r, uniforms.FogColour.g, uniforms.FogColour.b, 1.f}
+					))
+					return false;
+				core::Metrics::Count("render.empty_lighting.clears", 1);
 				return true;
 			}
 
@@ -1234,6 +1288,18 @@ namespace engine::render {
 				context.Reads.size() == 3 ? recording.GraphTexture(context.Reads[2], context, false)
 										  : Impl::NamedTexture{};
 			uniforms.Fog.w = State->Caps.HasCompute && environment.IsValid() ? 1.0f : 0.0f;
+			if (uniforms.Fog.w < 0.5f)
+				return recording.CopyImage(
+					context.Name,
+					{pbr.Lit,
+					 recording.PbrDimensions.LitWidth,
+					 recording.PbrDimensions.LitHeight,
+					 SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT},
+					{pbr.SkyLit,
+					 recording.PbrDimensions.LitWidth,
+					 recording.PbrDimensions.LitHeight,
+					 SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT}
+				);
 			const std::array bindings{
 				SDL_GPUTextureSamplerBinding{pbr.Lit, recording.Sampler},
 				SDL_GPUTextureSamplerBinding{recording.DepthTarget.texture, recording.Sampler},
@@ -1258,6 +1324,18 @@ namespace engine::render {
 		frameNodes.Set(core::Name("fog"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl::PbrSlot &pbr = *recording.Pbr;
+			if (recording.Uniforms.VolumeCount.x < 0.5f && recording.Uniforms.CloudCentreEnabled.w < 0.5f)
+				return recording.CopyImage(
+					context.Name,
+					{pbr.SkyLit,
+					 recording.PbrDimensions.LitWidth,
+					 recording.PbrDimensions.LitHeight,
+					 SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT},
+					{pbr.Lit,
+					 recording.PbrDimensions.LitWidth,
+					 recording.PbrDimensions.LitHeight,
+					 SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT}
+				);
 			if (!recording.UploadCloudDensity()) return false;
 			const std::array bindings{
 				SDL_GPUTextureSamplerBinding{pbr.SkyLit, recording.Sampler},
@@ -1375,7 +1453,9 @@ namespace engine::render {
 			}
 
 			if (source != output.Texture) {
-				// Empty and odd chains still publish the declared final image.
+				if (input.Width == output.Width && input.Height == output.Height)
+					return recording.CopyImage(context.Name, input, output);
+				// Authored scaling still needs a filtered publication.
 				recording.EnterNamedPass(context.Name);
 				SDL_GPUBlitInfo blit{};
 				blit.source.texture = source;
@@ -1404,6 +1484,9 @@ namespace engine::render {
 				target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || source.Width != target.Width ||
 				source.Height != target.Height)
 				return false;
+
+			if (State->BloomIntensity <= 0.0f || State->BloomRadius <= 0.0f)
+				return recording.ClearImage(context.Name, target, SDL_FColor{});
 
 			const BloomUniforms uniforms{
 				.Settings = glm::vec4{State->BloomIntensity, State->BloomThreshold, State->BloomRadius, 0.0f},
@@ -1449,6 +1532,8 @@ namespace engine::render {
 				colour.Height != target.Height || depth.Width != target.Width ||
 				depth.Height != target.Height)
 				return false;
+			if (State->DepthOfFieldIntensity <= 0.0f || State->DepthOfFieldRadius <= 0.0f)
+				return recording.CopyImage(context.Name, colour, target);
 			const LightingEffectsUniforms uniforms{
 				.DepthOfField =
 					glm::vec4{
@@ -1517,6 +1602,8 @@ namespace engine::render {
 			const glm::vec4 clip = recording.Matrices.ViewProjection * sunWorld;
 			const bool visible = clip.w > 0.0f && std::abs(clip.x) <= clip.w && std::abs(clip.y) <= clip.w &&
 								 clip.z >= 0.0f && clip.z <= clip.w;
+			if (State->GodRayIntensity <= 0.0f || State->GodRayRadius <= 0.0f || !visible)
+				return recording.CopyImage(context.Name, source, target);
 			const float reciprocalW = visible ? 1.0f / clip.w : 0.0f;
 			const LightingEffectsUniforms uniforms{
 				// Standard linear-depth clears to FarPlane. Keep that value with the

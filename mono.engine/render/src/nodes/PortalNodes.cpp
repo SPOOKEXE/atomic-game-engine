@@ -781,7 +781,6 @@ namespace engine::render {
 									   bool reverseSpectrum = false
 								   ) { return recording.DrawImage(source, target, load, reverseSpectrum); };
 
-			enterNamedPass(context.Name);
 			Impl::NamedTexture source;
 			Impl::NamedTexture target;
 			if (!context.Reads.empty()) {
@@ -793,10 +792,17 @@ namespace engine::render {
 					break;
 				}
 			}
-			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
+			const bool exactCopy = source.IsValid() && target.IsValid() && source.Format == target.Format &&
+								   source.Width == target.Width && source.Height == target.Height;
+			if (!exactCopy || source.Texture == target.Texture) enterNamedPass(context.Name);
+			const bool published = exactCopy ? recording.CopyImage(context.Name, source, target)
+											 : drawImage(source, target, SDL_GPU_LOADOP_CLEAR);
+			if (!published) {
 				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
 				return true;
 			}
+
+			if (!haveInstances || !recording.HavePortals) return true;
 
 			const bool hdr = target.Format == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 			SDL_GPUColorTargetInfo portalTarget{};
@@ -807,6 +813,7 @@ namespace engine::render {
 			depthTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
 			depthTarget.cycle = false;
+			recording.InvalidateBackgroundTexture(depthTarget.texture);
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &portalTarget, 1, &depthTarget);
 			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
 			SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));

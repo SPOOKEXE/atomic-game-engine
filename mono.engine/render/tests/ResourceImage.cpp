@@ -1,10 +1,12 @@
 #include "AmbientOcclusionCapture.hpp"
 #include "DataCaptureCompact.hpp"
+#include "DisplayColour.hpp"
 #include "RenderFixture.hpp"
 #include "RendererTestHooks.hpp"
 #include "portal/PortalRendererTerminalTrace.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
@@ -1418,10 +1420,24 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	auto &renderer = fixture.Render;
 	graph::RenderGraph pipeline;
 	core::Name offender;
-	REQUIRE(
-		graph::Build(graph::DefaultPbrDataCaptureDocument(), pipeline, offender) ==
-		graph::PipelineDocumentStatus::Ok
-	);
+	auto document = graph::DefaultPbrDataCaptureDocument();
+	for (const char *resource : {"lighting-baseline", "directional-response"}) {
+		document.Record(
+			{.Kind = graph::EditKind::AddNode,
+			 .Name = core::Name(std::string("background-") + resource),
+			 .NodeKind = core::Name("capture"),
+			 .Scope = graph::NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = graph::EditKind::Reads, .Target = core::Name(resource), .Key = core::Name("source")}
+		);
+	}
+	REQUIRE(graph::Build(document, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	const auto counter = [](std::string_view name) {
+		for (const auto &entry : core::Metrics::Snapshot().Counters)
+			if (entry.Name == core::Name(name)) return entry.Value;
+		return 0.;
+	};
 	const core::Name pipelineName("default-data-capture");
 	const core::Name captureNode("data-capture");
 	REQUIRE(renderer.SetPipeline(pipelineName, pipeline));
@@ -1433,6 +1449,8 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	view.WorldName = core::Name("fixture/world-a");
 	view.SnapshotId = "render-observation-snapshot";
 	view.CameraFrame.Position = {3, 4, 5};
+	view.OverrideLighting = true;
+	view.Lighting.FogColor = {0.5f, 0.25f, 0.75f};
 	const glm::mat4 expectedCamera = view.CameraFrame.ToMatrix();
 	const render::ResourceImageRequest request{
 		.Token = 1,
@@ -1443,7 +1461,39 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	};
 	REQUIRE(renderer.RequestResourceImage(request));
 	render::OverlayImage overlay;
-	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(captureNode));
+	const render::ResourceImageRequest baselineRequest{
+		9, pipelineName, core::Name("background-lighting-baseline"), 0
+	};
+	const render::ResourceImageRequest directionalRequest{
+		10, pipelineName, core::Name("background-directional-response"), 0
+	};
+	REQUIRE(renderer.RequestResourceImage(baselineRequest));
+	REQUIRE(renderer.RequestResourceImage(directionalRequest));
+	const auto depthClearsBefore = counter("render.empty_depth.clears");
+	const auto lightingClearsBefore = counter("render.empty_lighting.clears");
+	const auto emptyFrame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(emptyFrame.Ran(captureNode));
+	CHECK(counter("render.empty_depth.clears") - depthClearsBefore == 1);
+	CHECK(counter("render.empty_lighting.clears") - lightingClearsBefore == 1);
+	const auto backgrounds = AwaitImageGroup(renderer, std::array<uint64_t, 2>{9, 10});
+	for (size_t index = 0; index < backgrounds.size(); ++index) {
+		const auto &background = backgrounds[index];
+		REQUIRE(background.Status == render::ResourceImageStatus::Ok);
+		REQUIRE(background.Format == render::ResourceImageFormat::RGBA32_Float);
+		REQUIRE(background.Pixels.size() == size_t(target.Width) * target.Height * 16);
+		std::array<float, 4> expected{0.f, 0.f, 0.f, 1.f};
+		if (index == 0) {
+			expected[0] = render::WorkingFromDisplay(0.5f);
+			expected[1] = render::WorkingFromDisplay(0.25f);
+			expected[2] = render::WorkingFromDisplay(0.75f);
+		}
+		core::ByteReader pixels(background.Pixels);
+		bool constant = true;
+		while (!pixels.AtEnd())
+			for (const float channel : expected)
+				constant &= pixels.ReadFloat() == channel;
+		CHECK(constant);
+	}
 	// The graph has submitted. Mutating this caller-owned View must not change
 	// the observation that the asynchronous readback later returns.
 	view.WorldName = core::Name("fixture/world-b");
@@ -1478,6 +1528,11 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	CHECK(image.NormalResource == core::Name("normal"));
 	REQUIRE(image.Depth.size() == size_t(target.Width) * target.Height * 4);
 	REQUIRE(image.Normal.size() == size_t(target.Width) * target.Height * 4);
+	core::ByteReader backgroundDepth(image.Depth);
+	bool farBackground = true;
+	while (!backgroundDepth.AtEnd())
+		farBackground &= backgroundDepth.ReadFloat() == view.Camera.FarPlane;
+	CHECK(farBackground);
 	CHECK(image.AmbientResponse.empty());
 	CHECK(image.LightingBaseline.empty());
 
@@ -1495,19 +1550,22 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	CHECK(occlusion.RowStride == occlusion.Width);
 	CHECK(occlusion.Pixels.size() == size_t(occlusion.Width) * occlusion.Height);
 	REQUIRE(occlusion.AmbientOcclusion);
-	CHECK(occlusion.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::Estimated);
+	CHECK(occlusion.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::ClearedNoPass);
 	CHECK(occlusion.AmbientOcclusion->ProducerFrame == occlusion.CaptureFrame);
 	CHECK(occlusion.AmbientOcclusion->Enabled == true);
-	CHECK(occlusion.AmbientOcclusion->SampleCount == 12);
-	CHECK(occlusion.AmbientOcclusion->RadiusWorldUnits == 0.65f);
-	CHECK(occlusion.AmbientOcclusion->Denoiser == render::AmbientOcclusionDenoiser::None);
-	CHECK(occlusion.AmbientOcclusion->TemporalHistory == render::AmbientOcclusionTemporalHistory::Disabled);
+	CHECK_FALSE(occlusion.AmbientOcclusion->SampleCount);
+	CHECK_FALSE(occlusion.AmbientOcclusion->RadiusWorldUnits);
+	CHECK_FALSE(occlusion.AmbientOcclusion->Denoiser);
+	CHECK_FALSE(occlusion.AmbientOcclusion->TemporalHistory);
 	CHECK(occlusion.AmbientOcclusion->BackgroundValue == 1.0f);
 	CHECK(
 		occlusion.AmbientOcclusion->BackgroundClassification ==
 		render::AmbientOcclusionBackgroundClassification::Unavailable
 	);
 
+	CHECK(std::all_of(occlusion.Pixels.begin(), occlusion.Pixels.end(), [](std::byte pixel) {
+		return pixel == std::byte{255};
+	}));
 	// The output capture remains live on an unchanged scene while SSAO stays in
 	// the PBR slot. Its download is newer, but its producer is not.
 	view.Damage.Scene = false;
@@ -1523,6 +1581,41 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	CHECK(reused.CaptureFrame > occlusion.CaptureFrame);
 	CHECK(reused.AmbientOcclusion->ProducerFrame == occlusion.AmbientOcclusion->ProducerFrame);
 	CHECK(reused.AmbientOcclusion->ProducerFrame < reused.CaptureFrame);
+
+	view.Damage.Scene = true;
+	scene::DrawInstance wall;
+	wall.Source = 1;
+	wall.Frame.Position = view.CameraFrame.Position + core::Vector3{0, 0, -4};
+	wall.HalfExtent = {2, 2, 0.05f};
+	wall.CastShadow = false;
+	view.Instances = std::span(&wall, 1);
+	const render::ResourceImageRequest geometryAmbient{
+		8, pipelineName, core::Name("data-capture-ambient-occlusion"), 0
+	};
+	REQUIRE(renderer.RequestResourceImage(geometryAmbient));
+	const render::ResourceImageRequest geometryDepth{11, pipelineName, captureNode, 0};
+	REQUIRE(renderer.RequestResourceImage(geometryDepth));
+	const auto depthClears = counter("render.empty_depth.clears");
+	const auto lightingClears = counter("render.empty_lighting.clears");
+	const auto geometryFrame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(geometryFrame.Ran(geometryAmbient.Node));
+	CHECK(geometryFrame.DrawCalls >= emptyFrame.DrawCalls + 4);
+	CHECK(counter("render.empty_depth.clears") == depthClears);
+	CHECK(counter("render.empty_lighting.clears") == lightingClears);
+	const auto visibleWall = AwaitImage(renderer, geometryDepth.Token);
+	REQUIRE(visibleWall.Status == render::ResourceImageStatus::Ok);
+	core::ByteReader wallDepth(visibleWall.Depth);
+	float nearest = view.Camera.FarPlane;
+	while (!wallDepth.AtEnd())
+		nearest = std::min(nearest, wallDepth.ReadFloat());
+	CHECK(nearest == Catch::Approx(3.95f).margin(0.01f));
+	const auto estimated = AwaitImage(renderer, geometryAmbient.Token);
+	REQUIRE(estimated.AmbientOcclusion);
+	CHECK(estimated.AmbientOcclusion->SourceState == render::AmbientOcclusionSourceState::Estimated);
+	CHECK(estimated.AmbientOcclusion->Enabled == true);
+	CHECK(estimated.AmbientOcclusion->SampleCount == 12);
+	CHECK(estimated.AmbientOcclusion->RadiusWorldUnits == 0.65f);
+	view.Instances = {};
 
 	view.Damage.Scene = true;
 	view.OverrideLighting = true;
@@ -1578,6 +1671,47 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 		render::AmbientOcclusionSourceState::ClearedNoPass
 	);
 	CHECK(noPassDisabledOcclusion.AmbientOcclusion->Enabled == false);
+
+	// Zero exported depth uses a separate graph texture. Native lighting depth
+	// retains its far background, but this recording has no proof to skip its shader.
+	graph::PipelineDocument zeroDocument;
+	for (const auto &edit : document.Edits()) {
+		zeroDocument.Record(edit);
+		if (edit.Kind == graph::EditKind::AddNode && edit.Name == core::Name("depth-linearise"))
+			zeroDocument.Record(
+				{.Kind = graph::EditKind::Set, .Key = core::Name("background"), .Value = "zero"}
+			);
+	}
+	graph::RenderGraph zeroPipeline;
+	REQUIRE(graph::Build(zeroDocument, zeroPipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	const core::Name zeroName("default-data-capture-zero-background");
+	REQUIRE(renderer.SetPipeline(zeroName, zeroPipeline));
+	view.Pipeline = zeroName;
+	view.Camera.RenderFeatures.Disable &= ~scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
+	view.Lighting.RenderFeatures.Disable &= ~scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
+	const render::ResourceImageRequest zeroRequest{12, zeroName, captureNode, 0};
+	const render::ResourceImageRequest zeroBaseline{
+		13, zeroName, core::Name("background-lighting-baseline"), 0
+	};
+	REQUIRE(renderer.RequestResourceImage(zeroRequest));
+	REQUIRE(renderer.RequestResourceImage(zeroBaseline));
+	const auto zeroDepthBefore = counter("render.empty_depth.clears");
+	const auto zeroLightingBefore = counter("render.empty_lighting.clears");
+	const auto zeroFrame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(zeroFrame.Ran(captureNode));
+	CHECK(counter("render.empty_depth.clears") - zeroDepthBefore == 1);
+	CHECK(counter("render.empty_lighting.clears") == zeroLightingBefore);
+	CHECK(zeroFrame.DrawCalls == emptyFrame.DrawCalls + 1);
+	const auto zeroImages = AwaitImageGroup(renderer, std::array<uint64_t, 2>{12, 13});
+	REQUIRE(zeroImages[0].Status == render::ResourceImageStatus::Ok);
+	REQUIRE(zeroImages[1].Status == render::ResourceImageStatus::Ok);
+	core::ByteReader zeroDepth(zeroImages[0].Depth);
+	bool zeroDepthPixels = true;
+	while (!zeroDepth.AtEnd())
+		zeroDepthPixels &= zeroDepth.ReadFloat() == 0.f;
+	CHECK(zeroDepthPixels);
+	// The zero export must not replace the native lighting background.
+	CHECK(zeroImages[1].Pixels == backgrounds[0].Pixels);
 
 	const render::ResourceImageRequest residentAmbient{
 		3,

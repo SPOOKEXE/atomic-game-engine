@@ -230,6 +230,11 @@ namespace engine::render {
 		scene::SurfaceRun CameraRuns[scene::MAX_SURFACES];
 
 		bool HaveInstances = false;
+		// Successful empty G-buffer clears prove every normal has zero alpha.
+		bool EmptyGBufferNormals = false;
+		SDL_GPUTexture *EmptyHardwareDepth = nullptr;
+		SDL_GPUTexture *FarLinearDepth = nullptr;
+		void InvalidateBackgroundTexture(SDL_GPUTexture *texture);
 		bool HaveOverlay = false;
 		bool UploadOverlay = false;
 		bool HaveShadow = false;
@@ -595,6 +600,12 @@ namespace engine::render {
 		// @return The bindings.
 		std::vector<SDL_GPUTextureSamplerBinding>
 		TextureBindings(const graph::RunContext &context, SDL_GPUCommandBuffer *readCommand = nullptr);
+
+		// Publishes an identical image without running a fullscreen shader.
+		bool CopyImage(core::Name name, const Impl::NamedTexture &source, const Impl::NamedTexture &target);
+
+		// Initializes a declared colour output without running a shader.
+		bool ClearImage(core::Name name, const Impl::NamedTexture &target, SDL_FColor colour);
 
 		// Copies one image into another through the image pipeline.
 		//

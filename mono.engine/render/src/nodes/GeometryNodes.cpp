@@ -468,6 +468,8 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("gbuffer"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
+			recording.EmptyGBufferNormals = false;
+			recording.EmptyHardwareDepth = nullptr;
 			Impl *const State = recording.State;
 			FrameResult &result = recording.Result;
 			SDL_GPUCommandBuffer *const command = recording.Command;
@@ -531,6 +533,7 @@ namespace engine::render {
 				if (pass == nullptr) {
 					return pass;
 				}
+				if (!haveInstances || plainOpaque == 0) return pass;
 				State->BindPipeline(pass, State->GBufferPipeline, Impl::PipelineFamily::GBuffer);
 				SDL_SetGPUViewport(pass, &sceneViewport);
 				SDL_SetGPUScissor(pass, &sceneScissor);
@@ -634,6 +637,9 @@ namespace engine::render {
 					drawOpaque(gbuffer, State->InstanceIndexBuffer, nullptr);
 				}
 				SDL_EndGPURenderPass(gbuffer);
+				recording.EmptyGBufferNormals = !haveInstances || plainOpaque == 0;
+				if (recording.EmptyGBufferNormals && depthTarget.clear_depth == 1.0f)
+					recording.EmptyHardwareDepth = depthTarget.texture;
 				return true;
 			}
 
@@ -1129,12 +1135,7 @@ namespace engine::render {
 								   ) { return recording.DrawImage(source, target, load, reverseSpectrum); };
 
 			ENGINE_PROFILE_CAT("transparent pass", core::ProfileCategory::Render);
-			// Entered unconditionally, and that is the honest reading rather
-			// than a convenience: the stage clears colour and depth, so a frame
-			// with nothing in it still ran this pass - the background is what it
-			// drew. `Validate` sees the same thing, because the stage's writes
-			// are marked `Clear`.
-			enterNamedPass(context.Name);
+			// Publish the incoming scene even when no transparent hosts draw.
 
 			Impl::NamedTexture source;
 			Impl::NamedTexture target;
@@ -1148,6 +1149,15 @@ namespace engine::render {
 				}
 			}
 			State->RefractionGuardTexture = nullptr;
+			const bool exactCopy = source.IsValid() && target.IsValid() && source.Format == target.Format &&
+								   source.Width == target.Width && source.Height == target.Height;
+			if (!exactCopy || source.Texture == target.Texture) enterNamedPass(context.Name);
+			const bool published = exactCopy ? recording.CopyImage(context.Name, source, target)
+											 : drawImage(source, target, SDL_GPU_LOADOP_CLEAR);
+			if (!published) {
+				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
+				return true;
+			}
 			bool hasTransmission = false;
 			for (uint32_t index = 0; index < plainTransparent; ++index) {
 				const uint32_t slot = sceneCount + static_cast<uint32_t>(opaqueCount) + index;
@@ -1209,8 +1219,12 @@ namespace engine::render {
 					);
 				}
 			}
-			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
-				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
+
+			if (!recording.Request.Source->Grid.Enabled && plainTransparent == 0 && !drawInterface &&
+				particleCount == 0 && ribbonCount == 0) {
+				State->RefractionTexture = nullptr;
+				State->RefractionSampler = nullptr;
+				State->RefractionGuardTexture = nullptr;
 				return true;
 			}
 			const bool hdr = target.Format == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
@@ -1222,6 +1236,7 @@ namespace engine::render {
 			colourTarget.store_op = SDL_GPU_STOREOP_STORE;
 			colourTarget.cycle = false;
 
+			recording.InvalidateBackgroundTexture(depthTarget.texture);
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
 			// **The light set, pushed once for the whole pass.** Uniform state
 			// on a command buffer persists until it is replaced, so one push
@@ -1261,7 +1276,7 @@ namespace engine::render {
 			// The grid shares opaque depth and precedes every transparent draw.
 			recording.DrawGroundGrid(pass, matrices.ViewProjection, visibilityCameraFrame, worldTarget);
 
-			if (haveInstances || drawInterface || particleCount > 0 || ribbonCount > 0) {
+			if (plainTransparent > 0 || drawInterface || particleCount > 0 || ribbonCount > 0) {
 				State->BindPipeline(
 					pass,
 					hdr ? State->HdrOpaquePipeline : State->OpaquePipeline,
@@ -1432,6 +1447,7 @@ namespace engine::render {
 			// making the deferred lighting source contain the glass itself.
 			if (plainTransparent > 0 && recording.Pbr != nullptr &&
 				State->GBufferTransparentPipeline != nullptr) {
+				recording.EmptyGBufferNormals = false;
 				Impl::PbrSlot &pbr = *recording.Pbr;
 				SDL_GPUColorTargetInfo metadata[8]{};
 				SDL_GPUTexture *const textures[] = {
