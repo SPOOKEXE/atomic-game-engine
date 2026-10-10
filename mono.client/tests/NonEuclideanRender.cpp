@@ -56,9 +56,16 @@ namespace {
 		return {std::istreambuf_iterator<char>(input), {}};
 	}
 
-	void WriteAngleTour(const std::filesystem::path &path, int sample) {
-		std::string source =
-			ReadText(core::Paths::Base().parent_path() / "assets/examples/scripts/NonEuclidean.luau");
+	void WriteAngleTour(
+		const std::filesystem::path &builderPath, const std::filesystem::path &cameraPath, int sample
+	) {
+		const auto scripts = core::Paths::Base().parent_path() / "assets/examples/scripts";
+		std::ofstream builderOutput(builderPath);
+		REQUIRE(builderOutput);
+		builderOutput << ReadText(scripts / "NonEuclidean.luau");
+		REQUIRE(builderOutput);
+
+		std::string source = ReadText(scripts / "client/DemoCameras/NonEuclidean.client.luau");
 		const auto mode = source.find("view:SetAttribute(\"TourMode\", \"overview\")");
 		REQUIRE(mode != std::string::npos);
 		source.replace(
@@ -73,7 +80,7 @@ namespace {
 			std::string_view("view:SetAttribute(\"TourSample\", -1)").size(),
 			"view:SetAttribute(\"TourSample\", " + std::to_string(sample) + ")"
 		);
-		std::ofstream output(path);
+		std::ofstream output(cameraPath);
 		REQUIRE(output);
 		output << source;
 		REQUIRE(output);
@@ -130,13 +137,16 @@ TEST_CASE(
 	const auto root = core::Paths::Base() / "non-euclidean-render";
 	std::filesystem::remove_all(root);
 	std::filesystem::create_directories(root);
+	const auto cameraScripts = root / "client/DemoCameras";
+	std::filesystem::create_directories(cameraScripts);
 	std::vector<uint64_t> fingerprints;
 
 	for (const Shot &shot : SHOTS) {
 		CAPTURE(shot.Name, shot.Sample);
 		const auto script = root / (std::string(shot.Name) + ".luau");
+		const auto cameraScript = cameraScripts / (std::string(shot.Name) + ".client.luau");
 		const auto captureDirectory = root / shot.Name;
-		WriteAngleTour(script, shot.Sample);
+		WriteAngleTour(script, cameraScript, shot.Sample);
 
 		client::Options options;
 		options.Headless = true;
