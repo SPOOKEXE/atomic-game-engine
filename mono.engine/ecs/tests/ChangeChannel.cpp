@@ -380,6 +380,39 @@ TEST_CASE("component change epochs ignore unrelated writes", "[ecs]") {
 	REQUIRE(store.ComponentChangeVersion<Drift>() == held);
 }
 
+TEST_CASE("cleared component epochs identify discarded change records", "[ecs]") {
+	Store store("cleared-component-epochs");
+	REQUIRE(store.ComponentClearedChangeVersion<Spot>() == 0);
+	store.Observe<Spot>();
+	store.Observe<Drift>();
+	const Entity entity = store.Create();
+	store.Set(entity, Spot{1.0f});
+	store.Set(entity, Drift{2.0f});
+	REQUIRE(store.ComponentClearedChangeVersion<Spot>() == 0);
+	const uint64_t first = store.ComponentChangeVersion<Spot>();
+	store.ClearChanges();
+	CHECK(store.ComponentClearedChangeVersion<Spot>() == first);
+	CHECK(store.ComponentClearedChangeVersion<Drift>() == store.ComponentChangeVersion<Drift>());
+	CHECK_FALSE(store.Changed<Spot>(entity));
+
+	store.Set(entity, Spot{3.0f});
+	store.Set(entity, Spot{4.0f});
+	CHECK(store.ComponentChangeVersion<Spot>() > first);
+	CHECK(store.ComponentClearedChangeVersion<Spot>() == first);
+	CHECK(store.Changed<Spot>(entity));
+	store.ClearChanges();
+	CHECK(store.ComponentClearedChangeVersion<Spot>() == store.ComponentChangeVersion<Spot>());
+	const uint64_t held = store.ComponentClearedChangeVersion<Spot>();
+	store.ClearChanges();
+	CHECK(store.ComponentClearedChangeVersion<Spot>() == held);
+	CHECK(store.ComponentClearedChangeVersion<Quiet>() == 0);
+
+	store.Clear();
+	CHECK(store.ComponentClearedChangeVersion<Spot>() == 0);
+	store.Observe<Spot>();
+	CHECK(store.ComponentClearedChangeVersion<Spot>() == 0);
+}
+
 TEST_CASE("component membership epochs follow structural changes", "[ecs]") {
 	Store store("test");
 	store.Observe<Spot>();

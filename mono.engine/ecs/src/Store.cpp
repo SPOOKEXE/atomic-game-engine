@@ -1126,6 +1126,13 @@ namespace engine::ecs {
 		return State->ComponentChanges[id.Index];
 	}
 
+	uint64_t Store::ComponentClearedChangeVersionRaw(ComponentId id) const {
+		if (!id.IsValid() || id.Index >= State->ComponentClearedChanges.size()) {
+			return 0;
+		}
+		return State->ComponentClearedChanges[id.Index];
+	}
+
 	uint64_t Store::ComponentMembershipVersionRaw(ComponentId id) const {
 		if (!id.IsValid() || id.Index >= State->ComponentMembershipChanges.size()) {
 			return 0;
@@ -1521,6 +1528,7 @@ namespace engine::ecs {
 			}
 		}
 		for (const ComponentId watched : State->Watched) {
+			State->ComponentClearedChanges[watched.Index] = State->ComponentChanges[watched.Index];
 			State->ChangedEntities[watched.Index].clear();
 		}
 	}

@@ -1706,6 +1706,16 @@ namespace engine::ecs {
 			return ComponentChangeVersionRaw(Components::Of<T>());
 		}
 
+		// The write epoch at the last ClearChanges, even when no rows were dirty.
+		// A consumer with an older retained write epoch cannot use EachChanged<T>
+		// alone to recover every unseen write. Zero means no clear since observation.
+		// This process-local watermark is reset with world storage, not serialized.
+		//
+		// @return The last cleared write epoch for `T`, or zero when unobserved.
+		template <class T> uint64_t ComponentClearedChangeVersion() const {
+			return ComponentClearedChangeVersionRaw(Components::Of<T>());
+		}
+
 		// The monotonic membership epoch for one observed component.
 		// It advances when an entity gains or loses `T`, including destruction.
 		// Existing-value writes do not advance it. Zero means the component is not observed.
@@ -2446,6 +2456,7 @@ namespace engine::ecs {
 		void ObserveRaw(ComponentId id);
 		bool ObservedRaw(ComponentId id) const;
 		uint64_t ComponentChangeVersionRaw(ComponentId id) const;
+		uint64_t ComponentClearedChangeVersionRaw(ComponentId id) const;
 		uint64_t ComponentMembershipVersionRaw(ComponentId id) const;
 		Connection Listen(ComponentId id, std::function<void(Store &, Entity, const void *)> body);
 		bool ChangedRaw(Entity entity, ComponentId id) const;

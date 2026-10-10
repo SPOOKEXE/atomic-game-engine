@@ -95,6 +95,10 @@ namespace engine::ecs {
 			state.ComponentMembershipChanges.resize(static_cast<size_t>(id.Index) + 1, 0);
 		}
 		state.ComponentChanges[id.Index] = 1;
+		if (state.ComponentClearedChanges.size() <= id.Index) {
+			state.ComponentClearedChanges.resize(static_cast<size_t>(id.Index) + 1, 0);
+		}
+		state.ComponentClearedChanges[id.Index] = 0;
 		state.ComponentMembershipChanges[id.Index] = 1;
 
 		// The edges are now wrong rather than merely cold: a table holding this
@@ -460,6 +464,7 @@ namespace engine::ecs {
 		state.Plans.clear();
 		state.Commands.clear();
 		state.Watched.clear();
+		state.ComponentClearedChanges.clear();
 		state.ComponentMembershipChanges.clear();
 		state.DeferDepth = 0;
 
