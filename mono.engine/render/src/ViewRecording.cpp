@@ -41,6 +41,12 @@
 namespace engine::render {
 
 	namespace {
+		bool NeedsMeshResidencyFilter(std::span<const scene::DrawInstance> rows) {
+			return std::any_of(rows.begin(), rows.end(), [](const scene::DrawInstance &row) {
+				return row.Mesh.IsValid();
+			});
+		}
+
 		template <typename Value>
 		void StageRanges(
 			Value *destination, std::span<const InstanceUploadRange> ranges, std::span<const Value> source
@@ -501,41 +507,48 @@ namespace engine::render {
 		// mirror pass and the camera pass disagree about `Transparency` before
 		// `OrderScene` was one function.
 		//
-		// A frame where everything named is loaded copies the span and does one
-		// hash lookup per instance, which is nothing beside the hundred and
-		// fifty bytes of traffic per instance the collector already pays.
+		// A span with no named meshes cannot lose rows. Keep it borrowed instead
+		// of copying every default Part into a per-view buffer. Named meshes still
+		// take the residency path so a missing asset never becomes a default cube.
 		{
-			ENGINE_PROFILE_CAT("filter unloaded", core::ProfileCategory::Render);
+			ENGINE_PROFILE_CAT("classify/filter mesh rows", core::ProfileCategory::Render);
 
 			State->DrawableHidden.clear();
-			scene::KeepLoaded(
-				instances,
-				[State, &source](const scene::DrawInstance &row) {
-					return State->Meshes.Has(
-						row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
-					);
-				},
-				State->Drawable,
-				source.EyeHiddenRows,
-				source.EyeHiddenRows.empty() ? nullptr : &State->DrawableHidden
-			);
+			if (NeedsMeshResidencyFilter(instances)) {
+				scene::KeepLoaded(
+					instances,
+					[State, &source](const scene::DrawInstance &row) {
+						return State->Meshes.Has(
+							row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
+						);
+					},
+					State->Drawable,
+					source.EyeHiddenRows,
+					source.EyeHiddenRows.empty() ? nullptr : &State->DrawableHidden
+				);
+				instances = State->Drawable;
+			} else {
+				// No row was removed, so source indices remain the drawable indices.
+				State->DrawableHidden.assign(source.EyeHiddenRows.begin(), source.EyeHiddenRows.end());
+			}
 
 			// **The other worlds pay the same toll.** A destination whose meshes
 			// have not arrived here would otherwise come up as the field of
 			// cubes described above - seen through a portal, which is the one
 			// place a viewer cannot walk over and check.
-			scene::KeepLoaded(
-				foreign,
-				[State, &source](const scene::DrawInstance &row) {
-					return State->Meshes.Has(
-						row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
-					);
-				},
-				State->DrawableForeign
-			);
+			if (NeedsMeshResidencyFilter(foreign)) {
+				scene::KeepLoaded(
+					foreign,
+					[State, &source](const scene::DrawInstance &row) {
+						return State->Meshes.Has(
+							row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
+						);
+					},
+					State->DrawableForeign
+				);
+				foreign = State->DrawableForeign;
+			}
 		}
-		instances = State->Drawable;
-		foreign = State->DrawableForeign;
 
 		// --- uploads --------------------------------------------------------
 

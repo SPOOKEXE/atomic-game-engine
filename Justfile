@@ -189,6 +189,12 @@ render-preparation-bench samples="5":
     cmake --build --preset bench --target benchrunner bench_render
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --baseline .cache/build/bench/render-baseline.tsv --filter engine.render.bench.world-presentation --all --samples {{samples}}
 
+# CPU-only filtering cost for large default-part and named-mesh draw lists.
+keep-loaded-filter-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    ./.cache/build/bench/bench/bench_render --suite engine.render.bench.keep-loaded --samples {{samples}}
+
 # Data-capture hook dispatch through the real renderer without opening a device.
 data-capture-hook-bench samples="5":
     cmake --preset bench > /dev/null
