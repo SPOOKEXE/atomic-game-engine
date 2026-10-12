@@ -96,9 +96,6 @@ using engine::scene::WorldBounds;
 namespace {
 	constexpr uint32_t ENTITIES = 512;
 	constexpr float STEP = 1.0f / 60.0f;
-	// The authored world has one server script, two StarterPlayerScripts, and
-	// a local-player copy of each StarterPlayerScript in a combined host.
-	constexpr size_t BLADEBORNE_STARTUP_SCRIPT_COUNT = 5;
 	// The world loader puts each <Source> child in this cache.
 	constexpr size_t BLADEBORNE_SOURCE_COUNT = 15;
 
@@ -1344,6 +1341,29 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 		client::InstallPresentation(store, systems);
 		const engine::ecs::Entity localPlayer = client::EnsureLocalPlayer(store);
 		REQUIRE(localPlayer != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity starterPlayer = store.FindFirstRoot("StarterPlayer");
+		REQUIRE(starterPlayer != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity starterScripts =
+			store.FindFirstChild(starterPlayer, "StarterPlayerScripts");
+		REQUIRE(starterScripts != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity playerScripts =
+			store.FindFirstChild(localPlayer, engine::scene::PLAYER_SCRIPTS_NAME);
+		REQUIRE(playerScripts != engine::ecs::NULL_ENTITY);
+		constexpr std::array localScriptNames{"BladeborneHud", "BladeborneCamera"};
+		std::array<engine::ecs::Entity, localScriptNames.size()> templates{};
+		std::array<engine::ecs::Entity, localScriptNames.size()> copies{};
+		for (size_t index = 0; index < localScriptNames.size(); ++index) {
+			templates[index] = store.FindFirstChild(starterScripts, localScriptNames[index]);
+			copies[index] = store.FindFirstChild(playerScripts, localScriptNames[index]);
+			REQUIRE(templates[index] != engine::ecs::NULL_ENTITY);
+			REQUIRE(copies[index] != engine::ecs::NULL_ENTITY);
+			CHECK(copies[index] != templates[index]);
+		}
+		const engine::ecs::Entity serverScriptService = store.FindFirstRoot("ServerScriptService");
+		REQUIRE(serverScriptService != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity serverScript =
+			store.FindFirstChild(serverScriptService, "BladeborneArenaServer");
+		REQUIRE(serverScript != engine::ecs::NULL_ENTITY);
 
 		engine::script::RuntimeLimits limits;
 		limits.Role = engine::script::HostRole::OfBoth();
@@ -1353,8 +1373,19 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 		INFO(error);
 		REQUIRE(error.empty());
 		REQUIRE(runtime != nullptr);
-		REQUIRE(runtime->Costs().size() == BLADEBORNE_STARTUP_SCRIPT_COUNT);
+		// Combined hosts run the server script and player copies; templates remain inert.
+		const std::array startedScripts{serverScript, copies[0], copies[1]};
+		REQUIRE(runtime->Costs().size() == startedScripts.size());
+		for (const auto script : startedScripts)
+			CHECK(std::ranges::count(runtime->Costs(), script, &engine::script::ScriptCost::Instance) == 1);
+		for (const auto script : templates)
+			CHECK(std::ranges::count(runtime->Costs(), script, &engine::script::ScriptCost::Instance) == 0);
 		CHECK(std::ranges::all_of(runtime->Costs(), &engine::script::ScriptCost::Completed));
+		const engine::ecs::Entity camera = InWorkspace(store, "BladeborneCamera");
+		REQUIRE(camera != engine::ecs::NULL_ENTITY);
+		REQUIRE(store.Resource<ActiveCamera>() != nullptr);
+		CHECK(store.Resource<ActiveCamera>()->Entity == camera);
+		CHECK(CountNamedDescendants(store, engine::scene::WorkspaceOf(store), "BladeborneCamera") == 1);
 
 		const engine::script::SourceCache *sources = store.Resource<engine::script::SourceCache>();
 		REQUIRE(sources != nullptr);
@@ -1368,6 +1399,7 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 		REQUIRE(starterGui != engine::ecs::NULL_ENTITY);
 		const engine::ecs::Entity templateHud = store.FindFirstChild(starterGui, "BladeborneHUD");
 		REQUIRE(templateHud != engine::ecs::NULL_ENTITY);
+		CHECK(CountNamedDescendants(store, starterGui, "BladeborneHUD") == 1);
 		CHECK(CountNamedDescendants(store, templateHud, "Ability1") == 1);
 		CHECK(CountNamedDescendants(store, templateHud, "Minimap") == 1);
 
@@ -1376,6 +1408,8 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 		REQUIRE(playerGui != engine::ecs::NULL_ENTITY);
 		const engine::ecs::Entity liveHud = store.FindFirstChild(playerGui, "BladeborneHUD");
 		REQUIRE(liveHud != engine::ecs::NULL_ENTITY);
+		CHECK(CountNamedDescendants(store, playerGui, "BladeborneHUD") == 1);
+		CHECK(CountNamedDescendants(store, liveHud, "Hotbar") == 1);
 		CHECK(CountNamedDescendants(store, liveHud, "Ability1") == 1);
 		CHECK(CountNamedDescendants(store, liveHud, "Minimap") == 1);
 		CHECK(CountNamedDescendants(store, liveHud, "HotbarSlot1") == 2);
