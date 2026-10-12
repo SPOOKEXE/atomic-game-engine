@@ -42,7 +42,9 @@ namespace studio {
 
 	// Product services supplied when this host composes its optional control rows.
 	struct DataFactoryControlHookContext {
+		// Surface receiving the data-factory control rows.
 		engine::control::Surface &Surface;
+		// Whether renderer-dependent rows may be installed.
 		bool RendererReady = false;
 	};
 

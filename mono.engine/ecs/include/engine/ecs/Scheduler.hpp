@@ -128,6 +128,7 @@ namespace engine::ecs {
 		Scheduler &operator=(const Scheduler &other);
 		// Moving the system storage also moves the strings behind the timing views.
 		Scheduler(Scheduler &&other) noexcept = default;
+		// Replaces this scheduler with the moved registrations and timing views.
 		Scheduler &operator=(Scheduler &&other) noexcept = default;
 
 		// `name` is copied, so a caller may build one. It becomes the span

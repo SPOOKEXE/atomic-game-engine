@@ -366,8 +366,11 @@ namespace engine::effects {
 		// Variable timing is resolved from the world's texture catalogue. The
 		// name remains stable across content replacement and world boundaries.
 		core::Name FlipbookTexture;
+		// Rate converting particle age to time in the variable frame timeline.
 		float FlipbookTimelineScale = 1.0f;
+		// Whether frame durations come from the resolved texture sequence.
 		bool VariableFlipbookTiming = false;
+		// Whether the resolved sequence cannot provide usable frame timing.
 		bool InvalidFlipbookTiming = false;
 	};
 
