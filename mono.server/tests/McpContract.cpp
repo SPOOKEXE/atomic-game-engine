@@ -1,4 +1,6 @@
 // Product-level MCP contracts, observed through the actual server binary.
+// The probes request one cube because the benchmark field's population is
+// unrelated to the listener contract and delays its bind.
 
 #include <engine/core/Paths.hpp>
 #include <engine/parallel/Process.hpp>
@@ -82,7 +84,7 @@ namespace {
 		const uint16_t port = FreePort();
 		engine::parallel::Process child;
 		std::vector<std::string> arguments{
-			"--mcp-port", std::to_string(port), "--unpaced", "--seconds", "30"
+			"--mcp-port", std::to_string(port), "--unpaced", "--seconds", "30", "--entities", "1"
 		};
 		if (factory) arguments.push_back("--data-factory");
 		REQUIRE(child.Start(Program(), arguments));
@@ -159,7 +161,16 @@ TEST_CASE("server replication observation MCP hook follows listener availability
 	engine::parallel::Process child;
 	REQUIRE(child.Start(
 		Program(),
-		{"--mcp-port", std::to_string(port), "--listen", "--listen-port", "0", "--unpaced", "--seconds", "30"}
+		{"--mcp-port",
+		 std::to_string(port),
+		 "--listen",
+		 "--listen-port",
+		 "0",
+		 "--unpaced",
+		 "--seconds",
+		 "30",
+		 "--entities",
+		 "1"}
 	));
 
 	asio::io_context context;
@@ -191,9 +202,10 @@ TEST_CASE("server MCP listener restarts with its reviewed normal manifest", "[se
 	const json expected = Fixture()["normal"];
 	const uint16_t port = FreePort();
 	const auto run = [&](engine::parallel::Process &child) {
-		REQUIRE(
-			child.Start(Program(), {"--mcp-port", std::to_string(port), "--unpaced", "--seconds", "0.25"})
-		);
+		REQUIRE(child.Start(
+			Program(),
+			{"--mcp-port", std::to_string(port), "--unpaced", "--seconds", "0.25", "--entities", "1"}
+		));
 
 		asio::io_context context;
 		asio::ip::tcp::socket socket(context);
