@@ -1030,6 +1030,38 @@ TEST_CASE("a wheel scrolls the nearest frame that can take it", "[gui][input]") 
 	CHECK(world.Data.Get<Scrolling>(frame)->CanvasPosition.Y == Approx(10.0f));
 }
 
+TEST_CASE("a nested scrolling frame takes the wheel before its parent", "[gui][input]") {
+	World world("gui_input.nested_wheel");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity outer = world.Make("ScrollingFrame", screen);
+	world.Box(outer, 0.0f, 0.0f, 200.0f, 200.0f);
+	Scrolling outerScrolling;
+	outerScrolling.CanvasSize = UDim2{0.0f, 200.0f, 0.0f, 600.0f};
+	world.Data.Set(outer, outerScrolling);
+
+	const Entity inner = world.Make("ScrollingFrame", outer);
+	world.Box(inner, 10.0f, 20.0f, 150.0f, 100.0f);
+	Scrolling innerScrolling;
+	innerScrolling.CanvasSize = UDim2{0.0f, 150.0f, 0.0f, 400.0f};
+	world.Data.Set(inner, innerScrolling);
+	world.Compile();
+	REQUIRE(world.Data.Get<Resolved>(outer) != nullptr);
+	REQUIRE(world.Data.Get<Resolved>(inner) != nullptr);
+	REQUIRE(world.Data.Get<Resolved>(outer)->Order > world.Data.Get<Resolved>(inner)->Order);
+
+	Pointer pointer;
+	pointer.Position = Vector2{40.0f, 50.0f};
+	pointer.Wheel = -1.0f;
+	Send(world, pointer);
+	CHECK(world.Data.Get<Scrolling>(inner)->CanvasPosition.Y == Approx(60.0f));
+	CHECK(world.Data.Get<Scrolling>(outer)->CanvasPosition.Y == Approx(0.0f));
+
+	pointer.Wheel = -100.0f;
+	Send(world, pointer);
+	CHECK(world.Data.Get<Scrolling>(inner)->CanvasPosition.Y == Approx(300.0f));
+	CHECK(world.Data.Get<Scrolling>(outer)->CanvasPosition.Y == Approx(0.0f));
+}
+
 TEST_CASE("a wheel zooms a node canvas inside its bounds", "[gui][input]") {
 	World world("gui_input.node_canvas_zoom");
 	const Entity screen = world.Make("ScreenGui");
