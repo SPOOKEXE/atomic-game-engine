@@ -573,7 +573,7 @@ TEST_CASE("nothing is declared twice and every name is qualified", "[replication
 
 TEST_CASE("attributes cross as an observed owner-selected resource", "[replication][defaults]") {
 	defaults_test::Ready();
-	const auto *attributes = defaults_test::Row("ecs.AttributeTable");
+	const auto *attributes = Row("ecs.AttributeTable");
 	REQUIRE(attributes != nullptr);
 	CHECK(attributes->Resource);
 	CHECK(attributes->Detection == ChangeDetection::Observed);
