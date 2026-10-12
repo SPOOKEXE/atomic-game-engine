@@ -308,6 +308,7 @@ namespace client {
 
 	bool Client::Initialise(const Options &options) {
 		Settings = options;
+		Input.EnablePresentationInput();
 		SubmittedMoveTick = 0;
 		InputLocalEpoch = InputSequenceEpoch = 0;
 		if (!std::isfinite(Settings.InterfaceScale) || Settings.InterfaceScale <= 0.0f ||
@@ -2554,6 +2555,12 @@ namespace client {
 		for (auto &event : fresh)
 			automated.push_back(std::move(event));
 		const uint32_t windowId = Window == nullptr ? 0 : SDL_GetWindowID(Window);
+		struct ClickPress {
+			engine::control::InputAutomationKind Kind;
+			std::string Name;
+			SDL_Event Event;
+		};
+		std::vector<ClickPress> clicksThisPump;
 		for (const auto &input : automated) {
 			SDL_Event event{};
 			event.common.timestamp = SDL_GetTicksNS();
@@ -2609,13 +2616,51 @@ namespace client {
 				event.text.text = input.Text.c_str();
 				break;
 			}
+			const bool click = input.State == engine::control::InputAutomationState::Click &&
+							   (input.Kind == engine::control::InputAutomationKind::MouseButton ||
+								input.Kind == engine::control::InputAutomationKind::Key);
+			const std::string_view clickName =
+				input.Kind == engine::control::InputAutomationKind::MouseButton ? input.Button : input.Key;
+			auto previousClick =
+				std::find_if(clicksThisPump.begin(), clicksThisPump.end(), [&](const ClickPress &prior) {
+					return prior.Kind == input.Kind && prior.Name == clickName;
+				});
+			if (click && previousClick != clicksThisPump.end()) {
+				// Two Click requests for one control in a pump need an up between
+				// their downs. Keep the final up deferred for tick consumers.
+				SDL_Event released = previousClick->Event;
+				released.common.timestamp = SDL_GetTicksNS();
+				if (input.Kind == engine::control::InputAutomationKind::MouseButton) {
+					released.type = SDL_EVENT_MOUSE_BUTTON_UP;
+					released.button.down = false;
+				} else {
+					released.type = SDL_EVENT_KEY_UP;
+					released.key.down = false;
+					released.key.mod = SDL_KMOD_NONE;
+				}
+				if (!SDL_PushEvent(&released)) {
+					ENGINE_ERROR("control: could not queue input: {}", SDL_GetError());
+					continue;
+				}
+			}
 			const bool queued = SDL_PushEvent(&event);
 			if (!queued) {
 				ENGINE_ERROR("control: could not queue input: {}", SDL_GetError());
 			}
-			if (queued && input.State == engine::control::InputAutomationState::Click &&
-				(input.Kind == engine::control::InputAutomationKind::MouseButton ||
-				 input.Kind == engine::control::InputAutomationKind::Key)) {
+			if (queued && click) {
+				if (previousClick != clicksThisPump.end()) {
+					std::erase_if(
+						DeferredControlRelease, [&](const engine::control::InputAutomationEvent &pending) {
+							return pending.Kind == input.Kind &&
+								   (input.Kind == engine::control::InputAutomationKind::MouseButton
+										? pending.Button == clickName
+										: pending.Key == clickName);
+						}
+					);
+					previousClick->Event = event;
+				} else {
+					clicksThisPump.push_back(ClickPress{input.Kind, std::string(clickName), event});
+				}
 				auto release = input;
 				release.State = engine::control::InputAutomationState::Up;
 				DeferredControlRelease.push_back(std::move(release));
@@ -4213,7 +4258,7 @@ namespace client {
 			ENGINE_HEAP_SCOPE("client.interface");
 
 			engine::gui::CompileRequest request;
-			std::span<const engine::gui::GuiEvent> interfaceEvents;
+			std::vector<engine::gui::GuiEvent> interfaceEvents;
 			std::span<const engine::gui::GuiEvent> adornmentEvents;
 
 			// **What Return did, which the router cannot produce.** Releasing the
@@ -4304,13 +4349,25 @@ namespace client {
 					}
 				}
 
-				const bool textEditing = engine::gui::FocusedTextBox(store) != engine::ecs::NULL_ENTITY;
-				for (const engine::gui::SemanticAction action :
-					 GuiActions(Input.State(), Input.Controllers(), textEditing)) {
-					const std::span<const engine::gui::GuiEvent> events =
-						InterfaceRouter.UpdateSemantic(store, InterfaceList.Commands(), action);
-					semanticEvents.insert(semanticEvents.end(), events.begin(), events.end());
+				const engine::scene::ControllerState presentationControllers =
+					Input.ControllersForPresentation();
+				const auto routeActions = [&](const engine::scene::InputState &keyboard,
+											  const engine::scene::ControllerState &controllers) {
+					const bool textEditing = engine::gui::FocusedTextBox(store) != engine::ecs::NULL_ENTITY;
+					for (const engine::gui::SemanticAction action :
+						 GuiActions(keyboard, controllers, textEditing)) {
+						const std::span<const engine::gui::GuiEvent> events =
+							InterfaceRouter.UpdateSemantic(store, InterfaceList.Commands(), action);
+						semanticEvents.insert(semanticEvents.end(), events.begin(), events.end());
+					}
+				};
+				const engine::scene::ControllerState noControllers;
+				for (const engine::scene::KeyCode key : Input.PendingPresentation().KeyPresses) {
+					engine::scene::InputState oneKey;
+					oneKey.Down.Set(key, true);
+					routeActions(oneKey, noControllers);
 				}
+				routeActions(engine::scene::InputState{}, presentationControllers);
 
 				// **This frame's characters, and before the press that may move
 				// the focus.** They were produced by a keyboard aimed at whichever
@@ -4335,41 +4392,49 @@ namespace client {
 					ENGINE_INFO("type: sent '{}' on frame {}", Settings.TypedText, FramesDrawn);
 				}
 
-				// **Straight from the translator into `Label::Text`, with nothing
-				// in between.** `Translate.hpp` keeps the string on the translator
-				// rather than on `scene::InputState` because that resource is
-				// trivially copyable and a `std::string` on it buys a hand-written
-				// serialiser, so this is the one hop it makes - into the world,
-				// where rule 2 says the text lives.
+				// Edit keys and committed text keep their SDL order across skipped
+				// draws. Applying one batch would turn text, Backspace, text into
+				// text, text, Backspace and lose repeated key presses.
 				engine::gui::Typing typing;
-				typing.Text = Input.TypedText();
 				const engine::input::TextComposition composition = Input.Composition();
 				typing.Preedit = composition.Text;
 				typing.PreeditStart = composition.Start;
 				typing.PreeditLength = composition.Length;
 				typing.PreeditRevision = composition.Revision;
-				typing.Backspace = Input.State().WasKeyPressed(engine::scene::KeyCode::Backspace);
-				typing.Submit = Input.State().WasKeyPressed(engine::scene::KeyCode::Return);
-				typing.Extend = Input.State().IsKeyDown(engine::scene::KeyCode::LeftShift) ||
-								Input.State().IsKeyDown(engine::scene::KeyCode::RightShift);
-
-				// **One step per press and not one per repeat**, because
-				// `input::Translator` drops SDL's key repeats deliberately - a
-				// held arrow moves the caret once until something records how many
-				// times it fired.
-				if (Input.State().WasKeyPressed(engine::scene::KeyCode::Left)) {
-					typing.Caret = -1;
-				} else if (Input.State().WasKeyPressed(engine::scene::KeyCode::Right)) {
-					typing.Caret = 1;
+				const auto applyTyping = [&](const engine::gui::Typing &edit) {
+					if (const engine::gui::TypeResult typed = engine::gui::Type(store, edit);
+						typed.Released) {
+						engine::gui::GuiEvent released;
+						released.Kind = engine::gui::EventKind::FocusReleased;
+						released.Instance = typed.Instance;
+						released.Entered = true;
+						typedEvents.push_back(released);
+					}
+				};
+				for (const engine::input::PresentationEditEvent &event : Input.PendingPresentation().Edits) {
+					engine::gui::Typing edit = typing;
+					switch (event.Kind) {
+					case engine::input::PresentationEditKind::Text:
+						edit.Text = event.Text;
+						break;
+					case engine::input::PresentationEditKind::Backspace:
+						edit.Backspace = true;
+						break;
+					case engine::input::PresentationEditKind::Submit:
+						edit.Submit = true;
+						break;
+					case engine::input::PresentationEditKind::CaretLeft:
+						edit.Caret = -1;
+						edit.Extend = event.Extend;
+						break;
+					case engine::input::PresentationEditKind::CaretRight:
+						edit.Caret = 1;
+						edit.Extend = event.Extend;
+						break;
+					}
+					applyTyping(edit);
 				}
-
-				if (const engine::gui::TypeResult typed = engine::gui::Type(store, typing); typed.Released) {
-					engine::gui::GuiEvent released;
-					released.Kind = engine::gui::EventKind::FocusReleased;
-					released.Instance = typed.Instance;
-					released.Entered = true;
-					typedEvents.push_back(released);
-				}
+				applyTyping(typing);
 
 				// **The hit test, which a shipped client did not do at all.** The
 				// router was constructed, read for `Hovered` and `Pressed`, and
@@ -4387,7 +4452,7 @@ namespace client {
 				engine::core::Vector2 windowPointer = Input.State().MousePosition;
 				engine::gui::Pointer pointer;
 				pointer.Position = windowPointer;
-				pointer.Down = Input.State().IsButtonDown(engine::scene::MouseButton::Left);
+				pointer.Down = Input.PrimaryDownForPresentation();
 
 				// **Focus and not a rectangle test.** The position is already in
 				// window pixels, and a pointer that has left the window stops
@@ -4401,7 +4466,7 @@ namespace client {
 				// and not this one - a list has to move the same distance in the
 				// client and in the editor, and scaling here would be the second
 				// answer.
-				pointer.Wheel = Input.State().WheelDelta;
+				pointer.Wheel = Input.PendingPresentation().WheelDelta;
 
 				// **Before the router reads the pointer, so the press is this
 				// frame's.** Synthesising after would put the click one frame
@@ -4412,27 +4477,40 @@ namespace client {
 					PressNamedElement(store);
 					windowPointer = Input.State().MousePosition;
 					pointer.Position = windowPointer;
-					pointer.Down = Input.State().IsButtonDown(engine::scene::MouseButton::Left);
+					pointer.Down = Input.PrimaryDownForPresentation();
 				}
 
-				// A screen interface gets first refusal. If no interactive screen
-				// element is under the pointer, project the same window pixel onto
-				// the nearest interactive `SurfaceGui` or `BillboardGui` and route
-				// in that collector's own canvas coordinates.
-				if (pointer.Inside &&
-					engine::gui::PickScreen(store, InterfaceList.Commands(), pointer.Position) ==
-						engine::ecs::NULL_ENTITY) {
-					engine::render::SpatialPointer spatial;
-					if (engine::render::ResolveSpatialPointer(
-							store, InterfaceList.Commands(), request.Display, windowPointer, spatial
-						)) {
-						pointer.Position = spatial.Position;
-						pointer.Collector = spatial.Collector;
-						pointer.ScreenOnly = false;
+				// Route every button edge against the displayed list before the
+				// current pointer level. A press and release can share one SDL pump,
+				// and several update loops may run before this presentation.
+				const auto routePointer = [&](engine::gui::Pointer routed) {
+					const engine::core::Vector2 windowPosition = routed.Position;
+					if (routed.Inside &&
+						engine::gui::PickScreen(store, InterfaceList.Commands(), windowPosition) ==
+							engine::ecs::NULL_ENTITY) {
+						engine::render::SpatialPointer spatial;
+						if (engine::render::ResolveSpatialPointer(
+								store, InterfaceList.Commands(), request.Display, windowPosition, spatial
+							)) {
+							routed.Position = spatial.Position;
+							routed.Collector = spatial.Collector;
+							routed.ScreenOnly = false;
+						}
 					}
+					const std::span<const engine::gui::GuiEvent> events =
+						InterfaceRouter.Update(store, InterfaceList.Commands(), routed);
+					interfaceEvents.insert(interfaceEvents.end(), events.begin(), events.end());
+				};
+				for (const engine::input::PrimaryPointerSample &transition :
+					 Input.PendingPresentation().PrimarySamples) {
+					engine::gui::Pointer edge = pointer;
+					edge.Position = transition.Position;
+					edge.Down = transition.Down;
+					edge.Cancelled = transition.Cancelled;
+					edge.Wheel = 0.0f;
+					routePointer(edge);
 				}
-
-				interfaceEvents = InterfaceRouter.Update(store, InterfaceList.Commands(), pointer);
+				routePointer(pointer);
 
 				// World adornments use the same window pointer after screen and spatial
 				// UI have had first refusal. Their hit geometry is resolved against the
@@ -4507,9 +4585,9 @@ namespace client {
 				}
 			});
 
-			// **Outside the world's lock, because it reaches a VM.** The span
-			// points into the router's own vector, which is a member and is only
-			// rewritten by the next `Update`; `DeliverGuiEvents` copies.
+			// Deliver after leaving the world: dispatch can reach the VM. Pointer
+			// events were copied after each router update because a later update
+			// replaces its event buffer.
 			if (!typedEvents.empty() || !semanticEvents.empty() || !interfaceEvents.empty() ||
 				!adornmentEvents.empty()) {
 				if (engine::script::Runtime *runtime = RuntimeOf(interfaceWorld); runtime != nullptr) {
@@ -4534,6 +4612,7 @@ namespace client {
 			// Do not relayout, route, or deliver events while submitting it.
 			hook = &Interface;
 		}
+		Input.ConsumePresentation();
 
 		// **SDL is asked for text only while a `TextBox` has the keyboard, and
 		// that is a decision rather than a saving.** Text input is not a stream

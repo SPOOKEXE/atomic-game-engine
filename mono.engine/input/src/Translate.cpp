@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <utility>
 
 namespace engine::input {
 
@@ -313,6 +314,76 @@ namespace engine::input {
 		Typed.clear();
 	}
 
+	void Translator::EnablePresentationInput() {
+		PresentationEnabled = true;
+		ConsumePresentation();
+	}
+
+	scene::ControllerState Translator::ControllersForPresentation() const {
+		scene::ControllerState controllers = ControllerCurrent;
+		for (size_t index = 0; index < scene::MAX_CONTROLLERS; index++) {
+			const uint32_t pressed = PresentationPending.PressedControllerButtons[index];
+			controllers.Slots[index].Buttons |= pressed;
+			controllers.Slots[index].PreviousButtons = controllers.Slots[index].Buttons & ~pressed;
+		}
+		return controllers;
+	}
+
+	bool Translator::PrimaryDownForPresentation() const {
+		return !PrimarySuppressedUntilRelease && !PresentationPending.PointerOverflowed &&
+			   Current.IsButtonDown(MouseButton::Left);
+	}
+
+	void Translator::QueuePrimarySample(PrimaryPointerSample sample) {
+		if (!PresentationEnabled || PresentationPending.PointerOverflowed) return;
+		auto &samples = PresentationPending.PrimarySamples;
+		if (sample.Motion && !samples.empty() && samples.back().Motion) {
+			samples.back() = sample;
+			return;
+		}
+		if (samples.size() < PresentationInput::MAXIMUM_PRIMARY_SAMPLES) {
+			samples.push_back(sample);
+			return;
+		}
+		// A hidden or resizing window may accumulate events for arbitrarily long.
+		// Cancel the held gesture once and ignore further samples until draw.
+		samples.clear();
+		samples.push_back(PrimaryPointerSample{sample.Position, false, true, false});
+		PresentationPending.PointerOverflowed = true;
+		PrimarySuppressedUntilRelease = sample.Down;
+	}
+
+	void Translator::QueueEdit(PresentationEditEvent event) {
+		if (!PresentationEnabled || PresentationPending.EditsOverflowed) return;
+		auto &pending = PresentationPending;
+		if (pending.Edits.size() >= PresentationInput::MAXIMUM_EDIT_EVENTS ||
+			event.Text.size() > PresentationInput::MAXIMUM_TEXT_BYTES - pending.TextBytes) {
+			// Drop the whole edit batch rather than deliver a partial UTF-8 commit
+			// or a key without the text that preceded it.
+			pending.Edits.clear();
+			pending.TextBytes = 0;
+			pending.EditsOverflowed = true;
+			return;
+		}
+		pending.TextBytes += event.Text.size();
+		pending.Edits.push_back(std::move(event));
+	}
+
+	void Translator::ConsumePresentation() {
+		if (PresentationPending.PointerOverflowed && Current.IsButtonDown(MouseButton::Left)) {
+			PrimarySuppressedUntilRelease = true;
+		}
+		PresentationPending.KeyPresses.clear();
+		PresentationPending.PressedControllerButtons.fill(0);
+		PresentationPending.Edits.clear();
+		PresentationPending.TextBytes = 0;
+		PresentationPending.WheelDelta = 0.0f;
+		PresentationPending.PrimarySamples.clear();
+		PresentationPending.PointerOverflowed = false;
+		PresentationPending.EditsOverflowed = false;
+		PresentationPending.KeysOverflowed = false;
+	}
+
 	bool Translator::HandleEvent(const SDL_Event &event) {
 		auto findSlot = [this](uint32_t id) -> size_t {
 			for (size_t index = 0; index < scene::MAX_CONTROLLERS; index++) {
@@ -371,6 +442,7 @@ namespace engine::input {
 			if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
 				if ((ControllerCurrent.Slots[slot].Buttons & bit) == 0) {
 					ControllerCurrent.Slots[slot].PressedButtons |= bit;
+					if (PresentationEnabled) PresentationPending.PressedControllerButtons[slot] |= bit;
 				}
 				ControllerCurrent.Slots[slot].Buttons |= bit;
 			} else {
@@ -397,6 +469,7 @@ namespace engine::input {
 				if (ControllerCurrent.Slots[slot].Axes[axisIndex] >= 0.5f) {
 					if ((ControllerCurrent.Slots[slot].Buttons & bit) == 0) {
 						ControllerCurrent.Slots[slot].PressedButtons |= bit;
+						if (PresentationEnabled) PresentationPending.PressedControllerButtons[slot] |= bit;
 					}
 					ControllerCurrent.Slots[slot].Buttons |= bit;
 				} else {
@@ -417,6 +490,7 @@ namespace engine::input {
 			if (event.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN) {
 				if ((ControllerCurrent.Slots[slot].Buttons & bit) == 0) {
 					ControllerCurrent.Slots[slot].PressedButtons |= bit;
+					if (PresentationEnabled) PresentationPending.PressedControllerButtons[slot] |= bit;
 				}
 				ControllerCurrent.Slots[slot].Buttons |= bit;
 			} else {
@@ -459,6 +533,7 @@ namespace engine::input {
 			if ((event.jhat.value & SDL_HAT_RIGHT) != 0)
 				buttons |= 1u << static_cast<uint8_t>(ControllerButton::DPadRight);
 			controller.PressedButtons |= buttons & ~before;
+			if (PresentationEnabled) PresentationPending.PressedControllerButtons[slot] |= buttons & ~before;
 			Current.LastSource =
 				static_cast<scene::InputSource>(static_cast<uint8_t>(scene::InputSource::Gamepad1) + slot);
 			return true;
@@ -483,6 +558,37 @@ namespace engine::input {
 				// would add to the switch above.
 				ENGINE_DEBUG("SDL keycode {} has no scene::KeyCode; the event is dropped", event.key.key);
 				return false;
+			}
+			if (PresentationEnabled && event.type == SDL_EVENT_KEY_DOWN && !Current.Down.Has(key)) {
+				if (!PresentationPending.KeysOverflowed) {
+					if (PresentationPending.KeyPresses.size() < PresentationInput::MAXIMUM_KEY_PRESSES) {
+						PresentationPending.KeyPresses.push_back(key);
+					} else {
+						PresentationPending.KeyPresses.clear();
+						PresentationPending.KeysOverflowed = true;
+					}
+				}
+				PresentationEditEvent edit;
+				switch (key) {
+				case KeyCode::Backspace:
+					edit.Kind = PresentationEditKind::Backspace;
+					QueueEdit(std::move(edit));
+					break;
+				case KeyCode::Return:
+					edit.Kind = PresentationEditKind::Submit;
+					QueueEdit(std::move(edit));
+					break;
+				case KeyCode::Left:
+				case KeyCode::Right:
+					edit.Kind = key == KeyCode::Left ? PresentationEditKind::CaretLeft
+													 : PresentationEditKind::CaretRight;
+					edit.Extend =
+						Current.Down.Has(KeyCode::LeftShift) || Current.Down.Has(KeyCode::RightShift);
+					QueueEdit(std::move(edit));
+					break;
+				default:
+					break;
+				}
 			}
 			Current.Down.Set(key, event.type == SDL_EVENT_KEY_DOWN);
 
@@ -519,6 +625,8 @@ namespace engine::input {
 			// wanted. `client::Client` asks while a `TextBox` has the keyboard,
 			// so this case runs for exactly as long as somebody is typing.
 			Typed += event.text.text;
+			if (PresentationEnabled)
+				QueueEdit(PresentationEditEvent{PresentationEditKind::Text, event.text.text});
 			Preedit.clear();
 			PreeditStart = -1;
 			PreeditLength = -1;
@@ -546,7 +654,17 @@ namespace engine::input {
 				return false;
 			}
 			const uint8_t bit = 1u << static_cast<uint8_t>(button);
-			if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
+			const bool wasDown = (Current.Buttons & bit) != 0;
+			const bool down = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+			Current.MousePosition = core::Vector2{event.button.x, event.button.y};
+			if (button == MouseButton::Left && down != wasDown && PresentationEnabled) {
+				if (PrimarySuppressedUntilRelease) {
+					if (!down) PrimarySuppressedUntilRelease = false;
+				} else {
+					QueuePrimarySample(PrimaryPointerSample{Current.MousePosition, down, false, false});
+				}
+			}
+			if (down) {
 				Current.Buttons |= bit;
 			} else {
 				Current.Buttons &= static_cast<uint8_t>(~bit);
@@ -564,6 +682,9 @@ namespace engine::input {
 		case SDL_EVENT_MOUSE_MOTION:
 			Current.MousePosition = core::Vector2{event.motion.x, event.motion.y};
 			Current.LastSource = scene::InputSource::MouseMovement;
+			if (Current.IsButtonDown(MouseButton::Left) && !PrimarySuppressedUntilRelease) {
+				QueuePrimarySample(PrimaryPointerSample{Current.MousePosition, true, false, true});
+			}
 
 			// **Accumulated rather than assigned**, because several motion events
 			// arrive per frame and a camera wants all of the movement. Assigning
@@ -575,6 +696,7 @@ namespace engine::input {
 
 		case SDL_EVENT_MOUSE_WHEEL:
 			Current.WheelDelta += event.wheel.y;
+			if (PresentationEnabled) PresentationPending.WheelDelta += event.wheel.y;
 			Current.LastSource = scene::InputSource::MouseWheel;
 			return true;
 
@@ -607,6 +729,21 @@ namespace engine::input {
 		// held key as *released* rather than as never having been down. A listener
 		// waiting for a key-up gets one, which is what makes the state consistent
 		// rather than merely empty.
+		const bool primaryHeld = Current.IsButtonDown(MouseButton::Left);
+		if (PresentationEnabled) {
+			const bool pendingCancellation = std::any_of(
+				PresentationPending.PrimarySamples.begin(),
+				PresentationPending.PrimarySamples.end(),
+				[](const PrimaryPointerSample &sample) { return sample.Cancelled; }
+			);
+			ConsumePresentation();
+			if (primaryHeld || pendingCancellation) {
+				PresentationPending.PrimarySamples.push_back(
+					PrimaryPointerSample{Current.MousePosition, false, true, false}
+				);
+			}
+		}
+		PrimarySuppressedUntilRelease = false;
 		Current.Down = scene::KeyBits{};
 		Current.Buttons = 0;
 		Current.MouseDelta = {};
