@@ -453,7 +453,6 @@ TEST_CASE("every ecs component is classified rather than left to a prefix", "[re
 		// rather than a name - so they did not start with `ecs.` and this walk
 		// skipped them. Naming them is what let this test ask the question.
 		constexpr std::string_view NEVER_CROSSES[] = {
-			"ecs.AttributeTable",
 			"ecs.DirtyBits",
 			"ecs.WorldTime",
 			"ecs.NotArchivable",
@@ -570,4 +569,12 @@ TEST_CASE("nothing is declared twice and every name is qualified", "[replication
 			CHECK(table[outer].Name != table[inner].Name);
 		}
 	}
+}
+
+TEST_CASE("attributes cross as an observed owner-selected resource", "[replication][defaults]") {
+	defaults_test::Ready();
+	const auto *attributes = defaults_test::Row("ecs.AttributeTable");
+	REQUIRE(attributes != nullptr);
+	CHECK(attributes->Resource);
+	CHECK(attributes->Detection == ChangeDetection::Observed);
 }

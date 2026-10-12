@@ -45,6 +45,7 @@
 #include <engine/ecs/Entity.hpp>
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -155,6 +156,14 @@ namespace engine::ecs {
 		std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint64_t>>
 			Revisions; // Latest revision for each entity attribute.
 	};
+
+	// Copies attributes for the supplied visible authority instances only.
+	// Dead and predicted owners are excluded; runtime revisions are omitted.
+	// Work is bounded by the supplied owner list and its attributes.
+	// @param store The authoritative world containing the attribute table.
+	// @param instances The visible owner handles selected by the caller.
+	// @return An independent table containing only those owners' attributes.
+	AttributeTable SelectAttributes(const Store &store, std::span<const Entity> instances);
 
 	// Reads one attribute.
 	//

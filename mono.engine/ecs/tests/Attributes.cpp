@@ -510,3 +510,25 @@ TEST_CASE("a recycled entity does not inherit the dead one's attributes", "[ecs]
 	AttributeValue read;
 	CHECK_FALSE(GetAttribute(store, second, Name("Carried"), read));
 }
+
+TEST_CASE("attribute selection copies only visible authority owners", "[ecs][attributes]") {
+	RegisterAttributeComponents();
+	Store store("attribute-selection");
+	const Entity visible = store.Create();
+	const Entity hidden = store.Create();
+	const Entity predicted = store.CreatePredicted();
+	const Entity dead = store.Create();
+	AttributeValue score;
+	score.Type = PropertyType::Int32;
+	score.Int32 = 7;
+	for (const Entity entity : {visible, hidden, predicted, dead}) {
+		REQUIRE(SetAttribute(store, entity, Name("Score"), score));
+	}
+	store.Destroy(dead);
+	const auto selected = SelectAttributes(store, std::array{visible, visible, predicted, dead});
+	REQUIRE(selected.Entities.size() == 1);
+	CHECK(selected.Entities.at(static_cast<uint32_t>(visible.Id)).at(Name("Score").Id()).Int32 == 7);
+	CHECK(selected.Revisions.empty());
+	CHECK(AttributeRevision(store, visible, Name("Score")) > 0);
+	CHECK(AttributeNames(store, hidden) == std::vector<Name>{Name("Score")});
+}

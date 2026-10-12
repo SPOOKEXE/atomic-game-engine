@@ -145,7 +145,7 @@ namespace engine::replication {
 			return false;
 		}
 
-		constexpr std::string_view WORLD_RESOURCES[] = {"physics.Storm"};
+		constexpr std::string_view WORLD_RESOURCES[] = {"physics.Storm", "ecs.AttributeTable"};
 
 		bool IsSharedWorldResource(std::string_view component) {
 			for (const std::string_view named : WORLD_RESOURCES) {
@@ -524,7 +524,7 @@ namespace engine::replication {
 				// prefix can infer - and `CannotBeSigned` is where the three
 				// that have been made are written down, one line from the
 				// argument for each.
-				const bool observed = WrittenEveryTick(name) || CannotBeSigned(name);
+				const bool observed = resource || WrittenEveryTick(name) || CannotBeSigned(name);
 				if (!type.Trivial && !observed) {
 					continue;
 				}

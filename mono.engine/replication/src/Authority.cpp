@@ -3,6 +3,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/net/Packet.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -463,7 +464,7 @@ namespace engine::replication {
 				if (descriptor.Size > 0 && !descriptor.Serialisable) {
 					ENGINE_WARN("replication: '{}' has no serialisation and cannot cross.", name.Text());
 				} else if (const size_t crossingBytes = WireBytes(descriptor);
-						   !CanStageOversize(descriptor) &&
+						   !crossing.Resource && !CanStageOversize(descriptor) &&
 						   MESSAGE_OVERHEAD + ENTRY_OVERHEAD + sizeof(uint64_t) + crossingBytes >
 							   Settings_.ChunkBytes) {
 					ENGINE_WARN(
@@ -807,8 +808,14 @@ namespace engine::replication {
 		return owed;
 	}
 
-	std::vector<std::byte>
-	Authority::Capture(ecs::Store &store, std::span<const ecs::Entity> entities) const {
+	std::vector<std::byte> Authority::Capture(
+		ecs::Store &store,
+		std::span<const ecs::Entity> entities,
+		bool overlay,
+		std::optional<std::span<const ecs::Entity>> resourceOwners,
+		std::span<std::optional<uint64_t>> resourceHashes
+	) const {
+		std::fill(resourceHashes.begin(), resourceHashes.end(), std::nullopt);
 		ecs::Store scratch("replica");
 
 		for (const ecs::Entity entity : entities) {
@@ -884,18 +891,33 @@ namespace engine::replication {
 			}
 		}
 
-		// World resources have no entity to enter the interest-selected loop
-		// above. The declaration marks the small set that crosses whole, and a
-		// scratch copy keeps their save format identical to ordinary snapshots.
+		// An entity slice cannot replace a world resource with a partial owner set.
+		// Resource overlays carry the complete current visibility selection.
 		for (const Crossing &crossing : Crossings) {
+			if (overlay && !resourceOwners.has_value()) continue;
 			if (!crossing.Sendable || !crossing.Resource) continue;
 			const void *value = store.ResourceById(crossing.Id);
-			if (value != nullptr) scratch.SetResourceById(crossing.Id, value);
+			if (value == nullptr) continue;
+			if (crossing.Descriptor->Name == core::Name("ecs.AttributeTable")) {
+				const auto selected = ecs::SelectAttributes(store, resourceOwners.value_or(entities));
+				scratch.SetResource(selected);
+			} else
+				scratch.SetResourceById(crossing.Id, value);
 		}
 
 		core::ByteWriter writer;
 		if (!scratch.Save(writer)) {
 			return {};
+		}
+		// Remember the captured value, which can differ from the value queued a tick earlier.
+		for (size_t slot = 0; slot < resourceHashes.size(); ++slot) {
+			const Crossing &crossing = Crossings[slot];
+			if (!crossing.Sendable || !crossing.Resource) continue;
+			if (const void *value = scratch.ResourceById(crossing.Id)) {
+				core::ByteWriter encoded;
+				WriteValue(encoded, *crossing.Descriptor, value);
+				resourceHashes[slot] = HashBytes(encoded.Bytes().data(), encoded.Bytes().size());
+			}
 		}
 		return {writer.Bytes().begin(), writer.Bytes().end()};
 	}
@@ -921,7 +943,8 @@ namespace engine::replication {
 		preface = Staged{};
 		world = Staged{};
 
-		world.Bytes = Capture(store, lane.Visible);
+		client.OversizeResourceHashes.resize(Components.size());
+		world.Bytes = Capture(store, lane.Visible, false, std::nullopt, client.OversizeResourceHashes);
 		if (world.Bytes.empty()) {
 			ENGINE_ERROR("replication: the world cannot be snapshotted, so no client can join it.");
 			return;
@@ -934,7 +957,7 @@ namespace engine::replication {
 			// blob has just been written from, so a failure here is that
 			// failure, and a join that arrives in one blob is better than one
 			// that does not arrive.
-			preface.Bytes = Capture(store, Preceding);
+			preface.Bytes = Capture(store, Preceding, true, lane.Visible);
 			preface.Tick = tick;
 		}
 
@@ -979,12 +1002,15 @@ namespace engine::replication {
 		}
 	}
 
-	void Authority::StageOversize(Client &client, ecs::Store &store, uint64_t tick) {
+	void
+	Authority::StageOversize(Lane &lane, ClientId handle, Client &client, ecs::Store &store, uint64_t tick) {
 		std::sort(client.Oversize.begin(), client.Oversize.end());
 		client.Oversize.erase(
 			std::unique(client.Oversize.begin(), client.Oversize.end()), client.Oversize.end()
 		);
 
+		const bool resources =
+			std::binary_search(client.Oversize.begin(), client.Oversize.end(), ecs::NULL_ENTITY.Id);
 		Preceding.clear();
 		for (const uint64_t named : client.Oversize) {
 			const ecs::Entity entity{named};
@@ -998,7 +1024,7 @@ namespace engine::replication {
 		}
 
 		client.Oversize.clear();
-		if (Preceding.empty()) {
+		if (Preceding.empty() && !resources) {
 			return;
 		}
 
@@ -1013,7 +1039,11 @@ namespace engine::replication {
 		// other row the client holds.
 		Staged &staged = client.Snapshots[static_cast<size_t>(SnapshotStage::Preface)];
 		staged = Staged{};
-		staged.Bytes = Capture(store, Preceding);
+		if (resources) {
+			SelectVisible(lane, handle, store);
+			staged.Bytes = Capture(store, Preceding, true, lane.Visible, client.OversizeResourceHashes);
+		} else
+			staged.Bytes = Capture(store, Preceding, true);
 		staged.Tick = tick;
 
 		ENGINE_LOG(
@@ -1746,6 +1776,7 @@ namespace engine::replication {
 	void
 	Authority::BuildComponents(Lane &lane, ecs::Store &store, Client &client, Delta &delta, uint64_t tick) {
 		client.Unconfirmed.resize(Components.size());
+		client.OversizeResourceHashes.resize(Components.size());
 
 		lane.Candidates.clear();
 		lane.SourceSlot.clear();
@@ -1753,11 +1784,12 @@ namespace engine::replication {
 		for (size_t slot = 0; slot < Components.size(); slot++) {
 			const core::Name name = Components[slot];
 			OutstandingSet &unconfirmed = client.Unconfirmed[slot];
+			const Crossing &crossing = Crossings[slot];
 
 			// In bulk, because a joining client's `Appearing` is the whole world
 			// and inserting that into a sorted list one entity at a time moves
 			// the tail once per entity.
-			{
+			if (!crossing.Resource) {
 				const Lane::Timed timed(lane, Lane::Phase::PrepareOutstanding);
 				unconfirmed.EmplaceAll(lane.Appearing);
 
@@ -1782,7 +1814,6 @@ namespace engine::replication {
 			// registry for the first two takes its process-wide mutex. See
 			// `Crossing`: this loop runs per slot per client per tick, and the
 			// warnings that used to sit here fired at the same rate.
-			const Crossing &crossing = Crossings[slot];
 			if (!crossing.Sendable) {
 				continue;
 			}
@@ -1841,10 +1872,16 @@ namespace engine::replication {
 				const size_t wrote = values.Bytes().size() - at;
 				if (MESSAGE_OVERHEAD + ENTRY_OVERHEAD + sizeof(uint64_t) + wrote > Settings_.ChunkBytes) {
 					unconfirmed.Erase(entity.Id);
+					if (crossing.Resource) {
+						const auto hash = HashBytes(values.Bytes().data() + at, wrote);
+						if (client.OversizeResourceHashes[slot] == hash) return;
+					}
 					client.Oversize.push_back(entity.Id);
 					lane.Stats.Oversized++;
 					return;
 				}
+
+				if (crossing.Resource) client.OversizeResourceHashes[slot].reset();
 
 				lane.Candidates.push_back(
 					Candidate{
@@ -1862,8 +1899,15 @@ namespace engine::replication {
 
 			if (crossing.Resource) {
 				// Resources are authoritative world state. Sending the current copy
-				// every tick avoids a second dirty tracker for data outside ECS rows.
-				if (const void *value = store.ResourceById(id)) offer(ecs::NULL_ENTITY, value);
+				// each tick avoids a second dirty tracker for data outside ECS rows.
+				// Unchanged oversized values reuse their captured bulk stream.
+				if (const void *value = store.ResourceById(id)) {
+					if (name == core::Name("ecs.AttributeTable")) {
+						const auto selected = ecs::SelectAttributes(store, lane.Visible);
+						offer(ecs::NULL_ENTITY, &selected);
+					} else
+						offer(ecs::NULL_ENTITY, value);
+				}
 				if (component.Entities.empty()) {
 					lane.Candidates.resize(before);
 					continue;
@@ -2421,7 +2465,7 @@ namespace engine::replication {
 					// and the list is cleared by `BeginSnapshot` for exactly
 					// that reason. Owed nothing, because a blob part way out
 					// must not be replaced by one taken later.
-					StageOversize(client, store, tick);
+					StageOversize(owner, handle, client, store, tick);
 				}
 
 				if (Owed(client) > 0) {

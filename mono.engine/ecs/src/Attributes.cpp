@@ -31,6 +31,18 @@ namespace engine::ecs {
 		}
 	}
 
+	AttributeTable SelectAttributes(const Store &store, std::span<const Entity> instances) {
+		AttributeTable selected;
+		const AttributeTable *table = TableOf(store);
+		if (table == nullptr) return selected;
+		for (const Entity instance : instances) {
+			if (!store.Alive(instance) || Store::IsPredicted(instance)) continue;
+			const auto found = table->Entities.find(instance.Id);
+			if (found != table->Entities.end()) selected.Entities.try_emplace(instance.Id, found->second);
+		}
+		return selected;
+	}
+
 	bool GetAttribute(const Store &store, Entity instance, core::Name name, AttributeValue &out) {
 		const AttributeTable *table = TableOf(store);
 		if (table == nullptr || !name.IsValid()) {

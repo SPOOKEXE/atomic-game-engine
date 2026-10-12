@@ -1003,6 +1003,8 @@ namespace engine::replication {
 			// captures exactly these into the same staged blob a preface uses.
 			// See `Statistics::Oversized`.
 			std::vector<uint64_t> Oversize;
+			// Encoded resource values captured into the current bulk stream, by component slot.
+			std::vector<std::optional<uint64_t>> OversizeResourceHashes;
 		};
 
 		// One entity's value for one component, built and waiting for a place
@@ -1392,9 +1394,17 @@ namespace engine::replication {
 
 		// Saves `entities` and the values a client would decode for them.
 		//
+		// Overlays omit resources unless a complete visible-owner set is supplied.
+		// The optional hash span records the resources actually captured.
 		// Empty means the world could not be written at all: a `Save` of a store
 		// with nothing in it still writes a header.
-		std::vector<std::byte> Capture(ecs::Store &store, std::span<const ecs::Entity> entities) const;
+		std::vector<std::byte> Capture(
+			ecs::Store &store,
+			std::span<const ecs::Entity> entities,
+			bool overlay = false,
+			std::optional<std::span<const ecs::Entity>> resourceOwners = std::nullopt,
+			std::span<std::optional<uint64_t>> resourceHashes = {}
+		) const;
 
 		void BeginSnapshot(Lane &lane, Client &client, ecs::Store &store, uint64_t tick);
 
@@ -1410,7 +1420,7 @@ namespace engine::replication {
 		// re-snapshot would have cost - measured at 81 ticks of streaming on a
 		// scene of a hundred entities, twice, for three module scripts nothing
 		// had edited.
-		void StageOversize(Client &client, ecs::Store &store, uint64_t tick);
+		void StageOversize(Lane &lane, ClientId handle, Client &client, ecs::Store &store, uint64_t tick);
 
 		void StreamSnapshot(Client &client);
 		// Filters `BearingEntities` through the host's interest selector into
