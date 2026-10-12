@@ -782,13 +782,15 @@ and the program itself.** The program is `script.Program`, a row on the instance
 that `script::MirrorSourcePrograms` fills from the world's `SourceCache`.
 
 **The cache itself must never be replicated, and that is the sharpest decision
-in this set.** It is a world *resource* - one table of every program the world
-holds - and interest filters *entities*, so a resource can only cross whole.
-Whole means `ServerScriptService`'s programs on every client, which is precisely
-the leak `scene::VisibleToClients` was added at v0.15 to close for the instances
-themselves. A row on the instance is hidden by exactly the rule that hides the
-instance, and the mirror never writes one for a `Script` at all - so a server's
-logic is not one predicate away from being public.
+in this set.** `SourceCache` is keyed by program path and has no per-owner
+projection. Replicating it would expose `ServerScriptService`'s programs to every
+client. `script.Program` sits on the instance and follows its visibility rule;
+the mirror never writes one for a `Script`, so server logic stays private.
+
+**Attributes have an explicit owner projection.** `ecs.AttributeTable` is
+selected through the client's current visible owner list. The complete selected
+table crosses as a resource; an oversized overlay retains that full visible set
+rather than replacing it with attributes from only the staged entity slice.
 
 **A tag is not a component with no serialisation.** `script.Disabled` is empty,
 so `TypeDescriptor::Serialisable` is false - there are no bytes to write - and
@@ -957,10 +959,9 @@ that fits. What a given row costs is only known once `offer` has written it.
 ## Not here yet
 
 - **A weapon, a health pool, or anything else a game decides.**
-  `examples::Shooting` is the demo's rule and `mono.server` joins it to `Rewind`;
-  a second game would write its own, which is the point of `Input::Bytes` being
-  "the game's own encoding". A hit test in *this* module would be a game rule in
-  a network one.
+  `Arena.luau` owns demo damage and the current server raycast through generic
+  `RemoteEvent` delivery. `Rewind` remains an optional engine utility; it adds
+  no native demo hit rule. Another game supplies its own damage policy.
 - **A line of sight in the priority score.** Supplied at v0.9 as
   `DistancePriority::Blocked`, on the same terms as the rest. Distance is
   supplied too -
