@@ -1,11 +1,14 @@
 #include "Sha256.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <set>
 #include <sstream>
 #include <testrunner/Process.hpp>
+#include <testrunner/Report.hpp>
 #include <testrunner/Runner.hpp>
+#include <utility>
 
 namespace testrunner {
 
@@ -216,6 +219,83 @@ namespace testrunner {
 		// A GPU run explicitly selects hidden GPU cases while leaving process
 		// helpers hidden. Catch combines comma-separated specifications as a union.
 		return filter + "~[.]," + filter + "[gpu]";
+	}
+
+	ReportScratchDirectory::ReportScratchDirectory(const fs::path &build) {
+		const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
+		for (unsigned attempt = 0; attempt < 1024; attempt++) {
+			const fs::path candidate =
+				build / ("testrunner-report-" + std::to_string(nonce) + "-" + std::to_string(attempt));
+			std::error_code error;
+			if (fs::create_directory(candidate, error)) {
+				Directory = candidate;
+				return;
+			}
+			if (error && error != std::errc::file_exists) {
+				FailureMessage = error.message();
+				return;
+			}
+		}
+		FailureMessage = "could not reserve a unique report directory";
+	}
+
+	ReportScratchDirectory::~ReportScratchDirectory() {
+		if (!Directory.empty()) {
+			std::error_code error;
+			fs::remove_all(Directory, error);
+		}
+	}
+
+	bool RunSuite(
+		const Suite &suite, const fs::path &scratch, bool gpuTests, std::string &output, SuiteReport &report
+	) {
+		std::error_code error;
+		fs::remove(scratch, error);
+		if (error) {
+			output = "could not clear suite report " + scratch.string() + ": " + error.message();
+			return false;
+		}
+
+		// Keep console output for failures and write counts to the Mono report.
+		// Process startup and static initialisation belong in the suite duration.
+		const auto started = std::chrono::steady_clock::now();
+		const auto result = Run(
+			{suite.Binary.string(),
+			 // A source file can contain only GPU cases, so an empty ordinary
+			 // selection is a successful run with a zero-case Mono report.
+			 "--allow-running-no-tests",
+			 "-#",
+			 CatchFilter(suite, gpuTests),
+			 "--reporter",
+			 "console::out=-",
+			 "--reporter",
+			 "mono::out=" + scratch.string()}
+		);
+		report.Microseconds = static_cast<unsigned long long>(
+			std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started)
+				.count()
+		);
+
+		output = result.Output;
+		if (!result.Started) {
+			output = "could not start " + suite.Binary.string();
+			return false;
+		}
+
+		SuiteReport parsed;
+		if (ReadSuiteReport(scratch, parsed)) {
+			report.CasesPassed = parsed.CasesPassed;
+			report.CasesFailed = parsed.CasesFailed;
+			report.CasesSkipped = parsed.CasesSkipped;
+			report.AssertionsPassed = parsed.AssertionsPassed;
+			report.AssertionsFailed = parsed.AssertionsFailed;
+			report.Cases = std::move(parsed.Cases);
+		} else if (result.ExitCode == 0) {
+			if (!output.empty() && output.back() != '\n') output += '\n';
+			output += "test binary exited successfully without a complete Mono report: " + scratch.string();
+			return false;
+		}
+		return result.ExitCode == 0;
 	}
 
 	DependencyClosures ReadDependencyClosures(const fs::path &build) {

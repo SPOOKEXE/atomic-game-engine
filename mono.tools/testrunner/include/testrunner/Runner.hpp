@@ -20,6 +20,7 @@
 #include <vector>
 
 namespace testrunner {
+	struct SuiteReport;
 
 	// One test suite, as the binary holding it describes itself.
 	//
@@ -82,6 +83,43 @@ namespace testrunner {
 	// require a working device and driver; every ordinary invocation excludes
 	// them even though the suite's file tag would otherwise select them.
 	std::string CatchFilter(const Suite &suite, bool gpuTests);
+
+	// Atomically reserves one report directory for this runner invocation. Each
+	// worker writes only inside it, and destruction removes only this directory.
+	class ReportScratchDirectory {
+	  public:
+		// The build directory must already exist. Path is empty on failure.
+		explicit ReportScratchDirectory(const std::filesystem::path &build);
+		// Removes the reserved directory and its worker reports.
+		~ReportScratchDirectory();
+
+		ReportScratchDirectory(const ReportScratchDirectory &) = delete;
+		ReportScratchDirectory &operator=(const ReportScratchDirectory &) = delete;
+
+		// The directory this invocation owns, or empty if reservation failed.
+		const std::filesystem::path &Path() const {
+			return Directory;
+		}
+		// Why reservation failed. Empty when Path is available.
+		const std::string &Failure() const {
+			return FailureMessage;
+		}
+
+	  private:
+		std::filesystem::path Directory;
+		std::string FailureMessage;
+	};
+
+	// Runs one suite and reads the Mono reporter's complete result. A zero exit
+	// without that result is a failure, including when the report is malformed.
+	// A valid report with zero selected cases is still a successful result.
+	bool RunSuite(
+		const Suite &suite,
+		const std::filesystem::path &scratch,
+		bool gpuTests,
+		std::string &output,
+		SuiteReport &report
+	);
 
 	// Read back out of Ninja's dependency database. CMake tells the compiler to
 	// write .d files and then hands them to Ninja, which consumes and deletes
