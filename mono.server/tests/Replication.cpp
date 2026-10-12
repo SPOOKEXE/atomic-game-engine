@@ -99,7 +99,9 @@ namespace server_replication_test {
 	// every time. Registering the shared set is what removes the second
 	// declaration rather than renaming around the collision.
 	void RegisterTypes() {
-		engine::scene::RegisterSceneComponents();
+		// InstanceClass resolves names while adopting a snapshot. Register the
+		// full class tree before the first network bytes, as the client does.
+		engine::scene::RegisterSceneClasses();
 
 		// **And the two sets that started crossing at v0.15**, because this
 		// replica is a client and a client is what receives them. A snapshot
@@ -1577,9 +1579,14 @@ TEST_CASE(
 	auto runtime = engine::script::MakeRuntime(viewer.World, engine::script::Language::Luau, limits);
 	REQUIRE(runtime != nullptr);
 	const Entity playerScripts = viewer.World.FindFirstChild(viewer.Mine, "PlayerScripts");
-	REQUIRE(viewer.World.FindFirstChild(playerScripts, "DemoCamera") != engine::ecs::NULL_ENTITY);
-	REQUIRE(runtime->RunNewScripts(engine::script::ClientScriptsIn(viewer.World)) >= 1);
+	const Entity companion = viewer.World.FindFirstChild(playerScripts, "DemoCamera");
+	REQUIRE(companion != engine::ecs::NULL_ENTITY);
+	const auto selectedScripts = engine::script::ClientScriptsIn(viewer.World);
+	const size_t startedScripts = runtime->RunNewScripts(selectedScripts);
+	INFO("selected scripts: " << selectedScripts.size() << "; started scripts: " << startedScripts);
+	INFO("companion has program: " << (viewer.World.Get<engine::script::Program>(companion) != nullptr));
 	INFO(runtime->LastError());
+	REQUIRE(startedScripts >= 1);
 
 	auto *input = viewer.World.ResourceMutable<engine::scene::InputState>();
 	if (input == nullptr) {
