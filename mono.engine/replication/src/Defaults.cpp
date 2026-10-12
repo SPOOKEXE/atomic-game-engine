@@ -116,12 +116,11 @@ namespace engine::replication {
 		//
 		// **`script.SourceCache` must never be here.** It is a world resource:
 		// one table of every program the world holds, keyed by path, with no
-		// entity to hang it on. Interest filters entities, so a resource can
-		// only cross whole - and whole means `ServerScriptService`'s programs on
-		// every client, which is the leak `scene::VisibleToClients` was added to
-		// close for the instances themselves. `script.Program` is the row that
-		// crosses instead: it sits on the instance, so it is hidden by exactly
-		// the rule that hides the instance, and `script::MirrorSourcePrograms`
+		// owner projection. Resources cross as complete tables after any owner
+		// selection: `ecs.AttributeTable` selects visible owners, but this cache
+		// would expose `ServerScriptService`'s programs to every client.
+		// `script.Program` crosses instead: it sits on the instance, so it follows
+		// the instance's visibility rule, and `script::MirrorSourcePrograms`
 		// never writes one for a `Script`.
 		//
 		// A prefix could not have said that, and the suite is what keeps it
