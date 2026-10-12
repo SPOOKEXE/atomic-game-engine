@@ -75,12 +75,15 @@ EXCLUDE                = @MONO_DOCS_EXCLUDE@
 
 # The custom-node example is a private render-suite fixture. It builds against
 # the public API but is not itself part of that API.
-EXCLUDE_PATTERNS       = */tests/* \
-                         */src/* \
-                         */app/* \
-                         */mono.engine/render/examples/* \
-                         */.cache/* \
-                         */CLAUDE.md
+# Anchor exclusions below this checkout: an ancestor named .cache or src must
+# not hide recursively discovered public headers and markdown.
+EXCLUDE_PATTERNS       = "@CMAKE_SOURCE_DIR@/*/tests/*" \
+                         "@CMAKE_SOURCE_DIR@/*/src/*" \
+                         "@CMAKE_SOURCE_DIR@/*/app/*" \
+                         "@CMAKE_SOURCE_DIR@/mono.engine/render/examples/*" \
+                         "@CMAKE_SOURCE_DIR@/.cache/*" \
+                         "@CMAKE_SOURCE_DIR@/CLAUDE.md" \
+                         "@CMAKE_SOURCE_DIR@/*/CLAUDE.md"
 
 # ---------------------------------------------------------------------------
 # The filter
