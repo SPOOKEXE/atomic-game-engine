@@ -4,11 +4,8 @@
 //
 // **The library ships no node types, so its tests bring their own.** This
 // module knows nothing about terrain, pictures or arithmetic: every node type
-// arrives through `NodeTypes::Register`, and the set the studio's Demo Nodes
-// panel uses is `mono.studio/src/DemoNodes.cpp`, which is a consumer's content.
-// Reaching for that from here would tie this suite to a panel that moves for
-// reasons that have nothing to do with the model - so these cases register a
-// vocabulary they own and can reason about.
+// arrives through `NodeTypes::Register`. These cases register a vocabulary
+// they own and can reason about, independent of host-specific node sets.
 //
 // It is deliberately dull. The evaluations are the cheapest thing that produces
 // a distinguishable answer, because what is under test is the *model*: the

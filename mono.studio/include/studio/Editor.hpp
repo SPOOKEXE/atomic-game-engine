@@ -91,7 +91,6 @@
 #include <nodegraph/Editor.hpp>
 #include <nodegraph/Evaluate.hpp>
 #include <nodegraph/Graph.hpp>
-#include <nodegraph/Preview.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -846,37 +845,6 @@ namespace studio {
 	// The table is O(n·m) and this is a bound on the work, not on the answer -
 	// past it the diff degrades rather than failing, and says so.
 	inline constexpr size_t DIFF_CELL_LIMIT = 4u * 1000u * 1000u;
-
-	// Hands `Mono::nodegraph` the four values it draws chrome with.
-	//
-	// **The whole of what the library asks this program for.** A canvas paints
-	// its nodes from its own `Style`, but a palette popup, a section heading and
-	// a stage that has not run are the *editor's* text rather than a graph's, and
-	// a library that guessed at those would look like something else docked
-	// beside this one.
-	//
-	// Called every frame the panel draws rather than once at start-up, because
-	// the theme and the interface scale are both settings somebody can change
-	// while the panel is open.
-	//
-	// @since v0.15
-	void ApplyNodeChrome();
-
-	// A node's picture, as the texture the renderer takes.
-	//
-	// **A free function because it is the seam, and a seam is the thing to
-	// test.** `nodegraph::PreviewImage` promises red first and the top row first
-	// at four bytes a pixel, which is exactly `TextureFormat::RGBA8` - and
-	// nothing in either repository would notice the day that stopped being true,
-	// because a wrongly-ordered thumbnail is a picture that still draws.
-	//
-	// @param image What a node produced.
-	// @param out   Filled. Untouched when the picture is not a picture.
-	// @return `false` for an empty or inconsistent image, which is what a
-	//         payload nobody taught the library to draw produces.
-	//
-	// @since v0.15
-	bool NodePreviewTexture(const nodegraph::PreviewImage &image, engine::assets::TextureData &out);
 
 	// The window, the renderer, the interface and the game.
 	//
@@ -2474,100 +2442,6 @@ namespace studio {
 		void StartPlaytestPlugins(WorldId world, PluginRunTarget target);
 		void StopPlaytestPlugins(WorldId world);
 		void StopAllPlaytestPlugins();
-
-		// The ribbon's Demo row, and the panel it opens.
-		//
-		// **A demo is a panel like any other**, so it closes and comes back from
-		// the View menu, and it costs nothing while it is shut: the graph is
-		// built on the first open rather than at start-up.
-		//@{
-		void DrawDemoTools();
-		void DrawNodeDemo();
-
-		// The panel's menu bar: the file menu, the history, the selection tools
-		// and the build switch.
-		void DrawNodeDemoBar();
-
-		// The breadcrumb bar, when the view is inside a compressed node. Absent
-		// at the root, where it would be a row that only ever says one thing.
-		void DrawNodeDemoCrumbs();
-
-		// The one line under the canvas: zoom, counts, cache hit rate and
-		// whether the graph follows edits.
-		void DrawNodeDemoStatus();
-
-		// The right-hand side's three tabs.
-		//
-		// **Three tabs and not three panels**, which is the reference
-		// implementation's arrangement and the right one: they answer three
-		// questions about one selection - what can I add, what is this, and what
-		// can connect to what - and only one is being asked at a time.
-		//@{
-		void DrawNodeDemoLibrary();
-		void DrawNodeDemoInspector();
-		void DrawNodeDemoTypes();
-		//@}
-
-		// The selected node's knobs, as real widgets.
-		//
-		// **The same `WidgetSpec` the canvas paints and hit-tests from**, which
-		// is the third consumer `nodegraph/Layout.hpp` promises: a knob that existed
-		// here and not on the node, or took a different range, would be two
-		// declarations of one thing.
-		//
-		// @return Whether anything was changed.
-		bool DrawNodeDemoWidgets(nodegraph::Node &node);
-
-		// Writes one node's picture beside the graph file, as a PNG.
-		//
-		// **Encoded here rather than through `Engine::bake`**, which only reads
-		// one: its decoder is a publishing-pipeline concern this editor does not
-		// link, and a stored-block encoder needs nothing linked at all.
-		//
-		// @return What to say about it, either way.
-		std::string ExportNodeDemoImage(nodegraph::NodeId node);
-
-		// Snapshot undo over the demo graph.
-		//
-		// **Snapshots and not a command log.** The editor's own history is a log
-		// because a scene is large and an edit is small; this graph serialises to
-		// a few hundred bytes, and a snapshot cannot be wrong about what it
-		// reverses. `studio/Commands.hpp` carries the other side of that trade.
-		//@{
-		void CommitNodeDemo();
-		void UndoNodeDemo();
-		void RedoNodeDemo();
-		void RestoreNodeDemo(const std::string &document);
-		//@}
-
-		// Turns a node's preview into a texture the interface can draw.
-		//
-		// **Kept under the hash the payload was computed at.** A picture belongs
-		// to a result rather than to a node, so two nodes computing one thing
-		// share a texture and an edit makes a new key instead of overwriting a
-		// live one.
-		void *NodeDemoImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make);
-
-		// The 3-D view's picture, which is one texture rather than a table of
-		// them.
-		//
-		// **Not held under a hash like the rest.** A picture that changes on
-		// every frame of an orbit has an unbounded number of keys, and putting
-		// them in `NodeDemoTextures` would blow through its ceiling in a second
-		// and take every node's thumbnail with it. Two slots are alive at once:
-		// the one being drawn, and the one it replaced - which is released
-		// between frames, because a texture dropped while a draw list still
-		// names it is a use-after-free on the GPU.
-		void *NodeDemoOrbitImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make);
-
-		// Releases every preview texture. Called when the cache is dropped and
-		// when the graph is replaced - a texture per result would otherwise be a
-		// slow leak for as long as somebody keeps editing.
-		void DropNodeDemoImages();
-
-		// Enforces the preview ceiling, between frames.
-		void PumpNodeDemoImages();
-		//@}
 
 		// The ribbon's Plugins row: every running plugin's toolbars.
 		//
@@ -6128,82 +6002,6 @@ namespace studio {
 		PluginReloadTracker PluginReloader;
 		std::vector<PluginReloadRoot> PluginReloadRoots;
 		double NextPluginRootScanSeconds = 0.0;
-		//@}
-
-		// The Demo Nodes panel, and everything it holds.
-		//
-		// **On the editor rather than static inside the panel**, for the reason
-		// every other panel's state is: a static would be one graph shared by
-		// two editors in one process, which the tests and a future second window
-		// both produce.
-		//
-		// The graph is empty until the panel is first opened - see
-		// `DrawNodeDemo` - so an editor nobody opens it in carries three empty
-		// containers and nothing else.
-		//@{
-		bool ShowNodeDemo = false;
-		nodegraph::Graph NodeDemoGraph;
-		nodegraph::Canvas NodeDemoCanvas;
-		nodegraph::Evaluator NodeDemoRunner;
-		nodegraph::RunReport NodeDemoReport;
-
-		// The signature the demo last evaluated at, so dragging a node does not
-		// recompute a graph that has not changed.
-		uint64_t NodeDemoSignature = 0;
-
-		// Whether an edit re-runs the graph immediately.
-		//
-		// On, because a chain of cheap filters wants to follow the slider. A
-		// graph with a six-second task in it is what the switch is for.
-		bool NodeDemoLive = true;
-
-		// The preview textures, by result hash, and the names they were
-		// registered under so they can be dropped again.
-		//@{
-		std::unordered_map<uint64_t, void *> NodeDemoTextures;
-		std::unordered_map<uint64_t, engine::core::Name> NodeDemoTextureNames;
-		//@}
-
-		// The 3-D view's one texture: what it currently shows, what it is
-		// published as, and the name it displaced - released at the next pump.
-		//@{
-		uint64_t NodeDemoOrbitKey = 0;
-		void *NodeDemoOrbitHandle = nullptr;
-		engine::core::Name NodeDemoOrbitName;
-		engine::core::Name NodeDemoOrbitStale;
-		uint32_t NodeDemoOrbitSerial = 0;
-		//@}
-
-		// The undo stacks, as whole documents. `NodeDemoLast` is what the graph
-		// currently reads as, so a commit that changed nothing pushes nothing.
-		//@{
-		std::vector<std::string> NodeDemoPast;
-		std::vector<std::string> NodeDemoFuture;
-		std::string NodeDemoLast;
-		//@}
-
-		// Which of the right-hand tabs is open, and where the file menu reads
-		// and writes.
-		//@{
-		int NodeDemoTab = 0;
-		char NodeDemoPath[256] = "demo.nodegraph";
-		char NodeDemoFilter[64] = {};
-		char NodeDemoTypeName[64] = {};
-		std::string NodeDemoSaid;
-		//@}
-
-		// The counters the status line reads. Accumulated across runs rather
-		// than taken from the last one, because a hit rate over one frame of a
-		// settled graph is always 100%.
-		//@{
-		// Whether an inspector widget has been changed since the last commit.
-		// Survives the frames of a drag, so one drag is one undo step.
-		bool NodeDemoDirty = false;
-
-		size_t NodeDemoHits = 0;
-		size_t NodeDemoMisses = 0;
-		double NodeDemoRunMs = 0.0;
-		//@}
 		//@}
 
 		// Native and script plugins have separate ownership. `Plugins` is only

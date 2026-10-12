@@ -329,8 +329,6 @@ namespace studio {
 		ToolbarEditor,
 		DockWidgetEditor,
 		PluginStatus,
-		DemoNodes,
-		DemoDescription,
 	};
 
 	// A CPU copy of one renderer texture used while a CanvasGroup is rasterised.

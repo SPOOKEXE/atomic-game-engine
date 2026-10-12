@@ -619,9 +619,8 @@ namespace nodegraph {
 	}
 
 	void RegisterInspectors() {
-		// Idempotent, and for `RegisterDemoNodes`' reason: `Inspectors::For`
-		// calls this on every lookup so that a host which registered a node type
-		// and nothing else still gets panels.
+		// Idempotent: `Inspectors::For` calls this on every lookup so a host
+		// which registered a node type and nothing else still gets panels.
 		if (RegisteredInspectors) {
 			return;
 		}

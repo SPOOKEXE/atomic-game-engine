@@ -368,9 +368,6 @@ namespace studio {
 		case BuiltinStudioTool::DockWidgetEditor:
 		case BuiltinStudioTool::PluginStatus:
 			return "manage";
-		case BuiltinStudioTool::DemoNodes:
-		case BuiltinStudioTool::DemoDescription:
-			return "demo";
 		default:
 			return nullptr;
 		}
@@ -2244,10 +2241,6 @@ namespace studio {
 		case BuiltinStudioTool::DockWidgetEditor:
 		case BuiltinStudioTool::PluginStatus:
 			DrawPluginTools();
-			break;
-		case BuiltinStudioTool::DemoNodes:
-		case BuiltinStudioTool::DemoDescription:
-			DrawDemoTools();
 			break;
 		case BuiltinStudioTool::None:
 			break;

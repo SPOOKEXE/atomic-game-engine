@@ -1048,18 +1048,17 @@ bindings: (build "bindings")
 bindings-check: (build "bindings")
     ./{{build}}/tools/bindings --check
 
-# Every authored script against the declarations, in both languages.
+# Luau examples and Studio's TypeScript panels against the engine declarations.
 #
 # **The other half of `bindings-check`.** That one asks whether the declarations
-# still match the class table; this asks whether the scripts still match the
-# declarations. A property removed from the class table regenerates cleanly and
-# leaves every script that named it broken, with nothing reporting it until the
-# scene fails to build.
+# still match the class table; this checks the Luau examples and Studio panels
+# against those declarations. A property removed from the class table regenerates
+# cleanly and leaves a caller broken, with nothing reporting it until runtime.
 #
-# The Luau half is `mono.tools/scriptcheck`, which exists because upstream's
-# `luau-analyze` has no way to load a definition file - see MonoVendor.cmake.
-# The TypeScript half is `tsc` against the checked-in `tsconfig.json`, which
-# already lists the generated `.d.ts` as its type root.
+# Luau examples go through `mono.tools/scriptcheck`, which exists because
+# upstream's `luau-analyze` has no way to load a definition file - see
+# MonoVendor.cmake. Studio panels go through `tsc` and the checked-in
+# `tsconfig.json`, which lists the generated `.d.ts` as its type root.
 #
 # **The compiler is the pinned one, not whatever `bunx tsc` resolves to.**
 # `package.json` names an exact version and this runs `node_modules/.bin/tsc`,
@@ -1068,8 +1067,8 @@ bindings-check: (build "bindings")
 #
 # **`tsc` is skipped rather than fatal when no runner is installed.** It is the
 # one check here that needs something outside the C++ toolchain, and a
-# prerequisite list that grows a Node runtime for two example files is a worse
-# trade than a check that says out loud when it did not run.
+# prerequisite list that grows a Node runtime is a worse trade than a check that
+# says out loud when it did not run.
 typecheck: (build "scriptcheck")
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1085,7 +1084,7 @@ typecheck: (build "scriptcheck")
     fi
 
     ./node_modules/.bin/tsc --noEmit
-    echo "typecheck ok - luau and typescript $(./node_modules/.bin/tsc --version | cut -d' ' -f2)"
+    echo "typecheck ok - luau and studio typescript $(./node_modules/.bin/tsc --version | cut -d' ' -f2)"
 
 # The same scripts again, through the language server an editor actually runs.
 #
@@ -1732,19 +1731,15 @@ check-cdn-is-bare:
 # wrong, in the half nobody tests: the cycle guard, or the hash.
 #
 # A third would arrive as a file rather than as a decision. The render pipeline
-# editor and `Engine::bakegraph`'s pipeline documents are both still to be
-# written, and either could start its own registry and its own canvas without
-# anybody noticing until the first divergence - which is exactly what AGENTS.md
-# rule 6 says to make the build check rather than leave in somebody's memory.
+# editor uses this library; future graph editors must do the
+# same so their cycle guards and canvases do not diverge. AGENTS.md rule 6 says
+# to make that a build check rather than leave it in somebody's memory.
 #
 # Extend the library where it lives. `mono.studio/nodegraph` is ours: it was a
 # vendored submodule against a separate repository until v0.18.0, an engine
 # module until v0.19, and a library of the editor's since - so extending it is
 # an edit here rather than a pull request against somewhere else.
 #
-# The studio's Demo Nodes set is not a second implementation. It registers types
-# through that module's public `NodeTypes::Register` and implements none of the
-# model, which is the seam this rule is protecting rather than one it forbids.
 check-one-node-graph:
     #!/usr/bin/env bash
     set -euo pipefail

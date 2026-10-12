@@ -111,7 +111,6 @@ namespace studio {
 			{"Plugins", PluginDock::Right},
 			{TOOLBAR_EDITOR, PluginDock::Bottom},
 			{DOCK_WIDGET_EDITOR, PluginDock::Right},
-			{"Demo Nodes", PluginDock::Bottom},
 			{"Dataset Editor", PluginDock::Bottom},
 			{"DataStores", PluginDock::Right},
 			{"CDN", PluginDock::Right},
@@ -498,7 +497,6 @@ namespace studio {
 			Skinned("Plugins", [&] { DrawPlugins(); });
 			Skinned(TOOLBAR_EDITOR, [&] { DrawToolbarEditor(); });
 			Skinned(DOCK_WIDGET_EDITOR, [&] { DrawDockWidgetEditor(); });
-			Skinned("Demo Nodes", [&] { DrawNodeDemo(); });
 
 			// Default Studio contributes native panels through this same plugin
 			// path. Installed widgets retain their per-widget script colours.
@@ -1530,7 +1528,7 @@ namespace studio {
 			ShowRenderPipeline = ShowPipelineProfile = open;
 			ShowNetwork = ShowControl = ShowTeamCreate = ShowCommandBar = open;
 			ShowPlugins = ShowToolbarEditor = ShowDockWidgetEditor = ShowRobloxImport = open;
-			ShowNodeDemo = ShowBus = ShowScriptProfile = ShowScripting = ShowDiff = ShowDebugger = open;
+			ShowBus = ShowScriptProfile = ShowScripting = ShowDiff = ShowDebugger = open;
 			ShowStatistics = ShowFrameGraph = ShowHeap = ShowGuiPreviewControls = ShowCallStack =
 				ShowBreakpointsWatch = open;
 			ShowRojoSync = open;
@@ -1811,8 +1809,6 @@ namespace studio {
 
 		if (ImGui::BeginMenu("Demo")) {
 			DrawExampleSceneMenu();
-			ImGui::Separator();
-			ImGui::MenuItem("Node Graph", nullptr, &ShowNodeDemo);
 			ImGui::EndMenu();
 		}
 
