@@ -2,6 +2,7 @@
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/SparseSet.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
@@ -20,6 +21,7 @@ using engine::core::ByteWriter;
 using engine::core::Random;
 using engine::ecs::Components;
 using engine::ecs::Entity;
+using engine::ecs::Hierarchy;
 using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
 
@@ -69,6 +71,12 @@ namespace snapshot_test {
 		std::vector<float> found;
 		store.Each<Spot>([&](Entity, Spot &spot) { found.push_back(spot.X); });
 		std::sort(found.begin(), found.end());
+		return found;
+	}
+
+	std::vector<Entity> ChildrenIn(const Store &store, Entity parent) {
+		std::vector<Entity> found;
+		store.EachChild(parent, [&](Entity child) { found.push_back(child); });
 		return found;
 	}
 }
@@ -179,6 +187,257 @@ TEST_CASE("a tree survives a snapshot, links and order and all", "[ecs]") {
 	// And the order, which is what `GetChildren` publishes to a script.
 	CHECK(restored.FindFirstChild(parent, "C0") == children[0]);
 	CHECK(restored.FindFirstChild(parent, "C3") == children[3]);
+}
+
+TEST_CASE("an overlay child slice keeps external parent indexes and omitted children", "[ecs][snapshot]") {
+	engine::ecs::Classes::RegisterInstanceRoot();
+	Store receiver("receiver");
+	const Entity parent = receiver.Create();
+	const Entity before = receiver.Create();
+	const Entity selected = receiver.Create();
+	const Entity after = receiver.Create();
+	const Entity nested = receiver.Create();
+	for (const Entity entity : {parent, before, selected, after, nested})
+		receiver.Set<Hierarchy>(entity, Hierarchy{});
+	REQUIRE(receiver.SetParent(before, parent));
+	REQUIRE(receiver.SetParent(selected, parent));
+	REQUIRE(receiver.SetParent(after, parent));
+	REQUIRE(receiver.SetParent(nested, selected));
+	receiver.Set<Spot>(selected, Spot{1.0f, 2.0f});
+
+	Store slice("slice");
+	REQUIRE(slice.CreateAt(selected));
+	slice.Set<Hierarchy>(selected, Hierarchy{.Parent = parent});
+	slice.Set<Spot>(selected, Spot{17.0f, 19.0f});
+	ByteWriter snapshot;
+	REQUIRE(slice.Save(snapshot));
+	ByteReader reader(snapshot.Bytes());
+	REQUIRE(receiver.Apply(reader, engine::ecs::ApplyMode::Overlay));
+
+	CHECK(ChildrenIn(receiver, parent) == std::vector<Entity>{before, selected, after});
+	CHECK(ChildrenIn(receiver, selected) == std::vector<Entity>{nested});
+	CHECK(receiver.ParentOf(selected) == parent);
+	CHECK(receiver.ParentOf(nested) == selected);
+	CHECK(receiver.Get<Hierarchy>(selected)->PreviousSibling == before);
+	CHECK(receiver.Get<Hierarchy>(selected)->NextSibling == after);
+	CHECK(receiver.Get<Hierarchy>(selected)->FirstChild == nested);
+	CHECK(receiver.Get<Hierarchy>(selected)->LastChild == nested);
+	CHECK(receiver.Get<Spot>(selected)->X == 17.0f);
+}
+
+TEST_CASE("an overlay reparent updates both external child indexes", "[ecs][snapshot]") {
+	engine::ecs::Classes::RegisterInstanceRoot();
+	Store receiver("receiver");
+	const Entity from = receiver.Create();
+	const Entity to = receiver.Create();
+	const Entity before = receiver.Create();
+	const Entity selected = receiver.Create();
+	const Entity after = receiver.Create();
+	const Entity kept = receiver.Create();
+	const Entity nested = receiver.Create();
+	for (const Entity entity : {from, to, before, selected, after, kept, nested})
+		receiver.Set<Hierarchy>(entity, Hierarchy{});
+	REQUIRE(receiver.SetParent(before, from));
+	REQUIRE(receiver.SetParent(selected, from));
+	REQUIRE(receiver.SetParent(after, from));
+	REQUIRE(receiver.SetParent(kept, to));
+	REQUIRE(receiver.SetParent(nested, selected));
+
+	Store slice("slice");
+	REQUIRE(slice.CreateAt(selected));
+	slice.Set<Hierarchy>(selected, Hierarchy{.Parent = to});
+	ByteWriter snapshot;
+	REQUIRE(slice.Save(snapshot));
+	ByteReader reader(snapshot.Bytes());
+	REQUIRE(receiver.Apply(reader, engine::ecs::ApplyMode::Overlay));
+
+	CHECK(ChildrenIn(receiver, from) == std::vector<Entity>{before, after});
+	CHECK(ChildrenIn(receiver, to) == std::vector<Entity>{kept, selected});
+	CHECK(ChildrenIn(receiver, selected) == std::vector<Entity>{nested});
+	CHECK(receiver.Get<Hierarchy>(before)->NextSibling == after);
+	CHECK(receiver.Get<Hierarchy>(after)->PreviousSibling == before);
+	CHECK(receiver.Get<Hierarchy>(from)->FirstChild == before);
+	CHECK(receiver.Get<Hierarchy>(from)->LastChild == after);
+	CHECK(receiver.Get<Hierarchy>(to)->FirstChild == kept);
+	CHECK(receiver.Get<Hierarchy>(to)->LastChild == selected);
+	CHECK(receiver.ParentOf(selected) == to);
+}
+
+TEST_CASE("new overlay siblings use authored order across different archetypes", "[ecs][snapshot]") {
+	engine::ecs::Classes::RegisterInstanceRoot();
+	Store receiver("receiver");
+	const Entity parent = receiver.Create();
+	const Entity kept = receiver.Create();
+	receiver.Set<Hierarchy>(parent, Hierarchy{});
+	receiver.Set<Hierarchy>(kept, Hierarchy{});
+	REQUIRE(receiver.SetParent(kept, parent));
+
+	Store slice("slice");
+	const Entity omittedParent = slice.Create();
+	const Entity omittedChild = slice.Create();
+	REQUIRE(omittedParent == parent);
+	REQUIRE(omittedChild == kept);
+	const Entity first = slice.Create();
+	const Entity second = slice.Create();
+	const Entity third = slice.Create();
+	slice.Destroy(omittedParent);
+	slice.Destroy(omittedChild);
+	slice.Set<Hierarchy>(third, Hierarchy{.Parent = parent, .PreviousSibling = second});
+	slice.Set<Spot>(third, Spot{3.0f, 0.0f});
+	slice.Set<Hierarchy>(first, Hierarchy{.Parent = parent, .NextSibling = second});
+	slice.Set<Score>(first, Score{1});
+	slice.Set<Hierarchy>(second, Hierarchy{.Parent = parent, .NextSibling = third, .PreviousSibling = first});
+	std::vector<Entity> iterated;
+	slice.Each<const Hierarchy>([&](Entity entity, const Hierarchy &) { iterated.push_back(entity); });
+	REQUIRE(iterated != std::vector<Entity>{first, second, third});
+	ByteWriter snapshot;
+	REQUIRE(slice.Save(snapshot));
+	ByteReader reader(snapshot.Bytes());
+	REQUIRE(receiver.Apply(reader, engine::ecs::ApplyMode::Overlay));
+
+	CHECK(ChildrenIn(receiver, parent) == std::vector<Entity>{kept, first, second, third});
+	CHECK(receiver.Get<Hierarchy>(first)->PreviousSibling == kept);
+	CHECK(receiver.Get<Hierarchy>(first)->NextSibling == second);
+	CHECK(receiver.Get<Hierarchy>(second)->NextSibling == third);
+	CHECK(receiver.Get<Hierarchy>(third)->PreviousSibling == second);
+	CHECK(receiver.Get<Hierarchy>(parent)->LastChild == third);
+	CHECK(receiver.Get<Score>(first)->Value == 1);
+	CHECK(receiver.Get<Spot>(third)->X == 3.0f);
+}
+
+TEST_CASE("an incoming overlay parent cycle refuses every live change", "[ecs][snapshot]") {
+	engine::ecs::Classes::RegisterInstanceRoot();
+	Store receiver("receiver");
+	const Entity first = receiver.Create();
+	const Entity second = receiver.Create();
+	receiver.Set<Hierarchy>(first, Hierarchy{});
+	receiver.Set<Hierarchy>(second, Hierarchy{});
+	receiver.Set<Spot>(first, Spot{1.0f, 0.0f});
+	receiver.Set<Spot>(second, Spot{2.0f, 0.0f});
+	receiver.SetResource<Score>(Score{7});
+	REQUIRE(receiver.SetParent(second, first));
+	ByteWriter before;
+	REQUIRE(receiver.Save(before));
+
+	Store slice("slice");
+	REQUIRE(slice.CreateAt(first));
+	REQUIRE(slice.CreateAt(second));
+	slice.Set<Hierarchy>(first, Hierarchy{.Parent = second});
+	slice.Set<Hierarchy>(second, Hierarchy{.Parent = first});
+	slice.Set<Spot>(first, Spot{91.0f, 0.0f});
+	slice.Set<Spot>(second, Spot{92.0f, 0.0f});
+	slice.SetResource<Score>(Score{99});
+	ByteWriter snapshot;
+	REQUIRE(slice.Save(snapshot));
+	ByteReader reader(snapshot.Bytes());
+	REQUIRE_FALSE(receiver.Apply(reader, engine::ecs::ApplyMode::Overlay));
+
+	ByteWriter after;
+	REQUIRE(receiver.Save(after));
+	CHECK(
+		std::equal(before.Bytes().begin(), before.Bytes().end(), after.Bytes().begin(), after.Bytes().end())
+	);
+	CHECK(receiver.ParentOf(first) == NULL_ENTITY);
+	CHECK(ChildrenIn(receiver, first) == std::vector<Entity>{second});
+	CHECK(receiver.Get<Spot>(first)->X == 1.0f);
+	CHECK(receiver.Resource<Score>()->Value == 7);
+}
+
+TEST_CASE(
+	"an overlay cycle through an external receiver parent refuses every live change", "[ecs][snapshot]"
+) {
+	engine::ecs::Classes::RegisterInstanceRoot();
+	Store receiver("receiver");
+	const Entity selected = receiver.Create();
+	const Entity external = receiver.Create();
+	receiver.Set<Hierarchy>(selected, Hierarchy{});
+	receiver.Set<Hierarchy>(external, Hierarchy{});
+	receiver.Set<Spot>(selected, Spot{1.0f, 0.0f});
+	REQUIRE(receiver.SetParent(external, selected));
+	ByteWriter before;
+	REQUIRE(receiver.Save(before));
+
+	Store slice("slice");
+	REQUIRE(slice.CreateAt(selected));
+	slice.Set<Hierarchy>(selected, Hierarchy{.Parent = external});
+	slice.Set<Spot>(selected, Spot{99.0f, 0.0f});
+	ByteWriter snapshot;
+	REQUIRE(slice.Save(snapshot));
+	ByteReader reader(snapshot.Bytes());
+	REQUIRE_FALSE(receiver.Apply(reader, engine::ecs::ApplyMode::Overlay));
+
+	ByteWriter after;
+	REQUIRE(receiver.Save(after));
+	CHECK(
+		std::equal(before.Bytes().begin(), before.Bytes().end(), after.Bytes().begin(), after.Bytes().end())
+	);
+	CHECK(receiver.ParentOf(selected) == NULL_ENTITY);
+	CHECK(ChildrenIn(receiver, selected) == std::vector<Entity>{external});
+	CHECK(receiver.Get<Spot>(selected)->X == 1.0f);
+}
+
+TEST_CASE("an overlay parent row without hierarchy refuses every live change", "[ecs][snapshot]") {
+	engine::ecs::Classes::RegisterInstanceRoot();
+	Store receiver("receiver");
+	const Entity selected = receiver.Create();
+	const Entity plain = receiver.Create();
+	receiver.Set<Hierarchy>(selected, Hierarchy{});
+	receiver.Set<Spot>(selected, Spot{1.0f, 0.0f});
+	receiver.Set<Score>(plain, Score{2});
+	ByteWriter before;
+	REQUIRE(receiver.Save(before));
+
+	Store slice("slice");
+	REQUIRE(slice.CreateAt(selected));
+	slice.Set<Hierarchy>(selected, Hierarchy{.Parent = plain});
+	slice.Set<Spot>(selected, Spot{99.0f, 0.0f});
+	SECTION("the plain parent is outside the overlay") {}
+	SECTION("the overlay also supplies the plain parent") {
+		REQUIRE(slice.CreateAt(plain));
+		slice.Set<Score>(plain, Score{99});
+	}
+	ByteWriter snapshot;
+	REQUIRE(slice.Save(snapshot));
+	ByteReader reader(snapshot.Bytes());
+	REQUIRE_FALSE(receiver.Apply(reader, engine::ecs::ApplyMode::Overlay));
+
+	ByteWriter after;
+	REQUIRE(receiver.Save(after));
+	CHECK(
+		std::equal(before.Bytes().begin(), before.Bytes().end(), after.Bytes().begin(), after.Bytes().end())
+	);
+	CHECK(receiver.ParentOf(selected) == NULL_ENTITY);
+	CHECK(receiver.Get<Spot>(selected)->X == 1.0f);
+	CHECK(receiver.Get<Score>(plain)->Value == 2);
+}
+
+TEST_CASE("an overlay can precede an absent external parent in a join", "[ecs][snapshot]") {
+	engine::ecs::Classes::RegisterInstanceRoot();
+	Store authority("authority");
+	const Entity parent = authority.Create();
+	const Entity child = authority.Create();
+	authority.Set<Hierarchy>(parent, Hierarchy{});
+	authority.Set<Hierarchy>(child, Hierarchy{});
+	REQUIRE(authority.SetParent(child, parent));
+
+	Store slice("slice");
+	REQUIRE(slice.CreateAt(child));
+	slice.Set<Hierarchy>(child, Hierarchy{.Parent = parent});
+	ByteWriter preface;
+	REQUIRE(slice.Save(preface));
+	Store receiver("receiver");
+	ByteReader partial(preface.Bytes());
+	REQUIRE(receiver.Apply(partial, engine::ecs::ApplyMode::Overlay));
+	CHECK(receiver.Alive(child));
+	CHECK_FALSE(receiver.Alive(parent));
+	CHECK(receiver.ParentOf(child) == NULL_ENTITY);
+
+	ByteWriter snapshot;
+	REQUIRE(authority.Save(snapshot));
+	ByteReader complete(snapshot.Bytes());
+	REQUIRE(receiver.Apply(complete, engine::ecs::ApplyMode::Authoritative));
+	CHECK(receiver.ParentOf(child) == parent);
+	CHECK(ChildrenIn(receiver, parent) == std::vector<Entity>{child});
 }
 
 TEST_CASE("entity handles stay valid across a restore", "[ecs]") {
