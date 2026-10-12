@@ -847,13 +847,8 @@ namespace engine::replication {
 					continue;
 				}
 
-				// **The tree is built, not copied, for `WriteComponents`'
-				// reason.** `ecs.Hierarchy` crosses as a parent handle alone, so
-				// a snapshot that copied the component would carry a node with
-				// no child list and the far side would load a world whose
-				// parents have no children. Every entity in `entities` was
-				// created above before any component was set, so the parent of
-				// anything in this set is already here to hang it from.
+				// Full snapshots rebuild child indexes from visible parent links.
+				// Overlay slices retain external parents for the receiver to relink.
 				if (id == hierarchyId) {
 					const auto *node = static_cast<const ecs::Hierarchy *>(value);
 					if (overlay) {
