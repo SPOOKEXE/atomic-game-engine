@@ -81,8 +81,10 @@ class VendorTreeTest(unittest.TestCase):
     def git(repo: Path, *args: str):
         return run([REAL_GIT, *args], repo)
 
-    def invoke(self, *, check=True):
-        return run(["bash", str(SCRIPT), "fixture"], self.root, check=check, env=self.env)
+    def invoke(self, *, check=True, env=None):
+        return run(
+            ["bash", str(SCRIPT), "fixture"], self.root, check=check, env=env if env is not None else self.env
+        )
 
     def update_log(self):
         return self.log.read_text() if self.log.exists() else ""
@@ -131,6 +133,21 @@ class VendorTreeTest(unittest.TestCase):
         result = self.invoke(check=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("has local edits", result.stderr)
+
+    def test_parent_git_dir_does_not_make_vendor_look_dirty(self):
+        vendor = self.root / "mono.vendor/fixture"
+        hook_env = self.env.copy()
+        hook_env["GIT_DIR"] = str(self.root / ".git")
+
+        wrong_repository_view = run(
+            [REAL_GIT, "-C", str(vendor), "status", "--short"], self.root, env=hook_env
+        )
+        self.assertNotEqual(wrong_repository_view.stdout, "")
+
+        result = self.invoke(env=hook_env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.root / ".cache/vendor/fixture/vendor.txt").read_text(), "patched\n")
+        self.assertEqual(self.git(vendor, "status", "--short").stdout, "")
 
     def test_patch_content_changes_stamp_and_materialized_tree(self):
         self.invoke()
