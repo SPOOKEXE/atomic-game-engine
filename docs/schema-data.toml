@@ -9,11 +9,11 @@ generated_by = "schemadump"
 source = "runtime registries"
 
 ["reference"."counts"]
-components = 199
-classes = 154
-properties = 1992
-enums = 66
-functions = 102
+components = 232
+classes = 162
+properties = 2103
+enums = 69
+functions = 107
 
 services = 18
 service_methods = 92
@@ -23,7 +23,7 @@ service_signals = 10
 ["components"."ecs.AttributeTable"]
 name = "ecs.AttributeTable"
 kind = "Data"
-size = 56
+size = 120
 alignment = 8
 trivial = false
 serialisable = true
@@ -148,7 +148,7 @@ alignment = 4
 trivial = true
 serialisable = true
 raw_serialisation = false
-padded = false
+padded = true
 wire_size = 0
 described = false
 
@@ -236,6 +236,18 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."gui.AnimationPlayback"]
+name = "gui.AnimationPlayback"
+kind = "Data"
+size = 10672
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
 ["components"."gui.ArcHandlesShape"]
 name = "gui.ArcHandlesShape"
 kind = "Data"
@@ -284,6 +296,42 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."gui.Binding"]
+name = "gui.Binding"
+kind = "Data"
+size = 72
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."gui.BindingDependency"]
+name = "gui.BindingDependency"
+kind = "Data"
+size = 24
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."gui.BindingOutput"]
+name = "gui.BindingOutput"
+kind = "Data"
+size = 56
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
 ["components"."gui.BoxHandleShape"]
 name = "gui.BoxHandleShape"
 kind = "Data"
@@ -315,7 +363,19 @@ size = 16
 alignment = 4
 trivial = true
 serialisable = true
-raw_serialisation = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."gui.CanvasTransform"]
+name = "gui.CanvasTransform"
+kind = "Data"
+size = 16
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = false
 padded = false
 wire_size = 0
 described = false
@@ -447,7 +507,7 @@ size = 24
 alignment = 8
 trivial = true
 serialisable = true
-raw_serialisation = true
+raw_serialisation = false
 padded = false
 wire_size = 0
 described = false
@@ -488,10 +548,34 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."gui.LabelLocalizationArguments"]
+name = "gui.LabelLocalizationArguments"
+kind = "Data"
+size = 456
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."gui.LabelPresentation"]
+name = "gui.LabelPresentation"
+kind = "Data"
+size = 4
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
 ["components"."gui.Layer"]
 name = "gui.Layer"
 kind = "Data"
-size = 8
+size = 20
 alignment = 4
 trivial = true
 serialisable = true
@@ -517,6 +601,30 @@ name = "gui.ListLayout"
 kind = "Data"
 size = 16
 alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
+["components"."gui.Mask"]
+name = "gui.Mask"
+kind = "Data"
+size = 12
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
+["components"."gui.ModalScope"]
+name = "gui.ModalScope"
+kind = "Data"
+size = 1
+alignment = 1
 trivial = true
 serialisable = true
 raw_serialisation = true
@@ -615,7 +723,7 @@ size = 32
 alignment = 8
 trivial = true
 serialisable = true
-raw_serialisation = true
+raw_serialisation = false
 padded = false
 wire_size = 0
 described = false
@@ -632,6 +740,18 @@ padded = true
 wire_size = 0
 described = false
 
+["components"."gui.PresentationState"]
+name = "gui.PresentationState"
+kind = "Data"
+size = 656
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
 ["components"."gui.Resolved"]
 name = "gui.Resolved"
 kind = "Data"
@@ -639,8 +759,20 @@ size = 60
 alignment = 4
 trivial = true
 serialisable = true
-raw_serialisation = true
+raw_serialisation = false
 padded = false
+wire_size = 0
+described = false
+
+["components"."gui.ResolvedStyle"]
+name = "gui.ResolvedStyle"
+kind = "Data"
+size = 792
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
 wire_size = 0
 described = false
 
@@ -663,7 +795,7 @@ size = 48
 alignment = 8
 trivial = true
 serialisable = true
-raw_serialisation = true
+raw_serialisation = false
 padded = false
 wire_size = 0
 described = false
@@ -675,7 +807,7 @@ size = 48
 alignment = 4
 trivial = true
 serialisable = true
-raw_serialisation = true
+raw_serialisation = false
 padded = false
 wire_size = 0
 described = false
@@ -722,7 +854,7 @@ kind = "Data"
 size = 24
 alignment = 8
 trivial = false
-serialisable = false
+serialisable = true
 raw_serialisation = false
 padded = false
 wire_size = 0
@@ -747,7 +879,7 @@ size = 104
 alignment = 4
 trivial = true
 serialisable = true
-raw_serialisation = true
+raw_serialisation = false
 padded = false
 wire_size = 0
 described = false
@@ -769,6 +901,30 @@ name = "gui.Stroke"
 kind = "Data"
 size = 24
 alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
+["components"."gui.StyleClass"]
+name = "gui.StyleClass"
+kind = "Data"
+size = 40
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."gui.StyleDirect"]
+name = "gui.StyleDirect"
+kind = "Data"
+size = 1
+alignment = 1
 trivial = true
 serialisable = true
 raw_serialisation = true
@@ -800,6 +956,18 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."gui.TextCompositionState"]
+name = "gui.TextCompositionState"
+kind = "Data"
+size = 56
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
 ["components"."gui.TextSizeLimits"]
 name = "gui.TextSizeLimits"
 kind = "Data"
@@ -812,10 +980,10 @@ padded = false
 wire_size = 0
 described = false
 
-["components"."gui.Viewport"]
-name = "gui.Viewport"
+["components"."gui.ThemeBinding"]
+name = "gui.ThemeBinding"
 kind = "Data"
-size = 64
+size = 8
 alignment = 8
 trivial = true
 serialisable = true
@@ -824,8 +992,92 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."gui.UIStyle"]
+name = "gui.UIStyle"
+kind = "Data"
+size = 792
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
+["components"."gui.UITheme"]
+name = "gui.UITheme"
+kind = "Data"
+size = 784
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
+["components"."gui.Viewport"]
+name = "gui.Viewport"
+kind = "Data"
+size = 88
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
+["components"."gui.VirtualAnchorState"]
+name = "gui.VirtualAnchorState"
+kind = "Data"
+size = 48
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."gui.VirtualCollection"]
+name = "gui.VirtualCollection"
+kind = "Data"
+size = 80
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."gui.VirtualFocusState"]
+name = "gui.VirtualFocusState"
+kind = "Data"
+size = 48
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
 ["components"."physics.CopiedContactCache"]
 name = "physics.CopiedContactCache"
+kind = "Data"
+size = 32
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."physics.CopiedDynamicContactCache"]
+name = "physics.CopiedDynamicContactCache"
 kind = "Data"
 size = 32
 alignment = 8
@@ -869,6 +1121,66 @@ trivial = true
 serialisable = true
 raw_serialisation = true
 padded = false
+wire_size = 0
+described = false
+
+["components"."physics.Storm"]
+name = "physics.Storm"
+kind = "Data"
+size = 116
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
+["components"."physics.StormLink"]
+name = "physics.StormLink"
+kind = "Data"
+size = 20
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
+["components"."physics.StormResponse"]
+name = "physics.StormResponse"
+kind = "Data"
+size = 16
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
+["components"."physics.StormVegetation"]
+name = "physics.StormVegetation"
+kind = "Data"
+size = 52
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
+["components"."physics.observation-log"]
+name = "physics.observation-log"
+kind = "Data"
+size = 17688
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
 wire_size = 0
 described = false
 
@@ -1021,6 +1333,30 @@ name = "scene.AwakeWorld"
 kind = "Data"
 size = 4
 alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
+["components"."scene.BodyIdentity"]
+name = "scene.BodyIdentity"
+kind = "Data"
+size = 24
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."scene.BodyIdentityAuthority"]
+name = "scene.BodyIdentityAuthority"
+kind = "Data"
+size = 16
+alignment = 8
 trivial = true
 serialisable = true
 raw_serialisation = true
@@ -1304,6 +1640,18 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."scene.GpuParticleField"]
+name = "scene.GpuParticleField"
+kind = "Data"
+size = 72
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
 ["components"."scene.Gravity"]
 name = "scene.Gravity"
 kind = "Data"
@@ -1367,7 +1715,7 @@ described = false
 ["components"."scene.LODAuto"]
 name = "scene.LODAuto"
 kind = "Data"
-size = 32
+size = 36
 alignment = 4
 trivial = true
 serialisable = true
@@ -1379,7 +1727,7 @@ described = false
 ["components"."scene.LODCustom"]
 name = "scene.LODCustom"
 kind = "Data"
-size = 32
+size = 36
 alignment = 4
 trivial = true
 serialisable = true
@@ -1415,7 +1763,7 @@ described = false
 ["components"."scene.LightingService"]
 name = "scene.LightingService"
 kind = "Data"
-size = 64
+size = 104
 alignment = 4
 trivial = true
 serialisable = true
@@ -1532,6 +1880,18 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."scene.ObservationTrace"]
+name = "scene.ObservationTrace"
+kind = "Data"
+size = 8
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
 ["components"."scene.PhysicsProperties"]
 name = "scene.PhysicsProperties"
 kind = "Data"
@@ -1631,19 +1991,19 @@ described = false
 ["components"."scene.Portal"]
 name = "scene.Portal"
 kind = "Data"
-size = 16
+size = 24
 alignment = 8
 trivial = true
 serialisable = true
 raw_serialisation = false
-padded = false
+padded = true
 wire_size = 0
 described = false
 
 ["components"."scene.PortalBodyView"]
 name = "scene.PortalBodyView"
 kind = "Data"
-size = 232
+size = 240
 alignment = 8
 trivial = false
 serialisable = true
@@ -1652,10 +2012,34 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."scene.PortalCrossing"]
+name = "scene.PortalCrossing"
+kind = "Data"
+size = 184
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
 ["components"."scene.PortalProxy"]
 name = "scene.PortalProxy"
 kind = "Data"
 size = 8
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
+["components"."scene.PortalRim"]
+name = "scene.PortalRim"
+kind = "Data"
+size = 32
 alignment = 8
 trivial = true
 serialisable = true
@@ -1871,7 +2255,7 @@ described = false
 ["components"."scene.Sound"]
 name = "scene.Sound"
 kind = "Data"
-size = 20
+size = 24
 alignment = 4
 trivial = true
 serialisable = true
@@ -1919,12 +2303,12 @@ described = false
 ["components"."scene.SurfaceAppearance"]
 name = "scene.SurfaceAppearance"
 kind = "Data"
-size = 68
+size = 96
 alignment = 4
 trivial = true
 serialisable = true
 raw_serialisation = false
-padded = false
+padded = true
 wire_size = 0
 described = false
 
@@ -1935,7 +2319,7 @@ size = 4
 alignment = 4
 trivial = true
 serialisable = true
-raw_serialisation = false
+raw_serialisation = true
 padded = false
 wire_size = 0
 described = false
@@ -1971,7 +2355,7 @@ size = 4
 alignment = 4
 trivial = true
 serialisable = true
-raw_serialisation = false
+raw_serialisation = true
 padded = false
 wire_size = 0
 described = false
@@ -2261,6 +2645,18 @@ trivial = false
 serialisable = true
 raw_serialisation = false
 padded = false
+wire_size = 0
+described = false
+
+["components"."script.PortalObservationLog"]
+name = "script.PortalObservationLog"
+kind = "Data"
+size = 65648
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
 wire_size = 0
 described = false
 
@@ -4159,8 +4555,8 @@ writes = ["effects.Beam"]
 name = "BillboardGui"
 creatable = true
 inherits = "LayerCollector"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Layer", "gui.Canvas", "gui.Billboard", "gui.Resolved"]
-property_count = 25
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Layer", "gui.Canvas", "gui.Billboard", "gui.Resolved", "gui.ThemeBinding"]
+property_count = 28
 
 ["classes"."BillboardGui"."properties"."Parent"]
 name = "Parent"
@@ -4217,6 +4613,17 @@ scriptable = true
 reads = ["gui.Resolved"]
 writes = []
 
+["classes"."BillboardGui"."properties"."Theme"]
+name = "Theme"
+type = "Reference"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.ThemeBinding"]
+writes = ["gui.ThemeBinding"]
+
 ["classes"."BillboardGui"."properties"."Enabled"]
 name = "Enabled"
 type = "Bool"
@@ -4261,6 +4668,29 @@ scriptable = true
 reads = ["gui.Layer"]
 writes = ["gui.Layer"]
 enum = "ZIndexBehavior"
+
+["classes"."BillboardGui"."properties"."ReferenceResolution"]
+name = "ReferenceResolution"
+type = "Vector2"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Layer"]
+writes = ["gui.Layer"]
+
+["classes"."BillboardGui"."properties"."ScaleMode"]
+name = "ScaleMode"
+type = "Enum"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Layer"]
+writes = ["gui.Layer"]
+enum = "CollectorScaleMode"
 
 ["classes"."BillboardGui"."properties"."Adornee"]
 name = "Adornee"
@@ -5041,7 +5471,7 @@ writes = ["scene.SurfaceCamera"]
 name = "CanvasGroup"
 creatable = true
 inherits = "Frame"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Group", "gui.Resolved", "gui.Selection"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Group", "gui.Resolved", "gui.Selection", "gui.StyleClass", "gui.StyleDirect"]
 property_count = 31
 
 ["classes"."CanvasGroup"."properties"."Parent"]
@@ -5318,8 +5748,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."CanvasGroup"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -5329,8 +5759,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."CanvasGroup"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -6598,8 +7028,8 @@ enum = "NormalId"
 name = "DockWidgetPluginGui"
 creatable = true
 inherits = "PluginGui"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Layer", "gui.Canvas", "gui.Resolved"]
-property_count = 9
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Layer", "gui.Canvas", "gui.Resolved", "gui.ThemeBinding"]
+property_count = 12
 
 ["classes"."DockWidgetPluginGui"."properties"."Parent"]
 name = "Parent"
@@ -6656,6 +7086,17 @@ scriptable = true
 reads = ["gui.Resolved"]
 writes = []
 
+["classes"."DockWidgetPluginGui"."properties"."Theme"]
+name = "Theme"
+type = "Reference"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.ThemeBinding"]
+writes = ["gui.ThemeBinding"]
+
 ["classes"."DockWidgetPluginGui"."properties"."Enabled"]
 name = "Enabled"
 type = "Bool"
@@ -6700,6 +7141,29 @@ scriptable = true
 reads = ["gui.Layer"]
 writes = ["gui.Layer"]
 enum = "ZIndexBehavior"
+
+["classes"."DockWidgetPluginGui"."properties"."ReferenceResolution"]
+name = "ReferenceResolution"
+type = "Vector2"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Layer"]
+writes = ["gui.Layer"]
+
+["classes"."DockWidgetPluginGui"."properties"."ScaleMode"]
+name = "ScaleMode"
+type = "Enum"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Layer"]
+writes = ["gui.Layer"]
+enum = "CollectorScaleMode"
 
 ["classes"."EditableImage"]
 name = "EditableImage"
@@ -6964,7 +7428,7 @@ writes = ["ecs.InstanceName"]
 name = "Frame"
 creatable = true
 inherits = "GuiObject"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.StyleClass", "gui.StyleDirect"]
 property_count = 29
 
 ["classes"."Frame"."properties"."Parent"]
@@ -7241,8 +7705,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."Frame"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -7252,8 +7716,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."Frame"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -7288,6 +7752,178 @@ scriptable = true
 reads = ["gui.Background"]
 writes = ["gui.Background"]
 enum = "BorderMode"
+
+["classes"."GpuParticleField"]
+name = "GpuParticleField"
+creatable = true
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.GpuParticleField"]
+property_count = 15
+
+["classes"."GpuParticleField"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."GpuParticleField"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."GpuParticleField"."properties"."Enabled"]
+name = "Enabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.GpuParticleField"]
+writes = ["scene.GpuParticleField"]
+
+["classes"."GpuParticleField"."properties"."Layers"]
+name = "Layers"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.GpuParticleField"]
+writes = ["scene.GpuParticleField"]
+
+["classes"."GpuParticleField"."properties"."RequestedCount"]
+name = "RequestedCount"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.GpuParticleField"]
+writes = ["scene.GpuParticleField"]
+
+["classes"."GpuParticleField"."properties"."Seed"]
+name = "Seed"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.GpuParticleField"]
+writes = ["scene.GpuParticleField"]
+
+["classes"."GpuParticleField"."properties"."CondensationColor"]
+name = "CondensationColor"
+type = "Color3"
+value_size = 12
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.GpuParticleField"]
+writes = ["scene.GpuParticleField"]
+
+["classes"."GpuParticleField"."properties"."RainColor"]
+name = "RainColor"
+type = "Color3"
+value_size = 12
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.GpuParticleField"]
+writes = ["scene.GpuParticleField"]
+
+["classes"."GpuParticleField"."properties"."DebrisColor"]
+name = "DebrisColor"
+type = "Color3"
+value_size = 12
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.GpuParticleField"]
+writes = ["scene.GpuParticleField"]
+
+["classes"."GpuParticleField"."properties"."CondensationAlpha"]
+name = "CondensationAlpha"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.GpuParticleField"]
+writes = ["scene.GpuParticleField"]
+
+["classes"."GpuParticleField"."properties"."RainAlpha"]
+name = "RainAlpha"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.GpuParticleField"]
+writes = ["scene.GpuParticleField"]
+
+["classes"."GpuParticleField"."properties"."DebrisAlpha"]
+name = "DebrisAlpha"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.GpuParticleField"]
+writes = ["scene.GpuParticleField"]
+
+["classes"."GpuParticleField"."properties"."CondensationSize"]
+name = "CondensationSize"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.GpuParticleField"]
+writes = ["scene.GpuParticleField"]
+
+["classes"."GpuParticleField"."properties"."RainSize"]
+name = "RainSize"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.GpuParticleField"]
+writes = ["scene.GpuParticleField"]
+
+["classes"."GpuParticleField"."properties"."DebrisSize"]
+name = "DebrisSize"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.GpuParticleField"]
+writes = ["scene.GpuParticleField"]
 
 ["classes"."GravitationalLens"]
 name = "GravitationalLens"
@@ -7608,7 +8244,7 @@ writes = ["ecs.InstanceName"]
 name = "GuiButton"
 creatable = false
 inherits = "GuiObject"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Button", "gui.Resolved", "gui.Selection"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Button", "gui.Resolved", "gui.Selection", "gui.StyleClass", "gui.StyleDirect"]
 property_count = 30
 
 ["classes"."GuiButton"."properties"."Parent"]
@@ -7885,8 +8521,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."GuiButton"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -7896,8 +8532,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."GuiButton"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -7948,7 +8584,7 @@ writes = ["gui.Button"]
 name = "GuiLabel"
 creatable = false
 inherits = "GuiObject"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.StyleClass", "gui.StyleDirect"]
 property_count = 29
 
 ["classes"."GuiLabel"."properties"."Parent"]
@@ -8225,8 +8861,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."GuiLabel"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -8236,8 +8872,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."GuiLabel"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -8277,7 +8913,7 @@ enum = "BorderMode"
 name = "GuiObject"
 creatable = false
 inherits = "GuiBase2d"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.StyleClass", "gui.StyleDirect"]
 property_count = 29
 
 ["classes"."GuiObject"."properties"."Parent"]
@@ -8554,8 +9190,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."GuiObject"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -8565,8 +9201,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."GuiObject"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -8606,7 +9242,7 @@ enum = "BorderMode"
 name = "GuiService"
 creatable = false
 inherits = "Instance"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.GuiServiceState"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.GuiServiceState", "gui.TextCompositionState", "gui.VirtualFocusState"]
 property_count = 5
 
 ["classes"."GuiService"."properties"."Parent"]
@@ -9213,7 +9849,7 @@ writes = []
 name = "ImageButton"
 creatable = true
 inherits = "GuiButton"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Picture", "gui.Button", "gui.Resolved", "gui.Selection"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Picture", "gui.Button", "gui.Resolved", "gui.Selection", "gui.StyleClass", "gui.StyleDirect"]
 property_count = 43
 
 ["classes"."ImageButton"."properties"."Parent"]
@@ -9490,8 +10126,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."ImageButton"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -9501,8 +10137,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."ImageButton"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -9568,8 +10204,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Picture"]
-writes = ["gui.Picture"]
+reads = ["gui.Picture", "gui.StyleDirect"]
+writes = ["gui.Picture", "gui.StyleDirect"]
 
 ["classes"."ImageButton"."properties"."ImageTransparency"]
 name = "ImageTransparency"
@@ -9579,8 +10215,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Picture"]
-writes = ["gui.Picture"]
+reads = ["gui.Picture", "gui.StyleDirect"]
+writes = ["gui.Picture", "gui.StyleDirect"]
 
 ["classes"."ImageButton"."properties"."SliceCenter"]
 name = "SliceCenter"
@@ -9698,7 +10334,7 @@ writes = ["gui.Picture"]
 name = "ImageLabel"
 creatable = true
 inherits = "GuiLabel"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Picture", "gui.Resolved", "gui.Selection"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Picture", "gui.Resolved", "gui.Selection", "gui.StyleClass", "gui.StyleDirect"]
 property_count = 40
 
 ["classes"."ImageLabel"."properties"."Parent"]
@@ -9975,8 +10611,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."ImageLabel"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -9986,8 +10622,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."ImageLabel"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -10042,8 +10678,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Picture"]
-writes = ["gui.Picture"]
+reads = ["gui.Picture", "gui.StyleDirect"]
+writes = ["gui.Picture", "gui.StyleDirect"]
 
 ["classes"."ImageLabel"."properties"."ImageTransparency"]
 name = "ImageTransparency"
@@ -10053,8 +10689,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Picture"]
-writes = ["gui.Picture"]
+reads = ["gui.Picture", "gui.StyleDirect"]
+writes = ["gui.Picture", "gui.StyleDirect"]
 
 ["classes"."ImageLabel"."properties"."SliceCenter"]
 name = "SliceCenter"
@@ -10313,8 +10949,8 @@ writes = []
 name = "LayerCollector"
 creatable = false
 inherits = "GuiBase2d"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Layer", "gui.Canvas", "gui.Resolved"]
-property_count = 9
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Layer", "gui.Canvas", "gui.Resolved", "gui.ThemeBinding"]
+property_count = 12
 
 ["classes"."LayerCollector"."properties"."Parent"]
 name = "Parent"
@@ -10371,6 +11007,17 @@ scriptable = true
 reads = ["gui.Resolved"]
 writes = []
 
+["classes"."LayerCollector"."properties"."Theme"]
+name = "Theme"
+type = "Reference"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.ThemeBinding"]
+writes = ["gui.ThemeBinding"]
+
 ["classes"."LayerCollector"."properties"."Enabled"]
 name = "Enabled"
 type = "Bool"
@@ -10415,6 +11062,29 @@ scriptable = true
 reads = ["gui.Layer"]
 writes = ["gui.Layer"]
 enum = "ZIndexBehavior"
+
+["classes"."LayerCollector"."properties"."ReferenceResolution"]
+name = "ReferenceResolution"
+type = "Vector2"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Layer"]
+writes = ["gui.Layer"]
+
+["classes"."LayerCollector"."properties"."ScaleMode"]
+name = "ScaleMode"
+type = "Enum"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Layer"]
+writes = ["gui.Layer"]
+enum = "CollectorScaleMode"
 
 ["classes"."LensShader"]
 name = "LensShader"
@@ -10472,7 +11142,7 @@ name = "Light"
 creatable = true
 inherits = "Instance"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Light"]
-property_count = 6
+property_count = 7
 
 ["classes"."Light"."properties"."Parent"]
 name = "Parent"
@@ -10518,6 +11188,17 @@ scriptable = true
 reads = ["scene.Light"]
 writes = ["scene.Light"]
 
+["classes"."Light"."properties"."Shadows"]
+name = "Shadows"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.Light"]
+writes = ["scene.Light"]
+
 ["classes"."Light"."properties"."Brightness"]
 name = "Brightness"
 type = "Float"
@@ -10545,7 +11226,7 @@ name = "Lighting"
 creatable = false
 inherits = "Service"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service", "scene.LightingService"]
-property_count = 15
+property_count = 25
 
 ["classes"."Lighting"."properties"."Parent"]
 name = "Parent"
@@ -10660,6 +11341,116 @@ writes = ["scene.LightingService"]
 
 ["classes"."Lighting"."properties"."FogEnd"]
 name = "FogEnd"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LightingService"]
+writes = ["scene.LightingService"]
+
+["classes"."Lighting"."properties"."BloomThreshold"]
+name = "BloomThreshold"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LightingService"]
+writes = ["scene.LightingService"]
+
+["classes"."Lighting"."properties"."BloomIntensity"]
+name = "BloomIntensity"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LightingService"]
+writes = ["scene.LightingService"]
+
+["classes"."Lighting"."properties"."BloomRadius"]
+name = "BloomRadius"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LightingService"]
+writes = ["scene.LightingService"]
+
+["classes"."Lighting"."properties"."DepthOfFieldIntensity"]
+name = "DepthOfFieldIntensity"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LightingService"]
+writes = ["scene.LightingService"]
+
+["classes"."Lighting"."properties"."DepthOfFieldFocusDistance"]
+name = "DepthOfFieldFocusDistance"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LightingService"]
+writes = ["scene.LightingService"]
+
+["classes"."Lighting"."properties"."DepthOfFieldFocusRange"]
+name = "DepthOfFieldFocusRange"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LightingService"]
+writes = ["scene.LightingService"]
+
+["classes"."Lighting"."properties"."DepthOfFieldRadius"]
+name = "DepthOfFieldRadius"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LightingService"]
+writes = ["scene.LightingService"]
+
+["classes"."Lighting"."properties"."GodRayIntensity"]
+name = "GodRayIntensity"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LightingService"]
+writes = ["scene.LightingService"]
+
+["classes"."Lighting"."properties"."GodRayThreshold"]
+name = "GodRayThreshold"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LightingService"]
+writes = ["scene.LightingService"]
+
+["classes"."Lighting"."properties"."GodRayRadius"]
+name = "GodRayRadius"
 type = "Float"
 value_size = 4
 kind = "Field"
@@ -11129,7 +11920,7 @@ name = "MeshPart"
 creatable = true
 inherits = "BasePart"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Bounds", "scene.RigidBody", "scene.Collider", "scene.Surface", "scene.PhysicsProperties", "scene.Visual", "scene.SurfaceAppearance", "scene.Tags", "scene.LocalTransparency", "scene.Pivot", "scene.AuthoredAffordance"]
-property_count = 76
+property_count = 88
 
 ["classes"."MeshPart"."properties"."Parent"]
 name = "Parent"
@@ -11663,6 +12454,105 @@ scriptable = true
 reads = ["scene.SurfaceAppearance"]
 writes = ["scene.SurfaceAppearance"]
 
+["classes"."MeshPart"."properties"."PackedPbrMap"]
+name = "PackedPbrMap"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."MeshPart"."properties"."SpecularFactor"]
+name = "SpecularFactor"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."MeshPart"."properties"."TransmissionFactor"]
+name = "TransmissionFactor"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."MeshPart"."properties"."IndexOfRefraction"]
+name = "IndexOfRefraction"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."MeshPart"."properties"."Thickness"]
+name = "Thickness"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."MeshPart"."properties"."PackedRoughnessChannel"]
+name = "PackedRoughnessChannel"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."MeshPart"."properties"."PackedOcclusionChannel"]
+name = "PackedOcclusionChannel"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."MeshPart"."properties"."PackedHeightChannel"]
+name = "PackedHeightChannel"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."MeshPart"."properties"."PackedMetalnessChannel"]
+name = "PackedMetalnessChannel"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
 ["classes"."MeshPart"."properties"."Lod1MeshId"]
 name = "Lod1MeshId"
 type = "Name"
@@ -11739,6 +12629,17 @@ predicted_writable = false
 scriptable = true
 reads = ["scene.LODAuto"]
 writes = ["scene.LODAuto"]
+
+["classes"."MeshPart"."properties"."LodBillboardTexture"]
+name = "LodBillboardTexture"
+type = "Name"
+value_size = 4
+kind = "Structural"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LODCustom"]
+writes = ["scene.LODCustom"]
 
 ["classes"."MeshPart"."properties"."Lod1Distance"]
 name = "Lod1Distance"
@@ -11850,6 +12751,17 @@ scriptable = true
 reads = ["scene.LODAuto"]
 writes = ["scene.LODAuto"]
 
+["classes"."MeshPart"."properties"."AutoLodBillboardTexture"]
+name = "AutoLodBillboardTexture"
+type = "Name"
+value_size = 4
+kind = "Structural"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LODAuto"]
+writes = ["scene.LODAuto"]
+
 ["classes"."MeshPart"."properties"."AutoLodLevels"]
 name = "AutoLodLevels"
 type = "Int32"
@@ -11942,6 +12854,17 @@ writes = ["scene.LODCustom"]
 ["classes"."MeshPart"."properties"."CustomLodTargetQuadArea"]
 name = "CustomLodTargetQuadArea"
 type = "Float"
+value_size = 4
+kind = "Structural"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LODCustom"]
+writes = ["scene.LODCustom"]
+
+["classes"."MeshPart"."properties"."CustomLodBillboardTexture"]
+name = "CustomLodBillboardTexture"
+type = "Name"
 value_size = 4
 kind = "Structural"
 writable = true
@@ -12134,7 +13057,7 @@ writes = ["script.Disabled"]
 name = "NodeCanvas"
 creatable = true
 inherits = "Frame"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.NodeCanvas"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.NodeCanvas", "gui.StyleClass", "gui.StyleDirect"]
 property_count = 35
 
 ["classes"."NodeCanvas"."properties"."Parent"]
@@ -12411,8 +13334,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."NodeCanvas"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -12422,8 +13345,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."NodeCanvas"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -12529,7 +13452,7 @@ writes = ["gui.NodeCanvas"]
 name = "NodeCanvasGroup"
 creatable = true
 inherits = "Frame"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.NodeCanvasGroup"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.NodeCanvasGroup", "gui.StyleClass", "gui.StyleDirect"]
 property_count = 33
 
 ["classes"."NodeCanvasGroup"."properties"."Parent"]
@@ -12806,8 +13729,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."NodeCanvasGroup"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -12817,8 +13740,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."NodeCanvasGroup"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -13033,7 +13956,7 @@ writes = ["gui.NodeCanvasLink"]
 name = "NodeCanvasNode"
 creatable = true
 inherits = "Frame"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.NodeCanvasNode"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.NodeCanvasNode", "gui.StyleClass", "gui.StyleDirect"]
 property_count = 39
 
 ["classes"."NodeCanvasNode"."properties"."Parent"]
@@ -13310,8 +14233,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."NodeCanvasNode"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -13321,8 +14244,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."NodeCanvasNode"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -13474,7 +14397,7 @@ enum = "InputPortLayout"
 name = "NodeCanvasPort"
 creatable = true
 inherits = "GuiObject"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.NodeCanvasPort"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Resolved", "gui.Selection", "gui.NodeCanvasPort", "gui.StyleClass", "gui.StyleDirect"]
 property_count = 34
 
 ["classes"."NodeCanvasPort"."properties"."Parent"]
@@ -13751,8 +14674,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."NodeCanvasPort"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -13762,8 +14685,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."NodeCanvasPort"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -15314,8 +16237,8 @@ writes = ["scene.PlayersService"]
 name = "PluginGui"
 creatable = false
 inherits = "LayerCollector"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Layer", "gui.Canvas", "gui.Resolved"]
-property_count = 9
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Layer", "gui.Canvas", "gui.Resolved", "gui.ThemeBinding"]
+property_count = 12
 
 ["classes"."PluginGui"."properties"."Parent"]
 name = "Parent"
@@ -15372,6 +16295,17 @@ scriptable = true
 reads = ["gui.Resolved"]
 writes = []
 
+["classes"."PluginGui"."properties"."Theme"]
+name = "Theme"
+type = "Reference"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.ThemeBinding"]
+writes = ["gui.ThemeBinding"]
+
 ["classes"."PluginGui"."properties"."Enabled"]
 name = "Enabled"
 type = "Bool"
@@ -15417,12 +16351,35 @@ reads = ["gui.Layer"]
 writes = ["gui.Layer"]
 enum = "ZIndexBehavior"
 
+["classes"."PluginGui"."properties"."ReferenceResolution"]
+name = "ReferenceResolution"
+type = "Vector2"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Layer"]
+writes = ["gui.Layer"]
+
+["classes"."PluginGui"."properties"."ScaleMode"]
+name = "ScaleMode"
+type = "Enum"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Layer"]
+writes = ["gui.Layer"]
+enum = "CollectorScaleMode"
+
 ["classes"."PointLight"]
 name = "PointLight"
 creatable = true
 inherits = "Light"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Light"]
-property_count = 6
+property_count = 7
 
 ["classes"."PointLight"."properties"."Parent"]
 name = "Parent"
@@ -15459,6 +16416,17 @@ writes = ["scene.Light"]
 
 ["classes"."PointLight"."properties"."Enabled"]
 name = "Enabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.Light"]
+writes = ["scene.Light"]
+
+["classes"."PointLight"."properties"."Shadows"]
+name = "Shadows"
 type = "Bool"
 value_size = 1
 kind = "Field"
@@ -16317,8 +17285,8 @@ writes = ["scene.Constraint"]
 name = "ScreenGui"
 creatable = true
 inherits = "LayerCollector"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Layer", "gui.Canvas", "gui.Resolved"]
-property_count = 10
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Layer", "gui.Canvas", "gui.Resolved", "gui.ThemeBinding"]
+property_count = 13
 
 ["classes"."ScreenGui"."properties"."Parent"]
 name = "Parent"
@@ -16375,6 +17343,17 @@ scriptable = true
 reads = ["gui.Resolved"]
 writes = []
 
+["classes"."ScreenGui"."properties"."Theme"]
+name = "Theme"
+type = "Reference"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.ThemeBinding"]
+writes = ["gui.ThemeBinding"]
+
 ["classes"."ScreenGui"."properties"."Enabled"]
 name = "Enabled"
 type = "Bool"
@@ -16419,6 +17398,29 @@ scriptable = true
 reads = ["gui.Layer"]
 writes = ["gui.Layer"]
 enum = "ZIndexBehavior"
+
+["classes"."ScreenGui"."properties"."ReferenceResolution"]
+name = "ReferenceResolution"
+type = "Vector2"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Layer"]
+writes = ["gui.Layer"]
+
+["classes"."ScreenGui"."properties"."ScaleMode"]
+name = "ScaleMode"
+type = "Enum"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Layer"]
+writes = ["gui.Layer"]
+enum = "CollectorScaleMode"
 
 ["classes"."ScreenGui"."properties"."IgnoreGuiInset"]
 name = "IgnoreGuiInset"
@@ -16520,7 +17522,7 @@ writes = ["script.Disabled"]
 name = "ScrollingFrame"
 creatable = true
 inherits = "Frame"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Scrolling", "gui.Resolved", "gui.Selection"]
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Scrolling", "gui.Resolved", "gui.Selection", "gui.StyleClass", "gui.StyleDirect"]
 property_count = 46
 
 ["classes"."ScrollingFrame"."properties"."Parent"]
@@ -16797,8 +17799,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."ScrollingFrame"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -16808,8 +17810,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."ScrollingFrame"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -17701,7 +18703,7 @@ name = "SkinnedMeshPart"
 creatable = true
 inherits = "MeshPart"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Transform", "scene.PreviousTransform", "scene.Bounds", "scene.RigidBody", "scene.Collider", "scene.Surface", "scene.PhysicsProperties", "scene.Visual", "scene.SurfaceAppearance", "scene.Tags", "scene.LocalTransparency", "scene.Pivot", "scene.Skeleton", "scene.AuthoredAffordance"]
-property_count = 78
+property_count = 90
 
 ["classes"."SkinnedMeshPart"."properties"."Parent"]
 name = "Parent"
@@ -18235,6 +19237,105 @@ scriptable = true
 reads = ["scene.SurfaceAppearance"]
 writes = ["scene.SurfaceAppearance"]
 
+["classes"."SkinnedMeshPart"."properties"."PackedPbrMap"]
+name = "PackedPbrMap"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."SkinnedMeshPart"."properties"."SpecularFactor"]
+name = "SpecularFactor"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."SkinnedMeshPart"."properties"."TransmissionFactor"]
+name = "TransmissionFactor"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."SkinnedMeshPart"."properties"."IndexOfRefraction"]
+name = "IndexOfRefraction"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."SkinnedMeshPart"."properties"."Thickness"]
+name = "Thickness"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."SkinnedMeshPart"."properties"."PackedRoughnessChannel"]
+name = "PackedRoughnessChannel"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."SkinnedMeshPart"."properties"."PackedOcclusionChannel"]
+name = "PackedOcclusionChannel"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."SkinnedMeshPart"."properties"."PackedHeightChannel"]
+name = "PackedHeightChannel"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
+["classes"."SkinnedMeshPart"."properties"."PackedMetalnessChannel"]
+name = "PackedMetalnessChannel"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.SurfaceAppearance"]
+writes = ["scene.SurfaceAppearance"]
+
 ["classes"."SkinnedMeshPart"."properties"."Lod1MeshId"]
 name = "Lod1MeshId"
 type = "Name"
@@ -18311,6 +19412,17 @@ predicted_writable = false
 scriptable = true
 reads = ["scene.LODAuto"]
 writes = ["scene.LODAuto"]
+
+["classes"."SkinnedMeshPart"."properties"."LodBillboardTexture"]
+name = "LodBillboardTexture"
+type = "Name"
+value_size = 4
+kind = "Structural"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LODCustom"]
+writes = ["scene.LODCustom"]
 
 ["classes"."SkinnedMeshPart"."properties"."Lod1Distance"]
 name = "Lod1Distance"
@@ -18422,6 +19534,17 @@ scriptable = true
 reads = ["scene.LODAuto"]
 writes = ["scene.LODAuto"]
 
+["classes"."SkinnedMeshPart"."properties"."AutoLodBillboardTexture"]
+name = "AutoLodBillboardTexture"
+type = "Name"
+value_size = 4
+kind = "Structural"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LODAuto"]
+writes = ["scene.LODAuto"]
+
 ["classes"."SkinnedMeshPart"."properties"."AutoLodLevels"]
 name = "AutoLodLevels"
 type = "Int32"
@@ -18514,6 +19637,17 @@ writes = ["scene.LODCustom"]
 ["classes"."SkinnedMeshPart"."properties"."CustomLodTargetQuadArea"]
 name = "CustomLodTargetQuadArea"
 type = "Float"
+value_size = 4
+kind = "Structural"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.LODCustom"]
+writes = ["scene.LODCustom"]
+
+["classes"."SkinnedMeshPart"."properties"."CustomLodBillboardTexture"]
+name = "CustomLodBillboardTexture"
+type = "Name"
 value_size = 4
 kind = "Structural"
 writable = true
@@ -18795,7 +19929,7 @@ name = "Sound"
 creatable = true
 inherits = "Instance"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Sound"]
-property_count = 8
+property_count = 9
 
 ["classes"."Sound"."properties"."Parent"]
 name = "Parent"
@@ -18832,6 +19966,17 @@ writes = ["scene.Sound"]
 
 ["classes"."Sound"."properties"."Volume"]
 name = "Volume"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.Sound"]
+writes = ["scene.Sound"]
+
+["classes"."Sound"."properties"."Pan"]
+name = "Pan"
 type = "Float"
 value_size = 4
 kind = "Field"
@@ -19553,7 +20698,7 @@ name = "SpotLight"
 creatable = true
 inherits = "Light"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Light"]
-property_count = 8
+property_count = 9
 
 ["classes"."SpotLight"."properties"."Parent"]
 name = "Parent"
@@ -19590,6 +20735,17 @@ writes = ["scene.Light"]
 
 ["classes"."SpotLight"."properties"."Enabled"]
 name = "Enabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.Light"]
+writes = ["scene.Light"]
+
+["classes"."SpotLight"."properties"."Shadows"]
+name = "Shadows"
 type = "Bool"
 value_size = 1
 kind = "Field"
@@ -20371,8 +21527,8 @@ writes = ["scene.SurfaceCamera"]
 name = "SurfaceGui"
 creatable = true
 inherits = "LayerCollector"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Layer", "gui.Canvas", "gui.Surface", "gui.Resolved"]
-property_count = 21
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Layer", "gui.Canvas", "gui.Surface", "gui.Resolved", "gui.ThemeBinding"]
+property_count = 24
 
 ["classes"."SurfaceGui"."properties"."Parent"]
 name = "Parent"
@@ -20429,6 +21585,17 @@ scriptable = true
 reads = ["gui.Resolved"]
 writes = []
 
+["classes"."SurfaceGui"."properties"."Theme"]
+name = "Theme"
+type = "Reference"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.ThemeBinding"]
+writes = ["gui.ThemeBinding"]
+
 ["classes"."SurfaceGui"."properties"."Enabled"]
 name = "Enabled"
 type = "Bool"
@@ -20473,6 +21640,29 @@ scriptable = true
 reads = ["gui.Layer"]
 writes = ["gui.Layer"]
 enum = "ZIndexBehavior"
+
+["classes"."SurfaceGui"."properties"."ReferenceResolution"]
+name = "ReferenceResolution"
+type = "Vector2"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Layer"]
+writes = ["gui.Layer"]
+
+["classes"."SurfaceGui"."properties"."ScaleMode"]
+name = "ScaleMode"
+type = "Enum"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Layer"]
+writes = ["gui.Layer"]
+enum = "CollectorScaleMode"
 
 ["classes"."SurfaceGui"."properties"."Adornee"]
 name = "Adornee"
@@ -20613,7 +21803,7 @@ name = "SurfaceLight"
 creatable = true
 inherits = "Light"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Light"]
-property_count = 8
+property_count = 9
 
 ["classes"."SurfaceLight"."properties"."Parent"]
 name = "Parent"
@@ -20650,6 +21840,17 @@ writes = ["scene.Light"]
 
 ["classes"."SurfaceLight"."properties"."Enabled"]
 name = "Enabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["scene.Light"]
+writes = ["scene.Light"]
+
+["classes"."SurfaceLight"."properties"."Shadows"]
+name = "Shadows"
 type = "Bool"
 value_size = 1
 kind = "Field"
@@ -20800,8 +22001,8 @@ writes = []
 name = "TextBox"
 creatable = true
 inherits = "GuiObject"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Label", "gui.Entry", "gui.Resolved", "gui.Selection"]
-property_count = 54
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Label", "gui.LabelPresentation", "gui.Entry", "gui.Resolved", "gui.Selection", "gui.LabelLocalizationArguments", "gui.StyleClass", "gui.StyleDirect"]
+property_count = 57
 
 ["classes"."TextBox"."properties"."Parent"]
 name = "Parent"
@@ -21077,8 +22278,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."TextBox"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -21088,8 +22289,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."TextBox"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -21136,6 +22337,28 @@ scriptable = true
 reads = ["gui.Label"]
 writes = ["gui.Label"]
 
+["classes"."TextBox"."properties"."LocalizationKey"]
+name = "LocalizationKey"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.LabelPresentation"]
+writes = ["gui.LabelPresentation"]
+
+["classes"."TextBox"."properties"."LocalizationArgumentCount"]
+name = "LocalizationArgumentCount"
+type = "Int32"
+value_size = 4
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.LabelLocalizationArguments"]
+writes = ["gui.LabelLocalizationArguments"]
+
 ["classes"."TextBox"."properties"."TextColor3"]
 name = "TextColor3"
 type = "Color3"
@@ -21144,8 +22367,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Label"]
-writes = ["gui.Label"]
+reads = ["gui.Label", "gui.StyleDirect"]
+writes = ["gui.Label", "gui.StyleDirect"]
 
 ["classes"."TextBox"."properties"."TextTransparency"]
 name = "TextTransparency"
@@ -21155,8 +22378,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Label"]
-writes = ["gui.Label"]
+reads = ["gui.Label", "gui.StyleDirect"]
+writes = ["gui.Label", "gui.StyleDirect"]
 
 ["classes"."TextBox"."properties"."TextSize"]
 name = "TextSize"
@@ -21382,6 +22605,17 @@ scriptable = true
 reads = ["gui.Entry"]
 writes = ["gui.Entry"]
 
+["classes"."TextBox"."properties"."Password"]
+name = "Password"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Entry"]
+writes = ["gui.Entry"]
+
 ["classes"."TextBox"."properties"."CursorPosition"]
 name = "CursorPosition"
 type = "Int32"
@@ -21408,8 +22642,8 @@ writes = ["gui.Entry"]
 name = "TextButton"
 creatable = true
 inherits = "GuiButton"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Label", "gui.Button", "gui.Resolved", "gui.Selection"]
-property_count = 48
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Label", "gui.LabelPresentation", "gui.Button", "gui.Resolved", "gui.Selection", "gui.LabelLocalizationArguments", "gui.StyleClass", "gui.StyleDirect"]
+property_count = 50
 
 ["classes"."TextButton"."properties"."Parent"]
 name = "Parent"
@@ -21685,8 +22919,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."TextButton"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -21696,8 +22930,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."TextButton"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -21755,6 +22989,28 @@ scriptable = true
 reads = ["gui.Label"]
 writes = ["gui.Label"]
 
+["classes"."TextButton"."properties"."LocalizationKey"]
+name = "LocalizationKey"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.LabelPresentation"]
+writes = ["gui.LabelPresentation"]
+
+["classes"."TextButton"."properties"."LocalizationArgumentCount"]
+name = "LocalizationArgumentCount"
+type = "Int32"
+value_size = 4
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.LabelLocalizationArguments"]
+writes = ["gui.LabelLocalizationArguments"]
+
 ["classes"."TextButton"."properties"."TextColor3"]
 name = "TextColor3"
 type = "Color3"
@@ -21763,8 +23019,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Label"]
-writes = ["gui.Label"]
+reads = ["gui.Label", "gui.StyleDirect"]
+writes = ["gui.Label", "gui.StyleDirect"]
 
 ["classes"."TextButton"."properties"."TextTransparency"]
 name = "TextTransparency"
@@ -21774,8 +23030,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Label"]
-writes = ["gui.Label"]
+reads = ["gui.Label", "gui.StyleDirect"]
+writes = ["gui.Label", "gui.StyleDirect"]
 
 ["classes"."TextButton"."properties"."TextSize"]
 name = "TextSize"
@@ -21950,8 +23206,8 @@ enum = "TextTruncate"
 name = "TextLabel"
 creatable = true
 inherits = "GuiLabel"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Label", "gui.Resolved", "gui.Selection"]
-property_count = 47
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Label", "gui.LabelPresentation", "gui.Resolved", "gui.Selection", "gui.LabelLocalizationArguments", "gui.StyleClass", "gui.StyleDirect"]
+property_count = 49
 
 ["classes"."TextLabel"."properties"."Parent"]
 name = "Parent"
@@ -22227,8 +23483,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."TextLabel"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -22238,8 +23494,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."TextLabel"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -22286,6 +23542,28 @@ scriptable = true
 reads = ["gui.Label"]
 writes = ["gui.Label"]
 
+["classes"."TextLabel"."properties"."LocalizationKey"]
+name = "LocalizationKey"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.LabelPresentation"]
+writes = ["gui.LabelPresentation"]
+
+["classes"."TextLabel"."properties"."LocalizationArgumentCount"]
+name = "LocalizationArgumentCount"
+type = "Int32"
+value_size = 4
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.LabelLocalizationArguments"]
+writes = ["gui.LabelLocalizationArguments"]
+
 ["classes"."TextLabel"."properties"."TextColor3"]
 name = "TextColor3"
 type = "Color3"
@@ -22294,8 +23572,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Label"]
-writes = ["gui.Label"]
+reads = ["gui.Label", "gui.StyleDirect"]
+writes = ["gui.Label", "gui.StyleDirect"]
 
 ["classes"."TextLabel"."properties"."TextTransparency"]
 name = "TextTransparency"
@@ -22305,8 +23583,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Label"]
-writes = ["gui.Label"]
+reads = ["gui.Label", "gui.StyleDirect"]
+writes = ["gui.Label", "gui.StyleDirect"]
 
 ["classes"."TextLabel"."properties"."TextSize"]
 name = "TextSize"
@@ -22829,6 +24107,57 @@ scriptable = true
 reads = ["effects.Trail"]
 writes = ["effects.Trail"]
 
+["classes"."UIAnimation"]
+name = "UIAnimation"
+creatable = true
+inherits = "UIComponent"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.AnimationPlayback"]
+property_count = 4
+
+["classes"."UIAnimation"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."UIAnimation"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."UIAnimation"."properties"."StartTime"]
+name = "StartTime"
+type = "Double"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.AnimationPlayback"]
+writes = ["gui.AnimationPlayback"]
+
+["classes"."UIAnimation"."properties"."Playing"]
+name = "Playing"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.AnimationPlayback"]
+writes = ["gui.AnimationPlayback"]
+
 ["classes"."UIAspectRatioConstraint"]
 name = "UIAspectRatioConstraint"
 creatable = true
@@ -22921,6 +24250,101 @@ predicted_writable = false
 scriptable = true
 reads = ["ecs.InstanceName"]
 writes = ["ecs.InstanceName"]
+
+["classes"."UIBinding"]
+name = "UIBinding"
+creatable = true
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Binding", "gui.BindingOutput", "gui.BindingDependency"]
+property_count = 8
+
+["classes"."UIBinding"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."UIBinding"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."UIBinding"."properties"."SourcePath"]
+name = "SourcePath"
+type = "String"
+value_size = 32
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Binding"]
+writes = ["gui.Binding"]
+
+["classes"."UIBinding"."properties"."Attribute"]
+name = "Attribute"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Binding"]
+writes = ["gui.Binding"]
+
+["classes"."UIBinding"."properties"."Target"]
+name = "Target"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Binding"]
+writes = ["gui.Binding"]
+
+["classes"."UIBinding"."properties"."Fallback"]
+name = "Fallback"
+type = "String"
+value_size = 32
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Binding"]
+writes = ["gui.Binding"]
+
+["classes"."UIBinding"."properties"."Value"]
+name = "Value"
+type = "String"
+value_size = 32
+kind = "Computed"
+writable = false
+predicted_writable = false
+scriptable = true
+reads = ["gui.BindingOutput"]
+writes = []
+
+["classes"."UIBinding"."properties"."Valid"]
+name = "Valid"
+type = "Bool"
+value_size = 1
+kind = "Computed"
+writable = false
+predicted_writable = false
+scriptable = true
+reads = ["gui.BindingOutput"]
+writes = []
 
 ["classes"."UIComponent"]
 name = "UIComponent"
@@ -23573,6 +24997,97 @@ reads = ["gui.ListLayout"]
 writes = ["gui.ListLayout"]
 enum = "ItemLineAlignment"
 
+["classes"."UIMask"]
+name = "UIMask"
+creatable = true
+inherits = "UIComponent"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Mask"]
+property_count = 4
+
+["classes"."UIMask"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."UIMask"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."UIMask"."properties"."CornerRadius"]
+name = "CornerRadius"
+type = "UDim"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Mask"]
+writes = ["gui.Mask"]
+
+["classes"."UIMask"."properties"."Enabled"]
+name = "Enabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Mask"]
+writes = ["gui.Mask"]
+
+["classes"."UIModalScope"]
+name = "UIModalScope"
+creatable = true
+inherits = "UIComponent"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.ModalScope"]
+property_count = 3
+
+["classes"."UIModalScope"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."UIModalScope"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."UIModalScope"."properties"."Enabled"]
+name = "Enabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.ModalScope"]
+writes = ["gui.ModalScope"]
+
 ["classes"."UIPadding"]
 name = "UIPadding"
 creatable = true
@@ -23978,6 +25493,35 @@ reads = ["gui.Stroke"]
 writes = ["gui.Stroke"]
 enum = "StrokeSizingMode"
 
+["classes"."UIStyle"]
+name = "UIStyle"
+creatable = true
+inherits = "UIComponent"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.UIStyle"]
+property_count = 2
+
+["classes"."UIStyle"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."UIStyle"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
 ["classes"."UITableLayout"]
 name = "UITableLayout"
 creatable = true
@@ -24138,6 +25682,97 @@ predicted_writable = false
 scriptable = true
 reads = ["gui.TextSizeLimits"]
 writes = ["gui.TextSizeLimits"]
+
+["classes"."UITheme"]
+name = "UITheme"
+creatable = true
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.UITheme"]
+property_count = 2
+
+["classes"."UITheme"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."UITheme"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."UIVirtualCollection"]
+name = "UIVirtualCollection"
+creatable = true
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.VirtualCollection"]
+property_count = 5
+
+["classes"."UIVirtualCollection"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."UIVirtualCollection"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."UIVirtualCollection"."properties"."ItemCount"]
+name = "ItemCount"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.VirtualCollection"]
+writes = ["gui.VirtualCollection"]
+
+["classes"."UIVirtualCollection"."properties"."FixedExtent"]
+name = "FixedExtent"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.VirtualCollection"]
+writes = ["gui.VirtualCollection"]
+
+["classes"."UIVirtualCollection"."properties"."Revision"]
+name = "Revision"
+type = "Int64"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.VirtualCollection"]
+writes = ["gui.VirtualCollection"]
 
 ["classes"."ValueBase"]
 name = "ValueBase"
@@ -24501,8 +26136,8 @@ writes = ["scene.VectorField3D"]
 name = "ViewportFrame"
 creatable = true
 inherits = "GuiObject"
-components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Viewport", "gui.Resolved", "gui.Selection"]
-property_count = 35
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "gui.Element", "gui.Background", "gui.Viewport", "gui.Resolved", "gui.Selection", "gui.StyleClass", "gui.StyleDirect"]
+property_count = 39
 
 ["classes"."ViewportFrame"."properties"."Parent"]
 name = "Parent"
@@ -24778,8 +26413,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."ViewportFrame"."properties"."BackgroundTransparency"]
 name = "BackgroundTransparency"
@@ -24789,8 +26424,8 @@ kind = "Field"
 writable = true
 predicted_writable = false
 scriptable = true
-reads = ["gui.Background"]
-writes = ["gui.Background"]
+reads = ["gui.Background", "gui.StyleDirect"]
+writes = ["gui.Background", "gui.StyleDirect"]
 
 ["classes"."ViewportFrame"."properties"."BorderColor3"]
 name = "BorderColor3"
@@ -24884,6 +26519,51 @@ writes = ["gui.Viewport"]
 ["classes"."ViewportFrame"."properties"."ImageTransparency"]
 name = "ImageTransparency"
 type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Viewport"]
+writes = ["gui.Viewport"]
+
+["classes"."ViewportFrame"."properties"."ResolutionScale"]
+name = "ResolutionScale"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Viewport"]
+writes = ["gui.Viewport"]
+
+["classes"."ViewportFrame"."properties"."UpdateMode"]
+name = "UpdateMode"
+type = "Enum"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Viewport"]
+writes = ["gui.Viewport"]
+enum = "ViewportUpdateMode"
+
+["classes"."ViewportFrame"."properties"."UpdateEveryFrames"]
+name = "UpdateEveryFrames"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+reads = ["gui.Viewport"]
+writes = ["gui.Viewport"]
+
+["classes"."ViewportFrame"."properties"."InvalidationRevision"]
+name = "InvalidationRevision"
+type = "Int32"
 value_size = 4
 kind = "Field"
 writable = true
@@ -25657,6 +27337,13 @@ kind = "Method"
 source = "neutral"
 scriptable = true
 
+["classes"."Instance"."functions"."ClearLocalizedArgument"]
+name = "ClearLocalizedArgument"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
 ["classes"."Instance"."functions"."Clone"]
 name = "Clone"
 owner = "Instance"
@@ -26098,6 +27785,27 @@ kind = "Method"
 source = "neutral"
 scriptable = true
 
+["classes"."Instance"."functions"."SetLocalizedDateArgument"]
+name = "SetLocalizedDateArgument"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
+["classes"."Instance"."functions"."SetLocalizedNumberArgument"]
+name = "SetLocalizedNumberArgument"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
+["classes"."Instance"."functions"."SetLocalizedStringArgument"]
+name = "SetLocalizedStringArgument"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
 ["classes"."Instance"."functions"."SetNetworkOwner"]
 name = "SetNetworkOwner"
 owner = "Instance"
@@ -26128,6 +27836,13 @@ scriptable = true
 
 ["classes"."Instance"."functions"."SetVertexUV"]
 name = "SetVertexUV"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
+["classes"."Instance"."functions"."SetVirtualPage"]
+name = "SetVirtualPage"
 owner = "Instance"
 kind = "Method"
 source = "neutral"
@@ -27098,6 +28813,10 @@ items = ["Classic", "LockFirstPerson", "ShiftLock", "Scriptable"]
 name = "CloudComputeShader"
 items = ["Cumulus", "Stratus", "Storm", "Voxel"]
 
+["enums"."CollectorScaleMode"]
+name = "CollectorScaleMode"
+items = ["Stretch", "Fit", "Fill", "Integer", "None"]
+
 ["enums"."ConstraintMotion"]
 name = "ConstraintMotion"
 items = ["Locked", "Limited", "Free"]
@@ -27158,6 +28877,10 @@ items = ["Round", "Bevel", "Miter"]
 name = "ListenerType"
 items = ["Camera", "ObjectPosition"]
 
+["enums"."LocalizedArgumentType"]
+name = "LocalizedArgumentType"
+items = ["String", "Number", "Date"]
+
 ["enums"."MouseBehavior"]
 name = "MouseBehavior"
 items = ["Default", "LockCenter", "LockCurrentPosition"]
@@ -27196,7 +28919,7 @@ items = ["Volume", "Surface"]
 
 ["enums"."ParticleFlipbookLayout"]
 name = "ParticleFlipbookLayout"
-items = ["None", "Grid2x2", "Grid4x4", "Grid8x8"]
+items = ["None", "Grid2x2", "Grid4x4", "Grid8x8", "Grid16x16", "Grid32x32", "Grid64x64"]
 
 ["enums"."ParticleFlipbookMode"]
 name = "ParticleFlipbookMode"
@@ -27309,6 +29032,10 @@ items = ["Top", "Center", "Bottom"]
 ["enums"."VerticalScrollBarPosition"]
 name = "VerticalScrollBarPosition"
 items = ["Right", "Left"]
+
+["enums"."ViewportUpdateMode"]
+name = "ViewportUpdateMode"
+items = ["OnChange", "EveryFrame", "FixedRate", "Manual"]
 
 ["enums"."VolumeShape"]
 name = "VolumeShape"

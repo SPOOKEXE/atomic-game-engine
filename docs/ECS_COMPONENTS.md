@@ -304,4 +304,4 @@ state until v0.19.
 
 ---
 
-234 components registered by the engine, 0 without a purpose line.
+232 components registered by the engine, 0 without a purpose line.
