@@ -182,8 +182,8 @@ declare extern type ChangedSignal with
 end
 
 declare extern type RemoteEventSignal with
-	function Connect(self, handler: (payload: string) -> ()): RBXScriptConnection
-	function Once(self, handler: (payload: string) -> ()): RBXScriptConnection
+	function Connect(self, handler: (payload: string, sender: Player?) -> ()): RBXScriptConnection
+	function Once(self, handler: (payload: string, sender: Player?) -> ()): RBXScriptConnection
 end
 
 -- --- input ------------------------------------------------------------------

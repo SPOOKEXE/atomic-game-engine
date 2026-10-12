@@ -179,8 +179,8 @@ declare interface ChangedSignal {
 }
 
 declare interface RemoteEventSignal {
-	Connect(handler: (payload: string) => void): RBXScriptConnection;
-	Once(handler: (payload: string) => void): RBXScriptConnection;
+	Connect(handler: (payload: string, sender: Player | null) => void): RBXScriptConnection;
+	Once(handler: (payload: string, sender: Player | null) => void): RBXScriptConnection;
 }
 
 // The instance tree's signals, matching the Luau half - undeclared until v0.13
