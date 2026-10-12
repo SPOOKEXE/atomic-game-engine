@@ -1,7 +1,9 @@
 #include <algorithm>
+#include <charconv>
 #include <fstream>
 #include <sstream>
 #include <testrunner/Report.hpp>
+#include <utility>
 
 namespace testrunner {
 
@@ -27,18 +29,11 @@ namespace testrunner {
 			}
 		}
 
-		// Anything that is not a number reads as zero rather than throwing. The
-		// caller already has a stronger signal - the totals line, and the exit
-		// status behind it - so a malformed field is not worth an exception.
-		unsigned long long Number(std::string_view text) {
-			unsigned long long value = 0;
-			for (const char character : text) {
-				if (character < '0' || character > '9') {
-					return 0;
-				}
-				value = value * 10 + static_cast<unsigned long long>(character - '0');
-			}
-			return value;
+		// A malformed count must not become a plausible zero in a green report.
+		template <typename Number> bool ReadNumber(std::string_view text, Number &value) {
+			if (text.empty()) return false;
+			const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+			return error == std::errc{} && end == text.data() + text.size();
 		}
 
 		// The first `depth` dot-separated components of an identifier, joined
@@ -484,6 +479,7 @@ namespace testrunner {
 			return false;
 		}
 
+		SuiteReport parsed;
 		bool totalled = false;
 		while (std::getline(lines, line)) {
 			if (line.empty()) {
@@ -491,30 +487,45 @@ namespace testrunner {
 			}
 
 			const auto fields = Fields(line);
-			if (fields[0] == "case" && fields.size() >= 6) {
+			if (fields[0] == "case" && fields.size() == 6 && !totalled) {
+				if (fields[1] != "pass" && fields[1] != "fail" && fields[1] != "skip") return false;
+				unsigned assertionsPassed = 0;
+				unsigned assertionsFailed = 0;
 				CaseReport entry;
+				if (!ReadNumber(fields[2], assertionsPassed) || !ReadNumber(fields[3], assertionsFailed) ||
+					!ReadNumber(fields[4], entry.Microseconds))
+					return false;
 				entry.Failed = fields[1] == "fail";
 				entry.Skipped = fields[1] == "skip";
-				entry.Microseconds = Number(fields[4]);
 				// The name is the last field and may hold anything but a tab,
 				// so it is taken as the remainder rather than as one field.
 				entry.Name = line.substr(line.size() - fields.back().size());
 
-				report.Cases.push_back(std::move(entry));
+				parsed.Cases.push_back(std::move(entry));
 				continue;
 			}
 
-			if (fields[0] == "total" && fields.size() >= 6) {
-				report.CasesPassed = static_cast<unsigned>(Number(fields[1]));
-				report.CasesFailed = static_cast<unsigned>(Number(fields[2]));
-				report.CasesSkipped = static_cast<unsigned>(Number(fields[3]));
-				report.AssertionsPassed = static_cast<unsigned>(Number(fields[4]));
-				report.AssertionsFailed = static_cast<unsigned>(Number(fields[5]));
+			if (fields[0] == "total" && fields.size() == 6 && !totalled) {
+				if (!ReadNumber(fields[1], parsed.CasesPassed) ||
+					!ReadNumber(fields[2], parsed.CasesFailed) ||
+					!ReadNumber(fields[3], parsed.CasesSkipped) ||
+					!ReadNumber(fields[4], parsed.AssertionsPassed) ||
+					!ReadNumber(fields[5], parsed.AssertionsFailed))
+					return false;
 				totalled = true;
+				continue;
 			}
+			return false;
 		}
 
-		return totalled;
+		if (!totalled || parsed.Cases.size() != parsed.CaseCount()) return false;
+		report.CasesPassed = parsed.CasesPassed;
+		report.CasesFailed = parsed.CasesFailed;
+		report.CasesSkipped = parsed.CasesSkipped;
+		report.AssertionsPassed = parsed.AssertionsPassed;
+		report.AssertionsFailed = parsed.AssertionsFailed;
+		report.Cases = std::move(parsed.Cases);
+		return true;
 	}
 
 	bool ReadSuiteReport(const fs::path &path, SuiteReport &report) {
