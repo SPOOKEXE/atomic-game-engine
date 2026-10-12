@@ -41,7 +41,7 @@ TEST_CASE("a Luau RemoteEvent copies its payload to an authority callback", "[sc
 				assert(sender.Name == "authenticated" and sender.UserId == 42)
 			end
 			local proof = Instance.new("Part")
-			proof.Name = sender and sender.Name or payload
+			proof.Name = sender and (sender.Name .. ":proof") or payload
 		end)
 	)"));
 	REQUIRE(client->Run(R"(
@@ -56,7 +56,7 @@ TEST_CASE("a Luau RemoteEvent copies its payload to an authority callback", "[sc
 	const auto sender = engine::scene::AddPlayer(authorityStore, "authenticated", false, 42);
 	REQUIRE(sender != engine::ecs::NULL_ENTITY);
 	REQUIRE(authority->DeliverRemoteEvent(sent, sender));
-	CHECK(authorityStore.FindFirstRoot("authenticated") != engine::ecs::NULL_ENTITY);
+	CHECK(authorityStore.FindFirstRoot("authenticated:proof") != engine::ecs::NULL_ENTITY);
 	const auto invalid = authorityStore.CreateInstance(engine::scene::PartClass(), "not a player");
 	REQUIRE_FALSE(authority->DeliverRemoteEvent(sent, invalid));
 	authorityStore.DestroyInstance(sender);
