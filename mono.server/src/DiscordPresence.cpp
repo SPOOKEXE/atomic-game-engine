@@ -40,7 +40,7 @@ namespace server {
 	discord::Facts Server::DiscordFacts() {
 		const bool hidden = DiscordLink != nullptr && DiscordLink->Configured().HideNames;
 
-		std::string game = "a placeholder world";
+		std::string game = "ServerDefault";
 		if (!Settings.GamePath.empty()) {
 			game = std::filesystem::path(Settings.GamePath).stem().string();
 		}

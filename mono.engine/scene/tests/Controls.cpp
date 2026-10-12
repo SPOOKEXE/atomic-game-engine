@@ -767,10 +767,8 @@ TEST_CASE("an aim is the live camera's ray and the click is a latched edge", "[s
 	REQUIRE(aimed.Aimed);
 	CHECK_FALSE(aimed.Fired);
 
-	// The ray starts at the eye and points where the eye points. **A unit
-	// direction, and not by luck**: `examples::DecodeShot` refuses anything more
-	// than a thousandth off one, so a `LookVector` that stopped being normalised
-	// would make every shot a refused payload rather than a wrong one.
+	// The ray starts at the eye and points where the eye points. Its direction
+	// stays unit length even when the camera's frame changes.
 	CHECK(aimed.Ray.Origin.Z == Approx(10.0f));
 	CHECK(aimed.Ray.Direction.Z == Approx(-1.0f));
 	CHECK(aimed.Ray.Direction.Magnitude() == Approx(1.0f));

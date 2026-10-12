@@ -37,7 +37,6 @@ def positive_int(value: str) -> int:
 def staged_demos(build: Path) -> list[tuple[str, Path]]:
 	items: list[tuple[str, Path]] = []
 	items.extend(("script", path) for path in sorted((build / "assets/examples/scripts").glob("*.luau")))
-	items.extend(("script", path) for path in sorted((build / "assets/examples/scripts").glob("*.js")))
 	items.extend(("world", path) for path in sorted((build / "assets/examples/worlds").glob("*.aworld")))
 	return items
 

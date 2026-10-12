@@ -20,7 +20,9 @@
 #include <engine/datastore/Sqlite.hpp>
 #include <engine/delivery/Relay.hpp>
 #include <engine/delivery/Validation.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
 #include <engine/game/Content.hpp>
@@ -29,6 +31,7 @@
 #include <engine/game/PortalSeamCoordinator.hpp>
 #include <engine/game/PortalSession.hpp>
 #include <engine/game/Project.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/net/Endpoint.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -45,10 +48,13 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Ownership.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/script/Clock.hpp>
 #include <engine/script/Codec.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/script/PlayerGui.hpp>
 #include <engine/script/PortalObservation.hpp>
 #include <engine/script/TeleportRequest.hpp>
@@ -334,20 +340,6 @@ namespace server {
 
 		// The one topic every chattering world uses.
 		constexpr const char *CHATTER_TOPIC = "placeholder.chatter";
-
-		// What one confirmed hit takes off a character.
-		//
-		// **A quarter of a default `Humanoid::MaxHealth`, chosen against that
-		// number rather than tuned.** Four hits to a kill is the smallest figure
-		// that makes a death reachable in a session and still leaves the health
-		// bar saying something on the way there; a game with an opinion sets its
-		// own on the humanoid it spawns.
-		//
-		// **A constant and never a roll.** A damage drawn from a random number is
-		// a recording that does not replay, which is the rule `scene::FindSpawn`
-		// already keeps about picking a pad in tree order - and `just
-		// replay-check` would report it a long way from here.
-		constexpr float SHOT_DAMAGE = 25.0f;
 
 		// This executable, for spawning hosts of itself.
 		//
@@ -860,7 +852,7 @@ namespace server {
 		}
 
 		// Register names before any snapshot or world is built.
-		RegisterPlaceholderComponents();
+		RegisterServerComponents();
 		engine::script::RegisterPortalTransferComponents();
 
 		engine::world::UniverseSettings universe;
@@ -1016,8 +1008,8 @@ namespace server {
 			});
 			DataFactory->SetRehydrate(
 				[this](engine::world::Universe &universe, engine::world::WorldId world, std::string &detail) {
-					if (universe.Enter(world, [](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-							RegisterPlaceholderSystems(store, systems);
+					if (universe.Enter(world, [](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
+							RegisterServerDiagnostics(systems);
 						}) != engine::world::WorldStatus::Ok) {
 						detail = "server could not rebuild factory scheduler state";
 						return false;
@@ -1035,6 +1027,7 @@ namespace server {
 										   ) {
 				if (committed) {
 					if (operation == engine::world::DataFactoryWorldOperation::Retire) {
+						std::erase_if(Runtimes, [world](const auto &entry) { return entry.first == world; });
 						PrimaryWorld = {};
 						Lives.clear();
 					} else {
@@ -1048,8 +1041,8 @@ namespace server {
 				if (!world.IsValid() ||
 					universe.Enter(
 						world,
-						[this, &prepared](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-							prepared = BuildWorld(store, systems);
+						[this, world, &prepared](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+							prepared = BuildWorld(world, store, systems);
 						}
 					) != engine::world::WorldStatus::Ok ||
 					!prepared) {
@@ -1076,6 +1069,12 @@ namespace server {
 		}
 
 		if (!Settings.ReplayPath.empty()) {
+			// The snapshot names script and scene components before the restore
+			// callback has a world to enter. Register their class trees first.
+			engine::scene::RegisterSceneClasses();
+			engine::gui::RegisterGuiClasses();
+			engine::effects::RegisterEffectClasses();
+			(void)engine::script::ScriptClass();
 			std::vector<std::byte> bytes;
 			if (!ReadFile(Settings.ReplayPath, bytes)) {
 				ENGINE_ERROR("could not read the recording at '{}'", Settings.ReplayPath.string());
@@ -1090,18 +1089,42 @@ namespace server {
 			}
 
 			// Restore state, then install the systems for this executable.
-			const bool restored =
-				Replayer_->Restore(Worlds(), [](engine::world::Universe &into, engine::world::WorldId id) {
-					into.Enter(id, [](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-						RegisterPlaceholderSystems(store, systems);
-						const auto incarnation = engine::script::PortalTransferIncarnation(store);
-						if (incarnation != 0) {
-							engine::script::RegisterTeleportAdmission(systems);
+			bool restoredScripts = true;
+			const bool restored = Replayer_->Restore(
+				Worlds(), [this, &restoredScripts](engine::world::Universe &into, engine::world::WorldId id) {
+					const double scriptTickRate = into.SettingsOf(id).ScriptTickRate;
+					const double physicsTickRate = into.SettingsOf(id).PhysicsTickRate;
+					const auto status = into.Enter(
+						id,
+						[this, id, scriptTickRate, physicsTickRate, &restoredScripts](
+							engine::ecs::Store &store, engine::ecs::Scheduler &systems
+						) {
+							engine::scene::RegisterSceneClasses();
+							RegisterServerDiagnostics(systems);
+							PrepareSimulation(store, systems, physicsTickRate);
+							engine::script::RuntimeLimits limits;
+							limits.Role = engine::script::HostRole::OfServer();
+							std::string error;
+							Runtimes.emplace_back(
+								id,
+								engine::game::StartWorldScripts(
+									store, systems, limits, error, nullptr, scriptTickRate
+								)
+							);
+							if (!error.empty()) {
+								ENGINE_ERROR("replay world '{}': {}", store.Name(), error);
+								restoredScripts = false;
+							}
+							// Runtime rebinding may mark an observed script field. A replay
+							// starts at the same clean tick boundary as the source recording.
+							store.ClearChanges();
 						}
-					});
-				});
+					);
+					if (status != engine::world::WorldStatus::Ok) restoredScripts = false;
+				}
+			);
 
-			if (!restored) {
+			if (!restored || !restoredScripts) {
 				ENGINE_ERROR("the recording's snapshot could not be restored");
 				return false;
 			}
@@ -1146,14 +1169,17 @@ namespace server {
 					PrimaryWorld = id;
 				}
 
-				Worlds().Enter(id, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-					if (!BuildWorld(store, systems)) {
-						return;
+				bool built = false;
+				const auto status = Worlds().Enter(
+					id, [this, id, &built](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+						built = BuildWorld(id, store, systems);
+						if (!built) return;
+						if (Settings.Chatter) {
+							store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
+						}
 					}
-					if (Settings.Chatter) {
-						store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
-					}
-				});
+				);
+				if (status != engine::world::WorldStatus::Ok || !built) return false;
 			}
 		}
 
@@ -1642,34 +1668,53 @@ namespace server {
 		return true;
 	}
 
-	bool Server::BuildWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler) {
-		if (Settings.GamePath.empty()) {
-			// **No physics on the placeholder, deliberately.** It is a
-			// benchmark scene rather than a game: its entities carry no
-			// `Part` and so no rigid body, its own `Integrate` and `Bounce`
-			// are what it exists to measure, and `--entities 512 --ticks 200`
-			// is the shape `just determinism` and `just replay-check` compare.
-			// Preparing it would add a resource and two systems that find
-			// nothing to do, and put them inside the thing being measured.
-			BuildPlaceholderWorld(store, scheduler, Settings.Entities);
-			return true;
-		}
-
-		// The same loader the client calls, over the same file. A server that
-		// authored the scene differently would be disagreeing with its own
-		// replicas once per tick, and every side would look self-consistent.
-		//
-		// What it does *not* install is the client's half - there is no camera
-		// and no draw list here, because a server draws nothing. That split is
-		// the reason the loader stops where it does.
+	bool Server::BuildWorld(
+		engine::world::WorldId id, engine::ecs::Store &store, engine::ecs::Scheduler &scheduler
+	) {
+		RegisterServerDiagnostics(scheduler);
+		// Both the default Luau field and an explicit game use the server's
+		// physics and character systems. Prepare them before either script runs.
 		PrepareSimulation(store, scheduler, Settings.PhysicsTickRate);
 		InstallCollisionShapes(store);
-
-		std::string error;
-		if (!engine::examples::LoadScene(store, scheduler, Settings.GamePath, error)) {
-			ENGINE_ERROR("--game '{}' failed:\n{}", Settings.GamePath, error);
-			return false;
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfServer();
+		std::shared_ptr<engine::script::Runtime> runtime;
+		if (Settings.GamePath.empty()) {
+			// The default benchmark field is authored and moved by Luau. The host
+			// only passes the requested count through a serialized world attribute.
+			engine::scene::RegisterSceneClasses();
+			const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+			engine::ecs::AttributeValue count;
+			count.Type = engine::ecs::PropertyType::Double;
+			count.Double = Settings.Entities;
+			if (!engine::ecs::SetAttribute(
+					store, workspace, engine::core::Name("ServerDefaultCount"), count
+				)) {
+				ENGINE_ERROR("the default scene could not receive its entity count");
+				return false;
+			}
+			std::string error;
+			const std::string path = engine::examples::ExamplePath("ServerDefault.luau");
+			if (!engine::examples::LoadScene(store, scheduler, path, error, &runtime, &limits)) {
+				ENGINE_ERROR("default scene '{}' failed:\n{}", path, error);
+				return false;
+			}
+			// The replay path uses StartWorldScripts, whose scheduler reads this
+			// resource. Keep its initial snapshot equal on both paths.
+			engine::script::SetScriptTickRate(store, 0.0);
+		} else {
+			// The same loader the client calls, over the same file. A server that
+			// authored the scene differently would disagree with its own replicas.
+			std::string error;
+			if (!engine::examples::LoadScene(store, scheduler, Settings.GamePath, error, &runtime, &limits)) {
+				ENGINE_ERROR("--game '{}' failed:\n{}", Settings.GamePath, error);
+				return false;
+			}
 		}
+		// Scene construction precedes the first tick. Begin recording and replay
+		// from the same clean change boundary, including observed physics rows.
+		store.ClearChanges();
+		Runtimes.emplace_back(id, std::move(runtime));
 		return true;
 	}
 
@@ -1819,18 +1864,9 @@ namespace server {
 				return PositionOf(entity, out);
 			};
 
-			// **Where a client is looking from, which this server now knows.**
-			// It did not until v0.15: the comment here said the placeholder
-			// world was cubes with nobody in it, and it was right - nothing
-			// called `SetClientViewpoint`, so `DistancePriority` fell back to
-			// the round robin it was written to replace, on every connection,
-			// for three versions. `UpdateClientViewpoints` points each client at
-			// its own character once a tick.
-			//
-			// A client nothing has placed still scores everything the same, and
-			// that is still the honest answer rather than pretending every
-			// client is at the origin: between a join and a spawn there is
-			// genuinely nowhere it is standing.
+			// A spawned character supplies the client's viewpoint. Until then,
+			// `DistancePriority` falls back to round-robin scoring rather than
+			// placing an unspawned client at the origin.
 			score.Viewpoint = [this](engine::replication::ClientId client, engine::core::Vector3 &out) {
 				return ViewpointOf(client, out);
 			};
@@ -1976,10 +2012,8 @@ namespace server {
 					return;
 				}
 
-				// **A world with no `Players` service gets no player, quietly.**
-				// That is not a misconfiguration to warn about - it is the
-				// placeholder world, which is furnished by nobody and is what
-				// `--entities` builds. A game file has services and gets one.
+				// A service-free world cannot admit a player. It may be intentionally
+				// hosted for simulation, so absence of `Players` is not warned here.
 				if (engine::scene::PlayersOf(store) == engine::ecs::NULL_ENTITY) {
 					return;
 				}
@@ -2160,7 +2194,7 @@ namespace server {
 
 		Replication->OnAdmitted([this](engine::replication::ClientId client) {
 			// Apply the world delay before the join notice and first snapshot are
-			// sent. Placeholder worlds have no Player row but still use this value.
+			// sent. A service-free world has no Player row but still uses this value.
 			Replication->SetSimulatedLatency(
 				client, Worlds().SettingsOf(PrimaryWorld).GlobalSimulatedNetworkLatency
 			);
@@ -2498,95 +2532,14 @@ namespace server {
 	}
 
 	void Server::ApplyInputs() {
-		// **The one place this engine is server-authoritative about something a
-		// client did.** A client sends where it aimed, never what it hit: a
-		// client that decided what it hit would be a client nothing downstream
-		// can second-guess, and no amount of validation afterwards recovers
-		// from that.
 		for (const auto &submission : Replication->Inputs()) {
 			for (const engine::replication::Input &input : submission.Inputs) {
-				// **Movement first, because it is the tagged one.** A shot is
-				// an untagged payload, so the order has to be "try the message
-				// that identifies itself, then the one that does not" - the
-				// reverse would eventually read a move as a shot at whatever
-				// three of its bytes happened to spell.
 				engine::game::MoveInput move;
 				if (engine::game::DecodeMoveInput(input.Bytes, move)) {
 					ApplyMove(submission.Client, move, input.Tick);
 					continue;
 				}
-
-				engine::examples::Shot shot;
-				if (!engine::examples::DecodeShot(input.Bytes, shot)) {
-					// A client sending something this is not is either running
-					// a different game or probing. Counted and dropped; there
-					// is nothing to answer.
-					Dropped++;
-					continue;
-				}
-
-				// The payload names the rendered authoritative tick, including its
-				// interpolation fraction. The envelope tick only orders inputs.
-				double seen = shot.ViewTick;
-
-				// Missing or out-of-window view time uses the present. History
-				// depth remains the maximum rewind a client can request.
-				if (History.Depth() == 0) {
-					continue;
-				}
-				if (seen == 0 || seen < static_cast<double>(History.Oldest()) ||
-					seen > static_cast<double>(History.Newest())) {
-					seen = static_cast<double>(History.Newest());
-				}
-
-				// The candidates are the *history's*, not the world's, and that
-				// is the whole reason a hit test uses one: an entity destroyed
-				// between the tick the client saw and now is still a legitimate
-				// thing to have shot at, and the world no longer has it.
-				Candidates.clear();
-				History.Each(seen, [this](engine::ecs::Entity entity, const engine::core::Vector3 &at) {
-					engine::examples::Target target;
-					target.Entity = entity;
-					target.At = at;
-					Candidates.push_back(target);
-				});
-
-				const engine::examples::Hit hit = engine::examples::NearestHit(shot, Candidates);
-				if (!hit.Struck) {
-					continue;
-				}
-
-				// Two effects, and they answer different questions: the recolour
-				// says *something* was hit and the damage says *somebody* was.
-				// `scene.Visual` and `scene.Humanoid` both replicate, so every
-				// client sees the server's verdict rather than the shooter's.
-				//
-				// **This is the consequence `docs/retired/DEFERRED.md` D00121 was
-				// waiting for.** A hit test with no consequence did not need "dead" to
-				// mean anything; the moment one subtracts something it does, and
-				// `scene::TakeDamage` is the door - including its refusal to run
-				// in a replica, which is why a client running this same code
-				// against its own copy could not kill anybody.
-				Worlds().Enter(PrimaryWorld, [&hit](engine::ecs::Store &store) {
-					if (auto *visual = store.GetMutable<engine::scene::Visual>(hit.Entity)) {
-						visual->Tint = engine::core::Color3{1.0f, 0.2f, 0.1f};
-					}
-
-					// **The rewind history holds parts, and a `Character` sits on
-					// the model above one.** A limb is intangible and never
-					// enters the history, so what can be struck on a person is
-					// the root - whose parent is the model. Anything else struck
-					// is scenery and has no humanoid to lose.
-					const auto *rig = store.Get<engine::scene::Character>(store.ParentOf(hit.Entity));
-					if (rig == nullptr) {
-						return;
-					}
-
-					if (engine::scene::TakeDamage(store, rig->Humanoid, SHOT_DAMAGE)) {
-						ENGINE_INFO("server: a shot killed a character; the respawn clock has started");
-					}
-				});
-				Struck++;
+				Dropped++;
 			}
 		}
 	}
@@ -3499,60 +3452,6 @@ namespace server {
 			// empty loop.
 			Replication->ApplyOwnedState(store);
 
-			// **The rewind history, recorded beside the delta and from the same
-			// state.** Both answer questions about this tick, so taking them at
-			// two different moments is how a hit test starts disagreeing with
-			// what was actually sent.
-			//
-			// Only where something *can* move, which keeps the static geometry
-			// out of a ring whose rows would all carry the same answer.
-			//
-			// **`RigidBody` and not `Motion`, and the difference is a bug that
-			// made a standing player unhittable.** This walked `Motion` until
-			// v0.15, on the reading that a `Motion` is what makes a placement
-			// worth remembering - and `physics` takes a row's `Motion` *away*
-			// when it puts the body to sleep, deliberately, so that the solver's
-			// query never visits a resting row. `physics/AGENTS.md` carries that
-			// decision and `physics/tests/Solver.cpp` states it in one line.
-			//
-			// So the history held whatever happened to be awake. A player
-			// standing still is asleep within a second or so, which meant they
-			// could not be shot - and nothing reported it, because a hit test
-			// against an empty candidate list is an ordinary miss.
-			//
-			// `scene::Simulated` is the question actually being asked, and since
-			// v0.18 it is asked positively: a part the world may move carries
-			// the tag, so this records exactly those and skips the static
-			// geometry the old predicate was aiming at. `Static` is skipped for
-			// the same reason one layer in: it is a body that does not move.
-			//
-			// **A sleeping body keeps the tag**, which is the whole of the fix
-			// above surviving the polarity change: it loses `scene::Motion` and
-			// nothing else, so a player standing still is still in the rewind
-			// history and can still be shot.
-			//
-			// **It was the absence of `RigidBody` until v0.15**, when that
-			// component became the author's numbers rather than the world's
-			// decision and every part started carrying one. Left as it was, this
-			// would have recorded a rewind history for every wall in the map.
-			{
-				ENGINE_PROFILE_CAT("Server::Rewind", engine::core::ProfileCategory::Network);
-				if (History.Begin(store.Time().Tick)) {
-					store.Query<const engine::scene::Transform, const engine::scene::RigidBody>()
-						.With<engine::scene::Simulated>()
-						.Each([this](
-								  engine::ecs::Entity entity,
-								  const engine::scene::Transform &placement,
-								  const engine::scene::RigidBody &body
-							  ) {
-							if (body.Kind == engine::scene::BodyKind::Static) {
-								return;
-							}
-							History.Record(entity, placement.Frame.Position);
-						});
-				}
-			}
-
 			// Before `ClearChanges`, which the world does at the start of its
 			// next tick - the bits are the delta source and reading them after
 			// they are cleared is how a tick's worth of movement goes missing.
@@ -3660,7 +3559,7 @@ namespace server {
 		if (kind == engine::game::ProjectKind::WorldFile || kind == engine::game::ProjectKind::GameFile ||
 			kind == engine::game::ProjectKind::UniverseFolder ||
 			kind == engine::game::ProjectKind::ProjectZip) {
-			ENGINE_ERROR("--worlds duplicates a script or placeholder scene, not a multi-world project");
+			ENGINE_ERROR("--worlds duplicates a scripted scene, not a multi-world project");
 			return false;
 		}
 
@@ -3790,14 +3689,17 @@ namespace server {
 					return false;
 				}
 
-				Worlds().Enter(id, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-					if (!BuildWorld(store, systems)) {
-						return;
+				bool built = false;
+				const auto status = Worlds().Enter(
+					id, [this, id, &built](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+						built = BuildWorld(id, store, systems);
+						if (!built) return;
+						if (Settings.Chatter) {
+							store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
+						}
 					}
-					if (Settings.Chatter) {
-						store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
-					}
-				});
+				);
+				if (status != engine::world::WorldStatus::Ok || !built) return false;
 
 				// The first world granted is the one `Enter` reaches. A host holds
 				// several and a caller outside it addresses them by name, so this
@@ -4635,18 +4537,8 @@ namespace server {
 			summary.TickP99Milliseconds
 		);
 
-		// **Two counters that nothing read until now.** `Struck` and `Dropped`
-		// have been incremented since v0.9 and printed nowhere, which made them
-		// exactly the kind of number this file's own comment warns about: the
-		// reason they are two rather than one is that a payload which did not
-		// decode is a client running a different game or probing, and burying
-		// that in a hit count is how an unusual number stops being noticed.
-		// Neither could be noticed at all while neither was reported.
-		//
-		// Said only when something happened, so a run with no clients in it
-		// does not print a line of zeroes.
-		if (Struck > 0 || Dropped > 0) {
-			ENGINE_INFO("server: {} shot(s) struck, {} input(s) did not decode", Struck, Dropped);
+		if (Dropped > 0) {
+			ENGINE_INFO("server: {} input(s) did not decode as movement", Dropped);
 		}
 
 		// **The relay's own counters, and they are separate on purpose.** A

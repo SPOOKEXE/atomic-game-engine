@@ -23,7 +23,6 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/DemosLoader.hpp>
-#include <engine/examples/Shooting.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>
@@ -354,7 +353,7 @@ namespace client {
 				);
 				return false;
 			}
-			ENGINE_INFO("demo render pipeline from {}", Settings.RenderPipelineFile.string());
+			ENGINE_INFO("render pipeline from {}", Settings.RenderPipelineFile.string());
 		}
 		if (!Settings.CaptureSequence.empty()) {
 			if (Settings.MaximumFrames <= 0 || !Settings.Capture.empty()) {
@@ -2313,11 +2312,9 @@ namespace client {
 		}
 
 		engine::game::MoveInput move;
-		engine::scene::AimIntent aim;
 		uint64_t tick = 0;
-		double viewTick = 0;
 
-		Universe_->Enter(Replicated, [this, &move, &aim, &tick, &viewTick](engine::ecs::Store &store) {
+		Universe_->Enter(Replicated, [this, &move, &tick](engine::ecs::Store &store) {
 			// The authenticated source host forwards movement by transfer receipt
 			// after its Player has retired, until native destination input takes over.
 			const auto *local = store.Resource<engine::scene::LocalPlayer>();
@@ -2336,15 +2333,6 @@ namespace client {
 			move.Jump = intent.Jump;
 			move.StepSeconds = store.Time().Delta;
 
-			// **Read in the same scope as the move, from the same tick.** Two
-			// entries would sample the camera on one tick and the keys on
-			// another, so a shot fired while turning would be aimed a tick
-			// behind where the player was looking - which on a fast flick is
-			// several degrees and reads as the server cheating.
-			aim = engine::scene::ReadAimIntent(store);
-			if (const auto *buffer = store.Resource<engine::replication::SnapshotBuffer>())
-				viewTick = buffer->RenderTick();
-
 			tick = store.Time().Tick;
 		});
 
@@ -2352,40 +2340,6 @@ namespace client {
 		const auto inputTick = InputTickAt(tick);
 		if (!inputTick) return;
 		tick = *inputTick;
-
-		// **The aim, and never the result.** `Server::ApplyInputs` states the
-		// division and this is the half that had no caller: `examples::
-		// EncodeShot` existed with a complete server-side rewind and hit test
-		// behind it, and nothing in the tree had ever sent one - `D00109`
-		// records that as two finished halves connected to nothing.
-		//
-		// Sent before the move because the two share a channel and a shot is
-		// the one a dropped tick cannot be re-derived from: a move repeats every
-		// tick by design, and a click happens once.
-		if (aim.Aimed && aim.Fired) {
-			engine::examples::Shot shot;
-			shot.Aim = aim.Ray;
-			shot.ViewTick = viewTick;
-
-			// **The engine's ceiling and not a game's choice.** A client picks
-			// its own range on the wire and `DecodeShot` refuses anything past
-			// `MAXIMUM_SHOT_RANGE`, so sending the ceiling is sending the most
-			// an honest client is allowed to - a game with a shorter weapon
-			// shortens it here and the host still bounds it.
-			shot.Range = engine::examples::MAXIMUM_SHOT_RANGE;
-
-			if (Connection->Submit(tick, engine::examples::EncodeShot(shot), nowSeconds)) {
-				// **Cleared once the click is actually on the wire**, and
-				// separately from the jump below: a shot refused by the send
-				// budget while the move went through would otherwise forget a
-				// click nobody was ever told about.
-				Universe_->Enter(Replicated, [](engine::ecs::Store &store) {
-					if (auto *input = store.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
-						input->ConsumeButtonTaps();
-					}
-				});
-			}
-		}
 
 		// Send once per observed simulation tick, including still states. A client
 		// that only spoke when its keys changed would leave a character walking for ever

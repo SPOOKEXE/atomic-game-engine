@@ -3886,7 +3886,7 @@ TEST_CASE("a script may switch which language an instance runs", "[scripting][in
 	REQUIRE(store.SetParent(program, engine::scene::WorkspaceOf(store)));
 
 	// The instance holds a JavaScript program as well, put there by the author.
-	const engine::core::Name javascript("examples/Rings.js");
+	const engine::core::Name javascript("tests/Behaviour.js");
 	REQUIRE(
 		store.SetProperty(program, engine::core::Name("JavaScriptSource"), &javascript, sizeof(javascript))
 	);
@@ -3903,7 +3903,7 @@ TEST_CASE("a script may switch which language an instance runs", "[scripting][in
 	// **Both programs are still there**, which is the whole point of two
 	// containers: switching a language is not a destructive edit.
 	CHECK(engine::script::ActiveLanguageOf(store, program) == Language::JavaScript);
-	CHECK(engine::script::ActiveSourceOf(store, program) == engine::core::Name("examples/Rings.js"));
+	CHECK(engine::script::ActiveSourceOf(store, program) == engine::core::Name("tests/Behaviour.js"));
 
 	const auto *lua = store.Get<engine::script::LuaSourceContainer>(program);
 	REQUIRE(lua != nullptr);

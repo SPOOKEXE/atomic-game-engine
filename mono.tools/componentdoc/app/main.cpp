@@ -36,7 +36,6 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
-#include <engine/examples/Scene.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/physics/Pipeline.hpp>
@@ -199,7 +198,6 @@ namespace {
 		engine::graph::RegisterPipelineComponents();
 		engine::script::RegisterScriptComponents();
 		engine::replication::RegisterReplicationComponents();
-		engine::examples::RegisterExampleComponents();
 
 		// **The classes too, because a class registration registers the
 		// components it names.** `bindings` makes the same call for the same

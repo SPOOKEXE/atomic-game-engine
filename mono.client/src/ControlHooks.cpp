@@ -25,7 +25,6 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/DemosLoader.hpp>
-#include <engine/examples/Shooting.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>

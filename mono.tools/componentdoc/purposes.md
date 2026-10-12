@@ -39,8 +39,6 @@ effects.ParticleSystem | Per-world singleton particle pool: the particle slots a
 effects.RibbonBuffer | Per-world singleton holding the vertices and per-ribbon runs that this frame's beams and trails were built into, ready for the renderer.
 effects.Trail | A trail following two attachments: its authored colour, transparency, lifetime and texture, plus the ring of recorded edge points it is drawn from.
 effects.Texture | A tiled image projected onto one face of its parent BasePart, including tile size, offset, colour, transparency and draw order.
-examples.Orbit | Demo-only component that carries an entity round a fixed centre at a set radius, height, starting phase and angular speed.
-examples.Spin | Demo-only component that turns an entity at a fixed rate about its local X, Y and Z axes.
 graph.PipelineSet | Per-world singleton holding the named render pipeline documents a game file carried. A legacy load path: `game` reads it once and then removes it.
 physics.CopiedContactCache | Per-tick copied contact geometry and pre-step body poses used for portal collision correction.
 physics.CopiedDynamicContactCache | Per-world per-tick cache of copied dynamic far-side bodies, keyed by local root for the portal seam barrier.

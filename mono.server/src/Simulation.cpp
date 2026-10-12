@@ -1,11 +1,10 @@
-#include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
-#include <engine/core/Random.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Clock.hpp>
+#include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
@@ -13,12 +12,10 @@
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Registration.hpp>
-#include <engine/scene/Wire.hpp>
 #include <engine/script/PlayerGui.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/Postbox.hpp>
 
-#include <cmath>
 #include <cstring>
 #include <server/Simulation.hpp>
 #include <string>
@@ -26,138 +23,15 @@
 
 namespace server {
 
-	using engine::core::CFrame;
-	using engine::core::Color3;
-	using engine::core::Random;
-	using engine::core::Vector3;
 	using engine::ecs::Components;
 	using engine::ecs::Entity;
 	using engine::ecs::Phase;
 	using engine::ecs::Scheduler;
 	using engine::ecs::Store;
 	using engine::ecs::SystemOrder;
-	using engine::scene::Bounds;
-	using engine::scene::Motion;
 	using engine::scene::Transform;
-	using engine::scene::Visual;
-	using engine::scene::WorldBounds;
 
 	namespace {
-		// This used to be a copy of the mixer in mono.client/src/Demo.cpp, with
-		// a comment saying so. Both are engine::core::Random now - the reason
-		// was always "a seeded standard generator may differ between standard
-		// libraries", which was never a client concern or a server one.
-
-		// --- systems -------------------------------------------------------
-		//
-		// Plain functions, capturing nothing. Everything they need is in the
-		// world: the delta comes from its clock and the box comes from its
-		// resources.
-
-		// Parallel within the tick. The body reads and writes one row and
-		// nothing else, which is the whole contract - anything structural
-		// would abort on the store's affinity check from a worker, and that is
-		// the intended outcome rather than a limitation.
-		//
-		// It still blocks until every entity is done, so the tick remains one
-		// thing that starts and finishes and a recorded run still replays.
-		void Integrate(Store &store) {
-			const float delta = store.Time().Delta;
-
-			// `Transform` is a whole `CFrame`, so only its position is written
-			// here: the placeholder world has no angular velocity to apply and
-			// touching the rotation would be inventing one. `Motion::Angular`
-			// is what a physics step at L8 will integrate, and it is deliberately
-			// left alone until that exists rather than half-implemented here.
-			//
-			// **Takes `Jobs::DEFAULT_GRAIN` deliberately, and the resemblance to
-			// `physics::INTEGRATE_GRAIN` is the trap rather than the argument.**
-			// That constant is 1024 because *its* body carries a whole `CFrame`
-			// through a quaternion product and a normalise - about forty flops
-			// and a reciprocal square root - and crosses over at 8,000 rows. This
-			// body is the line below: three multiply-adds and a store, which is
-			// exactly the cheap body `engine.ecs.bench.iteration` measures at a
-			// crossover near 262,144 rows. The two load the same two components
-			// and do a twentieth of the work, and it is the work that sets the
-			// crossover.
-			//
-			// Borrowing 1024 would put the floor at 8192 rows, where this loop's
-			// serial cost is a couple of microseconds against a handover
-			// `engine.parallel.bench.dispatch` fits at 6.2 us to wake the pool
-			// plus 0.19 us a range - a loss bought on the strength of a
-			// measurement of somebody else's body, which is the mistake
-			// `Jobs::DEFAULT_GRAIN`'s own comment is about. Of the two constants
-			// the default's floor of 32,768 is the nearer, and unmeasured either
-			// way. The day this loop integrates `Motion::Angular` is the day it
-			// becomes the `CFrame` body and the day to re-take the number.
-			store.EachParallel<Transform, const Motion>(
-				[delta](Entity, Transform &transform, const Motion &motion) {
-					transform.Frame.Position = transform.Frame.Position + motion.Linear * delta;
-				}
-			);
-
-			// Every position just moved, and nothing else knows. An iteration
-			// hands out a reference and the store never sees the write, so a
-			// replication delta built from the dirty bits would carry nothing at
-			// all - which is a client that joins, receives a snapshot, and then
-			// watches a frozen world. Costs nothing when nobody is observing
-			// `Transform`, which is the case whenever `--listen` was not given.
-			store.MarkAllChanged<Transform>();
-		}
-
-		void Bounce(Store &store) {
-			// Read once for the whole world rather than once per entity. This
-			// was a *component* before it was a resource, holding the same four
-			// bytes on every row - a column in the archetype and a load in this
-			// loop's inner body for a number the loop already knew.
-			const float halfExtent = store.Resource<WorldBounds>()->HalfExtent;
-
-			// Default grain, for the reason `Integrate` above gives at length:
-			// six compares and an occasional pair of stores is *cheaper* per row
-			// than the `CFrame` body `physics::INTEGRATE_GRAIN` was measured
-			// against, not more expensive, so borrowing that constant would
-			// dispatch this four times too early rather than correcting
-			// anything. Unmeasured in either direction -
-			// `engine.ecs.bench.iteration` over this body is what would say.
-			store.EachParallel<Transform, Motion>([halfExtent](Entity, Transform &transform, Motion &motion) {
-				// Reflect off each wall independently. The position is
-				// clamped as well as the velocity flipped, because
-				// flipping alone lets an entity that overshot on a long
-				// tick sit outside the box flipping every tick.
-				Vector3 &position = transform.Frame.Position;
-				float *axis[] = {&position.X, &position.Y, &position.Z};
-				float *speed[] = {&motion.Linear.X, &motion.Linear.Y, &motion.Linear.Z};
-
-				for (int index = 0; index < 3; index++) {
-					if (*axis[index] > halfExtent) {
-						*axis[index] = halfExtent;
-						*speed[index] = -std::abs(*speed[index]);
-					} else if (*axis[index] < -halfExtent) {
-						*axis[index] = -halfExtent;
-						*speed[index] = std::abs(*speed[index]);
-					}
-				}
-			});
-
-			// Both, and both over-report: `Transform` moved on every row anyway,
-			// and `Motion` changed only on the few rows that hit a wall. A
-			// system that could name those rows should mark those rows - the
-			// cost of marking all of them is a delta carrying values that
-			// already match at the other end, which is bandwidth rather than
-			// error. Under-reporting a bounce would be a client that watches an
-			// entity keep going through the wall until the next snapshot.
-			store.MarkAllChanged<Transform>();
-			store.MarkAllChanged<Motion>();
-		}
-
-		// PreRender on a headless server is where replication will hang:
-		// deriving what to send is the same shape as deriving what to draw, and
-		// neither may mutate simulation state.
-		//
-		// The count comes from the world. It used to be captured at build time
-		// because asking the store cost a fresh query every tick and dominated
-		// the measurement; CountMatching now keeps its query, so the world can
-		// be asked and the second copy of the number is gone.
 		void Report(Store &store) {
 			engine::core::Metrics::Count(
 				"world.entities", static_cast<double>(store.CountMatching<Transform>())
@@ -166,18 +40,23 @@ namespace server {
 	}
 
 	void PrepareSimulation(Store &store, Scheduler &scheduler, double physicsTickRate) {
-		// The cell size is measured rather than authored, for the reason the
-		// studio gives: `PreparePhysicsWorld` with no size means "measure it",
-		// and a constant tuned now against a synthetic slab would be the wrong
-		// number for whichever world actually gains a tick.
-		engine::physics::PreparePhysicsWorld(store);
-
-		// **The world's rate, pushed down rather than read up.** `physics` sits
-		// above `world` and could name `WorldSettings`, but a physics library
-		// that knows what a universe world is has stopped being a physics
-		// library - so the host that owns both hands the number over, exactly
-		// as it does for the cell size.
-		engine::physics::SetPhysicsTickRate(store, physicsTickRate);
+		const bool restoredClock = store.Resource<engine::physics::PhysicsClock>() != nullptr;
+		if (store.Resource<engine::physics::PhysicsWorld>() == nullptr) {
+			// A fresh world measures its cell size from the colliders it gains.
+			engine::physics::PreparePhysicsWorld(store);
+		} else {
+			// Restoring a resource does not restore the store's observation setup.
+			// The broad phase needs changed Transform and Collider rows.
+			store.Observe<engine::scene::Transform>();
+			store.Observe<engine::scene::Collider>();
+		}
+		// The host owns the world rate. Replay keeps the serialized clock,
+		// including its accumulator, rather than resetting it here.
+		if (!restoredClock) {
+			if (store.Resource<engine::physics::PhysicsClock>() == nullptr)
+				store.SetResource(engine::physics::PhysicsClock{});
+			engine::physics::SetPhysicsTickRate(store, physicsTickRate);
+		}
 
 		engine::physics::RegisterPhysicsSystems(scheduler);
 
@@ -279,8 +158,8 @@ namespace server {
 		});
 	}
 
-	void RegisterPlaceholderComponents() {
-		// The placeholder's first system opens a Postbox. Register its resources
+	void RegisterServerComponents() {
+		// The optional bus diagnostic opens a Postbox. Register its resources
 		// here with the rest of the program's stable component names so a test or
 		// tool that prepares the scheduler before constructing a Universe cannot
 		// mint them under compiler spellings.
@@ -300,7 +179,7 @@ namespace server {
 		// id like any other - so one never registered here is minted by the
 		// first `SetResource`, under whatever the compiler calls the type, and
 		// aborts outright once the table is sealed. Registered on every path
-		// including the placeholder's, because the cost is a hash lookup and
+		// including the default scene, because the cost is a hash lookup and
 		// the failure is a crash in a program that did nothing wrong.
 		engine::physics::RegisterPhysicsComponents();
 
@@ -381,83 +260,8 @@ namespace server {
 		box.Publish(topic, payload);
 	}
 
-	void RegisterPlaceholderSystems(Store &, Scheduler &scheduler) {
+	void RegisterServerDiagnostics(Scheduler &scheduler) {
 		scheduler.Add("chat", Phase::PreSimulation, Chat);
-		scheduler.Add("integrate", Phase::Simulation, Integrate);
-		scheduler.Add("bounce", Phase::PostSimulation, Bounce);
 		scheduler.Add("report", Phase::PreRender, Report);
-	}
-
-	void BuildPlaceholderWorld(Store &store, Scheduler &scheduler, uint32_t count) {
-		constexpr float HALF_EXTENT = 64.0f;
-
-		// **The world's size and the replication wire's position grid are one
-		// decision made in two files**, and this is the line that keeps them
-		// together. A world authored past the grid does not fail to replicate -
-		// its entities are clamped and pile up against a wall that is not this
-		// one - so the size is checked where it is chosen rather than
-		// discovered per entity on a client. `scene/Wire.hpp` states the grid
-		// and the error it introduces.
-		static_assert(
-			engine::scene::WireCoversWorld(HALF_EXTENT),
-			"this world reaches further than the replication wire's position grid"
-		);
-
-		// Before the first `Set`, on every path. An unregistered component is
-		// minted under whatever the compiler calls the type, which is not a
-		// name a snapshot written by one build can be read back by another
-		// under. Idempotent, so calling it here as well as in `Server::Run`'s
-		// start-up costs a hash lookup.
-		RegisterPlaceholderComponents();
-
-		store.SetResource(WorldBounds{HALF_EXTENT});
-
-		for (uint32_t index = 0; index < count; index++) {
-			const Entity entity = store.Create();
-
-			store.Set<Transform>(
-				entity,
-				Transform{CFrame{Vector3{
-					Random::Range(index, 2u, -HALF_EXTENT, HALF_EXTENT),
-					Random::Range(index, 3u, -HALF_EXTENT, HALF_EXTENT),
-					Random::Range(index, 5u, -HALF_EXTENT, HALF_EXTENT),
-				}}}
-			);
-
-			// Linear only. The placeholder scene has never tumbled its
-			// entities, and giving them an angular velocity nothing integrates
-			// would be a field that reads as live and is not.
-			store.Set<Motion>(
-				entity,
-				Motion{
-					Vector3{
-						Random::Range(index, 7u, -10.0f, 10.0f),
-						Random::Range(index, 11u, -10.0f, 10.0f),
-						Random::Range(index, 13u, -10.0f, 10.0f),
-					},
-					Vector3::Zero,
-				}
-			);
-
-			// **What a headless server is doing with a size and a colour.** It
-			// is not drawing them - this binary contains no renderer. It is
-			// describing what these things *are*, which is what a client
-			// replicating this world needs in order to draw it, and what the
-			// draw list a hosted world publishes would carry. Before v0.4 a
-			// joining client received two vectors and had nothing to make a
-			// scene out of.
-			store.Set<Bounds>(entity, Bounds{});
-
-			Visual visual;
-			visual.Tint = Color3::FromLinear(
-				Random::Range(index, 19u, 0.15f, 0.90f),
-				Random::Range(index, 23u, 0.20f, 0.80f),
-				Random::Range(index, 29u, 0.35f, 0.95f)
-			);
-			store.Set<Visual>(entity, visual);
-		}
-
-		ENGINE_INFO("placeholder world: {} entities", count);
-		RegisterPlaceholderSystems(store, scheduler);
 	}
 }

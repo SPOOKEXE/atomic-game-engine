@@ -18,7 +18,6 @@ target_link_libraries(schemadump PRIVATE
 	Engine::graph
 	Engine::script
 	Engine::replication
-	Engine::examples
 )
 target_compile_options(schemadump PRIVATE ${MONO_COMPILE_OPTIONS})
 

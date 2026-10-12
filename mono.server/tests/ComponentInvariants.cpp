@@ -2,7 +2,7 @@
 //
 // `client.componentinvariants` is the same sweep from the other side of the
 // wire, and between them they cover every module either program links. This one
-// is what covers `server.` and the placeholder world, which no client binary
+// is what covers `server.` and the default world, which no client binary
 // can reach.
 
 #include <engine/ecs/Attributes.hpp>
@@ -28,7 +28,7 @@ TEST_CASE("every component this program registers obeys the serialisation rules"
 	engine::physics::RegisterPhysicsComponents();
 	engine::replication::RegisterReplicationComponents();
 	engine::world::RegisterMailboxTypes();
-	server::RegisterPlaceholderComponents();
+	server::RegisterServerComponents();
 	CHECK(engine::ecs::Components::Find(engine::core::Name("effects.ParticleEmitter")).IsValid());
 
 	CHECK(engine::ecs::Describe(engine::ecs::AuditComponents()) == "");

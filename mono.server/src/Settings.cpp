@@ -29,7 +29,7 @@ namespace server {
 					defaults.ReplicationTickRate,
 					"Snapshots published per second, or 0 to publish every tick"
 				);
-				built.Integer("server.entities", defaults.Entities, "Entities in the placeholder world");
+				built.Integer("server.entities", defaults.Entities, "Parts in the default Luau scene");
 				built.Boolean(
 					"server.unpaced", defaults.Unpaced, "Tick back to back instead of pacing to the tick rate"
 				);

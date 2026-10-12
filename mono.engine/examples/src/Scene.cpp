@@ -1,7 +1,5 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
-#include <engine/core/types/CFrame.hpp>
-#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Enums.hpp>
 #include <engine/ecs/Property.hpp>
 #include <engine/effects/Registration.hpp>
@@ -28,9 +26,7 @@
 namespace engine::examples {
 
 	namespace {
-		using core::CFrame;
 		using core::Vector3;
-		using ecs::Components;
 		using ecs::Entity;
 		using ecs::Phase;
 		using ecs::Scheduler;
@@ -40,42 +36,6 @@ namespace engine::examples {
 		using scene::Transform;
 		using scene::WorldBounds;
 
-		// --- systems ---------------------------------------------------------
-		//
-		// Plain functions capturing nothing, because there is nothing outside
-		// the world for them to capture - which is what makes them replayable
-		// from a recording and reusable by a second world.
-
-		void MoveOrbits(Store &store) {
-			// Simulated seconds, from the world's clock. Nothing accumulates
-			// wall time here: the scene has to be in the same place after one
-			// second whether that second took 30 frames or 600.
-			const auto now = static_cast<float>(store.Time().Elapsed);
-
-			store.Each<Transform, const Orbit>([now](Entity, Transform &transform, const Orbit &orbit) {
-				const float angle = orbit.Phase + now * orbit.RadiansPerSecond;
-				transform.Frame.Position = orbit.Centre + Vector3{
-															  std::cos(angle) * orbit.Radius,
-															  orbit.Height,
-															  std::sin(angle) * orbit.Radius,
-														  };
-			});
-		}
-
-		void ApplySpin(Store &store) {
-			// The tick delta, which is fixed. There is no way to reach the frame
-			// delta from here by accident - it is a different field with a
-			// different name.
-			const float delta = store.Time().Delta;
-
-			store.Each<Transform, const Spin>([delta](Entity, Transform &transform, const Spin &spin) {
-				// Rotation composes on the right, so the spin is applied in the
-				// cube's own space and the orbit position is untouched.
-				transform.Frame =
-					transform.Frame *
-					CFrame::Angles(spin.Rate.X * delta, spin.Rate.Y * delta, spin.Rate.Z * delta);
-			});
-		}
 	}
 
 	ecs::Entity MountDemoCamera(Store &store, std::string_view builderPath) {
@@ -216,30 +176,6 @@ namespace engine::examples {
 		return mounted;
 	}
 
-	void RegisterExampleComponents() {
-		// The shared set first, and under `scene`'s names. Every program
-		// registers the same strings, which is what lets a snapshot resolve on
-		// the far side with no translation layer.
-		scene::RegisterSceneComponents();
-
-		Components::Register<Orbit>("examples.Orbit");
-		Components::Register<Spin>("examples.Spin");
-	}
-
-	void InstallMotionSystems(Scheduler &scheduler) {
-		scheduler.Add("capture-previous", Phase::PreSimulation, scene::CapturePreviousTransforms);
-
-		// **And the snap that cancels it across a hole** - see
-		// `scene::SnapPortalTransit`. `PreRender`, because the serial it reads
-		// arrives with a replication delta and a delta lands after the tick's
-		// `PreSimulation` has run.
-		scheduler.Add("snap-portal-transit", Phase::PreRender, [](Store &world) {
-			(void)scene::SnapPortalTransit(world);
-		});
-		scheduler.Add("orbit", Phase::Simulation, MoveOrbits);
-		scheduler.Add("spin", Phase::Simulation, ApplySpin);
-	}
-
 	bool LoadScene(
 		Store &store,
 		Scheduler &scheduler,
@@ -248,9 +184,8 @@ namespace engine::examples {
 		std::shared_ptr<script::Runtime> *out,
 		const script::RuntimeLimits *limits
 	) {
-		// The class trees a script names, and this module's own components for
-		// the C++ path. A script builds out of `Part`; nothing it touches is
-		// registered here.
+		// Register the class trees and component types needed by a scripted scene
+		// before loading it.
 		//
 		// **`RegisterSceneClasses`, not `EnsureClassTree` alone - found the
 		// same way the `gui` gap below was.** `ShaderScript` and
@@ -291,7 +226,7 @@ namespace engine::examples {
 		// them.
 		effects::RegisterEffectClasses();
 
-		RegisterExampleComponents();
+		scene::RegisterSceneComponents();
 
 		// **The service instances, not just the classes above.** A scene that
 		// parents a `ScreenGui` into `StarterGui` needs one to exist, and
@@ -332,9 +267,8 @@ namespace engine::examples {
 		// Before `RunWorldScripts`, because a scene's first line is a `require`.
 		// Idempotent by name - a world that already has the tree keeps it.
 
-		// The extension picks the VM. `Rings.luau` and `Rings.js` build the
-		// same world through the same bindings, and this loader never learns
-		// which language it ran.
+		// The extension picks the VM, so callers may load their own scripts in
+		// any supported language. Shipped examples are authored in Luau.
 		//
 		// **Kept alive rather than run and discarded**, which is the difference
 		// between a scene format and a scripting layer. A script that connects
@@ -425,10 +359,8 @@ namespace engine::examples {
 
 		store.SetResource(WorldBounds{extent});
 
-		// Interpolation, and then the script. Not `InstallMotionSystems`: a
-		// scripted scene moves itself, and installing the C++ orbit and spin
-		// beside it would be two things driving one `Transform` - the second
-		// one winning, silently, on whichever ran last.
+		// Interpolation and portal transit support run beside the scene's
+		// scripted heartbeat. The script alone authors motion.
 		scheduler.Add("capture-previous", Phase::PreSimulation, scene::CapturePreviousTransforms);
 
 		// **And the snap that cancels it across a hole** - see

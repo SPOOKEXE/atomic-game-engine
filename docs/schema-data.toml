@@ -9,7 +9,7 @@ generated_by = "schemadump"
 source = "runtime registries"
 
 ["reference"."counts"]
-components = 236
+components = 234
 classes = 164
 properties = 2116
 enums = 69
@@ -221,30 +221,6 @@ trivial = true
 serialisable = true
 raw_serialisation = false
 padded = true
-wire_size = 0
-described = false
-
-["components"."examples.Orbit"]
-name = "examples.Orbit"
-kind = "Data"
-size = 28
-alignment = 4
-trivial = true
-serialisable = true
-raw_serialisation = true
-padded = false
-wire_size = 0
-described = false
-
-["components"."examples.Spin"]
-name = "examples.Spin"
-kind = "Data"
-size = 12
-alignment = 4
-trivial = true
-serialisable = true
-raw_serialisation = true
-padded = false
 wire_size = 0
 described = false
 
@@ -2367,7 +2343,7 @@ size = 4
 alignment = 4
 trivial = true
 serialisable = true
-raw_serialisation = true
+raw_serialisation = false
 padded = false
 wire_size = 0
 described = false
@@ -2403,7 +2379,7 @@ size = 4
 alignment = 4
 trivial = true
 serialisable = true
-raw_serialisation = true
+raw_serialisation = false
 padded = false
 wire_size = 0
 described = false

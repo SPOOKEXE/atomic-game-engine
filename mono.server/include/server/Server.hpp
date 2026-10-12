@@ -13,14 +13,12 @@
 #include <engine/delivery/Source.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/examples/Shooting.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/net/Wire.hpp>
 #include <engine/replication/Listener.hpp>
 #include <engine/replication/Observation.hpp>
-#include <engine/replication/Rewind.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/DataFactory.hpp>
 #include <engine/world/DataStore.hpp>
@@ -142,8 +140,7 @@ namespace server {
 		double ReplicationTickRate = 0.0;
 		//@}
 
-		// Entities in the placeholder world, until there is a game file to load
-		// one from.
+		// Cubes in the default Luau scene when no game file is supplied.
 		uint32_t Entities = 4096;
 
 		// -1 runs until stopped. A tick budget is what makes the server usable
@@ -193,7 +190,7 @@ namespace server {
 		// @since v0.13
 		double IdleCloseSeconds = engine::world::DEFAULT_IDLE_LIMIT_SECONDS;
 
-		// The scene to host. Empty means the placeholder world.
+		// The scene to host. Empty loads the default Luau scene.
 		//
 		// Scene script loaded with the same path as the client.
 		std::string GamePath;
@@ -675,33 +672,12 @@ namespace server {
 		// @param store The world about to be published.
 		void SurveyVisibility(engine::ecs::Store &store);
 
-		// Where moving things were, for judging a client's action against what
-		// that client actually saw.
-		//
-		// **The query is a game's to make and the answer is a game's to act
-		// on.** The server retains an accurate record. Shots supply their
-		// rendered world tick separately from the input sequence.
-		//
-		// **Nothing calls this accessor today**, and the claim it used to carry
-		// - that nothing consumes the history at all - stopped being true when
-		// `ApplyInputs` gained the shot path, which asks over `History`
-		// directly. What is unwired is the *outward* half: a game asking its own
-		// question of the same record. `docs/CODE_ARCH.md` decision 16.
-		//
-		// @return The history.
-		const engine::replication::Rewind &Rewound() const {
-			return History;
-		}
-
 		// Tells the authority where a client is looking from, for the priority
 		// score.
 		//
-		// **A host's job rather than the authority's**, because a client's
-		// viewpoint is a game's idea and this engine has no per-client avatar
-		// yet: the placeholder world is cubes and nobody is in it. A client
-		// nothing has placed scores everything the same, which is the round
-		// robin the score replaces and the honest answer rather than pretending
-		// every client stands at the origin.
+		// The host resolves a client's viewpoint from its character. A client
+		// without a spawned character has no viewpoint and falls back to the
+		// authority's round-robin priority.
 		//
 		// @param client The client.
 		// @param at     Where it is looking from, in world space.
@@ -713,14 +689,6 @@ namespace server {
 		void ForgetClientViewpoint(engine::replication::ClientId client);
 
 		// Points every client's viewpoint at its own character.
-		//
-		// **The caller `SetClientViewpoint` waited three versions for.** That
-		// hook and `DistancePriority` have both existed since v0.4, and the
-		// reason nothing filled them in was written into the comment beside
-		// them: there was no per-client avatar, so the placeholder world was
-		// cubes and nobody was in it. There is one now - `scene::AddPlayer` per
-		// connection, with a character - so the honest answer stopped being
-		// "score everything the same".
 		//
 		// Called once a tick from `ServeClients`, before the delta is built.
 		// A client between a join and a spawn is *forgotten* rather than left
@@ -870,17 +838,17 @@ namespace server {
 		// The VM that owns one world's script callbacks, or null when it has no scripts.
 		engine::script::Runtime *RuntimeOf(engine::world::WorldId world);
 		// Builds one world, from a scene file when `--game` names one and from
-		// the placeholder otherwise.
+		// the default Luau scene otherwise.
 		//
-		// One place rather than the two call sites that used to build the
-		// placeholder directly: a locally hosted world and a remotely hosted
-		// one authoring different scenes is a divergence nothing would report,
+		// One place rather than two separate scene loaders: locally and remotely
+		// hosted worlds authoring different scenes is a divergence nothing reports,
 		// because each side is internally consistent.
 		//
 		// @param store     The world to build into.
 		// @param scheduler The systems to install.
 		// @return `false` when a named scene could not be loaded.
-		bool BuildWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
+		bool
+		BuildWorld(engine::world::WorldId id, engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 
 		// Expands `Worlds` into one balanced local partition and supervised
 		// remote partitions before the job pool or any world exists.
@@ -963,7 +931,7 @@ namespace server {
 		// The built-in shapes always, because a `MeshPart` set to `Cube` needs
 		// one before any content exists, and `ContentShapes` when the store has
 		// been read. Called beside `PrepareSimulation`, so every world this
-		// process simulates gets it and the placeholder benchmark world - which
+		// process simulates gets it and the default Luau benchmark scene - which
 		// has no physics at all - does not.
 		void InstallCollisionShapes(engine::ecs::Store &store);
 
@@ -1287,27 +1255,7 @@ namespace server {
 		std::vector<engine::assets::PublicKey> AdmittedClientKeys;
 		bool AdmissionRestricted = false;
 
-		// Where moving things were, for the last `RewindSettings::HistoryTicks`
-		// ticks.
-		//
-		// **Recorded whether or not anything asks**, because the alternative is
-		// a game turning it on and finding the history empty for the first half
-		// second. It costs one map insert per moving entity per tick and no
-		// allocation after the ring has filled.
-		engine::replication::Rewind History;
-
-		// Reused across ticks so resolving a shot allocates nothing after the
-		// first one, which is the same reason every other per-tick buffer in
-		// this engine is a member rather than a local.
-		std::vector<engine::examples::Target> Candidates;
-
-		// How many inputs were resolved and how many were not this encoding.
-		//
-		// **Two counters and not one.** A shot that hit nothing is an ordinary
-		// event; a payload that did not decode is a client running a different
-		// game or probing, and burying the second in the first is how an
-		// unusual number stops being noticed.
-		uint64_t Struck = 0;
+		// Inputs that did not decode as engine movement.
 		uint64_t Dropped = 0;
 
 		// Where one client is looking from.

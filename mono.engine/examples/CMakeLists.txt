@@ -48,16 +48,31 @@ mono_add_library(examples
 )
 
 # Staged rather than referenced in place: a program started from anywhere finds
-# them, and `--assets` moves them with everything else.
+# them, and `--assets` moves them with everything else. Validate the whole
+# source tree so a non-Luau file cannot silently miss the staging globs.
+file(GLOB_RECURSE example_script_assets CONFIGURE_DEPENDS
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*")
+foreach(asset IN LISTS example_script_assets)
+	get_filename_component(asset_extension "${asset}" LAST_EXT)
+	if(NOT asset_extension STREQUAL ".luau")
+		message(FATAL_ERROR "examples: demo script asset ${asset} must be Luau")
+	endif()
+endforeach()
+
+# Reconfiguration removes outputs from older demo catalogs that staged JS twins.
+file(GLOB_RECURSE staged_javascript_demos
+	"${MONO_STAGE_ROOT}/assets/examples/scripts/*.js"
+	"${MONO_STAGE_ROOT}/assets/examples/scripts/*.js.map")
+if(staged_javascript_demos)
+	file(REMOVE ${staged_javascript_demos})
+endif()
+
 file(GLOB example_scenes CONFIGURE_DEPENDS
-	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*.luau"
-	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*.js"
-	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*.ts")
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*.luau")
 
 # Client camera programs retain their template path alongside each builder.
 file(GLOB_RECURSE demo_camera_scripts CONFIGURE_DEPENDS
-	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/client/DemoCameras/*.luau"
-	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/client/DemoCameras/*.js")
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/client/DemoCameras/*.luau")
 foreach(companion IN LISTS demo_camera_scripts)
 	file(RELATIVE_PATH companion_relative "${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts" "${companion}")
 	set(companion_staged "${MONO_STAGE_ROOT}/assets/examples/scripts/${companion_relative}")
@@ -72,99 +87,8 @@ foreach(companion IN LISTS demo_camera_scripts)
 	list(APPEND staged_scenes "${companion_staged}")
 endforeach()
 
-# **A `.ts` file is staged as stripped JavaScript, not copied.**
-#
-# `script/Runtime.hpp` has always said a `.ts` file "is expected to have been
-# type-stripped already - nothing in the C++ build compiles TypeScript, and
-# nothing should: the engine loads what a toolchain emitted". Nothing emitted
-# it. `tsconfig.json` sets `noEmit` and `just typecheck` runs `tsc --noEmit`, so
-# every `.ts` example was copied verbatim and QuickJS refused it at the first
-# type annotation - `Mirrors-1-world.ts` since the day it was written.
-#
-# This is the toolchain half, and it stays a toolchain: `tsc` transpiles, the
-# build copies the result. `--isolatedModules` transpiles file by file with no
-# type checking, which is the right split - `just typecheck` is where types are
-# checked, and doing it twice would make a build fail for a reason a typechecker
-# already reported better.
-#
-# **A missing `tsc` is not fatal.** A checkout without `bun install` still
-# builds and runs every Luau example; what is lost is the JavaScript twins, and
-# the configure says so once rather than failing over a dependency that is only
-# needed to author in the second language.
-set(_mono_tsc "${CMAKE_SOURCE_DIR}/node_modules/.bin/tsc")
-if(NOT EXISTS "${_mono_tsc}")
-	set(_mono_tsc "")
-	message(STATUS "examples: no node_modules/.bin/tsc - .ts scenes will not be staged")
-endif()
-
 foreach(scene IN LISTS example_scenes)
 	get_filename_component(scene_name "${scene}" NAME)
-	get_filename_component(scene_extension "${scene}" LAST_EXT)
-
-	if(scene_extension STREQUAL ".ts")
-		if(NOT _mono_tsc)
-			continue()
-		endif()
-
-		# Emitted under the same stem with a `.js` suffix, because that is what
-		# was actually produced - naming the output `.ts` would put stripped
-		# JavaScript in a file whose extension claims otherwise, and the next
-		# person to open it would be reading a lie.
-		get_filename_component(scene_stem "${scene}" NAME_WE)
-		set(staged "${MONO_STAGE_ROOT}/assets/examples/scripts/${scene_stem}.js")
-		set(staged_map "${MONO_STAGE_ROOT}/assets/examples/scripts/${scene_stem}.js.map")
-
-		add_custom_command(
-			OUTPUT "${staged}" "${staged_map}"
-			COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples/scripts"
-			COMMAND "${_mono_tsc}"
-				--target ES2020
-				--module ESNext
-				--isolatedModules
-				--skipLibCheck
-
-				# **`--sourceMap`, so a thrown error can name the line the author
-				# wrote.** Stripping types does not preserve line numbers - a
-				# multi-line annotation collapses - so without this every stack
-				# frame from a `.ts` scene points into generated JavaScript the
-				# author never saw. `script::SourceMap` reads the `.js.map` this
-				# emits and `JavaScriptRuntime`'s exception text rewrites the
-				# frames through it.
-				#
-				# `--sourceRoot` is deliberately absent: the map's `sources` are
-				# relative to the map, the map sits beside the `.js` in the stage,
-				# and a root would make them relative to somewhere neither file is.
-				--sourceMap
-
-				# **`--ignoreConfig`, because naming a file on the command line
-				# and having a `tsconfig.json` present is an error in tsc 7.**
-				# The config is for the editor and for `just typecheck`; this
-				# invocation is a transpile of one file and wants none of it.
-				--ignoreConfig
-
-				# **`--noResolve` and `--noCheck`, because this is a transpile.**
-				# Without the config there is no `engine.d.ts` on the include
-				# path, so every global the bindings declare - `game`, `Color3`,
-				# `Instance` - reports as an unknown name. Those are *type*
-				# errors and this step emits regardless, so they were noise on a
-				# build that had already succeeded: the stripped file was
-				# correct and the log said otherwise.
-				#
-				# Types are checked by `just typecheck`, against the config, with
-				# the declarations loaded. Checking them here too would be two
-				# answers to one question, and the worse one.
-				--noResolve
-				--noCheck
-				--outDir "${MONO_STAGE_ROOT}/assets/examples/scripts"
-				"${scene}"
-			DEPENDS "${scene}"
-			COMMENT "Transpiling example scene ${scene_name}"
-			VERBATIM)
-
-		list(APPEND staged_scenes "${staged}" "${staged_map}")
-		continue()
-	endif()
-
 	add_custom_command(
 		OUTPUT "${MONO_STAGE_ROOT}/assets/examples/scripts/${scene_name}"
 		COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples/scripts"

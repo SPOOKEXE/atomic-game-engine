@@ -5,6 +5,8 @@
 #include <engine/core/Name.hpp>
 #include <engine/delivery/Relay.hpp>
 #include <engine/delivery/Source.hpp>
+#include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/net/Endpoint.hpp>
 #include <engine/net/Handshake.hpp>
@@ -13,6 +15,8 @@
 #include <engine/replication/Defaults.hpp>
 #include <engine/replication/Protocol.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 
 #include <algorithm>
 #include <array>
@@ -128,6 +132,15 @@ namespace unified {
 			}
 			return text;
 		}
+
+		size_t PartCount(Store &world) {
+			const auto basePart = engine::ecs::Classes::Find(engine::core::Name("BasePart"));
+			size_t count = 0;
+			world.Each<const Transform>([&](Entity entity, const Transform &) {
+				if (world.IsA(entity, basePart)) count++;
+			});
+			return count;
+		}
 	}
 
 	Crossing::Crossing(const Settings &settings, const Arrangement &arrangement)
@@ -183,9 +196,25 @@ namespace unified {
 
 	void Crossing::BuildWorlds() {
 		// Both sides register the same names independently.
-		server::RegisterPlaceholderComponents();
+		server::RegisterServerComponents();
 		if (Options.ScenePath.empty()) {
-			server::BuildPlaceholderWorld(Server, ServerSystems, Options.Entities);
+			engine::scene::RegisterSceneClasses();
+			const Entity workspace = engine::scene::InstallServices(Server);
+			engine::ecs::AttributeValue count;
+			count.Type = engine::ecs::PropertyType::Double;
+			count.Double = Options.Entities;
+			if (!engine::ecs::SetAttribute(
+					Server, workspace, engine::core::Name("ServerDefaultCount"), count
+				)) {
+				throw std::runtime_error("the default scene could not receive its entity count");
+			}
+			std::string error;
+			const std::string path = engine::examples::ExamplePath("ServerDefault.luau");
+			if (!engine::examples::LoadScene(Server, ServerSystems, path, error)) {
+				ENGINE_ERROR("default scene '{}' failed:\n{}", path, error);
+				throw std::runtime_error("the default scene script failed");
+			}
+			server::RegisterServerDiagnostics(ServerSystems);
 		} else {
 			// Load only the server half; the client must receive its state.
 			std::string error;
@@ -212,11 +241,16 @@ namespace unified {
 		Handle = Authority_.Admit();
 
 		// Scan for the lowest row instead of assuming entity allocation order.
-		Server.Each<const Transform>([this](Entity entity, const Transform &) {
-			if (Probe_ == engine::ecs::NULL_ENTITY || entity.Id < Probe_.Id) {
-				Probe_ = entity;
+		Server.Each<const Transform, const engine::scene::Bounds, const engine::scene::Visual>(
+			[this](
+				Entity entity, const Transform &, const engine::scene::Bounds &, const engine::scene::Visual &
+			) {
+				if (!Server.IsA(entity, engine::ecs::Classes::Find(engine::core::Name("BasePart")))) return;
+				if (Probe_ == engine::ecs::NULL_ENTITY || entity.Id < Probe_.Id) {
+					Probe_ = entity;
+				}
 			}
-		});
+		);
 	}
 
 	void Crossing::BuildWire() {
@@ -816,8 +850,8 @@ namespace unified {
 			}
 		}
 
-		report.ServerEntities = Server.CountMatching<Transform>();
-		report.ClientEntities = Client.CountMatching<Transform>();
+		report.ServerEntities = PartCount(Server);
+		report.ClientEntities = PartCount(Client);
 		report.ServerX = PositionOf(Server, Probe_);
 		report.ClientX = PositionOf(Client, Probe_);
 		report.Behind = buffer == nullptr ? 0.0 : buffer->Behind();

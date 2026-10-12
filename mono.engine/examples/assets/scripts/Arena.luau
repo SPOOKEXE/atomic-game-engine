@@ -62,3 +62,136 @@ for index = 1, 6 do
 		WALL
 	)
 end
+
+local TARGET_COLOR = Color3.new(0.75, 0.85, 0.95)
+local targets: { { Core: Part, Humanoid: Humanoid, ResetAt: number } } = {}
+local function target(name: string, at: Vector3)
+	local model = Instance.new("Model")
+	model.Name = name
+	local core = Instance.new("Part")
+	core.Name = "Core"
+	core.Size = Vector3.new(4, 6, 4)
+	core.Position = at
+	core.Color = TARGET_COLOR
+	core.Anchored = true
+	core.Parent = model
+	local humanoid = Instance.new("Humanoid")
+	humanoid.MaxHealth = 100
+	humanoid.Health = 100
+	humanoid.Parent = model
+	model.Parent = workspace
+	table.insert(targets, { Core = core, Humanoid = humanoid, ResetAt = 0 })
+end
+
+target("TargetCenter", Vector3.new(0, 3, -36))
+target("TargetLeft", Vector3.new(-18, 3, -38))
+target("TargetRight", Vector3.new(18, 3, -38))
+
+local hud = Instance.new("ScreenGui")
+hud.Name = "ArenaHud"
+local crosshair = Instance.new("TextLabel")
+crosshair.Name = "Crosshair"
+crosshair.Position = UDim2.new(0.5, -12, 0.5, -18)
+crosshair.Size = UDim2.new(0, 24, 0, 36)
+crosshair.BackgroundTransparency = 1
+crosshair.Text = "+"
+crosshair.TextSize = 28
+crosshair.TextColor3 = Color3.new(1, 1, 1)
+crosshair.Parent = hud
+local hint = Instance.new("TextLabel")
+hint.Name = "Hint"
+hint.Position = UDim2.new(0, 20, 1, -38)
+hint.Size = UDim2.new(0, 320, 0, 24)
+hint.BackgroundTransparency = 1
+hint.Text = "CLICK / R2 TO FIRE  ·  REQUIRES ARENA SERVER"
+hint.TextSize = 14
+hint.TextColor3 = Color3.new(1, 1, 1)
+hint.Parent = hud
+hud.Parent = game:GetService("StarterGui")
+
+-- The arena owns its weapon rules. A client supplies aim, while this world
+-- uses its current physics state to choose reach, obstruction, damage, and
+-- the resulting replicated state. Shots do not rewind to a prior tick.
+local RunService = game:GetService("RunService")
+if not RunService:IsServer() then
+	return
+end
+
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local fire = Instance.new("RemoteEvent")
+fire.Name = "ArenaFire"
+fire.Parent = game:GetService("ReplicatedStorage")
+
+local SHOT_RANGE = 100
+local SHOT_DAMAGE = 25
+local CAMERA_REACH = 45
+local SHOT_INTERVAL = 0.15
+local HIT_COLOR = Color3.new(1, 0.2, 0.1)
+local elapsed = 0
+local lastShot: { [number]: number } = {}
+Players.PlayerRemoving:Connect(function(player: Instance)
+	lastShot[(player :: Player).UserId] = nil
+end)
+RunService.Heartbeat:Connect(function(delta: number)
+	elapsed += delta
+	for _, entry in targets do
+		if entry.ResetAt > 0 and elapsed >= entry.ResetAt then
+			entry.ResetAt = 0
+			entry.Humanoid.Health = entry.Humanoid.MaxHealth
+			entry.Core.Color = TARGET_COLOR
+		end
+	end
+end)
+
+local function finite(value: unknown): boolean
+	return typeof(value) == "number" and value == value and math.abs(value) < 100000
+end
+
+fire.OnServerEvent:Connect(function(payload: string, sender: Player?)
+	if sender == nil or sender.Parent == nil or not sender.Parent:IsA("Players") or #payload > 256 then return end
+	local character = sender.Character
+	if character == nil then return end
+	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local shooter = character:FindFirstChildOfClass("Humanoid") :: Humanoid?
+	if root == nil or shooter == nil or shooter.Health <= 0 then return end
+
+	local previous = lastShot[sender.UserId]
+	if previous ~= nil and elapsed - previous < SHOT_INTERVAL then return end
+	local decodedOk, aim = pcall(function() return HttpService:JSONDecode(payload) end)
+	if not decodedOk or typeof(aim) ~= "table" then return end
+	if not finite(aim.x) or not finite(aim.y) or not finite(aim.z)
+		or not finite(aim.dx) or not finite(aim.dy) or not finite(aim.dz) then return end
+
+	local origin = Vector3.new(aim.x, aim.y, aim.z)
+	local direction = Vector3.new(aim.dx, aim.dy, aim.dz)
+	local directionLength = direction.Magnitude
+	if (origin - root.Position).Magnitude > CAMERA_REACH
+		or directionLength < 0.999 or directionLength > 1.001 then return end
+	lastShot[sender.UserId] = elapsed
+
+	-- Cast from the character so a camera behind a wall cannot fire through it.
+	local muzzle = root.Position + Vector3.new(0, 3, 0)
+	local aimPoint = origin + direction * SHOT_RANGE
+	local travel = aimPoint - muzzle
+	if travel.Magnitude <= 0 then return end
+	local hit = workspace:Raycast(muzzle, travel.Unit * SHOT_RANGE)
+	if hit == nil or not hit.Instance:IsA("BasePart") then return end
+	local part = hit.Instance :: BasePart
+	local target = part.Parent
+	if target == character then return end
+	part.Color = HIT_COLOR
+	if target == nil then return end
+	local humanoid = target:FindFirstChildOfClass("Humanoid") :: Humanoid?
+	if humanoid ~= nil and humanoid.Health > 0 then
+		humanoid.Health = math.max(0, humanoid.Health - SHOT_DAMAGE)
+		if humanoid.Health == 0 then
+			for _, entry in targets do
+				if entry.Humanoid == humanoid then
+					entry.ResetAt = elapsed + 3
+					break
+				end
+			end
+		end
+	end
+end)

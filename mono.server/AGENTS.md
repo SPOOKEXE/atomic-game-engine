@@ -62,6 +62,16 @@ carry none, and they go when a game file brings traffic of its own.
 registers, but for serialisation rules and property rules - not for whether a
 name duplicates a `scene` one. A third component here is a reviewer's catch.
 
+## The default benchmark world is authored in Luau
+
+`BuildWorld` passes `Settings.Entities` to `ServerDefault.luau` as
+Workspace's `ServerDefaultCount` attribute, installs the shared server systems
+and retains the script runtime by world ID for remote event routing. The script
+creates the field, moves the parts, reflects them at the bounds and stores each
+part's `Velocity` attribute so the serialized world state carries its direction.
+The host supplies the count and loads the scene; it does not build or move the
+benchmark geometry in C++.
+
 ## QUIC is the default transport, and one UDP port carries both
 
 `--transport quic|datagram|both`, or `server.transport` in the settings file,
@@ -291,70 +301,25 @@ challenged and refused counts) and `host_players` (one row per client with a
 `Player`, and its round trip). The last two fail with an actionable message when
 this server was started without `--listen`, rather than reporting zeroes.
 
-## The rewind history records what the world may move
+## Movement input is intent; the server simulates its own world
 
-`ServeClients` fills `replication::Rewind` from
-`Query<const Transform, const RigidBody>().With<Simulated>()`, skipping
-`BodyKind::Static` one layer in. **`scene::Simulated` is the question actually
-being asked**; `RigidBody` is only what supplies `Kind`, and `Transform` is the
-value recorded.
+The client sends movement direction and jump intent for its player. The server
+applies that intent to the shared `scene::Humanoid` state, then its generic
+scene and physics systems simulate the world. The input does not supply a
+position or a hit result, and a client replica does not become the authority
+for the server's character state.
 
-The predicate is load-bearing and it has been wrong twice.
+## The Arena shooting example casts against current server state
 
-It walked `Motion` until v0.15, on the reading that a `Motion` is what makes a
-placement worth remembering - and `physics` *takes a row's `Motion` away* when it
-puts the body to sleep, so that the solver's query never visits a resting row.
-The history therefore held whatever happened to be awake. A player standing still
-is asleep within a second, which meant they could not be shot, and it presented
-as an ordinary miss: a hit test against an empty candidate list strikes nothing
-and reports nothing.
+`Arena.client.luau` sends aim origin and direction through `ArenaFire`; the
+client does not choose a hit. `Arena.luau` validates the sender and payload,
+checks the aim against the character, then casts from the server-side character
+muzzle with `workspace:Raycast`. A hit changes the server's target state, which
+replicates to clients.
 
-It was then the *absence* of `RigidBody` until v0.18, when the tag was `Anchored`
-and marked the immovable ones. `scene::Simulated` inverted that polarity, and
-**a sleeping body keeps the tag** - it loses `Motion` and nothing else - so the
-v0.15 fix survived the change rather than being re-broken by it. An anchored part
-never gets `Simulated` at all, so the static geometry the original predicate was
-aiming at is still excluded.
-
-## A hit takes health off here, and a client's copy of that number is a copy
-
-`ApplyInputs` recolours what was struck *and* subtracts `SHOT_DAMAGE` when the
-struck part belongs to a character. The character is found through the struck
-part's **parent**, because the rewind history holds parts and `scene::Character`
-sits on the model above. Both results cross as ordinary replicated state -
-`scene.Visual` and `scene.Humanoid` - so every client sees this process's verdict
-rather than the shooter's, which is the same division the whole function opens
-with: a client sends where it aimed and never what it hit.
-
-Two things a reviewer should refuse:
-
-- **A damage figure drawn from a random number.** `SHOT_DAMAGE` is a constant for
-  `scene::FindSpawn`'s reason about picking a pad in tree order: a roll inside a
-  tick is a recording that does not replay, and `just replay-check` reports it a
-  long way from here.
-- **A second subtracting path.** `scene::TakeDamage` is the one door, and its
-  refusal on `Store::AdoptOnly` is what stops a client running this same code
-  against its own replica and deciding who died. Reaching into
-  `scene::Humanoid::Health` directly walks past that.
-
-## A client's input tick is a claim, and a stale one means the world went quiet
-
-A client stamps its input with the newest tick it has *applied*, and a tick
-reaches it only when something changed. In a still scene its idea of the
-server's clock stops advancing while the server's does not, so
-`Rewind::TickSeenBy` can name a tick that has fallen out of the ring - and
-`Rewind::Each` answers nothing, which is a miss with no error anywhere.
-
-`ApplyInputs` resolves an out-of-window tick **at the present** rather than at
-the oldest frame held. That follows from why it goes stale: a world that has not
-been changing looks the same now as it did then. It also cannot be gamed -
-rewinding is the favourable answer for a laggy shooter, so claiming a tick this
-server no longer remembers buys the least favourable resolution there is, not
-the most. A tick inside the window is honoured exactly as before, and
-`RewindSettings::HistoryTicks` (32) remains the fairness bound.
-
-An empty history is a separate case and is skipped rather than resolved: there is
-no present to fall back to.
+This example uses the current `Workspace` state for the raycast. The engine does
+not rewind the scene to an input tick for this shot, so there is no built-in lag
+compensation in this path.
 
 ## A host never listens, and a listening driver holds exactly one world
 

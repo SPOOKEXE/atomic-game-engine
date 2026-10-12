@@ -9,22 +9,11 @@
 // programs, and the differences between them stay where they belong - a client
 // adds a camera and a draw list, a server adds neither.
 //
-// **Two ways to move a world, and both are here on purpose.**
-//
-// The C++ path uses `Orbit` and `Spin` as components and iterates them in
-// systems - which is what an ECS is for, and what a shipped game's hot loops
-// should look like. The scripted path does not use them at all: a script
-// connects to `RunService.Heartbeat` and assigns `Position` and `Orientation`
-// itself, because that is how somebody writing a game actually writes one.
-//
-// There is deliberately **no third thing** - no component a script fills in for
-// an engine system to animate. That arrangement reads like scripting and is a
-// scene format wearing its clothes: the game describes, the engine decides.
-// `Orbit` was that shape once and stopped being it.
+// The scene script builds and moves the world through the public bindings.
+// The loader supplies services and a scheduler; it does not author motion.
 //
 // @tier L10 · shared
 
-#include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
@@ -41,43 +30,6 @@ namespace engine::script {
 
 namespace engine::examples {
 
-	// A circular path a thing follows, in world space.
-	//
-	// Demo state rather than engine state, which is why it is here and not in
-	// `scene`: nothing in a real game is "an orbit", and `scene` holds what a
-	// thing in a world *is* rather than what one example does to it.
-	//
-	// @since v0.5
-	struct Orbit {
-		// What it circles.
-		core::Vector3 Centre;
-
-		// How far out, in metres.
-		float Radius = 1.0f;
-
-		// How fast, in radians of simulated time.
-		float RadiansPerSecond = 1.0f;
-
-		// Where on the circle it starts, in radians.
-		float Phase = 0.0f;
-
-		// How far above the centre's plane it sits.
-		float Height = 0.0f;
-	};
-
-	// How fast a thing turns about its own axes, in radians per second.
-	//
-	// @since v0.5
-	struct Spin {
-		// Turn rate about local X, Y and Z.
-		core::Vector3 Rate;
-	};
-
-	// Registers this module's components under explicit names.
-	//
-	// Idempotent. Calling it is not optional on any path that writes one: a
-	// component minted under the compiler's spelling for a type is a name one
-	// build can write into a recording and another cannot read back.
 	// Mounts a scene's own Luau modules as children of the script that uses
 	// them.
 	//
@@ -121,26 +73,9 @@ namespace engine::examples {
 	// @return The template, or null when no companion or container exists.
 	ecs::Entity MountDemoCamera(ecs::Store &store, std::string_view builderPath);
 
-	// Declares the components the example scenes' own systems read.
+	// Runs a scene script and schedules its heartbeat.
 	//
-	// **Idempotent, and called by every program that runs an example.** The
-	// registry replaces by name, so a client, the studio and a headless test
-	// can each call it without agreeing on who goes first.
-	void RegisterExampleComponents();
-
-	// Installs the systems that move what a script built.
-	//
-	// Three, and every one of them iterates columns: the previous transform for
-	// interpolation, the orbit, and the spin. Shared by every program, because
-	// a server that simulated this scene differently from a client would be
-	// disagreeing with its own replicas once per tick.
-	//
-	// @param scheduler The scheduler to add them to.
-	void InstallMotionSystems(ecs::Scheduler &scheduler);
-
-	// Runs a scene script and installs the systems that move it.
-	//
-	// Registers the components and the class first, so a script can name them,
+	// Registers the scene classes first, so a script can name them,
 	// then runs the file, then measures how far the result reaches and installs
 	// that as `scene::WorldBounds` - measured rather than declared by the
 	// script, because a scene that set its own bounds would be two sources of
@@ -196,11 +131,8 @@ namespace engine::examples {
 	// in whatever order the filesystem answers in, and a menu that reshuffles
 	// itself between runs is one nobody builds muscle memory for.
 	//
-	// The `.ts` scenes are deliberately absent: they are staged as `.js` and
-	// `LoadScene` picks its runtime off the extension, so listing the source
-	// would name a file no program on this path can read. `Rings.js` and the
-	// other transpiled twins are absent for the same reason - they are second
-	// copies of a scene already in the list, in a second language.
+	// Only shipped Luau builders are listed. `LoadScene` can still run a
+	// caller-supplied script in another supported language.
 	//
 	// @return The file names, such as "Rings.luau", sorted. Empty when nothing
 	//         was staged, which is a real situation rather than an error: a

@@ -9,7 +9,6 @@
 #include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
-#include <engine/examples/Scene.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/physics/Pipeline.hpp>
@@ -191,7 +190,6 @@ namespace {
 		engine::graph::RegisterPipelineComponents();
 		engine::script::RegisterScriptComponents();
 		engine::replication::RegisterReplicationComponents();
-		engine::examples::RegisterExampleComponents();
 
 		// Class registration is separate from component registration. Leaving a
 		// tree out would still write valid TOML, but it would describe less than a

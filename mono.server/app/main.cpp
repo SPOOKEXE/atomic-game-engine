@@ -94,7 +94,7 @@ int main(int argc, char **argv) {
 	arguments.Value("tick-rate", "HZ", "Ticks per second (default 30)");
 	arguments.Value("physics-tick-rate", "HZ", "Physics steps per second (default: the tick rate)");
 	arguments.Value("replication-tick-rate", "HZ", "Snapshots per second (default: every tick)");
-	arguments.Value("entities", "N", "Entities in the placeholder world (default 4096)");
+	arguments.Value("entities", "N", "Parts in the default Luau scene (default 4096)");
 	arguments.Value("worlds", "N", "Isolated worlds to distribute across physical-core processes");
 	arguments.Value("ticks", "N", "Exit after N ticks");
 	arguments.Value("seconds", "N", "Exit after N seconds");

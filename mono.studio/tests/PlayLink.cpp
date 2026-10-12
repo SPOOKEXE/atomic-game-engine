@@ -1388,9 +1388,8 @@ TEST_CASE("a play link admits a player and gives it a body", "[studio][playlink]
 	//   * no route for its intent, and the keyboard reaches nothing.
 	Fixture fixture;
 
-	// A furnished world, because a player is a child of the `Players` service -
-	// a scene nobody furnished gets no player, quietly, which is the placeholder
-	// case `mono.server` names too.
+	// A player is a child of the `Players` service, so furnish the test world
+	// before admitting one.
 	fixture.Worlds.Enter(fixture.Authority, [](Store &store) {
 		engine::scene::RegisterSceneClasses();
 		engine::scene::InstallServices(store);

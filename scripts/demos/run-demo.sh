@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 #
-# Runs any staged Luau or TypeScript example through one launcher.
+# Runs any staged Luau or authored-world example through one launcher.
 #
 # Script scenes are staged under `examples/scripts`; authored worlds are under
-# `examples/worlds`. TypeScript scenes are staged as JavaScript, so an explicit
-# `.ts` name is translated to its emitted `.js` name. A bare stem means Luau.
+# `examples/worlds`. A bare stem means Luau.
 # With no scene, the client opens Rings.luau.
 #
 #   scripts/demos/run-demo.sh Terrain --stats
-#   scripts/demos/run-demo.sh Mirrors-1-world.ts --stats
+#   scripts/demos/run-demo.sh Mirrors-1-world.luau --stats
 #   scripts/demos/run-demo.sh Mirrors-4-worlds --worlds 4 --stats
 #   MAX_FPS=60 scripts/demos/run-demo.sh Interface
 #   PRESET=release scripts/demos/run-demo.sh Magic --stats
@@ -22,8 +21,8 @@ if [ "$#" -gt 0 ] && [[ "$1" != -* ]]; then
 	SCENE=$1
 	shift
 	case "$SCENE" in
-	*.luau | *.js) ;;
-	*.ts) SCENE="${SCENE%.ts}.js" ;;
+	*.luau | *.aworld) ;;
+	*.*) echo "demo scenes must be .luau or .aworld: $SCENE" >&2; exit 2 ;;
 	*) SCENE="$SCENE.luau" ;;
 	esac
 fi
