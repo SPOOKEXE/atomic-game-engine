@@ -110,6 +110,6 @@ The demo source tree now contains Luau script assets only. Removed alternate sce
 
 ## Validation scope
 
-This inventory describes the v0.25.0-fixes sources. Branch-specific build, startup and interaction checks are recorded after the backport is validated.
+This inventory describes the v0.25.0-fixes sources. All 75 catalog entries and the separate `VirtualCameraCapture.agame` fixture passed a five-frame headless startup capture at 640 by 360 with the strict CI build. Arena's guidance was also inspected at 320 by 180. These captures check startup and image validity; they do not establish complete visual or interaction coverage for every scene.
 
 Arena's C++ integration tests drive its actual Luau scripts through authenticated network clients. They cover valid shots, rejected aim payloads, cooldowns, obstructions, replica authority and client input. The default server scene has C++ wall-bounce parity and snapshot/replay checks.
