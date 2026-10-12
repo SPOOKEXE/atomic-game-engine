@@ -26,6 +26,16 @@ using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
 
 namespace snapshot_test {
+	Hierarchy WithHierarchy(
+		Entity parent = NULL_ENTITY, Entity nextSibling = NULL_ENTITY, Entity previousSibling = NULL_ENTITY
+	) {
+		Hierarchy hierarchy{};
+		hierarchy.Parent = parent;
+		hierarchy.NextSibling = nextSibling;
+		hierarchy.PreviousSibling = previousSibling;
+		return hierarchy;
+	}
+
 	struct Spot {
 		float X = 0.0f;
 		float Y = 0.0f;
@@ -207,7 +217,7 @@ TEST_CASE("an overlay child slice keeps external parent indexes and omitted chil
 
 	Store slice("slice");
 	REQUIRE(slice.CreateAt(selected));
-	slice.Set<Hierarchy>(selected, Hierarchy{.Parent = parent});
+	slice.Set<Hierarchy>(selected, snapshot_test::WithHierarchy(parent));
 	slice.Set<Spot>(selected, Spot{17.0f, 19.0f});
 	ByteWriter snapshot;
 	REQUIRE(slice.Save(snapshot));
@@ -245,7 +255,7 @@ TEST_CASE("an overlay reparent updates both external child indexes", "[ecs][snap
 
 	Store slice("slice");
 	REQUIRE(slice.CreateAt(selected));
-	slice.Set<Hierarchy>(selected, Hierarchy{.Parent = to});
+	slice.Set<Hierarchy>(selected, snapshot_test::WithHierarchy(to));
 	ByteWriter snapshot;
 	REQUIRE(slice.Save(snapshot));
 	ByteReader reader(snapshot.Bytes());
@@ -282,11 +292,11 @@ TEST_CASE("new overlay siblings use authored order across different archetypes",
 	const Entity third = slice.Create();
 	slice.Destroy(omittedParent);
 	slice.Destroy(omittedChild);
-	slice.Set<Hierarchy>(third, Hierarchy{.Parent = parent, .PreviousSibling = second});
+	slice.Set<Hierarchy>(third, snapshot_test::WithHierarchy(parent, NULL_ENTITY, second));
 	slice.Set<Spot>(third, Spot{3.0f, 0.0f});
-	slice.Set<Hierarchy>(first, Hierarchy{.Parent = parent, .NextSibling = second});
+	slice.Set<Hierarchy>(first, snapshot_test::WithHierarchy(parent, second));
 	slice.Set<Score>(first, Score{1});
-	slice.Set<Hierarchy>(second, Hierarchy{.Parent = parent, .NextSibling = third, .PreviousSibling = first});
+	slice.Set<Hierarchy>(second, snapshot_test::WithHierarchy(parent, third, first));
 	std::vector<Entity> iterated;
 	slice.Each<const Hierarchy>([&](Entity entity, const Hierarchy &) { iterated.push_back(entity); });
 	REQUIRE(iterated != std::vector<Entity>{first, second, third});
@@ -322,8 +332,8 @@ TEST_CASE("an incoming overlay parent cycle refuses every live change", "[ecs][s
 	Store slice("slice");
 	REQUIRE(slice.CreateAt(first));
 	REQUIRE(slice.CreateAt(second));
-	slice.Set<Hierarchy>(first, Hierarchy{.Parent = second});
-	slice.Set<Hierarchy>(second, Hierarchy{.Parent = first});
+	slice.Set<Hierarchy>(first, snapshot_test::WithHierarchy(second));
+	slice.Set<Hierarchy>(second, snapshot_test::WithHierarchy(first));
 	slice.Set<Spot>(first, Spot{91.0f, 0.0f});
 	slice.Set<Spot>(second, Spot{92.0f, 0.0f});
 	slice.SetResource<Score>(Score{99});
@@ -359,7 +369,7 @@ TEST_CASE(
 
 	Store slice("slice");
 	REQUIRE(slice.CreateAt(selected));
-	slice.Set<Hierarchy>(selected, Hierarchy{.Parent = external});
+	slice.Set<Hierarchy>(selected, snapshot_test::WithHierarchy(external));
 	slice.Set<Spot>(selected, Spot{99.0f, 0.0f});
 	ByteWriter snapshot;
 	REQUIRE(slice.Save(snapshot));
@@ -389,7 +399,7 @@ TEST_CASE("an overlay parent row without hierarchy refuses every live change", "
 
 	Store slice("slice");
 	REQUIRE(slice.CreateAt(selected));
-	slice.Set<Hierarchy>(selected, Hierarchy{.Parent = plain});
+	slice.Set<Hierarchy>(selected, snapshot_test::WithHierarchy(plain));
 	slice.Set<Spot>(selected, Spot{99.0f, 0.0f});
 	SECTION("the plain parent is outside the overlay") {}
 	SECTION("the overlay also supplies the plain parent") {
@@ -422,7 +432,7 @@ TEST_CASE("an overlay can precede an absent external parent in a join", "[ecs][s
 
 	Store slice("slice");
 	REQUIRE(slice.CreateAt(child));
-	slice.Set<Hierarchy>(child, Hierarchy{.Parent = parent});
+	slice.Set<Hierarchy>(child, snapshot_test::WithHierarchy(parent));
 	ByteWriter preface;
 	REQUIRE(slice.Save(preface));
 	Store receiver("receiver");
