@@ -1,3 +1,4 @@
+#include "DemoPipelineAsset.hpp"
 #include "RenderFixture.hpp"
 
 #include <engine/core/Name.hpp>
@@ -45,7 +46,7 @@ void main(){ vec2 centre=abs(inUv-vec2(0.5)); float source=step(max(centre.x,cen
 		d.Record({.Kind = graph::EditKind::Set, .Key = core::Name("source"), .Value = source});
 	}
 	graph::RenderGraph Install(Renderer &r) {
-		auto base = graph::CompositorDemoDocument();
+		auto base = engine::render::test::DemoPipelineAsset("CompositorDemo.pipeline");
 		graph::PipelineDocument d;
 		bool inserted = false;
 		for (auto &e : base.Edits()) {
