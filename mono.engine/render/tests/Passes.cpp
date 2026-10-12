@@ -5,6 +5,7 @@
 // default output path belongs to the engine's default graph, not this boundary.
 
 #include "../src/PipelineCompiler.hpp"
+#include "DemoPipelineAsset.hpp"
 #include "EnvironmentModes.hpp"
 
 #include <engine/graph/ExecutionPlan.hpp>
@@ -790,10 +791,11 @@ TEST_CASE("render graph snapshots require an exact installed name", "[render][gr
 }
 
 TEST_CASE("hard render demo graphs install compute handlers", "[render][graph][hard-render]") {
-	for (const auto &[name, document] : std::array{
-			 std::pair{Name("Raytrace Demo"), engine::graph::RaytraceDemoDocument()},
-			 std::pair{Name("Pathtrace Demo"), engine::graph::PathtraceDemoDocument()},
+	for (const auto &[name, asset] : std::array{
+			 std::pair{Name("Raytrace Demo"), "RaytraceDemo.pipeline"},
+			 std::pair{Name("Pathtrace Demo"), "PathtraceDemo.pipeline"},
 		 }) {
+		const auto document = engine::render::test::DemoPipelineAsset(asset);
 		RenderGraph graph;
 		Name offender;
 		REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);

@@ -424,32 +424,6 @@ namespace engine::graph {
 	// @return The PBR document. `Build`ing it produces a graph that compiles.
 	PipelineDocument DefaultPbrDocument();
 
-	// A small authored graph that demonstrates adaptive tessellation, indirect
-	// light, and screen-space ray tracing as separate, connectable passes.
-	//
-	// It is a graph contract, not a claim that every renderer has a tracing
-	// backend. A device adapter refuses it until it registers those node kinds.
-	//
-	// @return The ray-tracing demonstration document. `Build`ing it produces a
-	//         graph that compiles.
-	PipelineDocument RaytraceDemoDocument();
-
-	// A small authored graph that demonstrates progressive path-tracing inputs
-	// without coupling its geometry preparation or indirect-light estimate to
-	// the path-tracing pass.
-	//
-	// @return The path-tracing demonstration document. `Build`ing it produces a
-	//         graph that compiles.
-	PipelineDocument PathtraceDemoDocument();
-
-	// The default PBR graph with an inspectable compositor tail. The chain keeps
-	// colour grading, mixing, image transforms and the two blur axes as separate
-	// nodes so each pass can be reordered or replaced in the editor.
-	//
-	// @return The compositor demonstration document. `Build`ing it produces a
-	//         complete graph ending at the ordinary image output.
-	PipelineDocument CompositorDemoDocument();
-
 	// The default PBR graph with capture nodes for linear HDR, depth, normal,
 	// material, authored mesh UVs, segmentation, and the half-size SSAO visibility estimate used by
 	// DataCapture. SSAO is an estimator rather than ambient-occlusion ground truth.

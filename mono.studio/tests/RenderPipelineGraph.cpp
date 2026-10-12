@@ -1,13 +1,18 @@
+#include <engine/core/Paths.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/testing/Suite.hpp>
+#include <studio/RenderPipelineGraph.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <array>
-#include <studio/RenderPipelineGraph.hpp>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -461,7 +466,14 @@ TEST_CASE("partial canvas records round trip without graph validation", "[studio
 
 TEST_CASE("signed compositor numbers survive editor save and reload", "[studio][pipeline][compositor]") {
 	studio::RegisterRenderPipelineNodeTypes();
-	const PipelineDocument basis = engine::graph::CompositorDemoDocument();
+	const std::filesystem::path path = engine::core::Paths::Base().parent_path() / "assets" / "examples" /
+									   "pipelines" / "CompositorDemo.pipeline";
+	std::ifstream input(path, std::ios::binary);
+	REQUIRE(input);
+	const std::string text(std::istreambuf_iterator<char>(input), {});
+	PipelineDocument basis;
+	engine::core::Name offender;
+	REQUIRE(Read(text, basis, offender) == PipelineDocumentStatus::Ok);
 	nodegraph::Graph canvas;
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
@@ -491,7 +503,6 @@ TEST_CASE("signed compositor numbers survive editor save and reload", "[studio][
 	PipelineDocument saved;
 	REQUIRE(studio::SaveRenderPipelineGraph(canvas, basis, saved, error));
 	PipelineDocument reloadedDocument;
-	engine::core::Name offender;
 	REQUIRE(Read(Write(saved), reloadedDocument, offender) == PipelineDocumentStatus::Ok);
 
 	nodegraph::Graph reloaded;

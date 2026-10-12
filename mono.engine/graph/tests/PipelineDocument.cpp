@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <array>
 #include <string>
-#include <tuple>
 
 TEST_SUITE_ID("engine.graph.pipelinedocument")
 TEST_DEPENDS("engine.graph.rendergraph")
@@ -332,72 +331,6 @@ TEST_CASE("the data capture document peels one aligned second surface", "[graph]
 	CHECK(validity->Format == engine::graph::ResourceFormat::R8);
 	CHECK(depth->Name == Name("second-surface-depth"));
 	CHECK(depth->Format == engine::graph::ResourceFormat::R32F);
-}
-
-TEST_CASE("the compositor demo keeps every image operation as a graph pass", "[graph][compositor]") {
-	RenderGraph graph;
-	Name offender;
-	REQUIRE(Build(engine::graph::CompositorDemoDocument(), graph, offender) == PipelineDocumentStatus::Ok);
-
-	CompiledGraph compiled;
-	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
-	const auto position = [&](const char *name) {
-		for (size_t index = 0; index < compiled.PerView.size(); ++index) {
-			if (graph.Find(compiled.PerView[index])->Name == Name(name)) return index;
-		}
-		return compiled.PerView.size();
-	};
-	CHECK(position("grade-exposure") < position("grade-hsv"));
-	CHECK(position("grade-hsv") < position("mix-original"));
-	CHECK(position("mix-original") < position("frame-transform"));
-	CHECK(position("frame-transform") < position("blur-x"));
-	CHECK(position("blur-x") < position("blur-y"));
-	CHECK(position("blur-y") < position("compositor-tonemap"));
-	REQUIRE_FALSE(compiled.Final.empty());
-	CHECK(graph.Find(compiled.Final.back())->Name == Name("compositor-output-image"));
-}
-
-TEST_CASE("tracing demonstrations keep geometry and lighting as graph inputs", "[graph][tracing]") {
-	for (const auto &[document, trace, tessellation, illumination] : {
-			 std::tuple{
-				 engine::graph::RaytraceDemoDocument(),
-				 Name("screen-raytrace"),
-				 Name("adaptive-tessellation"),
-				 Name("indirect-light")
-			 },
-			 std::tuple{
-				 engine::graph::PathtraceDemoDocument(),
-				 Name("progressive-pathtrace"),
-				 Name("adaptive-tessellation"),
-				 Name("indirect-light")
-			 },
-		 }) {
-		RenderGraph graph;
-		Name offender;
-		REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
-
-		const auto find = [&graph](Name name) -> const engine::graph::Node * {
-			for (uint32_t value = 1; value <= graph.Count(); ++value) {
-				const auto *node = graph.Find(NodeId{value});
-				if (node != nullptr && node->Name == name) return node;
-			}
-			return nullptr;
-		};
-		const auto *traceNode = find(trace);
-		REQUIRE(traceNode != nullptr);
-		REQUIRE(find(tessellation) != nullptr);
-		REQUIRE(find(Name("tessellated-geometry")) != nullptr);
-		CHECK(find(Name("tessellated-geometry"))->Reads.size() == 3);
-		REQUIRE(find(illumination) != nullptr);
-		CHECK(
-			std::find(traceNode->ReadPorts.begin(), traceNode->ReadPorts.end(), Name("indirect")) !=
-			traceNode->ReadPorts.end()
-		);
-
-		PipelineDocument reloaded;
-		REQUIRE(Read(Write(document), reloaded, offender) == PipelineDocumentStatus::Ok);
-		CHECK(Write(reloaded) == Write(document));
-	}
 }
 
 TEST_CASE("older documents upgrade resources to the current contract", "[graph][document]") {
