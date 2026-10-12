@@ -96,6 +96,6 @@ namespace nodegraph {
 	// node's inputs beside it, an async run's stages, a plain value readout, and
 	// the honest empty one.
 	//
-	// Registered on first use, for `RegisterDemoNodes`' reason.
+	// Registered on first use, so every host gets the standard inspectors.
 	void RegisterInspectors();
 }

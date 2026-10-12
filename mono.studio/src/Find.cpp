@@ -19,6 +19,7 @@
 // property's own type and `ValuesEqual` - so "0.5" does not match "0.50001"
 // when somebody asks for exactness.
 
+#include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/game/Values.hpp>
@@ -171,8 +172,9 @@ namespace studio {
 							   LastFind.Property == Find.Property && LastFind.Value == Find.Value &&
 							   LastFind.Exact == Find.Exact && LastFindWorld == ExplorerWorld;
 		bool cacheable = Find.Property.empty() && Find.Value.empty();
-		const auto wanted = Find.Class.empty() ? engine::ecs::ClassId{} : Classes::Find(Name(Find.Class));
-		const auto rootId = Classes::Find(Name("Instance"));
+		const auto wanted =
+			Find.Class.empty() ? engine::ecs::ClassId{} : Classes::Find(engine::core::Name(Find.Class));
+		const auto rootId = Classes::Find(engine::core::Name("Instance"));
 		if (!cacheable && rootId.IsValid()) {
 			const auto &root = Classes::Describe(rootId);
 			const auto canonical =

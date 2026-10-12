@@ -1640,13 +1640,6 @@ namespace studio {
 				ENGINE_PROFILE_CAT("thumbnails", engine::core::ProfileCategory::Assets);
 				PumpThumbnails();
 			}
-
-			// The node demo's own previews, bounded the same way and in the same
-			// gap - see `PumpNodeDemoImages`.
-			{
-				ENGINE_PROFILE_CAT("node previews", engine::core::ProfileCategory::Assets);
-				PumpNodeDemoImages();
-			}
 		}
 
 		{

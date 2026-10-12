@@ -456,7 +456,7 @@ detector is known to work rather than merely known to pass. **Reach for that
 harness before extracting a free function**: a panel's imgui behaviour is now
 testable, and moving logic out to avoid testing it is no longer the only option.
 
-## The node graph is a library of this program, and the panel is what is left here
+## The node graph library is shared; Studio owns its editors
 
 `nodegraph/` beside this file is `Mono::nodegraph`: the registry, the model,
 folding, layout, evaluation, the canvas, the save format and pictures as pixels.
@@ -476,39 +476,24 @@ its own. Its row in `expected_graph.json` has no `layer`, which is what makes
 "only the editor links this" a rule the architecture check enforces rather than
 a fact about today.
 
-The split is worth stating, because the next node editor has to know which side
-it is adding to. **The library owns everything that is true of any node graph.**
-**The program owns what only a host has**: a texture for a picture, a theme, an
-undo stack, a file dialog and a dockable window - `src/NodeDemo.cpp`.
+The split matters whenever an editor is added. **The library owns everything
+that is true of any node graph.** **Studio owns host-specific documents, node
+types and presentation.** `src/RenderPipelineGraph.cpp` adapts render pipeline
+documents, and `src/ImageComposerGraph.cpp` adapts image-composer documents.
+Each registers only the node types for its document through the public
+`NodeTypes::Register` API. The library contains no Studio node vocabulary, and
+its tests register their own fixture.
 
-**And it owns the node types.** `src/DemoNodes.cpp` is the set the Demo Nodes
-panel runs, and it is here rather than inside `nodegraph/` because it is content
-rather than library: it registers terrain-shaped types through the same public
-`NodeTypes::Register` any host would use, and the library knows nothing about
-it. That is the same seam by another name - a host with its own vocabulary links
-`Mono::nodegraph` and gets none of this. The library's own suite registers a
-fixture it owns rather than reaching for these, so nothing but this panel
-depends on them.
+The canvas works from CPU `PreviewImage` pixels and accepts an `ImageSink` from
+the host when a texture is needed. Its `Chrome` settings are plain values, with
+no dependency on Studio preferences or renderer assets. Keep those host choices
+outside `mono.studio/nodegraph` so headless tests need no GPU.
 
-Two seams, both in `studio/Editor.hpp` as free functions so that
-`tests/NodeGraph.cpp` can reach them, and both silent when they break:
-
-- **`NodePreviewTexture`** copies a `nodegraph::PreviewImage` into an
-  `assets::TextureData`. It is a `memcpy` because both sides mean red first and
-  the top row first - and the day one of them stops meaning that, the editor
-  keeps drawing thumbnails with their channels swapped.
-- **`ApplyNodeChrome`** hands the library the four values it draws chrome with.
-  Called every frame the panel draws, because the theme and the interface scale
-  are both settings somebody can change while it is open.
-
-**A third implementation is what must not happen**, and it would arrive as a
-file rather than as a decision - the render pipeline as a node editor is still
-to be written, and it could start its own registry and its own canvas without
-anybody noticing until the cycle guard or the hash diverged.
-`just check-one-node-graph` is what stops it: no first-party file outside
-`mono.studio/nodegraph` may open `namespace nodegraph`, and registering types
-into it - which is what `DemoNodes.cpp` does - is not opening it. Extend the
-library where it lives.
+Do not build a second graph model or canvas for another editor. Both current
+editors use the shared library, and future ones should too. `just
+check-one-node-graph` enforces the boundary: no first-party file outside
+`mono.studio/nodegraph` may open `namespace nodegraph`. Host files may register
+node types through its public API without opening that namespace.
 
 ## Configuration lives in the person's folder, not beside the binary
 

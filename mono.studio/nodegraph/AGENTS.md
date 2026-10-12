@@ -1,8 +1,8 @@
 # nodegraph
 
 A typed node graph, an evaluator that does not block, and a Dear ImGui canvas
-over both. `mono.studio` is the only consumer: the Demo Nodes panel and the
-render pipeline editor.
+over both. `mono.studio` is the only consumer: its render pipeline and Image
+Composer editors.
 
 It was a separate repository until v0.18.0, vendored as a submodule. That made
 this public repository unclonable while the other one was private, and the code
@@ -84,15 +84,15 @@ spelled.
 ## This library ships no node types
 
 The library knows no vocabulary. Every node type arrives through
-`NodeTypes::Register`, and the set the studio's Demo Nodes panel uses is
-`mono.studio/src/DemoNodes.cpp`, a directory up rather than in here. That seam
-is the reason this is reusable at all: a host with its own vocabulary links this
-and gets no terrain nodes it did not ask for.
+`NodeTypes::Register`. Studio registers render pipeline types in
+`mono.studio/src/RenderPipelineGraph.cpp` and image-composer types in
+`mono.studio/src/ImageComposerGraph.cpp`; those host-specific types stay outside
+this library. A host with its own vocabulary links this and registers only the
+types it needs.
 
 `tests/` therefore registers its **own** fixture rather than importing anybody's
-node set. A test that reaches for the studio's demo nodes has coupled the
-library's suite to a consumer's content, and the content will move for reasons
-that have nothing to do with the model.
+node set. A test that reaches for either editor's types couples the library's
+suite to consumer content that can change for reasons unrelated to the model.
 
 ## A picture belongs to the wire, not to the node
 
