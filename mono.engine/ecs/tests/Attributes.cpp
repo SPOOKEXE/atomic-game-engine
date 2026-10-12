@@ -22,6 +22,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
+#include <ranges>
 #include <string>
 #include <vector>
 
@@ -307,6 +308,44 @@ TEST_CASE("every attribute type a world may hold survives a save", "[ecs][attrib
 		REQUIRE(GetAttribute(restored, instance, KeyFor(value.Type), back));
 		CHECK(Same(value, back));
 	}
+}
+
+TEST_CASE("attribute snapshots have one order for every insertion order", "[ecs][attributes]") {
+	RegisterAttributeComponents();
+	Store forward("attribute-order");
+	Store reverse("attribute-order");
+	std::array<Entity, 3> first{};
+	std::array<Entity, 3> second{};
+	for (size_t index = 0; index < first.size(); index++) {
+		first[index] = forward.Create();
+		second[index] = reverse.Create();
+		REQUIRE(first[index] == second[index]);
+	}
+	AttributeValue value;
+	value.Type = PropertyType::Int32;
+	for (size_t index = 0; index < first.size(); index++) {
+		value.Int32 = static_cast<int32_t>(index + 1);
+		REQUIRE(SetAttribute(forward, first[index], Name("Alpha"), value));
+		REQUIRE(SetAttribute(forward, first[index], Name("Beta"), value));
+	}
+	for (size_t offset = first.size(); offset > 0; offset--) {
+		const size_t index = offset - 1;
+		value.Int32 = static_cast<int32_t>(index + 1);
+		REQUIRE(SetAttribute(reverse, second[index], Name("Beta"), value));
+		REQUIRE(SetAttribute(reverse, second[index], Name("Alpha"), value));
+	}
+	ByteWriter firstImage;
+	ByteWriter secondImage;
+	REQUIRE(forward.Save(firstImage));
+	REQUIRE(reverse.Save(secondImage));
+	CHECK(std::ranges::equal(firstImage.Bytes(), secondImage.Bytes()));
+
+	Store restored("attribute-order");
+	ByteReader reader(firstImage.Bytes());
+	REQUIRE(restored.Load(reader));
+	ByteWriter thirdImage;
+	REQUIRE(restored.Save(thirdImage));
+	CHECK(std::ranges::equal(firstImage.Bytes(), thirdImage.Bytes()));
 }
 
 TEST_CASE("every attribute type survives being read straight back", "[ecs][attributes]") {

@@ -5,6 +5,7 @@
 #include <engine/ecs/Store.hpp>
 
 #include <algorithm>
+#include <vector>
 
 namespace engine::ecs {
 
@@ -411,13 +412,27 @@ namespace engine::ecs {
 				const AttributeTable &table = tables[index];
 
 				writer.WriteUInt32(static_cast<uint32_t>(table.Entities.size()));
-				for (const auto &[entity, attributes] : table.Entities) {
+				// Hash insertion order changes on restore; snapshot and replay bytes must not.
+				std::vector<uint32_t> entities;
+				entities.reserve(table.Entities.size());
+				for (const auto &entry : table.Entities)
+					entities.push_back(entry.first);
+				std::sort(entities.begin(), entities.end());
+				for (const uint32_t entity : entities) {
+					const auto &attributes = table.Entities.at(entity);
 					writer.WriteUInt32(entity);
 					writer.WriteUInt32(static_cast<uint32_t>(attributes.size()));
 
-					for (const auto &[nameId, value] : attributes) {
+					std::vector<uint32_t> names;
+					names.reserve(attributes.size());
+					for (const auto &entry : attributes)
+						names.push_back(entry.first);
+					std::sort(names.begin(), names.end(), [](uint32_t left, uint32_t right) {
+						return core::Name::FromId(left).Text() < core::Name::FromId(right).Text();
+					});
+					for (const uint32_t nameId : names) {
 						writer.WriteName(core::Name::FromId(nameId));
-						WriteValue(writer, value);
+						WriteValue(writer, attributes.at(nameId));
 					}
 				}
 			}
