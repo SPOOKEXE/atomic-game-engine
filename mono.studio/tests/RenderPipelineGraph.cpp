@@ -3,7 +3,6 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/Schedule.hpp>
 #include <engine/testing/Suite.hpp>
-#include <studio/RenderPipelineGraph.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -13,6 +12,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <studio/RenderPipelineGraph.hpp>
 #include <utility>
 #include <vector>
 
