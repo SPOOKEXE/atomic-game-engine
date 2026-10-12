@@ -1224,9 +1224,7 @@ TEST_CASE(
 	);
 }
 
-TEST_CASE(
-	"script view.camera bridge tracks apply, restore and cancellation", "[render][data-capture][gpu]"
-) {
+TEST_CASE("script view.camera bridge tracks apply, restore and cancellation", "[render][data-capture][gpu]") {
 	engine::world::Universe worlds;
 	engine::world::DataFactorySession session(worlds);
 	const std::string snapshot = PauseAndSnapshot(worlds, session);
