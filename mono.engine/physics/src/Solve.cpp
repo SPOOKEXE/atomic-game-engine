@@ -293,10 +293,21 @@ namespace engine::physics {
 		// torques rather than building the point velocities, which is the same
 		// scalar triple product written the cheap way round - see
 		// `ContactAxis::FirstTorque`.
+		// The dense 4,000-body CI (-O0) profile is dominated by sweeps.
+		// Component math avoids value temporaries with the same float grouping and visit order.
 		float ClosingSpeed(const SolverBody &first, const SolverBody &second, const ContactAxis &axis) {
-			return (second.LinearVelocity - first.LinearVelocity).Dot(axis.Direction) +
-				   second.AngularVelocity.Dot(axis.SecondTorque) -
-				   first.AngularVelocity.Dot(axis.FirstTorque);
+			const float linearX = second.LinearVelocity.X - first.LinearVelocity.X;
+			const float linearY = second.LinearVelocity.Y - first.LinearVelocity.Y;
+			const float linearZ = second.LinearVelocity.Z - first.LinearVelocity.Z;
+			const float linear =
+				linearX * axis.Direction.X + linearY * axis.Direction.Y + linearZ * axis.Direction.Z;
+			const float secondAngular = second.AngularVelocity.X * axis.SecondTorque.X +
+										second.AngularVelocity.Y * axis.SecondTorque.Y +
+										second.AngularVelocity.Z * axis.SecondTorque.Z;
+			const float firstAngular = first.AngularVelocity.X * axis.FirstTorque.X +
+									   first.AngularVelocity.Y * axis.FirstTorque.Y +
+									   first.AngularVelocity.Z * axis.FirstTorque.Z;
+			return linear + secondAngular - firstAngular;
 		}
 
 		// Resolves one impulse direction: the two angular responses and the mass
@@ -345,14 +356,22 @@ namespace engine::physics {
 			// pair function obeys that one convention, which is why this is the
 			// only place the sign appears.
 			if (first.Movable) {
-				first.LinearVelocity =
-					first.LinearVelocity - axis.Direction * (magnitude * first.InverseMass);
-				first.AngularVelocity = first.AngularVelocity - axis.FirstAngular * magnitude;
+				const float linear = magnitude * first.InverseMass;
+				first.LinearVelocity.X = first.LinearVelocity.X - axis.Direction.X * linear;
+				first.LinearVelocity.Y = first.LinearVelocity.Y - axis.Direction.Y * linear;
+				first.LinearVelocity.Z = first.LinearVelocity.Z - axis.Direction.Z * linear;
+				first.AngularVelocity.X = first.AngularVelocity.X - axis.FirstAngular.X * magnitude;
+				first.AngularVelocity.Y = first.AngularVelocity.Y - axis.FirstAngular.Y * magnitude;
+				first.AngularVelocity.Z = first.AngularVelocity.Z - axis.FirstAngular.Z * magnitude;
 			}
 			if (second.Movable) {
-				second.LinearVelocity =
-					second.LinearVelocity + axis.Direction * (magnitude * second.InverseMass);
-				second.AngularVelocity = second.AngularVelocity + axis.SecondAngular * magnitude;
+				const float linear = magnitude * second.InverseMass;
+				second.LinearVelocity.X = second.LinearVelocity.X + axis.Direction.X * linear;
+				second.LinearVelocity.Y = second.LinearVelocity.Y + axis.Direction.Y * linear;
+				second.LinearVelocity.Z = second.LinearVelocity.Z + axis.Direction.Z * linear;
+				second.AngularVelocity.X = second.AngularVelocity.X + axis.SecondAngular.X * magnitude;
+				second.AngularVelocity.Y = second.AngularVelocity.Y + axis.SecondAngular.Y * magnitude;
+				second.AngularVelocity.Z = second.AngularVelocity.Z + axis.SecondAngular.Z * magnitude;
 			}
 		}
 
@@ -363,10 +382,16 @@ namespace engine::physics {
 		void ApplyCorrection(SolverBody &first, SolverBody &second, const ContactRow &row, float magnitude) {
 			const core::Vector3 &normal = row.Along[ContactRow::NORMAL].Direction;
 			if (first.Movable) {
-				first.CorrectionLinear = first.CorrectionLinear - normal * (magnitude * first.InverseMass);
+				const float linear = magnitude * first.InverseMass;
+				first.CorrectionLinear.X = first.CorrectionLinear.X - normal.X * linear;
+				first.CorrectionLinear.Y = first.CorrectionLinear.Y - normal.Y * linear;
+				first.CorrectionLinear.Z = first.CorrectionLinear.Z - normal.Z * linear;
 			}
 			if (second.Movable) {
-				second.CorrectionLinear = second.CorrectionLinear + normal * (magnitude * second.InverseMass);
+				const float linear = magnitude * second.InverseMass;
+				second.CorrectionLinear.X = second.CorrectionLinear.X + normal.X * linear;
+				second.CorrectionLinear.Y = second.CorrectionLinear.Y + normal.Y * linear;
+				second.CorrectionLinear.Z = second.CorrectionLinear.Z + normal.Z * linear;
 			}
 		}
 
@@ -508,9 +533,11 @@ namespace engine::physics {
 		//               count)`.
 		void SweepRows(std::vector<SolverBody> &bodies, std::vector<ContactRow> &rows, SolverGroup run) {
 			const size_t last = static_cast<size_t>(run.FirstRow) + run.RowCount;
+			SolverBody *bodyData = bodies.data();
+			ContactRow *rowData = rows.data();
 
 			for (size_t at = run.FirstRow; at < last; at++) {
-				ContactRow &row = rows[at];
+				ContactRow &row = rowData[at];
 
 				// **The two bodies of the row after this one, fetched early.**
 				// The rows stream in order and the prefetcher handles them; the
@@ -526,12 +553,12 @@ namespace engine::physics {
 				// row somebody else may be writing, and a hint has no result -
 				// but it is also a line pulled in that this worker will not use.
 				if (at + 1 < last) {
-					Prefetch(&bodies[rows[at + 1].First]);
-					Prefetch(&bodies[rows[at + 1].Second]);
+					Prefetch(&bodyData[rowData[at + 1].First]);
+					Prefetch(&bodyData[rowData[at + 1].Second]);
 				}
 
-				SolverBody &first = bodies[row.First];
-				SolverBody &second = bodies[row.Second];
+				SolverBody &first = bodyData[row.First];
+				SolverBody &second = bodyData[row.Second];
 
 				ContactAxis &normal = row.Along[ContactRow::NORMAL];
 
@@ -571,8 +598,11 @@ namespace engine::physics {
 				// The correction sweep. Its own effective mass, because it is a
 				// translation-only constraint and the row's normal mass carries
 				// the lever arms of one that is not.
-				const float drifting =
-					(second.CorrectionLinear - first.CorrectionLinear).Dot(normal.Direction);
+				const float driftingX = second.CorrectionLinear.X - first.CorrectionLinear.X;
+				const float driftingY = second.CorrectionLinear.Y - first.CorrectionLinear.Y;
+				const float driftingZ = second.CorrectionLinear.Z - first.CorrectionLinear.Z;
+				const float drifting = driftingX * normal.Direction.X + driftingY * normal.Direction.Y +
+									   driftingZ * normal.Direction.Z;
 				const float wantedCorrection =
 					row.CorrectionImpulse + (row.Bias - drifting) * row.CorrectionMass;
 				const float clampedCorrection = wantedCorrection > 0.0f ? wantedCorrection : 0.0f;
