@@ -698,8 +698,14 @@ namespace engine::gui {
 					return;
 				}
 
-				const bool wins = best == NULL_ENTITY || resolved.Order > bestOrder ||
-								  (resolved.Order == bestOrder && resolved.Depth > bestDepth);
+				// A parent scrollbar may paint after its child, so paint order alone
+				// would give the parent a wheel aimed inside the nested frame.
+				const bool insideBest = best != NULL_ENTITY && store.IsDescendantOf(node, best);
+				const bool containsBest = best != NULL_ENTITY && store.IsDescendantOf(best, node);
+				const bool wins =
+					best == NULL_ENTITY || insideBest ||
+					(!containsBest && (resolved.Order > bestOrder ||
+									   (resolved.Order == bestOrder && resolved.Depth > bestDepth)));
 				if (!wins) {
 					return;
 				}
