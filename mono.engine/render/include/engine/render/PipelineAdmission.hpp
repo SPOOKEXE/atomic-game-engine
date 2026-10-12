@@ -15,15 +15,20 @@ namespace engine::render {
 
 	// The declaration and reason associated with one rejected admission.
 	struct PipelineFailure {
+		// Admission boundary that rejected the pipeline.
 		PipelineAdmissionStage Stage = PipelineAdmissionStage::Validation;
+		// Named declaration responsible for the refusal, when identified.
 		core::Name Offender;
+		// Human-readable detail for the rejected declaration.
 		std::string Reason;
 	};
 
 	// A missing failure means the pipeline was accepted.
 	struct PipelineAdmissionResult {
+		// Empty when admission succeeded; otherwise describes the refusal.
 		std::optional<PipelineFailure> Failure;
 
+		// True when the pipeline passed admission.
 		explicit operator bool() const {
 			return !Failure.has_value();
 		}

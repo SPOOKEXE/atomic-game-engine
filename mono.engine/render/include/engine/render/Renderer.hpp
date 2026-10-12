@@ -344,11 +344,14 @@ namespace engine::render {
 		// Planner outcome for this aperture. It is diagnostic metadata and does
 		// not change the renderer's external image mode.
 		PortalDemandStatus ImageDemandStatus = PortalDemandStatus::Invalid;
+		// Geometric reason a hidden demand did not produce a capture.
 		PortalDemandHiddenReason ImageHiddenReason = PortalDemandHiddenReason::None;
+		// Whether the aperture intersects the demand culling frustum.
 		bool ImageFrustumVisible = false;
 		// Culling frame used for ImageDemandStatus. It can differ from the raster
 		// camera while a presentation route retains its source eye.
 		core::CFrame ImageDemandCamera;
+		// Revision of the camera used to classify this demand.
 		uint64_t ImageCameraRevision = 0;
 		// Generation handle of the accepted imported image, or zero.
 		uint64_t ImportedImage = 0;

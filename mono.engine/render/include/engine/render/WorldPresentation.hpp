@@ -50,6 +50,7 @@ namespace engine::render {
 	// while serialisation deliberately writes no instances because PreRender
 	// rebuilds them before use.
 	struct DrawList {
+		// Value and membership epochs identify which kind of source change occurred.
 		struct SourceRevision {
 			uint64_t Writes = 0;	 // Writes to existing component values.
 			uint64_t Membership = 0; // Entities gaining or losing the component.
@@ -58,6 +59,8 @@ namespace engine::render {
 		// Source epochs last inspected by CollectInstances. Named fields keep a
 		// new source component from being coupled to an array position.
 		struct SourceRevisions {
+			// Last collected epochs for pose, appearance, visibility and skin inputs.
+			//@{
 			SourceRevision Transform{};
 			SourceRevision PreviousTransform{};
 			SourceRevision Bounds{};
@@ -73,6 +76,7 @@ namespace engine::render {
 			SourceRevision LODCustom{};
 			SourceRevision LODSettings{};
 			SourceRevision RenderEffects{};
+			//@}
 		};
 
 		// One row per visible scene instance.

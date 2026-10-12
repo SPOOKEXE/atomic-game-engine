@@ -73,11 +73,12 @@ TOC_INCLUDE_HEADINGS   = 2
 # merely untidy.
 EXCLUDE                = @MONO_DOCS_EXCLUDE@
 
-# The custom-node example is a private render-suite fixture. It builds against
-# the public API but is not itself part of that API.
+# Benchmarks, tests and the custom-node example are private fixtures. They build
+# against the public API but their helper headers are not part of that API.
 # Anchor exclusions below this checkout: an ancestor named .cache or src must
 # not hide recursively discovered public headers and markdown.
 EXCLUDE_PATTERNS       = "@CMAKE_SOURCE_DIR@/*/tests/*" \
+                         "@CMAKE_SOURCE_DIR@/*/benchmarks/*" \
                          "@CMAKE_SOURCE_DIR@/*/src/*" \
                          "@CMAKE_SOURCE_DIR@/*/app/*" \
                          "@CMAKE_SOURCE_DIR@/mono.engine/render/examples/*" \

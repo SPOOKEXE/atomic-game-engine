@@ -842,20 +842,35 @@ namespace client {
 			// Capture-only snapshot of the facts that kept a crossed successor image-only.
 			std::shared_ptr<PortalReadinessEvidence> CapturedReadiness;
 			std::shared_ptr<PortalReadiness> CapturedReadinessDecision;
+			// Capture diagnostics for the destination eye prepared during a handoff.
 			struct EyeProbe {
+				// World selected for the eye view.
 				std::string SelectedWorld;
+				// Authored destination resolved by the eye's camera route.
 				std::string EyeWorld;
+				// Camera key used to look up the retained eye image.
 				std::string ImageKey;
+				// World bound to the prepared eye view.
 				std::string BoundWorld;
+				// Whether the destination eye view was prepared.
 				bool Prepared = false;
+				// Viewport slot used for eye image lookup.
 				size_t Slot = 0;
+				// Image handle selected for display, including a composed body when present.
 				uint64_t Image = 0;
+				// Current image handle published for this camera key.
 				uint64_t CurrentImage = 0;
+				// Imported image handle from the latest accepted capture.
 				uint64_t CaptureImage = 0;
+				// Producer world tick of the latest accepted capture.
 				uint64_t CaptureTick = 0;
+				// Requests submitted for the probed eye view.
 				size_t Submitted = 0;
+				// Whether the resolved producer world id is valid.
 				bool ProducerValid = false;
+				// Retained image handles for the two neighbouring eye views.
 				std::array<uint64_t, 2> ViewportImages{};
+				// Authored destinations corresponding to those neighbouring images.
 				std::array<std::string, 2> ViewportDestinations{};
 			};
 			std::optional<EyeProbe> CapturedEyeProbe;
