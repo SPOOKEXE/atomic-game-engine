@@ -32,6 +32,10 @@ name=${1:?usage: vendor-tree.sh <vendor-name>}
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
+# A caller such as a Git hook exports repository-local variables. They belong to
+# the superproject and would make `git -C "$src"` inspect the vendor with its index.
+unset $(git rev-parse --local-env-vars)
+
 src="mono.vendor/$name"
 patchdir="mono.vendor/patches/$name"
 dest=".cache/vendor/$name"
