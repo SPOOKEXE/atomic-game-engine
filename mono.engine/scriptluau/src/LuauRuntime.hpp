@@ -25,7 +25,7 @@ namespace engine::script {
 		bool RunInstance(ecs::Entity instance) override;
 
 		bool Heartbeat(float delta) override;
-		bool DeliverRemoteEvent(std::span<const std::byte> message) override;
+		bool DeliverRemoteEvent(std::span<const std::byte> message, ecs::Entity sender) override;
 
 		Language Which() const override {
 			return Language::Luau;

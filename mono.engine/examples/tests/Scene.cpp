@@ -40,6 +40,7 @@
 #include <engine/script/EventNarratives.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -372,6 +373,71 @@ TEST_CASE("the rings scene builds and moves itself", "[examples][scene]") {
 	// for.
 	REQUIRE(store.Resource<WorldBounds>() != nullptr);
 	CHECK(store.Resource<WorldBounds>()->HalfExtent > 5.0f);
+}
+
+TEST_CASE("the arena client preview keeps its targets and host guidance", "[examples][scene][arena]") {
+	const StagedAssets assets;
+	Store store("arena.client.preview");
+	Scheduler systems;
+	engine::script::RuntimeLimits limits;
+	// The standalone client builds its world with both host roles.
+	limits.Role = engine::script::HostRole::OfBoth();
+	std::string error;
+	const bool loaded = LoadScene(store, systems, ExamplePath("Arena.luau"), error, nullptr, &limits);
+	INFO(error);
+	REQUIRE(loaded);
+
+	const Entity workspace = store.FindFirstRoot("Workspace");
+	REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+	for (const char *name : {"TargetCenter", "TargetLeft", "TargetRight"}) {
+		const Entity target = store.FindFirstChild(workspace, name);
+		REQUIRE(target != engine::ecs::NULL_ENTITY);
+		CHECK(store.FindFirstChild(target, "Core") != engine::ecs::NULL_ENTITY);
+		const Entity humanoid = store.FindFirstChild(target, "Humanoid");
+		REQUIRE(humanoid != engine::ecs::NULL_ENTITY);
+		REQUIRE(store.Get<engine::scene::Humanoid>(humanoid) != nullptr);
+		CHECK(store.Get<engine::scene::Humanoid>(humanoid)->Health == 100.0f);
+	}
+
+	const Entity starterGui = store.FindFirstRoot("StarterGui");
+	REQUIRE(starterGui != engine::ecs::NULL_ENTITY);
+	const Entity hud = store.FindFirstChild(starterGui, "ArenaHud");
+	REQUIRE(hud != engine::ecs::NULL_ENTITY);
+	CHECK(store.FindFirstChild(hud, "Crosshair") != engine::ecs::NULL_ENTITY);
+	const Entity hint = store.FindFirstChild(hud, "Hint");
+	REQUIRE(hint != engine::ecs::NULL_ENTITY);
+	const auto *label = store.Get<engine::gui::Label>(hint);
+	REQUIRE(label != nullptr);
+	INFO("arena hint: " << label->Text);
+	CHECK(label->Text.find("REQUIRES ARENA SERVER") != std::string::npos);
+
+	const Entity storage = store.FindFirstRoot("ReplicatedStorage");
+	REQUIRE(storage != engine::ecs::NULL_ENTITY);
+	const Entity fire = store.FindFirstChild(storage, "ArenaFire");
+	REQUIRE(fire != engine::ecs::NULL_ENTITY);
+
+	// Re-run the mounted companion as a receiving client without its remote.
+	// Its bounded wait must finish without disabling the script.
+	const auto *local = store.Resource<engine::scene::LocalPlayer>();
+	REQUIRE(local != nullptr);
+	const Entity scripts = store.FindFirstChild(local->Instance, "PlayerScripts");
+	REQUIRE(scripts != engine::ecs::NULL_ENTITY);
+	const Entity companion = store.FindFirstChild(scripts, "DemoCamera");
+	REQUIRE(companion != engine::ecs::NULL_ENTITY);
+	store.DestroyInstance(fire);
+	store.SetAdoptOnly(true);
+	engine::script::RuntimeLimits clientLimits;
+	clientLimits.Role = engine::script::HostRole::OfClient();
+	auto clientRuntime = engine::script::MakeRuntime(store, engine::script::Language::Luau, clientLimits);
+	REQUIRE(clientRuntime != nullptr);
+	INFO(clientRuntime->LastError());
+	REQUIRE(clientRuntime->RunNewScripts(std::array{companion}) == 1);
+	for (int tick = 0; tick < 601; tick++) {
+		store.AdvanceTick(1.0f / 60.0f);
+		INFO(clientRuntime->LastError());
+		REQUIRE(clientRuntime->Heartbeat(1.0f / 60.0f));
+		store.FlushSignals();
+	}
 }
 
 TEST_CASE("the data factory capture request runs without a heartbeat", "[examples][scene][data]") {
@@ -1831,28 +1897,6 @@ TEST_CASE("the four-world mirrors scene varies by world", "[examples][scene][wor
 	CHECK(casterCount("client.world.4") == 6);
 }
 
-TEST_CASE("the four-world scene builds the same way in TypeScript", "[examples][scene][worlds][js]") {
-	const StagedAssets assets;
-
-	const std::filesystem::path transpiled = ExamplePath("Mirrors-4-worlds.js");
-	if (!std::filesystem::exists(transpiled)) {
-		SUCCEED("no transpiled twin; tsc was not available at configure time");
-		return;
-	}
-
-	Store store("client.world.2");
-	Scheduler systems;
-
-	std::string error;
-	const bool loaded = LoadScene(store, systems, transpiled.string(), error);
-	INFO(error);
-	REQUIRE(loaded);
-
-	CHECK(CountNamed(store, "Baseplate") == 1);
-	CHECK(CountNamed(store, "Mirror") == 1);
-	CHECK(CountNamed(store, "Caster") == 12);
-}
-
 TEST_CASE("the gui containment names match the services scene installs", "[examples][scene][gui]") {
 	Store store("examples_test.gui_names");
 	engine::scene::InstallServices(store);
@@ -3139,10 +3183,7 @@ TEST_CASE("every staged scene is offered by name, sorted", "[examples][scene]") 
 		CHECK(std::find(scenes.begin(), scenes.end(), shipped) != scenes.end());
 	}
 
-	// **Luau only.** A `.ts` scene is staged as transpiled JavaScript under a
-	// `.js` name, so offering either would name a second copy of a scene already
-	// in the list - and offering the `.ts` itself would name a file no program
-	// on this path can read.
+	// The shipped demo catalogue contains Luau builders only.
 	for (const std::string &scene : scenes) {
 		INFO(scene);
 		CHECK(scene.size() > 5);

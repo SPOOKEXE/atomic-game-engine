@@ -3868,7 +3868,7 @@ TEST_CASE("a script may switch which language an instance runs", "[scripting][in
 	REQUIRE(store.SetParent(program, engine::scene::WorkspaceOf(store)));
 
 	// The instance holds a JavaScript program as well, put there by the author.
-	const engine::core::Name javascript("examples/Rings.js");
+	const engine::core::Name javascript("tests/Behaviour.js");
 	REQUIRE(
 		store.SetProperty(program, engine::core::Name("JavaScriptSource"), &javascript, sizeof(javascript))
 	);
@@ -3885,7 +3885,7 @@ TEST_CASE("a script may switch which language an instance runs", "[scripting][in
 	// **Both programs are still there**, which is the whole point of two
 	// containers: switching a language is not a destructive edit.
 	CHECK(engine::script::ActiveLanguageOf(store, program) == Language::JavaScript);
-	CHECK(engine::script::ActiveSourceOf(store, program) == engine::core::Name("examples/Rings.js"));
+	CHECK(engine::script::ActiveSourceOf(store, program) == engine::core::Name("tests/Behaviour.js"));
 
 	const auto *lua = store.Get<engine::script::LuaSourceContainer>(program);
 	REQUIRE(lua != nullptr);
@@ -3908,6 +3908,19 @@ TEST_CASE("a world's scripts are selected by the host's role", "[scripting][inst
 	CHECK(engine::script::ScriptsIn(store, false, true) == std::vector<Entity>{onClient});
 	CHECK(engine::script::ScriptsIn(store, true, true) == std::vector<Entity>{onServer, onClient});
 	CHECK(engine::script::ScriptsIn(store, false, false).empty());
+
+	engine::scene::InstallServices(store);
+	const Entity starter =
+		engine::scene::ServiceOf(store, engine::ecs::Classes::Find(engine::core::Name("StarterPlayer")));
+	const Entity templates = store.FindFirstChild(starter, "StarterPlayerScripts");
+	REQUIRE(templates != engine::ecs::NULL_ENTITY);
+	store.SetParent(onClient, templates);
+	CHECK(engine::script::ScriptsIn(store, false, true).empty());
+	const Entity player = engine::scene::AddPlayer(store, "viewer", true, 1);
+	const Entity scripts = store.FindFirstChild(player, "PlayerScripts");
+	const Entity copied = store.FindFirstChild(scripts, "OnClient");
+	REQUIRE(copied != engine::ecs::NULL_ENTITY);
+	CHECK(engine::script::ScriptsIn(store, false, true) == std::vector<Entity>{copied});
 }
 
 TEST_CASE("a disabled script is not selected", "[scripting][instances]") {

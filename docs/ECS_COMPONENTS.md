@@ -50,13 +50,6 @@ state until v0.19.
 | `effects.Texture` | 44 | 4 | yes | . | . | . | A tiled image projected onto one face of its parent BasePart, including tile size, offset, colour, transparency and draw order. |
 | `effects.Trail` | 1152 | 8 | yes | . | yes | . | A trail following two attachments: its authored colour, transparency, lifetime and texture, plus the ring of recorded edge points it is drawn from. |
 
-## `examples`
-
-| component | size | align | save | raw | pad | wire | what it is for |
-|---|---|---|---|---|---|---|---|
-| `examples.Orbit` | 28 | 4 | yes | yes | . | . | Demo-only component that carries an entity round a fixed centre at a set radius, height, starting phase and angular speed. |
-| `examples.Spin` | 12 | 4 | yes | yes | . | . | Demo-only component that turns an entity at a fixed rate about its local X, Y and Z axes. |
-
 ## `graph`
 
 | component | size | align | save | raw | pad | wire | what it is for |

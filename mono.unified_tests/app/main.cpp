@@ -316,7 +316,7 @@ int main(int argc, char **argv) {
 	arguments.Flag("list-arrangements", "Print every arrangement's name, one per line, and exit");
 
 	arguments.Value("arrangement", "NAME", "How to wire the halves: " + Arrangements());
-	arguments.Value("entities", "N", "Entities in the placeholder world (default 64)");
+	arguments.Value("entities", "N", "Entities in the default Luau scene (default 64)");
 	arguments.Value("scene", "PATH", "Author the server's world from a scene script");
 	arguments.Value("ticks", "N", "Ticks to run after the join (default 120)");
 	arguments.Value("seconds", "N", "Run each arrangement for this long instead of for a tick count");

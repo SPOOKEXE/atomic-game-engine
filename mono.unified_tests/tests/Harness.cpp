@@ -226,27 +226,31 @@ TEST_CASE("the world crosses quantised and the server's copy does not", "[unifie
 	const float step =
 		engine::scene::WIRE_POSITION_HALF_EXTENT_METRES / static_cast<float>(engine::scene::WIRE_STEPS);
 
-	harness.ServerWorld().Each<const Transform>([&](engine::ecs::Entity entity,
-													const Transform &authoritative) {
-		const Transform *replicated = harness.ClientWorld().Get<Transform>(entity);
-		if (replicated == nullptr) {
-			return;
-		}
+	harness.ServerWorld().Each<const Transform, const engine::scene::Bounds, const engine::scene::Visual>(
+		[&](engine::ecs::Entity entity,
+			const Transform &authoritative,
+			const engine::scene::Bounds &,
+			const engine::scene::Visual &) {
+			const Transform *replicated = harness.ClientWorld().Get<Transform>(entity);
+			if (replicated == nullptr) {
+				return;
+			}
 
-		compared++;
-		const float difference = std::abs(replicated->Frame.Position.X - authoritative.Frame.Position.X);
-		worst = std::max(worst, difference);
-		if (difference > 0.0f) {
-			differing++;
-		}
+			compared++;
+			const float difference = std::abs(replicated->Frame.Position.X - authoritative.Frame.Position.X);
+			worst = std::max(worst, difference);
+			if (difference > 0.0f) {
+				differing++;
+			}
 
-		// The server's own value sits between grid points, which it could
-		// not do if anything had round-tripped it.
-		const float offset = std::abs(std::remainder(authoritative.Frame.Position.X, step));
-		if (offset > step * 0.1f) {
-			serverOffGrid = true;
+			// The server's own value sits between grid points, which it could
+			// not do if anything had round-tripped it.
+			const float offset = std::abs(std::remainder(authoritative.Frame.Position.X, step));
+			if (offset > step * 0.1f) {
+				serverOffGrid = true;
+			}
 		}
-	});
+	);
 
 	REQUIRE(compared == 64);
 	CHECK(worst <= engine::scene::WIRE_POSITION_ERROR_METRES);
@@ -299,8 +303,8 @@ namespace {
 
 	// Steps until the stream settles, and returns what a quiet tick costs.
 	//
-	// **Not zero.** Every transform is marked changed every tick by
-	// `Integrate`, so a quiet tick still carries the whole world's positions.
+	// **Not zero.** The scripted field moves every part each tick, so a quiet
+	// tick still carries the whole world's positions.
 	// What it does not carry is a `Bounds` or a `Visual`, and that is the
 	// difference the cases below measure against.
 	size_t SettledBytes(Harness &harness) {
@@ -431,7 +435,7 @@ TEST_CASE("a component nothing wrote is not sent again", "[unified]") {
 	const size_t settled = SettledBytes(harness);
 	REQUIRE(settled > 0);
 
-	// A quiet tick stays quiet. Transforms are marked every tick by `Integrate`
+	// A quiet tick stays quiet. The script moves every part each tick,
 	// so this is not zero, but it does not grow.
 	harness.Step();
 	CHECK(LastBytes(harness) == settled);

@@ -1702,6 +1702,7 @@ namespace studio {
 		// has no trace of `MagicCore` in it, and a brand-new game's tree is
 		// empty rather than carrying a demo's modules.
 		(void)engine::examples::MountSceneLibraries(store, script, file);
+		(void)engine::examples::MountDemoCamera(store, Label(located));
 	}
 
 	bool Editor::AddExampleWorld(const engine::examples::DemoEntry &demo) {

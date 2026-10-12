@@ -209,10 +209,9 @@ namespace server {
 										  );
 									  },
 								  .RunPackage = engine::script::RunDataScriptPackage,
-								  .InstallSystems =
-									  [](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-										  RegisterPlaceholderSystems(store, systems);
-									  },
+								  .InstallSystems = [](
+														engine::ecs::Store &, engine::ecs::Scheduler &systems
+													) { RegisterServerDiagnostics(systems); },
 								  .Admit =
 									  [](std::string_view source,
 										 std::string_view entry,

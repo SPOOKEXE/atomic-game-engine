@@ -1,4 +1,6 @@
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/scripthost/Runtime.hpp>
@@ -33,10 +35,13 @@ TEST_CASE("a Luau RemoteEvent copies its payload to an authority callback", "[sc
 	REQUIRE(authority->Run(R"(
 		local remote = Instance.new("RemoteEvent")
 		remote.Name = "Damage"
-		remote.OnServerEvent:Connect(function(payload)
+		remote.OnServerEvent:Connect(function(payload, sender)
 			assert(payload == "copied payload")
+			if sender ~= nil then
+				assert(sender.Name == "authenticated" and sender.UserId == 42)
+			end
 			local proof = Instance.new("Part")
-			proof.Name = payload
+			proof.Name = sender and sender.Name or payload
 		end)
 	)"));
 	REQUIRE(client->Run(R"(
@@ -47,6 +52,15 @@ TEST_CASE("a Luau RemoteEvent copies its payload to an authority callback", "[sc
 	REQUIRE_FALSE(sent.empty());
 	REQUIRE(authority->DeliverRemoteEvent(sent));
 	CHECK(authorityStore.FindFirstRoot("copied payload") != engine::ecs::NULL_ENTITY);
+
+	const auto sender = engine::scene::AddPlayer(authorityStore, "authenticated", false, 42);
+	REQUIRE(sender != engine::ecs::NULL_ENTITY);
+	REQUIRE(authority->DeliverRemoteEvent(sent, sender));
+	CHECK(authorityStore.FindFirstRoot("authenticated") != engine::ecs::NULL_ENTITY);
+	const auto invalid = authorityStore.CreateInstance(engine::scene::PartClass(), "not a player");
+	REQUIRE_FALSE(authority->DeliverRemoteEvent(sent, invalid));
+	authorityStore.DestroyInstance(sender);
+	REQUIRE_FALSE(authority->DeliverRemoteEvent(sent, sender));
 }
 
 TEST_CASE("a combined Luau host delivers a RemoteEvent without a network sender", "[script][remote-event]") {

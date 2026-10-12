@@ -8,13 +8,10 @@
 //
 // The maps are written by hand rather than by running `tsc`, so the cases hold
 // on a checkout with no `node_modules`: `just check` must not depend on whether
-// somebody has run `bun install`. The one case that does use the real toolchain
-// asks the build's own output whether it still has the shape the reader expects,
-// and skips when the transpile did not run.
+// somebody has run `bun install`.
 
 #include "SourceMap.hpp"
 
-#include <engine/core/Paths.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/scriptjs/Runtime.hpp>
@@ -236,41 +233,4 @@ TEST_CASE("a TypeScript scene that throws names its own line", "[script][sourcem
 	// first check and still leave a reader two line numbers to choose between.
 	CHECK(error.find((directory / "scene.ts").string() + ":12") != std::string::npos);
 	CHECK(error.find("scene.js:3") == std::string::npos);
-}
-
-TEST_CASE("the build's own transpile emits a map this reader understands", "[script][sourcemap]") {
-	// The staged twin of `mono.engine/examples/assets/scripts/Mirrors-4-worlds.ts`, which
-	// exists only where `tsc` was available at configure time. **The point of
-	// this case is that the hand-written maps above cannot go stale silently**:
-	// they are this suite's model of what the toolchain emits, and a real map is
-	// what says the model is still right.
-	//
-	// The examples stage under the program's assets tree. This stays spelled out
-	// here rather than adding an `examples` dependency to `scriptjs`.
-	const std::string name = "Mirrors-4-worlds.js.map";
-	std::filesystem::path staged = engine::core::Paths::Assets() / "examples" / "scripts" / name;
-	if (!std::filesystem::exists(staged)) {
-		staged = engine::core::Paths::Base().parent_path() / "assets" / "examples" / "scripts" / name;
-	}
-
-	if (!std::filesystem::exists(staged)) {
-		SUCCEED("no transpiled twin; tsc was not available at configure time");
-		return;
-	}
-
-	const auto loaded = LoadSourceMap(staged);
-	REQUIRE(loaded.has_value());
-
-	// It names the TypeScript the scene was written in, at a path that exists.
-	CHECK(loaded->Source.ends_with("Mirrors-4-worlds.ts"));
-	CHECK(std::filesystem::exists(loaded->Source));
-
-	// And it maps something rather than decoding to a run of zeroes, which is
-	// what a reader that silently gave up would produce.
-	REQUIRE_FALSE(loaded->SourceLines.empty());
-	size_t covered = 0;
-	for (const uint32_t line : loaded->SourceLines) {
-		covered += line != 0 ? 1 : 0;
-	}
-	CHECK(covered > loaded->SourceLines.size() / 2);
 }

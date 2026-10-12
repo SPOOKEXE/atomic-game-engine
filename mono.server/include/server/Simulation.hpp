@@ -1,24 +1,6 @@
 #pragma once
 
-// The placeholder world the server hosts until there is a game file to load one
-// from.
-//
-// **The components are `mono.engine/scene`'s and nothing here declares one.**
-// This file used to carry a `Position`, a `Velocity` and a `WorldBounds`,
-// because the ECS is storage and does not know what a Transform is and `scene`
-// at L7 did not exist. It does now, both programs register the same set under
-// the same names, and that is what lets a snapshot cross to a client with no
-// translation layer - `mono.client/include/client/Replicated.hpp` used to be
-// that layer and is not any more.
-//
-// Still deliberately not shared with `mono.client`. A client-tier header is
-// invisible to this binary by construction, and reaching for one would be the
-// first crack in the split this program exists to demonstrate. Sharing happens
-// through an engine module, which is what `scene` is.
-//
-// What is left here is the placeholder: `Chatter` and `Heard`, which exist to
-// put traffic on a bus that would otherwise have none, and the three functions
-// that build and register the world.
+// Server simulation setup and optional cross-world bus diagnostics.
 
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -28,13 +10,10 @@
 
 namespace server {
 
-	// Makes a placeholder world talk on a bus.
+	// Makes a world talk on a bus when --chatter is enabled.
 	//
-	// **There is no game yet, so there is no traffic.** A universe split across
-	// processes cannot be shown to work without something crossing it, and
-	// inventing traffic inside a test would only prove the test. This is that
-	// something: opt-in, off unless asked for, and it goes when a game file
-	// arrives with real traffic of its own.
+	// A universe split across processes needs observable traffic to check its
+	// bus. This diagnostic is opt-in and independent of scene authorship.
 	//
 	// @since v0.2
 	struct Chatter {
@@ -57,7 +36,7 @@ namespace server {
 		engine::core::Name From;
 	};
 
-	// Registers the `scene` component set and this program's two placeholders,
+	// Registers the `scene` component set and this program's two bus resources,
 	// under explicit names.
 	//
 	// Called before anything else, on every path - including a replay, which
@@ -70,25 +49,18 @@ namespace server {
 	// happens to call a type in an anonymous namespace is not a promise anybody
 	// made. The `scene` names are the same strings the client registers, which
 	// is what lets a snapshot cross between the two programs unaltered.
-	void RegisterPlaceholderComponents();
+	void RegisterServerComponents();
 
-	// Registers the systems, without touching storage.
+	// Installs the optional bus pump and entity-count metric.
 	//
-	// Separate from BuildPlaceholderWorld because a restore needs exactly this
-	// half: a snapshot carries state, never code, so a world restored from one
-	// has entities and no behaviour until this runs. The same program registers
-	// the same systems, which is what makes a replay reproduce a run rather
-	// than approximate it.
-	void RegisterPlaceholderSystems(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
-
-	// Populates `store` and registers the systems that move it. Deterministic:
-	// the same count produces the same world, which is what lets two runs be
-	// compared.
-	void BuildPlaceholderWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler, uint32_t count);
+	// A replay restores storage but not scheduler entries, so its host calls
+	// this again after the snapshot is loaded.
+	void RegisterServerDiagnostics(engine::ecs::Scheduler &scheduler);
 
 	// Gives a hosted world physics and weight - the server's half of what
 	// `studio::Editor::PrepareWorld` does, less the presentation this binary
-	// has no renderer for.
+	// has no renderer for. A restored world keeps its physics resources and
+	// clock; this call restores observation and scheduler setup around them.
 	//
 	// **The server was not simulating anything, and that is a stranger
 	// sentence than it sounds.** `D00039` wired physics into the studio and

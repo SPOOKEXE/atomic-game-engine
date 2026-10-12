@@ -527,9 +527,12 @@ namespace engine::script {
 		virtual bool Heartbeat(float delta) = 0;
 
 		// Delivers one copied RemoteEvent envelope at the authority's script
-		// barrier. Adapters that do not expose this API leave it refused.
-		virtual bool DeliverRemoteEvent(std::span<const std::byte> message) {
+		// barrier. The host resolves the sender from its admitted connection,
+		// never from the envelope. Local delivery without a player supplies nil.
+		virtual bool
+		DeliverRemoteEvent(std::span<const std::byte> message, ecs::Entity sender = ecs::NULL_ENTITY) {
 			(void)message;
+			(void)sender;
 			return false;
 		}
 

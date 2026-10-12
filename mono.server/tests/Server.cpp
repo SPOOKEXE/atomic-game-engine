@@ -5,9 +5,12 @@
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>
+#include <engine/physics/Clock.hpp>
+#include <engine/physics/PhysicsWorld.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
@@ -16,6 +19,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Wire.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
@@ -60,7 +64,6 @@ using engine::ecs::Store;
 using engine::scene::Attachment;
 using engine::scene::Motion;
 using engine::scene::Transform;
-using engine::scene::WorldBounds;
 using engine::world::DataFactoryStatus;
 using engine::world::DataFactoryWorldOperation;
 using engine::world::DataFactoryWorldRequest;
@@ -198,7 +201,7 @@ TEST_CASE("a server data factory owns one isolated lifecycle world", "[server][d
 }
 
 TEST_CASE(
-	"server packages rehydrate systems without rebuilding placeholder entities", "[server][data-factory]"
+	"server packages rehydrate systems without rebuilding default scene entities", "[server][data-factory]"
 ) {
 	server::Options options;
 	options.Entities = 4;
@@ -224,8 +227,8 @@ TEST_CASE(
 					 return engine::script::MakeRuntime(store, engine::script::Language::Luau, limits);
 				 },
 			 .RunPackage = engine::script::RunDataScriptPackage,
-			 .InstallSystems = [](Store &store,
-								  Scheduler &systems) { server::RegisterPlaceholderSystems(store, systems); },
+			 .InstallSystems = [](Store &,
+								  Scheduler &systems) { server::RegisterServerDiagnostics(systems); },
 			 .Admit =
 				 [](std::string_view source, std::string_view entry, std::string &error) {
 					 return engine::script::CheckDataScriptPackageSource(
@@ -449,13 +452,94 @@ TEST_CASE("a server hosts the requested number of entities", "[server]") {
 	Hosted hosted{128, 1};
 
 	size_t positions = 0;
-	size_t moving = 0;
+	size_t velocities = 0;
 	hosted.Host.Enter([&](Store &store) {
-		positions = store.CountMatching<Transform>();
-		moving = store.CountMatching<Transform, Motion>();
+		REQUIRE(store.Resource<engine::physics::PhysicsWorld>() != nullptr);
+		REQUIRE(store.Resource<engine::physics::PhysicsClock>() != nullptr);
+		const Entity field = store.FindFirstChild(store.FindFirstRoot("Workspace"), "ServerDefault");
+		REQUIRE(field != engine::ecs::NULL_ENTITY);
+		store.EachChild(field, [&](Entity entity) {
+			REQUIRE(store.ClassOf(entity) == engine::scene::PartClass());
+			if (store.Get<Transform>(entity) != nullptr) positions++;
+			engine::ecs::AttributeValue velocity;
+			if (engine::ecs::GetAttribute(store, entity, engine::core::Name("Velocity"), velocity) &&
+				velocity.Type == engine::ecs::PropertyType::Vector3) {
+				velocities++;
+			}
+		});
 	});
 	REQUIRE(positions == 128);
-	REQUIRE(moving == 128);
+	REQUIRE(velocities == 128);
+}
+
+TEST_CASE("the default Luau scene clamps and reflects motion at every wall", "[server]") {
+	static_assert(engine::scene::WireCoversWorld(64.0f));
+	server::Options options = Headless(64, 1);
+	options.TickRate = 0.01;
+	server::Server host;
+	REQUIRE(host.Initialise(options));
+
+	struct Sample {
+		Entity Id;
+		Vector3 Position;
+		Vector3 Velocity;
+	};
+	std::vector<Sample> samples;
+	REQUIRE(host.Enter([&](Store &store) {
+		const Entity field = store.FindFirstChild(store.FindFirstRoot("Workspace"), "ServerDefault");
+		REQUIRE(field != engine::ecs::NULL_ENTITY);
+		store.EachChild(field, [&](Entity entity) {
+			REQUIRE(store.ClassOf(entity) == engine::scene::PartClass());
+			const Transform *transform = store.Get<Transform>(entity);
+			REQUIRE(transform != nullptr);
+			engine::ecs::AttributeValue speed;
+			REQUIRE(engine::ecs::GetAttribute(store, entity, engine::core::Name("Velocity"), speed));
+			REQUIRE(speed.Type == engine::ecs::PropertyType::Vector3);
+			samples.push_back({entity, transform->Frame.Position, speed.Vector3});
+		});
+	}));
+	REQUIRE(samples.size() == 64);
+	REQUIRE(host.Run().Ticks == 1);
+
+	int upper[3]{};
+	int lower[3]{};
+	REQUIRE(host.Enter([&](Store &store) {
+		for (const Sample &sample : samples) {
+			const Transform *transform = store.Get<Transform>(sample.Id);
+			REQUIRE(transform != nullptr);
+			engine::ecs::AttributeValue speed;
+			REQUIRE(engine::ecs::GetAttribute(store, sample.Id, engine::core::Name("Velocity"), speed));
+			REQUIRE(speed.Type == engine::ecs::PropertyType::Vector3);
+
+			const float *before[] = {&sample.Position.X, &sample.Position.Y, &sample.Position.Z};
+			const float *velocity[] = {&sample.Velocity.X, &sample.Velocity.Y, &sample.Velocity.Z};
+			const float *after[] = {
+				&transform->Frame.Position.X, &transform->Frame.Position.Y, &transform->Frame.Position.Z
+			};
+			const float *newVelocity[] = {&speed.Vector3.X, &speed.Vector3.Y, &speed.Vector3.Z};
+			for (int axis = 0; axis < 3; axis++) {
+				const float travelled = *before[axis] + *velocity[axis] * 100.0f;
+				float expectedPosition = travelled;
+				float expectedVelocity = *velocity[axis];
+				if (travelled > 64.0f) {
+					upper[axis]++;
+					expectedPosition = 64.0f;
+					expectedVelocity = -std::abs(expectedVelocity);
+				} else if (travelled < -64.0f) {
+					lower[axis]++;
+					expectedPosition = -64.0f;
+					expectedVelocity = std::abs(expectedVelocity);
+				}
+				CHECK(*after[axis] == Approx(expectedPosition).margin(0.001f));
+				CHECK(*newVelocity[axis] == Approx(expectedVelocity).margin(0.001f));
+			}
+		}
+	}));
+	for (int axis = 0; axis < 3; axis++) {
+		CHECK(upper[axis] > 0);
+		CHECK(lower[axis] > 0);
+	}
+	host.Shutdown();
 }
 
 TEST_CASE("a tick budget is honoured exactly", "[server]") {
@@ -477,22 +561,21 @@ TEST_CASE("a zero tick rate is refused rather than dividing by it", "[server]") 
 TEST_CASE("entities move", "[server]") {
 	Hosted hosted{64, 10};
 
-	const auto positionOf = [&hosted](int nth) {
+	const auto positionOf = [&hosted] {
 		engine::core::Vector3 found;
-		int seen = 0;
 		hosted.Host.Enter([&](Store &store) {
-			store.Each<const Transform>([&](Entity, const Transform &transform) {
-				if (seen++ == nth) {
-					found = transform.Frame.Position;
-				}
-			});
+			const Entity field = store.FindFirstChild(store.FindFirstRoot("Workspace"), "ServerDefault");
+			const Entity cube = store.FindFirstChild(field, "Cube1");
+			const Transform *transform = store.Get<Transform>(cube);
+			REQUIRE(transform != nullptr);
+			found = transform->Frame.Position;
 		});
 		return found;
 	};
 
-	const auto before = positionOf(0);
+	const auto before = positionOf();
 	hosted.Host.Run();
-	const auto after = positionOf(0);
+	const auto after = positionOf();
 
 	REQUIRE_FALSE(before == after);
 }
@@ -504,11 +587,10 @@ TEST_CASE("nothing escapes the bounds, however long it runs", "[server]") {
 	// Reflecting the velocity without clamping the position lets an entity
 	// that overshot sit outside the box flipping every tick, which reads as
 	// a stuck entity rather than as a bounds bug.
-	// The box is a property of the world, so it is read once from the world
-	// rather than off each entity.
+	// The scripted field reflects at 64 studs on every axis.
 	bool inside = true;
 	hosted.Host.Enter([&inside](Store &store) {
-		const float limit = store.Resource<WorldBounds>()->HalfExtent + 0.001f;
+		const float limit = 64.0f + 0.001f;
 
 		store.Each<const Transform>([&inside, limit](Entity, const Transform &transform) {
 			const engine::core::Vector3 &position = transform.Frame.Position;
@@ -720,8 +802,14 @@ TEST_CASE("a recorded run replays to the same state", "[server]") {
 		});
 		return found;
 	};
+	const auto entitiesOf = [](server::Server &host) {
+		size_t count = 0;
+		host.Enter([&count](Store &store) { store.EachEntity([&count](Entity) { count++; }); });
+		return count;
+	};
 
 	std::vector<engine::core::Vector3> live;
+	size_t liveEntities = 0;
 	{
 		server::Server host;
 		auto options = Headless(64, 30);
@@ -730,12 +818,14 @@ TEST_CASE("a recorded run replays to the same state", "[server]") {
 		REQUIRE(host.Initialise(options));
 		REQUIRE(host.Run().Ticks == 30);
 		live = positionsOf(host);
+		liveEntities = entitiesOf(host);
 		host.Shutdown(); // writes the recording
 	}
 
 	REQUIRE(std::filesystem::exists(recording));
 
 	std::vector<engine::core::Vector3> replayed;
+	size_t replayedEntities = 0;
 	{
 		server::Server host;
 		server::Options options;
@@ -744,10 +834,12 @@ TEST_CASE("a recorded run replays to the same state", "[server]") {
 		REQUIRE(host.Initialise(options));
 		REQUIRE(host.Run().Ticks == 30);
 		replayed = positionsOf(host);
+		replayedEntities = entitiesOf(host);
 		host.Shutdown();
 	}
 
 	REQUIRE(live.size() == replayed.size());
+	REQUIRE(liveEntities == replayedEntities);
 	REQUIRE_FALSE(live.empty());
 
 	size_t drifted = 0;
@@ -804,7 +896,13 @@ TEST_CASE("recording a replay reproduces the recording it replayed", "[server]")
 		std::ifstream stream(path, std::ios::binary);
 		return std::vector<char>(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
 	};
-	REQUIRE(read(source) == read(again));
+	const std::vector<char> sourceBytes = read(source);
+	const std::vector<char> replayBytes = read(again);
+	REQUIRE(sourceBytes.size() == replayBytes.size());
+	const auto firstDifference =
+		std::mismatch(sourceBytes.begin(), sourceBytes.end(), replayBytes.begin(), replayBytes.end());
+	INFO("first differing byte: " << std::distance(sourceBytes.begin(), firstDifference.first));
+	REQUIRE(std::ranges::equal(sourceBytes, replayBytes));
 
 	std::filesystem::remove(source);
 	std::filesystem::remove(again);
@@ -880,7 +978,7 @@ TEST_CASE("a prepared world resolves its attachments", "[server]") {
 	// what makes `Attachment.WorldCFrame` fire `.Changed` for a server script.
 	// Reproduced with a scene script before it was fixed: zero signals over
 	// twenty ticks of a part moving one stud each.
-	server::RegisterPlaceholderComponents();
+	server::RegisterServerComponents();
 	engine::scene::RegisterSceneClasses();
 
 	Store store("server_test.attachments");
@@ -917,14 +1015,14 @@ TEST_CASE(
 	"player admission reply survives send backpressure", "[server][portal-session][admission-pressure]"
 ) {
 	using namespace engine;
-	const bool hasGame = GENERATE(false, true);
+	const bool customScene = GENERATE(false, true);
 	const bool replace = GENERATE(false, true);
-	CAPTURE(hasGame, replace);
+	CAPTURE(customScene, replace);
 	auto options = Headless(0, 3);
 	options.Listening = true;
 	options.Transport = net::WireMode::Datagram;
 	const auto path = core::Paths::Base() / "admission-pressure.luau";
-	if (hasGame) {
+	if (customScene) {
 		std::ofstream source(path);
 		REQUIRE(source);
 		source << "local floor = Instance.new('Part')\n"
@@ -935,7 +1033,7 @@ TEST_CASE(
 	}
 	server::Server host;
 	REQUIRE(host.Initialise(options));
-	if (hasGame) {
+	if (customScene) {
 		std::error_code ignored;
 		std::filesystem::remove(path, ignored);
 	}
@@ -986,20 +1084,15 @@ TEST_CASE(
 	client.Poll(replica, core::Clock::Seconds());
 	REQUIRE(replies.size() == 1);
 	CHECK(replies.front().Attempt == request.Attempt);
-	if (hasGame) {
-		CHECK(replies.front().Kind == game::PortalSessionKind::Ready);
-		REQUIRE(host.Enter([&](Store &store) {
-			CHECK(store.Alive(replies.front().Player));
-			size_t players = 0;
-			store.EachEntity([&](Entity entity) {
-				if (store.IsA(entity, scene::PlayerClass())) players++;
-			});
-			CHECK(players == 1);
-		}));
-	} else {
-		CHECK(replies.front().Kind == game::PortalSessionKind::Refused);
-		CHECK_FALSE(replies.front().Diagnostic.empty());
-	}
+	CHECK(replies.front().Kind == game::PortalSessionKind::Ready);
+	REQUIRE(host.Enter([&](Store &store) {
+		CHECK(store.Alive(replies.front().Player));
+		size_t players = 0;
+		store.EachEntity([&](Entity entity) {
+			if (store.IsA(entity, scene::PlayerClass())) players++;
+		});
+		CHECK(players == 1);
+	}));
 	host.Shutdown();
 }
 

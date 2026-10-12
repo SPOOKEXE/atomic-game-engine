@@ -46,11 +46,6 @@ namespace client {
 		engine::world::WorldId topologyOwner = {}
 	);
 
-	// Example-scene components shared by every program that can load an example.
-
-	using engine::examples::Orbit;
-	using engine::examples::Spin;
-
 	// --- resources: one of each, for the whole world -----------------------
 
 	using engine::render::CollectPortalViews;

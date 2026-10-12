@@ -196,9 +196,7 @@ namespace studio {
 			}
 
 			if (engine::scene::PlayersOf(store) == engine::ecs::NULL_ENTITY) {
-				// A world with no `Players` service gets no player, quietly.
-				// `mono.server` says the same: that is the placeholder scene,
-				// which is furnished by nobody.
+				// A service-free world admits no player, as on a server.
 				return;
 			}
 

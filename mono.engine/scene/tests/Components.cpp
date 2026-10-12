@@ -327,10 +327,8 @@ TEST_CASE("bounds and half extents agree on halves", "[scene][components]") {
 }
 
 TEST_CASE("world bounds are a half extent, once per world", "[scene][components]") {
-	// The default matches the box the server's placeholder scene has always
-	// bounced inside, so migrating that world onto this type changed no
-	// number. Half, not full: the containment test compares an absolute
-	// coordinate against it directly.
+	// Half, not full: the containment test compares an absolute coordinate
+	// against this radius directly.
 	const WorldBounds bounds;
 	CHECK(bounds.HalfExtent == 64.0f);
 }

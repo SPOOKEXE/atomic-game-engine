@@ -1370,6 +1370,10 @@ ui-lab *args: (build "client")
 ui-test: (build "test_examples")
     ./{{build}}/tests/test_examples '[ui-lab]'
 
+# Capture every shipped Luau demo and authored world through the headless client.
+demo-check frames="120": client
+    python3 scripts/demos/check-demos.py --build {{build}} --frames {{frames}}
+
 # Exercise the UI lab through the native desktop input path.
 ui-live-check *args: (build "client")
     python3 scripts/demos/ui-live-check.py --preset '{{preset}}' {{args}}

@@ -6,6 +6,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/Instances.hpp>
@@ -622,8 +623,11 @@ namespace engine::script {
 		luaL_sandbox(State);
 	}
 
-	bool LuauRuntime::DeliverRemoteEvent(std::span<const std::byte> bytes) {
-		if (!Role().Server) return false;
+	bool LuauRuntime::DeliverRemoteEvent(std::span<const std::byte> bytes, ecs::Entity sender) {
+		Runtime::StackGuard guard(*this);
+		if (!guard || !Role().Server) return false;
+		if (sender != ecs::NULL_ENTITY && (!Store.Alive(sender) || !Store.IsA(sender, scene::PlayerClass())))
+			return false;
 
 		RemoteEventMessage message;
 		if (!DecodeRemoteEvent(bytes, message)) return false;
@@ -632,7 +636,7 @@ namespace engine::script {
 		ecs::Entity subject = ecs::NULL_ENTITY;
 		bool ambiguous = false;
 		Store.Each<const ecs::InstanceClass>([&](ecs::Entity entity, const ecs::InstanceClass &) {
-			if (ambiguous) return;
+			if (ambiguous || scene::ScopeOfInstance(Store, entity) == scene::ServiceScope::Server) return;
 			if (Store.IsA(entity, remoteEvent) && Store.GetFullName(entity) == message.Event) {
 				if (subject != ecs::NULL_ENTITY) {
 					ambiguous = true;
@@ -646,7 +650,12 @@ namespace engine::script {
 		lua_pushlstring(
 			State, reinterpret_cast<const char *>(message.Payload.data()), message.Payload.size()
 		);
-		Error = FireSignal(State, SignalKind::RemoteEvent, subject, 1);
+		if (sender == ecs::NULL_ENTITY)
+			lua_pushnil(State);
+		else
+			PushInstanceValue(State, sender);
+		BoundsOf(State).StepsBase = BoundsOf(State).StepsTaken;
+		Error = FireSignal(State, SignalKind::RemoteEvent, subject, 2);
 		return Error.empty();
 	}
 
