@@ -1363,6 +1363,18 @@ packaged-tornado-audio: (build "client")
 ui-check: (build "client")
     PRESET={{preset}} ./scripts/demos/ui-visual-check.sh
 
+# Open the UI lab in the client. Extra arguments are passed to the client.
+ui-lab *args: (build "client")
+    ./{{build}}/client/client --script '{{build}}/assets/examples/scripts/UiLab.luau' {{args}}
+
+# Rerun the UI lab contract suite, including after script-only edits.
+ui-test: (build "test_examples")
+    ./{{build}}/tests/test_examples '[ui-lab]'
+
+# Exercise the UI lab through the native desktop input path.
+ui-live-check *args: (build "client")
+    python3 scripts/demos/ui-live-check.py --preset '{{preset}}' {{args}}
+
 # Run the client to a frame budget and check the process actually ends.
 #
 # **A hang is the one failure a `TEST_CASE` cannot report**, which is why this
