@@ -47,6 +47,9 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tools.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/RemoteEvent.hpp>
+#include <engine/script/Runtime.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
