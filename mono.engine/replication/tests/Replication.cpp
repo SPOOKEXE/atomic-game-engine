@@ -240,14 +240,14 @@ TEST_CASE("component changes survive a snapshot streamed across ticks", "[replic
 	pair.Server.Observe<SnapshotPayload>();
 	const Entity tracked = pair.Server.Create();
 	pair.Server.Set(tracked, Spot{1, 0});
-	const Entity large = pair.Server.Create();
-	pair.Server.Set(large, SnapshotPayload{});
 	const Entity parent = pair.Server.Create();
 	pair.Server.Set(parent, engine::ecs::Hierarchy{});
 	pair.Server.Set(parent, Spot{3, 0});
 	const Entity before = pair.Server.Create();
 	pair.Server.Set(before, engine::ecs::Hierarchy{});
 	pair.Server.Set(before, Spot{4, 0});
+	const Entity large = pair.Server.Create();
+	pair.Server.Set(large, SnapshotPayload{});
 	const Entity after = pair.Server.Create();
 	pair.Server.Set(after, engine::ecs::Hierarchy{});
 	pair.Server.Set(after, Spot{5, 0});
