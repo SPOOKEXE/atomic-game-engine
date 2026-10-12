@@ -23,7 +23,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
 
 -- StarterPlayerScripts is copied to the local player before the world starts.
--- The template may also be selected by a combined host, so one authored HUD wins.
+-- Templates stay inert; repeated player bootstrap calls keep one authored HUD.
 if StarterGui:FindFirstChild("BladeborneHUD") then
 	return
 end
