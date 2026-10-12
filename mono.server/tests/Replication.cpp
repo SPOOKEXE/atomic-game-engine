@@ -1576,6 +1576,9 @@ TEST_CASE(
 	limits.RemoteEventSender = [&](std::span<const std::byte> bytes) {
 		return viewer.Link->SendUser(bytes, engine::core::Clock::Seconds());
 	};
+	const auto *localBeforeRuntime = viewer.World.Resource<engine::scene::LocalPlayer>();
+	const Entity playerBeforeRuntime =
+		localBeforeRuntime != nullptr ? localBeforeRuntime->Instance : engine::ecs::NULL_ENTITY;
 	auto runtime = engine::script::MakeRuntime(viewer.World, engine::script::Language::Luau, limits);
 	REQUIRE(runtime != nullptr);
 	const Entity playerScripts = viewer.World.FindFirstChild(viewer.Mine, "PlayerScripts");
@@ -1583,6 +1586,40 @@ TEST_CASE(
 	REQUIRE(companion != engine::ecs::NULL_ENTITY);
 	const auto selectedScripts = engine::script::ClientScriptsIn(viewer.World);
 	const size_t startedScripts = runtime->RunNewScripts(selectedScripts);
+	const auto *localAfterRuntime = viewer.World.Resource<engine::scene::LocalPlayer>();
+	const Entity playerAfterRuntime =
+		localAfterRuntime != nullptr ? localAfterRuntime->Instance : engine::ecs::NULL_ENTITY;
+	const auto companionClass = viewer.World.ClassOf(companion);
+	const auto playerClass = viewer.World.ClassOf(viewer.Mine);
+	const Entity starterPlayer =
+		engine::scene::ServiceOf(viewer.World, engine::ecs::Classes::Find(Name("StarterPlayer")));
+	INFO(
+		"mine: " << viewer.Mine.Id << "; local before runtime: " << playerBeforeRuntime.Id
+				 << "; local after runtime: " << playerAfterRuntime.Id
+	);
+	INFO(
+		"mine alive: " << viewer.World.Alive(viewer.Mine) << "; local resource: "
+					   << (localAfterRuntime != nullptr) << "; adopt only: " << viewer.World.AdoptOnly()
+	);
+	INFO(
+		"player class: "
+		<< (playerClass.IsValid() ? engine::ecs::Classes::Describe(playerClass).Name.Text() : "invalid")
+		<< "; companion class: "
+		<< (companionClass.IsValid() ? engine::ecs::Classes::Describe(companionClass).Name.Text() : "invalid")
+	);
+	INFO(
+		"companion: " << viewer.World.GetFullName(companion)
+					  << "; owner: " << engine::scene::PlayerOwning(viewer.World, companion).Id
+					  << "; disabled: " << viewer.World.Has<engine::script::Disabled>(companion)
+					  << "; template: "
+					  << (starterPlayer != engine::ecs::NULL_ENTITY &&
+						  viewer.World.IsDescendantOf(companion, starterPlayer))
+	);
+	INFO(
+		"companion has lua container: "
+		<< (viewer.World.Get<engine::script::LuaSourceContainer>(companion) != nullptr)
+		<< "; all client scripts: " << engine::script::ScriptsIn(viewer.World, false, true).size()
+	);
 	INFO("selected scripts: " << selectedScripts.size() << "; started scripts: " << startedScripts);
 	INFO("companion has program: " << (viewer.World.Get<engine::script::Program>(companion) != nullptr));
 	INFO(runtime->LastError());
