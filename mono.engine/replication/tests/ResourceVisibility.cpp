@@ -13,6 +13,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -145,7 +146,8 @@ TEST_CASE("attribute snapshots and updates exclude hidden owners", "[replication
 
 	pair.ShowPublic = false;
 	REQUIRE(pair.Wait([&] {
-		return !pair.Client.Alive(publicOwner) &&
+		// The replica hands the tombstone to presentation before destroying the row.
+		return std::ranges::find(pair.Replica.Forgotten(), publicOwner) != pair.Replica.Forgotten().end() &&
 			   !engine::ecs::GetAttribute(pair.Client, publicOwner, Name("Score"), hidden);
 	}));
 	CHECK(HasScore(pair.Client, mine, 21));
