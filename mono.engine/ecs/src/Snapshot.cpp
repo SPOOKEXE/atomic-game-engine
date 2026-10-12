@@ -8,6 +8,7 @@
 #include <engine/ecs/Time.hpp>
 
 #include <algorithm>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -20,6 +21,70 @@ namespace engine::ecs {
 		// that is not a snapshot at all fails on the first field instead of
 		// interpreting arbitrary bytes as a table count.
 		constexpr uint64_t SNAPSHOT_MAGIC = 0x504E'534F'4E4F'4D55ull;
+
+		const Hierarchy *SnapshotHierarchyOf(const StoreState &state, Entity entity, ComponentId hierarchy) {
+			return static_cast<const Hierarchy *>(GetComponent(state, entity, hierarchy));
+		}
+
+		// Parents and earlier siblings must move first. Reject cycles before live rows change.
+		bool OverlayHierarchyOrder(
+			const StoreState &receiving,
+			const StoreState &incoming,
+			std::span<const Entity> entities,
+			ComponentId hierarchy,
+			std::vector<Entity> &ordered
+		) {
+			if (!hierarchy.IsValid()) return true;
+			enum class Visit : uint8_t { Visiting, Visited };
+			struct Pending {
+				Entity Instance;
+				bool Expanded;
+			};
+			const auto mentioned = [&](Entity entity) {
+				const EntityId key = EntityId::Of(entity);
+				return incoming.Directory.Alive(key.Index, key.Generation);
+			};
+			const auto desiredHierarchy = [&](Entity entity) {
+				return SnapshotHierarchyOf(mentioned(entity) ? incoming : receiving, entity, hierarchy);
+			};
+			std::unordered_map<Entity, Visit> visits;
+			std::vector<Pending> pending;
+			for (const Entity root : entities) {
+				pending.push_back({root, false});
+				while (!pending.empty()) {
+					const Pending step = pending.back();
+					pending.pop_back();
+					const Hierarchy *node = desiredHierarchy(step.Instance);
+					if (node == nullptr) continue;
+					if (step.Expanded) {
+						visits.at(step.Instance) = Visit::Visited;
+						if (mentioned(step.Instance)) ordered.push_back(step.Instance);
+						continue;
+					}
+					if (const auto found = visits.find(step.Instance); found != visits.end()) {
+						if (found->second == Visit::Visiting) return false;
+						continue;
+					}
+					visits.emplace(step.Instance, Visit::Visiting);
+					pending.push_back({step.Instance, true});
+					if (mentioned(step.Instance)) {
+						const Hierarchy *previous =
+							SnapshotHierarchyOf(incoming, node->PreviousSibling, hierarchy);
+						if (previous != nullptr && previous->Parent == node->Parent)
+							pending.push_back({node->PreviousSibling, false});
+					}
+					if (node->Parent == NULL_ENTITY) continue;
+					if (desiredHierarchy(node->Parent) != nullptr) {
+						pending.push_back({node->Parent, false});
+						continue;
+					}
+					const EntityId parent = EntityId::Of(node->Parent);
+					if (mentioned(node->Parent) || receiving.Directory.Alive(parent.Index, parent.Generation))
+						return false;
+				}
+			}
+			return true;
+		}
 	}
 
 	bool SaveSnapshot(const StoreState &state, std::string_view name, core::ByteWriter &writer) {
@@ -363,6 +428,11 @@ namespace engine::ecs {
 				incoming.push_back(entity);
 			}
 		}
+		const ComponentId hierarchy = Components::Of<Hierarchy>();
+		std::vector<Entity> hierarchyOrder;
+		if (mode == ApplyMode::Overlay &&
+			!OverlayHierarchyOrder(state, scratch, incoming, hierarchy, hierarchyOrder))
+			return false;
 
 		// --- entities here that the snapshot does not mention ---
 		if (mode == ApplyMode::Authoritative) {
@@ -449,15 +519,33 @@ namespace engine::ecs {
 					// A sender that does not observe this entity's components omits it,
 					// but removing it here would immediately be undone by Tracked().
 					if (id != dirtyBits && !wanted.Contains(id)) {
+						if (mode == ApplyMode::Overlay && id == hierarchy) DetachFromTree(state, entity);
 						RemoveComponent(state, entity, id);
 					}
 				}
 			}
 
 			for (const ComponentId id : wanted.Ids()) {
+				if (mode == ApplyMode::Overlay && id == hierarchy) {
+					// Keep indexes of children and siblings omitted by this partial snapshot.
+					if (SnapshotHierarchyOf(state, entity, hierarchy) == nullptr) {
+						const Hierarchy blank{};
+						SetComponent(state, entity, id, &blank);
+					}
+					continue;
+				}
 				const Column *column = scratch.Tables[from.Archetype].Find(id);
 				SetComponent(state, entity, id, column->At(from.Row));
 			}
+		}
+		for (const Entity entity : hierarchyOrder) {
+			const Entity parent = SnapshotHierarchyOf(scratch, entity, hierarchy)->Parent;
+			if (parent != NULL_ENTITY && SnapshotHierarchyOf(state, parent, hierarchy) == nullptr) {
+				// A join preface can precede its external parent; the full snapshot links it.
+				const EntityId key = EntityId::Of(parent);
+				if (!scratch.Directory.Alive(key.Index, key.Generation)) continue;
+			}
+			if (!SetParent(state, entity, parent)) return false;
 		}
 
 		// --- resources and the clock ---

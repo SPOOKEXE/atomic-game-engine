@@ -236,11 +236,30 @@ TEST_CASE("component changes survive a snapshot streamed across ticks", "[replic
 	pair.Handle = pair.Authority_.Admit();
 	pair.Authority_.Replicate(Name("replication_test.Spot"), detection);
 	pair.Authority_.Replicate(Name("replication_test.SnapshotPayload"), ChangeDetection::Observed);
+	pair.Authority_.Replicate(Name("ecs.Hierarchy"), ChangeDetection::Signature);
 	pair.Server.Observe<SnapshotPayload>();
 	const Entity tracked = pair.Server.Create();
 	pair.Server.Set(tracked, Spot{1, 0});
 	const Entity large = pair.Server.Create();
 	pair.Server.Set(large, SnapshotPayload{});
+	const Entity parent = pair.Server.Create();
+	pair.Server.Set(parent, engine::ecs::Hierarchy{});
+	pair.Server.Set(parent, Spot{3, 0});
+	const Entity before = pair.Server.Create();
+	pair.Server.Set(before, engine::ecs::Hierarchy{});
+	pair.Server.Set(before, Spot{4, 0});
+	const Entity after = pair.Server.Create();
+	pair.Server.Set(after, engine::ecs::Hierarchy{});
+	pair.Server.Set(after, Spot{5, 0});
+	pair.Server.Set(large, engine::ecs::Hierarchy{});
+	REQUIRE(pair.Server.SetParent(before, parent));
+	REQUIRE(pair.Server.SetParent(large, parent));
+	REQUIRE(pair.Server.SetParent(after, parent));
+	const auto childrenOf = [&](Entity owner) {
+		std::vector<Entity> children;
+		pair.Client.EachChild(owner, [&](Entity child) { children.push_back(child); });
+		return children;
+	};
 
 	std::vector<std::byte> delayedAck;
 	const auto publish = [&](bool acknowledge = true) {
@@ -258,6 +277,8 @@ TEST_CASE("component changes survive a snapshot streamed across ticks", "[replic
 		pair.Tick();
 		REQUIRE(pair.Client.Get<Spot>(tracked));
 		REQUIRE(pair.Client.Get<Spot>(tracked)->X == 1);
+		REQUIRE(pair.Client.ParentOf(large) == parent);
+		REQUIRE(childrenOf(parent) == std::vector<Entity>{before, large, after});
 		pair.Server.GetMutable<SnapshotPayload>(large)->Bytes[0] = 'b';
 		if (delayedAcknowledgement) pair.Server.Set(tracked, Spot{2, 0});
 		// The first delta queues the oversized row; the next publish starts its slice.
@@ -290,6 +311,8 @@ TEST_CASE("component changes survive a snapshot streamed across ticks", "[replic
 	CHECK(pair.Client.Get<Spot>(tracked)->X == 0);
 	REQUIRE(pair.Client.Get<SnapshotPayload>(large));
 	CHECK(pair.Client.Get<SnapshotPayload>(large)->Bytes[0] == (oversize ? 'b' : 'a'));
+	CHECK(pair.Client.ParentOf(large) == parent);
+	CHECK(childrenOf(parent) == std::vector<Entity>{before, large, after});
 	CHECK(pair.Authority_.Stats().Resnapshots == 0);
 }
 

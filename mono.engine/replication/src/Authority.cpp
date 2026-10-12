@@ -18,6 +18,7 @@
 #include <cstring>
 #include <limits>
 #include <span>
+#include <unordered_set>
 #include <utility>
 
 namespace engine::replication {
@@ -855,6 +856,13 @@ namespace engine::replication {
 				// anything in this set is already here to hang it from.
 				if (id == hierarchyId) {
 					const auto *node = static_cast<const ecs::Hierarchy *>(value);
+					if (overlay) {
+						// The receiver already holds parents outside this entity slice.
+						ecs::Hierarchy links{};
+						links.Parent = node->Parent;
+						scratch.SetComponent(entity, id, &links);
+						continue;
+					}
 
 					// **Both ends given a blank node before either is linked.**
 					// `SetParent` refuses a row with none, and this loop reaches
@@ -888,6 +896,24 @@ namespace engine::replication {
 				descriptor.Wire.Read(reader, decoded.data(), 1);
 				scratch.SetComponent(entity, id, decoded.data());
 				descriptor.Destruct(decoded.data(), 1);
+			}
+		}
+		if (overlay) {
+			// Retain selected siblings' authored order without naming omitted rows.
+			std::unordered_set<ecs::Entity> parents;
+			for (const ecs::Entity entity : entities) {
+				const auto *node = scratch.Get<ecs::Hierarchy>(entity);
+				if (node == nullptr || node->Parent == ecs::NULL_ENTITY ||
+					!parents.insert(node->Parent).second)
+					continue;
+				ecs::Entity previous = ecs::NULL_ENTITY;
+				store.EachChild(node->Parent, [&](ecs::Entity child) {
+					if (!scratch.Has<ecs::Hierarchy>(child)) return;
+					scratch.GetMutable<ecs::Hierarchy>(child)->PreviousSibling = previous;
+					if (previous != ecs::NULL_ENTITY)
+						scratch.GetMutable<ecs::Hierarchy>(previous)->NextSibling = child;
+					previous = child;
+				});
 			}
 		}
 
