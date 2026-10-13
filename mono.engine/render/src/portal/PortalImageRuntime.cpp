@@ -2909,7 +2909,6 @@ namespace engine::render {
 	}
 	void PortalImageProducer::SetContentOwner(core::Name owner, std::span<const WorldContentOwner> foreign) {
 		if (State->ContentOwner != owner) {
-			State->EditableImages.ForgetOwner(State->ContentOwner);
 			State->EditableMeshes.ForgetOwner(State->ContentOwner);
 		}
 		State->ContentOwner = owner;
@@ -2945,7 +2944,7 @@ namespace engine::render {
 			pending.Replies = {};
 		}
 		State->Render.ForgetWorld(State->World.Index, State->OwnerName);
-		State->EditableImages.ForgetOwner(State->ContentOwner);
+		State->EditableImages.ForgetOwner(State->OwnerName);
 		State->EditableMeshes.ForgetOwner(State->ContentOwner);
 		State->PipelineReady = {};
 		for (auto &frame : State->Frames) {
@@ -3295,7 +3294,7 @@ namespace engine::render {
 		gui::RegisterGuiComponents();
 		const bool copied = presented && state.Universe.Enter(state.World, [&](ecs::Store &store) {
 			// Prepare once for this batch, before lookups and capture renewal compare resources.
-			state.EditableImages.Refresh(store, state.Render.RendererRef(), state.ContentOwner);
+			state.EditableImages.Refresh(store, state.Render.RendererRef(), state.OwnerName);
 			state.EditableMeshes.Refresh(store, state.Render.RendererRef(), state.ContentOwner);
 			PrepareWorldShaders(
 				store,

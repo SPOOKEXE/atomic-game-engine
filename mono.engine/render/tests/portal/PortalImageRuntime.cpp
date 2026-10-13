@@ -2875,6 +2875,7 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 	SECTION("editable image changes are prepared before capture renewal") {
 		ecs::Entity editable;
 		core::Name editableName;
+		const core::Name editableOwner = worlds.Universe.NameOf(worlds.Destination);
 		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
 			editable = store.CreateInstance(scene::EditableImageClass(), "capture image");
 			scene::EditableImage image;
@@ -2886,7 +2887,8 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 			if (spatialImage) store.GetMutable<gui::Picture>(pictureEntity)->Image = editableName;
 		});
 		const auto prepared = capture();
-		REQUIRE(fixture.Render.TextureHandle(editableName, contentOwner) != nullptr);
+		REQUIRE(fixture.Render.TextureHandle(editableName, editableOwner) != nullptr);
+		CHECK(fixture.Render.TextureHandle(editableName, contentOwner) == nullptr);
 		CHECK(fixture.Render.TextureHandle(editableName) == nullptr);
 		const auto uploadedRevision = fixture.Render.ResourceRevision();
 		const auto unchanged = capture();
@@ -2907,7 +2909,8 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 		const core::Name reboundOwner("session:editable-rebound");
 		bindOwner(reboundOwner);
 		const auto rebound = capture();
-		CHECK(fixture.Render.TextureHandle(editableName, reboundOwner) != nullptr);
+		CHECK(fixture.Render.TextureHandle(editableName, editableOwner) != nullptr);
+		CHECK(fixture.Render.TextureHandle(editableName, reboundOwner) == nullptr);
 		CHECK(rebound.PixelHash == changed.PixelHash);
 		bindOwner(contentOwner);
 		const auto restored = capture();
