@@ -9,6 +9,7 @@
 // indexed by level *and* slot.
 
 #include "DisplayColour.hpp"
+#include "GraphBufferRoles.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
 #include "VulkanTimestamps.hpp"
@@ -889,9 +890,10 @@ namespace engine::render {
 			return nullptr;
 		}
 		SDL_GPUBufferUsageFlags usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-		if (desc->Name == core::Name("tessellated-vertices")) usage |= SDL_GPU_BUFFERUSAGE_VERTEX;
-		if (desc->Name == core::Name("tessellated-indices")) usage |= SDL_GPU_BUFFERUSAGE_INDEX;
-		if (desc->Name == core::Name("tessellated-commands")) usage |= SDL_GPU_BUFFERUSAGE_INDIRECT;
+		const auto roles = detail::GraphBufferRoles(pipeline.Graph, resource);
+		if (roles & detail::VertexBuffer) usage |= SDL_GPU_BUFFERUSAGE_VERTEX;
+		if (roles & detail::IndexBuffer) usage |= SDL_GPU_BUFFERUSAGE_INDEX;
+		if (roles & detail::IndirectBuffer) usage |= SDL_GPU_BUFFERUSAGE_INDIRECT;
 		if (desc->Access == graph::ResourceAccess::Write ||
 			desc->Access == graph::ResourceAccess::ReadWrite ||
 			desc->Access == graph::ResourceAccess::Automatic) {
