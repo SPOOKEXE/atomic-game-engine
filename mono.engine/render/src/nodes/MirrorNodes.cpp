@@ -911,6 +911,11 @@ namespace engine::render {
 
 			ENGINE_PROFILE_CAT("mirror overlay pass", core::ProfileCategory::Render);
 
+			if (!recording.Activity.MirrorOverlay) {
+				if (context.Reads.empty() || context.Writes.empty()) return false;
+				return recording.PublishIdentity(context, context.Reads.front(), context.Writes.front());
+			}
+
 			Impl::NamedTexture source;
 			Impl::NamedTexture target;
 			if (!context.Reads.empty()) {

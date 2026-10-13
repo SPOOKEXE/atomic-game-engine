@@ -781,6 +781,11 @@ namespace engine::render {
 									   bool reverseSpectrum = false
 								   ) { return recording.DrawImage(source, target, load, reverseSpectrum); };
 
+			if (!recording.Activity.PortalOverlay) {
+				if (context.Reads.empty() || context.Writes.empty()) return false;
+				return recording.PublishIdentity(context, context.Reads.front(), context.Writes.front());
+			}
+
 			Impl::NamedTexture source;
 			Impl::NamedTexture target;
 			if (!context.Reads.empty()) {

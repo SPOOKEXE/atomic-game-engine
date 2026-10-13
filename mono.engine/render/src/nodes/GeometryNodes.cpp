@@ -1116,7 +1116,8 @@ namespace engine::render {
 			const scene::CameraMatrices &matrices = recording.Matrices;
 			SDL_GPUColorTargetInfo &colourTarget = recording.ColourTarget;
 			SDL_GPUDepthStencilTargetInfo &depthTarget = recording.DepthTarget;
-			const bool drawInterface = recording.DrawInterface;
+			const bool drawInterface =
+				recording.DrawInterface && gameInterfaceHook != nullptr && gameInterfaceHook->AffectsScene();
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
@@ -1137,6 +1138,14 @@ namespace engine::render {
 			ENGINE_PROFILE_CAT("transparent pass", core::ProfileCategory::Render);
 			// Publish the incoming scene even when no transparent hosts draw.
 
+			if (!recording.Activity.Transparent) {
+				if (context.Reads.empty() || context.Writes.empty()) return false;
+				State->RefractionTexture = nullptr;
+				State->RefractionSampler = nullptr;
+				State->RefractionGuardTexture = nullptr;
+				return recording.PublishIdentity(context, context.Reads.front(), context.Writes.front());
+			}
+
 			Impl::NamedTexture source;
 			Impl::NamedTexture target;
 			if (!context.Reads.empty()) {
@@ -1149,6 +1158,16 @@ namespace engine::render {
 				}
 			}
 			State->RefractionGuardTexture = nullptr;
+			// A grid-only view publishes colour and grid together, preserving the
+			// incoming image for branches and captures without an extra scene copy.
+			const bool gridOnly = recording.Activity.Grid && plainTransparent == 0 && !drawInterface &&
+								  particleCount == 0 && ribbonCount == 0;
+			if (gridOnly && recording.ComposeGroundGrid(context.Name, source, target)) {
+				State->RefractionTexture = nullptr;
+				State->RefractionSampler = nullptr;
+				recording.StageHistoryWrites(context, command);
+				return true;
+			}
 			const bool exactCopy = source.IsValid() && target.IsValid() && source.Format == target.Format &&
 								   source.Width == target.Width && source.Height == target.Height;
 			if (!exactCopy || source.Texture == target.Texture) enterNamedPass(context.Name);

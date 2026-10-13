@@ -163,7 +163,9 @@ namespace engine::render {
 				.Compiled = pipeline.Compiled,
 				.Schedule = pipeline.Schedule,
 				.Aliases = pipeline.Aliases,
-				.Profile = graph::ProfilePipeline(pipeline.Graph, pipeline.Compiled, viewWidth, viewHeight),
+				.Profile = graph::ProfilePipeline(
+					pipeline.Graph, pipeline.Compiled, viewWidth, viewHeight, pipeline.IdentitySources
+				),
 			};
 		}
 
@@ -987,6 +989,8 @@ namespace engine::render {
 		// the grid and nothing else.
 		SDL_GPUGraphicsPipeline *GridPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *HdrGridPipeline = nullptr;
+		// Grid-only composition reads the immutable colour and depth in one draw.
+		SDL_GPUGraphicsPipeline *HdrGridCompositePipeline = nullptr;
 
 		// --- shader variants --------------------------------------------------
 		//
@@ -2014,6 +2018,23 @@ namespace engine::render {
 			static constexpr size_t RETAINED_FRAMES = 3;
 			uint64_t ContentSignature = 0;
 			static constexpr uint32_t NO_RETAINED_FRAME = UINT32_MAX;
+			PassActivity Activity;
+			core::Name ForwardPipeline;
+			uint64_t ForwardRevision = 0;
+			uint64_t ForwardWorld = 0;
+			bool ForwardUnavailable = false;
+			// Non-owning current-image bindings, bounded by the installed graph.
+			std::vector<NamedTexture> ForwardedTextures;
+			struct WorkingForwardSet {
+				core::Name Pipeline;
+				uint64_t Revision = 0;
+				uint64_t World = 0;
+				uint64_t ContentSignature = 0;
+				PassActivity Activity;
+				std::vector<NamedTexture> Textures;
+				bool Ready = false;
+				SDL_GPUCommandBuffer *Command = nullptr;
+			} ForwardWorking;
 
 			// Stable mesh and resident identities beside a retained viewport.
 			// Particle-only redraws still fill object draw metadata from the ECS rows,
@@ -2101,6 +2122,27 @@ namespace engine::render {
 		};
 
 		std::vector<SceneSlot> SceneSlots;
+		NamedTexture ForwardedTexture(
+			const InstalledPipeline &pipeline,
+			core::Name resource,
+			size_t slot,
+			SDL_GPUCommandBuffer *command = nullptr
+		) const {
+			if (slot >= SceneSlots.size()) return {};
+			const auto &scene = SceneSlots[slot];
+			const auto &working = scene.ForwardWorking;
+			const bool pending = command != nullptr && working.Command == command &&
+								 working.Pipeline == pipeline.Name && working.Revision == pipeline.Revision;
+			if (!pending &&
+				(scene.ForwardPipeline != pipeline.Name || scene.ForwardRevision != pipeline.Revision))
+				return {};
+			const auto &textures = pending ? working.Textures : scene.ForwardedTextures;
+			for (uint32_t value = 1; value <= pipeline.Graph.ResourceCount(); ++value) {
+				const auto *desc = pipeline.Graph.FindResource(graph::ResourceId{value});
+				if (desc && desc->Name == resource && value <= textures.size()) return textures[value - 1];
+			}
+			return {};
+		}
 
 		// One data-factory capture keeps its logical planes together. Shared
 		// capture nodes reduce thirteen resource-backed logical planes to at most

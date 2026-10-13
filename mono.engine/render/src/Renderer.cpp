@@ -905,6 +905,7 @@ namespace engine::render {
 			  State->HdrTransparentPipeline,
 			  State->GridPipeline,
 			  State->HdrGridPipeline,
+			  State->HdrGridCompositePipeline,
 			  State->HdrWireframeOpaquePipeline,
 			  State->HdrWireframeTransparentPipeline,
 			  State->GBufferPipeline,
@@ -1154,6 +1155,13 @@ namespace engine::render {
 			return;
 		}
 		RequireOwningThread("ForgetWorld");
+		for (auto &slot : State->SceneSlots) {
+			if (slot.ForwardWorking.World == world) slot.ForwardWorking = {};
+			if (slot.ForwardWorld != world) continue;
+			slot.ForwardedTextures.clear();
+			slot.ForwardPipeline = {};
+			slot.Activity = {};
+		}
 		SDL_WaitForGPUIdle(State->Device);
 		for (auto &tree : State->ImportedPortalTrees)
 			if (!tree.Nodes.empty() && tree.Nodes.front().Binding.World == world &&
@@ -2310,6 +2318,14 @@ namespace engine::render {
 		return State == nullptr ? VisibilitySnapshot{} : State->VisibilityCompleted;
 	}
 
+	PassActivity Renderer::ViewPassActivity(size_t slot) const {
+		if (!State || slot >= State->SceneSlots.size()) return {};
+		const auto &scene = State->SceneSlots[slot];
+		const auto *pipeline = State->Installed(scene.ForwardPipeline);
+		if (!pipeline || pipeline->Revision != scene.ForwardRevision) return {};
+		return scene.Activity;
+	}
+
 	void *Renderer::SceneTexture(size_t slot) const {
 		if (slot >= State->SceneSlots.size()) {
 			return nullptr;
@@ -2342,6 +2358,14 @@ namespace engine::render {
 		}
 		const Impl::InstalledPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
 		if (pipeline != nullptr) {
+			if (slot < State->SceneSlots.size()) {
+				const auto &scene = State->SceneSlots[slot];
+				if (scene.ForwardUnavailable && scene.ForwardPipeline == pipeline->Name &&
+					scene.ForwardRevision == pipeline->Revision)
+					return nullptr;
+			}
+			const auto forwarded = State->ForwardedTexture(*pipeline, resource, slot);
+			if (forwarded.IsValid()) return forwarded.Texture;
 			const core::Name physical = State->GraphTargetName(*pipeline, resource);
 			for (const Impl::GraphTarget &target : State->GraphResources.Targets) {
 				if (target.Pipeline != pipeline->Name || target.Resource != physical ||
@@ -2619,6 +2643,14 @@ namespace engine::render {
 		}
 		const Impl::InstalledPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
 		if (pipeline != nullptr) {
+			if (slot < State->SceneSlots.size()) {
+				const auto &scene = State->SceneSlots[slot];
+				if (scene.ForwardUnavailable && scene.ForwardPipeline == pipeline->Name &&
+					scene.ForwardRevision == pipeline->Revision)
+					return {};
+			}
+			const auto forwarded = State->ForwardedTexture(*pipeline, resource, slot);
+			if (forwarded.IsValid()) return SceneExtent{1.0f, 1.0f, forwarded.Width, forwarded.Height};
 			const core::Name physical = State->GraphTargetName(*pipeline, resource);
 			for (const Impl::GraphTarget &target : State->GraphResources.Targets) {
 				if (target.Pipeline != pipeline->Name || target.Resource != physical ||

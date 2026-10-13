@@ -715,6 +715,24 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::CommitPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command) {
+		for (auto &slot : SceneSlots) {
+			auto &working = slot.ForwardWorking;
+			if (working.Command != command || command == nullptr) continue;
+			slot.ForwardPipeline = working.Pipeline;
+			slot.ForwardRevision = working.Revision;
+			slot.ForwardWorld = working.World;
+			slot.ForwardUnavailable = !working.Ready;
+			if (working.Ready) {
+				slot.ForwardedTextures.swap(working.Textures);
+				slot.Activity = working.Activity;
+				slot.ContentSignature = working.ContentSignature;
+			} else {
+				slot.ForwardedTextures.clear();
+				slot.Activity = {};
+				slot.ContentSignature = 0;
+			}
+			working.Command = nullptr;
+		}
 		for (PendingGraphHistoryWrite &write : GraphResources.PendingHistoryWrites) {
 			if (write.Command != command || write.Submitted) continue;
 			if (write.Pipeline != nullptr) {
@@ -728,6 +746,20 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::DiscardPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command) {
+		// A failed batch can still submit a partial image. Its intermediate targets
+		// cannot promise old pixels, so invalidate bindings and retry the scene.
+		for (auto &slot : SceneSlots) {
+			auto &working = slot.ForwardWorking;
+			if (working.Command == nullptr || (command != nullptr && working.Command != command)) continue;
+			slot.ForwardPipeline = working.Pipeline;
+			slot.ForwardRevision = working.Revision;
+			slot.ForwardWorld = working.World;
+			slot.ForwardUnavailable = true;
+			slot.ForwardedTextures.clear();
+			slot.Activity = {};
+			slot.ContentSignature = 0;
+			working.Command = nullptr;
+		}
 		if (command == nullptr) {
 			GraphResources.PendingHistoryWrites.clear();
 		} else {

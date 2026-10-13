@@ -2891,6 +2891,74 @@ namespace engine::render {
 		const auto fixedTexture = [this](core::Name resource, size_t slot) {
 			return FixedTexture(resource, slot);
 		};
+		auto &sceneSlot = State->SlotAt(targetSlot);
+		const bool retainedBindings = !Request.Damage.Scene && !sceneSlot.ForwardUnavailable &&
+									  sceneSlot.ForwardPipeline == Pipeline->Name &&
+									  sceneSlot.ForwardRevision == Pipeline->Revision &&
+									  sceneSlot.ForwardWorld == Request.World &&
+									  sceneSlot.ForwardedTextures.size() == Pipeline->Graph.ResourceCount();
+		auto &working = sceneSlot.ForwardWorking;
+		working.Textures.resize(Pipeline->Graph.ResourceCount());
+		if (retainedBindings)
+			std::copy(
+				sceneSlot.ForwardedTextures.begin(),
+				sceneSlot.ForwardedTextures.end(),
+				working.Textures.begin()
+			);
+		else
+			std::fill(working.Textures.begin(), working.Textures.end(), Impl::NamedTexture{});
+		ForwardedTextures = working.Textures;
+		working.Pipeline = Pipeline->Name;
+		working.Revision = Pipeline->Revision;
+		working.World = Request.World;
+		working.Ready = false;
+		working.Command = command;
+		Activity = retainedBindings ? sceneSlot.Activity : PassActivity{};
+		if (!retainedBindings) {
+			Activity.Valid = true;
+			Activity.Sky = GraphEnabled(core::Name("sky")) && State->Caps.HasCompute &&
+						   (CurrentLighting.EnvironmentState.Skybox != scene::SkyboxSource::None ||
+							CurrentLighting.EnvironmentState.HasAtmosphere);
+			Activity.Fog = GraphEnabled(core::Name("fog")) &&
+						   (Uniforms.VolumeCount.x >= 0.5f || Uniforms.CloudCentreEnabled.w >= 0.5f);
+			Activity.ShaderLenses = GraphEnabled(core::Name("shader-lenses")) && LensGroupCount != 0;
+			Activity.DepthOfField = GraphEnabled(core::Name("dof")) && State->DepthOfFieldIntensity > 0.0f &&
+									State->DepthOfFieldRadius > 0.0f;
+			Activity.Bloom = GraphEnabled(core::Name("bloom")) && State->BloomIntensity > 0.0f &&
+							 State->BloomRadius > 0.0f;
+			for (size_t index = 0; index < scene::MAX_SURFACES; ++index) {
+				const auto &run = CameraRuns[index];
+				if (!HaveInstances || (run.OpaqueCount == 0 && run.BlendedCount == 0)) continue;
+				if (PortalOf[index] != nullptr && HavePortals && GraphEnabled(core::Name("portal-overlay")))
+					Activity.PortalOverlay = true;
+				if (PortalOf[index] == nullptr && GraphEnabled(core::Name("mirror-overlay")))
+					Activity.MirrorOverlay = true;
+			}
+			Activity.Grid = Request.Source->Grid.Enabled && Request.Source->Grid.Strength != 0.0f;
+			Activity.Particles = ParticleCount != 0;
+			Activity.Ribbons = RibbonCount != 0;
+			const bool worldInterface = DrawInterface && Request.GameInterfaceHook != nullptr &&
+										Request.GameInterfaceHook->AffectsScene();
+			Activity.Transparent = GraphEnabled(core::Name("transparent")) &&
+								   (Activity.Grid || PlainTransparent != 0 || worldInterface ||
+									Activity.Particles || Activity.Ribbons);
+		}
+		Activity.GodRays = false;
+		if (GraphEnabled(core::Name("god-rays")) && State->GodRayIntensity > 0.0f &&
+			State->GodRayRadius > 0.0f) {
+			const auto eye = Request.VisibilityCameraFrame.Position;
+			// Project at the view's far distance so an ordinary short camera still sees its sun.
+			const float distance = std::max(DrawCamera.NearPlane * 2.0f, DrawCamera.FarPlane * 0.99f);
+			GodRayClip = Matrices.ViewProjection * glm::vec4{
+													   eye.X - State->Sun.x * distance,
+													   eye.Y - State->Sun.y * distance,
+													   eye.Z - State->Sun.z * distance,
+													   1.0f
+												   };
+			Activity.GodRays = GodRayClip.w > 0.0f && std::abs(GodRayClip.x) <= GodRayClip.w &&
+							   std::abs(GodRayClip.y) <= GodRayClip.w && GodRayClip.z >= 0.0f &&
+							   GodRayClip.z <= GodRayClip.w;
+		}
 
 		// **The whole of the frame's recording, and it was the widest blank of
 		// the lot.** Everything below this line is `RenderGraph::Execute`
@@ -3053,7 +3121,14 @@ namespace engine::render {
 			return;
 		}
 
-		State->SlotAt(targetSlot).ContentSignature = ContentSignature;
+		auto &pending = State->SlotAt(targetSlot).ForwardWorking;
+		pending.Activity = Activity;
+		pending.Pipeline = Pipeline->Name;
+		pending.Revision = Pipeline->Revision;
+		pending.World = Request.World;
+		pending.ContentSignature = ContentSignature;
+		pending.Ready = true;
+		pending.Command = command;
 
 		closePass();
 
@@ -3062,7 +3137,16 @@ namespace engine::render {
 		// bytes are display colour.
 		if (offscreen && State->Inspected.IsValid() &&
 			(State->InspectedSlot == Renderer::ANY_VIEWPORT || State->InspectedSlot == targetSlot)) {
-			Impl::NamedTexture inspected = fixedTexture(State->Inspected, targetSlot);
+			Impl::NamedTexture inspected;
+			for (uint32_t value = 1; value <= Pipeline->Graph.ResourceCount(); ++value) {
+				const graph::ResourceId resource{value};
+				const auto *desc = Pipeline->Graph.FindResource(resource);
+				if (desc && desc->Name == State->Inspected) {
+					inspected = ResourceTexture(resource, targetSlot, false);
+					break;
+				}
+			}
+			if (!inspected.IsValid()) inspected = fixedTexture(State->Inspected, targetSlot);
 			if (!inspected.IsValid()) {
 				for (const Impl::GraphTarget &target : State->GraphResources.Targets) {
 					if (target.Pipeline == selectedPipeline->Name && target.Resource == State->Inspected &&

@@ -492,7 +492,9 @@ TEST_CASE(
 					);
 					const auto frame = fixture.Render.Render(views, overlay, interface.get(), false);
 					REQUIRE(frame.Ran(core::Name("surface-capture")));
-					REQUIRE(frame.Ran(core::Name("portal-overlay")));
+					// Looking away leaves no portal rows to composite. Its identity
+					// image is forwarded while the exterior pixel oracle still runs.
+					CHECK(frame.Ran(core::Name("portal-overlay")) == (sample.MinimumInterior > 0));
 					if (sample.MinimumInterior > 0) {
 						REQUIRE(frame.PortalPasses > 0);
 					}

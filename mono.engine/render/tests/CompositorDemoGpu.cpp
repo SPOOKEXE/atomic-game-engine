@@ -1,5 +1,6 @@
 #include "DemoPipelineAsset.hpp"
 #include "RenderFixture.hpp"
+#include "RendererTestHooks.hpp"
 
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Name.hpp>
@@ -17,6 +18,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <memory>
 #include <span>
 #include <string>
 #include <tuple>
@@ -275,9 +277,8 @@ void main(){ vec2 centre=abs(inUv-vec2(0.5)); float source=step(max(centre.x,cen
 		return graph;
 	}
 
-	std::vector<std::byte> Capture16(Renderer &r, core::Name n, size_t slot, uint32_t w, uint32_t h) {
+	std::vector<std::byte> CaptureTexture16(Renderer &r, SDL_GPUTexture *t, uint32_t w, uint32_t h) {
 		auto *d = static_cast<SDL_GPUDevice *>(r.Backend().Device);
-		auto *t = static_cast<SDL_GPUTexture *>(r.ResourceTexture(n, slot));
 		REQUIRE(d);
 		REQUIRE(t);
 		size_t row = (size_t(w) * 8 + 255) / 256 * 256;
@@ -316,6 +317,9 @@ void main(){ vec2 centre=abs(inUv-vec2(0.5)); float source=step(max(centre.x,cen
 		SDL_ReleaseGPUTransferBuffer(d, b);
 		return out;
 	}
+	std::vector<std::byte> Capture16(Renderer &r, core::Name n, size_t slot, uint32_t w, uint32_t h) {
+		return CaptureTexture16(r, static_cast<SDL_GPUTexture *>(r.ResourceTexture(n, slot)), w, h);
+	}
 	double Diff16(std::span<const std::byte> a, std::span<const std::byte> b, uint32_t w, uint32_t h) {
 		size_t row = (size_t(w) * 8 + 255) / 256 * 256;
 		double sum = 0;
@@ -353,19 +357,32 @@ void main(){ float blocked=step(0.40,inUv.x)*step(inUv.x,0.60)*step(0.40,inUv.y)
 		const char *pipelineName,
 		const char *effectKind,
 		const std::string &colour,
-		const std::string &depth
+		const std::string &depth,
+		graph::ResourceLifetime outputLifetime = graph::ResourceLifetime::Transient,
+		bool laterBlur = false,
+		uint32_t outputDivisor = 1
 	) {
 		graph::RenderGraph graph;
-		auto texture = [&graph](const char *name, graph::ResourceFormat format) {
+		auto texture = [&graph](
+						   const char *name,
+						   graph::ResourceFormat format,
+						   graph::ResourceLifetime lifetime = graph::ResourceLifetime::Transient,
+						   uint32_t divisor = 1
+					   ) {
 			const graph::ResourceId resource = graph.AddResource(
-				{.Name = core::Name(name), .Kind = graph::ResourceKind::Colour, .Format = format}
+				{.Name = core::Name(name),
+				 .Kind = graph::ResourceKind::Colour,
+				 .Format = format,
+				 .Divisor = divisor,
+				 .Lifetime = lifetime}
 			);
 			REQUIRE(resource.IsValid());
 			return resource;
 		};
 		const graph::ResourceId source = texture("effect-source", graph::ResourceFormat::RGBA16F);
 		const graph::ResourceId linearDepth = texture("effect-depth", graph::ResourceFormat::R32F);
-		const graph::ResourceId result = texture("effect-result", graph::ResourceFormat::RGBA16F);
+		const graph::ResourceId result =
+			texture("effect-result", graph::ResourceFormat::RGBA16F, outputLifetime, outputDivisor);
 		auto raster = [&graph](const char *name, graph::ResourceId output, const std::string &sourceText) {
 			graph::Node node;
 			node.Name = core::Name(name);
@@ -383,7 +400,28 @@ void main(){ float blocked=step(0.40,inUv.x)*step(inUv.x,0.60)*step(0.40,inUv.y)
 		effect.Scope = graph::NodeScope::View;
 		effect.Reads = {source, linearDepth};
 		effect.Writes = {result};
+		if (std::string_view(effectKind) == "shader-lenses") {
+			const auto scratch = texture(
+				"effect-scratch",
+				graph::ResourceFormat::RGBA16F,
+				graph::ResourceLifetime::Transient,
+				outputDivisor
+			);
+			effect.ReadPorts = {core::Name("colour"), core::Name("depth")};
+			effect.Writes.push_back(scratch);
+			effect.WritePorts = {core::Name("colour"), core::Name("scratch")};
+		}
 		REQUIRE(graph.AddNode(std::move(effect)).IsValid());
+		graph::ResourceId late;
+		if (laterBlur) {
+			late = texture("later-blur", graph::ResourceFormat::RGBA16F);
+			graph::Node blur;
+			blur.Name = core::Name("later-blur-pass");
+			blur.Kind = core::Name("blur");
+			blur.Reads = {result};
+			blur.Writes = {late};
+			REQUIRE(graph.AddNode(std::move(blur)).IsValid());
+		}
 		const core::Name sinkKind(std::string(pipelineName) + "-sink");
 		graph::NodeKindSpec sinkSpec;
 		sinkSpec.Kind = sinkKind;
@@ -391,6 +429,8 @@ void main(){ float blocked=step(0.40,inUv.x)*step(inUv.x,0.60)*step(0.40,inUv.y)
 		sinkSpec.Queue = graph::ExecutionQueue::Cpu;
 		sinkSpec.Category = graph::NodeCategory::Output;
 		sinkSpec.Inputs.push_back({.Name = core::Name("colour"), .Kind = graph::ResourceKind::Texture});
+		if (laterBlur)
+			sinkSpec.Inputs.push_back({.Name = core::Name("later"), .Kind = graph::ResourceKind::Texture});
 		REQUIRE(graph::RegisterNodeKind(std::move(sinkSpec)));
 		REQUIRE(renderer.InstallNodeHandler(sinkKind, [](const graph::RunContext &) { return true; }));
 		graph::Node sink;
@@ -398,6 +438,7 @@ void main(){ float blocked=step(0.40,inUv.x)*step(inUv.x,0.60)*step(0.40,inUv.y)
 		sink.Kind = sinkKind;
 		sink.Scope = graph::NodeScope::Frame;
 		sink.Reads = {result};
+		if (laterBlur) sink.Reads.push_back(late);
 		REQUIRE(graph.AddNode(std::move(sink)).IsValid());
 		REQUIRE(renderer.SetPipeline(core::Name(pipelineName), graph));
 		return graph;
@@ -620,8 +661,13 @@ TEST_CASE(
 			const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 			CHECK(frame.DrawCalls == 2);
 			CHECK(frame.ComputeDispatches == 0);
-			CHECK(CounterValue("render.identity_copy.commands") - copiesBefore == 1);
-			CHECK(CounterValue("render.identity_copy.bytes") - bytesBefore == 41 * 31 * 8);
+			CHECK(CounterValue("render.identity_copy.commands") - copiesBefore == 0);
+			CHECK_FALSE(frame.Ran(core::Name("effect-pass")));
+			CHECK(
+				fixture.Render.ResourceTexture(core::Name("effect-source"), view.Slot) ==
+				fixture.Render.ResourceTexture(core::Name("effect-result"), view.Slot)
+			);
+			CHECK(CounterValue("render.identity_copy.bytes") - bytesBefore == 0);
 			const auto source = Capture16(fixture.Render, core::Name("effect-source"), view.Slot, 41, 31);
 			const auto output = Capture16(fixture.Render, core::Name("effect-result"), view.Slot, 41, 31);
 			CHECK(Diff16(source, output, 41, 31) == 0);
@@ -631,6 +677,10 @@ TEST_CASE(
 		lighting.GodRayIntensity = 1;
 		fixture.Render.SetLighting(lighting);
 		CHECK(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).DrawCalls == 3);
+		CHECK(
+			fixture.Render.ResourceTexture(core::Name("effect-source"), view.Slot) !=
+			fixture.Render.ResourceTexture(core::Name("effect-result"), view.Slot)
+		);
 		// An active image must be replaced when the same output becomes inactive.
 		lighting.DepthOfFieldRadius = 0;
 		lighting.GodRayRadius = 0;
@@ -642,6 +692,313 @@ TEST_CASE(
 		}
 	}
 }
+
+TEST_CASE(
+	"inactive effects publish history outputs instead of forwarding them", "[render][gpu][inactive-effects]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallEffect(
+		fixture.Render, "inactive-history-dof", "dof", Solid(), FocusDepth(), graph::ResourceLifetime::History
+	);
+	SceneTarget target{41, 31};
+	View view;
+	view.World = 1;
+	view.Pipeline = core::Name("inactive-history-dof");
+	view.Target = &target;
+	OverlayImage overlay;
+	const auto before = CounterValue("render.identity_copy.commands");
+	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(frame.Ran(core::Name("effect-pass")));
+	CHECK(CounterValue("render.identity_copy.commands") - before == 1);
+	CHECK(
+		fixture.Render.ResourceTexture(core::Name("effect-source"), view.Slot) !=
+		fixture.Render.ResourceTexture(core::Name("effect-result"), view.Slot)
+	);
+	const auto source = Capture16(fixture.Render, core::Name("effect-source"), view.Slot, 41, 31);
+	const auto output = Capture16(fixture.Render, core::Name("effect-result"), view.Slot, 41, 31);
+	CHECK(Diff16(source, output, 41, 31) == 0);
+}
+
+TEST_CASE(
+	"inspection preserves fixed lighting alias publication without adding unobserved copies",
+	"[render][gpu][inactive-effects]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultWorldHdrDocument(), pipeline, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	REQUIRE(fixture.Render.SetPipeline(core::Name("inspected-lighting-alias"), pipeline));
+	SceneTarget target{41, 31};
+	View view;
+	view.Pipeline = core::Name("inspected-lighting-alias");
+	view.Target = &target;
+	view.OverrideLighting = true;
+	view.Lighting.EnvironmentState.Skybox = scene::SkyboxSource::Compute;
+	OverlayImage overlay;
+	fixture.Render.Inspect(core::Name("lit"));
+	const auto copiesBefore = CounterValue("render.identity_copy.commands");
+	const auto inspected = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(fixture.Render.ViewPassActivity(view.Slot).Sky);
+	CHECK(inspected.Ran(core::Name("fog")));
+	// The full graph also copies the scene into its final composed image.
+	// Inspection adds only the shared Lit publication in fog.
+	CHECK(CounterValue("render.identity_copy.commands") - copiesBefore == 2);
+	const auto sky = Capture16(fixture.Render, core::Name("sky-lit"), view.Slot, 41, 31);
+	const auto lit = Capture16(fixture.Render, core::Name("lit"), view.Slot, 41, 31);
+	CHECK(Diff16(sky, lit, 41, 31) == 0);
+
+	fixture.Render.Inspect({});
+	const auto unobservedCopiesBefore = CounterValue("render.identity_copy.commands");
+	const auto unobserved = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK_FALSE(unobserved.Ran(core::Name("fog")));
+	CHECK(CounterValue("render.identity_copy.commands") - unobservedCopiesBefore == 1);
+	CHECK(
+		fixture.Render.ResourceTexture(core::Name("volume-lit"), view.Slot) ==
+		fixture.Render.ResourceTexture(core::Name("sky-lit"), view.Slot)
+	);
+}
+
+TEST_CASE("later fixed publication preserves an earlier identity image", "[render][gpu][inactive-effects]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	graph::PipelineDocument document;
+	document.Record(
+		{.Kind = graph::EditKind::AddResource,
+		 .Name = core::Name("future-lit-image"),
+		 .Resource = graph::ResourceKind::Colour,
+		 .Format = graph::ResourceFormat::RGBA16F}
+	);
+	core::Name currentNode;
+	std::vector<graph::Edit> fog;
+	const auto basis = graph::DefaultPbrDocument();
+	for (auto edit : basis.Edits()) {
+		if (edit.Kind == graph::EditKind::AddNode) currentNode = edit.Name;
+		if (currentNode == core::Name("fog")) {
+			if (edit.Kind == graph::EditKind::Reads && edit.Key == core::Name("colour"))
+				edit.Target = core::Name("future-lit-image");
+			fog.push_back(std::move(edit));
+			continue;
+		}
+		if (edit.Kind == graph::EditKind::AddNode && edit.Name == core::Name("portal-overlay")) {
+			Raster(document, "future-lit-source", "future-lit-image", R"(#version 450
+layout(location=0) in vec2 inUv; layout(location=0) out vec4 outColour;
+layout(set=2,binding=0) uniform sampler2D previousImage;
+layout(set=3,binding=0,std140) uniform Pass { mat4 a; mat4 b; vec4 c; vec4 d; uvec4 e; } pass;
+void main(){ float band=step(0.5,fract(inUv.x*7.0));
+outColour=vec4(mix(vec3(0.05,0.2,1.5),vec3(1.8,0.18,0.04),band)+texture(previousImage,inUv).rgb,1.0); })");
+			document.Record(
+				{.Kind = graph::EditKind::Reads,
+				 .Target = core::Name("sky-lit"),
+				 .Key = core::Name("previous")}
+			);
+			for (const auto &fogEdit : fog)
+				document.Record(fogEdit);
+		}
+		// With no authored environment input, sky is a pure identity publication.
+		if (currentNode == core::Name("sky") && edit.Kind == graph::EditKind::Reads &&
+			edit.Key == core::Name("environment"))
+			continue;
+		document.Record(std::move(edit));
+	}
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(graph::Build(document, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	const auto resource = [&](core::Name name) {
+		for (uint32_t value = 1; value <= pipeline.ResourceCount(); ++value) {
+			const graph::ResourceId id{value};
+			if (pipeline.FindResource(id)->Name == name) return id;
+		}
+		return graph::ResourceId{};
+	};
+	const std::array observed{
+		resource(core::Name("lit")), resource(core::Name("sky-lit")), resource(core::Name("future-lit-image"))
+	};
+	InstallBoundary(fixture.Render, pipeline, "future-fixed-publication", observed, graph::NodeScope::Frame);
+	SceneTarget target{41, 31};
+	View view;
+	view.Pipeline = core::Name("future-fixed-publication");
+	view.Target = &target;
+	view.OverrideLighting = true;
+	view.Lighting.FogColor = {};
+	OverlayImage overlay;
+	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(frame.Ran(core::Name("sky")));
+	CHECK(frame.Ran(core::Name("fog")));
+	const auto earlier = Capture16(fixture.Render, core::Name("sky-lit"), view.Slot, 41, 31);
+	const auto published = Capture16(fixture.Render, core::Name("lit"), view.Slot, 41, 31);
+	const auto source = Capture16(fixture.Render, core::Name("future-lit-image"), view.Slot, 41, 31);
+	CHECK(Constant16(earlier, 41, 31, {0.f, 0.f, 0.f, 1.f}));
+	CHECK(Diff16(published, source, 41, 31) == 0);
+	CHECK(Diff16(earlier, published, 41, 31) > 1);
+	CHECK(
+		fixture.Render.ResourceTexture(core::Name("sky-lit"), view.Slot) !=
+		fixture.Render.ResourceTexture(core::Name("lit"), view.Slot)
+	);
+}
+
+TEST_CASE(
+	"inactive lens scaling publishes an HDR nearest image without allocating scratch",
+	"[render][gpu][inactive-effects]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallEffect(
+		fixture.Render,
+		"inactive-scaled-lenses",
+		"shader-lenses",
+		Solid(),
+		FocusDepth(),
+		graph::ResourceLifetime::Transient,
+		false,
+		2
+	);
+	SceneTarget target{40, 30};
+	View view;
+	view.World = 1;
+	view.Pipeline = core::Name("inactive-scaled-lenses");
+	view.Target = &target;
+	OverlayImage overlay;
+	const auto before = CounterValue("render.identity_blit.commands");
+	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(frame.Submitted);
+	CHECK(frame.Ran(core::Name("effect-pass")));
+	CHECK(CounterValue("render.identity_blit.commands") - before == 1);
+	CHECK_FALSE(fixture.Render.ViewPassActivity(view.Slot).ShaderLenses);
+	CHECK(fixture.Render.ResourceTexture(core::Name("effect-scratch"), view.Slot) == nullptr);
+	const auto extent = fixture.Render.ResourceTextureExtent(core::Name("effect-result"), view.Slot);
+	CHECK(extent.DrawnWidth == 20);
+	CHECK(extent.DrawnHeight == 15);
+	const auto output = Capture16(fixture.Render, core::Name("effect-result"), view.Slot, 20, 15);
+	// SDL owns the exact nearest footprint, including ties between texel centres.
+	// Compare against a separate device blit instead of assuming one tie direction.
+	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
+	SDL_GPUTextureCreateInfo info{};
+	info.type = SDL_GPU_TEXTURETYPE_2D;
+	info.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+	info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+	info.width = 20;
+	info.height = 15;
+	info.layer_count_or_depth = 1;
+	info.num_levels = 1;
+	const auto release = [device](SDL_GPUTexture *texture) { SDL_ReleaseGPUTexture(device, texture); };
+	std::unique_ptr<SDL_GPUTexture, decltype(release)> reference(
+		SDL_CreateGPUTexture(device, &info), release
+	);
+	REQUIRE(reference);
+	auto *command = SDL_AcquireGPUCommandBuffer(device);
+	REQUIRE(command);
+	SDL_GPUBlitInfo blit{};
+	blit.source.texture =
+		static_cast<SDL_GPUTexture *>(fixture.Render.ResourceTexture(core::Name("effect-source"), view.Slot));
+	blit.source.w = 40;
+	blit.source.h = 30;
+	blit.destination.texture = reference.get();
+	blit.destination.w = 20;
+	blit.destination.h = 15;
+	blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+	blit.filter = SDL_GPU_FILTER_NEAREST;
+	blit.cycle = true;
+	SDL_BlitGPUTexture(command, &blit);
+	REQUIRE(SDL_SubmitGPUCommandBuffer(command));
+	const auto expected = CaptureTexture16(fixture.Render, reference.get(), 20, 15);
+	CHECK(Diff16(expected, output, 20, 15) == 0);
+}
+
+TEST_CASE(
+	"forwarded HDR survives a later pooled write and view-local active inputs",
+	"[render][gpu][inactive-effects]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallEffect(
+		fixture.Render,
+		"forward-pooled-lifetime",
+		"dof",
+		Solid(),
+		FocusDepth(),
+		graph::ResourceLifetime::Transient,
+		true
+	);
+	SceneTarget firstTarget{41, 31}, secondTarget{41, 31};
+	std::array<View, 2> views;
+	views[0].World = 1;
+	views[0].Slot = 0;
+	views[0].Target = &firstTarget;
+	views[1].World = 2;
+	views[1].Slot = 1;
+	views[1].Target = &secondTarget;
+	for (auto &view : views) {
+		view.Pipeline = core::Name("forward-pooled-lifetime");
+		view.OverrideLighting = true;
+	}
+	views[1].Lighting.DepthOfFieldIntensity = 1;
+	OverlayImage overlay;
+	REQUIRE(fixture.Render.Render(views, overlay, nullptr, false).Submitted);
+	CHECK_FALSE(fixture.Render.ViewPassActivity(0).DepthOfField);
+	CHECK(fixture.Render.ViewPassActivity(1).DepthOfField);
+	CHECK(
+		fixture.Render.ResourceTexture(core::Name("effect-result"), 0) ==
+		fixture.Render.ResourceTexture(core::Name("effect-source"), 0)
+	);
+	CHECK(
+		fixture.Render.ResourceTexture(core::Name("effect-result"), 1) !=
+		fixture.Render.ResourceTexture(core::Name("effect-source"), 1)
+	);
+	const auto source = Capture16(fixture.Render, core::Name("effect-source"), 0, 41, 31);
+	const auto output = Capture16(fixture.Render, core::Name("effect-result"), 0, 41, 31);
+	const auto later = Capture16(fixture.Render, core::Name("later-blur"), 0, 41, 31);
+	CHECK(Diff16(source, output, 41, 31) == 0);
+	CHECK(Diff16(output, later, 41, 31) > 0);
+}
+
+#if ENGINE_ASSERTS_ENABLED
+TEST_CASE(
+	"forwarded images publish only after successful submission and recover after refusal",
+	"[render][gpu][inactive-effects]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallEffect(fixture.Render, "forward-submit-refusal", "dof", Solid(), FocusDepth());
+	SceneTarget target{41, 31};
+	View view;
+	view.World = 1;
+	view.Pipeline = core::Name("forward-submit-refusal");
+	view.Target = &target;
+	OverlayImage overlay;
+	scene::WorldLighting lighting;
+	fixture.Render.SetLighting(lighting);
+	REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	REQUIRE(fixture.Render.ViewPassActivity(view.Slot).Valid);
+	CHECK_FALSE(fixture.Render.ViewPassActivity(view.Slot).DepthOfField);
+	CHECK(
+		fixture.Render.ResourceTexture(core::Name("effect-source"), view.Slot) ==
+		fixture.Render.ResourceTexture(core::Name("effect-result"), view.Slot)
+	);
+	struct ResetFailure {
+		~ResetFailure() {
+			test_support::SetFrameBatchSubmissionFailureForTests(false);
+		}
+	} reset;
+	lighting.DepthOfFieldIntensity = 1;
+	fixture.Render.SetLighting(lighting);
+	test_support::SetFrameBatchSubmissionFailureForTests(true);
+	CHECK_FALSE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	CHECK_FALSE(fixture.Render.ViewPassActivity(view.Slot).Valid);
+	CHECK(fixture.Render.ResourceTexture(core::Name("effect-result"), view.Slot) == nullptr);
+	test_support::SetFrameBatchSubmissionFailureForTests(false);
+	REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	CHECK(fixture.Render.ViewPassActivity(view.Slot).DepthOfField);
+	CHECK(
+		fixture.Render.ResourceTexture(core::Name("effect-source"), view.Slot) !=
+		fixture.Render.ResourceTexture(core::Name("effect-result"), view.Slot)
+	);
+}
+#endif
 
 TEST_CASE("god rays stop at linear-depth occluders on Vulkan", "[render][gpu][god-rays]") {
 	FixtureDevice clearFixture;

@@ -653,14 +653,16 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 	CHECK(profile.Resources[11].Height == 512);
 	CHECK(profile.Resources[28].Width == 320);
 	CHECK(profile.Resources[28].Height == 240);
-	CHECK(profile.PeakBytes == 32'119'808);
+	// Potential identity inputs stay alive for named previews and captures.
+	// These are allocation-plan bounds; inactive outputs allocate no target.
+	CHECK(profile.PeakBytes == 45'329'408);
 	CHECK(profile.TotalBytes == 67'447'808);
-	CHECK(profile.AllocatedBytes == 23'347'200);
-	CHECK(profile.AliasedResources == 9);
+	CHECK(profile.AllocatedBytes == 38'092'800);
+	CHECK(profile.AliasedResources == 3);
 
 	CHECK(installed->Aliases.Allocations.size() == installed->Graph.ResourceCount());
-	CHECK(installed->Aliases.PhysicalTargets == 15);
-	CHECK(installed->Aliases.AliasedResources == 9);
+	CHECK(installed->Aliases.PhysicalTargets == 21);
+	CHECK(installed->Aliases.AliasedResources == 3);
 	const std::vector<std::string> expectedAliases{
 		"-",
 		"-",
@@ -693,16 +695,16 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		"-",
 		"lit",
 		"emissive",
-		"lit",
-		"emissive",
-		"lit",
-		"lit",
-		"emissive",
-		"lit",
+		"volume-lit",
+		"lens-b",
+		"lens-scratch",
+		"lens-scratch",
+		"god-rays",
+		"bloom",
 		"albedo",
 		"portaled",
 		"mirrored",
-		"portaled",
+		"display",
 		"scene-image",
 		"-",
 		"composed-image",

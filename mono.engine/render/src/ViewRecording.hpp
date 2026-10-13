@@ -173,6 +173,14 @@ namespace engine::render {
 
 		// The installed graph this view is drawing.
 		const Impl::InstalledPipeline *Pipeline = nullptr;
+		PassActivity Activity;
+		glm::vec4 GodRayClip{};
+		std::span<Impl::NamedTexture> ForwardedTextures;
+		bool IdentityWriterInactive(core::Name kind) const;
+		bool
+		ForwardImage(const graph::RunContext &context, graph::ResourceId source, graph::ResourceId target);
+		bool
+		PublishIdentity(const graph::RunContext &context, graph::ResourceId source, graph::ResourceId target);
 
 		// The buffer every pass records into, and the image it presents to.
 		SDL_GPUCommandBuffer *Command = nullptr;
@@ -487,6 +495,12 @@ namespace engine::render {
 			const glm::mat4 &viewProjection,
 			const core::CFrame &cameraFrame,
 			WorldColourTarget target
+		);
+
+		// Composes a grid-only tail while preserving opaque colour and depth.
+		// Unsupported inputs decline before recording so the caller can copy and draw.
+		bool ComposeGroundGrid(
+			core::Name name, const Impl::NamedTexture &source, const Impl::NamedTexture &target
 		);
 
 		// The world minus every pane, drawn into whatever pass is open.

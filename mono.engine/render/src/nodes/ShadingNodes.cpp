@@ -1284,84 +1284,66 @@ namespace engine::render {
 		});
 
 		frameNodes.Set(core::Name("sky"), [this](const graph::RunContext &context) {
-			ViewRecording &recording = *this;
-			Impl *const State = recording.State;
-			Impl::PbrSlot &pbr = *recording.Pbr;
-			PbrUniforms &uniforms = recording.Uniforms;
 			if ((context.Reads.size() != 2 && context.Reads.size() != 3) || context.Writes.size() != 1)
 				return false;
-			const Impl::NamedTexture environment =
-				context.Reads.size() == 3 ? recording.GraphTexture(context.Reads[2], context, false)
-										  : Impl::NamedTexture{};
-			uniforms.Fog.w = State->Caps.HasCompute && environment.IsValid() ? 1.0f : 0.0f;
-			if (uniforms.Fog.w < 0.5f)
-				return recording.CopyImage(
-					context.Name,
-					{pbr.Lit,
-					 recording.PbrDimensions.LitWidth,
-					 recording.PbrDimensions.LitHeight,
-					 SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT},
-					{pbr.SkyLit,
-					 recording.PbrDimensions.LitWidth,
-					 recording.PbrDimensions.LitHeight,
-					 SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT}
-				);
+			const auto environment = context.Reads.size() == 3
+										 ? GraphTexture(context.Reads[2], context, false)
+										 : Impl::NamedTexture{};
+			Activity.Sky = State->Caps.HasCompute && environment.IsValid();
+			Uniforms.Fog.w = Activity.Sky ? 1.0f : 0.0f;
+			if (!Activity.Sky) return PublishIdentity(context, context.Reads[0], context.Writes[0]);
+			const auto source = GraphTexture(context.Reads[0], context, false);
+			const auto target = GraphTexture(context.Writes[0], context, true);
+			if (!source.IsValid() || !target.IsValid() || source.Texture == target.Texture) return false;
 			const std::array bindings{
-				SDL_GPUTextureSamplerBinding{pbr.Lit, recording.Sampler},
-				SDL_GPUTextureSamplerBinding{recording.DepthTarget.texture, recording.Sampler},
-				SDL_GPUTextureSamplerBinding{
-					environment.IsValid() ? environment.Texture : State->FallbackTexture, recording.Sampler
-				},
+				SDL_GPUTextureSamplerBinding{source.Texture, Sampler},
+				SDL_GPUTextureSamplerBinding{DepthTarget.texture, Sampler},
+				SDL_GPUTextureSamplerBinding{environment.Texture, Sampler},
 			};
-			recording.Fullscreen(
+			Fullscreen(
 				context.Name,
 				State->SkyPipeline,
-				pbr.SkyLit,
-				recording.PbrDimensions.LitWidth,
-				recording.PbrDimensions.LitHeight,
+				target.Texture,
+				target.Width,
+				target.Height,
 				bindings,
-				&uniforms,
+				&Uniforms,
 				nullptr,
 				SDL_FColor{}
 			);
+			StageHistoryWrites(context, Command);
 			return true;
 		});
 
 		frameNodes.Set(core::Name("fog"), [this](const graph::RunContext &context) {
-			ViewRecording &recording = *this;
-			Impl::PbrSlot &pbr = *recording.Pbr;
-			if (recording.Uniforms.VolumeCount.x < 0.5f && recording.Uniforms.CloudCentreEnabled.w < 0.5f)
-				return recording.CopyImage(
-					context.Name,
-					{pbr.SkyLit,
-					 recording.PbrDimensions.LitWidth,
-					 recording.PbrDimensions.LitHeight,
-					 SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT},
-					{pbr.Lit,
-					 recording.PbrDimensions.LitWidth,
-					 recording.PbrDimensions.LitHeight,
-					 SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT}
-				);
-			if (!recording.UploadCloudDensity()) return false;
+			if (context.Reads.empty() || context.Writes.size() != 1) return false;
+			Activity.Fog = Uniforms.VolumeCount.x >= 0.5f || Uniforms.CloudCentreEnabled.w >= 0.5f;
+			if (!Activity.Fog) return PublishIdentity(context, context.Reads[0], context.Writes[0]);
+			const auto source = GraphTexture(context.Reads[0], context, false);
+			const auto target = GraphTexture(context.Writes[0], context, true);
+			if (!source.IsValid() || !target.IsValid() || source.Texture == target.Texture ||
+				!UploadCloudDensity())
+				return false;
 			const std::array bindings{
-				SDL_GPUTextureSamplerBinding{pbr.SkyLit, recording.Sampler},
-				SDL_GPUTextureSamplerBinding{recording.DepthTarget.texture, recording.Sampler},
+				SDL_GPUTextureSamplerBinding{source.Texture, Sampler},
+				SDL_GPUTextureSamplerBinding{DepthTarget.texture, Sampler},
 			};
-			recording.Fullscreen(
+			Fullscreen(
 				context.Name,
-				recording.State->VolumePipeline,
-				pbr.Lit,
-				recording.PbrDimensions.LitWidth,
-				recording.PbrDimensions.LitHeight,
+				State->VolumePipeline,
+				target.Texture,
+				target.Width,
+				target.Height,
 				bindings,
-				&recording.Uniforms,
+				&Uniforms,
 				nullptr,
 				SDL_FColor{},
 				nullptr,
 				0,
 				nullptr,
-				recording.State->CloudDensityBuffer
+				State->CloudDensityBuffer
 			);
+			StageHistoryWrites(context, Command);
 			return true;
 		});
 
@@ -1380,16 +1362,6 @@ namespace engine::render {
 			};
 			const auto input = resolve(false, core::Name("colour"));
 			const auto depth = resolve(false, core::Name("depth"));
-			const auto output = resolve(true, core::Name("colour"));
-			const auto scratch = resolve(true, core::Name("scratch"));
-			if (!input.IsValid() || !depth.IsValid() || !output.IsValid() || !scratch.IsValid() ||
-				input.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
-				depth.Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT || output.Format != input.Format ||
-				scratch.Format != input.Format || output.Width != scratch.Width ||
-				output.Height != scratch.Height || input.Texture == output.Texture ||
-				input.Texture == scratch.Texture || output.Texture == scratch.Texture)
-				return false;
-			SDL_GPUTexture *source = input.Texture;
 			struct LensPass {
 				const ViewRecording::LensGroup *Group = nullptr;
 				SDL_GPUGraphicsPipeline *Pipeline = nullptr;
@@ -1428,8 +1400,22 @@ namespace engine::render {
 				passes[passCount++] = LensPass{&group, pipeline};
 			}
 
+			recording.Activity.ShaderLenses = passCount != 0;
+			const auto sourceId = detail::IdentityPort(*node, false);
+			const auto targetId = detail::IdentityPort(*node, true);
+			if (passCount == 0) return recording.PublishIdentity(context, sourceId, targetId);
+			const auto output = resolve(true, core::Name("colour"));
+			const auto scratch = resolve(true, core::Name("scratch"));
+			if (!input.IsValid() || !depth.IsValid() || !output.IsValid() || !scratch.IsValid() ||
+				input.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				depth.Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT || output.Format != input.Format ||
+				scratch.Format != input.Format || output.Width != scratch.Width ||
+				output.Height != scratch.Height || input.Texture == output.Texture ||
+				input.Texture == scratch.Texture || output.Texture == scratch.Texture)
+				return false;
+			SDL_GPUTexture *source = input.Texture;
 			// Select the first target so the last effective pass always publishes
-			// directly to output. Only the empty chain needs a copy.
+			// directly to output.
 			SDL_GPUTexture *target = passCount % 2 == 0 ? scratch.Texture : output.Texture;
 			for (size_t index = 0; index < passCount; ++index) {
 				const LensPass &pass = passes[index];
@@ -1458,23 +1444,9 @@ namespace engine::render {
 				target = target == scratch.Texture ? output.Texture : scratch.Texture;
 			}
 
-			if (source != output.Texture) {
-				if (input.Width == output.Width && input.Height == output.Height)
-					return recording.CopyImage(context.Name, input, output);
-				// Authored scaling still needs a filtered publication.
-				recording.EnterNamedPass(context.Name);
-				SDL_GPUBlitInfo blit{};
-				blit.source.texture = source;
-				blit.source.w = source == input.Texture ? input.Width : output.Width;
-				blit.source.h = source == input.Texture ? input.Height : output.Height;
-				blit.destination.texture = output.Texture;
-				blit.destination.w = output.Width;
-				blit.destination.h = output.Height;
-				blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
-				blit.filter = SDL_GPU_FILTER_NEAREST;
-				blit.cycle = true;
-				SDL_BlitGPUTexture(recording.Command, &blit);
-			}
+			auto history = context;
+			if (passCount == 1) history.Writes = std::span<const graph::ResourceId>(&targetId, 1);
+			recording.StageHistoryWrites(history, recording.Command);
 			return true;
 		});
 
@@ -1523,6 +1495,11 @@ namespace engine::render {
 		frameNodes.Set(core::Name("dof"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
+			if (context.Reads.size() != 2 || context.Writes.size() != 1) return false;
+			recording.Activity.DepthOfField =
+				State->DepthOfFieldIntensity > 0.0f && State->DepthOfFieldRadius > 0.0f;
+			if (!recording.Activity.DepthOfField)
+				return recording.PublishIdentity(context, context.Reads[0], context.Writes[0]);
 			if (recording.Sampler == nullptr && !State->EnsureSurfaceSampler()) return false;
 			recording.Sampler = State->SurfaceSampler;
 			if (context.Reads.size() != 2 || context.Writes.size() != 1 ||
@@ -1538,8 +1515,6 @@ namespace engine::render {
 				colour.Height != target.Height || depth.Width != target.Width ||
 				depth.Height != target.Height)
 				return false;
-			if (State->DepthOfFieldIntensity <= 0.0f || State->DepthOfFieldRadius <= 0.0f)
-				return recording.CopyImage(context.Name, colour, target);
 			const LightingEffectsUniforms uniforms{
 				.DepthOfField =
 					glm::vec4{
@@ -1572,12 +1547,16 @@ namespace engine::render {
 				&uniforms,
 				sizeof(uniforms)
 			);
+			recording.StageHistoryWrites(context, recording.Command);
 			return true;
 		});
 
 		frameNodes.Set(core::Name("god-rays"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
+			if (context.Reads.size() != 2 || context.Writes.size() != 1) return false;
+			if (!recording.Activity.GodRays)
+				return recording.PublishIdentity(context, context.Reads[0], context.Writes[0]);
 			if (recording.Sampler == nullptr && !State->EnsureSurfaceSampler()) return false;
 			recording.Sampler = State->SurfaceSampler;
 			if (context.Reads.size() != 2 || context.Writes.size() != 1 || State->GodRaysPipeline == nullptr)
@@ -1593,24 +1572,9 @@ namespace engine::render {
 				depth.Height != target.Height)
 				return false;
 
-			const core::Vector3 eye = recording.Request.VisibilityCameraFrame.Position;
-			// The directional sun is projected at the eye's own far distance. A
-			// fixed kilometre point can lie behind an ordinary 500 metre camera far
-			// plane and incorrectly suppress every shaft.
-			const float sunDistance =
-				std::max(recording.DrawCamera.NearPlane * 2.0f, recording.DrawCamera.FarPlane * 0.99f);
-			const glm::vec4 sunWorld{
-				eye.X - State->Sun.x * sunDistance,
-				eye.Y - State->Sun.y * sunDistance,
-				eye.Z - State->Sun.z * sunDistance,
-				1.0f,
-			};
-			const glm::vec4 clip = recording.Matrices.ViewProjection * sunWorld;
-			const bool visible = clip.w > 0.0f && std::abs(clip.x) <= clip.w && std::abs(clip.y) <= clip.w &&
-								 clip.z >= 0.0f && clip.z <= clip.w;
-			if (State->GodRayIntensity <= 0.0f || State->GodRayRadius <= 0.0f || !visible)
-				return recording.CopyImage(context.Name, source, target);
-			const float reciprocalW = visible ? 1.0f / clip.w : 0.0f;
+			const auto clip = recording.GodRayClip;
+			const bool visible = true;
+			const float reciprocalW = 1.0f / clip.w;
 			const LightingEffectsUniforms uniforms{
 				// Standard linear-depth clears to FarPlane. Keep that value with the
 				// effect so the shader can distinguish sky from an opaque sample.
@@ -1646,6 +1610,7 @@ namespace engine::render {
 				&uniforms,
 				sizeof(uniforms)
 			);
+			recording.StageHistoryWrites(context, recording.Command);
 			return true;
 		});
 

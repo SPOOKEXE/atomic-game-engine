@@ -1256,6 +1256,37 @@ namespace engine::render {
 		virtual void Record(void *commandBuffer, void *renderPass) = 0;
 	};
 
+	// Effective inputs from the last scene recording for one view. Retained
+	// frames keep these gates; command counts and FrameResult::Nodes describe work.
+	struct PassActivity {
+		// Whether a scene recording has been accepted; false before the first accepted record.
+		bool Valid = false;
+		// Whether sky inputs were active for the recorded view.
+		bool Sky = false;
+		// Whether fog inputs were active for the recorded view.
+		bool Fog = false;
+		// Whether shader lens inputs were active for the recorded view.
+		bool ShaderLenses = false;
+		// Whether depth of field inputs were active for the recorded view.
+		bool DepthOfField = false;
+		// Whether god ray inputs were active for the recorded view.
+		bool GodRays = false;
+		// Whether bloom inputs were active for the recorded view.
+		bool Bloom = false;
+		// Whether portal overlay inputs were active for the recorded view.
+		bool PortalOverlay = false;
+		// Whether mirror overlay inputs were active for the recorded view.
+		bool MirrorOverlay = false;
+		// Whether transparent inputs were active for the recorded view.
+		bool Transparent = false;
+		// Whether ground grid inputs were active for the recorded view.
+		bool Grid = false;
+		// Whether particle inputs were active for the recorded view.
+		bool Particles = false;
+		// Whether ribbon inputs were active for the recorded view.
+		bool Ribbons = false;
+	};
+
 	// What one `Render` call submitted, and whether it reached the display.
 	//
 	// A default result means no frame was presented, including while the window
@@ -1592,6 +1623,8 @@ namespace engine::render {
 		// An owned copy of the last successfully submitted visibility snapshot.
 		// A submission is not a claim that pixels survived depth or blending.
 		VisibilitySnapshot Visibility() const;
+		// Effective pass gates for the last scene recording in this viewport.
+		PassActivity ViewPassActivity(size_t slot = 0) const;
 
 		// Whether this renderer has a window to present to.
 		//

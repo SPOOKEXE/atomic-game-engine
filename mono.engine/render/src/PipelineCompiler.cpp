@@ -560,7 +560,17 @@ namespace engine::render {
 
 		RetainedNodePlan retained = RetainedNodesOf(pipeline, customKinds);
 		std::vector<graph::NodeId> entityNodes = EntityNodesOf(pipeline, compiled);
-		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
+		const std::vector<graph::NodeId> ordered = [&] {
+			std::vector<graph::NodeId> nodes = compiled.Shared;
+			nodes.insert(nodes.end(), compiled.PerView.begin(), compiled.PerView.end());
+			nodes.insert(nodes.end(), compiled.Final.begin(), compiled.Final.end());
+			return nodes;
+		}();
+		auto identities = detail::BuildIdentityContracts(pipeline, ordered);
+		std::vector<graph::ResourceId> identitySources;
+		for (const auto &identity : identities)
+			identitySources.push_back(identity.Source);
+		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled, identitySources);
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
 		detail::EnabledNodeIndex nodeLookup;
 		nodeLookup.Rebuild(pipeline);
@@ -573,6 +583,8 @@ namespace engine::render {
 			.RetainedFamilies = retained.Families,
 			.Schedule = std::move(schedule),
 			.Aliases = std::move(aliases),
+			.Identities = std::move(identities),
+			.IdentitySources = std::move(identitySources),
 			.Buffers = std::move(buffers),
 			.NodeLookup = std::move(nodeLookup),
 			.PlanDiagnostics = {},

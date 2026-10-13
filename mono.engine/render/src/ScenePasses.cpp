@@ -631,6 +631,85 @@ namespace engine::render {
 		return pass;
 	}
 
+	bool ViewRecording::ComposeGroundGrid(
+		core::Name name, const Impl::NamedTexture &source, const Impl::NamedTexture &target
+	) {
+		if (!source.IsValid() || !target.IsValid() || source.Texture == target.Texture ||
+			source.Format != target.Format || source.Width != target.Width ||
+			source.Height != target.Height || target.Width != SceneWidth || target.Height != SceneHeight ||
+			DepthTarget.texture == nullptr || DepthTarget.texture == source.Texture ||
+			DepthTarget.texture == target.Texture)
+			return false;
+		// UNORM depth quantizes the written fragment depth before the hardware
+		// comparison. Keep that path until an equally precise manual test exists.
+		if (State->DepthFormat != SDL_GPU_TEXTUREFORMAT_D32_FLOAT) return false;
+		uint32_t depthWidth = State->DepthWidth;
+		uint32_t depthHeight = State->DepthHeight;
+		SDL_GPUTexture *depth = State->DepthTexture;
+		if (Offscreen) {
+			if (Request.TargetSlot >= State->SceneSlots.size()) return false;
+			const auto &slot = State->SceneSlots[Request.TargetSlot];
+			depthWidth = slot.DepthWidth;
+			depthHeight = slot.DepthHeight;
+			depth = slot.Depth;
+		}
+		if (depth != DepthTarget.texture || depthWidth < target.Width || depthHeight < target.Height)
+			return false;
+		// Normalized attachments clamp source colour and blend factors before
+		// blending. Keep their hardware path for authored values outside 0..1.
+		if (target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT) return false;
+		auto *pipeline = State->HdrGridCompositePipeline;
+		if (pipeline == nullptr || !State->EnsureSurfaceSampler()) return false;
+		const auto &grid = Request.Source->Grid;
+		if (!grid.Enabled || grid.Strength == 0.0f) return false;
+		GridUniforms uniforms;
+		uniforms.ViewProjection = Matrices.ViewProjection;
+		uniforms.InverseViewProjection = glm::inverse(Matrices.ViewProjection);
+		const auto &eye = Request.VisibilityCameraFrame.Position;
+		uniforms.Eye = {eye.X, eye.Y, eye.Z, 0};
+		uniforms.Params = {grid.Step, grid.Major, grid.Reach, grid.Strength};
+		uniforms.Offset = {grid.Offset.X, grid.Offset.Z, 0, 0};
+		uniforms.Colour = {grid.Colour.R, grid.Colour.G, grid.Colour.B, grid.Alpha};
+		uniforms.AxisX = {grid.AxisX.R, grid.AxisX.G, grid.AxisX.B, grid.AxisAlpha};
+		uniforms.AxisZ = {grid.AxisZ.R, grid.AxisZ.G, grid.AxisZ.B, grid.AxisAlpha};
+		const std::array bindings{
+			SDL_GPUTextureSamplerBinding{source.Texture, State->SurfaceSampler},
+			SDL_GPUTextureSamplerBinding{DepthTarget.texture, State->SurfaceSampler},
+		};
+		EnterNamedPass(name);
+		SDL_GPUColorTargetInfo attachment{};
+		attachment.texture = target.Texture;
+		attachment.load_op = SDL_GPU_LOADOP_DONT_CARE;
+		attachment.store_op = SDL_GPU_STOREOP_STORE;
+		attachment.cycle = true;
+		auto *pass = SDL_BeginGPURenderPass(Command, &attachment, 1, nullptr);
+		if (pass == nullptr) return false;
+		SDL_BindGPUGraphicsPipeline(pass, pipeline);
+		SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
+		SDL_PushGPUFragmentUniformData(Command, 0, &uniforms, sizeof(uniforms));
+		const SDL_GPUViewport viewport{
+			0, 0, static_cast<float>(target.Width), static_cast<float>(target.Height), 0, 1
+		};
+		const SDL_Rect scissor{0, 0, static_cast<int>(target.Width), static_cast<int>(target.Height)};
+		SDL_SetGPUViewport(pass, &viewport);
+		SDL_SetGPUScissor(pass, &scissor);
+		SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+		SDL_EndGPURenderPass(pass);
+		++Result.DrawCalls;
+		State->ActivePipeline = nullptr;
+		core::Metrics::Count("render.grid_composite.commands", 1);
+		core::Metrics::Count("render.transparent.raster_passes", 1);
+		core::Metrics::Count("render.grid_composite.pixels", uint64_t(target.Width) * target.Height);
+		const uint64_t colourBytes =
+			SDL_CalculateGPUTextureFormatSize(target.Format, target.Width, target.Height, 1);
+		// Logical input payload, not a measurement of device memory traffic.
+		core::Metrics::Count(
+			"render.grid_composite.input_bytes", colourBytes + uint64_t(target.Width) * target.Height * 4
+		);
+		core::Metrics::Count("render.grid_composite.write_bytes", colourBytes);
+		return true;
+	}
+
 	void ViewRecording::DrawGroundGrid(
 		SDL_GPURenderPass *pass,
 		const glm::mat4 &viewProjection,
@@ -1065,6 +1144,17 @@ namespace engine::render {
 		if (desc == nullptr) {
 			return Impl::NamedTexture{};
 		}
+		if (selectedSlot == Request.TargetSlot && resource.Value <= ForwardedTextures.size()) {
+			auto &forwarded = ForwardedTextures[resource.Value - 1];
+			if (make)
+				forwarded = {};
+			else if (forwarded.IsValid())
+				return forwarded;
+		} else if (!make && selectedSlot < State->SceneSlots.size()) {
+			const auto forwarded =
+				State->ForwardedTexture(*Pipeline, desc->Name, selectedSlot, selectedCommand);
+			if (forwarded.IsValid()) return forwarded;
+		}
 		Impl::NamedTexture fixed = FixedTexture(desc->Name, selectedSlot);
 		if (fixed.IsValid()) {
 			return fixed;
@@ -1256,6 +1346,140 @@ namespace engine::render {
 				return false;
 			}
 		}
+	}
+
+	bool ViewRecording::IdentityWriterInactive(core::Name kind) const {
+		// A sky node can read an authored environment different from the first sky.
+		if (kind == core::Name("sky")) return false;
+		if (kind == core::Name("fog")) return !Activity.Fog;
+		if (kind == core::Name("shader-lenses")) return LensGroupCount == 0;
+		if (kind == core::Name("dof")) return !Activity.DepthOfField;
+		if (kind == core::Name("god-rays")) return !Activity.GodRays;
+		if (kind == core::Name("portal-overlay")) return !Activity.PortalOverlay;
+		if (kind == core::Name("mirror-overlay")) return !Activity.MirrorOverlay;
+		if (kind == core::Name("transparent")) return !Activity.Transparent;
+		return false;
+	}
+
+	bool ViewRecording::ForwardImage(
+		const graph::RunContext &context, graph::ResourceId source, graph::ResourceId target
+	) {
+		const auto contract = std::find_if(
+			Pipeline->Identities.begin(), Pipeline->Identities.end(), [&](const auto &candidate) {
+				return candidate.Node == context.Node && candidate.Source == source &&
+					   candidate.Target == target;
+			}
+		);
+		if (contract == Pipeline->Identities.end() || GraphTextureSlot(context) != Request.TargetSlot ||
+			target.Value > ForwardedTextures.size())
+			return false;
+		const auto image = GraphTexture(source, context, false);
+		if (!image.IsValid()) return false;
+		const auto *desc = Pipeline->Graph.FindResource(target);
+		uint32_t width = 0, height = 0;
+		desc->Resolve(SceneWidth, SceneHeight, width, height);
+		if (image.Width != width || image.Height != height || image.Format != DeviceFormat(desc->Format))
+			return false;
+
+		const auto fixedOutput = FixedTexture(desc->Name, Request.TargetSlot);
+		if (fixedOutput.IsValid() && fixedOutput.Texture != image.Texture) {
+			const auto aliasesOutput = [&](graph::ResourceId read) {
+				const auto *input = Pipeline->Graph.FindResource(read);
+				return input && FixedTexture(input->Name, Request.TargetSlot).Texture == fixedOutput.Texture;
+			};
+			// Fog shares Lit with deferred lighting. Later branches and inspection
+			// observe that fixed publication even when they name the earlier output.
+			if (detail::IdentityAliasReadAfter(
+					Pipeline->Graph, Pipeline->Compiled.PerView, context.Node, target, aliasesOutput
+				) ||
+				detail::IdentityAliasReadAfter(
+					Pipeline->Graph, Pipeline->Compiled.Final, {}, target, aliasesOutput
+				) ||
+				(State->Inspected.IsValid() && State->Inspected != desc->Name &&
+				 (State->InspectedSlot == Renderer::ANY_VIEWPORT ||
+				  State->InspectedSlot == Request.TargetSlot) &&
+				 FixedTexture(State->Inspected, Request.TargetSlot).Texture == fixedOutput.Texture))
+				return false;
+		}
+
+		// Fixed PBR roles may share a texture even though the graph ids differ.
+		// An inactive writer is harmless only when it consumes this binding
+		// unchanged. Other identity fallbacks can still publish into fixed storage.
+		bool after = false;
+		bool outputRewritten = false;
+		for (const auto id : Pipeline->Compiled.PerView) {
+			if (id == context.Node) {
+				after = true;
+				continue;
+			}
+			const auto *node = Pipeline->Graph.Find(id);
+			if (!node) continue;
+			if (!after) continue;
+			const bool sameBinding =
+				!outputRewritten && IdentityWriterInactive(node->Kind) &&
+				std::any_of(Pipeline->Identities.begin(), Pipeline->Identities.end(), [&](const auto &next) {
+					return next.Node == id && next.Source == target;
+				});
+			for (const auto written : node->Writes) {
+				const auto *output = Pipeline->Graph.FindResource(written);
+				if (!sameBinding && output &&
+					FixedTexture(output->Name, Request.TargetSlot).Texture == image.Texture)
+					return false;
+			}
+			outputRewritten |=
+				std::find(node->Writes.begin(), node->Writes.end(), target) != node->Writes.end();
+		}
+		for (const auto id : Pipeline->Compiled.Final) {
+			const auto *node = Pipeline->Graph.Find(id);
+			if (!node) continue;
+			for (const auto written : node->Writes) {
+				const auto *output = Pipeline->Graph.FindResource(written);
+				if (output && FixedTexture(output->Name, Request.TargetSlot).Texture == image.Texture)
+					return false;
+			}
+		}
+		ForwardedTextures[target.Value - 1] = image;
+		core::Metrics::Count("render.identity_forward.outputs", 1);
+		return true;
+	}
+
+	bool ViewRecording::PublishIdentity(
+		const graph::RunContext &context, graph::ResourceId source, graph::ResourceId target
+	) {
+		if (ForwardImage(context, source, target)) return true;
+		const auto input = GraphTexture(source, context, false);
+		const auto output = GraphTexture(target, context, true);
+		if (!input.IsValid() || !output.IsValid()) return false;
+		bool published = false;
+		if (input.Format == output.Format) {
+			if (input.Width == output.Width && input.Height == output.Height)
+				published = CopyImage(context.Name, input, output);
+			else {
+				EnterNamedPass(context.Name);
+				SDL_GPUBlitInfo blit{};
+				blit.source.texture = input.Texture;
+				blit.source.w = input.Width;
+				blit.source.h = input.Height;
+				blit.destination.texture = output.Texture;
+				blit.destination.w = output.Width;
+				blit.destination.h = output.Height;
+				blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+				blit.filter = SDL_GPU_FILTER_NEAREST;
+				blit.cycle = true;
+				SDL_BlitGPUTexture(Command, &blit);
+				core::Metrics::Count("render.identity_blit.commands", 1);
+				published = true;
+			}
+		} else if (output.Format == State->ColourFormat()) {
+			EnterNamedPass(context.Name);
+			published = DrawImage(input, output, SDL_GPU_LOADOP_CLEAR);
+		}
+		if (published) {
+			auto history = context;
+			history.Writes = std::span<const graph::ResourceId>(&target, 1);
+			StageHistoryWrites(history, Command);
+		}
+		return published;
 	}
 
 	bool ViewRecording::CopyImage(

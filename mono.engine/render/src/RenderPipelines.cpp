@@ -544,6 +544,25 @@ namespace engine::render {
 			}
 		}
 
+		// Grid-only tails blend into a new image without copying their input first.
+		if (hdrSupported) {
+			auto *fragment = LoadShader("grid-composite.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
+			if (fragment != nullptr) {
+				SDL_GPUColorTargetDescription target{};
+				target.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+				SDL_GPUGraphicsPipelineCreateInfo composite = transparent;
+				composite.vertex_shader = overlayVertex;
+				composite.fragment_shader = fragment;
+				composite.vertex_input_state = {};
+				composite.depth_stencil_state = {};
+				composite.target_info.has_depth_stencil_target = false;
+				composite.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_INVALID;
+				composite.target_info.color_target_descriptions = &target;
+				HdrGridCompositePipeline = SDL_CreateGPUGraphicsPipeline(Device, &composite);
+				SDL_ReleaseGPUShader(Device, fragment);
+			}
+		}
+
 		// The wireframe twin, for `WireframeOpaquePipeline`'s own reason.
 		// Culling is already off on `transparent`, so only the fill mode
 		// changes.
@@ -1865,6 +1884,13 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::ReleaseGraphState(core::Name pipeline) {
+		for (auto &slot : SceneSlots) {
+			if (slot.ForwardWorking.Pipeline == pipeline) slot.ForwardWorking = {};
+			if (slot.ForwardPipeline != pipeline) continue;
+			slot.ForwardedTextures.clear();
+			slot.ForwardPipeline = {};
+			slot.Activity = {};
+		}
 		std::erase_if(GraphCaptureReceipts, [pipeline](const GraphCaptureReceipt &receipt) {
 			return receipt.Pipeline == pipeline;
 		});

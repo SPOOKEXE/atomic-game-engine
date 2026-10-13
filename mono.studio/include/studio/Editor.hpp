@@ -6546,12 +6546,17 @@ namespace studio {
 			engine::render::PresentationCacheProfile CacheProfile;
 			// Separate sampled row order for viewport and host tables.
 			std::array<std::vector<size_t>, 2> CacheOrder;
+			// Profile revision used to build each table's row order.
 			std::array<uint64_t, 2> CacheOrderRevision{};
+			// Increments when a new cache profile sample invalidates table ordering.
 			uint64_t CacheProfileRevision = 0;
 			// Effective pass inputs and submitted work from the selected view, sampled together.
 			engine::render::PassActivity CachePassActivity;
+			// Submitted work reported for the sampled viewport.
 			engine::render::FrameResult CacheRecording;
+			// ImGui time when the next cache profile sample is due.
 			double NextCacheProfile = 0.0;
+			// Viewport represented by the sampled profile and recording metadata.
 			size_t SampledCacheViewport = SIZE_MAX;
 		};
 
