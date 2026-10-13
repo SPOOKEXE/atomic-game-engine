@@ -182,6 +182,7 @@ namespace engine::render {
 		frame.ParticleDelta = advanced ? time.Delta : 0.0f;
 		bool fieldCollected = false;
 		store.Observe<scene::GpuParticleField>();
+		const uint64_t fieldDefinitionRevision = store.ComponentChangeVersion<scene::GpuParticleField>() + 1;
 		store.Each<const scene::GpuParticleField, const scene::Transform>(
 			[&](ecs::Entity instance,
 				const scene::GpuParticleField &field,
@@ -191,17 +192,20 @@ namespace engine::render {
 					// Refresh the owned packet in place so its sample capacity survives each tick.
 					if (!frame.GpuParticles) frame.GpuParticles.emplace();
 					auto &packet = *frame.GpuParticles;
-					packet.Field = field;
+					if (newWorld || packet.Source != instance ||
+						packet.DefinitionRevision != fieldDefinitionRevision) {
+						packet.Field = field;
+						core::Metrics::Count(
+							"render.gpu_particle_field.sample_collect_bytes",
+							field.SpawnSamples.size() * sizeof(scene::GpuParticleSpawnSample)
+						);
+					}
 					packet.Frame = transform.Frame;
 					packet.ForceField = scene::ResolveVectorField(store, instance);
 					packet.Source = instance;
-					packet.DefinitionRevision = store.ComponentChangeVersion<scene::GpuParticleField>() + 1;
+					packet.DefinitionRevision = fieldDefinitionRevision;
 					packet.Seconds = time.Elapsed;
 					fieldCollected = true;
-					core::Metrics::Count(
-						"render.gpu_particle_field.sample_collect_bytes",
-						field.SpawnSamples.size() * sizeof(scene::GpuParticleSpawnSample)
-					);
 				}
 			}
 		);

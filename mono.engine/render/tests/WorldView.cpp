@@ -1,4 +1,5 @@
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/Registration.hpp>
@@ -32,6 +33,13 @@ TEST_DEPENDS("engine.render.spatialcanvas")
 using namespace engine;
 
 namespace {
+	double GpuParticleSampleCopyBytes() {
+		for (const auto &counter : core::Metrics::Snapshot().Counters)
+			if (counter.Name == core::Name("render.gpu_particle_field.sample_collect_bytes"))
+				return counter.Value;
+		return 0.0;
+	}
+
 	void RegisterViewClasses() {
 		scene::RegisterSceneClasses();
 		effects::RegisterEffectClasses();
@@ -73,13 +81,20 @@ TEST_CASE(
 	view.GpuParticles = frame.GpuParticles;
 	const auto signature = [&] { return render::ScenePresentationSignaturesOf(view, {}).Particles; };
 	const auto original = signature();
+	const double unchangedBytes = GpuParticleSampleCopyBytes();
 	render::CollectWorldView(store, core::Name("generic-field"), frame);
 	view.GpuParticles = frame.GpuParticles;
 	CHECK(signature() == original);
+	CHECK(GpuParticleSampleCopyBytes() == unchangedBytes);
 	authored.SpawnSamples[0].Position.X = 99;
 	store.Set(field, authored);
 	CHECK(frame.GpuParticles->Field.SpawnSamples[0].Position.X == 1);
+	const double beforeSampleEdit = GpuParticleSampleCopyBytes();
 	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	CHECK(
+		GpuParticleSampleCopyBytes() ==
+		beforeSampleEdit + authored.SpawnSamples.size() * sizeof(scene::GpuParticleSpawnSample)
+	);
 	CHECK(frame.GpuParticles->Field.SpawnSamples[0].Position.X == 99);
 	CHECK(view.GpuParticles->Field.SpawnSamples[0].Position.X == 1);
 	view.GpuParticles = frame.GpuParticles;
@@ -88,7 +103,12 @@ TEST_CASE(
 	auto style = authored.Styles[0];
 	style.Size = 5;
 	REQUIRE(scene::SetGpuParticleStyle(store, field, 0, style));
+	const double beforeStyleEdit = GpuParticleSampleCopyBytes();
 	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	CHECK(
+		GpuParticleSampleCopyBytes() ==
+		beforeStyleEdit + authored.SpawnSamples.size() * sizeof(scene::GpuParticleSpawnSample)
+	);
 	view.GpuParticles = frame.GpuParticles;
 	CHECK(signature() != editedSamples);
 	const auto editedStyle = signature();
@@ -124,6 +144,60 @@ TEST_CASE(
 	CHECK(frame.GpuParticles->Field.SpawnSamples == currentField.SpawnSamples);
 	CHECK(frame.GpuParticles->Field.Styles[0].Size == 5);
 	CHECK(frame.GpuParticles->ForceField.Tangential == 50);
+
+	currentField.Enabled = false;
+	store.Set(field, currentField);
+	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	CHECK_FALSE(frame.GpuParticles);
+	const auto replacement =
+		store.CreateInstance(ecs::Classes::Find(core::Name("GpuParticleField")), "Replacement");
+	scene::GpuParticleField replacementField;
+	replacementField.SpawnSamples.push_back({{8, 9, 10}, 12, {1, 1, 1}, 1});
+	store.Set(replacement, replacementField);
+	store.Set(replacement, scene::Transform{core::CFrame{core::Vector3{2, 3, 4}}});
+	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	REQUIRE(frame.GpuParticles);
+	CHECK(frame.GpuParticles->Source == replacement);
+	CHECK(frame.GpuParticles->Field.SpawnSamples == replacementField.SpawnSamples);
+	store.Destroy(replacement);
+	render::CollectWorldView(store, core::Name("generic-field"), frame);
+	CHECK_FALSE(frame.GpuParticles);
+}
+
+TEST_CASE(
+	"generic GPU field samples refresh when the source store changes", "[render][world-view][particles]"
+) {
+	RegisterViewClasses();
+	ecs::Store first("generic-field-first");
+	const auto firstField =
+		first.CreateInstance(ecs::Classes::Find(core::Name("GpuParticleField")), "Particles");
+	scene::GpuParticleField firstDefinition;
+	firstDefinition.SpawnSamples.push_back({{1, 2, 3}, 10, {4, 5, 6}, 1});
+	first.Set(firstField, firstDefinition);
+	first.Set(firstField, scene::Transform{});
+
+	render::WorldViewFrame frame;
+	render::CollectWorldView(first, core::Name("same-owner"), frame);
+	REQUIRE(frame.GpuParticles);
+	const ecs::Entity firstSource = frame.GpuParticles->Source;
+
+	ecs::Store second("generic-field-second");
+	const auto secondField =
+		second.CreateInstance(ecs::Classes::Find(core::Name("GpuParticleField")), "Particles");
+	scene::GpuParticleField secondDefinition;
+	secondDefinition.SpawnSamples.push_back({{9, 8, 7}, 11, {6, 5, 4}, 1});
+	second.Set(secondField, secondDefinition);
+	second.Set(secondField, scene::Transform{});
+	CHECK(secondField == firstSource);
+	const double beforeWorldSwitch = GpuParticleSampleCopyBytes();
+	render::CollectWorldView(second, core::Name("same-owner"), frame);
+	REQUIRE(frame.GpuParticles);
+	CHECK(frame.GpuParticles->Source == secondField);
+	CHECK(frame.GpuParticles->Field.SpawnSamples == secondDefinition.SpawnSamples);
+	CHECK(
+		GpuParticleSampleCopyBytes() ==
+		beforeWorldSwitch + secondDefinition.SpawnSamples.size() * sizeof(scene::GpuParticleSpawnSample)
+	);
 }
 
 TEST_CASE(
