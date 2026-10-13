@@ -2173,6 +2173,17 @@ studio-replication-stress-bench samples="3" build_preset="bench":
     cmake --build --preset {{build_preset}} --target bench_studio
     ./.cache/build/{{build_preset}}/bench/bench_studio --suite studio.bench.replicationstress --samples {{samples}}
 
+# Blank Studio grid: unique completed GPU samples, CPU recording and tracked residency.
+grid-composite-bench frames="120" build_preset="bench":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    if ! SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_GRID_COMPOSITE_REPORT=1 MONO_GRID_COMPOSITE_FRAMES={{frames}} MONO_GRID_COMPOSITE_PRESET={{build_preset}} timeout --foreground --kill-after=10s 180s ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.grid-composite --samples 1; then
+        echo "grid-composite-bench failed or exceeded its 180s device deadline" >&2
+        exit 1
+    fi
+
 # Actual ordinary-emitter CPU recording/self cost, GPU timestamps and residency.
 # Device waits are outside CPU recording spans, so these numbers are not FPS.
 ordinary-particle-bench samples="1":
