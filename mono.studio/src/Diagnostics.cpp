@@ -13,7 +13,9 @@
 // menu, and they read exactly the same `core::FrameGraph` the client's overlay
 // does - the data is shared even though the drawing is not.
 
+#include "FrameGraphCaches.hpp"
 #include "FrameGraphFlame.hpp"
+#include "FrameGraphGeometry.hpp"
 #include "FrameGraphSnapshot.hpp"
 #include "FrameGraphTable.hpp"
 #include "ProfilerFlame.hpp"
@@ -931,14 +933,7 @@ namespace studio {
 		}
 
 		if (view.ShowCascadedCaches) {
-			ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::MutedColour());
-			ImGui::TextWrapped(
-				"One decision per viewport render opportunity. A hit means the retained GPU layer was "
-				"reused; "
-				"a write means that layer or one of its inputs invalidated it. These are counters, not "
-				"timing spans."
-			);
-			ImGui::PopStyleColor();
+			ImGui::TextUnformatted("Live collection, sampled display (250 ms).");
 
 			if (ViewportPresentations.empty()) {
 				ImGui::TextDisabled("no viewport cache has been observed yet");
@@ -962,66 +957,182 @@ namespace studio {
 
 			engine::render::PresentationCacheProfile &profile =
 				ViewportPresentations[view.CacheViewport].CacheProfile();
-			const std::span<const engine::render::PresentationCacheActivity> activities =
-				profile.Activities();
 			ImGui::SameLine();
 			if (ImGui::Button("Reset counters")) {
 				profile.Reset();
+				view.NextCacheProfile = 0.0;
 			}
-
-			constexpr ImGuiTableFlags flags = ImGuiTableFlags_BordersV | ImGuiTableFlags_RowBg |
-											  ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp;
-			if (ImGui::BeginTable("cascaded cache activity", 5, flags)) {
-				ImGui::TableSetupColumn("layer", ImGuiTableColumnFlags_WidthStretch, 2.0f);
-				ImGui::TableSetupColumn("last", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(64.0f));
-				ImGui::TableSetupColumn("hits", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(80.0f));
-				ImGui::TableSetupColumn(
-					"writes", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(80.0f)
-				);
-				ImGui::TableSetupColumn(
-					"hit rate", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(80.0f)
-				);
+			if (frame_graph_detail::SampleCacheProfile(view, profile, view.CacheViewport, ImGui::GetTime())) {
+				view.CachePassActivity = Renderer.ViewPassActivity(view.CacheViewport);
+				view.CacheRecording = view.CacheViewport < ViewportResults.size()
+										  ? ViewportResults[view.CacheViewport]
+										  : engine::render::FrameResult{};
+			}
+			const auto activities = view.CacheProfile.Activities();
+			const auto &damage = view.CacheProfile.LastDamage();
+			const auto drawDamage = [&](bool host) {
+				const int columns = host ? 2 : 4;
+				if (!ImGui::BeginTable("dirty bits", columns, ImGuiTableFlags_SizingStretchProp)) return;
+				for (int pair = 0; pair < columns / 2; pair++) {
+					ImGui::TableSetupColumn("flag", ImGuiTableColumnFlags_WidthStretch);
+					ImGui::TableSetupColumn(
+						"dirty", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(80.0f)
+					);
+				}
 				ImGui::TableHeadersRow();
-
-				for (size_t index = 0; index < activities.size(); index++) {
-					const engine::render::PresentationCacheLayerInfo &layer =
-						engine::render::PRESENTATION_CACHE_LAYERS[index];
-					const engine::render::PresentationCacheActivity &activity = activities[index];
-					const uint64_t decisions = activity.Hits + activity.Writes;
-					const double hitRate = decisions == 0 ? 0.0
-														  : static_cast<double>(activity.Hits) * 100.0 /
-																static_cast<double>(decisions);
-
-					ImGui::TableNextRow();
-					ImGui::TableSetColumnIndex(0);
-					ImGui::Indent(engine::ui::Scaled(16.0f) * static_cast<float>(layer.Depth));
-					ImGui::TextUnformatted(layer.Name.data(), layer.Name.data() + layer.Name.size());
-					ImGui::Unindent(engine::ui::Scaled(16.0f) * static_cast<float>(layer.Depth));
-					ImGui::TableSetColumnIndex(1);
-					if (activity.Last == engine::render::PresentationCacheActivity::Decision::NotApplicable) {
-						ImGui::TextDisabled("n/a");
-					} else if (activity.Last ==
-							   engine::render::PresentationCacheActivity::Decision::NotObserved) {
+				size_t shown = 0;
+				for (const auto &flag : frame_graph_detail::DAMAGE_FLAGS) {
+					if (flag.Host != host) continue;
+					const int column = static_cast<int>(shown++ % 2) * 2;
+					if (column == 0) ImGui::TableNextRow();
+					ImGui::TableSetColumnIndex(column);
+					ImGui::TextUnformatted(flag.Name);
+					ImGui::TableSetColumnIndex(column + 1);
+					if (!view.CacheProfile.HasObservations())
 						ImGui::TextDisabled("not seen");
-					} else if (activity.Wrote()) {
-						ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
-						ImGui::TextUnformatted("write");
-						ImGui::PopStyleColor();
-					} else {
-						ImGui::TextUnformatted("hit");
-					}
-					ImGui::TableSetColumnIndex(2);
-					ImGui::Text("%" PRIu64, activity.Hits);
-					ImGui::TableSetColumnIndex(3);
-					ImGui::Text("%" PRIu64, activity.Writes);
-					ImGui::TableSetColumnIndex(4);
-					if (decisions == 0) {
-						ImGui::TextDisabled("-");
-					} else {
-						ImGui::Text("%.1f%%", hitRate);
-					}
+					else
+						ImGui::TextUnformatted(damage.*flag.Member ? "true" : "false");
 				}
 				ImGui::EndTable();
+			};
+
+			constexpr ImGuiTableFlags flags = ImGuiTableFlags_BordersV | ImGuiTableFlags_RowBg |
+											  ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp |
+											  ImGuiTableFlags_Sortable | ImGuiTableFlags_SortTristate;
+			const auto drawCaches = [&](bool host) {
+				if (ImGui::BeginTable("cache activity", 5, flags)) {
+					ImGui::TableSetupColumn("layer", ImGuiTableColumnFlags_WidthStretch, 2.0f);
+					ImGui::TableSetupColumn(
+						"last", ImGuiTableColumnFlags_WidthFixed, engine::ui::Scaled(64.0f)
+					);
+					ImGui::TableSetupColumn(
+						"hits",
+						ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_PreferSortDescending,
+						engine::ui::Scaled(80.0f)
+					);
+					ImGui::TableSetupColumn(
+						"writes",
+						ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_PreferSortDescending,
+						engine::ui::Scaled(80.0f)
+					);
+					ImGui::TableSetupColumn(
+						"hit rate",
+						ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_PreferSortDescending,
+						engine::ui::Scaled(80.0f)
+					);
+					ImGui::TableHeadersRow();
+
+					const size_t group = host ? 1 : 0;
+					ImGuiTableSortSpecs *specs = ImGui::TableGetSortSpecs();
+					frame_graph_detail::CacheSort sort;
+					const bool sorted = specs != nullptr && specs->SpecsCount > 0;
+					if (sorted) sort = {specs->Specs[0].ColumnIndex, specs->Specs[0].SortDirection};
+					if (view.CacheOrderRevision[group] != view.CacheProfileRevision ||
+						(specs != nullptr && specs->SpecsDirty)) {
+						frame_graph_detail::BuildCacheOrder(
+							activities, host, sorted ? &sort : nullptr, view.CacheOrder[group]
+						);
+						view.CacheOrderRevision[group] = view.CacheProfileRevision;
+						if (specs != nullptr) specs->SpecsDirty = false;
+					}
+					for (const size_t index : view.CacheOrder[group]) {
+						const engine::render::PresentationCacheLayerInfo &layer =
+							engine::render::PRESENTATION_CACHE_LAYERS[index];
+						const engine::render::PresentationCacheActivity &activity = activities[index];
+						const uint64_t decisions = activity.Hits + activity.Writes;
+						const double hitRate = decisions == 0 ? 0.0
+															  : static_cast<double>(activity.Hits) * 100.0 /
+																	static_cast<double>(decisions);
+
+						ImGui::TableNextRow();
+						ImGui::TableSetColumnIndex(0);
+						const float indent =
+							sorted ? 0.0f : engine::ui::Scaled(16.0f) * static_cast<float>(layer.Depth);
+						if (indent > 0.0f) ImGui::Indent(indent);
+						ImGui::TextUnformatted(layer.Name.data(), layer.Name.data() + layer.Name.size());
+						if (indent > 0.0f) ImGui::Unindent(indent);
+						ImGui::TableSetColumnIndex(1);
+						if (activity.Last ==
+							engine::render::PresentationCacheActivity::Decision::NotApplicable) {
+							ImGui::TextDisabled("n/a");
+						} else if (activity.Last ==
+								   engine::render::PresentationCacheActivity::Decision::NotObserved) {
+							ImGui::TextDisabled("not seen");
+						} else if (activity.Wrote()) {
+							ImGui::PushStyleColor(ImGuiCol_Text, engine::ui::WarningColour());
+							ImGui::TextUnformatted("write");
+							ImGui::PopStyleColor();
+						} else {
+							ImGui::TextUnformatted("hit");
+						}
+						ImGui::TableSetColumnIndex(2);
+						ImGui::Text("%" PRIu64, activity.Hits);
+						ImGui::TableSetColumnIndex(3);
+						ImGui::Text("%" PRIu64, activity.Writes);
+						ImGui::TableSetColumnIndex(4);
+						if (decisions == 0) {
+							ImGui::TextDisabled("-");
+						} else {
+							ImGui::Text("%.1f%%", hitRate);
+						}
+					}
+					ImGui::EndTable();
+				}
+			};
+			for (const bool host : {false, true}) {
+				ImGui::PushID(host ? "host" : "viewport");
+				ImGui::SeparatorText(host ? "Host Studio UI and presentation" : "Viewport scene and game UI");
+				drawDamage(host);
+				drawCaches(host);
+				ImGui::PopID();
+			}
+
+			ImGui::SeparatorText("GPU effective inputs (last scene recording)");
+			if (ImGui::BeginTable("GPU activity", 4, ImGuiTableFlags_SizingStretchProp)) {
+				for (size_t index = 0; index < frame_graph_detail::PASS_FLAGS.size(); index++) {
+					const auto &flag = frame_graph_detail::PASS_FLAGS[index];
+					if (index % 2 == 0) ImGui::TableNextRow();
+					ImGui::TableSetColumnIndex(static_cast<int>(index % 2) * 2);
+					ImGui::TextUnformatted(flag.Name);
+					ImGui::TableSetColumnIndex(static_cast<int>(index % 2) * 2 + 1);
+					if (!view.CachePassActivity.Valid)
+						ImGui::TextDisabled("not seen");
+					else
+						ImGui::TextUnformatted(view.CachePassActivity.*flag.Member ? "true" : "false");
+				}
+				ImGui::EndTable();
+			}
+			ImGui::SeparatorText("Last renderer call: recorded work");
+			if (!view.CacheRecording.Submitted) {
+				ImGui::TextDisabled("no submission recorded");
+			} else {
+				ImGui::Text(
+					"%u draws | %u compute dispatches | %u uploads",
+					view.CacheRecording.DrawCalls,
+					view.CacheRecording.ComputeDispatches,
+					view.CacheRecording.UploadCommandBuffers
+				);
+				ImGui::Text(
+					"instance rows: %u dirty / %u | chunks: %u dirty / %u",
+					view.CacheRecording.InstanceRowsDirty,
+					view.CacheRecording.InstanceRows,
+					view.CacheRecording.InstanceChunksDirty,
+					view.CacheRecording.InstanceChunks
+				);
+				ImGui::Text(
+					"SurfaceCapturePlanWrite %s | surface passes %u | portal passes %u",
+					view.CacheRecording.SurfaceCapturePlanWrite ? "true" : "false",
+					view.CacheRecording.SurfacePasses,
+					view.CacheRecording.PortalPasses
+				);
+				ImGui::Text(
+					"uploaded %" PRIu64 " B | scheduled writes %" PRIu64 " B | queue traffic %" PRIu64 " B",
+					view.CacheRecording.UploadedBytes,
+					view.CacheRecording.ScheduledWriteBytes,
+					view.CacheRecording.QueueTransferBytes
+				);
+				for (const auto node : view.CacheRecording.Nodes)
+					ImGui::TextUnformatted(node.Text().data(), node.Text().data() + node.Text().size());
 			}
 
 			const double now = ImGui::GetTime();
@@ -1746,6 +1857,8 @@ namespace studio {
 				const auto index = static_cast<size_t>(category);
 				return palette[index < palette.size() ? index : 0];
 			};
+			if (!flame.Geometry[0]) flame.Geometry[0] = std::make_shared<frame_graph_detail::FlameGeometry>();
+			auto &cpuGeometry = *flame.Geometry[0];
 			const auto drawSpan = [&](size_t index) {
 				const DiagnosticSpan &span = visibleSpans[index];
 				// **Clamped to the graph, whatever the arithmetic above produced.**
@@ -1772,11 +1885,7 @@ namespace studio {
 				draw->AddRectFilled(upper, lower, colour);
 
 				if (mouseInGraph && ImGui::IsMouseHoveringRect(upper, lower)) {
-					hovered = &span;
-					hoveredSource = focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
-					if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-						clickedSource = hoveredSource;
-					}
+					cpuGeometry.Hovered = static_cast<uint32_t>(index);
 					draw->AddRect(upper, lower, engine::ui::BrightColour());
 				}
 
@@ -1800,11 +1909,41 @@ namespace studio {
 			// Accounting is the background of the timeline. Reported worker work is
 			// deliberately fitted into the measured wall-time gap that waited for it,
 			// so drawing synthetic gaps last would cover the useful worker bars.
-			for (const size_t kind : {frame_graph_detail::ACCOUNTING_PASS, frame_graph_detail::CPU_PASS}) {
-				auto &pass = flame.Passes[kind];
-				frame_graph_detail::PrepareFlameRows(pass, origin.y, rowHeight, clipMinimum.y, clipMaximum.y);
-				for (const uint32_t index : pass.Visible)
-					drawSpan(index);
+			const auto cpuKey = frame_graph_detail::GeometryKey(
+				*draw,
+				flame.Revision,
+				origin,
+				graphWidth,
+				rowHeight,
+				scale,
+				labelMinimumWidth,
+				mouseInGraph,
+				engine::ui::AccentColour(),
+				engine::ui::BrightColour()
+			);
+			frame_graph_detail::PaintGeometry(
+				cpuGeometry,
+				cpuKey,
+				*draw,
+				[&] {
+					for (const size_t kind :
+						 {frame_graph_detail::ACCOUNTING_PASS, frame_graph_detail::CPU_PASS}) {
+						auto &pass = flame.Passes[kind];
+						frame_graph_detail::PrepareFlameRows(
+							pass, origin.y, rowHeight, clipMinimum.y, clipMaximum.y
+						);
+						for (const uint32_t index : pass.Visible)
+							drawSpan(index);
+					}
+				},
+				view.Paused || interval > 0.0f
+			);
+			if (cpuGeometry.Hovered < visibleSpans.size()) {
+				hoveredSource =
+					focused ? view.FocusedSourceIndices[cpuGeometry.Hovered] : cpuGeometry.Hovered;
+				// Focus may replace the re-rooted spans before the tooltip is drawn.
+				hovered = &graphSpans[hoveredSource];
+				if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) clickedSource = hoveredSource;
 			}
 
 			ImGui::Dummy(ImVec2(graphWidth, graphHeight));
@@ -1844,43 +1983,71 @@ namespace studio {
 				frame_graph_detail::PrepareFlameRows(
 					gpuPass, gpuOrigin.y, rowHeight, clipMinimum.y, clipMaximum.y
 				);
-				for (const uint32_t index : gpuPass.Visible) {
-					const DiagnosticSpan &span = visibleSpans[index];
-					const float duration = std::max(span.Milliseconds, 0.0f);
-					const float width =
-						gpuMaximumMilliseconds > 0.0f
-							? std::clamp(duration / gpuMaximumMilliseconds * graphWidth, 1.0f, graphWidth)
-							: 1.0f;
-					const float top = gpuOrigin.y + static_cast<float>(visibleRows[index]) * rowHeight;
-					const ImVec2 upper(gpuOrigin.x, top);
-					const ImVec2 lower(gpuOrigin.x + width, top + rowHeight);
-					if (!intersectsWindowClip(upper, lower)) {
-						continue;
-					}
-					draw->AddRectFilled(upper, lower, colourOf(span.Category));
-					if (mouseInGpuGraph && ImGui::IsMouseHoveringRect(upper, lower)) {
-						hovered = &span;
-						hoveredSource =
-							focused ? view.FocusedSourceIndices[index] : static_cast<uint32_t>(index);
-						if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-							clickedSource = hoveredSource;
+				if (!flame.Geometry[1])
+					flame.Geometry[1] = std::make_shared<frame_graph_detail::FlameGeometry>();
+				auto &gpuGeometry = *flame.Geometry[1];
+				const auto gpuKey = frame_graph_detail::GeometryKey(
+					*draw,
+					flame.Revision,
+					gpuOrigin,
+					graphWidth,
+					rowHeight,
+					gpuMaximumMilliseconds,
+					labelMinimumWidth,
+					mouseInGpuGraph,
+					engine::ui::AccentColour(),
+					engine::ui::BrightColour()
+				);
+				frame_graph_detail::PaintGeometry(
+					gpuGeometry,
+					gpuKey,
+					*draw,
+					[&] {
+						for (const uint32_t index : gpuPass.Visible) {
+							const DiagnosticSpan &span = visibleSpans[index];
+							const float duration = std::max(span.Milliseconds, 0.0f);
+							const float width =
+								gpuMaximumMilliseconds > 0.0f
+									? std::clamp(
+										  duration / gpuMaximumMilliseconds * graphWidth, 1.0f, graphWidth
+									  )
+									: 1.0f;
+							const float top =
+								gpuOrigin.y + static_cast<float>(visibleRows[index]) * rowHeight;
+							const ImVec2 upper(gpuOrigin.x, top);
+							const ImVec2 lower(gpuOrigin.x + width, top + rowHeight);
+							if (!intersectsWindowClip(upper, lower)) {
+								continue;
+							}
+							draw->AddRectFilled(upper, lower, colourOf(span.Category));
+							if (mouseInGpuGraph && ImGui::IsMouseHoveringRect(upper, lower)) {
+								gpuGeometry.Hovered = index;
+								draw->AddRect(upper, lower, engine::ui::BrightColour());
+							}
+							if (width > labelMinimumWidth) {
+								const ImVec4 labelClip(upper.x, upper.y, lower.x, lower.y);
+								draw->AddText(
+									nullptr,
+									0.0f,
+									ImVec2(upper.x + 3.0f, top + 1.0f),
+									IM_COL32(16, 18, 22, 235),
+									span.Name.data(),
+									span.Name.data() + span.Name.size(),
+									0.0f,
+									&labelClip
+								);
+							}
 						}
-						draw->AddRect(upper, lower, engine::ui::BrightColour());
-					}
-					if (width > labelMinimumWidth) {
-						const ImVec4 labelClip(upper.x, upper.y, lower.x, lower.y);
-						draw->AddText(
-							nullptr,
-							0.0f,
-							ImVec2(upper.x + 3.0f, top + 1.0f),
-							IM_COL32(16, 18, 22, 235),
-							span.Name.data(),
-							span.Name.data() + span.Name.size(),
-							0.0f,
-							&labelClip
-						);
-					}
+					},
+					view.Paused || interval > 0.0f
+				);
+				if (gpuGeometry.Hovered < visibleSpans.size()) {
+					hoveredSource =
+						focused ? view.FocusedSourceIndices[gpuGeometry.Hovered] : gpuGeometry.Hovered;
+					hovered = &graphSpans[hoveredSource];
+					if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) clickedSource = hoveredSource;
 				}
+
 				ImGui::Dummy(ImVec2(graphWidth, gpuHeight));
 				const bool gpuGraphHovered = ImGui::IsItemHovered();
 				gpuGraphRightClick = gpuGraphHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right);

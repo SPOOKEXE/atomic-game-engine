@@ -27,6 +27,7 @@ namespace studio::frame_graph_detail {
 		uint32_t rowCapacity,
 		Cache &cache
 	) {
+		cache.Revision++;
 		cache.CpuRows = 0;
 		cache.GpuRows = 0;
 		cache.GpuMaximumMilliseconds = 0;

@@ -1,6 +1,8 @@
 // Flame row indexing and the production panel's clipped/full draw parity.
 #include "FrameGraphFlame.hpp"
 
+#include "FrameGraphCaches.hpp"
+#include "FrameGraphGeometry.hpp"
 #include "FrameGraphTable.hpp"
 
 #include <engine/testing/Suite.hpp>
@@ -137,6 +139,39 @@ namespace studio {
 			editor.Interface.End();
 			return editor.Interface.Signature();
 		}
+		static uint64_t GeometryDraw(
+			Editor &editor, frame_graph_detail::FlameGeometry &cache, int prefix, bool split = false
+		) {
+			editor.Interface.Begin(1.0f / 60.0f);
+			ImGui::GetIO().IniFilename = nullptr;
+			ImGui::SetNextWindowPos({20, 20}, ImGuiCond_Always);
+			ImGui::SetNextWindowSize({500, 300}, ImGuiCond_Always);
+			ImGui::Begin("geometry fixture", nullptr, ImGuiWindowFlags_NoSavedSettings);
+			auto &draw = *ImGui::GetWindowDrawList();
+			for (int index = 0; index < prefix; index++)
+				draw.AddRectFilled({30, 70}, {35, 75}, IM_COL32_WHITE);
+			const auto key = frame_graph_detail::GeometryKey(
+				draw,
+				split ? 2 : 1,
+				{40, 90},
+				300,
+				20,
+				1,
+				34,
+				false,
+				engine::ui::AccentColour(),
+				engine::ui::BrightColour()
+			);
+			frame_graph_detail::PaintGeometry(cache, key, draw, [&] {
+				draw.AddRectFilled({40, 90}, {340, 110}, engine::ui::AccentColour());
+				if (split) draw.PushClipRect({40, 90}, {200, 110}, true);
+				draw.AddText({43, 91}, IM_COL32_WHITE, "retained flame label");
+				if (split) draw.PopClipRect();
+			});
+			ImGui::End();
+			editor.Interface.End();
+			return editor.Interface.Signature();
+		}
 		static void TableClick(Editor &editor, int column) {
 			const ImVec2 position = TableHeaderPosition(column);
 			ImGui::GetIO().AddMousePosEvent(position.x, position.y);
@@ -150,6 +185,15 @@ namespace studio {
 			auto &view = editor.FrameGraphState;
 			return view.FocusRoot == engine::core::FrameGraph::NO_PARENT ? view.Flame : view.FocusedFlame;
 		}
+		static uint64_t GeometryHits(Editor &editor) {
+			const auto &cache = FlameCurrent(editor);
+			return cache.Geometry[0] ? cache.Geometry[0]->Hits : 0;
+		}
+		static void RepaintGeometry(Editor &editor) {
+			for (auto &geometry : FlameCurrent(editor).Geometry) {
+				if (geometry) geometry->Ready = false;
+			}
+		}
 		static void FlameClipAgain(Editor &editor) {
 			for (auto &pass : FlameCurrent(editor).Passes)
 				pass.Prepared = false;
@@ -161,12 +205,13 @@ namespace studio {
 				pass.Visible = pass.OriginalIndices;
 			}
 		}
-		static ImVec2 FlameBarCentre() {
+		static ImVec2
+		FlameBarCentre(engine::core::ProfileCategory category = engine::core::ProfileCategory::ECS) {
 			const auto *window = ImGui::FindWindowByName("Frame Graph");
 			REQUIRE(window != nullptr);
 			const auto colour = frame_graph_detail::FlameCategoryPalette(
 				engine::ui::AccentColour()
-			)[static_cast<size_t>(engine::core::ProfileCategory::ECS)];
+			)[static_cast<size_t>(category)];
 			const auto &vertices = window->DrawList->VtxBuffer;
 			for (int index = 0; index + 3 < vertices.Size; index++) {
 				if (vertices[index].col != colour || vertices[index + 2].col != colour) continue;
@@ -178,6 +223,68 @@ namespace studio {
 			}
 			FAIL("no visible measured ECS flame bar");
 			return {};
+		}
+		static void CacheOpen(Editor &editor) {
+			editor.FrameGraphState.ShowCascadedCaches = true;
+			editor.ViewportPresentations.resize(1);
+		}
+		static void CacheRecord(Editor &editor, const engine::render::PresentationDamage &damage) {
+			editor.ViewportPresentations[0].CacheProfile().Record(damage, true);
+		}
+		static uint64_t CacheSampledHits(const Editor &editor) {
+			return editor.FrameGraphState.CacheProfile
+				.Activities()[static_cast<size_t>(engine::render::PresentationCacheLayer::SceneImage)]
+				.Hits;
+		}
+		static const std::vector<size_t> &CacheOrder(const Editor &editor, bool host) {
+			return editor.FrameGraphState.CacheOrder[host ? 1 : 0];
+		}
+		static void CacheSortingSeed(Editor &editor) {
+			CacheOpen(editor);
+			auto &profile = editor.ViewportPresentations[0].CacheProfile();
+			profile.Reset();
+			engine::render::PresentationCacheApplicability applicable;
+			applicable.Objects = false;
+			profile.Record(
+				{.Scene = true, .HostInterface = true, .Objects = true}, true, false, false, applicable
+			);
+			profile.Record({.Particles = true}, true);
+			profile.Record({.Scene = true, .HostInterface = true}, true);
+			editor.FrameGraphState.NextCacheProfile = 0;
+		}
+		static void CacheSortingMutation(Editor &editor) {
+			engine::render::PresentationCacheApplicability applicable;
+			applicable.Environment = false;
+			for (size_t opportunity = 0; opportunity < 4; opportunity++)
+				editor.ViewportPresentations[0].CacheProfile().Record({}, true, false, false, applicable);
+		}
+		static ImVec2 CacheHeaderPosition(bool host, int column) {
+			ImGuiWindow *window = ImGui::FindWindowByName("Frame Graph");
+			REQUIRE(window != nullptr);
+			const ImGuiID group = window->GetID(host ? "host" : "viewport");
+			const ImGuiID tableId = ImHashStr("cache activity", 0, group);
+			ImGuiTable *table = ImGui::GetCurrentContext()->Tables.GetByKey(tableId);
+			REQUIRE(table != nullptr);
+			const auto &tableColumn = table->Columns[column];
+			const float headerHeight = table->InstanceDataFirst.LastTopHeadersRowHeight;
+			return {
+				(tableColumn.MinX + tableColumn.MaxX) * 0.5f, table->OuterRect.Min.y + headerHeight * 0.5f
+			};
+		}
+		static void CacheClick(Editor &editor, bool host, int column) {
+			const ImVec2 position = CacheHeaderPosition(host, column);
+			ImGui::GetIO().AddMousePosEvent(position.x, position.y);
+			FlameDraw(editor, 1000, 700, 0);
+			ImGui::GetIO().AddMouseButtonEvent(0, true);
+			FlameDraw(editor, 1000, 700, 0);
+			ImGui::GetIO().AddMouseButtonEvent(0, false);
+			FlameDraw(editor, 1000, 700, 0);
+		}
+		static void CacheExpire(Editor &editor) {
+			editor.FrameGraphState.NextCacheProfile = 0;
+		}
+		static uint32_t FlameFocusRoot(const Editor &editor) {
+			return editor.FrameGraphState.FocusRoot;
 		}
 		static bool FlameFocused(const Editor &editor) {
 			return editor.FrameGraphState.FocusRoot != engine::core::FrameGraph::NO_PARENT;
@@ -378,9 +485,15 @@ TEST_CASE(
 		studio::ToolsProbe::FlameClipAgain(editor);
 		const uint64_t clipped = studio::ToolsProbe::FlameDraw(editor, width, height, scroll);
 		studio::ToolsProbe::FlameFullTraversal(editor);
+		studio::ToolsProbe::RepaintGeometry(editor);
 		CHECK(studio::ToolsProbe::FlameDraw(editor, width, height, scroll) == clipped);
 	};
 	parity(1200, 650, 0);
+	const uint64_t hits = studio::ToolsProbe::GeometryHits(editor);
+	const uint64_t cached = studio::ToolsProbe::FlameDraw(editor, 1200, 650, 0);
+	CHECK(studio::ToolsProbe::GeometryHits(editor) == hits + 1);
+	studio::ToolsProbe::RepaintGeometry(editor);
+	CHECK(studio::ToolsProbe::FlameDraw(editor, 1200, 650, 0) == cached);
 	const ImVec2 bar = studio::ToolsProbe::FlameBarCentre();
 	ImGui::GetIO().AddMousePosEvent(bar.x, bar.y);
 	parity(1200, 650, 0);
@@ -389,6 +502,17 @@ TEST_CASE(
 	ImGui::GetIO().AddMouseButtonEvent(0, false);
 	studio::ToolsProbe::FlameDraw(editor, 1200, 650, 0);
 	REQUIRE(studio::ToolsProbe::FlameFocused(editor));
+	ImGui::GetIO().AddMousePosEvent(-100, -100);
+	parity(1200, 650, 0);
+	const uint32_t parentFocus = studio::ToolsProbe::FlameFocusRoot(editor);
+	const ImVec2 childBar = studio::ToolsProbe::FlameBarCentre(engine::core::ProfileCategory::Render);
+	ImGui::GetIO().AddMousePosEvent(childBar.x, childBar.y);
+	studio::ToolsProbe::FlameDraw(editor, 1200, 650, 0);
+	ImGui::GetIO().AddMouseButtonEvent(0, true);
+	studio::ToolsProbe::FlameDraw(editor, 1200, 650, 0);
+	ImGui::GetIO().AddMouseButtonEvent(0, false);
+	studio::ToolsProbe::FlameDraw(editor, 1200, 650, 0);
+	CHECK(studio::ToolsProbe::FlameFocusRoot(editor) > parentFocus);
 	ImGui::GetIO().AddMousePosEvent(-100, -100);
 	parity(1200, 650, 0);
 	studio::ToolsProbe::FlameFocus(editor, engine::core::FrameGraph::NO_PARENT);
@@ -454,4 +578,203 @@ TEST_CASE(
 			studio::frame_graph_detail::UncachedFlameColour(ProfileCategory::Engine, accent)
 		);
 	}
+}
+
+TEST_CASE(
+	"cache display samples without interrupting hidden-page collection", "[studio][diagnostics][cache]"
+) {
+	struct View {
+		engine::render::PresentationCacheProfile CacheProfile;
+		uint64_t CacheProfileRevision = 0;
+		double NextCacheProfile = 0;
+		size_t SampledCacheViewport = SIZE_MAX;
+	} view;
+	engine::render::PresentationCacheProfile live;
+	using engine::render::PresentationCacheLayer;
+	using studio::frame_graph_detail::SampleCacheProfile;
+	const size_t host = static_cast<size_t>(PresentationCacheLayer::HostInterface);
+	const size_t scene = static_cast<size_t>(PresentationCacheLayer::SceneImage);
+	// Timing page and hidden panel frames still accumulate, before any display sample.
+	for (size_t frame = 0; frame < 128; frame++)
+		live.Record({.HostInterface = frame % 4 == 0}, true);
+	REQUIRE(SampleCacheProfile(view, live, 0, 10.0));
+	CHECK(view.CacheProfile.Activities()[host].Writes == 32);
+	CHECK(view.CacheProfile.Activities()[host].Hits == 96);
+	CHECK(view.CacheProfile.Activities()[scene].Hits == 128);
+	live.Record({.Scene = true, .Objects = true}, true);
+	CHECK_FALSE(SampleCacheProfile(view, live, 0, 10.1));
+	CHECK_FALSE(view.CacheProfile.LastDamage().Scene);
+	CHECK(view.CacheProfile.Activities()[scene].Hits == 128);
+	CHECK(SampleCacheProfile(view, live, 0, 10.25));
+	CHECK(view.CacheProfile.LastDamage().Scene);
+	CHECK(view.CacheProfile.LastDamage().Objects);
+	CHECK(view.CacheProfile.Activities()[scene].Writes == 1);
+	// Switching viewport is immediate; an ImGui time reset must not stall the view.
+	CHECK(SampleCacheProfile(view, live, 1, 10.26));
+	CHECK(SampleCacheProfile(view, live, 1, 0.0));
+	live.Reset();
+	view.NextCacheProfile = 0;
+	CHECK(SampleCacheProfile(view, live, 1, 0.01));
+	CHECK_FALSE(view.CacheProfile.HasObservations());
+	CHECK(view.CacheProfile.Activities()[host].Writes == 0);
+}
+
+TEST_CASE(
+	"cache page retains geometry while live decisions accumulate", "[studio][diagnostics][cache][input]"
+) {
+	const auto previous = studio::ConfigRoot();
+	const auto scratch = std::filesystem::temp_directory_path() / "studio-cache-display";
+	std::filesystem::create_directories(scratch);
+	studio::SetConfigRoot(scratch);
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previous};
+	studio::Editor editor;
+	REQUIRE(studio::ToolsProbe::FlameInitialise(editor));
+	studio::ToolsProbe::FlameSeed(editor);
+	ImGui::GetIO().AddMousePosEvent(-100, -100);
+	studio::ToolsProbe::CacheOpen(editor);
+	studio::ToolsProbe::CacheRecord(editor, {});
+	for (size_t warm = 0; warm < 3; warm++)
+		studio::ToolsProbe::FlameDraw(editor, 1200, 650, 0);
+	const uint64_t steady = studio::ToolsProbe::FlameDraw(editor, 1200, 650, 0);
+	const uint64_t sampled = studio::ToolsProbe::CacheSampledHits(editor);
+	for (size_t frame = 0; frame < 3; frame++) {
+		studio::ToolsProbe::CacheRecord(editor, {});
+		CHECK(studio::ToolsProbe::FlameDraw(editor, 1200, 650, 0) == steady);
+		CHECK(studio::ToolsProbe::CacheSampledHits(editor) == sampled);
+	}
+	studio::ToolsProbe::CacheExpire(editor);
+	CHECK(studio::ToolsProbe::FlameDraw(editor, 1200, 650, 0) != steady);
+	CHECK(studio::ToolsProbe::CacheSampledHits(editor) == sampled + 3);
+}
+
+TEST_CASE(
+	"retained flame indices rebase and command boundaries decline reuse", "[studio][diagnostics][flame]"
+) {
+	studio::Editor editor;
+	REQUIRE(studio::ToolsProbe::FlameInitialise(editor));
+	studio::frame_graph_detail::FlameGeometry cache;
+	for (size_t warm = 0; warm < 3; warm++)
+		studio::ToolsProbe::GeometryDraw(editor, cache, 1);
+	REQUIRE(cache.Ready);
+	const uint64_t hits = cache.Hits;
+	const uint64_t rebased = studio::ToolsProbe::GeometryDraw(editor, cache, 300);
+	CHECK(cache.Hits == hits + 1);
+	cache.Ready = false;
+	CHECK(studio::ToolsProbe::GeometryDraw(editor, cache, 300) == rebased);
+	const uint64_t clipped = studio::ToolsProbe::GeometryDraw(editor, cache, 300, true);
+	CHECK_FALSE(cache.Ready);
+	CHECK(studio::ToolsProbe::GeometryDraw(editor, cache, 300, true) == clipped);
+	CHECK_FALSE(cache.Ready);
+}
+
+TEST_CASE(
+	"cache table headers sort sampled values and restore cascade order", "[studio][diagnostics][cache][input]"
+) {
+	const auto previous = studio::ConfigRoot();
+	const auto scratch = std::filesystem::temp_directory_path() / "studio-cache-table-sort";
+	std::filesystem::create_directories(scratch);
+	studio::SetConfigRoot(scratch);
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previous};
+	studio::Editor editor;
+	REQUIRE(studio::ToolsProbe::FlameInitialise(editor));
+	studio::ToolsProbe::CacheSortingSeed(editor);
+	for (size_t warm = 0; warm < 3; warm++)
+		studio::ToolsProbe::FlameDraw(editor, 1000, 700, 0);
+	const std::vector<size_t> cascade = studio::ToolsProbe::CacheOrder(editor, false);
+	const std::vector<size_t> hostCascade = studio::ToolsProbe::CacheOrder(editor, true);
+	REQUIRE(cascade == std::vector<size_t>{0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11});
+	REQUIRE(hostCascade == std::vector<size_t>{8, 12, 13});
+	for (const bool host : {false, true}) {
+		for (int column = 0; column < 5; column++) {
+			studio::ToolsProbe::CacheClick(editor, host, column);
+			std::vector<size_t> expected;
+			const auto &view = studio::ToolsProbe::CacheOrder(editor, host);
+			// The production column preference picks ascending text and descending values first.
+			const studio::frame_graph_detail::CacheSort descending{
+				column, column < 2 ? ImGuiSortDirection_Ascending : ImGuiSortDirection_Descending
+			};
+			engine::render::PresentationCacheProfile profile;
+			engine::render::PresentationCacheApplicability applicable;
+			applicable.Objects = false;
+			profile.Record(
+				{.Scene = true, .HostInterface = true, .Objects = true}, true, false, false, applicable
+			);
+			profile.Record({.Particles = true}, true);
+			profile.Record({.Scene = true, .HostInterface = true}, true);
+			studio::frame_graph_detail::BuildCacheOrder(profile.Activities(), host, &descending, expected);
+			CHECK(view == expected);
+			studio::ToolsProbe::CacheClick(editor, host, column);
+			const studio::frame_graph_detail::CacheSort ascending{
+				column, column < 2 ? ImGuiSortDirection_Descending : ImGuiSortDirection_Ascending
+			};
+			studio::frame_graph_detail::BuildCacheOrder(profile.Activities(), host, &ascending, expected);
+			CHECK(studio::ToolsProbe::CacheOrder(editor, host) == expected);
+			studio::ToolsProbe::CacheClick(editor, host, column);
+			CHECK(studio::ToolsProbe::CacheOrder(editor, host) == (host ? hostCascade : cascade));
+		}
+	}
+	studio::ToolsProbe::CacheClick(editor, false, 2);
+	studio::ToolsProbe::CacheExpire(editor);
+	studio::ToolsProbe::FlameDraw(editor, 1000, 700, 0);
+	const auto sampledOrder = studio::ToolsProbe::CacheOrder(editor, false);
+	const auto position = [](const std::vector<size_t> &order, size_t layer) {
+		return std::find(order.begin(), order.end(), layer) - order.begin();
+	};
+	CHECK(position(sampledOrder, 2) < position(sampledOrder, 0));
+	studio::ToolsProbe::CacheSortingMutation(editor);
+	studio::ToolsProbe::FlameDraw(editor, 1000, 700, 0);
+	CHECK(studio::ToolsProbe::CacheOrder(editor, false) == sampledOrder);
+	studio::ToolsProbe::CacheExpire(editor);
+	studio::ToolsProbe::FlameDraw(editor, 1000, 700, 0);
+	CHECK(
+		position(studio::ToolsProbe::CacheOrder(editor, false), 0) <
+		position(studio::ToolsProbe::CacheOrder(editor, false), 2)
+	);
+	CHECK(studio::ToolsProbe::CacheOrder(editor, true) == hostCascade);
+}
+
+TEST_CASE(
+	"cache table value ordering keeps missing rates last and breaks ties by cascade",
+	"[studio][diagnostics][cache]"
+) {
+	using engine::render::PresentationCacheActivity;
+	using studio::frame_graph_detail::BuildCacheOrder;
+	using studio::frame_graph_detail::CacheSort;
+	std::array<PresentationCacheActivity, 14> rows{};
+	rows[8] = {.Hits = 9, .Writes = 1, .Last = PresentationCacheActivity::Decision::Write};
+	rows[12] = {.Hits = 2, .Writes = 8, .Last = PresentationCacheActivity::Decision::Hit};
+	std::vector<size_t> order;
+	const CacheSort hits{2, ImGuiSortDirection_Descending};
+	BuildCacheOrder(rows, true, &hits, order);
+	CHECK(order == std::vector<size_t>{8, 12, 13});
+	const CacheSort writes{3, ImGuiSortDirection_Descending};
+	BuildCacheOrder(rows, true, &writes, order);
+	CHECK(order == std::vector<size_t>{12, 8, 13});
+	const CacheSort rateAscending{4, ImGuiSortDirection_Ascending};
+	BuildCacheOrder(rows, true, &rateAscending, order);
+	CHECK(order == std::vector<size_t>{12, 8, 13});
+	const CacheSort rateDescending{4, ImGuiSortDirection_Descending};
+	BuildCacheOrder(rows, true, &rateDescending, order);
+	CHECK(order == std::vector<size_t>{8, 12, 13});
+	const CacheSort last{1, ImGuiSortDirection_Ascending};
+	BuildCacheOrder(rows, true, &last, order);
+	CHECK(order == std::vector<size_t>{12, 13, 8});
+	const CacheSort names{0, ImGuiSortDirection_Ascending};
+	BuildCacheOrder(rows, true, &names, order);
+	CHECK(order == std::vector<size_t>{12, 8, 13});
+	rows[12] = rows[8];
+	BuildCacheOrder(rows, true, &hits, order);
+	CHECK(order == std::vector<size_t>{8, 12, 13});
+	BuildCacheOrder(rows, true, nullptr, order);
+	CHECK(order == std::vector<size_t>{8, 12, 13});
 }

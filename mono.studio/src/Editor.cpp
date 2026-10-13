@@ -3203,16 +3203,13 @@ namespace studio {
 		view.Damage = damage;
 		const bool visualChanged = damage.Any();
 		const bool particleDeviceStep = particleLayerPresent && frameSeconds > 0.0f;
-		if (!visualChanged && !particleDeviceStep) {
-			return;
-		}
 		if (!visualChanged) {
-			// A retained image that prevents submission is a skipped opportunity,
-			// not a cache read. Count hits only when this presentation actually asks
-			// the renderer to reuse those layers.
+			// Reusing retained images is a cache decision even when it avoids a
+			// renderer call. Collection never depends on which diagnostic page is visible.
 			ViewportPresentations[viewport].CacheProfile().Record(
 				damage, true, false, false, cacheApplicability
 			);
+			if (!particleDeviceStep) return;
 		}
 		{
 			ENGINE_PROFILE_CAT("render frame", engine::core::ProfileCategory::Render);
@@ -3227,8 +3224,10 @@ namespace studio {
 		if (ViewportResults.size() <= viewport) {
 			ViewportResults.resize(viewport + 1);
 		}
-		ViewportResults[viewport].Triangles =
+		const uint64_t retainedTriangles =
 			UpdateSceneTriangleCount(ViewportResults[viewport].Triangles, LastFrame, damage.Scene);
+		ViewportResults[viewport] = LastFrame;
+		ViewportResults[viewport].Triangles = retainedTriangles;
 		if (LastFrame.Submitted) {
 			LastGraphViewport = viewport;
 			LastGraphRenderGeneration = Renderer.RenderGeneration();

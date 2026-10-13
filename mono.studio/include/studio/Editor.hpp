@@ -138,6 +138,10 @@ struct ImGuiTableSortSpecs;
 // to name one parameter type would make a headless suite compile a UI library.
 struct ImGuiTableSortSpecs;
 
+namespace studio::frame_graph_detail {
+	struct FlameGeometry;
+}
+
 namespace studio {
 	struct ComponentPanelProbe;
 	struct UiAuthoringProbe;
@@ -6336,17 +6340,9 @@ namespace studio {
 
 		// --- the debug panels -------------------------------------------------
 		//
-		// **Drawn into the overlay rather than as imgui windows, and reused
-		// rather than rebuilt.** `render::DrawDebugPanels` is what the client
-		// draws with, so the editor's frame graph is the same panel with the
-		// same columns - an fps figure that meant something slightly different
-		// in two programs is worse than not having one in the editor.
-		//
-		// **No keys of their own.** They are panels like every other panel:
-		// opened from the View menu, docked where somebody wants them, closed
-		// with their own button. The client's F3/F5 could not be reused here -
-		// F5 is Play - and inventing a second set of function keys for the
-		// editor was a decision worth not making twice.
+		// Ordinary imgui windows reading the same profiler data as the client's overlay.
+		// The View menu owns visibility; the client's F3/F4/F5 are gameplay controls.
+
 		//@{
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
@@ -6393,9 +6389,8 @@ namespace studio {
 		// is on screen now, look less often, or look at what is typical rather
 		// than at whichever frame happened to be last.
 		struct FrameGraphView {
-			// Nothing is sampled and nothing is published while this is set.
-			// The panel keeps drawing whatever it last published, which is the
-			// point: a frozen graph can be read.
+			// Timing snapshots and their headline counters stop sampling while set.
+			// Cache decisions continue collecting with their own sampled display.
 			bool Paused = false;
 
 			// Index into `FRAME_GRAPH_INTERVALS`. Zero means every frame.
@@ -6453,6 +6448,10 @@ namespace studio {
 			// Snapshot metadata is rebuilt with layout, rather than rescanned during paint.
 			struct FlameCache {
 				//@{
+				// Geometry belongs to this retained snapshot, while input and layout stay live.
+				std::array<std::shared_ptr<frame_graph_detail::FlameGeometry>, 2> Geometry;
+				// Changed whenever layout or the published snapshot is rebuilt.
+				uint64_t Revision = 0;
 				// Row buckets for accounting, CPU and GPU flame spans.
 				std::array<FlamePass, 3> Passes;
 				// Number of rows occupied by non-GPU spans.
@@ -6543,6 +6542,17 @@ namespace studio {
 			// renderer's round-robin cursor so the table does not switch subjects
 			// every frame when several panels are open.
 			size_t CacheViewport = 0;
+			// Sampling changes diagnostic text at 4 Hz without changing live collection.
+			engine::render::PresentationCacheProfile CacheProfile;
+			// Separate sampled row order for viewport and host tables.
+			std::array<std::vector<size_t>, 2> CacheOrder;
+			std::array<uint64_t, 2> CacheOrderRevision{};
+			uint64_t CacheProfileRevision = 0;
+			// Effective pass inputs and submitted work from the selected view, sampled together.
+			engine::render::PassActivity CachePassActivity;
+			engine::render::FrameResult CacheRecording;
+			double NextCacheProfile = 0.0;
+			size_t SampledCacheViewport = SIZE_MAX;
 		};
 
 		// What the frame-graph panel is showing. Held across frames, which is

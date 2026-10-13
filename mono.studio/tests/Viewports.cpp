@@ -83,6 +83,23 @@ namespace studio {
 			editor.PresentViewport(viewport, 1.0f / 60.0f);
 		}
 
+		static void RetainCacheImages(Editor &editor) {
+			editor.Settings.Headless = false;
+			editor.LastGraphViewport = 0;
+			editor.LastGraphRenderGeneration = editor.Renderer.RenderGeneration();
+			editor.Overlay.MarkUploaded();
+			editor.ShowFrameGraph = false;
+		}
+
+		static engine::render::PresentationCacheProfile CacheProfile(const Editor &editor) {
+			return editor.ViewportPresentations[0].CacheProfile();
+		}
+
+		static void CachePage(Editor &editor, bool visible) {
+			editor.ShowFrameGraph = visible;
+			editor.FrameGraphState.ShowCascadedCaches = visible;
+		}
+
 		static engine::render::VisibilitySnapshot BodyVisibility(Editor &editor) {
 			editor.WorldTarget = {96, 96};
 			Present(editor, 0);
@@ -1362,4 +1379,40 @@ TEST_CASE(
 		});
 	}
 	editor.Shutdown();
+}
+
+TEST_CASE(
+	"retained viewport opportunities collect cache hits with diagnostics hidden",
+	"[studio][viewports][cache][gpu]"
+) {
+	SavedGameScratch scratch;
+	const auto previous = studio::ConfigRoot();
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previous};
+	studio::SetConfigRoot(scratch.Root);
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	(void)studio::ViewportCameraProbe::BodyVisibility(editor);
+	studio::ViewportCameraProbe::RetainCacheImages(editor);
+	const auto before = studio::ViewportCameraProbe::CacheProfile(editor);
+	for (size_t opportunity = 0; opportunity < 4; opportunity++)
+		studio::ViewportCameraProbe::Present(editor, 0);
+	const auto hidden = studio::ViewportCameraProbe::CacheProfile(editor);
+	CHECK_FALSE(hidden.LastDamage().Any());
+	for (size_t index = 0; index < hidden.Activities().size(); index++) {
+		if (hidden.Activities()[index].Last != engine::render::PresentationCacheActivity::Decision::Hit)
+			continue;
+		CHECK(hidden.Activities()[index].Hits == before.Activities()[index].Hits + 4);
+		CHECK(hidden.Activities()[index].Writes == before.Activities()[index].Writes);
+	}
+	studio::ViewportCameraProbe::CachePage(editor, true);
+	studio::ViewportCameraProbe::Present(editor, 0);
+	const auto visible = studio::ViewportCameraProbe::CacheProfile(editor);
+	const size_t scene = static_cast<size_t>(engine::render::PresentationCacheLayer::SceneImage);
+	CHECK(visible.Activities()[scene].Hits == hidden.Activities()[scene].Hits + 1);
+	CHECK(visible.Activities()[scene].Writes == hidden.Activities()[scene].Writes);
 }
