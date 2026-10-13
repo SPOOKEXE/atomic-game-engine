@@ -15,6 +15,7 @@
 
 #include "FrameGraphFlame.hpp"
 #include "FrameGraphSnapshot.hpp"
+#include "FrameGraphTable.hpp"
 #include "ProfilerFlame.hpp"
 
 #include <engine/core/FrameGraph.hpp>
@@ -1251,6 +1252,7 @@ namespace studio {
 			frame_graph_detail::BuildFlameCache(
 				graphSpans, view.Rows, {}, selected.size(), view.DisplayRows, view.Flame
 			);
+			view.TableOrderDirty = true;
 			view.FocusRoot = FrameGraph::NO_PARENT;
 			view.FocusedSpans.clear();
 			view.FocusedRows.clear();
@@ -1955,36 +1957,72 @@ namespace studio {
 		// --- the table ------------------------------------------------------
 
 		constexpr ImGuiTableFlags FLAGS = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV |
-										  ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp;
+										  ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingStretchProp |
+										  ImGuiTableFlags_Sortable | ImGuiTableFlags_SortTristate;
 
 		{
 			ENGINE_PROFILE_CAT("frame graph table", engine::core::ProfileCategory::Render);
 			if (ImGui::BeginTable("##spans", 4, FLAGS)) {
 				ImGui::TableSetupColumn("span", ImGuiTableColumnFlags_WidthStretch, 0.52f);
-				ImGui::TableSetupColumn("busy", ImGuiTableColumnFlags_WidthStretch, 0.16f);
-				ImGui::TableSetupColumn("idle", ImGuiTableColumnFlags_WidthStretch, 0.16f);
-				ImGui::TableSetupColumn("share", ImGuiTableColumnFlags_WidthStretch, 0.16f);
+				ImGui::TableSetupColumn(
+					"busy",
+					ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_PreferSortDescending,
+					0.16f
+				);
+				ImGui::TableSetupColumn(
+					"idle",
+					ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_PreferSortDescending,
+					0.16f
+				);
+				ImGui::TableSetupColumn(
+					"share",
+					ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_PreferSortDescending,
+					0.16f
+				);
 				ImGui::TableSetupScrollFreeze(0, 1);
 				ImGui::TableHeadersRow();
+				ImGuiTableSortSpecs *sortSpecs = ImGui::TableGetSortSpecs();
+				const bool sortSpecsDirty = sortSpecs != nullptr && sortSpecs->SpecsDirty;
+				if (view.TableOrderDirty || sortSpecsDirty) {
+					const frame_graph_table_detail::Sort sort =
+						sortSpecs != nullptr && sortSpecs->SpecsCount > 0
+							? frame_graph_table_detail::
+								  Sort{sortSpecs->Specs[0].ColumnIndex, sortSpecs->Specs[0].SortDirection}
+							: frame_graph_table_detail::Sort{};
+					const frame_graph_table_detail::Sort *activeSort =
+						sortSpecs != nullptr && sortSpecs->SpecsCount > 0 ? &sort : nullptr;
+					frame_graph_table_detail::BuildOrder(spans, busyMs, activeSort, view.TableOrder);
+					view.TableOrderDirty = false;
+					if (sortSpecs != nullptr) {
+						sortSpecs->SpecsDirty = false;
+					}
+				}
+				const bool sorted = sortSpecs != nullptr && sortSpecs->SpecsCount > 0;
 
 				ImGuiListClipper clipper;
-				clipper.Begin(static_cast<int>(spans.size()), ImGui::GetTextLineHeightWithSpacing());
+				clipper.Begin(
+					static_cast<int>(view.TableOrder.size()), ImGui::GetTextLineHeightWithSpacing()
+				);
 				while (clipper.Step()) {
 					for (int index = clipper.DisplayStart; index < clipper.DisplayEnd; index++) {
-						const DiagnosticSpan &span = spans[static_cast<size_t>(index)];
+						const size_t spanIndex = view.TableOrder[static_cast<size_t>(index)];
+						const DiagnosticSpan &span = spans[spanIndex];
 						ImGui::TableNextRow();
 
 						ImGui::TableSetColumnIndex(0);
-						ImGui::Indent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
+						const float indent =
+							sorted ? 0.0f : static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f);
+						if (!sorted) {
+							ImGui::Indent(indent);
+						}
 						ImGui::TextUnformatted(span.Name.data(), span.Name.data() + span.Name.size());
-						ImGui::Unindent(static_cast<float>(span.Depth) * engine::ui::Scaled(10.0f));
+						if (!sorted) {
+							ImGui::Unindent(indent);
+						}
 
 						const bool deviceDuration = span.Category == ProfileCategory::Gpu;
-						const float spanBusy =
-							deviceDuration ? std::max(span.Milliseconds, 0.0f)
-										   : std::max(span.Milliseconds - span.IdleMilliseconds, 0.0f);
-						const float share =
-							!deviceDuration && busyMs > 0.0001f ? (spanBusy / busyMs) * 100.0f : 0.0f;
+						const float spanBusy = frame_graph_table_detail::BusyMilliseconds(span);
+						const float share = frame_graph_table_detail::Share(span, busyMs).value_or(0.0f);
 
 						ImGui::TableSetColumnIndex(1);
 						if (deviceDuration) {

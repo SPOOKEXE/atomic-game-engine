@@ -6470,6 +6470,10 @@ namespace studio {
 			FlameCache Flame;
 			FlameCache FocusedFlame;
 			bool DisplayDirty = true;
+			// Row indices keep table sorting out of the captured hierarchy.
+			std::vector<size_t> TableOrder;
+			// Rebuilt after a new display snapshot or changed table sort specs.
+			bool TableOrderDirty = true;
 			engine::core::ProfileOwner OwnerFilter = engine::core::ProfileOwner::All;
 			std::array<float, static_cast<size_t>(engine::core::ProfileOwner::Count)> OwnerMilliseconds{};
 			float FrameMilliseconds = 0.0f;

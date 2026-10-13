@@ -1,6 +1,8 @@
 // Flame row indexing and the production panel's clipped/full draw parity.
 #include "FrameGraphFlame.hpp"
 
+#include "FrameGraphTable.hpp"
+
 #include <engine/testing/Suite.hpp>
 #include <engine/ui/Theme.hpp>
 
@@ -14,6 +16,7 @@
 #include <numeric>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
+#include <vector>
 
 TEST_SUITE_ID("studio.framegraphflame")
 TEST_DEPENDS("engine.core.framegraph")
@@ -68,6 +71,62 @@ namespace studio {
 			}
 			view.DisplayDirty = true;
 		}
+		static void TableSeed(Editor &editor) {
+			auto &view = editor.FrameGraphState;
+			view.Paused = true;
+			view.OwnerFilter = engine::core::ProfileOwner::All;
+			view.FrameMilliseconds = 10.0f;
+			view.IdleMilliseconds = 0.0f;
+			view.Spans = {
+				{.Name = "world",
+				 .Milliseconds = 6.0f,
+				 .IdleMilliseconds = 1.0f,
+				 .Owner = engine::core::ProfileOwner::Studio},
+				{.Name = "stage alpha",
+				 .Depth = 1,
+				 .Parent = 0,
+				 .Milliseconds = 3.0f,
+				 .Owner = engine::core::ProfileOwner::Studio},
+				{.Name = "script",
+				 .Milliseconds = 3.0f,
+				 .IdleMilliseconds = 2.0f,
+				 .Owner = engine::core::ProfileOwner::Engine},
+			};
+			view.DisplayDirty = true;
+		}
+		static void TableFilterStudio(Editor &editor) {
+			auto &view = editor.FrameGraphState;
+			view.OwnerFilter = engine::core::ProfileOwner::Studio;
+			view.DisplayDirty = true;
+		}
+		static void TableChangeStageTime(Editor &editor, float milliseconds) {
+			auto &view = editor.FrameGraphState;
+			view.Spans[1].Milliseconds = milliseconds;
+			view.DisplayDirty = true;
+		}
+		static const std::vector<size_t> &TableOrder(const Editor &editor) {
+			return editor.FrameGraphState.TableOrder;
+		}
+		static uint32_t TableParent(const Editor &editor, size_t index) {
+			return editor.FrameGraphState.Spans[index].Parent;
+		}
+		static uint32_t TableDepth(const Editor &editor, size_t index) {
+			return editor.FrameGraphState.Spans[index].Depth;
+		}
+		static ImVec2 TableHeaderPosition(int column) {
+			ImGuiWindow *window = ImGui::FindWindowByName("Frame Graph");
+			REQUIRE(window != nullptr);
+			const ImGuiID tableId = window->GetID("##spans");
+			ImGuiTable *table = ImGui::GetCurrentContext()->Tables.GetByKey(tableId);
+			REQUIRE(table != nullptr);
+			REQUIRE(column >= 0);
+			REQUIRE(column < table->ColumnsCount);
+			const ImGuiTableColumn &tableColumn = table->Columns[column];
+			const float headerHeight = table->InstanceDataFirst.LastTopHeadersRowHeight;
+			return ImVec2(
+				(tableColumn.MinX + tableColumn.MaxX) * 0.5f, table->OuterRect.Min.y + headerHeight * 0.5f
+			);
+		}
 		static uint64_t FlameDraw(Editor &editor, float width, float height, float scroll) {
 			editor.Interface.Begin(1.0f / 60.0f);
 			ImGui::GetIO().IniFilename = nullptr;
@@ -77,6 +136,15 @@ namespace studio {
 			editor.DrawFrameGraph();
 			editor.Interface.End();
 			return editor.Interface.Signature();
+		}
+		static void TableClick(Editor &editor, int column) {
+			const ImVec2 position = TableHeaderPosition(column);
+			ImGui::GetIO().AddMousePosEvent(position.x, position.y);
+			FlameDraw(editor, 1000, 600, 0);
+			ImGui::GetIO().AddMouseButtonEvent(0, true);
+			FlameDraw(editor, 1000, 600, 0);
+			ImGui::GetIO().AddMouseButtonEvent(0, false);
+			FlameDraw(editor, 1000, 600, 0);
 		}
 		static auto &FlameCurrent(Editor &editor) {
 			auto &view = editor.FrameGraphState;
@@ -189,6 +257,102 @@ TEST_CASE(
 		studio::frame_graph_detail::PrepareFlameRows(pass, 0, 10, 0, 100);
 		CHECK(pass.Visible.empty());
 	}
+}
+
+TEST_CASE(
+	"frame graph table sorts displayed values without changing captured spans", "[studio][diagnostics][table]"
+) {
+	using engine::core::ProfileCategory;
+	std::array<studio::DiagnosticSpan, 6> spans{{
+		{.Name = "zeta", .Depth = 1, .Parent = 1, .Milliseconds = 5, .IdleMilliseconds = 1},
+		{.Name = "alpha", .Milliseconds = 4},
+		{.Name = "alpha", .Milliseconds = 2, .IdleMilliseconds = 1},
+		{.Name = "gpu", .Milliseconds = -2, .Category = ProfileCategory::Gpu},
+		{.Name = "reported", .Milliseconds = 20, .Reported = true},
+		{.Name = "idle", .Milliseconds = 3, .IdleMilliseconds = 2},
+	}};
+	std::vector<size_t> order;
+	using studio::frame_graph_table_detail::BuildOrder;
+	using studio::frame_graph_table_detail::Sort;
+	constexpr float frameBusy = 10.0f;
+
+	const Sort nameAscending{0, ImGuiSortDirection_Ascending};
+	BuildOrder(spans, frameBusy, &nameAscending, order);
+	CHECK(order == std::vector<size_t>{1, 2, 3, 5, 4, 0});
+
+	const Sort busyDescending{1, ImGuiSortDirection_Descending};
+	BuildOrder(spans, frameBusy, &busyDescending, order);
+	CHECK(order == std::vector<size_t>{4, 0, 1, 2, 5, 3});
+	const Sort busyAscending{1, ImGuiSortDirection_Ascending};
+	BuildOrder(spans, frameBusy, &busyAscending, order);
+	CHECK(order == std::vector<size_t>{3, 2, 5, 0, 1, 4});
+	const Sort idleDescending{2, ImGuiSortDirection_Descending};
+	BuildOrder(spans, frameBusy, &idleDescending, order);
+	CHECK(order == std::vector<size_t>{5, 0, 2, 1, 3, 4});
+	const Sort idleAscending{2, ImGuiSortDirection_Ascending};
+	BuildOrder(spans, frameBusy, &idleAscending, order);
+	CHECK(order == std::vector<size_t>{1, 3, 4, 0, 2, 5});
+
+	const Sort shareDescending{3, ImGuiSortDirection_Descending};
+	BuildOrder(spans, frameBusy, &shareDescending, order);
+	CHECK(order == std::vector<size_t>{0, 1, 2, 5, 3, 4});
+	const Sort shareAscending{3, ImGuiSortDirection_Ascending};
+	BuildOrder(spans, frameBusy, &shareAscending, order);
+	CHECK(order == std::vector<size_t>{2, 5, 0, 1, 3, 4});
+
+	BuildOrder(spans, frameBusy, nullptr, order);
+	CHECK(order == std::vector<size_t>{0, 1, 2, 3, 4, 5});
+	CHECK(spans[0].Name == "zeta");
+	CHECK(spans[0].Parent == 1);
+	CHECK(spans[0].Depth == 1);
+	CHECK(spans[1].Name == "alpha");
+	CHECK_FALSE(studio::frame_graph_table_detail::Share(spans[3], frameBusy).has_value());
+	CHECK_FALSE(studio::frame_graph_table_detail::Share(spans[4], frameBusy).has_value());
+	CHECK(studio::frame_graph_table_detail::BusyMilliseconds(spans[3]) == 0.0f);
+	CHECK(studio::frame_graph_table_detail::BusyMilliseconds(spans[0]) == 4.0f);
+	CHECK(studio::frame_graph_table_detail::Share(spans[1], 0.0f).value() == 0.0f);
+}
+
+TEST_CASE("frame graph table headers cycle row sorting while paused", "[studio][diagnostics][table][input]") {
+	const auto previous = studio::ConfigRoot();
+	const auto scratch = std::filesystem::temp_directory_path() / "studio-framegraph-table-sort";
+	std::filesystem::create_directories(scratch);
+	studio::SetConfigRoot(scratch);
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previous};
+	studio::Editor editor;
+	REQUIRE(studio::ToolsProbe::FlameInitialise(editor));
+	studio::ToolsProbe::TableSeed(editor);
+	for (size_t warm = 0; warm < 3; warm++) {
+		studio::ToolsProbe::FlameDraw(editor, 1000, 600, 0);
+	}
+	CHECK(studio::ToolsProbe::TableOrder(editor) == std::vector<size_t>{0, 1, 2});
+
+	studio::ToolsProbe::TableClick(editor, 0);
+	CHECK(studio::ToolsProbe::TableOrder(editor) == std::vector<size_t>{2, 1, 0});
+	studio::ToolsProbe::FlameDraw(editor, 1000, 600, 0);
+	CHECK(studio::ToolsProbe::TableOrder(editor) == std::vector<size_t>{2, 1, 0});
+
+	studio::ToolsProbe::TableClick(editor, 1);
+	CHECK(studio::ToolsProbe::TableOrder(editor) == std::vector<size_t>{0, 1, 2});
+	studio::ToolsProbe::TableClick(editor, 1);
+	CHECK(studio::ToolsProbe::TableOrder(editor) == std::vector<size_t>{2, 1, 0});
+	studio::ToolsProbe::TableClick(editor, 1);
+	CHECK(studio::ToolsProbe::TableOrder(editor) == std::vector<size_t>{0, 1, 2});
+	studio::ToolsProbe::TableFilterStudio(editor);
+	studio::ToolsProbe::FlameDraw(editor, 1000, 600, 0);
+	CHECK(studio::ToolsProbe::TableOrder(editor) == std::vector<size_t>{0, 1});
+	studio::ToolsProbe::TableChangeStageTime(editor, 9.0f);
+	studio::ToolsProbe::FlameDraw(editor, 1000, 600, 0);
+	CHECK(studio::ToolsProbe::TableOrder(editor) == std::vector<size_t>{0, 1});
+	studio::ToolsProbe::TableClick(editor, 1);
+	CHECK(studio::ToolsProbe::TableOrder(editor) == std::vector<size_t>{1, 0});
+	CHECK(studio::ToolsProbe::TableParent(editor, 1) == 0);
+	CHECK(studio::ToolsProbe::TableDepth(editor, 1) == 1);
 }
 
 TEST_CASE(
