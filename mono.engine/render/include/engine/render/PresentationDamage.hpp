@@ -225,6 +225,8 @@ namespace engine::render {
 			bool surfaceCapturePlanWrite = false,
 			const PresentationCacheApplicability &applicable = {}
 		) {
+			Damage = damage;
+			Observed = true;
 			const bool sceneImage = damage.Scene || damage.Objects || damage.Particles ||
 									damage.Environment || damage.Portals || surfaceCapturePlanWrite ||
 									portalHistoryWrite;
@@ -286,13 +288,27 @@ namespace engine::render {
 			return Rows;
 		}
 
+		// Exact source dirty bits from the last opportunity, before upward cache cascades.
+		const PresentationDamage &LastDamage() const {
+			return Damage;
+		}
+
+		// Whether a damage result has been recorded since the last reset.
+		bool HasObservations() const {
+			return Observed;
+		}
+
 		// Clears cumulative and latest activity.
 		void Reset() {
 			Rows = {};
+			Damage = {};
+			Observed = false;
 		}
 
 	  private:
 		std::array<PresentationCacheActivity, static_cast<size_t>(PresentationCacheLayer::Count)> Rows;
+		PresentationDamage Damage{};
+		bool Observed = false;
 	};
 
 	// Compares a candidate presentation with the last one actually completed.

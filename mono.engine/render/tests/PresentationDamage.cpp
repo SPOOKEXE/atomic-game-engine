@@ -368,3 +368,37 @@ TEST_CASE("an invisible resident particle layer keeps its retained image", "[ren
 	visibility.Reset();
 	CHECK(visibility.RequiresImage(true, false, 42));
 }
+
+TEST_CASE(
+	"cache diagnostics retain exact source dirty bits before cascading", "[render][presentation][cache]"
+) {
+	engine::render::PresentationCacheProfile profile;
+	CHECK_FALSE(profile.HasObservations());
+	const PresentationDamage damage{
+		.Scene = false,
+		.GameInterface = true,
+		.HostInterface = true,
+		.Viewport = true,
+		.Overlay = true,
+		.Objects = true,
+		.Particles = true,
+		.Environment = true,
+		.Portals = true,
+	};
+	profile.Record(damage, true);
+	REQUIRE(profile.HasObservations());
+	const PresentationDamage &recorded = profile.LastDamage();
+	CHECK_FALSE(recorded.Scene);
+	CHECK(recorded.GameInterface);
+	CHECK(recorded.HostInterface);
+	CHECK(recorded.Viewport);
+	CHECK(recorded.Overlay);
+	CHECK(recorded.Objects);
+	CHECK(recorded.Particles);
+	CHECK(recorded.Environment);
+	CHECK(recorded.Portals);
+	CHECK(profile.Activities()[static_cast<size_t>(PresentationCacheLayer::SceneImage)].Wrote());
+	profile.Reset();
+	CHECK_FALSE(profile.HasObservations());
+	CHECK_FALSE(profile.LastDamage().Any());
+}
