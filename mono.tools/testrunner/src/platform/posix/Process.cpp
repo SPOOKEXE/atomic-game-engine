@@ -15,6 +15,13 @@ namespace testrunner {
 			return result;
 		}
 
+		std::vector<char *> argv;
+		argv.reserve(arguments.size() + 1);
+		for (const auto &argument : arguments) {
+			argv.push_back(const_cast<char *>(argument.c_str()));
+		}
+		argv.push_back(nullptr);
+
 		int pipes[2] = {-1, -1};
 		if (pipe(pipes) != 0) {
 			return result;
@@ -36,14 +43,6 @@ namespace testrunner {
 			dup2(pipes[1], STDOUT_FILENO);
 			dup2(pipes[1], STDERR_FILENO);
 			close(pipes[1]);
-
-			// Built before the fork, for the reason above.
-			std::vector<char *> argv;
-			argv.reserve(arguments.size() + 1);
-			for (const auto &argument : arguments) {
-				argv.push_back(const_cast<char *>(argument.c_str()));
-			}
-			argv.push_back(nullptr);
 
 			execvp(argv[0], argv.data());
 

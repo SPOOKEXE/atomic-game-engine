@@ -26,7 +26,7 @@ int main(int argc, char **argv) {
 	arguments.Flag("no-report", "Write no documents");
 	arguments.Flag("all", "Run every suite, cache or not");
 	arguments.Flag("gpu-tests", "Run every suite, including headless GPU cases");
-	arguments.Value("jobs", "N", "Suites to run at once (default: 8; 1 is one after another)");
+	arguments.Value("jobs", "N", "Discovery and suite workers (default: 8; 1 is one after another)");
 	arguments.Flag("list", "List suites and signatures, run nothing");
 	arguments.Flag("verbose", "Name every skipped suite");
 
@@ -69,12 +69,9 @@ int main(int argc, char **argv) {
 	const fs::path reportDirectory =
 		arguments.Get("report") ? fs::path(std::string(*arguments.Get("report"))) : fs::path(".cache");
 
-	std::vector<Suite> suites;
-	for (const auto &binary : FindTestBinaries(buildDirectory)) {
-		for (auto &suite : ReadSuites(binary, buildDirectory)) {
-			suites.push_back(std::move(suite));
-		}
-	}
+	const int requested = static_cast<int>(arguments.GetNumber("jobs", 8.0));
+	const auto jobs = static_cast<size_t>(std::max(requested, 1));
+	const auto suites = ReadSuites(FindTestBinaries(buildDirectory), buildDirectory, jobs);
 
 	if (suites.empty()) {
 		std::fprintf(
@@ -143,16 +140,15 @@ int main(int argc, char **argv) {
 	std::map<std::string, SuiteReport> reports;
 	unsigned long long totalMicroseconds = 0;
 
-	// **Eight by default, and the number is measured rather than chosen.**
-	// On this tree, twenty-four threads: serial is 2 m 54 s, `--jobs 8`
-	// is about 3 m 20 s, and higher counts oversubscribe the machine and
-	// slow things down. A test runner that goes red under its own
-	// concurrency is worse than a slow one, so the default is the fastest
-	// setting that was not observed to flake. `--jobs 1` is the old
-	// behaviour exactly, and a higher number is there for anybody who
-	// would rather have the minute back.
-	const int requested = static_cast<int>(arguments.GetNumber("jobs", 8.0));
-	const auto jobs = static_cast<size_t>(std::max(requested, 1));
+	// Cached durations put known long suites first, reducing the final idle tail.
+	// Unknown and equal-cost suites retain their discovery order.
+	std::stable_sort(stale.begin(), stale.end(), [&](const Suite *left, const Suite *right) {
+		const auto duration = [&](const Suite *suite) {
+			const auto previous = cache.find(suite->Id);
+			return previous == cache.end() ? 0ULL : previous->second.Microseconds;
+		};
+		return duration(left) > duration(right);
+	});
 
 	// Each worker reuses its slot only within this invocation's directory.
 	const auto scratchFor = [&scratch](size_t slot) {

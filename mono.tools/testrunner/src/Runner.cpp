@@ -1,13 +1,17 @@
 #include "Sha256.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <exception>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <sstream>
 #include <testrunner/Process.hpp>
 #include <testrunner/Report.hpp>
 #include <testrunner/Runner.hpp>
+#include <thread>
 #include <utility>
 
 namespace testrunner {
@@ -212,6 +216,48 @@ namespace testrunner {
 		return suites;
 	}
 
+	std::vector<Suite> ReadSuites(const std::vector<fs::path> &binaries, const fs::path &build, size_t jobs) {
+		if (binaries.empty()) return {};
+
+		std::vector<std::vector<Suite>> registries(binaries.size());
+		std::vector<std::exception_ptr> failures(binaries.size());
+		std::atomic<size_t> next{0};
+		const auto read = [&] {
+			for (size_t index = next++; index < binaries.size(); index = next++) {
+				try {
+					registries[index] = ReadSuites(binaries[index], build);
+				} catch (...) {
+					// Return filesystem/allocation failures to the caller after joining.
+					failures[index] = std::current_exception();
+				}
+			}
+		};
+
+		const size_t width = std::min(std::max(jobs, size_t{1}), binaries.size());
+		if (width == 1) {
+			read();
+		} else {
+			// Tracy's startup calibration makes serial discovery expensive. Overlap
+			// binary discovery without changing profiling or suite isolation.
+			std::vector<std::jthread> workers;
+			workers.reserve(width);
+			for (size_t slot = 0; slot < width; slot++)
+				workers.emplace_back(read);
+		}
+
+		std::vector<Suite> suites;
+		for (size_t index = 0; index < binaries.size(); index++) {
+			if (failures[index]) std::rethrow_exception(failures[index]);
+			auto &registry = registries[index];
+			suites.insert(
+				suites.end(),
+				std::make_move_iterator(registry.begin()),
+				std::make_move_iterator(registry.end())
+			);
+		}
+		return suites;
+	}
+
 	std::string CatchFilter(const Suite &suite, bool gpuTests) {
 		std::string filter = "[#" + suite.Source.stem().string() + "]";
 		if (!gpuTests) return filter + "~[gpu]~[.]";
@@ -318,6 +364,7 @@ namespace testrunner {
 		std::istringstream lines(dumped.Output);
 		std::string line;
 		std::vector<fs::path> current;
+		std::map<fs::path, fs::path> normalisedPaths;
 		bool collecting = false;
 
 		auto flush = [&] {
@@ -351,7 +398,15 @@ namespace testrunner {
 			}
 
 			// Ninja prints paths relative to the build directory.
-			current.push_back(Normalise(build / line.substr(start)));
+			fs::path rawPath = build / line.substr(start);
+			const auto cached = normalisedPaths.find(rawPath);
+			if (cached != normalisedPaths.end()) {
+				current.push_back(cached->second);
+			} else {
+				fs::path normalisedPath = Normalise(rawPath);
+				normalisedPaths.emplace(std::move(rawPath), normalisedPath);
+				current.push_back(std::move(normalisedPath));
+			}
 		}
 		flush();
 

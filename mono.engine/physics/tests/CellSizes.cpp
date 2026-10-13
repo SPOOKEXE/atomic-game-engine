@@ -9,16 +9,58 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <thread>
 #include <vector>
+
+namespace {
+	// Keep a caller's existing pool intact while enabling the parallel path in standalone runs.
+	struct JobPoolFixture {
+		const bool OwnsPool = engine::parallel::Jobs::WorkerCount() == 0;
+
+		JobPoolFixture() {
+			if (!OwnsPool) return;
+			// Three workers cut this dev suite from 516 s to 336 s on 24 logical processors.
+			// Leave a processor for the caller on smaller hosts.
+			constexpr unsigned MAXIMUM_WORKERS = 3;
+			const unsigned processors = std::thread::hardware_concurrency();
+			const unsigned workers = processors > 1 ? std::min(MAXIMUM_WORKERS, processors - 1) : 1;
+			engine::parallel::Jobs::Start(workers);
+		}
+
+		~JobPoolFixture() {
+			if (OwnsPool) engine::parallel::Jobs::Stop();
+		}
+
+		JobPoolFixture(const JobPoolFixture &) = delete;
+		JobPoolFixture &operator=(const JobPoolFixture &) = delete;
+	};
+
+	struct SerialComputeFixture {
+		const bool Previous = engine::parallel::ForceSerialCompute();
+
+		explicit SerialComputeFixture(bool serial) {
+			engine::parallel::SetForceSerialCompute(serial);
+		}
+		~SerialComputeFixture() {
+			engine::parallel::SetForceSerialCompute(Previous);
+		}
+
+		SerialComputeFixture(const SerialComputeFixture &) = delete;
+		SerialComputeFixture &operator=(const SerialComputeFixture &) = delete;
+	};
+}
 
 TEST_SUITE_ID("engine.physics.cell-sizes")
 TEST_DEPENDS("engine.physics.broadphase")
 TEST_DEPENDS("engine.physics.narrowphase")
 TEST_DEPENDS("engine.physics.solver")
+TEST_DEPENDS("engine.parallel.jobs")
 
 TEST_CASE("cell size preserves ordered contacts and body state in stress scenes", "[physics][cell-sizes]") {
+	JobPoolFixture jobPool;
 	using namespace engine::physics::testing;
 	for (const Layout layout : {Layout::Pile, Layout::Stacks, Layout::Scattered}) {
 		CAPTURE(static_cast<int>(layout));
@@ -29,8 +71,11 @@ TEST_CASE("cell size preserves ordered contacts and body state in stress scenes"
 		// measured ticks.
 		for (size_t tick = 0; tick < 23; tick++) {
 			CAPTURE(tick);
-			for (auto &world : worlds)
-				Tick(*world);
+			for (size_t variant = 0; variant < worlds.size(); variant++) {
+				// The 4m reference stays serial; finer grids exercise real workers.
+				const SerialComputeFixture compute(variant == 0);
+				Tick(*worlds[variant]);
+			}
 			const CellSizeSnapshot expected = Capture(*worlds[0]);
 			for (size_t variant = 1; variant < worlds.size(); variant++) {
 				CAPTURE(variant);
@@ -45,6 +90,7 @@ TEST_CASE("cell size preserves ordered contacts and body state in stress scenes"
 }
 
 TEST_CASE("representative cell-size scenes preserve exact output in both orders", "[physics][cell-sizes]") {
+	JobPoolFixture jobPool;
 	using namespace engine;
 	using namespace engine::physics::testing;
 	for (const Layout layout : {Layout::Pile, Layout::Stacks, Layout::Scattered, Layout::MixedScale}) {

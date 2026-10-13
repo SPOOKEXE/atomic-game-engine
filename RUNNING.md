@@ -64,6 +64,7 @@ just preset=server test
 | `build [target]` | Build the selected preset, optionally one target. |
 | `build-profile [target]` | Build and report Ninja and compiler-cache timing. |
 | `build-profile-check` | Test the build-profile tool. |
+| `compiler-cache-check` | Verify GCC PCH regeneration and compiler-cache hits. |
 | `client` | Build the client. |
 | `server` | Build the server. |
 | `cdn` | Build the content origin. |

@@ -133,6 +133,10 @@ build-profile target="":
 build-profile-check:
     python3 scripts/tests/build_profile_test.py
 
+# The real GCC PCH launcher, using an isolated cache under this preset's tree.
+compiler-cache-check:
+    cmake -DMONO_TEST_ROOT="{{build}}" -P mono.build/tests/CompilerCache.cmake
+
 # One program and only its dependencies.
 client: (build "client")
 server: (build "server")
@@ -1296,8 +1300,8 @@ luau-lsp:
 # recipe is meant to be runnable mid-change. Use `just preset=ci check` for the
 # strictest configuration this repository has - which is also what the hook
 # runs, so a push is held to the strictest configuration by default.
-check: format-check em-dash-check build-profile-check build test-all test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
-    @echo "check ok - format, em dashes, build profile, build, tests, architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
+check: format-check em-dash-check build-profile-check compiler-cache-check build test-all test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
+    @echo "check ok - format, em dashes, build profile, compiler cache, build, tests, architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
 # Run the launcher - the window that starts any of the others.
 #
