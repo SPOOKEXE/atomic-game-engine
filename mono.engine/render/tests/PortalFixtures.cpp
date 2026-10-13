@@ -1248,7 +1248,14 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 			install(depthDocument);
 			const auto rendered = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 			if (divisor == 2) CHECK(rendered.Ran(core::Name("lens-upsample")));
-			CHECK(rendered.Ran(core::Name("dof")));
+			CHECK_FALSE(rendered.Ran(core::Name("dof")));
+			CHECK_FALSE(fixture.Render.ViewPassActivity(view.Slot).DepthOfField);
+			CHECK(
+				fixture.Render.ResourceTexture(core::Name("dof"), view.Slot) ==
+				fixture.Render.ResourceTexture(
+					core::Name(divisor == 2 ? "lens-full-colour" : "lens-b"), view.Slot
+				)
+			);
 			CheckImage(
 				fixture.Render,
 				"lens-graph-depth",
