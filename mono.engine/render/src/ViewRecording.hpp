@@ -243,6 +243,7 @@ namespace engine::render {
 		SDL_GPUTexture *EmptyHardwareDepth = nullptr;
 		SDL_GPUTexture *FarLinearDepth = nullptr;
 		SDL_GPUTexture *OpaqueSkyTexture = nullptr;
+		SDL_GPUTexture *BlackSkyLit = nullptr;
 		SDL_GPUTexture *ClearedInterfaceTexture = nullptr;
 		void InvalidateBackgroundTexture(SDL_GPUTexture *texture, core::Name writerKind = {});
 		bool HaveOverlay = false;

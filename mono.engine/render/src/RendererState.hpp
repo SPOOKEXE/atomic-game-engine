@@ -697,6 +697,9 @@ namespace engine::render {
 			bool opaqueSkySource,
 			const std::function<void()> &beginWork
 		);
+		bool IsBlackEnvironment(
+			const scene::Environment &environment, const void *command, SDL_GPUTexture *texture
+		) const;
 		void ReleaseEnvironments();
 		void CommitEnvironmentWrites(SDL_GPUCommandBuffer *command);
 		void DiscardEnvironmentWrites(SDL_GPUCommandBuffer *command = nullptr);

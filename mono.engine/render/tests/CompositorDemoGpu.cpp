@@ -13,6 +13,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <glm/gtc/packing.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -277,11 +278,12 @@ void main(){ vec2 centre=abs(inUv-vec2(0.5)); float source=step(max(centre.x,cen
 		return graph;
 	}
 
-	std::vector<std::byte> CaptureTexture16(Renderer &r, SDL_GPUTexture *t, uint32_t w, uint32_t h) {
+	std::vector<std::byte>
+	CaptureTexture(Renderer &r, SDL_GPUTexture *t, uint32_t w, uint32_t h, uint32_t pixelBytes) {
 		auto *d = static_cast<SDL_GPUDevice *>(r.Backend().Device);
 		REQUIRE(d);
 		REQUIRE(t);
-		size_t row = (size_t(w) * 8 + 255) / 256 * 256;
+		size_t row = (size_t(w) * pixelBytes + 255) / 256 * 256;
 		SDL_GPUTransferBufferCreateInfo i{};
 		i.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
 		i.size = uint32_t(row * h);
@@ -298,7 +300,7 @@ void main(){ vec2 centre=abs(inUv-vec2(0.5)); float source=step(max(centre.x,cen
 		src.d = 1;
 		SDL_GPUTextureTransferInfo dst{};
 		dst.transfer_buffer = b;
-		dst.pixels_per_row = uint32_t(row / 8);
+		dst.pixels_per_row = uint32_t(row / pixelBytes);
 		dst.rows_per_layer = h;
 		SDL_DownloadFromGPUTexture(p, &src, &dst);
 		SDL_EndGPUCopyPass(p);
@@ -318,7 +320,10 @@ void main(){ vec2 centre=abs(inUv-vec2(0.5)); float source=step(max(centre.x,cen
 		return out;
 	}
 	std::vector<std::byte> Capture16(Renderer &r, core::Name n, size_t slot, uint32_t w, uint32_t h) {
-		return CaptureTexture16(r, static_cast<SDL_GPUTexture *>(r.ResourceTexture(n, slot)), w, h);
+		return CaptureTexture(r, static_cast<SDL_GPUTexture *>(r.ResourceTexture(n, slot)), w, h, 8);
+	}
+	std::vector<std::byte> Capture32(Renderer &r, core::Name n, size_t slot, uint32_t w, uint32_t h) {
+		return CaptureTexture(r, static_cast<SDL_GPUTexture *>(r.ResourceTexture(n, slot)), w, h, 16);
 	}
 	double Diff16(std::span<const std::byte> a, std::span<const std::byte> b, uint32_t w, uint32_t h) {
 		size_t row = (size_t(w) * 8 + 255) / 256 * 256;
@@ -332,6 +337,23 @@ void main(){ vec2 centre=abs(inUv-vec2(0.5)); float source=step(max(centre.x,cen
 					sum += std::abs(glm::unpackHalf1x16(l) - glm::unpackHalf1x16(r));
 				}
 		return sum;
+	}
+	double
+	MaxError16To32(std::span<const std::byte> half, std::span<const std::byte> full, uint32_t w, uint32_t h) {
+		const size_t halfRow = (size_t(w) * 8 + 255) / 256 * 256;
+		const size_t fullRow = (size_t(w) * 16 + 255) / 256 * 256;
+		double maxError = 0;
+		for (uint32_t y = 0; y < h; ++y)
+			for (uint32_t x = 0; x < w; ++x)
+				for (size_t channel = 0; channel < 4; ++channel) {
+					uint16_t halfBits = 0;
+					float fullValue = 0;
+					std::memcpy(&halfBits, half.data() + y * halfRow + x * 8 + channel * 2, 2);
+					std::memcpy(&fullValue, full.data() + y * fullRow + x * 16 + channel * 4, 4);
+					maxError =
+						std::max(maxError, double(std::abs(glm::unpackHalf1x16(halfBits) - fullValue)));
+				}
+		return maxError;
 	}
 
 	std::string FocusDepth() {
@@ -905,7 +927,7 @@ TEST_CASE(
 	blit.cycle = true;
 	SDL_BlitGPUTexture(command, &blit);
 	REQUIRE(SDL_SubmitGPUCommandBuffer(command));
-	const auto expected = CaptureTexture16(fixture.Render, reference.get(), 20, 15);
+	const auto expected = CaptureTexture(fixture.Render, reference.get(), 20, 15, 8);
 	CHECK(Diff16(expected, output, 20, 15) == 0);
 }
 
@@ -1038,6 +1060,237 @@ TEST_CASE("god rays stop at linear-depth occluders on Vulkan", "[render][gpu][go
 	const auto blocked =
 		Capture16(blockedFixture.Render, core::Name("effect-result"), blockedView.Slot, 41, 31);
 	CHECK(Diff16(unobscured, blocked, 41, 31) > 1.0);
+}
+
+TEST_CASE(
+	"empty built-in sky skips its draw and returns after provider transitions", "[render][gpu][empty-sky]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultWorldHdrDocument(), pipeline, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	REQUIRE(fixture.Render.SetPipeline(core::Name("empty-sky"), pipeline));
+	SceneTarget target{41, 31};
+	View view;
+	view.World = 31;
+	view.Pipeline = core::Name("empty-sky");
+	view.Target = &target;
+	view.OverrideLighting = true;
+	view.Lighting.FogColor = {0.4f, 0.2f, 0.1f};
+	OverlayImage overlay;
+	const auto render = [&] { return fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false); };
+	const auto skyImage = [&] { return Capture16(fixture.Render, core::Name("sky-lit"), view.Slot, 41, 31); };
+
+	const auto blank = render();
+	REQUIRE(blank.Submitted);
+	CHECK_FALSE(blank.Ran(core::Name("sky")));
+	CHECK_FALSE(fixture.Render.ViewPassActivity(view.Slot).Sky);
+	CHECK(Constant16(skyImage(), 41, 31, {0.f, 0.f, 0.f, 1.f}));
+	const auto black = skyImage();
+	const auto copies = CounterValue("render.identity_environment_copy.commands");
+	const auto cached = render();
+	CHECK_FALSE(cached.Ran(core::Name("sky")));
+	CHECK(CounterValue("render.identity_environment_copy.commands") == copies);
+	fixture.Render.Inspect(core::Name("lit"));
+	view.Lighting.FogColor = {0.45f, 0.2f, 0.1f};
+	const auto inspected = render();
+	CHECK(inspected.Ran(core::Name("sky")));
+	fixture.Render.Inspect({});
+
+	view.Lighting.EnvironmentState.Skybox = scene::SkyboxSource::Compute;
+	const auto active = render();
+	CHECK(active.Ran(core::Name("sky")));
+	CHECK(fixture.Render.ViewPassActivity(view.Slot).Sky);
+	CHECK(Diff16(skyImage(), black, 41, 31) > 1);
+
+	view.Lighting.EnvironmentState.Skybox = scene::SkyboxSource::None;
+	const auto disabled = render();
+	CHECK_FALSE(disabled.Ran(core::Name("sky")));
+	CHECK_FALSE(fixture.Render.ViewPassActivity(view.Slot).Sky);
+	CHECK(Constant16(skyImage(), 41, 31, {0.f, 0.f, 0.f, 1.f}));
+
+	scene::DrawInstance instance;
+	instance.Source = 1;
+	instance.Frame.Position = {0.f, 0.f, -5.f};
+	instance.HalfExtent = {1.f, 1.f, 1.f};
+	instance.Tint = {1.f, 1.f, 1.f};
+	view.Instances = std::span(&instance, 1);
+	const auto occupied = render();
+	CHECK(occupied.Ran(core::Name("sky")));
+	CHECK(fixture.Render.ViewPassActivity(view.Slot).Sky);
+}
+
+TEST_CASE("authored environment output keeps the sky draw", "[render][gpu][empty-sky]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	graph::PipelineDocument document;
+	bool inserted = false;
+	const auto baseDocument = graph::DefaultWorldHdrDocument();
+	for (const auto &edit : baseDocument.Edits()) {
+		if (!inserted && edit.Kind == graph::EditKind::AddNode && edit.Scope == graph::NodeScope::View) {
+			document.Record(
+				{.Kind = graph::EditKind::AddNode,
+				 .Name = core::Name("authored-environment-write"),
+				 .NodeKind = core::Name("dispatch"),
+				 .Scope = graph::NodeScope::World}
+			);
+			document.Record(
+				{.Kind = graph::EditKind::Writes,
+				 .Target = core::Name("environment-clouds"),
+				 .Key = core::Name("result")}
+			);
+			document.Record(
+				{.Kind = graph::EditKind::Set, .Key = core::Name("source"), .Value = R"(#version 450
+layout(local_size_x=8,local_size_y=8,local_size_z=1) in;
+layout(set=1,binding=0,rgba16f) writeonly uniform image2D targetImage;
+void main(){
+    ivec2 pixel=ivec2(gl_GlobalInvocationID.xy);
+    if(any(greaterThanEqual(pixel,imageSize(targetImage)))) return;
+    imageStore(targetImage,pixel,vec4(0.7,0.2,0.1,1.0));
+})"}
+			);
+			inserted = true;
+		}
+		document.Record(edit);
+	}
+	REQUIRE(inserted);
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(graph::Build(document, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	REQUIRE(fixture.Render.SetPipeline(core::Name("authored-empty-sky"), pipeline));
+	SceneTarget target{41, 31};
+	View view;
+	view.World = 32;
+	view.Pipeline = core::Name("authored-empty-sky");
+	view.Target = &target;
+	view.OverrideLighting = true;
+	OverlayImage overlay;
+	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(frame.Submitted);
+	CHECK(frame.Ran(core::Name("sky")));
+	CHECK(fixture.Render.ViewPassActivity(view.Slot).Sky);
+	CHECK_FALSE(Constant16(
+		Capture16(fixture.Render, core::Name("sky-lit"), view.Slot, 41, 31), 41, 31, {0.f, 0.f, 0.f, 1.f}
+	));
+}
+
+TEST_CASE("early Lit readers keep fog colour and capture baseline", "[render][gpu][empty-sky]") {
+	const auto resource = [](const graph::RenderGraph &pipeline, core::Name name) {
+		for (uint32_t value = 1; value <= pipeline.ResourceCount(); ++value) {
+			const graph::ResourceId id{value};
+			if (pipeline.FindResource(id)->Name == name) return id;
+		}
+		return graph::ResourceId{};
+	};
+	FixtureDevice baselineFixture;
+	baselineFixture.Initialise();
+	graph::RenderGraph baselinePipeline;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), baselinePipeline, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const std::array baselineOutputs{
+		resource(baselinePipeline, core::Name("lighting-baseline")),
+		resource(baselinePipeline, core::Name("sky-lit"))
+	};
+	REQUIRE(baselineOutputs[0].IsValid());
+	REQUIRE(baselineOutputs[1].IsValid());
+	InstallBoundary(
+		baselineFixture.Render,
+		baselinePipeline,
+		"blank-sky-baseline",
+		baselineOutputs,
+		graph::NodeScope::Frame
+	);
+	SceneTarget target{41, 31};
+	View baselineView;
+	baselineView.World = 34;
+	baselineView.Pipeline = core::Name("blank-sky-baseline");
+	baselineView.Target = &target;
+	baselineView.OverrideLighting = true;
+	baselineView.Lighting.FogColor = {0.4f, 0.2f, 0.1f};
+	OverlayImage overlay;
+	const auto blank = baselineFixture.Render.Render(std::span(&baselineView, 1), overlay, nullptr, false);
+	REQUIRE(blank.Submitted);
+	CHECK_FALSE(blank.Ran(core::Name("sky")));
+	const auto baseline =
+		Capture32(baselineFixture.Render, core::Name("lighting-baseline"), baselineView.Slot, 41, 31);
+	CHECK(Constant16(
+		Capture16(baselineFixture.Render, core::Name("sky-lit"), baselineView.Slot, 41, 31),
+		41,
+		31,
+		{0.f, 0.f, 0.f, 1.f}
+	));
+
+	graph::PipelineDocument document;
+	document.Record(
+		{.Kind = graph::EditKind::AddResource,
+		 .Name = core::Name("early-lit"),
+		 .Resource = graph::ResourceKind::Colour,
+		 .Format = graph::ResourceFormat::RGBA16F}
+	);
+	bool inserted = false;
+	const auto captureDocument = graph::DefaultPbrDataCaptureDocument();
+	for (const auto &edit : captureDocument.Edits()) {
+		if (edit.Kind == graph::EditKind::AddNode && edit.Name == core::Name("sky")) {
+			document.Record(
+				{.Kind = graph::EditKind::AddNode,
+				 .Name = core::Name("early-lit-reader"),
+				 .NodeKind = core::Name("blit"),
+				 .Scope = graph::NodeScope::View}
+			);
+			document.Record(
+				{.Kind = graph::EditKind::Reads, .Target = core::Name("lit"), .Key = core::Name("source")}
+			);
+			document.Record(
+				{.Kind = graph::EditKind::Writes,
+				 .Target = core::Name("early-lit"),
+				 .Key = core::Name("colour")}
+			);
+			inserted = true;
+		}
+		document.Record(edit);
+	}
+	REQUIRE(inserted);
+	FixtureDevice readerFixture;
+	readerFixture.Initialise();
+	graph::RenderGraph readerPipeline;
+	REQUIRE(graph::Build(document, readerPipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	const std::array readerOutputs{
+		resource(readerPipeline, core::Name("early-lit")),
+		resource(readerPipeline, core::Name("lighting-baseline")),
+		resource(readerPipeline, core::Name("sky-lit"))
+	};
+	for (const auto output : readerOutputs)
+		REQUIRE(output.IsValid());
+	InstallBoundary(
+		readerFixture.Render, readerPipeline, "early-lit-reader", readerOutputs, graph::NodeScope::Frame
+	);
+	View readerView = baselineView;
+	readerView.Pipeline = core::Name("early-lit-reader");
+	const auto observed = readerFixture.Render.Render(std::span(&readerView, 1), overlay, nullptr, false);
+	REQUIRE(observed.Submitted);
+	CHECK(observed.Ran(core::Name("sky")));
+	const auto earlyLit = Capture16(readerFixture.Render, core::Name("early-lit"), readerView.Slot, 41, 31);
+	CHECK(MaxError16To32(earlyLit, baseline, 41, 31) <= 1e-4);
+	CHECK(
+		MaxError16To32(
+			earlyLit,
+			Capture32(readerFixture.Render, core::Name("lighting-baseline"), readerView.Slot, 41, 31),
+			41,
+			31
+		) <= 1e-4
+	);
+	CHECK(
+		Diff16(
+			earlyLit, Capture16(readerFixture.Render, core::Name("sky-lit"), readerView.Slot, 41, 31), 41, 31
+		) > 1
+	);
 }
 
 TEST_CASE(

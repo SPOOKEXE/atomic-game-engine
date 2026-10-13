@@ -1703,7 +1703,10 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 	REQUIRE(zeroFrame.Ran(captureNode));
 	CHECK(counter("render.empty_depth.clears") - zeroDepthBefore == 1);
 	CHECK(counter("render.empty_lighting.clears") == zeroLightingBefore);
-	CHECK(zeroFrame.DrawCalls == emptyFrame.DrawCalls + 1);
+	// The unproven background needs both deferred lighting and the sky draw.
+	CHECK_FALSE(emptyFrame.Ran(core::Name("sky")));
+	CHECK(zeroFrame.Ran(core::Name("sky")));
+	CHECK(zeroFrame.DrawCalls == emptyFrame.DrawCalls + 2);
 	const auto zeroImages = AwaitImageGroup(renderer, std::array<uint64_t, 2>{12, 13});
 	REQUIRE(zeroImages[0].Status == render::ResourceImageStatus::Ok);
 	REQUIRE(zeroImages[1].Status == render::ResourceImageStatus::Ok);

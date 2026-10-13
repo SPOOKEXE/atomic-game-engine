@@ -28,6 +28,21 @@ namespace engine::render {
 			return glm::vec4{colour.R, colour.G, colour.B, alpha};
 		}
 
+		uint64_t BlackSkySignature(core::Name contentOwner) {
+			uint64_t signature = scene::MixSignature(1, contentOwner.Id());
+			signature = scene::MixSignature(signature, 0);
+			return scene::MixSignature(signature, 0);
+		}
+
+		uint64_t BlackCloudSignature(core::Name contentOwner, SDL_GPUTexture *source, uint64_t skySignature) {
+			uint64_t signature = scene::MixSignature(1, contentOwner.Id());
+			signature =
+				scene::MixSignature(signature, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(source)));
+			signature = scene::MixSignature(signature, skySignature);
+			signature = scene::MixSignature(signature, 0);
+			return scene::MixSignature(signature, true);
+		}
+
 		struct EnvironmentUniforms {
 			glm::vec4 Zenith;
 			glm::vec4 Horizon;
@@ -97,9 +112,12 @@ namespace engine::render {
 			}
 			faces[index] = faces[index] == nullptr ? Textures.Missing() : faces[index];
 		}
-		uint64_t signature = scene::MixSignature(1, ActiveContentOwner.Id());
-		signature = scene::MixSignature(signature, modes.Skybox);
-		signature = scene::MixSignature(signature, modes.Atmosphere);
+		uint64_t signature = BlackSkySignature(ActiveContentOwner);
+		if (modes.Skybox != 0 || modes.Atmosphere != 0) {
+			signature = scene::MixSignature(1, ActiveContentOwner.Id());
+			signature = scene::MixSignature(signature, modes.Skybox);
+			signature = scene::MixSignature(signature, modes.Atmosphere);
+		}
 		if (modes.Skybox == 1) {
 			for (size_t index = 0; index < faces.size(); index++) {
 				signature = scene::MixSignature(signature, names[index].Id());
@@ -264,17 +282,26 @@ namespace engine::render {
 		const scene::CloudCompute cloudCompute = EnvironmentCloudComputeOf(environment);
 		const EnvironmentUniformModes modes = EnvironmentModesOf(environment);
 		const EnvironmentUniformShaders shaders = EnvironmentShadersOf(environment);
-		uint64_t signature = scene::MixSignature(1, ActiveContentOwner.Id());
-		signature =
-			scene::MixSignature(signature, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(source)));
+		uint64_t skySignature = 0;
+		bool linkedSky = false;
 		for (const EnvironmentTarget &candidate : Environments) {
 			if (candidate.SkyTarget == source) {
-				signature = scene::MixSignature(signature, candidate.Sky.SignatureFor(command));
+				skySignature = candidate.Sky.SignatureFor(command);
+				linkedSky = true;
 				break;
 			}
 		}
-		signature = scene::MixSignature(signature, modes.Clouds);
-		signature = scene::MixSignature(signature, opaqueSkySource);
+		uint64_t signature;
+		if (modes.Clouds == 0 && opaqueSkySource && linkedSky) {
+			signature = BlackCloudSignature(ActiveContentOwner, source, skySignature);
+		} else {
+			signature = scene::MixSignature(1, ActiveContentOwner.Id());
+			signature =
+				scene::MixSignature(signature, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(source)));
+			if (linkedSky) signature = scene::MixSignature(signature, skySignature);
+			signature = scene::MixSignature(signature, modes.Clouds);
+			signature = scene::MixSignature(signature, opaqueSkySource);
+		}
 		if (modes.Clouds != 0) {
 			signature = Fold(signature, environment.CloudLayer);
 			signature = Fold(signature, EnvironmentCloudComputeOf(environment));
@@ -348,6 +375,27 @@ namespace engine::render {
 		cache->Cloud.Stage(signature, command);
 		dispatches++;
 		return true;
+	}
+
+	bool Renderer::Impl::IsBlackEnvironment(
+		const scene::Environment &environment, const void *command, SDL_GPUTexture *texture
+	) const {
+		if (texture == nullptr) return false;
+		const EnvironmentUniformModes modes = EnvironmentModesOf(environment);
+		if (modes.Skybox != 0 || modes.Atmosphere != 0 || modes.Clouds != 0) return false;
+
+		const uint64_t skySignature = BlackSkySignature(ActiveContentOwner);
+		for (const EnvironmentTarget &sky : Environments) {
+			if (sky.SkyTarget == nullptr || sky.Sky.SignatureFor(command) != skySignature) continue;
+			if (sky.SkyTarget == texture) return true;
+			const uint64_t cloudSignature =
+				BlackCloudSignature(ActiveContentOwner, sky.SkyTarget, skySignature);
+			for (const EnvironmentTarget &cloud : Environments) {
+				if (cloud.CloudTarget == texture && cloud.Cloud.SignatureFor(command) == cloudSignature)
+					return true;
+			}
+		}
+		return false;
 	}
 
 	void Renderer::Impl::ReleaseEnvironments() {

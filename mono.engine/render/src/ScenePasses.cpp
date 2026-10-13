@@ -1232,6 +1232,7 @@ namespace engine::render {
 		if (texture == EmptyHardwareDepth) EmptyHardwareDepth = nullptr;
 		if (texture == FarLinearDepth) FarLinearDepth = nullptr;
 		if (texture == OpaqueSkyTexture) OpaqueSkyTexture = nullptr;
+		if (texture == BlackSkyLit) BlackSkyLit = nullptr;
 		if (texture == ClearedInterfaceTexture) ClearedInterfaceTexture = nullptr;
 		for (auto &environment : State->Environments) {
 			if (texture == environment.SkyTarget && writerKind != core::Name("skybox-compute"))

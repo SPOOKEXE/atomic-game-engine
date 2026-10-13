@@ -809,6 +809,69 @@ namespace engine::render {
 			const bool directionalRequested = directionalPort != node->WritePorts.end();
 			const bool emptyLighting = recording.FarLinearDepth != nullptr &&
 									   lightingBindings[4].texture == recording.FarLinearDepth;
+			const bool blackSkyLit = [&] {
+				if (!emptyLighting || recording.EmptyHardwareDepth == nullptr ||
+					recording.EmptyHardwareDepth != recording.DepthTarget.texture ||
+					!recording.Request.Damage.Scene || !State->Caps.HasCompute ||
+					!recording.GraphEnabled(core::Name("sky")) || State->Inspected.IsValid() ||
+					State->StageProbe.Enabled(State->FrameCounter, recording.Request.TargetSlot))
+					return false;
+				const auto colourPort =
+					std::find(node->WritePorts.begin(), node->WritePorts.end(), core::Name("colour"));
+				if (colourPort == node->WritePorts.end() ||
+					static_cast<size_t>(colourPort - node->WritePorts.begin()) >= context.Writes.size())
+					return false;
+				const graph::ResourceId lit = context.Writes[colourPort - node->WritePorts.begin()];
+				const auto *litDesc = Pipeline->Graph.FindResource(lit);
+				if (litDesc == nullptr ||
+					recording.FixedTexture(litDesc->Name, recording.Request.TargetSlot).Texture != pbr.Lit)
+					return false;
+				auto next = std::find(
+					Pipeline->Compiled.PerView.begin(), Pipeline->Compiled.PerView.end(), context.Node
+				);
+				if (next == Pipeline->Compiled.PerView.end() || ++next == Pipeline->Compiled.PerView.end())
+					return false;
+				const auto *sky = Pipeline->Graph.Find(*next);
+				if (sky == nullptr || !sky->Enabled || sky->Kind != core::Name("sky") ||
+					sky->Reads.size() != 3 || sky->Reads[0] != lit || sky->Writes.size() != 1)
+					return false;
+				const auto depth =
+					recording.ResourceTexture(sky->Reads[1], recording.Request.TargetSlot, false);
+				const auto environment =
+					recording.ResourceTexture(sky->Reads[2], recording.Request.TargetSlot, false);
+				if (depth.Texture != recording.EmptyHardwareDepth ||
+					!State->IsBlackEnvironment(
+						recording.CurrentLighting.EnvironmentState, Command, environment.Texture
+					))
+					return false;
+				const auto observesLit = [&](graph::NodeId id) {
+					const auto *later = Pipeline->Graph.Find(id);
+					if (later == nullptr) return false;
+					return std::any_of(later->Reads.begin(), later->Reads.end(), [&](graph::ResourceId read) {
+						const auto *desc = Pipeline->Graph.FindResource(read);
+						return read == lit ||
+							   (desc != nullptr &&
+								recording.FixedTexture(desc->Name, recording.Request.TargetSlot).Texture ==
+									pbr.Lit);
+					});
+				};
+				for (++next; next != Pipeline->Compiled.PerView.end(); ++next) {
+					if (observesLit(*next)) return false;
+					const auto *later = Pipeline->Graph.Find(*next);
+					if (later == nullptr || !later->Enabled) continue;
+					const bool republishesLit =
+						std::any_of(later->Writes.begin(), later->Writes.end(), [&](graph::ResourceId write) {
+							const auto *desc = Pipeline->Graph.FindResource(write);
+							return desc != nullptr &&
+								   recording.FixedTexture(desc->Name, recording.Request.TargetSlot).Texture ==
+									   pbr.Lit;
+						});
+					if (republishesLit) return true;
+				}
+				return std::none_of(
+					Pipeline->Compiled.Final.begin(), Pipeline->Compiled.Final.end(), observesLit
+				);
+			}();
 			if (directionalRequested && baselinePort == node->WritePorts.end()) {
 				ENGINE_ERROR(
 					"deferred lighting '{}' requires lighting-baseline when directional-response is "
@@ -984,7 +1047,7 @@ namespace engine::render {
 					const SDL_FColor background{
 						uniforms.FogColour.r, uniforms.FogColour.g, uniforms.FogColour.b, 1.f
 					};
-					targets[0].clear_color = background;
+					targets[0].clear_color = blackSkyLit ? SDL_FColor{0.f, 0.f, 0.f, 1.f} : background;
 					targets[1].clear_color = background;
 					targets[2].clear_color = SDL_FColor{0.f, 0.f, 0.f, 1.f};
 				}
@@ -1169,6 +1232,7 @@ namespace engine::render {
 					}
 				}
 				if (!emptyLighting && !applyLocalShadowCorrections()) return false;
+				if (emptyLighting && blackSkyLit) recording.BlackSkyLit = pbr.Lit;
 				return true;
 			}
 
@@ -1179,10 +1243,15 @@ namespace engine::render {
 						 pbrDimensions.LitWidth,
 						 pbrDimensions.LitHeight,
 						 SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT},
-						SDL_FColor{uniforms.FogColour.r, uniforms.FogColour.g, uniforms.FogColour.b, 1.f}
+						blackSkyLit
+							? SDL_FColor{0.f, 0.f, 0.f, 1.f}
+							: SDL_FColor{
+								  uniforms.FogColour.r, uniforms.FogColour.g, uniforms.FogColour.b, 1.f
+							  }
 					))
 					return false;
 				core::Metrics::Count("render.empty_lighting.clears", 1);
+				if (blackSkyLit) recording.BlackSkyLit = pbr.Lit;
 				return true;
 			}
 
@@ -1289,10 +1358,14 @@ namespace engine::render {
 			const auto environment = context.Reads.size() == 3
 										 ? GraphTexture(context.Reads[2], context, false)
 										 : Impl::NamedTexture{};
-			Activity.Sky = State->Caps.HasCompute && environment.IsValid();
+			const auto source = GraphTexture(context.Reads[0], context, false);
+			const auto depth = GraphTexture(context.Reads[1], context, false);
+			const bool blackSky =
+				source.IsValid() && source.Texture == BlackSkyLit && depth.Texture == EmptyHardwareDepth &&
+				State->IsBlackEnvironment(CurrentLighting.EnvironmentState, Command, environment.Texture);
+			Activity.Sky = State->Caps.HasCompute && environment.IsValid() && !blackSky;
 			Uniforms.Fog.w = Activity.Sky ? 1.0f : 0.0f;
 			if (!Activity.Sky) return PublishIdentity(context, context.Reads[0], context.Writes[0]);
-			const auto source = GraphTexture(context.Reads[0], context, false);
 			const auto target = GraphTexture(context.Writes[0], context, true);
 			if (!source.IsValid() || !target.IsValid() || source.Texture == target.Texture) return false;
 			const std::array bindings{
@@ -1502,9 +1575,7 @@ namespace engine::render {
 				return recording.PublishIdentity(context, context.Reads[0], context.Writes[0]);
 			if (recording.Sampler == nullptr && !State->EnsureSurfaceSampler()) return false;
 			recording.Sampler = State->SurfaceSampler;
-			if (context.Reads.size() != 2 || context.Writes.size() != 1 ||
-				State->DepthOfFieldPipeline == nullptr)
-				return false;
+			if (State->DepthOfFieldPipeline == nullptr) return false;
 			const Impl::NamedTexture colour = recording.GraphTexture(context.Reads[0], context, false);
 			const Impl::NamedTexture depth = recording.GraphTexture(context.Reads[1], context, false);
 			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
@@ -1559,8 +1630,7 @@ namespace engine::render {
 				return recording.PublishIdentity(context, context.Reads[0], context.Writes[0]);
 			if (recording.Sampler == nullptr && !State->EnsureSurfaceSampler()) return false;
 			recording.Sampler = State->SurfaceSampler;
-			if (context.Reads.size() != 2 || context.Writes.size() != 1 || State->GodRaysPipeline == nullptr)
-				return false;
+			if (State->GodRaysPipeline == nullptr) return false;
 			const Impl::NamedTexture source = recording.GraphTexture(context.Reads[0], context, false);
 			const Impl::NamedTexture depth = recording.GraphTexture(context.Reads[1], context, false);
 			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
@@ -1573,7 +1643,6 @@ namespace engine::render {
 				return false;
 
 			const auto clip = recording.GodRayClip;
-			const bool visible = true;
 			const float reciprocalW = 1.0f / clip.w;
 			const LightingEffectsUniforms uniforms{
 				// Standard linear-depth clears to FarPlane. Keep that value with the
@@ -1584,7 +1653,7 @@ namespace engine::render {
 						State->GodRayIntensity,
 						State->GodRayThreshold,
 						State->GodRayRadius,
-						visible ? 1.0f : 0.0f,
+						1.0f,
 					},
 				.Target = glm::vec4{
 					clip.x * reciprocalW * 0.5f + 0.5f,
