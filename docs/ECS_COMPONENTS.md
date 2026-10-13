@@ -175,6 +175,7 @@ state until v0.19.
 | `scene.AudioState` | 16 | 8 | yes | yes | . | . | Resource: the world's one ear and master gain - listener mode, listener instance and volume, set through `SoundService` and consumed by the client mixer. |
 | `scene.AuthoredAffordance` | 8 | 4 | yes | . | . | . | Opt-in bounded gameplay semantics on a BasePart, read by data-scene affordance queries without inferring meaning from geometry; ordinary parts do not allocate the row. |
 | `scene.AwakeWorld` | 4 | 4 | yes | yes | . | . | Held by an entity that wants the world to keep ticking, with a required `Reason` naming why. `world::DecideLifecycle` walks these rows. |
+| `scene.BloomEffect` | 16 | 4 | yes | yes | . | . | On a child of `Lighting`: whether bloom contributes and its intensity, brightness threshold and spread radius. |
 | `scene.BodyIdentity` | 24 | 8 | yes | . | . | . | Globally unique persistent body key and lifetime generation, preserved by rename and reparent and refused when a live key collides. |
 | `scene.BodyIdentityAuthority` | 16 | 8 | yes | yes | . | . | Per-world authority holding the stable namespace and next sequence used to mint persistent body identities. |
 | `scene.Bone` | 116 | 4 | yes | yes | . | . | One joint of a rig on a `Bone` instance: its rest frame, the animated offset on top of it, its inverse bind frame, its resolved world frame, and its palette slot and parent slot. |
@@ -197,9 +198,12 @@ state until v0.19.
 | `scene.Color3Value` | 12 | 4 | yes | yes | . | . | The colour stored by a `Color3Value` instance. |
 | `scene.Constraint` | 120 | 8 | yes | yes | . | . | A generic six-degree-of-freedom joint between two attachments: a motion mode and a limit per axis, plus the drive target, stiffness, damping and force caps. Each Roblox constraint class is a prototype of this one row. |
 | `scene.ControllerState` | 512 | 4 | yes | yes | . | . | Resource: this host's mapped gamepad and raw joystick state for up to eight local devices, including connection changes and sticky button edges consumed by gameplay and scripts. |
+| `scene.DepthOfFieldEffect` | 20 | 4 | yes | yes | . | . | On a child of `Lighting`: whether depth of field contributes and its blur intensity, focus distance, focus range and radius. |
 | `scene.EditableImage` | 64 | 8 | yes | . | . | . | Script-drawable RGBA8 pixels with dimensions, presentation packing policy and a revision the client watches for upload changes. |
 | `scene.EditableMesh` | 176 | 8 | yes | . | . | . | Script-built geometry with presentation packing policy and a revision the client watches for upload changes; authored arrays remain canonical for editing and collision. |
 | `scene.EditableMeshCollision` | 24 | 8 | yes | . | . | . | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick. |
+| `scene.FogEffect` | 24 | 4 | yes | yes | . | . | On a child of `Lighting`: whether distance fog contributes, its colour and the start and end distances of its linear fade. |
+| `scene.GodRaysEffect` | 16 | 4 | yes | yes | . | . | On a child of `Lighting`: whether sun shafts contribute and their intensity, brightness threshold and spread radius. |
 | `scene.GpuParticleField` | 152 | 8 | yes | . | . | . | Authored configuration for a generic device-local particle field, including spawn samples, bounds, velocity response, visual layers and styles; live particle positions stay on the GPU. |
 | `scene.Gravity` | 12 | 4 | yes | yes | . | . | Per-world gravity acceleration applied to dynamic simulated bodies before physics integrates them; omitting the resource disables gravity, while `PrepareGravity` supplies Earth's default. |
 | `scene.Humanoid` | 48 | 8 | yes | yes | . | . | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick. |
@@ -211,7 +215,7 @@ state until v0.19.
 | `scene.LODCustom` | 36 | 4 | yes | . | . | . | Per-level authored mesh overrides and an optional final billboard texture. Nil fields inherit the matching `scene.LODAuto` field and valid fields take precedence. |
 | `scene.LODSettings` | 12 | 4 | yes | . | . | . | Per-item LOD distance floors. An all-zero row inherits the active view's default mesh LOD distances. |
 | `scene.Light` | 28 | 4 | yes | yes | . | . | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms. |
-| `scene.LightingService` | 104 | 4 | yes | yes | . | . | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude. |
+| `scene.LightingService` | 44 | 4 | yes | yes | . | . | On the single `Lighting` service instance: ambient and outdoor ambient colour, sun brightness, time of day, geographic latitude and the default render feature policy. |
 | `scene.LocalPlayer` | 8 | 8 | yes | yes | . | . | Resource: the `Player` this host is looking through, or null on a server. It backs the `Players.LocalPlayer` property. |
 | `scene.LocalTransparency` | 4 | 4 | yes | . | . | . | A per-viewer override of `Visual::Transparency`, written only through `SetLocalTransparency`, that fades a part standing between the camera and what it is watching. |
 | `scene.MaterialCatalogue` | 80 | 8 | yes | . | . | . | Resource: the derived table of texture sets per material name, filled by the content pump and read by `ResolveMaterials`. It is not authored and not saved. |
@@ -311,4 +315,4 @@ state until v0.19.
 
 ---
 
-234 components registered by the engine, 0 without a purpose line.
+238 components registered by the engine, 0 without a purpose line.

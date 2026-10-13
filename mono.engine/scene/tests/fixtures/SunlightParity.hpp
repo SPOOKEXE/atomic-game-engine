@@ -4,6 +4,7 @@
 // preflight. It uses separate worlds and never advances the measured world.
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <stdexcept>
 
@@ -25,7 +27,12 @@ namespace sunlight_fixture {
 		Require(actual == expected);
 	}
 	inline void Check(
-		const engine::scene::WorldLighting &actual, const engine::scene::LightingServiceComponent *authored
+		const engine::scene::WorldLighting &actual,
+		const engine::scene::LightingServiceComponent *authored,
+		const engine::scene::FogEffect *fog = nullptr,
+		const engine::scene::BloomEffect *bloom = nullptr,
+		const engine::scene::DepthOfFieldEffect *depth = nullptr,
+		const engine::scene::GodRaysEffect *rays = nullptr
 	) {
 		using namespace engine::scene;
 		WorldLighting expected;
@@ -48,20 +55,7 @@ namespace sunlight_fixture {
 			Near(actual.Direct.B, direct);
 			expected.Ambient = authored->Ambient;
 			expected.OutdoorAmbient = authored->OutdoorAmbient;
-			expected.FogColor = authored->FogColor;
 			expected.RenderFeatures = authored->RenderFeatures;
-			expected.FogStart = std::max(authored->FogStart, 0.0f);
-			expected.FogEnd = std::max(authored->FogEnd, expected.FogStart);
-			expected.BloomThreshold = std::max(authored->BloomThreshold, 0.0f);
-			expected.BloomIntensity = std::max(authored->BloomIntensity, 0.0f);
-			expected.BloomRadius = std::max(authored->BloomRadius, 0.0f);
-			expected.DepthOfFieldIntensity = std::clamp(authored->DepthOfFieldIntensity, 0.0f, 1.0f);
-			expected.DepthOfFieldFocusDistance = std::max(authored->DepthOfFieldFocusDistance, 0.0f);
-			expected.DepthOfFieldFocusRange = std::max(authored->DepthOfFieldFocusRange, 0.0f);
-			expected.DepthOfFieldRadius = std::max(authored->DepthOfFieldRadius, 0.0f);
-			expected.GodRayIntensity = std::max(authored->GodRayIntensity, 0.0f);
-			expected.GodRayThreshold = std::max(authored->GodRayThreshold, 0.0f);
-			expected.GodRayRadius = std::max(authored->GodRayRadius, 0.0f);
 		} else {
 			const double length = std::sqrt(
 				double(SUN_DIRECTION.X) * SUN_DIRECTION.X + double(SUN_DIRECTION.Y) * SUN_DIRECTION.Y +
@@ -71,6 +65,31 @@ namespace sunlight_fixture {
 			Near(actual.Direction.Y, SUN_DIRECTION.Y / length);
 			Near(actual.Direction.Z, SUN_DIRECTION.Z / length);
 			Colour(actual.Direct, expected.Direct);
+		}
+		if (fog != nullptr && fog->Enabled) {
+			expected.FogColor = fog->Color;
+			const float maximum = std::numeric_limits<float>::max();
+			const float largestStart = std::nextafter(maximum, 0.0f);
+			expected.FogStart = std::isnan(fog->Start) ? 0.0f : std::clamp(fog->Start, 0.0f, largestStart);
+			expected.FogEnd = std::isnan(fog->End) ? 0.0f : std::clamp(fog->End, 0.0f, maximum);
+			if (expected.FogEnd <= expected.FogStart)
+				expected.FogEnd = std::nextafter(expected.FogStart, maximum);
+		}
+		if (bloom != nullptr && bloom->Enabled) {
+			expected.BloomIntensity = std::max(bloom->Intensity, 0.0f);
+			expected.BloomThreshold = std::max(bloom->Threshold, 0.0f);
+			expected.BloomRadius = std::max(bloom->Radius, 0.0f);
+		}
+		if (depth != nullptr && depth->Enabled) {
+			expected.DepthOfFieldIntensity = std::clamp(depth->Intensity, 0.0f, 1.0f);
+			expected.DepthOfFieldFocusDistance = std::max(depth->FocusDistance, 0.0f);
+			expected.DepthOfFieldFocusRange = std::max(depth->FocusRange, 0.0f);
+			expected.DepthOfFieldRadius = std::max(depth->Radius, 0.0f);
+		}
+		if (rays != nullptr && rays->Enabled) {
+			expected.GodRayIntensity = std::max(rays->Intensity, 0.0f);
+			expected.GodRayThreshold = std::max(rays->Threshold, 0.0f);
+			expected.GodRayRadius = std::max(rays->Radius, 0.0f);
 		}
 		Colour(actual.Ambient, expected.Ambient);
 		Colour(actual.OutdoorAmbient, expected.OutdoorAmbient);
@@ -148,44 +167,55 @@ namespace sunlight_fixture {
 			ignored->Ambient = {0.0f, 0.0f, 0.0f};
 			chosen->Ambient = {0.125f, 0.25f, 0.5f};
 			chosen->OutdoorAmbient = {0.5f, 0.25f, 0.125f};
-			chosen->FogColor = {0.75f, 0.5f, 0.25f};
 			chosen->Brightness = 2.0f;
-			chosen->FogStart = 8.0f;
-			chosen->FogEnd = 32.0f;
-			chosen->BloomThreshold = 0.5f;
-			chosen->BloomIntensity = 1.5f;
-			chosen->BloomRadius = 4.0f;
-			chosen->DepthOfFieldIntensity = 0.75f;
-			chosen->DepthOfFieldFocusDistance = 16.0f;
-			chosen->DepthOfFieldFocusRange = 2.0f;
-			chosen->DepthOfFieldRadius = 8.0f;
-			chosen->GodRayIntensity = 0.25f;
-			chosen->GodRayThreshold = 0.75f;
-			chosen->GodRayRadius = 64.0f;
+			const auto addEffect = [&](const char *className) {
+				const auto entity =
+					store.CreateInstance(ecs::Classes::Find(core::Name(className)), className);
+				Require(store.SetParent(entity, first));
+				return entity;
+			};
+			auto *fog = store.GetMutable<scene::FogEffect>(addEffect("FogEffect"));
+			auto *bloom = store.GetMutable<scene::BloomEffect>(addEffect("BloomEffect"));
+			auto *depth = store.GetMutable<scene::DepthOfFieldEffect>(addEffect("DepthOfFieldEffect"));
+			auto *rays = store.GetMutable<scene::GodRaysEffect>(addEffect("GodRaysEffect"));
+			Require(fog && bloom && depth && rays);
+			fog->Color = {0.75f, 0.5f, 0.25f};
+			fog->Start = 8.0f;
+			fog->End = 32.0f;
+			bloom->Threshold = 0.5f;
+			bloom->Intensity = 1.5f;
+			bloom->Radius = 4.0f;
+			depth->Intensity = 0.75f;
+			depth->FocusDistance = 16.0f;
+			depth->FocusRange = 2.0f;
+			depth->Radius = 8.0f;
+			rays->Intensity = 0.25f;
+			rays->Threshold = 0.75f;
+			rays->Radius = 64.0f;
 			chosen->RenderFeatures = {3, 4};
 			for (size_t hour = 0; hour < 24; ++hour) {
 				chosen->ClockTime = static_cast<float>(hour) + 0.25f;
 				chosen->GeographicLatitude = 30.0f;
-				Check(scene::LightingOf(store), chosen);
+				Check(scene::LightingOf(store), chosen, fog, bloom, depth, rays);
 			}
 			Require(store.SetInstanceName(first, "Renamed selected service"));
 			chosen->ClockTime = -0.25f;
 			chosen->GeographicLatitude = 128.0f;
 			chosen->Brightness = -2.0f;
-			chosen->FogStart = -1.0f;
-			chosen->FogEnd = -4.0f;
-			chosen->BloomThreshold = -1.0f;
-			chosen->BloomIntensity = -2.0f;
-			chosen->BloomRadius = -3.0f;
-			chosen->DepthOfFieldIntensity = 2.0f;
-			chosen->DepthOfFieldFocusDistance = -4.0f;
-			chosen->DepthOfFieldFocusRange = -5.0f;
-			chosen->DepthOfFieldRadius = -6.0f;
-			chosen->GodRayIntensity = -7.0f;
-			chosen->GodRayThreshold = -8.0f;
-			chosen->GodRayRadius = -9.0f;
+			fog->Start = -1.0f;
+			fog->End = -4.0f;
+			bloom->Threshold = -1.0f;
+			bloom->Intensity = -2.0f;
+			bloom->Radius = -3.0f;
+			depth->Intensity = 2.0f;
+			depth->FocusDistance = -4.0f;
+			depth->FocusRange = -5.0f;
+			depth->Radius = -6.0f;
+			rays->Intensity = -7.0f;
+			rays->Threshold = -8.0f;
+			rays->Radius = -9.0f;
 			chosen->RenderFeatures = {8, 3};
-			Check(scene::LightingOf(store), chosen);
+			Check(scene::LightingOf(store), chosen, fog, bloom, depth, rays);
 			// Removing the selected service must expose the next authored instance.
 			store.Destroy(first);
 			Check(scene::LightingOf(store), store.Get<scene::LightingServiceComponent>(second));

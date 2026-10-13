@@ -99,11 +99,10 @@ namespace engine::scene {
 	// What `Lighting` holds that no other service does.
 	//
 	// **A component of its own rather than fields on `ServiceComponent`.** Every
-	// service carries that one; exactly one of them has a fog colour, and a
-	// shared component with eight unused floats on every service is eight
-	// floats in every snapshot of every world.
+	// service carries that one; only Lighting carries the solar and ambient
+	// values. Effect children hold their own authored controls.
 	//
-	// `LightingOf` resolves these into the directional, ambient and fog values
+	// `LightingOf` resolves these into the directional and ambient values
 	// consumed by every view of this world.
 	//
 	// @since v0.7
@@ -114,51 +113,11 @@ namespace engine::scene {
 		// The ambient term outdoors, which a sky replaces indoors.
 		core::Color3 OutdoorAmbient{0.058f, 0.058f, 0.058f};
 
-		// What distance fades to.
-		core::Color3 FogColor{0.0f, 0.0f, 0.0f};
-
 		// How strong the sun is.
 		float Brightness = 0.440f;
 
 		// The time of day, in hours. 14 is Roblox's default afternoon.
 		float ClockTime = 14.0f;
-
-		// Where fog starts, in studs.
-		float FogStart = 0.0f;
-
-		// Where fog is total, in studs. The default is far enough out to read as
-		// no fog at all.
-		float FogEnd = 100000.0f;
-
-		// HDR radiance begins contributing to bloom above this value.
-		float BloomThreshold = 1.0f;
-
-		// How strongly the filtered bright radiance is added before tone mapping.
-		float BloomIntensity = 0.0f;
-
-		// The bloom filter radius, in display pixels.
-		float BloomRadius = 6.0f;
-
-		// How strongly depth outside the focus range is blurred. Zero disables it.
-		float DepthOfFieldIntensity = 0.0f;
-
-		// The camera-forward distance that remains sharp, in studs.
-		float DepthOfFieldFocusDistance = 24.0f;
-
-		// The sharp range around DepthOfFieldFocusDistance, in studs.
-		float DepthOfFieldFocusRange = 8.0f;
-
-		// The maximum depth-of-field sample radius, in display pixels.
-		float DepthOfFieldRadius = 6.0f;
-
-		// How strongly screen-space shafts from the visible sun are added. Zero disables them.
-		float GodRayIntensity = 0.0f;
-
-		// HDR radiance begins contributing to the screen-space shafts above this value.
-		float GodRayThreshold = 1.0f;
-
-		// How far each god-ray sample moves toward the projected sun, in display pixels.
-		float GodRayRadius = 48.0f;
 
 		// Which latitude the sun's arc is computed for, in degrees.
 		float GeographicLatitude = 41.733f;

@@ -23,6 +23,7 @@
 #include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
@@ -1909,8 +1910,8 @@ namespace engine::scene {
 		// Decision 20 says a render graph may vary per platform and anything
 		// reaching a simulation input may not - these reach no simulation input,
 		// and what crosses is what the *author* wrote rather than what a machine
-		// resolved. `scene.LightingService` is already on this side of the line
-		// with the fog terms these sit beside; what stays local is the resolved
+		// resolved. `scene.LightingService` and the authored effect children are
+		// on this side of the line; what stays local is the resolved
 		// half, and the resolved half is `scene::WorldLighting`, which is not a
 		// component at all.
 		ecs::Components::Register<Atmosphere>("scene.Atmosphere");
@@ -1992,6 +1993,13 @@ namespace engine::scene {
 		ecs::Components::Register<GpuParticleField>(
 			"scene.GpuParticleField", WriteGpuParticleFields, ReadGpuParticleFields, 525000
 		);
+
+		// Appended to preserve every existing component id. Explicit padding
+		// makes the generated snapshot form deterministic.
+		ecs::Components::Register<BloomEffect>("scene.BloomEffect");
+		ecs::Components::Register<DepthOfFieldEffect>("scene.DepthOfFieldEffect");
+		ecs::Components::Register<GodRaysEffect>("scene.GodRaysEffect");
+		ecs::Components::Register<FogEffect>("scene.FogEffect");
 	}
 
 	void RegisterSceneClasses() {

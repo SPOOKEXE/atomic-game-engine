@@ -2166,41 +2166,10 @@ namespace engine::ecs {
 		// A reader refuses anything else outright. A format that tries to be
 		// tolerant of versions it has never seen is one that restores a world
 		// nobody can reason about.
-		//
-		// **2 - the entity directory is two runs rather than one.** The
-		// directory is written as a run of `Capacity()` entries, and the index
-		// space now has two regions with 2³¹ indices between them, so a version
-		// 1 reader handed a version 2 stream would read the predicted run's
-		// generations as authoritative slots and silently produce a world with
-		// entities nothing named. Bumped rather than sniffed, because the two
-		// layouts are indistinguishable from the bytes alone.
-		//
-		// **3 - `ecs.InstanceClass` is written as the class's name.** It was the
-		// registration index, which is `AGENTS.md` rule 4 in a file: nothing
-		// restores the class table the way `Load` restores the directory, so a
-		// world reloaded by a build that registered its classes in another order
-		// came back with every instance the wrong class. The bump is here rather
-		// than left to the reader because a length prefix read as a `ClassId`
-		// does not fail on that field - it consumes the bytes of the values
-		// behind it, and the load dies somewhere unrelated with nothing naming
-		// the cause.
-		//
-		// A component's serialiser is not the envelope this version usually
-		// describes, and that is not a reason to leave it. `ecs.InstanceName`
-		// went the same way at v0.8 without one, and every world saved before it
-		// loaded with its names garbled rather than being refused.
-		//
-		// **4 - a script's source path is written as its text.**
-		// `script.LuaSourceContainer` and its JavaScript twin hold a
-		// `core::Name` and had no writer of their own, so raw serialisation put
-		// an *interning index* in the file - the exact hazard
-		// `DescribeType`'s warning names. A world written by one process and
-		// read by another resolved every script's path to whatever that process
-		// happened to have interned in that slot, which is a game file that
-		// loads cleanly and runs the wrong programs. Same shape as 3, one type
-		// along, and refused for the same reason: a length prefix read as a
-		// four-byte id consumes the values behind it.
-		static constexpr uint32_t SNAPSHOT_VERSION = 7;
+		// The raw LightingService component layout changed when fog, bloom,
+		// depth of field and god rays moved into child components. This bump
+		// refuses snapshots whose component bytes use the old layout.
+		static constexpr uint32_t SNAPSHOT_VERSION = 8;
 
 		// The number of tables this world holds.
 		//

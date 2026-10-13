@@ -1816,6 +1816,35 @@ declare interface WeldConstraint extends Instance {
 	Part1: Instance;
 }
 
+declare interface BloomEffect extends Instance {
+	Enabled: boolean;
+	Intensity: number;
+	Radius: number;
+	Threshold: number;
+}
+
+declare interface DepthOfFieldEffect extends Instance {
+	Enabled: boolean;
+	FocusDistance: number;
+	FocusRange: number;
+	Intensity: number;
+	Radius: number;
+}
+
+declare interface GodRaysEffect extends Instance {
+	Enabled: boolean;
+	Intensity: number;
+	Radius: number;
+	Threshold: number;
+}
+
+declare interface FogEffect extends Instance {
+	Color: Color3;
+	Enabled: boolean;
+	End: number;
+	Start: number;
+}
+
 declare interface ShaderScript extends Instance {
 	readonly Revision: number;
 	Source: string;
@@ -2537,22 +2566,9 @@ declare interface Workspace extends WorldRoot {
 
 declare interface Lighting extends Service {
 	Ambient: Color3;
-	BloomIntensity: number;
-	BloomRadius: number;
-	BloomThreshold: number;
 	Brightness: number;
 	ClockTime: number;
-	DepthOfFieldFocusDistance: number;
-	DepthOfFieldFocusRange: number;
-	DepthOfFieldIntensity: number;
-	DepthOfFieldRadius: number;
-	FogColor: Color3;
-	FogEnd: number;
-	FogStart: number;
 	GeographicLatitude: number;
-	GodRayIntensity: number;
-	GodRayRadius: number;
-	GodRayThreshold: number;
 	OutdoorAmbient: Color3;
 	PostProcessShader: string;
 	RenderFeatureDisableMask: number;
@@ -3182,6 +3198,10 @@ declare const Instance: {
 		(className: "SpringConstraint", parent?: Instance): SpringConstraint;
 		(className: "Weld", parent?: Instance): Weld;
 		(className: "WeldConstraint", parent?: Instance): WeldConstraint;
+		(className: "BloomEffect", parent?: Instance): BloomEffect;
+		(className: "DepthOfFieldEffect", parent?: Instance): DepthOfFieldEffect;
+		(className: "GodRaysEffect", parent?: Instance): GodRaysEffect;
+		(className: "FogEffect", parent?: Instance): FogEffect;
 		(className: "ShaderScript", parent?: Instance): ShaderScript;
 		(className: "LensShader", parent?: Instance): LensShader;
 		(className: "EditableMesh", parent?: Instance): EditableMesh;

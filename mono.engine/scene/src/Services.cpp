@@ -918,44 +918,11 @@ namespace engine::scene {
 			const ClassId lighting = Classes::Find(core::Name("Lighting"));
 			Classes::Property<&LightingServiceComponent::Ambient>(lighting, "Ambient");
 			Classes::Property<&LightingServiceComponent::OutdoorAmbient>(lighting, "OutdoorAmbient");
-			Classes::Property<&LightingServiceComponent::FogColor>(lighting, "FogColor");
 			Classes::ClampedProperty<&LightingServiceComponent::Brightness, 0.0f, 10000.0f>(
 				lighting, "Brightness"
 			);
 			Classes::ClampedProperty<&LightingServiceComponent::ClockTime, 0.0f, 24.0f>(
 				lighting, "ClockTime"
-			);
-			Classes::Property<&LightingServiceComponent::FogStart>(lighting, "FogStart");
-			Classes::Property<&LightingServiceComponent::FogEnd>(lighting, "FogEnd");
-			Classes::ClampedProperty<&LightingServiceComponent::BloomThreshold, 0.0f, 10000.0f>(
-				lighting, "BloomThreshold"
-			);
-			Classes::ClampedProperty<&LightingServiceComponent::BloomIntensity, 0.0f, 100.0f>(
-				lighting, "BloomIntensity"
-			);
-			Classes::ClampedProperty<&LightingServiceComponent::BloomRadius, 0.0f, 128.0f>(
-				lighting, "BloomRadius"
-			);
-			Classes::ClampedProperty<&LightingServiceComponent::DepthOfFieldIntensity, 0.0f, 1.0f>(
-				lighting, "DepthOfFieldIntensity"
-			);
-			Classes::ClampedProperty<&LightingServiceComponent::DepthOfFieldFocusDistance, 0.0f, 100000.0f>(
-				lighting, "DepthOfFieldFocusDistance"
-			);
-			Classes::ClampedProperty<&LightingServiceComponent::DepthOfFieldFocusRange, 0.0f, 100000.0f>(
-				lighting, "DepthOfFieldFocusRange"
-			);
-			Classes::ClampedProperty<&LightingServiceComponent::DepthOfFieldRadius, 0.0f, 128.0f>(
-				lighting, "DepthOfFieldRadius"
-			);
-			Classes::ClampedProperty<&LightingServiceComponent::GodRayIntensity, 0.0f, 100.0f>(
-				lighting, "GodRayIntensity"
-			);
-			Classes::ClampedProperty<&LightingServiceComponent::GodRayThreshold, 0.0f, 10000.0f>(
-				lighting, "GodRayThreshold"
-			);
-			Classes::ClampedProperty<&LightingServiceComponent::GodRayRadius, 0.0f, 512.0f>(
-				lighting, "GodRayRadius"
 			);
 			Classes::ClampedProperty<&LightingServiceComponent::GeographicLatitude, -90.0f, 90.0f>(
 				lighting, "GeographicLatitude"
@@ -996,29 +963,10 @@ namespace engine::scene {
 				  "ChunkResolution"})
 				TagProperty(terrain, property, property == "Enabled" ? "Behavior" : "Terrain");
 			for (const std::string_view property :
-				 {"Ambient",
-				  "OutdoorAmbient",
-				  "FogColor",
-				  "FogStart",
-				  "FogEnd",
-				  "Brightness",
-				  "ClockTime",
-				  "GeographicLatitude",
-				  "GodRayIntensity",
-				  "GodRayThreshold",
-				  "GodRayRadius"})
+				 {"Ambient", "OutdoorAmbient", "Brightness", "ClockTime", "GeographicLatitude"})
 				TagProperty(lighting, property, "Lighting");
 			for (const std::string_view property :
-				 {"BloomThreshold",
-				  "BloomIntensity",
-				  "BloomRadius",
-				  "DepthOfFieldIntensity",
-				  "DepthOfFieldFocusDistance",
-				  "DepthOfFieldFocusRange",
-				  "DepthOfFieldRadius",
-				  "RenderFeatureEnableMask",
-				  "RenderFeatureDisableMask",
-				  "PostProcessShader"})
+				 {"RenderFeatureEnableMask", "RenderFeatureDisableMask", "PostProcessShader"})
 				TagProperty(lighting, property, "Rendering");
 			for (const std::string_view property :
 				 {"CurrentCamera", "SurfaceBounces", "MaxSurfaces", "Terrain"})

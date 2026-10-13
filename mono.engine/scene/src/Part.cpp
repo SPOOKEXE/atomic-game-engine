@@ -18,6 +18,7 @@
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -4289,6 +4290,56 @@ namespace engine::scene {
 			for (const std::string_view property : {"ZenithColor", "HorizonColor", "GroundColor"})
 				TagProperty(skyboxComputeClass, property, "Lighting");
 			TagProperty(volumeClass, "Bounds", "Geometry");
+
+			// These are independent authored children of Lighting. Registering them
+			// after the existing tree retains the established class ids.
+			const ecs::ClassId bloomEffect = ecs::Classes::Register(
+				"BloomEffect", instance, std::array{ecs::Components::Of<BloomEffect>()}
+			);
+			const ecs::ClassId depthOfFieldEffect = ecs::Classes::Register(
+				"DepthOfFieldEffect", instance, std::array{ecs::Components::Of<DepthOfFieldEffect>()}
+			);
+			const ecs::ClassId godRaysEffect = ecs::Classes::Register(
+				"GodRaysEffect", instance, std::array{ecs::Components::Of<GodRaysEffect>()}
+			);
+			const ecs::ClassId fogEffect =
+				ecs::Classes::Register("FogEffect", instance, std::array{ecs::Components::Of<FogEffect>()});
+
+			ecs::Classes::ClampedProperty<&BloomEffect::Intensity, 0.0f, 100.0f>(bloomEffect, "Intensity");
+			ecs::Classes::ClampedProperty<&BloomEffect::Threshold, 0.0f, 10000.0f>(bloomEffect, "Threshold");
+			ecs::Classes::ClampedProperty<&BloomEffect::Radius, 0.0f, 128.0f>(bloomEffect, "Radius");
+			ecs::Classes::Property<&BloomEffect::Enabled>(bloomEffect, "Enabled");
+			ecs::Classes::ClampedProperty<&DepthOfFieldEffect::Intensity, 0.0f, 1.0f>(
+				depthOfFieldEffect, "Intensity"
+			);
+			ecs::Classes::ClampedProperty<&DepthOfFieldEffect::FocusDistance, 0.0f, 100000.0f>(
+				depthOfFieldEffect, "FocusDistance"
+			);
+			ecs::Classes::ClampedProperty<&DepthOfFieldEffect::FocusRange, 0.0f, 100000.0f>(
+				depthOfFieldEffect, "FocusRange"
+			);
+			ecs::Classes::ClampedProperty<&DepthOfFieldEffect::Radius, 0.0f, 128.0f>(
+				depthOfFieldEffect, "Radius"
+			);
+			ecs::Classes::Property<&DepthOfFieldEffect::Enabled>(depthOfFieldEffect, "Enabled");
+			ecs::Classes::ClampedProperty<&GodRaysEffect::Intensity, 0.0f, 100.0f>(
+				godRaysEffect, "Intensity"
+			);
+			ecs::Classes::ClampedProperty<&GodRaysEffect::Threshold, 0.0f, 10000.0f>(
+				godRaysEffect, "Threshold"
+			);
+			ecs::Classes::ClampedProperty<&GodRaysEffect::Radius, 0.0f, 512.0f>(godRaysEffect, "Radius");
+			ecs::Classes::Property<&GodRaysEffect::Enabled>(godRaysEffect, "Enabled");
+			ecs::Classes::Property<&FogEffect::Color>(fogEffect, "Color");
+			ecs::Classes::Property<&FogEffect::Start>(fogEffect, "Start");
+			ecs::Classes::Property<&FogEffect::End>(fogEffect, "End");
+			ecs::Classes::Property<&FogEffect::Enabled>(fogEffect, "Enabled");
+			for (const ecs::ClassId effect : {bloomEffect, depthOfFieldEffect, godRaysEffect, fogEffect}) {
+				TagDeclaredProperties(effect, core::Name("Rendering"));
+				TagProperty(effect, "Enabled", "Behavior");
+			}
+			for (const std::string_view property : {"Color", "Start", "End"})
+				TagProperty(fogEffect, property, "Lighting");
 
 			return part;
 		}

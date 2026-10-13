@@ -2,20 +2,9 @@
 
 // The sky between the eye and everything else, and the sky above it.
 //
-// **There is no `Fog` type here, and its absence is the decision.**
-// `docs/ARCH_REVIEW.md` D4 reads the tree as having no fog at all; it has, in
-// the one place it belongs. `LightingServiceComponent::FogColor`, `FogStart` and
-// `FogEnd` are authored on the `Lighting` service, `LightingOf` resolves them
-// into `WorldLighting`, and `render::ViewRecording` puts them in a uniform. A
-// `scene::Fog` component would be a second answer to what a world's distance
-// fade is, which is rule 2 and is exactly the mistake `Humanoid::Radius` was
-// deleted for.
-//
-// **`Atmosphere` is separate because linear fog cannot express it.** Two
-// distances and a colour give a fade that is the same looking up as looking
-// along the ground; scattering is not. Roblox draws the same line:
-// `Atmosphere` is an instance under `Lighting`, while the legacy fog remains
-// three properties on that service.
+// `Atmosphere` and `FogEffect` are separate authored instances beneath
+// `Lighting`. Linear fog has a fixed distance fade, while atmosphere scatters
+// light differently by view direction. Both resolve into presentation state.
 //
 // **Both of these are per-world presentation state and neither reaches a
 // simulation input.** That is decision 20: "render graphs may vary per platform.

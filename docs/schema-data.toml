@@ -9,9 +9,9 @@ generated_by = "schemadump"
 source = "runtime registries"
 
 ["reference"."counts"]
-components = 234
-classes = 164
-properties = 2116
+components = 238
+classes = 168
+properties = 2128
 enums = 69
 functions = 115
 
@@ -1352,6 +1352,18 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."scene.BloomEffect"]
+name = "scene.BloomEffect"
+kind = "Data"
+size = 16
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
 ["components"."scene.BodyIdentity"]
 name = "scene.BodyIdentity"
 kind = "Data"
@@ -1616,6 +1628,18 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."scene.DepthOfFieldEffect"]
+name = "scene.DepthOfFieldEffect"
+kind = "Data"
+size = 20
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
 ["components"."scene.EditableImage"]
 name = "scene.EditableImage"
 kind = "Data"
@@ -1648,6 +1672,30 @@ alignment = 8
 trivial = false
 serialisable = true
 raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."scene.FogEffect"]
+name = "scene.FogEffect"
+kind = "Data"
+size = 24
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
+["components"."scene.GodRaysEffect"]
+name = "scene.GodRaysEffect"
+kind = "Data"
+size = 16
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = true
 padded = false
 wire_size = 0
 described = false
@@ -1787,7 +1835,7 @@ described = false
 ["components"."scene.LightingService"]
 name = "scene.LightingService"
 kind = "Data"
-size = 104
+size = 44
 alignment = 4
 trivial = true
 serialisable = true
@@ -5101,6 +5149,85 @@ nullable = false
 reads = ["ecs.InstanceName"]
 writes = ["ecs.InstanceName"]
 
+["classes"."BloomEffect"]
+name = "BloomEffect"
+creatable = true
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.BloomEffect"]
+property_count = 6
+
+["classes"."BloomEffect"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."BloomEffect"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."BloomEffect"."properties"."Intensity"]
+name = "Intensity"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.BloomEffect"]
+writes = ["scene.BloomEffect"]
+
+["classes"."BloomEffect"."properties"."Threshold"]
+name = "Threshold"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.BloomEffect"]
+writes = ["scene.BloomEffect"]
+
+["classes"."BloomEffect"."properties"."Radius"]
+name = "Radius"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.BloomEffect"]
+writes = ["scene.BloomEffect"]
+
+["classes"."BloomEffect"."properties"."Enabled"]
+name = "Enabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.BloomEffect"]
+writes = ["scene.BloomEffect"]
+
 ["classes"."Bone"]
 name = "Bone"
 creatable = true
@@ -7423,6 +7550,97 @@ reads = ["effects.Decal"]
 writes = ["effects.Decal"]
 enum = "NormalId"
 
+["classes"."DepthOfFieldEffect"]
+name = "DepthOfFieldEffect"
+creatable = true
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.DepthOfFieldEffect"]
+property_count = 7
+
+["classes"."DepthOfFieldEffect"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."DepthOfFieldEffect"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."DepthOfFieldEffect"."properties"."Intensity"]
+name = "Intensity"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.DepthOfFieldEffect"]
+writes = ["scene.DepthOfFieldEffect"]
+
+["classes"."DepthOfFieldEffect"."properties"."FocusDistance"]
+name = "FocusDistance"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.DepthOfFieldEffect"]
+writes = ["scene.DepthOfFieldEffect"]
+
+["classes"."DepthOfFieldEffect"."properties"."FocusRange"]
+name = "FocusRange"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.DepthOfFieldEffect"]
+writes = ["scene.DepthOfFieldEffect"]
+
+["classes"."DepthOfFieldEffect"."properties"."Radius"]
+name = "Radius"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.DepthOfFieldEffect"]
+writes = ["scene.DepthOfFieldEffect"]
+
+["classes"."DepthOfFieldEffect"."properties"."Enabled"]
+name = "Enabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.DepthOfFieldEffect"]
+writes = ["scene.DepthOfFieldEffect"]
+
 ["classes"."DockWidgetPluginGui"]
 name = "DockWidgetPluginGui"
 creatable = true
@@ -7837,6 +8055,85 @@ nullable = false
 reads = ["ecs.InstanceName"]
 writes = ["ecs.InstanceName"]
 
+["classes"."FogEffect"]
+name = "FogEffect"
+creatable = true
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.FogEffect"]
+property_count = 6
+
+["classes"."FogEffect"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."FogEffect"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."FogEffect"."properties"."Color"]
+name = "Color"
+type = "Color3"
+value_size = 12
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.FogEffect"]
+writes = ["scene.FogEffect"]
+
+["classes"."FogEffect"."properties"."Start"]
+name = "Start"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.FogEffect"]
+writes = ["scene.FogEffect"]
+
+["classes"."FogEffect"."properties"."End"]
+name = "End"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.FogEffect"]
+writes = ["scene.FogEffect"]
+
+["classes"."FogEffect"."properties"."Enabled"]
+name = "Enabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.FogEffect"]
+writes = ["scene.FogEffect"]
+
 ["classes"."Folder"]
 name = "Folder"
 creatable = true
@@ -8225,6 +8522,85 @@ nullable = false
 reads = ["gui.Background"]
 writes = ["gui.Background"]
 enum = "BorderMode"
+
+["classes"."GodRaysEffect"]
+name = "GodRaysEffect"
+creatable = true
+inherits = "Instance"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.GodRaysEffect"]
+property_count = 6
+
+["classes"."GodRaysEffect"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."GodRaysEffect"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."GodRaysEffect"."properties"."Intensity"]
+name = "Intensity"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.GodRaysEffect"]
+writes = ["scene.GodRaysEffect"]
+
+["classes"."GodRaysEffect"."properties"."Threshold"]
+name = "Threshold"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.GodRaysEffect"]
+writes = ["scene.GodRaysEffect"]
+
+["classes"."GodRaysEffect"."properties"."Radius"]
+name = "Radius"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.GodRaysEffect"]
+writes = ["scene.GodRaysEffect"]
+
+["classes"."GodRaysEffect"."properties"."Enabled"]
+name = "Enabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.GodRaysEffect"]
+writes = ["scene.GodRaysEffect"]
 
 ["classes"."GpuParticleField"]
 name = "GpuParticleField"
@@ -12054,7 +12430,7 @@ name = "Lighting"
 creatable = false
 inherits = "Service"
 components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Service", "scene.LightingService"]
-property_count = 25
+property_count = 12
 
 ["classes"."Lighting"."properties"."Parent"]
 name = "Parent"
@@ -12129,18 +12505,6 @@ nullable = false
 reads = ["scene.LightingService"]
 writes = ["scene.LightingService"]
 
-["classes"."Lighting"."properties"."FogColor"]
-name = "FogColor"
-type = "Color3"
-value_size = 12
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.LightingService"]
-writes = ["scene.LightingService"]
-
 ["classes"."Lighting"."properties"."Brightness"]
 name = "Brightness"
 type = "Float"
@@ -12155,150 +12519,6 @@ writes = ["scene.LightingService"]
 
 ["classes"."Lighting"."properties"."ClockTime"]
 name = "ClockTime"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.LightingService"]
-writes = ["scene.LightingService"]
-
-["classes"."Lighting"."properties"."FogStart"]
-name = "FogStart"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.LightingService"]
-writes = ["scene.LightingService"]
-
-["classes"."Lighting"."properties"."FogEnd"]
-name = "FogEnd"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.LightingService"]
-writes = ["scene.LightingService"]
-
-["classes"."Lighting"."properties"."BloomThreshold"]
-name = "BloomThreshold"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.LightingService"]
-writes = ["scene.LightingService"]
-
-["classes"."Lighting"."properties"."BloomIntensity"]
-name = "BloomIntensity"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.LightingService"]
-writes = ["scene.LightingService"]
-
-["classes"."Lighting"."properties"."BloomRadius"]
-name = "BloomRadius"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.LightingService"]
-writes = ["scene.LightingService"]
-
-["classes"."Lighting"."properties"."DepthOfFieldIntensity"]
-name = "DepthOfFieldIntensity"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.LightingService"]
-writes = ["scene.LightingService"]
-
-["classes"."Lighting"."properties"."DepthOfFieldFocusDistance"]
-name = "DepthOfFieldFocusDistance"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.LightingService"]
-writes = ["scene.LightingService"]
-
-["classes"."Lighting"."properties"."DepthOfFieldFocusRange"]
-name = "DepthOfFieldFocusRange"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.LightingService"]
-writes = ["scene.LightingService"]
-
-["classes"."Lighting"."properties"."DepthOfFieldRadius"]
-name = "DepthOfFieldRadius"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.LightingService"]
-writes = ["scene.LightingService"]
-
-["classes"."Lighting"."properties"."GodRayIntensity"]
-name = "GodRayIntensity"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.LightingService"]
-writes = ["scene.LightingService"]
-
-["classes"."Lighting"."properties"."GodRayThreshold"]
-name = "GodRayThreshold"
-type = "Float"
-value_size = 4
-kind = "Field"
-writable = true
-predicted_writable = false
-scriptable = true
-nullable = false
-reads = ["scene.LightingService"]
-writes = ["scene.LightingService"]
-
-["classes"."Lighting"."properties"."GodRayRadius"]
-name = "GodRayRadius"
 type = "Float"
 value_size = 4
 kind = "Field"

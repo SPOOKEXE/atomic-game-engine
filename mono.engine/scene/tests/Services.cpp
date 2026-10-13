@@ -171,15 +171,13 @@ TEST_CASE("a service carries its scope and Lighting carries more", "[scene][serv
 		ServiceScope::Client
 	);
 
-	// Lighting alone has the second component. Eight unused floats on the other
-	// eight services is eight floats in every snapshot of every world.
+	// Lighting alone carries solar and ambient settings on its second component.
 	const Entity lighting = store.FindFirstRoot("Lighting");
 	REQUIRE(lighting != NULL_ENTITY);
 	const LightingServiceComponent *lightingState = store.Get<LightingServiceComponent>(lighting);
 	REQUIRE(lightingState != nullptr);
 	CHECK(lightingState->Ambient == engine::core::Color3{0.078f, 0.078f, 0.078f});
 	CHECK(lightingState->OutdoorAmbient == engine::core::Color3{0.058f, 0.058f, 0.058f});
-	CHECK(lightingState->FogColor == engine::core::Color3{0.0f, 0.0f, 0.0f});
 	CHECK(lightingState->Brightness == 0.440f);
 	CHECK(lightingState->ClockTime == 14.0f);
 	CHECK(store.Get<LightingServiceComponent>(storage) == nullptr);
@@ -218,27 +216,15 @@ TEST_CASE("fixture identity is read-only and Lighting inputs are bounded", "[sce
 	const float negativeBrightness = -4.0f;
 	const float lateClock = 31.0f;
 	const float impossibleLatitude = 120.0f;
-	const float negativeBloom = -4.0f;
-	const float excessiveRadius = 1000.0f;
-	const float negativeDepthOfField = -4.0f;
-	const float excessiveGodRayRadius = 1000.0f;
 	REQUIRE(store.SetProperty(lighting, Name("Brightness"), &negativeBrightness, sizeof(float)));
 	REQUIRE(store.SetProperty(lighting, Name("ClockTime"), &lateClock, sizeof(float)));
 	REQUIRE(store.SetProperty(lighting, Name("GeographicLatitude"), &impossibleLatitude, sizeof(float)));
-	REQUIRE(store.SetProperty(lighting, Name("BloomIntensity"), &negativeBloom, sizeof(float)));
-	REQUIRE(store.SetProperty(lighting, Name("BloomRadius"), &excessiveRadius, sizeof(float)));
-	REQUIRE(store.SetProperty(lighting, Name("DepthOfFieldIntensity"), &negativeDepthOfField, sizeof(float)));
-	REQUIRE(store.SetProperty(lighting, Name("GodRayRadius"), &excessiveGodRayRadius, sizeof(float)));
 
 	const LightingServiceComponent *state = store.Get<LightingServiceComponent>(lighting);
 	REQUIRE(state != nullptr);
 	CHECK(state->Brightness == 0.0f);
 	CHECK(state->ClockTime == 24.0f);
 	CHECK(state->GeographicLatitude == 90.0f);
-	CHECK(state->BloomIntensity == 0.0f);
-	CHECK(state->BloomRadius == 128.0f);
-	CHECK(state->DepthOfFieldIntensity == 0.0f);
-	CHECK(state->GodRayRadius == 512.0f);
 
 	const uint32_t everyBit = UINT32_MAX;
 	const uint32_t post = engine::scene::FeatureBit(engine::scene::RenderFeature::PostProcessing);

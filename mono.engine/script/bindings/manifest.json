@@ -1386,6 +1386,63 @@
 			]
 		},
 		{
+			"name": "BloomEffect",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.BloomEffect"],
+			"properties": [
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.BloomEffect"], "writes": ["scene.BloomEffect"]},
+				{"name": "Intensity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.BloomEffect"], "writes": ["scene.BloomEffect"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.BloomEffect"], "writes": ["scene.BloomEffect"]},
+				{"name": "Threshold", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.BloomEffect"], "writes": ["scene.BloomEffect"]}
+			]
+		},
+		{
+			"name": "DepthOfFieldEffect",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.DepthOfFieldEffect"],
+			"properties": [
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.DepthOfFieldEffect"], "writes": ["scene.DepthOfFieldEffect"]},
+				{"name": "FocusDistance", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.DepthOfFieldEffect"], "writes": ["scene.DepthOfFieldEffect"]},
+				{"name": "FocusRange", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.DepthOfFieldEffect"], "writes": ["scene.DepthOfFieldEffect"]},
+				{"name": "Intensity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.DepthOfFieldEffect"], "writes": ["scene.DepthOfFieldEffect"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.DepthOfFieldEffect"], "writes": ["scene.DepthOfFieldEffect"]}
+			]
+		},
+		{
+			"name": "GodRaysEffect",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.GodRaysEffect"],
+			"properties": [
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.GodRaysEffect"], "writes": ["scene.GodRaysEffect"]},
+				{"name": "Intensity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.GodRaysEffect"], "writes": ["scene.GodRaysEffect"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Radius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.GodRaysEffect"], "writes": ["scene.GodRaysEffect"]},
+				{"name": "Threshold", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.GodRaysEffect"], "writes": ["scene.GodRaysEffect"]}
+			]
+		},
+		{
+			"name": "FogEffect",
+			"parent": "Instance",
+			"constructible": true,
+			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.FogEffect"],
+			"properties": [
+				{"name": "Color", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.FogEffect"], "writes": ["scene.FogEffect"]},
+				{"name": "Enabled", "type": "bool", "kind": "field", "bytes": 1, "writable": true, "nullable": false, "reads": ["scene.FogEffect"], "writes": ["scene.FogEffect"]},
+				{"name": "End", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.FogEffect"], "writes": ["scene.FogEffect"]},
+				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
+				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},
+				{"name": "Start", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.FogEffect"], "writes": ["scene.FogEffect"]}
+			]
+		},
+		{
 			"name": "ShaderScript",
 			"parent": "Instance",
 			"constructible": true,
@@ -3221,23 +3278,10 @@
 			"components": ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.LightingService", "scene.Service"],
 			"properties": [
 				{"name": "Ambient", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
-				{"name": "BloomIntensity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
-				{"name": "BloomRadius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
-				{"name": "BloomThreshold", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "Brightness", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "ClockTime", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
-				{"name": "DepthOfFieldFocusDistance", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
-				{"name": "DepthOfFieldFocusRange", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
-				{"name": "DepthOfFieldIntensity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
-				{"name": "DepthOfFieldRadius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "Fixture", "type": "bool", "kind": "computed", "bytes": 1, "writable": false, "nullable": false, "reads": ["scene.Service"], "writes": []},
-				{"name": "FogColor", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
-				{"name": "FogEnd", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
-				{"name": "FogStart", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "GeographicLatitude", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
-				{"name": "GodRayIntensity", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
-				{"name": "GodRayRadius", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
-				{"name": "GodRayThreshold", "type": "float", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "Name", "type": "Name", "kind": "field", "bytes": 4, "writable": true, "nullable": false, "reads": ["ecs.InstanceName"], "writes": ["ecs.InstanceName"]},
 				{"name": "OutdoorAmbient", "type": "Color3", "kind": "field", "bytes": 12, "writable": true, "nullable": false, "reads": ["scene.LightingService"], "writes": ["scene.LightingService"]},
 				{"name": "Parent", "type": "Instance", "kind": "computed", "bytes": 8, "writable": true, "nullable": false, "reads": ["ecs.Hierarchy"], "writes": ["ecs.Hierarchy"]},

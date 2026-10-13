@@ -2106,6 +2106,35 @@ declare extern type WeldConstraint extends Instance with
 	Part1: Instance
 end
 
+declare extern type BloomEffect extends Instance with
+	Enabled: boolean
+	Intensity: number
+	Radius: number
+	Threshold: number
+end
+
+declare extern type DepthOfFieldEffect extends Instance with
+	Enabled: boolean
+	FocusDistance: number
+	FocusRange: number
+	Intensity: number
+	Radius: number
+end
+
+declare extern type GodRaysEffect extends Instance with
+	Enabled: boolean
+	Intensity: number
+	Radius: number
+	Threshold: number
+end
+
+declare extern type FogEffect extends Instance with
+	Color: Color3
+	Enabled: boolean
+	End: number
+	Start: number
+end
+
 declare extern type ShaderScript extends Instance with
 	read Revision: number
 	Source: string
@@ -2878,22 +2907,9 @@ end
 
 declare extern type Lighting extends Service with
 	Ambient: Color3
-	BloomIntensity: number
-	BloomRadius: number
-	BloomThreshold: number
 	Brightness: number
 	ClockTime: number
-	DepthOfFieldFocusDistance: number
-	DepthOfFieldFocusRange: number
-	DepthOfFieldIntensity: number
-	DepthOfFieldRadius: number
-	FogColor: Color3
-	FogEnd: number
-	FogStart: number
 	GeographicLatitude: number
-	GodRayIntensity: number
-	GodRayRadius: number
-	GodRayThreshold: number
 	OutdoorAmbient: Color3
 	read PostProcessShader: string
 	write PostProcessShader: string?
@@ -3653,6 +3669,10 @@ type CreatableInstances = {
 	SpringConstraint: SpringConstraint,
 	Weld: Weld,
 	WeldConstraint: WeldConstraint,
+	BloomEffect: BloomEffect,
+	DepthOfFieldEffect: DepthOfFieldEffect,
+	GodRaysEffect: GodRaysEffect,
+	FogEffect: FogEffect,
 	ShaderScript: ShaderScript,
 	LensShader: LensShader,
 	EditableMesh: EditableMesh,

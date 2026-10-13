@@ -111,7 +111,11 @@ scene.Humanoid | The character controller's state: move direction, walk and jump
 scene.InputState | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's.
 scene.ImageGraph | On an `ImageGraph` instance: the signed graph asset, world-unique key, selected output, typed input overrides and local revision the client watches to resolve ordinary image outputs.
 scene.Light | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms.
-scene.LightingService | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude.
+scene.LightingService | On the single `Lighting` service instance: ambient and outdoor ambient colour, sun brightness, time of day, geographic latitude and the default render feature policy.
+scene.BloomEffect | On a child of `Lighting`: whether bloom contributes and its intensity, brightness threshold and spread radius.
+scene.DepthOfFieldEffect | On a child of `Lighting`: whether depth of field contributes and its blur intensity, focus distance, focus range and radius.
+scene.FogEffect | On a child of `Lighting`: whether distance fog contributes, its colour and the start and end distances of its linear fade.
+scene.GodRaysEffect | On a child of `Lighting`: whether sun shafts contribute and their intensity, brightness threshold and spread radius.
 scene.LODAuto | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, projected quad-area target, and optional final billboard texture.
 scene.LODCustom | Per-level authored mesh overrides and an optional final billboard texture. Nil fields inherit the matching `scene.LODAuto` field and valid fields take precedence.
 scene.LODSettings | Per-item LOD distance floors. An all-zero row inherits the active view's default mesh LOD distances.

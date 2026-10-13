@@ -150,6 +150,10 @@ namespace registration_test {
 		"scene.Gravity",
 		"scene.LODSettings",
 		"scene.GpuParticleField",
+		"scene.BloomEffect",
+		"scene.DepthOfFieldEffect",
+		"scene.GodRaysEffect",
+		"scene.FogEffect",
 	};
 }
 
@@ -255,6 +259,10 @@ TEST_CASE("built-in scene properties have inspector groups", "[scene][registrati
 		"Service",
 		"Workspace",
 		"Lighting",
+		"BloomEffect",
+		"DepthOfFieldEffect",
+		"GodRaysEffect",
+		"FogEffect",
 		"Players",
 		"Player",
 		"Team",
@@ -289,7 +297,8 @@ TEST_CASE("built-in scene properties have inspector groups", "[scene][registrati
 	CHECK(tagOf("BasePart", "CanCollide") == Name("Physics"));
 	CHECK(tagOf("BasePart", "Anchored") == Name("Physics"));
 	CHECK(tagOf("Lighting", "ClockTime") == Name("Lighting"));
-	CHECK(tagOf("Lighting", "BloomIntensity") == Name("Rendering"));
+	CHECK(tagOf("BloomEffect", "Intensity") == Name("Rendering"));
+	CHECK(tagOf("FogEffect", "Color") == Name("Lighting"));
 }
 
 TEST_CASE("everything registered here can be snapshotted", "[scene][registration]") {

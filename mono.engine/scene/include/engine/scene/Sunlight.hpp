@@ -12,8 +12,8 @@
 // cannot reach a constant in the renderer's anonymous namespace.
 //
 // `Lighting` is the authored source. `LightingOf` resolves its clock and
-// latitude into one directional light, then carries the ambient and fog terms
-// without making the renderer search an instance tree. A legacy `Sun` resource
+// latitude into one directional light, then resolves effect children and ambient
+// terms without making the renderer search an instance tree. A legacy `Sun` resource
 // remains an explicit C++ override for the direction and ambient term.
 //
 // @tier L7 · shared
@@ -90,18 +90,19 @@ namespace engine::scene {
 		core::Color3 Direct{1.0f, 1.0f, 1.0f};
 
 		// What distant geometry fades towards.
-		core::Color3 FogColor{0.05f, 0.06f, 0.09f};
+		core::Color3 FogColor{};
 
 		// The authored world feature layer copied from the Lighting service.
 		RenderFeaturePolicy RenderFeatures;
 
-		// Where the distance fade starts and becomes complete, in metres.
+		// Where the distance fade starts and becomes complete, in metres. The
+		// far default range keeps a world without FogEffect clear in normal views.
 		//@{
-		float FogStart = 100000.0f;
-		float FogEnd = 100001.0f;
+		float FogStart = 1000000000.0f;
+		float FogEnd = 1000001024.0f;
 		//@}
 
-		// The bloom controls copied from Lighting. The renderer filters HDR
+		// The bloom controls resolved from a BloomEffect. The renderer filters HDR
 		// radiance before it applies the display transform.
 		//@{
 		float BloomThreshold = 1.0f;
@@ -109,7 +110,7 @@ namespace engine::scene {
 		float BloomRadius = 6.0f;
 		//@}
 
-		// The depth-of-field and god-ray controls copied from Lighting. They stay
+		// The depth-of-field and god-ray controls resolved from effect children. They stay
 		// with the resolved world lighting so portals and ordinary views agree.
 		//@{
 		float DepthOfFieldIntensity = 0.0f;
