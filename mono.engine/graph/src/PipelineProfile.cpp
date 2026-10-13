@@ -69,7 +69,9 @@ namespace engine::graph {
 		}
 	}
 
-	ResourceAliasPlan BuildResourceAliases(const RenderGraph &graph, const CompiledGraph &compiled) {
+	ResourceAliasPlan BuildResourceAliases(
+		const RenderGraph &graph, const CompiledGraph &compiled, std::span<const ResourceId> retained
+	) {
 		ResourceAliasPlan plan;
 		plan.Allocations.resize(graph.ResourceCount());
 		const std::vector<NodeId> ordered = OrderedNodes(compiled);
@@ -95,6 +97,11 @@ namespace engine::graph {
 				Lifetime &life = lifetimes[resource.Value - 1];
 				life.Last = static_cast<uint32_t>(pass);
 			}
+		}
+
+		for (const ResourceId resource : retained) {
+			if (resource.IsValid() && resource.Value <= lifetimes.size() && !ordered.empty())
+				lifetimes[resource.Value - 1].Last = static_cast<uint32_t>(ordered.size() - 1);
 		}
 
 		struct Slot {
@@ -144,10 +151,14 @@ namespace engine::graph {
 	}
 
 	PipelineProfile ProfilePipeline(
-		const RenderGraph &graph, const CompiledGraph &compiled, uint32_t viewWidth, uint32_t viewHeight
+		const RenderGraph &graph,
+		const CompiledGraph &compiled,
+		uint32_t viewWidth,
+		uint32_t viewHeight,
+		std::span<const ResourceId> retained
 	) {
 		PipelineProfile profile;
-		const ResourceAliasPlan aliases = BuildResourceAliases(graph, compiled);
+		const ResourceAliasPlan aliases = BuildResourceAliases(graph, compiled, retained);
 		profile.AliasedResources = aliases.AliasedResources;
 
 		// **The three blocks in the order a frame runs them**, which is what
@@ -217,6 +228,12 @@ namespace engine::graph {
 					row.LastRead = static_cast<uint32_t>(pass);
 				}
 			}
+		}
+
+		for (const ResourceId resource : retained) {
+			if (resource.IsValid() && resource.Value <= profile.Resources.size())
+				profile.Resources[resource.Value - 1].LastRead =
+					static_cast<uint32_t>(profile.Passes.size() - 1);
 		}
 
 		// **The peak, walked rather than summed.** The sum is what an engine
