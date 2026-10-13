@@ -51,6 +51,10 @@
 -- streaming is the same streaming.
 
 local Lighting = game:GetService("Lighting")
+local fog = Instance.new("FogEffect")
+fog.Name = "Terrain Fog"
+fog.Enabled = true
+fog.Parent = Lighting
 local RunService = game:GetService("RunService")
 
 -- --- the noise library -----------------------------------------------------
@@ -626,9 +630,9 @@ Lighting.Ambient = Color3.fromRGB(16, 18, 24)
 -- **Fog where the chunks stop**, which is the one job it has here. The built
 -- world reaches `VIEW` chunks each way, so a fog that closes just inside that
 -- hides the edge of the data instead of bleaching the bands.
-Lighting.FogColor = Color3.fromRGB(178, 200, 218)
-Lighting.FogStart = VIEW * CHUNK * 0.8
-Lighting.FogEnd = VIEW * CHUNK * 1.35
+fog.Color = Color3.fromRGB(178, 200, 218)
+fog.Start = VIEW * CHUNK * 0.8
+fog.End = VIEW * CHUNK * 1.35
 
 -- --- a spawn for joining players -------------------------------------------
 --

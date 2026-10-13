@@ -10,6 +10,7 @@
 #include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -29,6 +30,7 @@
 TEST_SUITE_ID("engine.render.worldview")
 TEST_DEPENDS("engine.render.worldpresentation")
 TEST_DEPENDS("engine.render.spatialcanvas")
+TEST_DEPENDS("engine.scene.lighting-effects")
 
 using namespace engine;
 
@@ -51,6 +53,78 @@ namespace {
 		part.Frame.Position = position;
 		return scene::MakePart(store, part);
 	}
+}
+
+TEST_CASE(
+	"lighting effect edits refresh owned presentation data in the same frame",
+	"[render][world-view][lighting-effects]"
+) {
+	RegisterViewClasses();
+	ecs::Store store("lighting-effects");
+	const auto workspace = scene::InstallServices(store);
+	const auto lighting = scene::ServiceOf(store, ecs::Classes::Find(core::Name("Lighting")));
+	render::WorldViewFrame frame;
+	render::View view;
+	view.OverrideLighting = true;
+	view.Grid.Enabled = true;
+	const auto collect = [&] {
+		render::CollectWorldView(store, core::Name("lighting-effects"), frame);
+		view.Lighting = frame.Lighting;
+		return render::ScenePresentationSignaturesOf(view, {}).Objects;
+	};
+	const auto exercise =
+		[&]<typename Effect>(
+			const char *className, const char *property, float editedValue, Effect active, auto readValue
+		) {
+			CAPTURE(className);
+			const auto baseline = collect();
+			const auto child = store.CreateInstance(ecs::Classes::Find(core::Name(className)), "Effect");
+			store.Set(child, active);
+			CHECK(collect() == baseline);
+			REQUIRE(store.SetParent(child, lighting));
+			auto enabled = collect();
+			CHECK(enabled != baseline);
+			CHECK(readValue(frame.Lighting) == readValue(scene::LightingOf(store)));
+			const auto retained = frame.Lighting;
+			REQUIRE(store.SetProperty(child, core::Name(property), &editedValue, sizeof(editedValue)));
+			CHECK(readValue(frame.Lighting) == readValue(retained));
+			const auto edited = collect();
+			CHECK(edited != enabled);
+			CHECK(readValue(frame.Lighting) == editedValue);
+			enabled = edited;
+			const auto editedLighting = frame.Lighting;
+			const bool disabled = false;
+			REQUIRE(store.SetProperty(child, core::Name("Enabled"), &disabled, sizeof(disabled)));
+			CHECK(readValue(frame.Lighting) == readValue(editedLighting));
+			CHECK(collect() == baseline);
+			const bool enable = true;
+			REQUIRE(store.SetProperty(child, core::Name("Enabled"), &enable, sizeof(enable)));
+			CHECK(collect() == enabled);
+			REQUIRE(store.SetParent(child, workspace));
+			CHECK(collect() == baseline);
+			REQUIRE(store.SetParent(child, lighting));
+			CHECK(collect() == enabled);
+			store.DestroyInstance(child);
+			CHECK(collect() == baseline);
+		};
+	exercise("BloomEffect", "Intensity", 0.75f, scene::BloomEffect{.Intensity = 0.5f}, [](const auto &state) {
+		return state.BloomIntensity;
+	});
+	exercise(
+		"DepthOfFieldEffect",
+		"Intensity",
+		0.75f,
+		scene::DepthOfFieldEffect{.Intensity = 0.5f},
+		[](const auto &state) { return state.DepthOfFieldIntensity; }
+	);
+	exercise(
+		"GodRaysEffect", "Intensity", 0.75f, scene::GodRaysEffect{.Intensity = 0.5f}, [](const auto &state) {
+			return state.GodRayIntensity;
+		}
+	);
+	exercise("FogEffect", "End", 50.0f, scene::FogEffect{.Start = 5.0f, .End = 40.0f}, [](const auto &state) {
+		return state.FogEnd;
+	});
 }
 
 TEST_CASE(

@@ -15,10 +15,12 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/ImageGraph.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Terrain.hpp>
 #include <engine/script/InstanceShim.hpp>
@@ -56,6 +58,71 @@ using engine::game::XmlStatus;
 using engine::world::Universe;
 using engine::world::WorldId;
 using engine::world::WorldSettings;
+
+TEST_CASE(
+	"authored Lighting effect children survive XML export and import", "[game][roundtrip][lighting-effects]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	Store source("game.lighting-effects.source");
+	scene::InstallServices(source);
+	const Entity lighting = scene::ServiceOf(source, ecs::Classes::Find(Name("Lighting")));
+	const auto add = [&]<typename Effect>(const char *className, Effect settings) {
+		const Entity child = source.CreateInstance(ecs::Classes::Find(Name(className)), className);
+		REQUIRE(source.SetParent(child, lighting));
+		source.Set(child, settings);
+	};
+	add("BloomEffect", scene::BloomEffect{.Intensity = 0.7f, .Threshold = 1.5f, .Radius = 9.0f});
+	add("DepthOfFieldEffect",
+		scene::DepthOfFieldEffect{
+			.Intensity = 0.4f, .FocusDistance = 32.0f, .FocusRange = 12.0f, .Radius = 7.0f
+		});
+	add("GodRaysEffect",
+		scene::GodRaysEffect{.Intensity = 0.6f, .Threshold = 1.2f, .Radius = 64.0f, .Enabled = false});
+	add("FogEffect", scene::FogEffect{.Color = {0.1f, 0.2f, 0.3f}, .Start = 16.0f, .End = 96.0f});
+	const std::string document = game::WriteInstanceDocument(source, lighting);
+	REQUIRE_FALSE(document.empty());
+	Store restored("game.lighting-effects.restored");
+	std::string error;
+	const Entity copy = game::ReadInstanceDocument(restored, document, NULL_ENTITY, error);
+	INFO(error);
+	REQUIRE(copy != NULL_ENTITY);
+	const auto childNamed = [&](const char *className) {
+		Entity found = NULL_ENTITY;
+		restored.EachChild(copy, [&](Entity child) {
+			if (restored.ClassOf(child) == ecs::Classes::Find(Name(className))) found = child;
+		});
+		REQUIRE(found != NULL_ENTITY);
+		return found;
+	};
+	const auto *bloom = restored.Get<scene::BloomEffect>(childNamed("BloomEffect"));
+	REQUIRE(bloom != nullptr);
+	CHECK(bloom->Intensity == 0.7f);
+	CHECK(bloom->Threshold == 1.5f);
+	CHECK(bloom->Radius == 9.0f);
+	const auto *depth = restored.Get<scene::DepthOfFieldEffect>(childNamed("DepthOfFieldEffect"));
+	REQUIRE(depth != nullptr);
+	CHECK(depth->Intensity == 0.4f);
+	CHECK(depth->FocusDistance == 32.0f);
+	CHECK(depth->FocusRange == 12.0f);
+	CHECK(depth->Radius == 7.0f);
+	const auto *rays = restored.Get<scene::GodRaysEffect>(childNamed("GodRaysEffect"));
+	REQUIRE(rays != nullptr);
+	CHECK(rays->Intensity == 0.6f);
+	CHECK(rays->Threshold == 1.2f);
+	CHECK(rays->Radius == 64.0f);
+	CHECK_FALSE(rays->Enabled);
+	const auto *fog = restored.Get<scene::FogEffect>(childNamed("FogEffect"));
+	REQUIRE(fog != nullptr);
+	CHECK(fog->Color == Color3{0.1f, 0.2f, 0.3f});
+	CHECK(fog->Start == 16.0f);
+	CHECK(fog->End == 96.0f);
+	const auto resolved = scene::LightingOf(restored);
+	CHECK(resolved.BloomIntensity == 0.7f);
+	CHECK(resolved.DepthOfFieldIntensity == 0.4f);
+	CHECK(resolved.GodRayIntensity == 0.0f);
+	CHECK(resolved.FogColor == fog->Color);
+}
 
 TEST_CASE(
 	"authored live image graph properties preserve typed overrides and references", "[game][imagegraph]"

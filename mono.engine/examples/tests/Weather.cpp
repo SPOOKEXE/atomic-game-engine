@@ -8,6 +8,7 @@
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/scene/Atmosphere.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/Volume.hpp>
@@ -50,10 +51,11 @@ TEST_CASE("the weather scene stages and authors local volumetric fog", "[example
 	);
 
 	const engine::scene::WorldLighting lighting = engine::scene::LightingOf(store);
-	CHECK(lighting.FogStart == Catch::Approx(0.0f));
-	CHECK(lighting.FogEnd == Catch::Approx(100000.0f));
+	CHECK(lighting.FogStart == Catch::Approx(1000000000.0f));
+	CHECK(lighting.FogEnd == Catch::Approx(1000001024.0f));
 	CHECK(lighting.BloomThreshold == Catch::Approx(0.8f));
 	CHECK(lighting.BloomIntensity == Catch::Approx(1.0f));
+	CHECK(lighting.BloomRadius == Catch::Approx(8.0f));
 	CHECK(lighting.DepthOfFieldFocusDistance == Catch::Approx(54.0f));
 	CHECK(lighting.DepthOfFieldFocusRange == Catch::Approx(14.0f));
 	CHECK(lighting.DepthOfFieldRadius == Catch::Approx(7.0f));
@@ -61,6 +63,37 @@ TEST_CASE("the weather scene stages and authors local volumetric fog", "[example
 	CHECK(lighting.GodRayThreshold == Catch::Approx(0.72f));
 	CHECK(lighting.GodRayRadius == Catch::Approx(72.0f));
 	CHECK(lighting.GodRayIntensity == Catch::Approx(0.68f));
+	size_t bloomCount = 0;
+	store.Each<const engine::scene::BloomEffect>([&](engine::ecs::Entity, const auto &effect) {
+		bloomCount++;
+		CHECK(effect.Enabled);
+		CHECK(effect.Threshold == Catch::Approx(0.8f));
+		CHECK(effect.Intensity == Catch::Approx(1.0f));
+		CHECK(effect.Radius == Catch::Approx(8.0f));
+	});
+	CHECK(bloomCount == 1);
+	size_t depthOfFieldCount = 0;
+	store.Each<const engine::scene::DepthOfFieldEffect>([&](engine::ecs::Entity, const auto &effect) {
+		depthOfFieldCount++;
+		CHECK(effect.Enabled);
+		CHECK(effect.FocusDistance == Catch::Approx(54.0f));
+		CHECK(effect.FocusRange == Catch::Approx(14.0f));
+		CHECK(effect.Radius == Catch::Approx(7.0f));
+		CHECK(effect.Intensity == Catch::Approx(0.54f));
+	});
+	CHECK(depthOfFieldCount == 1);
+	size_t godRaysCount = 0;
+	store.Each<const engine::scene::GodRaysEffect>([&](engine::ecs::Entity, const auto &effect) {
+		godRaysCount++;
+		CHECK(effect.Enabled);
+		CHECK(effect.Threshold == Catch::Approx(0.72f));
+		CHECK(effect.Radius == Catch::Approx(72.0f));
+		CHECK(effect.Intensity == Catch::Approx(0.68f));
+	});
+	CHECK(godRaysCount == 1);
+	size_t fogCount = 0;
+	store.Each<const engine::scene::FogEffect>([&](engine::ecs::Entity, const auto &) { fogCount++; });
+	CHECK(fogCount == 0);
 	CHECK(lighting.EnvironmentState.HasAtmosphereCompute);
 	CHECK(lighting.EnvironmentState.HasCloudCompute);
 	CHECK(lighting.EnvironmentState.Skybox == engine::scene::SkyboxSource::Compute);

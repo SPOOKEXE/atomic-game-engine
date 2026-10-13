@@ -11,6 +11,10 @@
 --     client --script PbrShaderMaterialDemo.luau
 
 local Lighting = game:GetService("Lighting")
+local fog = Instance.new("FogEffect")
+fog.Name = "PBR Demo Fog"
+fog.Enabled = true
+fog.Parent = Lighting
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local IMAGE_SIZE = 256
@@ -266,8 +270,8 @@ Lighting.Brightness = 0.95
 Lighting.ClockTime = 15
 Lighting.Ambient = Color3.fromRGB(28, 30, 34)
 Lighting.OutdoorAmbient = Color3.fromRGB(38, 42, 48)
-Lighting.FogColor = Color3.fromRGB(2, 4, 9)
-Lighting.FogStart = 80
-Lighting.FogEnd = 120
+fog.Color = Color3.fromRGB(2, 4, 9)
+fog.Start = 80
+fog.End = 120
 
 print("pbr shader material demo: procedural stone relief and local lights ready")

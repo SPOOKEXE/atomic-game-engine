@@ -4,13 +4,17 @@
 -- HDR bloom filter against the environment rather than against a flat colour.
 
 local Lighting = game:GetService("Lighting")
+local bloom = Instance.new("BloomEffect")
+bloom.Name = "Bloom Environment Effect"
+bloom.Enabled = true
+bloom.Parent = Lighting
 
 Lighting.ClockTime = 17.25
 Lighting.GeographicLatitude = 34
 Lighting.Brightness = 4.5
-Lighting.BloomThreshold = 0.8
-Lighting.BloomIntensity = 1.35
-Lighting.BloomRadius = 10
+bloom.Threshold = 0.8
+bloom.Intensity = 1.35
+bloom.Radius = 10
 
 local sky = Instance.new("SkyboxCompute")
 sky.Name = "Bloom Sun"

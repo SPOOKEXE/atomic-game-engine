@@ -3,10 +3,21 @@
 --
 -- The panels drive target values. Heartbeat blends the targets into the live
 -- environment so a preset change reads as weather arriving, instead of as a
--- frame of unrelated property changes. Fog stays local: the script does not
--- write Lighting.FogStart, Lighting.FogEnd or Lighting.FogColor.
+-- frame of unrelated property changes. Weather fog stays local to its volumes.
 
 local Lighting = game:GetService("Lighting")
+local bloom = Instance.new("BloomEffect")
+bloom.Name = "Weather Bloom"
+bloom.Enabled = true
+bloom.Parent = Lighting
+local depthOfField = Instance.new("DepthOfFieldEffect")
+depthOfField.Name = "Weather Depth Of Field"
+depthOfField.Enabled = true
+depthOfField.Parent = Lighting
+local godRays = Instance.new("GodRaysEffect")
+godRays.Name = "Weather God Rays"
+godRays.Enabled = true
+godRays.Parent = Lighting
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
@@ -122,16 +133,16 @@ local function makePart(name: string, size: Vector3, position: Vector3, colour: 
 	return part
 end
 
-Lighting.BloomThreshold = 0.8
-Lighting.BloomRadius = 8
-Lighting.BloomIntensity = 1.0
-Lighting.DepthOfFieldFocusDistance = 54
-Lighting.DepthOfFieldFocusRange = 14
-Lighting.DepthOfFieldRadius = 7
-Lighting.DepthOfFieldIntensity = 0.54
-Lighting.GodRayThreshold = 0.72
-Lighting.GodRayRadius = 72
-Lighting.GodRayIntensity = 0.68
+bloom.Threshold = 0.8
+bloom.Radius = 8
+bloom.Intensity = 1.0
+depthOfField.FocusDistance = 54
+depthOfField.FocusRange = 14
+depthOfField.Radius = 7
+depthOfField.Intensity = 0.54
+godRays.Threshold = 0.72
+godRays.Radius = 72
+godRays.Intensity = 0.68
 
 local sky = Instance.new("SkyboxCompute")
 sky.Name = "Weather Sky"
@@ -488,13 +499,13 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 	Lighting.ClockTime = lerp(Lighting.ClockTime, target.ClockTime, alpha)
 	Lighting.Ambient = lerpColour(Lighting.Ambient, target.Ambient, alpha)
 	Lighting.OutdoorAmbient = lerpColour(Lighting.OutdoorAmbient, target.OutdoorAmbient, alpha)
-	Lighting.BloomIntensity = lerp(Lighting.BloomIntensity, target.BloomIntensity, alpha)
-	Lighting.DepthOfFieldIntensity = lerp(
-		Lighting.DepthOfFieldIntensity,
+	bloom.Intensity = lerp(bloom.Intensity, target.BloomIntensity, alpha)
+	depthOfField.Intensity = lerp(
+		depthOfField.Intensity,
 		target.DepthOfFieldIntensity,
 		alpha
 	)
-	Lighting.GodRayIntensity = lerp(Lighting.GodRayIntensity, target.GodRayIntensity, alpha)
+	godRays.Intensity = lerp(godRays.Intensity, target.GodRayIntensity, alpha)
 	atmosphere.Density = lerp(atmosphere.Density, target.AtmosphereDensity, alpha)
 	atmosphere.Haze = lerp(atmosphere.Haze, target.AtmosphereHaze, alpha)
 	atmosphere.Glare = lerp(atmosphere.Glare, target.AtmosphereGlare, alpha)

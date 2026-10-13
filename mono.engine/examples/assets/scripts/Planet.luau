@@ -37,6 +37,10 @@
 
 local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
+local fog = Instance.new("FogEffect")
+fog.Name = "Planet Fog"
+fog.Enabled = true
+fog.Parent = Lighting
 
 type FaceRenderMask = "All" | "Top" | "Bottom" | "Left" | "Right" | "Front" | "Back"
 
@@ -1461,9 +1465,9 @@ Lighting.ClockTime = 14.5
 -- terrain and LOD joins there while the directional sun still shapes the day.
 Lighting.Ambient = Color3.fromRGB(48, 58, 76)
 Lighting.OutdoorAmbient = Color3.fromRGB(58, 68, 88)
-Lighting.FogColor = Color3.fromRGB(4, 7, 16)
-Lighting.FogStart = 380
-Lighting.FogEnd = 950
+fog.Color = Color3.fromRGB(4, 7, 16)
+fog.Start = 380
+fog.End = 950
 
 -- The atmosphere binding is manual in this demo: one global
 -- `AtmosphereProcedural` driven from Haven's radius (70) with a shell height

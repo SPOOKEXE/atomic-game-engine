@@ -6,6 +6,10 @@
 -- any value below gives one frame where its runtime consumer is easy to see.
 
 local Lighting = game:GetService("Lighting")
+local fog = Instance.new("FogEffect")
+fog.Name = "Lighting Fog"
+fog.Enabled = true
+fog.Parent = Lighting
 
 local function block(name: string, size: Vector3, at: Vector3, colour: Color3): Part
 	local part = Instance.new("Part")
@@ -40,9 +44,9 @@ Lighting.OutdoorAmbient = Color3.fromRGB(75, 105, 170)
 Lighting.Brightness = 2.5
 Lighting.ClockTime = 12
 Lighting.GeographicLatitude = 0
-Lighting.FogColor = Color3.fromRGB(72, 118, 175)
-Lighting.FogStart = 24
-Lighting.FogEnd = 82
+fog.Color = Color3.fromRGB(72, 118, 175)
+fog.Start = 24
+fog.End = 82
 
 local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
 assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")

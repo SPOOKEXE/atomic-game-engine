@@ -15,6 +15,10 @@
 -- fixed: changing its count or layout makes frame captures incomparable.
 
 local Lighting = game:GetService("Lighting")
+local fog = Instance.new("FogEffect")
+fog.Name = "Sky Grid Fog"
+fog.Enabled = true
+fog.Parent = Lighting
 
 local BALL_COUNT = 8
 local BALL_RADIUS = 9.5
@@ -420,9 +424,9 @@ Lighting.Brightness = 0.8
 Lighting.ClockTime = 14
 Lighting.Ambient = Color3.fromRGB(24, 28, 38)
 Lighting.OutdoorAmbient = Color3.fromRGB(44, 52, 64)
-Lighting.FogColor = Color3.fromRGB(3, 7, 14)
-Lighting.FogStart = 120
-Lighting.FogEnd = 260
+fog.Color = Color3.fromRGB(3, 7, 14)
+fog.Start = 120
+fog.End = 260
 
 local sun = Instance.new("Part")
 sun.Name = "SkyGridKeyLight"
