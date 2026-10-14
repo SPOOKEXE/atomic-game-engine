@@ -21,7 +21,7 @@ Those checks require repository approval and have not run.
 | Fallback | Bounded fragment clouds for Tier B, missing graph products and refused compute resources; unavailable shadows use unity transmittance |
 | Consumers | Atmosphere response, terrain-relative fog, rain/snow/hail particles, roof clipping, authoritative lightning/hail events, ribbons and delayed thunder |
 | Lazy work | ECS write/membership epochs, retained terrain snapshots, bounded maintenance, cached descriptors, completed-publication reuse and retry gates for unchanged failures |
-| Demo | Procedural default, stateful/pause controls and ground/interior/above/roof/storm views; canonical precipitation replaces the old manual rain emitters |
+| Demo | Six shared weather recipes, procedural default, stateful/pause controls and ground/interior/above/valley/roof/storm views; canonical precipitation replaces the old manual rain emitters |
 
 Physical cells occupy 32 bytes plus four bytes of falling water. Terrain heights,
 solid bits, scratch, forcing, checkpoints and renderer targets are additional
@@ -34,6 +34,30 @@ completed validation. Compatible forcing and appearance edits retain the same
 physical owner across graph pipelines. A changed terrain payload requires a new
 accepted terrain revision. Stateful checkpoints remain available when visible
 clouds are hidden but ground shadows are active.
+
+## Plan exit gates
+
+The plan's eight stages have separate acceptance gates. Compiled shaders and
+headless planning tests do not establish rendered behavior or device performance.
+
+| Stage | Current evidence | Remaining gate |
+|---|---|---|
+| 1. Contract and dense slice | `weather/Weather` fixtures cover canonical bytes, signed/range refusal, batched parity and huge ticks; the field/ray shaders compile | Run CPU/GPU byte comparisons, including phase-wrap and UINT64_MAX fixtures, and fly-through image checks |
+| 2. Time and lifecycle | `weather/Clock`, `scene/WeatherClock` and replication `Negotiation` cover cold joins, frame counts, saved anchors, correction, pause and both wire transports | Verify desired-page reconstruction after actual graphics resource recreation |
+| 3. Sparse residency | Shared and renderer residency suites cover coarse coverage, budgets, stable multi-view unions, motion, teleports, empty certificates and retained generations | Run dense/sparse device sample and eviction/refill image checks |
+| 4. Lazy LOD and assemblies | Assembly/residency suites prove exact totals, separate velocities, canonical reconstruction, hysteresis and bounded maintenance | Verify compact pages and topology transitions in real volume integration |
+| 5. Lighting and shadows | Temporal/shadow suites prove cache keys, disocclusion policy, caster bounds, publication and optional work; real-device fixtures are compiled | Check inside/above/ground images, offscreen casters and shadow disable behavior on a device |
+| 6. Weather consumers | Shared events, terrain adapters, real VM controls, headless precipitation/fog geometry and real mixer callbacks pass; the server contains no graphics stack | Verify precipitation, branching lightning, atmosphere/fog composition and roof visibility in rendered scenes |
+| 7. Stateful evolution | CPU source/sink/boundary budgets, stability/refusal, complete checkpoint v3, save/load, bounded replay and replica query tests pass | Run the compiled GPU terrain/rain/open-top parity and transactional-publication fixtures |
+| 8. Performance and replacement | CPU layout/residency/solver measurements and removal of manual weather effects are established; device timing/counter harness is compiled | Measure real GPU costs and memory at representative resolutions, choose supported defaults and establish target budgets |
+
+The six demo recipes cover clear sky, scattered cumulus, overcast stratus,
+towering storm, wispy ice and ground fog. They use the same provider with distinct
+shape, moisture, temperature and motion controls. The far clip is 6,000 metres;
+interior and above-cloud cameras follow the selected layer. Actual VM button
+events verify these controls, including snow without liquid rain in the ice
+recipe and positive near-ground fog extinction. Their appearance remains a
+device acceptance item.
 
 ## Headless validation
 
@@ -57,7 +81,7 @@ review fixes.
 | Thunder, headless | 4,225 | 12 |
 | Audio mixer | 16,743 | 36 |
 | Studio weather | 21 | 3 |
-| Weather demo | 102 | 2 |
+| Weather demo | 388 | 2 |
 
 Review and tests found real defects in checkpoint cache invalidation, top escape
 flow, shadows-only checkpoint collection, fully blocked storm columns, thunder
@@ -137,3 +161,12 @@ The existing approval request covers GPU fixtures, profiling, short headless
 captures and reruns after fixes. [AGENTS.md](../AGENTS.md) requires approval before
 compute/live verification. The authoritative CPU field and gameplay events stay
 independent of cosmetic GPU evolution.
+
+The opt-in job accepts image dimensions:
+`just weather-gpu-bench 3 bench 1920 1080`. It defaults to 1920x1080 and accepts
+positive decimal dimensions up to 3840x2160. The 96x54 prototype remains available
+with explicit dimensions. Configuration is checked before SDL initialization;
+only `MONO_WEATHER_GPU_BENCH=1` enters the device path. Output names the selected
+device/backend, image size, workload counts, settings, completed pass times and
+logical memory counters. Disabled and invalid-configuration checks run without
+creating a device and do not provide GPU timing evidence.

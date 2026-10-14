@@ -8,12 +8,14 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 TEST_SUITE_ID("engine.render.bench.weather-gpu")
 
@@ -45,27 +47,27 @@ namespace {
 		"weather-reconstruct",
 		"weather-shadow-map"
 	};
-	constexpr std::array<const char *, 19> WEATHER_WORK{
-		"field_dispatches",
-		"summary_dispatches",
-		"ray_dispatches",
-		"shadow_dispatches",
-		"temporal_dispatches",
-		"reconstruct_dispatches",
-		"generated_bytes",
-		"page_upload_bytes",
-		"history_copy_bytes",
-		"history_samples",
-		"history_resets",
-		"field_cache_hits",
-		"summary_cache_hits",
-		"shadow_cache_hits",
-		"residency_cache_hits",
-		"generated_cells",
-		"ray_pixels",
-		"shadow_texels",
-		"page_uploads"
+	constexpr std::array<const char *, 20> WEATHER_WORK{
+		"field_dispatches",	   "summary_dispatches",	 "ray_dispatches",		 "shadow_dispatches",
+		"temporal_dispatches", "reconstruct_dispatches", "generated_bytes",		 "page_upload_bytes",
+		"history_copy_bytes",  "history_samples",		 "history_resets",		 "field_cache_hits",
+		"summary_cache_hits",  "shadow_cache_hits",		 "residency_cache_hits", "generated_cells",
+		"ray_pixels",		   "shadow_texels",			 "page_uploads",		 "resident_bricks"
 	};
+
+	uint32_t BenchmarkExtent(const char *name, uint32_t fallback, uint32_t maximum) {
+		const char *configured = std::getenv(name);
+		if (!configured) return fallback;
+		const std::string_view text(configured);
+		uint32_t extent = 0;
+		const auto parsed = std::from_chars(text.data(), text.data() + text.size(), extent, 10);
+		if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || extent == 0 ||
+			extent > maximum)
+			throw std::runtime_error(
+				std::string(name) + " must be a decimal integer in 1.." + std::to_string(maximum)
+			);
+		return extent;
+	}
 
 	struct PassTiming {
 		double Microseconds = 0;
@@ -90,6 +92,12 @@ namespace {
 			if (counter) values[index] = counter->Value;
 		}
 		return values;
+	}
+
+	double PhaseWork(const WeatherPhase &phase, std::string_view name) {
+		for (size_t index = 0; index < WEATHER_WORK.size(); ++index)
+			if (name == WEATHER_WORK[index]) return phase.After[index] - phase.Before[index];
+		return 0;
 	}
 
 	void PrintPhase(const WeatherPhase &phase) {
@@ -126,10 +134,20 @@ namespace {
 	}
 }
 
-BENCH("opt-in weather device scenario CPU harness 96x54", 1) {
+BENCH("opt-in weather device scenario CPU harness", 1) {
 	using namespace engine;
 	// Device checks remain opt-in so ordinary CPU benchmark batches stay headless.
-	if (!std::getenv("MONO_WEATHER_GPU_BENCH")) return;
+	const char *enabled = std::getenv("MONO_WEATHER_GPU_BENCH");
+	if (!enabled || std::string_view(enabled) != "1") return;
+	uint32_t width = 1920;
+	uint32_t height = 1080;
+	try {
+		width = BenchmarkExtent("MONO_WEATHER_GPU_BENCH_WIDTH", width, 3840);
+		height = BenchmarkExtent("MONO_WEATHER_GPU_BENCH_HEIGHT", height, 2160);
+	} catch (const std::runtime_error &refusal) {
+		std::cerr << "weather-gpu configuration refused: " << refusal.what() << '\n';
+		std::exit(EXIT_FAILURE);
+	}
 	if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
 	struct VideoLifetime {
 		~VideoLifetime() {
@@ -139,7 +157,7 @@ BENCH("opt-in weather device scenario CPU harness 96x54", 1) {
 	render::Renderer renderer;
 	if (!renderer.Initialise(nullptr)) throw std::runtime_error(SDL_GetError());
 	renderer.SetProfiling(render::ProfilingTier::Full);
-	render::SceneTarget target{96, 54};
+	render::SceneTarget target{width, height};
 	render::View view;
 	view.World = 928;
 	view.WorldName = core::Name("weather.benchmark.world");
@@ -231,14 +249,29 @@ BENCH("opt-in weather device scenario CPU harness 96x54", 1) {
 	// all recording/work/memory phase totals, and its own query is not sampled.
 	submit(nullptr);
 	const auto properties = SDL_GetGPUDeviceProperties(device);
-	std::cout << "weather-gpu backend=" << renderer.BackendName() << " device="
-			  << std::quoted(
-					 SDL_GetStringProperty(properties, SDL_PROP_GPU_DEVICE_NAME_STRING, "unavailable")
-				 )
-			  << " resolution=96x54 views=1 layer=1 opaque_receivers=1 page_budget="
-			  << environment.Weather.MaximumResidentBricks << " lod=" << environment.Weather.MaximumLod
-			  << " shadow_resolution=32 shadow_cascades=1"
-			  << " completed_device_timestamps=" << renderer.Timed()
+	std::cout
+		<< "weather-gpu backend=" << renderer.BackendName() << " device="
+		<< std::quoted(SDL_GetStringProperty(properties, SDL_PROP_GPU_DEVICE_NAME_STRING, "unavailable"))
+		<< " resolution=" << width << 'x' << height
+		<< " views=1 layers=1 opaque_receivers=1 page_budget=" << environment.Weather.MaximumResidentBricks
+		<< " lod=" << environment.Weather.MaximumLod
+		<< " cell_size_metres=" << environment.Weather.CellSizeMetres
+		<< " cloud_steps=" << environment.CloudVolume.Steps << " tick_rate=" << environment.Weather.TickRate
+		<< " shadow_resolution=" << environment.Weather.ShadowResolution
+		<< " shadow_cascades=" << environment.Weather.ShadowCascades
+		<< " field_dispatch_cells_per_generation=";
+	const double fieldGenerations = PhaseWork(phases[0], "field_dispatches");
+	if (fieldGenerations > 0)
+		std::cout << PhaseWork(phases[0], "generated_cells") / fieldGenerations;
+	else
+		std::cout << "unavailable";
+	std::cout << " resident_pages_per_summary=";
+	const double summaries = PhaseWork(phases[0], "summary_dispatches");
+	if (summaries > 0)
+		std::cout << PhaseWork(phases[0], "resident_bricks") / summaries;
+	else
+		std::cout << "unavailable";
+	std::cout << " completed_device_timestamps=" << renderer.Timed()
 			  << " history_timing=publication_marker reconstruct_timing=temporal_upsample_history_copies\n";
 	for (const auto &phase : phases)
 		PrintPhase(phase);

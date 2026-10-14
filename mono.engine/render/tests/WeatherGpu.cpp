@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -321,7 +322,16 @@ TEST_CASE("weather GPU generated words agree with canonical CPU samples", "[rend
 		gpu::CreateBuffer(device, &pageInfo), releaseBuffer
 	);
 	REQUIRE(pages);
-	for (const uint64_t tick : {uint64_t{0}, uint64_t{251}, (uint64_t{1} << 60) + 29}) {
+	for (const uint64_t tick :
+		 {uint64_t{0},
+		  uint64_t{251},
+		  (uint64_t{1} << 60) + 29,
+		  uint64_t{255},
+		  uint64_t{256},
+		  (uint64_t{1} << 40) - 1,
+		  uint64_t{1} << 40,
+		  (uint64_t{1} << 40) + 1,
+		  std::numeric_limits<uint64_t>::max()}) {
 		const auto time = weather::ResolveTime(weather::InitialAnchor(compiled->Definition), tick);
 		REQUIRE(time);
 		auto *command = SDL_AcquireGPUCommandBuffer(device);

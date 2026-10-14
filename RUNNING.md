@@ -165,7 +165,7 @@ the backend submission call separately from engine submission bookkeeping.
 | `weather-temporal-bench [samples] [build_preset]` | Measure temporal invalidation, periodic displacement and cloud composition without graphics. Defaults: `5`, `bench`. |
 | `weather-shadow-bench [samples] [build_preset]` | Measure shadow caster bounds, cascades, low-sun fades and retained revisions without graphics. Defaults: `5`, `bench`. |
 | `weather-effects-bench [samples] [build_preset]` | Measure weather emission and roof/ground visibility against published geometry without graphics. Defaults: `5`, `bench`. |
-| `weather-gpu-bench [samples] [build_preset]` | Open a GPU device and measure sparse weather generation, reuse, integration and tracked memory. Defaults: `3`, `bench`. |
+| `weather-gpu-bench [samples] [build_preset] [width] [height]` | Open a GPU device and measure sparse weather generation, reuse, integration and tracked memory. Defaults: `3`, `bench`, `1920`, `1080`. |
 | `weather-fuzz [runs] [compiler]` | Fuzz complete weather checkpoint decoding with AddressSanitizer and UBSan. Defaults: `10000`, `clang++-21`. |
 | `imagecodec-bench [samples]` | Measure CPU image imports at 1080p and print results to stdout. Default: `5`. |
 | `ui-headless-bench [samples]` | Measure ImGui layout and frozen draw signatures without a GPU. Default: `5`. |
