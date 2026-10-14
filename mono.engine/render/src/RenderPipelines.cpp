@@ -126,8 +126,8 @@ namespace engine::render {
 		SDL_GPUShader *packedOpaqueVertex =
 			LoadShader("packed-opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 2, 5);
 
-		// **Thirteen samplers: material inputs plus primary and widened opaque
-		// sources for transmission.** The count is
+		// Sixteen samplers include material/transmission inputs, reserved layer
+		// bounds and the cloud optical-depth atlas. The count is
 		// part of the shader object rather than of the pipeline, so a mismatch
 		// with the `layout(set = 2, binding = n)` declarations is a bind that
 		// silently reads nothing rather than a validation error.
@@ -139,7 +139,7 @@ namespace engine::render {
 			// count above records.
 			"opaque.frag",
 			SDL_GPU_SHADERSTAGE_FRAGMENT,
-			13,
+			16,
 			3
 		);
 
@@ -159,10 +159,10 @@ namespace engine::render {
 		SDL_GPUShader *ssaoFragment = LoadShader("ssao.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 		SDL_GPUShader *packChannelsFragment =
 			LoadShader("pack-channels.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 4, 1);
-		// Ten samplers: the seven G-buffer and shadow inputs, two seam light
-		// captures, then the portal shadow beam atlas.
+		// Eleven samplers include G-buffer inputs, solid/portal shadows and
+		// the independent weather optical-depth atlas.
 		SDL_GPUShader *deferredLightingFragment =
-			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
+			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 4);
 		SDL_GPUShader *skyFragment = LoadShader("sky.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
 		SDL_GPUShader *volumeFragment = LoadShader("volume.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1, 1);
 		SDL_GPUShader *bloomFragment = LoadShader("bloom.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
@@ -969,6 +969,12 @@ namespace engine::render {
 			GpuParticleFieldStep = LoadComputePipeline("gpu-particle-field.comp", 0, 1, 0, 1, 256, 1);
 			EnvironmentSkyCompute = LoadComputePipeline("environment.comp", 6, 0, 1, 0, 8, 8);
 			EnvironmentCloudCompute = LoadComputePipeline("environment-clouds.comp", 1, 0, 1, 0, 8, 8);
+			WeatherFieldCompute = LoadComputePipeline("weather-generate.comp", 0, 1, 0, 1, 64, 1);
+			WeatherSummaryCompute = LoadComputePipeline("weather-summary.comp", 0, 2, 0, 1, 64, 1);
+			WeatherRaysCompute = LoadComputePipeline("weather-clouds.comp", 2, 4, 2, 0, 8, 8);
+			WeatherTemporalCompute = LoadComputePipeline("weather-temporal.comp", 4, 0, 1, 0, 8, 8);
+			WeatherReconstructCompute = LoadComputePipeline("weather-reconstruct.comp", 4, 0, 1, 0, 8, 8);
+			WeatherEvolutionCompute = LoadComputePipeline("weather-evolve.comp", 0, 3, 0, 4, 64, 1);
 		}
 
 		// **The particle pipelines are deliberately not in this conjunction.** A
@@ -997,7 +1003,7 @@ namespace engine::render {
 			AdditiveParticleLayerColourPipeline && RibbonLayerPipeline && RibbonLayerColourPipeline &&
 			AdditiveRibbonLayerColourPipeline)
 			return true;
-		auto *fragment = LoadShader("transparent-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 15, 4);
+		auto *fragment = LoadShader("transparent-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 16, 4);
 		auto *particleVertex = LoadShader("particle.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
 		auto *particleFragment = LoadShader("particle-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 2);
 		auto *ribbonVertex = LoadShader("ribbon.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
@@ -1200,7 +1206,7 @@ namespace engine::render {
 	bool Renderer::Impl::EnsureDeferredLightingBaseline() {
 		if (DeferredLightingBaselinePipeline) return true;
 		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-		auto *fragment = LoadShader("deferred-lighting-baseline.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
+		auto *fragment = LoadShader("deferred-lighting-baseline.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 4);
 		if (vertex && fragment) {
 			SDL_GPUColorTargetDescription targets[2]{};
 			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
@@ -1227,7 +1233,7 @@ namespace engine::render {
 		if (DeferredLightingDirectionalPipeline) return true;
 		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		auto *fragment =
-			LoadShader("deferred-lighting-directional.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
+			LoadShader("deferred-lighting-directional.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 4);
 		if (vertex && fragment) {
 			SDL_GPUColorTargetDescription targets[3]{};
 			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;

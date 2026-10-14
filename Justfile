@@ -388,6 +388,59 @@ fuzz-ui runs="1000" compiler="clang++-21":
         "$fuzz_build/fuzz/$target" "$corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$artifacts/"
     done
 
+# Seeded samples, packing, clocks, assemblies, residency, events and solver costs.
+weather-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_weather
+    ./.cache/build/{{build_preset}}/bench/bench_weather --samples {{samples}}
+
+# Device-free descriptor preparation for the weather GPU adapter.
+weather-descriptor-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-gpu --samples {{samples}}
+
+# Actual sparse page selection for cold, retained and teleported camera demands.
+weather-residency-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weatherresidency --samples {{samples}}
+
+# Device-free temporal invalidation, periodic displacement and cloud composition.
+weather-temporal-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-temporal --samples {{samples}}
+
+# Device-free shadow caster bounds, cascades, low-sun fades and retained revisions.
+weather-shadow-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-shadows --samples {{samples}}
+
+# Weather emission and roof/ground visibility against actual published geometry.
+weather-effects-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-effects --samples {{samples}}
+
+# Real sparse generation and integration; opens a GPU device explicitly.
+weather-gpu-bench samples="3" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    MONO_WEATHER_GPU_BENCH=1 ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-gpu --samples {{samples}}
+
+# Coverage-guided hostile weather checkpoint decoding, without graphics.
+weather-fuzz runs="10000" compiler="clang++-21":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fuzz_build=".cache/build/weather-fuzz"
+    cmake --preset server -B "$fuzz_build" -DCMAKE_CXX_COMPILER="{{compiler}}" -DCMAKE_C_COMPILER="${CC:-clang-21}" -DMONO_BUILD_TESTS=OFF -DMONO_TRACY=OFF -DMONO_HEAP_PROFILE=OFF -DMONO_FUZZ_WEATHER=ON
+    cmake --build "$fuzz_build" --target fuzz_weather_checkpoint -j 4
+    mkdir -p "$fuzz_build/fuzz/corpus" "$fuzz_build/fuzz/artifacts"
+    "$fuzz_build/fuzz/fuzz_weather_checkpoint" --write-seeds "$fuzz_build/fuzz/corpus"
+    "$fuzz_build/fuzz/fuzz_weather_checkpoint" "$fuzz_build/fuzz/corpus" -runs={{runs}} -max_len=2097152 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$fuzz_build/fuzz/artifacts/"
+
 # Measure the benchmark suites a change could have affected.
 #
 # **The same selection as `just test`, over `bench/` instead of `tests/`.** A

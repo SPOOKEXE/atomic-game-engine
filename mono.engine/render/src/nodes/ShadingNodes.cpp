@@ -13,12 +13,15 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/weather/Clock.hpp>
+#include <engine/weather/Runtime.hpp>
 
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <tuple>
 #include <type_traits>
@@ -26,6 +29,7 @@
 namespace engine::render {
 
 	void ViewRecording::RegisterShadingNodes(NodeTable &frameNodes) {
+		RegisterWeatherShadowNodes(frameNodes);
 		for (const auto kind :
 			 {core::Name("ambient-response"), core::Name("ambient-merge"), core::Name("ambient-correct")}) {
 			frameNodes.Set(kind, [this, kind](const graph::RunContext &context) {
@@ -662,6 +666,7 @@ namespace engine::render {
 			PbrUniforms &uniforms = recording.Uniforms;
 			SDL_GPUSampler *const sampler = recording.Sampler;
 			const auto &lightingBindings = recording.LightingBindings;
+			WeatherShadowLightingUniforms weatherShadowLighting;
 			const auto graphEnabled = [&recording](core::Name kind) { return recording.GraphEnabled(kind); };
 			const auto clearOcclusion = [&recording, State] {
 				const uint32_t resolved = scene::ResolveRenderFeatures(
@@ -677,7 +682,7 @@ namespace engine::render {
 					(resolved & scene::FeatureBit(scene::RenderFeature::AmbientOcclusion)) != 0u
 				);
 			};
-			const auto fullscreen = [&recording](
+			const auto fullscreen = [&recording, &weatherShadowLighting](
 										core::Name name,
 										SDL_GPUGraphicsPipeline *pipeline,
 										SDL_GPUTexture *target,
@@ -701,7 +706,9 @@ namespace engine::render {
 					clear,
 					nullptr,
 					0,
-					passBeams
+					passBeams,
+					nullptr,
+					&weatherShadowLighting
 				);
 			};
 
@@ -724,7 +731,7 @@ namespace engine::render {
 			// expression`. `tuple_size_v` asks the type and never mentions the
 			// object at all.
 			constexpr size_t SPILL_BINDINGS =
-				std::tuple_size_v<std::remove_cvref_t<decltype(lightingBindings)>> + MAX_SEAM_LIGHTS + 1;
+				std::tuple_size_v<std::remove_cvref_t<decltype(lightingBindings)>> + MAX_SEAM_LIGHTS + 2;
 			std::array<SDL_GPUTextureSamplerBinding, SPILL_BINDINGS> spillBindings{};
 			std::copy(lightingBindings.begin(), lightingBindings.end(), spillBindings.begin());
 
@@ -794,13 +801,36 @@ namespace engine::render {
 					binding = SDL_GPUTextureSamplerBinding{State->FallbackTexture, sampler};
 				}
 			}
-			spillBindings.back() = SDL_GPUTextureSamplerBinding{
+			spillBindings[9] = SDL_GPUTextureSamplerBinding{
 				State->BeamTexture != nullptr ? State->BeamTexture : State->FallbackTexture,
 				State->ShadowSampler != nullptr ? State->ShadowSampler : sampler,
 			};
 
 			const auto *node = Pipeline->Graph.Find(context.Node);
 			if (!node) return false;
+			spillBindings[10] = {State->FallbackTexture, sampler};
+			const auto cloudShadowPort =
+				std::find(node->ReadPorts.begin(), node->ReadPorts.end(), core::Name("weather-shadow"));
+			const auto cloudGeneration = std::find_if(
+				State->WeatherGenerations.begin(),
+				State->WeatherGenerations.end(),
+				[this](const WeatherGpuGeneration &generation) {
+					return generation.World == Request.World && generation.Pipeline == Pipeline->Name;
+				}
+			);
+			const auto &weatherEnvironment = CurrentLighting.EnvironmentState;
+			if (cloudShadowPort != node->ReadPorts.end() && weatherEnvironment.HasWeatherCompute &&
+				weatherEnvironment.Weather.Enabled && weatherEnvironment.Weather.ShadowsEnabled &&
+				cloudGeneration != State->WeatherGenerations.end()) {
+				const auto *shadowLighting = cloudGeneration->Shadows.LightingFor(Command);
+				const auto shadowMap =
+					GraphTexture(context.Reads[cloudShadowPort - node->ReadPorts.begin()], context, false);
+				if (shadowLighting && shadowMap.IsValid() &&
+					shadowMap.Texture == cloudGeneration->Shadows.Texture) {
+					weatherShadowLighting = *shadowLighting;
+					spillBindings[10] = {shadowMap.Texture, State->OverlaySampler};
+				}
+			}
 			const auto baselinePort =
 				std::find(node->WritePorts.begin(), node->WritePorts.end(), core::Name("lighting-baseline"));
 			const auto directionalPort = std::find(
@@ -1075,6 +1105,9 @@ namespace engine::render {
 					SDL_PushGPUFragmentUniformData(Command, 0, &uniforms, sizeof(uniforms));
 					SDL_PushGPUFragmentUniformData(Command, 1, &lightUniforms, sizeof(lightUniforms));
 					SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
+					SDL_PushGPUFragmentUniformData(
+						Command, 3, &weatherShadowLighting, sizeof(weatherShadowLighting)
+					);
 					SDL_SetGPUViewport(pass, &viewport);
 					SDL_SetGPUScissor(pass, &scissor);
 					SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
@@ -1270,6 +1303,717 @@ namespace engine::render {
 			return applyLocalShadowCorrections();
 		});
 
+		const auto weatherInputs = [this]() -> std::optional<WeatherGpuInputs> {
+			if (!State->Caps.HasCompute || !State->WeatherFieldCompute || !State->WeatherSummaryCompute)
+				return std::nullopt;
+			const auto &environment = CurrentLighting.EnvironmentState;
+			if (environment.CloudLayer.Enabled &&
+				(!State->WeatherRaysCompute || !State->WeatherTemporalCompute ||
+				 !State->WeatherReconstructCompute))
+				return std::nullopt;
+			const bool visibleMedium =
+				environment.CloudLayer.Cover > 0 && environment.CloudLayer.Density > 0 &&
+				(environment.CloudLayer.Enabled ||
+				 (environment.Weather.ShadowsEnabled && environment.Weather.ShadowStrength > 0 &&
+				  environment.Weather.ShadowDistanceMetres > 0));
+			if (!environment.HasWeatherCompute || !environment.Weather.Enabled || !environment.HasClouds ||
+				!visibleMedium)
+				return std::nullopt;
+			const bool stateful = environment.Weather.Mode == scene::WeatherMode::Stateful;
+			if (stateful && !State->WeatherEvolutionCompute) return std::nullopt;
+			const auto cached = std::find_if(
+				State->WeatherGenerations.begin(),
+				State->WeatherGenerations.end(),
+				[this](const WeatherGpuGeneration &generation) {
+					return generation.World == Request.World && generation.Pipeline == Pipeline->Name;
+				}
+			);
+			std::optional<weather::CompiledWeather> compiled;
+			const auto grid = stateful
+								  ? (cached != State->WeatherGenerations.end() && cached->PhysicalOwner &&
+											 cached->PhysicalOwner->ExpectedDefinition &&
+											 cached->PhysicalOwner->RecipeSignature ==
+												 WeatherPhysicalSignature(
+													 environment, Request.Source->WeatherSimulationLayer
+												 )
+										 ? WeatherSimulationGridOf(*cached->PhysicalOwner->ExpectedDefinition)
+										 : WeatherSimulationGridOf(environment.Weather))
+								  : WeatherGridOf(environment.Weather);
+			if (!grid) return std::nullopt;
+			if (stateful) {
+				compiled.emplace();
+				compiled->Definition.Seed = environment.Weather.Seed;
+				compiled->Definition.LayerKey =
+					weather::WeatherLayerKey(environment.Weather.LayerName.Text());
+				compiled->Definition.Revision = environment.Weather.DefinitionRevision;
+				compiled->Definition.BaseCell = grid->Origin.Y;
+				compiled->Definition.ThicknessCells = grid->Dimensions.y;
+				compiled->Profile = WeatherEncodingOf(environment.Weather);
+			} else {
+				compiled = weather::Compile(environment.Weather);
+			}
+			if (!compiled) return std::nullopt;
+			const auto time = environment.HasWeatherClock
+								  ? weather::WeatherTimeOf(environment.Clock)
+								  : weather::ResolveTime(weather::InitialAnchor(compiled->Definition), 0);
+			if (!time) return std::nullopt;
+			WeatherGpuInputs inputs{
+				WeatherUniformsOf(compiled->Definition, *time, *grid), *compiled, *time, stateful
+			};
+			if (!stateful && cached != State->WeatherGenerations.end() &&
+				!cached->Topology.PageKeys.empty()) {
+				const uint32_t count = static_cast<uint32_t>(cached->Topology.PageKeys.size());
+				inputs.Uniforms.Grid = {8, 8, 8, count * 512};
+				inputs.Uniforms.Origin.w = 0;
+				inputs.Uniforms.Bricks = {0, 0, 0, count};
+				inputs.Uniforms.Phase.w = static_cast<uint32_t>(cached->Topology.PageKeys.back().w);
+			}
+			if (stateful) {
+				inputs.Uniforms.Time = {};
+				const bool published =
+					cached != State->WeatherGenerations.end() && cached->PhysicalOwner &&
+					cached->PhysicalOwner->Physical.Published &&
+					cached->PhysicalOwner->PhysicalRecipeSignature ==
+						WeatherPhysicalSignature(environment, Request.Source->WeatherSimulationLayer) &&
+					cached->PhysicalOwner->Physical.Tick <= inputs.Time.PhaseTick &&
+					cached->PhysicalOwner->Physical.Definition.Revision ==
+						environment.Weather.DefinitionRevision &&
+					cached->PhysicalOwner->Physical.Definition.Grid.CellSizeMetres ==
+						environment.Weather.CellSizeMetres &&
+					cached->PhysicalOwner->Physical.Definition.TickRate == environment.Weather.TickRate &&
+					(!environment.HasWeatherClock ||
+					 cached->PhysicalOwner->Physical.Definition.WorldEpoch == environment.Clock.Epoch) &&
+					cached->PhysicalOwner->Physical.Definition.Grid.Cells ==
+						std::array<uint32_t, 3>{grid->Dimensions.x, grid->Dimensions.y, grid->Dimensions.z} &&
+					cached->PhysicalOwner->Physical.Definition.Grid.Origin ==
+						std::array<int32_t, 3>{grid->Origin.X, grid->Origin.Y, grid->Origin.Z} &&
+					cached->PhysicalOwner->EncodingSignature ==
+						WeatherEncodingSignature(inputs.Compiled.Profile);
+				inputs.Uniforms.Phase = published
+					? glm::uvec4{uint32_t(cached->PhysicalOwner->Physical.Tick), uint32_t(cached->PhysicalOwner->Physical.Tick >> 32), 0, 0}
+					: glm::uvec4{0, 0, UINT32_MAX, 0};
+				inputs.Time.DisplacementQ8 = {};
+				if (published) inputs.Time.PhaseTick = cached->PhysicalOwner->Physical.Tick;
+			}
+			return inputs;
+		};
+
+		frameNodes.Set(
+			core::Name("weather-residency"), [this, weatherInputs](const graph::RunContext &context) {
+				if (context.Writes.size() != 2 || !context.Reads.empty()) return false;
+				const auto inputs = weatherInputs();
+				if (!State->Caps.HasCompute || !State->WeatherFieldCompute || !inputs) return true;
+				auto *pages = GraphBuffer(context.Writes[0], context, true);
+				auto *previousPages = GraphBuffer(context.Writes[1], context, true);
+				if (!pages || !previousPages) return false;
+				auto found = std::find_if(
+					State->WeatherGenerations.begin(),
+					State->WeatherGenerations.end(),
+					[this, pages](const WeatherGpuGeneration &generation) {
+						return generation.World == Request.World && generation.Pages == pages;
+					}
+				);
+				if (found == State->WeatherGenerations.end()) {
+					State->WeatherGenerations.emplace_back();
+					found = std::prev(State->WeatherGenerations.end());
+					found->World = Request.World;
+					found->Pipeline = Pipeline->Name;
+					found->Pages = pages;
+				}
+				found->PreviousPages = previousPages;
+				if (inputs->Stateful) {
+					const glm::ivec4 key{
+						inputs->Uniforms.Origin.x, inputs->Uniforms.Origin.y, inputs->Uniforms.Origin.z, 0
+					};
+					const uint64_t signature = WeatherSignature(inputs->Uniforms);
+					if (found->Residency.Matches(signature, Command)) return true;
+					EnterNamedPass(context.Name);
+					if (!RecordWeatherPages(State->Device, Command, pages, std::span(&key, 1))) return false;
+					if (!RecordWeatherPages(State->Device, Command, previousPages, std::span(&key, 1)))
+						return false;
+					found->Residency.Stage(signature, Command);
+					StageHistoryWrites(context, Command);
+					return true;
+				}
+				std::array<WeatherResidencyView, weather::MAXIMUM_RESIDENCY_VIEWS> views{};
+				size_t viewCount = 0;
+				for (const auto &view : State->WeatherViews)
+					if (view.World == Request.World) {
+						if (viewCount < views.size())
+							views[viewCount++] = view.Demand;
+						else
+							core::Metrics::Count("render.weather.refused_view_demands", 1);
+					}
+				WeatherResidencyView currentView;
+				currentView.View.Key = scene::MixSignature(
+					Request.TargetSlot, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(Request.Target))
+				);
+				currentView.View.CameraPositionMetres = Request.CameraFrame.Position;
+				currentView.View.PortalRevision =
+					Request.Source->CameraCut ? Request.Source->CameraTemporalSequence : 0;
+				currentView.ProjectionPixelsPerRadian =
+					SceneHeight / std::max(DrawCamera.FieldOfViewRadians, .01f);
+				currentView.MaximumDistanceMetres = DrawCamera.FarPlane;
+				const auto sameCamera = std::find_if(
+					views.begin(),
+					views.begin() + static_cast<ptrdiff_t>(viewCount),
+					[&](const WeatherResidencyView &view) {
+						return view.View.CameraPositionMetres == currentView.View.CameraPositionMetres &&
+							   view.ProjectionPixelsPerRadian == currentView.ProjectionPixelsPerRadian;
+					}
+				);
+				if (sameCamera == views.begin() + static_cast<ptrdiff_t>(viewCount)) {
+					if (viewCount < views.size())
+						views[viewCount++] = currentView;
+					else {
+						// Every refused refinement still samples the guaranteed whole-world coarse field.
+						views[viewCount - 1] = currentView;
+						core::Metrics::Count("render.weather.refused_view_demands", 1);
+					}
+				}
+				const auto shadowPlan = BuildWeatherShadowPlan(
+					CurrentLighting.EnvironmentState.Weather,
+					*inputs,
+					{State->Sun.x, State->Sun.y, State->Sun.z},
+					CurrentLighting.EnvironmentState.CloudLayer.Density *
+						std::clamp(CurrentLighting.EnvironmentState.CloudLayer.Cover, 0.0f, 1.0f),
+					scene::MixSignature(
+						CurrentLighting.EnvironmentState.Clock.Epoch,
+						CurrentLighting.EnvironmentState.WeatherHistoryRevision
+					),
+					std::span(views.data(), viewCount)
+				);
+				viewCount = AppendWeatherShadowDemand(
+					views, viewCount, shadowPlan, inputs->Compiled.Definition.LayerKey
+				);
+				const auto plan = BuildWeatherResidency(
+					found->Topology,
+					CurrentLighting.EnvironmentState.Weather,
+					inputs->Compiled,
+					inputs->Time,
+					scene::MixSignature(
+						CurrentLighting.EnvironmentState.Clock.Epoch,
+						CurrentLighting.EnvironmentState.WeatherHistoryRevision
+					),
+					std::span(views.data(), viewCount),
+					State->FrameCounter + 1,
+					std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count()
+				);
+				if (!plan) return false;
+				found->FieldWords = plan->FieldWords;
+				found->TransitionAlpha = plan->TransitionAlpha;
+				found->PreviousPageCount = static_cast<uint32_t>(plan->PreviousPages.size());
+				if (found->Residency.Matches(plan->Signature, Command)) {
+					core::Metrics::Count("render.weather.residency_cache_hits", 1);
+					StageHistoryWrites(context, Command);
+					return true;
+				}
+				EnterNamedPass(context.Name);
+				std::array<glm::ivec4, WEATHER_MAX_BRICKS> descriptors{};
+				uint32_t offsetWords = 0;
+				for (size_t index = 0; index < plan->Pages.size(); ++index) {
+					descriptors[index] = plan->Pages[index];
+					const uint32_t kind = plan->PageKinds[index];
+					descriptors[index].w = (plan->Pages[index].w & 31) | static_cast<int32_t>(kind << 5) |
+										   static_cast<int32_t>(offsetWords << 7);
+					offsetWords += kind == 2 ? 0 : kind == 1 ? 512 : 1024;
+				}
+				if (!RecordWeatherPages(
+						State->Device, Command, pages, std::span(descriptors.data(), plan->Pages.size())
+					))
+					return false;
+				const glm::ivec4 emptyKey{};
+				if (!RecordWeatherPages(
+						State->Device,
+						Command,
+						previousPages,
+						plan->PreviousPages.empty() ? std::span(&emptyKey, 1) : plan->PreviousPages
+					))
+					return false;
+				found->Residency.Stage(plan->Signature, Command);
+				core::Metrics::Count("render.weather.refused_refinements", plan->RefusedRefinements);
+				core::Metrics::SetGauge("render.weather.maintenance_age_ticks", plan->MaintenanceAgeTicks);
+				core::Metrics::SetGauge("render.weather.coarse_pages", plan->CoarsePages);
+				StageHistoryWrites(context, Command);
+				return true;
+			}
+		);
+
+		frameNodes.Set(core::Name("weather-field"), [this, weatherInputs](const graph::RunContext &context) {
+			if (context.Writes.size() != 1 || context.Reads.size() != 1) return false;
+			auto inputs = weatherInputs();
+			if (!State->Caps.HasCompute || !State->WeatherFieldCompute || !inputs) {
+				State->ForgetWeatherWorld(Request.World);
+				return true;
+			}
+			auto *pages = GraphBuffer(context.Reads[0], context, false);
+			if (!pages) return false;
+			auto found = std::find_if(
+				State->WeatherGenerations.begin(),
+				State->WeatherGenerations.end(),
+				[this, pages](const WeatherGpuGeneration &generation) {
+					return generation.World == Request.World && generation.Pages == pages;
+				}
+			);
+			if (found == State->WeatherGenerations.end()) {
+				State->WeatherGenerations.emplace_back();
+				found = std::prev(State->WeatherGenerations.end());
+				found->World = Request.World;
+				found->Pipeline = Pipeline->Name;
+				found->Pages = pages;
+			}
+			const uint64_t physicalBytes =
+				inputs->Stateful ? uint64_t(inputs->Uniforms.Grid.w) * 8 : uint64_t(found->FieldWords) * 4;
+			auto *cells = GraphBuffer(context.Writes[0], context, true, std::max(uint64_t{8}, physicalBytes));
+			if (!cells) return false;
+			if (found->Cells != cells) {
+				found->Field = {};
+				found->Summary = {};
+			}
+			found->Cells = cells;
+			found->PhysicalOwner =
+				inputs->Stateful
+					? &State->WeatherPhysicalFor(
+						  Request.World,
+						  WeatherPhysicalSignature(
+							  CurrentLighting.EnvironmentState, Request.Source->WeatherSimulationLayer
+						  )
+					  )
+					: nullptr;
+			if (inputs->Stateful) {
+				const auto &source = *Request.Source;
+				const bool hadFence = found->PhysicalOwner->Physical.Fence != nullptr;
+				const bool accepted = PollWeatherSimulationGpu(State->Device, found->PhysicalOwner->Physical);
+				if (accepted) {
+					found->PhysicalOwner->CheckpointSignature =
+						found->PhysicalOwner->PendingCheckpointSignature;
+					found->PhysicalOwner->EncodingSignature = found->PhysicalOwner->PendingEncodingSignature;
+					found->PhysicalOwner->PhysicalRecipeSignature =
+						found->PhysicalOwner->PendingPhysicalRecipeSignature;
+				} else if (hadFence && !found->PhysicalOwner->Physical.Fence) {
+					found->PhysicalOwner->RefusedStageSignature = found->PhysicalOwner->PendingStageSignature;
+					found->PhysicalOwner->CatchupPending = false;
+				}
+				uint64_t checkpointSignature = 0;
+				if (!source.WeatherCheckpoint.empty()) {
+					checkpointSignature =
+						scene::MixSignature(source.WeatherCheckpointVersion, source.WeatherCheckpointTick);
+					checkpointSignature =
+						scene::MixSignature(checkpointSignature, source.WeatherCheckpointEpoch);
+					checkpointSignature =
+						scene::MixSignature(checkpointSignature, source.WeatherCheckpointRevision);
+					if (!source.WeatherCheckpointVersion)
+						for (std::byte byte : source.WeatherCheckpoint)
+							checkpointSignature =
+								scene::MixSignature(checkpointSignature, std::to_integer<uint8_t>(byte));
+				}
+				if (!found->PhysicalOwner->Physical.Fence) {
+					auto &definition = found->PhysicalOwner->ExpectedDefinition;
+					if (!definition) {
+						auto physicalControls = CurrentLighting.EnvironmentState.Weather;
+						physicalControls.Paused = false;
+						physicalControls.TimeScale = 1;
+						definition = weather::MakeSimulationDefinition(
+							physicalControls,
+							source.WeatherSimulationLayer.IsValid()
+								? std::string(source.WeatherSimulationLayer.Text())
+								: "weather"
+						);
+						if (definition) definition->WorldEpoch = CurrentLighting.EnvironmentState.Clock.Epoch;
+					}
+					if (definition && found->PhysicalOwner->Physical.CellCount &&
+						definition->Grid != found->PhysicalOwner->Physical.Definition.Grid) {
+						ReleaseWeatherSimulationGpu(State->Device, found->PhysicalOwner->Physical);
+						found->PhysicalOwner->CheckpointSignature = 0;
+						found->PhysicalOwner->EncodingSignature = 0;
+					}
+					const auto checkpoint = checkpointSignature != found->PhysicalOwner->CheckpointSignature
+												? source.WeatherCheckpoint
+												: std::span<const std::byte>{};
+					if (found->PhysicalOwner->Physical.Published || !checkpoint.empty()) {
+						const auto targetTime =
+							weather::WeatherTimeOf(CurrentLighting.EnvironmentState.Clock);
+						const uint64_t stageSignature = scene::MixSignature(
+							scene::MixSignature(checkpointSignature, targetTime ? targetTime->PhaseTick : 0),
+							WeatherEncodingSignature(inputs->Compiled.Profile)
+						);
+						const bool refused = found->PhysicalOwner->RefusedStageSignature == stageSignature;
+						const bool staged = !refused && targetTime && definition &&
+											StageWeatherSimulationGpu(
+												State->Device,
+												State->WeatherEvolutionCompute,
+												found->PhysicalOwner->Physical,
+												targetTime->PhaseTick,
+												inputs->Compiled.Profile,
+												checkpoint,
+												128,
+												{},
+												&*definition,
+												true
+											);
+						found->PhysicalOwner->CatchupPending =
+							staged && targetTime &&
+							(found->PhysicalOwner->Physical.Fence
+								 ? found->PhysicalOwner->Physical.PendingTick
+								 : found->PhysicalOwner->Physical.Tick) < targetTime->PhaseTick;
+						if (staged && found->PhysicalOwner->Physical.Fence) {
+							found->PhysicalOwner->PendingStageSignature = stageSignature;
+							found->PhysicalOwner->PendingCheckpointSignature =
+								checkpointSignature ? checkpointSignature
+													: found->PhysicalOwner->CheckpointSignature;
+							found->PhysicalOwner->PendingEncodingSignature =
+								WeatherEncodingSignature(inputs->Compiled.Profile);
+							found->PhysicalOwner->PendingPhysicalRecipeSignature = WeatherPhysicalSignature(
+								CurrentLighting.EnvironmentState, Request.Source->WeatherSimulationLayer
+							);
+							Result.ComputeDispatches +=
+								found->PhysicalOwner->Physical.LastSubmittedDispatches;
+							++Result.AsyncComputeCommandBuffers;
+						} else if (!staged && !refused) {
+							found->PhysicalOwner->RefusedStageSignature = stageSignature;
+							core::Metrics::Count("render.weather.stateful.fallbacks", 1);
+						}
+					}
+				}
+				inputs = weatherInputs();
+				if (!inputs) return false;
+			}
+			auto fieldIdentity = inputs->Uniforms;
+			if (!inputs->Stateful && physicalBytes == 0) {
+				fieldIdentity.Time = {};
+				fieldIdentity.Phase.x = 0;
+				fieldIdentity.Phase.y = 0;
+				fieldIdentity.Phase.z = 0;
+			}
+			const uint64_t signature = scene::MixSignature(
+				scene::MixSignature(WeatherSignature(fieldIdentity), found->Residency.SignatureFor(Command)),
+				CurrentLighting.EnvironmentState.CloudProvider.Id
+			);
+			if (found->Field.Matches(signature, Command)) {
+				if (found->Field.Pending && found->Field.PendingCommand == Command)
+					found->PendingRenderInputs = *inputs;
+				else
+					found->RenderInputs = *inputs;
+				core::Metrics::Count("render.weather.field_cache_hits", 1);
+				StageHistoryWrites(context, Command);
+				return true;
+			}
+			EnterNamedPass(context.Name);
+			if (!inputs->Stateful && physicalBytes == 0) {
+				if (!found->Field.Ready && !RecordWeatherEmptyField(State->Device, Command, cells))
+					return false;
+				core::Metrics::Count("render.weather.certified_empty_field_skips", 1);
+			} else if (inputs->Stateful && inputs->Uniforms.Phase.z != UINT32_MAX) {
+				auto *copy = SDL_BeginGPUCopyPass(Command);
+				if (!copy) return false;
+				const SDL_GPUBufferLocation from{found->PhysicalOwner->Physical.PublishedPacked, 0};
+				const SDL_GPUBufferLocation to{cells, 0};
+				SDL_CopyGPUBufferToBuffer(
+					copy, &from, &to, found->PhysicalOwner->Physical.CellCount * 8, true
+				);
+				SDL_EndGPUCopyPass(copy);
+				core::Metrics::Count(
+					"render.weather.stateful.packed_copy_bytes", found->PhysicalOwner->Physical.CellCount * 8
+				);
+			} else {
+				if (!RecordWeatherField(
+						Command, State->WeatherFieldCompute, cells, pages, inputs->Uniforms, physicalBytes
+					))
+					return false;
+				++Result.ComputeDispatches;
+			}
+			found->Field.Stage(signature, Command);
+			found->PendingRenderInputs = *inputs;
+			StageHistoryWrites(context, Command);
+			return true;
+		});
+
+		frameNodes.Set(
+			core::Name("weather-summary"), [this, weatherInputs](const graph::RunContext &context) {
+				if (context.Reads.size() != 2 || context.Writes.size() != 1) return false;
+				const auto inputs = weatherInputs();
+				if (!State->Caps.HasCompute || !State->WeatherSummaryCompute || !inputs) return true;
+				auto *cells = GraphBuffer(context.Reads[0], context, false);
+				auto *summaries = GraphBuffer(context.Writes[0], context, true);
+				if (!cells || !summaries) return false;
+				const auto found = std::find_if(
+					State->WeatherGenerations.begin(),
+					State->WeatherGenerations.end(),
+					[this, cells](const WeatherGpuGeneration &generation) {
+						return generation.World == Request.World && generation.Cells == cells;
+					}
+				);
+				if (found == State->WeatherGenerations.end()) return false;
+				const uint64_t signature =
+					!inputs->Stateful && found->FieldWords == 0
+						? found->Field.SignatureFor(Command)
+						: scene::MixSignature(
+							  scene::MixSignature(
+								  WeatherSignature(inputs->Uniforms), found->Residency.SignatureFor(Command)
+							  ),
+							  CurrentLighting.EnvironmentState.CloudProvider.Id
+						  );
+				if (!found->Field.Matches(signature, Command)) return false;
+				if (found->Summaries == summaries && found->Summary.Matches(signature, Command)) {
+					core::Metrics::Count("render.weather.summary_cache_hits", 1);
+					StageHistoryWrites(context, Command);
+					return true;
+				}
+				EnterNamedPass(context.Name);
+				if (!RecordWeatherSummary(
+						Command,
+						State->WeatherSummaryCompute,
+						cells,
+						found->Pages,
+						summaries,
+						inputs->Uniforms
+					))
+					return false;
+				found->Summaries = summaries;
+				found->Summary.Stage(signature, Command);
+				++Result.ComputeDispatches;
+				StageHistoryWrites(context, Command);
+				return true;
+			}
+		);
+
+		frameNodes.Set(
+			core::Name("weather-integrate"), [this, weatherInputs](const graph::RunContext &context) {
+				if (context.Reads.size() != 6 || context.Writes.size() != 2) return false;
+				const auto inputs = weatherInputs();
+				if (!State->Caps.HasCompute || !State->WeatherRaysCompute || !inputs ||
+					!CurrentLighting.EnvironmentState.CloudLayer.Enabled)
+					return true;
+				const auto generation = std::find_if(
+					State->WeatherGenerations.begin(),
+					State->WeatherGenerations.end(),
+					[this](const WeatherGpuGeneration &candidate) {
+						return candidate.World == Request.World && candidate.Pipeline == Pipeline->Name;
+					}
+				);
+				if (generation == State->WeatherGenerations.end()) return false;
+				if (!inputs->Stateful && generation->FieldWords == 0) return true;
+				const auto source = GraphTexture(context.Reads[0], context, false);
+				const auto depth = GraphTexture(context.Reads[1], context, false);
+				const auto target = GraphTexture(context.Writes[0], context, true);
+				const auto cloudDepth = GraphTexture(context.Writes[1], context, true);
+				auto *cells = GraphBuffer(context.Reads[2], context, false);
+				auto *summaries = GraphBuffer(context.Reads[3], context, false);
+				auto *pages = GraphBuffer(context.Reads[4], context, false);
+				auto *previousPages = GraphBuffer(context.Reads[5], context, false);
+				if (!source.IsValid() || !depth.IsValid() || !target.IsValid() || !cloudDepth.IsValid() ||
+					!cells || !summaries || !pages || !previousPages ||
+					source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+					target.Format != source.Format || cloudDepth.Format != source.Format ||
+					cloudDepth.Width != target.Width || cloudDepth.Height != target.Height ||
+					depth.Width != source.Width || depth.Height != source.Height)
+					return false;
+				const auto &environment = CurrentLighting.EnvironmentState;
+				const auto &controls = environment.Weather;
+				const auto &appearance = environment.CloudLayer;
+				WeatherRayUniforms uniforms;
+				uniforms.InverseViewProjection = Uniforms.InverseViewProjection;
+				uniforms.Eye = Uniforms.Eye;
+				uniforms.Minimum = {
+					-controls.ExtentMetres.X * .5f,
+					controls.BaseHeightMetres,
+					-controls.ExtentMetres.Z * .5f,
+					controls.CellSizeMetres
+				};
+				uniforms.Maximum = {
+					controls.ExtentMetres.X * .5f,
+					controls.BaseHeightMetres + controls.ThicknessMetres,
+					controls.ExtentMetres.Z * .5f,
+					0
+				};
+				uniforms.Maximum.w = glm::length(glm::vec3(uniforms.Maximum - uniforms.Minimum)) +
+									 glm::length(glm::vec3(uniforms.Eye - uniforms.Minimum));
+				uniforms.ColourExtinction = {
+					appearance.Colour.R,
+					appearance.Colour.G,
+					appearance.Colour.B,
+					weather::ExtinctionPerMetre(controls.CondensateScale) * appearance.Density *
+						std::clamp(appearance.Cover, 0.0f, 1.0f)
+				};
+				const auto cloudLighting = WeatherLightingOf(CurrentLighting);
+				uniforms.Sun = cloudLighting.Direction;
+				uniforms.SunColour = cloudLighting.Direct;
+				uniforms.Ambient = cloudLighting.Ambient;
+				if (generation->Pages != pages) return false;
+				uniforms.Quality = {
+					std::clamp(environment.CloudVolume.Steps, 2u, 64u) * 4u,
+					std::bit_cast<uint32_t>(controls.LodError),
+					generation->PreviousPageCount,
+					std::bit_cast<uint32_t>(generation->TransitionAlpha)
+				};
+				uniforms.Field = inputs->Uniforms;
+				EnterNamedPass(context.Name);
+				if (!RecordWeatherRays(
+						Command,
+						State->WeatherRaysCompute,
+						cells,
+						summaries,
+						pages,
+						previousPages,
+						source.Texture,
+						depth.Texture,
+						target.Texture,
+						cloudDepth.Texture,
+						State->OverlaySampler,
+						target.Width,
+						target.Height,
+						uniforms
+					))
+					return false;
+				++Result.ComputeDispatches;
+				StageHistoryWrites(context, Command);
+				return true;
+			}
+		);
+
+		frameNodes.Set(
+			core::Name("weather-history"), [this, weatherInputs](const graph::RunContext &context) {
+				if (!context.Reads.empty() || context.Writes.size() != 2) return false;
+				const auto inputs = weatherInputs();
+				const auto generation = std::find_if(
+					State->WeatherGenerations.begin(),
+					State->WeatherGenerations.end(),
+					[this](const WeatherGpuGeneration &candidate) {
+						return candidate.World == Request.World && candidate.Pipeline == Pipeline->Name;
+					}
+				);
+				const bool empty = inputs && !inputs->Stateful &&
+								   generation != State->WeatherGenerations.end() &&
+								   generation->FieldWords == 0;
+				if (!inputs || !CurrentLighting.EnvironmentState.CloudLayer.Enabled || empty)
+					State->ReleaseWeatherTemporalSlot(Request.TargetSlot);
+				// Previous images are optional on the first frame. Reconstruction binds
+				// initialized current samples until a submitted history is available.
+				EnterNamedPass(context.Name);
+				return true;
+			}
+		);
+
+		frameNodes.Set(
+			core::Name("weather-reconstruct"), [this, weatherInputs](const graph::RunContext &context) {
+				if (context.Reads.size() != 6 || context.Writes.size() != 2) return false;
+				const auto inputs = weatherInputs();
+				const auto generation = std::find_if(
+					State->WeatherGenerations.begin(),
+					State->WeatherGenerations.end(),
+					[this](const WeatherGpuGeneration &candidate) {
+						return candidate.World == Request.World && candidate.Pipeline == Pipeline->Name;
+					}
+				);
+				const bool empty = inputs && !inputs->Stateful &&
+								   generation != State->WeatherGenerations.end() &&
+								   generation->FieldWords == 0;
+				if (!inputs || !State->WeatherTemporalCompute || !State->WeatherReconstructCompute ||
+					!CurrentLighting.EnvironmentState.CloudLayer.Enabled || empty) {
+					State->ReleaseWeatherTemporalSlot(Request.TargetSlot);
+					return PublishIdentity(context, context.Reads[0], context.Writes[1]);
+				}
+				const auto source = GraphTexture(context.Reads[0], context, false);
+				const auto depth = GraphTexture(context.Reads[1], context, false);
+				const auto clouds = GraphTexture(context.Reads[2], context, false);
+				const auto cloudDepth = GraphTexture(context.Reads[3], context, false);
+				const auto resolved = GraphTexture(context.Writes[0], context, true);
+				const auto target = GraphTexture(context.Writes[1], context, true);
+				if (!source.IsValid() || !depth.IsValid() || !clouds.IsValid() || !cloudDepth.IsValid() ||
+					!resolved.IsValid() || !target.IsValid() || source.Width != target.Width ||
+					source.Height != target.Height || depth.Width != target.Width ||
+					depth.Height != target.Height || clouds.Width != resolved.Width ||
+					clouds.Height != resolved.Height || cloudDepth.Width != resolved.Width ||
+					cloudDepth.Height != resolved.Height ||
+					source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+					target.Format != source.Format || clouds.Format != source.Format ||
+					cloudDepth.Format != source.Format || resolved.Format != source.Format)
+					return false;
+				auto &history = State->WeatherTemporalAt(Request.TargetSlot, Request.World, Pipeline->Name);
+				if (!EnsureWeatherTemporalHistory(State->Device, history, resolved.Width, resolved.Height))
+					return false;
+				const auto &environment = CurrentLighting.EnvironmentState;
+				auto identity = inputs->Uniforms;
+				identity.Time = {};
+				identity.Phase.x = 0;
+				identity.Phase.y = 0;
+				identity.Phase.z = 0;
+				uint64_t content = WeatherSignature(identity);
+				content = scene::MixSignature(content, environment.CloudVolume.Steps);
+				for (float value :
+					 {environment.CloudLayer.Colour.R,
+					  environment.CloudLayer.Colour.G,
+					  environment.CloudLayer.Colour.B,
+					  environment.CloudLayer.Density,
+					  environment.CloudLayer.Cover,
+					  environment.Weather.CondensateScale,
+					  State->Sun.x,
+					  State->Sun.y,
+					  State->Sun.z})
+					content = scene::MixSignature(content, std::bit_cast<uint32_t>(value));
+				const auto cloudLighting = WeatherLightingOf(CurrentLighting);
+				for (const auto colour :
+					 {cloudLighting.Direct, cloudLighting.Ambient, cloudLighting.Direction})
+					for (size_t lane = 0; lane < 3; ++lane)
+						content = scene::MixSignature(content, std::bit_cast<uint32_t>(colour[lane]));
+				WeatherTemporalFrame current;
+				current.Key.World = Request.World;
+				current.Key.Provider = environment.CloudProvider.Id;
+				current.Key.Content = content;
+				current.Key.Epoch = environment.Clock.Epoch;
+				current.Key.TimelineRevision = scene::MixSignature(
+					environment.Clock.DefinitionRevision, environment.WeatherHistoryRevision
+				);
+				current.Key.Tick = inputs->Stateful ? uint64_t(inputs->Uniforms.Phase.x) |
+														  (uint64_t(inputs->Uniforms.Phase.y) << 32)
+													: inputs->Time.PhaseTick;
+				current.Key.TickRate = environment.Weather.TickRate;
+				current.Key.Width = resolved.Width;
+				current.Key.Height = resolved.Height;
+				current.Key.CellSizeMetres = environment.Weather.CellSizeMetres;
+				current.Key.DisplacementQ8 = inputs->Time.DisplacementQ8;
+				current.Key.CameraCut = Request.Source && Request.Source->CameraCut;
+				current.ViewProjection = Matrices.ViewProjection;
+				current.Eye = glm::vec3(Uniforms.Eye);
+				WeatherReconstructionUniforms uniforms;
+				uniforms.InverseViewProjection = Uniforms.InverseViewProjection;
+				uniforms.PreviousViewProjection = history.Accepted.ViewProjection;
+				uniforms.Eye = Uniforms.Eye;
+				uniforms.PreviousEye = glm::vec4(history.Accepted.Eye, 0);
+				uniforms.Extents = {target.Width, target.Height, resolved.Width, resolved.Height};
+				const bool compatible = history.Ready && !history.PendingCommand &&
+										inputs->Uniforms.Phase.z != UINT32_MAX &&
+										WeatherTemporalCompatible(history.Accepted, current);
+				if (compatible)
+					uniforms.CloudDisplacement =
+						glm::vec4(WeatherCloudDisplacement(history.Accepted.Key, current.Key), 0);
+				else {
+					uniforms.Limits.x = 0;
+					core::Metrics::Count("render.weather.history_resets", 1);
+				}
+				history.Stage(current, Command);
+				EnterNamedPass(context.Name);
+				if (!RecordWeatherReconstruction(
+						Command,
+						State->WeatherTemporalCompute,
+						State->WeatherReconstructCompute,
+						source.Texture,
+						depth.Texture,
+						clouds.Texture,
+						cloudDepth.Texture,
+						resolved.Texture,
+						target.Texture,
+						history,
+						State->OverlaySampler,
+						uniforms
+					))
+					return false;
+				Result.ComputeDispatches += 2;
+				StageHistoryWrites(context, Command);
+				return true;
+			}
+		);
+
 		frameNodes.Set(core::Name("skybox-compute"), [this](const graph::RunContext &context) {
 			// Tier B intentionally retains the sky draw but omits this compute-only
 			// producer. Its sky handler binds the procedural fallback below.
@@ -1343,7 +2087,9 @@ namespace engine::render {
 				target.Height,
 				Result.ComputeDispatches,
 				OpaqueSkyTexture == source.Texture,
-				[this, name = context.Name] { EnterNamedPass(name); }
+				[this, name = context.Name] { EnterNamedPass(name); },
+				Request.World,
+				Pipeline->Name
 			);
 			if (!recorded) {
 				ENGINE_ERROR("clouds compute '{}' could not record its compute pass", context.Name.Text());

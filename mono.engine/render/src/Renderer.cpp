@@ -853,6 +853,7 @@ namespace engine::render {
 		State->ReleaseLod();
 		State->ReleaseOcclusion();
 		State->ReleaseGpuParticleField();
+		State->ReleaseWeatherPipelines();
 		State->ReleaseParticlePool();
 		State->ReleaseEnvironments();
 
@@ -1163,6 +1164,7 @@ namespace engine::render {
 			slot.Activity = {};
 		}
 		SDL_WaitForGPUIdle(State->Device);
+		State->ForgetWeatherWorld(world);
 		for (auto &tree : State->ImportedPortalTrees)
 			if (!tree.Nodes.empty() && tree.Nodes.front().Binding.World == world &&
 				tree.Nodes.front().Binding.WorldName == name)
@@ -1673,6 +1675,10 @@ namespace engine::render {
 
 	uint64_t Renderer::ResourceRevision() const {
 		return State == nullptr ? 0 : State->ResourceEpoch;
+	}
+
+	bool Renderer::HasPendingWeatherWork(uint64_t world) const {
+		return State != nullptr && State->HasPendingWeatherWork(world);
 	}
 
 	void *Renderer::TextureHandle(const core::Name &name, core::Name owner) const {

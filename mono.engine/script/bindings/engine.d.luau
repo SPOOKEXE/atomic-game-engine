@@ -749,6 +749,9 @@ end
 declare extern type Enum_VolumeShape extends EnumItem with
 end
 
+declare extern type Enum_WeatherMode extends EnumItem with
+end
+
 declare extern type Enum_ZIndexBehavior extends EnumItem with
 end
 
@@ -1219,6 +1222,10 @@ declare Enum: {
 	VolumeShape: {
 		Box: Enum_VolumeShape,
 		Ellipsoid: Enum_VolumeShape,
+	},
+	WeatherMode: {
+		Procedural: Enum_WeatherMode,
+		Stateful: Enum_WeatherMode,
 	},
 	ZIndexBehavior: {
 		Global: Enum_ZIndexBehavior,
@@ -2133,6 +2140,57 @@ declare extern type FogEffect extends Instance with
 	Enabled: boolean
 	End: number
 	Start: number
+end
+
+declare extern type WeatherCompute extends CloudCompute with
+	read AlgorithmVersion: number
+	AtmosphereDensityStrength: number
+	AtmosphereGlareSuppression: number
+	AtmosphereHazeStrength: number
+	BaseHeightMetres: number
+	BasePressureHectopascals: number
+	BaseTemperatureCelsius: number
+	CellSizeMetres: number
+	CondensateScale: number
+	Coverage: number
+	read DefinitionRevision: number
+	ExtentMetres: Vector3
+	FeatureCells: number
+	FogStrength: number
+	FrontContrast: number
+	GrowthRate: number
+	HailIntensity: number
+	IceFraction: number
+	read LayerName: string
+	write LayerName: string?
+	LiftMetresPerSecond: number
+	LightningRate: number
+	LodError: number
+	MaintenanceSeconds: number
+	MaximumLod: number
+	MaximumResidentBricks: number
+	Mode: Enum_WeatherMode
+	Paused: boolean
+	PrecipitationRate: number
+	PressureVariationHectopascals: number
+	ShadowCascades: number
+	ShadowDistanceMetres: number
+	ShadowResolution: number
+	ShadowStrength: number
+	ShadowUpdateSeconds: number
+	ShadowsEnabled: boolean
+	ShearMetresPerSecond: number
+	StormIntensity: number
+	TemperatureLapseCelsiusPerKilometre: number
+	TemperatureVariationCelsius: number
+	ThicknessMetres: number
+	TickRate: number
+	TimeScale: number
+	TurbulenceMetresPerSecond: number
+	VapourMixingRatio: number
+	VapourScale: number
+	WeatherEnabled: boolean
+	WindMetresPerSecond: Vector3
 end
 
 declare extern type ShaderScript extends Instance with
@@ -3673,6 +3731,7 @@ type CreatableInstances = {
 	DepthOfFieldEffect: DepthOfFieldEffect,
 	GodRaysEffect: GodRaysEffect,
 	FogEffect: FogEffect,
+	WeatherCompute: WeatherCompute,
 	ShaderScript: ShaderScript,
 	LensShader: LensShader,
 	EditableMesh: EditableMesh,

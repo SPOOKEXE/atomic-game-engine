@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <vector>
 
 TEST_SUITE_ID("engine.graph.pipelinedocument")
 TEST_DEPENDS("engine.graph.rendergraph")
@@ -33,6 +34,24 @@ using engine::graph::ResourceKind;
 using engine::graph::Write;
 
 namespace {
+	bool ContainsKind(const RenderGraph &graph, const std::vector<NodeId> &nodes, Name kind) {
+		return std::any_of(nodes.begin(), nodes.end(), [&](NodeId id) {
+			const auto *node = graph.Find(id);
+			return node != nullptr && node->Kind == kind;
+		});
+	}
+
+	bool HasKindsInOrder(
+		const RenderGraph &graph, const std::vector<NodeId> &nodes, const std::vector<Name> &kinds
+	) {
+		size_t next = 0;
+		for (const NodeId id : nodes) {
+			const auto *node = graph.Find(id);
+			if (node != nullptr && next < kinds.size() && node->Kind == kinds[next]) next++;
+		}
+		return next == kinds.size();
+	}
+
 	Edit Resource(std::string_view name, ResourceKind kind = ResourceKind::Colour) {
 		Edit edit;
 		edit.Kind = EditKind::AddResource;
@@ -90,14 +109,24 @@ TEST_CASE("the default document builds the engine frame", "[graph]") {
 	CompiledGraph fromDocument;
 	REQUIRE(graph.Compile(fromDocument, offender) == GraphStatus::Ok);
 
-	REQUIRE(fromDocument.Shared.size() == 5);
-	REQUIRE(fromDocument.PerView.size() == 22);
-	REQUIRE(fromDocument.Final.size() == 4);
 	CHECK(graph.Find(fromDocument.Shared.front())->Name == Name("world"));
-	CHECK(graph.Find(fromDocument.Shared[1])->Name == Name("mesh-residency"));
-	CHECK(graph.Find(fromDocument.Shared[2])->Name == Name("shadow"));
-	CHECK(graph.Find(fromDocument.Shared[3])->Name == Name("skybox-compute"));
-	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("clouds-compute"));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("mesh-residency")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("shadow")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("skybox-compute")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("clouds-compute")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("weather-residency")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("weather-field")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("weather-summary")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("weather-shadow-map")));
+	CHECK(ContainsKind(graph, fromDocument.PerView, Name("weather-integrate")));
+	CHECK(ContainsKind(graph, fromDocument.PerView, Name("weather-history")));
+	CHECK(ContainsKind(graph, fromDocument.PerView, Name("weather-reconstruct")));
+	for (const NodeId id : fromDocument.Shared)
+		CHECK(graph.Find(id)->Scope != NodeScope::View);
+	for (const NodeId id : fromDocument.PerView)
+		CHECK(graph.Find(id)->Scope == NodeScope::View);
+	for (const NodeId id : fromDocument.Final)
+		CHECK(graph.Find(id)->Scope == NodeScope::Frame);
 	CHECK(graph.Find(fromDocument.PerView.front())->Name == Name("camera"));
 	CHECK(graph.Find(fromDocument.PerView.back())->Name == Name("tonemap"));
 	CHECK(graph.Find(fromDocument.Final.back())->Name == Name("output-image"));
@@ -414,37 +443,49 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
-	REQUIRE(compiled.Shared.size() == 5);
-	REQUIRE(compiled.PerView.size() == 22);
-	REQUIRE(compiled.Final.size() == 4);
-
-	CHECK(graph.Find(compiled.Shared[0])->Kind == Name("world"));
-	CHECK(graph.Find(compiled.Shared[1])->Kind == Name("mesh-residency"));
-	CHECK(graph.Find(compiled.Shared[2])->Kind == Name("shadow"));
-	CHECK(graph.Find(compiled.Shared[3])->Kind == Name("skybox-compute"));
-	CHECK(graph.Find(compiled.Shared[4])->Kind == Name("clouds-compute"));
-	CHECK(graph.Find(compiled.PerView[0])->Kind == Name("camera"));
-	CHECK(graph.Find(compiled.PerView[1])->Kind == Name("last-frame"));
-	CHECK(graph.Find(compiled.PerView[2])->Kind == Name("entities"));
-	CHECK(graph.Find(compiled.PerView[3])->Kind == Name("cull-frustum"));
-	CHECK(graph.Find(compiled.PerView[4])->Kind == Name("order-draw"));
-	CHECK(graph.Find(compiled.PerView[5])->Kind == Name("delta-upload"));
-	CHECK(graph.Find(compiled.PerView[6])->Kind == Name("select-lod"));
-	CHECK(graph.Find(compiled.PerView[7])->Kind == Name("surface-capture"));
-	CHECK(graph.Find(compiled.PerView[8])->Kind == Name("gbuffer"));
-	CHECK(graph.Find(compiled.PerView[9])->Kind == Name("depth-linearise"));
-	CHECK(graph.Find(compiled.PerView[10])->Kind == Name("ssao"));
-	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("deferred-lighting"));
-	CHECK(graph.Find(compiled.PerView[12])->Kind == Name("sky"));
-	CHECK(graph.Find(compiled.PerView[13])->Kind == Name("fog"));
-	CHECK(graph.Find(compiled.PerView[14])->Kind == Name("portal-overlay"));
-	CHECK(graph.Find(compiled.PerView[15])->Kind == Name("mirror-overlay"));
-	CHECK(graph.Find(compiled.PerView[16])->Kind == Name("transparent"));
-	CHECK(graph.Find(compiled.PerView[17])->Kind == Name("shader-lenses"));
-	CHECK(graph.Find(compiled.PerView[20])->Kind == Name("bloom"));
-	CHECK(graph.Find(compiled.PerView[21])->Kind == Name("tonemap"));
-	CHECK(graph.Find(compiled.Final[0])->Kind == Name("present"));
-	CHECK(graph.Find(compiled.Final[3])->Kind == Name("output-image"));
+	CHECK(HasKindsInOrder(
+		graph,
+		compiled.Shared,
+		{Name("world"),
+		 Name("mesh-residency"),
+		 Name("shadow"),
+		 Name("skybox-compute"),
+		 Name("clouds-compute")}
+	));
+	CHECK(HasKindsInOrder(
+		graph,
+		compiled.PerView,
+		{Name("camera"),
+		 Name("last-frame"),
+		 Name("entities"),
+		 Name("cull-frustum"),
+		 Name("order-draw"),
+		 Name("delta-upload"),
+		 Name("select-lod"),
+		 Name("surface-capture"),
+		 Name("gbuffer"),
+		 Name("depth-linearise"),
+		 Name("ssao"),
+		 Name("deferred-lighting"),
+		 Name("sky"),
+		 Name("fog"),
+		 Name("portal-overlay"),
+		 Name("mirror-overlay"),
+		 Name("transparent"),
+		 Name("shader-lenses"),
+		 Name("bloom"),
+		 Name("tonemap")}
+	));
+	CHECK(HasKindsInOrder(
+		graph, compiled.Final, {Name("present"), Name("interface"), Name("overlay"), Name("output-image")}
+	));
+	CHECK(ContainsKind(graph, compiled.Shared, Name("weather-residency")));
+	CHECK(ContainsKind(graph, compiled.Shared, Name("weather-field")));
+	CHECK(ContainsKind(graph, compiled.Shared, Name("weather-summary")));
+	CHECK(ContainsKind(graph, compiled.Shared, Name("weather-shadow-map")));
+	CHECK(ContainsKind(graph, compiled.PerView, Name("weather-integrate")));
+	CHECK(ContainsKind(graph, compiled.PerView, Name("weather-history")));
+	CHECK(ContainsKind(graph, compiled.PerView, Name("weather-reconstruct")));
 
 	bool emissive = false;
 	bool occlusion = false;
@@ -502,7 +543,37 @@ TEST_CASE("optional default graph nodes can be disabled without breaking their c
 	RenderGraph graph;
 	Name offender;
 	REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
-	CHECK(graph.ResourceCount() == 44);
+	RenderGraph defaults;
+	REQUIRE(Build(DefaultPbrDocument(), defaults, offender) == PipelineDocumentStatus::Ok);
+	const auto resourceNames = [](const RenderGraph &candidate) {
+		std::vector<Name> names;
+		names.reserve(candidate.ResourceCount());
+		for (uint32_t index = 1; index <= candidate.ResourceCount(); ++index) {
+			const auto *resource = candidate.FindResource(engine::graph::ResourceId{index});
+			if (resource != nullptr) names.push_back(resource->Name);
+		}
+		return names;
+	};
+	const std::vector<Name> actualResources = resourceNames(graph);
+	const std::vector<Name> defaultResources = resourceNames(defaults);
+	CHECK(actualResources.size() == graph.ResourceCount());
+	CHECK(defaultResources.size() == defaults.ResourceCount());
+	CHECK(actualResources == defaultResources);
+	for (const std::string_view name : {
+			 "weather-pages",
+			 "weather-previous-pages",
+			 "weather-field",
+			 "weather-summary",
+			 "weather-shadow",
+			 "weather-cloud-history",
+			 "weather-depth-history",
+			 "weather-clouds",
+			 "weather-cloud-depth",
+			 "weather-resolved",
+			 "weather-lit",
+		 }) {
+		CHECK(std::find(actualResources.begin(), actualResources.end(), Name(name)) != actualResources.end());
+	}
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
@@ -672,9 +743,14 @@ TEST_CASE("an enable edit survives the round trip and the build", "[graph]") {
 
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	RenderGraph originalGraph;
+	REQUIRE(Build(DefaultPbrDocument(), originalGraph, offender) == PipelineDocumentStatus::Ok);
+	CompiledGraph original;
+	REQUIRE(originalGraph.Compile(original, offender) == GraphStatus::Ok);
 
 	// Out of the compile entirely, which is what disabling means here.
-	CHECK(compiled.PerView.size() == 21);
+	CHECK(compiled.PerView.size() + 1 == original.PerView.size());
+	CHECK_FALSE(ContainsKind(graph, compiled.PerView, Name("surface-capture")));
 }
 
 TEST_CASE("the game interface can be disabled without removing the frame output", "[graph][interface]") {
@@ -687,7 +763,11 @@ TEST_CASE("the game interface can be disabled without removing the frame output"
 
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
-	REQUIRE(compiled.Final.size() == 3);
+	RenderGraph originalGraph;
+	REQUIRE(Build(DefaultPbrDocument(), originalGraph, offender) == PipelineDocumentStatus::Ok);
+	CompiledGraph original;
+	REQUIRE(originalGraph.Compile(original, offender) == GraphStatus::Ok);
+	CHECK(compiled.Final.size() + 1 == original.Final.size());
 	CHECK(std::none_of(compiled.Final.begin(), compiled.Final.end(), [&](NodeId node) {
 		return graph.Find(node)->Kind == Name("interface");
 	}));

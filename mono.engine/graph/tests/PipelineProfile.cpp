@@ -81,11 +81,16 @@ namespace {
 // --- the frame we ship ------------------------------------------------------------
 
 TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
-	const PipelineProfile profile = Profiled(DefaultGraph());
+	const RenderGraph graph = DefaultGraph();
+	const PipelineProfile profile = Profiled(graph);
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
-	REQUIRE(profile.Passes.size() == 31);
-	REQUIRE(profile.Resources.size() == 44);
-	CHECK(profile.Cells.size() == 1364);
+	const size_t expectedPasses = compiled.Shared.size() + compiled.PerView.size() + compiled.Final.size();
+	CHECK(profile.Passes.size() == expectedPasses);
+	CHECK(profile.Resources.size() == graph.ResourceCount());
+	CHECK(profile.Cells.size() == profile.Passes.size() * profile.Resources.size());
 
 	// The three blocks, in the order a frame runs them.
 	CHECK(profile.Passes.front().Where == engine::graph::Band::Shared);
@@ -114,6 +119,15 @@ TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 
 	// And a pass that never touches a resource says so.
 	CHECK(profile.At(RowOf(profile, "shadow"), ColumnOf(profile, "interface")) == Access::None);
+	CHECK(
+		profile.At(RowOf(profile, "weather-field"), ColumnOf(profile, "weather-integrate")) == Access::Read
+	);
+	CHECK(
+		profile.At(RowOf(profile, "weather-shadow"), ColumnOf(profile, "weather-shadow-map")) == Access::Write
+	);
+	CHECK(
+		profile.At(RowOf(profile, "weather-shadow"), ColumnOf(profile, "deferred-lighting")) == Access::Read
+	);
 }
 
 TEST_CASE("a resource's lifetime is where it is written to where it is last read", "[graph][profile]") {

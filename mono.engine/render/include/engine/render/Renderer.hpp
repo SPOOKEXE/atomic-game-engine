@@ -43,6 +43,7 @@
 #include <glm/mat4x4.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -776,8 +777,23 @@ namespace engine::render {
 	//
 	// @since v0.17
 	struct View {
+		// Borrowed immutable solver checkpoint bytes, owned by the collected world packet.
+		std::span<const std::byte> WeatherCheckpoint;
+		// Trusted canonical full stream name copied from the accepted source definition.
+		core::Name WeatherSimulationLayer;
+		// Changes only when that packet publishes or retires a checkpoint.
+		uint64_t WeatherCheckpointVersion = 0;
+		// Copied checkpoint identity; decoder validates these against the encoded payload.
+		//@{
+		uint64_t WeatherCheckpointTick = 0;
+		uint64_t WeatherCheckpointEpoch = 0;
+		uint32_t WeatherCheckpointRevision = 0;
+		//@}
 		// Immutable packed cloud density copied from the source world.
 		std::optional<scene::CloudDensitySnapshot> CloudDensity;
+		// Borrowed camera-packet precipitation preserves the authored particle field.
+		// The owning WorldCameraFrame outlives this render invocation.
+		std::span<const GpuParticleFieldView> WeatherParticles;
 		// An HDR image owned by this world and viewport. The eye-image node defaults
 		// to whole-eye projection; seam intermediates require its explicit projection option.
 		// Zero denotes an unavailable image.
@@ -2428,6 +2444,10 @@ namespace engine::render {
 		// Changes when registered render resources are admitted, replaced or removed.
 		// Scoped to this renderer lifetime; callers also track their world/endpoint identity.
 		uint64_t ResourceRevision() const;
+
+		/// Whether submitted weather evolution still needs a completion poll.
+		/// A zero world selects all worlds owned by this renderer.
+		bool HasPendingWeatherWork(uint64_t world = 0) const;
 
 		// How big a registered texture is, in source pixels.
 		//

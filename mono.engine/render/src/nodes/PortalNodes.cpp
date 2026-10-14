@@ -592,7 +592,11 @@ namespace engine::render {
 								paneTexture,
 								State->SurfaceSampler,
 								portal.TagFilter,
-								result.Triangles
+								result.Triangles,
+								nullptr,
+								Impl::SlotSelection::All,
+								Impl::VisibilityPass::Secondary,
+								Pipeline->Name
 							);
 						}
 
@@ -926,7 +930,8 @@ namespace engine::render {
 							result.Triangles,
 							nullptr,
 							Impl::SlotSelection::All,
-							Impl::VisibilityPass::MainCamera
+							Impl::VisibilityPass::MainCamera,
+							Pipeline->Name
 						);
 					}
 				};

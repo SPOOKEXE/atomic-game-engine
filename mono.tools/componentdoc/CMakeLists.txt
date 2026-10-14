@@ -15,6 +15,7 @@ target_link_libraries(componentdoc PRIVATE
 	Engine::ecs
 	Engine::world
 	Engine::scene
+	Engine::weather
 	Engine::gui
 	Engine::physics
 	Engine::effects

@@ -30,6 +30,8 @@ files and prose in graph modules, ordering modules by the layers in
 - @subpage md_mono_8engine_2effects_2AGENTS
 - @subpage md_mono_8engine_2imagecodec_2docs_2ImageCodec
 - @subpage md_mono_8engine_2physics_2AGENTS
+- @subpage md_mono_8engine_2weather_2AGENTS
+- @subpage md_mono_8engine_2weather_2docs_2Design
 - @subpage md_mono_8engine_2bake_2AGENTS
 - @subpage md_mono_8engine_2bakegraph_2AGENTS
 - @subpage md_mono_8engine_2graph_2AGENTS

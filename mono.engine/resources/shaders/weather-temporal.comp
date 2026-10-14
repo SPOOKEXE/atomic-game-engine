@@ -1,0 +1,77 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D cloudsImage;
+layout(set = 0, binding = 1) uniform sampler2D cloudDepthImage;
+layout(set = 0, binding = 2) uniform sampler2D previousCloudsImage;
+layout(set = 0, binding = 3) uniform sampler2D previousDepthImage;
+layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D resolvedImage;
+layout(set = 2, binding = 0) uniform Reconstruction {
+	mat4 InverseViewProjection;
+	mat4 PreviousViewProjection;
+	vec4 Eye;
+	vec4 PreviousEye;
+	vec4 CloudDisplacement;
+	vec4 Limits;
+	uvec4 Extents;
+} pass;
+
+vec3 RayAt(vec2 uv) {
+	vec4 point = pass.InverseViewProjection * vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, 1.0, 1.0);
+	return normalize(point.xyz / point.w - pass.Eye.xyz);
+}
+
+bool DepthCompatible(float expected, float actual) {
+	return abs(expected - actual) <= max(pass.Limits.z, expected * pass.Limits.y);
+}
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 extent = imageSize(resolvedImage);
+	if (any(greaterThanEqual(pixel, extent))) return;
+	vec2 uv = (vec2(pixel) + .5) / vec2(extent);
+	vec4 current = texelFetch(cloudsImage, pixel, 0);
+	vec4 metadata = texelFetch(cloudDepthImage, pixel, 0);
+	// An empty ray cannot borrow a cloud that moved out of its current medium.
+	if (pass.Limits.x <= 0.0 || metadata.w < .5 || metadata.y <= 0.0) {
+		imageStore(resolvedImage, pixel, current);
+		return;
+	}
+	vec3 ray = RayAt(uv);
+	vec3 cloud = pass.Eye.xyz + ray * metadata.y - pass.CloudDisplacement.xyz;
+	vec4 previousClip = pass.PreviousViewProjection * vec4(cloud, 1.0);
+	if (previousClip.w <= 0.0) { imageStore(resolvedImage, pixel, current); return; }
+	vec3 projected = previousClip.xyz / previousClip.w;
+	vec2 previousUv = vec2(projected.x * .5 + .5, .5 - projected.y * .5);
+	vec2 inset = .5 / vec2(extent);
+	if (projected.z < 0.0 || projected.z > 1.0 || any(lessThan(previousUv, inset)) ||
+		any(greaterThan(previousUv, vec2(1.0) - inset))) {
+		imageStore(resolvedImage, pixel, current);
+		return;
+	}
+	ivec2 previousPixel = clamp(ivec2(previousUv * vec2(extent)), ivec2(0), extent - 1);
+	vec4 previousDepth = texelFetch(previousDepthImage, previousPixel, 0);
+	float expectedCloudDistance = length(cloud - pass.PreviousEye.xyz);
+	vec3 surface = pass.Eye.xyz + ray * metadata.z;
+	float expectedSurfaceDistance = length(surface - pass.PreviousEye.xyz);
+	bool sameMedium = previousDepth.w >= .5 && DepthCompatible(expectedCloudDistance, previousDepth.y);
+	bool sameSurface = metadata.x == previousDepth.x &&
+		(metadata.x >= .5 || DepthCompatible(expectedSurfaceDistance, previousDepth.z));
+	bool occluded = previousDepth.x < .5 && previousDepth.z + pass.Limits.z < expectedCloudDistance;
+	if (!sameMedium || !sameSurface || occluded) {
+		imageStore(resolvedImage, pixel, current);
+		return;
+	}
+	vec4 minimum = current;
+	vec4 maximum = current;
+	for (int y = -1; y <= 1; ++y) for (int x = -1; x <= 1; ++x) {
+		vec4 neighbor = texelFetch(cloudsImage, clamp(pixel + ivec2(x, y), ivec2(0), extent - 1), 0);
+		minimum = min(minimum, neighbor);
+		maximum = max(maximum, neighbor);
+	}
+	vec4 previous = clamp(texelFetch(previousCloudsImage, previousPixel, 0), minimum, maximum);
+	// Opacity changes indicate a medium boundary. Reduce history before clamping
+	// can hide the change, avoiding a trailing opaque cloud after rapid evolution.
+	float opacityConfidence = max(0.0, 1.0 - abs(previous.a - current.a) / max(pass.Limits.w, .001));
+	imageStore(resolvedImage, pixel, mix(current, previous, pass.Limits.x * opacityConfidence));
+}

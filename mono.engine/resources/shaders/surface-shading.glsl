@@ -42,6 +42,18 @@ layout(set = 2, binding = 11) uniform sampler2D refractionImage;
 // presented view and its border contains geometry outside that view.
 layout(set = 2, binding = 12) uniform sampler2D refractionGuardImage;
 
+#ifndef WEATHER_LAYER_BOUNDS
+layout(set = 2, binding = 13) uniform sampler2D reservedLayerOpaque;
+layout(set = 2, binding = 14) uniform sampler2D reservedLayerPrevious;
+#endif
+
+struct WeatherShadowState {
+	vec4 Regions[4];
+	vec4 Controls;
+	vec4 ToSun;
+	vec4 Receiver;
+};
+
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
 	vec4 Ambient;
@@ -122,7 +134,14 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 PackedPbrChannels;
 	// x: authored IOR. y: authored surface thickness in metres.
 	vec4 Transmission;
+	WeatherShadowState CloudShadow;
 } lighting;
+
+#define WEATHER_SHADOW_INLINE_STATE
+#define WEATHER_SHADOW_SAMPLER_BINDING 15
+#define weatherShadow lighting.CloudShadow
+#include "weather-shadow-lighting.glsl"
+#undef weatherShadow
 
 float PackedPbrValue(vec2 uv, float channel) {
 	return texture(packedPbrMap, uv)[int(channel + 0.5)];
@@ -585,7 +604,7 @@ void shadeSurface() {
 	vec3 diffuse = albedo * (1.0 - fresnel) * (1.0 - metalness);
 	vec3 ambientAlbedo = mix(albedo, baseReflectance, metalness);
 	vec3 ambient = ambientAlbedo * (lighting.Ambient.rgb + lighting.OutdoorAmbient.rgb * sky) * occlusion;
-	vec3 direct = (diffuse * lambert + specular) * lighting.Direct.rgb * shadow;
+	vec3 direct = (diffuse * lambert + specular) * lighting.Direct.rgb * shadow * WeatherShadowFactor(inWorldPosition);
 	vec3 lit = ambient + direct + diffuse * LocalLight(normal) + emissive;
 	lit = mix(lit, lighting.FogColour.rgb, FogFactor());
 

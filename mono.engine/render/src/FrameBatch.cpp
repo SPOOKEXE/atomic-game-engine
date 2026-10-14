@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <string>
@@ -287,6 +288,30 @@ namespace engine::render {
 		Render.State->BatchSwapchain = swapchain;
 		Render.State->BatchWidth = width;
 		Render.State->BatchHeight = height;
+		// Plan world residency from every primary view before the first world node runs.
+		// Recursive views add their own demand through the conservative planner fallback.
+		Render.State->WeatherViews.clear();
+		for (const View &view : views) {
+			const auto &environment =
+				view.OverrideLighting ? view.Lighting.EnvironmentState : previousLighting.EnvironmentState;
+			if (!environment.HasWeatherCompute || !environment.Weather.Enabled) continue;
+			const uint32_t viewHeight =
+				view.Target && view.Target->IsValid() ? view.Target->Height : std::max(height, 1u);
+			const float projection =
+				view.Projection
+					? std::abs((*view.Projection)[1][1])
+					: 1.0f / std::tan(std::clamp(view.Camera.FieldOfViewRadians, 0.01f, 3.0f) * 0.5f);
+			WeatherResidencyView demand;
+			demand.View.Key = view.Slot;
+			demand.View.CameraPositionMetres = view.VisibilityCameraFrame().Position;
+			demand.View.PortalRevision = view.CameraCut ? view.CameraTemporalSequence : 0;
+			demand.ProjectionPixelsPerRadian = static_cast<float>(viewHeight) * 0.5f * projection;
+			demand.MaximumDistanceMetres = std::max(
+				view.Camera.FarPlane,
+				std::max(environment.Weather.ExtentMetres.X, environment.Weather.ExtentMetres.Z)
+			);
+			Render.State->WeatherViews.push_back({view.World, demand});
+		}
 		Render.State->BatchTimingSlot = VulkanTimestamps::NO_SLOT;
 		Render.State->BatchCaptureTimingRequested = std::any_of(
 			Render.State->GraphResources.Images.begin(),

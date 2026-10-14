@@ -44,11 +44,15 @@
 #include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/WeatherClock.hpp>
+#include <engine/scene/WeatherCompute.hpp>
 #include <engine/scene/Wire.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/weather/Clock.hpp>
+#include <engine/weather/Runtime.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -3361,4 +3365,55 @@ TEST_CASE(
 	"portal images follow the walking player through replica handoff", "[studio][gpu][portal-walk-images][.]"
 ) {
 	WalkPortalReplicas(true);
+}
+
+TEST_CASE(
+	"paused Play links finish joins and freeze weather without advancing simulation",
+	"[studio][playlink][weather]"
+) {
+	engine::weather::RegisterWeatherRuntimeComponents();
+	Fixture fixture;
+	Entity provider;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store, engine::ecs::Scheduler &systems) {
+		provider = store.Create("WeatherLayer");
+		store.Set(provider, engine::scene::WeatherCompute{});
+		engine::weather::RegisterWeatherClockSystem(systems);
+	});
+	REQUIRE(fixture.Worlds.OnState([](WorldId, Store &store, engine::world::WorldState state) {
+		(void)engine::weather::SetWeatherWorldPaused(store, state == engine::world::WorldState::Suspended);
+	}));
+	fixture.Worlds.Tick(0.1f);
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	// Pause before the replica's initial snapshot has completed.
+	REQUIRE(
+		fixture.Worlds.SetState(fixture.Authority, engine::world::WorldState::Suspended) ==
+		engine::world::WorldStatus::Ok
+	);
+	uint64_t weatherTick = 0;
+	double sourceElapsed = 0;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		weatherTick = engine::scene::WeatherClockOf(store, provider).Tick;
+		sourceElapsed = store.Time().Elapsed;
+	});
+	REQUIRE(link.FlushPausedState(fixture.Worlds));
+	fixture.Worlds.Enter(fixture.Authority, [](Store &store) {
+		store.SetResource(engine::scene::WeatherClockPublication{});
+	});
+	for (int flush = 0; flush < 64; ++flush)
+		(void)link.FlushPausedState(fixture.Worlds);
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+		REQUIRE(store.Get<engine::scene::WeatherClock>(provider));
+		const auto clock = engine::scene::WeatherClockOf(store, provider);
+		CHECK(clock.Tick == weatherTick);
+		CHECK_FALSE(clock.Paused);
+		CHECK(clock.WorldPaused);
+		CHECK(store.Time().Elapsed == 0);
+	});
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		CHECK(store.Time().Elapsed == sourceElapsed);
+		CHECK(engine::scene::WeatherClockOf(store, provider).Tick == weatherTick);
+	});
+	link.Stop(fixture.Worlds);
 }

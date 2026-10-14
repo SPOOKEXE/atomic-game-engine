@@ -66,7 +66,21 @@ void main() {
 	}
 	if (reset) {
 		position = vec4(field.centreDelta.xyz + TurnedBy(field.rotation, positionLifetime.xyz), float(layer));
-		float age = field.control.z != 0u ? float(Mix(index ^ field.control.y) >> 8u) * (1.0 / 16777216.0) * positionLifetime.w : 0.0;
+		float maximumAge = positionLifetime.w;
+		// Weather source trajectories have already been clipped against roofs and
+		// ground. Phase particles along that proven segment instead of placing a
+		// million rows at the same ninety-six source points on initialization.
+		if (field.sampleOptions.y != 0u) {
+			for (int axis = 0; axis < 3; ++axis) {
+				float speed = velocityLayer[axis];
+				if (abs(speed) > 0.000001) {
+					float edge = speed > 0.0 ? field.bounds[axis] : -field.bounds[axis];
+					maximumAge = min(maximumAge, max(0.0, (edge - positionLifetime[axis]) / speed));
+				}
+			}
+		}
+		float age = field.control.z != 0u ? float(Mix(index ^ field.control.y) >> 8u) * (1.0 / 16777216.0) * maximumAge : 0.0;
+		if (field.sampleOptions.y != 0u) position.xyz += TurnedBy(field.rotation, velocityLayer.xyz) * age;
 		velocity = vec4(TurnedBy(field.rotation, velocityLayer.xyz), age);
 	}
 	states.rows[index * 2u] = position; states.rows[index * 2u + 1u] = velocity;

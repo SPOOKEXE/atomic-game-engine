@@ -17,6 +17,7 @@
 #include "GraphHistory.hpp"
 #include "SsaoSettings.hpp"
 #include "ViewRecording.hpp"
+#include "WeatherShadows.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -539,6 +540,22 @@ namespace engine::render {
 			DrawCamera.RenderFeatures.Enable & scene::ALL_RENDER_FEATURES,
 			DrawCamera.RenderFeatures.Disable & scene::ALL_RENDER_FEATURES,
 		};
+		const auto &environment = worldLighting.EnvironmentState;
+		if (environment.HasWeatherCompute && environment.Weather.Enabled &&
+			environment.Weather.ShadowsEnabled && GraphEnabled(core::Name("weather-shadow-map"))) {
+			// A later world producer may publish the map after these view controls were built.
+			lighting.CloudShadow.Receiver.w = -1;
+			const auto generation = std::find_if(
+				State->WeatherGenerations.begin(),
+				State->WeatherGenerations.end(),
+				[this](const WeatherGpuGeneration &candidate) {
+					return candidate.World == Request.World && candidate.Pipeline == Pipeline->Name;
+				}
+			);
+			if (generation != State->WeatherGenerations.end())
+				if (const auto *cloudShadow = generation->Shadows.LightingFor(Command))
+					lighting.CloudShadow = *cloudShadow;
+		}
 		return lighting;
 	}
 
@@ -761,7 +778,9 @@ namespace engine::render {
 				filter,
 				result.Triangles,
 				nullptr,
-				omitCharacters ? Impl::SlotSelection::CharacterFree : Impl::SlotSelection::All
+				omitCharacters ? Impl::SlotSelection::CharacterFree : Impl::SlotSelection::All,
+				Impl::VisibilityPass::Secondary,
+				Pipeline->Name
 			);
 		}
 	}
@@ -812,7 +831,9 @@ namespace engine::render {
 			filter,
 			result.Triangles,
 			nullptr,
-			omitCharacters ? Impl::SlotSelection::CharacterFree : Impl::SlotSelection::All
+			omitCharacters ? Impl::SlotSelection::CharacterFree : Impl::SlotSelection::All,
+			Impl::VisibilityPass::Secondary,
+			Pipeline->Name
 		);
 	}
 
@@ -829,7 +850,8 @@ namespace engine::render {
 		const void *rawUniforms,
 		size_t rawUniformBytes,
 		const BeamUniforms *passBeams,
-		SDL_GPUBuffer *fragmentStorage
+		SDL_GPUBuffer *fragmentStorage,
+		const WeatherShadowLightingUniforms *weatherShadows
 	) {
 		FrameResult &result = Result;
 		SDL_GPUCommandBuffer *const command = Command;
@@ -858,6 +880,9 @@ namespace engine::render {
 		if (passBeams != nullptr) {
 			SDL_PushGPUFragmentUniformData(command, 2, passBeams, sizeof(*passBeams));
 		}
+		if (weatherShadows != nullptr) {
+			SDL_PushGPUFragmentUniformData(command, 3, weatherShadows, sizeof(*weatherShadows));
+		}
 		const SDL_GPUViewport viewport{
 			0.0f, 0.0f, static_cast<float>(passWidth), static_cast<float>(passHeight), 0.0f, 1.0f
 		};
@@ -871,6 +896,22 @@ namespace engine::render {
 
 	Renderer::Impl::NamedTexture ViewRecording::FixedTexture(core::Name resource, size_t slot) const {
 		Impl *const State = this->State;
+		if (resource == core::Name("weather-cloud-history") ||
+			resource == core::Name("weather-depth-history")) {
+			for (const auto &target : State->WeatherTemporalTargets) {
+				if (target.Slot != slot || target.World != Request.World || !target.History.Ready ||
+					(Pipeline && target.Pipeline != Pipeline->Name))
+					continue;
+				return {
+					resource == core::Name("weather-cloud-history") ? target.History.Clouds
+																	: target.History.Depth,
+					target.History.Width,
+					target.History.Height,
+					SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT
+				};
+			}
+			return {};
+		}
 		const size_t targetSlot = Request.TargetSlot;
 		SDL_GPUTexture *const viewTarget = ViewTarget;
 		const uint32_t sceneWidth = SceneWidth;
@@ -1205,7 +1246,9 @@ namespace engine::render {
 		return State->FindGraphTarget(*selectedPipeline, desc->Name, scope, owner);
 	}
 
-	SDL_GPUBuffer *ViewRecording::ResourceBuffer(graph::ResourceId resource, size_t selectedSlot, bool make) {
+	SDL_GPUBuffer *ViewRecording::ResourceBuffer(
+		graph::ResourceId resource, size_t selectedSlot, bool make, uint64_t actualBytes
+	) {
 		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
 		const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
 		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer) return nullptr;
@@ -1214,7 +1257,9 @@ namespace engine::render {
 		if (make && scope == graph::NodeScope::World) {
 			State->GraphResources.WorldNames[owner] = Request.Source->WorldName;
 		}
-		return make ? State->EnsureGraphBuffer(*selectedPipeline, resource, owner, SceneWidth, SceneHeight)
+		return make ? State->EnsureGraphBuffer(
+						  *selectedPipeline, resource, owner, SceneWidth, SceneHeight, actualBytes
+					  )
 					: State->FindGraphBuffer(*selectedPipeline, desc->Name, scope, owner);
 	}
 
@@ -1277,9 +1322,10 @@ namespace engine::render {
 		}
 	}
 
-	SDL_GPUBuffer *
-	ViewRecording::GraphBuffer(graph::ResourceId resource, const graph::RunContext &context, bool make) {
-		return ResourceBuffer(resource, GraphTextureSlot(context), make);
+	SDL_GPUBuffer *ViewRecording::GraphBuffer(
+		graph::ResourceId resource, const graph::RunContext &context, bool make, uint64_t actualBytes
+	) {
+		return ResourceBuffer(resource, GraphTextureSlot(context), make, actualBytes);
 	}
 
 	std::vector<SDL_GPUTextureSamplerBinding>

@@ -22,9 +22,12 @@
 #include <engine/replication/Admission.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Listener.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/WeatherClock.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <cstddef>
@@ -406,4 +409,175 @@ TEST_CASE("a quic server still admits over a link that loses the initial", "[rep
 
 	CHECK(field.Client->Wire() == WireKind::Quic);
 	CHECK(field.Client->Attempts() == 1);
+}
+
+TEST_CASE(
+	"weather clock joins and updates on either wire while local elapsed time is preserved",
+	"[replication][negotiation][weather]"
+) {
+	const auto mode = GENERATE(WireMode::Datagram, WireMode::Quic);
+	engine::scene::RegisterSceneComponents();
+	Field field(mode);
+	const auto provider = field.World.Create();
+	engine::scene::WeatherClock clock;
+	clock.Tick = 4000;
+	clock.ElapsedSeconds = 200;
+	clock.Sequence = 1;
+	clock.PhaseTick = 80;
+	clock.DisplacementQ8 = {400, 0, 100};
+	clock.Paused = true;
+	field.World.Set(provider, clock);
+	field.Server->Authority().Replicate(
+		Name("scene.WeatherClock"), engine::replication::ChangeDetection::Observed
+	);
+	field.Replica.AdvanceTick(0.125f);
+	const auto before = field.Replica.Time();
+	ConnectorSettings settings;
+	settings.AttemptSeconds = 2;
+	field.Connect(settings);
+	uint64_t observations = 0;
+	field.Client->OnTiming([&](engine::ecs::Store &store, double nowSeconds, double roundTripSeconds) {
+		CHECK(nowSeconds == field.Now);
+		CHECK(roundTripSeconds >= 0);
+		engine::scene::SynchronizeWeatherClocks(store, nowSeconds, roundTripSeconds);
+		++observations;
+	});
+	field.Client->OnUserState(engine::scene::AcceptWeatherClockUpdate);
+	for (uint64_t tick = 1; tick < 400 && !field.Client->Joined(); ++tick)
+		field.Tick(tick);
+	REQUIRE(field.Client->Joined());
+	REQUIRE(field.Replica.Get<engine::scene::WeatherClock>(provider));
+	CHECK(engine::scene::WeatherClockOf(field.Replica, provider).Tick == 4000);
+	CHECK(engine::scene::WeatherClockOf(field.Replica, provider).ElapsedSeconds == 200);
+	CHECK(engine::scene::WeatherClockOf(field.Replica, provider).DisplacementQ8 == clock.DisplacementQ8);
+	CHECK(field.Replica.Time().Elapsed == before.Elapsed);
+	CHECK(field.Replica.Time().Tick == before.Tick);
+	const auto arrived = observations;
+	field.Client->Poll(field.Replica, field.Now);
+	CHECK(observations == arrived + 1);
+	clock.Sequence = 2;
+	clock.Tick = 5000;
+	clock.ElapsedSeconds = 250;
+	clock.DisplacementQ8 = {1200, 0, 100};
+	field.World.Set(provider, clock);
+	for (uint64_t tick = 500; tick < 520; ++tick)
+		field.Tick(tick);
+	CHECK(engine::scene::WeatherClockOf(field.Replica, provider).Tick == 5000);
+	CHECK(engine::scene::WeatherClockOf(field.Replica, provider).ElapsedSeconds == 250);
+	CHECK(engine::scene::WeatherClockOf(field.Replica, provider).DisplacementQ8 == clock.DisplacementQ8);
+	CHECK(field.Replica.Time().Elapsed == before.Elapsed);
+	clock.Sequence = 3;
+	clock.Tick = 6000;
+	clock.ElapsedSeconds = 300;
+	clock.WorldPaused = true;
+	engine::core::ByteWriter finalAnchor;
+	engine::scene::WriteWeatherClockUpdate(finalAnchor, provider, clock);
+	bool visible = false;
+	field.Server->Authority().SetInterestBatch([&](engine::replication::ClientId,
+												   const engine::ecs::Store &,
+												   std::span<const engine::ecs::Entity> candidates,
+												   std::span<uint8_t> accepted) {
+		for (size_t index = 0; index < candidates.size(); ++index)
+			accepted[index] = visible ? 1 : 0;
+	});
+	REQUIRE(field.Server->BroadcastEntityState(field.World, provider, finalAnchor.Bytes(), field.Now));
+	field.Now += 0.02;
+	field.Server->Advance(field.Now);
+	field.Client->Poll(field.Replica, field.Now);
+	CHECK(engine::scene::WeatherClockOf(field.Replica, provider).Tick == 5000);
+	visible = true;
+	REQUIRE(field.Server->BroadcastEntityState(field.World, provider, finalAnchor.Bytes(), field.Now));
+	// No world tick is advanced or newly acknowledged for this suspension anchor.
+	for (int pump = 0; pump < 5; ++pump) {
+		field.Now += 0.02;
+		field.Server->Advance(field.Now);
+		field.Client->Poll(field.Replica, field.Now);
+		field.Client->Advance(field.Now);
+	}
+	CHECK(engine::scene::WeatherClockOf(field.Replica, provider).Tick == 6000);
+	CHECK(engine::scene::WeatherClockOf(field.Replica, provider).ElapsedSeconds == 300);
+	CHECK(engine::scene::WeatherClockOf(field.Replica, provider).WorldPaused);
+	CHECK(field.Replica.Time().Elapsed == before.Elapsed);
+}
+
+TEST_CASE(
+	"reliable pause anchors survive an unfinished joining snapshot on either wire",
+	"[replication][negotiation][weather]"
+) {
+	const auto mode = GENERATE(WireMode::Datagram, WireMode::Quic);
+	const bool providerPresent = GENERATE(false, true);
+	engine::scene::RegisterSceneComponents();
+	Field field(mode);
+	const auto provider = field.World.Create();
+	engine::scene::WeatherClock beforePause;
+	beforePause.Tick = 70;
+	beforePause.ElapsedSeconds = 3;
+	beforePause.ElapsedFractionQ32 = uint32_t{1} << 31;
+	beforePause.Sequence = 1;
+	field.World.Set(provider, beforePause);
+	if (providerPresent) {
+		REQUIRE(field.Replica.CreateAt(provider));
+		field.Replica.Set(provider, beforePause);
+	}
+	const auto bulk = field.World.Create();
+	field.World.Set(bulk, Bulk{std::string(24 * 1024, 'w')});
+	field.Server->Authority().Replicate(Name("endtoend_test.Bulk"));
+	field.Server->Authority().Replicate(Name("scene.WeatherClock"));
+	ConnectorSettings settings;
+	settings.AttemptSeconds = 2;
+	field.Connect(settings);
+	field.Client->OnUserState(engine::scene::AcceptWeatherClockUpdate);
+	field.Client->OnTiming(engine::scene::SynchronizeWeatherClocks);
+	// Complete admission without publishing any world state.
+	for (int pump = 0; pump < 200; ++pump) {
+		field.Now += 1.0 / 60.0;
+		field.Client->Poll(field.Replica, field.Now);
+		field.Server->Poll(field.Now);
+		field.Server->Advance(field.Now);
+		field.Client->Poll(field.Replica, field.Now);
+		field.Client->Advance(field.Now);
+		if (field.Client->Admitted() && field.Server->Carrying() != 0) break;
+	}
+	REQUIRE(field.Client->Admitted());
+	REQUIRE(field.Server->Carrying() == 1);
+	REQUIRE_FALSE(field.Client->Joined());
+	// Capture the active snapshot, then suspend while that snapshot is in flight.
+	field.Server->Publish(field.World, 1, field.Now);
+	auto paused = beforePause;
+	REQUIRE(engine::scene::AdvanceWeatherElapsed(paused, 1));
+	paused.Sequence = 2;
+	paused.Tick = 71;
+	paused.WorldPaused = true;
+	field.World.Set(provider, paused);
+	engine::core::ByteWriter anchor;
+	engine::scene::WriteWeatherClockUpdate(anchor, provider, paused);
+	REQUIRE(field.Server->BroadcastEntityState(field.World, provider, anchor.Bytes(), field.Now));
+	for (int pump = 0; pump < 40; ++pump) {
+		field.Now += 1.0 / 60.0;
+		field.Server->Advance(field.Now);
+		field.Client->Poll(field.Replica, field.Now);
+		field.Client->Advance(field.Now);
+		field.Server->Poll(field.Now);
+		const auto *inbox = field.Replica.Resource<engine::scene::WeatherClockInbox>();
+		if (inbox != nullptr && inbox->Count == 1) break;
+	}
+	REQUIRE_FALSE(field.Client->Joined());
+	REQUIRE(field.Replica.Resource<engine::scene::WeatherClockInbox>());
+	REQUIRE(field.Replica.Resource<engine::scene::WeatherClockInbox>()->Count == 1);
+	// Continue snapshot delivery at the unchanged simulation tick after the
+	// reliable pause message has already been consumed and acknowledged.
+	for (int pump = 0; pump < 200 && !field.Client->Joined(); ++pump)
+		field.Tick(1);
+	REQUIRE(field.Client->Joined());
+	const auto accepted = engine::scene::WeatherClockOf(field.Replica, provider);
+	CHECK(accepted.Sequence == paused.Sequence);
+	CHECK(accepted.Tick == paused.Tick);
+	CHECK(accepted.ElapsedSeconds == paused.ElapsedSeconds);
+	CHECK(accepted.ElapsedFractionQ32 == paused.ElapsedFractionQ32);
+	CHECK(accepted.ElapsedRemainder == paused.ElapsedRemainder);
+	CHECK(accepted.WorldPaused);
+	CHECK_FALSE(accepted.Paused);
+	CHECK(field.Replica.Resource<engine::scene::WeatherClockInbox>()->Count == 1);
+	CHECK(field.Replica.Time().Elapsed == 0);
+	CHECK(field.World.Time().Elapsed == 0);
 }

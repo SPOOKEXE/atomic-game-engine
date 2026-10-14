@@ -800,7 +800,8 @@ namespace engine::render {
 		graph::ResourceId resource,
 		uint64_t owner,
 		uint32_t viewWidth,
-		uint32_t viewHeight
+		uint32_t viewHeight,
+		bool authoredExtent
 	) {
 		const graph::ResourceDesc *desc = pipeline.Graph.FindResource(resource);
 		if (desc == nullptr || desc->Kind == graph::ResourceKind::Texture ||
@@ -837,7 +838,12 @@ namespace engine::render {
 
 		uint32_t width = 0;
 		uint32_t height = 0;
-		desc->Resolve(viewWidth, viewHeight, width, height);
+		if (authoredExtent) {
+			width = viewWidth;
+			height = viewHeight;
+		} else {
+			desc->Resolve(viewWidth, viewHeight, width, height);
+		}
 		const graph::NodeScope scope = ResourceScope(pipeline, resource);
 		const core::Name targetName = GraphTargetName(pipeline, desc->Name);
 		for (GraphTarget &target : GraphResources.Targets) {
@@ -883,7 +889,7 @@ namespace engine::render {
 		}
 
 		GraphResources.Targets.push_back(GraphTarget{pipeline.Name, targetName, scope, owner});
-		return EnsureGraphTarget(pipeline, resource, owner, viewWidth, viewHeight);
+		return EnsureGraphTarget(pipeline, resource, owner, viewWidth, viewHeight, authoredExtent);
 	}
 
 	SDL_GPUBuffer *Renderer::Impl::FindGraphBuffer(
@@ -904,14 +910,18 @@ namespace engine::render {
 		graph::ResourceId resource,
 		uint64_t owner,
 		uint32_t viewWidth,
-		uint32_t viewHeight
+		uint32_t viewHeight,
+		uint64_t actualBytes
 	) {
 		const graph::ResourceDesc *desc = pipeline.Graph.FindResource(resource);
 		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer || desc->External ||
 			desc->BufferStride == 0) {
 			return nullptr;
 		}
-		const uint64_t bytes = desc->Bytes(viewWidth, viewHeight);
+		const uint64_t declaredBytes = desc->Bytes(viewWidth, viewHeight);
+		if (actualBytes != 0 && (actualBytes > declaredBytes || actualBytes % desc->BufferStride != 0))
+			return nullptr;
+		const uint64_t bytes = actualBytes != 0 ? actualBytes : declaredBytes;
 		if (bytes == 0 || bytes > MAX_GRAPH_BUFFER_BYTES || bytes > UINT32_MAX) {
 			ENGINE_WARN(
 				"graph buffer '{}' requests {} bytes, over the {} byte limit",

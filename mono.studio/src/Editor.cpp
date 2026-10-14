@@ -13,6 +13,7 @@
 #include <engine/examples/PackagedAssets.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/game/WeatherGround.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
@@ -43,6 +44,7 @@
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/scene/VectorField.hpp>
 #include <engine/scene/Volume.hpp>
+#include <engine/scene/WeatherClock.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/PortalTransfer.hpp>
@@ -50,6 +52,7 @@
 #include <engine/script/SourceCache.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/ui/Theme.hpp>
+#include <engine/weather/Clock.hpp>
 
 #include <SDL3/SDL.h>
 
@@ -62,6 +65,7 @@
 #include "ExternalEditor.hpp"
 #include "PlayedInput.hpp"
 #include "SourceEditor.hpp"
+#include "WeatherAudio.hpp"
 
 #include <spdlog/logger.h>
 #include <spdlog/sinks/base_sink.h>
@@ -843,6 +847,12 @@ namespace studio {
 		engine::world::UniverseSettings interactiveWorlds;
 		interactiveWorlds.MaximumCatchUpTicks = engine::world::INTERACTIVE_CATCH_UP_TICKS;
 		Universe = std::make_unique<engine::world::Universe>(interactiveWorlds);
+		(void)Universe->OnState([](WorldId, engine::ecs::Store &store, engine::world::WorldState state) {
+			(void)engine::weather::SetWeatherWorldPaused(
+				store,
+				state == engine::world::WorldState::Suspended || state == engine::world::WorldState::Faulted
+			);
+		});
 		if (!Universe->ConfigurePresentation(1)) {
 			Say("could not configure portal image transport", LogLevel::Error);
 			return false;
@@ -976,6 +986,7 @@ namespace studio {
 	}
 
 	void Editor::Shutdown() {
+		WeatherAudio_.reset();
 		ReleaseImageComposerPreview();
 		ImageComposer.reset();
 		// A prepared import owns no universe state, but its result fields belong
@@ -1219,6 +1230,7 @@ namespace studio {
 				PumpPlugins(delta);
 
 				Simulate(delta);
+				PumpWeatherAudio();
 				if (engine::core::Clock::Seconds() >= NextDataStoreFlush) {
 					(void)FlushDataStore();
 					NextDataStoreFlush = engine::core::Clock::Seconds() + 1.0;
@@ -1499,6 +1511,16 @@ namespace studio {
 			}
 		}
 
+		for (WorldRun &run : Runs) {
+			if (!run.Paused) continue;
+			for (const auto &link : run.Links)
+				if (link) (void)link->FlushPausedState(*Universe);
+			Universe->Enter(run.World, [](engine::ecs::Store &store) {
+				if (const auto *publication = store.Resource<engine::scene::WeatherClockPublication>();
+					publication && publication->Pending)
+					store.SetResource(engine::scene::WeatherClockPublication{});
+			});
+		}
 		if (!anyLive) {
 			// **The clock stops and nothing else does.** The runtimes are
 			// still alive, their connections still exist and the snapshot Stop
@@ -3173,6 +3195,9 @@ namespace studio {
 		particleVisibility.Refine(
 			damage, particleLayerPresent, ribbonLayerPresent, particleVisibilitySignature
 		);
+		const bool weatherWorkPending = Renderer.HasPendingWeatherWork(view.World);
+		damage.Environment = damage.Environment || weatherWorkPending;
+		damage.Scene = damage.Scene || weatherWorkPending;
 		damage.Overlay = Overlay.IsDirty();
 		const engine::render::PresentationCacheApplicability cacheApplicability{
 			.Objects = !view.Instances.empty() || view.Grid.Enabled,
@@ -3472,6 +3497,8 @@ namespace studio {
 		// tick rather than tuned now against a synthetic slab.
 		engine::physics::PreparePhysicsWorld(store);
 		engine::physics::RegisterPhysicsSystems(systems);
+		engine::weather::RegisterWeatherClockSystem(systems);
+		engine::game::RegisterWeatherGroundSystem(systems);
 
 		// **What a mesh collider resolves through**, and the studio needs it for
 		// the same reason a server does: a `Collider` names its geometry with a

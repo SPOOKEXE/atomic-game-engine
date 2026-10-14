@@ -14,6 +14,7 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/game/WeatherGround.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
@@ -46,6 +47,8 @@
 #include <engine/scene/Wire.hpp>
 #include <engine/script/PlayerGui.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/weather/Clock.hpp>
+#include <engine/weather/Runtime.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>
@@ -1067,6 +1070,8 @@ namespace client {
 		engine::scene::PrepareGravity(store);
 		engine::scene::RegisterGravitySystem(scheduler);
 		engine::scene::RegisterOwnershipSystem(scheduler);
+		engine::weather::RegisterWeatherClockSystem(scheduler);
+		engine::game::RegisterWeatherGroundSystem(scheduler);
 
 		// The script has now finished authoring `StarterGui`. Clone that completed
 		// template rather than the empty service that existed before it ran. An
@@ -1252,6 +1257,7 @@ namespace client {
 	}
 
 	void RegisterClientComponents() {
+		engine::weather::RegisterWeatherRuntimeComponents();
 		// **The simulation's components, registered here because this program
 		// was the only one not doing it.** `mono.server` calls this from
 		// `Simulation.cpp` and `mono.studio` from `Editor.cpp`; the client

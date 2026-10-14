@@ -51,6 +51,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/WeatherClock.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/Codec.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
@@ -59,6 +60,7 @@
 #include <engine/script/PortalObservation.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/scripthost/Runtime.hpp>
+#include <engine/weather/Clock.hpp>
 #include <engine/world/DataStore.hpp>
 #include <engine/world/Lifecycle.hpp>
 
@@ -970,6 +972,14 @@ namespace server {
 		}
 
 		Driver_ = std::make_unique<engine::world::Driver>(driver);
+		(void)Worlds().OnState([](engine::world::WorldId,
+								  engine::ecs::Store &store,
+								  engine::world::WorldState state) {
+			(void)engine::weather::SetWeatherWorldPaused(
+				store,
+				state == engine::world::WorldState::Suspended || state == engine::world::WorldState::Faulted
+			);
+		});
 		Driver_->SetFixedStepBarrier(engine::game::MakePortalIslandCoordinator().Callbacks());
 		if (Settings.DataFactory) {
 			// A factory begins empty, but its first MCP create still constructs a
@@ -3468,7 +3478,9 @@ namespace server {
 			// world does not publish.** What the survey works out is only true
 			// of the world as it stands, so running it for a delta nobody is
 			// building is its whole cost for nothing.
-			if (!publishDue) {
+			const auto *clockPublication = store.Resource<engine::scene::WeatherClockPublication>();
+			const bool clockPublicationDue = clockPublication && clockPublication->Pending;
+			if (!publishDue && !clockPublicationDue && !Replication->Authority().HasPendingSnapshots()) {
 				// **The wire is still pumped.** `Listener::Flush` exists for
 				// exactly this caller: acknowledgements that never leave fill
 				// the far side's reliable window, and a link that is working
@@ -3477,6 +3489,22 @@ namespace server {
 				// replication rate is asking for.
 				Replication->Flush(nowSeconds);
 				return;
+			}
+
+			if (clockPublicationDue) {
+				SurveyVisibility(store);
+				// Suspension may occur on an already acknowledged simulation tick.
+				// The reliable lane carries its final anchor independently of tick acks.
+				bool accepted = true;
+				store.Each<const engine::scene::WeatherClock>([&](engine::ecs::Entity provider,
+																  const engine::scene::WeatherClock &clock) {
+					if (!engine::scene::VisibleToClients(store, provider)) return;
+					engine::core::ByteWriter message;
+					engine::scene::WriteWeatherClockUpdate(message, provider, clock);
+					accepted &=
+						Replication->BroadcastEntityState(store, provider, message.Bytes(), nowSeconds);
+				});
+				if (accepted) store.SetResource(engine::scene::WeatherClockPublication{});
 			}
 
 			SurveyVisibility(store);

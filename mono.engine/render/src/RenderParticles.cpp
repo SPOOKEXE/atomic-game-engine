@@ -1941,19 +1941,69 @@ namespace engine::render {
 		return true;
 	}
 
-	Renderer::Impl::GpuParticleFieldPreparation Renderer::Impl::PrepareGpuParticleField(
+	Renderer::Impl::GpuParticleFieldPreparation Renderer::Impl::PrepareGpuParticleFields(
 		const View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot
+	) {
+		ActiveGpuParticleFieldIndices.clear();
+		ActiveGpuParticleFieldWorld = nullptr;
+		const uint64_t owner = view.ParticleWorldName.IsValid() ? view.ParticleWorld : view.World;
+		const auto name = view.ParticleWorldName.IsValid() ? view.ParticleWorldName : view.WorldName;
+		// Replaced sources retire their pools. Weather emission uses the bounded
+		// camera slot; ordinary authored fields remain shared by every world view.
+		std::erase_if(GpuParticleFieldWorlds, [&](GpuParticleFieldWorld &state) {
+			if (state.Id != owner || state.Name != name || (state.Weather && state.ViewSlot != view.Slot))
+				return false;
+			const bool retained = state.Weather
+									  ? std::any_of(
+											view.WeatherParticles.begin(),
+											view.WeatherParticles.end(),
+											[&](const auto &packet) { return packet.Source == state.Source; }
+										)
+									  : view.GpuParticles && view.GpuParticles->Source == state.Source;
+			if (retained) return false;
+			if (state.States) gpu::ReleaseBuffer(Device, state.States);
+			if (state.Samples) gpu::ReleaseBuffer(Device, state.Samples);
+			if (state.SampleTransfer) gpu::ReleaseTransferBuffer(Device, state.SampleTransfer);
+			return true;
+		});
+		GpuParticleFieldPreparation prepared;
+		const auto collect = [&](const GpuParticleFieldView &packet, bool weather) {
+			const auto field = PrepareGpuParticleField(view, packet, weather, command, timingSlot);
+			prepared.Dispatches += field.Dispatches;
+			if (ActiveGpuParticleFieldWorld != nullptr && ActiveGpuParticleFieldWorld->States != nullptr) {
+				ActiveGpuParticleFieldIndices.push_back(
+					static_cast<size_t>(ActiveGpuParticleFieldWorld - GpuParticleFieldWorlds.data())
+				);
+				prepared.Count += ActiveGpuParticleFieldWorld->ActiveCount;
+			}
+		};
+		if (view.GpuParticles) collect(*view.GpuParticles, false);
+		for (const auto &packet : view.WeatherParticles)
+			collect(packet, true);
+		ActiveGpuParticleFieldWorld = ActiveGpuParticleFieldIndices.empty()
+										  ? nullptr
+										  : &GpuParticleFieldWorlds[ActiveGpuParticleFieldIndices.front()];
+		return prepared;
+	}
+
+	Renderer::Impl::GpuParticleFieldPreparation Renderer::Impl::PrepareGpuParticleField(
+		const View &view,
+		const GpuParticleFieldView &source,
+		bool weather,
+		SDL_GPUCommandBuffer *command,
+		uint32_t timingSlot
 	) {
 		ENGINE_PROFILE_CAT("gpu particle field", core::ProfileCategory::Render);
 		ActiveGpuParticleFieldWorld = nullptr;
-		if (!view.GpuParticles || !view.GpuParticles->Field.Enabled ||
-			view.GpuParticles->Field.SpawnSamples.empty() || command == nullptr ||
+		if (!source.Field.Enabled || source.Field.SpawnSamples.empty() || command == nullptr ||
 			GpuParticleFieldStep == nullptr)
 			return {};
-		const auto &source = *view.GpuParticles;
 		ActiveGpuParticleFieldWorld = &GpuParticleFieldWorldFor(
 			view.ParticleWorldName.IsValid() ? view.ParticleWorld : view.World,
-			view.ParticleWorldName.IsValid() ? view.ParticleWorldName : view.WorldName
+			view.ParticleWorldName.IsValid() ? view.ParticleWorldName : view.WorldName,
+			source.Source,
+			weather,
+			weather ? view.Slot : 0u
 		);
 		auto &state = *ActiveGpuParticleFieldWorld;
 		const bool definitionCurrent =
@@ -2064,9 +2114,14 @@ namespace engine::render {
 		state.DefinitionValid = true;
 		state.Frame = source.Frame;
 		state.ForceField = source.ForceField;
+		const auto &weatherClock = view.Lighting.EnvironmentState.Clock;
+		const float deltaSeconds =
+			weather && (weatherClock.Paused || weatherClock.WorldPaused || weatherClock.TimeScaleQ16 == 0)
+				? 0.0f
+				: std::clamp(view.ParticleDelta, 0.0f, 1.0f);
 		// Zero time still applies changed bounds, samples and reset requests.
 		// Only an initialized, identical paused population can skip its dispatch.
-		if (!state.ResetPending && !definitionChanged && !poseChanged && view.ParticleDelta <= 0) {
+		if (!state.ResetPending && !definitionChanged && !poseChanged && deltaSeconds <= 0) {
 			state.PreparedFrame = FrameCounter;
 			return {};
 		}
@@ -2085,11 +2140,11 @@ namespace engine::render {
 							   (source.ForceField.LocalSpace ? 2u : 0u) |
 							   (source.ForceField.TwoDimensional ? 4u : 0u);
 		FieldUniforms uniforms{
-			vector(source.Frame.Position, std::clamp(view.ParticleDelta, 0.0f, 1.0f)),
+			vector(source.Frame.Position, deltaSeconds),
 			{turn.x, turn.y, turn.z, turn.w},
 			vector(source.Field.HalfExtent, source.Field.VelocityResponse),
 			{state.ActiveCount, state.Seed, state.ResetPending ? 1u : 0u, state.Layers},
-			{state.SampleCapacity, 0u, 0u, 0u},
+			{state.SampleCapacity, weather ? 1u : 0u, 0u, 0u},
 			{vector(source.Field.Styles[0].Acceleration, 0),
 			 vector(source.Field.Styles[1].Acceleration, 0),
 			 vector(source.Field.Styles[2].Acceleration, 0)},
@@ -2131,6 +2186,25 @@ namespace engine::render {
 		uint32_t &particlesDrawn,
 		WorldColourTarget target
 	) {
+		uint32_t draws = 0;
+		for (const size_t index : ActiveGpuParticleFieldIndices) {
+			ActiveGpuParticleFieldWorld = &GpuParticleFieldWorlds[index];
+			draws += DrawOneGpuParticleField(
+				command, pass, viewProjection, eye, triangles, particlesDrawn, target
+			);
+		}
+		return draws;
+	}
+
+	uint32_t Renderer::Impl::DrawOneGpuParticleField(
+		SDL_GPUCommandBuffer *command,
+		SDL_GPURenderPass *pass,
+		const glm::mat4 &viewProjection,
+		const core::CFrame &eye,
+		uint64_t &triangles,
+		uint32_t &particlesDrawn,
+		WorldColourTarget target
+	) {
 		if (ActiveGpuParticleFieldWorld == nullptr || ActiveGpuParticleFieldWorld->States == nullptr ||
 			pass == nullptr)
 			return 0;
@@ -2161,7 +2235,7 @@ namespace engine::render {
 			vector(up, 0),
 			vector(forward, 0),
 			vector(state.Frame.Position, state.Field.HalfExtent.Magnitude()),
-			{0, static_cast<float>(state.Layers), 0, 0},
+			{0, static_cast<float>(state.Layers), state.Weather ? 1.0f : 0.0f, state.Weather ? 128.0f : 0.0f},
 			{colour(state.Field.Styles[0]), colour(state.Field.Styles[1]), colour(state.Field.Styles[2])},
 			{state.Field.Styles[0].Size, state.Field.Styles[1].Size, state.Field.Styles[2].Size, 0}
 		};
@@ -2204,6 +2278,7 @@ namespace engine::render {
 			if (field.SampleTransfer != nullptr) gpu::ReleaseTransferBuffer(Device, field.SampleTransfer);
 		}
 		GpuParticleFieldWorlds.clear();
+		ActiveGpuParticleFieldIndices.clear();
 		ActiveGpuParticleFieldWorld = nullptr;
 		if (GpuParticleFieldStep != nullptr) SDL_ReleaseGPUComputePipeline(Device, GpuParticleFieldStep);
 		if (GpuParticleFieldPipeline != nullptr)

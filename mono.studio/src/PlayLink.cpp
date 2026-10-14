@@ -1,3 +1,4 @@
+#include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/game/Play.hpp>
@@ -9,6 +10,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/WeatherClock.hpp>
 #include <engine/script/PlayerGui.hpp>
 #include <engine/script/RemoteEvent.hpp>
 #include <engine/script/Runtime.hpp>
@@ -393,6 +395,43 @@ namespace studio {
 		StepMany(universe, std::span<PlayLink *const>(&link, 1), runtimeOf);
 	}
 
+	bool PlayLink::FlushPausedState(engine::world::Universe &universe) {
+		if (!IsRunning()) return false;
+		const double nowSeconds = engine::core::Clock::Seconds();
+		std::vector<std::vector<std::byte>> messages;
+		std::vector<std::vector<std::byte>> anchors;
+		bool needed = false;
+		universe.Enter(Authority_, [&](engine::ecs::Store &store) {
+			const auto *publication = store.Resource<engine::scene::WeatherClockPublication>();
+			const bool finalAnchors = publication && publication->Pending;
+			needed = finalAnchors || Server.HasPendingSnapshots();
+			if (!needed) return;
+			Server.Publish(store, store.Time().Tick);
+			for (const auto &message : Server.Outgoing(Handle))
+				messages.push_back(message);
+			if (!finalAnchors) return;
+			store.Each<const engine::scene::WeatherClock>([&](engine::ecs::Entity provider,
+															  const engine::scene::WeatherClock &clock) {
+				if (!Server.Interested(Handle, provider, store)) return;
+				engine::core::ByteWriter encoded;
+				engine::scene::WriteWeatherClockUpdate(encoded, provider, clock);
+				anchors.emplace_back(encoded.Bytes().begin(), encoded.Bytes().end());
+			});
+		});
+		if (!needed) return false;
+		universe.Enter(Replica_, [&](engine::ecs::Store &store) {
+			for (const auto &message : messages)
+				(void)Client.Receive(store, message);
+			for (const auto &anchor : anchors)
+				(void)engine::scene::AcceptWeatherClockUpdate(store, anchor, nowSeconds, 0);
+			engine::scene::SynchronizeWeatherClocks(store, nowSeconds, 0);
+			client::RecordReplicatedTick(store, Client.Applied());
+		});
+		const auto acknowledgement = Client.Acknowledge();
+		if (!acknowledgement.empty()) (void)Server.Receive(Handle, acknowledgement);
+		return true;
+	}
+
 	void PlayLink::StepMany(
 		engine::world::Universe &universe, std::span<PlayLink *const> links, const RuntimeLookup &runtimeOf
 	) {
@@ -506,6 +545,7 @@ namespace studio {
 						step.Report.LargestMessage = std::max(step.Report.LargestMessage, message.size());
 						link.Client.Receive(store, message);
 					}
+					engine::scene::SynchronizeWeatherClocks(store, engine::core::Clock::Seconds(), 0);
 
 					step.Report.Applied = link.Client.Applied();
 					step.Report.ClientEntities = PosedEntities(store);

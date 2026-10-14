@@ -47,6 +47,7 @@
 #include <vector>
 
 namespace engine::render {
+	struct WeatherShadowLightingUniforms;
 
 	// One prepared view, exactly as `Renderer::Render` handed it over.
 	//
@@ -559,10 +560,13 @@ namespace engine::render {
 			const void *rawUniforms = nullptr,
 			size_t rawUniformBytes = 0,
 			const BeamUniforms *passBeams = nullptr,
-			SDL_GPUBuffer *fragmentStorage = nullptr
+			SDL_GPUBuffer *fragmentStorage = nullptr,
+			const WeatherShadowLightingUniforms *weatherShadows = nullptr
 		);
 
 		bool UploadCloudDensity();
+
+		void RegisterWeatherShadowNodes(NodeTable &frameNodes);
 
 		// The renderer-owned texture a named resource role resolves to.
 		//
@@ -585,7 +589,8 @@ namespace engine::render {
 		);
 
 		// The buffer backing a graph resource, allocating it when asked.
-		SDL_GPUBuffer *ResourceBuffer(graph::ResourceId resource, size_t selectedSlot, bool make);
+		SDL_GPUBuffer *
+		ResourceBuffer(graph::ResourceId resource, size_t selectedSlot, bool make, uint64_t actualBytes = 0);
 
 		// The selected slot has to be shared by graph target allocation and history writes.
 		size_t GraphTextureSlot(const graph::RunContext &context) const;
@@ -608,7 +613,9 @@ namespace engine::render {
 		void StageHistoryWrites(const graph::RunContext &context, SDL_GPUCommandBuffer *command);
 
 		// `ResourceBuffer` for the viewport this node names, or this view's.
-		SDL_GPUBuffer *GraphBuffer(graph::ResourceId resource, const graph::RunContext &context, bool make);
+		SDL_GPUBuffer *GraphBuffer(
+			graph::ResourceId resource, const graph::RunContext &context, bool make, uint64_t actualBytes = 0
+		);
 
 		// The fragment samplers for everything a node reads, in read order. An
 		// absent image binds the fallback texel rather than nothing.

@@ -461,6 +461,13 @@ namespace engine::world {
 		// @return Whether it was applied or queued.
 		WorldStatus SetState(WorldId id, WorldState state);
 
+		// Appends a local observer for requested state transitions after tick workers have joined.
+		// The borrowed store is bound to the driver thread, as with Enter. Observers
+		// cannot re-enter or retain it; structural requests wait for the next barrier.
+		// Up to sixteen observers
+		// coexist; callbacks remain local and never enter snapshots or messages.
+		bool OnState(std::function<void(WorldId, ecs::Store &, WorldState)> observer);
+
 		// Clears a world's fault so it ticks again.
 		//
 		// @param id The world to recover.
@@ -923,6 +930,7 @@ namespace engine::world {
 		};
 
 		void Apply(const Control &control);
+		void ApplyState(WorldId id, WorldState state);
 		void DrainControls();
 		void RefreshLanes(unsigned laneCount);
 		WorldId Adopt(const WorldSettings &settings, core::Name host = {});
@@ -958,6 +966,7 @@ namespace engine::world {
 		unsigned LaneCount = 0;
 
 		std::vector<Control> Pending;
+		std::vector<std::function<void(WorldId, ecs::Store &, WorldState)>> StateObservers;
 
 		// Reused between driver ticks rather than rebuilt, because the active
 		// list is walked every frame and most frames it is nearly the same.

@@ -29,6 +29,8 @@
 #include "SurfaceCapturePlan.hpp"
 #include "Tessellation.hpp"
 #include "VulkanTimestamps.hpp"
+#include "WeatherGpu.hpp"
+#include "WeatherTemporal.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
@@ -589,6 +591,44 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *TonemapPipeline = nullptr;
 		SDL_GPUComputePipeline *EnvironmentSkyCompute = nullptr;
 		SDL_GPUComputePipeline *EnvironmentCloudCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherFieldCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherShadowCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherSummaryCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherRaysCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherTemporalCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherReconstructCompute = nullptr;
+		struct WeatherTemporalTarget {
+			size_t Slot = 0;
+			uint64_t World = 0;
+			core::Name Pipeline;
+			WeatherTemporalHistory History;
+		};
+		std::vector<WeatherTemporalTarget> WeatherTemporalTargets;
+		WeatherTemporalHistory &WeatherTemporalAt(size_t slot, uint64_t world, core::Name pipeline);
+		void ReleaseWeatherTemporalSlot(size_t slot);
+		void ForgetWeatherTemporalWorld(uint64_t world);
+		void ReleaseWeatherTemporalHistories();
+		void CommitWeatherTemporalWrites(const void *command);
+		void DiscardWeatherTemporalWrites(const void *command = nullptr);
+		SDL_GPUComputePipeline *WeatherEvolutionCompute = nullptr;
+		std::vector<WeatherGpuGeneration> WeatherGenerations;
+		std::vector<std::unique_ptr<WeatherPhysicalOwner>> WeatherPhysicalOwners;
+		WeatherPhysicalOwner &WeatherPhysicalFor(uint64_t world, uint64_t recipeSignature);
+		void PruneWeatherPhysicalOwners();
+		std::vector<WeatherGpuWorldView> WeatherViews;
+		bool HasPendingWeatherWork(uint64_t world = 0) const {
+			for (const auto &owner : WeatherPhysicalOwners)
+				if ((!world || owner->World == world) && (owner->Physical.Fence || owner->CatchupPending))
+					return true;
+			for (const auto &generation : WeatherGenerations)
+				if ((!world || generation.World == world) &&
+					(generation.Topology.WorkActive || generation.Topology.ClassificationActive ||
+					 generation.TransitionAlpha < 1.0f))
+					return true;
+			return false;
+		}
+		void ForgetWeatherWorld(uint64_t world);
+		void ReleaseWeatherPipelines();
 
 		// Each owner selects one grade. Missing owners use the engine tonemap.
 		struct PostProcessVariant {
@@ -695,7 +735,9 @@ namespace engine::render {
 			uint32_t height,
 			uint32_t &dispatches,
 			bool opaqueSkySource,
-			const std::function<void()> &beginWork
+			const std::function<void()> &beginWork,
+			uint64_t weatherWorld = 0,
+			core::Name weatherPipeline = {}
 		);
 		bool IsBlackEnvironment(
 			const scene::Environment &environment, const void *command, SDL_GPUTexture *texture
@@ -905,7 +947,8 @@ namespace engine::render {
 			graph::ResourceId resource,
 			uint64_t owner,
 			uint32_t viewWidth,
-			uint32_t viewHeight
+			uint32_t viewHeight,
+			bool authoredExtent = false
 		);
 		SDL_GPUBuffer *FindGraphBuffer(
 			const InstalledPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
@@ -915,7 +958,8 @@ namespace engine::render {
 			graph::ResourceId resource,
 			uint64_t owner,
 			uint32_t viewWidth,
-			uint32_t viewHeight
+			uint32_t viewHeight,
+			uint64_t actualBytes = 0
 		);
 
 		struct GraphRasterPipeline {
@@ -1591,6 +1635,9 @@ namespace engine::render {
 		struct GpuParticleFieldWorld {
 			uint64_t Id = 0;
 			core::Name Name;
+			ecs::Entity Source = ecs::NULL_ENTITY;
+			bool Weather = false;
+			size_t ViewSlot = 0;
 			SDL_GPUBuffer *States = nullptr;
 			uint32_t Capacity = 0;
 			uint32_t ActiveCount = 0;
@@ -1616,23 +1663,48 @@ namespace engine::render {
 		};
 		std::vector<GpuParticleFieldWorld> GpuParticleFieldWorlds;
 		GpuParticleFieldWorld *ActiveGpuParticleFieldWorld = nullptr;
+		std::vector<size_t> ActiveGpuParticleFieldIndices;
 
-		GpuParticleFieldWorld &GpuParticleFieldWorldFor(uint64_t id, core::Name name) {
+		GpuParticleFieldWorld &GpuParticleFieldWorldFor(
+			uint64_t id, core::Name name, ecs::Entity source, bool weather, size_t viewSlot
+		) {
 			for (GpuParticleFieldWorld &world : GpuParticleFieldWorlds) {
-				if (world.Id == id && world.Name == name) return world;
+				if (world.Id == id && world.Name == name && world.Source == source &&
+					world.Weather == weather && world.ViewSlot == viewSlot)
+					return world;
 			}
 			GpuParticleFieldWorld world;
 			world.Id = id;
 			world.Name = name;
+			world.Source = source;
+			world.Weather = weather;
+			world.ViewSlot = viewSlot;
 			GpuParticleFieldWorlds.push_back(std::move(world));
 			return GpuParticleFieldWorlds.back();
 		}
 		bool ReserveGpuParticleField(uint32_t count);
 		struct GpuParticleFieldPreparation {
 			uint32_t Dispatches = 0;
+			uint32_t Count = 0;
 		};
 		GpuParticleFieldPreparation
-		PrepareGpuParticleField(const View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot);
+		PrepareGpuParticleFields(const View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot);
+		GpuParticleFieldPreparation PrepareGpuParticleField(
+			const View &view,
+			const GpuParticleFieldView &source,
+			bool weather,
+			SDL_GPUCommandBuffer *command,
+			uint32_t timingSlot
+		);
+		uint32_t DrawOneGpuParticleField(
+			SDL_GPUCommandBuffer *command,
+			SDL_GPURenderPass *pass,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &eye,
+			uint64_t &triangles,
+			uint32_t &particlesDrawn,
+			WorldColourTarget target
+		);
 		uint32_t DrawGpuParticleField(
 			SDL_GPUCommandBuffer *command,
 			SDL_GPURenderPass *pass,
@@ -3138,7 +3210,8 @@ namespace engine::render {
 			uint64_t &triangles,
 			const IndirectPhase *indirect = nullptr,
 			SlotSelection selection = SlotSelection::All,
-			VisibilityPass visibilityPass = VisibilityPass::Secondary
+			VisibilityPass visibilityPass = VisibilityPass::Secondary,
+			core::Name weatherPipeline = {}
 		);
 
 		void RecordVisibilityDraw(uint32_t first, uint32_t count);

@@ -638,6 +638,11 @@ namespace engine::replication {
 		// @param client The client to ask about.
 		// @return Its status, or an empty record for an unknown handle.
 		ClientStatus StatusOf(ClientId client) const;
+		// Whether any admitted client needs an initial or continuing snapshot stream.
+		bool HasPendingSnapshots() const;
+		// Applies the same configured interest selector used by component publication.
+		// For entity-scoped copied application state; neither selector nor store is modified.
+		bool Interested(ClientId client, ecs::Entity entity, const ecs::Store &store) const;
 
 		// What the last `Publish` did.
 		//

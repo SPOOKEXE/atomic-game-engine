@@ -244,6 +244,52 @@ TEST_CASE("what a machine works out for itself is not sent", "[replication][defa
 	CHECK_FALSE(LocalToTheClient("ecs.Hierarchy"));
 }
 
+TEST_CASE(
+	"weather source records cross while receipt history and authority tombstones stay local",
+	"[replication][defaults]"
+) {
+	defaults_test::Ready();
+	for (const auto name :
+		 {"scene.WeatherClockEstimate",
+		  "scene.WeatherClockPublication",
+		  "scene.WeatherClockInbox",
+		  "scene.WeatherWorldPause",
+		  "weather.RuntimeCache",
+		  "weather.Listener",
+		  "weather.GroundQuery",
+		  "weather.StatefulState",
+		  "weather.EpochHistory"}) {
+		INFO(name);
+		CHECK(LocalToTheClient(name));
+		CHECK(Row(name) == nullptr);
+	}
+	for (const auto name :
+		 {"scene.WeatherCompute",
+		  "scene.WeatherClock",
+		  "scene.WeatherAcceptedDefinition",
+		  "weather.Events",
+		  "weather.RuntimeState",
+		  "weather.StatefulCheckpoint"})
+		CHECK_FALSE(LocalToTheClient(name));
+	CHECK(engine::replication::CannotBeSigned("scene.WeatherAcceptedDefinition"));
+	CHECK(engine::replication::CannotBeSigned("weather.Events"));
+	CHECK(engine::replication::CannotBeSigned("weather.StatefulCheckpoint"));
+	for (size_t index = 0; index < engine::ecs::Components::Count(); ++index) {
+		const auto &type =
+			engine::ecs::Components::Describe(engine::ecs::ComponentId{static_cast<uint32_t>(index)});
+		const auto name = type.Name.Text();
+		if (name != "scene.WeatherCompute" && name != "scene.WeatherClock" &&
+			name != "scene.WeatherAcceptedDefinition")
+			continue;
+		INFO(name);
+		REQUIRE(Row(name));
+		CHECK(
+			Row(name)->Detection ==
+			(name == "scene.WeatherCompute" ? ChangeDetection::Signature : ChangeDetection::Observed)
+		);
+	}
+}
+
 TEST_CASE("the derivation keeps what can cross and drops what cannot", "[replication][defaults]") {
 	defaults_test::Ready();
 
@@ -548,10 +594,13 @@ TEST_CASE("only what a system writes or a hash cannot cover is observed", "[repl
 			 component.Name == "scene.TextContent" || component.Name == "scene.ShaderSource" ||
 			 component.Name == "scene.EditableMesh" || component.Name == "scene.EditableImage" ||
 			 component.Name == "scene.ImageGraph" || component.Name == "scene.GpuParticleField" ||
-			 component.Name == "scene.SurfaceBounces" || component.Name == "scene.SurfaceLimit" ||
-			 component.Name == "gui.Label" || component.Name == "gui.Entry" ||
-			 component.Name == "gui.NodeCanvasNode" || component.Name == "gui.NodeCanvasGroup" ||
-			 component.Name == "script.Program" || component.Name == "ecs.AttributeTable")
+			 component.Name == "scene.WeatherClock" || component.Name == "scene.WeatherAcceptedDefinition" ||
+			 component.Name == "weather.Events" || component.Name == "weather.RuntimeState" ||
+			 component.Name == "weather.StatefulCheckpoint" || component.Name == "scene.SurfaceBounces" ||
+			 component.Name == "scene.SurfaceLimit" || component.Name == "gui.Label" ||
+			 component.Name == "gui.Entry" || component.Name == "gui.NodeCanvasNode" ||
+			 component.Name == "gui.NodeCanvasGroup" || component.Name == "script.Program" ||
+			 component.Name == "ecs.AttributeTable")
 		);
 	}
 }

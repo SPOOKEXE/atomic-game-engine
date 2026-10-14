@@ -245,7 +245,8 @@ namespace engine::audio {
 		// @return What happened.
 		MixReport Render(SampleBuffer &out);
 
-		// Applies every waiting command immediately, ignoring deadlines.
+		// Applies every waiting command immediately, ignoring dispatch deadlines.
+		// A Play with RetainDeadline still gates its samples until its deadline.
 		//
 		// For building a routing before the clock is running, and for a test
 		// that wants a graph in a known state. **Not for the device thread** -

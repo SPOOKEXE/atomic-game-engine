@@ -253,6 +253,22 @@ namespace engine::replication {
 		return taken;
 	}
 
+	bool Listener::BroadcastEntityState(
+		const ecs::Store &store, ecs::Entity entity, std::span<const std::byte> message, double nowSeconds
+	) {
+		core::ByteWriter writer;
+		User payload;
+		payload.Bytes.assign(message.begin(), message.end());
+		WriteMessage(writer, payload);
+		bool accepted = true;
+		for (Peer &peer : Peers) {
+			if (!peer.Wire || !peer.Wire->Carrying() || !Authority_.Interested(peer.Client, entity, store))
+				continue;
+			accepted &= peer.Wire->Send(writer.Bytes(), nowSeconds);
+		}
+		return accepted;
+	}
+
 	void
 	Listener::SetForeign(std::function<bool(std::span<const std::byte>, const net::Endpoint &)> handler) {
 		Foreign = std::move(handler);

@@ -18,6 +18,8 @@
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Volume.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/weather/Runtime.hpp>
+#include <engine/weather/StatefulRuntime.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -31,10 +33,34 @@ TEST_SUITE_ID("engine.render.worldview")
 TEST_DEPENDS("engine.render.worldpresentation")
 TEST_DEPENDS("engine.render.spatialcanvas")
 TEST_DEPENDS("engine.scene.lighting-effects")
+TEST_DEPENDS("engine.weather.statefulruntime")
 
 using namespace engine;
 
 namespace {
+	double WeatherCheckpointCopyBytes() {
+		for (const auto &counter : core::Metrics::Snapshot().Counters)
+			if (counter.Name == core::Name("render.weather.checkpoint_collect_bytes")) return counter.Value;
+		return 0.0;
+	}
+
+	ecs::Entity AddStatefulWeather(ecs::Store &store, const weather::StatefulWeatherCheckpoint &checkpoint) {
+		scene::InstallServices(store);
+		const auto lighting = scene::ServiceOf(store, ecs::Classes::Find(core::Name("Lighting")));
+		const auto provider =
+			store.CreateInstance(ecs::Classes::Find(core::Name("WeatherCompute")), "Weather");
+		REQUIRE(store.SetParent(provider, lighting));
+		auto controls = *store.Get<scene::WeatherCompute>(provider);
+		controls.Mode = scene::WeatherMode::Stateful;
+		controls.DefinitionRevision = checkpoint.Revision;
+		store.Set(provider, controls);
+		scene::WeatherClock clock;
+		clock.Epoch = checkpoint.Epoch;
+		store.Set(provider, clock);
+		store.Set(provider, checkpoint);
+		return provider;
+	}
+
 	double GpuParticleSampleCopyBytes() {
 		for (const auto &counter : core::Metrics::Snapshot().Counters)
 			if (counter.Name == core::Name("render.gpu_particle_field.sample_collect_bytes"))
@@ -47,6 +73,8 @@ namespace {
 		effects::RegisterEffectClasses();
 		gui::RegisterGuiClasses();
 		render::RegisterPresentationComponents();
+		weather::RegisterWeatherRuntimeComponents();
+		weather::RegisterStatefulWeatherComponents();
 	}
 	ecs::Entity PartAt(ecs::Store &store, core::Vector3 position) {
 		scene::PartDesc part;
@@ -837,4 +865,218 @@ TEST_CASE(
 	CHECK(std::any_of(lights.begin(), lights.end(), [](const render::SceneLight &candidate) {
 		return candidate.Position.X == 50.0f && candidate.Position.Z == -100.0f && candidate.Range == 50.0f;
 	}));
+}
+
+TEST_CASE(
+	"stateful weather packets retain owned checkpoints until their publication changes",
+	"[render][world-view][weather]"
+) {
+	RegisterViewClasses();
+	ecs::Store store("checkpoint-packet");
+	const weather::StatefulWeatherCheckpoint original{10, 1, 1, {std::byte{1}, std::byte{2}, std::byte{3}}};
+	const auto provider = AddStatefulWeather(store, original);
+	render::WorldViewFrame frame;
+	const core::Name owner("checkpoint-packet");
+	const auto beforeCopy = WeatherCheckpointCopyBytes();
+	render::CollectWorldView(store, owner, frame);
+	CHECK(frame.WeatherCheckpoint == original.Bytes);
+	CHECK(WeatherCheckpointCopyBytes() == beforeCopy + original.Bytes.size());
+	CHECK(frame.WeatherCheckpointTick == original.Tick);
+	CHECK(frame.WeatherCheckpointEpoch == original.Epoch);
+	CHECK(frame.WeatherCheckpointRevision == original.Revision);
+	CHECK(frame.WeatherCheckpointSource == provider);
+	const auto version = frame.WeatherCheckpointVersion;
+	const auto *retained = frame.WeatherCheckpoint.data();
+	const auto copied = WeatherCheckpointCopyBytes();
+	store.AdvanceTick(1.0f / 60.0f);
+	render::CollectWorldView(store, owner, frame);
+	CHECK(frame.WeatherCheckpoint.data() == retained);
+	CHECK(frame.WeatherCheckpointVersion == version);
+	CHECK(WeatherCheckpointCopyBytes() == copied);
+
+	render::WorldCameraFrame camera;
+	render::WorldViewBinding binding{};
+	binding.World = 3;
+	binding.Name = owner;
+	binding.Identity = store.Identity();
+	render::View view;
+	REQUIRE(render::BindWorldView(frame, camera, binding, view));
+	CHECK(view.WeatherCheckpoint.data() == frame.WeatherCheckpoint.data());
+	CHECK(view.WeatherCheckpointVersion == version);
+	CHECK(view.WeatherCheckpointTick == original.Tick);
+	CHECK(view.WeatherCheckpointEpoch == original.Epoch);
+	CHECK(view.WeatherCheckpointRevision == original.Revision);
+	const auto beforeSignature = render::ScenePresentationSignaturesOf(view, {}).Environment;
+
+	store.ClearChanges();
+	const auto other = AddStatefulWeather(store, original);
+	auto changed = original;
+	changed.Bytes[0] = std::byte{9};
+	store.Set(other, changed);
+	render::CollectWorldView(store, owner, frame);
+	CHECK(frame.WeatherCheckpointVersion == version);
+	CHECK(WeatherCheckpointCopyBytes() == copied);
+	CHECK(frame.WeatherCheckpoint == original.Bytes);
+
+	store.Set(provider, changed);
+	CHECK(frame.WeatherCheckpoint == original.Bytes);
+	render::CollectWorldView(store, owner, frame);
+	CHECK(frame.WeatherCheckpoint == changed.Bytes);
+	CHECK(frame.WeatherCheckpointVersion != version);
+	CHECK(WeatherCheckpointCopyBytes() == copied + changed.Bytes.size());
+	REQUIRE(render::BindWorldView(frame, camera, binding, view));
+	CHECK(render::ScenePresentationSignaturesOf(view, {}).Environment != beforeSignature);
+
+	store.ClearChanges();
+	changed.Bytes[1] = std::byte{8};
+	store.Set(provider, changed);
+	store.ClearChanges();
+	render::CollectWorldView(store, owner, frame);
+	CHECK(frame.WeatherCheckpoint == changed.Bytes);
+	const auto sameBytesVersion = frame.WeatherCheckpointVersion;
+	store.Set(provider, changed);
+	render::CollectWorldView(store, owner, frame);
+	CHECK(frame.WeatherCheckpointVersion == sameBytesVersion);
+	CHECK(frame.WeatherCheckpoint.data() == retained);
+}
+
+TEST_CASE(
+	"stateful weather checkpoint packets clear across source mode epoch and world replacement",
+	"[render][world-view][weather]"
+) {
+	RegisterViewClasses();
+	ecs::Store store("checkpoint-retirement");
+	weather::StatefulWeatherCheckpoint checkpoint{10, 1, 1, {std::byte{1}, std::byte{2}}};
+	const auto provider = AddStatefulWeather(store, checkpoint);
+	render::WorldViewFrame frame;
+	const core::Name owner("checkpoint-retirement");
+	const auto collect = [&] { render::CollectWorldView(store, owner, frame); };
+	collect();
+	REQUIRE_FALSE(frame.WeatherCheckpoint.empty());
+	const auto firstVersion = frame.WeatherCheckpointVersion;
+	store.GetMutable<scene::WeatherClock>(provider)->Epoch = 2;
+	collect();
+	CHECK(frame.WeatherCheckpoint.empty());
+	CHECK(frame.WeatherCheckpointVersion != firstVersion);
+	CHECK(frame.WeatherCheckpointEpoch == 0);
+	checkpoint.Epoch = 2;
+	store.Set(provider, checkpoint);
+	collect();
+	CHECK(frame.WeatherCheckpoint == checkpoint.Bytes);
+	CHECK(frame.WeatherCheckpointEpoch == 2);
+	store.GetMutable<scene::WeatherCompute>(provider)->Mode = scene::WeatherMode::Procedural;
+	collect();
+	CHECK(frame.WeatherCheckpoint.empty());
+	store.GetMutable<scene::WeatherCompute>(provider)->Mode = scene::WeatherMode::Stateful;
+	collect();
+	CHECK(frame.WeatherCheckpoint == checkpoint.Bytes);
+	store.GetMutable<scene::WeatherCompute>(provider)->Enabled = false;
+	collect();
+	CHECK(frame.WeatherCheckpoint.empty());
+	store.GetMutable<scene::WeatherCompute>(provider)->Enabled = true;
+	collect();
+	store.Remove<weather::StatefulWeatherCheckpoint>(provider);
+	collect();
+	CHECK(frame.WeatherCheckpoint.empty());
+	store.Set(provider, checkpoint);
+	collect();
+	const auto other = AddStatefulWeather(store, checkpoint);
+	store.DestroyInstance(provider);
+	collect();
+	CHECK(frame.WeatherCheckpointSource == other);
+	CHECK(frame.WeatherCheckpoint == checkpoint.Bytes);
+	const auto previousWorldVersion = frame.WeatherCheckpointVersion;
+	ecs::Store replacement("checkpoint-retirement");
+	AddStatefulWeather(replacement, checkpoint);
+	render::CollectWorldView(replacement, owner, frame);
+	CHECK(frame.Identity == replacement.Identity());
+	CHECK(frame.WeatherCheckpointVersion != previousWorldVersion);
+	ecs::Store empty("checkpoint-retirement");
+	render::CollectWorldView(empty, owner, frame);
+	CHECK(frame.WeatherCheckpoint.empty());
+	CHECK(frame.WeatherCheckpointSource == ecs::NULL_ENTITY);
+}
+
+TEST_CASE(
+	"camera weather bindings preserve authored particles and copied response lighting",
+	"[render][world-view][weather]"
+) {
+	RegisterViewClasses();
+	ecs::Store store("camera-weather-bind");
+	render::WorldViewFrame frame;
+	frame.Name = core::Name("camera-weather-bind");
+	frame.Identity = store.Identity();
+	frame.GpuParticles.emplace();
+	frame.GpuParticles->Field.Seed = 11;
+	render::WorldCameraFrame camera;
+	camera.WeatherEffects.Precipitation.emplace();
+	camera.WeatherEffects.Precipitation->Field.Seed = 55;
+	camera.WeatherEffects.HasLighting = true;
+	camera.WeatherEffects.Lighting = frame.Lighting;
+	camera.WeatherEffects.Lighting.Ambient.R = 0.123f;
+	render::WorldViewBinding binding{};
+	binding.World = 1;
+	binding.Name = frame.Name;
+	binding.Identity = store.Identity();
+	render::View view;
+	REQUIRE(render::BindWorldView(frame, camera, binding, view));
+	REQUIRE(view.GpuParticles);
+	REQUIRE(view.WeatherParticles.size() == 1);
+	CHECK(view.WeatherParticles.data() == &*camera.WeatherEffects.Precipitation);
+	CHECK(view.GpuParticles->Field.Seed == 11);
+	CHECK(view.WeatherParticles.front().Field.Seed == 55);
+	CHECK(view.Lighting.Ambient.R == 0.123f);
+	camera.WeatherEffects.Precipitation.reset();
+	camera.WeatherEffects.HasLighting = false;
+	REQUIRE(render::BindWorldView(frame, camera, binding, view));
+	CHECK(view.WeatherParticles.empty());
+	CHECK(view.Lighting.Ambient == frame.Lighting.Ambient);
+}
+
+TEST_CASE(
+	"trusted weather stream names retain accepted paths while provider edits wait",
+	"[render][world-view][weather]"
+) {
+	RegisterViewClasses();
+	ecs::Store store("trusted-weather-name");
+	weather::StatefulWeatherCheckpoint checkpoint{10, 1, 1, {std::byte{1}}};
+	const auto provider = AddStatefulWeather(store, checkpoint);
+	render::WorldViewFrame frame;
+	const core::Name owner("trusted-weather-name");
+	render::CollectWorldView(store, owner, frame);
+	const auto currentPath = weather::WeatherLayerName(store, provider);
+	REQUIRE_FALSE(currentPath.empty());
+	CHECK(frame.WeatherSimulationLayer.Text() == currentPath);
+	const auto initialName = frame.WeatherSimulationLayer;
+	render::CollectWorldView(store, owner, frame);
+	CHECK(frame.WeatherSimulationLayer == initialName);
+	scene::WeatherAcceptedDefinition accepted{*store.Get<scene::WeatherCompute>(provider), currentPath};
+	store.Set(provider, accepted);
+	const core::Name renamed("WeatherAfterBacklog");
+	REQUIRE(store.SetProperty(provider, core::Name("Name"), &renamed, sizeof(renamed)));
+	render::CollectWorldView(store, owner, frame);
+	CHECK(frame.WeatherSimulationLayer.Text() == currentPath);
+	store.Remove<scene::WeatherAcceptedDefinition>(provider);
+	const auto renamedPath = weather::WeatherLayerName(store, provider);
+	REQUIRE(renamedPath != currentPath);
+	render::CollectWorldView(store, owner, frame);
+	CHECK(frame.WeatherSimulationLayer.Text() == renamedPath);
+
+	accepted.Layer = "Canonical.Accepted.Provider#default";
+	store.Set(provider, accepted);
+	render::CollectWorldView(store, owner, frame);
+	CHECK(frame.WeatherSimulationLayer.Text() == accepted.Layer);
+	render::WorldCameraFrame camera;
+	render::WorldViewBinding binding{};
+	binding.World = 3;
+	binding.Name = owner;
+	binding.Identity = store.Identity();
+	render::View view;
+	REQUIRE(render::BindWorldView(frame, camera, binding, view));
+	CHECK(view.WeatherSimulationLayer == frame.WeatherSimulationLayer);
+	store.GetMutable<scene::WeatherCompute>(provider)->Enabled = false;
+	accepted.Controls.Enabled = false;
+	store.Set(provider, accepted);
+	render::CollectWorldView(store, owner, frame);
+	CHECK_FALSE(frame.WeatherSimulationLayer.IsValid());
 }

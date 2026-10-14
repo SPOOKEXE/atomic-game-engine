@@ -242,6 +242,9 @@ namespace studio {
 		// @param universe The editor's universe.
 		// @param runtimeOf Scoped authority runtime lookup for copied client events.
 		void Step(engine::world::Universe &universe, const RuntimeLookup &runtimeOf = {});
+		// Delivers final suspension anchors and unfinished joins without running inputs,
+		// respawns or scripts. Direct in-process delivery has zero transport RTT.
+		bool FlushPausedState(engine::world::Universe &universe);
 
 		// Steps independent in-process clients together. Their authority signing
 		// work is submitted as one engine batch across all served scenes.

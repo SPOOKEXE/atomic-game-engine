@@ -1,0 +1,56 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "weather-common.glsl"
+#include "weather-assembly.glsl"
+
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0, std430) readonly buffer Cells { uvec2 cells[]; } inputField;
+layout(set = 0, binding = 1, std430) readonly buffer Pages { ivec4 keys[]; } pageTable;
+layout(set = 1, binding = 0, std430) writeonly buffer Summaries { uvec4 values[]; } outputSummary;
+layout(set = 2, binding = 0) uniform Pass { WeatherField Field; } pass;
+
+void main() {
+	uint index = gl_GlobalInvocationID.x;
+	if (index >= pass.Field.Bricks.w) return;
+	if (pass.Field.Origin.w == 0 && ((uint(pageTable.keys[index].w) >> 5u) & 3u) == 2u) {
+		outputSummary.values[index] = uvec4(0u, 0u, 0u, 512u);
+		return;
+	}
+	uvec3 dimensions = pass.Field.Origin.w == 0 ? uvec3(1) : pass.Field.Bricks.xyz;
+	uvec3 brick = uvec3(index % dimensions.x, (index / dimensions.x) % dimensions.y, index / (dimensions.x * dimensions.y));
+	uint maximum = 0u;
+	uint minimum = 255u;
+	uint total = 0u;
+	uint count = 0u;
+	for (uint z = 0u; z < 8u; ++z) for (uint y = 0u; y < 8u; ++y) for (uint x = 0u; x < 8u; ++x) {
+		uvec3 point = brick * 8u + uvec3(x, y, z);
+		if (pass.Field.Origin.w != 0 && any(greaterThanEqual(point, pass.Field.Grid.xyz))) continue;
+		uint cellIndex = pass.Field.Origin.w == 0 ? index * 512u + x + 8u * (y + 8u * z)
+			: WeatherCellIndex(point, pass.Field.Grid.xyz);
+		uvec2 cell;
+		if (pass.Field.Origin.w == 0) {
+			ivec4 page = pageTable.keys[index];
+			uint descriptor = uint(page.w);
+				uint baseWords = descriptor >> 7u;
+			if (((descriptor >> 5u) & 3u) == 1u) {
+				uvec2 address = WeatherAssemblyAddress(uvec3(x, y, z));
+				uint words[8];
+				for (uint pair = 0u; pair < 4u; ++pair) {
+					uvec2 packed = inputField.cells[baseWords / 2u + address.x * 4u + pair];
+					words[pair * 2u] = packed.x;
+					words[pair * 2u + 1u] = packed.y;
+				}
+				cell = WeatherAssemblyUnsafe(words)
+					? WeatherEvaluate(pass.Field, page.xyz + ivec3(x, y, z) * (1 << (descriptor & 31u)))
+					: WeatherAssemblyDecode(words, address.y);
+			} else cell = inputField.cells[baseWords / 2u + x + 8u * (y + 8u * z)];
+		} else cell = inputField.cells[cellIndex];
+		uint density = cell.x & 255u;
+		maximum = max(maximum, density);
+		minimum = min(minimum, density);
+		total += density;
+		++count;
+	}
+	// Exact encoded total accompanies extrema. Rounded means cannot preserve child totals.
+	outputSummary.values[index] = uvec4(maximum, minimum, total, count);
+}

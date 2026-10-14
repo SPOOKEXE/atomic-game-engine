@@ -29,6 +29,7 @@
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
+#include <engine/weather/Clock.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -480,6 +481,90 @@ namespace engine::render {
 			return signature;
 		}
 
+		bool WeatherShadowLayerPresent(const scene::Environment &environment) {
+			const auto &weather = environment.Weather;
+			return environment.HasWeatherCompute && weather.Enabled && environment.HasClouds &&
+				   weather.ShadowsEnabled && weather.ShadowStrength > 0 && weather.ShadowDistanceMetres > 0 &&
+				   environment.CloudLayer.Density > 0 && environment.CloudLayer.Cover > 0;
+		}
+
+		uint64_t FoldWeatherState(uint64_t signature, const scene::Environment &environment) {
+			const auto &controls = environment.Weather;
+			signature = FoldPresentation(signature, environment.CloudProvider.Id);
+			signature = FoldPresentation(signature, controls.LayerName.Text().size());
+			for (const unsigned char byte : controls.LayerName.Text())
+				signature = FoldPresentation(signature, byte);
+			for (const float scalar : {
+					 controls.CellSizeMetres,
+					 controls.BaseHeightMetres,
+					 controls.ThicknessMetres,
+					 controls.ExtentMetres.X,
+					 controls.ExtentMetres.Y,
+					 controls.ExtentMetres.Z,
+					 controls.Coverage,
+					 controls.CondensateScale,
+					 controls.VapourMixingRatio,
+					 controls.VapourScale,
+					 controls.BaseTemperatureCelsius,
+					 controls.BasePressureHectopascals,
+					 controls.TemperatureLapseCelsiusPerKilometre,
+					 controls.TemperatureVariationCelsius,
+					 controls.PressureVariationHectopascals,
+					 controls.WindMetresPerSecond.X,
+					 controls.WindMetresPerSecond.Y,
+					 controls.WindMetresPerSecond.Z,
+					 controls.TurbulenceMetresPerSecond,
+					 controls.ShearMetresPerSecond,
+					 controls.LiftMetresPerSecond,
+					 controls.FrontContrast,
+					 controls.GrowthRate,
+					 controls.TimeScale,
+					 controls.MaintenanceSeconds,
+					 controls.LodError,
+					 controls.AtmosphereDensityStrength,
+					 controls.AtmosphereHazeStrength,
+					 controls.AtmosphereGlareSuppression,
+					 controls.FogStrength,
+					 controls.PrecipitationRate,
+					 controls.IceFraction,
+					 controls.StormIntensity,
+					 controls.HailIntensity,
+					 controls.LightningRate,
+				 })
+				signature = FoldPresentationObject(signature, scalar == 0 ? 0.0f : scalar);
+			signature = FoldPresentation(signature, controls.Seed);
+			signature = FoldPresentation(signature, controls.AlgorithmVersion);
+			signature = FoldPresentation(signature, controls.DefinitionRevision);
+			signature = FoldPresentation(signature, static_cast<uint8_t>(controls.Mode));
+			signature = FoldPresentation(signature, controls.FeatureCells);
+			signature = FoldPresentation(signature, controls.TickRate);
+			signature = FoldPresentation(signature, controls.Paused);
+			signature = FoldPresentation(signature, controls.MaximumResidentBricks);
+			signature = FoldPresentation(signature, controls.MaximumLod);
+			signature = FoldPresentation(signature, controls.ShadowsEnabled);
+			if (controls.ShadowsEnabled) {
+				signature = FoldPresentationObject(signature, controls.ShadowStrength);
+				signature = FoldPresentationObject(signature, controls.ShadowDistanceMetres);
+				signature = FoldPresentation(signature, controls.ShadowResolution);
+				signature = FoldPresentation(signature, controls.ShadowCascades);
+				signature = FoldPresentationObject(signature, controls.ShadowUpdateSeconds);
+			}
+			// Receipt fractions and packet sequence do not alter the canonical field.
+			const auto time = weather::WeatherTimeOf(environment.Clock);
+			signature = FoldPresentation(signature, time.has_value());
+			if (time) {
+				if (!environment.Clock.Paused && !environment.Clock.WorldPaused)
+					signature = FoldPresentation(signature, time->Tick);
+				signature = FoldPresentation(signature, time->PhaseTick);
+				signature = FoldPresentation(signature, time->PhaseFractionQ16);
+				signature = FoldPresentation(signature, time->Revision);
+				for (const auto displacement : time->DisplacementQ8)
+					signature = FoldPresentation(signature, displacement);
+			}
+			signature = FoldPresentation(signature, environment.Clock.Epoch);
+			return FoldPresentation(signature, environment.WeatherHistoryRevision);
+		}
+
 		uint64_t FoldSceneLight(uint64_t signature, const SceneLight &light) {
 			for (const float value :
 				 {light.Position.X,
@@ -507,7 +592,8 @@ namespace engine::render {
 			(environment.Textures.Front.IsValid() || environment.Textures.Back.IsValid() ||
 			 environment.Textures.Left.IsValid() || environment.Textures.Right.IsValid() ||
 			 environment.Textures.Up.IsValid() || environment.Textures.Down.IsValid());
-		return texturedSky || modes.Skybox == 2 || modes.Atmosphere != 0 || modes.Clouds != 0;
+		return texturedSky || modes.Skybox == 2 || modes.Atmosphere != 0 || modes.Clouds != 0 ||
+			   WeatherShadowLayerPresent(environment);
 	}
 
 	uint64_t
@@ -526,7 +612,8 @@ namespace engine::render {
 	}
 
 	uint64_t ParticleVisibilitySignature(const View &view) {
-		if (view.Particles.empty() && view.RibbonRuns.empty() && !view.GpuParticles) {
+		if (view.Particles.empty() && view.RibbonRuns.empty() && !view.GpuParticles &&
+			view.WeatherParticles.empty()) {
 			return 0;
 		}
 
@@ -543,7 +630,11 @@ namespace engine::render {
 		signature = FoldPresentation(signature, view.Particles.size());
 		signature = FoldPresentation(signature, view.ParticleSeams.empty() ? 0u : 1u);
 		// Device positions can enter the frustum without changing CPU residency.
+		signature = FoldPresentation(signature, view.GpuParticles.has_value());
 		if (view.GpuParticles) signature = FoldGpuParticleField(signature, *view.GpuParticles);
+		signature = FoldPresentation(signature, !view.WeatherParticles.empty());
+		for (const auto &packet : view.WeatherParticles)
+			signature = FoldGpuParticleField(signature, packet);
 		return signature;
 	}
 
@@ -605,6 +696,7 @@ namespace engine::render {
 		// of them must not redraw an identical scene.
 		const scene::Environment &environment = lighting.EnvironmentState;
 		const EnvironmentUniformModes environmentModes = EnvironmentModesOf(environment);
+		const bool weatherShadows = WeatherShadowLayerPresent(environment);
 		if (!EnvironmentLayerPresent(lighting)) {
 			environmentSignature = 0;
 		} else {
@@ -646,11 +738,45 @@ namespace engine::render {
 				}
 			}
 			if (environmentModes.Clouds != 0) {
+				environmentSignature = FoldPresentation(environmentSignature, environmentModes.Clouds);
 				environmentSignature = FoldPresentationObject(environmentSignature, environment.CloudLayer);
 				if (environmentModes.Clouds == 2) {
 					environmentSignature =
 						FoldPresentationObject(environmentSignature, environment.CloudVolume);
 				}
+			}
+			if (environmentModes.Clouds == 3 || weatherShadows) {
+				if (weatherShadows) {
+					environmentSignature =
+						FoldPresentationObject(environmentSignature, environment.CloudLayer.Density);
+					environmentSignature =
+						FoldPresentationObject(environmentSignature, environment.CloudLayer.Cover);
+				}
+				environmentSignature = FoldWeatherState(environmentSignature, environment);
+				if (environment.Weather.Mode == scene::WeatherMode::Stateful) {
+					environmentSignature =
+						FoldPresentation(environmentSignature, view.WeatherSimulationLayer.Text().size());
+					for (const unsigned char byte : view.WeatherSimulationLayer.Text())
+						environmentSignature = FoldPresentation(environmentSignature, byte);
+					environmentSignature =
+						FoldPresentation(environmentSignature, view.WeatherCheckpointVersion);
+					environmentSignature = FoldPresentation(environmentSignature, view.WeatherCheckpointTick);
+					environmentSignature =
+						FoldPresentation(environmentSignature, view.WeatherCheckpointEpoch);
+					environmentSignature =
+						FoldPresentation(environmentSignature, view.WeatherCheckpointRevision);
+					environmentSignature =
+						FoldPresentation(environmentSignature, view.WeatherCheckpoint.size());
+					// Unowned hand-built views have no publication version to certify their bytes.
+					if (view.WeatherCheckpointVersion == 0)
+						for (const auto byte : view.WeatherCheckpoint)
+							environmentSignature =
+								FoldPresentation(environmentSignature, std::to_integer<uint8_t>(byte));
+				}
+
+				// Volumetric weather depends on the eye, including cloud-only worlds.
+				environmentSignature = FoldCFrame(environmentSignature, view.CameraFrame);
+				environmentSignature = FoldPresentationObject(environmentSignature, view.Camera);
 			}
 			environmentSignature = FoldPresentation(environmentSignature, view.OverrideLighting ? 1u : 0u);
 			if (view.OverrideLighting) {
@@ -659,8 +785,8 @@ namespace engine::render {
 		}
 
 		uint64_t &particles = signatures.Particles;
-		const bool particleLayer =
-			!view.Particles.empty() || !view.RibbonRuns.empty() || view.GpuParticles.has_value();
+		const bool particleLayer = !view.Particles.empty() || !view.RibbonRuns.empty() ||
+								   view.GpuParticles.has_value() || !view.WeatherParticles.empty();
 		if (particleLayer) {
 			particles = FoldPresentation(particles, projection);
 			particles = FoldPresentation(particles, contentOwners);
@@ -671,13 +797,17 @@ namespace engine::render {
 			particles = FoldPresentation(particles, view.ParticleResidentRevision);
 			particles = FoldPresentationSpan(particles, view.RibbonRuns);
 			particles = FoldPresentationSpan(particles, view.RibbonVertices);
-			if (view.GpuParticles) {
+			if (view.GpuParticles || !view.WeatherParticles.empty()) {
 				particles = FoldPresentation(particles, view.World);
 				particles = FoldPresentation(particles, view.WorldName.Id());
 				particles = FoldCFrame(particles, view.CameraFrame);
 				particles = FoldPresentationObject(particles, view.Camera);
 				particles = FoldWorldLighting(particles, lighting);
-				particles = FoldGpuParticleField(particles, *view.GpuParticles);
+				particles = FoldPresentation(particles, view.GpuParticles.has_value());
+				if (view.GpuParticles) particles = FoldGpuParticleField(particles, *view.GpuParticles);
+				particles = FoldPresentation(particles, !view.WeatherParticles.empty());
+				for (const auto &packet : view.WeatherParticles)
+					particles = FoldGpuParticleField(particles, packet);
 			}
 		}
 

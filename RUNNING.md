@@ -159,6 +159,14 @@ the backend submission call separately from engine submission bookkeeping.
 | `bench [args...]` | Run selected affected benchmarks. |
 | `bench-all [args...]` | Run every benchmark. |
 | `bench-accept [args...]` | Accept benchmark baselines. |
+| `weather-bench [samples] [build_preset]` | Measure seeded weather, packing, clocks, assemblies, sparse residency, events and the stateful solver without graphics. Defaults: `5`, `bench`; use `bench-o0` for unoptimized costs. |
+| `weather-descriptor-bench [samples] [build_preset]` | Measure device-free weather GPU descriptor preparation. Defaults: `5`, `bench`. |
+| `weather-residency-bench [samples] [build_preset]` | Measure actual sparse cloud page selection, retained maintenance and teleports without graphics. Defaults: `5`, `bench`. |
+| `weather-temporal-bench [samples] [build_preset]` | Measure temporal invalidation, periodic displacement and cloud composition without graphics. Defaults: `5`, `bench`. |
+| `weather-shadow-bench [samples] [build_preset]` | Measure shadow caster bounds, cascades, low-sun fades and retained revisions without graphics. Defaults: `5`, `bench`. |
+| `weather-effects-bench [samples] [build_preset]` | Measure weather emission and roof/ground visibility against published geometry without graphics. Defaults: `5`, `bench`. |
+| `weather-gpu-bench [samples] [build_preset]` | Open a GPU device and measure sparse weather generation, reuse, integration and tracked memory. Defaults: `3`, `bench`. |
+| `weather-fuzz [runs] [compiler]` | Fuzz complete weather checkpoint decoding with AddressSanitizer and UBSan. Defaults: `10000`, `clang++-21`. |
 | `imagecodec-bench [samples]` | Measure CPU image imports at 1080p and print results to stdout. Default: `5`. |
 | `ui-headless-bench [samples]` | Measure ImGui layout and frozen draw signatures without a GPU. Default: `5`. |
 | `studio-interface-bench [samples] [build_preset]` | Measure toolbar, Preferences, retained 250 ms Frame Graph, and idle content scans without a window or GPU. Defaults: `5`, `bench`; use `bench-o0` for unoptimized engine costs. |

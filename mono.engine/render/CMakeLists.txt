@@ -29,6 +29,8 @@ mono_add_library(render
 		Engine::gui
 
 		Engine::scene
+		# Weather reference arithmetic and residency policy stay device-free at L8.
+		Engine::weather
 
 		# `render::ParticleBatch` names the effects block, spawn state and runtime
 		# rows. The renderer owns the particle pool and steps it, so those layouts

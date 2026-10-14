@@ -246,7 +246,9 @@ namespace engine::render {
 		uint32_t height,
 		uint32_t &dispatches,
 		bool opaqueSkySource,
-		const std::function<void()> &beginWork
+		const std::function<void()> &beginWork,
+		uint64_t weatherWorld,
+		core::Name weatherPipeline
 	) {
 		ENGINE_PROFILE_CAT("cloud environment compute", core::ProfileCategory::Render);
 		if (EnvironmentCloudCompute == nullptr || command == nullptr || source == nullptr ||
@@ -279,8 +281,29 @@ namespace engine::render {
 		const scene::Atmosphere &air = environment.Air;
 		const scene::AtmosphereProcedural airCompute = EnvironmentAtmosphereComputeOf(environment);
 		const scene::Clouds &clouds = environment.CloudLayer;
-		const scene::CloudCompute cloudCompute = EnvironmentCloudComputeOf(environment);
-		const EnvironmentUniformModes modes = EnvironmentModesOf(environment);
+		const scene::CloudCompute cloudCompute =
+			environment.HasWeatherCompute ? environment.CloudVolume : EnvironmentCloudComputeOf(environment);
+		EnvironmentUniformModes modes = EnvironmentModesOf(environment);
+		// World weather is integrated after geometry instead of painted onto the sky cube.
+		if (modes.Clouds == 3) {
+			bool weatherAvailable = WeatherFieldCompute && WeatherSummaryCompute && WeatherRaysCompute &&
+									WeatherTemporalCompute && WeatherReconstructCompute;
+			if (environment.Weather.Mode == scene::WeatherMode::Stateful) {
+				const auto generation = std::find_if(
+					WeatherGenerations.begin(),
+					WeatherGenerations.end(),
+					[weatherWorld, weatherPipeline](const WeatherGpuGeneration &candidate) {
+						return candidate.World == weatherWorld && candidate.Pipeline == weatherPipeline;
+					}
+				);
+				const auto *inputs =
+					generation != WeatherGenerations.end() ? generation->InputsFor(command) : nullptr;
+				weatherAvailable = weatherAvailable && WeatherEvolutionCompute && inputs &&
+								   inputs->Stateful && inputs->Uniforms.Phase.z != UINT32_MAX;
+			} else
+				weatherAvailable = weatherAvailable && weather::Compile(environment.Weather).has_value();
+			modes.Clouds = weatherAvailable ? 0u : 2u;
+		}
 		const EnvironmentUniformShaders shaders = EnvironmentShadersOf(environment);
 		uint64_t skySignature = 0;
 		bool linkedSky = false;
@@ -401,19 +424,123 @@ namespace engine::render {
 	void Renderer::Impl::ReleaseEnvironments() {
 		// Graph targets own the images. This cache only owns their dirty signatures.
 		Environments.clear();
+		ReleaseWeatherTemporalHistories();
+		for (auto &owner : WeatherPhysicalOwners)
+			ReleaseWeatherSimulationGpu(Device, owner->Physical);
+		WeatherPhysicalOwners.clear();
+		WeatherGenerations.clear();
+	}
+
+	void Renderer::Impl::ForgetWeatherWorld(uint64_t world) {
+		ForgetWeatherTemporalWorld(world);
+		std::erase_if(WeatherGenerations, [world](const WeatherGpuGeneration &generation) {
+			return generation.World == world;
+		});
+		PruneWeatherPhysicalOwners();
+		// SDL defers the actual destruction until queued references retire. Disabled
+		// layers release payloads immediately rather than retaining a world-sized cache.
+		std::erase_if(GraphResources.Buffers, [this, world](const GraphBuffer &buffer) {
+			const bool weatherBuffer = buffer.Resource == core::Name("weather-pages") ||
+									   buffer.Resource == core::Name("weather-previous-pages") ||
+									   buffer.Resource == core::Name("weather-field") ||
+									   buffer.Resource == core::Name("weather-summary");
+			if (buffer.Owner != world || buffer.Scope != graph::NodeScope::World || !weatherBuffer)
+				return false;
+			if (buffer.Buffer) gpu::ReleaseBuffer(Device, buffer.Buffer);
+			return true;
+		});
+		std::erase_if(GraphResources.Targets, [this, world](const GraphTarget &target) {
+			if (target.Owner != world || target.Scope != graph::NodeScope::World ||
+				target.Resource != core::Name("weather-shadow"))
+				return false;
+			if (target.Texture) gpu::ReleaseTexture(Device, target.Texture);
+			return true;
+		});
+	}
+
+	void Renderer::Impl::ReleaseWeatherPipelines() {
+		for (auto **pipeline :
+			 {&WeatherFieldCompute,
+			  &WeatherSummaryCompute,
+			  &WeatherRaysCompute,
+			  &WeatherEvolutionCompute,
+			  &WeatherTemporalCompute,
+			  &WeatherReconstructCompute,
+			  &WeatherShadowCompute}) {
+			if (*pipeline) SDL_ReleaseGPUComputePipeline(Device, *pipeline);
+			*pipeline = nullptr;
+		}
+		for (auto &owner : WeatherPhysicalOwners)
+			ReleaseWeatherSimulationGpu(Device, owner->Physical);
+		WeatherPhysicalOwners.clear();
+		WeatherGenerations.clear();
+		ReleaseWeatherTemporalHistories();
 	}
 
 	void Renderer::Impl::CommitEnvironmentWrites(SDL_GPUCommandBuffer *command) {
+		CommitWeatherTemporalWrites(command);
+		for (WeatherGpuGeneration &generation : WeatherGenerations) {
+			generation.Shadows.Commit(command);
+			generation.Residency.Commit(command);
+			if (generation.Field.Pending && generation.Field.PendingCommand == command &&
+				generation.PendingRenderInputs) {
+				generation.RenderInputs = std::move(generation.PendingRenderInputs);
+				generation.PendingRenderInputs.reset();
+			}
+			generation.Field.Commit(command);
+			generation.Summary.Commit(command);
+		}
 		for (EnvironmentTarget &target : Environments) {
 			target.Sky.Commit(command);
 			target.Cloud.Commit(command);
 		}
+		PruneWeatherPhysicalOwners();
+	}
+
+	WeatherPhysicalOwner &Renderer::Impl::WeatherPhysicalFor(uint64_t world, uint64_t recipeSignature) {
+		for (auto &owner : WeatherPhysicalOwners)
+			if (owner->World == world && owner->RecipeSignature == recipeSignature) return *owner;
+		auto owner = std::make_unique<WeatherPhysicalOwner>();
+		owner->World = world;
+		owner->RecipeSignature = recipeSignature;
+		WeatherPhysicalOwners.push_back(std::move(owner));
+		core::Metrics::SetGauge("render.weather.stateful.physical_owners", WeatherPhysicalOwners.size());
+		return *WeatherPhysicalOwners.back();
+	}
+
+	void Renderer::Impl::PruneWeatherPhysicalOwners() {
+		std::erase_if(WeatherPhysicalOwners, [this](const auto &owner) {
+			const bool referenced = std::any_of(
+				WeatherGenerations.begin(),
+				WeatherGenerations.end(),
+				[&](const WeatherGpuGeneration &generation) {
+					return generation.PhysicalOwner == owner.get();
+				}
+			);
+			if (referenced) return false;
+			ReleaseWeatherSimulationGpu(Device, owner->Physical);
+			return true;
+		});
+		core::Metrics::SetGauge("render.weather.stateful.physical_owners", WeatherPhysicalOwners.size());
 	}
 
 	void Renderer::Impl::DiscardEnvironmentWrites(SDL_GPUCommandBuffer *command) {
+		DiscardWeatherTemporalWrites(command);
+		for (WeatherGpuGeneration &generation : WeatherGenerations) {
+			generation.Shadows.Discard(command);
+			for (auto *content : {&generation.Residency, &generation.Field, &generation.Summary}) {
+				if (content->Pending && (!command || content->PendingCommand == command)) {
+					// Cycling may have selected unwritten backing before cancellation.
+					content->Ready = false;
+					content->Discard(command);
+					if (content == &generation.Field) generation.PendingRenderInputs.reset();
+				}
+			}
+		}
 		for (EnvironmentTarget &target : Environments) {
 			target.Sky.Discard(command);
 			target.Cloud.Discard(command);
 		}
+		PruneWeatherPhysicalOwners();
 	}
 }

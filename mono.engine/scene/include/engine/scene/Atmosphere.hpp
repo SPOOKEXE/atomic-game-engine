@@ -26,6 +26,9 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Entity.hpp>
+#include <engine/scene/WeatherClock.hpp>
+#include <engine/scene/WeatherCompute.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -301,6 +304,10 @@ namespace engine::scene {
 		AtmosphereProcedural AirCompute;
 		Clouds CloudLayer;
 		CloudCompute CloudVolume;
+		WeatherCompute Weather;
+		WeatherClock Clock;
+		// Local timeline corrections invalidate retained weather histories.
+		uint64_t WeatherHistoryRevision = 0;
 		//@}
 
 		// Deterministic animation time supplied by the world's simulation clock.
@@ -318,6 +325,12 @@ namespace engine::scene {
 		bool HasAtmosphereCompute = false;
 		// The selected cloud provider owns compute controls.
 		bool HasCloudCompute = false;
+		// Weather controls belong to the selected cloud provider only.
+		bool HasWeatherCompute = false;
+		// The selected provider carries an accepted replicated clock.
+		bool HasWeatherClock = false;
+		// Stable provider identity separates same-world layers and replacement history.
+		ecs::Entity CloudProvider = ecs::NULL_ENTITY;
 
 		// Explicit padding, for the reason `Components.hpp` opens with.
 		uint8_t Reserved[3] = {};

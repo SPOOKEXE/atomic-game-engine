@@ -45,11 +45,15 @@
 #include <engine/scene/VectorField.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Volume.hpp>
+#include <engine/scene/WeatherClock.hpp>
+#include <engine/scene/WeatherCompute.hpp>
 #include <engine/scene/Wire.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace engine::scene {
 
@@ -535,6 +539,192 @@ namespace engine::scene {
 				sky.Shader = SkyboxComputeShaderFromName(reader.ReadName());
 				sky.Enabled = reader.ReadBool();
 			}
+		}
+
+		void WriteWeatherCompute(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *layers = static_cast<const WeatherCompute *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				const auto &layer = layers[index];
+				writer.WriteUInt32(1);
+				writer.WriteFloat(layer.CellSizeMetres);
+				writer.WriteFloat(layer.BaseHeightMetres);
+				writer.WriteFloat(layer.ThicknessMetres);
+				writer.WriteFloat(layer.ExtentMetres.X);
+				writer.WriteFloat(layer.ExtentMetres.Y);
+				writer.WriteFloat(layer.ExtentMetres.Z);
+				writer.WriteUInt32(layer.Seed);
+				writer.WriteUInt32(layer.AlgorithmVersion);
+				writer.WriteUInt32(layer.DefinitionRevision);
+				writer.WriteName(core::Name(Describe(layer.Mode)));
+				writer.WriteFloat(layer.Coverage);
+				writer.WriteFloat(layer.CondensateScale);
+				writer.WriteFloat(layer.VapourMixingRatio);
+				writer.WriteFloat(layer.VapourScale);
+				writer.WriteFloat(layer.BaseTemperatureCelsius);
+				writer.WriteFloat(layer.BasePressureHectopascals);
+				writer.WriteFloat(layer.TemperatureLapseCelsiusPerKilometre);
+				writer.WriteFloat(layer.TemperatureVariationCelsius);
+				writer.WriteFloat(layer.PressureVariationHectopascals);
+				writer.WriteFloat(layer.WindMetresPerSecond.X);
+				writer.WriteFloat(layer.WindMetresPerSecond.Y);
+				writer.WriteFloat(layer.WindMetresPerSecond.Z);
+				writer.WriteFloat(layer.TurbulenceMetresPerSecond);
+				writer.WriteFloat(layer.ShearMetresPerSecond);
+				writer.WriteFloat(layer.LiftMetresPerSecond);
+				writer.WriteUInt32(layer.FeatureCells);
+				writer.WriteFloat(layer.FrontContrast);
+				writer.WriteFloat(layer.GrowthRate);
+				writer.WriteUInt32(layer.TickRate);
+				writer.WriteFloat(layer.TimeScale);
+				writer.WriteBool(layer.Paused);
+				writer.WriteFloat(layer.MaintenanceSeconds);
+				writer.WriteUInt32(layer.MaximumResidentBricks);
+				writer.WriteUInt32(layer.MaximumLod);
+				writer.WriteFloat(layer.LodError);
+				writer.WriteBool(layer.ShadowsEnabled);
+				writer.WriteFloat(layer.ShadowStrength);
+				writer.WriteFloat(layer.ShadowDistanceMetres);
+				writer.WriteUInt32(layer.ShadowResolution);
+				writer.WriteUInt32(layer.ShadowCascades);
+				writer.WriteFloat(layer.ShadowUpdateSeconds);
+				writer.WriteFloat(layer.AtmosphereDensityStrength);
+				writer.WriteFloat(layer.AtmosphereHazeStrength);
+				writer.WriteFloat(layer.AtmosphereGlareSuppression);
+				writer.WriteFloat(layer.FogStrength);
+				writer.WriteFloat(layer.PrecipitationRate);
+				writer.WriteFloat(layer.IceFraction);
+				writer.WriteFloat(layer.StormIntensity);
+				writer.WriteFloat(layer.HailIntensity);
+				writer.WriteFloat(layer.LightningRate);
+				writer.WriteName(layer.LayerName);
+				writer.WriteBool(layer.Enabled);
+			}
+		}
+
+		void ReadWeatherCompute(core::ByteReader &reader, void *destination, size_t count) {
+			if (count > reader.Remaining() / 203) {
+				reader.Fail();
+				return;
+			}
+			std::vector<WeatherCompute> candidate;
+			candidate.reserve(count);
+			for (size_t index = 0; index < count; ++index) {
+				if (reader.ReadUInt32() != 1) {
+					reader.Fail();
+					return;
+				}
+				WeatherCompute layer;
+				layer.CellSizeMetres = reader.ReadFloat();
+				layer.BaseHeightMetres = reader.ReadFloat();
+				layer.ThicknessMetres = reader.ReadFloat();
+				layer.ExtentMetres = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				layer.Seed = reader.ReadUInt32();
+				layer.AlgorithmVersion = reader.ReadUInt32();
+				layer.DefinitionRevision = reader.ReadUInt32();
+				if (!WeatherModeFromName(reader.ReadName(), layer.Mode)) {
+					reader.Fail();
+					return;
+				}
+				layer.Coverage = reader.ReadFloat();
+				layer.CondensateScale = reader.ReadFloat();
+				layer.VapourMixingRatio = reader.ReadFloat();
+				layer.VapourScale = reader.ReadFloat();
+				layer.BaseTemperatureCelsius = reader.ReadFloat();
+				layer.BasePressureHectopascals = reader.ReadFloat();
+				layer.TemperatureLapseCelsiusPerKilometre = reader.ReadFloat();
+				layer.TemperatureVariationCelsius = reader.ReadFloat();
+				layer.PressureVariationHectopascals = reader.ReadFloat();
+				layer.WindMetresPerSecond = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				layer.TurbulenceMetresPerSecond = reader.ReadFloat();
+				layer.ShearMetresPerSecond = reader.ReadFloat();
+				layer.LiftMetresPerSecond = reader.ReadFloat();
+				layer.FeatureCells = reader.ReadUInt32();
+				layer.FrontContrast = reader.ReadFloat();
+				layer.GrowthRate = reader.ReadFloat();
+				layer.TickRate = reader.ReadUInt32();
+				layer.TimeScale = reader.ReadFloat();
+				const uint8_t paused = reader.ReadUInt8();
+				if (paused > 1) {
+					reader.Fail();
+					return;
+				}
+				layer.Paused = paused != 0;
+				layer.MaintenanceSeconds = reader.ReadFloat();
+				layer.MaximumResidentBricks = reader.ReadUInt32();
+				layer.MaximumLod = reader.ReadUInt32();
+				layer.LodError = reader.ReadFloat();
+				const uint8_t shadowsEnabled = reader.ReadUInt8();
+				if (shadowsEnabled > 1) {
+					reader.Fail();
+					return;
+				}
+				layer.ShadowsEnabled = shadowsEnabled != 0;
+				layer.ShadowStrength = reader.ReadFloat();
+				layer.ShadowDistanceMetres = reader.ReadFloat();
+				layer.ShadowResolution = reader.ReadUInt32();
+				layer.ShadowCascades = reader.ReadUInt32();
+				layer.ShadowUpdateSeconds = reader.ReadFloat();
+				layer.AtmosphereDensityStrength = reader.ReadFloat();
+				layer.AtmosphereHazeStrength = reader.ReadFloat();
+				layer.AtmosphereGlareSuppression = reader.ReadFloat();
+				layer.FogStrength = reader.ReadFloat();
+				layer.PrecipitationRate = reader.ReadFloat();
+				layer.IceFraction = reader.ReadFloat();
+				layer.StormIntensity = reader.ReadFloat();
+				layer.HailIntensity = reader.ReadFloat();
+				layer.LightningRate = reader.ReadFloat();
+				const auto layerName = reader.ReadString();
+				if (layerName.empty() || layerName.size() > MAX_WEATHER_LAYER_NAME_BYTES) {
+					reader.Fail();
+					return;
+				}
+				layer.LayerName = core::Name(layerName);
+				const uint8_t enabled = reader.ReadUInt8();
+				if (enabled > 1) {
+					reader.Fail();
+					return;
+				}
+				layer.Enabled = enabled != 0;
+				if (reader.Failed() || !ValidWeatherCompute(layer)) {
+					reader.Fail();
+					return;
+				}
+				candidate.push_back(layer);
+			}
+			auto *layers = static_cast<WeatherCompute *>(destination);
+			std::copy(candidate.begin(), candidate.end(), layers);
+		}
+
+		void WriteWeatherAcceptedDefinitions(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *definitions = static_cast<const WeatherAcceptedDefinition *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				writer.WriteUInt32(2);
+				WriteWeatherCompute(writer, &definitions[index].Controls, 1);
+				writer.WriteString(definitions[index].Layer);
+			}
+		}
+
+		void ReadWeatherAcceptedDefinitions(core::ByteReader &reader, void *destination, size_t count) {
+			if (count > reader.Remaining() / 211) {
+				reader.Fail();
+				return;
+			}
+			std::vector<WeatherAcceptedDefinition> candidate(count);
+			for (auto &definition : candidate) {
+				if (reader.ReadUInt32() != 2) {
+					reader.Fail();
+					return;
+				}
+				ReadWeatherCompute(reader, &definition.Controls, 1);
+				const auto layer = reader.ReadString();
+				if (reader.Failed() || layer.size() > MAX_WEATHER_STREAM_LAYER_BYTES) {
+					reader.Fail();
+					return;
+				}
+				definition.Layer = layer;
+			}
+			auto *definitions = static_cast<WeatherAcceptedDefinition *>(destination);
+			std::copy(candidate.begin(), candidate.end(), definitions);
 		}
 
 		void WriteCloudCompute(core::ByteWriter &writer, const void *source, size_t count) {
@@ -2000,6 +2190,19 @@ namespace engine::scene {
 		ecs::Components::Register<DepthOfFieldEffect>("scene.DepthOfFieldEffect");
 		ecs::Components::Register<GodRaysEffect>("scene.GodRaysEffect");
 		ecs::Components::Register<FogEffect>("scene.FogEffect");
+
+		// Weather definitions append without renumbering existing snapshot components.
+		ecs::Components::Register<WeatherCompute>(
+			"scene.WeatherCompute", WriteWeatherCompute, ReadWeatherCompute, 384
+		);
+		RegisterWeatherClockComponents();
+		// Pending authored controls and the accepted backlog definition are distinct facts.
+		ecs::Components::Register<WeatherAcceptedDefinition>(
+			"scene.WeatherAcceptedDefinition",
+			WriteWeatherAcceptedDefinitions,
+			ReadWeatherAcceptedDefinitions,
+			648
+		);
 	}
 
 	void RegisterSceneClasses() {

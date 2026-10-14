@@ -241,7 +241,8 @@ namespace engine::render {
 					Result.Triangles,
 					nullptr,
 					Impl::SlotSelection::All,
-					Impl::VisibilityPass::MainCamera
+					Impl::VisibilityPass::MainCamera,
+					Pipeline->Name
 				);
 				SDL_EndGPURenderPass(pass);
 				return true;
@@ -357,7 +358,30 @@ namespace engine::render {
 					 State->RefractionSampler != nullptr ? State->RefractionSampler : fallbackSampler}
 				};
 				SDL_BindGPUFragmentSamplers(pass, 0, bindings, 13);
+				const auto cloudGeneration = std::find_if(
+					State->WeatherGenerations.begin(),
+					State->WeatherGenerations.end(),
+					[this](const WeatherGpuGeneration &generation) {
+						return generation.World == Request.World && generation.Pipeline == Pipeline->Name;
+					}
+				);
+				const auto *cloudLighting = cloudGeneration != State->WeatherGenerations.end()
+												? cloudGeneration->Shadows.LightingFor(Command)
+												: nullptr;
+				const SDL_GPUTextureSamplerBinding cloudMap{
+					cloudLighting && Lighting.CloudShadow.Receiver.w != 0 && cloudGeneration->Shadows.Texture
+						? cloudGeneration->Shadows.Texture
+						: State->FallbackTexture,
+					State->OverlaySampler
+				};
+				SDL_BindGPUFragmentSamplers(pass, 15, &cloudMap, 1);
+				const SDL_GPUTextureSamplerBinding reserved[2]{
+					{State->FallbackTexture, fallbackSampler}, {State->FallbackTexture, fallbackSampler}
+				};
+				SDL_BindGPUFragmentSamplers(pass, 13, reserved, 2);
 				LightingUniforms material = Lighting;
+				if (material.CloudShadow.Receiver.w != 0)
+					material.CloudShadow = cloudLighting ? *cloudLighting : WeatherShadowLightingUniforms{};
 				const std::array<float, 4> tint = absent ? std::array<float, 4>{1, 1, 1, 1} : source.Colour;
 				material.BaseColour = glm::vec4{tint[0], tint[1], tint[2], tint[3]};
 				material.Surface = glm::vec4{
@@ -459,7 +483,8 @@ namespace engine::render {
 					Result.Triangles,
 					nullptr,
 					Impl::SlotSelection::All,
-					Impl::VisibilityPass::MainCamera
+					Impl::VisibilityPass::MainCamera,
+					Pipeline->Name
 				);
 			}
 			SDL_EndGPURenderPass(pass);
@@ -559,7 +584,8 @@ namespace engine::render {
 						result.Triangles,
 						phase,
 						Impl::SlotSelection::All,
-						Impl::VisibilityPass::MainCamera
+						Impl::VisibilityPass::MainCamera,
+						Pipeline->Name
 					);
 				};
 
@@ -621,7 +647,8 @@ namespace engine::render {
 						result.Triangles,
 						nullptr,
 						Impl::SlotSelection::All,
-						Impl::VisibilityPass::MainCamera
+						Impl::VisibilityPass::MainCamera,
+						Pipeline->Name
 					);
 				}
 				SDL_EndGPURenderPass(pass);
@@ -699,7 +726,8 @@ namespace engine::render {
 				result.Triangles,
 				nullptr,
 				Impl::SlotSelection::LodOnly,
-				Impl::VisibilityPass::MainCamera
+				Impl::VisibilityPass::MainCamera,
+				Pipeline->Name
 			);
 			SDL_EndGPURenderPass(latePass);
 			return true;
@@ -814,7 +842,11 @@ namespace engine::render {
 					nullptr,
 					State->SurfaceSampler,
 					0,
-					Result.Triangles
+					Result.Triangles,
+					nullptr,
+					Impl::SlotSelection::All,
+					Impl::VisibilityPass::Secondary,
+					Pipeline->Name
 				);
 			}
 			SDL_EndGPURenderPass(pass);
@@ -946,7 +978,11 @@ namespace engine::render {
 						nullptr,
 						State->OverlaySampler,
 						0,
-						Result.Triangles
+						Result.Triangles,
+						nullptr,
+						Impl::SlotSelection::All,
+						Impl::VisibilityPass::Secondary,
+						Pipeline->Name
 					);
 				}
 				if (particleLayers || ribbonLayers) {
@@ -1229,7 +1265,8 @@ namespace engine::render {
 						result.Triangles,
 						nullptr,
 						Impl::SlotSelection::All,
-						Impl::VisibilityPass::Secondary
+						Impl::VisibilityPass::Secondary,
+						Pipeline->Name
 					);
 					SDL_EndGPURenderPass(guard);
 					State->RefractionGuardTexture = recording.Pbr->RefractionGuard;
@@ -1404,7 +1441,8 @@ namespace engine::render {
 							result.Triangles,
 							nullptr,
 							Impl::SlotSelection::All,
-							Impl::VisibilityPass::MainCamera
+							Impl::VisibilityPass::MainCamera,
+							Pipeline->Name
 						);
 					}
 				}
@@ -1530,7 +1568,11 @@ namespace engine::render {
 							nullptr,
 							State->SurfaceSampler,
 							0,
-							result.Triangles
+							result.Triangles,
+							nullptr,
+							Impl::SlotSelection::All,
+							Impl::VisibilityPass::Secondary,
+							Pipeline->Name
 						);
 						SDL_EndGPURenderPass(metadataPass);
 					}

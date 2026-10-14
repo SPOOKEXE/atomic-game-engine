@@ -405,6 +405,22 @@ namespace engine::replication {
 		return Reach(client) != nullptr;
 	}
 
+	bool Authority::HasPendingSnapshots() const {
+		return std::any_of(Clients.begin(), Clients.end(), [&](const Client &client) {
+			return client.Live && (Owed(client) != 0 || (client.Known.empty() && client.Applied == 0));
+		});
+	}
+
+	bool Authority::Interested(ClientId client, ecs::Entity entity, const ecs::Store &store) const {
+		if (!Reach(client) || !store.Alive(entity)) return false;
+		if (InterestBatch) {
+			uint8_t accepted = 0;
+			InterestBatch(client, store, {&entity, 1}, {&accepted, 1});
+			return accepted != 0;
+		}
+		return !Interest || Interest(client, entity, store);
+	}
+
 	void Authority::DiscoverSchemas() {
 		const uint64_t revision = ecs::Schemas::Revision();
 		if (revision == ObservedSchemaRevision) return;

@@ -527,6 +527,7 @@ declare namespace Enum {
 	interface VerticalScrollBarPosition extends EnumItem { readonly __enum: "VerticalScrollBarPosition"; }
 	interface ViewportUpdateMode extends EnumItem { readonly __enum: "ViewportUpdateMode"; }
 	interface VolumeShape extends EnumItem { readonly __enum: "VolumeShape"; }
+	interface WeatherMode extends EnumItem { readonly __enum: "WeatherMode"; }
 	interface ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
 
 	const AlphaMode: {
@@ -995,6 +996,10 @@ declare namespace Enum {
 	const VolumeShape: {
 		readonly Box: VolumeShape;
 		readonly Ellipsoid: VolumeShape;
+	};
+	const WeatherMode: {
+		readonly Procedural: WeatherMode;
+		readonly Stateful: WeatherMode;
 	};
 	const ZIndexBehavior: {
 		readonly Global: ZIndexBehavior;
@@ -1843,6 +1848,56 @@ declare interface FogEffect extends Instance {
 	Enabled: boolean;
 	End: number;
 	Start: number;
+}
+
+declare interface WeatherCompute extends CloudCompute {
+	readonly AlgorithmVersion: number;
+	AtmosphereDensityStrength: number;
+	AtmosphereGlareSuppression: number;
+	AtmosphereHazeStrength: number;
+	BaseHeightMetres: number;
+	BasePressureHectopascals: number;
+	BaseTemperatureCelsius: number;
+	CellSizeMetres: number;
+	CondensateScale: number;
+	Coverage: number;
+	readonly DefinitionRevision: number;
+	ExtentMetres: Vector3;
+	FeatureCells: number;
+	FogStrength: number;
+	FrontContrast: number;
+	GrowthRate: number;
+	HailIntensity: number;
+	IceFraction: number;
+	LayerName: string;
+	LiftMetresPerSecond: number;
+	LightningRate: number;
+	LodError: number;
+	MaintenanceSeconds: number;
+	MaximumLod: number;
+	MaximumResidentBricks: number;
+	Mode: Enum.WeatherMode;
+	Paused: boolean;
+	PrecipitationRate: number;
+	PressureVariationHectopascals: number;
+	ShadowCascades: number;
+	ShadowDistanceMetres: number;
+	ShadowResolution: number;
+	ShadowStrength: number;
+	ShadowUpdateSeconds: number;
+	ShadowsEnabled: boolean;
+	ShearMetresPerSecond: number;
+	StormIntensity: number;
+	TemperatureLapseCelsiusPerKilometre: number;
+	TemperatureVariationCelsius: number;
+	ThicknessMetres: number;
+	TickRate: number;
+	TimeScale: number;
+	TurbulenceMetresPerSecond: number;
+	VapourMixingRatio: number;
+	VapourScale: number;
+	WeatherEnabled: boolean;
+	WindMetresPerSecond: Vector3;
 }
 
 declare interface ShaderScript extends Instance {
@@ -3202,6 +3257,7 @@ declare const Instance: {
 		(className: "DepthOfFieldEffect", parent?: Instance): DepthOfFieldEffect;
 		(className: "GodRaysEffect", parent?: Instance): GodRaysEffect;
 		(className: "FogEffect", parent?: Instance): FogEffect;
+		(className: "WeatherCompute", parent?: Instance): WeatherCompute;
 		(className: "ShaderScript", parent?: Instance): ShaderScript;
 		(className: "LensShader", parent?: Instance): LensShader;
 		(className: "EditableMesh", parent?: Instance): EditableMesh;

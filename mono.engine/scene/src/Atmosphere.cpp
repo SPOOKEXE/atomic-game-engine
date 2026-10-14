@@ -150,6 +150,7 @@ namespace engine::scene {
 		environment.CloudLayer.Enabled = false;
 		environment.AirCompute.Enabled = false;
 		environment.CloudVolume.Enabled = false;
+		environment.Weather.Enabled = false;
 
 		const ecs::Entity lighting = LightingService(store);
 		if (lighting == ecs::NULL_ENTITY) {
@@ -185,9 +186,20 @@ namespace engine::scene {
 				if (const Clouds *clouds = store.Get<Clouds>(descendant)) {
 					environment.CloudLayer = Clamped(*clouds);
 					environment.HasClouds = true;
+					environment.CloudProvider = descendant;
 					if (const CloudCompute *compute = store.Get<CloudCompute>(descendant)) {
 						environment.HasCloudCompute = true;
 						environment.CloudVolume = Clamped(*compute);
+					}
+					if (const WeatherCompute *weather = store.Get<WeatherCompute>(descendant)) {
+						environment.HasWeatherCompute = true;
+						environment.HasWeatherClock = store.Has<WeatherClock>(descendant);
+						const auto *controls =
+							environment.HasWeatherClock ? WeatherControlsOf(store, descendant) : weather;
+						environment.Weather = ClampedWeatherCompute(*controls);
+						environment.Clock = WeatherClockOf(store, descendant);
+						if (const auto *estimate = store.Get<WeatherClockEstimate>(descendant))
+							environment.WeatherHistoryRevision = estimate->HistoryRevision;
 					}
 				}
 			}

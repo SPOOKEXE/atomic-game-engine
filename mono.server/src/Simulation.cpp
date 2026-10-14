@@ -1,6 +1,7 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/effects/Registration.hpp>
+#include <engine/game/WeatherGround.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Clock.hpp>
@@ -14,6 +15,8 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/script/PlayerGui.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/weather/Clock.hpp>
+#include <engine/weather/Runtime.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <cstring>
@@ -72,6 +75,8 @@ namespace server {
 		// reads ownership yet, because the day something does is the day this
 		// being absent is a bug rather than a gap.
 		engine::scene::RegisterOwnershipSystem(scheduler);
+		engine::weather::RegisterWeatherClockSystem(scheduler);
+		engine::game::RegisterWeatherGroundSystem(scheduler);
 
 		// **Who a teleport brings in, and it must not depend on scripts.** A
 		// destination is chosen by a script in *another* world, so a world can be
@@ -159,6 +164,7 @@ namespace server {
 	}
 
 	void RegisterServerComponents() {
+		engine::weather::RegisterWeatherRuntimeComponents();
 		// The optional bus diagnostic opens a Postbox. Register its resources
 		// here with the rest of the program's stable component names so a test or
 		// tool that prepares the scheduler before constructing a Universe cannot

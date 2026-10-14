@@ -62,6 +62,13 @@ namespace {
 		);
 		return graph;
 	}
+
+	bool Contains(const RenderGraph &graph, const std::vector<NodeId> &nodes, Name name) {
+		return std::any_of(nodes.begin(), nodes.end(), [&](NodeId id) {
+			const Node *node = graph.Find(id);
+			return node != nullptr && node->Name == name;
+		});
+	}
 }
 
 TEST_CASE("resource kinds have stable diagnostic names", "[graph]") {
@@ -140,20 +147,27 @@ TEST_CASE("the default frame compiles and its shadow pass is shared", "[graph]")
 	Name offender;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
-	// **Shared at both ends, per view in the middle**, which is the shape of a
-	// real frame: world input, shadow and environment work every view samples, twenty passes each view
-	// draws for itself, and the window's overlay and chrome once over the lot.
-	CHECK(compiled.Shared.size() == 5);
-	CHECK(compiled.PerView.size() == 22);
-	CHECK(compiled.Final.size() == 4);
-
-	CHECK(graph.Find(compiled.Shared.front())->Name == Name("world"));
-	CHECK(graph.Find(compiled.Shared[1])->Name == Name("mesh-residency"));
-	CHECK(graph.Find(compiled.Shared[2])->Name == Name("shadow"));
-	CHECK(graph.Find(compiled.Shared[3])->Name == Name("skybox-compute"));
-	CHECK(graph.Find(compiled.Shared.back())->Name == Name("clouds-compute"));
-	CHECK(graph.Find(compiled.Final.front())->Name == Name("present"));
-	CHECK(graph.Find(compiled.Final.back())->Name == Name("output-image"));
+	// Shared work brackets the per-view draws, then window presentation runs once.
+	CHECK(Contains(graph, compiled.Shared, Name("world")));
+	CHECK(Contains(graph, compiled.Shared, Name("mesh-residency")));
+	CHECK(Contains(graph, compiled.Shared, Name("shadow")));
+	CHECK(Contains(graph, compiled.Shared, Name("skybox-compute")));
+	CHECK(Contains(graph, compiled.Shared, Name("clouds-compute")));
+	CHECK(Contains(graph, compiled.Shared, Name("weather-residency")));
+	CHECK(Contains(graph, compiled.Shared, Name("weather-field")));
+	CHECK(Contains(graph, compiled.Shared, Name("weather-summary")));
+	CHECK(Contains(graph, compiled.Shared, Name("weather-shadow-map")));
+	CHECK(Contains(graph, compiled.PerView, Name("weather-integrate")));
+	CHECK(Contains(graph, compiled.PerView, Name("weather-history")));
+	CHECK(Contains(graph, compiled.PerView, Name("weather-reconstruct")));
+	CHECK(Contains(graph, compiled.Final, Name("present")));
+	CHECK(Contains(graph, compiled.Final, Name("output-image")));
+	for (const NodeId id : compiled.Shared)
+		CHECK(graph.Find(id)->Scope != NodeScope::View);
+	for (const NodeId id : compiled.PerView)
+		CHECK(graph.Find(id)->Scope == NodeScope::View);
+	for (const NodeId id : compiled.Final)
+		CHECK(graph.Find(id)->Scope == NodeScope::Frame);
 }
 
 TEST_CASE("four views pay for one shadow pass and four colour passes", "[graph]") {
@@ -192,20 +206,17 @@ TEST_CASE("no views runs the shared work and nothing else", "[graph]") {
 	Recorder recorder;
 	REQUIRE(graph.Execute(compiled, recorder, 0));
 
-	// A headless host that presents nothing still has a world to light, and an
-	// editor with every viewport closed still has panels to draw. **Both ends of
-	// the frame survive a viewless one** - which is the same contract
-	// `Renderer::Render` documents for an empty span of views.
-	REQUIRE(recorder.Ran.size() == 9);
-	CHECK(recorder.Ran[0] == "world");
-	CHECK(recorder.Ran[1] == "mesh-residency");
-	CHECK(recorder.Ran[2] == "shadow");
-	CHECK(recorder.Ran[3] == "skybox-compute");
-	CHECK(recorder.Ran[4] == "clouds-compute");
-	CHECK(recorder.Ran[5] == "present");
-	CHECK(recorder.Ran[6] == "interface");
-	CHECK(recorder.Ran[7] == "overlay");
-	CHECK(recorder.Ran[8] == "output-image");
+	// Shared work covers world and pre-view frame stages. Final frame stages
+	// still run, while every per-view stage is absent for a headless frame.
+	REQUIRE(recorder.Ran.size() == compiled.Shared.size() + compiled.Final.size());
+	size_t runIndex = 0;
+	for (const NodeId id : compiled.Shared) {
+		CHECK(recorder.Ran[runIndex++] == std::string{graph.Find(id)->Name.Text()});
+	}
+	for (const NodeId id : compiled.Final) {
+		CHECK(recorder.Ran[runIndex++] == std::string{graph.Find(id)->Name.Text()});
+	}
+	CHECK(runIndex == recorder.Ran.size());
 }
 
 TEST_CASE("one view's passes are adjacent rather than interleaved", "[graph]") {

@@ -64,6 +64,7 @@
 #include <client/Scene.hpp>
 #include <client/SettingsMenu.hpp>
 #include <client/Sounds.hpp>
+#include <client/WeatherSounds.hpp>
 #include <cstdint>
 #include <discord/Link.hpp>
 #include <filesystem>
@@ -1030,6 +1031,8 @@ namespace client {
 		// inside its own store, so a single stage across two worlds would
 		// collide on both counts.
 		std::unordered_map<uint32_t, SoundStage> Stages;
+		// Thunder bindings remain listener-local and independent of authored sounds.
+		std::unordered_map<uint32_t, WeatherSoundStage> WeatherStages;
 
 		// The busiest frame's counters, for the run's closing line. See where
 		// they are folded for why the *last* frame's would be zero.

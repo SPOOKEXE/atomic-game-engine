@@ -1,0 +1,50 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "weather-common.glsl"
+#include "weather-assembly.glsl"
+
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0, std430) readonly buffer Pages { ivec4 keys[]; } pageTable;
+layout(set = 1, binding = 0, std430) writeonly buffer Cells { uvec2 cells[]; } outputField;
+layout(set = 2, binding = 0) uniform Pass { WeatherField Field; } pass;
+
+void main() {
+	uint index = gl_GlobalInvocationID.x;
+	if (index >= pass.Field.Grid.w) return;
+	// Pending stateful data exposes an explicit neutral field until diagnostics accept the solver output.
+	if (pass.Field.Phase.z == 0xffffffffu) {
+		outputField.cells[index] = uvec2(0x7f007f00u, 0x007f7f7fu);
+		return;
+	}
+	uvec3 dimensions = pass.Field.Grid.xyz;
+	uvec3 point = uvec3(index % dimensions.x, (index / dimensions.x) % dimensions.y, index / (dimensions.x * dimensions.y));
+	ivec3 coordinate = pass.Field.Origin.xyz + ivec3(point) * pass.Field.Origin.w;
+	if (pass.Field.Origin.w == 0) {
+		uint pageIndex = index / 512u;
+		uint localIndex = index % 512u;
+		ivec4 page = pageTable.keys[pageIndex];
+		ivec3 local = ivec3(localIndex % 8u, (localIndex / 8u) % 8u, localIndex / 64u);
+		uint descriptor = uint(page.w);
+		int stride = 1 << (descriptor & 31u);
+		coordinate = page.xyz + local * stride;
+		uint baseWords = descriptor >> 7u;
+		uint kind = (descriptor >> 5u) & 3u;
+		if (kind == 2u) return;
+		if (kind == 1u) {
+			if (any(notEqual(local & ivec3(1), ivec3(0)))) return;
+			uvec2 children[8];
+			for (uint child = 0u; child < 8u; ++child) {
+				ivec3 offset = ivec3(child & 1u, (child >> 1u) & 1u, (child >> 2u) & 1u);
+				children[child] = WeatherEvaluate(pass.Field, coordinate + offset * stride);
+			}
+			uint words[8];
+			WeatherAssemblyPack(children, words);
+			uint group = WeatherAssemblyAddress(uvec3(local)).x;
+			for (uint pair = 0u; pair < 4u; ++pair)
+				outputField.cells[baseWords / 2u + group * 4u + pair] = uvec2(words[pair * 2u], words[pair * 2u + 1u]);
+			return;
+		}
+		index = baseWords / 2u + localIndex;
+	}
+	outputField.cells[index] = WeatherEvaluate(pass.Field, coordinate);
+}

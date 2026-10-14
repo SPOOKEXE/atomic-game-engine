@@ -150,6 +150,7 @@ namespace studio {
 	struct PlayedInputAdapter;
 	struct ImageComposerState;
 	class DataFactoryHost;
+	struct WeatherAudio;
 
 	using engine::ecs::Entity;
 	using engine::world::WorldId;
@@ -3540,6 +3541,9 @@ namespace studio {
 		// wherever this object was declared. Same reason `client::Client` holds
 		// its own that way.
 		std::unique_ptr<engine::world::Universe> Universe;
+		// Weather audio opens only for a focused Play viewport with due thunder.
+		std::unique_ptr<WeatherAudio> WeatherAudio_;
+		void PumpWeatherAudio();
 		// Selected portal images.
 		std::unique_ptr<engine::render::PortalImageHost> PortalImages;
 		// Selected factory host.

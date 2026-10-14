@@ -356,7 +356,11 @@ namespace engine::render {
 							paneTexture,
 							State->SurfaceSampler,
 							pane.TagFilter,
-							result.Triangles
+							result.Triangles,
+							nullptr,
+							Impl::SlotSelection::All,
+							Impl::VisibilityPass::Secondary,
+							Pipeline->Name
 						);
 					}
 
@@ -622,7 +626,11 @@ namespace engine::render {
 								surfaceTexture,
 								State->SurfaceSampler,
 								surfaceFilter,
-								result.Triangles
+								result.Triangles,
+								nullptr,
+								Impl::SlotSelection::All,
+								Impl::VisibilityPass::Secondary,
+								Pipeline->Name
 							);
 
 							// **Ended and left for the sweep below to mark ready**, which
@@ -708,7 +716,11 @@ namespace engine::render {
 										surfaceTexture,
 										State->SurfaceSampler,
 										surfaceFilter,
-										result.Triangles
+										result.Triangles,
+										nullptr,
+										Impl::SlotSelection::All,
+										Impl::VisibilityPass::Secondary,
+										Pipeline->Name
 									);
 									continue;
 								}
@@ -727,7 +739,11 @@ namespace engine::render {
 										surfaceTexture,
 										State->SurfaceSampler,
 										surfaceFilter,
-										result.Triangles
+										result.Triangles,
+										nullptr,
+										Impl::SlotSelection::All,
+										Impl::VisibilityPass::Secondary,
+										Pipeline->Name
 									);
 									continue;
 								}
@@ -762,7 +778,11 @@ namespace engine::render {
 									surfaceTexture,
 									State->SurfaceSampler,
 									surfaceFilter,
-									result.Triangles
+									result.Triangles,
+									nullptr,
+									Impl::SlotSelection::All,
+									Impl::VisibilityPass::Secondary,
+									Pipeline->Name
 								);
 							}
 						};
@@ -1037,7 +1057,8 @@ namespace engine::render {
 							result.Triangles,
 							nullptr,
 							Impl::SlotSelection::All,
-							Impl::VisibilityPass::MainCamera
+							Impl::VisibilityPass::MainCamera,
+							Pipeline->Name
 						);
 						SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
 					}

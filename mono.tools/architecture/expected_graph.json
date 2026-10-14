@@ -159,6 +159,7 @@
         "scriptjs",
         "scriptluau",
         "spatial",
+        "weather",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -294,6 +295,7 @@
         "scriptjs",
         "scriptluau",
         "spatial",
+        "weather",
         "world"
       ]
     },
@@ -353,6 +355,7 @@
         "script",
         "spatial",
         "ui",
+        "weather",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -386,6 +389,7 @@
         "scriptjs",
         "scriptluau",
         "spatial",
+        "weather",
         "world"
       ]
     },
@@ -456,6 +460,7 @@
         "scene",
         "script",
         "spatial",
+        "weather",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -598,6 +603,7 @@
         "scriptjs",
         "scriptluau",
         "spatial",
+        "weather",
         "world"
       ],
       "requires": "MONO_BUILD_SERVER"
@@ -660,6 +666,7 @@
         "server",
         "spatial",
         "ui",
+        "weather",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -694,6 +701,7 @@
         "scene",
         "script",
         "spatial",
+        "weather",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -737,9 +745,22 @@
         "scriptluau",
         "server",
         "spatial",
+        "weather",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
+    },
+    "weather": {
+      "tier": "shared",
+      "layer": 8,
+      "links": [
+        "collision",
+        "core",
+        "ecs",
+        "parallel",
+        "scene",
+        "spatial"
+      ]
     },
     "world": {
       "tier": "shared",
@@ -832,6 +853,7 @@
         "scriptjs",
         "scriptluau",
         "spatial",
+        "weather",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -858,6 +880,7 @@
         "script",
         "spatial",
         "ui",
+        "weather",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -892,6 +915,7 @@
         "scriptjs",
         "scriptluau",
         "spatial",
+        "weather",
         "world"
       ],
       "requires": "MONO_BUILD_SERVER"
@@ -939,6 +963,7 @@
         "server",
         "spatial",
         "ui",
+        "weather",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"
@@ -982,6 +1007,7 @@
         "scriptluau",
         "server",
         "spatial",
+        "weather",
         "world"
       ],
       "requires": "MONO_BUILD_CLIENT"

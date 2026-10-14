@@ -1,3 +1,5 @@
+#include "WeatherComputeRegistration.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
@@ -4340,6 +4342,14 @@ namespace engine::scene {
 			}
 			for (const std::string_view property : {"Color", "Start", "End"})
 				TagProperty(fogEffect, property, "Lighting");
+
+			// Append new classes so existing authored class ids retain their order.
+			const ecs::ClassId weatherCompute = ecs::Classes::Register(
+				"WeatherCompute", cloudComputeClass, std::array{ecs::Components::Of<WeatherCompute>()}
+			);
+			RegisterWeatherComputeProperties(weatherCompute);
+			TagDeclaredProperties(weatherCompute, core::Name("Weather"));
+			TagProperty(weatherCompute, "WeatherEnabled", "Behavior");
 
 			return part;
 		}

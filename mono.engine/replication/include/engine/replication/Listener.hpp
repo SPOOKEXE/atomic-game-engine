@@ -154,6 +154,11 @@ namespace engine::replication {
 		// @return How many clients took it.
 		// @since v0.13
 		size_t Broadcast(std::span<const std::byte> message, double nowSeconds, ClientId except = {});
+		// Sends copied state only to carrying clients admitted by the authority's entity interest rule.
+		// Returns false when any eligible recipient's reliable lane refuses; callers may retry duplicates.
+		bool BroadcastEntityState(
+			const ecs::Store &store, ecs::Entity entity, std::span<const std::byte> message, double nowSeconds
+		);
 
 		// Hears the messages this module does not read.
 		//

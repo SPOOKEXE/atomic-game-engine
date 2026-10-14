@@ -241,6 +241,22 @@ namespace engine::replication {
 			Replica_.OnPreface(std::move(callback));
 		}
 
+		// Observes the store after each admitted poll, including polls with no new data.
+		// Receipt time is caller-supplied monotonic seconds; RTT is measured by the
+		// active transport. Presentation clocks can extrapolate without this module
+		// knowing which components consume those observations.
+		void OnTiming(std::function<void(ecs::Store &, double, double)> callback) {
+			Timing = std::move(callback);
+		}
+
+		// Offers copied application state to an adapter before ordinary user routing.
+		// Returning true consumes the payload. The callback receives the borrowed
+		// replica store, monotonic receipt seconds and measured RTT seconds.
+		void
+		OnUserState(std::function<bool(ecs::Store &, std::span<const std::byte>, double, double)> callback) {
+			UserState = std::move(callback);
+		}
+
 		// The last tick applied in full.
 		//
 		// @return The tick, or zero before joining.
@@ -442,6 +458,8 @@ namespace engine::replication {
 
 		// Whoever is carrying something over this link. See OnUserMessage.
 		std::function<void(std::span<const std::byte>)> UserMessages;
+		std::function<void(ecs::Store &, double, double)> Timing;
+		std::function<bool(ecs::Store &, std::span<const std::byte>, double, double)> UserState;
 
 		Statistics Stats_;
 	};

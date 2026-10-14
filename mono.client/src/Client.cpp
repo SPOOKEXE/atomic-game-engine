@@ -53,10 +53,12 @@
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/WeatherClock.hpp>
 #include <engine/script/DataSceneService.hpp>
 #include <engine/script/PlayerGui.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/scripthost/Runtime.hpp>
+#include <engine/weather/Clock.hpp>
 #include <engine/world/HostLink.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -501,6 +503,14 @@ namespace client {
 		engine::world::UniverseSettings interactiveWorlds;
 		interactiveWorlds.MaximumCatchUpTicks = engine::world::INTERACTIVE_CATCH_UP_TICKS;
 		Universe_ = std::make_unique<engine::world::Universe>(interactiveWorlds);
+		(void)Universe_->OnState([](engine::world::WorldId,
+									engine::ecs::Store &store,
+									engine::world::WorldState state) {
+			(void)engine::weather::SetWeatherWorldPaused(
+				store,
+				state == engine::world::WorldState::Suspended || state == engine::world::WorldState::Faulted
+			);
+		});
 		if (Settings.DataFactory) {
 			if (Settings.Worlds != 1 || !Settings.ConnectAddress.empty() ||
 				Settings.PresentationSession != 0 || !Settings.PresentationWorld.empty()) {
@@ -1461,6 +1471,7 @@ namespace client {
 				// null device and stages before it may publish another observation.
 				DataAudio->Clear(clock.InstanceId);
 				Stages.clear();
+				WeatherStages.clear();
 				Sound = std::unique_ptr<engine::audio::Device>(engine::audio::OpenNullDevice({}));
 				if (Sound == nullptr) return;
 				DataAudio->ResetTickClock(clock, Sound->Format().SampleRate);
@@ -1475,6 +1486,13 @@ namespace client {
 				return false;
 			entry.second.Clear(Sound->Mixer());
 			return entry.second.PendingCloses() == 0;
+		});
+		std::erase_if(WeatherStages, [&](auto &entry) {
+			const engine::world::WorldId world{entry.first};
+			if (world == Replicated ||
+				std::find(Simulated.begin(), Simulated.end(), world) != Simulated.end())
+				return false;
+			return entry.second.Clear(Sound->Mixer());
 		});
 
 		// The listener is the composed camera's position, which is **last
@@ -1496,6 +1514,7 @@ namespace client {
 			SoundStage &stage = Stages[id.Index];
 			Universe_->Enter(id, [&](engine::ecs::Store &store) {
 				stage.Sync(store, Sound->Mixer(), Audible, ear, rate);
+				WeatherStages[id.Index].Sync(store, Sound->Mixer(), ear, Audible);
 			});
 		};
 
@@ -2067,6 +2086,8 @@ namespace client {
 		Connection = std::make_unique<engine::replication::Connector>(
 			*Socket, *server, engine::core::Clock::Seconds(), connector
 		);
+		Connection->OnTiming(engine::scene::SynchronizeWeatherClocks);
+		Connection->OnUserState(engine::scene::AcceptWeatherClockUpdate);
 		ResetPlayPresentation();
 
 		// **Which player is this client's, which nothing else can tell it.**
@@ -4920,9 +4941,11 @@ namespace client {
 		);
 		damage.Objects = damage.Objects || VisualResourcesChanged;
 		const bool portalUploadsPending = PortalImages && PortalImages->HasPendingUploads();
+		const bool weatherWorkPending = Renderer.HasPendingWeatherWork(view.World);
+		damage.Environment = damage.Environment || weatherWorkPending;
 		damage.Portals = damage.Portals || portalUploadsPending;
-		damage.Scene =
-			damage.Scene || damage.Objects || portalUploadsPending || diagnosticFrame || PresentedImages < 2;
+		damage.Scene = damage.Scene || damage.Objects || portalUploadsPending || weatherWorkPending ||
+					   diagnosticFrame || PresentedImages < 2;
 		damage.GameInterface =
 			damage.GameInterface || diagnosticFrame || interfaceContinuous || PresentedImages < 2;
 		damage.Overlay = Overlay.IsDirty();

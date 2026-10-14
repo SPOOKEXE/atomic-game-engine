@@ -1,0 +1,62 @@
+#version 450
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D sourceImage;
+layout(set = 0, binding = 1) uniform sampler2D depthImage;
+layout(set = 0, binding = 2) uniform sampler2D cloudsImage;
+layout(set = 0, binding = 3) uniform sampler2D cloudDepthImage;
+layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D outputImage;
+layout(set = 2, binding = 0) uniform Reconstruction {
+	mat4 InverseViewProjection;
+	mat4 PreviousViewProjection;
+	vec4 Eye;
+	vec4 PreviousEye;
+	vec4 CloudDisplacement;
+	vec4 Limits;
+	uvec4 Extents;
+} pass;
+
+vec3 WorldAt(vec2 uv, float depth) {
+	vec4 point = pass.InverseViewProjection * vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
+	return point.xyz / point.w;
+}
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 extent = imageSize(outputImage);
+	if (any(greaterThanEqual(pixel, extent))) return;
+	vec2 uv = (vec2(pixel) + .5) / vec2(extent);
+	vec4 scene = texelFetch(sourceImage, pixel, 0);
+	float sceneDepth = texelFetch(depthImage, pixel, 0).r;
+	bool sky = sceneDepth >= .9999995;
+	float surfaceDistance = length(WorldAt(uv, sceneDepth) - pass.Eye.xyz);
+	ivec2 halfExtent = textureSize(cloudsImage, 0);
+	vec2 point = uv * vec2(halfExtent) - .5;
+	ivec2 base = ivec2(floor(point));
+	vec2 fraction = fract(point);
+	ivec2 nearest = clamp(ivec2(round(point)), ivec2(0), halfExtent - 1);
+	vec4 medium = texelFetch(cloudDepthImage, nearest, 0);
+	vec4 cloud = vec4(0.0);
+	float total = 0.0;
+	for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
+		ivec2 samplePixel = clamp(base + ivec2(x, y), ivec2(0), halfExtent - 1);
+		vec4 metadata = texelFetch(cloudDepthImage, samplePixel, 0);
+		if ((metadata.x >= .5) != sky) continue;
+		float depthDelta = abs(metadata.z - surfaceDistance);
+		float depthTolerance = max(pass.Limits.z, surfaceDistance * pass.Limits.y);
+		if (!sky && depthDelta > depthTolerance) continue;
+		float weight = (x == 0 ? 1.0 - fraction.x : fraction.x) *
+			(y == 0 ? 1.0 - fraction.y : fraction.y);
+		if (!sky) weight *= max(.001, 1.0 - depthDelta / depthTolerance);
+		if (metadata.w >= .5 && medium.w >= .5) {
+			float cloudTolerance = max(32.0, medium.y * .1);
+			weight *= 1.0 / (1.0 + abs(metadata.y - medium.y) / cloudTolerance);
+		}
+		cloud += texelFetch(cloudsImage, samplePixel, 0) * weight;
+		total += weight;
+	}
+	cloud = total > .000001 ? cloud / total : vec4(0.0, 0.0, 0.0, 1.0);
+	float transmittance = clamp(cloud.a, 0.0, 1.0);
+	imageStore(outputImage, pixel, vec4(cloud.rgb + scene.rgb * transmittance,
+		1.0 - (1.0 - scene.a) * transmittance));
+}

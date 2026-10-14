@@ -9,12 +9,14 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/render/SpatialCanvas.hpp>
+#include <engine/render/WeatherEffects.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
 #include <array>
 #include <cstddef>
 #include <optional>
+#include <vector>
 
 namespace engine::render {
 	class ShaderLibrary;
@@ -89,6 +91,32 @@ namespace engine::render {
 		scene::WorldLighting Lighting;
 		// Packed generic cloud-density snapshot supplied by the presentation host.
 		std::optional<scene::CloudDensitySnapshot> CloudDensity;
+		// Immutable copied checkpoint bytes; unchanged frames retain the same allocation.
+		std::vector<std::byte> WeatherCheckpoint;
+		// Trusted canonical stream name; source epochs avoid rebuilding paths on quiet frames.
+		core::Name WeatherSimulationLayer;
+		// Derived path cache metadata, local to this owned packet.
+		//@{
+		ecs::Entity WeatherSimulationLayerSource = ecs::NULL_ENTITY;
+		uint64_t WeatherLayerNameWrites = 0;
+		uint64_t WeatherLayerHierarchyWrites = 0;
+		uint64_t WeatherLayerDefinitionWrites = 0;
+		uint64_t WeatherLayerAcceptedWrites = 0;
+		uint64_t WeatherLayerAcceptedMembership = 0;
+		//@}
+		// Local publication identity, stable across camera bindings and quiet collections.
+		uint64_t WeatherCheckpointVersion = 0;
+		// Semantic checkpoint metadata copied with its bytes.
+		//@{
+		uint64_t WeatherCheckpointTick = 0;
+		uint64_t WeatherCheckpointEpoch = 0;
+		uint32_t WeatherCheckpointRevision = 0;
+		//@}
+		// Source and observed ECS write watermark for bounded checkpoint copy decisions.
+		//@{
+		ecs::Entity WeatherCheckpointSource = ecs::NULL_ENTITY;
+		uint64_t WeatherCheckpointChangeVersion = 0;
+		//@}
 
 		// Renderable instances in presentation order.
 		std::vector<scene::DrawInstance> Instances;
@@ -122,6 +150,8 @@ namespace engine::render {
 	// One camera's light selection, surface demand, facing ribbons and spatial
 	// interface commands.
 	struct WorldCameraFrame {
+		// Camera-local copied weather consumers and their reusable derived packet.
+		WeatherEffectsFrame WeatherEffects;
 		// Camera-local selection of the world's bounded participating-media set.
 		std::array<scene::VolumeState, scene::MAX_SCENE_VOLUMES> Volumes{};
 		// Number of selected volumes in `Volumes`.

@@ -8,6 +8,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
+#include <engine/scene/WeatherClock.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -979,6 +980,8 @@ namespace client {
 			approach.Connection = std::make_unique<replication::Connector>(
 				*approach.Socket, approach.Endpoint, nowSeconds, connecting
 			);
+			approach.Connection->OnTiming(scene::SynchronizeWeatherClocks);
+			approach.Connection->OnUserState(scene::AcceptWeatherClockUpdate);
 			approach.Content = std::make_unique<ContentSession>();
 			approach.Content->RelayName = approach.Endpoint.Text();
 			approach.Content->Relay = std::make_unique<ContentLink>(
@@ -1155,6 +1158,8 @@ namespace client {
 			connecting.Quic.BytesPerTick = connecting.Session.Link.BytesPerTick;
 			next.Connection =
 				std::make_unique<replication::Connector>(*next.Socket, next.Endpoint, nowSeconds, connecting);
+			next.Connection->OnTiming(scene::SynchronizeWeatherClocks);
+			next.Connection->OnUserState(scene::AcceptWeatherClockUpdate);
 			next.Content = std::make_unique<ContentSession>();
 			if (next.Readiness) {
 				// Reserve the destination and return images plus content/upload headroom

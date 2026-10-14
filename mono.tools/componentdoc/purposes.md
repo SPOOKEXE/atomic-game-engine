@@ -268,3 +268,19 @@ playergui.Source | Marks an authoritative GUI source and links it to its viewer-
 script.PortalObservationLog | Resource: bounded rings of portal crossing, arrival, input and handoff records, stamped with each subject's trace id. Hooks and the server observation sink read them; the oldest rows are overwritten and counted.
 script.PortalPlayerInput | Per-player forwarded input clock and bounded native movement queue. Preserves control timing across route adoption and reports physics-applied input; character replacement invalidates the queue.
 script.PortalTransfers | Snapshot state for bounded portal handoffs: host incarnation, pending source fences, destination reservations, authenticated peer receipts and retry ticks. The installed transfer admission system consumes owned simulation messages.
+scene.WeatherCompute | Authored world-unit weather controls on a WeatherCompute cloud provider: versioned seed, thermodynamics, wind, progression, sparse quality and optional consumer responses.
+scene.WeatherAcceptedDefinition | Canonical accepted weather controls for unfinished ticks; pending desired edits remain on the authored provider.
+scene.WeatherClock | Accepted per-provider weather epoch, integer tick, phase and cumulative wind anchor, independent of local world elapsed time.
+scene.WeatherClockEstimate | Local-only receipt and RTT estimate for weather display time; saved state resets it and canonical weather clocks remain authoritative.
+scene.WeatherClockPublication | Local reliable final-anchor publication state for world pause and resume.
+scene.WeatherWorldPause | Local world suspension control shared by weather-clock updates.
+scene.WeatherClockInbox | Bounded local final-anchor inbox retained until replicated weather providers arrive.
+weather.RuntimeState | Persistent authoritative storm charge, hail growth and event sequence driven by canonical weather ticks.
+weather.Events | Bounded copied authoritative lightning and hail journal with stable event identity, endpoints and delayed-thunder inputs.
+weather.RuntimeCache | Disposable prepared weather arithmetic and changed-input epochs; definitions and timelines remain on their ECS rows.
+weather.Listener | Local-only thunder listener cursor and bounded due events derived from accepted lightning observations.
+weather.StatefulState | Authoritative full-precision canonical weather solver state with source budgets and forcing history; replicas reconstruct device-local state.
+weather.StatefulCheckpoint | Complete versioned canonical stateful-weather checkpoint published at a bounded cadence for save, late join and replay.
+weather.GroundQuery | Local host callback for authoritative storm impacts against accepted terrain and collider geometry; reset on load and excluded from replication.
+weather.EpochHistory | Saved authoritative named-stream epoch high-water marks that prevent event identity reuse after provider deletion, recreation or renaming; excluded from replication.
+weather.StatefulInitializationFailure | Saved authoritative initialization-refusal revision that allows corrective weather edits without publishing an invalid atmosphere or checkpoint; excluded from replication.

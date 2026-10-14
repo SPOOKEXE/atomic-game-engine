@@ -206,7 +206,11 @@ namespace engine::render {
 							nullptr,
 							State->SurfaceSampler,
 							filter,
-							Result.Triangles
+							Result.Triangles,
+							nullptr,
+							Impl::SlotSelection::All,
+							Impl::VisibilityPass::Secondary,
+							Pipeline->Name
 						);
 						return;
 					}
@@ -263,7 +267,11 @@ namespace engine::render {
 						texture,
 						State->SurfaceSampler,
 						filter,
-						Result.Triangles
+						Result.Triangles,
+						nullptr,
+						Impl::SlotSelection::All,
+						Impl::VisibilityPass::Secondary,
+						Pipeline->Name
 					);
 				};
 				{
@@ -325,7 +333,11 @@ namespace engine::render {
 							nullptr,
 							State->SurfaceSampler,
 							filter,
-							Result.Triangles
+							Result.Triangles,
+							nullptr,
+							Impl::SlotSelection::All,
+							Impl::VisibilityPass::Secondary,
+							Pipeline->Name
 						);
 					}
 					order += count;

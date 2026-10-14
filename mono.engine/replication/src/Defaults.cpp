@@ -50,6 +50,16 @@ namespace engine::replication {
 		// the component from its class. That is a feature with a design, not a
 		// prefix.
 		constexpr std::string_view SHARED_PREFIXES[] = {"scene.", "gui."};
+		// Copied authority weather records are named individually. Derived caches
+		// and listener receipt state remain private even though they share a module.
+		constexpr std::string_view WEATHER_COMPONENTS[] = {
+			"weather.Events", "weather.RuntimeState", "weather.StatefulCheckpoint"
+		};
+		bool PartOfWeather(std::string_view component) {
+			for (const auto named : WEATHER_COMPONENTS)
+				if (component == named) return true;
+			return false;
+		}
 
 		bool UnderASharedPrefix(std::string_view component) {
 			for (const std::string_view prefix : SHARED_PREFIXES) {
@@ -173,7 +183,8 @@ namespace engine::replication {
 		// and worth reducing, but not by guessing a component's write path from
 		// outside the module that owns it.
 		bool WrittenEveryTick(std::string_view component) {
-			return component == "scene.Transform" || component == "scene.Motion";
+			return component == "scene.Transform" || component == "scene.Motion" ||
+				   component == "scene.WeatherClock" || component == "weather.RuntimeState";
 		}
 	}
 
@@ -238,10 +249,18 @@ namespace engine::replication {
 			   component == "script.Program" || component == "scene.EditableMesh" ||
 			   component == "scene.EditableImage" || component == "scene.TextContent" ||
 			   component == "scene.ShaderSource" || component == "scene.ImageGraph" ||
-			   component == "scene.GpuParticleField";
+			   component == "scene.GpuParticleField" || component == "scene.WeatherAcceptedDefinition" ||
+			   component == "weather.Events" || component == "weather.StatefulCheckpoint";
 	}
 
 	bool LocalToTheClient(std::string_view component) {
+		// Monotonic receipt times and visual slew debt belong to the receiving machine.
+		if (component == "scene.WeatherClockEstimate" || component == "scene.WeatherClockPublication" ||
+			component == "scene.WeatherClockInbox" || component == "scene.WeatherWorldPause" ||
+			component == "weather.RuntimeCache" || component == "weather.Listener" ||
+			component == "weather.GroundQuery" || component == "weather.StatefulState" ||
+			component == "weather.StatefulInitializationFailure" || component == "weather.EpochHistory")
+			return true;
 		if (component == "ecs.ClientLocal" || component == "ecs.InstanceProjection") return true;
 		// **The client makes its own main camera, and the component that says
 		// *which* camera that is, is the one to keep local.** `ActiveCamera`
@@ -480,8 +499,8 @@ namespace engine::replication {
 				// have no owning entity, so their two values cross as world resources.
 				const bool resource = name == "ecs.AttributeTable" || name == "scene.SurfaceBounces" ||
 									  name == "scene.SurfaceLimit";
-				const bool shared =
-					resource || UnderASharedPrefix(name) || PartOfAnInstance(name) || PartOfAScript(name);
+				const bool shared = resource || UnderASharedPrefix(name) || PartOfAnInstance(name) ||
+									PartOfAScript(name) || PartOfWeather(name);
 				if (!shared || LocalToTheClient(name)) {
 					continue;
 				}

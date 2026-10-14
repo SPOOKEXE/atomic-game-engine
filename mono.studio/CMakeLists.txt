@@ -30,6 +30,9 @@ mono_add_library(studio
 		Engine::world
 		Engine::datastore
 		Engine::scene
+		Engine::weather
+		# The focused Play viewport consumes listener-local weather thunder.
+		Engine::audio
 		Engine::effects
 		Engine::script
 

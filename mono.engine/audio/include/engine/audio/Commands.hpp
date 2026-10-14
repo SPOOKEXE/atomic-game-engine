@@ -120,6 +120,9 @@ namespace engine::audio {
 		// to happen, and dropping it would turn a frame hitch into a missing
 		// sound - which is far worse than one that is a few samples late.
 		uint64_t AtSample = 0;
+		// Play can retain a deadline beyond the next callback block. The node
+		// stays silent without advancing its cursor until that absolute sample.
+		bool RetainDeadline = false;
 
 		// Which node.
 		NodeId Target;

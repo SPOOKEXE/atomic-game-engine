@@ -297,8 +297,35 @@ namespace engine::world {
 			return WorldStatus::Ok;
 		}
 
-		world->SetState(state);
+		ApplyState(id, state);
 		return WorldStatus::Ok;
+	}
+
+	bool Universe::OnState(std::function<void(WorldId, ecs::Store &, WorldState)> observer) {
+		RequireDriverThread("OnState");
+		if (Ticking || !observer || StateObservers.size() >= 16) return false;
+		StateObservers.push_back(std::move(observer));
+		return true;
+	}
+
+	void Universe::ApplyState(WorldId id, WorldState state) {
+		World *world = Reach(id);
+		if (!world) return;
+		const auto before = world->State();
+		world->SetState(state);
+		if (world->State() == before || IsRemote(id)) return;
+		world->Storage().BindToCallingThread();
+		// Reuse the structural queue while stores are borrowed. An observer may
+		// request a later transition but cannot destroy this store mid-notification.
+		struct NotificationGuard {
+			bool &Ticking;
+			~NotificationGuard() {
+				Ticking = false;
+			}
+		} guard{Ticking};
+		Ticking = true;
+		for (const auto &observer : StateObservers)
+			observer(id, world->Storage(), world->State());
 	}
 
 	WorldStatus Universe::Recover(WorldId id) {
@@ -345,9 +372,7 @@ namespace engine::world {
 			break;
 
 		case Control::Kind::SetState:
-			if (World *world = Reach(control.Target); world != nullptr) {
-				world->SetState(control.State);
-			}
+			ApplyState(control.Target, control.State);
 			break;
 
 		case Control::Kind::Recover:
@@ -695,7 +720,7 @@ namespace engine::world {
 			if (!world->Storage().Load(worldReader)) {
 				return abandon();
 			}
-			world->SetState(state);
+			ApplyState(id, state);
 		}
 
 		// After the worlds, so a subscriber naming one resolves against the

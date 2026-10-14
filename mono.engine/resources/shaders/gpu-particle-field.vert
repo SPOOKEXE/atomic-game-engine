@@ -18,7 +18,23 @@ void main() {
 		gl_Position = vec4(-4.0, -4.0, 0.0, 1.0); outColour = vec4(0.0); outTexCoord = vec2(0.0); outWorldPosition = inPositionLayer.xyz; return;
 	}
 	vec2 corner = vec2((gl_VertexIndex & 1) == 0 ? -0.5 : 0.5, (gl_VertexIndex & 2) == 0 ? -0.5 : 0.5);
-	vec3 world = inPositionLayer.xyz + frame.CameraRight.xyz * corner.x * frame.Sizes[layer] + frame.CameraUp.xyz * corner.y * frame.Sizes[layer];
+	vec3 right = frame.CameraRight.xyz, up = frame.CameraUp.xyz;
+	float width = frame.Sizes[layer], height = width;
+	// Weather uses the same generic population. Its first group is a short
+	// velocity-aligned liquid streak; authored groups keep their square billboards.
+	if (frame.Options.z > 0.0 && layer == 0u) {
+		vec3 projected = inVelocityAge.xyz - frame.CameraForward.xyz * dot(inVelocityAge.xyz, frame.CameraForward.xyz);
+		float squared = dot(projected, projected);
+		if (squared > 0.000001) {
+			up = projected * inversesqrt(squared);
+			right = normalize(cross(up, frame.CameraForward.xyz));
+			height = max(width, min(length(inVelocityAge.xyz) * 0.04, 0.6));
+		}
+	}
+	vec3 world = inPositionLayer.xyz + right * corner.x * width + up * corner.y * height;
 	outTexCoord = corner + 0.5; outColour = frame.Colours[layer]; outWorldPosition = world;
+	if (frame.Options.z > 0.0 && frame.Options.w > 0.0) {
+		outColour.a *= clamp(1.0 - distance(inPositionLayer.xyz, frame.Centre.xyz) / frame.Options.w, 0.0, 1.0);
+	}
 	gl_Position = frame.ViewProjection * vec4(world, 1.0);
 }

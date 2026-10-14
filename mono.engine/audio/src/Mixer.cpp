@@ -112,6 +112,7 @@ namespace engine::audio {
 		case CommandKind::Play:
 			if (Node *node = target) {
 				node->Playing = true;
+				node->NotBeforeSample = command.RetainDeadline ? command.AtSample : 0;
 			}
 			break;
 
@@ -289,7 +290,12 @@ namespace engine::audio {
 				static_cast<double>(source.Format().SampleRate) / static_cast<double>(Shape.SampleRate);
 
 			std::span<float> written = out.Data();
-			for (size_t frame = 0; frame < frames; ++frame) {
+			const uint64_t segmentSample = Rendered + blockOffset;
+			const size_t firstFrame =
+				node->NotBeforeSample > segmentSample
+					? static_cast<size_t>(std::min<uint64_t>(node->NotBeforeSample - segmentSample, frames))
+					: 0;
+			for (size_t frame = firstFrame; frame < frames; ++frame) {
 				if (node->Cursor >= static_cast<double>(sourceFrames)) {
 					if (!node->Looping) {
 						node->Playing = false;
