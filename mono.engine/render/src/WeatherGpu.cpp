@@ -183,18 +183,26 @@ namespace engine::render {
 		return signature;
 	}
 
-	uint64_t WeatherPhysicalSignature(const scene::Environment &environment, core::Name simulationLayer) {
+	uint64_t WeatherPhysicalSignature(
+		const scene::Environment &environment, core::Name simulationLayer, uint32_t terrainRevision
+	) {
 		const auto &controls = environment.Weather;
+		// Match MakeSimulationDefinition's static inputs without allocating its owned strings
+		// during graph lookups. Revision and wind select checkpoint/forcing updates, not storage.
 		uint64_t signature = scene::MixSignature(environment.CloudProvider.Id, weather::Hash(controls.Seed));
 		for (unsigned char byte : controls.LayerName.Text())
 			signature = scene::MixSignature(signature, byte);
 		for (unsigned char byte : simulationLayer.Text())
 			signature = scene::MixSignature(signature, byte);
+		signature = scene::MixSignature(signature, terrainRevision);
 		for (uint64_t value :
 			 {uint64_t(controls.AlgorithmVersion),
-			  uint64_t(controls.DefinitionRevision),
 			  uint64_t(controls.TickRate),
 			  uint64_t(controls.FeatureCells),
+			  uint64_t(controls.TerrainRevision),
+			  uint64_t(controls.BoundaryX),
+			  uint64_t(controls.BoundaryZ),
+			  uint64_t(controls.TopBoundary),
 			  environment.Clock.Epoch})
 			signature = scene::MixSignature(signature, value);
 		for (float value :
@@ -202,7 +210,6 @@ namespace engine::render {
 			  controls.BaseHeightMetres,
 			  controls.ThicknessMetres,
 			  controls.ExtentMetres.X,
-			  controls.ExtentMetres.Y,
 			  controls.ExtentMetres.Z,
 			  controls.Coverage,
 			  controls.CondensateScale,
@@ -213,16 +220,14 @@ namespace engine::render {
 			  controls.TemperatureLapseCelsiusPerKilometre,
 			  controls.TemperatureVariationCelsius,
 			  controls.PressureVariationHectopascals,
-			  controls.WindMetresPerSecond.X,
-			  controls.WindMetresPerSecond.Y,
-			  controls.WindMetresPerSecond.Z,
 			  controls.TurbulenceMetresPerSecond,
 			  controls.ShearMetresPerSecond,
 			  controls.LiftMetresPerSecond,
 			  controls.FrontContrast,
 			  controls.GrowthRate,
 			  controls.PrecipitationRate,
-			  controls.IceFraction})
+			  controls.GroundVapourFluxKilogramsPerSquareMetreSecond,
+			  controls.RainFallSpeedMetresPerSecond})
 			signature = scene::MixSignature(signature, std::bit_cast<uint32_t>(value));
 		return signature;
 	}

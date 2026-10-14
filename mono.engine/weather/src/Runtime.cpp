@@ -465,6 +465,7 @@ namespace engine::weather {
 			if (!store.AdoptOnly()) {
 				WeatherRuntimeState state;
 				const auto *oldState = store.Get<WeatherRuntimeState>(layer.Provider);
+				const bool hadState = oldState != nullptr;
 				if (oldState) state = *oldState;
 				const WeatherRuntimeState previousState = state;
 				WeatherEvents events;
@@ -487,6 +488,7 @@ namespace engine::weather {
 					(controls.LightningRate == 0 && controls.HailIntensity == 0)) {
 					state.LastTick = clock.Tick;
 				} else {
+					std::optional<bool> blockedRecipeCompatible;
 					const uint64_t steps = std::min(MAX_CATCH_UP_TICKS, clock.Tick - state.LastTick);
 					for (uint64_t step = 0; step < steps; ++step) {
 						const uint64_t tick = state.LastTick + 1;
@@ -503,6 +505,26 @@ namespace engine::weather {
 							const auto *physical = store.Get<StatefulWeatherState>(layer.Provider);
 							if (!completed || !physical || time->PhaseTick > *completed) break;
 							column = StatefulEventColumn(*physical, time->PhaseTick);
+							if (StatefulEventColumnBlocked(*physical, column)) {
+								if (!blockedRecipeCompatible) {
+									auto normalized = controls;
+									normalized.Enabled = true;
+									normalized.Paused = false;
+									normalized.TimeScale = 1;
+									auto expected = MakeSimulationDefinition(normalized, layer.Layer);
+									if (expected) expected->WorldEpoch = clock.Epoch;
+									blockedRecipeCompatible =
+										expected && *expected == physical->Simulation.Definition &&
+										physical->AcceptedRevision == controls.DefinitionRevision &&
+										physical->Seed == controls.Seed &&
+										physical->LayerKey == layer.Compiled->Definition.LayerKey;
+								}
+								if (!*blockedRecipeCompatible) break;
+								// Immutable era terrain proves this completed column contains no air.
+								// Consume it without substituting procedural samples or growing a storm.
+								state.LastTick = tick;
+								continue;
+							}
 							sample =
 								QueryStatefulWeather(store, layer.Provider, column, 0.0f, time->PhaseTick);
 						} else {
@@ -568,7 +590,7 @@ namespace engine::weather {
 						state.LastTick = tick;
 					}
 				}
-				if (!oldState || state != previousState) store.Set(layer.Provider, state);
+				if (!hadState || state != previousState) store.Set(layer.Provider, state);
 				if (eventsChanged) store.Set(layer.Provider, events);
 			}
 			if (auto *listener = store.ResourceMutable<WeatherListener>()) {

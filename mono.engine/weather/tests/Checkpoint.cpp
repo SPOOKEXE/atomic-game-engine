@@ -137,3 +137,54 @@ TEST_CASE(
 	CHECK(state.ForcingHistory.size() == 64);
 	CHECK(state.ForcingHistory.back().CoolingCelsiusPerSecond == 0.25f);
 }
+
+TEST_CASE(
+	"terrain geometry falling water and surface sources survive checkpoint replay", "[weather][checkpoint]"
+) {
+	SimulationDefinition definition;
+	definition.Grid.Cells = {4, 4, 4};
+	definition.Grid.CellSizeMetres = 8;
+	definition.Grid.Boundaries[0] = SolverBoundary::Open;
+	definition.TerrainRevision = 7;
+	definition.GroundVapourFluxKilogramsPerSquareMetreSecond = 0.0002f;
+	definition.BuoyancyMetresPerSecondSquaredPerCelsius = 0;
+	definition.PhaseRelaxationPerSecond = 0;
+	definition.PrecipitationPerSecond = 0;
+	std::vector<float> heights(16, 8);
+	heights[1] = NO_TERRAIN_HEIGHT;
+	heights[2] = 16;
+	auto state = CreateSimulation(definition, SolverCell{}, {}, heights);
+	REQUIRE(state);
+	state->FallingCondensateKilogramsPerCubicMetre[8] = 0.01f;
+	state->Budget.InitialWaterKilograms = SimulationWaterKilograms(*state);
+	for (uint32_t tick = 0; tick < 3; ++tick)
+		REQUIRE(StepSimulation(*state) == SimulationStatus::Success);
+	const auto encoded = EncodeCheckpoint(*state);
+	REQUIRE(encoded);
+	SimulationState restored;
+	REQUIRE(DecodeCheckpoint(*encoded, restored));
+	CHECK(restored == *state);
+	CHECK(restored.GroundHeightMetres == heights);
+	CHECK(restored.Definition.TerrainRevision == 7);
+	SimulationState replayed;
+	REQUIRE(ReplaySimulation(restored, 7, 4, replayed) == SimulationStatus::Success);
+	for (uint32_t tick = 0; tick < 4; ++tick)
+		REQUIRE(StepSimulation(*state) == SimulationStatus::Success);
+	CHECK(replayed == *state);
+	const auto published = restored;
+	auto malformed = restored;
+	malformed.SolidMask[0] ^= 1;
+	CHECK_FALSE(EncodeCheckpoint(malformed));
+	malformed = restored;
+	malformed.GroundHeightMetres.pop_back();
+	CHECK_FALSE(EncodeCheckpoint(malformed));
+	malformed = restored;
+	malformed.FallingCondensateKilogramsPerCubicMetre.pop_back();
+	CHECK_FALSE(EncodeCheckpoint(malformed));
+	for (size_t removed : {size_t{9}, size_t{100}, size_t{256}}) {
+		CHECK_FALSE(
+			DecodeCheckpoint(std::span<const std::byte>(*encoded).first(encoded->size() - removed), restored)
+		);
+		CHECK(restored == published);
+	}
+}

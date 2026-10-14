@@ -998,6 +998,34 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"hidden stateful clouds retain physical checkpoints for ground shadows", "[render][world-view][weather]"
+) {
+	RegisterViewClasses();
+	ecs::Store store("shadow-checkpoint");
+	const weather::StatefulWeatherCheckpoint checkpoint{10, 1, 1, {std::byte{1}, std::byte{2}}};
+	const auto provider = AddStatefulWeather(store, checkpoint);
+	store.GetMutable<scene::Clouds>(provider)->Enabled = false;
+	auto *controls = store.GetMutable<scene::WeatherCompute>(provider);
+	controls->ShadowsEnabled = true;
+	controls->ShadowStrength = 1;
+	controls->ShadowDistanceMetres = 1000;
+	render::WorldViewFrame frame;
+	const core::Name owner("shadow-checkpoint");
+	render::CollectWorldView(store, owner, frame);
+	CHECK_FALSE(frame.Lighting.EnvironmentState.CloudLayer.Enabled);
+	REQUIRE(frame.WeatherCheckpoint == checkpoint.Bytes);
+	CHECK(frame.WeatherCheckpointSource == provider);
+	const auto version = frame.WeatherCheckpointVersion;
+	const auto copied = WeatherCheckpointCopyBytes();
+	render::CollectWorldView(store, owner, frame);
+	CHECK(frame.WeatherCheckpointVersion == version);
+	CHECK(WeatherCheckpointCopyBytes() == copied);
+	store.GetMutable<scene::WeatherCompute>(provider)->ShadowsEnabled = false;
+	render::CollectWorldView(store, owner, frame);
+	CHECK(frame.WeatherCheckpoint.empty());
+}
+
+TEST_CASE(
 	"camera weather bindings preserve authored particles and copied response lighting",
 	"[render][world-view][weather]"
 ) {
@@ -1051,11 +1079,14 @@ TEST_CASE(
 	render::CollectWorldView(store, owner, frame);
 	CHECK(frame.WeatherSimulationLayer == initialName);
 	scene::WeatherAcceptedDefinition accepted{*store.Get<scene::WeatherCompute>(provider), currentPath};
+	accepted.Controls.TerrainRevision = 7;
 	store.Set(provider, accepted);
+	store.GetMutable<scene::WeatherCompute>(provider)->TerrainRevision = 19;
 	const core::Name renamed("WeatherAfterBacklog");
 	REQUIRE(store.SetProperty(provider, core::Name("Name"), &renamed, sizeof(renamed)));
 	render::CollectWorldView(store, owner, frame);
 	CHECK(frame.WeatherSimulationLayer.Text() == currentPath);
+	CHECK(frame.WeatherTerrainRevision == accepted.Controls.TerrainRevision);
 	store.Remove<scene::WeatherAcceptedDefinition>(provider);
 	const auto renamedPath = weather::WeatherLayerName(store, provider);
 	REQUIRE(renamedPath != currentPath);
@@ -1074,9 +1105,11 @@ TEST_CASE(
 	render::View view;
 	REQUIRE(render::BindWorldView(frame, camera, binding, view));
 	CHECK(view.WeatherSimulationLayer == frame.WeatherSimulationLayer);
+	CHECK(view.WeatherTerrainRevision == frame.WeatherTerrainRevision);
 	store.GetMutable<scene::WeatherCompute>(provider)->Enabled = false;
 	accepted.Controls.Enabled = false;
 	store.Set(provider, accepted);
 	render::CollectWorldView(store, owner, frame);
 	CHECK_FALSE(frame.WeatherSimulationLayer.IsValid());
+	CHECK(frame.WeatherTerrainRevision == 0);
 }

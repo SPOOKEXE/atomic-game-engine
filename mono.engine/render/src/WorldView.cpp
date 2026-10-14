@@ -39,6 +39,9 @@ namespace engine::render {
 
 		void CollectWeatherSimulationLayer(ecs::Store &store, WorldViewFrame &frame, bool newWorld) {
 			const auto &environment = frame.Lighting.EnvironmentState;
+			frame.WeatherTerrainRevision = environment.HasWeatherCompute && environment.Weather.Enabled
+											   ? environment.Weather.TerrainRevision
+											   : 0;
 			if (!environment.HasWeatherCompute || !environment.Weather.Enabled ||
 				environment.CloudProvider == ecs::NULL_ENTITY) {
 				frame.WeatherSimulationLayer = {};
@@ -96,8 +99,14 @@ namespace engine::render {
 			const auto &environment = frame.Lighting.EnvironmentState;
 			store.Observe<weather::StatefulWeatherCheckpoint>();
 			const auto changeVersion = store.ComponentChangeVersion<weather::StatefulWeatherCheckpoint>();
+			const bool medium =
+				environment.CloudLayer.Cover > 0 && environment.CloudLayer.Density > 0 &&
+				(environment.CloudLayer.Enabled ||
+				 (environment.Weather.ShadowsEnabled && environment.Weather.ShadowStrength > 0 &&
+				  environment.Weather.ShadowDistanceMetres > 0));
 			const auto *checkpoint =
-				EnvironmentModesOf(environment).Clouds == 3 &&
+				environment.HasWeatherCompute && environment.Weather.Enabled && environment.HasClouds &&
+						medium && scene::ValidWeatherCompute(environment.Weather) &&
 						environment.Weather.Mode == scene::WeatherMode::Stateful
 					? store.Get<weather::StatefulWeatherCheckpoint>(environment.CloudProvider)
 					: nullptr;
@@ -252,6 +261,7 @@ namespace engine::render {
 		view.CloudDensity = frame.CloudDensity;
 		view.WeatherCheckpoint = frame.WeatherCheckpoint;
 		view.WeatherSimulationLayer = frame.WeatherSimulationLayer;
+		view.WeatherTerrainRevision = frame.WeatherTerrainRevision;
 		view.WeatherCheckpointVersion = frame.WeatherCheckpointVersion;
 		view.WeatherCheckpointTick = frame.WeatherCheckpointTick;
 		view.WeatherCheckpointEpoch = frame.WeatherCheckpointEpoch;

@@ -417,8 +417,9 @@ local function setView(name: string)
 	viewName = name
 	demoCamera:SetAttribute("CFrame", frame)
 	local camera = Workspace.CurrentCamera
-	if camera then
-		camera.CFrame = frame
+	if camera ~= nil and camera:IsA("Camera") then
+		local currentCamera = camera :: Camera
+		currentCamera.CFrame = frame
 	end
 	updateStatus()
 end
@@ -439,14 +440,12 @@ end)
 button("Weather Scene Roof", "ROOF RAIN", 1, 2).Activated:Connect(function()
 	activePreset = 2
 	target = presets[activePreset]
-	applyRain(target)
 	applyWeather(target)
 	setView("ROOF")
 end)
 button("Weather Scene Storm", "STORM", 2, 2).Activated:Connect(function()
 	activePreset = 3
 	target = presets[activePreset]
-	applyRain(target)
 	applyWeather(target)
 	setView("STORM")
 end)

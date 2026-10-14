@@ -33,6 +33,10 @@ namespace engine::scene {
 		// edits preserve the evolved cells.
 		Stateful,
 	};
+	// Horizontal canonical-domain boundaries, independent of rendering quality.
+	enum class WeatherBoundary : uint8_t { Periodic, Closed, Open };
+	// Escape opens the top to projected air, moisture and heat exchange; the ground remains closed.
+	enum class WeatherTopBoundary : uint8_t { Closed, Escape };
 
 	// World-unit weather controls carried alongside inherited Clouds appearance.
 	struct WeatherCompute {
@@ -99,6 +103,7 @@ namespace engine::scene {
 		float AtmosphereHazeStrength = 0.0f;
 		float AtmosphereGlareSuppression = 0.0f;
 		//@}
+		// Normalized coupling from canonical weather to the fog consumer.
 		float FogStrength = 0.0f;
 		// Water-equivalent precipitation in millimetres/hour, bounded to 0..1000.
 		float PrecipitationRate = 0.0f;
@@ -112,6 +117,20 @@ namespace engine::scene {
 		float LightningRate = 0.0f;
 		// Stable nonempty layer purpose, stored as text and bounded to 128 bytes.
 		core::Name LayerName{"default"};
+		// Horizontal topology and vertical exchange policy for the physical domain.
+		//@{
+		WeatherBoundary BoundaryX = WeatherBoundary::Periodic;
+		WeatherBoundary BoundaryZ = WeatherBoundary::Periodic;
+		WeatherTopBoundary TopBoundary = WeatherTopBoundary::Closed;
+		//@}
+		// Increment revision to accept a new terrain snapshot for a stateful layer.
+		uint32_t TerrainRevision = 1;
+		// Lower-boundary vapour source and downward precipitation speed in SI units.
+		//@{
+		float GroundVapourFluxKilogramsPerSquareMetreSecond = 0;
+		float RainFallSpeedMetresPerSecond = 10;
+		//@}
+		// Disables weather contribution while retaining the authored definition.
 		bool Enabled = true;
 		//@}
 		// Compares semantic values without depending on object padding.
@@ -133,6 +152,14 @@ namespace engine::scene {
 
 	// Stable mode name used in authored files and reflection.
 	const char *Describe(WeatherMode mode);
+	// Stable authored name for a horizontal boundary policy.
+	const char *Describe(WeatherBoundary boundary);
+	// Stable authored name for the vertical top-boundary policy.
+	const char *Describe(WeatherTopBoundary boundary);
+	// Parses a known horizontal policy without changing output on failure.
+	[[nodiscard]] bool WeatherBoundaryFromName(core::Name name, WeatherBoundary &boundary);
+	// Parses a known top-boundary policy without changing output on failure.
+	[[nodiscard]] bool WeatherTopBoundaryFromName(core::Name name, WeatherTopBoundary &boundary);
 	// Refuses unknown names without changing the destination mode.
 	[[nodiscard]] bool WeatherModeFromName(core::Name name, WeatherMode &mode);
 	// Refuses nonfinite, unsupported or out-of-range controls at serialized boundaries.

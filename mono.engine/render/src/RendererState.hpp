@@ -584,6 +584,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *PackChannelsPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLightingPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *SkyPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *WeatherFallbackPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *VolumePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *BloomPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthOfFieldPipeline = nullptr;
@@ -736,8 +737,7 @@ namespace engine::render {
 			uint32_t &dispatches,
 			bool opaqueSkySource,
 			const std::function<void()> &beginWork,
-			uint64_t weatherWorld = 0,
-			core::Name weatherPipeline = {}
+			bool weatherIntegrationEnabled = false
 		);
 		bool IsBlackEnvironment(
 			const scene::Environment &environment, const void *command, SDL_GPUTexture *texture

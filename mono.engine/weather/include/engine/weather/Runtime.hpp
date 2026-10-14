@@ -85,6 +85,15 @@ namespace engine::weather {
 		// Downward first-hit height from the cloud origin, within the supplied distance, in metres.
 		// No captured context is permitted: the owning store supplies all query state.
 		std::optional<float> (*Height)(const ecs::Store &, core::Vector3, float) = nullptr;
+		// Derived terrain preparation watermarks reset on load, alongside the local callback.
+		//@{
+		uint64_t PreparedDefinitionWrites = UINT64_MAX;
+		uint64_t PreparedDefinitionMembership = UINT64_MAX;
+		uint64_t PreparedAcceptedWrites = UINT64_MAX;
+		uint64_t PreparedAcceptedMembership = UINT64_MAX;
+		uint64_t PreparedPhysicalMembership = UINT64_MAX;
+		uint64_t PreparedCheckpointMembership = UINT64_MAX;
+		//@}
 	};
 	// Accepted portable provider path, bounded to the storm payload identity limit.
 	// Pending renames retain their canonical path until old ticks have completed.

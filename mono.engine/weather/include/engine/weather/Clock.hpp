@@ -51,6 +51,7 @@ namespace engine::weather {
 	// Claims max(saved high-water, after)+1; refusal leaves history unchanged, including at UINT64_MAX.
 	[[nodiscard]] std::optional<uint64_t>
 	ClaimWeatherEpoch(ecs::Store &store, std::string_view layer, uint64_t after = 0);
+	// Elapsed-time result type shared with the copied scene clock API.
 	using WeatherElapsedTime = scene::WeatherElapsedTime;
 	// Resolves a past accepted integral tick without converting large absolute ages to floating point.
 	[[nodiscard]] std::optional<WeatherElapsedTime>

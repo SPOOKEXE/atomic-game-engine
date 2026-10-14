@@ -932,6 +932,7 @@ namespace engine::render {
 			  State->PackChannelsPipeline,
 			  State->DeferredLightingPipeline,
 			  State->SkyPipeline,
+			  State->WeatherFallbackPipeline,
 			  State->VolumePipeline,
 			  State->BloomPipeline,
 			  State->DepthOfFieldPipeline,

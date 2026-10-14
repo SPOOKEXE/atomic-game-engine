@@ -138,8 +138,9 @@ namespace engine::render {
 	);
 	[[nodiscard]] uint64_t WeatherSignature(const WeatherGpuUniforms &uniforms);
 	[[nodiscard]] uint64_t WeatherEncodingSignature(const weather::EncodingProfile &profile);
-	[[nodiscard]] uint64_t
-	WeatherPhysicalSignature(const scene::Environment &environment, core::Name simulationLayer = {});
+	[[nodiscard]] uint64_t WeatherPhysicalSignature(
+		const scene::Environment &environment, core::Name simulationLayer = {}, uint32_t terrainRevision = 0
+	);
 	[[nodiscard]] bool RecordWeatherPages(
 		SDL_GPUDevice *device,
 		SDL_GPUCommandBuffer *command,

@@ -24,8 +24,11 @@ namespace engine::scene {
 	inline constexpr uint32_t WEATHER_CLOCK_ENCODING_VERSION = 2;
 	// Accepted physical elapsed time uses integer seconds and a bounded fractional second.
 	struct WeatherElapsedTime {
+		// Whole elapsed seconds and the Q32 fraction of the next second.
+		//@{
 		uint64_t Seconds = 0;
 		uint32_t FractionQ32 = 0;
+		//@}
 	};
 	// One canonical base-rate clock and displacement anchor per authored weather layer.
 	struct WeatherClock {

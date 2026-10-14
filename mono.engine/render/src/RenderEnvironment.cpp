@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <span>
 #include <type_traits>
@@ -247,8 +248,7 @@ namespace engine::render {
 		uint32_t &dispatches,
 		bool opaqueSkySource,
 		const std::function<void()> &beginWork,
-		uint64_t weatherWorld,
-		core::Name weatherPipeline
+		bool weatherIntegrationEnabled
 	) {
 		ENGINE_PROFILE_CAT("cloud environment compute", core::ProfileCategory::Render);
 		if (EnvironmentCloudCompute == nullptr || command == nullptr || source == nullptr ||
@@ -281,30 +281,19 @@ namespace engine::render {
 		const scene::Atmosphere &air = environment.Air;
 		const scene::AtmosphereProcedural airCompute = EnvironmentAtmosphereComputeOf(environment);
 		const scene::Clouds &clouds = environment.CloudLayer;
-		const scene::CloudCompute cloudCompute =
+		scene::CloudCompute cloudCompute =
 			environment.HasWeatherCompute ? environment.CloudVolume : EnvironmentCloudComputeOf(environment);
 		EnvironmentUniformModes modes = EnvironmentModesOf(environment);
 		// World weather is integrated after geometry instead of painted onto the sky cube.
 		if (modes.Clouds == 3) {
-			bool weatherAvailable = WeatherFieldCompute && WeatherSummaryCompute && WeatherRaysCompute &&
-									WeatherTemporalCompute && WeatherReconstructCompute;
-			if (environment.Weather.Mode == scene::WeatherMode::Stateful) {
-				const auto generation = std::find_if(
-					WeatherGenerations.begin(),
-					WeatherGenerations.end(),
-					[weatherWorld, weatherPipeline](const WeatherGpuGeneration &candidate) {
-						return candidate.World == weatherWorld && candidate.Pipeline == weatherPipeline;
-					}
-				);
-				const auto *inputs =
-					generation != WeatherGenerations.end() ? generation->InputsFor(command) : nullptr;
-				weatherAvailable = weatherAvailable && WeatherEvolutionCompute && inputs &&
-								   inputs->Stateful && inputs->Uniforms.Phase.z != UINT32_MAX;
-			} else
-				weatherAvailable = weatherAvailable && weather::Compile(environment.Weather).has_value();
-			modes.Clouds = weatherAvailable ? 0u : 2u;
+			// Suppression follows the graph that will actually consume the volume.
+			// A later product refusal is handled by the view's fragment fallback.
+			modes.Clouds = weatherIntegrationEnabled ? 0u : 2u;
+			cloudCompute.Seed = environment.Weather.Seed;
 		}
-		const EnvironmentUniformShaders shaders = EnvironmentShadersOf(environment);
+		auto shaders = EnvironmentShadersOf(environment);
+		if (environment.HasWeatherCompute && modes.Clouds != 0)
+			shaders.Clouds = static_cast<uint32_t>(cloudCompute.Shader);
 		uint64_t skySignature = 0;
 		bool linkedSky = false;
 		for (const EnvironmentTarget &candidate : Environments) {
@@ -327,7 +316,17 @@ namespace engine::render {
 		}
 		if (modes.Clouds != 0) {
 			signature = Fold(signature, environment.CloudLayer);
-			signature = Fold(signature, EnvironmentCloudComputeOf(environment));
+			signature = Fold(signature, cloudCompute);
+			if (environment.HasWeatherCompute) {
+				signature = Fold(signature, environment.Weather.Coverage);
+				signature = Fold(signature, environment.Weather.WindMetresPerSecond);
+				signature = Fold(signature, environment.Clock.ElapsedSeconds);
+				signature = Fold(signature, environment.Clock.ElapsedFractionQ32);
+				signature = Fold(signature, Sun);
+				signature = Fold(signature, Ambient);
+				signature = Fold(signature, OutdoorAmbient);
+				signature = Fold(signature, Direct);
+			}
 			if (environment.CloudLayer.WindSpeed > 0.0f) {
 				signature = Fold(signature, environment.CloudTime);
 			}
@@ -351,6 +350,26 @@ namespace engine::render {
 			);
 			return true;
 		}
+		auto cloudColour = Colour(clouds.Colour);
+		glm::vec4 cloudCoverage{clouds.Cover, clouds.Density, clouds.WindDirection.X, clouds.WindDirection.Y};
+		glm::vec4 motion{clouds.WindSpeed, static_cast<float>(environment.CloudTime), 0, 0};
+		if (environment.HasWeatherCompute && modes.Clouds != 0) {
+			const float sunLength = std::sqrt(Sun.x * Sun.x + Sun.y * Sun.y + Sun.z * Sun.z);
+			const float sunlight =
+				sunLength > 0 && std::isfinite(sunLength) ? std::max(0.0f, -Sun.y / sunLength) : 1;
+			cloudColour *= Ambient + OutdoorAmbient * .5f + Direct * sunlight * .35f;
+			cloudCoverage = {
+				environment.Weather.Coverage,
+				clouds.Density * std::clamp(clouds.Cover, 0.0f, 1.0f),
+				environment.Weather.WindMetresPerSecond.X,
+				environment.Weather.WindMetresPerSecond.Z
+			};
+			motion.x = std::hypot(
+				environment.Weather.WindMetresPerSecond.X, environment.Weather.WindMetresPerSecond.Z
+			);
+			motion.y = float(environment.Clock.ElapsedSeconds % 4096) +
+					   float(double(environment.Clock.ElapsedFractionQ32) / 4294967296.0);
+		}
 		const EnvironmentUniforms uniforms{
 			.Zenith = Colour(sky.Zenith, sky.StarDensity),
 			.Horizon = Colour(sky.Horizon, sky.SunSize),
@@ -361,13 +380,13 @@ namespace engine::render {
 			.Atmosphere = glm::vec4{air.Density, air.Offset, air.Glare, air.Haze},
 			.AtmosphereCompute =
 				glm::vec4{airCompute.PlanetRadius, airCompute.Height, airCompute.Rayleigh, airCompute.Mie},
-			.CloudColour = Colour(clouds.Colour),
-			.Clouds = glm::vec4{clouds.Cover, clouds.Density, clouds.WindDirection.X, clouds.WindDirection.Y},
+			.CloudColour = cloudColour,
+			.Clouds = cloudCoverage,
 			.CloudCompute =
 				glm::vec4{
 					cloudCompute.CellSize, cloudCompute.Detail, cloudCompute.Height, cloudCompute.Thickness
 				},
-			.CloudMotion = glm::vec4{clouds.WindSpeed, static_cast<float>(environment.CloudTime), 0.0f, 0.0f},
+			.CloudMotion = motion,
 			.Modes = glm::uvec4{modes.Skybox, modes.Atmosphere, modes.Clouds, 0u},
 			.Counts =
 				glm::uvec4{

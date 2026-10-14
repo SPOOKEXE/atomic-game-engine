@@ -298,6 +298,9 @@ namespace engine::render {
 		LightingUniforms Lighting;
 		FrameUniforms Frame;
 		PbrUniforms Uniforms;
+		// These describe products recorded for this view, not canonical world state.
+		bool WeatherFallbackApplied = false;
+		bool WeatherIntegrationRecorded = false;
 
 		// Lenses arrive ordered by priority. A run only combines consecutive
 		// entries with one shader, because combining the same shader across an
@@ -376,6 +379,17 @@ namespace engine::render {
 		// @param kind The node kind.
 		// @return `true` when one is enabled.
 		bool GraphEnabled(core::Name kind) const;
+		bool WeatherVolumeAvailable() const;
+		bool RecordWeatherFallback(
+			const graph::RunContext &context,
+			const Impl::NamedTexture &source,
+			const Impl::NamedTexture &depth,
+			const Impl::NamedTexture &target,
+			const Impl::NamedTexture &environment,
+			bool drawSky,
+			bool drawClouds,
+			bool linearDepth
+		);
 
 		// Where the schedule placed a node.
 		//

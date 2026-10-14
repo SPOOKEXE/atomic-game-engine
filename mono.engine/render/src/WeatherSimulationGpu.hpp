@@ -13,9 +13,8 @@
 #include <memory>
 
 namespace engine::render {
-	// SDL-compatible compute ABI. Bind three read buffers and four write buffers at sets 0 and 1.
-	// Inputs: old cells, projected cells, pressure/divergence vec4 rows. Outputs: cells, scratch, packed,
-	// and two diagnostic vec4 rows per cell. Each phase is a separate dispatch with a resource barrier.
+	// Five read and five write buffers at sets 0 and 1. Terrain is immutable within a generation;
+	// full precision cells and falling water publish together after diagnostic validation.
 	struct alignas(16) SimulationGpuUniforms {
 		std::array<uint32_t, 4> Grid{};
 		std::array<uint32_t, 4> Boundaries{};
@@ -45,6 +44,10 @@ namespace engine::render {
 		SDL_GPUBuffer *Diagnostics = nullptr;
 		SDL_GPUBuffer *PublishedPacked = nullptr;
 		SDL_GPUBuffer *StagingPacked = nullptr;
+		SDL_GPUBuffer *PublishedTerrain = nullptr;
+		SDL_GPUBuffer *StagingTerrain = nullptr;
+		SDL_GPUBuffer *PublishedRain = nullptr;
+		SDL_GPUBuffer *WorkingRain[2]{};
 		SDL_GPUTransferBuffer *Readback = nullptr;
 		SDL_GPUFence *Fence = nullptr;
 		weather::SimulationDefinition Definition;
@@ -53,8 +56,12 @@ namespace engine::render {
 		std::vector<weather::SimulationForcing> PendingForcingHistory;
 		uint64_t Tick = 0;
 		uint64_t PendingTick = 0;
+		uint64_t TerrainSignature = 0;
+		uint64_t PendingTerrainSignature = 0;
 		uint32_t CellCount = 0;
 		uint32_t PendingCellIndex = 0;
+		uint32_t PendingRainIndex = 0;
+		bool PendingTerrain = false;
 		bool Published = false;
 		std::unique_ptr<VulkanTimestamps> Timings;
 		uint32_t TimingSlot = VulkanTimestamps::NO_SLOT;

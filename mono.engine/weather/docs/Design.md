@@ -10,6 +10,24 @@ hash. Process-local name handles never enter field identity. Explicit key
 overrides exist for reference fixtures and adapters carrying canonical keys.
 Runtime queries and rendering use the same default compilation path.
 
+## Script sampling
+
+`WeatherCompute:Sample(position[, groundHeight])` returns an owned record of
+physical atmosphere and weather-consumer values in both Luau and JavaScript.
+Positions and the optional ground height use metres; the omitted ground height
+is zero. The query uses accepted authoritative controls and the canonical
+clock, never a client's interpolated rendering time or GPU volume readback.
+Stateful replicas sample their validated copied checkpoint without retaining a
+CPU solver grid. Disabled, unavailable or incompatible weather returns nil in
+Luau and null in JavaScript. Malformed arguments are refused.
+
+`Layer` and `Mode` are strings. `Tick` and `Epoch` are decimal strings so values
+above 2^53 survive both VMs. `DefinitionRevision` is numeric. The record includes
+condensate kg/m^3, vapour kg/kg, temperature Celsius, pressure hPa, wind m/s,
+ice fraction, liquid/snow/hail mm/h, melting fraction and spawn seed, fog
+extinction per metre, charge separation and hail growth. Returned values are
+copies; editing the record does not edit ECS state.
+
 ## Algorithm version 1
 
 Reference noise is periodic every 2^24 canonical cells on each axis. Coordinates
@@ -102,6 +120,48 @@ its unoptimized intrinsic wrappers measured slower on the available x86 host.
 Exact byte parity is checked across spatial/phase boundaries and every tail
 length. The NEON branch has not been executed on this x86 host.
 Stateful evolution and its complete checkpoints have separate owning APIs.
+
+## Stateful terrain and falling water
+
+The authoritative solver uses a fixed world lattice independent of cameras.
+Each physical cell stores eight FP32 values (32 bytes); falling liquid adds one
+FP32 concentration per cell. Accepted terrain adds one height per X/Z column
+and one packed solid bit per cell. Scratch, retained forcing, diagnostic budgets,
+checkpoints and renderer resources are additional memory. The eight-byte
+procedural encoding is a presentation product, not complete physical state.
+
+The host samples actual collision geometry when initializing a physical era.
+`TerrainRevision` explicitly requests a new terrain snapshot. Seed, lattice,
+boundary or physical-model edits start a new era after validation; wind and
+appearance edits preserve evolved cells. Ground vapour flux applies only at
+real ground-contact air cells. A grid detached above terrain has no invented
+source at its artificial bottom face. Solid cells have no transport or weather
+consumer response. Horizontal boundaries support periodic, closed and open
+faces; the vertical bottom is impermeable to air and drains falling water.
+
+Cloud-to-rain conversion moves water into the falling reservoir. Conservative
+upwind flux transports that reservoir with projected air velocity plus a
+downward terminal speed. Conversion is an internal transfer, not a ground sink.
+Water remains in the inventory until it reaches terrain or an exterior face.
+Terrain/bottom exits enter the precipitation budget; other open-face exchanges
+enter the signed boundary budget. The declared dry-air/vapour enthalpy model
+omits liquid sensible heat consistently. The solver checks CFL, finite ranges,
+divergence and water/enthalpy residuals before publishing an entire tick.
+
+Checkpoint format 3 contains the complete definition, forcing history, budgets,
+terrain heights and mask, falling reservoir and physical cells. Decoding is
+bounded and transactional. Replicas retain checkpoint bytes with a derived
+query index, not another solver grid. Both integrity metadata and observed ECS
+write versions invalidate that index, including replacements that retain the
+old footer. Failed initialization retains a diagnostic and retries after
+accepted inputs or checkpoint writes change. Terrain preparation uses ECS
+write/membership versions to skip unchanged broadphase synchronization and rays.
+
+GPU stateful evolution is cosmetic and never supplies gameplay queries. It
+stages physical cells, falling water and terrain flags together and publishes
+them only after completed validation. Resource and recording failures retain a
+compatible completed publication or select the graphics fallback. Runtime
+parity and timing require the opt-in real-device fixtures.
 
 
 ## CPU packing comparison

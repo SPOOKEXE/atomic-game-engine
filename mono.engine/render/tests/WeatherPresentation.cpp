@@ -103,6 +103,38 @@ TEST_CASE(
 	CHECK(Signature(changed) == original);
 }
 
+TEST_CASE(
+	"stateful boundary and surface edits invalidate unchanged reflection revisions",
+	"[render][weather][cache]"
+) {
+	auto initial = ActiveWeather();
+	initial.Lighting.EnvironmentState.Weather.Mode = scene::WeatherMode::Stateful;
+	const auto original = Signature(initial);
+	for (const auto member :
+		 {&scene::WeatherCompute::GroundVapourFluxKilogramsPerSquareMetreSecond,
+		  &scene::WeatherCompute::RainFallSpeedMetresPerSecond}) {
+		auto changed = initial;
+		changed.Lighting.EnvironmentState.Weather.*member += 0.125f;
+		CHECK(Signature(changed) != original);
+	}
+	auto changed = initial;
+	changed.Lighting.EnvironmentState.Weather.BoundaryX = scene::WeatherBoundary::Closed;
+	CHECK(Signature(changed) != original);
+	changed = initial;
+	changed.Lighting.EnvironmentState.Weather.BoundaryZ = scene::WeatherBoundary::Closed;
+	CHECK(Signature(changed) != original);
+	changed = initial;
+	changed.Lighting.EnvironmentState.Weather.TopBoundary = scene::WeatherTopBoundary::Escape;
+	CHECK(Signature(changed) != original);
+	changed = initial;
+	changed.Lighting.EnvironmentState.Weather.TerrainRevision++;
+	CHECK(Signature(changed) != original);
+	render::View view;
+	const auto terrain = render::ScenePresentationSignaturesOf(view, initial).Environment;
+	view.WeatherTerrainRevision++;
+	CHECK(render::ScenePresentationSignaturesOf(view, initial).Environment != terrain);
+}
+
 TEST_CASE("disabled weather controls do not invalidate the remaining sky", "[render][weather][cache]") {
 	auto state = ActiveWeather();
 	auto &environment = state.Lighting.EnvironmentState;

@@ -6,8 +6,10 @@
 // Inactive effects publish their outputs with copies or clears, preserving
 // graph resources without running a shader over every pixel.
 
+#include "../EnvironmentModes.hpp"
 #include "../SeamLightSelection.hpp"
 #include "../SsaoSettings.hpp"
+#include "../WeatherFallback.hpp"
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
@@ -1303,6 +1305,13 @@ namespace engine::render {
 			return applyLocalShadowCorrections();
 		});
 
+		const auto refuseWeather = [this]() {
+			for (auto &generation : State->WeatherGenerations)
+				if (generation.World == Request.World && generation.Pipeline == Pipeline->Name)
+					RefuseWeatherPublication(generation);
+			core::Metrics::Count("render.weather.product_refusals", 1);
+			return true;
+		};
 		const auto weatherInputs = [this]() -> std::optional<WeatherGpuInputs> {
 			if (!State->Caps.HasCompute || !State->WeatherFieldCompute || !State->WeatherSummaryCompute)
 				return std::nullopt;
@@ -1334,7 +1343,9 @@ namespace engine::render {
 											 cached->PhysicalOwner->ExpectedDefinition &&
 											 cached->PhysicalOwner->RecipeSignature ==
 												 WeatherPhysicalSignature(
-													 environment, Request.Source->WeatherSimulationLayer
+													 environment,
+													 Request.Source->WeatherSimulationLayer,
+													 Request.Source->WeatherTerrainRevision
 												 )
 										 ? WeatherSimulationGridOf(*cached->PhysicalOwner->ExpectedDefinition)
 										 : WeatherSimulationGridOf(environment.Weather))
@@ -1374,10 +1385,12 @@ namespace engine::render {
 					cached != State->WeatherGenerations.end() && cached->PhysicalOwner &&
 					cached->PhysicalOwner->Physical.Published &&
 					cached->PhysicalOwner->PhysicalRecipeSignature ==
-						WeatherPhysicalSignature(environment, Request.Source->WeatherSimulationLayer) &&
+						WeatherPhysicalSignature(
+							environment,
+							Request.Source->WeatherSimulationLayer,
+							Request.Source->WeatherTerrainRevision
+						) &&
 					cached->PhysicalOwner->Physical.Tick <= inputs.Time.PhaseTick &&
-					cached->PhysicalOwner->Physical.Definition.Revision ==
-						environment.Weather.DefinitionRevision &&
 					cached->PhysicalOwner->Physical.Definition.Grid.CellSizeMetres ==
 						environment.Weather.CellSizeMetres &&
 					cached->PhysicalOwner->Physical.Definition.TickRate == environment.Weather.TickRate &&
@@ -1393,19 +1406,24 @@ namespace engine::render {
 					? glm::uvec4{uint32_t(cached->PhysicalOwner->Physical.Tick), uint32_t(cached->PhysicalOwner->Physical.Tick >> 32), 0, 0}
 					: glm::uvec4{0, 0, UINT32_MAX, 0};
 				inputs.Time.DisplacementQ8 = {};
-				if (published) inputs.Time.PhaseTick = cached->PhysicalOwner->Physical.Tick;
+				if (published) {
+					inputs.Time.PhaseTick = cached->PhysicalOwner->Physical.Tick;
+					inputs.Compiled.Definition.Revision = cached->PhysicalOwner->Physical.Definition.Revision;
+					inputs.Uniforms.Identity.z = cached->PhysicalOwner->Physical.Definition.Revision;
+				}
 			}
 			return inputs;
 		};
 
 		frameNodes.Set(
-			core::Name("weather-residency"), [this, weatherInputs](const graph::RunContext &context) {
+			core::Name("weather-residency"),
+			[this, weatherInputs, refuseWeather](const graph::RunContext &context) {
 				if (context.Writes.size() != 2 || !context.Reads.empty()) return false;
 				const auto inputs = weatherInputs();
 				if (!State->Caps.HasCompute || !State->WeatherFieldCompute || !inputs) return true;
 				auto *pages = GraphBuffer(context.Writes[0], context, true);
 				auto *previousPages = GraphBuffer(context.Writes[1], context, true);
-				if (!pages || !previousPages) return false;
+				if (!pages || !previousPages) return refuseWeather();
 				auto found = std::find_if(
 					State->WeatherGenerations.begin(),
 					State->WeatherGenerations.end(),
@@ -1428,9 +1446,10 @@ namespace engine::render {
 					const uint64_t signature = WeatherSignature(inputs->Uniforms);
 					if (found->Residency.Matches(signature, Command)) return true;
 					EnterNamedPass(context.Name);
-					if (!RecordWeatherPages(State->Device, Command, pages, std::span(&key, 1))) return false;
+					if (!RecordWeatherPages(State->Device, Command, pages, std::span(&key, 1)))
+						return refuseWeather();
 					if (!RecordWeatherPages(State->Device, Command, previousPages, std::span(&key, 1)))
-						return false;
+						return refuseWeather();
 					found->Residency.Stage(signature, Command);
 					StageHistoryWrites(context, Command);
 					return true;
@@ -1499,7 +1518,7 @@ namespace engine::render {
 					State->FrameCounter + 1,
 					std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count()
 				);
-				if (!plan) return false;
+				if (!plan) return refuseWeather();
 				found->FieldWords = plan->FieldWords;
 				found->TransitionAlpha = plan->TransitionAlpha;
 				found->PreviousPageCount = static_cast<uint32_t>(plan->PreviousPages.size());
@@ -1521,7 +1540,7 @@ namespace engine::render {
 				if (!RecordWeatherPages(
 						State->Device, Command, pages, std::span(descriptors.data(), plan->Pages.size())
 					))
-					return false;
+					return refuseWeather();
 				const glm::ivec4 emptyKey{};
 				if (!RecordWeatherPages(
 						State->Device,
@@ -1529,7 +1548,7 @@ namespace engine::render {
 						previousPages,
 						plan->PreviousPages.empty() ? std::span(&emptyKey, 1) : plan->PreviousPages
 					))
-					return false;
+					return refuseWeather();
 				found->Residency.Stage(plan->Signature, Command);
 				core::Metrics::Count("render.weather.refused_refinements", plan->RefusedRefinements);
 				core::Metrics::SetGauge("render.weather.maintenance_age_ticks", plan->MaintenanceAgeTicks);
@@ -1539,203 +1558,234 @@ namespace engine::render {
 			}
 		);
 
-		frameNodes.Set(core::Name("weather-field"), [this, weatherInputs](const graph::RunContext &context) {
-			if (context.Writes.size() != 1 || context.Reads.size() != 1) return false;
-			auto inputs = weatherInputs();
-			if (!State->Caps.HasCompute || !State->WeatherFieldCompute || !inputs) {
-				State->ForgetWeatherWorld(Request.World);
-				return true;
-			}
-			auto *pages = GraphBuffer(context.Reads[0], context, false);
-			if (!pages) return false;
-			auto found = std::find_if(
-				State->WeatherGenerations.begin(),
-				State->WeatherGenerations.end(),
-				[this, pages](const WeatherGpuGeneration &generation) {
-					return generation.World == Request.World && generation.Pages == pages;
+		frameNodes.Set(
+			core::Name("weather-field"),
+			[this, weatherInputs, refuseWeather](const graph::RunContext &context) {
+				if (context.Writes.size() != 1 || context.Reads.size() != 1) return false;
+				auto inputs = weatherInputs();
+				if (!State->Caps.HasCompute || !State->WeatherFieldCompute || !inputs) {
+					State->ForgetWeatherWorld(Request.World);
+					return true;
 				}
-			);
-			if (found == State->WeatherGenerations.end()) {
-				State->WeatherGenerations.emplace_back();
-				found = std::prev(State->WeatherGenerations.end());
-				found->World = Request.World;
-				found->Pipeline = Pipeline->Name;
-				found->Pages = pages;
-			}
-			const uint64_t physicalBytes =
-				inputs->Stateful ? uint64_t(inputs->Uniforms.Grid.w) * 8 : uint64_t(found->FieldWords) * 4;
-			auto *cells = GraphBuffer(context.Writes[0], context, true, std::max(uint64_t{8}, physicalBytes));
-			if (!cells) return false;
-			if (found->Cells != cells) {
-				found->Field = {};
-				found->Summary = {};
-			}
-			found->Cells = cells;
-			found->PhysicalOwner =
-				inputs->Stateful
-					? &State->WeatherPhysicalFor(
-						  Request.World,
-						  WeatherPhysicalSignature(
-							  CurrentLighting.EnvironmentState, Request.Source->WeatherSimulationLayer
-						  )
-					  )
-					: nullptr;
-			if (inputs->Stateful) {
-				const auto &source = *Request.Source;
-				const bool hadFence = found->PhysicalOwner->Physical.Fence != nullptr;
-				const bool accepted = PollWeatherSimulationGpu(State->Device, found->PhysicalOwner->Physical);
-				if (accepted) {
-					found->PhysicalOwner->CheckpointSignature =
-						found->PhysicalOwner->PendingCheckpointSignature;
-					found->PhysicalOwner->EncodingSignature = found->PhysicalOwner->PendingEncodingSignature;
-					found->PhysicalOwner->PhysicalRecipeSignature =
-						found->PhysicalOwner->PendingPhysicalRecipeSignature;
-				} else if (hadFence && !found->PhysicalOwner->Physical.Fence) {
-					found->PhysicalOwner->RefusedStageSignature = found->PhysicalOwner->PendingStageSignature;
-					found->PhysicalOwner->CatchupPending = false;
-				}
-				uint64_t checkpointSignature = 0;
-				if (!source.WeatherCheckpoint.empty()) {
-					checkpointSignature =
-						scene::MixSignature(source.WeatherCheckpointVersion, source.WeatherCheckpointTick);
-					checkpointSignature =
-						scene::MixSignature(checkpointSignature, source.WeatherCheckpointEpoch);
-					checkpointSignature =
-						scene::MixSignature(checkpointSignature, source.WeatherCheckpointRevision);
-					if (!source.WeatherCheckpointVersion)
-						for (std::byte byte : source.WeatherCheckpoint)
-							checkpointSignature =
-								scene::MixSignature(checkpointSignature, std::to_integer<uint8_t>(byte));
-				}
-				if (!found->PhysicalOwner->Physical.Fence) {
-					auto &definition = found->PhysicalOwner->ExpectedDefinition;
-					if (!definition) {
-						auto physicalControls = CurrentLighting.EnvironmentState.Weather;
-						physicalControls.Paused = false;
-						physicalControls.TimeScale = 1;
-						definition = weather::MakeSimulationDefinition(
-							physicalControls,
-							source.WeatherSimulationLayer.IsValid()
-								? std::string(source.WeatherSimulationLayer.Text())
-								: "weather"
-						);
-						if (definition) definition->WorldEpoch = CurrentLighting.EnvironmentState.Clock.Epoch;
+				auto *pages = GraphBuffer(context.Reads[0], context, false);
+				if (!pages) return refuseWeather();
+				auto found = std::find_if(
+					State->WeatherGenerations.begin(),
+					State->WeatherGenerations.end(),
+					[this, pages](const WeatherGpuGeneration &generation) {
+						return generation.World == Request.World && generation.Pages == pages;
 					}
-					if (definition && found->PhysicalOwner->Physical.CellCount &&
-						definition->Grid != found->PhysicalOwner->Physical.Definition.Grid) {
-						ReleaseWeatherSimulationGpu(State->Device, found->PhysicalOwner->Physical);
-						found->PhysicalOwner->CheckpointSignature = 0;
-						found->PhysicalOwner->EncodingSignature = 0;
+				);
+				if (found == State->WeatherGenerations.end()) {
+					State->WeatherGenerations.emplace_back();
+					found = std::prev(State->WeatherGenerations.end());
+					found->World = Request.World;
+					found->Pipeline = Pipeline->Name;
+					found->Pages = pages;
+				}
+				if (found->Residency.SignatureFor(Command) == 0) return refuseWeather();
+				const uint64_t physicalBytes = inputs->Stateful ? uint64_t(inputs->Uniforms.Grid.w) * 8
+																: uint64_t(found->FieldWords) * 4;
+				auto *cells =
+					GraphBuffer(context.Writes[0], context, true, std::max(uint64_t{8}, physicalBytes));
+				if (!cells) return refuseWeather();
+				if (found->Cells != cells) {
+					found->Field = {};
+					found->Summary = {};
+				}
+				found->Cells = cells;
+				found->PhysicalOwner = inputs->Stateful ? &State->WeatherPhysicalFor(
+															  Request.World,
+															  WeatherPhysicalSignature(
+																  CurrentLighting.EnvironmentState,
+																  Request.Source->WeatherSimulationLayer,
+																  Request.Source->WeatherTerrainRevision
+															  )
+														  )
+														: nullptr;
+				if (inputs->Stateful) {
+					const auto &source = *Request.Source;
+					const bool hadFence = found->PhysicalOwner->Physical.Fence != nullptr;
+					const bool accepted =
+						PollWeatherSimulationGpu(State->Device, found->PhysicalOwner->Physical);
+					if (accepted) {
+						found->PhysicalOwner->CheckpointSignature =
+							found->PhysicalOwner->PendingCheckpointSignature;
+						found->PhysicalOwner->EncodingSignature =
+							found->PhysicalOwner->PendingEncodingSignature;
+						found->PhysicalOwner->PhysicalRecipeSignature =
+							found->PhysicalOwner->PendingPhysicalRecipeSignature;
+					} else if (hadFence && !found->PhysicalOwner->Physical.Fence) {
+						found->PhysicalOwner->RefusedStageSignature =
+							found->PhysicalOwner->PendingStageSignature;
+						found->PhysicalOwner->CatchupPending = false;
 					}
-					const auto checkpoint = checkpointSignature != found->PhysicalOwner->CheckpointSignature
-												? source.WeatherCheckpoint
-												: std::span<const std::byte>{};
-					if (found->PhysicalOwner->Physical.Published || !checkpoint.empty()) {
-						const auto targetTime =
-							weather::WeatherTimeOf(CurrentLighting.EnvironmentState.Clock);
-						const uint64_t stageSignature = scene::MixSignature(
-							scene::MixSignature(checkpointSignature, targetTime ? targetTime->PhaseTick : 0),
-							WeatherEncodingSignature(inputs->Compiled.Profile)
+					uint64_t checkpointSignature = 0;
+					if (!source.WeatherCheckpoint.empty()) {
+						checkpointSignature = scene::MixSignature(
+							source.WeatherCheckpointVersion, source.WeatherCheckpointTick
 						);
-						const bool refused = found->PhysicalOwner->RefusedStageSignature == stageSignature;
-						const bool staged = !refused && targetTime && definition &&
-											StageWeatherSimulationGpu(
-												State->Device,
-												State->WeatherEvolutionCompute,
-												found->PhysicalOwner->Physical,
-												targetTime->PhaseTick,
-												inputs->Compiled.Profile,
-												checkpoint,
-												128,
-												{},
-												&*definition,
-												true
-											);
-						found->PhysicalOwner->CatchupPending =
-							staged && targetTime &&
-							(found->PhysicalOwner->Physical.Fence
-								 ? found->PhysicalOwner->Physical.PendingTick
-								 : found->PhysicalOwner->Physical.Tick) < targetTime->PhaseTick;
-						if (staged && found->PhysicalOwner->Physical.Fence) {
-							found->PhysicalOwner->PendingStageSignature = stageSignature;
-							found->PhysicalOwner->PendingCheckpointSignature =
-								checkpointSignature ? checkpointSignature
-													: found->PhysicalOwner->CheckpointSignature;
-							found->PhysicalOwner->PendingEncodingSignature =
-								WeatherEncodingSignature(inputs->Compiled.Profile);
-							found->PhysicalOwner->PendingPhysicalRecipeSignature = WeatherPhysicalSignature(
-								CurrentLighting.EnvironmentState, Request.Source->WeatherSimulationLayer
+						checkpointSignature =
+							scene::MixSignature(checkpointSignature, source.WeatherCheckpointEpoch);
+						checkpointSignature =
+							scene::MixSignature(checkpointSignature, source.WeatherCheckpointRevision);
+						if (!source.WeatherCheckpointVersion)
+							for (std::byte byte : source.WeatherCheckpoint)
+								checkpointSignature =
+									scene::MixSignature(checkpointSignature, std::to_integer<uint8_t>(byte));
+					}
+					if (!found->PhysicalOwner->Physical.Fence) {
+						auto &definition = found->PhysicalOwner->ExpectedDefinition;
+						if (!definition) {
+							auto physicalControls = CurrentLighting.EnvironmentState.Weather;
+							physicalControls.Paused = false;
+							physicalControls.TimeScale = 1;
+							definition = weather::MakeSimulationDefinition(
+								physicalControls,
+								source.WeatherSimulationLayer.IsValid()
+									? std::string(source.WeatherSimulationLayer.Text())
+									: "weather"
 							);
-							Result.ComputeDispatches +=
-								found->PhysicalOwner->Physical.LastSubmittedDispatches;
-							++Result.AsyncComputeCommandBuffers;
-						} else if (!staged && !refused) {
-							found->PhysicalOwner->RefusedStageSignature = stageSignature;
-							core::Metrics::Count("render.weather.stateful.fallbacks", 1);
+							if (definition) {
+								definition->WorldEpoch = CurrentLighting.EnvironmentState.Clock.Epoch;
+								definition->TerrainRevision = source.WeatherTerrainRevision;
+							}
+						}
+						// Revisions carry forcing edits too. Retain the compatible resident model while
+						// requiring the new checkpoint revision before another physical step.
+						if (definition)
+							definition->Revision =
+								CurrentLighting.EnvironmentState.Weather.DefinitionRevision;
+						if (definition && found->PhysicalOwner->Physical.CellCount &&
+							definition->Grid != found->PhysicalOwner->Physical.Definition.Grid) {
+							ReleaseWeatherSimulationGpu(State->Device, found->PhysicalOwner->Physical);
+							found->PhysicalOwner->CheckpointSignature = 0;
+							found->PhysicalOwner->EncodingSignature = 0;
+						}
+						const auto checkpoint =
+							checkpointSignature != found->PhysicalOwner->CheckpointSignature
+								? source.WeatherCheckpoint
+								: std::span<const std::byte>{};
+						if (found->PhysicalOwner->Physical.Published || !checkpoint.empty()) {
+							const auto targetTime =
+								weather::WeatherTimeOf(CurrentLighting.EnvironmentState.Clock);
+							const uint64_t stageSignature = scene::MixSignature(
+								scene::MixSignature(
+									scene::MixSignature(
+										checkpointSignature, targetTime ? targetTime->PhaseTick : 0
+									),
+									CurrentLighting.EnvironmentState.Weather.DefinitionRevision
+								),
+								WeatherEncodingSignature(inputs->Compiled.Profile)
+							);
+							const bool refused =
+								found->PhysicalOwner->RefusedStageSignature == stageSignature;
+							const bool staged = !refused && targetTime && definition &&
+												StageWeatherSimulationGpu(
+													State->Device,
+													State->WeatherEvolutionCompute,
+													found->PhysicalOwner->Physical,
+													targetTime->PhaseTick,
+													inputs->Compiled.Profile,
+													checkpoint,
+													128,
+													{},
+													&*definition,
+													true
+												);
+							found->PhysicalOwner->CatchupPending =
+								staged && targetTime &&
+								(found->PhysicalOwner->Physical.Fence
+									 ? found->PhysicalOwner->Physical.PendingTick
+									 : found->PhysicalOwner->Physical.Tick) < targetTime->PhaseTick;
+							if (staged && found->PhysicalOwner->Physical.Fence) {
+								found->PhysicalOwner->PendingStageSignature = stageSignature;
+								found->PhysicalOwner->PendingCheckpointSignature =
+									checkpointSignature ? checkpointSignature
+														: found->PhysicalOwner->CheckpointSignature;
+								found->PhysicalOwner->PendingEncodingSignature =
+									WeatherEncodingSignature(inputs->Compiled.Profile);
+								found->PhysicalOwner->PendingPhysicalRecipeSignature =
+									WeatherPhysicalSignature(
+										CurrentLighting.EnvironmentState,
+										Request.Source->WeatherSimulationLayer,
+										Request.Source->WeatherTerrainRevision
+									);
+								Result.ComputeDispatches +=
+									found->PhysicalOwner->Physical.LastSubmittedDispatches;
+								++Result.AsyncComputeCommandBuffers;
+							} else if (!staged && !refused) {
+								found->PhysicalOwner->RefusedStageSignature = stageSignature;
+								core::Metrics::Count("render.weather.stateful.fallbacks", 1);
+							}
 						}
 					}
+					inputs = weatherInputs();
+					if (!inputs) return refuseWeather();
 				}
-				inputs = weatherInputs();
-				if (!inputs) return false;
-			}
-			auto fieldIdentity = inputs->Uniforms;
-			if (!inputs->Stateful && physicalBytes == 0) {
-				fieldIdentity.Time = {};
-				fieldIdentity.Phase.x = 0;
-				fieldIdentity.Phase.y = 0;
-				fieldIdentity.Phase.z = 0;
-			}
-			const uint64_t signature = scene::MixSignature(
-				scene::MixSignature(WeatherSignature(fieldIdentity), found->Residency.SignatureFor(Command)),
-				CurrentLighting.EnvironmentState.CloudProvider.Id
-			);
-			if (found->Field.Matches(signature, Command)) {
-				if (found->Field.Pending && found->Field.PendingCommand == Command)
-					found->PendingRenderInputs = *inputs;
-				else
-					found->RenderInputs = *inputs;
-				core::Metrics::Count("render.weather.field_cache_hits", 1);
+				auto fieldIdentity = inputs->Uniforms;
+				if (!inputs->Stateful && physicalBytes == 0) {
+					fieldIdentity.Time = {};
+					fieldIdentity.Phase.x = 0;
+					fieldIdentity.Phase.y = 0;
+					fieldIdentity.Phase.z = 0;
+				}
+				const uint64_t signature = scene::MixSignature(
+					scene::MixSignature(
+						WeatherSignature(fieldIdentity), found->Residency.SignatureFor(Command)
+					),
+					CurrentLighting.EnvironmentState.CloudProvider.Id
+				);
+				if (found->Field.Matches(signature, Command)) {
+					if (found->Field.Pending && found->Field.PendingCommand == Command)
+						found->PendingRenderInputs = *inputs;
+					else
+						found->RenderInputs = *inputs;
+					core::Metrics::Count("render.weather.field_cache_hits", 1);
+					StageHistoryWrites(context, Command);
+					return true;
+				}
+				EnterNamedPass(context.Name);
+				if (!inputs->Stateful && physicalBytes == 0) {
+					if (!found->Field.Ready && !RecordWeatherEmptyField(State->Device, Command, cells))
+						return refuseWeather();
+					core::Metrics::Count("render.weather.certified_empty_field_skips", 1);
+				} else if (inputs->Stateful && inputs->Uniforms.Phase.z != UINT32_MAX) {
+					auto *copy = SDL_BeginGPUCopyPass(Command);
+					if (!copy) return refuseWeather();
+					const SDL_GPUBufferLocation from{found->PhysicalOwner->Physical.PublishedPacked, 0};
+					const SDL_GPUBufferLocation to{cells, 0};
+					SDL_CopyGPUBufferToBuffer(
+						copy, &from, &to, found->PhysicalOwner->Physical.CellCount * 8, true
+					);
+					SDL_EndGPUCopyPass(copy);
+					core::Metrics::Count(
+						"render.weather.stateful.packed_copy_bytes",
+						found->PhysicalOwner->Physical.CellCount * 8
+					);
+				} else {
+					if (!RecordWeatherField(
+							Command, State->WeatherFieldCompute, cells, pages, inputs->Uniforms, physicalBytes
+						))
+						return refuseWeather();
+					++Result.ComputeDispatches;
+				}
+				found->Field.Stage(signature, Command);
+				found->PendingRenderInputs = *inputs;
 				StageHistoryWrites(context, Command);
 				return true;
 			}
-			EnterNamedPass(context.Name);
-			if (!inputs->Stateful && physicalBytes == 0) {
-				if (!found->Field.Ready && !RecordWeatherEmptyField(State->Device, Command, cells))
-					return false;
-				core::Metrics::Count("render.weather.certified_empty_field_skips", 1);
-			} else if (inputs->Stateful && inputs->Uniforms.Phase.z != UINT32_MAX) {
-				auto *copy = SDL_BeginGPUCopyPass(Command);
-				if (!copy) return false;
-				const SDL_GPUBufferLocation from{found->PhysicalOwner->Physical.PublishedPacked, 0};
-				const SDL_GPUBufferLocation to{cells, 0};
-				SDL_CopyGPUBufferToBuffer(
-					copy, &from, &to, found->PhysicalOwner->Physical.CellCount * 8, true
-				);
-				SDL_EndGPUCopyPass(copy);
-				core::Metrics::Count(
-					"render.weather.stateful.packed_copy_bytes", found->PhysicalOwner->Physical.CellCount * 8
-				);
-			} else {
-				if (!RecordWeatherField(
-						Command, State->WeatherFieldCompute, cells, pages, inputs->Uniforms, physicalBytes
-					))
-					return false;
-				++Result.ComputeDispatches;
-			}
-			found->Field.Stage(signature, Command);
-			found->PendingRenderInputs = *inputs;
-			StageHistoryWrites(context, Command);
-			return true;
-		});
+		);
 
 		frameNodes.Set(
-			core::Name("weather-summary"), [this, weatherInputs](const graph::RunContext &context) {
+			core::Name("weather-summary"),
+			[this, weatherInputs, refuseWeather](const graph::RunContext &context) {
 				if (context.Reads.size() != 2 || context.Writes.size() != 1) return false;
 				const auto inputs = weatherInputs();
 				if (!State->Caps.HasCompute || !State->WeatherSummaryCompute || !inputs) return true;
 				auto *cells = GraphBuffer(context.Reads[0], context, false);
 				auto *summaries = GraphBuffer(context.Writes[0], context, true);
-				if (!cells || !summaries) return false;
+				if (!cells || !summaries) return refuseWeather();
 				const auto found = std::find_if(
 					State->WeatherGenerations.begin(),
 					State->WeatherGenerations.end(),
@@ -1743,7 +1793,7 @@ namespace engine::render {
 						return generation.World == Request.World && generation.Cells == cells;
 					}
 				);
-				if (found == State->WeatherGenerations.end()) return false;
+				if (found == State->WeatherGenerations.end()) return refuseWeather();
 				const uint64_t signature =
 					!inputs->Stateful && found->FieldWords == 0
 						? found->Field.SignatureFor(Command)
@@ -1753,7 +1803,7 @@ namespace engine::render {
 							  ),
 							  CurrentLighting.EnvironmentState.CloudProvider.Id
 						  );
-				if (!found->Field.Matches(signature, Command)) return false;
+				if (!found->Field.Matches(signature, Command)) return refuseWeather();
 				if (found->Summaries == summaries && found->Summary.Matches(signature, Command)) {
 					core::Metrics::Count("render.weather.summary_cache_hits", 1);
 					StageHistoryWrites(context, Command);
@@ -1768,7 +1818,7 @@ namespace engine::render {
 						summaries,
 						inputs->Uniforms
 					))
-					return false;
+					return refuseWeather();
 				found->Summaries = summaries;
 				found->Summary.Stage(signature, Command);
 				++Result.ComputeDispatches;
@@ -1781,8 +1831,8 @@ namespace engine::render {
 			core::Name("weather-integrate"), [this, weatherInputs](const graph::RunContext &context) {
 				if (context.Reads.size() != 6 || context.Writes.size() != 2) return false;
 				const auto inputs = weatherInputs();
-				if (!State->Caps.HasCompute || !State->WeatherRaysCompute || !inputs ||
-					!CurrentLighting.EnvironmentState.CloudLayer.Enabled)
+				if (WeatherFallbackApplied || !State->Caps.HasCompute || !State->WeatherRaysCompute ||
+					!inputs || !CurrentLighting.EnvironmentState.CloudLayer.Enabled)
 					return true;
 				const auto generation = std::find_if(
 					State->WeatherGenerations.begin(),
@@ -1791,7 +1841,9 @@ namespace engine::render {
 						return candidate.World == Request.World && candidate.Pipeline == Pipeline->Name;
 					}
 				);
-				if (generation == State->WeatherGenerations.end()) return false;
+				if (generation == State->WeatherGenerations.end() ||
+					!WeatherProductsReady(&*generation, Command))
+					return true;
 				if (!inputs->Stateful && generation->FieldWords == 0) return true;
 				const auto source = GraphTexture(context.Reads[0], context, false);
 				const auto depth = GraphTexture(context.Reads[1], context, false);
@@ -1807,7 +1859,7 @@ namespace engine::render {
 					target.Format != source.Format || cloudDepth.Format != source.Format ||
 					cloudDepth.Width != target.Width || cloudDepth.Height != target.Height ||
 					depth.Width != source.Width || depth.Height != source.Height)
-					return false;
+					return true;
 				const auto &environment = CurrentLighting.EnvironmentState;
 				const auto &controls = environment.Weather;
 				const auto &appearance = environment.CloudLayer;
@@ -1839,7 +1891,7 @@ namespace engine::render {
 				uniforms.Sun = cloudLighting.Direction;
 				uniforms.SunColour = cloudLighting.Direct;
 				uniforms.Ambient = cloudLighting.Ambient;
-				if (generation->Pages != pages) return false;
+				if (generation->Pages != pages) return true;
 				uniforms.Quality = {
 					std::clamp(environment.CloudVolume.Steps, 2u, 64u) * 4u,
 					std::bit_cast<uint32_t>(controls.LodError),
@@ -1864,8 +1916,9 @@ namespace engine::render {
 						target.Height,
 						uniforms
 					))
-					return false;
+					return true;
 				++Result.ComputeDispatches;
+				WeatherIntegrationRecorded = true;
 				StageHistoryWrites(context, Command);
 				return true;
 			}
@@ -1908,10 +1961,24 @@ namespace engine::render {
 				const bool empty = inputs && !inputs->Stateful &&
 								   generation != State->WeatherGenerations.end() &&
 								   generation->FieldWords == 0;
-				if (!inputs || !State->WeatherTemporalCompute || !State->WeatherReconstructCompute ||
-					!CurrentLighting.EnvironmentState.CloudLayer.Enabled || empty) {
+				const auto fallback = [&]() {
 					State->ReleaseWeatherTemporalSlot(Request.TargetSlot);
+					if (!WeatherFallbackApplied && !empty && WeatherVolumeAvailable() &&
+						VisibleWeatherMedium(CurrentLighting.EnvironmentState)) {
+						const auto source = GraphTexture(context.Reads[0], context, false);
+						const auto depth = GraphTexture(context.Reads[1], context, false);
+						const auto target = GraphTexture(context.Writes[1], context, true);
+						if (RecordWeatherFallback(context, source, depth, target, {}, false, true, true)) {
+							WeatherFallbackApplied = true;
+							return true;
+						}
+					}
 					return PublishIdentity(context, context.Reads[0], context.Writes[1]);
+				};
+				if (!WeatherIntegrationRecorded || !inputs || !State->WeatherTemporalCompute ||
+					!State->WeatherReconstructCompute ||
+					!CurrentLighting.EnvironmentState.CloudLayer.Enabled || empty) {
+					return fallback();
 				}
 				const auto source = GraphTexture(context.Reads[0], context, false);
 				const auto depth = GraphTexture(context.Reads[1], context, false);
@@ -1928,10 +1995,10 @@ namespace engine::render {
 					source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
 					target.Format != source.Format || clouds.Format != source.Format ||
 					cloudDepth.Format != source.Format || resolved.Format != source.Format)
-					return false;
+					return fallback();
 				auto &history = State->WeatherTemporalAt(Request.TargetSlot, Request.World, Pipeline->Name);
 				if (!EnsureWeatherTemporalHistory(State->Device, history, resolved.Width, resolved.Height))
-					return false;
+					return fallback();
 				const auto &environment = CurrentLighting.EnvironmentState;
 				auto identity = inputs->Uniforms;
 				identity.Time = {};
@@ -2007,7 +2074,7 @@ namespace engine::render {
 						State->OverlaySampler,
 						uniforms
 					))
-					return false;
+					return fallback();
 				Result.ComputeDispatches += 2;
 				StageHistoryWrites(context, Command);
 				return true;
@@ -2020,7 +2087,8 @@ namespace engine::render {
 			if (!State->Caps.HasCompute) return true;
 			if (context.Reads.size() != 0 || context.Writes.size() != 1) return false;
 			const Impl::NamedTexture target = GraphTexture(context.Writes.front(), context, true);
-			if (!target.IsValid() || target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT) return false;
+			if (!target.IsValid()) return CurrentLighting.EnvironmentState.HasWeatherCompute;
+			if (target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT) return false;
 			const bool recorded = State->RecordEnvironmentSkybox(
 				CurrentLighting.EnvironmentState,
 				Command,
@@ -2034,7 +2102,7 @@ namespace engine::render {
 				OpaqueSkyTexture = target.Texture;
 				StageHistoryWrites(context, Command);
 			}
-			return recorded;
+			return recorded || CurrentLighting.EnvironmentState.HasWeatherCompute;
 		});
 
 		frameNodes.Set(core::Name("clouds-compute"), [this](const graph::RunContext &context) {
@@ -2052,13 +2120,13 @@ namespace engine::render {
 			const Impl::NamedTexture target = GraphTexture(context.Writes.front(), context, true);
 			if (!source.IsValid()) {
 				ENGINE_ERROR("clouds compute '{}' could not allocate environment-sky", context.Name.Text());
-				return false;
+				return CurrentLighting.EnvironmentState.HasWeatherCompute;
 			}
 			if (!target.IsValid()) {
 				ENGINE_ERROR(
 					"clouds compute '{}' could not allocate environment-clouds", context.Name.Text()
 				);
-				return false;
+				return CurrentLighting.EnvironmentState.HasWeatherCompute;
 			}
 			if (source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || target.Format != source.Format) {
 				ENGINE_ERROR(
@@ -2088,13 +2156,14 @@ namespace engine::render {
 				Result.ComputeDispatches,
 				OpaqueSkyTexture == source.Texture,
 				[this, name = context.Name] { EnterNamedPass(name); },
-				Request.World,
-				Pipeline->Name
+				WeatherVolumeAvailable()
 			);
 			if (!recorded) {
 				ENGINE_ERROR("clouds compute '{}' could not record its compute pass", context.Name.Text());
 			}
 			if (recorded) StageHistoryWrites(context, Command);
+			if (!recorded && CurrentLighting.EnvironmentState.HasWeatherCompute)
+				return PublishIdentity(context, context.Reads[0], context.Writes[0]);
 			return recorded;
 		});
 
@@ -2109,11 +2178,41 @@ namespace engine::render {
 			const bool blackSky =
 				source.IsValid() && source.Texture == BlackSkyLit && depth.Texture == EmptyHardwareDepth &&
 				State->IsBlackEnvironment(CurrentLighting.EnvironmentState, Command, environment.Texture);
-			Activity.Sky = State->Caps.HasCompute && environment.IsValid() && !blackSky;
+			const auto &authored = CurrentLighting.EnvironmentState;
+			const bool volume = WeatherVolumeAvailable();
+			const auto generation = std::find_if(
+				State->WeatherGenerations.begin(),
+				State->WeatherGenerations.end(),
+				[this](const auto &entry) {
+					return entry.World == Request.World && entry.Pipeline == Pipeline->Name;
+				}
+			);
+			const bool products =
+				generation != State->WeatherGenerations.end() && WeatherProductsReady(&*generation, Command);
+			const bool legacyClouds =
+				!volume &&
+				std::any_of(State->Environments.begin(), State->Environments.end(), [&](const auto &entry) {
+					return entry.CloudTarget == environment.Texture && entry.Cloud.SignatureFor(Command) != 0;
+				});
+			const bool cloudFallback =
+				VisibleWeatherMedium(authored) && !(volume && products) && !legacyClouds;
+			const auto modes = EnvironmentModesOf(authored);
+			const bool skyFallback =
+				!environment.IsValid() && (modes.Skybox != 0 || modes.Atmosphere != 0 || cloudFallback);
+			Activity.Sky = (environment.IsValid() && !blackSky) || skyFallback || cloudFallback;
 			Uniforms.Fog.w = Activity.Sky ? 1.0f : 0.0f;
 			if (!Activity.Sky) return PublishIdentity(context, context.Reads[0], context.Writes[0]);
 			const auto target = GraphTexture(context.Writes[0], context, true);
 			if (!source.IsValid() || !target.IsValid() || source.Texture == target.Texture) return false;
+			if (skyFallback || cloudFallback) {
+				if (RecordWeatherFallback(
+						context, source, depth, target, environment, true, cloudFallback, false
+					)) {
+					WeatherFallbackApplied = cloudFallback;
+					return true;
+				}
+				return PublishIdentity(context, context.Reads[0], context.Writes[0]);
+			}
 			const std::array bindings{
 				SDL_GPUTextureSamplerBinding{source.Texture, Sampler},
 				SDL_GPUTextureSamplerBinding{DepthTarget.texture, Sampler},

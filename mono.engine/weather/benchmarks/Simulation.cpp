@@ -2,6 +2,7 @@
 #include <engine/weather/Checkpoint.hpp>
 
 #include <stdexcept>
+#include <vector>
 
 TEST_SUITE_ID("engine.weather.bench.simulation")
 
@@ -20,6 +21,26 @@ namespace {
 		}();
 		return state;
 	}
+
+	engine::weather::SimulationState &TerrainSolver() {
+		static auto state = [] {
+			engine::weather::SimulationDefinition definition;
+			definition.Grid.Cells = {16, 16, 16};
+			definition.Grid.CellSizeMetres = 64;
+			definition.GroundVapourFluxKilogramsPerSquareMetreSecond = 0.0001f;
+			engine::weather::SolverCell initial;
+			initial.VelocityMetresPerSecond = {6, 0, 0};
+			const std::vector<float> heights(16 * 16, 64);
+			auto created = engine::weather::CreateSimulation(definition, initial, {}, heights);
+			if (!created) throw std::runtime_error("weather terrain benchmark grid refused");
+			for (size_t index = 0; index < created->Cells.size(); ++index)
+				if (!(engine::weather::SimulationCellFlags(*created, index) & 1))
+					created->FallingCondensateKilogramsPerCubicMetre[index] = 0.001f;
+			created->Budget.InitialWaterKilograms = engine::weather::SimulationWaterKilograms(*created);
+			return *created;
+		}();
+		return state;
+	}
 }
 
 BENCH("weather constant-density 4096 cells cold workspace tick", 1) {
@@ -34,6 +55,14 @@ BENCH("weather constant-density 4096 cells warm workspace tick", 1) {
 	const auto status = engine::weather::StepSimulation(Solver(), workspace);
 	if (status != engine::weather::SimulationStatus::Success)
 		throw std::runtime_error("weather warm benchmark step refused");
+	engine::testing::Consume(status);
+}
+
+BENCH("weather terrain rain and ground flux 4096 cells warm workspace tick", 1) {
+	static engine::weather::SimulationWorkspace workspace;
+	const auto status = engine::weather::StepSimulation(TerrainSolver(), workspace);
+	if (status != engine::weather::SimulationStatus::Success)
+		throw std::runtime_error("weather terrain benchmark step refused");
 	engine::testing::Consume(status);
 }
 

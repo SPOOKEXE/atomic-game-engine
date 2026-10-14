@@ -1860,6 +1860,30 @@ declare extern type RunService with
 	function IsReplica(self): boolean
 end
 
+-- Copied accepted weather values in the named physical units. Tick and Epoch are exact decimal
+-- uint64 text. Mutating this dictionary never changes the atmosphere.
+declare extern type WeatherSample with
+	Layer: string
+	Mode: string
+	Tick: string
+	Epoch: string
+	DefinitionRevision: number
+	CondensateKilogramsPerCubicMetre: number
+	VapourKilogramsPerKilogram: number
+	TemperatureCelsius: number
+	PressureHectopascals: number
+	WindMetresPerSecond: Vector3
+	IceFraction: number
+	LiquidMillimetresPerHour: number
+	SnowMillimetresPerHour: number
+	HailMillimetresPerHour: number
+	MeltingFraction: number
+	SpawnSeed: number
+	FogExtinctionPerMetre: number
+	ChargeSeparation: number
+	HailGrowth: number
+end
+
 -- The shared analytical tornado field. Configure and Preset require the
 -- authoritative server role; the remaining queries are read-only everywhere.
 declare extern type StormFieldSample with
@@ -2341,6 +2365,9 @@ declare task: {
 				out << "\tfunction ApplyImpulse(self, impulse: Vector3): ()\n";
 				out << "\tfunction SetAppliedForce(self, force: Vector3): ()\n";
 				out << "\tfunction SetAppliedTorque(self, torque: Vector3): ()\n";
+				out << "\t-- WeatherCompute only. Missing, disabled or unavailable models return nil.\n";
+				out << "\tfunction Sample(self, positionMetres: Vector3, groundHeightMetres: number?): "
+					   "WeatherSample?\n";
 				out << "\tfunction SetSpawnSamples(self, samples: buffer): boolean\n";
 				out << "\tfunction SetLayer(self, index: number, colour: Color3, alpha: number, size: "
 					   "number, acceleration: Vector3): boolean\n";
@@ -3500,6 +3527,30 @@ declare interface DataStoreService {
 	RemoveAsync(key: string): Promise<StoreReply>;
 }
 
+// Copied accepted weather values in the named physical units. Tick and Epoch are exact decimal
+// uint64 text. Mutating this dictionary never changes the atmosphere.
+declare interface WeatherSample {
+	Layer: string;
+	Mode: "Procedural" | "Stateful";
+	Tick: string;
+	Epoch: string;
+	DefinitionRevision: number;
+	CondensateKilogramsPerCubicMetre: number;
+	VapourKilogramsPerKilogram: number;
+	TemperatureCelsius: number;
+	PressureHectopascals: number;
+	WindMetresPerSecond: Vector3;
+	IceFraction: number;
+	LiquidMillimetresPerHour: number;
+	SnowMillimetresPerHour: number;
+	HailMillimetresPerHour: number;
+	MeltingFraction: number;
+	SpawnSeed: number;
+	FogExtinctionPerMetre: number;
+	ChargeSeparation: number;
+	HailGrowth: number;
+}
+
 declare interface RunService {
 	readonly Heartbeat: HeartbeatSignal;
 }
@@ -4096,6 +4147,9 @@ declare const task: {
 				out << "\tApplyImpulse(impulse: Vector3): void;\n";
 				out << "\tSetAppliedForce(force: Vector3): void;\n";
 				out << "\tSetAppliedTorque(torque: Vector3): void;\n";
+				out << "\t// WeatherCompute only. Missing, disabled or unavailable models return null.\n";
+				out << "\tSample(positionMetres: Vector3, groundHeightMetres?: number | null): WeatherSample "
+					   "| null;\n";
 				out << "\tSetSpawnSamples(samples: ArrayBuffer): boolean;\n";
 				out << "\tSetLayer(index: number, colour: Color3, alpha: number, size: number, acceleration: "
 					   "Vector3): boolean;\n";

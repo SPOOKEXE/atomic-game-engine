@@ -44,6 +44,11 @@ namespace engine::weather {
 	struct StatefulWeatherInitializationFailure {
 		// The accepted authored revision whose initialization was refused.
 		uint32_t DefinitionRevision = 1;
+		// Derived retry watermarks are omitted from saves and reset when restored.
+		//@{
+		uint64_t AcceptedWrites = UINT64_MAX;
+		uint64_t CheckpointWrites = UINT64_MAX;
+		//@}
 	};
 	// Published at five-second weather intervals or explicit requests, suitable for copied late joins.
 	struct StatefulWeatherCheckpoint {
@@ -64,9 +69,12 @@ namespace engine::weather {
 			uint64_t Tick = 0;
 			uint64_t SourceWriteVersion = 0;
 			uint32_t CellOffset = 0;
+			uint32_t RainOffset = 0;
+			std::vector<uint8_t> SolidMask{};
+			std::vector<float> GroundHeightMetres{};
 			//@}
 		};
-		// Checkpoint bytes remain authoritative; a changed integrity word invalidates this local cache.
+		// Checkpoint bytes remain authoritative; integrity and observed source writes invalidate this cache.
 		mutable std::optional<QueryIndex> Queries{};
 	};
 	// Registers authoritative state, checkpoint and initialization-refusal component codecs.
@@ -96,4 +104,7 @@ namespace engine::weather {
 	);
 	// The canonical event-column key includes seed, named layer, epoch and completed solver tick.
 	[[nodiscard]] core::Vector3 StatefulEventColumn(const StatefulWeatherState &state, uint64_t tick);
+	// Certifies that accepted terrain excludes every physical cell in a canonical storm column.
+	// The caller separately checks that the requested phase tick has completed.
+	[[nodiscard]] bool StatefulEventColumnBlocked(const StatefulWeatherState &state, core::Vector3 column);
 }

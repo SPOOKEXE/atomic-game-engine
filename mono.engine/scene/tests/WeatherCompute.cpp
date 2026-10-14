@@ -243,6 +243,12 @@ TEST_CASE("every authored weather control survives named snapshot serialization"
 	authored.LightningRate = authored.LightningRate == 0.0f ? 0.2f : authored.LightningRate * 0.8f;
 	authored.LayerName = core::Name("named-high-ice-layer");
 	authored.Enabled = !authored.Enabled;
+	authored.BoundaryX = scene::WeatherBoundary::Open;
+	authored.BoundaryZ = scene::WeatherBoundary::Closed;
+	authored.TopBoundary = scene::WeatherTopBoundary::Escape;
+	authored.TerrainRevision = 4;
+	authored.GroundVapourFluxKilogramsPerSquareMetreSecond = 0.003f;
+	authored.RainFallSpeedMetresPerSecond = 12;
 
 	REQUIRE(scene::ValidWeatherCompute(authored));
 	store.Set(provider, authored);
@@ -279,13 +285,17 @@ TEST_CASE("malformed weather serialization refuses partial publication", "[scene
 		CHECK(destination.Seed == 900);
 	}
 	std::array<std::vector<std::byte>, 4> malformed{valid, valid, valid, valid};
-	malformed[0][0] = std::byte{2};
+	malformed[0][0] = std::byte{3};
 	// First scalar becomes a quiet NaN in the explicit little-endian float encoding.
 	malformed[1][4] = std::byte{0};
 	malformed[1][5] = std::byte{0};
 	malformed[1][6] = std::byte{0xc0};
 	malformed[1][7] = std::byte{0x7f};
-	malformed[2].back() = std::byte{2};
+	// The final authored fall speed must also refuse a nonfinite value.
+	malformed[2][valid.size() - 4] = std::byte{0};
+	malformed[2][valid.size() - 3] = std::byte{0};
+	malformed[2][valid.size() - 2] = std::byte{0xc0};
+	malformed[2][valid.size() - 1] = std::byte{0x7f};
 	const std::string validText(reinterpret_cast<const char *>(valid.data()), valid.size());
 	const auto modeOffset = validText.find("Procedural");
 	REQUIRE(modeOffset != std::string::npos);

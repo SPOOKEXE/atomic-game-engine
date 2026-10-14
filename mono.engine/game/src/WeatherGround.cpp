@@ -1,3 +1,4 @@
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/core/types/Ray.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -9,6 +10,7 @@
 #include <engine/scene/WeatherClock.hpp>
 #include <engine/scene/WeatherCompute.hpp>
 #include <engine/weather/Runtime.hpp>
+#include <engine/weather/StatefulRuntime.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -21,6 +23,7 @@ namespace engine::game {
 
 		std::optional<float>
 		GroundHeight(const ecs::Store &store, core::Vector3 origin, float maximumDistance) {
+			core::Metrics::Count("weather.ground.height_queries", 1);
 			const auto hit = physics::Raycast(
 				store,
 				{origin, {0, -1, 0}},
@@ -72,6 +75,65 @@ namespace engine::game {
 			// queries.
 			physics::SyncBroadphase(store);
 		}
+
+		void PrepareWeatherTerrain(ecs::Store &store) {
+			if (store.AdoptOnly()) return;
+			store.Observe<weather::StatefulWeatherState>();
+			store.Observe<weather::StatefulWeatherCheckpoint>();
+			const uint64_t definitions = store.ComponentChangeVersion<scene::WeatherCompute>();
+			const uint64_t definitionMembership = store.ComponentMembershipVersion<scene::WeatherCompute>();
+			const uint64_t accepted = store.ComponentChangeVersion<scene::WeatherAcceptedDefinition>();
+			const uint64_t acceptedMembership =
+				store.ComponentMembershipVersion<scene::WeatherAcceptedDefinition>();
+			const uint64_t physicalMembership =
+				store.ComponentMembershipVersion<weather::StatefulWeatherState>();
+			const uint64_t checkpointMembership =
+				store.ComponentMembershipVersion<weather::StatefulWeatherCheckpoint>();
+			const auto *previous = store.Resource<weather::WeatherGroundQuery>();
+			if (previous && previous->Height && previous->PreparedDefinitionWrites == definitions &&
+				previous->PreparedDefinitionMembership == definitionMembership &&
+				previous->PreparedAcceptedWrites == accepted &&
+				previous->PreparedAcceptedMembership == acceptedMembership &&
+				previous->PreparedPhysicalMembership == physicalMembership &&
+				previous->PreparedCheckpointMembership == checkpointMembership)
+				return;
+			bool needed = false;
+			store.Each<const scene::WeatherCompute>([&](ecs::Entity provider, const auto &) {
+				const auto *controls = scene::WeatherControlsOf(store, provider);
+				if (!controls || !controls->Enabled || controls->Mode != scene::WeatherMode::Stateful) return;
+				const auto *physical = store.Get<weather::StatefulWeatherState>(provider);
+				if (!physical) {
+					needed |= !store.Has<weather::StatefulWeatherCheckpoint>(provider);
+					return;
+				}
+				auto normalized = *controls;
+				normalized.Enabled = true;
+				normalized.Paused = false;
+				normalized.TimeScale = 1;
+				auto expected =
+					weather::MakeSimulationDefinition(normalized, physical->Simulation.Definition.LayerName);
+				if (!expected) return;
+				expected->WorldEpoch = physical->Simulation.Definition.WorldEpoch;
+				expected->Revision = physical->Simulation.Definition.Revision;
+				needed |= *expected != physical->Simulation.Definition;
+			});
+			if (needed) {
+				ENGINE_PROFILE("weather terrain snapshot preparation");
+				InstallWeatherGround(store);
+				if (store.HasResource<physics::PhysicsWorld>()) {
+					core::Metrics::Count("weather.terrain.broadphase_syncs", 1);
+					physics::SyncBroadphase(store);
+				}
+			}
+			if (auto *query = store.ResourceMutable<weather::WeatherGroundQuery>()) {
+				query->PreparedDefinitionWrites = definitions;
+				query->PreparedDefinitionMembership = definitionMembership;
+				query->PreparedAcceptedWrites = accepted;
+				query->PreparedAcceptedMembership = acceptedMembership;
+				query->PreparedPhysicalMembership = physicalMembership;
+				query->PreparedCheckpointMembership = checkpointMembership;
+			}
+		}
 	}
 
 	void InstallWeatherGround(ecs::Store &store) {
@@ -81,6 +143,12 @@ namespace engine::game {
 	}
 
 	void RegisterWeatherGroundSystem(ecs::Scheduler &scheduler) {
+		scheduler.Add(
+			"weather.terrain",
+			ecs::Phase::PreSimulation,
+			PrepareWeatherTerrain,
+			ecs::SystemOrder{{}, {}, {"weather.stateful"}, {"weather.clock"}}
+		);
 		scheduler.Add("weather.ground", ecs::Phase::Animation, PrepareWeatherGround);
 	}
 }

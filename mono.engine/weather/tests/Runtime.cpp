@@ -11,6 +11,7 @@
 #include <engine/testing/Suite.hpp>
 #include <engine/weather/Clock.hpp>
 #include <engine/weather/Runtime.hpp>
+#include <engine/weather/StatefulRuntime.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -632,4 +633,83 @@ TEST_CASE(
 	CHECK(store.Get<weather::WeatherEvents>(provider)->Dropped == 144);
 	for (const auto &event : store.Get<weather::WeatherEvents>(provider)->Events)
 		CHECK(event.Tick == 11);
+}
+
+TEST_CASE(
+	"completed solid terrain columns consume storm backlog without inventing air", "[weather][stateful]"
+) {
+	ecs::Store store("weather.solid-column");
+	const auto provider = Storm(store);
+	auto controls = *store.Get<scene::WeatherCompute>(provider);
+	controls.Mode = scene::WeatherMode::Stateful;
+	controls.BaseHeightMetres = 0;
+	controls.ThicknessMetres = 256;
+	controls.ExtentMetres = {256, 256, 256};
+	REQUIRE(controls.LightningRate > 0);
+	REQUIRE(controls.HailIntensity > 0);
+	store.Set(provider, controls);
+	store.SetResource(weather::WeatherGroundQuery{[](const ecs::Store &, core::Vector3, float) {
+		return std::optional(512.0f);
+	}});
+	store.AdvanceTick(2.0f);
+	weather::UpdateWeatherClocks(store);
+	weather::UpdateStatefulWeather(store);
+	const auto *physical = store.Get<weather::StatefulWeatherState>(provider);
+	REQUIRE(physical);
+	REQUIRE(weather::ValidateSimulation(physical->Simulation));
+	CHECK(physical->LastStatus == weather::SimulationStatus::Success);
+	CHECK(physical->Simulation.Tick == 32);
+	CHECK(physical->TickSamples.empty());
+	CHECK(physical->Simulation.GroundHeightMetres == std::vector<float>(16, 512));
+	for (size_t index = 0; index < physical->Simulation.Cells.size(); ++index)
+		REQUIRE((weather::SimulationCellFlags(physical->Simulation, index) & 1) != 0);
+	CHECK_FALSE(weather::QueryWeather(store, provider, {0, 64, 0}));
+	weather::UpdateWeatherRuntime(store);
+	const auto *runtime = store.Get<weather::WeatherRuntimeState>(provider);
+	REQUIRE(runtime);
+	CHECK(runtime->LastTick == 32);
+	CHECK(runtime->NextSequence == 1);
+	CHECK(runtime->ChargeQ16 == 0);
+	CHECK(runtime->HailGrowthQ16 == 0);
+	CHECK(store.Get<weather::WeatherEvents>(provider)->Events.empty());
+	// The terrain is immutable, but uncompleted physics still preserves its accepted backlog.
+	weather::UpdateWeatherRuntime(store);
+	CHECK(store.Get<weather::WeatherRuntimeState>(provider)->LastTick == 32);
+	store.AdvanceTick(0.0f);
+	weather::UpdateWeatherClocks(store);
+	weather::UpdateStatefulWeather(store);
+	weather::UpdateWeatherRuntime(store);
+	CHECK(store.Get<weather::StatefulWeatherState>(provider)->Simulation.Tick == 40);
+	CHECK(store.Get<weather::WeatherRuntimeState>(provider)->LastTick == 40);
+	CHECK(store.Get<weather::WeatherRuntimeState>(provider)->NextSequence == 1);
+	CHECK(store.Get<weather::WeatherEvents>(provider)->Events.empty());
+	// A completed, solid grid with stale accepted metadata cannot certify a different physical recipe.
+	auto *complete = store.GetMutable<weather::StatefulWeatherState>(provider);
+	REQUIRE(weather::StepSimulation(complete->Simulation) == weather::SimulationStatus::Success);
+	complete->AcceptedRevision = controls.DefinitionRevision + 1;
+	Step(store, provider, 41);
+	CHECK(store.Get<weather::StatefulWeatherState>(provider)->Simulation.Tick == 41);
+	CHECK(store.Get<weather::WeatherRuntimeState>(provider)->LastTick == 40);
+	CHECK(store.Get<weather::WeatherRuntimeState>(provider)->NextSequence == 1);
+	CHECK(store.Get<weather::WeatherEvents>(provider)->Events.empty());
+	// A fully solid, zero-water column is stationary. Restore a validated late snapshot and evolve
+	// one real tick at the inclusive hash endpoint, where an unclipped position would escape the grid.
+	complete = store.GetMutable<weather::StatefulWeatherState>(provider);
+	complete->AcceptedRevision = controls.DefinitionRevision;
+	auto late = complete->Simulation;
+	late.Tick = 58782;
+	const auto checkpoint = weather::EncodeCheckpoint(late);
+	REQUIRE(checkpoint);
+	REQUIRE(weather::DecodeCheckpoint(*checkpoint, complete->Simulation));
+	REQUIRE(weather::StepSimulation(complete->Simulation) == weather::SimulationStatus::Success);
+	REQUIRE(complete->Simulation.Tick == 58783);
+	REQUIRE(weather::ValidateSimulation(complete->Simulation));
+	const auto endpoint = weather::StatefulEventColumn(*complete, 58783);
+	CHECK(endpoint.X < 128);
+	CHECK(weather::StatefulEventColumnBlocked(*complete, endpoint));
+	store.GetMutable<weather::WeatherRuntimeState>(provider)->LastTick = 58782;
+	Step(store, provider, 58783);
+	CHECK(store.Get<weather::WeatherRuntimeState>(provider)->LastTick == 58783);
+	CHECK(store.Get<weather::WeatherRuntimeState>(provider)->NextSequence == 1);
+	CHECK(store.Get<weather::WeatherEvents>(provider)->Events.empty());
 }

@@ -155,6 +155,21 @@ TEST_CASE("stateful physical cache identity separates providers and model recipe
 	environment.Weather.Paused = true;
 	environment.Weather.TimeScale = .5f;
 	CHECK(WeatherPhysicalSignature(environment) == original);
+	environment.Weather.DefinitionRevision++;
+	environment.Weather.WindMetresPerSecond = {17, -2, 3};
+	environment.Weather.IceFraction = .75f;
+	environment.Weather.FogStrength = .5f;
+	environment.Weather.ExtentMetres.Y += 64;
+	environment.CloudLayer.Density *= .5f;
+	CHECK(WeatherPhysicalSignature(environment) == original);
+	for (unsigned change = 0; change < 4; ++change) {
+		auto physicalEdit = environment;
+		if (change == 0) physicalEdit.Weather.TerrainRevision++;
+		if (change == 1) physicalEdit.Weather.GroundVapourFluxKilogramsPerSquareMetreSecond = .001f;
+		if (change == 2) physicalEdit.Weather.RainFallSpeedMetresPerSecond += 1;
+		if (change == 3) physicalEdit.Weather.BoundaryX = scene::WeatherBoundary::Open;
+		CHECK(WeatherPhysicalSignature(physicalEdit) != original);
+	}
 	environment.Weather.Seed++;
 	CHECK(WeatherPhysicalSignature(environment) != original);
 	environment.Weather.Seed--;
@@ -576,14 +591,14 @@ TEST_CASE("stateful GPU shares one physical owner across two graph pipelines", "
 	};
 	settle();
 	CHECK(counter("render.weather.stateful.queue_submissions") == beforeQueues + 1);
-	CHECK(counter("render.weather.stateful.allocated_bytes") == beforeAllocations + 240 * 64 + 32);
+	CHECK(counter("render.weather.stateful.allocated_bytes") == beforeAllocations + 260 * 64 + 32);
 	CHECK(counter("render.weather.stateful.physical_owners") == 1);
 	for (auto &view : views)
 		view.Lighting.EnvironmentState.Clock.Tick = 1;
 	REQUIRE(fixture.Render.Render(views, overlay, nullptr, false).Submitted);
 	settle();
 	CHECK(counter("render.weather.stateful.queue_submissions") == beforeQueues + 2);
-	CHECK(counter("render.weather.stateful.allocated_bytes") == beforeAllocations + 240 * 64 + 32);
+	CHECK(counter("render.weather.stateful.allocated_bytes") == beforeAllocations + 260 * 64 + 32);
 	for (auto &view : views) {
 		view.Lighting.EnvironmentState.Clock.Paused = true;
 		view.Lighting.EnvironmentState.Clock.AnchorTick = 1;
@@ -593,6 +608,45 @@ TEST_CASE("stateful GPU shares one physical owner across two graph pipelines", "
 	}
 	REQUIRE(fixture.Render.Render(views, overlay, nullptr, false).Submitted);
 	CHECK(counter("render.weather.stateful.queue_submissions") == beforeQueues + 2);
+	const double residentAllocations = counter("render.weather.stateful.allocated_bytes");
+	const double residentCopies = counter("render.weather.stateful.packed_copy_bytes");
+	for (auto &view : views) {
+		auto &environment = view.Lighting.EnvironmentState;
+		environment.Weather.DefinitionRevision++;
+		environment.Weather.WindMetresPerSecond = {8, 0, 0};
+		environment.Weather.IceFraction = .75f;
+		environment.Weather.FogStrength = .5f;
+		environment.CloudLayer.Colour = {.25f, .5f, .75f};
+		environment.CloudLayer.Density *= .5f;
+	}
+	REQUIRE(fixture.Render.Render(views, overlay, nullptr, false).Submitted);
+	CHECK(counter("render.weather.stateful.physical_owners") == 1);
+	CHECK(counter("render.weather.stateful.allocated_bytes") == residentAllocations);
+	CHECK(counter("render.weather.stateful.queue_submissions") == beforeQueues + 2);
+	CHECK(counter("render.weather.stateful.packed_copy_bytes") == residentCopies);
+	auto updated = *simulation;
+	REQUIRE(weather::StepSimulation(updated) == weather::SimulationStatus::Success);
+	updated.Definition.Revision = views[0].Lighting.EnvironmentState.Weather.DefinitionRevision;
+	forcing.Tick = updated.Tick;
+	forcing.WindTargetMetresPerSecond = {8, 0, 0};
+	REQUIRE(weather::AddSimulationForcing(updated, forcing));
+	const auto forcingCheckpoint = weather::EncodeCheckpoint(updated);
+	REQUIRE(forcingCheckpoint);
+	for (auto &view : views) {
+		view.WeatherCheckpoint = *forcingCheckpoint;
+		view.WeatherCheckpointVersion++;
+		view.WeatherCheckpointRevision = updated.Definition.Revision;
+		view.WeatherCheckpointTick = updated.Tick;
+		view.Lighting.EnvironmentState.Clock.Paused = false;
+		view.Lighting.EnvironmentState.Clock.Tick = 2;
+		view.Lighting.EnvironmentState.Weather.Paused = false;
+		view.Lighting.EnvironmentState.Weather.TimeScale = 1;
+	}
+	REQUIRE(fixture.Render.Render(views, overlay, nullptr, false).Submitted);
+	settle();
+	CHECK(counter("render.weather.stateful.queue_submissions") == beforeQueues + 3);
+	CHECK(counter("render.weather.stateful.physical_owners") == 1);
+	CHECK(counter("render.weather.stateful.allocated_bytes") == residentAllocations);
 	for (auto &view : views)
 		view.Lighting.EnvironmentState.Weather.Enabled = false;
 	REQUIRE(fixture.Render.Render(views, overlay, nullptr, false).Submitted);

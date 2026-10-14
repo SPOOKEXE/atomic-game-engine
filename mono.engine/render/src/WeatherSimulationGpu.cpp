@@ -8,11 +8,24 @@
 #include <engine/weather/Simulation.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstring>
 
 namespace engine::render {
 	namespace {
+		uint64_t TerrainSignature(const weather::SimulationState &state) {
+			uint64_t signature = 14695981039346656037ull;
+			for (float height : state.GroundHeightMetres) {
+				const uint32_t word = std::bit_cast<uint32_t>(height);
+				for (uint32_t shift = 0; shift < 32; shift += 8)
+					signature = (signature ^ ((word >> shift) & 255)) * 1099511628211ull;
+			}
+			for (uint8_t mask : state.SolidMask)
+				signature = (signature ^ mask) * 1099511628211ull;
+			return signature;
+		}
+
 		SDL_GPUBuffer *Buffer(SDL_GPUDevice *device, uint32_t bytes) {
 			SDL_GPUBufferCreateInfo info{};
 			info.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
@@ -34,6 +47,11 @@ namespace engine::render {
 			state.Diagnostics = Buffer(device, count * 32);
 			state.PublishedPacked = Buffer(device, count * 8);
 			state.StagingPacked = Buffer(device, count * 8);
+			state.PublishedTerrain = Buffer(device, count * 4);
+			state.StagingTerrain = Buffer(device, count * 4);
+			state.PublishedRain = Buffer(device, count * 4);
+			for (auto &buffer : state.WorkingRain)
+				buffer = Buffer(device, count * 4);
 			SDL_GPUTransferBufferCreateInfo info{};
 			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
 			info.size = ((count + 63) / 64) * 32;
@@ -41,18 +59,20 @@ namespace engine::render {
 			if (state.Readback) core::Metrics::Count("render.weather.stateful.allocated_bytes", info.size);
 			return state.PublishedCells && state.WorkingCells[0] && state.WorkingCells[1] &&
 				   state.ForcedCells && state.ProjectedCells && state.Scratch[0] && state.Scratch[1] &&
-				   state.Diagnostics && state.PublishedPacked && state.StagingPacked && state.Readback;
+				   state.Diagnostics && state.PublishedPacked && state.StagingPacked && state.Readback &&
+				   state.PublishedTerrain && state.StagingTerrain && state.PublishedRain &&
+				   state.WorkingRain[0] && state.WorkingRain[1];
 		}
 
 		bool Upload(
 			SDL_GPUDevice *device,
 			SDL_GPUCommandBuffer *command,
 			SDL_GPUBuffer *buffer,
-			std::span<const weather::SolverCell> cells
+			std::span<const std::byte> bytes
 		) {
 			SDL_GPUTransferBufferCreateInfo info{};
 			info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-			info.size = static_cast<uint32_t>(cells.size_bytes());
+			info.size = static_cast<uint32_t>(bytes.size());
 			auto *transfer = gpu::CreateTransferBuffer(device, &info);
 			if (!transfer) return false;
 			void *mapped = SDL_MapGPUTransferBuffer(device, transfer, false);
@@ -60,7 +80,7 @@ namespace engine::render {
 				gpu::ReleaseTransferBuffer(device, transfer);
 				return false;
 			}
-			std::memcpy(mapped, cells.data(), cells.size_bytes());
+			std::memcpy(mapped, bytes.data(), bytes.size());
 			SDL_UnmapGPUTransferBuffer(device, transfer);
 			auto *pass = SDL_BeginGPUCopyPass(command);
 			if (!pass) {
@@ -85,26 +105,32 @@ namespace engine::render {
 			SDL_GPUBuffer *projectedCells,
 			SDL_GPUBuffer *inputScratch,
 			SDL_GPUBuffer *outputCells,
-			SDL_GPUBuffer *outputScratch
+			SDL_GPUBuffer *outputScratch,
+			SDL_GPUBuffer *terrain,
+			SDL_GPUBuffer *inputRain,
+			SDL_GPUBuffer *outputRain
 		) {
-			SDL_GPUStorageBufferReadWriteBinding outputs[4]{};
-			SDL_GPUBuffer *outputBuffers[4]{
-				outputCells, outputScratch, state.StagingPacked, state.Diagnostics
+			SDL_GPUStorageBufferReadWriteBinding outputs[5]{};
+			SDL_GPUBuffer *outputBuffers[5]{
+				outputCells, outputScratch, state.StagingPacked, state.Diagnostics, outputRain
 			};
-			for (size_t index = 0; index < 4; ++index) {
+			for (size_t index = 0; index < 5; ++index) {
 				outputs[index].buffer = outputBuffers[index];
 				outputs[index].cycle = false;
 			}
-			auto *pass = SDL_BeginGPUComputePass(command, nullptr, 0, outputs, 4);
+			auto *pass = SDL_BeginGPUComputePass(command, nullptr, 0, outputs, 5);
 			if (!pass) return false;
 			SDL_BindGPUComputePipeline(pass, pipeline);
-			SDL_GPUBuffer *inputs[3]{inputCells, projectedCells, inputScratch};
-			SDL_BindGPUComputeStorageBuffers(pass, 0, inputs, 3);
+			SDL_GPUBuffer *inputs[5]{inputCells, projectedCells, inputScratch, terrain, inputRain};
+			SDL_BindGPUComputeStorageBuffers(pass, 0, inputs, 5);
 			SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
-			SDL_DispatchGPUCompute(pass, (state.CellCount + 63) / 64, 1, 1);
+			const uint32_t workItems = uniforms.Grid[3] == 7 ? (state.CellCount + 63) / 64 : state.CellCount;
+			const uint32_t groups = (workItems + 63) / 64;
+			SDL_DispatchGPUCompute(pass, groups, 1, 1);
 			++state.RecordedDispatches;
 			SDL_EndGPUComputePass(pass);
 			core::Metrics::Count("render.weather.stateful.dispatches", 1);
+			core::Metrics::Count("render.weather.stateful.workgroups", groups);
 			return true;
 		}
 
@@ -181,10 +207,15 @@ namespace engine::render {
 			return true;
 		weather::SimulationState decoded;
 		uint64_t tick = state.Tick;
+		uint64_t terrainSignature = state.TerrainSignature;
 		auto definition = state.Definition;
 		auto history = state.ForcingHistory;
 		if (!checkpoint.empty()) {
 			if (!weather::DecodeCheckpoint(checkpoint, decoded)) return false;
+			terrainSignature = TerrainSignature(decoded);
+			if (state.Published && decoded.Definition.TerrainRevision == state.Definition.TerrainRevision &&
+				terrainSignature != state.TerrainSignature)
+				return false;
 			definition = decoded.Definition;
 			history = decoded.ForcingHistory;
 			tick = decoded.Tick;
@@ -196,7 +227,9 @@ namespace engine::render {
 			targetTick =
 				std::min(targetTick, tick + std::min<uint64_t>(maximumReplayTicks, UINT64_MAX - tick));
 		if (targetTick < tick || targetTick - tick > maximumReplayTicks || maximumReplayTicks > 128 ||
-			definition.MaximumStateBytes < decoded.Cells.size() * 304)
+			definition.MaximumStateBytes <
+				uint64_t(state.CellCount ? state.CellCount : decoded.Cells.size()) * 260 +
+					((uint64_t(state.CellCount ? state.CellCount : decoded.Cells.size()) + 63) / 64) * 32)
 			return false;
 		if (!state.CellCount && !Allocate(device, state, static_cast<uint32_t>(decoded.Cells.size()))) {
 			ReleaseWeatherSimulationGpu(device, state);
@@ -224,10 +257,45 @@ namespace engine::render {
 		if (recordHook) recordHook(command, WeatherSimulationRecordEvent::Begin);
 		uint32_t currentIndex = 0;
 		SDL_GPUBuffer *currentCells = state.PublishedCells;
+		SDL_GPUBuffer *currentRain = state.PublishedRain;
+		SDL_GPUBuffer *terrain = checkpoint.empty() ? state.PublishedTerrain : state.StagingTerrain;
 		if (!checkpoint.empty()) {
-			if (!Upload(device, command, state.WorkingCells[0], decoded.Cells)) return cancel();
+			std::vector<uint32_t> flags(state.CellCount);
+			for (uint32_t index = 0; index < state.CellCount; ++index)
+				flags[index] = weather::SimulationCellFlags(decoded, index);
+			if (!Upload(device, command, state.WorkingCells[0], std::as_bytes(std::span(decoded.Cells))) ||
+				!Upload(
+					device,
+					command,
+					state.WorkingRain[0],
+					std::as_bytes(std::span(decoded.FallingCondensateKilogramsPerCubicMetre))
+				) ||
+				!Upload(device, command, terrain, std::as_bytes(std::span(flags))))
+				return cancel();
 			currentCells = state.WorkingCells[0];
+			currentRain = state.WorkingRain[0];
 		}
+		const auto dispatch = [&](const SimulationGpuUniforms &uniforms,
+								  SDL_GPUBuffer *cells,
+								  SDL_GPUBuffer *projected,
+								  SDL_GPUBuffer *scratch,
+								  SDL_GPUBuffer *nextCells,
+								  SDL_GPUBuffer *nextScratch) {
+			return Dispatch(
+				command,
+				pipeline,
+				state,
+				uniforms,
+				cells,
+				projected,
+				scratch,
+				nextCells,
+				nextScratch,
+				terrain,
+				currentRain,
+				state.WorkingRain[currentRain == state.WorkingRain[0] ? 1 : 0]
+			);
+		};
 		const auto forcingAt = [&](uint64_t at) -> const weather::SimulationForcing & {
 			const auto found = std::upper_bound(
 				history.begin(), history.end(), at, [](uint64_t wanted, const auto &forcing) {
@@ -236,10 +304,7 @@ namespace engine::render {
 			);
 			return *std::prev(found);
 		};
-		if (!Dispatch(
-				command,
-				pipeline,
-				state,
+		if (!dispatch(
 				SimulationUniforms(definition, forcingAt(tick), 6, 1, profile),
 				currentCells,
 				state.PublishedCells,
@@ -257,10 +322,7 @@ namespace engine::render {
 				const auto uniforms = [&](uint32_t phase) {
 					return SimulationUniforms(definition, forcing, phase, seconds, profile);
 				};
-				if (!Dispatch(
-						command,
-						pipeline,
-						state,
+				if (!dispatch(
 						uniforms(0),
 						currentCells,
 						state.PublishedCells,
@@ -269,10 +331,7 @@ namespace engine::render {
 						state.Scratch[1]
 					))
 					return cancel();
-				if (!Dispatch(
-						command,
-						pipeline,
-						state,
+				if (!dispatch(
 						uniforms(1),
 						state.ForcedCells,
 						state.PublishedCells,
@@ -283,10 +342,7 @@ namespace engine::render {
 					return cancel();
 				uint32_t scratchIndex = 0;
 				for (uint32_t iteration = 0; iteration < definition.ProjectionIterations; ++iteration) {
-					if (!Dispatch(
-							command,
-							pipeline,
-							state,
+					if (!dispatch(
 							uniforms(2),
 							state.ForcedCells,
 							state.PublishedCells,
@@ -297,10 +353,7 @@ namespace engine::render {
 						return cancel();
 					scratchIndex ^= 1;
 				}
-				if (!Dispatch(
-						command,
-						pipeline,
-						state,
+				if (!dispatch(
 						uniforms(3),
 						state.ForcedCells,
 						state.PublishedCells,
@@ -310,10 +363,7 @@ namespace engine::render {
 					))
 					return cancel();
 				const uint32_t nextIndex = currentCells == state.WorkingCells[0] ? 1 : 0;
-				if (!Dispatch(
-						command,
-						pipeline,
-						state,
+				if (!dispatch(
 						uniforms(4),
 						currentCells,
 						state.ProjectedCells,
@@ -324,13 +374,11 @@ namespace engine::render {
 					return cancel();
 				currentIndex = nextIndex;
 				currentCells = state.WorkingCells[currentIndex];
+				currentRain = state.WorkingRain[currentIndex];
 			}
 			++tick;
 		}
-		if (!Dispatch(
-				command,
-				pipeline,
-				state,
+		if (!dispatch(
 				SimulationUniforms(definition, forcingAt(tick), 5, 1, profile),
 				currentCells,
 				state.PublishedCells,
@@ -339,10 +387,7 @@ namespace engine::render {
 				state.Scratch[1]
 			))
 			return cancel();
-		if (!Dispatch(
-				command,
-				pipeline,
-				state,
+		if (!dispatch(
 				SimulationUniforms(definition, forcingAt(tick), 7, 1, profile),
 				currentCells,
 				state.PublishedCells,
@@ -369,6 +414,9 @@ namespace engine::render {
 		if (state.Timings) state.Timings->Submitted(state.TimingSlot);
 		state.PendingTick = targetTick;
 		state.PendingCellIndex = currentCells == state.PublishedCells ? 2 : currentIndex;
+		state.PendingRainIndex = currentRain == state.PublishedRain ? 2 : currentIndex;
+		state.PendingTerrain = !checkpoint.empty();
+		state.PendingTerrainSignature = terrainSignature;
 		state.PendingDefinition = std::move(definition);
 		state.PendingForcingHistory = std::move(history);
 		state.PendingEncoding = encoding;
@@ -400,6 +448,10 @@ namespace engine::render {
 		}
 		if (state.PendingCellIndex < 2)
 			std::swap(state.PublishedCells, state.WorkingCells[state.PendingCellIndex]);
+		if (state.PendingRainIndex < 2)
+			std::swap(state.PublishedRain, state.WorkingRain[state.PendingRainIndex]);
+		if (state.PendingTerrain) std::swap(state.PublishedTerrain, state.StagingTerrain);
+		state.TerrainSignature = state.PendingTerrainSignature;
 		std::swap(state.PublishedPacked, state.StagingPacked);
 		state.Definition = std::move(state.PendingDefinition);
 		state.ForcingHistory = std::move(state.PendingForcingHistory);
@@ -429,6 +481,11 @@ namespace engine::render {
 		gpu::ReleaseBuffer(device, state.Diagnostics);
 		gpu::ReleaseBuffer(device, state.PublishedPacked);
 		gpu::ReleaseBuffer(device, state.StagingPacked);
+		gpu::ReleaseBuffer(device, state.PublishedTerrain);
+		gpu::ReleaseBuffer(device, state.StagingTerrain);
+		gpu::ReleaseBuffer(device, state.PublishedRain);
+		for (auto *buffer : state.WorkingRain)
+			gpu::ReleaseBuffer(device, buffer);
 		gpu::ReleaseTransferBuffer(device, state.Readback);
 		state = {};
 	}
@@ -470,7 +527,7 @@ namespace engine::render {
 			definition.PrecipitationThresholdKilogramsPerCubicMetre,
 			definition.PrecipitationPerSecond,
 			definition.MaximumDivergencePerSecond,
-			0
+			definition.RainFallSpeedMetresPerSecond
 		};
 		uniforms.Acceleration = {
 			forcing.AccelerationMetresPerSecondSquared[0],
@@ -485,7 +542,10 @@ namespace engine::render {
 			forcing.WindRelaxationPerSecond
 		};
 		uniforms.Sources = {
-			forcing.VapourSourcePerSecond, forcing.CondensateSourceKilogramsPerCubicMetrePerSecond, 0, 0
+			forcing.VapourSourcePerSecond,
+			forcing.CondensateSourceKilogramsPerCubicMetrePerSecond,
+			definition.GroundVapourFluxKilogramsPerSquareMetreSecond,
+			0
 		};
 		uniforms.OpenVelocity = {
 			forcing.OpenVelocityMetresPerSecond[0],

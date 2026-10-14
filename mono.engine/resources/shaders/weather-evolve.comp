@@ -6,10 +6,13 @@ layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 layout(set = 0, binding = 0, std430) readonly buffer PreviousCells { vec4 rows[]; } previousCells;
 layout(set = 0, binding = 1, std430) readonly buffer ProjectedCells { vec4 rows[]; } projectedCells;
 layout(set = 0, binding = 2, std430) readonly buffer PreviousScratch { vec4 rows[]; } previousScratch;
+layout(set = 0, binding = 3, std430) readonly buffer Terrain { uint flags[]; } terrain;
+layout(set = 0, binding = 4, std430) readonly buffer PreviousRain { float rows[]; } previousRain;
 layout(set = 1, binding = 0, std430) buffer NextCells { vec4 rows[]; } nextCells;
 layout(set = 1, binding = 1, std430) buffer NextScratch { vec4 rows[]; } nextScratch;
 layout(set = 1, binding = 2, std430) buffer PackedCells { uvec2 rows[]; } packedCells;
 layout(set = 1, binding = 3, std430) buffer Diagnostics { vec4 rows[]; } diagnostics;
+layout(set = 1, binding = 4, std430) buffer NextRain { float rows[]; } nextRain;
 layout(set = 2, binding = 0, std140) uniform Solver {
 	uvec4 grid;
 	uvec4 boundaries;
@@ -40,13 +43,23 @@ int Neighbor(uint index, uint axis, int direction) {
 		if (solver.boundaries[axis] != 0u) return -1;
 		coordinate[axis] = shifted < 0 ? solver.grid[axis] - 1u : 0u;
 	} else coordinate[axis] = uint(shifted);
-	return int(coordinate.x + solver.grid.x * (coordinate.y + solver.grid.y * coordinate.z));
+	uint neighbor = coordinate.x + solver.grid.x * (coordinate.y + solver.grid.y * coordinate.z);
+	return (terrain.flags[neighbor] & 1u) != 0u ? -2 : int(neighbor);
+}
+bool OpenFace(uint axis, int direction) {
+	return solver.boundaries[axis] == 2u ||
+	       (axis == 1u && direction > 0 && solver.boundaries[axis] == 3u);
+}
+bool HasOpenBoundary() {
+	return any(equal(solver.boundaries.xyz, uvec3(2u))) || solver.boundaries.y == 3u;
 }
 float LowVelocity(uint index, uint axis, bool projected) {
 	int low = Neighbor(index, axis, -1);
 	if (low >= 0) return projected ? projectedCells.rows[2u * uint(low) + 1u][axis]
 	                                : previousCells.rows[2u * uint(low) + 1u][axis];
-	return solver.boundaries[axis] == 2u ? solver.openVelocity[axis] : 0.0;
+	if (low != -1 || !OpenFace(axis, -1)) return 0.0;
+	return solver.openVelocity[axis] - (projected ? solver.integration.x /
+	    (solver.integration.z * solver.integration.y) * projectedCells.rows[2u * index + 1u].w : 0.0);
 }
 float Divergence(uint index, bool projected) {
 	vec4 velocities = projected ? projectedCells.rows[2u * index + 1u] : previousCells.rows[2u * index + 1u];
@@ -85,10 +98,24 @@ void main() {
 	vec4 velocity = previousCells.rows[index * 2u + 1u];
 	float seconds = solver.integration.x, cellSize = solver.integration.y, airDensity = solver.integration.z;
 	uint pass = solver.grid.w;
+	if ((terrain.flags[index] & 1u) != 0u && pass != 7u) {
+		if (pass == 0u || pass == 3u || pass == 4u) {
+			nextCells.rows[index * 2u] = vec4(0.0, 0.0, scalars.z, scalars.w);
+			nextCells.rows[index * 2u + 1u] = vec4(0.0);
+		}
+		if (pass == 1u || pass == 2u) nextScratch.rows[index] = vec4(0.0);
+		if (pass == 4u) nextRain.rows[index] = 0.0;
+		if (pass == 5u) packedCells.rows[index] = uvec2(0x7f007f00u, 0x007f7f7fu);
+		if (pass == 6u) {
+			diagnostics.rows[index * 2u] = vec4(0.0);
+			diagnostics.rows[index * 2u + 1u] = vec4(0.0, 0.0, 1.0, 0.0);
+		}
+		return;
+	}
 	if (pass == 0u) {
 		for (uint axis = 0u; axis < 3u; ++axis) {
 			int high = Neighbor(index, axis, 1);
-			if (high < 0) { velocity[axis] = solver.boundaries[axis] >= 2u ? solver.openVelocity[axis] : 0.0; continue; }
+			if (high < 0) { velocity[axis] = high == -1 && OpenFace(axis, 1) ? solver.openVelocity[axis] : 0.0; continue; }
 			vec4 neighbor = previousCells.rows[uint(high) * 2u];
 			float gradient = (neighbor.w - scalars.w) / (cellSize * airDensity);
 			float buoyancy = axis == 1u ? solver.thermal.z * (0.5 * (scalars.z + neighbor.z) - solver.phase.x) : 0.0;
@@ -108,10 +135,11 @@ void main() {
 		for (uint axis = 0u; axis < 3u; ++axis) for (int direction = -1; direction <= 1; direction += 2) {
 			int neighbor = Neighbor(index, axis, direction);
 			if (neighbor >= 0) { neighbors += previousScratch.rows[uint(neighbor)].x; count += 1.0; }
+			else if (neighbor == -1 && OpenFace(axis, direction)) count += 1.0;
 		}
 		vec4 scratch = previousScratch.rows[index];
-		float solved = (neighbors - airDensity * cellSize * cellSize / seconds * scratch.y) / count;
-		nextScratch.rows[index] = vec4(0.25 * scratch.x + 0.75 * solved, scratch.y, 0.0, 0.0);
+		float solved = count > 0.0 ? (neighbors - airDensity * cellSize * cellSize / seconds * scratch.y) / count : 0.0;
+		nextScratch.rows[index] = vec4(count > 0.0 ? 0.25 * scratch.x + 0.75 * solved : 0.0, scratch.y, 0.0, 0.0);
 		return;
 	}
 	if (pass == 3u) {
@@ -120,8 +148,10 @@ void main() {
 			int high = Neighbor(index, axis, 1);
 			if (high >= 0) velocity[axis] -= seconds / (airDensity * cellSize) *
 			    (previousScratch.rows[uint(high)].x - pressure);
+			else if (high == -1 && OpenFace(axis, 1))
+				velocity[axis] += seconds / (airDensity * cellSize) * pressure;
 		}
-		velocity.w = pressure - previousScratch.rows[0].x;
+		velocity.w = HasOpenBoundary() ? pressure : pressure - previousScratch.rows[0].x;
 		nextCells.rows[index * 2u] = scalars;
 		nextCells.rows[index * 2u + 1u] = velocity;
 		return;
@@ -130,24 +160,46 @@ void main() {
 		vec4 projected = projectedCells.rows[index * 2u + 1u];
 		vec3 changes = vec3(0.0);
 		float boundaryWater = 0.0, boundaryEnthalpy = 0.0, outgoingRate = 0.0;
+		float falling = previousRain.rows[index], rainChange = 0.0, rainSink = 0.0, rainOutgoingRate = 0.0;
+		bool velocityValid = true;
 		for (uint axis = 0u; axis < 3u; ++axis) {
 			int low = Neighbor(index, axis, -1), high = Neighbor(index, axis, 1);
 			float lowVelocity = LowVelocity(index, axis, true);
+			velocityValid = velocityValid && abs(lowVelocity) <= solver.thermal.w;
 			outgoingRate += max(0.0, projected[axis]) + max(0.0, -lowVelocity);
-			bool lowOpen = solver.boundaries[axis] == 2u, highOpen = solver.boundaries[axis] >= 2u;
+			bool lowOpen = low == -1 && OpenFace(axis, -1);
+			bool highOpen = high == -1 && OpenFace(axis, 1);
 			vec4 lowScalars = low >= 0 ? previousCells.rows[uint(low) * 2u] : solver.inflowScalars;
 			vec4 highScalars = high >= 0 ? previousCells.rows[uint(high) * 2u] : solver.inflowScalars;
 			for (uint quantity = 0u; quantity < 3u; ++quantity) {
 				float lowFlux = low >= 0 || lowOpen ? Flux(lowScalars, scalars, lowVelocity, quantity) : 0.0;
 				float highFlux = high >= 0 || highOpen ? Flux(scalars, highScalars, projected[axis], quantity) : 0.0;
 				changes[quantity] += seconds * (lowFlux - highFlux) / cellSize;
-				float boundaryChange = seconds * ((low < 0 ? lowFlux : 0.0) - (high < 0 ? highFlux : 0.0)) / cellSize;
+				float boundaryChange = seconds * ((low == -1 ? lowFlux : 0.0) - (high == -1 ? highFlux : 0.0)) / cellSize;
 				if (quantity < 2u) boundaryWater += boundaryChange * (quantity == 0u ? airDensity : 1.0);
 				if (quantity == 0u) boundaryEnthalpy += boundaryChange * airDensity * solver.thermal.x;
 				if (quantity == 2u) boundaryEnthalpy += boundaryChange * airDensity * solver.thermal.y;
 			}
+			float lowRainVelocity = lowVelocity - (axis == 1u ? solver.precipitation.w : 0.0);
+			float highRainVelocity = projected[axis] - (axis == 1u ? solver.precipitation.w : 0.0);
+			bool sink = axis == 1u && low < 0;
+			bool lowRainActive = low >= 0 || lowOpen || sink;
+			bool highRainActive = high >= 0 || highOpen;
+			float lowRain = low >= 0 ? previousRain.rows[uint(low)] : 0.0;
+			float highRain = high >= 0 ? previousRain.rows[uint(high)] : 0.0;
+			float lowRainFlux = lowRainActive
+				? lowRainVelocity * (lowRainVelocity >= 0.0 ? lowRain : falling) : 0.0;
+			float highRainFlux = highRainActive
+				? highRainVelocity * (highRainVelocity >= 0.0 ? falling : highRain) : 0.0;
+			rainChange += seconds * (lowRainFlux - highRainFlux) / cellSize;
+			if (sink) rainSink -= seconds * lowRainFlux / cellSize;
+			boundaryWater += seconds * ((low == -1 && !sink ? lowRainFlux : 0.0) -
+			    (high == -1 ? highRainFlux : 0.0)) / cellSize;
+			rainOutgoingRate += (highRainActive ? max(0.0, highRainVelocity) : 0.0) +
+			    (lowRainActive ? max(0.0, -lowRainVelocity) : 0.0);
 		}
-		scalars.xy += changes.xy + seconds * solver.sources.xy;
+		float groundSource = (terrain.flags[index] & 2u) != 0u ? solver.sources.z / (airDensity * cellSize) : 0.0;
+		scalars.xy += changes.xy + seconds * (solver.sources.xy + vec2(groundSource, 0.0));
 		scalars.z += changes.z - seconds * solver.acceleration.w;
 		if (solver.phase.w > 0.0) {
 			float low = -scalars.y / airDensity, high = scalars.x;
@@ -167,20 +219,26 @@ void main() {
 			scalars.x -= conversion;
 			scalars.z += heatScale * conversion;
 		}
-		float rain = max(0.0, scalars.y - solver.precipitation.x) * min(1.0, seconds * solver.precipitation.y);
+		float transportedRain = falling + rainChange;
+		float rain = min(max(0.0, scalars.y - solver.precipitation.x) * min(1.0, seconds * solver.precipitation.y),
+		    max(0.0, 100.0 - transportedRain));
 		scalars.y -= rain;
+		falling = transportedRain + rain;
+		nextRain.rows[index] = falling;
 		nextCells.rows[index * 2u] = scalars;
 		nextCells.rows[index * 2u + 1u] = projected;
 		float volume = cellSize * cellSize * cellSize;
-		float sourceWater = seconds * (airDensity * solver.sources.x + solver.sources.y);
+		float sourceWater = seconds * (airDensity * (solver.sources.x + groundSource) + solver.sources.y);
 		float externalEnthalpy = boundaryEnthalpy + seconds * airDensity *
-		    (solver.thermal.x * solver.sources.x - solver.thermal.y * solver.acceleration.w);
-		diagnostics.rows[index * 2u] += volume * vec4(boundaryWater, sourceWater, rain, externalEnthalpy);
+		    (solver.thermal.x * (solver.sources.x + groundSource) - solver.thermal.y * solver.acceleration.w);
+		diagnostics.rows[index * 2u] += volume * vec4(boundaryWater, sourceWater, rainSink, externalEnthalpy);
 		float divergence = abs(Divergence(index, true));
-		float cfl = seconds * (outgoingRate / cellSize + 6.0 * solver.integration.w / (cellSize * cellSize));
+		float cfl = max(seconds * rainOutgoingRate / cellSize,
+			seconds * (outgoingRate / cellSize + 6.0 * solver.integration.w / (cellSize * cellSize)));
 		vec4 previousDiagnostic = diagnostics.rows[index * 2u + 1u];
 		diagnostics.rows[index * 2u + 1u] = vec4(max(previousDiagnostic.x, divergence), max(previousDiagnostic.y, cfl),
-		    min(previousDiagnostic.z, ValidCell(scalars, projected) && divergence <= solver.precipitation.z && cfl <= 1.0 ? 1.0 : 0.0), 0.0);
+		    min(previousDiagnostic.z, velocityValid && ValidCell(scalars, projected) && !isnan(falling) && !isinf(falling) &&
+		        falling >= 0.0 && falling <= 100.0 && divergence <= solver.precipitation.z && cfl <= 1.0 ? 1.0 : 0.0), 0.0);
 		return;
 	}
 	if (pass == 5u) {

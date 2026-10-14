@@ -3543,6 +3543,7 @@ namespace studio {
 		std::unique_ptr<engine::world::Universe> Universe;
 		// Weather audio opens only for a focused Play viewport with due thunder.
 		std::unique_ptr<WeatherAudio> WeatherAudio_;
+		// Pumps due weather events for the focused Play viewport or silences stale playback.
 		void PumpWeatherAudio();
 		// Selected portal images.
 		std::unique_ptr<engine::render::PortalImageHost> PortalImages;

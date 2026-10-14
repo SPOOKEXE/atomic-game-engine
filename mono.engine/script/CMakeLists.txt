@@ -34,6 +34,9 @@ mono_add_library(script
 		Engine::imagecodec
 		Engine::scene
 
+		# L8. WeatherCompute:Sample reads the same accepted model as native consumers.
+		Engine::weather
+
 		# L7, `shared`. **The same edge as `scene`, one dimension down.** A
 		# script's vocabulary is the class tree, and there are two of them: a
 		# `Part` comes from `scene` and a `TextButton` from `gui`. Depending on
@@ -65,7 +68,7 @@ mono_add_library(script
 		# bounding box of a rotated part would be plausible and wrong, which is
 		# the failure `physics/Query.hpp` says that function exists for.
 		#
-		# The only edge from `script` to a simulation module, and it is one-way:
+		# This simulation query edge is one-way:
 		# nothing in `physics` knows a script exists.
 		Engine::physics
 		Engine::parallel

@@ -527,7 +527,9 @@ declare namespace Enum {
 	interface VerticalScrollBarPosition extends EnumItem { readonly __enum: "VerticalScrollBarPosition"; }
 	interface ViewportUpdateMode extends EnumItem { readonly __enum: "ViewportUpdateMode"; }
 	interface VolumeShape extends EnumItem { readonly __enum: "VolumeShape"; }
+	interface WeatherBoundary extends EnumItem { readonly __enum: "WeatherBoundary"; }
 	interface WeatherMode extends EnumItem { readonly __enum: "WeatherMode"; }
+	interface WeatherTopBoundary extends EnumItem { readonly __enum: "WeatherTopBoundary"; }
 	interface ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
 
 	const AlphaMode: {
@@ -997,9 +999,18 @@ declare namespace Enum {
 		readonly Box: VolumeShape;
 		readonly Ellipsoid: VolumeShape;
 	};
+	const WeatherBoundary: {
+		readonly Periodic: WeatherBoundary;
+		readonly Closed: WeatherBoundary;
+		readonly Open: WeatherBoundary;
+	};
 	const WeatherMode: {
 		readonly Procedural: WeatherMode;
 		readonly Stateful: WeatherMode;
+	};
+	const WeatherTopBoundary: {
+		readonly Closed: WeatherTopBoundary;
+		readonly Escape: WeatherTopBoundary;
 	};
 	const ZIndexBehavior: {
 		readonly Global: ZIndexBehavior;
@@ -1265,6 +1276,8 @@ declare interface Instance {
 	ApplyImpulse(impulse: Vector3): void;
 	SetAppliedForce(force: Vector3): void;
 	SetAppliedTorque(torque: Vector3): void;
+	// WeatherCompute only. Missing, disabled or unavailable models return null.
+	Sample(positionMetres: Vector3, groundHeightMetres?: number | null): WeatherSample | null;
 	SetSpawnSamples(samples: ArrayBuffer): boolean;
 	SetLayer(index: number, colour: Color3, alpha: number, size: number, acceleration: Vector3): boolean;
 	Break(): number;
@@ -1858,6 +1871,8 @@ declare interface WeatherCompute extends CloudCompute {
 	BaseHeightMetres: number;
 	BasePressureHectopascals: number;
 	BaseTemperatureCelsius: number;
+	BoundaryX: Enum.WeatherBoundary;
+	BoundaryZ: Enum.WeatherBoundary;
 	CellSizeMetres: number;
 	CondensateScale: number;
 	Coverage: number;
@@ -1866,6 +1881,7 @@ declare interface WeatherCompute extends CloudCompute {
 	FeatureCells: number;
 	FogStrength: number;
 	FrontContrast: number;
+	GroundVapourFluxKilogramsPerSquareMetreSecond: number;
 	GrowthRate: number;
 	HailIntensity: number;
 	IceFraction: number;
@@ -1880,6 +1896,7 @@ declare interface WeatherCompute extends CloudCompute {
 	Paused: boolean;
 	PrecipitationRate: number;
 	PressureVariationHectopascals: number;
+	RainFallSpeedMetresPerSecond: number;
 	ShadowCascades: number;
 	ShadowDistanceMetres: number;
 	ShadowResolution: number;
@@ -1890,9 +1907,11 @@ declare interface WeatherCompute extends CloudCompute {
 	StormIntensity: number;
 	TemperatureLapseCelsiusPerKilometre: number;
 	TemperatureVariationCelsius: number;
+	TerrainRevision: number;
 	ThicknessMetres: number;
 	TickRate: number;
 	TimeScale: number;
+	TopBoundary: Enum.WeatherTopBoundary;
 	TurbulenceMetresPerSecond: number;
 	VapourMixingRatio: number;
 	VapourScale: number;
@@ -2766,6 +2785,30 @@ declare interface DataStoreService {
 	GetAsync(key: string): Promise<StoreReply>;
 	SetAsync(key: string, value: unknown): Promise<StoreReply>;
 	RemoveAsync(key: string): Promise<StoreReply>;
+}
+
+// Copied accepted weather values in the named physical units. Tick and Epoch are exact decimal
+// uint64 text. Mutating this dictionary never changes the atmosphere.
+declare interface WeatherSample {
+	Layer: string;
+	Mode: "Procedural" | "Stateful";
+	Tick: string;
+	Epoch: string;
+	DefinitionRevision: number;
+	CondensateKilogramsPerCubicMetre: number;
+	VapourKilogramsPerKilogram: number;
+	TemperatureCelsius: number;
+	PressureHectopascals: number;
+	WindMetresPerSecond: Vector3;
+	IceFraction: number;
+	LiquidMillimetresPerHour: number;
+	SnowMillimetresPerHour: number;
+	HailMillimetresPerHour: number;
+	MeltingFraction: number;
+	SpawnSeed: number;
+	FogExtinctionPerMetre: number;
+	ChargeSeparation: number;
+	HailGrowth: number;
 }
 
 declare interface RunService {

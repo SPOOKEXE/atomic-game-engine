@@ -12,7 +12,7 @@ namespace engine::ecs {
 namespace engine::game {
 	// Installs this host's stateless downward raycast binding. Reinstall after loading world storage.
 	void InstallWeatherGround(ecs::Store &store);
-	// Lazily installs the binding and refreshes the physics index only when a storm impact may mature.
-	// Runs after physics and before weather.runtime in the Animation phase.
+	// Prepares accepted terrain snapshots after weather.clock and before weather.stateful, and refreshes
+	// impact queries after physics before weather.runtime. Steady terrain does not rebuild its index.
 	void RegisterWeatherGroundSystem(ecs::Scheduler &scheduler);
 }

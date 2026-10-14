@@ -187,6 +187,7 @@
         "scene",
         "script",
         "spatial",
+        "weather",
         "world"
       ]
     },
@@ -271,6 +272,7 @@
         "scriptjs",
         "scriptluau",
         "spatial",
+        "weather",
         "world"
       ]
     },
@@ -511,6 +513,7 @@
         "physics",
         "scene",
         "spatial",
+        "weather",
         "world"
       ]
     },
@@ -532,6 +535,7 @@
         "scriptjs",
         "scriptluau",
         "spatial",
+        "weather",
         "world"
       ]
     },
@@ -551,6 +555,7 @@
         "scene",
         "script",
         "spatial",
+        "weather",
         "world"
       ]
     },
@@ -570,6 +575,7 @@
         "scene",
         "script",
         "spatial",
+        "weather",
         "world"
       ]
     },
@@ -814,6 +820,7 @@
         "scene",
         "script",
         "spatial",
+        "weather",
         "world"
       ],
       "requires": "MONO_BUILD_CDN"

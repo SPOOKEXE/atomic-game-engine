@@ -450,4 +450,38 @@ TEST_CASE(
 		(dispatchesAfterEmpty ? dispatchesAfterEmpty->Value : 0) ==
 		(dispatchesBeforeEmpty ? dispatchesBeforeEmpty->Value : 0)
 	);
+	// A graph extension may decline to produce field data while the scene stays renderable.
+	const core::Name missingFieldKind("weather.shadow.fixture-missing-field");
+	const auto *fieldSpec = graph::NodeCatalogue::Find(core::Name("weather-field"));
+	REQUIRE(fieldSpec);
+	auto missingField = *fieldSpec;
+	missingField.Kind = missingFieldKind;
+	missingField.BuiltInBackend = false;
+	REQUIRE(graph::RegisterNodeKind(std::move(missingField)));
+	REQUIRE(fixture.Render.InstallNodeHandler(missingFieldKind, [](const graph::RunContext &) {
+		return true;
+	}));
+	graph::PipelineDocument unavailableDocument;
+	for (auto edit : document.Edits()) {
+		if (edit.Kind == graph::EditKind::AddNode && edit.Name == core::Name("weather-field"))
+			edit.NodeKind = missingFieldKind;
+		unavailableDocument.Record(std::move(edit));
+	}
+	graph::RenderGraph unavailableGraph;
+	REQUIRE(
+		graph::Build(unavailableDocument, unavailableGraph, offender) == graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name unavailablePipeline("weather.shadow.fixture-unavailable-field");
+	REQUIRE(fixture.Render.SetPipeline(unavailablePipeline, unavailableGraph));
+	view.Pipeline = unavailablePipeline;
+	view.World = 993;
+	view.WorldName = core::Name("weather.shadow.fixture-refused-world");
+	view.Lighting.Direct = {1, 1, 1};
+	view.Lighting.Ambient = {};
+	receiver.EmissiveStrength = 0;
+	controls.Coverage = 1;
+	REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	const auto unavailable = ReadCentre(fixture.Render, EXTENT);
+	for (uint32_t channel = 0; channel < 4; ++channel)
+		CHECK(unavailable[channel] == Catch::Approx(direct[channel]).margin(.00001));
 }

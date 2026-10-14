@@ -51,6 +51,8 @@
 //
 // @tier L9 · shared
 
+#include "WeatherMethods.hpp"
+
 #include <engine/assets/Animation.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Attributes.hpp>
@@ -1565,7 +1567,8 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 80> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 81> SCRIPT_METHODS{{
+			{"Sample", SampleWeather},
 			{"SetSpawnSamples", SetSpawnSamples},
 			{"SetLayer", SetParticleLayer},
 			{"SetInput", ImageGraphSetInput},

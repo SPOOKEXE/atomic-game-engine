@@ -536,6 +536,15 @@ namespace engine::render {
 			signature = FoldPresentation(signature, controls.AlgorithmVersion);
 			signature = FoldPresentation(signature, controls.DefinitionRevision);
 			signature = FoldPresentation(signature, static_cast<uint8_t>(controls.Mode));
+			if (controls.Mode == scene::WeatherMode::Stateful) {
+				signature = FoldPresentation(signature, static_cast<uint8_t>(controls.BoundaryX));
+				signature = FoldPresentation(signature, static_cast<uint8_t>(controls.BoundaryZ));
+				signature = FoldPresentation(signature, static_cast<uint8_t>(controls.TopBoundary));
+				signature = FoldPresentation(signature, controls.TerrainRevision);
+				signature =
+					FoldPresentationObject(signature, controls.GroundVapourFluxKilogramsPerSquareMetreSecond);
+				signature = FoldPresentationObject(signature, controls.RainFallSpeedMetresPerSecond);
+			}
 			signature = FoldPresentation(signature, controls.FeatureCells);
 			signature = FoldPresentation(signature, controls.TickRate);
 			signature = FoldPresentation(signature, controls.Paused);
@@ -754,6 +763,8 @@ namespace engine::render {
 				}
 				environmentSignature = FoldWeatherState(environmentSignature, environment);
 				if (environment.Weather.Mode == scene::WeatherMode::Stateful) {
+					environmentSignature =
+						FoldPresentation(environmentSignature, view.WeatherTerrainRevision);
 					environmentSignature =
 						FoldPresentation(environmentSignature, view.WeatherSimulationLayer.Text().size());
 					for (const unsigned char byte : view.WeatherSimulationLayer.Text())

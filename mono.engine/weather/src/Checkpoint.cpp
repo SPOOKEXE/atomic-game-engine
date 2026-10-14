@@ -9,7 +9,7 @@
 namespace engine::weather {
 	namespace {
 		constexpr uint32_t CHECKPOINT_MAGIC = 0x31524857;
-		constexpr uint32_t CHECKPOINT_VERSION = 2;
+		constexpr uint32_t CHECKPOINT_VERSION = 3;
 
 		uint64_t Digest(std::span<const std::byte> bytes) {
 			uint64_t digest = 14695981039346656037ull;
@@ -151,6 +151,9 @@ namespace engine::weather {
 			codec.Field(definition.MaximumVelocityMetresPerSecond);
 			codec.Field(definition.MaximumPressureGradientPascalsPerMetre);
 			codec.Field(definition.MaximumDivergencePerSecond);
+			codec.Field(definition.TerrainRevision);
+			codec.Field(definition.GroundVapourFluxKilogramsPerSquareMetreSecond);
+			codec.Field(definition.RainFallSpeedMetresPerSecond);
 		}
 
 		template <class Codec, class Forcing> void ForcingFields(Codec &codec, Forcing &forcing) {
@@ -188,7 +191,8 @@ namespace engine::weather {
 			state.Definition.LayerName.find('\0') != std::string::npos)
 			return std::nullopt;
 		const uint64_t maximumEncoded =
-			1024 + state.Cells.size() * sizeof(SolverCell) + state.ForcingHistory.size() * 128;
+			1024 + state.Cells.size() * (sizeof(SolverCell) + sizeof(float)) + state.SolidMask.size() +
+			state.GroundHeightMetres.size() * sizeof(float) + state.ForcingHistory.size() * 128;
 		if (maximumEncoded > limits.MaximumBytes) return std::nullopt;
 		try {
 			Writer writer;
@@ -203,6 +207,15 @@ namespace engine::weather {
 			writer.Field(static_cast<uint32_t>(state.ForcingHistory.size()));
 			for (const auto &forcing : state.ForcingHistory)
 				ForcingFields(writer, forcing);
+			writer.Field(static_cast<uint32_t>(state.GroundHeightMetres.size()));
+			for (float height : state.GroundHeightMetres)
+				writer.Field(height);
+			writer.Field(static_cast<uint32_t>(state.SolidMask.size()));
+			for (uint8_t mask : state.SolidMask)
+				writer.Field(mask);
+			writer.Field(static_cast<uint32_t>(state.FallingCondensateKilogramsPerCubicMetre.size()));
+			for (float rain : state.FallingCondensateKilogramsPerCubicMetre)
+				writer.Field(rain);
 			writer.Field(static_cast<uint32_t>(state.Cells.size()));
 			for (const auto &cell : state.Cells)
 				CellFields(writer, cell);
@@ -230,6 +243,14 @@ namespace engine::weather {
 			if (!reader.Valid || magic != CHECKPOINT_MAGIC || version != CHECKPOINT_VERSION) return false;
 			SimulationState decoded;
 			DefinitionFields(reader, decoded.Definition);
+			uint64_t gridCount = 1;
+			for (uint32_t extent : decoded.Definition.Grid.Cells) {
+				if (extent < 2 || extent > 128) return false;
+				gridCount *= extent;
+			}
+			if (!reader.Valid || gridCount > limits.MaximumCells || gridCount > 65536 ||
+				gridCount * 200 > decoded.Definition.MaximumStateBytes)
+				return false;
 			reader.Field(decoded.Tick);
 			BudgetFields(reader, decoded.Budget);
 			reader.Field(decoded.LastSubsteps);
@@ -242,19 +263,36 @@ namespace engine::weather {
 			decoded.ForcingHistory.resize(forcingCount);
 			for (auto &forcing : decoded.ForcingHistory)
 				ForcingFields(reader, forcing);
+			uint32_t columns = 0, maskBytes = 0, rainCount = 0;
+			reader.Field(columns);
+			if (!reader.Valid ||
+				columns != static_cast<uint64_t>(decoded.Definition.Grid.Cells[0]) *
+							   decoded.Definition.Grid.Cells[2] ||
+				columns > (reader.Bytes.size() - reader.Position) / sizeof(float))
+				return false;
+			decoded.GroundHeightMetres.resize(columns);
+			for (float &height : decoded.GroundHeightMetres)
+				reader.Field(height);
+			reader.Field(maskBytes);
+			if (!reader.Valid || maskBytes != (gridCount + 7) / 8 ||
+				maskBytes > reader.Bytes.size() - reader.Position)
+				return false;
+			decoded.SolidMask.resize(maskBytes);
+			for (uint8_t &mask : decoded.SolidMask)
+				reader.Field(mask);
+			reader.Field(rainCount);
+			if (!reader.Valid || rainCount != gridCount ||
+				rainCount > (reader.Bytes.size() - reader.Position) / sizeof(float))
+				return false;
+			decoded.FallingCondensateKilogramsPerCubicMetre.resize(rainCount);
+			for (float &rain : decoded.FallingCondensateKilogramsPerCubicMetre)
+				reader.Field(rain);
 			uint32_t cellCount = 0;
 			reader.Field(cellCount);
-			uint64_t gridCount = 1;
-			for (uint32_t extent : decoded.Definition.Grid.Cells) {
-				if (extent < 2 || extent > 128) return false;
-				gridCount *= extent;
-			}
 			if (!reader.Valid || cellCount == 0 || cellCount > limits.MaximumCells || cellCount > 65536 ||
 				cellCount != gridCount ||
 				cellCount > (reader.Bytes.size() - reader.Position) / sizeof(SolverCell) ||
-				static_cast<uint64_t>(cellCount) *
-						(4 * sizeof(SolverCell) + 3 * sizeof(float) + 6 * sizeof(uint32_t)) >
-					decoded.Definition.MaximumStateBytes)
+				static_cast<uint64_t>(cellCount) * 200 > decoded.Definition.MaximumStateBytes)
 				return false;
 			decoded.Cells.resize(cellCount);
 			for (auto &cell : decoded.Cells)

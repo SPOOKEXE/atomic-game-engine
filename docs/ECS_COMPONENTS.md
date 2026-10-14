@@ -280,12 +280,12 @@ state until v0.19.
 | `scene.VectorField3D` | 52 | 4 | yes | yes | . | . | A three-dimensional vector field: constant, radial and axis-directed tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor. |
 | `scene.Visual` | 40 | 4 | yes | . | . | . | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame. |
 | `scene.Volume` | 60 | 4 | yes | yes | . | . | A placed participating medium: coloured, bounded density with extinction, falloff, noise and ray-march controls. `ResolveVolumes` copies enabled instances into a bounded value snapshot for the renderer. |
-| `scene.WeatherAcceptedDefinition` | 240 | 8 | yes | . | . | . | Canonical accepted weather controls for unfinished ticks; pending desired edits remain on the authored provider. |
+| `scene.WeatherAcceptedDefinition` | 256 | 8 | yes | . | . | . | Canonical accepted weather controls for unfinished ticks; pending desired edits remain on the authored provider. |
 | `scene.WeatherClock` | 136 | 8 | yes | . | yes | . | Accepted per-provider weather epoch, integer tick, phase and cumulative wind anchor, independent of local world elapsed time. |
 | `scene.WeatherClockEstimate` | 200 | 8 | yes | . | yes | . | Local-only receipt and RTT estimate for weather display time; saved state resets it and canonical weather clocks remain authoritative. |
 | `scene.WeatherClockInbox` | 5128 | 8 | yes | . | yes | . | Bounded local final-anchor inbox retained until replicated weather providers arrive. |
 | `scene.WeatherClockPublication` | 1 | 1 | yes | . | . | . | Local reliable final-anchor publication state for world pause and resume. |
-| `scene.WeatherCompute` | 208 | 4 | yes | . | yes | . | Authored world-unit weather controls on a WeatherCompute cloud provider: versioned seed, thermodynamics, wind, progression, sparse quality and optional consumer responses. |
+| `scene.WeatherCompute` | 224 | 4 | yes | . | yes | . | Authored world-unit weather controls on a WeatherCompute cloud provider: versioned seed, thermodynamics, wind, progression, sparse quality and optional consumer responses. |
 | `scene.WeatherWorldPause` | 1 | 1 | yes | . | . | . | Local world suspension control shared by weather-clock updates. |
 | `scene.WeldConstraint` | 24 | 8 | yes | yes | . | . | A direct rigid link between two parts whose initial relative frame is captured by the physics world. |
 | `scene.WorldBounds` | 4 | 4 | yes | yes | . | . | Resource: how far the world reaches from the origin on each axis. Camera framing, the bounce loop and wire quantisation all read it. |
@@ -316,13 +316,13 @@ state until v0.19.
 |---|---|---|---|---|---|---|---|
 | `weather.EpochHistory` | 24 | 8 | yes | . | . | . | Saved authoritative named-stream epoch high-water marks that prevent event identity reuse after provider deletion, recreation or renaming; excluded from replication. |
 | `weather.Events` | 32 | 8 | yes | . | . | . | Bounded copied authoritative lightning and hail journal with stable event identity, endpoints and delayed-thunder inputs. |
-| `weather.GroundQuery` | 8 | 8 | yes | . | . | . | Local host callback for authoritative storm impacts against accepted terrain and collider geometry; reset on load and excluded from replication. |
+| `weather.GroundQuery` | 56 | 8 | yes | . | . | . | Local host callback for authoritative storm impacts against accepted terrain and collider geometry; reset on load and excluded from replication. |
 | `weather.Listener` | 64 | 8 | yes | . | . | . | Local-only thunder listener cursor and bounded due events derived from accepted lightning observations. |
 | `weather.RuntimeCache` | 88 | 8 | yes | . | . | . | Disposable prepared weather arithmetic and changed-input epochs; definitions and timelines remain on their ECS rows. |
 | `weather.RuntimeState` | 40 | 8 | yes | . | yes | . | Persistent authoritative storm charge, hail growth and event sequence driven by canonical weather ticks. |
-| `weather.StatefulCheckpoint` | 352 | 8 | yes | . | . | . | Complete versioned canonical stateful-weather checkpoint published at a bounded cadence for save, late join and replay. |
-| `weather.StatefulInitializationFailure` | 4 | 4 | yes | . | . | . | Saved authoritative initialization-refusal revision that allows corrective weather edits without publishing an invalid atmosphere or checkpoint; excluded from replication. |
-| `weather.StatefulState` | 456 | 8 | yes | . | . | . | Authoritative full-precision canonical weather solver state with source budgets and forcing history; replicas reconstruct device-local state. |
+| `weather.StatefulCheckpoint` | 416 | 8 | yes | . | . | . | Complete versioned canonical stateful-weather checkpoint published at a bounded cadence for save, late join and replay. |
+| `weather.StatefulInitializationFailure` | 24 | 8 | yes | . | yes | . | Saved authoritative initialization-refusal revision that allows corrective weather edits without publishing an invalid atmosphere or checkpoint; excluded from replication. |
+| `weather.StatefulState` | 544 | 8 | yes | . | . | . | Authoritative full-precision canonical weather solver state with source budgets and forcing history; replicas reconstruct device-local state. |
 
 ## `world`
 

@@ -12,6 +12,7 @@ namespace engine::weather {
 		constexpr uint32_t MAXIMUM_CELLS = 65536;
 		constexpr uint32_t MAXIMUM_FORCING = 64;
 		constexpr double KELVIN_OFFSET = 273.15;
+		constexpr uint32_t BLOCKED_NEIGHBOR = UINT32_MAX - 1;
 
 		uint64_t CellCount(const SimulationGrid &grid) {
 			uint64_t count = 1;
@@ -59,7 +60,10 @@ namespace engine::weather {
 				!Bounded(definition.PrecipitationPerSecond, 0, 100) ||
 				!Bounded(definition.MaximumVelocityMetresPerSecond, 0.01f, 4096) ||
 				!Bounded(definition.MaximumPressureGradientPascalsPerMetre, 0, 10000) ||
-				!Bounded(definition.MaximumDivergencePerSecond, 0.000001f, 0.1f))
+				!Bounded(definition.MaximumDivergencePerSecond, 0.000001f, 0.1f) ||
+				definition.TerrainRevision == 0 ||
+				!Bounded(definition.GroundVapourFluxKilogramsPerSquareMetreSecond, 0, 1) ||
+				!Bounded(definition.RainFallSpeedMetresPerSecond, 0, 64))
 				return false;
 			for (SolverBoundary boundary : definition.Grid.Boundaries)
 				if (boundary != SolverBoundary::Periodic && boundary != SolverBoundary::Closed &&
@@ -70,9 +74,7 @@ namespace engine::weather {
 				return false;
 			// Four physical buffers and three scalar buffers include transactional stepping and projection
 			// scratch.
-			return definition.MaximumStateBytes >=
-				   CellCount(definition.Grid) *
-					   (4 * sizeof(SolverCell) + 3 * sizeof(float) + 6 * sizeof(uint32_t));
+			return definition.MaximumStateBytes >= CellCount(definition.Grid) * 200;
 		}
 
 		bool ValidForcing(const SimulationForcing &forcing, const SimulationDefinition &definition) {
@@ -95,8 +97,7 @@ namespace engine::weather {
 						definition.MaximumVelocityMetresPerSecond
 					))
 					return false;
-			return definition.Grid.Boundaries[1] != SolverBoundary::GroundOpen ||
-				   forcing.OpenVelocityMetresPerSecond[1] == 0;
+			return true;
 		}
 
 		std::array<uint32_t, 3> Coordinate(size_t index, const SimulationGrid &grid) {
@@ -121,27 +122,49 @@ namespace engine::weather {
 		std::optional<size_t>
 		Neighbor(size_t index, size_t axis, int direction, const SimulationWorkspace &workspace) {
 			const uint32_t neighbor = workspace.Neighbors[index][axis * 2 + (direction > 0 ? 1 : 0)];
-			return neighbor == UINT32_MAX ? std::nullopt : std::optional<size_t>(neighbor);
+			return neighbor >= BLOCKED_NEIGHBOR ? std::nullopt : std::optional<size_t>(neighbor);
+		}
+		bool Exterior(size_t index, size_t axis, int direction, const SimulationWorkspace &workspace) {
+			return workspace.Neighbors[index][axis * 2 + (direction > 0 ? 1 : 0)] == UINT32_MAX;
+		}
+		bool OpenFace(const SimulationGrid &grid, size_t axis, int direction) {
+			return grid.Boundaries[axis] == SolverBoundary::Open ||
+				   (grid.Boundaries[axis] == SolverBoundary::GroundOpen && axis == 1 && direction > 0);
 		}
 		void PrepareWorkspace(const SimulationState &state, SimulationWorkspace &workspace) {
-			if (workspace.Grid != state.Definition.Grid || workspace.Neighbors.size() != state.Cells.size()) {
+			if (workspace.Grid != state.Definition.Grid || workspace.Neighbors.size() != state.Cells.size() ||
+				workspace.SolidMask != state.SolidMask ||
+				workspace.GroundHeightMetres != state.GroundHeightMetres) {
 				// Releasing old capacities keeps a reused workspace inside the new domain's admission budget.
 				workspace = {};
 				workspace.Grid = state.Definition.Grid;
+				workspace.SolidMask = state.SolidMask;
+				workspace.GroundHeightMetres = state.GroundHeightMetres;
+				workspace.TerrainFlags.resize(state.Cells.size());
+				workspace.PressureNeighborCounts.assign(state.Cells.size(), 0);
 				workspace.Neighbors.resize(state.Cells.size());
-				for (size_t index = 0; index < state.Cells.size(); ++index)
+				for (size_t index = 0; index < state.Cells.size(); ++index) {
+					workspace.TerrainFlags[index] = static_cast<uint8_t>(SimulationCellFlags(state, index));
 					for (size_t axis = 0; axis < 3; ++axis)
 						for (int direction : {-1, 1}) {
 							const auto neighbor = Neighbor(index, axis, direction, workspace.Grid);
+							const bool blocked = (SimulationCellFlags(state, index) & 1) ||
+												 (neighbor && (SimulationCellFlags(state, *neighbor) & 1));
 							workspace.Neighbors[index][axis * 2 + (direction > 0 ? 1 : 0)] =
-								neighbor ? static_cast<uint32_t>(*neighbor) : UINT32_MAX;
+								blocked	   ? BLOCKED_NEIGHBOR
+								: neighbor ? static_cast<uint32_t>(*neighbor)
+										   : UINT32_MAX;
+							if (!blocked && (neighbor || OpenFace(workspace.Grid, axis, direction)))
+								++workspace.PressureNeighborCounts[index];
 						}
+				}
 			}
 			workspace.ForcedCells.resize(state.Cells.size());
 			workspace.NextCells.resize(state.Cells.size());
 			workspace.Pressure.resize(state.Cells.size());
 			workspace.NextPressure.resize(state.Cells.size());
 			workspace.Divergence.resize(state.Cells.size());
+			workspace.NextFallingCondensate.resize(state.Cells.size());
 		}
 
 		float LowVelocity(
@@ -149,26 +172,30 @@ namespace engine::weather {
 			size_t axis,
 			const std::vector<SolverCell> &cells,
 			const SimulationWorkspace &workspace,
-			const SimulationForcing &forcing
+			const SimulationForcing &forcing,
+			float projectionScale = 0
 		) {
 			const auto &grid = workspace.Grid;
 			const auto low = Neighbor(index, axis, -1, workspace);
 			if (low) return cells[*low].VelocityMetresPerSecond[axis];
-			return grid.Boundaries[axis] == SolverBoundary::Open ? forcing.OpenVelocityMetresPerSecond[axis]
-																 : 0;
+			return Exterior(index, axis, -1, workspace) && OpenFace(grid, axis, -1)
+					   ? forcing.OpenVelocityMetresPerSecond[axis] -
+							 projectionScale * cells[index].ProjectionPressurePascals
+					   : 0;
 		}
 
 		float Divergence(
 			size_t index,
 			const std::vector<SolverCell> &cells,
 			const SimulationWorkspace &workspace,
-			const SimulationForcing &forcing
+			const SimulationForcing &forcing,
+			float projectionScale = 0
 		) {
 			const auto &grid = workspace.Grid;
 			float divergence = 0;
 			for (size_t axis = 0; axis < 3; ++axis)
 				divergence += cells[index].VelocityMetresPerSecond[axis] -
-							  LowVelocity(index, axis, cells, workspace, forcing);
+							  LowVelocity(index, axis, cells, workspace, forcing, projectionScale);
 			return divergence / grid.CellSizeMetres;
 		}
 
@@ -184,47 +211,75 @@ namespace engine::weather {
 			float &maximumDivergence
 		) {
 			const auto &grid = definition.Grid;
-			for (size_t index = 0; index < cells.size(); ++index) {
-				pressure[index] = cells[index].ProjectionPressurePascals;
-				divergence[index] = Divergence(index, cells, workspace, forcing);
+			const size_t cellCount = cells.size();
+			const auto *adjacency = workspace.Neighbors.data();
+			const auto *counts = workspace.PressureNeighborCounts.data();
+			const auto *flags = workspace.TerrainFlags.data();
+			auto *physical = cells.data();
+			auto *currentPressure = pressure.data();
+			auto *outputPressure = nextPressure.data();
+			auto *rhs = divergence.data();
+			const bool open = std::any_of(grid.Boundaries.begin(), grid.Boundaries.end(), [](auto boundary) {
+				return boundary == SolverBoundary::Open || boundary == SolverBoundary::GroundOpen;
+			});
+			for (size_t index = 0; index < cellCount; ++index) {
+				currentPressure[index] = flags[index] & 1 ? 0 : physical[index].ProjectionPressurePascals;
+				rhs[index] = flags[index] & 1 ? 0 : Divergence(index, cells, workspace, forcing);
 			}
 			const float pressureScale =
 				definition.DryAirKilogramsPerCubicMetre * grid.CellSizeMetres * grid.CellSizeMetres / seconds;
+			// Typed raw rows remove optional/wrapper churn without changing the six-term summation order.
 			for (uint32_t iteration = 0; iteration < definition.ProjectionIterations; ++iteration) {
-				for (size_t index = 0; index < cells.size(); ++index) {
+				for (size_t index = 0; index < cellCount; ++index) {
 					float neighbors = 0;
-					uint32_t count = 0;
-					for (size_t axis = 0; axis < 3; ++axis)
-						for (int direction : {-1, 1}) {
-							const auto neighbor = Neighbor(index, axis, direction, workspace);
-							if (neighbor) {
-								neighbors += pressure[*neighbor];
-								++count;
-							}
-						}
-					// Weighted Jacobi damps the alternating mode of an even periodic lattice.
-					const float solved =
-						(neighbors - pressureScale * divergence[index]) / static_cast<float>(count);
-					nextPressure[index] = 0.25f * pressure[index] + 0.75f * solved;
+					const uint32_t *row = adjacency[index].data();
+					for (size_t face = 0; face < 6; ++face) {
+						const uint32_t neighbor = row[face];
+						if (neighbor < cellCount) neighbors += currentPressure[neighbor];
+					}
+					const uint32_t count = counts[index];
+					if (!count) {
+						outputPressure[index] = 0;
+						continue;
+					}
+					const float solved = (neighbors - pressureScale * rhs[index]) / static_cast<float>(count);
+					outputPressure[index] = 0.25f * currentPressure[index] + 0.75f * solved;
 				}
 				pressure.swap(nextPressure);
+				std::swap(currentPressure, outputPressure);
 			}
 			const float velocityScale =
 				seconds / (definition.DryAirKilogramsPerCubicMetre * grid.CellSizeMetres);
-			for (size_t index = 0; index < cells.size(); ++index) {
-				// Fix the null-space gauge without changing any face pressure difference.
-				cells[index].ProjectionPressurePascals = pressure[index] - pressure[0];
+			const float gauge = open ? 0 : currentPressure[0];
+			for (size_t index = 0; index < cellCount; ++index) {
+				physical[index].ProjectionPressurePascals =
+					flags[index] & 1 ? 0 : currentPressure[index] - gauge;
+				const uint32_t *row = adjacency[index].data();
 				for (size_t axis = 0; axis < 3; ++axis) {
-					const auto high = Neighbor(index, axis, 1, workspace);
-					if (high)
-						cells[index].VelocityMetresPerSecond[axis] -=
-							velocityScale * (pressure[*high] - pressure[index]);
+					const uint32_t high = row[axis * 2 + 1];
+					if (high < cellCount)
+						physical[index].VelocityMetresPerSecond[axis] -=
+							velocityScale * (currentPressure[high] - currentPressure[index]);
+					else if (high == UINT32_MAX && OpenFace(grid, axis, 1))
+						physical[index].VelocityMetresPerSecond[axis] +=
+							velocityScale * currentPressure[index];
+					else
+						physical[index].VelocityMetresPerSecond[axis] = 0;
 				}
 			}
 			maximumDivergence = 0;
-			for (size_t index = 0; index < cells.size(); ++index)
-				maximumDivergence =
-					std::max(maximumDivergence, std::abs(Divergence(index, cells, workspace, forcing)));
+			for (size_t index = 0; index < cellCount; ++index) {
+				if (flags[index] & 1) continue;
+				maximumDivergence = std::max(
+					maximumDivergence,
+					std::abs(Divergence(index, cells, workspace, forcing, open ? velocityScale : 0))
+				);
+				for (size_t axis = 0; axis < 3; ++axis)
+					if (std::abs(
+							LowVelocity(index, axis, cells, workspace, forcing, open ? velocityScale : 0)
+						) > definition.MaximumVelocityMetresPerSecond)
+						return false;
+			}
 			return std::isfinite(maximumDivergence) &&
 				   maximumDivergence <= definition.MaximumDivergencePerSecond;
 		}
@@ -309,6 +364,65 @@ namespace engine::weather {
 			cell.TemperatureCelsius += heatScale * conversion;
 		}
 
+		bool TransportRain(
+			SimulationState &state,
+			const std::vector<SolverCell> &projected,
+			const SimulationForcing &forcing,
+			float seconds,
+			SimulationWorkspace &workspace
+		) {
+			const auto &definition = state.Definition;
+			const auto &grid = definition.Grid;
+			const float h = grid.CellSizeMetres;
+			const double volume = std::pow(static_cast<double>(h), 3);
+			const float pressureScale = seconds / (definition.DryAirKilogramsPerCubicMetre * h);
+			const auto &old = state.FallingCondensateKilogramsPerCubicMetre;
+			auto &next = workspace.NextFallingCondensate;
+			for (size_t index = 0; index < old.size(); ++index) {
+				if (workspace.TerrainFlags[index] & 1) {
+					next[index] = 0;
+					continue;
+				}
+				float change = 0, outgoing = 0;
+				for (size_t axis = 0; axis < 3; ++axis) {
+					const auto low = Neighbor(index, axis, -1, workspace);
+					const auto high = Neighbor(index, axis, 1, workspace);
+					const bool lowExterior = Exterior(index, axis, -1, workspace);
+					const bool highExterior = Exterior(index, axis, 1, workspace);
+					const bool highOpen = OpenFace(grid, axis, 1);
+					const bool lowOpen = OpenFace(grid, axis, -1);
+					const bool groundSink = !low && axis == 1;
+					const float fall = axis == 1 ? definition.RainFallSpeedMetresPerSecond : 0;
+					const bool highActive = high || (highExterior && highOpen);
+					const bool lowActive = low || groundSink || (lowExterior && lowOpen);
+					const float highVelocity = projected[index].VelocityMetresPerSecond[axis] - fall;
+					const float lowVelocity =
+						low || (lowExterior && lowOpen)
+							? LowVelocity(index, axis, projected, workspace, forcing, pressureScale) - fall
+							: -fall;
+					const float highFlux = highActive ? highVelocity * (highVelocity >= 0 ? old[index]
+																		: high			  ? old[*high]
+																						  : 0)
+													  : 0;
+					const float lowFlux =
+						lowActive ? lowVelocity * (lowVelocity >= 0 ? low ? old[*low] : 0 : old[index]) : 0;
+					change += seconds * (lowFlux - highFlux) / h;
+					outgoing += (highActive ? std::max(highVelocity, 0.0f) : 0) +
+								(lowActive ? std::max(-lowVelocity, 0.0f) : 0);
+					if (groundSink)
+						state.Budget.PrecipitationWaterKilograms -= volume * seconds * lowFlux / h;
+					else if (lowExterior && lowOpen)
+						state.Budget.BoundaryWaterKilograms += volume * seconds * lowFlux / h;
+					if (highExterior && highOpen)
+						state.Budget.BoundaryWaterKilograms -= volume * seconds * highFlux / h;
+				}
+				if (seconds * outgoing / h > 1) return false;
+				next[index] = old[index] + change;
+				if (!Bounded(next[index], 0, 100)) return false;
+			}
+			return true;
+		}
+
 		SimulationStatus Evolve(SimulationState &state, SimulationWorkspace &workspace) {
 			const auto &definition = state.Definition;
 			const auto &grid = definition.Grid;
@@ -336,8 +450,7 @@ namespace engine::weather {
 						const auto high = Neighbor(index, axis, 1, workspace);
 						if (!high) {
 							next[index].VelocityMetresPerSecond[axis] =
-								grid.Boundaries[axis] == SolverBoundary::Open ||
-										grid.Boundaries[axis] == SolverBoundary::GroundOpen
+								Exterior(index, axis, 1, workspace) && OpenFace(grid, axis, 1)
 									? forcing.OpenVelocityMetresPerSecond[axis]
 									: 0;
 							continue;
@@ -373,11 +486,19 @@ namespace engine::weather {
 					))
 					return SimulationStatus::ProjectionFailed;
 				state.LastMaximumDivergencePerSecond = maximumDivergence;
+				const float projectionScale =
+					seconds / (definition.DryAirKilogramsPerCubicMetre * grid.CellSizeMetres);
+				if (!TransportRain(state, next, forcing, seconds, workspace))
+					return SimulationStatus::Unstable;
 				for (size_t index = 0; index < state.Cells.size(); ++index) {
+					if (workspace.TerrainFlags[index] & 1) continue;
 					float outgoingRate = 0;
 					for (size_t axis = 0; axis < 3; ++axis)
-						outgoingRate += std::max(0.0f, next[index].VelocityMetresPerSecond[axis]) +
-										std::max(0.0f, -LowVelocity(index, axis, next, workspace, forcing));
+						outgoingRate +=
+							std::max(0.0f, next[index].VelocityMetresPerSecond[axis]) +
+							std::max(
+								0.0f, -LowVelocity(index, axis, next, workspace, forcing, projectionScale)
+							);
 					if (seconds * (outgoingRate / grid.CellSizeMetres +
 								   6 * definition.DiffusionSquareMetresPerSecond /
 									   (grid.CellSizeMetres * grid.CellSizeMetres)) >
@@ -388,14 +509,16 @@ namespace engine::weather {
 				auto &transported = workspace.NextCells;
 				transported = state.Cells;
 				for (size_t index = 0; index < state.Cells.size(); ++index) {
+					if (workspace.TerrainFlags[index] & 1) continue;
 					float scalarChange[3]{};
 					for (size_t axis = 0; axis < 3; ++axis) {
 						const auto low = Neighbor(index, axis, -1, workspace);
 						const auto high = Neighbor(index, axis, 1, workspace);
 						for (size_t quantity = 0; quantity < 3; ++quantity) {
-							const bool lowOpen = grid.Boundaries[axis] == SolverBoundary::Open;
+							const bool lowOpen =
+								Exterior(index, axis, -1, workspace) && OpenFace(grid, axis, -1);
 							const bool highOpen =
-								lowOpen || grid.Boundaries[axis] == SolverBoundary::GroundOpen;
+								Exterior(index, axis, 1, workspace) && OpenFace(grid, axis, 1);
 							const float highFlux = high || highOpen
 													   ? Flux(
 															 state.Cells[index],
@@ -406,14 +529,15 @@ namespace engine::weather {
 														 )
 													   : 0;
 							const float lowFlux =
-								low || lowOpen ? Flux(
-													 low ? state.Cells[*low] : forcing.Inflow,
-													 state.Cells[index],
-													 LowVelocity(index, axis, next, workspace, forcing),
-													 quantity,
-													 definition
-												 )
-											   : 0;
+								low || lowOpen
+									? Flux(
+										  low ? state.Cells[*low] : forcing.Inflow,
+										  state.Cells[index],
+										  LowVelocity(index, axis, next, workspace, forcing, projectionScale),
+										  quantity,
+										  definition
+									  )
+									: 0;
 							scalarChange[quantity] += seconds * (lowFlux - highFlux) / grid.CellSizeMetres;
 							const double boundaryChange = seconds *
 														  ((!low ? lowFlux : 0) - (!high ? highFlux : 0)) /
@@ -433,35 +557,44 @@ namespace engine::weather {
 						}
 					}
 					SolverCell &cell = transported[index];
+					const float groundVapour =
+						workspace.TerrainFlags[index] & 2
+							? definition.GroundVapourFluxKilogramsPerSquareMetreSecond /
+								  (definition.DryAirKilogramsPerCubicMetre * grid.CellSizeMetres)
+							: 0;
 					cell.VapourKilogramsPerKilogram +=
-						scalarChange[0] + seconds * forcing.VapourSourcePerSecond;
+						scalarChange[0] + seconds * (forcing.VapourSourcePerSecond + groundVapour);
 					cell.CondensateKilogramsPerCubicMetre +=
 						scalarChange[1] + seconds * forcing.CondensateSourceKilogramsPerCubicMetrePerSecond;
 					cell.TemperatureCelsius += scalarChange[2] - seconds * forcing.CoolingCelsiusPerSecond;
 					cell.VelocityMetresPerSecond = next[index].VelocityMetresPerSecond;
 					cell.ProjectionPressurePascals = next[index].ProjectionPressurePascals;
 					ConvertPhase(cell, definition, seconds);
-					const float precipitation =
+					const float precipitation = std::min(
+						100 - workspace.NextFallingCondensate[index],
 						std::max(
 							0.0f,
 							cell.CondensateKilogramsPerCubicMetre -
 								definition.PrecipitationThresholdKilogramsPerCubicMetre
-						) *
-						std::min(1.0f, seconds * definition.PrecipitationPerSecond);
+						) * std::min(1.0f, seconds * definition.PrecipitationPerSecond)
+					);
 					cell.CondensateKilogramsPerCubicMetre -= precipitation;
-					state.Budget.PrecipitationWaterKilograms += volume * precipitation;
+					workspace.NextFallingCondensate[index] += precipitation;
 					state.Budget.SourceWaterKilograms +=
 						volume * seconds *
-						(definition.DryAirKilogramsPerCubicMetre * forcing.VapourSourcePerSecond +
+						(definition.DryAirKilogramsPerCubicMetre *
+							 (forcing.VapourSourcePerSecond + groundVapour) +
 						 forcing.CondensateSourceKilogramsPerCubicMetrePerSecond);
 					state.Budget.ExternalEnthalpyJoules +=
 						volume * seconds * definition.DryAirKilogramsPerCubicMetre *
-						(definition.LatentHeatJoulesPerKilogram * forcing.VapourSourcePerSecond -
+						(definition.LatentHeatJoulesPerKilogram *
+							 (forcing.VapourSourcePerSecond + groundVapour) -
 						 definition.HeatCapacityJoulesPerKilogramCelsius * forcing.CoolingCelsiusPerSecond);
 					if (!ValidCell(cell, definition.MaximumVelocityMetresPerSecond))
 						return SimulationStatus::Unstable;
 				}
 				state.Cells.swap(transported);
+				state.FallingCondensateKilogramsPerCubicMetre.swap(workspace.NextFallingCondensate);
 			}
 			++state.Tick;
 			state.LastSubsteps = substeps;
@@ -476,6 +609,23 @@ namespace engine::weather {
 		}
 	}
 
+	uint32_t SimulationCellFlags(const SimulationState &state, size_t index) {
+		if (index >= state.Cells.size() || state.SolidMask.size() != (state.Cells.size() + 7) / 8) return 0;
+		if (state.SolidMask[index / 8] & (1u << (index & 7))) return 1;
+		const auto &grid = state.Definition.Grid;
+		const auto position = Coordinate(index, grid);
+		const size_t column = position[0] + grid.Cells[0] * position[2];
+		if (column >= state.GroundHeightMetres.size()) return 0;
+		const float height = state.GroundHeightMetres[column];
+		if (height == NO_TERRAIN_HEIGHT) return 0;
+		if (position[1] > 0) {
+			const size_t below = index - grid.Cells[0];
+			return state.SolidMask[below / 8] & (1u << (below & 7)) ? 2 : 0;
+		}
+		const float bottom = grid.Origin[1] * grid.CellSizeMetres;
+		return height >= bottom && height < bottom + 0.5f * grid.CellSizeMetres ? 2 : 0;
+	}
+
 	bool ValidateSimulation(const SimulationState &state) {
 		if (!ValidDefinition(state.Definition) || state.Cells.size() != CellCount(state.Definition.Grid) ||
 			state.ForcingHistory.empty() || state.ForcingHistory.size() > MAXIMUM_FORCING ||
@@ -483,19 +633,43 @@ namespace engine::weather {
 			state.LastSubsteps > state.Definition.MaximumSubsteps ||
 			!Bounded(state.LastMaximumDivergencePerSecond, 0, state.Definition.MaximumDivergencePerSecond))
 			return false;
+		const auto &grid = state.Definition.Grid;
+		if (state.SolidMask.size() != (state.Cells.size() + 7) / 8 ||
+			state.GroundHeightMetres.size() != static_cast<size_t>(grid.Cells[0]) * grid.Cells[2] ||
+			state.FallingCondensateKilogramsPerCubicMetre.size() != state.Cells.size())
+			return false;
+		if ((state.Cells.size() & 7) && (state.SolidMask.back() >> (state.Cells.size() & 7))) return false;
+		for (float height : state.GroundHeightMetres)
+			if (height != NO_TERRAIN_HEIGHT && !Bounded(height, -1e9f, 1e9f)) return false;
 		for (size_t index = 0; index < state.ForcingHistory.size(); ++index)
 			if (!ValidForcing(state.ForcingHistory[index], state.Definition) ||
 				(index && state.ForcingHistory[index - 1].Tick >= state.ForcingHistory[index].Tick))
 				return false;
 		for (size_t index = 0; index < state.Cells.size(); ++index) {
 			if (!ValidCell(state.Cells[index], state.Definition.MaximumVelocityMetresPerSecond)) return false;
+			if (!Bounded(state.FallingCondensateKilogramsPerCubicMetre[index], 0, 100)) return false;
+			const auto position = Coordinate(index, grid);
+			const float height = state.GroundHeightMetres[position[0] + grid.Cells[0] * position[2]];
+			const bool expectedSolid =
+				height != NO_TERRAIN_HEIGHT &&
+				(grid.Origin[1] + static_cast<float>(position[1]) + 0.5f) * grid.CellSizeMetres <= height;
+			if (expectedSolid != ((SimulationCellFlags(state, index) & 1) != 0)) return false;
+			if (expectedSolid) {
+				const auto &cell = state.Cells[index];
+				if (cell.VapourKilogramsPerKilogram != 0 || cell.CondensateKilogramsPerCubicMetre != 0 ||
+					state.FallingCondensateKilogramsPerCubicMetre[index] != 0 ||
+					cell.VelocityMetresPerSecond != std::array<float, 3>{})
+					return false;
+				continue;
+			}
 			for (size_t axis = 0; axis < 3; ++axis) {
 				const auto high = Neighbor(index, axis, 1, state.Definition.Grid);
-				if (high && std::abs(
-								state.Cells[*high].AtmosphericPressurePascals -
-								state.Cells[index].AtmosphericPressurePascals
-							) / state.Definition.Grid.CellSizeMetres >
-								state.Definition.MaximumPressureGradientPascalsPerMetre)
+				if (high && !(SimulationCellFlags(state, *high) & 1) &&
+					std::abs(
+						state.Cells[*high].AtmosphericPressurePascals -
+						state.Cells[index].AtmosphericPressurePascals
+					) / state.Definition.Grid.CellSizeMetres >
+						state.Definition.MaximumPressureGradientPascalsPerMetre)
 					return false;
 			}
 		}
@@ -509,27 +683,44 @@ namespace engine::weather {
 	}
 
 	double SimulationWaterKilograms(const SimulationState &state) {
+		if (state.SolidMask.size() != (state.Cells.size() + 7) / 8 ||
+			state.FallingCondensateKilogramsPerCubicMetre.size() != state.Cells.size())
+			return std::numeric_limits<double>::quiet_NaN();
 		double water = 0;
-		for (const auto &cell : state.Cells)
+		const auto *mask = state.SolidMask.data();
+		for (size_t index = 0; index < state.Cells.size(); ++index) {
+			if (mask[index / 8] & (1u << (index & 7))) continue;
+			const auto &cell = state.Cells[index];
 			water += state.Definition.DryAirKilogramsPerCubicMetre *
 						 static_cast<double>(cell.VapourKilogramsPerKilogram) +
-					 cell.CondensateKilogramsPerCubicMetre;
+					 cell.CondensateKilogramsPerCubicMetre +
+					 state.FallingCondensateKilogramsPerCubicMetre[index];
+		}
 		return water * std::pow(static_cast<double>(state.Definition.Grid.CellSizeMetres), 3);
 	}
 
 	double SimulationEnthalpyJoules(const SimulationState &state) {
+		if (state.SolidMask.size() != (state.Cells.size() + 7) / 8)
+			return std::numeric_limits<double>::quiet_NaN();
 		double enthalpy = 0;
-		for (const auto &cell : state.Cells)
+		const auto *mask = state.SolidMask.data();
+		for (size_t index = 0; index < state.Cells.size(); ++index) {
+			if (mask[index / 8] & (1u << (index & 7))) continue;
+			const auto &cell = state.Cells[index];
 			enthalpy += state.Definition.HeatCapacityJoulesPerKilogramCelsius *
 							(static_cast<double>(cell.TemperatureCelsius) + KELVIN_OFFSET) +
 						state.Definition.LatentHeatJoulesPerKilogram *
 							static_cast<double>(cell.VapourKilogramsPerKilogram);
+		}
 		return enthalpy * state.Definition.DryAirKilogramsPerCubicMetre *
 			   std::pow(static_cast<double>(state.Definition.Grid.CellSizeMetres), 3);
 	}
 
 	std::optional<SimulationState> CreateSimulation(
-		const SimulationDefinition &definition, const SolverCell &initial, const SimulationForcing &forcing
+		const SimulationDefinition &definition,
+		const SolverCell &initial,
+		const SimulationForcing &forcing,
+		std::span<const float> groundHeightMetres
 	) {
 		if (!ValidDefinition(definition) || !ValidCell(initial, definition.MaximumVelocityMetresPerSecond) ||
 			forcing.Tick != 0 || !ValidForcing(forcing, definition))
@@ -538,6 +729,32 @@ namespace engine::weather {
 			SimulationState state;
 			state.Definition = definition;
 			state.Cells.assign(CellCount(definition.Grid), initial);
+			const size_t columns = static_cast<size_t>(definition.Grid.Cells[0]) * definition.Grid.Cells[2];
+			if (!groundHeightMetres.empty() && groundHeightMetres.size() != columns) return std::nullopt;
+			state.GroundHeightMetres.assign(columns, NO_TERRAIN_HEIGHT);
+			if (!groundHeightMetres.empty())
+				std::copy(
+					groundHeightMetres.begin(), groundHeightMetres.end(), state.GroundHeightMetres.begin()
+				);
+			for (float height : state.GroundHeightMetres)
+				if (height != NO_TERRAIN_HEIGHT && !Bounded(height, -1e9f, 1e9f)) return std::nullopt;
+			state.SolidMask.assign((state.Cells.size() + 7) / 8, 0);
+			state.FallingCondensateKilogramsPerCubicMetre.assign(state.Cells.size(), 0);
+			for (size_t index = 0; index < state.Cells.size(); ++index) {
+				const auto position = Coordinate(index, definition.Grid);
+				const float height =
+					state.GroundHeightMetres[position[0] + definition.Grid.Cells[0] * position[2]];
+				if (height != NO_TERRAIN_HEIGHT &&
+					(definition.Grid.Origin[1] + static_cast<float>(position[1]) + 0.5f) *
+							definition.Grid.CellSizeMetres <=
+						height) {
+					state.SolidMask[index / 8] |= static_cast<uint8_t>(1u << (index & 7));
+					state.Cells[index].VapourKilogramsPerKilogram = 0;
+					state.Cells[index].CondensateKilogramsPerCubicMetre = 0;
+					state.Cells[index].VelocityMetresPerSecond = {};
+					state.Cells[index].ProjectionPressurePascals = 0;
+				}
+			}
 			state.ForcingHistory.push_back(forcing);
 			state.Budget.InitialWaterKilograms = SimulationWaterKilograms(state);
 			state.Budget.InitialEnthalpyJoules = SimulationEnthalpyJoules(state);
@@ -576,6 +793,21 @@ namespace engine::weather {
 			std::bit_cast<uint32_t>(controls.GrowthRate)
 		};
 		definition.TickRate = controls.TickRate;
+		definition.TerrainRevision = controls.TerrainRevision;
+		definition.GroundVapourFluxKilogramsPerSquareMetreSecond =
+			controls.GroundVapourFluxKilogramsPerSquareMetreSecond;
+		definition.RainFallSpeedMetresPerSecond = controls.RainFallSpeedMetresPerSecond;
+		const auto boundary = [](scene::WeatherBoundary value) {
+			return value == scene::WeatherBoundary::Periodic ? SolverBoundary::Periodic
+				   : value == scene::WeatherBoundary::Closed ? SolverBoundary::Closed
+															 : SolverBoundary::Open;
+		};
+		definition.Grid.Boundaries = {
+			boundary(controls.BoundaryX),
+			controls.TopBoundary == scene::WeatherTopBoundary::Escape ? SolverBoundary::GroundOpen
+																	  : SolverBoundary::Closed,
+			boundary(controls.BoundaryZ)
+		};
 		definition.Grid.CellSizeMetres = controls.CellSizeMetres;
 		const std::array<float, 3> extents{
 			controls.ExtentMetres.X, controls.ThicknessMetres, controls.ExtentMetres.Z
@@ -682,6 +914,10 @@ namespace engine::weather {
 		std::vector<EncodedCell> packed;
 		packed.reserve(state.Cells.size());
 		for (size_t index = 0; index < state.Cells.size(); ++index) {
+			if (SimulationCellFlags(state, index) & 1) {
+				packed.push_back(*Encode(CellValues{}));
+				continue;
+			}
 			const auto &cell = state.Cells[index];
 			const float altitude = (static_cast<float>(state.Definition.Grid.Origin[1]) +
 									Coordinate(index, state.Definition.Grid)[1] + 0.5f) *
@@ -727,10 +963,11 @@ namespace engine::weather {
 			2 * definition.MaximumVelocityMetresPerSecond * forcing.WindRelaxationPerSecond;
 		const float speed = 2 * (definition.MaximumVelocityMetresPerSecond + seconds * acceleration);
 		const float stability =
-			seconds * (3 * speed / definition.Grid.CellSizeMetres +
-					   6 * definition.DiffusionSquareMetresPerSecond /
-						   (definition.Grid.CellSizeMetres * definition.Grid.CellSizeMetres) +
-					   definition.PrecipitationPerSecond + forcing.WindRelaxationPerSecond);
+			seconds *
+			((3 * speed + definition.RainFallSpeedMetresPerSecond) / definition.Grid.CellSizeMetres +
+			 6 * definition.DiffusionSquareMetresPerSecond /
+				 (definition.Grid.CellSizeMetres * definition.Grid.CellSizeMetres) +
+			 definition.PrecipitationPerSecond + forcing.WindRelaxationPerSecond);
 		if (!std::isfinite(stability) || stability > 0.8f * static_cast<float>(definition.MaximumSubsteps))
 			return std::nullopt;
 		return std::max(1u, static_cast<uint32_t>(std::ceil(stability / 0.8f)));

@@ -781,6 +781,8 @@ namespace engine::render {
 		std::span<const std::byte> WeatherCheckpoint;
 		// Trusted canonical full stream name copied from the accepted source definition.
 		core::Name WeatherSimulationLayer;
+		// Accepted terrain snapshot identity, checked before adopting physical checkpoint resources.
+		uint32_t WeatherTerrainRevision = 1;
 		// Changes only when that packet publishes or retires a checkpoint.
 		uint64_t WeatherCheckpointVersion = 0;
 		// Copied checkpoint identity; decoder validates these against the encoded payload.

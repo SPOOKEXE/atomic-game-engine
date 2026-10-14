@@ -95,6 +95,8 @@ namespace engine::render {
 		std::vector<std::byte> WeatherCheckpoint;
 		// Trusted canonical stream name; source epochs avoid rebuilding paths on quiet frames.
 		core::Name WeatherSimulationLayer;
+		// Accepted terrain snapshot revision comes from authored controls, independently of checkpoint bytes.
+		uint32_t WeatherTerrainRevision = 1;
 		// Derived path cache metadata, local to this owned packet.
 		//@{
 		ecs::Entity WeatherSimulationLayerSource = ecs::NULL_ENTITY;

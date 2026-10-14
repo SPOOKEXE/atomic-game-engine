@@ -60,7 +60,9 @@ namespace engine::scene {
 				weather.IceFraction,
 				weather.StormIntensity,
 				weather.HailIntensity,
-				weather.LightningRate
+				weather.LightningRate,
+				weather.GroundVapourFluxKilogramsPerSquareMetreSecond,
+				weather.RainFallSpeedMetresPerSecond
 			};
 			return std::all_of(scalars.begin(), scalars.end(), [](float scalar) {
 				return std::isfinite(scalar);
@@ -151,6 +153,42 @@ namespace engine::scene {
 			};
 			return property;
 		}
+
+		template <auto Member>
+		ecs::PropertyDescriptor BoundaryProperty(std::string_view name, std::string_view enumName) {
+			using Value = std::remove_cvref_t<decltype(WeatherCompute{}.*Member)>;
+			auto property = WeatherProperty<&WeatherCompute::Enabled>(name);
+			property.Type = ecs::PropertyType::Enum;
+			property.EnumName = core::Name(enumName);
+			property.Size = sizeof(core::Name);
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *output) {
+				const auto *weather = store.Get<WeatherCompute>(instance);
+				if (!weather) return false;
+				*static_cast<core::Name *>(output) = core::Name(Describe(weather->*Member));
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *input) {
+				const auto *weather = store.Get<WeatherCompute>(instance);
+				if (!weather) return false;
+				Value value;
+				if constexpr (std::is_same_v<Value, WeatherBoundary>) {
+					if (!WeatherBoundaryFromName(*static_cast<const core::Name *>(input), value))
+						return false;
+				} else {
+					if (!WeatherTopBoundaryFromName(*static_cast<const core::Name *>(input), value))
+						return false;
+				}
+				if (weather->*Member == value) return true;
+				auto candidate = *weather;
+				candidate.*Member = value;
+				if (!ValidWeatherCompute(candidate)) return false;
+				candidate.DefinitionRevision =
+					weather->DefinitionRevision == UINT32_MAX ? 1 : weather->DefinitionRevision + 1;
+				store.Set(instance, candidate);
+				return true;
+			};
+			return property;
+		}
 	}
 
 	const WeatherCompute *WeatherControlsOf(const ecs::Store &store, ecs::Entity provider) {
@@ -177,6 +215,36 @@ namespace engine::scene {
 			mode = WeatherMode::Stateful;
 			return true;
 		}
+		return false;
+	}
+	const char *Describe(WeatherBoundary boundary) {
+		switch (boundary) {
+		case WeatherBoundary::Periodic:
+			return "Periodic";
+		case WeatherBoundary::Closed:
+			return "Closed";
+		case WeatherBoundary::Open:
+			return "Open";
+		}
+		return "Closed";
+	}
+	const char *Describe(WeatherTopBoundary boundary) {
+		return boundary == WeatherTopBoundary::Escape ? "Escape" : "Closed";
+	}
+	bool WeatherBoundaryFromName(core::Name name, WeatherBoundary &boundary) {
+		for (auto value : {WeatherBoundary::Periodic, WeatherBoundary::Closed, WeatherBoundary::Open})
+			if (name == core::Name(Describe(value))) {
+				boundary = value;
+				return true;
+			}
+		return false;
+	}
+	bool WeatherTopBoundaryFromName(core::Name name, WeatherTopBoundary &boundary) {
+		for (auto value : {WeatherTopBoundary::Closed, WeatherTopBoundary::Escape})
+			if (name == core::Name(Describe(value))) {
+				boundary = value;
+				return true;
+			}
 		return false;
 	}
 
@@ -253,6 +321,24 @@ namespace engine::scene {
 		weather.ShadowCascades = std::clamp(weather.ShadowCascades, 1u, 4u);
 		weather.ShadowResolution = std::bit_floor(std::clamp(weather.ShadowResolution, 32u, 2048u));
 		weather.DefinitionRevision = std::max(weather.DefinitionRevision, 1u);
+		weather.TerrainRevision = std::max(weather.TerrainRevision, 1u);
+		if (weather.BoundaryX != WeatherBoundary::Periodic && weather.BoundaryX != WeatherBoundary::Closed &&
+			weather.BoundaryX != WeatherBoundary::Open)
+			weather.BoundaryX = defaults.BoundaryX;
+		if (weather.BoundaryZ != WeatherBoundary::Periodic && weather.BoundaryZ != WeatherBoundary::Closed &&
+			weather.BoundaryZ != WeatherBoundary::Open)
+			weather.BoundaryZ = defaults.BoundaryZ;
+		if (weather.TopBoundary != WeatherTopBoundary::Closed &&
+			weather.TopBoundary != WeatherTopBoundary::Escape)
+			weather.TopBoundary = defaults.TopBoundary;
+		weather.GroundVapourFluxKilogramsPerSquareMetreSecond = Bounded(
+			weather.GroundVapourFluxKilogramsPerSquareMetreSecond,
+			0,
+			1,
+			defaults.GroundVapourFluxKilogramsPerSquareMetreSecond
+		);
+		weather.RainFallSpeedMetresPerSecond =
+			Bounded(weather.RainFallSpeedMetresPerSecond, 0, 64, defaults.RainFallSpeedMetresPerSecond);
 		if (!weather.LayerName.IsValid() || weather.LayerName.Text().size() > MAX_WEATHER_LAYER_NAME_BYTES)
 			weather.LayerName = defaults.LayerName;
 		return weather;
@@ -260,6 +346,12 @@ namespace engine::scene {
 
 	bool ValidWeatherCompute(const WeatherCompute &weather) {
 		return Finite(weather) && weather.AlgorithmVersion == 1 &&
+			   (weather.BoundaryX == WeatherBoundary::Periodic ||
+				weather.BoundaryX == WeatherBoundary::Closed || weather.BoundaryX == WeatherBoundary::Open) &&
+			   (weather.BoundaryZ == WeatherBoundary::Periodic ||
+				weather.BoundaryZ == WeatherBoundary::Closed || weather.BoundaryZ == WeatherBoundary::Open) &&
+			   (weather.TopBoundary == WeatherTopBoundary::Closed ||
+				weather.TopBoundary == WeatherTopBoundary::Escape) &&
 			   (weather.Mode == WeatherMode::Procedural || weather.Mode == WeatherMode::Stateful) &&
 			   ClampedWeatherCompute(weather) == weather;
 	}
@@ -267,6 +359,30 @@ namespace engine::scene {
 	void RegisterWeatherComputeProperties(ecs::ClassId owner) {
 		ecs::EnumTable::Register(
 			WeatherModeEnum().Text(), std::array<std::string_view, 2>{"Procedural", "Stateful"}
+		);
+		ecs::EnumTable::Register(
+			"WeatherBoundary", std::array<std::string_view, 3>{"Periodic", "Closed", "Open"}
+		);
+		ecs::EnumTable::Register("WeatherTopBoundary", std::array<std::string_view, 2>{"Closed", "Escape"});
+		ecs::Classes::Computed(
+			owner, BoundaryProperty<&WeatherCompute::BoundaryX>("BoundaryX", "WeatherBoundary")
+		);
+		ecs::Classes::Computed(
+			owner, BoundaryProperty<&WeatherCompute::BoundaryZ>("BoundaryZ", "WeatherBoundary")
+		);
+		ecs::Classes::Computed(
+			owner, BoundaryProperty<&WeatherCompute::TopBoundary>("TopBoundary", "WeatherTopBoundary")
+		);
+		ecs::Classes::Computed(owner, WeatherProperty<&WeatherCompute::TerrainRevision>("TerrainRevision"));
+		ecs::Classes::Computed(
+			owner,
+			WeatherProperty<&WeatherCompute::GroundVapourFluxKilogramsPerSquareMetreSecond>(
+				"GroundVapourFluxKilogramsPerSquareMetreSecond"
+			)
+		);
+		ecs::Classes::Computed(
+			owner,
+			WeatherProperty<&WeatherCompute::RainFallSpeedMetresPerSecond>("RainFallSpeedMetresPerSecond")
 		);
 		ecs::Classes::Computed(owner, WeatherProperty<&WeatherCompute::CellSizeMetres>("CellSizeMetres"));
 		ecs::Classes::Computed(owner, WeatherProperty<&WeatherCompute::BaseHeightMetres>("BaseHeightMetres"));

@@ -15,8 +15,9 @@ namespace engine::ecs {
 
 namespace client {
 	class SoundCatalogue;
-	// Prepares copied listener arrivals without opening an audio device. Returns
-	// true when an active accepted layer has thunder within the sample horizon.
+	// Prepares copied listener arrivals without opening an audio device.
+	// Expired waveform arrivals remain consumed. Returns true for an active
+	// accepted layer with an audible tail or thunder within the sample horizon.
 	[[nodiscard]] bool WeatherThunderDueSoon(
 		engine::ecs::Store &store, engine::core::Vector3 listener, double horizonSeconds = 0.25
 	);
@@ -28,8 +29,12 @@ namespace client {
 		//@{
 		engine::weather::StormEvent Event;
 		engine::audio::NodeId Player;
+		// Exact first output sample; late arrivals seek into their source waveform.
 		uint64_t StartSample = 0;
+		// Exact end of the remaining source tail, excluding any propagation delay.
 		uint64_t EndSample = 0;
+		// Retried until terminal commands are accepted, even if the old deadline passes meanwhile.
+		bool Retiring = false;
 		//@}
 	};
 	// Mixer ownership for one world. Refused queue writes remain retryable.

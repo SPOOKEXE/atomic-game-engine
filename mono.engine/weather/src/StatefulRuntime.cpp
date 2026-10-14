@@ -77,7 +77,13 @@ namespace engine::weather {
 				0,
 				static_cast<uint32_t>(
 					checkpoint.Bytes.size() - 8 - validated.Cells.size() * sizeof(SolverCell)
-				)
+				),
+				static_cast<uint32_t>(
+					checkpoint.Bytes.size() - 8 -
+					validated.Cells.size() * (sizeof(SolverCell) + sizeof(float)) - 4
+				),
+				validated.SolidMask,
+				validated.GroundHeightMetres
 			};
 		}
 
@@ -340,13 +346,16 @@ namespace engine::weather {
 			);
 		}
 
-		template <class CellReader>
+		template <class CellReader, class RainReader>
 		std::optional<ConsumerSample> SamplePhysicalField(
 			const SimulationDefinition &definition,
 			uint64_t tick,
 			uint32_t seed,
 			uint32_t layerKey,
 			const CellReader &cellAt,
+			const RainReader &rainAt,
+			std::span<const uint8_t> solidMask,
+			std::span<const float> groundHeights,
 			const scene::WeatherCompute &controls,
 			core::Vector3 position,
 			float groundHeight
@@ -376,7 +385,20 @@ namespace engine::weather {
 					local[axis] = static_cast<uint32_t>(lattice);
 				}
 			}
-			const size_t index = local[0] + grid.Cells[0] * (local[1] + grid.Cells[1] * local[2]);
+			const float terrainHeight = groundHeights[local[0] + grid.Cells[0] * local[2]];
+			if (terrainHeight != NO_TERRAIN_HEIGHT) {
+				groundHeight = terrainHeight;
+				if (position.Y < terrainHeight) return std::nullopt;
+			}
+			const auto solid = [&](size_t cellIndex) {
+				return (solidMask[cellIndex / 8] & (1u << (cellIndex & 7))) != 0;
+			};
+			size_t index = local[0] + grid.Cells[0] * (local[1] + grid.Cells[1] * local[2]);
+			while (solid(index) && local[1] + 1 < grid.Cells[1]) {
+				++local[1];
+				index += grid.Cells[0];
+			}
+			if (solid(index)) return std::nullopt;
 			const auto &cell = cellAt(index);
 			ConsumerSample sample;
 			sample.Air.CondensateKilogramsPerCubicMetre =
@@ -400,24 +422,24 @@ namespace engine::weather {
 			float precipitation = 0, frozen = 0, charge = 0, hail = 0;
 			for (uint32_t height = 0; height < grid.Cells[1]; ++height) {
 				const auto &column = cellAt(local[0] + grid.Cells[0] * (height + grid.Cells[1] * local[2]));
-				const float upperHeight =
-					(grid.Origin[1] + static_cast<float>(height) + 1) * grid.CellSizeMetres;
-				const float contributingDepth =
-					std::clamp(upperHeight - position.Y, 0.0f, grid.CellSizeMetres);
-				const float rate = std::max(
-									   0.0f,
-									   column.CondensateKilogramsPerCubicMetre -
-										   definition.PrecipitationThresholdKilogramsPerCubicMetre
-								   ) *
-								   definition.PrecipitationPerSecond * contributingDepth * 3600;
+				if (solid(local[0] + grid.Cells[0] * (height + grid.Cells[1] * local[2]))) continue;
 				const float ice = std::clamp(-column.TemperatureCelsius / 20, 0.0f, 1.0f);
-				precipitation += rate;
-				frozen += rate * ice;
 				const float updraft = std::clamp(column.VelocityMetresPerSecond[1] / 10, 0.0f, 1.0f);
 				const float wet = std::clamp(column.CondensateKilogramsPerCubicMetre / 0.003f, 0.0f, 1.0f);
 				charge = std::max(charge, wet * updraft * (0.25f + 0.75f * ice) * controls.StormIntensity);
 				hail = std::max(hail, wet * updraft * ice * controls.HailIntensity);
 			}
+			// Completed falling-water concentration determines precipitation flux; cloud conversion is not
+			// a ground sink. The closed ground face has no air velocity.
+			const bool surface = local[1] == 0 || solid(index - grid.Cells[0]);
+			precipitation = rainAt(index) *
+							std::max(
+								0.0f,
+								definition.RainFallSpeedMetresPerSecond -
+									(surface ? 0 : cellAt(index - grid.Cells[0]).VelocityMetresPerSecond[1])
+							) *
+							3600;
+			frozen = precipitation * sample.Air.IceFraction;
 			const float topHeight =
 				(grid.Origin[1] + static_cast<float>(grid.Cells[1])) * grid.CellSizeMetres;
 			const float columnLength = std::max(0.0f, topHeight - position.Y);
@@ -426,8 +448,9 @@ namespace engine::weather {
 				const float altitude = position.Y + columnLength * (static_cast<float>(heightSample) + 0.5f) /
 														COLUMN_TEMPERATURE_SAMPLES;
 				const float lattice = std::floor(altitude / grid.CellSizeMetres) - grid.Origin[1];
-				const uint32_t height =
-					static_cast<uint32_t>(std::clamp(lattice, 0.0f, static_cast<float>(grid.Cells[1] - 1)));
+				const uint32_t height = static_cast<uint32_t>(
+					std::clamp(lattice, static_cast<float>(local[1]), static_cast<float>(grid.Cells[1] - 1))
+				);
 				const auto &column = cellAt(local[0] + grid.Cells[0] * (height + grid.Cells[1] * local[2]));
 				const float cellHeight =
 					(grid.Origin[1] + static_cast<float>(height) + 0.5f) * grid.CellSizeMetres;
@@ -481,6 +504,9 @@ namespace engine::weather {
 				state.Seed,
 				state.LayerKey,
 				[&](size_t index) -> const SolverCell & { return state.Simulation.Cells[index]; },
+				[&](size_t index) { return state.Simulation.FallingCondensateKilogramsPerCubicMetre[index]; },
+				state.Simulation.SolidMask,
+				state.Simulation.GroundHeightMetres,
 				controls,
 				position,
 				groundHeight
@@ -515,7 +541,39 @@ namespace engine::weather {
 				controls.WindMetresPerSecond.X, controls.WindMetresPerSecond.Y, controls.WindMetresPerSecond.Z
 			};
 			forcing.WindRelaxationPerSecond = 1;
-			auto simulation = CreateSimulation(*definition, uniform, forcing);
+			for (size_t axis = 0; axis < 3; ++axis)
+				if (definition->Grid.Boundaries[axis] == SolverBoundary::Open ||
+					definition->Grid.Boundaries[axis] == SolverBoundary::GroundOpen)
+					forcing.OpenVelocityMetresPerSecond[axis] = forcing.WindTargetMetresPerSecond[axis];
+			std::vector<float> terrain(
+				static_cast<size_t>(definition->Grid.Cells[0]) * definition->Grid.Cells[2], NO_TERRAIN_HEIGHT
+			);
+			if (const auto *query = store.Resource<WeatherGroundQuery>(); query && query->Height) {
+				const float rayHeight = std::max(
+					1000000.0f,
+					(definition->Grid.Origin[1] + static_cast<float>(definition->Grid.Cells[1]) + 1) *
+						definition->Grid.CellSizeMetres
+				);
+				const float bottom =
+					std::min(-1000000.0f, (definition->Grid.Origin[1] - 1) * definition->Grid.CellSizeMetres);
+				for (uint32_t z = 0; z < definition->Grid.Cells[2]; ++z)
+					for (uint32_t x = 0; x < definition->Grid.Cells[0]; ++x) {
+						const auto height = query->Height(
+							store,
+							{(definition->Grid.Origin[0] + static_cast<float>(x) + 0.5f) *
+								 definition->Grid.CellSizeMetres,
+							 rayHeight,
+							 (definition->Grid.Origin[2] + static_cast<float>(z) + 0.5f) *
+								 definition->Grid.CellSizeMetres},
+							rayHeight - bottom
+						);
+						if (height) {
+							if (!std::isfinite(*height) || std::abs(*height) > 1e9f) return std::nullopt;
+							terrain[x + definition->Grid.Cells[0] * z] = *height;
+						}
+					}
+			}
+			auto simulation = CreateSimulation(*definition, uniform, forcing, terrain);
 			if (!simulation) return std::nullopt;
 			const auto initialTime = initialClock ? WeatherTimeOf(*initialClock)
 												  : ResolveTime(InitialAnchor(compiled->Definition), 0);
@@ -523,6 +581,7 @@ namespace engine::weather {
 			simulation->Tick = initialTime->PhaseTick;
 			simulation->ForcingHistory.front().Tick = simulation->Tick;
 			for (size_t index = 0; index < simulation->Cells.size(); ++index) {
+				if (SimulationCellFlags(*simulation, index) & 1) continue;
 				CellCoordinate coordinate{
 					definition->Grid.Origin[0] + static_cast<int32_t>(index % definition->Grid.Cells[0]),
 					definition->Grid.Origin[1] +
@@ -600,7 +659,7 @@ namespace engine::weather {
 
 	core::Vector3 StatefulEventColumn(const StatefulWeatherState &state, uint64_t tick) {
 		const auto &grid = state.Simulation.Definition.Grid;
-		return StormColumn(
+		auto column = StormColumn(
 			state.Seed,
 			state.LayerKey,
 			tick,
@@ -609,11 +668,52 @@ namespace engine::weather {
 			 grid.Cells[1] * grid.CellSizeMetres,
 			 grid.Cells[2] * grid.CellSizeMetres}
 		);
+		column.X += (grid.Origin[0] + 0.5f * grid.Cells[0]) * grid.CellSizeMetres;
+		column.Z += (grid.Origin[2] + 0.5f * grid.Cells[2]) * grid.CellSizeMetres;
+		// The signed Q16 sample includes its positive endpoint; canonical domain bounds do not.
+		const float lowerX = grid.Origin[0] * grid.CellSizeMetres;
+		const float lowerZ = grid.Origin[2] * grid.CellSizeMetres;
+		const float upperX = (grid.Origin[0] + static_cast<float>(grid.Cells[0])) * grid.CellSizeMetres;
+		const float upperZ = (grid.Origin[2] + static_cast<float>(grid.Cells[2])) * grid.CellSizeMetres;
+		column.X = std::clamp(column.X, lowerX, std::nextafter(upperX, lowerX));
+		column.Z = std::clamp(column.Z, lowerZ, std::nextafter(upperZ, lowerZ));
+		const uint32_t x = static_cast<uint32_t>(std::clamp(
+			std::floor(column.X / grid.CellSizeMetres) - grid.Origin[0],
+			0.0f,
+			static_cast<float>(grid.Cells[0] - 1)
+		));
+		const uint32_t z = static_cast<uint32_t>(std::clamp(
+			std::floor(column.Z / grid.CellSizeMetres) - grid.Origin[2],
+			0.0f,
+			static_cast<float>(grid.Cells[2] - 1)
+		));
+		const float height = state.Simulation.GroundHeightMetres[x + grid.Cells[0] * z];
+		if (height != NO_TERRAIN_HEIGHT) column.Y = std::max(column.Y, height);
+		return column;
 	}
 
 	std::optional<uint64_t> StatefulWeatherTick(const ecs::Store &store, ecs::Entity provider) {
 		const auto *state = store.Get<StatefulWeatherState>(provider);
 		return state ? std::optional(state->Simulation.Tick) : std::nullopt;
+	}
+
+	bool StatefulEventColumnBlocked(const StatefulWeatherState &state, core::Vector3 column) {
+		const auto &simulation = state.Simulation;
+		const auto &grid = simulation.Definition.Grid;
+		if (!std::isfinite(column.X) || !std::isfinite(column.Z) || grid.CellSizeMetres <= 0 ||
+			grid.Cells[0] == 0 || grid.Cells[1] == 0 || grid.Cells[2] == 0 ||
+			simulation.SolidMask.size() != (simulation.Cells.size() + 7) / 8)
+			return false;
+		const double x = std::floor(static_cast<double>(column.X) / grid.CellSizeMetres) - grid.Origin[0];
+		const double z = std::floor(static_cast<double>(column.Z) / grid.CellSizeMetres) - grid.Origin[2];
+		if (x < 0 || x >= grid.Cells[0] || z < 0 || z >= grid.Cells[2]) return false;
+		for (uint32_t y = 0; y < grid.Cells[1]; ++y) {
+			const size_t index =
+				static_cast<size_t>(x) + grid.Cells[0] * (y + grid.Cells[1] * static_cast<size_t>(z));
+			if (index >= simulation.Cells.size() || !(simulation.SolidMask[index / 8] & (1u << (index & 7))))
+				return false;
+		}
+		return true;
 	}
 
 	std::optional<ConsumerSample> QueryStatefulWeather(
@@ -623,6 +723,7 @@ namespace engine::weather {
 		float groundHeightMetres,
 		uint64_t tick
 	) {
+		store.Observe<StatefulWeatherCheckpoint>();
 		const auto *state = store.Get<StatefulWeatherState>(provider);
 		const auto *controls = scene::WeatherControlsOf(store, provider);
 		if (!controls || !scene::ValidWeatherCompute(*controls) || !controls->Enabled ||
@@ -650,6 +751,15 @@ namespace engine::weather {
 				controls->Seed,
 				WeatherLayerKey(controls->LayerName.Text()),
 				[&](size_t index) { return IndexedCell(*checkpoint, index); },
+				[&](size_t index) {
+					core::ByteReader reader(
+						std::span<const std::byte>(checkpoint->Bytes)
+							.subspan(checkpoint->Queries->RainOffset + index * sizeof(float), sizeof(float))
+					);
+					return reader.ReadFloat();
+				},
+				checkpoint->Queries->SolidMask,
+				checkpoint->Queries->GroundHeightMetres,
 				*controls,
 				positionMetres,
 				groundHeightMetres
@@ -729,6 +839,14 @@ namespace engine::weather {
 	void UpdateStatefulWeather(ecs::Store &store) {
 		ENGINE_PROFILE("weather authoritative stateful runtime");
 		if (store.AdoptOnly()) return;
+		store.Observe<StatefulWeatherCheckpoint>();
+		const uint64_t acceptedWrites = store.ComponentChangeVersion<scene::WeatherAcceptedDefinition>();
+		const uint64_t checkpointWrites = store.ComponentChangeVersion<StatefulWeatherCheckpoint>();
+		const auto refuseInitialization = [&](ecs::Entity provider, uint32_t revision) {
+			store.Set(
+				provider, StatefulWeatherInitializationFailure{revision, acceptedWrites, checkpointWrites}
+			);
+		};
 		std::vector<ecs::Entity> staleFailures;
 		store.Each<const StatefulWeatherInitializationFailure>([&](ecs::Entity provider, const auto &) {
 			const auto *controls = scene::WeatherControlsOf(store, provider);
@@ -766,6 +884,10 @@ namespace engine::weather {
 		std::vector<ecs::Entity> missing;
 		store.Each<const scene::WeatherCompute>([&](ecs::Entity provider, const auto &) {
 			const auto *controls = scene::WeatherControlsOf(store, provider);
+			const auto *failure = store.Get<StatefulWeatherInitializationFailure>(provider);
+			if (failure && controls && failure->DefinitionRevision == controls->DefinitionRevision &&
+				failure->AcceptedWrites == acceptedWrites && failure->CheckpointWrites == checkpointWrites)
+				return;
 			if (controls && controls->Enabled && controls->Mode == scene::WeatherMode::Stateful &&
 				!store.Has<StatefulWeatherState>(provider) && existingCount + missing.size() < 32)
 				missing.push_back(provider);
@@ -775,7 +897,7 @@ namespace engine::weather {
 			const auto *checkpoint = store.Get<StatefulWeatherCheckpoint>(provider);
 			if (checkpoint) {
 				if (!RestoreStatefulCheckpoint(store, provider, *checkpoint))
-					store.Set(provider, StatefulWeatherInitializationFailure{controls.DefinitionRevision});
+					refuseInitialization(provider, controls.DefinitionRevision);
 				continue;
 			}
 			const auto *clock = store.Get<scene::WeatherClock>(provider);
@@ -783,16 +905,14 @@ namespace engine::weather {
 								 ? NextPhysicsEpoch(*clock)
 								 : std::optional<scene::WeatherClock>{};
 			if (clock && store.Has<WeatherRuntimeState>(provider) && !restarted) {
-				store.Set(provider, StatefulWeatherInitializationFailure{controls.DefinitionRevision});
+				refuseInitialization(provider, controls.DefinitionRevision);
 				continue;
 			}
 			auto state = InitialState(store, provider, controls, restarted ? &*restarted : nullptr);
 			if (state) {
 				if (restarted) {
 					if (!ClaimInitializedEpoch(store, provider, *restarted, *state, controls)) {
-						store.Set(
-							provider, StatefulWeatherInitializationFailure{controls.DefinitionRevision}
-						);
+						refuseInitialization(provider, controls.DefinitionRevision);
 						continue;
 					}
 					*store.GetMutable<scene::WeatherClock>(provider) = *restarted;
@@ -803,7 +923,7 @@ namespace engine::weather {
 				store.Remove<StatefulWeatherInitializationFailure>(provider);
 				(void)PublishStatefulCheckpoint(store, provider);
 			} else
-				store.Set(provider, StatefulWeatherInitializationFailure{controls.DefinitionRevision});
+				refuseInitialization(provider, controls.DefinitionRevision);
 		}
 		std::vector<ecs::Entity> publish;
 		store.Each<const scene::WeatherCompute, const scene::WeatherClock, StatefulWeatherState>(
@@ -864,6 +984,11 @@ namespace engine::weather {
 						controls.WindMetresPerSecond.Z
 					};
 					forcing.WindRelaxationPerSecond = 1;
+					for (size_t axis = 0; axis < 3; ++axis)
+						if (state.Simulation.Definition.Grid.Boundaries[axis] == SolverBoundary::Open ||
+							state.Simulation.Definition.Grid.Boundaries[axis] == SolverBoundary::GroundOpen)
+							forcing.OpenVelocityMetresPerSecond[axis] =
+								forcing.WindTargetMetresPerSecond[axis];
 					const bool windChanged = forcing.WindTargetMetresPerSecond !=
 											 state.Simulation.ForcingHistory.back().WindTargetMetresPerSecond;
 					if (windChanged && !AddSimulationForcing(state.Simulation, forcing, true)) {

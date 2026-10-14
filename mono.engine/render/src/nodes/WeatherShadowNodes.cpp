@@ -59,8 +59,46 @@ namespace engine::render {
 			}
 			const auto *description = Pipeline->Graph.FindResource(context.Writes.front());
 			if (!description || description->Kind != graph::ResourceKind::Storage ||
-				description->Format != graph::ResourceFormat::RGBA16F)
-				return false;
+				description->Format != graph::ResourceFormat::RGBA16F) {
+				found->Shadows = {};
+				core::Metrics::Count("render.weather.shadow_resource_refusals", 1);
+				return true;
+			}
+			const auto retainCompatible = [&] {
+				const auto retained = State->FindGraphTarget(
+					*Pipeline, description->Name, graph::NodeScope::World, Request.World
+				);
+				if (retained.IsValid() && retained.Texture == found->Shadows.Texture &&
+					retained.Width == plan.Resolution && retained.Height == plan.Resolution * plan.Cascades &&
+					found->Shadows.Contents.Matches(plan.Signature, Command)) {
+					StageHistoryWrites(context, Command);
+					return true;
+				}
+				found->Shadows = {};
+				return true;
+			};
+			const auto retained =
+				State->FindGraphTarget(*Pipeline, description->Name, graph::NodeScope::World, Request.World);
+			if (retained.IsValid() && found->Shadows.Texture == retained.Texture &&
+				retained.Width == plan.Resolution && retained.Height == plan.Resolution * plan.Cascades &&
+				found->Shadows.Contents.Matches(plan.Signature, Command)) {
+				core::Metrics::Count("render.weather.shadow_cache_hits", 1);
+				StageHistoryWrites(context, Command);
+				return true;
+			}
+			auto *cells = GraphBuffer(context.Reads[0], context, false);
+			auto *pages = GraphBuffer(context.Reads[1], context, false);
+			if (!cells || !pages || cells != found->Cells || pages != found->Pages) {
+				core::Metrics::Count("render.weather.shadow_missing_fields", 1);
+				return retainCompatible();
+			}
+			if (!State->WeatherShadowCompute)
+				State->WeatherShadowCompute =
+					State->LoadComputePipeline("weather-shadow.comp", 0, 2, 1, 0, 8, 8);
+			if (!State->WeatherShadowCompute) {
+				core::Metrics::Count("render.weather.shadow_pipeline_refusals", 1);
+				return retainCompatible();
+			}
 			State->GraphResources.WorldNames[Request.World] = Request.Source->WorldName;
 			const auto target = State->EnsureGraphTarget(
 				*Pipeline,
@@ -70,20 +108,10 @@ namespace engine::render {
 				plan.Resolution * plan.Cascades,
 				true
 			);
-			if (!target.IsValid()) return false;
-			if (found->Shadows.Texture == target.Texture &&
-				found->Shadows.Contents.Matches(plan.Signature, Command)) {
-				core::Metrics::Count("render.weather.shadow_cache_hits", 1);
-				StageHistoryWrites(context, Command);
-				return true;
+			if (!target.IsValid()) {
+				core::Metrics::Count("render.weather.shadow_allocation_refusals", 1);
+				return retainCompatible();
 			}
-			auto *cells = GraphBuffer(context.Reads[0], context, false);
-			auto *pages = GraphBuffer(context.Reads[1], context, false);
-			if (!cells || !pages || cells != found->Cells || pages != found->Pages) return false;
-			if (!State->WeatherShadowCompute)
-				State->WeatherShadowCompute =
-					State->LoadComputePipeline("weather-shadow.comp", 0, 2, 1, 0, 8, 8);
-			if (!State->WeatherShadowCompute) return false;
 			EnterNamedPass(context.Name);
 			if (!RecordWeatherShadows(
 					Command,
@@ -95,8 +123,12 @@ namespace engine::render {
 					*inputs,
 					controls,
 					effectiveDensity
-				))
-				return false;
+				)) {
+				// A refused pass may have cycled the target. Never certify that backing as the old map.
+				found->Shadows = {};
+				core::Metrics::Count("render.weather.shadow_record_refusals", 1);
+				return true;
+			}
 			found->Shadows.Stage(plan, target.Texture, Command);
 			++Result.ComputeDispatches;
 			StageHistoryWrites(context, Command);

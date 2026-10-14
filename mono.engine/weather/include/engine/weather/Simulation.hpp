@@ -7,11 +7,15 @@
 #include <engine/weather/Weather.hpp>
 
 #include <array>
+#include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace engine::weather {
+	// A missing collision-ground sample is explicit, rather than an invented sea-level surface.
+	inline constexpr float NO_TERRAIN_HEIGHT = -std::numeric_limits<float>::max();
 
 	// Each axis uses paired periodic, impermeable or prescribed open boundaries.
 	enum class SolverBoundary : uint8_t {
@@ -19,9 +23,9 @@ namespace engine::weather {
 		Periodic,
 		// Both exterior faces are impermeable.
 		Closed,
-		// Both exterior faces use prescribed balanced velocity and copied inflow scalars.
+		// Both exterior faces use open pressure, a prescribed velocity target and copied inflow scalars.
 		Open,
-		// The vertical ground is closed; the top exchanges scalar diffusion with zero net dry-air flow.
+		// The vertical ground is closed; the top uses open pressure, air and scalar boundary conditions.
 		GroundOpen
 	};
 	// The first solver version keeps a bounded uniform grid independent of all viewers.
@@ -101,6 +105,9 @@ namespace engine::weather {
 		float MaximumVelocityMetresPerSecond = 256.0f;
 		float MaximumPressureGradientPascalsPerMetre = 64.0f;
 		float MaximumDivergencePerSecond = 0.002f;
+		uint32_t TerrainRevision = 1;
+		float GroundVapourFluxKilogramsPerSquareMetreSecond = 0;
+		float RainFallSpeedMetresPerSecond = 10;
 		// Compares every semantic field for checkpoint and replay verification.
 		bool operator==(const SimulationDefinition &) const = default;
 		//@}
@@ -128,6 +135,12 @@ namespace engine::weather {
 		SimulationDefinition Definition;
 		uint64_t Tick = 0;
 		std::vector<SolverCell> Cells;
+		// Accepted column heights use x+Nx*z; solid bits use the same cell order as Cells.
+		std::vector<float> GroundHeightMetres;
+		std::vector<uint8_t> SolidMask;
+		// Falling liquid remains in the water inventory until it reaches terrain or an exterior sink.
+		// Liquid sensible heat is omitted from the declared first dry-air/vapour enthalpy model.
+		std::vector<float> FallingCondensateKilogramsPerCubicMetre;
 		std::vector<SimulationForcing> ForcingHistory;
 		SimulationBudget Budget;
 		uint32_t LastSubsteps = 0;
@@ -147,6 +160,11 @@ namespace engine::weather {
 		std::vector<float> Pressure;
 		std::vector<float> NextPressure;
 		std::vector<float> Divergence;
+		std::vector<uint8_t> TerrainFlags;
+		std::vector<uint8_t> PressureNeighborCounts;
+		std::vector<uint8_t> SolidMask;
+		std::vector<float> GroundHeightMetres;
+		std::vector<float> NextFallingCondensate;
 		SimulationState Trial;
 		//@}
 	};
@@ -165,11 +183,14 @@ namespace engine::weather {
 	};
 	// Validates geometry, finite physics and all replay metadata without allocating.
 	[[nodiscard]] bool ValidateSimulation(const SimulationState &state);
+	// Bit0 is solid, bit1 is a real ground-contact source face. No device layout is exposed.
+	[[nodiscard]] uint32_t SimulationCellFlags(const SimulationState &state, size_t index);
 	// Builds a validated fixed-domain state with uniform initial conditions.
 	[[nodiscard]] std::optional<SimulationState> CreateSimulation(
 		const SimulationDefinition &definition,
 		const SolverCell &initial,
-		const SimulationForcing &forcing = {}
+		const SimulationForcing &forcing = {},
+		std::span<const float> groundHeightMetres = {}
 	);
 	// Converts authored stateful controls into the declared canonical solver, never a camera LOD.
 	[[nodiscard]] std::optional<SimulationDefinition>

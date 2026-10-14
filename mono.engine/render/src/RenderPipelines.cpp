@@ -164,6 +164,8 @@ namespace engine::render {
 		SDL_GPUShader *deferredLightingFragment =
 			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 4);
 		SDL_GPUShader *skyFragment = LoadShader("sky.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
+		SDL_GPUShader *weatherFallbackFragment =
+			LoadShader("weather-fallback.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 2);
 		SDL_GPUShader *volumeFragment = LoadShader("volume.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1, 1);
 		SDL_GPUShader *bloomFragment = LoadShader("bloom.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
 		SDL_GPUShader *depthOfFieldFragment = LoadShader("dof.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
@@ -422,6 +424,9 @@ namespace engine::render {
 			DeferredLightingPipeline =
 				fullscreen(deferredLightingFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+			if (weatherFallbackFragment)
+				WeatherFallbackPipeline =
+					fullscreen(weatherFallbackFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			VolumePipeline = fullscreen(volumeFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			BloomPipeline = fullscreen(bloomFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			DepthOfFieldPipeline = fullscreen(depthOfFieldFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
@@ -940,6 +945,7 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(Device, packChannelsFragment);
 		SDL_ReleaseGPUShader(Device, deferredLightingFragment);
 		SDL_ReleaseGPUShader(Device, skyFragment);
+		if (weatherFallbackFragment) SDL_ReleaseGPUShader(Device, weatherFallbackFragment);
 		SDL_ReleaseGPUShader(Device, tonemapFragment);
 		SDL_ReleaseGPUShader(Device, overlayVertex);
 		SDL_ReleaseGPUShader(Device, imageFragment);
@@ -974,7 +980,7 @@ namespace engine::render {
 			WeatherRaysCompute = LoadComputePipeline("weather-clouds.comp", 2, 4, 2, 0, 8, 8);
 			WeatherTemporalCompute = LoadComputePipeline("weather-temporal.comp", 4, 0, 1, 0, 8, 8);
 			WeatherReconstructCompute = LoadComputePipeline("weather-reconstruct.comp", 4, 0, 1, 0, 8, 8);
-			WeatherEvolutionCompute = LoadComputePipeline("weather-evolve.comp", 0, 3, 0, 4, 64, 1);
+			WeatherEvolutionCompute = LoadComputePipeline("weather-evolve.comp", 0, 5, 0, 5, 64, 1);
 		}
 
 		// **The particle pipelines are deliberately not in this conjunction.** A
@@ -982,6 +988,8 @@ namespace engine::render {
 		// failing initialisation over an effect would take the whole client down
 		// for something a scene may not even use. `DrawParticles` checks for null
 		// and draws nothing, with the error already in the log above.
+		// Environment and weather compute are optional too: the sky handler uses
+		// the fragment approximation when those products cannot be published.
 		return OpaquePipeline != nullptr && ForwardPipeline != nullptr && TransparentPipeline != nullptr &&
 			   PackedOpaquePipeline != nullptr && PackedForwardPipeline != nullptr &&
 			   PackedTransparentPipeline != nullptr && PackedMeshShadowPipeline != nullptr &&
@@ -993,8 +1001,7 @@ namespace engine::render {
 				 DepthValidityPipeline != nullptr && CameraMotionPipeline != nullptr &&
 				 SsaoPipeline != nullptr && DeferredLightingPipeline != nullptr && SkyPipeline != nullptr &&
 				 VolumePipeline != nullptr && TonemapPipeline != nullptr)) &&
-			   (!Caps.HasCompute || (EnvironmentSkyCompute != nullptr && EnvironmentCloudCompute != nullptr &&
-									 Lod.Select != nullptr));
+			   (!Caps.HasCompute || Lod.Select != nullptr);
 	}
 
 	bool Renderer::Impl::EnsureTransparentLayer() {

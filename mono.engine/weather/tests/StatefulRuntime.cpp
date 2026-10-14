@@ -7,6 +7,7 @@
 #include <engine/weather/Runtime.hpp>
 #include <engine/weather/StatefulRuntime.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 TEST_SUITE_ID("engine.weather.statefulruntime")
@@ -232,6 +233,85 @@ TEST_CASE("replica consumer queries read checkpoint cells without a CPU grid mir
 	const uint64_t writes = replica.ComponentChangeVersion<weather::StatefulWeatherCheckpoint>();
 	CHECK(weather::QueryStatefulWeather(replica, local, {16, 64, 0}));
 	CHECK(replica.ComponentChangeVersion<weather::StatefulWeatherCheckpoint>() == writes);
+	auto corrupted = *replica.Get<weather::StatefulWeatherCheckpoint>(local);
+	REQUIRE(corrupted.Queries);
+	corrupted.Bytes[corrupted.Queries->CellOffset] ^= std::byte{1};
+	replica.Set(local, corrupted);
+	CHECK_FALSE(weather::QueryStatefulWeather(replica, local, {0, 64, 0}));
+	replica.Set(local, checkpoint);
+	CHECK(weather::QueryStatefulWeather(replica, local, {0, 64, 0}));
+}
+
+TEST_CASE("replica terrain and precipitation queries use saved falling water", "[weather][stateful]") {
+	Register();
+	ecs::Store authority("terrain.authority");
+	const auto provider = authority.Create("weather");
+	auto controls = Controls();
+	controls.WindMetresPerSecond = {};
+	controls.FogStrength = 1;
+	authority.Set(provider, controls);
+	authority.SetResource(
+		weather::WeatherGroundQuery{[](const ecs::Store &, core::Vector3, float) -> std::optional<float> {
+			return 64;
+		}}
+	);
+	Tick(authority, 0);
+	auto *state = authority.GetMutable<weather::StatefulWeatherState>(provider);
+	REQUIRE(state);
+	for (size_t index = 0; index < state->Simulation.Cells.size(); ++index) {
+		if (weather::SimulationCellFlags(state->Simulation, index) & 1) continue;
+		state->Simulation.Cells[index].TemperatureCelsius = -20;
+		state->Simulation.Cells[index].VapourKilogramsPerKilogram = 0.03f;
+		state->Simulation.Cells[index].VelocityMetresPerSecond = {};
+		state->Simulation.FallingCondensateKilogramsPerCubicMetre[index] = 0.0002f;
+	}
+	state->Simulation.Budget.InitialWaterKilograms = weather::SimulationWaterKilograms(state->Simulation);
+	state->Simulation.Budget.InitialEnthalpyJoules = weather::SimulationEnthalpyJoules(state->Simulation);
+	REQUIRE(weather::PublishStatefulCheckpoint(authority, provider));
+	ecs::Store replica("terrain.replica");
+	const auto local = replica.Create("weather");
+	replica.Set(local, controls);
+	replica.Set(local, *authority.Get<weather::StatefulWeatherCheckpoint>(provider));
+	replica.SetAdoptOnly(true);
+	CHECK_FALSE(weather::QueryStatefulWeather(authority, provider, {0, 32, 0}));
+	CHECK_FALSE(weather::QueryStatefulWeather(replica, local, {0, 32, 0}));
+	const auto reference = weather::QueryStatefulWeather(authority, provider, {0, 64, 0}, 0);
+	const auto sampled = weather::QueryStatefulWeather(replica, local, {0, 64, 0}, 0);
+	REQUIRE(reference);
+	REQUIRE(sampled);
+	CHECK(reference->Precipitation.SnowMillimetresPerHour == Catch::Approx(7.2f).epsilon(0.00001));
+	CHECK(sampled->Precipitation.SnowMillimetresPerHour == reference->Precipitation.SnowMillimetresPerHour);
+	CHECK(sampled->Precipitation.LiquidMillimetresPerHour == 0);
+	CHECK(sampled->FogExtinctionPerMetre > 0);
+	CHECK(sampled->FogExtinctionPerMetre == reference->FogExtinctionPerMetre);
+	CHECK_FALSE(replica.Has<weather::StatefulWeatherState>(local));
+	REQUIRE(replica.Get<weather::StatefulWeatherCheckpoint>(local)->Queries);
+	CHECK(
+		replica.Get<weather::StatefulWeatherCheckpoint>(local)->Queries->GroundHeightMetres ==
+		std::vector<float>(16, 64)
+	);
+}
+
+TEST_CASE(
+	"canonical storm columns keep positive hash endpoints inside terrain bounds", "[weather][stateful]"
+) {
+	auto definition = weather::MakeSimulationDefinition(Controls());
+	REQUIRE(definition);
+	auto simulation =
+		weather::CreateSimulation(*definition, weather::SolverCell{}, {}, std::vector<float>(16, 512));
+	REQUIRE(simulation);
+	weather::StatefulWeatherState state;
+	state.Simulation = *simulation;
+	state.Seed = 1;
+	state.LayerKey = 3477690857u;
+	state.Simulation.Definition.WorldEpoch = 1;
+	const auto column = weather::StatefulEventColumn(state, 58783);
+	CHECK(column.X >= -128);
+	CHECK(column.X < 128);
+	CHECK(column.Z >= -128);
+	CHECK(column.Z < 128);
+	CHECK(weather::StatefulEventColumnBlocked(state, column));
+	CHECK_FALSE(weather::StatefulEventColumnBlocked(state, {128, column.Y, column.Z}));
 }
 
 TEST_CASE("wind changes begin at their accepted phase anchor across solver backlog", "[weather][stateful]") {

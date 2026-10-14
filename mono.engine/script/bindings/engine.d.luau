@@ -749,7 +749,13 @@ end
 declare extern type Enum_VolumeShape extends EnumItem with
 end
 
+declare extern type Enum_WeatherBoundary extends EnumItem with
+end
+
 declare extern type Enum_WeatherMode extends EnumItem with
+end
+
+declare extern type Enum_WeatherTopBoundary extends EnumItem with
 end
 
 declare extern type Enum_ZIndexBehavior extends EnumItem with
@@ -1223,9 +1229,18 @@ declare Enum: {
 		Box: Enum_VolumeShape,
 		Ellipsoid: Enum_VolumeShape,
 	},
+	WeatherBoundary: {
+		Periodic: Enum_WeatherBoundary,
+		Closed: Enum_WeatherBoundary,
+		Open: Enum_WeatherBoundary,
+	},
 	WeatherMode: {
 		Procedural: Enum_WeatherMode,
 		Stateful: Enum_WeatherMode,
+	},
+	WeatherTopBoundary: {
+		Closed: Enum_WeatherTopBoundary,
+		Escape: Enum_WeatherTopBoundary,
 	},
 	ZIndexBehavior: {
 		Global: Enum_ZIndexBehavior,
@@ -1515,6 +1530,8 @@ declare extern type Instance with
 	function ApplyImpulse(self, impulse: Vector3): ()
 	function SetAppliedForce(self, force: Vector3): ()
 	function SetAppliedTorque(self, torque: Vector3): ()
+	-- WeatherCompute only. Missing, disabled or unavailable models return nil.
+	function Sample(self, positionMetres: Vector3, groundHeightMetres: number?): WeatherSample?
 	function SetSpawnSamples(self, samples: buffer): boolean
 	function SetLayer(self, index: number, colour: Color3, alpha: number, size: number, acceleration: Vector3): boolean
 	function Break(self): number
@@ -2150,6 +2167,8 @@ declare extern type WeatherCompute extends CloudCompute with
 	BaseHeightMetres: number
 	BasePressureHectopascals: number
 	BaseTemperatureCelsius: number
+	BoundaryX: Enum_WeatherBoundary
+	BoundaryZ: Enum_WeatherBoundary
 	CellSizeMetres: number
 	CondensateScale: number
 	Coverage: number
@@ -2158,6 +2177,7 @@ declare extern type WeatherCompute extends CloudCompute with
 	FeatureCells: number
 	FogStrength: number
 	FrontContrast: number
+	GroundVapourFluxKilogramsPerSquareMetreSecond: number
 	GrowthRate: number
 	HailIntensity: number
 	IceFraction: number
@@ -2173,6 +2193,7 @@ declare extern type WeatherCompute extends CloudCompute with
 	Paused: boolean
 	PrecipitationRate: number
 	PressureVariationHectopascals: number
+	RainFallSpeedMetresPerSecond: number
 	ShadowCascades: number
 	ShadowDistanceMetres: number
 	ShadowResolution: number
@@ -2183,9 +2204,11 @@ declare extern type WeatherCompute extends CloudCompute with
 	StormIntensity: number
 	TemperatureLapseCelsiusPerKilometre: number
 	TemperatureVariationCelsius: number
+	TerrainRevision: number
 	ThicknessMetres: number
 	TickRate: number
 	TimeScale: number
+	TopBoundary: Enum_WeatherTopBoundary
 	TurbulenceMetresPerSecond: number
 	VapourMixingRatio: number
 	VapourScale: number
@@ -3481,6 +3504,30 @@ declare extern type RunService with
 	-- belong to somebody else. A single-player process is a server whose
 	-- client-side world is still a replica.
 	function IsReplica(self): boolean
+end
+
+-- Copied accepted weather values in the named physical units. Tick and Epoch are exact decimal
+-- uint64 text. Mutating this dictionary never changes the atmosphere.
+declare extern type WeatherSample with
+	Layer: string
+	Mode: string
+	Tick: string
+	Epoch: string
+	DefinitionRevision: number
+	CondensateKilogramsPerCubicMetre: number
+	VapourKilogramsPerKilogram: number
+	TemperatureCelsius: number
+	PressureHectopascals: number
+	WindMetresPerSecond: Vector3
+	IceFraction: number
+	LiquidMillimetresPerHour: number
+	SnowMillimetresPerHour: number
+	HailMillimetresPerHour: number
+	MeltingFraction: number
+	SpawnSeed: number
+	FogExtinctionPerMetre: number
+	ChargeSeparation: number
+	HailGrowth: number
 end
 
 -- The shared analytical tornado field. Configure and Preset require the
