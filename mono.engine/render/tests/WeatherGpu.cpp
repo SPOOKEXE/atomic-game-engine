@@ -421,23 +421,25 @@ TEST_CASE(
 	environment.Weather.FeatureCells = 8;
 	environment.Weather.WindMetresPerSecond = {};
 	environment.Weather.Seed = 17;
-	view.Camera.FarPlane = 8;
-	view.CameraFrame.Position = {0, 0, -20};
-	OverlayImage overlay;
-	const auto clippedFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
-	REQUIRE(clippedFrame.Submitted);
-	const auto clipped = test::CaptureResource(
-		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, test::ImageFormat::Rgba8Unorm
-	);
-	view.CameraFrame.Position = {};
 	view.Camera.FarPlane = 32;
+	view.CameraFrame.Position = {};
+	OverlayImage overlay;
 	const auto insideFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 	REQUIRE(insideFrame.Submitted);
 	CHECK(insideFrame.Ran(core::Name("weather-integrate")));
 	const auto inside = test::CaptureResource(
 		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, test::ImageFormat::Rgba8Unorm
 	);
+	view.CameraFrame.Position = {0, 0, -20};
+	view.Camera.FarPlane = 8;
+	const auto clippedFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(clippedFrame.Submitted);
+	const auto clipped = test::CaptureResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, test::ImageFormat::Rgba8Unorm
+	);
 	CHECK(test::CompareImages(clipped.View(), inside.View()).MismatchedPixels > 0);
+	view.CameraFrame.Position = {};
+	view.Camera.FarPlane = 32;
 	view.Lighting.Ambient = {};
 	view.Lighting.Direct = {};
 	REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
@@ -483,6 +485,21 @@ TEST_CASE(
 		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, test::ImageFormat::Rgba8Unorm
 	);
 	CHECK(test::CompareImages(inside.View(), restored.View()).Passed());
+
+	// Both images start with empty renderer-owned weather history.
+	const double beforeDeviceRecreation = counter("render.weather.field_dispatches");
+	fixture.Render.Shutdown();
+	REQUIRE(fixture.Render.Initialise(nullptr));
+	REQUIRE(fixture.Render.IsHeadless());
+	REQUIRE(fixture.Render.SetPipeline(pipeline, graph));
+	const auto recreatedFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(recreatedFrame.Submitted);
+	CHECK(recreatedFrame.Ran(core::Name("weather-integrate")));
+	CHECK(counter("render.weather.field_dispatches") == beforeDeviceRecreation + 1);
+	const auto recreated = test::CaptureResource(
+		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, test::ImageFormat::Rgba8Unorm
+	);
+	CHECK(test::CompareImages(inside.View(), recreated.View()).Passed());
 
 	environment.Weather.ShadowsEnabled = false;
 	view.CameraFrame.Position = {0, 0, 12};

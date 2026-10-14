@@ -43,7 +43,7 @@ headless planning tests do not establish rendered behavior or device performance
 | Stage | Current evidence | Remaining gate |
 |---|---|---|
 | 1. Contract and dense slice | `weather/Weather` fixtures cover canonical bytes, signed/range refusal, batched parity and huge ticks; the field/ray shaders compile | Run CPU/GPU byte comparisons, including phase-wrap and UINT64_MAX fixtures, and fly-through image checks |
-| 2. Time and lifecycle | `weather/Clock`, `scene/WeatherClock` and replication `Negotiation` cover cold joins, frame counts, saved anchors, correction, pause and both wire transports | Verify desired-page reconstruction after actual graphics resource recreation |
+| 2. Time and lifecycle | `weather/Clock`, `scene/WeatherClock` and replication `Negotiation` cover cold joins, frame counts, saved anchors, correction, pause and both wire transports; the device-recreation fixture is compiled | Run the cold-frame comparison and fresh field-dispatch check after actual graphics resource recreation |
 | 3. Sparse residency | Shared and renderer residency suites cover coarse coverage, budgets, stable multi-view unions, motion, teleports, empty certificates and retained generations | Run dense/sparse device sample and eviction/refill image checks |
 | 4. Lazy LOD and assemblies | Assembly/residency suites prove exact totals, separate velocities, canonical reconstruction, hysteresis and bounded maintenance | Verify compact pages and topology transitions in real volume integration |
 | 5. Lighting and shadows | Temporal/shadow suites prove cache keys, disocclusion policy, caster bounds, publication and optional work; real-device fixtures are compiled | Check inside/above/ground images, offscreen casters and shadow disable behavior on a device |
