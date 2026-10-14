@@ -525,6 +525,7 @@ namespace engine::audio {
 
 		Rendered += frames;
 		report.EndSample = Rendered;
+		PublishedRendered.store(Rendered, std::memory_order_relaxed);
 		return report;
 	}
 }

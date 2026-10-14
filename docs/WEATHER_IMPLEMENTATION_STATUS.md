@@ -77,12 +77,13 @@ and the shared `ci` targets also build. The current central checks passed:
 | World | 34,188 | 294 |
 | Weather rendering, headless | 118,100 | 47 |
 | Weather thunder adapter, headless | 1,287 | 5 |
-| Audio mixer | 16,740 | 35 |
+| Audio mixer | 16,743 | 36 |
 
 The first complete headless presentation run exposed two incorrect fixtures
 (a cadence boundary and an atmosphere response) and a real thunder scheduling
 issue. The corrected fixtures and opt-in exact playback scheduling now pass.
-An atomic producer-readable audio sample clock is the next small concurrency fix.
+The mixer now publishes its completed-block sample clock atomically for producer
+reads; the headless callback/producer concurrency case passes.
 The architecture graph and all six architecture fixtures pass. Source scanning
 reports zero open ownership, crossing-pointer or serialized-name-ID findings.
 Its 40 public-header reports are advisory and include existing forward APIs.
@@ -94,7 +95,8 @@ edits create an explicit new physics era after candidate validation; wind and
 appearance edits preserve evolved cells. Failed initialization records a local
 saved diagnostic so corrective edits can recover without an invalid checkpoint.
 
-The demo uses canonical weather rain, wind and lightning. Its two authored fog
+The demo starts in procedural mode and uses canonical weather rain, wind and
+lightning. Its two authored fog
 volumes remain local appearance controls. Independent authored GPU particle
 fields still compose with weather precipitation.
 

@@ -94,6 +94,17 @@ TEST_CASE("weather preset controls write canonical wind and precipitation", "[ex
 		CHECK(weather->PrecipitationRate == Catch::Approx(preset.Precipitation));
 		CHECK(weather->LightningRate == Catch::Approx(preset.Lightning));
 	}
+	const auto modeButton = NamedInstance(store, "Weather Stateful Checkpoint");
+	REQUIRE(modeButton != engine::ecs::NULL_ENTITY);
+	for (const auto expected :
+		 {engine::scene::WeatherMode::Stateful, engine::scene::WeatherMode::Procedural}) {
+		engine::gui::GuiEvent click;
+		click.Kind = engine::gui::EventKind::Activated;
+		click.Instance = modeButton;
+		runtime->DeliverGuiEvents(std::span(&click, 1));
+		REQUIRE(runtime->Heartbeat(0));
+		CHECK(store.Get<engine::scene::WeatherCompute>(provider)->Mode == expected);
+	}
 }
 
 TEST_CASE(
@@ -159,7 +170,7 @@ TEST_CASE(
 	CHECK(lighting.EnvironmentState.HasCloudCompute);
 	CHECK(lighting.EnvironmentState.HasWeatherCompute);
 	CHECK(lighting.EnvironmentState.Skybox == engine::scene::SkyboxSource::Compute);
-	CHECK(lighting.EnvironmentState.Weather.Mode == engine::scene::WeatherMode::Stateful);
+	CHECK(lighting.EnvironmentState.Weather.Mode == engine::scene::WeatherMode::Procedural);
 	CHECK(lighting.EnvironmentState.Weather.LayerName == engine::core::Name("weather-demo"));
 	CHECK(lighting.EnvironmentState.Weather.CellSizeMetres == Catch::Approx(64.0f));
 	CHECK(lighting.EnvironmentState.Weather.BaseHeightMetres == Catch::Approx(1024.0f));
@@ -184,7 +195,7 @@ TEST_CASE(
 		);
 		CHECK(store.Has<engine::scene::Clouds>(provider));
 		CHECK(store.Has<engine::scene::CloudCompute>(provider));
-		CHECK(weather.Mode == engine::scene::WeatherMode::Stateful);
+		CHECK(weather.Mode == engine::scene::WeatherMode::Procedural);
 		CHECK(weather.TickRate == 20);
 		CHECK(weather.MaximumResidentBricks == 512);
 		CHECK(weather.ShadowsEnabled);

@@ -203,7 +203,7 @@ weather.Thickness = 0.68
 weather.Steps = 32
 weather.Seed = 1337
 weather.LayerName = "weather-demo"
-weather.Mode = Enum.WeatherMode.Stateful
+weather.Mode = Enum.WeatherMode.Procedural
 weather.CellSizeMetres = 64
 weather.BaseHeightMetres = 1024
 weather.ThicknessMetres = 1024
@@ -343,7 +343,7 @@ local fogSize = 1
 local fogSquash = 1
 local fogFluff = 1
 local viewName = "GROUND"
-local weatherMode = "STATEFUL"
+local weatherMode = "PROCEDURAL"
 local weatherPaused = false
 
 local function applyWeather(preset: Weather)
@@ -535,7 +535,7 @@ shapeSlider.Activated:Connect(function()
 	end
 end)
 
-local modeControl = button("Weather Stateful Checkpoint", "STATEFUL", 0, 8)
+local modeControl = button("Weather Stateful Checkpoint", "PROCEDURAL", 0, 8)
 modeControl.Position = UDim2.new(0, 12, 0, 334)
 modeControl.Size = UDim2.new(0, 108, 0, 28)
 modeControl.Activated:Connect(function()
