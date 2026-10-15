@@ -6,10 +6,12 @@
 // the screen rather than take the launcher down, and none of them is visible in
 // a screenshot of a launcher that started successfully.
 
+#include <engine/core/Arguments.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <launcher/Description.hpp>
 
 TEST_SUITE_ID("launcher.description")
@@ -50,6 +52,32 @@ TEST_CASE("a described program yields its two surfaces", "[launcher]") {
 
 	CHECK(description->Settings[0].Kind == "boolean");
 	CHECK(description->Settings[0].Default == "false");
+}
+
+TEST_CASE("generated option descriptions survive registration and parse as launcher JSON", "[launcher]") {
+	engine::core::Arguments arguments("client", "Generated command-line metadata");
+	const std::string expectedDescription =
+		"Listen for Model Context Protocol on 127.0.0.1:PORT (conventionally " + std::to_string(8738) +
+		") with \"quoted\" UTF-8 café " + std::string(128, 'x');
+	{
+		std::string temporaryDescription = expectedDescription;
+		arguments.Value("mcp-port", "PORT", temporaryDescription);
+		std::fill(temporaryDescription.begin(), temporaryDescription.end(), '!');
+	}
+	for (int index = 0; index < 32; index++) {
+		arguments.Flag("extra-" + std::to_string(index), std::string(128, 'x'));
+	}
+
+	std::string failure;
+	const auto description = ParseDescription(arguments.Describe(), failure);
+	INFO(failure);
+	REQUIRE(description.has_value());
+	CHECK(failure.empty());
+	const auto *option = description->Option("mcp-port");
+	REQUIRE(option != nullptr);
+	CHECK(option->TakesValue);
+	CHECK(option->ValueName == "PORT");
+	CHECK(option->Description == expectedDescription);
 }
 
 TEST_CASE("options can be looked up by name", "[launcher]") {

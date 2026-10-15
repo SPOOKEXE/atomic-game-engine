@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <string>
 #include <vector>
 
 TEST_SUITE_ID("engine.core.arguments")
@@ -210,4 +212,48 @@ TEST_CASE("describe escapes what a description may legally contain", "[arguments
 	// contains a quote. Emitting it raw produces JSON that parses into the
 	// wrong shape rather than failing, which is the worse of the two outcomes.
 	REQUIRE(json.find(R"(Use \"quotes\" and a \\backslash)") != std::string::npos);
+}
+
+TEST_CASE("argument declarations own temporary text used after registration", "[arguments]") {
+	const std::string expectedProgram = "dynamic-" + std::string(64, 'p');
+	const std::string expectedSummary = "Generated summary " + std::string(128, 's');
+	const std::string expectedFlagDescription = "Generated flag description " + std::string(128, 'f');
+	const std::string expectedValueDescription = "Generated value description " + std::string(128, 'v');
+	auto arguments = [&] {
+		std::string program = expectedProgram;
+		std::string summary = expectedSummary;
+		std::string flagName = "stats";
+		std::string flagDescription = expectedFlagDescription;
+		std::string valueName = "frames";
+		std::string placeholder = "COUNT";
+		std::string valueDescription = expectedValueDescription;
+		Arguments declared(program, summary);
+		declared.Flag(flagName, flagDescription);
+		declared.Value(valueName, placeholder, valueDescription);
+		// Overwrite while the buffers are live, then destroy them before reading declarations.
+		for (std::string *text :
+			 {&program, &summary, &flagName, &flagDescription, &valueName, &placeholder, &valueDescription}) {
+			std::fill(text->begin(), text->end(), '!');
+		}
+		return declared;
+	}();
+	for (int index = 0; index < 32; index++) {
+		arguments.Flag("extra-" + std::to_string(index), std::string(128, 'x'));
+	}
+
+	CommandLine line{"--stats", "--frames=17"};
+	REQUIRE(arguments.Parse(line.Count(), line.Values()).Ok);
+	CHECK(arguments.Has("stats"));
+	CHECK(arguments.GetInteger("frames", -1) == 17);
+	const std::string help = arguments.Help();
+	CHECK(help.find(expectedProgram) != std::string::npos);
+	CHECK(help.find(expectedSummary) != std::string::npos);
+	CHECK(help.find(expectedFlagDescription) != std::string::npos);
+	CHECK(help.find(expectedValueDescription) != std::string::npos);
+	CHECK(help.find("--frames COUNT") != std::string::npos);
+	const std::string json = arguments.Describe();
+	CHECK(json.find(expectedProgram) != std::string::npos);
+	CHECK(json.find(expectedSummary) != std::string::npos);
+	CHECK(json.find(expectedFlagDescription) != std::string::npos);
+	CHECK(json.find(expectedValueDescription) != std::string::npos);
 }

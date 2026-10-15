@@ -113,9 +113,9 @@ namespace engine::core {
 		// instead of silently defaulting at two call sites.
 		Options.push_back(
 			Option{
-				.Name = name,
+				.Name = std::string(name),
 				.ValueName = {},
-				.Description = description,
+				.Description = std::string(description),
 				.TakesValue = false,
 				.Present = false,
 				.Given = {},
@@ -129,9 +129,9 @@ namespace engine::core {
 	Arguments::Value(std::string_view name, std::string_view valueName, std::string_view description) {
 		Options.push_back(
 			Option{
-				.Name = name,
-				.ValueName = valueName,
-				.Description = description,
+				.Name = std::string(name),
+				.ValueName = std::string(valueName),
+				.Description = std::string(description),
 				.TakesValue = true,
 				.Present = false,
 				.Given = {},
