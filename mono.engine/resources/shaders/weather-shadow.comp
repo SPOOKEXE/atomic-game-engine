@@ -63,23 +63,18 @@ float CodeAt(ivec3 coordinate, uint lod) {
 		uint offset = (uint(descriptor.w) >> 7u) / 2u;
 		if (kind == 1u) {
 			uvec2 address = WeatherAssemblyAddress(local);
-			uint words[8];
-			for (uint pair = 0u; pair < 4u; ++pair) {
-				uvec2 packed = field.cells[offset + address.x * 4u + pair];
-				words[pair * 2u] = packed.x;
-				words[pair * 2u + 1u] = packed.y;
-			}
-			if (WeatherAssemblyUnsafe(words))
-				return float(WeatherEvaluate(pass.Field, coordinate).x & 255u) / 255.0;
+			uvec2 scalarWords = field.cells[offset + address.x * 4u];
+			if (WeatherAssemblyUnsafe(scalarWords))
+				return float(WeatherDensityCode(pass.Field, coordinate)) / 255.0;
 			approximationUsed = true;
-			return float(WeatherAssemblyDecode(words, address.y).x & 255u) / 255.0;
+			return float(WeatherAssemblyDensityCode(scalarWords, address.y)) / 255.0;
 		}
 		if (lod > 0u) approximationUsed = true;
 		uint index = offset + local.x + 8u * (local.y + 8u * local.z);
 		return float(field.cells[index].x & 255u) / 255.0;
 	}
 	if (pass.Quality.w != 0u) return 0.0;
-	return float(WeatherEvaluate(pass.Field, coordinate).x & 255u) / 255.0;
+	return float(WeatherDensityCode(pass.Field, coordinate)) / 255.0;
 }
 
 float DensityAtLod(vec3 canonical, uint lod) {
@@ -111,7 +106,7 @@ float DensityAt(vec3 world) {
 		vec3 weight = fract(canonical);
 		float fine = 0.0;
 		for (uint z = 0u; z < 2u; ++z) for (uint y = 0u; y < 2u; ++y) for (uint x = 0u; x < 2u; ++x) {
-			float code = float(WeatherEvaluate(pass.Field, cell + ivec3(x, y, z)).x & 255u) / 255.0;
+			float code = float(WeatherDensityCode(pass.Field, cell + ivec3(x, y, z))) / 255.0;
 			vec3 blend = mix(vec3(1.0) - weight, weight, vec3(x, y, z));
 			fine += code * blend.x * blend.y * blend.z;
 		}

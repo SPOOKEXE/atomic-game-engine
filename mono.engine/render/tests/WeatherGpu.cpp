@@ -6,6 +6,8 @@
 
 #include <engine/core/Metrics.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/msl/Translate.hpp>
+#include <engine/render/ShaderCompiler.hpp>
 #include <engine/resources/Shaders.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/weather/Clock.hpp>
@@ -17,6 +19,7 @@
 #include <array>
 #include <chrono>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -28,6 +31,40 @@ TEST_DEPENDS("engine.weather.weather")
 namespace {
 	using namespace engine;
 	using namespace engine::render;
+
+	SDL_GPUComputePipeline *RuntimeWeatherOraclePipeline(
+		SDL_GPUDevice *device, std::string_view source, std::string_view label, uint32_t uniformBuffers = 0
+	) {
+		const auto formats = SDL_GetGPUShaderFormats(device);
+		if (!(formats & (SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL)))
+			SKIP("weather kernel oracles require SPIR-V or runtime-translated MSL");
+		ShaderCompiler compiler;
+		const auto compiled = compiler.Compile(source, ShaderStage::Compute, label);
+		INFO(compiled.Error);
+		REQUIRE_FALSE(compiled.Failed);
+		SDL_GPUComputePipelineCreateInfo info{};
+		std::string metalSource;
+		if (formats & SDL_GPU_SHADERFORMAT_SPIRV) {
+			info.code = reinterpret_cast<const Uint8 *>(compiled.SpirV.data());
+			info.code_size = compiled.SpirV.size() * sizeof(uint32_t);
+			info.entrypoint = "main";
+			info.format = SDL_GPU_SHADERFORMAT_SPIRV;
+		} else {
+			auto translated = msl::Translate(compiled.SpirV);
+			INFO(translated.Error);
+			REQUIRE_FALSE(translated.Failed);
+			metalSource = std::move(translated.Source);
+			info.code = reinterpret_cast<const Uint8 *>(metalSource.data());
+			info.code_size = metalSource.size();
+			info.entrypoint = msl::ENTRY_POINT;
+			info.format = SDL_GPU_SHADERFORMAT_MSL;
+		}
+		info.num_readwrite_storage_buffers = 1;
+		info.num_uniform_buffers = uniformBuffers;
+		info.threadcount_x = 64;
+		info.threadcount_y = info.threadcount_z = 1;
+		return SDL_CreateGPUComputePipeline(device, &info);
+	}
 
 	SDL_GPUComputePipeline *FieldPipeline(SDL_GPUDevice *device) {
 		const auto binary = ShaderBinaryFor(device);
@@ -68,13 +105,15 @@ namespace {
 		SDL_GPUTransferBufferLocation location{transfer.get(), 0};
 		SDL_DownloadFromGPUBuffer(copy, &region, &location);
 		SDL_EndGPUCopyPass(copy);
-		auto *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+		const auto releaseFence = [device](SDL_GPUFence *fence) { SDL_ReleaseGPUFence(device, fence); };
+		std::unique_ptr<SDL_GPUFence, decltype(releaseFence)> fence(
+			SDL_SubmitGPUCommandBufferAndAcquireFence(command), releaseFence
+		);
 		REQUIRE(fence);
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-		while (!SDL_QueryGPUFence(device, fence) && std::chrono::steady_clock::now() < deadline)
+		while (!SDL_QueryGPUFence(device, fence.get()) && std::chrono::steady_clock::now() < deadline)
 			SDL_Delay(1);
-		REQUIRE(SDL_QueryGPUFence(device, fence));
-		SDL_ReleaseGPUFence(device, fence);
+		REQUIRE(SDL_QueryGPUFence(device, fence.get()));
 		const void *mapped = SDL_MapGPUTransferBuffer(device, transfer.get(), false);
 		REQUIRE(mapped);
 		std::vector<std::array<uint32_t, 2>> result(count);
@@ -408,6 +447,7 @@ TEST_CASE("weather GPU generated words agree with canonical CPU samples", "[rend
 		 {SampleCase{0, shift, origin},
 		  SampleCase{6, shift, origin},
 		  SampleCase{7, shift, origin},
+		  SampleCase{128, shift, origin},
 		  SampleCase{249, shift, origin},
 		  SampleCase{250, shift, origin},
 		  SampleCase{251, shift, origin},
@@ -849,4 +889,222 @@ TEST_CASE("stateful GPU shares one physical owner across two graph pipelines", "
 	REQUIRE(releasedPhysicalOwners);
 	CHECK(releasedPhysicalOwners->Value == 0);
 	CHECK_FALSE(fixture.Render.HasPendingWeatherWork(views[0].World));
+}
+
+TEST_CASE(
+	"weather GPU compact density decode agrees for every legal sum child and unsafe marker",
+	"[render][gpu][weather][.]"
+) {
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
+	const auto sourcePath = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() /
+							"resources/shaders/weather-assembly.glsl";
+	REQUIRE(sourcePath.is_absolute());
+	std::ifstream includeFile(sourcePath, std::ios::binary);
+	REQUIRE(includeFile.good());
+	const std::string assembly{std::istreambuf_iterator<char>(includeFile), std::istreambuf_iterator<char>()};
+	REQUIRE_FALSE(assembly.empty());
+	const std::string source = "#version 450\n" + assembly + R"(
+layout(local_size_x = 64) in;
+layout(set = 1, binding = 0, std430) writeonly buffer Results { uvec2 values[]; } outputBuffer;
+void main() {
+	uint index = gl_GlobalInvocationID.x;
+	if (index >= 2041u * 8u * 2u) return;
+	uint sum = index / 16u;
+	uint child = (index / 2u) & 7u;
+	uint unsafe = index & 1u;
+	uint remaining = sum;
+	uvec2 children[8];
+	for (uint i = 0u; i < 8u; ++i) {
+		uint density = min(remaining, 255u);
+		remaining -= density;
+		uint varied = index * 0x9e3779b9u + i * 0x85ebca6bu;
+		uint temperature = varied % 255u;
+		uint vapour = (varied >> 7u) & 255u;
+		uint pressure = (varied >> 13u) % 255u;
+		uint windX = (varied >> 3u) % 255u;
+		uint windY = (varied >> 11u) % 255u;
+		uint windZ = (varied >> 19u) % 255u;
+		uint ice = (varied >> 24u) & 255u;
+		children[i] = uvec2(density | (temperature << 8u) | (vapour << 16u) | (pressure << 24u),
+			windX | (windY << 8u) | (windZ << 16u) | (ice << 24u));
+	}
+	uint words[8];
+	WeatherAssemblyPack(children, words);
+	words[1] = (words[1] & ~(1u << 23u)) | (unsafe << 23u);
+	uvec2 scalarWords = uvec2(words[0], words[1]);
+	uint specialized = WeatherAssemblyDensityCode(scalarWords, child) |
+		(uint(WeatherAssemblyUnsafe(scalarWords)) << 8u);
+	uint generic = (WeatherAssemblyDecode(words, child).x & 255u) |
+		(uint(WeatherAssemblyUnsafe(words)) << 8u);
+	outputBuffer.values[index] = uvec2(specialized, generic);
+}
+)";
+	const auto releasePipeline = [device](SDL_GPUComputePipeline *pipeline) {
+		SDL_ReleaseGPUComputePipeline(device, pipeline);
+	};
+	std::unique_ptr<SDL_GPUComputePipeline, decltype(releasePipeline)> pipeline(
+		RuntimeWeatherOraclePipeline(device, source, "weather-assembly-oracle.comp"), releasePipeline
+	);
+	INFO(SDL_GetError());
+	REQUIRE(pipeline);
+	constexpr uint32_t CASES = 2041 * 8 * 2;
+	SDL_GPUBufferCreateInfo bufferInfo{};
+	bufferInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+	bufferInfo.size = CASES * sizeof(std::array<uint32_t, 2>);
+	const auto releaseBuffer = [device](SDL_GPUBuffer *buffer) { gpu::ReleaseBuffer(device, buffer); };
+	std::unique_ptr<SDL_GPUBuffer, decltype(releaseBuffer)> output(
+		gpu::CreateBuffer(device, &bufferInfo), releaseBuffer
+	);
+	REQUIRE(output);
+	const auto cancelCommand = [](SDL_GPUCommandBuffer *command) {
+		(void)SDL_CancelGPUCommandBuffer(command);
+	};
+	std::unique_ptr<SDL_GPUCommandBuffer, decltype(cancelCommand)> command(
+		SDL_AcquireGPUCommandBuffer(device), cancelCommand
+	);
+	REQUIRE(command);
+	SDL_GPUStorageBufferReadWriteBinding binding{};
+	binding.buffer = output.get();
+	auto *pass = SDL_BeginGPUComputePass(command.get(), nullptr, 0, &binding, 1);
+	REQUIRE(pass);
+	SDL_BindGPUComputePipeline(pass, pipeline.get());
+	SDL_DispatchGPUCompute(pass, (CASES + 63) / 64, 1, 1);
+	SDL_EndGPUComputePass(pass);
+	REQUIRE(SDL_SubmitGPUCommandBuffer(command.release()));
+	const auto actual = Download(device, output.get(), CASES);
+	for (uint32_t index = 0; index < CASES; ++index) {
+		const uint32_t sum = index / 16;
+		const uint32_t child = (index / 2) & 7;
+		const uint32_t unsafe = index & 1;
+		const uint32_t expected = (sum / 8 + uint32_t(child < sum % 8)) | (unsafe << 8);
+		CAPTURE(sum, child, unsafe);
+		REQUIRE(actual[index][0] == expected);
+		REQUIRE(actual[index][1] == expected);
+	}
+}
+
+TEST_CASE(
+	"weather GPU density shortcut preserves canonical boundary and phase samples", "[render][gpu][weather][.]"
+) {
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
+	const auto sourcePath = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() /
+							"resources/shaders/weather-common.glsl";
+	REQUIRE(sourcePath.is_absolute());
+	std::ifstream includeFile(sourcePath, std::ios::binary);
+	REQUIRE(includeFile.good());
+	const std::string common{std::istreambuf_iterator<char>(includeFile), std::istreambuf_iterator<char>()};
+	REQUIRE_FALSE(common.empty());
+	const std::string source = "#version 450\n" + common + R"(
+layout(local_size_x = 64) in;
+layout(set = 1, binding = 0, std430) writeonly buffer Results { uvec2 values[]; } outputBuffer;
+layout(set = 2, binding = 0) uniform Pass { WeatherField Field; } pass;
+void main() {
+	uint index = gl_GlobalInvocationID.x;
+	if (index >= 74u) return;
+	const ivec2 horizontal[8] = ivec2[8](ivec2(0), ivec2(-1, 1),
+		ivec2(int(0x80000000u), 0x7fffffff), ivec2(0x7fffffff, int(0x80000000u)),
+		ivec2(16777215, -16777216), ivec2(-16777216, 16777215),
+		ivec2(-33, 17), ivec2(29, -47));
+	ivec3 coordinate;
+	if (index < 72u) {
+		ivec2 xz = horizontal[index / 9u];
+		coordinate = ivec3(xz.x, int(pass.Field.Shape.x) + int(index % 9u) - 1, xz.y);
+	} else {
+		coordinate = index == 72u ? ivec3(int(0x80000000u)) : ivec3(0x7fffffff);
+	}
+	outputBuffer.values[index] = uvec2(WeatherDensityCode(pass.Field, coordinate),
+		WeatherEvaluate(pass.Field, coordinate).x);
+}
+)";
+	const auto releasePipeline = [device](SDL_GPUComputePipeline *pipeline) {
+		SDL_ReleaseGPUComputePipeline(device, pipeline);
+	};
+	std::unique_ptr<SDL_GPUComputePipeline, decltype(releasePipeline)> pipeline(
+		RuntimeWeatherOraclePipeline(device, source, "weather-density-oracle.comp", 1), releasePipeline
+	);
+	INFO(SDL_GetError());
+	REQUIRE(pipeline);
+	constexpr uint32_t CASES = 74;
+	SDL_GPUBufferCreateInfo bufferInfo{};
+	bufferInfo.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+	bufferInfo.size = CASES * sizeof(std::array<uint32_t, 2>);
+	const auto releaseBuffer = [device](SDL_GPUBuffer *buffer) { gpu::ReleaseBuffer(device, buffer); };
+	std::unique_ptr<SDL_GPUBuffer, decltype(releaseBuffer)> output(
+		gpu::CreateBuffer(device, &bufferInfo), releaseBuffer
+	);
+	REQUIRE(output);
+	scene::WeatherCompute controls;
+	const auto compiled = weather::Compile(controls);
+	const auto grid = WeatherGridOf(controls);
+	REQUIRE(compiled);
+	REQUIRE(grid);
+	const std::array<std::array<int32_t, 2>, 8> horizontal{
+		{{0, 0},
+		 {-1, 1},
+		 {INT32_MIN, INT32_MAX},
+		 {INT32_MAX, INT32_MIN},
+		 {16777215, -16777216},
+		 {-16777216, 16777215},
+		 {-33, 17},
+		 {29, -47}}
+	};
+	for (const uint32_t shift : {0u, 10u})
+		for (const uint64_t tick : {uint64_t{0}, uint64_t{128}, uint64_t{250}, uint64_t{256}, UINT64_MAX}) {
+			auto definition = compiled->Definition;
+			definition.BaseCell = -3;
+			definition.ThicknessCells = 7;
+			definition.FeatureShift = shift;
+			definition.Coverage = 255;
+			definition.Vapour = 255;
+			definition.SaturationBase = 0;
+			definition.SaturationLapseQ8 = 0;
+			definition.TemperatureSaturationQ8 = 0;
+			const auto time = weather::ResolveTime(weather::InitialAnchor(definition), tick);
+			REQUIRE(time);
+			const auto uniforms = WeatherUniformsOf(definition, *time, *grid);
+			const auto cancelCommand = [](SDL_GPUCommandBuffer *command) {
+				(void)SDL_CancelGPUCommandBuffer(command);
+			};
+			std::unique_ptr<SDL_GPUCommandBuffer, decltype(cancelCommand)> command(
+				SDL_AcquireGPUCommandBuffer(device), cancelCommand
+			);
+			REQUIRE(command);
+			SDL_GPUStorageBufferReadWriteBinding binding{};
+			binding.buffer = output.get();
+			auto *pass = SDL_BeginGPUComputePass(command.get(), nullptr, 0, &binding, 1);
+			REQUIRE(pass);
+			SDL_BindGPUComputePipeline(pass, pipeline.get());
+			SDL_PushGPUComputeUniformData(command.get(), 0, &uniforms, sizeof(uniforms));
+			SDL_DispatchGPUCompute(pass, (CASES + 63) / 64, 1, 1);
+			SDL_EndGPUComputePass(pass);
+			REQUIRE(SDL_SubmitGPUCommandBuffer(command.release()));
+			const auto actual = Download(device, output.get(), CASES);
+			bool hasPositiveDensity = false;
+			bool hasZeroEnvelope = false;
+			for (uint32_t index = 0; index < CASES; ++index) {
+				const weather::CellCoordinate coordinate =
+					index < 72
+						? weather::
+							  CellCoordinate{horizontal[index / 9][0], -4 + int32_t(index % 9), horizontal[index / 9][1]}
+					: index == 72 ? weather::CellCoordinate{INT32_MIN, INT32_MIN, INT32_MIN}
+								  : weather::CellCoordinate{INT32_MAX, INT32_MAX, INT32_MAX};
+				const auto expected = weather::Evaluate(definition, *time, coordinate);
+				hasPositiveDensity |= expected.Codes[0] > 0;
+				const int64_t altitude = int64_t(coordinate.Y) - definition.BaseCell;
+				hasZeroEnvelope |= altitude < 0 || uint64_t(altitude) >= definition.ThicknessCells;
+				uint32_t expectedWord = 0;
+				for (uint32_t lane = 0; lane < 4; ++lane)
+					expectedWord |= uint32_t(expected.Codes[lane]) << (lane * 8);
+				CAPTURE(shift, tick, index);
+				REQUIRE(actual[index][0] == uint32_t(expected.Codes[0]));
+				REQUIRE(actual[index][1] == expectedWord);
+			}
+			CAPTURE(shift, tick);
+			REQUIRE(hasPositiveDensity);
+			REQUIRE(hasZeroEnvelope);
+		}
 }

@@ -124,4 +124,10 @@ uvec2 WeatherEvaluate(WeatherField field, ivec3 coordinate) {
 		wind.x | (wind.y << 8u) | (wind.z << 16u) | (uint(field.Wind.w) << 24u));
 }
 
+uint WeatherDensityCode(WeatherField field, ivec3 coordinate) {
+	// Interpolation halos and coarse corners may lie outside the finite layer.
+	if (WeatherEnvelope(field, coordinate.y) == 0u) return 0u;
+	return WeatherEvaluate(field, coordinate).x & 255u;
+}
+
 #endif

@@ -70,8 +70,18 @@ void WeatherAssemblyPack(uvec2 children[8], out uint packedWords[8]) {
 	if (!WeatherAssemblyCanMerge(children)) packedWords[1] |= 1u << 23u;
 }
 
+// Density and the unsafe marker occupy the first aligned word pair.
+bool WeatherAssemblyUnsafe(uvec2 scalarWords) {
+	return (scalarWords.y & (1u << 23u)) != 0u;
+}
+
+uint WeatherAssemblyDensityCode(uvec2 scalarWords, uint child) {
+	uint sum = scalarWords.x & 2047u;
+	return (sum >> 3u) + uint(child < (sum & 7u));
+}
+
 bool WeatherAssemblyUnsafe(uint packedWords[8]) {
-	return (packedWords[1] & (1u << 23u)) != 0u;
+	return WeatherAssemblyUnsafe(uvec2(packedWords[0], packedWords[1]));
 }
 
 uvec2 WeatherAssemblyDecode(uint packedWords[8], uint child) {

@@ -129,23 +129,18 @@ float SparseCode(ivec3 coordinate, uint lod) {
 		}
 		if (kind == 1u) {
 			uvec2 address = WeatherAssemblyAddress(point);
-			uint packedWords[8];
-			for (uint word = 0u; word < 8u; ++word) {
-				uint offset = baseWord + address.x * 8u + word;
-				packedWords[word] = inputField.cells[offset / 2u][offset & 1u];
-			}
-			if (WeatherAssemblyUnsafe(packedWords))
-				return float(WeatherEvaluate(pass.Field, coordinate).x & 255u) / 255.0;
+			uvec2 scalarWords = inputField.cells[baseWord / 2u + address.x * 4u];
+			if (WeatherAssemblyUnsafe(scalarWords))
+				return float(WeatherDensityCode(pass.Field, coordinate)) / 255.0;
 			sampledCompact = true;
-			return float(WeatherAssemblyDecode(packedWords, address.y).x & 255u) / 255.0;
+			return float(WeatherAssemblyDensityCode(scalarWords, address.y)) / 255.0;
 		}
 	}
 	// Border and missing pages reconstruct canonical samples; allocation refusal cannot make a hole.
-	return float(WeatherEvaluate(pass.Field, coordinate).x & 255u) / 255.0;
+	return float(WeatherDensityCode(pass.Field, coordinate)) / 255.0;
 }
 
-bool SparseEmpty(vec3 canonical) {
-	int selected = PageAt(canonical);
+bool SparseEmpty(vec3 canonical, int selected) {
 	if (selected < 0) return false;
 	uint descriptor = uint(pageTable.keys[selected].w);
 	// The empty certificate covers every canonical sample in the page and its
@@ -159,12 +154,8 @@ bool SparseEmpty(vec3 canonical) {
 	vec3 local = canonical - vec3(pageTable.keys[selected].xyz);
 	vec3 edge = min(local, vec3(8 * stride) - local);
 	if (min(min(edge.x, edge.y), edge.z) < 1.5 * float(stride)) return false;
-	ivec3 base = ivec3(floor(canonical / float(stride))) * stride;
-	for (uint z = 0u; z < 2u; ++z) for (uint y = 0u; y < 2u; ++y) for (uint x = 0u; x < 2u; ++x) {
-		int neighbor = FindPage(base + ivec3(x, y, z) * stride, lod);
-		if (neighbor < 0 || inputSummary.values[neighbor].x != 0u) return false;
-	}
-	return true;
+	// The edge margin keeps all eight lod-0 trilinear corners in this same page.
+	return inputSummary.values[selected].x == 0u;
 }
 
 float SparseDensityAtLod(vec3 canonical, uint lod) {
@@ -180,7 +171,7 @@ float SparseDensityAtLod(vec3 canonical, uint lod) {
 }
 
 float CanonicalCode(ivec3 coordinate) {
-	return float(WeatherEvaluate(pass.Field, coordinate).x & 255u) / 255.0;
+	return float(WeatherDensityCode(pass.Field, coordinate)) / 255.0;
 }
 
 float CanonicalDensityAtLod(vec3 canonical, uint lod) {
@@ -195,8 +186,7 @@ float CanonicalDensityAtLod(vec3 canonical, uint lod) {
 	return mix(low, high, weight.z);
 }
 
-float SparseCurrentDensity(vec3 canonical, out bool approximated) {
-	int selected = PageAt(canonical);
+float SparseCurrentDensity(vec3 canonical, int selected, out bool approximated) {
 	uint lod = selected >= 0 ? uint(pageTable.keys[selected].w) & 31u : 0u;
 	// Compact means need the same optical error check as coarse samples.
 	// Comparing them with their own decoded means would not bound that error.
@@ -220,9 +210,9 @@ float SparseCurrentDensity(vec3 canonical, out bool approximated) {
 	return density;
 }
 
-float SparseDensity(vec3 canonical) {
+float SparseDensity(vec3 canonical, int selected) {
 	bool approximated;
-	float density = SparseCurrentDensity(canonical, approximated);
+	float density = SparseCurrentDensity(canonical, selected, approximated);
 	float transition = clamp(uintBitsToFloat(pass.Quality.w), 0.0, 1.0);
 	if (pass.Quality.z > 0u && transition < 1.0) {
 		// Retain topology only. Reevaluate its samples at the accepted current
@@ -237,9 +227,9 @@ float SparseDensity(vec3 canonical) {
 	return abs(density - fine) <= allowedDensityError ? density : fine;
 }
 
-float DensityAt(vec3 world) {
+float DensityAt(vec3 world, int selected) {
 	vec3 lattice = world / pass.Minimum.w;
-	if (pass.Field.Origin.w == 0) return SparseDensity(lattice);
+	if (pass.Field.Origin.w == 0) return SparseDensity(lattice, selected);
 	vec3 point = (lattice - vec3(pass.Field.Origin.xyz)) / float(pass.Field.Origin.w);
 	ivec3 cell = ivec3(floor(point));
 	vec3 weight = fract(point);
@@ -250,9 +240,14 @@ float DensityAt(vec3 world) {
 	return mix(low, high, weight.z);
 }
 
-bool EmptyNeighborhood(vec3 world) {
+bool EmptyNeighborhood(vec3 world, out int selected) {
+	selected = -1;
 	// Sparse borders may reconstruct missing neighbours; their old maxima cannot prove emptiness.
-	if (pass.Field.Origin.w == 0) return SparseEmpty(world / pass.Minimum.w);
+	if (pass.Field.Origin.w == 0) {
+		vec3 canonical = world / pass.Minimum.w;
+		selected = PageAt(canonical);
+		return SparseEmpty(canonical, selected);
+	}
 	ivec3 cell = ivec3(floor((world / pass.Minimum.w - vec3(pass.Field.Origin.xyz)) / float(pass.Field.Origin.w)));
 	ivec3 brick = clamp(cell / 8, ivec3(0), ivec3(pass.Field.Bricks.xyz) - 1);
 	// Interpolation reaches neighboring bricks. Their maxima must also be zero before skipping.
@@ -307,8 +302,9 @@ void main() {
 	for (uint index = 0u; index < steps; ++index) {
 		float distance = enter + (float(index) + jitter) * stepLength;
 		vec3 world = pass.Eye.xyz + ray * distance;
-		if (EmptyNeighborhood(world)) continue;
-		float density = DensityAt(world);
+		int selected;
+		if (EmptyNeighborhood(world, selected)) continue;
+		float density = DensityAt(world, selected);
 		float stepTransmittance = exp(-pass.ColourExtinction.w * density * stepLength);
 		float contribution = transmittance * (1.0 - stepTransmittance);
 		scattered += contribution * light;
