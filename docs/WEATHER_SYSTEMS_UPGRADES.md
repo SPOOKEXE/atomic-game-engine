@@ -250,6 +250,11 @@ without replay. Include authored changes in timestamped timeline records.
 
 ## 6. Server time, replication and checkpoints
 
+The implemented [resident clock and synchronization audit](WEATHER_CLOCK_RESIDENCY.md)
+records the GPU counter, one-second reliable anchors, rate slewing and measured
+transfer costs. The descriptor and recovery requirements below remain the design
+contract.
+
 Replicate a small weather descriptor, not every cloud cell. Proposed descriptor
 fields are algorithm name/version, world epoch, seed, layer definitions,
 parameter revision, current segment and displacement anchor, anchor weather

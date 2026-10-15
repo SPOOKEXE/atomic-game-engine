@@ -13,6 +13,10 @@ parallel page summaries, reduced density-sampling work and a measured
 14.6-fold summary-kernel speedup on the local Vulkan device. Its affected GPU
 and complete headless renderer checks pass in development and strict CI.
 
+The [resident clock audit](WEATHER_CLOCK_RESIDENCY.md) adds an integer GPU
+counter, reliable one-second client anchors and measured clock traffic.
+Small corrections use the existing bounded local rate slew.
+
 The later [portal and mirror visual validation](WEATHER_VISUAL_VALIDATION.md)
 records the expanded scene checks, capture repairs and an unresolved
 intermittent black frame during a 144 FPS portal crossing. The final client
