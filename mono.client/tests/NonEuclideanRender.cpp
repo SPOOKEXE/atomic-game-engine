@@ -163,3 +163,54 @@ TEST_CASE(
 	std::sort(fingerprints.begin(), fingerprints.end());
 	CHECK(std::adjacent_find(fingerprints.begin(), fingerprints.end()) == fingerprints.end());
 }
+
+TEST_CASE(
+	"an unjoined two-world capture sequence writes every image with one claim per portal",
+	"[client][gpu][portal][non-euclidean][.]"
+) {
+	const auto root = core::Paths::Base() / "cross-world-capture-sequence";
+	std::filesystem::remove_all(root);
+	client::Options options;
+	options.Headless = true;
+	options.Worlds = 2;
+	options.ViewSpacing = 0;
+	options.Width = WIDTH;
+	options.Height = HEIGHT;
+	options.MaximumFrames = 24;
+	options.MaximumFrameRate = 30;
+	options.ScriptPath =
+		(core::Paths::Base().parent_path() / "assets/examples/scripts/CrossWorldSeam.luau").string();
+	options.CaptureSequence = root;
+	client::Client client;
+	REQUIRE(client.Initialise(options));
+	REQUIRE(client.Run() == 0);
+	for (int frame = 0; frame < options.MaximumFrames; ++frame) {
+		CAPTURE(frame);
+		const auto stem = root / std::to_string(frame);
+		std::ifstream metadataFile(stem.string() + ".json");
+		REQUIRE(metadataFile);
+		const nlohmann::json metadata = nlohmann::json::parse(metadataFile);
+		CHECK(metadata.at("frame") == frame);
+		CHECK(metadata.at("view_world") == "client.world");
+		const auto &portals = metadata.at("portal_views");
+		CHECK(metadata.at("portals") == portals.size());
+		std::vector<int> claimedIndices;
+		for (const auto &portal : portals)
+			claimedIndices.push_back(portal.at("index").get<int>());
+		std::sort(claimedIndices.begin(), claimedIndices.end());
+		CHECK(std::adjacent_find(claimedIndices.begin(), claimedIndices.end()) == claimedIndices.end());
+		if (frame == options.MaximumFrames - 1) {
+			REQUIRE(portals.size() == 1);
+			CHECK(portals[0].at("external") == true);
+			CHECK(portals[0].at("key") == "Workspace.PortalBlock.Hole");
+			CHECK(portals[0].at("image").get<uint64_t>() != 0);
+			CHECK(portals[0].at("capture").is_object());
+		}
+		std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)> image(
+			SDL_LoadBMP((stem.string() + ".bmp").c_str()), SDL_DestroySurface
+		);
+		REQUIRE(image);
+		CHECK(image->w == WIDTH);
+		CHECK(image->h == HEIGHT);
+	}
+}

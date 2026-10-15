@@ -4855,7 +4855,8 @@ namespace client {
 			view.CameraTemporalId.clear();
 			Renderer.SetAnimationTime(AnimationSeconds);
 		} else if (!namedCaptureBound && !PresentationLink && PortalImages && Windowed) {
-			if (!ReportedJoin) {
+			// Sequence capture already prepared this native eye before returning to the displayed view.
+			if (!ReportedJoin && Settings.CaptureSequence.empty()) {
 				auto sourceView = view;
 				sourceView.Instances = Views.Instances();
 				sourceView.JointFrames = Views.JointFrames();
