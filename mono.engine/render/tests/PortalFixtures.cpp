@@ -1883,6 +1883,148 @@ TEST_CASE("interface shaders follow the submitted content owner", "[render][gpu]
 	CHECK(CompareImages(missing.View(), capture(&lagging).View()).Passed());
 }
 
+TEST_CASE(
+	"weather clouds reflect inside a horizontal mirror without leaking outside",
+	"[render][gpu][weather][mirror][.]"
+) {
+	const bool separateCaptures = GENERATE(false, true);
+	INFO("separate captures=" << separateCaptures);
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallPortalFixture(fixture.Render, false, separateCaptures);
+	fixture.Render.SetSurfaceBounces(1);
+	const render::SceneTarget target{WIDTH, HEIGHT};
+	constexpr float MIRROR_HALF_SIZE = 3;
+	auto pane = Plane(1, {}, MIRROR_HALF_SIZE, MIRROR_HALF_SIZE, {1, 1, 1});
+	pane.Frame = core::CFrame::Angles(-1.5707963268f, 0, 0);
+	pane.Surface = 0;
+	const std::array instances{pane};
+	render::View view;
+	view.World = 19137;
+	view.WorldName = core::Name("weather.mirror.fixture");
+	view.Pipeline = core::Name("portal.fixture.pbr");
+	view.Target = &target;
+	view.Instances = instances;
+	view.CameraFrame = core::CFrame::LookAt({0, 6, 8}, {});
+	view.Camera.FieldOfViewRadians = .872664626f;
+	view.Camera.NearPlane = .1f;
+	view.Camera.FarPlane = 512;
+	view.CameraCut = true;
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {.75f, .75f, .75f};
+	view.Lighting.OutdoorAmbient = {};
+	view.Lighting.Direct = {};
+	view.Lighting.FogStart = 1000;
+	view.Lighting.FogEnd = 1001;
+	auto &environment = view.Lighting.EnvironmentState;
+	environment.HasClouds = environment.HasWeatherCompute = environment.HasWeatherClock = true;
+	environment.CloudLayer.Colour = {1, .04f, .02f};
+	environment.CloudLayer.Cover = environment.CloudLayer.Density = 1;
+	environment.CloudVolume.Steps = 32;
+	environment.Weather.CellSizeMetres = 2;
+	environment.Weather.ExtentMetres = {256, 64, 256};
+	environment.Weather.BaseHeightMetres = 24;
+	environment.Weather.ThicknessMetres = 16;
+	environment.Weather.Coverage = 1;
+	environment.Weather.VapourMixingRatio = .029f;
+	environment.Weather.BaseTemperatureCelsius = -50;
+	environment.Weather.FeatureCells = 8;
+	environment.Weather.WindMetresPerSecond = {};
+	environment.Weather.Seed = 17;
+	environment.Weather.LodError = .0001f;
+	environment.Weather.ShadowsEnabled = false;
+	environment.Clock.Tick = environment.Clock.AnchorTick = environment.Clock.PhaseTick = 123;
+	environment.Clock.Paused = true;
+	environment.Clock.WindQ20 = {};
+	const scene::SurfacePane geometry{
+		.Centre = {},
+		.Normal = {0, 1, 0},
+		.First = {MIRROR_HALF_SIZE, 0, 0},
+		.Second = {0, 0, -MIRROR_HALF_SIZE}
+	};
+	const auto reflected = scene::ReflectCamera(geometry, view.CameraFrame, {});
+	REQUIRE(reflected.Renders);
+	render::SurfaceView surface;
+	surface.Frame = reflected.Frame;
+	surface.Projection = scene::SurfaceProjection(reflected.Lens, reflected.Frame);
+	surface.PaneCentre = geometry.Centre;
+	surface.PaneNormal = geometry.Normal;
+	surface.PaneFirst = geometry.First;
+	surface.PaneSecond = geometry.Second;
+	surface.Width = WIDTH;
+	surface.Height = HEIGHT;
+	view.Surfaces = std::span(&surface, 1);
+	render::OverlayImage overlay;
+	const auto capture = [&](bool enabled) {
+		environment.Weather.Enabled = enabled;
+		view.Damage.Scene = true;
+		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(frame.Submitted);
+		REQUIRE(frame.SurfacePasses > 0);
+		return CaptureResource(
+			fixture.Render, core::Name("tonemapped"), view.Slot, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+		);
+	};
+	const auto disabled = capture(false);
+	const auto enabled = capture(true);
+	const auto restored = capture(false);
+	size_t interior = 0, exterior = 0, reflectedCloudPixels = 0;
+	int exteriorDifference = 0;
+	const double tangent = std::tan(view.Camera.FieldOfViewRadians * .5);
+	for (uint32_t y = 0; y < HEIGHT; ++y)
+		for (uint32_t x = 0; x < WIDTH; ++x) {
+			const core::Vector3 local{
+				static_cast<float>((2 * (x + .5) / WIDTH - 1) * tangent * WIDTH / HEIGHT),
+				static_cast<float>((1 - 2 * (y + .5) / HEIGHT) * tangent),
+				-1
+			};
+			const auto ray = view.CameraFrame.VectorToWorldSpace(local);
+			// Every primary ray points below the elevated slab. Only reflection can show it.
+			REQUIRE(ray.Y < 0);
+			const float distance = -view.CameraFrame.Position.Y / ray.Y;
+			const auto aperture = view.CameraFrame.Position + ray * distance;
+			if (std::abs(std::abs(aperture.X) - MIRROR_HALF_SIZE) < .08f ||
+				std::abs(std::abs(aperture.Z) - MIRROR_HALF_SIZE) < .08f)
+				continue;
+			const bool inside =
+				std::abs(aperture.X) < MIRROR_HALF_SIZE && std::abs(aperture.Z) < MIRROR_HALF_SIZE;
+			const size_t at = y * enabled.RowStrideBytes + x * 4;
+			if (inside) {
+				++interior;
+				const int red = std::to_integer<int>(enabled.Bytes[at]);
+				const int green = std::to_integer<int>(enabled.Bytes[at + 1]);
+				if (red > std::to_integer<int>(disabled.Bytes[at]) + 10 && red > green + 10)
+					++reflectedCloudPixels;
+			} else {
+				++exterior;
+				for (size_t channel = 0; channel < 3; ++channel)
+					exteriorDifference = std::max(
+						exteriorDifference,
+						std::abs(
+							std::to_integer<int>(enabled.Bytes[at + channel]) -
+							std::to_integer<int>(disabled.Bytes[at + channel])
+						)
+					);
+			}
+		}
+	INFO("interior=" << interior << " exterior=" << exterior << " clouds=" << reflectedCloudPixels);
+	REQUIRE(interior > 100);
+	REQUIRE(exterior > 100);
+	CHECK(reflectedCloudPixels > 30);
+	CHECK(exteriorDifference <= 2);
+	ImageTolerance tolerance;
+	tolerance.Absolute = 2.0 / 255;
+	CheckImage(
+		fixture.Render,
+		separateCaptures ? "weather-mirror-separate-restored" : "weather-mirror-mixed-restored",
+		"tonemapped",
+		"fixed weather tick123; horizontal mirror; cloud slab24..40m; weather disabled after capture",
+		disabled.View(),
+		restored.View(),
+		tolerance
+	);
+}
+
 TEST_CASE("device particles reach portal and mirror captures", "[render][gpu][surface-particles][.]") {
 	const bool mirror = GENERATE(false, true);
 	const bool separateCaptures = GENERATE(false, true);
