@@ -272,7 +272,7 @@ scene.WeatherCompute | Authored world-unit weather controls on a WeatherCompute 
 scene.WeatherAcceptedDefinition | Canonical accepted weather controls for unfinished ticks; pending desired edits remain on the authored provider.
 scene.WeatherClock | Accepted per-provider weather epoch, integer tick, phase and cumulative wind anchor, independent of local world elapsed time.
 scene.WeatherClockEstimate | Local-only receipt and RTT estimate for weather display time; saved state resets it and canonical weather clocks remain authoritative.
-scene.WeatherClockPublication | Local reliable final-anchor publication state for world pause and resume.
+scene.WeatherClockPublication | Local reliable weather-clock publication generation and heartbeat schedule; pending state covers periodic updates and pause/resume anchors.
 scene.WeatherWorldPause | Local world suspension control shared by weather-clock updates.
 scene.WeatherClockInbox | Bounded local final-anchor inbox retained until replicated weather providers arrive.
 weather.RuntimeState | Persistent authoritative storm charge, hail growth and event sequence driven by canonical weather ticks.
