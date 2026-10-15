@@ -1,5 +1,7 @@
 #include "WeatherResidency.hpp"
 
+#include "WeatherGpu.hpp"
+
 #include <engine/testing/Bench.hpp>
 
 #include <array>
@@ -82,6 +84,61 @@ BENCH("sparse residency: warm four-view topology reuse", 10000) {
 		ConsumePlan(
 			BuildWeatherResidency(cache, fixture.Controls, fixture.Compiled, fixture.Time, 1, fixture.Views)
 		);
+}
+
+BENCH_PER_ITEM("sparse residency: 180 animated-sun shadow demands per frame", 180) {
+	static const auto fixture = [] {
+		ResidencyFixture created;
+		created.Controls.BaseHeightMetres = 1024;
+		created.Controls.ThicknessMetres = 256;
+		created.Controls.ExtentMetres = {2048, 1024, 2048};
+		created.Controls.ShadowDistanceMetres = 2048;
+		created.Controls.ShadowResolution = 256;
+		created.Controls.ShadowCascades = 2;
+		const auto compiled = weather::Compile(created.Controls);
+		if (!compiled) throw std::runtime_error("animated shadow benchmark definition refused");
+		created.Compiled = *compiled;
+		created.Anchor = weather::InitialAnchor(created.Compiled.Definition);
+		created.Time = *weather::ResolveTime(created.Anchor, 100);
+		return created;
+	}();
+	const auto grid = WeatherGridOf(fixture.Controls);
+	if (!grid) throw std::runtime_error("animated shadow benchmark grid refused");
+	const WeatherGpuInputs gpuInputs{
+		WeatherUniformsOf(fixture.Compiled.Definition, fixture.Time, *grid),
+		fixture.Compiled,
+		fixture.Time,
+		false
+	};
+	WeatherResidencyCache cache;
+	uint32_t candidateEvaluations = 0;
+	uint32_t classifiedPages = 0;
+	for (uint64_t frame = 1; frame <= 180; ++frame) {
+		std::array<WeatherResidencyView, weather::MAXIMUM_RESIDENCY_VIEWS> views{};
+		views[0] = fixture.Views[0];
+		const core::Vector3 sun{-0.35f - static_cast<float>(frame) * 0.000002f, -0.8f, -0.2f};
+		const auto shadow =
+			BuildWeatherShadowPlan(fixture.Controls, gpuInputs, sun, 1, 1, std::span(views).first(1));
+		if (!shadow.Enabled) throw std::runtime_error("animated shadow benchmark footprint refused");
+		const auto count = AppendWeatherShadowDemand(views, 1, shadow, fixture.Compiled.Definition.LayerKey);
+		const auto plan = BuildWeatherResidency(
+			cache,
+			fixture.Controls,
+			fixture.Compiled,
+			fixture.Time,
+			1,
+			std::span(views).first(count),
+			frame,
+			static_cast<double>(frame) / 60
+		);
+		ConsumePlan(plan);
+		if (frame >= 96 && plan->MaintenancePending)
+			throw std::runtime_error("animated shadow benchmark restarted bounded maintenance");
+		candidateEvaluations += plan->CandidateEvaluations;
+		classifiedPages += plan->ClassifiedPages;
+	}
+	testing::Consume(candidateEvaluations);
+	testing::Consume(classifiedPages);
 }
 
 BENCH("sparse residency: complete four-view maintenance and compression classification", 20) {

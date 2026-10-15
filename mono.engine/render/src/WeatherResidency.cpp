@@ -24,6 +24,15 @@ namespace engine::render {
 
 		using Candidate = WeatherResidencyCandidate;
 
+		float PlanningDistance(float requested, float brickMetres) {
+			const double rounded = std::ceil(static_cast<double>(requested) / brickMetres) * brickMetres;
+			if (rounded >= std::numeric_limits<float>::max()) return std::numeric_limits<float>::max();
+			const float distance = static_cast<float>(rounded);
+			return static_cast<double>(distance) < rounded
+					   ? std::nextafter(distance, std::numeric_limits<float>::infinity())
+					   : distance;
+		}
+
 		int64_t FloorMultiple(int64_t coordinate, int64_t side) {
 			return (coordinate / side - (coordinate < 0 && coordinate % side != 0 ? 1 : 0)) * side;
 		}
@@ -405,6 +414,7 @@ namespace engine::render {
 		if (presentationSeconds != -1.0 && (!std::isfinite(presentationSeconds) || presentationSeconds < 0.0))
 			return std::nullopt;
 		std::array<weather::ResidencyView, weather::MAXIMUM_RESIDENCY_VIEWS> viewPositions{};
+		std::array<WeatherResidencyView, weather::MAXIMUM_RESIDENCY_VIEWS> planningViews{};
 		for (size_t index = 0; index < views.size(); ++index) {
 			if (!std::isfinite(views[index].ProjectionPixelsPerRadian) ||
 				views[index].ProjectionPixelsPerRadian <= 0.0f ||
@@ -412,7 +422,14 @@ namespace engine::render {
 				views[index].MaximumDistanceMetres < 0.0f)
 				return std::nullopt;
 			viewPositions[index] = views[index].View;
+			planningViews[index] = views[index];
+			planningViews[index].MaximumDistanceMetres = PlanningDistance(
+				views[index].MaximumDistanceMetres, weather::BRICK_SIDE * controls.CellSizeMetres
+			);
 		}
+		// Both the retained signature and candidate coverage use the expanded range, so small sun
+		// movements can finish maintenance without losing newly requested shadow casters.
+		views = std::span(planningViews).first(views.size());
 		const auto positions = std::span(viewPositions).first(views.size());
 		weather::MaintenancePolicy maintenancePolicy;
 		maintenancePolicy.TickRate = controls.TickRate;

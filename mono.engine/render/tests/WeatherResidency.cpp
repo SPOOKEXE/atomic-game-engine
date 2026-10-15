@@ -1,11 +1,14 @@
 #include "WeatherResidency.hpp"
 
+#include "WeatherGpu.hpp"
+
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 
 TEST_SUITE_ID("engine.render.weatherresidency")
@@ -286,6 +289,118 @@ TEST_CASE(
 	CHECK(expired->MaintenanceAgeTicks == 0);
 	CHECK(expired->CoarsePages > 0);
 	CHECK(expired->CandidateEvaluations <= WEATHER_MAINTENANCE_CHUNK);
+}
+
+TEST_CASE("weather planning retains the entire upward rounded view range", "[render][weather]") {
+	Inputs inputs;
+	const float brickMetres = weather::BRICK_SIDE * inputs.Controls.CellSizeMetres;
+	const float requested = 17 * brickMetres + 1;
+	const float upper = 18 * brickMetres;
+	WeatherResidencyCache marginCache;
+	const auto margin =
+		BuildWeatherResidency(marginCache, inputs.Controls, inputs.Compiled, inputs.Time, 1, {});
+	REQUIRE(margin);
+	// The closest coarse face lies strictly between the raw and expanded ranges, including motion.
+	// No second view may hide an incorrectly omitted demand from the unrounded candidate path.
+	inputs.Views[0].View.CameraPositionMetres.X =
+		inputs.Controls.ExtentMetres.X * 0.5f + (requested + upper) * 0.5f + margin->MotionMarginMetres;
+	inputs.Views[0].MaximumDistanceMetres = requested;
+	const auto views = std::span(inputs.Views).first(1);
+	auto expandedViews = inputs.Views;
+	expandedViews[0].MaximumDistanceMetres = upper;
+	WeatherResidencyCache cache;
+	WeatherResidencyCache expandedCache;
+	REQUIRE(BuildWeatherResidency(cache, inputs.Controls, inputs.Compiled, inputs.Time, 1, views, 1));
+	REQUIRE(BuildWeatherResidency(
+		expandedCache, inputs.Controls, inputs.Compiled, inputs.Time, 1, std::span(expandedViews).first(1), 1
+	));
+	REQUIRE(expandedCache.WorkEvaluations > 0);
+	CHECK(cache.WorkEvaluations == expandedCache.WorkEvaluations);
+	CHECK(inputs.Views[0].MaximumDistanceMetres == requested);
+	CHECK(cache.InputSignature == expandedCache.InputSignature);
+	CHECK(cache.PageKeys == expandedCache.PageKeys);
+	REQUIRE(cache.WorkDemands.size() == expandedCache.WorkDemands.size());
+	for (size_t index = 0; index < cache.WorkDemands.size(); ++index) {
+		CHECK(cache.WorkDemands[index].Key == expandedCache.WorkDemands[index].Key);
+		CHECK(cache.WorkDemands[index].ProjectedPixels == expandedCache.WorkDemands[index].ProjectedPixels);
+		CHECK(
+			cache.WorkDemands[index].MaximumOpticalError ==
+			expandedCache.WorkDemands[index].MaximumOpticalError
+		);
+		CHECK(cache.WorkDemands[index].RequiredCoarse == expandedCache.WorkDemands[index].RequiredCoarse);
+	}
+	const uint64_t signature = cache.InputSignature;
+	const uint64_t maintenanceTick = cache.Maintenance.Tick;
+	const uint64_t phaseTick = cache.WorkTime.PhaseTick;
+	const auto nextTime = weather::ResolveTime(weather::InitialAnchor(inputs.Compiled.Definition), 101);
+	REQUIRE(nextTime);
+	REQUIRE(nextTime->Tick < cache.NextMaintenanceTick);
+	inputs.Views[0].MaximumDistanceMetres = upper;
+	const auto retained =
+		BuildWeatherResidency(cache, inputs.Controls, inputs.Compiled, *nextTime, 1, views, 2);
+	REQUIRE(retained);
+	CHECK(cache.InputSignature == signature);
+	CHECK(cache.Maintenance.Tick == maintenanceTick);
+	CHECK(cache.WorkTime.PhaseTick == phaseTick);
+	inputs.Views[0].MaximumDistanceMetres = std::nextafter(upper, std::numeric_limits<float>::infinity());
+	const auto enlarged =
+		BuildWeatherResidency(cache, inputs.Controls, inputs.Compiled, *nextTime, 1, views, 3);
+	REQUIRE(enlarged);
+	CHECK(enlarged->Rebuilt);
+	CHECK(cache.InputSignature != signature);
+	CHECK(cache.Maintenance.Tick == nextTime->Tick);
+	CHECK(cache.WorkTime.PhaseTick == nextTime->PhaseTick);
+}
+
+TEST_CASE("smooth sunlight completes weather residency maintenance", "[render][weather]") {
+	Inputs inputs;
+	const auto grid = WeatherGridOf(inputs.Controls);
+	REQUIRE(grid);
+	const WeatherGpuInputs gpuInputs{
+		WeatherUniformsOf(inputs.Compiled.Definition, inputs.Time, *grid), inputs.Compiled, inputs.Time, false
+	};
+	WeatherResidencyCache cache;
+	std::optional<WeatherResidencyPlan> plan;
+	uint64_t initialSignature = 0;
+	float firstDistance = 0;
+	float lastDistance = 0;
+	for (uint64_t frame = 1; frame <= 160; ++frame) {
+		std::array<WeatherResidencyView, weather::MAXIMUM_RESIDENCY_VIEWS> views{};
+		views[0] = inputs.Views[0];
+		const core::Vector3 sun{-0.35f - static_cast<float>(frame) * 0.000002f, -0.8f, -0.2f};
+		const auto shadow =
+			BuildWeatherShadowPlan(inputs.Controls, gpuInputs, sun, 1, 1, std::span(views).first(1));
+		REQUIRE(shadow.Enabled);
+		const auto count = AppendWeatherShadowDemand(views, 1, shadow, inputs.Compiled.Definition.LayerKey);
+		REQUIRE(count == 2);
+		lastDistance = views[1].MaximumDistanceMetres;
+		plan = BuildWeatherResidency(
+			cache,
+			inputs.Controls,
+			inputs.Compiled,
+			inputs.Time,
+			1,
+			std::span(views).first(count),
+			frame,
+			static_cast<double>(frame) / 60
+		);
+		REQUIRE(plan);
+		if (frame == 1) {
+			initialSignature = cache.InputSignature;
+			firstDistance = lastDistance;
+		}
+		CHECK(cache.InputSignature == initialSignature);
+		CHECK(cache.WorkTime.PhaseTick == inputs.Time.PhaseTick);
+		CHECK(cache.Maintenance.Tick == inputs.Time.Tick);
+		CHECK(plan->CandidateEvaluations <= WEATHER_MAINTENANCE_CHUNK);
+		CHECK(plan->ClassifiedPages <= WEATHER_CLASSIFICATION_CHUNK);
+		if (frame >= 96) CHECK_FALSE(plan->MaintenancePending);
+	}
+	CHECK(lastDistance != firstDistance);
+	REQUIRE(plan);
+	CHECK_FALSE(plan->RequiresProceduralFallback);
+	CHECK(plan->CandidateEvaluations == 0);
+	CHECK(plan->ClassifiedPages == 0);
 }
 
 TEST_CASE(
