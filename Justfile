@@ -1261,31 +1261,9 @@ mcp port="8738" +args="--width 1600": (build "studio") (build "mcpbridge")
 # the same `Luau.*` target names ours does. Adding it to this build fails at
 # configure time; `.gitmodules` carries the full argument.
 #
-# **`-Wno-error=maybe-uninitialized`, and the narrowness is the point.** luau-lsp
-# hardcodes `-Wall -Werror` with no option to disable it, and GCC 13 reports a
-# false positive in `src/operations/CallHierarchy.cpp`: a `std::string` inside an
-# `std::optional` inside the `FunctionName` pair, reported against
-# `bits/basic_string.h` rather than against any line upstream wrote. So the build
-# fails on a warning about vendored code in a vendored tree.
-# `MonoVendor.cmake` turns Luau's own `LUAU_WERROR` off for exactly this reason.
-#
-# A blanket `-Wno-error` does not work here: `CMAKE_CXX_FLAGS` lands *before*
-# their `target_compile_options`, so the later `-Werror` wins. A specific
-# `-Wno-error=<warning>` takes precedence over the blanket form whatever the
-# order, which is why this names the warning rather than silencing all of them -
-# every other warning upstream cares about still fails the build.
-#
-# **`-include cstdint` was the second one and is gone.** It was here because
-# luau-lsp pinned a Luau from before GCC 13 stopped including `<cstdint>`
-# transitively, so `Ast/src/StringUtils.cpp` named `uint8_t` without including
-# it. The v0.15 bump to the revision luau-lsp `d5df9af` pins carries the fix, and
-# the flag was removed after building without it rather than on the assumption
-# that a newer tree would be fine. `docs/DEFERRED.md` D00019 is the bump.
-#
-# Flags rather than patches wherever a flag will do. Where one will not, the
-# patch is a file under `mono.vendor/patches/luau-lsp/` - the third shape
-# `mono.vendor/AGENTS.md` argues for, taken over a fork so that nothing has to be
-# pushed to a remote we do not own.
+# Copied-tree patches make FunctionName construction and optional codegen logging
+# explicit so GCC 13 can check them with upstream warning flags.
+# Empty CMAKE_CXX_FLAGS also clears the old warning exemption in existing caches.
 #
 # **The patch is applied to a copy, never to the submodule.** Applying it in
 # place left `mono.vendor/luau-lsp` modified in every `git status` from then on,
@@ -1332,7 +1310,8 @@ luau-lsp:
 
     cmake -S "$src" -B .cache/build/luau-lsp -G Ninja \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_CXX_FLAGS="-Wno-error=maybe-uninitialized" > /dev/null
+          -DLUAU_BUILD_TESTS=OFF \
+          -DCMAKE_CXX_FLAGS="" > /dev/null
     cmake --build .cache/build/luau-lsp --target luau-lsp
     echo ""
     echo "luau-lsp built: $(pwd)/.cache/build/luau-lsp/luau-lsp"

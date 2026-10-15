@@ -1,0 +1,39 @@
+mono.vendor/patches/luau-lsp/call-hierarchy-function-name-copy.patch
+
+Keep GCC 13 warning checks enabled when building call hierarchy support.
+
+WHY THIS IS A PATCH
+    GCC 13 reports maybe-uninitialized in the string storage of the disengaged
+    optional when a temporary FunctionName is moved into the functions tuple.
+    Constructing a named const FunctionName and copying it into the tuple avoids
+    that move while preserving the same name and empty detail. This replaces the
+    recipe's warning exemption without weakening upstream's -Wall -Werror.
+
+WHERE IT GOES
+    FindAllFunctionsVisitor::visit(Luau::AstStatLocalFunction*) in
+    src/operations/CallHierarchy.cpp, at the funcs.emplace_back call.
+
+WHEN IT STOPS APPLYING
+    Re-point this hunk at the local-function tuple insertion. If upstream no
+    longer moves the temporary, remove the patch after a cold GCC 13 build with
+    warnings still fatal. scripts/vendor-tree.sh applies this only to the copied
+    vendor tree and stops when a patch no longer applies.
+
+VALIDATION
+    just typecheck-editor rebuilds the patched language server and checks all
+    authored examples. Check the cold build output for warnings as well as its
+    exit status; no compiler-warning suppression is needed by this patch.
+
+diff --git a/src/operations/CallHierarchy.cpp b/src/operations/CallHierarchy.cpp
+--- a/src/operations/CallHierarchy.cpp
++++ b/src/operations/CallHierarchy.cpp
+@@ -68,7 +68,8 @@ struct FindAllFunctionsVisitor : public Luau::AstVisitor
+ 
+     bool visit(class Luau::AstStatLocalFunction* node) override
+     {
+-        funcs.emplace_back(FunctionName{node->name->name.value, std::nullopt}, node->location, node->name->location, node->func);
++        const FunctionName functionName{node->name->name.value, std::nullopt};
++        funcs.emplace_back(functionName, node->location, node->name->location, node->func);
+         return true;
+     }
+ 
