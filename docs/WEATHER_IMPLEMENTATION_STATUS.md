@@ -8,6 +8,11 @@ images, lightning, portal composition and exact opaque-wall preservation pass
 in both development and strict CI builds. CPU and GPU measurements are recorded
 below. Other backends have not been run.
 
+The later [GPU compute optimisation](WEATHER_GPU_OPTIMISATION.md) records
+parallel page summaries, reduced density-sampling work and a measured
+14.6-fold summary-kernel speedup on the local Vulkan device. Its affected GPU
+and complete headless renderer checks pass in development and strict CI.
+
 The later [portal and mirror visual validation](WEATHER_VISUAL_VALIDATION.md)
 records the expanded scene checks, capture repairs and an unresolved
 intermittent black frame during a 144 FPS portal crossing. The final client
