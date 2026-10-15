@@ -54,7 +54,9 @@ capture() {
 	# shows something when it is run by hand, and matching only `""` made this
 	# script fail the moment one of them did. The guard below is what turns that
 	# into a message rather than a capture of the wrong view.
-	local staged="$out/$scene-$view.luau"
+	local fixture="$out/fixtures/portal-lighting-$scene-$view"
+	mkdir -p "$fixture"
+	local staged="$fixture/$scene.luau"
 	sed "s/^local VIEW = \"[^\"]*\"$/local VIEW = \"$view\"/" "$source" > "$staged"
 
 	if ! grep -q "^local VIEW = \"$view\"$" "$staged"; then
