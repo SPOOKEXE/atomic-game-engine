@@ -223,6 +223,13 @@ namespace engine::weather {
 				return false;
 			}
 			const auto bytes = reader.ReadRawView(length);
+			// An untouched component has no physical history. Only its default envelope means uninitialized.
+			if (!reader.Failed() && length == 0 && checkpoint.Tick == 0 && checkpoint.Epoch == 1 &&
+				checkpoint.Revision == 1) {
+				checkpoint.Bytes.clear();
+				checkpoint.Queries.reset();
+				return true;
+			}
 			SimulationState validated;
 			if (reader.Failed() || !DecodeCheckpoint(bytes, validated) || validated.Tick != checkpoint.Tick ||
 				validated.Definition.WorldEpoch != checkpoint.Epoch ||
@@ -240,15 +247,22 @@ namespace engine::weather {
 			for (size_t index = 0; index < count; ++index) {
 				const auto &state = states[index];
 				writer.WriteUInt32(2);
-				const auto checkpoint = EncodeCheckpoint(state.Simulation);
-				if (!checkpoint) throw std::runtime_error("invalid stateful weather save");
-				WriteCheckpoint(
-					writer,
-					{state.Simulation.Tick,
-					 state.Simulation.Definition.WorldEpoch,
-					 state.Simulation.Definition.Revision,
-					 *checkpoint}
-				);
+				const bool uninitialized = state.AcceptedRevision == 0 && state.Seed == 1 &&
+										   state.LayerKey == 0 && state.TickSamples.empty() &&
+										   state.Simulation == SimulationState{};
+				if (uninitialized) {
+					WriteCheckpoint(writer, StatefulWeatherCheckpoint{});
+				} else {
+					const auto checkpoint = EncodeCheckpoint(state.Simulation);
+					if (!checkpoint) throw std::runtime_error("invalid stateful weather save");
+					WriteCheckpoint(
+						writer,
+						{state.Simulation.Tick,
+						 state.Simulation.Definition.WorldEpoch,
+						 state.Simulation.Definition.Revision,
+						 *checkpoint}
+					);
+				}
 				writer.WriteUInt32(state.Seed);
 				writer.WriteUInt32(state.LayerKey);
 				writer.WriteUInt32(state.AcceptedRevision);
@@ -270,13 +284,23 @@ namespace engine::weather {
 					return;
 				}
 				StatefulWeatherCheckpoint checkpoint;
-				if (!ReadCheckpoint(reader, checkpoint) ||
-					!DecodeCheckpoint(checkpoint.Bytes, state.Simulation))
+				if (!ReadCheckpoint(reader, checkpoint)) return;
+				if (!checkpoint.Bytes.empty() && !DecodeCheckpoint(checkpoint.Bytes, state.Simulation)) {
+					reader.Fail();
 					return;
+				}
 				state.Seed = reader.ReadUInt32();
 				state.LayerKey = reader.ReadUInt32();
 				state.AcceptedRevision = reader.ReadUInt32();
 				const uint32_t samples = reader.ReadUInt32();
+				if (checkpoint.Bytes.empty()) {
+					if (state.Seed != 1 || state.LayerKey != 0 || state.AcceptedRevision != 0 ||
+						samples != 0) {
+						reader.Fail();
+						return;
+					}
+					continue;
+				}
 				if (samples > MAXIMUM_CATCHUP_TICKS || state.Seed != state.Simulation.Definition.Seed ||
 					state.AcceptedRevision != state.Simulation.Definition.Revision) {
 					reader.Fail();

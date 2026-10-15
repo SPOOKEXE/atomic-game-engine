@@ -1,5 +1,6 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
@@ -9,6 +10,10 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <array>
+#include <stdexcept>
 
 TEST_SUITE_ID("engine.weather.statefulruntime")
 TEST_DEPENDS("engine.weather.clock")
@@ -43,6 +48,160 @@ namespace {
 		weather::UpdateStatefulWeather(store);
 		weather::UpdateWeatherRuntime(store);
 	}
+}
+
+TEST_CASE("fresh uninitialized stateful components survive store save and load", "[weather][stateful]") {
+	Register();
+	ecs::Store store("uninitialized");
+	const auto provider = store.Create("weather");
+	store.Set(provider, weather::StatefulWeatherState{});
+	store.Set(provider, weather::StatefulWeatherCheckpoint{});
+	core::ByteWriter saved;
+	REQUIRE(store.Save(saved));
+	ecs::Store loaded("loaded");
+	core::ByteReader reader(saved.Bytes());
+	REQUIRE(loaded.Load(reader));
+	CHECK(reader.AtEnd());
+	const auto *state = loaded.Get<weather::StatefulWeatherState>(provider);
+	REQUIRE(state);
+	CHECK(state->Simulation == weather::SimulationState{});
+	CHECK(state->Seed == 1);
+	CHECK(state->LayerKey == 0);
+	CHECK(state->AcceptedRevision == 0);
+	CHECK(state->TickSamples.empty());
+	const auto *checkpoint = loaded.Get<weather::StatefulWeatherCheckpoint>(provider);
+	REQUIRE(checkpoint);
+	CHECK(checkpoint->Tick == 0);
+	CHECK(checkpoint->Epoch == 1);
+	CHECK(checkpoint->Revision == 1);
+	CHECK(checkpoint->Bytes.empty());
+	CHECK_FALSE(checkpoint->Queries);
+	CHECK_FALSE(weather::ValidateSimulation(state->Simulation));
+	weather::SimulationState physical;
+	CHECK_FALSE(weather::DecodeCheckpoint(checkpoint->Bytes, physical));
+}
+
+TEST_CASE("stateful default component arrays retain deterministic envelope bytes", "[weather][stateful]") {
+	Register();
+	const auto roundTrip = []<class Component>() {
+		const auto &descriptor = ecs::Components::Describe(ecs::Components::Assigned<Component>());
+		std::array<Component, 3> source{};
+		core::ByteWriter saved;
+		descriptor.Write(saved, source.data(), source.size());
+		std::array<Component, 3> decoded{};
+		core::ByteReader reader(saved.Bytes());
+		descriptor.Read(reader, decoded.data(), decoded.size());
+		REQUIRE_FALSE(reader.Failed());
+		CHECK(reader.AtEnd());
+		core::ByteWriter repeated;
+		descriptor.Write(repeated, decoded.data(), decoded.size());
+		CHECK(std::ranges::equal(saved.Bytes(), repeated.Bytes()));
+	};
+	roundTrip.template operator()<weather::StatefulWeatherState>();
+	roundTrip.template operator()<weather::StatefulWeatherCheckpoint>();
+}
+
+TEST_CASE(
+	"uninitialized stateful envelopes refuse physical metadata and retained samples", "[weather][stateful]"
+) {
+	Register();
+	weather::StatefulWeatherCheckpoint checkpoint;
+	uint32_t seed = 1, layerKey = 0, acceptedRevision = 0, samples = 0;
+	SECTION("tick") {
+		checkpoint.Tick = 1;
+	}
+	SECTION("epoch") {
+		checkpoint.Epoch = 2;
+	}
+	SECTION("revision") {
+		checkpoint.Revision = 2;
+	}
+	SECTION("seed") {
+		seed = 2;
+	}
+	SECTION("layer key") {
+		layerKey = 1;
+	}
+	SECTION("accepted revision") {
+		acceptedRevision = 1;
+	}
+	SECTION("retained samples") {
+		samples = 1;
+	}
+	const auto &checkpointDescriptor =
+		ecs::Components::Describe(ecs::Components::Assigned<weather::StatefulWeatherCheckpoint>());
+	core::ByteWriter saved;
+	saved.WriteUInt32(2);
+	checkpointDescriptor.Write(saved, &checkpoint, 1);
+	saved.WriteUInt32(seed);
+	saved.WriteUInt32(layerKey);
+	saved.WriteUInt32(acceptedRevision);
+	saved.WriteUInt32(samples);
+	weather::StatefulWeatherState destination;
+	destination.AcceptedRevision = 99;
+	core::ByteReader reader(saved.Bytes());
+	ecs::Components::Describe(ecs::Components::Assigned<weather::StatefulWeatherState>())
+		.Read(reader, &destination, 1);
+	CHECK(reader.Failed());
+	CHECK(destination.AcceptedRevision == 99);
+}
+
+TEST_CASE("stateful envelopes still refuse malformed nonempty physical checkpoints", "[weather][stateful]") {
+	Register();
+	ecs::Store store("physical");
+	const auto provider = store.Create("weather");
+	store.Set(provider, Controls());
+	Tick(store, 0.05f);
+	REQUIRE(weather::PublishStatefulCheckpoint(store, provider));
+	auto checkpoint = *store.Get<weather::StatefulWeatherCheckpoint>(provider);
+	REQUIRE_FALSE(checkpoint.Bytes.empty());
+	SECTION("corrupt physical digest") {
+		checkpoint.Bytes.back() ^= std::byte{1};
+	}
+	SECTION("nonempty garbage") {
+		checkpoint.Bytes = {std::byte{0}};
+	}
+	const auto &descriptor =
+		ecs::Components::Describe(ecs::Components::Assigned<weather::StatefulWeatherCheckpoint>());
+	core::ByteWriter saved;
+	descriptor.Write(saved, &checkpoint, 1);
+	weather::StatefulWeatherCheckpoint destination;
+	destination.Tick = 99;
+	core::ByteReader reader(saved.Bytes());
+	descriptor.Read(reader, &destination, 1);
+	CHECK(reader.Failed());
+	CHECK(destination.Tick == 99);
+	CHECK(destination.Bytes.empty());
+	core::ByteWriter stateBytes;
+	stateBytes.WriteUInt32(2);
+	descriptor.Write(stateBytes, &checkpoint, 1);
+	weather::StatefulWeatherState state;
+	state.AcceptedRevision = 99;
+	core::ByteReader stateReader(stateBytes.Bytes());
+	ecs::Components::Describe(ecs::Components::Assigned<weather::StatefulWeatherState>())
+		.Read(stateReader, &state, 1);
+	CHECK(stateReader.Failed());
+	CHECK(state.AcceptedRevision == 99);
+}
+
+TEST_CASE(
+	"empty or partial physical history cannot masquerade as an uninitialized save", "[weather][stateful]"
+) {
+	Register();
+	weather::StatefulWeatherState state;
+	SECTION("one physical cell") {
+		state.Simulation.Cells.emplace_back();
+	}
+	SECTION("changed empty definition") {
+		state.Simulation.Definition.WorldEpoch = 2;
+	}
+	SECTION("accepted physical revision") {
+		state.AcceptedRevision = 1;
+	}
+	core::ByteWriter writer;
+	const auto &descriptor =
+		ecs::Components::Describe(ecs::Components::Assigned<weather::StatefulWeatherState>());
+	CHECK_THROWS_AS(descriptor.Write(writer, &state, 1), std::runtime_error);
 }
 
 TEST_CASE("stateful fixed tick owns real physical cells and pause keeps history", "[weather][stateful]") {
