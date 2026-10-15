@@ -425,10 +425,10 @@ weather-effects-bench samples="5" build_preset="bench":
     ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-effects --samples {{samples}}
 
 # Real sparse generation and integration at a configurable image size; opens a GPU device explicitly.
-weather-gpu-bench samples="3" build_preset="bench" width="1920" height="1080":
+weather-gpu-bench samples="3" build_preset="bench" width="1920" height="1080" shadow_resolution="256":
     cmake --preset {{build_preset}} > /dev/null
     cmake --build --preset {{build_preset}} --target bench_render
-    MONO_WEATHER_GPU_BENCH=1 MONO_WEATHER_GPU_BENCH_WIDTH={{width}} MONO_WEATHER_GPU_BENCH_HEIGHT={{height}} ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-gpu --samples {{samples}}
+    MONO_WEATHER_GPU_BENCH=1 MONO_WEATHER_GPU_BENCH_WIDTH={{width}} MONO_WEATHER_GPU_BENCH_HEIGHT={{height}} MONO_WEATHER_GPU_BENCH_SHADOW_RESOLUTION={{shadow_resolution}} ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-gpu --samples {{samples}}
 
 # Coverage-guided hostile weather checkpoint decoding, without graphics.
 weather-fuzz runs="10000" compiler="clang++-21":

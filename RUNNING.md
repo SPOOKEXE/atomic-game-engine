@@ -165,7 +165,7 @@ the backend submission call separately from engine submission bookkeeping.
 | `weather-temporal-bench [samples] [build_preset]` | Measure temporal invalidation, periodic displacement and cloud composition without graphics. Defaults: `5`, `bench`. |
 | `weather-shadow-bench [samples] [build_preset]` | Measure shadow caster bounds, cascades, low-sun fades and retained revisions without graphics. Defaults: `5`, `bench`. |
 | `weather-effects-bench [samples] [build_preset]` | Measure weather emission and roof/ground visibility against published geometry without graphics. Defaults: `5`, `bench`. |
-| `weather-gpu-bench [samples] [build_preset] [width] [height]` | Open a GPU device and measure sparse weather generation, reuse, integration and tracked memory. Defaults: `3`, `bench`, `1920`, `1080`. |
+| `weather-gpu-bench [samples] [build_preset] [width] [height] [shadow_resolution]` | Open a GPU device and measure sparse weather generation, reuse, integration and tracked memory. Defaults: `3`, `bench`, `1920`, `1080`, `256`. Shadow resolution must be a power of two in `32..2048`. |
 | `weather-fuzz [runs] [compiler]` | Fuzz complete weather checkpoint decoding with AddressSanitizer and UBSan. Defaults: `10000`, `clang++-21`. |
 | `imagecodec-bench [samples]` | Measure CPU image imports at 1080p and print results to stdout. Default: `5`. |
 | `ui-headless-bench [samples]` | Measure ImGui layout and frozen draw signatures without a GPU. Default: `5`. |
@@ -212,6 +212,17 @@ the backend submission call separately from engine submission bookkeeping.
 | `priority-refinement-bench [samples]` | Measure refined multi-row replication publishing. Default: `5`. |
 | `recovery-rows-bench [samples]` | Measure recovery-row re-offer work. Default: `5`. |
 | `bench-mesh-lod [samples]` | Measure mesh LOD generation. Default: `5`. |
+
+The prototype's 12 ms combined weather GPU budget was met by this one-layer,
+1920x1080 Vulkan fixture on an RTX 4090 with one 256x256 shadow cascade.
+Concurrent GPU residency affected timing variance; this measurement does not
+establish a universal frame guarantee or a quality ranking. The default matches
+authored shadow resolution. Compare lower-quality maps with
+`just weather-gpu-bench 3 bench 1920 1080 64` and
+`just weather-gpu-bench 3 bench 1920 1080 128`.
+`MONO_WEATHER_GPU_BENCH_SHADOW_RESOLUTION` sets the same value when running the
+benchmark executable directly; invalid values are refused before SDL
+initialization.
 
 Profile and soak outputs are retained under `.cache/`, including
 `.cache/medium-render-profile/`, `.cache/heap-*.txt`, and

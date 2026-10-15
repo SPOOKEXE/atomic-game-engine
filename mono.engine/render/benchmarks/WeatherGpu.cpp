@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <charconv>
 #include <chrono>
 #include <cstdlib>
@@ -162,9 +163,16 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 	if (!enabled || std::string_view(enabled) != "1") return;
 	uint32_t width = 1920;
 	uint32_t height = 1080;
+	uint32_t shadowResolution = 256;
 	try {
 		width = BenchmarkExtent("MONO_WEATHER_GPU_BENCH_WIDTH", width, 3840);
 		height = BenchmarkExtent("MONO_WEATHER_GPU_BENCH_HEIGHT", height, 2160);
+		shadowResolution =
+			BenchmarkExtent("MONO_WEATHER_GPU_BENCH_SHADOW_RESOLUTION", shadowResolution, 2048);
+		if (shadowResolution < 32 || !std::has_single_bit(shadowResolution))
+			throw std::runtime_error(
+				"MONO_WEATHER_GPU_BENCH_SHADOW_RESOLUTION must be a power of two in 32..2048"
+			);
 	} catch (const std::runtime_error &refusal) {
 		std::cerr << "weather-gpu configuration refused: " << refusal.what() << '\n';
 		std::exit(EXIT_FAILURE);
@@ -204,7 +212,7 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 	environment.Weather.Coverage = .8f;
 	environment.Weather.VapourMixingRatio = .025f;
 	environment.Weather.ShadowsEnabled = true;
-	environment.Weather.ShadowResolution = 32;
+	environment.Weather.ShadowResolution = shadowResolution;
 	environment.Weather.ShadowCascades = 1;
 	environment.Weather.ShadowDistanceMetres = 1024;
 	environment.CloudLayer.Cover = 1;
