@@ -19,6 +19,7 @@
 
 TEST_SUITE_ID("engine.render.weathergpuclockgpu")
 TEST_DEPENDS("engine.weather.weather")
+TEST_DEPENDS("engine.render.weathergpuclock")
 
 namespace {
 	using namespace engine;

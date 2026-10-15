@@ -2839,6 +2839,12 @@
         "name": "AGENTS.md (engine/ui)",
         "uri": "atomic://agents/engine/ui"
       },
+      "atomic://agents/engine/weather": {
+        "description": "The invariants specific to engine/weather. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/weather)",
+        "uri": "atomic://agents/engine/weather"
+      },
       "atomic://agents/engine/world": {
         "description": "The invariants specific to engine/world. AGENTS.md rule: read this before changing anything in it.",
         "mimeType": "text/markdown",
@@ -6266,6 +6272,12 @@
         "mimeType": "text/markdown",
         "name": "AGENTS.md (engine/ui)",
         "uri": "atomic://agents/engine/ui"
+      },
+      "atomic://agents/engine/weather": {
+        "description": "The invariants specific to engine/weather. AGENTS.md rule: read this before changing anything in it.",
+        "mimeType": "text/markdown",
+        "name": "AGENTS.md (engine/weather)",
+        "uri": "atomic://agents/engine/weather"
       },
       "atomic://agents/engine/world": {
         "description": "The invariants specific to engine/world. AGENTS.md rule: read this before changing anything in it.",

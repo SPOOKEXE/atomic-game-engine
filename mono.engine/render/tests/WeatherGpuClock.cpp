@@ -7,6 +7,7 @@
 #include <limits>
 
 TEST_SUITE_ID("engine.render.weathergpuclock")
+TEST_DEPENDS("engine.weather.weather")
 
 using namespace engine::render;
 
