@@ -323,6 +323,118 @@ TEST_CASE("A program's own main counts as an includer", "[sourcecheck]") {
 	CHECK(CheckPublicHeader(builder.Result).empty());
 }
 
+TEST_CASE("External demand reaches every published dependency of a public API", "[sourcecheck]") {
+	Builder builder;
+	// Reverse dependency order also checks that the traversal does not depend on file order.
+	builder.Add("alpha/include/alpha/Value.hpp", "struct Value {};");
+	builder.Add(
+		"alpha/include/alpha/Result.hpp", "#include <alpha/Value.hpp>\nstruct Result { Value Data; };"
+	);
+	builder.Add("alpha/include/alpha/Api.hpp", "#include <alpha/Result.hpp>\nResult Read();");
+	builder.Add("beta/src/Beta.hpp", "#include <alpha/Api.hpp>\n");
+	CHECK(CheckPublicHeader(builder.Result).empty());
+}
+
+TEST_CASE("Public include cycles need an external demand root", "[sourcecheck]") {
+	Builder builder;
+	builder.Add("alpha/include/alpha/A.hpp", "#include <alpha/B.hpp>\n");
+	builder.Add("alpha/include/alpha/B.hpp", "#include <alpha/C.hpp>\n");
+	builder.Add("alpha/include/alpha/C.hpp", "#include <alpha/A.hpp>\n");
+	builder.Add("alpha/src/Alpha.hpp", "#include <alpha/A.hpp>\n");
+	SECTION("a rooted cycle is fully consumed") {
+		builder.Add("beta/src/Beta.hpp", "#include <alpha/A.hpp>\n");
+		CHECK(CheckPublicHeader(builder.Result).empty());
+	}
+	SECTION("an unrooted cycle remains advisory in stable order") {
+		const auto findings = CheckPublicHeader(builder.Result);
+		REQUIRE(findings.size() == 3);
+		CHECK(findings[0].Path == "alpha/include/alpha/A.hpp");
+		CHECK(findings[1].Path == "alpha/include/alpha/B.hpp");
+		CHECK(findings[2].Path == "alpha/include/alpha/C.hpp");
+		for (const auto &finding : findings) {
+			CHECK(finding.Status == State::Open);
+			CHECK_FALSE(sourcecheck::Gating(finding.Rule));
+		}
+	}
+}
+
+TEST_CASE("Same-module sources and tests do not root a public dependency chain", "[sourcecheck]") {
+	Builder builder;
+	builder.Add("alpha/include/alpha/Api.hpp", "#include <alpha/Value.hpp>\n");
+	builder.Add("alpha/include/alpha/Value.hpp", "struct Value {};");
+	builder.Add("alpha/src/Alpha.hpp", "#include <alpha/Api.hpp>\n");
+	builder.Add("alpha/tests/Alpha.hpp", "#include <alpha/Api.hpp>\n#include <alpha/Value.hpp>\n");
+	builder.Result.Files.back().Test = true;
+	const auto findings = CheckPublicHeader(builder.Result);
+	REQUIRE(findings.size() == 2);
+	CHECK(findings[0].Path == "alpha/include/alpha/Api.hpp");
+	CHECK(findings[1].Path == "alpha/include/alpha/Value.hpp");
+}
+
+TEST_CASE("An application roots its public dependencies but a module source does not", "[sourcecheck]") {
+	Builder builder;
+	builder.Add("studio/include/studio/Editor.hpp", "#include <studio/Options.hpp>\n");
+	builder.Add("studio/include/studio/Options.hpp", "struct Options {};");
+	SECTION("application entry point") {
+		builder.Add("studio/app/main.hpp", "#include <studio/Editor.hpp>\n");
+		CHECK(CheckPublicHeader(builder.Result).empty());
+	}
+	SECTION("module implementation") {
+		builder.Add("studio/src/Editor.hpp", "#include <studio/Editor.hpp>\n");
+		CHECK(CheckPublicHeader(builder.Result).size() == 2);
+	}
+}
+
+TEST_CASE("External test demand propagates through public dependencies", "[sourcecheck]") {
+	Builder builder;
+	builder.Add("alpha/include/alpha/Api.hpp", "#include <alpha/Value.hpp>\n");
+	builder.Add("alpha/include/alpha/Value.hpp", "struct Value {};");
+	builder.Add("beta/tests/Alpha.hpp", "#include <alpha/Api.hpp>\n");
+	builder.Result.Files.back().Test = true;
+	CHECK(CheckPublicHeader(builder.Result).empty());
+}
+
+TEST_CASE("An external published include retains its direct demand semantics", "[sourcecheck]") {
+	Builder builder;
+	builder.Add("alpha/include/alpha/Api.hpp", "#include <alpha/Value.hpp>\n");
+	builder.Add("alpha/include/alpha/Value.hpp", "struct Value {};");
+	builder.Add("beta/include/beta/Unused.hpp", "#include <alpha/Api.hpp>\n");
+	const auto findings = CheckPublicHeader(builder.Result);
+	REQUIRE(findings.size() == 1);
+	CHECK(findings[0].Path == "beta/include/beta/Unused.hpp");
+}
+
+TEST_CASE("Public header waivers do not create dependency demand", "[sourcecheck]") {
+	Builder builder;
+	std::string reason;
+	State status = State::Open;
+	SECTION("a reason waives the advisory") {
+		reason = "reserved forward API";
+		status = State::Waived;
+	}
+	SECTION("a known violation remains distinct") {
+		reason = "known violation - retained for a planned consumer";
+		status = State::Known;
+	}
+	SECTION("an empty reason is refused") {}
+	builder.Add(
+		"alpha/include/alpha/Api.hpp",
+		"#include <alpha/Value.hpp>\n// arch-waiver public-header: " + reason + "\nvoid Read();\n"
+	);
+	builder.Add("alpha/include/alpha/Value.hpp", "struct Value {};");
+	const auto findings = CheckPublicHeader(builder.Result);
+	REQUIRE(findings.size() == 2);
+	CHECK(findings[0].Path == "alpha/include/alpha/Api.hpp");
+	CHECK(findings[0].Status == status);
+	CHECK(findings[1].Path == "alpha/include/alpha/Value.hpp");
+	CHECK(findings[1].Status == State::Open);
+	CHECK_FALSE(sourcecheck::Gating(findings[0].Rule));
+	if (reason.empty())
+		CHECK(Mentions(findings, "no reason"));
+	else
+		CHECK(findings[0].Reason == reason);
+}
+
 TEST_CASE("Only the reporting rule declines to gate", "[sourcecheck]") {
 	CHECK(sourcecheck::Gating("ecs-copy"));
 	CHECK(sourcecheck::Gating("world-pointer"));
