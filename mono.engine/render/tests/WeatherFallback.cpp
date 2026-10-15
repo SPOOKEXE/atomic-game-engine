@@ -136,7 +136,42 @@ TEST_CASE(
 		INFO("fallback scenario=" << scenario);
 		const auto original = scenario == 0 ? graph::DefaultPbrTierBDocument() : graph::DefaultPbrDocument();
 		graph::PipelineDocument document;
+		bool skipNode = false;
 		for (auto edit : original.Edits()) {
+			// The custom graph omits the volume producers and returns fog to the sky output.
+			if (scenario == 1 && edit.Kind == graph::EditKind::AddResource) {
+				skipNode = false;
+				if (edit.Name == core::Name("environment-sky") ||
+					edit.Name == core::Name("environment-clouds") ||
+					edit.Name == core::Name("weather-pages") ||
+					edit.Name == core::Name("weather-previous-pages") ||
+					edit.Name == core::Name("weather-field") || edit.Name == core::Name("weather-summary") ||
+					edit.Name == core::Name("weather-cloud-history") ||
+					edit.Name == core::Name("weather-depth-history") ||
+					edit.Name == core::Name("weather-clouds") ||
+					edit.Name == core::Name("weather-cloud-depth") ||
+					edit.Name == core::Name("weather-resolved") ||
+					edit.Name == core::Name("weather-shadow") || edit.Name == core::Name("weather-lit"))
+					continue;
+			}
+			if (scenario == 1 && edit.Kind == graph::EditKind::AddNode) {
+				skipNode = edit.NodeKind == core::Name("skybox-compute") ||
+						   edit.NodeKind == core::Name("clouds-compute") ||
+						   edit.NodeKind == core::Name("weather-residency") ||
+						   edit.NodeKind == core::Name("weather-field") ||
+						   edit.NodeKind == core::Name("weather-summary") ||
+						   edit.NodeKind == core::Name("weather-shadow-map") ||
+						   edit.NodeKind == core::Name("weather-integrate") ||
+						   edit.NodeKind == core::Name("weather-history") ||
+						   edit.NodeKind == core::Name("weather-reconstruct");
+			}
+			if (scenario == 1 && skipNode) continue;
+			if (scenario == 1 && edit.Kind == graph::EditKind::Reads) {
+				if (edit.Target == core::Name("environment-clouds") ||
+					edit.Target == core::Name("weather-shadow"))
+					continue;
+				if (edit.Target == core::Name("weather-lit")) edit.Target = core::Name("sky-lit");
+			}
 			// The existing allocator refuses an incompatible stride before requesting device memory.
 			if (scenario == 2 && edit.Kind == graph::EditKind::AddResource &&
 				edit.Name == core::Name("weather-pages"))
@@ -157,12 +192,6 @@ TEST_CASE(
 		graph::RenderGraph graph;
 		core::Name offender;
 		REQUIRE(graph::Build(document, graph, offender) == graph::PipelineDocumentStatus::Ok);
-		if (scenario == 1)
-			for (uint32_t value = 1; value <= graph.Count(); ++value) {
-				const auto *node = graph.Find(graph::NodeId{value});
-				if (node && node->Kind == core::Name("weather-integrate"))
-					REQUIRE(graph.SetEnabled(graph::NodeId{value}, false));
-			}
 		REQUIRE(fixture.Render.SetPipeline(pipelines[scenario], graph));
 		constexpr uint32_t EXTENT = 33;
 		SceneTarget target{EXTENT, EXTENT};

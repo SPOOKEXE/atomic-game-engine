@@ -619,7 +619,9 @@ TEST_CASE("stateful GPU shares one physical owner across two graph pipelines", "
 	settle();
 	CHECK(counter("render.weather.stateful.queue_submissions") == beforeQueues + 1);
 	CHECK(counter("render.weather.stateful.allocated_bytes") == beforeAllocations + 260 * 64 + 32);
-	CHECK(counter("render.weather.stateful.physical_owners") == 1);
+	const auto firstPhysicalOwners = core::Metrics::GetGauge("render.weather.stateful.physical_owners");
+	REQUIRE(firstPhysicalOwners);
+	CHECK(firstPhysicalOwners->Value == 1);
 	for (auto &view : views)
 		view.Lighting.EnvironmentState.Clock.Tick = 1;
 	REQUIRE(fixture.Render.Render(views, overlay, nullptr, false).Submitted);
@@ -647,7 +649,9 @@ TEST_CASE("stateful GPU shares one physical owner across two graph pipelines", "
 		environment.CloudLayer.Density *= .5f;
 	}
 	REQUIRE(fixture.Render.Render(views, overlay, nullptr, false).Submitted);
-	CHECK(counter("render.weather.stateful.physical_owners") == 1);
+	const auto sharedPhysicalOwners = core::Metrics::GetGauge("render.weather.stateful.physical_owners");
+	REQUIRE(sharedPhysicalOwners);
+	CHECK(sharedPhysicalOwners->Value == 1);
 	CHECK(counter("render.weather.stateful.allocated_bytes") == residentAllocations);
 	CHECK(counter("render.weather.stateful.queue_submissions") == beforeQueues + 2);
 	CHECK(counter("render.weather.stateful.packed_copy_bytes") == residentCopies);
@@ -672,11 +676,15 @@ TEST_CASE("stateful GPU shares one physical owner across two graph pipelines", "
 	REQUIRE(fixture.Render.Render(views, overlay, nullptr, false).Submitted);
 	settle();
 	CHECK(counter("render.weather.stateful.queue_submissions") == beforeQueues + 3);
-	CHECK(counter("render.weather.stateful.physical_owners") == 1);
+	const auto resumedPhysicalOwners = core::Metrics::GetGauge("render.weather.stateful.physical_owners");
+	REQUIRE(resumedPhysicalOwners);
+	CHECK(resumedPhysicalOwners->Value == 1);
 	CHECK(counter("render.weather.stateful.allocated_bytes") == residentAllocations);
 	for (auto &view : views)
 		view.Lighting.EnvironmentState.Weather.Enabled = false;
 	REQUIRE(fixture.Render.Render(views, overlay, nullptr, false).Submitted);
-	CHECK(counter("render.weather.stateful.physical_owners") == 0);
+	const auto releasedPhysicalOwners = core::Metrics::GetGauge("render.weather.stateful.physical_owners");
+	REQUIRE(releasedPhysicalOwners);
+	CHECK(releasedPhysicalOwners->Value == 0);
 	CHECK_FALSE(fixture.Render.HasPendingWeatherWork(views[0].World));
 }

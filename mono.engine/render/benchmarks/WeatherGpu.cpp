@@ -100,6 +100,27 @@ namespace {
 		return 0;
 	}
 
+	bool ValidateWeatherPhases(const std::array<WeatherPhase, 3> &phases) {
+		bool valid = true;
+		const auto expect = [&](const WeatherPhase &phase, std::string_view counter, bool positive) {
+			const double observed = PhaseWork(phase, counter);
+			if (positive ? observed > 0 : observed == 0) return;
+			std::cerr << "weather-gpu workload refused: phase=" << phase.Name << " counter=" << counter
+					  << " expected=" << (positive ? "positive" : "zero") << " observed=" << observed << '\n';
+			valid = false;
+		};
+		// Work counters remain required even when completed device timestamps are unavailable.
+		for (const auto *counter :
+			 {"field_dispatches", "summary_dispatches", "ray_dispatches", "shadow_dispatches"})
+			expect(phases[0], counter, true);
+		expect(phases[1], "field_dispatches", false);
+		expect(phases[1], "field_cache_hits", true);
+		expect(phases[1], "ray_dispatches", true);
+		for (const auto *counter : {"field_dispatches", "summary_dispatches", "ray_dispatches"})
+			expect(phases[2], counter, true);
+		return valid;
+	}
+
 	void PrintPhase(const WeatherPhase &phase) {
 		std::cout << "weather-gpu phase=" << phase.Name << " frames=" << phase.Frames
 				  << " cpu_record_ns=" << phase.RecordingNanoseconds / std::max(phase.Frames, 1u)
@@ -277,4 +298,5 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 		PrintPhase(phase);
 	if (!SDL_WaitForGPUIdle(device)) throw std::runtime_error(SDL_GetError());
 	renderer.Shutdown();
+	if (!ValidateWeatherPhases(phases)) std::exit(EXIT_FAILURE);
 }

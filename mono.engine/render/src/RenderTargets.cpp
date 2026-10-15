@@ -914,7 +914,9 @@ namespace engine::render {
 		uint64_t actualBytes
 	) {
 		const graph::ResourceDesc *desc = pipeline.Graph.FindResource(resource);
-		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer || desc->External ||
+		// History is graph-owned; its External flag also excludes it from transient aliasing.
+		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer ||
+			(desc->External && desc->Lifetime != graph::ResourceLifetime::History) ||
 			desc->BufferStride == 0) {
 			return nullptr;
 		}
