@@ -164,7 +164,7 @@ TEST_CASE("the data capture document keeps SSAO as an independent R8 source", "[
 	CHECK(ambient->Scope == NodeScope::Frame);
 	REQUIRE(ambient->Reads.size() == 1);
 	CHECK(ambient->ReadPorts == std::vector<Name>{Name("source")});
-	const auto *occlusion = graph.FindResource(ambient->Reads.front());
+	const auto *occlusion = graph.FindResourceDesc(ambient->Reads.front());
 	REQUIRE(occlusion != nullptr);
 	CHECK(occlusion->Name == Name("occlusion"));
 	CHECK(occlusion->Format == engine::graph::ResourceFormat::R8);
@@ -183,7 +183,7 @@ TEST_CASE("the HDR capture reads the completed transparent scene", "[graph][data
 		if (node && node->Name == Name("data-capture")) capture = node;
 	}
 	REQUIRE(capture != nullptr);
-	const auto *source = graph.FindResource(capture->Reads.front());
+	const auto *source = graph.FindResourceDesc(capture->Reads.front());
 	REQUIRE(source != nullptr);
 	CHECK(source->Name == Name("display"));
 	CHECK(source->Format == engine::graph::ResourceFormat::RGBA16F);
@@ -223,7 +223,7 @@ TEST_CASE(
 	CHECK(capture->Kind == Name("capture"));
 	CHECK(capture->ReadPorts == std::vector<Name>{Name("source")});
 	REQUIRE(capture->Reads.size() == 1);
-	const auto *response = graph.FindResource(capture->Reads.front());
+	const auto *response = graph.FindResourceDesc(capture->Reads.front());
 	REQUIRE(response != nullptr);
 	CHECK(response->Name == Name("directional-response"));
 	CHECK(response->Format == engine::graph::ResourceFormat::RGBA32F);
@@ -250,7 +250,7 @@ TEST_CASE("the data capture document exposes a GPU packed RGBA32F target", "[gra
 	CHECK(pack->Integer(Name("g-component"), 9) == 0);
 	CHECK(pack->Integer(Name("b-component"), 9) == 0);
 	CHECK(pack->Integer(Name("a-component"), 9) == 2);
-	const auto *packed = graph.FindResource(pack->Writes.front());
+	const auto *packed = graph.FindResourceDesc(pack->Writes.front());
 	REQUIRE(packed != nullptr);
 	CHECK(packed->Name == Name("packed-gpu"));
 	CHECK(packed->Format == engine::graph::ResourceFormat::RGBA32F);
@@ -281,7 +281,7 @@ TEST_CASE(
 	REQUIRE(capture != nullptr);
 	CHECK(capture->Kind == Name("capture"));
 	CHECK(capture->ReadPorts == std::vector<Name>{Name("source")});
-	const auto *vectors = graph.FindResource(capture->Reads.front());
+	const auto *vectors = graph.FindResourceDesc(capture->Reads.front());
 	REQUIRE(vectors != nullptr);
 	CHECK(vectors->Name == Name("camera-motion-vectors"));
 	CHECK(vectors->Format == engine::graph::ResourceFormat::RG16F);
@@ -303,7 +303,7 @@ TEST_CASE(
 	REQUIRE(capture != nullptr);
 	CHECK(capture->Kind == Name("capture"));
 	CHECK(capture->ReadPorts == std::vector<Name>{Name("source")});
-	const auto *uv = graph.FindResource(capture->Reads.front());
+	const auto *uv = graph.FindResourceDesc(capture->Reads.front());
 	REQUIRE(uv != nullptr);
 	CHECK(uv->Name == Name("mesh-uv"));
 	CHECK(uv->Format == engine::graph::ResourceFormat::RG16F);
@@ -324,7 +324,7 @@ TEST_CASE("the data capture document records visible opaque or masked coverage",
 	CHECK(capture->Kind == Name("capture"));
 	CHECK(capture->Scope == NodeScope::Frame);
 	CHECK(capture->ReadPorts == std::vector<Name>{Name("source")});
-	const auto *validity = graph.FindResource(capture->Reads.front());
+	const auto *validity = graph.FindResourceDesc(capture->Reads.front());
 	REQUIRE(validity != nullptr);
 	CHECK(validity->Name == Name("first-surface-validity"));
 	CHECK(validity->Format == engine::graph::ResourceFormat::R8);
@@ -352,8 +352,8 @@ TEST_CASE("the data capture document peels one aligned second surface", "[graph]
 	CHECK(capture->Kind == Name("capture"));
 	CHECK(capture->Scope == NodeScope::Frame);
 	CHECK(capture->ReadPorts == std::vector<Name>{Name("source"), Name("depth")});
-	const auto *validity = graph.FindResource(capture->Reads[0]);
-	const auto *depth = graph.FindResource(capture->Reads[1]);
+	const auto *validity = graph.FindResourceDesc(capture->Reads[0]);
+	const auto *depth = graph.FindResourceDesc(capture->Reads[1]);
 	REQUIRE(validity != nullptr);
 	REQUIRE(depth != nullptr);
 	CHECK(validity->Name == Name("second-surface-validity"));
@@ -419,7 +419,7 @@ TEST_CASE("resource and canvas contracts survive text and runtime build", "[grap
 
 	RenderGraph graph;
 	REQUIRE(Build(reloaded, graph, offender) == PipelineDocumentStatus::Ok);
-	const auto *built = graph.FindResource(engine::graph::ResourceId{1});
+	const auto *built = graph.FindResourceDesc(engine::graph::ResourceId{1});
 	REQUIRE(built != nullptr);
 	CHECK(built->Access == engine::graph::ResourceAccess::ReadWrite);
 	CHECK(built->Samples == 4);
@@ -493,7 +493,7 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	bool skyHistory = false;
 	bool cloudsHistory = false;
 	for (uint32_t value = 1; value <= graph.ResourceCount(); value++) {
-		const auto *resource = graph.FindResource(engine::graph::ResourceId{value});
+		const auto *resource = graph.FindResourceDesc(engine::graph::ResourceId{value});
 		REQUIRE(resource != nullptr);
 		emissive = emissive || (resource->Name == Name("emissive") &&
 								resource->Format == engine::graph::ResourceFormat::RGBA16F);
@@ -549,7 +549,7 @@ TEST_CASE("optional default graph nodes can be disabled without breaking their c
 		std::vector<Name> names;
 		names.reserve(candidate.ResourceCount());
 		for (uint32_t index = 1; index <= candidate.ResourceCount(); ++index) {
-			const auto *resource = candidate.FindResource(engine::graph::ResourceId{index});
+			const auto *resource = candidate.FindResourceDesc(engine::graph::ResourceId{index});
 			if (resource != nullptr) names.push_back(resource->Name);
 		}
 		return names;
@@ -1215,7 +1215,7 @@ TEST_CASE(
 	REQUIRE(spatial.size() >= expectedTail.size());
 	CHECK(std::vector<Name>(spatial.end() - expectedTail.size(), spatial.end()) == expectedTail);
 	for (uint32_t value = 1; value <= graph.ResourceCount(); ++value) {
-		const auto *resource = graph.FindResource(engine::graph::ResourceId{value});
+		const auto *resource = graph.FindResourceDesc(engine::graph::ResourceId{value});
 		if (resource->Name == Name("mirror-views") || resource->Name == Name("portaled") ||
 			resource->Name == Name("mirrored") || resource->Name == Name("display") ||
 			resource->Name == Name("lens-b")) {
@@ -1232,10 +1232,10 @@ TEST_CASE(
 		REQUIRE(node->Writes.size() == 2);
 		CHECK(node->ReadPorts == std::vector<Name>{Name("colour"), Name("depth")});
 		CHECK(node->WritePorts == std::vector<Name>{Name("colour"), Name("scratch")});
-		CHECK(graph.FindResource(node->Reads[0])->Name == Name("display"));
-		CHECK(graph.FindResource(node->Reads[1])->Format == engine::graph::ResourceFormat::R32F);
+		CHECK(graph.FindResourceDesc(node->Reads[0])->Name == Name("display"));
+		CHECK(graph.FindResourceDesc(node->Reads[1])->Format == engine::graph::ResourceFormat::R32F);
 		CHECK(node->Writes[0] != node->Writes[1]);
-		CHECK(graph.FindResource(node->Writes[1])->Format == engine::graph::ResourceFormat::RGBA16F);
+		CHECK(graph.FindResourceDesc(node->Writes[1])->Format == engine::graph::ResourceFormat::RGBA16F);
 	}
 	PipelineDocument restored;
 	REQUIRE(Read(Write(document), restored, offender) == PipelineDocumentStatus::Ok);
@@ -1307,11 +1307,11 @@ TEST_CASE(
 						CHECK(exported->Kind == Name("capture"));
 						REQUIRE(exported->Reads.size() == 2);
 						CHECK(
-							graph.FindResource(exported->Reads[0])->Format ==
+							graph.FindResourceDesc(exported->Reads[0])->Format ==
 							engine::graph::ResourceFormat::RGBA16F
 						);
 						CHECK(
-							graph.FindResource(exported->Reads[1])->Format ==
+							graph.FindResourceDesc(exported->Reads[1])->Format ==
 							engine::graph::ResourceFormat::R32F
 						);
 						if (lenses) {
@@ -1384,11 +1384,15 @@ TEST_CASE(
 			const auto *ssao = find("ssao");
 			REQUIRE(merged->Writes.size() == 2);
 			CHECK(ssao->Reads == merged->Writes);
-			CHECK(graph.FindResource(merged->Writes[0])->Format == engine::graph::ResourceFormat::R32F);
-			CHECK(graph.FindResource(merged->Writes[1])->Format == engine::graph::ResourceFormat::RGB10A2);
+			CHECK(graph.FindResourceDesc(merged->Writes[0])->Format == engine::graph::ResourceFormat::R32F);
+			CHECK(
+				graph.FindResourceDesc(merged->Writes[1])->Format == engine::graph::ResourceFormat::RGB10A2
+			);
 			const auto *room = find("room-image");
 			REQUIRE(room->Writes.size() == 5);
-			CHECK(graph.FindResource(room->Writes.back())->Format == engine::graph::ResourceFormat::RGBA32F);
+			CHECK(
+				graph.FindResourceDesc(room->Writes.back())->Format == engine::graph::ResourceFormat::RGBA32F
+			);
 			const auto *body = find("body-compose");
 			CHECK(body->Reads[2] == find("ambient-correct")->Writes[0]);
 			const auto *correction = find("ambient-correct");
@@ -1446,12 +1450,14 @@ TEST_CASE(
 			const auto *node = graph.Find(id);
 			if (node->Kind != Name("deferred-lighting")) continue;
 			REQUIRE(node->Writes.size() == (directional ? 3 : 2));
-			CHECK(graph.FindResource(node->Writes[0])->Format == engine::graph::ResourceFormat::RGBA16F);
-			CHECK(graph.FindResource(node->Writes[1])->Format == engine::graph::ResourceFormat::RGBA32F);
+			CHECK(graph.FindResourceDesc(node->Writes[0])->Format == engine::graph::ResourceFormat::RGBA16F);
+			CHECK(graph.FindResourceDesc(node->Writes[1])->Format == engine::graph::ResourceFormat::RGBA32F);
 			CHECK(node->WritePorts[1] == Name("lighting-baseline"));
 			if (directional) {
 				CHECK(node->WritePorts[2] == Name("directional-response"));
-				CHECK(graph.FindResource(node->Writes[2])->Format == engine::graph::ResourceFormat::RGBA32F);
+				CHECK(
+					graph.FindResourceDesc(node->Writes[2])->Format == engine::graph::ResourceFormat::RGBA32F
+				);
 			}
 		}
 		PipelineDocument restored;
@@ -1508,7 +1514,7 @@ TEST_CASE(
 					std::find(correction->ReadPorts.begin(), correction->ReadPorts.end(), Name(input.Port));
 				REQUIRE(at != correction->ReadPorts.end());
 				const auto resource = correction->Reads[at - correction->ReadPorts.begin()];
-				const auto *description = graph.FindResource(resource);
+				const auto *description = graph.FindResourceDesc(resource);
 				REQUIRE(description);
 				CHECK(description->Name == Name(input.Resource));
 				CHECK(description->Format == input.Format);
@@ -1523,7 +1529,7 @@ TEST_CASE(
 			REQUIRE(background != body->ReadPorts.end());
 			REQUIRE(correction->Writes.size() == 1);
 			CHECK(body->Reads[background - body->ReadPorts.begin()] == correction->Writes.front());
-			CHECK(graph.FindResource(correction->Writes.front())->Format == ResourceFormat::RGBA16F);
+			CHECK(graph.FindResourceDesc(correction->Writes.front())->Format == ResourceFormat::RGBA16F);
 			CHECK(find("ambient-merge")->Writes.size() == 2);
 		}
 }

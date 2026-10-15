@@ -52,7 +52,7 @@ namespace {
 		spec.Category = graph::NodeCategory::Output;
 		for (const auto resource : resources)
 			spec.Inputs.push_back(
-				{.Name = pipeline.FindResource(resource)->Name, .Kind = graph::ResourceKind::Texture}
+				{.Name = pipeline.FindResourceDesc(resource)->Name, .Kind = graph::ResourceKind::Texture}
 			);
 		REQUIRE(graph::RegisterNodeKind(std::move(spec)));
 		REQUIRE(renderer.InstallNodeHandler(sinkKind, [](const graph::RunContext &) { return true; }));
@@ -833,7 +833,7 @@ outColour=vec4(mix(vec3(0.05,0.2,1.5),vec3(1.8,0.18,0.04),band)+texture(previous
 	const auto resource = [&](core::Name name) {
 		for (uint32_t value = 1; value <= pipeline.ResourceCount(); ++value) {
 			const graph::ResourceId id{value};
-			if (pipeline.FindResource(id)->Name == name) return id;
+			if (pipeline.FindResourceDesc(id)->Name == name) return id;
 		}
 		return graph::ResourceId{};
 	};
@@ -1182,7 +1182,7 @@ TEST_CASE("early Lit readers keep fog colour and capture baseline", "[render][gp
 	const auto resource = [](const graph::RenderGraph &pipeline, core::Name name) {
 		for (uint32_t value = 1; value <= pipeline.ResourceCount(); ++value) {
 			const graph::ResourceId id{value};
-			if (pipeline.FindResource(id)->Name == name) return id;
+			if (pipeline.FindResourceDesc(id)->Name == name) return id;
 		}
 		return graph::ResourceId{};
 	};
@@ -1597,7 +1597,7 @@ void main(){ colour=vec4(0.25,0.0,0.0,0.5); })");
 		std::vector<graph::ResourceId> retained;
 		for (uint32_t value = 1; value <= pipeline.ResourceCount(); ++value) {
 			const graph::ResourceId resource{value};
-			const auto name = pipeline.FindResource(resource)->Name;
+			const auto name = pipeline.FindResourceDesc(resource)->Name;
 			if (name == core::Name("output-source") || name == core::Name("output-interface") ||
 				name == core::Name("output-composed") ||
 				(!copyOverlay && name == core::Name("output-presented")))

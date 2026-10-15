@@ -213,7 +213,7 @@ namespace engine::render {
 					continue;
 				}
 				for (size_t output = 0; output < node->Writes.size(); output++) {
-					const graph::ResourceDesc *desc = pipeline->Graph.FindResource(node->Writes[output]);
+					const graph::ResourceDesc *desc = pipeline->Graph.FindResourceDesc(node->Writes[output]);
 					if (desc == nullptr || desc->Name != resource) {
 						continue;
 					}
@@ -2215,7 +2215,7 @@ namespace engine::render {
 				return {};
 			const auto &textures = pending ? working.Textures : scene.ForwardedTextures;
 			for (uint32_t value = 1; value <= pipeline.Graph.ResourceCount(); ++value) {
-				const auto *desc = pipeline.Graph.FindResource(graph::ResourceId{value});
+				const auto *desc = pipeline.Graph.FindResourceDesc(graph::ResourceId{value});
 				if (desc && desc->Name == resource && value <= textures.size()) return textures[value - 1];
 			}
 			return {};

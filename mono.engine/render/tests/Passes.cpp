@@ -53,7 +53,7 @@ namespace {
 		names.reserve(graph.ResourceCount());
 		for (uint32_t value = 1; value <= graph.ResourceCount(); ++value) {
 			const engine::graph::ResourceDesc *resource =
-				graph.FindResource(engine::graph::ResourceId{value});
+				graph.FindResourceDesc(engine::graph::ResourceId{value});
 			REQUIRE(resource != nullptr);
 			names.emplace_back(resource->Name.Text());
 		}
@@ -107,7 +107,7 @@ namespace {
 				names.emplace_back("-");
 				continue;
 			}
-			const engine::graph::ResourceDesc *resource = graph.FindResource(owner);
+			const engine::graph::ResourceDesc *resource = graph.FindResourceDesc(owner);
 			REQUIRE(resource != nullptr);
 			names.emplace_back(resource->Name.Text());
 		}
@@ -837,13 +837,13 @@ TEST_CASE("render graph snapshots require an exact installed name", "[render][gr
 		const engine::graph::ResourceId resource{value};
 		const auto allocation = snapshot->Aliases.AllocationOf(resource);
 		if (allocation.IsValid()) {
-			CHECK(snapshot->Graph.FindResource(allocation) != nullptr);
+			CHECK(snapshot->Graph.FindResourceDesc(allocation) != nullptr);
 		}
 	}
 
 	bool hasHistory = false;
 	for (uint32_t value = 1; value <= snapshot->Graph.ResourceCount(); ++value) {
-		const auto *resource = snapshot->Graph.FindResource(engine::graph::ResourceId{value});
+		const auto *resource = snapshot->Graph.FindResourceDesc(engine::graph::ResourceId{value});
 		hasHistory = hasHistory ||
 					 (resource != nullptr && resource->Lifetime == engine::graph::ResourceLifetime::History);
 	}
@@ -971,7 +971,7 @@ TEST_CASE("built-in capability fallbacks compile into the graph backend", "[rend
 					const auto found = std::find(node->ReadPorts.begin(), node->ReadPorts.end(), port);
 					if (found == node->ReadPorts.end()) return {};
 					const size_t index = static_cast<size_t>(found - node->ReadPorts.begin());
-					const auto *resource = graph.FindResource(node->Reads[index]);
+					const auto *resource = graph.FindResourceDesc(node->Reads[index]);
 					return resource == nullptr ? Name{} : resource->Name;
 				}
 				return {};

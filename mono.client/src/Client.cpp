@@ -564,7 +564,7 @@ namespace client {
 					return nlohmann::json(nullptr);
 				}
 				const auto resourceName = [&](engine::graph::ResourceId id) -> nlohmann::json {
-					const auto *resource = graph->Graph.FindResource(id);
+					const auto *resource = graph->Graph.FindResourceDesc(id);
 					return resource == nullptr ? nlohmann::json(nullptr)
 											   : nlohmann::json(resource->Name.Text());
 				};
@@ -634,7 +634,7 @@ namespace client {
 				nlohmann::json resources = nlohmann::json::array();
 				for (uint32_t value = 1; value <= graph->Graph.ResourceCount(); ++value) {
 					const engine::graph::ResourceId id{value};
-					const auto *resource = graph->Graph.FindResource(id);
+					const auto *resource = graph->Graph.FindResourceDesc(id);
 					const auto *profile = profileFor(id);
 					if (resource != nullptr && profile != nullptr) {
 						const engine::graph::ResourceId allocation = graph->Aliases.AllocationOf(id);

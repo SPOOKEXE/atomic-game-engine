@@ -111,7 +111,7 @@ namespace engine::render::detail {
 				kind != core::Name("weather-reconstruct"))
 				continue;
 			const auto source = IdentityPort(*node, false), target = IdentityPort(*node, true);
-			const auto *from = graph.FindResource(source), *to = graph.FindResource(target);
+			const auto *from = graph.FindResourceDesc(source), *to = graph.FindResourceDesc(target);
 			if (!from || !to) continue;
 			// A bypass only samples its image. Storage and colour allocations may
 			// share that binding when no reader requires either writable usage.

@@ -438,7 +438,7 @@ namespace engine::graph {
 		return end == text->c_str() ? fallback : static_cast<uint32_t>(value);
 	}
 
-	const ResourceDesc *RenderGraph::FindResource(ResourceId resource) const {
+	const ResourceDesc *RenderGraph::FindResourceDesc(ResourceId resource) const {
 		if (!resource.IsValid() || resource.Value > Resources.size()) {
 			return nullptr;
 		}
@@ -473,7 +473,7 @@ namespace engine::graph {
 			}
 
 			for (const ResourceId resource : node.Reads) {
-				const ResourceDesc *desc = FindResource(resource);
+				const ResourceDesc *desc = FindResourceDesc(resource);
 				if (desc == nullptr) {
 					offender = node.Name;
 					return GraphStatus::UnknownResource;
@@ -484,7 +484,7 @@ namespace engine::graph {
 				}
 			}
 			for (const ResourceId resource : node.Writes) {
-				const ResourceDesc *desc = FindResource(resource);
+				const ResourceDesc *desc = FindResourceDesc(resource);
 				if (desc == nullptr) {
 					offender = node.Name;
 					return GraphStatus::UnknownResource;
@@ -515,12 +515,12 @@ namespace engine::graph {
 
 		for (const auto &[value, producer] : producers) {
 			if (producer.ByWorld && producer.ByFrame) {
-				const ResourceDesc *desc = FindResource(ResourceId{value});
+				const ResourceDesc *desc = FindResourceDesc(ResourceId{value});
 				offender = desc != nullptr ? desc->Name : core::Name{};
 				return GraphStatus::FrameWorldWriteConflict;
 			}
 			if (producer.ByShared && producer.ByPerView) {
-				const ResourceDesc *desc = FindResource(ResourceId{value});
+				const ResourceDesc *desc = FindResourceDesc(ResourceId{value});
 				offender = desc != nullptr ? desc->Name : core::Name{};
 				return GraphStatus::SharedWriteConflict;
 			}

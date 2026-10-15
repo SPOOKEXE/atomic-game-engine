@@ -1183,7 +1183,7 @@ namespace engine::render {
 		const uint64_t world = Request.World;
 
 		SDL_GPUCommandBuffer *const selectedCommand = readCommand != nullptr ? readCommand : Command;
-		const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+		const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 		if (desc == nullptr) {
 			return Impl::NamedTexture{};
 		}
@@ -1252,7 +1252,7 @@ namespace engine::render {
 		graph::ResourceId resource, size_t selectedSlot, bool make, uint64_t actualBytes
 	) {
 		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
-		const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+		const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer) return nullptr;
 		const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
 		const uint64_t owner = GraphHistoryOwner(scope, selectedSlot, Request.World);
@@ -1308,7 +1308,7 @@ namespace engine::render {
 		// a separate command submitted first could otherwise read unqueued pixels.
 		if (command == Command) MainGpuWorkRecorded = true;
 		for (const graph::ResourceId resource : context.Writes) {
-			const graph::ResourceDesc *desc = Pipeline->Graph.FindResource(resource);
+			const graph::ResourceDesc *desc = Pipeline->Graph.FindResourceDesc(resource);
 			if (desc == nullptr || desc->Lifetime != graph::ResourceLifetime::History) {
 				continue;
 			}
@@ -1337,7 +1337,7 @@ namespace engine::render {
 
 		std::vector<SDL_GPUTextureSamplerBinding> bindings;
 		for (const graph::ResourceId resource : context.Reads) {
-			const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+			const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 			if (desc == nullptr || desc->Kind == graph::ResourceKind::Buffer ||
 				desc->Kind == graph::ResourceKind::Camera || desc->Kind == graph::ResourceKind::Entities) {
 				continue;
@@ -1426,7 +1426,7 @@ namespace engine::render {
 			return false;
 		const auto image = GraphTexture(source, context, false);
 		if (!image.IsValid()) return false;
-		const auto *desc = Pipeline->Graph.FindResource(target);
+		const auto *desc = Pipeline->Graph.FindResourceDesc(target);
 		uint32_t width = 0, height = 0;
 		desc->Resolve(SceneWidth, SceneHeight, width, height);
 		if (image.Width != width || image.Height != height || image.Format != DeviceFormat(desc->Format))
@@ -1435,7 +1435,7 @@ namespace engine::render {
 		const auto fixedOutput = FixedTexture(desc->Name, Request.TargetSlot);
 		if (fixedOutput.IsValid() && fixedOutput.Texture != image.Texture) {
 			const auto aliasesOutput = [&](graph::ResourceId read) {
-				const auto *input = Pipeline->Graph.FindResource(read);
+				const auto *input = Pipeline->Graph.FindResourceDesc(read);
 				return input && FixedTexture(input->Name, Request.TargetSlot).Texture == fixedOutput.Texture;
 			};
 			// Fog shares Lit with deferred lighting. Later branches and inspection
@@ -1475,7 +1475,7 @@ namespace engine::render {
 			const bool sameBinding =
 				!outputRewritten && IdentityWriterInactive(node->Kind) && next != Pipeline->Identities.end();
 			for (const auto written : node->Writes) {
-				const auto *output = Pipeline->Graph.FindResource(written);
+				const auto *output = Pipeline->Graph.FindResourceDesc(written);
 				if ((!sameBinding || written != next->Target) && output &&
 					FixedTexture(output->Name, Request.TargetSlot).Texture == image.Texture)
 					return false;
@@ -1490,7 +1490,7 @@ namespace engine::render {
 			const auto *node = Pipeline->Graph.Find(id);
 			if (!node) continue;
 			for (const auto written : node->Writes) {
-				const auto *output = Pipeline->Graph.FindResource(written);
+				const auto *output = Pipeline->Graph.FindResourceDesc(written);
 				if (output && FixedTexture(output->Name, Request.TargetSlot).Texture == image.Texture)
 					return false;
 			}

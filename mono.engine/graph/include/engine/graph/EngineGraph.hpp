@@ -90,7 +90,7 @@ namespace engine::graph {
 		const EngineNode *Find(EngineNodeId node) const;
 
 		// Looks up a declared resource by its stable name.
-		const EngineResourceDesc *FindResource(core::Name name) const;
+		const EngineResourceDesc *FindResourceDesc(core::Name name) const;
 
 		// Number of authored nodes.
 		size_t NodeCount() const {

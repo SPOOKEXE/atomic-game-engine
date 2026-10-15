@@ -42,7 +42,7 @@ namespace engine::render {
 		observation.Camera.Width = captureSource.Width;
 		observation.Camera.Height = captureSource.Height;
 		const auto nameOf = [&recording](graph::ResourceId resource) {
-			const graph::ResourceDesc *desc = recording.Pipeline->Graph.FindResource(resource);
+			const graph::ResourceDesc *desc = recording.Pipeline->Graph.FindResourceDesc(resource);
 			return desc != nullptr ? desc->Name : core::Name{};
 		};
 		for (graph::ResourceId resource : context.Reads) {

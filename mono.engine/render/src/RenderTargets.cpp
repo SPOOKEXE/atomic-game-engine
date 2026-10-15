@@ -784,12 +784,12 @@ namespace engine::render {
 	core::Name Renderer::Impl::GraphTargetName(const InstalledPipeline &pipeline, core::Name resource) const {
 		for (uint32_t value = 1; value <= pipeline.Graph.ResourceCount(); value++) {
 			const graph::ResourceId id{value};
-			const graph::ResourceDesc *desc = pipeline.Graph.FindResource(id);
+			const graph::ResourceDesc *desc = pipeline.Graph.FindResourceDesc(id);
 			if (desc == nullptr || desc->Name != resource) {
 				continue;
 			}
 			const graph::ResourceId allocation = pipeline.Aliases.AllocationOf(id);
-			const graph::ResourceDesc *physical = pipeline.Graph.FindResource(allocation);
+			const graph::ResourceDesc *physical = pipeline.Graph.FindResourceDesc(allocation);
 			return physical != nullptr ? physical->Name : resource;
 		}
 		return resource;
@@ -803,7 +803,7 @@ namespace engine::render {
 		uint32_t viewHeight,
 		bool authoredExtent
 	) {
-		const graph::ResourceDesc *desc = pipeline.Graph.FindResource(resource);
+		const graph::ResourceDesc *desc = pipeline.Graph.FindResourceDesc(resource);
 		if (desc == nullptr || desc->Kind == graph::ResourceKind::Texture ||
 			desc->Kind == graph::ResourceKind::Buffer || desc->Kind == graph::ResourceKind::Camera ||
 			desc->Kind == graph::ResourceKind::Entities) {
@@ -913,7 +913,7 @@ namespace engine::render {
 		uint32_t viewHeight,
 		uint64_t actualBytes
 	) {
-		const graph::ResourceDesc *desc = pipeline.Graph.FindResource(resource);
+		const graph::ResourceDesc *desc = pipeline.Graph.FindResourceDesc(resource);
 		// History is graph-owned; its External flag also excludes it from transient aliasing.
 		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer ||
 			(desc->External && desc->Lifetime != graph::ResourceLifetime::History) ||

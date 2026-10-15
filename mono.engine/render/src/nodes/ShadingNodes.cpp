@@ -854,7 +854,7 @@ namespace engine::render {
 					static_cast<size_t>(colourPort - node->WritePorts.begin()) >= context.Writes.size())
 					return false;
 				const graph::ResourceId lit = context.Writes[colourPort - node->WritePorts.begin()];
-				const auto *litDesc = Pipeline->Graph.FindResource(lit);
+				const auto *litDesc = Pipeline->Graph.FindResourceDesc(lit);
 				if (litDesc == nullptr ||
 					recording.FixedTexture(litDesc->Name, recording.Request.TargetSlot).Texture != pbr.Lit)
 					return false;
@@ -880,7 +880,7 @@ namespace engine::render {
 					const auto *later = Pipeline->Graph.Find(id);
 					if (later == nullptr) return false;
 					return std::any_of(later->Reads.begin(), later->Reads.end(), [&](graph::ResourceId read) {
-						const auto *desc = Pipeline->Graph.FindResource(read);
+						const auto *desc = Pipeline->Graph.FindResourceDesc(read);
 						return read == lit ||
 							   (desc != nullptr &&
 								recording.FixedTexture(desc->Name, recording.Request.TargetSlot).Texture ==
@@ -893,7 +893,7 @@ namespace engine::render {
 					if (later == nullptr || !later->Enabled) continue;
 					const bool republishesLit =
 						std::any_of(later->Writes.begin(), later->Writes.end(), [&](graph::ResourceId write) {
-							const auto *desc = Pipeline->Graph.FindResource(write);
+							const auto *desc = Pipeline->Graph.FindResourceDesc(write);
 							return desc != nullptr &&
 								   recording.FixedTexture(desc->Name, recording.Request.TargetSlot).Texture ==
 									   pbr.Lit;

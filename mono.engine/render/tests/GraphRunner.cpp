@@ -480,8 +480,9 @@ TEST_CASE("deferred baseline port extent follows its port in either order", "[re
 		std::find(deferred->WritePorts.begin(), deferred->WritePorts.end(), Name("lighting-baseline"));
 	REQUIRE(colourPort != deferred->WritePorts.end());
 	REQUIRE(baselinePort != deferred->WritePorts.end());
-	const auto *colour = graph.FindResource(deferred->Writes[colourPort - deferred->WritePorts.begin()]);
-	const auto *baseline = graph.FindResource(deferred->Writes[baselinePort - deferred->WritePorts.begin()]);
+	const auto *colour = graph.FindResourceDesc(deferred->Writes[colourPort - deferred->WritePorts.begin()]);
+	const auto *baseline =
+		graph.FindResourceDesc(deferred->Writes[baselinePort - deferred->WritePorts.begin()]);
 	REQUIRE(colour != nullptr);
 	REQUIRE(baseline != nullptr);
 	uint32_t colourWidth = 0, colourHeight = 0, baselineWidth = 0, baselineHeight = 0;

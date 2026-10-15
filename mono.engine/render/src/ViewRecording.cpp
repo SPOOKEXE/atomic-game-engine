@@ -826,7 +826,7 @@ namespace engine::render {
 				std::span<const uint32_t> frustumInput;
 				if (node->Kind == core::Name("cull-frustum")) {
 					for (const graph::ResourceId resource : node->Reads) {
-						const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+						const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 						if (desc != nullptr && desc->Kind == graph::ResourceKind::Entities) {
 							frustumInput = entityFlow.Get(desc->Name);
 							break;
@@ -1107,7 +1107,7 @@ namespace engine::render {
 		MirrorFormat = State->ColourFormat();
 		if (captureFormatNode != nullptr) {
 			for (const auto resource : captureFormatNode->Writes) {
-				const auto *desc = selectedPipeline->Graph.FindResource(resource);
+				const auto *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 				if (desc != nullptr && desc->Format == graph::ResourceFormat::RGBA16F) {
 					MirrorFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 					break;
@@ -1758,7 +1758,8 @@ namespace engine::render {
 				output = static_cast<size_t>(found - node->WritePorts.begin());
 			}
 			if (output >= node->Writes.size()) return;
-			const graph::ResourceDesc *resource = selectedPipeline->Graph.FindResource(node->Writes[output]);
+			const graph::ResourceDesc *resource =
+				selectedPipeline->Graph.FindResourceDesc(node->Writes[output]);
 			if (resource != nullptr) {
 				resource->Resolve(sceneWidth, sceneHeight, outWidth, outHeight);
 			}
@@ -3068,7 +3069,7 @@ namespace engine::render {
 				}
 				if (context.Writes.empty()) save({}, "no-image-output");
 				for (const auto resource : context.Writes) {
-					const auto *description = Pipeline->Graph.FindResource(resource);
+					const auto *description = Pipeline->Graph.FindResourceDesc(resource);
 					save(
 						GraphTexture(resource, context, false),
 						description ? description->Name.Text() : "unknown"
@@ -3140,7 +3141,7 @@ namespace engine::render {
 			Impl::NamedTexture inspected;
 			for (uint32_t value = 1; value <= Pipeline->Graph.ResourceCount(); ++value) {
 				const graph::ResourceId resource{value};
-				const auto *desc = Pipeline->Graph.FindResource(resource);
+				const auto *desc = Pipeline->Graph.FindResourceDesc(resource);
 				if (desc && desc->Name == State->Inspected) {
 					inspected = ResourceTexture(resource, targetSlot, false);
 					break;

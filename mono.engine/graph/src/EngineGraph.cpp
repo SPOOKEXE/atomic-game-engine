@@ -47,7 +47,7 @@ namespace engine::graph {
 	}
 
 	bool EngineGraph::AddResource(EngineResourceDesc resource) {
-		if (!resource.Name.IsValid() || FindResource(resource.Name) != nullptr) {
+		if (!resource.Name.IsValid() || FindResourceDesc(resource.Name) != nullptr) {
 			return false;
 		}
 		DeclaredResources.push_back(std::move(resource));
@@ -72,7 +72,7 @@ namespace engine::graph {
 		return node.IsValid() && node.Value <= Nodes.size() ? &Nodes[node.Value - 1] : nullptr;
 	}
 
-	const EngineResourceDesc *EngineGraph::FindResource(core::Name name) const {
+	const EngineResourceDesc *EngineGraph::FindResourceDesc(core::Name name) const {
 		const auto found = std::find_if(
 			DeclaredResources.begin(), DeclaredResources.end(), [&](const EngineResourceDesc &resource) {
 				return resource.Name == name;
@@ -111,7 +111,7 @@ namespace engine::graph {
 					offender = nodes[index].Name;
 					return EngineGraphStatus::InvalidName;
 				}
-				if (graph.FindResource(resource) == nullptr) {
+				if (graph.FindResourceDesc(resource) == nullptr) {
 					offender = resource;
 					return EngineGraphStatus::UnknownResource;
 				}
@@ -121,7 +121,7 @@ namespace engine::graph {
 					offender = nodes[index].Name;
 					return EngineGraphStatus::InvalidName;
 				}
-				if (graph.FindResource(resource) == nullptr) {
+				if (graph.FindResourceDesc(resource) == nullptr) {
 					offender = resource;
 					return EngineGraphStatus::UnknownResource;
 				}
@@ -299,12 +299,12 @@ namespace engine::graph {
 			return core::Name(std::string(prefix) + std::string(name.Text()));
 		};
 		for (uint32_t value = 1; value <= renderGraph.ResourceCount(); value++) {
-			const ResourceDesc *resource = renderGraph.FindResource(ResourceId{value});
+			const ResourceDesc *resource = renderGraph.FindResourceDesc(ResourceId{value});
 			if (resource == nullptr) {
 				continue;
 			}
 			const core::Name name = qualified(resource->Name);
-			if (engineGraph.FindResource(name) == nullptr &&
+			if (engineGraph.FindResourceDesc(name) == nullptr &&
 				!engineGraph.AddResource({
 					.Name = name,
 					.Lifetime = resource->External || resource->Lifetime != ResourceLifetime::Transient
@@ -329,13 +329,13 @@ namespace engine::graph {
 			imported.Profile = node->Parameter(core::Name("profile")) == nullptr ||
 							   *node->Parameter(core::Name("profile")) != "false";
 			for (const ResourceId resource : node->Reads) {
-				const ResourceDesc *desc = renderGraph.FindResource(resource);
+				const ResourceDesc *desc = renderGraph.FindResourceDesc(resource);
 				if (desc != nullptr) {
 					imported.Reads.push_back(qualified(desc->Name));
 				}
 			}
 			for (const ResourceId resource : node->Writes) {
-				const ResourceDesc *desc = renderGraph.FindResource(resource);
+				const ResourceDesc *desc = renderGraph.FindResourceDesc(resource);
 				if (desc != nullptr) {
 					imported.Writes.push_back(qualified(desc->Name));
 				}
