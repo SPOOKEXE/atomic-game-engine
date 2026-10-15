@@ -474,6 +474,16 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		"resident-meshes",
 		"environment-sky",
 		"environment-clouds",
+		"weather-pages",
+		"weather-previous-pages",
+		"weather-field",
+		"weather-summary",
+		"weather-cloud-history",
+		"weather-depth-history",
+		"weather-clouds",
+		"weather-cloud-depth",
+		"weather-resolved",
+		"weather-shadow",
 		"view-instances",
 		"lod-instances",
 		"albedo",
@@ -492,6 +502,7 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		"occlusion",
 		"lit",
 		"sky-lit",
+		"weather-lit",
 		"volume-lit",
 		"lens-b",
 		"lens-scratch",
@@ -514,6 +525,10 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		"shadow",
 		"skybox-compute",
 		"clouds-compute",
+		"weather-residency",
+		"weather-field",
+		"weather-summary",
+		"weather-shadow-map",
 		"camera",
 		"last-frame",
 		"entities",
@@ -528,6 +543,9 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		"ssao",
 		"deferred-lighting",
 		"sky",
+		"weather-integrate",
+		"weather-history",
+		"weather-reconstruct",
 		"fog",
 		"portal-overlay",
 		"mirror-overlay",
@@ -549,7 +567,11 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		actualAuthoredNodes.emplace_back(node->Name.Text());
 	}
 	CHECK(actualAuthoredNodes == authoredNodes);
-	const Node *disabledDepthPeel = installed->Graph.Find(NodeId{15});
+	const Node *disabledDepthPeel = nullptr;
+	for (uint32_t value = 1; value <= installed->Graph.Count(); ++value) {
+		const Node *node = installed->Graph.Find(NodeId{value});
+		if (node != nullptr && node->Name == Name("depth-peel")) disabledDepthPeel = node;
+	}
 	REQUIRE(disabledDepthPeel != nullptr);
 	CHECK_FALSE(disabledDepthPeel->Enabled);
 
@@ -557,13 +579,18 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		"world",
 		"mesh-residency",
 		"skybox-compute",
+		"weather-residency",
 		"shadow",
 		"clouds-compute",
+		"weather-field",
+		"weather-summary",
+		"weather-shadow-map",
 	};
 	const std::vector<std::string> expectedPerView{
 		"camera",
 		"last-frame",
 		"entities",
+		"weather-history",
 		"cull-frustum",
 		"order-draw",
 		"delta-upload",
@@ -574,6 +601,8 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		"ssao",
 		"deferred-lighting",
 		"sky",
+		"weather-integrate",
+		"weather-reconstruct",
 		"fog",
 		"portal-overlay",
 		"mirror-overlay",
@@ -594,11 +623,16 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		"world",
 		"mesh-residency",
 		"skybox-compute",
+		"weather-residency",
 		"shadow",
 		"clouds-compute",
+		"weather-field",
+		"weather-summary",
+		"weather-shadow-map",
 		"camera",
 		"last-frame",
 		"entities",
+		"weather-history",
 		"cull-frustum",
 		"order-draw",
 		"delta-upload",
@@ -609,6 +643,8 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		"ssao",
 		"deferred-lighting",
 		"sky",
+		"weather-integrate",
+		"weather-reconstruct",
 		"fog",
 		"portal-overlay",
 		"mirror-overlay",
@@ -633,7 +669,7 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		CHECK(pass.Name == Name(expectedPasses[index]));
 		CHECK(pass.Name == node->Name);
 		CHECK(pass.Kind == node->Kind);
-		CHECK(pass.Where == (index < 5 ? Band::Shared : (index < 27 ? Band::PerView : Band::Final)));
+		CHECK(pass.Where == (index < 9 ? Band::Shared : (index < 34 ? Band::PerView : Band::Final)));
 		CHECK(pass.Elapsed == 0.0);
 		CHECK(pass.Wall == 0.0);
 	}
@@ -643,26 +679,26 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		CHECK(resource.Name == Name(expectedResources[index]));
 		CHECK(resource.Allocation == installed->Aliases.AllocationOf(resource.Id));
 	}
-	CHECK(profile.At(15, 13) == Access::Write);
-	CHECK(profile.At(23, 13) == Access::Write);
-	CHECK(profile.At(23, 14) == Access::Read);
-	CHECK(profile.At(24, 15) == Access::Read);
-	CHECK(profile.At(42, 28) == Access::Write);
-	CHECK(profile.At(43, 30) == Access::Read);
+	CHECK(profile.At(25, 18) == Access::Write);
+	CHECK(profile.At(33, 18) == Access::Write);
+	CHECK(profile.At(33, 19) == Access::Read);
+	CHECK(profile.At(34, 20) == Access::Read);
+	CHECK(profile.At(53, 35) == Access::Write);
+	CHECK(profile.At(54, 37) == Access::Read);
 	CHECK(profile.Resources[11].Width == 1024);
 	CHECK(profile.Resources[11].Height == 512);
-	CHECK(profile.Resources[28].Width == 320);
-	CHECK(profile.Resources[28].Height == 240);
+	CHECK(profile.Resources[38].Width == 320);
+	CHECK(profile.Resources[38].Height == 240);
 	// Potential identity inputs stay alive for named previews and captures.
 	// These are allocation-plan bounds; inactive outputs allocate no target.
-	CHECK(profile.PeakBytes == 45'329'408);
-	CHECK(profile.TotalBytes == 67'447'808);
-	CHECK(profile.AllocatedBytes == 38'092'800);
-	CHECK(profile.AliasedResources == 3);
+	CHECK(profile.PeakBytes == 46'746'624);
+	CHECK(profile.TotalBytes == 75'623'424);
+	CHECK(profile.AllocatedBytes == 39'936'000);
+	CHECK(profile.AliasedResources == 4);
 
 	CHECK(installed->Aliases.Allocations.size() == installed->Graph.ResourceCount());
-	CHECK(installed->Aliases.PhysicalTargets == 21);
-	CHECK(installed->Aliases.AliasedResources == 3);
+	CHECK(installed->Aliases.PhysicalTargets == 24);
+	CHECK(installed->Aliases.AliasedResources == 4);
 	const std::vector<std::string> expectedAliases{
 		"-",
 		"-",
@@ -676,6 +712,16 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		"-",
 		"-",
 		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"-",
+		"weather-clouds",
+		"weather-cloud-depth",
+		"weather-resolved",
 		"-",
 		"-",
 		"-",
@@ -695,7 +741,8 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		"-",
 		"lit",
 		"emissive",
-		"volume-lit",
+		"weather-lit",
+		"emissive",
 		"lens-b",
 		"lens-scratch",
 		"lens-scratch",
@@ -711,9 +758,10 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 	};
 	CHECK(AliasOwnerNames(installed->Graph, installed->Aliases) == expectedAliases);
 	const std::vector<std::string> expectedWaves{
-		"concurrent:world@cpu:mesh-residency@transfer:skybox-compute@compute",
-		"concurrent:shadow@graphics:clouds-compute@compute",
-		"serial:camera@cpu:last-frame@graphics:entities@cpu",
+		"concurrent:world@cpu:mesh-residency@transfer:skybox-compute@compute:weather-residency@graphics",
+		"concurrent:shadow@graphics:clouds-compute@compute:weather-field@compute",
+		"serial:weather-summary@compute:weather-shadow-map@compute",
+		"serial:camera@cpu:last-frame@graphics:entities@cpu:weather-history@graphics",
 		"serial:cull-frustum@cpu",
 		"serial:order-draw@cpu",
 		"serial:delta-upload@transfer",
@@ -723,6 +771,8 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		"serial:ssao@graphics",
 		"serial:deferred-lighting@graphics",
 		"serial:sky@graphics",
+		"serial:weather-integrate@compute",
+		"serial:weather-reconstruct@compute",
 		"serial:fog@graphics",
 		"serial:portal-overlay@graphics",
 		"serial:mirror-overlay@graphics",
@@ -739,13 +789,19 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 	CHECK(ScheduleNames(installed->Graph, installed->Schedule) == expectedWaves);
 	const std::vector<std::string> expectedBuffers{
 		"transfer:0-0:mesh-residency",
-		"compute:0-1:skybox-compute:clouds-compute",
-		"graphics:1-2:shadow:last-frame",
-		"transfer:5-5:delta-upload",
-		"compute:6-6:select-lod",
-		"graphics:7-22:surface-capture:gbuffer:depth-linearise:ssao:deferred-lighting:sky:fog:portal-overlay:"
-		"mirror-overlay:transparent:shader-lenses:dof:god-rays:bloom:tonemap:present:interface:overlay",
-		"transfer:23-23:output-image",
+		"compute:0-0:skybox-compute",
+		"graphics:0-0:weather-residency",
+		"compute:1-1:clouds-compute:weather-field",
+		"graphics:1-1:shadow",
+		"compute:2-2:weather-summary:weather-shadow-map",
+		"graphics:3-3:last-frame:weather-history",
+		"transfer:6-6:delta-upload",
+		"compute:7-7:select-lod",
+		"graphics:8-12:surface-capture:gbuffer:depth-linearise:ssao:deferred-lighting:sky",
+		"compute:13-14:weather-integrate:weather-reconstruct",
+		"graphics:15-25:fog:portal-overlay:mirror-overlay:transparent:shader-lenses:dof:god-rays:bloom:"
+		"tonemap:present:interface:overlay",
+		"transfer:26-26:output-image",
 	};
 	const std::vector<PlannedCommandBuffer> replannedBuffers = PlanCommandBuffers(package.Schedule);
 	REQUIRE_FALSE(package.Buffers.empty());
