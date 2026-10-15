@@ -42,7 +42,7 @@ namespace {
 		info.code_size = bytes.size();
 		info.entrypoint = binary.EntryPoint;
 		info.format = binary.Format;
-		info.num_readonly_storage_buffers = 2;
+		info.num_readonly_storage_buffers = 3;
 		info.num_readwrite_storage_buffers = 1;
 		info.num_uniform_buffers = 1;
 		info.threadcount_x = 64;

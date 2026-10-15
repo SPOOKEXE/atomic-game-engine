@@ -4,6 +4,7 @@
 // the graph owns the resident field and its conservative brick summaries.
 
 #include "GraphHistory.hpp"
+#include "WeatherGpuClock.hpp"
 #include "WeatherResidency.hpp"
 #include "WeatherShadows.hpp"
 #include "WeatherSimulationGpu.hpp"
@@ -103,6 +104,7 @@ namespace engine::render {
 	struct WeatherGpuGeneration {
 		uint64_t World = 0;
 		core::Name Pipeline;
+		WeatherGpuClock Clock;
 		SDL_GPUBuffer *Cells = nullptr;
 		SDL_GPUBuffer *Summaries = nullptr;
 		SDL_GPUBuffer *Pages = nullptr;
@@ -155,7 +157,8 @@ namespace engine::render {
 		SDL_GPUBuffer *cells,
 		SDL_GPUBuffer *pages,
 		const WeatherGpuUniforms &uniforms,
-		uint64_t physicalBytes = 0
+		uint64_t physicalBytes = 0,
+		SDL_GPUBuffer *clock = nullptr
 	);
 	[[nodiscard]] bool
 	RecordWeatherEmptyField(SDL_GPUDevice *device, SDL_GPUCommandBuffer *command, SDL_GPUBuffer *cells);
@@ -165,7 +168,8 @@ namespace engine::render {
 		SDL_GPUBuffer *cells,
 		SDL_GPUBuffer *pages,
 		SDL_GPUBuffer *summaries,
-		const WeatherGpuUniforms &uniforms
+		const WeatherGpuUniforms &uniforms,
+		SDL_GPUBuffer *clock = nullptr
 	);
 	[[nodiscard]] bool RecordWeatherRays(
 		SDL_GPUCommandBuffer *command,
@@ -180,6 +184,7 @@ namespace engine::render {
 		SDL_GPUSampler *sampler,
 		uint32_t width,
 		uint32_t height,
-		const WeatherRayUniforms &uniforms
+		const WeatherRayUniforms &uniforms,
+		SDL_GPUBuffer *clock = nullptr
 	);
 }

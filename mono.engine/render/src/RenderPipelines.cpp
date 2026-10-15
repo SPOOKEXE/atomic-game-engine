@@ -975,9 +975,10 @@ namespace engine::render {
 			GpuParticleFieldStep = LoadComputePipeline("gpu-particle-field.comp", 0, 1, 0, 1, 256, 1);
 			EnvironmentSkyCompute = LoadComputePipeline("environment.comp", 6, 0, 1, 0, 8, 8);
 			EnvironmentCloudCompute = LoadComputePipeline("environment-clouds.comp", 1, 0, 1, 0, 8, 8);
-			WeatherFieldCompute = LoadComputePipeline("weather-generate.comp", 0, 1, 0, 1, 64, 1);
-			WeatherSummaryCompute = LoadComputePipeline("weather-summary.comp", 0, 2, 0, 1, 64, 1);
-			WeatherRaysCompute = LoadComputePipeline("weather-clouds.comp", 1, 4, 2, 0, 8, 8);
+			WeatherClockCompute = LoadComputePipeline("weather-clock.comp", 0, 0, 0, 1, 1, 1);
+			WeatherFieldCompute = LoadComputePipeline("weather-generate.comp", 0, 2, 0, 1, 64, 1);
+			WeatherSummaryCompute = LoadComputePipeline("weather-summary.comp", 0, 3, 0, 1, 64, 1);
+			WeatherRaysCompute = LoadComputePipeline("weather-clouds.comp", 1, 5, 2, 0, 8, 8);
 			WeatherTemporalCompute = LoadComputePipeline("weather-temporal.comp", 4, 0, 1, 0, 8, 8);
 			WeatherReconstructCompute = LoadComputePipeline("weather-reconstruct.comp", 4, 0, 1, 0, 8, 8);
 			WeatherEvolutionCompute = LoadComputePipeline("weather-evolve.comp", 0, 5, 0, 5, 64, 1);

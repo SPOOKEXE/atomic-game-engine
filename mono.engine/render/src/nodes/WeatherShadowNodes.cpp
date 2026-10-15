@@ -94,7 +94,7 @@ namespace engine::render {
 			}
 			if (!State->WeatherShadowCompute)
 				State->WeatherShadowCompute =
-					State->LoadComputePipeline("weather-shadow.comp", 0, 2, 1, 0, 8, 8);
+					State->LoadComputePipeline("weather-shadow.comp", 0, 3, 1, 0, 8, 8);
 			if (!State->WeatherShadowCompute) {
 				core::Metrics::Count("render.weather.shadow_pipeline_refusals", 1);
 				return retainCompatible();
@@ -122,7 +122,8 @@ namespace engine::render {
 					plan,
 					*inputs,
 					controls,
-					effectiveDensity
+					effectiveDensity,
+					found->Clock.Buffer
 				)) {
 				// A refused pass may have cycled the target. Never certify that backing as the old map.
 				found->Shadows = {};

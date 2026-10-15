@@ -1,6 +1,8 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 #include "weather-common.glsl"
+#define WEATHER_CLOCK_BINDING 1
+#include "weather-clock.glsl"
 #include "weather-assembly.glsl"
 
 layout(local_size_x = 64) in;
@@ -8,18 +10,21 @@ layout(set = 0, binding = 0, std430) readonly buffer Pages { ivec4 keys[]; } pag
 layout(set = 1, binding = 0, std430) writeonly buffer Cells { uvec2 cells[]; } outputField;
 layout(set = 2, binding = 0) uniform Pass { WeatherField Field; } pass;
 
+WeatherField effectiveField;
+
 void main() {
+	effectiveField = WeatherClockField(pass.Field);
 	uint index = gl_GlobalInvocationID.x;
-	if (index >= pass.Field.Grid.w) return;
+	if (index >= effectiveField.Grid.w) return;
 	// Pending stateful data exposes an explicit neutral field until diagnostics accept the solver output.
-	if (pass.Field.Phase.z == 0xffffffffu) {
+	if (effectiveField.Phase.z == 0xffffffffu) {
 		outputField.cells[index] = uvec2(0x7f007f00u, 0x007f7f7fu);
 		return;
 	}
-	uvec3 dimensions = pass.Field.Grid.xyz;
+	uvec3 dimensions = effectiveField.Grid.xyz;
 	uvec3 point = uvec3(index % dimensions.x, (index / dimensions.x) % dimensions.y, index / (dimensions.x * dimensions.y));
-	ivec3 coordinate = pass.Field.Origin.xyz + ivec3(point) * pass.Field.Origin.w;
-	if (pass.Field.Origin.w == 0) {
+	ivec3 coordinate = effectiveField.Origin.xyz + ivec3(point) * effectiveField.Origin.w;
+	if (effectiveField.Origin.w == 0) {
 		uint pageIndex = index / 512u;
 		uint localIndex = index % 512u;
 		ivec4 page = pageTable.keys[pageIndex];
@@ -35,7 +40,7 @@ void main() {
 			uvec2 children[8];
 			for (uint child = 0u; child < 8u; ++child) {
 				ivec3 offset = ivec3(child & 1u, (child >> 1u) & 1u, (child >> 2u) & 1u);
-				children[child] = WeatherEvaluate(pass.Field, coordinate + offset * stride);
+				children[child] = WeatherEvaluate(effectiveField, coordinate + offset * stride);
 			}
 			uint words[8];
 			WeatherAssemblyPack(children, words);
@@ -46,5 +51,5 @@ void main() {
 		}
 		index = baseWords / 2u + localIndex;
 	}
-	outputField.cells[index] = WeatherEvaluate(pass.Field, coordinate);
+	outputField.cells[index] = WeatherEvaluate(effectiveField, coordinate);
 }

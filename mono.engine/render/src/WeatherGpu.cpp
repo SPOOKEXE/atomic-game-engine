@@ -303,7 +303,8 @@ namespace engine::render {
 		SDL_GPUBuffer *cells,
 		SDL_GPUBuffer *pages,
 		const WeatherGpuUniforms &uniforms,
-		uint64_t physicalBytes
+		uint64_t physicalBytes,
+		SDL_GPUBuffer *clock
 	) {
 		ENGINE_PROFILE_CAT("weather field generation", core::ProfileCategory::Render);
 		if (!command || !pipeline || !cells || !pages || uniforms.Grid.w == 0) return false;
@@ -313,8 +314,14 @@ namespace engine::render {
 		auto *pass = SDL_BeginGPUComputePass(command, nullptr, 0, &output, 1);
 		if (!pass) return false;
 		SDL_BindGPUComputePipeline(pass, pipeline);
-		SDL_BindGPUComputeStorageBuffers(pass, 0, &pages, 1);
-		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
+		const std::array<SDL_GPUBuffer *, 2> inputs{pages, clock ? clock : pages};
+		SDL_BindGPUComputeStorageBuffers(pass, 0, inputs.data(), inputs.size());
+		auto resolved = uniforms;
+		if (clock && resolved.Phase.z != UINT32_MAX) {
+			resolved.Time = {};
+			resolved.Phase = {0, 0, 1, resolved.Phase.w};
+		}
+		SDL_PushGPUComputeUniformData(command, 0, &resolved, sizeof(resolved));
 		SDL_DispatchGPUCompute(pass, (uniforms.Grid.w + 63) / 64, 1, 1);
 		SDL_EndGPUComputePass(pass);
 		core::Metrics::Count("render.weather.generated_cells", uniforms.Grid.w);
@@ -332,7 +339,8 @@ namespace engine::render {
 		SDL_GPUBuffer *cells,
 		SDL_GPUBuffer *pages,
 		SDL_GPUBuffer *summaries,
-		const WeatherGpuUniforms &uniforms
+		const WeatherGpuUniforms &uniforms,
+		SDL_GPUBuffer *clock
 	) {
 		ENGINE_PROFILE_CAT("weather brick summary", core::ProfileCategory::Render);
 		if (!command || !pipeline || !cells || !pages || !summaries || uniforms.Bricks.w == 0) return false;
@@ -342,9 +350,14 @@ namespace engine::render {
 		auto *pass = SDL_BeginGPUComputePass(command, nullptr, 0, &output, 1);
 		if (!pass) return false;
 		SDL_BindGPUComputePipeline(pass, pipeline);
-		const std::array<SDL_GPUBuffer *, 2> inputs{cells, pages};
+		const std::array<SDL_GPUBuffer *, 3> inputs{cells, pages, clock ? clock : pages};
 		SDL_BindGPUComputeStorageBuffers(pass, 0, inputs.data(), inputs.size());
-		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
+		auto resolved = uniforms;
+		if (clock && resolved.Phase.z != UINT32_MAX) {
+			resolved.Time = {};
+			resolved.Phase = {0, 0, 1, resolved.Phase.w};
+		}
+		SDL_PushGPUComputeUniformData(command, 0, &resolved, sizeof(resolved));
 		// One 64-lane workgroup reduces each complete or partial page in weather-summary.comp.
 		SDL_DispatchGPUCompute(pass, uniforms.Bricks.w, 1, 1);
 		SDL_EndGPUComputePass(pass);
@@ -366,7 +379,8 @@ namespace engine::render {
 		SDL_GPUSampler *sampler,
 		uint32_t width,
 		uint32_t height,
-		const WeatherRayUniforms &uniforms
+		const WeatherRayUniforms &uniforms,
+		SDL_GPUBuffer *clock
 	) {
 		ENGINE_PROFILE_CAT("weather volume rays", core::ProfileCategory::Render);
 		if (!command || !pipeline || !cells || !summaries || !pages || !previousPages || !depth ||
@@ -383,9 +397,14 @@ namespace engine::render {
 		SDL_BindGPUComputePipeline(pass, pipeline);
 		const SDL_GPUTextureSamplerBinding image{depth, sampler};
 		SDL_BindGPUComputeSamplers(pass, 0, &image, 1);
-		SDL_GPUBuffer *buffers[4]{cells, summaries, pages, previousPages};
-		SDL_BindGPUComputeStorageBuffers(pass, 0, buffers, 4);
-		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
+		SDL_GPUBuffer *buffers[5]{cells, summaries, pages, previousPages, clock ? clock : pages};
+		SDL_BindGPUComputeStorageBuffers(pass, 0, buffers, 5);
+		auto resolved = uniforms;
+		if (clock && resolved.Field.Phase.z != UINT32_MAX) {
+			resolved.Field.Time = {};
+			resolved.Field.Phase = {0, 0, 1, resolved.Field.Phase.w};
+		}
+		SDL_PushGPUComputeUniformData(command, 0, &resolved, sizeof(resolved));
 		SDL_DispatchGPUCompute(pass, (width + 7) / 8, (height + 7) / 8, 1);
 		SDL_EndGPUComputePass(pass);
 		core::Metrics::Count("render.weather.ray_dispatches", 1);

@@ -40,7 +40,8 @@ namespace engine::render {
 
 	bool WeatherProductsReady(const WeatherGpuGeneration *generation, const void *command) {
 		if (!generation || !generation->Cells || !generation->Pages || !generation->PreviousPages ||
-			!generation->Summaries)
+			!generation->Summaries || !generation->Clock.Buffer ||
+			generation->Clock.Publication.SignatureFor(command) == 0)
 			return false;
 		const auto *inputs = generation->InputsFor(command);
 		const uint64_t field = generation->Field.SignatureFor(command);
@@ -58,9 +59,9 @@ namespace engine::render {
 	}
 
 	bool ViewRecording::WeatherVolumeAvailable() const {
-		const bool programs = State->WeatherFieldCompute && State->WeatherSummaryCompute &&
-							  State->WeatherRaysCompute && State->WeatherTemporalCompute &&
-							  State->WeatherReconstructCompute;
+		const bool programs = State->WeatherClockCompute && State->WeatherFieldCompute &&
+							  State->WeatherSummaryCompute && State->WeatherRaysCompute &&
+							  State->WeatherTemporalCompute && State->WeatherReconstructCompute;
 		const auto &environment = CurrentLighting.EnvironmentState;
 		return WeatherVolumeGraphAvailable(Pipeline->Graph, State->Caps.HasCompute, programs) &&
 			   scene::ValidWeatherCompute(environment.Weather) &&

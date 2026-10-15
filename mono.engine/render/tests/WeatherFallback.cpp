@@ -51,7 +51,14 @@ TEST_CASE("partial weather publication cannot expose unwritten summary products"
 	CHECK_FALSE(render::WeatherProductsReady(&generation, &identity));
 	generation.Summary.Ready = true;
 	generation.Summary.Signature = 11;
+	CHECK_FALSE(render::WeatherProductsReady(&generation, &identity));
+	generation.Clock.Buffer = generation.Cells;
+	CHECK_FALSE(render::WeatherProductsReady(&generation, &identity));
+	generation.Clock.Publication.Stage(1, &identity);
 	CHECK(render::WeatherProductsReady(&generation, &identity));
+	std::byte otherCommand{};
+	CHECK_FALSE(render::WeatherProductsReady(&generation, &otherCommand));
+	generation.Clock.Publication.Commit(&identity);
 	generation.Field.Stage(22, &identity);
 	generation.PendingRenderInputs.emplace();
 	CHECK_FALSE(render::WeatherProductsReady(&generation, &identity));

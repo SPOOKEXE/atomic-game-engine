@@ -447,11 +447,15 @@ namespace engine::render {
 		for (auto &owner : WeatherPhysicalOwners)
 			ReleaseWeatherSimulationGpu(Device, owner->Physical);
 		WeatherPhysicalOwners.clear();
+		for (auto &generation : WeatherGenerations)
+			ReleaseWeatherGpuClock(Device, generation.Clock);
 		WeatherGenerations.clear();
 	}
 
 	void Renderer::Impl::ForgetWeatherWorld(uint64_t world) {
 		ForgetWeatherTemporalWorld(world);
+		for (auto &generation : WeatherGenerations)
+			if (generation.World == world) ReleaseWeatherGpuClock(Device, generation.Clock);
 		std::erase_if(WeatherGenerations, [world](const WeatherGpuGeneration &generation) {
 			return generation.World == world;
 		});
@@ -479,7 +483,8 @@ namespace engine::render {
 
 	void Renderer::Impl::ReleaseWeatherPipelines() {
 		for (auto **pipeline :
-			 {&WeatherFieldCompute,
+			 {&WeatherClockCompute,
+			  &WeatherFieldCompute,
 			  &WeatherSummaryCompute,
 			  &WeatherRaysCompute,
 			  &WeatherEvolutionCompute,
@@ -492,6 +497,8 @@ namespace engine::render {
 		for (auto &owner : WeatherPhysicalOwners)
 			ReleaseWeatherSimulationGpu(Device, owner->Physical);
 		WeatherPhysicalOwners.clear();
+		for (auto &generation : WeatherGenerations)
+			ReleaseWeatherGpuClock(Device, generation.Clock);
 		WeatherGenerations.clear();
 		ReleaseWeatherTemporalHistories();
 	}
@@ -499,6 +506,7 @@ namespace engine::render {
 	void Renderer::Impl::CommitEnvironmentWrites(SDL_GPUCommandBuffer *command) {
 		CommitWeatherTemporalWrites(command);
 		for (WeatherGpuGeneration &generation : WeatherGenerations) {
+			CommitWeatherGpuClock(generation.Clock, command);
 			generation.Shadows.Commit(command);
 			generation.Residency.Commit(command);
 			if (generation.Field.Pending && generation.Field.PendingCommand == command &&
@@ -546,6 +554,7 @@ namespace engine::render {
 	void Renderer::Impl::DiscardEnvironmentWrites(SDL_GPUCommandBuffer *command) {
 		DiscardWeatherTemporalWrites(command);
 		for (WeatherGpuGeneration &generation : WeatherGenerations) {
+			DiscardWeatherGpuClock(generation.Clock, command);
 			generation.Shadows.Discard(command);
 			for (auto *content : {&generation.Residency, &generation.Field, &generation.Summary}) {
 				if (content->Pending && (!command || content->PendingCommand == command)) {

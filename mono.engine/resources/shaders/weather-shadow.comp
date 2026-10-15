@@ -3,6 +3,8 @@
 // Endpoint branching cost 3 to 6 percent on interior phases in the RTX 4090 Vulkan shadow benchmark.
 #define WEATHER_BRANCHLESS_NOISE
 #include "weather-common.glsl"
+#define WEATHER_CLOCK_BINDING 2
+#include "weather-clock.glsl"
 #include "weather-assembly.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
@@ -21,6 +23,8 @@ layout(set = 2, binding = 0) uniform Pass {
 	WeatherField Field;
 } pass;
 
+WeatherField effectiveField;
+
 bool approximationUsed;
 
 bool PageKeyLess(ivec4 first, ivec4 second) {
@@ -37,22 +41,22 @@ int FindPage(ivec3 coordinate, uint lod) {
 	ivec3 origin = ivec3(uvec3(coordinate) & uvec3(~(uint(edge) - 1u)));
 	ivec4 key = ivec4(origin, int(lod));
 	uint low = 0u;
-	uint high = pass.Field.Bricks.w;
+	uint high = effectiveField.Bricks.w;
 	while (low < high) {
 		uint middle = low + (high - low) / 2u;
 		if (PageKeyLess(pageTable.keys[middle], key)) low = middle + 1u;
 		else high = middle;
 	}
-	return low < pass.Field.Bricks.w && all(equal(pageTable.keys[low].xyz, key.xyz)) &&
+	return low < effectiveField.Bricks.w && all(equal(pageTable.keys[low].xyz, key.xyz)) &&
 		(uint(pageTable.keys[low].w) & 31u) == lod ? int(low) : -1;
 }
 
 float CodeAt(ivec3 coordinate, uint lod) {
-	if (pass.Field.Origin.w > 0) {
-		ivec3 local = coordinate - pass.Field.Origin.xyz;
-		if (any(lessThan(local, ivec3(0))) || any(greaterThanEqual(local, ivec3(pass.Field.Grid.xyz))))
+	if (effectiveField.Origin.w > 0) {
+		ivec3 local = coordinate - effectiveField.Origin.xyz;
+		if (any(lessThan(local, ivec3(0))) || any(greaterThanEqual(local, ivec3(effectiveField.Grid.xyz))))
 			return 0.0;
-		return float(field.cells[WeatherCellIndex(uvec3(local), pass.Field.Grid.xyz)].x & 255u) / 255.0;
+		return float(field.cells[WeatherCellIndex(uvec3(local), effectiveField.Grid.xyz)].x & 255u) / 255.0;
 	}
 	int page = FindPage(coordinate, lod);
 	if (page >= 0) {
@@ -65,7 +69,7 @@ float CodeAt(ivec3 coordinate, uint lod) {
 			uvec2 address = WeatherAssemblyAddress(local);
 			uvec2 scalarWords = field.cells[offset + address.x * 4u];
 			if (WeatherAssemblyUnsafe(scalarWords))
-				return float(WeatherDensityCode(pass.Field, coordinate)) / 255.0;
+				return float(WeatherDensityCode(effectiveField, coordinate)) / 255.0;
 			approximationUsed = true;
 			return float(WeatherAssemblyDensityCode(scalarWords, address.y)) / 255.0;
 		}
@@ -74,7 +78,7 @@ float CodeAt(ivec3 coordinate, uint lod) {
 		return float(field.cells[index].x & 255u) / 255.0;
 	}
 	if (pass.Quality.w != 0u) return 0.0;
-	return float(WeatherDensityCode(pass.Field, coordinate)) / 255.0;
+	return float(WeatherDensityCode(effectiveField, coordinate)) / 255.0;
 }
 
 float DensityAtLod(vec3 canonical, uint lod) {
@@ -94,19 +98,19 @@ float DensityAt(vec3 world) {
 	approximationUsed = false;
 	uint selected = 0u;
 	int selectedPage = -1;
-	if (pass.Field.Origin.w == 0)
-		for (uint lod = 0u; lod <= pass.Field.Phase.w; ++lod)
+	if (effectiveField.Origin.w == 0)
+		for (uint lod = 0u; lod <= effectiveField.Phase.w; ++lod)
 			if ((selectedPage = FindPage(ivec3(floor(canonical)), lod)) >= 0) { selected = lod; break; }
 	// Certified empty pages include their reconstruction halo for every accepted time.
 	if (selectedPage >= 0 && ((uint(pageTable.keys[selectedPage].w) >> 5u) & 3u) == 2u) return 0.0;
 	float density = DensityAtLod(canonical, selected);
 	// Canonical fallback at coarse corners still interpolates across unresolved fine features.
-	if (pass.Field.Origin.w == 0 && (selected > 0u || approximationUsed)) {
+	if (effectiveField.Origin.w == 0 && (selected > 0u || approximationUsed)) {
 		ivec3 cell = ivec3(floor(canonical));
 		vec3 weight = fract(canonical);
 		float fine = 0.0;
 		for (uint z = 0u; z < 2u; ++z) for (uint y = 0u; y < 2u; ++y) for (uint x = 0u; x < 2u; ++x) {
-			float code = float(WeatherDensityCode(pass.Field, cell + ivec3(x, y, z))) / 255.0;
+			float code = float(WeatherDensityCode(effectiveField, cell + ivec3(x, y, z))) / 255.0;
 			vec3 blend = mix(vec3(1.0) - weight, weight, vec3(x, y, z));
 			fine += code * blend.x * blend.y * blend.z;
 		}
@@ -135,6 +139,7 @@ bool Interval(vec3 origin, out float enter, out float exit) {
 }
 
 void main() {
+	effectiveField = WeatherClockField(pass.Field);
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	if (any(greaterThanEqual(pixel, imageSize(opticalDepthImage)))) return;
 	uint cascade = uint(pixel.y) / pass.Quality.x;

@@ -1313,7 +1313,8 @@ namespace engine::render {
 			return true;
 		};
 		const auto weatherInputs = [this]() -> std::optional<WeatherGpuInputs> {
-			if (!State->Caps.HasCompute || !State->WeatherFieldCompute || !State->WeatherSummaryCompute)
+			if (!State->Caps.HasCompute || !State->WeatherClockCompute || !State->WeatherFieldCompute ||
+				!State->WeatherSummaryCompute)
 				return std::nullopt;
 			const auto &environment = CurrentLighting.EnvironmentState;
 			if (environment.CloudLayer.Enabled &&
@@ -1723,6 +1724,30 @@ namespace engine::render {
 					inputs = weatherInputs();
 					if (!inputs) return refuseWeather();
 				}
+				const auto &environment = CurrentLighting.EnvironmentState;
+				const WeatherGpuClockSample clockSample{
+					.Time = inputs->Time,
+					.SourceTick =
+						environment.HasWeatherClock ? environment.Clock.Tick : inputs->Time.PhaseTick,
+					.TickRate = environment.Weather.TickRate,
+					.Identity = scene::MixSignature(
+						scene::MixSignature(environment.CloudProvider.Id, environment.Clock.Epoch),
+						environment.WeatherHistoryRevision
+					)
+				};
+				// The shared field stage advances once per logical sample, including batches with many views.
+				const auto clockPlan = PlanWeatherGpuClock(found->Clock, clockSample, Command);
+				if (!clockPlan) return refuseWeather();
+				if (clockPlan->Action != WeatherGpuClockAction::Reuse)
+					EnterNamedPass(core::Name("weather-clock"));
+				if (!RecordWeatherGpuClock(
+						State->Device, Command, State->WeatherClockCompute, found->Clock, clockSample
+					))
+					return refuseWeather();
+				if (clockPlan->Action != WeatherGpuClockAction::Reuse) {
+					++Result.ComputeDispatches;
+					ClosePass();
+				}
 				auto fieldIdentity = inputs->Uniforms;
 				if (!inputs->Stateful && physicalBytes == 0) {
 					fieldIdentity.Time = {};
@@ -1765,7 +1790,13 @@ namespace engine::render {
 					);
 				} else {
 					if (!RecordWeatherField(
-							Command, State->WeatherFieldCompute, cells, pages, inputs->Uniforms, physicalBytes
+							Command,
+							State->WeatherFieldCompute,
+							cells,
+							pages,
+							inputs->Uniforms,
+							physicalBytes,
+							found->Clock.Buffer
 						))
 						return refuseWeather();
 					++Result.ComputeDispatches;
@@ -1816,7 +1847,8 @@ namespace engine::render {
 						cells,
 						found->Pages,
 						summaries,
-						inputs->Uniforms
+						inputs->Uniforms,
+						found->Clock.Buffer
 					))
 					return refuseWeather();
 				found->Summaries = summaries;
@@ -1911,7 +1943,8 @@ namespace engine::render {
 						State->OverlaySampler,
 						target.Width,
 						target.Height,
-						uniforms
+						uniforms,
+						generation->Clock.Buffer
 					))
 					return true;
 				++Result.ComputeDispatches;

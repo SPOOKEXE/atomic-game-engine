@@ -593,6 +593,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *TonemapPipeline = nullptr;
 		SDL_GPUComputePipeline *EnvironmentSkyCompute = nullptr;
 		SDL_GPUComputePipeline *EnvironmentCloudCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherClockCompute = nullptr;
 		SDL_GPUComputePipeline *WeatherFieldCompute = nullptr;
 		SDL_GPUComputePipeline *WeatherShadowCompute = nullptr;
 		SDL_GPUComputePipeline *WeatherSummaryCompute = nullptr;

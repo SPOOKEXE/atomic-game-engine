@@ -205,7 +205,8 @@ namespace engine::render {
 					State->OverlaySampler,
 					(width + 1) / 2,
 					(height + 1) / 2,
-					rays
+					rays,
+					resident ? found->Clock.Buffer : nullptr
 				))
 				return false;
 			WeatherReconstructionUniforms reconstruction;

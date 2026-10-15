@@ -173,11 +173,12 @@ namespace engine::render {
 		const WeatherShadowPlan &plan,
 		const WeatherGpuInputs &inputs,
 		const scene::WeatherCompute &controls,
-		float appearanceDensity
+		float appearanceDensity,
+		SDL_GPUBuffer *clock
 	) {
 		ENGINE_PROFILE_CAT("weather cloud shadows", core::ProfileCategory::Render);
 		if (!command || !pipeline || !cells || !pages || !destination || !plan.Enabled) return false;
-		const WeatherShadowMapUniforms uniforms{
+		WeatherShadowMapUniforms uniforms{
 			.Lighting = plan.Lighting,
 			.Minimum =
 				{-controls.ExtentMetres.X * .5f,
@@ -198,14 +199,18 @@ namespace engine::render {
 				 0},
 			.Field = inputs.Uniforms
 		};
+		if (clock && uniforms.Field.Phase.z != UINT32_MAX) {
+			uniforms.Field.Time = {};
+			uniforms.Field.Phase = {0, 0, 1, uniforms.Field.Phase.w};
+		}
 		SDL_GPUStorageTextureReadWriteBinding output{};
 		output.texture = destination;
 		output.cycle = true;
 		auto *pass = SDL_BeginGPUComputePass(command, &output, 1, nullptr, 0);
 		if (!pass) return false;
 		SDL_BindGPUComputePipeline(pass, pipeline);
-		SDL_GPUBuffer *buffers[]{cells, pages};
-		SDL_BindGPUComputeStorageBuffers(pass, 0, buffers, 2);
+		SDL_GPUBuffer *buffers[]{cells, pages, clock ? clock : pages};
+		SDL_BindGPUComputeStorageBuffers(pass, 0, buffers, 3);
 		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
 		SDL_DispatchGPUCompute(pass, (plan.Resolution + 7) / 8, (plan.Resolution * plan.Cascades + 7) / 8, 1);
 		SDL_EndGPUComputePass(pass);

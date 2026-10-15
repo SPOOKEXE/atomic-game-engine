@@ -53,7 +53,7 @@ namespace {
 		description.code_size = bytes.size();
 		description.entrypoint = binary.EntryPoint;
 		description.format = binary.Format;
-		description.num_readonly_storage_buffers = generateField ? 1 : 2;
+		description.num_readonly_storage_buffers = generateField ? 2 : 3;
 		description.num_readwrite_storage_buffers = generateField ? 1 : 0;
 		description.num_readwrite_storage_textures = generateField ? 0 : 1;
 		description.num_uniform_buffers = 1;

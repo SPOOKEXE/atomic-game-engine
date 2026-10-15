@@ -91,6 +91,7 @@ namespace engine::render {
 		const WeatherShadowPlan &plan,
 		const WeatherGpuInputs &inputs,
 		const scene::WeatherCompute &controls,
-		float appearanceDensity
+		float appearanceDensity,
+		SDL_GPUBuffer *clock = nullptr
 	);
 }
