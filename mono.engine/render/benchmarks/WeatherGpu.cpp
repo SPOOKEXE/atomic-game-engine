@@ -41,7 +41,8 @@ BENCH("weather descriptor CPU preparation and bounded full-field grid", 1000) {
 namespace {
 	using namespace engine;
 	constexpr uint32_t PHASE_FRAMES = 8;
-	constexpr std::array<const char *, 6> WEATHER_PASSES{
+	constexpr std::array<const char *, 7> WEATHER_PASSES{
+		"weather-clock",
 		"weather-field",
 		"weather-summary",
 		"weather-integrate",
@@ -49,12 +50,14 @@ namespace {
 		"weather-reconstruct",
 		"weather-shadow-map"
 	};
-	constexpr std::array<const char *, 20> WEATHER_WORK{
+	constexpr std::array<const char *, 25> WEATHER_WORK{
 		"field_dispatches",	   "summary_dispatches",	 "ray_dispatches",		 "shadow_dispatches",
 		"temporal_dispatches", "reconstruct_dispatches", "generated_bytes",		 "page_upload_bytes",
 		"history_copy_bytes",  "history_samples",		 "history_resets",		 "field_cache_hits",
 		"summary_cache_hits",  "shadow_cache_hits",		 "residency_cache_hits", "generated_cells",
-		"ray_pixels",		   "shadow_texels",			 "page_uploads",		 "resident_bricks"
+		"ray_pixels",		   "shadow_texels",			 "page_uploads",		 "resident_bricks",
+		"clock_dispatches",	   "clock_anchors",			 "clock_advances",		 "clock_cache_hits",
+		"clock_uniform_bytes"
 	};
 
 	uint32_t BenchmarkExtent(const char *name, uint32_t fallback, uint32_t maximum) {
@@ -128,12 +131,24 @@ namespace {
 		};
 		// Work counters remain required even when completed device timestamps are unavailable.
 		for (const auto *counter :
-			 {"field_dispatches", "summary_dispatches", "ray_dispatches", "shadow_dispatches"})
+			 {"clock_dispatches",
+			  "clock_anchors",
+			  "field_dispatches",
+			  "summary_dispatches",
+			  "ray_dispatches",
+			  "shadow_dispatches"})
 			expect(phases[0], counter, true);
 		expect(phases[1], "field_dispatches", false);
+		expect(phases[1], "clock_dispatches", false);
+		expect(phases[1], "clock_cache_hits", true);
 		expect(phases[1], "field_cache_hits", true);
 		expect(phases[1], "ray_dispatches", true);
-		for (const auto *counter : {"field_dispatches", "summary_dispatches", "ray_dispatches"})
+		for (const auto *counter :
+			 {"clock_dispatches",
+			  "clock_advances",
+			  "field_dispatches",
+			  "summary_dispatches",
+			  "ray_dispatches"})
 			expect(phases[2], counter, true);
 		return valid;
 	}
