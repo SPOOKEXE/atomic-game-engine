@@ -648,7 +648,7 @@ namespace studio {
 			ENGINE_INFO("assets from {}", Settings.Assets.string());
 		}
 
-		if (!SDL_SetAppMetadata("Atomic Studio", nullptr, "atomic-studio")) {
+		if (!SDL_SetAppMetadata("Atomic Studio", nullptr, "io.github.spookexe.atomicgameengine.studio")) {
 			ENGINE_WARN("SDL_SetAppMetadata: {}", SDL_GetError());
 		}
 

@@ -397,7 +397,7 @@ namespace client {
 			ENGINE_INFO("scene from {}", Settings.ScriptPath);
 		}
 
-		if (!SDL_SetAppMetadata("Atomic Client", nullptr, "atomic-client")) {
+		if (!SDL_SetAppMetadata("Atomic Client", nullptr, "io.github.spookexe.atomicgameengine.client")) {
 			ENGINE_WARN("SDL_SetAppMetadata: {}", SDL_GetError());
 		}
 
