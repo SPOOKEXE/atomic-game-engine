@@ -25,12 +25,14 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <memory>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 TEST_SUITE_ID("engine.examples.weather")
 TEST_DEPENDS("engine.scripthost.scripting")
@@ -194,7 +196,7 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 			  640,
 			  16,
 			  16,
-			  .009f,
+			  .016f,
 			  0,
 			  0,
 			  1.8f,
@@ -212,7 +214,7 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 			  256,
 			  32,
 			  15,
-			  .012f,
+			  .015f,
 			  .04f,
 			  .02f,
 			  2,
@@ -317,6 +319,61 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 		}
 		if (std::string_view(preset.Button) == "Weather Preset GROUND FOG")
 			CHECK(sample->FogExtinctionPerMetre > 0);
+		const bool scattered = std::string_view(preset.Button) == "Weather Preset SCATTERED CUMULUS";
+		const bool overcast = std::string_view(preset.Button) == "Weather Preset OVERCAST STRATUS";
+		const bool thinIce = std::string_view(preset.Button) == "Weather Preset WISPY ICE";
+		if (scattered || overcast || thinIce) {
+			const int32_t cellsX =
+				static_cast<int32_t>(std::ceil(weather->ExtentMetres.X / weather->CellSizeMetres));
+			const int32_t cellsZ =
+				static_cast<int32_t>(std::ceil(weather->ExtentMetres.Z / weather->CellSizeMetres));
+			const uint32_t cellsY = compiled->Definition.ThicknessCells;
+			const size_t count = size_t(cellsX) * cellsZ * cellsY;
+			REQUIRE(count <= 10240);
+			std::vector<engine::weather::CellCoordinate> coordinates;
+			coordinates.reserve(count);
+			for (int32_t z = -cellsZ / 2; z < cellsZ / 2; ++z)
+				for (int32_t x = -cellsX / 2; x < cellsX / 2; ++x)
+					for (uint32_t y = 0; y < cellsY; ++y)
+						coordinates.push_back({x, compiled->Definition.BaseCell + int32_t(y), z});
+			std::vector<engine::weather::EncodedCell> cells(coordinates.size());
+			for (const uint64_t tick : {0, 100, 500}) {
+				const auto fieldTime = engine::weather::ResolveTime(
+					engine::weather::InitialAnchor(compiled->Definition, 0), tick
+				);
+				REQUIRE(fieldTime);
+				REQUIRE(engine::weather::EvaluateBatch(compiled->Definition, *fieldTime, coordinates, cells));
+				size_t occupied = 0;
+				size_t occupiedColumns = 0;
+				uint8_t maximum = 0;
+				for (size_t column = 0; column < cells.size(); column += cellsY) {
+					bool hasCloud = false;
+					for (uint32_t y = 0; y < cellsY; ++y) {
+						const uint8_t density = cells[column + y].Codes[0];
+						occupied += density != 0;
+						hasCloud |= density != 0;
+						maximum = std::max(maximum, density);
+					}
+					occupiedColumns += hasCloud;
+				}
+				CAPTURE(tick, occupied, occupiedColumns, maximum);
+				// Sample named shapes at startup, five seconds and twenty-five seconds without a camera.
+				CHECK(occupied > 0);
+				CHECK(occupiedColumns > 0);
+				if (scattered) {
+					CHECK(occupied >= count / 100);
+					CHECK(occupied <= count * 3 / 4);
+					CHECK(occupiedColumns < size_t(cellsX) * cellsZ);
+					CHECK(maximum >= 12);
+				} else if (overcast) {
+					CHECK(occupiedColumns >= size_t(cellsX) * cellsZ * 3 / 4);
+					CHECK(maximum >= 8);
+				} else {
+					CHECK(occupied < count / 2);
+					CHECK(occupiedColumns < size_t(cellsX) * cellsZ);
+				}
+			}
+		}
 		const auto *shape = store.Get<engine::scene::CloudCompute>(provider);
 		REQUIRE(shape);
 		CHECK(shape->Shader == preset.Shader);
