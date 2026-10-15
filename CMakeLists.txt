@@ -482,6 +482,9 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/mono.build")
 include(MonoVendor)
 
+# Apply link choices after vendor targets exist, before first-party targets do.
+include(MonoLinker)
+
 # After MonoVendor, so that glslc_exe exists to be named. Only the presentation
 # modules own GLSL, so a server-only configure needs no shader compiler at all.
 #
