@@ -3,6 +3,7 @@
 #include "FramePreparation.hpp"
 #include "GraphHistory.hpp"
 #include "PortalCaptureTreeWork.hpp"
+#include "WeatherCapture.hpp"
 
 // `Renderer::Impl` - every device object the renderer owns, and the operations
 // over them.
@@ -2918,6 +2919,7 @@ namespace engine::render {
 		// reallocation `SCENE_TARGET_BLOCK` exists to avoid one layer up. The
 		// high-water mark is bounded by `scene::MAX_SURFACES`.
 		struct SurfaceBank {
+			WeatherCaptureScratch WeatherCapture;
 			SurfaceCapturePlan CapturePlan;
 			SurfaceCaptureCache CaptureCache;
 			std::vector<effects::RibbonVertex> CaptureRibbonSource;

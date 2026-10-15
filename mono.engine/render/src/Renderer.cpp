@@ -987,6 +987,7 @@ namespace engine::render {
 			SDL_ReleaseGPUSampler(device, State->ShadowSampler);
 		}
 		for (Impl::SurfaceBank &bank : State->SurfaceBanks) {
+			ReleaseWeatherCapture(device, bank.WeatherCapture);
 			for (Impl::SurfaceSlotState &surface : bank.Surfaces) {
 				for (SDL_GPUTexture *texture : surface.Texture) {
 					if (texture) {

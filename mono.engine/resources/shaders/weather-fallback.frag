@@ -113,25 +113,41 @@ bool Interval(vec3 origin, vec3 direction, float maximum, out float enter, out f
 	return enter < leave;
 }
 void main() {
-	vec4 colour = texture(colourImage, inUv);
+	bool capture = (fallback.Modes.x & 128u) != 0u;
+	vec4 colour = texture(colourImage, capture ? inUv * pass.Target.zw : inUv);
 	bool linear = (fallback.Modes.x & 8u) != 0u;
-	float depth = texture(depthImage, linear ? inUv : inUv * pass.Target.zw).r;
+	float depth = texture(depthImage, (linear || capture) ? inUv : inUv * pass.Target.zw).r;
 	vec2 clip = vec2(inUv.x * 2 - 1, 1 - inUv.y * 2);
-	vec4 farPoint = pass.InverseViewProjection * vec4(clip, 1, 1);
-	vec3 direction = normalize(farPoint.xyz / max(abs(farPoint.w), 1e-6) - pass.Eye.xyz);
+	// An oblique far plane can cross infinity within the image. Its depth-one
+	// point may lie behind the eye; the finite arrival plane defines the forward ray.
+	vec4 nearPoint = pass.InverseViewProjection * vec4(clip, 0, 1);
+	if (abs(nearPoint.w) < 1e-7 || any(isnan(nearPoint)) || any(isinf(nearPoint))) {
+		outColour = colour; return;
+	}
+	vec3 nearDelta = nearPoint.xyz / nearPoint.w - pass.Eye.xyz;
+	float nearDistance = length(nearDelta);
+	if (!(nearDistance > 0) || isnan(nearDistance) || isinf(nearDistance)) {
+		outColour = colour; return;
+	}
+	vec3 direction = nearDelta / nearDistance;
 	bool background = linear ? depth >= pass.Planes.y * .999 : depth >= .999999;
 	float maximum = pass.Planes.y / max(dot(pass.CameraDepth.xyz, direction), 1e-6);
 	if (!background) {
 		if (linear) maximum = max(0, depth) / max(dot(pass.CameraDepth.xyz, direction), 1e-6);
 		else {
 			vec4 hit = pass.InverseViewProjection * vec4(clip, depth, 1);
-			maximum = length(hit.xyz / max(abs(hit.w), 1e-6) - pass.Eye.xyz);
+			if (abs(hit.w) < 1e-7 || any(isnan(hit)) || any(isinf(hit))) {
+				outColour = colour; return;
+			}
+			maximum = length(hit.xyz / hit.w - pass.Eye.xyz);
 		}
 	}
 	if (background && (fallback.Modes.x & 2u) != 0u) colour.rgb = Sky(direction);
 	float enter, leave;
 	if ((fallback.Modes.x & 4u) != 0u && fallback.CloudPattern.x > 0 &&
 		Interval(pass.Eye.xyz, direction, maximum, enter, leave)) {
+		enter = max(enter, nearDistance);
+		if (!(leave > enter)) { outColour = colour; return; }
 		float stepMetres = (leave - enter) * .25;
 		float density = 0;
 		uint style = (fallback.Modes.w >> 8) & 255u;

@@ -4,12 +4,11 @@
 #include "weather-assembly.glsl"
 
 layout(local_size_x = 8, local_size_y = 8) in;
-layout(set = 0, binding = 0) uniform sampler2D sourceImage;
-layout(set = 0, binding = 1) uniform sampler2D depthImage;
-layout(set = 0, binding = 2, std430) readonly buffer Cells { uvec2 cells[]; } inputField;
-layout(set = 0, binding = 3, std430) readonly buffer Summaries { uvec4 values[]; } inputSummary;
-layout(set = 0, binding = 4, std430) readonly buffer Pages { ivec4 keys[]; } pageTable;
-layout(set = 0, binding = 5, std430) readonly buffer PreviousPages { ivec4 keys[]; } previousPageTable;
+layout(set = 0, binding = 0) uniform sampler2D depthImage;
+layout(set = 0, binding = 1, std430) readonly buffer Cells { uvec2 cells[]; } inputField;
+layout(set = 0, binding = 2, std430) readonly buffer Summaries { uvec4 values[]; } inputSummary;
+layout(set = 0, binding = 3, std430) readonly buffer Pages { ivec4 keys[]; } pageTable;
+layout(set = 0, binding = 4, std430) readonly buffer PreviousPages { ivec4 keys[]; } previousPageTable;
 layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D outputImage;
 layout(set = 1, binding = 1, rgba16f) writeonly uniform image2D cloudDepthImage;
 layout(set = 2, binding = 0) uniform Pass {
@@ -23,6 +22,7 @@ layout(set = 2, binding = 0) uniform Pass {
 	vec4 Ambient;
 	uvec4 Quality;
 	WeatherField Field;
+	uvec4 ImageExtent;
 } pass;
 
 // Bound the LOD approximation at the actual integration samples. A few
@@ -66,10 +66,8 @@ bool PageKeyLess(ivec4 first, ivec4 second) {
 }
 
 ivec3 PageOrigin(ivec3 coordinate, int extent) {
-	ivec3 quotient = coordinate / extent;
-	for (uint axis = 0u; axis < 3u; ++axis)
-		if (coordinate[axis] < 0 && coordinate[axis] % extent != 0) --quotient[axis];
-	return quotient * extent;
+	// Unsigned masking floors negative coordinates to the power-of-two page boundary.
+	return ivec3(uvec3(coordinate) & uvec3(~(uint(extent) - 1u)));
 }
 
 int FindPage(ivec3 coordinate, uint lod) {
@@ -270,7 +268,8 @@ void main() {
 	ivec2 size = imageSize(outputImage);
 	if (any(greaterThanEqual(pixel, size))) return;
 	vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
-	ivec2 fullExtent = textureSize(depthImage, 0);
+	ivec2 fullExtent = all(greaterThan(pass.ImageExtent.xy, uvec2(0)))
+		? ivec2(pass.ImageExtent.xy) : textureSize(depthImage, 0);
 	ivec2 depthPixel = clamp(ivec2(uv * vec2(fullExtent)), ivec2(0), fullExtent - 1);
 	float sceneDepth = texelFetch(depthImage, depthPixel, 0).r;
 	vec3 surface = WorldAt(uv, sceneDepth);
@@ -287,6 +286,10 @@ void main() {
 	float enter;
 	float exit;
 	if (!Interval(pass.Eye.xyz, ray, maximum, enter, exit)) return;
+	// An oblique capture starts at its arrival aperture, not its virtual eye.
+	// Ordinary views use their near plane through this same inverse projection.
+	enter = max(enter, max(0.0, dot(WorldAt(uv, 0.0) - pass.Eye.xyz, ray)));
+	if (!(exit > enter)) return;
 	allowedDensityError = max(0.0, uintBitsToFloat(pass.Quality.y)) /
 		max(pass.ColourExtinction.w * (exit - enter), .000001);
 	uint steps = clamp(pass.Quality.x, 1u, 256u);

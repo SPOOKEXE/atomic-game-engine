@@ -388,7 +388,23 @@ namespace engine::render {
 			const Impl::NamedTexture &environment,
 			bool drawSky,
 			bool drawClouds,
-			bool linearDepth
+			bool linearDepth,
+			const PbrUniforms *captureUniforms = nullptr,
+			const scene::WorldLighting *captureLighting = nullptr
+		);
+		// Applies the accepted world field to a completed local capture before its
+		// parent samples it. Captures use their own depth and no temporal history.
+		bool RecordCaptureWeather(
+			const graph::RunContext &context,
+			SDL_GPUTexture *colour,
+			SDL_GPUTexture *depth,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &camera,
+			uint32_t width,
+			uint32_t height,
+			const scene::WorldLighting &lighting,
+			uint32_t backingWidth = 0,
+			uint32_t backingHeight = 0
 		);
 
 		// Where the schedule placed a node.
@@ -494,6 +510,7 @@ namespace engine::render {
 		// @param passLights  The light set, pushed once for the pass.
 		// @param clearColour Overrides the fog clear. The seam light captures
 		//                    clear to the world's ambient - the lit void.
+		// @param storeDepth Retains local capture depth for subsequent weather sampling.
 		// @return The open pass.
 		SDL_GPURenderPass *OpenScenePass(
 			SDL_GPUTexture *colour,
@@ -502,7 +519,8 @@ namespace engine::render {
 			const SDL_GPUViewport *viewport,
 			const LightUniforms &passLights,
 			const SDL_FColor *clearColour = nullptr,
-			WorldColourTarget target = WorldColourTarget::Display
+			WorldColourTarget target = WorldColourTarget::Display,
+			bool storeDepth = false
 		);
 
 		// Draws the requested editor grid after opaque depth, using this capture's camera and clip.

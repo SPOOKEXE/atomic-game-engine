@@ -1845,7 +1845,6 @@ namespace engine::render {
 					!WeatherProductsReady(&*generation, Command))
 					return true;
 				if (!inputs->Stateful && generation->FieldWords == 0) return true;
-				const auto source = GraphTexture(context.Reads[0], context, false);
 				const auto depth = GraphTexture(context.Reads[1], context, false);
 				const auto target = GraphTexture(context.Writes[0], context, true);
 				const auto cloudDepth = GraphTexture(context.Writes[1], context, true);
@@ -1853,18 +1852,17 @@ namespace engine::render {
 				auto *summaries = GraphBuffer(context.Reads[3], context, false);
 				auto *pages = GraphBuffer(context.Reads[4], context, false);
 				auto *previousPages = GraphBuffer(context.Reads[5], context, false);
-				if (!source.IsValid() || !depth.IsValid() || !target.IsValid() || !cloudDepth.IsValid() ||
-					!cells || !summaries || !pages || !previousPages ||
-					source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
-					target.Format != source.Format || cloudDepth.Format != source.Format ||
-					cloudDepth.Width != target.Width || cloudDepth.Height != target.Height ||
-					depth.Width != source.Width || depth.Height != source.Height)
+				if (!depth.IsValid() || !target.IsValid() || !cloudDepth.IsValid() || !cells || !summaries ||
+					!pages || !previousPages || target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+					cloudDepth.Format != target.Format || cloudDepth.Width != target.Width ||
+					cloudDepth.Height != target.Height)
 					return true;
 				const auto &environment = CurrentLighting.EnvironmentState;
 				const auto &controls = environment.Weather;
 				const auto &appearance = environment.CloudLayer;
 				WeatherRayUniforms uniforms;
 				uniforms.InverseViewProjection = Uniforms.InverseViewProjection;
+				uniforms.ImageExtent = {depth.Width, depth.Height, 0, 0};
 				uniforms.Eye = Uniforms.Eye;
 				uniforms.Minimum = {
 					-controls.ExtentMetres.X * .5f,
@@ -1907,7 +1905,6 @@ namespace engine::render {
 						summaries,
 						pages,
 						previousPages,
-						source.Texture,
 						depth.Texture,
 						target.Texture,
 						cloudDepth.Texture,

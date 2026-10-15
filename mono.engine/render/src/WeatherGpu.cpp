@@ -359,7 +359,6 @@ namespace engine::render {
 		SDL_GPUBuffer *summaries,
 		SDL_GPUBuffer *pages,
 		SDL_GPUBuffer *previousPages,
-		SDL_GPUTexture *source,
 		SDL_GPUTexture *depth,
 		SDL_GPUTexture *destination,
 		SDL_GPUTexture *cloudDepth,
@@ -369,9 +368,9 @@ namespace engine::render {
 		const WeatherRayUniforms &uniforms
 	) {
 		ENGINE_PROFILE_CAT("weather volume rays", core::ProfileCategory::Render);
-		if (!command || !pipeline || !cells || !summaries || !pages || !previousPages || !source || !depth ||
-			!destination || !cloudDepth || !sampler || !width || !height || source == destination ||
-			depth == destination || source == cloudDepth || depth == cloudDepth || destination == cloudDepth)
+		if (!command || !pipeline || !cells || !summaries || !pages || !previousPages || !depth ||
+			!destination || !cloudDepth || !sampler || !width || !height || depth == destination ||
+			depth == cloudDepth || destination == cloudDepth)
 			return false;
 		std::array<SDL_GPUStorageTextureReadWriteBinding, 2> output{};
 		output[0].texture = destination;
@@ -381,8 +380,8 @@ namespace engine::render {
 		auto *pass = SDL_BeginGPUComputePass(command, output.data(), uint32_t(output.size()), nullptr, 0);
 		if (!pass) return false;
 		SDL_BindGPUComputePipeline(pass, pipeline);
-		const SDL_GPUTextureSamplerBinding images[2]{{source, sampler}, {depth, sampler}};
-		SDL_BindGPUComputeSamplers(pass, 0, images, 2);
+		const SDL_GPUTextureSamplerBinding image{depth, sampler};
+		SDL_BindGPUComputeSamplers(pass, 0, &image, 1);
 		SDL_GPUBuffer *buffers[4]{cells, summaries, pages, previousPages};
 		SDL_BindGPUComputeStorageBuffers(pass, 0, buffers, 4);
 		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));

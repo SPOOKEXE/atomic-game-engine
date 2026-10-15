@@ -127,12 +127,14 @@ namespace engine::render {
 		SDL_GPUTexture *destination,
 		WeatherTemporalHistory &history,
 		SDL_GPUSampler *sampler,
-		const WeatherReconstructionUniforms &uniforms
+		const WeatherReconstructionUniforms &uniforms,
+		bool retainHistory
 	) {
 		ENGINE_PROFILE_CAT("weather temporal reconstruction", core::ProfileCategory::Render);
 		if (!command || !temporalPipeline || !reconstructPipeline || !source || !depth || !clouds ||
-			!cloudDepth || !resolved || !destination || !history.Clouds || !history.Depth || !sampler ||
-			!uniforms.Extents.x || !uniforms.Extents.y || !uniforms.Extents.z || !uniforms.Extents.w)
+			!cloudDepth || !resolved || !destination ||
+			(retainHistory && (!history.Clouds || !history.Depth)) || !sampler || !uniforms.Extents.x ||
+			!uniforms.Extents.y || !uniforms.Extents.z || !uniforms.Extents.w)
 			return false;
 		for (auto *input : {source, depth, clouds, cloudDepth, history.Clouds, history.Depth})
 			if (input == resolved || input == destination) return false;
@@ -145,7 +147,7 @@ namespace engine::render {
 		SDL_BindGPUComputePipeline(pass, temporalPipeline);
 		// Invalid history binds today's initialized samples and sets weight zero.
 		// Even speculative shader reads can never observe an unwritten allocation.
-		const bool historyReadable = uniforms.Limits.x > 0 && history.Ready;
+		const bool historyReadable = retainHistory && uniforms.Limits.x > 0 && history.Ready;
 		const std::array temporalInputs{
 			SDL_GPUTextureSamplerBinding{clouds, sampler},
 			SDL_GPUTextureSamplerBinding{cloudDepth, sampler},
@@ -172,20 +174,22 @@ namespace engine::render {
 		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
 		SDL_DispatchGPUCompute(pass, (uniforms.Extents.x + 7) / 8, (uniforms.Extents.y + 7) / 8, 1);
 		SDL_EndGPUComputePass(pass);
-		for (const auto images :
-			 {std::array{resolved, history.Clouds}, std::array{cloudDepth, history.Depth}}) {
-			SDL_GPUBlitInfo copy{};
-			copy.source = {images[0], 0, 0, 0, 0, uniforms.Extents.z, uniforms.Extents.w};
-			copy.destination = {images[1], 0, 0, 0, 0, uniforms.Extents.z, uniforms.Extents.w};
-			copy.load_op = SDL_GPU_LOADOP_DONT_CARE;
-			copy.filter = SDL_GPU_FILTER_NEAREST;
-			copy.cycle = true;
-			SDL_BlitGPUTexture(command, &copy);
-		}
+		if (retainHistory)
+			for (const auto images :
+				 {std::array{resolved, history.Clouds}, std::array{cloudDepth, history.Depth}}) {
+				SDL_GPUBlitInfo copy{};
+				copy.source = {images[0], 0, 0, 0, 0, uniforms.Extents.z, uniforms.Extents.w};
+				copy.destination = {images[1], 0, 0, 0, 0, uniforms.Extents.z, uniforms.Extents.w};
+				copy.load_op = SDL_GPU_LOADOP_DONT_CARE;
+				copy.filter = SDL_GPU_FILTER_NEAREST;
+				copy.cycle = true;
+				SDL_BlitGPUTexture(command, &copy);
+			}
 		core::Metrics::Count("render.weather.temporal_dispatches", 1);
 		core::Metrics::Count("render.weather.reconstruct_dispatches", 1);
 		core::Metrics::Count(
-			"render.weather.history_copy_bytes", uint64_t(history.Width) * history.Height * 16
+			"render.weather.history_copy_bytes",
+			retainHistory ? uint64_t(history.Width) * history.Height * 16 : 0
 		);
 		core::Metrics::Count("render.weather.history_samples", historyReadable ? 1 : 0);
 		return true;

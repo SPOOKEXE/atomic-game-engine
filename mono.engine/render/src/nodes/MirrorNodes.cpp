@@ -103,7 +103,7 @@ namespace engine::render {
 										   const SDL_FColor *clearColour = nullptr
 									   ) {
 				return recording.OpenScenePass(
-					colour, depth, cycle, viewport, passLights, clearColour, captureTarget
+					colour, depth, cycle, viewport, passLights, clearColour, captureTarget, true
 				);
 			};
 			const auto drawWorldInto =
@@ -195,6 +195,7 @@ namespace engine::render {
 			//                own reflection, and descending into it would put the pane
 			//                in front of its own camera.
 			std::function<void(const glm::mat4 &, const core::CFrame &, uint32_t, int16_t)> fillMirror;
+			bool weatherCaptureFailed = false;
 
 			fillMirror = [&](const glm::mat4 &from, const core::CFrame &frame, uint32_t level, int16_t skip) {
 				for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
@@ -249,6 +250,7 @@ namespace engine::render {
 					// the end of the allowance is exactly `wouldDescend`.
 					if (level > 0) {
 						fillMirror(matrices.ViewProjection, eye.Frame, level - 1, static_cast<int16_t>(slot));
+						if (weatherCaptureFailed) return;
 					} else {
 						surfaceDepth.Deeper =
 							surfaceDepth.Deeper ||
@@ -399,6 +401,19 @@ namespace engine::render {
 					}
 
 					SDL_EndGPURenderPass(pass);
+					if (captureHdr && !recording.RecordCaptureWeather(
+										  context,
+										  target->Colour,
+										  target->Depth,
+										  matrices.ViewProjection,
+										  eye.Frame,
+										  target->Width,
+										  target->Height,
+										  currentLighting
+									  )) {
+						weatherCaptureFailed = true;
+						return;
+					}
 
 					// **Written after the pass has ended**, which is the invariant the
 					// whole ordering rests on: a level is readable only once the draw
@@ -533,6 +548,7 @@ namespace engine::render {
 								mirrorLevels - 1,
 								static_cast<int16_t>(self)
 							);
+							if (weatherCaptureFailed) return false;
 						} else if (havePanes[self]) {
 							surfaceDepth.Deeper = surfaceDepth.Deeper || wouldDescend(
 																			 accepted[index].ViewProjection,
@@ -638,6 +654,17 @@ namespace engine::render {
 							// this frame may not be sampled as another surface's
 							// "previous" within the same frame.
 							SDL_EndGPURenderPass(pass);
+							if (captureHdr && !recording.RecordCaptureWeather(
+												  context,
+												  state.Texture[state.Slot],
+												  state.Depth,
+												  state.ViewProjection,
+												  capturedView.Frame,
+												  state.Width,
+												  state.Height,
+												  surfaceWorldLighting
+											  ))
+								return false;
 							continue;
 						}
 
@@ -835,6 +862,17 @@ namespace engine::render {
 						}
 
 						SDL_EndGPURenderPass(pass);
+						if (captureHdr && !recording.RecordCaptureWeather(
+											  context,
+											  state.Texture[state.Slot],
+											  state.Depth,
+											  state.ViewProjection,
+											  capturedView.Frame,
+											  state.Width,
+											  state.Height,
+											  surfaceWorldLighting
+										  ))
+							return false;
 					}
 				}
 

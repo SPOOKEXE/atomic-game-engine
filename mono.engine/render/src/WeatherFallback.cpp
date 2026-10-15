@@ -139,12 +139,15 @@ namespace engine::render {
 		const Impl::NamedTexture &environment,
 		bool drawSky,
 		bool drawClouds,
-		bool linearDepth
+		bool linearDepth,
+		const PbrUniforms *captureUniforms,
+		const scene::WorldLighting *captureLighting
 	) {
 		if (!State->WeatherFallbackPipeline || !source.IsValid() || !depth.IsValid() || !target.IsValid() ||
 			source.Texture == target.Texture)
 			return false;
-		const auto &textures = CurrentLighting.EnvironmentState.Textures;
+		const auto &lighting = captureLighting ? *captureLighting : CurrentLighting;
+		const auto &textures = lighting.EnvironmentState.Textures;
 		const std::array names{
 			textures.Front, textures.Back, textures.Left, textures.Right, textures.Up, textures.Down
 		};
@@ -164,9 +167,10 @@ namespace engine::render {
 			if (texture && names[index].IsValid()) faceMask |= 1u << index;
 			bindings[index + 3] = {texture ? texture : State->Textures.Missing(), Sampler};
 		}
-		const auto fallback = WeatherFallbackOf(
-			CurrentLighting, environment.IsValid(), drawSky, drawClouds, linearDepth, faceMask
-		);
+		auto fallback =
+			WeatherFallbackOf(lighting, environment.IsValid(), drawSky, drawClouds, linearDepth, faceMask);
+		// Captures crop depth independently while colour retains its target's backing size.
+		if (captureUniforms) fallback.Modes.x |= 128u;
 		EnterNamedPass(context.Name);
 		SDL_GPUColorTargetInfo colour{};
 		colour.texture = target.Texture;
@@ -177,7 +181,8 @@ namespace engine::render {
 		if (!pass) return false;
 		SDL_BindGPUGraphicsPipeline(pass, State->WeatherFallbackPipeline);
 		SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
-		SDL_PushGPUFragmentUniformData(Command, 0, &Uniforms, sizeof(Uniforms));
+		const auto &passUniforms = captureUniforms ? *captureUniforms : Uniforms;
+		SDL_PushGPUFragmentUniformData(Command, 0, &passUniforms, sizeof(passUniforms));
 		SDL_PushGPUFragmentUniformData(Command, 1, &fallback, sizeof(fallback));
 		const SDL_GPUViewport viewport{0, 0, float(target.Width), float(target.Height), 0, 1};
 		const SDL_Rect scissor{0, 0, int(target.Width), int(target.Height)};

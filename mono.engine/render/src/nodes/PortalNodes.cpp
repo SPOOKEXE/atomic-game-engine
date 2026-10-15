@@ -425,6 +425,7 @@ namespace engine::render {
 				// beside a whole scene render.
 				std::function<void(const scene::CameraMatrices &, const core::CFrame &, uint32_t, int16_t)>
 					fillLevel;
+				bool weatherCaptureFailed = false;
 
 				fillLevel = [&](const scene::CameraMatrices &from,
 								const core::CFrame &fromFrame,
@@ -457,6 +458,7 @@ namespace engine::render {
 
 						if (level > 0) {
 							fillLevel(sub.Matrices, sub.Frame, level - 1, portal.Partner);
+							if (weatherCaptureFailed) return;
 						}
 
 						if (!recording.AdmitSurfaceCapture(sceneWidth, sceneHeight, portalLevels - level)) {
@@ -499,7 +501,8 @@ namespace engine::render {
 							&portalViewport,
 							lightUniforms,
 							nullptr,
-							WorldColourTarget::Hdr
+							WorldColourTarget::Hdr,
+							true
 						);
 
 						const FrameUniforms subFrameUniforms{
@@ -670,6 +673,21 @@ namespace engine::render {
 						}
 
 						SDL_EndGPURenderPass(pass);
+						if (!recording.RecordCaptureWeather(
+								context,
+								target->Colour,
+								target->Depth,
+								sub.Matrices.ViewProjection,
+								sub.Frame,
+								sceneWidth,
+								sceneHeight,
+								recording.CurrentLighting,
+								targetWidth,
+								targetHeight
+							)) {
+							weatherCaptureFailed = true;
+							return;
+						}
 						result.PortalPasses++;
 					}
 				};
@@ -677,6 +695,7 @@ namespace engine::render {
 				fillLevel(
 					recording.BehaviourMatrices, recording.Request.VisibilityCameraFrame, portalLevels - 1, -1
 				);
+				if (weatherCaptureFailed) return false;
 
 				if (!recording.CaptureSeamLights(WorldColourTarget::Display)) {
 					return false;

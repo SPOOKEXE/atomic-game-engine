@@ -81,6 +81,7 @@ namespace engine::render {
 		SDL_GPUTexture *destination,
 		WeatherTemporalHistory &history,
 		SDL_GPUSampler *sampler,
-		const WeatherReconstructionUniforms &uniforms
+		const WeatherReconstructionUniforms &uniforms,
+		bool retainHistory = true
 	);
 }

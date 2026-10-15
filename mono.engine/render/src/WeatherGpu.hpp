@@ -60,8 +60,10 @@ namespace engine::render {
 		glm::vec4 Ambient;
 		glm::uvec4 Quality;
 		WeatherGpuUniforms Field;
+		// Active hardware-depth rectangle. Zero uses the complete bound texture.
+		glm::uvec4 ImageExtent{};
 	};
-	static_assert(sizeof(WeatherRayUniforms) == 368);
+	static_assert(sizeof(WeatherRayUniforms) == 384);
 
 	struct WeatherGpuLighting {
 		glm::vec4 Direction;
@@ -172,7 +174,6 @@ namespace engine::render {
 		SDL_GPUBuffer *summaries,
 		SDL_GPUBuffer *pages,
 		SDL_GPUBuffer *previousPages,
-		SDL_GPUTexture *source,
 		SDL_GPUTexture *depth,
 		SDL_GPUTexture *destination,
 		SDL_GPUTexture *cloudDepth,

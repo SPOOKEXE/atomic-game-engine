@@ -170,7 +170,7 @@ namespace engine::render {
 				}
 				const SDL_GPUViewport viewport{0, 0, float(entry.Width), float(entry.Height), 0, 1};
 				auto *pass = OpenScenePass(
-					colour, depth, false, &viewport, SceneLights, nullptr, WorldColourTarget::Hdr
+					colour, depth, false, &viewport, SceneLights, nullptr, WorldColourTarget::Hdr, true
 				);
 				if (pass == nullptr) {
 					return false;
@@ -367,6 +367,17 @@ namespace engine::render {
 				}
 				drawInterface(true);
 				SDL_EndGPURenderPass(pass);
+				if (!RecordCaptureWeather(
+						context,
+						colour,
+						depth,
+						entry.Matrices.ViewProjection,
+						entry.Frame,
+						entry.Width,
+						entry.Height,
+						CurrentLighting
+					))
+					return false;
 				if (root) {
 					root->PreviousViewProjection = root->ViewProjection;
 					root->PreviousSampling = root->Sampling;

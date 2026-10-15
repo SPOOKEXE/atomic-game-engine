@@ -1394,6 +1394,168 @@ void main(){float blue=gl_FragCoord.x/64.0;colour=vec4(0,0,blue,1);}
 }
 
 TEST_CASE(
+	"weather volume reaches portal pixels at the destination canonical tick",
+	"[render][gpu][weather][portal][.]"
+) {
+	const bool separateCaptures = GENERATE(false, true);
+	const bool pendingStateful = GENERATE(false, true);
+	INFO("separate captures=" << separateCaptures << " pending stateful=" << pendingStateful);
+	FixtureDevice fixture;
+	fixture.Initialise();
+	const auto document = InstallPortalFixture(fixture.Render, false, separateCaptures);
+	const render::SceneTarget target{WIDTH, HEIGHT};
+	const core::Vector3 translation{DESTINATION_X, 32, 32};
+	const std::array destination{
+		Plane(1, translation + core::Vector3{-10, 0, -4}, 10, 20, {0.8f, 0.2f, 0.1f}),
+		Plane(2, translation + core::Vector3{10, 0, -4}, 10, 20, {0.1f, 0.6f, 0.8f})
+	};
+	auto pane = Plane(3, {}, HALF_WIDTH, HALF_HEIGHT, {0.3f, 0.3f, 0.3f});
+	pane.Surface = 0;
+	std::vector<scene::DrawInstance> instances(destination.begin(), destination.end());
+	instances.push_back(pane);
+	render::PortalView portal;
+	portal.Normal = {0, 0, 1};
+	portal.First = {HALF_WIDTH, 0, 0};
+	portal.Second = {0, HALF_HEIGHT, 0};
+	portal.Warp.Frame.Position = translation;
+	std::array<render::View, 2> views;
+	for (size_t index = 0; index < views.size(); ++index) {
+		auto &view = views[index];
+		view.Slot = index;
+		view.World = 19020 + index;
+		view.WorldName = core::Name(index == 0 ? "weather.portal" : "weather.portal.direct");
+		view.Pipeline = core::Name("portal.fixture.pbr");
+		view.Target = &target;
+		view.Camera.FieldOfViewRadians = 1.0471975512f;
+		view.Camera.NearPlane = .1f;
+		view.Camera.FarPlane = 64;
+		view.CameraCut = true;
+		view.OverrideLighting = true;
+		view.Lighting.Ambient = {.75f, .75f, .75f};
+		view.Lighting.OutdoorAmbient = {};
+		view.Lighting.Direct = {};
+		view.Lighting.FogStart = 1000;
+		view.Lighting.FogEnd = 1001;
+		auto &environment = view.Lighting.EnvironmentState;
+		environment.HasClouds = environment.HasWeatherCompute = environment.HasWeatherClock = true;
+		environment.Weather.Mode =
+			pendingStateful ? scene::WeatherMode::Stateful : scene::WeatherMode::Procedural;
+		environment.CloudLayer.Colour = {.8f, .1f, .05f};
+		environment.CloudLayer.Cover = environment.CloudLayer.Density = 1;
+		environment.Weather.CellSizeMetres = 2;
+		environment.Weather.ExtentMetres = {256, 32, 64};
+		environment.Weather.BaseHeightMetres = 24;
+		environment.Weather.ThicknessMetres = 16;
+		environment.Weather.Coverage = 1;
+		environment.Weather.VapourMixingRatio = .029f;
+		environment.Weather.BaseTemperatureCelsius = -50;
+		environment.Weather.FeatureCells = 8;
+		environment.Weather.WindMetresPerSecond = {};
+		environment.Weather.Seed = 17;
+		environment.Weather.LodError = .0001f;
+		environment.Weather.ShadowsEnabled = false;
+		environment.Clock.Tick = environment.Clock.AnchorTick = environment.Clock.PhaseTick = 123;
+		environment.Clock.WindQ20 = {};
+	}
+	views[0].Instances = instances;
+	views[0].Portals = std::span(&portal, 1);
+	views[1].Instances = destination;
+	render::OverlayImage overlay;
+	const auto capture = [&](size_t slot) {
+		return CaptureResource(
+			fixture.Render, core::Name("tonemapped"), slot, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+		);
+	};
+	const auto scratchCreations = [] {
+		const auto count = core::Metrics::Get("render.weather.capture_scratch_image_creations");
+		return count ? count->Value : 0.0;
+	};
+	bool firstCapture = true;
+	for (const auto &sample :
+		 {CameraSample{"weather-front", {0, 0, 4}}, CameraSample{"weather-off-centre", {1.1f, .6f, 4}}}) {
+		views[0].CameraFrame = core::CFrame::LookAt(sample.Eye, sample.Aim);
+		views[1].CameraFrame = views[0].CameraFrame;
+		views[1].CameraFrame.Position = views[1].CameraFrame.Position + translation;
+		for (auto &view : views) {
+			view.Damage.Scene = true;
+			view.Lighting.EnvironmentState.Weather.Enabled = false;
+		}
+		REQUIRE(fixture.Render.Render(views, overlay, nullptr, false).Submitted);
+		const auto clearPortal = capture(0);
+		const auto clearDirect = capture(1);
+		for (auto &view : views)
+			view.Lighting.EnvironmentState.Weather.Enabled = true;
+		// The source aperture lies below the slab. Only a destination capture can
+		// put clouds in its opening; the direct oracle samples identical world coordinates.
+		auto baseline = views[0];
+		baseline.Portals = {};
+		REQUIRE(fixture.Render.Render(std::span(&baseline, 1), overlay, nullptr, false).Submitted);
+		const auto before = capture(0);
+		const double scratchBefore = scratchCreations();
+		const auto frame = fixture.Render.Render(views, overlay, nullptr, false);
+		REQUIRE(frame.Submitted);
+		REQUIRE(frame.PortalPasses > 0);
+		CHECK(
+			scratchCreations() - scratchBefore ==
+			(firstCapture ? (pendingStateful ? 1 : 4) + (separateCaptures ? 1 : 0) : 0)
+		);
+		firstCapture = false;
+		const auto unfolded = capture(1);
+		const auto actual = capture(0);
+		size_t changedDirect = 0, changedPortal = 0;
+		const double tangent = std::tan(views[0].Camera.FieldOfViewRadians / 2);
+		for (uint32_t y = 0; y < HEIGHT; ++y)
+			for (uint32_t x = 0; x < WIDTH; ++x) {
+				const core::Vector3 local{
+					static_cast<float>((2 * (x + .5) / WIDTH - 1) * tangent * WIDTH / HEIGHT),
+					static_cast<float>((1 - 2 * (y + .5) / HEIGHT) * tangent),
+					-1
+				};
+				const auto ray = views[0].CameraFrame.VectorToWorldSpace(local);
+				if (std::abs(ray.Z) < 1e-6f) continue;
+				const float distance = -sample.Eye.Z / ray.Z;
+				const auto aperture = sample.Eye + ray * distance;
+				if (distance <= 0 || std::abs(aperture.X) >= HALF_WIDTH - .08f ||
+					std::abs(aperture.Y) >= HALF_HEIGHT - .08f)
+					continue;
+				const auto changed = [&](const CapturedImage &clear, const CapturedImage &cloudy) {
+					for (size_t channel = 0; channel < 3; ++channel)
+						if (std::abs(
+								std::to_integer<int>(
+									clear.Bytes[y * clear.RowStrideBytes + x * 4 + channel]
+								) -
+								std::to_integer<int>(
+									cloudy.Bytes[y * cloudy.RowStrideBytes + x * 4 + channel]
+								)
+							) > 2)
+							return true;
+					return false;
+				};
+				changedDirect += changed(clearDirect, unfolded);
+				changedPortal += changed(clearPortal, actual);
+			}
+		INFO(
+			sample.Name << " changed aperture pixels direct=" << changedDirect << " portal=" << changedPortal
+		);
+		CHECK(changedDirect > 30);
+		CHECK(changedPortal > 30);
+		CheckOpening(
+			fixture.Render,
+			sample,
+			.75f,
+			document,
+			views[0],
+			-4,
+			before,
+			unfolded,
+			actual,
+			destination,
+			destination
+		);
+	}
+}
+
+TEST_CASE(
 	"postprocess grades stay within each view's content owner", "[render][gpu][postprocess-owner-draw][.]"
 ) {
 	FixtureDevice fixture;

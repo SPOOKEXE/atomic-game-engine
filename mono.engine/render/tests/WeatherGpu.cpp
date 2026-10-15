@@ -11,6 +11,8 @@
 #include <engine/weather/Clock.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include <glm/packing.hpp>
 
 #include <array>
 #include <chrono>
@@ -79,6 +81,77 @@ namespace {
 		std::memcpy(result.data(), mapped, info.size);
 		SDL_UnmapGPUTransferBuffer(device, transfer.get());
 		return result;
+	}
+
+	// These graph resources must remain live through the fixture's final output node.
+	test::CapturedImage CaptureHalfResource(
+		Renderer &renderer, core::Name resource, size_t slot, uint32_t width, uint32_t height
+	) {
+		auto *device = static_cast<SDL_GPUDevice *>(renderer.Backend().Device);
+		auto *texture = static_cast<SDL_GPUTexture *>(renderer.ResourceTexture(resource, slot));
+		REQUIRE(device);
+		REQUIRE(texture);
+		REQUIRE(width > 0);
+		REQUIRE(height > 0);
+		const uint32_t rowBytes = (width * 8 + 255) / 256 * 256;
+		SDL_GPUTransferBufferCreateInfo info{};
+		info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+		info.size = rowBytes * height;
+		const auto releaseTransfer = [device](SDL_GPUTransferBuffer *buffer) {
+			gpu::ReleaseTransferBuffer(device, buffer);
+		};
+		std::unique_ptr<SDL_GPUTransferBuffer, decltype(releaseTransfer)> transfer(
+			gpu::CreateTransferBuffer(device, &info), releaseTransfer
+		);
+		REQUIRE(transfer);
+		auto *command = SDL_AcquireGPUCommandBuffer(device);
+		REQUIRE(command);
+		auto *copy = SDL_BeginGPUCopyPass(command);
+		REQUIRE(copy);
+		SDL_GPUTextureRegion source{};
+		source.texture = texture;
+		source.w = width;
+		source.h = height;
+		source.d = 1;
+		SDL_GPUTextureTransferInfo destination{};
+		destination.transfer_buffer = transfer.get();
+		destination.pixels_per_row = rowBytes / 8;
+		destination.rows_per_layer = height;
+		SDL_DownloadFromGPUTexture(copy, &source, &destination);
+		SDL_EndGPUCopyPass(copy);
+		const auto releaseFence = [device](SDL_GPUFence *fence) { SDL_ReleaseGPUFence(device, fence); };
+		std::unique_ptr<SDL_GPUFence, decltype(releaseFence)> fence(
+			SDL_SubmitGPUCommandBufferAndAcquireFence(command), releaseFence
+		);
+		REQUIRE(fence);
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (!SDL_QueryGPUFence(device, fence.get()) && std::chrono::steady_clock::now() < deadline)
+			SDL_Delay(1);
+		INFO("half-float capture timeout for " << resource.Text());
+		REQUIRE(SDL_QueryGPUFence(device, fence.get()));
+		const auto *mapped =
+			static_cast<const uint32_t *>(SDL_MapGPUTransferBuffer(device, transfer.get(), false));
+		REQUIRE(mapped);
+		test::CapturedImage image;
+		image.Width = width;
+		image.Height = height;
+		image.Format = test::ImageFormat::Rgba32Float;
+		image.RowStrideBytes = width * sizeof(float) * 4;
+		image.Bytes.resize(image.RowStrideBytes * height);
+		for (uint32_t y = 0; y < height; ++y)
+			for (uint32_t x = 0; x < width; ++x) {
+				const size_t offset = y * (rowBytes / 4) + x * 2;
+				const auto redGreen = glm::unpackHalf2x16(mapped[offset]);
+				const auto blueAlpha = glm::unpackHalf2x16(mapped[offset + 1]);
+				const std::array<float, 4> pixel{redGreen.x, redGreen.y, blueAlpha.x, blueAlpha.y};
+				std::memcpy(
+					image.Bytes.data() + y * image.RowStrideBytes + x * sizeof(pixel),
+					pixel.data(),
+					sizeof(pixel)
+				);
+			}
+		SDL_UnmapGPUTransferBuffer(device, transfer.get());
+		return image;
 	}
 }
 
@@ -367,17 +440,24 @@ TEST_CASE(
 ) {
 	using namespace engine;
 	using namespace engine::render;
+	const bool captureDiagnostics = GENERATE(true, false);
+	INFO("pinned half-float diagnostics=" << captureDiagnostics);
 	test::FixtureDevice fixture;
 	fixture.Initialise();
-	const core::Name pipeline("weather.gpu.capture");
-	const core::Name boundary("weather-test-output");
+	const core::Name pipeline(captureDiagnostics ? "weather.gpu.diagnostic" : "weather.gpu.capture");
+	const core::Name boundary(captureDiagnostics ? "weather-test-diagnostic" : "weather-test-output");
 	graph::PipelineDocument document = graph::DefaultPbrDocument();
 	graph::NodeKindSpec spec;
 	spec.Kind = boundary;
 	spec.Scope = graph::NodeScope::Frame;
 	spec.Queue = graph::ExecutionQueue::Cpu;
 	spec.Category = graph::NodeCategory::Output;
-	spec.Inputs.push_back({.Name = core::Name("tonemapped"), .Kind = graph::ResourceKind::Texture});
+	std::vector<core::Name> capturedResources{core::Name("tonemapped")};
+	if (captureDiagnostics)
+		for (const auto resource : {"sky-lit", "weather-lit", "weather-clouds", "weather-cloud-depth"})
+			capturedResources.emplace_back(resource);
+	for (const auto resource : capturedResources)
+		spec.Inputs.push_back({.Name = resource, .Kind = graph::ResourceKind::Texture});
 	REQUIRE(graph::RegisterNodeKind(std::move(spec)));
 	REQUIRE(fixture.Render.InstallNodeHandler(boundary, [](const graph::RunContext &) { return true; }));
 	document.Record(
@@ -386,9 +466,8 @@ TEST_CASE(
 		 .NodeKind = boundary,
 		 .Scope = graph::NodeScope::Frame}
 	);
-	document.Record(
-		{.Kind = graph::EditKind::Reads, .Target = core::Name("tonemapped"), .Key = core::Name("tonemapped")}
-	);
+	for (const auto resource : capturedResources)
+		document.Record({.Kind = graph::EditKind::Reads, .Target = resource, .Key = resource});
 	graph::RenderGraph graph;
 	core::Name offender;
 	REQUIRE(graph::Build(document, graph, offender) == graph::PipelineDocumentStatus::Ok);
@@ -513,13 +592,71 @@ TEST_CASE(
 	const auto opaqueWeather = test::CaptureResource(
 		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, test::ImageFormat::Rgba8Unorm
 	);
+	if (captureDiagnostics) {
+		const auto halfExtent = fixture.Render.ResourceTextureExtent(core::Name("weather-clouds"), view.Slot);
+		const auto rawClouds = CaptureHalfResource(
+			fixture.Render,
+			core::Name("weather-clouds"),
+			view.Slot,
+			halfExtent.DrawnWidth,
+			halfExtent.DrawnHeight
+		);
+		const auto cloudDepth = CaptureHalfResource(
+			fixture.Render,
+			core::Name("weather-cloud-depth"),
+			view.Slot,
+			halfExtent.DrawnWidth,
+			halfExtent.DrawnHeight
+		);
+		const auto opaqueSky =
+			CaptureHalfResource(fixture.Render, core::Name("sky-lit"), view.Slot, EXTENT, EXTENT);
+		const auto opaqueWeatherLit =
+			CaptureHalfResource(fixture.Render, core::Name("weather-lit"), view.Slot, EXTENT, EXTENT);
+		auto neutralClouds = rawClouds;
+		const std::array<float, 4> neutralPixel{0, 0, 0, 1};
+		for (size_t offset = 0; offset < neutralClouds.Bytes.size(); offset += sizeof(neutralPixel))
+			std::memcpy(neutralClouds.Bytes.data() + offset, neutralPixel.data(), sizeof(neutralPixel));
+		test::CheckImage(
+			fixture.Render,
+			"weather-opaque-wall",
+			"raw-clouds",
+			"opaque wall fully occludes cloud bounds",
+			neutralClouds.View(),
+			rawClouds.View()
+		);
+		REQUIRE(test::CompareImages(neutralClouds.View(), rawClouds.View()).Passed());
+		for (size_t offset = 3 * sizeof(float); offset < cloudDepth.Bytes.size();
+			 offset += 4 * sizeof(float)) {
+			float hit = -1;
+			std::memcpy(&hit, cloudDepth.Bytes.data() + offset, sizeof(hit));
+			REQUIRE(hit == 0);
+		}
+		test::CheckImage(
+			fixture.Render,
+			"weather-opaque-wall",
+			"neutral-reconstruction",
+			"expected: sky-lit FP16; actual: weather-lit FP16 with all raw clouds neutral",
+			opaqueSky.View(),
+			opaqueWeatherLit.View()
+		);
+	}
 	environment.Weather.Enabled = false;
 	const double beforeDisabled = counter("render.weather.field_dispatches");
 	REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
 	const auto opaqueClear = test::CaptureResource(
 		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, test::ImageFormat::Rgba8Unorm
 	);
-	CHECK(test::CompareImages(opaqueWeather.View(), opaqueClear.View()).Passed());
+	test::CheckImage(
+		fixture.Render,
+		"weather-opaque-wall",
+		"tonemapped",
+		"33x33 camera=(0,0,12), emissive wall z=10 halfExtent=(20,20,.1), weather "
+		"bounds=(-8,-8,-8)..(8,8,8); "
+		"expected: weather disabled; actual: weather enabled after inside-cloud history and device "
+		"recreation",
+		opaqueClear.View(),
+		opaqueWeather.View()
+	);
 	CHECK(counter("render.weather.field_dispatches") == beforeDisabled);
 	CHECK_FALSE(fixture.Render.HasPendingWeatherWork(view.World));
 	view.Instances = {};

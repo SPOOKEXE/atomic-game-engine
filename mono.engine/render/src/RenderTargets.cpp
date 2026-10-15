@@ -1129,7 +1129,7 @@ namespace engine::render {
 		SDL_GPUTextureCreateInfo depth{};
 		depth.type = SDL_GPU_TEXTURETYPE_2D;
 		depth.format = DepthFormat;
-		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		depth.width = width;
 		depth.height = height;
 		depth.layer_count_or_depth = 1;
@@ -1280,7 +1280,7 @@ namespace engine::render {
 		SDL_GPUTextureCreateInfo depth{};
 		depth.type = SDL_GPU_TEXTURETYPE_2D;
 		depth.format = DepthFormat;
-		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		depth.width = width;
 		depth.height = height;
 		depth.layer_count_or_depth = 1;
@@ -1383,7 +1383,7 @@ namespace engine::render {
 		SDL_GPUTextureCreateInfo depth{};
 		depth.type = SDL_GPU_TEXTURETYPE_2D;
 		depth.format = DepthFormat;
-		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		depth.width = width;
 		depth.height = height;
 		depth.layer_count_or_depth = 1;

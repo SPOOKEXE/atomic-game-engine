@@ -580,7 +580,8 @@ namespace engine::render {
 		const SDL_GPUViewport *viewport,
 		const LightUniforms &passLights,
 		const SDL_FColor *clearColour,
-		WorldColourTarget target
+		WorldColourTarget target,
+		bool storeDepth
 	) {
 		Impl *const State = this->State;
 		SDL_GPUCommandBuffer *const command = Command;
@@ -602,7 +603,7 @@ namespace engine::render {
 		depthInfo.texture = depth;
 		depthInfo.clear_depth = 1.0f;
 		depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;
-		depthInfo.store_op = SDL_GPU_STOREOP_DONT_CARE;
+		depthInfo.store_op = storeDepth ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_DONT_CARE;
 		depthInfo.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
 		depthInfo.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
 		depthInfo.cycle = cycle;

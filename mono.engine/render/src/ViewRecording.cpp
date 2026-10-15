@@ -1102,9 +1102,11 @@ namespace engine::render {
 		// shows a second simulation and a camera parented to the world has no
 		// face, so neither can be descended into and neither reports a depth.
 		const graph::Node *mirrorCapture = graphNode(core::Name("mirror-capture"));
+		const graph::Node *captureFormatNode =
+			mirrorCapture ? mirrorCapture : graphNode(core::Name("surface-capture"));
 		MirrorFormat = State->ColourFormat();
-		if (mirrorCapture != nullptr) {
-			for (const auto resource : mirrorCapture->Writes) {
+		if (captureFormatNode != nullptr) {
+			for (const auto resource : captureFormatNode->Writes) {
 				const auto *desc = selectedPipeline->Graph.FindResource(resource);
 				if (desc != nullptr && desc->Format == graph::ResourceFormat::RGBA16F) {
 					MirrorFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
