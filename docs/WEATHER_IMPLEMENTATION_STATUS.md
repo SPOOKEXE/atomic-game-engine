@@ -1,9 +1,12 @@
 # Weather implementation and verification
 
 The [weather upgrade plan](WEATHER_SYSTEMS_UPGRADES.md) is implemented across
-shared weather semantics, authoritative simulation and GPU presentation. Final
-acceptance remains open for real-device parity, image checks and GPU profiling.
-Those checks require repository approval and have not run.
+shared weather semantics, authoritative simulation and GPU presentation. The
+approved device checks now run on Vulkan with an NVIDIA GeForce RTX 4090 and
+driver 580.173.02. Canonical GPU parity, stateful evolution, sparse transition
+images, lightning, portal composition and exact opaque-wall preservation pass
+in both development and strict CI builds. CPU and GPU measurements are recorded
+below. Other backends have not been run.
 
 ## Implemented behavior
 
@@ -40,24 +43,24 @@ clouds are hidden but ground shadows are active.
 The plan's eight stages have separate acceptance gates. Compiled shaders and
 headless planning tests do not establish rendered behavior or device performance.
 
-| Stage | Current evidence | Remaining gate |
+| Stage | Current evidence | Acceptance |
 |---|---|---|
-| 1. Contract and dense slice | `weather/Weather` fixtures cover canonical bytes, signed/range refusal, batched parity and huge ticks; the field/ray shaders compile | Run CPU/GPU byte comparisons, including phase-wrap and UINT64_MAX fixtures, and fly-through image checks |
-| 2. Time and lifecycle | `weather/Clock`, `scene/WeatherClock` and replication `Negotiation` cover cold joins, frame counts, saved anchors, correction, pause and both wire transports; the device-recreation fixture is compiled | Run the cold-frame comparison and fresh field-dispatch check after actual graphics resource recreation |
-| 3. Sparse residency | Shared and renderer residency suites cover coarse coverage, budgets, stable multi-view unions, motion, teleports, empty certificates and retained generations | Run dense/sparse device sample and eviction/refill image checks |
-| 4. Lazy LOD and assemblies | Assembly/residency suites prove exact totals, separate velocities, canonical reconstruction, hysteresis and bounded maintenance | Verify compact pages and topology transitions in real volume integration |
-| 5. Lighting and shadows | Temporal/shadow suites prove cache keys, disocclusion policy, caster bounds, publication and optional work; real-device fixtures are compiled | Check inside/above/ground images, offscreen casters and shadow disable behavior on a device |
-| 6. Weather consumers | Shared events, terrain adapters, real VM controls, headless precipitation/fog geometry and real mixer callbacks pass; the server contains no graphics stack | Verify precipitation, branching lightning, atmosphere/fog composition and roof visibility in rendered scenes |
-| 7. Stateful evolution | CPU source/sink/boundary budgets, stability/refusal, complete checkpoint v3, save/load, bounded replay and replica query tests pass | Run the compiled GPU terrain/rain/open-top parity and transactional-publication fixtures |
-| 8. Performance and replacement | CPU layout/residency/solver measurements and removal of manual weather effects are established; device timing/counter harness is compiled | Measure real GPU costs and memory at representative resolutions, choose supported defaults and establish target budgets |
+| 1. Contract and dense slice | CPU/GPU packed bytes agree, including phase-wrap and UINT64_MAX; world rays clip to depth; all six recipes and interior/above views were captured | Passed on local Vulkan |
+| 2. Time and lifecycle | Clock/replication suites cover cold joins, correction, pause and save/load; actual renderer shutdown/reinitialization regenerates the field and reproduces the cold image exactly | Passed on the local Vulkan backend |
+| 3. Sparse residency | Dense/compact words and per-pixel dense references agree across seams, missing pages, eviction and refill; planning covers budgets, motion, teleports and multi-view unions | Passed within declared optical/FP16 bounds |
+| 4. Lazy LOD and assemblies | Totals, retained velocities, reconstruction, hysteresis and bounded maintenance pass; compact/coarse transitions and unsafe shadow fallback meet their error bounds | Passed |
+| 5. Lighting and shadows | Device fixtures cover occlusion, temporal silhouettes, colored sun/night, direct versus ambient light, disabled shadows and both portal capture paths | Passed on local Vulkan |
+| 6. Weather consumers | Shared events, terrain adapters, VM controls, fog/roof geometry and mixer callbacks pass; actual GPU precipitation composes, lightning branches render/expire, and roof/storm/fog captures were inspected | Passed |
+| 7. Stateful evolution | CPU budgets/checkpoints and actual GPU terrain, falling-water, top escape, shared-owner and transactional-refusal fixtures pass | Passed with authoritative CPU state and cosmetic GPU evolution |
+| 8. Performance and replacement | 720p/1080p device work, shadow quality and logical memory are measured; compiler optimization reduces costs; replaced manual weather effects are removed | Named local prototype budget passes; hardware limits below |
 
 The six demo recipes cover clear sky, scattered cumulus, overcast stratus,
 towering storm, wispy ice and ground fog. They use the same provider with distinct
 shape, moisture, temperature and motion controls. The far clip is 6,000 metres;
 interior and above-cloud cameras follow the selected layer. Actual VM button
 events verify these controls, including snow without liquid rain in the ice
-recipe and positive near-ground fog extinction. Their appearance remains a
-device acceptance item.
+recipe and positive near-ground fog extinction. Canonical occupancy checks
+retain scattered cumulus, broad stratus and sparse ice at three specified times.
 
 ## Headless validation
 
@@ -81,18 +84,25 @@ review fixes.
 | Thunder, headless | 4,225 | 12 |
 | Audio mixer | 16,743 | 36 |
 | Studio weather | 21 | 3 |
-| Weather demo | 388 | 2 |
+| Weather demo | 598 | 2 |
+| Full renderer, dev and strict CI separately | over 413,000 | 819 |
+| Weather GPU, dev and strict CI separately, Vulkan | 486,878 | 16 |
 
 Review and tests found real defects in checkpoint cache invalidation, top escape
 flow, shadows-only checkpoint collection, fully blocked storm columns, thunder
 age/deadlines and terrain preparation observation. Each has a concrete fixture.
 Incorrect cadence, graph reuse and single-substep expectations were corrected
-where the production behavior was valid.
+where the production behavior was valid. Real GPU runs exposed retained history
+buffers being incorrectly treated as externally supplied buffers, and a coarse
+shadow fallback bypassing its fine optical guard. Both have reproduced failures
+and passing checks. Graph baseline tests now include the weather nodes and
+resources. The demo test checks the actual client camera, including view requests
+and free movement between requests.
 
 Architecture and all six fixtures pass. Source scanning and its fixtures pass
 with zero open ownership, crossing-pointer or serialized-name-ID findings;
-public-header reports are advisory. Component documentation covers all 254
-registered components. Generated bindings, all 128 Luau examples, the Luau
+public-header reports are advisory. Component documentation and generated
+bindings pass their checks. All 128 Luau examples, the Luau
 language server and Studio TypeScript checks pass. All 87 staged shaders pass
 resource-binding checks and MSL translation. Public documentation coverage
 passes after documenting the new API. Formatting and em-dash checks pass.
@@ -148,25 +158,100 @@ checks. Stateful history does not use that certificate. An isolated uniform-page
 fixture halves field payload but reduces metadata-inclusive memory by only
 5.24 percent; no general compression ratio is claimed.
 
-## Pending device acceptance
+## Device verification and measurements
 
-Real GPU procedural/stateful parity, fallback and lighting images, sparse page
-consumption, inside/above/roof views, shadow images, delayed timestamp results,
-actual memory counters and weather-demo captures have not run. The opt-in GPU
-benchmark's disabled harness timing is not a GPU measurement. No backend is yet
-declared validated for weather, and no GPU speedup is claimed from shader source.
-The NEON branch is compiled conditionally but has not executed on this x86 host.
+User approval covered real GPU fixtures, benchmarks, short headless captures and
+reruns after fixes. Vulkan is the locally exercised weather backend. MSL
+translation and binding checks pass for all 87 shaders, but Metal execution has
+not been tested. The NEON branch has not executed on this x86 host.
 
-The existing approval request covers GPU fixtures, profiling, short headless
-captures and reruns after fixes. [AGENTS.md](../AGENTS.md) requires approval before
-compute/live verification. The authoritative CPU field and gameplay events stay
-independent of cosmetic GPU evolution.
+The device fixtures compare canonical CPU/GPU words at large and wrapped times,
+validate terrain/rain/top-boundary evolution, and reject partial stateful
+publication. Renderer recreation regenerates the procedural field. Volume
+fixtures compare every pixel against a dense reference across dense/compact
+seams, coarse LOD, missing pages, eviction, refill and topology blending, with
+the declared optical budget and FP16 allowance. Lightning images require visible
+branches away from the main channel and exact restoration after expiry.
 
-The opt-in job accepts image dimensions:
-`just weather-gpu-bench 3 bench 1920 1080`. It defaults to 1920x1080 and accepts
-positive decimal dimensions up to 3840x2160. The 96x54 prototype remains available
-with explicit dimensions. Configuration is checked before SDL initialization;
-only `MONO_WEATHER_GPU_BENCH=1` enters the device path. Output names the selected
-device/backend, image size, workload counts, settings, completed pass times and
-logical memory counters. Disabled and invalid-configuration checks run without
-creating a device and do not provide GPU timing evidence.
+Portal comparisons cover mixed and separate captures, two camera poses and
+both compute and pending-stateful fragment fallback. They keep the existing
+two-display-code tolerance and verify cold scratch allocations and warm reuse.
+These checks exposed missing capture weather, padded-depth sampling and
+oblique fallback rays crossing infinity. Capture weather now uses stored depth,
+its own camera, bounded bank-owned scratch and no shared temporal history.
+Raw opaque-wall captures proved exact zero scattering, unit transmission and
+zero medium hits. Weighted reconstruction normalization still introduced an
+FP16 ULP at some pixels. An exact-neutral branch now preserves the original
+scene, with unchanged exact comparisons in both pinned and ordinary graph
+variants. Non-neutral and absorbing samples retain the original integration.
+
+Inspected 1280x720 captures include the six recipes, cloud interiors, above-cloud
+views, valley fog, roof and storm controls with the sunset environment. Artifacts
+are under `.cache/build/dev/weather-acceptance/`. Cumulus was nearly dry in the
+original recipe. Its moisture now produces both clouds and clear columns at
+ticks 0, 100 and 500. Stratus retains at least 75 percent occupied columns at
+those times; ice remains sparse and deliberately faint. Actual VM tests sample
+the canonical field rather than checking only the authored parameter values.
+
+The optimized `bench` fixture uses 1920x1080 output, 960x540 cloud images,
+one layer/view/opaque receiver, 64-metre cells, 512-page budget, maximum LOD 4,
+12 authored cloud steps and one shadow cascade. The kernel takes four samples
+per authored step. Completed GPU queries are sampled every fourth frame;
+the cold submission has no sampled device timing. Recording time excludes the
+explicit device-idle wait. Eleven printed phase rows from a three-sample job,
+including harness warmups, supply each median below.
+
+| Prototype comparison | Before | After |
+|---|---:|---:|
+| Same-tick cloud integration, 32x32 shadows | 6.22 ms | 2.35 ms |
+| Advancing cloud integration, 32x32 shadows | 8.93 ms | 3.75 ms |
+| Shadow map, 32x32 | 6.45 ms | 1.80 ms |
+
+This comparison changes shader compiler optimization while retaining identical
+work counters and residency. The two weather kernels use `-O -g`; debug names
+are needed for the SPIR-V/MSL binding check. Their unused cloud colour sampler
+was removed and bindings renumbered. Extra page-lookup and raw-corner caches
+were measured and removed because their gains did not survive the final gate.
+Power-of-two page masks replace signed division; negative-coordinate behavior
+follows the bit-preserving integer conversions in the
+[GLSL specification](https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html).
+
+The subsequent shadow-quality sweep, without the raw-corner cache, measured
+the following medians. Other desktop/GPU work was present, including a resident
+19,608 MiB model server. Variance prevents ranking the close quality settings or
+claiming an isolated maximum frame time.
+
+| Shadow resolution | Advancing cloud | Shadow map | Approximate sum of measured weather passes | Logical live GPU bytes |
+|---|---:|---:|---:|---:|
+| 64x64 | 5.92 ms | 1.97 ms | 8.03 ms | 265,057,176 |
+| 128x128 | 5.98 ms | 3.93 ms | 10.06 ms | 265,155,480 |
+| 256x256 | 5.37 ms | 2.96 ms | 8.47 ms | 265,548,696 |
+
+Final runs after the depth/neutral-reconstruction fixes retain the authored
+256x256 single-cascade default:
+
+| Output | Same-tick cloud | Advancing cloud | Shadow map | Sum of measured weather passes | Logical live GPU bytes |
+|---|---:|---:|---:|---:|---:|
+| 1280x720 | 2.00 ms | 3.00 ms | 2.48 ms | 5.60 ms | 127,297,176 |
+| 1920x1080 | 2.39 ms | 3.73 ms | 2.41 ms | 6.28 ms | 265,548,696 |
+
+At 1080p, CPU command recording measured 0.75 ms per same-tick frame and
+1.03 ms per advancing frame; the cold recording measured 9.58 ms. These are
+recording durations, not total frame or first-use shader compilation costs.
+
+The local prototype target is at most 12 ms for these measured weather passes;
+these sampled medians pass it. This is not a full-frame, cold-start or
+cross-hardware guarantee. The sum includes field generation, summary,
+integration and reconstruction; it does not imply queue overlap. Logical live
+bytes cover the renderer's tracked resources, not just weather cells and not
+driver heap commitment. Advancing frames generate 536,576 cells over eight
+generations; same-tick frames generate none, record eight field-cache hits and
+still integrate eight views. Refinement and history warmup allocate resources,
+so these short phases do not establish allocation-free steady state.
+
+Run `just weather-gpu-bench 3 bench 1920 1080 256`. Width/height are bounded to
+3840x2160; shadow resolution is a power of two in 32..2048. Invalid configuration
+is refused before SDL initialization. Only `MONO_WEATHER_GPU_BENCH=1` enters the
+device path. The benchmark requires positive generation, summary, ray and shadow
+work, plus actual same-tick reuse, so an empty/refused workload cannot report
+success. Results print to stdout. Disabled-harness timings are not GPU evidence.
