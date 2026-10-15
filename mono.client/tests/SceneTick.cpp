@@ -10,6 +10,8 @@
 // testable on a machine with no GPU, and drawing the line there is what keeps
 // the suite runnable everywhere.
 
+#include "WorldSystems.hpp"
+
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
@@ -28,13 +30,16 @@
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/InterfacePass.hpp>
+#include <engine/render/WeatherEffects.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
+#include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -43,6 +48,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Wire.hpp>
 #include <engine/script/PlayerGui.hpp>
@@ -60,7 +66,6 @@
 #include <algorithm>
 #include <array>
 #include <client/Scene.hpp>
-#include <client/WorldSystems.hpp>
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
@@ -82,6 +87,8 @@ TEST_DEPENDS("engine.gui.compile")
 TEST_DEPENDS("engine.gui.input")
 TEST_DEPENDS("engine.gui.typing")
 TEST_DEPENDS("engine.game.roundtrip")
+TEST_DEPENDS("engine.weather.runtime")
+TEST_DEPENDS("engine.weather.consumers")
 
 using Catch::Approx;
 using engine::core::FrameGraph;
@@ -325,23 +332,44 @@ TEST_CASE("GuiInteraction routes client controls into visible scripted state", "
 }
 
 TEST_CASE(
-	"a GUI weather preset reaches the resident emitter before its next step", "[client][gui][particles]"
+	"a GUI weather preset changes authored controls before the next accepted precipitation boundary",
+	"[client][gui][particles][weather]"
 ) {
 	Session session("Weather.luau");
 	Store &store = session.World;
 	session.Tick(1);
 
-	const engine::ecs::Entity workspace = engine::scene::WorkspaceOf(store);
-	const engine::ecs::Entity emitter = FirstNamedDescendant(store, workspace, "Weather Rain");
-	const engine::ecs::Entity clear = FirstGuiElement(store, "Weather CLEAR");
-	REQUIRE(emitter != engine::ecs::NULL_ENTITY);
+	const auto environment = engine::scene::EnvironmentOf(store);
+	REQUIRE(environment.HasWeatherCompute);
+	const auto provider = environment.CloudProvider;
+	REQUIRE(provider != engine::ecs::NULL_ENTITY);
+	CHECK(store.InstanceNameOf(provider) == engine::core::Name("Weather Clouds"));
+	const auto clear = FirstGuiElement(store, "Weather Preset CLEAR");
 	REQUIRE(clear != engine::ecs::NULL_ENTITY);
-	const auto *slot = store.Get<engine::effects::EmitterSlot>(emitter);
-	REQUIRE(slot != nullptr);
-	REQUIRE(slot->Index != engine::effects::NO_SLOT);
-	auto *particles = store.ResourceMutable<engine::effects::ParticleSystem>();
-	REQUIRE(particles != nullptr);
-	CHECK(particles->RuntimeStates[slot->Index].ContinuousRate > 0.0f);
+	REQUIRE(store.Get<engine::scene::WeatherCompute>(provider));
+	CHECK(store.Get<engine::scene::WeatherCompute>(provider)->PrecipitationRate == Approx(38));
+	engine::render::WeatherEffectsFrame precipitation;
+	engine::effects::RibbonBuffer ribbons;
+	std::vector<engine::render::SceneLight> lights;
+	const auto collectPrecipitation = [&] {
+		const auto *active = store.Resource<ActiveCamera>();
+		REQUIRE(active);
+		const auto *transform = store.Get<Transform>(active->Entity);
+		REQUIRE(transform);
+		engine::render::View view;
+		view.World = store.Identity();
+		view.WorldName = engine::core::Name(store.Name());
+		view.CameraFrame = transform->Frame;
+		view.Lighting = engine::scene::LightingOf(store);
+		view.Instances = session.Drawn();
+		engine::render::CollectWeatherEffects(store, view, precipitation, ribbons, lights);
+	};
+	collectPrecipitation();
+	REQUIRE(precipitation.Precipitation);
+	CHECK(precipitation.Precipitation->Source == provider);
+	CHECK(engine::scene::ValidGpuParticleField(precipitation.Precipitation->Field));
+	CHECK_FALSE(precipitation.Precipitation->Field.SpawnSamples.empty());
+	const auto wetDefinition = precipitation.Definition;
 
 	engine::gui::CompileRequest request;
 	request.Display = {
@@ -376,11 +404,26 @@ TEST_CASE(
 
 	frame(false);
 	frame(true);
+	const auto clickTick = store.Time().Tick;
 	frame(false);
-
-	particles = store.ResourceMutable<engine::effects::ParticleSystem>();
-	CHECK(particles->RuntimeStates[slot->Index].ContinuousRate == 0.0f);
-	CHECK(particles->RuntimeStates[slot->Index].DeviceRetiring);
+	CHECK(store.Time().Tick == clickTick + 1);
+	CHECK(store.Get<engine::scene::WeatherCompute>(provider)->PrecipitationRate == 0);
+	// GUI handlers run after the clock pass. The accepted definition drains its
+	// existing tick before the next boundary admits the authored preset.
+	REQUIRE(engine::scene::WeatherControlsOf(store, provider));
+	CHECK(engine::scene::WeatherControlsOf(store, provider)->PrecipitationRate == Approx(38));
+	collectPrecipitation();
+	REQUIRE(precipitation.Precipitation);
+	CHECK(precipitation.Definition == wetDefinition);
+	session.Tick(1);
+	CHECK(engine::scene::WeatherControlsOf(store, provider)->PrecipitationRate == 0);
+	collectPrecipitation();
+	REQUIRE(precipitation.Sample);
+	CHECK(precipitation.Sample->Precipitation.LiquidMillimetresPerHour == 0);
+	CHECK(precipitation.Sample->Precipitation.SnowMillimetresPerHour == 0);
+	CHECK(precipitation.Sample->Precipitation.HailMillimetresPerHour == 0);
+	CHECK_FALSE(precipitation.Precipitation);
+	CHECK(precipitation.Definition != wetDefinition);
 }
 
 TEST_CASE("data capture driver ticket transition is paused, strict, and terminal", "[client][data-capture]") {
@@ -1122,118 +1165,21 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	for (const auto &timing : session.Systems.Timings()) {
 		timings.push_back({timing.Name, timing.Milliseconds});
 	}
-	// capture-previous, script-heartbeat, move-camera, sync-rendered,
-	// aim-surface-cameras, collect-instances. `sync-rendered` arrived at v0.7
-	// with the render gate: it is what keeps `scene::Rendered` in step with the
-	// `Workspace` subtree, and it is structural. `aim-surface-cameras` arrived
-	// beside it and places every surface camera parented to a part - see
-	// `scene/SurfaceCameras.hpp`.
-	//
-	// **Ten more at v0.10**, from two installers. `InstallEffects` adds
-	// resolve-attachments in `PreSimulation`, then refreshes attachments and
-	// emitters after `script-heartbeat` and before step-particles in `Simulation`;
-	// record-trails also runs in `Simulation`, and build-ribbons in `PreRender`.
-	// `InstallControls` adds character-control in `PreSimulation` and
-	// camera-control in `PreRender`, and `physics::RegisterCharacterSystems`
-	// adds character.control in `PreSimulation` - that moved out of this file's
-	// installer at v0.14, so that a dedicated server grounds its characters too.
-	//
-	// Only two of the ten are presentation; the rest are simulation and are here
-	// because this count is over every phase rather than over one.
-	//
-	// The question this assertion exists to force was asked and answered:
-	// **a world that only presents still does the right thing.** The studio's
-	// suspended scene runs `PreRender` and not `Simulation`, so it builds ribbons
-	// from whatever the trails last recorded and steps no particles - a frozen
-	// effect rather than a missing one, which is what a suspended world should
-	// look like.
-	//
-	// **A count rather than a list, and it is worth keeping as one.** It fails
-	// whenever a system is added to the presentation phase, which is exactly
-	// when somebody should be asked whether a world that only presents - the
-	// studio's suspended scene - still does the right thing.
-	//
-	// **Sixteen since v0.10's `resolve-materials`, and the question it forces was
-	// answered.** It runs in `PreSimulation`, so a suspended scene does not run
-	// it - which is right: a `Material` instance's texture is already on the part
-	// from the last tick that did, so a frozen world keeps the material it was
-	// frozen with rather than losing it.
-	//
-	// **Seventeen since v0.14's `character.pose`, and its question has the
-	// friendliest answer of the three.** It is presentation, so a suspended
-	// scene *does* run it - and that is exactly right: a character's limbs are a
-	// product of where its root is, so a frozen world shows a character standing
-	// still rather than one whose arms are wherever they were when the world
-	// stopped.
-	//
-	// **Eighteen since `character.link`, and its answer is the same as
-	// `resolve-materials`'.** It runs in `PreSimulation`, so a suspended scene
-	// does not run it - which is right: the link between a player and the model
-	// they drive is state, not presentation, and a frozen world showing the
-	// character it was frozen with is exactly what it should show.
-	//
-	// **Eighteen since v0.14's `character.portal`.** It is `PostSimulation`, so
-	// a suspended scene does not run it, and that is right for a stronger reason
-	// than the others: a crossing is the segment between where a body started
-	// the tick and where it finished one, and a world that is not ticking has no
-	// such segment. Running it on a frozen world would compare the same pair of
-	// identical positions every frame and find nothing, for ever.
-	//
-	// **Nineteen since `character.link`**, which rebuilds a rig a client
-	// received over the wire. `PreSimulation`, so a suspended scene does not run
-	// it - and a scene nobody is playing has no client to have received one.
-	//
-	// **And eighteen again once the wake, the ground query and the step became
-	// one `character.control`.** They were two systems in two phases and the
-	// second shared `Simulation` with `physics.simulation`, which the scheduler
-	// leaves unordered - so the velocity a key press produced was written after
-	// the integrator that would have moved it, and thrown away with the
-	// `scene::Motion` when the resting body lost it. Composed, the way
-	// `physics.contacts` composes its four steps and for the same reason.
-	//
-	// **And nineteen again for `portal.open`**, which turns a portal's pane into
-	// a trigger so a body can be inside the hole rather than stopped on its
-	// picture. `PreSimulation`, and it is the one system here that a suspended
-	// scene genuinely does not need to run: what it writes is a property of the
-	// scene rather than of the tick, so a world that resumes gets it on the
-	// first tick it takes and nothing in between could have walked anywhere.
-	//
-	// **And twenty-one for the pair that holds a body up in one.** `portal.open`
-	// lets a body be inside a pane and nothing then had it standing on anything:
-	// the floor under the half that has gone through is in the other room, so a
-	// crate in a doorway was held by the near room alone. `portal.ghost` copies
-	// the far room's colliders into this one through the inverse seam, where they
-	// are ordinary static geometry the solver pushes with; `portal.retire` takes
-	// them away again in `PostSimulation`, because a proxy that outlived its tick
-	// is a piece of another room standing invisibly in this one. Both are a query
-	// that returns at its first line in a world with no portal in it.
-	//
-	// **And twenty-two for `snap-portal-transit`**, which is the render half of
-	// a crossing rather than the simulation half. `capture-previous` records
-	// where a body was when the tick began and the renderer blends the two;
-	// across a teleport that blend spans the gap between two rooms, and on a
-	// client - which never runs `CrossPortals` and so never gets the mapped
-	// previous frame the authority computes - the body is drawn once or twice
-	// somewhere in between. `PreRender`, because the serial it reads arrives
-	// with a replication delta and a delta lands after `PreSimulation` has run.
-	//
-	// **And twenty-seven for a standalone client's authority pipeline.** The
-	// script path now installs editable collision refresh, integration, contacts,
-	// gravity and abandoned-owner reclamation. Without those five a scripted
-	// Humanoid produced velocity that no system ever integrated.
-	//
-	// **And thirty-one for the animation pipeline.** The post-heartbeat attachment
-	// and emitter refresh lets script-authored particle changes reach the GPU
-	// before the particle step. Track clocks advance in
-	// `Simulation`; clip sampling and bone resolution are presentation work, so
-	// a suspended Studio scene retains and redraws its last simulated pose.
-	REQUIRE(timings.size() == 31);
+	// Timings cover the complete authority tick and its presentation passes.
+	// Weather clock, terrain and stateful preparation precede simulation;
+	// ground queries and event consumers run after physics, before collection.
+	REQUIRE(timings.size() == 36);
 	const auto hasTiming = [&timings](const std::string_view name) {
 		return std::ranges::any_of(timings, [name](const auto &timing) { return timing.Name == name; });
 	};
 	CHECK(hasTiming("advance-animation-tracks"));
 	CHECK(hasTiming("evaluate-animations"));
 	CHECK(hasTiming("resolve-bones"));
+	for (const auto name :
+		 {"weather.clock", "weather.terrain", "weather.stateful", "weather.ground", "weather.runtime"}) {
+		CAPTURE(name);
+		CHECK(hasTiming(name));
+	}
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);
@@ -1341,8 +1287,11 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 	REQUIRE(id.IsValid());
 
 	std::shared_ptr<engine::script::Runtime> runtime;
+	const auto settings = universe.SettingsOf(id);
 	universe.Enter(id, [&](Store &store, Scheduler &systems) {
 		client::InstallPresentation(store, systems);
+		client::InstallClientWorldSystems(store, systems, settings.PhysicsTickRate);
+		REQUIRE(store.Resource<engine::physics::PhysicsWorld>());
 		(void)client::InstallDefaultCamera(store, systems);
 		const engine::ecs::Entity localPlayer = client::EnsureLocalPlayer(store);
 		REQUIRE(localPlayer != engine::ecs::NULL_ENTITY);
