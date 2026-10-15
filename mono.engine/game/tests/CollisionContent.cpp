@@ -23,6 +23,7 @@
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Signature.hpp>
+#include <engine/collision/ConvexHull.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/CollisionContent.hpp>
@@ -32,6 +33,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
@@ -189,12 +191,42 @@ TEST_CASE("the built-in meshes have collision geometry", "[game][collision]") {
 	for (uint8_t index = 0; index < engine::assets::BUILTIN_MESH_COUNT; index++) {
 		const auto which = static_cast<engine::assets::BuiltinMesh>(index);
 		const Name name(engine::assets::BuiltinName(which));
+		const MeshData rendered = engine::assets::MakeBuiltin(which);
 
 		INFO(name.Text());
 		const auto *hull = shapes.FindHull(name);
+		const auto *soup = shapes.FindMesh(name);
 		REQUIRE(hull != nullptr);
+		REQUIRE(soup != nullptr);
 		CHECK_FALSE(hull->Points.empty());
-		CHECK(shapes.FindMesh(name) != nullptr);
+		CHECK(hull->Points.size() <= engine::collision::MAXIMUM_HULL_POINTS);
+		CHECK(soup->Indices == rendered.Indices);
+		REQUIRE(soup->Vertices.size() == rendered.Vertices.size());
+		for (size_t vertex = 0; vertex < rendered.Vertices.size(); vertex++) {
+			const auto &position = rendered.Vertices[vertex].Position;
+			const engine::core::Vector3 point{position[0], position[1], position[2]};
+			CHECK(soup->Vertices[vertex] == point);
+			CHECK(hull->Bounds.Contains(point));
+			for (const auto &face : hull->Faces) {
+				CHECK(face.Normal.Dot(point) <= face.Offset + 1.0e-6f);
+			}
+		}
+
+		if (which == engine::assets::BuiltinMesh::Sphere) {
+			const auto centre = (rendered.Minimum + rendered.Maximum) * 0.5f;
+			float renderedRadius = 0.0f;
+			for (const auto &point : soup->Vertices) {
+				renderedRadius = std::max(renderedRadius, (point - centre).Magnitude());
+			}
+			for (const auto &point : hull->Points) {
+				CHECK((point - centre).Magnitude() < renderedRadius * 1.13f);
+			}
+			for (const auto &face : hull->Faces) {
+				CHECK(face.Offset - face.Normal.Dot(centre) >= renderedRadius - 1.0e-6f);
+			}
+			CHECK((hull->Bounds.Minimum - rendered.Minimum).Magnitude() < 1.0e-6f);
+			CHECK((hull->Bounds.Maximum - rendered.Maximum).Magnitude() < 1.0e-6f);
+		}
 
 		// **Every one but the two flat quads, which have no volume to hull.**
 		// `BuildConvexHull` says so: a degenerate input keeps its points and
@@ -212,11 +244,36 @@ TEST_CASE("baking the built-ins twice is the same table", "[game][collision]") {
 	// call is on that path.
 	CollisionShapes once;
 	AddBuiltinCollisionShapes(once);
-	CollisionShapes twice = once;
+	CollisionShapes twice;
 	AddBuiltinCollisionShapes(twice);
 
 	CHECK(twice.HullCount() == once.HullCount());
 	CHECK(twice.MeshCount() == once.MeshCount());
+	for (uint8_t index = 0; index < engine::assets::BUILTIN_MESH_COUNT; index++) {
+		const Name name(engine::assets::BuiltinName(static_cast<engine::assets::BuiltinMesh>(index)));
+		INFO(name.Text());
+		const auto *first = once.FindHull(name);
+		const auto *second = twice.FindHull(name);
+		REQUIRE(first != nullptr);
+		REQUIRE(second != nullptr);
+		CHECK(first->Points == second->Points);
+		CHECK(first->Loops == second->Loops);
+		CHECK(first->Bounds.Minimum == second->Bounds.Minimum);
+		CHECK(first->Bounds.Maximum == second->Bounds.Maximum);
+		REQUIRE(first->Faces.size() == second->Faces.size());
+		for (size_t face = 0; face < first->Faces.size(); face++) {
+			CHECK(first->Faces[face].FirstIndex == second->Faces[face].FirstIndex);
+			CHECK(first->Faces[face].IndexCount == second->Faces[face].IndexCount);
+			CHECK(first->Faces[face].Normal == second->Faces[face].Normal);
+			CHECK(first->Faces[face].Offset == second->Faces[face].Offset);
+		}
+		const auto *firstMesh = once.FindMesh(name);
+		const auto *secondMesh = twice.FindMesh(name);
+		REQUIRE(firstMesh != nullptr);
+		REQUIRE(secondMesh != nullptr);
+		CHECK(firstMesh->Vertices == secondMesh->Vertices);
+		CHECK(firstMesh->Indices == secondMesh->Indices);
+	}
 }
 
 TEST_CASE("a content store bakes its meshes and nothing else", "[game][collision]") {
