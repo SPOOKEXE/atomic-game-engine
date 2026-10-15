@@ -409,6 +409,21 @@ namespace engine::ecs {
 		bool SafeInRawBytes(PropertyType type) {
 			return type != PropertyType::String;
 		}
+
+		std::vector<std::byte>
+		PropertyWriteBytes(const Store &store, Entity instance, const ComponentSet &components) {
+			core::ByteWriter writer;
+			for (const ComponentId component : components.Ids()) {
+				const void *value = store.GetComponent(instance, component);
+				writer.WriteUInt8(value != nullptr);
+				if (!value) continue;
+				const auto &type = Components::Describe(component);
+				writer.WriteRaw(value, type.Size);
+				// Object bytes alone miss edits inside an existing string or vector allocation.
+				if (!type.Trivial && type.Serialisable) type.Write(writer, value, 1);
+			}
+			return {writer.Bytes().begin(), writer.Bytes().end()};
+		}
 	}
 
 	std::vector<PropertyComplaint> AuditProperties() {
@@ -574,6 +589,15 @@ namespace engine::ecs {
 					scratch.ObserveComponent(component);
 				}
 				scratch.ClearChanges();
+				const auto beforeWrite = PropertyWriteBytes(scratch, instance, *property.Writes);
+				const auto unmarkedMutation = [&](const std::vector<std::byte> &beforeComponents,
+												  const std::vector<std::byte> &beforeValue,
+												  const std::vector<std::byte> &afterValue) {
+					for (const ComponentId component : property.Writes->Ids())
+						if (scratch.ChangedComponent(instance, component)) return false;
+					return !ComparableAsBytes(property.Type) || beforeValue != afterValue ||
+						   beforeComponents != PropertyWriteBytes(scratch, instance, *property.Writes);
+				};
 
 				if (!property.Set(scratch, instance, first.data())) {
 					fault("refuses the value its own getter just produced");
@@ -585,6 +609,7 @@ namespace engine::ecs {
 					fault("cannot be read back after a write its own setter accepted");
 					continue;
 				}
+				bool unmarkedChange = unmarkedMutation(beforeWrite, first, second);
 
 				// **Convergence rather than exactness, because a conversion is
 				// allowed to round.** `FieldOfView` stores radians and shows
@@ -596,14 +621,17 @@ namespace engine::ecs {
 					std::vector<std::byte> settled = second;
 					bool converged = false;
 					for (int attempt = 0; attempt < SETTLING_WRITES && !converged; attempt++) {
+						const auto beforeSettlingWrite =
+							PropertyWriteBytes(scratch, instance, *property.Writes);
+						scratch.ClearChanges();
 						if (!property.Set(scratch, instance, settled.data())) {
 							break;
 						}
-
 						std::vector<std::byte> next(property.Size);
 						if (!property.Get(scratch, instance, next.data())) {
 							break;
 						}
+						unmarkedChange |= unmarkedMutation(beforeSettlingWrite, settled, next);
 
 						converged = next == settled;
 						settled = std::move(next);
@@ -630,12 +658,9 @@ namespace engine::ecs {
 					continue;
 				}
 
-				bool marked = false;
-				for (const ComponentId component : property.Writes->Ids()) {
-					marked = marked || scratch.ChangedComponent(instance, component);
-				}
-
-				if (!marked) {
+				// Accepted write-backs may be clean when neither the property nor its backing storage
+				// changes.
+				if (unmarkedChange) {
 					fault(
 						"marks none of the components it says it writes, so a script's assignment "
 						"never reaches a delta. Reach the bytes through `Store::GetMutable` rather "
