@@ -50,9 +50,13 @@ namespace client {
 				built.Integer(
 					"client.max-fps",
 					defaults.MaximumFrameRate,
-					"Cap presentation FPS. Needs client.uncapped; 0 presents every update"
+					"Cap presentation FPS while client.uncapped is true (default); 0 means no cap"
 				);
-				built.Boolean("client.uncapped", defaults.Uncapped, "Present without waiting for vblank");
+				built.Boolean(
+					"client.uncapped",
+					defaults.Uncapped,
+					"Present without waiting for vblank; false enables VSync"
+				);
 
 				built.Boolean(
 					"client.show-statistics",

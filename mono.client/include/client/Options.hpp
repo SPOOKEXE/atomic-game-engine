@@ -149,9 +149,9 @@ namespace client {
 		// it.
 		engine::render::ProfilerTab Tab = engine::render::ProfilerTab::Frame;
 
-		// Present without waiting for vblank, to measure the frame rather than
-		// the display.
-		bool Uncapped = false;
+		// Present without waiting for vblank by default. MaximumFrameRate may
+		// limit presentation independently of the fixed simulation rate.
+		bool Uncapped = true;
 
 		// How many frames the CPU may queue ahead of the GPU, 1 to 3.
 		//
@@ -195,11 +195,13 @@ namespace client {
 		// off the vblank wait lets simulation and entity work continue without
 		// the display pacing them. This number limits only how often prepared
 		// visual state may claim and present a swapchain image. The update loop
-		// never sleeps for it, and an unchanged image submits nothing.
+		// continues between presentation deadlines, and an unchanged image
+		// submits nothing.
 		//
 		// Ignored when the vblank wait is on: the display is already the
 		// limiter, and a second one fighting it produces judder rather than a
-		// lower number.
+		// lower number. Headless data-factory and inherited presentation hosts
+		// use this as their service rate, defaulting to 60 when it is zero.
 		uint32_t MaximumFrameRate = 0;
 
 		// Seconds to wait for a Tracy profiler to attach before starting.

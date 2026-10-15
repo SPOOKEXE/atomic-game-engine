@@ -4,6 +4,7 @@
 #include "DisplayedSceneView.hpp"
 #include "NamedCaptureView.hpp"
 #include "PortalReadiness.hpp"
+#include "PresentationPacing.hpp"
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/audio/Wav.hpp>
@@ -375,17 +376,7 @@ namespace client {
 				return false;
 			}
 		}
-		// A headless data-factory host has no swapchain wait to pace idle service
-		// frames. Keep its normal idle path near the simulation rate, while an
-		// explicit uncapped request keeps its existing rate selection.
-		constexpr uint32_t DATA_FACTORY_HEADLESS_FRAME_RATE = 60;
-		Presentations.SetRate(
-			Settings.PresentationSession != 0
-				? (Settings.MaximumFrameRate != 0 ? Settings.MaximumFrameRate : 60)
-				: (Settings.DataFactory && Settings.Headless && !Settings.Uncapped
-					   ? DATA_FACTORY_HEADLESS_FRAME_RATE
-					   : (Settings.Uncapped ? Settings.MaximumFrameRate : 0))
-		);
+		Presentations.SetRate(PresentationRateOf(Settings));
 
 		// **Said at startup rather than at the first refusal**, so "my texture
 		// never arrives" and "this client was told not to fetch GIFs" are one
@@ -488,8 +479,20 @@ namespace client {
 
 		// **Only with a window**, because a present mode belongs to a swapchain
 		// and a headless run has none.
-		if (Window != nullptr && !Renderer.SetVerticalSync(!Settings.Uncapped)) {
-			ENGINE_WARN("client could not select {} present mode", Settings.Uncapped ? "immediate" : "vsync");
+		if (Window != nullptr) {
+			ENGINE_INFO("presentation: {} mode requested", Settings.Uncapped ? "immediate" : "vsync");
+			if (!Renderer.SetVerticalSync(!Settings.Uncapped)) {
+				ENGINE_WARN(
+					"client could not select {} present mode", Settings.Uncapped ? "immediate" : "vsync"
+				);
+			}
+		}
+		if (Presentations.Rate() != 0) {
+			ENGINE_INFO("presentation: {} FPS cap", Presentations.Rate());
+		} else {
+			ENGINE_INFO(
+				"presentation: {}", Window != nullptr && !Settings.Uncapped ? "display paced" : "no FPS cap"
+			);
 		}
 
 		// **The configured count wins, and zero means work it out.** A machine
