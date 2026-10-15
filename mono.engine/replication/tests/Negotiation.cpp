@@ -29,6 +29,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <memory>
@@ -580,4 +581,188 @@ TEST_CASE(
 	CHECK(field.Replica.Resource<engine::scene::WeatherClockInbox>()->Count == 1);
 	CHECK(field.Replica.Time().Elapsed == 0);
 	CHECK(field.World.Time().Elapsed == 0);
+}
+
+TEST_CASE(
+	"reliable weather heartbeats reach interested peers despite slow budgeted ordinary publication",
+	"[replication][negotiation][weather]"
+) {
+	const auto mode = GENERATE(WireMode::Datagram, WireMode::Quic);
+	engine::scene::RegisterSceneComponents();
+	auto ends = MakeLoopbackTransport(4);
+	REQUIRE(ends.size() == 4);
+	ListenerSettings settings;
+	settings.Wire = mode;
+	settings.Quic.Connection.Tls.Seed = Seed();
+	settings.Quic.Connection.Tls.HasSeed = true;
+	// Joining snapshots have their own bounded chunks; ordinary component rows cannot fit.
+	settings.Authority.BytesPerTick = 1;
+	Listener server(*ends[0], settings);
+	server.Authority().Replicate(Name("scene.WeatherClock"));
+	std::vector<engine::replication::ClientId> admitted;
+	server.OnAdmitted([&](auto client) { admitted.push_back(client); });
+	engine::ecs::Store authority("weather_heartbeat_authority");
+	const auto provider = authority.Create();
+	engine::scene::WeatherClock clock;
+	clock.Tick = 1000;
+	clock.Sequence = 1;
+	authority.Set(provider, clock);
+	authority.AdvanceTick(0.05f);
+	std::array<std::unique_ptr<engine::ecs::Store>, 3> replicas;
+	std::array<std::unique_ptr<Connector>, 3> clients;
+	std::array<uint32_t, 3> clockReceipts{};
+	std::array<uint32_t, 3> otherReceipts{};
+	double now = 0;
+	for (size_t index = 0; index < clients.size(); ++index) {
+		replicas[index] = std::make_unique<engine::ecs::Store>("weather_heartbeat_replica");
+		clients[index] = std::make_unique<Connector>(*ends[index + 1], ends[0]->Local(), now);
+		clients[index]->OnUserState([&, index](auto &store, auto bytes, double seconds, double rtt) {
+			if (!engine::scene::AcceptWeatherClockUpdate(store, bytes, seconds, rtt)) return false;
+			++clockReceipts[index];
+			return true;
+		});
+		clients[index]->OnUserMessage([&, index](auto) { ++otherReceipts[index]; });
+		clients[index]->OnTiming(engine::scene::SynchronizeWeatherClocks);
+	}
+	auto pump = [&](bool publish) {
+		now += 1.0 / 60;
+		for (size_t index = 0; index < clients.size(); ++index)
+			clients[index]->Poll(*replicas[index], now);
+		server.Poll(now);
+		if (publish) server.Publish(authority, authority.Time().Tick, now);
+		server.Advance(now);
+		for (size_t index = 0; index < clients.size(); ++index) {
+			clients[index]->Poll(*replicas[index], now);
+			clients[index]->Advance(now);
+		}
+	};
+	auto allJoined = [&] {
+		return std::all_of(clients.begin(), clients.end(), [](const auto &client) {
+			return client->Joined();
+		});
+	};
+	for (uint32_t attempt = 0; attempt < 600 && !allJoined(); ++attempt)
+		pump(true);
+	REQUIRE(allJoined());
+	REQUIRE(admitted.size() == 3);
+	const auto excluded = admitted.back();
+	server.Authority().SetInterest([excluded](auto client, auto, const auto &) {
+		return client != excluded;
+	});
+	const auto simulationTick = authority.Time().Tick;
+	for (uint32_t heartbeat = 1; heartbeat <= 4; ++heartbeat) {
+		++clock.Sequence;
+		clock.Tick += 20;
+		authority.Set(provider, clock);
+		engine::core::ByteWriter message;
+		engine::scene::WriteWeatherClockUpdate(message, provider, clock);
+		if (heartbeat == 1) {
+			// Fill a real reliable lane, then retry the latest clock without advancing a world tick.
+			// Equal user-payload lengths spend the same framed budget as the anchor itself.
+			const std::vector<std::byte> filler(message.Size());
+			uint32_t sent = 0;
+			while (sent < 1024 && server.SendTo(admitted.front(), filler, now))
+				++sent;
+			REQUIRE(sent > 0);
+			REQUIRE(sent < 1024);
+			REQUIRE_FALSE(server.BroadcastEntityState(authority, provider, message.Bytes(), now, heartbeat));
+			++clock.Sequence;
+			clock.Tick += 1;
+			authority.Set(provider, clock);
+			message = engine::core::ByteWriter{};
+			engine::scene::WriteWeatherClockUpdate(message, provider, clock);
+		}
+		bool accepted = false;
+		for (uint32_t frame = 0; frame < 60; ++frame) {
+			accepted |= server.BroadcastEntityState(authority, provider, message.Bytes(), now, heartbeat);
+			// Ordinary publication is only once every three seconds, with an insufficient row budget.
+			pump(heartbeat == 3 && frame == 0);
+		}
+		REQUIRE(accepted);
+		uint32_t current = 0;
+		uint32_t omitted = 0;
+		for (size_t index = 0; index < replicas.size(); ++index) {
+			const auto &replica = replicas[index];
+			const auto *received = replica->Get<engine::scene::WeatherClock>(provider);
+			if (clockReceipts[index] != 0) {
+				CHECK(clockReceipts[index] == heartbeat);
+				REQUIRE(received);
+				if (received->Sequence == clock.Sequence) ++current;
+				if (heartbeat == 1) {
+					CHECK(received->Sequence >= clock.Sequence - 1);
+					CHECK(received->Tick >= clock.Tick - 1);
+				} else {
+					CHECK(received->Sequence == clock.Sequence);
+					CHECK(received->Tick == clock.Tick);
+				}
+			} else {
+				++omitted;
+				if (received) CHECK(received->Sequence == 1);
+			}
+		}
+		CHECK(current == (heartbeat == 1 ? 1 : 2));
+		CHECK(omitted == 1);
+		CHECK(authority.Time().Tick == simulationTick);
+	}
+	// Coincident token and provider ids in another world must not suppress its copied state.
+	engine::ecs::Store otherWorld("weather_heartbeat_other_world");
+	REQUIRE(otherWorld.CreateAt(provider));
+	const std::array<std::byte, 1> otherPayload{std::byte{7}};
+	const auto beforeOther = otherReceipts;
+	REQUIRE(server.BroadcastEntityState(otherWorld, provider, otherPayload, now, 4));
+	REQUIRE(server.BroadcastEntityState(authority, provider, otherPayload, now, 4));
+	for (uint32_t frame = 0; frame < 30; ++frame)
+		pump(false);
+	uint32_t otherDelivered = 0;
+	for (size_t index = 0; index < clients.size(); ++index) {
+		if (clockReceipts[index] == 0)
+			CHECK(otherReceipts[index] == beforeOther[index]);
+		else {
+			CHECK(otherReceipts[index] == beforeOther[index] + 1);
+			++otherDelivered;
+		}
+	}
+	CHECK(otherDelivered == 2);
+}
+
+TEST_CASE(
+	"tracked entity publications bound receipts and release retired or superseded slots",
+	"[replication][negotiation]"
+) {
+	const auto mode = GENERATE(WireMode::Datagram, WireMode::Quic);
+	Field field(mode);
+	field.World.Set(field.World.Create(), Spot{});
+	field.Connect({});
+	for (uint32_t tick = 1; tick < 600 && !field.Client->Joined(); ++tick)
+		field.Tick(tick);
+	REQUIRE(field.Client->Joined());
+	uint32_t receipts = 0;
+	field.Client->OnUserMessage([&](auto) { ++receipts; });
+	const std::array<std::byte, 1> payload{std::byte{1}};
+	std::array<engine::ecs::Entity, 32> providers;
+	uint64_t tick = 1000;
+	for (auto &provider : providers) {
+		provider = field.World.Create();
+		bool accepted = false;
+		for (uint32_t attempt = 0; attempt < 120 && !accepted; ++attempt) {
+			accepted = field.Server->BroadcastEntityState(field.World, provider, payload, field.Now, 1);
+			field.Tick(tick++);
+		}
+		REQUIRE(accepted);
+	}
+	for (uint32_t pump = 0; pump < 30; ++pump)
+		field.Tick(tick++);
+	CHECK(receipts == 32);
+	const auto extra = field.World.Create();
+	CHECK_FALSE(field.Server->BroadcastEntityState(field.World, extra, payload, field.Now, 1));
+	field.World.Destroy(providers.front());
+	REQUIRE(field.Server->BroadcastEntityState(field.World, extra, payload, field.Now, 1));
+	field.Tick(tick++);
+	const auto replacement = field.World.Create();
+	REQUIRE(field.Server->BroadcastEntityState(field.World, replacement, payload, field.Now, 2));
+	for (uint32_t retry = 0; retry < 30; ++retry) {
+		REQUIRE(field.Server->BroadcastEntityState(field.World, replacement, payload, field.Now, 2));
+		field.Tick(tick++);
+	}
+	CHECK(receipts == 34);
 }

@@ -12,6 +12,14 @@
 
 namespace engine::weather {
 	namespace {
+		constexpr double WEATHER_CLOCK_HEARTBEAT_SECONDS = 1.0;
+		void RequestPublication(ecs::Store &store) {
+			scene::WeatherClockPublication publication;
+			if (const auto *held = store.Resource<scene::WeatherClockPublication>()) publication = *held;
+			publication.Pending = true;
+			publication.Generation = publication.Generation == UINT64_MAX ? 1 : publication.Generation + 1;
+			store.SetResource(publication);
+		}
 		bool ValidEpochLayer(std::string_view layer) {
 			return !layer.empty() && layer.size() <= MAX_WEATHER_LAYER_NAME_BYTES &&
 				   layer.find('\0') == std::string_view::npos;
@@ -225,7 +233,46 @@ namespace engine::weather {
 			clock.WorldPaused = worldPaused;
 			if (!NextSample(store, layer.Layer, clock)) continue;
 			store.Set(layer.Provider, clock);
+			if (!stored || changed) RequestPublication(store);
 		}
+	}
+
+	bool PrepareWeatherClockPublication(ecs::Store &store, double monotonicSeconds) {
+		if (store.AdoptOnly() || !std::isfinite(monotonicSeconds)) return false;
+		scene::WeatherClockPublication publication;
+		if (const auto *held = store.Resource<scene::WeatherClockPublication>()) publication = *held;
+		if (publication.Scheduled && monotonicSeconds < publication.NextHeartbeatSeconds)
+			return publication.Pending;
+		publication.Scheduled = true;
+		publication.NextHeartbeatSeconds = monotonicSeconds + WEATHER_CLOCK_HEARTBEAT_SECONDS;
+		publication.Generation = publication.Generation == UINT64_MAX ? 1 : publication.Generation + 1;
+		PrepareWeatherRuntime(store);
+		if (const auto *cache = store.Resource<WeatherRuntimeCache>()) {
+			for (const auto &layer : cache->Layers) {
+				const auto *stored = store.Get<scene::WeatherClock>(layer.Provider);
+				if (!stored || !scene::ValidWeatherClock(*stored)) continue;
+				auto clock = *stored;
+				if (!ObserveWeatherEpoch(store, layer.Layer, clock.Epoch) ||
+					!NextSample(store, layer.Layer, clock))
+					continue;
+				store.Set(layer.Provider, clock);
+				publication.Pending = true;
+			}
+		}
+		store.SetResource(publication);
+		return publication.Pending;
+	}
+
+	std::vector<WeatherClockSample> WeatherClockSamples(const ecs::Store &store) {
+		std::vector<WeatherClockSample> samples;
+		if (const auto *cache = store.Resource<WeatherRuntimeCache>()) {
+			samples.reserve(cache->Layers.size());
+			for (const auto &layer : cache->Layers)
+				if (const auto *clock = store.Get<scene::WeatherClock>(layer.Provider);
+					clock && scene::ValidWeatherClock(*clock))
+					samples.push_back({layer.Provider, *clock});
+		}
+		return samples;
 	}
 
 	bool SetWeatherWorldPaused(ecs::Store &store, bool paused) {
@@ -260,7 +307,7 @@ namespace engine::weather {
 			store.Set(layer.Provider, clock);
 			changed = true;
 		}
-		if (changed) store.SetResource(scene::WeatherClockPublication{true});
+		if (changed) RequestPublication(store);
 		return changed;
 	}
 

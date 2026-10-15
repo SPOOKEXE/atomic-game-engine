@@ -1508,8 +1508,11 @@ namespace studio {
 				if (link) (void)link->FlushPausedState(*Universe);
 			Universe->Enter(run.World, [](engine::ecs::Store &store) {
 				if (const auto *publication = store.Resource<engine::scene::WeatherClockPublication>();
-					publication && publication->Pending)
-					store.SetResource(engine::scene::WeatherClockPublication{});
+					publication && publication->Pending) {
+					auto acknowledged = *publication;
+					acknowledged.Pending = false;
+					store.SetResource(acknowledged);
+				}
 			});
 		}
 		if (!anyLive) {

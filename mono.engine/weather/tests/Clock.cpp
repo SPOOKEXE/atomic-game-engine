@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
+#include <string>
 TEST_SUITE_ID("engine.weather.clock")
 
 using namespace engine;
@@ -113,6 +115,99 @@ TEST_CASE(
 	CHECK(resumed->DisplacementRemainderQ12[0] == (expectedDisplacement & 4095));
 	CHECK(resumedClock.AnchorTick == 20);
 	CHECK(store.Time().Elapsed == 4);
+}
+
+TEST_CASE("weather heartbeat coalesces fresh samples without stepping simulation", "[weather]") {
+	Register();
+	ecs::Store store("weather_heartbeat");
+	const auto provider = store.Create("Layer");
+	store.Set(provider, scene::WeatherCompute{});
+	Tick(store, 0.05f);
+	REQUIRE(store.Get<scene::WeatherClock>(provider));
+	const auto original = *store.Get<scene::WeatherClock>(provider);
+	const auto simulation = store.Time();
+	REQUIRE(weather::PrepareWeatherClockPublication(store, 100));
+	auto sampled = *store.Get<scene::WeatherClock>(provider);
+	CHECK(sampled.Sequence == original.Sequence + 1);
+	// A heartbeat changes sample ordering alone, including while an earlier send is refused.
+	sampled.Sequence = original.Sequence;
+	core::ByteWriter before, after;
+	scene::WriteWeatherClock(before, original);
+	scene::WriteWeatherClock(after, sampled);
+	CHECK(std::ranges::equal(before.Bytes(), after.Bytes()));
+	for (uint32_t retry = 0; retry < 10; ++retry)
+		REQUIRE(weather::PrepareWeatherClockPublication(store, 100.1 + retry * 0.01));
+	CHECK(store.Get<scene::WeatherClock>(provider)->Sequence == original.Sequence + 1);
+	CHECK(store.Time().Tick == simulation.Tick);
+	CHECK(store.Time().Elapsed == simulation.Elapsed);
+	Tick(store, 0.05f);
+	const auto latest = *store.Get<scene::WeatherClock>(provider);
+	REQUIRE(weather::PrepareWeatherClockPublication(store, 100.5));
+	CHECK(store.Get<scene::WeatherClock>(provider)->Tick == latest.Tick);
+	CHECK(store.Get<scene::WeatherClock>(provider)->Sequence == latest.Sequence);
+	REQUIRE(weather::PrepareWeatherClockPublication(store, 101));
+	CHECK(store.Get<scene::WeatherClock>(provider)->Sequence == latest.Sequence + 1);
+	auto delivered = *store.Resource<scene::WeatherClockPublication>();
+	delivered.Pending = false;
+	store.SetResource(delivered);
+	CHECK_FALSE(weather::PrepareWeatherClockPublication(store, 101.5));
+	CHECK_FALSE(weather::PrepareWeatherClockPublication(store, 50));
+	CHECK_FALSE(weather::PrepareWeatherClockPublication(store, std::numeric_limits<double>::infinity()));
+	REQUIRE(weather::SetWeatherWorldPaused(store, true));
+	const auto paused = *store.Get<scene::WeatherClock>(provider);
+	CHECK(store.Resource<scene::WeatherClockPublication>()->NextHeartbeatSeconds == 102);
+	REQUIRE(weather::PrepareWeatherClockPublication(store, 102));
+	CHECK(store.Get<scene::WeatherClock>(provider)->Sequence == paused.Sequence + 1);
+	CHECK(store.Get<scene::WeatherClock>(provider)->Tick == paused.Tick);
+	CHECK(store.Get<scene::WeatherClock>(provider)->ElapsedSeconds == paused.ElapsedSeconds);
+	ecs::Store loaded("weather_heartbeat_loaded");
+	core::ByteWriter saved;
+	REQUIRE(store.Save(saved));
+	core::ByteReader reader(saved.Bytes());
+	REQUIRE(loaded.Load(reader));
+	REQUIRE(loaded.Resource<scene::WeatherClockPublication>());
+	CHECK_FALSE(loaded.Resource<scene::WeatherClockPublication>()->Scheduled);
+	CHECK_FALSE(loaded.Resource<scene::WeatherClockPublication>()->Pending);
+	CHECK(loaded.Resource<scene::WeatherClockPublication>()->Generation == 0);
+	loaded.SetAdoptOnly(true);
+	CHECK_FALSE(weather::PrepareWeatherClockPublication(loaded, 200));
+}
+
+TEST_CASE("weather publication copies only admitted layers after provider churn", "[weather]") {
+	Register();
+	ecs::Store store("weather_heartbeat_membership");
+	std::vector<ecs::Entity> providers;
+	for (uint32_t index = 0; index < weather::MAX_RUNTIME_WEATHER_LAYERS + 1; ++index) {
+		const auto provider = store.Create("Layer" + std::to_string(index));
+		store.Set(provider, scene::WeatherCompute{});
+		providers.push_back(provider);
+	}
+	Tick(store, 0.05f);
+	REQUIRE(weather::PrepareWeatherClockPublication(store, 1));
+	auto samples = weather::WeatherClockSamples(store);
+	REQUIRE(samples.size() == weather::MAX_RUNTIME_WEATHER_LAYERS);
+	const auto omitted = std::find_if(providers.begin(), providers.end(), [&](auto provider) {
+		return std::none_of(samples.begin(), samples.end(), [&](const auto &sample) {
+			return sample.Provider == provider;
+		});
+	});
+	REQUIRE(omitted != providers.end());
+	// A still-live historical Clock is not another admitted stream.
+	store.Set(*omitted, scene::WeatherClock{});
+	samples = weather::WeatherClockSamples(store);
+	CHECK(samples.size() == weather::MAX_RUNTIME_WEATHER_LAYERS);
+	CHECK(std::none_of(samples.begin(), samples.end(), [&](const auto &sample) {
+		return sample.Provider == *omitted;
+	}));
+	const auto retired = samples.front().Provider;
+	store.Destroy(retired);
+	Tick(store, 0.05f);
+	REQUIRE(weather::PrepareWeatherClockPublication(store, 2));
+	samples = weather::WeatherClockSamples(store);
+	CHECK(samples.size() == weather::MAX_RUNTIME_WEATHER_LAYERS);
+	CHECK(std::any_of(samples.begin(), samples.end(), [&](const auto &sample) {
+		return sample.Provider == *omitted;
+	}));
 }
 
 TEST_CASE(

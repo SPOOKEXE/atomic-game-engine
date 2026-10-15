@@ -3417,3 +3417,55 @@ TEST_CASE(
 	});
 	link.Stop(fixture.Worlds);
 }
+
+TEST_CASE(
+	"Play links admit one heartbeat per client without a new simulation tick", "[studio][playlink][weather]"
+) {
+	engine::weather::RegisterWeatherRuntimeComponents();
+	Fixture fixture;
+	Entity provider;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store, engine::ecs::Scheduler &systems) {
+		provider = store.Create("HeartbeatLayer");
+		store.Set(provider, engine::scene::WeatherCompute{});
+		engine::weather::RegisterWeatherClockSystem(systems);
+	});
+	fixture.Worlds.Tick(0.1f);
+	PlayLink first, second;
+	std::string error;
+	REQUIRE(first.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	REQUIRE(second.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	std::array<PlayLink *, 2> links{&first, &second};
+	for (uint32_t frame = 0; frame < 64; ++frame)
+		PlayLink::StepMany(fixture.Worlds, links);
+	uint64_t expectedSequence = 0;
+	uint64_t expectedTick = 0;
+	uint64_t simulationTick = 0;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		auto clock = *store.Get<engine::scene::WeatherClock>(provider);
+		clock.Tick += 20;
+		store.Set(provider, clock);
+		expectedTick = clock.Tick;
+		expectedSequence = clock.Sequence + 1;
+		simulationTick = store.Time().Tick;
+		auto publication = *store.Resource<engine::scene::WeatherClockPublication>();
+		publication.Pending = false;
+		publication.NextHeartbeatSeconds = 0;
+		store.SetResource(publication);
+	});
+	PlayLink::StepMany(fixture.Worlds, links);
+	for (PlayLink *link : links) {
+		fixture.Worlds.Enter(link->ReplicaWorld(), [&](Store &store) {
+			const auto *clock = store.Get<engine::scene::WeatherClock>(provider);
+			REQUIRE(clock);
+			CHECK(clock->Sequence == expectedSequence);
+			CHECK(clock->Tick == expectedTick);
+		});
+		CHECK_FALSE(link->FlushPausedState(fixture.Worlds));
+	}
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		CHECK(store.Time().Tick == simulationTick);
+		CHECK(store.Get<engine::scene::WeatherClock>(provider)->Sequence == expectedSequence);
+	});
+	first.Stop(fixture.Worlds);
+	second.Stop(fixture.Worlds);
+}

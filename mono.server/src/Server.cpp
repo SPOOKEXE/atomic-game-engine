@@ -3434,99 +3434,114 @@ namespace server {
 		// holding its change bits across the other two so that the delta built
 		// below covers all three - see `World::Tick`.
 		const bool publishDue = Worlds().TakeReplicationTick(PrimaryWorld);
+		const auto actualState = Worlds().StateOf(PrimaryWorld);
+		const bool weatherSuspended = actualState == engine::world::WorldState::Suspended ||
+									  actualState == engine::world::WorldState::Faulted;
 
-		Worlds().Enter(PrimaryWorld, [this, nowSeconds, publishDue](engine::ecs::Store &store) {
-			{
-				ENGINE_PROFILE_CAT("Server::NetworkLatency", engine::core::ProfileCategory::Network);
-				const double global = Worlds().SettingsOf(PrimaryWorld).GlobalSimulatedNetworkLatency;
-				for (const auto &[slot, occupant] : Players) {
-					if (!store.Alive(occupant.Instance)) {
-						continue;
+		Worlds().Enter(
+			PrimaryWorld, [this, nowSeconds, publishDue, weatherSuspended](engine::ecs::Store &store) {
+				{
+					ENGINE_PROFILE_CAT("Server::NetworkLatency", engine::core::ProfileCategory::Network);
+					const double global = Worlds().SettingsOf(PrimaryWorld).GlobalSimulatedNetworkLatency;
+					for (const auto &[slot, occupant] : Players) {
+						if (!store.Alive(occupant.Instance)) {
+							continue;
+						}
+						const auto *network =
+							store.Get<engine::scene::PlayerNetworkComponent>(occupant.Instance);
+						const double local = network != nullptr ? network->LocalSimulatedNetworkLatency : 0.0;
+						Replication->SetSimulatedLatency(
+							engine::replication::ClientId{slot, occupant.Generation}, global + local
+						);
 					}
-					const auto *network = store.Get<engine::scene::PlayerNetworkComponent>(occupant.Instance);
-					const double local = network != nullptr ? network->LocalSimulatedNetworkLatency : 0.0;
-					Replication->SetSimulatedLatency(
-						engine::replication::ClientId{slot, occupant.Generation}, global + local
-					);
+				}
+
+				// **What the clients that own something said, applied before this
+				// tick is published.** Applying after would publish a delta built
+				// from last tick's value and send the owner's own state back to it
+				// one tick stale, which is a client fighting its own echo.
+				//
+				// What gets through is `Authority::SetOwnership`'s business - see
+				// the predicate in `BeginListening`. A world where nothing has been
+				// handed over, which is every world this repository ships, sees an
+				// empty loop.
+				Replication->ApplyOwnedState(store);
+
+				// Before `ClearChanges`, which the world does at the start of its
+				// next tick - the bits are the delta source and reading them after
+				// they are cleared is how a tick's worth of movement goes missing.
+				//
+				// The borrow is opened and closed around exactly this call, so the
+				// priority callbacks read the store this walk is in rather than
+				// entering the world again per candidate. See `Publishing`.
+				//
+				// **The visibility survey immediately before it, inside the same
+				// entry**, because what it works out is only true of the world as it
+				// stands now - and nothing between the two mutates one.
+				//
+				// **The survey and the publish are skipped together on a tick this
+				// world does not publish.** What the survey works out is only true
+				// of the world as it stands, so running it for a delta nobody is
+				// building is its whole cost for nothing.
+				// Automatic scheduler faults bypass requested-state observers. Refresh within the owner
+				// entry.
+				(void)engine::weather::SetWeatherWorldPaused(store, weatherSuspended);
+				(void)engine::weather::PrepareWeatherClockPublication(store, nowSeconds);
+				const auto *clockPublication = store.Resource<engine::scene::WeatherClockPublication>();
+				const bool clockPublicationDue = clockPublication && clockPublication->Pending;
+				if (!publishDue && !clockPublicationDue && !Replication->Authority().HasPendingSnapshots()) {
+					// **The wire is still pumped.** `Listener::Flush` exists for
+					// exactly this caller: acknowledgements that never leave fill
+					// the far side's reliable window, and a link that is working
+					// perfectly then gives up. What waits for the next published
+					// tick is the queued outgoing messages, which is what a
+					// replication rate is asking for.
+					Replication->Flush(nowSeconds);
+					return;
+				}
+
+				if (clockPublicationDue) {
+					const auto publicationGeneration = clockPublication->Generation;
+					SurveyVisibility(store);
+					// Suspension may occur on an already acknowledged simulation tick.
+					// The reliable lane carries its final anchor independently of tick acks.
+					bool accepted = true;
+					for (const auto &[provider, clock] : engine::weather::WeatherClockSamples(store)) {
+						if (!engine::scene::VisibleToClients(store, provider)) continue;
+						engine::core::ByteWriter message;
+						engine::scene::WriteWeatherClockUpdate(message, provider, clock);
+						accepted &= Replication->BroadcastEntityState(
+							store, provider, message.Bytes(), nowSeconds, publicationGeneration
+						);
+					}
+					if (accepted) {
+						auto publication = *store.Resource<engine::scene::WeatherClockPublication>();
+						publication.Pending = false;
+						store.SetResource(publication);
+					}
+				}
+
+				SurveyVisibility(store);
+				Publishing = &store;
+				Replication->Publish(store, store.Time().Tick, nowSeconds);
+				Publishing = nullptr;
+				// The tick is complete and ApplyInputs below has not advanced the input
+				// frontier yet. Scheduled portal input supplies its physics-applied prefix;
+				// ordinary input uses the consumed prefix from the completed step.
+				for (auto &[index, occupant] : Players) {
+					if (occupant.MotionSentTick >= store.Time().Tick) continue;
+					const engine::replication::ClientId client{index, occupant.Generation};
+					const auto status = Replication->Authority().StatusOf(client);
+					const auto sample =
+						engine::game::CapturePlayerMotion(store, occupant.Instance, status.ConsumedInput);
+					if (!sample) continue;
+					const auto bytes = engine::game::EncodePlayerMotion(*sample);
+					if (!Replication->SendTo(client, bytes, nowSeconds)) continue;
+					occupant.MotionSentTick = store.Time().Tick;
+					engine::core::Metrics::Count("server.player.motion.bytes", bytes.size());
 				}
 			}
-
-			// **What the clients that own something said, applied before this
-			// tick is published.** Applying after would publish a delta built
-			// from last tick's value and send the owner's own state back to it
-			// one tick stale, which is a client fighting its own echo.
-			//
-			// What gets through is `Authority::SetOwnership`'s business - see
-			// the predicate in `BeginListening`. A world where nothing has been
-			// handed over, which is every world this repository ships, sees an
-			// empty loop.
-			Replication->ApplyOwnedState(store);
-
-			// Before `ClearChanges`, which the world does at the start of its
-			// next tick - the bits are the delta source and reading them after
-			// they are cleared is how a tick's worth of movement goes missing.
-			//
-			// The borrow is opened and closed around exactly this call, so the
-			// priority callbacks read the store this walk is in rather than
-			// entering the world again per candidate. See `Publishing`.
-			//
-			// **The visibility survey immediately before it, inside the same
-			// entry**, because what it works out is only true of the world as it
-			// stands now - and nothing between the two mutates one.
-			//
-			// **The survey and the publish are skipped together on a tick this
-			// world does not publish.** What the survey works out is only true
-			// of the world as it stands, so running it for a delta nobody is
-			// building is its whole cost for nothing.
-			const auto *clockPublication = store.Resource<engine::scene::WeatherClockPublication>();
-			const bool clockPublicationDue = clockPublication && clockPublication->Pending;
-			if (!publishDue && !clockPublicationDue && !Replication->Authority().HasPendingSnapshots()) {
-				// **The wire is still pumped.** `Listener::Flush` exists for
-				// exactly this caller: acknowledgements that never leave fill
-				// the far side's reliable window, and a link that is working
-				// perfectly then gives up. What waits for the next published
-				// tick is the queued outgoing messages, which is what a
-				// replication rate is asking for.
-				Replication->Flush(nowSeconds);
-				return;
-			}
-
-			if (clockPublicationDue) {
-				SurveyVisibility(store);
-				// Suspension may occur on an already acknowledged simulation tick.
-				// The reliable lane carries its final anchor independently of tick acks.
-				bool accepted = true;
-				store.Each<const engine::scene::WeatherClock>([&](engine::ecs::Entity provider,
-																  const engine::scene::WeatherClock &clock) {
-					if (!engine::scene::VisibleToClients(store, provider)) return;
-					engine::core::ByteWriter message;
-					engine::scene::WriteWeatherClockUpdate(message, provider, clock);
-					accepted &=
-						Replication->BroadcastEntityState(store, provider, message.Bytes(), nowSeconds);
-				});
-				if (accepted) store.SetResource(engine::scene::WeatherClockPublication{});
-			}
-
-			SurveyVisibility(store);
-			Publishing = &store;
-			Replication->Publish(store, store.Time().Tick, nowSeconds);
-			Publishing = nullptr;
-			// The tick is complete and ApplyInputs below has not advanced the input
-			// frontier yet. Scheduled portal input supplies its physics-applied prefix;
-			// ordinary input uses the consumed prefix from the completed step.
-			for (auto &[index, occupant] : Players) {
-				if (occupant.MotionSentTick >= store.Time().Tick) continue;
-				const engine::replication::ClientId client{index, occupant.Generation};
-				const auto status = Replication->Authority().StatusOf(client);
-				const auto sample =
-					engine::game::CapturePlayerMotion(store, occupant.Instance, status.ConsumedInput);
-				if (!sample) continue;
-				const auto bytes = engine::game::EncodePlayerMotion(*sample);
-				if (!Replication->SendTo(client, bytes, nowSeconds)) continue;
-				occupant.MotionSentTick = store.Time().Tick;
-				engine::core::Metrics::Count("server.player.motion.bytes", bytes.size());
-			}
-		});
+		);
 
 		// **After the world, and that ordering is the whole of "content must not
 		// starve the simulation".** `Publish` has already spent what this tick's

@@ -68,10 +68,16 @@ namespace engine::scene {
 		//@}
 	};
 
-	// Local coalesced reliable-publication status, cleared on loading a world.
+	// Local coalesced reliable-publication status and monotonic heartbeat deadline, cleared on load.
 	struct WeatherClockPublication {
-		// True until the current suspension anchors enter every carrying client's reliable lane.
+		// True until the latest anchors enter every interested carrying client's reliable lane.
 		bool Pending = false;
+		// Orders publication requests so one blocked recipient cannot resend to healthy peers.
+		uint64_t Generation = 0;
+		// Host monotonic deadline; unrelated to the world's fixed simulation clock.
+		double NextHeartbeatSeconds = 0.0;
+		// False until the host schedules its first one-second heartbeat.
+		bool Scheduled = false;
 	};
 	// Persistent world suspension state, independent of every authored layer's pause control.
 	struct WeatherWorldPause {

@@ -313,6 +313,8 @@ namespace studio {
 		engine::replication::Authority Server;
 		engine::replication::Replica Client;
 		engine::replication::ClientId Handle;
+		// Last copied weather publication admitted by this link, independent of simulation tick acks.
+		uint64_t WeatherPublication_ = 0;
 		std::weak_ptr<engine::script::Runtime> ReplicaRuntime_;
 
 		// Copied client envelopes, drained at the next authority script barrier.

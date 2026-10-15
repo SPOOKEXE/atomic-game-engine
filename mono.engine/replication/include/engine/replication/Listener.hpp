@@ -156,8 +156,14 @@ namespace engine::replication {
 		size_t Broadcast(std::span<const std::byte> message, double nowSeconds, ClientId except = {});
 		// Sends copied state only to carrying clients admitted by the authority's entity interest rule.
 		// Returns false when any eligible recipient's reliable lane refuses; callers may retry duplicates.
+		// A nonzero publication token admits each (world name, entity) once per recipient and token.
+		// Up to 32 live streams are tracked per peer; retired handles release their slots. Zero is untracked.
 		bool BroadcastEntityState(
-			const ecs::Store &store, ecs::Entity entity, std::span<const std::byte> message, double nowSeconds
+			const ecs::Store &store,
+			ecs::Entity entity,
+			std::span<const std::byte> message,
+			double nowSeconds,
+			uint64_t publication = 0
 		);
 
 		// Hears the messages this module does not read.
@@ -406,6 +412,14 @@ namespace engine::replication {
 
 	  private:
 		struct Peer {
+			struct EntityStateReceipt {
+				core::Name World;
+				ecs::Entity Entity;
+				uint64_t Publication = 0;
+			};
+			// Admission receipts, never another copy of the state carried by the wire.
+			std::array<EntityStateReceipt, 32> EntityStateReceipts{};
+			size_t EntityStateReceiptCount = 0;
 			net::Endpoint Where;
 			ClientId Client;
 

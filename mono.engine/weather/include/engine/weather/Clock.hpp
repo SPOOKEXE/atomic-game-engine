@@ -63,6 +63,21 @@ namespace engine::weather {
 	// Advances authored layers from fixed simulation time, preserving anchors before edits.
 	// Replica stores are ignored. Repeated calls within one world tick do no work.
 	void UpdateWeatherClocks(ecs::Store &store);
+	// Requests a fresh reliable sample every second without advancing accepted weather time.
+	// Call from the host's network pump, including while suspended. Pending samples coalesce
+	// to current anchors and remain pending until every interested reliable lane accepts them.
+	// Returns whether publication is pending; transport queuing and asymmetric delay remain uncertain.
+	[[nodiscard]] bool PrepareWeatherClockPublication(ecs::Store &store, double monotonicSeconds);
+	// Copied sample belonging to one of the bounded, currently admitted weather layers.
+	struct WeatherClockSample {
+		// Full authoritative entity handle and its accepted clock, without borrowed storage.
+		//@{
+		ecs::Entity Provider;
+		scene::WeatherClock Clock;
+		//@}
+	};
+	// Old live Clock components outside the current runtime layer set are not published.
+	[[nodiscard]] std::vector<WeatherClockSample> WeatherClockSamples(const ecs::Store &store);
 	// Registers the headless fixed-tick pass before weather consumers.
 	void RegisterWeatherClockSystem(ecs::Scheduler &scheduler);
 	// Suspends or resumes the base tick without changing historical authored anchors.

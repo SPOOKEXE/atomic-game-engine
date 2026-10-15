@@ -14,6 +14,7 @@
 #include <engine/script/PlayerGui.hpp>
 #include <engine/script/RemoteEvent.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/weather/Clock.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -401,22 +402,30 @@ namespace studio {
 		std::vector<std::vector<std::byte>> messages;
 		std::vector<std::vector<std::byte>> anchors;
 		bool needed = false;
+		uint64_t publicationGeneration = 0;
+		const auto actualState = universe.StateOf(Authority_);
 		universe.Enter(Authority_, [&](engine::ecs::Store &store) {
+			(void)engine::weather::SetWeatherWorldPaused(
+				store,
+				actualState == engine::world::WorldState::Suspended ||
+					actualState == engine::world::WorldState::Faulted
+			);
+			(void)engine::weather::PrepareWeatherClockPublication(store, nowSeconds);
 			const auto *publication = store.Resource<engine::scene::WeatherClockPublication>();
-			const bool finalAnchors = publication && publication->Pending;
+			const bool finalAnchors = publication && publication->Generation != WeatherPublication_;
+			if (finalAnchors) publicationGeneration = publication->Generation;
 			needed = finalAnchors || Server.HasPendingSnapshots();
 			if (!needed) return;
 			Server.Publish(store, store.Time().Tick);
 			for (const auto &message : Server.Outgoing(Handle))
 				messages.push_back(message);
 			if (!finalAnchors) return;
-			store.Each<const engine::scene::WeatherClock>([&](engine::ecs::Entity provider,
-															  const engine::scene::WeatherClock &clock) {
-				if (!Server.Interested(Handle, provider, store)) return;
+			for (const auto &[provider, clock] : engine::weather::WeatherClockSamples(store)) {
+				if (!Server.Interested(Handle, provider, store)) continue;
 				engine::core::ByteWriter encoded;
 				engine::scene::WriteWeatherClockUpdate(encoded, provider, clock);
 				anchors.emplace_back(encoded.Bytes().begin(), encoded.Bytes().end());
-			});
+			}
 		});
 		if (!needed) return false;
 		universe.Enter(Replica_, [&](engine::ecs::Store &store) {
@@ -427,6 +436,7 @@ namespace studio {
 			engine::scene::SynchronizeWeatherClocks(store, nowSeconds, 0);
 			client::RecordReplicatedTick(store, Client.Applied());
 		});
+		if (publicationGeneration != 0) WeatherPublication_ = publicationGeneration;
 		const auto acknowledgement = Client.Acknowledge();
 		if (!acknowledgement.empty()) (void)Server.Receive(Handle, acknowledgement);
 		return true;
@@ -440,7 +450,10 @@ namespace studio {
 		struct Pending {
 			PlayLink *Link = nullptr;
 			LinkReport Report;
+			uint64_t ClockPublication = 0;
+			std::vector<std::vector<std::byte>> ClockAnchors;
 		};
+		const double nowSeconds = engine::core::Clock::Seconds();
 		static thread_local std::vector<Pending> pending;
 		static thread_local std::vector<engine::replication::Authority::PublishRequest> requests;
 		static thread_local std::vector<engine::ecs::Entity> spawned;
@@ -485,29 +498,53 @@ namespace studio {
 					hasInput = engine::game::DecodeMoveInput(engine::game::EncodeMoveInput(wanted), arrived);
 				}
 
-				universe.Enter(link->Authority_, [link, hasInput, &arrived, &runtimeOf](Store &store) {
-					// Identity comes from this admitted link, never replica state or event payload.
-					if (store.Alive(link->Player_) &&
-						store.IsA(link->Player_, engine::scene::PlayerClass()) && runtimeOf) {
-						if (auto *runtime = runtimeOf(link->Authority_); runtime != nullptr)
-							for (const auto &message : link->RemoteEvents_)
-								if (message.Sender == link->Handle)
-									(void)runtime->DeliverRemoteEvent(message.Bytes, link->Player_);
-					}
-					link->RemoteEvents_.clear();
-					link->RemoteEventBytes_ = 0;
-					if (hasInput) {
-						(void)engine::game::ApplyMoveInput(store, link->Player_, arrived);
-					}
+				const auto actualState = universe.StateOf(link->Authority_);
+				universe.Enter(
+					link->Authority_,
+					[link, hasInput, &arrived, &runtimeOf, &step, actualState, nowSeconds](Store &store) {
+						(void)engine::weather::SetWeatherWorldPaused(
+							store,
+							actualState == engine::world::WorldState::Suspended ||
+								actualState == engine::world::WorldState::Faulted
+						);
+						(void)engine::weather::PrepareWeatherClockPublication(store, nowSeconds);
+						if (const auto *publication =
+								store.Resource<engine::scene::WeatherClockPublication>();
+							publication && publication->Generation != link->WeatherPublication_) {
+							step.ClockPublication = publication->Generation;
+							for (const auto &[provider, clock] :
+								 engine::weather::WeatherClockSamples(store)) {
+								if (!link->Server.Interested(link->Handle, provider, store)) continue;
+								engine::core::ByteWriter encoded;
+								engine::scene::WriteWeatherClockUpdate(encoded, provider, clock);
+								step.ClockAnchors.emplace_back(
+									encoded.Bytes().begin(), encoded.Bytes().end()
+								);
+							}
+						}
+						// Identity comes from this admitted link, never replica state or event payload.
+						if (store.Alive(link->Player_) &&
+							store.IsA(link->Player_, engine::scene::PlayerClass()) && runtimeOf) {
+							if (auto *runtime = runtimeOf(link->Authority_); runtime != nullptr)
+								for (const auto &message : link->RemoteEvents_)
+									if (message.Sender == link->Handle)
+										(void)runtime->DeliverRemoteEvent(message.Bytes, link->Player_);
+						}
+						link->RemoteEvents_.clear();
+						link->RemoteEventBytes_ = 0;
+						if (hasInput) {
+							(void)engine::game::ApplyMoveInput(store, link->Player_, arrived);
+						}
 
-					spawned.clear();
-					if (engine::scene::UpdateRespawns(store, spawned) == 0) {
-						return;
+						spawned.clear();
+						if (engine::scene::UpdateRespawns(store, spawned) == 0) {
+							return;
+						}
+						for (const engine::ecs::Entity player : spawned) {
+							(void)engine::script::ResetPlayerGui(store, player);
+						}
 					}
-					for (const engine::ecs::Entity player : spawned) {
-						(void)engine::script::ResetPlayerGui(store, player);
-					}
-				});
+				);
 			}
 		}
 
@@ -539,13 +576,19 @@ namespace studio {
 				const std::span<const std::vector<std::byte>> messages = link.Server.Outgoing(link.Handle);
 				step.Report.Messages = messages.size();
 
-				universe.Enter(link.Replica_, [&link, &step, messages](Store &store) {
+				universe.Enter(link.Replica_, [&link, &step, messages, nowSeconds](Store &store) {
 					for (const std::vector<std::byte> &message : messages) {
 						step.Report.Bytes += message.size();
 						step.Report.LargestMessage = std::max(step.Report.LargestMessage, message.size());
 						link.Client.Receive(store, message);
 					}
-					engine::scene::SynchronizeWeatherClocks(store, engine::core::Clock::Seconds(), 0);
+					for (const auto &anchor : step.ClockAnchors) {
+						++step.Report.Messages;
+						step.Report.Bytes += anchor.size();
+						step.Report.LargestMessage = std::max(step.Report.LargestMessage, anchor.size());
+						(void)engine::scene::AcceptWeatherClockUpdate(store, anchor, nowSeconds, 0);
+					}
+					engine::scene::SynchronizeWeatherClocks(store, nowSeconds, 0);
 
 					step.Report.Applied = link.Client.Applied();
 					step.Report.ClientEntities = PosedEntities(store);
@@ -563,6 +606,7 @@ namespace studio {
 						}
 					}
 				});
+				if (step.ClockPublication != 0) link.WeatherPublication_ = step.ClockPublication;
 
 				const std::vector<std::byte> acknowledgement = link.Client.Acknowledge();
 				if (!acknowledgement.empty()) {
@@ -573,6 +617,16 @@ namespace studio {
 				step.Report.TotalBytes += step.Report.Bytes;
 				link.Last = step.Report;
 			}
+		}
+		for (const Pending &step : pending) {
+			universe.Enter(step.Link->Authority_, [&](Store &store) {
+				if (const auto *held = store.Resource<engine::scene::WeatherClockPublication>();
+					held && held->Pending && held->Generation == step.Link->WeatherPublication_) {
+					auto delivered = *held;
+					delivered.Pending = false;
+					store.SetResource(delivered);
+				}
+			});
 		}
 	}
 
@@ -613,6 +667,7 @@ namespace studio {
 		const engine::world::WorldId replica = Replica_;
 		Replica_ = engine::world::WorldId{};
 		Authority_ = engine::world::WorldId{};
+		WeatherPublication_ = 0;
 		Last = LinkReport{};
 		PortalTransfer_.reset();
 		DepartingCamera_.reset();

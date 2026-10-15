@@ -7,6 +7,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <limits>
 #include <vector>
 
@@ -219,6 +221,61 @@ TEST_CASE("small weather offsets slew monotonically while large offsets reconstr
 	CHECK(estimate.HistoryRevision == 2);
 	CHECK_FALSE(SampleWeatherClock(estimate, sample, 3, -0.1));
 	CHECK_FALSE(SampleWeatherClock(estimate, sample, 3, 11));
+}
+
+TEST_CASE("moving weather clocks converge at different frame rates and RTTs", "[scene][weather]") {
+	constexpr uint64_t base = uint64_t{1} << 60;
+	std::array<WeatherClockEstimate, 2> clients;
+	const std::array<uint32_t, 2> frameRates{30, 144};
+	const std::array<double, 2> roundTrips{0.08, 0.32};
+	const std::array<double, 2> localOrigins{1000, 4000};
+	for (size_t client = 0; client < clients.size(); ++client) {
+		auto &estimate = clients[client];
+		WeatherClock sample;
+		sample.Tick = base;
+		sample.Sequence = 1;
+		const double delay = roundTrips[client] * 0.5;
+		REQUIRE(SampleWeatherClock(estimate, sample, localOrigins[client] + delay, roundTrips[client]));
+		if (client == 0)
+			estimate.Tick += 15;
+		else
+			estimate.Tick -= 15;
+		double previousError = 15;
+		for (uint32_t second = 1; second <= 12; ++second) {
+			for (uint32_t frame = 1; frame <= frameRates[client]; ++frame) {
+				const double before = static_cast<double>(estimate.Tick - (base - 100)) + estimate.Fraction;
+				const double now = localOrigins[client] + delay + second - 1 +
+								   static_cast<double>(frame) / frameRates[client];
+				AdvanceWeatherClock(estimate, now);
+				const double advanced =
+					static_cast<double>(estimate.Tick - (base - 100)) + estimate.Fraction - before;
+				CHECK(advanced >= 0.9 * sample.TickRate / frameRates[client] - 1e-8);
+				CHECK(advanced <= 1.1 * sample.TickRate / frameRates[client] + 1e-8);
+			}
+			sample.Tick = base + second * sample.TickRate;
+			sample.Sequence = second + 1;
+			const double receipt = localOrigins[client] + second + delay;
+			REQUIRE(SampleWeatherClock(estimate, sample, receipt, roundTrips[client]));
+			const double error = std::abs(estimate.CorrectionTicks);
+			CHECK(error <= previousError + 1e-7);
+			previousError = error;
+			auto stale = sample;
+			--stale.Sequence;
+			stale.Tick = base + 9999;
+			CHECK_FALSE(SampleWeatherClock(estimate, stale, receipt, roundTrips[client]));
+			CHECK_FALSE(SampleWeatherClock(estimate, sample, receipt, roundTrips[client]));
+			if (second >= 10) CHECK(std::abs(estimate.CorrectionTicks) < 1e-7);
+		}
+		CHECK(estimate.HistoryRevision == 1);
+		AdvanceWeatherClock(estimate, localOrigins[client] + 14);
+		CHECK(static_cast<double>(estimate.Tick - base) + estimate.Fraction == Approx(280).margin(1e-7));
+		AdvanceWeatherClock(estimate, localOrigins[client] + 15);
+		const auto stoppedTick = estimate.Tick;
+		const auto stoppedFraction = estimate.Fraction;
+		AdvanceWeatherClock(estimate, localOrigins[client] + 100);
+		CHECK(estimate.Tick == stoppedTick);
+		CHECK(estimate.Fraction == stoppedFraction);
+	}
 }
 
 TEST_CASE("paused weather does not extrapolate or pay an RTT progression offset", "[scene][weather]") {
