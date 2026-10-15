@@ -9,11 +9,15 @@ layout(set = 0, binding = 1, std430) readonly buffer Pages { ivec4 keys[]; } pag
 layout(set = 1, binding = 0, std430) writeonly buffer Summaries { uvec4 values[]; } outputSummary;
 layout(set = 2, binding = 0) uniform Pass { WeatherField Field; } pass;
 
+shared uvec4 partial[64];
+
 void main() {
-	uint index = gl_GlobalInvocationID.x;
+	uint index = gl_WorkGroupID.x;
+	uint lane = gl_LocalInvocationID.x;
+	// Page exits are uniform across the workgroup; clipped edge cells still reach every barrier.
 	if (index >= pass.Field.Bricks.w) return;
 	if (pass.Field.Origin.w == 0 && ((uint(pageTable.keys[index].w) >> 5u) & 3u) == 2u) {
-		outputSummary.values[index] = uvec4(0u, 0u, 0u, 512u);
+		if (lane == 0u) outputSummary.values[index] = uvec4(0u, 0u, 0u, 512u);
 		return;
 	}
 	uvec3 dimensions = pass.Field.Origin.w == 0 ? uvec3(1) : pass.Field.Bricks.xyz;
@@ -22,35 +26,39 @@ void main() {
 	uint minimum = 255u;
 	uint total = 0u;
 	uint count = 0u;
-	for (uint z = 0u; z < 8u; ++z) for (uint y = 0u; y < 8u; ++y) for (uint x = 0u; x < 8u; ++x) {
-		uvec3 point = brick * 8u + uvec3(x, y, z);
+	for (uint localCell = lane; localCell < 512u; localCell += 64u) {
+		uvec3 local = uvec3(localCell & 7u, (localCell >> 3u) & 7u, localCell >> 6u);
+		uvec3 point = brick * 8u + local;
 		if (pass.Field.Origin.w != 0 && any(greaterThanEqual(point, pass.Field.Grid.xyz))) continue;
-		uint cellIndex = pass.Field.Origin.w == 0 ? index * 512u + x + 8u * (y + 8u * z)
-			: WeatherCellIndex(point, pass.Field.Grid.xyz);
-		uvec2 cell;
+		uint density;
 		if (pass.Field.Origin.w == 0) {
 			ivec4 page = pageTable.keys[index];
 			uint descriptor = uint(page.w);
-				uint baseWords = descriptor >> 7u;
+			uint baseWords = descriptor >> 7u;
 			if (((descriptor >> 5u) & 3u) == 1u) {
-				uvec2 address = WeatherAssemblyAddress(uvec3(x, y, z));
-				uint words[8];
-				for (uint pair = 0u; pair < 4u; ++pair) {
-					uvec2 packed = inputField.cells[baseWords / 2u + address.x * 4u + pair];
-					words[pair * 2u] = packed.x;
-					words[pair * 2u + 1u] = packed.y;
-				}
-				cell = WeatherAssemblyUnsafe(words)
-					? WeatherEvaluate(pass.Field, page.xyz + ivec3(x, y, z) * (1 << (descriptor & 31u)))
-					: WeatherAssemblyDecode(words, address.y);
-			} else cell = inputField.cells[baseWords / 2u + x + 8u * (y + 8u * z)];
-		} else cell = inputField.cells[cellIndex];
-		uint density = cell.x & 255u;
+				uvec2 address = WeatherAssemblyAddress(local);
+				uvec2 scalarWords = inputField.cells[baseWords / 2u + address.x * 4u];
+				density = WeatherAssemblyUnsafe(scalarWords)
+					? WeatherDensityCode(pass.Field, page.xyz + ivec3(local) * (1 << (descriptor & 31u)))
+					: WeatherAssemblyDensityCode(scalarWords, address.y);
+			} else density = inputField.cells[baseWords / 2u + localCell].x & 255u;
+		} else density = inputField.cells[WeatherCellIndex(point, pass.Field.Grid.xyz)].x & 255u;
 		maximum = max(maximum, density);
 		minimum = min(minimum, density);
 		total += density;
 		++count;
 	}
+	partial[lane] = uvec4(maximum, minimum, total, count);
+	barrier();
+	// Integer extrema, sums and counts are exact under any reduction order.
+	for (uint offset = 32u; offset != 0u; offset >>= 1u) {
+		if (lane < offset) {
+			uvec4 other = partial[lane + offset];
+			partial[lane] = uvec4(max(partial[lane].x, other.x), min(partial[lane].y, other.y),
+				partial[lane].z + other.z, partial[lane].w + other.w);
+		}
+		barrier();
+	}
 	// Exact encoded total accompanies extrema. Rounded means cannot preserve child totals.
-	outputSummary.values[index] = uvec4(maximum, minimum, total, count);
+	if (lane == 0u) outputSummary.values[index] = partial[0];
 }

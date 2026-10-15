@@ -345,7 +345,8 @@ namespace engine::render {
 		const std::array<SDL_GPUBuffer *, 2> inputs{cells, pages};
 		SDL_BindGPUComputeStorageBuffers(pass, 0, inputs.data(), inputs.size());
 		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
-		SDL_DispatchGPUCompute(pass, (uniforms.Bricks.w + 63) / 64, 1, 1);
+		// One 64-lane workgroup reduces each complete or partial page in weather-summary.comp.
+		SDL_DispatchGPUCompute(pass, uniforms.Bricks.w, 1, 1);
 		SDL_EndGPUComputePass(pass);
 		core::Metrics::Count("render.weather.summary_dispatches", 1);
 		core::Metrics::Count("render.weather.resident_bricks", uniforms.Bricks.w);
