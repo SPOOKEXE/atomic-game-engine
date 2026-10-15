@@ -284,7 +284,7 @@ state until v0.19.
 | `scene.WeatherClock` | 136 | 8 | yes | . | yes | . | Accepted per-provider weather epoch, integer tick, phase and cumulative wind anchor, independent of local world elapsed time. |
 | `scene.WeatherClockEstimate` | 200 | 8 | yes | . | yes | . | Local-only receipt and RTT estimate for weather display time; saved state resets it and canonical weather clocks remain authoritative. |
 | `scene.WeatherClockInbox` | 5128 | 8 | yes | . | yes | . | Bounded local final-anchor inbox retained until replicated weather providers arrive. |
-| `scene.WeatherClockPublication` | 1 | 1 | yes | . | . | . | Local reliable final-anchor publication state for world pause and resume. |
+| `scene.WeatherClockPublication` | 32 | 8 | yes | . | yes | . | Local reliable final-anchor publication state for world pause and resume. |
 | `scene.WeatherCompute` | 224 | 4 | yes | . | yes | . | Authored world-unit weather controls on a WeatherCompute cloud provider: versioned seed, thermodynamics, wind, progression, sparse quality and optional consumer responses. |
 | `scene.WeatherWorldPause` | 1 | 1 | yes | . | . | . | Local world suspension control shared by weather-clock updates. |
 | `scene.WeldConstraint` | 24 | 8 | yes | yes | . | . | A direct rigid link between two parts whose initial relative frame is captured by the physics world. |
