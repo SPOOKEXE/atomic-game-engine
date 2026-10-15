@@ -233,7 +233,7 @@ namespace engine::graph {
 	) {
 		const auto firstResource = [&](std::span<const ResourceId> ids, ResourceKind kind) {
 			for (const ResourceId id : ids) {
-				const ResourceDesc *resource = graph.FindResource(id);
+				const ResourceDesc *resource = graph.FindResourceDesc(id);
 				if (resource != nullptr && resource->Kind == kind) {
 					return resource->Name;
 				}

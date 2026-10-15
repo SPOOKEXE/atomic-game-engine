@@ -57,7 +57,7 @@ namespace engine::render {
 				found->Shadows = {};
 				return true;
 			}
-			const auto *description = Pipeline->Graph.FindResource(context.Writes.front());
+			const auto *description = Pipeline->Graph.FindResourceDesc(context.Writes.front());
 			if (!description || description->Kind != graph::ResourceKind::Storage ||
 				description->Format != graph::ResourceFormat::RGBA16F) {
 				found->Shadows = {};

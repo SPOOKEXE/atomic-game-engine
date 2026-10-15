@@ -98,7 +98,7 @@ TEST_CASE("resource shape and access are executable graph contracts", "[graph][r
 		.Lifetime = engine::graph::ResourceLifetime::History,
 	});
 	REQUIRE(readable.IsValid());
-	const auto *desc = graph.FindResource(readable);
+	const auto *desc = graph.FindResourceDesc(readable);
 	REQUIRE(desc != nullptr);
 	CHECK(desc->External);
 	CHECK(desc->Bytes(1, 1) == 2560);
@@ -111,7 +111,7 @@ TEST_CASE("resource shape and access are executable graph contracts", "[graph][r
 		.Access = engine::graph::ResourceAccess::ReadWrite,
 		.BufferStride = 12,
 	});
-	const auto *bufferDesc = graph.FindResource(buffer);
+	const auto *bufferDesc = graph.FindResourceDesc(buffer);
 	REQUIRE(bufferDesc != nullptr);
 	CHECK(bufferDesc->Bytes(1, 1) == 768);
 
@@ -1119,10 +1119,10 @@ TEST_CASE("a node id means nothing outside the graph that issued it", "[graph]")
 	CHECK(crossed->Name == Name("effect"));
 	CHECK(crossed->Name != first.Find(firstNode)->Name);
 
-	const ResourceDesc *swapped = second.FindResource(firstColour);
+	const ResourceDesc *swapped = second.FindResourceDesc(firstColour);
 	REQUIRE(swapped != nullptr);
 	CHECK(swapped->Kind == ResourceKind::Depth);
-	CHECK(swapped->Kind != first.FindResource(firstColour)->Kind);
+	CHECK(swapped->Kind != first.FindResourceDesc(firstColour)->Kind);
 }
 
 TEST_CASE("full float ambient response format preserves four channels", "[graph][formats]") {

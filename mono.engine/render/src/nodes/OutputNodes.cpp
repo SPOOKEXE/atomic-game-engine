@@ -421,7 +421,7 @@ namespace engine::render {
 
 			enterNamedPass(context.Name);
 			for (const graph::ResourceId resource : context.Reads) {
-				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 				const Impl::NamedTexture source = graphTexture(resource, context, false);
 				if (desc == nullptr || !source.IsValid()) {
 					continue;
@@ -449,7 +449,7 @@ namespace engine::render {
 			if (!node || context.Reads.size() != 1 || !context.Writes.empty() ||
 				node->Scope != graph::NodeScope::View)
 				return false;
-			const auto *desc = Pipeline->Graph.FindResource(context.Reads.front());
+			const auto *desc = Pipeline->Graph.FindResourceDesc(context.Reads.front());
 			if (!desc) return false;
 			ResourceShadowCapture metadata;
 			metadata.SourceEmpty = Instances.empty();
@@ -536,13 +536,14 @@ namespace engine::render {
 					else
 						colorId = context.Reads[i];
 				}
-				const auto *desc = selectedPipeline->Graph.FindResource(colorId);
-				const auto *depthDesc = selectedPipeline->Graph.FindResource(depthId);
-				const auto *normalDesc = selectedPipeline->Graph.FindResource(normalId);
-				const auto *ambientResponseDesc = selectedPipeline->Graph.FindResource(ambientResponseId);
-				const auto *lightingBaselineDesc = selectedPipeline->Graph.FindResource(lightingBaselineId);
+				const auto *desc = selectedPipeline->Graph.FindResourceDesc(colorId);
+				const auto *depthDesc = selectedPipeline->Graph.FindResourceDesc(depthId);
+				const auto *normalDesc = selectedPipeline->Graph.FindResourceDesc(normalId);
+				const auto *ambientResponseDesc = selectedPipeline->Graph.FindResourceDesc(ambientResponseId);
+				const auto *lightingBaselineDesc =
+					selectedPipeline->Graph.FindResourceDesc(lightingBaselineId);
 				const auto *directionalResponseDesc =
-					selectedPipeline->Graph.FindResource(directionalResponseId);
+					selectedPipeline->Graph.FindResourceDesc(directionalResponseId);
 				for (const size_t slot : slots) {
 					const DataCaptureSource &captureSource = slot < State->DataCaptureSources.size()
 																 ? State->DataCaptureSources[slot]
@@ -705,7 +706,7 @@ namespace engine::render {
 				graph::ResourceId resource;
 				for (uint32_t value = 1; value <= selectedPipeline->Graph.ResourceCount(); value++) {
 					const graph::ResourceId candidate{value};
-					const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(candidate);
+					const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(candidate);
 					if (desc != nullptr && desc->Name == preview.Route.Resource) {
 						resource = candidate;
 						break;

@@ -213,7 +213,7 @@ namespace engine::graph {
 				const Node *node = graph.Find(invocation.Scheduled.Node);
 				const auto access = [&](std::span<const ResourceId> resources, bool write) {
 					for (const ResourceId id : resources) {
-						const ResourceDesc *resource = graph.FindResource(id);
+						const ResourceDesc *resource = graph.FindResourceDesc(id);
 						if (resource == nullptr) {
 							offender = node->Name;
 							return ExecutionPlanStatus::MissingResource;

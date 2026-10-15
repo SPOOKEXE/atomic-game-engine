@@ -100,7 +100,7 @@ namespace engine::graph {
 			const auto inspect = [&](std::span<const ResourceId> resources) {
 				ExecutionQueue queue = ExecutionQueue::Graphics;
 				for (const ResourceId id : resources) {
-					const ResourceDesc *resource = graph.FindResource(id);
+					const ResourceDesc *resource = graph.FindResourceDesc(id);
 					if (resource == nullptr) {
 						continue;
 					}
@@ -235,7 +235,7 @@ namespace engine::graph {
 
 		for (uint32_t resourceValue = 1; resourceValue <= graph.ResourceCount(); resourceValue++) {
 			const ResourceId resource{resourceValue};
-			const ResourceDesc *desc = graph.FindResource(resource);
+			const ResourceDesc *desc = graph.FindResourceDesc(resource);
 			std::vector<size_t> writers;
 			for (size_t index = 0; index < count; index++) {
 				if (std::find(nodes[index]->Writes.begin(), nodes[index]->Writes.end(), resource) !=

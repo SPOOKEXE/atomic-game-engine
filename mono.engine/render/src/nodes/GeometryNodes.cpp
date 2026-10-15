@@ -39,9 +39,9 @@ namespace engine::render {
 			SDL_GPUBuffer *indices = GraphBuffer(context.Writes[1], context, true);
 			SDL_GPUBuffer *commands = GraphBuffer(context.Writes[2], context, true);
 			if (vertices == nullptr || indices == nullptr || commands == nullptr) return false;
-			const auto *vertexDesc = Pipeline->Graph.FindResource(context.Writes[0]);
-			const auto *indexDesc = Pipeline->Graph.FindResource(context.Writes[1]);
-			const auto *commandDesc = Pipeline->Graph.FindResource(context.Writes[2]);
+			const auto *vertexDesc = Pipeline->Graph.FindResourceDesc(context.Writes[0]);
+			const auto *indexDesc = Pipeline->Graph.FindResourceDesc(context.Writes[1]);
+			const auto *commandDesc = Pipeline->Graph.FindResourceDesc(context.Writes[2]);
 			if (vertexDesc == nullptr || indexDesc == nullptr || commandDesc == nullptr) return false;
 			const TessellationCapacity capacity{
 				static_cast<uint32_t>(

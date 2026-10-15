@@ -60,9 +60,9 @@ namespace {
 		return nullptr;
 	}
 
-	const engine::graph::ResourceDesc *FindResource(const engine::graph::RenderGraph &graph, Name name) {
+	const engine::graph::ResourceDesc *FindResourceDesc(const engine::graph::RenderGraph &graph, Name name) {
 		for (uint32_t value = 1; value <= graph.ResourceCount(); ++value) {
-			const auto *resource = graph.FindResource(engine::graph::ResourceId{value});
+			const auto *resource = graph.FindResourceDesc(engine::graph::ResourceId{value});
 			if (resource != nullptr && resource->Name == name) return resource;
 		}
 		return nullptr;
@@ -78,7 +78,7 @@ namespace {
 		const auto &resources = read ? node.Reads : node.Writes;
 		const auto &ports = read ? node.ReadPorts : node.WritePorts;
 		for (size_t index = 0; index < resources.size(); ++index) {
-			const auto *description = graph.FindResource(resources[index]);
+			const auto *description = graph.FindResourceDesc(resources[index]);
 			if (description != nullptr && description->Name == resource && index < ports.size() &&
 				ports[index] == port)
 				return true;
@@ -165,7 +165,7 @@ TEST_CASE(
 			CHECK(HasPort(graph, *trace, Name("visible-entities"), Name("entities"), true));
 			CHECK(HasPort(graph, *trace, Name("coarse-instances"), Name("instances"), true));
 			CHECK(HasPort(graph, *trace, Name("path-radiance"), Name("radiance"), false));
-			const auto *history = FindResource(graph, Name("path-history"));
+			const auto *history = FindResourceDesc(graph, Name("path-history"));
 			REQUIRE(history != nullptr);
 			CHECK(history->Lifetime == engine::graph::ResourceLifetime::History);
 			CHECK(HasPort(graph, *trace, Name("path-history"), Name("history"), true));

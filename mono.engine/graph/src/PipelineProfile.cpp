@@ -111,14 +111,14 @@ namespace engine::graph {
 		std::vector<Slot> slots;
 		for (size_t index = 0; index < graph.ResourceCount(); index++) {
 			const ResourceId resource{static_cast<uint32_t>(index + 1)};
-			const ResourceDesc *desc = graph.FindResource(resource);
+			const ResourceDesc *desc = graph.FindResourceDesc(resource);
 			const Lifetime life = lifetimes[index];
 			if (desc == nullptr || !AllocatedTarget(*desc) || life.First == ProfileResource::NEVER) {
 				continue;
 			}
 
 			auto reusable = std::find_if(slots.begin(), slots.end(), [&](const Slot &slot) {
-				const ResourceDesc *owner = graph.FindResource(slot.Owner);
+				const ResourceDesc *owner = graph.FindResourceDesc(slot.Owner);
 				return slot.Last < life.First && owner != nullptr && Compatible(*owner, *desc) &&
 					   ScopeOf(graph, slot.Owner) == ScopeOf(graph, resource);
 			});
@@ -174,7 +174,7 @@ namespace engine::graph {
 
 		for (size_t index = 0; index < graph.ResourceCount(); index++) {
 			const ResourceId id{static_cast<uint32_t>(index + 1)};
-			const ResourceDesc *desc = graph.FindResource(id);
+			const ResourceDesc *desc = graph.FindResourceDesc(id);
 			if (desc == nullptr) {
 				continue;
 			}

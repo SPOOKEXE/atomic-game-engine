@@ -60,6 +60,14 @@ just preset=release build
 just preset=server test
 ```
 
+For `windows-cross` from Linux, install MinGW and Wine with
+`sudo apt install mingw-w64 wine`, then add the Rust target with
+`rustup target add x86_64-pc-windows-gnu`. The preset uses native `glslc` at
+`.cache/build/release/mono.vendor/shaderc/glslc/glslc`; prepare it with
+`just preset=release configure` and `just preset=release build glslc_exe`.
+Then run `just preset=windows-cross configure` and
+`just preset=windows-cross build`.
+
 ## Setup and build
 
 | Recipe | Purpose |

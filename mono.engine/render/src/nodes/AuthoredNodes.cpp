@@ -179,7 +179,7 @@ namespace engine::render {
 			std::vector<Impl::NamedTexture> targets;
 			std::vector<SDL_GPUTextureFormat> formats;
 			for (const graph::ResourceId resource : context.Writes) {
-				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 				if (desc != nullptr && desc->Kind == graph::ResourceKind::Colour) {
 					Impl::NamedTexture target = graphTexture(resource, context, true);
 					if (target.IsValid()) {
@@ -334,7 +334,7 @@ namespace engine::render {
 			std::vector<SDL_GPUStorageTextureReadWriteBinding> writes;
 			Impl::NamedTexture firstTarget;
 			for (const graph::ResourceId resource : context.Writes) {
-				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+				const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 				if (desc == nullptr || desc->Kind != graph::ResourceKind::Storage) {
 					continue;
 				}
@@ -496,7 +496,7 @@ namespace engine::render {
 			if (traceUniforms) {
 				bool historyAvailable = false;
 				for (const graph::ResourceId resource : context.Reads) {
-					const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+					const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 					if (desc != nullptr && desc->Lifetime == graph::ResourceLifetime::History) {
 						historyAvailable = graphTexture(resource, context, false, dispatchCommand).IsValid();
 						break;

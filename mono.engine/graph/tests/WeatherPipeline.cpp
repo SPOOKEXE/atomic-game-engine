@@ -39,9 +39,9 @@ namespace {
 		return nullptr;
 	}
 
-	const ResourceDesc *FindResource(const RenderGraph &graph, std::string_view name) {
+	const ResourceDesc *FindResourceDesc(const RenderGraph &graph, std::string_view name) {
 		for (uint32_t value = 1; value <= graph.ResourceCount(); value++) {
-			const ResourceDesc *resource = graph.FindResource(ResourceId{value});
+			const ResourceDesc *resource = graph.FindResourceDesc(ResourceId{value});
 			if (resource != nullptr && resource->Name == Name(name)) return resource;
 		}
 		return nullptr;
@@ -71,8 +71,8 @@ TEST_CASE("weather pages feed world work and each view's integration", "[graph][
 		return graph.Find(id)->Name == Name("weather-integrate");
 	}));
 
-	const ResourceDesc *pages = FindResource(graph, "weather-pages");
-	const ResourceDesc *previousPages = FindResource(graph, "weather-previous-pages");
+	const ResourceDesc *pages = FindResourceDesc(graph, "weather-pages");
+	const ResourceDesc *previousPages = FindResourceDesc(graph, "weather-previous-pages");
 	REQUIRE(pages != nullptr);
 	REQUIRE(previousPages != nullptr);
 	CHECK(pages->Kind == ResourceKind::Buffer);
@@ -113,15 +113,15 @@ TEST_CASE("weather pages feed world work and each view's integration", "[graph][
 									 Name("previous-pages")
 								 })
 	);
-	CHECK(graph.FindResource(residency->Writes.front())->Name == Name("weather-pages"));
-	CHECK(graph.FindResource(residency->Writes[1])->Name == Name("weather-previous-pages"));
-	CHECK(graph.FindResource(field->Reads.front())->Name == Name("weather-pages"));
-	CHECK(graph.FindResource(field->Writes.front())->Name == Name("weather-field"));
-	CHECK(graph.FindResource(summary->Reads[0])->Name == Name("weather-field"));
-	CHECK(graph.FindResource(summary->Reads[1])->Name == Name("weather-pages"));
-	CHECK(graph.FindResource(integrate->Reads[4])->Name == Name("weather-pages"));
-	CHECK(graph.FindResource(integrate->Reads[5])->Name == Name("weather-previous-pages"));
-	CHECK(graph.FindResource(integrate->Writes.front())->Name == Name("weather-clouds"));
+	CHECK(graph.FindResourceDesc(residency->Writes.front())->Name == Name("weather-pages"));
+	CHECK(graph.FindResourceDesc(residency->Writes[1])->Name == Name("weather-previous-pages"));
+	CHECK(graph.FindResourceDesc(field->Reads.front())->Name == Name("weather-pages"));
+	CHECK(graph.FindResourceDesc(field->Writes.front())->Name == Name("weather-field"));
+	CHECK(graph.FindResourceDesc(summary->Reads[0])->Name == Name("weather-field"));
+	CHECK(graph.FindResourceDesc(summary->Reads[1])->Name == Name("weather-pages"));
+	CHECK(graph.FindResourceDesc(integrate->Reads[4])->Name == Name("weather-pages"));
+	CHECK(graph.FindResourceDesc(integrate->Reads[5])->Name == Name("weather-previous-pages"));
+	CHECK(graph.FindResourceDesc(integrate->Writes.front())->Name == Name("weather-clouds"));
 
 	const auto *residencySpec = NodeCatalogue::Find(Name("weather-residency"));
 	REQUIRE(residencySpec != nullptr);
@@ -135,11 +135,11 @@ TEST_CASE("Tier B removes weather residency with the weather pipeline", "[graph]
 	RenderGraph graph;
 	Name offender;
 	REQUIRE(Build(DefaultPbrTierBDocument(), graph, offender) == PipelineDocumentStatus::Ok);
-	CHECK(FindResource(graph, "weather-pages") == nullptr);
-	CHECK(FindResource(graph, "weather-previous-pages") == nullptr);
-	CHECK(FindResource(graph, "weather-field") == nullptr);
-	CHECK(FindResource(graph, "weather-summary") == nullptr);
-	CHECK(FindResource(graph, "weather-lit") == nullptr);
+	CHECK(FindResourceDesc(graph, "weather-pages") == nullptr);
+	CHECK(FindResourceDesc(graph, "weather-previous-pages") == nullptr);
+	CHECK(FindResourceDesc(graph, "weather-field") == nullptr);
+	CHECK(FindResourceDesc(graph, "weather-summary") == nullptr);
+	CHECK(FindResourceDesc(graph, "weather-lit") == nullptr);
 	CHECK_FALSE(ContainsNode(graph, "weather-residency"));
 	CHECK_FALSE(ContainsNode(graph, "weather-field"));
 	CHECK_FALSE(ContainsNode(graph, "weather-summary"));
@@ -148,5 +148,5 @@ TEST_CASE("Tier B removes weather residency with the weather pipeline", "[graph]
 	const Node *fog = FindNode(graph, "fog");
 	REQUIRE(fog != nullptr);
 	REQUIRE(fog->Reads.size() >= 1);
-	CHECK(graph.FindResource(fog->Reads.front())->Name == Name("sky-lit"));
+	CHECK(graph.FindResourceDesc(fog->Reads.front())->Name == Name("sky-lit"));
 }

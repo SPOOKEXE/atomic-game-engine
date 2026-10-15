@@ -208,6 +208,8 @@ def display_edge(build_directory: Path, edge: BuildEdge) -> str:
 CCACHE_HIT_EVENTS = {"direct_cache_hit", "preprocessed_cache_hit"}
 CCACHE_AUXILIARY_EVENTS = CCACHE_HIT_EVENTS | {
 	"cache_miss",
+	"direct_cache_miss",
+	"preprocessed_cache_miss",
 	"local_storage_hit",
 	"local_storage_miss",
 	"local_storage_read_hit",

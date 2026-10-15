@@ -23,6 +23,14 @@ SPEC.loader.exec_module(MODULE)
 
 
 class BuildProfileTest(unittest.TestCase):
+	def test_direct_miss_events_are_auxiliary_to_uncacheable_reason(self) -> None:
+		outcomes = MODULE.parse_ccache_stats(
+			"# source.cpp\ndirect_cache_miss\npreprocessed_cache_miss\nmodified_input_file\n".splitlines()
+		)
+		outcome = outcomes["source.cpp"]
+		self.assertEqual(outcome.uncacheable, 1)
+		self.assertEqual(outcome.reasons, {"modified_input_file": 1})
+
 	def test_run_reports_only_new_edges_and_cache_calls(self) -> None:
 		with tempfile.TemporaryDirectory() as temporary:
 			build = Path(temporary)

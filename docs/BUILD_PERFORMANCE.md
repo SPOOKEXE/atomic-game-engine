@@ -50,12 +50,37 @@ just build-profile-check
 just linker-check
 ```
 
-Validation passed for the `dev`, `server` and strict `ci` builds, 51 dev CTest
-checks and all 43 server CTest checks. The three dev binaries excluded from
-CTest also passed with GPU and hidden cases filtered: render (830 cases),
-client (322) and Studio (723). Architecture fixtures, server headlessness,
-compiler-cache regeneration, formatting and prose checks passed. GPU cases,
-Windows/macOS builds and a clean source-build comparison were not run.
+The original linker change also passed the Linux `server` and strict `ci`
+builds, plus all 43 server CTest checks.
+
+The platform fixes make CMake invoke `assetc` by target name so Wine runs it,
+build AccessKit for `x86_64-pc-windows-gnu` into Rust's target-specific artifact
+path and link its reported native libraries, and rename the graph lookup to
+`FindResourceDesc` to avoid the Win32 macro. Apple AccessKit links AppKit,
+Foundation and objc from the Rust static-library probe.
+
+After these fixes, the full Linux `dev` build passed. CTest passed the graph,
+game, examples and architecture suites; headless render (830 cases), client
+(322) and Studio (723) checks also passed. Formatting, prose checks, the 10
+build-profiler tests and the linker fixture passed.
+
+The full `windows-cross` build passed with MinGW GCC 13 posix, including all
+products, tools and staging; its null build took 0.083 s. Under Wine 11,
+`server`, `cdn` and `launcher --version` passed, as did a three-tick server
+run. Unmodified `client --version` and `studio --version` failed in the built-in
+`dbghelp` DWARF `dwarf2_locate_cu` parser. Copies with only debug sections
+removed passed both commands; the original artifacts and build options were
+unchanged. No GPU runtime was tested.
+
+Rust-only AccessKit static-library probes passed for Windows GNU, Windows MSVC
+and macOS ARM64 on Linux. The macOS probe used no Apple SDK and did not link a
+native application. In [the GitHub Actions run][platform-run], the Windows and
+macOS release jobs failed at checkout before compilation:
+upstream did not contain pinned ngtcp2 commit
+`751c3402549f5918deb253db5b8abfd1055e8c82`. The workflow reported overall
+success because those platform jobs are optional. `.gitmodules` was unchanged.
+
+[platform-run]: https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/38720005737
 
 The driver search option is applied only while linking, because GCC also uses
 [`-B` to select compiler tools and search paths](https://gcc.gnu.org/onlinedocs/gcc/Directory-Options.html).

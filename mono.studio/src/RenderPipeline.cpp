@@ -201,7 +201,7 @@ namespace studio {
 						continue;
 					}
 					const engine::graph::ResourceDesc *resource =
-						previewGraph.FindResource(renderNode->Writes[output]);
+						previewGraph.FindResourceDesc(renderNode->Writes[output]);
 					if (resource != nullptr && refreshPreviews && previewSourceReady) {
 						const auto reverse = canvasNode.Widgets.find("preview.reverse-spectrum");
 						Renderer.RefreshResourcePreview(

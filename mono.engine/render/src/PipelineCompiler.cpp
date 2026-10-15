@@ -260,7 +260,7 @@ namespace engine::render {
 								reason = "pack-channels input cannot alias its output";
 								return false;
 							}
-							const graph::ResourceDesc *source = pipeline.FindResource(node->Reads[index]);
+							const graph::ResourceDesc *source = pipeline.FindResourceDesc(node->Reads[index]);
 							const std::string *component =
 								node->Parameter(core::Name(std::string(ports[index]) + "-component"));
 							if (component != nullptr &&
@@ -279,7 +279,7 @@ namespace engine::render {
 								return false;
 							}
 						}
-						const graph::ResourceDesc *target = pipeline.FindResource(node->Writes.front());
+						const graph::ResourceDesc *target = pipeline.FindResourceDesc(node->Writes.front());
 						if (target == nullptr || target->Format != graph::ResourceFormat::RGBA32F) {
 							offender = node->Name;
 							reason = "pack-channels output must be RGBA32F";
@@ -300,7 +300,7 @@ namespace engine::render {
 							reason = "blit target format is not recognised";
 							return false;
 						}
-						const graph::ResourceDesc *target = pipeline.FindResource(node->Writes.front());
+						const graph::ResourceDesc *target = pipeline.FindResourceDesc(node->Writes.front());
 						if (target == nullptr || target->Format != targetFormat) {
 							offender = node->Name;
 							reason = "blit target resource does not use its selected format";
@@ -388,7 +388,7 @@ namespace engine::render {
 				}
 				const bool producesEntityFlow =
 					std::any_of(node->Writes.begin(), node->Writes.end(), [&](graph::ResourceId resource) {
-						const graph::ResourceDesc *desc = pipeline.FindResource(resource);
+						const graph::ResourceDesc *desc = pipeline.FindResourceDesc(resource);
 						return desc != nullptr && (desc->Kind == graph::ResourceKind::Entities ||
 												   desc->Kind == graph::ResourceKind::Camera);
 					});

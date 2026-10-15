@@ -165,7 +165,7 @@ namespace engine::render {
 			}
 		}
 		for (uint32_t value = 1; value <= installed->Graph.ResourceCount(); ++value) {
-			const graph::ResourceDesc *resource = installed->Graph.FindResource(graph::ResourceId{value});
+			const graph::ResourceDesc *resource = installed->Graph.FindResourceDesc(graph::ResourceId{value});
 			if (resource == nullptr || !boundedName(resource->Name, true) ||
 				!boundedName(resource->Owner, false)) {
 				return std::nullopt;

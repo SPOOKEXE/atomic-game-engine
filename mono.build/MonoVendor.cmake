@@ -214,26 +214,39 @@ if(MONO_BUILD_CLIENT)
 		message(FATAL_ERROR "mono.vendor/accesskit-c is missing. Run `just setup`.")
 	endif()
 	find_program(MONO_CARGO cargo REQUIRED)
+	set(MONO_ACCESSKIT_RUST_TARGET "" CACHE STRING
+		"Rust target triple for AccessKit C (empty for the host target)")
 	set(MONO_ACCESSKIT_TARGET "${CMAKE_BINARY_DIR}/vendor/accesskit-c")
+	set(MONO_ACCESSKIT_ARTIFACT_DIR "${MONO_ACCESSKIT_TARGET}")
+	set(MONO_ACCESSKIT_CARGO_ENV "CARGO_TARGET_DIR=${MONO_ACCESSKIT_TARGET}")
+	set(MONO_ACCESSKIT_TARGET_FLAG)
+	if(MONO_ACCESSKIT_RUST_TARGET)
+		set(MONO_ACCESSKIT_ARTIFACT_DIR "${MONO_ACCESSKIT_TARGET}/${MONO_ACCESSKIT_RUST_TARGET}")
+		set(MONO_ACCESSKIT_TARGET_FLAG --target "${MONO_ACCESSKIT_RUST_TARGET}")
+		string(TOUPPER "${MONO_ACCESSKIT_RUST_TARGET}" MONO_ACCESSKIT_TARGET_ENV)
+		string(REGEX REPLACE "[^A-Z0-9]" "_" MONO_ACCESSKIT_TARGET_ENV "${MONO_ACCESSKIT_TARGET_ENV}")
+		list(APPEND MONO_ACCESSKIT_CARGO_ENV
+			"CARGO_TARGET_${MONO_ACCESSKIT_TARGET_ENV}_LINKER=${CMAKE_C_COMPILER}")
+	endif()
 	set(MONO_ACCESSKIT_PROFILE debug)
 	set(MONO_ACCESSKIT_RELEASE_FLAG)
 	if(MONO_OPTIMISE)
 		set(MONO_ACCESSKIT_PROFILE release)
 		set(MONO_ACCESSKIT_RELEASE_FLAG --release)
 	endif()
-	if(WIN32)
+	if(MSVC)
 		set(MONO_ACCESSKIT_LIBRARY_NAME accesskit.lib)
 	else()
 		set(MONO_ACCESSKIT_LIBRARY_NAME libaccesskit.a)
 	endif()
-	set(MONO_ACCESSKIT_LIBRARY "${MONO_ACCESSKIT_TARGET}/${MONO_ACCESSKIT_PROFILE}/${MONO_ACCESSKIT_LIBRARY_NAME}")
+	set(MONO_ACCESSKIT_LIBRARY "${MONO_ACCESSKIT_ARTIFACT_DIR}/${MONO_ACCESSKIT_PROFILE}/${MONO_ACCESSKIT_LIBRARY_NAME}")
 	file(GLOB_RECURSE MONO_ACCESSKIT_SOURCES CONFIGURE_DEPENDS
 		"${MONO_VENDOR}/accesskit-c/src/*.rs"
 		"${MONO_VENDOR}/accesskit-c/build.rs")
 	add_custom_command(
 		OUTPUT "${MONO_ACCESSKIT_LIBRARY}"
-		COMMAND ${CMAKE_COMMAND} -E env "CARGO_TARGET_DIR=${MONO_ACCESSKIT_TARGET}"
-			${MONO_CARGO} build --locked ${MONO_ACCESSKIT_RELEASE_FLAG}
+		COMMAND ${CMAKE_COMMAND} -E env ${MONO_ACCESSKIT_CARGO_ENV}
+			${MONO_CARGO} build --locked ${MONO_ACCESSKIT_RELEASE_FLAG} ${MONO_ACCESSKIT_TARGET_FLAG}
 			--manifest-path "${MONO_VENDOR}/accesskit-c/Cargo.toml"
 		DEPENDS "${MONO_VENDOR}/accesskit-c/Cargo.toml" "${MONO_VENDOR}/accesskit-c/Cargo.lock" ${MONO_ACCESSKIT_SOURCES}
 		WORKING_DIRECTORY "${MONO_VENDOR}/accesskit-c"
@@ -246,6 +259,19 @@ if(MONO_BUILD_CLIENT)
 	add_dependencies(vendor_accesskit_c_static vendor_accesskit_c)
 	if(UNIX AND NOT APPLE)
 		target_link_libraries(vendor_accesskit_c_static INTERFACE Threads::Threads ${CMAKE_DL_LIBS} m)
+	endif()
+	if(APPLE)
+		# Rust's --print=native-static-libs reports these; the compiler supplies c, System and m.
+		find_library(MONO_ACCESSKIT_APPKIT AppKit REQUIRED)
+		find_library(MONO_ACCESSKIT_FOUNDATION Foundation REQUIRED)
+		find_library(MONO_ACCESSKIT_OBJC objc REQUIRED)
+		target_link_libraries(vendor_accesskit_c_static INTERFACE
+			${MONO_ACCESSKIT_APPKIT} ${MONO_ACCESSKIT_FOUNDATION} ${MONO_ACCESSKIT_OBJC})
+	endif()
+	if(WIN32)
+		# Rust's --print=native-static-libs reports this order for the pinned crate.
+		target_link_libraries(vendor_accesskit_c_static INTERFACE
+			kernel32 ntdll userenv ws2_32 dbghelp)
 	endif()
 	add_library(Vendor::accesskit-c ALIAS vendor_accesskit_c_static)
 	mono_vendor_system(vendor_accesskit_c_static)
