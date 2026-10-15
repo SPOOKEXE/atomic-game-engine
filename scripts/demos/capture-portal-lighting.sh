@@ -17,10 +17,6 @@
 # `mono.client/tests/PortalLighting.cpp` asserts the same scenes' light lists
 # headlessly; this script is the half only a GPU can answer - the lit pixels.
 #
-# The client is killed rather than waited for: there is a shutdown race in the
-# GPU teardown that predates the portal pass - `NON-EUCLIDEAN.md` Appendix A -
-# and the capture is written well before the exit that hangs.
-
 set -euo pipefail
 
 here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -29,9 +25,20 @@ root=$(cd -- "$here/../.." && pwd)
 preset=${PRESET:-dev}
 build="$root/.cache/build/$preset"
 out=${OUT:-$build/captures}
+skip_build=${SKIP_BUILD:-0}
 
-cmake -S "$root" --preset "$preset" > /dev/null
-cmake --build "$build" --target client
+if [ "$skip_build" != 0 ] && [ "$skip_build" != 1 ]; then
+	echo "SKIP_BUILD must be 0 or 1" >&2
+	exit 1
+fi
+
+if [ "$skip_build" = 0 ]; then
+	cmake -S "$root" --preset "$preset" > /dev/null
+	cmake --build "$build" --target client
+elif [ ! -x "$build/client/client" ]; then
+	echo "no prebuilt client at $build/client/client" >&2
+	exit 1
+fi
 
 mkdir -p "$out"
 
@@ -65,11 +72,20 @@ capture() {
 	fi
 
 	local shot="$out/portal-lighting-$scene-$view.bmp"
+	local runtime_log="$out/portal-lighting-$scene-$view.runtime.log"
 	rm -f "$shot"
 
 	echo "capturing $scene $view"
-	timeout --signal=KILL 120 "$build/client/client" \
-		--script "$staged" --frames 30 --capture "$shot" > /dev/null 2>&1 || true
+	# Keep the log and require a clean client exit; a BMP can outlive a failure.
+	if timeout --signal=KILL 120 "$build/client/client" \
+		--script "$staged" --frames 30 --capture "$shot" > "$runtime_log" 2>&1; then
+		:
+	else
+		local status=$?
+		echo "  client failed with status $status; log: $runtime_log" >&2
+		tail -n 40 "$runtime_log" >&2
+		exit "$status"
+	fi
 
 	if [ ! -f "$shot" ]; then
 		echo "  no capture written - run the client by hand to see why" >&2
