@@ -8,6 +8,12 @@ images, lightning, portal composition and exact opaque-wall preservation pass
 in both development and strict CI builds. CPU and GPU measurements are recorded
 below. Other backends have not been run.
 
+The later [portal and mirror visual validation](WEATHER_VISUAL_VALIDATION.md)
+records the expanded scene checks, capture repairs and an unresolved
+intermittent black frame during a 144 FPS portal crossing. The final client
+rerun also fails handoff sample-count gates. A passing earlier isolated rerun
+does not close these findings.
+
 ## Implemented behavior
 
 | Area | Implementation |
