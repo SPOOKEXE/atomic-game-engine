@@ -412,9 +412,13 @@ namespace engine::replication {
 
 	  private:
 		struct Peer {
+			// Tracks state publications successfully queued for this peer to suppress duplicates.
 			struct EntityStateReceipt {
+				// Name identifying the world that owns the entity.
 				core::Name World;
+				// Full entity handle, including its generation.
 				ecs::Entity Entity;
+				// Token for the last successfully queued state publication.
 				uint64_t Publication = 0;
 			};
 			// Admission receipts, never another copy of the state carried by the wire.

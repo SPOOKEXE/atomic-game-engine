@@ -110,6 +110,7 @@ specific game, follow the genre table later in this document instead.
 
 ## Gameplay, navigation, and animation
 
+<a id="g01-character-intent-shared-movement-and-prediction-parity"></a>
 ### G01. Character intent, shared movement, and prediction parity
 
 P1. Extension and planned. Owners: [character system](future-work/character-system.md)
@@ -131,6 +132,7 @@ latency. Report correction size and replay cost. Arbitrary scripted movement
 needs an explicit prediction policy; reproducible fixed ticks do not establish
 bitwise determinism across machines.
 
+<a id="g02-historical-hitboxes-and-authoritative-combat-queries"></a>
 ### G02. Historical hitboxes and authoritative combat queries
 
 P1 for shooters. Extension. Build on the current position rewind and query APIs.
@@ -147,6 +149,7 @@ portal traversal. Unity documents [collision-world history](https://docs.unity3d
 Riot explains why [bounded rewind](https://www.riotgames.com/en/news/peeking-valorants-netcode)
 matters to actual gunplay.
 
+<a id="g03-reusable-abilities-attributes-effects-and-gameplay-cues"></a>
 ### G03. Reusable abilities, attributes, effects, and gameplay cues
 
 P1 for MOBAs, RPGs, and hero shooters. Extension; a complete shared contract was
@@ -164,6 +167,7 @@ interrupt. Two clients must agree after duplicate requests and denied casts;
 predicted sound/VFX must not play twice. Unreal's [ability framework](https://dev.epicgames.com/documentation/en-us/unreal-engine/understanding-the-unreal-engine-gameplay-ability-system)
 is a useful behavioural reference. Copy the useful contract, not its class tree.
 
+<a id="g04-team-vision-fog-of-war-and-gameplay-relevance"></a>
 ### G04. Team vision, fog of war, and gameplay relevance
 
 P1 for MOBAs/RTS; P2 elsewhere. Extension; a complete gameplay vision service
@@ -181,6 +185,7 @@ actual outgoing data. League's [fog-of-war account](https://www.riotgames.com/en
 is a concrete reference for the visual side; the disclosure policy is a proposed
 engine/game contract, not a claim about that article's network implementation.
 
+<a id="g05-tiled-navigation-meshes-and-bounded-route-queries"></a>
 ### G05. Tiled navigation meshes and bounded route queries
 
 P1. Extension and planned: [navigation and AI](future-work/navigation-ai-system.md).
@@ -228,6 +233,7 @@ returns home. A ranged enemy chooses reachable cover. Unreal's
 and [EQS example](https://dev.epicgames.com/documentation/unreal-engine/environment-query-system-quick-start-in-unreal-engine)
 provide useful references for state inspection and candidate scoring.
 
+<a id="g08-animation-graphs-masks-synchronisation-and-event-markers"></a>
 ### G08. Animation graphs, masks, synchronisation, and event markers
 
 P1. Extension and planned in the character plan. Clips and weighted tracks
@@ -279,6 +285,7 @@ live spectating. Use this to inspect G02 and G04 before building a broadcast UI.
 
 ## Physics and physical gameplay
 
+<a id="p01-solve-the-existing-generic-constraints"></a>
 ### P01. Solve the existing generic constraints
 
 P1. Extension and planned: [physics expansion](future-work/physics-expansion.md).
@@ -379,6 +386,7 @@ systems should supply inputs where appropriate.
 
 ## Rendering and content scale
 
+<a id="r01-baked-lighting-reflection-probes-and-a-deliberate-gi-path"></a>
 ### R01. Baked lighting, reflection probes, and a deliberate GI path
 
 P1/P2. Extension; a complete light-baking/probe workflow was not found. Existing
@@ -411,6 +419,7 @@ existing lighting result within a declared tolerance, show affected lights per
 tile and shadow-update decisions, and measure total GPU time including list
 construction. More queues or fewer draw calls alone are not proof of a win.
 
+<a id="r03-material-graphs-instances-and-permutation-control"></a>
 ### R03. Material graphs, instances, and permutation control
 
 P1/P2. Extension. Materials, map channels, runtime fragment shaders, and cooked
@@ -650,6 +659,7 @@ Define rebuild budgets and last-good output while a chunk changes. Large
 planets additionally need a coordinate/precision contract across physics,
 rendering, networking, and asset placement.
 
+<a id="w02-world-cell-streaming-with-explicit-activation"></a>
 ### W02. World cell streaming with explicit activation
 
 P1 for MMOs/open worlds. Extension and planned:
@@ -668,6 +678,7 @@ Unreal's [World Partition](https://dev.epicgames.com/documentation/en-us/unreal-
 and Roblox's [instance streaming](https://create.roblox.com/docs/workspace/streaming)
 show useful author-facing concepts; they do not solve cross-server MMO placement.
 
+<a id="w03-prefabs-variants-and-versioned-content-packages"></a>
 ### W03. Prefabs, variants, and versioned content packages
 
 P1. Extension and planned:
@@ -742,6 +753,7 @@ one reward, reconnect, and retain the result. Inspect the chain from definition
 to authoritative state to UI. This is a practical integration test for G03,
 W03, and W05, even if no generic quest framework is ultimately needed.
 
+<a id="w07-repeatable-multiplayer-fault-scenes-and-load-profiles"></a>
 ### W07. Repeatable multiplayer fault scenes and load profiles
 
 P1/P2. Extension. Existing tests, stress scenes, observations, automation,

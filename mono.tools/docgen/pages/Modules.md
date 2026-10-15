@@ -59,10 +59,12 @@ files and prose in graph modules, ordering modules by the layers in
 - @subpage md_mono_8cdn_2AGENTS
 - @subpage md_mono_8cdn_2docs_2index
 - @subpage md_mono_8client_2AGENTS
+- @subpage md_mono_8client_2docs_2FramePacing
 - @subpage md_mono_8launcher_2AGENTS
 - @subpage md_mono_8studio_2nodegraph_2AGENTS
 - @subpage md_mono_8server_2AGENTS
 - @subpage md_mono_8studio_2AGENTS
+- @subpage md_mono_8studio_2docs_2FramePacing
 - @subpage md_mono_8unified__tests_2AGENTS
 - @subpage md_mono_8tools_2AGENTS
 - @subpage md_mono_8tools_2docgen_2AGENTS
