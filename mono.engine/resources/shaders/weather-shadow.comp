@@ -32,10 +32,8 @@ bool PageKeyLess(ivec4 first, ivec4 second) {
 
 int FindPage(ivec3 coordinate, uint lod) {
 	int edge = 8 << lod;
-	ivec3 quotient = coordinate / edge;
-	for (uint axis = 0u; axis < 3u; ++axis)
-		if (coordinate[axis] < 0 && coordinate[axis] % edge != 0) --quotient[axis];
-	ivec4 key = ivec4(quotient * edge, int(lod));
+	ivec3 origin = ivec3(uvec3(coordinate) & uvec3(~(uint(edge) - 1u)));
+	ivec4 key = ivec4(origin, int(lod));
 	uint low = 0u;
 	uint high = pass.Field.Bricks.w;
 	while (low < high) {
@@ -105,8 +103,8 @@ float DensityAt(vec3 world) {
 	// Certified empty pages include their reconstruction halo for every accepted time.
 	if (selectedPage >= 0 && ((uint(pageTable.keys[selectedPage].w) >> 5u) & 3u) == 2u) return 0.0;
 	float density = DensityAtLod(canonical, selected);
-	// Coarse zero samples cannot prove that a thin canonical feature is absent.
-	if (pass.Field.Origin.w == 0 && approximationUsed) {
+	// Canonical fallback at coarse corners still interpolates across unresolved fine features.
+	if (pass.Field.Origin.w == 0 && (selected > 0u || approximationUsed)) {
 		ivec3 cell = ivec3(floor(canonical));
 		vec3 weight = fract(canonical);
 		float fine = 0.0;

@@ -13,7 +13,9 @@
 #include <catch2/catch_approx.hpp>
 #include <glm/packing.hpp>
 
+#include <cmath>
 #include <fstream>
+#include <limits>
 
 TEST_SUITE_ID("engine.render.weathershadows")
 TEST_DEPENDS("engine.render.weathergpu")
@@ -36,6 +38,29 @@ namespace {
 		WeatherResidencyView view;
 		view.View.CameraPositionMetres = position;
 		return view;
+	}
+
+	SDL_GPUComputePipeline *WeatherPipeline(SDL_GPUDevice *device, bool generateField = false) {
+		const auto binary = ShaderBinaryFor(device);
+		std::ifstream file(
+			resources::Shader(generateField ? "weather-generate.comp" : "weather-shadow.comp", binary.Form),
+			std::ios::binary
+		);
+		const std::vector<char> bytes{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+		REQUIRE_FALSE(bytes.empty());
+		SDL_GPUComputePipelineCreateInfo description{};
+		description.code = reinterpret_cast<const Uint8 *>(bytes.data());
+		description.code_size = bytes.size();
+		description.entrypoint = binary.EntryPoint;
+		description.format = binary.Format;
+		description.num_readonly_storage_buffers = generateField ? 1 : 2;
+		description.num_readwrite_storage_buffers = generateField ? 1 : 0;
+		description.num_readwrite_storage_textures = generateField ? 0 : 1;
+		description.num_uniform_buffers = 1;
+		description.threadcount_x = generateField ? 64 : 8;
+		description.threadcount_y = generateField ? 1 : 8;
+		description.threadcount_z = 1;
+		return SDL_CreateGPUComputePipeline(device, &description);
 	}
 
 	std::array<float, 4> ReadCentre(Renderer &renderer, uint32_t extent) {
@@ -192,26 +217,11 @@ TEST_CASE(
 	test::FixtureDevice fixture;
 	fixture.Initialise();
 	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
-	const auto binary = ShaderBinaryFor(device);
-	std::ifstream file(resources::Shader("weather-shadow.comp", binary.Form), std::ios::binary);
-	const std::vector<char> bytes{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
-	REQUIRE_FALSE(bytes.empty());
-	SDL_GPUComputePipelineCreateInfo pipelineDescription{};
-	pipelineDescription.code = reinterpret_cast<const Uint8 *>(bytes.data());
-	pipelineDescription.code_size = bytes.size();
-	pipelineDescription.entrypoint = binary.EntryPoint;
-	pipelineDescription.format = binary.Format;
-	pipelineDescription.num_readonly_storage_buffers = 2;
-	pipelineDescription.num_readwrite_storage_textures = 1;
-	pipelineDescription.num_uniform_buffers = 1;
-	pipelineDescription.threadcount_x = 8;
-	pipelineDescription.threadcount_y = 8;
-	pipelineDescription.threadcount_z = 1;
 	const auto releasePipeline = [device](SDL_GPUComputePipeline *pipeline) {
 		SDL_ReleaseGPUComputePipeline(device, pipeline);
 	};
 	std::unique_ptr<SDL_GPUComputePipeline, decltype(releasePipeline)> pipeline(
-		SDL_CreateGPUComputePipeline(device, &pipelineDescription), releasePipeline
+		WeatherPipeline(device), releasePipeline
 	);
 	REQUIRE(pipeline);
 	const auto releaseBuffer = [device](SDL_GPUBuffer *buffer) { gpu::ReleaseBuffer(device, buffer); };
@@ -318,6 +328,199 @@ TEST_CASE(
 	CHECK(first.y == Catch::Approx(extinction).epsilon(.002));
 	CHECK(second.x == Catch::Approx(extinction).epsilon(.002));
 	CHECK(second.y == Catch::Approx(extinction * .5f).epsilon(.002));
+}
+
+TEST_CASE(
+	"weather GPU shadow coarse unsafe fallback respects the canonical optical error bound",
+	"[render][gpu][weather][shadows][.]"
+) {
+	test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
+	const auto releasePipeline = [device](SDL_GPUComputePipeline *pipeline) {
+		SDL_ReleaseGPUComputePipeline(device, pipeline);
+	};
+	std::unique_ptr<SDL_GPUComputePipeline, decltype(releasePipeline)> fieldPipeline(
+		WeatherPipeline(device, true), releasePipeline
+	);
+	std::unique_ptr<SDL_GPUComputePipeline, decltype(releasePipeline)> shadowPipeline(
+		WeatherPipeline(device), releasePipeline
+	);
+	REQUIRE(fieldPipeline);
+	REQUIRE(shadowPipeline);
+	constexpr uint32_t COMPACT_BYTES = 2048;
+	const auto releaseBuffer = [device](SDL_GPUBuffer *buffer) { gpu::ReleaseBuffer(device, buffer); };
+	SDL_GPUBufferCreateInfo bufferDescription{};
+	bufferDescription.usage =
+		SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+	bufferDescription.size = COMPACT_BYTES;
+	std::unique_ptr<SDL_GPUBuffer, decltype(releaseBuffer)> cells(
+		gpu::CreateBuffer(device, &bufferDescription), releaseBuffer
+	);
+	bufferDescription.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+	bufferDescription.size = sizeof(glm::ivec4);
+	std::unique_ptr<SDL_GPUBuffer, decltype(releaseBuffer)> pages(
+		gpu::CreateBuffer(device, &bufferDescription), releaseBuffer
+	);
+	REQUIRE(cells);
+	REQUIRE(pages);
+	SDL_GPUTextureCreateInfo textureDescription{};
+	textureDescription.type = SDL_GPU_TEXTURETYPE_2D;
+	textureDescription.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+	textureDescription.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+	textureDescription.width = textureDescription.height = 32;
+	textureDescription.layer_count_or_depth = textureDescription.num_levels = 1;
+	const auto releaseTexture = [device](SDL_GPUTexture *texture) { gpu::ReleaseTexture(device, texture); };
+	std::unique_ptr<SDL_GPUTexture, decltype(releaseTexture)> map(
+		gpu::CreateTexture(device, &textureDescription), releaseTexture
+	);
+	REQUIRE(map);
+	scene::WeatherCompute controls;
+	controls.CellSizeMetres = 1;
+	controls.BaseHeightMetres = 1;
+	controls.ThicknessMetres = 32;
+	controls.ExtentMetres = {128, 64, 128};
+	controls.Coverage = 1;
+	controls.CondensateScale = .0003f;
+	controls.VapourMixingRatio = controls.VapourScale;
+	controls.BaseTemperatureCelsius = -50;
+	controls.TemperatureVariationCelsius = 0;
+	controls.PressureVariationHectopascals = 32;
+	controls.TurbulenceMetresPerSecond = 16;
+	controls.WindMetresPerSecond = {};
+	controls.FrontContrast = 0;
+	controls.GrowthRate = 0;
+	controls.FeatureCells = 1;
+	controls.LodError = .001f;
+	auto inputs = Inputs(controls);
+	inputs.Uniforms.Grid = {8, 8, 8, 512};
+	inputs.Uniforms.Origin = {0, 0, 0, 0};
+	inputs.Uniforms.Bricks = {1, 1, 1, 1};
+	inputs.Uniforms.Phase.w = 3;
+	// An aged compact LOD3 page must regenerate its sharp groups through canonical fallback.
+	const std::array keys{glm::ivec4(0, 0, 0, 3 | (1 << 5))};
+	auto *command = SDL_AcquireGPUCommandBuffer(device);
+	REQUIRE(command);
+	REQUIRE(RecordWeatherPages(device, command, pages.get(), keys));
+	REQUIRE(RecordWeatherField(
+		command, fieldPipeline.get(), cells.get(), pages.get(), inputs.Uniforms, COMPACT_BYTES
+	));
+	WeatherShadowPlan plan;
+	plan.Enabled = true;
+	plan.Resolution = 32;
+	plan.Cascades = 1;
+	plan.Lighting.Regions[0] = {16, 16, 1, 0};
+	plan.Lighting.Controls = {1, 1, 33, 1};
+	plan.Lighting.ToSun = {0, 1, 0, 8};
+	plan.Lighting.Receiver = {16, 16, 0, 1};
+	REQUIRE(RecordWeatherShadows(
+		command, shadowPipeline.get(), cells.get(), pages.get(), map.get(), plan, inputs, controls, 1
+	));
+	REQUIRE(SDL_SubmitGPUCommandBuffer(command));
+	SDL_GPUTransferBufferCreateInfo downloadDescription{};
+	downloadDescription.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+	downloadDescription.size = 256 + COMPACT_BYTES;
+	const auto releaseTransfer = [device](SDL_GPUTransferBuffer *transfer) {
+		gpu::ReleaseTransferBuffer(device, transfer);
+	};
+	std::unique_ptr<SDL_GPUTransferBuffer, decltype(releaseTransfer)> download(
+		gpu::CreateTransferBuffer(device, &downloadDescription), releaseTransfer
+	);
+	REQUIRE(download);
+	command = SDL_AcquireGPUCommandBuffer(device);
+	REQUIRE(command);
+	auto *copy = SDL_BeginGPUCopyPass(command);
+	REQUIRE(copy);
+	const SDL_GPUTextureRegion from{map.get(), 0, 0, 16, 16, 0, 1, 1, 1};
+	SDL_GPUTextureTransferInfo to{};
+	to.transfer_buffer = download.get();
+	to.pixels_per_row = 32;
+	to.rows_per_layer = 1;
+	SDL_DownloadFromGPUTexture(copy, &from, &to);
+	const SDL_GPUBufferRegion fieldFrom{cells.get(), 0, COMPACT_BYTES};
+	const SDL_GPUTransferBufferLocation fieldTo{download.get(), 256};
+	SDL_DownloadFromGPUBuffer(copy, &fieldFrom, &fieldTo);
+	SDL_EndGPUCopyPass(copy);
+	auto *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+	REQUIRE(fence);
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+	while (!SDL_QueryGPUFence(device, fence) && std::chrono::steady_clock::now() < deadline)
+		SDL_Delay(1);
+	REQUIRE(SDL_QueryGPUFence(device, fence));
+	SDL_ReleaseGPUFence(device, fence);
+	const auto *mapped =
+		static_cast<const uint32_t *>(SDL_MapGPUTransferBuffer(device, download.get(), false));
+	REQUIRE(mapped);
+	const auto first = glm::unpackHalf2x16(mapped[0]);
+	const auto second = glm::unpackHalf2x16(mapped[1]);
+	const std::array actual{first.x, first.y, second.x, second.y};
+	const std::array halfCodes{mapped[0] & 65535u, mapped[0] >> 16u, mapped[1] & 65535u, mapped[1] >> 16u};
+	std::array<uint32_t, COMPACT_BYTES / sizeof(uint32_t)> packed;
+	std::memcpy(packed.data(), mapped + 256 / sizeof(uint32_t), COMPACT_BYTES);
+	SDL_UnmapGPUTransferBuffer(device, download.get());
+	// The probe's eight corners touch exactly these three groups throughout its full vertical ray.
+	for (uint32_t groupY = 0; groupY < 3; ++groupY) {
+		const uint32_t group = 1 + 4 * (groupY + 4);
+		INFO("coarse fallback group " << group);
+		REQUIRE((packed[group * 8 + 1] & (1u << 23)) != 0);
+	}
+	const auto reference = [&](int32_t stride) {
+		std::array<float, 4> bands{};
+		constexpr float PROBE = 16.0f + 1.0f / 32;
+		constexpr float STEP = .5f;
+		for (uint32_t index = 0; index < 64; ++index) {
+			const float height = controls.BaseHeightMetres + (float(index) + .5f) * STEP;
+			const std::array point{PROBE / stride, height / stride, PROBE / stride};
+			const std::array cell{
+				int32_t(std::floor(point[0])) * stride,
+				int32_t(std::floor(point[1])) * stride,
+				int32_t(std::floor(point[2])) * stride
+			};
+			const std::array weight{
+				point[0] - std::floor(point[0]),
+				point[1] - std::floor(point[1]),
+				point[2] - std::floor(point[2])
+			};
+			float density = 0;
+			for (int32_t z = 0; z < 2; ++z)
+				for (int32_t y = 0; y < 2; ++y)
+					for (int32_t x = 0; x < 2; ++x) {
+						const auto encoded = weather::Evaluate(
+							inputs.Compiled.Definition,
+							inputs.Time,
+							{cell[0] + x * stride, cell[1] + y * stride, cell[2] + z * stride}
+						);
+						density += float(encoded.Codes[0]) / 255 * (x ? weight[0] : 1 - weight[0]) *
+								   (y ? weight[1] : 1 - weight[1]) * (z ? weight[2] : 1 - weight[2]);
+					}
+			const uint32_t band = uint32_t((height - controls.BaseHeightMetres) / 8);
+			bands[band] += density * weather::ExtinctionPerMetre(controls.CondensateScale) * STEP;
+		}
+		return bands;
+	};
+	const auto fine = reference(1);
+	const auto coarse = reference(8);
+	const auto sum = [](const std::array<float, 4> &values) {
+		return values[0] + values[1] + values[2] + values[3];
+	};
+	REQUIRE(std::abs(std::exp(-sum(coarse)) - std::exp(-sum(fine))) > controls.LodError * 8);
+	for (size_t receiverBand = 0; receiverBand < 4; ++receiverBand) {
+		float actualTau = 0;
+		float referenceTau = 0;
+		float rounding = 0;
+		for (size_t band = receiverBand; band < 4; ++band) {
+			actualTau += actual[band];
+			referenceTau += fine[band];
+			// Half an FP16 ULP bounds map encoding; exp(-tau) cannot amplify absolute tau error.
+			const uint32_t exponent = (halfCodes[band] >> 10u) & 31u;
+			rounding += std::ldexp(1.0f, int(std::max(exponent, 1u)) - 26);
+		}
+		rounding += 64 * std::numeric_limits<float>::epsilon() * std::max(referenceTau, 1.0f);
+		INFO(
+			"receiver band " << receiverBand << ": actual tau=" << actualTau << ", fine tau=" << referenceTau
+		);
+		CHECK(std::abs(std::exp(-actualTau) - std::exp(-referenceTau)) <= controls.LodError + rounding);
+	}
 }
 
 TEST_CASE(
