@@ -222,7 +222,10 @@ authored shadow resolution. Compare lower-quality maps with
 `just weather-gpu-bench 3 bench 1920 1080 128`.
 `MONO_WEATHER_GPU_BENCH_SHADOW_RESOLUTION` sets the same value when running the
 benchmark executable directly; invalid values are refused before SDL
-initialization.
+initialization. Set `MONO_WEATHER_GPU_BENCH_TICK` to choose its initial
+canonical tick, for example `MONO_WEATHER_GPU_BENCH_TICK=128`; the benchmark
+prints `initial_tick` and refuses values that leave its eight-tick phase open to
+overflow. Its default is `0`.
 
 Profile and soak outputs are retained under `.cache/`, including
 `.cache/medium-render-profile/`, `.cache/heap-*.txt`, and

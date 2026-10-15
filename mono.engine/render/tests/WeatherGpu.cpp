@@ -395,16 +395,38 @@ TEST_CASE("weather GPU generated words agree with canonical CPU samples", "[rend
 		gpu::CreateBuffer(device, &pageInfo), releaseBuffer
 	);
 	REQUIRE(pages);
-	for (const uint64_t tick :
-		 {uint64_t{0},
-		  uint64_t{251},
-		  (uint64_t{1} << 60) + 29,
-		  uint64_t{255},
-		  uint64_t{256},
-		  (uint64_t{1} << 40) - 1,
-		  uint64_t{1} << 40,
-		  (uint64_t{1} << 40) + 1,
-		  std::numeric_limits<uint64_t>::max()}) {
+	struct SampleCase {
+		uint64_t Tick;
+		uint32_t FeatureShift;
+		weather::CellCoordinate Origin;
+	};
+	const uint32_t shift = compiled->Definition.FeatureShift;
+	const auto origin = grid->Origin;
+	const weather::CellCoordinate lowHigh{INT32_MIN, origin.Y, INT32_MAX - 16};
+	const weather::CellCoordinate highLow{INT32_MAX - 16, origin.Y, INT32_MIN};
+	for (const auto sample :
+		 {SampleCase{0, shift, origin},
+		  SampleCase{6, shift, origin},
+		  SampleCase{7, shift, origin},
+		  SampleCase{249, shift, origin},
+		  SampleCase{250, shift, origin},
+		  SampleCase{251, shift, origin},
+		  SampleCase{(uint64_t{1} << 60) + 29, shift, origin},
+		  SampleCase{255, shift, origin},
+		  SampleCase{256, shift, origin},
+		  SampleCase{(uint64_t{1} << 40) - 1, shift, origin},
+		  SampleCase{uint64_t{1} << 40, shift, origin},
+		  SampleCase{(uint64_t{1} << 40) + 1, shift, origin},
+		  SampleCase{std::numeric_limits<uint64_t>::max(), shift, origin},
+		  SampleCase{(uint64_t{1} << 40) + 6, 0, lowHigh},
+		  SampleCase{(uint64_t{1} << 40) + 7, 0, lowHigh},
+		  SampleCase{(uint64_t{1} << 40) + 249, 10, highLow},
+		  SampleCase{(uint64_t{1} << 40) + 250, 10, highLow}}) {
+		const uint64_t tick = sample.Tick;
+		auto definition = compiled->Definition;
+		definition.FeatureShift = sample.FeatureShift;
+		auto sampleGrid = *grid;
+		sampleGrid.Origin = sample.Origin;
 		const auto time = weather::ResolveTime(weather::InitialAnchor(compiled->Definition), tick);
 		REQUIRE(time);
 		auto *command = SDL_AcquireGPUCommandBuffer(device);
@@ -414,21 +436,24 @@ TEST_CASE("weather GPU generated words agree with canonical CPU samples", "[rend
 			pipeline.get(),
 			cells.get(),
 			pages.get(),
-			WeatherUniformsOf(compiled->Definition, *time, *grid)
+			WeatherUniformsOf(definition, *time, sampleGrid)
 		));
 		REQUIRE(SDL_SubmitGPUCommandBuffer(command));
 		const auto actual = Download(device, cells.get(), grid->CellCount);
 		for (uint32_t index = 0; index < grid->CellCount; ++index) {
 			const weather::CellCoordinate coordinate{
-				grid->Origin.X + int32_t(index % grid->Dimensions.x) * int32_t(grid->Stride),
-				grid->Origin.Y +
+				sampleGrid.Origin.X + int32_t(index % grid->Dimensions.x) * int32_t(grid->Stride),
+				sampleGrid.Origin.Y +
 					int32_t((index / grid->Dimensions.x) % grid->Dimensions.y) * int32_t(grid->Stride),
-				grid->Origin.Z +
+				sampleGrid.Origin.Z +
 					int32_t(index / (grid->Dimensions.x * grid->Dimensions.y)) * int32_t(grid->Stride)
 			};
-			const auto expected = weather::Evaluate(compiled->Definition, *time, coordinate);
+			const auto expected = weather::Evaluate(definition, *time, coordinate);
 			for (uint32_t lane = 0; lane < 8; ++lane) {
-				INFO("tick=" << tick << " index=" << index << " lane=" << lane);
+				INFO(
+					"tick=" << tick << " shift=" << sample.FeatureShift << " index=" << index
+							<< " lane=" << lane
+				);
 				REQUIRE(((actual[index][lane / 4] >> (8 * (lane % 4))) & 255u) == expected.Codes[lane]);
 			}
 		}

@@ -70,8 +70,16 @@ uint WeatherNoise(WeatherField field, ivec3 coordinate, uint purpose, uint shift
 	uint seed = field.Identity.x ^ WeatherHash(field.Identity.y);
 	uint epoch = (field.Phase.x >> 8u) | (field.Phase.y << 24u);
 	uint phase = WeatherSmooth(field.Phase.x & 255u);
+#ifdef WEATHER_BRANCHLESS_NOISE
 	return WeatherInterpolate(WeatherNoiseAt(seed, purpose, epoch, x, y, z),
 		WeatherNoiseAt(seed, purpose, epoch + 1u, x, y, z), phase);
+#else
+	// Uniform endpoint weights make the other epoch contribute exactly zero.
+	uint first = WeatherNoiseAt(seed, purpose, epoch + uint(phase == 256u), x, y, z);
+	if (phase == 0u || phase == 256u) return first;
+	return WeatherInterpolate(first,
+		WeatherNoiseAt(seed, purpose, epoch + 1u, x, y, z), phase);
+#endif
 }
 
 // Modular subtraction first avoids signed overflow for extreme canonical coordinates.

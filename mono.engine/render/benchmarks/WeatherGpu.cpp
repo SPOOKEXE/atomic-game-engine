@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -68,6 +69,21 @@ namespace {
 				std::string(name) + " must be a decimal integer in 1.." + std::to_string(maximum)
 			);
 		return extent;
+	}
+
+	uint64_t BenchmarkTick(const char *name, uint64_t fallback) {
+		const char *configured = std::getenv(name);
+		if (!configured) return fallback;
+		const std::string_view text(configured);
+		uint64_t tick = 0;
+		const auto parsed = std::from_chars(text.data(), text.data() + text.size(), tick, 10);
+		const uint64_t maximum = std::numeric_limits<uint64_t>::max() - PHASE_FRAMES;
+		if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || tick > maximum)
+			throw std::runtime_error(
+				std::string(name) + " must be a decimal uint64 no greater than " + std::to_string(maximum) +
+				" so the advancing phase cannot overflow"
+			);
+		return tick;
 	}
 
 	struct PassTiming {
@@ -164,11 +180,13 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 	uint32_t width = 1920;
 	uint32_t height = 1080;
 	uint32_t shadowResolution = 256;
+	uint64_t initialTick = 0;
 	try {
 		width = BenchmarkExtent("MONO_WEATHER_GPU_BENCH_WIDTH", width, 3840);
 		height = BenchmarkExtent("MONO_WEATHER_GPU_BENCH_HEIGHT", height, 2160);
 		shadowResolution =
 			BenchmarkExtent("MONO_WEATHER_GPU_BENCH_SHADOW_RESOLUTION", shadowResolution, 2048);
+		initialTick = BenchmarkTick("MONO_WEATHER_GPU_BENCH_TICK", initialTick);
 		if (shadowResolution < 32 || !std::has_single_bit(shadowResolution))
 			throw std::runtime_error(
 				"MONO_WEATHER_GPU_BENCH_SHADOW_RESOLUTION must be a power of two in 32..2048"
@@ -215,6 +233,7 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 	environment.Weather.ShadowResolution = shadowResolution;
 	environment.Weather.ShadowCascades = 1;
 	environment.Weather.ShadowDistanceMetres = 1024;
+	environment.Clock.Tick = initialTick;
 	environment.CloudLayer.Cover = 1;
 	environment.CloudLayer.Density = 1;
 	const auto compiled = weather::Compile(environment.Weather);
@@ -287,7 +306,7 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 		<< " cell_size_metres=" << environment.Weather.CellSizeMetres
 		<< " cloud_steps=" << environment.CloudVolume.Steps << " tick_rate=" << environment.Weather.TickRate
 		<< " shadow_resolution=" << environment.Weather.ShadowResolution
-		<< " shadow_cascades=" << environment.Weather.ShadowCascades
+		<< " shadow_cascades=" << environment.Weather.ShadowCascades << " initial_tick=" << initialTick
 		<< " field_dispatch_cells_per_generation=";
 	const double fieldGenerations = PhaseWork(phases[0], "field_dispatches");
 	if (fieldGenerations > 0)

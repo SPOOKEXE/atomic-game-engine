@@ -1,5 +1,7 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+// Endpoint branching cost 3 to 6 percent on interior phases in the RTX 4090 Vulkan shadow benchmark.
+#define WEATHER_BRANCHLESS_NOISE
 #include "weather-common.glsl"
 #include "weather-assembly.glsl"
 
