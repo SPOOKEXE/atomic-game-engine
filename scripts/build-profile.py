@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reports retained Ninja edge history and cumulative ccache outcomes for one build tree.
+"""Reports retained build history, or profiles one command's build activity.
 
 Ninja retains one entry per output across invocations. Its log records elapsed
 time for each edge, not the dependency critical path. Edges overlap, so grouped
@@ -16,11 +16,14 @@ that source to its authored .cpp includes for attribution only.
 from __future__ import annotations
 
 import argparse
+import re
+import subprocess
+import sys
+import time
+from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-import re
-from typing import Iterable
-
 
 UNITY_INCLUDE = re.compile(r'^\s*#include\s+"([^"]+\.cpp)"\s*$')
 
@@ -71,11 +74,11 @@ class CacheOutcome:
 		return 100.0 * self.misses / self.cacheable_calls if self.cacheable_calls else 0.0
 
 
-def read_ninja_log(path: Path) -> list[BuildEdge]:
-	"""Reads Ninja v5 rows, coalescing each multi-output command by hash."""
+def parse_ninja_log(lines: Iterable[str]) -> list[BuildEdge]:
+	"""Coalesces Ninja v5 rows from the selected log interval."""
 
 	commands: dict[tuple[int, int, str], list[str]] = {}
-	for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+	for line in lines:
 		if not line or line.startswith("#"):
 			continue
 		fields = line.split("\t")
@@ -103,6 +106,41 @@ def read_ninja_log(path: Path) -> list[BuildEdge]:
 			)
 		)
 	return edges
+
+
+def read_ninja_log(path: Path) -> list[BuildEdge]:
+	"""Reads retained Ninja v5 rows."""
+
+	return parse_ninja_log(path.read_text(encoding="utf-8", errors="replace").splitlines())
+
+
+def new_ninja_rows(before: bytes | None, after: bytes | None) -> list[str]:
+	"""Finds new rows even when Ninja compacts its retained output history."""
+
+	if after is None:
+		return []
+	if before is None:
+		delta = after
+	elif after.startswith(before):
+		delta = after[len(before):]
+	else:
+		# A rewritten log can retain older rows for an output with newly stamped mtimes.
+		# Only its last row represents the latest completed edge for that output.
+		latest_rows: dict[bytes, bytes] = {}
+		for row in after.splitlines():
+			fields = row.split(b"\t")
+			if len(fields) == 5:
+				latest_rows[fields[3]] = row
+		# Keep the raw mtime column. Equal durations and hashes can occur in later builds.
+		previous = Counter(before.splitlines())
+		new_rows = []
+		for row in latest_rows.values():
+			if previous[row]:
+				previous[row] -= 1
+			else:
+				new_rows.append(row.decode("utf-8", errors="replace"))
+		return new_rows
+	return delta.decode("utf-8", errors="replace").splitlines()
 
 
 def build_span(edges: Iterable[BuildEdge]) -> tuple[int, int] | None:
@@ -183,7 +221,7 @@ CCACHE_AUXILIARY_EVENTS = CCACHE_HIT_EVENTS | {
 }
 
 
-def read_ccache_stats(path: Path) -> dict[str, CacheOutcome]:
+def parse_ccache_stats(lines: Iterable[str]) -> dict[str, CacheOutcome]:
 	"""Accumulates terminal ccache hits and misses from comment-delimited blocks."""
 
 	results: dict[str, CacheOutcome] = {}
@@ -204,7 +242,7 @@ def read_ccache_stats(path: Path) -> dict[str, CacheOutcome]:
 			for reason in reasons or ["unknown_outcome"]:
 				outcome.reasons[reason] = outcome.reasons.get(reason, 0) + 1
 
-	for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+	for raw in lines:
 		line = raw.strip()
 		if line.startswith("#"):
 			finish()
@@ -214,6 +252,12 @@ def read_ccache_stats(path: Path) -> dict[str, CacheOutcome]:
 			events.add(line)
 	finish()
 	return results
+
+
+def read_ccache_stats(path: Path) -> dict[str, CacheOutcome]:
+	"""Reads cumulative ccache outcomes."""
+
+	return parse_ccache_stats(path.read_text(encoding="utf-8", errors="replace").splitlines())
 
 
 def source_for_cache_unit(build_directory: Path, translation_unit: str) -> Path | None:
@@ -235,19 +279,21 @@ def display_cache_unit(build_directory: Path, outcome: CacheOutcome) -> str:
 	return f"{outcome.translation_unit} [unity unit: {names}]"
 
 
-def print_edges(build_directory: Path, edges: list[BuildEdge], top: int) -> None:
-	"""Prints retained-log duration, grouped-work and final-tail edge views."""
+def print_edges(build_directory: Path, edges: list[BuildEdge], top: int, current_run: bool = False) -> None:
+	"""Prints edge duration, grouped-work and final-tail views."""
 
 	span = build_span(edges)
 	if span is None:
-		print("ninja: no completed edges")
+		print("ninja: no completed edges" + (" in this run" if current_run else ""))
 		return
 	start, end = span
-	print(f"ninja retained-log span: {(end - start) / 1000.0:.3f} s across {len(edges)} completed edges")
-	print("Ninja retains output history across invocations. This is a single-build span only in a fresh tree, such as CI.")
+	scope = "this-run" if current_run else "retained-log"
+	print(f"ninja {scope} span: {(end - start) / 1000.0:.3f} s across {len(edges)} completed edges")
+	if not current_run:
+		print("Ninja retains output history across invocations. This is a single-build span only in a fresh tree, such as CI.")
 	print("edge durations are not a dependency critical path; parallel work overlaps.")
-	print("")
-	print(f"top {top} retained-log edges by elapsed time")
+	print()
+	print(f"top {top} {scope} edges by elapsed time")
 	for edge in sorted(edges, key=lambda value: value.elapsed_milliseconds, reverse=True)[:top]:
 		print(f"  {edge.elapsed_milliseconds / 1000.0:8.3f} s  {display_edge(build_directory, edge)}")
 
@@ -255,40 +301,54 @@ def print_edges(build_directory: Path, edges: list[BuildEdge], top: int) -> None
 	for edge in edges:
 		group = group_for(edge.output)
 		work[group] = work.get(group, 0) + edge.elapsed_milliseconds
-	print("")
-	print(f"top {top} groups by retained-log cumulative edge work")
+	print()
+	print(f"top {top} groups by {scope} cumulative edge work")
 	for group, milliseconds in sorted(work.items(), key=lambda item: item[1], reverse=True)[:top]:
 		print(f"  {milliseconds / 1000.0:8.3f} s  {group}")
 
 	tail_start = start + (end - start) * 9 // 10
 	tail = [edge for edge in edges if edge.end_milliseconds >= tail_start]
-	print("")
-	print(f"top {top} edges ending in the final 10% of the retained-log span")
+	print()
+	print(f"top {top} edges ending in the final 10% of the {scope} span")
 	for edge in sorted(tail, key=lambda value: value.elapsed_milliseconds, reverse=True)[:top]:
 		print(f"  {edge.elapsed_milliseconds / 1000.0:8.3f} s  {display_edge(build_directory, edge)}")
 
 
-def print_cache(build_directory: Path, stats_log: Path, top: int) -> None:
-	"""Prints cumulative ccache results without treating a cache hit as source-level work."""
+def print_cache(
+	build_directory: Path,
+	stats_log: Path,
+	top: int,
+	outcomes: dict[str, CacheOutcome] | None = None,
+	current_run: bool = False,
+) -> None:
+	"""Prints ccache results without treating a cache hit as source-level work."""
 
-	if not stats_log.is_file():
-		print("")
+	if outcomes is None and not stats_log.is_file():
+		print()
 		print(f"ccache: no stats log at {stats_log}")
 		return
-	outcomes = list(read_ccache_stats(stats_log).values())
-	measured = [outcome for outcome in outcomes if outcome.calls]
+	if outcomes is None:
+		outcomes = read_ccache_stats(stats_log)
+	measured = [outcome for outcome in outcomes.values() if outcome.calls]
 	if not measured:
-		print("")
-		print("ccache: stats log contains no terminal hit or miss outcomes")
+		print()
+		message = (
+			"ccache: no recorded calls in this run"
+			if current_run
+			else "ccache: stats log contains no terminal hit or miss outcomes"
+		)
+		print(message)
 		return
 	total_hits = sum(outcome.hits for outcome in measured)
 	total_misses = sum(outcome.misses for outcome in measured)
 	total_uncacheable = sum(outcome.uncacheable for outcome in measured)
 	total_cacheable = total_hits + total_misses
 	total_calls = total_cacheable + total_uncacheable
-	print("")
+	print()
 	hit_rate = 100.0 * total_hits / total_cacheable if total_cacheable else 0.0
-	print(f"ccache cumulative: {total_hits} hits, {total_misses} misses, {total_uncacheable} uncacheable "
+	print(
+		f"ccache {'this run' if current_run else 'cumulative'}: {total_hits} hits, "
+		f"{total_misses} misses, {total_uncacheable} uncacheable "
 		f"across {total_calls} compiler calls, {hit_rate:.1f}% cacheable hit rate")
 	print("cache granularity is the translation unit. Unity source lists are attribution only.")
 	print("translation units that always miss (at least 2 calls)")
@@ -316,11 +376,11 @@ def print_cache(build_directory: Path, stats_log: Path, top: int) -> None:
 		key=lambda value: (value.uncacheable, value.calls),
 		reverse=True,
 	)[:top]:
-		reasons = ", ".join(
+		reason_labels = ", ".join(
 			f"{reason} ({count})" for reason, count in sorted(outcome.reasons.items(), key=lambda item: (-item[1], item[0]))
 		)
 		print(
-			f"  {outcome.uncacheable:5d} uncacheable  {reasons}  "
+			f"  {outcome.uncacheable:5d} uncacheable  {reason_labels}  "
 			f"{display_cache_unit(build_directory, outcome)}"
 		)
 	reasons: dict[str, int] = {}
@@ -332,7 +392,7 @@ def print_cache(build_directory: Path, stats_log: Path, top: int) -> None:
 		print("  none")
 	for reason, count in sorted(reasons.items(), key=lambda item: (-item[1], item[0]))[:top]:
 		print(f"  {count:5d}  {reason}")
-	print(f"top {top} translation units by cumulative misses")
+	print(f"top {top} translation units by {'this-run' if current_run else 'cumulative'} misses")
 	misses = [outcome for outcome in measured if outcome.misses > 0]
 	if not misses:
 		print("  none")
@@ -344,22 +404,67 @@ def print_cache(build_directory: Path, stats_log: Path, top: int) -> None:
 		)
 
 
+def read_log_bytes(path: Path) -> bytes | None:
+	try:
+		return path.read_bytes()
+	except FileNotFoundError:
+		return None
+
+
+def profile_run(build_directory: Path, stats_log: Path, top: int, command: list[str]) -> int:
+	"""Runs one command and reports only its newly recorded build activity."""
+
+	ninja_log = build_directory / ".ninja_log"
+	previous_ninja = read_log_bytes(ninja_log)
+	previous_stats = read_log_bytes(stats_log)
+	start = time.monotonic()
+	try:
+		status = subprocess.run(command, check=False).returncode
+	except OSError as error:
+		print(f"build-profile: could not run {command[0]}: {error}", file=sys.stderr)
+		status = 127
+	wall_seconds = time.monotonic() - start
+	print(f"build wall time: {wall_seconds:.3f} s")
+	try:
+		current_ninja = read_log_bytes(ninja_log)
+		current_stats = read_log_bytes(stats_log)
+		edges = parse_ninja_log(new_ninja_rows(previous_ninja, current_ninja))
+		print_edges(build_directory, edges, top, current_run=True)
+		if current_stats is None:
+			print(f"\nccache: no stats log at {stats_log}")
+		elif previous_stats is not None and not current_stats.startswith(previous_stats):
+			print("\nccache: stats log was replaced; this-run outcomes cannot be determined")
+		else:
+			delta = current_stats[len(previous_stats):] if previous_stats is not None else current_stats
+			outcomes = parse_ccache_stats(delta.decode("utf-8", errors="replace").splitlines())
+			print_cache(build_directory, stats_log, top, outcomes, current_run=True)
+	except (OSError, ValueError) as error:
+		print(f"build-profile: report failed: {error}", file=sys.stderr)
+		return status if status else 1
+	return status
+
+
 def main() -> int:
 	parser = argparse.ArgumentParser(description=__doc__)
 	parser.add_argument("--build-dir", type=Path, required=True, help="CMake/Ninja build directory")
 	parser.add_argument("--stats-log", type=Path, help="CCACHE_STATSLOG path, defaulting inside build-dir")
 	parser.add_argument("--top", type=int, default=5, help="rows to print in each ranked section")
+	parser.add_argument("--run", nargs=argparse.REMAINDER, help="command and arguments to profile")
 	args = parser.parse_args()
 	if args.top <= 0:
 		parser.error("--top must be positive")
+	if args.run is not None and not args.run:
+		parser.error("--run requires a command")
 
 	build_directory = args.build_dir
 	ninja_log = build_directory / ".ninja_log"
+	stats_log = args.stats_log or build_directory / "ccache-stats.log"
+	if args.run is not None:
+		return profile_run(build_directory, stats_log, args.top, args.run)
 	if not ninja_log.is_file():
 		print(f"ninja: no log at {ninja_log}")
 	else:
 		print_edges(build_directory, read_ninja_log(ninja_log), args.top)
-	stats_log = args.stats_log or build_directory / "ccache-stats.log"
 	print_cache(build_directory, stats_log, args.top)
 	return 0
 

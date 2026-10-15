@@ -10,6 +10,13 @@ documentation generators can update checked-in reference files.
 Every Linux preset builds with GCC, and configure refuses any other compiler.
 Only the fuzz recipes use `clang++-21`, because libFuzzer needs it. If a build
 directory picked up another compiler, run `cmake --preset <name> --fresh`.
+This does not change the compiler: `MONO_LINKER=auto` uses LLVM LLD on native
+GCC/Linux when its probe succeeds, and otherwise uses the system linker. To
+use the system linker, configure with
+`cmake --preset dev -DMONO_LINKER=system`;
+`MONO_LINK_JOBS` (default `2`) limits concurrent first-party Ninja links. Set
+`MONO_LLD` to an `ld.lld` path when CMake cannot find it automatically.
+See [build performance](docs/BUILD_PERFORMANCE.md) for measurements and comparisons.
 
 ## Start here
 
@@ -62,8 +69,9 @@ just preset=server test
 | `ccache [size]` | Show compiler-cache status, or set its size. |
 | `configure` | Configure the selected preset. |
 | `build [target]` | Build the selected preset, optionally one target. |
-| `build-profile [target]` | Build and report Ninja and compiler-cache timing. |
+| `build-profile [target]` | Build and report current-invocation edge, compiler-cache, and wall-clock timing. |
 | `build-profile-check` | Test the build-profile tool. |
+| `linker-check` | Check automatic, system, and LLD linker selection in a standalone CMake fixture. |
 | `compiler-cache-check` | Verify GCC PCH regeneration and compiler-cache hits. |
 | `client` | Build the client. |
 | `server` | Build the server. |

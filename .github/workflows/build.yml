@@ -97,7 +97,6 @@ jobs:
           # profiler compiled in. It doubles an hour-long matrix, which is why
           # it runs for a tag only - a manual run publishes nothing.
           shipped='
-            {"platform":"linux-x86_64","runner":"ubuntu-24.04","optional":false,"flavour":"release","preset":"release"},
             {"platform":"windows-x86_64","runner":"windows-2022","optional":true,"flavour":"release","preset":"release"},
             {"platform":"macos-arm64","runner":"macos-14","optional":true,"flavour":"release","preset":"release"}'
           diagnostic='
@@ -340,6 +339,15 @@ jobs:
         run: |
           cmake --preset ${{ matrix.preset }}
           cmake --build --preset ${{ matrix.preset }} --target client studio server cdn launcher
+
+      - name: Check build profiler (Unix)
+        if: runner.os != 'Windows'
+        run: python3 scripts/tests/build_profile_test.py
+
+      - name: Check build profiler (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: python scripts\tests\build_profile_test.py
 
       # The repository's own Windows entry point rather than a marketplace
       # action that sets the same variables. Every preset generates for Ninja,

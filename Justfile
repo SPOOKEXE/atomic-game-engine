@@ -106,9 +106,8 @@ build target="":
     export CCACHE_STATSLOG="$PWD/{{build}}/ccache-stats.log"
     cmake --build --preset {{preset}} {{ if target == "" { "" } else { "--target " + target } }}
 
-# Report one selected build's Ninja edges and cumulative ccache outcomes. The
-# build status remains authoritative: a partial Ninja log is still useful after
-# a failed compile, but profiling must never turn that failure into success.
+# Report only the Ninja edges and ccache outcomes from this build invocation.
+# A partial log is still useful after a failed compile, and its exit status wins.
 build-profile target="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -116,26 +115,21 @@ build-profile target="":
         cmake --preset {{preset}} > /dev/null
     fi
     export CCACHE_STATSLOG="$PWD/{{build}}/ccache-stats.log"
-    set +e
-    cmake --build --preset {{preset}} {{ if target == "" { "" } else { "--target " + target } }}
-    build_status=$?
-    python3 scripts/build-profile.py --build-dir "{{build}}" --stats-log "$CCACHE_STATSLOG"
-    profile_status=$?
-    set -e
-    if [ "$build_status" -ne 0 ]; then
-        exit "$build_status"
-    fi
-    exit "$profile_status"
+    python3 scripts/build-profile.py --build-dir "{{build}}" --stats-log "$CCACHE_STATSLOG" --run cmake --build --preset {{preset}} {{ if target == "" { "" } else { "--target " + target } }}
 
 # The profiler is standalone so it can inspect a build before an engine tool
 # exists. Its synthetic fixtures cover Ninja timing, grouping, ccache outcomes
-# and unity-source attribution.
+# current-run log deltas and unity-source attribution.
 build-profile-check:
     python3 scripts/tests/build_profile_test.py
 
 # The real GCC PCH launcher, using an isolated cache under this preset's tree.
 compiler-cache-check:
     cmake -DMONO_TEST_ROOT="{{build}}" -P mono.build/tests/CompilerCache.cmake
+
+# Check real linker selection, fallback, pool limits and compile flag isolation.
+linker-check:
+    cmake -DMONO_TEST_ROOT="{{build}}" -P mono.build/tests/Linker.cmake
 
 # One program and only its dependencies.
 client: (build "client")
@@ -1332,7 +1326,7 @@ luau-lsp:
 # recipe is meant to be runnable mid-change. Use `just preset=ci check` for the
 # strictest configuration this repository has - which is also what the hook
 # runs, so a push is held to the strictest configuration by default.
-check: format-check em-dash-check build-profile-check compiler-cache-check build test-all test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
+check: format-check em-dash-check build-profile-check linker-check compiler-cache-check build test-all test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
     @echo "check ok - format, em dashes, build profile, compiler cache, build, tests, architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
 # Run the launcher - the window that starts any of the others.
