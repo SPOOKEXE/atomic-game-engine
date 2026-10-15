@@ -17,6 +17,7 @@
 #include "GraphHistory.hpp"
 #include "SsaoSettings.hpp"
 #include "ViewRecording.hpp"
+#include "WeatherFallback.hpp"
 #include "WeatherShadows.hpp"
 
 #include <engine/core/Log.hpp>
@@ -1399,6 +1400,8 @@ namespace engine::render {
 	bool ViewRecording::IdentityWriterInactive(core::Name kind) const {
 		// A sky node can read an authored environment different from the first sky.
 		if (kind == core::Name("sky")) return false;
+		if (kind == core::Name("weather-reconstruct"))
+			return !VisibleWeatherMedium(CurrentLighting.EnvironmentState);
 		if (kind == core::Name("fog")) return !Activity.Fog;
 		if (kind == core::Name("shader-lenses")) return LensGroupCount == 0;
 		if (kind == core::Name("dof")) return !Activity.DepthOfField;
@@ -1451,10 +1454,11 @@ namespace engine::render {
 		}
 
 		// Fixed PBR roles may share a texture even though the graph ids differ.
-		// An inactive writer is harmless only when it consumes this binding
-		// unchanged. Other identity fallbacks can still publish into fixed storage.
+		// Follow inactive identity outputs so intervening weather cannot hide a
+		// later writer consuming this binding unchanged.
 		bool after = false;
 		bool outputRewritten = false;
+		auto binding = target;
 		for (const auto id : Pipeline->Compiled.PerView) {
 			if (id == context.Node) {
 				after = true;
@@ -1463,19 +1467,24 @@ namespace engine::render {
 			const auto *node = Pipeline->Graph.Find(id);
 			if (!node) continue;
 			if (!after) continue;
+			const auto next = std::find_if(
+				Pipeline->Identities.begin(), Pipeline->Identities.end(), [&](const auto &identity) {
+					return identity.Node == id && identity.Source == binding;
+				}
+			);
 			const bool sameBinding =
-				!outputRewritten && IdentityWriterInactive(node->Kind) &&
-				std::any_of(Pipeline->Identities.begin(), Pipeline->Identities.end(), [&](const auto &next) {
-					return next.Node == id && next.Source == target;
-				});
+				!outputRewritten && IdentityWriterInactive(node->Kind) && next != Pipeline->Identities.end();
 			for (const auto written : node->Writes) {
 				const auto *output = Pipeline->Graph.FindResource(written);
-				if (!sameBinding && output &&
+				if ((!sameBinding || written != next->Target) && output &&
 					FixedTexture(output->Name, Request.TargetSlot).Texture == image.Texture)
 					return false;
 			}
-			outputRewritten |=
-				std::find(node->Writes.begin(), node->Writes.end(), target) != node->Writes.end();
+			if (sameBinding)
+				binding = next->Target;
+			else
+				outputRewritten |=
+					std::find(node->Writes.begin(), node->Writes.end(), binding) != node->Writes.end();
 		}
 		for (const auto id : Pipeline->Compiled.Final) {
 			const auto *node = Pipeline->Graph.Find(id);

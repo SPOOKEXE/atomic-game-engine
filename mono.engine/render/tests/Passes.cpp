@@ -690,15 +690,17 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 	CHECK(profile.Resources[38].Width == 320);
 	CHECK(profile.Resources[38].Height == 240);
 	// Potential identity inputs stay alive for named previews and captures.
-	// These are allocation-plan bounds; inactive outputs allocate no target.
-	CHECK(profile.PeakBytes == 46'746'624);
+	// At 640x480 the sky/weather bypass pins two 2,457,600-byte RGBA16F images.
+	// One extra physical target permits inactive forwarding with only the final
+	// composition copy. These are plan bounds; inactive outputs allocate no target.
+	CHECK(profile.PeakBytes == 51'661'824);
 	CHECK(profile.TotalBytes == 75'623'424);
-	CHECK(profile.AllocatedBytes == 39'936'000);
-	CHECK(profile.AliasedResources == 4);
+	CHECK(profile.AllocatedBytes == 42'393'600);
+	CHECK(profile.AliasedResources == 3);
 
 	CHECK(installed->Aliases.Allocations.size() == installed->Graph.ResourceCount());
-	CHECK(installed->Aliases.PhysicalTargets == 24);
-	CHECK(installed->Aliases.AliasedResources == 4);
+	CHECK(installed->Aliases.PhysicalTargets == 25);
+	CHECK(installed->Aliases.AliasedResources == 3);
 	const std::vector<std::string> expectedAliases{
 		"-",
 		"-",
@@ -742,7 +744,7 @@ TEST_CASE("the default PBR install matches its fixed graph baseline", "[render][
 		"lit",
 		"emissive",
 		"weather-lit",
-		"emissive",
+		"volume-lit",
 		"lens-b",
 		"lens-scratch",
 		"lens-scratch",

@@ -147,6 +147,79 @@ TEST_CASE("lens identity binds its colour ports regardless of port declaration o
 	CHECK(contracts[0].Target == output);
 }
 
+TEST_CASE("weather bypass preserves sampled colour across its storage output", "[render][identity]") {
+	graph::RegisterRenderNodeKinds();
+	graph::RenderGraph graph;
+	const auto sky = graph.AddResource(Colour("sky"));
+	auto storage = Colour("weather");
+	storage.Kind = graph::ResourceKind::Storage;
+	const auto weather = graph.AddResource(storage);
+	const auto scratch = graph.AddResource(Colour("scratch"));
+	const auto volume = graph.AddResource(Colour("volume"));
+	const auto producer =
+		graph.AddNode({.Name = core::Name("producer"), .Kind = core::Name("raster"), .Writes = {sky}});
+	const auto reconstruct = graph.AddNode(
+		{.Name = core::Name("weather"),
+		 .Kind = core::Name("weather-reconstruct"),
+		 .Reads = {sky},
+		 .ReadPorts = {core::Name("colour")},
+		 .Writes = {scratch, weather},
+		 .WritePorts = {core::Name("resolved"), core::Name("colour")}}
+	);
+	const auto fog = graph.AddNode(
+		{.Name = core::Name("fog"),
+		 .Kind = core::Name("fog"),
+		 .Reads = {weather},
+		 .ReadPorts = {core::Name("colour")},
+		 .Writes = {volume}}
+	);
+	const std::array ordered{producer, reconstruct, fog};
+	const auto contracts = BuildIdentityContracts(graph, ordered);
+	REQUIRE(contracts.size() == 2);
+	CHECK(contracts[0].Source == sky);
+	CHECK(contracts[0].Target == weather);
+	CHECK(contracts[1].Source == weather);
+	CHECK(contracts[1].Target == volume);
+	CHECK_FALSE(IdentityCompatible(Colour("sky"), storage));
+
+	SECTION("storage bindings cannot acquire a colour-only texture") {
+		struct RestoreKind {
+			graph::NodeKindSpec Original;
+			~RestoreKind() {
+				(void)graph::RegisterNodeKind(std::move(Original));
+			}
+		} restore{*graph::NodeCatalogue::Find(core::Name("dispatch"))};
+		auto consumer = restore.Original;
+		consumer.Inputs[0].Kind = graph::ResourceKind::Storage;
+		REQUIRE(graph::RegisterNodeKind(std::move(consumer)));
+		const auto reader = graph.AddNode(
+			{.Name = core::Name("storage-reader"),
+			 .Kind = core::Name("dispatch"),
+			 .Reads = {weather},
+			 .ReadPorts = {core::Name("source")}}
+		);
+		CHECK(BuildIdentityContracts(graph, std::array{producer, reconstruct, fog, reader}).empty());
+	}
+	SECTION("unknown consumers require materialized usage") {
+		const auto reader = graph.AddNode(
+			{.Name = core::Name("unknown-reader"),
+			 .Kind = core::Name("identity-unknown-reader"),
+			 .Reads = {weather},
+			 .ReadPorts = {core::Name("image")}}
+		);
+		CHECK(BuildIdentityContracts(graph, std::array{producer, reconstruct, fog, reader}).empty());
+	}
+	SECTION("colour captures do not need storage usage") {
+		const auto reader = graph.AddNode(
+			{.Name = core::Name("colour-reader"),
+			 .Kind = core::Name("identity-unknown-colour-reader"),
+			 .Reads = {sky},
+			 .ReadPorts = {core::Name("image")}}
+		);
+		CHECK(BuildIdentityContracts(graph, std::array{producer, reconstruct, fog, reader}).size() == 2);
+	}
+}
+
 TEST_CASE("fixed identity publication preserves later logical alias readers", "[render][identity]") {
 	graph::RenderGraph graph;
 	const auto earlier = graph.AddResource(Colour("lit"));
