@@ -621,11 +621,6 @@ local function setView(name: string)
 	end
 	viewName = name
 	demoCamera:SetAttribute("CFrame", frame)
-	local camera = Workspace.CurrentCamera
-	if camera ~= nil and camera:IsA("Camera") then
-		local currentCamera = camera :: Camera
-		currentCamera.CFrame = frame
-	end
 	updateStatus()
 end
 

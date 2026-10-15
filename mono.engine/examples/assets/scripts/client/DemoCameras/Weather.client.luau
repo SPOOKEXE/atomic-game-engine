@@ -1,6 +1,8 @@
 --!strict
 
-local frame = script:GetAttribute("CFrame")
+local templates = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+local requests = if templates ~= nil then templates:FindFirstChild("DemoCamera") else nil
+local frame = if requests ~= nil then requests:GetAttribute("CFrame") else script:GetAttribute("CFrame")
 if typeof(frame) ~= "CFrame" then
 	return
 end
@@ -34,6 +36,20 @@ end
 camera.CameraSubject = nil
 camera.Parent = workspace
 workspace.CurrentCamera = camera
+
+-- The builder edits the replicated template after this client-local script was cloned.
+-- View requests are events so ordinary camera movement remains independent.
+if requests ~= nil then
+	local cameraRequests = requests
+	local function applyRequestedFrame()
+		local requested = cameraRequests:GetAttribute("CFrame")
+		if typeof(requested) == "CFrame" then
+			camera.CFrame = requested
+		end
+	end
+	cameraRequests:GetAttributeChangedSignal("CFrame"):Connect(applyRequestedFrame)
+	applyRequestedFrame()
+end
 
 local published = Instance.new("ObjectValue")
 published.Name = "PublishedCamera"

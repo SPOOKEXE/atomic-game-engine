@@ -9,7 +9,9 @@
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Atmosphere.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
@@ -69,6 +71,10 @@ namespace {
 		const bool completed = runtime.Heartbeat(seconds);
 		INFO(runtime.LastError());
 		REQUIRE(completed);
+		// Attribute changes from the click reach client listeners at the next script barrier.
+		const bool delivered = runtime.Heartbeat(0);
+		INFO(runtime.LastError());
+		REQUIRE(delivered);
 	}
 
 	engine::core::CFrame CameraFrame(const engine::ecs::Store &store, engine::ecs::Entity camera) {
@@ -77,25 +83,42 @@ namespace {
 		REQUIRE(value.Type == engine::ecs::PropertyType::CFrame);
 		return value.CFrame;
 	}
+
+	engine::core::CFrame ActiveCameraFrame(const engine::ecs::Store &store) {
+		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		REQUIRE(active);
+		const auto *transform = store.Get<engine::scene::Transform>(active->Entity);
+		REQUIRE(transform);
+		return transform->Frame;
+	}
 }
 
 TEST_CASE("weather controls select six recipes and reachable layer views", "[examples][weather]") {
 	const StagedAssets assets;
 	engine::ecs::Store store("weather.presets");
 	engine::ecs::Scheduler systems;
+	engine::script::RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfBoth();
 	std::shared_ptr<engine::script::Runtime> runtime;
 	std::string error;
 	INFO(error);
 	REQUIRE(
 		engine::examples::LoadScene(
-			store, systems, engine::examples::ExamplePath("Weather.luau"), error, &runtime
+			store, systems, engine::examples::ExamplePath("Weather.luau"), error, &runtime, &limits
 		)
 	);
 	REQUIRE(runtime);
 	const auto provider = NamedInstance(store, "Weather Clouds");
 	REQUIRE(provider != engine::ecs::NULL_ENTITY);
-	const auto camera = NamedInstance(store, "DemoCamera");
+	const auto templates = store.FindFirstChild(store.FindFirstRoot("StarterPlayer"), "StarterPlayerScripts");
+	const auto camera = store.FindFirstChild(templates, "DemoCamera");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	const auto *active = store.Resource<engine::scene::ActiveCamera>();
+	REQUIRE(active);
+	const auto activeCamera = active->Entity;
+	CHECK(engine::ecs::Store::IsPredicted(activeCamera));
+	CHECK(engine::ecs::IsClientLocalInstance(store, activeCamera));
+	CHECK(ActiveCameraFrame(store).Position == CameraFrame(store, camera).Position);
 	engine::ecs::AttributeValue farPlane;
 	REQUIRE(engine::ecs::GetAttribute(store, camera, engine::core::Name("FarPlaneZ"), farPlane));
 	REQUIRE(farPlane.Type == engine::ecs::PropertyType::Double);
@@ -287,7 +310,10 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 
 		const float centre = preset.BaseHeight + preset.Thickness * .5f;
 		const float top = preset.BaseHeight + preset.Thickness;
-		if (aboveSelected) CHECK(CameraFrame(store, camera).Position.Y == Catch::Approx(top + 500));
+		if (aboveSelected) {
+			CHECK(CameraFrame(store, camera).Position.Y == Catch::Approx(top + 500));
+			CHECK(ActiveCameraFrame(store).Position.Y == Catch::Approx(top + 500));
+		}
 		ActivateControl(store, *runtime, "Weather Scene Inside Clouds");
 		const auto inside = CameraFrame(store, camera);
 		CHECK(inside.Position.Y == Catch::Approx(centre));
@@ -296,10 +322,15 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 		CHECK(inside.Position.X == 0);
 		CHECK(inside.Position.Z == 700);
 		CHECK(inside.LookVector().Y == Catch::Approx(0));
+		CHECK(ActiveCameraFrame(store).Position == inside.Position);
+		CHECK(ActiveCameraFrame(store).LookVector().Dot(inside.LookVector()) == Catch::Approx(1));
 		ActivateControl(store, *runtime, "Weather Scene Above Clouds");
 		const auto above = CameraFrame(store, camera);
 		CHECK(above.Position.Y == Catch::Approx(top + 500));
 		CHECK(above.LookVector().Y < 0);
+		CHECK(ActiveCameraFrame(store).Position == above.Position);
+		CHECK(ActiveCameraFrame(store).LookVector().Dot(above.LookVector()) == Catch::Approx(1));
+		CHECK(store.Resource<engine::scene::ActiveCamera>()->Entity == activeCamera);
 		CHECK((above.Position - engine::core::Vector3{0, centre, 0}).Magnitude() < farPlane.Double);
 		aboveSelected = true;
 	}
@@ -313,9 +344,17 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 	ActivateControl(store, *runtime, "Weather Scene Roof");
 	CHECK(store.Get<engine::scene::WeatherCompute>(provider)->PrecipitationRate == Catch::Approx(38));
 	CHECK(CameraFrame(store, camera).Position.Y == Catch::Approx(9));
+	CHECK(ActiveCameraFrame(store).Position.Y == Catch::Approx(9));
 	ActivateControl(store, *runtime, "Weather Scene Storm");
 	CHECK(store.Get<engine::scene::WeatherCompute>(provider)->StormIntensity == Catch::Approx(.88f));
 	CHECK(CameraFrame(store, camera).Position.Y == Catch::Approx(18));
+	CHECK(ActiveCameraFrame(store).Position.Y == Catch::Approx(18));
+	const engine::core::CFrame moved(engine::core::Vector3{12, 29, 31});
+	store.Set(activeCamera, engine::scene::Transform{moved});
+	REQUIRE(runtime->Heartbeat(.05));
+	CHECK(ActiveCameraFrame(store).Position == moved.Position);
+	ActivateControl(store, *runtime, "Weather Scene Inside Clouds");
+	CHECK(ActiveCameraFrame(store).Position == CameraFrame(store, camera).Position);
 }
 
 TEST_CASE(
