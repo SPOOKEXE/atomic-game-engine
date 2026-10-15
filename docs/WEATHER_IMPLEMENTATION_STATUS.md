@@ -264,6 +264,14 @@ The fixed simulation rate remains independent. Headless data-factory and
 inherited presentation services retain their bounded service cadence. See
 [client frame pacing](../mono.client/docs/FramePacing.md).
 
+Studio also defaults to uncapped presentation. Its Preferences page now exposes
+an **Uncapped presentation** toggle that restores the saved active, idle,
+focused and unfocused limits when disabled. Explicit saved caps still load;
+`--uncapped` remains a temporary override. See
+[Studio frame pacing](../mono.studio/docs/FramePacing.md). The local user profile
+was switched to uncapped without changing its other values; the previous file
+is backed up under `.cache/build/dev/weather-uncapped/studio-preferences-before.json`.
+
 Three sequential 180-frame native window checks at 640x360 reported 464 FPS
 by default, 60 FPS with VSync and 95 FPS with a 100 FPS cap, including startup.
 These empty-scene checks verify pacing choices rather than weather throughput.
@@ -325,3 +333,20 @@ Validation passed in both `dev` and strict `ci`: six pacing/settings cases
 16 actual GPU weather cases (801,390 assertions). All 87 shader SPIR-V/MSL
 contracts, changed C++ formatting and changed-file em-dash checks pass. Metal
 execution remains unverified; these device results are local Vulkan evidence.
+
+Broader Studio checks exposed a pipeline-editor compatibility gap: weather's
+storage-image output could not connect to a colour-image reader when saving.
+The adapter now accepts that read edge while retaining buffer/image and
+depth/colour rejection. Tests round-trip all seven weather nodes, their pins,
+resource descriptors and edited execution settings through save, build and
+schedule compilation.
+
+All 722 Studio headless cases pass in both presets (76,701 assertions each).
+The two MCP contract cases launch a real GPU-backed Studio, so they now carry
+the GPU tag and use isolated configuration directories. Device/world startup
+has a separate 60-second allowance after a measured 24-second cold start;
+individual protocol replies retain their five-second deadline. Both manifests
+were missing only the new weather module's resource entry. The strict updated
+contracts pass in both presets (493 assertions each). Source checks and the
+architecture check also pass. Studio's new Preferences control has behavioral
+test coverage; its visual interaction was not exercised.
