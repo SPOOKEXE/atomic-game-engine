@@ -255,3 +255,73 @@ is refused before SDL initialization. Only `MONO_WEATHER_GPU_BENCH=1` enters the
 device path. The benchmark requires positive generation, summary, ray and shadow
 work, plus actual same-tick reuse, so an empty/refused workload cannot report
 success. Results print to stdout. Disabled-harness timings are not GPU evidence.
+
+## Uncapped presentation and follow-up performance, 2026-10-15
+
+Client presentation now defaults to immediate mode with no FPS cap. `--vsync`
+restores display pacing, and `--max-fps N` sets an explicit presentation rate.
+The fixed simulation rate remains independent. Headless data-factory and
+inherited presentation services retain their bounded service cadence. See
+[client frame pacing](../mono.client/docs/FramePacing.md).
+
+Three sequential 180-frame native window checks at 640x360 reported 464 FPS
+by default, 60 FPS with VSync and 95 FPS with a 100 FPS cap, including startup.
+These empty-scene checks verify pacing choices rather than weather throughput.
+
+Changing sunlight previously changed the exact shadow-demand radius every
+frame, repeatedly restarting sparse residency maintenance. Planning now expands
+requested ranges upward to a world-brick boundary and uses that same range for
+both coverage and invalidation. Crossing the expanded boundary still rebuilds
+immediately. Tests exercise a camera between the raw and expanded limits, plus
+160 actual animated-sun shadow demands completing bounded maintenance.
+
+Two sequential 600-frame `dev` runs used the same final shaders, 1280x720,
+`Weather.luau`, no FPS cap and an RTX 4090 Vulkan backend. The retained executable
+for the first run predates the CPU residency fix. The before snapshot retains
+396 frames in its five-second window; the after snapshot contains all 600.
+
+| Development frame-graph measurement | Before | After |
+|---|---:|---:|
+| Residency planning median | 6.969 ms | 0.011 ms |
+| Residency planning mean | 6.944 ms | 0.085 ms |
+| Whole-frame median | 12.409 ms | 4.738 ms |
+
+These are unoptimized CPU measurements with concurrent desktop/CPU work, not
+shipping performance guarantees. Startup and maintenance spikes remain: the
+after run includes a 2.622-second first-use frame. Snapshots and runtime logs
+are under `.cache/build/dev/weather-uncapped/`. The optimized `bench` residency
+suite measures the new 180-frame animated-sun scenario at 16.867 microseconds
+per frame, including its initial bounded maintenance. Run
+`just weather-residency-bench 3 bench`.
+
+Cloud noise now skips an epoch when its integer interpolation weight is exactly
+zero. Two call sites retain the original integer results and avoid the interior
+regression measured with a larger four-call-site variant. Shadows retain their
+original branchless interpolation because endpoint branching regressed their
+interior timings. Packed-cell GPU parity covers the branch boundaries, extreme
+signed coordinates, feature shifts and epoch wrap.
+
+The final 1920x1080, 256x256-shadow GPU comparison alternated original and final
+shader binaries twice. Each value below is the range of two medians, each from
+11 printed phase rows of a three-sample job. Work counts and tracked residency
+were identical.
+
+| Initial canonical tick | Original paused cloud integration | Final paused cloud integration |
+|---|---:|---:|
+| 0 | 2.356 to 2.372 ms | 1.763 to 1.807 ms |
+| 128 | 2.362 to 2.398 ms | 2.282 to 2.301 ms |
+| 250 | 2.439 to 2.482 ms | 1.786 to 1.800 ms |
+
+The roughly 24 to 27 percent endpoint gain applies to endpoint phases, which
+cover 13 of 256 phase codes. It is not a whole-cycle speedup. Interior cloud
+timings did not regress in these comparisons; shadow timings remained within
+the observed run variance. Set `MONO_WEATHER_GPU_BENCH_TICK=128` for an interior
+phase. Invalid, malformed and overflowing tick settings are refused before
+device initialization. Device timestamps remain sampled and cold GPU time is
+unavailable, as described above.
+
+Validation passed in both `dev` and strict `ci`: six pacing/settings cases
+(48 assertions), all 821 headless renderer cases (414,448 assertions), and
+16 actual GPU weather cases (801,390 assertions). All 87 shader SPIR-V/MSL
+contracts, changed C++ formatting and changed-file em-dash checks pass. Metal
+execution remains unverified; these device results are local Vulkan evidence.
