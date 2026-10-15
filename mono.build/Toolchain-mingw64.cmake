@@ -24,6 +24,7 @@
 # --- What it needs --------------------------------------------------------
 #
 # Debian and Ubuntu:  apt install mingw-w64 wine
+# Rust:               rustup target add x86_64-pc-windows-gnu
 #
 # **A native `glslc`, passed in as `MONO_GLSLC`.** The vendored shaderc is built
 # for the target, so a cross build produces a `glslc.exe` that cannot run on the
@@ -35,17 +36,16 @@
 #
 # --- Why wine is in here --------------------------------------------------
 #
-# `shadercross` is the second build-time tool, and unlike glslc it is ours: the
-# shader rules run it on every `.spv` to write the `.msl` beside it. It has no
-# equivalent of `MONO_VENDORED_GLSLC` because it has never had a reason to be
-# anything but the one just built.
+# `shadercross` and `assetc` are Windows build-time tools. Shader rules use the
+# first to write `.msl` beside each `.spv`; example staging uses the second to
+# bake packaged assets.
 #
 # `CMAKE_CROSSCOMPILING_EMULATOR` is the answer CMake provides, and it fits
 # because of how those rules are spelled: CMake prepends the emulator to an
 # `add_custom_command` COMMAND that names an executable *target*, which
-# `COMMAND shadercross` is. Note that it would not fit glslc even if that were
-# built here - `MONO_GLSLC` holds `$<TARGET_FILE:glslc_exe>`, a generator
-# expression rather than a target name, and CMake leaves those alone.
+# `COMMAND shadercross` and `COMMAND assetc` do. It would not fit glslc even if
+# that were built here: `MONO_GLSLC` holds `$<TARGET_FILE:glslc_exe>`, a
+# generator expression rather than a target name, and CMake leaves those alone.
 
 set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_PROCESSOR x86_64)
@@ -61,6 +61,8 @@ set(CMAKE_CXX_COMPILER ${prefix}-g++-posix)
 set(CMAKE_RC_COMPILER  ${prefix}-windres)
 set(CMAKE_AR           ${prefix}-ar)
 set(CMAKE_RANLIB       ${prefix}-ranlib)
+set(MONO_ACCESSKIT_RUST_TARGET x86_64-pc-windows-gnu CACHE STRING
+	"Rust target triple for AccessKit C")
 
 # Libraries and headers come from the target sysroot; programs come from the
 # host, because the programs CMake looks for are the ones it intends to run.
@@ -82,7 +84,7 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 set(CMAKE_EXE_LINKER_FLAGS_INIT    "-static")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-static-libgcc -static-libstdc++")
 
-# See the header. Only `shadercross` goes through this.
+# See the header. `shadercross` and `assetc` go through this.
 find_program(MONO_WINE wine REQUIRED
 	DOC "Runs the Windows build-time tools during a cross build")
 set(CMAKE_CROSSCOMPILING_EMULATOR "${MONO_WINE}")
