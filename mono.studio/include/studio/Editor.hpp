@@ -552,20 +552,9 @@ namespace studio {
 		// Needs `--frames`, because a headless run has no window to close.
 		bool Headless = false;
 
-		// Draw as fast as the GPU allows: no vblank and no ceiling.
-		//
-		// **The client's flag, and it removes a different thing in each.** The
-		// client is paced by the display until this is passed. The editor never
-		// is - `Editor::VerticalSync` is off from the start, because the hands
-		// doing the work feel every millisecond between the mouse and the
-		// viewport - so what is left to remove here are the four presentation
-		// rates that keep a still scene off a laptop's fans.
-		//
-		// Which makes this a benchmark's flag rather than a comfort one: pass it
-		// when the number being read is the maximum presentation throughput.
-		// The scheduled rates never sleep or slow the update loop, but they still
-		// deliberately leave time between images. See
-		// `render::Renderer::SetVerticalSync`.
+		// Force uncapped presentation for this run, overriding saved ceilings and
+		// disabling pacing controls. False leaves the preferences in charge;
+		// fresh preferences already default to uncapped presentation.
 		bool Uncapped = false;
 
 		// Write the world the viewport is showing to this file, then carry on.
@@ -4977,18 +4966,13 @@ namespace studio {
 		// up. `Options::Uncapped` bypasses the persisted choice for one run and is
 		// never written back.
 		//
-		// **Off by default, and the pair is one decision.** An editor is a
-		// program with hands on it, and vertical sync puts the display's refresh
-		// between the mouse and the viewport - 16.7 ms on a 60 Hz panel before
-		// the compositor takes its turn. The cost of turning it off is a
-		// viewport spinning as fast as the GPU allows, which the rates below
-		// answer; the two ship together because either one alone is a worse
-		// default than what they are now.
+		// Off by default to keep the display's refresh out of the input path.
+		// The Preferences page can enable it when display pacing is preferred.
 		bool VerticalSync = false;
 
-		// Whether the adaptive presentation ceilings are bypassed. The rates stay
-		// intact so turning this off restores the previous pacing policy.
-		bool Uncapped = false;
+		// Bypass adaptive presentation ceilings by default. Saved preferences can
+		// restore the four configured rates without changing the simulation tick.
+		bool Uncapped = true;
 
 		// The image deadline, independent of the update loop. A busy swapchain
 		// does not consume its opportunity, and a late image does not cause a

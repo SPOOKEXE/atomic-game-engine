@@ -171,13 +171,8 @@ namespace studio {
 
 		ImGui::SeparatorText("Frames");
 
-		// **Vertical sync, then a cap, and the cap only matters without it.**
-		// The two are one decision presented as two controls because they fail
-		// differently: sync ties the frame to the display, which costs a whole
-		// refresh of latency between the mouse and the viewport, so the editor
-		// ships with it off and a 120 fps ceiling instead. Ticking it back on is
-		// for a viewport that tears; the ceiling is what keeps a still scene
-		// from spinning the fans once it is off.
+		// Display pacing and configured ceilings are optional. Fresh preferences
+		// bypass both; the per-run --uncapped override locks these controls.
 		// **Asked for from here and applied at the top of the next frame**, which
 		// is the renderer's business and is worth knowing about at the one call
 		// site that clicks it mid-frame. This panel is drawn *after*
@@ -211,6 +206,8 @@ namespace studio {
 		// stop.
 		ImGui::Spacing();
 		ImGui::SeparatorText("Rates");
+		ImGui::Checkbox("Uncapped presentation", &Uncapped);
+		ImGui::BeginDisabled(Uncapped);
 
 		ImGui::TextDisabled("the lowest ceiling that applies is the image presentation rate");
 
@@ -245,6 +242,7 @@ namespace studio {
 			"so this is the one worth setting low."
 		);
 
+		ImGui::EndDisabled();
 		ImGui::EndDisabled();
 
 		ImGui::TextDisabled("without a cap the editor draws as fast as it can, which on a still");

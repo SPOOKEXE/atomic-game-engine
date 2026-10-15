@@ -65,6 +65,8 @@ namespace {
 
 TEST_CASE("studio double buffers frames by default", "[studio][config]") {
 	CHECK(studio::Options{}.FramesInFlight == 2);
+	CHECK_FALSE(studio::Options{}.Uncapped);
+	CHECK(studio::Options{}.TickRate == 60.0);
 }
 
 TEST_CASE("LOD distance preferences feed live viewport settings", "[studio][config][lod]") {
@@ -107,6 +109,7 @@ TEST_CASE("a missing document is not an error", "[studio][config]") {
 
 	Preferences preferences;
 	CHECK_FALSE(preferences.Load());
+	CHECK(preferences.Uncapped);
 
 	RecentProjects recent;
 	CHECK_FALSE(recent.Load());
@@ -175,7 +178,11 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	written.ControlPort = 9001;
 	written.ShowControl = true;
 	written.Sides = studio::ScaleSide::BothHalf;
-	written.Uncapped = true;
+	written.Uncapped = false;
+	written.InterfaceActiveHz = 144.0f;
+	written.InterfaceIdleHz = 24.0f;
+	written.RendererFocusedHz = 100.0f;
+	written.RendererUnfocusedHz = 12.0f;
 	REQUIRE(written.Save());
 
 	Preferences read;
@@ -205,7 +212,11 @@ TEST_CASE("preferences round trip and are read forward", "[studio][config]") {
 	CHECK(read.PivotEditing);
 	CHECK(read.ControlPort == 9001);
 	CHECK(read.ShowControl);
-	CHECK(read.Uncapped);
+	CHECK_FALSE(read.Uncapped);
+	CHECK(read.InterfaceActiveHz == 144.0f);
+	CHECK(read.InterfaceIdleHz == 24.0f);
+	CHECK(read.RendererFocusedHz == 100.0f);
+	CHECK(read.RendererUnfocusedHz == 12.0f);
 
 	// **Written as its name rather than its index**, so reordering `ScaleSide`
 	// cannot silently change how everybody's scale drag behaves. A name nobody

@@ -705,17 +705,8 @@ namespace studio {
 			);
 		}
 
-		// **After the renderer and only with a window**, because the present
-		// mode belongs to a swapchain and a headless run has none. The client
-		// makes the same call for `--uncapped`; see `Options::Uncapped` for why
-		// an editor wants it for a different reason.
-		//
-		// **Every run rather than only under a flag.** The editor's default is
-		// unpaced-and-capped rather than paced by the display, so this is the
-		// call that puts the swapchain in the state `Editor::VerticalSync`
-		// already claims it is in. The flag bypasses the saved ceiling for this
-		// run without erasing the rates that should return on the next one.
-
+		// Immediate mode is the default. Saved ceilings control the separate
+		// presentation schedule; --uncapped bypasses them for this run.
 		if (!Settings.Headless && !Renderer.SetVerticalSync(false)) {
 			// **The preference follows the device rather than the other way
 			// round.** A driver with no immediate present mode is an ordinary

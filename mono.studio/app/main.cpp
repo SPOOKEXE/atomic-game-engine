@@ -51,7 +51,9 @@ int main(int argc, char **argv) {
 	);
 	arguments.Flag("headless", "Run with no window (needs --frames)");
 	arguments.Flag("data-factory", "Start an empty isolated Studio data-factory host (needs --mcp-port)");
-	arguments.Flag("uncapped", "Draw with no frame rate ceiling (default 120 fps)");
+	arguments.Flag(
+		"uncapped", "Force no frame rate ceiling, overriding saved pacing (fresh default: uncapped)"
+	);
 
 	// The client's names for the same two panels. See `Options::ShowStatistics`.
 	arguments.Flag("stats", "Open the statistics panel (F7)");

@@ -410,9 +410,9 @@ namespace studio {
 		float RendererUnfocusedHz = 10.0f;
 		//@}
 
-		// Bypasses every adaptive frame-rate ceiling without discarding the four
-		// configured rates. Turning it off restores those rates immediately.
-		bool Uncapped = false;
+		// Bypasses every adaptive frame-rate ceiling by default without discarding
+		// the four configured rates. Turning it off restores those rates.
+		bool Uncapped = true;
 
 		// Whether `DefaultWorlds` came from a file rather than from nothing.
 		// See the load path for why absent and empty are different answers.
