@@ -300,3 +300,9 @@
 [submodule "mono.vendor/accesskit-c"]
 	path = mono.vendor/accesskit-c
 	url = https://github.com/AccessKit/accesskit-c
+; Pinned at v3.1.0 for future 2D physics; it is not configured or linked today.
+[submodule "mono.vendor/box2d"]
+	path = mono.vendor/box2d
+	url = https://github.com/erincatto/box2d.git
+	branch = main
+	shallow = true
