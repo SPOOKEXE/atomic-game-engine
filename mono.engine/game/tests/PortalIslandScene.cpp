@@ -1,5 +1,6 @@
+#include "PortalIslandScene.hpp"
+
 #include <engine/ecs/Store.hpp>
-#include <engine/game/PortalIslandScene.hpp>
 #include <engine/game/PortalSeamCoordinator.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/testing/Suite.hpp>

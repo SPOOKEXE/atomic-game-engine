@@ -1,4 +1,5 @@
 #include "AssetPublication.hpp"
+#include "ImageComposer.hpp"
 
 #include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/LocalStore.hpp>
@@ -13,7 +14,6 @@
 #include <imgui.h>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
-#include <studio/ImageComposer.hpp>
 #include <studio/PropertySelection.hpp>
 #include <unordered_set>
 

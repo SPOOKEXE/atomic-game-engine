@@ -1,11 +1,12 @@
 #include "ImageComposerGraph.hpp"
 
+#include "ImageComposer.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <nodegraph/Layout.hpp>
 #include <nodegraph/Registry.hpp>
-#include <studio/ImageComposer.hpp>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>

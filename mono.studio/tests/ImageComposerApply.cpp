@@ -1,3 +1,5 @@
+#include "ImageComposer.hpp"
+
 #include <engine/gui/Registration.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/ImageGraph.hpp>
@@ -10,7 +12,6 @@
 #include <array>
 #include <stdexcept>
 #include <studio/Commands.hpp>
-#include <studio/ImageComposer.hpp>
 
 TEST_SUITE_ID("studio.imagecomposer.apply")
 TEST_DEPENDS("engine.scene.imagegraph")

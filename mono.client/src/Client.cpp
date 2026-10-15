@@ -2,9 +2,11 @@
 #include "DataCaptureDriver.hpp"
 #include "DataFactoryPausedPresentation.hpp"
 #include "DisplayedSceneView.hpp"
+#include "GuiActions.hpp"
 #include "NamedCaptureView.hpp"
 #include "PortalReadiness.hpp"
 #include "PresentationPacing.hpp"
+#include "WorldSystems.hpp"
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/audio/Wav.hpp>
@@ -72,11 +74,7 @@
 #include <bit>
 #include <chrono>
 #include <client/Client.hpp>
-#include <client/DataScriptPackage.hpp>
-#include <client/DataScriptPackageTransaction.hpp>
-#include <client/GuiActions.hpp>
 #include <client/Replicated.hpp>
-#include <client/WorldSystems.hpp>
 #include <cmath>
 #include <cstddef>
 #include <fstream>

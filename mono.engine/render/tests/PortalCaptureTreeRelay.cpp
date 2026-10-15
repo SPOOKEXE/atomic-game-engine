@@ -1,8 +1,8 @@
+#include "PortalCaptureTreeImport.hpp"
 #include "RenderFixture.hpp"
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/parallel/Channel.hpp>
-#include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>

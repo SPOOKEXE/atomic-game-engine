@@ -1,3 +1,5 @@
+#include "ImageComposer.hpp"
+
 #include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
@@ -8,7 +10,6 @@
 #include <studio/Assets.hpp>
 #include <studio/Commands.hpp>
 #include <studio/Editor.hpp>
-#include <studio/ImageComposer.hpp>
 #include <type_traits>
 
 namespace studio {

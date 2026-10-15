@@ -1,5 +1,7 @@
 // A Composer export reaches ordinary GUI and particle consumers through signed content delivery.
 
+#include "ImageComposer.hpp"
+
 #include <engine/assets/Signature.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
@@ -15,7 +17,6 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
-#include <studio/ImageComposer.hpp>
 
 TEST_SUITE_ID("studio.imagegraph.content.render")
 TEST_DEPENDS("studio.imagecomposer")

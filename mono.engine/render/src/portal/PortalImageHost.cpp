@@ -1,13 +1,13 @@
+#include "PortalCaptureTreeImport.hpp"
 #include "PortalRenderOperations.hpp"
+#include "PortalResidentImages.hpp"
+#include "PortalShadowTransport.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/graph/PipelineDocument.hpp>
-#include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/render/PortalImageHost.hpp>
-#include <engine/render/PortalResidentImages.hpp>
-#include <engine/render/PortalShadowTransport.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/world/HostLink.hpp>
 #include <engine/world/Universe.hpp>

@@ -22,6 +22,8 @@
 #include "LodSelection.hpp"
 #include "ParticleWork.hpp"
 #include "PipelineCompiler.hpp"
+#include "PortalCaptureTreeImport.hpp"
+#include "PortalShadowImageImport.hpp"
 #include "RenderStageProbe.hpp"
 #include "RenderTypes.hpp"
 #include "ResourcePreview.hpp"
@@ -43,9 +45,7 @@
 #include <engine/graph/Schedule.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/MeshTable.hpp>
-#include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalImageImport.hpp>
-#include <engine/render/PortalShadowImageImport.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/TextureTable.hpp>

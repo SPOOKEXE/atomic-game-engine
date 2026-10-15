@@ -1,7 +1,8 @@
 #pragma once
 
+#include "PortalCaptureTreeImport.hpp"
+
 #include <engine/render/PortalCaptureTreeCompose.hpp>
-#include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/Renderer.hpp>
 
 struct SDL_GPUCommandBuffer;

@@ -1,3 +1,5 @@
+#include "UiDocumentFile.hpp"
+
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
@@ -7,7 +9,6 @@
 
 #include <fstream>
 #include <studio/Commands.hpp>
-#include <studio/UiDocumentFile.hpp>
 #include <vector>
 
 namespace studio {

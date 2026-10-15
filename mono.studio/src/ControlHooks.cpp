@@ -1,6 +1,7 @@
 // Studio-owned composition for optional control rows.
 
 #include "ControlAutomation.hpp"
+#include "DataFactoryHost.hpp"
 
 #include <engine/control/features/DataScene.hpp>
 #include <engine/control/features/Script.hpp>
@@ -16,7 +17,6 @@
 #include <functional>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
-#include <studio/DataFactoryHost.hpp>
 #include <studio/Editor.hpp>
 
 namespace studio {

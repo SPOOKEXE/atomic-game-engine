@@ -1,4 +1,5 @@
-#include <engine/game/PortalIslandScene.hpp>
+#include "PortalIslandScene.hpp"
+
 #include <engine/game/PortalSeamCoordinator.hpp>
 #include <engine/world/Universe.hpp>
 

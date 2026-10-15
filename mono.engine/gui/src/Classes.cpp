@@ -1,3 +1,5 @@
+#include "Modal.hpp"
+
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/EnumTable.hpp>
@@ -5,7 +7,6 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Binding.hpp>
 #include <engine/gui/Components.hpp>
-#include <engine/gui/Modal.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/RichText.hpp>
 #include <engine/gui/Style.hpp>

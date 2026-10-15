@@ -1,3 +1,5 @@
+#include "PortalCaptureTreeImport.hpp"
+#include "PortalShadowImageImport.hpp"
 #include "RenderFixture.hpp"
 
 #include <engine/assets/Mesh.hpp>
@@ -6,10 +8,8 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/graph/Shadow.hpp>
 #include <engine/render/PortalCaptureTreeCompose.hpp>
-#include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalGeometry.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
-#include <engine/render/PortalShadowImageImport.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/testing/Suite.hpp>
 

@@ -1,3 +1,6 @@
+#include "UiDocumentFile.hpp"
+#include "UiExternalImport.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
@@ -22,8 +25,6 @@
 #include <optional>
 #include <span>
 #include <studio/Editor.hpp>
-#include <studio/UiDocumentFile.hpp>
-#include <studio/UiExternalImport.hpp>
 #include <vector>
 
 namespace studio {

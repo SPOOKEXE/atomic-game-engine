@@ -1,3 +1,5 @@
+#include "ImageComposer.hpp"
+
 #include "ImageComposerGraph.hpp"
 
 #include <engine/assets/ContentPolicy.hpp>
@@ -13,7 +15,6 @@
 #include <nodegraph/Layout.hpp>
 #include <nodegraph/Registry.hpp>
 #include <nodegraph/Serialize.hpp>
-#include <studio/ImageComposer.hpp>
 #include <system_error>
 #include <type_traits>
 

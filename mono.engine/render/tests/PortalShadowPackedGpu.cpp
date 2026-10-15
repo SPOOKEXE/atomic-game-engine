@@ -1,7 +1,7 @@
+#include "PortalShadowPacked.hpp"
 #include "RenderFixture.hpp"
 #include "ShaderBinary.hpp"
 
-#include <engine/render/PortalShadowPacked.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/generators/catch_generators.hpp>

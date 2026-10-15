@@ -1,6 +1,7 @@
 #include "AmbientOcclusionCapture.hpp"
 #include "DataCaptureCompact.hpp"
 #include "DisplayColour.hpp"
+#include "PortalResidentImages.hpp"
 #include "RenderFixture.hpp"
 #include "RendererTestHooks.hpp"
 #include "portal/PortalRendererTerminalTrace.hpp"
@@ -18,7 +19,6 @@
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/render/PortalImageImport.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
-#include <engine/render/PortalResidentImages.hpp>
 #include <engine/render/ResourceImage.hpp>
 #include <engine/render/ScriptDataCaptureBridge.hpp>
 #include <engine/render/ShaderCompiler.hpp>

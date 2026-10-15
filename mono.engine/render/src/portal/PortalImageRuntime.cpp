@@ -1,7 +1,10 @@
 #include "PortalCaptureEntrance.hpp"
+#include "PortalCaptureTreeImport.hpp"
 #include "PortalImageBudget.hpp"
 #include "PortalPresentationClock.hpp"
 #include "PortalRenderOperations.hpp"
+#include "PortalResidentImages.hpp"
+#include "PortalShadowTransport.hpp"
 #include "TransparentLayerWork.hpp"
 
 #include <engine/core/Log.hpp>
@@ -17,12 +20,9 @@
 #include <engine/render/EditableMeshes.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/Overlay.hpp>
-#include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/render/PortalImageDemand.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
-#include <engine/render/PortalResidentImages.hpp>
-#include <engine/render/PortalShadowTransport.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/WorldPresentation.hpp>

@@ -1,3 +1,5 @@
+#include "WorldSystems.hpp"
+
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Store.hpp>
@@ -21,7 +23,6 @@
 
 #include <client/DataFactoryRehydrator.hpp>
 #include <client/Scene.hpp>
-#include <client/WorldSystems.hpp>
 #include <cstddef>
 #include <memory>
 #include <span>

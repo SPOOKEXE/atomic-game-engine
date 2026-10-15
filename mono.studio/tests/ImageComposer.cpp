@@ -1,3 +1,5 @@
+#include "ImageComposer.hpp"
+
 #include "AssetPublication.hpp"
 
 #include <engine/core/Bytes.hpp>
@@ -11,7 +13,6 @@
 #include <imgui_internal.h>
 #include <nodegraph/Layout.hpp>
 #include <nodegraph/Serialize.hpp>
-#include <studio/ImageComposer.hpp>
 
 TEST_SUITE_ID("studio.imagecomposer")
 TEST_DEPENDS("engine.imagegraph.document")

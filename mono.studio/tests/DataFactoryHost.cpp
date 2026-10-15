@@ -1,3 +1,5 @@
+#include "DataFactoryHost.hpp"
+
 #include "../../mono.engine/control/tests/HookFixture.hpp"
 
 #include <engine/assets/ContentHash.hpp>
@@ -17,7 +19,6 @@
 #include <nlohmann/json.hpp>
 #include <span>
 #include <stdexcept>
-#include <studio/DataFactoryHost.hpp>
 #include <studio/Editor.hpp>
 #include <vector>
 

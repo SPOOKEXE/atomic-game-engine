@@ -1,17 +1,17 @@
+#include "PortalCaptureTreeImport.hpp"
 #include "PortalRendererTerminalTrace.hpp"
+#include "PortalResidentImages.hpp"
+#include "PortalShadowTransport.hpp"
 #include "RendererTestHooks.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
-#include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalGeometry.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/render/PortalImageDemand.hpp>
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
-#include <engine/render/PortalResidentImages.hpp>
-#include <engine/render/PortalShadowTransport.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/WorldPresentation.hpp>

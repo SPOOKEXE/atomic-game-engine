@@ -1,4 +1,5 @@
 #include "FrameGraphSnapshot.hpp"
+#include "ImageComposer.hpp"
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Bytes.hpp>
@@ -55,13 +56,12 @@
 #include <engine/weather/Clock.hpp>
 
 #include <SDL3/SDL.h>
-
-#include <studio/ImageComposer.hpp>
 // `Log.hpp` forward-declares `spdlog::logger` so that the rest of the tree does
 // not acquire spdlog for the sake of a log macro. This file is one of the two
 // that genuinely wants the type - `PanelSink` below installs itself into
 // `Log::Logger().sinks()` - so it completes it here. `logger.h` rather than
 // `spdlog.h`: the whole front end is not needed to reach a sink list.
+#include "DataFactoryHost.hpp"
 #include "ExternalEditor.hpp"
 #include "PlayedInput.hpp"
 #include "SourceEditor.hpp"
@@ -81,7 +81,6 @@
 #include <network/Advert.hpp>
 #include <optional>
 #include <sstream>
-#include <studio/DataFactoryHost.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Presentation.hpp>

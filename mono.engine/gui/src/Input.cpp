@@ -1,10 +1,11 @@
+#include "Modal.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
-#include <engine/gui/Modal.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>

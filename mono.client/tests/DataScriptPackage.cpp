@@ -2,6 +2,7 @@
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/control/DataFactoryOperationLedger.hpp>
+#include <engine/control/DataScriptPackage.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/script/DataScriptPackage.hpp>
@@ -12,7 +13,6 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <array>
-#include <client/DataScriptPackage.hpp>
 #include <nlohmann/json.hpp>
 #include <span>
 #include <stdexcept>
@@ -34,7 +34,7 @@ namespace {
 			std::array{engine::control::test::Custom(
 				"client.data-script-package.test",
 				[execute = std::move(execute)](engine::control::Surface &owner) mutable {
-					client::AddDataScriptPackageTool(owner, std::move(execute));
+					engine::control::AddDataScriptPackageTool(owner, std::move(execute));
 				}
 			)}
 		);
