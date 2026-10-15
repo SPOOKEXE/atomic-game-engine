@@ -241,9 +241,9 @@
 ; hardest to reproduce, and `just determinism` and `just replay-check` both
 ; depend on it not doing that.
 ;
-; Pinned at the `v1.25.0` tag rather than at the head of `main`, for the reason
-; SDL is pinned at a release: the version is a number documents quote. Upstream
-; cuts no release branch, so `main` is what the tag sits on.
+; Pinned to the upstream `main` snapshot `48228939787d4b5bea94c7795b8c7fe0781d918e`
+; from 2026-10-11. The stable `v1.25.0` tag is older; pinning the exact commit
+; keeps the moving branch reproducible.
 ;
 ; Only `lib/` is built - `MonoVendor.cmake` configures with `ENABLE_LIB_ONLY`,
 ; so the `crypto/` helpers for OpenSSL, GnuTLS, wolfSSL and picotls are never
