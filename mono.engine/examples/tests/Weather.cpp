@@ -2,6 +2,7 @@
 // computed environment providers, weather transitions and the control surface.
 
 #include <engine/core/Paths.hpp>
+#include <engine/core/types/AABB.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -123,6 +124,28 @@ TEST_CASE("weather controls select six recipes and reachable layer views", "[exa
 	REQUIRE(engine::ecs::GetAttribute(store, camera, engine::core::Name("FarPlaneZ"), farPlane));
 	REQUIRE(farPlane.Type == engine::ecs::PropertyType::Double);
 	CHECK(farPlane.Double == 6000);
+	const auto *initial = store.Get<engine::scene::WeatherCompute>(provider);
+	const auto *lens = store.Get<engine::scene::Camera>(activeCamera);
+	REQUIRE(initial);
+	REQUIRE(lens);
+	const auto groundFrame = ActiveCameraFrame(store);
+	// An upper-frame ray must reach the middle of the finite cloud layer before leaving its bounds.
+	const auto upperRay = groundFrame.VectorToWorldSpace(
+		engine::core::Vector3{0, std::tan(lens->FieldOfViewRadians * .5f) * .9f, -1}.Unit()
+	);
+	REQUIRE(upperRay.Y > 0);
+	const float layerMiddle = initial->BaseHeightMetres + initial->ThicknessMetres * .5f;
+	const float distance = (layerMiddle - groundFrame.Position.Y) / upperRay.Y;
+	const engine::core::AABB cloudBounds{
+		{-initial->ExtentMetres.X * .5f, initial->BaseHeightMetres, -initial->ExtentMetres.Z * .5f},
+		{initial->ExtentMetres.X * .5f,
+		 initial->BaseHeightMetres + initial->ThicknessMetres,
+		 initial->ExtentMetres.Z * .5f}
+	};
+	CHECK(
+		(distance > 0 && distance < lens->FarPlane &&
+		 cloudBounds.Contains(groundFrame.Position + upperRay * distance))
+	);
 	using CloudShader = engine::scene::CloudComputeShader;
 	struct Preset {
 		const char *Button;

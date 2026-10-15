@@ -474,7 +474,7 @@ local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
 assert(demoCamera ~= nil, 'DemoCamera is missing')
 
 local sceneViews: { [string]: CFrame } = {
-	GROUND = CFrame.lookAt(Vector3.new(43, 18, 42), Vector3.new(0, 7, -42)),
+	GROUND = CFrame.lookAt(Vector3.new(43, 18, 42), Vector3.new(0, 46, -42)),
 	VALLEY = CFrame.lookAt(Vector3.new(0, 12, 44), Vector3.new(0, 4, -42)),
 	ROOF = CFrame.lookAt(Vector3.new(30, 9, -32), Vector3.new(30, 1, -32)),
 	STORM = CFrame.lookAt(Vector3.new(43, 18, 42), Vector3.new(0, 1100, -42)),
