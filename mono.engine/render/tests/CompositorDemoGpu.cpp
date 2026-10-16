@@ -587,6 +587,9 @@ TEST_CASE("compositor demo runs its authored image workflow on Vulkan", "[render
 TEST_CASE("bloom spreads HDR highlights before tone mapping on Vulkan", "[render][gpu][bloom]") {
 	FixtureDevice fixture;
 	fixture.Initialise();
+	REQUIRE(
+		fixture.Render.Backend().ColourFormat == static_cast<uint32_t>(SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM)
+	);
 	InstallBloom(fixture.Render);
 	SceneTarget target{41, 31};
 	View view;
@@ -606,25 +609,25 @@ TEST_CASE("bloom spreads HDR highlights before tone mapping on Vulkan", "[render
 	CHECK(CounterValue("render.colour_clear.bytes") - clearBytesBefore == 41 * 31 * 8);
 	CHECK(inactiveFrame.DrawCalls == 2);
 	const auto withoutBloom =
-		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Rgba8Unorm);
+		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Bgra8Unorm);
 
 	lighting.BloomIntensity = 1.5f;
 	fixture.Render.SetLighting(lighting);
 	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 	const auto withBloom =
-		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Rgba8Unorm);
+		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Bgra8Unorm);
 
 	CHECK(Different(withoutBloom, withBloom) > 100);
 	const size_t neighbour = 15 * withBloom.RowStrideBytes + 14 * 4;
 	CHECK(
-		std::to_integer<uint8_t>(withBloom.Bytes[neighbour]) >
-		std::to_integer<uint8_t>(withoutBloom.Bytes[neighbour])
+		std::to_integer<uint8_t>(withBloom.Bytes[neighbour + 2]) >
+		std::to_integer<uint8_t>(withoutBloom.Bytes[neighbour + 2])
 	);
 	lighting.BloomIntensity = 0;
 	fixture.Render.SetLighting(lighting);
 	CHECK(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).DrawCalls == 2);
 	const auto reset =
-		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Rgba8Unorm);
+		CaptureResource(fixture.Render, core::Name("tonemapped"), view.Slot, 41, 31, ImageFormat::Bgra8Unorm);
 	CHECK(Different(withoutBloom, reset) == 0);
 	const auto bloom = Capture16(fixture.Render, core::Name("bloom-result"), view.Slot, 41, 31);
 	bool clearedPixels = true;
@@ -764,21 +767,27 @@ TEST_CASE(
 	OverlayImage overlay;
 	fixture.Render.Inspect(core::Name("lit"));
 	const auto copiesBefore = CounterValue("render.identity_copy.commands");
+	const auto copyBytesBefore = CounterValue("render.identity_copy.bytes");
 	const auto inspected = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto copyBytesAfter = CounterValue("render.identity_copy.bytes");
 	REQUIRE(fixture.Render.ViewPassActivity(view.Slot).Sky);
 	CHECK(inspected.Ran(core::Name("fog")));
-	// The full graph also copies the scene into its final composed image.
-	// Inspection adds only the shared Lit publication in fog.
-	CHECK(CounterValue("render.identity_copy.commands") - copiesBefore == 2);
+	// Present and overlay copy one native BGRA image each; inspected fog adds its HDR publication.
+	CHECK(copyBytesAfter - copyBytesBefore == 41 * 31 * (4 + 4 + 8));
+	CHECK(CounterValue("render.identity_copy.commands") - copiesBefore == 3);
 	const auto sky = Capture16(fixture.Render, core::Name("sky-lit"), view.Slot, 41, 31);
 	const auto lit = Capture16(fixture.Render, core::Name("lit"), view.Slot, 41, 31);
 	CHECK(Diff16(sky, lit, 41, 31) == 0);
 
 	fixture.Render.Inspect({});
 	const auto unobservedCopiesBefore = CounterValue("render.identity_copy.commands");
+	const auto unobservedCopyBytesBefore = CounterValue("render.identity_copy.bytes");
 	const auto unobserved = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	const auto unobservedCopyBytesAfter = CounterValue("render.identity_copy.bytes");
 	CHECK_FALSE(unobserved.Ran(core::Name("fog")));
-	CHECK(CounterValue("render.identity_copy.commands") - unobservedCopiesBefore == 1);
+	// Without inspected fog, present and overlay still copy their two BGRA images.
+	CHECK(unobservedCopyBytesAfter - unobservedCopyBytesBefore == 41 * 31 * (4 + 4));
+	CHECK(CounterValue("render.identity_copy.commands") - unobservedCopiesBefore == 2);
 	CHECK(
 		fixture.Render.ResourceTexture(core::Name("volume-lit"), view.Slot) ==
 		fixture.Render.ResourceTexture(core::Name("sky-lit"), view.Slot)
