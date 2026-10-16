@@ -18,6 +18,8 @@
 #include <fstream>
 #include <iterator>
 #include <thread>
+#include <utility>
+#include <vector>
 
 TEST_SUITE_ID("engine.render.scriptcomputebridgegpu")
 TEST_DEPENDS("engine.computegraph.stock")
@@ -37,6 +39,19 @@ namespace {
 			SDL_Delay(1);
 		}
 		FAIL("renderer compute bridge did not complete within its fixture deadline");
+		return {};
+	}
+	engine::script::ComputePoll
+	Finish(engine::render::ScriptComputeBridge &pool, ComputeBridge &endpoint, uint64_t ticket) {
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+		engine::script::ComputePoll reply;
+		while (std::chrono::steady_clock::now() < deadline) {
+			pool.Pump(0);
+			REQUIRE(endpoint.Poll(ticket, reply) == cg::Status::Ok);
+			if (reply.Ready) return reply;
+			SDL_Delay(1);
+		}
+		FAIL("shared compute bridge did not complete within its fixture deadline");
 		return {};
 	}
 	cg::Program CopyProgram(uint32_t capacity) {
@@ -211,6 +226,114 @@ TEST_CASE(
 		pool->Pump(ceiling - payload);
 		SDL_Delay(1);
 	}
+	CHECK(pool->ReservedDeviceBytes() == 0);
+	first->Detach();
+	second->Detach();
+	pool->Pump(0);
+}
+
+TEST_CASE(
+	"script compute bridge retains its exact maximum result charge until release",
+	"[render][computegraph][gpu][boundary]"
+) {
+	constexpr uint32_t maximumResult = 2'097'152;
+	constexpr size_t maximumResultBytes = size_t(maximumResult) * sizeof(uint32_t);
+	constexpr size_t readChunkBytes = 65'536;
+	engine::render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto pool = std::make_shared<engine::render::ScriptComputeBridge>(fixture.Render.Backend().Device);
+	auto factory = pool->ForWorld("result-budget-world");
+	auto first = factory(91, 1), second = factory(92, 1);
+	REQUIRE(first);
+	REQUIRE(second);
+	std::string detail;
+	uint64_t largeDefinition = 0, oversizedDefinition = 0, smallDefinition = 0;
+	REQUIRE(first->Define("large", CopyProgram(maximumResult), largeDefinition, detail) == cg::Status::Ok);
+	REQUIRE(
+		first->Define("oversized", CopyProgram(maximumResult + 1), oversizedDefinition, detail) ==
+		cg::Status::Ok
+	);
+	REQUIRE(second->Define("small", CopyProgram(65), smallDefinition, detail) == cg::Status::Ok);
+	pool->Pump(0);
+	engine::script::ComputePoll reply;
+	for (const auto &[endpoint, definition] : {
+			 std::pair{first.get(), largeDefinition},
+			 std::pair{first.get(), oversizedDefinition},
+			 std::pair{second.get(), smallDefinition},
+		 }) {
+		REQUIRE(endpoint->Poll(definition, reply) == cg::Status::Ok);
+		REQUIRE(reply.Ready);
+		REQUIRE(reply.Code == cg::Status::Ok);
+	}
+	REQUIRE(first->Release(largeDefinition));
+	REQUIRE(first->Release(oversizedDefinition));
+	REQUIRE(second->Release(smallDefinition));
+	pool->Pump(0);
+	CHECK(pool->ReservedDeviceBytes() == 0);
+
+	cg::Upload smallUpload{.Buffer = "input", .Count = 65};
+	smallUpload.Bytes.resize(65 * sizeof(uint32_t));
+	const uint32_t smallValue = 17;
+	for (uint32_t index = 0; index < 65; ++index) {
+		std::memcpy(
+			smallUpload.Bytes.data() + size_t(index) * sizeof(smallValue), &smallValue, sizeof(smallValue)
+		);
+	}
+	cg::Request oversizedRequest{
+		.Identity = {}, .Inputs = {smallUpload}, .Outputs = {{"output", maximumResult + 1}}
+	};
+	const auto reservationBeforeRefusal = pool->ReservedDeviceBytes();
+	uint64_t ticket = 123;
+	CHECK(first->Submit("oversized", oversizedRequest, ticket, detail) == cg::Status::LimitExceeded);
+	CHECK(ticket == 123);
+	CHECK(pool->ReservedDeviceBytes() == reservationBeforeRefusal);
+
+	std::vector<std::byte> expected(maximumResultBytes);
+	for (uint32_t index = 0; index < maximumResult; ++index) {
+		const uint32_t value = index ^ 0xa5a5a5a5u;
+		std::memcpy(expected.data() + size_t(index) * sizeof(value), &value, sizeof(value));
+	}
+	cg::Upload largeUpload{.Buffer = "input", .Count = maximumResult, .Bytes = expected};
+	cg::Request largeRequest{
+		.Identity = {}, .Inputs = {std::move(largeUpload)}, .Outputs = {{"output", maximumResult}}
+	};
+	uint64_t largeTicket = 0;
+	REQUIRE(first->Submit("large", std::move(largeRequest), largeTicket, detail) == cg::Status::Ok);
+	reply = Finish(*pool, *first, largeTicket);
+	REQUIRE(reply.Code == cg::Status::Ok);
+	REQUIRE(reply.Outputs.size() == 1);
+	CHECK(reply.Outputs.front().Count == maximumResult);
+	CHECK(reply.Outputs.front().Bytes == maximumResultBytes);
+	CHECK(pool->ReservedDeviceBytes() == 0);
+
+	std::vector<std::byte> actual;
+	for (size_t offset = 0; offset < maximumResultBytes; offset += readChunkBytes) {
+		INFO("output byte offset " << offset);
+		REQUIRE(first->Read(largeTicket, "output", offset, readChunkBytes, actual) == cg::Status::Ok);
+		REQUIRE(actual.size() == readChunkBytes);
+		CHECK(std::memcmp(actual.data(), expected.data() + offset, readChunkBytes) == 0);
+	}
+
+	cg::Request smallRequest{.Identity = {}, .Inputs = {smallUpload}, .Outputs = {{"output", 65}}};
+	ticket = 321;
+	CHECK(second->Submit("small", smallRequest, ticket, detail) == cg::Status::LimitExceeded);
+	CHECK(ticket == 321);
+	CHECK(pool->ReservedDeviceBytes() == 0);
+	REQUIRE(first->Release(largeTicket));
+	pool->Pump(0);
+
+	uint64_t smallTicket = 0;
+	REQUIRE(second->Submit("small", smallRequest, smallTicket, detail) == cg::Status::Ok);
+	reply = Finish(*pool, *second, smallTicket);
+	REQUIRE(reply.Code == cg::Status::Ok);
+	REQUIRE(reply.Outputs.size() == 1);
+	CHECK(reply.Outputs.front().Count == 65);
+	CHECK(reply.Outputs.front().Bytes == 65 * sizeof(uint32_t));
+	REQUIRE(second->Read(smallTicket, "output", 0, 65 * sizeof(uint32_t), actual) == cg::Status::Ok);
+	REQUIRE(actual.size() == 65 * sizeof(uint32_t));
+	CHECK(std::memcmp(actual.data(), smallUpload.Bytes.data(), actual.size()) == 0);
+	REQUIRE(second->Release(smallTicket));
+	pool->Pump(0);
 	CHECK(pool->ReservedDeviceBytes() == 0);
 	first->Detach();
 	second->Detach();
