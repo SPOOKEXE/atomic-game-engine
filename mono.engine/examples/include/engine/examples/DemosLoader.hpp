@@ -45,19 +45,21 @@ namespace engine::examples {
 		std::filesystem::path Directory(DemoKind kind) const;
 
 		// Resolves a runnable file without allowing it to leave its directory.
-		// Scripts must be `.luau`; worlds must be `.aworld`. Returns an
-		// empty path for an invalid, unsupported or missing entry.
+		// Scripts default to `.luau`; `TownCadence.js`, `BufferCompute.js` and
+		// `ForestVillage.js` are the listed JavaScript companions. Worlds must be
+		// `.aworld`. Returns an empty path for an invalid, unsupported or missing
+		// entry.
 		std::filesystem::path Resolve(DemoKind kind, std::string_view name) const;
 
 		// Lists one kind, sorted by file name. Script listings contain canonical
-		// `.luau` demos only. World listings contain `.aworld` demos.
+		// `.luau` demos and the three listed JavaScript companions above. World
+		// listings contain `.aworld` demos.
 		std::vector<DemoEntry> List(DemoKind kind) const;
 
 		// Lists scripts followed by authored worlds, sorted within each kind.
 		std::vector<DemoEntry> List() const;
 
-		// Finds a canonical listed demo by its file name. This uses the same
-		// `.luau` and `.aworld` rules as `List`.
+		// Finds a listed demo by its file name using the same rules as `List`.
 		std::optional<DemoEntry> Find(DemoKind kind, std::string_view name) const;
 
 		// Resolves the demo root from the current assets configuration.

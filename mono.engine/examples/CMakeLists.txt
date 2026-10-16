@@ -49,26 +49,32 @@ mono_add_library(examples
 
 # Staged rather than referenced in place: a program started from anywhere finds
 # them, and `--assets` moves them with everything else. Validate the whole
-# source tree so a non-Luau file cannot silently miss the staging globs.
+# source tree so an unsupported file cannot silently miss the staging globs.
+set(example_javascript_twins TownCadence.js BufferCompute.js ForestVillage.js)
 file(GLOB_RECURSE example_script_assets CONFIGURE_DEPENDS
 	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*")
 foreach(asset IN LISTS example_script_assets)
 	get_filename_component(asset_extension "${asset}" LAST_EXT)
-	if(NOT asset_extension STREQUAL ".luau")
-		message(FATAL_ERROR "examples: demo script asset ${asset} must be Luau")
+	file(RELATIVE_PATH asset_relative "${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts" "${asset}")
+	if(NOT asset_extension STREQUAL ".luau" AND NOT asset_relative IN_LIST example_javascript_twins)
+		message(FATAL_ERROR "examples: demo script asset ${asset} must be Luau or a declared JavaScript twin")
 	endif()
 endforeach()
 
-# Reconfiguration removes outputs from older demo catalogs that staged JS twins.
+# Retire stale twins while preserving the explicitly paired milestone demos.
 file(GLOB_RECURSE staged_javascript_demos
 	"${MONO_STAGE_ROOT}/assets/examples/scripts/*.js"
 	"${MONO_STAGE_ROOT}/assets/examples/scripts/*.js.map")
-if(staged_javascript_demos)
-	file(REMOVE ${staged_javascript_demos})
-endif()
+foreach(staged_demo IN LISTS staged_javascript_demos)
+	get_filename_component(staged_name "${staged_demo}" NAME)
+	if(NOT staged_name IN_LIST example_javascript_twins)
+		file(REMOVE "${staged_demo}")
+	endif()
+endforeach()
 
 file(GLOB example_scenes CONFIGURE_DEPENDS
-	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*.luau")
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*.luau"
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/*.js")
 
 # Client camera programs retain their template path alongside each builder.
 file(GLOB_RECURSE demo_camera_scripts CONFIGURE_DEPENDS

@@ -309,6 +309,9 @@ state until v0.19.
 | `script.EventNarratives` | 152 | 8 | yes | . | . | . | Per-world canonical bundle of validated script-declared narrative records, retained for data-scene reads and checkpoint serialization. |
 | `script.JavaScriptSourceContainer` | 4 | 4 | yes | . | . | . | Where a script's JavaScript program is read from, as an asset-relative path. A separate component, so a world of Luau scripts pays nothing for the column. |
 | `script.LuaSourceContainer` | 4 | 4 | yes | . | . | . | Where a script's Luau program is read from, as an asset-relative path. Deliberately not scriptable, which is the sandbox boundary rather than a preference. |
+| `script.NpcBehaviour` | 12 | 4 | yes | . | . | . | One NPC's last committed movement, published with Humanoid movement and the behaviour cadence clock. |
+| `script.NpcCadencePending` | 208 | 8 | yes | . | yes | . | Two transient NPC work admissions tied to the exact runtime, store incarnation and source revision; snapshot restore clears pending tokens. |
+| `script.NpcPerception` | 16 | 4 | yes | . | yes | . | One NPC's last committed visibility and target position, refreshed by perception cadence before combat consumes it. |
 | `script.PortalContactRequests` | 32 | 8 | yes | . | . | . | Per-tick portal contact requests pairing local roots with seam transforms for applying copied destination contacts. |
 | `script.PortalObservationLog` | 65648 | 8 | yes | . | yes | . | Resource: bounded rings of portal crossing, arrival, input and handoff records, stamped with each subject's trace id. Hooks and the server observation sink read them; the oldest rows are overwritten and counted. |
 | `script.PortalPlayerInput` | 2136 | 8 | yes | . | yes | . | Per-player forwarded input clock and bounded native movement queue. Preserves control timing across route adoption and reports physics-applied input; character replacement invalidates the queue. |
@@ -347,4 +350,4 @@ state until v0.19.
 
 ---
 
-260 components registered by the engine, 0 without a purpose line.
+263 components registered by the engine, 0 without a purpose line.

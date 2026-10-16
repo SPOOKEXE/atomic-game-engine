@@ -359,6 +359,16 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 		{"HttpService", {"JSONEncode", "JSONDecode", "GenerateGUID", "UrlEncode"}, {}},
 		{"TweenService", {"GetValue", "Create"}, {}},
 		{"Debris", {"AddItem"}, {}},
+		{"UpdateCadenceService",
+		 {"Configure",
+		  "SetCombat",
+		  "BeginUpdate",
+		  "CommitPerception",
+		  "CommitBehaviour",
+		  "Perception",
+		  "Behaviour",
+		  "CombatReady"},
+		 {}},
 	};
 
 	// **Every `Always` row appears above.** A service added to the catalogue and

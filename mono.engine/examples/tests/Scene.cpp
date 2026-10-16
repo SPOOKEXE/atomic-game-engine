@@ -3295,9 +3295,12 @@ TEST_CASE("every staged scene is offered by name, sorted", "[examples][scene]") 
 		CHECK(std::find(scenes.begin(), scenes.end(), shipped) != scenes.end());
 	}
 
-	// The shipped demo catalogue contains Luau builders only.
+	// Only the three explicitly paired JavaScript builders are supported.
 	for (const std::string &scene : scenes) {
 		INFO(scene);
+		if (scene == "BufferCompute.js" || scene == "TownCadence.js" || scene == "ForestVillage.js") {
+			continue;
+		}
 		CHECK(scene.size() > 5);
 		CHECK(scene.compare(scene.size() - 5, 5, ".luau") == 0);
 	}

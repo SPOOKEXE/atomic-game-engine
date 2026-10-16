@@ -1,6 +1,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/examples/DemosLoader.hpp>
 #include <engine/examples/PackagedAssets.hpp>
+#include <engine/script/Language.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 TEST_SUITE_ID("engine.examples.demos-loader")
@@ -24,6 +26,10 @@ namespace {
 			std::ofstream(Root / "scripts" / "Zeta.luau") << "return true\n";
 			std::ofstream(Root / "scripts" / "Alpha.luau") << "return true\n";
 			std::ofstream(Root / "scripts" / "Alpha.js") << "true;\n";
+			for (const std::string_view name : {"TownCadence", "BufferCompute", "ForestVillage"}) {
+				std::ofstream(Root / "scripts" / (std::string(name) + ".luau")) << "return true\n";
+				std::ofstream(Root / "scripts" / (std::string(name) + ".js")) << "true;\n";
+			}
 			std::ofstream(Root / "scripts" / "notes.txt") << "not a demo\n";
 			std::ofstream(Root / "scripts" / "nested" / "Hidden.luau") << "return true\n";
 			std::ofstream(Root / "worlds" / "Arena.aworld") << "<World />\n";
@@ -53,9 +59,15 @@ TEST_CASE("demo loader lists scripts and worlds by kind", "[examples][demos]") {
 	const engine::examples::DemosLoader demos(fixture.Root);
 
 	const auto scripts = demos.List(engine::examples::DemoKind::Script);
-	REQUIRE(scripts.size() == 2);
+	REQUIRE(scripts.size() == 8);
 	CHECK(scripts[0].Name == "Alpha.luau");
-	CHECK(scripts[1].Name == "Zeta.luau");
+	CHECK(scripts[1].Name == "BufferCompute.js");
+	CHECK(scripts[2].Name == "BufferCompute.luau");
+	CHECK(scripts[3].Name == "ForestVillage.js");
+	CHECK(scripts[4].Name == "ForestVillage.luau");
+	CHECK(scripts[5].Name == "TownCadence.js");
+	CHECK(scripts[6].Name == "TownCadence.luau");
+	CHECK(scripts[7].Name == "Zeta.luau");
 	CHECK(scripts[0].Kind == engine::examples::DemoKind::Script);
 
 	const auto worlds = demos.List(engine::examples::DemoKind::World);
@@ -64,9 +76,9 @@ TEST_CASE("demo loader lists scripts and worlds by kind", "[examples][demos]") {
 	CHECK(worlds[0].Kind == engine::examples::DemoKind::World);
 
 	const auto all = demos.List();
-	REQUIRE(all.size() == 3);
+	REQUIRE(all.size() == 9);
 	CHECK(all[0].Kind == engine::examples::DemoKind::Script);
-	CHECK(all[2].Kind == engine::examples::DemoKind::World);
+	CHECK(all[8].Kind == engine::examples::DemoKind::World);
 }
 
 TEST_CASE("demo loader resolves only direct files of the requested kind", "[examples][demos]") {
@@ -87,6 +99,24 @@ TEST_CASE("demo loader resolves only direct files of the requested kind", "[exam
 	CHECK(demos.Resolve(engine::examples::DemoKind::World, "Alpha.luau").empty());
 	CHECK_FALSE(demos.Find(engine::examples::DemoKind::Script, "Alpha.js").has_value());
 	CHECK_FALSE(demos.Find(engine::examples::DemoKind::World, "missing.aworld").has_value());
+}
+
+TEST_CASE("demo loader pairs only admitted JavaScript scripts with Luau", "[examples][demos]") {
+	const Fixture fixture;
+	const engine::examples::DemosLoader demos(fixture.Root);
+	for (const std::string_view name : {"TownCadence", "BufferCompute", "ForestVillage"}) {
+		const std::string luauName = std::string(name) + ".luau";
+		const std::string javascriptName = std::string(name) + ".js";
+		const auto luau = demos.Find(engine::examples::DemoKind::Script, luauName);
+		const auto javascript = demos.Find(engine::examples::DemoKind::Script, javascriptName);
+		REQUIRE(luau.has_value());
+		REQUIRE(javascript.has_value());
+		CHECK(luau->Path == fixture.Root / "scripts" / luauName);
+		CHECK(javascript->Path == fixture.Root / "scripts" / javascriptName);
+		CHECK(engine::script::LanguageOf(luau->Path.string()) == engine::script::Language::Luau);
+		CHECK(engine::script::LanguageOf(javascript->Path.string()) == engine::script::Language::JavaScript);
+	}
+	CHECK(demos.Resolve(engine::examples::DemoKind::Script, "Alpha.js").empty());
 }
 
 TEST_CASE("staged demo tree contains script and authored world demos", "[examples][demos]") {

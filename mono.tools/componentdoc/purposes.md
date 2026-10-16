@@ -55,6 +55,9 @@ script.EventNarratives | Per-world canonical bundle of validated script-declared
 script.Disabled | A tag: the host must not run this script. Presence moves it to a different archetype so the run loop never visits the row at all.
 script.JavaScriptSourceContainer | Where a script's JavaScript program is read from, as an asset-relative path. A separate component, so a world of Luau scripts pays nothing for the column.
 script.LuaSourceContainer | Where a script's Luau program is read from, as an asset-relative path. Deliberately not scriptable, which is the sandbox boundary rather than a preference.
+script.NpcPerception | One NPC's last committed visibility and target position, refreshed by perception cadence before combat consumes it.
+script.NpcBehaviour | One NPC's last committed movement, published with Humanoid movement and the behaviour cadence clock.
+script.NpcCadencePending | Two transient NPC work admissions tied to the exact runtime, store incarnation and source revision; snapshot restore clears pending tokens.
 script.ProceduralAuthority | Per-world authored recipe, named source facts and registered regions, with local revisions fencing asynchronous generation.
 script.ProceduralPublished | Per-world accepted canonical regional artifacts and activation receipts, replaced atomically after source and digest checks.
 script.Program | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass.

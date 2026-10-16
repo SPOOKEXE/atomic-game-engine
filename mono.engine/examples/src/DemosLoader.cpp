@@ -2,6 +2,7 @@
 #include <engine/examples/DemosLoader.hpp>
 
 #include <algorithm>
+#include <array>
 #include <iterator>
 #include <system_error>
 #include <utility>
@@ -12,9 +13,18 @@ namespace engine::examples {
 		constexpr std::string_view DEMOS_DIRECTORY = "examples";
 		constexpr std::string_view SCRIPTS_DIRECTORY = "scripts";
 		constexpr std::string_view WORLDS_DIRECTORY = "worlds";
+		constexpr std::array<std::string_view, 3> JAVASCRIPT_SCRIPT_DEMOS{
+			"TownCadence.js", "BufferCompute.js", "ForestVillage.js"
+		};
 
 		bool IsListed(DemoKind kind, const std::filesystem::path &path) {
-			return kind == DemoKind::Script ? path.extension() == ".luau" : path.extension() == ".aworld";
+			if (kind != DemoKind::Script) return path.extension() == ".aworld";
+			if (path.extension() == ".luau") return true;
+			if (path.extension() != ".js") return false;
+			const std::string name = path.filename().string();
+			return std::find(
+					   JAVASCRIPT_SCRIPT_DEMOS.begin(), JAVASCRIPT_SCRIPT_DEMOS.end(), std::string_view(name)
+				   ) != JAVASCRIPT_SCRIPT_DEMOS.end();
 		}
 
 		bool IsLeaf(std::string_view name) {

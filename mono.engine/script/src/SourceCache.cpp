@@ -11,6 +11,7 @@
 #include <engine/script/ProceduralJobs.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/script/TeleportRequest.hpp>
+#include <engine/script/UpdateCadenceService.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -241,6 +242,7 @@ namespace engine::script {
 		);
 		RegisterTeleportRequestComponents();
 		RegisterPortalTransferComponents();
+		RegisterUpdateCadenceServiceComponents();
 		RegisterProceduralComponents();
 	}
 

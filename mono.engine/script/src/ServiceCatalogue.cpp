@@ -22,6 +22,7 @@
 
 #include <engine/script/DataSceneService.hpp>
 #include <engine/script/ServiceCatalogue.hpp>
+#include <engine/script/UpdateCadenceService.hpp>
 
 #include <array>
 #include <cstring>
@@ -39,7 +40,7 @@ namespace engine::script {
 		// studio row installs after the debugger pointer is set and before
 		// `luaL_sandbox` freezes the globals - which is why it is walked in a
 		// second pass rather than moved up the list.
-		constexpr std::array<Row, 17> ROWS{{
+		constexpr std::array<Row, 18> ROWS{{
 			// --- the bus, which is the only route out of a world ---------------
 			//
 			// **All four described once since v0.16, and the last of them is what
@@ -180,6 +181,12 @@ namespace engine::script {
 			{{"TweenService", ServiceAvailability::Always, ServiceLanguages::Both}, TweenServiceSurface},
 
 			{{"Debris", ServiceAvailability::Always, ServiceLanguages::Both}, DebrisServiceSurface},
+
+			{{"UpdateCadenceService",
+			  ServiceAvailability::Always,
+			  ServiceLanguages::Both,
+			  ScriptCapabilities::World},
+			 UpdateCadenceServiceSurface},
 		}};
 
 		// The studio's, walked separately.
