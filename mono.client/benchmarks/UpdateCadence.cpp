@@ -363,10 +363,111 @@ namespace cadence_native_bench {
 		}
 	};
 
-	template <bool COMPLEX, bool FULL> void Run() {
-		constexpr size_t actors = COMPLEX ? 128 : 16, bones = COMPLEX ? 64 : 4;
-		constexpr size_t keys = COMPLEX ? 32 : 8, beams = COMPLEX ? 256 : 16,
-						 obstacles = COMPLEX ? 2048 : 128;
+	// No fixture actors or presentation sources: measure the real empty consumer paths.
+	struct EmptyWorld {
+		Store Storage{"bench.cadence.empty"};
+		ecs::Scheduler Physics;
+		effects::RibbonBuffer Ribbons;
+		size_t ClockWrites = 0, RibbonRuns = 0;
+
+		EmptyWorld() {
+			scene::RegisterSceneClasses();
+			render::RegisterPresentationComponents();
+			script::RegisterUpdateCadenceServiceComponents();
+			effects::RegisterEffectClasses();
+			scene::InstallServices(Storage);
+			physics::PreparePhysicsWorld(Storage);
+			physics::RegisterPhysicsSystems(Physics);
+			physics::RegisterCharacterSystems(Physics);
+			physics::SyncBroadphase(Storage);
+		}
+		void Step(Work &counts) {
+			Storage.ClearChanges();
+			Storage.AdvanceTick(DELTA);
+			{
+				ENGINE_PROFILE_CAT("cadence physics", core::ProfileCategory::Physics);
+				Physics.RunPhases(Storage, ecs::Phase::Input, ecs::Phase::Physics);
+			}
+			{
+				ENGINE_PROFILE_CAT("cadence animation clock", core::ProfileCategory::Simulation);
+				ClockWrites = scene::AdvanceAnimationTracks(Storage);
+			}
+			{
+				ENGINE_PROFILE_CAT("cadence pose", core::ProfileCategory::Simulation);
+				counts.PoseWrites += render::EvaluateAnimations(Storage);
+				counts.BoneResolves += scene::ResolveBones(Storage);
+			}
+			{
+				ENGINE_PROFILE_CAT("cadence beam", core::ProfileCategory::Simulation);
+				const float elapsed = static_cast<float>(Storage.Time().Tick) * DELTA;
+				const Vector3 eye{10 * std::sin(elapsed), 12, 20};
+				RibbonRuns = effects::BuildRibbons(Storage, eye, elapsed, Ribbons);
+				counts.BeamVertices += Ribbons.Vertices.size();
+			}
+		}
+		void Verify(uint64_t tick, const Work &counts) {
+			Require(Storage.Time().Tick == tick, "cadence empty semantic tick diverged");
+			Require(ClockWrites == 0, "cadence empty animation clock wrote a track");
+			Require(
+				RibbonRuns == 0 && Ribbons.Runs.empty() && Ribbons.Vertices.empty(),
+				"cadence empty ribbons produced geometry"
+			);
+			Require(
+				counts.Perception == 0 && counts.Behaviour == 0 && counts.Rays == 0 && counts.RayHits == 0 &&
+					counts.PoseEvaluated == 0 && counts.PoseSkipped == 0 && counts.PoseWrites == 0 &&
+					counts.BoneResolves == 0 && counts.BeamRebuilt == 0 && counts.BeamSkipped == 0 &&
+					counts.BeamVertices == 0 && counts.Deadlines == 0 && counts.Damage == 0 &&
+					counts.Promotions == 0 && counts.MaximumAge == 0 && counts.PromotionLatency == 0,
+				"cadence empty fixture reported consumer work"
+			);
+			Require(
+				Storage.CountMatching<scene::Character>() == 0 &&
+					Storage.CountMatching<scene::AnimationTrack>() == 0 &&
+					Storage.CountMatching<scene::Animator>() == 0 &&
+					Storage.CountMatching<scene::Skeleton>() == 0 &&
+					Storage.CountMatching<scene::Bone>() == 0 &&
+					Storage.CountMatching<effects::Beam>() == 0 &&
+					Storage.CountMatching<scene::UpdateCadence>() == 0,
+				"cadence empty fixture contains a consumer"
+			);
+			Require(
+				Storage.Resource<scene::PoseCadenceHistory>() == nullptr &&
+					Storage.Resource<effects::BeamCadenceCache>() == nullptr,
+				"cadence empty fixture created a cadence cache"
+			);
+		}
+	};
+
+	void RunEmpty() {
+		const size_t ticks = TickCount();
+		EmptyWorld world;
+		for (size_t tick = 0; tick < WARM_TICKS; ++tick) {
+			Work counts;
+			world.Step(counts);
+			world.Verify(tick + 1, counts);
+		}
+		Measurements measured(ticks);
+		for (size_t tick = 0; tick < ticks; ++tick) {
+			measured.Measure(tick, WindowAt(tick, ticks), [&](Work &counts) { world.Step(counts); });
+			world.Verify(WARM_TICKS + tick + 1, measured.Ticks[tick].Counts);
+		}
+		static size_t calls = 0;
+		constexpr const char *row = "native-empty";
+		auto &summary = BeginSummary(row, ++calls);
+		summary.Append(
+			"# cadence-empty fixture=native final_tick=%llu fidelity=n/a critical_promotions=n/a "
+			"pose_cache=n/a beam_cache=n/a cache_hit_rate=n/a reference=zero_work_oracle_outside_owner\n",
+			static_cast<unsigned long long>(world.Storage.Time().Tick)
+		);
+		measured.Summarize(summary, row, calls, 0, 1, 0, 0, 0, 0, false, 0, false);
+		VmMemoryWindow{}.Summarize(summary, row);
+		engine::testing::Consume(world.Storage.Time().Tick);
+	}
+
+	template <bool COMPLEX, bool FULL, bool BUSY = false> void Run() {
+		constexpr size_t actors = COMPLEX || BUSY ? 128 : 16, bones = COMPLEX ? 64 : 4;
+		constexpr size_t keys = COMPLEX ? 32 : 8, beams = COMPLEX ? 256 : (BUSY ? 128 : 16),
+						 obstacles = COMPLEX ? 2048 : (BUSY ? 1024 : 128);
 		const size_t ticks = TickCount();
 		World world(actors, bones, keys, beams, obstacles, FULL);
 		World reference(actors, bones, keys, beams, obstacles, true);
@@ -409,6 +510,7 @@ namespace cadence_native_bench {
 			);
 		static size_t calls = 0;
 		const char *row = COMPLEX ? (FULL ? "native-complex-full" : "native-complex-authored")
+						  : BUSY  ? (FULL ? "native-busy-full" : "native-busy-authored")
 								  : (FULL ? "native-simple-full" : "native-simple-authored");
 		auto &summary = BeginSummary(row, ++calls);
 
@@ -456,4 +558,13 @@ BENCH("Native complex full fidelity, whole harness", 1) {
 }
 BENCH("Native complex authored cadence, whole harness", 1) {
 	cadence_native_bench::Run<true, false>();
+}
+BENCH("Native empty consumers, whole harness", 1) {
+	cadence_native_bench::RunEmpty();
+}
+BENCH("Native busy full fidelity, whole harness", 1) {
+	cadence_native_bench::Run<false, true, true>();
+}
+BENCH("Native busy authored cadence, whole harness", 1) {
+	cadence_native_bench::Run<false, false, true>();
 }

@@ -79,7 +79,7 @@ namespace cadence_bench {
 		}
 	};
 	struct SummaryRegistry {
-		std::array<LatestSummary, 12> Rows;
+		std::array<LatestSummary, 16> Rows;
 		~SummaryRegistry() {
 			for (const auto &row : Rows)
 				if (row.Size != 0) (void)std::fwrite(row.Text.data(), 1, row.Size, stdout);
@@ -95,15 +95,14 @@ namespace cadence_bench {
 			summary.Row[name.size()] = '\0';
 			summary.Size = 0;
 			summary.Append(
-				"# cadence-cohort row=%s selection=latest_completed_body call=%zu harness_warmup=%d "
+				"# cadence-cohort row=%s selection=latest_completed_body call=%zu "
 				"retained_cohorts=1 emitted_at=process_exit\n",
 				summary.Row.data(),
-				call,
-				call <= 8
+				call
 			);
 			return summary;
 		}
-		throw std::runtime_error("cadence summary workload count exceeded twelve rows");
+		throw std::runtime_error("cadence summary workload count exceeded sixteen rows");
 	}
 	// Snapshot only at cohort boundaries. Same-basis live totals are additive;
 	// the sum of individual peaks is deliberately not a simultaneous heap peak.
@@ -438,20 +437,21 @@ namespace cadence_bench {
 			size_t beams,
 			size_t obstacles,
 			bool full,
-			uint64_t retainedPayload
+			uint64_t retainedPayload,
+			bool includesReference = true
 		) {
 			const auto residentAfter = ResidentBytes();
 			summary.Append(
-				"# cadence-config row=%s call=%zu harness_warmup=%d actors=%zu worlds=%zu "
+				"# cadence-config row=%s call=%zu actors=%zu worlds=%zu "
 				"joints_per_rig=%zu keys_per_channel=%zu beams=%zu obstacles=%zu "
 				"full=%d fixed_hz=60 warm_ticks=%zu measured_ticks=%zu backend=headless "
 				"gpu=not-used vm_allocator_memory=reported_separately heap_coverage=cxx_new_delete "
-				"process_memory_includes_reference_and_oracles=1 retained_payload_is_main_cache_only=1 "
+				"owner_time=refresh_consumption_excludes_authored_policy_edits "
+				"process_memory_includes_reference_and_oracles=%d retained_payload_is_main_cache_only=1 "
 				"retained_cache_payload_bytes=%llu os_rss_before_bytes=%lld os_rss_after_bytes=%lld "
-				"normal_BENCH_row=whole_harness_including_reference_and_verification\n",
+				"normal_BENCH_row=%s\n",
 				row,
 				call,
-				call <= 8,
 				actors,
 				worlds,
 				joints,
@@ -461,9 +461,12 @@ namespace cadence_bench {
 				full,
 				WARM_TICKS,
 				Ticks.size(),
+				includesReference,
 				static_cast<unsigned long long>(retainedPayload),
 				ResidentBefore ? static_cast<long long>(*ResidentBefore) : -1,
-				residentAfter ? static_cast<long long>(*residentAfter) : -1
+				residentAfter ? static_cast<long long>(*residentAfter) : -1,
+				includesReference ? "whole_harness_including_reference_and_verification"
+								  : "whole_harness_including_zero_work_verification"
 			);
 			for (size_t kind = 0; kind < WINDOWS.size(); ++kind) {
 				const auto window = static_cast<Window>(kind);
@@ -488,7 +491,7 @@ namespace cadence_bench {
 				Require(last != nullptr, "cadence empty measurement window");
 				const auto owner = [](const TickReading &tick) { return tick.OwnerMilliseconds; };
 				summary.Append(
-					"# cadence-window row=%s call=%zu window=%s ticks=%zu owner_p50_ms=%.6f "
+					"# cadence-window row=%s call=%zu window=%s ticks=%zu tail_status=%s owner_p50_ms=%.6f "
 					"owner_p95_ms=%.6f owner_p99_ms=%.6f owner_max_ms=%.6f inclusive_total_ms=%.6f "
 					"self_total_ms=%.6f unmarked_total_ms=%.6f owner_frame_drops=0 off_thread_scopes=%llu "
 					"reported_work_total_ms=%.6f heap_drops=0 "
@@ -502,6 +505,7 @@ namespace cadence_bench {
 					call,
 					WINDOWS[kind],
 					count,
+					count < 100 ? "insufficient_samples_below_100" : "sample_count_at_least_100",
 					Percentile(window, .5, owner),
 					Percentile(window, .95, owner),
 					Percentile(window, .99, owner),
