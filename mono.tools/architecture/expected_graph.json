@@ -468,6 +468,14 @@
         "spatial"
       ]
     },
+    "procedural": {
+      "tier": "shared",
+      "layer": 3,
+      "links": [
+        "core",
+        "graphcore"
+      ]
+    },
     "render": {
       "tier": "client",
       "layer": 12,

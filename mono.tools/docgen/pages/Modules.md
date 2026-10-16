@@ -70,3 +70,4 @@ files and prose in graph modules, ordering modules by the layers in
 - @subpage md_mono_8unified__tests_2AGENTS
 - @subpage md_mono_8tools_2AGENTS
 - @subpage md_mono_8tools_2docgen_2AGENTS
+- @subpage md_mono_8engine_2procedural_2AGENTS
