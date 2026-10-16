@@ -1,14 +1,17 @@
 #include <engine/audio/Graph.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <string>
 #include <vector>
 
 TEST_SUITE_ID("engine.audio.graph")
 TEST_DEPENDS("engine.audio.sample")
+TEST_DEPENDS("engine.graphcore.compile")
 
 using engine::audio::AudioGraph;
 using engine::audio::Describe;
@@ -342,4 +345,131 @@ TEST_CASE("every node kind has a name", "[audio][graph]") {
 	CHECK(std::string(Describe(NodeKind::Emitter)) == "emitter");
 	CHECK(std::string(Describe(NodeKind::Bus)) == "bus");
 	CHECK(std::string(Describe(NodeKind::Output)) == "output");
+}
+
+TEST_CASE(
+	"routing keeps authored sweeps and input summation sequence after shared compilation", "[audio][graph]"
+) {
+	AudioGraph graph;
+	const NodeId first = graph.Add(NodeKind::Bus);
+	const NodeId second = graph.Add(NodeKind::Bus);
+	const NodeId loose = graph.Add(NodeKind::Player);
+	const NodeId left = graph.Add(NodeKind::Player);
+	const NodeId right = graph.Add(NodeKind::Player);
+	REQUIRE(graph.Connect(left, first));
+	REQUIRE(graph.Connect(right, second));
+	const std::array expected{graph.Output(), loose, left, right, first, second};
+	CHECK(std::equal(graph.Order().begin(), graph.Order().end(), expected.begin(), expected.end()));
+	REQUIRE(graph.Connect(right, graph.Output()));
+	REQUIRE(graph.Connect(left, graph.Output()));
+	const auto inputs = graph.InputsOf(graph.Output());
+	REQUIRE(inputs.size() == 2);
+	CHECK(inputs[0] == right);
+	CHECK(inputs[1] == left);
+	const std::vector<NodeId> savedOrder(graph.Order().begin(), graph.Order().end());
+	REQUIRE(graph.Connect(first, second));
+	const std::vector<NodeId> acceptedOrder(graph.Order().begin(), graph.Order().end());
+	const auto acceptedInputs = graph.InputsOf(graph.Output());
+	CHECK_FALSE(graph.Connect(second, first));
+	CHECK(std::equal(graph.Order().begin(), graph.Order().end(), acceptedOrder.begin(), acceptedOrder.end()));
+	CHECK(graph.InputsOf(graph.Output()).data() == acceptedInputs.data());
+	CHECK(graph.InputsOf(graph.Output())[0] == right);
+	REQUIRE(graph.Disconnect(first, second));
+	CHECK(std::equal(graph.Order().begin(), graph.Order().end(), savedOrder.begin(), savedOrder.end()));
+}
+
+TEST_CASE(
+	"prepared routing mutators and rebuilds allocate nothing through the full node capacity",
+	"[audio][graph][heap]"
+) {
+	using engine::core::HeapProfile;
+	if (!HeapProfile::IsCompiledIn()) SKIP("allocator hooks are required for the routing allocation check");
+	uint64_t constructorBytes = 0;
+	uint64_t constructorBlocks = 0;
+	const uint32_t previous = HeapProfile::Push("audio.graph.construction.check");
+	const uint32_t constructorTag = HeapProfile::Current();
+	const auto beforeConstructor = HeapProfile::Node(constructorTag);
+	AudioGraph graph;
+	const auto afterConstructor = HeapProfile::Node(constructorTag);
+	HeapProfile::Pop(previous);
+	constructorBytes = afterConstructor.TotalBytes - beforeConstructor.TotalBytes;
+	constructorBlocks = afterConstructor.TotalBlocks - beforeConstructor.TotalBlocks;
+	CAPTURE(constructorBytes, constructorBlocks);
+
+	std::array<NodeId, AudioGraph::MAXIMUM_NODES - 1> nodes{};
+	engine::core::HeapNodeView before;
+	engine::core::HeapNodeView after;
+	bool accepted = true;
+	bool fullRefused = false;
+	bool cycleRefused = false;
+	size_t orderedCount = 0;
+	size_t inputCount = 0;
+	{
+		ENGINE_HEAP_SCOPE("audio.graph.routing.check");
+		const uint32_t tag = HeapProfile::Current();
+		before = HeapProfile::Node(tag);
+		for (NodeId &node : nodes) {
+			node = graph.Add(NodeKind::Bus);
+			accepted = accepted && node.IsValid();
+		}
+		fullRefused = !graph.Add(NodeKind::Player).IsValid();
+		for (const NodeId node : nodes)
+			accepted = graph.Connect(node, graph.Output()) && accepted;
+		orderedCount = graph.Order().size();
+		inputCount = graph.InputsOf(graph.Output()).size();
+		accepted = graph.Connect(nodes[0], nodes[1]) && accepted;
+		cycleRefused = !graph.Connect(nodes[1], nodes[0]);
+		accepted = graph.Disconnect(nodes[0], nodes[1]) && accepted;
+		accepted = graph.Remove(nodes.back()) && accepted;
+		accepted = graph.Adopt(NodeId{5000}, NodeKind::Player) && accepted;
+		accepted = graph.Connect(NodeId{5000}, graph.Output()) && accepted;
+		accepted = graph.Order().size() == AudioGraph::MAXIMUM_NODES && accepted;
+		const auto inputs = graph.InputsOf(graph.Output());
+		accepted = !inputs.empty() && inputs.back() == NodeId{5000} && accepted;
+		after = HeapProfile::Node(tag);
+	}
+	CHECK(constructorBytes > 0);
+	CHECK(constructorBlocks > 0);
+	CHECK(accepted);
+	CHECK(fullRefused);
+	CHECK(cycleRefused);
+	CHECK(orderedCount == AudioGraph::MAXIMUM_NODES);
+	CHECK(inputCount == AudioGraph::MAXIMUM_NODES - 1);
+	CHECK(after.TotalBlocks == before.TotalBlocks);
+	CHECK(after.TotalBytes == before.TotalBytes);
+}
+
+TEST_CASE("copied and moved routing retain prepared mutation capacity", "[audio][graph][heap]") {
+	using engine::core::HeapProfile;
+	if (!HeapProfile::IsCompiledIn())
+		SKIP("allocator hooks are required for the copied routing allocation check");
+	AudioGraph original;
+	const NodeId player = original.Add(NodeKind::Player);
+	REQUIRE(original.Connect(player, original.Output()));
+	AudioGraph copied(original);
+	AudioGraph assigned;
+	assigned = original;
+	AudioGraph moved(std::move(copied));
+	CHECK(copied.Count() == 1);
+	CHECK(moved.InputsOf(moved.Output()).size() == 1);
+	engine::core::HeapNodeView before;
+	engine::core::HeapNodeView after;
+	bool accepted = true;
+	{
+		ENGINE_HEAP_SCOPE("audio.graph.copy.routing.check");
+		const uint32_t tag = HeapProfile::Current();
+		before = HeapProfile::Node(tag);
+		for (AudioGraph *graph : {&copied, &assigned, &moved}) {
+			const size_t initialCount = graph->Count();
+			for (size_t index = 0; index < 32; ++index) {
+				const NodeId node = graph->Add(NodeKind::Bus);
+				accepted = node.IsValid() && graph->Connect(node, graph->Output()) && accepted;
+			}
+			accepted = graph->Order().size() == initialCount + 32 && accepted;
+		}
+		after = HeapProfile::Node(tag);
+	}
+	CHECK(accepted);
+	CHECK(after.TotalBlocks == before.TotalBlocks);
+	CHECK(after.TotalBytes == before.TotalBytes);
 }

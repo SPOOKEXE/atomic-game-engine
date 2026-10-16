@@ -23,6 +23,7 @@ mono_add_library(audio
 	DEPS
 		Engine::core
 		Engine::audiocodec
+		Engine::graphcore
 	VENDOR
 		SDL3::SDL3
 )

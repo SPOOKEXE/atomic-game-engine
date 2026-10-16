@@ -7,15 +7,9 @@
 // kinds: a `Player` is an input, a `Fader`, `Emitter` and `Bus` are processors,
 // and an `Output` is where it all lands.
 //
-// **Why this is not `engine::graph`.** The plan is one graph runtime with
-// several consumers and audio listed among them, and that is right eventually.
-// But the stated ordering for building it is strict: *build
-// `mono.engine/graph/` against render only, and do not claim it is general
-// until the physics graph is the second user.* Today `graph` holds
-// the description of a frame and none of the execution - no nodes, no compiler,
-// no executor - so routing audio through it would mean building that runtime
-// against a second consumer before it exists for the first. This graph is small
-// and this file says plainly what it will be folded into.
+// `graphcore` supplies bounded topology compilation. Audio retains its sample
+// runtime and authored input summation order. Routing storage is prepared during
+// construction so command deadlines may change routing without allocating.
 //
 // **A wire runs from a source's output to a target's input**, which is Roblox's
 // arrangement and reads the right way round: you connect a sound *to* a fader,
@@ -25,7 +19,8 @@
 // feedback loop in an audio graph is not a subtle bug: it is either an infinite
 // recursion on the device thread - which is a crash inside a callback with a
 // hard deadline - or unbounded gain, which is the loudest possible failure. The
-// check is a walk at connect time, and connecting is not on the audio path.
+// check compiles the candidate connection in prepared workspace before it is
+// installed, including when a command changes routing inside an audio block.
 //
 // **Everything here is plain data with no thread of its own.** The mixer owns
 // one of these and mutates it only by applying commands, so a tick never writes
@@ -34,11 +29,13 @@
 // @tier L12 · client
 
 #include <engine/audio/Sample.hpp>
+#include <engine/graphcore/Compile.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace engine::audio {
@@ -247,6 +244,18 @@ namespace engine::audio {
 		// Builds a graph holding only its output node.
 		AudioGraph();
 
+		// Copies routing and runtime state into fully prepared storage before use.
+		AudioGraph(const AudioGraph &other);
+
+		// Copies into existing prepared capacity; graph mutation remains owner-only.
+		AudioGraph &operator=(const AudioGraph &other);
+
+		// Transfers state and leaves the source as a fresh, fully prepared graph.
+		AudioGraph(AudioGraph &&other);
+
+		// Exchanges fully prepared graph state without allocating.
+		AudioGraph &operator=(AudioGraph &&other) noexcept;
+
 		// The output every chain eventually reaches.
 		NodeId Output() const {
 			return Sink;
@@ -378,22 +387,26 @@ namespace engine::audio {
 		};
 
 		size_t IndexOf(NodeId id) const;
+		void Swap(AudioGraph &other) noexcept;
 
-		// Whether following wires forwards from `start` ever arrives at
-		// `target`. A wire `from -> to` is a cycle exactly when
-		// `CanReach(to, from)`.
-		bool CanReach(NodeId start, NodeId target) const;
+		// The complete simple DAG is the largest routing accepted by the node cap.
+		static constexpr size_t MAXIMUM_WIRES = MAXIMUM_NODES * (MAXIMUM_NODES - 1) / 2;
 
-		void Rebuild() const;
+		bool PrepareDependencies() const;
+		bool Rebuild() const;
 
 		std::vector<NodeId> Ids;
 		std::vector<Node> Nodes;
 		std::vector<Wire> Wires;
 
-		// Per node, what is wired into it. Derived from `Wires` and rebuilt
-		// with the order, so a mixer asking per node per block neither
-		// allocates nor walks every wire.
-		mutable std::vector<std::vector<NodeId>> Sources;
+		// Input CSR retains the original wire sequence for floating-point summation.
+		mutable std::vector<NodeId> Sources;
+		mutable std::vector<size_t> SourceOffsets;
+		mutable std::vector<size_t> SourceCursor;
+		mutable std::vector<std::pair<uint32_t, graphcore::NodeIndex>> DenseIds;
+		mutable std::vector<graphcore::Dependency> Dependencies;
+		mutable std::vector<graphcore::NodeIndex> DenseOrder;
+		mutable graphcore::OrderWorkspace Workspace;
 
 		NodeId Sink;
 		uint32_t NextNode = 1;

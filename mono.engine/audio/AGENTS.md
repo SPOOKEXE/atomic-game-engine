@@ -173,10 +173,10 @@ runtime, with scalar domain runtimes; audio does not need to route through it or
 wait for a physics consumer. The audio module owns its mixer, sample clock,
 deadlines, runtime state, and summation order.
 
-Routing compilation happens before callback execution. It must build a
-precompiled plan or use bounded workspace outside the callback. No graphcore or
-audio routing work may allocate, lock, or block in the callback; rendering
-continues to use the graph and scratch buffers already prepared for it.
+Routing storage and compiler workspace are allocated before device execution.
+Bounded allocation-free compilation may apply topology commands at their sample
+deadlines inside a callback. No graphcore or audio routing work may allocate,
+lock, or block in the callback; rendering uses the prepared routing storage.
 
 ## Not here yet
 

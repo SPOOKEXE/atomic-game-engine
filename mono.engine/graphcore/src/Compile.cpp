@@ -4,9 +4,11 @@
 
 #include <algorithm>
 #include <array>
-#include <deque>
+#include <functional>
+#include <limits>
 #include <new>
 #include <set>
+#include <stdexcept>
 #include <unordered_map>
 
 namespace engine::graphcore {
@@ -97,6 +99,109 @@ namespace engine::graphcore {
 		}
 	}
 
+	OrderWorkspace::OrderWorkspace(size_t maximumNodes, size_t maximumDependencies) {
+		if (maximumNodes > NO_NODE || maximumNodes == std::numeric_limits<size_t>::max())
+			throw std::length_error("graph workspace node capacity is not representable");
+		Offsets.resize(maximumNodes + 1);
+		Incoming.resize(maximumNodes);
+		CursorDepth.resize(maximumNodes);
+		Targets.resize(maximumDependencies);
+		Ready.resize(maximumNodes);
+		NextReady.resize(maximumNodes);
+		Candidate.resize(maximumNodes);
+	}
+
+	OrderResult CompileOrder(
+		size_t nodeCount,
+		std::span<const Dependency> dependencies,
+		const Limits &limits,
+		OrderWorkspace &workspace,
+		std::span<NodeIndex> out,
+		OrderPolicy policy
+	) noexcept {
+		if (nodeCount > limits.MaximumNodes || nodeCount > NO_NODE || nodeCount >= workspace.Offsets.size() ||
+			nodeCount > workspace.Incoming.size() || nodeCount > workspace.CursorDepth.size() ||
+			nodeCount > workspace.Ready.size() || nodeCount > workspace.NextReady.size() ||
+			nodeCount > workspace.Candidate.size() || nodeCount > out.size() ||
+			dependencies.size() > limits.MaximumConnections || dependencies.size() > workspace.Targets.size())
+			return {.Status = CompileStatus::LimitExceeded};
+		if (policy != OrderPolicy::AuthoredSweep && policy != OrderPolicy::LowestReady &&
+			policy != OrderPolicy::FifoReady)
+			return {.Status = CompileStatus::InvalidDependency};
+		for (const Dependency &edge : dependencies) {
+			if (edge.Before >= nodeCount || edge.After >= nodeCount)
+				return {.Status = CompileStatus::InvalidDependency};
+		}
+		std::fill_n(workspace.Offsets.begin(), nodeCount + 1, size_t{0});
+		std::fill_n(workspace.Incoming.begin(), nodeCount, size_t{0});
+		for (const Dependency &edge : dependencies) {
+			++workspace.Offsets[edge.Before + 1];
+			++workspace.Incoming[edge.After];
+		}
+		for (size_t index = 0; index < nodeCount; ++index)
+			workspace.Offsets[index + 1] += workspace.Offsets[index];
+		std::copy_n(workspace.Offsets.begin(), nodeCount, workspace.CursorDepth.begin());
+		for (const Dependency &edge : dependencies)
+			workspace.Targets[workspace.CursorDepth[edge.Before]++] = edge.After;
+		std::fill_n(workspace.CursorDepth.begin(), nodeCount, size_t{0});
+
+		std::span<NodeIndex> ready = workspace.Ready;
+		std::span<NodeIndex> nextReady = workspace.NextReady;
+		size_t readyCount = 0;
+		size_t nextCount = 0;
+		size_t fifoRead = 0;
+		size_t fifoWrite = 0;
+		for (size_t index = 0; index < nodeCount; ++index) {
+			if (workspace.Incoming[index] != 0) continue;
+			if (policy == OrderPolicy::FifoReady)
+				ready[fifoWrite++] = static_cast<NodeIndex>(index);
+			else {
+				ready[readyCount++] = static_cast<NodeIndex>(index);
+				std::push_heap(ready.begin(), ready.begin() + readyCount, std::greater<NodeIndex>{});
+			}
+		}
+		size_t emitted = 0;
+		while (policy == OrderPolicy::FifoReady ? fifoRead < fifoWrite : readyCount != 0) {
+			NodeIndex current;
+			if (policy == OrderPolicy::FifoReady)
+				current = ready[fifoRead++];
+			else {
+				std::pop_heap(ready.begin(), ready.begin() + readyCount, std::greater<NodeIndex>{});
+				current = ready[--readyCount];
+			}
+			workspace.Candidate[emitted++] = current;
+			for (size_t edge = workspace.Offsets[current]; edge < workspace.Offsets[current + 1]; ++edge) {
+				const NodeIndex after = workspace.Targets[edge];
+				workspace.CursorDepth[after] =
+					std::max(workspace.CursorDepth[after], workspace.CursorDepth[current] + 1);
+				if (--workspace.Incoming[after] != 0) continue;
+				if (policy == OrderPolicy::FifoReady) {
+					ready[fifoWrite++] = after;
+					continue;
+				}
+				// An earlier declaration waits for the next sweep; LowestReady
+				// deliberately reconsiders it immediately.
+				const bool defer = policy == OrderPolicy::AuthoredSweep && after < current;
+				auto destination = defer ? nextReady : ready;
+				size_t &count = defer ? nextCount : readyCount;
+				destination[count++] = after;
+				std::push_heap(destination.begin(), destination.begin() + count, std::greater<NodeIndex>{});
+			}
+			if (readyCount == 0 && policy == OrderPolicy::AuthoredSweep) {
+				std::swap(ready, nextReady);
+				std::swap(readyCount, nextCount);
+			}
+		}
+		if (emitted != nodeCount) {
+			const auto first = workspace.Incoming.begin();
+			const auto blocked =
+				std::find_if(first, first + nodeCount, [](size_t count) { return count != 0; });
+			return {.Status = CompileStatus::Cycle, .Blocked = static_cast<NodeIndex>(blocked - first)};
+		}
+		std::copy_n(workspace.Candidate.begin(), nodeCount, out.begin());
+		return {.Count = nodeCount};
+	}
+
 	CompileStatus CompileDependencies(
 		size_t nodeCount,
 		std::span<const Dependency> dependencies,
@@ -107,15 +212,21 @@ namespace engine::graphcore {
 	) {
 		try {
 			if (nodeCount > limits.MaximumNodes || nodeCount > NO_NODE ||
+				nodeCount == std::numeric_limits<size_t>::max() ||
 				dependencies.size() > limits.MaximumConnections)
 				return detail::Refuse(diagnostic, CompileStatus::LimitExceeded);
 			if (policy != OrderPolicy::AuthoredSweep && policy != OrderPolicy::LowestReady &&
 				policy != OrderPolicy::FifoReady)
 				return detail::Refuse(diagnostic, CompileStatus::InvalidDependency);
-			for (const Dependency &dependency : dependencies) {
-				if (dependency.Before >= nodeCount || dependency.After >= nodeCount)
+			for (const Dependency &edge : dependencies) {
+				if (edge.Before >= nodeCount || edge.After >= nodeCount)
 					return detail::Refuse(diagnostic, CompileStatus::InvalidDependency);
 			}
+			OrderWorkspace workspace(nodeCount, dependencies.size());
+			Topology candidate;
+			candidate.Order.resize(nodeCount);
+			const OrderResult result =
+				CompileOrder(nodeCount, dependencies, limits, workspace, candidate.Order, policy);
 			std::vector<Dependency> edges(dependencies.begin(), dependencies.end());
 			std::sort(edges.begin(), edges.end(), [](const Dependency &left, const Dependency &right) {
 				return std::array{left.Before, left.After} < std::array{right.Before, right.After};
@@ -130,74 +241,25 @@ namespace engine::graphcore {
 				),
 				edges.end()
 			);
-			Topology candidate;
-			candidate.Order.reserve(nodeCount);
 			candidate.Inputs.resize(nodeCount);
 			candidate.Dependents.resize(nodeCount);
-			std::vector<size_t> incoming(nodeCount);
 			for (const Dependency &edge : edges) {
 				candidate.Inputs[edge.After].push_back(edge.Before);
 				candidate.Dependents[edge.Before].push_back(edge.After);
-				++incoming[edge.After];
 			}
-			std::vector<std::vector<NodeIndex>> fifoDependents;
-			if (policy == OrderPolicy::FifoReady) {
-				fifoDependents.resize(nodeCount);
-				std::fill(incoming.begin(), incoming.end(), 0);
-				for (const Dependency &edge : dependencies) {
-					fifoDependents[edge.Before].push_back(edge.After);
-					++incoming[edge.After];
-				}
-			}
-			std::set<NodeIndex> ready;
-			std::set<NodeIndex> nextSweep;
-			std::deque<NodeIndex> fifoReady;
-			for (size_t index = 0; index < nodeCount; ++index) {
-				if (incoming[index] != 0) continue;
-				if (policy == OrderPolicy::FifoReady)
-					fifoReady.push_back(static_cast<NodeIndex>(index));
-				else
-					ready.insert(static_cast<NodeIndex>(index));
-			}
-			std::vector<size_t> depth(nodeCount);
-			size_t waveCount = 0;
-			while (!ready.empty() || !fifoReady.empty()) {
-				const NodeIndex current =
-					policy == OrderPolicy::FifoReady ? fifoReady.front() : *ready.begin();
-				if (policy == OrderPolicy::FifoReady)
-					fifoReady.pop_front();
-				else
-					ready.erase(ready.begin());
-				candidate.Order.push_back(current);
-				waveCount = std::max(waveCount, depth[current] + 1);
-				const auto &downstream = policy == OrderPolicy::FifoReady ? fifoDependents[current]
-																		  : candidate.Dependents[current];
-				for (const NodeIndex after : downstream) {
-					depth[after] = std::max(depth[after], depth[current] + 1);
-					if (--incoming[after] != 0) continue;
-					if (policy == OrderPolicy::FifoReady) {
-						fifoReady.push_back(after);
-						continue;
-					}
-					// Earlier declarations wait for the next sweep. A minimum-ready
-					// policy deliberately reconsiders them immediately instead.
-					auto &destination =
-						policy == OrderPolicy::AuthoredSweep && after < current ? nextSweep : ready;
-					destination.insert(after);
-				}
-				if (ready.empty()) ready.swap(nextSweep);
-			}
-			if (candidate.Order.size() != nodeCount) {
-				detail::Refuse(diagnostic, CompileStatus::Cycle);
-				const auto blocked =
-					std::find_if(incoming.begin(), incoming.end(), [](size_t count) { return count != 0; });
-				diagnostic.Blocked = static_cast<NodeIndex>(blocked - incoming.begin());
-				FindCycle(candidate, incoming, diagnostic);
+			if (result.Status != CompileStatus::Ok) {
+				detail::Refuse(diagnostic, result.Status);
+				diagnostic.Blocked = result.Blocked;
+				if (result.Status == CompileStatus::Cycle)
+					FindCycle(candidate, std::span(workspace.Incoming).first(nodeCount), diagnostic);
 				return diagnostic.Status;
 			}
+			size_t waveCount = 0;
+			for (size_t index = 0; index < nodeCount; ++index)
+				waveCount = std::max(waveCount, workspace.CursorDepth[index] + 1);
 			candidate.Waves.resize(waveCount);
 			for (size_t index = 0; index < nodeCount; ++index)
-				candidate.Waves[depth[index]].push_back(static_cast<NodeIndex>(index));
+				candidate.Waves[workspace.CursorDepth[index]].push_back(static_cast<NodeIndex>(index));
 			out = std::move(candidate);
 			diagnostic = {};
 			return CompileStatus::Ok;

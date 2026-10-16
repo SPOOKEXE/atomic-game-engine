@@ -20,7 +20,16 @@ namespace engine::audio {
 		return "unknown";
 	}
 
-	AudioGraph::AudioGraph() {
+	AudioGraph::AudioGraph()
+		: SourceOffsets(MAXIMUM_NODES + 1), SourceCursor(MAXIMUM_NODES), DenseOrder(MAXIMUM_NODES),
+		  Workspace(MAXIMUM_NODES, MAXIMUM_WIRES) {
+		Ids.reserve(MAXIMUM_NODES);
+		Nodes.reserve(MAXIMUM_NODES);
+		Wires.reserve(MAXIMUM_WIRES);
+		Sources.reserve(MAXIMUM_WIRES);
+		DenseIds.reserve(MAXIMUM_NODES);
+		Dependencies.reserve(MAXIMUM_WIRES);
+		Sorted.reserve(MAXIMUM_NODES);
 		// The output exists from the start rather than being added, so there is
 		// never a graph in which "where does the device read from" has no
 		// answer.
@@ -28,6 +37,50 @@ namespace engine::audio {
 		NextNode = FIRST_FREE_ID;
 		Ids.push_back(Sink);
 		Nodes.push_back(Node{.Kind = NodeKind::Output});
+	}
+
+	AudioGraph::AudioGraph(const AudioGraph &other) : AudioGraph() {
+		*this = other;
+	}
+
+	AudioGraph &AudioGraph::operator=(const AudioGraph &other) {
+		if (this == &other) return *this;
+		Ids.assign(other.Ids.begin(), other.Ids.end());
+		Nodes.assign(other.Nodes.begin(), other.Nodes.end());
+		Wires.assign(other.Wires.begin(), other.Wires.end());
+		Sink = other.Sink;
+		NextNode = other.NextNode;
+		Ear = other.Ear;
+		OrderStale = true;
+		return *this;
+	}
+
+	AudioGraph::AudioGraph(AudioGraph &&other) : AudioGraph() {
+		Swap(other);
+	}
+
+	AudioGraph &AudioGraph::operator=(AudioGraph &&other) noexcept {
+		if (this != &other) Swap(other);
+		return *this;
+	}
+
+	void AudioGraph::Swap(AudioGraph &other) noexcept {
+		using std::swap;
+		swap(Ids, other.Ids);
+		swap(Nodes, other.Nodes);
+		swap(Wires, other.Wires);
+		swap(Sources, other.Sources);
+		swap(SourceOffsets, other.SourceOffsets);
+		swap(SourceCursor, other.SourceCursor);
+		swap(DenseIds, other.DenseIds);
+		swap(Dependencies, other.Dependencies);
+		swap(DenseOrder, other.DenseOrder);
+		swap(Workspace, other.Workspace);
+		swap(Sink, other.Sink);
+		swap(NextNode, other.NextNode);
+		swap(Ear, other.Ear);
+		swap(Sorted, other.Sorted);
+		swap(OrderStale, other.OrderStale);
 	}
 
 	size_t AudioGraph::IndexOf(NodeId id) const {
@@ -115,37 +168,27 @@ namespace engine::audio {
 		return index == Ids.size() ? nullptr : &Nodes[index];
 	}
 
-	bool AudioGraph::CanReach(NodeId start, NodeId target) const {
-		// Depth-first *forwards* from `start`, looking for `target`. Iterative
-		// rather than recursive: this runs against a graph somebody is
-		// building, and a deep chain should not be a stack overflow.
-		//
-		// **The direction is the whole check and it is easy to invert**, which
-		// is why the parameters are named for what the walk does rather than
-		// for the wire being considered. Written the other way round it
-		// refuses every shortcut across a chain and admits every loop, which
-		// is exactly backwards and reads plausibly either way.
-		std::vector<NodeId> pending{start};
-		std::vector<NodeId> seen;
-
-		while (!pending.empty()) {
-			const NodeId at = pending.back();
-			pending.pop_back();
-			if (at == target) {
-				return true;
-			}
-			if (std::find(seen.begin(), seen.end(), at) != seen.end()) {
-				continue;
-			}
-			seen.push_back(at);
-
-			for (const Wire &wire : Wires) {
-				if (wire.From == at) {
-					pending.push_back(wire.To);
+	bool AudioGraph::PrepareDependencies() const {
+		DenseIds.resize(Ids.size());
+		for (size_t index = 0; index < Ids.size(); ++index)
+			DenseIds[index] = {Ids[index].Value, static_cast<graphcore::NodeIndex>(index)};
+		std::sort(DenseIds.begin(), DenseIds.end());
+		auto denseIndex = [&](NodeId id) {
+			const auto found = std::lower_bound(
+				DenseIds.begin(), DenseIds.end(), id.Value, [](const auto &entry, uint32_t value) {
+					return entry.first < value;
 				}
-			}
+			);
+			return found != DenseIds.end() && found->first == id.Value ? found->second : graphcore::NO_NODE;
+		};
+		Dependencies.clear();
+		for (const Wire &wire : Wires) {
+			const auto from = denseIndex(wire.From);
+			const auto to = denseIndex(wire.To);
+			if (from == graphcore::NO_NODE || to == graphcore::NO_NODE) return false;
+			Dependencies.push_back({from, to});
 		}
-		return false;
+		return true;
 	}
 
 	bool AudioGraph::Connect(NodeId from, NodeId to) {
@@ -163,14 +206,13 @@ namespace engine::audio {
 			// A caller rebuilding a routing should not have to diff it first.
 			return true;
 		}
-		// A wire `from -> to` closes a loop exactly when `to` can already reach
-		// `from` by following wires forwards.
-		if (CanReach(to, from)) {
-			// Refused here, where it costs a walk, rather than discovered on
-			// the device thread where it is an infinite recursion or unbounded
-			// gain.
-			return false;
-		}
+		if (Wires.size() == MAXIMUM_WIRES || !PrepareDependencies()) return false;
+		Dependencies.push_back(
+			{static_cast<graphcore::NodeIndex>(IndexOf(from)), static_cast<graphcore::NodeIndex>(IndexOf(to))}
+		);
+		const graphcore::Limits limits{.MaximumNodes = MAXIMUM_NODES, .MaximumConnections = MAXIMUM_WIRES};
+		const auto result = graphcore::CompileOrder(Ids.size(), Dependencies, limits, Workspace, DenseOrder);
+		if (result.Status != graphcore::CompileStatus::Ok) return false;
 
 		Wires.push_back(Wire{.From = from, .To = to});
 		OrderStale = true;
@@ -196,82 +238,38 @@ namespace engine::audio {
 	}
 
 	std::span<const NodeId> AudioGraph::InputsOf(NodeId id) const {
-		if (OrderStale) {
-			Rebuild();
-		}
+		if (OrderStale && !Rebuild()) return {};
 		const size_t index = IndexOf(id);
-		if (index >= Sources.size()) {
-			return {};
-		}
-		return Sources[index];
+		if (index == Ids.size()) return {};
+		return std::span<const NodeId>(Sources).subspan(
+			SourceOffsets[index], SourceOffsets[index + 1] - SourceOffsets[index]
+		);
 	}
 
-	void AudioGraph::Rebuild() const {
-		Sorted.clear();
-		Sorted.reserve(Ids.size());
+	bool AudioGraph::Rebuild() const {
+		if (!PrepareDependencies()) return false;
+		const graphcore::Limits limits{.MaximumNodes = MAXIMUM_NODES, .MaximumConnections = MAXIMUM_WIRES};
+		const auto result = graphcore::CompileOrder(Ids.size(), Dependencies, limits, Workspace, DenseOrder);
+		if (result.Status != graphcore::CompileStatus::Ok) return false;
 
-		// The adjacency list, rebuilt with the order because both are derived
-		// from the same wires and go stale together.
-		Sources.assign(Ids.size(), {});
-		for (const Wire &wire : Wires) {
-			const size_t target = IndexOf(wire.To);
-			if (target < Sources.size()) {
-				Sources[target].push_back(wire.From);
-			}
-		}
-
-		// Kahn's algorithm over in-degree. Deterministic because the ready set
-		// is walked in node order rather than popped from a stack - two runs of
-		// one graph produce one order, which is what makes a mix reproducible.
-		std::vector<size_t> remaining(Ids.size(), 0);
-		for (const Wire &wire : Wires) {
-			const size_t target = IndexOf(wire.To);
-			if (target < remaining.size()) {
-				++remaining[target];
-			}
-		}
-
-		std::vector<bool> emitted(Ids.size(), false);
-		bool progressed = true;
-		while (progressed) {
-			progressed = false;
-			for (size_t index = 0; index < Ids.size(); ++index) {
-				if (emitted[index] || remaining[index] != 0) {
-					continue;
-				}
-				emitted[index] = true;
-				Sorted.push_back(Ids[index]);
-				progressed = true;
-
-				for (const Wire &wire : Wires) {
-					if (wire.From != Ids[index]) {
-						continue;
-					}
-					const size_t target = IndexOf(wire.To);
-					if (target < remaining.size() && remaining[target] > 0) {
-						--remaining[target];
-					}
-				}
-			}
-		}
-
-		// Anything left is in a cycle, which `Connect` refuses - so this cannot
-		// happen. Appending rather than dropping is the safe answer if it ever
-		// does: a node missing from the order silently stops advancing, which
-		// is far harder to find than one mixed in the wrong order.
-		for (size_t index = 0; index < Ids.size(); ++index) {
-			if (!emitted[index]) {
-				Sorted.push_back(Ids[index]);
-			}
-		}
-
+		std::fill_n(SourceOffsets.begin(), Ids.size() + 1, size_t{0});
+		for (const auto &edge : Dependencies)
+			++SourceOffsets[edge.After + 1];
+		for (size_t index = 0; index < Ids.size(); ++index)
+			SourceOffsets[index + 1] += SourceOffsets[index];
+		std::copy_n(SourceOffsets.begin(), Ids.size(), SourceCursor.begin());
+		Sources.resize(Wires.size());
+		for (size_t index = 0; index < Wires.size(); ++index)
+			Sources[SourceCursor[Dependencies[index].After]++] = Wires[index].From;
+		Sorted.resize(Ids.size());
+		for (size_t index = 0; index < Ids.size(); ++index)
+			Sorted[index] = Ids[DenseOrder[index]];
 		OrderStale = false;
+		return true;
 	}
 
 	std::span<const NodeId> AudioGraph::Order() const {
-		if (OrderStale) {
-			Rebuild();
-		}
+		if (OrderStale && !Rebuild()) return {};
 		return Sorted;
 	}
 }

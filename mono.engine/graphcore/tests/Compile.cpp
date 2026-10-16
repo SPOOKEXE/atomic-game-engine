@@ -1,3 +1,4 @@
+#include <engine/core/HeapProfile.hpp>
 #include <engine/graphcore/Compile.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -402,4 +403,94 @@ TEST_CASE("typed graph budgets include node and pin text as well as schema text"
 		CompileGraph(nodes, connections, schemas, limits, graph, diagnostic) == CompileStatus::LimitExceeded
 	);
 	CheckConnections(graph, saved);
+}
+
+TEST_CASE(
+	"prepared order compilation shares policy results and preserves output on refusal", "[graphcore][compile]"
+) {
+	OrderWorkspace workspace(5, 4);
+	const std::array dependencies{Dependency{3, 0}, Dependency{4, 1}, Dependency{3, 0}};
+	std::array<NodeIndex, 5> order{};
+	Diagnostic diagnostic;
+	for (const OrderPolicy policy :
+		 {OrderPolicy::AuthoredSweep, OrderPolicy::LowestReady, OrderPolicy::FifoReady}) {
+		Topology dynamic;
+		REQUIRE(
+			CompileDependencies(5, dependencies, GraphLimits(), dynamic, diagnostic, policy) ==
+			CompileStatus::Ok
+		);
+		const OrderResult result = CompileOrder(5, dependencies, GraphLimits(), workspace, order, policy);
+		REQUIRE(result.Status == CompileStatus::Ok);
+		CHECK(result.Count == 5);
+		CHECK(std::equal(order.begin(), order.end(), dynamic.Order.begin(), dynamic.Order.end()));
+	}
+	const auto saved = order;
+	SECTION("cycle") {
+		const OrderResult result =
+			CompileOrder(5, std::array{Dependency{0, 1}, Dependency{1, 0}}, GraphLimits(), workspace, order);
+		CHECK(result.Status == CompileStatus::Cycle);
+		CHECK(result.Blocked == 0);
+		CHECK(result.Count == 0);
+	}
+	SECTION("invalid endpoint") {
+		CHECK(
+			CompileOrder(5, std::array{Dependency{0, 5}}, GraphLimits(), workspace, order).Status ==
+			CompileStatus::InvalidDependency
+		);
+	}
+	SECTION("workspace edge capacity") {
+		CHECK(
+			CompileOrder(
+				5,
+				std::array{
+					Dependency{0, 1}, Dependency{0, 1}, Dependency{0, 1}, Dependency{0, 1}, Dependency{0, 1}
+				},
+				GraphLimits(),
+				workspace,
+				order
+			)
+				.Status == CompileStatus::LimitExceeded
+		);
+	}
+	SECTION("workspace node capacity") {
+		CHECK(CompileOrder(6, {}, GraphLimits(), workspace, order).Status == CompileStatus::LimitExceeded);
+	}
+	SECTION("caller output capacity") {
+		CHECK(
+			CompileOrder(5, {}, GraphLimits(), workspace, std::span(order).first(4)).Status ==
+			CompileStatus::LimitExceeded
+		);
+	}
+	CHECK(order == saved);
+}
+
+TEST_CASE(
+	"prepared order compilation allocates nothing on cold success or cycle refusal",
+	"[graphcore][compile][heap]"
+) {
+	using engine::core::HeapProfile;
+	if (!HeapProfile::IsCompiledIn()) SKIP("allocator hooks are required for the workspace allocation check");
+	OrderWorkspace workspace(5, 4);
+	std::array<NodeIndex, 5> order{};
+	std::array<OrderResult, 4> results{};
+	engine::core::HeapNodeView before;
+	engine::core::HeapNodeView after;
+	{
+		ENGINE_HEAP_SCOPE("graphcore.order.workspace.check");
+		const uint32_t tag = HeapProfile::Current();
+		before = HeapProfile::Node(tag);
+		const std::array dependencies{Dependency{3, 0}, Dependency{4, 1}};
+		results[0] = CompileOrder(5, dependencies, GraphLimits(), workspace, order);
+		results[1] = CompileOrder(5, dependencies, GraphLimits(), workspace, order, OrderPolicy::LowestReady);
+		results[2] = CompileOrder(5, dependencies, GraphLimits(), workspace, order, OrderPolicy::FifoReady);
+		results[3] =
+			CompileOrder(5, std::array{Dependency{0, 1}, Dependency{1, 0}}, GraphLimits(), workspace, order);
+		after = HeapProfile::Node(tag);
+	}
+	CHECK(results[0].Status == CompileStatus::Ok);
+	CHECK(results[1].Status == CompileStatus::Ok);
+	CHECK(results[2].Status == CompileStatus::Ok);
+	CHECK(results[3].Status == CompileStatus::Cycle);
+	CHECK(after.TotalBlocks == before.TotalBlocks);
+	CHECK(after.TotalBytes == before.TotalBytes);
 }
