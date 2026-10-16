@@ -16,6 +16,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <charconv>
+#include <cmath>
+#include <limits>
 #include <string_view>
 
 TEST_SUITE_ID("engine.core.chars")
@@ -33,6 +35,38 @@ namespace {
 		code = result.ec;
 		consumed = static_cast<size_t>(result.ptr - text.data());
 		return value;
+	}
+
+	template <class T> void CheckRangeError(std::string_view text, size_t consumed) {
+		T portableValue = 42;
+		const auto portableResult = portable::Read(text.data(), text.data() + text.size(), portableValue);
+		T value = 42;
+		const auto result = FromChars(text.data(), text.data() + text.size(), value);
+
+		INFO("text was \"" << text << "\"");
+		CHECK(portableResult.ec == std::errc::result_out_of_range);
+		CHECK(portableResult.ptr == text.data() + consumed);
+		CHECK(portableValue == 42);
+		CHECK(result.ec == std::errc::result_out_of_range);
+		CHECK(result.ptr == text.data() + consumed);
+		CHECK(value == 42);
+	}
+
+	template <class T> void CheckBoundaryValue(std::string_view text, T expected) {
+		T portableValue = 42;
+		const auto portableResult = portable::Read(text.data(), text.data() + text.size(), portableValue);
+		T value = 42;
+		const auto result = FromChars(text.data(), text.data() + text.size(), value);
+
+		INFO("text was \"" << text << "\"");
+		CHECK(portableResult.ec == std::errc{});
+		CHECK(portableResult.ptr == text.data() + text.size());
+		CHECK(portableValue == expected);
+		CHECK(std::signbit(portableValue) == std::signbit(expected));
+		CHECK(result.ec == std::errc{});
+		CHECK(result.ptr == text.data() + text.size());
+		CHECK(value == expected);
+		CHECK(std::signbit(value) == std::signbit(expected));
 	}
 }
 
@@ -149,4 +183,23 @@ TEST_CASE("a float and a double read the same text", "[chars]") {
 	double twice = 0.0;
 	CHECK(FromChars(text.data(), text.data() + text.size(), twice).ec == std::errc{});
 	CHECK(twice == Approx(0.125));
+}
+
+TEST_CASE("floating-point range errors leave the value untouched", "[chars]") {
+	for (const std::string_view text : {"1e9999", "-1e9999", "1e-9999", "-1e-9999"}) {
+		CheckRangeError<float>(text, text.size());
+		CheckRangeError<double>(text, text.size());
+	}
+
+	CheckRangeError<float>("1e9999kg", 6);
+	CheckRangeError<double>("1e9999kg", 6);
+}
+
+TEST_CASE("zero and representable subnormals remain valid", "[chars]") {
+	CheckBoundaryValue<float>("0e-9999", 0.0f);
+	CheckBoundaryValue<double>("0e-9999", 0.0);
+	CheckBoundaryValue<float>("-0e-9999", -0.0f);
+	CheckBoundaryValue<double>("-0e-9999", -0.0);
+	CheckBoundaryValue<float>("1.40129846e-45", std::numeric_limits<float>::denorm_min());
+	CheckBoundaryValue<double>("4.9406564584124654e-324", std::numeric_limits<double>::denorm_min());
 }
