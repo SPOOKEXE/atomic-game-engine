@@ -7,6 +7,8 @@
 #include <engine/examples/Scene.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/physics/Broadphase.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Interpolation.hpp>
@@ -337,6 +339,9 @@ namespace engine::examples {
 		//
 		// A zero delta rather than a tick's worth: this must not move the
 		// simulation forward, only settle it.
+		// Physics remains optional for bare loads; when a host prepared it,
+		// refresh authored colliders before startup heartbeat queries run.
+		if (physics::PhysicsClockOf(store) != nullptr) physics::SyncBroadphase(store);
 		if (!runtime->Heartbeat(0.0f)) {
 			error = runtime->LastError();
 			return false;

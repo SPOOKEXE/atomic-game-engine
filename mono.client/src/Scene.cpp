@@ -19,6 +19,7 @@
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/physics/Characters.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/render/Animation.hpp>
@@ -1033,6 +1034,9 @@ namespace client {
 
 		// The scene, the components and the systems that move it are the
 		// engine's and every program's. What follows is the client's half.
+		// Keep a host's clock settings, while making startup heartbeat queries
+		// available on standalone scenes.
+		if (engine::physics::PhysicsClockOf(store) == nullptr) engine::physics::PreparePhysicsWorld(store);
 		std::string error;
 		engine::script::RuntimeLimits standalone;
 		standalone.Role = engine::script::HostRole::OfBoth();
@@ -1065,7 +1069,6 @@ namespace client {
 		// non-zero MoveDirection for ever while no integrator consumed the Motion
 		// it produced. Anchored examples still cost no body work because they have
 		// no Simulated rows.
-		engine::physics::PreparePhysicsWorld(store);
 		engine::physics::RegisterPhysicsSystems(scheduler);
 		engine::scene::PrepareGravity(store);
 		engine::scene::RegisterGravitySystem(scheduler);

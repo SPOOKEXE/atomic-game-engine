@@ -36,6 +36,9 @@ mono_add_library(examples
 		# "'ParticleEmitter' is not a registered class" out of its heartbeat in
 		# every program but the client, which registered them on its own path.
 		Engine::effects
+
+		# Synchronize authored colliders before startup Heartbeat when physics is prepared.
+		Engine::physics
 		Engine::graph
 
 		Engine::script

@@ -30,8 +30,10 @@
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/physics/Clock.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/physics/Query.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/WeatherEffects.hpp>
@@ -54,6 +56,7 @@
 #include <engine/script/PlayerGui.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
+#include <engine/script/UpdateCadenceService.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
@@ -89,6 +92,7 @@ TEST_DEPENDS("engine.gui.typing")
 TEST_DEPENDS("engine.game.roundtrip")
 TEST_DEPENDS("engine.weather.runtime")
 TEST_DEPENDS("engine.weather.consumers")
+TEST_DEPENDS("engine.script.updatecadenceservice")
 
 using Catch::Approx;
 using engine::core::FrameGraph;
@@ -126,7 +130,7 @@ namespace {
 		Scheduler Systems;
 		std::shared_ptr<engine::script::Runtime> Scripts;
 
-		explicit Session(std::string_view scene = "Rings.luau") {
+		explicit Session(std::string_view scene = "Rings.luau", bool preparedPhysics = false) {
 			engine::parallel::Jobs::Start(2);
 
 			// **The staged assets root, not the test binary's own directory.**
@@ -135,6 +139,11 @@ namespace {
 			// `assets/`. A client finds them because a client stages beside
 			// them; this has to be told.
 			engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
+			if (preparedPhysics) {
+				engine::physics::PreparePhysicsWorld(World, 8.0f);
+				engine::physics::SetPhysicsTickRate(World, 120.0);
+				engine::physics::SetPhysicsPaused(World, true);
+			}
 
 			const bool built = client::BuildScriptedWorld(
 				World, Systems, engine::examples::ExamplePath(std::string(scene)), ENTITIES, &Scripts
@@ -223,6 +232,89 @@ namespace {
 			});
 		return found == list.Commands.end() ? nullptr : &*found;
 	}
+}
+
+TEST_CASE(
+	"scripted client towns query authored colliders during the startup heartbeat",
+	"[client][scripting][cadence][startup]"
+) {
+	for (const auto *path : {"TownCadence.luau", "TownCadence.js"}) {
+		for (const bool prepared : {false, true}) {
+			INFO(path);
+			INFO(prepared);
+			Session session(path, prepared);
+			auto &store = session.World;
+			const auto *physics = store.Resource<engine::physics::PhysicsWorld>();
+			REQUIRE(physics != nullptr);
+			REQUIRE(engine::physics::PhysicsClockOf(store) != nullptr);
+			CHECK(store.Time().Tick == 0);
+			if (prepared) {
+				CHECK_FALSE(physics->CellSizeMeasured());
+				CHECK(physics->CellSize() == 8.0f);
+				CHECK(engine::physics::PhysicsTickRate(store) == 120.0);
+				CHECK(engine::physics::IsPhysicsPaused(store));
+			}
+			const auto target = InWorkspace(store, "Practice Target");
+			REQUIRE(target != engine::ecs::NULL_ENTITY);
+			for (const auto *name : {"North Guard", "South Guard"}) {
+				INFO(name);
+				const auto guard = InWorkspace(store, name);
+				REQUIRE(guard != engine::ecs::NULL_ENTITY);
+				const auto root = store.FindFirstChild(guard, "Body");
+				const auto humanoid = store.FindFirstChild(guard, "Humanoid");
+				REQUIRE(root != engine::ecs::NULL_ENTITY);
+				REQUIRE(humanoid != engine::ecs::NULL_ENTITY);
+				const auto *observed = store.Get<engine::script::NpcPerception>(guard);
+				const auto *decision = store.Get<engine::script::NpcBehaviour>(guard);
+				const auto *state = store.Get<engine::scene::UpdateCadenceState>(guard);
+				REQUIRE(observed != nullptr);
+				REQUIRE(decision != nullptr);
+				REQUIRE(state != nullptr);
+				CHECK(observed->Visible);
+				CHECK(observed->TargetPosition == store.Get<Transform>(target)->Frame.Position);
+				for (size_t domain = 0; domain < 2; ++domain) {
+					CHECK(state->Domains[domain].Generation > 0);
+					CHECK(state->Domains[domain].LastCommittedTick == 0);
+				}
+				CHECK(decision->MoveDirection.Magnitude() > 0.9f);
+				CHECK(store.Get<engine::scene::Humanoid>(humanoid)->MoveDirection == decision->MoveDirection);
+				const auto position = store.Get<Transform>(root)->Frame.Position;
+				const auto direction = (observed->TargetPosition - position).Unit();
+				const auto hit = engine::physics::Raycast(
+					store, engine::core::Ray{position + direction * 2, direction}, 100.0f
+				);
+				REQUIRE(hit);
+				CHECK(hit->Owner == target);
+			}
+			if (!prepared) {
+				const auto guard = InWorkspace(store, "North Guard");
+				const auto root = store.FindFirstChild(guard, "Body");
+				const auto initial = store.Get<Transform>(root)->Frame.Position;
+				session.Tick(30);
+				CHECK(store.Time().Tick == 30);
+				CHECK(store.Get<Transform>(root)->Frame.Position.Z < initial.Z - 0.25f);
+				CHECK(store.Get<engine::script::NpcPerception>(guard)->Visible);
+			}
+		}
+	}
+}
+
+TEST_CASE("bare scene loading keeps physics optional", "[client][scripting][startup]") {
+	Store store("bare-script-loader");
+	Scheduler systems;
+	engine::core::Paths::SetAssetsOverride(engine::core::Paths::Base().parent_path() / "assets");
+	CHECK(engine::physics::PhysicsClockOf(store) == nullptr);
+	std::string failure;
+	std::shared_ptr<engine::script::Runtime> runtime;
+	REQUIRE(
+		engine::examples::LoadScene(
+			store, systems, engine::examples::ExamplePath("Rings.luau"), failure, &runtime
+		)
+	);
+	INFO(failure);
+	REQUIRE(runtime != nullptr);
+	CHECK(engine::physics::PhysicsClockOf(store) == nullptr);
+	CHECK(store.Time().Tick == 0);
 }
 
 TEST_CASE("GuiInteraction routes client controls into visible scripted state", "[client][gui][scripting]") {
