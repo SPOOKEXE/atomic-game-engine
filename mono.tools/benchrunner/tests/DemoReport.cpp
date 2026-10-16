@@ -7,6 +7,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 
 TEST_SUITE_ID("tools.benchrunner.demo-report")
@@ -80,6 +81,16 @@ TEST_CASE("demo reports reject incomplete collection and incomplete measurements
 	DemoFixture fixture;
 	SECTION("short runtime") {
 		fixture.Report["duration_seconds"] = 4.9;
+	}
+	SECTION("runtime shorter than the requested window") {
+		fixture.Manifest["settings"]["seconds"] = 15;
+	}
+	SECTION("requested window below five seconds") {
+		fixture.Manifest["settings"]["seconds"] = 4.9;
+	}
+	SECTION("nonfinite requested window") {
+		fixture.Manifest["settings"]["seconds"] = std::numeric_limits<double>::infinity();
+		CHECK_THROWS(DemoValidateManifest(fixture.Manifest));
 	}
 	SECTION("missing heap hooks") {
 		fixture.Report["heap_compiled"] = false;
@@ -187,11 +198,19 @@ TEST_CASE("demo cost ceilings handle zero baselines and configurable absolute fl
 	CHECK(DemoCeiling(100, "render_ms_per_frame", limits) == 115);
 }
 
-TEST_CASE("demo CLI writes reviewable comparisons and gates incompatible machines", "[benchrunner]") {
+TEST_CASE(
+	"demo CLI writes reviewable comparisons and gates incompatible machines or settings", "[benchrunner]"
+) {
 	DemoFixture baseline;
 	DemoFixture current;
 	baseline.Write();
-	current.Manifest["machine"]["cpu"] = "another cpu";
+	SECTION("different machine") {
+		current.Manifest["machine"]["cpu"] = "another cpu";
+	}
+	SECTION("different requested duration") {
+		current.Manifest["settings"]["seconds"] = 15;
+		current.Report["duration_seconds"] = 15.01;
+	}
 	current.Write();
 	const auto document = current.Directory / "impact.md";
 	std::vector<std::string> arguments{
@@ -230,6 +249,11 @@ TEST_CASE("demo CLI writes reviewable comparisons and gates incompatible machine
 
 TEST_CASE("embedded baseline roundtrips exact aggregates without runtime files", "[benchrunner]") {
 	DemoFixture fixture;
+	SECTION("historical five-second window") {}
+	SECTION("fifteen-second window") {
+		fixture.Manifest["settings"]["seconds"] = 15;
+		fixture.Report["duration_seconds"] = 15.01;
+	}
 	fixture.Report["cpu_peak_basis"] = "frame_end_samples";
 	fixture.Report["metrics"]["render_ms_per_frame"] = 1.234567891234;
 	fixture.Write();
@@ -266,6 +290,9 @@ TEST_CASE("embedded baseline rejects malformed aggregates and metadata", "[bench
 	}
 	SECTION("short measurement") {
 		aggregate["workloads"]["Demo"]["metrics"]["duration_seconds"]["min"] = 4;
+	}
+	SECTION("measurement shorter than the requested window") {
+		aggregate["manifest"]["settings"]["seconds"] = 15;
 	}
 	SECTION("settings changed") {
 		aggregate["manifest"]["settings"]["runs"] = 1;
@@ -359,16 +386,58 @@ TEST_CASE("demo reports distinguish expected off-thread spans from incomplete ow
 
 TEST_CASE("demo cost normalization uses actual wall-clock window and per-second floors", "[benchrunner]") {
 	DemoFixture fixture;
+	double actualSeconds = 5.01;
+	SECTION("historical five-second window") {}
+	SECTION("fifteen-second window") {
+		fixture.Manifest["settings"]["seconds"] = 15;
+		actualSeconds = 15.01;
+	}
+	fixture.Report["duration_seconds"] = actualSeconds;
 	fixture.Write();
 	const auto collected = DemoLoad(fixture.Directory);
 	const auto &metrics = collected.Workloads.at("Demo").Metrics;
-	CHECK(std::abs(metrics.at("cpu_allocations_per_second").Mean - 30 / 5.01) < 1e-12);
-	CHECK(std::abs(metrics.at("render_ms_per_second").Mean - 300 / 5.01) < 1e-12);
+	CHECK(std::abs(metrics.at("cpu_allocations_per_second").Mean - 30 / actualSeconds) < 1e-12);
+	CHECK(std::abs(metrics.at("render_ms_per_second").Mean - 300 / actualSeconds) < 1e-12);
+	std::ostringstream document;
+	DemoMetadata(document, collected, "Fixture");
+	const std::string requestedSeconds = fixture.Manifest["settings"]["seconds"].dump();
+	CHECK(
+		document.str().find("Three independent " + requestedSeconds + "-second runs.") != std::string::npos
+	);
 	CHECK_FALSE(DemoDiagnostic("render_ms_per_frame"));
 	CHECK_FALSE(DemoDiagnostic("render_ms_per_second"));
 	CHECK(DemoFloor("render_ms_per_second", DemoLimits{}) == 5);
 	CHECK(DemoFloor("cpu_allocations_per_second", DemoLimits{}) == 1000);
 	CHECK(DemoFloor("cpu_allocated_bytes_per_second", DemoLimits{}) == 65536);
+}
+
+TEST_CASE("equal fifteen-second windows still reject GPU allocation rate regressions", "[benchrunner]") {
+	DemoFixture fixture;
+	fixture.Manifest["settings"]["seconds"] = 15;
+	fixture.Report["duration_seconds"] = 15.01;
+	fixture.Report["metrics"]["gpu_allocated_bytes"] = 15'010'000;
+	fixture.Write();
+	const auto baseline = DemoLoad(fixture.Directory);
+	fixture.Report["metrics"]["gpu_allocated_bytes"] = 18'012'000;
+	fixture.Write();
+	const auto current = DemoLoad(fixture.Directory);
+	CHECK(
+		std::abs(
+			baseline.Workloads.at("Demo").Metrics.at("gpu_allocated_bytes_per_second").Mean - 1'000'000
+		) < 1e-6
+	);
+	CHECK(
+		std::abs(current.Workloads.at("Demo").Metrics.at("gpu_allocated_bytes_per_second").Mean - 1'200'000) <
+		1e-6
+	);
+	std::ostringstream document;
+	CHECK_FALSE(DemoCompareTable(document, baseline, current, DemoLimits{}));
+	CHECK(
+		document.str().find(
+			"gpu_allocated_bytes_per_second | 1000000.000 | 1200000.000 | +200000.000 (20.000%) | "
+			"1150000.000 | FAIL"
+		) != std::string::npos
+	);
 }
 
 TEST_CASE(
