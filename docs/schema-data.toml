@@ -9,11 +9,11 @@ generated_by = "schemadump"
 source = "runtime registries"
 
 ["reference"."counts"]
-components = 238
-classes = 168
-properties = 2128
-enums = 69
-functions = 115
+components = 245
+classes = 169
+properties = 2197
+enums = 72
+functions = 116
 
 services = 18
 service_methods = 92
@@ -2608,6 +2608,90 @@ alignment = 4
 trivial = true
 serialisable = true
 raw_serialisation = true
+padded = false
+wire_size = 0
+described = false
+
+["components"."scene.WeatherAcceptedDefinition"]
+name = "scene.WeatherAcceptedDefinition"
+kind = "Data"
+size = 256
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."scene.WeatherClock"]
+name = "scene.WeatherClock"
+kind = "Data"
+size = 136
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
+["components"."scene.WeatherClockEstimate"]
+name = "scene.WeatherClockEstimate"
+kind = "Data"
+size = 200
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
+["components"."scene.WeatherClockInbox"]
+name = "scene.WeatherClockInbox"
+kind = "Data"
+size = 5128
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
+["components"."scene.WeatherClockPublication"]
+name = "scene.WeatherClockPublication"
+kind = "Data"
+size = 32
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
+["components"."scene.WeatherCompute"]
+name = "scene.WeatherCompute"
+kind = "Data"
+size = 224
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
+["components"."scene.WeatherWorldPause"]
+name = "scene.WeatherWorldPause"
+kind = "Data"
+size = 1
+alignment = 1
+trivial = true
+serialisable = true
+raw_serialisation = false
 padded = false
 wire_size = 0
 described = false
@@ -29306,6 +29390,846 @@ nullable = false
 reads = ["scene.Volume"]
 writes = ["scene.Volume"]
 
+["classes"."WeatherCompute"]
+name = "WeatherCompute"
+creatable = true
+inherits = "CloudCompute"
+components = ["ecs.Hierarchy", "ecs.InstanceClass", "ecs.InstanceName", "scene.Clouds", "scene.CloudCompute", "scene.WeatherCompute"]
+property_count = 69
+
+["classes"."WeatherCompute"."properties"."Parent"]
+name = "Parent"
+type = "Reference"
+value_size = 8
+kind = "Computed"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.Hierarchy"]
+writes = ["ecs.Hierarchy"]
+
+["classes"."WeatherCompute"."properties"."Name"]
+name = "Name"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["ecs.InstanceName"]
+writes = ["ecs.InstanceName"]
+
+["classes"."WeatherCompute"."properties"."Color"]
+name = "Color"
+type = "Color3"
+value_size = 12
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.Clouds"]
+writes = ["scene.Clouds"]
+
+["classes"."WeatherCompute"."properties"."Cover"]
+name = "Cover"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.Clouds"]
+writes = ["scene.Clouds"]
+
+["classes"."WeatherCompute"."properties"."Density"]
+name = "Density"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.Clouds"]
+writes = ["scene.Clouds"]
+
+["classes"."WeatherCompute"."properties"."WindSpeed"]
+name = "WindSpeed"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.Clouds"]
+writes = ["scene.Clouds"]
+
+["classes"."WeatherCompute"."properties"."WindDirection"]
+name = "WindDirection"
+type = "Vector2"
+value_size = 8
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.Clouds"]
+writes = ["scene.Clouds"]
+
+["classes"."WeatherCompute"."properties"."Enabled"]
+name = "Enabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.Clouds"]
+writes = ["scene.Clouds"]
+
+["classes"."WeatherCompute"."properties"."CellSize"]
+name = "CellSize"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.CloudCompute"]
+writes = ["scene.CloudCompute"]
+
+["classes"."WeatherCompute"."properties"."Detail"]
+name = "Detail"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.CloudCompute"]
+writes = ["scene.CloudCompute"]
+
+["classes"."WeatherCompute"."properties"."Height"]
+name = "Height"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.CloudCompute"]
+writes = ["scene.CloudCompute"]
+
+["classes"."WeatherCompute"."properties"."Thickness"]
+name = "Thickness"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.CloudCompute"]
+writes = ["scene.CloudCompute"]
+
+["classes"."WeatherCompute"."properties"."Seed"]
+name = "Seed"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."Steps"]
+name = "Steps"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.CloudCompute"]
+writes = ["scene.CloudCompute"]
+
+["classes"."WeatherCompute"."properties"."Shader"]
+name = "Shader"
+type = "Enum"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.CloudCompute"]
+writes = ["scene.CloudCompute"]
+enum = "CloudComputeShader"
+
+["classes"."WeatherCompute"."properties"."ComputeEnabled"]
+name = "ComputeEnabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.CloudCompute"]
+writes = ["scene.CloudCompute"]
+
+["classes"."WeatherCompute"."properties"."BoundaryX"]
+name = "BoundaryX"
+type = "Enum"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+enum = "WeatherBoundary"
+
+["classes"."WeatherCompute"."properties"."BoundaryZ"]
+name = "BoundaryZ"
+type = "Enum"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+enum = "WeatherBoundary"
+
+["classes"."WeatherCompute"."properties"."TopBoundary"]
+name = "TopBoundary"
+type = "Enum"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+enum = "WeatherTopBoundary"
+
+["classes"."WeatherCompute"."properties"."TerrainRevision"]
+name = "TerrainRevision"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."GroundVapourFluxKilogramsPerSquareMetreSecond"]
+name = "GroundVapourFluxKilogramsPerSquareMetreSecond"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."RainFallSpeedMetresPerSecond"]
+name = "RainFallSpeedMetresPerSecond"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."CellSizeMetres"]
+name = "CellSizeMetres"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."BaseHeightMetres"]
+name = "BaseHeightMetres"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."ThicknessMetres"]
+name = "ThicknessMetres"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."ExtentMetres"]
+name = "ExtentMetres"
+type = "Vector3"
+value_size = 12
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."Coverage"]
+name = "Coverage"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."CondensateScale"]
+name = "CondensateScale"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."VapourMixingRatio"]
+name = "VapourMixingRatio"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."VapourScale"]
+name = "VapourScale"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."BaseTemperatureCelsius"]
+name = "BaseTemperatureCelsius"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."BasePressureHectopascals"]
+name = "BasePressureHectopascals"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."TemperatureLapseCelsiusPerKilometre"]
+name = "TemperatureLapseCelsiusPerKilometre"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."TemperatureVariationCelsius"]
+name = "TemperatureVariationCelsius"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."PressureVariationHectopascals"]
+name = "PressureVariationHectopascals"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."TurbulenceMetresPerSecond"]
+name = "TurbulenceMetresPerSecond"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."ShearMetresPerSecond"]
+name = "ShearMetresPerSecond"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."LiftMetresPerSecond"]
+name = "LiftMetresPerSecond"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."FrontContrast"]
+name = "FrontContrast"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."GrowthRate"]
+name = "GrowthRate"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."TimeScale"]
+name = "TimeScale"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."MaintenanceSeconds"]
+name = "MaintenanceSeconds"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."LodError"]
+name = "LodError"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."ShadowStrength"]
+name = "ShadowStrength"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."ShadowDistanceMetres"]
+name = "ShadowDistanceMetres"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."ShadowUpdateSeconds"]
+name = "ShadowUpdateSeconds"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."AtmosphereDensityStrength"]
+name = "AtmosphereDensityStrength"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."AtmosphereHazeStrength"]
+name = "AtmosphereHazeStrength"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."AtmosphereGlareSuppression"]
+name = "AtmosphereGlareSuppression"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."FogStrength"]
+name = "FogStrength"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."PrecipitationRate"]
+name = "PrecipitationRate"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."IceFraction"]
+name = "IceFraction"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."StormIntensity"]
+name = "StormIntensity"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."HailIntensity"]
+name = "HailIntensity"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."LightningRate"]
+name = "LightningRate"
+type = "Float"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."WindMetresPerSecond"]
+name = "WindMetresPerSecond"
+type = "Vector3"
+value_size = 12
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."FeatureCells"]
+name = "FeatureCells"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."TickRate"]
+name = "TickRate"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."Paused"]
+name = "Paused"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."MaximumResidentBricks"]
+name = "MaximumResidentBricks"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."MaximumLod"]
+name = "MaximumLod"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."ShadowsEnabled"]
+name = "ShadowsEnabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."ShadowResolution"]
+name = "ShadowResolution"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."ShadowCascades"]
+name = "ShadowCascades"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."WeatherEnabled"]
+name = "WeatherEnabled"
+type = "Bool"
+value_size = 1
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."LayerName"]
+name = "LayerName"
+type = "Name"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+
+["classes"."WeatherCompute"."properties"."Mode"]
+name = "Mode"
+type = "Enum"
+value_size = 4
+kind = "Field"
+writable = true
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = ["scene.WeatherCompute"]
+enum = "WeatherMode"
+
+["classes"."WeatherCompute"."properties"."AlgorithmVersion"]
+name = "AlgorithmVersion"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = false
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = []
+
+["classes"."WeatherCompute"."properties"."DefinitionRevision"]
+name = "DefinitionRevision"
+type = "Int32"
+value_size = 4
+kind = "Field"
+writable = false
+predicted_writable = false
+scriptable = true
+nullable = false
+reads = ["scene.WeatherCompute"]
+writes = []
+
 ["classes"."Weld"]
 name = "Weld"
 creatable = true
@@ -30265,6 +31189,13 @@ scriptable = true
 
 ["classes"."Instance"."functions"."Resize"]
 name = "Resize"
+owner = "Instance"
+kind = "Method"
+source = "neutral"
+scriptable = true
+
+["classes"."Instance"."functions"."Sample"]
+name = "Sample"
 owner = "Instance"
 kind = "Method"
 source = "neutral"
@@ -31616,6 +32547,18 @@ items = ["OnChange", "EveryFrame", "FixedRate", "Manual"]
 ["enums"."VolumeShape"]
 name = "VolumeShape"
 items = ["Box", "Ellipsoid"]
+
+["enums"."WeatherBoundary"]
+name = "WeatherBoundary"
+items = ["Periodic", "Closed", "Open"]
+
+["enums"."WeatherMode"]
+name = "WeatherMode"
+items = ["Procedural", "Stateful"]
+
+["enums"."WeatherTopBoundary"]
+name = "WeatherTopBoundary"
+items = ["Closed", "Escape"]
 
 ["enums"."ZIndexBehavior"]
 name = "ZIndexBehavior"
