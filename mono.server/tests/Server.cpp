@@ -204,6 +204,23 @@ TEST_CASE("a server data factory owns one isolated lifecycle world", "[server][d
 	CHECK(host.Worlds().StatisticsOf(host.Primary()).Ticks == 0);
 	CHECK(session.AllSystemsPaused("server-factory-world"));
 	CHECK(session.CreateWorld(create).WorldVersion == created.WorldVersion);
+	const auto checkFactoryWorld = [&] {
+		REQUIRE(host.Worlds().Enter(host.Primary(), [](Store &store, Scheduler &systems) {
+			CHECK(store.Resource<engine::physics::PhysicsWorld>() != nullptr);
+			CHECK(store.Resource<engine::physics::PhysicsClock>() != nullptr);
+			const Entity workspace = store.FindFirstRoot("Workspace");
+			REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+			CHECK(store.FindFirstChild(workspace, "ServerDefault") == engine::ecs::NULL_ENTITY);
+			size_t parts = 0;
+			store.EachEntity([&](Entity entity) {
+				if (store.IsA(entity, engine::scene::PartClass())) ++parts;
+			});
+			CHECK(parts == 0);
+			CHECK(systems.HasSystem("resolve-attachments", Phase::PostSimulation));
+			CHECK_FALSE(systems.HasSystem("script-heartbeat", Phase::Simulation));
+		}) == engine::world::WorldStatus::Ok);
+	};
+	checkFactoryWorld();
 
 	const DataFactoryWorldRequest reset{
 		.Operation = DataFactoryWorldOperation::Reset,
@@ -221,6 +238,7 @@ TEST_CASE("a server data factory owns one isolated lifecycle world", "[server][d
 	CHECK(resetReply.WorldVersion == created.WorldVersion + 1);
 	CHECK(host.Worlds().SettingsOf(host.Primary()).TickRate == 30.0);
 	CHECK(session.ResetWorld(reset).WorldVersion == resetReply.WorldVersion);
+	checkFactoryWorld();
 
 	const DataFactoryWorldRequest retire{
 		.Operation = DataFactoryWorldOperation::Retire,
@@ -239,9 +257,7 @@ TEST_CASE("a server data factory owns one isolated lifecycle world", "[server][d
 	host.Shutdown();
 }
 
-TEST_CASE(
-	"server packages rehydrate systems without rebuilding default scene entities", "[server][data-factory]"
-) {
+TEST_CASE("server packages rehydrate systems without adding benchmark entities", "[server][data-factory]") {
 	server::Options options;
 	options.Entities = 4;
 	options.DataFactory = true;
@@ -292,6 +308,10 @@ TEST_CASE(
 	const auto second = run(session.Inspect("package-world"));
 	REQUIRE(second.Ran);
 	CHECK(Entities(host.Worlds(), host.Primary()) == afterFirst);
+	REQUIRE(host.Worlds().Enter(host.Primary(), [](Store &, Scheduler &systems) {
+		CHECK(systems.HasSystem("chat", Phase::PreSimulation));
+		CHECK(systems.HasSystem("report", Phase::PreRender));
+	}) == engine::world::WorldStatus::Ok);
 }
 
 TEST_CASE("a paused factory skips headless presentation and empty bounds", "[server][data-factory]") {
@@ -1737,8 +1757,11 @@ TEST_CASE(
 			const size_t before = replies.size();
 			poll();
 			REQUIRE(client.SendUser(game::EncodePortalSession(message), now));
-			for (int tick = 0; tick < 100 && replies.size() == before; tick++)
+			const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+			while (replies.size() == before && std::chrono::steady_clock::now() < deadline) {
 				poll();
+				std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			}
 			REQUIRE(replies.size() == before + 1);
 			CHECK(replies.back().Attempt == message.Attempt);
 			CHECK(replies.back().Kind == expected);
