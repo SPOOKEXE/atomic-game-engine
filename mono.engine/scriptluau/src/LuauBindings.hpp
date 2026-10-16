@@ -69,6 +69,7 @@ namespace engine::script {
 	// @since v0.6
 	struct LuauContext {
 		const DataScriptPackageContext *Package = nullptr;
+		uint64_t RuntimeIdentity = 0;
 		// One C closure the runtime owns and names for binding profiling.
 		//
 		// A Luau function pointer has no portable conversion to data, so the

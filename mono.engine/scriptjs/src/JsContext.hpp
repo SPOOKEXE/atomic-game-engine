@@ -64,6 +64,7 @@ namespace engine::script {
 	// @since v0.5
 	struct JsContext {
 		const DataScriptPackageContext *Package = nullptr;
+		uint64_t RuntimeIdentity = 0;
 		ecs::Store *World = nullptr;
 
 		// What the host is, for `RunService.IsServer()` and friends.

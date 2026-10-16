@@ -245,6 +245,10 @@ namespace engine::script {
 				return *Context.World;
 			}
 
+			uint64_t RuntimeIdentity() const override {
+				return Context.RuntimeIdentity;
+			}
+
 			ChangeQueue &Changes() override {
 				return Context.Changes;
 			}

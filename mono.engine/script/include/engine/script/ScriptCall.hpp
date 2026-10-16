@@ -83,6 +83,11 @@ namespace engine::script {
 		ScriptCall(ScriptCall &&) = delete;
 		ScriptCall &operator=(ScriptCall &&) = delete;
 
+		// Returns this call's runtime identity, or zero for unsupported adapters.
+		virtual uint64_t RuntimeIdentity() const {
+			return 0;
+		}
+
 		// The world this VM builds into.
 		virtual ecs::Store &World() = 0;
 

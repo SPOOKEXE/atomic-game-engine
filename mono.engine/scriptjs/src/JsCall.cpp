@@ -169,6 +169,10 @@ namespace engine::script {
 				return *JsOf(Context).World;
 			}
 
+			uint64_t RuntimeIdentity() const override {
+				return JsOf(Context).RuntimeIdentity;
+			}
+
 			ChangeQueue &Changes() override {
 				return JsOf(Context).Changes;
 			}

@@ -61,6 +61,21 @@ namespace {
 	}
 }
 
+TEST_CASE("runtime identities are nonzero, stable, and process-monotonic", "[script][runtime]") {
+	RegisterClasses();
+	Store luauStore("runtime_identity_luau");
+	Store javascriptStore("runtime_identity_javascript");
+	const auto luau = MakeRuntime(luauStore, Language::Luau);
+	const auto javascript = MakeRuntime(javascriptStore, Language::JavaScript);
+
+	const uint64_t luauIdentity = luau->Identity();
+	const uint64_t javascriptIdentity = javascript->Identity();
+	CHECK(luauIdentity != 0);
+	CHECK(javascriptIdentity > luauIdentity);
+	CHECK(luau->Identity() == luauIdentity);
+	CHECK(javascript->Identity() == javascriptIdentity);
+}
+
 TEST_CASE("a script runs and can print", "[script]") {
 	RegisterClasses();
 	Store store("script_test");

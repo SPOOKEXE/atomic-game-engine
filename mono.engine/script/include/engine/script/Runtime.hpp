@@ -425,8 +425,16 @@ namespace engine::script {
 	//
 	// @since v0.5
 	class Runtime {
+	  private:
+		const uint64_t IdentityValue;
+
 	  public:
 		virtual ~Runtime() = default;
+
+		// Process-local lifetime nonce, never a saved script or world identity.
+		uint64_t Identity() const {
+			return IdentityValue;
+		}
 
 		// Runs one verified package with its package-only global installed by
 		// the adapter. Ordinary Run never gains this extra host surface.
@@ -866,7 +874,7 @@ namespace engine::script {
 			return Breakpoints;
 		}
 
-		// Returns the host-owned capture adapter, or an empty pointer when absent.
+		// The host-owned capture adapter for this runtime.
 		const std::shared_ptr<DataCaptureBridge> &CaptureBridge() const {
 			return DataCapture;
 		}
@@ -881,10 +889,7 @@ namespace engine::script {
 		//
 		// @param store The world. Outlives the runtime.
 		// @param limits Where the scripts stand and what they may access.
-		Runtime(ecs::Store &store, const RuntimeLimits &limits)
-			: Store(store), HostRoleValue(limits.Role), ScriptOriginValue(limits.Origin),
-			  ScriptCapabilitiesValue(limits.EffectiveCapabilities()), DataCapture(limits.DataCapture),
-			  DataLifecycle(limits.DataLifecycle), PackageOnly(limits.PackageOnly) {}
+		Runtime(ecs::Store &store, const RuntimeLimits &limits);
 
 		// The world this runtime builds into. A reference rather than a handle,
 		// because a VM is created for one world and dies with it.

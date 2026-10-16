@@ -8,9 +8,12 @@
 #include <engine/script/Runtime.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 
 #ifdef _MSC_VER
@@ -18,6 +21,27 @@
 #endif
 
 namespace engine::script {
+	namespace {
+		std::atomic<uint64_t> NextRuntimeIdentity{1};
+
+		uint64_t AllocateRuntimeIdentity() {
+			uint64_t identity = NextRuntimeIdentity.load(std::memory_order_relaxed);
+			for (;;) {
+				if (identity == 0) std::abort();
+				const uint64_t next = identity == std::numeric_limits<uint64_t>::max() ? 0 : identity + 1;
+				if (NextRuntimeIdentity.compare_exchange_weak(
+						identity, next, std::memory_order_relaxed, std::memory_order_relaxed
+					))
+					return identity;
+			}
+		}
+	}
+
+	Runtime::Runtime(ecs::Store &store, const RuntimeLimits &limits)
+		: IdentityValue(AllocateRuntimeIdentity()), Store(store), HostRoleValue(limits.Role),
+		  ScriptOriginValue(limits.Origin), ScriptCapabilitiesValue(limits.EffectiveCapabilities()),
+		  DataCapture(limits.DataCapture), DataLifecycle(limits.DataLifecycle),
+		  PackageOnly(limits.PackageOnly) {}
 
 	DataScriptPackageRunResult
 	Runtime::RunDataScriptPackage(const DataScriptPackageContext &, std::string_view, std::string_view) {

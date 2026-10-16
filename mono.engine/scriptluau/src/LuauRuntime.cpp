@@ -554,6 +554,7 @@ namespace engine::script {
 		auto *bounds = new Bounds();
 		bounds->MemoryLimit = limits.MemoryBytes;
 		bounds->StepBudget = limits.StepBudget;
+		bounds->Context.RuntimeIdentity = Identity();
 		bounds->Context.World = &Store;
 		bounds->Context.Role = limits.Role;
 		bounds->Context.Access = limits.EffectiveCapabilities();
