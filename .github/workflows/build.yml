@@ -354,6 +354,24 @@ jobs:
           set PRESET=${{ matrix.preset }}
           scripts\build-windows.bat client studio server cdn launcher
 
+      # These headless process-contract checks exercise each platform's native
+      # launcher. The release products above still use the matrix preset.
+      - name: Check runner process isolation
+        if: matrix.flavour == 'release' && runner.os != 'Windows'
+        run: |
+          cmake --preset release-tests
+          cmake --build --preset release-tests --target test_testrunner testrunner
+          ./.cache/build/release-tests/tests/test_testrunner "[process]"
+
+      - name: Check runner process isolation
+        if: matrix.flavour == 'release' && runner.os == 'Windows'
+        shell: cmd
+        run: |
+          set PRESET=release-tests
+          CALL scripts\build-windows.bat test_testrunner testrunner
+          if errorlevel 1 exit /b %ERRORLEVEL%
+          .cache\build\release-tests\tests\test_testrunner.exe "[process]"
+
       # **Always, including after a failed compile.** A cache that stopped being
       # used is indistinguishable from one that never was. Failure statistics
       # also show whether a partially completed build produced useful entries.
