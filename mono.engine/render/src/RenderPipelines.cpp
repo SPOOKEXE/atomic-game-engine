@@ -33,6 +33,7 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <memory>
 #include <span>
 #include <string>
 #include <unordered_set>
@@ -208,6 +209,10 @@ namespace engine::render {
 			if (Compilation) Compilation->Operation(name);
 			return SDL_CreateGPUGraphicsPipeline(Device, info);
 		};
+		const auto releasePipeline = [this](SDL_GPUGraphicsPipeline *pipeline) {
+			SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+		};
+		using OwnedPipeline = std::unique_ptr<SDL_GPUGraphicsPipeline, decltype(releasePipeline)>;
 
 		beginGroup(ShaderGroup::Modules);
 		SDL_GPUShader *opaqueVertex = LoadShader("opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 4);
@@ -334,9 +339,11 @@ namespace engine::render {
 								  SDL_GPUGraphicsPipelineCreateInfo info) {
 			if (culled == nullptr || info.rasterizer_state.cull_mode == SDL_GPU_CULLMODE_NONE) return;
 			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-			if (auto *twin = graphics(std::string(name) + " two-sided", &info))
-				TwoSidedPipelines.emplace_back(culled, twin);
-			else
+			OwnedPipeline twin(graphics(std::string(name) + " two-sided", &info), releasePipeline);
+			if (twin) {
+				TwoSidedPipelines.emplace_back(culled, twin.get());
+				twin.release();
+			} else
 				ENGINE_WARN("two-sided surface pipeline unavailable: {}", SDL_GetError());
 		};
 		twoSided("OpaquePipeline", OpaquePipeline, opaque);
@@ -689,9 +696,9 @@ namespace engine::render {
 			[&](std::string_view name, SDL_GPUGraphicsPipelineCreateInfo info, SDL_GPUShader *vertex) {
 				info.vertex_shader = vertex;
 				info.vertex_input_state = SDL_GPUVertexInputState{};
-				auto *made = graphics(name, &info);
-				twoSided(name, made, info);
-				return made;
+				OwnedPipeline made(graphics(name, &info), releasePipeline);
+				twoSided(name, made.get(), info);
+				return made.release();
 			};
 		PackedOpaquePipeline = packedPipeline("PackedOpaquePipeline", opaque, packedOpaqueVertex);
 		PackedForwardPipeline = packedPipeline("PackedForwardPipeline", forward, packedOpaqueVertex);

@@ -930,6 +930,10 @@ namespace engine::render {
 			  State->RibbonLayerPipeline,
 			  State->RibbonLayerColourPipeline,
 			  State->AdditiveRibbonLayerColourPipeline,
+			  State->ParticlePipeline,
+			  State->AdditiveParticlePipeline,
+			  State->RibbonPipeline,
+			  State->AdditiveRibbonPipeline,
 			  State->HdrParticlePipeline,
 			  State->HdrAdditiveParticlePipeline,
 			  State->HdrRibbonPipeline,
@@ -974,6 +978,10 @@ namespace engine::render {
 				SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
 			}
 		}
+		State->ParticlePipeline = nullptr;
+		State->AdditiveParticlePipeline = nullptr;
+		State->RibbonPipeline = nullptr;
+		State->AdditiveRibbonPipeline = nullptr;
 		for (const auto &[owner, variant] : State->PostProcessPipelines) {
 			(void)owner;
 			SDL_ReleaseGPUGraphicsPipeline(device, variant.Pipeline);
