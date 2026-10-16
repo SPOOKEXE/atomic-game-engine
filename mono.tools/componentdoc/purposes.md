@@ -32,6 +32,7 @@ ecs.InstanceClass | Which registered class an entity was created as, so `ClassNa
 ecs.InstanceName | An instance's name, interned, so a thousand parts called "Part" cost one string and comparing two names is an integer compare. Names are not unique.
 ecs.InstanceProjection | Viewer-local source identity for a projected instance, used to remap reads between a canonical row and its local copy; restored metadata is inactive until rebuilt.
 effects.Beam | An authored beam drawn between two attachments: colour and transparency along its length, the texture and its scroll, end widths and curve control.
+effects.BeamCadenceCache | Per-world derived beam centreline and gradient samples with fixed-tick history; each view supplies facing and scroll, and snapshot restore clears the cache.
 effects.Decal | A single image projected onto one face of its parent BasePart, with colour, transparency and draw order.
 effects.EmitterSlot | Which row of the particle pool's block table an emitter owns, kept on the emitter's own row so the per-frame passes read a column instead of a hash map.
 effects.ParticleEmitter | The authored settings of one particle emitter: size, colour, transparency and squash over a particle's life, the spawn shape and rate, and the material and flipbook facts.

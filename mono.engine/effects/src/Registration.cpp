@@ -294,6 +294,15 @@ namespace engine::effects {
 					}
 				}
 			);
+			ecs::Components::Register<BeamCadenceCache>(
+				"effects.BeamCadenceCache",
+				[](core::ByteWriter &, const void *, size_t) {},
+				[](core::ByteReader &, void *destination, size_t count) {
+					auto *caches = static_cast<BeamCadenceCache *>(destination);
+					for (size_t index = 0; index < count; ++index)
+						caches[index] = {};
+				}
+			);
 		}
 	}
 

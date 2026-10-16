@@ -1,3 +1,5 @@
+#include "BeamGeometry.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -17,50 +19,6 @@ namespace engine::effects {
 		using core::CFrame;
 		using core::Vector2;
 		using core::Vector3;
-
-		uint32_t PackRgba(const core::Color3 &colour, float alpha) {
-			const auto channel = [](float value) {
-				return static_cast<uint32_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
-			};
-			return channel(colour.R) | (channel(colour.G) << 8) | (channel(colour.B) << 16) |
-				   (channel(alpha) << 24);
-		}
-
-		// A cubic Bezier between two points with two tangents.
-		//
-		// **De Casteljau's form rather than the expanded polynomial**, which is
-		// two more multiplies and is numerically better behaved at the endpoints -
-		// and, more to the point here, is the form where the four control points
-		// are visible in the code. A beam's shape is the thing an author is
-		// looking at when they read this.
-		Vector3
-		Bezier(const Vector3 &from, const Vector3 &out, const Vector3 &in, const Vector3 &to, float t) {
-			const Vector3 a = from.Lerp(out, t);
-			const Vector3 b = out.Lerp(in, t);
-			const Vector3 c = in.Lerp(to, t);
-			return a.Lerp(b, t).Lerp(b.Lerp(c, t), t);
-		}
-
-		// Both ends of a ribbon segment, given a centre, a direction along the
-		// ribbon and a half-width.
-		//
-		// **The side vector is the cross of the ribbon's own direction with the
-		// eye direction**, which is what makes a camera-facing ribbon face the
-		// camera: the strip stays in the plane containing its length and turns
-		// about that axis until its face is towards the viewer.
-		//
-		// A degenerate cross - the ribbon pointing straight at the eye - falls back
-		// to world up rather than to zero, because a zero side vector collapses the
-		// strip to a line and the segment disappears. A beam seen exactly end-on is
-		// meant to be thin, not absent.
-		Vector3 SideVector(const Vector3 &along, const Vector3 &toEye) {
-			const Vector3 side = along.Cross(toEye);
-			if (side.Magnitude() > 1e-5f) {
-				return side.Unit();
-			}
-			const Vector3 fallback = along.Cross(Vector3{0.0f, 1.0f, 0.0f});
-			return fallback.Magnitude() > 1e-5f ? fallback.Unit() : Vector3{1.0f, 0.0f, 0.0f};
-		}
 	}
 
 	// --- trails ---------------------------------------------------------------
@@ -130,68 +88,6 @@ namespace engine::effects {
 			out.push_back(RibbonVertex{bottom, Vector2{along, 1.0f}, colour});
 		}
 
-		void BuildBeam(
-			const ecs::Store &store,
-			const Beam &beam,
-			const Vector3 &eye,
-			float elapsed,
-			std::vector<RibbonVertex> &out
-		) {
-			const CFrame start = scene::ResolveAttachment(store, beam.Attachment0);
-			const CFrame finish = scene::ResolveAttachment(store, beam.Attachment1);
-
-			// The control points are pushed along each attachment's own axis,
-			// which is what an attachment carries an orientation for. A beam with
-			// no curve size is a straight line and still runs through the Bezier -
-			// with the controls on the segment, the curve is the segment.
-			const Vector3 control0 =
-				start.Position + start.VectorToWorldSpace(Vector3{0.0f, 0.0f, -1.0f}) * beam.CurveSize0;
-			const Vector3 control1 =
-				finish.Position + finish.VectorToWorldSpace(Vector3{0.0f, 0.0f, -1.0f}) * beam.CurveSize1;
-
-			// How far the texture has scrolled. Wrapped into `[0, 1)` here rather
-			// than left to grow, because at ten minutes of elapsed time a float's
-			// resolution over a scrolling coordinate is visibly steppy.
-			const float scroll = std::fmod(elapsed * beam.TextureSpeed, 1.0f);
-
-			// The whole length, so the texture repeats by metres rather than by
-			// segment - a beam stretched to twice its length should show twice as
-			// much texture, not the same texture twice as wide.
-			const float span = (finish.Position - start.Position).Magnitude();
-			const float repeats = beam.TextureLength > 0.0f ? span / beam.TextureLength : 1.0f;
-
-			Vector3 previous = start.Position;
-			for (uint32_t segment = 0; segment <= BEAM_SEGMENTS; segment++) {
-				const float t = static_cast<float>(segment) / static_cast<float>(BEAM_SEGMENTS);
-				const Vector3 centre = Bezier(start.Position, control0, control1, finish.Position, t);
-
-				// The direction is towards the *next* point at the start and from
-				// the previous one after that, so the first segment is not
-				// degenerate. A zero-length direction is what the fallback in
-				// `SideVector` catches.
-				const Vector3 along = segment == 0 ? (Bezier(
-														  start.Position,
-														  control0,
-														  control1,
-														  finish.Position,
-														  1.0f / static_cast<float>(BEAM_SEGMENTS)
-													  ) -
-													  centre)
-												   : (centre - previous);
-				previous = centre;
-
-				const Vector3 side = beam.FaceCamera ? SideVector(along, (eye - centre).Unit())
-													 : start.VectorToWorldSpace(Vector3{1.0f, 0.0f, 0.0f});
-
-				const float width = beam.Width0 + (beam.Width1 - beam.Width0) * t;
-				const Vector3 offset = side * (width * 0.5f);
-
-				const uint32_t colour =
-					PackRgba(beam.Colour.Evaluate(t), 1.0f - beam.Transparency.Evaluate(t));
-				Emit(out, centre + offset, centre - offset, t * repeats + scroll, colour);
-			}
-		}
-
 		void BuildTrail(const Trail &trail, const Vector3 &eye, std::vector<RibbonVertex> &out) {
 			if (trail.Recorded < 2) {
 				// One point is not a strip. Skipped rather than emitted as a
@@ -245,8 +141,9 @@ namespace engine::effects {
 				// so widening it is moving them apart rather than editing a
 				// number that then disagrees with where they are.
 				const float age = trail.Lifetime > 0.0f ? trail.Age[at] / trail.Lifetime : 1.0f;
-				const uint32_t colour =
-					PackRgba(trail.Colour.Evaluate(age), 1.0f - trail.Transparency.Evaluate(age));
+				const uint32_t colour = beam_geometry::PackRibbonRgba(
+					trail.Colour.Evaluate(age), 1.0f - trail.Transparency.Evaluate(age)
+				);
 
 				const float repeat = trail.TextureLength > 0.0f ? travelled / trail.TextureLength : age;
 				Emit(out, top, bottom, repeat, colour);
@@ -298,7 +195,7 @@ namespace engine::effects {
 			const Vector3 centre = transform->Frame.PointToWorldSpace(basis.Normal * basis.Depth);
 			const Vector3 right = transform->Frame.VectorToWorldSpace(basis.Right) * basis.HalfWidth;
 			const Vector3 up = transform->Frame.VectorToWorldSpace(basis.Up) * basis.HalfHeight;
-			const uint32_t colour = PackRgba(image.Colour, 1.0f - image.Transparency);
+			const uint32_t colour = beam_geometry::PackRibbonRgba(image.Colour, 1.0f - image.Transparency);
 
 			out.push_back(RibbonVertex{centre - right + up, Vector2{u0, v0}, colour});
 			out.push_back(RibbonVertex{centre - right - up, Vector2{u0, v1}, colour});
@@ -316,6 +213,8 @@ namespace engine::effects {
 	size_t BuildRibbons(ecs::Store &store, const Vector3 &eye, float elapsed, RibbonBuffer &output) {
 		ENGINE_PROFILE_CAT("build ribbons", core::ProfileCategory::Simulation);
 		auto *buffer = &output;
+		auto *beamCache = beam_geometry::PrepareBeamCache(store);
+		uint64_t uncachedRebuilt = 0;
 
 		// Cleared rather than resized, because the vertex count is a function of
 		// how many ribbons doubled back this frame and no count is known ahead of
@@ -325,13 +224,17 @@ namespace engine::effects {
 		buffer->Vertices.clear();
 		buffer->Runs.clear();
 
-		store.Each<const Beam>([&](ecs::Entity, const Beam &beam) {
+		store.Each<const Beam>([&](ecs::Entity entity, const Beam &beam) {
 			if (!beam.Enabled) {
 				return;
 			}
 
 			const auto first = static_cast<uint32_t>(buffer->Vertices.size());
-			BuildBeam(store, beam, eye, elapsed, buffer->Vertices);
+			if (!beam_geometry::AppendBeamGeometry(
+					store, beamCache, entity, beam, eye, elapsed, buffer->Vertices
+				))
+				return;
+			if (beamCache == nullptr) uncachedRebuilt++;
 
 			RibbonRun run;
 			run.First = first;
@@ -420,6 +323,25 @@ namespace engine::effects {
 
 		core::Metrics::SetGauge("effects.ribbon.runs", static_cast<double>(buffer->Runs.size()));
 		core::Metrics::SetGauge("effects.ribbon.vertices", static_cast<double>(buffer->Vertices.size()));
+		core::Metrics::Count(
+			"effects.beam.geometry.rebuilt",
+			static_cast<double>(beamCache == nullptr ? uncachedRebuilt : beamCache->Rebuilt)
+		);
+		if (beamCache != nullptr) {
+			core::Metrics::Count("effects.beam.geometry.skipped", static_cast<double>(beamCache->Skipped));
+			core::Metrics::Count(
+				"effects.beam.geometry.critical", static_cast<double>(beamCache->CriticalRebuilds)
+			);
+			core::Metrics::Count(
+				"effects.beam.geometry.capacity-refused", static_cast<double>(beamCache->CapacityRefused)
+			);
+			core::Metrics::Count(
+				"effects.beam.geometry.invalid-source", static_cast<double>(beamCache->InvalidSources)
+			);
+			core::Metrics::SetGauge(
+				"effects.beam.geometry.cached", static_cast<double>(beamCache->Beams.size())
+			);
+		}
 		return buffer->Runs.size();
 	}
 
@@ -455,7 +377,8 @@ namespace engine::effects {
 										  : centre - previous;
 				previous = centre;
 				const float halfWidth = (source[at].Position - source[at + 1].Position).Magnitude() * .5f;
-				const Vector3 offset = SideVector(along, (eye - centre).Unit()) * halfWidth;
+				const Vector3 offset =
+					beam_geometry::RibbonSideVector(along, (eye - centre).Unit()) * halfWidth;
 				output[at].Position = centre + offset;
 				output[at + 1].Position = centre - offset;
 			}

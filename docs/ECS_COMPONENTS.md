@@ -44,6 +44,7 @@ state until v0.19.
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
 | `effects.Beam` | 712 | 8 | yes | . | yes | . | An authored beam drawn between two attachments: colour and transparency along its length, the texture and its scroll, end widths and curve control. |
+| `effects.BeamCadenceCache` | 112 | 8 | yes | . | . | . | Per-world derived beam centreline and gradient samples with fixed-tick history; each view supplies facing and scroll, and snapshot restore clears the cache. |
 | `effects.Decal` | 28 | 4 | yes | . | . | . | A single image projected onto one face of its parent BasePart, with colour, transparency and draw order. |
 | `effects.EmitterSlot` | 12 | 4 | yes | . | . | . | Which row of the particle pool's block table an emitter owns, kept on the emitter's own row so the per-frame passes read a column instead of a hash map. |
 | `effects.ParticleEmitter` | 1300 | 4 | yes | . | yes | . | The authored settings of one particle emitter: size, colour, transparency and squash over a particle's life, the spawn shape and rate, and the material and flipbook facts. |
@@ -344,4 +345,4 @@ state until v0.19.
 
 ---
 
-257 components registered by the engine, 0 without a purpose line.
+258 components registered by the engine, 0 without a purpose line.

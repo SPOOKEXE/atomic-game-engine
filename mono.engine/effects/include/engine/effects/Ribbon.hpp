@@ -33,9 +33,13 @@
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/UpdateCadence.hpp>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
+#include <unordered_map>
 #include <vector>
 
 namespace engine::core {
@@ -338,6 +342,61 @@ namespace engine::effects {
 
 		// One per ribbon that produced anything.
 		std::vector<RibbonRun> Runs;
+	};
+
+	// One derived beam sample, independent of the viewer and texture-scroll clock.
+	struct BeamGeometrySample {
+		// Sampled world-space centreline.
+		core::Vector3 Centre;
+		// Direction used to orient this sample's width.
+		core::Vector3 Along;
+		// Half-width after evaluating the authored taper.
+		float HalfWidth = 0;
+		// Unscrolled texture coordinate along the beam.
+		float Coordinate = 0;
+		// Sampled gradient and transparency, packed as RGBA8.
+		uint32_t Colour = 0;
+	};
+
+	// Local derived beam samples. Authored beams, endpoints and clocks remain in their ECS rows.
+	struct BeamCadenceCache {
+		// Hard admission bound; excess beams retain the full-fidelity path.
+		static constexpr size_t MAXIMUM_BEAMS = 16384;
+
+		// Derived samples and source watermarks for one beam.
+		struct Entry {
+			// Independent cosmetic-domain commit history.
+			scene::DomainCadenceState State;
+			// Last successfully sampled endpoint frames, used as an exact dependency signature.
+			core::CFrame Start;
+			// The other last successfully sampled endpoint frame.
+			core::CFrame Finish;
+			// Authored-plane direction derived from the starting attachment.
+			core::Vector3 FixedSide;
+			// Fixed-capacity centreline and gradient samples.
+			std::array<BeamGeometrySample, BEAM_SEGMENTS + 1> Samples{};
+			// Local input generation; changes whenever an observed source invalidates the samples.
+			uint64_t SourceRevision = 1;
+			// A dependency write not yet represented by a successful sample.
+			bool Dirty = false;
+		};
+
+		// Bounded entries keyed by complete beam handles, pruned on removal or disabling.
+		std::unordered_map<ecs::Entity, Entry> Beams;
+		// Optional smaller admission limit for this world's presentation budget.
+		size_t MaximumBeams = MAXIMUM_BEAMS;
+		// Last consumed observed Beam write epoch, including changes cleared between views.
+		uint64_t BeamWriteVersion = 0;
+		// Geometry samples rebuilt by the last BuildRibbons call.
+		uint64_t Rebuilt = 0;
+		// Beams reusing their sampled centreline and gradients in the last call.
+		uint64_t Skipped = 0;
+		// Rebuilds required by gameplay criticality or player ownership.
+		uint64_t CriticalRebuilds = 0;
+		// Beams drawn through the fallback because the cache admission bound was reached.
+		uint64_t CapacityRefused = 0;
+		// Opted-in beams refused because an endpoint was absent or invalid.
+		uint64_t InvalidSources = 0;
 	};
 
 	// Records where every enabled trail's attachments are now, and ages what is
