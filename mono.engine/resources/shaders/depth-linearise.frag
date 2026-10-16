@@ -12,6 +12,7 @@ layout(set = 3, binding = 0) uniform Pass {
 	mat4 InverseViewProjection;
 	mat4 LightViewProjection;
 	vec4 Planes;
+	// xy: output pixels; zw: active depth rectangle within its allocation.
 	vec4 Target;
 	vec4 Direction;
 	vec4 Ambient;
@@ -25,7 +26,11 @@ layout(set = 3, binding = 0) uniform Pass {
 } pass;
 
 void main() {
-	float raw = texture(depthImage, inUv * pass.Target.zw).r;
+	ivec2 activeDepthSize = ivec2(round(vec2(textureSize(depthImage, 0)) * pass.Target.zw));
+	bool samePixelGrid = all(equal(ivec2(pass.Target.xy), activeDepthSize));
+	// A matching grid must not mix geometry depth into an adjacent clear pixel.
+	float raw = samePixelGrid ? texelFetch(depthImage, ivec2(gl_FragCoord.xy), 0).r
+		: texture(depthImage, inUv * pass.Target.zw).r;
 	if (pass.Direction.w > 1.5) {
 		outLinear = vec4(raw < 0.999999 ? 1.0 : 0.0);
 		return;
