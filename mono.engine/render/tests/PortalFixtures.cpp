@@ -28,12 +28,15 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <glm/packing.hpp>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <iostream>
 #include <optional>
 #include <sstream>
+#include <string_view>
 #include <utility>
 
 TEST_SUITE_ID("engine.render.portalfixtures")
@@ -1891,6 +1894,9 @@ TEST_CASE(
 	INFO("separate captures=" << separateCaptures);
 	FixtureDevice fixture;
 	fixture.Initialise();
+	REQUIRE(
+		fixture.Render.Backend().ColourFormat == static_cast<uint32_t>(SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM)
+	);
 	InstallPortalFixture(fixture.Render, false, separateCaptures);
 	fixture.Render.SetSurfaceBounces(1);
 	const render::SceneTarget target{WIDTH, HEIGHT};
@@ -1955,19 +1961,79 @@ TEST_CASE(
 	surface.Height = HEIGHT;
 	view.Surfaces = std::span(&surface, 1);
 	render::OverlayImage overlay;
+	constexpr std::array<std::string_view, 4> metricNames{
+		"render.weather.capture_views",
+		"render.weather.capture_canonical_fallbacks",
+		"render.weather.ray_dispatches",
+		"render.weather.reconstruct_dispatches"
+	};
+	constexpr std::array<std::string_view, 3> captureLabels{"disabled", "enabled", "restored"};
+	struct CaptureMetricSample {
+		std::array<std::optional<core::Counter>, metricNames.size()> Before;
+		std::array<std::optional<core::Counter>, metricNames.size()> After;
+		uint32_t SurfacePasses = 0;
+	};
+	std::array<CaptureMetricSample, captureLabels.size()> captureMetrics{};
+	size_t captureIndex = 0;
+	const auto readWeatherMetrics = [&] {
+		std::array<std::optional<core::Counter>, metricNames.size()> values{};
+		for (size_t index = 0; index < metricNames.size(); ++index)
+			values[index] = core::Metrics::Get(metricNames[index]);
+		return values;
+	};
+	const auto appendMetricDiagnostic = [&](std::ostringstream &out,
+											size_t index,
+											const std::optional<core::Counter> &before,
+											const std::optional<core::Counter> &after) {
+		const double beforeValue = before ? before->Value : 0.0;
+		const double afterValue = after ? after->Value : 0.0;
+		out << ' ' << metricNames[index] << "={before:" << beforeValue << ",after:" << afterValue
+			<< ",delta:";
+		if (afterValue < beforeValue)
+			out << "reset";
+		else
+			out << afterValue - beforeValue;
+		out << '}';
+	};
 	const auto capture = [&](bool enabled) {
+		auto &metrics = captureMetrics[captureIndex++];
+		metrics.Before = readWeatherMetrics();
 		environment.Weather.Enabled = enabled;
 		view.Damage.Scene = true;
 		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		metrics.SurfacePasses = frame.SurfacePasses;
+		metrics.After = readWeatherMetrics();
+		std::ostringstream captureDiagnostic;
+		const size_t labelIndex = captureIndex - 1;
+		captureDiagnostic << "capture=" << captureLabels[labelIndex]
+						  << " counter_scope=whole_render SurfacePasses=" << metrics.SurfacePasses;
+		for (size_t metricIndex = 0; metricIndex < metricNames.size(); ++metricIndex)
+			appendMetricDiagnostic(
+				captureDiagnostic, metricIndex, metrics.Before[metricIndex], metrics.After[metricIndex]
+			);
+		INFO(captureDiagnostic.str());
 		REQUIRE(frame.Submitted);
 		REQUIRE(frame.SurfacePasses > 0);
 		return CaptureResource(
-			fixture.Render, core::Name("tonemapped"), view.Slot, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+			fixture.Render, core::Name("tonemapped"), view.Slot, WIDTH, HEIGHT, ImageFormat::Bgra8Unorm
 		);
 	};
 	const auto disabled = capture(false);
 	const auto enabled = capture(true);
 	const auto restored = capture(false);
+	struct RgbRange {
+		std::array<int, 3> Minimum{255, 255, 255};
+		std::array<int, 3> Maximum{};
+	};
+	std::array<RgbRange, captureLabels.size()> interiorRgbRanges{};
+	std::array<int, 3> maxPairwiseRgbChange{};
+	constexpr std::array<size_t, 3> rgbChannels{2, 1, 0};
+	int minimumRedGain = 255;
+	int maximumRedGain = -255;
+	int maximumEnabledRedGreen = -255;
+	size_t changedInteriorPixels = 0;
+	size_t redGainPixels = 0;
+	size_t redDominantPixels = 0;
 	size_t interior = 0, exterior = 0, reflectedCloudPixels = 0;
 	int exteriorDifference = 0;
 	const double tangent = std::tan(view.Camera.FieldOfViewRadians * .5);
@@ -1991,9 +2057,43 @@ TEST_CASE(
 			const size_t at = y * enabled.RowStrideBytes + x * 4;
 			if (inside) {
 				++interior;
-				const int red = std::to_integer<int>(enabled.Bytes[at]);
+				const std::array<std::array<int, 3>, captureLabels.size()> rgb{
+					{{{std::to_integer<int>(disabled.Bytes[at + rgbChannels[0]]),
+					   std::to_integer<int>(disabled.Bytes[at + rgbChannels[1]]),
+					   std::to_integer<int>(disabled.Bytes[at + rgbChannels[2]])}},
+					 {{std::to_integer<int>(enabled.Bytes[at + rgbChannels[0]]),
+					   std::to_integer<int>(enabled.Bytes[at + rgbChannels[1]]),
+					   std::to_integer<int>(enabled.Bytes[at + rgbChannels[2]])}},
+					 {{std::to_integer<int>(restored.Bytes[at + rgbChannels[0]]),
+					   std::to_integer<int>(restored.Bytes[at + rgbChannels[1]]),
+					   std::to_integer<int>(restored.Bytes[at + rgbChannels[2]])}}}
+				};
+				for (size_t image = 0; image < rgb.size(); ++image)
+					for (size_t channel = 0; channel < rgb[image].size(); ++channel) {
+						interiorRgbRanges[image].Minimum[channel] =
+							std::min(interiorRgbRanges[image].Minimum[channel], rgb[image][channel]);
+						interiorRgbRanges[image].Maximum[channel] =
+							std::max(interiorRgbRanges[image].Maximum[channel], rgb[image][channel]);
+						for (size_t other = image + 1; other < rgb.size(); ++other)
+							maxPairwiseRgbChange[channel] = std::max(
+								maxPairwiseRgbChange[channel],
+								std::abs(rgb[image][channel] - rgb[other][channel])
+							);
+					}
+				const int redGain = rgb[1][0] - rgb[0][0];
+				const int enabledRedGreen = rgb[1][0] - rgb[1][1];
+				minimumRedGain = std::min(minimumRedGain, redGain);
+				maximumRedGain = std::max(maximumRedGain, redGain);
+				maximumEnabledRedGreen = std::max(maximumEnabledRedGreen, enabledRedGreen);
+				bool changed = false;
+				for (size_t channel = 0; channel < 3; ++channel)
+					changed = changed || std::abs(rgb[1][channel] - rgb[0][channel]) > 2;
+				changedInteriorPixels += changed ? 1u : 0u;
+				redGainPixels += redGain > 10 ? 1u : 0u;
+				redDominantPixels += enabledRedGreen > 10 ? 1u : 0u;
+				const int red = std::to_integer<int>(enabled.Bytes[at + 2]);
 				const int green = std::to_integer<int>(enabled.Bytes[at + 1]);
-				if (red > std::to_integer<int>(disabled.Bytes[at]) + 10 && red > green + 10)
+				if (red > std::to_integer<int>(disabled.Bytes[at + 2]) + 10 && red > green + 10)
 					++reflectedCloudPixels;
 			} else {
 				++exterior;
@@ -2007,6 +2107,36 @@ TEST_CASE(
 					);
 			}
 		}
+	std::ostringstream diagnostic;
+	diagnostic << "weather mirror diagnostics separate_captures=" << separateCaptures
+			   << " counter_scope=whole_render";
+	for (size_t captureIndex = 0; captureIndex < captureMetrics.size(); ++captureIndex) {
+		const auto &metrics = captureMetrics[captureIndex];
+		diagnostic << "\n capture=" << captureLabels[captureIndex]
+				   << " counter_scope=whole_render SurfacePasses=" << metrics.SurfacePasses;
+		for (size_t metricIndex = 0; metricIndex < metricNames.size(); ++metricIndex)
+			appendMetricDiagnostic(
+				diagnostic, metricIndex, metrics.Before[metricIndex], metrics.After[metricIndex]
+			);
+	}
+	diagnostic << "\n interior_rgb_stats rgb_units=rgb8_code";
+	for (size_t image = 0; image < captureLabels.size(); ++image) {
+		diagnostic << ' ' << captureLabels[image] << "_rgb_min=" << interiorRgbRanges[image].Minimum[0] << ','
+				   << interiorRgbRanges[image].Minimum[1] << ',' << interiorRgbRanges[image].Minimum[2] << ' '
+				   << captureLabels[image] << "_rgb_max=" << interiorRgbRanges[image].Maximum[0] << ','
+				   << interiorRgbRanges[image].Maximum[1] << ',' << interiorRgbRanges[image].Maximum[2];
+	}
+	diagnostic << " max_pairwise_rgb_change=" << maxPairwiseRgbChange[0] << ',' << maxPairwiseRgbChange[1]
+			   << ',' << maxPairwiseRgbChange[2] << " red_gain_enabled_minus_disabled=" << minimumRedGain
+			   << ".." << maximumRedGain << " max_enabled_red_minus_green=" << maximumEnabledRedGreen
+			   << " changed_interior_pixels_gt2=" << changedInteriorPixels
+			   << " red_gain_pixels_gt10=" << redGainPixels
+			   << " red_dominant_pixels_gt10=" << redDominantPixels;
+	const std::string diagnosticText = diagnostic.str();
+	INFO(diagnosticText);
+	if (const char *diagnostics = std::getenv("MONO_WEATHER_MIRROR_DIAGNOSTICS");
+		diagnostics != nullptr && std::string_view(diagnostics) == "1")
+		std::cerr << diagnosticText << '\n';
 	INFO("interior=" << interior << " exterior=" << exterior << " clouds=" << reflectedCloudPixels);
 	REQUIRE(interior > 100);
 	REQUIRE(exterior > 100);
