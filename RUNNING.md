@@ -183,6 +183,7 @@ the backend submission call separately from engine submission bookkeeping.
 | `weather-effects-bench [samples] [build_preset]` | Measure weather emission and roof/ground visibility against published geometry without graphics. Defaults: `5`, `bench`. |
 | `weather-gpu-bench [samples] [build_preset] [width] [height] [shadow_resolution]` | Open a GPU device and measure sparse weather generation, reuse, integration and tracked memory. Defaults: `3`, `bench`, `1920`, `1080`, `256`. Shadow resolution must be a power of two in `32..2048`. |
 | `weather-fuzz [runs] [compiler]` | Fuzz complete weather checkpoint decoding with AddressSanitizer and UBSan. Defaults: `10000`, `clang++-21`. |
+| `procedural-fuzz [runs] [compiler]` | Fuzz portable procedural inputs, PRD1 descriptions, and script state snapshots with libFuzzer, AddressSanitizer, and UBSan. Defaults: `10000`, `clang++-21`. |
 | `imagecodec-bench [samples]` | Measure CPU image imports at 1080p and print results to stdout. Default: `5`. |
 | `ui-headless-bench [samples]` | Measure ImGui layout and frozen draw signatures without a GPU. Default: `5`. |
 | `studio-interface-bench [samples] [build_preset]` | Measure toolbar, Preferences, retained 250 ms Frame Graph, and idle content scans without a window or GPU. Defaults: `5`, `bench`; use `bench-o0` for unoptimized engine costs. |

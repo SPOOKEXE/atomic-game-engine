@@ -435,6 +435,21 @@ weather-fuzz runs="10000" compiler="clang++-21":
     "$fuzz_build/fuzz/fuzz_weather_checkpoint" --write-seeds "$fuzz_build/fuzz/corpus"
     "$fuzz_build/fuzz/fuzz_weather_checkpoint" "$fuzz_build/fuzz/corpus" -runs={{runs}} -max_len=2097152 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$fuzz_build/fuzz/artifacts/"
 
+# Coverage-guided parsing of procedural inputs, descriptions, and script state.
+procedural-fuzz runs="10000" compiler="clang++-21":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fuzz_build=".cache/build/procedural-fuzz"
+    cmake --preset server -B "$fuzz_build" -DCMAKE_CXX_COMPILER="{{compiler}}" -DCMAKE_C_COMPILER="${CC:-clang-21}" -DMONO_BUILD_TESTS=OFF -DMONO_TRACY=OFF -DMONO_HEAP_PROFILE=OFF -DMONO_FUZZ_PROCEDURAL=ON -DMONO_FUZZ_PROCEDURAL_DESCRIPTION=ON -DMONO_FUZZ_PROCEDURAL_STATE=ON
+    cmake --build "$fuzz_build" --target fuzz_procedural_portable fuzz_procedural_description fuzz_procedural_state -j 4
+    for target in fuzz_procedural_portable fuzz_procedural_description fuzz_procedural_state; do
+        corpus="$fuzz_build/fuzz/$target-corpus"
+        artifacts="$fuzz_build/fuzz/$target-artifacts"
+        mkdir -p "$corpus" "$artifacts"
+        "$fuzz_build/fuzz/$target" --write-seeds "$corpus"
+        "$fuzz_build/fuzz/$target" "$corpus" -runs={{runs}} -max_len=1048577 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$artifacts/"
+    done
+
 # Measure the benchmark suites a change could have affected.
 #
 # **The same selection as `just test`, over `bench/` instead of `tests/`.** A

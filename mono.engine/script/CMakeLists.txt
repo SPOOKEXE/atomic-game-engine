@@ -77,3 +77,26 @@ mono_add_library(script
 		Engine::physics
 		Engine::parallel
 )
+
+option(MONO_FUZZ_PROCEDURAL_STATE "Build procedural snapshot readers with libFuzzer and sanitizers" OFF)
+if(MONO_FUZZ_PROCEDURAL_STATE)
+	if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+		message(FATAL_ERROR "MONO_FUZZ_PROCEDURAL_STATE requires Clang with libFuzzer")
+	endif()
+	# Direct compilation instruments the private readers and their nested payloads.
+	# Separate archive objects prevent unity batches from redefining those symbols.
+	set_target_properties(engine_script engine_procedural engine_core PROPERTIES UNITY_BUILD OFF)
+	add_executable(fuzz_procedural_state
+		fuzz/ProceduralState.cpp
+		src/ProceduralState.cpp src/ProceduralInputs.cpp src/BakedProceduralReference.cpp
+		../procedural/src/Canonical.cpp ../procedural/src/CanonicalDecode.cpp
+		../procedural/src/Artifact.cpp ../procedural/src/AuthoredInputs.cpp
+		../core/src/Bytes.cpp)
+	target_include_directories(fuzz_procedural_state PRIVATE include src)
+	target_link_libraries(fuzz_procedural_state PRIVATE Engine::script)
+	target_compile_options(fuzz_procedural_state PRIVATE
+		-fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -O1 -g)
+	target_link_options(fuzz_procedural_state PRIVATE -fsanitize=fuzzer,address,undefined)
+	set_target_properties(fuzz_procedural_state PROPERTIES
+		UNITY_BUILD OFF RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/fuzz")
+endif()

@@ -44,3 +44,22 @@ if(MONO_FUZZ_SHADER)
 	target_link_options(fuzz_shader PRIVATE -fsanitize=fuzzer,address,undefined)
 	set_target_properties(fuzz_shader PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/fuzz")
 endif()
+
+option(MONO_FUZZ_PROCEDURAL_DESCRIPTION "Build the PRD1 parser with libFuzzer and sanitizers" OFF)
+if(MONO_FUZZ_PROCEDURAL_DESCRIPTION)
+	if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+		message(FATAL_ERROR "MONO_FUZZ_PROCEDURAL_DESCRIPTION requires Clang with libFuzzer")
+	endif()
+	# Instrument the actual decoder and byte/hash helpers, not only its caller.
+	set_target_properties(engine_assets engine_core PROPERTIES UNITY_BUILD OFF)
+	add_executable(fuzz_procedural_description
+		fuzz/ProceduralDescription.cpp src/ProceduralDescription.cpp src/ContentHash.cpp
+		../core/src/Bytes.cpp)
+	target_include_directories(fuzz_procedural_description PRIVATE include)
+	target_link_libraries(fuzz_procedural_description PRIVATE Engine::assets Vendor::blake3)
+	target_compile_options(fuzz_procedural_description PRIVATE
+		-fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -O1 -g)
+	target_link_options(fuzz_procedural_description PRIVATE -fsanitize=fuzzer,address,undefined)
+	set_target_properties(fuzz_procedural_description PROPERTIES
+		UNITY_BUILD OFF RUNTIME_OUTPUT_DIRECTORY "${MONO_STAGE_ROOT}/fuzz")
+endif()
