@@ -175,6 +175,14 @@
         "core"
       ]
     },
+    "computegraph": {
+      "tier": "shared",
+      "layer": 3,
+      "links": [
+        "core",
+        "graphcore"
+      ]
+    },
     "control": {
       "tier": "shared",
       "layer": 13,

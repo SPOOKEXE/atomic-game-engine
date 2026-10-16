@@ -30,6 +30,7 @@ the machine-readable copy that `just test-architecture` enforces.
 | 2 | `parallel` | shared | jobs, threads, processes and the pipe between them |
 | 2 | `graphcore` | shared | pure, bounded graph schema and topology compilation; links only `core` |
 | 3 | `ecs` | shared | the storage. Columns, sets, change channels, the scheduler, thread affinity |
+| 3 | `computegraph` | shared | typed buffer compute plans and bounded request contracts; devices stay in `render` |
 | 4 | `world` | shared | the universe of worlds, the tick, and the ordered bus between them |
 | 5 | `collision` | shared | hulls and triangle soups. Geometry, with no notion of an entity |
 | 6 | `spatial` | shared | where things are. Hash grids, chunk maps, layer masks, queries |
