@@ -32,7 +32,7 @@ namespace {
 	constexpr std::array<const char *, 8> FAMILIES{
 		"trace", "volume", "environment", "fallback", "god-rays", "lens", "capture", "mirror"
 	};
-	constexpr std::array<const char *, 4> SCENES{"inactive", "empty", "simple", "complex"};
+	constexpr std::array<const char *, 5> SCENES{"inactive", "empty", "simple", "busy", "complex"};
 	constexpr std::array<const char *, 12> PASSES{
 		"bench-gi",
 		"bench-ray",
@@ -49,6 +49,18 @@ namespace {
 	};
 	const core::Name PIPELINE("benchmark.ray.consumers");
 	const core::Name MESH("benchmark.ray.plane");
+	struct TraceQuality {
+		const char *GiRaysPerPixel;
+		const char *ReflectionSteps;
+		const char *PathSamplesPerFrame;
+		const char *PathBounces;
+		uint32_t HistorySamples;
+	};
+	TraceQuality TraceQualityFor(std::string_view scene) {
+		if (scene == "complex") return {"64", "128", "64", "8", 63};
+		if (scene == "busy") return {"16", "64", "8", "4", 8};
+		return {"1", "32", "1", "1", 1};
+	}
 
 	assets::MeshData PlaneMesh() {
 		assets::MeshData mesh;
@@ -116,7 +128,8 @@ namespace {
 		}
 		Require(graph.AddNode(std::move(sink)).IsValid(), "could not pin ray benchmark resources");
 	}
-	graph::ResourceId AddTrace(graph::RenderGraph &graph, bool complex) {
+	graph::ResourceId AddTrace(graph::RenderGraph &graph, std::string_view scene) {
+		const auto quality = TraceQualityFor(scene);
 		const auto image = [&](const char *name,
 							   graph::ResourceLifetime lifetime = graph::ResourceLifetime::Transient) {
 			return graph.AddResource(
@@ -139,15 +152,15 @@ namespace {
 			node.Reads.assign(reads);
 			node.Writes = {output};
 			if (node.Kind == core::Name("global-illumination"))
-				node.Parameters.push_back({core::Name("rays-per-pixel"), complex ? "64" : "1"});
+				node.Parameters.push_back({core::Name("rays-per-pixel"), quality.GiRaysPerPixel});
 			if (node.Kind == core::Name("raytrace")) {
-				node.Parameters.push_back({core::Name("steps"), complex ? "128" : "32"});
+				node.Parameters.push_back({core::Name("steps"), quality.ReflectionSteps});
 				node.Parameters.push_back({core::Name("max-distance"), "24"});
 				node.Parameters.push_back({core::Name("thickness"), "0.2"});
 			}
 			if (node.Kind == core::Name("pathtrace")) {
-				node.Parameters.push_back({core::Name("samples-per-frame"), complex ? "64" : "1"});
-				node.Parameters.push_back({core::Name("max-bounces"), complex ? "8" : "1"});
+				node.Parameters.push_back({core::Name("samples-per-frame"), quality.PathSamplesPerFrame});
+				node.Parameters.push_back({core::Name("max-bounces"), quality.PathBounces});
 			}
 			Require(graph.AddNode(std::move(node)).IsValid(), "trace graph node refused");
 		};
@@ -237,7 +250,7 @@ namespace {
 				graph::Node copy = *node;
 				if (family == "trace" && scene != "inactive" && !traceAdded &&
 					copy.Kind == core::Name("tonemap")) {
-					const auto path = AddTrace(graph, scene == "complex");
+					const auto path = AddTrace(graph, scene);
 					// Trace outputs join the singleton tonemap chain through its first image input.
 					copy.Reads.front() = path;
 					traceAdded = true;
@@ -316,7 +329,7 @@ namespace {
 		uint32_t width,
 		uint32_t height
 	) {
-		const bool inactive = variant == "inactive", empty = variant == "empty",
+		const bool inactive = variant == "inactive", empty = variant == "empty", busy = variant == "busy",
 				   complex = variant == "complex";
 		scene.Target = {width, height};
 		auto &view = scene.View;
@@ -346,18 +359,36 @@ namespace {
 					{float(index % 5) / 5, .4f, .8f}
 				));
 		}
+		if (busy && family != "capture" && family != "mirror" && family != "lens") {
+			// Leave the central ray clear so every projection retains the six-metre depth oracle.
+			for (uint32_t index = 0; index < 16; ++index)
+				scene.Instances.push_back(Plane(
+					index + 2,
+					{(float(index % 4) - 1.5f) * .9f, (float(index / 4) - 1.5f) * .7f, -4 - float(index % 3)},
+					{.2f, .2f, .01f},
+					{float(index % 5) / 5, .4f, .8f}
+				));
+		}
 		if (family == "trace") {
 			if (empty)
 				scene.Instances.clear();
 			else {
-				auto floor = Plane(1000, {0, -2, -5}, {8, 8, .01f}, {.6f, .6f, .6f});
-				floor.Frame = core::CFrame::Angles(-1.5707963268f, 0, 0);
-				floor.Frame.Position = {0, -2, -5};
+				const bool orthographic = projection == "orthographic";
+				const core::Vector3 floorCentre =
+					orthographic ? core::Vector3{0, -2, -4} : core::Vector3{0, -2, -5};
+				const core::Vector3 floorExtent =
+					orthographic ? core::Vector3{8, 4, .01f} : core::Vector3{8, 8, .01f};
+				const float floorRotation = orthographic ? -1.3962634016f : -1.5707963268f;
+				// The orthographic reflector reaches the six-metre wall while its centre stays below the
+				// depth probe.
+				auto floor = Plane(1000, floorCentre, floorExtent, {.6f, .6f, .6f});
+				floor.Frame = core::CFrame::Angles(floorRotation, 0, 0);
+				floor.Frame.Position = floorCentre;
 				scene.Instances.push_back(floor);
 			}
 		}
 		if (family == "volume" && !inactive) {
-			view.Lighting.VolumeCount = complex ? 16 : 1;
+			view.Lighting.VolumeCount = complex ? 16 : busy ? 4 : 1;
 			for (size_t index = 0; index < view.Lighting.VolumeCount; ++index) {
 				auto &volume = view.Lighting.Volumes[index];
 				volume.Enabled = true;
@@ -365,14 +396,15 @@ namespace {
 				volume.HalfExtent = {3, 3, 2};
 				volume.Density = .25f;
 				volume.Extinction = .5f;
-				volume.NoiseStrength = complex ? .7f : 0;
-				volume.Steps = complex ? 64 : 32;
-				volume.ShadowSteps = complex ? 32 : 1;
+				volume.NoiseStrength = complex ? .7f : busy ? .35f : 0;
+				volume.Steps = complex ? 64 : busy ? 48 : 32;
+				volume.ShadowSteps = complex ? 32 : busy ? 8 : 1;
 				volume.Colour = {float(index % 3) / 3, .4f, .7f};
 				volume.Seed = uint32_t(index + 1);
-				volume.Shape = complex && index % 2 ? scene::VolumeShape::Ellipsoid : scene::VolumeShape::Box;
+				volume.Shape =
+					(busy || complex) && index % 2 ? scene::VolumeShape::Ellipsoid : scene::VolumeShape::Box;
 			}
-			if (!complex) {
+			if (!busy && !complex) {
 				view.Lighting.Ambient = {};
 				scene.Instances[0].EmissiveStrength = 1;
 			} else {
@@ -390,7 +422,7 @@ namespace {
 			environment.CloudLayer.Density = empty ? 0 : .8f;
 			environment.CloudLayer.Cover = .7f;
 			environment.CloudVolume.Enabled = true;
-			environment.CloudVolume.Steps = complex ? 64 : 12;
+			environment.CloudVolume.Steps = complex ? 64 : busy ? 32 : 12;
 			environment.CloudVolume.Shader =
 				complex ? scene::CloudComputeShader::Storm : scene::CloudComputeShader::Cumulus;
 			environment.CloudTime = .75;
@@ -407,7 +439,7 @@ namespace {
 			view.Lighting.EnvironmentState.SkyCompute.SunSize = .18f;
 			view.Lighting.GodRayIntensity = inactive ? 0 : 1.5f;
 			view.Lighting.GodRayThreshold = empty ? 10000 : .15f;
-			view.Lighting.GodRayRadius = complex ? 256 : 64;
+			view.Lighting.GodRayRadius = complex ? 256 : busy ? 128 : 64;
 		}
 		if (family == "lens") {
 			scene.Instances[0].HalfExtent = {16, 16, .01f};
@@ -436,12 +468,14 @@ namespace {
 				program && device.Renderer.AddLensShader(core::Name("gravitational-lens"), program->SpirV),
 				"built-in lens install refused"
 			);
-			view.Lighting.ShaderLensCount = inactive ? 0 : complex ? 16 : 1;
+			view.Lighting.ShaderLensCount = inactive ? 0 : complex ? 16 : busy ? 4 : 1;
 			for (size_t index = 0; index < view.Lighting.ShaderLensCount; ++index) {
 				auto &lens = view.Lighting.ShaderLenses[index];
 				lens.Shader = core::Name("gravitational-lens");
 				lens.EntityId = index + 1;
-				lens.Frame.Position = {float(index % 4) * .2f, 0, empty ? -20.f : -3.f};
+				lens.Frame.Position = {
+					busy ? float(index) * .6f - .9f : float(index % 4) * .2f, 0, empty ? -20.f : -3.f
+				};
 				lens.Radius = 2;
 				lens.InnerRadius = .4f;
 				lens.Strength = 2;
@@ -455,17 +489,18 @@ namespace {
 			view.Lighting.EnvironmentState.Weather.Enabled = !inactive;
 			view.CameraFrame = core::CFrame::LookAt({0, 0, 4}, {});
 			device.Renderer.SetPortalDepth(1);
-			const size_t count = complex ? 4 : 1;
+			const size_t count = complex ? 4 : busy ? 2 : 1;
+			const float halfWidth = complex ? .8f : busy ? 1.1f : 1.7f;
 			for (size_t index = 0; index < count; ++index) {
-				const float x = complex ? float(index) * 2 - 3 : 0;
-				auto pane = Plane(index + 1, {x, 0, 0}, {complex ? .8f : 1.7f, 1.4f, .01f});
+				const float x = complex ? float(index) * 2 - 3 : busy ? float(index) * 3 - 1.5f : 0;
+				auto pane = Plane(index + 1, {x, 0, 0}, {halfWidth, 1.4f, .01f});
 				pane.Surface = int16_t(index);
 				scene.Instances.push_back(pane);
 				render::PortalView portal;
 				portal.Index = int16_t(index);
 				portal.Centre = {x, 0, 0};
 				portal.Normal = {0, 0, 1};
-				portal.First = {complex ? .8f : 1.7f, 0, 0};
+				portal.First = {halfWidth, 0, 0};
 				portal.Second = {0, 1.4f, 0};
 				portal.Warp.Frame.Position = {100, 32, 32};
 				scene.Portals.push_back(portal);
@@ -479,16 +514,34 @@ namespace {
 			view.CameraFrame = core::CFrame::LookAt({0, 6, 8}, {});
 			view.Camera.FarPlane = 512;
 			device.Renderer.SetSurfaceBounces(1);
-			const size_t count = complex ? 4 : 1;
+			// Keep orthographic pane centres and their nine-pixel probes inside the view.
+			const bool busyOrthographic = busy && projection == "orthographic";
+			const bool complexOrthographic = complex && projection == "orthographic";
+			const float mirrorHalfWidth = busyOrthographic || complexOrthographic ? 2 : 3;
+			const float mirrorHalfDepth = complexOrthographic ? 2 : 3;
+			const size_t count = complex ? 4 : busy ? 2 : 1;
 			for (size_t index = 0; index < count; ++index) {
-				const core::Vector3 centre{complex ? float(index) * 7 - 10.5f : 0, 0, 0};
-				auto pane = Plane(index + 1, centre, {3, 3, .01f}, {1, 1, 1});
+				float centreX = 0, centreZ = 0;
+				if (complexOrthographic) {
+					centreX = float(index % 2) * 5 - 2.5f;
+					centreZ = float(index / 2) * 5 - 2.5f;
+				} else if (busyOrthographic)
+					centreX = float(index) * 5 - 2.5f;
+				else if (complex)
+					centreX = float(index) * 7 - 10.5f;
+				else if (busy)
+					centreX = float(index) * 7 - 3.5f;
+				const core::Vector3 centre{centreX, 0, centreZ};
+				auto pane = Plane(index + 1, centre, {mirrorHalfWidth, mirrorHalfDepth, .01f}, {1, 1, 1});
 				pane.Frame = core::CFrame::Angles(-1.5707963268f, 0, 0);
 				pane.Frame.Position = centre;
 				pane.Surface = int16_t(index);
 				scene.Instances.push_back(pane);
 				const scene::SurfacePane geometry{
-					.Centre = centre, .Normal = {0, 1, 0}, .First = {3, 0, 0}, .Second = {0, 0, -3}
+					.Centre = centre,
+					.Normal = {0, 1, 0},
+					.First = {mirrorHalfWidth, 0, 0},
+					.Second = {0, 0, -mirrorHalfDepth}
 				};
 				const auto reflected = scene::ReflectCamera(geometry, view.CameraFrame, {});
 				Require(reflected.Renders, "mirror camera refused");
@@ -620,7 +673,7 @@ namespace {
 				<< " repeat_surface_passes=" << oracleFrame.SurfacePasses;
 		if (family == "trace" && !inactive) {
 			const auto first = Output(device, scene, "bench-path", true);
-			const float expected = variant == "complex" ? 63 : 1;
+			const float expected = float(TraceQualityFor(variant).HistorySamples);
 			Require(
 				first.Pixel(first.Width / 2, first.Height / 2).a == expected,
 				"pathtrace reset sample count is wrong"
@@ -771,6 +824,7 @@ namespace {
 							  float(scene.Target.Width) / scene.Target.Height
 						  );
 				double paneEffect = 0;
+				size_t testedPaneProbes = 0;
 				for (const auto &instance : scene.Instances) {
 					if (instance.Surface < 0) continue;
 					const auto point =
@@ -782,6 +836,7 @@ namespace {
 					const int x = int((point.x / point.w * .5f + .5f) * clear.Width),
 							  y = int((.5f - point.y / point.w * .5f) * clear.Height);
 					if (x < 5 || y < 5 || x + 5 >= int(clear.Width) || y + 5 >= int(clear.Height)) continue;
+					++testedPaneProbes;
 					for (int dy = -4; dy <= 4; ++dy)
 						for (int dx = -4; dx <= 4; ++dx) {
 							const auto a = clear.Pixel(uint32_t(x + dx), uint32_t(y + dy)),
@@ -790,8 +845,10 @@ namespace {
 								paneEffect = std::max(paneEffect, double(std::abs(a[channel] - b[channel])));
 						}
 				}
+				Require(testedPaneProbes > 0, "captured aperture fixture has no valid interior probe");
 				Require(paneEffect > 2.0 / 255, "weather changed no pixels inside the captured aperture");
-				out << " pane_interior_weather_effect=" << paneEffect;
+				out << " tested_pane_probes=" << testedPaneProbes
+					<< " pane_interior_weather_effect=" << paneEffect;
 			}
 			out << " weather_max_effect=" << difference;
 		}
@@ -867,8 +924,15 @@ namespace {
 		Print(device, report, family, scene, projection, width, height, cohort, workload);
 		cohort << "# ray-consumer-work case=" << family << " scene=" << scene
 			   << " instances=" << fixture.Instances.size()
-			   << " volume_count=" << fixture.View.Lighting.VolumeCount
+			   << " volume_count=" << fixture.View.Lighting.VolumeCount << " volume_steps="
+			   << (fixture.View.Lighting.VolumeCount ? fixture.View.Lighting.Volumes[0].Steps : 0)
+			   << " volume_shadow_steps="
+			   << (fixture.View.Lighting.VolumeCount ? fixture.View.Lighting.Volumes[0].ShadowSteps : 0)
+			   << " volume_noise_strength="
+			   << (fixture.View.Lighting.VolumeCount ? fixture.View.Lighting.Volumes[0].NoiseStrength : 0)
 			   << " lens_count=" << fixture.View.Lighting.ShaderLensCount
+			   << " portal_count=" << fixture.Portals.size() << " mirror_count=" << fixture.Mirrors.size()
+			   << " god_ray_radius=" << fixture.View.Lighting.GodRayRadius
 			   << " cloud_steps=" << fixture.View.Lighting.EnvironmentState.CloudVolume.Steps
 			   << " fallback_dispatches_including_warmup_and_drain="
 			   << Counter("render.weather.fragment_fallbacks") - fallbackBefore
@@ -878,6 +942,13 @@ namespace {
 			   << Counter("render.weather.capture_scratch_image_creations") - scratchBefore
 			   << " capture_views_including_warmup_and_drain="
 			   << Counter("render.weather.capture_views") - captureViewsBefore;
+		if (family == "trace" && scene != "inactive") {
+			const auto quality = TraceQualityFor(scene);
+			cohort << " gi_rays_per_pixel=" << quality.GiRaysPerPixel
+				   << " reflection_steps=" << quality.ReflectionSteps
+				   << " path_samples_per_frame=" << quality.PathSamplesPerFrame
+				   << " path_bounces=" << quality.PathBounces;
+		}
 		if (family == "mirror") {
 			const std::string_view weatherMedium = scene == "inactive" ? "inactive"
 												   : scene == "empty"  ? "active_empty"

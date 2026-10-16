@@ -279,7 +279,8 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 	bool diagnostics = false;
 	const auto scenario =
 		ray_consumer_bench::Setting("MONO_WEATHER_GPU_BENCH_SCENE", std::string_view("simple"));
-	if (scenario != "inactive" && scenario != "empty" && scenario != "simple" && scenario != "complex")
+	if (scenario != "inactive" && scenario != "empty" && scenario != "simple" && scenario != "complex" &&
+		scenario != "busy")
 		throw std::runtime_error("unknown weather GPU benchmark scene");
 	try {
 		const char *configuredDiagnostics = std::getenv("MONO_WEATHER_GPU_BENCH_DIAGNOSTICS");
@@ -342,6 +343,17 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 			receivers.push_back(receiver);
 		}
 	}
+	if (scenario == "busy") {
+		for (uint32_t index = 0; index < 16; ++index) {
+			auto receiver = ground;
+			receiver.Source = index + 2;
+			receiver.HalfExtent = {24, 20 + float(index % 5) * 10, 24};
+			receiver.Frame.Position = {
+				float(index % 4) * 160 - 240, receiver.HalfExtent.Y, float(index / 4) * 160 - 240
+			};
+			receivers.push_back(receiver);
+		}
+	}
 	if (scenario == "empty") {
 		// A near occluder keeps an active resident field and shadow map while
 		// every view ray ends below the cloud layer before it can integrate it.
@@ -365,6 +377,10 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 	if (scenario == "complex") {
 		environment.Weather.ShadowCascades = 4;
 		environment.CloudVolume.Steps = 64;
+	}
+	if (scenario == "busy") {
+		environment.Weather.ShadowCascades = 2;
+		environment.CloudVolume.Steps = 32;
 	}
 	environment.Weather.Enabled = scenario != "inactive";
 	environment.Weather.ShadowDistanceMetres = 1024;
