@@ -64,6 +64,16 @@ namespace engine::script::procedural_detail {
 namespace engine::script::procedural_source_detail {
 	const ProceduralAuthority *Authority(const ecs::Store &store);
 	bool MayEdit(const ecs::Store &store, procedural::Diagnostic &diagnostic);
+	bool CaptureAuthorityRegion(
+		const ProceduralAuthority &,
+		procedural::RegionScope,
+		procedural::CompiledRecipe &,
+		procedural::RegionRequest &,
+		procedural::Diagnostic &
+	);
+	bool PreparePreviewAuthority(
+		const ecs::Store &, std::span<const uint8_t>, ProceduralAuthority &, procedural::Diagnostic &
+	);
 	bool
 	ReplaceAuthority(ecs::Store &store, ProceduralAuthority candidate, procedural::Diagnostic &diagnostic);
 }

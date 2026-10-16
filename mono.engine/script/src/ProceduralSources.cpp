@@ -220,6 +220,111 @@ namespace engine::script {
 		}
 	}
 
+	namespace procedural_source_detail {
+		bool CaptureAuthorityRegion(
+			const ProceduralAuthority &authority,
+			procedural::RegionScope scope,
+			procedural::CompiledRecipe &recipe,
+			procedural::RegionRequest &request,
+			procedural::Diagnostic &diagnostic
+		) {
+			try {
+				procedural::CompiledRecipe compiled;
+				if (!CompileAuthority(authority, compiled, diagnostic)) return false;
+				const auto region =
+					std::find_if(authority.Regions.begin(), authority.Regions.end(), [&](const auto &value) {
+						return SameScope(value.Scope, scope);
+					});
+				if (region == authority.Regions.end())
+					return Refuse(diagnostic, procedural::Status::InvalidInput, "region.unregistered");
+				procedural::Bounds owner;
+				procedural::Bounds queryBounds;
+				if (procedural::RequiredRegionBounds(compiled, scope, owner, queryBounds, diagnostic) !=
+					procedural::Status::Ok)
+					return false;
+				procedural::RegionRequest captured;
+				captured.Scope = scope;
+				captured.RecipeDigest = Hash(compiled.CanonicalBytes());
+				captured.ExpectedSourceRevision = region->SourceRevision;
+				size_t visits = 0;
+				for (const auto kind : {procedural::SourceKind::Village, procedural::SourceKind::Entrance}) {
+					procedural::SourceQuery query;
+					query.Source = kind == procedural::SourceKind::Village ? "villages" : "entrances";
+					query.Covered = queryBounds;
+					for (const auto &source : authority.Sources) {
+						if (++visits > ProceduralHostLimits::MaximumQueryVisits)
+							return Refuse(
+								diagnostic, procedural::Status::LimitExceeded, "region.query_visits"
+							);
+						if (source.Kind == kind && Contains(queryBounds, source.Anchor))
+							query.Matches.push_back(CaptureLeaf(source));
+					}
+					query.Complete = true;
+					query.CoverageDigest = Coverage(query);
+					captured.Queries.push_back(std::move(query));
+				}
+				if (!CaptureAuthoredFacts(
+						authority, compiled, owner, queryBounds, captured.Authored, diagnostic
+					))
+					return false;
+				std::vector<uint8_t> checkedKey;
+				if (procedural::BuildRegionKey(compiled, captured, checkedKey, diagnostic) !=
+					procedural::Status::Ok)
+					return false;
+				recipe = std::move(compiled);
+				request = std::move(captured);
+				diagnostic = {};
+				return true;
+			} catch (const std::bad_alloc &) {
+				return Refuse(diagnostic, procedural::Status::AllocationFailed, "region.capture");
+			}
+		}
+
+	}
+
+	namespace procedural_source_detail {
+		bool PreparePreviewAuthority(
+			const ecs::Store &store,
+			std::span<const uint8_t> bytes,
+			ProceduralAuthority &out,
+			procedural::Diagnostic &diagnostic
+		) {
+			ProceduralAuthority candidate;
+			if (!ReadAuthority(bytes, candidate, diagnostic)) return false;
+			const auto *current = Authority(store);
+			if (current && current->Owner == candidate.Owner) {
+				procedural::CompiledRecipe checked;
+				if (!CompileAuthority(*current, checked, diagnostic)) return false;
+				for (auto &region : candidate.Regions) {
+					const auto previous =
+						std::find_if(current->Regions.begin(), current->Regions.end(), [&](const auto &row) {
+							return SameScope(row.Scope, region.Scope);
+						});
+					if (previous == current->Regions.end()) continue;
+					procedural::CompiledRecipe oldRecipe, newRecipe;
+					procedural::RegionRequest oldRequest, newRequest;
+					std::vector<uint8_t> oldKey, newKey;
+					if (!CaptureAuthorityRegion(*current, region.Scope, oldRecipe, oldRequest, diagnostic) ||
+						!CaptureAuthorityRegion(candidate, region.Scope, newRecipe, newRequest, diagnostic) ||
+						procedural::BuildRegionKey(oldRecipe, oldRequest, oldKey, diagnostic) !=
+							procedural::Status::Ok ||
+						procedural::BuildRegionKey(newRecipe, newRequest, newKey, diagnostic) !=
+							procedural::Status::Ok)
+						return false;
+					region.SourceRevision = previous->SourceRevision;
+					if (oldKey != newKey) {
+						if (region.SourceRevision == std::numeric_limits<uint64_t>::max())
+							return Refuse(diagnostic, procedural::Status::LimitExceeded, "preview.revision");
+						++region.SourceRevision;
+					}
+				}
+				candidate.Incarnation = current->Incarnation;
+			}
+			out = std::move(candidate);
+			return true;
+		}
+	}
+
 	bool CaptureProceduralRegion(
 		const ecs::Store &store,
 		procedural::RegionScope scope,
@@ -227,61 +332,15 @@ namespace engine::script {
 		procedural::RegionRequest &request,
 		procedural::Diagnostic &diagnostic
 	) {
-		using namespace procedural_detail;
-		using namespace procedural_source_detail;
 		ENGINE_PROFILE("Procedural::Capture");
 		if (!store.IsOnOwningThread())
-			return Refuse(diagnostic, procedural::Status::InvalidInput, "request.owner");
-		const auto *authority = Authority(store);
-		if (!authority) return Refuse(diagnostic, procedural::Status::MissingSource, "authority");
-		try {
-			procedural::CompiledRecipe compiled;
-			if (!CompileAuthority(*authority, compiled, diagnostic)) return false;
-			const auto region =
-				std::find_if(authority->Regions.begin(), authority->Regions.end(), [&](const auto &value) {
-					return SameScope(value.Scope, scope);
-				});
-			if (region == authority->Regions.end())
-				return Refuse(diagnostic, procedural::Status::InvalidInput, "region.unregistered");
-			procedural::Bounds owner;
-			procedural::Bounds queryBounds;
-			if (procedural::RequiredRegionBounds(compiled, scope, owner, queryBounds, diagnostic) !=
-				procedural::Status::Ok)
-				return false;
-			procedural::RegionRequest captured;
-			captured.Scope = scope;
-			captured.RecipeDigest = Hash(compiled.CanonicalBytes());
-			captured.ExpectedSourceRevision = region->SourceRevision;
-			size_t visits = 0;
-			for (const auto kind : {procedural::SourceKind::Village, procedural::SourceKind::Entrance}) {
-				procedural::SourceQuery query;
-				query.Source = kind == procedural::SourceKind::Village ? "villages" : "entrances";
-				query.Covered = queryBounds;
-				for (const auto &source : authority->Sources) {
-					if (++visits > ProceduralHostLimits::MaximumQueryVisits)
-						return Refuse(diagnostic, procedural::Status::LimitExceeded, "region.query_visits");
-					if (source.Kind == kind && Contains(queryBounds, source.Anchor))
-						query.Matches.push_back(CaptureLeaf(source));
-				}
-				query.Complete = true;
-				query.CoverageDigest = Coverage(query);
-				captured.Queries.push_back(std::move(query));
-			}
-			if (!CaptureAuthoredFacts(
-					*authority, compiled, owner, queryBounds, captured.Authored, diagnostic
-				))
-				return false;
-			std::vector<uint8_t> checkedKey;
-			if (procedural::BuildRegionKey(compiled, captured, checkedKey, diagnostic) !=
-				procedural::Status::Ok)
-				return false;
-			recipe = std::move(compiled);
-			request = std::move(captured);
-			diagnostic = {};
-			return true;
-		} catch (const std::bad_alloc &) {
-			return Refuse(diagnostic, procedural::Status::AllocationFailed, "region.capture");
-		}
+			return procedural_detail::Refuse(diagnostic, procedural::Status::InvalidInput, "request.owner");
+		const auto *authority = procedural_source_detail::Authority(store);
+		if (!authority)
+			return procedural_detail::Refuse(diagnostic, procedural::Status::MissingSource, "authority");
+		return procedural_source_detail::CaptureAuthorityRegion(
+			*authority, scope, recipe, request, diagnostic
+		);
 	}
 
 	bool EncodeProceduralAuthority(

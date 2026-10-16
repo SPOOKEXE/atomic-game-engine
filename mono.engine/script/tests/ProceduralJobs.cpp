@@ -402,3 +402,95 @@ TEST_CASE(
 		script::CaptureProceduralRegion(fixture.Store, {500, 500, 16}, compiled, request, fixture.Diagnostic)
 	);
 }
+
+TEST_CASE(
+	"explicit preview synchronization retains exact local inputs and keeps load fences",
+	"[procedural][host][preview]"
+) {
+	ProceduralFixture source;
+	ProceduralFixture preview;
+	script::ProceduralJobs jobs(preview.Store);
+	const std::array<uint64_t, 2> tickets{
+		jobs.Submit(preview.Store, SCOPES[0], parallel::JobContext::Serial),
+		jobs.Submit(preview.Store, SCOPES[1], parallel::JobContext::Serial)
+	};
+	REQUIRE(tickets[0]);
+	REQUIRE(tickets[1]);
+	jobs.Poll();
+	const auto before = *preview.Store.Resource<script::ProceduralAuthority>();
+	std::vector<uint8_t> original;
+	REQUIRE(script::EncodeProceduralAuthority(preview.Store, original, preview.Diagnostic));
+	REQUIRE(
+		script::SetProceduralSource(
+			source.Store,
+			{procedural::SourceKind::Village, "oakstead", {9 * CELL, 8 * CELL}, ""},
+			source.Diagnostic
+		)
+	);
+	std::vector<uint8_t> changed;
+	REQUIRE(script::EncodeProceduralAuthority(source.Store, changed, source.Diagnostic));
+	auto malformed = changed;
+	malformed.front() ^= 1;
+	CHECK_FALSE(jobs.SynchronizePreviewInputs(preview.Store, malformed, preview.Diagnostic));
+	std::vector<uint8_t> afterRefusal;
+	REQUIRE(script::EncodeProceduralAuthority(preview.Store, afterRefusal, preview.Diagnostic));
+	CHECK(afterRefusal == original);
+	REQUIRE(jobs.Completions().size() == 2);
+	CHECK(jobs.Completions()[0].Status == script::ProceduralJobStatus::Ready);
+	CHECK(jobs.Completions()[1].Status == script::ProceduralJobStatus::Ready);
+	REQUIRE(jobs.SynchronizePreviewInputs(preview.Store, changed, preview.Diagnostic));
+	const auto *updated = preview.Store.Resource<script::ProceduralAuthority>();
+	REQUIRE(updated);
+	CHECK(updated->Incarnation == before.Incarnation);
+	CHECK(updated->Regions[0].SourceRevision == before.Regions[0].SourceRevision + 1);
+	CHECK(updated->Regions[1].SourceRevision == before.Regions[1].SourceRevision);
+	CHECK(jobs.Completions()[0].Status == script::ProceduralJobStatus::Canceled);
+	CHECK(jobs.Completions()[1].Status == script::ProceduralJobStatus::Ready);
+	CHECK_FALSE(jobs.PublishBatch(preview.Store, std::span(&tickets[0], 1), preview.Store.Time().Tick));
+	REQUIRE(jobs.PublishBatch(preview.Store, std::span(&tickets[1], 1), preview.Store.Time().Tick));
+	const auto far = Published(preview.Store, SCOPES[1]);
+	jobs.ClearCompletions();
+	const auto fresh = jobs.Submit(preview.Store, SCOPES[1], parallel::JobContext::Serial);
+	REQUIRE(fresh);
+	jobs.Poll();
+	REQUIRE(script::DecodeProceduralAuthority(preview.Store, changed, preview.Diagnostic));
+	CHECK(preview.Store.Resource<script::ProceduralAuthority>()->Incarnation != before.Incarnation);
+	CHECK_FALSE(jobs.PublishBatch(preview.Store, std::span(&fresh, 1), preview.Store.Time().Tick));
+	CHECK(Published(preview.Store, SCOPES[1]).ArtifactBytes == far.ArtifactBytes);
+}
+
+TEST_CASE(
+	"preview synchronization refuses foreign ownership and exhausted revisions before canceling work",
+	"[procedural][host][preview]"
+) {
+	ProceduralFixture source;
+	ProceduralFixture preview;
+	script::ProceduralJobs jobs(preview.Store);
+	std::vector<uint8_t> bytes;
+	REQUIRE(script::EncodeProceduralAuthority(source.Store, bytes, source.Diagnostic));
+	CHECK_FALSE(jobs.SynchronizePreviewInputs(source.Store, bytes, preview.Diagnostic));
+	preview.Store.SetAdoptOnly(true);
+	CHECK_FALSE(jobs.SynchronizePreviewInputs(preview.Store, bytes, preview.Diagnostic));
+	preview.Store.SetAdoptOnly(false);
+	preview.Store.ResourceMutable<script::ProceduralAuthority>()->Regions[0].SourceRevision =
+		std::numeric_limits<uint64_t>::max();
+	const auto ticket = jobs.Submit(preview.Store, SCOPES[0], parallel::JobContext::Serial);
+	REQUIRE(ticket);
+	jobs.Poll();
+	REQUIRE(
+		script::SetProceduralSource(
+			source.Store,
+			{procedural::SourceKind::Village, "oakstead", {9 * CELL, 8 * CELL}, ""},
+			source.Diagnostic
+		)
+	);
+	REQUIRE(script::EncodeProceduralAuthority(source.Store, bytes, source.Diagnostic));
+	CHECK_FALSE(jobs.SynchronizePreviewInputs(preview.Store, bytes, preview.Diagnostic));
+	CHECK(preview.Diagnostic.Field == "preview.revision");
+	CHECK(
+		preview.Store.Resource<script::ProceduralAuthority>()->Regions[0].SourceRevision ==
+		std::numeric_limits<uint64_t>::max()
+	);
+	CHECK(jobs.Completions().front().Status == script::ProceduralJobStatus::Ready);
+	REQUIRE(jobs.PublishBatch(preview.Store, std::span(&ticket, 1), preview.Store.Time().Tick));
+}

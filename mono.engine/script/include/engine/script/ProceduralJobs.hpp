@@ -185,6 +185,14 @@ namespace engine::script {
 			procedural::RegionScope scope,
 			parallel::JobContext context = parallel::JobContext::Threaded
 		);
+		// Explicit native isolated-preview mirror update. Same-owner scopes retain
+		// incarnation and revision only when their exact canonical input keys match.
+		// Changed or removed requests are irrevocably canceled before a later update
+		// can reintroduce their scope. Ordinary Configure/Decode lifecycle resets
+		// remain unchanged; runtime services do not expose this mirror operation.
+		bool SynchronizePreviewInputs(
+			ecs::Store &, std::span<const uint8_t> canonicalAuthority, procedural::Diagnostic &
+		);
 		// Observes the completed ticket prefix without waiting for worker work.
 		void Poll();
 		// Idempotently stops unpublished work; published artifacts remain accepted.

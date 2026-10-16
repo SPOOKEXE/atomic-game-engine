@@ -6,6 +6,7 @@
 #include <engine/procedural/Artifact.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <limits>
 #include <new>
@@ -151,6 +152,56 @@ namespace engine::script {
 		} catch (const std::bad_alloc &) {
 			Refuse(Held->Diagnostic, procedural::Status::AllocationFailed, "request.bytes");
 			return 0;
+		}
+	}
+
+	bool ProceduralJobs::SynchronizePreviewInputs(
+		ecs::Store &store, std::span<const uint8_t> bytes, procedural::Diagnostic &diagnostic
+	) {
+		using namespace procedural_detail;
+		ENGINE_PROFILE("Procedural::PreviewInputs");
+		if (!store.IsOnOwningThread() || store.Identity() != Held->StoreIdentity ||
+			!procedural_source_detail::MayEdit(store, diagnostic))
+			return Refuse(diagnostic, procedural::Status::InvalidInput, "preview.owner");
+		try {
+			ProceduralAuthority candidate;
+			if (!procedural_source_detail::PreparePreviewAuthority(store, bytes, candidate, diagnostic))
+				return false;
+			std::array<uint64_t, ProceduralHostLimits::MaximumRetainedRequests> canceled{};
+			size_t canceledCount = 0;
+			for (const auto &job : Held->Jobs) {
+				bool retain = job->StoreIdentity == store.Identity() && job->Owner == candidate.Owner &&
+							  job->AuthorityIncarnation == candidate.Incarnation;
+				const auto region =
+					std::find_if(candidate.Regions.begin(), candidate.Regions.end(), [&](const auto &row) {
+						return SameScope(row.Scope, job->Request.Scope);
+					});
+				retain = retain && region != candidate.Regions.end() &&
+						 region->SourceRevision == job->Request.ExpectedSourceRevision;
+				if (retain) {
+					procedural::CompiledRecipe compiled;
+					procedural::RegionRequest request;
+					std::vector<uint8_t> key;
+					if (!procedural_source_detail::CaptureAuthorityRegion(
+							candidate, region->Scope, compiled, request, diagnostic
+						) ||
+						procedural::BuildRegionKey(compiled, request, key, diagnostic) !=
+							procedural::Status::Ok)
+						return false;
+					retain = key == job->ExpectedKey;
+				}
+				if (!retain) canceled[canceledCount++] = job->Ticket;
+			}
+			// All decoding, exact key decisions and destination marking precede
+			// the authority swap. Cancellation below touches only atomics and enums.
+			if (!procedural_source_detail::ReplaceAuthority(store, std::move(candidate), diagnostic))
+				return false;
+			for (size_t index = 0; index < canceledCount; ++index)
+				Cancel(canceled[index]);
+			diagnostic = {};
+			return true;
+		} catch (const std::bad_alloc &) {
+			return Refuse(diagnostic, procedural::Status::AllocationFailed, "preview.inputs");
 		}
 	}
 
