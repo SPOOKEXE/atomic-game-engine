@@ -15,6 +15,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Terrain.hpp>
+#include <engine/script/BakedProceduralReference.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/ProceduralJobs.hpp>
@@ -25,6 +26,7 @@
 #include <charconv>
 #include <fstream>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <system_error>
 #include <unordered_map>
@@ -60,6 +62,7 @@ namespace engine::game {
 		// would make a file's meaning depend on which build wrote it.
 		constexpr std::string_view ASSET_PIPELINES = "AssetPipelines";
 		constexpr std::string_view PROCEDURAL_AUTHORITY = "ProceduralAuthority";
+		constexpr std::string_view BAKED_PROCEDURAL_REFERENCES = "BakedProceduralReferences";
 
 		// One instance and its subtree, on its own. See
 		// `WriteInstanceDocument`.
@@ -795,39 +798,25 @@ namespace engine::game {
 			}
 		}
 
-		// Only the bounded binary envelope belongs here. The procedural codec owns
-		// every authored field and version; accepted outputs and live jobs stay out.
-		bool WriteProceduralAuthority(XmlWriter &writer, const Store &store, std::string &error) {
-			if (store.Resource<script::ProceduralAuthority>() == nullptr) return true;
-			std::vector<uint8_t> bytes;
-			procedural::Diagnostic diagnostic;
-			if (!script::EncodeProceduralAuthority(store, bytes, diagnostic)) {
-				error = "procedural authority refused at '" + diagnostic.Field + "'";
-				return false;
-			}
+		// Owners define the bytes; the document carries only a bounded envelope.
+		void WriteHexPayload(XmlWriter &writer, std::string_view name, std::span<const uint8_t> bytes) {
 			constexpr char HEX[] = "0123456789abcdef";
 			std::string text(bytes.size() * 2, '0');
 			for (size_t index = 0; index < bytes.size(); ++index) {
 				text[index * 2] = HEX[bytes[index] >> 4];
 				text[index * 2 + 1] = HEX[bytes[index] & 15];
 			}
-			writer.Open(PROCEDURAL_AUTHORITY);
+			writer.Open(name);
 			writer.Attribute("encoding", "hex");
 			writer.Verbatim(text);
 			writer.Close();
-			return true;
 		}
 
-		void ReadProceduralAuthority(const XmlElement &element, Store &store) {
-			const auto refuse = [] {
-				ENGINE_WARN("world procedural authority is malformed; the world loads without this recipe");
-			};
+		bool ReadHexPayload(const XmlElement &element, size_t maximumBytes, std::vector<uint8_t> &out) {
 			const auto &text = element.Text;
 			if (element.Attribute("encoding") != "hex" || text.size() % 2 != 0 ||
-				text.size() > script::ProceduralHostLimits::MaximumAuthorityBytes * 2) {
-				refuse();
-				return;
-			}
+				text.size() / 2 > maximumBytes)
+				return false;
 			const auto digit = [](char value) -> int {
 				if (value >= '0' && value <= '9') return value - '0';
 				if (value >= 'a' && value <= 'f') return value - 'a' + 10;
@@ -838,15 +827,84 @@ namespace engine::game {
 				const int high = digit(text[index * 2]);
 				const int low = digit(text[index * 2 + 1]);
 				if (high < 0 || low < 0) {
-					refuse();
-					return;
+					return false;
 				}
 				bytes[index] = static_cast<uint8_t>((high << 4) | low);
+			}
+			out.swap(bytes);
+			return true;
+		}
+
+		// Accepted outputs and live jobs stay out of this owner's authored codec.
+		bool WriteProceduralAuthority(XmlWriter &writer, const Store &store, std::string &error) {
+			if (store.Resource<script::ProceduralAuthority>() == nullptr) return true;
+			std::vector<uint8_t> bytes;
+			procedural::Diagnostic diagnostic;
+			if (!script::EncodeProceduralAuthority(store, bytes, diagnostic)) {
+				error = "procedural authority refused at '" + diagnostic.Field + "'";
+				return false;
+			}
+			WriteHexPayload(writer, PROCEDURAL_AUTHORITY, bytes);
+			return true;
+		}
+
+		void ReadProceduralAuthority(const XmlElement &element, Store &store) {
+			std::vector<uint8_t> bytes;
+			if (!ReadHexPayload(element, script::ProceduralHostLimits::MaximumAuthorityBytes, bytes)) {
+				ENGINE_WARN("world procedural authority is malformed; the world loads without this recipe");
+				return;
 			}
 			procedural::Diagnostic diagnostic;
 			if (!script::DecodeProceduralAuthority(store, bytes, diagnostic)) {
 				ENGINE_WARN(
 					"world procedural authority refused at '{}' - the world loads without this recipe",
+					diagnostic.Field
+				);
+			}
+		}
+
+		bool EncodeBakedReferences(
+			const Store &store, const Numbering &numbering, std::vector<uint8_t> &bytes, std::string &error
+		) {
+			procedural::Diagnostic diagnostic;
+			if (!script::EncodeBakedProceduralReferences(
+					store, [&](Entity instance) { return numbering.Of(instance); }, bytes, diagnostic
+				)) {
+				error = "baked procedural references refused at '" + diagnostic.Field + "'";
+				return false;
+			}
+			return true;
+		}
+
+		bool WriteBakedReferences(
+			XmlWriter &writer, const Store &store, const Numbering &numbering, std::string &error
+		) {
+			std::vector<uint8_t> bytes;
+			if (!EncodeBakedReferences(store, numbering, bytes, error)) return false;
+			if (!bytes.empty()) WriteHexPayload(writer, BAKED_PROCEDURAL_REFERENCES, bytes);
+			return true;
+		}
+
+		void ReadBakedReferences(
+			const XmlElement &element, Store &store, const std::unordered_map<uint32_t, Entity> &byId
+		) {
+			std::vector<uint8_t> bytes;
+			if (!ReadHexPayload(element, script::MAXIMUM_BAKED_PROCEDURAL_DOCUMENT_BYTES, bytes)) {
+				ENGINE_WARN("world baked procedural references are malformed; this block is ignored");
+				return;
+			}
+			procedural::Diagnostic diagnostic;
+			if (!script::DecodeBakedProceduralReferences(
+					store,
+					bytes,
+					[&](uint32_t id) {
+						const auto found = byId.find(id);
+						return found == byId.end() ? NULL_ENTITY : found->second;
+					},
+					diagnostic
+				)) {
+				ENGINE_WARN(
+					"world baked procedural references refused at '{}' - this block is ignored",
 					diagnostic.Field
 				);
 			}
@@ -1154,6 +1212,7 @@ namespace engine::game {
 
 		Numbering numbering;
 		store.EachRoot([&](Entity root) { numbering.Walk(store, root); });
+		if (!WriteBakedReferences(writer, store, numbering, error)) return false;
 
 		Defaults defaults;
 		store.EachRoot([&](Entity root) { WriteInstance(writer, store, root, numbering, defaults); });
@@ -1223,6 +1282,14 @@ namespace engine::game {
 			if (!RestoreDocumentReference(store, reference, target, error)) {
 				return false;
 			}
+		}
+
+		// Owner codecs resolve document-local targets only after every item and
+		// reflected reference exists. A malformed optional block keeps the items.
+		for (const uint32_t index : element.Children) {
+			const XmlElement *child = document.At(index);
+			if (child != nullptr && child->Name == BAKED_PROCEDURAL_REFERENCES)
+				ReadBakedReferences(*child, store, byId);
 		}
 
 		return true;
@@ -1530,23 +1597,23 @@ namespace engine::game {
 			writer.Attribute("path", relative.generic_string());
 			writer.Close();
 		}
-		// Refuse invalid authored authorities before replacing any world file.
+		// Refuse invalid authored procedural content before replacing any world file.
 		// Each codec buffer is bounded and discarded before the next world.
 		for (const world::WorldId id : universe.Worlds()) {
 			if (universe.IsRemote(id) || !AuthoredLocalWorld(universe, id)) continue;
 			bool valid = false;
 			const world::WorldStatus status = universe.Enter(id, [&](Store &store) {
-				if (store.Resource<script::ProceduralAuthority>() == nullptr) {
-					valid = true;
-					return;
-				}
 				std::vector<uint8_t> bytes;
 				procedural::Diagnostic diagnostic;
-				valid = script::EncodeProceduralAuthority(store, bytes, diagnostic);
-				if (!valid) {
+				if (store.Resource<script::ProceduralAuthority>() != nullptr &&
+					!script::EncodeProceduralAuthority(store, bytes, diagnostic)) {
 					error = "procedural authority in world '" + std::string(store.Name()) + "' refused at '" +
 							diagnostic.Field + "'";
+					return;
 				}
+				Numbering numbering;
+				store.EachRoot([&](Entity root) { numbering.Walk(store, root); });
+				valid = EncodeBakedReferences(store, numbering, bytes, error);
 			});
 			if (status != world::WorldStatus::Ok) error = "could not enter authored world";
 			if (!valid) return false;

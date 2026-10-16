@@ -1,8 +1,14 @@
+#include <engine/ecs/Classes.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/procedural/Region.hpp>
+#include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/script/BakedProceduralReference.hpp>
 #include <engine/script/ProceduralInputs.hpp>
 #include <engine/script/ProceduralJobs.hpp>
+#include <engine/script/ProceduralScene.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -23,12 +29,37 @@
 TEST_SUITE_ID("engine.game.proceduralpersistence")
 TEST_DEPENDS("engine.game.roundtrip")
 TEST_DEPENDS("engine.script.proceduralinputs")
+TEST_DEPENDS("engine.script.bakedproceduralreference")
 
 namespace {
 	using namespace engine;
 
 	constexpr int64_t CELL = procedural::SUBCELLS_PER_CELL;
 	constexpr std::array<procedural::RegionScope, 2> SCOPES{{{0, 0, 16}, {20, 0, 16}}};
+	constexpr procedural::RegionScope BAKED_SCOPE{3, -2, 16};
+
+	struct BakedTargets {
+		ecs::Entity Mesh{};
+		ecs::Entity Part{};
+	};
+
+	bool AuthorBakedReference(ecs::Store &store, BakedTargets &out) {
+		out.Mesh = store.CreateInstance(scene::EditableMeshClass(), "BakedRegion");
+		if (out.Mesh == ecs::NULL_ENTITY) return false;
+		scene::PartDesc description;
+		description.Class = ecs::Classes::Find(core::Name("MeshPart"));
+		description.Mesh = scene::EditableMeshContentName(store, out.Mesh);
+		out.Part = scene::MakePart(store, description);
+		if (out.Part == ecs::NULL_ENTITY || !store.SetInstanceName(out.Part, "BakedPart")) return false;
+		auto *collider = store.GetMutable<scene::Collider>(out.Part);
+		if (collider == nullptr) return false;
+		collider->Mask = spatial::LayerMask::None();
+		collider->CanQuery = false;
+		procedural::Diagnostic diagnostic;
+		return script::SetBakedProceduralReference(
+			store, BAKED_SCOPE, out.Mesh, out.Part, "town/region.aproc", diagnostic
+		);
+	}
 
 	struct ScratchDirectory {
 		std::filesystem::path Path =
@@ -126,15 +157,24 @@ namespace {
 		return jobs.PublishBatch(store, std::array{ticket}, store.Time().Tick);
 	}
 
-	std::string AddAuthorityBlock(std::string document, std::string_view payload) {
+	std::string AddOptionalBlock(
+		std::string document,
+		std::string_view name,
+		std::string_view payload,
+		std::string_view encoding = "hex"
+	) {
 		const auto close = document.rfind("</World>");
 		if (close == std::string::npos) return {};
 		document.insert(
 			close,
-			"<ProceduralAuthority encoding=\"hex\"><![CDATA[" + std::string(payload) +
-				"]]></ProceduralAuthority>"
+			"<" + std::string(name) + " encoding=\"" + std::string(encoding) + "\"><![CDATA[" +
+				std::string(payload) + "]]></" + std::string(name) + ">"
 		);
 		return document;
+	}
+
+	std::string AddAuthorityBlock(std::string document, std::string_view payload) {
+		return AddOptionalBlock(std::move(document), "ProceduralAuthority", payload);
 	}
 
 	bool HasAuthority(world::Universe &universe, world::WorldId worldId) {
@@ -403,6 +443,317 @@ TEST_CASE(
 	REQUIRE(source.Enter(later, [](ecs::Store &store) {
 		store.ResourceMutable<script::ProceduralAuthority>()->RecipeBytes.clear();
 	}) == world::WorldStatus::Ok);
+	CHECK_FALSE(game::SaveUniverse(source, core::Name("Atomic"), {}, manifest, {}, error));
+	CHECK_FALSE(error.empty());
+	std::string manifestAfter;
+	std::string earlierAfter;
+	std::string laterAfter;
+	REQUIRE(ReadFileText(manifest, manifestAfter));
+	REQUIRE(ReadFileText(earlierFile, earlierAfter));
+	REQUIRE(ReadFileText(laterFile, laterAfter));
+	CHECK(manifestAfter == manifestBefore);
+	CHECK(earlierAfter == earlierBefore);
+	CHECK(laterAfter == laterBefore);
+}
+
+TEST_CASE("baked procedural references survive game file roundtrips", "[game][procedural][content]") {
+	game::RegisterGameClasses();
+	world::Universe source;
+	const auto original = AddWorld(source, core::Name("Baked"));
+	REQUIRE(original.IsValid());
+
+	const procedural::RegionScope scope{3, -2, 16};
+	ecs::Entity originalMesh = ecs::NULL_ENTITY;
+	ecs::Entity originalPart = ecs::NULL_ENTITY;
+	uint64_t sourceIdentity = 0;
+	bool authored = false;
+	procedural::Diagnostic diagnostic;
+	REQUIRE(source.Enter(original, [&](ecs::Store &store) {
+		const auto transient = store.CreateInstance(scene::PartClass(), "SessionOnly");
+		if (transient == ecs::NULL_ENTITY) return;
+		store.Set(transient, scene::TransientComponent{});
+
+		originalMesh = store.CreateInstance(scene::EditableMeshClass(), "BakedRegion");
+		if (originalMesh == ecs::NULL_ENTITY) return;
+
+		scene::PartDesc description;
+		description.Class = ecs::Classes::Find(core::Name("MeshPart"));
+		description.Mesh = scene::EditableMeshContentName(store, originalMesh);
+		originalPart = scene::MakePart(store, description);
+		if (originalPart == ecs::NULL_ENTITY || !store.SetInstanceName(originalPart, "BakedPart")) return;
+
+		auto *collider = store.GetMutable<scene::Collider>(originalPart);
+		if (collider == nullptr) return;
+		collider->Mask = spatial::LayerMask::None();
+		collider->CanQuery = false;
+		if (!script::SetBakedProceduralReference(
+				store, scope, originalMesh, originalPart, "town/region.aproc", diagnostic
+			) ||
+			!script::SetBakedProceduralReference(
+				store, scope, originalMesh, originalPart, "town/region.aproc", diagnostic
+			))
+			return;
+
+		sourceIdentity = store.Identity();
+		authored = store.Resource<script::ProceduralAuthority>() == nullptr &&
+				   store.Resource<script::ProceduralPublished>() == nullptr &&
+				   store.Resource<script::SourceCache>() == nullptr;
+	}) == world::WorldStatus::Ok);
+	REQUIRE(authored);
+	REQUIRE(originalMesh != ecs::NULL_ENTITY);
+	REQUIRE(originalPart != ecs::NULL_ENTITY);
+
+	const auto checkRestored = [&](world::Universe &destination, world::WorldId restored) {
+		REQUIRE(restored.IsValid());
+		bool checked = false;
+		const auto status = destination.Enter(restored, [&](ecs::Store &store) {
+			const auto mesh = store.FindFirstRoot("BakedRegion");
+			const auto part = store.FindFirstRoot("BakedPart");
+			CHECK(store.FindFirstRoot("SessionOnly") == ecs::NULL_ENTITY);
+			CHECK(store.Identity() != sourceIdentity);
+			CHECK(mesh != ecs::NULL_ENTITY);
+			CHECK(part != ecs::NULL_ENTITY);
+			if (mesh == ecs::NULL_ENTITY || part == ecs::NULL_ENTITY) return;
+
+			CHECK(mesh != originalMesh);
+			CHECK(part != originalPart);
+			const auto *collider = store.Get<scene::Collider>(part);
+			REQUIRE(collider);
+			CHECK(collider->Mask == spatial::LayerMask::None());
+			CHECK_FALSE(collider->Trigger);
+			CHECK_FALSE(collider->CanQuery);
+			const auto *reference = store.Get<script::BakedProceduralReference>(mesh);
+			REQUIRE(reference);
+			CHECK(reference->Description.Text() == "town/region.aproc");
+			CHECK(reference->Scope.X == scope.X);
+			CHECK(reference->Scope.Y == scope.Y);
+			CHECK(reference->Scope.CellsPerSide == scope.CellsPerSide);
+			CHECK(reference->Part == part);
+			CHECK(reference->Revision != 0);
+
+			script::ProceduralSceneTarget target;
+			procedural::Diagnostic restoredDiagnostic;
+			REQUIRE(
+				script::CaptureProceduralSceneTarget(store, scope, mesh, part, target, restoredDiagnostic)
+			);
+			CHECK(target.Content == scene::EditableMeshContentName(store, mesh));
+			CHECK(target.StoreIdentity == store.Identity());
+			CHECK(store.Resource<script::ProceduralAuthority>() == nullptr);
+			CHECK(store.Resource<script::ProceduralPublished>() == nullptr);
+			CHECK(store.Resource<script::SourceCache>() == nullptr);
+			checked = true;
+		});
+		REQUIRE(status == world::WorldStatus::Ok);
+		REQUIRE(checked);
+	};
+
+	SECTION("world document") {
+		std::string error;
+		const std::string document = game::WriteWorldDocument(source, original, error);
+		REQUIRE_FALSE(document.empty());
+		world::Universe destination;
+		const auto restored = game::ReadWorldDocument(destination, document, core::Name{}, error);
+		checkRestored(destination, restored);
+	}
+
+	SECTION("world file") {
+		ScratchDirectory scratch;
+		const auto path = scratch.Path / "baked.aworld";
+		std::string error;
+		REQUIRE(game::ExportWorld(source, original, path, error));
+		world::Universe destination;
+		const auto restored = game::ImportWorld(destination, path, core::Name{}, error);
+		checkRestored(destination, restored);
+	}
+
+	SECTION("game file") {
+		ScratchDirectory scratch;
+		const auto path = scratch.Path / "baked.agame";
+		std::string error;
+		REQUIRE(game::SaveGame(source, core::Name("BakedGame"), path, error));
+		world::Universe destination;
+		game::GameInfo info;
+		REQUIRE(game::LoadGame(destination, path, info, error));
+		REQUIRE(info.Worlds.size() == 1);
+		checkRestored(destination, destination.Find(core::Name("Baked")));
+	}
+}
+
+TEST_CASE("transient baked subtrees and inert rows do not author demands", "[game][procedural][content]") {
+	game::RegisterGameClasses();
+	world::Universe source;
+	const auto original = AddWorld(source, core::Name("Transient"));
+	REQUIRE(original.IsValid());
+	bool authored = false;
+	const auto status = source.Enter(original, [&](ecs::Store &store) {
+		BakedTargets targets;
+		if (!AuthorBakedReference(store, targets)) return;
+		const auto parent = store.CreateInstance(scene::PartClass(), "SessionOnly");
+		store.Set(parent, scene::TransientComponent{});
+		if (!store.SetParent(targets.Mesh, parent) || !store.SetParent(targets.Part, parent)) return;
+		// An excluded subtree cannot block a save, even with an incomplete demand.
+		store.GetMutable<script::BakedProceduralReference>(targets.Mesh)->Part = ecs::NULL_ENTITY;
+		const auto inert = store.CreateInstance(scene::EditableMeshClass(), "InertRegion");
+		store.Set(inert, script::BakedProceduralReference{});
+		store.CreateInstance(scene::PartClass(), "KeepMe");
+		authored = true;
+	});
+	REQUIRE(status == world::WorldStatus::Ok);
+	REQUIRE(authored);
+	std::string error;
+	const auto document = game::WriteWorldDocument(source, original, error);
+	REQUIRE_FALSE(document.empty());
+	CHECK(document.find("BakedProceduralReferences") == std::string::npos);
+	CHECK(document.find("BakedRegion") == std::string::npos);
+	CHECK(document.find("BakedPart") == std::string::npos);
+	CHECK(document.find("SessionOnly") == std::string::npos);
+	ScratchDirectory scratch;
+	const auto path = scratch.Path / "transient.agame";
+	REQUIRE(game::SaveGame(source, core::Name("TransientGame"), path, error));
+	world::Universe loaded;
+	game::GameInfo info;
+	REQUIRE(game::LoadGame(loaded, path, info, error));
+	const auto restored = loaded.Find(core::Name("Transient"));
+	REQUIRE(restored.IsValid());
+	const auto loadedStatus = loaded.Enter(restored, [](ecs::Store &store) {
+		CHECK(store.FindFirstRoot("KeepMe") != ecs::NULL_ENTITY);
+		const auto inert = store.FindFirstRoot("InertRegion");
+		REQUIRE(inert != ecs::NULL_ENTITY);
+		CHECK_FALSE(store.Has<script::BakedProceduralReference>(inert));
+		CHECK(store.FindFirstRoot("SessionOnly") == ecs::NULL_ENTITY);
+	});
+	REQUIRE(loadedStatus == world::WorldStatus::Ok);
+}
+
+TEST_CASE(
+	"malformed optional baked references preserve authored items and earlier bindings",
+	"[game][procedural][content]"
+) {
+	game::RegisterGameClasses();
+	world::Universe source;
+	const auto original = AddWorld(source, core::Name("Baked"));
+	REQUIRE(original.IsValid());
+	bool authored = false;
+	const auto status = source.Enter(original, [&](ecs::Store &store) {
+		BakedTargets targets;
+		authored = AuthorBakedReference(store, targets);
+		store.CreateInstance(scene::PartClass(), "KeepMe");
+	});
+	REQUIRE(status == world::WorldStatus::Ok);
+	REQUIRE(authored);
+	std::string error;
+	const std::string document = game::WriteWorldDocument(source, original, error);
+	REQUIRE_FALSE(document.empty());
+	REQUIRE(document.find("<BakedProceduralReferences encoding=\"hex\">") != std::string::npos);
+	const std::array<std::pair<std::string, std::string>, 5> invalidPayloads{{
+		{"BadHex", "0g"},
+		{"OddHex", "0"},
+		{"Oversize", std::string(script::MAXIMUM_BAKED_PROCEDURAL_DOCUMENT_BYTES * 2 + 2, '0')},
+		{"UnknownVersion", "00000000"},
+		{"Truncated", "0100000001000000"},
+	}};
+	for (const auto &[name, payload] : invalidPayloads) {
+		INFO(name);
+		world::Universe loaded;
+		const auto invalid = AddOptionalBlock(document, "BakedProceduralReferences", payload);
+		const auto restored = game::ReadWorldDocument(loaded, invalid, core::Name(name), error);
+		REQUIRE(restored.IsValid());
+		const auto loadedStatus = loaded.Enter(restored, [](ecs::Store &store) {
+			CHECK(store.FindFirstRoot("KeepMe") != ecs::NULL_ENTITY);
+			const auto mesh = store.FindFirstRoot("BakedRegion");
+			const auto part = store.FindFirstRoot("BakedPart");
+			const auto *reference = store.Get<script::BakedProceduralReference>(mesh);
+			REQUIRE(reference);
+			CHECK(reference->Description.Text() == "town/region.aproc");
+			CHECK(reference->Part == part);
+			script::ProceduralSceneTarget target;
+			procedural::Diagnostic diagnostic;
+			CHECK(script::CaptureProceduralSceneTarget(store, BAKED_SCOPE, mesh, part, target, diagnostic));
+		});
+		REQUIRE(loadedStatus == world::WorldStatus::Ok);
+	}
+	world::Universe plain;
+	const auto oldWorld = AddWorld(plain, core::Name("Old"));
+	REQUIRE(oldWorld.IsValid());
+	plain.Enter(oldWorld, [](ecs::Store &store) { store.CreateInstance(scene::PartClass(), "KeepMe"); });
+	const auto oldDocument = game::WriteWorldDocument(plain, oldWorld, error);
+	REQUIRE_FALSE(oldDocument.empty());
+	world::Universe loaded;
+	const auto invalid = AddOptionalBlock(oldDocument, "BakedProceduralReferences", "00", "unknown");
+	const auto restored = game::ReadWorldDocument(loaded, invalid, core::Name{}, error);
+	REQUIRE(restored.IsValid());
+	const auto loadedStatus = loaded.Enter(restored, [](ecs::Store &store) {
+		CHECK(store.FindFirstRoot("KeepMe") != ecs::NULL_ENTITY);
+	});
+	REQUIRE(loadedStatus == world::WorldStatus::Ok);
+}
+
+TEST_CASE("dangling baked demands cannot replace saved game content", "[game][procedural][content]") {
+	game::RegisterGameClasses();
+	world::Universe source;
+	const auto original = AddWorld(source, core::Name("Baked"));
+	REQUIRE(original.IsValid());
+	BakedTargets targets;
+	bool authored = false;
+	const auto status =
+		source.Enter(original, [&](ecs::Store &store) { authored = AuthorBakedReference(store, targets); });
+	REQUIRE(status == world::WorldStatus::Ok);
+	REQUIRE(authored);
+	ScratchDirectory scratch;
+	const auto path = scratch.Path / "baked.agame";
+	std::string error;
+	REQUIRE(game::SaveGame(source, core::Name("BakedGame"), path, error));
+	std::string before;
+	REQUIRE(ReadFileText(path, before));
+	SECTION("destroyed target") {
+		source.Enter(original, [&](ecs::Store &store) { store.DestroyInstance(targets.Part); });
+	}
+	SECTION("excluded target") {
+		source.Enter(original, [&](ecs::Store &store) {
+			store.Set(targets.Part, scene::TransientComponent{});
+		});
+	}
+	CHECK_FALSE(game::SaveGame(source, core::Name("BakedGame"), path, error));
+	CHECK_FALSE(error.empty());
+	std::string after;
+	REQUIRE(ReadFileText(path, after));
+	CHECK(after == before);
+	CHECK(game::WriteWorldDocument(source, original, error).empty());
+	CHECK_FALSE(error.empty());
+}
+
+TEST_CASE(
+	"invalid later baked demand cannot partially replace a saved universe", "[game][procedural][manifest]"
+) {
+	game::RegisterGameClasses();
+	world::Universe source;
+	const auto earlier = AddWorld(source, core::Name("AFirst"));
+	const auto later = AddWorld(source, core::Name("ZLater"));
+	REQUIRE(earlier.IsValid());
+	REQUIRE(later.IsValid());
+	BakedTargets targets;
+	bool authored = false;
+	const auto status =
+		source.Enter(later, [&](ecs::Store &store) { authored = AuthorBakedReference(store, targets); });
+	REQUIRE(status == world::WorldStatus::Ok);
+	REQUIRE(authored);
+	ScratchDirectory scratch;
+	const auto manifest = scratch.Path / "atomic.auniverse";
+	const auto worldDirectory = scratch.Path / "atomic.worlds";
+	const auto earlierFile = worldDirectory / "1-AFirst.aworld";
+	const auto laterFile = worldDirectory / "2-ZLater.aworld";
+	std::string error;
+	REQUIRE(game::SaveUniverse(source, core::Name("Atomic"), {}, manifest, {}, error));
+	std::string manifestBefore;
+	std::string earlierBefore;
+	std::string laterBefore;
+	REQUIRE(ReadFileText(manifest, manifestBefore));
+	REQUIRE(ReadFileText(earlierFile, earlierBefore));
+	REQUIRE(ReadFileText(laterFile, laterBefore));
+	source.Enter(earlier, [](ecs::Store &store) {
+		store.CreateInstance(scene::PartClass(), "ChangedAfterSave");
+	});
+	source.Enter(later, [&](ecs::Store &store) { store.DestroyInstance(targets.Part); });
 	CHECK_FALSE(game::SaveUniverse(source, core::Name("Atomic"), {}, manifest, {}, error));
 	CHECK_FALSE(error.empty());
 	std::string manifestAfter;
