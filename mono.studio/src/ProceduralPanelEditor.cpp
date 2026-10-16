@@ -94,6 +94,10 @@ namespace studio {
 		}
 		auto actions = std::move(ProceduralPanel->Pending);
 		ProceduralPanel->Pending.clear();
+		if (!actions.empty()) {
+			ProceduralPanel->Status.clear();
+			ProceduralPanel->HasPreviewDiagnostic = false;
+		}
 		procedural::Diagnostic diagnostic;
 		if (!ProceduralPreview) {
 			ProceduralPreview = std::make_unique<ProceduralEditor>();
@@ -124,11 +128,12 @@ namespace studio {
 						);
 				});
 				if (changed) MarkModified();
-			} else if (action.Kind == ProceduralActionKind::Preview)
+			} else if (action.Kind == ProceduralActionKind::Preview) {
 				ProceduralPreview->Start();
-			else if (action.Kind == ProceduralActionKind::Cancel)
+			} else if (action.Kind == ProceduralActionKind::Cancel) {
 				ProceduralPreview->Cancel();
-			else if (action.Kind == ProceduralActionKind::Activate) {
+				ProceduralPanel->Status = "Preview canceled";
+			} else if (action.Kind == ProceduralActionKind::Activate) {
 				bool activated = false;
 				Universe->Enter(ProceduralWorld, [&](ecs::Store &store) {
 					activated = ProceduralPreview->Activate(
@@ -197,11 +202,23 @@ namespace studio {
 			ProceduralPreview->Pump(diagnostic);
 			return;
 		}
+		procedural::Diagnostic syncDiagnostic;
+		bool synchronized = false;
 		Universe->Enter(ProceduralWorld, [&](ecs::Store &store) {
-			ProceduralPreview->SyncSource(store, diagnostic);
+			synchronized = ProceduralPreview->SyncSource(store, syncDiagnostic);
 		});
-		ProceduralPreview->Pump(diagnostic);
-		if (diagnostic.Code != procedural::Status::Ok) ProceduralPanel->Status = diagnostic.Field;
+		procedural::Diagnostic pumpDiagnostic;
+		const bool pumped = ProceduralPreview->Pump(pumpDiagnostic);
+		if (!synchronized) {
+			ProceduralPanel->Status = syncDiagnostic.Field;
+			ProceduralPanel->HasPreviewDiagnostic = true;
+		} else if (!pumped) {
+			ProceduralPanel->Status = pumpDiagnostic.Field;
+			ProceduralPanel->HasPreviewDiagnostic = true;
+		} else if (ProceduralPanel->HasPreviewDiagnostic) {
+			ProceduralPanel->Status.clear();
+			ProceduralPanel->HasPreviewDiagnostic = false;
+		}
 	}
 	bool Editor::RenderProceduralPreviewSlot() {
 		using namespace engine;

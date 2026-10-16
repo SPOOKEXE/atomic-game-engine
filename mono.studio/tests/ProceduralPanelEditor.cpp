@@ -10,9 +10,13 @@
 
 #include <algorithm>
 #include <imgui.h>
+#include <imgui_internal.h>
+#include <string>
+#include <string_view>
 #include <studio/Editor.hpp>
 #include <studio/ProceduralEditor.hpp>
 #include <studio/ProceduralPanel.hpp>
+#include <vector>
 
 TEST_SUITE_ID("studio.proceduralpaneladapter")
 TEST_DEPENDS("studio.proceduraleditor")
@@ -24,14 +28,45 @@ namespace {
 		ImGuiContext *Owned = ImGui::CreateContext();
 		ProceduralAdapterContext() {
 			ImGui::SetCurrentContext(Owned);
-			ImGui::GetIO().IniFilename = nullptr;
-			ImGui::GetIO().LogFilename = nullptr;
+			auto &io = ImGui::GetIO();
+			io.DisplaySize = ImVec2(1100, 1400);
+			io.DeltaTime = 1.0f / 60.0f;
+			io.IniFilename = nullptr;
+			io.LogFilename = nullptr;
+			io.Fonts->AddFontDefault();
+			io.Fonts->Build();
+			io.Fonts->SetTexID(ImTextureID{1});
 		}
 		~ProceduralAdapterContext() {
 			ImGui::DestroyContext(Owned);
 			ImGui::SetCurrentContext(Previous);
 		}
 	};
+	void InitializeAdapterEditor(studio::Editor &editor, std::string_view worldName) {
+		using namespace engine;
+		scene::RegisterSceneClasses();
+		script::RegisterProceduralComponents();
+		editor.Universe = std::make_unique<world::Universe>();
+		editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
+		const auto world = editor.Universe->Create({.Name = core::Name(worldName)});
+		REQUIRE(world.IsValid());
+		editor.Active = world;
+		editor.ProceduralWorld = world;
+		editor.ShowProcedural = true;
+		editor.ProceduralPanel = std::make_unique<studio::ProceduralPanelState>();
+		editor.ProceduralPreview = std::make_unique<studio::ProceduralEditor>(parallel::JobContext::Serial);
+	}
+	std::string DrawProceduralEditor(studio::Editor &editor) {
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(900, 1200), ImGuiCond_Always);
+		editor.DrawProceduralGeneration();
+		const std::string text = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return text;
+	}
 	studio::ProceduralAction VillageAt(int64_t x) {
 		studio::ProceduralAction action{studio::ProceduralActionKind::SetSource};
 		action.Source = {
@@ -128,4 +163,91 @@ TEST_CASE(
 		10 * procedural::SUBCELLS_PER_CELL
 	);
 	CHECK(published->Regions[0].ArtifactBytes == acceptedNear.ArtifactBytes);
+}
+
+TEST_CASE(
+	"Studio procedural cancellation feedback survives request retirement and idle redraw",
+	"[studio][procedural][adapter][feedback]"
+) {
+	using namespace engine;
+	ProceduralAdapterContext context;
+	studio::Editor editor;
+	InitializeAdapterEditor(editor, "procedural-cancel-feedback");
+	REQUIRE(editor.ProceduralPanel->Queue({studio::ProceduralActionKind::Initialize}));
+	REQUIRE(editor.ProceduralPanel->Queue({studio::ProceduralActionKind::Preview}));
+	editor.ApplyProceduralPending();
+	editor.ApplyProceduralPending();
+	REQUIRE(editor.ProceduralPreview->Progress().size() == 2);
+	REQUIRE(
+		std::all_of(
+			editor.ProceduralPreview->Progress().begin(),
+			editor.ProceduralPreview->Progress().end(),
+			[](const auto &row) { return row.Status == script::ProceduralJobStatus::Ready; }
+		)
+	);
+	REQUIRE(editor.ProceduralPreview->ReservedBytes() > 0);
+	REQUIRE(editor.ProceduralPanel->Queue({studio::ProceduralActionKind::Cancel}));
+	editor.ApplyProceduralPending();
+	CHECK_FALSE(editor.ProceduralPreview->Running());
+	CHECK(editor.ProceduralPreview->ReservedBytes() == 0);
+	CHECK(editor.ProceduralPreview->Progress().empty());
+	CHECK(DrawProceduralEditor(editor).find("anceled") != std::string::npos);
+	editor.ApplyProceduralPending();
+	CHECK(DrawProceduralEditor(editor).find("anceled") != std::string::npos);
+	REQUIRE(editor.ProceduralPanel->Queue({studio::ProceduralActionKind::Preview}));
+	editor.ApplyProceduralPending();
+	CHECK(editor.ProceduralPreview->Running());
+	CHECK(DrawProceduralEditor(editor).find("anceled") == std::string::npos);
+}
+
+TEST_CASE(
+	"Studio procedural source sync refusal remains visible after a successful idle pump",
+	"[studio][procedural][adapter][feedback]"
+) {
+	using namespace engine;
+	ProceduralAdapterContext context;
+	studio::Editor editor;
+	InitializeAdapterEditor(editor, "procedural-sync-feedback");
+	REQUIRE(editor.ProceduralPanel->Queue({studio::ProceduralActionKind::Initialize}));
+	editor.ApplyProceduralPending();
+	const auto *previewAuthority =
+		editor.ProceduralPreview->PreviewStore().Resource<script::ProceduralAuthority>();
+	REQUIRE(previewAuthority);
+	REQUIRE(previewAuthority->Regions.size() == 2);
+	const auto oldOwner = previewAuthority->Owner;
+
+	bool encoded = true;
+	std::vector<uint8_t> originalBytes;
+	procedural::Diagnostic diagnostic;
+	editor.Universe->Enter(editor.ProceduralWorld, [&](ecs::Store &store) {
+		REQUIRE(script::EncodeProceduralAuthority(store, originalBytes, diagnostic));
+		store.RemoveResource<script::ProceduralAuthority>();
+		std::vector<uint8_t> bytes;
+		encoded = script::EncodeProceduralAuthority(store, bytes, diagnostic);
+	});
+	REQUIRE_FALSE(encoded);
+	CHECK(diagnostic.Code == procedural::Status::MissingSource);
+	CHECK(diagnostic.Field == "authority");
+
+	editor.ApplyProceduralPending();
+	CHECK(editor.ProceduralPanel->Status == diagnostic.Field);
+	const auto firstDraw = DrawProceduralEditor(editor);
+	CHECK(firstDraw.find(diagnostic.Field) != std::string::npos);
+	editor.ApplyProceduralPending();
+	const auto idleDraw = DrawProceduralEditor(editor);
+	CHECK(editor.ProceduralPanel->Status == diagnostic.Field);
+	CHECK(idleDraw.find(diagnostic.Field) != std::string::npos);
+	previewAuthority = editor.ProceduralPreview->PreviewStore().Resource<script::ProceduralAuthority>();
+	REQUIRE(previewAuthority);
+	CHECK(previewAuthority->Owner == oldOwner);
+	CHECK(previewAuthority->Regions.size() == 2);
+	CHECK(editor.ProceduralPreview->Targets().size() == 2);
+	bool restored = false;
+	editor.Universe->Enter(editor.ProceduralWorld, [&](ecs::Store &store) {
+		restored = script::DecodeProceduralAuthority(store, originalBytes, diagnostic);
+	});
+	REQUIRE(restored);
+	editor.ApplyProceduralPending();
+	CHECK(editor.ProceduralPanel->Status.empty());
+	CHECK(DrawProceduralEditor(editor).find("authority") == std::string::npos);
 }

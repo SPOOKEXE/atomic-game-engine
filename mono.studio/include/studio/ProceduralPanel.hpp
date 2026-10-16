@@ -62,6 +62,8 @@ namespace studio {
 		engine::procedural::RegionScope ImageScope{}; // Scope depicted by the retained image.
 		bool HasImageScope = false;
 		std::string Status{};
+		// Background sync or pump failures stay visible until a later successful retry.
+		bool HasPreviewDiagnostic = false;
 		std::vector<ProceduralAction> Pending{};
 		// Queue is bounded before copying any action-owned strings.
 		bool Queue(const ProceduralAction &);
