@@ -69,7 +69,7 @@ namespace engine::render {
 			Request Action = Request::None;
 			uint32_t Index = 0;
 			bool Finished = true;
-			std::jthread Thread;
+			std::thread Thread;
 		};
 		SDL_GPUDevice *Device = nullptr;
 		SDL_GPUDevice *TeardownDevice = nullptr;
@@ -339,9 +339,21 @@ namespace engine::render {
 			for (uint32_t queue = 0; queue < ATOMIC_GPU_QUEUE_COUNT; ++queue)
 				(void)recorder[queue].Queries.Probe(device, queue);
 		Held->Parallel = std::string_view(std::getenv("MONO_GPU_QUEUES")) == "parallel";
-		if (Held->Parallel)
-			for (size_t worker = 0; worker < Held->Workers.size(); ++worker)
-				Held->Workers[worker].Thread = std::jthread([this, worker] { Held->Run(worker); });
+		if (Held->Parallel) {
+			try {
+				for (size_t worker = 0; worker < Held->Workers.size(); ++worker)
+					Held->Workers[worker].Thread = std::thread([this, worker] { Held->Run(worker); });
+			} catch (...) {
+				// A later worker may fail to start after an earlier one did. Stop
+				// those already running before their thread objects are destroyed.
+				for (size_t worker = 0; worker < Held->Workers.size(); ++worker)
+					if (Held->Workers[worker].Thread.joinable()) {
+						Held->Send(worker, State::Request::Stop);
+						Held->Workers[worker].Thread.join();
+					}
+				throw;
+			}
+		}
 		SDL_SetPointerProperty(properties, DEVICE_PROPERTY, this);
 		ENGINE_INFO(
 			"private GPU queues ready on {}: graphics family {}, compute family {}, transfer family {}, "

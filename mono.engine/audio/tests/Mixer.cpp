@@ -363,7 +363,7 @@ TEST_CASE("producers read only completed native callback sample clocks", "[audio
 	constexpr uint64_t callbackCount = 4096;
 	AudioMixer mixer(STEREO, callbackFrames);
 	std::atomic<bool> complete{false};
-	std::jthread callback([&] {
+	std::thread callback([&] {
 		SampleBuffer block(STEREO, callbackFrames);
 		for (uint64_t index = 0; index < callbackCount; ++index)
 			mixer.Render(block);
@@ -893,12 +893,24 @@ TEST_CASE(
 	Rig rig;
 	rig.Engine.EnablePlaybackEvents();
 	constexpr size_t total = 8192;
-	std::jthread owner([&](std::stop_token stop) {
-		while (!stop.stop_requested()) {
+	std::atomic<bool> stopRequested{false};
+	std::thread owner([&] {
+		while (!stopRequested.load(std::memory_order_acquire)) {
 			rig.Engine.Render(rig.Out);
 			std::this_thread::yield();
 		}
 	});
+	struct StopAndJoin {
+		std::atomic<bool> &Stop;
+		std::thread &Owner;
+		void Join() {
+			Stop.store(true, std::memory_order_release);
+			if (Owner.joinable()) Owner.join();
+		}
+		~StopAndJoin() {
+			Join();
+		}
+	} ownerGuard{stopRequested, owner};
 	std::array<PlaybackEvent, 17> events{};
 	size_t posted = 0;
 	size_t received = 0;
@@ -920,8 +932,7 @@ TEST_CASE(
 		}
 		std::this_thread::yield();
 	}
-	owner.request_stop();
-	owner.join();
+	ownerGuard.Join();
 	CHECK(ordered);
 	CHECK(received == total);
 	CHECK(rig.Engine.PlaybackEventsDropped() == 0);

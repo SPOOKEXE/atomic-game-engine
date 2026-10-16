@@ -7,6 +7,7 @@
 #include <atomic>
 #include <semaphore>
 #include <stdexcept>
+#include <thread>
 
 TEST_SUITE_ID("engine.render.startupcompilation")
 

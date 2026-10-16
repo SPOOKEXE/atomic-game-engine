@@ -9,9 +9,9 @@
 #include <condition_variable>
 #include <exception>
 #include <functional>
+#include <future>
 #include <mutex>
 #include <string>
-#include <thread>
 
 namespace engine::render {
 	struct StartupCompilationCancelled {};
@@ -49,7 +49,7 @@ namespace engine::render {
 			if (!callback) return work();
 			std::exception_ptr failure;
 			bool result = false;
-			std::jthread worker([&] {
+			auto worker = std::async(std::launch::async, [&] {
 				try {
 					result = work();
 				} catch (const StartupCompilationCancelled &) {
@@ -84,7 +84,7 @@ namespace engine::render {
 				if (done) break;
 				Changed.wait_for(lock, std::chrono::milliseconds(16), [&] { return Done; });
 			}
-			worker.join();
+			worker.get();
 			if (callbackFailure) std::rethrow_exception(callbackFailure);
 			if (failure) std::rethrow_exception(failure);
 			return accepted && result;
