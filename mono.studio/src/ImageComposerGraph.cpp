@@ -135,10 +135,11 @@ namespace studio {
 					if (value.Kind != nodegraph::WidgetKind::Text) return fail("invalid node identity");
 					continue;
 				}
-				const auto spec =
-					std::find_if(type->Widgets.begin(), type->Widgets.end(), [&](const auto &entry) {
-						return entry.Key == key;
-					});
+				const auto spec = std::find_if(
+					type->Widgets.begin(), type->Widgets.end(), [&widgetKey = key](const auto &entry) {
+						return entry.Key == widgetKey;
+					}
+				);
 				if (spec == type->Widgets.end() || value.Kind != spec->Kind)
 					return fail("unsupported node control " + key);
 			}
