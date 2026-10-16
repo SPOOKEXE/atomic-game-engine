@@ -210,20 +210,22 @@ namespace studio {
 		}
 
 		std::string BindingPort(
-			const render_pipeline::Binding &binding, const std::vector<PortSpec> &ports, size_t index
+			const render_pipeline::Binding &binding,
+			const NodeKindSpec &kind,
+			PortDirection direction,
+			size_t index
 		) {
-			if (!binding.Port.empty()) {
-				return binding.Port;
-			}
-			return index < ports.size() ? std::string(ports[index].Name.Text()) : std::string();
+			if (!binding.Port.empty()) return binding.Port;
+			const auto *port = kind.DeclaredPort(direction, index);
+			return port ? port->Id : std::string{};
 		}
 
-		const PortSpec *PortNamed(const std::vector<PortSpec> &ports, std::string_view name) {
-			for (const PortSpec &port : ports) {
-				if (port.Name.Text() == name) {
-					return &port;
-				}
-			}
+		const PortSpec *PortNamed(const NodeKindSpec &kind, PortDirection direction, std::string_view name) {
+			const auto *declaration = kind.DeclaredPort(direction, name);
+			if (!declaration) return nullptr;
+			const auto &metadata = direction == PortDirection::Input ? kind.Inputs : kind.Outputs;
+			for (const auto &port : metadata)
+				if (port.Name.Text() == declaration->Id) return &port;
 			return nullptr;
 		}
 
@@ -498,21 +500,19 @@ namespace studio {
 
 		for (const NodeKindSpec &spec : NodeCatalogue::All()) {
 			nodegraph::NodeType type;
-			type.Id = TypeId(spec.Kind);
+			type.Id = std::string(TYPE_PREFIX) + spec.Declaration.Id;
 			type.Title = spec.Label.empty() ? std::string(spec.Kind.Text()) : spec.Label;
 			type.Category = Describe(spec.Category);
 			type.Accent = Accent(spec.Category);
 			type.Subtitle = spec.Summary;
-			for (const PortSpec &port : spec.Inputs) {
-				type.Inputs.push_back(
-					nodegraph::Port(std::string(port.Name.Text()), ResourceType(port.Kind))
-				);
+			for (const auto &port : spec.Declaration.Ports) {
+				ResourceKind kind;
+				if (!ResourceKindFromPortType(port.ValueType, kind)) continue;
+				auto &side =
+					port.Direction == engine::graphcore::PortDirection::Input ? type.Inputs : type.Outputs;
+				side.push_back(nodegraph::Port(port.Id, ResourceType(kind)));
 			}
-			for (const PortSpec &port : spec.Outputs) {
-				type.Outputs.push_back(
-					nodegraph::Port(std::string(port.Name.Text()), ResourceType(port.Kind))
-				);
-			}
+
 			type.Evaluate = [outputs = type.Outputs](const nodegraph::Inputs &) {
 				nodegraph::Outputs made;
 				for (const nodegraph::PortSpec &output : outputs) {
@@ -692,11 +692,12 @@ namespace studio {
 			}
 
 			for (size_t index = 0; spec != nullptr && index < source.Reads.size(); index++) {
-				const std::string port = BindingPort(source.Reads[index], spec->Inputs, index);
+				const std::string port = BindingPort(source.Reads[index], *spec, PortDirection::Input, index);
 				PutText(node, Key("read", port), std::string(source.Reads[index].Resource.Text()));
 			}
 			for (size_t index = 0; spec != nullptr && index < source.Writes.size(); index++) {
-				const std::string port = BindingPort(source.Writes[index], spec->Outputs, index);
+				const std::string port =
+					BindingPort(source.Writes[index], *spec, PortDirection::Output, index);
 				PutText(node, Key("write", port), std::string(source.Writes[index].Resource.Text()));
 				const auto found = resourceSettings.find(source.Writes[index].Resource.Id());
 				if (found != resourceSettings.end()) {
@@ -756,7 +757,9 @@ namespace studio {
 			const NodeKindSpec *spec = NodeCatalogue::Find(authored[index].Kind);
 			for (size_t slot = 0; spec != nullptr && slot < authored[index].Writes.size(); slot++) {
 				writers[authored[index].Writes[slot].Resource.Id()].push_back(
-					{ids[index], BindingPort(authored[index].Writes[slot], spec->Outputs, slot), index}
+					{ids[index],
+					 BindingPort(authored[index].Writes[slot], *spec, PortDirection::Output, slot),
+					 index}
 				);
 			}
 		}
@@ -779,7 +782,7 @@ namespace studio {
 			const NodeKindSpec *spec = NodeCatalogue::Find(authored[index].Kind);
 			for (size_t slot = 0; spec != nullptr && slot < authored[index].Reads.size(); slot++) {
 				const Binding &read = authored[index].Reads[slot];
-				const std::string input = BindingPort(read, spec->Inputs, slot);
+				const std::string input = BindingPort(read, *spec, PortDirection::Input, slot);
 				PutText(
 					*graph.Find(ids[index]), Key("read-baseline", input), std::string(read.Resource.Text())
 				);
@@ -867,8 +870,9 @@ namespace studio {
 			const NodeKindSpec *fromKind = NodeCatalogue::Find(KindOf(*from));
 			const NodeKindSpec *toKind = NodeCatalogue::Find(KindOf(*to));
 			const PortSpec *fromPort =
-				fromKind == nullptr ? nullptr : PortNamed(fromKind->Outputs, link.FromPort);
-			const PortSpec *toPort = toKind == nullptr ? nullptr : PortNamed(toKind->Inputs, link.ToPort);
+				fromKind == nullptr ? nullptr : PortNamed(*fromKind, PortDirection::Output, link.FromPort);
+			const PortSpec *toPort =
+				toKind == nullptr ? nullptr : PortNamed(*toKind, PortDirection::Input, link.ToPort);
 			if (fromPort == nullptr || toPort == nullptr) {
 				error = "a render link names a socket the pass no longer declares";
 				return false;
@@ -1027,7 +1031,7 @@ namespace studio {
 			for (size_t index = 0; index < originalReads; index++) {
 				const std::string port = BindingMetadata(node, false, index, "port");
 				const std::string original = BindingMetadata(node, false, index, "resource");
-				if (PortNamed(spec.Inputs, port) == nullptr) {
+				if (PortNamed(spec, PortDirection::Input, port) == nullptr) {
 					recordBinding(EditKind::Reads, port, original);
 				} else {
 					const std::string current = currentRead(port);
@@ -1050,7 +1054,7 @@ namespace studio {
 			for (size_t index = 0; index < originalWrites; index++) {
 				const std::string port = BindingMetadata(node, true, index, "port");
 				const std::string original = BindingMetadata(node, true, index, "resource");
-				if (PortNamed(spec.Outputs, port) == nullptr) {
+				if (PortNamed(spec, PortDirection::Output, port) == nullptr) {
 					recordBinding(EditKind::Writes, port, original);
 				} else {
 					const std::string current = TextOf(node, Key("write", port));

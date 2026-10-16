@@ -55,21 +55,26 @@ namespace engine::graph {
 			return spec->Category == NodeCategory::Output || spec->Category == NodeCategory::Interface;
 		}
 
+		const PortSpec *SlotMetadata(const NodeKindSpec &spec, const Node &node, size_t slot, bool reading) {
+			const auto direction = reading ? PortDirection::Input : PortDirection::Output;
+			const auto &bound = reading ? node.ReadPorts : node.WritePorts;
+			const auto *declaration = slot < bound.size() && bound[slot].IsValid()
+										  ? spec.DeclaredPort(direction, bound[slot].Text())
+										  : spec.DeclaredPort(direction, slot);
+			if (!declaration) return nullptr;
+			const auto &metadata = reading ? spec.Inputs : spec.Outputs;
+			for (const auto &port : metadata)
+				if (port.Name.Text() == declaration->Id) return &port;
+			return nullptr;
+		}
+
 		bool UsedInside(const Node &node, ResourceId resource) {
 			const auto *spec = NodeCatalogue::Find(node.Kind);
 			if (!spec) return false;
 			for (size_t index = 0; index < node.Writes.size(); ++index) {
 				if (node.Writes[index] != resource) continue;
-				if (index < node.WritePorts.size() && node.WritePorts[index].IsValid()) {
-					const auto port = std::find_if(
-						spec->Outputs.begin(), spec->Outputs.end(), [&](const PortSpec &candidate) {
-							return candidate.Name == node.WritePorts[index];
-						}
-					);
-					if (port != spec->Outputs.end() && port->InternalUse) return true;
-				} else if (index < spec->Outputs.size() && spec->Outputs[index].InternalUse) {
-					return true;
-				}
+				const auto *port = SlotMetadata(*spec, node, index, false);
+				if (port && port->InternalUse) return true;
 			}
 			return false;
 		}
@@ -83,22 +88,10 @@ namespace engine::graph {
 			if (spec == nullptr) {
 				return false;
 			}
-			const std::vector<PortSpec> &side = reading ? spec->Inputs : spec->Outputs;
-			const std::vector<core::Name> &bound = reading ? node.ReadPorts : node.WritePorts;
-			if (slot < bound.size() && bound[slot].IsValid()) {
-				const auto named = std::find_if(side.begin(), side.end(), [&](const PortSpec &port) {
-					return port.Name == bound[slot];
-				});
-				if (named == side.end()) {
-					return false;
-				}
-				out = named->Format;
-			} else {
-				if (slot >= side.size()) {
-					return false;
-				}
-				out = side[slot].Format;
-			}
+			const auto *port = SlotMetadata(*spec, node, slot, reading);
+			if (!port) return false;
+			out = port->Format;
+
 			if (!reading && node.Kind == core::Name("blit")) {
 				const std::string *format = node.Parameter(core::Name("format"));
 				if (format != nullptr && !ParseResourceFormat(*format, out)) {
@@ -355,10 +348,11 @@ namespace engine::graph {
 				// A slot the catalogue calls a texture is sampled; one it calls
 				// a colour or depth target is bound as an attachment.
 				const NodeKindSpec *spec = NodeCatalogue::Find(row.Body->Kind);
-				if (spec == nullptr || slot >= spec->Inputs.size()) {
+				const auto *port = spec ? spec->DeclaredPort(PortDirection::Input, slot) : nullptr;
+				if (port == nullptr) {
 					continue;
 				}
-				if (spec->Inputs[slot].Kind != ResourceKind::Texture) {
+				if (port->ValueType != ResourcePortType(ResourceKind::Texture)) {
 					continue;
 				}
 

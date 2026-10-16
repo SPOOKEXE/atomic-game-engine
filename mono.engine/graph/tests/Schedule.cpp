@@ -360,7 +360,9 @@ TEST_CASE("every schedule status and queue has a stable name", "[graph][schedule
 		  ScheduleStatus::MissingProducer,
 		  ScheduleStatus::ScopeDependency,
 		  ScheduleStatus::Cycle,
-		  ScheduleStatus::InvalidHint}) {
+		  ScheduleStatus::InvalidHint,
+		  ScheduleStatus::LimitExceeded,
+		  ScheduleStatus::AllocationFailed}) {
 		CHECK(std::string(Describe(status)) != "unknown");
 	}
 	for (const ExecutionQueue queue :
@@ -374,4 +376,105 @@ TEST_CASE("every schedule status and queue has a stable name", "[graph][schedule
 		 {CullingMode::Inherit, CullingMode::None, CullingMode::Frustum, CullingMode::Occlusion}) {
 		CHECK(std::string(Describe(mode)) != "unknown");
 	}
+}
+
+TEST_CASE(
+	"reachable invalid hints precede a disconnected cycle while blocked hints do not", "[graph][schedule]"
+) {
+	RenderGraph graph;
+	const auto first = Resource(graph, "cycle-first", ResourceKind::Storage);
+	const auto second = Resource(graph, "cycle-second", ResourceKind::Storage);
+	const auto spare = Resource(graph, "spare", ResourceKind::Storage);
+	const auto output = Resource(graph, "blocked-output", ResourceKind::Storage);
+	Node blocked = NodeOf("blocked-low", "compute");
+	blocked.Reads = {first};
+	blocked.Writes = {output};
+	Node left = NodeOf("cycle-left", "compute");
+	left.Reads = {second};
+	left.Writes = {first};
+	Node right = NodeOf("cycle-right", "compute");
+	right.Reads = {first};
+	right.Writes = {second};
+	Node independent = NodeOf("independent", "compute");
+	independent.Writes = {spare};
+	ScheduleStatus expected = ScheduleStatus::Cycle;
+	Name expectedOffender("blocked-low");
+	SECTION("invalid hint on an emitted node precedes the cycle") {
+		independent.Parameters = {{Name("dispatch.x"), "zero"}};
+		expected = ScheduleStatus::InvalidHint;
+		expectedOffender = independent.Name;
+	}
+	SECTION("invalid hint on a blocked node is never evaluated") {
+		blocked.Parameters = {{Name("dispatch.x"), "zero"}};
+	}
+	SECTION("cycle without invalid hints reports the first blocked descendant") {}
+	graph.AddNode(blocked);
+	graph.AddNode(left);
+	graph.AddNode(right);
+	graph.AddNode(independent);
+	ExecutionSchedule schedule;
+	schedule.Waves.push_back({});
+	Name offender;
+	CHECK(CompileSchedule(graph, schedule, offender) == expected);
+	CHECK(offender == expectedOffender);
+	CHECK(schedule.Waves.empty());
+}
+
+TEST_CASE(
+	"hint refusal follows complete declaration-ordered waves before a later cycle", "[graph][schedule]"
+) {
+	RenderGraph graph;
+	const auto prefix = Resource(graph, "prefix", ResourceKind::Storage);
+	const auto first = Resource(graph, "first", ResourceKind::Storage);
+	const auto second = Resource(graph, "second", ResourceKind::Storage);
+	const auto a = Resource(graph, "cycle-a", ResourceKind::Storage);
+	const auto b = Resource(graph, "cycle-b", ResourceKind::Storage);
+	Node later = NodeOf("later-wave-low-index", "compute");
+	later.Reads = {prefix};
+	later.Writes = {first};
+	later.Parameters = {{Name("dispatch.x"), "zero"}};
+	graph.AddNode(later);
+	Node earlier = NodeOf("first-wave-higher-index", "compute");
+	earlier.Writes = {second};
+	earlier.Parameters = {{Name("dispatch.x"), "zero"}};
+	graph.AddNode(earlier);
+	Node source = NodeOf("source", "compute");
+	source.Writes = {prefix};
+	graph.AddNode(source);
+	Node left = NodeOf("left", "compute");
+	left.Reads = {b};
+	left.Writes = {a};
+	graph.AddNode(left);
+	Node right = NodeOf("right", "compute");
+	right.Reads = {a};
+	right.Writes = {b};
+	graph.AddNode(right);
+	ExecutionSchedule schedule;
+	Name offender;
+	CHECK(CompileSchedule(graph, schedule, offender) == ScheduleStatus::InvalidHint);
+	CHECK(offender == earlier.Name);
+	CHECK(schedule.Waves.empty());
+}
+
+TEST_CASE("unregistered render kinds retain resource-based scheduling fallbacks", "[graph][schedule]") {
+	RenderGraph graph;
+	const auto entities = Resource(graph, "entities", ResourceKind::Entities);
+	const auto storage = Resource(graph, "storage", ResourceKind::Storage);
+	Node cpu = NodeOf("unregistered-cpu", "schedule-custom-cpu");
+	cpu.Writes = {entities};
+	graph.AddNode(cpu);
+	Node compute = NodeOf("unregistered-compute", "schedule-custom-compute");
+	compute.Writes = {storage};
+	graph.AddNode(compute);
+	ExecutionSchedule schedule;
+	Name offender;
+	REQUIRE(CompileSchedule(graph, schedule, offender) == ScheduleStatus::Ok);
+	REQUIRE(schedule.Waves.size() == 1);
+	REQUIRE(schedule.Waves[0].Nodes.size() == 2);
+	CHECK(schedule.Waves[0].Nodes[0].Node == NodeId{1});
+	CHECK(schedule.Waves[0].Nodes[0].Queue == ExecutionQueue::Cpu);
+	CHECK(schedule.Waves[0].Nodes[1].Node == NodeId{2});
+	CHECK(schedule.Waves[0].Nodes[1].Queue == ExecutionQueue::Compute);
+	CHECK(schedule.Waves[0].Concurrent);
+	CHECK_FALSE(offender.IsValid());
 }

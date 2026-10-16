@@ -1,6 +1,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/Schedule.hpp>
+#include <engine/graphcore/Compile.hpp>
 
 #include <algorithm>
 #include <charconv>
@@ -62,6 +63,10 @@ namespace engine::graph {
 			return "the resource dependencies form a cycle";
 		case ScheduleStatus::InvalidHint:
 			return "a scheduling hint is not valid";
+		case ScheduleStatus::LimitExceeded:
+			return "the render graph exceeds dependency compilation limits";
+		case ScheduleStatus::AllocationFailed:
+			return "render dependency compilation could not allocate storage";
 		}
 		return "unknown";
 	}
@@ -336,44 +341,37 @@ namespace engine::graph {
 			}
 		}
 
-		std::vector<size_t> remaining(count);
-		for (size_t index = 0; index < count; index++) {
-			remaining[index] = incoming[index].size();
+		std::vector<graphcore::Dependency> dependencies;
+		for (size_t before = 0; before < count; ++before)
+			for (const size_t after : outgoing[before])
+				dependencies.push_back(
+					{static_cast<graphcore::NodeIndex>(before), static_cast<graphcore::NodeIndex>(after)}
+				);
+		const graphcore::Limits limits{
+			.MaximumNodes = RenderGraph::MAXIMUM_NODES,
+			.MaximumConnections = size_t{RenderGraph::MAXIMUM_NODES} * (RenderGraph::MAXIMUM_NODES - 1),
+		};
+		graphcore::Topology topology;
+		graphcore::Diagnostic diagnostic;
+		const auto status = graphcore::CompileDependencies(count, dependencies, limits, topology, diagnostic);
+		if (status != graphcore::CompileStatus::Ok && status != graphcore::CompileStatus::Cycle) {
+			offender = {};
+			if (status == graphcore::CompileStatus::LimitExceeded) return ScheduleStatus::LimitExceeded;
+			if (status == graphcore::CompileStatus::AllocationFailed) return ScheduleStatus::AllocationFailed;
+			return ScheduleStatus::InvalidGraph;
 		}
-
+		// A reachable bad hint precedes a later cycle in the established refusal order.
+		// Prefix waves are diagnostics, never a partially installed schedule.
+		const auto &waves =
+			status == graphcore::CompileStatus::Cycle ? diagnostic.AcyclicPrefixWaves : topology.Waves;
+		std::vector<uint8_t> completed(count);
 		size_t emitted = 0;
-		while (emitted < count) {
+		for (const auto &ready : waves) {
 			ExecutionWave wave;
-			std::vector<size_t> ready;
-			for (size_t index = 0; index < count; index++) {
-				if (remaining[index] == 0) {
-					ready.push_back(index);
-					remaining[index] = static_cast<size_t>(-1);
-				}
-			}
-
-			if (ready.empty()) {
-				// **Every node still in the cycle, not only the first.**
-				// `offender` holds one name and a cycle needs at least two to be
-				// findable, so the rest go to the log rather than nowhere.
-				bool named = false;
-				for (size_t index = 0; index < count; index++) {
-					if (remaining[index] != static_cast<size_t>(-1)) {
-						if (!named) {
-							offender = nodes[index]->Name;
-							named = true;
-						}
-						ENGINE_WARN("'{}' is in the unschedulable cycle", nodes[index]->Name.Text());
-					}
-				}
-				out.Clear();
-				return ScheduleStatus::Cycle;
-			}
-
 			std::unordered_set<uint8_t> queues;
 			bool permitsOverlap = false;
 			bool forcesSerial = false;
-			for (const size_t index : ready) {
+			for (const auto index : ready) {
 				ScheduledNode scheduled;
 				if (!ReadHints(graph, *nodes[index], ids[index], scheduled)) {
 					offender = nodes[index]->Name;
@@ -385,13 +383,19 @@ namespace engine::graph {
 				permitsOverlap = permitsOverlap || scheduled.AsyncEligible;
 				forcesSerial = forcesSerial || scheduled.Async == AsyncPolicy::Serial;
 				wave.Nodes.push_back(scheduled);
-				for (const size_t next : outgoing[index]) {
-					remaining[next]--;
-				}
+				completed[index] = 1;
 			}
 			wave.Concurrent = queues.size() > 1 && permitsOverlap && !forcesSerial;
 			emitted += ready.size();
 			out.Waves.push_back(std::move(wave));
+		}
+		if (status == graphcore::CompileStatus::Cycle) {
+			offender = diagnostic.Blocked < count ? nodes[diagnostic.Blocked]->Name : core::Name{};
+			for (size_t index = 0; index < count; ++index)
+				if (!completed[index])
+					ENGINE_WARN("'{}' is in the unschedulable cycle", nodes[index]->Name.Text());
+			out.Clear();
+			return ScheduleStatus::Cycle;
 		}
 
 		offender = core::Name{};

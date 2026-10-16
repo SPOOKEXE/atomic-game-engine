@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <initializer_list>
 #include <mutex>
+#include <new>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -36,11 +38,109 @@ namespace engine::graph {
 		}
 
 		void Reindex(Table &table) {
-			table.Index.clear();
 			for (size_t position = 0; position < table.Specs.size(); position++) {
-				table.Index[table.Specs[position].Kind.Id()] = position;
+				table.Index.at(table.Specs[position].Kind.Id()) = position;
 			}
 		}
+
+		bool BuildDeclaration(NodeKindSpec &spec) {
+			if (spec.Inputs.size() > NodeCatalogue::MAXIMUM_SCHEMA_PORTS ||
+				spec.Outputs.size() > NodeCatalogue::MAXIMUM_SCHEMA_PORTS - spec.Inputs.size())
+				return false;
+			size_t identityBytes = 0;
+			const auto countText = [&](std::string_view text) {
+				if (text.size() > NodeCatalogue::MAXIMUM_SCHEMA_IDENTITY_BYTES - identityBytes) return false;
+				identityBytes += text.size();
+				return true;
+			};
+			if (!countText(spec.Kind.Text())) return false;
+			for (const auto *side : {&spec.Inputs, &spec.Outputs})
+				for (const auto &port : *side) {
+					const auto type = ResourcePortType(port.Kind);
+					if (type.empty() || !countText(port.Name.Text()) || !countText(type)) return false;
+				}
+			graphcore::NodeSchema declaration{.Id = std::string(spec.Kind.Text())};
+			declaration.Ports.reserve(spec.Inputs.size() + spec.Outputs.size());
+			for (const auto direction : {PortDirection::Input, PortDirection::Output}) {
+				const auto &side = direction == PortDirection::Input ? spec.Inputs : spec.Outputs;
+				for (const auto &port : side)
+					declaration.Ports.push_back({
+						.Id = std::string(port.Name.Text()),
+						.ValueType = std::string(ResourcePortType(port.Kind)),
+						.Direction = direction == PortDirection::Input ? graphcore::PortDirection::Input
+																	   : graphcore::PortDirection::Output,
+						.MaximumConnections = 1,
+						// Missing render inputs remain authoring warnings, not compilation refusals.
+						.Optional = true,
+					});
+			}
+			const graphcore::Limits limits{
+				.MaximumSchemas = 1,
+				.MaximumPorts = NodeCatalogue::MAXIMUM_SCHEMA_PORTS,
+				.MaximumIdentityBytes = NodeCatalogue::MAXIMUM_SCHEMA_IDENTITY_BYTES,
+			};
+			graphcore::Diagnostic diagnostic;
+			if (graphcore::ValidateSchemas(std::span(&declaration, 1), limits, diagnostic) !=
+				graphcore::CompileStatus::Ok)
+				return false;
+			spec.Declaration = std::move(declaration);
+			return true;
+		}
+	}
+
+	std::string_view ResourcePortType(ResourceKind kind) {
+		switch (kind) {
+		case ResourceKind::Colour:
+			return "render.colour";
+		case ResourceKind::Depth:
+			return "render.depth";
+		case ResourceKind::Texture:
+			return "render.texture";
+		case ResourceKind::Storage:
+			return "render.storage";
+		case ResourceKind::Buffer:
+			return "render.buffer";
+		case ResourceKind::Camera:
+			return "render.camera";
+		case ResourceKind::Entities:
+			return "render.entities";
+		}
+		return {};
+	}
+
+	bool ResourceKindFromPortType(std::string_view type, ResourceKind &out) {
+		for (const auto kind :
+			 {ResourceKind::Colour,
+			  ResourceKind::Depth,
+			  ResourceKind::Texture,
+			  ResourceKind::Storage,
+			  ResourceKind::Buffer,
+			  ResourceKind::Camera,
+			  ResourceKind::Entities})
+			if (type == ResourcePortType(kind)) {
+				out = kind;
+				return true;
+			}
+		return false;
+	}
+
+	const graphcore::PortSchema *NodeKindSpec::DeclaredPort(PortDirection direction, size_t index) const {
+		if (direction != PortDirection::Input && direction != PortDirection::Output) return nullptr;
+		const auto sharedDirection = direction == PortDirection::Input ? graphcore::PortDirection::Input
+																	   : graphcore::PortDirection::Output;
+		for (const auto &port : Declaration.Ports)
+			if (port.Direction == sharedDirection && index-- == 0) return &port;
+		return nullptr;
+	}
+
+	const graphcore::PortSchema *
+	NodeKindSpec::DeclaredPort(PortDirection direction, std::string_view name) const {
+		if (direction != PortDirection::Input && direction != PortDirection::Output) return nullptr;
+		const auto sharedDirection = direction == PortDirection::Input ? graphcore::PortDirection::Input
+																	   : graphcore::PortDirection::Output;
+		for (const auto &port : Declaration.Ports)
+			if (port.Direction == sharedDirection && port.Id == name) return &port;
+		return nullptr;
 	}
 
 	const char *Describe(PortDirection direction) {
@@ -557,25 +657,38 @@ namespace engine::graph {
 	}
 
 	bool NodeCatalogue::Register(NodeKindSpec spec) {
-		if (!spec.Kind.IsValid()) {
+		if (!spec.Kind.IsValid()) return false;
+		try {
+			if (!BuildDeclaration(spec)) return false;
+			Table &table = Kinds();
+			const std::lock_guard<std::mutex> held(table.Guard);
+			const auto found = table.Index.find(spec.Kind.Id());
+			static_assert(std::is_nothrow_move_assignable_v<NodeKindSpec>);
+			static_assert(std::is_nothrow_move_constructible_v<NodeKindSpec>);
+			if (found != table.Index.end()) {
+				table.Specs[found->second] = std::move(spec);
+				return true;
+			}
+			// Complete every allocating step before publishing the new entry.
+			// Reindex only updates keys already reserved and inserted here.
+			if (table.Specs.size() == table.Specs.capacity()) {
+				const size_t available = table.Specs.max_size() - table.Specs.capacity();
+				if (available == 0) return false;
+				const size_t growth = std::max(size_t{1}, std::min(table.Specs.capacity(), available));
+				table.Specs.reserve(table.Specs.capacity() + growth);
+			}
+			table.Index.emplace(spec.Kind.Id(), 0);
+			table.Specs.push_back(std::move(spec));
+			std::sort(
+				table.Specs.begin(), table.Specs.end(), [](const NodeKindSpec &a, const NodeKindSpec &b) {
+					return a.Kind.Text() < b.Kind.Text();
+				}
+			);
+			Reindex(table);
+			return true;
+		} catch (const std::bad_alloc &) {
 			return false;
 		}
-
-		Table &table = Kinds();
-		const std::lock_guard<std::mutex> held(table.Guard);
-
-		const auto found = table.Index.find(spec.Kind.Id());
-		if (found != table.Index.end()) {
-			table.Specs[found->second] = std::move(spec);
-			return true;
-		}
-
-		table.Specs.push_back(std::move(spec));
-		std::sort(table.Specs.begin(), table.Specs.end(), [](const NodeKindSpec &a, const NodeKindSpec &b) {
-			return a.Kind.Text() < b.Kind.Text();
-		});
-		Reindex(table);
-		return true;
 	}
 
 	const NodeKindSpec *NodeCatalogue::Find(core::Name kind) {

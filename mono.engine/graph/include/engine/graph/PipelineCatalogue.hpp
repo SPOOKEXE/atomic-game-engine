@@ -46,10 +46,13 @@
 #include <engine/core/Name.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
+#include <engine/graphcore/Schema.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace engine::graph {
@@ -311,7 +314,21 @@ namespace engine::graph {
 		ResourceLifetime Lifetime = ResourceLifetime::Transient;
 		// History reads used by this object.
 		uint32_t HistoryReads = 0;
+
+		// Derived common kind and port declaration, rebuilt by Register from Kind,
+		// Inputs and Outputs. Installed consumers read this immutable projection.
+		graphcore::NodeSchema Declaration{};
+
+		// Finds an installed port by its declaration-local position on one side.
+		const graphcore::PortSchema *DeclaredPort(PortDirection direction, size_t index) const;
+		// Finds an installed port by stable name on one side.
+		const graphcore::PortSchema *DeclaredPort(PortDirection direction, std::string_view name) const;
 	};
+
+	// Closed common-schema type token for a render resource role; unknown kinds return empty.
+	std::string_view ResourcePortType(ResourceKind kind);
+	// Resolves a common-schema render type token without changing out on refusal.
+	bool ResourceKindFromPortType(std::string_view type, ResourceKind &out);
 
 	// Whether a wire from an output of kind `from` may land in an input of kind
 	// `to`.
@@ -369,6 +386,11 @@ namespace engine::graph {
 	// @since v0.11
 	class NodeCatalogue {
 	  public:
+		// Per-kind derived declaration ceiling, independent of the number of registered kinds.
+		static constexpr size_t MAXIMUM_SCHEMA_PORTS = 4096;
+		// Combined kind, port and type-token bytes accepted before deriving a declaration.
+		static constexpr size_t MAXIMUM_SCHEMA_IDENTITY_BYTES = 262144;
+
 		// Adds a kind, or replaces the one of that name.
 		//
 		// **Replaces rather than refuses**, so a game may correct a built-in
@@ -376,7 +398,8 @@ namespace engine::graph {
 		// idempotent for the same reason.
 		//
 		// @param spec The kind. Copied.
-		// @return `false` for a spec with no `Kind`.
+		// @return `false` for invalid or over-budget declarations or failed allocation.
+		// Refusal preserves the previously registered spec.
 		static bool Register(NodeKindSpec spec);
 
 		// One kind.

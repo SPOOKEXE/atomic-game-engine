@@ -247,3 +247,52 @@ TEST_CASE("fixed identity publication preserves later logical alias readers", "[
 	REQUIRE(graph.SetEnabled(reader, false));
 	CHECK_FALSE(observed(std::array{fog, reader}, fog));
 }
+
+TEST_CASE("installed common port roles govern identity reader materialization", "[render][identity]") {
+	graph::RegisterRenderNodeKinds();
+	struct Restore {
+		graph::NodeKindSpec Original;
+		~Restore() {
+			(void)graph::RegisterNodeKind(std::move(Original));
+		}
+	} restore{*graph::NodeCatalogue::Find(core::Name("dispatch"))};
+	auto spec = restore.Original;
+	spec.Inputs.front().Kind = graph::ResourceKind::Texture;
+	REQUIRE(graph::RegisterNodeKind(spec));
+	graph::RenderGraph graph;
+	const auto image = graph.AddResource(Colour("image"));
+	graph::Node consumer{
+		.Name = core::Name("consumer"),
+		.Kind = spec.Kind,
+		.Reads = {image},
+		.ReadPorts = {spec.Inputs.front().Name}
+	};
+	graph.AddNode(consumer);
+	CHECK(render::detail::IdentityReadersSampleOnly(graph, image));
+	SECTION("a replacement changes the installed common role") {
+		spec.Inputs.front().Kind = graph::ResourceKind::Storage;
+		REQUIRE(graph::RegisterNodeKind(spec));
+		CHECK_FALSE(render::detail::IdentityReadersSampleOnly(graph, image));
+	}
+	SECTION("a refused replacement preserves accepted alias eligibility") {
+		spec.Inputs.push_back(spec.Inputs.front());
+		CHECK_FALSE(graph::RegisterNodeKind(spec));
+		CHECK(render::detail::IdentityReadersSampleOnly(graph, image));
+	}
+	SECTION("missing named bindings retain their materialization fallback") {
+		graph::RenderGraph positional;
+		const auto resource = positional.AddResource(Colour("positional"));
+		consumer.Reads = {resource};
+		consumer.ReadPorts.clear();
+		positional.AddNode(consumer);
+		CHECK_FALSE(render::detail::IdentityReadersSampleOnly(positional, resource));
+	}
+	SECTION("unregistered kinds retain their materialization fallback") {
+		graph::RenderGraph unknown;
+		const auto resource = unknown.AddResource(Colour("unknown"));
+		consumer.Kind = core::Name("unregistered-identity-reader");
+		consumer.Reads = {resource};
+		unknown.AddNode(consumer);
+		CHECK_FALSE(render::detail::IdentityReadersSampleOnly(unknown, resource));
+	}
+}

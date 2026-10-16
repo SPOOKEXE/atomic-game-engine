@@ -148,6 +148,12 @@ namespace engine::graph {
 		// An authored hint contradicts itself, such as demanding a queue the
 		// node's own work cannot run on.
 		InvalidHint,
+
+		// Bounded shared dependency compilation refused the graph size.
+		LimitExceeded,
+
+		// Shared dependency compilation could not allocate its derived storage.
+		AllocationFailed,
 	};
 
 	// One line naming a status, for a message a person reads.

@@ -937,3 +937,28 @@ TEST_CASE("compute colour admission keeps depth attachment roles distinct", "[st
 	CHECK_FALSE(studio::SaveRenderPipelineGraph(canvas, PipelineDocument{}, saved, error));
 	CHECK(error.find("depth buffer") != std::string::npos);
 }
+
+TEST_CASE("render canvas sockets consume the registered common declarations", "[studio][pipeline]") {
+	studio::RegisterRenderPipelineNodeTypes();
+	for (const auto &kind : NodeCatalogue::All()) {
+		const auto *type = nodegraph::NodeTypes::Find("render.pass." + kind.Declaration.Id);
+		REQUIRE(type);
+		size_t inputs = 0;
+		size_t outputs = 0;
+		for (const auto &port : kind.Declaration.Ports) {
+			const bool input = port.Direction == engine::graphcore::PortDirection::Input;
+			const auto &side = input ? type->Inputs : type->Outputs;
+			size_t &index = input ? inputs : outputs;
+			REQUIRE(index < side.size());
+			CHECK(side[index].Name == port.Id);
+			ResourceKind role;
+			REQUIRE(ResourceKindFromPortType(port.ValueType, role));
+			const bool image = role == ResourceKind::Colour || role == ResourceKind::Depth ||
+							   role == ResourceKind::Texture || role == ResourceKind::Storage;
+			CHECK(side[index].Type == (image ? "render.image" : port.ValueType));
+			++index;
+		}
+		CHECK(type->Inputs.size() == inputs);
+		CHECK(type->Outputs.size() == outputs);
+	}
+}

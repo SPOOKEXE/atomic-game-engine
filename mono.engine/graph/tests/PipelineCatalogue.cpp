@@ -16,6 +16,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <span>
 #include <string>
 #include <string_view>
@@ -508,4 +509,158 @@ TEST_CASE("a later Register moves what an earlier Find named", "[graph][catalogu
 	Kinds();
 	CHECK(NodeCatalogue::Find(Name("aaa-sorts-first")) == nullptr);
 	CHECK(NodeCatalogue::Find(Name("gbuffer")) != nullptr);
+}
+
+TEST_CASE("registered render declarations drive named and positional port lookup", "[graph][catalogue]") {
+	struct Restore {
+		~Restore() {
+			NodeCatalogue::Reset();
+			engine::graph::RegisterRenderNodeKinds();
+		}
+	} restore;
+	NodeCatalogue::Reset();
+	Kinds();
+	REQUIRE_FALSE(NodeCatalogue::All().empty());
+	size_t maximumPorts = 0;
+	size_t maximumBytes = 0;
+	for (const auto &spec : NodeCatalogue::All()) {
+		CHECK(spec.Declaration.Id == spec.Kind.Text());
+		CHECK(spec.Declaration.Ports.size() == spec.Inputs.size() + spec.Outputs.size());
+		size_t bytes = spec.Declaration.Id.size();
+		for (const auto direction :
+			 {engine::graph::PortDirection::Input, engine::graph::PortDirection::Output}) {
+			const auto &side = direction == engine::graph::PortDirection::Input ? spec.Inputs : spec.Outputs;
+			for (size_t index = 0; index < side.size(); ++index) {
+				const auto *port = spec.DeclaredPort(direction, index);
+				REQUIRE(port);
+				CHECK(port->Id == side[index].Name.Text());
+				CHECK(port->ValueType == engine::graph::ResourcePortType(side[index].Kind));
+				CHECK(port->Optional);
+				CHECK(spec.DeclaredPort(direction, port->Id) == port);
+				bytes += port->Id.size() + port->ValueType.size();
+			}
+			CHECK(spec.DeclaredPort(direction, side.size()) == nullptr);
+			CHECK(spec.DeclaredPort(direction, "missing-port") == nullptr);
+		}
+		CHECK(spec.DeclaredPort(static_cast<engine::graph::PortDirection>(255), size_t{0}) == nullptr);
+		CHECK(spec.DeclaredPort(static_cast<engine::graph::PortDirection>(255), "colour") == nullptr);
+		maximumPorts = std::max(maximumPorts, spec.Declaration.Ports.size());
+		maximumBytes = std::max(maximumBytes, bytes);
+	}
+	CAPTURE(maximumPorts, maximumBytes);
+	CHECK(maximumPorts < NodeCatalogue::MAXIMUM_SCHEMA_PORTS);
+	CHECK(maximumBytes < NodeCatalogue::MAXIMUM_SCHEMA_IDENTITY_BYTES);
+}
+
+TEST_CASE("render resource role tokens retain their closed directional domain policy", "[graph][catalogue]") {
+	using namespace engine::graph;
+	for (const auto kind :
+		 {ResourceKind::Colour,
+		  ResourceKind::Depth,
+		  ResourceKind::Texture,
+		  ResourceKind::Storage,
+		  ResourceKind::Buffer,
+		  ResourceKind::Camera,
+		  ResourceKind::Entities}) {
+		ResourceKind decoded = ResourceKind::Colour;
+		CHECK_FALSE(ResourcePortType(kind).empty());
+		REQUIRE(ResourceKindFromPortType(ResourcePortType(kind), decoded));
+		CHECK(decoded == kind);
+	}
+	ResourceKind unchanged = ResourceKind::Depth;
+	CHECK_FALSE(ResourceKindFromPortType("any", unchanged));
+	CHECK(unchanged == ResourceKind::Depth);
+	CHECK(ResourcePortType(static_cast<ResourceKind>(255)).empty());
+	CHECK(PortsCompatible(ResourceKind::Storage, ResourceKind::Texture));
+	CHECK_FALSE(PortsCompatible(ResourceKind::Texture, ResourceKind::Storage));
+}
+
+TEST_CASE(
+	"render declaration replacement rebuilds derived ports and refuses malformed candidates",
+	"[graph][catalogue]"
+) {
+	using namespace engine::graph;
+	struct Restore {
+		~Restore() {
+			NodeCatalogue::Reset();
+			RegisterRenderNodeKinds();
+		}
+	} restore;
+	NodeCatalogue::Reset();
+	NodeKindSpec spec;
+	spec.Kind = Name("checked");
+	spec.Label = "accepted";
+	spec.Inputs = {{.Name = Name("image"), .Kind = ResourceKind::Texture}};
+	spec.Declaration.Id = "forged";
+	spec.Declaration.Ports = {{.Id = "forged", .ValueType = "unrelated"}};
+	REQUIRE(NodeCatalogue::Register(spec));
+	CHECK(NodeCatalogue::Find(spec.Kind)->Declaration.Id == "checked");
+	SECTION("duplicate directional port") {
+		spec.Inputs.push_back(spec.Inputs.front());
+	}
+	SECTION("unknown resource role") {
+		spec.Inputs.front().Kind = static_cast<ResourceKind>(255);
+	}
+	SECTION("empty stable port identity") {
+		spec.Inputs.front().Name = {};
+	}
+	SECTION("over budget count") {
+		spec.Inputs.resize(NodeCatalogue::MAXIMUM_SCHEMA_PORTS + 1);
+	}
+	spec.Label = "refused";
+	CHECK_FALSE(NodeCatalogue::Register(spec));
+	const auto *accepted = NodeCatalogue::Find(Name("checked"));
+	REQUIRE(accepted);
+	CHECK(accepted->Label == "accepted");
+	REQUIRE(accepted->DeclaredPort(PortDirection::Input, "image"));
+	CHECK(accepted->DeclaredPort(PortDirection::Input, "image")->ValueType == "render.texture");
+	spec.Inputs.clear();
+	spec.Outputs = {{.Name = Name("replacement"), .Kind = ResourceKind::Buffer}};
+	REQUIRE(NodeCatalogue::Register(spec));
+	const auto *replacement = NodeCatalogue::Find(spec.Kind);
+	CHECK(replacement->DeclaredPort(PortDirection::Input, "image") == nullptr);
+	REQUIRE(replacement->DeclaredPort(PortDirection::Output, "replacement"));
+	CHECK(replacement->DeclaredPort(PortDirection::Output, "replacement")->ValueType == "render.buffer");
+}
+
+TEST_CASE(
+	"render declaration budgets accept their exact count and identity boundaries", "[graph][catalogue]"
+) {
+	using namespace engine::graph;
+	struct Restore {
+		~Restore() {
+			NodeCatalogue::Reset();
+			RegisterRenderNodeKinds();
+		}
+	} restore;
+	NodeCatalogue::Reset();
+	NodeKindSpec spec;
+	spec.Kind = Name("boundary");
+	SECTION("port count") {
+		for (size_t index = 0; index < NodeCatalogue::MAXIMUM_SCHEMA_PORTS; ++index)
+			spec.Inputs.push_back(
+				{.Name = Name("port-" + std::to_string(index)), .Kind = ResourceKind::Texture}
+			);
+		REQUIRE(NodeCatalogue::Register(spec));
+		CHECK(
+			NodeCatalogue::Find(spec.Kind)->Declaration.Ports.size() == NodeCatalogue::MAXIMUM_SCHEMA_PORTS
+		);
+		spec.Outputs.push_back({.Name = Name("extra")});
+		CHECK_FALSE(NodeCatalogue::Register(spec));
+		CHECK(
+			NodeCatalogue::Find(spec.Kind)->Declaration.Ports.size() == NodeCatalogue::MAXIMUM_SCHEMA_PORTS
+		);
+	}
+	SECTION("identity bytes") {
+		const size_t length = NodeCatalogue::MAXIMUM_SCHEMA_IDENTITY_BYTES - spec.Kind.Text().size() -
+							  ResourcePortType(ResourceKind::Texture).size();
+		std::string name(length, 'x');
+		spec.Inputs = {{.Name = Name(name), .Kind = ResourceKind::Texture}};
+		REQUIRE(NodeCatalogue::Register(spec));
+		CHECK(NodeCatalogue::Find(spec.Kind)->Declaration.Ports.front().Id.size() == length);
+		name.push_back('x');
+		spec.Inputs.front().Name = Name(name);
+		CHECK_FALSE(NodeCatalogue::Register(spec));
+		CHECK(NodeCatalogue::Find(spec.Kind)->Declaration.Ports.front().Id.size() == length);
+	}
 }

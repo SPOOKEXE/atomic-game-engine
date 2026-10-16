@@ -57,16 +57,12 @@ namespace engine::render::detail {
 				if (node->Reads[index] != resource) continue;
 				const auto *kind = graph::NodeCatalogue::Find(node->Kind);
 				if (!kind || !kind->BuiltInBackend) return false;
-				const auto port =
+				const auto *port =
 					index < node->ReadPorts.size()
-						? std::find_if(
-							  kind->Inputs.begin(),
-							  kind->Inputs.end(),
-							  [&](const auto &input) { return input.Name == node->ReadPorts[index]; }
-						  )
-						: kind->Inputs.end();
-				if (port == kind->Inputs.end() ||
-					(port->Kind != graph::ResourceKind::Texture && port->Kind != graph::ResourceKind::Colour))
+						? kind->DeclaredPort(graph::PortDirection::Input, node->ReadPorts[index].Text())
+						: nullptr;
+				if (!port || (port->ValueType != graph::ResourcePortType(graph::ResourceKind::Texture) &&
+							  port->ValueType != graph::ResourcePortType(graph::ResourceKind::Colour)))
 					return false;
 			}
 		}
