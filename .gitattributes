@@ -1,2 +1,5 @@
 # Authored world containers embed external scripts and should not be line-merged.
 *.aworld binary
+
+# Unified diff context markers carry spaces; git apply checks added source lines.
+mono.vendor/patches/sdl/vulkan-queues.patch -whitespace

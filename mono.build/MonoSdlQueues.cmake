@@ -94,7 +94,7 @@ function(mono_prepare_sdl_queues root output)
 	file(REMOVE "${archive}")
 	file(RELATIVE_PATH staging_relative "${root}" "${staging}")
 	execute_process(
-		COMMAND ${git} -C "${root}" apply "--directory=${staging_relative}" "${patch}"
+		COMMAND ${git} -C "${root}" apply --whitespace=error "--directory=${staging_relative}" "${patch}"
 		ERROR_VARIABLE error RESULT_VARIABLE result
 	)
 	if(NOT result EQUAL 0)
