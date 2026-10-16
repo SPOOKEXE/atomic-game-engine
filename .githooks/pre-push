@@ -49,6 +49,9 @@ if [ "$only_deletions" = "1" ]; then
 	exit 0
 fi
 
+# Git hooks export superproject variables that can misdirect vendor Git commands.
+unset $(git rev-parse --local-env-vars)
+
 # Missing tool is a failure, not a skip - `just format-check` argues this at
 # length and it is the same argument: a gate that exits 0 having run nothing is
 # worse than no gate, because the push looks checked.
