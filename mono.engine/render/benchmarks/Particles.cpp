@@ -22,6 +22,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 TEST_SUITE_ID("engine.render.bench.particles")
@@ -97,6 +98,15 @@ namespace {
 		uint64_t Curves = Counter("render.particles.curve_upload_bytes");
 		uint64_t Metadata = Counter("render.particles.metadata_copy_bytes");
 	};
+	struct CpuSpanTotal {
+		std::string_view Name;
+		std::string_view Prefix;
+		bool Inclusive;
+		bool Self;
+		double Milliseconds = 0;
+		double SelfMilliseconds = 0;
+		uint64_t Occurrences = 0;
+	};
 
 	void Measure(uint32_t count, uint32_t changed, float rate = 5, float lifetime = 1) {
 		if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
@@ -135,7 +145,17 @@ namespace {
 			if (!result.Submitted) throw std::runtime_error("particle warm-up submission failed");
 		}
 		uint64_t recording = 0;
-		double prepare = 0, prepareSelf = 0, gpuStep = 0, gpuTransparent = 0;
+		double gpuStep = 0, gpuTransparent = 0;
+		std::array cpuSpans{
+			CpuSpanTotal{"prepare particles", "cpu_prepare", true, true},
+			CpuSpanTotal{"particles.step", "cpu_particle_step", true, true},
+			CpuSpanTotal{"draw particles", "cpu_particle_draw", false, true},
+			CpuSpanTotal{"particles.draw plan", "cpu_particle_draw_plan", true, false},
+			CpuSpanTotal{"FrameBatch::plan pipelines", "cpu_pipeline_plan", true, false},
+			CpuSpanTotal{"submit.scene", "cpu_scene_submit", true, false},
+			CpuSpanTotal{"FrameBatch::submit command", "cpu_batch_submit_scope", true, false},
+		};
+		size_t droppedProfileSpans = 0;
 		uint32_t timestamps = 0, particles = 0, drawn = 0, dispatches = 0;
 		const auto heapBefore = renderer.MemoryStatistics();
 		const Traffic before;
@@ -153,10 +173,16 @@ namespace {
 			particles = result.Particles;
 			drawn = result.ParticlesDrawn;
 			dispatches += result.ComputeDispatches;
+			droppedProfileSpans += core::FrameGraph::Dropped();
 			for (const auto &span : core::FrameGraph::Spans()) {
-				if (span.Name != "prepare particles") continue;
-				prepare += span.Milliseconds;
-				prepareSelf += span.SelfMilliseconds;
+				if (span.Reported || span.Category != core::ProfileCategory::Render) continue;
+				for (auto &total : cpuSpans) {
+					if (span.Name != total.Name) continue;
+					total.Milliseconds += span.Milliseconds;
+					total.SelfMilliseconds += span.SelfMilliseconds;
+					++total.Occurrences;
+					break;
+				}
 			}
 			const auto &timings = renderer.PassTimings();
 			const auto step = timings.find(core::Name("particle-step").Id());
@@ -174,9 +200,17 @@ namespace {
 					  << " rate=" << rate << " lifetime=" << lifetime << " warm_frames=" << warmFrames
 					  << " slots_per_emitter=" << particles / count << " slots=" << particles
 					  << " drawn=" << drawn << " frames=" << FRAMES
-					  << " cameras=1 extent=960x540 cpu_record_ns=" << recording / FRAMES
-					  << " cpu_prepare_us=" << prepare * 1000 / FRAMES
-					  << " cpu_prepare_self_us=" << prepareSelf * 1000 / FRAMES
+					  << " cameras=1 extent=960x540 cpu_record_ns=" << recording / FRAMES;
+			// Durations are per measured frame; retained occurrence counts expose
+			// absent spans. The batch submit scope can be only an ownership check.
+			for (const auto &total : cpuSpans) {
+				if (total.Inclusive)
+					std::cout << ' ' << total.Prefix << "_us=" << total.Milliseconds * 1000 / FRAMES;
+				if (total.Self)
+					std::cout << ' ' << total.Prefix << "_self_us=" << total.SelfMilliseconds * 1000 / FRAMES;
+				std::cout << ' ' << total.Prefix << "_spans=" << total.Occurrences;
+			}
+			std::cout << " cpu_profile_dropped_spans=" << droppedProfileSpans
 					  << " gpu_timing_reads=" << timestamps
 					  << " gpu_step_us=" << (timestamps == 0 ? 0 : gpuStep / timestamps)
 					  << " gpu_transparent_us=" << (timestamps == 0 ? 0 : gpuTransparent / timestamps)
