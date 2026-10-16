@@ -150,8 +150,9 @@ relabeled GPU queue waits.
 
 ## Partial CPU heap baseline
 
-Commit `d0ce2609` makes the five existing graph-pipeline benchmark suites emit v2 heap rows when
-`MONO_BENCH_MEMORY=1`. The rows report process allocation byte and block deltas,
+Commit `d0ce2609` added v2 heap rows to the five existing graph-pipeline
+benchmark suites when `MONO_BENCH_MEMORY=1`. These measurements predate the
+audio repair in `48dbe261`. The rows report process allocation byte and block deltas,
 retained-byte delta, live bytes and blocks, exclusive named-tag self peak,
 process lifetime peak, modeled header overhead (`LiveBlocks * 32` on this
 build), per-block overhead, and dropped-scope and foreign-free deltas. Zero
@@ -169,20 +170,58 @@ RelWithDebInfo, `-O2`, `MONO_HEAP_PROFILE=ON`, unity builds, and GCC 13.3 on a
 Ryzen 9 9900X with 24 logical CPUs. The run was CPU-only, so GPU resolution was
 not applicable.
 
-The graphcore empty case allocated 976 bytes in 14 blocks. Its prepared
+The pre-fix graphcore empty case allocated 976 bytes in 14 blocks. Its prepared
 64-node order case allocated zero bytes and blocks in this fixture; this does
-not establish that all graph compilation is allocation-free. Audio's deadline
-probe allocated 2,568 bytes in nine blocks and retained 1,348 bytes on its cold invocation, then
-allocated 136 bytes in one block and retained zero bytes on the immediately
-following warm invocation. Source review attributes the warm allocation to
-the GNU 13 `std::stable_sort` temporary. The cold invocation also grows
-`Taken` and `Schedule` and rebuilds scratch storage. This shows the existing
-mixer callback's no-allocation requirement is not met by this path; it is not
-profiler initialization, and no production fix is included here. Resolve this
-callback requirement before closing audio acceptance; it is separate from
-accepting optimization gains after the complete B0 gate.
+not establish that all graph compilation is allocation-free. Audio's
+deadline probe allocated 2,568 bytes in nine blocks and retained 1,348 bytes on
+its cold invocation, then allocated 136 bytes in one block and retained zero
+bytes on the immediately following warm invocation. Source review attributed
+the warm allocation to the GNU 13 `std::stable_sort` temporary. The cold
+invocation also grew `Taken` and `Schedule` and rebuilt scratch storage. This
+was the pre-fix evidence that the mixer callback's no-allocation requirement
+was unmet, not profiler initialization.
 
 All five benchmark targets built successfully across ten build edges, and
 `format-check` passed with pinned clang-format 21. These are diagnostic memory
 measurements only. Shared-host timings are rejected, and this is not full B0
 or pass completion. No speed claim is made.
+
+## Audio deadline callback repair
+
+Commit `48dbe261` repairs the mixer callback allocation path found above. The
+mixer preallocates bounded flat scratch and queue, schedule, and ID lookup
+storage at construction. Sorted IDs avoid map-node allocation, and ordinal
+sorting preserves command posting order. The scratch payload is 1 MiB for
+stereo at 128 frames and 4 MiB at the default 512 frames, plus other reserved
+storage. This is an explicit resident-memory tradeoff, with no timing claim.
+
+On the same `bench` preset and GNU 13.3 environment, the updated audio suite
+emitted seven heap rows, including mixer construction. Three fresh-process
+runs were byte-identical. Construction requested 14,213,136 bytes across 23
+allocations and retained zero bytes after destruction. Cold and warm
+`RenderScheduled` each allocated and retained zero bytes; dropped scopes and
+foreign frees remained zero. After the warm fixture, process live bytes were
+14,251,624, compared with 12,906,488 in the pre-fix run. The actual sample
+oracle is unchanged.
+
+Three new allocation tests fail against the old `9cabd481` mixer with 18 heap
+assertion failures; 5,276 of 5,294 assertions passed. The fixed audio suite
+passed 105 cases with one SDL dummy-driver skip, 150,506 assertions total. The
+skipped case passed separately with `SDL_AUDIODRIVER=dummy` and 44 assertions,
+covering all 106 cases across both runs. Logs are
+`.cache/build/ci/v0261-audio-repro/old-tests.log`,
+`.cache/build/ci/v0261-audio-fixed-tests.log`, and
+`.cache/build/ci/v0261-audio-dummy-tests.log`.
+
+The AddressSanitizer and UndefinedBehaviorSanitizer audio run passed 42 cases
+and 22,062 assertions with leak detection and halt-on-error enabled. The audio
+module unity build and mixer tests were instrumented; dependencies were not.
+Log: `.cache/build/ci/v0261-audio-sanitize/tests.log`. New cases cover cold and
+warm rendering, 1,024 nodes, a full 1,023-command queue, tie order, sparse high
+IDs, replacement and topology deadlines, overflow, and zero output. Existing
+format mismatch and float summation order checks pass. `SoundRef` ownership
+remains with the host; no retirement system was added.
+
+This repair establishes allocation correctness for the checked callback paths, not an accepted
+optimization pass. Full B0 and all three optimization passes remain
+incomplete. Native CI and the full gate are still pending.
