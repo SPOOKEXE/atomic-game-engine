@@ -43,6 +43,10 @@ namespace engine::computegraph {
 			return "request not complete";
 		case Status::AllocationFailed:
 			return "allocation failed";
+		case Status::DeviceUnavailable:
+			return "compute device unavailable";
+		case Status::DeviceFailure:
+			return "compute device failure";
 		}
 		return "invalid status";
 	}

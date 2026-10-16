@@ -1,0 +1,32 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "compute-common.glsl"
+
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0, std430) readonly buffer Local { uint Data[]; } localPrefix;
+layout(set = 0, binding = 1, std430) readonly buffer Parent { uint Data[]; } parentPrefix;
+layout(set = 1, binding = 0, std430) writeonly buffer Prefix { uint Data[]; } prefix;
+layout(set = 1, binding = 1, std430) writeonly buffer Errors { uint Data[]; } errors;
+
+shared uint groupError;
+
+void main() {
+	uint index = gl_GlobalInvocationID.x;
+	uint lane = gl_LocalInvocationID.x;
+	uint block = gl_WorkGroupID.x;
+	if (lane == 0u) groupError = 0u;
+	barrier();
+	if (index < computeParameters.Dispatch.x) {
+		if (index >= computeParameters.Buffers[0].y || index >= computeParameters.Buffers[16].y ||
+			block >= computeParameters.Buffers[1].x || block >= computeParameters.Buffers[1].y) {
+			atomicOr(groupError, 1u);
+		} else {
+			uint own = localPrefix.Data[index];
+			uint combined = own + parentPrefix.Data[block];
+			if (combined < own) atomicOr(groupError, 1u);
+			else prefix.Data[index] = combined;
+		}
+	}
+	barrier();
+	if (lane == 0u && block < computeParameters.Buffers[17].y) errors.Data[block] = groupError;
+}

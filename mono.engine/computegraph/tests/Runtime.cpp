@@ -256,3 +256,20 @@ TEST_CASE(
 	completion.Outputs[1].Bytes.resize(12);
 	CHECK(queue.Complete(completion, diagnostic) == Status::Ok);
 }
+
+TEST_CASE(
+	"device failures are terminal compute results with no published buffers", "[computegraph][runtime]"
+) {
+	for (const auto failure : {Status::DeviceUnavailable, Status::DeviceFailure}) {
+		Queue queue(HostOwner());
+		Diagnostic diagnostic;
+		uint64_t ticket = 0;
+		REQUIRE(queue.Submit(AcceptedPlan(), InputRequest(), ticket, diagnostic) == Status::Ok);
+		Completion failed{.Ticket = ticket, .Identity = HostOwner(), .Code = failure};
+		REQUIRE(queue.Complete(failed, diagnostic) == Status::Ok);
+		Completion result;
+		REQUIRE(queue.Take(ticket, result, diagnostic) == Status::Ok);
+		CHECK(result.Code == failure);
+		CHECK(result.Outputs.empty());
+	}
+}

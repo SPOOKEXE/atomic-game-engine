@@ -1,0 +1,38 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "compute-common.glsl"
+
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0, std430) readonly buffer Values { uint Data[]; } values;
+layout(set = 0, binding = 1, std430) readonly buffer Flags { uint Data[]; } flags;
+layout(set = 0, binding = 2, std430) readonly buffer Prefix { uint Data[]; } prefix;
+layout(set = 0, binding = 3, std430) readonly buffer Count { uint Data[1]; } count;
+layout(set = 1, binding = 0, std430) writeonly buffer Packed { uint Data[]; } packed;
+layout(set = 1, binding = 1, std430) writeonly buffer Errors { uint Data[]; } errors;
+
+shared uint groupError;
+
+void main() {
+	uint index = gl_GlobalInvocationID.x;
+	uint lane = gl_LocalInvocationID.x;
+	uint block = gl_WorkGroupID.x;
+	uint logicalCount = count.Data[0];
+	if (lane == 0u) groupError = logicalCount > computeParameters.Buffers[16].y ||
+		logicalCount > computeParameters.Buffers[0].x ? 1u : 0u;
+	barrier();
+	if (index < computeParameters.Buffers[0].x) {
+		if (index >= computeParameters.Buffers[0].y || index >= computeParameters.Buffers[1].y ||
+			index >= computeParameters.Buffers[2].y) {
+			atomicOr(groupError, 1u);
+		} else if (flags.Data[index] == 1u) {
+			uint destination = prefix.Data[index];
+			if (destination < logicalCount && destination < computeParameters.Buffers[16].y)
+				packed.Data[destination] = values.Data[index];
+			else atomicOr(groupError, 1u);
+		} else if (flags.Data[index] != 0u) {
+			atomicOr(groupError, 1u);
+		}
+	}
+	barrier();
+	if (lane == 0u && block < computeParameters.Buffers[17].y) errors.Data[block] = groupError;
+}

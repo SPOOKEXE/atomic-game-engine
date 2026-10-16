@@ -1,0 +1,17 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "compute-common.glsl"
+
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0, std430) readonly buffer Values { uint Data[]; } values;
+layout(set = 1, binding = 0, std430) writeonly buffer Flags { uint Data[]; } flags;
+
+void main() {
+	uint index = gl_GlobalInvocationID.x;
+	if (index >= computeParameters.Dispatch.x || index >= computeParameters.Buffers[16].y) return;
+	// Cover the complete fixed scratch extent, including its empty sentinel and inactive tail.
+	uint selected = 0u;
+	if (index < computeParameters.Buffers[0].x && index < computeParameters.Buffers[0].y)
+		selected = values.Data[index] != 0u ? 1u : 0u;
+	flags.Data[index] = selected;
+}

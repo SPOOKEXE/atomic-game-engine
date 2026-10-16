@@ -50,7 +50,7 @@ namespace engine::render {
 		// machine.
 		constexpr int PADDING = 1;
 
-		std::vector<unsigned char> ReadFile(const std::filesystem::path &path) {
+		std::vector<unsigned char> ReadFontBytes(const std::filesystem::path &path) {
 			std::ifstream file(path, std::ios::binary | std::ios::ate);
 			if (!file) {
 				return {};
@@ -118,7 +118,7 @@ namespace engine::render {
 
 		size_t available = 0;
 		for (size_t face = 0; face < FACES; face++) {
-			files[face] = ReadFile(root / FILES[face]);
+			files[face] = ReadFontBytes(root / FILES[face]);
 			if (files[face].empty()) {
 				continue;
 			}

@@ -150,7 +150,7 @@ namespace engine::computegraph {
 		if (found == Pending.end()) return detail::Refuse(diagnostic, Status::UnknownTicket);
 		if (found->Ready) return detail::Refuse(diagnostic, Status::UnknownTicket);
 		if (completion.Code != Status::Ok) {
-			if (completion.Code > Status::AllocationFailed || !completion.Outputs.empty())
+			if (completion.Code > Status::DeviceFailure || !completion.Outputs.empty())
 				return detail::Refuse(diagnostic, Status::InvalidCount);
 		} else {
 			if (completion.Outputs.size() != found->Data.Outputs.size())

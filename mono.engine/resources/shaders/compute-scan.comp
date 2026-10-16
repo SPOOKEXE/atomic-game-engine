@@ -1,0 +1,42 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "compute-common.glsl"
+
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0, std430) readonly buffer Values { uint Data[]; } values;
+layout(set = 1, binding = 0, std430) writeonly buffer Prefix { uint Data[]; } prefix;
+layout(set = 1, binding = 1, std430) writeonly buffer Sums { uint Data[]; } sums;
+layout(set = 1, binding = 2, std430) writeonly buffer Errors { uint Data[]; } errors;
+
+shared uint partial[64];
+shared uint groupError;
+
+void main() {
+	uint index = gl_GlobalInvocationID.x;
+	uint lane = gl_LocalInvocationID.x;
+	uint block = gl_WorkGroupID.x;
+	uint count = computeParameters.Buffers[0].x;
+	uint value = index < count && index < computeParameters.Buffers[0].y ? values.Data[index] : 0u;
+	partial[lane] = value;
+	if (lane == 0u) groupError = count > computeParameters.Buffers[0].y ? 1u : 0u;
+	barrier();
+	for (uint offset = 1u; offset < COMPUTE_GROUP_SIZE; offset <<= 1u) {
+		uint own = partial[lane];
+		uint add = lane >= offset ? partial[lane - offset] : 0u;
+		barrier();
+		uint combined = own + add;
+		if (combined < own) atomicOr(groupError, 1u);
+		partial[lane] = combined;
+		barrier();
+	}
+	if (index < count) {
+		if (index < computeParameters.Buffers[16].y) prefix.Data[index] = partial[lane] - value;
+		else atomicOr(groupError, 1u);
+	}
+	if (lane == 0u) {
+		if (block < computeParameters.Buffers[17].y) sums.Data[block] = partial[63];
+		else atomicOr(groupError, 1u);
+	}
+	barrier();
+	if (lane == 0u && block < computeParameters.Buffers[18].y) errors.Data[block] = groupError;
+}

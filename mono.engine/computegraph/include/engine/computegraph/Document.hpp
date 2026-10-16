@@ -40,6 +40,8 @@ namespace engine::computegraph {
 		UnknownTicket,
 		NotReady,
 		AllocationFailed,
+		DeviceUnavailable,
+		DeviceFailure,
 	};
 	// Refusal identity is bounded independently of untrusted authored names.
 	struct Diagnostic {
