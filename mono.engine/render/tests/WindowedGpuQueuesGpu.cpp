@@ -2,6 +2,7 @@
 #include "GpuQueueBatch.hpp"
 #include "RenderFixture.hpp"
 #include "RendererTestHooks.hpp"
+#include "VulkanTimestamps.hpp"
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Assert.hpp>
@@ -186,7 +187,7 @@ void main(){ colour=vec4(0.25,0.0,0.0,0.5); })",
 			ObservedActiveBatch = snapshot.Active;
 			if (snapshot.Active && snapshot.FrameCounter % 4 == 0) {
 				++NominalSampleFrames;
-				CHECK(snapshot.LegacyTimingSlot == UINT32_MAX);
+				CHECK(snapshot.LegacyTimingSlot == VulkanTimestamps::NO_SLOT);
 			}
 			return PrepareCommand != nullptr;
 		}
@@ -215,7 +216,7 @@ void main(){ colour=vec4(0.25,0.0,0.0,0.5); })",
 		CHECK(hook.PrepareCommand != hook.RecordCommand);
 		CHECK(hook.PrepareThread == hook.RecordThread);
 		CHECK(hook.RecordThread == std::this_thread::get_id());
-		if (hook.ObservedActiveBatch) CHECK(hook.ObservedLegacyTimingSlot == UINT32_MAX);
+		if (hook.ObservedActiveBatch) CHECK(hook.ObservedLegacyTimingSlot == VulkanTimestamps::NO_SLOT);
 	}
 
 	QueueFixture RequireQueueFixture(Renderer &renderer) {
@@ -497,7 +498,7 @@ TEST_CASE(
 	CHECK_FALSE(failed.Presented);
 	CHECK(hostOverlay.ObservedFrameCounter == 4);
 	CHECK(hostOverlay.ObservedActiveBatch);
-	CHECK(hostOverlay.ObservedLegacyTimingSlot == UINT32_MAX);
+	CHECK(hostOverlay.ObservedLegacyTimingSlot == VulkanTimestamps::NO_SLOT);
 	CHECK(hostOverlay.NominalSampleFrames == 1);
 	const GpuQueueBatch::Statistics failedStatistics = queues.Batch->LastStatistics();
 	CHECK(failedStatistics.PresentationAdopted);
