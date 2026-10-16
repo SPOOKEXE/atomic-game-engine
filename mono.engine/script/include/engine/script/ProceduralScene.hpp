@@ -27,7 +27,8 @@ namespace engine::script {
 		procedural::Digest ArtifactDigest{};		  // Exact canonical artifact backing this view.
 		std::vector<ProceduralObjectRange> Objects{}; // Stable identity table in aggregate order.
 	};
-	// Owner-local binding captured before generation. Never serialized or sent
+	// Owner-local binding captured before generation or baked content admission.
+	// Never serialized or sent
 	// between worlds. Any intervening target edit refuses publication.
 	struct ProceduralSceneTarget {
 		procedural::RegionScope Scope{}; // Region owned by this materialization.

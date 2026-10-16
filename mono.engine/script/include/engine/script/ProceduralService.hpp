@@ -41,7 +41,8 @@ namespace engine::script {
 		bool RemoveSpline(ecs::Store &, std::string_view, procedural::Diagnostic &);
 		bool SetOverride(ecs::Store &, const procedural::PlacementOverride &, procedural::Diagnostic &);
 		bool RemoveOverride(ecs::Store &, std::string_view, procedural::Diagnostic &);
-		// Binds both scene targets before copying inputs and starting generation.
+		// Captures targets and inputs before admission. Accepted work binds both
+		// scene targets; admission refusal leaves them unchanged.
 		bool Generate(
 			ecs::Store &,
 			procedural::RegionScope,
