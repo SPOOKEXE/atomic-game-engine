@@ -243,9 +243,10 @@ stable - the instance, not the text.
 
 ## What is deferred, said out loud
 
-- **One VM per world, and it is Luau.** A world whose scripts are JavaScript
-  runs nothing. `script::LanguageOf` picks per file and the runtime is per
-  world; reconciling those is a design decision, not an oversight to patch.
+- **One VM per world.** Before execution, select the common language among
+  active runnable scripts selected by role; refuse mixed-language worlds.
+  Default empty worlds to Luau. Replicated worlds still start Luau, and
+  JavaScript LocalScripts remain unsupported.
 - **Headless runs no interface backends.** `--headless` starts the imgui
   context but not its platform or renderer backends, so panel *drawing* is
   skipped entirely - what a headless run exercises is the universe, the scripts,
