@@ -102,6 +102,18 @@ namespace {
 			std::chrono::duration_cast<std::chrono::nanoseconds>(ended - started).count()
 		);
 	}
+
+	void PrintHelp() {
+		std::cout << "Usage: bench [options]\n"
+				  << "Options:\n"
+				  << "  -h, --help                 Show this help and exit.\n"
+				  << "  --mono-suites              List suites for discovery and exit.\n"
+				  << "  --suite ID                 Run only benchmarks in ID.\n"
+				  << "  --samples N                Measured samples per benchmark (default: "
+				  << DEFAULT_SAMPLES << ").\n"
+				  << "  --warmup-samples N         Harness warmups, 0 through " << MAXIMUM_WARMUP_SAMPLES
+				  << " (default: " << WARMUP_SAMPLES << ").\n";
+	}
 }
 
 int main(int argc, char **argv) {
@@ -110,6 +122,13 @@ int main(int argc, char **argv) {
 	std::string filter;
 	const char *latencySetting = std::getenv("MONO_BENCH_LATENCY");
 	const bool reportLatency = latencySetting != nullptr && std::strcmp(latencySetting, "1") == 0;
+
+	for (int index = 1; index < argc; index++) {
+		if (std::strcmp(argv[index], "--help") == 0 || std::strcmp(argv[index], "-h") == 0) {
+			PrintHelp();
+			return 0;
+		}
+	}
 
 	for (int index = 1; index < argc; index++) {
 		if (std::strcmp(argv[index], "--mono-suites") == 0) {
