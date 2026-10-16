@@ -63,6 +63,7 @@ namespace client {
 	}
 
 	void Client::LoadPackagedAudio() {
+		ENGINE_PROFILE_CAT("client.packaged audio", engine::core::ProfileCategory::Assets);
 		std::filesystem::path directory = engine::core::Paths::Assets() / "audio";
 		std::error_code error;
 		if (!std::filesystem::is_directory(directory, error)) {
