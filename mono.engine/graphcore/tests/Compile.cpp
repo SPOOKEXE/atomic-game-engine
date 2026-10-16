@@ -246,6 +246,36 @@ TEST_CASE(
 }
 
 TEST_CASE(
+	"cycle diagnostics retain complete acyclic prefix waves without publishing them", "[graphcore][compile]"
+) {
+	const std::array edges{Dependency{0, 1}, Dependency{4, 2}, Dependency{2, 4}, Dependency{4, 3}};
+	Topology topology;
+	Diagnostic diagnostic;
+	REQUIRE(CompileDependencies(2, {}, GraphLimits(), topology, diagnostic) == CompileStatus::Ok);
+	const auto accepted = topology;
+	for (const auto policy : {OrderPolicy::AuthoredSweep, OrderPolicy::LowestReady, OrderPolicy::FifoReady}) {
+		REQUIRE(
+			CompileDependencies(6, edges, GraphLimits(), topology, diagnostic, policy) == CompileStatus::Cycle
+		);
+		CHECK(diagnostic.AcyclicPrefixWaves == std::vector<std::vector<NodeIndex>>{{0, 5}, {1}});
+		CHECK(diagnostic.Blocked == 2);
+		CheckTopology(topology, accepted);
+	}
+	REQUIRE(
+		CompileDependencies(1, std::array{Dependency{0, 1}}, GraphLimits(), topology, diagnostic) ==
+		CompileStatus::InvalidDependency
+	);
+	CHECK(diagnostic.AcyclicPrefixWaves.empty());
+	REQUIRE(CompileDependencies(0, {}, {}, topology, diagnostic) == CompileStatus::Ok);
+	CHECK(diagnostic.AcyclicPrefixWaves.empty());
+	REQUIRE(
+		CompileDependencies(1, std::array{Dependency{0, 0}}, GraphLimits(), topology, diagnostic) ==
+		CompileStatus::Cycle
+	);
+	CHECK(diagnostic.AcyclicPrefixWaves.empty());
+}
+
+TEST_CASE(
 	"typed compilation preserves authored pin order while sharing dependency edges", "[graphcore][compile]"
 ) {
 	const std::array nodes{Node{"mixed", "blend"}, Node{"solid", "source"}};

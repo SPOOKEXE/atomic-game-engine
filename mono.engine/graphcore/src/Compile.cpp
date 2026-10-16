@@ -247,19 +247,23 @@ namespace engine::graphcore {
 				candidate.Inputs[edge.After].push_back(edge.Before);
 				candidate.Dependents[edge.Before].push_back(edge.After);
 			}
+			size_t waveCount = 0;
+			for (size_t index = 0; index < nodeCount; ++index)
+				if (workspace.Incoming[index] == 0)
+					waveCount = std::max(waveCount, workspace.CursorDepth[index] + 1);
+			candidate.Waves.resize(waveCount);
+			for (size_t index = 0; index < nodeCount; ++index)
+				if (workspace.Incoming[index] == 0)
+					candidate.Waves[workspace.CursorDepth[index]].push_back(static_cast<NodeIndex>(index));
 			if (result.Status != CompileStatus::Ok) {
 				detail::Refuse(diagnostic, result.Status);
 				diagnostic.Blocked = result.Blocked;
-				if (result.Status == CompileStatus::Cycle)
+				if (result.Status == CompileStatus::Cycle) {
 					FindCycle(candidate, std::span(workspace.Incoming).first(nodeCount), diagnostic);
+					diagnostic.AcyclicPrefixWaves = std::move(candidate.Waves);
+				}
 				return diagnostic.Status;
 			}
-			size_t waveCount = 0;
-			for (size_t index = 0; index < nodeCount; ++index)
-				waveCount = std::max(waveCount, workspace.CursorDepth[index] + 1);
-			candidate.Waves.resize(waveCount);
-			for (size_t index = 0; index < nodeCount; ++index)
-				candidate.Waves[workspace.CursorDepth[index]].push_back(static_cast<NodeIndex>(index));
 			out = std::move(candidate);
 			diagnostic = {};
 			return CompileStatus::Ok;

@@ -74,6 +74,9 @@ namespace engine::graphcore {
 		NodeIndex Blocked = NO_NODE;
 		// Directed cycle with its first node repeated at the end.
 		std::vector<NodeIndex> Cycle{};
+		// Complete dependency waves emitted before a cycle blocked further progress.
+		// Populated only on Cycle; refused compilation never publishes a partial topology.
+		std::vector<std::vector<NodeIndex>> AcyclicPrefixWaves{};
 	};
 
 	// One named input or output, without an executable payload representation.
