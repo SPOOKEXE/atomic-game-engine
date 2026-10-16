@@ -3,6 +3,8 @@ Engine Features - MISSING\_ENGINE\_FTRES.md (current version: v0.26.0-imagegraph
 
 # Zero v0.26.1
 
+Implementation and validation plan pending review: [v0.26.1 implementation plan](docs/V0261_IMPLEMENTATION_PLAN.md).
+
 - unified graph library in underlying engine
 - system-specific defined graphs and nodes
 - system-specific runtimes
