@@ -12,7 +12,7 @@ procedural.SetSpline({Name:'village-road',EntranceName:'west-gate',ControlX:10,C
 const floor = Instance.new('Part');
 floor.Name = 'VillageGround';
 floor.Anchored = true;
-floor.Size = Vector3.new(32,1,32);
+floor.Size = Vector3.new(20,1,20);
 floor.Position = Vector3.new(8,-0.5,8);
 floor.Color = Color3.fromRGB(55,62,42);
 floor.Parent = workspace;
@@ -48,3 +48,11 @@ const canceled = procedural.Generate(scopes[0],meshes[0],parts[0]);
 procedural.Cancel(canceled);
 if (procedural.Progress(canceled).Status !== 'Canceled') throw new Error('cancellation failed');
 procedural.Release(canceled);
+
+const starterPlayerScripts = game.GetService('StarterPlayer').FindFirstChild('StarterPlayerScripts');
+if (starterPlayerScripts === null) throw new Error('the starter player scripts container is missing');
+const camera = starterPlayerScripts.FindFirstChild('DemoCamera');
+if (camera === null) throw new Error('the demo camera companion is missing');
+camera.SetAttribute('Name','Forest Village Camera');
+camera.SetAttribute('CFrame',CFrame.lookAt(Vector3.new(10,14,22),Vector3.new(10,0,8)));
+camera.SetAttribute('FieldOfView',58);

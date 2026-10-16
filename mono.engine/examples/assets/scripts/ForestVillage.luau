@@ -12,7 +12,7 @@ procedural:SetSpline({Name = "village-road", EntranceName = "west-gate", Control
 local floor = Instance.new("Part")
 floor.Name = "VillageGround"
 floor.Anchored = true
-floor.Size = Vector3.new(32, 1, 32)
+floor.Size = Vector3.new(20, 1, 20)
 floor.Position = Vector3.new(8, -0.5, 8)
 floor.Color = Color3.fromRGB(55, 62, 42)
 floor.Parent = workspace
@@ -47,3 +47,10 @@ local canceled = procedural:Generate(scopes[1], meshes[1], parts[1])
 procedural:Cancel(canceled)
 assert(procedural:Progress(canceled).Status == "Canceled")
 procedural:Release(canceled)
+
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local camera = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+camera:SetAttribute("Name", "Forest Village Camera")
+camera:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(10, 14, 22), Vector3.new(10, 0, 8)))
+camera:SetAttribute("FieldOfView", 58)

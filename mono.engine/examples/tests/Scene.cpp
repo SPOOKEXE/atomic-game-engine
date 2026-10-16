@@ -3323,13 +3323,19 @@ TEST_CASE(
 		const auto builder = files.Root / (javascript ? "Fixture.js" : "Fixture.luau");
 		const auto companion = files.Root / "client" / "DemoCameras" /
 							   (javascript ? "Fixture.client.js" : "Fixture.client.luau");
+		const auto stagedBuilder =
+			std::filesystem::path(ExamplePath(javascript ? "ForestVillage.js" : "ForestVillage.luau"));
+		const auto stagedCompanion = stagedBuilder.parent_path() / "client" / "DemoCameras" /
+									 (javascript ? "ForestVillage.client.js" : "ForestVillage.client.luau");
 		{
 			std::ofstream source(builder);
 			REQUIRE(source);
 			source
 				<< (javascript ? R"(
 const config = game.GetService('StarterPlayer').FindFirstChild('StarterPlayerScripts').FindFirstChild('DemoCamera');
-config.SetAttribute('CFrame', CFrame.new(12, 13, 14));
+config.SetAttribute('Name', 'FixtureCamera');
+config.SetAttribute('CFrame', CFrame.lookAt(Vector3.new(10, 14, 22), Vector3.new(10, 0, 8)));
+config.SetAttribute('FieldOfView', 58);
 if (!workspace.FindFirstChild('Authored')) {
  const part = Instance.new('Part', workspace);
  part.Name = 'Authored';
@@ -3337,40 +3343,22 @@ if (!workspace.FindFirstChild('Authored')) {
 )"
 							   : R"(
 local config = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts'):FindFirstChild('DemoCamera')
-config:SetAttribute('CFrame', CFrame.new(12, 13, 14))
+config:SetAttribute('Name', 'FixtureCamera')
+config:SetAttribute('CFrame', CFrame.lookAt(Vector3.new(10, 14, 22), Vector3.new(10, 0, 8)))
+config:SetAttribute('FieldOfView', 58)
 if workspace:FindFirstChild('Authored') == nil then
  local part = Instance.new('Part', workspace)
  part.Name = 'Authored'
 end
 )");
 		}
-		{
-			std::ofstream source(companion);
-			REQUIRE(source);
-			source
-				<< (javascript ? R"(
-const camera = Instance.new('Camera', workspace);
-camera.Name = 'FixtureCamera';
-camera.CFrame = script.GetAttribute('CFrame');
-camera.CameraSubject = null;
-workspace.CurrentCamera = camera;
-camera.CameraType = Enum.CameraType.Scriptable;
-const marker = Instance.new('ObjectValue', script);
-marker.Name = 'PublishedCamera';
-marker.Value = camera;
-)"
-							   : R"(
-local camera = Instance.new('Camera', workspace)
-camera.Name = 'FixtureCamera'
-camera.CFrame = script:GetAttribute('CFrame')
-camera.CameraSubject = nil
-workspace.CurrentCamera = camera
-camera.CameraType = Enum.CameraType.Scriptable
-local marker = Instance.new('ObjectValue', script)
-marker.Name = 'PublishedCamera'
-marker.Value = camera
-)");
-		}
+		std::error_code copyError;
+		REQUIRE(
+			std::filesystem::copy_file(
+				stagedCompanion, companion, std::filesystem::copy_options::overwrite_existing, copyError
+			)
+		);
+		REQUIRE_FALSE(copyError);
 		for (const bool client : {false, true}) {
 			Store store("demo-camera-fixture");
 			Scheduler systems;
@@ -3378,8 +3366,10 @@ marker.Value = camera
 			limits.Role = client ? engine::script::HostRole::OfBoth() : engine::script::HostRole::OfServer();
 			std::shared_ptr<engine::script::Runtime> runtime;
 			std::string error;
-			REQUIRE(LoadScene(store, systems, builder.string(), error, &runtime, &limits));
+			INFO("language=" << (javascript ? "JavaScript" : "Luau") << " client=" << client);
+			const bool loaded = LoadScene(store, systems, builder.string(), error, &runtime, &limits);
 			INFO(error);
+			REQUIRE(loaded);
 			const auto authored = InScene(store, "Authored");
 			REQUIRE(authored != engine::ecs::NULL_ENTITY);
 			CHECK_FALSE(Store::IsPredicted(authored));
@@ -3392,6 +3382,53 @@ marker.Value = camera
 				engine::script::ActiveSourceOf(store, source) ==
 				Name(std::filesystem::absolute(companion).string())
 			);
+			const auto expected = engine::core::CFrame::LookAt(
+				engine::core::Vector3{10, 14, 22}, engine::core::Vector3{10, 0, 8}
+			);
+			const auto checkFrame = [&](std::string_view stage, const engine::core::CFrame &frame) {
+				const auto &position = frame.Position;
+				const auto right = frame.RightVector();
+				const auto up = frame.UpVector();
+				const auto look = frame.LookVector();
+				INFO(
+					stage << " position=(" << position.X << ',' << position.Y << ',' << position.Z
+						  << ") quaternion=(" << frame.QuaternionX << ',' << frame.QuaternionY << ','
+						  << frame.QuaternionZ << ',' << frame.QuaternionW << ") right=(" << right.X << ','
+						  << right.Y << ',' << right.Z << ") up=(" << up.X << ',' << up.Y << ',' << up.Z
+						  << ") look=(" << look.X << ',' << look.Y << ',' << look.Z << ')'
+				);
+				for (float value :
+					 {position.X,
+					  position.Y,
+					  position.Z,
+					  frame.QuaternionX,
+					  frame.QuaternionY,
+					  frame.QuaternionZ,
+					  frame.QuaternionW})
+					CHECK(std::isfinite(value));
+				const auto checkVector = [](const engine::core::Vector3 &actual,
+											const engine::core::Vector3 &wanted) {
+					CHECK(actual.X == Approx(wanted.X).margin(1e-5));
+					CHECK(actual.Y == Approx(wanted.Y).margin(1e-5));
+					CHECK(actual.Z == Approx(wanted.Z).margin(1e-5));
+				};
+				checkVector(position, expected.Position);
+				checkVector(right, expected.RightVector());
+				checkVector(up, expected.UpVector());
+				checkVector(look, expected.LookVector());
+			};
+			engine::ecs::AttributeValue sourceFrame;
+			REQUIRE(engine::ecs::GetAttribute(store, source, Name("CFrame"), sourceFrame));
+			CHECK(sourceFrame.Type == engine::ecs::PropertyType::CFrame);
+			checkFrame("template CFrame", sourceFrame.CFrame);
+			engine::ecs::AttributeValue sourceName;
+			REQUIRE(engine::ecs::GetAttribute(store, source, Name("Name"), sourceName));
+			CHECK(sourceName.Type == engine::ecs::PropertyType::String);
+			CHECK(sourceName.String == "FixtureCamera");
+			engine::ecs::AttributeValue sourceFieldOfView;
+			REQUIRE(engine::ecs::GetAttribute(store, source, Name("FieldOfView"), sourceFieldOfView));
+			CHECK(sourceFieldOfView.Type == engine::ecs::PropertyType::Double);
+			CHECK(sourceFieldOfView.Double == Approx(58.0));
 			const auto *active = store.Resource<ActiveCamera>();
 			if (!client) {
 				CHECK(active == nullptr);
@@ -3402,19 +3439,38 @@ marker.Value = camera
 			const auto camera = active->Entity;
 			CHECK(Store::IsPredicted(camera));
 			CHECK(engine::ecs::IsClientLocalInstance(store, camera));
-			CHECK(
-				store.Get<engine::scene::Transform>(camera)->Frame.Position ==
-				engine::core::Vector3{12, 13, 14}
-			);
-			CHECK(
-				store.Resource<engine::scene::CameraController>()->Mode ==
-				engine::scene::CameraMode::Scriptable
-			);
+			CHECK(engine::scene::CameraSubjectRoot(store, camera) == engine::ecs::NULL_ENTITY);
 			const auto player = store.Resource<engine::scene::LocalPlayer>()->Instance;
 			const auto copy =
 				store.FindFirstChild(store.FindFirstChild(player, "PlayerScripts"), "DemoCamera");
 			CHECK(copy != source);
 			CHECK(Store::IsPredicted(copy));
+			engine::ecs::AttributeValue copiedFrame;
+			REQUIRE(engine::ecs::GetAttribute(store, copy, Name("CFrame"), copiedFrame));
+			CHECK(copiedFrame.Type == engine::ecs::PropertyType::CFrame);
+			checkFrame("PlayerScripts CFrame", copiedFrame.CFrame);
+			const auto marker = store.FindFirstChild(copy, "PublishedCamera");
+			REQUIRE(store.Get<engine::scene::ObjectValue>(marker) != nullptr);
+			CHECK(store.Get<engine::scene::ObjectValue>(marker)->Value == camera);
+			const auto checkActiveCamera = [&](std::string_view stage) {
+				const auto *current = store.Resource<ActiveCamera>();
+				REQUIRE(current != nullptr);
+				CHECK(current->Entity == camera);
+				const auto *transform = store.Get<engine::scene::Transform>(camera);
+				REQUIRE(transform != nullptr);
+				checkFrame(stage, transform->Frame);
+				const auto *lens = store.Get<engine::scene::Camera>(camera);
+				REQUIRE(lens != nullptr);
+				CHECK(
+					lens->FieldOfViewRadians ==
+					Approx(58.0f * std::numbers::pi_v<float> / 180.0f).margin(1e-5)
+				);
+			};
+			checkActiveCamera("active camera after companion");
+			engine::scene::UpdateCameraControl(store);
+			engine::scene::FollowOwnCharacter(store);
+			engine::scene::PlaceCamera(store);
+			checkActiveCamera("active camera after camera systems");
 			const auto cameraCount = [&] {
 				size_t count = 0;
 				store.Each<const engine::scene::Camera>([&](Entity entity, const engine::scene::Camera &) {
@@ -3425,6 +3481,7 @@ marker.Value = camera
 			for (int tick = 0; tick < 3; ++tick)
 				systems.Tick(store, 1.0f / 60);
 			CHECK(cameraCount() == 1);
+			checkActiveCamera("active camera after scheduler ticks");
 			REQUIRE(LoadScene(store, systems, builder.string(), error, &runtime, &limits));
 			CHECK_FALSE(store.Alive(camera));
 			CHECK_FALSE(store.Alive(copy));

@@ -59,9 +59,16 @@ file(GLOB_RECURSE example_script_assets CONFIGURE_DEPENDS
 foreach(asset IN LISTS example_script_assets)
 	get_filename_component(asset_extension "${asset}" LAST_EXT)
 	file(RELATIVE_PATH asset_relative "${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts" "${asset}")
-	if(NOT asset_extension STREQUAL ".luau" AND NOT asset_relative IN_LIST example_javascript_twins)
-		message(FATAL_ERROR "examples: demo script asset ${asset} must be Luau or a declared JavaScript twin")
+	if(asset_extension STREQUAL ".luau" OR asset_relative IN_LIST example_javascript_twins)
+		continue()
 	endif()
+	if(asset_relative MATCHES "^client/DemoCameras/([^/]+)\\.client\\.js$")
+		set(camera_stem "${CMAKE_MATCH_1}")
+		if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/client/DemoCameras/${camera_stem}.client.luau")
+			continue()
+		endif()
+	endif()
+	message(FATAL_ERROR "examples: demo script asset ${asset} must be Luau or a paired JavaScript demo")
 endforeach()
 
 # Retire stale twins while preserving the explicitly paired milestone demos.
@@ -69,8 +76,19 @@ file(GLOB_RECURSE staged_javascript_demos
 	"${MONO_STAGE_ROOT}/assets/examples/scripts/*.js"
 	"${MONO_STAGE_ROOT}/assets/examples/scripts/*.js.map")
 foreach(staged_demo IN LISTS staged_javascript_demos)
-	get_filename_component(staged_name "${staged_demo}" NAME)
-	if(NOT staged_name IN_LIST example_javascript_twins)
+	file(RELATIVE_PATH staged_relative "${MONO_STAGE_ROOT}/assets/examples/scripts" "${staged_demo}")
+	string(REGEX REPLACE "\\.map$" "" staged_javascript "${staged_relative}")
+	set(preserve_javascript FALSE)
+	if(staged_javascript IN_LIST example_javascript_twins)
+		set(preserve_javascript TRUE)
+	elseif(staged_javascript MATCHES "^client/DemoCameras/([^/]+)\\.client\\.js$")
+		set(camera_stem "${CMAKE_MATCH_1}")
+		if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/client/DemoCameras/${camera_stem}.client.js" AND
+		   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/client/DemoCameras/${camera_stem}.client.luau")
+			set(preserve_javascript TRUE)
+		endif()
+	endif()
+	if(NOT preserve_javascript)
 		file(REMOVE "${staged_demo}")
 	endif()
 endforeach()
@@ -81,7 +99,8 @@ file(GLOB example_scenes CONFIGURE_DEPENDS
 
 # Client camera programs retain their template path alongside each builder.
 file(GLOB_RECURSE demo_camera_scripts CONFIGURE_DEPENDS
-	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/client/DemoCameras/*.luau")
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/client/DemoCameras/*.luau"
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts/client/DemoCameras/*.js")
 foreach(companion IN LISTS demo_camera_scripts)
 	file(RELATIVE_PATH companion_relative "${CMAKE_CURRENT_SOURCE_DIR}/assets/scripts" "${companion}")
 	set(companion_staged "${MONO_STAGE_ROOT}/assets/examples/scripts/${companion_relative}")
