@@ -10,6 +10,11 @@ mono_add_library(assetc
 		Engine::imagegraph
 )
 
+# The end-to-end benchmark joins the ECS host to the ordinary asset cooker.
+if(TARGET bench_assetc)
+	target_link_libraries(bench_assetc PRIVATE Engine::script)
+endif()
+
 add_executable(assetc app/main.cpp)
 target_link_libraries(assetc PRIVATE Tool::assetc Engine::core Engine::assets Engine::bake)
 target_compile_options(assetc PRIVATE ${MONO_COMPILE_OPTIONS})
