@@ -5,8 +5,8 @@
 This is the approved execution plan for the v0.26.1 work listed in
 [`NEW_ROADMAP.md`](../NEW_ROADMAP.md). The shared graph module, target layer,
 module policy updates, and adapter migrations have user approval. Remaining
-implementation and evidence gates are tracked below. No GPU checks or
-optimization gains are claimed here.
+implementation and evidence gates are tracked below. No milestone completion
+or optimization gains are claimed here.
 
 The planned scope is:
 
@@ -23,8 +23,8 @@ The task is complete only when each item has a real consuming path, accepted evi
 tests, or public declarations alone do not complete a feature. The scope must not be reduced to fit an implementation shortcut.
 
 The v0.26.1 branch is based on the minimal baseline and documentation changes named in the task handoff. The archived
-`v0.26.5-imagegraph-full-archive` at `27a50cd2` is reference history only. Do not import its full runtime into this work. The version file currently
-says `0.26.0`; update it to `0.26.1` only as part of authorized implementation.
+`v0.26.5-imagegraph-full-archive` at `27a50cd2` is reference history only. Do not import its full runtime into this work. `VERSION` is `0.26.1`
+at commit `c9dbcedc`.
 
 ## Constraints that govern the work
 
@@ -172,11 +172,17 @@ a town scene. Do not imply a future AI runtime already exists.
 
 ### C04 CPU recording and physical queue overlap
 
-Measure complete owner-thread recording first. `Renderer.cpp` currently advertises `UnifiedQueue = true`; the vendored SDL path is reported to create
-one Vulkan queue. Queue-family capabilities are not yet established. The available GPU is reported as an RTX 4090, while Nsight tools were not found
-on PATH. Recheck hardware, drivers, backend and tools before choosing a prototype.
-Read-only `/proc/driver/nvidia/params` reports `RmProfilingAdminOnly=1`; Nsight is not installed. Tool installation alone would not prove trace
-access. Keep capture permission unknown until a concrete capture succeeds. See NVIDIA's [performance-counter permissions note](https://developer.nvidia.com/ERR_NVGPUCTRPERM). No root driver configuration change is planned.
+Measure complete owner-thread recording first. The initial source audit found
+`Renderer.cpp` advertising `UnifiedQueue = true` and reported the vendored SDL
+path creating one Vulkan queue. That was the audit state, not a current
+capability claim. Queue-family capabilities still need to be established for
+the opt-in path. The audit reported an RTX 4090 and
+`/proc/driver/nvidia/params` with `RmProfilingAdminOnly=1`; it also recorded
+Nsight unavailable at that time. Later capture attempts and their limits are
+in the current evidence table below. Tool installation alone does not prove
+trace access. See NVIDIA's [performance-counter permissions
+note](https://developer.nvidia.com/ERR_NVGPUCTRPERM). No root driver
+configuration change is planned.
 
 The C04 goal requires a working private parallel-recording path and measured, vendor-traced physical overlap. Profiling can reject an individual
 optimization or justify leaving overlap disabled by default, but serial fallback alone does not fulfill C04. Unavailable queues or trace permissions
@@ -416,6 +422,9 @@ implementation slice. They do not validate the full proposed feature.
 These commits and results record partial work. They do not establish milestone
 completion or optimization gains.
 
+Earlier source-audit observations in this plan describe the tree at audit time.
+The rows below record later, scoped evidence and retain their stated limits.
+
 | Commits | Implemented increment |
 |---|---|
 | `750761a6`, `9b1dc61f`, `76fb2cc4`, `f06ef94f` | Graph foundation; cadence and pose; typed compute CPU contracts; scalar FIFO and schema adapter. |
@@ -439,15 +448,25 @@ completion or optimization gains.
 | Latest focused validation | Native procedural: 3,596 assertions/33 cases passed, including the previously failing Generate rollback coverage. Neutral service and serial Studio/Game coexistence: 106 assertions/4 cases passed. Signed RGA-to-Cook-to-CDN-to-directory delivery and unbound generator-free install: 171 assertions/1 case passed, including stale input, download edit, misnamed mesh last-good, and retry cases. |
 | Bindings and component documentation | Bindings generation/check passed for 3 artifacts. `components-check` passed for 266 components, with 0 missing purposes and no serialized padding leaks. The full 131-script Luau check passed against current bindings, and Studio TypeScript passed. The new ProceduralService has 13 methods. |
 | C06 real forest | ProceduralVM Luau and JavaScript produced identical real-forest hashes, 84 assertions/3 cases. This is C06 evidence, separate from C02 service results. |
-| C06 benchmark harness | Eight diagnostic scenarios and context oracles passed in a concurrent O0 CI trial. This is functional harness evidence, not timed B0 performance evidence. A dense O0 C02 harness did not finish within its 180-second deadline and had no oracle failure; optimized rerun is pending. |
+| C06 benchmark harness | Eight diagnostic scenarios and context oracles passed in a concurrent O0 CI trial. This is functional harness evidence, not timed B0 performance evidence. The earlier dense O0 C02 harness did not finish within its 180-second deadline and had no oracle failure; later optimized 120-tick results are recorded below. |
 | Compiler and review status | Benchmark compiler is GCC 13.3.0. The Generate rollback failure is fixed in the current procedural result. The Studio role-mode conflict is fixed; serial Studio/Game coexistence is covered by the passing service tests above. |
 | C01 and startup on real Vulkan | `.cache/build/ci/compute-bounded-and-startup-validation.log`: 360 assertions/12 cases passed on RTX 4090, NVIDIA 580.173.02, with zero VUIDs or validation errors. Earlier pre-metadata poll passed 470/12; poll loops vary assertion counts. The prior 56 teardown and 3 partial-startup VUID reproductions are fixed in the current path. |
 | Headless regression | The old SIGSEGV case passed after the JavaScript self-disconnect fix: 16 assertions, 1 case. |
 | Isolated SDL sidecar | Opt-out/opt-in transfer-to-compute-to-graphics exact parity and synchronization validation passed cleanly. This separate sidecar result does not establish production integration or physical overlap. |
 | AudioGraph heap | Constructor: 12,734,480 bytes and 17 blocks. Legal 1,024-node/1,023-input mutation/rebuild added 0 blocks/bytes. This does not prove full mixer allocation freedom. |
 | C04 recording and quiet benchmark | The earlier emitter recording measured 1,000 to 100,000 emitters, each with 6 particle slots, and one changed emitter; step-record self time was 4 to 10 us, draw self about 1 us, and whole render 150 to 223 us unchanged or 323 to 359 us for 10,000 emitters with one change. No dropped spans. The approved RTX 4090/Vulkan 580.173.02 GCC 13.3.0/O3 quiet benchmark used 128² scenes with 1,024 actual meshes per view, 11 cohorts, 16 warmups and 16 measured samples. Whole Render was 0.511 to 0.567 ms for 1 view, 0.915 to 1.029 ms for 2, and 3.446 to 3.721 ms for 8. `drawSlots` self time was 0.264 to 0.287, 0.531 to 0.559, and 2.104 to 2.204 ms respectively. There were no dirty rows, uploads, allocation churn, or CPU drops. Eight-view GPU marks were 296, so GPU timing is partial. The profiling prerequisite is met and the previously approved renderer worker implementation may proceed; these results do not establish worker benefit or physical overlap. |
-| C01 native GPU benchmark | Six cases passed exact CPU checks. GPU timing was unavailable and the latest mean/tail metrics are partial, so the timing matrix is incomplete. |
-| Remaining | C06 native scene/bake/authored inputs, shared assets PRD1, baked loading, signed client delivery and real-forest hash parity have validation; Studio UI remains. C02 simple native rows and service/serial Runtime checks passed, while UI, queues and ray B0 work remain. The dense O0 harness timed out at 180 seconds with no oracle failure; an optimized rerun is pending. B0 and all three optimization passes remain incomplete. |
+| Earlier C01 native GPU benchmark | Six cases passed exact CPU checks. GPU timing was unavailable in that run and its mean/tail metrics were partial; this is historical evidence, not the current trace result below. |
+| Current strict builds | The selected five targets passed in 681 steps. The optimized build of benchRender, benchClient, and benchAssetc passed in 540 steps. Later coverage and unit builds passed. These are scoped build results, not the full build gate. |
+| C01 and C04 serial/parallel suites | In each mode, the suites passed 15 cases: serial had 1,229 assertions and parallel had 1,228 assertions. Both had zero VUIDs, synchronization messages, or validation errors after retirement fixes in `02d6e013` and `ca424e27`. |
+| Broad CTest | `graphcore`, `graph`, `imagegraph`, `bakegraph`, `audio`, `procedural`, `scriptluau`, `scriptjs`, and `scripthost` passed. Studio passed 743/745 tests; the two failures were MCP resource fixtures missing the new computegraph, graphcore, and procedural policies. Fixture-only correction `825ad0bb` then passed focused normal and factory suites with 505 assertions/2 cases. This is not a full 10/10 CTest result. |
+| Studio headless interaction | Procedural and command suites passed with 11,933 assertions/45 cases, including a real ImGui click. Commits `9693ddf3` (undo) and `2c6a281b` (panel) are present; final visual review remains pending. |
+| Architecture | 54 modules, 6 programs, 40 layered modules, and 6 fixtures passed. Other required gates remain open. |
+| Weather and ray functional diagnostics | Ray passed 36 cohorts at 1080p for 512 frames, with all correctness oracles passing. Its run started at 00:32:52 ACST while unrelated GPU work was active, so reject its timings for quiet B0 acceptance. Weather inactive passed 512 frames. Empty initially observed one field dispatch where zero was expected; the benchmark now separates a 96-frame maintenance phase before the strict 512-frame reuse phase. The revised diagnostic runtime is pending. |
+| C02 native and town timing | Seven native cohorts and eight town cohorts each passed 600 ticks with 120 internal warmup ticks. The runner used `--warmup-samples 0` and reported that actual CLI setting; cohorts were not repeated for harness warmup. The native run started at 00:26:48 ACST and provides 497 steady measured ticks per cohort with useful tails. Critical windows have only 30 samples and remain insufficient for firm tail claims. Native classes cover empty, simple (16 actors, 4 bones, 8 keys, 128 obstacles), busy (128 actors, 4 bones, 8 keys, 1,024 obstacles), and complex (128 actors, 64 bones, 32 keys, 2,048 obstacles), with full and authored variants for populated classes. Town simple is one world with 2 NPCs; complex is 32 independent worlds with 64 NPCs total per VM, not one crowded town. All town cohorts ran from 00:28:56.202 through 00:29:03.262 ACST, before the model processes started at 00:29:54. Native complex full p50 was 4.739151 ms and authored p50 was 2.827348 ms, a feature-baseline comparison rather than an optimization-pass claim. Luau allocator figures use requested bytes/blocks and individual-window peaks summed; QuickJS reports charged malloc live bytes/count and has no peak or growth measure. These allocator bases are not comparable. |
+| Partial quiet B0 rows | Graph/domain: 30 rows at 101 samples; portal: 5 rows at 101 samples; procedural: 8 rows at 128 trials. Timed runs and exact oracles passed. The whole B0 matrix and all three optimization passes remain incomplete. |
+| C04 capture evidence | Nsight Systems 2026.5.1 on RTX 4090 with driver 580.173.02 recorded an affirmative overlap between the C01 compute and G-buffer raster GPU execution ranges. For 16 measured frames after 16 warmups, overlap was observed in 9/16 one-view frames (sum 166,504 ns, max 27,393 ns), 8/16 two-view frames (sum 160,359 ns, max 27,201 ns), and 12/16 eight-view frames (sum 193,899 ns, max 26,945 ns). This capture at 00:21:24 ACST predates the later model processes and remains valid evidence of physical overlap, not a speedup. Native queue handles, source packet order, and GPU context/correlation IDs identify the raster work; the counts were independently reproduced. Exact full-oracle output passed for the unchanged two-pass kernel over 524,288 `f32x4` elements, with 8 MiB input and output. This benchmark size respects the bridge's 16 MiB aggregate budget for its two result copies; the native executor's separate allowance was not changed. A later set of 12 cohorts (4 MiB/8 MiB, 1/2/8 views, serial/parallel, 256 frames) also passed every exact full-buffer oracle with zero drops, but its timings are rejected for quiet B0 acceptance: two external Ollama `llama-server` processes (PIDs 3275794 and 3275845, started 00:29:54 and 00:29:56 ACST) used the same RTX 4090, with `nvidia-smi pmon` later showing 21% to 70% model use; a .NET build was also active. Local v2 capture artifacts are `.cache/build/bench/c04-nsys-parallel-v2.nsys-rep` and `.sqlite`. GPU ranges do not report instruction occupancy; compute and transfer ranges may appear early per [Nsight Systems Vulkan trace notes](https://docs.nvidia.com/nsight-systems/UserGuide/index.html#vulkan-gpu-trace-notes). Nsight Graphics 2026.3.1 counter capture remains blocked by permissions. |
+| Current Vulkan GPU test | The ordinary Vulkan `test_render` and frozen SDL window-adoption patch passed in both presets across 376 build steps. Canonical weather, volume, and hard-render suites had 15 passes and 2 failures at assertions 920,000 and 920,003, followed by exit 139. `PortalFixtures.cpp:2013` observed zero reflected cloud pixels against an expectation above 30 in both separate captures 0 and 1. `HardRenderGpu.cpp:435` hit SIGSEGV with sampler-layout 0: 7,988 reads and draw 8,114 reads, alongside many `SYNC_READ_AFTER_WRITE` messages. The available messages show compute writes to sampled images followed by vertex/fragment-only destination barriers. Isolated repro investigation is active; the cause is unresolved, with no engine cause or fix established. |
+| Remaining | C06 native scene/bake/authored inputs, shared assets PRD1, baked loading, signed client delivery and real-forest hash parity have validation. Windowed presentation work is in progress; the ordinary fallback remains, and final visual Studio/runtime review remains pending. The seventh C01 zero-input/128-batch case is frozen pending a build. Weather's revised maintenance/reuse diagnostic awaits runtime. Ray 512-frame and C04 256-frame quiet timing runs need clean-environment reruns. The complete B0 matrix and all three optimization passes remain incomplete. |
 
 ## Initial evidence checklist
 
