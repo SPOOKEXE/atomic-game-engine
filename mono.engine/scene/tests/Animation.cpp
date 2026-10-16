@@ -5,6 +5,7 @@
 // keeping a back-pointer that could go stale.
 
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Components.hpp>
@@ -20,6 +21,7 @@
 #include <vector>
 
 TEST_SUITE_ID("engine.scene.animation")
+TEST_DEPENDS("engine.ecs.scheduler")
 
 using engine::core::Name;
 using engine::ecs::Classes;
@@ -260,4 +262,30 @@ TEST_CASE("playing tracks advance and fade on fixed world time", "[scene][animat
 	REQUIRE(advanced != nullptr);
 	CHECK(advanced->TimePosition == 0.2f);
 	CHECK(advanced->Weight == 0.2f);
+}
+
+TEST_CASE(
+	"the semantic animation installer is idempotent orders after scripts and respects replica ownership",
+	"[scene][animation]"
+) {
+	RegisterSceneClasses();
+	Store store("animation_test.installed");
+	const Entity track = store.CreateInstance(Classes::Find(Name("AnimationTrack")), "Walk");
+	store.GetMutable<AnimationTrack>(track)->FadeTime = 1;
+	engine::ecs::Scheduler scheduler;
+	engine::scene::RegisterAnimationClockSystem(scheduler);
+	engine::scene::RegisterAnimationClockSystem(scheduler);
+	scheduler.Add("script-heartbeat", engine::ecs::Phase::Simulation, [track](Store &world) {
+		auto *state = world.GetMutable<AnimationTrack>(track);
+		state->Playing = true;
+		state->Speed = 2;
+	});
+	REQUIRE(scheduler.Validate().Status == engine::ecs::SystemScheduleStatus::Ready);
+	scheduler.Tick(store, 0.125f);
+	CHECK(store.Get<AnimationTrack>(track)->TimePosition == 0.25f);
+	const float weight = store.Get<AnimationTrack>(track)->Weight;
+	store.SetAdoptOnly(true);
+	scheduler.Tick(store, 0.125f);
+	CHECK(store.Get<AnimationTrack>(track)->TimePosition == 0.25f);
+	CHECK(store.Get<AnimationTrack>(track)->Weight == weight);
 }

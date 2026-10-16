@@ -14,6 +14,7 @@
 
 namespace engine::ecs {
 	class Store;
+	class Scheduler;
 }
 
 namespace engine::render {
@@ -40,7 +41,11 @@ namespace engine::render {
 	// Finds a registered clip by name, or null when absent.
 	const assets::AnimationData *FindAnimation(const ecs::Store &store, const core::Name &name);
 
-	// Samples every playing track and writes the resulting local bone poses.
+	// Samples due rigs at current track time and retains bones between evaluations.
 	// Returns the number of Bone rows whose Transform changed.
 	size_t EvaluateAnimations(ecs::Store &store);
+
+	// Installs visual sampling and bone resolution once, in that order before collection.
+	// Does not advance semantic track time, including in a replicated world.
+	void RegisterAnimationPresentationSystems(ecs::Scheduler &scheduler);
 }

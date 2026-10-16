@@ -1135,18 +1135,8 @@ namespace client {
 		// this frame's distance.
 		InstallEffectsPresentation(store, scheduler);
 		InstallControls(store, scheduler);
-		scheduler.Add("advance-animation-tracks", Phase::Simulation, [](Store &world) {
-			(void)engine::scene::AdvanceAnimationTracks(world);
-		});
-		scheduler.Add("evaluate-animations", Phase::PreRender, [](Store &world) {
-			(void)engine::render::EvaluateAnimations(world);
-		});
-		scheduler.Add(
-			"resolve-bones",
-			Phase::PreRender,
-			[](Store &world) { (void)engine::scene::ResolveBones(world); },
-			SystemOrder{{}, {"evaluate-animations"}}
-		);
+		engine::scene::RegisterAnimationClockSystem(scheduler);
+		engine::render::RegisterAnimationPresentationSystems(scheduler);
 
 		scheduler.Add(
 			"collect-instances",
@@ -1403,18 +1393,8 @@ namespace client {
 		// list is built from. The collection dependencies state that order.
 		InstallEffectsPresentation(store, scheduler);
 		InstallControls(store, scheduler);
-		scheduler.Add("advance-animation-tracks", Phase::Simulation, [](Store &world) {
-			(void)engine::scene::AdvanceAnimationTracks(world);
-		});
-		scheduler.Add("evaluate-animations", Phase::PreRender, [](Store &world) {
-			(void)engine::render::EvaluateAnimations(world);
-		});
-		scheduler.Add(
-			"resolve-bones",
-			Phase::PreRender,
-			[](Store &world) { (void)engine::scene::ResolveBones(world); },
-			SystemOrder{{}, {"evaluate-animations"}}
-		);
+		engine::scene::RegisterAnimationClockSystem(scheduler);
+		engine::render::RegisterAnimationPresentationSystems(scheduler);
 
 		scheduler.Add(
 			"collect-instances",

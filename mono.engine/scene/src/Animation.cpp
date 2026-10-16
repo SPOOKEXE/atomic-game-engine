@@ -1,4 +1,5 @@
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Part.hpp>
@@ -121,6 +122,19 @@ namespace engine::scene {
 			}
 		});
 		return changed;
+	}
+
+	void RegisterAnimationClockSystem(ecs::Scheduler &scheduler) {
+		if (scheduler.HasSystem("advance-animation-tracks", ecs::Phase::Simulation)) return;
+		scheduler.Add(
+			"advance-animation-tracks",
+			ecs::Phase::Simulation,
+			[](ecs::Store &store) {
+				if (store.AdoptOnly()) return;
+				(void)AdvanceAnimationTracks(store);
+			},
+			ecs::SystemOrder{{}, {}, {}, {"script-heartbeat"}}
+		);
 	}
 
 	ecs::ClassId AnimatorClass() {

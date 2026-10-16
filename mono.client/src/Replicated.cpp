@@ -15,6 +15,7 @@
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Integrate.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/render/Animation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/CameraContinuation.hpp>
@@ -623,12 +624,18 @@ namespace client {
 		scheduler.Add("resolve-materials", Phase::PreRender, [](Store &world) {
 			(void)engine::scene::ResolveMaterials(world);
 		});
+		engine::render::RegisterAnimationPresentationSystems(scheduler);
 		scheduler.Add(
 			"collect-replicated",
 			Phase::PreRender,
 			CollectReplicated,
 			SystemOrder{
-				{}, {"resolve-attachments", "pose-characters", "aim-surface-cameras", "resolve-materials"}
+				{},
+				{"resolve-attachments",
+				 "pose-characters",
+				 "aim-surface-cameras",
+				 "resolve-materials",
+				 "resolve-bones"}
 			}
 		);
 

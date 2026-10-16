@@ -41,6 +41,7 @@
 
 namespace engine::ecs {
 	class Store;
+	class Scheduler;
 }
 
 namespace engine::scene {
@@ -275,6 +276,10 @@ namespace engine::scene {
 	// Clip length is content-owned, so wrapping and clamping happen when sampled.
 	// @return The number of track rows changed.
 	size_t AdvanceAnimationTracks(ecs::Store &store);
+
+	// Installs fixed-tick semantic playback once, after scripts when present.
+	// Adopt-only stores retain the authority's received track time and fade weights.
+	void RegisterAnimationClockSystem(ecs::Scheduler &scheduler);
 
 	// The `Animator` class id, registering the scene tree on first call.
 	//

@@ -7,6 +7,7 @@
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/scene/Animation.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
@@ -93,6 +94,7 @@ namespace server {
 		// writer. The input half stays out: a server has no keyboard, and what
 		// moves a client-owned character here is its submitted `Motion`.
 		engine::physics::RegisterCharacterSystems(scheduler);
+		engine::scene::RegisterAnimationClockSystem(scheduler);
 
 		// **The respawn loop, and it is here rather than in `physics` because
 		// half of it is `gui`'s.** A spawn is two things: a new body, which is
