@@ -51,6 +51,7 @@ namespace engine::render {
 			uint32_t Recorded = 0;
 			uint32_t WorkerRecorded = 0;
 			uint32_t Submitted = 0;
+			uint32_t HandoffAttempts = 0;
 			uint32_t Edges = 0;
 			double ProducerMicroseconds = 0;
 			double JoinMicroseconds = 0;
@@ -82,6 +83,8 @@ namespace engine::render {
 		bool HasCapacity(uint32_t extra) const;
 		void Refuse();
 		void RefuseSubmissionAfterForTests(uint32_t successfulSubmits);
+		// Lets SDL submit one command successfully, then refuses its controller result.
+		void RefuseFirstHandoffResultForTests();
 		void RefuseDrainForTests();
 		// Explicit failure recovery or teardown only; normal completion never waits here.
 		bool RetireFailed();

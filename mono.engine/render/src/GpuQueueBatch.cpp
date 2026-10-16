@@ -15,6 +15,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 
 namespace engine::render {
 	namespace {
@@ -89,6 +90,7 @@ namespace engine::render {
 		uint32_t NextWorker = 0;
 		uint32_t RefuseAfter = INVALID;
 		bool RefuseDrain = false;
+		bool RefuseFirstHandoffResult = false;
 		std::shared_ptr<GpuRetirementProof> Retirement;
 		std::shared_ptr<GpuRetirementProof> FailedRetirement;
 		std::vector<std::shared_ptr<void>> RetainedResources;
@@ -192,11 +194,17 @@ namespace engine::render {
 				return;
 			auto *command = task.Command;
 			task.Command = nullptr;
+			++Last.HandoffAttempts;
+			const bool refuseObservedResult = std::exchange(RefuseFirstHandoffResult, false);
 			if (task.Completion) {
 				task.Fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
 				task.Submitted = task.Fence != nullptr;
 			} else
 				task.Submitted = SDL_SubmitGPUCommandBuffer(command);
+			// This seam keeps the successful native submit alive while testing a lost controller result.
+			if (refuseObservedResult && !task.Completion && task.Submitted) {
+				task.Submitted = false;
+			}
 		}
 
 		void Run(size_t worker) {
@@ -391,6 +399,12 @@ namespace engine::render {
 		Held->RefuseAfter = successfulSubmits;
 #else
 		(void)successfulSubmits;
+#endif
+	}
+	void GpuQueueBatch::RefuseFirstHandoffResultForTests() {
+#if ENGINE_ASSERTS_ENABLED
+		Held->RequireOwner();
+		Held->RefuseFirstHandoffResult = true;
 #endif
 	}
 	void GpuQueueBatch::RefuseDrainForTests() {
@@ -626,11 +640,13 @@ namespace engine::render {
 	bool GpuQueueBatch::Complete(bool submitted, bool finalHandedOff) {
 		Held->RequireOwner();
 		if (!Held->Active) return submitted;
+		if (finalHandedOff) ++Held->Last.HandoffAttempts;
 		if (finalHandedOff && Held->FinalTask != INVALID) Held->Tasks[Held->FinalTask].Command = nullptr;
 		if (submitted && Held->FinalTask != INVALID) {
 			Held->Tasks[Held->FinalTask].Submitted = true;
 			++Held->Last.Submitted;
 			auto *tail = Held->Api->Acquire(Held->Device, ATOMIC_GPU_QUEUE_GRAPHICS);
+			if (tail) ++Held->Last.HandoffAttempts;
 			auto *fence = tail ? SDL_SubmitGPUCommandBufferAndAcquireFence(tail) : nullptr;
 			if (fence) {
 				++Held->Last.Submitted;
@@ -658,7 +674,8 @@ namespace engine::render {
 				SDL_CancelGPUCommandBuffer(*Held->Main);
 				*Held->Main = nullptr;
 			}
-			if (Held->Last.Submitted != 0 || finalHandedOff) {
+			// A failed device submission can still be pending even when SDL reported failure.
+			if (Held->Last.HandoffAttempts != 0 || finalHandedOff) {
 				ENGINE_PROFILE_CAT("GPU partial submission drain", core::ProfileCategory::Idle);
 				if (Held->RefuseDrain || !SDL_WaitForGPUIdle(Held->Device)) {
 					retirementKnown = false;
@@ -688,6 +705,7 @@ namespace engine::render {
 			Held->DestroySemaphore(Held->Api->Device, semaphore, nullptr);
 		Held->Semaphores.clear();
 		Held->RefuseAfter = INVALID;
+		Held->RefuseFirstHandoffResult = false;
 		Held->Last.Complete = submitted;
 		Held->Main = nullptr;
 		Held->View = nullptr;

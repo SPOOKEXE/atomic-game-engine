@@ -385,7 +385,7 @@ TEST_CASE(
 	REQUIRE(computegraph::StockStableCompactU32(8, program, diagnostic) == computegraph::Status::Ok);
 	REQUIRE(host.Install(program, diagnostic) == computegraph::Status::Ok);
 
-	const auto runFailure = [&](bool refuseDrain) {
+	const auto runFailure = [&](bool refuseDrain, bool refuseFirstHandoff = false) {
 		SDL_GPUCommandBuffer *main = nullptr;
 		REQUIRE(batch.Begin(&main));
 		main = batch.Api()->Acquire(queues.Device, ATOMIC_GPU_QUEUE_GRAPHICS);
@@ -410,10 +410,14 @@ TEST_CASE(
 		const uint64_t reservedBytes = host.ReservedDeviceBytes();
 		REQUIRE(reservedBytes > 0);
 
-		batch.RefuseSubmissionAfterForTests(2);
+		if (refuseFirstHandoff)
+			batch.RefuseFirstHandoffResultForTests();
+		else
+			batch.RefuseSubmissionAfterForTests(2);
 		if (refuseDrain) batch.RefuseDrainForTests();
 		CHECK_FALSE(batch.SubmitEarlier(main));
-		CHECK(batch.LastStatistics().Submitted == 2);
+		CHECK(batch.LastStatistics().Submitted == (refuseFirstHandoff ? 0u : 2u));
+		CHECK(batch.LastStatistics().HandoffAttempts == (refuseFirstHandoff ? 1u : 2u));
 		CHECK_FALSE(batch.Complete(false, false));
 		CHECK_FALSE(batch.LastStatistics().Complete);
 		batch.EndScope();
@@ -432,6 +436,9 @@ TEST_CASE(
 
 		CHECK(host.PendingGpuCount() == 1);
 		CHECK(host.ReservedDeviceBytes() == reservedBytes);
+		SDL_GPUCommandBuffer *rejectedMain = nullptr;
+		CHECK_FALSE(batch.Begin(&rejectedMain));
+		CHECK(rejectedMain == nullptr);
 		REQUIRE(batch.RetireFailed());
 		host.Poll();
 		CHECK(host.PendingGpuCount() == 0);
@@ -443,6 +450,12 @@ TEST_CASE(
 	}
 	SECTION("an uncertain drain keeps ownership until explicit failed-flight retirement") {
 		runFailure(true);
+	}
+	SECTION("a first handoff with a refused controller result is drained") {
+		runFailure(false, true);
+	}
+	SECTION("a first handoff with an uncertain drain keeps GPU ownership") {
+		runFailure(true, true);
 	}
 }
 #else
