@@ -43,6 +43,7 @@
 
 namespace engine::script {
 	class DataScriptPackageContext;
+	class JavaScriptRuntime;
 
 	// One neutral service property installed in this VM, and the service it is
 	// on.
@@ -67,6 +68,8 @@ namespace engine::script {
 		const DataScriptPackageContext *Package = nullptr;
 		uint64_t RuntimeIdentity = 0;
 		ecs::Store *World = nullptr;
+		// Non-owning bridge for native callbacks that enter this VM outside a runtime method.
+		JavaScriptRuntime *OwnerRuntime = nullptr;
 
 		// What the host is, for `RunService.IsServer()` and friends.
 		HostRole Role;

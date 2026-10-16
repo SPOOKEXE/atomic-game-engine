@@ -24,6 +24,7 @@
 // queue, so a reaction runs at a point the engine picked. A JS engine without
 // that API would have had to be rejected on rule 5 alone.
 
+#include "JavaScriptRuntime.hpp"
 #include "JsBindings.hpp"
 
 #include <engine/core/Log.hpp>
@@ -174,6 +175,19 @@ namespace engine::script {
 
 			ecs::Store *world = bound.World;
 			bound.World->OnDescendantRemoving([context, world](Entity ancestor, Entity leaving) {
+				JavaScriptRuntime *runtime = JsOf(context).OwnerRuntime;
+				if (runtime == nullptr) {
+					ENGINE_WARN("[script] DescendantRemoving has no owning JavaScript runtime");
+					return;
+				}
+				JavaScriptRuntime::EntryGuard guard(*runtime);
+				if (!guard) {
+					ENGINE_WARN(
+						"[script] a DescendantRemoving handler was refused: {}", runtime->LastError()
+					);
+					return;
+				}
+
 				JSValue subject = MakeJsInstance(context, leaving);
 
 				// **Logged rather than returned**, because there is nowhere to

@@ -1,4 +1,5 @@
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Characters.hpp>
@@ -15,13 +16,16 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
+#include <future>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 
 TEST_SUITE_ID("engine.scripthost.runtime")
@@ -510,11 +514,8 @@ namespace {
 	// regression presents. Without it an unbounded drain hangs the whole suite
 	// with no output, which is the least useful failure a test can produce.
 	//
-	// **The work stays on the calling thread and only the timer moves off it**,
-	// which is not a style choice: `ecs::Store` refuses a touch from a thread
-	// that does not own it, and QuickJS measures its call depth against the
-	// stack address its context was made on. A VM driven from a borrowed thread
-	// fails for both reasons before it reaches anything this file is about.
+	// Only the timer moves off-thread. The guarded VM call retains ownership
+	// of its store, with no concurrent access or handoff for the watchdog.
 	//
 	// Aborts rather than failing: the guarded thread is still inside a VM, so
 	// there is nothing to unwind to and nothing to report from.
@@ -1415,4 +1416,204 @@ TEST_CASE("a world with no scripts still takes somebody in", "[script][teleport]
 	});
 
 	scripts.reset();
+}
+
+TEST_CASE("runtime heartbeat follows serialized store handoffs between threads", "[script][thread-handoff]") {
+	RegisterClasses();
+	for (const auto language : {Language::Luau, Language::JavaScript}) {
+		INFO(static_cast<int>(language));
+		Store store("script_thread_handoff");
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime->Run(
+			language == Language::Luau ? R"(
+			local marker = Instance.new('Part')
+			marker.Name = 'ThreadMarker'
+			local beats = 0
+			RunService.Heartbeat:Connect(function()
+				beats += 1
+				marker.Size = Vector3.new(beats, 2 * beats, 3)
+				marker.Position = Vector3.new(0, beats, 0)
+			end)
+		)"
+									   : R"(
+			const marker = Instance.new('Part');
+			marker.Name = 'ThreadMarker';
+			let beats = 0;
+			RunService.Heartbeat.Connect(() => {
+				beats += 1;
+				marker.Size = Vector3.new(beats, 2 * beats, 3);
+				Promise.resolve().then(() => { marker.Position = Vector3.new(0, beats, 0); });
+			});
+		)"
+		));
+		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+		const auto caller = std::this_thread::get_id();
+		std::array<std::thread::id, 2> workers{};
+		std::array<bool, 2> beatOk{};
+		std::array<std::string, 2> errors{};
+		bool recursionRefused = false;
+		bool recovered = false;
+		std::string recursionError;
+		// The first worker stays alive while the second runs, proving distinct
+		// stacks while every VM entry remains serialized by get().
+		auto first = std::async(std::launch::async, [&] {
+			store.BindToCallingThread();
+			workers[0] = std::this_thread::get_id();
+			beatOk[0] = runtime->Heartbeat(1.0f / 60.0f);
+			errors[0] = runtime->LastError();
+			auto second = std::async(std::launch::async, [&] {
+				store.BindToCallingThread();
+				workers[1] = std::this_thread::get_id();
+				beatOk[1] = runtime->Heartbeat(1.0f / 60.0f);
+				errors[1] = runtime->LastError();
+				recursionRefused = !runtime->Run(
+					language == Language::Luau ? R"(
+					local function deep(n)
+						if n == 0 then return 0 end
+						return 1 + deep(n - 1)
+					end
+					deep(100000)
+				)"
+											   : R"(
+					function deep(n) { return n === 0 ? 0 : 1 + deep(n - 1); }
+					deep(100000);
+				)"
+				);
+				recursionError = runtime->LastError();
+				recovered = runtime->Run(
+					language == Language::Luau ? "assert(3 + 4 == 7)"
+											   : "if (3 + 4 !== 7) throw new Error('arithmetic');"
+				);
+			});
+			second.get();
+		});
+		try {
+			first.get();
+		} catch (...) {
+			store.BindToCallingThread();
+			throw;
+		}
+		store.BindToCallingThread();
+		CHECK(workers[0] != caller);
+		CHECK(workers[1] != caller);
+		CHECK(workers[0] != workers[1]);
+		INFO(errors[0]);
+		CHECK(beatOk[0]);
+		INFO(errors[1]);
+		CHECK(beatOk[1]);
+		INFO(recursionError);
+		CHECK(recursionRefused);
+		CHECK(recursionError.find("stack") != std::string::npos);
+		CHECK(recovered);
+		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+		const auto marker = store.FindFirstRoot("ThreadMarker");
+		REQUIRE(marker != engine::ecs::NULL_ENTITY);
+		CHECK(store.Get<Bounds>(marker)->HalfExtent == engine::core::Vector3(2, 4, 1.5f));
+		CHECK(store.Get<Transform>(marker)->Frame.Position.Y == Approx(4));
+	}
+}
+
+TEST_CASE(
+	"native removal enters a migrated VM before its worker script system", "[script][thread-handoff][jobs]"
+) {
+	RegisterClasses();
+	struct Pool {
+		Pool() {
+			engine::parallel::Jobs::Start(2);
+		}
+		~Pool() {
+			engine::parallel::Jobs::Stop();
+		}
+	} pool;
+	if (engine::parallel::Jobs::PinnedWorkerCount() == 0 || engine::parallel::ForceSerialCompute())
+		SKIP("actual assigned worker execution is unavailable on this host");
+	const auto caller = std::this_thread::get_id();
+	for (const auto language : {Language::Luau, Language::JavaScript}) {
+		INFO(static_cast<int>(language));
+		engine::world::UniverseSettings settings;
+		settings.WorldParallelFloorMilliseconds = 0;
+		engine::world::Universe universe(settings);
+		engine::world::WorldSettings scriptedSettings;
+		scriptedSettings.Name = engine::core::Name("worker.scripted");
+		engine::world::WorldSettings neighborSettings;
+		neighborSettings.Name = engine::core::Name("worker.neighbor");
+		const auto scripted = universe.Create(scriptedSettings);
+		REQUIRE(scripted.IsValid());
+		REQUIRE(universe.Create(neighborSettings).IsValid());
+		std::unique_ptr<engine::script::Runtime> runtime;
+		Entity marker{};
+		Entity victim{};
+		std::thread::id removalThread;
+		std::thread::id heartbeatThread;
+		bool heartbeatOk = false;
+		std::string heartbeatError;
+		REQUIRE(universe.Enter(scripted, [&](Store &store, engine::ecs::Scheduler &systems) {
+			runtime = MakeRuntime(store, language);
+			REQUIRE(runtime->Run(
+				language == Language::Luau ? R"(
+				local marker = Instance.new('Part')
+				marker.Name = 'NativeMarker'
+				marker.Size = Vector3.new(2, 2, 2)
+				local watched = Instance.new('Folder')
+				watched.Name = 'Watched'
+				local victim = Instance.new('Part')
+				victim.Name = 'Victim'
+				victim.Parent = watched
+				watched.DescendantRemoving:Connect(function(leaving)
+					if leaving.Name == 'Victim' then marker.Size = Vector3.new(2, 4, 2) end
+				end)
+				local beats = 0
+				RunService.Heartbeat:Connect(function()
+					beats += 1
+					marker.Position = Vector3.new(beats, 0, 0)
+				end)
+			)"
+										   : R"(
+				const marker = Instance.new('Part');
+				marker.Name = 'NativeMarker';
+				marker.Size = Vector3.new(2, 2, 2);
+				const watched = Instance.new('Folder');
+				watched.Name = 'Watched';
+				const victim = Instance.new('Part');
+				victim.Name = 'Victim';
+				victim.Parent = watched;
+				watched.DescendantRemoving.Connect((leaving) => {
+					if (leaving.Name === 'Victim') marker.Size = Vector3.new(2, 4, 2);
+				});
+				let beats = 0;
+				RunService.Heartbeat.Connect(() => {
+					beats += 1;
+					marker.Position = Vector3.new(beats, 0, 0);
+				});
+			)"
+			));
+			marker = store.FindFirstRoot("NativeMarker");
+			const auto watched = store.FindFirstRoot("Watched");
+			REQUIRE(watched != engine::ecs::NULL_ENTITY);
+			victim = store.FindFirstChild(watched, "Victim");
+			REQUIRE(victim != engine::ecs::NULL_ENTITY);
+			systems.Add("native-removal", engine::ecs::Phase::Input, [&](Store &owned) {
+				removalThread = std::this_thread::get_id();
+				owned.DestroyInstance(victim);
+			});
+			systems.Add("script-heartbeat", engine::ecs::Phase::Simulation, [&](Store &) {
+				heartbeatThread = std::this_thread::get_id();
+				heartbeatOk = runtime->Heartbeat(1.0f / 60.0f);
+				heartbeatError = runtime->LastError();
+			});
+		}) == engine::world::WorldStatus::Ok);
+		universe.Tick(1.0f / 60.0f);
+		CHECK(removalThread != caller);
+		CHECK(heartbeatThread == removalThread);
+		INFO(heartbeatError);
+		CHECK(heartbeatOk);
+		REQUIRE(universe.Enter(scripted, [&](Store &store) {
+			REQUIRE(marker != engine::ecs::NULL_ENTITY);
+			CHECK_FALSE(store.Alive(victim));
+			CHECK(store.Get<Bounds>(marker)->HalfExtent.Y == Approx(2));
+			CHECK(store.Get<Transform>(marker)->Frame.Position.X == Approx(1));
+			CHECK(runtime->Heartbeat(1.0f / 60.0f));
+			CHECK(store.Get<Transform>(marker)->Frame.Position.X == Approx(2));
+		}) == engine::world::WorldStatus::Ok);
+	}
 }

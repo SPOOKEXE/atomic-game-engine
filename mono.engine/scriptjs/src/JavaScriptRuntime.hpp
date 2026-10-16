@@ -15,6 +15,18 @@ namespace engine::script {
 
 	class JavaScriptRuntime final : public Runtime {
 	  public:
+		class EntryGuard {
+		  public:
+			explicit EntryGuard(const JavaScriptRuntime &runtime);
+			EntryGuard(const EntryGuard &) = delete;
+			EntryGuard &operator=(const EntryGuard &) = delete;
+
+			operator bool() const;
+
+		  private:
+			Runtime::StackGuard Crossing;
+		};
+
 		JavaScriptRuntime(ecs::Store &store, const RuntimeLimits &limits);
 		~JavaScriptRuntime() override;
 

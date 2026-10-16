@@ -16,6 +16,16 @@
 
 namespace engine::script {
 
+	JavaScriptRuntime::EntryGuard::EntryGuard(const JavaScriptRuntime &runtime) : Crossing(runtime) {
+		// Only the outermost entry adopts the current stack; nested entries retain
+		// that anchor so a callback cannot reset the recursion bound.
+		if (Crossing && runtime.Depth == 1) JS_UpdateStackTop(runtime.Vm);
+	}
+
+	JavaScriptRuntime::EntryGuard::operator bool() const {
+		return static_cast<bool>(Crossing);
+	}
+
 	namespace {
 		// The step counter, hung off the runtime.
 		//
@@ -296,6 +306,7 @@ namespace engine::script {
 		// again rather than assuming it was fixed.
 
 		OpenJsBindings(Context, Store, limits.Role, limits.EffectiveCapabilities());
+		JsOf(Context).OwnerRuntime = this;
 		BindProceduralEndpoint();
 		JsOf(Context).Procedural = ProceduralEndpointForWorld();
 		JsOf(Context).RuntimeIdentity = Identity();
@@ -327,7 +338,7 @@ namespace engine::script {
 	}
 
 	bool JavaScriptRuntime::DeliverRemoteEvent(std::span<const std::byte> message, ecs::Entity sender) {
-		Runtime::StackGuard guard(*this);
+		EntryGuard guard(*this);
 		if (!guard) return false;
 		if (auto *budget = static_cast<Budget *>(JS_GetRuntimeOpaque(Vm)); budget != nullptr)
 			budget->Base = budget->Taken;
@@ -448,7 +459,7 @@ namespace engine::script {
 
 	bool JavaScriptRuntime::Invoke(HostCallback callback, HostArguments arguments, HostValue &result) {
 		MarkWorldSwapUsed();
-		Runtime::StackGuard guard(*this);
+		EntryGuard guard(*this);
 		if (!guard) {
 			return false;
 		}
@@ -477,7 +488,7 @@ namespace engine::script {
 		std::string_view source, std::string_view name, const HostRole &execution, ecs::Entity instance
 	) {
 		MarkWorldSwapUsed();
-		Runtime::StackGuard guard(*this);
+		EntryGuard guard(*this);
 		if (!guard) {
 			return false;
 		}
@@ -564,7 +575,7 @@ namespace engine::script {
 	}
 
 	bool JavaScriptRuntime::RunInstance(ecs::Entity instance) {
-		Runtime::StackGuard guard(*this);
+		EntryGuard guard(*this);
 		if (!guard) {
 			return false;
 		}
@@ -594,7 +605,7 @@ namespace engine::script {
 	}
 
 	bool JavaScriptRuntime::Heartbeat(float delta) {
-		Runtime::StackGuard guard(*this);
+		EntryGuard guard(*this);
 		if (!guard) {
 			return false;
 		}
@@ -726,7 +737,7 @@ namespace engine::script {
 	}
 
 	ScriptSurface JavaScriptRuntime::Surface() const {
-		Runtime::StackGuard guard(*this);
+		EntryGuard guard(*this);
 		if (!guard) {
 			return {};
 		}
