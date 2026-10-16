@@ -2,6 +2,7 @@
 #include "UiExternalImport.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Chars.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
@@ -1219,8 +1220,9 @@ namespace studio {
 						if (const auto value = editText("value", current)) {
 							if (argument.Type == engine::gui::LocalizedArgumentType::Number) {
 								double parsed = 0.0;
-								const auto result =
-									std::from_chars(value->data(), value->data() + value->size(), parsed);
+								const auto result = engine::core::FromChars(
+									value->data(), value->data() + value->size(), parsed
+								);
 								if (result.ec == std::errc{} && result.ptr == value->data() + value->size() &&
 									std::isfinite(parsed))
 									edited().Values[index].Number = parsed;

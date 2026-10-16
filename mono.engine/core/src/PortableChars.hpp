@@ -102,10 +102,17 @@ namespace engine::core::portable {
 		T parsed{};
 		stream >> parsed;
 
-		// Overflow saturates and sets failbit; reported the way `from_chars`
-		// reports it, with `ptr` still past the number that was there.
-		if (stream.fail() && !stream.eof()) {
+		// Overflow sets failbit, while underflow can silently round a nonzero
+		// number to zero. `from_chars` reports both as out of range.
+		if (stream.fail()) {
 			return {end, std::errc::result_out_of_range};
+		}
+		if (parsed == T{}) {
+			for (const char *at = first; at != end && *at != 'e' && *at != 'E'; ++at) {
+				if (*at >= '1' && *at <= '9') {
+					return {end, std::errc::result_out_of_range};
+				}
+			}
 		}
 
 		value = parsed;

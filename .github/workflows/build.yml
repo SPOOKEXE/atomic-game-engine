@@ -344,6 +344,13 @@ jobs:
         if: runner.os != 'Windows'
         run: python3 scripts/tests/build_profile_test.py
 
+      - name: Check portable number parsing on macOS
+        if: runner.os == 'macOS'
+        run: |
+          cmake --preset ${{ matrix.preset }} -DMONO_BUILD_TESTS=ON
+          cmake --build --preset ${{ matrix.preset }} --target test_core
+          .cache/build/${{ matrix.preset }}/tests/test_core '[chars]' --reporter compact
+
       - name: Check build profiler (Windows)
         if: runner.os == 'Windows'
         shell: cmd
