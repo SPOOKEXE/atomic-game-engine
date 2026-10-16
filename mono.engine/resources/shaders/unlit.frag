@@ -20,10 +20,9 @@
 //
 // ## The interface, which is `opaque.frag`'s and is not negotiable
 //
-// `Renderer::AddShader` creates every fragment shader with ten samplers and
-// three uniform buffers, because a shader object carries those counts rather
-// than the pipeline doing so. A module declaring a different arrangement binds
-// and silently samples nothing.
+// `Renderer::AddShader` uses the full surface sampler layout and three uniform
+// buffers. Authored material inputs remain limited to the first ten sampler
+// slots. Shader objects carry those counts, so their layout must match the draw.
 //
 // **So the `Lighting` block below is copied whole, including the members this
 // file never reads.** It is pushed as one blob at set 3 binding 0, so a member

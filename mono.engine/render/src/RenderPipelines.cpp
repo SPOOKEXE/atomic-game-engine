@@ -140,7 +140,7 @@ namespace engine::render {
 			// count above records.
 			"opaque.frag",
 			SDL_GPU_SHADERSTAGE_FRAGMENT,
-			13,
+			SURFACE_FRAGMENT_SAMPLERS,
 			3
 		);
 
@@ -1496,7 +1496,7 @@ namespace engine::render {
 		info.entrypoint = Binary.EntryPoint;
 		info.format = Binary.Format;
 		info.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
-		info.num_samplers = 10;
+		info.num_samplers = SURFACE_FRAGMENT_SAMPLERS;
 		info.num_uniform_buffers = 3;
 
 		SDL_GPUShader *fragment = SDL_CreateGPUShader(Device, &info);

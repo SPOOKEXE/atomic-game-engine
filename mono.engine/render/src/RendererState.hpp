@@ -474,6 +474,7 @@ namespace engine::render {
 			PendingCaptureTimings[slot].clear();
 		}
 
+		static constexpr uint32_t SURFACE_FRAGMENT_SAMPLERS = 13;
 		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
 		// No-cull twins of the back-face-culled opaque pipelines, as (culled,
 		// twin) pairs. Portal and mirror surfaces draw through them, so a camera
@@ -1083,11 +1084,10 @@ namespace engine::render {
 		graph::EntityFlow GraphEntities;
 		graph::Viewpoints GraphViewpoints;
 
-		// What survived culling: the indices, and the instances themselves.
-		//
-		// The copy makes scene and camera ranges contiguous in one buffer.
+		// Indices surviving culling.
 		std::vector<uint32_t> Visible;
-		std::vector<scene::DrawInstance> VisibleInstances;
+		// Camera and portal selection read Drawable throughout synchronous Begin/Finish.
+		std::span<const scene::DrawInstance> VisibleInstances;
 
 		// The whole draw list, ordered for the surface camera. What the shadow
 		// pass and the surface pass draw, because neither is the eye's: a caster
