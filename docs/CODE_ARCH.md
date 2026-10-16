@@ -121,21 +121,24 @@ checks it.
 |---|---|---|---|
 | 13 | `control` | shared | the control surface |
 | 12 | `render` `ui` `input` `audio` | client | presentation |
-| 12 | `replication` `network` | shared | what the wire means, and finding a peer |
+| 12 | `datastore` `replication` `network` | shared | persistence, what the wire means, and finding a peer |
 | 12 | `game` `examples` | shared | what a game file is |
 | 11 | `net` `delivery` `discord` | shared | transport, fetching, presence |
 | 11 | `resources` `msl` | client | built-in GLSL, SPIR-V to MSL |
 | 11 | `scripthost` | shared | which VM to open |
 | 10 | `scriptluau` `scriptjs` | shared | one adapter each, and neither names the other |
-| 9 | `script` `graph` `bake` `bakegraph` | shared | what a script may name, what is drawn, importing |
-| 8 | `assets` `physics` `effects` | shared | content addressing, simulation |
+| 9 | `script` `graph` `bake` `bakegraph` `imagegraph` | shared | what a script may name, what is drawn, importing |
+| 8 | `assets` `audiocodec` `effects` `imagecodec` `physics` `weather` | shared | content addressing, codecs, simulation |
 | 7 | `scene` `gui` | shared | what a thing in a world is, what a 2D thing is |
 | 6 | `spatial` | shared | where things are |
 | 5 | `collision` | shared | hulls and triangle soups |
 | 4 | `world` | shared | universe, worlds, ticking |
-| 3 | `ecs` | shared | columns, sets, change channels |
-| 2 | `parallel` | shared | jobs, threads, processes, ipc |
+| 3 | `computegraph` `ecs` `procedural` | shared | authored GPU graphs, columns, and bounded generation |
+| 2 | `graphcore` `parallel` | shared | shared dependency compilation, jobs, threads, processes, ipc |
 | 1 | `core` | shared | platform and values |
+
+The current graph has 54 module entries: 40 layered entries and 14 entries in
+the program band.
 
 **`game` and `examples` moved from L10 to L12 at v0.19**, and the reason is the
 one edge the split created: both call `MakeRuntime` to start a world's scripts,
@@ -144,12 +147,12 @@ sit above both adapters. Nothing but the program band links either module, so
 the move cost two `layer` fields and no edge - which is what §4's "a layer is a
 ceiling, not a slot" is for.
 
-Above L13 is the **program band**: `client`, `server`, `studio`, `launcher`,
-`cdn`, `loadtest`, `unified_tests`, the tool libraries `assetc`, `docgen`,
-`linecount`, `shadercheck`, `sourcecheck`, `testrunner`, and `nodegraph`. These
-have no layer, and that absence is itself checked: **nothing that has a layer
-may link something that has not.** A program-band entry is the thing that links
-modules and that no module links.
+Above L13 are 14 **program-band entries**: `assetc`, `cdn`, `client`, `docgen`,
+`launcher`, `linecount`, `loadtest`, `nodegraph`, `server`, `shadercheck`,
+`sourcecheck`, `studio`, `testrunner`, and `unified_tests`. These have no layer,
+and that absence is itself checked: **nothing that has a layer may link
+something that has not.** A program-band entry is the thing that links modules
+and that no module links.
 
 **`nodegraph` is in the band for the second half of that definition rather than
 the first.** It links no module at all - `shadercheck` and `sourcecheck` are the
@@ -180,7 +183,7 @@ choice once a module needed one of them was a renumber of eleven modules or a
 fractional layer.
 
 **It is neither, because a layer is a ceiling and not a slot.** §4's first
-paragraph says exactly that, and the built table already carries eight modules
+paragraph says exactly that, and the built table already carries nine modules
 at L12 and six at L11. Two modules at one height are a problem only when one needs
 to see the other, and that is the case the `lateral` array already covers by
 name. So the reservation is:
@@ -357,25 +360,37 @@ that can no longer be changed.
 `expected_graph.json`; if it disagrees with the build, the build is right and
 this table is stale.
 
+The `loadtest` column uses `modules.loadtest.links`; `tests` uses the
+`programs.unified_tests` closure. The checked-in closure sizes are 37 for
+client, 32 for server, 45 for studio, 24 for launcher, 22 for cdn, 25 for
+loadtest and 41 for tests.
+
 | module | L | tier | client | server | studio | launcher | cdn | loadtest | tests |
 |---|---|---|---|---|---|---|---|---|---|
 | `core` | 1 | shared | O | O | O | O | O | O | O |
+| `graphcore` | 2 | shared | O | O | O | O | O | O | O |
 | `parallel` | 2 | shared | O | O | O | O | O | O | O |
-| `ecs` | 3 | shared | O | O | O | O | . | O | O |
-| `world` | 4 | shared | O | O | O | . | . | O | O |
-| `collision` | 5 | shared | O | O | O | O | . | O | O |
-| `spatial` | 6 | shared | O | O | O | O | . | O | O |
-| `gui` | 7 | shared | O | O | O | O | . | O | O |
-| `scene` | 7 | shared | O | O | O | O | . | O | O |
+| `computegraph` | 3 | shared | O | O | O | O | O | O | O |
+| `ecs` | 3 | shared | O | O | O | O | O | O | O |
+| `procedural` | 3 | shared | O | O | O | O | O | O | O |
+| `world` | 4 | shared | O | O | O | O | O | O | O |
+| `collision` | 5 | shared | O | O | O | O | O | O | O |
+| `spatial` | 6 | shared | O | O | O | O | O | O | O |
+| `gui` | 7 | shared | O | O | O | O | O | O | O |
+| `scene` | 7 | shared | O | O | O | O | O | O | O |
 | `assets` | 8 | shared | O | O | O | O | O | O | O |
-| `effects` | 8 | shared | O | O | O | O | . | O | O |
-| `physics` | 8 | shared | O | O | O | . | . | O | O |
+| `audiocodec` | 8 | shared | O | . | O | . | . | . | O |
+| `effects` | 8 | shared | O | O | O | O | O | O | O |
+| `imagecodec` | 8 | shared | O | O | O | O | O | O | O |
+| `physics` | 8 | shared | O | O | O | O | O | O | O |
+| `weather` | 8 | shared | O | O | O | O | O | O | O |
 | `bake` | 9 | shared | . | . | O | . | . | . | . |
 | `bakegraph` | 9 | shared | O | O | O | . | . | O | O |
 | `graph` | 9 | shared | O | O | O | O | . | O | O |
-| `script` | 9 | shared | O | O | O | . | . | O | O |
-| `scriptluau` | 10 | shared | O | O | O | . | . | O | O |
+| `imagegraph` | 9 | shared | O | . | O | O | . | . | O |
+| `script` | 9 | shared | O | O | O | O | O | O | O |
 | `scriptjs` | 10 | shared | O | O | O | . | . | O | O |
+| `scriptluau` | 10 | shared | O | O | O | . | . | O | O |
 | `delivery` | 11 | shared | O | O | O | . | O | . | O |
 | `discord` | 11 | shared | O | O | O | . | O | . | O |
 | `msl` | 11 | client | O | . | O | O | . | . | O |
@@ -383,6 +398,7 @@ this table is stale.
 | `resources` | 11 | client | O | . | O | O | . | . | O |
 | `scripthost` | 11 | shared | O | O | O | . | . | O | O |
 | `audio` | 12 | client | O | . | O | . | . | . | O |
+| `datastore` | 12 | shared | . | O | O | . | . | . | O |
 | `examples` | 12 | shared | O | O | O | . | . | . | O |
 | `game` | 12 | shared | O | O | O | . | . | O | O |
 | `input` | 12 | client | O | . | O | . | . | . | O |
@@ -390,7 +406,7 @@ this table is stale.
 | `render` | 12 | client | O | . | O | O | . | . | O |
 | `replication` | 12 | shared | O | O | O | . | . | O | O |
 | `ui` | 12 | client | . | . | O | O | . | . | . |
-| `control` | 13 | shared | O | O | O | . | O | . | O |
+| `control` | 13 | shared | O | O | O | O | O | . | O |
 | `nodegraph` | . | client | . | . | O | . | . | . | . |
 
 Four rows are worth reading twice.
@@ -405,10 +421,8 @@ above it carries a number, and none of those may link this one.
 in one of those cells has made the server contain a graphics stack, and
 `just check-server-is-headless` is the recipe that notices.
 
-**The `cdn` column is the "partial engine" proof.** Eight modules, every one of
-them `shared`, and no `ecs`. A content origin does not know what an entity is.
-The moment somebody adds a convenience function that needs one, `mono.cdn`
-starts linking the engine and the claim stops being true.
+**The `cdn` column lists the content-origin closure.** It contains 22 modules,
+all with the `shared` tier, including `ecs`.
 
 **Three modules are absent from the `tests` column**: `bake`, `nodegraph` and
 `ui`. They are covered only by their own `tests/` directories and by nothing
