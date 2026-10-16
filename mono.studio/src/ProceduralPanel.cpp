@@ -1,3 +1,5 @@
+#include "ProceduralPanel.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/procedural/Canonical.hpp>
 #include <engine/script/ProceduralScene.hpp>
@@ -7,7 +9,6 @@
 #include <imgui.h>
 #include <limits>
 #include <studio/ProceduralEditor.hpp>
-#include <studio/ProceduralPanel.hpp>
 #include <utility>
 
 namespace studio {

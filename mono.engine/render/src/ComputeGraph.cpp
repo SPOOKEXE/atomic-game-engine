@@ -1,3 +1,5 @@
+#include "ComputeGraph.hpp"
+
 #include "GpuDrawPackets.hpp"
 #include "GpuHeap.hpp"
 #include "GpuQueueBatch.hpp"
@@ -7,7 +9,6 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
-#include <engine/render/ComputeGraph.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/resources/Shaders.hpp>
 

@@ -1,10 +1,11 @@
 // Real-device buffer graph baseline. Detailed rows separate installation,
 // submission, fence-observed CPU latency and retirement. No GPU timing is inferred.
 
+#include "ComputeGraph.hpp"
+
 #include <engine/computegraph/Reference.hpp>
 #include <engine/computegraph/Stock.hpp>
 #include <engine/core/HeapProfile.hpp>
-#include <engine/render/ComputeGraph.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/testing/Bench.hpp>
 

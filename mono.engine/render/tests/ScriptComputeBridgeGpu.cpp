@@ -1,9 +1,9 @@
 #include "RenderFixture.hpp"
+#include "ScriptComputeBridge.hpp"
 
 #include <engine/computegraph/Stock.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/DemosLoader.hpp>
-#include <engine/render/ScriptComputeBridge.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>

@@ -1,10 +1,10 @@
+#include "ComputeGraph.hpp"
 #include "GpuQueueBatch.hpp"
 #include "RenderFixture.hpp"
 #include "VulkanTimestamps.hpp"
 
 #include <engine/computegraph/Reference.hpp>
 #include <engine/computegraph/Stock.hpp>
-#include <engine/render/ComputeGraph.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

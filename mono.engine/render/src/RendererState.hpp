@@ -3,9 +3,8 @@
 #include "GpuCommandIdentity.hpp"
 #include "GraphHistory.hpp"
 #include "PortalCaptureTreeWork.hpp"
+#include "ScriptComputeBridge.hpp"
 #include "WeatherCapture.hpp"
-
-#include <engine/render/ScriptComputeBridge.hpp>
 
 // `Renderer::Impl` - every device object the renderer owns, and the operations
 // over them.

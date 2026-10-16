@@ -1,5 +1,6 @@
 #include "FrameGraphSnapshot.hpp"
 #include "ImageComposer.hpp"
+#include "ProceduralPanel.hpp"
 #include "StartupWindow.hpp"
 
 #include <engine/assets/Mesh.hpp>
@@ -59,7 +60,6 @@
 #include <SDL3/SDL.h>
 
 #include <studio/ProceduralEditor.hpp>
-#include <studio/ProceduralPanel.hpp>
 // `Log.hpp` forward-declares `spdlog::logger` so that the rest of the tree does
 // not acquire spdlog for the sake of a log macro. This file is one of the two
 // that genuinely wants the type - `PanelSink` below installs itself into

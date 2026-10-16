@@ -1,4 +1,5 @@
 #include "AssetPublication.hpp"
+#include "ProceduralPanel.hpp"
 
 #include <engine/assets/LocalStore.hpp>
 #include <engine/core/Profiling.hpp>
@@ -11,7 +12,6 @@
 #include <cmath>
 #include <studio/Editor.hpp>
 #include <studio/ProceduralEditor.hpp>
-#include <studio/ProceduralPanel.hpp>
 
 namespace studio {
 	namespace procedural_editor_adapter {

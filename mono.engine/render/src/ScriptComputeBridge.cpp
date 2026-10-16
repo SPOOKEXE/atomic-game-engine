@@ -1,6 +1,8 @@
+#include "ScriptComputeBridge.hpp"
+
+#include "ComputeGraph.hpp"
+
 #include <engine/core/Profiling.hpp>
-#include <engine/render/ComputeGraph.hpp>
-#include <engine/render/ScriptComputeBridge.hpp>
 
 #include <algorithm>
 #include <cstdlib>

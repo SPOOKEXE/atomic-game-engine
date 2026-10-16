@@ -1,3 +1,5 @@
+#include "ProceduralPanel.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -15,7 +17,6 @@
 #include <string_view>
 #include <studio/Editor.hpp>
 #include <studio/ProceduralEditor.hpp>
-#include <studio/ProceduralPanel.hpp>
 #include <vector>
 
 TEST_SUITE_ID("studio.proceduralpaneladapter")

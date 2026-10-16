@@ -1,3 +1,4 @@
+#include "ComputeGraph.hpp"
 #include "GpuQueueBatch.hpp"
 #include "GraphHistory.hpp"
 #include "RenderFixture.hpp"
@@ -6,7 +7,6 @@
 #include <engine/computegraph/Stock.hpp>
 #include <engine/core/Assert.hpp>
 #include <engine/core/Name.hpp>
-#include <engine/render/ComputeGraph.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/testing/Suite.hpp>

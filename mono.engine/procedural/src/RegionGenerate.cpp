@@ -1,8 +1,8 @@
 #include "Encoding.hpp"
+#include "Random.hpp"
 #include "RegionInternal.hpp"
 #include "Stages.hpp"
 
-#include <engine/procedural/Random.hpp>
 #include <engine/procedural/Region.hpp>
 
 #include <algorithm>

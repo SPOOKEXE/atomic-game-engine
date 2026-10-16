@@ -1,3 +1,5 @@
+#include "ProceduralPanel.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/script/ProceduralJobs.hpp>
 #include <engine/testing/Suite.hpp>
@@ -6,7 +8,6 @@
 
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <studio/ProceduralPanel.hpp>
 
 TEST_SUITE_ID("studio.proceduralpanel")
 
