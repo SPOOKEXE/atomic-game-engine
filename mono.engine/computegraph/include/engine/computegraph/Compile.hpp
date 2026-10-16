@@ -14,6 +14,7 @@ namespace engine::computegraph {
 	struct BufferAllocation {
 		// Physical bytes reserved, and dense declaration index of the count buffer.
 		uint64_t Bytes = 0;
+		// Count buffer index, or UINT32_MAX when no device count is used.
 		uint32_t CountBuffer = UINT32_MAX;
 	};
 	// Checked dispatch dimensions; Empty means the adapter records no dispatch.
@@ -29,12 +30,14 @@ namespace engine::computegraph {
 	struct ResolvedBinding {
 		// Index into the selected kernel's port declarations and document buffers.
 		uint32_t Port = 0;
+		// Index into the document's buffer declarations.
 		uint32_t Buffer = 0;
 	};
 	// One immutable-by-convention invocation ready for a rendering adapter.
 	struct CompiledPass {
 		// Dense kernel and dispatch-buffer indices.
 		uint32_t Kernel = 0;
+		// Document buffer index that bounds this pass's dispatch.
 		uint32_t DispatchBuffer = 0;
 		// Resolved bindings in kernel port declaration order.
 		std::vector<ResolvedBinding> Bindings{};
@@ -45,7 +48,9 @@ namespace engine::computegraph {
 	struct BufferBarrier {
 		// Declaration-local producer, consumer and buffer indices.
 		uint32_t Producer = 0;
+		// Pass that reads the buffer after the producer writes it.
 		uint32_t Consumer = 0;
+		// Document buffer handed from producer to consumer.
 		uint32_t Buffer = 0;
 	};
 	// Owned typed plan. The backend must admit executable reflection independently.
@@ -56,9 +61,11 @@ namespace engine::computegraph {
 		DispatchLimits DeviceLimits;
 		// Buffer reservations and resolved pass work.
 		std::vector<BufferAllocation> Allocations{};
+		// Resolved invocation work for each authored pass.
 		std::vector<CompiledPass> Passes{};
 		// Shared dependency order and domain-specific buffer handovers.
 		graphcore::Topology Topology;
+		// Buffer handovers required between dependent passes.
 		std::vector<BufferBarrier> Barriers{};
 		// Total bounded device payload, including all sentinel allocations.
 		uint64_t Bytes = 0;

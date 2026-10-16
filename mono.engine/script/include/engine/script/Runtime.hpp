@@ -311,14 +311,20 @@ namespace engine::script {
 		QuickJsChargedBytes,
 	};
 
+	// Snapshot of VM allocator usage using the adapter's declared accounting basis.
 	struct VmMemorySnapshot {
+		// Accounting basis used for the byte and block values below.
 		VmMemoryBasis Basis = VmMemoryBasis::Unavailable;
+		// Currently live VM allocator bytes, when the adapter can report them.
 		uint64_t LiveBytes = 0;
+		// Currently live allocator blocks, when the adapter can report them.
 		uint64_t LiveBlocks = 0;
 		// Peak is since BeginMemoryWindow; growth totals are since VM creation.
 		// An empty field means the adapter has no exact counter for that measure.
 		std::optional<uint64_t> PeakLiveBytes;
+		// Cumulative successful positive allocation growth since VM creation.
 		std::optional<uint64_t> GrowthBytes;
+		// Count of successful positive allocation-size changes since VM creation.
 		std::optional<uint64_t> GrowthOps;
 	};
 
@@ -950,7 +956,9 @@ namespace engine::script {
 		std::shared_ptr<DataCaptureBridge> DataCapture;
 		// Host-owned adapter used for copied package lifecycle operations.
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
+		// Host-owned typed compute adapter, empty when compute is unavailable.
 		std::shared_ptr<ComputeBridge> Compute{};
+		// Revocable CPU procedural endpoint bound to this runtime and world.
 		std::shared_ptr<ProceduralEndpoint> Procedural{};
 		// Called by each adapter after class/component registration is complete.
 		void BindProceduralEndpoint();

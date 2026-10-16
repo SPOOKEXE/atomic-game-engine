@@ -22,7 +22,9 @@ namespace engine::bake {
 
 	// One complete bake transaction, ordered by stable object identity.
 	struct ProceduralBake {
+		// Deduplicated ordinary mesh payloads referenced by Placements.
 		std::vector<ProceduralMeshAsset> Meshes{};
+		// Stable placements referring to Meshes by asset name.
 		std::vector<assets::ProceduralPlacement> Placements{};
 		std::vector<std::byte> DescriptionBytes{}; // Canonical PRD1 placement bytes.
 	};

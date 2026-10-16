@@ -43,6 +43,7 @@ namespace engine::script {
 	// The two slots are runtime-only. A save retains the component's presence but
 	// clears every outstanding admission when loaded into another Store/runtime.
 	struct NpcCadencePending {
+		// One domain's current admission, bound to its actor, runtime and store.
 		struct Slot {
 			scene::CadenceDecision Decision; // Captured policy decision and source revision.
 			ecs::Entity Actor;				 // Actor that received the admission.
@@ -90,6 +91,7 @@ namespace engine::script {
 		const core::Vector3 &targetPosition,
 		bool completed
 	);
+	// Commits the movement result only if the runtime, token and source revision still match.
 	bool CommitNpcBehaviour(
 		ecs::Store &store,
 		uint64_t runtimeIdentity,

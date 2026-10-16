@@ -16,6 +16,7 @@ namespace engine::script {
 	bool SetProceduralSpline(
 		ecs::Store &store, const procedural::AuthoredSpline &spline, procedural::Diagnostic &diagnostic
 	);
+	// Removes a named spline and invalidates facts that depend on it.
 	bool RemoveProceduralSpline(ecs::Store &store, std::string_view name, procedural::Diagnostic &diagnostic);
 
 	// A replacement is complete: the stable target ID and all placement choices
@@ -25,6 +26,7 @@ namespace engine::script {
 		const procedural::PlacementOverride &overrideValue,
 		procedural::Diagnostic &diagnostic
 	);
+	// Removes the sparse placement edit with this stable target ID.
 	bool RemoveProceduralOverride(
 		ecs::Store &store, std::string_view targetId, procedural::Diagnostic &diagnostic
 	);

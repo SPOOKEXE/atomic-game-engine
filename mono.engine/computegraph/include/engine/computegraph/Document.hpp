@@ -54,21 +54,26 @@ namespace engine::computegraph {
 	struct Limits {
 		// Maximum declarations in each collection.
 		size_t MaximumBuffers = 128;
+		// Maximum authored kernel declarations.
 		size_t MaximumKernels = 64;
+		// Maximum authored pass declarations.
 		size_t MaximumPasses = 256;
 		// Combined authored/reflected ports and pass bindings, respectively.
 		size_t MaximumPorts = 512;
+		// Maximum authored pass-to-port bindings.
 		size_t MaximumBindings = 1024;
 		// Combined authored and reflected identity bytes.
 		size_t MaximumNameBytes = 64 * 1024;
 		// Device payload budgets, including empty-buffer sentinel allocations.
 		uint64_t MaximumBufferBytes = 64u * 1024u * 1024u;
+		// Aggregate device payload budget.
 		uint64_t MaximumTotalBytes = 256u * 1024u * 1024u;
 	};
 	// Backend-reported dispatch limits. Defaults are conservative admission policy.
 	struct DispatchLimits {
 		// Largest local size and workgroup count on each axis.
 		std::array<uint32_t, 3> MaximumLocal{256, 256, 64};
+		// Largest admitted workgroup count on each axis.
 		std::array<uint32_t, 3> MaximumGroups{65535, 65535, 65535};
 		// Largest product of local dimensions.
 		uint32_t MaximumThreads = 256;
@@ -79,6 +84,7 @@ namespace engine::computegraph {
 		std::string Name{};
 		// Exact element layout and bytes between consecutive elements.
 		ElementType Type = ElementType::U32;
+		// Bytes between consecutive elements.
 		uint32_t Stride = 4;
 		// Maximum elements, independent of the current count.
 		uint32_t Capacity = 0;
@@ -88,9 +94,11 @@ namespace engine::computegraph {
 		std::string CountBuffer{};
 		// Granted access and whether a host supplies this buffer before execution.
 		Access Permission = Access::ReadWrite;
+		// True when the host supplies this input before execution.
 		bool External = false;
 		// Stable owner identity and retention scope.
 		std::string Owner{};
+		// Device ownership scope for this buffer.
 		Lifetime Retention = Lifetime::Submission;
 	};
 	// One named shader buffer binding. Stride and type describe std430 element storage.
@@ -99,10 +107,13 @@ namespace engine::computegraph {
 		std::string Name{};
 		// Reflected element layout and required access.
 		ElementType Type = ElementType::U32;
+		// Bytes between shader elements in std430 storage.
 		uint32_t Stride = 4;
+		// Access required by the shader.
 		Access Permission = Access::Read;
 		// Explicit descriptor location under the backend's binding convention.
 		uint32_t Set = 0;
+		// Descriptor binding within Set.
 		uint32_t Binding = 0;
 		// Minimum full buffer allocation required by the shader block.
 		uint64_t MinimumBytes = 0;
@@ -113,6 +124,7 @@ namespace engine::computegraph {
 	struct KernelDesc {
 		// Stable kernel asset or built-in name and interface version.
 		std::string Name{};
+		// Version of the named kernel interface.
 		uint32_t Version = 1;
 		// Shader-declared local dimensions.
 		std::array<uint32_t, 3> Local{64, 1, 1};
@@ -123,21 +135,25 @@ namespace engine::computegraph {
 	struct KernelReflection {
 		// Stable kernel identity and agreed interface metadata version.
 		std::string Name{};
+		// Version reported by executable reflection.
 		uint32_t Version = 1;
 		// Actual executable local dimensions and storage interface.
 		std::array<uint32_t, 3> Local{64, 1, 1};
+		// Reflected storage interface of the executable kernel.
 		std::vector<KernelPort> Ports{};
 	};
 	// One pass maps a named shader port to a named document buffer.
 	struct Binding {
 		// Kernel-local port and document-local buffer.
 		std::string Port{};
+		// Document buffer connected to Port.
 		std::string Buffer{};
 	};
 	// One invocation; an optional count buffer controls shader guards, never host waits.
 	struct PassDesc {
 		// Durable pass and reusable kernel identities.
 		std::string Name{};
+		// Reusable kernel interface used by this pass.
 		std::string Kernel{};
 		// Buffer whose host count or device-count capacity bounds dispatch.
 		std::string DispatchBuffer{};
@@ -148,11 +164,14 @@ namespace engine::computegraph {
 	struct Document {
 		// Named buffers, reusable kernel contracts, and work declarations.
 		std::vector<BufferDesc> Buffers{};
+		// Reusable kernel interface declarations.
 		std::vector<KernelDesc> Kernels{};
+		// Work invocations that bind buffers to kernel ports.
 		std::vector<PassDesc> Passes{};
 	};
 	// Stable diagnostic and type spellings.
 	const char *Describe(Status status);
+	// Returns the stable spelling of an element type.
 	const char *Describe(ElementType type);
 	// Packed scalar/vector stride; zero for the reserved opaque host layout or invalid type.
 	uint32_t ElementStride(ElementType type);

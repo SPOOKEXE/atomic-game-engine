@@ -15,13 +15,20 @@ namespace engine::script {
 	// Borrowed delivered bytes. The call verifies their content names and copies
 	// validated geometry before returning; no pointer enters the world.
 	struct BakedProceduralMesh {
+		// Content-addressed .amesh asset name expected by the description closure.
 		std::string_view Name{};
+		// Borrowed encoded mesh payload, copied after validation during installation.
 		std::span<const std::byte> Bytes{};
 	};
+	// Borrowed description and mesh closure for one existing regional scene target.
 	struct BakedProceduralRegion {
+		// Existing scene objects that receive this region's decoded placements.
 		ProceduralSceneTarget Target{};
+		// Expected digest of the canonical description bytes.
 		assets::ContentHash DescriptionHash{};
+		// Borrowed encoded PRD1 description payload.
 		std::span<const std::byte> DescriptionBytes{};
+		// All mesh payloads referenced by the description.
 		std::span<const BakedProceduralMesh> Meshes{};
 	};
 

@@ -45,9 +45,11 @@ namespace engine::procedural {
 	struct Vector2 {
 		std::array<double, 2> Values{}; // Components in authored order.
 	};
+	// Three-component numeric value in authored order; encoding requires finite components.
 	struct Vector3 {
 		std::array<double, 3> Values{}; // Components in authored order.
 	};
+	// Four-component numeric value in authored order; encoding requires finite components.
 	struct Vector4 {
 		std::array<double, 4> Values{}; // Components in authored order.
 	};

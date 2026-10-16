@@ -21,25 +21,40 @@ namespace engine::render {
 	// Counts are captured only while profiling is enabled. Four query slots are
 	// retained through fence retirement; saturation leaves Available false.
 	struct ComputeGraphTiming {
+		// Submission ticket measured by this record.
 		uint64_t Ticket = 0;
+		// False when this ticket has no retained timing query.
 		bool Available = false;
+		// Elapsed device command duration in nanoseconds.
 		double CommandNanoseconds = 0;
+		// Number of compute dispatches in the command.
 		uint32_t Dispatches = 0;
+		// Total workgroups submitted across its dispatches.
 		uint64_t Workgroups = 0;
+		// Input bytes uploaded for the request.
 		uint64_t UploadBytes = 0;
+		// Resident instance bytes copied for the request.
 		uint64_t InstanceCopyBytes = 0;
+		// Output bytes copied back for the request.
 		uint64_t ReadbackBytes = 0;
 	};
 	// Opt-in owner-thread counts. Canceled jobs count as retired only after their
 	// fence or explicit retirement proof, independently of result consumption.
 	// TimedJobs includes canceled measurements. DroppedTimings excludes C04 jobs.
 	struct ComputeGraphStatistics {
+		// Whether opt-in native profiling is enabled.
 		bool Enabled = false;
+		// Jobs admitted since profiling was enabled.
 		uint64_t AcceptedJobs = 0;
+		// Jobs whose device resources are safe to release.
 		uint64_t RetiredJobs = 0;
+		// Jobs with a retained device timing measurement.
 		uint64_t TimedJobs = 0;
+		// Measurements unavailable because query slots saturated.
 		uint64_t DroppedTimings = 0;
+		// Jobs submitted through the C04 recording batch.
 		uint64_t BatchedJobs = 0;
+		// Canceled jobs retired after device completion was proven.
 		uint64_t CanceledRetirements = 0;
 	};
 	// Fixed host ABI v1: set 2/binding 0 is an optional std140 block containing

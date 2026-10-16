@@ -235,8 +235,9 @@ namespace studio {
 		// Serialized component state after the edit.
 		std::vector<std::byte> ComponentAfter;
 
-		// Canonical authored authority bytes. Empty means the resource was absent.
+		// Canonical authored authority bytes before the command. Empty means absent.
 		std::vector<std::byte> AuthorityBefore;
+		// Canonical authored authority bytes after the command. Empty means absent.
 		std::vector<std::byte> AuthorityAfter;
 
 		// What to call this in the Edit menu - "Delete Part", not "Destroy".

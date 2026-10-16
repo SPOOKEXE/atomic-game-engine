@@ -6082,19 +6082,33 @@ namespace studio {
 
 		// Isolated procedural preview and editor-only input drafts.
 		bool ShowProcedural = false;
+		// Isolated editor for procedural preview edits.
 		std::unique_ptr<ProceduralEditor> ProceduralPreview;
+		// Draft values shown by the procedural panel.
 		std::unique_ptr<ProceduralPanelState> ProceduralPanel;
+		// World currently associated with the preview.
 		WorldId ProceduralWorld{};
+		// Renderer ownership key for preview content.
 		engine::core::Name ProceduralPreviewOwner{};
+		// Renderer key for the captured preview image.
 		engine::core::Name ProceduralPreviewTexture{};
+		// Renderer handle used by the panel image widget.
 		void *ProceduralPreviewHandle = nullptr;
+		// Whether the preview slot should be refreshed.
 		bool ProceduralPreviewWanted = false;
+		// Revision represented by the last rendered preview.
 		uint32_t ProceduralRenderedRevision = 0;
+		// Mesh represented by the last rendered preview.
 		engine::ecs::Entity ProceduralRenderedMesh{};
+		// Orbit angle represented by the last rendered preview.
 		float ProceduralRenderedOrbit = 0.0f;
+		// Draws the procedural panel and tracks preview changes.
 		void DrawProceduralGeneration();
+		// Applies pending procedural edits and preview work.
 		void ApplyProceduralPending();
+		// Renders the isolated preview into its texture slot.
 		bool RenderProceduralPreviewSlot();
+		// Releases the isolated preview and its renderer resources.
 		void ReleaseProceduralPreview();
 
 		// Image Composer state belongs to this editor instance.

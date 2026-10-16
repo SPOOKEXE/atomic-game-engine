@@ -1197,6 +1197,8 @@ namespace studio {
 	// @param target  Whether the plugin runs in Studio or a play world.
 	// @param world   The world identity associated with the runtime.
 	// @param bindings Optional registry receiving plugin bindings.
+	// @param compute Optional factory invoked with the runtime VM identity and ECS storage incarnation
+	//                to provide a host-bound compute bridge.
 	// @since v0.12
 	void StartPlugins(
 		std::vector<LoadedPlugin> &plugins,

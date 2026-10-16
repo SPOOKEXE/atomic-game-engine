@@ -3,7 +3,8 @@
 ## Status and scope
 
 This is the approved execution plan for the v0.26.1 work listed in
-[`NEW_ROADMAP.md`](../NEW_ROADMAP.md). The shared graph module, target layer,
+`NEW_ROADMAP.md`. The Doxygen-published [repository roadmap](../ROADMAP.md)
+provides the main version history. The shared graph module, target layer,
 module policy updates, and adapter migrations have user approval. Remaining
 implementation and evidence gates are tracked below. No milestone completion
 or optimization gains are claimed here.

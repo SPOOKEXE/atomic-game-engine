@@ -14,6 +14,7 @@
 #include <vector>
 
 namespace engine::assets {
+	// Maximum encoded or decoded PRD1 payload size.
 	inline constexpr size_t MAXIMUM_PROCEDURAL_DESCRIPTION_BYTES = 1024 * 1024;
 	struct MeshData;
 

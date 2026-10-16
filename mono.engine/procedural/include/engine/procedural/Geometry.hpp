@@ -38,6 +38,7 @@ namespace engine::procedural {
 
 	// Complete geometry transaction, ordered by stable object identity.
 	struct RegionGeometry {
+		// Generated objects sorted by stable identity.
 		std::vector<GeometryObject> Objects{};
 		Point Origin{};				   // Exact fixed-point origin for an aggregate region mesh.
 		std::array<float, 3> Centre{}; // Region-local bounds centre across all objects.
@@ -62,9 +63,13 @@ namespace engine::procedural {
 
 	// Hard ceilings checked before any output geometry is allocated.
 	struct GeometryLimits {
+		// Absolute object ceiling for every request.
 		static constexpr uint32_t HARD_MAXIMUM_OBJECTS = 4352;
+		// Absolute vertex ceiling for every request.
 		static constexpr uint32_t HARD_MAXIMUM_VERTICES = 500000;
+		// Absolute index ceiling for every request.
 		static constexpr uint32_t HARD_MAXIMUM_INDICES = 500000;
+		// Absolute estimated output-storage ceiling.
 		static constexpr size_t HARD_MAXIMUM_BYTES = 20 * 1024 * 1024;
 		uint32_t MaximumObjects = HARD_MAXIMUM_OBJECTS;	  // Combined placements and roads.
 		uint32_t MaximumVertices = HARD_MAXIMUM_VERTICES; // Combined object-local vertices.

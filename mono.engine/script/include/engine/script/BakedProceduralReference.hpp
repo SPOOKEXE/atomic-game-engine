@@ -17,10 +17,15 @@ namespace engine::ecs {
 }
 
 namespace engine::script {
+	// Maximum number of per-world published-region demands retained by the client.
 	inline constexpr size_t MAXIMUM_BAKED_PROCEDURAL_REFERENCES = 64;
+	// ECS-owned demand for one signed description in a local world.
 	struct BakedProceduralReference {
+		// Stable name of the signed procedural description requested for installation.
 		core::Name Description{};
+		// Region scope whose generated scene output is requested.
 		procedural::RegionScope Scope{};
+		// Mesh entity whose visible output receives the delivered placements.
 		ecs::Entity Part{};
 		uint64_t Revision = 0; // Each explicit demand advances, even for identical content.
 	};
@@ -35,5 +40,6 @@ namespace engine::script {
 		std::string_view descriptionName,
 		procedural::Diagnostic &diagnostic
 	);
+	// Registers the ECS component used to store baked procedural demands.
 	void RegisterBakedProceduralReferenceComponents();
 }
