@@ -2286,3 +2286,14 @@ render-recording-bench samples="3":
         echo "render-recording-bench failed or exceeded its 180s device deadline" >&2
         exit 1
     fi
+
+# Reflected authored GPU buffers and stable compaction, checked against CPU bytes.
+computegraph-bench samples="3" build_preset="bench":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    if ! SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_GPU_QUEUES=serial MONO_COMPUTEGRAPH_REPORT=1 MONO_COMPUTEGRAPH_PRESET={{build_preset}} timeout --foreground --kill-after=10s 300s ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.computegraph --samples {{samples}}; then
+        echo "computegraph-bench failed or exceeded its 300s device deadline" >&2
+        exit 1
+    fi
