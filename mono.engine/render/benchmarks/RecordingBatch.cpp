@@ -3,6 +3,7 @@
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/FrameGraph.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/script/ComputeBridge.hpp>
 #include <engine/testing/Bench.hpp>
@@ -54,6 +55,17 @@ namespace {
 					  << " queue_" << QUEUE_NAMES[queue] << "_family=" << api->Family[queue] << " queue_"
 					  << QUEUE_NAMES[queue] << "_index=" << api->QueueIndex[queue];
 		}
+	}
+
+	void PrintHeapSnapshot(std::string_view name, const core::HeapTotals &heap) {
+		std::cout << ' ' << name << "_live_bytes=" << heap.LiveBytes << ' ' << name
+				  << "_live_blocks=" << heap.LiveBlocks << ' ' << name
+				  << "_lifetime_peak_bytes=" << heap.PeakBytes << ' ' << name
+				  << "_lifetime_allocated_bytes=" << heap.TotalBytes << ' ' << name
+				  << "_lifetime_allocated_blocks=" << heap.TotalBlocks << ' ' << name
+				  << "_profiler_overhead_bytes=" << heap.OverheadBytes << ' ' << name
+				  << "_foreign_frees=" << heap.ForeignFrees << ' ' << name
+				  << "_dropped_scopes=" << heap.DroppedScopes;
 	}
 
 	size_t RecordingFrameCount() {
@@ -398,10 +410,15 @@ void main() {
 		std::array<double, ATOMIC_GPU_QUEUE_COUNT> queueMicroseconds{};
 		std::array<uint64_t, ATOMIC_GPU_QUEUE_COUNT> queueSamples{};
 		const auto gpuBefore = renderer.MemoryStatistics();
+		const auto presteady = core::HeapProfile::Totals();
 		render::GpuMemoryStatistics gpuAfter;
+		core::HeapTotals measuredEnd{};
 		for (size_t frame = 0; frame <= measuredFrames; ++frame) {
 			wait();
-			if (frame == measuredFrames) gpuAfter = renderer.MemoryStatistics();
+			if (frame == measuredFrames) {
+				gpuAfter = renderer.MemoryStatistics();
+				measuredEnd = core::HeapProfile::Totals();
+			}
 			advance(WARM_FRAMES + frame);
 			submitCompute();
 			core::FrameGraph::BeginFrame();
@@ -492,6 +509,7 @@ void main() {
 			}
 		}
 		wait();
+		const auto finalSettlement = core::HeapProfile::Totals();
 		const bool parallel = batch && batch->LastStatistics().Parallel;
 		const char *mode = batch ? (parallel ? "packet_parallel" : "packet_serial") : "owner_ordinary";
 		std::cout << "render-recording-profile";
@@ -569,6 +587,23 @@ void main() {
 		PrintTails("cpu_render_ns", cpuRenderSamples, measuredFrames);
 		PrintTails("cpu_producer_ns", producerSamples, controllerSampleCount);
 		PrintTails("cpu_worker_join_ns", joinSamples, controllerSampleCount);
+		std::cout << '\n';
+		std::cout << "render-recording-cpp-heap";
+		PrintCaptureIdentity(invocationId, api);
+		const bool heapHooks = core::HeapProfile::IsCompiledIn();
+		std::cout << " mode=" << mode << " views=" << Count << " hooks=" << heapHooks
+				  << " scope=process_tracked_cpp worker_allocator_coverage=process_global"
+				  << " includes_benchmark_and_oracle=true driver_memory=unavailable vm_memory=unavailable"
+				  << " peak_scope=process_lifetime_not_phase";
+		if (heapHooks) {
+			std::cout << " steady_allocated_bytes=" << measuredEnd.TotalBytes - presteady.TotalBytes
+					  << " steady_allocated_blocks=" << measuredEnd.TotalBlocks - presteady.TotalBlocks;
+			PrintHeapSnapshot("presteady", presteady);
+			PrintHeapSnapshot("measured_end", measuredEnd);
+			PrintHeapSnapshot("final_settlement", finalSettlement);
+		} else {
+			std::cout << " allocation_live_peak=unavailable";
+		}
 		std::cout << '\n';
 		testing::Consume(cpuNanoseconds);
 	}
