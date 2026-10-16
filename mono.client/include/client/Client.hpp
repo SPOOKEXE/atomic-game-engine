@@ -61,6 +61,7 @@
 #include <client/DataFactoryRehydrator.hpp>
 #include <client/DataFactoryRenderOnly.hpp>
 #include <client/Options.hpp>
+#include <client/ProceduralContent.hpp>
 #include <client/Scene.hpp>
 #include <client/SettingsMenu.hpp>
 #include <client/Sounds.hpp>
@@ -971,6 +972,7 @@ namespace client {
 			};
 			std::unique_ptr<ContentLink> Relay;
 			std::unique_ptr<engine::delivery::AssetClient> Client;
+			std::unique_ptr<ProceduralContent> Procedural = std::make_unique<ProceduralContent>();
 			std::string RelayName;
 			std::vector<engine::delivery::Source> OfferedSources;
 			std::string PublisherKey;

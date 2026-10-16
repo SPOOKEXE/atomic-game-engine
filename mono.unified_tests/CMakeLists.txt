@@ -72,3 +72,7 @@ mono_add_program(unified_tests
 		Engine::core
 		Engine::scene
 )
+
+if(TARGET test_unified_tests)
+	target_link_libraries(test_unified_tests PRIVATE Tool::assetc)
+endif()

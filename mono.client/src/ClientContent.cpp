@@ -189,6 +189,7 @@ namespace client {
 		}
 
 		content.Client = std::move(built);
+		content.Procedural = std::make_unique<ProceduralContent>();
 
 		// **Everything asked for is asked for again.** A rebuilt client holds none
 		// of the previous one's requests, and the demand walk only asks for what
@@ -357,6 +358,12 @@ namespace client {
 		// admitted.
 
 		ENGINE_PROFILE_CAT("content.intake", engine::core::ProfileCategory::Assets);
+		content.Procedural->BeginFrame();
+		for (const engine::world::WorldId id : worlds)
+			Universe_->Enter(id, [&](engine::ecs::Store &store) {
+				content.Procedural->PumpWorld(store, *content.Client, ContentBudget);
+			});
+		content.Procedural->EndFrame(*content.Client);
 
 		size_t kept = 0;
 		for (const engine::delivery::RequestId id : content.Pending) {
