@@ -113,7 +113,8 @@
       "tier": "shared",
       "layer": 9,
       "links": [
-        "core"
+        "core",
+        "graphcore"
       ]
     },
     "cdn": {

@@ -4,10 +4,12 @@
 #include <engine/bake/Graph.hpp>
 #include <engine/bake/Image.hpp>
 #include <engine/bake/Model.hpp>
+#include <engine/bakegraph/Schema.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Clock.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
+#include <engine/graphcore/Compile.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -138,7 +140,23 @@ namespace engine::bake {
 		}
 
 		Node &target = Nodes[to.Value - 1];
-		if (IsInput(target.Kind) || target.Input.IsValid()) {
+		const graphcore::NodeSchema *sourceSchema = NodeSchemaFor(Nodes[from.Value - 1].Kind);
+		const graphcore::NodeSchema *targetSchema = NodeSchemaFor(target.Kind);
+		if (sourceSchema == nullptr || targetSchema == nullptr) {
+			return false;
+		}
+		const auto output = std::find_if(
+			sourceSchema->Ports.begin(), sourceSchema->Ports.end(), [](const graphcore::PortSchema &port) {
+				return port.Direction == graphcore::PortDirection::Output;
+			}
+		);
+		const auto input = std::find_if(
+			targetSchema->Ports.begin(), targetSchema->Ports.end(), [](const graphcore::PortSchema &port) {
+				return port.Direction == graphcore::PortDirection::Input;
+			}
+		);
+		if (output == sourceSchema->Ports.end() || input == targetSchema->Ports.end() ||
+			input->MaximumConnections != 1 || target.Input.IsValid()) {
 			return false;
 		}
 
@@ -495,42 +513,39 @@ namespace engine::bake {
 			node.Result.Kind = PayloadKind::None;
 		}
 
-		// Kahn's order, over a graph where in-degree is zero or one. Repeated
-		// scans rather than a queue because a bake graph is tens of nodes and
-		// the simple version is the one a reader can check.
-		std::vector<bool> done(Nodes.size(), false);
-		size_t remaining = Nodes.size();
-
-		while (remaining > 0) {
-			bool progressed = false;
-
-			for (size_t index = 0; index < Nodes.size(); index++) {
-				if (done[index]) {
-					continue;
-				}
-				const NodeId input = Nodes[index].Input;
-				if (input.IsValid() && !done[input.Value - 1]) {
-					continue;
-				}
-				if (!Evaluate(index, failure)) {
-					// A caller cannot publish an incomplete bake. Earlier write nodes
-					// may have produced bytes before a later chain refused its input.
-					Exports.clear();
-					return false;
-				}
-				done[index] = true;
-				remaining--;
-				progressed = true;
+		std::vector<graphcore::Dependency> dependencies;
+		dependencies.reserve(Nodes.size());
+		for (size_t index = 0; index < Nodes.size(); ++index) {
+			const NodeId input = Nodes[index].Input;
+			if (input.IsValid()) {
+				dependencies.push_back({input.Value - 1, static_cast<graphcore::NodeIndex>(index)});
 			}
-
-			if (!progressed) {
-				// Unreachable while `Connect` refuses cycles, and left in
-				// because the alternative to an impossible-state check here is
-				// an infinite loop.
-				// Unreachable while `Connect` refuses cycles, so reaching it is a
-				// bug in the wiring check rather than in the document.
-				ENGINE_ERROR("a cycle survived the wiring check with {} node(s) unevaluated", remaining);
+		}
+		const graphcore::Limits limits{
+			.MaximumNodes = MAXIMUM_NODES,
+			.MaximumConnections = MAXIMUM_NODES,
+			.MaximumSchemas = 0,
+			.MaximumPorts = 0,
+			.MaximumIdentityBytes = 0,
+		};
+		graphcore::Topology topology;
+		graphcore::Diagnostic diagnostic;
+		const graphcore::CompileStatus status = graphcore::CompileDependencies(
+			Nodes.size(), dependencies, limits, topology, diagnostic, graphcore::OrderPolicy::AuthoredSweep
+		);
+		if (status != graphcore::CompileStatus::Ok) {
+			if (status == graphcore::CompileStatus::Cycle) {
+				ENGINE_ERROR("a cycle survived the wiring check");
 				failure = "graph: a cycle survived the wiring check";
+			} else {
+				failure = "graph: dependency compilation failed: " + std::string(graphcore::Describe(status));
+			}
+			return false;
+		}
+		for (const graphcore::NodeIndex index : topology.Order) {
+			if (!Evaluate(index, failure)) {
+				// Earlier write nodes may have produced bytes before a later chain
+				// refused its input; a caller cannot publish that partial bake.
 				Exports.clear();
 				return false;
 			}

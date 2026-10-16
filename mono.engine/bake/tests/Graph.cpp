@@ -356,6 +356,20 @@ TEST_CASE("one input fans out to several chains", "[bake][graph]") {
 	CHECK(graph.Baked()[2].Name == "textures/floor@4");
 }
 
+TEST_CASE("backward dependencies keep authored-sweep export order", "[bake][graph]") {
+	Graph graph;
+	const NodeId lateWrite = graph.AddWrite("late");
+	const NodeId earlySource = graph.AddBuiltin("engine.Cube");
+	const NodeId earlyWrite = graph.AddWrite("early");
+	const NodeId lateSource = graph.AddBuiltin("engine.Sphere");
+	REQUIRE(graph.Connect(lateSource, lateWrite));
+	REQUIRE(graph.Connect(earlySource, earlyWrite));
+	REQUIRE(Ran(graph).empty());
+	REQUIRE(graph.Baked().size() == 2);
+	CHECK(graph.Baked()[0].Name == "early");
+	CHECK(graph.Baked()[1].Name == "late");
+}
+
 TEST_CASE("a second input on one node is refused rather than replacing the first", "[bake][graph]") {
 	Graph graph;
 	const NodeId first = graph.AddBuiltin("engine.Cube");
@@ -421,7 +435,7 @@ TEST_CASE("a node with no input fails the run rather than producing nothing", "[
 
 	// The alternative is a `Write` further down emitting an empty asset, which
 	// publishes and then fails at whatever tries to draw it.
-	CHECK_FALSE(Ran(graph).empty());
+	CHECK(Ran(graph) == "graph: a node has no input");
 }
 
 TEST_CASE("a kind mismatch names the file it came from", "[bake][graph]") {

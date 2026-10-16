@@ -23,6 +23,8 @@ mono_add_library(bake
 	TIER shared
 	DEPS
 		Engine::core
+		# Pure authored-sweep topology for Graph::Run. Payload checks stay here.
+		Engine::graphcore
 		Engine::assets
 		Engine::imagecodec
 

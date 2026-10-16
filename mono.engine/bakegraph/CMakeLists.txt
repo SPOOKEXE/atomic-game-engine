@@ -14,11 +14,12 @@
 # than the world trades a dependency question for an ownership question nobody
 # has answered.
 #
-# **`Engine::core` and nothing else.** That is the whole point of the module and
+# **`Engine::core` and `Engine::graphcore`, and nothing else.** That is the point of the module and
 # is the line to defend: the day this needs `assets`, ask what for - a document
 # is names and numbers, and a payload is `bake`'s.
 mono_add_library(bakegraph
 	TIER shared
 	DEPS
 		Engine::core
+		Engine::graphcore
 )
