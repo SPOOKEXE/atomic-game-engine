@@ -69,7 +69,7 @@ jobs:
           restore-keys: demo-impact-${{ runner.os }}-
       - name: Fetch shader compiler dependencies
         run: python3 mono.vendor/shaderc/utils/git-sync-deps
-      - name: Build, collect and compare three five-second runs
+      - name: Build, collect and compare three fifteen-second runs
         env:
           BASELINE_REF: ${{ inputs.baseline || 'origin/v0.24.1' }}
         run: |
