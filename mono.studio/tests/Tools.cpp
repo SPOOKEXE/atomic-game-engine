@@ -109,6 +109,10 @@ namespace studio {
 		static void FinishInputFrame(Editor &editor) {
 			editor.FinishControlAutomationFrame();
 		}
+
+		static bool HasPendingControlClick(const Editor &editor) {
+			return editor.PendingControlClick.has_value();
+		}
 	};
 }
 
@@ -502,4 +506,191 @@ TEST_CASE(
 	observe("!", -1.0f);
 	studio::ToolsProbe::PumpInput(editor);
 	observe({}, 0.0f);
+}
+
+TEST_CASE(
+	"Studio omitted-down clicks wait for a presented hover and release once", "[studio][control][automation]"
+) {
+	Context context;
+	REQUIRE(SDL_Init(SDL_INIT_EVENTS));
+	struct ControlEventsLifetime {
+		~ControlEventsLifetime() {
+			SDL_QuitSubSystem(SDL_INIT_EVENTS);
+		}
+	} eventsLifetime;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareTransport(editor);
+	engine::ui::InterfaceSettings settings;
+	settings.DisplayWidth = 1024;
+	settings.DisplayHeight = 720;
+	REQUIRE(editor.Interface.Initialise(editor.Renderer, nullptr, settings));
+	editor.EnableControlFeatures();
+
+	const auto call = [&](uint32_t id, std::string_view tool, nlohmann::json arguments) {
+		const nlohmann::json request{
+			{"jsonrpc", "2.0"},
+			{"id", id},
+			{"method", "tools/call"},
+			{"params", {{"name", tool}, {"arguments", std::move(arguments)}}},
+		};
+		const auto response = nlohmann::json::parse(editor.ControlSurface.Answer(request.dump()));
+		REQUIRE(response.contains("result"));
+		const auto &result = response.at("result");
+		INFO(result.dump());
+		REQUIRE_FALSE(result.value("isError", false));
+		const auto payload = nlohmann::json::parse(result.at("content").at(0).at("text").get<std::string>());
+		REQUIRE(payload.at("queued").get<bool>());
+	};
+	struct PresentedFrame {
+		ImVec2 AssetsCenter{};
+		ImVec2 ButtonCenter{};
+		bool WorldsSelected = false;
+		bool AssetsSelected = false;
+		bool AssetsHovered = false;
+		bool ButtonHovered = false;
+		bool ButtonActivated = false;
+		bool LeftDown = false;
+		bool LeftClicked = false;
+		bool LeftReleased = false;
+	};
+	const auto drawFrame = [&] {
+		PresentedFrame result;
+		editor.Interface.Begin(1.0f / 60.0f);
+		ImGui::SetNextWindowPos(ImVec2(60.0f, 60.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(360.0f, 220.0f), ImGuiCond_Always);
+		ImGui::Begin(
+			"Control click tabs",
+			nullptr,
+			ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings
+		);
+		if (ImGui::BeginTabBar("##control-click-tabs")) {
+			result.WorldsSelected = ImGui::BeginTabItem("Worlds");
+			if (result.WorldsSelected) {
+				ImGui::TextUnformatted("World contents");
+				ImGui::EndTabItem();
+			}
+			result.AssetsSelected = ImGui::BeginTabItem("Assets");
+			result.AssetsHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenOverlappedByItem);
+			const ImVec2 selectedAssetsMin = ImGui::GetItemRectMin();
+			const ImVec2 selectedAssetsMax = ImGui::GetItemRectMax();
+			result.AssetsCenter = ImVec2(
+				(selectedAssetsMin.x + selectedAssetsMax.x) * 0.5f,
+				(selectedAssetsMin.y + selectedAssetsMax.y) * 0.5f
+			);
+			if (result.AssetsSelected) {
+				ImGui::TextUnformatted("Asset contents");
+				ImGui::EndTabItem();
+			}
+			ImGui::EndTabBar();
+		}
+		ImGui::End();
+
+		ImGui::SetNextWindowPos(ImVec2(570.0f, 60.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(340.0f, 220.0f), ImGuiCond_Always);
+		ImGui::Begin(
+			"Control click button",
+			nullptr,
+			ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings
+		);
+		result.ButtonActivated = ImGui::Button("Invoke once");
+		result.ButtonHovered = ImGui::IsItemHovered();
+		const ImVec2 buttonMin = ImGui::GetItemRectMin();
+		const ImVec2 buttonMax = ImGui::GetItemRectMax();
+		result.ButtonCenter = ImVec2((buttonMin.x + buttonMax.x) * 0.5f, (buttonMin.y + buttonMax.y) * 0.5f);
+		ImGui::End();
+
+		const ImGuiIO &io = ImGui::GetIO();
+		result.LeftDown = io.MouseDown[ImGuiMouseButton_Left];
+		result.LeftClicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+		result.LeftReleased = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+		editor.Interface.End();
+		studio::ToolsProbe::FinishInputFrame(editor);
+		return result;
+	};
+	const auto advance = [&] {
+		studio::ToolsProbe::PumpInput(editor);
+		return drawFrame();
+	};
+
+	PresentedFrame initial;
+	for (uint32_t frame = 0; frame < 3; ++frame)
+		initial = advance();
+	CHECK(initial.WorldsSelected);
+	CHECK_FALSE(initial.AssetsSelected);
+
+	studio::ToolsProbe::PumpInput(editor);
+	call(1, "emulate_mouse_move", {{"x", initial.ButtonCenter.x}, {"y", initial.ButtonCenter.y}});
+	const PresentedFrame pointerInOtherWindow = drawFrame();
+	CHECK(pointerInOtherWindow.ButtonHovered);
+	CHECK_FALSE(pointerInOtherWindow.AssetsHovered);
+
+	studio::ToolsProbe::PumpInput(editor);
+	call(
+		2, "emulate_click", {{"x", initial.AssetsCenter.x}, {"y", initial.AssetsCenter.y}, {"button", "left"}}
+	);
+	CHECK(studio::ToolsProbe::HasPendingControlClick(editor));
+	// Polling the motion cannot advance the click phase without a presented ImGui frame.
+	studio::ToolsProbe::PumpInput(editor);
+	CHECK(studio::ToolsProbe::HasPendingControlClick(editor));
+
+	const PresentedFrame hoverBeforePress = drawFrame();
+	CHECK(hoverBeforePress.AssetsHovered);
+	CHECK_FALSE(hoverBeforePress.LeftDown);
+	CHECK(studio::ToolsProbe::HasPendingControlClick(editor));
+
+	uint32_t tabDownFrames = 0;
+	uint32_t tabClickEdges = 0;
+	uint32_t tabReleaseEdges = 0;
+	bool assetsSelected = false;
+	for (uint32_t attempt = 0; attempt < 8 && studio::ToolsProbe::HasPendingControlClick(editor); ++attempt) {
+		const PresentedFrame frame = advance();
+		if (frame.LeftDown) ++tabDownFrames;
+		if (frame.LeftClicked) ++tabClickEdges;
+		if (frame.LeftReleased) ++tabReleaseEdges;
+		assetsSelected = assetsSelected || frame.AssetsSelected;
+	}
+	CHECK_FALSE(studio::ToolsProbe::HasPendingControlClick(editor));
+	CHECK(assetsSelected);
+	CHECK(tabDownFrames == 1);
+	CHECK(tabClickEdges == 1);
+	CHECK(tabReleaseEdges == 1);
+
+	for (uint32_t frame = 0; frame < 3; ++frame) {
+		const PresentedFrame idle = advance();
+		CHECK_FALSE(idle.LeftDown);
+		CHECK_FALSE(idle.LeftClicked);
+		CHECK_FALSE(idle.ButtonActivated);
+		CHECK(idle.AssetsSelected);
+	}
+
+	studio::ToolsProbe::PumpInput(editor);
+	call(
+		3, "emulate_click", {{"x", initial.ButtonCenter.x}, {"y", initial.ButtonCenter.y}, {"button", "left"}}
+	);
+	const PresentedFrame buttonHover = drawFrame();
+	CHECK(buttonHover.ButtonHovered);
+	CHECK_FALSE(buttonHover.LeftDown);
+
+	uint32_t buttonDownFrames = 0;
+	uint32_t buttonClickEdges = 0;
+	uint32_t buttonReleaseEdges = 0;
+	uint32_t buttonActivations = 0;
+	for (uint32_t attempt = 0; attempt < 8 && studio::ToolsProbe::HasPendingControlClick(editor); ++attempt) {
+		const PresentedFrame frame = advance();
+		if (frame.LeftDown) ++buttonDownFrames;
+		if (frame.LeftClicked) ++buttonClickEdges;
+		if (frame.LeftReleased) ++buttonReleaseEdges;
+		if (frame.ButtonActivated) ++buttonActivations;
+	}
+	CHECK_FALSE(studio::ToolsProbe::HasPendingControlClick(editor));
+	CHECK(buttonDownFrames == 1);
+	CHECK(buttonClickEdges == 1);
+	CHECK(buttonReleaseEdges == 1);
+	CHECK(buttonActivations == 1);
+	for (uint32_t frame = 0; frame < 3; ++frame) {
+		const PresentedFrame idle = advance();
+		CHECK_FALSE(idle.LeftDown);
+		CHECK_FALSE(idle.LeftClicked);
+		CHECK_FALSE(idle.ButtonActivated);
+	}
 }

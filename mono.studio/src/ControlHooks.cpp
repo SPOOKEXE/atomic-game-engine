@@ -197,6 +197,13 @@ namespace studio {
 							}
 							const uint8_t button = MouseButton(event.Button);
 							if (!motion(event.X, event.Y)) return json(nullptr);
+							if (event.State == engine::control::InputAutomationState::Click) {
+								host.PendingControlClick =
+									Editor::ControlClick{event.X, event.Y, button, false};
+								return json{
+									{"queued", true}, {"x", event.X}, {"y", event.Y}, {"button", event.Button}
+								};
+							}
 							SDL_Event input{};
 							input.type = event.State == engine::control::InputAutomationState::Up
 											 ? SDL_EVENT_MOUSE_BUTTON_UP
@@ -209,10 +216,6 @@ namespace studio {
 							input.button.x = event.X;
 							input.button.y = event.Y;
 							if (!push(input, "mouse button")) return json(nullptr);
-							if (event.State == engine::control::InputAutomationState::Click) {
-								host.PendingControlClick =
-									Editor::ControlClick{event.X, event.Y, button, false};
-							}
 							return json{
 								{"queued", true}, {"x", event.X}, {"y", event.Y}, {"button", event.Button}
 							};

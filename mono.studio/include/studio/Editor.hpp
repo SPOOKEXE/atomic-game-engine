@@ -3345,15 +3345,17 @@ namespace studio {
 		// Whether the front screenshot request has reached the renderer.
 		bool ControlScreenshotIssued = false;
 
-		// A click injected through SDL. The release waits until a presented ImGui
-		// frame has observed the press, matching a physical button lifecycle.
+		// A click injected through SDL waits for pointer hover, a presented press,
+		// and a presented release so tab bars receive the same sequence as a user click.
 		struct ControlClick {
-			// Screen position, SDL button, and press-observation state.
+			enum class Phase : uint8_t { Hover, Down, Release };
+			// Screen position, SDL button, phase, and SDL press-observation state.
 			//@{
 			float X = 0.0f;
 			float Y = 0.0f;
 			uint8_t Button = 0;
 			bool DownProcessed = false;
+			Phase Current = Phase::Hover;
 			//@}
 		};
 		// The synthetic click currently crossing the frame boundary.

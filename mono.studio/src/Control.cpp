@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <array>
 #include <cfloat>
+#include <cmath>
 #include <filesystem>
 #include <imgui.h>
 #include <nlohmann/json.hpp>
@@ -749,29 +750,93 @@ namespace studio {
 			ControlScreenshotIssued = false;
 		}
 
-		if (PendingControlClick.has_value() && PendingControlClick->DownProcessed) {
-			SDL_Event motion{};
-			motion.type = SDL_EVENT_MOUSE_MOTION;
-			motion.motion.timestamp = SDL_GetTicksNS();
-			motion.motion.windowID = window;
-			motion.motion.x = PendingControlClick->X;
-			motion.motion.y = PendingControlClick->Y;
-			SDL_Event release{};
-			release.type = SDL_EVENT_MOUSE_BUTTON_UP;
-			release.button.timestamp = SDL_GetTicksNS();
-			release.button.windowID = window;
-			release.button.button = PendingControlClick->Button;
-			release.button.down = false;
-			release.button.clicks = 1;
-			release.button.x = PendingControlClick->X;
-			release.button.y = PendingControlClick->Y;
-			if (!SDL_PushEvent(&motion) || !SDL_PushEvent(&release)) {
-				Say(std::string("control: could not release emulated click: ") + SDL_GetError(),
-					engine::core::LogLevel::Error);
-			} else {
-				Interface.QueueAutomationEvent(motion);
-				Interface.QueueAutomationEvent(release);
-				PendingControlClick.reset();
+		if (PendingControlClick.has_value()) {
+			ControlClick &click = *PendingControlClick;
+			int mouseButton = -1;
+			if (click.Button == SDL_BUTTON_LEFT) mouseButton = 0;
+			if (click.Button == SDL_BUTTON_RIGHT) mouseButton = 1;
+			if (click.Button == SDL_BUTTON_MIDDLE) mouseButton = 2;
+			if (mouseButton >= 0) {
+				const ImGuiIO &io = ImGui::GetIO();
+				float targetX = click.X;
+				float targetY = click.Y;
+				if ((io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0 && Window != nullptr) {
+					int windowX = 0;
+					int windowY = 0;
+					(void)SDL_GetWindowPosition(Window, &windowX, &windowY);
+					targetX += static_cast<float>(windowX);
+					targetY += static_cast<float>(windowY);
+				}
+				const bool pointerAtTarget =
+					io.MousePos.x == std::floor(targetX) && io.MousePos.y == std::floor(targetY);
+
+				const auto queueMotion = [&] {
+					SDL_Event motion{};
+					motion.type = SDL_EVENT_MOUSE_MOTION;
+					motion.motion.timestamp = SDL_GetTicksNS();
+					motion.motion.windowID = window;
+					motion.motion.x = click.X;
+					motion.motion.y = click.Y;
+					if (!SDL_PushEvent(&motion)) {
+						Say(std::string("control: could not queue emulated click motion: ") + SDL_GetError(),
+							engine::core::LogLevel::Error);
+						return false;
+					}
+					Interface.QueueAutomationEvent(motion);
+					return true;
+				};
+				const auto queuePointerButton = [&](bool down) {
+					SDL_Event motion{};
+					motion.type = SDL_EVENT_MOUSE_MOTION;
+					motion.motion.timestamp = SDL_GetTicksNS();
+					motion.motion.windowID = window;
+					motion.motion.x = click.X;
+					motion.motion.y = click.Y;
+					SDL_Event button{};
+					button.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+					button.button.timestamp = SDL_GetTicksNS();
+					button.button.windowID = window;
+					button.button.button = click.Button;
+					button.button.down = down;
+					button.button.clicks = 1;
+					button.button.x = click.X;
+					button.button.y = click.Y;
+					if (!SDL_PushEvent(&motion) || !SDL_PushEvent(&button)) {
+						Say(std::string("control: could not queue emulated click ") +
+								(down ? "press: " : "release: ") + SDL_GetError(),
+							engine::core::LogLevel::Error);
+						return false;
+					}
+					Interface.QueueAutomationEvent(motion);
+					Interface.QueueAutomationEvent(button);
+					return true;
+				};
+
+				switch (click.Current) {
+				case ControlClick::Phase::Hover:
+					if (!pointerAtTarget) {
+						(void)queueMotion();
+					} else if (!io.MouseDown[mouseButton] && queuePointerButton(true)) {
+						click.Current = ControlClick::Phase::Down;
+						click.DownProcessed = false;
+					}
+					break;
+				case ControlClick::Phase::Down:
+					if (click.DownProcessed && pointerAtTarget && io.MouseDown[mouseButton] &&
+						queuePointerButton(false)) {
+						click.Current = ControlClick::Phase::Release;
+					} else if (!pointerAtTarget) {
+						(void)queueMotion();
+					}
+					break;
+				case ControlClick::Phase::Release:
+					if (pointerAtTarget && !io.MouseDown[mouseButton]) {
+						PendingControlClick.reset();
+					} else if (!pointerAtTarget) {
+						(void)queueMotion();
+					}
+					break;
+				}
 			}
 		}
 
