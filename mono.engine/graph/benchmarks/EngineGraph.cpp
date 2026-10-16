@@ -153,17 +153,29 @@ namespace {
 		if (!found) throw std::runtime_error("benchmark heap scope was not recorded");
 		std::cout << "# b0 heap\t" << name << '\t' << (after.TotalBytes - before.TotalBytes) << '\t'
 				  << (after.TotalBlocks - before.TotalBlocks) << '\t' << (after.LiveBytes - before.LiveBytes)
-				  << '\t' << after.LiveBytes << '\t' << peak << '\n';
+				  << '\t' << after.LiveBytes << '\t' << peak << '\t' << after.LiveBlocks << '\t'
+				  << after.PeakBytes << '\t' << after.OverheadBytes << '\t' << HeapProfile::BlockOverhead()
+				  << '\t' << (after.DroppedScopes - before.DroppedScopes) << '\t'
+				  << (after.ForeignFrees - before.ForeignFrees) << '\n';
 	}
 
 	void ProbeMemoryOnce() {
 		static const bool probed = [] {
 			if (const char *setting = std::getenv("MONO_BENCH_MEMORY");
 				setting != nullptr && setting[0] == '1' && setting[1] == '\0') {
+				std::cout << "# b0 heap basis\ttracked_cpp_requested_payload=1\t"
+						  << "malloc_gpu_excluded=1\twork_invocations=1\tfixtures_prepared=1\t"
+						  << "scope_peak=exclusive\tprocess_peak=lifetime\t"
+						  << "external_contention_invalidates_timing=1\ttiming_valid=0\t"
+						  << "counters=process_local\n";
 				std::cout
 					<< "# b0 heap "
-					   "v1\tname\tallocated_bytes\tallocated_blocks\tretained_bytes\tlive_bytes\tscope_peak_"
-					   "bytes\n";
+					   "v2\tname\tprocess_allocated_bytes\tprocess_allocated_blocks\tprocess_retained_bytes\t"
+					   "process_live_bytes\tscope_self_peak_bytes\tprocess_live_blocks\tprocess_peak_"
+					   "lifetime_bytes\t"
+					   "process_header_overhead_model_bytes\tblock_overhead_bytes\tdropped_scopes_"
+					   "delta\tforeign_"
+					   "frees_delta\n";
 				ProbeHeap("b0 enginegraph empty", [] { Compile(EMPTY, EngineExecutionMode::Concurrent); });
 				ProbeHeap("b0 enginegraph simple", [] { Compile(SIMPLE, EngineExecutionMode::Concurrent); });
 				ProbeHeap("b0 enginegraph busy", [] { Compile(BUSY, EngineExecutionMode::Concurrent); });
