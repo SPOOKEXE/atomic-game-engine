@@ -17,6 +17,7 @@
 // build file.
 
 #include <charconv>
+#include <cmath>
 #include <cstddef>
 #include <ios>
 #include <locale>
@@ -104,7 +105,8 @@ namespace engine::core::portable {
 
 		// Overflow sets failbit, while underflow can silently round a nonzero
 		// number to zero. `from_chars` reports both as out of range.
-		if (stream.fail()) {
+		// libc++ also sets failbit for a representable subnormal result.
+		if (stream.fail() && std::fpclassify(parsed) != FP_SUBNORMAL) {
 			return {end, std::errc::result_out_of_range};
 		}
 		if (parsed == T{}) {
