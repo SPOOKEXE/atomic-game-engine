@@ -58,6 +58,9 @@ namespace engine::render {
 			uint32_t Edges = 0;
 			double ProducerMicroseconds = 0;
 			double JoinMicroseconds = 0;
+			// Owner CPU waits for submission workers, including their API work, not GPU semaphore waits.
+			double SubmissionWorkerWaitMicroseconds = 0;
+			uint32_t SubmissionWorkerWaits = 0;
 			double ParallelOverlapMicroseconds = 0;
 			std::array<double, 3> RecorderMicroseconds{};
 			std::array<uint32_t, 3> RecorderTasks{};

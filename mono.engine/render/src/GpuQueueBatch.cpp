@@ -755,7 +755,10 @@ namespace engine::render {
 			}
 			if (task.Worker >= 0) {
 				Held->Send(static_cast<size_t>(task.Worker), State::Request::Submit, index);
+				const auto waitStarted = Clock::now();
 				Held->Await(static_cast<size_t>(task.Worker));
+				Held->Last.SubmissionWorkerWaitMicroseconds += Microseconds(waitStarted);
+				++Held->Last.SubmissionWorkerWaits;
 			} else
 				Held->Submit(task);
 			if (!task.Submitted) {

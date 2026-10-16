@@ -362,7 +362,9 @@ void main() {
 			}
 		};
 		const auto wait = [&] {
+			const auto started = Clock::now();
 			if (!SDL_WaitForGPUIdle(device)) throw std::runtime_error(SDL_GetError());
+			return Elapsed(started);
 		};
 		for (size_t frame = 0; frame < WARM_FRAMES; ++frame) {
 			wait();
@@ -399,8 +401,12 @@ void main() {
 		size_t queueCompletedFrames = 0, queueDropped = 0, batchCompleted = 0;
 		uint64_t recorded = 0, workerRecorded = 0, submitted = 0, edges = 0;
 		double producerMicroseconds = 0, joinMicroseconds = 0, cpuOverlapMicroseconds = 0;
+		uint64_t cpuDeviceIdleWaitNanoseconds = 0, submissionWorkerWaits = 0;
+		double submissionWorkerWaitMicroseconds = 0;
 		std::array<uint64_t, MAX_RECORDING_FRAMES> cpuRenderSamples{};
+		std::array<uint64_t, MAX_RECORDING_FRAMES> deviceIdleWaitSamples{};
 		std::array<double, MAX_RECORDING_FRAMES> producerSamples{}, joinSamples{};
+		std::array<double, MAX_RECORDING_FRAMES> submissionWorkerWaitSamples{};
 		size_t controllerSampleCount = 0;
 		uint64_t firstControllerSequence = 0, lastControllerSequence = 0;
 		std::array<std::array<double, MAX_RECORDING_FRAMES>, ATOMIC_GPU_QUEUE_COUNT> queueFrameSamples{};
@@ -414,7 +420,9 @@ void main() {
 		render::GpuMemoryStatistics gpuAfter;
 		core::HeapTotals measuredEnd{};
 		for (size_t frame = 0; frame <= measuredFrames; ++frame) {
-			wait();
+			// Host API duration before each measured render; warm-up, capture flush and final drain stay
+			// separate.
+			const uint64_t deviceIdleWaitNanoseconds = wait();
 			if (frame == measuredFrames) {
 				gpuAfter = renderer.MemoryStatistics();
 				measuredEnd = core::HeapProfile::Totals();
@@ -438,6 +446,8 @@ void main() {
 			if (frame < measuredFrames) {
 				cpuNanoseconds += elapsed;
 				cpuRenderSamples[frame] = elapsed;
+				cpuDeviceIdleWaitNanoseconds += deviceIdleWaitNanoseconds;
+				deviceIdleWaitSamples[frame] = deviceIdleWaitNanoseconds;
 				drawCalls += result.DrawCalls;
 				uploadedBytes += result.UploadedBytes;
 				dirtyRows += result.InstanceRowsDirty;
@@ -450,6 +460,8 @@ void main() {
 						lastControllerSequence = stats.Sequence;
 						producerSamples[controllerSampleCount] = stats.ProducerMicroseconds * 1000.0;
 						joinSamples[controllerSampleCount] = stats.JoinMicroseconds * 1000.0;
+						submissionWorkerWaitSamples[controllerSampleCount] =
+							stats.SubmissionWorkerWaitMicroseconds;
 						++controllerSampleCount;
 					}
 					recorded += stats.Recorded;
@@ -458,6 +470,8 @@ void main() {
 					edges += stats.Edges;
 					producerMicroseconds += stats.ProducerMicroseconds;
 					joinMicroseconds += stats.JoinMicroseconds;
+					submissionWorkerWaitMicroseconds += stats.SubmissionWorkerWaitMicroseconds;
+					submissionWorkerWaits += stats.SubmissionWorkerWaits;
 					cpuOverlapMicroseconds += stats.ParallelOverlapMicroseconds;
 					for (size_t recorder = 0; recorder < 3; ++recorder) {
 						recorderMicroseconds[recorder] += stats.RecorderMicroseconds[recorder];
@@ -527,6 +541,9 @@ void main() {
 				  << " compute_verified_bytes_per_frame=" << expectedCompute.size()
 				  << " compute_oracle=" << (computeEnabled ? "exact_full_buffer" : "disabled")
 				  << " cpu_render_ns=" << cpuNanoseconds / measuredFrames
+				  << " cpu_device_idle_wait_ns=" << cpuDeviceIdleWaitNanoseconds / measuredFrames
+				  << " cpu_device_idle_wait_scope=before_measured_render"
+				  << " cpu_device_idle_wait_basis=host_sdl_wait_for_gpu_idle_including_api_overhead"
 				  << " packet_records_per_frame=" << static_cast<double>(recorded) / measuredFrames
 				  << " worker_records_per_frame=" << static_cast<double>(workerRecorded) / measuredFrames
 				  << " controller_submits_per_frame=" << static_cast<double>(submitted) / measuredFrames
@@ -534,9 +551,13 @@ void main() {
 				  << " completed_batches=" << batchCompleted
 				  << " cpu_producer_us=" << producerMicroseconds / measuredFrames
 				  << " cpu_worker_join_us=" << joinMicroseconds / measuredFrames
+				  << " cpu_submission_worker_wait_us=" << submissionWorkerWaitMicroseconds / measuredFrames
+				  << " cpu_submission_worker_wait_calls=" << submissionWorkerWaits
+				  << " cpu_submission_worker_wait_basis=owner_await_including_worker_submission_api_work"
 				  << " cpu_worker_interval_overlap_us=" << cpuOverlapMicroseconds / measuredFrames
 				  << " gpu_queue_unique_completed_frames=" << queueCompletedFrames
-				  << " gpu_queue_dropped_queries=" << queueDropped << " gpu_overlap=unmeasured";
+				  << " gpu_queue_dropped_queries=" << queueDropped
+				  << " gpu_dependency_wait=unmeasured gpu_overlap=unmeasured";
 		for (size_t recorder = 0; recorder < 3; ++recorder)
 			std::cout << " cpu_recorder_" << recorder
 					  << "_us=" << recorderMicroseconds[recorder] / measuredFrames << " cpu_recorder_"
@@ -585,8 +606,10 @@ void main() {
 				  << " gpu_live_bytes=" << gpuAfter.LiveBytes << " gpu_peak_bytes=" << gpuAfter.PeakBytes
 				  << " gpu_memory=logical_payload";
 		PrintTails("cpu_render_ns", cpuRenderSamples, measuredFrames);
+		PrintTails("cpu_device_idle_wait_ns", deviceIdleWaitSamples, measuredFrames);
 		PrintTails("cpu_producer_ns", producerSamples, controllerSampleCount);
 		PrintTails("cpu_worker_join_ns", joinSamples, controllerSampleCount);
+		PrintTails("cpu_submission_worker_wait_us", submissionWorkerWaitSamples, controllerSampleCount);
 		std::cout << '\n';
 		std::cout << "render-recording-cpp-heap";
 		PrintCaptureIdentity(invocationId, api);
