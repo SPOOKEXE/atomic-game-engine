@@ -10,6 +10,7 @@
 #include <engine/render/Animation.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/scene/Animation.hpp>
+#include <engine/scene/Attachments.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -19,6 +20,7 @@
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -114,20 +116,50 @@ namespace cadence_town_bench {
 					"cadence actual town citizen hierarchy changed"
 				);
 				citizen.InitialPosition = Storage.Get<scene::Transform>(citizen.Root)->Frame.Position;
-				const auto identity = Storage.Get<scene::UpdateCadence>(citizen.Model)->Identity;
-				auto policy = Policy(identity.Text(), full);
-				Storage.Set(citizen.Model, policy);
+				const auto *authored = Storage.Get<scene::UpdateCadence>(citizen.Model);
+				Require(
+					authored != nullptr && authored->Identity.IsValid() && authored->Owner == citizen.Model,
+					"cadence actual town owner policy missing"
+				);
+				constexpr std::array<scene::CadenceInterval, 4> expected{{{8, 12}, {4, 8}, {4, 8}, {4, 8}}};
+				for (size_t domain = 0; domain < expected.size(); ++domain)
+					Require(
+						authored->Domains[domain].IntervalTicks == expected[domain].IntervalTicks &&
+							authored->Domains[domain].MaximumStalenessTicks ==
+								expected[domain].MaximumStalenessTicks,
+						"cadence actual town authored intervals changed"
+					);
+				if (full) {
+					auto policy = *authored;
+					for (auto &domain : policy.Domains)
+						domain = {1, 1};
+					Storage.Set(citizen.Model, policy);
+				}
+				const size_t beforeBeams = Beams.Beams.size();
+				Storage.EachDescendant(citizen.Model, [&](Entity entity) {
+					const auto *beam = Storage.Get<effects::Beam>(entity);
+					if (beam == nullptr) return;
+					Require(
+						beam->Enabled && beam->Attachment0 != ecs::NULL_ENTITY &&
+							beam->Attachment1 != ecs::NULL_ENTITY && beam->Attachment0 != beam->Attachment1 &&
+							Storage.Has<scene::Attachment>(beam->Attachment0) &&
+							Storage.Has<scene::Attachment>(beam->Attachment1) &&
+							!Storage.Has<scene::UpdateCadence>(entity),
+						"cadence actual town beam source or policy changed"
+					);
+					Beams.Beams.push_back(entity);
+					Beams.Ends.push_back(beam->Attachment1);
+				});
+				Require(
+					Beams.Beams.size() == beforeBeams + 1,
+					"cadence actual town needs one owned beam per citizen"
+				);
 				if (population == 64) {
 					auto *targetHealth = Storage.GetMutable<scene::Humanoid>(citizen.TargetHumanoid);
 					targetHealth->MaxHealth = 1000000;
 					targetHealth->Health = 1000000;
 				}
 			}
-			std::vector<Entity> owners;
-			owners.reserve(population);
-			for (const auto &citizen : Citizens)
-				owners.push_back(citizen.Model);
-			Beams.Create(Storage, population, full, 16, owners);
 			physics::SyncBroadphase(Storage);
 		}
 		void Author(Window window) {
@@ -180,7 +212,9 @@ namespace cadence_town_bench {
 					);
 			}
 			BeforeHealth = Storage.Get<scene::Humanoid>(TargetHumanoid)->Health;
-			Beams.Author(Storage, window);
+			if (window == Window::Invalidation)
+				for (const Entity end : Beams.Ends)
+					Storage.GetMutable<scene::Attachment>(end)->Frame.Position.Y += .5f;
 		}
 		void Step(Work &counts) {
 			Storage.ClearChanges();
@@ -320,9 +354,8 @@ namespace cadence_town_bench {
 					"cadence town health differs from attack deadline oracle"
 				);
 			counts.Damage += expectedDamage;
-			// Combat is the actual script's proximity rule. Single-target windows
-			// can promote one guard while a beam's explicit policy names the same
-			// presentation requirement. Compare both VMs' current view and scroll.
+			// The beam inherits its citizen's combat, ownership and invalidation policy.
+			// Compare both VMs' current view and scroll.
 			Beams.Verify(Storage, other.Beams, window, counts);
 		}
 	};
@@ -418,7 +451,7 @@ namespace cadence_town_bench {
 		);
 
 		summary.Append(
-			"# cadence-town script=actual_unchanged_TownCadence paired_language_parity=1 "
+			"# cadence-town script=actual_authored_TownCadence paired_language_parity=1 "
 			"ray_attempts_provenance=committed_perception_beyond_three_metres "
 			"ray_hits_provenance=visible_target_commits vm_source_profiler=off\n"
 		);

@@ -126,8 +126,36 @@ local function citizen(name: string, x: number, color: Color3, practice: Practic
 	humanoid.RootPart = rig
 	humanoid.WalkSpeed = 3.5
 	humanoid.Parent = model
+	-- Keep the cosmetic source still while the physical body follows its target.
+	local beacon = Instance.new("Part")
+	beacon.Name = "Beacon"
+	beacon.Size = Vector3.new(0.2, 0.2, 0.2)
+	beacon.Position = Vector3.new(x, 4.8, 8)
+	beacon.Anchored = true
+	beacon.CanCollide = false
+	beacon.CanQuery = false
+	beacon.Transparency = 1
+	beacon.Parent = model
+	local from = Instance.new("Attachment")
+	from.CFrame = CFrame.new(Vector3.new(-1.2, 0, -0.5))
+	from.Parent = beacon
+	local to = Instance.new("Attachment")
+	to.CFrame = CFrame.new(Vector3.new(1.2, 0.2, -0.5))
+	to.Parent = beacon
+	local beam = Instance.new("Beam")
+	beam.Name = "Cosmetic Beam"
+	beam.Enabled = true
+	beam.Attachment0 = from
+	beam.Attachment1 = to
+	beam.CurveSize0 = 0.6
+	beam.CurveSize1 = -0.4
+	beam.Width0 = 0.22
+	beam.Width1 = 0.35
+	beam.TextureSpeed = 0.25
+	beam.Color = ColorSequence.new(color)
+	beam.Parent = beacon
 	model.Parent = workspace
-	assert(cadence:Configure(model, "town.citizen." .. name, 8, 12, 4, 8, 3))
+	assert(cadence:Configure(model, "town.citizen." .. name, 8, 12, 4, 8, 3, 4, 8, 4, 8))
 	model:SetAttribute("NextAttackTick", 0)
 	table.insert(citizens, {
 		Model = model,
