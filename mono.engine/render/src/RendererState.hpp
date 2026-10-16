@@ -505,6 +505,7 @@ namespace engine::render {
 			PendingCaptureTimings[slot].clear();
 		}
 
+		static constexpr uint32_t SURFACE_FRAGMENT_SAMPLERS = 16;
 		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
 		// No-cull twins of the back-face-culled opaque pipelines, as (culled,
 		// twin) pairs. Portal and mirror surfaces draw through them, so a camera

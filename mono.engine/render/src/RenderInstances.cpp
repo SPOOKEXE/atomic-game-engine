@@ -195,7 +195,7 @@ namespace engine::render {
 				native == WireframeTransparentPipeline || native == HdrWireframeOpaquePipeline ||
 				native == HdrWireframeTransparentPipeline || native == ForwardPipeline ||
 				native == TransparentLayerPipeline || native == TransparentLayerColourPipeline;
-			materialSamplerCount = authoredMaterial ? 10u : surfaceShader ? 13u : 11u;
+			materialSamplerCount = authoredMaterial || surfaceShader ? 13u : 11u;
 			if (want != bound) {
 				SDL_BindGPUGraphicsPipeline(pass, want);
 				bound = want;
