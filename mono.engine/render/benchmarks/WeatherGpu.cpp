@@ -43,6 +43,7 @@ BENCH("weather descriptor CPU preparation and bounded full-field grid", 1000) {
 namespace {
 	using namespace engine;
 	constexpr uint32_t DEFAULT_PHASE_FRAMES = 256;
+	constexpr uint32_t MAINTENANCE_FRAMES = 96;
 	constexpr std::array<const char *, 7> WEATHER_PASSES{
 		"weather-clock",
 		"weather-field",
@@ -60,6 +61,12 @@ namespace {
 		"ray_pixels",		   "shadow_texels",			 "page_uploads",		 "resident_bricks",
 		"clock_dispatches",	   "clock_anchors",			 "clock_advances",		 "clock_cache_hits",
 		"clock_uniform_bytes"
+	};
+	constexpr std::array<std::string_view, 4> DISPATCH_COUNTERS{
+		"render.weather.field_dispatches",
+		"render.weather.summary_dispatches",
+		"render.weather.page_uploads",
+		"render.weather.clock_dispatches"
 	};
 
 	uint32_t BenchmarkExtent(const char *name, uint32_t fallback, uint32_t maximum) {
@@ -98,8 +105,11 @@ namespace {
 	};
 	struct WeatherPhase {
 		const char *Name = "cold";
+		const char *Role = "first_submission";
+		bool TailEvidenceInsufficient = false;
 		uint32_t Frames = 0;
 		int64_t RecordingNanoseconds = 0;
+		uint64_t CounterObserverNanoseconds = 0;
 		uint64_t SubmittedComputeDispatches = 0;
 		std::array<PassTiming, WEATHER_PASSES.size()> Timings{};
 		std::array<double, WEATHER_WORK.size()> Before{};
@@ -109,7 +119,24 @@ namespace {
 		core::HeapTotals CpuBefore, CpuAfter;
 		std::vector<uint64_t> RecordingSamples, CompletionSamples;
 		std::chrono::steady_clock::time_point LastStarted;
+		struct CounterEvent {
+			uint32_t Frame = 0;
+			uint64_t Tick = 0;
+			std::array<double, DISPATCH_COUNTERS.size()> Deltas{};
+		};
+		std::array<CounterEvent, 16> CounterEvents{};
+		size_t CounterEventCount = 0;
+		uint64_t CounterEventTotal = 0, CounterEventDropped = 0;
 	};
+
+	std::array<double, DISPATCH_COUNTERS.size()> ReadDispatchCounters() {
+		std::array<double, DISPATCH_COUNTERS.size()> values{};
+		for (size_t index = 0; index < DISPATCH_COUNTERS.size(); ++index) {
+			const auto counter = core::Metrics::Get(DISPATCH_COUNTERS[index]);
+			if (counter) values[index] = counter->Value;
+		}
+		return values;
+	}
 
 	std::array<double, WEATHER_WORK.size()> ReadWeatherWork() {
 		std::array<double, WEATHER_WORK.size()> values{};
@@ -126,13 +153,16 @@ namespace {
 		return 0;
 	}
 
-	bool ValidateWeatherPhases(const std::array<WeatherPhase, 3> &phases, bool inactive) {
+	bool ValidateWeatherPhases(
+		const std::array<WeatherPhase, 4> &phases, bool inactive, std::string_view scenario
+	) {
 		bool valid = true;
 		const auto expect = [&](const WeatherPhase &phase, std::string_view counter, bool positive) {
 			const double observed = PhaseWork(phase, counter);
 			if (positive ? observed > 0 : observed == 0) return;
-			std::cerr << "weather-gpu workload refused: phase=" << phase.Name << " counter=" << counter
-					  << " expected=" << (positive ? "positive" : "zero") << " observed=" << observed << '\n';
+			std::cerr << "weather-gpu workload refused: scenario=" << scenario << " phase=" << phase.Name
+					  << " counter=" << counter << " expected=" << (positive ? "positive" : "zero")
+					  << " observed=" << observed << '\n';
 			valid = false;
 		};
 		if (inactive) {
@@ -155,25 +185,32 @@ namespace {
 			  "ray_dispatches",
 			  "shadow_dispatches"})
 			expect(phases[0], counter, true);
-		expect(phases[1], "field_dispatches", false);
 		expect(phases[1], "clock_dispatches", false);
 		expect(phases[1], "clock_cache_hits", true);
 		expect(phases[1], "field_cache_hits", true);
 		expect(phases[1], "ray_dispatches", true);
+		expect(phases[1], "summary_cache_hits", true);
+		for (const auto *counter : {"clock_dispatches", "field_dispatches"})
+			expect(phases[2], counter, false);
+		for (const auto *counter : {"clock_cache_hits", "field_cache_hits", "ray_dispatches"})
+			expect(phases[2], counter, true);
 		for (const auto *counter :
 			 {"clock_dispatches",
 			  "clock_advances",
 			  "field_dispatches",
 			  "summary_dispatches",
 			  "ray_dispatches"})
-			expect(phases[2], counter, true);
+			expect(phases[3], counter, true);
 		return valid;
 	}
 
 	void PrintPhase(const WeatherPhase &phase, std::ostream &out) {
-		out << "weather-gpu phase=" << phase.Name << " frames=" << phase.Frames
+		out << "weather-gpu phase=" << phase.Name << " role=" << phase.Role << " frames=" << phase.Frames
 			<< " cpu_record_ns=" << phase.RecordingNanoseconds / std::max(phase.Frames, 1u)
+			<< " counter_observer_cpu_ns=" << phase.CounterObserverNanoseconds
+			<< " cpu_record_excludes_observer=1 completion_includes_post_observer=1"
 			<< " submitted_compute_dispatches=" << phase.SubmittedComputeDispatches;
+		if (phase.TailEvidenceInsufficient) out << " tail_evidence=insufficient";
 		for (size_t index = 0; index < WEATHER_PASSES.size(); ++index) {
 			const auto &timing = phase.Timings[index];
 			out << " gpu_" << WEATHER_PASSES[index] << "_us=";
@@ -195,6 +232,8 @@ namespace {
 			<< " live_buffers=" << phase.FinalHeap.Buffers
 			<< " live_transfers=" << phase.FinalHeap.TransferBuffers
 			<< " live_textures=" << phase.FinalHeap.Textures
+			<< " counter_events_total=" << phase.CounterEventTotal
+			<< " counter_events_dropped=" << phase.CounterEventDropped
 			<< " created_buffers=" << phase.FinalHeap.BufferAllocations - phase.InitialHeap.BufferAllocations
 			<< " created_transfers="
 			<< phase.FinalHeap.TransferBufferAllocations - phase.InitialHeap.TransferBufferAllocations
@@ -209,6 +248,22 @@ namespace {
 				<< " cpu_allocated_blocks=" << phase.CpuAfter.TotalBlocks - phase.CpuBefore.TotalBlocks;
 		out << '\n';
 	}
+	void PrintCounterEvents(const std::array<WeatherPhase, 4> &phases, std::ostream &out) {
+		for (const auto &phase : phases) {
+			out << "weather-gpu-counter-events phase=" << phase.Name << " total=" << phase.CounterEventTotal
+				<< " captured=" << phase.CounterEventCount << " dropped=" << phase.CounterEventDropped
+				<< '\n';
+			for (size_t eventIndex = 0; eventIndex < phase.CounterEventCount; ++eventIndex) {
+				const auto &event = phase.CounterEvents[eventIndex];
+				out << "weather-gpu-counter-event phase=" << phase.Name << " frame_0based=" << event.Frame
+					<< " tick=" << event.Tick;
+				for (size_t counter = 0; counter < DISPATCH_COUNTERS.size(); ++counter)
+					out << ' ' << DISPATCH_COUNTERS[counter].substr(sizeof("render.weather.") - 1) << '='
+						<< event.Deltas[counter];
+				out << '\n';
+			}
+		}
+	}
 }
 
 BENCH("opt-in weather device scenario CPU harness", 1) {
@@ -221,11 +276,17 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 	uint32_t shadowResolution = 256;
 	uint64_t initialTick = 0;
 	uint32_t phaseFrames = DEFAULT_PHASE_FRAMES;
+	bool diagnostics = false;
 	const auto scenario =
 		ray_consumer_bench::Setting("MONO_WEATHER_GPU_BENCH_SCENE", std::string_view("simple"));
 	if (scenario != "inactive" && scenario != "empty" && scenario != "simple" && scenario != "complex")
 		throw std::runtime_error("unknown weather GPU benchmark scene");
 	try {
+		const char *configuredDiagnostics = std::getenv("MONO_WEATHER_GPU_BENCH_DIAGNOSTICS");
+		const std::string_view diagnosticsText = configuredDiagnostics ? configuredDiagnostics : "0";
+		if (diagnosticsText != "0" && diagnosticsText != "1")
+			throw std::runtime_error("MONO_WEATHER_GPU_BENCH_DIAGNOSTICS must be 0 or 1");
+		diagnostics = diagnosticsText == "1";
 		width = BenchmarkExtent("MONO_WEATHER_GPU_BENCH_WIDTH", width, 3840);
 		height = BenchmarkExtent("MONO_WEATHER_GPU_BENCH_HEIGHT", height, 2160);
 		shadowResolution =
@@ -315,14 +376,27 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 	environment.Clock.WindQ20 = compiled->Definition.WindQ20;
 	render::OverlayImage overlay;
 	auto *device = static_cast<SDL_GPUDevice *>(renderer.Backend().Device);
-	std::array<WeatherPhase, 3> phases;
-	phases[1].Name = "same_tick_reuse";
-	phases[2].Name = "advancing_ticks";
-	for (auto &phase : phases) {
-		phase.RecordingSamples.reserve(phaseFrames);
-		phase.CompletionSamples.reserve(phaseFrames);
+	std::array<WeatherPhase, 4> phases;
+	phases[0].Name = "cold";
+	phases[0].Role = "first_submission";
+	phases[0].TailEvidenceInsufficient = true;
+	phases[1].Name = "same_tick_maintenance";
+	phases[1].Role = "bounded_residency_maintenance";
+	phases[1].TailEvidenceInsufficient = true;
+	phases[2].Name = "same_tick_reuse";
+	phases[2].Role = "strict_reuse_after_admission";
+	phases[3].Name = "advancing_ticks";
+	phases[3].Role = "changing_tick_work";
+	// WeatherResidency.cpp/.hpp production bounds are 2048 refinements / 128 per frame = 16 frames,
+	// plus 512 classification pages / 8 per frame = 64 frames. Ninety-six
+	// fixed-tick submissions cover the 80-frame bound with a 16-frame reserve.
+	for (size_t index = 0; index < phases.size(); ++index) {
+		auto &phase = phases[index];
+		const uint32_t reservedFrames = index == 0 ? 1 : index == 1 ? MAINTENANCE_FRAMES : phaseFrames;
+		phase.RecordingSamples.reserve(reservedFrames);
+		phase.CompletionSamples.reserve(reservedFrames);
 		for (auto &timing : phase.Timings)
-			timing.Nanoseconds.reserve(phaseFrames);
+			timing.Nanoseconds.reserve(reservedFrames);
 	}
 	uint64_t lastTiming = renderer.PassTimingSequence();
 	WeatherPhase *previousSubmission = nullptr;
@@ -340,17 +414,46 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 		}
 	};
 	const auto submit = [&](WeatherPhase *phase) {
+		std::array<double, DISPATCH_COUNTERS.size()> counterBefore{};
+		const auto observerBefore = std::chrono::steady_clock::now();
+		if (phase) counterBefore = ReadDispatchCounters();
 		const auto start = std::chrono::steady_clock::now();
 		if (phase) phase->LastStarted = start;
 		const auto result = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+		const auto recordingEnd = std::chrono::steady_clock::now();
 		const auto nanoseconds =
-			std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
-				.count();
+			std::chrono::duration_cast<std::chrono::nanoseconds>(recordingEnd - start).count();
+		std::array<double, DISPATCH_COUNTERS.size()> counterAfter{};
+		const auto observerAfter = std::chrono::steady_clock::now();
+		if (phase) counterAfter = ReadDispatchCounters();
+		const auto observerEnd = std::chrono::steady_clock::now();
 		if (!result.Submitted) throw std::runtime_error("weather benchmark submission refused");
 		if (renderer.DroppedProfileMarks())
 			throw std::runtime_error("weather benchmark GPU timestamp marks dropped");
 		collect();
 		if (phase) {
+			phase->CounterObserverNanoseconds +=
+				uint64_t(
+					std::chrono::duration_cast<std::chrono::nanoseconds>(start - observerBefore).count()
+				) +
+				uint64_t(
+					std::chrono::duration_cast<std::chrono::nanoseconds>(observerEnd - observerAfter).count()
+				);
+			WeatherPhase::CounterEvent event;
+			event.Frame = phase->Frames;
+			event.Tick = environment.Clock.Tick;
+			bool changed = false;
+			for (size_t index = 0; index < DISPATCH_COUNTERS.size(); ++index) {
+				event.Deltas[index] = counterAfter[index] - counterBefore[index];
+				changed = changed || event.Deltas[index] != 0;
+			}
+			if (changed) {
+				++phase->CounterEventTotal;
+				if (phase->CounterEventCount < phase->CounterEvents.size())
+					phase->CounterEvents[phase->CounterEventCount++] = event;
+				else
+					++phase->CounterEventDropped;
+			}
 			phase->RecordingNanoseconds += nanoseconds;
 			phase->RecordingSamples.push_back(uint64_t(nanoseconds));
 			phase->SubmittedComputeDispatches += result.ComputeDispatches;
@@ -372,8 +475,9 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 		phase.InitialHeap = renderer.MemoryStatistics();
 		phase.Before = ReadWeatherWork();
 		phase.CpuBefore = core::HeapProfile::Totals();
-		for (uint32_t frame = 0; frame < phaseFrames; ++frame) {
-			if (phaseIndex == 2) ++environment.Clock.Tick;
+		const uint32_t frames = phaseIndex == 1 ? MAINTENANCE_FRAMES : phaseFrames;
+		for (uint32_t frame = 0; frame < frames; ++frame) {
+			if (phaseIndex == 3) ++environment.Clock.Tick;
 			submit(&phase);
 			if (!SDL_WaitForGPUIdle(device)) throw std::runtime_error(SDL_GetError());
 			phase.CompletionSamples.push_back(ray_consumer_bench::Elapsed(phase.LastStarted));
@@ -411,11 +515,21 @@ BENCH("opt-in weather device scenario CPU harness", 1) {
 	else
 		cohort << "unavailable";
 	cohort << " completed_device_timestamps=" << renderer.Timed()
-		   << " history_timing=publication_marker reconstruct_timing=temporal_upsample_history_copies\n";
+		   << " history_timing=publication_marker reconstruct_timing=temporal_upsample_history_copies"
+		   << " maintenance_refinements=2048 refinement_budget_per_frame=128"
+		   << " maintenance_classification_pages=512 classification_budget_per_frame=8"
+		   << " maintenance_refinement_frame_bound=16 maintenance_classification_frame_bound=64"
+		   << " maintenance_bound_sum=80 maintenance_phase_frames=" << MAINTENANCE_FRAMES
+		   << " maintenance_reserve_frames=16\n";
 	for (const auto &phase : phases)
 		PrintPhase(phase, cohort);
 	if (!SDL_WaitForGPUIdle(device)) throw std::runtime_error(SDL_GetError());
+	const bool valid = ValidateWeatherPhases(phases, scenario == "inactive", scenario);
+	if (diagnostics || !valid) PrintCounterEvents(phases, cohort);
 	renderer.Shutdown();
-	if (!ValidateWeatherPhases(phases, scenario == "inactive")) std::exit(EXIT_FAILURE);
+	if (!valid) {
+		std::cerr << cohort.str();
+		std::exit(EXIT_FAILURE);
+	}
 	ray_consumer_bench::RetainCompletedReport("weather-gpu/" + std::string(scenario), cohort.str());
 }
