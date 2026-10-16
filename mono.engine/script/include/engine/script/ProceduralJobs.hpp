@@ -21,6 +21,10 @@ namespace engine::ecs {
 }
 
 namespace engine::script {
+	struct ProceduralSceneTarget;
+	namespace procedural_detail {
+		struct PublicationCandidate;
+	}
 
 	// Named authored facts, without caller-supplied digest or coverage claims.
 	struct ProceduralSource {
@@ -40,11 +44,13 @@ namespace engine::script {
 	// Only Configure/Set/RemoveProcedural functions write this resource. Snapshot
 	// codecs retain authored bytes and reset the process-local incarnation.
 	struct ProceduralAuthority {
-		std::string Owner{};					 // Stable owner within this world.
-		std::vector<uint8_t> RecipeBytes{};		 // Canonical checked REC1 recipe.
-		std::vector<ProceduralSource> Sources{}; // Sorted authoritative local facts.
-		std::vector<ProceduralRegion> Regions{}; // Sorted registered scopes.
-		uint64_t Incarnation = 0;				 // Process-local reconfiguration fence, never saved.
+		std::string Owner{};									// Stable owner within this world.
+		std::vector<uint8_t> RecipeBytes{};						// Canonical checked REC1 recipe.
+		std::vector<ProceduralSource> Sources{};				// Sorted authoritative local facts.
+		std::vector<procedural::AuthoredSpline> Splines{};		// Sorted authored road controls.
+		std::vector<procedural::PlacementOverride> Overrides{}; // Sorted sparse placement edits.
+		std::vector<ProceduralRegion> Regions{};				// Sorted registered scopes.
+		uint64_t Incarnation = 0; // Process-local reconfiguration fence, never saved.
 	};
 
 	// Accepted artifact and the fixed-barrier receipt for one region.
@@ -65,8 +71,9 @@ namespace engine::script {
 
 	// Admission and storage ceilings, including work retained after cancellation.
 	struct ProceduralHostLimits {
-		static constexpr size_t MaximumSources = 512;					  // Authored source records.
-		static constexpr size_t MaximumRegions = 64;					  // Registered and published scopes.
+		static constexpr size_t MaximumSources = 512; // Authored source records.
+		static constexpr size_t MaximumFacts = 512;	  // Sources, splines and overrides together.
+		static constexpr size_t MaximumRegions = 64;  // Registered and published scopes.
 		static constexpr size_t MaximumQueryVisits = MaximumSources * 2;  // Both local source queries.
 		static constexpr size_t MaximumAuthorityBytes = 262144;			  // Encoded authored bytes.
 		static constexpr size_t MaximumPublishedBytes = 16 * 1024 * 1024; // Total accepted artifact bytes.
@@ -188,6 +195,9 @@ namespace engine::script {
 		std::span<const ProceduralCompletion> Completions() const;
 		// Releases observed requests, including canceled records and their budget.
 		void ClearCompletions();
+		// Drops one observed request without disturbing other owners sharing this queue.
+		// Pending work retains its reservation until Poll observes completion.
+		bool Release(uint64_t ticket);
 		// Includes active, canceled and completed unconsumed requests.
 		size_t RetainedCount() const;
 		// Conservative work reservation held by every retained request.
@@ -201,7 +211,21 @@ namespace engine::script {
 		// This publishes canonical artifacts only; scene materialization is separate.
 		bool PublishBatch(ecs::Store &store, std::span<const uint64_t> tickets, uint64_t activationTick);
 
+		// Publishes canonical artifacts and all bound visible regional outputs together.
+		bool PublishSceneBatch(
+			ecs::Store &store,
+			std::span<const uint64_t> tickets,
+			std::span<const ProceduralSceneTarget> targets,
+			uint64_t activationTick
+		);
+
 	  private:
+		bool PreparePublication(
+			ecs::Store &store,
+			std::span<const uint64_t> tickets,
+			uint64_t activationTick,
+			procedural_detail::PublicationCandidate &out
+		);
 		struct State;
 		std::unique_ptr<State> Held;
 	};

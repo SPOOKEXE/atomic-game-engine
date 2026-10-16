@@ -75,13 +75,6 @@ namespace engine::script {
 		}
 	}
 
-	struct ProceduralJobs::State {
-		uint64_t StoreIdentity = 0;
-		std::vector<std::unique_ptr<procedural_job_detail::Job>> Jobs{};
-		std::vector<ProceduralCompletion> Completed{};
-		procedural::Diagnostic Diagnostic{};
-	};
-
 	ProceduralJobs::ProceduralJobs(const ecs::Store &store) : Held(std::make_unique<State>()) {
 		Held->StoreIdentity = store.Identity();
 		Held->Jobs.reserve(ProceduralHostLimits::MaximumRetainedRequests);
@@ -235,8 +228,22 @@ namespace engine::script {
 		Held->Completed.clear();
 	}
 
-	bool ProceduralJobs::PublishBatch(
-		ecs::Store &store, std::span<const uint64_t> tickets, uint64_t activationTick
+	bool ProceduralJobs::Release(uint64_t ticket) {
+		const auto job = std::find_if(Held->Jobs.begin(), Held->Jobs.end(), [&](const auto &row) {
+			return row->Ticket == ticket;
+		});
+		if (job == Held->Jobs.end() || !(*job)->Observed) return false;
+		if ((*job)->Worker.joinable()) (*job)->Worker.join();
+		Held->Jobs.erase(job);
+		std::erase_if(Held->Completed, [&](const auto &row) { return row.Ticket == ticket; });
+		return true;
+	}
+
+	bool ProceduralJobs::PreparePublication(
+		ecs::Store &store,
+		std::span<const uint64_t> tickets,
+		uint64_t activationTick,
+		procedural_detail::PublicationCandidate &out
 	) {
 		using namespace procedural_detail;
 		ENGINE_PROFILE("Procedural::Publish");
@@ -333,19 +340,33 @@ namespace engine::script {
 					return Refuse(Held->Diagnostic, procedural::Status::LimitExceeded, "publication.bytes");
 				retained += row.ArtifactBytes.size();
 			}
-			// Mutable lookup and all allocations precede the single authoritative edit.
-			// The existing resource's vector then swaps without allocating or calling
-			// observers, so no rollback path can itself fail halfway through a batch.
-			auto *destination = store.ResourceMutable<ProceduralPublished>();
-			core::Metrics::Count("procedural.publications", static_cast<double>(accepted.size()));
-			core::Metrics::Count("procedural.output_bytes", static_cast<double>(retained));
-			static_assert(std::is_nothrow_swappable_v<decltype(destination->Regions)>);
-			destination->Regions.swap(candidate.Regions);
-			for (auto *completion : accepted)
-				completion->Status = ProceduralJobStatus::Published;
+			out.Published = std::move(candidate);
+			out.Accepted = std::move(accepted);
+			out.Bytes = retained;
 			return true;
 		} catch (const std::bad_alloc &) {
 			return Refuse(Held->Diagnostic, procedural::Status::AllocationFailed, "publication.bytes");
 		}
 	}
+	bool ProceduralJobs::PublishBatch(
+		ecs::Store &store, std::span<const uint64_t> tickets, uint64_t activationTick
+	) {
+		procedural_detail::PublicationCandidate candidate;
+		if (!PreparePublication(store, tickets, activationTick, candidate)) return false;
+		try {
+			auto *destination = store.ResourceMutable<ProceduralPublished>();
+			core::Metrics::Count("procedural.publications", static_cast<double>(candidate.Accepted.size()));
+			core::Metrics::Count("procedural.output_bytes", static_cast<double>(candidate.Bytes));
+			static_assert(std::is_nothrow_swappable_v<decltype(destination->Regions)>);
+			destination->Regions.swap(candidate.Published.Regions);
+			for (auto *completion : candidate.Accepted)
+				completion->Status = ProceduralJobStatus::Published;
+			return true;
+		} catch (const std::bad_alloc &) {
+			return procedural_detail::Refuse(
+				Held->Diagnostic, procedural::Status::AllocationFailed, "publication.bytes"
+			);
+		}
+	}
+
 }

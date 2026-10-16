@@ -46,29 +46,6 @@ namespace engine::script {
 			return true;
 		}
 
-		bool Invalidate(
-			ProceduralAuthority &authority,
-			const procedural::CompiledRecipe &compiled,
-			const ProceduralSource *previous,
-			const ProceduralSource *next,
-			procedural::Diagnostic &diagnostic
-		) {
-			for (auto &region : authority.Regions) {
-				procedural::Bounds owner;
-				procedural::Bounds query;
-				if (procedural::RequiredRegionBounds(compiled, region.Scope, owner, query, diagnostic) !=
-					procedural::Status::Ok)
-					return false;
-				if ((previous && Contains(query, previous->Anchor)) ||
-					(next && Contains(query, next->Anchor))) {
-					if (region.SourceRevision == std::numeric_limits<uint64_t>::max())
-						return Refuse(diagnostic, procedural::Status::LimitExceeded, "authority.revision");
-					++region.SourceRevision;
-				}
-			}
-			return true;
-		}
-
 		procedural::SpatialLeaf CaptureLeaf(const ProceduralSource &source) {
 			core::ByteWriter writer(0, 1024);
 			writer.WriteString("procedural.source.v1");
@@ -119,7 +96,7 @@ namespace engine::script {
 		if (!MayEdit(store, diagnostic)) return false;
 		if (owner.size() > 128 || !procedural::ValidStableName(owner) ||
 			regions.size() > ProceduralHostLimits::MaximumRegions ||
-			sources.size() > ProceduralHostLimits::MaximumSources)
+			sources.size() > ProceduralHostLimits::MaximumFacts)
 			return Refuse(diagnostic, procedural::Status::LimitExceeded, "authority.limits");
 		for (const auto &source : sources)
 			if (!ValidSource(source))
@@ -199,12 +176,13 @@ namespace engine::script {
 			}
 			if (!existing && candidate.Sources.size() >= ProceduralHostLimits::MaximumSources)
 				return Refuse(diagnostic, procedural::Status::LimitExceeded, "authority.sources");
-			if (!Invalidate(candidate, compiled, existing ? &*found : nullptr, &source, diagnostic))
-				return false;
 			if (existing)
 				*found = source;
 			else
 				candidate.Sources.insert(found, source);
+			if (!ValidateAuthoredFacts(candidate, compiled, diagnostic) ||
+				!InvalidateChangedFacts(*current, candidate, compiled, diagnostic))
+				return false;
 			return ReplaceAuthority(store, std::move(candidate), diagnostic);
 		} catch (const std::bad_alloc &) {
 			return Refuse(diagnostic, procedural::Status::AllocationFailed, "authority.source");
@@ -232,8 +210,10 @@ namespace engine::script {
 				});
 			if (found == candidate.Sources.end())
 				return Refuse(diagnostic, procedural::Status::MissingSource, "authority.source");
-			if (!Invalidate(candidate, compiled, &*found, nullptr, diagnostic)) return false;
 			candidate.Sources.erase(found);
+			if (!ValidateAuthoredFacts(candidate, compiled, diagnostic) ||
+				!InvalidateChangedFacts(*current, candidate, compiled, diagnostic))
+				return false;
 			return ReplaceAuthority(store, std::move(candidate), diagnostic);
 		} catch (const std::bad_alloc &) {
 			return Refuse(diagnostic, procedural::Status::AllocationFailed, "authority.source");
@@ -287,6 +267,10 @@ namespace engine::script {
 				query.CoverageDigest = Coverage(query);
 				captured.Queries.push_back(std::move(query));
 			}
+			if (!CaptureAuthoredFacts(
+					*authority, compiled, owner, queryBounds, captured.Authored, diagnostic
+				))
+				return false;
 			std::vector<uint8_t> checkedKey;
 			if (procedural::BuildRegionKey(compiled, captured, checkedKey, diagnostic) !=
 				procedural::Status::Ok)

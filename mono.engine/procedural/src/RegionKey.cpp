@@ -84,9 +84,12 @@ namespace engine::procedural {
 		detail::QueryView queries;
 		const Status coverage = detail::ValidateQueries(request, required, queries, diagnostic);
 		if (coverage != Status::Ok) return coverage;
+		const Status authored =
+			detail::ValidateAuthoredInputs(request, owner, required, recipe.Settings_, queries, diagnostic);
+		if (authored != Status::Ok) return authored;
 		try {
 			detail::Writer writer{{}, std::min<size_t>(262144, request.Limits.MaximumOutputBytes)};
-			if (!writer.Raw(std::array<uint8_t, 4>{'R', 'G', 'K', '1'}) ||
+			if (!writer.Raw(std::array<uint8_t, 4>{'R', 'G', 'K', '2'}) ||
 				!writer.U32(std::bit_cast<uint32_t>(request.Scope.X)) ||
 				!writer.U32(std::bit_cast<uint32_t>(request.Scope.Y)) ||
 				!writer.U16(request.Scope.CellsPerSide) || !writer.Raw(request.RecipeDigest.Bytes) ||
@@ -111,6 +114,32 @@ namespace engine::procedural {
 						!writer.Text(leaf->TargetVillage) || !writer.Raw(leaf->ContentDigest.Bytes))
 						return detail::Refuse(diagnostic, Status::LimitExceeded, "region.key");
 				}
+			}
+			const auto &inputs = request.Authored;
+			if (!writer.Text("authored.inputs.v1") ||
+				!writer.U64(std::bit_cast<uint64_t>(inputs.Covered.Min.X)) ||
+				!writer.U64(std::bit_cast<uint64_t>(inputs.Covered.Min.Y)) ||
+				!writer.U64(std::bit_cast<uint64_t>(inputs.Covered.Max.X)) ||
+				!writer.U64(std::bit_cast<uint64_t>(inputs.Covered.Max.Y)) ||
+				!writer.Raw(inputs.CoverageDigest.Bytes) ||
+				!writer.U16(static_cast<uint16_t>(queries.SplineLeaves.size())))
+				return detail::Refuse(diagnostic, Status::LimitExceeded, "region.key");
+			std::vector<uint8_t> encoded;
+			for (const SplineFact *fact : queries.SplineLeaves) {
+				const Status status = EncodeAuthoredSpline(fact->Value, encoded, diagnostic);
+				if (status != Status::Ok) return status;
+				if (!writer.U16(static_cast<uint16_t>(encoded.size())) || !writer.Raw(encoded) ||
+					!writer.Raw(fact->ContentDigest.Bytes))
+					return detail::Refuse(diagnostic, Status::LimitExceeded, "region.key");
+			}
+			if (!writer.U16(static_cast<uint16_t>(queries.OverrideLeaves.size())))
+				return detail::Refuse(diagnostic, Status::LimitExceeded, "region.key");
+			for (const OverrideFact *fact : queries.OverrideLeaves) {
+				const Status status = EncodePlacementOverride(fact->Value, encoded, diagnostic);
+				if (status != Status::Ok) return status;
+				if (!writer.U16(static_cast<uint16_t>(encoded.size())) || !writer.Raw(encoded) ||
+					!writer.Raw(fact->ContentDigest.Bytes))
+					return detail::Refuse(diagnostic, Status::LimitExceeded, "region.key");
 			}
 			out = std::move(writer.Bytes);
 			diagnostic = {};

@@ -183,17 +183,94 @@ namespace engine::procedural {
 					entrance->Anchor.X + dx / 2 - Sign(dy) * bend * SUBCELLS_PER_CELL,
 					entrance->Anchor.Y + dy / 2 + Sign(dx) * bend * SUBCELLS_PER_CELL
 				};
+				Point selectedControl = control;
+				for (const SplineFact *fact : queries.SplineLeaves) {
+					if (!Spend(result.Facts.WorkUnits, request.Limits.MaximumWorkUnits))
+						return detail::Refuse(diagnostic, Status::LimitExceeded, "region.work");
+					if (fact->Value.EntranceName == entrance->Name) {
+						selectedControl = fact->Value.Control;
+						break;
+					}
+				}
 				RoadSpline road{
 					"road/" + entrance->Name,
 					entrance->Name,
 					village->Name,
-					{entrance->Anchor, control, village->Anchor}
+					{entrance->Anchor, selectedControl, village->Anchor}
 				};
 				if (localRoads.size() >= request.Limits.MaximumRoads)
 					return detail::Refuse(diagnostic, Status::LimitExceeded, "region.roads");
 				localRoads.push_back(road);
 				if (detail::Contains(owner, entrance->Anchor) &&
 					!AppendRoad(result, std::move(road), request.Limits))
+					return detail::Refuse(diagnostic, Status::LimitExceeded, "region.output");
+			}
+			return Status::Ok;
+		}
+
+		Status ApplyOverrides(
+			const RegionRequest &request,
+			Bounds owner,
+			const detail::QueryView &queries,
+			RegionResult &result,
+			GenerationControl *control,
+			uint32_t completedCandidates,
+			Diagnostic &diagnostic
+		) {
+			for (const OverrideFact *fact : queries.OverrideLeaves) {
+				if (!PollControl(control, result, completedCandidates, diagnostic)) return Status::Canceled;
+				const auto &edit = fact->Value;
+				const bool house = edit.TargetId.starts_with("house/");
+				const std::string lotId = house ? "lot/" + edit.TargetId.substr(6) : std::string{};
+				for (size_t index = 0; index < result.Placements.size();) {
+					if (!Spend(result.Facts.WorkUnits, request.Limits.MaximumWorkUnits))
+						return detail::Refuse(diagnostic, Status::LimitExceeded, "region.work");
+					if ((result.Facts.WorkUnits & 63) == 0 &&
+						!PollControl(control, result, completedCandidates, diagnostic))
+						return Status::Canceled;
+					const auto &placed = result.Placements[index];
+					if (placed.Id != edit.TargetId && (!house || placed.Id != lotId)) {
+						++index;
+						continue;
+					}
+					if (!Spend(
+							result.Facts.WorkUnits,
+							request.Limits.MaximumWorkUnits,
+							static_cast<uint32_t>(result.Placements.size() - index)
+						))
+						return detail::Refuse(diagnostic, Status::LimitExceeded, "region.work");
+					result.Facts.OutputBytes -=
+						static_cast<uint32_t>(48 + placed.Id.size() + placed.SourceName.size());
+					result.Placements.erase(result.Placements.begin() + static_cast<ptrdiff_t>(index));
+				}
+			}
+			for (const OverrideFact *fact : queries.OverrideLeaves) {
+				if (!PollControl(control, result, completedCandidates, diagnostic)) return Status::Canceled;
+				if (!Spend(result.Facts.WorkUnits, request.Limits.MaximumWorkUnits))
+					return detail::Refuse(diagnostic, Status::LimitExceeded, "region.work");
+				const auto &edit = fact->Value;
+				const bool house = edit.TargetId.starts_with("house/");
+				const std::string lotId = house ? "lot/" + edit.TargetId.substr(6) : std::string{};
+				if (edit.Action == OverrideAction::Delete || !detail::Contains(owner, edit.Position))
+					continue;
+				Placement replacement{
+					edit.TargetId,
+					house ? PlacementKind::House : PlacementKind::Tree,
+					edit.SourceName,
+					edit.Position,
+					edit.RotationQuarterTurns,
+					edit.Variant,
+					edit.Material
+				};
+				if (house) {
+					Placement lot = replacement;
+					lot.Id = lotId;
+					lot.Kind = PlacementKind::VillageLot;
+					lot.Variant = 0;
+					if (!AppendPlacement(result, std::move(lot), request.Limits))
+						return detail::Refuse(diagnostic, Status::LimitExceeded, "region.output");
+				}
+				if (!AppendPlacement(result, std::move(replacement), request.Limits))
 					return detail::Refuse(diagnostic, Status::LimitExceeded, "region.output");
 			}
 			return Status::Ok;
@@ -401,6 +478,10 @@ namespace engine::procedural {
 			detail::QueryView queries;
 			const Status coverage = detail::ValidateQueries(request, required, queries, diagnostic);
 			if (coverage != Status::Ok) return coverage;
+			const Status authored = detail::ValidateAuthoredInputs(
+				request, owner, required, recipe.Settings_, queries, diagnostic
+			);
+			if (authored != Status::Ok) return authored;
 			if (!PollControl(control, candidate, completedCandidates, diagnostic)) return Status::Canceled;
 			const detail::QueryView *sources = nullptr;
 			uint64_t seed = 0;
@@ -465,6 +546,9 @@ namespace engine::procedural {
 					return detail::Refuse(diagnostic, Status::InvalidRecipe, "recipe.stages");
 				}
 			}
+			const Status edits =
+				ApplyOverrides(request, owner, queries, candidate, control, completedCandidates, diagnostic);
+			if (edits != Status::Ok) return edits;
 			std::sort(
 				candidate.Placements.begin(),
 				candidate.Placements.end(),

@@ -4,6 +4,7 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/procedural/Artifact.hpp>
+#include <engine/script/ProceduralScene.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -83,7 +84,8 @@ namespace engine::script {
 			if (authority.Incarnation == 0)
 				return Refuse(diagnostic, procedural::Status::LimitExceeded, "authority.incarnation");
 			if (authority.Owner.size() > 128 || !procedural::ValidStableName(authority.Owner) ||
-				authority.Sources.size() > ProceduralHostLimits::MaximumSources ||
+				authority.Sources.size() + authority.Splines.size() + authority.Overrides.size() >
+					ProceduralHostLimits::MaximumFacts ||
 				authority.Regions.size() > ProceduralHostLimits::MaximumRegions ||
 				authority.RecipeBytes.size() > 32768)
 				return Refuse(diagnostic, procedural::Status::LimitExceeded, "authority.limits");
@@ -97,6 +99,7 @@ namespace engine::script {
 					(index > 0 && !SourceLess(authority.Sources[index - 1], authority.Sources[index])))
 					return Refuse(diagnostic, procedural::Status::InvalidInput, "authority.sources");
 			}
+			if (!ValidateAuthoredFacts(authority, out, diagnostic)) return false;
 			for (size_t index = 0; index < authority.Regions.size(); ++index) {
 				procedural::Bounds owner;
 				procedural::Bounds query;
@@ -121,12 +124,7 @@ namespace engine::script {
 			procedural::RegionScope ReadScope(core::ByteReader &reader) {
 				return {reader.ReadInt32(), reader.ReadInt32(), reader.ReadUInt16()};
 			}
-			bool KeyScopeMatches(std::span<const uint8_t> key, procedural::RegionScope scope) {
-				core::ByteReader reader(std::as_bytes(key));
-				if (reader.ReadUInt32() != 0x314b4752) return false;
-				const auto decoded = ReadScope(reader);
-				return !reader.Failed() && SameScope(decoded, scope);
-			}
+
 			bool ReadText(core::ByteReader &reader, std::string &out, bool empty = false) {
 				const auto text = reader.ReadString();
 				if (reader.Failed() || text.size() > 128 ||
@@ -142,6 +140,12 @@ namespace engine::script {
 			}
 		}
 
+		bool KeyScopeMatches(std::span<const uint8_t> key, procedural::RegionScope scope) {
+			core::ByteReader reader(std::as_bytes(key));
+			if (reader.ReadUInt32() != 0x324b4752) return false;
+			const auto decoded = ReadScope(reader);
+			return !reader.Failed() && SameScope(decoded, scope);
+		}
 		bool WriteAuthority(
 			const ProceduralAuthority &authority,
 			std::vector<uint8_t> &out,
@@ -151,7 +155,7 @@ namespace engine::script {
 			if (!CompileAuthority(authority, checked, diagnostic)) return false;
 			try {
 				core::ByteWriter writer(0, ProceduralHostLimits::MaximumAuthorityBytes);
-				writer.WriteUInt32(0x31485750); // PWH1, authored procedural world facts.
+				writer.WriteUInt32(0x32485750); // PWH2, authored procedural world facts.
 				writer.WriteString(authority.Owner);
 				writer.WriteUInt32(static_cast<uint32_t>(authority.RecipeBytes.size()));
 				writer.WriteRaw(authority.RecipeBytes.data(), authority.RecipeBytes.size());
@@ -164,6 +168,23 @@ namespace engine::script {
 					writer.WriteInt64(source.Anchor.X);
 					writer.WriteInt64(source.Anchor.Y);
 					writer.WriteString(source.TargetVillage);
+				}
+				writer.WriteUInt16(static_cast<uint16_t>(authority.Splines.size()));
+				for (const auto &spline : authority.Splines) {
+					std::vector<uint8_t> bytes;
+					if (procedural::EncodeAuthoredSpline(spline, bytes, diagnostic) != procedural::Status::Ok)
+						return false;
+					writer.WriteUInt16(static_cast<uint16_t>(bytes.size()));
+					writer.WriteRaw(bytes.data(), bytes.size());
+				}
+				writer.WriteUInt16(static_cast<uint16_t>(authority.Overrides.size()));
+				for (const auto &overrideValue : authority.Overrides) {
+					std::vector<uint8_t> bytes;
+					if (procedural::EncodePlacementOverride(overrideValue, bytes, diagnostic) !=
+						procedural::Status::Ok)
+						return false;
+					writer.WriteUInt16(static_cast<uint16_t>(bytes.size()));
+					writer.WriteRaw(bytes.data(), bytes.size());
 				}
 				writer.WriteUInt16(static_cast<uint16_t>(authority.Regions.size()));
 				for (const auto &region : authority.Regions)
@@ -186,7 +207,7 @@ namespace engine::script {
 			try {
 				core::ByteReader reader(std::as_bytes(bytes));
 				ProceduralAuthority candidate;
-				if (reader.ReadUInt32() != 0x31485750 || !ReadText(reader, candidate.Owner))
+				if (reader.ReadUInt32() != 0x32485750 || !ReadText(reader, candidate.Owner))
 					return Refuse(diagnostic, procedural::Status::InvalidInput, "authority.header");
 				const size_t recipeBytes = reader.ReadUInt32();
 				if (recipeBytes > 32768 || recipeBytes > reader.Remaining())
@@ -213,6 +234,45 @@ namespace engine::script {
 					if (!ReadText(reader, source.TargetVillage, true))
 						return Refuse(diagnostic, procedural::Status::InvalidInput, "authority.source");
 					candidate.Sources.push_back(std::move(source));
+				}
+				const size_t splineCount = reader.ReadUInt16();
+				if (splineCount > ProceduralHostLimits::MaximumFacts - candidate.Sources.size() ||
+					splineCount > reader.Remaining() / 6)
+					return Refuse(diagnostic, procedural::Status::LimitExceeded, "authority.splines");
+				candidate.Splines.reserve(splineCount);
+				for (size_t index = 0; index < splineCount; ++index) {
+					const size_t length = reader.ReadUInt16();
+					if (length > 1024 || length > reader.Remaining())
+						return Refuse(diagnostic, procedural::Status::LimitExceeded, "authority.spline");
+					const auto bytes = reader.ReadRawView(length);
+					procedural::AuthoredSpline spline;
+					if (procedural::DecodeAuthoredSpline(
+							std::span(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()),
+							spline,
+							diagnostic
+						) != procedural::Status::Ok)
+						return false;
+					candidate.Splines.push_back(std::move(spline));
+				}
+				const size_t overrideCount = reader.ReadUInt16();
+				if (overrideCount > ProceduralHostLimits::MaximumFacts - candidate.Sources.size() -
+										candidate.Splines.size() ||
+					overrideCount > reader.Remaining() / 6)
+					return Refuse(diagnostic, procedural::Status::LimitExceeded, "authority.overrides");
+				candidate.Overrides.reserve(overrideCount);
+				for (size_t index = 0; index < overrideCount; ++index) {
+					const size_t length = reader.ReadUInt16();
+					if (length > 1024 || length > reader.Remaining())
+						return Refuse(diagnostic, procedural::Status::LimitExceeded, "authority.override");
+					const auto bytes = reader.ReadRawView(length);
+					procedural::PlacementOverride overrideValue;
+					if (procedural::DecodePlacementOverride(
+							std::span(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()),
+							overrideValue,
+							diagnostic
+						) != procedural::Status::Ok)
+						return false;
+					candidate.Overrides.push_back(std::move(overrideValue));
 				}
 				const size_t regionCount = reader.ReadUInt16();
 				if (regionCount > ProceduralHostLimits::MaximumRegions ||
@@ -382,5 +442,6 @@ namespace engine::script {
 				ProceduralHostLimits::MaximumPublishedBytes + 8192>,
 			ProceduralHostLimits::MaximumPublishedBytes + 8196
 		);
+		RegisterProceduralSceneComponents();
 	}
 }

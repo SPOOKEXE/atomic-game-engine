@@ -81,17 +81,6 @@ namespace engine::procedural {
 		uint32_t MaximumOutputBytes = 1048576;	// Combined bounded result storage.
 	};
 
-	// Complete copied input for deterministic generation of one region.
-	struct RegionRequest {
-		RegionScope Scope{};				// Region coordinates and cell extent.
-		Digest RecipeDigest{};				// Opaque digest verified by the host.
-		std::vector<SourceQuery> Queries{}; // Bounded local source coverage witnesses.
-		GenerationLimits Limits{};			// Per-request hard ceilings.
-		// These host lifecycle values never enter random streams or region keys.
-		uint64_t ExpectedSourceRevision = 0; // Host revision expected at publication.
-		uint64_t RequestSequence = 0;		 // Host ordering token, excluded from content.
-	};
-
 	// Generated placement categories.
 	enum class PlacementKind : uint8_t {
 		Tree,		// Forest instance.
@@ -117,6 +106,66 @@ namespace engine::procedural {
 		std::string EntranceName{};		 // Stable connected entrance identity.
 		std::string VillageName{};		 // Stable connected village identity.
 		std::array<Point, 3> Controls{}; // Quadratic controls in fixed subcell units.
+	};
+
+	// Authored control for an existing named entrance-to-village road. Endpoints
+	// come from the source facts, so moving an entrance does not duplicate them.
+	struct AuthoredSpline {
+		std::string Name{};			// Stable authored fact identity.
+		std::string EntranceName{}; // Existing entrance whose road this controls.
+		Point Control{};			// Absolute quadratic middle control in subcell units.
+	};
+
+	// Sparse manual edits apply after baseline spacing and do not reseed candidates.
+	enum class OverrideAction : uint8_t { Delete, Replace };
+
+	// A tree/x/y or house/x/y stable ID and its complete authored replacement.
+	// Move is represented by Replace with the same ID and choices at a new position.
+	// A house edit also edits its associated lot/x/y record. Replacements bypass
+	// procedural spacing and leave other candidates' original choices unchanged.
+	struct PlacementOverride {
+		std::string TargetId{};							// Canonical generated target identity.
+		OverrideAction Action = OverrideAction::Delete; // Delete or complete replacement.
+		Point Position{};								// Replacement position; zero for Delete.
+		uint8_t RotationQuarterTurns = 0;				// Replacement clockwise orientation.
+		uint16_t Variant = 0;	  // Replacement variant, checked against recipe choices.
+		uint16_t Material = 0;	  // Replacement material, checked against recipe choices.
+		std::string SourceName{}; // Village attribution for houses, empty for trees/Delete.
+	};
+
+	// Immutable spline input and its host-verified canonical content digest.
+	struct SplineFact {
+		AuthoredSpline Value{}; // Copied authored value.
+		Digest ContentDigest{}; // Opaque host-verified digest of EncodeAuthoredSpline.
+	};
+
+	// Immutable manual edit and its host-verified canonical content digest.
+	struct OverrideFact {
+		PlacementOverride Value{}; // Copied authored value.
+		Digest ContentDigest{};	   // Opaque host-verified digest of EncodePlacementOverride.
+	};
+
+	// Complete local coverage for authored inputs, including an explicit empty witness.
+	// Splines are relevant when their expanded influence intersects the owner. Edits
+	// are relevant when their home cell or replacement destination intersects the owner.
+	struct AuthoredInputQuery {
+		Bounds Covered{};					   // Same exact query halo as the two spatial source queries.
+		Digest CoverageDigest{};			   // Host-verified digest of the local sorted fact manifest.
+		bool Complete = false;				   // Incomplete and absent empty witnesses refuse.
+		std::vector<SplineFact> Splines{};	   // Copied relevant spline facts.
+		std::vector<OverrideFact> Overrides{}; // Copied relevant sparse placement edits.
+	};
+
+	// Complete copied input for deterministic generation of one region.
+	struct RegionRequest {
+		RegionScope Scope{};				// Region coordinates and cell extent.
+		Digest RecipeDigest{};				// Opaque digest verified by the host.
+		std::vector<SourceQuery> Queries{}; // Bounded local source coverage witnesses.
+		GenerationLimits Limits{};			// Per-request hard ceilings.
+		// These host lifecycle values never enter random streams or region keys.
+		uint64_t ExpectedSourceRevision = 0; // Host revision expected at publication.
+		uint64_t RequestSequence = 0;		 // Host ordering token, excluded from content.
+		AuthoredInputQuery Authored{};		 // Complete local authored-input coverage.
 	};
 
 	// Bounded work counters reported for a completed generation request.
@@ -183,6 +232,10 @@ namespace engine::procedural {
 
 		friend Status CompileForestVillage(const Recipe &, CompiledRecipe &, Diagnostic &);
 		friend Status
+		SplineInfluence(const CompiledRecipe &, const AuthoredSpline &, Point, Point, Bounds &, Diagnostic &);
+		friend Status
+		ValidatePlacementOverride(const CompiledRecipe &, const PlacementOverride &, Diagnostic &);
+		friend Status
 		RequiredRegionBounds(const CompiledRecipe &, RegionScope, Bounds &, Bounds &, Diagnostic &);
 		friend Status
 		BuildRegionKey(const CompiledRecipe &, const RegionRequest &, std::vector<uint8_t> &, Diagnostic &);
@@ -190,6 +243,32 @@ namespace engine::procedural {
 			const CompiledRecipe &, const RegionRequest &, RegionResult &, Diagnostic &, GenerationControl *
 		);
 	};
+
+	// Canonical SPL1 bytes for one bounded authored spline. Refusal preserves out.
+	Status EncodeAuthoredSpline(const AuthoredSpline &, std::vector<uint8_t> &out, Diagnostic &);
+	// Reads canonical SPL1 bytes only; unknown/trailing data refuses transactionally.
+	Status DecodeAuthoredSpline(std::span<const uint8_t>, AuthoredSpline &out, Diagnostic &);
+	// Canonical OVR1 bytes; Delete has no inactive replacement fields.
+	Status EncodePlacementOverride(const PlacementOverride &, std::vector<uint8_t> &out, Diagnostic &);
+	// Reads canonical OVR1 bytes only and preserves out on malformed input.
+	Status DecodePlacementOverride(std::span<const uint8_t>, PlacementOverride &out, Diagnostic &);
+	// Checks canonical target syntax and replacement choices against this recipe.
+	Status ValidatePlacementOverride(const CompiledRecipe &, const PlacementOverride &, Diagnostic &);
+
+	// Validates bounded controls and returns their hull expanded for clearance and
+	// competitor spacing. The host resolves endpoint names from its ECS facts and
+	// intersects both old and new influence with registered owner bounds.
+	Status SplineInfluence(
+		const CompiledRecipe &,
+		const AuthoredSpline &,
+		Point entrance,
+		Point village,
+		Bounds &out,
+		Diagnostic &
+	);
+	// Returns separate half-open home and destination bounds, without joining the
+	// intervening area. Delete returns its home cell for both. Refusal preserves both.
+	Status OverrideInfluence(const PlacementOverride &, Bounds &home, Bounds &destination, Diagnostic &);
 
 	// Supplies the exact v1 forest and village parameter names and typed defaults.
 	Recipe ForestVillageDefaults(std::string name, uint64_t rootSeed);

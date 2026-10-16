@@ -316,8 +316,9 @@ state until v0.19.
 | `script.PortalObservationLog` | 65648 | 8 | yes | . | yes | . | Resource: bounded rings of portal crossing, arrival, input and handoff records, stamped with each subject's trace id. Hooks and the server observation sink read them; the oldest rows are overwritten and counted. |
 | `script.PortalPlayerInput` | 2136 | 8 | yes | . | yes | . | Per-player forwarded input clock and bounded native movement queue. Preserves control timing across route adoption and reports physics-applied input; character replacement invalidates the queue. |
 | `script.PortalTransfers` | 104 | 8 | yes | . | . | . | Snapshot state for bounded portal handoffs: host incarnation, pending source fences, destination reservations, authenticated peer receipts and retry ticks. The installed transfer admission system consumes owned simulation messages. |
-| `script.ProceduralAuthority` | 112 | 8 | yes | . | . | . | Per-world authored recipe, named source facts and registered regions, with local revisions fencing asynchronous generation. |
+| `script.ProceduralAuthority` | 160 | 8 | yes | . | . | . | Per-world authored recipe, named source facts and registered regions, with local revisions fencing asynchronous generation. |
 | `script.ProceduralPublished` | 24 | 8 | yes | . | . | . | Per-world accepted canonical regional artifacts and activation receipts, replaced atomically after source and digest checks. |
+| `script.ProceduralSceneRegion` | 72 | 8 | yes | . | . | . | Derived aggregate mesh ranges and canonical content digest for one procedural region; snapshot restore clears the local geometry index. |
 | `script.Program` | 40 | 8 | yes | . | . | . | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass. |
 | `script.ScriptClock` | 24 | 8 | yes | yes | . | . | Per-world singleton script clock: the update rate, simulated time owed but not yet spent, and which world tick was last observed. |
 | `script.SourceCache` | 32 | 8 | yes | . | . | . | Per-world singleton table of script text keyed by asset path, in the order programs were first set, with a write counter that makes noticing a change cheap. |
@@ -350,4 +351,4 @@ state until v0.19.
 
 ---
 
-263 components registered by the engine, 0 without a purpose line.
+264 components registered by the engine, 0 without a purpose line.

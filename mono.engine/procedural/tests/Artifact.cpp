@@ -15,7 +15,7 @@ using namespace engine::procedural;
 namespace {
 	RegionResult Example() {
 		RegionResult result;
-		result.KeyBytes = {'R', 'G', 'K', '1', 7};
+		result.KeyBytes = {'R', 'G', 'K', '2', 7};
 		result.Placements = {
 			{"tree/b", PlacementKind::Tree, "", {-12, 25}, 3, 2, 1},
 			{"tree/a", PlacementKind::Tree, "", {8, -9}, 1, 0, 1}
@@ -30,23 +30,23 @@ namespace {
 
 TEST_CASE("empty regional artifact has fixed version-one bytes", "[procedural][artifact]") {
 	RegionResult result;
-	result.KeyBytes = {'R', 'G', 'K', '1'};
+	result.KeyBytes = {'R', 'G', 'K', '2'};
 	std::vector<uint8_t> bytes;
 	Diagnostic diagnostic;
 	REQUIRE(EncodeRegionResult(result, bytes, diagnostic) == Status::Ok);
 	CHECK((bytes == std::vector<uint8_t>{'R', 'G', 'A', '1', 4, 0, 0, 0, 'R', 'G',
-										 'K', '1', 0,	0,	 0, 0, 0, 0, 0,	  0}));
+										 'K', '2', 0,	0,	 0, 0, 0, 0, 0,	  0}));
 }
 
 TEST_CASE("placement kind and signed coordinates have fixed artifact bytes", "[procedural][artifact]") {
 	RegionResult result;
-	result.KeyBytes = {'R', 'G', 'K', '1'};
+	result.KeyBytes = {'R', 'G', 'K', '2'};
 	result.Placements = {{"t", PlacementKind::Tree, "", {1, -1}, 2, 3, 4}};
 	std::vector<uint8_t> bytes;
 	Diagnostic diagnostic;
 	REQUIRE(EncodeRegionResult(result, bytes, diagnostic) == Status::Ok);
 	CHECK((bytes == std::vector<uint8_t>{'R', 'G', 'A',	 '1',  4,	 0,	   0,	 0,	   'R',	 'G',  'K',
-										 '1', 1,   0,	 0,	   0,	 4,	   0,	 't',  'r',	 'e',  'e',
+										 '2', 1,   0,	 0,	   0,	 4,	   0,	 't',  'r',	 'e',  'e',
 										 1,	  0,   't',	 0,	   0,	 1,	   0,	 0,	   0,	 0,	   0,
 										 0,	  0,   0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 2,
 										 3,	  0,   4,	 0,	   0,	 0,	   0,	 0}));
@@ -81,9 +81,9 @@ TEST_CASE("stale and malformed artifacts preserve prior result", "[procedural][a
 	Diagnostic diagnostic;
 	REQUIRE(EncodeRegionResult(result, bytes, diagnostic) == Status::Ok);
 	RegionResult previous;
-	previous.KeyBytes = {'R', 'G', 'K', '1', 99};
+	previous.KeyBytes = {'R', 'G', 'K', '2', 99};
 	const auto saved = previous.KeyBytes;
-	const std::array<uint8_t, 5> staleKey{'R', 'G', 'K', '1', 8};
+	const std::array<uint8_t, 5> staleKey{'R', 'G', 'K', '2', 8};
 	CHECK(DecodeRegionResult(bytes, previous, diagnostic, staleKey) == Status::StaleArtifact);
 	CHECK(previous.KeyBytes == saved);
 	bytes.push_back(0);
@@ -106,7 +106,7 @@ TEST_CASE("stale and malformed artifacts preserve prior result", "[procedural][a
 
 TEST_CASE("decoder rejects unknown kinds and noncanonical row order", "[procedural][artifact]") {
 	RegionResult result;
-	result.KeyBytes = {'R', 'G', 'K', '1'};
+	result.KeyBytes = {'R', 'G', 'K', '2'};
 	result.Placements = {
 		{"tree/a", PlacementKind::Tree, "", {1, 2}, 0, 0, 0},
 		{"tree/b", PlacementKind::Tree, "", {3, 4}, 0, 0, 0}

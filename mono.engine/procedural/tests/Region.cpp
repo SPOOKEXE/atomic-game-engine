@@ -37,6 +37,8 @@ namespace {
 		RegionRequest request;
 		request.Scope = scope;
 		request.RecipeDigest = TestDigest(3);
+		request.Authored.Covered = query;
+		request.Authored.Complete = true;
 		request.Queries = {
 			{"villages",
 			 query,

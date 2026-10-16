@@ -60,6 +60,7 @@ script.NpcBehaviour | One NPC's last committed movement, published with Humanoid
 script.NpcCadencePending | Two transient NPC work admissions tied to the exact runtime, store incarnation and source revision; snapshot restore clears pending tokens.
 script.ProceduralAuthority | Per-world authored recipe, named source facts and registered regions, with local revisions fencing asynchronous generation.
 script.ProceduralPublished | Per-world accepted canonical regional artifacts and activation receipts, replaced atomically after source and digest checks.
+script.ProceduralSceneRegion | Derived aggregate mesh ranges and canonical content digest for one procedural region; snapshot restore clears the local geometry index.
 script.Program | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass.
 script.ScriptClock | Per-world singleton script clock: the update rate, simulated time owed but not yet spent, and which world tick was last observed.
 script.SourceCache | Per-world singleton table of script text keyed by asset path, in the order programs were first set, with a write counter that makes noticing a change cheap.

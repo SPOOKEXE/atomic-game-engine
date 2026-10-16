@@ -26,7 +26,7 @@ namespace engine::procedural {
 
 		bool ValidKey(std::span<const uint8_t> key, const ArtifactLimits &limits) {
 			return key.size() >= 4 && key.size() <= limits.MaximumKeyBytes &&
-				   std::equal(key.begin(), key.begin() + 4, "RGK1");
+				   std::equal(key.begin(), key.begin() + 4, "RGK2");
 		}
 
 		std::string_view KindTag(PlacementKind kind) {
