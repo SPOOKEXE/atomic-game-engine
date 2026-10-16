@@ -42,6 +42,7 @@
 #include <engine/scene/Terrain.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/scene/Tools.hpp>
+#include <engine/scene/UpdateCadence.hpp>
 #include <engine/scene/VectorField.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Volume.hpp>
@@ -2218,6 +2219,7 @@ namespace engine::scene {
 			ReadWeatherAcceptedDefinitions,
 			800
 		);
+		RegisterUpdateCadenceComponents();
 	}
 
 	void RegisterSceneClasses() {

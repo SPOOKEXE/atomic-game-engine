@@ -153,6 +153,12 @@ state until v0.19.
 | `playergui.Projection` | 40 | 8 | yes | . | . | . | Per-player runtime state mapping canonical GUI collectors to local copies and tracking character changes and locally destroyed copies until respawn. |
 | `playergui.Source` | 16 | 8 | yes | . | yes | . | Marks an authoritative GUI source and links it to its viewer-local copy; the mapping is cleared when snapshot data is restored. |
 
+## `presentation`
+
+| component | size | align | save | raw | pad | wire | what it is for |
+|---|---|---|---|---|---|---|---|
+| `presentation.PoseCadenceHistory` | 104 | 8 | yes | . | . | . | Viewer-local derived visual-pose commit history keyed by animator, with bounded admission and counts from the last presentation pass; its payload clears on snapshot restore and stays outside replication. |
+
 ## `replication`
 
 | component | size | align | save | raw | pad | wire | what it is for |
@@ -275,6 +281,8 @@ state until v0.19.
 | `scene.Tool` | 28 | 4 | yes | yes | . | . | On a `Tool` instance: where its handle sits relative to the grip point. `EquipTool` and the grip pose read it, and it decides where a held handle is drawn. |
 | `scene.Transform` | 28 | 4 | yes | yes | . | 10 | Where a thing is: a world-space CFrame, never relative to a parent. The component almost every system reads. |
 | `scene.Transient` | 0 | 1 | . | . | . | . | Marks a viewer-owned subtree omitted from authored game saves, so local viewport state cannot become shared world content. |
+| `scene.UpdateCadence` | 64 | 8 | yes | . | yes | . | Per-subject fixed-tick intervals and maximum staleness for each update domain, with stable phase identity, owner, revision and criticality policy. |
+| `scene.UpdateCadenceState` | 224 | 8 | yes | . | . | . | Authority-owned last-commit state for each update domain, including consumed revisions, generation, interval, phase and demotion hold. |
 | `scene.Vector3Value` | 12 | 4 | yes | yes | . | . | The vector stored by a `Vector3Value` instance. |
 | `scene.VectorField2D` | 32 | 4 | yes | yes | . | . | A planar vector field over its local XZ plane: constant, radial and tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor. |
 | `scene.VectorField3D` | 52 | 4 | yes | yes | . | . | A three-dimensional vector field: constant, radial and axis-directed tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor. |
@@ -336,4 +344,4 @@ state until v0.19.
 
 ---
 
-254 components registered by the engine, 0 without a purpose line.
+257 components registered by the engine, 0 without a purpose line.

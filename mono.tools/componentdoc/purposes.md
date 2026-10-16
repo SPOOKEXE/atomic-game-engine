@@ -76,6 +76,9 @@ scene.AnimationBuffer | World-owned canonical animation bytes and the revision p
 scene.AnimationClip | On an `Animation` instance: which asset or `AnimationBuffer` supplies the clip and which `Skeleton::Rig` its channels were authored against, so playing a fox's walk on a dragon is refusable.
 scene.AnimationTrack | One clip playing on one animator: its play head, speed, current and target weight, fade time, priority, loop flag and whether it is running. Storage for the v0.24 animation handler.
 scene.Animator | On an `Animator` instance: which rig it poses, whether the root channel moves the body and by how much, and whether the pose may be evaluated less often at distance.
+scene.UpdateCadence | Per-subject fixed-tick intervals and maximum staleness for each update domain, with stable phase identity, owner, revision and criticality policy.
+scene.UpdateCadenceState | Authority-owned last-commit state for each update domain, including consumed revisions, generation, interval, phase and demotion hold.
+presentation.PoseCadenceHistory | Viewer-local derived visual-pose commit history keyed by animator, with bounded admission and counts from the last presentation pass; its payload clears on snapshot restore and stays outside replication.
 scene.Atmosphere | Per-world scattering authored on an `Atmosphere` instance under `Lighting`: the air's colour and decay, its density and offset, and the sun's glare and horizon haze. Presentation only.
 scene.AtmosphereProcedural | Extra scattering controls on an `AtmosphereProcedural` instance: planet and atmosphere scale, Rayleigh and Mie strength, and bounded integration quality for the resident environment compute pass.
 scene.Attachment | A named point on a part: the authored local `Frame` plus the `WorldFrame` every host recomposes each tick. The cache puts an emitter and a lamp where their part is, and its reported write is what signals a change.
