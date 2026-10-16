@@ -35,6 +35,8 @@ namespace engine::script {
 		ecs::Entity Part{};				 // Full generation-bearing static MeshPart handle.
 		uint64_t StoreIdentity = 0;		 // Exact owner-world incarnation fence.
 		uint32_t MeshRevision = 0;		 // Geometry revision observed before generation.
+		core::Name BeforeFitted{};		 // Expected fitted binding at publication.
+		spatial::LayerMask BeforeMask{}; // Expected contact filter at publication.
 		core::Name Content{};			 // Existing Mesh and Fitted content binding.
 		core::CFrame Frame{};			 // Captured transform; intervening edits refuse publication.
 		core::CFrame Previous{};		 // Captured interpolation history.
@@ -42,9 +44,23 @@ namespace engine::script {
 	};
 	// Called by RegisterProceduralComponents before the component registry seals.
 	void RegisterProceduralSceneComponents();
+	// Reads and validates a target before admission, without adding components or
+	// normalizing any part field. The snapshot fences later target provisioning.
+	bool CaptureProceduralSceneTarget(
+		const ecs::Store &store,
+		procedural::RegionScope scope,
+		ecs::Entity mesh,
+		ecs::Entity part,
+		ProceduralSceneTarget &out,
+		procedural::Diagnostic &diagnostic
+	);
+
 	// Requires a static MeshPart naming the mesh. Establishes Fitted and the
 	// derived component before work starts. Aggregate output is visual-only:
-	// collider queries and contact masks must already be disabled by the author.
+	// the author disables CanCollide and CanQuery first. Binding normalizes the
+	// collider mask to empty before generation, so no aggregate trigger box remains.
+	// Component addition inherits Store::Set exception guarantees; all part scalar
+	// writes follow successful staging and preserve existing geometry on refusal.
 	bool BindProceduralSceneTarget(
 		ecs::Store &store,
 		procedural::RegionScope scope,
