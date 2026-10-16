@@ -411,23 +411,35 @@ implementation slice. They do not validate the full proposed feature.
 - The Studio adapter unity object compiles in the CI preset. Focused server
   graphcore and imagegraph tests passed: 2/2 in 0.30 s.
 
-## Completed increments and current evidence
+## Implemented increments and current validation
 
-Partial increments only.
+These commits and results record partial work. They do not establish milestone
+completion or optimization gains.
 
-| Increment or check | Result and remaining scope |
+| Commits | Implemented increment |
 |---|---|
-| `750761a6`, `9b1dc61f` | Graph foundation; cadence and pose. |
-| `76fb2cc4`, `f06ef94f` | Typed compute CPU contracts; scalar FIFO and schema adapter. |
-| `a96f7618` | Shared prepared compiler and audio. |
-| `543a3056` | Bake schemas and runtime. |
-| `e47fbc10` | Bounded forest, village and roads kernel; canonical named-tag decoder. |
-| `e7fd7955` | Server old time/weight 2/0 vs expected 3/1; fixed 6 assertions. Replica unposed bones/palette: 5 old failures, 19 fixed assertions. |
-| CI snapshots | Initial 5/5, 1.35 s: graphcore/computegraph/procedural/scene/graph; uncommitted codec snapshot. Latest 5/5, 1.21 s: graphcore/procedural/bakegraph/bake/audio. |
-| Client animation | 4 `client*animation*` cases passed, 229 assertions. |
-| AudioGraph heap | Actual constructor: 12,734,480 bytes/17 blocks. Legal 1,024-node/1,023-input mutation/rebuild: 0 new blocks/bytes. Not full mixer allocation proof. |
-| C04 isolated SDL | Opt-out/opt-in transfer-compute-graphics parity and sync validation passed; no production integration, overlap, or speed claim. |
-| Remaining | C02 needs NPC/effects/service/demo. Full C06, Studio, host, B0 and optimization passes remain pending. |
+| `750761a6`, `9b1dc61f`, `76fb2cc4`, `f06ef94f` | Graph foundation; cadence and pose; typed compute CPU contracts; scalar FIFO and schema adapter. |
+| `a96f7618`, `543a3056`, `e47fbc10` | Graph ordering and allocation-free audio routing; bake schemas/runtime; bounded forest/village/roads kernel and canonical named-tag decoder. |
+| `03d6da25`, `2deb6af2`, `a257a3c8` | Canonical artifacts and cancellation; portable SDL hooks; strict patch whitespace. |
+| `6660000f`, `da1da6d5`, `ac58e4a8`, `c108ee68` | Reflected GPU host; beam cadence; ray baseline; geometry. |
+| `fe43101a`, `5842d73d`, `e13582e5`, `e0f43820`, `47209fff` | Canonical procedural job host; runtime identity; both-VM NPC/town; neutral stock compaction; atomic mesh batch. |
+| `e7fd7955` | Host animation fixes for server time/weight and replica unposed bones/palette. |
+| `8d710d7e`, `7c0b32d5` | JavaScript self-disconnect fix; startup resource ownership. |
+| `dd5ec7e1`, `0059e2ae`, `aa32cc9f` | Shared geometry bounds/palette; pure mesh bake; authored splines/overrides and atomic scene update. |
+| `87179aae`, `2f924933` | Bounded C01 bridge for both VMs; client/Studio endpoint injection. |
+
+| Validation | Result and limit |
+|---|---|
+| Coherent CI build | The selected product and test targets passed across 137 build steps. |
+| Full CTest | `script`, `scripthost`, `procedural`, `bake`, `examples`: 5/5 passed in 51.98 s. |
+| Focused tests | Compute: 339 assertions/19 cases; scripting compute, cadence and catalogue: 390/6; mesh: 182/26; procedural: 3,818/38; script procedural and codec: 2,933/42; bake: 2,338/5; scripthost compute/lifetime: 100/5. All passed. |
+| Component documentation | `components-check` passed for 264 components, all documented, with no serialized padding leaks. |
+| C01 and startup on real Vulkan | `.cache/build/ci/compute-bounded-and-startup-validation.log`: 360 assertions/12 cases passed on RTX 4090, NVIDIA 580.173.02, with zero VUIDs or validation errors. Earlier pre-metadata poll passed 470/12; poll loops vary assertion counts. The prior 56 teardown and 3 partial-startup VUID reproductions are fixed in the current path. |
+| Headless regression | The old SIGSEGV case passed after the JavaScript self-disconnect fix: 16 assertions, 1 case. |
+| Isolated SDL sidecar | Opt-out/opt-in transfer-to-compute-to-graphics exact parity and synchronization validation passed cleanly. This separate sidecar result does not establish production integration or physical overlap. |
+| AudioGraph heap | Constructor: 12,734,480 bytes and 17 blocks. Legal 1,024-node/1,023-input mutation/rebuild added 0 blocks/bytes. This does not prove full mixer allocation freedom. |
+| CPU recording sample | RTX 4090, NVIDIA 580.173.02, `bench` preset, 3 samples. The unchanged workloads used 1,000 to 100,000 emitters with 6 particle slots each, giving 6,000 to 600,000 particle capacity. The changed workload edited one of 10,000 emitters. CPU step-record self time was 4 to 10 us, draw self about 1 us. Whole render was 150 to 223 us across the emitter range, and 323 to 359 us at 10,000 emitters with one change. No dropped spans. This does not show useful worker benefit; C04 private-worker policy is unchanged and physical overlap is unmeasured. |
+| Remaining | C06 native scene/bake/authored inputs are validated; assets, codec, assetc, runtime baked-load, VM service and Studio editor remain unvalidated. C02 has native pose/effects checks and both-VM NPC service/town checks; generated bindings, live demo review and measured benchmarks remain. B0 and optimization passes are not claimed. |
 
 ## Initial evidence checklist
 
