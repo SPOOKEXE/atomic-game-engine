@@ -53,6 +53,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -300,6 +301,25 @@ namespace engine::script {
 		// Whether it ran without raising. A script that failed half way through
 		// has a step count and it is not comparable to one that finished.
 		bool Completed = true;
+	};
+
+	// VM-owned allocator accounting. The bases describe different byte measures
+	// and must not be compared across languages or with process RSS.
+	enum class VmMemoryBasis : uint8_t {
+		Unavailable,
+		RequestedBytes,
+		QuickJsChargedBytes,
+	};
+
+	struct VmMemorySnapshot {
+		VmMemoryBasis Basis = VmMemoryBasis::Unavailable;
+		uint64_t LiveBytes = 0;
+		uint64_t LiveBlocks = 0;
+		// Peak is since BeginMemoryWindow; growth totals are since VM creation.
+		// An empty field means the adapter has no exact counter for that measure.
+		std::optional<uint64_t> PeakLiveBytes;
+		std::optional<uint64_t> GrowthBytes;
+		std::optional<uint64_t> GrowthOps;
 	};
 
 	// One source location in a script stack sample.
@@ -824,6 +844,15 @@ namespace engine::script {
 		virtual uint64_t StepsTaken() const {
 			return 0;
 		}
+
+		// Read at diagnostic boundaries, outside timed script execution. Growth
+		// counts only successful positive requested-size changes, not all calls.
+		virtual VmMemorySnapshot MemorySnapshot() const {
+			return {};
+		}
+
+		// Start a new peak window without changing limits or cumulative totals.
+		virtual void BeginMemoryWindow() {}
 
 		// What each script cost when it last ran, most expensive first.
 		//

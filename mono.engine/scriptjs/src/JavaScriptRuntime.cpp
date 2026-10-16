@@ -415,6 +415,22 @@ namespace engine::script {
 		return budget != nullptr ? budget->Taken : 0;
 	}
 
+	VmMemorySnapshot JavaScriptRuntime::MemorySnapshot() const {
+		if (Vm == nullptr) {
+			return {};
+		}
+		JSMemoryUsage usage{};
+		JS_ComputeMemoryUsage(Vm, &usage);
+		if (usage.malloc_size < 0 || usage.malloc_count < 0) {
+			return {};
+		}
+		VmMemorySnapshot snapshot;
+		snapshot.Basis = VmMemoryBasis::QuickJsChargedBytes;
+		snapshot.LiveBytes = static_cast<uint64_t>(usage.malloc_size);
+		snapshot.LiveBlocks = static_cast<uint64_t>(usage.malloc_count);
+		return snapshot;
+	}
+
 	void JavaScriptRuntime::SetHost(HostSurface *host) {
 		if (host != nullptr && !Can(ScriptCapabilities::PluginHost)) {
 			Error = "script runtime lacks the 'plugin-host' capability";

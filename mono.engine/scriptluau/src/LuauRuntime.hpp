@@ -41,6 +41,8 @@ namespace engine::script {
 		//
 		// @return Cumulative steps since this runtime was made.
 		uint64_t StepsTaken() const override;
+		VmMemorySnapshot MemorySnapshot() const override;
+		void BeginMemoryWindow() override;
 
 		// --- the host seam ---------------------------------------------------
 

@@ -51,6 +51,22 @@ TEST_CASE("the javascript adapter opens a runtime on its own", "[scriptjs]") {
 	CHECK_FALSE(runtime->CanDiscardForWorldSwap());
 }
 
+TEST_CASE("the javascript adapter exposes charged-byte live accounting", "[scriptjs][memory]") {
+	RegisterClasses();
+	Store store("scriptjs_memory");
+	const auto runtime = MakeJavaScriptRuntime(store);
+	const auto snapshot = runtime->MemorySnapshot();
+	CHECK(snapshot.Basis == engine::script::VmMemoryBasis::QuickJsChargedBytes);
+	CHECK(snapshot.LiveBytes > 0);
+	CHECK(snapshot.LiveBlocks > 0);
+	CHECK_FALSE(snapshot.PeakLiveBytes.has_value());
+	CHECK_FALSE(snapshot.GrowthBytes.has_value());
+	CHECK_FALSE(snapshot.GrowthOps.has_value());
+	const auto before = snapshot.LiveBytes;
+	runtime->BeginMemoryWindow();
+	CHECK(runtime->MemorySnapshot().LiveBytes == before);
+}
+
 TEST_CASE("the javascript adapter builds into the world it was handed", "[scriptjs]") {
 	RegisterClasses();
 	Store store("scriptjs_test");

@@ -103,6 +103,68 @@ TEST_CASE("the luau adapter opens a runtime on its own", "[scriptluau]") {
 	CHECK_FALSE(runtime->CanDiscardForWorldSwap());
 }
 
+TEST_CASE("the luau adapter exposes requested-byte allocator accounting", "[scriptluau][memory]") {
+	RegisterClasses();
+	Store store("scriptluau_memory");
+	const auto runtime = MakeLuauRuntime(store);
+	const auto snapshot = runtime->MemorySnapshot();
+	CHECK(snapshot.Basis == engine::script::VmMemoryBasis::RequestedBytes);
+	CHECK(snapshot.LiveBytes > 0);
+	CHECK(snapshot.LiveBlocks > 0);
+	REQUIRE(snapshot.PeakLiveBytes.has_value());
+	CHECK(*snapshot.PeakLiveBytes >= snapshot.LiveBytes);
+	CHECK(snapshot.GrowthBytes.has_value());
+	CHECK(snapshot.GrowthOps.has_value());
+}
+
+TEST_CASE("retained Luau buffers raise live allocator bytes and blocks", "[scriptluau][memory]") {
+	RegisterClasses();
+	Store store("scriptluau_retained_memory");
+	const auto runtime = MakeLuauRuntime(store);
+	runtime->BeginMemoryWindow();
+	const auto before = runtime->MemorySnapshot();
+	REQUIRE(runtime->Run(R"(
+		local retained = buffer.create(262144)
+		task.defer(function() assert(buffer.len(retained) == 262144) end)
+	)"));
+	const auto after = runtime->MemorySnapshot();
+	REQUIRE(after.PeakLiveBytes.has_value());
+	REQUIRE(after.GrowthBytes.has_value());
+	REQUIRE(after.GrowthOps.has_value());
+	CHECK(after.LiveBytes >= before.LiveBytes + 262144);
+	CHECK(after.LiveBlocks > before.LiveBlocks);
+	CHECK(*after.PeakLiveBytes >= after.LiveBytes);
+	CHECK(*after.GrowthBytes >= *before.GrowthBytes + 262144);
+	CHECK(*after.GrowthOps > *before.GrowthOps);
+}
+
+TEST_CASE("refused Luau buffer allocation stays outside allocator counters", "[scriptluau][memory]") {
+	RegisterClasses();
+	Store store("scriptluau_bounded_memory");
+	constexpr size_t limit = 8u * 1024u * 1024u;
+	constexpr size_t refusedSize = 16u * 1024u * 1024u;
+	engine::script::RuntimeLimits limits{};
+	limits.MemoryBytes = limit;
+	const auto runtime = MakeLuauRuntime(store, limits);
+	const auto before = runtime->MemorySnapshot();
+	REQUIRE(before.GrowthBytes.has_value());
+	runtime->BeginMemoryWindow();
+	CHECK_FALSE(runtime->Run("buffer.create(16 * 1024 * 1024)"));
+	CHECK_FALSE(runtime->LastError().empty());
+	const auto after = runtime->MemorySnapshot();
+	REQUIRE(after.PeakLiveBytes.has_value());
+	REQUIRE(after.GrowthBytes.has_value());
+	CHECK(after.LiveBytes <= limit);
+	CHECK(*after.PeakLiveBytes <= limit);
+	// Compilation and error reporting may allocate, but the refused buffer
+	// must not be charged as successful growth.
+	CHECK(*after.GrowthBytes - *before.GrowthBytes < refusedSize);
+	runtime->BeginMemoryWindow();
+	const auto reset = runtime->MemorySnapshot();
+	CHECK(reset.PeakLiveBytes == reset.LiveBytes);
+	CHECK(reset.GrowthBytes == after.GrowthBytes);
+}
+
 TEST_CASE("the luau adapter builds into the world it was handed", "[scriptluau]") {
 	RegisterClasses();
 	Store store("scriptluau_test");

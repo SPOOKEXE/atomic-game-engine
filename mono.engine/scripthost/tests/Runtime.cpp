@@ -76,6 +76,44 @@ TEST_CASE("runtime identities are nonzero, stable, and process-monotonic", "[scr
 	CHECK(javascript->Identity() == javascriptIdentity);
 }
 
+TEST_CASE("VM memory snapshots preserve each adapter's measurement basis", "[script][runtime][memory]") {
+	RegisterClasses();
+	Store luauStore("memory_luau");
+	Store javascriptStore("memory_javascript");
+	const auto luau = MakeRuntime(luauStore, Language::Luau);
+	const auto javascript = MakeRuntime(javascriptStore, Language::JavaScript);
+
+	const auto before = luau->MemorySnapshot();
+	REQUIRE(before.Basis == engine::script::VmMemoryBasis::RequestedBytes);
+	REQUIRE(before.GrowthBytes.has_value());
+	REQUIRE(before.GrowthOps.has_value());
+	luau->BeginMemoryWindow();
+	const auto window = luau->MemorySnapshot();
+	REQUIRE(window.PeakLiveBytes.has_value());
+	CHECK(*window.PeakLiveBytes == window.LiveBytes);
+	CHECK(window.GrowthBytes == before.GrowthBytes);
+	CHECK(window.GrowthOps == before.GrowthOps);
+	REQUIRE(luau->Run("local b = buffer.create(65536) assert(buffer.len(b) == 65536)"));
+	const auto grown = luau->MemorySnapshot();
+	REQUIRE(grown.GrowthBytes.has_value());
+	REQUIRE(grown.GrowthOps.has_value());
+	CHECK(*grown.GrowthBytes >= *before.GrowthBytes + 65536);
+	CHECK(*grown.GrowthOps > *before.GrowthOps);
+	CHECK(*grown.PeakLiveBytes >= window.LiveBytes);
+	luau->BeginMemoryWindow();
+	const auto reset = luau->MemorySnapshot();
+	CHECK(reset.PeakLiveBytes == reset.LiveBytes);
+	CHECK(reset.GrowthBytes == grown.GrowthBytes);
+	CHECK(reset.GrowthOps == grown.GrowthOps);
+
+	const auto js = javascript->MemorySnapshot();
+	CHECK(js.Basis == engine::script::VmMemoryBasis::QuickJsChargedBytes);
+	CHECK(js.LiveBytes > 0);
+	CHECK_FALSE(js.PeakLiveBytes.has_value());
+	CHECK_FALSE(js.GrowthBytes.has_value());
+	CHECK_FALSE(js.GrowthOps.has_value());
+}
+
 TEST_CASE("a script runs and can print", "[script]") {
 	RegisterClasses();
 	Store store("script_test");

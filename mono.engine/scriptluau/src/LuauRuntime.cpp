@@ -15,11 +15,13 @@
 #include <engine/script/SourceCache.hpp>
 #include <engine/scriptluau/Runtime.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <luacode.h>
 #include <lualib.h>
 #include <sstream>
@@ -37,6 +39,11 @@ namespace engine::script {
 		struct Bounds {
 			size_t MemoryLimit = 0;
 			size_t MemoryHeld = 0;
+			uint64_t LiveBlocks = 0;
+			size_t PeakMemoryHeld = 0;
+			uint64_t GrowthBytes = 0;
+			uint64_t GrowthOps = 0;
+			bool GrowthCountersValid = true;
 			uint64_t StepBudget = 0;
 
 			// Only ever goes up, so a difference of two readings is what one
@@ -68,6 +75,9 @@ namespace engine::script {
 
 			if (newSize == 0) {
 				bounds->MemoryHeld -= oldSize;
+				if (pointer != nullptr) {
+					bounds->LiveBlocks--;
+				}
 				std::free(pointer);
 				return nullptr;
 			}
@@ -77,12 +87,27 @@ namespace engine::script {
 				return nullptr;
 			}
 
+			const bool newBlock = pointer == nullptr;
 			void *resized = std::realloc(pointer, newSize);
 			if (resized == nullptr) {
 				return nullptr;
 			}
 
 			bounds->MemoryHeld = held;
+			if (newBlock) {
+				bounds->LiveBlocks++;
+			}
+			bounds->PeakMemoryHeld = std::max(bounds->PeakMemoryHeld, held);
+			if (newSize > oldSize && bounds->GrowthCountersValid) {
+				const auto growth = static_cast<uint64_t>(newSize - oldSize);
+				if (growth > std::numeric_limits<uint64_t>::max() - bounds->GrowthBytes ||
+					bounds->GrowthOps == std::numeric_limits<uint64_t>::max()) {
+					bounds->GrowthCountersValid = false;
+				} else {
+					bounds->GrowthBytes += growth;
+					bounds->GrowthOps++;
+				}
+			}
 			if (newSize > oldSize && bounds->Context.Profiler != nullptr) {
 				bounds->Context.Profiler->RecordAllocation(newSize - oldSize);
 			}
@@ -1053,6 +1078,30 @@ namespace engine::script {
 			return 0;
 		}
 		return BoundsOf(State).StepsTaken;
+	}
+
+	VmMemorySnapshot LuauRuntime::MemorySnapshot() const {
+		if (State == nullptr) {
+			return {};
+		}
+		const Bounds &bounds = BoundsOf(State);
+		VmMemorySnapshot snapshot;
+		snapshot.Basis = VmMemoryBasis::RequestedBytes;
+		snapshot.LiveBytes = bounds.MemoryHeld;
+		snapshot.LiveBlocks = bounds.LiveBlocks;
+		snapshot.PeakLiveBytes = bounds.PeakMemoryHeld;
+		if (bounds.GrowthCountersValid) {
+			snapshot.GrowthBytes = bounds.GrowthBytes;
+			snapshot.GrowthOps = bounds.GrowthOps;
+		}
+		return snapshot;
+	}
+
+	void LuauRuntime::BeginMemoryWindow() {
+		if (State != nullptr) {
+			Bounds &bounds = BoundsOf(State);
+			bounds.PeakMemoryHeld = bounds.MemoryHeld;
+		}
 	}
 
 	bool LuauRuntime::RunInstance(ecs::Entity instance) {
