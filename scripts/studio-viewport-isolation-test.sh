@@ -107,7 +107,8 @@ fi
 	--mcp-port "$port" > "$log" 2>&1 &
 studio_pid=$!
 
-for _ in $(seq 1 100); do
+# Cold renderer startup can take over 30 seconds before the control surface opens.
+for _ in $(seq 1 600); do
 	if grep -q "control: listening on 127.0.0.1:$port" "$log"; then
 		break
 	fi
@@ -142,33 +143,49 @@ fi
 # Wait for both sides to receive a real draw. The first imgui pass only learns
 # panel extents, so capturing before both slots exist would prove nothing.
 request_screenshots() {
+	local wait_seconds=${1:-5}
 	printf '%s\n' \
 		'{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"screenshot","arguments":{"target":"scene"}}}' |
-		nc -N -w 5 127.0.0.1 "$port"
+		nc -N -w "$wait_seconds" 127.0.0.1 "$port"
 }
 
 capture_pair() {
 	local label=$1
-	local before_server="missing"
-	local before_client="missing"
-	[ -f "$server_path" ] && before_server=$(stat -c '%y:%s' "$server_path")
-	[ -f "$client_path" ] && before_client=$(stat -c '%y:%s' "$client_path")
-
-	request_screenshots > "$output/$label-control.json"
-	for _ in $(seq 1 100); do
-		if [ -f "$server_path" ] && [ -f "$client_path" ]; then
-			local after_server
-			local after_client
-			after_server=$(stat -c '%y:%s' "$server_path")
-			after_client=$(stat -c '%y:%s' "$client_path")
-			if [ "$after_server" != "$before_server" ] && [ "$after_client" != "$before_client" ]; then
-				break
+	local deadline=$((SECONDS + 10))
+	local ready=false
+	# A resize can retain one slot's previous frame while the other already
+	# presents its new extent. Require a fresh pair from one settled layout.
+	while [ "$SECONDS" -lt "$deadline" ]; do
+		local before_server="missing"
+		local before_client="missing"
+		[ -f "$server_path" ] && before_server=$(stat -c '%y:%s' "$server_path")
+		[ -f "$client_path" ] && before_client=$(stat -c '%y:%s' "$client_path")
+		local remaining=$((deadline - SECONDS))
+		[ "$remaining" -gt 0 ] || break
+		[ "$remaining" -gt 5 ] && remaining=5
+		request_screenshots "$remaining" > "$output/$label-control.json"
+		local fresh=false
+		while [ "$SECONDS" -lt "$deadline" ]; do
+			if [ -s "$server_path" ] && [ -s "$client_path" ]; then
+				local after_server
+				local after_client
+				after_server=$(stat -c '%y:%s' "$server_path")
+				after_client=$(stat -c '%y:%s' "$client_path")
+				if [ "$after_server" != "$before_server" ] && [ "$after_client" != "$before_client" ]; then
+					fresh=true
+					break
+				fi
 			fi
+			sleep 0.1
+		done
+		if "$fresh" && [ "$(stat -c %s "$server_path")" = "$(stat -c %s "$client_path")" ]; then
+			ready=true
+			break
 		fi
 		sleep 0.1
 	done
-	if [ ! -s "$server_path" ] || [ ! -s "$client_path" ]; then
-		echo "FAIL: $label did not produce both renderer-slot captures" >&2
+	if ! "$ready"; then
+		echo "FAIL: $label did not produce fresh matching renderer-slot captures within 10 seconds" >&2
 		tail -40 "$log" >&2
 		exit 1
 	fi
@@ -189,13 +206,12 @@ capture_pair() {
 
 capture_pair initial
 
-# The split lives in the first 38% of the default Studio layout. These points
+# The split fills the first 76% of the default Studio layout. These points
 # are the centres of its two halves, clear of the menu, tab strips, transport
-# and output pane. They exercise the server and client focus paths rather than
-# the adjacent empty centre dockspace.
+# and output pane. Each point and host crop stays inside its rendered panel.
 eval "$(xdotool getwindowgeometry --shell "$window")"
-left_x=$((WIDTH * 9 / 100))
-right_x=$((WIDTH * 28 / 100))
+left_x=$((WIDTH * 19 / 100))
+right_x=$((WIDTH * 57 / 100))
 view_y=$((HEIGHT * 42 / 100))
 crop_width=$((WIDTH * 30 / 100))
 crop_height=$((HEIGHT * 25 / 100))
