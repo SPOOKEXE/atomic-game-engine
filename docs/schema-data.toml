@@ -9,14 +9,14 @@ generated_by = "schemadump"
 source = "runtime registries"
 
 ["reference"."counts"]
-components = 245
+components = 257
 classes = 169
 properties = 2197
 enums = 72
 functions = 116
 
-services = 18
-service_methods = 92
+services = 20
+service_methods = 120
 service_properties = 12
 service_signals = 10
 
@@ -137,6 +137,18 @@ trivial = true
 serialisable = true
 raw_serialisation = false
 padded = true
+wire_size = 0
+described = false
+
+["components"."effects.BeamCadenceCache"]
+name = "effects.BeamCadenceCache"
+kind = "Data"
+size = 112
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
 wire_size = 0
 described = false
 
@@ -1193,6 +1205,18 @@ trivial = true
 serialisable = true
 raw_serialisation = false
 padded = true
+wire_size = 0
+described = false
+
+["components"."presentation.PoseCadenceHistory"]
+name = "presentation.PoseCadenceHistory"
+kind = "Data"
+size = 104
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
 wire_size = 0
 described = false
 
@@ -2552,6 +2576,30 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."scene.UpdateCadence"]
+name = "scene.UpdateCadence"
+kind = "Data"
+size = 64
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
+["components"."scene.UpdateCadenceState"]
+name = "scene.UpdateCadenceState"
+kind = "Data"
+size = 224
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
 ["components"."scene.Vector3Value"]
 name = "scene.Vector3Value"
 kind = "Data"
@@ -2720,6 +2768,18 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."script.BakedProceduralReference"]
+name = "script.BakedProceduralReference"
+kind = "Data"
+size = 32
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
 ["components"."script.CodeSourceContainerSelector"]
 name = "script.CodeSourceContainerSelector"
 kind = "Data"
@@ -2792,6 +2852,42 @@ padded = false
 wire_size = 0
 described = false
 
+["components"."script.NpcBehaviour"]
+name = "script.NpcBehaviour"
+kind = "Data"
+size = 12
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."script.NpcCadencePending"]
+name = "script.NpcCadencePending"
+kind = "Data"
+size = 208
+alignment = 8
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
+["components"."script.NpcPerception"]
+name = "script.NpcPerception"
+kind = "Data"
+size = 16
+alignment = 4
+trivial = true
+serialisable = true
+raw_serialisation = false
+padded = true
+wire_size = 0
+described = false
+
 ["components"."script.PortalContactRequests"]
 name = "script.PortalContactRequests"
 kind = "Data"
@@ -2832,6 +2928,54 @@ described = false
 name = "script.PortalTransfers"
 kind = "Data"
 size = 104
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."script.ProceduralAuthority"]
+name = "script.ProceduralAuthority"
+kind = "Data"
+size = 160
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."script.ProceduralPublished"]
+name = "script.ProceduralPublished"
+kind = "Data"
+size = 24
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."script.ProceduralQueueOwner"]
+name = "script.ProceduralQueueOwner"
+kind = "Data"
+size = 16
+alignment = 8
+trivial = false
+serialisable = true
+raw_serialisation = false
+padded = false
+wire_size = 0
+described = false
+
+["components"."script.ProceduralSceneRegion"]
+name = "script.ProceduralSceneRegion"
+kind = "Data"
+size = 72
 alignment = 8
 trivial = false
 serialisable = true
@@ -31562,12 +31706,47 @@ availability = "Always"
 languages = ["Luau", "JavaScript"]
 required_capabilities = ["world"]
 surface = true
-method_count = 1
+method_count = 8
 property_count = 0
 signal_count = 0
 
 ["services"."ComputeService"."methods"."NoiseGridAsync"]
 name = "NoiseGridAsync"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ComputeService"."methods"."StockGraph"]
+name = "StockGraph"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ComputeService"."methods"."DefineGraph"]
+name = "DefineGraph"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ComputeService"."methods"."SubmitGraph"]
+name = "SubmitGraph"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ComputeService"."methods"."PollGraph"]
+name = "PollGraph"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ComputeService"."methods"."ReadGraphResult"]
+name = "ReadGraphResult"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ComputeService"."methods"."CancelGraph"]
+name = "CancelGraph"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ComputeService"."methods"."ReleaseGraph"]
+name = "ReleaseGraph"
 kind = "Method"
 languages = ["Luau", "JavaScript"]
 
@@ -31956,6 +32135,81 @@ name = "SubscribeAsync"
 kind = "Method"
 languages = ["Luau", "JavaScript"]
 
+["services"."ProceduralService"]
+name = "ProceduralService"
+availability = "Always"
+languages = ["Luau", "JavaScript"]
+required_capabilities = ["world"]
+surface = true
+method_count = 13
+property_count = 0
+signal_count = 0
+
+["services"."ProceduralService"."methods"."ConfigureForestVillage"]
+name = "ConfigureForestVillage"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ProceduralService"."methods"."SetSource"]
+name = "SetSource"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ProceduralService"."methods"."RemoveSource"]
+name = "RemoveSource"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ProceduralService"."methods"."SetSpline"]
+name = "SetSpline"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ProceduralService"."methods"."RemoveSpline"]
+name = "RemoveSpline"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ProceduralService"."methods"."SetOverride"]
+name = "SetOverride"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ProceduralService"."methods"."RemoveOverride"]
+name = "RemoveOverride"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ProceduralService"."methods"."Generate"]
+name = "Generate"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ProceduralService"."methods"."UseBaked"]
+name = "UseBaked"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ProceduralService"."methods"."Progress"]
+name = "Progress"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ProceduralService"."methods"."Cancel"]
+name = "Cancel"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ProceduralService"."methods"."Publish"]
+name = "Publish"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."ProceduralService"."methods"."Release"]
+name = "Release"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
 ["services"."RunService"]
 name = "RunService"
 availability = "Always"
@@ -32095,6 +32349,56 @@ languages = ["Luau", "JavaScript"]
 
 ["services"."TweenService"."methods"."Create"]
 name = "Create"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."UpdateCadenceService"]
+name = "UpdateCadenceService"
+availability = "Always"
+languages = ["Luau", "JavaScript"]
+required_capabilities = ["world"]
+surface = true
+method_count = 8
+property_count = 0
+signal_count = 0
+
+["services"."UpdateCadenceService"."methods"."Configure"]
+name = "Configure"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."UpdateCadenceService"."methods"."SetCombat"]
+name = "SetCombat"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."UpdateCadenceService"."methods"."BeginUpdate"]
+name = "BeginUpdate"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."UpdateCadenceService"."methods"."CommitPerception"]
+name = "CommitPerception"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."UpdateCadenceService"."methods"."CommitBehaviour"]
+name = "CommitBehaviour"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."UpdateCadenceService"."methods"."Perception"]
+name = "Perception"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."UpdateCadenceService"."methods"."Behaviour"]
+name = "Behaviour"
+kind = "Method"
+languages = ["Luau", "JavaScript"]
+
+["services"."UpdateCadenceService"."methods"."CombatReady"]
+name = "CombatReady"
 kind = "Method"
 languages = ["Luau", "JavaScript"]
 
