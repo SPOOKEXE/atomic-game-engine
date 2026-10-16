@@ -1,4 +1,5 @@
 // Locking, anchoring and the pivot, as the tools panel writes them.
+// Studio automation also covers RPC-driven text and wheel input through SDL.
 //
 // **The panel itself is not what is under test.** Drawing an ImGui strip needs a
 // context and proves nothing about what a button does; what the buttons do is
@@ -21,17 +22,23 @@
 #include <engine/spatial/Query.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <nlohmann/json.hpp>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 #include <vector>
 
 TEST_SUITE_ID("studio.tools")
 TEST_DEPENDS("engine.scene.part")
+TEST_DEPENDS("engine.control.input_tools")
+TEST_DEPENDS("engine.ui.interface")
 
 using engine::core::AABB;
 using engine::core::Name;
@@ -93,6 +100,14 @@ namespace studio {
 
 		static void DrawPluginToolbar(Editor &editor) {
 			editor.DrawPluginToolbar();
+		}
+
+		static void PumpInput(Editor &editor) {
+			editor.PumpEvents();
+		}
+
+		static void FinishInputFrame(Editor &editor) {
+			editor.FinishControlAutomationFrame();
 		}
 	};
 }
@@ -409,4 +424,82 @@ TEST_CASE("anchoring is a structural change and locking is not", "[studio][tools
 	REQUIRE(store.GetProperty(part, Name("Anchored"), &anchored, sizeof(anchored)));
 	CHECK(anchored);
 	CHECK(store.Get<Visual>(part)->Locked);
+}
+
+TEST_CASE(
+	"Studio control text and wheel input arrive once across frame boundaries", "[studio][control][automation]"
+) {
+	Context context;
+	REQUIRE(SDL_Init(SDL_INIT_EVENTS));
+	struct ControlEventsLifetime {
+		~ControlEventsLifetime() {
+			SDL_QuitSubSystem(SDL_INIT_EVENTS);
+		}
+	} eventsLifetime;
+	studio::Editor editor;
+	studio::ToolsProbe::PrepareTransport(editor);
+	engine::ui::InterfaceSettings settings;
+	settings.DisplayWidth = 640;
+	settings.DisplayHeight = 480;
+	REQUIRE(editor.Interface.Initialise(editor.Renderer, nullptr, settings));
+	editor.EnableControlFeatures();
+
+	const auto call = [&](std::string_view name, nlohmann::json arguments) {
+		const nlohmann::json request{
+			{"jsonrpc", "2.0"},
+			{"id", 1},
+			{"method", "tools/call"},
+			{"params", {{"name", name}, {"arguments", std::move(arguments)}}},
+		};
+		const auto response = nlohmann::json::parse(editor.ControlSurface.Answer(request.dump()));
+		REQUIRE(response.contains("result"));
+		const auto &result = response.at("result");
+		INFO(result.dump());
+		REQUIRE_FALSE(result.value("isError", false));
+		const auto payload = nlohmann::json::parse(result.at("content").at(0).at("text").get<std::string>());
+		REQUIRE(payload.at("queued").get<bool>());
+	};
+	const auto observe = [&](std::string_view expectedText, float expectedWheel) {
+		editor.Interface.Begin(1.0f / 60.0f);
+		const auto &io = ImGui::GetIO();
+		CHECK(io.InputQueueCharacters.Size == static_cast<int>(expectedText.size()));
+		for (int index = 0;
+			 index < io.InputQueueCharacters.Size && index < static_cast<int>(expectedText.size());
+			 ++index)
+			CHECK(
+				io.InputQueueCharacters[index] ==
+				static_cast<ImWchar>(expectedText[static_cast<size_t>(index)])
+			);
+		CHECK(io.MouseWheel == expectedWheel);
+		CHECK(io.MouseWheelH == 0.0f);
+		CHECK(io.MousePos.x == 320.0f);
+		CHECK(io.MousePos.y == 240.0f);
+		editor.Interface.End();
+		studio::ToolsProbe::FinishInputFrame(editor);
+	};
+
+	// Match the host: RPC admission follows this frame's SDL pump. The queued
+	// text must remain owned until the following pump consumes it.
+	studio::ToolsProbe::PumpInput(editor);
+	call("emulate_mouse_move", {{"x", 320.0f}, {"y", 240.0f}});
+	const std::string expected = "verification/v0261-far.aproc";
+	std::string submitted = expected;
+	call("emulate_text", {{"text", submitted}});
+	submitted.assign(128, 'x');
+	call("emulate_mouse_wheel", {{"notches", 2.0f}});
+	call("emulate_mouse_wheel", {{"notches", 3.0f}});
+	observe({}, 0.0f);
+	studio::ToolsProbe::PumpInput(editor);
+	observe(expected, 5.0f);
+
+	// Consumption releases the retained text request. A second request and
+	// oppositely signed wheel events must neither replay nor erase the first.
+	call("emulate_text", {{"text", "!"}});
+	call("emulate_mouse_wheel", {{"notches", -1.25f}});
+	call("emulate_mouse_wheel", {{"notches", 0.25f}});
+	observe({}, 0.0f);
+	studio::ToolsProbe::PumpInput(editor);
+	observe("!", -1.0f);
+	studio::ToolsProbe::PumpInput(editor);
+	observe({}, 0.0f);
 }

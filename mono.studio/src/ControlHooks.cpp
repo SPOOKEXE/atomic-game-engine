@@ -168,7 +168,11 @@ namespace studio {
 								failure = std::string("could not queue ") + what + ": " + SDL_GetError();
 								return false;
 							}
-							host.Interface.QueueAutomationEvent(input);
+							// The overlay retains synthetic pointer position after polling; text and wheel
+							// events arrive through SDL once.
+							if (input.type != SDL_EVENT_TEXT_INPUT && input.type != SDL_EVENT_MOUSE_WHEEL) {
+								host.Interface.QueueAutomationEvent(input);
+							}
 							return true;
 						};
 						const auto motion = [&](float x, float y) {
