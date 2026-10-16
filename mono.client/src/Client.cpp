@@ -308,6 +308,7 @@ namespace client {
 	}
 
 	bool Client::Initialise(const Options &options) {
+		ENGINE_PROFILE("client.initialise");
 		Settings = options;
 		Input.EnablePresentationInput();
 		SubmittedMoveTick = 0;
@@ -318,24 +319,27 @@ namespace client {
 			return false;
 		}
 		size_t fontPackageBytes = 0;
-		for (const auto &[file, face] : std::array{
-				 std::pair{"Inter.ttf", engine::gui::FontFace::Regular},
-				 std::pair{"Roboto.ttf", engine::gui::FontFace::Bold},
-				 std::pair{"NotoSans.ttf", engine::gui::FontFace::Italic},
-				 std::pair{"JetBrainsMono.ttf", engine::gui::FontFace::Code},
-			 }) {
-			std::ifstream input(engine::core::Paths::Fonts() / file, std::ios::binary | std::ios::ate);
-			if (!input) continue;
-			const std::streamsize size = input.tellg();
-			if (size <= 0 || static_cast<uint64_t>(size) > engine::gui::MAXIMUM_FONT_PACKAGE_BYTES ||
-				static_cast<uint64_t>(size) >
-					engine::gui::MAXIMUM_FONT_PACKAGE_TOTAL_BYTES - fontPackageBytes)
-				continue;
-			std::vector<std::byte> bytes(static_cast<size_t>(size));
-			input.seekg(0);
-			if (!input.read(reinterpret_cast<char *>(bytes.data()), size)) continue;
-			if (InterfaceFonts.Add(engine::core::Name(std::string("fonts/") + file), face, bytes))
-				fontPackageBytes += bytes.size();
+		{
+			ENGINE_PROFILE_CAT("client.font package", engine::core::ProfileCategory::Assets);
+			for (const auto &[file, face] : std::array{
+					 std::pair{"Inter.ttf", engine::gui::FontFace::Regular},
+					 std::pair{"Roboto.ttf", engine::gui::FontFace::Bold},
+					 std::pair{"NotoSans.ttf", engine::gui::FontFace::Italic},
+					 std::pair{"JetBrainsMono.ttf", engine::gui::FontFace::Code},
+				 }) {
+				std::ifstream input(engine::core::Paths::Fonts() / file, std::ios::binary | std::ios::ate);
+				if (!input) continue;
+				const std::streamsize size = input.tellg();
+				if (size <= 0 || static_cast<uint64_t>(size) > engine::gui::MAXIMUM_FONT_PACKAGE_BYTES ||
+					static_cast<uint64_t>(size) >
+						engine::gui::MAXIMUM_FONT_PACKAGE_TOTAL_BYTES - fontPackageBytes)
+					continue;
+				std::vector<std::byte> bytes(static_cast<size_t>(size));
+				input.seekg(0);
+				if (!input.read(reinterpret_cast<char *>(bytes.data()), size)) continue;
+				if (InterfaceFonts.Add(engine::core::Name(std::string("fonts/") + file), face, bytes))
+					fontPackageBytes += bytes.size();
+			}
 		}
 		if (InterfaceFonts.Faces().empty()) {
 			ENGINE_WARN("no GUI font package; text shaping uses the fallback path");
@@ -464,6 +468,7 @@ namespace client {
 		// one that draws a world with no interface over it, and the log says
 		// which happened.
 		{
+			ENGINE_PROFILE_CAT("client.interface", engine::core::ProfileCategory::Render);
 			const engine::render::BackendHandles backend = Renderer.Backend();
 			if (!Interface.Initialise(backend.Device, backend.ColourFormat)) {
 				ENGINE_WARN("no interface pass; a ScreenGui will not be drawn");
@@ -1144,6 +1149,7 @@ namespace client {
 	}
 
 	bool Client::BuildDemoWorlds() {
+		ENGINE_PROFILE("client.demo worlds");
 		if (Settings.DataFactory) {
 			RenderingProfiles.Set(
 				engine::core::Name("Default PBR"), engine::graph::DefaultPbrDataCaptureDocument()

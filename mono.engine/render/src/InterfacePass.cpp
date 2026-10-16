@@ -3,6 +3,7 @@
 #include "ShaderBinary.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/ShaderLibrary.hpp>
@@ -148,6 +149,7 @@ namespace engine::render {
 	}
 
 	bool InterfacePass::Initialise(void *device, uint32_t swapchainFormat, float pixelSize) {
+		ENGINE_PROFILE_CAT("renderer.interface initialise", core::ProfileCategory::Render);
 		Shutdown();
 		Device = device;
 		SwapchainFormat = swapchainFormat;
