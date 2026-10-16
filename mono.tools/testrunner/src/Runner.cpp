@@ -239,8 +239,16 @@ namespace testrunner {
 		} else {
 			// Tracy's startup calibration makes serial discovery expensive. Overlap
 			// binary discovery without changing profiling or suite isolation.
-			std::vector<std::jthread> workers;
+			std::vector<std::thread> workers;
 			workers.reserve(width);
+			struct JoinOnExit {
+				std::vector<std::thread> &Workers;
+				~JoinOnExit() {
+					for (auto &worker : Workers) {
+						if (worker.joinable()) worker.join();
+					}
+				}
+			} join{workers};
 			for (size_t slot = 0; slot < width; slot++)
 				workers.emplace_back(read);
 		}
