@@ -2,6 +2,7 @@
 #include "GpuHeap.hpp"
 #include "GpuQueueBatch.hpp"
 #include "ShaderBinary.hpp"
+#include "VulkanTimestamps.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -270,6 +271,11 @@ namespace engine::render {
 			bool PendingSubmission = false;
 			bool SubmissionFailed = false;
 			bool FailurePublished = false;
+			bool Batched = false;
+			uint32_t TimingSlot = VulkanTimestamps::NO_SLOT;
+			uint32_t TimingFrom = VulkanTimestamps::MARKS;
+			uint32_t TimingTo = VulkanTimestamps::MARKS;
+			bool TimingResolved = false;
 			std::shared_ptr<const GpuRetirementProof> Retirement;
 			bool BatchMetricsPending = false;
 			uint64_t InstanceCopyBytes = 0;
@@ -287,6 +293,26 @@ namespace engine::render {
 					if (buffer) gpu::ReleaseBuffer(Device, buffer);
 				if (Source) gpu::ReleaseTransferBuffer(Device, Source);
 				if (Target) gpu::ReleaseTransferBuffer(Device, Target);
+			}
+		};
+		struct Profiling {
+			VulkanTimestamps Queries;
+			std::array<ComputeGraphTiming, MAXIMUM_JOBS> Records{};
+			ComputeGraphStatistics Statistics{.Enabled = true};
+			const AtomicGpuQueuesV1 *Api = nullptr;
+			bool UncertainSubmission = false;
+			ComputeGraphTiming *Find(uint64_t ticket) {
+				for (auto &record : Records)
+					if (record.Ticket == ticket) return &record;
+				return nullptr;
+			}
+			void Erase(uint64_t ticket) {
+				if (auto *record = Find(ticket)) *record = {};
+			}
+			static void SDLCALL FinishCleanup(void *userdata, bool resourcesRetired) noexcept {
+				auto *profiling = static_cast<Profiling *>(userdata);
+				profiling->Queries.Shutdown(resourcesRetired);
+				delete profiling;
 			}
 		};
 		struct QueuePacket {
@@ -402,6 +428,7 @@ namespace engine::render {
 		computegraph::Queue Queue;
 		std::shared_ptr<computegraph_detail::Package> Installed{};
 		std::vector<std::shared_ptr<computegraph_detail::Job>> Jobs{};
+		std::unique_ptr<computegraph_detail::Profiling> Profiling{};
 		std::string Error{};
 		uint64_t OutsideBytes = 0;
 		uint64_t DeviceBytes = 0;
@@ -573,6 +600,19 @@ namespace engine::render {
 			SDL_AcquireGPUCommandBuffer(Device), cancel
 		);
 		if (!command) return Backend(diagnostic);
+		struct TimingRecording {
+			computegraph_detail::Profiling *Profile;
+			computegraph_detail::Job &Work;
+			bool HandedOff = false;
+			~TimingRecording() {
+				if (Profile && !HandedOff) Profile->Queries.Abandon(Work.TimingSlot);
+			}
+		} timing{Profiling.get(), job};
+		if (Profiling && !Profiling->UncertainSubmission) {
+			job.TimingSlot = Profiling->Queries.Begin(command.get());
+			if (job.TimingSlot != VulkanTimestamps::NO_SLOT)
+				job.TimingFrom = Profiling->Queries.Mark(command.get());
+		}
 		const auto &plan = submission.Plan;
 		const bool importsInstances = std::any_of(
 			plan.Definition.Buffers.begin(), plan.Definition.Buffers.end(), [](const auto &buffer) {
@@ -596,6 +636,7 @@ namespace engine::render {
 				SDL_CopyGPUBufferToBuffer(
 					copy, &source, &target, static_cast<uint32_t>(plan.Allocations[index].Bytes), false
 				);
+				if (Profiling) job.InstanceCopyBytes += plan.Allocations[index].Bytes;
 				core::Metrics::Count("render.compute.instance_copy_bytes", plan.Allocations[index].Bytes);
 			}
 			SDL_EndGPUCopyPass(copy);
@@ -635,6 +676,10 @@ namespace engine::render {
 			if (pipeline.Uniform)
 				SDL_PushGPUComputeUniformData(command.get(), 0, &parameters, sizeof(parameters));
 			SDL_DispatchGPUCompute(pass, work.Work.Groups[0], work.Work.Groups[1], work.Work.Groups[2]);
+			if (Profiling) {
+				++job.Dispatches;
+				job.Workgroups += uint64_t(work.Work.Groups[0]) * work.Work.Groups[1] * work.Work.Groups[2];
+			}
 			SDL_EndGPUComputePass(pass);
 			core::Metrics::Count("render.compute.dispatches", 1);
 			core::Metrics::Count("render.compute.workgroups", work.Work.Groups[0]);
@@ -652,8 +697,17 @@ namespace engine::render {
 			core::Metrics::Count("render.compute.readback_bytes", job.DownloadBytes);
 		}
 		core::Metrics::Count("render.compute.submit_calls", 1);
+		if (Profiling && job.TimingSlot != VulkanTimestamps::NO_SLOT) {
+			job.TimingTo = Profiling->Queries.Mark(command.get());
+			Profiling->Queries.Submitted(job.TimingSlot);
+		}
+		timing.HandedOff = true;
 		job.Fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command.release());
-		if (!job.Fence) return Backend(diagnostic);
+		if (!job.Fence) {
+			if (Profiling && job.TimingSlot != VulkanTimestamps::NO_SLOT)
+				Profiling->UncertainSubmission = true;
+			return Backend(diagnostic);
+		}
 		return computegraph::Status::Ok;
 	}
 
@@ -919,6 +973,14 @@ namespace engine::render {
 			auto status = Held->Queue.Submit(Held->Installed->Plan, request, ticket, diagnostic);
 			if (status != computegraph::Status::Ok)
 				return Held->Refuse(diagnostic, status, diagnostic.Subject);
+			if (Held->Profiling) {
+				auto *record = Held->Profiling->Find(0);
+				if (!record) {
+					Held->Queue.Cancel(ticket);
+					return Held->Refuse(diagnostic, computegraph::Status::LimitExceeded);
+				}
+				record->Ticket = ticket;
+			}
 			auto job = std::make_shared<computegraph_detail::Job>();
 			const auto *submission = Held->Submission(ticket);
 			status = Held->Prepare(*job, *submission, diagnostic);
@@ -930,7 +992,20 @@ namespace engine::render {
 			}
 			if (status != computegraph::Status::Ok) {
 				Held->Queue.Cancel(ticket);
+				if (Held->Profiling) Held->Profiling->Erase(ticket);
 				return status;
+			}
+			if (Held->Profiling) {
+				job->Batched = job->PendingSubmission;
+				auto &profile = *Held->Profiling;
+				auto &record = *profile.Find(ticket);
+				record.Dispatches = job->Dispatches;
+				record.Workgroups = job->Workgroups;
+				record.UploadBytes = job->UploadBytes;
+				record.InstanceCopyBytes = job->InstanceCopyBytes;
+				record.ReadbackBytes = job->DownloadBytes;
+				++profile.Statistics.AcceptedJobs;
+				if (job->Batched) ++profile.Statistics.BatchedJobs;
 			}
 			Held->DeviceBytes += job->DeviceBytes;
 			Held->Jobs.push_back(std::move(job));
@@ -940,6 +1015,7 @@ namespace engine::render {
 			return computegraph::Status::Ok;
 		} catch (const std::bad_alloc &) {
 			if (ticket) Held->Queue.Cancel(ticket);
+			if (ticket && Held->Profiling) Held->Profiling->Erase(ticket);
 			diagnostic.Subject.clear();
 			diagnostic.Code = computegraph::Status::AllocationFailed;
 			return diagnostic.Code;
@@ -1007,13 +1083,38 @@ namespace engine::render {
 					continue;
 				}
 				if (!SDL_WaitForGPUFences(Held->Device, true, &job.Fence, 1)) {
-					job.Canceled = true;
-					Held->Queue.Cancel(job.Ticket);
+					// Query success alone does not retire SDL's command references. Keep
+					// the fence, resources and timestamp slot until that proof succeeds.
+					job.SubmissionFailed = true;
 					Held->Error = SDL_GetError();
+					++index;
+					continue;
 				}
 				SDL_ReleaseGPUFence(Held->Device, job.Fence);
 				job.Fence = nullptr;
 				job.Finished = true;
+			}
+			if (Held->Profiling && !job.TimingResolved) {
+				auto &profile = *Held->Profiling;
+				if (!job.Batched) {
+					std::array<double, VulkanTimestamps::MARKS> times{};
+					uint32_t count = 0;
+					const bool available = job.TimingSlot != VulkanTimestamps::NO_SLOT &&
+										   profile.Queries.Collect(job.TimingSlot, times.data(), count) &&
+										   job.TimingFrom < job.TimingTo && job.TimingTo < count;
+					if (available) {
+						++profile.Statistics.TimedJobs;
+						if (auto *record = profile.Find(job.Ticket)) {
+							record->Available = true;
+							record->CommandNanoseconds =
+								VulkanTimestamps::Between(times.data(), job.TimingFrom, job.TimingTo);
+						}
+					} else {
+						++profile.Statistics.DroppedTimings;
+						profile.Queries.Abandon(job.TimingSlot);
+					}
+				}
+				job.TimingResolved = true;
 			}
 			try {
 				if (!job.Canceled && !job.FailurePublished && !Held->Publish(job)) {
@@ -1025,19 +1126,68 @@ namespace engine::render {
 				continue;
 			}
 			Held->DeviceBytes -= job.DeviceBytes;
+			if (Held->Profiling) {
+				++Held->Profiling->Statistics.RetiredJobs;
+				if (job.Canceled) ++Held->Profiling->Statistics.CanceledRetirements;
+			}
 			Held->Jobs.erase(Held->Jobs.begin() + static_cast<std::ptrdiff_t>(index));
 			core::Metrics::Count("render.compute.retired", 1);
 		}
 	}
 
-	computegraph::Status
-	ComputeGraph::Take(uint64_t ticket, computegraph::Completion &out, computegraph::Diagnostic &diagnostic) {
+	computegraph::Status ComputeGraph::Take(
+		uint64_t ticket,
+		computegraph::Completion &out,
+		computegraph::Diagnostic &diagnostic,
+		ComputeGraphTiming *timing
+	) {
 		Held->RequireThread();
-		return Held->Queue.Take(ticket, out, diagnostic);
+		const auto status = Held->Queue.Take(ticket, out, diagnostic);
+		if (status == computegraph::Status::Ok) {
+			if (timing) {
+				*timing = {.Ticket = ticket};
+				if (Held->Profiling)
+					if (const auto *record = Held->Profiling->Find(ticket)) *timing = *record;
+			}
+			if (Held->Profiling) Held->Profiling->Erase(ticket);
+		}
+		return status;
+	}
+	bool ComputeGraph::EnableGpuTimings(bool enabled) {
+		Held->RequireThread();
+		if (Held->Profiling && Held->Profiling->UncertainSubmission) return false;
+		if (!Held->Device || !Held->Jobs.empty() || !Held->Queue.Submissions().empty() ||
+			computegraph_detail::ActiveBatch(Held->Device))
+			return false;
+		if (bool(Held->Profiling) == enabled) return true;
+		if (!enabled) {
+			Held->Profiling.reset();
+			return true;
+		}
+		const auto *api = static_cast<const AtomicGpuQueuesV1 *>(SDL_GetPointerProperty(
+			SDL_GetGPUDeviceProperties(Held->Device), ATOMIC_GPU_QUEUES_DEVICE_PROPERTY, nullptr
+		));
+		if (!api || api->AbiVersion != ATOMIC_GPU_QUEUES_ABI_VERSION || api->StructSize < sizeof(*api) ||
+			!api->DeferDeviceCleanup)
+			return false;
+		try {
+			auto profile = std::make_unique<computegraph_detail::Profiling>();
+			profile->Api = api;
+			if (!profile->Queries.Probe(Held->Device, ATOMIC_GPU_QUEUE_GRAPHICS)) return false;
+			Held->Profiling = std::move(profile);
+			return true;
+		} catch (const std::bad_alloc &) {
+			return false;
+		}
+	}
+	ComputeGraphStatistics ComputeGraph::Statistics() const {
+		Held->RequireThread();
+		return Held->Profiling ? Held->Profiling->Statistics : ComputeGraphStatistics{};
 	}
 	bool ComputeGraph::Cancel(uint64_t ticket) {
 		Held->RequireThread();
 		const bool canceled = Held->Queue.Cancel(ticket);
+		if (canceled && Held->Profiling) Held->Profiling->Erase(ticket);
 		for (auto &job : Held->Jobs)
 			if (job->Ticket == ticket) job->Canceled = true;
 		return canceled;
@@ -1047,6 +1197,7 @@ namespace engine::render {
 		for (auto &job : Held->Jobs)
 			job->Canceled = true;
 		Held->Queue.Reset(std::move(owner));
+		if (Held->Profiling) Held->Profiling->Records = {};
 	}
 	bool ComputeGraph::SetOutsideDeviceBytes(uint64_t bytes) {
 		Held->RequireThread();
@@ -1091,19 +1242,50 @@ namespace engine::render {
 				  ))
 				: nullptr;
 		if (batch) (void)batch->RetireFailed();
-		for (auto &job : Held->Jobs) {
+		bool timingsRetired = !Held->Profiling || !Held->Profiling->UncertainSubmission;
+		std::array<bool, computegraph_detail::MAXIMUM_JOBS> failedWaits{};
+		for (size_t index = 0; index < Held->Jobs.size(); ++index) {
+			auto &job = Held->Jobs[index];
 			if (job->SubmissionFailed && !job->Fence && job->Retirement && !job->Retirement->Complete &&
 				batch)
 				batch->RetainUntilDeviceDestruction(job, job->DeviceBytes);
 			if (job->Fence) {
 				ENGINE_PROFILE_CAT("compute graph retirement wait", core::ProfileCategory::Idle);
-				(void)SDL_WaitForGPUFences(Held->Device, true, &job->Fence, 1);
+				if (!SDL_WaitForGPUFences(Held->Device, true, &job->Fence, 1)) {
+					timingsRetired = false;
+					failedWaits[index] = true;
+				}
 			}
 			Held->Queue.Cancel(job->Ticket);
+		}
+		if (!timingsRetired) {
+			ENGINE_PROFILE_CAT("compute graph failed retirement drain", core::ProfileCategory::Idle);
+			timingsRetired = SDL_WaitForGPUIdle(Held->Device);
+			if (!timingsRetired && batch)
+				for (size_t index = 0; index < Held->Jobs.size(); ++index)
+					if (failedWaits[index])
+						batch->RetainUntilDeviceDestruction(
+							Held->Jobs[index], Held->Jobs[index]->DeviceBytes
+						);
 		}
 		Held->Jobs.clear();
 		Held->Queue.Reset({});
 		Held->Installed.reset();
+		if (Held->Profiling) {
+			// Shutdown may block, but normal Poll never does. An unconfirmed device
+			// drain leaves query pools owned by SDL's bounded destruction callback.
+			if (timingsRetired) {
+				Held->Profiling.reset();
+			} else {
+				auto *profile = Held->Profiling.release();
+				if (!profile->Api->DeferDeviceCleanup(
+						Held->Device, computegraph_detail::Profiling::FinishCleanup, profile
+					)) {
+					ENGINE_ERROR("could not register compute timestamp cleanup: {}", SDL_GetError());
+					computegraph_detail::Profiling::FinishCleanup(profile, false);
+				}
+			}
+		}
 		Held->DeviceBytes = 0;
 		Held->Instances = nullptr;
 		Held->Device = nullptr;

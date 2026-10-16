@@ -1,3 +1,4 @@
+#include "GpuQueueBatch.hpp"
 #include "RenderFixture.hpp"
 
 #include <engine/computegraph/Reference.hpp>
@@ -78,13 +79,14 @@ namespace {
 		if (!values.empty()) std::memcpy(upload.Bytes.data(), values.data(), values.size_bytes());
 		return {.Identity = Owner(), .Inputs = {std::move(upload)}, .Outputs = {{"doubled", maximumResult}}};
 	}
-	cg::Completion Finish(ComputeGraph &graph, uint64_t ticket) {
+	cg::Completion
+	Finish(ComputeGraph &graph, uint64_t ticket, engine::render::ComputeGraphTiming *timing = nullptr) {
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
 		cg::Diagnostic diagnostic;
 		cg::Completion completion;
 		while (std::chrono::steady_clock::now() < deadline) {
 			graph.Poll();
-			const auto status = graph.Take(ticket, completion, diagnostic);
+			const auto status = graph.Take(ticket, completion, diagnostic, timing);
 			if (status == cg::Status::Ok) return completion;
 			INFO(graph.LastError());
 			REQUIRE(status == cg::Status::NotReady);
@@ -111,6 +113,120 @@ namespace {
 		}
 		REQUIRE(graph.PendingGpuCount() == 0);
 	}
+}
+
+TEST_CASE(
+	"standalone compute timing keeps bounded slots with exact ticket and fence retirement",
+	"[render][computegraph][gpu][timing]"
+) {
+	engine::render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ComputeGraph graph(fixture.Render.Backend().Device, Owner());
+	cg::Diagnostic diagnostic;
+	REQUIRE(graph.Install(CompactProgram(65), diagnostic) == cg::Status::Ok);
+	const std::array<uint32_t, 5> input{0, 2, 3, 0, 5};
+	const std::vector<uint32_t> expected{4, 6, 10};
+	const auto request = Request(input, 65);
+	uint64_t ticket = 0;
+	REQUIRE_FALSE(graph.Statistics().Enabled);
+	REQUIRE(graph.Submit(request, ticket, diagnostic) == cg::Status::Ok);
+	engine::render::ComputeGraphTiming timing;
+	CHECK(Values(Finish(graph, ticket, &timing)) == expected);
+	CHECK(timing.Ticket == ticket);
+	CHECK_FALSE(timing.Available);
+	CHECK(graph.Statistics().AcceptedJobs == 0);
+	if (!graph.EnableGpuTimings(true))
+		SKIP(
+			"requires Vulkan graphics timestamps and private cleanup capability; use MONO_GPU_QUEUES=serial"
+		);
+
+	REQUIRE(graph.Submit(request, ticket, diagnostic) == cg::Status::Ok);
+	timing.Ticket = 999;
+	cg::Completion completion;
+	CHECK(graph.Take(ticket, completion, diagnostic, &timing) == cg::Status::NotReady);
+	CHECK(timing.Ticket == 999);
+	CHECK_FALSE(graph.EnableGpuTimings(false));
+	Drain(graph);
+	// A ready result still owns its timing row until Take or cancellation.
+	CHECK_FALSE(graph.EnableGpuTimings(false));
+	REQUIRE(graph.Take(ticket, completion, diagnostic, &timing) == cg::Status::Ok);
+	CHECK(Values(completion) == expected);
+	CHECK(timing.Ticket == ticket);
+	CHECK(timing.Available);
+	CHECK(timing.CommandNanoseconds > 0);
+	CHECK(timing.Dispatches == 6);
+	CHECK(timing.Workgroups == 11);
+	// Five input words, one count word and nine error words; readback reserves 65 output words.
+	CHECK(timing.UploadBytes == 60);
+	CHECK(timing.ReadbackBytes == 300);
+	CHECK(timing.InstanceCopyBytes == 0);
+	CHECK(graph.Statistics().AcceptedJobs == 1);
+	CHECK(graph.Statistics().RetiredJobs == 1);
+	CHECK(graph.Statistics().TimedJobs == 1);
+	CHECK(graph.Statistics().DroppedTimings == 0);
+	CHECK(graph.Statistics().BatchedJobs == 0);
+	REQUIRE(graph.EnableGpuTimings(false));
+	REQUIRE(graph.EnableGpuTimings(true));
+
+	std::array<uint64_t, 8> tickets{};
+	for (auto &accepted : tickets)
+		REQUIRE(graph.Submit(request, accepted, diagnostic) == cg::Status::Ok);
+	REQUIRE(graph.Cancel(tickets.front()));
+	CHECK(graph.PendingGpuCount() == tickets.size());
+	uint64_t refused = 0;
+	CHECK(graph.Submit(request, refused, diagnostic) == cg::Status::LimitExceeded);
+	CHECK(refused == 0);
+	Drain(graph);
+	for (size_t index = 1; index < tickets.size(); ++index) {
+		CAPTURE(index);
+		REQUIRE(graph.Take(tickets[index], completion, diagnostic, &timing) == cg::Status::Ok);
+		CHECK(Values(completion) == expected);
+		CHECK(timing.Ticket == tickets[index]);
+		CHECK(timing.Available == (index < 4));
+		CHECK(timing.Dispatches == 6);
+	}
+	const auto counts = graph.Statistics();
+	CHECK(counts.AcceptedJobs == 8);
+	CHECK(counts.RetiredJobs == 8);
+	CHECK(counts.TimedJobs == 4);
+	CHECK(counts.DroppedTimings == 4);
+	CHECK(counts.CanceledRetirements == 1);
+	CHECK(graph.ReservedDeviceBytes() == 0);
+
+	// The same opted-in executor enters C04 without issuing its own reset or
+	// timestamp commands on the controller's transfer/compute command buffers.
+	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
+	auto *batch = static_cast<engine::render::GpuQueueBatch *>(SDL_GetPointerProperty(
+		SDL_GetGPUDeviceProperties(device), engine::render::GpuQueueBatch::DEVICE_PROPERTY, nullptr
+	));
+	REQUIRE(batch != nullptr);
+	SDL_GPUCommandBuffer *main = nullptr;
+	REQUIRE(batch->Begin(&main));
+	CHECK_FALSE(graph.EnableGpuTimings(false));
+	main = batch->Api()->Acquire(device, ATOMIC_GPU_QUEUE_GRAPHICS);
+	REQUIRE(main != nullptr);
+	batch->BindView(&main);
+	REQUIRE(graph.Submit(request, ticket, diagnostic) == cg::Status::Ok);
+	REQUIRE(batch->SubmitEarlier(main));
+	const bool submitted = SDL_SubmitGPUCommandBuffer(main);
+	CHECK(submitted);
+	CHECK(batch->Complete(submitted));
+	batch->EndScope();
+	CHECK(Values(Finish(graph, ticket, &timing)) == expected);
+	CHECK(timing.Ticket == ticket);
+	CHECK_FALSE(timing.Available);
+	CHECK(timing.CommandNanoseconds == 0);
+	CHECK(graph.Statistics().BatchedJobs == 1);
+	CHECK(graph.Statistics().TimedJobs == 4);
+	CHECK(graph.Statistics().DroppedTimings == 4);
+	REQUIRE(graph.Submit(request, ticket, diagnostic) == cg::Status::Ok);
+	CHECK(Values(Finish(graph, ticket, &timing)) == expected);
+	CHECK(timing.Available);
+	REQUIRE(graph.EnableGpuTimings(false));
+	CHECK_FALSE(graph.Statistics().Enabled);
+	REQUIRE(graph.Submit(request, ticket, diagnostic) == cg::Status::Ok);
+	CHECK(Values(Finish(graph, ticket, &timing)) == expected);
+	CHECK_FALSE(timing.Available);
 }
 
 TEST_CASE(

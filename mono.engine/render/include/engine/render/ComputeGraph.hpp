@@ -16,6 +16,32 @@ namespace engine::render {
 	using ComputeKernelCode = computegraph::KernelCode;
 	// Neutral typed document plus independent executable sources.
 	using ComputeGraphProgram = computegraph::Program;
+	// Optional native observation for one exact ticket. Device duration covers its
+	// whole standalone command, including upload, compute and download.
+	// Counts are captured only while profiling is enabled. Four query slots are
+	// retained through fence retirement; saturation leaves Available false.
+	struct ComputeGraphTiming {
+		uint64_t Ticket = 0;
+		bool Available = false;
+		double CommandNanoseconds = 0;
+		uint32_t Dispatches = 0;
+		uint64_t Workgroups = 0;
+		uint64_t UploadBytes = 0;
+		uint64_t InstanceCopyBytes = 0;
+		uint64_t ReadbackBytes = 0;
+	};
+	// Opt-in owner-thread counts. Canceled jobs count as retired only after their
+	// fence or explicit retirement proof, independently of result consumption.
+	// TimedJobs includes canceled measurements. DroppedTimings excludes C04 jobs.
+	struct ComputeGraphStatistics {
+		bool Enabled = false;
+		uint64_t AcceptedJobs = 0;
+		uint64_t RetiredJobs = 0;
+		uint64_t TimedJobs = 0;
+		uint64_t DroppedTimings = 0;
+		uint64_t BatchedJobs = 0;
+		uint64_t CanceledRetirements = 0;
+	};
 	// Fixed host ABI v1: set 2/binding 0 is an optional std140 block containing
 	// uvec4 Dispatch followed by uvec4 Buffers[32]. Dispatch.x is the current
 	// invocation bound. Readonly descriptor slot N uses row N, writable slot N
@@ -41,9 +67,22 @@ namespace engine::render {
 		);
 		// Queries completed fences and publishes validated copied results without waiting.
 		void Poll();
-		// Moves a completed result out, releasing its retained CPU byte reservation.
-		computegraph::Status
-		Take(uint64_t ticket, computegraph::Completion &out, computegraph::Diagnostic &diagnostic);
+		// Moves a completed result out and optionally copies its exact ticket timing.
+		// Both retained result and timing records are consumed, even when timing is omitted.
+		computegraph::Status Take(
+			uint64_t ticket,
+			computegraph::Completion &out,
+			computegraph::Diagnostic &diagnostic,
+			ComputeGraphTiming *timing = nullptr
+		);
+		// Disabled by default, with no query pools. Refuses changes while jobs/results
+		// remain, a C04 recording batch is active, or submission is uncertain until
+		// explicit shutdown proves device idle. Requires the private Vulkan cleanup
+		// capability; ordinary opt-out and unsupported devices return false.
+		// C04 jobs always use their controller's per-queue timing instead.
+		bool EnableGpuTimings(bool enabled);
+		// Snapshot since the most recent enable. No counters are drained by reading it.
+		ComputeGraphStatistics Statistics() const;
 		// Invalidates publication while retaining device resources until their fence completes.
 		bool Cancel(uint64_t ticket);
 		// Cancels every ticket from the previous host generation without blocking.
