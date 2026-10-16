@@ -3,7 +3,23 @@
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/script/ProceduralScene.hpp>
 
+namespace engine::scene {
+	struct Collider;
+}
+
 namespace engine::script::procedural_scene_detail {
+	// Document import stages fresh content and derived contact masks before
+	// applying the same live target predicate.
+	bool CaptureTarget(
+		const ecs::Store &,
+		procedural::RegionScope,
+		ecs::Entity mesh,
+		ecs::Entity part,
+		core::Name expectedBinding,
+		const scene::Collider &candidateCollider,
+		ProceduralSceneTarget &,
+		procedural::Diagnostic &
+	);
 	struct StagedRegion {
 		scene::EditableMeshUpdate Mesh{};
 		ProceduralSceneRegion Region{};

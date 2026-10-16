@@ -314,11 +314,13 @@ namespace engine::script {
 			0
 		);
 	}
-	bool CaptureProceduralSceneTarget(
+	bool procedural_scene_detail::CaptureTarget(
 		const ecs::Store &store,
 		procedural::RegionScope scope,
 		ecs::Entity mesh,
 		ecs::Entity part,
+		core::Name expectedBinding,
+		const scene::Collider &candidateCollider,
 		ProceduralSceneTarget &out,
 		procedural::Diagnostic &diagnostic
 	) {
@@ -334,9 +336,10 @@ namespace engine::script {
 		const auto content = scene::EditableMeshContentName(store, mesh);
 		if (mesh == part || !held || !frame || !previous || !bounds || !visual || !collider ||
 			!content.IsValid() || !store.IsA(part, ecs::Classes::Find(core::Name("MeshPart"))) ||
-			visual->Mesh != content || store.Has<scene::Simulated>(part) ||
-			(!collider->Trigger && collider->Mask != spatial::LayerMask::None()) || collider->CanQuery ||
-			visual->Tint != core::Color3{1, 1, 1} || visual->Transparency != 0.0f || !visual->Visible)
+			visual->Mesh != expectedBinding || store.Has<scene::Simulated>(part) ||
+			(!candidateCollider.Trigger && candidateCollider.Mask != spatial::LayerMask::None()) ||
+			candidateCollider.CanQuery || visual->Tint != core::Color3{1, 1, 1} ||
+			visual->Transparency != 0.0f || !visual->Visible)
 			return Refuse(diagnostic, procedural::Status::InvalidInput, "scene.binding");
 		const ProceduralSceneTarget candidate{
 			scope,
@@ -345,7 +348,7 @@ namespace engine::script {
 			store.Identity(),
 			held->Revision,
 			visual->Fitted,
-			collider->Mask,
+			candidateCollider.Mask,
 			content,
 			frame->Frame,
 			previous->Frame,
@@ -354,6 +357,23 @@ namespace engine::script {
 		out = candidate;
 		diagnostic = {};
 		return true;
+	}
+	bool CaptureProceduralSceneTarget(
+		const ecs::Store &store,
+		procedural::RegionScope scope,
+		ecs::Entity mesh,
+		ecs::Entity part,
+		ProceduralSceneTarget &out,
+		procedural::Diagnostic &diagnostic
+	) {
+		if (!store.IsOnOwningThread() || store.AdoptOnly())
+			return procedural_detail::Refuse(diagnostic, procedural::Status::InvalidInput, "scene.owner");
+		const auto *collider = store.Get<scene::Collider>(part);
+		if (!collider)
+			return procedural_detail::Refuse(diagnostic, procedural::Status::InvalidInput, "scene.binding");
+		return procedural_scene_detail::CaptureTarget(
+			store, scope, mesh, part, scene::EditableMeshContentName(store, mesh), *collider, out, diagnostic
+		);
 	}
 	namespace procedural_scene_detail {
 		bool ProvisionTarget(
