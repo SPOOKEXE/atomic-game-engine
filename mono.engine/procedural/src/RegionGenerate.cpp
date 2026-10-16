@@ -29,6 +29,25 @@ namespace engine::procedural {
 			return true;
 		}
 
+		bool PollControl(
+			GenerationControl *control,
+			const RegionResult &result,
+			uint32_t completedCandidates,
+			Diagnostic &diagnostic
+		) {
+			if (control == nullptr) return true;
+			control->CandidateCells.store(completedCandidates, std::memory_order_release);
+			control->WorkUnits.store(result.Facts.WorkUnits, std::memory_order_release);
+			control->SpatialTests.store(result.Facts.SpatialTests, std::memory_order_release);
+			control->Placements.store(
+				static_cast<uint32_t>(result.Placements.size()), std::memory_order_release
+			);
+			control->Roads.store(static_cast<uint32_t>(result.Roads.size()), std::memory_order_release);
+			if (!control->StopRequested.load(std::memory_order_acquire)) return true;
+			detail::Refuse(diagnostic, Status::Canceled, "region.cancel");
+			return false;
+		}
+
 		int64_t Square(int64_t value) {
 			return value * value;
 		}
@@ -122,6 +141,8 @@ namespace engine::procedural {
 			Bounds owner,
 			RegionResult &result,
 			std::vector<RoadSpline> &localRoads,
+			GenerationControl *control,
+			uint32_t completedCandidates,
 			Diagnostic &diagnostic
 		) {
 			const int64_t competitorMargin =
@@ -135,7 +156,10 @@ namespace engine::procedural {
 			};
 			const int64_t maximumReach =
 				static_cast<int64_t>(settings.MaximumRoadReachCells) * SUBCELLS_PER_CELL;
+			size_t examined = 0;
 			for (const SpatialLeaf *entrance : queries.EntranceLeaves) {
+				if ((examined++ & 15) == 0 && !PollControl(control, result, completedCandidates, diagnostic))
+					return Status::Canceled;
 				if (!detail::Contains(influenced, entrance->Anchor)) continue;
 				if (!Spend(result.Facts.WorkUnits, request.Limits.MaximumWorkUnits))
 					return detail::Refuse(diagnostic, Status::LimitExceeded, "region.work");
@@ -184,8 +208,11 @@ namespace engine::procedural {
 			Bounds owner,
 			const std::vector<RoadSpline> &roads,
 			RegionResult &result,
+			GenerationControl *control,
+			uint32_t &completedCandidates,
 			Diagnostic &diagnostic
 		) {
+			if (!PollControl(control, result, completedCandidates, diagnostic)) return Status::Canceled;
 			const uint16_t minimumCells =
 				houses ? settings.HouseMinimumDistanceCells : settings.TreeMinimumDistanceCells;
 			const int64_t margin = minimumCells + 2;
@@ -212,6 +239,10 @@ namespace engine::procedural {
 				for (int64_t column = 0; column < width; ++column) {
 					if (!Spend(result.Facts.WorkUnits, request.Limits.MaximumWorkUnits))
 						return detail::Refuse(diagnostic, Status::LimitExceeded, "region.work");
+					++completedCandidates;
+					if ((completedCandidates & 63) == 0 &&
+						!PollControl(control, result, completedCandidates, diagnostic))
+						return Status::Canceled;
 					const int64_t cellX = left + column;
 					const int64_t cellY = top + row;
 					Candidate &candidate = candidates[static_cast<size_t>(row * width + column)];
@@ -237,6 +268,9 @@ namespace engine::procedural {
 					for (const SpatialLeaf *village : queries.VillageLeaves) {
 						if (!Spend(result.Facts.SpatialTests, request.Limits.MaximumSpatialTests))
 							return detail::Refuse(diagnostic, Status::LimitExceeded, "region.spatial_tests");
+						if ((result.Facts.SpatialTests & 63) == 0 &&
+							!PollControl(control, result, completedCandidates, diagnostic))
+							return Status::Canceled;
 						const int64_t distance = DistanceSquared(candidate.Position, village->Anchor);
 						if (distance < nearestDistance ||
 							(distance == nearestDistance && nearestVillage != nullptr &&
@@ -255,6 +289,9 @@ namespace engine::procedural {
 					for (const SpatialLeaf *entrance : queries.EntranceLeaves) {
 						if (!Spend(result.Facts.SpatialTests, request.Limits.MaximumSpatialTests))
 							return detail::Refuse(diagnostic, Status::LimitExceeded, "region.spatial_tests");
+						if ((result.Facts.SpatialTests & 63) == 0 &&
+							!PollControl(control, result, completedCandidates, diagnostic))
+							return Status::Canceled;
 						if (DistanceSquared(candidate.Position, entrance->Anchor) < Square(entranceRadius)) {
 							clear = false;
 							break;
@@ -264,6 +301,9 @@ namespace engine::procedural {
 					for (const RoadSpline &road : roads) {
 						if (!Spend(result.Facts.SpatialTests, request.Limits.MaximumSpatialTests, 16))
 							return detail::Refuse(diagnostic, Status::LimitExceeded, "region.spatial_tests");
+						if ((result.Facts.SpatialTests & 63) == 0 &&
+							!PollControl(control, result, completedCandidates, diagnostic))
+							return Status::Canceled;
 						if (NearRoad(candidate.Position, road, roadRadius)) {
 							clear = false;
 							break;
@@ -286,6 +326,9 @@ namespace engine::procedural {
 							if (dx == 0 && dy == 0) continue;
 							if (!Spend(result.Facts.WorkUnits, request.Limits.MaximumWorkUnits))
 								return detail::Refuse(diagnostic, Status::LimitExceeded, "region.work");
+							if ((result.Facts.WorkUnits & 63) == 0 &&
+								!PollControl(control, result, completedCandidates, diagnostic))
+								return Status::Canceled;
 							const Candidate &other =
 								candidates[static_cast<size_t>((row + dy) * width + column + dx)];
 							if (!other.Active || DistanceSquared(candidate.Position, other.Position) >=
@@ -330,15 +373,22 @@ namespace engine::procedural {
 						return detail::Refuse(diagnostic, Status::LimitExceeded, "region.output");
 				}
 			}
+			if (!PollControl(control, result, completedCandidates, diagnostic)) return Status::Canceled;
 			return Status::Ok;
 		}
 	}
 
 	Status GenerateRegion(
-		const CompiledRecipe &recipe, const RegionRequest &request, RegionResult &out, Diagnostic &diagnostic
+		const CompiledRecipe &recipe,
+		const RegionRequest &request,
+		RegionResult &out,
+		Diagnostic &diagnostic,
+		GenerationControl *control
 	) {
 		try {
 			RegionResult candidate;
+			uint32_t completedCandidates = 0;
+			if (!PollControl(control, candidate, completedCandidates, diagnostic)) return Status::Canceled;
 			const Status key = BuildRegionKey(recipe, request, candidate.KeyBytes, diagnostic);
 			if (key != Status::Ok) return key;
 			if (candidate.KeyBytes.size() > request.Limits.MaximumOutputBytes)
@@ -351,10 +401,13 @@ namespace engine::procedural {
 			detail::QueryView queries;
 			const Status coverage = detail::ValidateQueries(request, required, queries, diagnostic);
 			if (coverage != Status::Ok) return coverage;
+			if (!PollControl(control, candidate, completedCandidates, diagnostic)) return Status::Canceled;
 			const detail::QueryView *sources = nullptr;
 			uint64_t seed = 0;
 			std::vector<RoadSpline> localRoads;
 			for (uint8_t stage : recipe.Stages_) {
+				if (!PollControl(control, candidate, completedCandidates, diagnostic))
+					return Status::Canceled;
 				switch (static_cast<detail::Stage>(stage)) {
 				case detail::Stage::Seed:
 					seed = recipe.Definition_.RootSeed;
@@ -376,7 +429,16 @@ namespace engine::procedural {
 					break;
 				case detail::Stage::Road: {
 					const Status status = BuildRoads(
-						request, *sources, recipe.Settings_, seed, owner, candidate, localRoads, diagnostic
+						request,
+						*sources,
+						recipe.Settings_,
+						seed,
+						owner,
+						candidate,
+						localRoads,
+						control,
+						completedCandidates,
+						diagnostic
 					);
 					if (status != Status::Ok) return status;
 					break;
@@ -392,6 +454,8 @@ namespace engine::procedural {
 						owner,
 						localRoads,
 						candidate,
+						control,
+						completedCandidates,
 						diagnostic
 					);
 					if (status != Status::Ok) return status;
@@ -411,6 +475,7 @@ namespace engine::procedural {
 					return StableNameLess(a.Id, b.Id);
 				}
 			);
+			if (!PollControl(control, candidate, completedCandidates, diagnostic)) return Status::Canceled;
 			out = std::move(candidate);
 			diagnostic = {};
 			return Status::Ok;

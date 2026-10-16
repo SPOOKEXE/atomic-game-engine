@@ -284,3 +284,28 @@ TEST_CASE("roads near seam competitors consume the declared road budget", "[proc
 	CHECK(GenerateRegion(recipe, request, previous, diagnostic) == Status::LimitExceeded);
 	CHECK((previous.KeyBytes == std::vector<uint8_t>{1, 2, 3}));
 }
+
+TEST_CASE(
+	"generation stop is transactional and progress stays outside output identity", "[procedural][region]"
+) {
+	const CompiledRecipe recipe = Compile(ForestVillageDefaults("town", 42));
+	const RegionRequest request = Request(recipe, {0, 0, 32});
+	RegionResult result;
+	result.KeyBytes = {1, 2, 3};
+	Diagnostic diagnostic;
+	GenerationControl canceled;
+	canceled.StopRequested.store(true);
+	CHECK(GenerateRegion(recipe, request, result, diagnostic, &canceled) == Status::Canceled);
+	CHECK((result.KeyBytes == std::vector<uint8_t>{1, 2, 3}));
+	CHECK(canceled.CandidateCells.load() == 0);
+	GenerationControl running;
+	REQUIRE(GenerateRegion(recipe, request, result, diagnostic, &running) == Status::Ok);
+	CHECK(running.CandidateCells.load() == result.Facts.CandidateCells);
+	CHECK(running.WorkUnits.load() == result.Facts.WorkUnits);
+	CHECK(running.SpatialTests.load() == result.Facts.SpatialTests);
+	CHECK(running.Placements.load() == result.Placements.size());
+	CHECK(running.Roads.load() == result.Roads.size());
+	RegionResult withoutControl;
+	REQUIRE(GenerateRegion(recipe, request, withoutControl, diagnostic) == Status::Ok);
+	CHECK(SameOutput(result, withoutControl));
+}

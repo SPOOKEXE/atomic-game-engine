@@ -8,6 +8,7 @@
 #include <engine/procedural/Canonical.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <span>
 #include <string>
@@ -134,6 +135,17 @@ namespace engine::procedural {
 		GenerationFacts Facts{};			 // Work counters for this result.
 	};
 
+	// One worker-owned control per in-flight call. The host may read progress
+	// concurrently; these counters never enter canonical keys or artifacts.
+	struct GenerationControl {
+		std::atomic_bool StopRequested{false};	 // Host sets this to cancel before publication.
+		std::atomic<uint32_t> CandidateCells{0}; // Global cells visited so far.
+		std::atomic<uint32_t> WorkUnits{0};		 // Bounded generation work consumed.
+		std::atomic<uint32_t> SpatialTests{0};	 // Spatial comparisons performed.
+		std::atomic<uint32_t> Placements{0};	 // Output placements assembled so far.
+		std::atomic<uint32_t> Roads{0};			 // Output roads assembled so far.
+	};
+
 	// Typed defaults for the bounded forest and village generator.
 	struct ForestVillageSettings {
 		uint32_t ForestDensityPpm = 0;			// Forest density in parts per million.
@@ -174,8 +186,9 @@ namespace engine::procedural {
 		RequiredRegionBounds(const CompiledRecipe &, RegionScope, Bounds &, Bounds &, Diagnostic &);
 		friend Status
 		BuildRegionKey(const CompiledRecipe &, const RegionRequest &, std::vector<uint8_t> &, Diagnostic &);
-		friend Status
-		GenerateRegion(const CompiledRecipe &, const RegionRequest &, RegionResult &, Diagnostic &);
+		friend Status GenerateRegion(
+			const CompiledRecipe &, const RegionRequest &, RegionResult &, Diagnostic &, GenerationControl *
+		);
 	};
 
 	// Supplies the exact v1 forest and village parameter names and typed defaults.
@@ -207,8 +220,13 @@ namespace engine::procedural {
 
 	// Generates seeded forest trees, village lots and houses, and connected roads.
 	// Candidate names derive from global cells before any filtering. Refusal
-	// preserves the complete previous RegionResult.
+	// preserves the complete previous RegionResult. Control is optional and must
+	// outlive this call; stop and progress have no effect on canonical bytes.
 	Status GenerateRegion(
-		const CompiledRecipe &recipe, const RegionRequest &request, RegionResult &out, Diagnostic &diagnostic
+		const CompiledRecipe &recipe,
+		const RegionRequest &request,
+		RegionResult &out,
+		Diagnostic &diagnostic,
+		GenerationControl *control = nullptr
 	);
 }

@@ -24,6 +24,8 @@ namespace engine::procedural {
 		MissingSource,	  // A required named source is absent.
 		LimitExceeded,	  // A configured count or byte limit was exceeded.
 		AllocationFailed, // Required storage could not be allocated.
+		Canceled,		  // Generation stopped before publishing a result.
+		StaleArtifact,	  // Decoded artifact key differs from the expected key.
 	};
 
 	// Identifies a refused field without copying unbounded authored content.
