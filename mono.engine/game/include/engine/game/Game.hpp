@@ -384,10 +384,9 @@ namespace engine::game {
 	// same reason. A caller that drops its copy leaves the world holding the
 	// last one.
 	//
-	// **Luau, and a world whose scripts are JavaScript runs nothing.** The
-	// runtime is per world and `script::LanguageOf` picks per file;
-	// reconciling those is a design decision rather than an oversight, and it
-	// is stated here rather than discovered.
+	// **One VM per world, with the language selected by its scripts.** Every
+	// role-selected script with source must use the same language. An empty
+	// world defaults to Luau; mixed languages are refused before runtime creation.
 	//
 	// @param store     The world.
 	// @param scheduler The systems to install the heartbeat into.
@@ -401,7 +400,7 @@ namespace engine::game {
 	//                    on a script's top level fire at all - that code has
 	//                    already executed by the time this returns.
 	// @param scriptTickRate Fixed script heartbeat rate, or zero to use the world rate.
-	// @return The runtime, which is never null.
+	// @return The runtime, or nullptr when selected scripts mix languages.
 	std::shared_ptr<script::Runtime> StartWorldScripts(
 		ecs::Store &store,
 		ecs::Scheduler &scheduler,

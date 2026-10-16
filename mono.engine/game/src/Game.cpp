@@ -1237,8 +1237,22 @@ namespace engine::game {
 		double scriptTickRate
 	) {
 		error.clear();
+		std::vector<Entity> scripts = script::ScriptsIn(store, limits.Role.Server, limits.Role.Client);
+		std::erase_if(scripts, [&](Entity instance) {
+			return !script::ActiveSourceOf(store, instance).IsValid();
+		});
+		script::Language language =
+			scripts.empty() ? script::Language::Luau : script::ActiveLanguageOf(store, scripts.front());
+		for (Entity instance : scripts) {
+			if (script::ActiveLanguageOf(store, instance) != language) {
+				error = "world '" + std::string(store.Name()) + "' contains mixed script languages: '" +
+						store.GetFullName(scripts.front()) + "' and '" + store.GetFullName(instance) +
+						"'; one language per world is required";
+				return nullptr;
+			}
+		}
 
-		std::shared_ptr<script::Runtime> runtime = script::MakeRuntime(store, script::Language::Luau, limits);
+		std::shared_ptr<script::Runtime> runtime = script::MakeRuntime(store, language, limits);
 
 		// **Before the scripts run, and that ordering is the whole point.** A
 		// script's top level has already executed by the time this function

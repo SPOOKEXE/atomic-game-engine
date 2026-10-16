@@ -1115,12 +1115,13 @@ namespace server {
 							engine::script::RuntimeLimits limits;
 							limits.Role = engine::script::HostRole::OfServer();
 							std::string error;
-							Runtimes.emplace_back(
-								id,
-								engine::game::StartWorldScripts(
-									store, systems, limits, error, nullptr, scriptTickRate
-								)
+							auto runtime = engine::game::StartWorldScripts(
+								store, systems, limits, error, nullptr, scriptTickRate
 							);
+							if (runtime)
+								Runtimes.emplace_back(id, std::move(runtime));
+							else
+								restoredScripts = false;
 							if (!error.empty()) {
 								ENGINE_ERROR("replay world '{}': {}", store.Name(), error);
 								restoredScripts = false;
@@ -1619,9 +1620,10 @@ namespace server {
 			const double scriptTickRate = Worlds().SettingsOf(id).ScriptTickRate;
 
 			std::string failure;
+			bool selectedRuntime = false;
 			Worlds().Enter(
 				id,
-				[this, &limits, &failure, id, physicsTickRate, scriptTickRate](
+				[this, &limits, &failure, &selectedRuntime, id, physicsTickRate, scriptTickRate](
 					engine::ecs::Store &store, engine::ecs::Scheduler &systems
 				) {
 					// A standalone world may intentionally omit the standard
@@ -1646,12 +1648,12 @@ namespace server {
 					// The same call the studio's Play makes. What "running a
 					// game" means is one function, or the two drift and the
 					// first thing to drift is the heartbeat's delta.
-					Runtimes.emplace_back(
-						id,
-						engine::game::StartWorldScripts(
-							store, systems, limits, failure, nullptr, scriptTickRate
-						)
+					auto runtime = engine::game::StartWorldScripts(
+						store, systems, limits, failure, nullptr, scriptTickRate
 					);
+					if (!runtime) return;
+					selectedRuntime = true;
+					Runtimes.emplace_back(id, std::move(runtime));
 
 					if (id == PrimaryWorld && Settings.Chatter) {
 						store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
@@ -1660,13 +1662,11 @@ namespace server {
 			);
 
 			if (!failure.empty()) {
-				// Reported and not fatal, for the reason `RunWorldScripts`
-				// runs every script even when one fails: a game where half the
-				// scripts silently did not start is a bug report with nothing
-				// in it, and refusing to host at all is worse than hosting a
-				// game with one broken script in it.
+				// One broken script leaves the runtime hosting healthy scripts.
+				// A rejected world language has no runtime and refuses hosting below.
 				ENGINE_ERROR("world '{}': {}", Worlds().NameOf(id).Text(), failure);
 			}
+			if (!selectedRuntime) return false;
 		}
 
 		ENGINE_INFO(

@@ -1097,6 +1097,7 @@ namespace client {
 			const engine::world::WorldSettings worldSettings = Universe_->SettingsOf(id);
 			limits.Compute = Renderer.ComputeForWorld(std::string(worldSettings.Name.Text()));
 			std::string failure;
+			bool selectedRuntime = false;
 
 			Universe_->Enter(id, [&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
 				InstallPresentation(store, systems, Settings.Entities);
@@ -1109,12 +1110,12 @@ namespace client {
 
 				// Startup source can control the local eye or replace CurrentCamera.
 				InstallDefaultCamera(store, systems);
-				Runtimes.emplace_back(
-					id,
-					engine::game::StartWorldScripts(
-						store, systems, limits, failure, nullptr, worldSettings.ScriptTickRate
-					)
+				auto runtime = engine::game::StartWorldScripts(
+					store, systems, limits, failure, nullptr, worldSettings.ScriptTickRate
 				);
+				if (!runtime) return;
+				selectedRuntime = true;
+				Runtimes.emplace_back(id, std::move(runtime));
 				(void)engine::script::ResetPlayerGui(store, localPlayer);
 
 				// Startup scripts get the first say over `Players.CharacterAutoLoads`.
@@ -1134,6 +1135,7 @@ namespace client {
 			if (!failure.empty()) {
 				ENGINE_ERROR("world '{}': {}", Universe_->NameOf(id).Text(), failure);
 			}
+			if (!selectedRuntime) return false;
 
 			Views.Track(id, Universe_->NameOf(id), Settings.Entities);
 			Simulated.push_back(id);

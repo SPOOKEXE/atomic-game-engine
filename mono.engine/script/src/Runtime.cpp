@@ -379,7 +379,13 @@ namespace engine::script {
 			bool ok = false;
 			unsigned long fault = 0;
 			try {
-				ok = RunInstanceIsolated(*this, instance, fault);
+				if (ActiveSourceOf(Store, instance).IsValid() &&
+					ActiveLanguageOf(Store, instance) != Which()) {
+					Error = "script '" + Store.GetFullName(instance) +
+							"' has a different language from this world's runtime";
+				} else {
+					ok = RunInstanceIsolated(*this, instance, fault);
+				}
 			} catch (const std::exception &failure) {
 				Error = failure.what();
 			} catch (...) {
@@ -449,7 +455,13 @@ namespace engine::script {
 			bool ok = false;
 			unsigned long fault = 0;
 			try {
-				ok = RunInstanceIsolated(*this, instance, fault);
+				if (ActiveSourceOf(Store, instance).IsValid() &&
+					ActiveLanguageOf(Store, instance) != Which()) {
+					Error = "script '" + Store.GetFullName(instance) +
+							"' has a different language from this world's runtime";
+				} else {
+					ok = RunInstanceIsolated(*this, instance, fault);
+				}
 			} catch (const std::exception &failure) {
 				Error = failure.what();
 			} catch (...) {

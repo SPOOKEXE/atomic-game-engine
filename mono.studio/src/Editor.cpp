@@ -5330,12 +5330,16 @@ namespace studio {
 		// Reuse the viewport's local eye; mint a fallback only when no native
 		// camera exists. Neither camera belongs to the authored snapshot.
 		const ViewportCameraPose runtimePose = DefaultViewportCamera();
+		std::optional<engine::scene::ActiveCamera> previousCamera;
+		Entity createdCamera = NULL_ENTITY;
 		Universe->Enter(world, [&](Store &store) {
 			const Entity existing = RuntimeCameraOf(store);
 			if (existing != NULL_ENTITY && store.Has<engine::ecs::ClientLocal>(existing) &&
 				store.Has<engine::scene::TransientComponent>(existing))
 				return;
-			if (CreateRuntimeCamera(store, runtimePose) == NULL_ENTITY) {
+			if (const auto *active = store.Resource<engine::scene::ActiveCamera>()) previousCamera = *active;
+			createdCamera = CreateRuntimeCamera(store, runtimePose);
+			if (createdCamera == NULL_ENTITY) {
 				failure = "could not create the server runtime camera";
 			}
 		});
@@ -5348,19 +5352,6 @@ namespace studio {
 		// would be a game that came up frozen for a reason nobody could see.
 		run.Paused = false;
 		run.Snapshot = std::move(document);
-
-		// **The undo stack does not survive the run, and Stop is why.** Stop
-		// restores the snapshot taken on the line above, which throws away
-		// everything the run did - so a command recorded before it describes a
-		// world that the restore has already put back, and one recorded during
-		// it describes a world that no longer exists. Either way the entry is a
-		// lie the moment Stop is pressed.
-		//
-		// Cleared here rather than at Stop so that the guarantee holds even for
-		// a run that is never stopped cleanly.
-		if (Commands != nullptr) {
-			Commands->Clear();
-		}
 
 		// **Through `game::StartWorldScripts`, which is the same call a
 		// dedicated server makes.** What "running a game" means has to be one
@@ -5376,6 +5367,21 @@ namespace studio {
 		if (!failure.empty()) {
 			Say("script error: " + failure, LogLevel::Error);
 		}
+		if (!run.Runtime) {
+			if (createdCamera != NULL_ENTITY) {
+				Universe->Enter(world, [&](Store &store) {
+					store.DestroyInstance(createdCamera);
+					if (previousCamera)
+						store.SetResource(*previousCamera);
+					else
+						store.RemoveResource<engine::scene::ActiveCamera>();
+				});
+			}
+			return false;
+		}
+		// Stop restores a snapshot, so earlier commands cannot survive a run.
+		// A refused language selection preserves the author's edit history.
+		if (Commands != nullptr) Commands->Clear();
 
 		Runs.push_back(std::move(run));
 		StartPlaytestPlugins(world, PluginRunTarget::PlaytestServer);

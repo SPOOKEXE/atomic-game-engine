@@ -675,6 +675,7 @@ namespace client {
 		if (!failure.empty()) {
 			ENGINE_ERROR("replica '{}': {}", store.Name(), failure);
 		}
+		if (!runtime) return nullptr;
 
 		// **The one thing about a replica's scripts that is not a host's.** A
 		// host starts a world's scripts once because the world is already built;

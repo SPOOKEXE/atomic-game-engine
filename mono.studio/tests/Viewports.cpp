@@ -33,6 +33,8 @@
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/ProceduralJobs.hpp>
+#include <engine/script/ProceduralScene.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -204,6 +206,10 @@ namespace studio {
 			return editor.AddExampleWorld(demo);
 		}
 
+		static bool StartServer(Editor &editor) {
+			return editor.BeginRun(editor.Active, RunMode::Server);
+		}
+
 		static void TickPlay(Editor &editor) {
 			for (size_t tick = 0; tick < 24; ++tick) {
 				for (auto &run : editor.Runs)
@@ -309,6 +315,7 @@ namespace studio {
 }
 
 TEST_SUITE_ID("studio.viewports")
+TEST_DEPENDS("engine.game.worldscripts")
 
 using engine::world::WorldId;
 using studio::CameraRelativeMovement;
@@ -1415,4 +1422,94 @@ TEST_CASE(
 	const size_t scene = static_cast<size_t>(engine::render::PresentationCacheLayer::SceneImage);
 	CHECK(visible.Activities()[scene].Hits == hidden.Activities()[scene].Hits + 1);
 	CHECK(visible.Activities()[scene].Writes == hidden.Activities()[scene].Writes);
+}
+
+TEST_CASE(
+	"Studio imported procedural demos run in their authored VM and stop cleanly",
+	"[studio][scripts][language]"
+) {
+	using namespace engine;
+	const SavedGameScratch scratch;
+	struct ConfigRestore {
+		std::filesystem::path Previous = studio::ConfigRoot();
+		~ConfigRestore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore;
+	studio::SetConfigRoot(scratch.Root);
+	for (const std::string_view file : {"ForestVillage.luau", "ForestVillage.js"}) {
+		DYNAMIC_SECTION(file) {
+			studio::Editor editor;
+			REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+			const auto demo = examples::DemosLoader().Find(examples::DemoKind::Script, file);
+			REQUIRE(demo.has_value());
+			REQUIRE(studio::ViewportCameraProbe::AddDemo(editor, *demo));
+			const auto language = script::LanguageOf(file);
+			editor.Universe->Enter(editor.Active, [&](const ecs::Store &store) {
+				const auto service = store.FindFirstRoot("ServerScriptService");
+				const auto instance = store.FindFirstChild(service, "ForestVillageScene");
+				REQUIRE(instance != ecs::NULL_ENTITY);
+				CHECK(script::ActiveLanguageOf(store, instance) == language);
+				CHECK(
+					script::ActiveSourceOf(store, instance) ==
+					core::Name(std::string("examples/scripts/") + std::string(file))
+				);
+			});
+			for (size_t run = 0; run < 2; ++run) {
+				REQUIRE(studio::ViewportCameraProbe::StartServer(editor));
+				REQUIRE(editor.Runs.size() == 1);
+				REQUIRE(editor.Runs.front().Runtime != nullptr);
+				CHECK(editor.Runs.front().Runtime->Which() == language);
+				CHECK(editor.Runs.front().Runtime->LastError().empty());
+				editor.Universe->Enter(editor.Active, [&](ecs::Store &store) {
+					const auto *published = store.Resource<script::ProceduralPublished>();
+					REQUIRE(published != nullptr);
+					CHECK(published->Regions.size() == 2);
+					CHECK(store.CountMatching<script::ProceduralSceneRegion>() == 2);
+				});
+				studio::ViewportCameraProbe::Stop(editor);
+				CHECK(editor.Runs.empty());
+				editor.Universe->Enter(editor.Active, [&](ecs::Store &store) {
+					CHECK(store.CountMatching<script::ProceduralSceneRegion>() == 0);
+				});
+			}
+		}
+	}
+}
+
+TEST_CASE("Studio refuses a mixed script world before recording a run", "[studio][scripts][language]") {
+	using namespace engine;
+	const SavedGameScratch scratch;
+	struct ConfigRestore {
+		std::filesystem::path Previous = studio::ConfigRoot();
+		~ConfigRestore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore;
+	studio::SetConfigRoot(scratch.Root);
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	const auto demo = examples::DemosLoader().Find(examples::DemoKind::Script, "ForestVillage.js");
+	REQUIRE(demo.has_value());
+	REQUIRE(studio::ViewportCameraProbe::AddDemo(editor, *demo));
+	size_t cameras = 0;
+	editor.Universe->Enter(editor.Active, [&](ecs::Store &store) {
+		const auto extra = script::MakeScript(store, "mixed-extra.luau", "MixedExtra");
+		REQUIRE(extra != ecs::NULL_ENTITY);
+		REQUIRE(store.SetParent(extra, store.FindFirstRoot("ServerScriptService")));
+		auto cache = *store.Resource<script::SourceCache>();
+		cache.Set(core::Name("mixed-extra.luau"), "error('must not execute')");
+		store.SetResource(cache);
+		store.RemoveResource<scene::ActiveCamera>();
+		cameras = store.CountMatching<scene::Camera>();
+	});
+	CHECK_FALSE(studio::ViewportCameraProbe::StartServer(editor));
+	CHECK(editor.Runs.empty());
+	editor.Universe->Enter(editor.Active, [&](ecs::Store &store) {
+		CHECK(store.Resource<scene::ActiveCamera>() == nullptr);
+		CHECK(store.CountMatching<scene::Camera>() == cameras);
+		CHECK(store.CountMatching<script::ProceduralSceneRegion>() == 0);
+		const auto *published = store.Resource<script::ProceduralPublished>();
+		CHECK((published == nullptr || published->Regions.empty()));
+	});
 }
