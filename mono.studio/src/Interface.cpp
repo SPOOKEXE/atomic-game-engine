@@ -148,7 +148,7 @@ namespace studio {
 		//                      rather than spelled here because the editor owns
 		//                      both how many there are and what they are called -
 		//                      see `Editor::ResizeViewports`.
-		// @param splitViewports Whether an extra viewport is open in this layout.
+		// @param splitViewports Whether an open viewport needs a default split.
 		// @param pluginWindows  The dynamic plugin windows and their requested homes.
 		void BuildDefaultLayout(
 			ImGuiID dockspace,
@@ -336,9 +336,10 @@ namespace studio {
 					}
 				}
 			}
+			// Play clients split their source dock when drawn, so do not split them twice.
 			const bool splitViewports =
 				std::any_of(Extras.begin(), Extras.end(), [](const ViewportState &view) {
-					return view.Open;
+					return view.Open && view.SplitBeside == 0;
 				});
 			BuildDefaultLayout(dockspace, extraTitles, splitViewports, pluginWindows);
 		}
@@ -1017,14 +1018,12 @@ namespace studio {
 			extra->Undocked = false;
 		}
 
-		// A Play client owns a split rather than borrowing a tab. Resolve the
-		// source here because several client panels may have been created before
-		// imgui has drawn any of them, so a later client's source dock can become
-		// real only earlier in this same viewport pass.
+		// A Play client owns one split. New source panels need a completed frame
+		// before their dock sizes reflect the host's available space.
 		if (extra != nullptr && extra->SplitBeside != 0) {
 			const size_t sourceIndex = extra->SplitBeside - 1;
 			if (const ImGuiWindow *source = ImGui::FindWindowByName(ViewportIdentity(sourceIndex));
-				source != nullptr && source->DockId != 0) {
+				source != nullptr && source->WasActive && source->DockId != 0) {
 				const ImGuiID clientDock =
 					ImGui::DockBuilderSplitNode(source->DockId, ImGuiDir_Right, 0.5f, nullptr, nullptr);
 				ImGui::SetNextWindowDockID(clientDock, ImGuiCond_Always);
