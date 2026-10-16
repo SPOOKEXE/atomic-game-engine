@@ -34,6 +34,9 @@ namespace studio {
 		}
 	}
 	void Editor::ReleaseProceduralPreview() {
+		if (ProceduralPreviewTexture.IsValid() && ProceduralPreviewHandle != nullptr &&
+			!RetireProceduralPreviewTexture(ProceduralPreviewTexture))
+			return;
 		ProceduralPreviewWanted = false;
 		ProceduralPreview.reset();
 		ProceduralPanel.reset();
@@ -42,12 +45,31 @@ namespace studio {
 			EditableMeshes.ForgetOwner(ProceduralPreviewOwner);
 			Renderer.DropContentOwner(ProceduralPreviewOwner);
 		}
-		if (ProceduralPreviewTexture.IsValid()) Renderer.DropTexture(ProceduralPreviewTexture);
 		ProceduralPreviewOwner = {};
 		ProceduralPreviewTexture = {};
 		ProceduralPreviewHandle = nullptr;
 		ProceduralRenderedMesh = {};
 		ProceduralRenderedRevision = 0;
+	}
+	bool Editor::RetireProceduralPreviewTexture(engine::core::Name texture) {
+		if (!texture.IsValid()) return true;
+		for (const engine::core::Name retired : RetiredProceduralPreviewTextures)
+			if (retired == texture) return true;
+		for (engine::core::Name &retired : RetiredProceduralPreviewTextures)
+			if (!retired.IsValid()) {
+				retired = texture;
+				return true;
+			}
+		return false;
+	}
+	void Editor::ReleaseRetiredProceduralPreviewTexture(engine::core::Name texture) {
+		if (!texture.IsValid()) return;
+		for (engine::core::Name &retired : RetiredProceduralPreviewTextures)
+			if (retired == texture) {
+				Renderer.DropTexture(texture);
+				retired = {};
+				return;
+			}
 	}
 	void Editor::DrawProceduralGeneration() {
 		if (!ShowProcedural) {
@@ -225,6 +247,8 @@ namespace studio {
 		if (!ProceduralPreviewWanted || !ShowProcedural || !ProceduralPreview || !ProceduralPanel ||
 			Renderer.Backend().Device == nullptr)
 			return false;
+		for (const core::Name retired : RetiredProceduralPreviewTextures)
+			if (retired.IsValid()) return false;
 		const auto *target = procedural_editor_adapter::Selected(*ProceduralPreview, *ProceduralPanel);
 		if (!target) {
 			ProceduralPreviewWanted = false;
@@ -267,13 +291,29 @@ namespace studio {
 		view.WorldName = ProceduralPreviewOwner;
 		view.ContentOwner = ProceduralPreviewOwner;
 		Renderer.Render(std::span<const render::View>(&view, 1), Overlay, nullptr, true, &Interface);
-		if (Renderer.CaptureSceneTexture(PreviewSlot(), ProceduralPreviewTexture)) {
-			ProceduralPreviewHandle = Renderer.TextureHandle(ProceduralPreviewTexture);
-			ProceduralRenderedMesh = target->Mesh;
-			ProceduralRenderedRevision = mesh->Revision;
-			ProceduralRenderedOrbit = angle;
-			ProceduralPanel->ImageScope = target->Scope;
-			ProceduralPanel->HasImageScope = true;
+		// Capture into the alternate key so the visible texture remains alive if refresh fails.
+		const core::Name primaryTexture(std::string(ProceduralPreviewOwner.Text()) + "/image");
+		const core::Name alternateTexture(std::string(ProceduralPreviewOwner.Text()) + "/image-alternate");
+		const core::Name candidateTexture =
+			ProceduralPreviewHandle == nullptr
+				? ProceduralPreviewTexture
+				: (ProceduralPreviewTexture == primaryTexture ? alternateTexture : primaryTexture);
+		if (Renderer.CaptureSceneTexture(PreviewSlot(), candidateTexture)) {
+			void *candidateHandle = Renderer.TextureHandle(candidateTexture);
+			if (candidateHandle != nullptr && (ProceduralPreviewHandle == nullptr ||
+											   RetireProceduralPreviewTexture(ProceduralPreviewTexture))) {
+				ProceduralPreviewTexture = candidateTexture;
+				ProceduralPreviewHandle = candidateHandle;
+				ProceduralRenderedMesh = target->Mesh;
+				ProceduralRenderedRevision = mesh->Revision;
+				ProceduralRenderedOrbit = angle;
+				ProceduralPanel->ImageScope = target->Scope;
+				ProceduralPanel->HasImageScope = true;
+			} else {
+				Renderer.DropTexture(candidateTexture);
+			}
+		} else {
+			Renderer.DropTexture(candidateTexture);
 		}
 		ProceduralPreviewWanted = false;
 		return true;

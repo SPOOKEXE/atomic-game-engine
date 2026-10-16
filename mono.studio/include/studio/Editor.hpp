@@ -6094,6 +6094,9 @@ namespace studio {
 		engine::core::Name ProceduralPreviewOwner{};
 		// Renderer key for the captured preview image.
 		engine::core::Name ProceduralPreviewTexture{};
+		// A replaced image and its successor can both be retired before the next draw.
+		// New captures wait while either slot is held by main or platform draw data.
+		std::array<engine::core::Name, 2> RetiredProceduralPreviewTextures{};
 		// Renderer handle used by the panel image widget.
 		void *ProceduralPreviewHandle = nullptr;
 		// Whether the preview slot should be refreshed.
@@ -6110,8 +6113,12 @@ namespace studio {
 		void ApplyProceduralPending();
 		// Renders the isolated preview into its texture slot.
 		bool RenderProceduralPreviewSlot();
-		// Releases the isolated preview and its renderer resources.
+		// Releases the isolated preview and content, retiring its displayed image.
 		void ReleaseProceduralPreview();
+		// Adds a texture to the bounded retirement handoff.
+		bool RetireProceduralPreviewTexture(engine::core::Name texture);
+		// Drops a retired texture after matching main and platform draw data finish.
+		void ReleaseRetiredProceduralPreviewTexture(engine::core::Name texture);
 
 		// Image Composer state belongs to this editor instance.
 		//@{

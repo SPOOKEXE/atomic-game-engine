@@ -1087,6 +1087,9 @@ namespace studio {
 		// nothing.
 		GameInterface.Shutdown();
 		Interface.Shutdown();
+		const auto retiredPreviewTextures = RetiredProceduralPreviewTextures;
+		for (const engine::core::Name texture : retiredPreviewTextures)
+			ReleaseRetiredProceduralPreviewTexture(texture);
 		Renderer.Shutdown();
 		for (SDL_Gamepad *gamepad : PlayedInput->Gamepads)
 			SDL_CloseGamepad(gamepad);
@@ -1673,6 +1676,7 @@ namespace studio {
 			}
 		}
 
+		const std::array<engine::core::Name, 2> retiredPreviewTextures = RetiredProceduralPreviewTextures;
 		{
 			ENGINE_PROFILE_CAT("build interface", engine::core::ProfileCategory::Render);
 
@@ -1696,6 +1700,9 @@ namespace studio {
 			ENGINE_PROFILE_CAT("present platform windows", engine::core::ProfileCategory::Render);
 			Interface.PresentPlatformWindows();
 		}
+		// Both the main and platform-window draw data have finished using the image.
+		for (const engine::core::Name texture : retiredPreviewTextures)
+			ReleaseRetiredProceduralPreviewTexture(texture);
 
 		FinishControlAutomationFrame();
 	}

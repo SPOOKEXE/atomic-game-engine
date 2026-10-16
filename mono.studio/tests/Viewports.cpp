@@ -12,6 +12,8 @@
 // a panel minted while a free one sat there is a `SceneTarget` and a turn in the
 // rotation nobody asked to pay.
 
+#include "ProceduralPanel.hpp"
+
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
@@ -50,9 +52,11 @@
 #include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 #include <studio/PlayLink.hpp>
+#include <studio/ProceduralEditor.hpp>
 #include <studio/Projection.hpp>
 #include <studio/ViewportDiagnostics.hpp>
 #include <studio/Viewports.hpp>
+#include <tuple>
 
 namespace studio {
 	struct ViewportCameraProbe {
@@ -210,6 +214,75 @@ namespace studio {
 			return editor.BeginRun(editor.Active, RunMode::Server);
 		}
 
+		static engine::core::Name CaptureProceduralPreview(Editor &editor) {
+			editor.ShowProcedural = true;
+			editor.ProceduralWorld = editor.Active;
+			editor.ProceduralPanel = std::make_unique<ProceduralPanelState>();
+			editor.ProceduralPreview =
+				std::make_unique<ProceduralEditor>(engine::parallel::JobContext::Serial);
+			editor.ProceduralPreviewOwner = engine::core::Name(
+				"studio.procedural/" + std::to_string(editor.ProceduralPreview->PreviewStore().Identity())
+			);
+			editor.ProceduralPreviewTexture =
+				engine::core::Name(std::string(editor.ProceduralPreviewOwner.Text()) + "/image");
+			REQUIRE(editor.ProceduralPanel->Queue({ProceduralActionKind::Initialize}));
+			REQUIRE(editor.ProceduralPanel->Queue({ProceduralActionKind::Preview}));
+			editor.ApplyProceduralPending();
+			editor.ApplyProceduralPending();
+			REQUIRE(editor.ProceduralPanel->Queue({ProceduralActionKind::Activate}));
+			editor.ApplyProceduralPending();
+			REQUIRE(editor.RenderProceduralPreviewSlot());
+			REQUIRE(editor.ProceduralPreviewHandle != nullptr);
+			return editor.ProceduralPreviewTexture;
+		}
+
+		static void DrawProceduralPreview(Editor &editor) {
+			ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+			ImGui::SetNextWindowSize(ImVec2(900, 1000), ImGuiCond_Always);
+			editor.DrawProceduralGeneration();
+		}
+
+		static bool Save(Editor &editor, const std::filesystem::path &path) {
+			return editor.SaveGame(path);
+		}
+
+		static bool Open(Editor &editor, const std::filesystem::path &path) {
+			return editor.OpenGame(path);
+		}
+
+		static bool RetiredProceduralTexture(const Editor &editor, engine::core::Name texture) {
+			return std::find(
+					   editor.RetiredProceduralPreviewTextures.begin(),
+					   editor.RetiredProceduralPreviewTextures.end(),
+					   texture
+				   ) != editor.RetiredProceduralPreviewTextures.end();
+		}
+
+		static bool TryRefreshProceduralPreview(Editor &editor) {
+			editor.ProceduralPanel->Orbit += 0.25f;
+			editor.ProceduralPreviewWanted = true;
+			return editor.RenderProceduralPreviewSlot();
+		}
+
+		static auto ProceduralImageState(const Editor &editor) {
+			return std::tuple{
+				editor.ProceduralPreviewTexture,
+				editor.ProceduralPreviewHandle,
+				editor.ProceduralRenderedMesh,
+				editor.ProceduralRenderedRevision,
+				editor.ProceduralRenderedOrbit
+			};
+		}
+
+		static engine::core::Name RefreshProceduralPreview(Editor &editor) {
+			REQUIRE(TryRefreshProceduralPreview(editor));
+			return editor.ProceduralPreviewTexture;
+		}
+
+		static void PresentFrame(Editor &editor) {
+			editor.Present(1.0f / 60.0f);
+		}
+
 		static void TickPlay(Editor &editor) {
 			for (size_t tick = 0; tick < 24; ++tick) {
 				for (auto &run : editor.Runs)
@@ -316,6 +389,7 @@ namespace studio {
 
 TEST_SUITE_ID("studio.viewports")
 TEST_DEPENDS("engine.game.worldscripts")
+TEST_DEPENDS("studio.proceduralpaneladapter")
 
 using engine::world::WorldId;
 using studio::CameraRelativeMovement;
@@ -1512,4 +1586,119 @@ TEST_CASE("Studio refuses a mixed script world before recording a run", "[studio
 		const auto *published = store.Resource<script::ProceduralPublished>();
 		CHECK((published == nullptr || published->Regions.empty()));
 	});
+}
+
+TEST_CASE(
+	"Studio reopening a game retains the procedural image through its referencing interface frame",
+	"[studio][procedural][preview-lifetime]"
+) {
+	using namespace engine;
+	const SavedGameScratch scratch;
+	struct ConfigRestore {
+		std::filesystem::path Previous = studio::ConfigRoot();
+		~ConfigRestore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore;
+	studio::SetConfigRoot(scratch.Root);
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	const auto image = studio::ViewportCameraProbe::CaptureProceduralPreview(editor);
+	void *const handle = editor.Renderer.TextureHandle(image);
+	REQUIRE(handle != nullptr);
+	const auto path = scratch.Root / "procedural-preview.agame";
+	REQUIRE(studio::ViewportCameraProbe::Save(editor, path));
+
+	editor.Interface.Begin(1.0f / 60.0f);
+	studio::ViewportCameraProbe::DrawProceduralPreview(editor);
+	// The modal opens after panels have emitted images, before this frame records.
+	REQUIRE(studio::ViewportCameraProbe::Open(editor, path));
+	CHECK(editor.Renderer.TextureHandle(image) == handle);
+	CHECK(studio::ViewportCameraProbe::RetiredProceduralTexture(editor, image));
+	REQUIRE(studio::ViewportCameraProbe::Open(editor, path));
+	CHECK(editor.Renderer.TextureHandle(image) == handle);
+	CHECK(studio::ViewportCameraProbe::RetiredProceduralTexture(editor, image));
+	editor.Interface.End();
+	const auto referencesImage = [texture = ImTextureRef(handle)._TexID] {
+		const auto *draw = ImGui::GetDrawData();
+		if (!draw) return false;
+		for (int index = 0; index < draw->CmdListsCount; ++index)
+			for (const auto &command : draw->CmdLists[index]->CmdBuffer)
+				if (command.ElemCount && command.TexRef._TexData == nullptr &&
+					command.TexRef._TexID == texture)
+					return true;
+		return false;
+	};
+	REQUIRE(referencesImage());
+	studio::ViewportCameraProbe::Present(editor, 0);
+	CHECK(editor.Renderer.TextureHandle(image) == handle);
+
+	// A full replacement frame retires the old image after every interface consumer.
+	studio::ViewportCameraProbe::PresentFrame(editor);
+	CHECK_FALSE(referencesImage());
+	CHECK(editor.Renderer.TextureHandle(image) == nullptr);
+	CHECK_FALSE(studio::ViewportCameraProbe::RetiredProceduralTexture(editor, image));
+}
+
+TEST_CASE(
+	"Studio refresh and reopen retain both procedural images until replacement interface presentation",
+	"[studio][procedural][preview-lifetime]"
+) {
+	using namespace engine;
+	const SavedGameScratch scratch;
+	struct ConfigRestore {
+		std::filesystem::path Previous = studio::ConfigRoot();
+		~ConfigRestore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore;
+	studio::SetConfigRoot(scratch.Root);
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	const auto first = studio::ViewportCameraProbe::CaptureProceduralPreview(editor);
+	void *const firstHandle = editor.Renderer.TextureHandle(first);
+	REQUIRE(firstHandle != nullptr);
+	const auto path = scratch.Root / "procedural-refresh.agame";
+	REQUIRE(studio::ViewportCameraProbe::Save(editor, path));
+
+	editor.Interface.Begin(1.0f / 60.0f);
+	studio::ViewportCameraProbe::DrawProceduralPreview(editor);
+	editor.Interface.End();
+	const auto second = studio::ViewportCameraProbe::RefreshProceduralPreview(editor);
+	CHECK(second != first);
+	void *const secondHandle = editor.Renderer.TextureHandle(second);
+	REQUIRE(secondHandle != nullptr);
+	CHECK(secondHandle != firstHandle);
+	CHECK(editor.Renderer.TextureHandle(first) == firstHandle);
+	CHECK(studio::ViewportCameraProbe::RetiredProceduralTexture(editor, first));
+	const auto lastGood = studio::ViewportCameraProbe::ProceduralImageState(editor);
+	CHECK_FALSE(studio::ViewportCameraProbe::TryRefreshProceduralPreview(editor));
+	CHECK(studio::ViewportCameraProbe::ProceduralImageState(editor) == lastGood);
+	CHECK(editor.Renderer.TextureHandle(first) == firstHandle);
+	CHECK(editor.Renderer.TextureHandle(second) == secondHandle);
+	bool referencesFirst = false;
+	const auto *draw = ImGui::GetDrawData();
+	REQUIRE(draw != nullptr);
+	for (int index = 0; index < draw->CmdListsCount; ++index)
+		for (const auto &command : draw->CmdLists[index]->CmdBuffer)
+			if (command.ElemCount && command.TexRef._TexData == nullptr &&
+				command.TexRef._TexID == ImTextureRef(firstHandle)._TexID)
+				referencesFirst = true;
+	REQUIRE(referencesFirst);
+
+	// Platform windows still consume the earlier frame after the preview capture.
+	CHECK(studio::ViewportCameraProbe::Open(editor, path));
+	CHECK(studio::ViewportCameraProbe::RetiredProceduralTexture(editor, first));
+	CHECK(studio::ViewportCameraProbe::RetiredProceduralTexture(editor, second));
+	CHECK(editor.Renderer.TextureHandle(first) == firstHandle);
+	CHECK(editor.Renderer.TextureHandle(second) == secondHandle);
+	CHECK(studio::ViewportCameraProbe::Open(editor, path));
+	CHECK(editor.Renderer.TextureHandle(first) == firstHandle);
+	CHECK(editor.Renderer.TextureHandle(second) == secondHandle);
+
+	studio::ViewportCameraProbe::PresentFrame(editor);
+	CHECK(editor.Renderer.TextureHandle(first) == nullptr);
+	CHECK(editor.Renderer.TextureHandle(second) == nullptr);
+	CHECK_FALSE(studio::ViewportCameraProbe::RetiredProceduralTexture(editor, first));
+	CHECK_FALSE(studio::ViewportCameraProbe::RetiredProceduralTexture(editor, second));
 }
