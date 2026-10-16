@@ -27,6 +27,8 @@ mono_add_library(bake
 		Engine::graphcore
 		Engine::assets
 		Engine::imagecodec
+		# Shared deterministic geometry also feeds live regional previews.
+		Engine::procedural
 
 		# L9, `shared`. The node vocabulary and the document format, split out at
 		# v0.13 so that `Engine::game` can read a pipeline without linking the
