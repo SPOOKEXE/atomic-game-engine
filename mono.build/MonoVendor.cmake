@@ -188,7 +188,8 @@ if(MONO_BUILD_CLIENT)
 		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/sdl/vulkan-texture-cancellation.patch"
 		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/sdl/vulkan-queues.patch"
 		"${CMAKE_SOURCE_DIR}/mono.build/private/AtomicGpuQueues.h")
-	mono_prepare_sdl_queues("${CMAKE_SOURCE_DIR}" mono_sdl_source)
+	mono_prepare_sdl_queues("${CMAKE_SOURCE_DIR}" mono_sdl_source mono_sdl_revision)
+	set(SDL_REVISION "${mono_sdl_revision}" CACHE STRING "Pinned SDL source and project patches" FORCE)
 	add_subdirectory("${mono_sdl_source}" "${CMAKE_BINARY_DIR}/mono.vendor/sdl" EXCLUDE_FROM_ALL)
 	if(MONO_SDL_VULKAN_QUEUES)
 		target_compile_definitions(SDL3-shared PRIVATE ATOMIC_GPU_QUEUE_EXTENSION)

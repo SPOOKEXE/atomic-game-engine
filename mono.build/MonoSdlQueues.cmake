@@ -3,7 +3,7 @@ include_guard(GLOBAL)
 # Materialize pinned SDL sources with the required Vulkan correctness patches and,
 # when enabled, the private queue patch. Git archives tracked sources only; a
 # content-keyed directory keeps concurrent presets from replacing active builds.
-function(mono_prepare_sdl_queues root output)
+function(mono_prepare_sdl_queues root output revision_output)
 	find_package(Git REQUIRED)
 	set(source "${root}/mono.vendor/sdl")
 	set(patches
@@ -77,6 +77,7 @@ function(mono_prepare_sdl_queues root output)
 	string(SUBSTRING "${fingerprint}" 0 16 key)
 	set(cache "${root}/.cache/vendor/sdl")
 	set(destination "${cache}/${key}")
+	set(${revision_output} "SDL-g${pinned_commit}-atomic-${key}" PARENT_SCOPE)
 	file(MAKE_DIRECTORY "${cache}")
 	file(LOCK "${cache}/prepare.lock" GUARD FUNCTION TIMEOUT 60 RESULT_VARIABLE result)
 	if(NOT result STREQUAL "0")
