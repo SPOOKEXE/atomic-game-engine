@@ -15,6 +15,7 @@
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/packing.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -297,6 +298,130 @@ TEST_CASE(
 		REQUIRE(frame.Ran(core::Name("depth-linearise")));
 		CheckPlanes(fixture.Render, document, "pinhole-" + std::to_string(target.Width), planes, view);
 	}
+}
+
+TEST_CASE(
+	"scaled depth exports resample the active rectangle of a padded target",
+	"[render][gpu][fixture][projection][.]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	const auto basis = InstallFixture(fixture.Render);
+	graph::PipelineDocument document;
+	const core::Name exported("fixture-scaled-depth");
+	constexpr uint32_t outputWidth = 32, outputHeight = 16;
+	const auto addExport = [&] {
+		document.Record({
+			.Kind = graph::EditKind::AddResource,
+			.Name = exported,
+			.Resource = graph::ResourceKind::Colour,
+			.Format = graph::ResourceFormat::R32F,
+			.Width = outputWidth,
+			.Height = outputHeight,
+		});
+		document.Record({
+			.Kind = graph::EditKind::AddNode,
+			.Name = core::Name("fixture-scaled-depth-export"),
+			.NodeKind = core::Name("depth-linearise"),
+			.Scope = graph::NodeScope::View,
+		});
+		document.Record(
+			{.Kind = graph::EditKind::Reads, .Target = core::Name("depth"), .Key = core::Name("depth")}
+		);
+		document.Record({.Kind = graph::EditKind::Writes, .Target = exported, .Key = core::Name("linear")});
+		document.Record({.Kind = graph::EditKind::Set, .Key = core::Name("background"), .Value = "zero"});
+	};
+	for (const auto &edit : basis.Edits()) {
+		if (edit.Kind == graph::EditKind::AddNode && edit.Name == core::Name("present")) addExport();
+		document.Record(edit);
+	}
+	graph::NodeKindSpec boundary;
+	boundary.Kind = core::Name("fixture-scaled-depth-boundary");
+	boundary.Scope = graph::NodeScope::Frame;
+	boundary.Queue = graph::ExecutionQueue::Cpu;
+	boundary.Category = graph::NodeCategory::Output;
+	boundary.Inputs.push_back({.Name = core::Name("depth"), .Kind = graph::ResourceKind::Texture});
+	REQUIRE(graph::RegisterNodeKind(boundary));
+	REQUIRE(fixture.Render.InstallNodeHandler(boundary.Kind, [](const graph::RunContext &) { return true; }));
+	document.Record(
+		{.Kind = graph::EditKind::AddNode,
+		 .Name = boundary.Kind,
+		 .NodeKind = boundary.Kind,
+		 .Scope = graph::NodeScope::Frame}
+	);
+	document.Record({.Kind = graph::EditKind::Reads, .Target = exported, .Key = core::Name("depth")});
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(graph::Build(document, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	REQUIRE(fixture.Render.SetPipeline(core::Name("fixture.scaled-depth"), pipeline));
+	const std::array planes{
+		Plane{-1.1f, 0.7f, 4, 0.72f, 0.46f, 0xFF0000FFu},
+		Plane{0.65f, -0.5f, 3, 0.52f, 0.65f, 0xFF00FF00u},
+		Plane{0.65f, -0.5f, 6, 1.5f, 1.5f, 0xFFFF0000u},
+	};
+	const auto instances = DrawPlanes(planes);
+	// Two fraction bits on each axis keep corner weights exact at four bits.
+	const render::SceneTarget target{80, 40};
+	render::View view;
+	view.World = 907;
+	view.Pipeline = core::Name("fixture.scaled-depth");
+	view.Instances = instances;
+	view.Target = &target;
+	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+	view.Camera.NearPlane = 0.25f;
+	view.Camera.FarPlane = 32;
+	render::OverlayImage overlay;
+	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(frame.Submitted);
+	REQUIRE(frame.Ran(core::Name("fixture-scaled-depth-export")));
+	// G-buffer attachments share the allocation; albedo reports its active fraction before publication.
+	const auto extent = fixture.Render.ResourceTextureExtent(core::Name("albedo"));
+	CHECK(extent.U < 1.0f);
+	CHECK(extent.V < 1.0f);
+	const auto source = ProjectPlanes(planes, target.Width, target.Height, view.Camera, {});
+	const double nearPlane = view.Camera.NearPlane, farPlane = view.Camera.FarPlane;
+	// A D24-quantized reference interpolates raw depth before distance, rather than blending metres.
+	const auto rawAt = [&](int x, int y) {
+		x = std::clamp(x, 0, static_cast<int>(target.Width) - 1);
+		y = std::clamp(y, 0, static_cast<int>(target.Height) - 1);
+		const double distance = source.Depth[static_cast<size_t>(y) * target.Width + x];
+		const double raw =
+			farPlane / (farPlane - nearPlane) - farPlane * nearPlane / ((farPlane - nearPlane) * distance);
+		constexpr double d24 = 16777215.0;
+		return std::round(raw * d24) / d24;
+	};
+	std::vector<float> expected(outputWidth * outputHeight);
+	size_t blendedPixels = 0;
+	for (uint32_t y = 0; y < outputHeight; ++y) {
+		for (uint32_t x = 0; x < outputWidth; ++x) {
+			const double sourceX = (x + 0.5) * target.Width / outputWidth - 0.5;
+			const double sourceY = (y + 0.5) * target.Height / outputHeight - 0.5;
+			const int left = static_cast<int>(std::floor(sourceX)),
+					  top = static_cast<int>(std::floor(sourceY));
+			const double horizontal = sourceX - left, vertical = sourceY - top;
+			const double upper = std::lerp(rawAt(left, top), rawAt(left + 1, top), horizontal);
+			const double lower = std::lerp(rawAt(left, top + 1), rawAt(left + 1, top + 1), horizontal);
+			const double raw = std::lerp(upper, lower, vertical);
+			blendedPixels += raw != rawAt(left, top);
+			expected[y * outputWidth + x] = static_cast<float>(
+				raw >= 0.999999 ? 0.0 : farPlane * nearPlane / (farPlane - raw * (farPlane - nearPlane))
+			);
+		}
+	}
+	CHECK(blendedPixels > 0);
+	const auto actual =
+		CaptureResource(fixture.Render, exported, 0, outputWidth, outputHeight, ImageFormat::R32Float);
+	ImageTolerance tolerance;
+	tolerance.Absolute = 0.001;
+	CheckImage(
+		fixture.Render,
+		"scaled-depth",
+		"linear-depth",
+		graph::Write(document),
+		{outputWidth, outputHeight, ImageFormat::R32Float, std::as_bytes(std::span(expected))},
+		actual.View(),
+		tolerance
+	);
 }
 
 TEST_CASE(

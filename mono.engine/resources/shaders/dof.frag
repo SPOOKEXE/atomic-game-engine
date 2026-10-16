@@ -14,16 +14,25 @@ layout(set = 3, binding = 0, std140) uniform LightingEffects {
 } effects;
 
 void main() {
-	vec4 source = texture(colourImage, inUv);
+	ivec2 outputSize = ivec2(round(1.0 / effects.target.zw));
+	bool samePixelGrid = all(equal(textureSize(colourImage, 0), outputSize)) &&
+		all(equal(textureSize(depthImage, 0), outputSize));
+	ivec2 pixel = ivec2(gl_FragCoord.xy);
+	vec4 source = samePixelGrid ? texelFetch(colourImage, pixel, 0) : texture(colourImage, inUv);
 	if (effects.depthOfField.x <= 0.0 || effects.depthOfField.w <= 0.0) {
 		outColour = source;
 		return;
 	}
 
-	float depth = texture(depthImage, inUv).r;
+	float depth = samePixelGrid ? texelFetch(depthImage, pixel, 0).r : texture(depthImage, inUv).r;
 	float focusRange = max(effects.depthOfField.z, 0.0001);
 	float circle = clamp((abs(depth - effects.depthOfField.y) - focusRange) / focusRange, 0.0, 1.0);
 	vec2 radius = effects.depthOfField.w * effects.depthOfField.x * circle * effects.target.zw;
+	if (samePixelGrid && circle <= 0.0 && all(equal(radius, vec2(0.0)))) {
+		// Focused pixels preserve their source instead of resampling across colour edges.
+		outColour = source;
+		return;
+	}
 	vec4 filtered = source * 0.2;
 	for (int axis = 0; axis < 2; ++axis) {
 		vec2 offset = axis == 0 ? vec2(radius.x, 0.0) : vec2(0.0, radius.y);

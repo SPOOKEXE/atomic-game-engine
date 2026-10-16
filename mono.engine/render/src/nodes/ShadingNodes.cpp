@@ -415,6 +415,8 @@ namespace engine::render {
 			const auto *background = node ? node->Parameter(core::Name("background")) : nullptr;
 			const bool zeroBackground = background && *background == "zero";
 			PbrUniforms uniforms = recording.Uniforms;
+			uniforms.Target.x = static_cast<float>(target.Width);
+			uniforms.Target.y = static_cast<float>(target.Height);
 			uniforms.Direction.w = zeroBackground ? 1.f : 0.f;
 			const auto &depthBindings = recording.DepthBindings;
 			const auto fullscreen = [&recording](
@@ -461,6 +463,8 @@ namespace engine::render {
 			PbrUniforms uniforms = recording.Uniforms;
 			// The shared depth shader writes binary R8 when this mode is selected.
 			// G-buffer depth omits blended draws, so the plane remains honest about its scope.
+			uniforms.Target.x = static_cast<float>(target.Width);
+			uniforms.Target.y = static_cast<float>(target.Height);
 			uniforms.Direction.w = 2.0f;
 			recording.Fullscreen(
 				context.Name,

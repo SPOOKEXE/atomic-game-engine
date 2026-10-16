@@ -498,6 +498,13 @@ TEST_CASE("depth of field preserves focus and blurs distant HDR detail on Vulkan
 	CHECK(enabled.DrawCalls == disabled.DrawCalls + 1);
 	const auto blurred = Capture16(fixture.Render, core::Name("effect-result"), view.Slot, 41, 31);
 	CHECK(Diff16Region(source, blurred, 41, 31, 0, 20) < 0.01);
+	const size_t rowBytes = (41 * 8 + 255) / 256 * 256;
+	for (uint32_t row = 0; row < 31; ++row) {
+		const size_t offset = row * rowBytes;
+		CHECK(
+			std::equal(source.begin() + offset, source.begin() + offset + 20 * 8, blurred.begin() + offset)
+		);
+	}
 	CHECK(Diff16Region(source, blurred, 41, 31, 21, 41) > 10.0);
 
 	lighting.DepthOfFieldIntensity = 0.0f;
