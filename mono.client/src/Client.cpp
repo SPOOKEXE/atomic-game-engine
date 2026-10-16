@@ -318,6 +318,7 @@ namespace client {
 			ENGINE_ERROR("interface and text scales must be finite and positive");
 			return false;
 		}
+		engine::gui::FontPackage interfaceFonts;
 		size_t fontPackageBytes = 0;
 		{
 			ENGINE_PROFILE_CAT("client.font package", engine::core::ProfileCategory::Assets);
@@ -337,11 +338,11 @@ namespace client {
 				std::vector<std::byte> bytes(static_cast<size_t>(size));
 				input.seekg(0);
 				if (!input.read(reinterpret_cast<char *>(bytes.data()), size)) continue;
-				if (InterfaceFonts.Add(engine::core::Name(std::string("fonts/") + file), face, bytes))
+				if (interfaceFonts.Add(engine::core::Name(std::string("fonts/") + file), face, bytes))
 					fontPackageBytes += bytes.size();
 			}
 		}
-		if (InterfaceFonts.Faces().empty()) {
+		if (interfaceFonts.Faces().empty()) {
 			ENGINE_WARN("no GUI font package; text shaping uses the fallback path");
 		}
 		if (!Settings.RenderPipelineFile.empty()) {
@@ -473,7 +474,7 @@ namespace client {
 			if (!Interface.Initialise(backend.Device, backend.ColourFormat)) {
 				ENGINE_WARN("no interface pass; a ScreenGui will not be drawn");
 			}
-			Interface.SetFontPackage(InterfaceFonts);
+			Interface.SetFontPackage(std::move(interfaceFonts));
 		}
 
 		if (Window != nullptr && !SDL_ShowWindow(Window)) {
@@ -1520,6 +1521,7 @@ namespace client {
 			}
 			SoundStage &stage = Stages[id.Index];
 			Universe_->Enter(id, [&](engine::ecs::Store &store) {
+				LoadPackagedAudio(store);
 				stage.Sync(store, Sound->Mixer(), Audible, ear, rate);
 				WeatherStages[id.Index].Sync(store, Sound->Mixer(), ear, Audible);
 			});
@@ -1628,7 +1630,7 @@ namespace client {
 					decoded->Seconds()
 				);
 			}
-			LoadPackagedAudio();
+			IndexPackagedAudio();
 			return true;
 		}
 		if (Settings.DataFactory && DataAudio && DataFactory && Rendered.IsValid()) {
@@ -1637,7 +1639,7 @@ namespace client {
 			DataAudio->ResetTickClock(clock, Sound->Format().SampleRate);
 			DataAudioEpoch = clock.WorldEpoch;
 		}
-		LoadPackagedAudio();
+		IndexPackagedAudio();
 		if (!decoded) {
 			return true;
 		}
@@ -3957,8 +3959,6 @@ namespace client {
 		{
 			ENGINE_PROFILE_CAT("debug panels", engine::core::ProfileCategory::Render);
 
-			Overlay.Resize(pixelWidth, pixelHeight);
-
 			// The panels are redrawn on a clock of their own, and presented on
 			// every frame from the texture they were last drawn into.
 			//
@@ -4081,6 +4081,7 @@ namespace client {
 				// stay the same apparent size on a high-DPI display.
 				panels.Scale = pixelWidth >= 2400 ? 3 : 2;
 
+				Overlay.Resize(pixelWidth, pixelHeight);
 				engine::render::DrawDebugPanels(Overlay, panels);
 				if (Menu.IsOpen()) {
 					DrawSettingsMenu(Overlay, Settings, Menu, MenuActions);
@@ -4093,6 +4094,7 @@ namespace client {
 				Metrics::Clear();
 			}
 			if (redraw && WaitingForPortalViews()) {
+				Overlay.Resize(pixelWidth, pixelHeight);
 				Overlay.Fill(0, 0, pixelWidth, 16, 0, 0, 0, 255);
 				engine::render::DebugText::Draw(Overlay, 4, 4, "Loading portals", 255, 255, 255, 1);
 			}
@@ -4105,6 +4107,7 @@ namespace client {
 					ClientAdornments.Build(store);
 				});
 				if (!ClientAdornments.Lines().empty() && pixelWidth > 0 && pixelHeight > 0) {
+					Overlay.Resize(pixelWidth, pixelHeight);
 					const engine::scene::CameraMatrices camera = engine::scene::ResolveCamera(
 						Views.CameraFrame(),
 						Views.Camera(),
@@ -4291,7 +4294,7 @@ namespace client {
 			request.Display.DevicePixelRatio = request.Display.FramebufferScale;
 			request.Display.InterfaceScale = Settings.InterfaceScale;
 			request.Display.TextScale = Settings.TextScale;
-			request.Fonts = InterfaceFonts.Faces().empty() ? nullptr : &InterfaceFonts;
+			request.Fonts = Interface.FontPackageForCompile();
 			request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
 
 			// Fed back from the previous frame's routing, deliberately: the

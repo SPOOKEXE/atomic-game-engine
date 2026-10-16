@@ -41,6 +41,7 @@
 #include <optional>
 #include <span>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace engine::ecs {
@@ -191,18 +192,23 @@ namespace engine::render {
 			return true;
 		}
 
-		// Copies the validated package used when compiled text was shaped.
-		// The package stays owned by this pass so a compiled list never borrows
-		// client-owned font bytes across a frame boundary.
-		void SetFontPackage(const gui::FontPackage &package) {
+		// Takes ownership of the validated package used to shape compiled text.
+		// The interface pass retains its bytes, so the client need not keep a copy.
+		void SetFontPackage(gui::FontPackage package) {
 			if (Fonts.has_value() && Fonts->Signature() == package.Signature()) {
 				return;
 			}
-			Fonts = package;
+			Fonts = std::move(package);
 			if (ShapedGlyphs.has_value()) {
 				ShapedGlyphs->Clear();
 			}
 			MeshDirty = true;
+		}
+
+		// Returns the retained package to the synchronous GUI compiler.
+		const gui::FontPackage *FontPackageForCompile() const {
+			if (!Fonts.has_value() || Fonts->Faces().empty()) return nullptr;
+			return &*Fonts;
 		}
 
 		// The list to draw next frame, and the canvas it was compiled against.

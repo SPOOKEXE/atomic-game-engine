@@ -882,10 +882,9 @@ namespace engine::render {
 
 		const std::span<const uint32_t> ordered = entityFlow.Get(orderedEntities);
 		{
-			// Two full copies of the draw list, per view, per frame. Small on a
-			// demo and not small on a scene, and nothing named them.
+			// The caller or Drawable retains the source; copy only its camera order.
 			ENGINE_PROFILE_CAT("copy draw lists", core::ProfileCategory::Render);
-			State->VisibleInstances.assign(instances.begin(), instances.end());
+			State->VisibleInstances = instances;
 			State->DrawOrder.assign(ordered.begin(), ordered.end());
 		}
 		const auto isEyeBody = [&source](const scene::DrawInstance &row) {

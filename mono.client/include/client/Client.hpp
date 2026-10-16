@@ -288,7 +288,8 @@ namespace client {
 		void PumpContent();
 		void RefreshContentBindings();
 		void LoadPackagedExampleTextures(ContentSession &content);
-		void LoadPackagedAudio();
+		void IndexPackagedAudio();
+		void LoadPackagedAudio(engine::ecs::Store &store);
 		void PumpContent(ContentSession &content, std::span<const engine::world::WorldId> worlds);
 		void RefreshImageGraphs(ContentSession &, std::span<const engine::world::WorldId>);
 
@@ -505,7 +506,6 @@ namespace client {
 		// the viewer, and `--worlds N` places four *views* rather than four
 		// overlays.
 		engine::render::InterfacePass Interface;
-		engine::gui::FontPackage InterfaceFonts;
 		engine::render::ViewportFrames ViewportImages;
 
 		// Whether the interface pass has been given its image resolver. Set
@@ -1025,6 +1025,8 @@ namespace client {
 		// must never resample on the callback thread, and a buffer converted
 		// per voice would do it once per part playing a footstep.
 		SoundCatalogue Audible;
+		// Pending files are consumed once, when a world first names the sound.
+		std::unordered_map<uint32_t, std::filesystem::path> PackagedAudio;
 
 		// The voices standing in for each world's `Sound` rows, one stage per
 		// world. Node ids are minted per mixer and an entity is only unique

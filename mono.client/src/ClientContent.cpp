@@ -7,6 +7,7 @@
 #include <engine/assets/Shader.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/examples/PackagedAssets.hpp>
@@ -14,6 +15,7 @@
 #include <engine/imagegraph/Reference.hpp>
 #include <engine/render/Animation.hpp>
 #include <engine/render/AutomaticMeshLod.hpp>
+#include <engine/scene/Audio.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
@@ -62,8 +64,9 @@ namespace client {
 		}
 	}
 
-	void Client::LoadPackagedAudio() {
-		ENGINE_PROFILE_CAT("client.packaged audio", engine::core::ProfileCategory::Assets);
+	void Client::IndexPackagedAudio() {
+		ENGINE_PROFILE_CAT("client.packaged audio index", engine::core::ProfileCategory::Assets);
+		PackagedAudio.clear();
 		std::filesystem::path directory = engine::core::Paths::Assets() / "audio";
 		std::error_code error;
 		if (!std::filesystem::is_directory(directory, error)) {
@@ -88,37 +91,58 @@ namespace client {
 			return;
 		}
 		std::sort(files.begin(), files.end());
+		for (const std::filesystem::path &path : files) {
+			const engine::core::Name name("audio/" + path.filename().generic_string());
+			PackagedAudio.emplace(name.Id(), path);
+		}
+	}
 
+	void Client::LoadPackagedAudio(engine::ecs::Store &store) {
+		if (PackagedAudio.empty()) return;
 		size_t registered = 0;
 		const engine::audio::AudioFormat target = Sound ? Sound->Format() : engine::audio::AudioFormat{};
-		for (const std::filesystem::path &path : files) {
+		store.Each<const engine::scene::Sound>([&](engine::ecs::Entity, const engine::scene::Sound &sound) {
+			const auto pending = PackagedAudio.find(sound.SoundId.Id());
+			if (pending == PackagedAudio.end()) return;
+			const std::filesystem::path path = std::move(pending->second);
+			PackagedAudio.erase(pending);
+			if (Audible.Find(sound.SoundId)) return;
+			ENGINE_PROFILE_CAT("client.packaged audio", engine::core::ProfileCategory::Assets);
 			std::ifstream input(path, std::ios::binary | std::ios::ate);
 			if (!input) {
 				ENGINE_WARN("audio: cannot read packaged sound {}", path.string());
-				continue;
+				return;
 			}
 			const std::streamoff size = input.tellg();
 			if (size <= 0) {
 				ENGINE_WARN("audio: packaged sound {} is empty", path.string());
-				continue;
+				return;
 			}
 			input.seekg(0);
 			std::vector<std::byte> bytes(static_cast<size_t>(size));
-			if (!input.read(reinterpret_cast<char *>(bytes.data()), size)) {
+			input.read(reinterpret_cast<char *>(bytes.data()), size);
+			engine::core::Metrics::Count("client.audio.packaged.reads", 1.0);
+			engine::core::Metrics::Count(
+				"client.audio.packaged.read-bytes", static_cast<double>(input.gcount())
+			);
+			if (!input) {
 				ENGINE_WARN("audio: cannot read packaged sound {}", path.string());
-				continue;
+				return;
 			}
+			engine::core::Metrics::Count("client.audio.packaged.decodes", 1.0);
 			const std::optional<engine::audio::SampleBuffer> samples = DecodeAudio(bytes);
 			if (!samples) {
 				ENGINE_WARN("audio: packaged sound {} is not audio this engine decodes", path.string());
-				continue;
+				return;
 			}
 
-			const engine::core::Name name("audio/" + path.filename().generic_string());
 			auto ready = std::make_shared<const engine::audio::SampleBuffer>(samples->ConvertTo(target));
-			if (Audible.Add(name, std::move(ready))) ++registered;
-		}
-		ENGINE_INFO("audio: {} packaged sound(s) registered", registered);
+			engine::core::Metrics::Count(
+				"client.audio.packaged.pcm-bytes", static_cast<double>(ready->Data().size_bytes())
+			);
+			if (Audible.Add(sound.SoundId, std::move(ready))) ++registered;
+		});
+		if (registered != 0) ENGINE_INFO("audio: {} packaged sound(s) registered", registered);
 	}
 
 	void Client::RefreshContentBindings() {
