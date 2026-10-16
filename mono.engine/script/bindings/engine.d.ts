@@ -2951,11 +2951,14 @@ type NpcCadenceReason = "current" | "first_update" | "scheduled" | "maximum_stal
 interface NpcCadenceAdmission { due: boolean; reason: NpcCadenceReason; token: number; }
 interface NpcPerception { visible: boolean; target_position: Vector3; }
 
-// Admission and publication for authored NPC perception and behaviour work.
+// Admission and publication for authored NPC work and optional presentation tiers.
+// Omitted presentation pairs preserve existing policy or keep new subjects full fidelity.
 declare interface UpdateCadenceService {
 	Configure(actor: Instance, identity: string, perceptionIntervalTicks: number,
 		perceptionMaximumStalenessTicks: number, behaviourIntervalTicks: number,
-		behaviourMaximumStalenessTicks: number, demotionDelayTicks: number): boolean;
+		behaviourMaximumStalenessTicks: number, demotionDelayTicks: number,
+		visualPoseIntervalTicks?: number, visualPoseMaximumStalenessTicks?: number,
+		cosmeticEffectsIntervalTicks?: number, cosmeticEffectsMaximumStalenessTicks?: number): boolean;
 	SetCombat(actor: Instance, active: boolean): boolean;
 	BeginUpdate(actor: Instance, domain: NpcCadenceDomain, sourceRevision: number): NpcCadenceAdmission;
 	CommitPerception(actor: Instance, token: number, sourceRevision: number,

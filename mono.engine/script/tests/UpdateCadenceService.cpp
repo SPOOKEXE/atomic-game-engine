@@ -13,6 +13,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <optional>
 #include <string_view>
 
 TEST_SUITE_ID("engine.script.updatecadenceservice")
@@ -75,6 +77,94 @@ TEST_CASE("NPC cadence commits complete perception and movement at the fixed tic
 	CHECK(store.Get<NpcBehaviour>(actor)->MoveDirection == Vector3{0, 0, 1});
 	CHECK(store.Get<engine::scene::Humanoid>(actor)->MoveDirection == Vector3{0, 0, 1});
 	CHECK_FALSE(NpcCombatReady(store, actor, 1));
+}
+
+TEST_CASE(
+	"NPC configuration preserves omitted presentation tiers and invalidates changed admissions",
+	"[script][cadence-configure-tiers]"
+) {
+	using engine::scene::CadenceInterval;
+	using engine::scene::UpdateCadence;
+	using engine::script::NpcCadencePending;
+	engine::scene::EnsureClassTree();
+	engine::scene::RegisterSceneComponents();
+	engine::script::RegisterScriptComponents();
+	Store store("town_configure_tiers");
+	const Entity actor = Actor(store, "Guard");
+	REQUIRE(Configure(store, actor, "town.guard.tiers"));
+	const auto index = [](UpdateDomain domain) { return static_cast<size_t>(domain); };
+	const auto *policy = store.Get<UpdateCadence>(actor);
+	REQUIRE(policy != nullptr);
+	CHECK(policy->Domains[index(UpdateDomain::VisualPose)].IntervalTicks == 1);
+	CHECK(policy->Domains[index(UpdateDomain::CosmeticEffects)].IntervalTicks == 1);
+	const uint64_t initialRevision = policy->Revision;
+
+	REQUIRE(ConfigureNpcCadence(store, actor, "town.guard.tiers", {4, 7}, {7, 11}, 3, CadenceInterval{4, 8}));
+	policy = store.Get<UpdateCadence>(actor);
+	REQUIRE(policy != nullptr);
+	CHECK(policy->Revision == initialRevision + 1);
+	CHECK(policy->Domains[index(UpdateDomain::VisualPose)].IntervalTicks == 4);
+	CHECK(policy->Domains[index(UpdateDomain::VisualPose)].MaximumStalenessTicks == 8);
+	CHECK(policy->Domains[index(UpdateDomain::CosmeticEffects)].IntervalTicks == 1);
+
+	REQUIRE(ConfigureNpcCadence(
+		store, actor, "town.guard.tiers", {4, 7}, {7, 11}, 3, std::nullopt, CadenceInterval{8, 16}
+	));
+	policy = store.Get<UpdateCadence>(actor);
+	REQUIRE(policy != nullptr);
+	CHECK(policy->Revision == initialRevision + 2);
+	CHECK(policy->Domains[index(UpdateDomain::VisualPose)].IntervalTicks == 4);
+	CHECK(policy->Domains[index(UpdateDomain::CosmeticEffects)].IntervalTicks == 8);
+	CHECK(policy->Domains[index(UpdateDomain::CosmeticEffects)].MaximumStalenessTicks == 16);
+
+	const auto oldAdmission = BeginNpcUpdate(store, 73, actor, UpdateDomain::Perception, 1);
+	REQUIRE(oldAdmission.Due);
+	REQUIRE(Configure(store, actor, "town.guard.tiers"));
+	policy = store.Get<UpdateCadence>(actor);
+	REQUIRE(policy != nullptr);
+	CHECK(policy->Revision == initialRevision + 2);
+	CHECK(
+		store.Get<NpcCadencePending>(actor)->Domains[index(UpdateDomain::Perception)].Token ==
+		oldAdmission.Token
+	);
+	REQUIRE(CommitNpcPerception(store, 73, actor, oldAdmission.Token, 1, true, {}, true));
+
+	const auto nextAdmission = BeginNpcUpdate(store, 73, actor, UpdateDomain::Behaviour, 1);
+	REQUIRE(nextAdmission.Due);
+	REQUIRE(
+		ConfigureNpcCadence(store, actor, "town.guard.tiers", {4, 7}, {7, 11}, 3, CadenceInterval{5, 10})
+	);
+	policy = store.Get<UpdateCadence>(actor);
+	REQUIRE(policy != nullptr);
+	CHECK(policy->Revision == initialRevision + 3);
+	CHECK(policy->Domains[index(UpdateDomain::VisualPose)].IntervalTicks == 5);
+	CHECK(policy->Domains[index(UpdateDomain::CosmeticEffects)].IntervalTicks == 8);
+	CHECK(store.Get<NpcCadencePending>(actor)->Domains[index(UpdateDomain::Behaviour)].Token == 0);
+	CHECK_FALSE(CommitNpcBehaviour(store, 73, actor, nextAdmission.Token, 1, {}, true));
+
+	const auto pending = BeginNpcUpdate(store, 73, actor, UpdateDomain::Behaviour, 1);
+	REQUIRE(pending.Due);
+	const std::array<CadenceInterval, 3> invalid{{
+		{0, 1},
+		{engine::scene::MAXIMUM_CADENCE_TICKS + 1, engine::scene::MAXIMUM_CADENCE_TICKS + 1},
+		{8, 7},
+	}};
+	for (const auto interval : invalid) {
+		CHECK_FALSE(ConfigureNpcCadence(
+			store, actor, "town.guard.tiers", {4, 7}, {7, 11}, 3, interval, CadenceInterval{9, 18}
+		));
+		CHECK_FALSE(ConfigureNpcCadence(
+			store, actor, "town.guard.tiers", {4, 7}, {7, 11}, 3, CadenceInterval{6, 12}, interval
+		));
+		CHECK(store.Get<UpdateCadence>(actor)->Revision == initialRevision + 3);
+		CHECK(
+			store.Get<NpcCadencePending>(actor)->Domains[index(UpdateDomain::Behaviour)].Token ==
+			pending.Token
+		);
+	}
+	CHECK(store.Get<UpdateCadence>(actor)->Domains[index(UpdateDomain::VisualPose)].IntervalTicks == 5);
+	CHECK(store.Get<UpdateCadence>(actor)->Domains[index(UpdateDomain::CosmeticEffects)].IntervalTicks == 8);
+	CHECK(CommitNpcBehaviour(store, 73, actor, pending.Token, 1, {}, true));
 }
 
 TEST_CASE("promotion requires same-tick refreshed results before combat", "[script][cadence]") {

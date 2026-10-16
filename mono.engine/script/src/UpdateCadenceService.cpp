@@ -205,11 +205,15 @@ namespace engine::script {
 		std::string_view persistentIdentity,
 		scene::CadenceInterval perception,
 		scene::CadenceInterval behaviour,
-		uint32_t demotionDelayTicks
+		uint32_t demotionDelayTicks,
+		std::optional<scene::CadenceInterval> visualPose,
+		std::optional<scene::CadenceInterval> cosmeticEffects
 	) {
 		if (store.AdoptOnly() || !store.Alive(actor) || FindNpcHumanoid(store, actor) == ecs::NULL_ENTITY ||
 			persistentIdentity.empty() || persistentIdentity.size() > scene::MAXIMUM_CADENCE_IDENTITY_BYTES ||
 			!NpcValidInterval(perception) || !NpcValidInterval(behaviour) ||
+			(visualPose && !NpcValidInterval(*visualPose)) ||
+			(cosmeticEffects && !NpcValidInterval(*cosmeticEffects)) ||
 			demotionDelayTicks > scene::MAXIMUM_CADENCE_TICKS)
 			return false;
 		if (!store.Has<NpcCadencePending>(actor)) {
@@ -228,24 +232,27 @@ namespace engine::script {
 
 		scene::UpdateCadence policy = existing != nullptr ? *existing : scene::UpdateCadence{};
 		const core::Name identity(persistentIdentity);
-		const bool changed =
-			existing == nullptr || policy.Identity != identity || policy.Owner != actor ||
-			policy.Domains[NpcDomainIndex(scene::UpdateDomain::Perception)].IntervalTicks !=
-				perception.IntervalTicks ||
-			policy.Domains[NpcDomainIndex(scene::UpdateDomain::Perception)].MaximumStalenessTicks !=
-				perception.MaximumStalenessTicks ||
-			policy.Domains[NpcDomainIndex(scene::UpdateDomain::Behaviour)].IntervalTicks !=
-				behaviour.IntervalTicks ||
-			policy.Domains[NpcDomainIndex(scene::UpdateDomain::Behaviour)].MaximumStalenessTicks !=
-				behaviour.MaximumStalenessTicks ||
-			policy.DemotionDelayTicks != demotionDelayTicks;
-		if (changed && existing != nullptr && policy.Revision == std::numeric_limits<uint64_t>::max())
-			return false;
 		policy.Identity = identity;
 		policy.Owner = actor;
 		policy.Domains[NpcDomainIndex(scene::UpdateDomain::Perception)] = perception;
 		policy.Domains[NpcDomainIndex(scene::UpdateDomain::Behaviour)] = behaviour;
+		if (visualPose) policy.Domains[NpcDomainIndex(scene::UpdateDomain::VisualPose)] = *visualPose;
+		if (cosmeticEffects)
+			policy.Domains[NpcDomainIndex(scene::UpdateDomain::CosmeticEffects)] = *cosmeticEffects;
 		policy.DemotionDelayTicks = demotionDelayTicks;
+		bool changed = existing == nullptr || policy.Identity != existing->Identity ||
+					   policy.Owner != existing->Owner ||
+					   policy.DemotionDelayTicks != existing->DemotionDelayTicks;
+		if (existing != nullptr) {
+			for (size_t index = 0; index < scene::UPDATE_DOMAIN_COUNT; ++index) {
+				changed = changed ||
+						  policy.Domains[index].IntervalTicks != existing->Domains[index].IntervalTicks ||
+						  policy.Domains[index].MaximumStalenessTicks !=
+							  existing->Domains[index].MaximumStalenessTicks;
+			}
+		}
+		if (changed && existing != nullptr && policy.Revision == std::numeric_limits<uint64_t>::max())
+			return false;
 		if (changed && existing != nullptr) policy.Revision++;
 		if (!scene::ValidUpdateCadence(policy)) return false;
 
@@ -419,6 +426,22 @@ namespace engine::script {
 			return static_cast<uint64_t>(number);
 		}
 
+		std::optional<scene::CadenceInterval>
+		NpcScriptOptionalInterval(ScriptCall &call, size_t intervalIndex, size_t maximumIndex) {
+			const bool absentInterval = call.IsNil(intervalIndex);
+			const bool absentMaximum = call.IsNil(maximumIndex);
+			if (absentInterval && absentMaximum) return std::nullopt;
+			if (absentInterval != absentMaximum)
+				call.Raise("cadence interval and maximum staleness must be supplied together");
+			const scene::CadenceInterval interval{
+				static_cast<uint32_t>(NpcScriptInteger(call, intervalIndex, 1, scene::MAXIMUM_CADENCE_TICKS)),
+				static_cast<uint32_t>(NpcScriptInteger(call, maximumIndex, 1, scene::MAXIMUM_CADENCE_TICKS))
+			};
+			if (interval.MaximumStalenessTicks < interval.IntervalTicks)
+				call.Raise("cadence maximum staleness must be at least the interval");
+			return interval;
+		}
+
 		bool NpcScriptBoolean(ScriptCall &call, size_t index) {
 			ScriptValue value;
 			CodecStatus status = CodecStatus::Ok;
@@ -506,9 +529,11 @@ namespace engine::script {
 			};
 			const auto hold =
 				static_cast<uint32_t>(NpcScriptInteger(call, 6, 0, scene::MAXIMUM_CADENCE_TICKS));
-			call.ReturnBoolean(
-				ConfigureNpcCadence(call.World(), actor, identity, perception, behaviour, hold)
-			);
+			const auto visualPose = NpcScriptOptionalInterval(call, 7, 8);
+			const auto cosmeticEffects = NpcScriptOptionalInterval(call, 9, 10);
+			call.ReturnBoolean(ConfigureNpcCadence(
+				call.World(), actor, identity, perception, behaviour, hold, visualPose, cosmeticEffects
+			));
 		}
 
 		void SetNpcServiceCombat(ScriptCall &call) {

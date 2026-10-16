@@ -1,6 +1,7 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Characters.hpp>
 #include <engine/physics/Pipeline.hpp>
@@ -57,6 +58,7 @@ namespace {
 	TownResult RunTown(Language language) {
 		engine::scene::EnsureClassTree();
 		engine::scene::RegisterSceneComponents();
+		engine::effects::RegisterEffectClasses();
 		Store store("town_cadence_parity");
 		engine::physics::PreparePhysicsWorld(store);
 		const auto runtime = engine::script::MakeRuntime(store, language);
@@ -150,6 +152,7 @@ namespace {
 	std::vector<CrowdSample> RunCrowdTown(Language language) {
 		using namespace engine;
 		scene::RegisterSceneClasses();
+		effects::RegisterEffectClasses();
 		Store store("town_cadence_same_world_crowd");
 		physics::PreparePhysicsWorld(store);
 		const auto runtime = script::MakeRuntime(store, language);
@@ -443,6 +446,136 @@ TEST_CASE(
 		engine::ecs::AttributeValue value;
 		REQUIRE(engine::ecs::GetAttribute(store, guard, engine::core::Name("CadenceParity"), value));
 		CHECK(value.String == "ok");
+	}
+}
+
+TEST_CASE(
+	"paired VMs configure presentation tiers without losing pending admissions on refusal",
+	"[scripting][cadence-configure-tiers]"
+) {
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		engine::scene::EnsureClassTree();
+		engine::scene::RegisterSceneComponents();
+		Store store("cadence_configure_tiers");
+		const auto runtime = engine::script::MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+		const char *source = language == Language::Luau ? R"(
+			local cadence = game:GetService('UpdateCadenceService')
+			local guard = Instance.new('Humanoid')
+			guard.Name = 'Tier Guard'
+			guard.Parent = workspace
+			local legacy = Instance.new('Humanoid')
+			legacy.Name = 'Legacy Guard'
+			legacy.Parent = workspace
+			assert(cadence:Configure(legacy, 'town.guard.legacy', 4, 7, 7, 11, 3))
+			assert(cadence:Configure(guard, 'town.guard.tiers', 4, 7, 7, 11, 3, 4, 8, 8, 16))
+			local first = cadence:BeginUpdate(guard, 'perception', 1)
+			assert(first.due)
+			assert(cadence:Configure(guard, 'town.guard.tiers', 4, 7, 7, 11, 3))
+			local function reject(poseInterval, poseMax, effectInterval, effectMax)
+				local ok = pcall(function()
+					cadence:Configure(guard, 'town.guard.tiers', 4, 7, 7, 11, 3,
+						poseInterval, poseMax, effectInterval, effectMax)
+				end)
+				assert(not ok)
+			end
+			reject(0, 8)
+			reject(1048577, 1048577)
+			reject(8, 7)
+			reject('4', 8)
+			reject(4.5, 8)
+			reject(0 / 0, 8)
+			reject(4)
+			reject(nil, 8)
+			reject(nil, nil, 0, 8)
+			reject(nil, nil, 1048577, 1048577)
+			reject(nil, nil, 8, 7)
+			reject(nil, nil, '8', 16)
+			reject(nil, nil, 8.5, 16)
+			reject(nil, nil, 0 / 0, 16)
+			reject(nil, nil, 8)
+			reject(nil, nil, nil, 16)
+			assert(cadence:CommitPerception(guard, first.token, 1, true, Vector3.new(0, 0, 0), true))
+			local next = cadence:BeginUpdate(guard, 'behaviour', 1)
+			assert(next.due)
+			assert(cadence:Configure(guard, 'town.guard.tiers', 4, 7, 7, 11, 3, 5, 10))
+			assert(not cadence:CommitBehaviour(guard, next.token, 1, Vector3.new(0, 0, 0), true))
+			assert(cadence:Configure(guard, 'town.guard.tiers', 4, 7, 7, 11, 3, nil, nil, 9, 18))
+		)"
+														: R"(
+			const cadence = game.GetService('UpdateCadenceService');
+			const guard = Instance.new('Humanoid');
+			guard.Name = 'Tier Guard';
+			guard.Parent = workspace;
+			const legacy = Instance.new('Humanoid');
+			legacy.Name = 'Legacy Guard';
+			legacy.Parent = workspace;
+			if (!cadence.Configure(legacy, 'town.guard.legacy', 4, 7, 7, 11, 3))
+			    throw new Error('legacy configure');
+			if (!cadence.Configure(guard, 'town.guard.tiers', 4, 7, 7, 11, 3, 4, 8, 8, 16))
+			    throw new Error('initial configure');
+			const first = cadence.BeginUpdate(guard, 'perception', 1);
+			if (!first.due || !cadence.Configure(guard, 'town.guard.tiers', 4, 7, 7, 11, 3))
+			    throw new Error('old configure');
+			function reject(...args) {
+			    let raised = false;
+			    try { cadence.Configure(guard, 'town.guard.tiers', 4, 7, 7, 11, 3, ...args); }
+			    catch (error) { raised = true; }
+			    if (!raised) throw new Error('invalid tier accepted');
+			}
+			reject(0, 8);
+			reject(1048577, 1048577);
+			reject(8, 7);
+			reject('4', 8);
+			reject(4.5, 8);
+			reject(NaN, 8);
+			reject(4);
+			reject(undefined, 8);
+			reject(undefined, undefined, 0, 8);
+			reject(undefined, undefined, 1048577, 1048577);
+			reject(undefined, undefined, 8, 7);
+			reject(undefined, undefined, '8', 16);
+			reject(undefined, undefined, 8.5, 16);
+			reject(undefined, undefined, NaN, 16);
+			reject(undefined, undefined, 8);
+			reject(undefined, undefined, undefined, 16);
+			if (!cadence.CommitPerception(guard, first.token, 1, true, Vector3.new(0, 0, 0), true))
+			    throw new Error('admission changed on refusal');
+			const next = cadence.BeginUpdate(guard, 'behaviour', 1);
+			if (!next.due || !cadence.Configure(guard, 'town.guard.tiers', 4, 7, 7, 11, 3, 5, 10))
+			    throw new Error('pose configure');
+			if (cadence.CommitBehaviour(guard, next.token, 1, Vector3.new(0, 0, 0), true))
+			    throw new Error('stale admission accepted');
+			if (!cadence.Configure(guard, 'town.guard.tiers', 4, 7, 7, 11, 3,
+			    undefined, undefined, 9, 18)) throw new Error('effect configure');
+		)";
+		const bool ran = runtime->Run(source);
+		INFO(runtime->LastError());
+		REQUIRE(ran);
+		const Entity actor = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Tier Guard");
+		const Entity legacy = store.FindFirstChild(engine::scene::WorkspaceOf(store), "Legacy Guard");
+		REQUIRE(actor != engine::ecs::NULL_ENTITY);
+		REQUIRE(legacy != engine::ecs::NULL_ENTITY);
+		const auto *policy = store.Get<engine::scene::UpdateCadence>(actor);
+		const auto *legacyPolicy = store.Get<engine::scene::UpdateCadence>(legacy);
+		REQUIRE(policy != nullptr);
+		REQUIRE(legacyPolicy != nullptr);
+		CHECK(policy->Revision == 3);
+		CHECK(
+			legacyPolicy->Domains[static_cast<size_t>(engine::scene::UpdateDomain::VisualPose)]
+				.IntervalTicks == 1
+		);
+		CHECK(
+			legacyPolicy->Domains[static_cast<size_t>(engine::scene::UpdateDomain::CosmeticEffects)]
+				.IntervalTicks == 1
+		);
+		const auto &pose = policy->Domains[static_cast<size_t>(engine::scene::UpdateDomain::VisualPose)];
+		const auto &effects =
+			policy->Domains[static_cast<size_t>(engine::scene::UpdateDomain::CosmeticEffects)];
+		CHECK(pose.IntervalTicks == 5);
+		CHECK(pose.MaximumStalenessTicks == 10);
+		CHECK(effects.IntervalTicks == 9);
+		CHECK(effects.MaximumStalenessTicks == 18);
 	}
 }
 

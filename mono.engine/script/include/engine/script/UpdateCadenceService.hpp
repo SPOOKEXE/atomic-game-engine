@@ -11,6 +11,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 namespace engine::ecs {
@@ -57,15 +58,17 @@ namespace engine::script {
 	// Registers saved outputs and transient admissions before Components::Seal.
 	void RegisterUpdateCadenceServiceComponents();
 
-	// Configures only perception and behaviour. Existing pose/effect intervals stay
-	// authored where they are. A differing existing identity is refused.
+	// Configures perception and behaviour, plus supplied pose/effect intervals.
+	// Omitted intervals retain existing values. A differing identity is refused.
 	bool ConfigureNpcCadence(
 		ecs::Store &store,
 		ecs::Entity actor,
 		std::string_view persistentIdentity,
 		scene::CadenceInterval perception,
 		scene::CadenceInterval behaviour,
-		uint32_t demotionDelayTicks
+		uint32_t demotionDelayTicks,
+		std::optional<scene::CadenceInterval> visualPose = std::nullopt,
+		std::optional<scene::CadenceInterval> cosmeticEffects = std::nullopt
 	);
 
 	// Changes combat fidelity without trusting a script flag for player ownership.
