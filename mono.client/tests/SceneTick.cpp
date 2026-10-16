@@ -1221,6 +1221,16 @@ TEST_CASE("the magic camera orbit does not rebuild static terrain draw rows", "[
 	// transform as it orbits the 5k-plus terrain parts.
 	session.Tick(1);
 	REQUIRE(session.Drawn().size() > 500);
+	const std::vector<DrawInstance> previousDrawn(session.Drawn().begin(), session.Drawn().end());
+	const ActiveCamera *activeCamera = session.World.Resource<ActiveCamera>();
+	REQUIRE(activeCamera != nullptr);
+	const engine::ecs::Entity cameraEntity = activeCamera->Entity;
+	const Transform *cameraTransform = session.World.Get<Transform>(cameraEntity);
+	REQUIRE(cameraTransform != nullptr);
+	const engine::core::CFrame previousCameraFrame = cameraTransform->Frame;
+	const uint64_t previousTransformEpoch = session.World.ComponentChangeVersion<Transform>();
+	// Match PrepareTick: consumed setup writes do not belong to the next batch.
+	session.World.ClearChanges();
 
 	FrameGraph::SetEnabled(true);
 	FrameGraph::BeginFrame();
@@ -1234,6 +1244,29 @@ TEST_CASE("the magic camera orbit does not rebuild static terrain draw rows", "[
 			return span.Name == name;
 		});
 	};
+
+	const ActiveCamera *currentActiveCamera = session.World.Resource<ActiveCamera>();
+	REQUIRE(currentActiveCamera != nullptr);
+	CHECK(currentActiveCamera->Entity == cameraEntity);
+	const Transform *currentCameraTransform = session.World.Get<Transform>(cameraEntity);
+	REQUIRE(currentCameraTransform != nullptr);
+	CHECK(
+		(currentCameraTransform->Frame.Position != previousCameraFrame.Position ||
+		 currentCameraTransform->Frame.Rotation() != previousCameraFrame.Rotation())
+	);
+	CHECK(session.World.ComponentChangeVersion<Transform>() > previousTransformEpoch);
+	const std::vector<DrawInstance> &currentDrawn = session.Drawn();
+	REQUIRE(currentDrawn.size() == previousDrawn.size());
+	for (size_t index = 0; index < previousDrawn.size(); ++index) {
+		CHECK(currentDrawn[index].Source == previousDrawn[index].Source);
+		CHECK(currentDrawn[index].Frame.Position == previousDrawn[index].Frame.Position);
+		CHECK(currentDrawn[index].Frame.Rotation() == previousDrawn[index].Frame.Rotation());
+	}
+	session.World.EachChanged<Transform>([&](engine::ecs::Entity entity, const Transform &) {
+		CHECK_FALSE(std::ranges::any_of(previousDrawn, [entity](const DrawInstance &instance) {
+			return instance.Source == entity.Id;
+		}));
+	});
 
 	// A global Transform epoch is not enough to invalidate visible rows. The
 	// old path refreshed every terrain instance here because the eye moved.
