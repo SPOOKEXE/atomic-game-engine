@@ -2245,3 +2245,15 @@ portal-query-bench samples="101" build_preset="bench":
     cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_physics
     MONO_BENCH_LATENCY=1 ./.cache/build/{{build_preset}}/bench/bench_physics --suite engine.physics.bench.portal-queries --samples {{samples}}
+
+# Native cadence consumers, including physics, animation and curved beam geometry.
+update-cadence-native-bench samples="3" build_preset="bench":
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_client
+    ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.native --samples {{samples}}
+
+# The paired town scripts through the real Luau and JavaScript runtimes.
+update-cadence-town-bench samples="3" build_preset="bench":
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_client
+    ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.town --samples {{samples}}

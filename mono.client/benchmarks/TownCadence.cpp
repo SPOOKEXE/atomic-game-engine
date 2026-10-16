@@ -1,0 +1,393 @@
+#include "CadenceMeasurements.hpp"
+
+#include <engine/core/Paths.hpp>
+#include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Scheduler.hpp>
+#include <engine/physics/Broadphase.hpp>
+#include <engine/physics/Characters.hpp>
+#include <engine/physics/Pipeline.hpp>
+#include <engine/physics/Query.hpp>
+#include <engine/render/Animation.hpp>
+#include <engine/render/WorldPresentation.hpp>
+#include <engine/scene/Animation.hpp>
+#include <engine/scene/Controls.hpp>
+#include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
+#include <engine/scene/Skinning.hpp>
+#include <engine/script/Runtime.hpp>
+#include <engine/script/UpdateCadenceService.hpp>
+#include <engine/scripthost/Runtime.hpp>
+#include <engine/testing/Bench.hpp>
+
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <memory>
+
+TEST_SUITE_ID("client.bench.update-cadence.town")
+
+namespace cadence_town_bench {
+
+	using namespace cadence_bench;
+	using namespace engine;
+	using script::Language;
+	std::string ReadTown(Language language) {
+		const auto filename = language == Language::Luau ? "TownCadence.luau" : "TownCadence.js";
+		auto source = core::Paths::Assets() / "examples/scripts" / filename;
+		if (!std::filesystem::is_regular_file(source))
+			source = std::filesystem::path(__FILE__).parent_path().parent_path().parent_path() /
+					 "mono.engine/examples/assets/scripts" / filename;
+		std::ifstream input(source, std::ios::binary);
+		Require(input.good(), "cadence could not read actual TownCadence example");
+		return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+	}
+	struct Citizen {
+		Entity Model, Root, Humanoid, Animator, Track, Bone;
+		Vector3 InitialPosition;
+		uint64_t BeforeDeadline = 0, BeforePerception = 0, BeforeBehaviour = 0;
+		float BeforeDistance = 0;
+		bool Fighting = false;
+	};
+	struct Town {
+		Store Storage{"bench.cadence.town"};
+		ecs::Scheduler Physics;
+		std::shared_ptr<script::Runtime> Runtime;
+		std::array<Citizen, 2> Citizens;
+		BeamSet Beams;
+		Entity Target, TargetHumanoid, Player;
+		float BeforeHealth = 0;
+
+		Town(Language language, bool full, const std::string &source) {
+			scene::RegisterSceneClasses();
+			render::RegisterPresentationComponents();
+			effects::RegisterEffectClasses();
+			physics::PreparePhysicsWorld(Storage);
+			Runtime = script::MakeRuntime(Storage, language);
+			Require(Runtime != nullptr, "cadence town VM unavailable");
+			if (!Runtime->Run(source, "TownCadence")) throw std::runtime_error(Runtime->LastError());
+			physics::RegisterPhysicsSystems(Physics);
+			physics::RegisterCharacterSystems(Physics);
+			const auto workspace = scene::WorkspaceOf(Storage);
+			Target = Storage.FindFirstChild(workspace, "Practice Target");
+			TargetHumanoid = Storage.FindFirstChild(Target, "Humanoid");
+			Require(
+				Target != ecs::NULL_ENTITY && TargetHumanoid != ecs::NULL_ENTITY,
+				"cadence town target missing"
+			);
+			auto *health = Storage.GetMutable<scene::Humanoid>(TargetHumanoid);
+			health->MaxHealth = 1000000;
+			health->Health = 1000000;
+			Player = scene::AddPlayer(Storage, "Cadence town owner");
+			Require(Player != ecs::NULL_ENTITY, "cadence town player missing");
+			for (size_t index = 0; index < Citizens.size(); ++index) {
+				auto &citizen = Citizens[index];
+				citizen.Model = Storage.FindFirstChild(workspace, index == 0 ? "North Guard" : "South Guard");
+				citizen.Root = Storage.FindFirstChild(citizen.Model, "Body");
+				citizen.Humanoid = Storage.FindFirstChild(citizen.Model, "Humanoid");
+				citizen.Animator = Storage.FindFirstChild(citizen.Root, "Animator");
+				citizen.Track = Storage.FindFirstChild(citizen.Animator, "AnimationTrack");
+				citizen.Bone = Storage.FindFirstChild(citizen.Root, "Root");
+				Require(
+					citizen.Model != ecs::NULL_ENTITY && citizen.Root != ecs::NULL_ENTITY &&
+						citizen.Humanoid != ecs::NULL_ENTITY && citizen.Animator != ecs::NULL_ENTITY &&
+						citizen.Track != ecs::NULL_ENTITY && citizen.Bone != ecs::NULL_ENTITY,
+					"cadence actual town citizen hierarchy changed"
+				);
+				citizen.InitialPosition = Storage.Get<scene::Transform>(citizen.Root)->Frame.Position;
+				const auto identity = Storage.Get<scene::UpdateCadence>(citizen.Model)->Identity;
+				auto policy = Policy(identity.Text(), full);
+				Storage.Set(citizen.Model, policy);
+			}
+			Beams.Create(Storage, 2, full, 16, {Citizens[0].Model, Citizens[1].Model});
+			physics::SyncBroadphase(Storage);
+		}
+		void Author(Window window) {
+			const auto north = Storage.Get<scene::Transform>(Citizens[0].Root)->Frame.Position;
+			const auto south = Storage.Get<scene::Transform>(Citizens[1].Root)->Frame.Position;
+			Vector3 target{0, 2.5f, -500};
+			if (window == Window::SingleCombat) target = north + Vector3{-3, 0, -4};
+			if (window == Window::CombatBurst) target = (north + south) * .5f + Vector3{0, 0, -5};
+			const bool targetMoved = Storage.Get<scene::Transform>(Target)->Frame.Position != target;
+			if (targetMoved) Storage.GetMutable<scene::Transform>(Target)->Frame.Position = target;
+			// Publish the authored target move before the script's real Raycast.
+			// The scheduler still performs its ordinary physics work inside the owner.
+			if (targetMoved) physics::SyncBroadphase(Storage);
+			for (size_t index = 0; index < Citizens.size(); ++index) {
+				auto &citizen = Citizens[index];
+				if (window == Window::PlayerOwned && index == 0)
+					Storage.Set(citizen.Model, scene::NetworkOwner{Player});
+				else if (Storage.Has<scene::NetworkOwner>(citizen.Model))
+					Storage.Remove<scene::NetworkOwner>(citizen.Model);
+				if (window == Window::Invalidation)
+					++Storage.GetMutable<scene::UpdateCadence>(citizen.Model)->Revision;
+				citizen.BeforeDeadline = AttackDeadline(Storage, citizen.Model);
+				const auto *state = Storage.Get<scene::UpdateCadenceState>(citizen.Model);
+				citizen.BeforePerception = state == nullptr ? 0 : state->Domains[0].Generation;
+				citizen.BeforeBehaviour = state == nullptr ? 0 : state->Domains[1].Generation;
+				citizen.BeforeDistance =
+					(target - Storage.Get<scene::Transform>(citizen.Root)->Frame.Position).Magnitude();
+				citizen.Fighting =
+					citizen.BeforeDistance <= 12 && Storage.Get<scene::Humanoid>(TargetHumanoid)->Health > 0;
+			}
+			BeforeHealth = Storage.Get<scene::Humanoid>(TargetHumanoid)->Health;
+			Beams.Author(Storage, window);
+		}
+		void Step(Work &counts) {
+			Storage.ClearChanges();
+			Storage.AdvanceTick(DELTA);
+			{
+				ENGINE_PROFILE_CAT("cadence heartbeat", core::ProfileCategory::Script);
+				if (!Runtime->Heartbeat(DELTA)) throw std::runtime_error(Runtime->LastError());
+				Storage.FlushSignals();
+			}
+			{
+				ENGINE_PROFILE_CAT("cadence physics", core::ProfileCategory::Physics);
+				Physics.RunPhases(Storage, ecs::Phase::Input, ecs::Phase::Physics);
+			}
+			{
+				ENGINE_PROFILE_CAT("cadence animation clock", core::ProfileCategory::Simulation);
+				(void)scene::AdvanceAnimationTracks(Storage);
+			}
+			{
+				ENGINE_PROFILE_CAT("cadence pose", core::ProfileCategory::Simulation);
+				counts.PoseWrites += render::EvaluateAnimations(Storage);
+				counts.BoneResolves += scene::ResolveBones(Storage);
+				const auto *history = Storage.Resource<scene::PoseCadenceHistory>();
+				Require(history != nullptr && history->Unavailable == 0, "cadence town clip unavailable");
+				counts.PoseEvaluated += history->Evaluated;
+				counts.PoseSkipped += history->Skipped;
+				counts.Promotions += history->Promotions;
+			}
+			Beams.Build(Storage, counts);
+		}
+		void Verify(const Town &other, Window window, Work &counts) const {
+			const uint64_t tick = Storage.Time().Tick;
+			Require(tick == other.Storage.Time().Tick, "cadence VM tick parity failed");
+			Require(
+				Storage.Get<scene::Humanoid>(TargetHumanoid)->Health ==
+					other.Storage.Get<scene::Humanoid>(other.TargetHumanoid)->Health,
+				"cadence VM health parity failed"
+			);
+			const auto *poses = Storage.Resource<scene::PoseCadenceHistory>();
+			uint64_t expectedDamage = 0;
+			for (size_t index = 0; index < Citizens.size(); ++index) {
+				const auto &citizen = Citizens[index];
+				const auto &paired = other.Citizens[index];
+				const auto *state = Storage.Get<scene::UpdateCadenceState>(citizen.Model);
+				const auto *pairedState = other.Storage.Get<scene::UpdateCadenceState>(paired.Model);
+				Require(state != nullptr && pairedState != nullptr, "cadence VM admission never committed");
+				for (size_t domain = 0; domain < 2; ++domain) {
+					const auto &current = state->Domains[domain];
+					Require(
+						current.Generation == pairedState->Domains[domain].Generation &&
+							current.LastCommittedTick == pairedState->Domains[domain].LastCommittedTick,
+						"cadence VM admission parity failed"
+					);
+					const auto age = tick - current.LastCommittedTick;
+					counts.MaximumAge = std::max(counts.MaximumAge, age);
+					Require(age <= (domain == 0 ? 12 : 8), "cadence town NPC stale beyond bound");
+					if (citizen.Fighting || (window == Window::PlayerOwned && index == 0) ||
+						window == Window::Invalidation)
+						Require(age == 0, "cadence town critical NPC failed immediate refresh");
+				}
+				const auto perception = state->Domains[0].Generation - citizen.BeforePerception;
+				const auto behaviour = state->Domains[1].Generation - citizen.BeforeBehaviour;
+				Require(perception <= 1 && behaviour <= 1, "cadence town duplicated an admitted update");
+				counts.Perception += perception;
+				counts.Behaviour += behaviour;
+				// The unchanged script calls Raycast once on a committed observation
+				// beyond three metres. Report this provenance beside the VM rows.
+				if (citizen.BeforeDistance > 3) counts.Rays += perception;
+				const auto *observed = Storage.Get<script::NpcPerception>(citizen.Model);
+				const auto *pairedObserved = other.Storage.Get<script::NpcPerception>(paired.Model);
+				Require(
+					observed->Visible == pairedObserved->Visible &&
+						Near(observed->TargetPosition, pairedObserved->TargetPosition),
+					"cadence VM perception parity failed"
+				);
+				if (perception != 0 && observed->Visible) ++counts.RayHits;
+				const auto *decision = Storage.Get<script::NpcBehaviour>(citizen.Model);
+				const auto *pairedDecision = other.Storage.Get<script::NpcBehaviour>(paired.Model);
+				Require(
+					Near(decision->MoveDirection, pairedDecision->MoveDirection) &&
+						Storage.Get<scene::Humanoid>(citizen.Humanoid)->MoveDirection ==
+							decision->MoveDirection,
+					"cadence VM behaviour did not steer the real Humanoid"
+				);
+				const bool attack = citizen.Fighting && tick >= citizen.BeforeDeadline && observed->Visible &&
+									state->Domains[0].LastCommittedTick == tick &&
+									state->Domains[1].LastCommittedTick == tick;
+				const uint64_t expectedDeadline = attack ? tick + 30 : citizen.BeforeDeadline;
+				Require(
+					AttackDeadline(Storage, citizen.Model) == expectedDeadline &&
+						AttackDeadline(other.Storage, paired.Model) == expectedDeadline,
+					"cadence town missed an every-tick attack deadline"
+				);
+				++counts.Deadlines;
+				expectedDamage += attack;
+				const auto *track = Storage.Get<scene::AnimationTrack>(citizen.Track);
+				const auto *pairedTrack = other.Storage.Get<scene::AnimationTrack>(paired.Track);
+				Require(
+					track->TimePosition == pairedTrack->TimePosition &&
+						track->Weight == pairedTrack->Weight &&
+						Near(track->TimePosition, static_cast<float>(tick) * DELTA, .002f),
+					"cadence VM semantic animation clock paused"
+				);
+				const auto &pose = poses->Poses.at(citizen.Animator);
+				const auto age = tick - pose.LastCommittedTick;
+				counts.MaximumAge = std::max(counts.MaximumAge, age);
+				Require(age <= 8, "cadence town pose stale beyond bound");
+				if (citizen.Fighting || (window == Window::PlayerOwned && index == 0) ||
+					window == Window::Invalidation)
+					Require(age == 0, "cadence town critical visual pose failed refresh");
+				Require(
+					Near(
+						Storage.Get<scene::Bone>(citizen.Bone)->Transform,
+						other.Storage.Get<scene::Bone>(paired.Bone)->Transform
+					),
+					"cadence VM visual pose parity failed"
+				);
+				Require(
+					Near(
+						Storage.Get<scene::Transform>(citizen.Root)->Frame,
+						other.Storage.Get<scene::Transform>(paired.Root)->Frame
+					),
+					"cadence VM real physics movement parity failed"
+				);
+			}
+			Require(
+				BeforeHealth - Storage.Get<scene::Humanoid>(TargetHumanoid)->Health ==
+					static_cast<float>(expectedDamage),
+				"cadence town health differs from attack deadline oracle"
+			);
+			counts.Damage += expectedDamage;
+			// Combat is the actual script's proximity rule. Single-target windows
+			// can promote one guard while a beam's explicit policy names the same
+			// presentation requirement. Compare both VMs' current view and scroll.
+			Beams.Verify(Storage, other.Beams, window, counts);
+		}
+	};
+
+	template <Language LANGUAGE, bool COMPLEX, bool FULL> void Run() {
+		constexpr size_t worlds = COMPLEX ? 32 : 1;
+		constexpr Language paired = LANGUAGE == Language::Luau ? Language::JavaScript : Language::Luau;
+		const auto source = ReadTown(LANGUAGE), pairedSource = ReadTown(paired);
+		std::vector<std::unique_ptr<Town>> main, reference;
+		for (size_t index = 0; index < worlds; ++index) {
+			main.push_back(std::make_unique<Town>(LANGUAGE, FULL, source));
+			reference.push_back(std::make_unique<Town>(paired, FULL, pairedSource));
+		}
+		const auto author = [&](Window window) {
+			for (size_t index = 0; index < worlds; ++index) {
+				main[index]->Author(window);
+				reference[index]->Author(window);
+			}
+		};
+		const auto step = [&](Work &counts) {
+			for (auto &town : main)
+				town->Step(counts);
+		};
+		const auto verify = [&](Window window, Work &counts) {
+			for (size_t index = 0; index < worlds; ++index) {
+				Work ignored;
+				reference[index]->Step(ignored);
+				main[index]->Verify(*reference[index], window, counts);
+			}
+		};
+		for (size_t tick = 0; tick < WARM_TICKS; ++tick) {
+			author(Window::Steady);
+			Work counts;
+			step(counts);
+			verify(Window::Steady, counts);
+		}
+		const size_t ticks = TickCount();
+		VmMemoryWindow vmMemory;
+		for (const auto &town : main)
+			vmMemory.Begin(*town->Runtime);
+		Measurements measured(ticks);
+		Work total;
+		for (size_t tick = 0; tick < ticks; ++tick) {
+			const auto window = WindowAt(tick, ticks);
+			author(window);
+			measured.Measure(tick, window, step);
+			verify(window, measured.Ticks[tick].Counts);
+			total.Add(measured.Ticks[tick].Counts);
+		}
+		vmMemory.End();
+		Require(
+			total.Rays > 0 && total.RayHits > 0 && total.Damage > 0 && total.PoseWrites > 0,
+			"cadence town did no real ray, combat or animation work"
+		);
+		Require(
+			FULL || (total.Perception < worlds * 2 * ticks && total.PoseSkipped > 0 && total.BeamSkipped > 0),
+			"cadence town authored policy skipped no consumer work"
+		);
+		uint64_t retained = 0;
+		for (const auto &town : main) {
+			retained += town->Beams.Payload(town->Storage);
+			retained += town->Storage.Resource<scene::PoseCadenceHistory>()->Poses.size() *
+						sizeof(scene::DomainCadenceState);
+			for (const auto &citizen : town->Citizens)
+				Require(
+					(town->Storage.Get<scene::Transform>(citizen.Root)->Frame.Position -
+					 citizen.InitialPosition)
+							.Magnitude() > 1,
+					"cadence town Humanoid never physically moved"
+				);
+		}
+		const std::string row = std::string(LANGUAGE == Language::Luau ? "town-luau-" : "town-js-") +
+								(COMPLEX ? "complex-" : "simple-") + (FULL ? "full" : "authored");
+		static size_t calls = 0;
+		auto &summary = BeginSummary(row, ++calls);
+
+		summary.Append(
+			"# cadence-clock row=%s final_tick=%llu track_time_seconds=%.9f next_attack_tick=%llu "
+			"target_health=%.1f reference=opposite_VM_same_policy_outside_owner\n",
+			row.c_str(),
+			static_cast<unsigned long long>(main.front()->Storage.Time().Tick),
+			main.front()
+				->Storage.Get<scene::AnimationTrack>(main.front()->Citizens.front().Track)
+				->TimePosition,
+			static_cast<unsigned long long>(
+				AttackDeadline(main.front()->Storage, main.front()->Citizens.front().Model)
+			),
+			main.front()->Storage.Get<scene::Humanoid>(main.front()->TargetHumanoid)->Health
+		);
+
+		summary.Append(
+			"# cadence-town script=actual_unchanged_TownCadence paired_language_parity=1 "
+			"ray_attempts_provenance=committed_perception_beyond_three_metres "
+			"ray_hits_provenance=visible_target_commits vm_source_profiler=off\n"
+		);
+		measured.Summarize(
+			summary, row.c_str(), calls, worlds * 2, worlds, 1, 3, worlds * 2, worlds * 5, FULL, retained
+		);
+		vmMemory.Summarize(summary, row.c_str());
+		engine::testing::Consume(total.Rays);
+	}
+}
+
+BENCH("Luau town simple full fidelity, whole harness", 1) {
+	cadence_town_bench::Run<engine::script::Language::Luau, false, true>();
+}
+BENCH("Luau town simple authored cadence, whole harness", 1) {
+	cadence_town_bench::Run<engine::script::Language::Luau, false, false>();
+}
+BENCH("Luau town complex full fidelity, whole harness", 1) {
+	cadence_town_bench::Run<engine::script::Language::Luau, true, true>();
+}
+BENCH("Luau town complex authored cadence, whole harness", 1) {
+	cadence_town_bench::Run<engine::script::Language::Luau, true, false>();
+}
+BENCH("JS town simple full fidelity, whole harness", 1) {
+	cadence_town_bench::Run<engine::script::Language::JavaScript, false, true>();
+}
+BENCH("JS town simple authored cadence, whole harness", 1) {
+	cadence_town_bench::Run<engine::script::Language::JavaScript, false, false>();
+}
+BENCH("JS town complex full fidelity, whole harness", 1) {
+	cadence_town_bench::Run<engine::script::Language::JavaScript, true, true>();
+}
+BENCH("JS town complex authored cadence, whole harness", 1) {
+	cadence_town_bench::Run<engine::script::Language::JavaScript, true, false>();
+}
