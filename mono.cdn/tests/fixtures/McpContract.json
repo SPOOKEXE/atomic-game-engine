@@ -465,6 +465,12 @@
       "name": "AGENTS.md (engine/collision)",
       "uri": "atomic://agents/engine/collision"
     },
+    "atomic://agents/engine/computegraph": {
+      "description": "The invariants specific to engine/computegraph. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/computegraph)",
+      "uri": "atomic://agents/engine/computegraph"
+    },
     "atomic://agents/engine/control": {
       "description": "The invariants specific to engine/control. AGENTS.md rule: read this before changing anything in it.",
       "mimeType": "text/markdown",
@@ -513,6 +519,12 @@
       "name": "AGENTS.md (engine/graph)",
       "uri": "atomic://agents/engine/graph"
     },
+    "atomic://agents/engine/graphcore": {
+      "description": "The invariants specific to engine/graphcore. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/graphcore)",
+      "uri": "atomic://agents/engine/graphcore"
+    },
     "atomic://agents/engine/gui": {
       "description": "The invariants specific to engine/gui. AGENTS.md rule: read this before changing anything in it.",
       "mimeType": "text/markdown",
@@ -554,6 +566,12 @@
       "mimeType": "text/markdown",
       "name": "AGENTS.md (engine/physics)",
       "uri": "atomic://agents/engine/physics"
+    },
+    "atomic://agents/engine/procedural": {
+      "description": "The invariants specific to engine/procedural. AGENTS.md rule: read this before changing anything in it.",
+      "mimeType": "text/markdown",
+      "name": "AGENTS.md (engine/procedural)",
+      "uri": "atomic://agents/engine/procedural"
     },
     "atomic://agents/engine/render": {
       "description": "The invariants specific to engine/render. AGENTS.md rule: read this before changing anything in it.",

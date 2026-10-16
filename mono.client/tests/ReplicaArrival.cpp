@@ -426,6 +426,11 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 		// Text composition, binding results, virtual focus and anchors, presentation
 		// samples, and resolved styles are derived from one viewer's input, source
 		// revisions, timeline, or display. Their authored inputs cross separately.
+		// NPC decisions and perception are authority-side combat state; pending
+		// admissions are bound to one runtime and tick. Procedural authority and
+		// published artifacts stay with that world, while scene regions are derived
+		// geometry and the queue owner is a process-local handle. Baked references
+		// drive only local-world delivery; the client content pump refuses replicas.
 		const bool excluded =
 			name == "gui.Canvas" || name == "gui.CanvasTransform" || name == "gui.Resolved" ||
 			name == "gui.SpatialCanvas" || name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
@@ -437,7 +442,11 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 			name == "script.DataCaptureDriver" || name == "script.EventNarratives" ||
 			name == "script.TeleportRequestHandler" || name == "script.TeleportRequestOutbox" ||
 			name == "script.PortalTransfers" || name == "script.PortalContactRequests" ||
-			name == "script.PortalPlayerInput" || name == "script.PortalObservationLog";
+			name == "script.PortalPlayerInput" || name == "script.PortalObservationLog" ||
+			name == "script.NpcPerception" || name == "script.NpcBehaviour" ||
+			name == "script.NpcCadencePending" || name == "script.ProceduralAuthority" ||
+			name == "script.ProceduralPublished" || name == "script.ProceduralSceneRegion" ||
+			name == "script.ProceduralQueueOwner" || name == "script.BakedProceduralReference";
 
 		CHECK((excluded == (Row(name) == nullptr)));
 	}
