@@ -104,8 +104,14 @@ namespace engine::script {
 			lua_setfield(state, LUA_REGISTRYINDEX, VISITING);
 		}
 
-		bool
-		TableToScriptValue(lua_State *state, int index, ScriptValue &out, uint32_t depth, CodecStatus &why) {
+		bool TableToScriptValue(
+			lua_State *state,
+			int index,
+			ScriptValue &out,
+			uint32_t depth,
+			CodecStatus &why,
+			ValueReadBudget *budget
+		) {
 			// **Grow the stack before recursing.** A C function is guaranteed
 			// `LUA_MINSTACK` slots and one level of this walk holds the visiting
 			// table, the key, the value and the stringified key at the same
@@ -119,6 +125,12 @@ namespace engine::script {
 				return false;
 			}
 
+			// A dense prefix alone cannot fit once its element storage exceeds the owned budget.
+			if (budget &&
+				static_cast<size_t>(lua_objlen(state, index)) > budget->Remaining / sizeof(ScriptValue)) {
+				why = CodecStatus::TooLarge;
+				return false;
+			}
 			// **A cycle is an error, not a hang.** `Codec.hpp` §3's third
 			// requirement, and the check has to be here rather than in the
 			// encoder: by the time a tree exists the cycle has already become
@@ -148,14 +160,38 @@ namespace engine::script {
 			bool ok = true;
 			if (array) {
 				const int length = lua_objlen(state, index);
-				out.Items.resize(static_cast<size_t>(length));
+				if (budget && !budget->Charge(static_cast<size_t>(length), sizeof(ScriptValue))) {
+					why = CodecStatus::TooLarge;
+					ok = false;
+				}
+				if (ok) out.Items.resize(static_cast<size_t>(length));
 
 				for (int item = 1; item <= length && ok; item++) {
 					lua_rawgeti(state, index, item);
-					ok = ReadScriptValue(state, lua_gettop(state), out.Items[item - 1], depth + 1, why);
+					ok = ReadScriptValue(
+						state, lua_gettop(state), out.Items[item - 1], depth + 1, why, budget
+					);
 					lua_pop(state, 1);
 				}
 			} else {
+				if (budget) {
+					size_t count = 0;
+					lua_pushnil(state);
+					while (lua_next(state, index) != 0) {
+						lua_pop(state, 1);
+						++count;
+						if (count > budget->Remaining / sizeof(std::pair<std::string, ScriptValue>)) {
+							lua_pop(state, 1);
+							why = CodecStatus::TooLarge;
+							ok = false;
+							break;
+						}
+					}
+					if (ok) {
+						budget->Charge(count, sizeof(std::pair<std::string, ScriptValue>));
+						out.Entries.reserve(count);
+					}
+				}
 				lua_pushnil(state);
 				while (ok && lua_next(state, index) != 0) {
 					// **A key is a string, a number or a boolean, and anything
@@ -185,7 +221,11 @@ namespace engine::script {
 					const char *text = luaL_tolstring(state, -2, &length);
 
 					ScriptValue value;
-					ok = ReadScriptValue(state, lua_gettop(state) - 1, value, depth + 1, why);
+					if (budget && (length > CODEC_MAX_BYTES || !budget->Charge(length + 1, 2))) {
+						why = CodecStatus::TooLarge;
+						ok = false;
+					}
+					if (ok) ok = ReadScriptValue(state, lua_gettop(state) - 1, value, depth + 1, why, budget);
 					if (ok) {
 						out.Entries.emplace_back(std::string(text, length), std::move(value));
 					}
@@ -209,7 +249,14 @@ namespace engine::script {
 		}
 	}
 
-	bool ReadScriptValue(lua_State *state, int index, ScriptValue &out, uint32_t depth, CodecStatus &why) {
+	bool ReadScriptValue(
+		lua_State *state,
+		int index,
+		ScriptValue &out,
+		uint32_t depth,
+		CodecStatus &why,
+		ValueReadBudget *budget
+	) {
 		if (depth > CODEC_MAX_DEPTH) {
 			why = CodecStatus::TooDeep;
 			return false;
@@ -229,6 +276,10 @@ namespace engine::script {
 		if (lua_type(state, index) == LUA_TSTRING) {
 			size_t length = 0;
 			const char *text = lua_tolstring(state, index, &length);
+			if (budget && (length > CODEC_MAX_BYTES || !budget->Charge(length + 1, 2))) {
+				why = CodecStatus::TooLarge;
+				return false;
+			}
 			out = ScriptValue{ValueTag::String};
 			out.Text.assign(text, length);
 			return true;
@@ -256,7 +307,7 @@ namespace engine::script {
 		}
 
 		if (lua_istable(state, index)) {
-			return TableToScriptValue(state, index, out, depth, why);
+			return TableToScriptValue(state, index, out, depth, why, budget);
 		}
 
 		// A function, a thread, or an instance. **An `Entity` is meaningless

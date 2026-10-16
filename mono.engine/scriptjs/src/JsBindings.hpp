@@ -462,7 +462,13 @@ namespace engine::script {
 	// **The same tree the Luau side builds**, which is what makes "identical
 	// bytes from both VMs" a property of the format rather than of either
 	// binding.
-	bool
-	ToScriptValue(JSContext *context, JSValueConst value, ScriptValue &out, uint32_t depth, CodecStatus &why);
+	bool ToScriptValue(
+		JSContext *context,
+		JSValueConst value,
+		ScriptValue &out,
+		uint32_t depth,
+		CodecStatus &why,
+		ValueReadBudget *budget = nullptr
+	);
 	JSValue FromScriptValue(JSContext *context, const ScriptValue &value);
 }

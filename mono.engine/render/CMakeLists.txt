@@ -97,6 +97,8 @@ if(TARGET test_render)
 	# selected ShaderScript through ShaderLibrary. This is test-only: the renderer
 	# does not need example content to ship.
 	target_link_libraries(test_render PRIVATE Engine::examples)
+	# Typed compute bridge cases run both installed script VMs on the real device.
+	target_link_libraries(test_render PRIVATE Engine::scripthost)
 endif()
 
 # The atlas experiment owns a real headless SDL device. Benchmarks normally

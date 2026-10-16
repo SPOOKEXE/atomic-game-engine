@@ -195,6 +195,7 @@
       "links": [
         "assets",
         "collision",
+        "computegraph",
         "core",
         "ecs",
         "effects",
@@ -278,6 +279,7 @@
       "links": [
         "assets",
         "collision",
+        "computegraph",
         "core",
         "ecs",
         "effects",
@@ -305,6 +307,7 @@
         "assets",
         "bakegraph",
         "collision",
+        "computegraph",
         "core",
         "ecs",
         "effects",
@@ -409,6 +412,7 @@
         "assets",
         "bakegraph",
         "collision",
+        "computegraph",
         "core",
         "ecs",
         "effects",
@@ -552,6 +556,7 @@
       "links": [
         "assets",
         "collision",
+        "computegraph",
         "core",
         "ecs",
         "effects",
@@ -573,6 +578,7 @@
       "links": [
         "assets",
         "collision",
+        "computegraph",
         "core",
         "ecs",
         "effects",
@@ -597,6 +603,7 @@
       "links": [
         "assets",
         "collision",
+        "computegraph",
         "core",
         "ecs",
         "effects",
@@ -619,6 +626,7 @@
       "links": [
         "assets",
         "collision",
+        "computegraph",
         "core",
         "ecs",
         "effects",
@@ -642,6 +650,7 @@
         "bakegraph",
         "cdn",
         "collision",
+        "computegraph",
         "control",
         "core",
         "datastore",
@@ -873,6 +882,7 @@
       "links": [
         "assets",
         "collision",
+        "computegraph",
         "control",
         "core",
         "delivery",
@@ -975,6 +985,7 @@
         "bakegraph",
         "cdn",
         "collision",
+        "computegraph",
         "control",
         "core",
         "datastore",

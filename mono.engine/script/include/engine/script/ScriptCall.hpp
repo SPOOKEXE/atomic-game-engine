@@ -46,6 +46,7 @@
 
 namespace engine::script {
 	class DataCaptureBridge;
+	class ComputeBridge;
 	class DataLifecycleBridge;
 	// Two parallel placement arrays owned by one runtime's marshalling scratch.
 	//
@@ -127,6 +128,12 @@ namespace engine::script {
 		// The host-owned capture queue for this runtime. The bridge accepts copied
 		// requests only, so a script call cannot touch renderer-owned state.
 		virtual const std::shared_ptr<DataCaptureBridge> &DataCapture() const = 0;
+
+		// The endpoint is bound to this actual VM identity by the host.
+		virtual const std::shared_ptr<ComputeBridge> &Compute() const {
+			static const std::shared_ptr<ComputeBridge> unavailable;
+			return unavailable;
+		}
 
 		// Returns the host bridge that owns asynchronous data-lifecycle requests.
 		virtual const std::shared_ptr<DataLifecycleBridge> &DataLifecycle() const = 0;
@@ -296,6 +303,11 @@ namespace engine::script {
 		// @param why   Set when the answer is `false`.
 		// @return `false` when the value has no representation.
 		virtual bool ReadValue(size_t index, ScriptValue &out, CodecStatus &why) = 0;
+		// Bounds the owned tree before allocation. Unsupported adapters refuse explicitly.
+		virtual bool ReadBoundedValue(size_t, ScriptValue &, CodecStatus &why, size_t) {
+			why = CodecStatus::Unsupported;
+			return false;
+		}
 
 		// The field names of a record argument. Raises when it is not one.
 		//

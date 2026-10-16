@@ -6,6 +6,8 @@
 // copied into `ComputeJobs`; the heartbeat later resumes with one flat array in
 // row-major order.
 
+#include "ComputeGraphService.hpp"
+
 #include <engine/script/ServiceSurface.hpp>
 
 #include <array>
@@ -13,6 +15,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <vector>
 
 namespace engine::script {
 
@@ -70,7 +73,13 @@ namespace engine::script {
 		static const ServiceSurface SURFACE = [] {
 			ServiceSurface surface;
 			surface.Name = "ComputeService";
-			surface.Methods = COMPUTE_METHODS;
+			static const std::vector<ServiceMethod> methods = [] {
+				std::vector<ServiceMethod> result(COMPUTE_METHODS.begin(), COMPUTE_METHODS.end());
+				const auto graph = ComputeGraphServiceMethods();
+				result.insert(result.end(), graph.begin(), graph.end());
+				return result;
+			}();
+			surface.Methods = methods;
 			return surface;
 		}();
 		return SURFACE;

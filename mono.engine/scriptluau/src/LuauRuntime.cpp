@@ -559,6 +559,7 @@ namespace engine::script {
 		bounds->Context.Role = limits.Role;
 		bounds->Context.Access = limits.EffectiveCapabilities();
 		bounds->Context.DataCapture = limits.DataCapture;
+		bounds->Context.Compute = ComputeEndpoint();
 		bounds->Context.DataLifecycle = limits.DataLifecycle;
 		bounds->Context.RemoteEventSender = limits.RemoteEventSender;
 		bounds->Context.Profiler = &ScriptProfile;

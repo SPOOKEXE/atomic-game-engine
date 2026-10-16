@@ -33,6 +33,7 @@ mono_add_library(script
 		Engine::effects
 		Engine::imagecodec
 		Engine::scene
+		Engine::computegraph
 
 		# The neutral procedural service owns scheduling and verified asset digests.
 		Engine::procedural

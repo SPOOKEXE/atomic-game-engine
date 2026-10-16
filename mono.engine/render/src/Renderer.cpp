@@ -550,8 +550,28 @@ namespace engine::render {
 		return true;
 	}
 
+	uint64_t Renderer::Impl::GraphBufferBytes() const {
+		uint64_t total = 0;
+		for (const auto &buffer : GraphResources.Buffers)
+			total += buffer.Bytes;
+		return total;
+	}
+	uint64_t Renderer::Impl::ComputeBufferBytes() const {
+		return ComputeRegistry ? ComputeRegistry->ReservedDeviceBytes() : 0;
+	}
+	script::ComputeBridgeFactory Renderer::ComputeForWorld(std::string world, uint32_t view) {
+		RequireOwningThread("ComputeForWorld");
+		if (!State->ComputeRegistry)
+			State->ComputeRegistry = std::make_shared<ScriptComputeBridge>(State->Device);
+		return State->ComputeRegistry->ForWorld(std::move(world), view);
+	}
+	void Renderer::PumpCompute() {
+		RequireOwningThread("PumpCompute");
+		if (State->ComputeRegistry) State->ComputeRegistry->Pump(State->GraphBufferBytes());
+	}
 	bool Renderer::WaitForFrame() {
 		RequireOwningThread("WaitForFrame");
+		PumpCompute();
 
 		if (State->Device == nullptr) {
 			return false;
@@ -794,6 +814,10 @@ namespace engine::render {
 		// another thread holds a command buffer against it is the same violation
 		// arriving at the end of the frame instead of the middle.
 		RequireOwningThread("Shutdown");
+		if (State->ComputeRegistry) {
+			State->ComputeRegistry->Shutdown();
+			State->ComputeRegistry.reset();
+		}
 		State->VisibilityWorking.Invalidate();
 		State->VisibilityCompleted = {};
 		HookBind->Shutdown();

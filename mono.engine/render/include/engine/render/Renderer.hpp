@@ -36,6 +36,7 @@
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/VectorField.hpp>
+#include <engine/script/ComputeBridge.hpp>
 
 // `SurfaceView::Projection` is a matrix. glm has always arrived here through
 // `core/types/CFrame.hpp` and `graph/Frustum.hpp`, but a header that names a
@@ -2901,6 +2902,10 @@ namespace engine::render {
 		//
 		// @return The handles, both empty before Initialise.
 		BackendHandles Backend() const;
+		// Supplies fixed world/view ownership; Runtime adds its VM and storage identities.
+		script::ComputeBridgeFactory ComputeForWorld(std::string world, uint32_t view = UINT32_MAX);
+		// Pumps copied compute work even when presentation is skipped or minimized.
+		void PumpCompute();
 
 	  private:
 		bool AdoptResourceImagesInternal(

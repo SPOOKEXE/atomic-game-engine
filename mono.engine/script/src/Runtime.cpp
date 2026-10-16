@@ -41,7 +41,12 @@ namespace engine::script {
 		: IdentityValue(AllocateRuntimeIdentity()), Store(store), HostRoleValue(limits.Role),
 		  ScriptOriginValue(limits.Origin), ScriptCapabilitiesValue(limits.EffectiveCapabilities()),
 		  DataCapture(limits.DataCapture), DataLifecycle(limits.DataLifecycle),
+		  Compute(limits.Compute ? limits.Compute(IdentityValue, store.Identity()) : nullptr),
 		  PackageOnly(limits.PackageOnly) {}
+
+	Runtime::~Runtime() {
+		if (Compute) Compute->Detach();
+	}
 
 	DataScriptPackageRunResult
 	Runtime::RunDataScriptPackage(const DataScriptPackageContext &, std::string_view, std::string_view) {

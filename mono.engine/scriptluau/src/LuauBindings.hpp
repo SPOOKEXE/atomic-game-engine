@@ -28,6 +28,7 @@
 #include <engine/script/Changes.hpp>
 #include <engine/script/ChildWaiters.hpp>
 #include <engine/script/Codec.hpp>
+#include <engine/script/ComputeBridge.hpp>
 #include <engine/script/ComputeJobs.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/script/DataLifecycleBridge.hpp>
@@ -100,6 +101,7 @@ namespace engine::script {
 
 		// Installed by the host, never shared through a process-global registry.
 		std::shared_ptr<DataCaptureBridge> DataCapture;
+		std::shared_ptr<ComputeBridge> Compute{};
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
 		std::function<bool(std::span<const std::byte>)> RemoteEventSender;
 
@@ -530,7 +532,14 @@ namespace engine::script {
 	// @param depth How deep this value sits. Zero at the top.
 	// @param why   Set when the answer is `false`.
 	// @return `false` when the value has no representation.
-	bool ReadScriptValue(lua_State *state, int index, ScriptValue &out, uint32_t depth, CodecStatus &why);
+	bool ReadScriptValue(
+		lua_State *state,
+		int index,
+		ScriptValue &out,
+		uint32_t depth,
+		CodecStatus &why,
+		ValueReadBudget *budget = nullptr
+	);
 
 	// Pushes a `ScriptValue` as the Luau value it names.
 	//

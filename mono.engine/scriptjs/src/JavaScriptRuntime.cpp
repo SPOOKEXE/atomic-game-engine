@@ -298,6 +298,7 @@ namespace engine::script {
 		OpenJsBindings(Context, Store, limits.Role, limits.EffectiveCapabilities());
 		JsOf(Context).RuntimeIdentity = Identity();
 		JsOf(Context).DataCapture = limits.DataCapture;
+		JsOf(Context).Compute = ComputeEndpoint();
 		JsOf(Context).DataLifecycle = limits.DataLifecycle;
 		JsOf(Context).RemoteEventSender = limits.RemoteEventSender;
 		OpenJsSurface(Context);

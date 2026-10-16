@@ -395,3 +395,15 @@ TEST_CASE("encoding is stable across repeated calls", "[codec]") {
 		CHECK(Bytes(value) == first);
 	}
 }
+
+TEST_CASE("owned value reads refuse structure overflow without consuming their budget", "[codec]") {
+	engine::script::ValueReadBudget budget{15};
+	CHECK(budget.Charge(3, 4));
+	CHECK(budget.Remaining == 3);
+	CHECK_FALSE(budget.Charge(4, 4));
+	CHECK(budget.Remaining == 3);
+	CHECK_FALSE(budget.Charge(SIZE_MAX, SIZE_MAX));
+	CHECK(budget.Remaining == 3);
+	CHECK(budget.Charge(0, SIZE_MAX));
+	CHECK(budget.Remaining == 3);
+}

@@ -1,9 +1,10 @@
 #pragma once
-
 #include "FramePreparation.hpp"
 #include "GraphHistory.hpp"
 #include "PortalCaptureTreeWork.hpp"
 #include "WeatherCapture.hpp"
+
+#include <engine/render/ScriptComputeBridge.hpp>
 
 // `Renderer::Impl` - every device object the renderer owns, and the operations
 // over them.
@@ -893,8 +894,11 @@ namespace engine::render {
 		static constexpr size_t RESOURCE_IMAGE_CAPACITY = GraphResourceCache::RESOURCE_IMAGE_CAPACITY;
 		GraphResourceCache GraphResources;
 
-		// Authored buffers are transient scratch. These caps bound a document before
-		// one unchecked width, height and stride turn into an unbounded allocation.
+		// One device owner accounts for ordinary graph buffers and every compute VM.
+		std::shared_ptr<ScriptComputeBridge> ComputeRegistry{};
+		uint64_t GraphBufferBytes() const;
+		uint64_t ComputeBufferBytes() const;
+		// Bound unchecked width, height and stride before resource allocation.
 		static constexpr uint64_t MAX_GRAPH_BUFFER_BYTES = 64u * 1024u * 1024u;
 		static constexpr uint64_t MAX_GRAPH_BUFFER_TOTAL_BYTES = 256u * 1024u * 1024u;
 		struct TessellationState {

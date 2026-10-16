@@ -265,6 +265,10 @@ namespace engine::script {
 				return Execution;
 			}
 
+			const std::shared_ptr<ComputeBridge> &Compute() const override {
+				return Context.Compute;
+			}
+
 			const std::shared_ptr<DataCaptureBridge> &DataCapture() const override {
 				return Context.DataCapture;
 			}
@@ -513,6 +517,18 @@ namespace engine::script {
 				// JSON are one shape rather than two that agree until somebody
 				// edits one.
 				return ReadScriptValue(State, Slot(index), out, 0, why);
+			}
+
+			bool ReadBoundedValue(size_t index, ScriptValue &out, CodecStatus &why, size_t maximum) override {
+				ValueReadBudget budget{maximum};
+				if (!budget.Charge(sizeof(ScriptValue))) {
+					why = CodecStatus::TooLarge;
+					return false;
+				}
+				ScriptValue candidate;
+				if (!ReadScriptValue(State, Slot(index), candidate, 0, why, &budget)) return false;
+				out = std::move(candidate);
+				return true;
 			}
 
 			void ReadFieldNames(size_t index, std::vector<std::string> &out) override {

@@ -38,6 +38,7 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/script/ComputeBridge.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/script/DataLifecycleBridge.hpp>
 #include <engine/script/Debugger.hpp>
@@ -219,6 +220,8 @@ namespace engine::script {
 		std::shared_ptr<DataCaptureBridge> DataCapture{};
 		// Host-owned lifecycle adapter for copied package and world state.
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle{};
+		// Host-bound typed GPU work. Empty on hosts without a renderer.
+		ComputeBridgeFactory Compute{};
 		// The client host supplies the reliable, ordered user lane. It receives a
 		// complete RemoteEvent envelope and must copy it before returning.
 		std::function<bool(std::span<const std::byte>)> RemoteEventSender{};
@@ -429,7 +432,7 @@ namespace engine::script {
 		const uint64_t IdentityValue;
 
 	  public:
-		virtual ~Runtime() = default;
+		virtual ~Runtime();
 
 		// Process-local lifetime nonce, never a saved script or world identity.
 		uint64_t Identity() const {
@@ -874,6 +877,11 @@ namespace engine::script {
 			return Breakpoints;
 		}
 
+		// Returns the typed compute endpoint bound to this VM and storage incarnation.
+		const std::shared_ptr<ComputeBridge> &ComputeEndpoint() const {
+			return Compute;
+		}
+
 		// The host-owned capture adapter for this runtime.
 		const std::shared_ptr<DataCaptureBridge> &CaptureBridge() const {
 			return DataCapture;
@@ -907,6 +915,7 @@ namespace engine::script {
 		std::shared_ptr<DataCaptureBridge> DataCapture;
 		// Host-owned adapter used for copied package lifecycle operations.
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
+		std::shared_ptr<ComputeBridge> Compute{};
 		// True when this runtime is restricted to package execution.
 		bool PackageOnly = false;
 		// Prevents discard after work has crossed the world-swap boundary.

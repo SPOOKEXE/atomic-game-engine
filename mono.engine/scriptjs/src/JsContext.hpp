@@ -21,6 +21,7 @@
 #include <engine/script/Bus.hpp>
 #include <engine/script/Changes.hpp>
 #include <engine/script/ChildWaiters.hpp>
+#include <engine/script/ComputeBridge.hpp>
 #include <engine/script/ComputeJobs.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/script/DataLifecycleBridge.hpp>
@@ -89,6 +90,7 @@ namespace engine::script {
 
 		// Installed by the host after bindings exist, one bridge per runtime.
 		std::shared_ptr<DataCaptureBridge> DataCapture;
+		std::shared_ptr<ComputeBridge> Compute{};
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
 
 		// The program surface installed for plugin runtimes.

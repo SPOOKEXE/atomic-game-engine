@@ -189,6 +189,10 @@ namespace engine::script {
 				return JsExecutionRole(Context);
 			}
 
+			const std::shared_ptr<ComputeBridge> &Compute() const override {
+				return JsOf(Context).Compute;
+			}
+
 			const std::shared_ptr<DataCaptureBridge> &DataCapture() const override {
 				return JsOf(Context).DataCapture;
 			}
@@ -586,6 +590,22 @@ namespace engine::script {
 					return false;
 				}
 				return ToScriptValue(Context, Argv[index], out, 0, why);
+			}
+
+			bool ReadBoundedValue(size_t index, ScriptValue &out, CodecStatus &why, size_t maximum) override {
+				if (index >= Argc) {
+					why = CodecStatus::Unsupported;
+					return false;
+				}
+				ValueReadBudget budget{maximum};
+				if (!budget.Charge(sizeof(ScriptValue))) {
+					why = CodecStatus::TooLarge;
+					return false;
+				}
+				ScriptValue candidate;
+				if (!ToScriptValue(Context, Argv[index], candidate, 0, why, &budget)) return false;
+				out = std::move(candidate);
+				return true;
 			}
 
 			void ReadFieldNames(size_t index, std::vector<std::string> &out) override {

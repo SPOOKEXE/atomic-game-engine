@@ -963,7 +963,9 @@ namespace engine::render {
 		}
 		if (entry != nullptr && entry->Buffer != nullptr && entry->Bytes == bytes && entry->Usage == usage)
 			return entry->Buffer;
-		if (total + bytes > MAX_GRAPH_BUFFER_TOTAL_BYTES) {
+		const uint64_t computeBytes = ComputeBufferBytes();
+		if (computeBytes > MAX_GRAPH_BUFFER_TOTAL_BYTES ||
+			total + bytes > MAX_GRAPH_BUFFER_TOTAL_BYTES - computeBytes) {
 			ENGINE_WARN(
 				"graph buffers for '{}' exceed the {} byte budget",
 				pipeline.Name.Text(),

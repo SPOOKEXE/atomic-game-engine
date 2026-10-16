@@ -201,6 +201,19 @@ namespace engine::script {
 		bool operator==(const ScriptValue &other) const;
 	};
 
+	// Optional VM-walker bound, independent of the encoded 64 KiB wire limit.
+	// VM-owned enumeration and encoding temporaries stay within the VM memory limit.
+	struct ValueReadBudget {
+		// Remaining owned structure and string bytes, charged before each allocation.
+		size_t Remaining = 0;
+		// Refuses multiplication overflow and leaves the budget unchanged on refusal.
+		bool Charge(size_t count, size_t stride = 1) {
+			if (stride != 0 && count > Remaining / stride) return false;
+			Remaining -= count * stride;
+			return true;
+		}
+	};
+
 	// Puts one map's entries in the order the format writes them.
 	//
 	// **The sort is the determinism guarantee, and it lives here so that there

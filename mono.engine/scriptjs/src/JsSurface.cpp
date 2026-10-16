@@ -396,7 +396,12 @@ namespace engine::script {
 		// --- the codec bridge ------------------------------------------------
 
 		bool ObjectToScriptValue(
-			JSContext *context, JSValueConst value, ScriptValue &out, uint32_t depth, CodecStatus &why
+			JSContext *context,
+			JSValueConst value,
+			ScriptValue &out,
+			uint32_t depth,
+			CodecStatus &why,
+			ValueReadBudget *budget
 		);
 
 		// --- task ------------------------------------------------------------
@@ -617,8 +622,22 @@ namespace engine::script {
 	// --- the codec bridge, in full -------------------------------------------
 
 	namespace {
+		bool CodecReadStringFits(JSContext *context, JSValueConst value, const ValueReadBudget *budget) {
+			if (!budget) return true;
+			const auto size = JS_GetPropertyStr(context, value, "length");
+			int64_t characters = 0;
+			const auto status = JS_ToInt64(context, &characters, size);
+			JS_FreeValue(context, size);
+			return status >= 0 && characters >= 0 && static_cast<uint64_t>(characters) <= CODEC_MAX_BYTES &&
+				   static_cast<uint64_t>(characters) < budget->Remaining / 2;
+		}
 		bool ArrayToScriptValue(
-			JSContext *context, JSValueConst value, ScriptValue &out, uint32_t depth, CodecStatus &why
+			JSContext *context,
+			JSValueConst value,
+			ScriptValue &out,
+			uint32_t depth,
+			CodecStatus &why,
+			ValueReadBudget *budget
 		) {
 			out = ScriptValue{ValueTag::Array};
 
@@ -627,10 +646,14 @@ namespace engine::script {
 			JS_ToUint32(context, &length, lengthValue);
 			JS_FreeValue(context, lengthValue);
 
+			if (budget && !budget->Charge(length, sizeof(ScriptValue))) {
+				why = CodecStatus::TooLarge;
+				return false;
+			}
 			out.Items.resize(length);
 			for (uint32_t index = 0; index < length; index++) {
 				JSValue item = JS_GetPropertyUint32(context, value, index);
-				const bool ok = ToScriptValue(context, item, out.Items[index], depth + 1, why);
+				const bool ok = ToScriptValue(context, item, out.Items[index], depth + 1, why, budget);
 				JS_FreeValue(context, item);
 				if (!ok) {
 					return false;
@@ -640,7 +663,12 @@ namespace engine::script {
 		}
 
 		bool ObjectToScriptValue(
-			JSContext *context, JSValueConst value, ScriptValue &out, uint32_t depth, CodecStatus &why
+			JSContext *context,
+			JSValueConst value,
+			ScriptValue &out,
+			uint32_t depth,
+			CodecStatus &why,
+			ValueReadBudget *budget
 		) {
 			out = ScriptValue{ValueTag::Map};
 
@@ -653,16 +681,30 @@ namespace engine::script {
 				return false;
 			}
 
-			bool ok = true;
+			bool ok = !budget || budget->Charge(count, sizeof(std::pair<std::string, ScriptValue>));
+			if (!ok) why = CodecStatus::TooLarge;
+			if (budget && ok) out.Entries.reserve(count);
 			for (uint32_t index = 0; index < count && ok; index++) {
 				JSValue key = JS_AtomToString(context, properties[index].atom);
 				size_t length = 0;
-				const char *text = JS_ToCStringLen(context, &length, key);
+				const bool fits = CodecReadStringFits(context, key, budget);
+				const char *text = fits ? JS_ToCStringLen(context, &length, key) : nullptr;
+				if (!fits || (budget && (length > CODEC_MAX_BYTES || !budget->Charge(length + 1, 2)))) {
+					why = CodecStatus::TooLarge;
+					ok = false;
+				}
 
+				if (!ok || text == nullptr) {
+					if (ok) why = CodecStatus::Unsupported;
+					ok = false;
+					JS_FreeCString(context, text);
+					JS_FreeValue(context, key);
+					break;
+				}
 				JSValue held = JS_GetProperty(context, value, properties[index].atom);
 
 				ScriptValue child;
-				ok = text != nullptr && ToScriptValue(context, held, child, depth + 1, why);
+				ok = ok && text != nullptr && ToScriptValue(context, held, child, depth + 1, why, budget);
 				if (ok) {
 					out.Entries.emplace_back(std::string(text, length), std::move(child));
 				}
@@ -681,7 +723,12 @@ namespace engine::script {
 	}
 
 	bool ToScriptValue(
-		JSContext *context, JSValueConst value, ScriptValue &out, uint32_t depth, CodecStatus &why
+		JSContext *context,
+		JSValueConst value,
+		ScriptValue &out,
+		uint32_t depth,
+		CodecStatus &why,
+		ValueReadBudget *budget
 	) {
 		if (depth > CODEC_MAX_DEPTH) {
 			// **Depth is how a cycle is caught here**, rather than a visited
@@ -709,6 +756,10 @@ namespace engine::script {
 			return true;
 		}
 		if (JS_IsString(value)) {
+			if (!CodecReadStringFits(context, value, budget)) {
+				why = CodecStatus::TooLarge;
+				return false;
+			}
 			size_t length = 0;
 			const char *text = JS_ToCStringLen(context, &length, value);
 			if (text == nullptr) {
@@ -716,6 +767,11 @@ namespace engine::script {
 				return false;
 			}
 
+			if (budget && (length > CODEC_MAX_BYTES || !budget->Charge(length + 1, 2))) {
+				JS_FreeCString(context, text);
+				why = CodecStatus::TooLarge;
+				return false;
+			}
 			out = ScriptValue{ValueTag::String};
 			out.Text.assign(text, length);
 			JS_FreeCString(context, text);
@@ -739,7 +795,7 @@ namespace engine::script {
 		}
 
 		if (JS_IsArray(value) != 0) {
-			return ArrayToScriptValue(context, value, out, depth, why);
+			return ArrayToScriptValue(context, value, out, depth, why, budget);
 		}
 		if (JS_IsFunction(context, value)) {
 			// A function, an instance, or anything holding a pointer. **An
@@ -754,7 +810,7 @@ namespace engine::script {
 				why = CodecStatus::Unsupported;
 				return false;
 			}
-			return ObjectToScriptValue(context, value, out, depth, why);
+			return ObjectToScriptValue(context, value, out, depth, why, budget);
 		}
 
 		why = CodecStatus::Unsupported;
