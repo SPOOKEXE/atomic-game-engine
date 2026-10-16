@@ -3348,6 +3348,7 @@ namespace studio {
 		// A click injected through SDL waits for pointer hover, a presented press,
 		// and a presented release so tab bars receive the same sequence as a user click.
 		struct ControlClick {
+			// Ordered stages of an injected click across presented frames.
 			enum class Phase : uint8_t { Hover, Down, Release };
 			// Screen position, SDL button, phase, and SDL press-observation state.
 			//@{
