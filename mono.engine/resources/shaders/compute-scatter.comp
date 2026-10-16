@@ -7,7 +7,7 @@ layout(set = 0, binding = 0, std430) readonly buffer Values { uint Data[]; } val
 layout(set = 0, binding = 1, std430) readonly buffer Flags { uint Data[]; } flags;
 layout(set = 0, binding = 2, std430) readonly buffer Prefix { uint Data[]; } prefix;
 layout(set = 0, binding = 3, std430) readonly buffer Count { uint Data[1]; } count;
-layout(set = 1, binding = 0, std430) writeonly buffer Packed { uint Data[]; } packed;
+layout(set = 1, binding = 0, std430) writeonly buffer Packed { uint Data[]; } compacted;
 layout(set = 1, binding = 1, std430) writeonly buffer Errors { uint Data[]; } errors;
 
 shared uint groupError;
@@ -27,7 +27,7 @@ void main() {
 		} else if (flags.Data[index] == 1u) {
 			uint destination = prefix.Data[index];
 			if (destination < logicalCount && destination < computeParameters.Buffers[16].y)
-				packed.Data[destination] = values.Data[index];
+				compacted.Data[destination] = values.Data[index];
 			else atomicOr(groupError, 1u);
 		} else if (flags.Data[index] != 0u) {
 			atomicOr(groupError, 1u);
