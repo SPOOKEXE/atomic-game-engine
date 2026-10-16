@@ -91,6 +91,7 @@ namespace engine::script {
 		// Installed by the host after bindings exist, one bridge per runtime.
 		std::shared_ptr<DataCaptureBridge> DataCapture;
 		std::shared_ptr<ComputeBridge> Compute{};
+		std::shared_ptr<ProceduralEndpoint> Procedural{};
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
 
 		// The program surface installed for plugin runtimes.

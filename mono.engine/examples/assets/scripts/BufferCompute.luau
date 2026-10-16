@@ -3,10 +3,19 @@
 local compute = game:GetService("ComputeService")
 local capacity = 4097
 local plan = compute:StockGraph("StableCompactU32", capacity)
-table.insert(plan.Buffers, {Name="doubled", Type="u32", Capacity=capacity, CountBuffer="count"})
-table.insert(plan.Buffers, {Name="double-errors", Type="u32", Capacity=65, Count=65})
-table.insert(plan.ErrorBuffers, "double-errors")
-table.insert(plan.Kernels, {
+local outputBuffer: ComputeBuffer = {
+    Name = "doubled",
+    Type = "u32",
+    Capacity = capacity,
+    CountBuffer = "count",
+}
+local errorBuffer: ComputeBuffer = {Name = "double-errors", Type = "u32", Capacity = 65, Count = 65}
+table.insert(plan.Buffers, outputBuffer)
+table.insert(plan.Buffers, errorBuffer)
+local errorBuffers = plan.ErrorBuffers
+assert(errorBuffers ~= nil)
+table.insert(errorBuffers, "double-errors")
+local kernel: ComputeKernel = {
     Name="authored-double", Local={64,1,1},
     Ports={
         {Name="Values", Type="u32", Access="Read", Set=0, Binding=0},
@@ -45,7 +54,8 @@ void main() {
 	if (lane == 0u && block < computeParameters.Buffers[17].y) errors.Data[block] = groupError;
 }
 ]=],
-})
+}
+table.insert(plan.Kernels, kernel)
 table.insert(plan.Passes, {
     Name="authored-double", Kernel="authored-double", DispatchBuffer="packed",
     Bindings={{Port="Values",Buffer="packed"},{Port="Count",Buffer="count"},
@@ -55,7 +65,7 @@ local ticket = compute:DefineGraph("example.compact-double", plan)
 local sizes = {0,65,4097,7,65,4098}
 local caseIndex = 0
 local expected: {number} = {}
-local connection
+local connection: RBXScriptConnection
 connection = game:GetService("RunService").Heartbeat:Connect(function()
     local reply = compute:PollGraph(ticket)
     if reply.Status == "pending" then return end

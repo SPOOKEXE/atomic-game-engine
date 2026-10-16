@@ -2870,8 +2870,60 @@ declare interface ContentService {
 	GetTriangleCount(mesh: string): number;
 }
 
-// Runs a rectangular batch of values compatible with `math.noise` without
-// holding the VM thread. The result is flat and row-major.
+type ComputeElement = "u32" | "f32" | "f32x4";
+type ComputeAccess = "Read" | "Write" | "ReadWrite";
+// Opaque decimal ticket. Keep its string form; it can exceed exact numeric range.
+declare const computeTicketBrand: unique symbol;
+type ComputeTicket = string & { readonly [computeTicketBrand]: true };
+interface ComputeBuffer {
+	Name: string;
+	Type: ComputeElement;
+	Capacity: number;
+	Count?: number;
+	CountBuffer?: string;
+	Access?: ComputeAccess;
+	External?: boolean;
+}
+interface ComputePort {
+	Name: string;
+	Type: ComputeElement;
+	Access?: ComputeAccess;
+	Set: number;
+	Binding: number;
+	MinimumBytes?: number;
+}
+type ComputeBuiltIn = "compute-classify.comp" | "compute-scan.comp" | "compute-add-offsets.comp" | "compute-scatter.comp";
+type ComputeKernel = {
+	Name: string;
+	Version?: number;
+	Local: [number, number, number];
+	Ports: ComputePort[];
+} & ({ Source: string; BuiltIn?: never } | { Source?: never; BuiltIn: ComputeBuiltIn });
+interface ComputeBinding { Port: string; Buffer: string; }
+interface ComputePass {
+	Name: string;
+	Kernel: string;
+	DispatchBuffer: string;
+	Bindings: ComputeBinding[];
+}
+interface ComputePlan {
+	Buffers: ComputeBuffer[];
+	Kernels: ComputeKernel[];
+	Passes: ComputePass[];
+	ErrorBuffers?: string[];
+}
+interface ComputeInput { Name: string; Type: ComputeElement; Count: number; }
+interface ComputeOutputRequest { Name: string; MaximumElements: number; }
+interface ComputeRequest { Inputs: ComputeInput[]; Outputs: ComputeOutputRequest[]; }
+interface ComputeOutput { Name: string; Type: ComputeElement; Count: number; Bytes: number; }
+interface ComputePoll {
+	Status: "pending" | "complete" | "failed" | "cancelled";
+	Code: string;
+	Detail: string;
+	Outputs: ComputeOutput[];
+}
+
+// CPU noise batches and owner-bound asynchronous GPU buffer graphs.
 declare interface ComputeService {
 	NoiseGridAsync(
 		width: number,
@@ -2882,6 +2934,94 @@ declare interface ComputeService {
 		context?: "Serial" | "Threaded" | "Processed",
 		originY?: number
 	): Promise<number[]>;
+	StockGraph(name: "StableCompactU32", capacity: number): ComputePlan;
+	DefineGraph(name: string, plan: ComputePlan): ComputeTicket;
+	// Copied buffers follow Inputs order and contain exactly Count * element stride bytes.
+	SubmitGraph(name: string, request: ComputeRequest, ...inputs: ArrayBuffer[]): ComputeTicket;
+	PollGraph(ticket: ComputeTicket): ComputePoll;
+	// A read copies at most 65536 bytes from a completed output.
+	ReadGraphResult(ticket: ComputeTicket, name: string, offset: number, maximumBytes: number): ArrayBuffer;
+	CancelGraph(ticket: ComputeTicket): boolean;
+	ReleaseGraph(ticket: ComputeTicket): boolean;
+}
+
+type NpcCadenceDomain = "perception" | "behaviour";
+type NpcCadenceReason = "current" | "first_update" | "scheduled" | "maximum_staleness"
+	| "revision_changed" | "critical" | "demotion_hold" | "invalid_policy" | "clock_reset";
+interface NpcCadenceAdmission { due: boolean; reason: NpcCadenceReason; token: number; }
+interface NpcPerception { visible: boolean; target_position: Vector3; }
+
+// Admission and publication for authored NPC perception and behaviour work.
+declare interface UpdateCadenceService {
+	Configure(actor: Instance, identity: string, perceptionIntervalTicks: number,
+		perceptionMaximumStalenessTicks: number, behaviourIntervalTicks: number,
+		behaviourMaximumStalenessTicks: number, demotionDelayTicks: number): boolean;
+	SetCombat(actor: Instance, active: boolean): boolean;
+	BeginUpdate(actor: Instance, domain: NpcCadenceDomain, sourceRevision: number): NpcCadenceAdmission;
+	CommitPerception(actor: Instance, token: number, sourceRevision: number,
+		visible: boolean, targetPosition: Vector3, completed: boolean): boolean;
+	CommitBehaviour(actor: Instance, token: number, sourceRevision: number,
+		moveDirection: Vector3, completed: boolean): boolean;
+	Perception(actor: Instance): NpcPerception | null;
+	Behaviour(actor: Instance): Vector3 | null;
+	CombatReady(actor: Instance, sourceRevision: number): boolean;
+}
+
+declare const proceduralTicketBrand: unique symbol;
+type ProceduralTicket = string & { readonly [proceduralTicketBrand]: true };
+interface ProceduralRegion { X: number; Z: number; Cells: number; }
+interface ProceduralSourceKey { Kind: "Village" | "Entrance"; Name: string; }
+interface ProceduralSource extends ProceduralSourceKey {
+	X: number;
+	Z: number;
+	TargetVillage?: string;
+}
+interface ProceduralParameter { Node: string; Name: string; Value: number; }
+interface ForestVillageConfiguration {
+	Name: string;
+	// Unsigned 64-bit seed in decimal string form.
+	Seed: string;
+	Regions: ProceduralRegion[];
+	Sources: ProceduralSource[];
+	Parameters?: ProceduralParameter[];
+}
+interface ProceduralSpline { Name: string; EntranceName: string; ControlX: number; ControlZ: number; }
+type ProceduralOverride = { TargetId: string; Action: "Delete" } | {
+	TargetId: string;
+	Action: "Replace";
+	X: number;
+	Z: number;
+	RotationQuarterTurns: number;
+	Variant: number;
+	Material: number;
+	SourceName: string;
+};
+interface ProceduralProgress {
+	Status: "Pending" | "Ready" | "Canceled" | "Failed" | "Published";
+	CandidateCells: number;
+	WorkUnits: number;
+	SpatialTests: number;
+	Placements: number;
+	Roads: number;
+	ArtifactDigest: string;
+	Diagnostic: string;
+}
+
+// Copied CPU generation and signed baked-region references.
+declare interface ProceduralService {
+	ConfigureForestVillage(configuration: ForestVillageConfiguration): boolean;
+	SetSource(source: ProceduralSource): boolean;
+	RemoveSource(source: ProceduralSourceKey): boolean;
+	SetSpline(spline: ProceduralSpline): boolean;
+	RemoveSpline(name: string): boolean;
+	SetOverride(override: ProceduralOverride): boolean;
+	RemoveOverride(targetId: string): boolean;
+	Generate(scope: ProceduralRegion, mesh: EditableMesh, part: MeshPart): ProceduralTicket;
+	UseBaked(scope: ProceduralRegion, mesh: EditableMesh, part: MeshPart, descriptionName: string): boolean;
+	Progress(ticket: ProceduralTicket): ProceduralProgress;
+	Cancel(ticket: ProceduralTicket): boolean;
+	Publish(tickets: ProceduralTicket[]): boolean;
+	Release(ticket: ProceduralTicket): boolean;
 }
 
 interface DataSceneOptions {
@@ -3119,6 +3259,8 @@ declare const MemoryStoreService: MemoryStoreService;
 declare const DataStoreService: DataStoreService;
 declare const RunService: RunService;
 declare const ComputeService: ComputeService;
+declare const UpdateCadenceService: UpdateCadenceService;
+declare const ProceduralService: ProceduralService;
 declare const DataSceneService: DataSceneService;
 declare const TweenService: TweenService;
 declare const Debris: Debris;
@@ -3218,6 +3360,8 @@ declare const game: {
 		(service: "Teams"): Teams;
 		(service: "RunService"): RunService;
 		(service: "ComputeService"): ComputeService;
+		(service: "UpdateCadenceService"): UpdateCadenceService;
+		(service: "ProceduralService"): ProceduralService;
 		(service: "DataSceneService"): DataSceneService;
 		(service: "MessagingService"): MessagingService;
 		(service: "TeleportService"): TeleportService;

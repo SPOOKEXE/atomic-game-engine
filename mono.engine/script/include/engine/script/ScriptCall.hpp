@@ -47,6 +47,7 @@
 namespace engine::script {
 	class DataCaptureBridge;
 	class ComputeBridge;
+	class ProceduralEndpoint;
 	class DataLifecycleBridge;
 	// Two parallel placement arrays owned by one runtime's marshalling scratch.
 	//
@@ -133,6 +134,11 @@ namespace engine::script {
 		virtual const std::shared_ptr<ComputeBridge> &Compute() const {
 			static const std::shared_ptr<ComputeBridge> unavailable;
 			return unavailable;
+		}
+
+		// The host-bound procedural endpoint for this runtime, when installed.
+		virtual std::shared_ptr<ProceduralEndpoint> Procedural() {
+			return {};
 		}
 
 		// Returns the host bridge that owns asynchronous data-lifecycle requests.

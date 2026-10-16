@@ -102,6 +102,7 @@ namespace engine::script {
 		// Installed by the host, never shared through a process-global registry.
 		std::shared_ptr<DataCaptureBridge> DataCapture;
 		std::shared_ptr<ComputeBridge> Compute{};
+		std::shared_ptr<ProceduralEndpoint> Procedural{};
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
 		std::function<bool(std::span<const std::byte>)> RemoteEventSender;
 

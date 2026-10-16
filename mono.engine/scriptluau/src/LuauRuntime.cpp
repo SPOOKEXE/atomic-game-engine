@@ -589,6 +589,8 @@ namespace engine::script {
 		OpenInstances(State);
 		OpenGame(State);
 		OpenWorkspace(State, Store);
+		BindProceduralEndpoint();
+		bounds->Context.Procedural = ProceduralEndpointForWorld();
 
 		// **Before the services, because two of them produce one.**
 		// `UserInputService`'s signals and a bound action's handler are both

@@ -303,6 +303,7 @@ state until v0.19.
 
 | component | size | align | save | raw | pad | wire | what it is for |
 |---|---|---|---|---|---|---|---|
+| `script.BakedProceduralReference` | 32 | 8 | yes | . | yes | . | A local world's signed-content demand for one ordinary procedural placement description, its region scope and its same-world MeshPart target. |
 | `script.CodeSourceContainerSelector` | 1 | 1 | yes | yes | . | . | Which language container the script actually runs, and the one part of the script trio a game may set at run time. Absent means Luau. |
 | `script.DataCaptureDriver` | 8 | 8 | yes | . | . | . | Per-world singleton holding the scene's retained data-capture callback. The client invokes it only at a paused capture barrier, and snapshot restore clears the VM-local handle. |
 | `script.Disabled` | 0 | 1 | . | . | . | . | A tag: the host must not run this script. Presence moves it to a different archetype so the run loop never visits the row at all. |
@@ -318,6 +319,7 @@ state until v0.19.
 | `script.PortalTransfers` | 104 | 8 | yes | . | . | . | Snapshot state for bounded portal handoffs: host incarnation, pending source fences, destination reservations, authenticated peer receipts and retry ticks. The installed transfer admission system consumes owned simulation messages. |
 | `script.ProceduralAuthority` | 160 | 8 | yes | . | . | . | Per-world authored recipe, named source facts and registered regions, with local revisions fencing asynchronous generation. |
 | `script.ProceduralPublished` | 24 | 8 | yes | . | . | . | Per-world accepted canonical regional artifacts and activation receipts, replaced atomically after source and digest checks. |
+| `script.ProceduralQueueOwner` | 16 | 8 | yes | . | . | . | Transient per-store procedural job host shared by runtime leases; teardown cancels and joins copied work, and snapshots restore an empty owner. |
 | `script.ProceduralSceneRegion` | 72 | 8 | yes | . | . | . | Derived aggregate mesh ranges and canonical content digest for one procedural region; snapshot restore clears the local geometry index. |
 | `script.Program` | 40 | 8 | yes | . | . | . | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass. |
 | `script.ScriptClock` | 24 | 8 | yes | yes | . | . | Per-world singleton script clock: the update rate, simulated time owed but not yet spent, and which world tick was last observed. |
@@ -351,4 +353,4 @@ state until v0.19.
 
 ---
 
-264 components registered by the engine, 0 without a purpose line.
+266 components registered by the engine, 0 without a purpose line.

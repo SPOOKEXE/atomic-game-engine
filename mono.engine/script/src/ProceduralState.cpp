@@ -4,7 +4,9 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/procedural/Artifact.hpp>
+#include <engine/script/BakedProceduralReference.hpp>
 #include <engine/script/ProceduralScene.hpp>
+#include <engine/script/ProceduralService.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -141,10 +143,8 @@ namespace engine::script {
 		}
 
 		bool KeyScopeMatches(std::span<const uint8_t> key, procedural::RegionScope scope) {
-			core::ByteReader reader(std::as_bytes(key));
-			if (reader.ReadUInt32() != 0x324b4752) return false;
-			const auto decoded = ReadScope(reader);
-			return !reader.Failed() && SameScope(decoded, scope);
+			procedural::RegionScope decoded;
+			return procedural::ReadRegionKeyScope(key, decoded) && SameScope(decoded, scope);
 		}
 		bool WriteAuthority(
 			const ProceduralAuthority &authority,
@@ -443,5 +443,7 @@ namespace engine::script {
 			ProceduralHostLimits::MaximumPublishedBytes + 8196
 		);
 		RegisterProceduralSceneComponents();
+		RegisterProceduralServiceComponents();
+		RegisterBakedProceduralReferenceComponents();
 	}
 }

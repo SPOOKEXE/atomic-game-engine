@@ -136,6 +136,7 @@ RunService.Heartbeat:Connect(function(_delta: number)
 		local moving = cadence:BeginUpdate(npc.Model, "behaviour", SOURCE_REVISION)
 		if moving.due then
 			local observed = cadence:Perception(npc.Model)
+			assert(observed ~= nil, "NPC perception is unavailable")
 			local direction = Vector3.new(0, 0, 0)
 			if observed.visible and distance > 5 then direction = difference.Unit end
 			assert(cadence:CommitBehaviour(npc.Model, moving.token, SOURCE_REVISION, direction, true))
@@ -143,7 +144,11 @@ RunService.Heartbeat:Connect(function(_delta: number)
 
 		-- The deadline is checked every tick, including ticks with no expensive
 		-- perception or behaviour work. Promotion refreshes both before damage.
-		local nextAttack = npc.Model:GetAttribute("NextAttackTick") or 0
+		local nextAttackValue = npc.Model:GetAttribute("NextAttackTick")
+		if nextAttackValue ~= nil and type(nextAttackValue) ~= "number" then
+			error("NextAttackTick must be a number")
+		end
+		local nextAttack = if nextAttackValue == nil then 0 else nextAttackValue
 		if fighting and tick >= nextAttack and cadence:CombatReady(npc.Model, SOURCE_REVISION) then
 			targetHumanoid.Health = math.max(0, targetHumanoid.Health - 1)
 			npc.Model:SetAttribute("NextAttackTick", tick + 30)

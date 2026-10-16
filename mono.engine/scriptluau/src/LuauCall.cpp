@@ -269,6 +269,10 @@ namespace engine::script {
 				return Context.Compute;
 			}
 
+			std::shared_ptr<ProceduralEndpoint> Procedural() override {
+				return Context.Package ? nullptr : Context.Procedural;
+			}
+
 			const std::shared_ptr<DataCaptureBridge> &DataCapture() const override {
 				return Context.DataCapture;
 			}

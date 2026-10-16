@@ -378,6 +378,21 @@ TEST_CASE("every service member is reachable in both languages", "[scripting][se
 		  "Behaviour",
 		  "CombatReady"},
 		 {}},
+		{"ProceduralService",
+		 {"ConfigureForestVillage",
+		  "SetSource",
+		  "RemoveSource",
+		  "SetSpline",
+		  "RemoveSpline",
+		  "SetOverride",
+		  "RemoveOverride",
+		  "Generate",
+		  "UseBaked",
+		  "Progress",
+		  "Cancel",
+		  "Publish",
+		  "Release"},
+		 {}},
 	};
 
 	// **Every `Always` row appears above.** A service added to the catalogue and

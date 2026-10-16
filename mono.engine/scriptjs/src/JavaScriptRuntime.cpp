@@ -296,6 +296,8 @@ namespace engine::script {
 		// again rather than assuming it was fixed.
 
 		OpenJsBindings(Context, Store, limits.Role, limits.EffectiveCapabilities());
+		BindProceduralEndpoint();
+		JsOf(Context).Procedural = ProceduralEndpointForWorld();
 		JsOf(Context).RuntimeIdentity = Identity();
 		JsOf(Context).DataCapture = limits.DataCapture;
 		JsOf(Context).Compute = ComputeEndpoint();

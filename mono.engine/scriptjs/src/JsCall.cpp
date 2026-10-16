@@ -193,6 +193,10 @@ namespace engine::script {
 				return JsOf(Context).Compute;
 			}
 
+			std::shared_ptr<ProceduralEndpoint> Procedural() override {
+				return JsOf(Context).Package ? nullptr : JsOf(Context).Procedural;
+			}
+
 			const std::shared_ptr<DataCaptureBridge> &DataCapture() const override {
 				return JsOf(Context).DataCapture;
 			}

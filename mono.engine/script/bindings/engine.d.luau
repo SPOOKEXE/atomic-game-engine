@@ -3243,8 +3243,62 @@ declare extern type ContentService with
 	function GetTriangleCount(self, mesh: string): number
 end
 
--- Runs a rectangular batch of values compatible with `math.noise` without
--- holding the VM thread. The result is flat and row-major.
+export type ComputeElement = "u32" | "f32" | "f32x4"
+export type ComputeAccess = "Read" | "Write" | "ReadWrite"
+-- Opaque decimal ticket. Keep its string form; it can exceed exact numeric range.
+export type ComputeTicket = string
+export type ComputeBuffer = {
+	Name: string,
+	Type: ComputeElement,
+	Capacity: number,
+	Count: number?,
+	CountBuffer: string?,
+	Access: ComputeAccess?,
+	External: boolean?,
+}
+export type ComputePort = {
+	Name: string,
+	Type: ComputeElement,
+	Access: ComputeAccess?,
+	Set: number,
+	Binding: number,
+	MinimumBytes: number?,
+}
+export type ComputeKernel = {
+	Name: string,
+	Version: number?,
+	-- Exactly three local workgroup dimensions.
+	Local: { number },
+	Ports: { ComputePort },
+	-- Exactly one of Source or BuiltIn must be supplied.
+	Source: string?,
+	BuiltIn: ("compute-classify.comp" | "compute-scan.comp" | "compute-add-offsets.comp" | "compute-scatter.comp")?,
+}
+export type ComputeBinding = { Port: string, Buffer: string }
+export type ComputePass = {
+	Name: string,
+	Kernel: string,
+	DispatchBuffer: string,
+	Bindings: { ComputeBinding },
+}
+export type ComputePlan = {
+	Buffers: { ComputeBuffer },
+	Kernels: { ComputeKernel },
+	Passes: { ComputePass },
+	ErrorBuffers: { string }?,
+}
+export type ComputeInput = { Name: string, Type: ComputeElement, Count: number }
+export type ComputeOutputRequest = { Name: string, MaximumElements: number }
+export type ComputeRequest = { Inputs: { ComputeInput }, Outputs: { ComputeOutputRequest } }
+export type ComputeOutput = { Name: string, Type: ComputeElement, Count: number, Bytes: number }
+export type ComputePoll = {
+	Status: "pending" | "complete" | "failed" | "cancelled",
+	Code: string,
+	Detail: string,
+	Outputs: { ComputeOutput },
+}
+
+-- CPU noise batches and owner-bound asynchronous GPU buffer graphs.
 declare extern type ComputeService with
 	function NoiseGridAsync(
 		self,
@@ -3256,6 +3310,95 @@ declare extern type ComputeService with
 		context: "Serial" | "Threaded" | "Processed"?,
 		originY: number?
 	): { number }
+	function StockGraph(self, name: "StableCompactU32", capacity: number): ComputePlan
+	function DefineGraph(self, name: string, plan: ComputePlan): ComputeTicket
+	-- Copied buffers follow Inputs order and contain exactly Count * element stride bytes.
+	function SubmitGraph(self, name: string, request: ComputeRequest, ...: buffer): ComputeTicket
+	function PollGraph(self, ticket: ComputeTicket): ComputePoll
+	-- A read copies at most 65536 bytes from a completed output.
+	function ReadGraphResult(self, ticket: ComputeTicket, name: string, offset: number, maximumBytes: number): buffer
+	function CancelGraph(self, ticket: ComputeTicket): boolean
+	function ReleaseGraph(self, ticket: ComputeTicket): boolean
+end
+
+export type NpcCadenceDomain = "perception" | "behaviour"
+export type NpcCadenceReason = "current" | "first_update" | "scheduled" | "maximum_staleness"
+	| "revision_changed" | "critical" | "demotion_hold" | "invalid_policy" | "clock_reset"
+export type NpcCadenceAdmission = { due: boolean, reason: NpcCadenceReason, token: number }
+export type NpcPerception = { visible: boolean, target_position: Vector3 }
+
+-- Admission and publication for authored NPC perception and behaviour work.
+declare extern type UpdateCadenceService with
+	function Configure(self, actor: Instance, identity: string, perceptionIntervalTicks: number,
+		perceptionMaximumStalenessTicks: number, behaviourIntervalTicks: number,
+		behaviourMaximumStalenessTicks: number, demotionDelayTicks: number): boolean
+	function SetCombat(self, actor: Instance, active: boolean): boolean
+	function BeginUpdate(self, actor: Instance, domain: NpcCadenceDomain, sourceRevision: number): NpcCadenceAdmission
+	function CommitPerception(self, actor: Instance, token: number, sourceRevision: number,
+		visible: boolean, targetPosition: Vector3, completed: boolean): boolean
+	function CommitBehaviour(self, actor: Instance, token: number, sourceRevision: number,
+		moveDirection: Vector3, completed: boolean): boolean
+	function Perception(self, actor: Instance): NpcPerception?
+	function Behaviour(self, actor: Instance): Vector3?
+	function CombatReady(self, actor: Instance, sourceRevision: number): boolean
+end
+
+export type ProceduralTicket = string
+export type ProceduralRegion = { X: number, Z: number, Cells: number }
+export type ProceduralSourceKey = { Kind: "Village" | "Entrance", Name: string }
+export type ProceduralSource = {
+	Kind: "Village" | "Entrance",
+	Name: string,
+	X: number,
+	Z: number,
+	TargetVillage: string?,
+}
+export type ProceduralParameter = { Node: string, Name: string, Value: number }
+export type ForestVillageConfiguration = {
+	Name: string,
+	-- Unsigned 64-bit seed in decimal string form.
+	Seed: string,
+	Regions: { ProceduralRegion },
+	Sources: { ProceduralSource },
+	Parameters: { ProceduralParameter }?,
+}
+export type ProceduralSpline = { Name: string, EntranceName: string, ControlX: number, ControlZ: number }
+export type ProceduralOverride = { TargetId: string, Action: "Delete" } | {
+	TargetId: string,
+	Action: "Replace",
+	X: number,
+	Z: number,
+	RotationQuarterTurns: number,
+	Variant: number,
+	Material: number,
+	SourceName: string,
+}
+export type ProceduralProgress = {
+	Status: "Pending" | "Ready" | "Canceled" | "Failed" | "Published",
+	CandidateCells: number,
+	WorkUnits: number,
+	SpatialTests: number,
+	Placements: number,
+	Roads: number,
+	ArtifactDigest: string,
+	Diagnostic: string,
+}
+
+-- Copied CPU generation and signed baked-region references.
+declare extern type ProceduralService with
+	function ConfigureForestVillage(self, configuration: ForestVillageConfiguration): boolean
+	function SetSource(self, source: ProceduralSource): boolean
+	function RemoveSource(self, source: ProceduralSourceKey): boolean
+	function SetSpline(self, spline: ProceduralSpline): boolean
+	function RemoveSpline(self, name: string): boolean
+	function SetOverride(self, override: ProceduralOverride): boolean
+	function RemoveOverride(self, targetId: string): boolean
+	function Generate(self, scope: ProceduralRegion, mesh: EditableMesh, part: MeshPart): ProceduralTicket
+	function UseBaked(self, scope: ProceduralRegion, mesh: EditableMesh, part: MeshPart, descriptionName: string): boolean
+	function Progress(self, ticket: ProceduralTicket): ProceduralProgress
+	function Cancel(self, ticket: ProceduralTicket): boolean
+	function Publish(self, tickets: { ProceduralTicket }): boolean
+	function Release(self, ticket: ProceduralTicket): boolean
 end
 
 -- A copied, non-parented capture request. CameraId is `current_view` or a
@@ -3580,6 +3723,8 @@ declare DataStoreService: DataStoreService
 declare RunService: RunService
 declare Storm: StormService
 declare ComputeService: ComputeService
+declare UpdateCadenceService: UpdateCadenceService
+declare ProceduralService: ProceduralService
 declare DataSceneService: DataSceneService
 declare ContentService: ContentService
 declare CollectionService: CollectionService
@@ -3700,6 +3845,8 @@ type Services = {
 	TeleportService: TeleportService,
 	ContentService: ContentService,
 	ComputeService: ComputeService,
+	UpdateCadenceService: UpdateCadenceService,
+	ProceduralService: ProceduralService,
 	DataSceneService: DataSceneService,
 	CollectionService: CollectionService,
 	HttpService: HttpService,

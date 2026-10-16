@@ -59,6 +59,7 @@
 #include <vector>
 
 namespace engine::script {
+	class ProceduralEndpoint;
 	class DataScriptPackageContext;
 	struct DataScriptPackageRunResult;
 
@@ -882,6 +883,11 @@ namespace engine::script {
 			return Compute;
 		}
 
+		// Shared CPU procedural endpoint, bound after ordinary world bindings open.
+		const std::shared_ptr<ProceduralEndpoint> &ProceduralEndpointForWorld() const {
+			return Procedural;
+		}
+
 		// The host-owned capture adapter for this runtime.
 		const std::shared_ptr<DataCaptureBridge> &CaptureBridge() const {
 			return DataCapture;
@@ -916,6 +922,9 @@ namespace engine::script {
 		// Host-owned adapter used for copied package lifecycle operations.
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
 		std::shared_ptr<ComputeBridge> Compute{};
+		std::shared_ptr<ProceduralEndpoint> Procedural{};
+		// Called by each adapter after class/component registration is complete.
+		void BindProceduralEndpoint();
 		// True when this runtime is restricted to package execution.
 		bool PackageOnly = false;
 		// Prevents discard after work has crossed the world-swap boundary.

@@ -5,7 +5,9 @@
 #include <engine/scene/Services.hpp>
 #include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/ProceduralService.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/script/SourceCache.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -46,6 +48,17 @@ namespace engine::script {
 
 	Runtime::~Runtime() {
 		if (Compute) Compute->Detach();
+		if (Procedural) Procedural->Detach();
+	}
+
+	void Runtime::BindProceduralEndpoint() {
+		if (Procedural || PackageOnly || !Can(ScriptCapabilities::World) || Store.AdoptOnly()) return;
+		RegisterScriptComponents();
+
+		procedural::Diagnostic diagnostic;
+		Procedural = OpenProceduralEndpoint(
+			Store, IdentityValue, ProceduralWorldMode::AuthoritativeSerial, diagnostic
+		);
 	}
 
 	DataScriptPackageRunResult
