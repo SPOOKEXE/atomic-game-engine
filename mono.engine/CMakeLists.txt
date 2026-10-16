@@ -9,6 +9,7 @@
 # module's DEPS.
 
 add_subdirectory(core)      # L0 platform · L1 values      [shared]
+add_subdirectory(graphcore) # L2 bounded graph declarations [shared]
 add_subdirectory(parallel)  # L2 jobs and threads          [shared]
 add_subdirectory(ecs)       # L3 storage                   [shared]
 add_subdirectory(world)     # L4 universe, worlds, ticking  [shared]

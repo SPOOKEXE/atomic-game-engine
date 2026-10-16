@@ -184,13 +184,16 @@ namespace engine::graph {
 		MissingProducer,
 		StageRegression,
 		Cycle,
+		LimitExceeded,
+		InvalidDependency,
+		AllocationFailed,
 	};
 
 	// Stable diagnostic label for a compilation status.
 	const char *Describe(EngineGraphStatus status);
 
-	// Concurrent mode emits every ready node in one wave. Deterministic mode
-	// emits one ready node at a time in declaration order for replay audits.
+	// Concurrent mode emits every currently ready node in one wave. Deterministic
+	// mode chooses the lowest ready declaration again after each emitted node.
 	enum class EngineExecutionMode : uint8_t { Concurrent, Deterministic };
 
 	// Compiles dependencies, stage boundaries, barriers, and live intervals.

@@ -22,6 +22,7 @@ mono_add_library(graph
 	TIER shared
 	DEPS
 		Engine::core
+		Engine::graphcore
 		Engine::ecs
 		Engine::parallel
 

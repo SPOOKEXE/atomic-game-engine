@@ -2,8 +2,11 @@
 
 ## Status and scope
 
-This is a proposed execution plan for the v0.26.1 work listed in [`NEW_ROADMAP.md`](../NEW_ROADMAP.md). It is for review before implementation. No
-product-code changes, GPU checks, or optimization gains are claimed here.
+This is the approved execution plan for the v0.26.1 work listed in
+[`NEW_ROADMAP.md`](../NEW_ROADMAP.md). The shared graph module, target layer,
+module policy updates, and adapter migrations have user approval. Remaining
+implementation and evidence gates are tracked below. No GPU checks or
+optimization gains are claimed here.
 
 The planned scope is:
 
@@ -43,28 +46,42 @@ The source facts below come from the completed repository source audit. `graph` 
 `NodeSchema.hpp` and `Execution.hpp` exist, but no external domain consumers were found. Existing `ExecuteEngineGraph` runs serially. The remaining
 image graph, bake graph, audio, compute, animation, renderer, procedural, and ray-query observations are the audited facts used to shape this work.
 
-The audit is not runtime verification. No product-code changes, GPU checks, or optimization gains are claimed. A CPU benchmark baseline was run with
-`just imagegraph-bench 3` and `just spatial-hashgrid-bench 3`; both passed. These commands provide partial CPU baseline evidence only, not the complete
-v0.26.1 baseline matrix or any optimization pass. Recheck source assumptions and tests before changing behavior.
+The audit itself is not runtime verification. Its first-slice implementation
+evidence is recorded below. No full milestone verification, GPU checks, or
+optimization gains are claimed. Both baseline commands passed:
 
-## Policy exception review before implementation
+- `just imagegraph-bench 3`
+- `just spatial-hashgrid-bench 3`
 
-The following proposed design edges conflict with current module invariants. Present this plan and the concrete dependency graph to the user first.
-Obtain explicit approval for the exact invariant changes before implementation. If the user declines an exception, revise the design together without
-silently dropping the requested behavior.
+This is partial CPU baseline evidence only, not the complete v0.26.1 baseline
+matrix or any optimization pass. Recheck source assumptions and tests before
+changing behavior.
 
-| Module policy | Exact current invariant | Proposed change requiring approval |
+## Policy exceptions and approval status
+
+The user approved this plan, the shared graph module and its L2 core-only
+dependency, the imagegraph, bakegraph, and audio policy updates, the associated
+layer and adapter migrations, and the renderer worker-recording change subject
+to its profiling prerequisite. This approval does not waive implementation or
+validation gates. Owner-thread profiling must prove a recording cost before
+the render policy edit or implementation. The approved renderer change is
+limited to isolated private worker recording after that prerequisite, with
+public renderer ownership, shutdown, resource publication, joins, and final
+composition remaining on the owner thread.
+
+| Module policy | Exact current invariant | Approved change or remaining condition |
 |---|---|---|
-| Proposed `mono.engine/graphcore/AGENTS.md` | No module policy exists yet. | Create policy for a device-free L2 compiler that links only `Engine::core`. |
-| [imagegraph/AGENTS.md](../mono.engine/imagegraph/AGENTS.md) | “This module links only `Engine::core`.” | Permit `Engine::graphcore` for common bounded topology compilation. |
-| [bakegraph/AGENTS.md](../mono.engine/bakegraph/AGENTS.md) | “`Engine::core` and nothing else” | Permit `Engine::graphcore` for common bounded topology compilation. |
-| [audio/AGENTS.md](../mono.engine/audio/AGENTS.md) | “Do not "unify" them until `graph` has an executor and physics uses it.” | Permit shared topology validation/ordering while retaining audio's sample mixer and clock. No physics consumer is proposed. |
-| [render/AGENTS.md](../mono.engine/render/AGENTS.md) | “A frame is recorded by one thread, and that is a contract” and “Revisit when a viewport's *record* is measurable” | Permit isolated private worker recording only after owner-thread profiling proves a cost and the user approves the revised contract. Public renderer ownership, shutdown, and final composition remain on the owner thread. |
+| Proposed `mono.engine/graphcore/AGENTS.md` | No module policy exists yet. | Approved: add policy for a device-free L2 compiler that links only `Engine::core`. |
+| [imagegraph/AGENTS.md](../mono.engine/imagegraph/AGENTS.md) | “This module links only `Engine::core`.” | Approved: permit `Engine::graphcore` for common bounded topology compilation. |
+| [bakegraph/AGENTS.md](../mono.engine/bakegraph/AGENTS.md) | “`Engine::core` and nothing else” | Approved: permit `Engine::graphcore` for common bounded topology compilation. |
+| [audio/AGENTS.md](../mono.engine/audio/AGENTS.md) | “Do not "unify" them until `graph` has an executor and physics uses it.” | Approved: permit shared schema and topology compilation while retaining audio's sample mixer, clock, and runtime. No physics consumer is proposed. |
+| [render/AGENTS.md](../mono.engine/render/AGENTS.md) | “A frame is recorded by one thread, and that is a contract” and “Revisit when a viewport's *record* is measurable” | Approved subject to profiling prerequisite: permit isolated private worker recording only after owner-thread profiling proves a recording cost. Public renderer ownership, shutdown, resource publication, joins, and final composition remain on the owner thread. |
 
 The concrete proposal is `mono.engine/graphcore` at L2, linking only `Engine::core`. Existing `mono.engine/graph` remains L9 and calls graphcore;
 imagegraph, bakegraph, and audio link graphcore directly. Add the proposed graphcore policy and update `mono.tools/architecture/expected_graph.json` and all
-transitive closures. The four policy edits and exact edges above require user approval. Keep the feature under the engine layer; do not route engine
-code through a product executable.
+transitive closures. These dependency changes and listed module policy updates
+are approved. Keep the feature under the engine layer; do not route engine code
+through a product executable.
 
 ## Intended ownership and migration contracts
 
@@ -246,8 +263,10 @@ without quality or behavior loss.
 
 ## Ten execution phases
 
-Each phase produces reviewable evidence. No phase authorizes a policy exception by itself. Implementation remains gated on user review of this plan
-and any requested policy changes.
+Each phase produces reviewable evidence. No phase authorizes a policy exception
+by itself. User review and the shared graph, module, layer, and migration
+approvals are recorded above. The renderer change remains conditional on its
+owner-thread profiling prerequisite.
 
 ### 1. Classify
 
@@ -368,7 +387,8 @@ Every row is required. The named proof is evidence to collect after implementati
 
 ## Current baseline checks
 
-These checks describe the existing tree before implementation. They do not validate any proposed feature.
+These commands record the existing tree's partial CPU baseline before the
+implementation slice. They do not validate the full proposed feature.
 
 | Command | Result | Limit |
 |---|---|---|
@@ -377,13 +397,31 @@ These checks describe the existing tree before implementation. They do not valid
 | `cmake --build --preset ci --target test_graph test_imagegraph test_bakegraph test_audio` | No work to do. | Existing build targets only. |
 | `ctest --test-dir .cache/build/ci --output-on-failure -R '^(graph|imagegraph|bakegraph|audio)$'` | 4/4 passed in 1.20 s. | Existing behavior only; no new feature tests or GPU/runtime verification. |
 
+## First-slice implementation evidence
+
+- The CI build of `graphcore`, `imagegraph`, and `graph` passed after correcting
+  an aggregate default warning.
+- Focused tests passed: 3/3 in 0.75 s.
+- `just test-architecture` passed with 52 modules, 6 programs, and 38 layered
+  modules.
+- Server configure and architecture checks passed with 41 modules, 1 program,
+  and 32 layered modules.
+- The source check ran with no foundational findings. Its report still lists
+  unconsumed compute and cadence headers, so the source gate is not complete.
+- The Studio adapter unity object compiles in the CI preset. Focused server
+  graphcore and imagegraph tests passed: 2/2 in 0.30 s.
+
 ## Initial evidence checklist
 
-All implementation, validation, optimization, and delivery evidence below is unchecked until it is obtained from the authorized work:
+Approval entries below reflect completed user review. All implementation,
+validation, optimization, and delivery evidence remains unchecked until
+obtained from the authorized work:
 
-- [ ] User reviewed this plan and resolved requested policy exceptions.
-- [ ] Source assumptions and module invariants rechecked before edits.
-- [ ] Shared graph module, target layer, closures, and adapter migrations approved.
+- [x] User reviewed this plan and approved the listed module policy changes
+  and renderer worker recording subject to the profiling prerequisite.
+- [ ] Source assumptions and module invariants rechecked, including the
+  in-progress compute and cadence consumers.
+- [x] Shared graph module, target layer, closures, and adapter migrations approved.
 - [ ] C01 chain, ownership, reflection, limits, and CPU oracle complete.
 - [ ] C02 cadence and real consumer complete with installation gaps reproduced.
 - [ ] C04 CPU baseline and approved complete backend path demonstrated.

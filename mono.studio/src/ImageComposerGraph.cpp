@@ -2,6 +2,8 @@
 
 #include "ImageComposer.hpp"
 
+#include <engine/imagegraph/Schema.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -15,7 +17,6 @@
 namespace studio {
 	namespace {
 		using namespace engine::imagegraph;
-		constexpr const char *IMAGE = "composer.image";
 		constexpr const char *IDENTITY = "__composer.id";
 
 		nodegraph::Value Value(const nodegraph::Node &node, const std::string &key) {
@@ -239,27 +240,28 @@ namespace studio {
 	void RegisterImageComposerNodeTypes() {
 		if (nodegraph::NodeTypes::Find("image.source") != nullptr) return;
 		nodegraph::DataType image;
-		image.Id = IMAGE;
+		image.Id = std::string(IMAGE_PORT_TYPE);
 		image.Label = "Image";
 		image.Tint = {1, 1, 1, 1};
 		nodegraph::DataTypes::Register(image);
-		const auto registerType = [](const char *kind,
-									 const char *title,
-									 size_t inputs,
-									 std::vector<nodegraph::WidgetSpec> widgets) {
-			nodegraph::NodeType type;
-			type.Id = kind;
-			type.Title = title;
-			type.Category = "Image Composer";
-			type.Accent = {1, 1, 1, 1};
-			type.Width = 200;
-			if (inputs == 1) type.Inputs = {nodegraph::Port("Image", IMAGE)};
-			if (inputs == 2)
-				type.Inputs = {nodegraph::Port("Background", IMAGE), nodegraph::Port("Foreground", IMAGE)};
-			type.Outputs = {nodegraph::Port("Image", IMAGE)};
-			type.Widgets = std::move(widgets);
-			nodegraph::NodeTypes::Register(type);
-		};
+		const auto registerType =
+			[](const char *kind, const char *title, std::vector<nodegraph::WidgetSpec> widgets) {
+				const auto *schema = FindNodeSchema(kind);
+				if (schema == nullptr) return;
+				nodegraph::NodeType type;
+				type.Id = kind;
+				type.Title = title;
+				type.Category = "Image Composer";
+				type.Accent = {1, 1, 1, 1};
+				type.Width = 200;
+				for (const auto &port : schema->Ports) {
+					auto &ports = port.Direction == engine::graphcore::PortDirection::Input ? type.Inputs
+																							: type.Outputs;
+					ports.push_back(nodegraph::Port(port.Id, port.ValueType));
+				}
+				type.Widgets = std::move(widgets);
+				nodegraph::NodeTypes::Register(type);
+			};
 		const auto dimensions = [] {
 			return std::vector<nodegraph::WidgetSpec>{
 				nodegraph::Number("width", "Width", 256), nodegraph::Number("height", "Height", 256)
@@ -271,7 +273,6 @@ namespace studio {
 		registerType(
 			"image.source",
 			"Source Image",
-			0,
 			{nodegraph::Text("path", "Source", "source.png"),
 			 nodegraph::Select("interpretation", "Interpretation", {"colour", "data"}, 0)}
 		);
@@ -281,14 +282,14 @@ namespace studio {
 		colour.Label = "RGBA";
 		colour.Kind = colour.Default.Kind = nodegraph::WidgetKind::Colour;
 		solid.push_back(colour);
-		registerType("image.solid", "Solid", 0, solid);
+		registerType("image.solid", "Solid", solid);
 		auto resize = dimensions();
 		resize.push_back(filter());
-		registerType("image.resize", "Resize", 1, resize);
+		registerType("image.resize", "Resize", resize);
 		auto crop = dimensions();
 		crop.push_back(nodegraph::Number("x", "X", 0));
 		crop.push_back(nodegraph::Number("y", "Y", 0));
-		registerType("image.crop", "Crop", 1, crop);
+		registerType("image.crop", "Crop", crop);
 		auto transform = dimensions();
 		for (const auto &[key, label, number] : std::array<std::tuple<const char *, const char *, double>, 7>{
 				 {{"translate_x", "Translate X", 0},
@@ -301,15 +302,14 @@ namespace studio {
 			 })
 			transform.push_back(nodegraph::Number(key, label, number));
 		transform.push_back(filter());
-		registerType("image.transform", "Transform 2D", 1, transform);
+		registerType("image.transform", "Transform 2D", transform);
 		registerType(
 			"image.flip",
 			"Flip",
-			1,
 			{nodegraph::Toggle("horizontal", "Horizontal", false),
 			 nodegraph::Toggle("vertical", "Vertical", false)}
 		);
-		registerType("image.blend", "Blend", 2, {nodegraph::Slider("opacity", "Opacity", 0, 1, 1)});
+		registerType("image.blend", "Blend", {nodegraph::Slider("opacity", "Opacity", 0, 1, 1)});
 	}
 
 	bool LoadImageComposerGraph(

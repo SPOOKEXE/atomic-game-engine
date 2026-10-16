@@ -28,6 +28,7 @@ the machine-readable copy that `just test-architecture` enforces.
 |---|---|---|---|
 | 1 | `core` | shared | the platform and the value types. `CFrame`, `Vector3`, `Colour`, the clock, the log, `Name`, `FrameGraph` |
 | 2 | `parallel` | shared | jobs, threads, processes and the pipe between them |
+| 2 | `graphcore` | shared | pure, bounded graph schema and topology compilation; links only `core` |
 | 3 | `ecs` | shared | the storage. Columns, sets, change channels, the scheduler, thread affinity |
 | 4 | `world` | shared | the universe of worlds, the tick, and the ordered bus between them |
 | 5 | `collision` | shared | hulls and triangle soups. Geometry, with no notion of an entity |
@@ -38,7 +39,7 @@ the machine-readable copy that `just test-architecture` enforces.
 | 8 | `physics` | shared | shapes, integration, pairs, the solver |
 | 8 | `effects` | shared | particles, beams, trails |
 | 9 | `script` | shared | running a script. Two VMs, one binding set, the sandbox, the debugger |
-| 9 | `graph` | shared | the node runtime. One graph library, N node sets |
+| 9 | `graph` | shared | render and engine orchestration plus scalar domain runtime; common pure topology compilation is `graphcore` |
 | 9 | `bakegraph` | shared | what a bake pipeline *is*, carrying no decoders |
 | 9 | `bake` | shared | importing and baking content. The glTF, OBJ, PMX, PNG and WAV readers |
 | 10 | `game` | shared | what a game file is. Reads and writes a `.agame` |
@@ -63,13 +64,14 @@ Two pairs are routinely confused and are not the same thing:
   `ui` is L12 `client` and is the only target that makes Dear ImGui public.
   `mono.client/CMakeLists.txt:18` says it outright: "`Engine::ui` is the
   editor's toolkit and is deliberately absent."
-- **`graph`, `bakegraph` and `nodegraph` are three different things.** `graph`
-  is the runtime that executes nodes. `bakegraph` is a pipeline *description*
-  with no decoders in it, which is what lets a game file carry its bake
-  pipelines without carrying a glTF reader. `nodegraph` is an editor canvas and
-  is **not here** - it was `mono.engine/nodegraph` until v0.19 and is
-  `mono.studio/nodegraph` now, because the editor was the only thing that ever
-  linked it.
+- **`graphcore`, `graph`, `bakegraph` and `nodegraph` are different things.**
+  `graphcore` is the L2 pure, bounded schema and topology compiler and links only
+  `core`. `graph` stays L9 for render and engine orchestration plus scalar
+  domain runtime. `bakegraph` is a pipeline *description* with no decoders in
+  it, which lets a game file carry bake pipelines without carrying a glTF
+  reader. `nodegraph` is an editor canvas and is **not here** - it was
+  `mono.engine/nodegraph` until v0.19 and is `mono.studio/nodegraph` now,
+  because the editor was the only thing that ever linked it.
 
 ---
 

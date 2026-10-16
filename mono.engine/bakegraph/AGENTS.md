@@ -3,17 +3,21 @@
 L9, `shared` tier. The words a bake pipeline is described in, and nothing that
 runs one.
 
-## `Engine::core` and nothing else
+## `Engine::core` and `Engine::graphcore`, and nothing else
 
-This module exists to keep a decoder out of a save format. `bake` carries every
-importer the engine has - PNG, JPEG, GIF, BMP, OBJ, glTF, PMX - and nothing a
-shipped game links may link it; `Engine::game` links *this*, so a dedicated
-server parses a pipeline document with none of them.
+This module exists to keep a decoder out of a save format. `Engine::graphcore`
+provides only pure, bounded topology compilation at L2; this module owns the
+bake-pipeline schema and domain validation. It must not link decoders, UI,
+devices, jobs, or runtime state. `bake` carries every importer the engine has -
+PNG, JPEG, GIF, BMP, OBJ, glTF, PMX - and nothing a shipped game links may link
+it; `Engine::game` links *this*, so a dedicated server parses a pipeline
+document with none of them.
 
-That property is one link line wide. The day something here wants `assets`, ask
-what for: a document is names and numbers, and a payload is `bake`'s. The tier
-check will not stop it - `assets` is below this - so the guard is the row in
-`mono.tools/architecture/expected_graph.json` and this paragraph.
+`Engine::core` owns value types and names. The day something here wants
+`assets`, ask what for: a document is names and numbers, and a payload is
+`bake`'s. The tier check will not stop it - `assets` is below this - so the
+guard is the row in `mono.tools/architecture/expected_graph.json` and this
+paragraph.
 
 ## The namespace is still `engine::bake`
 

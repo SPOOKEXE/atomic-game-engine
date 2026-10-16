@@ -128,6 +128,94 @@ TEST_CASE("ready work is concurrent or stably serial by execution mode", "[graph
 	CHECK(deterministic.Waves[1].Nodes.front().Node.Value == 2);
 }
 
+TEST_CASE("engine graph serial order revisits newly ready authored nodes", "[graph][engine]") {
+	EngineGraph graph;
+	REQUIRE(graph.AddResource({Name("first"), EngineResourceLifetime::Tick}));
+	REQUIRE(graph.AddResource({Name("second"), EngineResourceLifetime::Tick}));
+	REQUIRE(graph.AddNode(MakeNode("first-reader", EngineStage::World, {Name("first")}, {})).IsValid());
+	REQUIRE(graph.AddNode(MakeNode("second-reader", EngineStage::World, {Name("second")}, {})).IsValid());
+	REQUIRE(graph.AddNode(MakeNode("independent", EngineStage::World, {}, {})).IsValid());
+	REQUIRE(graph.AddNode(MakeNode("first-writer", EngineStage::World, {}, {Name("first")})).IsValid());
+	REQUIRE(graph.AddNode(MakeNode("second-writer", EngineStage::World, {}, {Name("second")})).IsValid());
+
+	Name offender;
+	EngineSchedule serial;
+	REQUIRE(
+		CompileEngineGraph(graph, serial, offender, EngineExecutionMode::Deterministic) ==
+		EngineGraphStatus::Ok
+	);
+	REQUIRE(serial.Waves.size() == 5);
+	for (const EngineWave &wave : serial.Waves) {
+		REQUIRE(wave.Nodes.size() == 1);
+		CHECK_FALSE(wave.Concurrent);
+	}
+	Recorder serialRecorder;
+	REQUIRE(ExecuteEngineGraph(graph, serial, serialRecorder));
+	CHECK(
+		serialRecorder.Ran ==
+		std::vector<std::string>{
+			"independent", "first-writer", "first-reader", "second-writer", "second-reader"
+		}
+	);
+
+	EngineSchedule concurrent;
+	REQUIRE(
+		CompileEngineGraph(graph, concurrent, offender, EngineExecutionMode::Concurrent) ==
+		EngineGraphStatus::Ok
+	);
+	REQUIRE(concurrent.Waves.size() == 2);
+	REQUIRE(concurrent.Waves[0].Nodes.size() == 3);
+	REQUIRE(concurrent.Waves[1].Nodes.size() == 2);
+	CHECK(concurrent.Waves[0].Nodes[0].Node.Value == 3);
+	CHECK(concurrent.Waves[0].Nodes[1].Node.Value == 4);
+	CHECK(concurrent.Waves[0].Nodes[2].Node.Value == 5);
+	CHECK(concurrent.Waves[1].Nodes[0].Node.Value == 1);
+	CHECK(concurrent.Waves[1].Nodes[1].Node.Value == 2);
+}
+
+TEST_CASE("engine graph cycle refuses and clears a reused schedule", "[graph][engine]") {
+	EngineGraph graph;
+	REQUIRE(graph.AddResource({Name("output"), EngineResourceLifetime::Tick}));
+	REQUIRE(graph.AddResource({Name("loop-a"), EngineResourceLifetime::Tick}));
+	REQUIRE(graph.AddResource({Name("loop-b"), EngineResourceLifetime::Tick}));
+	REQUIRE(graph.AddNode(MakeNode("blocked-reader", EngineStage::World, {Name("output")}, {})).IsValid());
+	REQUIRE(graph
+				.AddNode(MakeNode(
+					"first-cycle-node", EngineStage::World, {Name("loop-b")}, {Name("output"), Name("loop-a")}
+				))
+				.IsValid());
+	REQUIRE(
+		graph.AddNode(MakeNode("second-cycle-node", EngineStage::World, {Name("loop-a")}, {Name("loop-b")}))
+			.IsValid()
+	);
+
+	EngineSchedule schedule;
+	schedule.Waves.push_back({});
+	schedule.Barriers.push_back({});
+	schedule.Resources.push_back({});
+	Name offender;
+	CHECK(CompileEngineGraph(graph, schedule, offender) == EngineGraphStatus::Cycle);
+	CHECK(offender == Name("blocked-reader"));
+	CHECK(schedule.Waves.empty());
+	CHECK(schedule.Barriers.empty());
+	CHECK(schedule.Resources.empty());
+}
+
+TEST_CASE("engine graph dependency refusals have distinct descriptions", "[graph][engine]") {
+	CHECK(
+		std::string(Describe(EngineGraphStatus::LimitExceeded)) ==
+		"the engine graph exceeds dependency compilation limits"
+	);
+	CHECK(
+		std::string(Describe(EngineGraphStatus::InvalidDependency)) ==
+		"the engine graph has an invalid dependency"
+	);
+	CHECK(
+		std::string(Describe(EngineGraphStatus::AllocationFailed)) ==
+		"engine dependency compilation could not allocate storage"
+	);
+}
+
 TEST_CASE("the authored render graph imports into the unified final stage", "[graph][engine]") {
 	RenderGraph render;
 	Name offender;

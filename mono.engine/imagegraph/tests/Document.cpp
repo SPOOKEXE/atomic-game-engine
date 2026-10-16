@@ -78,6 +78,30 @@ TEST_CASE("compile resolves a shared DAG in stable authored order", "[imagegraph
 	CHECK(repeated == plan);
 }
 
+TEST_CASE("image compilation preserves authored sweeps and distinct blend pins", "[imagegraph][document]") {
+	Document document{
+		.Nodes =
+			{
+				{"early-left", Flip{}, {"left"}, {}},
+				{"early-right", Flip{}, {"right"}, {}},
+				{"independent", Solid{}, {}, {}},
+				{"left", Solid{}, {}, {}},
+				{"right", Solid{}, {}, {}},
+			},
+		.Outputs = {{"main", "early-left"}},
+	};
+	Diagnostic diagnostic;
+	Plan plan;
+	REQUIRE(Compile(document, plan, diagnostic));
+	CHECK(plan.Order == std::vector<size_t>{2, 3, 4, 0, 1});
+
+	document.Nodes = {{"blend", Blend{}, {"source", "source"}, {}}, {"source", Solid{}, {}, {}}};
+	document.Outputs[0].Node = "blend";
+	REQUIRE(Compile(document, plan, diagnostic));
+	CHECK(plan.Order == std::vector<size_t>{1, 0});
+	CHECK(plan.Inputs[0] == std::vector<size_t>{1, 1});
+}
+
 TEST_CASE("compile refuses malformed graphs without replacing an accepted plan", "[imagegraph][document]") {
 	const Document accepted = Basic();
 	Diagnostic diagnostic;

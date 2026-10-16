@@ -165,19 +165,18 @@ against ffmpeg's decode of the same bytes** - the same 8064 frames, the same
 peak to seven figures. A decoder checked only against its own output is a
 decoder nobody has checked.
 
-## Why this graph is not `engine::graph`
+## Share topology compilation, keep audio runtime local
 
-`repo_layout.md` §9 plans one graph runtime with five consumers and lists audio
-among them. §16 decision 12 states the ordering: *build `mono.engine/graph/`
-against render only, and do not claim it is general until the physics graph is
-the second user.* Today `graph` holds the description of a frame and none of the
-execution, so routing audio through it would mean building that runtime against
-a second consumer before it exists for the first.
+Audio may use `Engine::graphcore` for pure, bounded schema and topology
+compilation. `Engine::graph` remains the L9 render and engine orchestration
+runtime, with scalar domain runtimes; audio does not need to route through it or
+wait for a physics consumer. The audio module owns its mixer, sample clock,
+deadlines, runtime state, and summation order.
 
-This graph is small and deliberately shaped like the eventual one - nodes,
-ports, a topological order - so folding it in later is a move rather than a
-rewrite. **Do not "unify" them until `graph` has an executor and physics uses
-it.**
+Routing compilation happens before callback execution. It must build a
+precompiled plan or use bounded workspace outside the callback. No graphcore or
+audio routing work may allocate, lock, or block in the callback; rendering
+continues to use the graph and scratch buffers already prepared for it.
 
 ## Not here yet
 

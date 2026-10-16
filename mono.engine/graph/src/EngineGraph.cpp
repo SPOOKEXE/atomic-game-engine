@@ -1,5 +1,6 @@
 #include <engine/graph/EngineGraph.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
+#include <engine/graphcore/Compile.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -42,6 +43,12 @@ namespace engine::graph {
 			return "a dependency points back to an earlier engine stage";
 		case EngineGraphStatus::Cycle:
 			return "the engine dependencies form a cycle";
+		case EngineGraphStatus::LimitExceeded:
+			return "the engine graph exceeds dependency compilation limits";
+		case EngineGraphStatus::InvalidDependency:
+			return "the engine graph has an invalid dependency";
+		case EngineGraphStatus::AllocationFailed:
+			return "engine dependency compilation could not allocate storage";
 		}
 		return "unknown engine graph status";
 	}
@@ -82,16 +89,10 @@ namespace engine::graph {
 	}
 
 	namespace {
-		void AddEdge(
-			std::vector<std::unordered_set<size_t>> &outgoing,
-			std::vector<std::unordered_set<size_t>> &incoming,
-			size_t before,
-			size_t after
-		) {
-			if (before == after || !outgoing[before].insert(after).second) {
-				return;
+		void AddEdge(std::vector<std::unordered_set<size_t>> &outgoing, size_t before, size_t after) {
+			if (before != after) {
+				outgoing[before].insert(after);
 			}
-			incoming[after].insert(before);
 		}
 	}
 
@@ -102,7 +103,6 @@ namespace engine::graph {
 		const std::span<const EngineNode> nodes = graph.AllNodes();
 		const size_t count = nodes.size();
 		std::vector<std::unordered_set<size_t>> outgoing(count);
-		std::vector<std::unordered_set<size_t>> incoming(count);
 		std::unordered_map<uint32_t, std::vector<size_t>> writers;
 
 		for (size_t index = 0; index < count; index++) {
@@ -132,7 +132,7 @@ namespace engine::graph {
 		for (size_t before = 0; before < count; before++) {
 			for (size_t after = 0; after < count; after++) {
 				if (nodes[before].Stage < nodes[after].Stage) {
-					AddEdge(outgoing, incoming, before, after);
+					AddEdge(outgoing, before, after);
 				}
 			}
 		}
@@ -142,7 +142,7 @@ namespace engine::graph {
 			const std::vector<size_t> empty;
 			const std::vector<size_t> &resourceWriters = found == writers.end() ? empty : found->second;
 			for (size_t index = 1; index < resourceWriters.size(); index++) {
-				AddEdge(outgoing, incoming, resourceWriters[index - 1], resourceWriters[index]);
+				AddEdge(outgoing, resourceWriters[index - 1], resourceWriters[index]);
 			}
 			for (size_t reader = 0; reader < count; reader++) {
 				if (std::find(nodes[reader].Reads.begin(), nodes[reader].Reads.end(), resource.Name) ==
@@ -169,51 +169,60 @@ namespace engine::graph {
 					offender = nodes[reader].Name;
 					return EngineGraphStatus::StageRegression;
 				}
-				AddEdge(outgoing, incoming, producer, reader);
+				AddEdge(outgoing, producer, reader);
 				const auto next =
 					std::find_if(resourceWriters.begin(), resourceWriters.end(), [producer](size_t writer) {
 						return writer > producer;
 					});
 				if (next != resourceWriters.end()) {
-					AddEdge(outgoing, incoming, reader, *next);
+					AddEdge(outgoing, reader, *next);
 				}
 			}
 		}
 
-		std::vector<size_t> remaining(count);
-		std::vector<uint32_t> waveOf(count, std::numeric_limits<uint32_t>::max());
-		for (size_t index = 0; index < count; index++) {
-			remaining[index] = incoming[index].size();
+		if (count > std::numeric_limits<graphcore::NodeIndex>::max()) {
+			offender = {};
+			return EngineGraphStatus::LimitExceeded;
 		}
-		size_t emitted = 0;
-		while (emitted < count) {
-			std::vector<size_t> ready;
-			for (size_t index = 0; index < count; index++) {
-				if (remaining[index] == 0) {
-					ready.push_back(index);
-				}
+		std::vector<graphcore::Dependency> dependencies;
+		for (size_t before = 0; before < count; before++) {
+			for (const size_t after : outgoing[before]) {
+				dependencies.push_back({
+					.Before = static_cast<graphcore::NodeIndex>(before),
+					.After = static_cast<graphcore::NodeIndex>(after),
+				});
 			}
-			if (ready.empty()) {
-				for (size_t index = 0; index < count; index++) {
-					if (remaining[index] != std::numeric_limits<size_t>::max()) {
-						offender = nodes[index].Name;
-						break;
-					}
-				}
-				out.Clear();
+		}
+		graphcore::Topology topology;
+		graphcore::Diagnostic diagnostic;
+		const graphcore::Limits limits{
+			.MaximumNodes = count,
+			.MaximumConnections = dependencies.size(),
+		};
+		// Serial execution must reconsider newly ready low-index nodes after each step.
+		const graphcore::CompileStatus dependencyStatus = graphcore::CompileDependencies(
+			count, dependencies, limits, topology, diagnostic, graphcore::OrderPolicy::LowestReady
+		);
+		if (dependencyStatus != graphcore::CompileStatus::Ok) {
+			offender = diagnostic.Blocked < count ? nodes[diagnostic.Blocked].Name : core::Name{};
+			switch (dependencyStatus) {
+			case graphcore::CompileStatus::Cycle:
 				return EngineGraphStatus::Cycle;
+			case graphcore::CompileStatus::LimitExceeded:
+				return EngineGraphStatus::LimitExceeded;
+			case graphcore::CompileStatus::AllocationFailed:
+				return EngineGraphStatus::AllocationFailed;
+			default:
+				return EngineGraphStatus::InvalidDependency;
 			}
-			if (mode == EngineExecutionMode::Deterministic) {
-				ready.resize(1);
-			}
-			for (const size_t index : ready) {
-				remaining[index] = std::numeric_limits<size_t>::max();
-			}
+		}
 
+		std::vector<uint32_t> waveOf(count, std::numeric_limits<uint32_t>::max());
+		const auto appendWave = [&](std::span<const graphcore::NodeIndex> ready) {
 			EngineWave wave;
 			std::unordered_set<uint8_t> queues;
 			const uint32_t waveIndex = static_cast<uint32_t>(out.Waves.size());
-			for (const size_t index : ready) {
+			for (const graphcore::NodeIndex index : ready) {
 				wave.Nodes.push_back({
 					.Node = EngineNodeId{static_cast<uint32_t>(index + 1)},
 					.Queue = nodes[index].Queue,
@@ -223,17 +232,20 @@ namespace engine::graph {
 				queues.insert(static_cast<uint8_t>(nodes[index].Queue));
 				waveOf[index] = waveIndex;
 			}
-			wave.Concurrent =
-				mode == EngineExecutionMode::Concurrent && ready.size() > 1 &&
-				(queues.size() == 1 || std::any_of(ready.begin(), ready.end(), [&](size_t index) {
-					 return nodes[index].AsyncEligible;
-				 }));
+			wave.Concurrent = mode == EngineExecutionMode::Concurrent && ready.size() > 1 &&
+							  (queues.size() == 1 ||
+							   std::any_of(ready.begin(), ready.end(), [&](graphcore::NodeIndex index) {
+								   return nodes[index].AsyncEligible;
+							   }));
 			out.Waves.push_back(std::move(wave));
-			emitted += ready.size();
-			for (const size_t index : ready) {
-				for (const size_t dependent : outgoing[index]) {
-					remaining[dependent]--;
-				}
+		};
+		if (mode == EngineExecutionMode::Deterministic) {
+			for (const graphcore::NodeIndex index : topology.Order) {
+				appendWave(std::span<const graphcore::NodeIndex>(&index, 1));
+			}
+		} else {
+			for (const std::vector<graphcore::NodeIndex> &ready : topology.Waves) {
+				appendWave(ready);
 			}
 		}
 

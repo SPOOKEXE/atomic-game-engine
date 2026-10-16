@@ -1,13 +1,14 @@
 #include "Inputs.hpp"
 
+#include <engine/graphcore/Compile.hpp>
 #include <engine/imagegraph/Reference.hpp>
+#include <engine/imagegraph/Schema.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <stdexcept>
-#include <unordered_map>
 #include <unordered_set>
 
 namespace engine::imagegraph {
@@ -286,16 +287,8 @@ namespace engine::imagegraph {
 			   Pixels.size() == uint64_t(Width) * Height * 4;
 	}
 	std::string_view Kind(const Operation &operation) noexcept {
-		constexpr std::array<std::string_view, 7> kinds{
-			"image.source",
-			"image.solid",
-			"image.resize",
-			"image.crop",
-			"image.transform",
-			"image.flip",
-			"image.blend"
-		};
-		return operation.index() < kinds.size() ? kinds[operation.index()] : std::string_view{};
+		return operation.index() < NODE_KIND_IDS.size() ? NODE_KIND_IDS[operation.index()]
+														: std::string_view{};
 	}
 	std::string_view SamplingName(Sampling sampling) noexcept {
 		switch (sampling) {
@@ -313,23 +306,29 @@ namespace engine::imagegraph {
 		try {
 			Plan plan;
 			plan.Inputs.resize(document.Nodes.size());
-			std::unordered_map<std::string_view, size_t> names;
+			std::vector<graphcore::Node> nodes;
+			std::vector<graphcore::Connection> connections;
+			nodes.reserve(document.Nodes.size());
+			connections.reserve(document.Nodes.size() * 2);
 			size_t authoredBytes = 0;
 			for (size_t index = 0; index < document.Nodes.size(); index++) {
 				const Node &node = document.Nodes[index];
-				if (!NameValid(node.Id) || !names.emplace(node.Id, index).second)
+				if (!NameValid(node.Id))
 					return Fail(diagnostic, node.Id, "node identity is empty, invalid or duplicated");
 				if (!std::isfinite(node.Position[0]) || !std::isfinite(node.Position[1]))
 					return Fail(diagnostic, node.Id, "canvas position must be finite");
 				const std::string failure = Validate(node.Value);
 				if (!failure.empty()) return Fail(diagnostic, node.Id, failure);
-				const size_t expected =
-					std::holds_alternative<Source>(node.Value) || std::holds_alternative<Solid>(node.Value)
-						? 0
-					: std::holds_alternative<Blend>(node.Value) ? 2
-																: 1;
+				const auto *schema = FindNodeSchema(Kind(node.Value));
+				if (schema == nullptr) return Fail(diagnostic, node.Id, "image operation has no node schema");
+				const size_t expected = static_cast<size_t>(
+					std::count_if(schema->Ports.begin(), schema->Ports.end(), [](const auto &port) {
+						return port.Direction == graphcore::PortDirection::Input;
+					})
+				);
 				if (node.Inputs.size() != expected)
 					return Fail(diagnostic, node.Id, "input count does not match node kind");
+				nodes.push_back({node.Id, schema->Id});
 				authoredBytes += node.Id.size();
 				if (const auto *source = std::get_if<Source>(&node.Value))
 					authoredBytes += source->Path.size();
@@ -337,17 +336,57 @@ namespace engine::imagegraph {
 					if (!NameValid(input)) return Fail(diagnostic, node.Id, "input identity is invalid");
 					authoredBytes += input.size();
 				}
-			}
-			for (size_t index = 0; index < document.Nodes.size(); index++) {
-				for (const auto &input : document.Nodes[index].Inputs) {
-					const auto found = names.find(input);
-					if (found == names.end())
-						return Fail(
-							diagnostic, document.Nodes[index].Id, "input names a missing node: " + input
-						);
-					plan.Inputs[index].push_back(found->second);
+				size_t inputIndex = 0;
+				for (const auto &port : schema->Ports) {
+					if (port.Direction == graphcore::PortDirection::Input)
+						connections.push_back({node.Inputs[inputIndex++], "Image", node.Id, port.Id});
 				}
 			}
+			const auto schemas = NodeSchemas();
+			size_t schemaPorts = 0;
+			for (const auto &schema : schemas)
+				schemaPorts += schema.Ports.size();
+			const graphcore::Limits limits{
+				.MaximumNodes = Limits::MaximumNodes,
+				.MaximumConnections = Limits::MaximumNodes * 2,
+				.MaximumSchemas = schemas.size(),
+				.MaximumPorts = schemaPorts,
+				.MaximumIdentityBytes = Limits::MaximumDocumentBytes,
+			};
+			graphcore::CompiledGraph compiled;
+			graphcore::Diagnostic sharedDiagnostic;
+			const auto status =
+				graphcore::CompileGraph(nodes, connections, schemas, limits, compiled, sharedDiagnostic);
+			if (status != graphcore::CompileStatus::Ok) {
+				if (status == graphcore::CompileStatus::DuplicateNode)
+					return Fail(
+						diagnostic, sharedDiagnostic.Node, "node identity is empty, invalid or duplicated"
+					);
+				if (status == graphcore::CompileStatus::UnknownNode) {
+					const auto failed =
+						std::find_if(connections.begin(), connections.end(), [&](const auto &connection) {
+							return connection.FromNode == sharedDiagnostic.Node;
+						});
+					if (failed != connections.end())
+						return Fail(
+							diagnostic, failed->ToNode, "input names a missing node: " + failed->FromNode
+						);
+				}
+				if (status == graphcore::CompileStatus::Cycle) {
+					const auto blocked = sharedDiagnostic.Blocked;
+					return Fail(
+						diagnostic,
+						blocked < document.Nodes.size() ? document.Nodes[blocked].Id : std::string_view{},
+						"graph contains a dependency cycle"
+					);
+				}
+				if (status == graphcore::CompileStatus::AllocationFailed)
+					return Fail(diagnostic, {}, "graph allocation refused");
+				return Fail(diagnostic, sharedDiagnostic.Node, graphcore::Describe(status));
+			}
+			for (const auto &connection : compiled.Connections)
+				plan.Inputs[connection.ToNode].push_back(connection.FromNode);
+			plan.Order.assign(compiled.Dependencies.Order.begin(), compiled.Dependencies.Order.end());
 			std::unordered_set<std::string_view> outputs;
 			for (const auto &output : document.Outputs) {
 				if (output.Space != OutputSpace::SRGB && output.Space != OutputSpace::Linear)
@@ -355,35 +394,17 @@ namespace engine::imagegraph {
 				if (!NameValid(output.Name) || !NameValid(output.Node) ||
 					!outputs.emplace(output.Name).second)
 					return Fail(diagnostic, output.Node, "output identity is empty, invalid or duplicated");
-				const auto found = names.find(output.Node);
-				if (found == names.end()) return Fail(diagnostic, output.Node, "output names a missing node");
-				plan.Outputs.push_back(found->second);
+				const auto found =
+					std::find_if(document.Nodes.begin(), document.Nodes.end(), [&](const auto &node) {
+						return node.Id == output.Node;
+					});
+				if (found == document.Nodes.end())
+					return Fail(diagnostic, output.Node, "output names a missing node");
+				plan.Outputs.push_back(static_cast<size_t>(found - document.Nodes.begin()));
 				authoredBytes += output.Name.size() + output.Node.size();
 			}
 			if (authoredBytes > Limits::MaximumDocumentBytes)
 				return Fail(diagnostic, {}, "authored data exceeds document byte limit");
-			std::vector<uint8_t> visited(document.Nodes.size());
-			while (plan.Order.size() < document.Nodes.size()) {
-				bool progressed = false;
-				for (size_t index = 0; index < document.Nodes.size(); index++) {
-					if (visited[index] ||
-						!std::all_of(plan.Inputs[index].begin(), plan.Inputs[index].end(), [&](size_t input) {
-							return visited[input];
-						}))
-						continue;
-					visited[index] = true;
-					plan.Order.push_back(index);
-					progressed = true;
-				}
-				if (!progressed) {
-					const auto unvisited = std::find(visited.begin(), visited.end(), uint8_t{0});
-					return Fail(
-						diagnostic,
-						document.Nodes[static_cast<size_t>(unvisited - visited.begin())].Id,
-						"graph contains a dependency cycle"
-					);
-				}
-			}
 			out = std::move(plan);
 			diagnostic = {};
 			return true;
