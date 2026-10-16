@@ -56,8 +56,8 @@ namespace benchrunner {
 		DemoStatistics statistics;
 		statistics.Minimum = *std::min_element(samples.begin(), samples.end());
 		statistics.Maximum = *std::max_element(samples.begin(), samples.end());
-		for (double sample : samples)
-			statistics.Mean += sample / static_cast<double>(samples.size());
+		for (size_t index = 0; index < samples.size(); ++index)
+			statistics.Mean += (samples[index] - statistics.Mean) / static_cast<double>(index + 1);
 		for (double sample : samples) {
 			const double difference = sample - statistics.Mean;
 			statistics.Deviation += difference * difference / static_cast<double>(samples.size());
@@ -113,9 +113,10 @@ namespace benchrunner {
 			throw std::runtime_error("invalid demo manifest metadata");
 		}
 		const DemoJson &settings = manifest.at("settings");
-		if (settings.at("runs") != 3 || settings.at("seconds") != 5 || settings.at("preset") != "profile" ||
-			DemoNumber(settings, "width") == 0 || DemoNumber(settings, "height") == 0) {
-			throw std::runtime_error("demo collection requires three five-second profile runs");
+		if (settings.at("runs") != 3 || DemoNumber(settings, "seconds") < 5 ||
+			settings.at("preset") != "profile" || DemoNumber(settings, "width") == 0 ||
+			DemoNumber(settings, "height") == 0) {
+			throw std::runtime_error("demo collection requires three profile runs of at least five seconds");
 		}
 		if (!manifest.at("workloads").is_array() || manifest.at("workloads").empty()) {
 			throw std::runtime_error("demo manifest contains no workloads");
@@ -127,6 +128,7 @@ namespace benchrunner {
 		collection.Manifest = DemoReadJson(directory / "manifest.json");
 		DemoValidateManifest(collection.Manifest);
 		const DemoJson &manifest = collection.Manifest;
+		const double requestedSeconds = DemoNumber(manifest.at("settings"), "seconds");
 		for (const DemoJson &entry : manifest.at("workloads")) {
 			const std::string name = entry.at("name").get<std::string>();
 			if (name.empty() || collection.Workloads.contains(name)) {
@@ -168,7 +170,8 @@ namespace benchrunner {
 				const double offThreadDropped =
 					hasOffThreadDrops ? DemoNumber(report, "off_thread_dropped_spans") : 0;
 				if (report.at("schema") != 1 || report.at("heap_compiled") != true || frames == 0 ||
-					seconds < 5 || ownerDropped != 0 || ownerDropped + offThreadDropped != dropped ||
+					seconds < requestedSeconds || ownerDropped != 0 ||
+					ownerDropped + offThreadDropped != dropped ||
 					DemoNumber(report, "heap_dropped_scopes") != 0 || !report.at("metrics").is_object()) {
 					throw std::runtime_error("incomplete demo measurement: " + relative.string());
 				}
@@ -308,6 +311,7 @@ namespace benchrunner {
 		DemoCollection collection;
 		collection.Manifest = aggregate.at("manifest");
 		DemoValidateManifest(collection.Manifest);
+		const double requestedSeconds = DemoNumber(collection.Manifest.at("settings"), "seconds");
 		std::set<std::string> manifestNames;
 		for (const DemoJson &entry : collection.Manifest.at("workloads")) {
 			const std::string name = entry.at("name").get<std::string>();
@@ -378,7 +382,7 @@ namespace benchrunner {
 						workload.Metrics.at("framegraph_dropped_spans").Maximum)
 					throw std::runtime_error("invalid embedded dropped-span provenance");
 				if (workload.Metrics.at("frame_count").Minimum <= 0 ||
-					workload.Metrics.at("duration_seconds").Minimum < 5) {
+					workload.Metrics.at("duration_seconds").Minimum < requestedSeconds) {
 					throw std::runtime_error("incomplete embedded runtime window");
 				}
 			} else if (!workload.Metrics.empty())
@@ -450,7 +454,8 @@ namespace benchrunner {
 																		: " (clean)")
 				 << ". Source diff SHA-256: `"
 				 << DemoCell(collection.Manifest.value("source_diff_sha256", "unrecorded"))
-				 << "`. Three independent five-second runs.\n\n```json\n"
+				 << "`. Three independent " << DemoNumber(collection.Manifest.at("settings"), "seconds")
+				 << "-second runs.\n\n```json\n"
 				 << collection.Manifest.at("machine").dump(2) << "\n"
 				 << collection.Manifest.at("settings").dump(2) << "\n```\n\n";
 	}
@@ -661,7 +666,9 @@ namespace benchrunner {
 				   "excluded. "
 				   "Off-thread rejected spans are visible as diagnostics. Owner-thread drops invalidate "
 				   "measurements.\n\n"
-				<< "Run `just demo-bench` to collect three five-second samples per available demo. "
+				<< "Run `just demo-bench` to collect three "
+				<< DemoNumber(baseline.Manifest.at("settings"), "seconds")
+				<< "-second samples per available demo. "
 				   "Run `just demo-impact` to compare with this reusable baseline, `just "
 				   "demo-impact-report <collection-directory>` to "
 				   "refresh this document from saved samples, and `just regression-check` for the regression "
