@@ -37,6 +37,9 @@ jobs:
       # Both revisions use the same software Vulkan device. These measurements
       # form their own baseline and are not compared to desktop GPU timings.
       BUILD_JOBS: 4
+      SDL_VIDEO_DRIVER: offscreen
+      SDL_AUDIO_DRIVER: dummy
+      SDL_GPU_DRIVER: vulkan
     steps:
       - uses: actions/checkout@v4
         with:
