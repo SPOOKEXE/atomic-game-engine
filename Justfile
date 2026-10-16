@@ -2242,7 +2242,7 @@ ordinary-particle-bench samples="1":
     fi
 
 # Shared compilation and domain execution with measured-sample latency tails.
-# MONO_BENCH_MEMORY=1 adds heap probes on a heap-enabled preset.
+# MONO_BENCH_MEMORY=1 adds diagnostic heap probes on a heap-enabled preset; reject their timings.
 graph-pipeline-bench samples="101" build_preset="bench":
     #!/usr/bin/env bash
     set -euo pipefail

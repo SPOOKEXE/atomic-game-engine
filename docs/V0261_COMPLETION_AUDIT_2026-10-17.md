@@ -147,3 +147,42 @@ completion. The B0 matrix remains incomplete and zero of three optimization
 passes is complete. These correctness checks establish no optimization gain.
 Actual GPU dependency waits remain unverified; host API durations must not be
 relabeled GPU queue waits.
+
+## Partial CPU heap baseline
+
+Commit `d0ce2609` makes the five existing graph-pipeline benchmark suites emit v2 heap rows when
+`MONO_BENCH_MEMORY=1`. The rows report process allocation byte and block deltas,
+retained-byte delta, live bytes and blocks, exclusive named-tag self peak,
+process lifetime peak, modeled header overhead (`LiveBlocks * 32` on this
+build), per-block overhead, and dropped-scope and foreign-free deltas. Zero
+dropped scopes and foreign frees were observed. The probe counts tracked C++
+requested payload; it excludes `malloc` and GPU allocations, as well as the
+total profiler and allocator footprint. A tag peak is its maximum simultaneous
+attributed bytes, not a whole-path interval peak.
+
+Each run set produced 26 heap rows across the five suites. Three fresh
+processes per suite produced 15 process runs; rows were byte-identical across
+the repeats. Each process took one measured body sample with zero warmups. Each
+set also ran 30 existing benchmark bodies, and all semantic oracles passed.
+Output remained on stdout and was not saved. The `bench` preset used
+RelWithDebInfo, `-O2`, `MONO_HEAP_PROFILE=ON`, unity builds, and GCC 13.3 on a
+Ryzen 9 9900X with 24 logical CPUs. The run was CPU-only, so GPU resolution was
+not applicable.
+
+The graphcore empty case allocated 976 bytes in 14 blocks. Its prepared
+64-node order case allocated zero bytes and blocks in this fixture; this does
+not establish that all graph compilation is allocation-free. Audio's deadline
+probe allocated 2,568 bytes in nine blocks and retained 1,348 bytes on its cold invocation, then
+allocated 136 bytes in one block and retained zero bytes on the immediately
+following warm invocation. Source review attributes the warm allocation to
+the GNU 13 `std::stable_sort` temporary. The cold invocation also grows
+`Taken` and `Schedule` and rebuilds scratch storage. This shows the existing
+mixer callback's no-allocation requirement is not met by this path; it is not
+profiler initialization, and no production fix is included here. Resolve this
+callback requirement before closing audio acceptance; it is separate from
+accepting optimization gains after the complete B0 gate.
+
+All five benchmark targets built successfully across ten build edges, and
+`format-check` passed with pinned clang-format 21. These are diagnostic memory
+measurements only. Shared-host timings are rejected, and this is not full B0
+or pass completion. No speed claim is made.
