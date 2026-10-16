@@ -3,6 +3,7 @@
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/SparseSet.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/testing/Suite.hpp>
@@ -21,10 +22,21 @@ using engine::core::ByteWriter;
 using engine::core::Random;
 using engine::ecs::Components;
 using engine::ecs::Entity;
+using engine::ecs::Hierarchy;
 using engine::ecs::NULL_ENTITY;
 using engine::ecs::Store;
 
 namespace snapshot_test {
+	Hierarchy WithHierarchy(
+		Entity parent = NULL_ENTITY, Entity nextSibling = NULL_ENTITY, Entity previousSibling = NULL_ENTITY
+	) {
+		Hierarchy hierarchy{};
+		hierarchy.Parent = parent;
+		hierarchy.NextSibling = nextSibling;
+		hierarchy.PreviousSibling = previousSibling;
+		return hierarchy;
+	}
+
 	struct Spot {
 		float X = 0.0f;
 		float Y = 0.0f;
@@ -70,6 +82,12 @@ namespace snapshot_test {
 		std::vector<float> found;
 		store.Each<Spot>([&](Entity, Spot &spot) { found.push_back(spot.X); });
 		std::sort(found.begin(), found.end());
+		return found;
+	}
+
+	std::vector<Entity> ChildrenIn(const Store &store, Entity parent) {
+		std::vector<Entity> found;
+		store.EachChild(parent, [&](Entity child) { found.push_back(child); });
 		return found;
 	}
 }
@@ -311,6 +329,74 @@ TEST_CASE("overlay refuses cyclic desired ancestry before modifying receiver row
 	std::vector<Entity> children;
 	receiver.EachChild(root, [&](Entity child) { children.push_back(child); });
 	CHECK(children == std::vector<Entity>{first, second});
+}
+
+TEST_CASE(
+	"an overlay cycle through an external receiver parent refuses every live change", "[ecs][snapshot]"
+) {
+	engine::ecs::Classes::RegisterInstanceRoot();
+	Store receiver("receiver");
+	const Entity selected = receiver.Create();
+	const Entity external = receiver.Create();
+	receiver.Set<Hierarchy>(selected, Hierarchy{});
+	receiver.Set<Hierarchy>(external, Hierarchy{});
+	receiver.Set<Spot>(selected, Spot{1.0f, 0.0f});
+	REQUIRE(receiver.SetParent(external, selected));
+	ByteWriter before;
+	REQUIRE(receiver.Save(before));
+
+	Store slice("slice");
+	REQUIRE(slice.CreateAt(selected));
+	slice.Set<Hierarchy>(selected, snapshot_test::WithHierarchy(external));
+	slice.Set<Spot>(selected, Spot{99.0f, 0.0f});
+	ByteWriter snapshot;
+	REQUIRE(slice.Save(snapshot));
+	ByteReader reader(snapshot.Bytes());
+	REQUIRE_FALSE(receiver.Apply(reader, engine::ecs::ApplyMode::Overlay));
+
+	ByteWriter after;
+	REQUIRE(receiver.Save(after));
+	CHECK(
+		std::equal(before.Bytes().begin(), before.Bytes().end(), after.Bytes().begin(), after.Bytes().end())
+	);
+	CHECK(receiver.ParentOf(selected) == NULL_ENTITY);
+	CHECK(ChildrenIn(receiver, selected) == std::vector<Entity>{external});
+	CHECK(receiver.Get<Spot>(selected)->X == 1.0f);
+}
+
+TEST_CASE("an overlay parent row without hierarchy refuses every live change", "[ecs][snapshot]") {
+	engine::ecs::Classes::RegisterInstanceRoot();
+	Store receiver("receiver");
+	const Entity selected = receiver.Create();
+	const Entity plain = receiver.Create();
+	receiver.Set<Hierarchy>(selected, Hierarchy{});
+	receiver.Set<Spot>(selected, Spot{1.0f, 0.0f});
+	receiver.Set<Score>(plain, Score{2});
+	ByteWriter before;
+	REQUIRE(receiver.Save(before));
+
+	Store slice("slice");
+	REQUIRE(slice.CreateAt(selected));
+	slice.Set<Hierarchy>(selected, snapshot_test::WithHierarchy(plain));
+	slice.Set<Spot>(selected, Spot{99.0f, 0.0f});
+	SECTION("the plain parent is outside the overlay") {}
+	SECTION("the overlay also supplies the plain parent") {
+		REQUIRE(slice.CreateAt(plain));
+		slice.Set<Score>(plain, Score{99});
+	}
+	ByteWriter snapshot;
+	REQUIRE(slice.Save(snapshot));
+	ByteReader reader(snapshot.Bytes());
+	REQUIRE_FALSE(receiver.Apply(reader, engine::ecs::ApplyMode::Overlay));
+
+	ByteWriter after;
+	REQUIRE(receiver.Save(after));
+	CHECK(
+		std::equal(before.Bytes().begin(), before.Bytes().end(), after.Bytes().begin(), after.Bytes().end())
+	);
+	CHECK(receiver.ParentOf(selected) == NULL_ENTITY);
+	CHECK(receiver.Get<Spot>(selected)->X == 1.0f);
+	CHECK(receiver.Get<Score>(plain)->Value == 2);
 }
 
 TEST_CASE("an empty world round-trips", "[ecs]") {

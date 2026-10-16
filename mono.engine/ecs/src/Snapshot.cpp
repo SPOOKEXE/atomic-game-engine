@@ -41,6 +41,7 @@ namespace engine::ecs {
 		// Resolve desired ancestors and earlier siblings before moving a node.
 		// Validate cycles before any live rows or local branches are touched.
 		bool OverlayHierarchyOrder(
+			const StoreState &receiving,
 			const StoreState &incoming,
 			std::span<const Entity> entities,
 			ComponentId hierarchy,
@@ -52,6 +53,13 @@ namespace engine::ecs {
 				Entity Instance;
 				bool Expanded;
 			};
+			const auto mentioned = [&](Entity entity) {
+				const EntityId key = EntityId::Of(entity);
+				return incoming.Directory.Alive(key.Index, key.Generation);
+			};
+			const auto desiredHierarchy = [&](Entity entity) {
+				return HierarchyOf(mentioned(entity) ? incoming : receiving, entity, hierarchy);
+			};
 			std::unordered_map<Entity, Visit> visits;
 			std::vector<Pending> pending;
 			for (const Entity root : entities) {
@@ -59,11 +67,11 @@ namespace engine::ecs {
 				while (!pending.empty()) {
 					const Pending step = pending.back();
 					pending.pop_back();
-					const Hierarchy *node = HierarchyOf(incoming, step.Instance, hierarchy);
+					const Hierarchy *node = desiredHierarchy(step.Instance);
 					if (node == nullptr) continue;
 					if (step.Expanded) {
 						visits.at(step.Instance) = Visit::Visited;
-						ordered.push_back(step.Instance);
+						if (mentioned(step.Instance)) ordered.push_back(step.Instance);
 						continue;
 					}
 					if (const auto found = visits.find(step.Instance); found != visits.end()) {
@@ -72,11 +80,19 @@ namespace engine::ecs {
 					}
 					visits.emplace(step.Instance, Visit::Visiting);
 					pending.push_back({step.Instance, true});
-					const Hierarchy *previous = HierarchyOf(incoming, node->PreviousSibling, hierarchy);
-					if (previous != nullptr && previous->Parent == node->Parent)
-						pending.push_back({node->PreviousSibling, false});
-					if (HierarchyOf(incoming, node->Parent, hierarchy) != nullptr)
+					if (mentioned(step.Instance)) {
+						const Hierarchy *previous = HierarchyOf(incoming, node->PreviousSibling, hierarchy);
+						if (previous != nullptr && previous->Parent == node->Parent)
+							pending.push_back({node->PreviousSibling, false});
+					}
+					if (node->Parent == NULL_ENTITY) continue;
+					if (desiredHierarchy(node->Parent) != nullptr) {
 						pending.push_back({node->Parent, false});
+						continue;
+					}
+					const EntityId parent = EntityId::Of(node->Parent);
+					if (mentioned(node->Parent) || receiving.Directory.Alive(parent.Index, parent.Generation))
+						return false;
 				}
 			}
 			return true;
@@ -544,7 +560,7 @@ namespace engine::ecs {
 		}
 		std::vector<Entity> hierarchyOrder;
 		if (mode == ApplyMode::Overlay &&
-			!OverlayHierarchyOrder(scratch, incoming, hierarchy, hierarchyOrder))
+			!OverlayHierarchyOrder(state, scratch, incoming, hierarchy, hierarchyOrder))
 			return false;
 		const auto localBranches = LocalBranches(state, scratch, mode);
 		for (const LocalBranch branch : localBranches)
