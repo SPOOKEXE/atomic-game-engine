@@ -417,14 +417,19 @@ namespace engine::render {
 		// agree about how big the image is, and they are decided hundreds of
 		// lines apart.
 		//
-		// A target that cannot be allocated falls back to the window rather than
-		// dropping the frame. A caller asking for a texture and getting a frame
+		// The ordinary path falls back to the window when a target cannot be allocated.
+		// A caller asking for a texture and getting a frame
 		// it did not expect can see that something is wrong; one that gets no
 		// frame at all sees a frozen editor.
 		{
 			ENGINE_PROFILE_CAT("ensure scene target", core::ProfileCategory::Render);
 			offscreen = sceneTarget != nullptr && sceneTarget->IsValid() &&
 						State->EnsureScene(sceneTarget->Width, sceneTarget->Height);
+		}
+		// The acquired swapchain belongs to P, so W must never take that fallback.
+		if (State->BatchPresentationCommand && !offscreen) {
+			endIncompleteView();
+			return ViewStart::Abandoned;
 		}
 
 		if (State->Headless() && !offscreen) {
@@ -1570,9 +1575,12 @@ namespace engine::render {
 			State->WallTimings.clear();
 			State->DroppedProfileMarks = 0;
 		}
-		const bool sampleGpu = (State->ProfileTier == ProfilingTier::Full && State->ProfileSampleRate > 0 &&
-								State->FrameCounter % State->ProfileSampleRate == 0) ||
-							   State->BatchCaptureTimingRequested;
+		// Split owner commands use the controller's retained per-recorder queries;
+		// the ordinary pool cannot recycle after an unproven prefix failure.
+		const bool sampleGpu = !State->GpuQueues.Active() &&
+							   ((State->ProfileTier == ProfilingTier::Full && State->ProfileSampleRate > 0 &&
+								 State->FrameCounter % State->ProfileSampleRate == 0) ||
+								State->BatchCaptureTimingRequested);
 		timingSlot = !sampleGpu ? VulkanTimestamps::NO_SLOT
 					 : State->BatchActive
 						 ? (State->BatchFirst ? State->Timestamps.Begin(command) : State->BatchTimingSlot)
@@ -3105,7 +3113,13 @@ namespace engine::render {
 			if (isolatedShadow && dispatched && Request.Damage.Scene)
 				State->PreparedScopes.InvalidateWorld(selectedPipeline, world);
 			if (dispatched && State->BatchFinal) {
-				dispatched = selectedPipeline->Graph.ExecuteFinal(selectedPipeline->Compiled, runner);
+				if (State->BatchPresentationCommand != nullptr) {
+					closePass();
+					dispatched = State->GpuQueues.PreparePresentation(&Command);
+					if (dispatched) TimedCommand = Command;
+				}
+				if (dispatched)
+					dispatched = selectedPipeline->Graph.ExecuteFinal(selectedPipeline->Compiled, runner);
 			}
 		} else {
 			const uint64_t worlds[] = {world};

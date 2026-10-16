@@ -24,6 +24,9 @@ SYNCHRONIZATION AND LIFETIME
     frozen facades pin the selected buffer/texture generation for worker packets;
     sampler and pipeline leases pin their native objects. Workers never cycle or
     release frozen handles. Batch completion and maintenance refuse live leases.
+    The optional presentation-batch begin accepts only the single outstanding
+    owner graphics command with acquired swapchain presentation data and keeps it
+    with its caller.
     An owner signal covers SDL's implicit texture-initialization submissions.
     Recording batches exclude defragmentation; explicit maintenance drains queues
     before using SDL's existing compaction path. Empty maintenance does not wait.
@@ -102,7 +105,7 @@ index 8e0e349..f804c54 100644
  extern SDL_GPUBootstrap D3D12Driver;
  extern SDL_GPUBootstrap MetalDriver;
 diff --git a/src/gpu/vulkan/SDL_gpu_vulkan.c b/src/gpu/vulkan/SDL_gpu_vulkan.c
-index 330bb1a..bff8633 100644
+index 330bb1a..df94dd6 100644
 --- a/src/gpu/vulkan/SDL_gpu_vulkan.c
 +++ b/src/gpu/vulkan/SDL_gpu_vulkan.c
 @@ -34,6 +34,18 @@
@@ -675,7 +678,7 @@ index 330bb1a..bff8633 100644
                  VULKAN_INTERNAL_BufferTransitionFromDefaultUsage(
                      renderer,
                      commandBuffer,
-@@ -12487,6 +12701,379 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
+@@ -12487,6 +12701,406 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
      return 1;
  }
  
@@ -727,6 +730,32 @@ index 330bb1a..bff8633 100644
 +    if (accepted) renderer->atomicRecordingBatch = true;
 +    SDL_UnlockMutex(renderer->submitLock);
 +    return accepted ? true : SDL_SetError("Atomic GPU batch requires idle owner recording state");
++}
++
++static bool SDLCALL VULKAN_AtomicBeginBatchWithPresentation(
++    SDL_GPUDevice *device,
++    SDL_GPUCommandBuffer *presentationCommand)
++{
++    if (device == NULL || presentationCommand == NULL) {
++        return SDL_SetError("Atomic GPU presentation batch requires a device and command buffer");
++    }
++    VulkanRenderer *renderer = (VulkanRenderer *)device->driverData;
++    VulkanCommandBuffer *presentation = (VulkanCommandBuffer *)presentationCommand;
++    bool accepted;
++
++    SDL_LockMutex(renderer->submitLock);
++    accepted = SDL_GetCurrentThreadID() == renderer->atomicOwner &&
++        !renderer->atomicRecordingBatch && !renderer->atomicMaintenance && !renderer->atomicDestroying &&
++        SDL_GetAtomicInt(&renderer->atomicOutstandingCommands) == 1 &&
++        SDL_GetAtomicInt(&renderer->atomicFrozenResources) == 0 &&
++        presentation != NULL && presentation->renderer == renderer &&
++        presentation->common.device == device && !presentation->common.submitted &&
++        presentation->commandPool != NULL && presentation->commandPool->threadID == renderer->atomicOwner &&
++        presentation->commandPool->queueFamilyIndex == renderer->atomicQueueFamilies[0] &&
++        presentation->atomicQueueClass == 0 && presentation->atomicAcquired && presentation->presentDataCount > 0;
++    if (accepted) renderer->atomicRecordingBatch = true;
++    SDL_UnlockMutex(renderer->submitLock);
++    return accepted ? true : SDL_SetError("Atomic GPU batch requires its unsubmitted owner presentation command");
 +}
 +
 +static bool SDLCALL VULKAN_AtomicEndBatch(SDL_GPUDevice *device)
@@ -1048,6 +1077,7 @@ index 330bb1a..bff8633 100644
 +    api->FreezeResources = VULKAN_AtomicFreezeResources;
 +    api->ReleaseFrozenResources = VULKAN_AtomicReleaseFrozenResources;
 +    api->DeferDeviceCleanup = VULKAN_AtomicDeferDeviceCleanup;
++    api->BeginRecordingBatchWithPresentation = VULKAN_AtomicBeginBatchWithPresentation;
 +    return SDL_SetPointerProperty(renderer->props, ATOMIC_GPU_QUEUES_DEVICE_PROPERTY, api);
 +}
 +#endif
@@ -1055,7 +1085,7 @@ index 330bb1a..bff8633 100644
  static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
      VulkanRenderer *renderer,
      VulkanFeatures *features)
-@@ -12498,8 +13085,12 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
+@@ -12498,8 +13112,12 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
      const char **deviceExtensions;
  
      VkDeviceQueueCreateInfo queueCreateInfo;
@@ -1068,7 +1098,7 @@ index 330bb1a..bff8633 100644
      queueCreateInfo.sType =
          VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
      queueCreateInfo.pNext = NULL;
-@@ -12554,6 +13145,15 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
+@@ -12554,6 +13172,15 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
      deviceCreateInfo.flags = 0;
      deviceCreateInfo.queueCreateInfoCount = 1;
      deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
@@ -1084,7 +1114,7 @@ index 330bb1a..bff8633 100644
      deviceCreateInfo.enabledLayerCount = 0;
      deviceCreateInfo.ppEnabledLayerNames = NULL;
      deviceCreateInfo.enabledExtensionCount = GetDeviceExtensionCount(
-@@ -12647,6 +13247,10 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
+@@ -12647,6 +13274,10 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
          renderer->queueFamilyIndex,
          0,
          &renderer->unifiedQueue);
@@ -1095,7 +1125,7 @@ index 330bb1a..bff8633 100644
  
      return 1;
  }
-@@ -12793,6 +13397,10 @@ static SDL_GPUDevice *VULKAN_CreateDevice(bool debugMode, bool preferLowPower, S
+@@ -12793,6 +13424,10 @@ static SDL_GPUDevice *VULKAN_CreateDevice(bool debugMode, bool preferLowPower, S
      renderer->debugMode = debugMode;
      renderer->preferLowPower = preferLowPower;
      renderer->allowedFramesInFlight = 2;
@@ -1106,7 +1136,7 @@ index 330bb1a..bff8633 100644
  
      if (!VULKAN_INTERNAL_PrepareVulkan(renderer, &features, props)) {
          SET_STRING_ERROR("Failed to initialize Vulkan!");
-@@ -13102,6 +13710,12 @@ static SDL_GPUDevice *VULKAN_CreateDevice(bool debugMode, bool preferLowPower, S
+@@ -13102,6 +13737,12 @@ static SDL_GPUDevice *VULKAN_CreateDevice(bool debugMode, bool preferLowPower, S
      renderer->allocationsToDefrag = SDL_malloc(
          renderer->allocationsToDefragCapacity * sizeof(VulkanMemoryAllocation *));
  

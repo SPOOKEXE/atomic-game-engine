@@ -7,6 +7,7 @@
 #include <SDL3/SDL_gpu.h>
 #include <SDL3/SDL_vulkan.h>
 
+#include <cstddef>
 #include <string_view>
 #include <vulkan/vulkan.h>
 
@@ -133,7 +134,9 @@ namespace engine::render {
 		QueueApi = nullptr;
 		TimestampMask = ~uint64_t{0};
 		if (api != nullptr) {
-			if (api->AbiVersion != ATOMIC_GPU_QUEUES_ABI_VERSION || api->StructSize < sizeof(*api) ||
+			if (api->AbiVersion != ATOMIC_GPU_QUEUES_ABI_VERSION ||
+				api->StructSize <
+					offsetof(AtomicGpuQueuesV1, NativeCommandBuffer) + sizeof(api->NativeCommandBuffer) ||
 				api->Device == VK_NULL_HANDLE || api->GetDeviceProcAddr == nullptr ||
 				api->NativeCommandBuffer == nullptr || api->Queue[queue] == VK_NULL_HANDLE ||
 				api->TimestampValidBits[queue] == 0 || api->TimestampValidBits[queue] > 64) {

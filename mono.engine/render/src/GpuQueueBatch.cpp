@@ -11,7 +11,9 @@
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdlib>
+#include <exception>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -83,6 +85,7 @@ namespace engine::render {
 		std::vector<VkSemaphore> FailedSemaphores;
 		std::vector<Timing> PendingTimings;
 		SDL_GPUCommandBuffer *Identity = nullptr;
+		SDL_GPUCommandBuffer *Presentation = nullptr;
 		SDL_GPUCommandBuffer **Main = nullptr;
 		SDL_GPUCommandBuffer **View = nullptr;
 		uint32_t MainDependency = INVALID;
@@ -91,6 +94,10 @@ namespace engine::render {
 		uint32_t RefuseAfter = INVALID;
 		bool RefuseDrain = false;
 		bool RefuseFirstHandoffResult = false;
+		bool PresentationHandedOff = false;
+		bool SubmitEarlierAttempted = false;
+		bool SubmitEarlierSucceeded = false;
+		SDL_GPUCommandBuffer *PreparedFinalCommand = nullptr;
 		std::shared_ptr<GpuRetirementProof> Retirement;
 		std::shared_ptr<GpuRetirementProof> FailedRetirement;
 		std::vector<std::shared_ptr<void>> RetainedResources;
@@ -102,6 +109,7 @@ namespace engine::render {
 		Statistics Last;
 		DeviceStatistics CompletedDevice;
 		std::array<std::array<QueryBank, ATOMIC_GPU_QUEUE_COUNT>, 3> QueryBanks;
+		std::array<std::array<uint32_t, ATOMIC_GPU_QUEUE_COUNT>, 3> FailedQuerySlots{};
 		PFN_vkCreateSemaphore CreateSemaphore = nullptr;
 		PFN_vkDestroySemaphore DestroySemaphore = nullptr;
 
@@ -294,9 +302,9 @@ namespace engine::render {
 		auto *api = static_cast<const AtomicGpuQueuesV1 *>(
 			SDL_GetPointerProperty(properties, ATOMIC_GPU_QUEUES_DEVICE_PROPERTY, nullptr)
 		);
-		if (!api || api->StructSize < sizeof(AtomicGpuQueuesV1) ||
-			api->AbiVersion != ATOMIC_GPU_QUEUES_ABI_VERSION || !api->FreezeResources ||
-			!api->ReleaseFrozenResources || !api->DeferDeviceCleanup)
+		constexpr auto requiredSize = offsetof(AtomicGpuQueuesV1, BeginRecordingBatchWithPresentation);
+		if (!api || api->StructSize < requiredSize || api->AbiVersion != ATOMIC_GPU_QUEUES_ABI_VERSION ||
+			!api->FreezeResources || !api->ReleaseFrozenResources || !api->DeferDeviceCleanup)
 			return false;
 		Held->Device = device;
 		Held->TeardownDevice = device;
@@ -316,6 +324,8 @@ namespace engine::render {
 		Held->Tasks.reserve(MAX_TASKS);
 		Held->RetainedResources.reserve(MAX_TASKS);
 		Held->PendingTimings.reserve(MAX_TASKS);
+		for (auto &recorder : Held->FailedQuerySlots)
+			recorder.fill(VulkanTimestamps::NO_SLOT);
 		Held->Semaphores.reserve(ATOMIC_GPU_QUEUES_MAX_SEMAPHORES);
 		Held->FailedSemaphores.reserve(ATOMIC_GPU_QUEUES_MAX_SEMAPHORES);
 		Held->Flights.reserve(3);
@@ -339,21 +349,46 @@ namespace engine::render {
 		);
 		return true;
 	}
+	bool GpuQueueBatch::PreparePresentationAcquire() {
+		Held->RequireOwner();
+		if (!Held->Api || Held->Active || Held->Poisoned || Held->Identity) return false;
+		Held->Collect(false);
+		ENGINE_PROFILE_CAT("GPU queue maintenance", core::ProfileCategory::Idle);
+		return Held->Api->MaintainIdle(Held->Device);
+	}
 	bool GpuQueueBatch::Begin(SDL_GPUCommandBuffer **mainCommand) {
+		return Begin(mainCommand, nullptr);
+	}
+	bool GpuQueueBatch::Begin(SDL_GPUCommandBuffer **mainCommand, SDL_GPUCommandBuffer *presentation) {
 		Held->RequireOwner();
 		if (Held->Active) return true;
 		if (!Held->Api || Held->Poisoned || Held->Identity) return false;
+		if (presentation &&
+			(Held->Api->StructSize < offsetof(AtomicGpuQueuesV1, BeginRecordingBatchWithPresentation) +
+										 sizeof(Held->Api->BeginRecordingBatchWithPresentation) ||
+			 Held->Api->BeginRecordingBatchWithPresentation == nullptr))
+			return false;
 		auto position = std::find(CommandOwners.begin(), CommandOwners.end(), nullptr);
 		if (position == CommandOwners.end()) return false;
-		Held->Collect(false);
-		{
+		if (!presentation) {
+			Held->Collect(false);
 			ENGINE_PROFILE_CAT("GPU queue maintenance", core::ProfileCategory::Idle);
 			if (!Held->Api->MaintainIdle(Held->Device)) return false;
 		}
 		auto retirement = std::make_shared<GpuRetirementProof>();
-		if (Held->Flights.size() >= 3 || !Held->Api->BeginRecordingBatch(Held->Device)) return false;
+		if (Held->Flights.size() >= 3) return false;
+		const bool accepted = presentation
+								  ? Held->Api->BeginRecordingBatchWithPresentation(Held->Device, presentation)
+								  : Held->Api->BeginRecordingBatch(Held->Device);
+		if (!accepted) return false;
 		Held->Retirement = std::move(retirement);
 		Held->Main = mainCommand;
+		Held->Presentation = presentation;
+		Held->PresentationHandedOff = false;
+		Held->SubmitEarlierAttempted = false;
+		Held->SubmitEarlierSucceeded = false;
+		Held->PreparedFinalCommand = nullptr;
+		Held->Identity = presentation;
 		Held->View = nullptr;
 		Held->MainDependency = INVALID;
 		Held->FinalTask = INVALID;
@@ -362,6 +397,11 @@ namespace engine::render {
 		Held->Active = true;
 		*position = this;
 		Held->Last = {.Sequence = Held->Last.Sequence + 1, .Parallel = Held->Parallel};
+		if (presentation) {
+			Held->Last.PresentationAdopted = true;
+			Held->OwnerCommands.push_back(presentation);
+		}
+		if (presentation) *mainCommand = presentation;
 		State::Task reset;
 		reset.Command = Held->Api->Acquire(Held->Device, ATOMIC_GPU_QUEUE_GRAPHICS);
 		if (!reset.Command) {
@@ -377,11 +417,52 @@ namespace engine::render {
 		Held->MainDependency = 0;
 		return true;
 	}
+	GpuQueueBatch::PresentationBegin
+	GpuQueueBatch::BeginPresentation(SDL_GPUCommandBuffer **mainCommand, SDL_GPUCommandBuffer *presentation) {
+		Held->RequireOwner();
+		const auto previousSequence = Held->Last.Sequence;
+		try {
+			if (Begin(mainCommand, presentation)) return PresentationBegin::Active;
+		} catch (const std::exception &error) {
+			ENGINE_ERROR("GPU presentation batch admission failed: {}", error.what());
+			if (Held->Last.Sequence != previousSequence) {
+				if (Held->Active) {
+					Complete(false, false);
+					EndScope();
+				}
+				return PresentationBegin::Failed;
+			}
+			return PresentationBegin::Fallback;
+		}
+		return Held->Last.Sequence == previousSequence ? PresentationBegin::Fallback
+													   : PresentationBegin::Failed;
+	}
+	bool GpuQueueBatch::PreparePresentation(SDL_GPUCommandBuffer **viewCommand) {
+		Held->RequireOwner();
+		if (!Held->Active || !Held->Presentation) return false;
+		if (Held->SubmitEarlierAttempted)
+			return Held->PreparedFinalCommand == Held->Presentation && Held->SubmitEarlierSucceeded;
+		if (!viewCommand || !*viewCommand || Held->Tasks.size() + 1 >= MAX_TASKS) return false;
+		State::Task prefix;
+		prefix.Command = *viewCommand;
+		prefix.Ready = true;
+		if (Held->MainDependency != INVALID) prefix.Dependencies.push_back(Held->MainDependency);
+		const auto index = static_cast<uint32_t>(Held->Tasks.size());
+		Held->Tasks.push_back(std::move(prefix));
+		Held->OwnerCommands.push_back(*viewCommand);
+		Held->MainDependency = index;
+		*viewCommand = Held->Presentation;
+		*Held->Main = Held->Presentation;
+		Held->View = viewCommand;
+		return SubmitEarlier(Held->Presentation);
+	}
 	void GpuQueueBatch::BindView(SDL_GPUCommandBuffer **command) {
 		Held->View = command;
-		if (Held->Active && command && *command && Held->Identity == nullptr) {
-			Held->Identity = *command;
-			Held->OwnerCommands.push_back(*command);
+		if (Held->Active && command && *command) {
+			if (Held->Identity == nullptr) Held->Identity = *command;
+			if (std::find(Held->OwnerCommands.begin(), Held->OwnerCommands.end(), *command) ==
+				Held->OwnerCommands.end())
+				Held->OwnerCommands.push_back(*command);
 		}
 	}
 	void GpuQueueBatch::UnbindView(SDL_GPUCommandBuffer **command) {
@@ -390,7 +471,11 @@ namespace engine::render {
 	bool GpuQueueBatch::Active() const {
 		return Held->Active;
 	}
-	bool GpuQueueBatch::HasCapacity(uint32_t extra) const {
+	bool GpuQueueBatch::HasCapacity(uint32_t extra) {
+		if (Held->SubmitEarlierAttempted) {
+			Held->Failed = true;
+			return false;
+		}
 		return Held->Active && !Held->Failed && extra < MAX_TASKS && Held->Tasks.size() + extra < MAX_TASKS;
 	}
 	void GpuQueueBatch::RefuseSubmissionAfterForTests(uint32_t successfulSubmits) {
@@ -425,6 +510,13 @@ namespace engine::render {
 		for (const auto &timing : Held->PendingTimings)
 			Held->QueryBanks[timing.Recorder][timing.Queue].Queries.Abandon(timing.Slot);
 		Held->PendingTimings.clear();
+		for (uint32_t recorder = 0; recorder < Held->FailedQuerySlots.size(); ++recorder)
+			for (uint32_t queue = 0; queue < ATOMIC_GPU_QUEUE_COUNT; ++queue) {
+				const auto slot = Held->FailedQuerySlots[recorder][queue];
+				if (slot != VulkanTimestamps::NO_SLOT)
+					Held->QueryBanks[recorder][queue].Queries.Abandon(slot);
+				Held->FailedQuerySlots[recorder][queue] = VulkanTimestamps::NO_SLOT;
+			}
 		Held->RetainedResources.clear();
 		Held->RetainedBytes = 0;
 		Held->Poisoned = false;
@@ -455,6 +547,14 @@ namespace engine::render {
 	void GpuQueueBatch::Refuse() {
 		Held->Failed = true;
 	}
+	void GpuQueueBatch::ReportPresentationFallback(std::string_view staticReason) {
+		Held->RequireOwner();
+		if (Held->Last.PresentationFallbackReason != staticReason && Held->Api)
+			ENGINE_INFO("GPU presentation batch fallback: {}", staticReason);
+		Held->Last.PresentationFallbackReason = staticReason;
+		Held->Last.PresentationAdopted = false;
+		Held->Last.PresentationHandoffs = 0;
+	}
 	void GpuQueueBatch::EndScope() {
 		Abort();
 		for (auto &batch : CommandOwners)
@@ -467,6 +567,10 @@ namespace engine::render {
 	}
 	uint32_t GpuQueueBatch::Prefix() {
 		Held->RequireOwner();
+		if (Held->SubmitEarlierAttempted) {
+			Held->Failed = true;
+			return INVALID;
+		}
 		if (!Held->Active || !Held->View || !*Held->View || Held->Tasks.size() + 2 >= MAX_TASKS)
 			return INVALID;
 		State::Task prefix;
@@ -491,6 +595,10 @@ namespace engine::render {
 		GpuTaskCompletion completion
 	) {
 		Held->RequireOwner();
+		if (Held->SubmitEarlierAttempted) {
+			Held->Failed = true;
+			return INVALID;
+		}
 		if (!Held->Active || Held->Tasks.size() + 1 >= MAX_TASKS || queue >= ATOMIC_GPU_QUEUE_COUNT)
 			return INVALID;
 		for (const auto dependency : dependencies)
@@ -523,11 +631,20 @@ namespace engine::render {
 		return true;
 	}
 	void GpuQueueBatch::JoinAtEnd(uint32_t task) {
+		if (Held->SubmitEarlierAttempted) {
+			Held->Failed = true;
+			return;
+		}
 		if (task != INVALID) Held->FinalDependencies.push_back(task);
 	}
 	bool GpuQueueBatch::SubmitEarlier(SDL_GPUCommandBuffer *finalCommand) {
 		Held->RequireOwner();
 		if (!Held->Active) return true;
+		if (Held->Presentation && finalCommand != Held->Presentation) return false;
+		if (Held->SubmitEarlierAttempted)
+			return Held->PreparedFinalCommand == finalCommand && Held->SubmitEarlierSucceeded;
+		Held->SubmitEarlierAttempted = true;
+		Held->PreparedFinalCommand = finalCommand;
 		ENGINE_PROFILE_CAT("GPU packet recording", core::ProfileCategory::Render);
 		State::Task final;
 		final.Command = finalCommand;
@@ -628,7 +745,7 @@ namespace engine::render {
 		std::array<VkPipelineStageFlags, ATOMIC_GPU_QUEUES_MAX_SEMAPHORES> stages;
 		stages.fill(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
 		auto &tail = Held->Tasks.back();
-		return Held->Api->SetDependencies(
+		Held->SubmitEarlierSucceeded = Held->Api->SetDependencies(
 			finalCommand,
 			static_cast<uint32_t>(tail.Waits.size()),
 			tail.Waits.data(),
@@ -636,11 +753,39 @@ namespace engine::render {
 			0,
 			nullptr
 		);
+		return Held->SubmitEarlierSucceeded;
 	}
 	bool GpuQueueBatch::Complete(bool submitted, bool finalHandedOff) {
 		Held->RequireOwner();
 		if (!Held->Active) return submitted;
+		if (Held->Failed) submitted = false;
 		if (finalHandedOff) ++Held->Last.HandoffAttempts;
+		if (Held->Presentation && !Held->PresentationHandedOff) {
+			if (finalHandedOff) {
+				Held->PresentationHandedOff = true;
+				++Held->Last.PresentationHandoffs;
+			} else {
+				std::array<VkPipelineStageFlags, ATOMIC_GPU_QUEUES_MAX_SEMAPHORES> stages;
+				stages.fill(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+				const bool prepared = Held->SubmitEarlierAttempted && Held->SubmitEarlierSucceeded &&
+									  Held->PreparedFinalCommand == Held->Presentation;
+				if (!prepared)
+					(void)Held->Api->SetDependencies(
+						Held->Presentation, 0, nullptr, stages.data(), 0, nullptr
+					);
+				Held->PresentationHandedOff = true;
+				++Held->Last.PresentationHandoffs;
+				++Held->Last.HandoffAttempts;
+				const bool cleanupSubmitted = SDL_SubmitGPUCommandBuffer(Held->Presentation);
+				if (!cleanupSubmitted) submitted = false;
+				if (Held->Main && *Held->Main == Held->Presentation) *Held->Main = nullptr;
+				for (auto &task : Held->Tasks)
+					if (task.Command == Held->Presentation) task.Command = nullptr;
+			}
+		}
+		if (Held->PresentationHandedOff)
+			for (auto &task : Held->Tasks)
+				if (task.Command == Held->Presentation) task.Command = nullptr;
 		if (finalHandedOff && Held->FinalTask != INVALID) Held->Tasks[Held->FinalTask].Command = nullptr;
 		if (submitted && Held->FinalTask != INVALID) {
 			Held->Tasks[Held->FinalTask].Submitted = true;
@@ -670,7 +815,8 @@ namespace engine::render {
 					SDL_CancelGPUCommandBuffer(task.Command);
 					task.Command = nullptr;
 				}
-			if (Held->FinalTask == INVALID && Held->Main && *Held->Main) {
+			if (Held->FinalTask == INVALID && Held->Main && *Held->Main &&
+				*Held->Main != Held->Presentation) {
 				SDL_CancelGPUCommandBuffer(*Held->Main);
 				*Held->Main = nullptr;
 			}
@@ -694,9 +840,13 @@ namespace engine::render {
 		for (auto &task : Held->Tasks)
 			if (task.Completion) task.Completion({task.Fence, Held->Retirement});
 
-		for (auto &recorder : Held->QueryBanks)
-			for (auto &bank : recorder) {
-				if (!submitted && !Held->Poisoned) bank.Queries.Abandon(bank.Slot);
+		for (uint32_t recorder = 0; recorder < Held->QueryBanks.size(); ++recorder)
+			for (uint32_t queue = 0; queue < ATOMIC_GPU_QUEUE_COUNT; ++queue) {
+				auto &bank = Held->QueryBanks[recorder][queue];
+				if (!submitted && !Held->Poisoned)
+					bank.Queries.Abandon(bank.Slot);
+				else if (!submitted && bank.Slot != VulkanTimestamps::NO_SLOT)
+					Held->FailedQuerySlots[recorder][queue] = bank.Slot;
 				bank.Slot = VulkanTimestamps::NO_SLOT;
 			}
 		Held->Tasks.clear();
@@ -710,6 +860,11 @@ namespace engine::render {
 		Held->Main = nullptr;
 		Held->View = nullptr;
 		Held->Active = false;
+		Held->Presentation = nullptr;
+		Held->PresentationHandedOff = false;
+		Held->SubmitEarlierAttempted = false;
+		Held->SubmitEarlierSucceeded = false;
+		Held->PreparedFinalCommand = nullptr;
 		if (!Held->Api->EndRecordingBatch(Held->Device)) {
 			Held->Poisoned = true;
 			Held->Last.Complete = false;

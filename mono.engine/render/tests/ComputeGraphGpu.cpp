@@ -1,5 +1,6 @@
 #include "GpuQueueBatch.hpp"
 #include "RenderFixture.hpp"
+#include "VulkanTimestamps.hpp"
 
 #include <engine/computegraph/Reference.hpp>
 #include <engine/computegraph/Stock.hpp>
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstring>
 #include <iterator>
 #include <memory>
@@ -227,6 +229,67 @@ TEST_CASE(
 	REQUIRE(graph.Submit(request, ticket, diagnostic) == cg::Status::Ok);
 	CHECK(Values(Finish(graph, ticket, &timing)) == expected);
 	CHECK_FALSE(timing.Available);
+}
+
+TEST_CASE(
+	"standalone compute timing accepts size-tagged private ABI prefixes",
+	"[render][computegraph][gpu][timing]"
+) {
+	engine::render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto *device = static_cast<SDL_GPUDevice *>(fixture.Render.Backend().Device);
+	const SDL_PropertiesID properties = SDL_GetGPUDeviceProperties(device);
+	void *originalValue = SDL_GetPointerProperty(properties, ATOMIC_GPU_QUEUES_DEVICE_PROPERTY, nullptr);
+	auto *liveApi = static_cast<AtomicGpuQueuesV1 *>(originalValue);
+	if (liveApi == nullptr || liveApi->StructSize < sizeof(*liveApi))
+		SKIP("requires the full private GPU queue API table");
+	if (liveApi->AbiVersion != ATOMIC_GPU_QUEUES_ABI_VERSION || liveApi->DeferDeviceCleanup == nullptr)
+		SKIP("requires the private GPU cleanup capability");
+	AtomicGpuQueuesV1 apiCopy = *liveApi;
+	const uint32_t apiPrefixSize =
+		static_cast<uint32_t>(offsetof(AtomicGpuQueuesV1, BeginRecordingBatchWithPresentation));
+	const uint32_t cleanupEnd = static_cast<uint32_t>(
+		offsetof(AtomicGpuQueuesV1, DeferDeviceCleanup) + sizeof(apiCopy.DeferDeviceCleanup)
+	);
+	const uint32_t nativeCommandBufferEnd = static_cast<uint32_t>(
+		offsetof(AtomicGpuQueuesV1, NativeCommandBuffer) + sizeof(apiCopy.NativeCommandBuffer)
+	);
+	struct RestoreQueueApi {
+		SDL_PropertiesID Properties;
+		void *Original;
+		~RestoreQueueApi() {
+			(void)SDL_SetPointerProperty(Properties, ATOMIC_GPU_QUEUES_DEVICE_PROPERTY, Original);
+		}
+	} restore{properties, originalValue};
+	apiCopy.StructSize = apiPrefixSize;
+	apiCopy.BeginRecordingBatchWithPresentation = nullptr;
+	REQUIRE(SDL_SetPointerProperty(properties, ATOMIC_GPU_QUEUES_DEVICE_PROPERTY, &apiCopy));
+	{
+		ComputeGraph graph(device, Owner());
+		cg::Diagnostic diagnostic;
+		REQUIRE(graph.Install(CompactProgram(65), diagnostic) == cg::Status::Ok);
+		REQUIRE(graph.EnableGpuTimings(true));
+		const std::array<uint32_t, 5> input{0, 2, 3, 0, 5};
+		const std::vector<uint32_t> expected{4, 6, 10};
+		const auto request = Request(input, 65);
+		uint64_t ticket = 0;
+		REQUIRE(graph.Submit(request, ticket, diagnostic) == cg::Status::Ok);
+		engine::render::ComputeGraphTiming timing;
+		CHECK(Values(Finish(graph, ticket, &timing)) == expected);
+		CHECK(timing.Ticket == ticket);
+		CHECK(timing.Available);
+		REQUIRE(graph.EnableGpuTimings(false));
+
+		apiCopy.StructSize = cleanupEnd - 1;
+		CHECK_FALSE(graph.EnableGpuTimings(true));
+		apiCopy.StructSize = nativeCommandBufferEnd - 1;
+		engine::render::VulkanTimestamps timestamps;
+		CHECK_FALSE(timestamps.Probe(device));
+		apiCopy.StructSize = nativeCommandBufferEnd;
+		REQUIRE(timestamps.Probe(device));
+		timestamps.Shutdown();
+		apiCopy.StructSize = apiPrefixSize;
+	}
 }
 
 TEST_CASE(

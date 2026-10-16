@@ -503,3 +503,41 @@ TEST_CASE(
 	CHECK(native.Semaphore == VK_NULL_HANDLE);
 	CHECK(fixture.Render.Backend().Device == nullptr);
 }
+
+TEST_CASE("an inspection download falls back before private queue batch admission", "[render][gpu][queues]") {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	const QueueFixture queues = RequireQueueFixture(fixture);
+	auto instances = AddResidentRuns(fixture.Render);
+	const render::SceneTarget target{WIDTH, HEIGHT};
+	auto views = MakeViews(instances, target);
+	render::OverlayImage overlay;
+
+	const FrameResult warm = fixture.Render.Render(views, overlay, nullptr, false);
+	REQUIRE(warm.Submitted);
+	REQUIRE(queues.Batch->LastStatistics().Complete);
+	const uint64_t sequence = queues.Batch->LastStatistics().Sequence;
+
+	fixture.Render.Inspect(core::Name("composed-image"), views[0].Slot);
+	for (render::View &view : views) {
+		view.Damage.Scene = true;
+		view.Damage.Viewport = true;
+	}
+	const FrameResult inspected = fixture.Render.Render(views, overlay, nullptr, false);
+	REQUIRE(inspected.Submitted);
+	const GpuQueueBatch::Statistics fallback = queues.Batch->LastStatistics();
+	CHECK(fallback.PresentationFallbackReason == "download requested");
+	CHECK_FALSE(fallback.PresentationAdopted);
+	CHECK(fallback.Sequence == sequence);
+
+	SubmitAndWaitEmpty(queues.Device);
+	fixture.Render.Inspect(core::Name{});
+	for (render::View &view : views) {
+		view.Damage.Scene = true;
+		view.Damage.Viewport = true;
+	}
+	const FrameResult resumed = fixture.Render.Render(views, overlay, nullptr, false);
+	REQUIRE(resumed.Submitted);
+	CHECK(queues.Batch->LastStatistics().Complete);
+	CHECK(queues.Batch->LastStatistics().Sequence > sequence);
+}

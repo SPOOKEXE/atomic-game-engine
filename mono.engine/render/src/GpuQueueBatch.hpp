@@ -52,6 +52,9 @@ namespace engine::render {
 			uint32_t WorkerRecorded = 0;
 			uint32_t Submitted = 0;
 			uint32_t HandoffAttempts = 0;
+			bool PresentationAdopted = false;
+			uint32_t PresentationHandoffs = 0;
+			std::string_view PresentationFallbackReason{};
 			uint32_t Edges = 0;
 			double ProducerMicroseconds = 0;
 			double JoinMicroseconds = 0;
@@ -61,6 +64,7 @@ namespace engine::render {
 			bool Parallel = false;
 			bool Complete = false;
 		};
+		enum class PresentationBegin { Fallback, Active, Failed };
 
 		struct DeviceStatistics {
 			uint64_t Sequence = 0;
@@ -77,11 +81,17 @@ namespace engine::render {
 		bool Initialise(SDL_GPUDevice *device);
 		void Shutdown();
 		bool Begin(SDL_GPUCommandBuffer **mainCommand);
+		bool Begin(SDL_GPUCommandBuffer **mainCommand, SDL_GPUCommandBuffer *presentation);
+		PresentationBegin
+		BeginPresentation(SDL_GPUCommandBuffer **mainCommand, SDL_GPUCommandBuffer *presentation);
+		bool PreparePresentationAcquire();
+		bool PreparePresentation(SDL_GPUCommandBuffer **viewCommand);
 		void BindView(SDL_GPUCommandBuffer **command);
 		void UnbindView(SDL_GPUCommandBuffer **command);
 		bool Active() const;
-		bool HasCapacity(uint32_t extra) const;
+		bool HasCapacity(uint32_t extra);
 		void Refuse();
+		void ReportPresentationFallback(std::string_view staticReason);
 		void RefuseSubmissionAfterForTests(uint32_t successfulSubmits);
 		// Lets SDL submit one command successfully, then refuses its controller result.
 		void RefuseFirstHandoffResultForTests();

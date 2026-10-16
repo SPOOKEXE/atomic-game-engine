@@ -381,6 +381,7 @@ namespace engine::render {
 		size_t BatchViewIndex = 0;
 		size_t BatchWorldIndex = 0;
 		SDL_GPUTexture *BatchSwapchain = nullptr;
+		SDL_GPUCommandBuffer *BatchPresentationCommand = nullptr;
 		uint32_t BatchWidth = 0;
 		uint32_t BatchHeight = 0;
 		uint32_t BatchTimingSlot = VulkanTimestamps::NO_SLOT;
@@ -2395,6 +2396,7 @@ namespace engine::render {
 		// Whether `BeginFrame` has claimed this frame and `Render` has not yet
 		// consumed it.
 		bool FrameClaimed = false;
+		bool PendingPresentationPrepared = false;
 
 		// A present mode asked for, waiting for a legal moment to be set.
 		//
@@ -2441,6 +2443,7 @@ namespace engine::render {
 				return true;
 			}
 			if (Device == nullptr) {
+				PendingPresentationPrepared = false;
 				return false;
 			}
 			PollSceneFrames();
@@ -2456,6 +2459,7 @@ namespace engine::render {
 			// that true once the wait moved ahead of the interface - an editor
 			// records its draw lists between the two calls.
 			DrainRetiredScenes();
+			PendingPresentationPrepared = !Headless() && GpuQueues.PreparePresentationAcquire();
 
 			SDL_GPUCommandBuffer *command = nullptr;
 			{
@@ -2463,6 +2467,7 @@ namespace engine::render {
 				command = SDL_AcquireGPUCommandBuffer(Device);
 			}
 			if (command == nullptr) {
+				PendingPresentationPrepared = false;
 				ENGINE_ERROR("SDL_AcquireGPUCommandBuffer: {}", SDL_GetError());
 				return false;
 			}
@@ -2505,6 +2510,7 @@ namespace engine::render {
 			}
 
 			if (!acquired || swapchain == nullptr) {
+				PendingPresentationPrepared = false;
 				// Minimised, or mid-resize. Not an error, and not a reason to
 				// stop ticking - the simulation carries on and the next frame
 				// presents.
@@ -2544,6 +2550,7 @@ namespace engine::render {
 			PendingWidth = 0;
 			PendingHeight = 0;
 			FrameClaimed = false;
+			PendingPresentationPrepared = false;
 		}
 
 		// Gets rid of a frame that was claimed and will never be recorded.
@@ -2554,6 +2561,7 @@ namespace engine::render {
 		// trip through the submit path, which is the correct price for a caller
 		// that waited for a frame and then decided to quit.
 		void AbandonFrame() {
+			PendingPresentationPrepared = false;
 			if (!FrameClaimed) {
 				return;
 			}

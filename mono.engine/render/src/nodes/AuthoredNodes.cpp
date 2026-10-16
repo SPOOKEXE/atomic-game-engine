@@ -400,9 +400,9 @@ namespace engine::render {
 				}
 				return false;
 			};
-			const bool separateCommand = scheduled != nullptr && scheduled->AsyncEligible &&
-										 planLeadsGraphics(context.Node) && !mainGpuWorkRecorded &&
-										 !dedicatedComputeSubmitted &&
+			const bool separateCommand = !State->GpuQueues.Active() && scheduled != nullptr &&
+										 scheduled->AsyncEligible && planLeadsGraphics(context.Node) &&
+										 !mainGpuWorkRecorded && !dedicatedComputeSubmitted &&
 										 (!State->BatchActive || State->BatchFirst);
 			SDL_GPUCommandBuffer *dispatchCommand = command;
 			if (separateCommand) {

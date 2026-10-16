@@ -27,6 +27,8 @@ namespace engine::render {
 		size_t ReadyHistoryTargets = 0;
 		size_t SubmissionAttempts = 0;
 		uint64_t HistoryFingerprint = 0;
+		uint32_t LegacyTimingSlot = UINT32_MAX;
+		uint64_t FrameCounter = 0;
 	};
 
 	// Owns one render call from view grouping through command submission and cleanup.

@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -1167,7 +1168,9 @@ namespace engine::render {
 		const auto *api = static_cast<const AtomicGpuQueuesV1 *>(SDL_GetPointerProperty(
 			SDL_GetGPUDeviceProperties(Held->Device), ATOMIC_GPU_QUEUES_DEVICE_PROPERTY, nullptr
 		));
-		if (!api || api->AbiVersion != ATOMIC_GPU_QUEUES_ABI_VERSION || api->StructSize < sizeof(*api) ||
+		if (!api || api->AbiVersion != ATOMIC_GPU_QUEUES_ABI_VERSION ||
+			api->StructSize <
+				offsetof(AtomicGpuQueuesV1, DeferDeviceCleanup) + sizeof(api->DeferDeviceCleanup) ||
 			!api->DeferDeviceCleanup)
 			return false;
 		try {

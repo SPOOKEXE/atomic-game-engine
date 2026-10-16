@@ -101,6 +101,13 @@ typedef struct AtomicGpuQueuesV1 {
 	bool(SDLCALL *DeferDeviceCleanup)(
 		SDL_GPUDevice *device, void(SDLCALL *cleanup)(void *userdata, bool resourcesRetired), void *userdata
 	);
+
+	/* Optional size-tagged tail for preserving a frame's acquired presentation command.
+	 * Present only when StructSize covers this field. The command remains caller-owned;
+	 * its swapchain barrier, semaphores and present data are not transferred. */
+	bool(SDLCALL *BeginRecordingBatchWithPresentation)(
+		SDL_GPUDevice *device, SDL_GPUCommandBuffer *presentationCommand
+	);
 } AtomicGpuQueuesV1;
 
 #endif
