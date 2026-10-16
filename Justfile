@@ -2255,6 +2255,83 @@ graph-pipeline-bench samples="101" build_preset="bench":
     ./.cache/build/{{build_preset}}/bench/bench_audio --suite engine.audio.bench.graphrouting --samples {{samples}}
     ./.cache/build/{{build_preset}}/bench/bench_graph --suite engine.graph.bench.enginegraph --samples {{samples}}
 
+# Real render schemas, startup registration and single-operation CPU planning.
+# Startup samples use fresh processes. MONO_BENCH_MEMORY=0 allows heap-disabled presets.
+render-catalogue-bench samples="101" startup_samples="101" build_preset="bench":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_graph
+    python3 - '{{build_preset}}' '{{samples}}' '{{startup_samples}}' <<'PY'
+    import hashlib
+    import os
+    import subprocess
+    import sys
+
+    preset, warm_text, startup_text = sys.argv[1:]
+    def count(text):
+        if not text.isascii() or not text.isdecimal() or not 1 <= int(text) <= 10000:
+            raise SystemExit("sample counts must be decimal integers from 1 through 10000")
+        return int(text)
+    warm_samples, startup_samples = count(warm_text), count(startup_text)
+    executable = f".cache/build/{preset}/bench/bench_graph"
+    suite = "engine.graph.bench.pipelinecatalogue"
+    environment = dict(os.environ, MONO_BENCH_LATENCY="1",
+                       MONO_BENCH_MEMORY=os.environ.get("MONO_BENCH_MEMORY", "1"))
+    startup_oracle = None
+    def run(cohort, samples, warmups):
+        completed = subprocess.run(
+            [executable, "--suite", suite, "--samples", str(samples), "--warmup-samples", str(warmups)],
+            env=dict(environment, MONO_RENDER_CATALOGUE_COHORT=cohort), capture_output=True, text=True)
+        if completed.returncode:
+            sys.stdout.write(completed.stdout)
+            sys.stderr.write(completed.stderr)
+            raise SystemExit(completed.returncode if completed.returncode > 0 else 1)
+        if completed.stderr:
+            sys.stderr.write(completed.stderr)
+        return completed.stdout.splitlines()
+    def oracle(row):
+        prefix, name, canonical = row.split("\t", 2)
+        encoded = canonical.encode("utf-8")
+        print(f"# b0 renderer oracle sha256 v1\t{prefix}\t{name}\t{len(encoded)}\t{hashlib.sha256(encoded).hexdigest()}")
+        return canonical
+
+    print("# b0 renderer cohorts v1\tstartup=fresh-process,zero-warmup,one-call\twarm=8-warmups,one-call-per-sample")
+    print("# b0 renderer host load v1\tunassessed; record contention before accepting latency evidence")
+    startup_times = []
+    for index in range(startup_samples):
+        rows = run("startup", 1, 0)
+        timing = [row for row in rows if row.startswith("bench\t") and "RegisterRenderNodeKinds fresh process" in row]
+        proofs = [row for row in rows if row.startswith("# b0 renderer startup oracle v1\t")]
+        if len(timing) != 1 or len(proofs) != 1:
+            raise SystemExit("startup process did not report one measured registration and its oracle")
+        canonical = proofs[0].split("\t", 2)[2]
+        if startup_oracle is not None and canonical != startup_oracle:
+            raise SystemExit("fresh-process catalogue canonical bytes changed")
+        if startup_oracle is None:
+            startup_oracle = oracle(proofs[0])
+        nanoseconds = int(timing[0].split("\t")[2])
+        startup_times.append(nanoseconds)
+        print(f"# b0 renderer startup sample v1\t{index + 1}\t{nanoseconds}")
+        for row in rows:
+            if row.startswith("# b0 renderer heap v1\t"):
+                print(row)
+    ordered = sorted(startup_times)
+    percentile = lambda rank: ordered[(len(ordered) * rank + 99) // 100 - 1]
+    print(f"# b0 renderer startup latency v1\t{len(ordered)}\t1\tcall\t{percentile(50)}\t{percentile(95)}\t{percentile(99)}\t{ordered[-1]}")
+    if min(warm_samples, startup_samples) < 100:
+        print("# b0 renderer tails v1\tsmoke counts; p99 has insufficient tail observations")
+    for row in run("warm", warm_samples, 8):
+        if row.startswith("# b0 renderer catalogue oracle v1\t"):
+            if row.split("\t", 2)[2] != startup_oracle:
+                raise SystemExit("warm catalogue differs from fresh-process canonical bytes")
+            oracle(row)
+        elif row.startswith("# b0 renderer semantic oracle v1\t"):
+            oracle(row)
+        else:
+            print(row)
+    PY
+
 # Complete CPU ray queries through retained portal colliders.
 portal-query-bench samples="101" build_preset="bench":
     cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
