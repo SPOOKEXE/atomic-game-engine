@@ -6,6 +6,7 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Property.hpp>
@@ -20,8 +21,10 @@
 #include <array>
 #include <bit>
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -98,6 +101,23 @@ namespace engine::scene {
 			return mesh.Positions == geometry.Positions && mesh.Normals == geometry.Normals &&
 				   mesh.UVs == geometry.UVs && mesh.Colours == geometry.Colours &&
 				   mesh.Alphas == geometry.Alphas && mesh.Indices == geometry.Indices;
+		}
+
+		void ApplyPreparedEditableMesh(EditableMesh &mesh, PreparedEditableMesh &prepared) noexcept {
+			static_assert(std::is_nothrow_swappable_v<std::vector<core::Vector3>>);
+			static_assert(std::is_nothrow_swappable_v<std::vector<core::Vector2>>);
+			static_assert(std::is_nothrow_swappable_v<std::vector<core::Color3>>);
+			static_assert(std::is_nothrow_swappable_v<std::vector<float>>);
+			static_assert(std::is_nothrow_swappable_v<std::vector<uint32_t>>);
+			mesh.Positions.swap(prepared.Geometry.Positions);
+			mesh.Normals.swap(prepared.Geometry.Normals);
+			mesh.UVs.swap(prepared.Geometry.UVs);
+			mesh.Colours.swap(prepared.Geometry.Colours);
+			mesh.Alphas.swap(prepared.Geometry.Alphas);
+			mesh.Indices.swap(prepared.Geometry.Indices);
+			mesh.Signature = prepared.Signature;
+			++mesh.Revision;
+			prepared.Valid = false;
 		}
 
 		// How many vertices are in the mesh, read-only.
@@ -573,15 +593,50 @@ namespace engine::scene {
 			return EditableMeshCommit::Unchanged;
 		}
 
-		mesh->Positions = std::move(prepared.Geometry.Positions);
-		mesh->Normals = std::move(prepared.Geometry.Normals);
-		mesh->UVs = std::move(prepared.Geometry.UVs);
-		mesh->Colours = std::move(prepared.Geometry.Colours);
-		mesh->Alphas = std::move(prepared.Geometry.Alphas);
-		mesh->Indices = std::move(prepared.Geometry.Indices);
-		mesh->Signature = prepared.Signature;
-		mesh->Revision++;
+		ApplyPreparedEditableMesh(*mesh, prepared);
 		return EditableMeshCommit::Applied;
+	}
+
+	EditableMeshCommit CommitEditableMeshBatch(ecs::Store &store, std::span<EditableMeshUpdate> updates) {
+		ENGINE_PROFILE_CAT("CommitEditableMeshBatch", core::ProfileCategory::Engine);
+		if (updates.size() > MAXIMUM_EDITABLE_MESH_BATCH) return EditableMeshCommit::Invalid;
+		struct Destination {
+			EditableMesh *Mesh = nullptr;
+			uint64_t Signature = 0;
+			bool Changed = false;
+		};
+		std::array<Destination, MAXIMUM_EDITABLE_MESH_BATCH> destinations{};
+		bool anyChanged = false;
+		for (size_t index = 0; index < updates.size(); ++index) {
+			const auto &update = updates[index];
+			if (!update.Prepared.Valid) return EditableMeshCommit::Invalid;
+			for (size_t previous = 0; previous < index; ++previous)
+				if (updates[previous].Instance == update.Instance) return EditableMeshCommit::Invalid;
+			const auto *mesh = store.Get<EditableMesh>(update.Instance);
+			if (mesh == nullptr) return EditableMeshCommit::Missing;
+			if (mesh->Revision != update.ExpectedRevision) return EditableMeshCommit::Stale;
+			const uint64_t signature = mesh->Signature != 0 ? mesh->Signature : SignGeometry(*mesh);
+			const bool changed =
+				signature != update.Prepared.Signature || !SameGeometry(*mesh, update.Prepared.Geometry);
+			if (changed && mesh->Revision == std::numeric_limits<uint32_t>::max())
+				return EditableMeshCommit::Invalid;
+			destinations[index] = {nullptr, signature, changed};
+			anyChanged |= changed;
+		}
+		// Marking an observed row can grow the ECS change list. Finish every such
+		// operation before touching a geometry array; these lookups never move rows.
+		for (size_t index = 0; index < updates.size(); ++index)
+			destinations[index].Mesh = store.GetMutable<EditableMesh>(updates[index].Instance);
+		for (size_t index = 0; index < updates.size(); ++index) {
+			auto &destination = destinations[index];
+			auto &mesh = *destination.Mesh;
+			if (!destination.Changed) {
+				mesh.Signature = destination.Signature;
+				continue;
+			}
+			ApplyPreparedEditableMesh(mesh, updates[index].Prepared);
+		}
+		return anyChanged ? EditableMeshCommit::Applied : EditableMeshCommit::Unchanged;
 	}
 
 	EditableMeshCommit

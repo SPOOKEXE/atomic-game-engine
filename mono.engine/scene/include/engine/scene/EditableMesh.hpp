@@ -59,6 +59,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace engine::ecs {
@@ -171,6 +172,24 @@ namespace engine::scene {
 		// Whether every array and index satisfies the geometry contract.
 		bool Valid = false;
 	};
+
+	// One complete geometry replacement at a captured target revision.
+	struct EditableMeshUpdate {
+		ecs::Entity Instance{};			 // Complete generation-bearing target handle.
+		uint32_t ExpectedRevision = 0;	 // Revision observed before preparation.
+		PreparedEditableMesh Prepared{}; // Owned scene-validated geometry.
+	};
+
+	// Bounds preflight storage and duplicate checks for one atomic publication.
+	inline constexpr size_t MAXIMUM_EDITABLE_MESH_BATCH = 64;
+
+	// Checks every target and revision, obtains every mutable destination, then
+	// publishes all geometry with nonthrowing swaps. A refusal changes no mesh.
+	// No structural operation, observer callback, allocation or lookup runs after
+	// the first geometry write, so callers may retain other row pointers on their
+	// own stack while committing related values immediately after success.
+	// Consumes prepared geometry only on success. Empty batches are Unchanged.
+	EditableMeshCommit CommitEditableMeshBatch(ecs::Store &store, std::span<EditableMeshUpdate> updates);
 
 	// Validates and signs a geometry transaction without touching a world.
 	//

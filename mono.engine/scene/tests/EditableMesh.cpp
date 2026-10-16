@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 
 TEST_SUITE_ID("engine.scene.editablemesh")
 
@@ -51,6 +52,16 @@ using engine::scene::SetVertexUV;
 namespace {
 	Entity MakeEditableMesh(Store &store) {
 		return store.CreateInstance(EditableMeshClass(), "Mesh");
+	}
+	EditableMeshGeometry BatchTriangle(float height) {
+		EditableMeshGeometry geometry;
+		geometry.Positions = {Vector3{0, height, 0}, Vector3{1, height, 0}, Vector3{0, height, 1}};
+		geometry.Normals.assign(3, Vector3{0, 1, 0});
+		geometry.UVs.assign(3, Vector2{});
+		geometry.Colours.assign(3, Color3{1, 1, 1});
+		geometry.Alphas.assign(3, 1);
+		geometry.Indices = {0, 2, 1};
+		return geometry;
 	}
 }
 
@@ -240,6 +251,63 @@ TEST_CASE("bulk geometry refuses malformed and stale transactions", "[scene][edi
 		engine::scene::CommitEditableMesh(store, mesh, std::move(prepared), 0) == EditableMeshCommit::Stale
 	);
 	CHECK(store.Get<EditableMesh>(mesh)->Positions.size() == 1);
+}
+
+TEST_CASE("mesh batch preflights every target before changing an earlier geometry", "[scene][editablemesh]") {
+	Store store("editablemesh.batch");
+	const Entity first = MakeEditableMesh(store);
+	const Entity second = MakeEditableMesh(store);
+	REQUIRE(ReplaceEditableMesh(store, first, BatchTriangle(1)) == EditableMeshCommit::Applied);
+	REQUIRE(ReplaceEditableMesh(store, second, BatchTriangle(2)) == EditableMeshCommit::Applied);
+	std::array<engine::scene::EditableMeshUpdate, 2> updates{
+		{{first, 1, PrepareEditableMesh(BatchTriangle(3))},
+		 {second, 0, PrepareEditableMesh(BatchTriangle(4))}}
+	};
+	CHECK(engine::scene::CommitEditableMeshBatch(store, updates) == EditableMeshCommit::Stale);
+	CHECK(store.Get<EditableMesh>(first)->Positions[0].Y == 1);
+	CHECK(store.Get<EditableMesh>(first)->Revision == 1);
+	CHECK(updates[0].Prepared.Valid);
+	updates[1].ExpectedRevision = 1;
+	REQUIRE(engine::scene::CommitEditableMeshBatch(store, updates) == EditableMeshCommit::Applied);
+	CHECK(store.Get<EditableMesh>(first)->Positions[0].Y == 3);
+	CHECK(store.Get<EditableMesh>(second)->Positions[0].Y == 4);
+	CHECK(store.Get<EditableMesh>(first)->Revision == 2);
+	CHECK(store.Get<EditableMesh>(second)->Revision == 2);
+	CHECK_FALSE(updates[0].Prepared.Valid);
+	CHECK_FALSE(updates[1].Prepared.Valid);
+	updates = {
+		{{first, 2, PrepareEditableMesh(BatchTriangle(3))},
+		 {second, 2, PrepareEditableMesh(BatchTriangle(4))}}
+	};
+	CHECK(engine::scene::CommitEditableMeshBatch(store, updates) == EditableMeshCommit::Unchanged);
+	CHECK(store.Get<EditableMesh>(first)->Revision == 2);
+}
+
+TEST_CASE(
+	"mesh batch refuses duplicate missing invalid and exhausted targets without partial output",
+	"[scene][editablemesh]"
+) {
+	Store store("editablemesh.batch.refuse");
+	const Entity first = MakeEditableMesh(store);
+	const Entity second = MakeEditableMesh(store);
+	std::array<engine::scene::EditableMeshUpdate, 2> updates{
+		{{first, 0, PrepareEditableMesh(BatchTriangle(1))}, {first, 0, PrepareEditableMesh(BatchTriangle(2))}}
+	};
+	CHECK(engine::scene::CommitEditableMeshBatch(store, updates) == EditableMeshCommit::Invalid);
+	CHECK(store.Get<EditableMesh>(first)->Revision == 0);
+	updates[1].Instance = NULL_ENTITY;
+	CHECK(engine::scene::CommitEditableMeshBatch(store, updates) == EditableMeshCommit::Missing);
+	CHECK(store.Get<EditableMesh>(first)->Positions.empty());
+	updates[1].Instance = second;
+	updates[1].Prepared.Valid = false;
+	CHECK(engine::scene::CommitEditableMeshBatch(store, updates) == EditableMeshCommit::Invalid);
+	CHECK(store.Get<EditableMesh>(first)->Positions.empty());
+	updates[1].Prepared = PrepareEditableMesh(BatchTriangle(2));
+	store.GetMutable<EditableMesh>(second)->Revision = std::numeric_limits<uint32_t>::max();
+	updates[1].ExpectedRevision = std::numeric_limits<uint32_t>::max();
+	CHECK(engine::scene::CommitEditableMeshBatch(store, updates) == EditableMeshCommit::Invalid);
+	CHECK(store.Get<EditableMesh>(first)->Revision == 0);
+	CHECK(engine::scene::CommitEditableMeshBatch(store, {}) == EditableMeshCommit::Unchanged);
 }
 
 TEST_CASE("writing the same vertex attributes does not invalidate geometry", "[scene][editablemesh]") {
