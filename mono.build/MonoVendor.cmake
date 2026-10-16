@@ -179,7 +179,25 @@ if(MONO_BUILD_CLIENT)
 	# turned the precompiled header off" while the compile line carries `/Yu` is
 	# worse than no setting at all.
 
-	add_subdirectory("${MONO_VENDOR}/sdl" EXCLUDE_FROM_ALL)
+	# Compile the private Vulkan hooks, with runtime opt-in remaining off until
+	# the renderer admits a measured recording workload. OFF builds pinned SDL.
+	option(MONO_SDL_VULKAN_QUEUES "Build the private SDL Vulkan queue extension" ON)
+	if(MONO_SDL_VULKAN_QUEUES)
+		include("${CMAKE_CURRENT_LIST_DIR}/MonoSdlQueues.cmake")
+		set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+			"${CMAKE_SOURCE_DIR}/mono.vendor/patches/sdl/vulkan-queues.patch"
+			"${CMAKE_SOURCE_DIR}/mono.build/private/AtomicGpuQueues.h")
+		mono_prepare_sdl_queues("${CMAKE_SOURCE_DIR}" mono_sdl_source)
+	else()
+		set(mono_sdl_source "${MONO_VENDOR}/sdl")
+	endif()
+	add_subdirectory("${mono_sdl_source}" "${CMAKE_BINARY_DIR}/mono.vendor/sdl" EXCLUDE_FROM_ALL)
+	if(MONO_SDL_VULKAN_QUEUES)
+		target_compile_definitions(SDL3-shared PRIVATE ATOMIC_GPU_QUEUE_EXTENSION)
+		target_include_directories(SDL3-shared PRIVATE
+			"${CMAKE_SOURCE_DIR}/mono.build/private"
+			"${mono_sdl_source}/src/video/khronos")
+	endif()
 
 	# SDL declares its include directories PUBLIC and not SYSTEM, and 149
 	# first-party translation units carry them. mono_vendor_system above.
