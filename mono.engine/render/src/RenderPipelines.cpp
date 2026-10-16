@@ -165,16 +165,13 @@ namespace engine::render {
 			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
 		SDL_GPUShader *skyFragment = LoadShader("sky.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
 		SDL_GPUShader *volumeFragment = LoadShader("volume.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1, 1);
-		SDL_GPUShader *bloomFragment = LoadShader("bloom.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 1, 1);
-		SDL_GPUShader *depthOfFieldFragment = LoadShader("dof.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
-		SDL_GPUShader *godRaysFragment = LoadShader("god-rays.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 		SDL_GPUShader *tonemapFragment = LoadShader("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 
 		if (!opaqueVertex || !packedOpaqueVertex || !opaqueFragment || !shadowVertex || !packedShadowVertex ||
 			!shadowFragment || !overlayVertex || !imageFragment || !overlayFragment || !gbufferFragment ||
 			!depthPeelFragment || !depthLinearFragment || !cameraMotionFragment || !ssaoFragment ||
 			!packChannelsFragment || !deferredLightingFragment || !skyFragment || !volumeFragment ||
-			!bloomFragment || !depthOfFieldFragment || !godRaysFragment || !tonemapFragment) {
+			!tonemapFragment) {
 			return false;
 		}
 
@@ -423,14 +420,10 @@ namespace engine::render {
 				fullscreen(deferredLightingFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			VolumePipeline = fullscreen(volumeFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
-			BloomPipeline = fullscreen(bloomFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
-			DepthOfFieldPipeline = fullscreen(depthOfFieldFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
-			GodRaysPipeline = fullscreen(godRaysFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			TonemapPipeline = fullscreen(tonemapFragment, swapchainFormat);
 			if (DepthLinearPipeline == nullptr || DepthValidityPipeline == nullptr ||
 				CameraMotionPipeline == nullptr || SsaoPipeline == nullptr ||
 				DeferredLightingPipeline == nullptr || SkyPipeline == nullptr || VolumePipeline == nullptr ||
-				BloomPipeline == nullptr || DepthOfFieldPipeline == nullptr || GodRaysPipeline == nullptr ||
 				TonemapPipeline == nullptr) {
 				ENGINE_ERROR("default PBR fullscreen pipeline: {}", SDL_GetError());
 			}
@@ -912,6 +905,7 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(Device, packChannelsFragment);
 		SDL_ReleaseGPUShader(Device, deferredLightingFragment);
 		SDL_ReleaseGPUShader(Device, skyFragment);
+		SDL_ReleaseGPUShader(Device, volumeFragment);
 		SDL_ReleaseGPUShader(Device, tonemapFragment);
 		SDL_ReleaseGPUShader(Device, overlayVertex);
 		SDL_ReleaseGPUShader(Device, imageFragment);
@@ -1286,6 +1280,32 @@ namespace engine::render {
 		if (vertex) SDL_ReleaseGPUShader(Device, vertex);
 		if (fragment) SDL_ReleaseGPUShader(Device, fragment);
 		return DeferredLocalLightAccumulationPipeline != nullptr;
+	}
+
+	bool Renderer::Impl::EnsureLightingEffectPipeline(
+		SDL_GPUGraphicsPipeline *&pipeline, std::string_view shader, uint32_t samplers
+	) {
+		if (pipeline != nullptr) return true;
+		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
+		auto *fragment = LoadShader(shader, SDL_GPU_SHADERSTAGE_FRAGMENT, samplers, 1);
+		if (vertex != nullptr && fragment != nullptr) {
+			SDL_GPUColorTargetDescription target{};
+			target.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+			SDL_GPUGraphicsPipelineCreateInfo info{};
+			info.vertex_shader = vertex;
+			info.fragment_shader = fragment;
+			info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+			info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			info.target_info.color_target_descriptions = &target;
+			info.target_info.num_color_targets = 1;
+			pipeline = SDL_CreateGPUGraphicsPipeline(Device, &info);
+			if (pipeline == nullptr)
+				ENGINE_ERROR("lighting effect pipeline '{}': {}", shader, SDL_GetError());
+		}
+		if (vertex != nullptr) SDL_ReleaseGPUShader(Device, vertex);
+		if (fragment != nullptr) SDL_ReleaseGPUShader(Device, fragment);
+		return pipeline != nullptr;
 	}
 
 	bool Renderer::Impl::EnsureDirectionalCorrection() {

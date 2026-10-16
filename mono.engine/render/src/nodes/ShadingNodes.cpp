@@ -2,10 +2,9 @@
 // built from it, ambient occlusion, the deferred lighting resolve, and the
 // grade that turns the result into a display image.
 //
-// **All five are fullscreen triangles, and they all go through
-// `ViewRecording::Fullscreen`.** One function opens the pass, binds the
-// samplers, pushes the uniforms and sets the viewport, so a node added here
-// cannot forget the scissor and scribble outside its own rectangle.
+// Fullscreen shading goes through `ViewRecording::Fullscreen` so every draw
+// binds its samplers, uniforms, viewport and scissor together. Disabled lighting
+// effects publish the same declared images through copies or clears.
 
 #include "../SeamLightSelection.hpp"
 #include "../SsaoSettings.hpp"
@@ -25,6 +24,32 @@
 #include <type_traits>
 
 namespace engine::render {
+
+	namespace {
+		void CopyLightingEffect(
+			ViewRecording &recording,
+			core::Name name,
+			const ViewRecording::Impl::NamedTexture &source,
+			const ViewRecording::Impl::NamedTexture &target
+		) {
+			recording.EnterNamedPass(name);
+			SDL_GPUBlitInfo blit{};
+			blit.source.texture = source.Texture;
+			blit.source.w = source.Width;
+			blit.source.h = source.Height;
+			blit.destination.texture = target.Texture;
+			blit.destination.w = target.Width;
+			blit.destination.h = target.Height;
+			blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+			blit.filter = SDL_GPU_FILTER_NEAREST;
+			blit.cycle = true;
+			SDL_BlitGPUTexture(recording.Command, &blit);
+			core::Metrics::Count("render.lighting_effect.copy_operations", 1);
+			core::Metrics::Count(
+				"render.lighting_effect.copied_bytes", uint64_t(source.Width) * source.Height * 8
+			);
+		}
+	}
 
 	void ViewRecording::RegisterShadingNodes(NodeTable &frameNodes) {
 		for (const auto kind :
@@ -1380,8 +1405,7 @@ namespace engine::render {
 		frameNodes.Set(core::Name("bloom"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
-			if (context.Reads.size() != 1 || context.Writes.size() != 1 || State->BloomPipeline == nullptr)
-				return false;
+			if (context.Reads.size() != 1 || context.Writes.size() != 1) return false;
 			const Impl::NamedTexture source = recording.GraphTexture(context.Reads.front(), context, false);
 			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
 			if (!source.IsValid() || !target.IsValid() ||
@@ -1389,6 +1413,25 @@ namespace engine::render {
 				target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || source.Width != target.Width ||
 				source.Height != target.Height)
 				return false;
+
+			if (State->BloomIntensity <= 0.0f || State->BloomRadius <= 0.0f) {
+				// Bloom is additive radiance, so its disabled output is zero in every channel.
+				recording.EnterNamedPass(context.Name);
+				SDL_GPUColorTargetInfo colour{};
+				colour.texture = target.Texture;
+				colour.load_op = SDL_GPU_LOADOP_CLEAR;
+				colour.store_op = SDL_GPU_STOREOP_STORE;
+				colour.cycle = true;
+				auto *pass = SDL_BeginGPURenderPass(recording.Command, &colour, 1, nullptr);
+				if (pass == nullptr) return false;
+				SDL_EndGPURenderPass(pass);
+				core::Metrics::Count("render.lighting_effect.clear_operations", 1);
+				core::Metrics::Count(
+					"render.lighting_effect.cleared_bytes", uint64_t(target.Width) * target.Height * 8
+				);
+				return true;
+			}
+			if (!State->EnsureLightingEffectPipeline(State->BloomPipeline, "bloom.frag", 1)) return false;
 
 			const BloomUniforms uniforms{
 				.Settings = glm::vec4{State->BloomIntensity, State->BloomThreshold, State->BloomRadius, 0.0f},
@@ -1421,9 +1464,7 @@ namespace engine::render {
 			Impl *const State = recording.State;
 			if (recording.Sampler == nullptr && !State->EnsureSurfaceSampler()) return false;
 			recording.Sampler = State->SurfaceSampler;
-			if (context.Reads.size() != 2 || context.Writes.size() != 1 ||
-				State->DepthOfFieldPipeline == nullptr)
-				return false;
+			if (context.Reads.size() != 2 || context.Writes.size() != 1) return false;
 			const Impl::NamedTexture colour = recording.GraphTexture(context.Reads[0], context, false);
 			const Impl::NamedTexture depth = recording.GraphTexture(context.Reads[1], context, false);
 			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
@@ -1433,6 +1474,13 @@ namespace engine::render {
 				target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || colour.Width != target.Width ||
 				colour.Height != target.Height || depth.Width != target.Width ||
 				depth.Height != target.Height)
+				return false;
+			if (State->DepthOfFieldIntensity <= 0.0f || State->DepthOfFieldRadius <= 0.0f) {
+				// Keep the declared target and its alias lifetime while copying all four channels.
+				CopyLightingEffect(recording, context.Name, colour, target);
+				return true;
+			}
+			if (!State->EnsureLightingEffectPipeline(State->DepthOfFieldPipeline, "dof.frag", 2))
 				return false;
 			const LightingEffectsUniforms uniforms{
 				.DepthOfField =
@@ -1474,8 +1522,7 @@ namespace engine::render {
 			Impl *const State = recording.State;
 			if (recording.Sampler == nullptr && !State->EnsureSurfaceSampler()) return false;
 			recording.Sampler = State->SurfaceSampler;
-			if (context.Reads.size() != 2 || context.Writes.size() != 1 || State->GodRaysPipeline == nullptr)
-				return false;
+			if (context.Reads.size() != 2 || context.Writes.size() != 1) return false;
 			const Impl::NamedTexture source = recording.GraphTexture(context.Reads[0], context, false);
 			const Impl::NamedTexture depth = recording.GraphTexture(context.Reads[1], context, false);
 			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
@@ -1502,6 +1549,12 @@ namespace engine::render {
 			const glm::vec4 clip = recording.Matrices.ViewProjection * sunWorld;
 			const bool visible = clip.w > 0.0f && std::abs(clip.x) <= clip.w && std::abs(clip.y) <= clip.w &&
 								 clip.z >= 0.0f && clip.z <= clip.w;
+			if (State->GodRayIntensity <= 0.0f || State->GodRayRadius <= 0.0f || !visible) {
+				CopyLightingEffect(recording, context.Name, source, target);
+				return true;
+			}
+			if (!State->EnsureLightingEffectPipeline(State->GodRaysPipeline, "god-rays.frag", 2))
+				return false;
 			const float reciprocalW = visible ? 1.0f / clip.w : 0.0f;
 			const LightingEffectsUniforms uniforms{
 				// Standard linear-depth clears to FarPlane. Keep that value with the
