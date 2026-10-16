@@ -371,6 +371,82 @@ TEST_CASE(
 
 #if ENGINE_ASSERTS_ENABLED
 TEST_CASE(
+	"a refused owner cancellation result requires retirement proof before reuse", "[render][gpu][queues]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	const QueueFixture queues = RequireQueueFixture(fixture);
+	GpuQueueBatch &batch = *queues.Batch;
+
+	auto runCancellationFailure = [&](bool refuseDrain) {
+		SDL_GPUCommandBuffer *main = nullptr;
+		REQUIRE(batch.Begin(&main));
+		main = batch.Api()->Acquire(queues.Device, ATOMIC_GPU_QUEUE_GRAPHICS);
+		REQUIRE(main != nullptr);
+		batch.BindView(&main);
+
+		bool completionCalled = false;
+		std::shared_ptr<const GpuRetirementProof> retirement;
+		const uint32_t task = batch.Add(
+			ATOMIC_GPU_QUEUE_GRAPHICS,
+			"cancel result refusal test",
+			[](SDL_GPUCommandBuffer *) { return false; },
+			std::span<const uint32_t>{},
+			[&](GpuTaskResult result) noexcept {
+				completionCalled = true;
+				retirement = std::move(result.Retirement);
+			}
+		);
+		REQUIRE(task != GpuQueueBatch::INVALID);
+		batch.Refuse();
+		batch.RefuseCancellationResultForTests();
+		if (refuseDrain) batch.RefuseDrainForTests();
+
+		CHECK_FALSE(batch.Complete(false, false));
+		CHECK(batch.LastStatistics().HandoffAttempts == 0);
+		CHECK_FALSE(batch.LastStatistics().Complete);
+		CHECK(completionCalled);
+		REQUIRE(retirement != nullptr);
+		if (refuseDrain) {
+			CHECK_FALSE(retirement->Complete);
+			batch.EndScope();
+
+			SDL_GPUCommandBuffer *rejectedMain = nullptr;
+			CHECK_FALSE(batch.Begin(&rejectedMain));
+			CHECK(rejectedMain == nullptr);
+			REQUIRE(batch.RetireFailed());
+			CHECK(retirement->Complete);
+		} else {
+			CHECK(retirement->Complete);
+			batch.EndScope();
+		}
+
+		SDL_GPUCommandBuffer *recovery = nullptr;
+		REQUIRE(batch.Begin(&recovery));
+		recovery = batch.Api()->Acquire(queues.Device, ATOMIC_GPU_QUEUE_GRAPHICS);
+		REQUIRE(recovery != nullptr);
+		CHECK_FALSE(batch.Complete(false, false));
+		batch.EndScope();
+		SubmitAndWaitEmpty(queues.Device);
+	};
+
+	SECTION("a successful drain completes the proof with no handoffs") {
+		runCancellationFailure(false);
+	}
+	SECTION("a refused drain keeps the proof until explicit retirement") {
+		runCancellationFailure(true);
+	}
+}
+#else
+TEST_CASE(
+	"canceled owner command result injection needs assert-enabled queue hooks", "[render][gpu][queues]"
+) {
+	SKIP("The cancellation result injection hook is active only when ENGINE_ASSERTS_ENABLED is non-zero.");
+}
+#endif
+
+#if ENGINE_ASSERTS_ENABLED
+TEST_CASE(
 	"partial private queue submission fails a real compute request and retains uncertain GPU ownership",
 	"[render][gpu][queues]"
 ) {

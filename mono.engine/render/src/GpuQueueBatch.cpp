@@ -53,6 +53,8 @@ namespace engine::render {
 			Timing GpuTiming;
 			bool Ready = false;
 			bool Submitted = false;
+			bool CancellationAttempted = false;
+			bool CancellationFailed = false;
 		};
 		struct Flight {
 			SDL_GPUFence *Fence = nullptr;
@@ -94,6 +96,7 @@ namespace engine::render {
 		uint32_t RefuseAfter = INVALID;
 		bool RefuseDrain = false;
 		bool RefuseFirstHandoffResult = false;
+		bool RefuseCancellationResult = false;
 		bool PresentationHandedOff = false;
 		bool SubmitEarlierAttempted = false;
 		bool SubmitEarlierSucceeded = false;
@@ -184,7 +187,8 @@ namespace engine::render {
 			);
 			task.Microseconds = engine::render::Microseconds(started);
 			if (!task.Ready && task.Command) {
-				SDL_CancelGPUCommandBuffer(task.Command);
+				task.CancellationAttempted = true;
+				task.CancellationFailed = !SDL_CancelGPUCommandBuffer(task.Command);
 				task.Command = nullptr;
 			}
 		}
@@ -232,7 +236,8 @@ namespace engine::render {
 				} else if (action == Request::Cancel) {
 					for (auto &task : Tasks)
 						if (task.Worker == static_cast<int>(worker) && task.Command) {
-							SDL_CancelGPUCommandBuffer(task.Command);
+							task.CancellationAttempted = true;
+							task.CancellationFailed = !SDL_CancelGPUCommandBuffer(task.Command);
 							task.Command = nullptr;
 						}
 				}
@@ -490,6 +495,12 @@ namespace engine::render {
 #if ENGINE_ASSERTS_ENABLED
 		Held->RequireOwner();
 		Held->RefuseFirstHandoffResult = true;
+#endif
+	}
+	void GpuQueueBatch::RefuseCancellationResultForTests() {
+#if ENGINE_ASSERTS_ENABLED
+		Held->RequireOwner();
+		Held->RefuseCancellationResult = true;
 #endif
 	}
 	void GpuQueueBatch::RefuseDrainForTests() {
@@ -806,22 +817,36 @@ namespace engine::render {
 		bool retirementKnown = false;
 		if (!submitted) {
 			retirementKnown = true;
+			bool cancellationFailed = false;
+			bool cancellationSucceeded = false;
 			for (size_t worker = 0; worker < Held->Workers.size(); ++worker)
 				if (Held->Parallel) Held->Send(worker, State::Request::Cancel);
 			for (size_t worker = 0; worker < Held->Workers.size(); ++worker)
 				if (Held->Parallel) Held->Await(worker);
+			for (const auto &task : Held->Tasks) {
+				cancellationFailed = cancellationFailed || task.CancellationFailed;
+				cancellationSucceeded =
+					cancellationSucceeded || (task.CancellationAttempted && !task.CancellationFailed);
+			}
 			for (auto &task : Held->Tasks)
 				if (task.Worker < 0 && task.Command) {
-					SDL_CancelGPUCommandBuffer(task.Command);
+					task.CancellationAttempted = true;
+					const bool canceled = SDL_CancelGPUCommandBuffer(task.Command);
+					task.CancellationFailed = !canceled;
+					cancellationSucceeded = cancellationSucceeded || canceled;
+					cancellationFailed = task.CancellationFailed || cancellationFailed;
 					task.Command = nullptr;
 				}
 			if (Held->FinalTask == INVALID && Held->Main && *Held->Main &&
 				*Held->Main != Held->Presentation) {
-				SDL_CancelGPUCommandBuffer(*Held->Main);
+				const bool canceled = SDL_CancelGPUCommandBuffer(*Held->Main);
+				cancellationSucceeded = cancellationSucceeded || canceled;
+				cancellationFailed = !canceled || cancellationFailed;
 				*Held->Main = nullptr;
 			}
-			// A failed device submission can still be pending even when SDL reported failure.
-			if (Held->Last.HandoffAttempts != 0 || finalHandedOff) {
+			if (Held->RefuseCancellationResult && cancellationSucceeded) cancellationFailed = true;
+			// A failed submission or cancellation can leave GPU work pending even when SDL reported failure.
+			if (Held->Last.HandoffAttempts != 0 || finalHandedOff || cancellationFailed) {
 				ENGINE_PROFILE_CAT("GPU partial submission drain", core::ProfileCategory::Idle);
 				if (Held->RefuseDrain || !SDL_WaitForGPUIdle(Held->Device)) {
 					retirementKnown = false;
@@ -856,6 +881,7 @@ namespace engine::render {
 		Held->Semaphores.clear();
 		Held->RefuseAfter = INVALID;
 		Held->RefuseFirstHandoffResult = false;
+		Held->RefuseCancellationResult = false;
 		Held->Last.Complete = submitted;
 		Held->Main = nullptr;
 		Held->View = nullptr;

@@ -1,12 +1,14 @@
 include_guard(GLOBAL)
 
-# Materialize pinned SDL sources with the required sampler barrier patch and,
+# Materialize pinned SDL sources with the required Vulkan correctness patches and,
 # when enabled, the private queue patch. Git archives tracked sources only; a
 # content-keyed directory keeps concurrent presets from replacing active builds.
 function(mono_prepare_sdl_queues root output)
 	find_package(Git REQUIRED)
 	set(source "${root}/mono.vendor/sdl")
-	set(patches "${root}/mono.vendor/patches/sdl/vulkan-compute-samplers.patch")
+	set(patches
+		"${root}/mono.vendor/patches/sdl/vulkan-compute-samplers.patch"
+		"${root}/mono.vendor/patches/sdl/vulkan-texture-cancellation.patch")
 	if(MONO_SDL_VULKAN_QUEUES)
 		list(APPEND patches "${root}/mono.vendor/patches/sdl/vulkan-queues.patch")
 	endif()

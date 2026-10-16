@@ -1,0 +1,359 @@
+Preserve Vulkan fresh cycled texture layouts when user commands are canceled.
+
+WHY THIS IS A PATCH
+    A fresh cycle backing is published immediately, but its UNDEFINED-to-default
+    transition is recorded into the caller's cancelable command buffer. Discarding
+    that buffer leaves the published backing in UNDEFINED while later commands
+    assume its default layout. On cancellation, rebuild only those internal layout
+    transitions in the same command buffer, without user copies, draws, graph
+    semaphores, defragmentation or presentation. Successful submissions keep their
+    existing initialization and incur no extra submission or wait.
+
+LIFETIME AND FAILURE
+    Backings and allocator regions are pinned until cleanup. Exceptional cancel
+    initialization uses the original queue and a five-second fence timeout, in
+    nanoseconds. An unsuccessful repair latches a device fault and refuses new
+    acquisition/submission. Commands retained after failure use a separate list,
+    never normal submitted-fence polling. Unproven retained faults permanently
+    refuse new blocking waits, acquisition and submission. A wait entered before
+    the fault cannot be retroactively bounded. Destruction abandons native objects
+    before any window/resource destruction; private cleanup callbacks receive false.
+    Known completed cancellation initializations are cleaned normally; DEVICE_LOST
+    from a fence wait is also a retirement boundary. DEVICE_LOST from submission
+    still means pending, just as a successful submission does.
+
+WHEN IT STOPS APPLYING
+    Pinned SDL commit: fa2c02bb6e21974a89ea9824bc53c9932abe5f9c.
+    Applied on both private-queue option states. Re-point texture cycling, command
+    cleanup/acquisition/cancellation and the device wait/destruction boundary.
+    The private queue patch is based on this correctness patch. Do not edit the
+    tracked SDL submodule. GPU tests: engine.render.texturecancellationgpu.
+
+--- a/src/gpu/vulkan/SDL_gpu_vulkan.c
++++ b/src/gpu/vulkan/SDL_gpu_vulkan.c
+@@ -1053,6 +1053,13 @@
+     Sint32 usedTextureCount;
+     Sint32 usedTextureCapacity;
+ 
++    // Fresh cycle layouts must survive cancellation of the user commands.
++    VulkanTexture **freshCycleTextures;
++    Uint32 freshCycleTextureCount;
++    Uint32 freshCycleTextureCapacity;
++    struct VulkanCommandBuffer *nextFailedCancellation;
++    bool failedCancellation;
++
+     VulkanTexture **texturesUsedInPendingTransfers;
+     Sint32 texturesUsedInPendingTransfersCount;
+     Sint32 texturesUsedInPendingTransfersCapacity;
+@@ -1150,6 +1157,8 @@
+ 
+     Uint32 queueFamilyIndex;
+     VkQueue unifiedQueue;
++    SDL_AtomicInt cancellationInitializationFault;
++    VulkanCommandBuffer *failedCancellations;
+ 
+     VulkanCommandBuffer **submittedCommandBuffers;
+     Uint32 submittedCommandBufferCount;
+@@ -3207,6 +3216,7 @@
+         SDL_free(commandBuffer->usedBuffers);
+         SDL_free(commandBuffer->buffersUsedInPendingTransfers);
+         SDL_free(commandBuffer->usedTextures);
++        SDL_free(commandBuffer->freshCycleTextures);
+         SDL_free(commandBuffer->texturesUsedInPendingTransfers);
+         SDL_free(commandBuffer->usedSamplers);
+         SDL_free(commandBuffer->usedGraphicsPipelines);
+@@ -4985,6 +4995,25 @@
+     VulkanRenderer *renderer = (VulkanRenderer *)device->driverData;
+     VulkanMemorySubAllocator *allocator;
+ 
++    // Device destruction requires all other device calls to have ended.
++    // An unproven repair must not enter another unbounded device-idle wait.
++    // Do not destroy even a window fence while a repair remains pending.
++    if (renderer->failedCancellations != NULL) {
++#ifdef ATOMIC_GPU_QUEUE_EXTENSION
++        Uint32 cleanupCount = renderer->atomicDeviceCleanupCount;
++        renderer->atomicDeviceCleanupCount = 0;
++        for (Uint32 i = 0; i < cleanupCount; ++i) {
++            void (SDLCALL *cleanup)(void *, bool) = renderer->atomicDeviceCleanups[i].cleanup;
++            void *userdata = renderer->atomicDeviceCleanups[i].userdata;
++            SDL_zero(renderer->atomicDeviceCleanups[i]);
++            cleanup(userdata, false);
++        }
++#endif
++        SDL_LogError(SDL_LOG_CATEGORY_GPU,
++            "Texture cancellation initialization could not retire; abandoning native device resources");
++        return;
++    }
++
+     VULKAN_Wait(device->driverData);
+ 
+     for (Sint32 i = renderer->claimedWindowCount - 1; i >= 0; i -= 1) {
+@@ -6052,6 +6081,16 @@
+     texture->containerIndex = container->textureCount;
+     container->textureCount += 1;
+ 
++    VULKAN_INTERNAL_TrackTexture(commandBuffer, texture);
++    // Keep the allocation stable while cancellation can rebuild its layout barriers.
++    VULKAN_INTERNAL_TrackTextureTransfer(commandBuffer, texture);
++    EXPAND_ARRAY_IF_NEEDED(
++        commandBuffer->freshCycleTextures,
++        VulkanTexture *,
++        commandBuffer->freshCycleTextureCount + 1,
++        commandBuffer->freshCycleTextureCapacity,
++        commandBuffer->freshCycleTextureCapacity * 2);
++    commandBuffer->freshCycleTextures[commandBuffer->freshCycleTextureCount++] = texture;
+     container->activeTexture = texture;
+ 
+     // Transition texture after storing it as the memory barrier might need to read the texture's container info
+@@ -6973,6 +7012,10 @@
+     // is fully initialized before any Submit that could trigger defrag.
+     {
+         VulkanCommandBuffer *barrierCommandBuffer = (VulkanCommandBuffer *)VULKAN_AcquireCommandBuffer((SDL_GPURenderer *)renderer);
++        if (barrierCommandBuffer == NULL) {
++            VULKAN_ReleaseTexture((SDL_GPURenderer *)renderer, (SDL_GPUTexture *)container);
++            return NULL;
++        }
+         VULKAN_INTERNAL_TextureTransitionToDefaultUsage(
+             renderer,
+             barrierCommandBuffer,
+@@ -9538,6 +9581,11 @@
+     commandBuffer->buffersUsedInPendingTransfers = SDL_malloc(
+         commandBuffer->buffersUsedInPendingTransfersCapacity * sizeof(VulkanBuffer *));
+ 
++    commandBuffer->freshCycleTextureCount = 0;
++    commandBuffer->nextFailedCancellation = NULL;
++    commandBuffer->failedCancellation = false;
++    commandBuffer->freshCycleTextureCapacity = 4;
++    commandBuffer->freshCycleTextures = SDL_malloc(4 * sizeof(VulkanTexture *));
+     commandBuffer->usedTextureCapacity = 4;
+     commandBuffer->usedTextureCount = 0;
+     commandBuffer->usedTextures = SDL_malloc(
+@@ -9649,10 +9697,14 @@
+     VulkanRenderer *renderer,
+     SDL_ThreadID threadID)
+ {
+-    VulkanCommandPool *commandPool =
+-        VULKAN_INTERNAL_FetchCommandPool(renderer, threadID);
++    VulkanCommandPool *commandPool;
+     VulkanCommandBuffer *commandBuffer;
+ 
++    if (SDL_GetAtomicInt(&renderer->cancellationInitializationFault)) {
++        SDL_SetError("Texture cancellation initialization failed; recreate the GPU device");
++        return NULL;
++    }
++    commandPool = VULKAN_INTERNAL_FetchCommandPool(renderer, threadID);
+     if (commandPool == NULL) {
+         return NULL;
+     }
+@@ -9760,6 +9812,7 @@
+     SDL_zeroa(commandBuffer->readOnlyComputeStorageBuffers);
+ 
+     commandBuffer->autoReleaseFence = true;
++    commandBuffer->inFlightFence = NULL;
+ 
+     commandBuffer->swapchainRequested = false;
+     commandBuffer->isDefrag = 0;
+@@ -10632,6 +10685,11 @@
+         (void)SDL_AtomicDecRef(&commandBuffer->usedTextures[i]->referenceCount);
+     }
+     commandBuffer->usedTextureCount = 0;
++    if (cancel && commandBuffer->freshCycleTextureCount > 0) {
++        // Also catch private pre-submit disposal without a completed initializer.
++        SDL_SetAtomicInt(&renderer->cancellationInitializationFault, 1);
++    }
++    commandBuffer->freshCycleTextureCount = 0;
+ 
+     for (Sint32 i = 0; i < commandBuffer->texturesUsedInPendingTransfersCount; i += 1){
+         (void)SDL_AtomicDecRef(&commandBuffer->texturesUsedInPendingTransfers[i]->usedRegion->allocation->referenceCount);
+@@ -10706,6 +10764,26 @@
+     }
+ }
+ 
++// submitLock is held. Failed repairs never enter normal fence polling: some
++// have not reached a queue, while others may still have a pending initialization.
++static void VULKAN_INTERNAL_RetainFailedCancellation(
++    VulkanRenderer *renderer,
++    VulkanCommandBuffer *commandBuffer)
++{
++    SDL_SetAtomicInt(&renderer->cancellationInitializationFault, 1);
++    if (!commandBuffer->failedCancellation) {
++        commandBuffer->failedCancellation = true;
++        commandBuffer->nextFailedCancellation = renderer->failedCancellations;
++        renderer->failedCancellations = commandBuffer;
++#ifdef ATOMIC_GPU_QUEUE_EXTENSION
++        if (commandBuffer->atomicAcquired) {
++            commandBuffer->atomicAcquired = false;
++            SDL_AddAtomicInt(&renderer->atomicOutstandingCommands, -1);
++        }
++#endif
++    }
++}
++
+ static bool VULKAN_WaitForFences(
+     SDL_GPURenderer *driverData,
+     bool waitAll,
+@@ -10718,6 +10796,15 @@
+ 
+     for (Uint32 i = 0; i < numFences; i += 1) {
+         vkFences[i] = ((VulkanFenceHandle *)fences[i])->fence;
++    }
++
++    // A wait already entered before the fault cannot be retroactively bounded.
++    SDL_LockMutex(renderer->submitLock);
++    bool unprovenCancellation = renderer->failedCancellations != NULL;
++    SDL_UnlockMutex(renderer->submitLock);
++    if (unprovenCancellation) {
++        SDL_stack_free(vkFences);
++        return SDL_SetError("Texture cancellation initialization is unproven; blocking GPU waits are disabled");
+     }
+ 
+     result = renderer->vkWaitForFences(
+@@ -10763,6 +10850,10 @@
+ 
+     SDL_LockMutex(renderer->submitLock);
+ 
++    if (renderer->failedCancellations != NULL) {
++        SDL_UnlockMutex(renderer->submitLock);
++        return SDL_SetError("Texture cancellation initialization is unproven; blocking GPU waits are disabled");
++    }
+     result = renderer->vkDeviceWaitIdle(renderer->logicalDevice);
+ 
+     if (result != VK_SUCCESS) {
+@@ -10831,6 +10922,12 @@
+         renderer->claimedWindowCount == 0;
+ 
+     SDL_LockMutex(renderer->submitLock);
++
++    if (SDL_GetAtomicInt(&renderer->cancellationInitializationFault)) {
++        VULKAN_INTERNAL_RetainFailedCancellation(renderer, vulkanCommandBuffer);
++        SDL_UnlockMutex(renderer->submitLock);
++        return SDL_SetError("Texture cancellation initialization failed; recreate the GPU device");
++    }
+ 
+     // FIXME: Can this just be permanent?
+     for (Uint32 i = 0; i < MAX_PRESENT_COUNT; i += 1) {
+@@ -10992,27 +11089,112 @@
+     return true;
+ }
+ 
++// Cancellation discards every user command. Only fresh-backing layout setup
++// survives, using the same thread's command buffer and its original queue.
+ static bool VULKAN_Cancel(
+     SDL_GPUCommandBuffer *commandBuffer)
+ {
+-    VulkanRenderer *renderer;
+-    VulkanCommandBuffer *vulkanCommandBuffer;
++    VulkanCommandBuffer *vulkanCommandBuffer = (VulkanCommandBuffer *)commandBuffer;
++    VulkanRenderer *renderer = vulkanCommandBuffer->renderer;
+     VkResult result;
+-
+-    vulkanCommandBuffer = (VulkanCommandBuffer *)commandBuffer;
+-    renderer = vulkanCommandBuffer->renderer;
+-
++    bool repaired = false;
++    bool deviceLost = false;
++    const char *operation = "vkResetCommandBuffer";
++    char diagnostic[256];
++
++#ifdef ATOMIC_GPU_QUEUE_EXTENSION
++    if (renderer->atomicQueuesEnabled && (vulkanCommandBuffer->commandPool->threadID != SDL_GetCurrentThreadID() ||
++        !vulkanCommandBuffer->atomicAcquired)) {
++        return SDL_SetError("Atomic GPU command cancellation requires its acquiring thread");
++    }
++#endif
++    SDL_LockMutex(renderer->submitLock);
++    if (vulkanCommandBuffer->failedCancellation) {
++        SDL_UnlockMutex(renderer->submitLock);
++        return SDL_SetError("Texture cancellation initialization is awaiting device retirement");
++    }
+     result = renderer->vkResetCommandBuffer(
+         vulkanCommandBuffer->commandBuffer,
+         VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
+-    CHECK_VULKAN_ERROR_AND_RETURN(result, vkResetCommandBuffer, false);
+-
+-    vulkanCommandBuffer->autoReleaseFence = false;
+-    SDL_LockMutex(renderer->submitLock);
++    if (result != VK_SUCCESS) {
++        goto failed;
++    }
++
++    if (vulkanCommandBuffer->freshCycleTextureCount > 0) {
++        VkSubmitInfo submitInfo = { 0 };
++        VkQueue queue = renderer->unifiedQueue;
++        operation = "begin internal initialization";
++        if (SDL_GetAtomicInt(&renderer->cancellationInitializationFault)) {
++            SDL_SetError("an earlier cancellation initialization fault is latched");
++            goto failed;
++        }
++        if (!VULKAN_INTERNAL_BeginCommandBuffer(renderer, vulkanCommandBuffer)) {
++            goto failed;
++        }
++        for (Uint32 i = 0; i < vulkanCommandBuffer->freshCycleTextureCount; ++i) {
++            VULKAN_INTERNAL_TextureTransitionToDefaultUsage(
++                renderer, vulkanCommandBuffer, VULKAN_TEXTURE_USAGE_MODE_UNINITIALIZED,
++                vulkanCommandBuffer->freshCycleTextures[i]);
++        }
++        operation = "vkEndCommandBuffer";
++        result = renderer->vkEndCommandBuffer(vulkanCommandBuffer->commandBuffer);
++        if (result != VK_SUCCESS) {
++            goto failed;
++        }
++        operation = "acquire initialization fence";
++        vulkanCommandBuffer->inFlightFence = VULKAN_INTERNAL_AcquireFenceFromPool(renderer);
++        if (vulkanCommandBuffer->inFlightFence == NULL) {
++            goto failed;
++        }
++        (void)SDL_AtomicIncRef(&vulkanCommandBuffer->inFlightFence->referenceCount);
++#ifdef ATOMIC_GPU_QUEUE_EXTENSION
++        if (renderer->atomicQueuesEnabled) {
++            queue = renderer->atomicQueues[vulkanCommandBuffer->atomicQueueClass];
++        }
++#endif
++        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
++        submitInfo.commandBufferCount = 1;
++        submitInfo.pCommandBuffers = &vulkanCommandBuffer->commandBuffer;
++        // No application waits/signals, defrag, presentation or canceled copies.
++        operation = "vkQueueSubmit internal initialization";
++        result = renderer->vkQueueSubmit(queue, 1, &submitInfo, vulkanCommandBuffer->inFlightFence->fence);
++        if (result != VK_SUCCESS && result != VK_ERROR_DEVICE_LOST) {
++            // OOM submissions do not change resource or synchronization state.
++            goto failed;
++        }
++        deviceLost = result == VK_ERROR_DEVICE_LOST;
++        // Five seconds in nanoseconds bounds exceptional cancellation recovery.
++        // A successful/lost-device wait is the resource retirement boundary.
++        operation = "vkWaitForFences internal initialization";
++        result = renderer->vkWaitForFences(renderer->logicalDevice, 1,
++            &vulkanCommandBuffer->inFlightFence->fence, VK_TRUE, 5000000000ULL);
++        if (result != VK_SUCCESS && result != VK_ERROR_DEVICE_LOST) {
++            goto failed;
++        }
++        repaired = result == VK_SUCCESS && !deviceLost;
++        if (!repaired) SDL_SetAtomicInt(&renderer->cancellationInitializationFault, 1);
++        vulkanCommandBuffer->autoReleaseFence = true;
++    } else {
++        vulkanCommandBuffer->autoReleaseFence = false;
++        repaired = true;
++    }
++    vulkanCommandBuffer->freshCycleTextureCount = 0;
+     VULKAN_INTERNAL_CleanCommandBuffer(renderer, vulkanCommandBuffer, true);
++#ifdef ATOMIC_GPU_QUEUE_EXTENSION
++    if (vulkanCommandBuffer->atomicAcquired) {
++        vulkanCommandBuffer->atomicAcquired = false;
++        SDL_AddAtomicInt(&renderer->atomicOutstandingCommands, -1);
++    }
++#endif
+     SDL_UnlockMutex(renderer->submitLock);
+-
+-    return true;
++    return repaired ? true : SDL_SetError("Texture cancellation initialization lost the GPU device; recreate it");
++
++failed:
++    SDL_strlcpy(diagnostic, result == VK_SUCCESS ? SDL_GetError() : VkErrorMessages(result), sizeof(diagnostic));
++    VULKAN_INTERNAL_RetainFailedCancellation(renderer, vulkanCommandBuffer);
++    SDL_UnlockMutex(renderer->submitLock);
++    SDL_LogError(SDL_LOG_CATEGORY_GPU, "Texture cancellation initialization failed at %s (%s)", operation, diagnostic);
++    return SDL_SetError("Texture cancellation initialization failed at %s (%s); recreate the GPU device", operation, diagnostic);
+ }
+ 
+ static bool VULKAN_INTERNAL_DefragmentMemory(

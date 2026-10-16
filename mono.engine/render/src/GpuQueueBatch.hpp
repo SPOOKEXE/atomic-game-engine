@@ -95,6 +95,8 @@ namespace engine::render {
 		void RefuseSubmissionAfterForTests(uint32_t successfulSubmits);
 		// Lets SDL submit one command successfully, then refuses its controller result.
 		void RefuseFirstHandoffResultForTests();
+		// Completes native cancellation, then refuses the owner-observed result.
+		void RefuseCancellationResultForTests();
 		void RefuseDrainForTests();
 		// Explicit failure recovery or teardown only; normal completion never waits here.
 		bool RetireFailed();
