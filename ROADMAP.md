@@ -140,7 +140,8 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] localization support
 - [_] /docs/future-work/terrain-system.md
 - [_] Player-independent characters, controller state, animation graphs, and
-  player roster/possession in the [character system plan](docs/future-work/character-system.md).
+  player roster/possession, plus calibrated body/hand tracking mapped to rig
+  bones, in the [character system plan](docs/future-work/character-system.md).
 - [_] /docs/future-work/vfx-system.md
 - [_] /docs/future-work/input-system.md
 - [_] /docs/future-work/camera-and-cinematics.md
@@ -171,7 +172,12 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
 - [_] VR support, with Rift S as a requested validation target: OpenXR stereo
   views, in-game per-eye image-clarity calibration, and calibrated glasses-style
-  magnification. Physical optical focus depends on headset support. Expand the
+  magnification. Capability-based controllers, arbitrary tracked sources, body
+  and hand calibration, and character bone/IK mapping share the input and
+  character paths. Add Luau-defined virtual controllers and reusable tracking
+  modules, with optional computer vision adapters feeding the same samples.
+  Hardware support depends on provider integration; physical
+  optical focus depends on headset support. Expand the
   Far Cry VR and Space Marine VR references from Zero Latency Adelaide when
   POVs arrive. See the [VR system plan](docs/future-work/vr-system.md).
 - [_] setup a studio permissions system for: microphone, camera, etc

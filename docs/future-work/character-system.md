@@ -4,7 +4,8 @@
 
 Build one inspectable character stack that supports the default R6 character,
 artificial characters, bots, imported Roblox characters, custom controllers,
-animation, clothing, accessories, and later graph-authored behaviour.
+animation, clothing, accessories, tracked body and hand poses, and later
+graph-authored behaviour.
 
 Characters do not know about players. Human input, bot AI, replay, and scripts
 all produce the same bounded character intent. `Players` owns the player roster,
@@ -649,6 +650,128 @@ This one component serves three existing needs:
 The old root-offset path remains only as a load migration. After saved content
 has been converted, delete its runtime branch and the old component.
 
+## Tracked character poses
+
+This is planned work after the bone, pose-buffer, and shared-sampling foundation.
+The [input plan](input-system.md#xr-and-tracked-source-seam) owns device samples.
+The [VR plan](vr-system.md) owns provider integration, tracking spaces, and local
+body calibration. Characters consume copied semantic pose targets. They never
+include an input backend, hold a hardware handle, or require a headset or a
+`Player`. Recorded motion, a camera-based mocap adapter, bots, and scripts can
+produce the same target contract without pretending to be controllers.
+
+When an application needs reusable input controls, a Luau-defined virtual
+controller can also publish buttons, poses, and named hand joints through the
+[planned script input surface](input-system.md#luau-defined-virtual-controllers).
+Native trackers, procedural Luau hands, and future computer vision adapters
+then use the same `TrackingBinding` and rig profile. Gesture-derived actions
+enter the action/intent path; joint samples enter the pose path. Neither
+requires a character-specific vision integration. A local hand-shape estimate
+may pose fingers while an independently calibrated tracker positions the wrist;
+missing room-space position remains unavailable rather than fabricated.
+
+### Tracking profiles and bindings
+
+Keep three different mappings explicit:
+
+| Mapping | Owner | Purpose |
+|---|---|---|
+| Device source to semantic slot | local calibration profile | Assign a wrist tracker to `hand.left`, for example, and correct its mounting offset |
+| Semantic joint to target bone | this plan's `RigRetargetProfile` | Resolve stable joint names, rig axes, and reference-pose corrections |
+| Semantic slot to pose constraint | proposed `TrackingRigProfile` | Select the retarget profile, direct bone or IK chain, channels, masks, weights, and fallback |
+
+`TrackingRigProfile` is a versioned author-owned asset. It references
+`RigRetargetProfile` rather than copying its joint-to-bone map. Named slot
+entries declare required position or orientation channels, optional semantic
+finger targets resolved by that retarget profile, the permitted target chain,
+rotation limits, blend priority, and bounded loss/recovery times. Custom slots
+and chains support imported rigs, non-human characters, extra limbs, and
+tracked props. A missing optional bone
+disables that entry with a diagnostic; a missing required bone rejects the
+profile without replacing the last valid revision.
+
+A proposed `TrackingBinding` is an inspectable character-owned instance with a
+profile reference, neutral pose-target stream reference, enabled flag, weight,
+and read-only per-slot availability. Its stream uses semantic names and copied
+values, never source device handles or personal hardware fingerprints. It
+consumes the shared semantic target stream rather than keeping a private copy
+of the same live poses. Luau and JavaScript expose the same fields and validation.
+
+Each target includes its semantic slot or joint name, sample tick or
+presentation time, sequence, tracking-origin generation, and profile/schema
+revision. Position and orientation validity are independent. Confidence and
+velocities have explicit availability when supplied; no solver may invent them
+to make an incomplete sample appear fully tracked. Convert provider coordinates
+to declared engine units and tracking space before solving. Convert resulting
+targets into the character's current root and skeleton space exactly once.
+
+Compile mappings and chain lookups by skeleton, retarget profile, and tracking
+profile revisions. Resolve names outside the per-bone loop. Bound slots,
+joints, chains, iterations, and scratch bytes; malformed or non-finite samples
+fail before they change a pose. Rebuild only when a dependency revision changes.
+
+### Solving and composing a pose
+
+Start from the ordinary blended animation pose in `PoseBuffer`. Direct
+orientation controls can drive a tracked head, wrist, or finger joint after
+reference-pose correction. Sparse positional targets drive declared IK chains:
+a hand target can solve shoulder/elbow/wrist, while a foot target can solve
+hip/knee/ankle. A knee or elbow tracker may supply a bend hint as well as a
+target. A position-only source must not supply an invented tracked orientation.
+
+Use a bounded two-bone solve for ordinary limbs, with explicit pole direction,
+joint limits, reach clamping, and a stable fallback near straight or folded
+singularities. Custom chains need a declared bounded solver; do not promise
+that arbitrary tracker placement reconstructs a unique full-body pose. Missing
+hips, spine, or finger data falls back to authored animation or declared
+inference whose output remains identified as inferred.
+
+Tracking constraints join the planned procedural control pass after clip
+blending. Declare per-bone masks, channel selection, weights, and stable
+authored priority for tracking, aim, recoil, and script controls. Simultaneous
+controller grip, optical hand joints, and glove samples use an explicit source
+selection policy with bounded transition blending. Do not average competing
+absolute poses or let provider enumeration order select the winner.
+
+Resolve final local bone transforms once, then reuse `PoseBinding` for rigid
+limbs, tools, and accessories and the ordinary skinning palette for meshes.
+R6 can use its head and coarse limb targets; it has no finger bones. R15 and
+custom rigs use only the joints their retarget profiles declare. An unsupported
+finger mapping reports unavailable instead of creating hidden bones.
+
+Loss fades only the affected constraints back to the current animation pose
+after a bounded grace period. Keep last-good values only for marked display
+continuity, never as fresh gameplay targets. Recovery blends from the current
+composite pose. Recenter, source reassignment, skeleton replacement, and stale
+origin/profile revisions invalidate affected targets before reuse. Unbinding,
+character destruction, and driver handoff clear transient targets and weights.
+Death or ragdoll yields to the existing authority policy; tracking cannot keep
+writing physics-owned limbs until that policy explicitly permits recovery.
+
+### Gameplay and authority
+
+Visual tracking never moves the root capsule or silently resizes its collider
+from measured player height. Room-scale root movement is a separately declared
+intent that passes through authoritative capsule collision. Character
+proportions, local body measurements, and optical or virtual world scale remain
+different settings.
+
+If a game uses tracked hands for hits, grabs, climbing, or reach, validate
+bounded semantic targets at the fixed tick through the existing driver lease
+and possession checks. Shared animation sampling and a bounded authority-side
+constraint solve must land before gameplay can depend on solved limbs. Physics
+queries use that committed tick result, never a late-latched presentation bone.
+Validate target age, origin/profile revision, finite values, reach, and allowed
+rates. A client pose is not proof of contact or permission to move an object.
+
+Networking sends only the semantic targets and availability needed for remote
+avatars or declared gameplay, with bounded joint count, bytes, and rate. It
+does not replicate hardware identity, calibration measurements, transient
+`PoseBuffer`, or every resolved bone frame. Remote presentation interpolates
+accepted samples; replay uses the recorded tick targets and profile revisions,
+not new hardware samples. Presentation-only newer samples never rewrite that
+history. Calibration changes enter gameplay at a named tick barrier.
+
 ## Physics controller
 
 The final controller is a queried upright capsule, not a dynamic body whose
@@ -707,6 +830,7 @@ enabled would make system registration order decide movement.
 ```text
 fixed tick
   higher-level drivers resolve one neutral character intent
+  freeze and validate declared semantic tracking targets and their revisions
   ensure character links and default stack
   commit the typed parameter snapshot
   sample controller sensors
@@ -719,11 +843,13 @@ fixed tick
   atomically commit capsule movement and final state transitions
   update animation-track intent
   advance tracks and fades
+  sample gameplay-required poses and solve bounded tracking constraints, if enabled
+  resolve authority bone frames and run declared hand/contact queries
   publish replication changes
 
 presentation frame
   sample and blend visible animation tracks
-  apply procedural bone controls
+  apply procedural bone controls, including validated tracking constraints
   resolve bones
   resolve pose bindings for limbs, tools, and accessories
   build skinning palettes and draw
@@ -739,6 +865,13 @@ motion ships, extract format decode and deterministic sampling into a shared
 engine animation module that links `assets` and `scene`. Render then consumes
 its pose result instead of owning the only sampler. Physics consumes only the
 scene-side root-motion intent row, preserving the layer direction.
+
+The optional authority pose solve uses the same shared sampler and constraints
+as presentation, with separate transient scratch and only the bones needed by
+declared gameplay. It completes before hand/contact query results are consumed.
+Contacts requesting movement or climbing feed the next tick's intent; they
+never trigger a second capsule integration in the current tick. Presentation
+may sample newer local tracking, but cannot replace these committed results.
 
 ## Animation binding
 
@@ -1138,9 +1271,13 @@ not a prerequisite for any phase.
 | Player roster and active possession | runtime snapshot only | yes | authority `Players` service |
 | Character appearance and clothing | yes | yes | authority or authoring world |
 | Bone rest pose and controls | yes | yes | author, animation, or controller by field |
+| Tracking rig profile and binding configuration | yes | asset reference and permitted configuration | authority or authoring world |
+| Local device assignment, mount offsets, and body measurements | no | no | local calibration profile |
+| Semantic tracking targets and validity | no | bounded validated stream when declared | current driver through the input barrier |
+| Compiled tracking constraints and transient solve scratch | no | no | local compiler and pose evaluator |
 | `AnimationBuffer` clips, markers, and curves | yes | asset or buffer reference | authority or authoring world |
-| `PoseBuffer` samples | no | no | local animation evaluation |
-| Resolved bone world frames | no | no | local presentation |
+| `PoseBuffer` samples | no | no | presentation or declared fixed-tick authority pose evaluation |
+| Resolved bone world frames | no | no | presentation or declared fixed-tick authority queries |
 | Accessory definition | yes | yes | authority or authoring world |
 | Derived pose binding cache | no | no | local resolver |
 | Compiled cage and retarget caches | no | no | local compiler from saved inputs |
@@ -1306,6 +1443,26 @@ Gate: server, standalone client, and replay produce the same root displacement
 for one canonical clip, including collision and portals; a procedural bake
 round-trips within declared tolerances and fires identical markers.
 
+### Phase 7 extension: tracked body and hand poses
+
+After Phase 4's bones and retarget foundation, Phase 7's `PoseBuffer` and shared
+sampling, and the input/VR tracking-source contract:
+
+- add `TrackingRigProfile` and `TrackingBinding` over the planned retarget map
+- support head, waist, limb, wrist, and optional finger targets with direct
+  controls and bounded IK, masks, source selection, and loss/recovery blending
+- add local calibration, custom rig mapping, script parity, and replayable
+  neutral target injection without a headset
+- demonstrate a Luau-defined virtual hand with named joints and pinch/grab
+  controls; allow optional vision-library output to replace the synthetic feed
+- add authority-side constraint solving and committed contact queries before
+  enabling gameplay hits, grabs, or climbing from solved bones
+
+Gate: a recorded pose stream drives R6 and a finger-capable custom rig without
+device dependencies. Sparse and lost targets fall back per limb, custom roles
+resolve by name, and the capsule remains authoritative. The ordinary untracked
+character stack ships independently of this extension.
+
 ### Phase 8: custom states and shared parameters
 
 - make runtime state identity a stable name with built-in compatibility mapping
@@ -1385,6 +1542,17 @@ existing suites or narrow successors:
   complete headless character and animation playback
 - both script runtimes for the same properties, methods, buffers, and events
 
+Tracking cases cover tracker mounting and rig-axis corrections, position-only
+and orientation-only sources, sparse limb IK, unreachable targets, straight
+limb singularities, finger-name retargeting, R6 without fingers, custom extra
+limbs, overlapping controller/hand sources, partial loss and recovery, origin
+changes, profile edits, and rig replacement. Also check two local people,
+possession or driver handoff, ragdoll priority, rejected replica writes,
+headless recorded playback, and fixed-tick gameplay isolation from render poses.
+Include Luau procedural and recorded hand feeds, producer teardown, and
+combining finger-only estimates with an aligned wrist source. These exercise
+the same rig solver without requiring a camera or inference library.
+
 Add focused cases, not a second pile of generic smoke tests. Each error branch
 needs a case: missing root, bad controller reference, disabled or unresolved
 custom state, stale possession revision, duplicate possession, bot handoff,
@@ -1405,6 +1573,8 @@ Profile the release preset with idle, moving, and accessory-heavy crowds. Record
 - marker events, throttled visual samples, and procedural bake keys retained
 - accessory rebinds versus cache hits
 - cage and retarget compiles versus cache hits
+- tracking constraints, IK iterations, sample age, fallback counts, profile
+  compiles versus cache hits, and tracking-stream bytes per player
 - possession swaps and rejected stale intents
 - active ragdoll bodies and recovery probes
 - allocations per tick
@@ -1438,6 +1608,8 @@ This plan is complete in code when all of these are true:
 - `CurrentState` stays a locomotion compatibility projection while the full
   active region configuration is available read-only
 - bones and rigid pose bindings drive limbs, tools, and accessories
+- the tracking extension maps calibrated body and hand targets through the same
+  rig, control, and pose pipeline, with explicit partial-tracking fallback
 - appearance, classic clothing, rigid accessories, and layered clothing share
   the rig without becoming movement authorities
 - existing animation instances and tracks bind to controller state

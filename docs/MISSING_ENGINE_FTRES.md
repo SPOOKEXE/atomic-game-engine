@@ -852,7 +852,7 @@ plays animation/sound, can be skipped, and returns control correctly. Test a
 late join, player death, and scene unload during the sequence. Do not make a
 cinematic timeline the required way to implement ordinary gameplay.
 
-### U05. VR stereo views, per-eye calibration, and magnification
+### U05. VR views, tracked controllers and bodies, and calibration
 
 P2/P3. Planned in the [VR system plan](future-work/vr-system.md). This is a
 proposal, with Rift S as a requested validation target rather than confirmed
@@ -868,9 +868,25 @@ plane. Full-world projection magnification needs compositor and comfort
 validation before enabling it; UI zoom and a bounded magnifier provide smaller
 first steps.
 
+Extend the shared input device model with capability-based controllers,
+pose-only body/limb trackers, and optional hand/body joint sources. Keep device
+identity, local body-role assignment, and rig bone mapping separate. Calibrate
+mounting offsets and provider spaces, then feed semantic targets through the
+character plan's proposed retarget, bone-control, and bounded IK pipeline.
+Support depends on real provider integration, including headset-free tracking
+where available. Partial tracking falls back per target; gameplay still uses
+validated fixed-tick intent and authoritative capsule collision.
+
+Let LocalScripts define virtual controllers and named joint sources through
+the same publishing contract. Ship reusable Luau modules for landmark
+normalization, gestures, calibration, and synthetic or recorded feeds. Optional
+camera/inference adapters can later feed those modules without coupling a
+character to a vision library or requiring a headset for virtual input.
+
 First useful slice: a calibration room and an original two-player tracked
 range. Verify eye geometry, hand/aim alignment, room origin, tracking loss,
-boundaries, reconnection, and local profile restoration. Far Cry VR and Space
+boundaries, reconnection, local profile restoration, and waist/foot/wrist plus
+finger mapping on a suitable rig. Far Cry VR and Space
 Marine VR at Zero Latency Adelaide are reference experiences named by the user;
 their POV comparison remains pending. Official product descriptions and the
 proposed engine requirements are recorded separately in the VR plan.

@@ -215,7 +215,9 @@ resources:
 | `ControllerState` | world and compatibility | existing eight script-facing gamepad slots |
 | `ActionFrameState` | local player and frame | values, frame deltas, and processed flags for presentation and scripts |
 | `ActionTickState` | local player and tick | deterministic levels, transitions, counters, and accumulated deltas consumed by simulation |
-| `InputAssignmentState` | client world | local player to device assignment and active action-map revision |
+| `TrackingSampleState` | client-local and tick | bounded copied pose and joint samples with source, clock, schema, and space revisions |
+| `InputAssignmentState` | client world | local player to physical or virtual source assignment, tracked-source calibration revision, and active action-map revision |
+| `InputProducerState` | client-local | scoped script providers, immutable origin tags, schema revisions, freshness, and bounded pending snapshots |
 | `InputDiagnostics` | client-local | bounded counters and timestamps, never saved or replicated |
 
 If several local players share one world, one singleton action resource is not
@@ -252,7 +254,7 @@ Each live `InputDevice` record contains:
 | Field | Meaning |
 |---|---|
 | `Handle` | generation-checked runtime identity |
-| `Kind` | keyboard, mouse, gamepad, touch, pen, or XR controller |
+| `Kind` | keyboard, mouse, gamepad, generic controller, touch, pen, XR source, tracker, or skeletal source |
 | `Capabilities` | bounded bitset of available controls and output features |
 | `DisplayName` | sanitized local display text |
 | `MappingGuid` | backend mapping identity where available |
@@ -269,6 +271,13 @@ backend may hash stable local fields with an installation salt. Where a
 platform exposes no stable identity, reconnect matching is best effort and the
 profile falls back to kind, mapping GUID, vendor, product, then assignment
 order.
+
+Physical identity is only a local reconnect aid. Nonunique vendor and product
+fields, mapping GUIDs, and stable semantic aliases may be used in a private
+local profile for matching. Raw serials, Bluetooth addresses, device paths, and
+other hardware-unique identifiers stay inside the adapter. A salted,
+machine-local reconnect key may be derived from them, but the raw values never
+enter ordinary saves, recordings, logs, analytics, or wire messages.
 
 ### Device discovery and reconnect
 
@@ -334,6 +343,13 @@ validation message, not a binding that silently never fires.
 - window or surface route as a host-local handle;
 - backend flags such as repeat or synthesized release.
 
+Normalized input facts also carry an engine-assigned origin descriptor:
+hardware adapter, script provider, test fixture, or derived sample, plus a
+stable provider namespace and generation-checked local source handle. Scripts
+may mark an individual landmark or joint as supplied or inferred, but cannot
+claim hardware provenance. Origin tags are diagnostic and routing facts, not
+server authority or persistent hardware identity.
+
 The timestamp does not decide authoritative simulation. Sequence order and the
 fixed-tick sampler do. Backend timestamps may use different epochs, so the
 adapter converts them to the engine's monotonic clock at ingestion.
@@ -355,11 +371,19 @@ Relative mouse mode uses motion deltas and never derives them from a recentered
 position. Focus loss exits capture through the existing window owner and emits
 one cancellation sequence.
 
-### Gamepads and joysticks
+### Gamepads, joysticks, and arbitrary controllers
 
 Mapped gamepads expose semantic buttons and axes. Raw joysticks expose bounded
 numbered controls only through explicit raw control paths. A raw button ordinal
 must not masquerade as a semantic south button.
+
+The eight `Gamepad1` through `Gamepad8` slots remain a compatibility view, not
+the device registry or its capacity. An arbitrary controller is described by
+its capabilities and bounded control descriptors: buttons, axes, poses, joints,
+and outputs where present. Descriptors use stable namespaced paths supplied by
+the provider or a declared mapping. The adapter never guesses that an unknown
+button means confirm, trigger, or a particular hand. Existing mapped gamepad
+and raw joystick paths keep their current meanings.
 
 Deadzone calibration moves out of the translator's one fixed constant and into
 binding processors or a device calibration profile. The raw normalized state
@@ -409,20 +433,78 @@ sends a compatibility mouse event, the adapter marks the related sequence so a
 consumer can deduplicate it. Studio drawing tools may prefer pen data while a
 game continues to use primary pointer actions.
 
-### XR seam
+### XR and tracked-source seam
 
-XR support is a future adapter, not part of the first runtime. The action value
-model reserves:
+XR support is a future adapter, not part of the first production runtime. The
+action value model reserves:
 
 - boolean and scalar hand controls;
 - 2D thumbsticks and touchpads;
 - 3D linear or angular values;
-- poses with position, orientation, validity, and tracking confidence;
-- device role paths for head, left hand, right hand, and optional trackers.
+- poses with position, orientation, validity, and optional tracking confidence;
+- semantic paths for head, controller, hand, and optional tracker sources.
 
 The XR runtime owns late-latched presentation poses. Fixed-tick gameplay reads a
 sampled pose with its tick and validity. Rendering may use a newer local pose
 without rewriting authoritative action history. Haptics remain an output path.
+
+The XR adapter exposes bounded capabilities and descriptors instead of a
+universal controller layout. Existing gamepad mappings remain unchanged;
+arbitrary controls use provider or mapping namespaced descriptors and never
+receive guessed button roles. A provider may expose logical head, controller,
+hand-joint, or body sources without enumerating the physical hardware behind
+them. Backend support is gated on integration with an actual runtime. OpenXR
+support alone does not promise enumeration of arbitrary non-HMD hardware, and
+non-HMD tracking is available only when the selected provider exposes it.
+
+`TrackedSource` is a logical pose or joint endpoint, not necessarily one piece
+of hardware. A source can be pose-only, with no buttons or haptics. A person may
+have several tracker sources, and a project may define custom named semantic
+slots. Do not impose left/right fixed indices, backend role enums, or the eight
+legacy gamepad slot ceiling. Identical anonymous trackers, including same-model
+body trackers, remain unassigned until a user explicitly chooses their
+semantic slot. Discovery order and prior enumeration never infer left or right.
+
+Each copied `TrackingSample` contains a bounded pose or joint set, stable source
+alias, stable semantic joint names, monotonic sample timestamp converted into
+the engine clock, sequence number, origin/space generation, and schema
+revision. Position-valid, orientation-valid, position-tracked, and
+orientation-tracked flags are independent. Velocity and confidence are optional values with explicit
+availability. Reject stale schema or origin generations rather than applying
+samples in a changed coordinate space. Different providers need calibrated
+spaces and aligned clocks before their samples can be combined.
+
+High-volume pose and skeletal samples live in a bounded tracking resource, not
+in pinned `InputState` or legacy `ControllerState`. Joints are not scalar
+actions. Discrete buttons remain on the action path, and a selected `Pose`
+action may reference a logical source. Samples publish at the fixed-tick input
+barrier for simulation and replay; rendering may consume a newer local pose
+without rewriting tick history. Loss or invalid required data cancels an active
+pose action exactly once and never substitutes a false zero pose. Controller
+and optical-hand overlap resolves only through explicit stable source
+precedence and masks.
+
+Generation-checked device and source handles never serialize or cross a world
+boundary. Saved profiles and diagnostic traces refer to stable semantic source
+aliases with ticks and schema/space revisions. Network messages carry only
+explicitly declared semantic intent; raw tracking samples are not replicated.
+
+Local assignment separates three facts: the reconnect match for a physical
+device, the role or semantic slot assigned to a logical source, and the
+character rig mapping. A local player slot may own multiple tracker sources,
+but one source cannot silently drive multiple people. Local calibration maps
+hardware sources to semantic slots and mount offsets.
+
+The character plan proposes a pose foundation built from `RigRetargetProfile`,
+`BoneController`, transient `PoseBuffer`, and `PoseBinding`. These are planned
+systems, not a claim about implemented engine code. Its author-owned
+`TrackingRigProfile` references `RigRetargetProfile` and adds tracker slots,
+chains, corrections, and constraint policy. It does not extend that type or
+duplicate its semantic joint-to-bone and rest-pose map. Character
+`TrackingBinding` consumes neutral semantic targets through that planned pose
+pipeline and has no input-provider or physical-device dependency. Input
+provides samples and assignments; it never solves character IK or retargeting.
+See the [VR system plan](vr-system.md) and [tracked character poses](character-system.md#tracked-character-poses).
 
 ## Named and typed actions
 
@@ -901,15 +983,95 @@ Server scripts may inspect accepted semantic character or gameplay intent
 through the owning gameplay service. They do not see a client's local
 `InputActionService` state as if it were authoritative.
 
-### Virtual devices and tests
+### Luau-defined virtual controllers
 
-Scripts do not receive an unrestricted API to impersonate hardware. Test and
-trusted tooling may create a bounded virtual input device through a permissioned
-host API. Ordinary game scripts can drive characters or game systems through
-their semantic APIs instead.
+Plan a first-class virtual controller/provider API for ordinary `LocalScripts`
+running in their own assigned local-player slot. This is a project feature, not
+a debug-only injection path or a privileged test-only exception. Luau and
+JavaScript wrappers publish the same copied neutral facts. A human-facing
+virtual controller still goes through action maps and the ordinary character
+intent builder. AI and scripts that already own semantic intent can continue to
+write that intent directly without manufacturing a device.
 
-Virtual device events use the same normalization, map, context, and sampling
-path. This is the basis for headless input tests and Studio's event injector.
+Creating a virtual provider does not grant camera, microphone, native-library,
+or operating-system input access. Those remain separate host capabilities when
+an adapter needs them; a script that only publishes data needs no per-provider
+approval flow. The engine assigns immutable `script` origin, provider
+namespace, and generation-checked local handles. Providers cannot impersonate
+OS hardware, claim vendor or serial identity, inject committed text or global
+OS keys, address another player's slot, send Studio commands, or gain server
+authority.
+
+The proposed service shape is:
+
+| API | Purpose |
+|---|---|
+| `InputActionService:CreateVirtualController(definition, localSlot?)` | Create a scoped producer for a declared control and tracking schema in the caller's assigned local slot |
+| `producer:Publish(sample)` | Validate and stage one complete copied control and tracking snapshot for the next input barrier |
+| `producer:Reset()` | Clear levels and mark tracked values invalid through one cancellation path |
+| `producer:Destroy()` | Revoke the handle generation, clear state, and prevent later writes |
+| `producer.Output` signal | Optional bounded output request only when a real output capability has been implemented |
+
+The declaration supplies a stable provider namespace, schema name and version,
+named controls, and named logical sources. Controls may be boolean, scalar,
+vector, or `Pose`; scalar and vector controls declare absolute or relative
+update semantics. Source rows use the `TrackingSample` contract and may contain
+bounded named joints. An ordinary input action map binds these named paths as
+it does other controls. No script callback runs from the hardware polling
+thread.
+
+`Publish` is atomic. The engine validates the full snapshot, then copies it
+into the provider's bounded pending state. The snapshot carries an engine-owned
+sequence, capture timestamp, schema and origin-space revisions, and validity
+for each position, orientation, and tracking state. Per-value provenance may
+say `supplied` or `inferred`; the provider origin remains `script`. Reject
+unknown names, stale revisions, non-finite values, invalid quaternions, excess
+joint counts, and partial or oversized frames. Reuse the regular physical and
+tracking validation path wherever the source kind permits it.
+
+Preserve ordered button transitions and declared relative deltas when several
+snapshots arrive between input barriers. A bounded transition ring retains a
+press and release even if the latest level is neutral; pose and absolute-axis
+channels may retain only their latest complete sample. Overflow follows the
+ordinary counted-drop and cancellation policy rather than leaving an action
+held or silently losing an edge.
+
+Producer count, controls, sources, joints per source, update rate, sample age,
+and bytes per update all have named hard limits. Publish only stages data.
+The input barrier accepts complete snapshots before fixed-tick sampling, so an
+asynchronous producer cannot rewrite action or replay history after the tick.
+Action maps, contexts, rebinding, accessibility transforms, diagnostics, and
+fixed-tick sampling then follow the ordinary path. Provider publication never
+writes `InputState`, `ControllerState`, character bones, or pose buffers directly.
+
+The provider lifetime is bounded by the creating script instance, VM, world, and Play
+session. Assignment to a different local slot requires an explicit engine
+assignment. Reset, script error, teardown, focus loss, or a freshness timeout
+clears active levels and invalidates poses with exactly one cancellation path.
+A schema change creates a new revision and requires validation before publish;
+Destroy revokes the generation immediately, so a stale producer cannot publish
+later. Output requests are delivered only to implemented output backends and
+are cancelled through the existing output lifecycle.
+
+Declarative provider and control definitions may be project assets. Closures,
+producer handles, and pending snapshots are runtime data and are never saved
+or replicated. Calibration remains a versioned local user profile, following
+the ordinary source assignment policy. Recorded or synthetic samples use stable
+semantic aliases, tick, and revisions. A virtual controller can therefore be
+tested headlessly before XR hardware exists, and a synthetic hand/body feed can
+use the shared tracking contract without an OpenXR session or HMD.
+
+Keep reusable Luau helpers small and composable: controller composition,
+named-landmark normalization, filtering with explicit latency, pinch and grab
+thresholds with tick-based hysteresis, local calibration, and recorded or
+synthetic sample sources. They may process camera landmarks supplied by a host
+adapter. They do not promise computer-vision inference in pure Luau. Camera
+capture and inference adapters remain optional host work described with the VR
+plan.
+
+Test tooling and Studio may use the same virtual-provider boundary to inject
+fixtures. Tests exercise the full normalization, action-map, context, and sample
+path instead of writing `ActionTickState` directly.
 
 ## Action-map asset and user profile
 
@@ -1092,6 +1254,7 @@ ceilings:
 |---|---|
 | live devices | 32 per process |
 | script-facing gamepads | existing 8 slots |
+| virtual producers and published data | named aggregate and per-producer caps for controls, sources, joints, rate, sample age, and bytes |
 | local player slots | 8 per client |
 | active touch contacts | 16 per surface |
 | action maps active per local slot | 8 layers |
@@ -1112,6 +1275,9 @@ are ceilings to design against, not performance claims.
 Overflow policies:
 
 - device and contact overflow refuses the new item and logs once per episode;
+- an over-limit virtual snapshot is refused before any update, preserving the
+  last accepted complete snapshot without refreshing its age; transition-ring
+  overflow follows the event-buffer cancellation policy below;
 - event-buffer overflow synthesizes a full local release and marks the sample
   unreliable rather than leaving unknown held state;
 - transition counters saturate and set an overflow flag;
@@ -1131,11 +1297,17 @@ private hardware identifiers or one line per frame.
 | Data | Saved with game | User profile | Replicated | Recorded | Owner |
 |---|---:|---:|---:|---:|---|
 | action declarations and defaults | yes | no | content revision only | signature | project asset |
+| `TrackingRigProfile` semantic slots, chains, and constraints | yes | no | content revision only | profile revision | authoring world |
+| virtual provider and control declarations | yes, declarative asset only | no | content revision only | schema revision | project asset |
 | user binding overrides | no | yes | no | no | local client |
 | accessibility transforms | no | yes | no | resolved sample only | local client |
 | raw `InputState` | current snapshot rules | no | not as player authority | diagnostic only | world and client adapter |
 | device handles and SDL ids | no | no | no | no | input runtime |
 | device match descriptors | no | yes, privacy-safe | no | local aliases only | local client |
+| tracked-source aliases, slot assignment, and calibration | no | yes, local profile only | no | stable aliases, ticks, and revisions in diagnostic trace | local client |
+| tracking samples | no | no | no | bounded samples by opt-in with aliases, ticks, and revisions | input runtime |
+| runtime source handles | no | no | no | no | input runtime |
+| producer callbacks, handles, and pending snapshots | no | no | no | no | local script VM and input runtime |
 | active contexts | no, unless game state recreates them | optional profile defaults | no | action trace | local slot |
 | action frame state | no | no | no | diagnostic trace | input runtime |
 | action tick sample | no | no | semantic intent only | action trace | local slot |
@@ -1169,9 +1341,11 @@ character.
 9. Add user profiles, rebinding, accessibility, and Studio editors.
 10. Add local multiplayer assignment. Remove any assumption that one process
     has exactly one input owner.
-11. Add touch on the same action path, then pen, then an XR adapter when the
-    platform runtime exists.
-12. Remove temporary adapters, duplicated deadzones, private tap latches, and
+11. Add touch on the same action path, then pen, then the base XR adapter when
+    a selected platform runtime is integrated.
+12. After the base XR gate, add arbitrary controller capabilities, logical
+    tracked sources, and bounded skeletal samples behind provider support.
+13. Remove temporary adapters, duplicated deadzones, private tap latches, and
     obsolete hard-coded key tables only after their callers are gone.
 
 During migration, a diagnostic parity mode may evaluate old and new movement
@@ -1250,10 +1424,14 @@ replayed characters consume the same intent shape.
 - extend processed-state and device reporting;
 - bridge supported raw controls into `ContextActionService` without changing
   its VM-local callable ownership;
-- add permissioned virtual input for tests and tools.
+- add scoped virtual controllers and script providers for ordinary LocalScripts;
+- publish virtual controls and tracked samples through shared normalized facts;
+- keep camera or native inference access as a separate optional host capability.
 
-Gate: both languages pass the same end-to-end input fixtures and generated
-declarations match the runtime surface.
+Gate: both languages pass the same end-to-end fixtures, generated declarations
+match the runtime surface, and a LocalScript provider assigned to its own slot
+drives the normal action and character-intent path. Headless synthetic hand
+samples use the tracking contract without an XR backend.
 
 ### Phase 6: profiles, rebinding, and accessibility
 
@@ -1309,8 +1487,32 @@ mouse synthesis being required.
 - add tracking-loss cancellation and recenter events;
 - validate headless builds remain backend-free.
 
-Gate: XR adds no alternate gameplay intent path and a tracking loss cannot
-leave an action active.
+Base XR gate: an integrated backend provides semantic head and controller
+sources, fixed-tick pose samples, late-latched presentation poses, and
+loss/recenter handling. XR adds no alternate gameplay intent path, and tracking
+loss cannot leave an action active.
+
+The shared tracked-source contract, script providers, and synthetic hand or
+body samples do not depend on this hardware gate. Once the base backend is
+integrated, it may supply physical XR sources through the same contract.
+
+After the base gate, add a separate arbitrary-controller and tracking gate:
+
+- describe arbitrary controls through bounded capability records and
+  namespaced descriptors while preserving mapped gamepad and raw joystick
+  semantics;
+- connect provider-supplied tracked sources with explicit ambiguity resolution,
+  local calibration, and copied pose/joint samples;
+- expose pose-only, hand-joint, body, and non-HMD sources only when the selected
+  provider actually supplies them;
+- deliver semantic targets to the character pose pipeline using the character
+  plan's `RigRetargetProfile` as its bone mapping foundation.
+
+Tracking integration gate: more than eight pose sources work independently of
+legacy gamepad slots; ambiguous anonymous sources require explicit assignment;
+stale schema or space revisions fail safely; and hand/controller fallback
+follows explicit source masks and precedence. This does not claim universal
+hardware enumeration or provider-independent body layouts.
 
 ## Test plan
 
@@ -1329,6 +1531,54 @@ leave an action active.
 - stale generation handles cannot reach a replacement device;
 - focus loss followed by key-up does not double-fire a release;
 - touch and pen compatibility events deduplicate when marked related.
+
+### Tracked sources
+
+- more than eight pose-only sources coexist without consuming gamepad slots;
+- sources without buttons or haptics remain assignable and usable;
+- identical anonymous trackers, including same-model body trackers, require
+  explicit user assignment regardless of connection or discovery order;
+- source aliases, semantic joint names, schema revisions, and origin generations
+  remain stable in copied samples;
+- stale schema or origin generations are rejected;
+- position-only, orientation-only, and actively-tracked validity combinations
+  remain distinct, with optional velocity and confidence availability;
+- provider samples from different spaces or clocks are not combined before
+  calibration and clock alignment;
+- tracking loss cancels dependent actions once without producing a zero pose;
+- a synthetic hand/body provider publishes useful poses without an XR session;
+- overlapping controller and optical-hand sources follow configured masks and
+  stable precedence;
+- one source cannot drive multiple local players without an explicit sharing
+  policy;
+- assignments and calibration remain local and never become character or
+  physical-device identity;
+- recorded samples replay at fixed ticks while newer render poses leave tick
+  history unchanged.
+
+### Virtual controllers and script providers
+
+- an ordinary LocalScript creates a provider only in its assigned local slot;
+- Luau and JavaScript wrappers produce equal validated facts and action values;
+- a complete publish is accepted atomically at the next input barrier;
+- press/release snapshots between barriers retain their edges and relative
+  deltas; bounded overflow cancels affected actions rather than sticking levels;
+- malformed controls, quaternions, joints, sizes, or revisions preserve the last
+  valid snapshot and report a bounded error;
+- reset, script error, stop, focus loss, freshness timeout, and teardown clear
+  levels and invalidate poses through one cancellation path;
+- Destroy revokes the generation, and a stale producer cannot publish after
+  destroy or hot reload;
+- slot reassignment requires explicit assignment and cannot leak one producer
+  into another local player;
+- a virtual controller reaches the ordinary action-map, intent, and recording
+  paths, while scripts with semantic intent do not need a fake device;
+- sample provenance remains engine-tagged as script or derived even if a script
+  labels supplied versus inferred landmarks;
+- virtual hand samples replay deterministically at fixed ticks without camera,
+  OpenXR, or HMD access;
+- output events are available only when an output backend exists and remain
+  bounded by that backend's capability.
 
 ### Action compilation and evaluation
 
@@ -1510,10 +1760,13 @@ The first production action system does not include:
 - cloud synchronization of personal profiles;
 - kernel-level global hotkeys or input capture outside application focus;
 - anti-cheat based on trusting client device metadata;
-- arbitrary script-created hardware identities;
+- script-created hardware identities or OS device spoofing;
 - recording personal typed text;
 - platform gesture results as authoritative gameplay;
-- XR hand skeletons, eye tracking, or body tracking before the base XR adapter;
+- hardware-backed XR hand skeletons, eye tracking, or body tracking before the
+  base adapter and a provider that exposes the needed capabilities; synthetic
+  or script-provided hand and body samples may use the shared tracking contract
+  without XR hardware;
 - motion matching or animation selection inside input;
 - character ownership, possession policy, or bot decision making;
 - a replacement for Studio command keybinds;

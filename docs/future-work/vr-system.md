@@ -27,7 +27,9 @@ The system should support:
 
 - headset session and frame lifecycle through a client platform adapter;
 - runtime-provided view pose and asymmetric projection parameters per eye;
-- head and controller actions translated into the common input path;
+- head, controller, tracker, and hand data translated into the common input and character paths;
+- arbitrary input devices and pose sources through capability-reporting provider adapters;
+- positional body and limb tracking, plus optical or glove hand joints mapped onto authored character rigs;
 - configurable comfort and accessibility options;
 - optional per-eye perceived-focus adjustments for users who need them;
 - a separate, clearly named virtual magnifier for interface or world content;
@@ -93,8 +95,8 @@ implementation change.
 |---|---|
 | Client platform adapter | Runtime discovery, instance/session lifecycle, frame timing, event pump, swapchains, and device capability reporting |
 | `scene` and camera path | Copied tracked poses, per-view camera inputs, and presentation configuration |
-| Input | XR action mapping, focus-loss release, and fixed-tick samples |
-| Character and physics | Validated locomotion intent, collision, ground state, and authoritative movement |
+| Input | XR action mapping, local device handles, focus-loss release, and fixed-tick samples |
+| Character and physics | Validated locomotion intent, semantic tracking targets, rig and pose integration, collision, ground state, and authoritative movement |
 | Render | Per-eye target setup, projection, submission, and diagnostics |
 | Audio | Listener pose and spatial output from the final presentation view |
 | Server | Fixed-tick authority, intent validation, room membership, and copied state |
@@ -122,6 +124,236 @@ Inside the active frame loop:
 Every failure path must release acquired resources and move the session to a known state. The
 exact API calls and graphics binding belong in the adapter implementation after runtime and
 platform support are verified.
+
+## Device and tracking source contract
+
+Treat a device, a tracked source, a semantic body role, and a character bone as four different
+things. A device is an input endpoint that may expose buttons, axes, haptics, a pose, or a joint
+set. A `TrackedSource` is one logical pose or joint-set endpoint. Its identity does not imply that
+it is a waist, hand, or any other body part. A semantic role is assigned by local calibration. A
+character bone name comes from the authored rig profile.
+
+Keep XR runtime handles, vendor objects, and operating-system device identifiers inside the
+client provider. `InputDevice` retains a generation-checked local handle for input routing; a
+disconnect invalidates that generation, so queued samples for the old handle are rejected.
+`TrackedSource` identity is local and opaque outside the provider. Never serialize device handles,
+runtime paths, hardware serials, or declaration-order numbers as durable identities.
+
+The common input and tracking path allows zero, one, or many devices, with independent capability
+sets. It does not assume two controllers, left and right slots, gamepad slot numbers, or a vendor
+role enumeration. It should accommodate gamepads and raw joysticks, 3DoF and 6DoF controllers,
+pose-only trackers, gloves and optical hand tracking, optional body skeletons, tracked props, and
+cameras. A custom provider may offer any subset and can operate without an HMD when that provider
+supports the configuration. Input and output capabilities are separate; haptics or other output
+are available only when reported by the provider and requested by a supported action.
+
+OpenXR action paths and extensions expose only devices and features implemented by the active
+runtime. For example, the HTC tracker extension has runtime-specific persistent and role paths,
+and a role may be unset or change during an instance. Its roles do not define a universal tracker
+contract ([HTC Vive Tracker interaction extension](https://github.com/KhronosGroup/OpenXR-Docs/blob/main/specification/sources/chapters/extensions/htcx/htcx_vive_tracker_interaction.adoc)).
+OpenXR hand tracking can expose individual joint locations when the runtime supports the
+extension ([OpenXR hand tracking extension](https://github.com/KhronosGroup/OpenXR-Docs/blob/main/specification/sources/chapters/extensions/ext/ext_hand_tracking.adoc)).
+The FB body tracking extension describes an optional provider-specific skeleton path
+([FB body tracking extension](https://github.com/KhronosGroup/OpenXR-Docs/blob/main/specification/sources/chapters/extensions/fb/fb_body_tracking.adoc)).
+These references establish examples of capability-shaped integration, not a promise that every
+runtime exposes them. USB presence alone does not provide universal pose discovery. A device
+without an implemented provider is unavailable and must be reported as such.
+
+Providers publish bounded inventories: maximum device count, source count per device, joint
+count per source, action count, and sample size. Define limits in provider configuration and
+reject or explicitly truncate overflow with a diagnostic. Unknown feature identifiers remain
+unknown and unavailable; do not reinterpret them as a nearby known feature. A provider adapter
+normalizes its reports and copies samples into the common contract. Headless tests use a
+simulated provider through the same seam, with no runtime library or GPU dependency.
+
+Represent each tracking read as a copied, bounded `TrackingSample`. It contains source identity,
+source schema revision, sample sequence, provider timestamp, converted engine timestamp, origin
+generation, and either one pose or a bounded set of named joints. Each pose or joint carries its
+own position-valid, orientation-valid, position-tracked, and orientation-tracked flags. Confidence
+and linear or angular velocity are optional fields with explicit availability. A provider that
+does not supply them leaves them absent; the adapter does not estimate values and label them as
+measured.
+
+Transforms use the engine's declared coordinate convention and units after provider conversion.
+Accept only finite positions and finite, normalized orientations. Joint names are stable strings
+within a documented provider schema, never wire ordinals. Skeleton schema revision and source
+revision change when the provider's meaning or joint set changes. Samples use a monotonic provider
+clock converted through an explicit clock mapping, plus a sequence number to detect stale,
+duplicate, or reordered data. Do not compare timestamps from different clock domains before
+conversion.
+
+Every source declares its coordinate space, handedness, units, and origin generation. The adapter
+converts positions and orientations into the session's selected tracking space before publishing
+samples. Two sources may be combined only when their coordinate transforms, clocks, and origin
+generations are known to agree. Otherwise the source remains uncalibrated and cannot contribute to
+the same character solution. Recenter or origin remap publishes one coherent generation change;
+old-generation samples are rejected, and any device mount calibration tied to the old origin is
+marked for review or invalidated according to its declared reference space.
+
+Device discovery and reassignment are explicit state changes. On disconnect, invalidate the local
+handle generation and mark its sources unavailable immediately. On reconnect, a reused runtime
+role or device path is not enough to silently restore an ambiguous assignment. Preserve local
+calibration only when its stable provider identity and schema still match; otherwise require the
+user to confirm the source. Let users swap or clear role assignments, then bump the calibration
+revision. Multiple local people use separate session-scoped inventories, calibration state,
+origins, and sample queues; never share a role assignment implicitly.
+
+## Luau providers and computer vision
+
+Luau-defined controllers are a normal production input source. LocalScripts
+can declare virtual buttons, axes, poses, and named joint streams and publish
+them through the [input plan's virtual controller API](input-system.md#luau-defined-virtual-controllers).
+The host owns producer lifetime, source registration, and validation. The
+script owns how its declared controls are computed. Published values use the
+same action maps, calibration, fixed-tick sampling, and character rig mapping
+as native devices. A pure Luau or recorded provider requires no headset,
+camera, OpenXR runtime, or inference dependency.
+
+Virtual controller creation must be useful before a computer vision backend
+ships. Start with a procedural hand or replayed landmark fixture controlled by
+a Luau module. Use it to exercise pointing, pinch/grab actions, finger posing,
+source selection, and partial loss. This is a production extension point as
+well as a headless test seam. Scripts that already produce semantic character
+intent can continue using that path directly.
+
+### Optional vision adapters and built-in libraries
+
+Keep capture, inference, and input publishing separate:
+
+```text
+camera frames or recorded input
+  optional native vision backend -> timestamped landmarks and model metadata
+  Luau library -> joint normalization, calibration, filtering, and gestures
+  virtual controller Publish -> action and tracking input barriers
+  semantic intent and targets -> character controls and rig pose
+```
+
+Provide versioned first-party Luau modules for common controller composition,
+named hand landmarks, joint-frame construction, gesture thresholds and
+hysteresis, calibration, and recorded/synthetic feeds. They accept ordinary
+landmark data, so a project can replace a model or supply its own detector.
+Filtering exposes its added latency and resets on source loss or origin
+change. Degenerate landmark segments produce unavailable orientations rather
+than non-finite joint frames. The shared producer contract also supports
+JavaScript consumers without duplicating tracking storage or solving policy.
+
+Offer camera capture and hand/body inference through optional engine adapters
+with thin script wrappers. Native inference and capture dependencies belong
+behind engine interfaces, not in character code or public vendor types. A
+project can use only the pure Luau helpers, only a native tracker, or both.
+Verify backend platform support, model and library licenses, distribution,
+memory cost, and measured latency before selecting a built-in backend. This
+plan does not claim an inference library or a model is already integrated.
+
+MediaPipe Hand Landmarker is one candidate to evaluate, not a selected engine
+dependency. Its documented inputs include images, video, and live streams, and
+its output includes hand landmarks and handedness
+([Google's Hand Landmarker guide](https://developers.google.com/edge/mediapipe/solutions/vision/hand_landmarker)).
+Adapters must describe the actual model's coordinate frame, scale, confidence
+semantics, and timestamp behavior instead of passing its output through as a
+runtime-tracked world pose.
+
+Image-space landmarks can drive pointer or gesture controls. Local 3D hand
+shape can drive finger articulation without establishing a wrist's position
+in the room. A world-space wrist or body root needs an explicit calibrated
+positioning method or another aligned source. Declare inferred channels and
+unavailable channels honestly. Do not treat a library's use of the word
+"world" as evidence of alignment with the engine's tracking origin. Mirroring,
+handedness, and detection-to-person association are explicit adapter policies;
+detector list order never reassigns one person's hands to another.
+
+Camera access follows the host's camera capability and permission policy.
+Creating a virtual controller does not grant camera access or start capture.
+Raw frames and model intermediates remain local unless a separate feature
+explicitly needs them; normal avatar replication carries semantic targets.
+Stopping capture or losing access invalidates the affected sources and
+cancels dependent controls through the ordinary loss path.
+
+Capture and inference are external input work. They must not block the fixed
+simulation tick or keep a simulation job running across ticks. Completed
+results enter a bounded owner-thread inbox with capture time, completion time,
+sequence, and source revision. Discard stale or out-of-order results before
+publication. The next input barrier accepts a complete snapshot; late results
+never alter a consumed tick. Record the accepted semantic tick samples for
+replay rather than expecting inference to finish identically on every machine.
+
+## Mapping tracked sources to character rigs
+
+Keep reusable rig authoring separate from per-player calibration. The planned `TrackingRigProfile`
+references the `RigRetargetProfile` described by the future character foundation for semantic
+joint-to-bone and rest-pose mapping. It adds named tracking slots, target-chain and constraint
+policy, masks, weights, and tracking-specific reference corrections. It does not declare a
+competing skeleton or a second set of bone names. Its revision changes when slot names, chain
+policies, masks, weights, or corrections change.
+
+Local calibration assigns available `TrackedSource` endpoints to named tracking slots and stores
+mount offsets and the accepted tracking reference. It does not edit the author profile or infer a
+semantic role from a controller label. Store calibration locally with a revision and fingerprints
+for provider identity, source schema, rig profile, and origin generation. Do not put personal
+dimensions or exact mount offsets into shared telemetry.
+
+Calibration should let a user assign or confirm waist, chest, elbows, knees, feet, and wrists,
+including multiple unlabelled sources. Show the source pose and expected virtual slot together.
+For a mounted tracker, capture its offset from the intended body segment, reference pose, axes,
+and rest orientation. Ask the user to stand or sit in a known reference pose, perform a short
+verification movement, then explicitly accept, cancel, or reset. Keep mount correction, player
+proportions, virtual locomotion scale, and world optical scale as separate values. Revalidate
+after a rig, device, provider schema, or origin change; never quietly apply stale calibration.
+
+An example mapping is a guide for profile authors, not an engine-wide skeleton naming convention:
+
+| Input source | Semantic target | Example rig target |
+|---|---|---|
+| Headset head pose | Head | `Head` or head chain in `RigRetargetProfile` |
+| Waist tracker | Pelvis | `Hips` or pelvis chain in `RigRetargetProfile` |
+| Foot tracker | Foot position constraint | Ankle or foot IK target |
+| Wrist tracker or controller grip pose | Wrist and hand | Wrist joint plus hand target |
+| Optical or glove finger joints | Finger joint targets | Named thumb and finger chains |
+
+The planned character foundation consumes neutral semantic targets through `TrackingBinding` and
+the planned `RigRetargetProfile`, `BoneController` / `BoneControl`, `PoseBuffer`, and `PoseBinding`
+path. These names describe future interfaces in [the character system plan](character-system.md),
+not implemented engine features. `TrackingBinding` owns the inspectable enable state, weight, and
+profile reference. It never consumes provider handles. The adapter and calibration layer produce
+semantic targets; the character owns how its rig, animation layers, and constraints use them. This
+plan adds no parallel pose storage system.
+
+Sparse tracking does not uniquely determine a full skeleton. A head and two controllers cannot
+recover shoulders, spine, elbows, legs, and fingers without assumptions. Resolve available
+targets with bounded inverse kinematics, authored chain lengths, anatomical limits, and declared
+fallback animation. Define source precedence, masks, weights, and blend behavior in the rig
+profile or character configuration. Resolve ties deterministically, and expose the chosen source
+and validity in diagnostics. Missing sources leave their targets unconstrained or use an explicit
+animation fallback; they do not create inferred authoritative motion.
+
+Hand tracking is an optional richer input than a grip pose. When named finger joints are
+available, map them onto matching rig chains through the same semantic target path. When only a
+controller pose or a provider's hand aim is available, use a declared grip or hand pose fallback.
+Do not fabricate individual fingers from a pose and mark them tracked. Skeletons with fewer or
+different joints remain usable through explicit profile mappings and bounded interpolation.
+
+## Tracking calibration and loss behavior
+
+Calibration UI should list detected devices and capabilities, then guide assignment without
+assuming role labels exist. A user can confirm automatic suggestions, assign a source manually,
+swap two assignments, or leave a slot unassigned. Require deliberate confirmation when a
+reconnect could map one of several sources to a previously used slot. Include a live validity
+indicator, a short movement check for each assigned limb, and an explicit finish action. Cancel
+leaves prior valid calibration active; reset clears the selected mapping and its offsets.
+
+When a target loses tracking, retain validity per component and per semantic target. A missing
+position with a valid orientation may still support orientation-only use if the profile allows
+it. Loss fallback is configured per target: fade tracking influence to animation, preserve a last
+pose only for brief presentation continuity while marking it invalid, or disable a dependent
+action. Never replace an invalid pose with the world origin. Never invent missing finger joints or
+promote predicted display motion to measured tracking.
+
+Pose-driven actions such as grabbing, pointing, or contact interaction cancel once when their
+required targets become invalid. Release held input exactly once and stop associated haptics when
+the owning provider is no longer valid. Death, ragdoll, possession changes, or driver-lease release
+clears the character's tracking overrides. Reacquisition requires valid current samples and a new
+accepted action state; it must not replay stale presses or snap the authoritative character to an
+old pose.
 
 ## View and camera model
 
@@ -234,8 +466,9 @@ diagnostic.
 ## Input, comfort, and player control
 
 XR controls enter through the action system as named actions. The adapter translates runtime
-events into bounded samples. Gameplay consumes one authoritative sample per fixed tick. Device
-events, runtime handles, and render-time pose updates remain local to the client.
+events into bounded action samples, while pose and joint reads use copied `TrackingSample` values.
+Gameplay consumes validated action and semantic tracking input at fixed ticks. Device events,
+runtime handles, local source identity, and render-time pose updates remain local to the client.
 
 Support explicit policies for:
 
@@ -271,10 +504,19 @@ pose. Virtual locomotion changes the game-space mapping under a declared policy 
 distinct from physical movement.
 
 Network messages carry copied, bounded intent and any pose data the game actually needs. The
-server validates player ownership, tick order, finite values, action ranges, rate limits, and
-movement against authoritative rules. It does not accept a client pose as proof of collision,
-reach, or room safety. The renderer may predict and smooth remote poses, but simulation commits
-only at its fixed tick.
+server validates player ownership, possession or driver lease, profile and calibration revisions,
+tick order, finite values, action ranges, target reach and rate limits, and movement against
+authoritative rules. It does not accept a client pose as proof of collision, reach, or room safety.
+Render-only late tracking never writes the capsule, network action history, or authoritative
+character transforms. Gameplay pose uses fixed-tick sampled and validated intent or semantic
+targets; a current lease and matching revision are required to submit them.
+
+Replicate semantic targets and their validity only when another peer needs them for gameplay or
+presentation. Keep packet size, target count, and update rate bounded, and use interpolation for
+remote presentation without changing the authoritative tick at which an input was accepted.
+Record the consumed tick samples for replay. Physical source identity, tracker serials, local role
+assignment, mount calibration, and raw device fingerprints stay local. A client sample cannot
+override server collision, reach, room boundary, or locomotion checks.
 
 The first cooperative test experience should use an original small arena or range with two
 players. It should exercise tracked aim, weapon offsets, handedness, reload actions, bounded
@@ -289,12 +531,29 @@ dimensions and formats, frame timing, and dropped or skipped frame counts. Do no
 calibration values to shared telemetry. A local diagnostic view may show whether preferences are
 neutral or active without exposing exact profile values to the game.
 
+Tracking diagnostics should show bounded device and source counts, reported capabilities,
+assignment state, source and schema revisions, origin generation, sample age and sequence,
+component validity, and the selected semantic target source. Show overflow and stale-handle
+rejections. Personal dimensions, exact mount offsets, persistent hardware identifiers, and raw
+fingerprints remain private. Profile CPU time and copied sample bytes at the provider boundary;
+report joint counts and update rates without inventing confidence or velocity data.
+
+For script and vision sources, also show producer origin, script execution
+cost, publish counts and bytes, capture-to-result latency, result age at input
+acceptance, queue drops, and filtering delay. Keep model availability and
+camera availability distinct from whether a virtual controller exists.
+
 Measure CPU and GPU frame time percentiles on named hardware, runtime, resolution, refresh rate,
 and render scale. Track time spent waiting on the runtime separately from engine work. Report
 per-eye render cost and any reprojection or missed-frame signal the runtime exposes. Do not
 invent a performance budget or claim a measured result before implementation.
 
 ## Delivery stages
+
+Script-defined controllers depend on the common input scripting contract,
+not on the headset stages below. Synthetic hand/joint sources additionally
+need the shared tracking schema. Camera inference and XR hardware integration
+are independent adapters that can follow those contracts separately.
 
 1. Verify target operating systems, runtime availability, Rift S compatibility, graphics
    bindings, and license requirements. Record supported combinations.
@@ -304,12 +563,30 @@ invent a performance budget or claim a measured result before implementation.
    through submission.
 4. Map XR actions into the existing input and character intent path. Add tracking-loss release,
    recenter generation, and explicit comfort settings.
-5. Add the local calibration and profile flow with neutral defaults and per-eye preview. Keep
-   physical lens control capability-gated.
-6. Add the cooperative range and validate copied network intent, audio, boundary handling, and
-   recovery under a headless authoritative server.
-7. Evaluate advanced world magnification only after binocular and comfort tests pass. Keep it
-   opt-in and removable if evidence is poor.
+5. Integrate the independently deliverable common device and tracking contract with the XR backend:
+   bounded feeds, generation-checked handles, normalized samples, origin conversion, and capabilities.
+   The Luau virtual producer, including procedural or recorded hand/joint sources,
+   belongs to the input scripting phase once its shared schema is ready. It can
+   ship before headset stages 1-4 and requires no XR hardware.
+6. Integrate a positional tracker provider and a joint-capable hand provider when a selected runtime
+   or device backend exposes them. Record the tested runtime, provider, device, and operating-system
+   combinations.
+   Separately evaluate an optional camera/inference adapter and reusable Luau
+   landmark/gesture modules. An unavailable camera or model must not block
+   virtual controllers, recorded feeds, or native XR tracking.
+7. Add `TrackingRigProfile` references to planned retarget profiles and character
+   `TrackingBinding`, then validate semantic targets with a headless character fixture.
+8. Add local source-to-slot calibration, mount correction, short movement verification, and
+   reassignment after provider, device, rig, or origin changes.
+9. Add the local vision calibration and profile flow with neutral defaults and per-eye preview.
+   Keep physical lens control capability-gated.
+10. After headless fixtures pass, complete final hardware verification on supported, available setups.
+    Check device assignment, mount and reference calibration, rig bone or chain
+    mapping, partial tracking loss, reconnect, and source switching. Report only tested combinations.
+11. Add the cooperative range and validate copied fixed-tick intent, semantic target budgets,
+    audio, boundary handling, and recovery under a headless authoritative server.
+12. Evaluate advanced world magnification only after binocular and comfort tests pass. Keep it
+    opt-in and removable if evidence is poor.
 
 ## Validation
 
@@ -318,11 +595,42 @@ stale-runtime detection, neutral fallback, action release, and copied message va
 tests should check asymmetric per-eye projections, matching submitted metadata, and consistent
 pose sampling.
 
+Tracking checks should cover arbitrary device counts within declared bounds, overflow behavior,
+unknown capabilities, stale `InputDevice` generations, ambiguous reconnect, role swaps, source and
+skeleton schema revisions, finite normalized transforms, separate position and orientation
+validity, optional confidence and velocity availability, clock conversion, origin-generation
+rejection, and simulated-provider operation without an XR runtime. Verify that uncalibrated or
+incompatible coordinate spaces cannot be combined.
+
+Script-provider fixtures should drive the ordinary action path and an animated
+rig from Luau-created controls and named joints without a headset. Cover atomic
+publication, script stop/error/hot reload, freshness timeout, stale producer
+handles, model/source revision changes, partial landmark loss, detector order
+changes, mirrored input, unknown depth, and camera denial or removal. Replay
+the accepted tick samples with capture and inference absent. Complete the
+optional vision backend gate with a real camera check on named hardware and
+report capture, inference, filtering, and input-acceptance latency separately.
+
+Character checks should cover profile references, stable named slots, local calibration revision
+mismatch, semantic target precedence, masks and weights, bounded IK constraints, sparse hand and
+body inputs, and explicit animation fallback. Network and replay checks should verify possession
+or driver lease, reach and rate validation, target count and packet limits, fixed-tick recording,
+and rejection of client collision claims. Exercise source loss, one-time action cancellation,
+haptic stop, and tracking override cleanup on death, ragdoll, and possession release.
+
 Desktop and headless tests cannot verify optical comfort, physical focus, or binocular fusion.
 Those require headset checks with the supported runtime. Validate the calibration grid and text,
 per-eye adjustments, head motion, recenter, tracking loss, boundary warnings, and comfort
 transitions with people using the target device. Do not treat a successful launch as evidence
 that vision settings are safe or useful.
+
+Complete final device verification after headless fixtures pass. Where supported hardware is available,
+use at least one actual positional tracker provider and a joint-capable hand provider.
+Check real device assignment, mount
+and reference calibration, rig bone or chain mapping, partial loss, reconnect, and source switching.
+Record the tested operating system, runtime and version, provider and version, device models,
+enabled extensions, and each feature exercised. Mark all other combinations unverified. Do not
+infer availability or support from another runtime or from USB enumeration alone.
 
 Rift S is the named first validation target from the request. Before relying on it, verify that
 a supported runtime and driver are available on the chosen development platform. Windows is the
