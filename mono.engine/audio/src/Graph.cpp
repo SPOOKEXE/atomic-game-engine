@@ -1,3 +1,5 @@
+#include "Schema.hpp"
+
 #include <engine/audio/Graph.hpp>
 
 #include <algorithm>
@@ -5,24 +7,16 @@
 namespace engine::audio {
 
 	const char *Describe(NodeKind kind) {
-		switch (kind) {
-		case NodeKind::Player:
-			return "player";
-		case NodeKind::Fader:
-			return "fader";
-		case NodeKind::Emitter:
-			return "emitter";
-		case NodeKind::Bus:
-			return "bus";
-		case NodeKind::Output:
-			return "output";
-		}
-		return "unknown";
+		const auto *schema = detail::NodeSchemaFor(kind);
+		return schema == nullptr ? "unknown" : schema->Id.c_str();
 	}
 
 	AudioGraph::AudioGraph()
 		: SourceOffsets(MAXIMUM_NODES + 1), SourceCursor(MAXIMUM_NODES), DenseOrder(MAXIMUM_NODES),
 		  Workspace(MAXIMUM_NODES, MAXIMUM_WIRES) {
+		// Complete and validate the domain schema before this graph can reach a
+		// device callback, so no first-use schema allocation occurs there.
+		(void)detail::NodeSchemas();
 		Ids.reserve(MAXIMUM_NODES);
 		Nodes.reserve(MAXIMUM_NODES);
 		Wires.reserve(MAXIMUM_WIRES);
@@ -93,9 +87,9 @@ namespace engine::audio {
 	}
 
 	NodeId AudioGraph::Add(NodeKind kind) {
-		if (kind == NodeKind::Output) {
-			// Two outputs is a graph with no answer to "what does the device
-			// play". The one that exists was made by the constructor.
+		if (kind == NodeKind::Output || detail::NodeSchemaFor(kind) == nullptr) {
+			// The output is constructor-owned, and an undeclared kind has no
+			// routing schema to enter the graph with.
 			return {};
 		}
 		if (Nodes.size() >= MAXIMUM_NODES) {
@@ -110,7 +104,7 @@ namespace engine::audio {
 	}
 
 	bool AudioGraph::Adopt(NodeId id, NodeKind kind) {
-		if (!id.IsValid() || kind == NodeKind::Output) {
+		if (!id.IsValid() || kind == NodeKind::Output || detail::NodeSchemaFor(kind) == nullptr) {
 			return false;
 		}
 		if (IndexOf(id) != Ids.size()) {
@@ -186,6 +180,7 @@ namespace engine::audio {
 			const auto from = denseIndex(wire.From);
 			const auto to = denseIndex(wire.To);
 			if (from == graphcore::NO_NODE || to == graphcore::NO_NODE) return false;
+			if (detail::RouteFor(Nodes[from].Kind, Nodes[to].Kind).Input == nullptr) return false;
 			Dependencies.push_back({from, to});
 		}
 		return true;
@@ -195,20 +190,26 @@ namespace engine::audio {
 		if (from == to) {
 			return false;
 		}
-		if (IndexOf(from) == Ids.size() || IndexOf(to) == Ids.size()) {
+		const size_t fromIndex = IndexOf(from);
+		const size_t toIndex = IndexOf(to);
+		if (fromIndex == Ids.size() || toIndex == Ids.size()) {
 			return false;
 		}
-		if (from == Sink) {
-			// Nothing is downstream of the output.
-			return false;
-		}
+		const detail::RoutingPorts route = detail::RouteFor(Nodes[fromIndex].Kind, Nodes[toIndex].Kind);
+		if (route.Input == nullptr) return false;
 		if (Connected(from, to)) {
 			// A caller rebuilding a routing should not have to diff it first.
 			return true;
 		}
+		if (route.Input->MaximumConnections != 0) {
+			size_t inputs = 0;
+			for (const Wire &wire : Wires)
+				inputs += wire.To == to;
+			if (inputs >= route.Input->MaximumConnections) return false;
+		}
 		if (Wires.size() == MAXIMUM_WIRES || !PrepareDependencies()) return false;
 		Dependencies.push_back(
-			{static_cast<graphcore::NodeIndex>(IndexOf(from)), static_cast<graphcore::NodeIndex>(IndexOf(to))}
+			{static_cast<graphcore::NodeIndex>(fromIndex), static_cast<graphcore::NodeIndex>(toIndex)}
 		);
 		const graphcore::Limits limits{.MaximumNodes = MAXIMUM_NODES, .MaximumConnections = MAXIMUM_WIRES};
 		const auto result = graphcore::CompileOrder(Ids.size(), Dependencies, limits, Workspace, DenseOrder);

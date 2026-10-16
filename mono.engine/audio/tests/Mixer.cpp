@@ -213,6 +213,23 @@ TEST_CASE("a stopped player is silent and a playing one is not", "[audio][mixer]
 	CHECK(rig.At(0) == 0.5f);
 }
 
+TEST_CASE("a player's incoming route does not replace its own sound", "[audio][mixer]") {
+	Rig rig;
+	const NodeId source = rig.Engine.Commands().Allocate();
+	rig.Post(AddNode(source, NodeKind::Player));
+	rig.Post(Wire(source, rig.Player));
+	rig.Post(SetSound(source, Constant(0.5f)));
+	rig.Post(SetSound(rig.Player, Constant(0.25f)));
+	rig.Post(Act(CommandKind::Play, source));
+	rig.Post(Act(CommandKind::Play, rig.Player));
+	rig.Engine.ApplyPending();
+	REQUIRE(rig.Engine.Graph().Connected(source, rig.Player));
+	REQUIRE(rig.Engine.Graph().InputsOf(rig.Player).size() == 1);
+	rig.Render();
+	CHECK(rig.At(0) == 0.25f);
+	CHECK(rig.Engine.Graph().Find(source)->Cursor == BLOCK);
+}
+
 TEST_CASE("a mismatched output format produces silence rather than a resample", "[audio][mixer]") {
 	// A resample on the device thread is the wrong answer to a caller's
 	// configuration mistake, and silence is at least diagnosable.

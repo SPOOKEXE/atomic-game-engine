@@ -1,5 +1,8 @@
+#include "Schema.hpp"
+
 #include <engine/audio/Graph.hpp>
 #include <engine/core/HeapProfile.hpp>
+#include <engine/graphcore/Schema.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -12,6 +15,7 @@
 TEST_SUITE_ID("engine.audio.graph")
 TEST_DEPENDS("engine.audio.sample")
 TEST_DEPENDS("engine.graphcore.compile")
+TEST_DEPENDS("engine.graphcore.schema")
 
 using engine::audio::AudioGraph;
 using engine::audio::Describe;
@@ -345,6 +349,63 @@ TEST_CASE("every node kind has a name", "[audio][graph]") {
 	CHECK(std::string(Describe(NodeKind::Emitter)) == "emitter");
 	CHECK(std::string(Describe(NodeKind::Bus)) == "bus");
 	CHECK(std::string(Describe(NodeKind::Output)) == "output");
+}
+
+TEST_CASE("audio node declarations define the routing vocabulary", "[audio][graph]") {
+	const auto schemas = engine::audio::detail::NodeSchemas();
+	REQUIRE(schemas.size() == 5);
+	const std::array kinds{
+		NodeKind::Player, NodeKind::Fader, NodeKind::Emitter, NodeKind::Bus, NodeKind::Output
+	};
+	for (size_t index = 0; index < kinds.size(); ++index)
+		CHECK(engine::audio::detail::NodeSchemaFor(kinds[index]) == &schemas[index]);
+	const auto playerInput = engine::audio::detail::RouteFor(NodeKind::Bus, NodeKind::Player).Input;
+	REQUIRE(playerInput != nullptr);
+	CHECK(playerInput->Id == "input");
+	CHECK(playerInput->ValueType == "audio.block");
+	CHECK(playerInput->MaximumConnections == 0);
+	CHECK(playerInput->Optional);
+	CHECK(engine::audio::detail::RouteFor(NodeKind::Output, NodeKind::Bus).Input == nullptr);
+	const engine::graphcore::Limits limits{
+		.MaximumSchemas = 5, .MaximumPorts = 9, .MaximumIdentityBytes = 256
+	};
+	engine::graphcore::Diagnostic diagnostic;
+	CHECK(
+		engine::graphcore::ValidateSchemas(schemas, limits, diagnostic) ==
+		engine::graphcore::CompileStatus::Ok
+	);
+}
+
+TEST_CASE("invalid node kinds cannot enter or route through an audio graph", "[audio][graph]") {
+	const auto invalid = static_cast<NodeKind>(255);
+	AudioGraph graph;
+	CHECK(std::string(Describe(invalid)) == "unknown");
+	CHECK(engine::audio::detail::NodeSchemaFor(invalid) == nullptr);
+	CHECK_FALSE(graph.Add(invalid).IsValid());
+	CHECK_FALSE(graph.Adopt(NodeId{.Value = 400}, invalid));
+	const NodeId player = graph.Add(NodeKind::Player);
+	REQUIRE(player.IsValid());
+	REQUIRE(graph.Connect(player, graph.Output()));
+	graph.Find(player)->Kind = invalid;
+	CHECK(graph.Order().empty());
+	CHECK_FALSE(graph.Connect(player, graph.Output()));
+	CHECK(graph.Connected(player, graph.Output()));
+}
+
+TEST_CASE("players retain optional incoming wires in authored order", "[audio][graph]") {
+	AudioGraph graph;
+	const NodeId target = graph.Add(NodeKind::Player);
+	const NodeId first = graph.Add(NodeKind::Bus);
+	const NodeId second = graph.Add(NodeKind::Bus);
+	REQUIRE(graph.Connect(second, target));
+	REQUIRE(graph.Connect(first, target));
+	REQUIRE(graph.Connect(target, graph.Output()));
+	const auto inputs = graph.InputsOf(target);
+	REQUIRE(inputs.size() == 2);
+	CHECK(inputs[0] == second);
+	CHECK(inputs[1] == first);
+	CHECK(RunsBefore(graph, second, target));
+	CHECK(RunsBefore(graph, first, target));
 }
 
 TEST_CASE(

@@ -7,9 +7,10 @@
 // kinds: a `Player` is an input, a `Fader`, `Emitter` and `Bus` are processors,
 // and an `Output` is where it all lands.
 //
-// `graphcore` supplies bounded topology compilation. Audio retains its sample
-// runtime and authored input summation order. Routing storage is prepared during
-// construction so command deadlines may change routing without allocating.
+// `graphcore` supplies bounded topology compilation and node schema validation.
+// Audio owns its node declarations, sample runtime and authored input summation
+// order. Routing storage is prepared during construction so command deadlines
+// may change routing without allocating.
 //
 // **A wire runs from a source's output to a target's input**, which is Roblox's
 // arrangement and reads the right way round: you connect a sound *to* a fader,
