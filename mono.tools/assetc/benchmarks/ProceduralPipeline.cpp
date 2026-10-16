@@ -123,6 +123,7 @@ namespace procedural_pipeline_bench {
 
 	struct Measurement {
 		std::vector<uint64_t> Nanoseconds{};
+		bool MeasuredPhase = false;
 		bool HasHeapCounters = false;
 		uint64_t AllocatedBytes = 0;
 		uint64_t AllocatedBlocks = 0;
@@ -150,7 +151,8 @@ namespace procedural_pipeline_bench {
 			const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - started);
 			const auto after = core::HeapProfile::Totals();
 			auto &row = Stages[static_cast<size_t>(stage)];
-			row.HasHeapCounters = true;
+			row.MeasuredPhase = true;
+			row.HasHeapCounters = core::HeapProfile::IsCompiledIn();
 			row.Nanoseconds.push_back(static_cast<uint64_t>(elapsed.count()));
 			row.AllocatedBytes += after.TotalBytes - before.TotalBytes;
 			row.AllocatedBlocks += after.TotalBlocks - before.TotalBlocks;
@@ -1094,12 +1096,15 @@ namespace procedural_pipeline_bench {
 			<< " generated_roads=" << report.GeneratedRoads << " artifact_bytes=" << report.ArtifactBytes
 			<< " peak_retained_requests=" << report.PeakRetainedRequests
 			<< " peak_reserved_bytes=" << report.PeakReservedBytes
-			<< " process_live_bytes=" << afterTrials.LiveBytes
-			<< " process_live_blocks=" << afterTrials.LiveBlocks
-			<< " process_peak_bytes=" << report.PeakProcessBytes
-			<< " profiler_overhead_bytes=" << afterTrials.OverheadBytes
-			<< " post_trials_live_delta=" << afterTrials.LiveBytes - beforeTrials.LiveBytes
-			<< " max_post_trial_live_delta=" << report.MaximumPostTrialLiveDelta << '\n';
+			<< " process_heap_counters=" << (core::HeapProfile::IsCompiledIn() ? "measured" : "unavailable");
+		if (core::HeapProfile::IsCompiledIn())
+			summary << " process_live_bytes=" << afterTrials.LiveBytes
+					<< " process_live_blocks=" << afterTrials.LiveBlocks
+					<< " process_peak_bytes=" << report.PeakProcessBytes
+					<< " profiler_overhead_bytes=" << afterTrials.OverheadBytes
+					<< " post_trials_live_delta=" << afterTrials.LiveBytes - beforeTrials.LiveBytes
+					<< " max_post_trial_live_delta=" << report.MaximumPostTrialLiveDelta;
+		summary << '\n';
 		for (size_t index = 0; index < report.Stages.size(); ++index) {
 			auto &row = report.Stages[index];
 			if (row.Nanoseconds.empty()) continue;
@@ -1110,14 +1115,17 @@ namespace procedural_pipeline_bench {
 					<< " p50_ns=" << Quantile(row.Nanoseconds, 50)
 					<< " p95_ns=" << Quantile(row.Nanoseconds, 95)
 					<< " p99_ns=" << Quantile(row.Nanoseconds, 99) << " max_ns=" << row.Nanoseconds.back()
-					<< " heap_counters=" << (row.HasHeapCounters ? "measured" : "see-phase-rows");
+					<< " heap_counters="
+					<< (row.HasHeapCounters ? "measured"
+											: (row.MeasuredPhase ? "unavailable" : "see-phase-rows"));
 			if (row.HasHeapCounters)
 				summary << " allocated_bytes=" << row.AllocatedBytes
 						<< " allocated_blocks=" << row.AllocatedBlocks
 						<< " observed_process_peak_bytes=" << row.ObservedProcessPeak
-						<< " work_units=" << row.WorkUnits << " candidate_cells=" << row.CandidateCells
-						<< " spatial_tests=" << row.SpatialTests
 						<< " max_live_delta_bytes=" << row.MaximumLiveDelta;
+			if (row.MeasuredPhase)
+				summary << " work_units=" << row.WorkUnits << " candidate_cells=" << row.CandidateCells
+						<< " spatial_tests=" << row.SpatialTests;
 			summary << '\n';
 		}
 		auto text = summary.str();

@@ -2263,3 +2263,15 @@ ray-gpu-bench samples="3" build_preset="bench" width="1920" height="1080" family
     cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_render
     SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_RAY_GPU_BENCH=1 MONO_RAY_GPU_BENCH_WIDTH={{width}} MONO_RAY_GPU_BENCH_HEIGHT={{height}} MONO_RAY_GPU_BENCH_CASE={{family}} MONO_RAY_GPU_BENCH_SCENE={{scene}} MONO_RAY_GPU_BENCH_FRAMES={{frames}} MONO_RAY_GPU_BENCH_PROJECTION={{projection}} ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.ray-consumers --samples {{samples}} --warmup-samples 0
+
+# Regional generation, atomic scene activation and ordinary cooked assets.
+procedural-pipeline-bench samples="3" trials="128" build_preset="bench":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_assetc
+    MONO_PROCEDURAL_B0=1 MONO_PROCEDURAL_B0_TRIALS={{trials}} MONO_PROCEDURAL_B0_ROOT="$PWD/.cache/build/{{build_preset}}" timeout --foreground --kill-after=10s 900s ./.cache/build/{{build_preset}}/bench/bench_assetc --suite tool.assetc.bench.procedural-pipeline --samples {{samples}}
+
+# Diagnostic comparison with unoptimised engine libraries.
+procedural-pipeline-bench-o0 samples="1" trials="1":
+    just procedural-pipeline-bench {{samples}} {{trials}} bench-o0
