@@ -26,6 +26,7 @@
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/generators/catch_generators.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/packing.hpp>
 
 #include <algorithm>
@@ -1279,6 +1280,10 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 }
 
 TEST_CASE("gravitational lens keeps inward curvature across spin phases", "[render][gpu][lens-gradient][.]") {
+	const auto projection = GENERATE(
+		std::string_view{"perspective"}, std::string_view{"orthographic"}, std::string_view{"oblique"}
+	);
+	INFO(projection);
 	FixtureDevice fixture;
 	fixture.Initialise();
 	auto lensDocument = InstallPortalFixture(fixture.Render);
@@ -1317,6 +1322,15 @@ void main(){float blue=gl_FragCoord.x/64.0;colour=vec4(0,0,blue,1);}
 	view.CameraFrame = core::CFrame::LookAt({0, 0, 4}, {});
 	view.Camera.NearPlane = .1f;
 	view.Camera.FarPlane = 64;
+	// Keep the fixed gradient probes inside the orthographic lens core.
+	if (projection == "orthographic")
+		view.Projection = glm::orthoRH_ZO(-1.f, 1.f, -1.f, 1.f, view.Camera.NearPlane, view.Camera.FarPlane);
+	else if (projection == "oblique") {
+		auto matrix = scene::ResolveCamera(view.CameraFrame, view.Camera, 1.f).Projection;
+		for (uint32_t column = 0; column < 4; ++column)
+			matrix[column][2] += .08f * matrix[column][0];
+		view.Projection = matrix;
+	}
 	view.OverrideLighting = true;
 	auto plane = Plane(1, {0, 0, 0}, 16, 16, {1, 1, 1});
 	plane.Shader = gradient;

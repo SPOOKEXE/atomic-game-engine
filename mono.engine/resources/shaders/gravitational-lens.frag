@@ -34,21 +34,28 @@ layout(set = 3, binding = 0) uniform LensPass {
 bool RayAt(vec2 uv, out vec3 origin, out vec3 ray) {
 	vec2 clip = ClipCoordinates(uv);
 	vec4 nearPoint = pass.InverseViewProjection * vec4(clip, 0.0, 1.0);
-	vec4 farPoint = pass.InverseViewProjection * vec4(clip, 0.999, 1.0);
-	if (!(abs(nearPoint.w) > 1e-6) || !(abs(farPoint.w) > 1e-6)) {
+	if (!(abs(nearPoint.w) > 1e-6) || any(isnan(nearPoint)) || any(isinf(nearPoint))) {
 		return false;
 	}
 	vec3 nearWorld = nearPoint.xyz / nearPoint.w;
-	vec3 farWorld = farPoint.xyz / farPoint.w;
-	// Orthographic inverse projections keep homogeneous w constant, so each
-	// pixel has its own origin. Perspective and oblique views start at Eye.
-	origin = abs(nearPoint.w - farPoint.w) < 1e-6 ? nearWorld : pass.Eye.xyz;
-	vec3 direction = farWorld - origin;
-	float length = length(direction);
-	if (!(length > 1e-6)) {
+	if (any(isnan(nearWorld)) || any(isinf(nearWorld))) {
 		return false;
 	}
-	ray = direction / length;
+	// Orthographic pixels start on the near plane; perspective rays start at Eye.
+	bool orthographic = abs(pass.InverseViewProjection[2].w) < 1e-6;
+	origin = orthographic ? nearWorld : pass.Eye.xyz;
+	float originDepth = dot(pass.CameraDepth, vec4(origin, 1.0));
+	// An oblique far plane can cross infinity, so aim at a finite forward-depth target.
+	vec3 target = WorldAtLinearDepth(pass.InverseViewProjection, pass.CameraDepth, uv, originDepth + 1.0);
+	vec3 direction = target - origin;
+	if (any(isnan(direction)) || any(isinf(direction))) {
+		return false;
+	}
+	float directionLength = length(direction);
+	if (!(directionLength > 1e-6) || isnan(directionLength) || isinf(directionLength)) {
+		return false;
+	}
+	ray = direction / directionLength;
 	return true;
 }
 
