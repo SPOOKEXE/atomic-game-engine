@@ -34,6 +34,9 @@ mono_add_library(script
 		Engine::imagecodec
 		Engine::scene
 
+		# The neutral procedural service owns scheduling and verified asset digests.
+		Engine::procedural
+
 		# L8. WeatherCompute:Sample reads the same accepted model as native consumers.
 		Engine::weather
 

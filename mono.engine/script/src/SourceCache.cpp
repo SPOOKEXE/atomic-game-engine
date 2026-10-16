@@ -8,6 +8,7 @@
 #include <engine/script/EventNarratives.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/PortalTransfer.hpp>
+#include <engine/script/ProceduralJobs.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/script/TeleportRequest.hpp>
 
@@ -240,6 +241,7 @@ namespace engine::script {
 		);
 		RegisterTeleportRequestComponents();
 		RegisterPortalTransferComponents();
+		RegisterProceduralComponents();
 	}
 
 	void MirrorSourcePrograms(ecs::Store &store, SourceMirror &mirror) {

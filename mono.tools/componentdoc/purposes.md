@@ -55,6 +55,8 @@ script.EventNarratives | Per-world canonical bundle of validated script-declared
 script.Disabled | A tag: the host must not run this script. Presence moves it to a different archetype so the run loop never visits the row at all.
 script.JavaScriptSourceContainer | Where a script's JavaScript program is read from, as an asset-relative path. A separate component, so a world of Luau scripts pays nothing for the column.
 script.LuaSourceContainer | Where a script's Luau program is read from, as an asset-relative path. Deliberately not scriptable, which is the sandbox boundary rather than a preference.
+script.ProceduralAuthority | Per-world authored recipe, named source facts and registered regions, with local revisions fencing asynchronous generation.
+script.ProceduralPublished | Per-world accepted canonical regional artifacts and activation receipts, replaced atomically after source and digest checks.
 script.Program | The mirrored text of the source a client-runnable script points at, with the path it was read for as the freshness key. Written only by the mirror pass.
 script.ScriptClock | Per-world singleton script clock: the update rate, simulated time owed but not yet spent, and which world tick was last observed.
 script.SourceCache | Per-world singleton table of script text keyed by asset path, in the order programs were first set, with a write counter that makes noticing a change cheap.
