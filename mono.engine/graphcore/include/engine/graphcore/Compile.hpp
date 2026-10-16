@@ -9,7 +9,7 @@
 namespace engine::graphcore {
 
 	// Serial readiness policy; dependency waves are independent of this choice.
-	enum class OrderPolicy : uint8_t { AuthoredSweep, LowestReady };
+	enum class OrderPolicy : uint8_t { AuthoredSweep, LowestReady, FifoReady };
 
 	// One authored node instance referencing a domain schema by stable text.
 	struct Node {
@@ -71,7 +71,8 @@ namespace engine::graphcore {
 		std::vector<ResolvedConnection> Connections{};
 	};
 
-	// Validates bounds and endpoints, deduplicates edges and compiles stable topology.
+	// Validates bounds and endpoints, deduplicates public adjacency and compiles topology.
+	// FifoReady retains raw edge order and multiplicity for readiness transitions.
 	// Empty graphs succeed. Cycles produce a closed path. Refusal preserves out.
 	CompileStatus CompileDependencies(
 		size_t nodeCount,

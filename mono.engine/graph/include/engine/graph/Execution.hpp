@@ -40,6 +40,8 @@ namespace engine::graph {
 		Pending,
 		StaleCompletion,
 		EvaluationFailed,
+		LimitExceeded,
+		AllocationFailed,
 	};
 
 	// Stable diagnostic label for an execution result.

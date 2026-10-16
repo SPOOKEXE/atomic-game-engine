@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <deque>
 #include <new>
 #include <set>
 #include <unordered_map>
@@ -108,7 +109,8 @@ namespace engine::graphcore {
 			if (nodeCount > limits.MaximumNodes || nodeCount > NO_NODE ||
 				dependencies.size() > limits.MaximumConnections)
 				return detail::Refuse(diagnostic, CompileStatus::LimitExceeded);
-			if (policy != OrderPolicy::AuthoredSweep && policy != OrderPolicy::LowestReady)
+			if (policy != OrderPolicy::AuthoredSweep && policy != OrderPolicy::LowestReady &&
+				policy != OrderPolicy::FifoReady)
 				return detail::Refuse(diagnostic, CompileStatus::InvalidDependency);
 			for (const Dependency &dependency : dependencies) {
 				if (dependency.Before >= nodeCount || dependency.After >= nodeCount)
@@ -138,21 +140,45 @@ namespace engine::graphcore {
 				candidate.Dependents[edge.Before].push_back(edge.After);
 				++incoming[edge.After];
 			}
+			std::vector<std::vector<NodeIndex>> fifoDependents;
+			if (policy == OrderPolicy::FifoReady) {
+				fifoDependents.resize(nodeCount);
+				std::fill(incoming.begin(), incoming.end(), 0);
+				for (const Dependency &edge : dependencies) {
+					fifoDependents[edge.Before].push_back(edge.After);
+					++incoming[edge.After];
+				}
+			}
 			std::set<NodeIndex> ready;
 			std::set<NodeIndex> nextSweep;
+			std::deque<NodeIndex> fifoReady;
 			for (size_t index = 0; index < nodeCount; ++index) {
-				if (incoming[index] == 0) ready.insert(static_cast<NodeIndex>(index));
+				if (incoming[index] != 0) continue;
+				if (policy == OrderPolicy::FifoReady)
+					fifoReady.push_back(static_cast<NodeIndex>(index));
+				else
+					ready.insert(static_cast<NodeIndex>(index));
 			}
 			std::vector<size_t> depth(nodeCount);
 			size_t waveCount = 0;
-			while (!ready.empty()) {
-				const NodeIndex current = *ready.begin();
-				ready.erase(ready.begin());
+			while (!ready.empty() || !fifoReady.empty()) {
+				const NodeIndex current =
+					policy == OrderPolicy::FifoReady ? fifoReady.front() : *ready.begin();
+				if (policy == OrderPolicy::FifoReady)
+					fifoReady.pop_front();
+				else
+					ready.erase(ready.begin());
 				candidate.Order.push_back(current);
 				waveCount = std::max(waveCount, depth[current] + 1);
-				for (const NodeIndex after : candidate.Dependents[current]) {
+				const auto &downstream = policy == OrderPolicy::FifoReady ? fifoDependents[current]
+																		  : candidate.Dependents[current];
+				for (const NodeIndex after : downstream) {
 					depth[after] = std::max(depth[after], depth[current] + 1);
 					if (--incoming[after] != 0) continue;
+					if (policy == OrderPolicy::FifoReady) {
+						fifoReady.push_back(after);
+						continue;
+					}
 					// Earlier declarations wait for the next sweep. A minimum-ready
 					// policy deliberately reconsiders them immediately instead.
 					auto &destination =

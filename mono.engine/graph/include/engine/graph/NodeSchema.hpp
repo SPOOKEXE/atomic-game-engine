@@ -106,6 +106,11 @@ namespace engine::graph {
 		UnknownBypassOutput,
 		InvalidBypassType,
 		DuplicateBypassOutput,
+		InvalidIdentity,
+		InvalidDirection,
+		LimitExceeded,
+		AllocationFailed,
+		InvalidDeclaration,
 	};
 
 	// Why evaluation did not yield a usable output set.

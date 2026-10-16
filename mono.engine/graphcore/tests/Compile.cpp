@@ -87,6 +87,86 @@ TEST_CASE("dependency diamonds deduplicate edges and retain detached nodes", "[g
 	CheckTopology(topology, saved);
 }
 
+TEST_CASE("FIFO readiness retains initial sources and authored outgoing order", "[graphcore][compile]") {
+	std::vector dependencies{Dependency{0, 2}, Dependency{0, 1}};
+	Topology fifo;
+	Topology swept;
+	Topology lowest;
+	Diagnostic diagnostic;
+	REQUIRE(
+		CompileDependencies(4, dependencies, GraphLimits(), fifo, diagnostic, OrderPolicy::FifoReady) ==
+		CompileStatus::Ok
+	);
+	CHECK(fifo.Order == std::vector<NodeIndex>{0, 3, 2, 1});
+	CHECK(fifo.Dependents[0] == std::vector<NodeIndex>{1, 2});
+	CHECK(fifo.Inputs[1] == std::vector<NodeIndex>{0});
+	CHECK(fifo.Inputs[2] == std::vector<NodeIndex>{0});
+	CHECK(fifo.Waves == std::vector<std::vector<NodeIndex>>{{0, 3}, {1, 2}});
+	REQUIRE(CompileDependencies(4, dependencies, GraphLimits(), swept, diagnostic) == CompileStatus::Ok);
+	REQUIRE(
+		CompileDependencies(4, dependencies, GraphLimits(), lowest, diagnostic, OrderPolicy::LowestReady) ==
+		CompileStatus::Ok
+	);
+	CHECK(swept.Order == std::vector<NodeIndex>{0, 1, 2, 3});
+	CHECK(lowest.Order == swept.Order);
+	const Topology savedFifo = fifo;
+	const Topology savedSwept = swept;
+	const Topology savedLowest = lowest;
+	dependencies = {{0, 1}, {0, 2}, {0, 2}};
+	REQUIRE(
+		CompileDependencies(4, dependencies, GraphLimits(), fifo, diagnostic, OrderPolicy::FifoReady) ==
+		CompileStatus::Ok
+	);
+	CHECK(fifo.Order == std::vector<NodeIndex>{0, 3, 1, 2});
+	CHECK(fifo.Waves == savedFifo.Waves);
+	CHECK(fifo.Inputs == savedFifo.Inputs);
+	CHECK(fifo.Dependents == savedFifo.Dependents);
+	REQUIRE(CompileDependencies(4, dependencies, GraphLimits(), swept, diagnostic) == CompileStatus::Ok);
+	REQUIRE(
+		CompileDependencies(4, dependencies, GraphLimits(), lowest, diagnostic, OrderPolicy::LowestReady) ==
+		CompileStatus::Ok
+	);
+	CheckTopology(swept, savedSwept);
+	CheckTopology(lowest, savedLowest);
+	REQUIRE(
+		CompileDependencies(
+			3,
+			std::array{Dependency{0, 2}, Dependency{0, 1}},
+			GraphLimits(),
+			fifo,
+			diagnostic,
+			OrderPolicy::FifoReady
+		) == CompileStatus::Ok
+	);
+	CHECK(fifo.Order == std::vector<NodeIndex>{0, 2, 1});
+}
+
+TEST_CASE(
+	"FIFO repeated prerequisites release consumers at their last authored occurrence", "[graphcore][compile]"
+) {
+	const std::array dependencies{Dependency{0, 1}, Dependency{0, 2}, Dependency{0, 1}};
+	Topology fifo;
+	Topology swept;
+	Topology lowest;
+	Diagnostic diagnostic;
+	REQUIRE(
+		CompileDependencies(3, dependencies, GraphLimits(), fifo, diagnostic, OrderPolicy::FifoReady) ==
+		CompileStatus::Ok
+	);
+	CHECK(fifo.Order == std::vector<NodeIndex>{0, 2, 1});
+	CHECK(fifo.Inputs[1] == std::vector<NodeIndex>{0});
+	CHECK(fifo.Dependents[0] == std::vector<NodeIndex>{1, 2});
+	CHECK(fifo.Waves == std::vector<std::vector<NodeIndex>>{{0}, {1, 2}});
+	REQUIRE(CompileDependencies(3, dependencies, GraphLimits(), swept, diagnostic) == CompileStatus::Ok);
+	REQUIRE(
+		CompileDependencies(3, dependencies, GraphLimits(), lowest, diagnostic, OrderPolicy::LowestReady) ==
+		CompileStatus::Ok
+	);
+	CHECK(swept.Order == std::vector<NodeIndex>{0, 1, 2});
+	CHECK(lowest.Order == swept.Order);
+	CHECK(fifo.Waves == swept.Waves);
+}
+
 TEST_CASE("deep reversed chains do not recurse and retain one wave per dependency", "[graphcore][compile]") {
 	constexpr NodeIndex COUNT = 4096;
 	std::vector<Dependency> dependencies;

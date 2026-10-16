@@ -75,6 +75,49 @@ TEST_CASE("node schemas reject invalid bypass mappings", "[graph][nodeschema]") 
 	CHECK(registry.Add(registry.All().front()) == NodeSchemaStatus::DuplicateSchemaId);
 }
 
+TEST_CASE(
+	"schema validation preserves detailed domain errors around graphcore checks", "[graph][nodeschema]"
+) {
+	NodeSchema schema{
+		.Id = "test.schema",
+		.Title = "Test schema",
+		.Ports =
+			{
+				{.Id = "first", .ValueType = "number", .Direction = NodePortDirection::Input},
+				{.Id = "second", .ValueType = "number", .Direction = NodePortDirection::Input},
+				{.Id = "result", .ValueType = "number", .Direction = NodePortDirection::Output},
+			},
+		.BypassMappings = {},
+		.Evaluate = {},
+	};
+	std::string reason;
+
+	schema.Ports.push_back({.Id = "first", .ValueType = "number", .Direction = NodePortDirection::Input});
+	CHECK(ValidateNodeSchema(schema, &reason) == NodeSchemaStatus::DuplicatePortId);
+	CHECK(reason == "port 'first' is duplicated");
+	schema.Ports.pop_back();
+
+	schema.BypassMappings = {{"first", "result"}, {"second", "result"}};
+	CHECK(ValidateNodeSchema(schema, &reason) == NodeSchemaStatus::DuplicateBypassOutput);
+	CHECK(reason == "bypass output 'result' is mapped twice");
+	schema.BypassMappings.push_back({"first", "result"});
+	schema.BypassMappings.push_back({"second", "result"});
+	CHECK(ValidateNodeSchema(schema, &reason) == NodeSchemaStatus::DuplicateBypassOutput);
+	schema.BypassMappings.clear();
+
+	schema.Ports[0].DefaultValue = true;
+	CHECK(ValidateNodeSchema(schema, &reason) == NodeSchemaStatus::EmptyValueType);
+	CHECK(reason == "input 'first' has a mismatched default value");
+	schema.Ports[0].DefaultValue = {};
+
+	schema.Ports[0].Direction = static_cast<NodePortDirection>(3);
+	CHECK(ValidateNodeSchema(schema, &reason) == NodeSchemaStatus::InvalidDirection);
+	schema.Ports[0].Direction = NodePortDirection::Input;
+
+	schema.Id = std::string("bad\0id", 6);
+	CHECK(ValidateNodeSchema(schema, &reason) == NodeSchemaStatus::InvalidIdentity);
+}
+
 TEST_CASE("built-in node schemas contain the initial logical scalar and flow set", "[graph][nodeschema]") {
 	const NodeSchemaRegistry &schemas = BuiltinNodeSchemas();
 	CHECK(schemas.Count() == 17);

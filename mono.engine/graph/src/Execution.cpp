@@ -1,8 +1,13 @@
 #include <engine/graph/Execution.hpp>
+#include <engine/graphcore/Compile.hpp>
 
 #include <algorithm>
 #include <deque>
+#include <limits>
+#include <new>
+#include <set>
 #include <sstream>
+#include <tuple>
 
 namespace engine::graph {
 
@@ -29,6 +34,47 @@ namespace engine::graph {
 			message << "port '" << port << "' expects " << expected << " but received "
 					<< ValueTypeOf(actual);
 			return message.str();
+		}
+
+		NodeExecutionStatus FromCompileStatus(graphcore::CompileStatus status) {
+			switch (status) {
+			case graphcore::CompileStatus::Ok:
+				return NodeExecutionStatus::Ok;
+			case graphcore::CompileStatus::LimitExceeded:
+				return NodeExecutionStatus::LimitExceeded;
+			case graphcore::CompileStatus::AllocationFailed:
+				return NodeExecutionStatus::AllocationFailed;
+			case graphcore::CompileStatus::DuplicateNode:
+				return NodeExecutionStatus::DuplicateNode;
+			case graphcore::CompileStatus::UnknownSchema:
+			case graphcore::CompileStatus::DuplicateSchema:
+			case graphcore::CompileStatus::DuplicatePort:
+			case graphcore::CompileStatus::InvalidDirection:
+			case graphcore::CompileStatus::InvalidBypass:
+				return NodeExecutionStatus::UnknownSchema;
+			case graphcore::CompileStatus::InvalidIdentity:
+				return NodeExecutionStatus::InvalidNode;
+			case graphcore::CompileStatus::TypeMismatch:
+				return NodeExecutionStatus::TypeMismatch;
+			case graphcore::CompileStatus::Cycle:
+				return NodeExecutionStatus::Cycle;
+			case graphcore::CompileStatus::UnknownNode:
+			case graphcore::CompileStatus::UnknownPort:
+			case graphcore::CompileStatus::TooManyConnections:
+			case graphcore::CompileStatus::DuplicateConnection:
+			case graphcore::CompileStatus::MissingInput:
+			case graphcore::CompileStatus::InvalidDependency:
+				return NodeExecutionStatus::InvalidConnection;
+			}
+			return NodeExecutionStatus::InvalidConnection;
+		}
+
+		bool CountRuntimeIdentityBytes(size_t &total, std::string_view identity) {
+			if (identity.size() > std::numeric_limits<size_t>::max() - total) {
+				return false;
+			}
+			total += identity.size();
+			return true;
 		}
 	}
 
@@ -70,6 +116,10 @@ namespace engine::graph {
 			return "node execution completion is stale";
 		case NodeExecutionStatus::EvaluationFailed:
 			return "node evaluation failed";
+		case NodeExecutionStatus::LimitExceeded:
+			return "node graph compilation limit exceeded";
+		case NodeExecutionStatus::AllocationFailed:
+			return "node graph compilation allocation failed";
 		}
 		return "unknown node execution status";
 	}
@@ -198,34 +248,142 @@ namespace engine::graph {
 
 	NodeExecutionStatus NodeRuntime::BuildOrder(std::vector<size_t> &order) const {
 		order.clear();
-		std::vector<size_t> incoming(Nodes.size());
-		std::vector<std::vector<size_t>> outgoing(Nodes.size());
-		for (const NodeExecutionConnection &wire : Wires) {
-			const size_t from = NodeIndexes.at(wire.FromNode);
-			const size_t to = NodeIndexes.at(wire.ToNode);
-			if (Nodes[from].BreaksCycle) {
-				continue;
+		try {
+			if (Nodes.size() > graphcore::NO_NODE) {
+				return NodeExecutionStatus::LimitExceeded;
 			}
-			outgoing[from].push_back(to);
-			incoming[to]++;
-		}
-		std::deque<size_t> ready;
-		for (size_t index = 0; index < incoming.size(); index++) {
-			if (incoming[index] == 0) {
-				ready.push_back(index);
-			}
-		}
-		while (!ready.empty()) {
-			const size_t current = ready.front();
-			ready.pop_front();
-			order.push_back(current);
-			for (const size_t dependent : outgoing[current]) {
-				if (--incoming[dependent] == 0) {
-					ready.push_back(dependent);
+			std::vector<graphcore::NodeSchema> declarations;
+			declarations.reserve(Schemas.Count());
+			size_t portCount = 0;
+			size_t identityBytes = 0;
+			for (const NodeSchema &schema : Schemas.All()) {
+				if (schema.Ports.size() > std::numeric_limits<size_t>::max() - portCount ||
+					!CountRuntimeIdentityBytes(identityBytes, schema.Id)) {
+					return NodeExecutionStatus::LimitExceeded;
 				}
+				portCount += schema.Ports.size();
+				graphcore::NodeSchema declaration{.Id = schema.Id};
+				declaration.Ports.reserve(schema.Ports.size());
+				for (const NodePortSchema &port : schema.Ports) {
+					if (!CountRuntimeIdentityBytes(identityBytes, port.Id) ||
+						!CountRuntimeIdentityBytes(identityBytes, port.ValueType)) {
+						return NodeExecutionStatus::LimitExceeded;
+					}
+					declaration.Ports.push_back({
+						.Id = port.Id,
+						.ValueType = port.ValueType,
+						.Direction = port.Direction == NodePortDirection::Input
+										 ? graphcore::PortDirection::Input
+										 : graphcore::PortDirection::Output,
+						.MaximumConnections = port.MaxConnections,
+						// Constants and defaults are resolved by this runtime during evaluation.
+						.Optional = true,
+					});
+				}
+				declaration.BypassMappings.reserve(schema.BypassMappings.size());
+				for (const NodeBypassMapping &mapping : schema.BypassMappings) {
+					if (!CountRuntimeIdentityBytes(identityBytes, mapping.Input) ||
+						!CountRuntimeIdentityBytes(identityBytes, mapping.Output)) {
+						return NodeExecutionStatus::LimitExceeded;
+					}
+					declaration.BypassMappings.push_back({mapping.Input, mapping.Output});
+				}
+				declarations.push_back(std::move(declaration));
 			}
+			std::vector<graphcore::Node> nodes;
+			nodes.reserve(Nodes.size());
+			for (const NodeExecutionNode &node : Nodes) {
+				if (!CountRuntimeIdentityBytes(identityBytes, node.Id.Text()) ||
+					!CountRuntimeIdentityBytes(identityBytes, node.Schema.Text())) {
+					return NodeExecutionStatus::LimitExceeded;
+				}
+				nodes.push_back({std::string(node.Id.Text()), std::string(node.Schema.Text())});
+			}
+			std::vector<graphcore::Connection> connections;
+			connections.reserve(Wires.size());
+			std::set<std::tuple<std::string_view, std::string_view, std::string_view, std::string_view>>
+				seenConnections;
+			bool hasRepeatedConnection = false;
+			for (const NodeExecutionConnection &wire : Wires) {
+				const size_t from = NodeIndexes.at(wire.FromNode);
+				if (Nodes[from].BreaksCycle) {
+					continue;
+				}
+				if (!seenConnections
+						 .emplace(wire.FromNode.Text(), wire.FromPort, wire.ToNode.Text(), wire.ToPort)
+						 .second) {
+					hasRepeatedConnection = true;
+					continue;
+				}
+				if (!CountRuntimeIdentityBytes(identityBytes, wire.FromNode.Text()) ||
+					!CountRuntimeIdentityBytes(identityBytes, wire.FromPort) ||
+					!CountRuntimeIdentityBytes(identityBytes, wire.ToNode.Text()) ||
+					!CountRuntimeIdentityBytes(identityBytes, wire.ToPort)) {
+					return NodeExecutionStatus::LimitExceeded;
+				}
+				connections.push_back(
+					{std::string(wire.FromNode.Text()),
+					 wire.FromPort,
+					 std::string(wire.ToNode.Text()),
+					 wire.ToPort}
+				);
+			}
+			const graphcore::Limits limits{
+				.MaximumNodes = Nodes.size(),
+				.MaximumConnections = Wires.size(),
+				.MaximumSchemas = declarations.size(),
+				.MaximumPorts = portCount,
+				.MaximumIdentityBytes = identityBytes,
+			};
+			graphcore::CompiledGraph compiled;
+			graphcore::Diagnostic diagnostic;
+			const graphcore::CompileStatus compileStatus = graphcore::CompileGraph(
+				nodes,
+				connections,
+				declarations,
+				limits,
+				compiled,
+				diagnostic,
+				graphcore::OrderPolicy::FifoReady
+			);
+			if (compileStatus != graphcore::CompileStatus::Ok) {
+				return FromCompileStatus(compileStatus);
+			}
+			if (hasRepeatedConnection) {
+				// Typed compilation rejects exact duplicates. The FIFO queue still counts
+				// every authored wire when its last prerequisite unlocks a node.
+				std::vector<graphcore::Dependency> dependencies;
+				dependencies.reserve(Wires.size());
+				for (const NodeExecutionConnection &wire : Wires) {
+					const size_t from = NodeIndexes.at(wire.FromNode);
+					if (!Nodes[from].BreaksCycle) {
+						dependencies.push_back({
+							static_cast<graphcore::NodeIndex>(from),
+							static_cast<graphcore::NodeIndex>(NodeIndexes.at(wire.ToNode)),
+						});
+					}
+				}
+				graphcore::Topology topology;
+				const graphcore::CompileStatus orderStatus = graphcore::CompileDependencies(
+					Nodes.size(),
+					dependencies,
+					limits,
+					topology,
+					diagnostic,
+					graphcore::OrderPolicy::FifoReady
+				);
+				if (orderStatus != graphcore::CompileStatus::Ok) {
+					return FromCompileStatus(orderStatus);
+				}
+				order.assign(topology.Order.begin(), topology.Order.end());
+			} else {
+				order.assign(compiled.Dependencies.Order.begin(), compiled.Dependencies.Order.end());
+			}
+			return NodeExecutionStatus::Ok;
+		} catch (const std::bad_alloc &) {
+			order.clear();
+			return NodeExecutionStatus::AllocationFailed;
 		}
-		return order.size() == Nodes.size() ? NodeExecutionStatus::Ok : NodeExecutionStatus::Cycle;
 	}
 
 	NodeExecutionStatus

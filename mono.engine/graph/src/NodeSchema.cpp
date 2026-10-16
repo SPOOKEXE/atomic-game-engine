@@ -1,7 +1,10 @@
 #include <engine/graph/NodeSchema.hpp>
+#include <engine/graphcore/Schema.hpp>
 
 #include <algorithm>
 #include <exception>
+#include <limits>
+#include <new>
 #include <sstream>
 #include <unordered_set>
 
@@ -34,6 +37,53 @@ namespace engine::graph {
 				return !ValueTypeOf(value).empty();
 			}
 			return ValueTypeOf(value) == type;
+		}
+
+		bool CountSchemaIdentityBytes(size_t &total, std::string_view identity) {
+			if (identity.size() > std::numeric_limits<size_t>::max() - total) {
+				return false;
+			}
+			total += identity.size();
+			return true;
+		}
+
+		std::string_view DuplicatePortId(const NodeSchema &schema) {
+			std::unordered_set<std::string_view> inputs;
+			std::unordered_set<std::string_view> outputs;
+			for (const NodePortSchema &port : schema.Ports) {
+				auto &ids = port.Direction == NodePortDirection::Input ? inputs : outputs;
+				if (!ids.insert(port.Id).second) {
+					return port.Id;
+				}
+			}
+			return {};
+		}
+
+		NodeSchemaStatus ClassifyBypassFailure(const NodeSchema &schema, std::string *reason) {
+			std::unordered_set<std::string_view> outputs;
+			for (const NodeBypassMapping &mapping : schema.BypassMappings) {
+				const NodePortSchema *input = FindSchemaPort(schema, mapping.Input, NodePortDirection::Input);
+				if (input == nullptr) {
+					WriteReason(reason, "bypass input '" + mapping.Input + "' is not declared");
+					return NodeSchemaStatus::UnknownBypassInput;
+				}
+				const NodePortSchema *output =
+					FindSchemaPort(schema, mapping.Output, NodePortDirection::Output);
+				if (output == nullptr) {
+					WriteReason(reason, "bypass output '" + mapping.Output + "' is not declared");
+					return NodeSchemaStatus::UnknownBypassOutput;
+				}
+				if (!ArePortTypesCompatible(input->ValueType, output->ValueType)) {
+					WriteReason(reason, "bypass mapping has incompatible port types");
+					return NodeSchemaStatus::InvalidBypassType;
+				}
+				if (!outputs.insert(mapping.Output).second) {
+					WriteReason(reason, "bypass output '" + mapping.Output + "' is mapped twice");
+					return NodeSchemaStatus::DuplicateBypassOutput;
+				}
+			}
+			WriteReason(reason, "bypass mapping is invalid");
+			return NodeSchemaStatus::InvalidDeclaration;
 		}
 
 		const NodeValue *Input(const NodeValues &inputs, std::string_view id) {
@@ -342,14 +392,15 @@ namespace engine::graph {
 	}
 
 	NodeTypeCompatibility ComparePortTypes(std::string_view source, std::string_view destination) {
-		if (source == destination) {
+		switch (graphcore::ComparePortTypes(source, destination)) {
+		case graphcore::TypeCompatibility::Exact:
 			return NodeTypeCompatibility::Exact;
-		}
-		if (destination == VALUE_TYPE_ANY) {
+		case graphcore::TypeCompatibility::DestinationAny:
 			return NodeTypeCompatibility::DestinationAny;
-		}
-		if (source == VALUE_TYPE_ANY) {
+		case graphcore::TypeCompatibility::SourceAny:
 			return NodeTypeCompatibility::SourceAny;
+		case graphcore::TypeCompatibility::Incompatible:
+			return NodeTypeCompatibility::Incompatible;
 		}
 		return NodeTypeCompatibility::Incompatible;
 	}
@@ -359,56 +410,108 @@ namespace engine::graph {
 	}
 
 	NodeSchemaStatus ValidateNodeSchema(const NodeSchema &schema, std::string *reason) {
-		if (schema.Id.empty()) {
-			WriteReason(reason, "schema id is empty");
-			return NodeSchemaStatus::EmptySchemaId;
-		}
+		try {
+			if (schema.Id.empty()) {
+				WriteReason(reason, "schema id is empty");
+				return NodeSchemaStatus::EmptySchemaId;
+			}
 
-		std::unordered_set<std::string> ids;
-		for (const NodePortSchema &port : schema.Ports) {
-			if (port.Id.empty()) {
-				WriteReason(reason, "port id is empty");
-				return NodeSchemaStatus::EmptyPortId;
+			graphcore::NodeSchema declaration{.Id = schema.Id};
+			declaration.Ports.reserve(schema.Ports.size());
+			size_t identityBytes = 0;
+			if (!CountSchemaIdentityBytes(identityBytes, schema.Id)) {
+				WriteReason(reason, "schema validation limit exceeded");
+				return NodeSchemaStatus::LimitExceeded;
 			}
-			if (port.ValueType.empty()) {
-				WriteReason(reason, "port '" + port.Id + "' has no value type");
-				return NodeSchemaStatus::EmptyValueType;
+			for (const NodePortSchema &port : schema.Ports) {
+				if (port.Id.empty()) {
+					WriteReason(reason, "port id is empty");
+					return NodeSchemaStatus::EmptyPortId;
+				}
+				if (port.ValueType.empty()) {
+					WriteReason(reason, "port '" + port.Id + "' has no value type");
+					return NodeSchemaStatus::EmptyValueType;
+				}
+				if (port.Direction == NodePortDirection::Input &&
+					!std::holds_alternative<std::monostate>(port.DefaultValue) &&
+					!ValueMatches(port.ValueType, port.DefaultValue)) {
+					WriteReason(reason, "input '" + port.Id + "' has a mismatched default value");
+					return NodeSchemaStatus::EmptyValueType;
+				}
+				if (!CountSchemaIdentityBytes(identityBytes, port.Id) ||
+					!CountSchemaIdentityBytes(identityBytes, port.ValueType)) {
+					WriteReason(reason, "schema validation limit exceeded");
+					return NodeSchemaStatus::LimitExceeded;
+				}
+				declaration.Ports.push_back({
+					.Id = port.Id,
+					.ValueType = port.ValueType,
+					.Direction = static_cast<graphcore::PortDirection>(port.Direction),
+					.MaximumConnections = port.MaxConnections,
+					.Optional = port.Optional || !std::holds_alternative<std::monostate>(port.DefaultValue),
+				});
 			}
-			const std::string key = std::to_string(static_cast<uint8_t>(port.Direction)) + ":" + port.Id;
-			if (!ids.insert(key).second) {
-				WriteReason(reason, "port '" + port.Id + "' is duplicated");
+			declaration.BypassMappings.reserve(schema.BypassMappings.size());
+			for (const NodeBypassMapping &mapping : schema.BypassMappings) {
+				if (mapping.Input.empty() || mapping.Output.empty()) {
+					return ClassifyBypassFailure(schema, reason);
+				}
+				if (!CountSchemaIdentityBytes(identityBytes, mapping.Input) ||
+					!CountSchemaIdentityBytes(identityBytes, mapping.Output)) {
+					WriteReason(reason, "schema validation limit exceeded");
+					return NodeSchemaStatus::LimitExceeded;
+				}
+				declaration.BypassMappings.push_back({mapping.Input, mapping.Output});
+			}
+			const graphcore::Limits limits{
+				.MaximumNodes = 0,
+				.MaximumConnections = 0,
+				.MaximumSchemas = 1,
+				.MaximumPorts = schema.Ports.size(),
+				.MaximumIdentityBytes = identityBytes,
+			};
+			graphcore::Diagnostic diagnostic;
+			const graphcore::CompileStatus status = graphcore::ValidateSchemas(
+				std::span<const graphcore::NodeSchema>(&declaration, 1), limits, diagnostic
+			);
+			if (status == graphcore::CompileStatus::Ok) {
+				return NodeSchemaStatus::Ok;
+			}
+			if (status == graphcore::CompileStatus::DuplicatePort) {
+				WriteReason(reason, "port '" + std::string(DuplicatePortId(schema)) + "' is duplicated");
 				return NodeSchemaStatus::DuplicatePortId;
 			}
-			if (port.Direction == NodePortDirection::Input &&
-				!std::holds_alternative<std::monostate>(port.DefaultValue) &&
-				!ValueMatches(port.ValueType, port.DefaultValue)) {
-				WriteReason(reason, "input '" + port.Id + "' has a mismatched default value");
-				return NodeSchemaStatus::EmptyValueType;
+			if (status == graphcore::CompileStatus::InvalidBypass) {
+				return ClassifyBypassFailure(schema, reason);
 			}
+			if (status == graphcore::CompileStatus::InvalidIdentity) {
+				WriteReason(reason, "schema contains an invalid identity");
+				return NodeSchemaStatus::InvalidIdentity;
+			}
+			if (status == graphcore::CompileStatus::InvalidDirection) {
+				WriteReason(reason, "schema port has an invalid direction");
+				return NodeSchemaStatus::InvalidDirection;
+			}
+			if (status == graphcore::CompileStatus::LimitExceeded) {
+				// More bypass rows than ports always implies a legacy bypass error.
+				if (schema.BypassMappings.size() > schema.Ports.size()) {
+					return ClassifyBypassFailure(schema, reason);
+				}
+				WriteReason(reason, "schema validation limit exceeded");
+				return NodeSchemaStatus::LimitExceeded;
+			}
+			if (status == graphcore::CompileStatus::AllocationFailed) {
+				WriteReason(reason, "schema validation allocation failed");
+				return NodeSchemaStatus::AllocationFailed;
+			}
+			WriteReason(reason, graphcore::Describe(status));
+			return NodeSchemaStatus::InvalidDeclaration;
+		} catch (const std::bad_alloc &) {
+			if (reason != nullptr) {
+				reason->clear();
+			}
+			return NodeSchemaStatus::AllocationFailed;
 		}
-
-		std::unordered_set<std::string> bypassOutputs;
-		for (const NodeBypassMapping &mapping : schema.BypassMappings) {
-			const NodePortSchema *input = FindSchemaPort(schema, mapping.Input, NodePortDirection::Input);
-			if (input == nullptr) {
-				WriteReason(reason, "bypass input '" + mapping.Input + "' is not declared");
-				return NodeSchemaStatus::UnknownBypassInput;
-			}
-			const NodePortSchema *output = FindSchemaPort(schema, mapping.Output, NodePortDirection::Output);
-			if (output == nullptr) {
-				WriteReason(reason, "bypass output '" + mapping.Output + "' is not declared");
-				return NodeSchemaStatus::UnknownBypassOutput;
-			}
-			if (!ArePortTypesCompatible(input->ValueType, output->ValueType)) {
-				WriteReason(reason, "bypass mapping has incompatible port types");
-				return NodeSchemaStatus::InvalidBypassType;
-			}
-			if (!bypassOutputs.insert(mapping.Output).second) {
-				WriteReason(reason, "bypass output '" + mapping.Output + "' is mapped twice");
-				return NodeSchemaStatus::DuplicateBypassOutput;
-			}
-		}
-		return NodeSchemaStatus::Ok;
 	}
 
 	NodeEvaluationStatus EvaluateNode(

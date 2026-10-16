@@ -24,10 +24,14 @@ and a closed cycle path containing at most one row per node plus its closing row
 AuthoredSweep serial order preserves an authored sweep: newly ready nodes later
 in the current sweep run immediately; earlier nodes wait for the next sweep.
 LowestReady serial order instead reconsiders the lowest ready declaration after
-every emitted node, preserving deterministic engine scheduling. Execution waves
+every emitted node, preserving deterministic engine scheduling. FifoReady starts
+with ready nodes in declaration order, then appends newly ready nodes in authored
+dependency order. Its internal indegrees and outgoing rows retain repeated edges:
+the last prerequisite occurrence releases a node. Public adjacency remains sorted
+and deduplicated under every policy. Execution waves
 describe dependency depth separately. Flattening waves changes serial order and
-can change audio summation. Neither answer depends on text sorting, interned
-names, hash iteration or wall time.
+can change audio summation. Serial ordering never depends on text sorting,
+interned names, hash iteration or wall time.
 
 ## Port semantics stay explicit
 

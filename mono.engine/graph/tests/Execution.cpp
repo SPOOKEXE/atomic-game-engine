@@ -4,7 +4,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 TEST_SUITE_ID("engine.graph.execution")
 TEST_DEPENDS("engine.graph.nodeschema")
@@ -36,6 +38,18 @@ namespace {
 				return true;
 			},
 		};
+	}
+
+	NodeSchema OrderedSchema(std::string id, std::vector<std::string> &order) {
+		NodeSchema schema = PassSchema(id, "number");
+		schema.Evaluate = [id = std::move(id), &order](
+							  const NodeSchema &, const NodeValues &inputs, NodeValues &outputs, std::string &
+						  ) {
+			order.push_back(id);
+			outputs["value"] = inputs.at("value");
+			return true;
+		};
+		return schema;
 	}
 
 	NodeRuntime TwoPassRuntime(NodeSchemaRegistry &schemas, int *evaluations = nullptr) {
@@ -227,6 +241,85 @@ TEST_CASE("a link exceeding an input cardinality and an unbroken cycle are refus
 		) == NodeExecutionStatus::Ok
 	);
 	CHECK(runtime.Evaluate() == NodeExecutionStatus::Cycle);
+}
+
+TEST_CASE("execution uses FIFO readiness and authored wire order", "[graph][execution]") {
+	NodeSchemaRegistry schemas;
+	std::vector<std::string> order;
+	for (const std::string_view id : {"source", "left", "right"}) {
+		REQUIRE(schemas.Add(OrderedSchema(std::string(id), order)) == NodeSchemaStatus::Ok);
+	}
+	NodeRuntime runtime(schemas);
+	for (const std::string_view id : {"source", "left", "right"}) {
+		REQUIRE(runtime.AddNode({.Id = Name(id), .Schema = Name(id)}) == NodeExecutionStatus::Ok);
+	}
+	REQUIRE(runtime.Connect({Name("source"), "value", Name("right"), "value"}) == NodeExecutionStatus::Ok);
+	REQUIRE(runtime.Connect({Name("source"), "value", Name("left"), "value"}) == NodeExecutionStatus::Ok);
+	REQUIRE(runtime.Evaluate() == NodeExecutionStatus::Ok);
+	CHECK(order == std::vector<std::string>{"source", "right", "left"});
+}
+
+TEST_CASE("parallel authored wires retain their last-readiness FIFO position", "[graph][execution]") {
+	NodeSchemaRegistry schemas;
+	std::vector<std::string> order;
+	for (const std::string_view id : {"source", "left", "right"}) {
+		NodeSchema schema = OrderedSchema(std::string(id), order);
+		if (id == "left") {
+			schema.Ports[0].MaxConnections = 2;
+		}
+		REQUIRE(schemas.Add(std::move(schema)) == NodeSchemaStatus::Ok);
+	}
+	NodeRuntime runtime(schemas);
+	for (const std::string_view id : {"source", "left", "right"}) {
+		REQUIRE(runtime.AddNode({.Id = Name(id), .Schema = Name(id)}) == NodeExecutionStatus::Ok);
+	}
+	const NodeExecutionConnection repeated{Name("source"), "value", Name("left"), "value"};
+	REQUIRE(runtime.Connect(repeated) == NodeExecutionStatus::Ok);
+	REQUIRE(runtime.Connect({Name("source"), "value", Name("right"), "value"}) == NodeExecutionStatus::Ok);
+	REQUIRE(runtime.Connect(repeated) == NodeExecutionStatus::Ok);
+	REQUIRE(runtime.Connections().size() == 3);
+	REQUIRE(runtime.Evaluate() == NodeExecutionStatus::Ok);
+	CHECK(order == std::vector<std::string>{"source", "right", "left"});
+}
+
+TEST_CASE("distinct pin wires to one node preserve FIFO readiness", "[graph][execution]") {
+	NodeSchemaRegistry schemas;
+	std::vector<std::string> order;
+	NodeSchema source = OrderedSchema("source", order);
+	source.Ports.push_back({.Id = "other", .ValueType = "number", .Direction = NodePortDirection::Output});
+	source.Evaluate =
+		[&order](const NodeSchema &, const NodeValues &inputs, NodeValues &outputs, std::string &) {
+			order.push_back("source");
+			outputs["value"] = inputs.at("value");
+			outputs["other"] = inputs.at("value");
+			return true;
+		};
+	NodeSchema left = OrderedSchema("left", order);
+	left.Ports.push_back({.Id = "other", .ValueType = "number", .Direction = NodePortDirection::Input});
+	REQUIRE(schemas.Add(std::move(source)) == NodeSchemaStatus::Ok);
+	REQUIRE(schemas.Add(std::move(left)) == NodeSchemaStatus::Ok);
+	REQUIRE(schemas.Add(OrderedSchema("right", order)) == NodeSchemaStatus::Ok);
+	NodeRuntime runtime(schemas);
+	for (const std::string_view id : {"source", "left", "right"}) {
+		REQUIRE(runtime.AddNode({.Id = Name(id), .Schema = Name(id)}) == NodeExecutionStatus::Ok);
+	}
+	REQUIRE(runtime.Connect({Name("source"), "value", Name("left"), "value"}) == NodeExecutionStatus::Ok);
+	REQUIRE(runtime.Connect({Name("source"), "value", Name("right"), "value"}) == NodeExecutionStatus::Ok);
+	REQUIRE(runtime.Connect({Name("source"), "other", Name("left"), "other"}) == NodeExecutionStatus::Ok);
+	REQUIRE(runtime.Evaluate() == NodeExecutionStatus::Ok);
+	CHECK(order == std::vector<std::string>{"source", "right", "left"});
+}
+
+TEST_CASE("a missing required input is refused during evaluation", "[graph][execution]") {
+	NodeSchemaRegistry schemas;
+	NodeSchema schema = PassSchema("required", "number");
+	schema.Ports[0].DefaultValue = {};
+	REQUIRE(schemas.Add(std::move(schema)) == NodeSchemaStatus::Ok);
+	NodeRuntime runtime(schemas);
+	REQUIRE(runtime.AddNode({.Id = Name("required"), .Schema = Name("required")}) == NodeExecutionStatus::Ok);
+	CHECK(runtime.Evaluate() == NodeExecutionStatus::EvaluationFailed);
+	REQUIRE(runtime.Find(Name("required")) != nullptr);
+	CHECK(runtime.Find(Name("required"))->Error.find("missing input") != std::string::npos);
 }
 
 TEST_CASE("an explicit delay boundary feeds a feedback cycle from its cached output", "[graph][execution]") {
