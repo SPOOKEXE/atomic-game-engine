@@ -169,7 +169,11 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] concept idea: setup a public mcp repository in python, add .mcp.json in project folder that loads it, it watches forums channels in the discord server for new/existing bugs. agent writes a message in the channel stating you're fixing it, other agents work on other bugs. agents can write that "this bug is a big rewrite" in the channel too which could be helpful. as a custom plugin? maybe just consider as a separate project.
 - [_] could we try some minecraft shaders / pbr texture packs as test items? maybe upload to my cdn and then load it and ill check if it works
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
-- [_] VR support (oculus rift s)
+- [_] VR support, with Rift S as a requested validation target: OpenXR stereo
+  views, in-game per-eye image-clarity calibration, and calibrated glasses-style
+  magnification. Physical optical focus depends on headset support. Expand the
+  Far Cry VR and Space Marine VR references from Zero Latency Adelaide when
+  POVs arrive. See the [VR system plan](docs/future-work/vr-system.md).
 - [_] setup a studio permissions system for: microphone, camera, etc
 - [_] setup a example plugin for mocap with camera point track
 - [_] ECS driven RL agent environments

@@ -8,11 +8,15 @@ character movement, combat, navigation, animation, reusable content, and world
 streaming. Rendering and compute have useful opportunities too, particularly
 lighting, material authoring, residency, and reusable GPU workloads.
 
-This is a researched selection of 42 feature proposals, not a replacement
+This is a researched selection of 43 feature proposals, not a replacement
 roadmap or a claim that every proposal should be built. Existing system plans
 remain the design owners. Priorities, relative effort, and proposed acceptance
 scenes below are engineering judgments. They are not user-survey results,
 measured performance claims, delivery estimates, or commitments.
+
+The VR proposal was added on 2026-10-16 from the requested calibration features
+and official references. Its target headset/runtime support and the forthcoming
+Zero Latency Adelaide POVs have not been verified in this review.
 
 ## How to read the gaps
 
@@ -848,6 +852,29 @@ plays animation/sound, can be skipped, and returns control correctly. Test a
 late join, player death, and scene unload during the sequence. Do not make a
 cinematic timeline the required way to implement ordinary gameplay.
 
+### U05. VR stereo views, per-eye calibration, and magnification
+
+P2/P3. Planned in the [VR system plan](future-work/vr-system.md). This is a
+proposal, with Rift S as a requested validation target rather than confirmed
+runtime support.
+
+Add runtime-derived stereo views and tracked actions through the existing
+camera, input, render, and character systems. Provide an in-game calibration
+flow for independent left/right image clarity and linked binocular
+magnification, with preview, confirmation, cancel, and reset. Physical per-lens
+optical focus is a separate, hardware-dependent capability. FOV, zoom, and
+sharpening cannot replace prescription lenses or move a fixed optical focal
+plane. Full-world projection magnification needs compositor and comfort
+validation before enabling it; UI zoom and a bounded magnifier provide smaller
+first steps.
+
+First useful slice: a calibration room and an original two-player tracked
+range. Verify eye geometry, hand/aim alignment, room origin, tracking loss,
+boundaries, reconnection, and local profile restoration. Far Cry VR and Space
+Marine VR at Zero Latency Adelaide are reference experiences named by the user;
+their POV comparison remains pending. Official product descriptions and the
+proposed engine requirements are recorded separately in the VR plan.
+
 ## Choose a genre-sized vertical slice
 
 | Game target | Build first | Playable proof | Add after the proof |
@@ -856,6 +883,7 @@ cinematic timeline the required way to implement ordinary gameplay.
 | MOBA comparable in needs to League | G03, G04, G05, G06, C02 | Two teams, lanes, minions, wards, towers, and a fight with stacked effects and interrupts. | Replay/spectating, skin/material workflows, hosted matches, richer tactical AI. |
 | MMORPG | G01, G03, G05, W02, W04, W05 | Two authored regions, a party, an encounter, persistent loot, travel, and reconnect without duplication. | Larger populations, social systems, simulation LOD, richer avatars and terrain. |
 | Co-op action RPG | G03, G08, G09, W03, W06 | A reusable enemy encounter with synced attacks, gear, rewards, and a saved quest objective. | Procedural dungeons, richer animation, voice, and cinematic tools. |
+| Co-op VR range or arena | U05, U01, G01, G02, W07 | Two tracked players calibrate, aim, interact, hear spatial world audio, and recover from tracking loss without breaking room alignment. | Voice, richer acoustic effects and avatars, and encounters informed by the pending Zero Latency POVs. |
 | Survival/building/physics game | P01, P03, P05, W01, W02, W03 | A constructed mechanism, breakable wall, editable ground, and persisted changes across a cell transition. | Vehicles, water, procedural worlds, and selected soft-body effects. |
 | Large battle or village simulation | G05, G06, G07, C02, R05 | Agents navigate, make inspectable decisions, fight or work, and change fidelity without losing state. | Flow fields, shared animation, procedural population and settlement tools. |
 
