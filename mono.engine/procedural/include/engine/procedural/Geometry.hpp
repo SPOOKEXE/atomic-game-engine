@@ -24,21 +24,41 @@ namespace engine::procedural {
 	// One independently addressable generated object. Kind is stable text:
 	// "tree", "village-lot", "house", "entrance", or "road".
 	struct GeometryObject {
-		std::string Id{};						// Original stable placement or road identity.
-		std::string Kind{};						// Named geometry category.
-		Point Origin{};							// Exact global fixed-point X/Z origin.
-		uint16_t Material = 0;					// Generator material choice; roads use zero.
-		uint16_t Variant = 0;					// Generator variant choice; roads use zero.
-		std::vector<GeometryVertex> Vertices{}; // Object-local triangle vertices.
-		std::vector<uint32_t> Indices{};		// Three indices per triangle.
+		std::string Id{};						 // Original stable placement or road identity.
+		std::string Kind{};						 // Named geometry category.
+		Point Origin{};							 // Exact global fixed-point X/Z origin.
+		uint16_t Material = 0;					 // Generator material choice; roads use zero.
+		uint16_t Variant = 0;					 // Generator variant choice; roads use zero.
+		std::array<float, 4> Colour{1, 1, 1, 1}; // Version-one shared linear material palette.
+		std::array<float, 3> Centre{};			 // Local vertex-bounds centre.
+		std::array<float, 3> Size{};			 // Full local vertex-bounds extent.
+		std::vector<GeometryVertex> Vertices{};	 // Object-local triangle vertices.
+		std::vector<uint32_t> Indices{};		 // Three indices per triangle.
 	};
 
 	// Complete geometry transaction, ordered by stable object identity.
 	struct RegionGeometry {
 		std::vector<GeometryObject> Objects{};
-		uint32_t VertexCount = 0; // Total vertices across objects.
-		uint32_t IndexCount = 0;  // Total triangle indices across objects.
+		Point Origin{};				   // Exact fixed-point origin for an aggregate region mesh.
+		std::array<float, 3> Centre{}; // Region-local bounds centre across all objects.
+		std::array<float, 3> Size{};   // Full region-local bounds extent.
+		uint32_t VertexCount = 0;	   // Total vertices across objects.
+		uint32_t IndexCount = 0;	   // Total triangle indices across objects.
 	};
+
+	// Rebases a validated geometry object's local position without converting its
+	// large global origin to float before subtracting the aggregate origin.
+	std::array<float, 3> GeometryPositionRelativeTo(
+		const GeometryObject &object, Point origin, const std::array<float, 3> &position
+	);
+
+	// Shared world translation for a fixed-point origin and its local bounds centre.
+	std::array<float, 3> GeometryWorldCentre(Point origin, const std::array<float, 3> &centre);
+
+	// Shared MeshPart centre placement for ordinary baked and live geometry.
+	std::array<float, 3> GeometryWorldCentre(const GeometryObject &object);
+	// Shared MeshPart centre placement for a complete aggregate region mesh.
+	std::array<float, 3> GeometryWorldCentre(const RegionGeometry &region);
 
 	// Hard ceilings checked before any output geometry is allocated.
 	struct GeometryLimits {

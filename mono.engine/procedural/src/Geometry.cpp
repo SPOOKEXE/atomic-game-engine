@@ -15,6 +15,28 @@ namespace engine::procedural {
 		constexpr int64_t MAXIMUM_ROAD_EXTENT = 64 * SUBCELLS_PER_CELL;
 		constexpr uint32_t ROAD_SEGMENTS = 16;
 
+		std::array<float, 4> GeometryColour(std::string_view kind, uint16_t material, uint16_t variant) {
+			// Palette v1 quantizes in integer colour codes before float conversion,
+			// so live and baked adapters never select different material colours.
+			std::array<int, 3> rgb{90, 68, 42};
+			if (kind == "tree")
+				rgb = {36, 104, 44};
+			else if (kind == "house")
+				rgb = {175, 135, 83};
+			else if (kind == "entrance")
+				rgb = {224, 178, 47};
+			else if (kind == "road")
+				rgb = {118, 104, 78};
+			const int variation =
+				static_cast<int>((static_cast<uint32_t>(material) * 13u + variant * 7u) % 17u) - 8;
+			return {
+				static_cast<float>(rgb[0] + variation) / 255.0f,
+				static_cast<float>(rgb[1] + variation) / 255.0f,
+				static_cast<float>(rgb[2] + variation) / 255.0f,
+				1.0f
+			};
+		}
+
 		struct Point3 {
 			double X = 0;
 			double Y = 0;
@@ -233,6 +255,34 @@ namespace engine::procedural {
 		}
 	}
 
+	std::array<float, 3> GeometryPositionRelativeTo(
+		const GeometryObject &object, Point origin, const std::array<float, 3> &position
+	) {
+		return {
+			static_cast<float>(
+				static_cast<double>(object.Origin.X - origin.X) / SUBCELLS_PER_CELL + position[0]
+			),
+			position[1],
+			static_cast<float>(
+				static_cast<double>(object.Origin.Y - origin.Y) / SUBCELLS_PER_CELL + position[2]
+			)
+		};
+	}
+
+	std::array<float, 3> GeometryWorldCentre(Point origin, const std::array<float, 3> &centre) {
+		return {
+			static_cast<float>(static_cast<double>(origin.X) / SUBCELLS_PER_CELL + centre[0]),
+			centre[1],
+			static_cast<float>(static_cast<double>(origin.Y) / SUBCELLS_PER_CELL + centre[2])
+		};
+	}
+	std::array<float, 3> GeometryWorldCentre(const GeometryObject &object) {
+		return GeometryWorldCentre(object.Origin, object.Centre);
+	}
+	std::array<float, 3> GeometryWorldCentre(const RegionGeometry &region) {
+		return GeometryWorldCentre(region.Origin, region.Centre);
+	}
+
 	Status BuildRegionGeometry(
 		const RegionResult &result,
 		RegionScope scope,
@@ -313,6 +363,10 @@ namespace engine::procedural {
 				if (rows[index - 1].Id == rows[index].Id)
 					return Refuse(diagnostic, Status::InvalidInput, "geometry.duplicate-id");
 			RegionGeometry built;
+			built.Origin = owner.Min;
+			std::array<float, 3> minimum{};
+			std::array<float, 3> maximum{};
+			bool firstRegionVertex = true;
 			built.Objects.reserve(rows.size());
 			for (const SourceRow &row : rows) {
 				GeometryObject object;
@@ -350,7 +404,30 @@ namespace engine::procedural {
 				}
 				if (object.Vertices.size() != row.Vertices || object.Indices.size() != row.Indices)
 					return Refuse(diagnostic, Status::InvalidInput, "geometry.count");
+				object.Colour = GeometryColour(object.Kind, object.Material, object.Variant);
+				std::array<float, 3> objectMinimum = object.Vertices.front().Position;
+				std::array<float, 3> objectMaximum = objectMinimum;
+				for (const auto &vertex : object.Vertices) {
+					const auto regional = GeometryPositionRelativeTo(object, built.Origin, vertex.Position);
+					for (size_t axis = 0; axis < 3; ++axis) {
+						objectMinimum[axis] = std::min(objectMinimum[axis], vertex.Position[axis]);
+						objectMaximum[axis] = std::max(objectMaximum[axis], vertex.Position[axis]);
+						minimum[axis] =
+							firstRegionVertex ? regional[axis] : std::min(minimum[axis], regional[axis]);
+						maximum[axis] =
+							firstRegionVertex ? regional[axis] : std::max(maximum[axis], regional[axis]);
+					}
+					firstRegionVertex = false;
+				}
+				for (size_t axis = 0; axis < 3; ++axis) {
+					object.Centre[axis] = (objectMinimum[axis] + objectMaximum[axis]) * 0.5f;
+					object.Size[axis] = objectMaximum[axis] - objectMinimum[axis];
+				}
 				built.Objects.push_back(std::move(object));
+			}
+			for (size_t axis = 0; axis < 3; ++axis) {
+				built.Centre[axis] = (minimum[axis] + maximum[axis]) * 0.5f;
+				built.Size[axis] = maximum[axis] - minimum[axis];
 			}
 			built.VertexCount = static_cast<uint32_t>(vertices);
 			built.IndexCount = static_cast<uint32_t>(indices);

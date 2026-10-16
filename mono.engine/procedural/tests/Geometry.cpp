@@ -67,6 +67,11 @@ TEST_CASE("region geometry contains visible typed meshes with stable identities"
 	const GeometryObject &entrance = Find(geometry, "entrance");
 	CHECK(tree.Material == 3);
 	CHECK(tree.Variant == 2);
+	CHECK(tree.Colour != house.Colour);
+	CHECK(tree.Colour[3] == 1.0f);
+	for (const auto &object : geometry.Objects)
+		for (const float channel : object.Colour)
+			CHECK((channel >= 0.0f && channel <= 1.0f));
 	CHECK((tree.Origin == Point{2 * CELL, 3 * CELL}));
 	CHECK(MaximumHeight(tree) > 2.3f);
 	CHECK(MaximumHeight(house) > 2.0f);
@@ -230,4 +235,44 @@ TEST_CASE("caller cannot raise the pure geometry hard ceilings", "[procedural][g
 	++limits.MaximumBytes;
 	CHECK(BuildRegionGeometry(result, {0, 0, 16}, geometry, diagnostic, limits) == Status::LimitExceeded);
 	CHECK(geometry.VertexCount == savedCount);
+}
+
+TEST_CASE("shared geometry bounds preserve object and aggregate placement", "[procedural][geometry]") {
+	RegionGeometry geometry;
+	Diagnostic diagnostic;
+	REQUIRE(BuildRegionGeometry(Example(), {0, 0, 16}, geometry, diagnostic) == Status::Ok);
+	std::array<float, 3> minimum{};
+	std::array<float, 3> maximum{};
+	minimum.fill(std::numeric_limits<float>::infinity());
+	maximum.fill(-std::numeric_limits<float>::infinity());
+	for (const auto &object : geometry.Objects) {
+		std::array<float, 3> localMinimum{};
+		std::array<float, 3> localMaximum{};
+		localMinimum.fill(std::numeric_limits<float>::infinity());
+		localMaximum.fill(-std::numeric_limits<float>::infinity());
+		for (const auto &vertex : object.Vertices) {
+			const auto relative = GeometryPositionRelativeTo(object, geometry.Origin, vertex.Position);
+			for (size_t axis = 0; axis < 3; ++axis) {
+				localMinimum[axis] = std::min(localMinimum[axis], vertex.Position[axis]);
+				localMaximum[axis] = std::max(localMaximum[axis], vertex.Position[axis]);
+				minimum[axis] = std::min(minimum[axis], relative[axis]);
+				maximum[axis] = std::max(maximum[axis], relative[axis]);
+			}
+		}
+		for (size_t axis = 0; axis < 3; ++axis) {
+			CHECK(object.Centre[axis] == (localMinimum[axis] + localMaximum[axis]) * 0.5f);
+			CHECK(object.Size[axis] == localMaximum[axis] - localMinimum[axis]);
+		}
+		CHECK(GeometryWorldCentre(object) == GeometryPositionRelativeTo(object, {}, object.Centre));
+	}
+	for (size_t axis = 0; axis < 3; ++axis) {
+		CHECK(geometry.Centre[axis] == (minimum[axis] + maximum[axis]) * 0.5f);
+		CHECK(geometry.Size[axis] == maximum[axis] - minimum[axis]);
+	}
+	CHECK(Find(geometry, "village-lot").Size[1] == 0.0f);
+	RegionGeometry empty;
+	REQUIRE(BuildRegionGeometry({}, {-2, 3, 16}, empty, diagnostic) == Status::Ok);
+	CHECK((empty.Origin == Point{-32 * CELL, 48 * CELL}));
+	CHECK((empty.Size == std::array<float, 3>{}));
+	CHECK((GeometryWorldCentre(empty) == std::array<float, 3>{-32, 0, 48}));
 }
