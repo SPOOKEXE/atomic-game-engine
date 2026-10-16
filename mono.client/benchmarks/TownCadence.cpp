@@ -42,33 +42,45 @@ namespace cadence_town_bench {
 		return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 	}
 	struct Citizen {
-		Entity Model, Root, Humanoid, Animator, Track, Bone;
+		Entity Model, Root, Humanoid, Animator, Track, Bone, Target, TargetHumanoid;
 		Vector3 InitialPosition;
 		uint64_t BeforeDeadline = 0, BeforePerception = 0, BeforeBehaviour = 0;
-		float BeforeDistance = 0;
+		float BeforeDistance = 0, BeforeHealth = 0;
 		bool Fighting = false;
 	};
 	struct Town {
 		Store Storage{"bench.cadence.town"};
 		ecs::Scheduler Physics;
 		std::shared_ptr<script::Runtime> Runtime;
-		std::array<Citizen, 2> Citizens;
+		std::vector<Citizen> Citizens;
 		BeamSet Beams;
 		Entity Target, TargetHumanoid, Player;
 		float BeforeHealth = 0;
 
-		Town(Language language, bool full, const std::string &source) {
+		Town(Language language, bool full, const std::string &source, size_t population = 2)
+			: Citizens(population) {
+			Require(population == 2 || population == 64, "cadence town population must be 2 or 64");
 			scene::RegisterSceneClasses();
 			render::RegisterPresentationComponents();
 			effects::RegisterEffectClasses();
 			physics::PreparePhysicsWorld(Storage);
 			Runtime = script::MakeRuntime(Storage, language);
 			Require(Runtime != nullptr, "cadence town VM unavailable");
+			if (population == 64) {
+				ecs::AttributeValue value;
+				value.Type = ecs::PropertyType::Int32;
+				value.Int32 = 64;
+				Require(
+					ecs::SetAttribute(Storage, scene::WorkspaceOf(Storage), Name("CadencePopulation"), value),
+					"cadence crowded town authoring refused"
+				);
+			}
 			if (!Runtime->Run(source, "TownCadence")) throw std::runtime_error(Runtime->LastError());
 			physics::RegisterPhysicsSystems(Physics);
 			physics::RegisterCharacterSystems(Physics);
 			const auto workspace = scene::WorkspaceOf(Storage);
-			Target = Storage.FindFirstChild(workspace, "Practice Target");
+			Target =
+				Storage.FindFirstChild(workspace, population == 2 ? "Practice Target" : "Practice Target 1");
 			TargetHumanoid = Storage.FindFirstChild(Target, "Humanoid");
 			Require(
 				Target != ecs::NULL_ENTITY && TargetHumanoid != ecs::NULL_ENTITY,
@@ -81,34 +93,65 @@ namespace cadence_town_bench {
 			Require(Player != ecs::NULL_ENTITY, "cadence town player missing");
 			for (size_t index = 0; index < Citizens.size(); ++index) {
 				auto &citizen = Citizens[index];
-				citizen.Model = Storage.FindFirstChild(workspace, index == 0 ? "North Guard" : "South Guard");
+				const std::string name = population == 2 ? (index == 0 ? "North Guard" : "South Guard")
+														 : "Citizen " + std::to_string(index + 1);
+				citizen.Model = Storage.FindFirstChild(workspace, name);
 				citizen.Root = Storage.FindFirstChild(citizen.Model, "Body");
 				citizen.Humanoid = Storage.FindFirstChild(citizen.Model, "Humanoid");
 				citizen.Animator = Storage.FindFirstChild(citizen.Root, "Animator");
 				citizen.Track = Storage.FindFirstChild(citizen.Animator, "AnimationTrack");
 				citizen.Bone = Storage.FindFirstChild(citizen.Root, "Root");
+				citizen.Target =
+					population == 2
+						? Target
+						: Storage.FindFirstChild(workspace, "Practice Target " + std::to_string(index + 1));
+				citizen.TargetHumanoid = Storage.FindFirstChild(citizen.Target, "Humanoid");
 				Require(
 					citizen.Model != ecs::NULL_ENTITY && citizen.Root != ecs::NULL_ENTITY &&
 						citizen.Humanoid != ecs::NULL_ENTITY && citizen.Animator != ecs::NULL_ENTITY &&
-						citizen.Track != ecs::NULL_ENTITY && citizen.Bone != ecs::NULL_ENTITY,
+						citizen.Track != ecs::NULL_ENTITY && citizen.Bone != ecs::NULL_ENTITY &&
+						citizen.Target != ecs::NULL_ENTITY && citizen.TargetHumanoid != ecs::NULL_ENTITY,
 					"cadence actual town citizen hierarchy changed"
 				);
 				citizen.InitialPosition = Storage.Get<scene::Transform>(citizen.Root)->Frame.Position;
 				const auto identity = Storage.Get<scene::UpdateCadence>(citizen.Model)->Identity;
 				auto policy = Policy(identity.Text(), full);
 				Storage.Set(citizen.Model, policy);
+				if (population == 64) {
+					auto *targetHealth = Storage.GetMutable<scene::Humanoid>(citizen.TargetHumanoid);
+					targetHealth->MaxHealth = 1000000;
+					targetHealth->Health = 1000000;
+				}
 			}
-			Beams.Create(Storage, 2, full, 16, {Citizens[0].Model, Citizens[1].Model});
+			std::vector<Entity> owners;
+			owners.reserve(population);
+			for (const auto &citizen : Citizens)
+				owners.push_back(citizen.Model);
+			Beams.Create(Storage, population, full, 16, owners);
 			physics::SyncBroadphase(Storage);
 		}
 		void Author(Window window) {
-			const auto north = Storage.Get<scene::Transform>(Citizens[0].Root)->Frame.Position;
-			const auto south = Storage.Get<scene::Transform>(Citizens[1].Root)->Frame.Position;
-			Vector3 target{0, 2.5f, -500};
-			if (window == Window::SingleCombat) target = north + Vector3{-3, 0, -4};
-			if (window == Window::CombatBurst) target = (north + south) * .5f + Vector3{0, 0, -5};
-			const bool targetMoved = Storage.Get<scene::Transform>(Target)->Frame.Position != target;
-			if (targetMoved) Storage.GetMutable<scene::Transform>(Target)->Frame.Position = target;
+			bool targetMoved = false;
+			if (Citizens.size() == 2) {
+				const auto north = Storage.Get<scene::Transform>(Citizens[0].Root)->Frame.Position;
+				const auto south = Storage.Get<scene::Transform>(Citizens[1].Root)->Frame.Position;
+				Vector3 target{0, 2.5f, -500};
+				if (window == Window::SingleCombat) target = north + Vector3{-3, 0, -4};
+				if (window == Window::CombatBurst) target = (north + south) * .5f + Vector3{0, 0, -5};
+				targetMoved = Storage.Get<scene::Transform>(Target)->Frame.Position != target;
+				if (targetMoved) Storage.GetMutable<scene::Transform>(Target)->Frame.Position = target;
+			} else {
+				for (size_t index = 0; index < Citizens.size(); ++index) {
+					const auto &citizen = Citizens[index];
+					Vector3 target = citizen.InitialPosition + Vector3{0, 0, -500};
+					if (window == Window::CombatBurst || (window == Window::SingleCombat && index == 0))
+						target =
+							Storage.Get<scene::Transform>(citizen.Root)->Frame.Position + Vector3{0, 0, -5};
+					if (Storage.Get<scene::Transform>(citizen.Target)->Frame.Position == target) continue;
+					Storage.GetMutable<scene::Transform>(citizen.Target)->Frame.Position = target;
+					targetMoved = true;
+				}
+			}
 			// Publish the authored target move before the script's real Raycast.
 			// The scheduler still performs its ordinary physics work inside the owner.
 			if (targetMoved) physics::SyncBroadphase(Storage);
@@ -124,10 +167,17 @@ namespace cadence_town_bench {
 				const auto *state = Storage.Get<scene::UpdateCadenceState>(citizen.Model);
 				citizen.BeforePerception = state == nullptr ? 0 : state->Domains[0].Generation;
 				citizen.BeforeBehaviour = state == nullptr ? 0 : state->Domains[1].Generation;
-				citizen.BeforeDistance =
-					(target - Storage.Get<scene::Transform>(citizen.Root)->Frame.Position).Magnitude();
-				citizen.Fighting =
-					citizen.BeforeDistance <= 12 && Storage.Get<scene::Humanoid>(TargetHumanoid)->Health > 0;
+				citizen.BeforeDistance = (Storage.Get<scene::Transform>(citizen.Target)->Frame.Position -
+										  Storage.Get<scene::Transform>(citizen.Root)->Frame.Position)
+											 .Magnitude();
+				citizen.BeforeHealth = Storage.Get<scene::Humanoid>(citizen.TargetHumanoid)->Health;
+				citizen.Fighting = citizen.BeforeDistance <= 12 && citizen.BeforeHealth > 0;
+				if (Citizens.size() == 64)
+					Require(
+						citizen.Fighting ==
+							(window == Window::CombatBurst || (window == Window::SingleCombat && index == 0)),
+						"cadence crowded town combat scope changed"
+					);
 			}
 			BeforeHealth = Storage.Get<scene::Humanoid>(TargetHumanoid)->Health;
 			Beams.Author(Storage, window);
@@ -217,6 +267,14 @@ namespace cadence_town_bench {
 				const bool attack = citizen.Fighting && tick >= citizen.BeforeDeadline && observed->Visible &&
 									state->Domains[0].LastCommittedTick == tick &&
 									state->Domains[1].LastCommittedTick == tick;
+				if (Citizens.size() == 64) {
+					const float health = Storage.Get<scene::Humanoid>(citizen.TargetHumanoid)->Health;
+					Require(
+						health == other.Storage.Get<scene::Humanoid>(paired.TargetHumanoid)->Health &&
+							citizen.BeforeHealth - health == (attack ? 1 : 0),
+						"cadence crowded target health differs from VM or deadline oracle"
+					);
+				}
 				const uint64_t expectedDeadline = attack ? tick + 30 : citizen.BeforeDeadline;
 				Require(
 					AttackDeadline(Storage, citizen.Model) == expectedDeadline &&
@@ -255,11 +313,12 @@ namespace cadence_town_bench {
 					"cadence VM real physics movement parity failed"
 				);
 			}
-			Require(
-				BeforeHealth - Storage.Get<scene::Humanoid>(TargetHumanoid)->Health ==
-					static_cast<float>(expectedDamage),
-				"cadence town health differs from attack deadline oracle"
-			);
+			if (Citizens.size() == 2)
+				Require(
+					BeforeHealth - Storage.Get<scene::Humanoid>(TargetHumanoid)->Health ==
+						static_cast<float>(expectedDamage),
+					"cadence town health differs from attack deadline oracle"
+				);
 			counts.Damage += expectedDamage;
 			// Combat is the actual script's proximity rule. Single-target windows
 			// can promote one guard while a beam's explicit policy names the same
@@ -268,14 +327,15 @@ namespace cadence_town_bench {
 		}
 	};
 
-	template <Language LANGUAGE, bool COMPLEX, bool FULL> LatestSummary &RunBaseline(size_t calls) {
-		constexpr size_t worlds = COMPLEX ? 32 : 1;
+	template <Language LANGUAGE, bool COMPLEX, bool FULL, bool CROWDED = false>
+	LatestSummary &RunBaseline(size_t calls) {
+		constexpr size_t worlds = COMPLEX ? 32 : 1, population = CROWDED ? 64 : 2;
 		constexpr Language paired = LANGUAGE == Language::Luau ? Language::JavaScript : Language::Luau;
 		const auto source = ReadTown(LANGUAGE), pairedSource = ReadTown(paired);
 		std::vector<std::unique_ptr<Town>> main, reference;
 		for (size_t index = 0; index < worlds; ++index) {
-			main.push_back(std::make_unique<Town>(LANGUAGE, FULL, source));
-			reference.push_back(std::make_unique<Town>(paired, FULL, pairedSource));
+			main.push_back(std::make_unique<Town>(LANGUAGE, FULL, source, population));
+			reference.push_back(std::make_unique<Town>(paired, FULL, pairedSource, population));
 		}
 		const auto author = [&](Window window) {
 			for (size_t index = 0; index < worlds; ++index) {
@@ -319,7 +379,8 @@ namespace cadence_town_bench {
 			"cadence town did no real ray, combat or animation work"
 		);
 		Require(
-			FULL || (total.Perception < worlds * 2 * ticks && total.PoseSkipped > 0 && total.BeamSkipped > 0),
+			FULL || (total.Perception < worlds * population * ticks && total.PoseSkipped > 0 &&
+					 total.BeamSkipped > 0),
 			"cadence town authored policy skipped no consumer work"
 		);
 		uint64_t retained = 0;
@@ -336,7 +397,10 @@ namespace cadence_town_bench {
 				);
 		}
 		const std::string row = std::string(LANGUAGE == Language::Luau ? "town-luau-" : "town-js-") +
-								(COMPLEX ? "complex-" : "simple-") + (FULL ? "full" : "authored");
+								(CROWDED   ? "crowded-"
+								 : COMPLEX ? "complex-"
+										   : "simple-") +
+								(FULL ? "full" : "authored");
 		auto &summary = BeginSummary(row, calls);
 
 		summary.Append(
@@ -358,17 +422,33 @@ namespace cadence_town_bench {
 			"ray_attempts_provenance=committed_perception_beyond_three_metres "
 			"ray_hits_provenance=visible_target_commits vm_source_profiler=off\n"
 		);
+		if constexpr (CROWDED)
+			summary.Append(
+				"# cadence-crowd actors_per_world=64 runtime_count=1 shared_broadphase=1 "
+				"individual_targets=64 target_health_scope=first_target "
+				"deadline_oracle=each_individual_target\n"
+			);
 		measured.Summarize(
-			summary, row.c_str(), calls, worlds * 2, worlds, 1, 3, worlds * 2, worlds * 5, FULL, retained
+			summary,
+			row.c_str(),
+			calls,
+			worlds * population,
+			worlds,
+			1,
+			3,
+			worlds * population,
+			worlds * (CROWDED ? 68 : 5),
+			FULL,
+			retained
 		);
 		vmMemory.Summarize(summary, row.c_str());
 		engine::testing::Consume(total.Rays);
 		return summary;
 	}
 
-	template <Language LANGUAGE, bool COMPLEX, bool FULL>
+	template <Language LANGUAGE, bool COMPLEX, bool FULL, bool CROWDED = false>
 	void RunPromotions(LatestSummary &summary, size_t calls) {
-		constexpr size_t worlds = COMPLEX ? 32 : 1;
+		constexpr size_t worlds = COMPLEX ? 32 : 1, population = CROWDED ? 64 : 2;
 		constexpr Language paired = LANGUAGE == Language::Luau ? Language::JavaScript : Language::Luau;
 		const auto source = ReadTown(LANGUAGE), pairedSource = ReadTown(paired);
 		Measurements measured(PROMOTION_TICKS);
@@ -379,8 +459,8 @@ namespace cadence_town_bench {
 			main.reserve(worlds);
 			reference.reserve(worlds);
 			for (size_t index = 0; index < worlds; ++index) {
-				main.push_back(std::make_unique<Town>(LANGUAGE, FULL, source));
-				reference.push_back(std::make_unique<Town>(paired, FULL, pairedSource));
+				main.push_back(std::make_unique<Town>(LANGUAGE, FULL, source, population));
+				reference.push_back(std::make_unique<Town>(paired, FULL, pairedSource, population));
 			}
 			const auto author = [&](Window window) {
 				for (size_t index = 0; index < worlds; ++index) {
@@ -414,14 +494,14 @@ namespace cadence_town_bench {
 					}
 				author(window);
 				if (PromotionEntry(tick))
-					for (const auto &town : main) {
-						Require(
-							town->Citizens[0].Fighting ==
-									(window == Window::SingleCombat || window == Window::CombatBurst) &&
-								town->Citizens[1].Fighting == (window == Window::CombatBurst),
-							"cadence town entry did not produce its authored combat scope"
-						);
-					}
+					for (const auto &town : main)
+						for (size_t index = 0; index < population; ++index)
+							Require(
+								town->Citizens[index].Fighting ==
+									(window == Window::CombatBurst ||
+									 (window == Window::SingleCombat && index == 0)),
+								"cadence town entry did not produce its authored combat scope"
+							);
 				const size_t sample = batch * PROMOTION_BATCH_TICKS + tick;
 				measured.Measure(sample, window, step);
 				auto &counts = measured.Ticks[sample].Counts;
@@ -434,10 +514,11 @@ namespace cadence_town_bench {
 				if (PromotionEntry(tick)) {
 					++entries[static_cast<size_t>(window)];
 					const size_t refreshed =
-						worlds * (window == Window::CombatBurst || window == Window::Invalidation ? 2 : 1);
+						worlds *
+						(window == Window::CombatBurst || window == Window::Invalidation ? population : 1);
 					Require(
 						counts.Perception >= refreshed && counts.Behaviour >= refreshed &&
-							counts.PoseEvaluated >= refreshed && counts.BeamRebuilt >= worlds,
+							counts.PoseEvaluated >= refreshed && counts.BeamRebuilt >= refreshed,
 						"cadence town entry did not refresh its actual consumers"
 					);
 				}
@@ -469,12 +550,12 @@ namespace cadence_town_bench {
 			summary,
 			row.c_str(),
 			calls,
-			worlds * 2,
+			worlds * population,
 			worlds,
 			1,
 			3,
-			worlds * 2,
-			worlds * 5,
+			worlds * population,
+			worlds * (CROWDED ? 68 : 5),
 			FULL,
 			retained,
 			true,
@@ -488,11 +569,12 @@ namespace cadence_town_bench {
 		);
 	}
 
-	template <Language LANGUAGE, bool COMPLEX, bool FULL> void Run() {
+	template <Language LANGUAGE, bool COMPLEX, bool FULL, bool CROWDED = false> void Run() {
+		static_assert(!COMPLEX || !CROWDED);
 		const bool promotions = PromotionEnabled();
 		static size_t calls = 0;
-		auto &summary = RunBaseline<LANGUAGE, COMPLEX, FULL>(++calls);
-		if (promotions) RunPromotions<LANGUAGE, COMPLEX, FULL>(summary, calls);
+		auto &summary = RunBaseline<LANGUAGE, COMPLEX, FULL, CROWDED>(++calls);
+		if (promotions) RunPromotions<LANGUAGE, COMPLEX, FULL, CROWDED>(summary, calls);
 	}
 }
 
@@ -519,4 +601,16 @@ BENCH("JS town complex full fidelity, whole harness", 1) {
 }
 BENCH("JS town complex authored cadence, whole harness", 1) {
 	cadence_town_bench::Run<engine::script::Language::JavaScript, true, false>();
+}
+BENCH("Luau crowded town full fidelity, whole harness", 1) {
+	cadence_town_bench::Run<engine::script::Language::Luau, false, true, true>();
+}
+BENCH("Luau crowded town authored cadence, whole harness", 1) {
+	cadence_town_bench::Run<engine::script::Language::Luau, false, false, true>();
+}
+BENCH("JS crowded town full fidelity, whole harness", 1) {
+	cadence_town_bench::Run<engine::script::Language::JavaScript, false, true, true>();
+}
+BENCH("JS crowded town authored cadence, whole harness", 1) {
+	cadence_town_bench::Run<engine::script::Language::JavaScript, false, false, true>();
 }

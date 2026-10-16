@@ -87,7 +87,7 @@ namespace cadence_bench {
 		}
 	};
 	struct SummaryRegistry {
-		std::array<LatestSummary, 16> Rows;
+		std::array<LatestSummary, 20> Rows;
 		~SummaryRegistry() {
 			for (const auto &row : Rows)
 				if (row.Size != 0) (void)std::fwrite(row.Text.data(), 1, row.Size, stdout);
@@ -110,7 +110,7 @@ namespace cadence_bench {
 			);
 			return summary;
 		}
-		throw std::runtime_error("cadence summary workload count exceeded sixteen rows");
+		throw std::runtime_error("cadence summary workload count exceeded twenty rows");
 	}
 	// Snapshot only at cohort boundaries. Same-basis live totals are additive;
 	// the sum of individual peaks is deliberately not a simultaneous heap peak.

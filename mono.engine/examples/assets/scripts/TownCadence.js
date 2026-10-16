@@ -1,4 +1,4 @@
-// Paired with TownCadence.luau. Both scripts build the same two NPCs and use
+// Paired with TownCadence.luau. Both scripts build the same authored town and use
 // the same fixed-tick cadence and combat deadlines through one service.
 
 const RunService = game.GetService('RunService');
@@ -7,6 +7,12 @@ if (!RunService.IsReplica()) {
   const data = game.GetService('DataSceneService');
   const RIG = 'examples.SwingRig';
   const SOURCE_REVISION = 1;
+  // Set the authored attribute before running this script to open one crowded town.
+  const authoredPopulation = workspace.GetAttribute('CadencePopulation');
+  if (authoredPopulation != null && authoredPopulation !== 2 && authoredPopulation !== 64) {
+    throw new Error('CadencePopulation must be 2 or 64');
+  }
+  const crowded = authoredPopulation === 64;
 
   function part(name, size, position, color) {
     const object = Instance.new('Part');
@@ -19,20 +25,25 @@ if (!RunService.IsReplica()) {
     return object;
   }
 
-  part('Town Square', Vector3.new(52, 1, 52), Vector3.new(0, -0.5, 0), Color3.new(0.29, 0.31, 0.29));
+  part('Town Square', crowded ? Vector3.new(264, 1, 128) : Vector3.new(52, 1, 52),
+    Vector3.new(0, -0.5, 0), Color3.new(0.29, 0.31, 0.29));
   for (let index = -1; index <= 1; ++index) {
-    part('House ' + index, Vector3.new(7, 7, 7), Vector3.new(index * 14, 3.5, -21),
+    part('House ' + index, Vector3.new(7, 7, 7), Vector3.new(index * 14, 3.5, crowded ? 40 : -21),
       Color3.new(0.49, 0.36, 0.25));
   }
 
-  const target = part('Practice Target', Vector3.new(3, 4, 3), Vector3.new(0, 2, -8),
-    Color3.new(0.7, 0.3, 0.2));
-  target.SetAttribute('DataFactoryId', 'town.practice-target');
-  const targetHumanoid = Instance.new('Humanoid');
-  targetHumanoid.RootPart = target;
-  targetHumanoid.MaxHealth = 100;
-  targetHumanoid.Health = 100;
-  targetHumanoid.Parent = target;
+  function practiceTarget(name, id, position) {
+    const target = part(name, Vector3.new(3, 4, 3), position, Color3.new(0.7, 0.3, 0.2));
+    target.SetAttribute('DataFactoryId', id);
+    const health = Instance.new('Humanoid');
+    health.RootPart = target;
+    health.MaxHealth = 100;
+    health.Health = 100;
+    health.Parent = target;
+    return {target, health, id};
+  }
+  const sharedTarget = crowded ? null : practiceTarget('Practice Target', 'town.practice-target',
+    Vector3.new(0, 2, -8));
 
   // Animation.luau's SwingRig clip layout, written through JS's byte view.
   const clip = Instance.new('AnimationBuffer');
@@ -60,7 +71,7 @@ if (!RunService.IsReplica()) {
   clip.Parent = workspace;
 
   const citizens = [];
-  function citizen(name, x, color) {
+  function citizen(name, x, color, practice) {
     const model = Instance.new('Model');
     model.Name = name;
     const rig = Instance.new('SkinnedMeshPart');
@@ -99,16 +110,28 @@ if (!RunService.IsReplica()) {
       throw new Error('cadence configuration failed');
     }
     model.SetAttribute('NextAttackTick', 0);
-    citizens.push({model, rig, humanoid});
+    citizens.push({model, rig, humanoid, target: practice.target,
+      targetHumanoid: practice.health, targetId: practice.id});
   }
 
-  citizen('North Guard', -9, Color3.new(0.2, 0.62, 0.78));
-  citizen('South Guard', 9, Color3.new(0.78, 0.6, 0.24));
+  if (crowded) {
+    for (let index = 1; index <= 64; ++index) {
+      const x = (index - 32.5) * 4;
+      const practice = practiceTarget('Practice Target ' + index, 'town.practice-target.' + index,
+        Vector3.new(x, 2.5, -492));
+      citizen('Citizen ' + index, x, Color3.new(0.2, 0.62, 0.78), practice);
+    }
+  } else {
+    citizen('North Guard', -9, Color3.new(0.2, 0.62, 0.78), sharedTarget);
+    citizen('South Guard', 9, Color3.new(0.78, 0.6, 0.24), sharedTarget);
+  }
 
   let tick = 0;
   RunService.Heartbeat.Connect(() => {
     tick += 1;
     for (const npc of citizens) {
+      const target = npc.target;
+      const targetHumanoid = npc.targetHumanoid;
       const difference = target.Position.sub(npc.rig.Position);
       const distance = difference.Magnitude;
       const fighting = distance <= 12 && targetHumanoid.Health > 0;
@@ -124,7 +147,7 @@ if (!RunService.IsReplica()) {
             direction,
             max_distance_metres: distance,
           });
-          visible = hit.status === 'ok' && hit.hit && hit.id === 'town.practice-target';
+          visible = hit.status === 'ok' && hit.hit && hit.id === npc.targetId;
         }
         if (!cadence.CommitPerception(npc.model, seeing.token, SOURCE_REVISION, visible,
           target.Position, true)) throw new Error('perception commit failed');

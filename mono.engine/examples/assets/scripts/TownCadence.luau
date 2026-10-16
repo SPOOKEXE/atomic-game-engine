@@ -9,6 +9,12 @@ local cadence = game:GetService("UpdateCadenceService")
 local data = game:GetService("DataSceneService")
 local RIG = "examples.SwingRig"
 local SOURCE_REVISION = 1
+-- Set the authored attribute before running this script to open one crowded town.
+local authoredPopulation = workspace:GetAttribute("CadencePopulation")
+if authoredPopulation ~= nil and authoredPopulation ~= 2 and authoredPopulation ~= 64 then
+	error("CadencePopulation must be 2 or 64")
+end
+local crowded = authoredPopulation == 64
 
 local function part(name: string, size: Vector3, position: Vector3, color: Color3): Part
 	local object = Instance.new("Part")
@@ -21,23 +27,36 @@ local function part(name: string, size: Vector3, position: Vector3, color: Color
 	return object
 end
 
-part("Town Square", Vector3.new(52, 1, 52), Vector3.new(0, -0.5, 0), Color3.new(0.29, 0.31, 0.29))
+part(
+	"Town Square",
+	if crowded then Vector3.new(264, 1, 128) else Vector3.new(52, 1, 52),
+	Vector3.new(0, -0.5, 0),
+	Color3.new(0.29, 0.31, 0.29)
+)
 for index = -1, 1 do
 	part(
 		"House " .. index,
 		Vector3.new(7, 7, 7),
-		Vector3.new(index * 14, 3.5, -21),
+		Vector3.new(index * 14, 3.5, if crowded then 40 else -21),
 		Color3.new(0.49, 0.36, 0.25)
 	)
 end
 
-local target = part("Practice Target", Vector3.new(3, 4, 3), Vector3.new(0, 2, -8), Color3.new(0.7, 0.3, 0.2))
-target:SetAttribute("DataFactoryId", "town.practice-target")
-local targetHumanoid = Instance.new("Humanoid")
-targetHumanoid.RootPart = target
-targetHumanoid.MaxHealth = 100
-targetHumanoid.Health = 100
-targetHumanoid.Parent = target
+type Practice = { Target: Part, Health: Humanoid, Id: string }
+local function practiceTarget(name: string, id: string, position: Vector3): Practice
+	local target = part(name, Vector3.new(3, 4, 3), position, Color3.new(0.7, 0.3, 0.2))
+	target:SetAttribute("DataFactoryId", id)
+	local health = Instance.new("Humanoid")
+	health.RootPart = target
+	health.MaxHealth = 100
+	health.Health = 100
+	health.Parent = target
+	return { Target = target, Health = health, Id = id }
+end
+local sharedTarget: Practice? = nil
+if not crowded then
+	sharedTarget = practiceTarget("Practice Target", "town.practice-target", Vector3.new(0, 2, -8))
+end
 
 -- The one-bone authored clip uses the same 36-byte layout and SwingRig as
 -- Animation.luau. Cadence never pauses the track's semantic time.
@@ -64,9 +83,16 @@ keyframe(2, 1, -0.3)
 assert(clip:BakeAnimation(1, frames))
 clip.Parent = workspace
 
-type Citizen = { Model: Model, Rig: SkinnedMeshPart, Humanoid: Humanoid }
+type Citizen = {
+	Model: Model,
+	Rig: SkinnedMeshPart,
+	Humanoid: Humanoid,
+	Target: Part,
+	TargetHumanoid: Humanoid,
+	TargetId: string,
+}
 local citizens: { Citizen } = {}
-local function citizen(name: string, x: number, color: Color3)
+local function citizen(name: string, x: number, color: Color3, practice: Practice)
 	local model = Instance.new("Model")
 	model.Name = name
 	local rig = Instance.new("SkinnedMeshPart")
@@ -103,16 +129,38 @@ local function citizen(name: string, x: number, color: Color3)
 	model.Parent = workspace
 	assert(cadence:Configure(model, "town.citizen." .. name, 8, 12, 4, 8, 3))
 	model:SetAttribute("NextAttackTick", 0)
-	table.insert(citizens, { Model = model, Rig = rig, Humanoid = humanoid })
+	table.insert(citizens, {
+		Model = model,
+		Rig = rig,
+		Humanoid = humanoid,
+		Target = practice.Target,
+		TargetHumanoid = practice.Health,
+		TargetId = practice.Id,
+	})
 end
 
-citizen("North Guard", -9, Color3.new(0.2, 0.62, 0.78))
-citizen("South Guard", 9, Color3.new(0.78, 0.6, 0.24))
+if crowded then
+	for index = 1, 64 do
+		local x = (index - 32.5) * 4
+		local practice = practiceTarget(
+			"Practice Target " .. index,
+			"town.practice-target." .. index,
+			Vector3.new(x, 2.5, -492)
+		)
+		citizen("Citizen " .. index, x, Color3.new(0.2, 0.62, 0.78), practice)
+	end
+else
+	assert(sharedTarget ~= nil)
+	citizen("North Guard", -9, Color3.new(0.2, 0.62, 0.78), sharedTarget)
+	citizen("South Guard", 9, Color3.new(0.78, 0.6, 0.24), sharedTarget)
+end
 
 local tick = 0
 RunService.Heartbeat:Connect(function(_delta: number)
 	tick += 1
 	for _, npc in citizens do
+		local target = npc.Target
+		local targetHumanoid = npc.TargetHumanoid
 		local difference = target.Position - npc.Rig.Position
 		local distance = difference.Magnitude
 		local fighting = distance <= 12 and targetHumanoid.Health > 0
@@ -128,7 +176,7 @@ RunService.Heartbeat:Connect(function(_delta: number)
 					direction = direction,
 					max_distance_metres = distance,
 				})
-				visible = hit.status == "ok" and hit.hit and hit.id == "town.practice-target"
+				visible = hit.status == "ok" and hit.hit and hit.id == npc.TargetId
 			end
 			assert(cadence:CommitPerception(npc.Model, seeing.token, SOURCE_REVISION, visible, target.Position, true))
 		end
