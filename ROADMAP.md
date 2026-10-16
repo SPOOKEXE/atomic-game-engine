@@ -124,7 +124,9 @@ When you create a new world/scene, it auto appends the scripts in.
 
 ### FUTURE
 
-- [_] /docs/future-work/navigation-ai-system.md
+- [_] Navigation and AI: bounded navigation, perception, named inspectable AI
+  states, behaviour plans, and driver-safe character actions in the
+  [navigation and AI plan](docs/future-work/navigation-ai-system.md).
 - [_] pathfinding
 - [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
 

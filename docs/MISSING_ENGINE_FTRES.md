@@ -224,13 +224,18 @@ on different levels do not avoid each other. Godot explicitly documents that
 
 ### G07. Perception, inspectable behaviours, and tactical queries
 
-P2. Planned in the navigation plan. Useful for shooter bots, MMO enemies, pets,
-and village simulations.
+P2. Planned in the [navigation and AI plan](future-work/navigation-ai-system.md).
+Useful for shooter bots, MMO enemies, pets, and village simulations.
 
-Add sight/hearing/proximity facts, a small state-machine or behaviour runtime,
-and query scoring for cover, attack range, and reachable positions. Expose the
-selected state, failed condition, remembered stimulus, and chosen destination.
-Start with one behaviour representation, not several competing graph languages.
+Add sight/hearing/proximity facts, named hierarchical AI states, Boolean
+transition guards, and query scoring for cover, attack range, and reachable
+positions. Expose the selected state, failed condition, remembered stimulus,
+and chosen destination. The plan keeps state transitions separate from
+same-tick behaviour dataflow and uses one bounded behaviour representation.
+Registered typed condition/action/task nodes provide programmable extensions
+without worker-thread callbacks. Export the canonical state tree and labelled
+transitions to SVG and self-contained HTML, with an optional revision-matched
+active path and reason snapshot.
 
 First useful slice: a guard patrols, hears a noise, investigates, chases, and
 returns home. A ranged enemy chooses reachable cover. Unreal's
