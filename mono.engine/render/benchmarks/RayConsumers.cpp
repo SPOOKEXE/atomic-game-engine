@@ -20,6 +20,7 @@
 
 #include <functional>
 #include <initializer_list>
+#include <iostream>
 
 TEST_SUITE_ID("engine.render.bench.ray-consumers")
 TEST_DEPENDS("engine.render.hardrendergpu")
@@ -306,7 +307,17 @@ namespace {
 		environment.Clock.WindQ20 = {};
 		environment.Clock.Paused = true;
 	}
-	void Projection(render::View &view, std::string_view projection, uint32_t width, uint32_t height) {
+	float ObliqueClipSkew(std::string_view family, std::string_view projection) {
+		// Keep the lens's six-metre gradient visible at the bent samples.
+		return projection == "oblique" ? (family == "lens" ? .04f : .08f) : 0.f;
+	}
+	void Projection(
+		render::View &view,
+		std::string_view family,
+		std::string_view projection,
+		uint32_t width,
+		uint32_t height
+	) {
 		const float aspect = float(width) / height;
 		if (projection == "orthographic")
 			view.Projection = glm::orthoRH_ZO(
@@ -315,7 +326,7 @@ namespace {
 		else if (projection == "oblique") {
 			auto matrix = scene::ResolveCamera(view.CameraFrame, view.Camera, aspect).Projection;
 			for (uint32_t column = 0; column < 4; ++column)
-				matrix[column][2] += .08f * matrix[column][0];
+				matrix[column][2] += ObliqueClipSkew(family, projection) * matrix[column][0];
 			view.Projection = matrix;
 		} else
 			Require(projection == "perspective", "unknown ray benchmark projection");
@@ -561,7 +572,7 @@ namespace {
 		view.Instances = scene.Instances;
 		view.Portals = scene.Portals;
 		view.Surfaces = scene.Mirrors;
-		Projection(view, projection, width, height);
+		Projection(view, family, projection, width, height);
 	}
 
 	render::FrameResult Submit(Device &device, Scene &scene) {
@@ -787,17 +798,26 @@ namespace {
 							  scene.View.Camera,
 							  float(scene.Target.Width) / scene.Target.Height
 						  );
-				const auto correctedBlue = [&](const Image &image, float horizontal) {
+				const auto probeX = [&](float horizontal) {
 					const auto clip = matrices.ViewProjection * glm::vec4(horizontal, 0, -3, 1);
-					const auto x = uint32_t((clip.x / clip.w * .5f + .5f) * image.Width);
-					const auto pixel = image.Pixel(std::min(x, image.Width - 1), image.Height / 2);
+					const auto x = uint32_t((clip.x / clip.w * .5f + .5f) * source.Width);
+					return std::min(x, source.Width - 1);
+				};
+				const auto correctedBlue = [&](const Image &image, uint32_t x) {
+					const auto pixel = image.Pixel(x, image.Height / 2);
 					return pixel.b - .12f * pixel.r;
 				};
-				Require(
-					correctedBlue(effect, -.3f) > correctedBlue(source, -.3f) + .01f &&
-						correctedBlue(effect, .3f) < correctedBlue(source, .3f) - .01f,
-					"gravitational lens failed inward gradient oracle"
-				);
+				const uint32_t leftX = probeX(-.3f), rightX = probeX(.3f);
+				const float leftSource = correctedBlue(source, leftX),
+							leftEffect = correctedBlue(effect, leftX);
+				const float rightSource = correctedBlue(source, rightX),
+							rightEffect = correctedBlue(effect, rightX);
+				const bool inward = leftEffect > leftSource + .01f && rightEffect < rightSource - .01f;
+				if (!inward)
+					std::cerr << "# ray-consumer-lens-failure left_x=" << leftX << " right_x=" << rightX
+							  << " left_source=" << leftSource << " left_effect=" << leftEffect
+							  << " right_source=" << rightSource << " right_effect=" << rightEffect << '\n';
+				Require(inward, "gravitational lens failed inward gradient oracle");
 				out << " lens_gradient=inward emission_red_correction=0.12";
 			}
 		}
@@ -923,6 +943,7 @@ namespace {
 		}
 		Print(device, report, family, scene, projection, width, height, cohort, workload);
 		cohort << "# ray-consumer-work case=" << family << " scene=" << scene
+			   << " oblique_clip_skew=" << ObliqueClipSkew(family, projection)
 			   << " instances=" << fixture.Instances.size()
 			   << " volume_count=" << fixture.View.Lighting.VolumeCount << " volume_steps="
 			   << (fixture.View.Lighting.VolumeCount ? fixture.View.Lighting.Volumes[0].Steps : 0)
