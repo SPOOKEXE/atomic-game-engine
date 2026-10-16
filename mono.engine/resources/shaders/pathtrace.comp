@@ -12,6 +12,8 @@ layout(set = 2, binding = 0, std140) uniform Pass {
 	mat4 ivp;
 	vec4 target;
 	vec4 view;
+	vec4 eye;
+	vec4 cameraDepth;
 	uvec4 features;
 } pass;
 layout(set = 2, binding = 1, std140) uniform Trace {
