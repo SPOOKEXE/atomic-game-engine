@@ -1468,6 +1468,7 @@ namespace studio {
 	}
 
 	void Editor::Simulate(float frameSeconds) {
+		Renderer.PumpCompute();
 		ENGINE_PROFILE_CAT("simulation", engine::core::ProfileCategory::Simulation);
 
 		// **Cleared first and set once, at the tick.** Every early return below
@@ -5303,6 +5304,7 @@ namespace studio {
 		}
 
 		engine::script::RuntimeLimits limits;
+		limits.Compute = Renderer.ComputeForWorld(std::string(Universe->NameOf(world).Text()));
 		limits.Role.Server = true;
 		limits.Role.Client = mode == RunMode::Play;
 

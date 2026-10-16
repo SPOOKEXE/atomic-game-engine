@@ -255,6 +255,9 @@ namespace studio {
 		}
 
 		auto link = std::make_unique<PlayLink>();
+		link->SetComputeHost([this](std::string worldName) {
+			return Renderer.ComputeForWorld(std::move(worldName));
+		});
 
 		// Numbered by how many there already are, so the world's name stays the
 		// identity it has to be - rule 4. Two clients that took one name would

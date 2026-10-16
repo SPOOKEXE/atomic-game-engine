@@ -742,7 +742,8 @@ namespace client {
 				static_cast<uint32_t>(Settings.Width),
 				static_cast<uint32_t>(Settings.Height),
 				DataCapture,
-				DataLifecycle
+				DataLifecycle,
+				[this](std::string world) { return Renderer.ComputeForWorld(std::move(world)); }
 			);
 			DataFactory->SetRehydrator({
 				.Prepare = [this](
@@ -1094,6 +1095,7 @@ namespace client {
 
 		for (const engine::world::WorldId id : worlds) {
 			const engine::world::WorldSettings worldSettings = Universe_->SettingsOf(id);
+			limits.Compute = Renderer.ComputeForWorld(std::string(worldSettings.Name.Text()));
 			std::string failure;
 
 			Universe_->Enter(id, [&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
@@ -1166,6 +1168,7 @@ namespace client {
 			);
 			world.TickRate = Settings.TickRate;
 			world.RenderingProfile = PipelineSelected;
+			limits.Compute = Renderer.ComputeForWorld(std::string(world.Name.Text()));
 
 			const engine::world::WorldId id = Universe_->Create(world);
 			if (!id.IsValid()) {
@@ -1990,9 +1993,11 @@ namespace client {
 		}
 
 		std::shared_ptr<engine::script::Runtime> replicaScripts;
+		const auto compute = Renderer.ComputeForWorld(std::string(world.Name.Text()));
 
 		Universe_->Enter(
-			Replicated, [this, &replicaScripts](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+			Replicated,
+			[this, &replicaScripts, &compute](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
 				// The v0.2 refusal, used for what it was reserved for. A replica
 				// that published to a bus would be telling the universe
 				// something the server never said; the inbox still delivers,
@@ -2033,6 +2038,7 @@ namespace client {
 				engine::replication::InterpolationSettings interpolation;
 				interpolation.TickRate = Settings.TickRate;
 				engine::script::RuntimeLimits limits;
+				limits.Compute = compute;
 				limits.RemoteEventSender = [this](std::span<const std::byte> payload) {
 					return Connection != nullptr &&
 						   Connection->SendUser(payload, engine::core::Clock::Seconds());
@@ -3168,6 +3174,7 @@ namespace client {
 	}
 
 	void Client::Step() {
+		Renderer.PumpCompute();
 		UpdateIterations++;
 		const engine::render::PresentationSchedule::TimePoint presentationNow =
 			engine::render::PresentationSchedule::Clock::now();

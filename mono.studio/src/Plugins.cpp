@@ -1164,7 +1164,8 @@ namespace studio {
 		const std::function<std::unique_ptr<engine::script::HostSurface>(LoadedPlugin &)> &surface,
 		PluginRunTarget target,
 		engine::world::WorldId world,
-		PluginBindingRegistry *bindings
+		PluginBindingRegistry *bindings,
+		const engine::script::ComputeBridgeFactory &compute
 	) {
 		plugin.Vm.reset();
 		plugin.Surface.reset();
@@ -1211,6 +1212,7 @@ namespace studio {
 		limits.Role.Client = target == PluginRunTarget::PlaytestClient;
 		limits.Role.Studio = true;
 		limits.Origin = engine::script::ScriptOrigin::Plugin;
+		limits.Compute = compute;
 
 		plugin.Vm = engine::script::MakeRuntime(store, plugin.Language, limits);
 		if (plugin.Vm == nullptr) {
@@ -1243,10 +1245,11 @@ namespace studio {
 		const std::function<std::unique_ptr<engine::script::HostSurface>(LoadedPlugin &)> &surface,
 		PluginRunTarget target,
 		engine::world::WorldId world,
-		PluginBindingRegistry *bindings
+		PluginBindingRegistry *bindings,
+		engine::script::ComputeBridgeFactory compute
 	) {
 		for (LoadedPlugin &plugin : plugins) {
-			StartPlugin(plugin, store, surface, target, world, bindings);
+			StartPlugin(plugin, store, surface, target, world, bindings, compute);
 		}
 	}
 	size_t BeatPlugins(std::vector<LoadedPlugin> &plugins, float delta) {
@@ -1456,7 +1459,8 @@ namespace studio {
 		}
 
 		PluginRuntimeSet *runtimeSet = set.get();
-		Universe->Enter(world, [this, runtimeSet, &native, world, target](Store &store) {
+		const auto compute = Renderer.ComputeForWorld(std::string(Universe->NameOf(world).Text()));
+		Universe->Enter(world, [this, runtimeSet, &native, world, target, &compute](Store &store) {
 			StartCppPlugins(runtimeSet->Cpp, native, store, runtimeSet->Bindings, target, world, this);
 			StartPlugins(
 				runtimeSet->Scripts,
@@ -1464,7 +1468,8 @@ namespace studio {
 				[this, &store](LoadedPlugin &plugin) { return MakePluginSurface(*this, plugin, store); },
 				target,
 				world,
-				&runtimeSet->Bindings
+				&runtimeSet->Bindings,
+				compute
 			);
 		});
 
@@ -1557,7 +1562,8 @@ namespace studio {
 			}
 		}
 
-		Universe->Enter(Active, [this, &native](Store &store) {
+		const auto compute = Renderer.ComputeForWorld(std::string(Universe->NameOf(Active).Text()));
+		Universe->Enter(Active, [this, &native, &compute](Store &store) {
 			StartCppPlugins(
 				CppPlugins, native, store, StudioPluginBindings, PluginRunTarget::Studio, Active, this
 			);
@@ -1567,7 +1573,8 @@ namespace studio {
 				[this, &store](LoadedPlugin &plugin) { return MakePluginSurface(*this, plugin, store); },
 				PluginRunTarget::Studio,
 				Active,
-				&StudioPluginBindings
+				&StudioPluginBindings,
+				compute
 			);
 		});
 

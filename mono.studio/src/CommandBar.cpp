@@ -82,6 +82,7 @@ namespace studio {
 		}
 
 		engine::script::RuntimeLimits limits;
+		limits.Compute = Renderer.ComputeForWorld(std::string(store.Name()));
 		limits.Role.Server = false;
 		limits.Role.Client = false;
 		limits.Role.Studio = true;

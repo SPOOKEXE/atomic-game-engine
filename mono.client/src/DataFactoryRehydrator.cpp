@@ -19,10 +19,11 @@ namespace client {
 		uint32_t width,
 		uint32_t height,
 		std::shared_ptr<engine::script::DataCaptureBridge> capture,
-		std::shared_ptr<engine::script::QueuedDataLifecycleBridge> lifecycle
+		std::shared_ptr<engine::script::QueuedDataLifecycleBridge> lifecycle,
+		engine::script::ComputeWorldBridgeFactory compute
 	)
 		: Worlds(worlds), Runtimes(runtimes), Entities(entities), Width(width), Height(height),
-		  Capture(std::move(capture)), Lifecycle(std::move(lifecycle)) {}
+		  Capture(std::move(capture)), Lifecycle(std::move(lifecycle)), Compute(std::move(compute)) {}
 
 	bool DataFactoryRehydrator::Prepare(
 		engine::world::Universe &candidate, engine::world::WorldId world, std::string &detail
@@ -46,10 +47,12 @@ namespace client {
 		}
 
 		const engine::world::WorldSettings settings = candidate.SettingsOf(world);
+		const auto compute =
+			Compute ? Compute(std::string(settings.Name.Text())) : engine::script::ComputeBridgeFactory{};
 		bool installed = false;
 		if (candidate.Enter(
 				world,
-				[this, &installed, &settings, &detail](
+				[this, &installed, &settings, &detail, &compute](
 					engine::ecs::Store &store, engine::ecs::Scheduler &systems
 				) {
 					if (!engine::script::ScriptsIn(store, true, true).empty()) {
@@ -72,6 +75,7 @@ namespace client {
 					limits.Role = engine::script::HostRole::OfBoth();
 					limits.DataCapture = Capture;
 					limits.DataLifecycle = Lifecycle;
+					limits.Compute = compute;
 					Runtimes.reserve(Runtimes.size() + 1);
 					Prepared.emplace(
 						PreparedRuntime{

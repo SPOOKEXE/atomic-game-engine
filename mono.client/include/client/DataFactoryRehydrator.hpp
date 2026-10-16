@@ -38,7 +38,8 @@ namespace client {
 			uint32_t width,
 			uint32_t height,
 			std::shared_ptr<engine::script::DataCaptureBridge> capture,
-			std::shared_ptr<engine::script::QueuedDataLifecycleBridge> lifecycle
+			std::shared_ptr<engine::script::QueuedDataLifecycleBridge> lifecycle,
+			engine::script::ComputeWorldBridgeFactory compute = {}
 		);
 
 		// Stages candidate world resources before the factory atomically swaps them in.
@@ -79,6 +80,7 @@ namespace client {
 		uint32_t Height = 0;
 		std::shared_ptr<engine::script::DataCaptureBridge> Capture;
 		std::shared_ptr<engine::script::QueuedDataLifecycleBridge> Lifecycle;
+		engine::script::ComputeWorldBridgeFactory Compute;
 		std::optional<PreparedRuntime> Prepared;
 		std::optional<PreparedRuntime> PreparedFork;
 		std::unordered_map<std::string, std::shared_ptr<engine::script::Runtime>> ForkRuntimes;

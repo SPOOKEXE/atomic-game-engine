@@ -115,6 +115,8 @@ namespace studio {
 		RemoteEvents_.clear();
 		RemoteEventBytes_ = 0;
 		engine::script::RuntimeLimits limits;
+		limits.Compute = ComputeHost ? ComputeHost(std::string(settings.Name.Text()))
+									 : engine::script::ComputeBridgeFactory{};
 		limits.RemoteEventSender = [this](std::span<const std::byte> message) {
 			constexpr size_t maximumMessages = 64;
 			constexpr size_t maximumBytes =

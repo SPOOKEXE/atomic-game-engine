@@ -1204,7 +1204,8 @@ namespace studio {
 		const std::function<std::unique_ptr<engine::script::HostSurface>(LoadedPlugin &)> &surface = {},
 		PluginRunTarget target = PluginRunTarget::Studio,
 		engine::world::WorldId world = {},
-		PluginBindingRegistry *bindings = nullptr
+		PluginBindingRegistry *bindings = nullptr,
+		engine::script::ComputeBridgeFactory compute = {}
 	);
 
 	// Beats every running plugin once.

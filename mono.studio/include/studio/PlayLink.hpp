@@ -54,6 +54,7 @@
 #include <engine/replication/Authority.hpp>
 #include <engine/replication/Replica.hpp>
 #include <engine/scene/CameraContinuation.hpp>
+#include <engine/script/ComputeBridge.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/world/World.hpp>
 
@@ -64,6 +65,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace engine::world {
@@ -152,6 +154,11 @@ namespace studio {
 
 		PlayLink(const PlayLink &) = delete;
 		PlayLink &operator=(const PlayLink &) = delete;
+
+		// Binds renderer compute factories before starting a replica runtime.
+		void SetComputeHost(engine::script::ComputeWorldBridgeFactory factory) {
+			ComputeHost = std::move(factory);
+		}
 
 		// Creates the replica world beside `authority` and admits a client.
 		//
@@ -307,6 +314,7 @@ namespace studio {
 		}
 
 	  private:
+		engine::script::ComputeWorldBridgeFactory ComputeHost{};
 		engine::world::WorldId Authority_;
 		engine::world::WorldId Replica_;
 
