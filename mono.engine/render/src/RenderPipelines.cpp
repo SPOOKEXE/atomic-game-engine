@@ -122,6 +122,7 @@ namespace engine::render {
 	}
 
 	bool Renderer::Impl::CreatePipelines() {
+		ENGINE_PROFILE_CAT("renderer.create pipelines", core::ProfileCategory::Render);
 		SDL_GPUShader *opaqueVertex = LoadShader("opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 4);
 		SDL_GPUShader *packedOpaqueVertex =
 			LoadShader("packed-opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 2, 5);

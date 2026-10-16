@@ -588,6 +588,7 @@ namespace engine::render {
 	bool Renderer::Initialise(
 		SDL_Window *window, uint32_t framesInFlight, bool retainSourceTextures, size_t textureBudgetBytes
 	) {
+		ENGINE_PROFILE_CAT("renderer.initialise", engine::core::ProfileCategory::Render);
 		// **Re-bound here, and the constructor's claim is what makes the check
 		// testable without a device.** A renderer is legitimately constructed by
 		// whoever owns the object and initialised by whoever owns the window -
