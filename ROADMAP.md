@@ -95,7 +95,7 @@ The milestone headings below are development labels. Not in line with project ve
 - [_] Non-acceptance follow-up: audit aggregate replica snapshot and staged-byte ceilings for large EditableImage rows. The current path has a `uint32_t` total cap but no explicit assembled-image budget; per-image bounds and windowed staging are tested.
 - [_] Security follow-up: audit dynamic schema and component-codec acceptance, plus client-local provenance and descendant filtering across replication and authored game saves.
 
-The accepted implementation is `v0.26.0-imagegraph-minimal`. The preserved full Composer work remains on `v0.26.5-imagegraph-full` for user review.
+The accepted implementation is `v0.26.0-imagegraph-minimal`. The full Composer work is preserved on `v0.26.5-imagegraph-full-archive` as a reference; it requires refactoring before any future integration.
 
 ### v0.27
 
