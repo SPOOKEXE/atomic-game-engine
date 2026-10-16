@@ -1,7 +1,10 @@
 // In-memory authored bake document through graph construction and evaluation.
 // File decoding and publishing are outside this device-free benchmark.
 
+#include <engine/assets/Builtin.hpp>
+#include <engine/assets/Mesh.hpp>
 #include <engine/bake/GraphDocument.hpp>
+#include <engine/bake/Model.hpp>
 #include <engine/bakegraph/Schema.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/HeapProfile.hpp>
@@ -11,6 +14,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
+#include <vector>
 
 TEST_SUITE_ID("engine.bake.bench.graph")
 
@@ -31,6 +35,18 @@ namespace {
 		operation.From = from;
 		operation.To = to;
 		return operation;
+	}
+
+	const std::vector<std::byte> &CanonicalCubeBytes() {
+		static const std::vector<std::byte> bytes = [] {
+			auto mesh = engine::assets::MakeBuiltin(engine::assets::BuiltinMesh::Cube);
+			if (!FitMesh(mesh, 2.0f)) throw std::runtime_error("bake benchmark canonical cube fit refused");
+			engine::core::ByteWriter writer;
+			if (!engine::assets::Mesh::Write(writer, mesh))
+				throw std::runtime_error("bake benchmark canonical cube export refused");
+			return std::vector<std::byte>(writer.Bytes().begin(), writer.Bytes().end());
+		}();
+		return bytes;
 	}
 
 	Document Make(size_t branchCount) {
@@ -54,8 +70,10 @@ namespace {
 		if (!graph.Run(failure) || graph.Baked().size() != branchCount)
 			throw std::runtime_error("bake benchmark run refused: " + failure);
 		for (size_t index = 0; index < branchCount; ++index) {
+			const auto &canonical = CanonicalCubeBytes();
 			if (graph.Baked()[index].Name != "cube" + std::to_string(index) + ".amesh" ||
-				graph.Baked()[index].Bytes.empty())
+				graph.Baked()[index].Kind != engine::assets::AssetKind::Mesh ||
+				graph.Baked()[index].Bytes != canonical)
 				throw std::runtime_error("bake benchmark export changed");
 			engine::core::ByteReader reader(graph.Baked()[index].Bytes);
 			engine::assets::MeshData mesh;

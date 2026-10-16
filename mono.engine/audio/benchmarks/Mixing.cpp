@@ -35,6 +35,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -98,10 +99,14 @@ namespace mixing_bench {
 		auto mixer = std::make_unique<AudioMixer>();
 		engine::audio::AudioGraph &graph = mixer->Graph();
 		const NodeId output{engine::audio::AudioGraph::OUTPUT_ID};
+		size_t activeVoices = 0;
 
 		for (size_t voice = 0; voice < voices; voice++) {
 			const NodeId player = graph.Add(NodeKind::Player);
 			const NodeId stage = graph.Add(spatial ? NodeKind::Emitter : NodeKind::Fader);
+			if (!player.IsValid() || !stage.IsValid()) {
+				throw std::runtime_error("audio benchmark graph refused a voice node");
+			}
 
 			if (engine::audio::Node *node = graph.Find(player)) {
 				node->Sound = Tone();
@@ -112,6 +117,9 @@ namespace mixing_bench {
 				// real mix looks like and what makes the memory traffic honest.
 				node->Cursor = static_cast<double>(voice * 37u % 40'000u);
 				node->Gain = 0.5f;
+				++activeVoices;
+			} else {
+				throw std::runtime_error("audio benchmark graph lost a player node");
 			}
 
 			if (engine::audio::Node *node = graph.Find(stage)) {
@@ -127,10 +135,18 @@ namespace mixing_bench {
 				} else {
 					node->Pan = std::sin(static_cast<float>(voice)) * 0.8f;
 				}
+			} else {
+				throw std::runtime_error("audio benchmark graph lost a voice stage");
 			}
 
-			graph.Connect(player, stage);
-			graph.Connect(stage, output);
+			if (!graph.Connect(player, stage) || !graph.Connect(stage, output)) {
+				throw std::runtime_error("audio benchmark graph refused a voice connection");
+			}
+		}
+		const size_t expectedNodes = 1 + voices * 2;
+		if (activeVoices != voices || graph.Count() != expectedNodes ||
+			graph.Order().size() != expectedNodes) {
+			throw std::runtime_error("audio benchmark graph did not activate the requested voices");
 		}
 
 		built.emplace_back(std::make_pair(voices, spatial), std::move(mixer));
@@ -192,12 +208,12 @@ BENCH("Render · 256 voices", 100) {
 	}
 }
 
-BENCH("Render · 512 voices", 50) {
-	// Half of `MAXIMUM_NODES` spent on players alone. **If this row is inside
-	// the budget, the graph's own bound is the effective voice cap and no
-	// separate one is needed**; if it is outside, the cap has to come from
-	// somewhere and this row says where.
-	AudioMixer &mixer = GraphOf(512, false);
+BENCH("Render · 511 voices", 50) {
+	// 511 players, 511 stages, and the output use 1023 of 1024 node slots.
+	// **If this row is inside the budget, the graph's own bound is the effective
+	// voice cap and no separate one is needed**; if it is outside, the cap has to
+	// come from somewhere and this row says where.
+	AudioMixer &mixer = GraphOf(511, false);
 	SampleBuffer &out = Out();
 	for (size_t block = 0; block < 50; block++) {
 		const MixReport report = mixer.Render(out);
