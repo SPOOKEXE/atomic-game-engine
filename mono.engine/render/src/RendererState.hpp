@@ -590,6 +590,10 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *BloomPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthOfFieldPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *GodRaysPipeline = nullptr;
+		// Disabled effects still publish their declared images without compiling shaders.
+		bool EnsureLightingEffectPipeline(
+			SDL_GPUGraphicsPipeline *&pipeline, std::string_view shader, uint32_t samplers
+		);
 		SDL_GPUGraphicsPipeline *TonemapPipeline = nullptr;
 		SDL_GPUComputePipeline *EnvironmentSkyCompute = nullptr;
 		SDL_GPUComputePipeline *EnvironmentCloudCompute = nullptr;
