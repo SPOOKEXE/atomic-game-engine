@@ -73,6 +73,7 @@
 #include <vector>
 
 namespace engine::render {
+	class StartupCompilation;
 	// Which half of the two-pass transparent-layer capture a draw records.
 	enum class TransparentLayerPhase : uint8_t { None, Nearest, Colour };
 
@@ -3129,7 +3130,11 @@ namespace engine::render {
 			uint32_t threadsY
 		) const;
 
-		bool CreatePipelines();
+		// Non-owning, valid only within the joined startup compilation scope.
+		StartupCompilation *Compilation = nullptr;
+		std::vector<SDL_GPUShader *> *StartupShaders = nullptr;
+
+		bool CreatePipelines(SDL_GPUTextureFormat swapchainFormat);
 
 		// Binds a pipeline and records which family it belongs to.
 		//

@@ -5,6 +5,7 @@
 #include "RendererState.hpp"
 #include "ResourcePreview.hpp"
 #include "ShaderBinary.hpp"
+#include "StartupCompilation.hpp"
 #include "SurfaceScale.hpp"
 #include "ViewRecording.hpp"
 #include "VulkanTimestamps.hpp"
@@ -586,7 +587,11 @@ namespace engine::render {
 	}
 
 	bool Renderer::Initialise(
-		SDL_Window *window, uint32_t framesInFlight, bool retainSourceTextures, size_t textureBudgetBytes
+		SDL_Window *window,
+		uint32_t framesInFlight,
+		bool retainSourceTextures,
+		size_t textureBudgetBytes,
+		const StartupProgressCallback &progress
 	) {
 		// **Re-bound here, and the constructor's claim is what makes the check
 		// testable without a device.** A renderer is legitimately constructed by
@@ -596,6 +601,17 @@ namespace engine::render {
 		// that costs nothing to be wrong about, because being wrong about it
 		// means nothing has been created yet.
 		Owner = std::this_thread::get_id();
+		const auto reportSetup = [&](std::string_view name) {
+			if (!progress) return true;
+			try {
+				return progress({0, 0, name});
+			} catch (...) {
+				// Setup callbacks have the same cleanup guarantee as the worker pump.
+				Shutdown();
+				throw;
+			}
+		};
+		if (!reportSetup("GPU device")) return false;
 
 		// **A null window is headless and is not an error.** A renderer with
 		// nowhere to present still draws: into a `SceneTarget`, which is what a
@@ -712,7 +728,23 @@ namespace engine::render {
 		sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
 		State->OverlaySampler = SDL_CreateGPUSampler(State->Device, &sampler);
 
-		if (!State->CreatePipelines() || !State->CreateGeometry()) {
+		bool pipelinesReady = false;
+		try {
+			StartupCompilation compilation;
+			State->Compilation = progress ? &compilation : nullptr;
+			// SDL GPU resource creation has no window affinity. All swapchain,
+			// geometry recording and device teardown stay on the owner thread.
+			const auto swapchainFormat = State->ColourFormat();
+			pipelinesReady =
+				compilation.Run([&] { return State->CreatePipelines(swapchainFormat); }, progress);
+			State->Compilation = nullptr;
+		} catch (...) {
+			// Both worker and UI exceptions reach here only after the worker joined.
+			State->Compilation = nullptr;
+			Shutdown();
+			throw;
+		}
+		if (!pipelinesReady || !reportSetup("GPU geometry") || !State->CreateGeometry()) {
 			Shutdown();
 			return false;
 		}
@@ -748,7 +780,7 @@ namespace engine::render {
 			Shutdown();
 			return false;
 		}
-		if (!InstallEngineDefault(defaultDocument)) {
+		if (!reportSetup("Render graph") || !InstallEngineDefault(defaultDocument)) {
 			Shutdown();
 			return false;
 		}

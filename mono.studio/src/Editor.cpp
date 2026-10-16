@@ -1,5 +1,6 @@
 #include "FrameGraphSnapshot.hpp"
 #include "ImageComposer.hpp"
+#include "StartupWindow.hpp"
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Bytes.hpp>
@@ -657,7 +658,14 @@ namespace studio {
 			return false;
 		}
 
+		StartupWindow startup;
+		engine::render::StartupProgressCallback startupProgress;
 		if (!Settings.Headless) {
+			if (startup.Open(engine::core::Paths::Base() / "icon.png")) {
+				startupProgress = [&](const engine::render::StartupProgress &progress) {
+					return startup.Update(progress.Completed, progress.Total, progress.ShaderName);
+				};
+			}
 			Window = SDL_CreateWindow(
 				"atomic studio",
 				Settings.Width,
@@ -685,9 +693,12 @@ namespace studio {
 		// Plugin dock widgets paint CanvasGroups through Dear ImGui's CPU target.
 		// Retaining source pixels gives that bounded path image samples without a
 		// GPU readback. TextureTable caps retained copies at 256 MiB.
-		if (!Renderer.Initialise(Window, static_cast<uint32_t>(Settings.FramesInFlight), true)) {
+		if (!Renderer.Initialise(
+				Window, static_cast<uint32_t>(Settings.FramesInFlight), true, 0, startupProgress
+			)) {
 			return false;
 		}
+		startup.Close();
 		if (Window != nullptr && !SDL_ShowWindow(Window)) {
 			ENGINE_WARN("SDL_ShowWindow: {}", SDL_GetError());
 		}

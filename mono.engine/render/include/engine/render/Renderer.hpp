@@ -68,6 +68,20 @@ namespace engine::imagegraph {
 }
 
 namespace engine::render {
+	// Completed shader compilation groups and the current native shader or pipeline.
+	// Groups include their graphics variants. Total zero denotes device setup.
+	struct StartupProgress {
+		// Groups whose native compilation work has finished.
+		size_t Completed = 0;
+		// Planned groups, fixed once device capabilities are known.
+		size_t Total = 0;
+		// Current native operation. Valid only for the callback invocation.
+		std::string_view ShaderName;
+	};
+
+	// Called on the Initialise owner thread. False cancels between native operations.
+	using StartupProgressCallback = std::function<bool(const StartupProgress &)>;
+
 	// Exact resident source for one authored relative path. No owner fallback occurs.
 	struct ImageGraphSourceBinding {
 		// Authored source path, matched together with Interpretation.
@@ -1630,12 +1644,15 @@ namespace engine::render {
 		// @param retainSourceTextures Keep bounded decoded base pixels for factory export.
 		// @param textureBudgetBytes Content texture capacity. Zero keeps the normal
 		//        `TextureTable::MAXIMUM_BYTES` safety limit.
+		// @param progress Optional owner-thread progress pump; false cancels startup.
+		//        Must not call renderer methods while compilation is running.
 		// @return True when the device, pipelines and geometry are ready.
 		bool Initialise(
 			SDL_Window *window,
 			uint32_t framesInFlight = 1,
 			bool retainSourceTextures = false,
-			size_t textureBudgetBytes = 0
+			size_t textureBudgetBytes = 0,
+			const StartupProgressCallback &progress = {}
 		);
 
 		// An owned copy of the last successfully submitted visibility snapshot.
