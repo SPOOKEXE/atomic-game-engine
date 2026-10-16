@@ -22,10 +22,10 @@
 // benchmarks with different loop counts are comparable and a body that got
 // faster shows as a smaller number rather than as a shorter run.
 //
-// **Warm-up is not optional and not the caller's job.** The first run of
-// anything pays for cold caches, lazy page faults and a branch predictor that
-// has never seen the code. A harness that included those in the measurement
-// would report the allocator, not the algorithm.
+// **The harness warms by default.** The first run can pay for cold caches,
+// lazy page faults and a branch predictor that has never seen the code. A
+// benchmark with its own workload warm-up may explicitly set the harness count
+// to zero; the report records the selected count.
 //
 // **The minimum sample is reported, not the mean.** A benchmark is bounded
 // below by the work and unbounded above by whatever else the machine felt like

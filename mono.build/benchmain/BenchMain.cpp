@@ -19,12 +19,14 @@
 #include <engine/testing/Bench.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace engine::testing {
@@ -61,7 +63,23 @@ namespace {
 	// stayed within 3 percent. Eight warms the code, data and CPU frequency before
 	// the usual seven-sample minimum is allowed to describe the algorithm.
 	constexpr int WARMUP_SAMPLES = 8;
+	constexpr int MAXIMUM_WARMUP_SAMPLES = 64;
 	constexpr int MAXIMUM_LATENCY_SAMPLES = 10'000;
+
+	bool ParseWarmupSamples(std::string_view text, int &out) {
+		if (text.empty()) return false;
+		for (const char character : text) {
+			if (character < '0' || character > '9') return false;
+		}
+
+		unsigned value = 0;
+		const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+		if (error != std::errc{} || end != text.data() + text.size() || value > MAXIMUM_WARMUP_SAMPLES) {
+			return false;
+		}
+		out = static_cast<int>(value);
+		return true;
+	}
 
 	// A record is one line and its free-text field is last, so a name carrying
 	// a tab would otherwise end the record early.
@@ -88,6 +106,7 @@ namespace {
 
 int main(int argc, char **argv) {
 	int samples = DEFAULT_SAMPLES;
+	int warmupSamples = WARMUP_SAMPLES;
 	std::string filter;
 	const char *latencySetting = std::getenv("MONO_BENCH_LATENCY");
 	const bool reportLatency = latencySetting != nullptr && std::strcmp(latencySetting, "1") == 0;
@@ -110,6 +129,19 @@ int main(int argc, char **argv) {
 			samples = std::max(1, std::atoi(argv[++index]));
 			continue;
 		}
+		if (std::strcmp(argv[index], "--warmup-samples") == 0) {
+			if (index + 1 >= argc) {
+				std::cerr << "--warmup-samples requires a decimal integer from 0 through "
+						  << MAXIMUM_WARMUP_SAMPLES << '\n';
+				return 2;
+			}
+			if (!ParseWarmupSamples(argv[++index], warmupSamples)) {
+				std::cerr << "--warmup-samples must be a decimal integer from 0 through "
+						  << MAXIMUM_WARMUP_SAMPLES << '\n';
+				return 2;
+			}
+			continue;
+		}
 		if (std::strcmp(argv[index], "--suite") == 0 && index + 1 < argc) {
 			// One suite at a time, so the runner's selection is honoured and a
 			// benchmark that did not change is not paid for.
@@ -123,13 +155,14 @@ int main(int argc, char **argv) {
 	}
 
 	std::cout << "# mono bench report v1\n";
+	std::cout << "# mono bench warmup v1\t" << warmupSamples << '\n';
 
 	for (const auto &entry : engine::testing::BenchRegistry::All()) {
 		if (!filter.empty() && entry.Suite != filter) {
 			continue;
 		}
 
-		for (int warm = 0; warm < WARMUP_SAMPLES; warm++) {
+		for (int warm = 0; warm < warmupSamples; warm++) {
 			Sample(entry);
 		}
 
