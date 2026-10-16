@@ -9,9 +9,12 @@
 //
 //     # mono bench report v1
 //     bench<TAB>suite<TAB>nanoseconds<TAB>spread<TAB>samples<TAB>iterations<TAB>unit<TAB>name
+//     # mono bench latency
+//     v1<TAB>suite<TAB>samples<TAB>iterations<TAB>unit<TAB>p50<TAB>p95<TAB>p99<TAB>max<TAB>name
 //
 // `nanoseconds` is the *minimum* sample, per iteration. See `Bench.hpp` on why
 // that is the right statistic and the mean is not.
+// Set MONO_BENCH_LATENCY=1 for the optional comment row, which uses only measured samples.
 
 #include <engine/testing/Bench.hpp>
 
@@ -58,6 +61,7 @@ namespace {
 	// stayed within 3 percent. Eight warms the code, data and CPU frequency before
 	// the usual seven-sample minimum is allowed to describe the algorithm.
 	constexpr int WARMUP_SAMPLES = 8;
+	constexpr int MAXIMUM_LATENCY_SAMPLES = 10'000;
 
 	// A record is one line and its free-text field is last, so a name carrying
 	// a tab would otherwise end the record early.
@@ -85,6 +89,8 @@ namespace {
 int main(int argc, char **argv) {
 	int samples = DEFAULT_SAMPLES;
 	std::string filter;
+	const char *latencySetting = std::getenv("MONO_BENCH_LATENCY");
+	const bool reportLatency = latencySetting != nullptr && std::strcmp(latencySetting, "1") == 0;
 
 	for (int index = 1; index < argc; index++) {
 		if (std::strcmp(argv[index], "--mono-suites") == 0) {
@@ -111,6 +117,10 @@ int main(int argc, char **argv) {
 			continue;
 		}
 	}
+	if (reportLatency && samples > MAXIMUM_LATENCY_SAMPLES) {
+		std::cerr << "latency reporting accepts at most " << MAXIMUM_LATENCY_SAMPLES << " samples\n";
+		return 2;
+	}
 
 	std::cout << "# mono bench report v1\n";
 
@@ -125,10 +135,13 @@ int main(int argc, char **argv) {
 
 		uint64_t fastest = UINT64_MAX;
 		uint64_t slowest = 0;
+		std::vector<uint64_t> measured;
+		if (reportLatency) measured.reserve(static_cast<size_t>(samples));
 		for (int taken = 0; taken < samples; taken++) {
 			const uint64_t elapsed = Sample(entry);
 			fastest = std::min(fastest, elapsed);
 			slowest = std::max(slowest, elapsed);
+			if (reportLatency) measured.push_back(elapsed);
 		}
 
 		const auto iterations = static_cast<uint64_t>(std::max<size_t>(1, entry.Iterations));
@@ -143,6 +156,19 @@ int main(int argc, char **argv) {
 		std::cout << "bench\t" << entry.Suite << '\t' << (fastest / iterations) << '\t'
 				  << ((slowest - fastest) / iterations) << '\t' << samples << '\t' << iterations << '\t'
 				  << engine::testing::Describe(entry.Unit) << '\t' << OneLine(entry.Name) << '\n';
+		if (reportLatency) {
+			std::sort(measured.begin(), measured.end());
+			const auto percentile = [&](size_t numerator) {
+				const size_t rank = (measured.size() * numerator + 99) / 100;
+				return measured[rank - 1] / iterations;
+			};
+			// Comment rows leave the v1 parser intact. Samples are complete body
+			// durations, normalized like the ordinary row, after warmup only.
+			std::cout << "# mono bench latency v1\t" << entry.Suite << '\t' << samples << '\t' << iterations
+					  << '\t' << engine::testing::Describe(entry.Unit) << '\t' << percentile(50) << '\t'
+					  << percentile(95) << '\t' << percentile(99) << '\t' << (measured.back() / iterations)
+					  << '\t' << OneLine(entry.Name) << '\n';
+		}
 	}
 
 	std::cout.flush();

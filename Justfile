@@ -2225,3 +2225,17 @@ ordinary-particle-bench samples="1":
         echo "ordinary-particle-bench failed or exceeded its 300s device deadline" >&2
         exit 1
     fi
+
+# Shared compilation and domain execution with measured-sample latency tails.
+# MONO_BENCH_MEMORY=1 adds heap probes on a heap-enabled preset.
+graph-pipeline-bench samples="101" build_preset="bench":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_graphcore bench_imagegraph bench_bake bench_audio bench_graph
+    export MONO_BENCH_LATENCY=1
+    ./.cache/build/{{build_preset}}/bench/bench_graphcore --suite engine.graphcore.bench.compile --samples {{samples}}
+    ./.cache/build/{{build_preset}}/bench/bench_imagegraph --suite engine.imagegraph.bench.compile --samples {{samples}}
+    ./.cache/build/{{build_preset}}/bench/bench_bake --suite engine.bake.bench.graph --samples {{samples}}
+    ./.cache/build/{{build_preset}}/bench/bench_audio --suite engine.audio.bench.graphrouting --samples {{samples}}
+    ./.cache/build/{{build_preset}}/bench/bench_graph --suite engine.graph.bench.enginegraph --samples {{samples}}

@@ -14,7 +14,8 @@ TEST_CASE("benchmark runner accepts complete selected-suite rows", "[benchrunner
 	REQUIRE(
 		benchrunner::ParseBenchmarkReport(
 			"# mono bench report v1\n"
-			"bench\ttools.benchrunner.report\t17\t2\t3\t8\tcall\tcache hit\n",
+			"bench\ttools.benchrunner.report\t17\t2\t3\t8\tcall\tcache hit\n"
+			"# mono bench latency v1\ttools.benchrunner.report\t3\t8\tcall\t18\t19\t19\t19\tcache hit\n",
 			"tools.benchrunner.report",
 			measurements,
 			error
