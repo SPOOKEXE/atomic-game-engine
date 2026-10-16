@@ -1745,7 +1745,11 @@ namespace engine::script {
 	JSValue InvokeJsCallback(JSContext *context, CallbackRef reference, int count, JSValueConst *arguments) {
 		// A previous listener may have destroyed this Script during the same pump.
 		if (!JsCallbackAlive(context, reference)) return JS_UNDEFINED;
-		return JS_Call(context, Held(context, reference), JS_UNDEFINED, count, arguments);
+		// A callback may disconnect its last registration while its bytecode is running.
+		const JSValue function = JS_DupValue(context, Held(context, reference));
+		const JSValue result = JS_Call(context, function, JS_UNDEFINED, count, arguments);
+		JS_FreeValue(context, function);
+		return result;
 	}
 
 	void ReapJsScripts(JSContext *context) {

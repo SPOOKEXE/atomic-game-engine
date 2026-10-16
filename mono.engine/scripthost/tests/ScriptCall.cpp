@@ -2471,3 +2471,38 @@ TEST_CASE(
 		);
 	}
 }
+
+TEST_CASE(
+	"an inline signal callback remains alive after disconnecting itself", "[scripting][signals][lifetime]"
+) {
+	for (const Language language : LANGUAGES) {
+		CAPTURE(static_cast<int>(language));
+		Store store = Fresh("scriptcall.self-disconnect");
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+		const char *source = language == Language::Luau ? R"(
+local connection
+connection = game:GetService('RunService').Heartbeat:Connect(function()
+    connection:Disconnect()
+    workspace.Name = 'callback survived disconnect'
+end)
+)"
+														: R"(
+let connection;
+connection = game.GetService('RunService').Heartbeat.Connect(() => {
+    connection.Disconnect();
+    workspace.Name = 'callback survived disconnect';
+});
+)";
+		REQUIRE(runtime->Run(source));
+		const bool first = runtime->Heartbeat(1.0f / 60.0f);
+		INFO(runtime->LastError());
+		REQUIRE(first);
+		const auto workspace = engine::scene::WorkspaceOf(store);
+		REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+		CHECK(store.InstanceNameOf(workspace).Text() == "callback survived disconnect");
+		REQUIRE(runtime->Run("workspace.Name = 'disconnected callback stayed stopped'"));
+		REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+		CHECK(store.InstanceNameOf(workspace).Text() == "disconnected callback stayed stopped");
+	}
+}
