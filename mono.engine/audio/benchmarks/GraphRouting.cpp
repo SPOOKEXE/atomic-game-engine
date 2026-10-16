@@ -162,6 +162,10 @@ namespace {
 				ProbeHeap("b0 audio simple", [] { BuildRouting(1); });
 				ProbeHeap("b0 audio busy", [] { BuildRouting(16); });
 				ProbeHeap("b0 audio complex", [] { BuildRouting(64); });
+				ProbeHeap("b0 audio mixer construction", [] {
+					AudioMixer mixer(AudioFormat{}, 128);
+					Consume(mixer.Clock());
+				});
 				Deadline();
 				ProbeHeap("b0 audio deadline cold", [] { Deadline().RenderScheduled(); });
 				ProbeHeap("b0 audio deadline warm", [] { Deadline().RenderScheduled(); });

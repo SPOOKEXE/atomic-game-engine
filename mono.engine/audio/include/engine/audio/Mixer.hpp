@@ -15,10 +15,9 @@
 // - applying everything at the top of the block - is audible jitter, and it is
 // the one place where "close enough to the frame" is wrong.
 //
-// **Nothing is allocated during a render.** Every scratch buffer is sized when
-// the graph changes and reused after that. A device callback that allocated
-// would eventually take a lock inside the allocator, on a thread whose deadline
-// is measured in milliseconds.
+// **Nothing is allocated during a render.** Bounded scratch storage is allocated
+// at construction, including space for later graph changes. An allocation could
+// take a lock inside the allocator, on a thread whose deadline is milliseconds.
 //
 // @tier L12 · client
 
@@ -30,7 +29,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace engine::audio {
@@ -262,6 +261,7 @@ namespace engine::audio {
 		struct Due {
 			Command What;
 			size_t Offset = 0;
+			size_t PostingOrder = 0;
 		};
 
 		PlaybackStatus Apply(const Command &command);
@@ -276,6 +276,8 @@ namespace engine::audio {
 		void RenderNode(size_t index, size_t frames, size_t blockOffset);
 
 		void EnsureScratch();
+		std::span<float> ScratchSamples(size_t slot, size_t frames);
+		size_t ScratchSlot(NodeId id) const;
 
 		AudioFormat Shape;
 		size_t BlockFrames;
@@ -287,26 +289,14 @@ namespace engine::audio {
 		// The callback owns Rendered; producers read only this completed-block publication.
 		std::atomic<uint64_t> PublishedRendered{0};
 
-		// One scratch buffer per node, indexed alongside the graph's order.
-		// Sized when the graph changes and reused after that, so a render
-		// allocates nothing.
-		std::vector<SampleBuffer> Scratch;
+		// Fixed rows cover the maximum graph before the first callback.
+		// Segments touch only their used prefix, preserving split-block work.
+		std::vector<float> Scratch;
 		std::vector<NodeId> ScratchFor;
 
-		// Which scratch slot each node's id occupies.
-		//
-		// **Because the alternative was a linear scan of `ScratchFor`, per
-		// input, per node, per segment.** Summing what is wired into a node
-		// means finding each input's scratch, and searching for it made the mix
-		// quadratic in the node count - an output with sixty-four inputs over a
-		// hundred-and-thirty-node graph is eight thousand comparisons to move
-		// sixty-four buffers, and a block split by commands paid all of it again
-		// per piece.
-		//
-		// Rebuilt only alongside `ScratchFor`, which is to say only when the
-		// node set changes - far less often than a block is rendered, and never
-		// on the device thread's critical path for an unchanged graph.
-		std::unordered_map<uint32_t, size_t> SlotOfNode;
+		// Sorted IDs keep lookup bounded without allocating map nodes when
+		// topology commands change the graph inside a callback.
+		std::vector<std::pair<uint32_t, size_t>> SlotOfNode;
 
 		// Reused across renders for the same reason.
 		std::vector<Command> Taken;

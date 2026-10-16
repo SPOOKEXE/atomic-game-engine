@@ -5,61 +5,53 @@
 #include <algorithm>
 #include <cmath>
 #include <span>
+#include <stdexcept>
 
 namespace engine::audio {
-
-	namespace {
-		// The part of a scratch buffer one segment actually uses.
-		//
-		// **Scratch is sized to the largest block the mixer will ever be asked
-		// for, and a segment is usually far shorter than that.** A command with a
-		// deadline inside the block splits it, and every piece re-renders every
-		// node - so a node touching all 512 frames when the segment is eight of
-		// them does sixty-four times the memory traffic the audio needs.
-		//
-		// That was measurable and large: `engine.audio.bench.mixing` reported 64
-		// voices at 102 microseconds with no commands and 693 with sixty-four of
-		// them, against a block deadline of 10.67 milliseconds. The work scaled
-		// with the number of splits rather than with the number of frames, which
-		// is the wrong axis entirely - the audio in a split block is exactly the
-		// audio in an unsplit one.
-		//
-		// Nothing reads past `frames`: `MixSegment` copies that many and the
-		// input-summing loop sums that many, and every segment re-silences from
-		// zero before it writes. So the tail is not stale, it is simply never
-		// looked at.
-		std::span<float> Used(SampleBuffer &buffer, size_t frames, uint16_t channels) {
-			const std::span<float> all = buffer.Data();
-			return all.first(std::min(frames * static_cast<size_t>(channels), all.size()));
-		}
-	}
 
 	AudioMixer::AudioMixer(AudioFormat format, size_t blockFrames)
 		: Shape(format.IsValid() ? format : AudioFormat{}),
 		  BlockFrames(blockFrames == 0 ? DEFAULT_BLOCK_FRAMES : blockFrames) {
+		const size_t channels = Shape.Channels;
+		if (BlockFrames > Scratch.max_size() / AudioGraph::MAXIMUM_NODES / channels)
+			throw std::length_error("audio mixer scratch exceeds maximum size");
+		Scratch.resize(AudioGraph::MAXIMUM_NODES * BlockFrames * channels);
+		ScratchFor.reserve(AudioGraph::MAXIMUM_NODES);
+		SlotOfNode.reserve(AudioGraph::MAXIMUM_NODES);
+		Taken.reserve(CommandQueue::CAPACITY);
+		Schedule.reserve(CommandQueue::CAPACITY);
 		EnsureScratch();
+	}
+
+	std::span<float> AudioMixer::ScratchSamples(size_t slot, size_t frames) {
+		const size_t rowSamples = BlockFrames * Shape.Channels;
+		return std::span<float>(Scratch).subspan(slot * rowSamples, frames * Shape.Channels);
+	}
+
+	size_t AudioMixer::ScratchSlot(NodeId id) const {
+		const auto found = std::lower_bound(
+			SlotOfNode.begin(), SlotOfNode.end(), id.Value, [](const auto &entry, uint32_t value) {
+				return entry.first < value;
+			}
+		);
+		return found != SlotOfNode.end() && found->first == id.Value ? found->second : ScratchFor.size();
 	}
 
 	void AudioMixer::EnsureScratch() {
 		const std::span<const NodeId> order = Nodes.Order();
 
-		// Rebuilt only when the node set changed. Comparing the id list is
-		// cheaper than reallocating a buffer per node per block, and the node
-		// set changes far less often than a block is rendered.
+		// Only rebuild the reserved lookup when topology changes its node order.
 		if (ScratchFor.size() == order.size() &&
 			std::equal(ScratchFor.begin(), ScratchFor.end(), order.begin())) {
 			return;
 		}
 
 		ScratchFor.assign(order.begin(), order.end());
-		Scratch.clear();
-		Scratch.reserve(order.size());
 		SlotOfNode.clear();
-		SlotOfNode.reserve(order.size());
 		for (size_t index = 0; index < order.size(); ++index) {
-			Scratch.emplace_back(Shape, BlockFrames);
-			SlotOfNode.emplace(order[index].Value, index);
+			SlotOfNode.emplace_back(order[index].Value, index);
 		}
+		std::sort(SlotOfNode.begin(), SlotOfNode.end());
 	}
 
 	PlaybackStatus AudioMixer::Apply(const Command &command) {
@@ -264,10 +256,7 @@ namespace engine::audio {
 	void AudioMixer::RenderNode(size_t index, size_t frames, size_t blockOffset) {
 		const NodeId id = ScratchFor[index];
 		Node *node = Nodes.Find(id);
-		SampleBuffer &out = Scratch[index];
-
-		// Only this segment's frames, per `Used` above.
-		const std::span<float> used = Used(out, frames, Shape.Channels);
+		const std::span<float> used = ScratchSamples(index, frames);
 		std::fill(used.begin(), used.end(), 0.0f);
 
 		if (node == nullptr) {
@@ -289,7 +278,7 @@ namespace engine::audio {
 			const double step =
 				static_cast<double>(source.Format().SampleRate) / static_cast<double>(Shape.SampleRate);
 
-			std::span<float> written = out.Data();
+			std::span<float> written = used;
 			const uint64_t segmentSample = Rendered + blockOffset;
 			const size_t firstFrame =
 				node->NotBeforeSample > segmentSample
@@ -337,13 +326,13 @@ namespace engine::audio {
 		// thing to the sum. Gathering first is what makes a bus and a fader the
 		// same code with one extra step.
 		for (const NodeId source : Nodes.InputsOf(id)) {
-			const auto found = SlotOfNode.find(source.Value);
-			if (found == SlotOfNode.end()) {
+			const size_t slot = ScratchSlot(source);
+			if (slot == ScratchFor.size()) {
 				continue;
 			}
 			// The topological order guarantees the input was rendered before
 			// this node, which is the whole reason the order exists.
-			const std::span<const float> from = Scratch[found->second].Data();
+			const std::span<const float> from = ScratchSamples(slot, frames);
 			for (size_t sample = 0; sample < used.size(); ++sample) {
 				used[sample] += from[sample];
 			}
@@ -357,7 +346,7 @@ namespace engine::audio {
 		switch (node->Kind) {
 		case NodeKind::Fader: {
 			const StereoGain pan = PanGain(node->Pan);
-			std::span<float> written = out.Data();
+			std::span<float> written = used;
 			for (size_t frame = 0; frame < frames; ++frame) {
 				written[frame * Shape.Channels] *= node->Gain * pan.Left;
 				if (Shape.Channels > 1) {
@@ -369,7 +358,7 @@ namespace engine::audio {
 
 		case NodeKind::Emitter: {
 			const StereoGain placed = Place(Nodes.Listener(), node->Placement);
-			std::span<float> written = out.Data();
+			std::span<float> written = used;
 			for (size_t frame = 0; frame < frames; ++frame) {
 				written[frame * Shape.Channels] *= node->Gain * placed.Left;
 				if (Shape.Channels > 1) {
@@ -407,11 +396,11 @@ namespace engine::audio {
 		}
 
 		// Copy the output's scratch into place.
-		const auto found = SlotOfNode.find(Nodes.Output().Value);
-		if (found == SlotOfNode.end()) {
+		const size_t slot = ScratchSlot(Nodes.Output());
+		if (slot == ScratchFor.size()) {
 			return;
 		}
-		const std::span<const float> from = Scratch[found->second].Data();
+		const std::span<const float> from = ScratchSamples(slot, frames);
 		std::span<float> written = out.Data();
 		const size_t count = frames * Shape.Channels;
 		for (size_t sample = 0; sample < count; ++sample) {
@@ -461,15 +450,17 @@ namespace engine::audio {
 			// A deadline in the past lands at offset zero - applied at the
 			// start of the next block rather than dropped. A tick that ran late
 			// still meant its command to happen.
-			Schedule.push_back(Due{.What = command, .Offset = offset});
+			const size_t postingOrder = Schedule.size();
+			Schedule.push_back(Due{.What = command, .Offset = offset, .PostingOrder = postingOrder});
 		}
 
-		// Stable, so two commands due on one sample are applied in the order
+		// The posting ordinal keeps commands due on one sample in the order
 		// they were posted. "Set the gain then play" and "play then set the
 		// gain" are different, and the caller's order is the one that means
 		// something.
-		std::stable_sort(Schedule.begin(), Schedule.end(), [](const Due &left, const Due &right) {
-			return left.Offset < right.Offset;
+		std::sort(Schedule.begin(), Schedule.end(), [](const Due &left, const Due &right) {
+			return left.Offset != right.Offset ? left.Offset < right.Offset
+											   : left.PostingOrder < right.PostingOrder;
 		});
 
 		// Walk the block, stopping at each distinct deadline.

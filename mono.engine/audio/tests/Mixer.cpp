@@ -2,6 +2,7 @@
 #include <engine/audio/Graph.hpp>
 #include <engine/audio/Mixer.hpp>
 #include <engine/audio/Sample.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -12,6 +13,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -937,4 +939,170 @@ TEST_CASE(
 	CHECK(received == total);
 	CHECK(rig.Engine.PlaybackEventsDropped() == 0);
 	CHECK(rig.Engine.Commands().Dropped() == 0);
+}
+
+TEST_CASE("mixer construction rejects an unrepresentable scratch block", "[audio][mixer]") {
+	REQUIRE_THROWS_AS(AudioMixer(STEREO, std::numeric_limits<size_t>::max()), std::length_error);
+}
+
+TEST_CASE("cold and warm callbacks use prepared storage after routing changes", "[audio][mixer]") {
+	using engine::core::HeapProfile;
+	AudioMixer mixer(STEREO, BLOCK);
+	SampleBuffer out(STEREO, BLOCK);
+	const SoundRef sound = Constant(0.5f);
+	const NodeId player = mixer.Graph().Add(NodeKind::Player);
+	REQUIRE(mixer.Graph().Connect(player, mixer.Graph().Output()));
+	mixer.Graph().Find(player)->Sound = sound;
+	mixer.Graph().Find(player)->Playing = true;
+	for (size_t block = 0; block < 2; ++block) {
+		REQUIRE(
+			mixer.Commands().Post(SetValue(CommandKind::SetGain, player, 0.5f, mixer.Clock() + BLOCK / 2))
+		);
+		const auto before = HeapProfile::Totals();
+		const MixReport report = mixer.Render(out);
+		const auto after = HeapProfile::Totals();
+		CHECK(report.Segments == 2);
+		CHECK(out.Frame(0)[0] == (block == 0 ? 0.5f : 0.25f));
+		CHECK(out.Frame(BLOCK / 2)[0] == 0.25f);
+		if (HeapProfile::IsCompiledIn()) {
+			CHECK(after.TotalBytes == before.TotalBytes);
+			CHECK(after.TotalBlocks == before.TotalBlocks);
+			CHECK(after.LiveBytes == before.LiveBytes);
+			CHECK(after.LiveBlocks == before.LiveBlocks);
+		}
+	}
+	if (!HeapProfile::IsCompiledIn()) SKIP("heap hooks unavailable; callback output was checked");
+}
+
+TEST_CASE("a full command ring preserves equal deadline posting order without allocation", "[audio][mixer]") {
+	using engine::core::HeapProfile;
+	Rig rig;
+	const SoundRef sound = Constant(0.5f);
+	rig.Post(SetSound(rig.Player, sound));
+	rig.Post(Act(CommandKind::Play, rig.Player));
+	rig.Engine.ApplyPending();
+	constexpr size_t count = CommandQueue::CAPACITY - 1;
+	std::array<size_t, BLOCK> last{};
+	std::array<bool, BLOCK> present{};
+	for (size_t index = 0; index < count; ++index) {
+		const size_t offset = (index * 17) % BLOCK;
+		const float gain = static_cast<float>(index % 8) / 8.0f;
+		Command command = SetValue(CommandKind::SetGain, rig.Player, gain, offset);
+		// The unused related ID makes every posted gain distinguishable in the trace.
+		command.Second = NodeId{static_cast<uint32_t>(index + 1)};
+		rig.Post(command);
+		last[offset] = index;
+		present[offset] = true;
+	}
+	CHECK_FALSE(rig.Engine.Commands().Post(Act(CommandKind::Stop, rig.Player)));
+	const auto before = HeapProfile::Totals();
+	const MixReport report = rig.Render();
+	const auto after = HeapProfile::Totals();
+	REQUIRE(report.Applied == count);
+	const auto trace = rig.Engine.LastAppliedCommands();
+	size_t traced = 0;
+	float gain = 1.0f;
+	for (size_t offset = 0; offset < BLOCK; ++offset) {
+		for (size_t index = 0; index < count; ++index) {
+			if ((index * 17) % BLOCK != offset) continue;
+			REQUIRE(traced < trace.size());
+			CHECK(trace[traced].Related.Value == index + 1);
+			CHECK(trace[traced].RequestedSample == offset);
+			CHECK(trace[traced].OffsetFrames == offset);
+			++traced;
+		}
+		if (present[offset]) gain = static_cast<float>(last[offset] % 8) / 8.0f;
+		CHECK(rig.At(offset) == 0.5f * gain);
+	}
+	CHECK(rig.Engine.Graph().Find(rig.Player)->Gain == gain);
+	if (!HeapProfile::IsCompiledIn()) SKIP("heap hooks unavailable; full ring output was checked");
+	CHECK(after.TotalBytes == before.TotalBytes);
+	CHECK(after.TotalBlocks == before.TotalBlocks);
+	CHECK(after.LiveBytes == before.LiveBytes);
+	CHECK(after.LiveBlocks == before.LiveBlocks);
+}
+
+TEST_CASE("maximum routing and deadline topology changes use prepared scratch", "[audio][mixer]") {
+	using engine::audio::AudioGraph;
+	using engine::core::HeapProfile;
+	AudioMixer mixer(STEREO, BLOCK);
+	SampleBuffer out(STEREO, BLOCK);
+	const SoundRef sound = Constant(0.5f);
+	const NodeId player = mixer.Graph().Add(NodeKind::Player);
+	mixer.Graph().Find(player)->Sound = sound;
+	mixer.Graph().Find(player)->Playing = true;
+	REQUIRE(mixer.Graph().Connect(player, mixer.Graph().Output()));
+	NodeId removed;
+	while (mixer.Graph().Count() < AudioGraph::MAXIMUM_NODES)
+		removed = mixer.Graph().Add(NodeKind::Bus);
+	const auto coldBefore = HeapProfile::Totals();
+	const MixReport coldReport = mixer.Render(out);
+	const auto coldAfter = HeapProfile::Totals();
+	CHECK(coldReport.Frames == BLOCK);
+	CHECK(out.Frame(0)[0] == 0.5f);
+	const NodeId high{std::numeric_limits<uint32_t>::max() - 1};
+	Command refused = AddNode(high, NodeKind::Bus);
+	refused.AtSample = mixer.Clock() + 8;
+	REQUIRE(mixer.Commands().Post(refused));
+	REQUIRE(mixer.Commands().Post(Act(CommandKind::RemoveNode, removed, mixer.Clock() + 16)));
+	Command add = AddNode(high, NodeKind::Bus);
+	add.AtSample = mixer.Clock() + 16;
+	REQUIRE(mixer.Commands().Post(add));
+	Command wire = Wire(player, high);
+	wire.AtSample = mixer.Clock() + 16;
+	REQUIRE(mixer.Commands().Post(wire));
+	wire = Wire(high, mixer.Graph().Output());
+	wire.AtSample = mixer.Clock() + 16;
+	REQUIRE(mixer.Commands().Post(wire));
+	REQUIRE(mixer.Commands().Post(Act(CommandKind::RemoveNode, high, mixer.Clock() + 32)));
+	add.AtSample = mixer.Clock() + 40;
+	REQUIRE(mixer.Commands().Post(add));
+	wire = Wire(player, high);
+	wire.AtSample = mixer.Clock() + 40;
+	REQUIRE(mixer.Commands().Post(wire));
+	wire = Wire(high, mixer.Graph().Output());
+	wire.AtSample = mixer.Clock() + 40;
+	REQUIRE(mixer.Commands().Post(wire));
+	const auto before = HeapProfile::Totals();
+	const MixReport report = mixer.Render(out);
+	const auto after = HeapProfile::Totals();
+	CHECK(report.Applied == 9);
+	CHECK(mixer.LastAppliedCommands()[0].Status == engine::audio::PlaybackStatus::Refused);
+	CHECK(mixer.Graph().Count() == AudioGraph::MAXIMUM_NODES);
+	for (size_t frame = 0; frame < BLOCK; ++frame)
+		CHECK(out.Frame(frame)[0] == ((frame >= 16 && frame < 32) || frame >= 40 ? 1.0f : 0.5f));
+	if (!HeapProfile::IsCompiledIn()) SKIP("heap hooks unavailable; maximum routing output was checked");
+	CHECK(coldAfter.TotalBytes == coldBefore.TotalBytes);
+	CHECK(coldAfter.TotalBlocks == coldBefore.TotalBlocks);
+	CHECK(coldAfter.LiveBytes == coldBefore.LiveBytes);
+	CHECK(coldAfter.LiveBlocks == coldBefore.LiveBlocks);
+	CHECK(after.TotalBytes == before.TotalBytes);
+	CHECK(after.TotalBlocks == before.TotalBlocks);
+	CHECK(after.LiveBytes == before.LiveBytes);
+	CHECK(after.LiveBlocks == before.LiveBlocks);
+}
+
+TEST_CASE("an empty output applies waiting commands without advancing the mixer clock", "[audio][mixer]") {
+	using engine::core::HeapProfile;
+	AudioMixer mixer(STEREO, BLOCK);
+	SampleBuffer out(STEREO, 0);
+	const NodeId player = mixer.Commands().Allocate();
+	Command add = AddNode(player, NodeKind::Player);
+	add.AtSample = 12;
+	REQUIRE(mixer.Commands().Post(add));
+	const auto before = HeapProfile::Totals();
+	const MixReport report = mixer.Render(out);
+	const auto after = HeapProfile::Totals();
+	CHECK(report.Frames == 0);
+	CHECK(report.Applied == 1);
+	CHECK(mixer.Clock() == 0);
+	REQUIRE(mixer.Graph().Find(player) != nullptr);
+	REQUIRE(mixer.LastAppliedCommands().size() == 1);
+	CHECK(mixer.LastAppliedCommands()[0].AppliedSample == 0);
+	CHECK(mixer.LastAppliedCommands()[0].RequestedSample == 12);
+	if (!HeapProfile::IsCompiledIn()) SKIP("heap hooks unavailable; empty output was checked");
+	CHECK(after.TotalBytes == before.TotalBytes);
+	CHECK(after.TotalBlocks == before.TotalBlocks);
+	CHECK(after.LiveBytes == before.LiveBytes);
+	CHECK(after.LiveBlocks == before.LiveBlocks);
 }
