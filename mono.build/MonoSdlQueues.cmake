@@ -1,15 +1,24 @@
 include_guard(GLOBAL)
 
-# Materialize the pinned SDL sources with the private queue patch. Git archives
-# tracked sources only; a content-keyed directory keeps concurrent presets from
-# replacing sources another build is compiling. No shell or installed SDK is used.
+# Materialize pinned SDL sources with the required sampler barrier patch and,
+# when enabled, the private queue patch. Git archives tracked sources only; a
+# content-keyed directory keeps concurrent presets from replacing active builds.
 function(mono_prepare_sdl_queues root output)
 	find_package(Git REQUIRED)
 	set(source "${root}/mono.vendor/sdl")
-	set(patch "${root}/mono.vendor/patches/sdl/vulkan-queues.patch")
-	if(NOT EXISTS "${source}/CMakeLists.txt" OR NOT EXISTS "${patch}")
-		message(FATAL_ERROR "SDL sources or the private queue patch are missing. Run just setup.")
+	set(patches "${root}/mono.vendor/patches/sdl/vulkan-compute-samplers.patch")
+	if(MONO_SDL_VULKAN_QUEUES)
+		list(APPEND patches "${root}/mono.vendor/patches/sdl/vulkan-queues.patch")
 	endif()
+	if(NOT EXISTS "${source}/CMakeLists.txt")
+		message(FATAL_ERROR "SDL sources are missing. Run just setup.")
+	endif()
+	foreach(patch IN LISTS patches)
+		if(NOT EXISTS "${patch}")
+			message(FATAL_ERROR "Required SDL patch is missing: ${patch}")
+		endif()
+	endforeach()
+	unset(patch)
 
 	# Repository-local Git environment from hooks must not redirect these reads.
 	execute_process(
@@ -56,8 +65,13 @@ function(mono_prepare_sdl_queues root output)
 		message(FATAL_ERROR "SDL must stay pristine. Move local changes into its project patch. ${edits} ${error}")
 	endif()
 
-	file(SHA256 "${patch}" patch_hash)
-	string(SHA256 fingerprint "atomic-sdl-queues-v1\n${pinned_commit}\n${patch_hash}\n")
+	set(patch_fingerprint "")
+	foreach(patch IN LISTS patches)
+		file(SHA256 "${patch}" patch_hash)
+		get_filename_component(patch_name "${patch}" NAME)
+		string(APPEND patch_fingerprint "${patch_name}:${patch_hash}\n")
+	endforeach()
+	string(SHA256 fingerprint "atomic-sdl-patches-v2\n${pinned_commit}\n${patch_fingerprint}")
 	string(SUBSTRING "${fingerprint}" 0 16 key)
 	set(cache "${root}/.cache/vendor/sdl")
 	set(destination "${cache}/${key}")
@@ -93,17 +107,20 @@ function(mono_prepare_sdl_queues root output)
 	file(ARCHIVE_EXTRACT INPUT "${archive}" DESTINATION "${staging}" TOUCH)
 	file(REMOVE "${archive}")
 	file(RELATIVE_PATH staging_relative "${root}" "${staging}")
-	execute_process(
-		COMMAND ${git} -C "${root}" apply --whitespace=error "--directory=${staging_relative}" "${patch}"
-		ERROR_VARIABLE error RESULT_VARIABLE result
-	)
-	if(NOT result EQUAL 0)
-		file(REMOVE_RECURSE "${staging}")
-		message(FATAL_ERROR "The private SDL queue patch no longer applies to ${pinned_commit}: ${error}")
-	endif()
+	foreach(patch IN LISTS patches)
+		get_filename_component(patch_name "${patch}" NAME)
+		execute_process(
+			COMMAND ${git} -C "${root}" apply --whitespace=error "--directory=${staging_relative}" "${patch}"
+			ERROR_VARIABLE error RESULT_VARIABLE result
+		)
+		if(NOT result EQUAL 0)
+			file(REMOVE_RECURSE "${staging}")
+			message(FATAL_ERROR "SDL patch ${patch_name} no longer applies to ${pinned_commit}: ${error}")
+		endif()
+	endforeach()
 	file(WRITE "${staging}/.atomic-source.sha256" "${fingerprint}")
 	file(REMOVE_RECURSE "${destination}")
 	file(RENAME "${staging}" "${destination}")
-	message(STATUS "Prepared private SDL queue sources at ${destination}")
+	message(STATUS "Prepared patched SDL sources at ${destination}")
 	set(${output} "${destination}" PARENT_SCOPE)
 endfunction()

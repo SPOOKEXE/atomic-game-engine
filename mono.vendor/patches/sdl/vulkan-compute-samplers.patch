@@ -1,0 +1,36 @@
+Correct Vulkan sampler barriers for compute shader reads.
+
+WHY THIS IS A PATCH
+    SDL represents graphics and compute texture sampling with the same
+    VULKAN_TEXTURE_USAGE_MODE_SAMPLER state. Its default barrier stage mask
+    covers only vertex and fragment shaders, so a compute sampler read can run
+    outside the dependency. ALL_COMMANDS covers that shared usage while keeping
+    SDL's shader-read access mask and image layouts unchanged. The private queue
+    patch retains its later queue-enabled override.
+
+WHEN IT STOPS APPLYING
+    Pinned SDL commit: fa2c02bb6e21974a89ea9824bc53c9932abe5f9c.
+    Re-point the source and destination SAMPLER branches in
+    src/gpu/vulkan/SDL_gpu_vulkan.c. Do not edit mono.vendor/sdl in place.
+
+--- a/src/gpu/vulkan/SDL_gpu_vulkan.c
++++ b/src/gpu/vulkan/SDL_gpu_vulkan.c
+@@ -2726,7 +2726,8 @@
+         memoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+         memoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+     } else if (sourceUsageMode == VULKAN_TEXTURE_USAGE_MODE_SAMPLER) {
+-        srcStages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
++        /* SDL's generic sampler usage also covers compute sampler bindings. */
++        srcStages = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+         memoryBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+         memoryBarrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+     } else if (sourceUsageMode == VULKAN_TEXTURE_USAGE_MODE_GRAPHICS_STORAGE_READ) {
+@@ -2763,7 +2764,7 @@
+         memoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+         memoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+     } else if (destinationUsageMode == VULKAN_TEXTURE_USAGE_MODE_SAMPLER) {
+-        dstStages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
++        dstStages = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+         memoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+         memoryBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+     } else if (destinationUsageMode == VULKAN_TEXTURE_USAGE_MODE_GRAPHICS_STORAGE_READ) {
