@@ -57,6 +57,9 @@
 #include <engine/weather/Clock.hpp>
 
 #include <SDL3/SDL.h>
+
+#include <studio/ProceduralEditor.hpp>
+#include <studio/ProceduralPanel.hpp>
 // `Log.hpp` forward-declares `spdlog::logger` so that the rest of the tree does
 // not acquire spdlog for the sake of a log macro. This file is one of the two
 // that genuinely wants the type - `PanelSink` below installs itself into
@@ -988,6 +991,7 @@ namespace studio {
 
 	void Editor::Shutdown() {
 		WeatherAudio_.reset();
+		ReleaseProceduralPreview();
 		ReleaseImageComposerPreview();
 		ImageComposer.reset();
 		// A prepared import owns no universe state, but its result fields belong
@@ -2189,7 +2193,7 @@ namespace studio {
 			}
 		}
 
-		if (!PreviewWanted.empty()) {
+		if (!PreviewWanted.empty() || ProceduralPreviewWanted) {
 			Candidates.push_back(PreviewSlot());
 		}
 
@@ -2226,6 +2230,7 @@ namespace studio {
 		PrepareControlScreenshot();
 
 		if (viewport == PreviewSlot()) {
+			if (ProceduralPreviewWanted && RenderProceduralPreviewSlot()) return;
 			if (RenderPreviewSlot()) {
 				PreviewWanted.clear();
 				return;
@@ -3798,6 +3803,7 @@ namespace studio {
 	}
 
 	void Editor::NewGame() {
+		ReleaseProceduralPreview();
 		ReleaseImageComposerPreview();
 		EndAllRuns();
 		StopAllPlaytestPlugins();
@@ -3981,6 +3987,7 @@ namespace studio {
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
+		ReleaseProceduralPreview();
 		ReleaseImageComposerPreview();
 		EndAllRuns();
 		StopAllPlaytestPlugins();

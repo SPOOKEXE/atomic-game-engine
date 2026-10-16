@@ -35,6 +35,8 @@ mono_add_library(studio
 		Engine::audio
 		Engine::effects
 		Engine::script
+		# The procedural editor authors recipes and compares canonical region keys.
+		Engine::procedural
 
 		# L11, `shared`. **Because script plugins and the command bar each open
 		# their own VM.** `Plugins.cpp`, `CommandBar.cpp` and `ScriptEditor.cpp` each

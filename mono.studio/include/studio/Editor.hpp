@@ -149,6 +149,8 @@ namespace studio {
 	struct ViewportCameraProbe;
 	struct PlayedInputAdapter;
 	struct ImageComposerState;
+	class ProceduralEditor;
+	struct ProceduralPanelState;
 	class DataFactoryHost;
 	struct WeatherAudio;
 
@@ -6077,6 +6079,23 @@ namespace studio {
 		std::vector<PluginReloadRoot> PluginReloadRoots;
 		double NextPluginRootScanSeconds = 0.0;
 		//@}
+
+		// Isolated procedural preview and editor-only input drafts.
+		bool ShowProcedural = false;
+		std::unique_ptr<ProceduralEditor> ProceduralPreview;
+		std::unique_ptr<ProceduralPanelState> ProceduralPanel;
+		WorldId ProceduralWorld{};
+		engine::core::Name ProceduralPreviewOwner{};
+		engine::core::Name ProceduralPreviewTexture{};
+		void *ProceduralPreviewHandle = nullptr;
+		bool ProceduralPreviewWanted = false;
+		uint32_t ProceduralRenderedRevision = 0;
+		engine::ecs::Entity ProceduralRenderedMesh{};
+		float ProceduralRenderedOrbit = 0.0f;
+		void DrawProceduralGeneration();
+		void ApplyProceduralPending();
+		bool RenderProceduralPreviewSlot();
+		void ReleaseProceduralPreview();
 
 		// Image Composer state belongs to this editor instance.
 		//@{
