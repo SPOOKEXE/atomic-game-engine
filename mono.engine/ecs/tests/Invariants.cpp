@@ -91,6 +91,18 @@ namespace invariants_test {
 		uint32_t Second = 0;
 	};
 
+	// A transient resource can be serialisable while its writer emits no bytes.
+	struct EmptyEncoded {
+		uint32_t Value = 0;
+	};
+
+	void WriteEmpty(ByteWriter &, const void *, size_t) {}
+
+	void ReadEmpty(ByteReader &, void *destination, size_t count) {
+		auto *values = static_cast<EmptyEncoded *>(destination);
+		for (size_t index = 0; index < count; index++) values[index] = {};
+	}
+
 	void WriteLopsided(ByteWriter &writer, const void *source, size_t count) {
 		const auto *values = static_cast<const Lopsided *>(source);
 		for (size_t index = 0; index < count; index++) {
@@ -167,6 +179,12 @@ TEST_CASE("a reader that consumes less than its writer produced is named", "[ecs
 	Components::Register<Lopsided>("test.Lopsided", WriteLopsided, ReadLopsided);
 
 	REQUIRE(Mentions(RulesFor("test.Lopsided"), "different number of bytes"));
+}
+
+TEST_CASE("a zero-byte codec survives the component audit", "[ecs][invariants]") {
+	Components::Register<EmptyEncoded>("test.EmptyEncoded", WriteEmpty, ReadEmpty);
+
+	REQUIRE(RulesFor("test.EmptyEncoded").empty());
 }
 
 TEST_CASE("a wire format that lies about its width is named", "[ecs][invariants]") {

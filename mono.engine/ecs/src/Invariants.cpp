@@ -207,7 +207,8 @@ namespace engine::ecs {
 			const std::span<const std::byte> first = writer.Bytes();
 			const std::span<const std::byte> second = again.Bytes();
 			const bool same =
-				first.size() == second.size() && std::memcmp(first.data(), second.data(), first.size()) == 0;
+				first.size() == second.size() &&
+				(first.empty() || std::memcmp(first.data(), second.data(), first.size()) == 0);
 
 			type.Destruct(restored.Data(), COUNT);
 
