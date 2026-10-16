@@ -4,6 +4,7 @@
 // its existing device; this adapter never opens a second graphics device.
 // @tier L12 · client
 
+#include <engine/computegraph/Program.hpp>
 #include <engine/computegraph/Runtime.hpp>
 
 #include <memory>
@@ -11,24 +12,10 @@
 #include <vector>
 
 namespace engine::render {
-	// Named executable code supplied independently of the authored binding contract.
-	struct ComputeKernelCode {
-		// Stable identity matching one document kernel.
-		std::string Name{};
-		// Runtime-authored GLSL, or a staged engine shader filename, exclusively.
-		std::string Source{};
-		std::string BuiltIn{};
-	};
-	// One admitted domain document and its executable sources.
-	struct ComputeGraphProgram {
-		// Typed buffers, interfaces and resource dependencies.
-		computegraph::Document Definition{};
-		// One executable for every reusable kernel declaration.
-		std::vector<ComputeKernelCode> Kernels{};
-		// Named u32 diagnostic outputs. Every nonzero word prevents publication.
-		// These may not also serve as device-count buffers.
-		std::vector<std::string> ErrorBuffers{};
-	};
+	// Neutral executable-source declaration shared with script hosts.
+	using ComputeKernelCode = computegraph::KernelCode;
+	// Neutral typed document plus independent executable sources.
+	using ComputeGraphProgram = computegraph::Program;
 	// Fixed host ABI v1: set 2/binding 0 is an optional std140 block containing
 	// uvec4 Dispatch followed by uvec4 Buffers[32]. Dispatch.x is the current
 	// invocation bound. Readonly descriptor slot N uses row N, writable slot N

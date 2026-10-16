@@ -1,6 +1,7 @@
 #include "RenderFixture.hpp"
 
 #include <engine/computegraph/Reference.hpp>
+#include <engine/computegraph/Stock.hpp>
 #include <engine/render/ComputeGraph.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -44,110 +45,23 @@ namespace {
 	}
 	ComputeGraphProgram CompactProgram(uint32_t capacity) {
 		ComputeGraphProgram program;
-		auto &document = program.Definition;
-		const auto buffer = [&](std::string name, uint32_t count) {
-			document.Buffers.push_back({.Name = std::move(name), .Capacity = count, .LogicalCount = count});
-		};
-		const auto error = [&](std::string name, uint32_t work) {
-			buffer(name, std::max(1u, Groups(work)));
-			program.ErrorBuffers.push_back(std::move(name));
-		};
-		document.Buffers.push_back(
-			{.Name = "input", .Capacity = capacity, .Permission = cg::Access::Read, .External = true}
+		cg::Diagnostic diagnostic;
+		REQUIRE(cg::StockStableCompactU32(capacity, program, diagnostic) == cg::Status::Ok);
+		program.Definition.Buffers.push_back(
+			{.Name = "doubled", .Capacity = capacity, .CountBuffer = "count"}
 		);
-		const auto scratch = std::max(1u, capacity);
-		buffer("flags", scratch);
-		buffer("count", 1);
-		document.Buffers.push_back({.Name = "packed", .Capacity = capacity, .CountBuffer = "count"});
-		document.Buffers.push_back({.Name = "doubled", .Capacity = capacity, .CountBuffer = "count"});
-		document.Kernels = {
-			{.Name = "classify", .Ports = {Read("Values", 0), Write("Flags", 0)}},
-			{.Name = "scan",
-			 .Ports = {Read("Values", 0), Write("Prefix", 0), Write("Sums", 1), Write("Errors", 2)}},
-			{.Name = "add-offsets",
-			 .Ports = {Read("Local", 0), Read("Parent", 1), Write("Prefix", 0), Write("Errors", 1)}},
-			{.Name = "scatter",
-			 .Ports =
-				 {Read("Values", 0),
-				  Read("Flags", 1),
-				  Read("Prefix", 2),
-				  Read("Count", 3, true),
-				  Write("Packed", 0),
-				  Write("Errors", 1)}},
+		program.Definition.Buffers.push_back(
+			{.Name = "double-errors",
+			 .Capacity = std::max(1u, Groups(capacity)),
+			 .LogicalCount = std::max(1u, Groups(capacity))}
+		);
+		program.ErrorBuffers.push_back("double-errors");
+		program.Definition.Kernels.push_back(
 			{.Name = "double",
-			 .Ports = {Read("Values", 0), Read("Count", 1, true), Write("Result", 0), Write("Errors", 1)}},
-		};
-		program.Kernels = {
-			{.Name = "classify", .BuiltIn = "compute-classify.comp"},
-			{.Name = "scan", .BuiltIn = "compute-scan.comp"},
-			{.Name = "add-offsets", .BuiltIn = "compute-add-offsets.comp"},
-			{.Name = "scatter", .BuiltIn = "compute-scatter.comp"},
-			{.Name = "double", .BuiltIn = "compute-double.comp"},
-		};
-		document.Passes.push_back(
-			{.Name = "classify",
-			 .Kernel = "classify",
-			 .DispatchBuffer = "flags",
-			 .Bindings = {{"Values", "input"}, {"Flags", "flags"}}}
+			 .Ports = {Read("Values", 0), Read("Count", 1, true), Write("Result", 0), Write("Errors", 1)}}
 		);
-		std::vector<std::string> prefixes;
-		std::vector<uint32_t> extents;
-		std::string source = "flags";
-		uint32_t extent = scratch;
-		for (uint32_t level = 0;; ++level) {
-			const auto label = std::to_string(level);
-			const auto prefix = "local-" + label;
-			const auto sums = Groups(extent) == 1 ? "count" : "sums-" + label;
-			const auto errors = "scan-errors-" + label;
-			buffer(prefix, extent);
-			if (sums != "count") buffer(sums, Groups(extent));
-			error(errors, extent);
-			document.Passes.push_back(
-				{.Name = "scan-" + label,
-				 .Kernel = "scan",
-				 .DispatchBuffer = source,
-				 .Bindings = {{"Values", source}, {"Prefix", prefix}, {"Sums", sums}, {"Errors", errors}}}
-			);
-			prefixes.push_back(prefix);
-			extents.push_back(extent);
-			if (Groups(extent) == 1) break;
-			source = sums;
-			extent = Groups(extent);
-		}
-		std::string global = prefixes.back();
-		for (size_t level = prefixes.size() - 1; level > 0;) {
-			--level;
-			const auto label = std::to_string(level);
-			const auto next = "global-" + label;
-			const auto errors = "add-errors-" + label;
-			buffer(next, extents[level]);
-			error(errors, extents[level]);
-			document.Passes.push_back(
-				{.Name = "add-" + label,
-				 .Kernel = "add-offsets",
-				 .DispatchBuffer = prefixes[level],
-				 .Bindings = {
-					 {"Local", prefixes[level]}, {"Parent", global}, {"Prefix", next}, {"Errors", errors}
-				 }}
-			);
-			global = next;
-		}
-		error("scatter-errors", scratch);
-		error("double-errors", capacity);
-		document.Passes.push_back(
-			{.Name = "scatter",
-			 .Kernel = "scatter",
-			 .DispatchBuffer = "flags",
-			 .Bindings = {
-				 {"Values", "input"},
-				 {"Flags", "flags"},
-				 {"Prefix", global},
-				 {"Count", "count"},
-				 {"Packed", "packed"},
-				 {"Errors", "scatter-errors"}
-			 }}
-		);
-		document.Passes.push_back(
+		program.Kernels.push_back({.Name = "double", .BuiltIn = "compute-double.comp"});
+		program.Definition.Passes.push_back(
 			{.Name = "double",
 			 .Kernel = "double",
 			 .DispatchBuffer = "packed",
