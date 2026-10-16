@@ -100,7 +100,8 @@ namespace invariants_test {
 
 	void ReadEmpty(ByteReader &, void *destination, size_t count) {
 		auto *values = static_cast<EmptyEncoded *>(destination);
-		for (size_t index = 0; index < count; index++) values[index] = {};
+		for (size_t index = 0; index < count; index++)
+			values[index] = {};
 	}
 
 	void WriteLopsided(ByteWriter &writer, const void *source, size_t count) {
