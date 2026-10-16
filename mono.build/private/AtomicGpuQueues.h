@@ -11,6 +11,7 @@
 #define ATOMIC_GPU_QUEUES_CREATE_PROPERTY "Atomic.gpu.vulkan.enable_queues"
 #define ATOMIC_GPU_QUEUES_DEVICE_PROPERTY "Atomic.gpu.vulkan.queues.v1"
 #define ATOMIC_GPU_QUEUES_MAX_SEMAPHORES 128u
+#define ATOMIC_GPU_QUEUES_MAX_RESOURCES 128u
 
 typedef enum AtomicGpuQueueClass {
 	ATOMIC_GPU_QUEUE_GRAPHICS = 0,
@@ -18,6 +19,19 @@ typedef enum AtomicGpuQueueClass {
 	ATOMIC_GPU_QUEUE_TRANSFER = 2,
 	ATOMIC_GPU_QUEUE_COUNT = 3
 } AtomicGpuQueueClass;
+
+typedef enum AtomicGpuResourceKind {
+	ATOMIC_GPU_RESOURCE_BUFFER = 0,
+	ATOMIC_GPU_RESOURCE_TEXTURE = 1,
+	ATOMIC_GPU_RESOURCE_SAMPLER = 2,
+	ATOMIC_GPU_RESOURCE_GRAPHICS_PIPELINE = 3,
+	ATOMIC_GPU_RESOURCE_COMPUTE_PIPELINE = 4
+} AtomicGpuResourceKind;
+
+typedef struct AtomicGpuResource {
+	uint32_t Kind;
+	void *Handle;
+} AtomicGpuResource;
 
 typedef struct AtomicGpuQueuesV1 {
 	uint32_t StructSize;
@@ -36,7 +50,7 @@ typedef struct AtomicGpuQueuesV1 {
 	VkQueue Queue[ATOMIC_GPU_QUEUE_COUNT];
 
 	/* Owner brackets all worker recording and submission. End refuses until every
-	 * acquired buffer was submitted or cancelled on its acquiring thread. */
+	 * acquired buffer was submitted or cancelled and every frozen lease released. */
 	bool(SDLCALL *BeginRecordingBatch)(SDL_GPUDevice *device);
 	bool(SDLCALL *EndRecordingBatch)(SDL_GPUDevice *device);
 
@@ -44,8 +58,8 @@ typedef struct AtomicGpuQueuesV1 {
 	 * otherwise waits for all queues and performs SDL's pending defragmentation. */
 	bool(SDLCALL *MaintainIdle)(SDL_GPUDevice *device);
 
-	/* Acquire, record, configure, submit or cancel on one thread. Resources must
-	 * keep the same active generation throughout the batch; workers never cycle. */
+	/* Acquire, record, configure, submit or cancel on one thread. Workers bind frozen
+	 * resource handles and never cycle their backing. */
 	SDL_GPUCommandBuffer *(SDLCALL *Acquire)(SDL_GPUDevice *device, uint32_t queueClass);
 
 	/* Copies at most MAX_SEMAPHORES waits and signals each. Semaphores are binary,
@@ -65,6 +79,28 @@ typedef struct AtomicGpuQueuesV1 {
 	/* Borrowed timestamp/debug handle only. Submit and cancel through SDL so
 	 * command/resource references and completion cleanup stay intact. */
 	VkCommandBuffer(SDLCALL *NativeCommandBuffer)(SDL_GPUCommandBuffer *command);
+
+	/* Owner freezes current backing generations inside a recording batch. Frozen
+	 * handles bind through SDL normally; workers must never cycle or release them.
+	 * At most MAX_RESOURCES per call. Allocation failure clears every output.
+	 * Owner releases only returned handles after workers finish, before ending the
+	 * batch. Release clears the outputs. Submitted SDL commands retain their own
+	 * backing references until their fences finish. */
+	bool(SDLCALL *FreezeResources)(
+		SDL_GPUDevice *device, uint32_t count, const AtomicGpuResource *sources, AtomicGpuResource *outputs
+	);
+	bool(SDLCALL *ReleaseFrozenResources)(
+		SDL_GPUDevice *device, uint32_t count, AtomicGpuResource *resources
+	);
+
+	/* Owner registers at most eight cleanup callbacks outside recording batches.
+	 * Userdata stays alive until SDL_DestroyGPUDevice returns. Each callback runs
+	 * once before native device destruction and must not submit work. A true
+	 * resourcesRetired permits native child destruction; false requires abandoning
+	 * borrowed handles without Vulkan calls after an unconfirmed queue drain. */
+	bool(SDLCALL *DeferDeviceCleanup)(
+		SDL_GPUDevice *device, void(SDLCALL *cleanup)(void *userdata, bool resourcesRetired), void *userdata
+	);
 } AtomicGpuQueuesV1;
 
 #endif

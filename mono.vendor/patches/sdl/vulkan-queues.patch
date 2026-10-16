@@ -20,11 +20,19 @@ SYNCHRONIZATION AND LIFETIME
     Bounded graph semaphores are copied into each SDL command buffer. All graph
     waits use ALL_COMMANDS in ABI v1. SDL submit, fence and reference cleanup remain
     authoritative. Concurrent sharing removes family ownership handoffs; ordinary
-    image layouts and explicit graph data dependencies still apply. Resources must
-    keep their active generation fixed throughout worker recording. An owner
-    preparation signal covers SDL's implicit texture-initialization submissions.
+    image layouts and explicit graph data dependencies still apply. Owner-created
+    frozen facades pin the selected buffer/texture generation for worker packets;
+    sampler and pipeline leases pin their native objects. Workers never cycle or
+    release frozen handles. Batch completion and maintenance refuse live leases.
+    An owner signal covers SDL's implicit texture-initialization submissions.
     Recording batches exclude defragmentation; explicit maintenance drains queues
     before using SDL's existing compaction path. Empty maintenance does not wait.
+    Valid acquiring-thread submissions consume the command even on failure;
+    unsubmitted failures drop command references, while present failures retain
+    the successfully submitted work until its fence completes. Owner-registered
+    native cleanup callbacks run once after SDL's final all-device wait and before
+    native device destruction. They receive whether queue retirement was confirmed;
+    an unconfirmed drain logs an error and callbacks abandon native handles.
 
 VALIDATION
     An isolated headless RTX 4090 fixture passed ordinary opt-out and opt-in paths:
@@ -32,6 +40,8 @@ VALIDATION
     graphics download and exact byte parity. Local Khronos validation was enabled
     with synchronization checks and reported no diagnostics. This demonstrates
     correctness, not measured physical hardware overlap or recording speedup.
+    Frozen-resource and deferred-cleanup callbacks need engine integration
+    validation after rebuilding.
 
 WHEN IT STOPS APPLYING
     Pinned SDL commit: fa2c02bb6e21974a89ea9824bc53c9932abe5f9c.
@@ -90,7 +100,7 @@ index 8e0e349..f804c54 100644
  extern SDL_GPUBootstrap D3D12Driver;
  extern SDL_GPUBootstrap MetalDriver;
 diff --git a/src/gpu/vulkan/SDL_gpu_vulkan.c b/src/gpu/vulkan/SDL_gpu_vulkan.c
-index 330bb1a..51fba21 100644
+index 330bb1a..7211538 100644
 --- a/src/gpu/vulkan/SDL_gpu_vulkan.c
 +++ b/src/gpu/vulkan/SDL_gpu_vulkan.c
 @@ -34,6 +34,18 @@
@@ -151,7 +161,7 @@ index 330bb1a..51fba21 100644
      VkCommandPool commandPool;
  
      VulkanCommandBuffer **inactiveCommandBuffers;
-@@ -1150,6 +1171,21 @@ struct VulkanRenderer
+@@ -1150,6 +1171,28 @@ struct VulkanRenderer
  
      Uint32 queueFamilyIndex;
      VkQueue unifiedQueue;
@@ -160,6 +170,7 @@ index 330bb1a..51fba21 100644
 +    bool atomicMaintenance;
 +    SDL_ThreadID atomicOwner;
 +    SDL_AtomicInt atomicOutstandingCommands;
++    SDL_AtomicInt atomicFrozenResources;
 +    Uint32 atomicQueueFamilies[ATOMIC_QUEUE_COUNT];
 +    VkQueue atomicQueues[ATOMIC_QUEUE_COUNT];
 +    VkQueueFlags atomicQueueFlags[ATOMIC_QUEUE_COUNT];
@@ -169,11 +180,17 @@ index 330bb1a..51fba21 100644
 +    Uint32 atomicSharingCount;
 +#ifdef ATOMIC_GPU_QUEUE_EXTENSION
 +    AtomicGpuQueuesV1 atomicApi;
++    struct {
++        void (SDLCALL *cleanup)(void *userdata, bool resourcesRetired);
++        void *userdata;
++    } atomicDeviceCleanups[8];
++    Uint32 atomicDeviceCleanupCount;
++    bool atomicDestroying;
 +#endif
  
      VulkanCommandBuffer **submittedCommandBuffers;
      Uint32 submittedCommandBufferCount;
-@@ -2668,6 +2704,14 @@ static void VULKAN_INTERNAL_BufferMemoryBarrier(
+@@ -2668,6 +2711,14 @@ static void VULKAN_INTERNAL_BufferMemoryBarrier(
          &dstStages,
          &memoryBarrier.dstAccessMask);
  
@@ -188,7 +205,7 @@ index 330bb1a..51fba21 100644
      renderer->vkCmdPipelineBarrier(
          commandBuffer->commandBuffer,
          srcStages,
-@@ -2680,7 +2724,7 @@ static void VULKAN_INTERNAL_BufferMemoryBarrier(
+@@ -2680,7 +2731,7 @@ static void VULKAN_INTERNAL_BufferMemoryBarrier(
          0,
          NULL);
  
@@ -197,7 +214,7 @@ index 330bb1a..51fba21 100644
  }
  
  static void VULKAN_INTERNAL_TextureMemoryBarrier(
-@@ -2795,6 +2839,14 @@ static void VULKAN_INTERNAL_TextureMemoryBarrier(
+@@ -2795,6 +2846,14 @@ static void VULKAN_INTERNAL_TextureMemoryBarrier(
          return;
      }
  
@@ -212,7 +229,7 @@ index 330bb1a..51fba21 100644
      renderer->vkCmdPipelineBarrier(
          commandBuffer->commandBuffer,
          srcStages,
-@@ -3514,14 +3566,15 @@ static void SDLCALL VULKAN_INTERNAL_DescriptorSetLayoutHashDestroy(void *userdat
+@@ -3514,14 +3573,15 @@ static void SDLCALL VULKAN_INTERNAL_DescriptorSetLayoutHashDestroy(void *userdat
  
  static Uint32 SDLCALL VULKAN_INTERNAL_CommandPoolHashFunction(void *userdata, const void *key)
  {
@@ -230,7 +247,7 @@ index 330bb1a..51fba21 100644
  }
  
  static void SDLCALL VULKAN_INTERNAL_CommandPoolHashDestroy(void *userdata, const void *key, const void *value)
-@@ -4260,7 +4313,7 @@ static VulkanBuffer *VULKAN_INTERNAL_CreateBuffer(
+@@ -4260,7 +4320,7 @@ static VulkanBuffer *VULKAN_INTERNAL_CreateBuffer(
      buffer->usage = usageFlags;
      buffer->type = type;
      buffer->markedForDestroy = false;
@@ -239,7 +256,7 @@ index 330bb1a..51fba21 100644
  
      createinfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
      createinfo.pNext = NULL;
-@@ -4270,6 +4323,11 @@ static VulkanBuffer *VULKAN_INTERNAL_CreateBuffer(
+@@ -4270,6 +4330,11 @@ static VulkanBuffer *VULKAN_INTERNAL_CreateBuffer(
      createinfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
      createinfo.queueFamilyIndexCount = 1;
      createinfo.pQueueFamilyIndices = &renderer->queueFamilyIndex;
@@ -251,7 +268,50 @@ index 330bb1a..51fba21 100644
  
      // Set transfer bits so we can defrag
      createinfo.usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-@@ -5807,6 +5865,11 @@ static VulkanTexture *VULKAN_INTERNAL_CreateTexture(
+@@ -4985,6 +5050,9 @@ static void VULKAN_DestroyDevice(
+     VulkanRenderer *renderer = (VulkanRenderer *)device->driverData;
+     VulkanMemorySubAllocator *allocator;
+ 
++#ifdef ATOMIC_GPU_QUEUE_EXTENSION
++    renderer->atomicDestroying = true;
++#endif
+     VULKAN_Wait(device->driverData);
+ 
+     for (Sint32 i = renderer->claimedWindowCount - 1; i >= 0; i -= 1) {
+@@ -4993,7 +5061,32 @@ static void VULKAN_DestroyDevice(
+ 
+     SDL_free(renderer->claimedWindows);
+ 
++#ifdef ATOMIC_GPU_QUEUE_EXTENSION
++    bool resourcesRetired = VULKAN_Wait(device->driverData);
++    if (renderer->atomicDeviceCleanupCount > 0) {
++        if (!resourcesRetired) {
++            SDL_LockMutex(renderer->submitLock);
++            VkResult result = renderer->vkDeviceWaitIdle(renderer->logicalDevice);
++            SDL_UnlockMutex(renderer->submitLock);
++            resourcesRetired = result == VK_SUCCESS || result == VK_ERROR_DEVICE_LOST;
++            if (!resourcesRetired) {
++                SDL_LogError(SDL_LOG_CATEGORY_GPU,
++                    "Atomic GPU deferred cleanup cannot confirm resource retirement: vkDeviceWaitIdle %s; abandoning native handles",
++                    VkErrorMessages(result));
++            }
++        }
++        Uint32 cleanupCount = renderer->atomicDeviceCleanupCount;
++        renderer->atomicDeviceCleanupCount = 0;
++        for (Uint32 i = 0; i < cleanupCount; ++i) {
++            void (SDLCALL *cleanup)(void *, bool) = renderer->atomicDeviceCleanups[i].cleanup;
++            void *userdata = renderer->atomicDeviceCleanups[i].userdata;
++            SDL_zero(renderer->atomicDeviceCleanups[i]);
++            cleanup(userdata, resourcesRetired);
++        }
++    }
++#else
+     VULKAN_Wait(device->driverData);
++#endif
+ 
+     SDL_free(renderer->submittedCommandBuffers);
+ 
+@@ -5807,6 +5900,11 @@ static VulkanTexture *VULKAN_INTERNAL_CreateTexture(
      imageCreateInfo.queueFamilyIndexCount = 0;
      imageCreateInfo.pQueueFamilyIndices = NULL;
      imageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -263,7 +323,7 @@ index 330bb1a..51fba21 100644
  
      vulkanResult = renderer->vkCreateImage(
          renderer->logicalDevice,
-@@ -9585,13 +9648,15 @@ static bool VULKAN_INTERNAL_AllocateCommandBuffer(
+@@ -9585,13 +9683,15 @@ static bool VULKAN_INTERNAL_AllocateCommandBuffer(
  
  static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
      VulkanRenderer *renderer,
@@ -280,7 +340,7 @@ index 330bb1a..51fba21 100644
  
      bool result = SDL_FindInHashTable(
          renderer->commandPoolHashTable,
-@@ -9607,7 +9672,7 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
+@@ -9607,7 +9707,7 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
      commandPoolCreateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
      commandPoolCreateInfo.pNext = NULL;
      commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -289,7 +349,7 @@ index 330bb1a..51fba21 100644
  
      vulkanResult = renderer->vkCreateCommandPool(
          renderer->logicalDevice,
-@@ -9622,6 +9687,7 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
+@@ -9622,6 +9722,7 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
      }
  
      vulkanCommandPool->threadID = threadID;
@@ -297,7 +357,7 @@ index 330bb1a..51fba21 100644
  
      vulkanCommandPool->inactiveCommandBufferCapacity = 0;
      vulkanCommandPool->inactiveCommandBufferCount = 0;
-@@ -9636,6 +9702,7 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
+@@ -9636,6 +9737,7 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
  
      CommandPoolHashTableKey *allocedKey = SDL_malloc(sizeof(CommandPoolHashTableKey));
      allocedKey->threadID = threadID;
@@ -305,7 +365,7 @@ index 330bb1a..51fba21 100644
  
      SDL_InsertIntoHashTable(
          renderer->commandPoolHashTable,
-@@ -9647,10 +9714,11 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
+@@ -9647,10 +9749,11 @@ static VulkanCommandPool *VULKAN_INTERNAL_FetchCommandPool(
  
  static VulkanCommandBuffer *VULKAN_INTERNAL_GetInactiveCommandBufferFromPool(
      VulkanRenderer *renderer,
@@ -319,7 +379,7 @@ index 330bb1a..51fba21 100644
      VulkanCommandBuffer *commandBuffer;
  
      if (commandPool == NULL) {
-@@ -9671,8 +9739,9 @@ static VulkanCommandBuffer *VULKAN_INTERNAL_GetInactiveCommandBufferFromPool(
+@@ -9671,8 +9774,9 @@ static VulkanCommandBuffer *VULKAN_INTERNAL_GetInactiveCommandBufferFromPool(
      return commandBuffer;
  }
  
@@ -331,7 +391,7 @@ index 330bb1a..51fba21 100644
  {
      VulkanRenderer *renderer = (VulkanRenderer *)driverData;
      VkResult result;
-@@ -9680,16 +9749,34 @@ static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(
+@@ -9680,16 +9784,34 @@ static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(
  
      SDL_ThreadID threadID = SDL_GetCurrentThreadID();
  
@@ -367,7 +427,15 @@ index 330bb1a..51fba21 100644
      DescriptorSetCache *descriptorSetCache =
          VULKAN_INTERNAL_AcquireDescriptorSetCache(renderer);
  
-@@ -9771,15 +9858,22 @@ static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(
+@@ -9760,6 +9882,7 @@ static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(
+     SDL_zeroa(commandBuffer->readOnlyComputeStorageBuffers);
+ 
+     commandBuffer->autoReleaseFence = true;
++    if (renderer->atomicQueuesEnabled) commandBuffer->inFlightFence = NULL;
+ 
+     commandBuffer->swapchainRequested = false;
+     commandBuffer->isDefrag = 0;
+@@ -9771,15 +9894,22 @@ static SDL_GPUCommandBuffer *VULKAN_AcquireCommandBuffer(
          commandBuffer->commandBuffer,
          VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
  
@@ -393,7 +461,7 @@ index 330bb1a..51fba21 100644
  static bool VULKAN_QueryFence(
      SDL_GPURenderer *driverData,
      SDL_GPUFence *fence)
-@@ -10151,6 +10245,11 @@ static bool VULKAN_INTERNAL_AcquireSwapchainTexture(
+@@ -10151,6 +10281,11 @@ static bool VULKAN_INTERNAL_AcquireSwapchainTexture(
      VulkanPresentData *presentData;
  
      *swapchainTexture = NULL;
@@ -405,7 +473,30 @@ index 330bb1a..51fba21 100644
      if (swapchainTextureWidth) {
          *swapchainTextureWidth = 0;
      }
-@@ -10822,7 +10921,9 @@ static bool VULKAN_Submit(
+@@ -10813,6 +10948,22 @@ static void VULKAN_INTERNAL_ReleaseCommandBuffer(VulkanCommandBuffer *vulkanComm
+     renderer->submittedCommandBufferCount += 1;
+ }
+ 
++/* Failed submission never reached a queue. The next acquisition resets this buffer. */
++static void VULKAN_INTERNAL_DisposeUnsubmittedAtomicCommand(VulkanCommandBuffer *commandBuffer)
++{
++    VulkanRenderer *renderer = commandBuffer->renderer;
++    SDL_LockMutex(renderer->submitLock);
++    if (commandBuffer->inFlightFence) {
++        VULKAN_ReleaseFence((SDL_GPURenderer *)renderer, (SDL_GPUFence *)commandBuffer->inFlightFence);
++        commandBuffer->inFlightFence = NULL;
++    }
++    commandBuffer->autoReleaseFence = false;
++    VULKAN_INTERNAL_CleanCommandBuffer(renderer, commandBuffer, true);
++    commandBuffer->atomicAcquired = false;
++    SDL_AddAtomicInt(&renderer->atomicOutstandingCommands, -1);
++    SDL_UnlockMutex(renderer->submitLock);
++}
++
+ static bool VULKAN_Submit(
+     SDL_GPUCommandBuffer *commandBuffer)
+ {
+@@ -10822,7 +10973,9 @@ static bool VULKAN_Submit(
      VkPresentInfoKHR presentInfo;
      VulkanPresentData *presentData;
      VkResult vulkanResult, presentResult = VK_SUCCESS;
@@ -416,7 +507,7 @@ index 330bb1a..51fba21 100644
      Uint32 swapchainImageIndex;
      VulkanTextureSubresource *swapchainTextureSubresource;
      VulkanMemorySubAllocator *allocator;
-@@ -10830,6 +10931,15 @@ static bool VULKAN_Submit(
+@@ -10830,6 +10983,16 @@ static bool VULKAN_Submit(
          (renderer->claimedWindowCount > 0 && vulkanCommandBuffer->swapchainRequested) ||
          renderer->claimedWindowCount == 0;
  
@@ -427,12 +518,13 @@ index 330bb1a..51fba21 100644
 +    if (renderer->atomicQueuesEnabled &&
 +        (vulkanCommandBuffer->waitSemaphoreCount > MAX_PRESENT_COUNT ||
 +         vulkanCommandBuffer->signalSemaphoreCount > MAX_PRESENT_COUNT)) {
++        VULKAN_INTERNAL_DisposeUnsubmittedAtomicCommand(vulkanCommandBuffer);
 +        return SDL_SetError("Atomic GPU swapchain semaphore budget exceeded");
 +    }
      SDL_LockMutex(renderer->submitLock);
  
      // FIXME: Can this just be permanent?
-@@ -10851,7 +10961,9 @@ static bool VULKAN_Submit(
+@@ -10851,7 +11014,9 @@ static bool VULKAN_Submit(
              swapchainTextureSubresource);
      }
  
@@ -443,7 +535,22 @@ index 330bb1a..51fba21 100644
          renderer->allocationsToDefragCount > 0 &&
          !renderer->defragInProgress) {
          if (!VULKAN_INTERNAL_DefragmentMemory(renderer, vulkanCommandBuffer))
-@@ -10884,18 +10996,38 @@ static bool VULKAN_Submit(
+@@ -10862,12 +11027,14 @@ static bool VULKAN_Submit(
+ 
+     if (!VULKAN_INTERNAL_EndCommandBuffer(renderer, vulkanCommandBuffer)) {
+         SDL_UnlockMutex(renderer->submitLock);
++        if (renderer->atomicQueuesEnabled) VULKAN_INTERNAL_DisposeUnsubmittedAtomicCommand(vulkanCommandBuffer);
+         return false;
+     }
+ 
+     vulkanCommandBuffer->inFlightFence = VULKAN_INTERNAL_AcquireFenceFromPool(renderer);
+     if (vulkanCommandBuffer->inFlightFence == NULL) {
+         SDL_UnlockMutex(renderer->submitLock);
++        if (renderer->atomicQueuesEnabled) VULKAN_INTERNAL_DisposeUnsubmittedAtomicCommand(vulkanCommandBuffer);
+         return false;
+     }
+ 
+@@ -10884,18 +11051,35 @@ static bool VULKAN_Submit(
      submitInfo.waitSemaphoreCount = vulkanCommandBuffer->waitSemaphoreCount;
      submitInfo.pSignalSemaphores = vulkanCommandBuffer->signalSemaphores;
      submitInfo.signalSemaphoreCount = vulkanCommandBuffer->signalSemaphoreCount;
@@ -467,11 +574,8 @@ index 330bb1a..51fba21 100644
          vulkanCommandBuffer->inFlightFence->fence);
  
      if (vulkanResult != VK_SUCCESS) {
-+        if (renderer->atomicQueuesEnabled) {
-+            VULKAN_ReleaseFence((SDL_GPURenderer *)renderer, (SDL_GPUFence *)vulkanCommandBuffer->inFlightFence);
-+            vulkanCommandBuffer->inFlightFence = NULL;
-+        }
          SDL_UnlockMutex(renderer->submitLock);
++        if (renderer->atomicQueuesEnabled) VULKAN_INTERNAL_DisposeUnsubmittedAtomicCommand(vulkanCommandBuffer);
          CHECK_VULKAN_ERROR_AND_RETURN(vulkanResult, vkQueueSubmit, false);
      }
  
@@ -483,7 +587,15 @@ index 330bb1a..51fba21 100644
      // Present, if applicable
      for (Uint32 j = 0; j < vulkanCommandBuffer->presentDataCount; j += 1) {
          presentData = &vulkanCommandBuffer->presentDatas[j];
-@@ -11002,6 +11134,10 @@ static bool VULKAN_Cancel(
+@@ -10935,6 +11119,7 @@ static bool VULKAN_Submit(
+             presentData->windowData->needsSurfaceRecreate = true;
+         } else {
+             if (presentResult != VK_SUCCESS) {
++                if (renderer->atomicQueuesEnabled) vulkanCommandBuffer->autoReleaseFence = true;
+                 VULKAN_INTERNAL_ReleaseCommandBuffer(vulkanCommandBuffer);
+                 SDL_UnlockMutex(renderer->submitLock);
+             }
+@@ -11002,6 +11187,10 @@ static bool VULKAN_Cancel(
      vulkanCommandBuffer = (VulkanCommandBuffer *)commandBuffer;
      renderer = vulkanCommandBuffer->renderer;
  
@@ -494,7 +606,7 @@ index 330bb1a..51fba21 100644
      result = renderer->vkResetCommandBuffer(
          vulkanCommandBuffer->commandBuffer,
          VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
-@@ -11010,6 +11146,10 @@ static bool VULKAN_Cancel(
+@@ -11010,6 +11199,10 @@ static bool VULKAN_Cancel(
      vulkanCommandBuffer->autoReleaseFence = false;
      SDL_LockMutex(renderer->submitLock);
      VULKAN_INTERNAL_CleanCommandBuffer(renderer, vulkanCommandBuffer, true);
@@ -505,7 +617,7 @@ index 330bb1a..51fba21 100644
      SDL_UnlockMutex(renderer->submitLock);
  
      return true;
-@@ -11074,7 +11214,7 @@ static bool VULKAN_INTERNAL_DefragmentMemory(
+@@ -11074,7 +11267,7 @@ static bool VULKAN_INTERNAL_DefragmentMemory(
  
              // Copy buffer contents if necessary
              if (
@@ -514,7 +626,7 @@ index 330bb1a..51fba21 100644
                  VULKAN_INTERNAL_BufferTransitionFromDefaultUsage(
                      renderer,
                      commandBuffer,
-@@ -12487,6 +12627,197 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
+@@ -12487,6 +12680,379 @@ static Uint8 VULKAN_INTERNAL_DeterminePhysicalDevice(VulkanRenderer *renderer, V
      return 1;
  }
  
@@ -561,7 +673,8 @@ index 330bb1a..51fba21 100644
 +    bool accepted;
 +    SDL_LockMutex(renderer->submitLock);
 +    accepted = SDL_GetCurrentThreadID() == renderer->atomicOwner && !renderer->atomicRecordingBatch &&
-+        !renderer->atomicMaintenance && SDL_GetAtomicInt(&renderer->atomicOutstandingCommands) == 0;
++        !renderer->atomicMaintenance && SDL_GetAtomicInt(&renderer->atomicOutstandingCommands) == 0 &&
++        SDL_GetAtomicInt(&renderer->atomicFrozenResources) == 0;
 +    if (accepted) renderer->atomicRecordingBatch = true;
 +    SDL_UnlockMutex(renderer->submitLock);
 +    return accepted ? true : SDL_SetError("Atomic GPU batch requires idle owner recording state");
@@ -573,10 +686,11 @@ index 330bb1a..51fba21 100644
 +    bool accepted;
 +    SDL_LockMutex(renderer->submitLock);
 +    accepted = SDL_GetCurrentThreadID() == renderer->atomicOwner && renderer->atomicRecordingBatch &&
-+        SDL_GetAtomicInt(&renderer->atomicOutstandingCommands) == 0;
++        SDL_GetAtomicInt(&renderer->atomicOutstandingCommands) == 0 &&
++        SDL_GetAtomicInt(&renderer->atomicFrozenResources) == 0;
 +    if (accepted) renderer->atomicRecordingBatch = false;
 +    SDL_UnlockMutex(renderer->submitLock);
-+    return accepted ? true : SDL_SetError("Atomic GPU batch still owns unsubmitted command buffers");
++    return accepted ? true : SDL_SetError("Atomic GPU batch still owns command buffers or frozen resources");
 +}
 +
 +static SDL_GPUCommandBuffer *SDLCALL VULKAN_AtomicAcquire(SDL_GPUDevice *device, uint32_t queueClass)
@@ -643,6 +757,154 @@ index 330bb1a..51fba21 100644
 +    return buffer->commandBuffer;
 +}
 +
++/* Facades pin shared backing. Ordinary SDL release would mark it for destruction. */
++static void VULKAN_INTERNAL_ReleaseFrozenResource(AtomicGpuResource *resource)
++{
++    switch (resource->Kind) {
++    case ATOMIC_GPU_RESOURCE_BUFFER: {
++        VulkanBufferContainer *container = (VulkanBufferContainer *)resource->Handle;
++        (void)SDL_AtomicDecRef(&container->activeBuffer->referenceCount);
++        SDL_free(container->buffers);
++        SDL_free(container);
++        break;
++    }
++    case ATOMIC_GPU_RESOURCE_TEXTURE: {
++        VulkanTextureContainer *container = (VulkanTextureContainer *)resource->Handle;
++        (void)SDL_AtomicDecRef(&container->activeTexture->referenceCount);
++        SDL_free(container->textures);
++        SDL_free(container);
++        break;
++    }
++    case ATOMIC_GPU_RESOURCE_SAMPLER:
++        (void)SDL_AtomicDecRef(&((VulkanSampler *)resource->Handle)->referenceCount);
++        break;
++    case ATOMIC_GPU_RESOURCE_GRAPHICS_PIPELINE:
++        (void)SDL_AtomicDecRef(&((VulkanGraphicsPipeline *)resource->Handle)->referenceCount);
++        break;
++    case ATOMIC_GPU_RESOURCE_COMPUTE_PIPELINE:
++        (void)SDL_AtomicDecRef(&((VulkanComputePipeline *)resource->Handle)->referenceCount);
++        break;
++    }
++    SDL_zero(*resource);
++}
++
++static bool SDLCALL VULKAN_AtomicFreezeResources(SDL_GPUDevice *device, Uint32 count,
++    const AtomicGpuResource *sources, AtomicGpuResource *outputs)
++{
++    VulkanRenderer *renderer;
++    AtomicGpuResource inputs[ATOMIC_GPU_QUEUES_MAX_RESOURCES];
++    Uint32 completed = 0;
++    if (!device || count > ATOMIC_GPU_QUEUES_MAX_RESOURCES || (count && (!sources || !outputs))) {
++        return SDL_SetError("Atomic GPU freeze arguments are invalid");
++    }
++    renderer = (VulkanRenderer *)device->driverData;
++    if (SDL_GetCurrentThreadID() != renderer->atomicOwner || !renderer->atomicRecordingBatch ||
++        SDL_GetAtomicInt(&renderer->atomicFrozenResources) > SDL_MAX_SINT32 - (Sint32)count) {
++        return SDL_SetError("Atomic GPU freeze requires an active owner recording batch");
++    }
++    if (count) {
++        SDL_memcpy(inputs, sources, count * sizeof(*inputs));
++        SDL_memset(outputs, 0, count * sizeof(*outputs));
++    }
++    for (Uint32 i = 0; i < count; ++i) {
++        if (!inputs[i].Handle || inputs[i].Kind > ATOMIC_GPU_RESOURCE_COMPUTE_PIPELINE) {
++            return SDL_SetError("Atomic GPU freeze resource kind or handle is invalid");
++        }
++    }
++    for (; completed < count; ++completed) {
++        AtomicGpuResource *input = &inputs[completed];
++        AtomicGpuResource *output = &outputs[completed];
++        output->Kind = input->Kind;
++        switch (input->Kind) {
++        case ATOMIC_GPU_RESOURCE_BUFFER: {
++            VulkanBufferContainer *source = (VulkanBufferContainer *)input->Handle;
++            VulkanBufferContainer *container = SDL_malloc(sizeof(*container));
++            if (!container) goto allocation_failed;
++            *container = *source;
++            container->buffers = SDL_malloc(sizeof(*container->buffers));
++            if (!container->buffers) {
++                SDL_free(container);
++                goto allocation_failed;
++            }
++            container->buffers[0] = container->activeBuffer;
++            container->bufferCount = 1;
++            container->bufferCapacity = 1;
++            container->debugName = NULL;
++            SDL_AtomicIncRef(&container->activeBuffer->referenceCount);
++            output->Handle = container;
++            break;
++        }
++        case ATOMIC_GPU_RESOURCE_TEXTURE: {
++            VulkanTextureContainer *source = (VulkanTextureContainer *)input->Handle;
++            VulkanTextureContainer *container = SDL_malloc(sizeof(*container));
++            if (!container) goto allocation_failed;
++            *container = *source;
++            container->textures = SDL_malloc(sizeof(*container->textures));
++            if (!container->textures) {
++                SDL_free(container);
++                goto allocation_failed;
++            }
++            container->textures[0] = container->activeTexture;
++            container->textureCount = 1;
++            container->textureCapacity = 1;
++            container->header.info.props = 0;
++            container->debugName = NULL;
++            container->canBeCycled = false;
++            SDL_AtomicIncRef(&container->activeTexture->referenceCount);
++            output->Handle = container;
++            break;
++        }
++        case ATOMIC_GPU_RESOURCE_SAMPLER:
++            SDL_AtomicIncRef(&((VulkanSampler *)input->Handle)->referenceCount);
++            output->Handle = input->Handle;
++            break;
++        case ATOMIC_GPU_RESOURCE_GRAPHICS_PIPELINE:
++            SDL_AtomicIncRef(&((VulkanGraphicsPipeline *)input->Handle)->referenceCount);
++            output->Handle = input->Handle;
++            break;
++        case ATOMIC_GPU_RESOURCE_COMPUTE_PIPELINE:
++            SDL_AtomicIncRef(&((VulkanComputePipeline *)input->Handle)->referenceCount);
++            output->Handle = input->Handle;
++            break;
++        }
++    }
++    SDL_AddAtomicInt(&renderer->atomicFrozenResources, (Sint32)count);
++    return true;
++
++allocation_failed:
++    for (Uint32 i = 0; i < completed; ++i) VULKAN_INTERNAL_ReleaseFrozenResource(&outputs[i]);
++    SDL_memset(outputs, 0, count * sizeof(*outputs));
++    return SDL_SetError("Atomic GPU frozen resource allocation failed");
++}
++
++static bool SDLCALL VULKAN_AtomicReleaseFrozenResources(SDL_GPUDevice *device, Uint32 count, AtomicGpuResource *resources)
++{
++    VulkanRenderer *renderer;
++    if (!device || count > ATOMIC_GPU_QUEUES_MAX_RESOURCES || (count && !resources)) {
++        return SDL_SetError("Atomic GPU frozen release arguments are invalid");
++    }
++    renderer = (VulkanRenderer *)device->driverData;
++    if (SDL_GetCurrentThreadID() != renderer->atomicOwner || !renderer->atomicRecordingBatch ||
++        SDL_GetAtomicInt(&renderer->atomicFrozenResources) < (Sint32)count) {
++        return SDL_SetError("Atomic GPU frozen release requires its owner recording batch");
++    }
++    for (Uint32 i = 0; i < count; ++i) {
++        if (!resources[i].Handle || resources[i].Kind > ATOMIC_GPU_RESOURCE_COMPUTE_PIPELINE) {
++            return SDL_SetError("Atomic GPU frozen release resource kind or handle is invalid");
++        }
++        if (resources[i].Kind == ATOMIC_GPU_RESOURCE_BUFFER || resources[i].Kind == ATOMIC_GPU_RESOURCE_TEXTURE) {
++            for (Uint32 j = 0; j < i; ++j) {
++                if (resources[j].Handle == resources[i].Handle) {
++                    return SDL_SetError("Atomic GPU frozen release repeats a resource facade");
++                }
++            }
++        }
++    }
++    for (Uint32 i = 0; i < count; ++i) VULKAN_INTERNAL_ReleaseFrozenResource(&resources[i]);
++    SDL_AddAtomicInt(&renderer->atomicFrozenResources, -(Sint32)count);
++    return true;
++}
++
 +static bool SDLCALL VULKAN_AtomicMaintainIdle(SDL_GPUDevice *device)
 +{
 +    VulkanRenderer *renderer = (VulkanRenderer *)device->driverData;
@@ -650,7 +912,8 @@ index 330bb1a..51fba21 100644
 +    bool success;
 +    SDL_LockMutex(renderer->submitLock);
 +    accepted = SDL_GetCurrentThreadID() == renderer->atomicOwner && !renderer->atomicRecordingBatch &&
-+        !renderer->atomicMaintenance && SDL_GetAtomicInt(&renderer->atomicOutstandingCommands) == 0;
++        !renderer->atomicMaintenance && SDL_GetAtomicInt(&renderer->atomicOutstandingCommands) == 0 &&
++        SDL_GetAtomicInt(&renderer->atomicFrozenResources) == 0;
 +    if (accepted) {
 +        SDL_LockMutex(renderer->allocatorLock);
 +        if (renderer->allocationsToDefragCount == 0) {
@@ -669,7 +932,6 @@ index 330bb1a..51fba21 100644
 +        success = command != NULL;
 +        if (command) {
 +            success = VULKAN_Submit(command);
-+            if (!success) VULKAN_Cancel(command);
 +        }
 +        if (success) success = VULKAN_Wait(device->driverData);
 +    }
@@ -677,6 +939,35 @@ index 330bb1a..51fba21 100644
 +    renderer->atomicMaintenance = false;
 +    SDL_UnlockMutex(renderer->submitLock);
 +    return success;
++}
++
++static bool SDLCALL VULKAN_AtomicDeferDeviceCleanup(SDL_GPUDevice *device,
++    void (SDLCALL *cleanup)(void *userdata, bool resourcesRetired), void *userdata)
++{
++    VulkanRenderer *renderer;
++    if (!device || !cleanup) return SDL_SetError("Atomic GPU device cleanup arguments are invalid");
++    renderer = (VulkanRenderer *)device->driverData;
++    SDL_LockMutex(renderer->submitLock);
++    if (SDL_GetCurrentThreadID() != renderer->atomicOwner || renderer->atomicRecordingBatch ||
++        renderer->atomicMaintenance || renderer->atomicDestroying ||
++        SDL_GetAtomicInt(&renderer->atomicOutstandingCommands) != 0 ||
++        SDL_GetAtomicInt(&renderer->atomicFrozenResources) != 0 ||
++        renderer->atomicDeviceCleanupCount >= SDL_arraysize(renderer->atomicDeviceCleanups)) {
++        SDL_UnlockMutex(renderer->submitLock);
++        return SDL_SetError("Atomic GPU device cleanup requires idle owner state and an available callback slot");
++    }
++    for (Uint32 i = 0; i < renderer->atomicDeviceCleanupCount; ++i) {
++        if (renderer->atomicDeviceCleanups[i].cleanup == cleanup &&
++            renderer->atomicDeviceCleanups[i].userdata == userdata) {
++            SDL_UnlockMutex(renderer->submitLock);
++            return SDL_SetError("Atomic GPU device cleanup is already registered");
++        }
++    }
++    renderer->atomicDeviceCleanups[renderer->atomicDeviceCleanupCount].cleanup = cleanup;
++    renderer->atomicDeviceCleanups[renderer->atomicDeviceCleanupCount].userdata = userdata;
++    ++renderer->atomicDeviceCleanupCount;
++    SDL_UnlockMutex(renderer->submitLock);
++    return true;
 +}
 +
 +static bool VULKAN_AtomicPublish(SDL_GPUDevice *device)
@@ -705,6 +996,9 @@ index 330bb1a..51fba21 100644
 +    api->Acquire = VULKAN_AtomicAcquire;
 +    api->SetDependencies = VULKAN_AtomicSetDependencies;
 +    api->NativeCommandBuffer = VULKAN_AtomicNativeCommandBuffer;
++    api->FreezeResources = VULKAN_AtomicFreezeResources;
++    api->ReleaseFrozenResources = VULKAN_AtomicReleaseFrozenResources;
++    api->DeferDeviceCleanup = VULKAN_AtomicDeferDeviceCleanup;
 +    return SDL_SetPointerProperty(renderer->props, ATOMIC_GPU_QUEUES_DEVICE_PROPERTY, api);
 +}
 +#endif
@@ -712,7 +1006,7 @@ index 330bb1a..51fba21 100644
  static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
      VulkanRenderer *renderer,
      VulkanFeatures *features)
-@@ -12498,8 +12829,12 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
+@@ -12498,8 +13064,12 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
      const char **deviceExtensions;
  
      VkDeviceQueueCreateInfo queueCreateInfo;
@@ -725,7 +1019,7 @@ index 330bb1a..51fba21 100644
      queueCreateInfo.sType =
          VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
      queueCreateInfo.pNext = NULL;
-@@ -12554,6 +12889,15 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
+@@ -12554,6 +13124,15 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
      deviceCreateInfo.flags = 0;
      deviceCreateInfo.queueCreateInfoCount = 1;
      deviceCreateInfo.pQueueCreateInfos = &queueCreateInfo;
@@ -741,7 +1035,7 @@ index 330bb1a..51fba21 100644
      deviceCreateInfo.enabledLayerCount = 0;
      deviceCreateInfo.ppEnabledLayerNames = NULL;
      deviceCreateInfo.enabledExtensionCount = GetDeviceExtensionCount(
-@@ -12647,6 +12991,10 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
+@@ -12647,6 +13226,10 @@ static Uint8 VULKAN_INTERNAL_CreateLogicalDevice(
          renderer->queueFamilyIndex,
          0,
          &renderer->unifiedQueue);
@@ -752,7 +1046,7 @@ index 330bb1a..51fba21 100644
  
      return 1;
  }
-@@ -12793,6 +13141,10 @@ static SDL_GPUDevice *VULKAN_CreateDevice(bool debugMode, bool preferLowPower, S
+@@ -12793,6 +13376,10 @@ static SDL_GPUDevice *VULKAN_CreateDevice(bool debugMode, bool preferLowPower, S
      renderer->debugMode = debugMode;
      renderer->preferLowPower = preferLowPower;
      renderer->allowedFramesInFlight = 2;
@@ -763,7 +1057,7 @@ index 330bb1a..51fba21 100644
  
      if (!VULKAN_INTERNAL_PrepareVulkan(renderer, &features, props)) {
          SET_STRING_ERROR("Failed to initialize Vulkan!");
-@@ -13102,6 +13454,12 @@ static SDL_GPUDevice *VULKAN_CreateDevice(bool debugMode, bool preferLowPower, S
+@@ -13102,6 +13689,12 @@ static SDL_GPUDevice *VULKAN_CreateDevice(bool debugMode, bool preferLowPower, S
      renderer->allocationsToDefrag = SDL_malloc(
          renderer->allocationsToDefragCapacity * sizeof(VulkanMemoryAllocation *));
  
