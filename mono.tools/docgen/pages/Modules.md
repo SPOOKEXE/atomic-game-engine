@@ -20,6 +20,7 @@ files and prose in graph modules, ordering modules by the layers in
 - @subpage md_mono_8engine_2computegraph_2AGENTS
 - @subpage md_mono_8engine_2ecs_2AGENTS
 - @subpage md_mono_8engine_2ecs_2docs_2TODO
+- @subpage md_mono_8engine_2procedural_2AGENTS
 - @subpage md_mono_8engine_2world_2AGENTS
 - @subpage md_mono_8engine_2collision_2AGENTS
 - @subpage md_mono_8engine_2spatial_2AGENTS
@@ -70,4 +71,3 @@ files and prose in graph modules, ordering modules by the layers in
 - @subpage md_mono_8unified__tests_2AGENTS
 - @subpage md_mono_8tools_2AGENTS
 - @subpage md_mono_8tools_2docgen_2AGENTS
-- @subpage md_mono_8engine_2procedural_2AGENTS
