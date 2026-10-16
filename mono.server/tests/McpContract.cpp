@@ -2,6 +2,7 @@
 // The probes request one cube because the benchmark field's population is
 // unrelated to the listener contract and delays its bind.
 
+#include <engine/assets/ContentHash.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/testing/Suite.hpp>
@@ -18,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -153,6 +155,83 @@ TEST_CASE("server normal MCP manifest is the reviewed contract", "[server][mcp]"
 }
 TEST_CASE("server factory MCP manifest is the reviewed contract", "[server][mcp][data-factory]") {
 	Check("factory", true);
+}
+
+TEST_CASE("server factory MCP packages survive reset and retirement", "[server][mcp][data-factory]") {
+	if (!std::filesystem::exists(Program())) SKIP("the server program is not built into this preset");
+	const uint16_t port = FreePort();
+	engine::parallel::Process child;
+	REQUIRE(child.Start(
+		Program(), {"--data-factory", "--mcp-port", std::to_string(port), "--unpaced", "--seconds", "30"}
+	));
+
+	asio::io_context context;
+	asio::ip::tcp::socket socket(context);
+	std::error_code failure;
+	for (int attempt = 0; attempt < 200; ++attempt) {
+		socket.connect({asio::ip::address_v4::loopback(), port}, failure);
+		if (!failure) break;
+		socket.close();
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	}
+	REQUIRE_FALSE(failure);
+	REQUIRE(Ask(socket, 1, "initialize").contains("result"));
+	int requestId = 1;
+	const auto call = [&](std::string_view name, json arguments) {
+		const json reply =
+			Ask(socket, ++requestId, "tools/call", {{"name", name}, {"arguments", std::move(arguments)}});
+		INFO(reply.dump());
+		REQUIRE_FALSE(reply.contains("error"));
+		REQUIRE_FALSE(reply["result"].value("isError", false));
+		return json::parse(reply["result"]["content"][0]["text"].get<std::string>());
+	};
+	const auto revision = [](const json &state, std::string_view operation) {
+		return json{
+			{"instance_id", "server-package-world"},
+			{"expected_tick", state.at("tick")},
+			{"expected_world_epoch", state.at("world_epoch")},
+			{"expected_world_version", state.at("world_version")},
+			{"operation_id", operation},
+		};
+	};
+	const std::string source = "return";
+	const json manifest{
+		{"format", "atomic.data-script.v1"},
+		{"entry", "package.luau"},
+		{"source_hash", engine::assets::Hasher::Of(std::as_bytes(std::span(source))).ToHex()},
+		{"assets", json::array()},
+		{"parameters", json::array()},
+		{"capabilities", json::array()},
+		{"budget", {{"source_bytes", 1024}, {"asset_bytes", 0}, {"assets", 0}, {"parameters", 0}}},
+		{"seed", 0},
+	};
+	const auto package = [&](const json &state, std::string_view operation) {
+		json arguments = revision(state, operation);
+		arguments["language"] = "luau";
+		arguments["manifest"] = manifest.dump();
+		arguments["source_base64"] = "cmV0dXJu";
+		arguments["assets"] = json::array();
+		const json applied = call("run_script_package", std::move(arguments));
+		CHECK(applied.at("status") == "completed");
+		CHECK(applied.at("ran") == true);
+		CHECK(applied.at("atomic") == true);
+		CHECK(applied.at("tick") == 0);
+		return applied;
+	};
+	json state = call(
+		"world_create",
+		{{"instance_id", "server-package-world"}, {"seed", 1}, {"tick_rate", 30}, {"operation_id", "create"}}
+	);
+	state = package(state, "package-first");
+	state = package(state, "package-second");
+	json reset = revision(state, "reset");
+	reset["seed"] = 2;
+	reset["tick_rate"] = 60;
+	const json fresh = call("world_reset", std::move(reset));
+	CHECK(fresh.at("world_epoch").get<uint64_t>() == state.at("world_epoch").get<uint64_t>() + 1);
+	state = package(fresh, "package-after-reset");
+	const json retired = call("world_retire", revision(state, "retire"));
+	CHECK(retired.at("tombstone") == true);
 }
 
 TEST_CASE("server replication observation MCP hook follows listener availability", "[server][mcp]") {

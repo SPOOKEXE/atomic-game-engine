@@ -971,16 +971,37 @@ namespace server {
 		Driver_ = std::make_unique<engine::world::Driver>(driver);
 		Driver_->SetFixedStepBarrier(engine::game::MakePortalIslandCoordinator().Callbacks());
 		if (Settings.DataFactory) {
-			// A factory begins empty, but its first MCP create still constructs a
-			// Store. Construct and remove one private world while component
-			// registration remains open, so the later create cannot mint ECS
-			// bookkeeping types after the executable sealed the shared table.
+			const auto prepareFactoryWorld =
+				[this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+					RegisterServerDiagnostics(systems);
+					PrepareSimulation(store, systems, Settings.PhysicsTickRate);
+					InstallCollisionShapes(store);
+					engine::scene::InstallServices(store);
+					engine::gui::InstallGuiServices(store);
+				};
+			// Later MCP worlds and package VMs must not register types after Seal.
+			// The bootstrap runs no source and releases its VM before its store.
+			engine::scene::RegisterSceneClasses();
+			engine::effects::RegisterEffectClasses();
+			(void)engine::script::ScriptClass();
 			engine::world::WorldSettings bootstrap;
 			bootstrap.Name = engine::core::Name("server.data-factory.bootstrap");
 			bootstrap.TickRate = Settings.TickRate;
 			const engine::world::WorldId bootstrapWorld = Worlds().Create(bootstrap);
+			bool bootstrapReady = false;
 			if (!bootstrapWorld.IsValid() ||
-				Worlds().Destroy(bootstrapWorld) != engine::world::WorldStatus::Ok) {
+				Worlds().Enter(
+					bootstrapWorld,
+					[&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+						prepareFactoryWorld(store, systems);
+						engine::script::RuntimeLimits limits;
+						limits.Role = engine::script::HostRole::OfServer();
+						const auto runtime =
+							engine::script::MakeRuntime(store, engine::script::Language::Luau, limits);
+						bootstrapReady = runtime != nullptr;
+					}
+				) != engine::world::WorldStatus::Ok ||
+				!bootstrapReady || Worlds().Destroy(bootstrapWorld) != engine::world::WorldStatus::Ok) {
 				ENGINE_ERROR("server could not prepare isolated data-factory world storage");
 				return false;
 			}
@@ -1017,7 +1038,7 @@ namespace server {
 					return true;
 				}
 			);
-			DataFactory->SetWorldLifecycle([this](
+			DataFactory->SetWorldLifecycle([this, prepareFactoryWorld](
 											   engine::world::DataFactoryWorldOperation operation,
 											   engine::world::Universe &universe,
 											   engine::world::WorldId world,
@@ -1026,7 +1047,6 @@ namespace server {
 										   ) {
 				if (committed) {
 					if (operation == engine::world::DataFactoryWorldOperation::Retire) {
-						std::erase_if(Runtimes, [world](const auto &entry) { return entry.first == world; });
 						PrimaryWorld = {};
 						Lives.clear();
 					} else {
@@ -1040,8 +1060,11 @@ namespace server {
 				if (!world.IsValid() ||
 					universe.Enter(
 						world,
-						[this, world, &prepared](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-							prepared = BuildWorld(world, store, systems);
+						[&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+							// Factory packages own the content. A benchmark VM would outlive
+							// its borrowed store when the factory replaces or retires it.
+							prepareFactoryWorld(store, systems);
+							prepared = true;
 						}
 					) != engine::world::WorldStatus::Ok ||
 					!prepared) {
