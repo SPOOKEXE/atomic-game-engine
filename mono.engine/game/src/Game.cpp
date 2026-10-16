@@ -17,6 +17,7 @@
 #include <engine/scene/Terrain.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/ProceduralJobs.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/scripthost/Runtime.hpp>
 
@@ -58,6 +59,7 @@ namespace engine::game {
 		// recognised by the reader below. Two kinds of pipeline under one tag
 		// would make a file's meaning depend on which build wrote it.
 		constexpr std::string_view ASSET_PIPELINES = "AssetPipelines";
+		constexpr std::string_view PROCEDURAL_AUTHORITY = "ProceduralAuthority";
 
 		// One instance and its subtree, on its own. See
 		// `WriteInstanceDocument`.
@@ -793,6 +795,63 @@ namespace engine::game {
 			}
 		}
 
+		// Only the bounded binary envelope belongs here. The procedural codec owns
+		// every authored field and version; accepted outputs and live jobs stay out.
+		bool WriteProceduralAuthority(XmlWriter &writer, const Store &store, std::string &error) {
+			if (store.Resource<script::ProceduralAuthority>() == nullptr) return true;
+			std::vector<uint8_t> bytes;
+			procedural::Diagnostic diagnostic;
+			if (!script::EncodeProceduralAuthority(store, bytes, diagnostic)) {
+				error = "procedural authority refused at '" + diagnostic.Field + "'";
+				return false;
+			}
+			constexpr char HEX[] = "0123456789abcdef";
+			std::string text(bytes.size() * 2, '0');
+			for (size_t index = 0; index < bytes.size(); ++index) {
+				text[index * 2] = HEX[bytes[index] >> 4];
+				text[index * 2 + 1] = HEX[bytes[index] & 15];
+			}
+			writer.Open(PROCEDURAL_AUTHORITY);
+			writer.Attribute("encoding", "hex");
+			writer.Verbatim(text);
+			writer.Close();
+			return true;
+		}
+
+		void ReadProceduralAuthority(const XmlElement &element, Store &store) {
+			const auto refuse = [] {
+				ENGINE_WARN("world procedural authority is malformed; the world loads without this recipe");
+			};
+			const auto &text = element.Text;
+			if (element.Attribute("encoding") != "hex" || text.size() % 2 != 0 ||
+				text.size() > script::ProceduralHostLimits::MaximumAuthorityBytes * 2) {
+				refuse();
+				return;
+			}
+			const auto digit = [](char value) -> int {
+				if (value >= '0' && value <= '9') return value - '0';
+				if (value >= 'a' && value <= 'f') return value - 'a' + 10;
+				return -1;
+			};
+			std::vector<uint8_t> bytes(text.size() / 2);
+			for (size_t index = 0; index < bytes.size(); ++index) {
+				const int high = digit(text[index * 2]);
+				const int low = digit(text[index * 2 + 1]);
+				if (high < 0 || low < 0) {
+					refuse();
+					return;
+				}
+				bytes[index] = static_cast<uint8_t>((high << 4) | low);
+			}
+			procedural::Diagnostic diagnostic;
+			if (!script::DecodeProceduralAuthority(store, bytes, diagnostic)) {
+				ENGINE_WARN(
+					"world procedural authority refused at '{}' - the world loads without this recipe",
+					diagnostic.Field
+				);
+			}
+		}
+
 		void ReadSources(const XmlDocument &document, const XmlElement &element, Store &store) {
 			script::SourceCache cache;
 
@@ -1083,19 +1142,22 @@ namespace engine::game {
 		// never met. Naming it beside the classes is what makes the order
 		// impossible to get wrong from outside.
 		graph::RegisterPipelineComponents();
+		script::RegisterProceduralComponents();
 	}
 
-	void WriteWorldBody(XmlWriter &writer, Store &store) {
+	bool WriteWorldBody(XmlWriter &writer, Store &store, std::string &error) {
 		RegisterGameClasses();
 
 		WriteSources(writer, store);
 		WriteAssetPipelines(writer, store);
+		if (!WriteProceduralAuthority(writer, store, error)) return false;
 
 		Numbering numbering;
 		store.EachRoot([&](Entity root) { numbering.Walk(store, root); });
 
 		Defaults defaults;
 		store.EachRoot([&](Entity root) { WriteInstance(writer, store, root, numbering, defaults); });
+		return true;
 	}
 
 	bool
@@ -1118,6 +1180,11 @@ namespace engine::game {
 
 			if (child->Name == ASSET_PIPELINES) {
 				ReadAssetPipelines(*child, store);
+				continue;
+			}
+
+			if (child->Name == PROCEDURAL_AUTHORITY) {
+				ReadProceduralAuthority(*child, store);
 				continue;
 			}
 
@@ -1290,7 +1357,13 @@ namespace engine::game {
 			WriteWorldProperties(writer, worldSettings);
 
 			if (!remote) {
-				universe.Enter(id, [&](Store &store) { WriteWorldBody(writer, store); });
+				bool written = false;
+				std::string error;
+				universe.Enter(id, [&](Store &store) { written = WriteWorldBody(writer, store, error); });
+				if (!written) {
+					ENGINE_ERROR("could not write world '{}': {}", worldSettings.Name.Text(), error);
+					return {};
+				}
 			}
 
 			writer.Close();
@@ -1404,6 +1477,7 @@ namespace engine::game {
 		const UniverseFileOptions &options,
 		std::string &error
 	) {
+		RegisterGameClasses();
 		error.clear();
 		XmlWriter writer;
 		writer.Open(UNIVERSE_ROOT);
@@ -1442,6 +1516,28 @@ namespace engine::game {
 			writer.Attribute("path", relative.generic_string());
 			writer.Close();
 		}
+		// Refuse invalid authored authorities before replacing any world file.
+		// Each codec buffer is bounded and discarded before the next world.
+		for (const world::WorldId id : universe.Worlds()) {
+			if (universe.IsRemote(id) || !AuthoredLocalWorld(universe, id)) continue;
+			bool valid = false;
+			const world::WorldStatus status = universe.Enter(id, [&](Store &store) {
+				if (store.Resource<script::ProceduralAuthority>() == nullptr) {
+					valid = true;
+					return;
+				}
+				std::vector<uint8_t> bytes;
+				procedural::Diagnostic diagnostic;
+				valid = script::EncodeProceduralAuthority(store, bytes, diagnostic);
+				if (!valid) {
+					error = "procedural authority in world '" + std::string(store.Name()) + "' refused at '" +
+							diagnostic.Field + "'";
+				}
+			});
+			if (status != world::WorldStatus::Ok) error = "could not enter authored world";
+			if (!valid) return false;
+		}
+
 		const std::filesystem::path assetsDirectory = path.parent_path() / "assets";
 		std::error_code assetsError;
 		std::filesystem::create_directories(assetsDirectory, assetsError);
@@ -1506,7 +1602,12 @@ namespace engine::game {
 		if (path.extension() == UNIVERSE_EXTENSION) {
 			return SaveUniverse(universe, name, renderingProfiles, path, UniverseFileOptions{}, error);
 		}
-		return WriteFile(path, WriteGame(universe, name, renderingProfiles), error);
+		const auto document = WriteGame(universe, name, renderingProfiles);
+		if (document.empty()) {
+			error = "could not serialize authored game content";
+			return false;
+		}
+		return WriteFile(path, document, error);
 	}
 
 	bool LoadUniverse(
@@ -2044,12 +2145,14 @@ namespace engine::game {
 		WriteWorldAttributes(writer, settings);
 		WriteWorldProperties(writer, settings);
 
+		bool written = false;
 		const world::WorldStatus status =
-			universe.Enter(world, [&](Store &store) { WriteWorldBody(writer, store); });
+			universe.Enter(world, [&](Store &store) { written = WriteWorldBody(writer, store, error); });
 		if (status != world::WorldStatus::Ok) {
 			error = "no such world";
 			return {};
 		}
+		if (!written) return {};
 
 		writer.Close();
 		return writer.Finish();

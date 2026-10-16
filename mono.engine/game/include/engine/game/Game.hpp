@@ -311,7 +311,8 @@ namespace engine::game {
 	// @param universe The universe holding it.
 	// @param world    Which world.
 	// @param error    Filled in with why, on failure.
-	// @return The document, or empty when the world is unknown or remote.
+	// @return The document, or empty when the world is unknown, remote, or its authored content cannot be
+	// encoded.
 	std::string WriteWorldDocument(world::Universe &universe, world::WorldId world, std::string &error);
 
 	// Reads a standalone world document, creating a world for it.
@@ -526,7 +527,7 @@ namespace engine::game {
 	//
 	// @param universe The universe to write.
 	// @param name     The game's name.
-	// @return The document.
+	// @return The document, or empty when authored content cannot be encoded.
 	std::string WriteGame(world::Universe &universe, core::Name name);
 
 	// Builds a game document carrying the universe's rendering profiles.
