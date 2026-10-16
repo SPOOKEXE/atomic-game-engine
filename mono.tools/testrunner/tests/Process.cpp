@@ -3,18 +3,20 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <future>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <testrunner/Process.hpp>
 #include <testrunner/Runner.hpp>
 #include <thread>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("tools.testrunner.process")
@@ -162,35 +164,58 @@ TEST_CASE("concurrent children do not hold one another's output open", "[process
 	const ScratchEnvironment environment(scratch.Path().string());
 	REQUIRE(environment.Ready);
 
-	std::atomic<size_t> waiting{0};
-	std::atomic<bool> launch{false};
+	std::mutex launchMutex;
+	std::condition_variable launchSignal;
+	size_t waiting = 0;
+	bool launch = false;
 	std::vector<std::future<testrunner::ProcessResult>> children;
 	children.reserve(childCount);
-	// On an exception during thread creation, release every already-started
-	// worker before future destruction waits for it.
+	std::vector<std::thread> workers;
+	workers.reserve(childCount);
+	// On partial startup or an exception, release and join every started worker.
 	struct ReleaseOnExit {
-		std::atomic<bool> &Launch;
+		std::mutex &LaunchMutex;
+		std::condition_variable &LaunchSignal;
+		bool &Launch;
 		fs::path Path;
+		std::vector<std::thread> &Workers;
 		~ReleaseOnExit() {
-			Launch.store(true);
+			{
+				std::lock_guard lock(LaunchMutex);
+				Launch = true;
+			}
+			LaunchSignal.notify_all();
 			std::ofstream(Path / "release").put('\n');
+			for (auto &worker : Workers) {
+				if (worker.joinable()) worker.join();
+			}
 		}
-	} release{launch, scratch.Path()};
+	} release{launchMutex, launchSignal, launch, scratch.Path(), workers};
 
+	// Dedicated threads let every worker reach the barrier; pooled tasks could
+	// remain queued behind workers already waiting there.
 	for (size_t index = 0; index < childCount; index++) {
-		children.push_back(std::async(std::launch::async, [&, index] {
-			waiting.fetch_add(1);
-			while (!launch.load())
-				std::this_thread::yield();
+		std::packaged_task<testrunner::ProcessResult()> child([&, index] {
+			{
+				std::unique_lock lock(launchMutex);
+				waiting++;
+				launchSignal.notify_all();
+				launchSignal.wait(lock, [&] { return launch; });
+			}
 			if (index % 4 == 0) return Run({self, "process inheritance held child"});
 			return Run({self, "--mono-suites"});
-		}));
+		});
+		children.push_back(child.get_future());
+		workers.emplace_back(std::move(child));
 	}
 	const auto launchDeadline = std::chrono::steady_clock::now() + 8s;
-	while (waiting.load() != childCount && std::chrono::steady_clock::now() < launchDeadline)
-		std::this_thread::yield();
-	const bool allWorkersReady = waiting.load() == childCount;
-	launch.store(true);
+	std::unique_lock launchLock(launchMutex);
+	launchSignal.wait_until(launchLock, launchDeadline, [&] { return waiting == childCount; });
+	const size_t workersReadyAtDeadline = waiting;
+	const bool allWorkersReady = workersReadyAtDeadline == childCount;
+	launch = true;
+	launchLock.unlock();
+	launchSignal.notify_all();
 
 	const bool allHeldStarted = allWorkersReady && WaitForReadyChildren(scratch.Path(), heldCount);
 	const auto deadline = std::chrono::steady_clock::now() + 5s;
@@ -213,7 +238,10 @@ TEST_CASE("concurrent children do not hold one another's output open", "[process
 	outcomes.reserve(childCount);
 	for (auto &child : children)
 		outcomes.push_back(child.get());
+	for (auto &worker : workers)
+		worker.join();
 
+	INFO("workers ready at deadline: " << workersReadyAtDeadline << '/' << childCount);
 	REQUIRE(allWorkersReady);
 	REQUIRE(allHeldStarted);
 	REQUIRE(heldChildrenStillRunning);
