@@ -15,6 +15,7 @@
 #include <new>
 #include <stdexcept>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 namespace engine::script {
@@ -390,10 +391,24 @@ namespace engine::script {
 	}
 
 	namespace {
+		bool UnconfiguredAuthority(const ProceduralAuthority &authority) {
+			return authority.Owner.empty() && authority.RecipeBytes.empty() && authority.Sources.empty() &&
+				   authority.Splines.empty() && authority.Overrides.empty() && authority.Regions.empty() &&
+				   authority.Incarnation == 0;
+		}
+
 		template <class T, auto Encode>
 		void WriteResource(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *values = static_cast<const T *>(source);
 			for (size_t index = 0; index < count; ++index) {
+				// A default resource is an unconfigured snapshot value, not a valid
+				// authored PWH2 document. The public authority codec stays strict.
+				if constexpr (std::is_same_v<T, ProceduralAuthority>) {
+					if (UnconfiguredAuthority(values[index])) {
+						writer.WriteUInt32(0);
+						continue;
+					}
+				}
 				std::vector<uint8_t> bytes;
 				procedural::Diagnostic diagnostic;
 				if (!Encode(values[index], bytes, diagnostic))
@@ -407,9 +422,15 @@ namespace engine::script {
 			auto *values = static_cast<T *>(destination);
 			for (size_t index = 0; index < count; ++index) {
 				const size_t length = reader.ReadUInt32();
-				if (length > Maximum || length > reader.Remaining()) {
+				if (reader.Failed() || length > Maximum || length > reader.Remaining()) {
 					reader.Fail();
 					return;
+				}
+				if constexpr (std::is_same_v<T, ProceduralAuthority>) {
+					if (length == 0) {
+						values[index] = {};
+						continue;
+					}
 				}
 				const auto bytes = reader.ReadRawView(length);
 				procedural::Diagnostic diagnostic;

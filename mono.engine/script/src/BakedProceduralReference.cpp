@@ -35,6 +35,12 @@ namespace engine::script {
 				   ValidName(reference.Description.Text());
 		}
 
+		bool Unconfigured(const BakedProceduralReference &reference) {
+			return !reference.Description.IsValid() && reference.Scope.X == 0 && reference.Scope.Y == 0 &&
+				   reference.Scope.CellsPerSide == procedural::RegionScope{}.CellsPerSide &&
+				   reference.Part == ecs::NULL_ENTITY && reference.Revision == 0;
+		}
+
 		void Write(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *rows = static_cast<const BakedProceduralReference *>(source);
 			for (size_t i = 0; i < count; ++i) {
@@ -57,7 +63,23 @@ namespace engine::script {
 				}
 				BakedProceduralReference candidate;
 				const auto name = reader.ReadString();
-				if (reader.Failed() || !ValidName(name)) {
+				candidate.Scope.X = reader.ReadInt32();
+				candidate.Scope.Y = reader.ReadInt32();
+				candidate.Scope.CellsPerSide = reader.ReadUInt16();
+				candidate.Part = ecs::Entity(reader.ReadUInt64());
+				candidate.Revision = reader.ReadUInt64();
+				if (reader.Failed()) return;
+				if (name.empty()) {
+					// Only the exact default is an inert snapshot value. A partial
+					// demand must not become a loadable row.
+					if (!Unconfigured(candidate)) {
+						reader.Fail();
+						return;
+					}
+					rows[i] = candidate;
+					continue;
+				}
+				if (!ValidName(name)) {
 					reader.Fail();
 					return;
 				}
@@ -67,12 +89,7 @@ namespace engine::script {
 					reader.Fail();
 					return;
 				}
-				candidate.Scope.X = reader.ReadInt32();
-				candidate.Scope.Y = reader.ReadInt32();
-				candidate.Scope.CellsPerSide = reader.ReadUInt16();
-				candidate.Part = ecs::Entity(reader.ReadUInt64());
-				candidate.Revision = reader.ReadUInt64();
-				if (reader.Failed() || !Valid(candidate)) {
+				if (!Valid(candidate)) {
 					reader.Fail();
 					return;
 				}

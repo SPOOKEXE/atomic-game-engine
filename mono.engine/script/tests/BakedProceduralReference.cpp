@@ -1,4 +1,5 @@
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
@@ -9,12 +10,61 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <limits>
 
 TEST_SUITE_ID("engine.script.bakedproceduralreference")
 TEST_DEPENDS("engine.script.proceduralscene")
 
 using namespace engine;
+
+TEST_CASE("default baked reference survives a snapshot without becoming a demand", "[procedural][content]") {
+	scene::RegisterSceneComponents();
+	script::RegisterProceduralComponents();
+	ecs::Store source("default-baked-reference");
+	const auto mesh = source.CreateInstance(scene::EditableMeshClass(), "Region");
+	source.Set(mesh, script::BakedProceduralReference{});
+
+	core::ByteWriter snapshot;
+	REQUIRE(source.Save(snapshot));
+	core::ByteReader reader(snapshot.Bytes());
+	ecs::Store restored("restored-default-reference");
+	REQUIRE(restored.Load(reader));
+	const auto *reference = restored.Get<script::BakedProceduralReference>(mesh);
+	REQUIRE(reference);
+	CHECK_FALSE(reference->Description.IsValid());
+	CHECK(reference->Scope.X == 0);
+	CHECK(reference->Scope.Y == 0);
+	CHECK(reference->Scope.CellsPerSide == procedural::RegionScope{}.CellsPerSide);
+	CHECK(reference->Part == ecs::NULL_ENTITY);
+	CHECK(reference->Revision == 0);
+}
+
+TEST_CASE(
+	"baked reference reader rejects partially configured rows without changing the destination",
+	"[procedural][content]"
+) {
+	script::RegisterProceduralComponents();
+	const auto &type =
+		ecs::Components::Describe(ecs::Components::Assigned<script::BakedProceduralReference>());
+	const script::BakedProceduralReference good{core::Name("town/region.aproc"), {}, ecs::Entity{1}, 1};
+	const std::array partial{
+		script::BakedProceduralReference{{}, {}, {}, 1},
+		script::BakedProceduralReference{core::Name("town/region.aproc"), {}, {}, 1},
+		script::BakedProceduralReference{core::Name("town/region.aproc"), {}, ecs::Entity{1}, 0}
+	};
+	for (const auto &value : partial) {
+		core::ByteWriter bytes;
+		type.Write(bytes, &value, 1);
+		core::ByteReader reader(bytes.Bytes());
+		auto destination = good;
+		type.Read(reader, &destination, 1);
+		CHECK(reader.Failed());
+		CHECK(destination.Description == good.Description);
+		CHECK(destination.Part == good.Part);
+		CHECK(destination.Revision == good.Revision);
+	}
+}
 
 TEST_CASE("baked reference saves its content name, region and same-world part", "[procedural][content]") {
 	scene::RegisterSceneComponents();

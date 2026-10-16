@@ -1,6 +1,7 @@
 #include "../src/ProceduralState.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/procedural/Artifact.hpp>
 #include <engine/script/ProceduralJobs.hpp>
@@ -12,6 +13,7 @@
 #include <array>
 #include <chrono>
 #include <limits>
+#include <stdexcept>
 #include <thread>
 
 TEST_SUITE_ID("engine.script.proceduraljobs")
@@ -90,6 +92,82 @@ namespace {
 		REQUIRE(found != published->Regions.end());
 		return *found;
 	}
+}
+
+TEST_CASE(
+	"unconfigured procedural authority survives snapshots but is not an authored document",
+	"[procedural][host]"
+) {
+	script::RegisterProceduralComponents();
+	ecs::Store source("unconfigured-authority");
+	source.SetResource(script::ProceduralAuthority{});
+	const auto &type = ecs::Components::Describe(ecs::Components::Assigned<script::ProceduralAuthority>());
+	auto partial = script::ProceduralAuthority{};
+	partial.Owner = "demo";
+	core::ByteWriter malformed;
+	CHECK_THROWS_AS(type.Write(malformed, &partial, 1), std::length_error);
+	procedural::Diagnostic diagnostic;
+	std::vector<uint8_t> portable;
+	CHECK_FALSE(script::EncodeProceduralAuthority(source, portable, diagnostic));
+
+	core::ByteWriter snapshot;
+	REQUIRE(source.Save(snapshot));
+	core::ByteReader reader(snapshot.Bytes());
+	ecs::Store restored("restored-unconfigured-authority");
+	REQUIRE(restored.Load(reader));
+	const auto *authority = restored.Resource<script::ProceduralAuthority>();
+	REQUIRE(authority);
+	CHECK(authority->Owner.empty());
+	CHECK(authority->RecipeBytes.empty());
+	CHECK(authority->Sources.empty());
+	CHECK(authority->Splines.empty());
+	CHECK(authority->Overrides.empty());
+	CHECK(authority->Regions.empty());
+	CHECK(authority->Incarnation == 0);
+	CHECK_FALSE(script::EncodeProceduralAuthority(restored, portable, diagnostic));
+}
+
+TEST_CASE(
+	"registered authority codec preserves authored bytes and rejects malformed payloads", "[procedural][host]"
+) {
+	ProceduralFixture fixture;
+	const auto *authority = fixture.Store.Resource<script::ProceduralAuthority>();
+	REQUIRE(authority);
+	const auto &type = ecs::Components::Describe(ecs::Components::Assigned<script::ProceduralAuthority>());
+	std::vector<uint8_t> portable;
+	REQUIRE(script::EncodeProceduralAuthority(fixture.Store, portable, fixture.Diagnostic));
+	core::ByteWriter expected;
+	expected.WriteUInt32(static_cast<uint32_t>(portable.size()));
+	expected.WriteRaw(portable.data(), portable.size());
+	core::ByteWriter registered;
+	type.Write(registered, authority, 1);
+	CHECK(
+		std::equal(
+			registered.Bytes().begin(),
+			registered.Bytes().end(),
+			expected.Bytes().begin(),
+			expected.Bytes().end()
+		)
+	);
+
+	core::ByteWriter malformed;
+	malformed.WriteUInt32(1);
+	malformed.WriteUInt8(0);
+	core::ByteReader reader(malformed.Bytes());
+	auto destination = *authority;
+	type.Read(reader, &destination, 1);
+	CHECK(reader.Failed());
+	CHECK(destination.Owner == authority->Owner);
+	CHECK(destination.RecipeBytes == authority->RecipeBytes);
+	CHECK(destination.Incarnation == authority->Incarnation);
+
+	core::ByteWriter empty;
+	core::ByteReader missingLength(empty.Bytes());
+	destination = *authority;
+	type.Read(missingLength, &destination, 1);
+	CHECK(missingLength.Failed());
+	CHECK(destination.Owner == authority->Owner);
+	CHECK(destination.Incarnation == authority->Incarnation);
 }
 
 TEST_CASE(
