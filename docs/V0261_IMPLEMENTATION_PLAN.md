@@ -411,6 +411,24 @@ implementation slice. They do not validate the full proposed feature.
 - The Studio adapter unity object compiles in the CI preset. Focused server
   graphcore and imagegraph tests passed: 2/2 in 0.30 s.
 
+## Completed increments and current evidence
+
+Partial increments only.
+
+| Increment or check | Result and remaining scope |
+|---|---|
+| `750761a6`, `9b1dc61f` | Graph foundation; cadence and pose. |
+| `76fb2cc4`, `f06ef94f` | Typed compute CPU contracts; scalar FIFO and schema adapter. |
+| `a96f7618` | Shared prepared compiler and audio. |
+| `543a3056` | Bake schemas and runtime. |
+| `e47fbc10` | Bounded forest, village and roads kernel; canonical named-tag decoder. |
+| `e7fd7955` | Server old time/weight 2/0 vs expected 3/1; fixed 6 assertions. Replica unposed bones/palette: 5 old failures, 19 fixed assertions. |
+| CI snapshots | Initial 5/5, 1.35 s: graphcore/computegraph/procedural/scene/graph; uncommitted codec snapshot. Latest 5/5, 1.21 s: graphcore/procedural/bakegraph/bake/audio. |
+| Client animation | 4 `client*animation*` cases passed, 229 assertions. |
+| AudioGraph heap | Actual constructor: 12,734,480 bytes/17 blocks. Legal 1,024-node/1,023-input mutation/rebuild: 0 new blocks/bytes. Not full mixer allocation proof. |
+| C04 isolated SDL | Opt-out/opt-in transfer-compute-graphics parity and sync validation passed; no production integration, overlap, or speed claim. |
+| Remaining | C02 needs NPC/effects/service/demo. Full C06, Studio, host, B0 and optimization passes remain pending. |
+
 ## Initial evidence checklist
 
 Approval entries below reflect completed user review. All implementation,
