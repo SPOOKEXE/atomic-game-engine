@@ -50,9 +50,9 @@ if (procedural.Progress(canceled).Status !== 'Canceled') throw new Error('cancel
 procedural.Release(canceled);
 
 const starterPlayerScripts = game.GetService('StarterPlayer').FindFirstChild('StarterPlayerScripts');
-if (starterPlayerScripts === null) throw new Error('the starter player scripts container is missing');
-const camera = starterPlayerScripts.FindFirstChild('DemoCamera');
-if (camera === null) throw new Error('the demo camera companion is missing');
-camera.SetAttribute('Name','Forest Village Camera');
-camera.SetAttribute('CFrame',CFrame.lookAt(Vector3.new(10,14,22),Vector3.new(10,0,8)));
-camera.SetAttribute('FieldOfView',58);
+const camera = starterPlayerScripts === null ? null : starterPlayerScripts.FindFirstChild('DemoCamera');
+if (camera !== null) {
+  camera.SetAttribute('Name','Forest Village Camera');
+  camera.SetAttribute('CFrame',CFrame.lookAt(Vector3.new(10,14,22),Vector3.new(10,0,8)));
+  camera.SetAttribute('FieldOfView',58);
+}

@@ -49,8 +49,9 @@ assert(procedural:Progress(canceled).Status == "Canceled")
 procedural:Release(canceled)
 
 local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
-assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
-local camera = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
-camera:SetAttribute("Name", "Forest Village Camera")
-camera:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(10, 14, 22), Vector3.new(10, 0, 8)))
-camera:SetAttribute("FieldOfView", 58)
+local camera = starterPlayerScripts and starterPlayerScripts:FindFirstChild("DemoCamera")
+if camera ~= nil then
+	camera:SetAttribute("Name", "Forest Village Camera")
+	camera:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(10, 14, 22), Vector3.new(10, 0, 8)))
+	camera:SetAttribute("FieldOfView", 58)
+end
