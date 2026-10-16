@@ -2239,3 +2239,9 @@ graph-pipeline-bench samples="101" build_preset="bench":
     ./.cache/build/{{build_preset}}/bench/bench_bake --suite engine.bake.bench.graph --samples {{samples}}
     ./.cache/build/{{build_preset}}/bench/bench_audio --suite engine.audio.bench.graphrouting --samples {{samples}}
     ./.cache/build/{{build_preset}}/bench/bench_graph --suite engine.graph.bench.enginegraph --samples {{samples}}
+
+# Complete CPU ray queries through retained portal colliders.
+portal-query-bench samples="101" build_preset="bench":
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_physics
+    MONO_BENCH_LATENCY=1 ./.cache/build/{{build_preset}}/bench/bench_physics --suite engine.physics.bench.portal-queries --samples {{samples}}
