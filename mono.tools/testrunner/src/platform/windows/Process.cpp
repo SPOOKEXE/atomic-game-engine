@@ -2,6 +2,8 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <array>
+#include <cstddef>
+#include <vector>
 #include <windows.h>
 
 namespace testrunner {
@@ -57,6 +59,19 @@ namespace testrunner {
 			return result;
 		}
 
+		std::wstring commandLine;
+		for (size_t index = 0; index < arguments.size(); index++) {
+			if (index > 0) {
+				commandLine.push_back(L' ');
+			}
+			commandLine += Quote(arguments[index]);
+		}
+
+		SIZE_T attributeBytes = 0;
+		InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeBytes);
+		if (attributeBytes == 0) return result;
+		std::vector<std::byte> attributeStorage(attributeBytes);
+
 		SECURITY_ATTRIBUTES security{};
 		security.nLength = sizeof(security);
 		security.bInheritHandle = TRUE;
@@ -66,30 +81,97 @@ namespace testrunner {
 		if (!CreatePipe(&readEnd, &writeEnd, &security, 0)) {
 			return result;
 		}
-		// The child must not inherit the read end, or the pipe never reports
-		// EOF and the read below blocks forever.
-		SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
-
-		std::wstring commandLine;
-		for (size_t index = 0; index < arguments.size(); index++) {
-			if (index > 0) {
-				commandLine.push_back(L' ');
-			}
-			commandLine += Quote(arguments[index]);
+		// The parent alone reads this capture pipe. Only the writer belongs in
+		// the child's explicit inheritance list.
+		if (!SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0)) {
+			CloseHandle(readEnd);
+			CloseHandle(writeEnd);
+			return result;
 		}
 
-		STARTUPINFOW startup{};
-		startup.cb = sizeof(startup);
-		startup.dwFlags = STARTF_USESTDHANDLES;
-		startup.hStdOutput = writeEnd;
-		startup.hStdError = writeEnd;
-		startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+		// STARTF_USESTDHANDLES needs a valid inheritable stdin handle. Keep the
+		// parent's stdin when there is one, and use NUL in a detached runner.
+		HANDLE childInput = nullptr;
+		const HANDLE parentInput = GetStdHandle(STD_INPUT_HANDLE);
+		if (parentInput && parentInput != INVALID_HANDLE_VALUE) {
+			if (!DuplicateHandle(
+					GetCurrentProcess(),
+					parentInput,
+					GetCurrentProcess(),
+					&childInput,
+					0,
+					TRUE,
+					DUPLICATE_SAME_ACCESS
+				)) {
+				CloseHandle(readEnd);
+				CloseHandle(writeEnd);
+				return result;
+			}
+		} else {
+			childInput = CreateFileW(
+				L"NUL",
+				GENERIC_READ,
+				FILE_SHARE_READ | FILE_SHARE_WRITE,
+				&security,
+				OPEN_EXISTING,
+				FILE_ATTRIBUTE_NORMAL,
+				nullptr
+			);
+		}
+		if (childInput == INVALID_HANDLE_VALUE) {
+			CloseHandle(readEnd);
+			CloseHandle(writeEnd);
+			return result;
+		}
+
+		// TRUE without a handle list would copy another concurrent Run call's
+		// write pipe into this child, keeping that call's reader open past exit.
+		HANDLE inherited[] = {writeEnd, childInput};
+		STARTUPINFOEXW startup{};
+		startup.StartupInfo.cb = sizeof(startup);
+		startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+		startup.StartupInfo.hStdOutput = writeEnd;
+		startup.StartupInfo.hStdError = writeEnd;
+		startup.StartupInfo.hStdInput = childInput;
+		startup.lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributeStorage.data());
+		if (!InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &attributeBytes)) {
+			CloseHandle(childInput);
+			CloseHandle(readEnd);
+			CloseHandle(writeEnd);
+			return result;
+		}
+		if (!UpdateProcThreadAttribute(
+				startup.lpAttributeList,
+				0,
+				PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+				inherited,
+				sizeof(inherited),
+				nullptr,
+				nullptr
+			)) {
+			DeleteProcThreadAttributeList(startup.lpAttributeList);
+			CloseHandle(childInput);
+			CloseHandle(readEnd);
+			CloseHandle(writeEnd);
+			return result;
+		}
 
 		PROCESS_INFORMATION process{};
 		const BOOL started = CreateProcessW(
-			nullptr, commandLine.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &startup, &process
+			nullptr,
+			commandLine.data(),
+			nullptr,
+			nullptr,
+			TRUE,
+			EXTENDED_STARTUPINFO_PRESENT,
+			nullptr,
+			nullptr,
+			&startup.StartupInfo,
+			&process
 		);
 
+		DeleteProcThreadAttributeList(startup.lpAttributeList);
+		CloseHandle(childInput);
 		CloseHandle(writeEnd);
 		if (!started) {
 			CloseHandle(readEnd);

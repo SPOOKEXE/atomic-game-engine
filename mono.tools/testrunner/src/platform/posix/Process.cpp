@@ -1,13 +1,32 @@
 #include <array>
 #include <cerrno>
-#include <csignal>
-#include <cstring>
+#include <fcntl.h>
+#include <mutex>
+#include <spawn.h>
 #include <sys/wait.h>
 #include <testrunner/Process.hpp>
 #include <unistd.h>
 #include <vector>
 
+extern char **environ;
+
 namespace testrunner {
+	namespace {
+		int MoveAboveStdio(int descriptor) {
+			if (descriptor > STDERR_FILENO) return descriptor;
+#ifdef F_DUPFD_CLOEXEC
+			const int moved = fcntl(descriptor, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+#else
+			const int moved = fcntl(descriptor, F_DUPFD, STDERR_FILENO + 1);
+			if (moved >= 0 && fcntl(moved, F_SETFD, FD_CLOEXEC) < 0) {
+				close(moved);
+				return -1;
+			}
+#endif
+			if (moved >= 0) close(descriptor);
+			return moved;
+		}
+	}
 
 	ProcessResult Run(const std::vector<std::string> &arguments) {
 		ProcessResult result;
@@ -22,36 +41,67 @@ namespace testrunner {
 		}
 		argv.push_back(nullptr);
 
+		// The portable pipe() and fcntl() path uses separate calls. Serialize
+		// only pipe setup and spawn there, so concurrent Run calls cannot spawn
+		// between pipe() and marking both ends close-on-exec.
+#ifndef __linux__
+		static std::mutex launchMutex;
+		std::unique_lock launchLock(launchMutex);
+#endif
 		int pipes[2] = {-1, -1};
+#ifdef __linux__
+		if (pipe2(pipes, O_CLOEXEC) != 0) {
+#else
 		if (pipe(pipes) != 0) {
+#endif
 			return result;
 		}
+#ifndef __linux__
+		if (fcntl(pipes[0], F_SETFD, FD_CLOEXEC) < 0 || fcntl(pipes[1], F_SETFD, FD_CLOEXEC) < 0) {
+			close(pipes[0]);
+			close(pipes[1]);
+			return result;
+		}
+#endif
+		// A caller may have closed stdin/stdout/stderr. Keep the pipe on FDs
+		// above them so dup2 never leaves CLOEXEC on captured stdout or closes it.
+		for (int &descriptor : pipes) {
+			const int moved = MoveAboveStdio(descriptor);
+			if (moved < 0) {
+				close(pipes[0]);
+				close(pipes[1]);
+				return result;
+			}
+			descriptor = moved;
+		}
 
-		const pid_t child = fork();
-		if (child < 0) {
+		// posix_spawnp keeps PATH lookup while performing child setup without
+		// running library code from this multi-threaded parent after a fork.
+		posix_spawn_file_actions_t actions;
+		if (posix_spawn_file_actions_init(&actions) != 0) {
+			close(pipes[0]);
+			close(pipes[1]);
+			return result;
+		}
+		const bool configured = posix_spawn_file_actions_addclose(&actions, pipes[0]) == 0 &&
+								posix_spawn_file_actions_adddup2(&actions, pipes[1], STDOUT_FILENO) == 0 &&
+								posix_spawn_file_actions_adddup2(&actions, pipes[1], STDERR_FILENO) == 0 &&
+								posix_spawn_file_actions_addclose(&actions, pipes[1]) == 0;
+		pid_t child = -1;
+		const int spawned =
+			configured ? posix_spawnp(&child, argv[0], &actions, nullptr, argv.data(), environ) : -1;
+		posix_spawn_file_actions_destroy(&actions);
+
+#ifndef __linux__
+		launchLock.unlock();
+#endif
+		if (spawned != 0) {
 			close(pipes[0]);
 			close(pipes[1]);
 			return result;
 		}
 
-		if (child == 0) {
-			// The child. Nothing between fork and execvp may allocate or take a
-			// lock: in a multi-threaded parent, only the forking thread
-			// survives, and a lock another thread happened to hold is held
-			// forever. Everything below is a syscall.
-			close(pipes[0]);
-			dup2(pipes[1], STDOUT_FILENO);
-			dup2(pipes[1], STDERR_FILENO);
-			close(pipes[1]);
-
-			execvp(argv[0], argv.data());
-
-			// Only reachable if exec failed. _exit rather than exit: the
-			// child shares the parent's atexit handlers and stdio buffers, and
-			// running them here would flush the parent's buffers twice.
-			_exit(127);
-		}
-
+		// The parent closes its writer before draining the child's output.
 		close(pipes[1]);
 
 		// Read to EOF before waiting. Waiting first deadlocks as soon as the
@@ -81,7 +131,7 @@ namespace testrunner {
 		result.Started = true;
 		if (WIFEXITED(status)) {
 			result.ExitCode = WEXITSTATUS(status);
-			// 127 is the convention execvp failure exits with above. A real
+			// 127 is the convention for failed spawn setup or exec. A real
 			// program is unlikely to use it, and treating it as "did not start"
 			// gives a better message than "failed with 127".
 			if (result.ExitCode == 127) {
