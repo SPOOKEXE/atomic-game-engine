@@ -5,6 +5,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/gui/Document.hpp>
+#include <engine/script/ProceduralJobs.hpp>
 
 #include <memory>
 #include <studio/Commands.hpp>
@@ -541,6 +542,24 @@ namespace studio {
 		Push(std::move(command));
 	}
 
+	void CommandLog::RecordProceduralAuthority(
+		WorldId world, std::vector<std::byte> before, std::vector<std::byte> after, std::string description
+	) {
+		using engine::script::ProceduralHostLimits;
+		if (!world.IsValid() || before == after ||
+			before.size() > ProceduralHostLimits::MaximumAuthorityBytes ||
+			after.size() > ProceduralHostLimits::MaximumAuthorityBytes)
+			return;
+
+		Command command;
+		command.Kind = CommandKind::ProceduralAuthority;
+		command.World = world;
+		command.AuthorityBefore = std::move(before);
+		command.AuthorityAfter = std::move(after);
+		command.Description = std::move(description);
+		Push(std::move(command));
+	}
+
 	bool CommandLog::Apply(Command &command, bool forward) {
 		if (Universe == nullptr || !command.World.IsValid()) {
 			return false;
@@ -643,6 +662,24 @@ namespace studio {
 					command.Component,
 					forward ? std::span<const std::byte>(command.ComponentAfter)
 							: std::span<const std::byte>(command.ComponentBefore)
+				);
+				return;
+			}
+
+			case CommandKind::ProceduralAuthority: {
+				const auto &bytes = forward ? command.AuthorityAfter : command.AuthorityBefore;
+				if (bytes.empty()) {
+					if (!store.HasResource<engine::script::ProceduralAuthority>()) return;
+					store.RemoveResource<engine::script::ProceduralAuthority>();
+					landed = true;
+					return;
+				}
+				if (bytes.size() > engine::script::ProceduralHostLimits::MaximumAuthorityBytes) return;
+				engine::procedural::Diagnostic diagnostic;
+				landed = engine::script::DecodeProceduralAuthority(
+					store,
+					std::span(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()),
+					diagnostic
 				);
 				return;
 			}

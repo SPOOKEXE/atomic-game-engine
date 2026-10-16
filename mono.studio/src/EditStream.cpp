@@ -407,6 +407,11 @@ namespace studio {
 		records.reserve(commands.size());
 
 		for (const Command &command : commands) {
+			// Procedural authority history is a world resource edit local to this
+			// editor. It has no instance path and is not part of the peer protocol.
+			if (command.Kind == CommandKind::ProceduralAuthority) {
+				continue;
+			}
 			if (!command.World.IsValid()) {
 				continue;
 			}

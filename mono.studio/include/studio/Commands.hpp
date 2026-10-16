@@ -130,6 +130,9 @@ namespace studio {
 
 		// One serializable component changed as an atomic authored value.
 		UiComponent,
+
+		// The world's procedural authoring resource changed as one edit.
+		ProceduralAuthority,
 	};
 
 	// What to do with a recording that has finished.
@@ -231,6 +234,10 @@ namespace studio {
 		std::vector<std::byte> ComponentBefore;
 		// Serialized component state after the edit.
 		std::vector<std::byte> ComponentAfter;
+
+		// Canonical authored authority bytes. Empty means the resource was absent.
+		std::vector<std::byte> AuthorityBefore;
+		std::vector<std::byte> AuthorityAfter;
 
 		// What to call this in the Edit menu - "Delete Part", not "Destroy".
 		std::string Description;
@@ -416,6 +423,15 @@ namespace studio {
 			engine::world::WorldId world,
 			engine::ecs::Entity instance,
 			engine::core::Name component,
+			std::vector<std::byte> before,
+			std::vector<std::byte> after,
+			std::string description
+		);
+
+		// Records one canonical procedural authority replacement. Empty before
+		// bytes represent a world that had no authority resource yet.
+		void RecordProceduralAuthority(
+			engine::world::WorldId world,
 			std::vector<std::byte> before,
 			std::vector<std::byte> after,
 			std::string description

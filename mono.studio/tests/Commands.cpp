@@ -19,6 +19,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/ProceduralJobs.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -196,6 +197,63 @@ TEST_CASE("an empty log has nothing to undo or redo", "[studio][commands]") {
 	CHECK_FALSE(fixture.Log.Undo());
 	CHECK_FALSE(fixture.Log.Redo());
 	CHECK(fixture.Log.Depth() == 0);
+}
+
+TEST_CASE(
+	"procedural authority undo restores a fresh authority and leaves published output alone",
+	"[studio][commands]"
+) {
+	Fixture fixture;
+	engine::script::RegisterProceduralComponents();
+	std::vector<std::byte> after;
+	uint64_t configuredIncarnation = 0;
+	const engine::procedural::RegionScope scope{0, 0, 16};
+	fixture.Worlds.Enter(fixture.Scene, [&](Store &store) {
+		engine::procedural::Diagnostic diagnostic;
+		REQUIRE(
+			engine::script::ConfigureProceduralWorld(
+				store,
+				"undo-test",
+				engine::procedural::ForestVillageDefaults("forest-village", 42),
+				std::span(&scope, 1),
+				std::span<const engine::script::ProceduralSource>{},
+				diagnostic
+			)
+		);
+		const auto *authority = store.Resource<engine::script::ProceduralAuthority>();
+		REQUIRE(authority != nullptr);
+		configuredIncarnation = authority->Incarnation;
+		std::vector<uint8_t> encoded;
+		REQUIRE(engine::script::EncodeProceduralAuthority(store, encoded, diagnostic));
+		after.assign(
+			reinterpret_cast<const std::byte *>(encoded.data()),
+			reinterpret_cast<const std::byte *>(encoded.data() + encoded.size())
+		);
+		engine::script::ProceduralPublished published;
+		published.Regions.push_back({scope, {}, {}, {42}, 7, 11});
+		store.SetResource(published);
+	});
+
+	fixture.Log.RecordProceduralAuthority(fixture.Scene, {}, std::move(after), "Configure Procedural World");
+	REQUIRE(fixture.Log.Undo());
+	fixture.Worlds.Enter(fixture.Scene, [](Store &store) {
+		CHECK(store.Resource<engine::script::ProceduralAuthority>() == nullptr);
+		const auto *published = store.Resource<engine::script::ProceduralPublished>();
+		REQUIRE(published != nullptr);
+		REQUIRE(published->Regions.size() == 1);
+		CHECK(published->Regions[0].ArtifactBytes == std::vector<uint8_t>{42});
+	});
+
+	REQUIRE(fixture.Log.Redo());
+	fixture.Worlds.Enter(fixture.Scene, [configuredIncarnation](Store &store) {
+		const auto *authority = store.Resource<engine::script::ProceduralAuthority>();
+		REQUIRE(authority != nullptr);
+		CHECK(authority->Incarnation != configuredIncarnation);
+		const auto *published = store.Resource<engine::script::ProceduralPublished>();
+		REQUIRE(published != nullptr);
+		REQUIRE(published->Regions.size() == 1);
+		CHECK(published->Regions[0].ArtifactBytes == std::vector<uint8_t>{42});
+	});
 }
 
 TEST_CASE("undoing an insert takes the instance away", "[studio][commands]") {
