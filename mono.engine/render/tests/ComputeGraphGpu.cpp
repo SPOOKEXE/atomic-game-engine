@@ -18,6 +18,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -32,6 +33,7 @@ namespace {
 	using engine::render::ComputeKernelCode;
 	constexpr uint32_t GROUP = 64;
 	constexpr uint32_t MAXIMUM_INPUT = 1024u * 1024u;
+	constexpr uint32_t MAXIMUM_STOCK_CAPACITY = 65'535u * GROUP;
 	constexpr uint64_t DEVICE_BUDGET = 256u * 1024u * 1024u;
 
 	cg::Owner Owner() {
@@ -73,6 +75,25 @@ namespace {
 			 }}
 		);
 		return program;
+	}
+	uint64_t ReadbackControlBytes(const ComputeGraphProgram &program) {
+		std::vector<std::string_view> countBuffers;
+		for (const auto &buffer : program.Definition.Buffers) {
+			if (buffer.CountBuffer.empty()) continue;
+			if (std::find(countBuffers.begin(), countBuffers.end(), buffer.CountBuffer) == countBuffers.end())
+				countBuffers.push_back(buffer.CountBuffer);
+		}
+		uint64_t bytes = countBuffers.size() * sizeof(uint32_t);
+		for (const auto &name : program.ErrorBuffers) {
+			const auto buffer = std::find_if(
+				program.Definition.Buffers.begin(),
+				program.Definition.Buffers.end(),
+				[&name](const auto &item) { return item.Name == name; }
+			);
+			REQUIRE(buffer != program.Definition.Buffers.end());
+			bytes += uint64_t(buffer->LogicalCount) * buffer->Stride;
+		}
+		return bytes;
 	}
 
 	cg::Request Request(std::span<const uint32_t> values, uint32_t maximumResult = MAXIMUM_INPUT) {
@@ -332,6 +353,88 @@ TEST_CASE(
 	ticket = 91;
 	CHECK(graph.Submit(Request(oversized), ticket, diagnostic) == cg::Status::InvalidCount);
 	CHECK(ticket == 91);
+	CHECK(graph.ReservedDeviceBytes() == 0);
+}
+
+TEST_CASE(
+	"native typed compute admits the exact full-result readback ceiling",
+	"[render][computegraph][gpu][boundary]"
+) {
+	engine::render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ComputeGraph graph(fixture.Render.Backend().Device, Owner());
+	cg::Diagnostic diagnostic;
+	const cg::RuntimeLimits limits;
+	// Count and error readbacks leave less room for output than the dispatch capacity allows.
+	constexpr uint32_t maximumOutput = 3'945'730;
+	const auto program = CompactProgram(maximumOutput);
+	const uint64_t controlBytes = ReadbackControlBytes(program);
+	REQUIRE(controlBytes == 994'296);
+	REQUIRE(controlBytes < limits.MaximumReadbackBytes);
+	REQUIRE((limits.MaximumReadbackBytes - controlBytes) % sizeof(uint32_t) == 0);
+	CHECK(controlBytes + uint64_t(maximumOutput) * sizeof(uint32_t) == limits.MaximumReadbackBytes);
+	CHECK(controlBytes + uint64_t(maximumOutput + 1) * sizeof(uint32_t) > limits.MaximumReadbackBytes);
+
+	REQUIRE(graph.Install(program, diagnostic) == cg::Status::Ok);
+	std::vector<uint32_t> input(maximumOutput);
+	for (uint32_t index = 0; index < maximumOutput; ++index)
+		input[index] = index + 1;
+	std::vector<uint32_t> expected;
+	REQUIRE(
+		cg::CompactDoubleU32(input, maximumOutput, maximumOutput, expected, diagnostic) == cg::Status::Ok
+	);
+	uint64_t ticket = 0;
+	REQUIRE(graph.Submit(Request(input, maximumOutput), ticket, diagnostic) == cg::Status::Ok);
+	const auto actual = Values(Finish(graph, ticket));
+	REQUIRE(actual.size() == expected.size());
+	const auto difference = std::mismatch(actual.begin(), actual.end(), expected.begin());
+	if (difference.first != actual.end()) {
+		INFO("first differing output " << std::distance(actual.begin(), difference.first));
+		INFO("actual " << *difference.first << ", expected " << *difference.second);
+		CHECK(difference.first == actual.end());
+	}
+	CHECK(graph.ReservedDeviceBytes() == 0);
+
+	const auto oversizedProgram = CompactProgram(maximumOutput + 1);
+	CHECK(ReadbackControlBytes(oversizedProgram) == controlBytes);
+	REQUIRE(graph.Install(oversizedProgram, diagnostic) == cg::Status::Ok);
+	const std::array<uint32_t, 1> one{1};
+	ticket = 91;
+	CHECK(graph.Submit(Request(one, maximumOutput + 1), ticket, diagnostic) == cg::Status::LimitExceeded);
+	CHECK(ticket == 91);
+	CHECK(graph.PendingGpuCount() == 0);
+	CHECK(graph.ReservedDeviceBytes() == 0);
+}
+
+TEST_CASE(
+	"native typed compute executes the maximum stock dispatch with a sparse CPU oracle",
+	"[render][computegraph][gpu][boundary]"
+) {
+	engine::render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	ComputeGraph graph(fixture.Render.Backend().Device, Owner());
+	cg::Diagnostic diagnostic;
+	REQUIRE(graph.Install(CompactProgram(MAXIMUM_STOCK_CAPACITY), diagnostic) == cg::Status::Ok);
+	std::vector<uint32_t> input(MAXIMUM_STOCK_CAPACITY);
+	for (uint32_t index = 0; index < MAXIMUM_STOCK_CAPACITY; ++index)
+		input[index] = index % 3 == 0 ? 0 : index + 1;
+	const uint32_t maximumResult = MAXIMUM_STOCK_CAPACITY / 3 * 2;
+	std::vector<uint32_t> expected;
+	REQUIRE(
+		cg::CompactDoubleU32(input, MAXIMUM_STOCK_CAPACITY, maximumResult, expected, diagnostic) ==
+		cg::Status::Ok
+	);
+	uint64_t ticket = 0;
+	REQUIRE(graph.Submit(Request(input, maximumResult), ticket, diagnostic) == cg::Status::Ok);
+	const auto actual = Values(Finish(graph, ticket));
+	REQUIRE(actual.size() == expected.size());
+	CHECK(actual.size() == maximumResult);
+	const auto difference = std::mismatch(actual.begin(), actual.end(), expected.begin());
+	if (difference.first != actual.end()) {
+		INFO("first differing output " << std::distance(actual.begin(), difference.first));
+		INFO("actual " << *difference.first << ", expected " << *difference.second);
+		CHECK(difference.first == actual.end());
+	}
 	CHECK(graph.ReservedDeviceBytes() == 0);
 }
 

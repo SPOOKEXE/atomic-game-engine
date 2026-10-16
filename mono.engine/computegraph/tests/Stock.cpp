@@ -12,7 +12,7 @@ TEST_CASE(
 	"[computegraph]"
 ) {
 	using namespace engine::computegraph;
-	for (const auto capacity : {0u, 1u, 65u, 4097u, 65537u, 1048576u}) {
+	for (const auto capacity : {0u, 1u, 65u, 4097u, 65537u, 1048576u, 65'535u * 64u}) {
 		Program program;
 		Diagnostic diagnostic;
 		REQUIRE(StockStableCompactU32(capacity, program, diagnostic) == Status::Ok);
@@ -51,4 +51,11 @@ TEST_CASE("stock compaction refuses oversize without replacing an accepted plan"
 	CHECK(StockStableCompactU32(UINT32_MAX, program, diagnostic) == Status::LimitExceeded);
 	CHECK(program.Definition.Passes.size() == passes);
 	CHECK(program.Definition.Buffers.front().Capacity == 65);
+
+	constexpr uint32_t maximumCapacity = 65'535u * 64u;
+	REQUIRE(StockStableCompactU32(maximumCapacity, program, diagnostic) == Status::Ok);
+	const auto maximumPasses = program.Definition.Passes.size();
+	CHECK(StockStableCompactU32(maximumCapacity + 1, program, diagnostic) == Status::LimitExceeded);
+	CHECK(program.Definition.Passes.size() == maximumPasses);
+	CHECK(program.Definition.Buffers.front().Capacity == maximumCapacity);
 }
