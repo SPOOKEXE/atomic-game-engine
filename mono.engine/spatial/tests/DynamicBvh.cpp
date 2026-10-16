@@ -107,6 +107,63 @@ TEST_CASE("dynamic hierarchy keeps nearest ray hits and bounded output determini
 	REQUIRE(result.Overflowed);
 	CHECK(hits[0].Id == 3u);
 	CHECK(hits[1].Id == 9u);
+	std::array<engine::core::RayHit, 3> complete{};
+	const auto exact = RaycastAll(tree, ray, 10.0f, LayerMask::All(), complete);
+	CHECK_FALSE(exact.Overflowed);
+	REQUIRE(exact.Written == complete.size());
+	CHECK(complete[0].Id == 3u);
+	CHECK(complete[1].Id == 9u);
+	CHECK(complete[2].Id == 5u);
+	CHECK(RaycastAll(tree, ray, 10.0f, LayerMask::All(), {}).Overflowed);
+	CHECK_FALSE(RaycastAll(tree, ray, 1.0f, LayerMask::All(), {}).Overflowed);
+}
+
+TEST_CASE("dynamic hierarchy diagonal rays match grid hits through empty segment bounds", "[dynamicbvh]") {
+	std::vector<Proxy> proxies;
+	for (uint64_t row = 0; row < 16; ++row) {
+		for (uint64_t column = 0; column < 16; ++column) {
+			proxies.push_back(
+				{1 + row * 16 + column,
+				 AABB::FromCentre({float(column) * 2, 0, float(row) * 2}, {.4f, .4f, .4f}),
+				 LayerMask::Only(uint32_t((row + column) % 2))}
+			);
+		}
+	}
+	DynamicBvh tree;
+	HashGrid grid;
+	tree.Rebuild(proxies);
+	grid.Rebuild(proxies);
+	const std::array rays{
+		Ray{{-2, 0, -2}, Vector3{1, 0, 1}.Unit()},
+		Ray{{32, 0, 32}, Vector3{-1, 0, -1}.Unit()},
+		Ray{{-2, 0, -1}, Vector3{1, 0, 1}.Unit()},
+		Ray{{-2, -.1f, -2}, Vector3{1, .01f, 1}.Unit()},
+		Ray{{0, .4f, 0}, Vector3::XAxis},
+		Ray{{0, .4f, 0}, Vector3{-1, -0.0f, 0}},
+	};
+	for (const Ray &ray : rays) {
+		for (float distance : {1.0f, 8.0f, 48.0f}) {
+			for (LayerMask mask : {LayerMask::All(), LayerMask::Only(0), LayerMask::Only(1)}) {
+				const auto actual = Raycast(tree, ray, distance, mask);
+				const auto expected = Raycast(grid, ray, distance, mask);
+				REQUIRE(actual.has_value() == expected.has_value());
+				if (actual) {
+					CHECK(actual->Id == expected->Id);
+					CHECK(actual->Distance == expected->Distance);
+					CHECK(actual->Normal == expected->Normal);
+				}
+				std::array<engine::core::RayHit, 2> actualHits{}, expectedHits{};
+				const auto found = RaycastAll(tree, ray, distance, mask, actualHits);
+				const auto reference = RaycastAll(grid, ray, distance, mask, expectedHits);
+				REQUIRE(found.Written == reference.Written);
+				CHECK(found.Overflowed == reference.Overflowed);
+				for (size_t index = 0; index < found.Written; ++index) {
+					CHECK(actualHits[index].Id == expectedHits[index].Id);
+					CHECK(actualHits[index].Distance == expectedHits[index].Distance);
+				}
+			}
+		}
+	}
 }
 
 TEST_CASE("dynamic hierarchy filters layers and supports sphere and swept-box candidates", "[dynamicbvh]") {
