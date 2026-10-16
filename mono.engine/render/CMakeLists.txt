@@ -82,6 +82,15 @@ mono_add_library(render
 		${CMAKE_SOURCE_DIR}/mono.vendor/sdl/src/video/khronos
 )
 
+foreach(queue_target engine_render test_render bench_render)
+	if(TARGET ${queue_target})
+		target_include_directories(${queue_target} PRIVATE
+			${CMAKE_SOURCE_DIR}/mono.build/private
+			${CMAKE_SOURCE_DIR}/mono.vendor/sdl/src/video/khronos
+		)
+	endif()
+endforeach()
+
 # Compile the extension example as part of the render suite. It stays out of
 # the shipped library while every API call in it remains build-checked.
 if(TARGET test_render)
@@ -104,8 +113,18 @@ endif()
 # The atlas experiment owns a real headless SDL device. Benchmarks normally
 # measure renderer CPU preparation only, so keep this backend dependency on the
 # one opt-in GPU suite rather than widening the render library's public API.
+set(MONO_NSIGHT_SDK_ROOT "" CACHE PATH "Optional Nsight Graphics SDK for opt-in benchmark capture")
 if(TARGET bench_render)
 	target_link_libraries(bench_render PRIVATE SDL3::SDL3)
+	if(MONO_NSIGHT_SDK_ROOT)
+		find_path(MONO_NSIGHT_SDK_INCLUDE NGFX_GPUTrace_Vulkan.h
+			HINTS "${MONO_NSIGHT_SDK_ROOT}/include" "${MONO_NSIGHT_SDK_ROOT}"
+			NO_DEFAULT_PATH REQUIRED
+		)
+		target_include_directories(bench_render SYSTEM PRIVATE "${MONO_NSIGHT_SDK_INCLUDE}")
+		target_compile_definitions(bench_render PRIVATE MONO_NGFX_SDK=1)
+		target_link_libraries(bench_render PRIVATE ${CMAKE_DL_LIBS})
+	endif()
 endif()
 
 option(MONO_FUZZ_PORTAL_EXCHANGE "Build portal image codecs with libFuzzer and sanitizers" OFF)

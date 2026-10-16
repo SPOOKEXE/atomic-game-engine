@@ -557,7 +557,8 @@ namespace engine::render {
 		return total;
 	}
 	uint64_t Renderer::Impl::ComputeBufferBytes() const {
-		return ComputeRegistry ? ComputeRegistry->ReservedDeviceBytes() : 0;
+		return (ComputeRegistry ? ComputeRegistry->ReservedDeviceBytes() : 0) +
+			   GpuQueues.RetainedDeviceBytes();
 	}
 	script::ComputeBridgeFactory Renderer::ComputeForWorld(std::string world, uint32_t view) {
 		RequireOwningThread("ComputeForWorld");
@@ -567,16 +568,13 @@ namespace engine::render {
 	}
 	void Renderer::PumpCompute() {
 		RequireOwningThread("PumpCompute");
-		if (State->ComputeRegistry) State->ComputeRegistry->Pump(State->GraphBufferBytes());
+		if (State->ComputeRegistry)
+			State->ComputeRegistry->Pump(State->GraphBufferBytes() + State->GpuQueues.RetainedDeviceBytes());
 	}
 	bool Renderer::WaitForFrame() {
 		RequireOwningThread("WaitForFrame");
 		PumpCompute();
-
-		if (State->Device == nullptr) {
-			return false;
-		}
-
+		if (State->Device == nullptr) return false;
 		return State->BeginFrame();
 	}
 
@@ -649,7 +647,24 @@ namespace engine::render {
 #if defined(__APPLE__)
 		SDL_SetHint(SDL_HINT_VULKAN_LIBRARY, "@executable_path/libMoltenVK.dylib");
 #endif
-		State->Device = SDL_CreateGPUDevice(SUPPORTED_SHADER_FORMATS, false, "vulkan");
+		if (GpuQueueBatch::Requested()) {
+			const auto properties = SDL_CreateProperties();
+			SDL_SetStringProperty(properties, SDL_PROP_GPU_DEVICE_CREATE_NAME_STRING, "vulkan");
+			SDL_SetBooleanProperty(
+				properties,
+				SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN,
+				(SUPPORTED_SHADER_FORMATS & SDL_GPU_SHADERFORMAT_SPIRV) != 0
+			);
+			SDL_SetBooleanProperty(
+				properties,
+				SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN,
+				(SUPPORTED_SHADER_FORMATS & SDL_GPU_SHADERFORMAT_MSL) != 0
+			);
+			SDL_SetBooleanProperty(properties, ATOMIC_GPU_QUEUES_CREATE_PROPERTY, true);
+			State->Device = SDL_CreateGPUDeviceWithProperties(properties);
+			SDL_DestroyProperties(properties);
+		} else
+			State->Device = SDL_CreateGPUDevice(SUPPORTED_SHADER_FORMATS, false, "vulkan");
 		if (!State->Device) {
 			ENGINE_ERROR("SDL_CreateGPUDevice: {}", SDL_GetError());
 			return false;
@@ -696,6 +711,14 @@ namespace engine::render {
 		State->Backend = driver ? driver : "unknown";
 		const bool hasTimestamps = State->Timestamps.Probe(State->Device);
 		State->Caps = ProbeCapabilities(State->Device, State->Binary, hasTimestamps);
+		if (State->GpuQueues.Initialise(State->Device)) {
+			const auto *queues = State->GpuQueues.Api();
+			const char *mode = std::getenv("MONO_GPU_QUEUES");
+			State->Caps.UnifiedQueue =
+				mode == nullptr || std::string_view(mode) != "parallel" ||
+				(queues->Queue[ATOMIC_GPU_QUEUE_COMPUTE] == queues->Queue[ATOMIC_GPU_QUEUE_GRAPHICS] &&
+				 queues->Queue[ATOMIC_GPU_QUEUE_TRANSFER] == queues->Queue[ATOMIC_GPU_QUEUE_GRAPHICS]);
+		}
 		for (InstalledNodeHandler &installed : CustomNodeHandlers) {
 			if (installed.Lifecycle.Reinstall && !installed.Lifecycle.Reinstall(Backend())) {
 				ENGINE_ERROR("custom render node '{}' failed to install", installed.Kind.Text());
@@ -848,6 +871,7 @@ namespace engine::render {
 		// finished. Waiting once here is simpler and no slower than tracking
 		// per-resource fences for a shutdown path.
 		SDL_WaitForGPUIdle(device);
+		State->GpuQueues.Shutdown();
 		State->ImageGraphs.Shutdown(device, State->Textures);
 		if (State->PortalTreeJob.Fence) {
 			SDL_ReleaseGPUFence(device, State->PortalTreeJob.Fence);
@@ -1202,6 +1226,7 @@ namespace engine::render {
 		if (State->Window) {
 			SDL_ReleaseWindowFromGPUDevice(device, State->Window);
 		}
+		State->GpuQueues.ReleaseForDeviceDestruction();
 		gpu::ForgetDevice(device);
 		SDL_DestroyGPUDevice(device);
 
@@ -2831,6 +2856,13 @@ namespace engine::render {
 		// the handlers depend on: each of them captures the recording and is
 		// called while the graph runs.
 		ViewRecording recording(*this, *State, result);
+		struct ReleaseViewBinding {
+			GpuQueueBatch &Queues;
+			SDL_GPUCommandBuffer **Command;
+			~ReleaseViewBinding() {
+				Queues.UnbindView(Command);
+			}
+		} releaseViewBinding{State->GpuQueues, &recording.Command};
 
 		// **Named rather than positional**, because nineteen arguments in a row
 		// is nineteen chances to hand `foreign` to the parameter that wanted

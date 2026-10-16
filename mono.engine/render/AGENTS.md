@@ -473,34 +473,28 @@ target and bound to another.
 pass would run and its result would be discarded, which is a caller mistake
 worth reporting rather than a state to tolerate.
 
-## A frame is recorded by one thread, and that is a contract
+## Public renderer ownership stays on the owner thread
 
 `Render` and `Shutdown` abort when called from a thread other than the one that
-called `Initialise`. Draw several viewports one after another; do not record two
-frames at once.
+called `Initialise`. There is no public rebind, and two public frames are never
+recorded at once. Viewports remain ordered so each world pass writes its scene
+target before the interface pass samples it in the final composition.
 
-This is a design decision rather than a limitation nobody got round to lifting.
-The passes share **one command buffer and one device**, so parallel recording
-would serialise at submit and buy nothing - and it would cost the property that
-makes a viewport correct, which is that the world pass writes a scene target
-*before* the interface pass samples it in the same buffer. An editor's imgui
-draw lists are recorded before the renderer runs and bind whatever texture
-exists at that moment, so the ordering inside one buffer is the whole reason a
-docked viewport shows this frame instead of the last one.
+An opt-in private recording path is allowed because owner-thread profiling
+measured CPU recording cost: with GCC 13.3.0 `-O3`, the `bench` preset, an RTX 4090,
+Vulkan, and NVIDIA 580.173.02, 1,024 resident named-mesh runs per view and a
+moving camera at 128x128 took 264-287 us of draw-slot self time for one view and
+2.10-2.20 ms for eight views. CPU spans had zero drops. This measures CPU work;
+it does not establish GPU overlap.
 
-**It is checked rather than written down, because this repository has twice
-found a claim that had quietly stopped being true.** v0.7 recorded the
-sequential-drawing decision in `ROADMAP.md` and enforced nothing; a sentence in
-a document is not a constraint, and the failure it guards against - a second
-viewport recording from a worker - produces a driver validation error or a frame
-of somebody else's geometry, neither of which points back at the thread that
-caused it.
-
-There is deliberately **no handoff**, unlike `ecs::Store::BindToCallingThread`.
-A store is picked up by a different worker every tick and a device is not, so a
-public rebind here would be a seam for exactly the thing the contract forbids.
-Revisit when a viewport's *record* is measurable; at the sizes measured it is
-not.
+Workers may record only immutable copied plans into private per-thread command
+contexts, in a bounded batch. Each SDL command buffer must be acquired, used,
+and submitted or canceled on the same thread. Workers do not prepare or cycle
+resources, publish shared resources, or compose the frame. The owner freezes
+resource generations, establishes explicit dependencies, prepares and cycles
+resources, joins every worker before publication and final ordered composition,
+and cleans up failed work. A working serial fallback remains available. Public
+renderer ownership and lifecycle stay on the owner thread.
 
 ## One buffer pair for every mesh, and a name resolves to a range
 

@@ -1,5 +1,7 @@
 #include "VulkanTimestamps.hpp"
 
+#include "AtomicGpuQueues.h"
+
 #include <engine/core/Log.hpp>
 
 #include <SDL3/SDL_gpu.h>
@@ -72,32 +74,50 @@ namespace engine::render {
 			VkPhysicalDeviceDriverPropertiesKHR PhysicalDeviceDriverProperties;
 			VkDevice LogicalDevice;
 		};
+
+		VkCommandBuffer CommandHandle(SDL_GPUCommandBuffer *command, const AtomicGpuQueuesV1 *api) {
+			return api != nullptr ? api->NativeCommandBuffer(command)
+								  : reinterpret_cast<MirroredCommandBuffer *>(command)->CommandBuffer;
+		}
 	}
 
 	VulkanTimestamps::~VulkanTimestamps() {
 		Shutdown();
 	}
 
-	void VulkanTimestamps::Shutdown() {
-		if (Device == nullptr || DestroyQueryPool == nullptr) {
-			return;
-		}
-		auto destroy = reinterpret_cast<PFN_vkDestroyQueryPool>(DestroyQueryPool);
-		for (void *pool : Pools) {
-			if (pool != nullptr) {
-				destroy(static_cast<VkDevice>(Device), static_cast<VkQueryPool>(pool), nullptr);
+	void VulkanTimestamps::Shutdown(bool resourcesRetired) {
+		if (resourcesRetired && Device != nullptr && DestroyQueryPool != nullptr) {
+			auto destroy = reinterpret_cast<PFN_vkDestroyQueryPool>(DestroyQueryPool);
+			for (void *pool : Pools) {
+				if (pool != nullptr) {
+					destroy(static_cast<VkDevice>(Device), static_cast<VkQueryPool>(pool), nullptr);
+				}
 			}
 		}
-		for (void *&pool : Pools) {
-			pool = nullptr;
+		for (uint32_t slot = 0; slot < SLOTS; ++slot) {
+			Pools[slot] = nullptr;
+			InFlight[slot] = false;
+			Counts[slot] = 0;
 		}
 		Device = nullptr;
+		QueueApi = nullptr;
+		TimestampMask = ~uint64_t{0};
+		Queue = 0;
+		Period = 0.0;
 		Active = NO_SLOT;
+		Used = 0;
+		DestroyQueryPool = nullptr;
+		CmdResetQueryPool = nullptr;
+		CmdWriteTimestamp = nullptr;
+		GetQueryPoolResults = nullptr;
 	}
 
-	bool VulkanTimestamps::Probe(SDL_GPUDevice *device) {
+	bool VulkanTimestamps::Probe(SDL_GPUDevice *device, uint32_t queue) {
 		if (device == nullptr || Ready()) {
-			return Ready();
+			return Ready() && queue == Queue;
+		}
+		if (queue >= ATOMIC_GPU_QUEUE_COUNT) {
+			return false;
 		}
 		const char *driver = SDL_GetGPUDeviceDriver(device);
 		if (driver == nullptr || std::string_view(driver) != "vulkan") {
@@ -105,55 +125,85 @@ namespace engine::render {
 			return false;
 		}
 
-		auto getInstanceProcAddr =
-			reinterpret_cast<PFN_vkGetInstanceProcAddr>(SDL_Vulkan_GetVkGetInstanceProcAddr());
-		if (getInstanceProcAddr == nullptr) {
-			ENGINE_WARN("gpu timestamps unavailable: SDL did not expose vkGetInstanceProcAddr");
-			return false;
-		}
+		PFN_vkGetDeviceProcAddr getDeviceProcAddr = nullptr;
+		VkDevice logical = VK_NULL_HANDLE;
+		const auto *api = static_cast<const AtomicGpuQueuesV1 *>(SDL_GetPointerProperty(
+			SDL_GetGPUDeviceProperties(device), ATOMIC_GPU_QUEUES_DEVICE_PROPERTY, nullptr
+		));
+		QueueApi = nullptr;
+		TimestampMask = ~uint64_t{0};
+		if (api != nullptr) {
+			if (api->AbiVersion != ATOMIC_GPU_QUEUES_ABI_VERSION || api->StructSize < sizeof(*api) ||
+				api->Device == VK_NULL_HANDLE || api->GetDeviceProcAddr == nullptr ||
+				api->NativeCommandBuffer == nullptr || api->Queue[queue] == VK_NULL_HANDLE ||
+				api->TimestampValidBits[queue] == 0 || api->TimestampValidBits[queue] > 64) {
+				return false;
+			}
+			Period = api->Properties.limits.timestampPeriod;
+			if (!(Period > 0.0)) {
+				return false;
+			}
+			const uint32_t bits = api->TimestampValidBits[queue];
+			TimestampMask = bits == 64 ? ~uint64_t{0} : (uint64_t{1} << bits) - 1;
+			QueueApi = api;
+			logical = api->Device;
+			getDeviceProcAddr = api->GetDeviceProcAddr;
+		} else {
+			if (queue != ATOMIC_GPU_QUEUE_GRAPHICS) {
+				return false;
+			}
+			auto getInstanceProcAddr =
+				reinterpret_cast<PFN_vkGetInstanceProcAddr>(SDL_Vulkan_GetVkGetInstanceProcAddr());
+			if (getInstanceProcAddr == nullptr) {
+				ENGINE_WARN("gpu timestamps unavailable: SDL did not expose vkGetInstanceProcAddr");
+				return false;
+			}
 
-		SDL_GPUCommandBuffer *probe = SDL_AcquireGPUCommandBuffer(device);
-		if (probe == nullptr) {
-			return false;
-		}
-		auto *command = reinterpret_cast<MirroredCommandBuffer *>(probe);
-		if (command->Common.Device != device || command->Renderer == nullptr ||
-			command->CommandBuffer == VK_NULL_HANDLE) {
-			ENGINE_WARN("gpu timestamps unavailable: SDL's Vulkan command prefix changed");
-			SDL_SubmitGPUCommandBuffer(probe);
-			return false;
-		}
+			SDL_GPUCommandBuffer *probe = SDL_AcquireGPUCommandBuffer(device);
+			if (probe == nullptr) {
+				return false;
+			}
+			auto *command = reinterpret_cast<MirroredCommandBuffer *>(probe);
+			if (command->Common.Device != device || command->Renderer == nullptr ||
+				command->CommandBuffer == VK_NULL_HANDLE) {
+				ENGINE_WARN("gpu timestamps unavailable: SDL's Vulkan command prefix changed");
+				SDL_SubmitGPUCommandBuffer(probe);
+				return false;
+			}
 
-		auto *renderer = static_cast<MirroredRenderer *>(command->Renderer);
-		if (renderer->Instance == VK_NULL_HANDLE || renderer->PhysicalDevice == VK_NULL_HANDLE ||
-			renderer->LogicalDevice == VK_NULL_HANDLE ||
-			renderer->PhysicalDeviceProperties.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2) {
-			ENGINE_WARN("gpu timestamps unavailable: SDL's Vulkan renderer prefix changed");
-			SDL_SubmitGPUCommandBuffer(probe);
-			return false;
-		}
+			auto *renderer = static_cast<MirroredRenderer *>(command->Renderer);
+			if (renderer->Instance == VK_NULL_HANDLE || renderer->PhysicalDevice == VK_NULL_HANDLE ||
+				renderer->LogicalDevice == VK_NULL_HANDLE ||
+				renderer->PhysicalDeviceProperties.sType != VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2) {
+				ENGINE_WARN("gpu timestamps unavailable: SDL's Vulkan renderer prefix changed");
+				SDL_SubmitGPUCommandBuffer(probe);
+				return false;
+			}
 
-		Period = renderer->PhysicalDeviceProperties.properties.limits.timestampPeriod;
-		if (Period <= 0.0) {
-			SDL_SubmitGPUCommandBuffer(probe);
-			return false;
-		}
+			Period = renderer->PhysicalDeviceProperties.properties.limits.timestampPeriod;
+			if (Period <= 0.0) {
+				SDL_SubmitGPUCommandBuffer(probe);
+				return false;
+			}
 
-		auto getDeviceProcAddr = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
-			getInstanceProcAddr(renderer->Instance, "vkGetDeviceProcAddr")
-		);
-		if (getDeviceProcAddr == nullptr) {
+			getDeviceProcAddr = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
+				getInstanceProcAddr(renderer->Instance, "vkGetDeviceProcAddr")
+			);
+			if (getDeviceProcAddr == nullptr) {
+				SDL_SubmitGPUCommandBuffer(probe);
+				return false;
+			}
+			logical = renderer->LogicalDevice;
 			SDL_SubmitGPUCommandBuffer(probe);
-			return false;
 		}
-		const VkDevice logical = renderer->LogicalDevice;
+		Queue = queue;
+
 		auto create =
 			reinterpret_cast<PFN_vkCreateQueryPool>(getDeviceProcAddr(logical, "vkCreateQueryPool"));
 		DestroyQueryPool = reinterpret_cast<void *>(getDeviceProcAddr(logical, "vkDestroyQueryPool"));
 		CmdResetQueryPool = reinterpret_cast<void *>(getDeviceProcAddr(logical, "vkCmdResetQueryPool"));
 		CmdWriteTimestamp = reinterpret_cast<void *>(getDeviceProcAddr(logical, "vkCmdWriteTimestamp"));
 		GetQueryPoolResults = reinterpret_cast<void *>(getDeviceProcAddr(logical, "vkGetQueryPoolResults"));
-		SDL_SubmitGPUCommandBuffer(probe);
 		if (create == nullptr || DestroyQueryPool == nullptr || CmdResetQueryPool == nullptr ||
 			CmdWriteTimestamp == nullptr || GetQueryPoolResults == nullptr) {
 			return false;
@@ -196,8 +246,10 @@ namespace engine::render {
 		if (status != VK_SUCCESS) {
 			return false;
 		}
+		const uint64_t first = ticks[0] & TimestampMask;
 		for (uint32_t index = 0; index < wanted; index++) {
-			times[index] = static_cast<double>(ticks[index]) * Period;
+			const uint64_t elapsed = (ticks[index] - first) & TimestampMask;
+			times[index] = static_cast<double>(elapsed) * Period;
 		}
 		count = wanted;
 		InFlight[slot] = false;
@@ -209,17 +261,16 @@ namespace engine::render {
 		if (!Ready() || command == nullptr || Active != NO_SLOT) {
 			return NO_SLOT;
 		}
+		const VkCommandBuffer native = CommandHandle(command, QueueApi);
+		if (native == VK_NULL_HANDLE) {
+			return NO_SLOT;
+		}
 		for (uint32_t slot = 0; slot < SLOTS; slot++) {
 			if (InFlight[slot] || slot == avoid) {
 				continue;
 			}
 			auto reset = reinterpret_cast<PFN_vkCmdResetQueryPool>(CmdResetQueryPool);
-			reset(
-				reinterpret_cast<MirroredCommandBuffer *>(command)->CommandBuffer,
-				static_cast<VkQueryPool>(Pools[slot]),
-				0,
-				MARKS
-			);
+			reset(native, static_cast<VkQueryPool>(Pools[slot]), 0, MARKS);
 			Active = slot;
 			Used = 0;
 			return slot;
@@ -231,13 +282,12 @@ namespace engine::render {
 		if (Active == NO_SLOT || command == nullptr || Used >= MARKS) {
 			return MARKS;
 		}
+		const VkCommandBuffer native = CommandHandle(command, QueueApi);
+		if (native == VK_NULL_HANDLE) {
+			return MARKS;
+		}
 		auto write = reinterpret_cast<PFN_vkCmdWriteTimestamp>(CmdWriteTimestamp);
-		write(
-			reinterpret_cast<MirroredCommandBuffer *>(command)->CommandBuffer,
-			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-			static_cast<VkQueryPool>(Pools[Active]),
-			Used
-		);
+		write(native, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, static_cast<VkQueryPool>(Pools[Active]), Used);
 		return Used++;
 	}
 
@@ -252,6 +302,11 @@ namespace engine::render {
 	}
 
 	void VulkanTimestamps::Abandon(uint32_t slot) {
+		if (slot >= SLOTS) {
+			return;
+		}
+		InFlight[slot] = false;
+		Counts[slot] = 0;
 		if (slot == Active) {
 			Active = NO_SLOT;
 			Used = 0;

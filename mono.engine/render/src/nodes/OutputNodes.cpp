@@ -8,6 +8,7 @@
 // is deliberately not here: `ViewRecording::Finish` records it after this node,
 // so a graph preview or an authored capture holds only the game image.
 
+#include "../GpuCommandIdentity.hpp"
 #include "ViewRecording.hpp"
 
 #include <engine/core/Log.hpp>
@@ -155,7 +156,8 @@ namespace engine::render {
 					owner.World != view.World || owner.WorldName != view.WorldName ||
 					owner.ViewSlot != Request.TargetSlot || owner.Portal != view.EyeImageKey ||
 					owner.ExpectedProjection != expectedProjection || owner.ExpectedScope != expectedScope ||
-					image.Texture == nullptr || (!image.Ready && image.Recorded != Command))
+					image.Texture == nullptr ||
+					(!image.Ready && image.Recorded != GpuCommandIdentity(Command)))
 					continue;
 				if (layerIndex != 0) {
 					const auto base = std::find_if(
@@ -175,7 +177,7 @@ namespace engine::render {
 						base->Binding.Sampling != owner.Sampling || base->Width != image.Width ||
 						base->Height != image.Height || base->ContentRevision != image.ContentRevision ||
 						base->LightingRevision != image.LightingRevision ||
-						(!base->Ready && base->Recorded != Command))
+						(!base->Ready && base->Recorded != GpuCommandIdentity(Command)))
 						return false;
 				}
 				if (directional && !image.DirectionalResponseTexture) return false;

@@ -16,6 +16,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -166,10 +167,26 @@ namespace engine::render {
 		if (test_support::ConsumeFrameBatchSubmissionFailureForTests()) {
 			FinishPortalImports(command, false);
 			DropStagedSceneFrames();
-			SDL_CancelGPUCommandBuffer(command);
+			if (GpuQueues.Active())
+				GpuQueues.Abort();
+			else
+				SDL_CancelGPUCommandBuffer(command);
 			return false;
 		}
-		return SubmitSceneCommand(command);
+		bool recorded = false;
+		try {
+			recorded = GpuQueues.SubmitEarlier(command);
+		} catch (const std::exception &error) {
+			ENGINE_ERROR("GPU packet admission failed: {}", error.what());
+		}
+		if (!recorded) {
+			FinishPortalImports(command, false);
+			DropStagedSceneFrames();
+			GpuQueues.Complete(false, false);
+			return false;
+		}
+		const bool submitted = SubmitSceneCommand(command);
+		return GpuQueues.Complete(submitted);
 	}
 
 	FrameBatchResult FrameBatch::Run(
@@ -188,6 +205,18 @@ namespace engine::render {
 			Render.State->VisibilityCompleted = {};
 			return {.Frame = frame, .Outcome = FrameBatchOutcome::SkippedBeforeAcquisition};
 		}
+		struct AbortQueuesOnExit {
+			GpuQueueBatch &Queues;
+			~AbortQueuesOnExit() {
+				Queues.EndScope();
+			}
+		} abortQueues{Render.State->GpuQueues};
+		// SDL owns acquired presentation images on their original command. Until
+		// presentation transfer and cancellation are supported, those frames use the ordinary path.
+		if (present)
+			Render.State->GpuQueues.EndScope();
+		else
+			Render.State->GpuQueues.Begin(&Render.State->BatchSubmit.Command);
 		Render.State->BatchSubmit = {};
 		Render.State->VisibilityCompleted = {};
 		Render.State->VisibilityWorking.Invalidate();
@@ -250,6 +279,7 @@ namespace engine::render {
 			}
 		}
 		Render.State->BatchSubmit = {command, Renderer::Impl::BatchSubmitStatus::NotAttempted};
+		Render.PumpCompute();
 
 		const SceneTarget *finalTarget = views[order.back()].Target;
 		if (swapchain == nullptr && (finalTarget == nullptr || !finalTarget->IsValid())) {
@@ -537,6 +567,7 @@ namespace engine::render {
 			Render.State->BatchCaptureTimingRequested = false;
 			Render.State->BatchSubmit = {};
 		}
+		Render.State->GpuQueues.EndScope();
 		// Completion callbacks may start another batch after BatchActive is cleared.
 		clearScratch.Clear();
 		{

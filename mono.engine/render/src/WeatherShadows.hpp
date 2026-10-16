@@ -3,6 +3,7 @@
 // Light-ray cloud optical depth, retained independently of visible cloud rays.
 // The graph owns the texture; these records only describe its accepted contents.
 
+#include "GpuCommandIdentity.hpp"
 #include "GraphHistory.hpp"
 #include "WeatherResidency.hpp"
 
@@ -48,7 +49,8 @@ namespace engine::render {
 		WeatherShadowLightingUniforms PendingLighting;
 
 		const WeatherShadowLightingUniforms *LightingFor(const void *command) const {
-			if (Contents.Pending && Contents.PendingCommand == command) return &PendingLighting;
+			if (Contents.Pending && Contents.PendingCommand == GpuCommandIdentity(command))
+				return &PendingLighting;
 			return Contents.Ready ? &Lighting : nullptr;
 		}
 		void Stage(const WeatherShadowPlan &plan, SDL_GPUTexture *texture, const void *command) {
@@ -57,11 +59,12 @@ namespace engine::render {
 			Contents.Stage(plan.Signature, command);
 		}
 		void Commit(const void *command) {
-			if (Contents.Pending && Contents.PendingCommand == command) Lighting = PendingLighting;
+			if (Contents.Pending && Contents.PendingCommand == GpuCommandIdentity(command))
+				Lighting = PendingLighting;
 			Contents.Commit(command);
 		}
 		void Discard(const void *command) {
-			if (Contents.Pending && (!command || Contents.PendingCommand == command)) {
+			if (Contents.Pending && (!command || Contents.PendingCommand == GpuCommandIdentity(command))) {
 				// A cycled backing selected by an abandoned command cannot certify a retained map.
 				Contents.Ready = false;
 				Contents.Discard(command);

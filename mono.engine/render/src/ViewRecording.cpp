@@ -16,6 +16,7 @@
 #include "ViewRecording.hpp"
 
 #include "DisplayColour.hpp"
+#include "GpuCommandIdentity.hpp"
 #include "SurfaceScale.hpp"
 
 #include <engine/assets/Builtin.hpp>
@@ -367,6 +368,7 @@ namespace engine::render {
 		// same acquisition at the same point in the frame. See `Impl::BeginFrame`.
 		if (State->BatchActive) {
 			command = State->BatchSubmit.Command;
+			State->GpuQueues.BindView(&Command);
 			if (State->BatchFinal) {
 				swapchain = State->BatchSwapchain;
 				width = State->BatchWidth;
@@ -2870,7 +2872,7 @@ namespace engine::render {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
 		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
-		SDL_GPUCommandBuffer *const command = Command;
+		SDL_GPUCommandBuffer *&command = Command;
 		SDL_GPUTexture *const swapchain = Swapchain;
 		FrameOverlayHook *const hostOverlayHook = Request.HostOverlayHook;
 		const size_t targetSlot = Request.TargetSlot;
@@ -2913,7 +2915,7 @@ namespace engine::render {
 		working.Revision = Pipeline->Revision;
 		working.World = Request.World;
 		working.Ready = false;
-		working.Command = command;
+		working.Command = GpuCommandIdentity(command);
 		Activity = retainedBindings ? sceneSlot.Activity : PassActivity{};
 		if (!retainedBindings) {
 			Activity.Valid = true;
@@ -3129,7 +3131,7 @@ namespace engine::render {
 		pending.World = Request.World;
 		pending.ContentSignature = ContentSignature;
 		pending.Ready = true;
-		pending.Command = command;
+		pending.Command = GpuCommandIdentity(command);
 
 		closePass();
 

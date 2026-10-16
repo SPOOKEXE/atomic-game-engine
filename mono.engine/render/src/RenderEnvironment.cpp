@@ -1,4 +1,5 @@
 #include "EnvironmentModes.hpp"
+#include "GpuCommandIdentity.hpp"
 #include "GpuHeap.hpp"
 #include "RendererState.hpp"
 
@@ -509,7 +510,7 @@ namespace engine::render {
 			CommitWeatherGpuClock(generation.Clock, command);
 			generation.Shadows.Commit(command);
 			generation.Residency.Commit(command);
-			if (generation.Field.Pending && generation.Field.PendingCommand == command &&
+			if (generation.Field.Pending && generation.Field.PendingCommand == GpuCommandIdentity(command) &&
 				generation.PendingRenderInputs) {
 				generation.RenderInputs = std::move(generation.PendingRenderInputs);
 				generation.PendingRenderInputs.reset();
@@ -557,7 +558,8 @@ namespace engine::render {
 			DiscardWeatherGpuClock(generation.Clock, command);
 			generation.Shadows.Discard(command);
 			for (auto *content : {&generation.Residency, &generation.Field, &generation.Summary}) {
-				if (content->Pending && (!command || content->PendingCommand == command)) {
+				if (content->Pending &&
+					(!command || content->PendingCommand == GpuCommandIdentity(command))) {
 					// Cycling may have selected unwritten backing before cancellation.
 					content->Ready = false;
 					content->Discard(command);

@@ -2,15 +2,15 @@
 
 // Nonblocking per-pass GPU timestamps for SDL's Vulkan backend.
 //
-// SDL 3.4.14 has no public GPU query API or native command-buffer handle. This
-// adapter mirrors only the pinned backend prefixes needed to reach Vulkan. A
-// submodule update must revalidate the mirror. Every failed probe disables GPU
-// timing instead of returning invented measurements.
+// The private queue descriptor supplies native handles when enabled. Ordinary
+// SDL uses pinned backend prefixes for the graphics queue only. A submodule
+// update must revalidate that fallback. Failed probes disable GPU timing.
 
 #include <cstdint>
 
 struct SDL_GPUCommandBuffer;
 struct SDL_GPUDevice;
+struct AtomicGpuQueuesV1;
 
 namespace engine::render {
 
@@ -21,15 +21,17 @@ namespace engine::render {
 		static constexpr uint32_t NO_SLOT = SLOTS;
 
 		~VulkanTimestamps();
-		void Shutdown();
+		// A failed backend teardown forgets handles without issuing calls on a destroyed device.
+		void Shutdown(bool resourcesRetired = true);
 
-		bool Probe(SDL_GPUDevice *device);
+		bool Probe(SDL_GPUDevice *device, uint32_t queue = 0);
 
 		bool Ready() const {
 			return Pools[0] != nullptr;
 		}
 
-		// Collects one completed slot without waiting and makes it reusable.
+		// Collects one completed slot without waiting and makes it reusable. Times
+		// are nanoseconds relative to the slot's first timestamp, including wrap.
 		bool Collect(uint32_t slot, double *times, uint32_t &count);
 
 		// Starts marks in a free slot. `avoid` names a slot whose reset is already
@@ -38,6 +40,8 @@ namespace engine::render {
 		uint32_t Begin(SDL_GPUCommandBuffer *command, uint32_t avoid = NO_SLOT);
 		uint32_t Mark(SDL_GPUCommandBuffer *command);
 		void Submitted(uint32_t slot);
+		// Discards recorded marks. Caller ensures no command using this slot remains
+		// in GPU flight, either because none was submitted or the device was drained.
 		void Abandon(uint32_t slot);
 
 		bool Pending(uint32_t slot) const {
@@ -52,6 +56,9 @@ namespace engine::render {
 		bool InFlight[SLOTS]{};
 		uint32_t Counts[SLOTS]{};
 		double Period = 0.0;
+		uint64_t TimestampMask = ~uint64_t{0};
+		uint32_t Queue = 0;
+		const AtomicGpuQueuesV1 *QueueApi = nullptr;
 		uint32_t Active = NO_SLOT;
 		uint32_t Used = 0;
 

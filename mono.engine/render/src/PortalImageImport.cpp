@@ -1,3 +1,4 @@
+#include "GpuCommandIdentity.hpp"
 #include "PortalImageSamples.hpp"
 #include "RendererState.hpp"
 #include "portal/PortalRendererTerminalObserver.hpp"
@@ -774,7 +775,7 @@ namespace engine::render {
 				SDL_UploadToGPUTexture(copy, &from, &to, true);
 			}
 			SDL_EndGPUCopyPass(copy);
-			image.Recorded = command;
+			image.Recorded = GpuCommandIdentity(command);
 			PortalImportUsage.Uploads += count;
 			PortalImportUsage.UploadedBytes += bytes;
 			core::Metrics::Count("render.portal_import.uploads", count);
@@ -786,7 +787,8 @@ namespace engine::render {
 	void Renderer::Impl::FinishPortalImports(SDL_GPUCommandBuffer *command, bool submitted) {
 		FinishPortalShadowImports(command, submitted);
 		for (auto &image : ImportedPortals) {
-			if (image.Recorded == nullptr || (command != nullptr && image.Recorded != command)) {
+			if (image.Recorded == nullptr ||
+				(command != nullptr && image.Recorded != GpuCommandIdentity(command))) {
 				continue;
 			}
 			image.Recorded = nullptr;
@@ -1040,7 +1042,7 @@ namespace engine::render {
 				image.Binding.World == view.World && image.Binding.WorldName == view.WorldName &&
 				image.Binding.ViewSlot == viewSlot && image.Binding.Index == portal.Index &&
 				image.Binding.Portal == key && image.Binding.Layer == 0 && image.Texture != nullptr &&
-				(image.Ready || image.Recorded == command)) {
+				(image.Ready || image.Recorded == GpuCommandIdentity(command))) {
 				return &image;
 			}
 		}

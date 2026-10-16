@@ -1,5 +1,6 @@
 #pragma once
 #include "FramePreparation.hpp"
+#include "GpuCommandIdentity.hpp"
 #include "GraphHistory.hpp"
 #include "PortalCaptureTreeWork.hpp"
 #include "WeatherCapture.hpp"
@@ -17,6 +18,7 @@
 // public header is what confines it to `src/`.
 
 #include "GpuHeap.hpp"
+#include "GpuQueueBatch.hpp"
 #include "ImageGraphGpu.hpp"
 #include "IndexResidency.hpp"
 #include "InstanceResidency.hpp"
@@ -92,6 +94,8 @@ namespace engine::render {
 	struct Renderer::Impl {
 		SDL_Window *Window = nullptr;
 		SDL_GPUDevice *Device = nullptr;
+		GpuQueueBatch GpuQueues;
+		GpuDrawPacket *DrawPacketCapture = nullptr;
 		RenderStageProbe StageProbe;
 		DeviceCaps Caps;
 		ImageGraphGpuState ImageGraphs;
@@ -2213,7 +2217,7 @@ namespace engine::render {
 			if (slot >= SceneSlots.size()) return {};
 			const auto &scene = SceneSlots[slot];
 			const auto &working = scene.ForwardWorking;
-			const bool pending = command != nullptr && working.Command == command &&
+			const bool pending = command != nullptr && working.Command == GpuCommandIdentity(command) &&
 								 working.Pipeline == pipeline.Name && working.Revision == pipeline.Revision;
 			if (!pending &&
 				(scene.ForwardPipeline != pipeline.Name || scene.ForwardRevision != pipeline.Revision))

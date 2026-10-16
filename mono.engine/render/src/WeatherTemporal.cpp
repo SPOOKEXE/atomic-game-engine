@@ -1,5 +1,6 @@
 #include "WeatherTemporal.hpp"
 
+#include "GpuCommandIdentity.hpp"
 #include "GpuHeap.hpp"
 
 #include <engine/core/Metrics.hpp>
@@ -14,18 +15,18 @@
 namespace engine::render {
 	void WeatherTemporalHistory::Stage(const WeatherTemporalFrame &frame, const void *command) {
 		Pending = frame;
-		PendingCommand = command;
+		PendingCommand = GpuCommandIdentity(command);
 	}
 
 	void WeatherTemporalHistory::Commit(const void *command) {
-		if (!command || PendingCommand != command) return;
+		if (!command || PendingCommand != GpuCommandIdentity(command)) return;
 		Accepted = Pending;
 		Ready = true;
 		PendingCommand = nullptr;
 	}
 
 	void WeatherTemporalHistory::Discard(const void *command) {
-		if (command && PendingCommand != command) return;
+		if (command && PendingCommand != GpuCommandIdentity(command)) return;
 		// SDL may already have cycled a destination while recording the copy.
 		// A cancelled command cannot certify that new backing as initialized.
 		if (PendingCommand) Ready = false;

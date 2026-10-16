@@ -1,5 +1,6 @@
 #include "WeatherGpuClock.hpp"
 
+#include "GpuCommandIdentity.hpp"
 #include "GpuHeap.hpp"
 
 #include <engine/core/Metrics.hpp>
@@ -29,7 +30,8 @@ namespace engine::render {
 	) {
 		if (!command || sample.TickRate == 0 || sample.TickRate > 120 || sample.Time.Revision == 0)
 			return std::nullopt;
-		if (clock.Publication.Pending && clock.Publication.PendingCommand != command) return std::nullopt;
+		if (clock.Publication.Pending && clock.Publication.PendingCommand != GpuCommandIdentity(command))
+			return std::nullopt;
 		const bool pending = clock.Publication.Pending;
 		const bool ready = pending || clock.Publication.Ready;
 		const auto &previous = pending ? clock.PendingSample : clock.CommittedSample;
@@ -106,7 +108,8 @@ namespace engine::render {
 	}
 
 	void CommitWeatherGpuClock(WeatherGpuClock &clock, const void *command) {
-		if (!clock.Publication.Pending || clock.Publication.PendingCommand != command) return;
+		if (!clock.Publication.Pending || clock.Publication.PendingCommand != GpuCommandIdentity(command))
+			return;
 		clock.CommittedSample = clock.PendingSample;
 		clock.AnchorTick = clock.PendingAnchorTick;
 		clock.Publication.Commit(command);
@@ -115,7 +118,9 @@ namespace engine::render {
 	}
 
 	void DiscardWeatherGpuClock(WeatherGpuClock &clock, const void *command) {
-		if (!clock.Publication.Pending || (command && clock.Publication.PendingCommand != command)) return;
+		if (!clock.Publication.Pending ||
+			(command && clock.Publication.PendingCommand != GpuCommandIdentity(command)))
+			return;
 		// A partially submitted command may have advanced the in-place buffer already.
 		clock.Publication.Ready = false;
 		clock.Publication.Discard(command);

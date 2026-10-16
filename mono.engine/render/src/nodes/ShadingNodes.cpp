@@ -7,6 +7,7 @@
 // graph resources without running a shader over every pixel.
 
 #include "../EnvironmentModes.hpp"
+#include "../GpuCommandIdentity.hpp"
 #include "../SeamLightSelection.hpp"
 #include "../SsaoSettings.hpp"
 #include "../WeatherFallback.hpp"
@@ -1762,7 +1763,7 @@ namespace engine::render {
 					CurrentLighting.EnvironmentState.CloudProvider.Id
 				);
 				if (found->Field.Matches(signature, Command)) {
-					if (found->Field.Pending && found->Field.PendingCommand == Command)
+					if (found->Field.Pending && found->Field.PendingCommand == GpuCommandIdentity(Command))
 						found->PendingRenderInputs = *inputs;
 					else
 						found->RenderInputs = *inputs;

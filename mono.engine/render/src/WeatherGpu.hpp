@@ -3,6 +3,7 @@
 // Private packed weather ABI. Canonical samples remain owned by Engine::weather;
 // the graph owns the resident field and its conservative brick summaries.
 
+#include "GpuCommandIdentity.hpp"
 #include "GraphHistory.hpp"
 #include "WeatherGpuClock.hpp"
 #include "WeatherResidency.hpp"
@@ -121,7 +122,7 @@ namespace engine::render {
 		std::optional<WeatherGpuInputs> PendingRenderInputs;
 
 		const WeatherGpuInputs *InputsFor(const void *command) const {
-			if (Field.Pending && Field.PendingCommand == command && PendingRenderInputs)
+			if (Field.Pending && Field.PendingCommand == GpuCommandIdentity(command) && PendingRenderInputs)
 				return &*PendingRenderInputs;
 			return RenderInputs ? &*RenderInputs : nullptr;
 		}

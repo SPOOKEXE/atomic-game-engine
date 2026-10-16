@@ -7,6 +7,7 @@
 // particles and the ribbons ride in the transparent node for the same reason -
 // see its own comment for why they are not a node of their own.
 
+#include "../GpuDrawPackets.hpp"
 #include "../SecondSurfaceDepth.hpp"
 #include "Tessellation.hpp"
 #include "TransparentLayerWork.hpp"
@@ -25,6 +26,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <vector>
 
@@ -567,9 +569,11 @@ namespace engine::render {
 			};
 			const auto drawOpaque =
 				[&](SDL_GPURenderPass *pass, SDL_GPUBuffer *indices, const Impl::IndirectPhase *phase) {
-					State->BindInstanceBuffers(pass, indices);
-					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
-					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+					if (!State->DrawPacketCapture) {
+						State->BindInstanceBuffers(pass, indices);
+						const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+						SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+					}
 					result.DrawCalls += State->DrawSlots(
 						command,
 						pass,
@@ -600,6 +604,77 @@ namespace engine::render {
 				for (uint32_t slot = sceneCount; slot < sceneCount + plainOpaque; ++slot)
 					customOpaque = authored(slot) || customOpaque;
 			}
+			if (!occluded && !customOpaque && haveInstances && plainOpaque > 0 &&
+				State->GpuQueues.HasCapacity(2)) {
+				try {
+					// Select and clear owner-owned generations before freezing their bindings.
+					auto *prepare = beginGBuffer(true);
+					if (!prepare) return false;
+					SDL_EndGPURenderPass(prepare);
+					auto packet = std::make_shared<GpuDrawPacket>(State->Device, *State->GpuQueues.Api());
+					const std::array textures{
+						pbr.Albedo,
+						pbr.Normal,
+						pbr.Material,
+						pbr.Emissive,
+						pbr.ObjectIds,
+						pbr.SemanticIds,
+						pbr.PartIds,
+						pbr.MeshUv
+					};
+					for (size_t target = 0; target < textures.size(); ++target) {
+						auto &binding = packet->Targets[target];
+						binding.texture = static_cast<SDL_GPUTexture *>(
+							packet->Resources.Freeze(ATOMIC_GPU_RESOURCE_TEXTURE, textures[target])
+						);
+						binding.load_op = SDL_GPU_LOADOP_LOAD;
+						binding.store_op = SDL_GPU_STOREOP_STORE;
+					}
+					packet->Depth = depthTarget;
+					packet->Depth.texture = static_cast<SDL_GPUTexture *>(
+						packet->Resources.Freeze(ATOMIC_GPU_RESOURCE_TEXTURE, depthTarget.texture)
+					);
+					packet->Depth.load_op = SDL_GPU_LOADOP_LOAD;
+					packet->Depth.cycle = false;
+					DrawEncoder encoder(command, nullptr, packet.get());
+					encoder.Pipeline(State->ActivePipeline);
+					encoder.Viewport(sceneViewport);
+					encoder.Scissor(sceneScissor);
+					encoder.VertexUniform(0, &frameUniforms, sizeof(frameUniforms));
+					const SDL_GPUBufferBinding vertices{State->Meshes.Vertices(), 0};
+					encoder.VertexBuffers(0, &vertices, 1);
+					const SDL_GPUBufferBinding indices{State->Meshes.Indices(), 0};
+					encoder.IndexBuffer(indices, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+					SDL_GPUBuffer *const storage[]{
+						State->InstanceBuffer,
+						State->InstanceIndexBuffer,
+						State->SkinOffsetBuffer,
+						State->JointBuffer
+					};
+					encoder.VertexStorage(0, storage, 4);
+					struct CaptureScope {
+						GpuDrawPacket *&Capture;
+						~CaptureScope() {
+							Capture = nullptr;
+						}
+					};
+					{
+						CaptureScope capture{State->DrawPacketCapture};
+						State->DrawPacketCapture = packet.get();
+						drawOpaque(nullptr, State->InstanceIndexBuffer, nullptr);
+					}
+					if (State->GpuQueues.Raster(packet)) {
+						recording.TimedCommand = recording.Command;
+						return true;
+					}
+					return packet->Record(recording.Command);
+				} catch (const std::exception &error) {
+					State->GpuQueues.Refuse();
+					ENGINE_ERROR("GPU raster packet admission failed: {}", error.what());
+					return false;
+				}
+			}
+
 			if (customOpaque) {
 				// Authored colour occupies emissive while cleared normal alpha marks it
 				// as already shaded. Drawing first preserves discard and nearest depth.

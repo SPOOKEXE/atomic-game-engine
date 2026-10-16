@@ -8,6 +8,7 @@
 // the sort exists to prevent.
 
 #include "DisplayColour.hpp"
+#include "GpuDrawPackets.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
 #include "SeamLightSelection.hpp"
@@ -58,8 +59,9 @@ namespace engine::render {
 	void Renderer::Impl::BindInstanceBuffers(
 		SDL_GPURenderPass *pass, SDL_GPUBuffer *indices, SDL_GPUBuffer *instances, SDL_GPUBuffer *skinOffsets
 	) {
+		DrawEncoder encoder(nullptr, pass, DrawPacketCapture);
 		const SDL_GPUBufferBinding vertices{Meshes.Vertices(), 0};
-		SDL_BindGPUVertexBuffers(pass, 0, &vertices, 1);
+		encoder.VertexBuffers(0, &vertices, 1);
 
 		SDL_GPUBuffer *const storage[] = {
 			instances != nullptr ? instances : InstanceBuffer,
@@ -67,7 +69,7 @@ namespace engine::render {
 			skinOffsets != nullptr ? skinOffsets : SkinOffsetBuffer,
 			JointBuffer,
 		};
-		SDL_BindGPUVertexStorageBuffers(pass, 0, storage, 4);
+		encoder.VertexStorage(0, storage, 4);
 	}
 
 	uint32_t Renderer::Impl::DrawSlots(
@@ -97,6 +99,7 @@ namespace engine::render {
 		// find. Named here rather than at each caller, which is what stops the
 		// tenth caller from being the one that forgets.
 		ENGINE_PROFILE_CAT("draw slots", core::ProfileCategory::Render);
+		DrawEncoder encoder(command, pass, DrawPacketCapture);
 
 		uint32_t calls = 0;
 
@@ -133,13 +136,13 @@ namespace engine::render {
 				: FallbackTexture,
 			OverlaySampler
 		};
-		SDL_BindGPUFragmentSamplers(pass, 15, &cloudMap, 1);
+		encoder.FragmentSamplers(15, &cloudMap, 1);
 		if (base != TransparentLayerPipeline && base != TransparentLayerColourPipeline &&
 			base != PackedTransparentLayerPipeline && base != PackedTransparentLayerColourPipeline) {
 			const SDL_GPUTextureSamplerBinding reserved[2]{
 				{FallbackTexture, OverlaySampler}, {FallbackTexture, OverlaySampler}
 			};
-			SDL_BindGPUFragmentSamplers(pass, 13, reserved, 2);
+			encoder.FragmentSamplers(13, reserved, 2);
 		}
 		const auto packedPipeline = [&](SDL_GPUGraphicsPipeline *native) {
 			if (native == OpaquePipeline) return PackedOpaquePipeline;
@@ -197,13 +200,13 @@ namespace engine::render {
 				native == TransparentLayerPipeline || native == TransparentLayerColourPipeline;
 			materialSamplerCount = authoredMaterial ? 10u : surfaceShader ? 13u : 11u;
 			if (want != bound) {
-				SDL_BindGPUGraphicsPipeline(pass, want);
+				encoder.Pipeline(want);
 				bound = want;
 			}
 			if (!mesh.Packed) return true;
 			SDL_GPUBuffer *packed = Meshes.PackedVertices();
 			if (packed == nullptr) return false;
-			SDL_BindGPUVertexStorageBuffers(pass, 4, &packed, 1);
+			encoder.VertexStorage(4, &packed, 1);
 			const auto words = [](const PackedMeshStream &stream) {
 				return std::array<uint32_t, 4>{
 					stream.ByteOffset,
@@ -220,7 +223,7 @@ namespace engine::render {
 				{mesh.PackedStreams[1].Minimum, mesh.PackedStreams[1].Maximum, 0.0f, 0.0f},
 				{mesh.PackedStreams[2].Minimum, mesh.PackedStreams[2].Maximum, 0.0f, 0.0f},
 			};
-			SDL_PushGPUVertexUniformData(command, 1, &descriptor, sizeof(descriptor));
+			encoder.VertexUniform(1, &descriptor, sizeof(descriptor));
 			return true;
 		};
 		const auto resetShadowUniforms = [&] {
@@ -228,9 +231,9 @@ namespace engine::render {
 				Textures.Default() != nullptr ? Textures.Default() : FallbackTexture,
 				Textures.Sampler(),
 			};
-			SDL_BindGPUFragmentSamplers(pass, 0, &defaultSampler, 1);
+			encoder.FragmentSamplers(0, &defaultSampler, 1);
 			const ShadowUniforms defaultUniforms;
-			SDL_PushGPUFragmentUniformData(command, 0, &defaultUniforms, sizeof(defaultUniforms));
+			encoder.FragmentUniform(0, &defaultUniforms, sizeof(defaultUniforms));
 		};
 		bool shadowUniformsDirty = false;
 		if (lighting == nullptr) {
@@ -376,7 +379,7 @@ namespace engine::render {
 					{RefractionGuardTexture != nullptr ? RefractionGuardTexture : FallbackTexture,
 					 RefractionSampler != nullptr ? RefractionSampler : fallbackSampler},
 				};
-				SDL_BindGPUFragmentSamplers(pass, 0, samplers, materialSamplerCount);
+				encoder.FragmentSamplers(0, samplers, materialSamplerCount);
 
 				LightingUniforms uniforms = *lighting;
 				if (uniforms.CloudShadow.Receiver.w != 0)
@@ -459,7 +462,7 @@ namespace engine::render {
 					uniforms.Direction = glm::vec4{mapped, 0.0f};
 				}
 
-				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
+				encoder.FragmentUniform(0, &uniforms, sizeof(uniforms));
 			} else if (!simpleShadow) {
 				// **Depth only, and it still has to know where the body is cut.** A
 				// half drawn whole into the shadow map casts a whole body's shadow,
@@ -480,7 +483,7 @@ namespace engine::render {
 					SlotResample[slot] == scene::SurfaceResampleMode::Pixelated ? Textures.PixelSampler()
 																				: Textures.Sampler(),
 				};
-				SDL_BindGPUFragmentSamplers(pass, 0, &sampler, 1);
+				encoder.FragmentSamplers(0, &sampler, 1);
 
 				ShadowUniforms uniforms;
 				uniforms.Plane = SlotSeam[slot];
@@ -490,13 +493,12 @@ namespace engine::render {
 				uniforms.Material.x = colour[3];
 				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds, textureOwner);
 				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
-				SDL_PushGPUFragmentUniformData(command, 0, &uniforms, sizeof(uniforms));
+				encoder.FragmentUniform(0, &uniforms, sizeof(uniforms));
 				shadowUniformsDirty = true;
 			}
 
 			if (forcedArguments != nullptr) {
-				SDL_DrawGPUIndexedPrimitivesIndirect(
-					pass,
+				encoder.Indirect(
 					forcedArguments,
 					forcedArgument * static_cast<uint32_t>(sizeof(SDL_GPUIndexedIndirectDrawCommand)),
 					1
@@ -507,8 +509,7 @@ namespace engine::render {
 				// bound, so the triangle tally can only overcount what the
 				// cull discarded - an estimate is honest for a number whose
 				// exact value never comes back to the CPU.
-				SDL_DrawGPUIndexedPrimitivesIndirect(
-					pass,
+				encoder.Indirect(
 					indirect->Arguments,
 					(indirect->FirstArgument + argument) *
 						static_cast<uint32_t>(sizeof(SDL_GPUIndexedIndirectDrawCommand)),
@@ -516,9 +517,7 @@ namespace engine::render {
 				);
 				argument++;
 			} else {
-				SDL_DrawGPUIndexedPrimitives(
-					pass, range.IndexCount, run, range.FirstIndex, range.VertexOffset, slot
-				);
+				encoder.Indexed(range.IndexCount, run, range.FirstIndex, range.VertexOffset, slot);
 				if (visibilityPass == VisibilityPass::MainCamera) RecordVisibilityDraw(slot, run);
 			}
 			calls++;
@@ -755,7 +754,7 @@ namespace engine::render {
 
 		// Put the pass's own pipeline back - see `base` above.
 		if (bound != base && base != nullptr) {
-			SDL_BindGPUGraphicsPipeline(pass, base);
+			encoder.Pipeline(base);
 		}
 
 		return calls;

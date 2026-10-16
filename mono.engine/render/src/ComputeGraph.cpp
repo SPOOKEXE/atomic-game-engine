@@ -1,4 +1,6 @@
+#include "GpuDrawPackets.hpp"
 #include "GpuHeap.hpp"
+#include "GpuQueueBatch.hpp"
 #include "ShaderBinary.hpp"
 
 #include <engine/core/Log.hpp>
@@ -18,6 +20,7 @@
 #include <limits>
 #include <new>
 #include <spirv_cross.hpp>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 
@@ -264,6 +267,14 @@ namespace engine::render {
 			uint64_t DownloadBytes = 0;
 			bool Canceled = false;
 			bool Finished = false;
+			bool PendingSubmission = false;
+			bool SubmissionFailed = false;
+			bool FailurePublished = false;
+			std::shared_ptr<const GpuRetirementProof> Retirement;
+			bool BatchMetricsPending = false;
+			uint64_t InstanceCopyBytes = 0;
+			uint64_t Workgroups = 0;
+			uint32_t Dispatches = 0;
 			SDL_GPUFence *Fence = nullptr;
 			SDL_GPUTransferBuffer *Source = nullptr;
 			SDL_GPUTransferBuffer *Target = nullptr;
@@ -278,6 +289,94 @@ namespace engine::render {
 				if (Target) gpu::ReleaseTransferBuffer(Device, Target);
 			}
 		};
+		struct QueuePacket {
+			struct UploadCommand {
+				SDL_GPUTransferBufferLocation Source;
+				SDL_GPUBufferRegion Target;
+			};
+			struct BufferCopy {
+				SDL_GPUBufferLocation Source;
+				SDL_GPUBufferLocation Target;
+				uint32_t Bytes = 0;
+			};
+			struct DispatchCommand {
+				Pipeline Shader;
+				std::array<SDL_GPUBuffer *, MAXIMUM_SLOTS> Inputs{};
+				std::array<SDL_GPUStorageBufferReadWriteBinding, MAXIMUM_SLOTS> Outputs{};
+				Parameters Uniforms;
+				std::array<uint32_t, 3> Groups{};
+			};
+			struct DownloadCommand {
+				SDL_GPUBufferRegion Source;
+				SDL_GPUTransferBufferLocation Target;
+			};
+
+			// Transfer buffers and installed shaders outlive deferred recording and owner-side settlement.
+			std::shared_ptr<Job> Owner;
+			std::shared_ptr<const Package> Program;
+			FrozenGpuResources Resources;
+			std::vector<UploadCommand> Uploads;
+			std::vector<BufferCopy> Copies;
+			std::vector<DispatchCommand> Dispatches;
+			std::vector<DownloadCommand> Downloads;
+
+			QueuePacket(
+				SDL_GPUDevice *device,
+				const AtomicGpuQueuesV1 &api,
+				std::shared_ptr<Job> owner,
+				std::shared_ptr<const Package> program
+			)
+				: Owner(std::move(owner)), Program(std::move(program)), Resources(device, api) {}
+
+			bool Upload(SDL_GPUCommandBuffer *command) const {
+				if (Uploads.empty() && Copies.empty()) return true;
+				auto *copy = SDL_BeginGPUCopyPass(command);
+				if (!copy) return false;
+				for (const auto &upload : Uploads)
+					SDL_UploadToGPUBuffer(copy, &upload.Source, &upload.Target, false);
+				for (const auto &buffer : Copies)
+					SDL_CopyGPUBufferToBuffer(copy, &buffer.Source, &buffer.Target, buffer.Bytes, false);
+				SDL_EndGPUCopyPass(copy);
+				return true;
+			}
+			bool Compute(SDL_GPUCommandBuffer *command) const {
+				for (const auto &dispatch : Dispatches) {
+					auto *pass = SDL_BeginGPUComputePass(
+						command, nullptr, 0, dispatch.Outputs.data(), dispatch.Shader.Writable
+					);
+					if (!pass) return false;
+					SDL_BindGPUComputePipeline(pass, dispatch.Shader.Handle);
+					if (dispatch.Shader.Readonly)
+						SDL_BindGPUComputeStorageBuffers(
+							pass, 0, dispatch.Inputs.data(), dispatch.Shader.Readonly
+						);
+					if (dispatch.Shader.Uniform)
+						SDL_PushGPUComputeUniformData(
+							command, 0, &dispatch.Uniforms, sizeof(dispatch.Uniforms)
+						);
+					SDL_DispatchGPUCompute(pass, dispatch.Groups[0], dispatch.Groups[1], dispatch.Groups[2]);
+					SDL_EndGPUComputePass(pass);
+				}
+				return true;
+			}
+			bool Download(SDL_GPUCommandBuffer *command) const {
+				if (Downloads.empty()) return true;
+				auto *copy = SDL_BeginGPUCopyPass(command);
+				if (!copy) return false;
+				for (const auto &download : Downloads)
+					SDL_DownloadFromGPUBuffer(copy, &download.Source, &download.Target);
+				SDL_EndGPUCopyPass(copy);
+				return true;
+			}
+		};
+
+		GpuQueueBatch *ActiveBatch(SDL_GPUDevice *device) {
+			if (!device) return nullptr;
+			auto *batch = static_cast<GpuQueueBatch *>(SDL_GetPointerProperty(
+				SDL_GetGPUDeviceProperties(device), GpuQueueBatch::DEVICE_PROPERTY, nullptr
+			));
+			return batch && batch->Active() ? batch : nullptr;
+		}
 		struct Mapping {
 			SDL_GPUDevice *Device = nullptr;
 			SDL_GPUTransferBuffer *Transfer = nullptr;
@@ -301,8 +400,8 @@ namespace engine::render {
 		std::thread::id Thread = std::this_thread::get_id();
 		computegraph::RuntimeLimits Bounds{};
 		computegraph::Queue Queue;
-		std::unique_ptr<computegraph_detail::Package> Installed{};
-		std::vector<std::unique_ptr<computegraph_detail::Job>> Jobs{};
+		std::shared_ptr<computegraph_detail::Package> Installed{};
+		std::vector<std::shared_ptr<computegraph_detail::Job>> Jobs{};
 		std::string Error{};
 		uint64_t OutsideBytes = 0;
 		uint64_t DeviceBytes = 0;
@@ -351,6 +450,12 @@ namespace engine::render {
 			const computegraph::Submission &submission,
 			computegraph::Diagnostic &diagnostic
 		);
+		computegraph::Status RecordBatch(
+			std::shared_ptr<computegraph_detail::Job> job,
+			const computegraph::Submission &submission,
+			GpuQueueBatch &batch,
+			computegraph::Diagnostic &diagnostic
+		);
 		bool Publish(computegraph_detail::Job &job);
 	};
 
@@ -381,7 +486,7 @@ namespace engine::render {
 			reflections.push_back(binary.Reflection);
 			binaries.push_back(std::move(binary));
 		}
-		auto package = std::make_unique<computegraph_detail::Package>();
+		auto package = std::make_shared<computegraph_detail::Package>();
 		package->Device = Device;
 		const auto status = computegraph::Compile(
 			program.Definition,
@@ -552,6 +657,166 @@ namespace engine::render {
 		return computegraph::Status::Ok;
 	}
 
+	computegraph::Status ComputeGraph::State::RecordBatch(
+		std::shared_ptr<computegraph_detail::Job> job,
+		const computegraph::Submission &submission,
+		GpuQueueBatch &batch,
+		computegraph::Diagnostic &diagnostic
+	) {
+		const auto &plan = submission.Plan;
+		const bool importsInstances = std::any_of(
+			plan.Definition.Buffers.begin(), plan.Definition.Buffers.end(), [](const auto &buffer) {
+				return buffer.Type == computegraph::ElementType::EngineInstance && buffer.Capacity != 0;
+			}
+		);
+		if (!batch.HasCapacity(importsInstances ? 4 : 3))
+			return Refuse(diagnostic, computegraph::Status::LimitExceeded);
+
+		struct Admission {
+			GpuQueueBatch &Batch;
+			bool Started = false;
+			bool Complete = false;
+			~Admission() {
+				if (Started && !Complete) Batch.Refuse();
+			}
+		} admission{batch};
+		try {
+			auto packet =
+				std::make_shared<computegraph_detail::QueuePacket>(Device, *batch.Api(), job, Installed);
+			std::vector<SDL_GPUBuffer *> buffers;
+			buffers.reserve(job->Buffers.size());
+			for (auto *buffer : job->Buffers)
+				buffers.push_back(
+					static_cast<SDL_GPUBuffer *>(packet->Resources.Freeze(ATOMIC_GPU_RESOURCE_BUFFER, buffer))
+				);
+			packet->Uploads.reserve(job->Uploads.size());
+			for (const auto &upload : job->Uploads) {
+				if (upload.Bytes == 0) continue;
+				packet->Uploads.push_back(
+					{{job->Source, upload.Offset}, {buffers[upload.Buffer], 0, upload.Bytes}}
+				);
+			}
+			uint64_t instanceBytes = 0;
+			if (importsInstances) {
+				auto *instances = static_cast<SDL_GPUBuffer *>(
+					packet->Resources.Freeze(ATOMIC_GPU_RESOURCE_BUFFER, Instances)
+				);
+				for (size_t index = 0; index < plan.Definition.Buffers.size(); ++index) {
+					const auto &buffer = plan.Definition.Buffers[index];
+					if (buffer.Type != computegraph::ElementType::EngineInstance || buffer.Capacity == 0)
+						continue;
+					const auto bytes = static_cast<uint32_t>(plan.Allocations[index].Bytes);
+					packet->Copies.push_back({{instances, 0}, {buffers[index], 0}, bytes});
+					instanceBytes += bytes;
+				}
+			}
+			uint64_t workgroups = 0;
+			packet->Dispatches.reserve(plan.Topology.Order.size());
+			for (const auto index : plan.Topology.Order) {
+				const auto &work = plan.Passes[index];
+				if (work.Work.Elements == 0) continue;
+				const auto &kernel = plan.Definition.Kernels[work.Kernel];
+				computegraph_detail::QueuePacket::DispatchCommand dispatch;
+				dispatch.Shader = Installed->Pipelines[work.Kernel];
+				dispatch.Shader.Handle = static_cast<SDL_GPUComputePipeline *>(
+					packet->Resources.Freeze(ATOMIC_GPU_RESOURCE_COMPUTE_PIPELINE, dispatch.Shader.Handle)
+				);
+				dispatch.Uniforms.Dispatch[0] = work.Work.Elements;
+				dispatch.Groups = work.Work.Groups;
+				for (const auto &binding : work.Bindings) {
+					const auto &port = kernel.Ports[binding.Port];
+					const auto &buffer = plan.Definition.Buffers[binding.Buffer];
+					const auto row =
+						(computegraph_detail::Writes(port.Permission) ? computegraph_detail::MAXIMUM_SLOTS
+																	  : 0) +
+						port.Binding;
+					dispatch.Uniforms.Buffers[row] = {
+						buffer.LogicalCount,
+						buffer.Capacity,
+						buffer.Stride,
+						buffer.CountBuffer.empty() ? 0u : 1u
+					};
+					if (computegraph_detail::Writes(port.Permission)) {
+						dispatch.Outputs[port.Binding].buffer = buffers[binding.Buffer];
+						dispatch.Outputs[port.Binding].cycle = false;
+					} else
+						dispatch.Inputs[port.Binding] = buffers[binding.Buffer];
+				}
+				workgroups += work.Work.Groups[0];
+				packet->Dispatches.push_back(std::move(dispatch));
+			}
+			packet->Downloads.reserve(job->Downloads.size());
+			for (const auto &download : job->Downloads) {
+				if (download.Bytes == 0) continue;
+				packet->Downloads.push_back(
+					{{buffers[download.Buffer], 0, download.Bytes}, {job->Target, download.Offset}}
+				);
+			}
+			job->InstanceCopyBytes = instanceBytes;
+			job->Workgroups = workgroups;
+			job->Dispatches = static_cast<uint32_t>(packet->Dispatches.size());
+			const std::shared_ptr<const computegraph_detail::QueuePacket> ready = std::move(packet);
+
+			std::array<uint32_t, 1> prefix{};
+			std::span<const uint32_t> uploadDependencies;
+			if (importsInstances) {
+				admission.Started = true;
+				prefix[0] = batch.Prefix();
+				if (prefix[0] == GpuQueueBatch::INVALID)
+					return Refuse(
+						diagnostic,
+						computegraph::Status::DeviceFailure,
+						{},
+						"resident instance import needs an ordered owner prefix"
+					);
+				uploadDependencies = prefix;
+			}
+			admission.Started = true;
+			job->PendingSubmission = true;
+			const auto upload = batch.Add(
+				ATOMIC_GPU_QUEUE_TRANSFER,
+				"compute graph upload",
+				[ready](SDL_GPUCommandBuffer *command) { return ready->Upload(command); },
+				uploadDependencies
+			);
+			if (upload == GpuQueueBatch::INVALID) return Backend(diagnostic);
+			const std::array uploadEdge{upload};
+			const auto compute = batch.Add(
+				ATOMIC_GPU_QUEUE_COMPUTE,
+				"compute graph dispatch",
+				[ready](SDL_GPUCommandBuffer *command) { return ready->Compute(command); },
+				uploadEdge
+			);
+			if (compute == GpuQueueBatch::INVALID) return Backend(diagnostic);
+			const std::array computeEdge{compute};
+			const auto download = batch.Add(
+				ATOMIC_GPU_QUEUE_TRANSFER,
+				"compute graph download",
+				[ready](SDL_GPUCommandBuffer *command) { return ready->Download(command); },
+				computeEdge,
+				[ready](GpuTaskResult result) noexcept {
+					auto &pending = *ready->Owner;
+					pending.Fence = result.Fence;
+					pending.Retirement = std::move(result.Retirement);
+					pending.PendingSubmission = false;
+					pending.BatchMetricsPending = true;
+					if (!pending.Fence) {
+						pending.Finished = pending.Retirement && pending.Retirement->Complete;
+						pending.SubmissionFailed = true;
+						return;
+					}
+				}
+			);
+			if (download == GpuQueueBatch::INVALID) return Backend(diagnostic);
+			admission.Complete = true;
+			return computegraph::Status::Ok;
+		} catch (const std::bad_alloc &) {
+			return Refuse(diagnostic, computegraph::Status::AllocationFailed);
+		} catch (const std::runtime_error &error) {
+			return Refuse(diagnostic, computegraph::Status::DeviceFailure, {}, error.what());
+		}
+	}
+
 	bool ComputeGraph::State::Publish(computegraph_detail::Job &job) {
 		const auto *submission = Submission(job.Ticket);
 		if (!submission) return true;
@@ -654,10 +919,15 @@ namespace engine::render {
 			auto status = Held->Queue.Submit(Held->Installed->Plan, request, ticket, diagnostic);
 			if (status != computegraph::Status::Ok)
 				return Held->Refuse(diagnostic, status, diagnostic.Subject);
-			auto job = std::make_unique<computegraph_detail::Job>();
+			auto job = std::make_shared<computegraph_detail::Job>();
 			const auto *submission = Held->Submission(ticket);
 			status = Held->Prepare(*job, *submission, diagnostic);
-			if (status == computegraph::Status::Ok) status = Held->Record(*job, *submission, diagnostic);
+			if (status == computegraph::Status::Ok) {
+				if (auto *batch = computegraph_detail::ActiveBatch(Held->Device))
+					status = Held->RecordBatch(job, *submission, *batch, diagnostic);
+				else
+					status = Held->Record(*job, *submission, diagnostic);
+			}
 			if (status != computegraph::Status::Ok) {
 				Held->Queue.Cancel(ticket);
 				return status;
@@ -681,17 +951,72 @@ namespace engine::render {
 		Held->RequireThread();
 		for (size_t index = 0; index < Held->Jobs.size();) {
 			auto &job = *Held->Jobs[index];
+			if (job.PendingSubmission) {
+				++index;
+				continue;
+			}
+			if (job.BatchMetricsPending) {
+				job.BatchMetricsPending = false;
+				try {
+					if (job.SubmissionFailed) {
+						core::Metrics::Count("render.compute.failed_batches", 1);
+					} else {
+						core::Metrics::Count("render.compute.instance_copy_bytes", job.InstanceCopyBytes);
+						core::Metrics::Count("render.compute.upload_bytes", job.UploadBytes);
+						core::Metrics::Count("render.compute.dispatches", job.Dispatches);
+						core::Metrics::Count("render.compute.workgroups", job.Workgroups);
+						core::Metrics::Count("render.compute.readback_bytes", job.DownloadBytes);
+						core::Metrics::Count("render.compute.submit_calls", 3);
+					}
+				} catch (const std::bad_alloc &) {
+					// Missing counters cannot change fence ownership or retry already reported amounts.
+				}
+			}
+			if (job.SubmissionFailed) {
+				try {
+					if (!job.Canceled && !job.FailurePublished) {
+						const auto *submission = Held->Submission(job.Ticket);
+						if (submission) {
+							computegraph::Completion completion;
+							completion.Ticket = job.Ticket;
+							completion.Identity = submission->Data.Identity;
+							completion.Code = computegraph::Status::DeviceFailure;
+							computegraph::Diagnostic diagnostic;
+							if (Held->Queue.Complete(completion, diagnostic) ==
+								computegraph::Status::AllocationFailed) {
+								++index;
+								continue;
+							}
+						}
+						job.FailurePublished = true;
+						Held->Error = "compute recording batch did not submit";
+					}
+				} catch (const std::bad_alloc &) {
+					++index;
+					continue;
+				}
+				if (!job.Fence && (!job.Retirement || !job.Retirement->Complete)) {
+					++index;
+					continue;
+				}
+				if (!job.Fence) job.Finished = true;
+			}
 			if (!job.Finished) {
 				if (!SDL_QueryGPUFence(Held->Device, job.Fence)) {
 					++index;
 					continue;
+				}
+				if (!SDL_WaitForGPUFences(Held->Device, true, &job.Fence, 1)) {
+					job.Canceled = true;
+					Held->Queue.Cancel(job.Ticket);
+					Held->Error = SDL_GetError();
 				}
 				SDL_ReleaseGPUFence(Held->Device, job.Fence);
 				job.Fence = nullptr;
 				job.Finished = true;
 			}
 			try {
-				if (!job.Canceled && !Held->Publish(job)) {
+				if (!job.Canceled && !job.FailurePublished && !Held->Publish(job)) {
 					++index;
 					continue;
 				}
@@ -754,7 +1079,22 @@ namespace engine::render {
 	void ComputeGraph::Shutdown() {
 		if (!Held) return;
 		Held->RequireThread();
+		const bool deferred = std::any_of(Held->Jobs.begin(), Held->Jobs.end(), [](const auto &job) {
+			return job->PendingSubmission;
+		});
+		if (deferred)
+			if (auto *batch = computegraph_detail::ActiveBatch(Held->Device)) batch->Abort();
+		auto *batch =
+			Held->Device
+				? static_cast<GpuQueueBatch *>(SDL_GetPointerProperty(
+					  SDL_GetGPUDeviceProperties(Held->Device), GpuQueueBatch::DEVICE_PROPERTY, nullptr
+				  ))
+				: nullptr;
+		if (batch) (void)batch->RetireFailed();
 		for (auto &job : Held->Jobs) {
+			if (job->SubmissionFailed && !job->Fence && job->Retirement && !job->Retirement->Complete &&
+				batch)
+				batch->RetainUntilDeviceDestruction(job, job->DeviceBytes);
 			if (job->Fence) {
 				ENGINE_PROFILE_CAT("compute graph retirement wait", core::ProfileCategory::Idle);
 				(void)SDL_WaitForGPUFences(Held->Device, true, &job->Fence, 1);

@@ -1,3 +1,4 @@
+#include "GpuCommandIdentity.hpp"
 #include "PortalShadowPacked.hpp"
 #include "RendererState.hpp"
 
@@ -214,7 +215,7 @@ namespace engine::render {
 
 	bool
 	Renderer::Impl::RecordPortalShadowImport(SDL_GPUCommandBuffer *command, ImportedPortalShadow &image) {
-		if (image.Ready || image.Recorded == command) return true;
+		if (image.Ready || image.Recorded == GpuCommandIdentity(command)) return true;
 		if (image.Recorded ||
 			((!image.Texture || image.Pending.empty()) && (!image.Packed || image.PackedPending.empty())))
 			return false;
@@ -275,7 +276,7 @@ namespace engine::render {
 			SDL_UploadToGPUTexture(copy, &source, &destination, false);
 		}
 		SDL_EndGPUCopyPass(copy);
-		image.Recorded = command;
+		image.Recorded = GpuCommandIdentity(command);
 		++PortalImportUsage.Uploads;
 		PortalImportUsage.UploadedBytes += bytes;
 		core::Metrics::Count("render.portal_import.uploads", 1);
@@ -285,7 +286,7 @@ namespace engine::render {
 	}
 	void Renderer::Impl::FinishPortalShadowImports(SDL_GPUCommandBuffer *command, bool submitted) {
 		for (auto &image : ImportedPortalShadows) {
-			if (!image.Recorded || (command && image.Recorded != command)) continue;
+			if (!image.Recorded || (command && image.Recorded != GpuCommandIdentity(command))) continue;
 			image.Recorded = nullptr;
 			image.Ready = submitted;
 			if (!submitted) continue;

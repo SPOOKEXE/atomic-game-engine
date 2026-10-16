@@ -2,6 +2,8 @@
 
 // The identity and ownership rules for graph resources retained between views.
 
+#include "GpuCommandIdentity.hpp"
+
 #include <engine/graph/Schedule.hpp>
 #include <engine/render/PresentationDamage.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -37,7 +39,7 @@ namespace engine::render {
 		return !make && resource.Lifetime == graph::ResourceLifetime::History;
 	}
 
-	// The graph may chain two history writers in one command buffer. A completed
+	// The graph may chain history writers across one ordered command batch. A completed
 	// prior generation is temporal history, while a scheduled earlier producer is
 	// the current graph result and does not depend on presentation damage.
 	enum class GraphHistoryReadSource : uint8_t { CurrentProducer, PreviousGeneration, Unavailable };
@@ -50,13 +52,13 @@ namespace engine::render {
 	}
 
 	// A queued producer is visible to later commands in this graph invocation.
-	// An unqueued producer is visible only inside the command buffer recording it.
+	// An unqueued producer is visible only inside its ordered command batch.
 	inline bool GraphHistoryCurrentProducer(bool pending, bool sameCommand, bool submitted) {
 		return submitted || (pending && sameCommand);
 	}
 
 	// A renderer-side cache may avoid recording a deterministic producer only
-	// after the command that produced it entered the queue. Pending generations
+	// after the ordered command batch that produced it entered the queue. Pending generations
 	// never replace the last completed one, so cancellation cannot certify pixels
 	// that were merely recorded.
 	struct GraphHistoryGeneration {
@@ -68,22 +70,23 @@ namespace engine::render {
 
 		bool Matches(uint64_t candidate, const void *command) const {
 			return (Ready && Signature == candidate) ||
-				   (Pending && PendingCommand == command && PendingSignature == candidate);
+				   (Pending && PendingCommand == GpuCommandIdentity(command) &&
+					PendingSignature == candidate);
 		}
 
 		uint64_t SignatureFor(const void *command) const {
-			if (Pending && PendingCommand == command) return PendingSignature;
+			if (Pending && PendingCommand == GpuCommandIdentity(command)) return PendingSignature;
 			return Ready ? Signature : 0;
 		}
 
 		void Stage(uint64_t candidate, const void *command) {
 			PendingSignature = candidate;
-			PendingCommand = command;
+			PendingCommand = GpuCommandIdentity(command);
 			Pending = true;
 		}
 
 		void Commit(const void *command) {
-			if (!Pending || PendingCommand != command) return;
+			if (!Pending || PendingCommand != GpuCommandIdentity(command)) return;
 			Signature = PendingSignature;
 			Ready = true;
 			Pending = false;
@@ -91,7 +94,7 @@ namespace engine::render {
 		}
 
 		void Discard(const void *command = nullptr) {
-			if (!Pending || (command != nullptr && PendingCommand != command)) return;
+			if (!Pending || (command != nullptr && PendingCommand != GpuCommandIdentity(command))) return;
 			Pending = false;
 			PendingCommand = nullptr;
 		}

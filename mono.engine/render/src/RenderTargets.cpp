@@ -9,6 +9,7 @@
 // indexed by level *and* slot.
 
 #include "DisplayColour.hpp"
+#include "GpuCommandIdentity.hpp"
 #include "GraphBufferRoles.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
@@ -667,7 +668,7 @@ namespace engine::render {
 			if (write->Pipeline == &pipeline && write->Resource == resource && write->Scope == scope &&
 				write->Owner == owner &&
 				GraphHistoryCurrentProducer(
-					!write->Submitted, write->Command == readCommand, write->Submitted
+					!write->Submitted, write->Command == GpuCommandIdentity(readCommand), write->Submitted
 				)) {
 				return FindGraphTarget(pipeline, resource, scope, owner);
 			}
@@ -702,22 +703,22 @@ namespace engine::render {
 		uint64_t signature
 	) {
 		for (PendingGraphHistoryWrite &write : GraphResources.PendingHistoryWrites) {
-			if (write.Pipeline == &pipeline && write.Command == command && write.Resource == resource &&
-				write.Scope == scope && write.Owner == owner) {
+			if (write.Pipeline == &pipeline && write.Command == GpuCommandIdentity(command) &&
+				write.Resource == resource && write.Scope == scope && write.Owner == owner) {
 				write.Signature = signature;
 				write.Submitted = false;
 				return;
 			}
 		}
 		GraphResources.PendingHistoryWrites.push_back(
-			{&pipeline, command, resource, scope, owner, signature, false}
+			{&pipeline, GpuCommandIdentity(command), resource, scope, owner, signature, false}
 		);
 	}
 
 	void Renderer::Impl::CommitPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command) {
 		for (auto &slot : SceneSlots) {
 			auto &working = slot.ForwardWorking;
-			if (working.Command != command || command == nullptr) continue;
+			if (working.Command != GpuCommandIdentity(command) || command == nullptr) continue;
 			slot.ForwardPipeline = working.Pipeline;
 			slot.ForwardRevision = working.Revision;
 			slot.ForwardWorld = working.World;
@@ -734,7 +735,7 @@ namespace engine::render {
 			working.Command = nullptr;
 		}
 		for (PendingGraphHistoryWrite &write : GraphResources.PendingHistoryWrites) {
-			if (write.Command != command || write.Submitted) continue;
+			if (write.Command != GpuCommandIdentity(command) || write.Submitted) continue;
 			if (write.Pipeline != nullptr) {
 				CommitGraphHistoryWrite(
 					*write.Pipeline, write.Resource, write.Scope, write.Owner, write.Signature
@@ -750,7 +751,9 @@ namespace engine::render {
 		// cannot promise old pixels, so invalidate bindings and retry the scene.
 		for (auto &slot : SceneSlots) {
 			auto &working = slot.ForwardWorking;
-			if (working.Command == nullptr || (command != nullptr && working.Command != command)) continue;
+			if (working.Command == nullptr ||
+				(command != nullptr && working.Command != GpuCommandIdentity(command)))
+				continue;
 			slot.ForwardPipeline = working.Pipeline;
 			slot.ForwardRevision = working.Revision;
 			slot.ForwardWorld = working.World;
@@ -766,7 +769,9 @@ namespace engine::render {
 			auto firstRetained = std::remove_if(
 				GraphResources.PendingHistoryWrites.begin(),
 				GraphResources.PendingHistoryWrites.end(),
-				[command](const PendingGraphHistoryWrite &write) { return write.Command == command; }
+				[command](const PendingGraphHistoryWrite &write) {
+					return write.Command == GpuCommandIdentity(command);
+				}
 			);
 			GraphResources.PendingHistoryWrites.erase(
 				firstRetained, GraphResources.PendingHistoryWrites.end()
@@ -820,9 +825,10 @@ namespace engine::render {
 				continue;
 			}
 			if (!haveWriter) {
-				presentationImage = writer->Kind == core::Name("present") ||
-									writer->Kind == core::Name("interface") ||
-									writer->Kind == core::Name("overlay");
+				// Tonemap already produces display-encoded colour and its pipeline uses ColourFormat.
+				presentationImage =
+					writer->Kind == core::Name("tonemap") || writer->Kind == core::Name("present") ||
+					writer->Kind == core::Name("interface") || writer->Kind == core::Name("overlay");
 				haveWriter = true;
 			}
 			clearableSky |= writer->Kind == core::Name("skybox-compute");
