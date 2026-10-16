@@ -163,6 +163,12 @@ spawners, NPC scripts, tests, and authored worlds.
 - source tick and monotonic sequence
 - an intent revision
 
+Each named action request carries a bounded request id and source tick. For
+character actions submitted by AI, the same request record also carries the
+agent generation, driver token, and lease generation. `BotController` places
+these requests in the action field of the one `CharacterIntent` row it
+publishes per tick; there is no separate character action command stream.
+
 The row contains no pointer or player id. A human client adapter, server bot,
 AI graph, replay reader, or script command validates its own source and writes
 the same data. Missing or expired intent means neutral input, not reuse of the
@@ -177,6 +183,16 @@ character tick rather than letting multiple writers race on the component.
 Bots run on the server and emit deterministic intent with explicit seeds and
 bounded work. Replays emit recorded intent. Neither needs a fake `Player`, a
 local client, or a different controller path.
+
+| Character case | Roster relation | Active driver | Character state owner |
+|---|---|---|---|
+| NPC in an AI-only world | None; no `Players` service required | `AIController` through `BotController` | Character stack and authority simulation |
+| Player's active human character | In that player's roster and active possession | Validated human input lease | Character stack and authority simulation |
+| Player's roster character driven by a bot | In roster, not active possession | Bot lease through `BotController` | Character stack and authority simulation |
+
+The roster controls selection; the active driver controls whose intent is
+accepted. Neither relation owns character state, animation time, or physical
+state.
 
 ### `Players` roster and active possession
 
@@ -433,15 +449,28 @@ This is the visible state machine. It holds:
 
 - `CurrentState`
 - `PreviousState`
-- `RequestedState`
+- bounded region-qualified state requests
 - `ActiveMotionController`
 - `AutomaticTransitionsEnabled`
 - `Revision`
 
 Each child `CharacterState` instance has a stable name, an enabled flag, and a
 motion-controller reference. Built-in code supplies the first transition
-policy. Scripts may disable a state or request an enabled state. A request is
-validated and committed at one fixed point in the tick.
+policy. Scripts may disable a state or submit a request naming a declared
+region and enabled state. The bounded request record carries region, state,
+source, priority, sequence, and expiry. Its capacity is declared; overflow is
+rejected and counted before arbitration. `RequestState(region, state)` submits
+a region-qualified request, while legacy `Humanoid:ChangeState(state)` targets
+the locomotion region. Requests are validated and arbitrated at the state
+commit point; equal-priority conflicts use stable source and sequence ordering.
+Writers never modify active-state projections directly.
+
+When composed regions are present, `CurrentState` and `PreviousState` remain
+the locomotion-region compatibility projection used by `Humanoid`. A separate
+read-only active-configuration view exposes the stable state name in every
+region. `StateChanged` and legacy compatibility events report locomotion
+changes only. A separate full-region change view and `RegionStateChanged`
+records expose changes in every region.
 
 State identity is a stable `core::Name`, not a closed runtime enum. Built-in
 names map to Roblox `HumanoidStateType` values at the compatibility boundary.
@@ -479,7 +508,11 @@ Transition arbitration is explicit:
 - an accepted manual request beats ordinary automatic locomotion for that tick
 - each transition declares priority, minimum residence time, cooldown,
   re-entry permission, and whether it may interrupt the current state
-- at most one transition commits per fixed tick
+- the initial flat machine commits at most one transition per fixed tick; a
+  composed machine commits at most one transition per region
+- safety transitions override ordinary requests and transitions; conflicts
+  between ordinary candidates use declared priority, then source-scope depth,
+  then stable authored transition id
 - requests that lose arbitration are consumed or retained according to their
   declared policy, never by incidental evaluation order
 
@@ -489,10 +522,11 @@ animation selector may crossfade among locomotion poses, aim poses, and action
 layers without changing gameplay state. Animation completion may enqueue a
 future state request, but it cannot mutate state during pose sampling.
 
-State entry and exit are recorded into a bounded `CharacterStateChanges` world
-resource. The script layer drains it and fires `StateChanged` and compatibility
-events after the store mutation barrier. Property changes still use the normal
-property signal path.
+State entry and exit for every region are recorded in the bounded
+`CharacterStateChanges` world resource. After the store mutation barrier, the
+script layer drains these full-region records and fires `RegionStateChanged`.
+It fires `StateChanged` and legacy compatibility events only for locomotion
+changes. Property changes still use the normal property signal path.
 
 ### `Humanoid` compatibility shim
 
@@ -515,13 +549,15 @@ one field on the controller and no shadow field on the humanoid.
 | `Enabled` | `CharacterController.Enabled` |
 | `FloorMaterial` | Material resolved from `GroundEntity`, read-only |
 | `GetState()` | `CharacterStateController.CurrentState` |
-| `ChangeState(state)` | Validated state request |
+| `ChangeState(state)` | Validated locomotion-region request |
+| `RequestState(region, state)`, `GetActiveStates()` | Region-qualified request and read-only active-state view |
 | `SetStateEnabled(state, enabled)` | Matching `CharacterState.Enabled` |
 | `GetStateEnabled(state)` | Matching `CharacterState.Enabled` |
 | `Move(direction)` | Writes `CharacterController.MovingDirection` |
 | `TakeDamage(amount)` | Existing authority-only health path |
 | `Died` | Health transition event |
-| `StateChanged` | Drained state-change record |
+| `StateChanged` | Drained locomotion-region change record |
+| `RegionStateChanged` | Drained state-change record for any region |
 
 Full shim coverage is tracked by a checked-in compatibility manifest, not by a
 claim in prose. Every supported Roblox `Humanoid` property, method, and event is
@@ -674,11 +710,13 @@ fixed tick
   ensure character links and default stack
   commit the typed parameter snapshot
   sample controller sensors
-  choose requested state
+  resolve preliminary state candidates for controller selection
+  resolve one candidate motion controller before the capsule sweep
   evaluate root motion, if enabled
-  run active motion controller
-  sweep and commit capsule movement
-  commit state transition
+  run the resolved candidate motion controller
+  sweep capsule and stage movement plus contact results
+  finalize state candidates from staged contacts without integrating motion again
+  atomically commit capsule movement and final state transitions
   update animation-track intent
   advance tracks and fades
   publish replication changes
@@ -876,11 +914,160 @@ state instances first. This gives a working character and proves the inputs a
 graph actually needs.
 
 The first machine is flat. The later state blueprint may group leaf states
-under parents such as `Alive`, `Grounded`, and `Airborne`. Parent entry tasks and
-transitions remain active with the chosen leaf, allowing one death transition
-or one shared airborne task instead of copies on every child. Leaf-to-root
-transition order and stable state id tie breaks must be part of the compile
-format.
+under parents such as `Alive`, `Grounded`, and `Airborne`. Parent entry tasks
+and transitions remain active with the chosen leaf, allowing one death
+transition or one shared airborne task instead of copies on every child.
+
+### Reusable custom state machines
+
+`CharacterStateBlueprint` is a reusable saved asset, separate from each
+character's bounded runtime state. It declares stable named states, one initial
+state per exclusive region, and ordered transitions. A state may declare
+bounded entry and exit tasks, residence and cooldown limits, re-entry policy,
+and interruptibility. A transition names its source scope, target state,
+priority, guard, and request-consumption policy. General guards read only the
+committed `CharacterParameters` snapshot and committed sensor output. Dedicated
+post-sweep landing and safety predicates may also read this tick's staged
+contact result, which stays immutable during finalization. The resolver
+atomically commits that result with movement and final states. Guards cannot
+write parameters, issue arbitrary instance changes, or run script callbacks
+inside the solver.
+
+State names and asset references are stable strings in files and on the wire;
+compiled slots are process-local. Unknown names round-trip unchanged. Declared
+custom states compile, unresolved references do not. Runtime holds bounded
+active state per region, residence and cooldown counters, and task state.
+Custom task kinds declare their storage bound and reset behavior; ticks cannot
+allocate or grow this state.
+
+### Exclusive and parallel state composition
+
+Initially, an exclusive (OR) group has exactly one active child. A parallel
+(AND) group has one active child in each declared region, with disjoint region
+identity and bounded child counts.
+For example, a locomotion region can be `Grounded` or `Freefall` while a
+separate upper-body region is `Unarmed` or `Aiming`. This allows running and
+aiming together without inventing a combined `RunningAndAiming` state.
+These composition operators are separate from Boolean guard logic. Guards use
+AND, OR, and NOT over their typed conditions; an OR group still selects exactly
+one active state child.
+
+Each region resolves its own eligible transitions from one immutable tick
+snapshot. Preliminary candidates select the motion controller before the
+capsule sweep, using explicit controller priority and stable authored region id
+as the tie break. These candidates are provisional and do not commit state.
+After the sweep stages movement and contact results, the resolver finalizes
+state candidates without integrating motion again. It commits at most one
+transition per region and the movement output together at one barrier, so no
+reader sees half of a cross-region transition.
+Competing transitions within a region use explicit priority, then source scope
+depth, then stable authored transition id. Declaration order and entity
+iteration order never decide a winner. A transition spanning multiple regions
+must name every affected region and win arbitration in all of them before any
+of its exits or entries run.
+
+Parent transitions are eligible while a descendant is active. A parent may
+preempt a child transition only when its declared priority wins the same
+arbitration; deeper scope is the tie break after priority. A system safety
+transition such as death overrides every ordinary transition, including
+cross-region transitions, and commits once for the character. It cancels
+incompatible active tasks at that commit. Possession or driver-lease changes
+only route future intent; they do not reset character states, cancel state
+tasks, or restart animation. Explicit gameplay requests own those changes.
+
+Entry and exit order is deterministic: regions use stable authored order,
+exits run deepest to parent, and entries run parent to deepest. Declared task
+cancellation and re-entry policies govern interruptions without resetting all
+regions implicitly.
+
+### Animation graph asset and evaluation contract
+
+`AnimationTree` is the saved graph asset for selecting and combining motion. It
+declares typed input parameters by reference to the character's existing
+`CharacterParameters`; it does not declare a second parameter table. Graph
+ports have fixed types and cardinality. Connected ports must match type, and
+missing required inputs or multiple connections to a single-input port fail
+validation with a node and port diagnostic.
+
+The initial node registry contains:
+
+- clip nodes that reference an existing `Animation`, `AnimationClip`, or
+  world-owned `AnimationBuffer`, with loop, rate, and phase inputs
+- transition nodes that select between clip or subgraph outputs with a typed
+  condition, duration, and interruption rule
+- blend-space nodes that map a bounded vector of parameters to clip weights
+- mask nodes that restrict output to a validated set of named rig bones
+- additive nodes that apply a clip relative to an explicit reference pose
+- output nodes that route track intent, a pose layer, or an optional root-motion
+  sample to the character animation binding
+
+Nodes cannot create `AnimationTrack` instances, write gameplay state, or mutate
+the rig. The existing `Animator` owns playback and rig binding; the graph
+produces bounded track intent and weights that update or reuse
+`AnimationTrack` rows. Existing marker traversal and fade rules remain the
+playback contract. Final blended local transforms are sampled into the
+transient `PoseBuffer`, then the existing bone and pose-binding path applies
+them. Masks and additive reference data are resolved during compile, not by
+walking authored graph nodes during sampling.
+
+Graph input declarations refer to shared parameter slots and inherit their
+type, default, replication policy, writer authority, and bounds. Values outside
+declared bounds follow the parameter's existing validation rule and never
+silently widen a graph input. A blend with total weight zero resolves through
+its explicit fallback input; compilation rejects a missing fallback. If a
+fade is interrupted, the next fade starts from the current composite weights
+and pose, not from the previous fade's endpoints. The graph source can be
+shared by many characters, but phase, transition progress, and current output
+weights are per-character runtime state. Tracks are reused by stable binding
+identity and are not recreated when graph evaluation repeats.
+
+Animation graph evaluation has two explicit outputs. Fixed-tick evaluation
+advances deterministic phase, marker-relevant track intent, and optional
+authoritative root-motion samples. Presentation evaluation blends the current
+track times and weights into a `PoseBuffer`; throttling may skip this work but
+never advances gameplay or marker time. A visual-only graph cannot produce
+authoritative root motion. A graph that enables root motion must use the shared
+deterministic sampler and feed displacement through controller intent and
+capsule collision.
+
+Compilation validates bounds, types, stable node ids, rig references, masks,
+and cycle rules, then emits an immutable plan. State-transition cycles across
+fixed ticks are valid. Same-sample dataflow cycles fail unless a bounded delay
+or state node breaks the cycle. A compile cache is keyed by canonical authored
+content revision plus referenced clip, rig, and mask revisions; editor layout
+is excluded. Changing any dependency invalidates the plan before evaluation.
+Invalid edits leave the last valid plan active and report the failed revision.
+Compiled plans and `PoseBuffer` samples are local caches, never saved or
+replicated.
+
+### AI and driver seam
+
+The AI system owns named behavior states, transitions, and task policy through
+the shared bounded `BehaviourPlan` described in
+[`navigation-ai-system.md`](navigation-ai-system.md). Its `AIController` owns
+behavior execution. A `BotController` adapts that output into the same
+`CharacterIntent` accepted from human input, replay, and scripts. The character
+system does not add a second AI graph or accept direct AI writes to state,
+transform, motion-controller selection, animation tracks, or undeclared graph
+inputs.
+
+`BotController` puts correlated named actions in the action field of its one
+`CharacterIntent` row per tick. Character action requests carry a request id,
+source tick, agent generation, driver token, and lease generation. The
+character side returns a bounded status (`Accepted`, `Refused`, `Running`,
+`Completed`, `Cancelled`, or `Failed`), optional result, bounded reason, and
+source tick for that id. Acknowledgements with an unknown or expired request
+id, stale agent generation, or prior driver lease generation are discarded.
+State and animation feedback is a read-only projection of committed character
+states, parameters, and action results. AI may publish declared gameplay
+parameters such as aim or mood only when its writer authority permits it, at
+the parameter commit barrier. AI and animation graphs resolve those values
+from the same declared `CharacterParameters` slots; neither keeps a duplicate
+parameter table. Changing possession revokes the old input lease and
+invalidates its pending action acknowledgements, but does not reset character
+state or animation phase. The AI controller may cancel its own driver tasks
+according to behavior task policy; that is separate from resetting character
+state or cancelling character-owned tasks.
 
 When graph authoring ships, add a shared, device-free behaviour graph document
 and compiler under `mono.engine`. Do not link `scene`, `physics`, or any engine
@@ -892,8 +1079,8 @@ The shared graph layer supports three documents:
 | Document | Runs | Output |
 |---|---|---|
 | `CharacterBlueprint` | Once when building or spawning | A validated instance template and controller links |
-| `CharacterStateBlueprint` | Fixed tick | A requested state and motion-controller selection |
-| `AnimationTree` | Fixed tick plus presentation sample | Track weights, playback speeds, and an optional root-motion sample |
+| `CharacterStateBlueprint` | Fixed tick | Resolved state per active region and one motion-controller selection |
+| `AnimationTree` | Fixed tick plus presentation sample | Track intent and weights, a `PoseBuffer` sample, and an optional root-motion sample |
 
 Graph rules:
 
@@ -901,7 +1088,9 @@ Graph rules:
 - node and edge counts are bounded
 - data ports are typed
 - graph parameters resolve against the shared `CharacterParameters` declaration
-- cycles are rejected unless a node kind explicitly owns bounded state
+- state transitions may form cycles across fixed ticks, such as
+  `Idle -> Running -> Idle`; same-sample dataflow cycles are rejected unless an
+  explicit bounded delay or state node breaks the cycle
 - compile happens after edits, never in the tick
 - the compile result is immutable and revision-cached
 - the document stores a revision and the compile result records which revision
@@ -913,6 +1102,11 @@ Graph rules:
 - editor position, folding, groups, and comments never affect the runtime hash
 - scripts receive entry and exit events but arbitrary script callbacks do not
   run in the middle of the physics solver
+- flat state machines retain one transition per tick; composed machines resolve
+  one transition per active region and commit the selected set atomically
+- every character resolves one active motion controller from candidate region
+  outputs before the capsule sweep; movement and selected states commit at the
+  same barrier after movement
 
 Do not force one universal node runtime too early. State graphs and animation
 trees are the first two consumers that justify a shared document and compiler.
@@ -937,8 +1131,10 @@ not a prerequisite for any phase.
 | Sensor tuning and references | yes | yes | authority or authoring world |
 | Sensor hit output | snapshot-safe, recomputed next step | yes when script-visible | authority physics |
 | Ground and support output | snapshot-safe, recomputed next step | yes when script-visible | authority physics |
-| Current and previous state | yes | yes | authority state controller |
-| State definitions and animation bindings | yes | yes | authority or authoring world |
+| `CurrentState` and `PreviousState` locomotion projection | yes | yes | authority state controller |
+| Full active region configuration, residence, cooldown, and bounded task state | snapshot-safe state only | yes | authority state controller; task policy declares its own writer |
+| Pending transition candidates and cross-region arbitration | no | no | fixed-tick state resolver |
+| State definitions, graph assets, and animation bindings | yes | yes | authority or authoring world |
 | Player roster and active possession | runtime snapshot only | yes | authority `Players` service |
 | Character appearance and clothing | yes | yes | authority or authoring world |
 | Bone rest pose and controls | yes | yes | author, animation, or controller by field |
@@ -949,6 +1145,7 @@ not a prerequisite for any phase.
 | Derived pose binding cache | no | no | local resolver |
 | Compiled cage and retarget caches | no | no | local compiler from saved inputs |
 | Active ragdoll state | snapshot policy only | yes while active | authority physics |
+| Per-character animation graph phase and weights | snapshot-safe track state only | through existing animator and track state | authority animation evaluation |
 | Compiled graph plan | no | no | local compiler from saved document |
 
 The server remains authoritative. The first release may keep current
@@ -1115,10 +1312,12 @@ round-trips within declared tolerances and fires identical markers.
 - preserve unknown custom states through save and replication
 - add bounded typed `CharacterParameters`
 - enforce manual and automatic transition priority, interruption, cooldown,
-  residence, re-entry, and one-transition-per-tick rules
+  residence, re-entry, and the flat machine's one-transition-per-tick rule
 
 Gate: custom states and parameters round-trip, replicas refuse invalid writers,
 and the same fixed input sequence chooses the same transition on every run.
+Flat state tests also cover safety override, request consumption, and stable
+priority ties.
 
 ### Phase 9: ragdoll handoff
 
@@ -1135,12 +1334,30 @@ without overlap, replicate consistently, and replay deterministically.
 - add the shared graph document and bounded compiler
 - add state and animation node registries
 - compile against typed parameters and stable custom state names
+- support exclusive OR groups, parallel AND regions, Boolean AND/OR/NOT guards,
+  parent transitions, atomic cross-region commits, and one resolved motion
+  controller before the capsule sweep
+- define clip, transition, blend-space, mask, additive, and output nodes with
+  fixed-tick and presentation outputs
+- keep animation graph runtime phase and weights per character while reusing
+  persistent `Animator` and `AnimationTrack` rows
+- connect `AIController` and `BotController` through shared `BehaviourPlan`,
+  bounded correlated action results, declared parameter writers, and
+  read-only character feedback
 - adapt Studio's node canvas without moving ImGui into the engine
-- compile on edits and cache by content revision
+- compile on edits and cache by content and dependency revisions
 - add a character-construction blueprint that runs only at spawn
 
-Gate: saved graphs survive unknown nodes, reject cycles and bad types, compile
+Gate: saved graphs survive unknown nodes, reject invalid dataflow cycles and
+bad types, compile
 deterministically, and produce the same result as the plain default policy.
+Legal state-transition loops across ticks remain valid; same-sample dataflow
+cycles fail unless a bounded delay or state node breaks the cycle. Tests cover
+Boolean AND/OR/NOT guards, AND locomotion plus aim, one-region
+transition limits, atomic cross-region changes, parent death override, and
+stable controller selection. Animation tests cover zero-weight fallback,
+interrupted crossfade from the current composite pose, dependency cache
+invalidation, track reuse, and presentation throttling without marker delay.
 
 ## Test and profile plan
 
@@ -1154,6 +1371,10 @@ existing suites or narrow successors:
 - `engine.physics.characters` for capsule movement and contacts
 - `engine.scene.animation` and `engine.render.animation` for binding, markers,
   curves, sync, masks, additive layers, pose buffers, and procedural bake parity
+- character graph suites for typed port rejection, custom state transitions,
+  parallel region arbitration, parent safety overrides, per-character graph
+  state, animation fallback and interruption, compile-cache invalidation, and
+  deterministic blend output
 - appearance and render suites for classic clothing, rigid attachments, layered
   cages, cache invalidation, scale, and invalid assets
 - `engine.physics.characters` successors for ragdoll entry, contact, replication
@@ -1165,18 +1386,22 @@ existing suites or narrow successors:
 - both script runtimes for the same properties, methods, buffers, and events
 
 Add focused cases, not a second pile of generic smoke tests. Each error branch
-needs a case: missing root, bad controller reference, disabled or unknown custom
-state, stale possession revision, duplicate possession, bot handoff, marker at a
-loop boundary, reverse seek, invalid mask, invalid cage, ambiguous accessory
-attachment, unsafe ragdoll recovery, invalid capsule dimensions, and a replica
-write.
+needs a case: missing root, bad controller reference, disabled or unresolved
+custom state, stale possession revision, duplicate possession, bot handoff,
+stale action acknowledgement after lease change, marker at a loop boundary,
+reverse seek, invalid mask, invalid cage, ambiguous accessory
+attachment, unsafe ragdoll recovery, invalid capsule dimensions, a same-tick
+landing state finalized from staged sweep contact with exactly one movement
+integration, and a replica write.
 
 Profile the release preset with idle, moving, and accessory-heavy crowds. Record:
 
 - controller time per active character
 - sweep count and slide iterations
 - state transitions per tick
+- active state regions and controller arbitration decisions
 - animation tracks sampled and cache hits
+- graph evaluations, compiled-plan cache hits, and crossfade restarts
 - marker events, throttled visual samples, and procedural bake keys retained
 - accessory rebinds versus cache hits
 - cage and retarget compiles versus cache hits
@@ -1207,12 +1432,23 @@ This plan is complete in code when all of these are true:
 - `Humanoid` visibly forwards to a default modular controller stack
 - controller state and motion are scriptable instances, not private objects
 - custom state names and typed parameters save and replicate intact
-- transition interruption, cooldown, re-entry, and priority are deterministic
+- flat transition interruption, cooldown, re-entry, and priority are
+  deterministic; composed regions resolve one transition each and commit
+  atomically
+- `CurrentState` stays a locomotion compatibility projection while the full
+  active region configuration is available read-only
 - bones and rigid pose bindings drive limbs, tools, and accessories
 - appearance, classic clothing, rigid accessories, and layered clothing share
   the rig without becoming movement authorities
 - existing animation instances and tracks bind to controller state
 - markers, curves, sync groups, masks, and additive layers have exact semantics
+- animation graphs use typed ports and shared bounded parameters, cache by
+  content dependencies, reuse tracks, and resume interrupted blends from the
+  current composite pose
+- AI owns behavior execution, while `BotController` adapts it to character
+  intent and receives only correlated action results and read-only feedback
+- player roster, active possession, and driver lease remain separate; lease
+  changes do not reset physical state, character states, or animation phase
 - transient pose buffers and procedurally baked animation buffers use the same
   sampling and binding path as asset clips
 - visual throttling never delays markers, root motion, or gameplay events

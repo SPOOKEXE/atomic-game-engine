@@ -137,7 +137,8 @@ When you create a new world/scene, it auto appends the scripts in.
 
 - [_] localization support
 - [_] /docs/future-work/terrain-system.md
-- [_] /docs/future-work/character-system.md
+- [_] Player-independent characters, controller state, animation graphs, and
+  player roster/possession in the [character system plan](docs/future-work/character-system.md).
 - [_] /docs/future-work/vfx-system.md
 - [_] /docs/future-work/input-system.md
 - [_] /docs/future-work/camera-and-cinematics.md

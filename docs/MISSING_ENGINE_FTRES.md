@@ -116,6 +116,11 @@ specific game, follow the genre table later in this document instead.
 P1. Extension and planned. Owners: [character system](future-work/character-system.md)
 and [input system](future-work/input-system.md).
 
+The character plan also defines player-independent NPC characters, player roster
+and possession ownership, and the lease boundary between a human driver and AI.
+The [navigation and AI plan](future-work/navigation-ai-system.md) specifies the
+correlated named-action request and acknowledgement seam.
+
 The native client already predicts movement, reconciles authoritative state,
 replays unconfirmed move inputs, and retains visual correction for smoothing.
 Extract a player-independent CharacterIntent and controller so players, bots,
@@ -236,8 +241,11 @@ provide useful references for state inspection and candidate scoring.
 <a id="g08-animation-graphs-masks-synchronisation-and-event-markers"></a>
 ### G08. Animation graphs, masks, synchronisation, and event markers
 
-P1. Extension and planned in the character plan. Clips and weighted tracks
-already play; adding another clip player would duplicate existing work.
+P1. Extension and planned in the [character system plan](future-work/character-system.md).
+Clips and weighted tracks already play; adding another clip player would
+duplicate existing work. AI requests named character actions through the
+[navigation and AI plan](future-work/navigation-ai-system.md), which does not
+own animation state or bones.
 
 Add locomotion blend spaces, state transitions, upper/lower-body masks,
 additive aim/recoil, sync groups, and event markers. Define looping, reverse
