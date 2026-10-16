@@ -10,10 +10,3 @@ RenderFeatures client RenderFeaturesDemo.luau required
 ReplicationRings replica Rings.luau required
 ServerRings server-replica Rings.luau required
 ServerPhysics server StressPhysics.luau required
-ImageGraph3D client-world Composer-3D-Reference.aworld added
-ImageGraphFeedback client-world Composer-Feedback-And-Fluid.aworld added
-ImageGraphGui client-world Composer-Gui-And-Shader.aworld added
-ImageGraphMaterials client-world Composer-Material-Maps.aworld added
-ImageGraphFlipbook client-world Composer-Particle-Flipbook.aworld added
-ImageGraphSkybox client-world Composer-Skybox.aworld added
-ImageGraphVerlet client-world Composer-Verlet-Braced-Disk.aworld added
