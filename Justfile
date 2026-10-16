@@ -2297,3 +2297,15 @@ computegraph-bench samples="3" build_preset="bench":
         echo "computegraph-bench failed or exceeded its 300s device deadline" >&2
         exit 1
     fi
+
+# Repeated native cadence promotion entries.
+update-cadence-native-promotion-bench samples="1" build_preset="bench":
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_client
+    ATOMIC_CADENCE_PROMOTIONS=1 ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.native --samples {{samples}} --warmup-samples 0
+
+# Repeated town cadence promotion entries through both VMs.
+update-cadence-town-promotion-bench samples="1" build_preset="bench":
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_client
+    ATOMIC_CADENCE_PROMOTIONS=1 ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.town --samples {{samples}} --warmup-samples 0

@@ -268,7 +268,7 @@ namespace cadence_town_bench {
 		}
 	};
 
-	template <Language LANGUAGE, bool COMPLEX, bool FULL> void Run() {
+	template <Language LANGUAGE, bool COMPLEX, bool FULL> LatestSummary &RunBaseline(size_t calls) {
 		constexpr size_t worlds = COMPLEX ? 32 : 1;
 		constexpr Language paired = LANGUAGE == Language::Luau ? Language::JavaScript : Language::Luau;
 		const auto source = ReadTown(LANGUAGE), pairedSource = ReadTown(paired);
@@ -337,8 +337,7 @@ namespace cadence_town_bench {
 		}
 		const std::string row = std::string(LANGUAGE == Language::Luau ? "town-luau-" : "town-js-") +
 								(COMPLEX ? "complex-" : "simple-") + (FULL ? "full" : "authored");
-		static size_t calls = 0;
-		auto &summary = BeginSummary(row, ++calls);
+		auto &summary = BeginSummary(row, calls);
 
 		summary.Append(
 			"# cadence-clock row=%s final_tick=%llu track_time_seconds=%.9f next_attack_tick=%llu "
@@ -364,6 +363,136 @@ namespace cadence_town_bench {
 		);
 		vmMemory.Summarize(summary, row.c_str());
 		engine::testing::Consume(total.Rays);
+		return summary;
+	}
+
+	template <Language LANGUAGE, bool COMPLEX, bool FULL>
+	void RunPromotions(LatestSummary &summary, size_t calls) {
+		constexpr size_t worlds = COMPLEX ? 32 : 1;
+		constexpr Language paired = LANGUAGE == Language::Luau ? Language::JavaScript : Language::Luau;
+		const auto source = ReadTown(LANGUAGE), pairedSource = ReadTown(paired);
+		Measurements measured(PROMOTION_TICKS);
+		std::array<size_t, static_cast<size_t>(Window::Count)> entries{};
+		uint64_t retained = 0;
+		for (size_t batch = 0; batch < PROMOTION_BATCHES; ++batch) {
+			std::vector<std::unique_ptr<Town>> main, reference;
+			main.reserve(worlds);
+			reference.reserve(worlds);
+			for (size_t index = 0; index < worlds; ++index) {
+				main.push_back(std::make_unique<Town>(LANGUAGE, FULL, source));
+				reference.push_back(std::make_unique<Town>(paired, FULL, pairedSource));
+			}
+			const auto author = [&](Window window) {
+				for (size_t index = 0; index < worlds; ++index) {
+					main[index]->Author(window);
+					reference[index]->Author(window);
+				}
+			};
+			const auto step = [&](Work &counts) {
+				for (auto &town : main)
+					town->Step(counts);
+			};
+			const auto verify = [&](Window window, Work &counts) {
+				for (size_t index = 0; index < worlds; ++index) {
+					Work ignored;
+					reference[index]->Step(ignored);
+					main[index]->Verify(*reference[index], window, counts);
+				}
+			};
+			for (size_t tick = 0; tick < WARM_TICKS; ++tick) {
+				author(Window::Steady);
+				Work counts;
+				step(counts);
+				verify(Window::Steady, counts);
+			}
+			for (size_t tick = 0; tick < PROMOTION_BATCH_TICKS; ++tick) {
+				const auto window = PromotionWindow(tick);
+				if (PromotionEntry(tick))
+					for (size_t index = 0; index < worlds; ++index) {
+						VerifyPromotionSettled(main[index]->Storage);
+						VerifyPromotionSettled(reference[index]->Storage);
+					}
+				author(window);
+				if (PromotionEntry(tick))
+					for (const auto &town : main) {
+						Require(
+							town->Citizens[0].Fighting ==
+									(window == Window::SingleCombat || window == Window::CombatBurst) &&
+								town->Citizens[1].Fighting == (window == Window::CombatBurst),
+							"cadence town entry did not produce its authored combat scope"
+						);
+					}
+				const size_t sample = batch * PROMOTION_BATCH_TICKS + tick;
+				measured.Measure(sample, window, step);
+				auto &counts = measured.Ticks[sample].Counts;
+				verify(window, counts);
+				if (window == Window::Demotion)
+					for (size_t index = 0; index < worlds; ++index) {
+						VerifyPromotionDemotion(main[index]->Storage);
+						VerifyPromotionDemotion(reference[index]->Storage);
+					}
+				if (PromotionEntry(tick)) {
+					++entries[static_cast<size_t>(window)];
+					const size_t refreshed =
+						worlds * (window == Window::CombatBurst || window == Window::Invalidation ? 2 : 1);
+					Require(
+						counts.Perception >= refreshed && counts.Behaviour >= refreshed &&
+							counts.PoseEvaluated >= refreshed && counts.BeamRebuilt >= worlds,
+						"cadence town entry did not refresh its actual consumers"
+					);
+				}
+			}
+			uint64_t batchRetained = 0;
+			for (const auto &town : main) {
+				batchRetained += town->Beams.Payload(town->Storage);
+				batchRetained += town->Storage.Resource<scene::PoseCadenceHistory>()->Poses.size() *
+								 sizeof(scene::DomainCadenceState);
+			}
+			retained = std::max(retained, batchRetained);
+		}
+		for (const auto window :
+			 {Window::SingleCombat, Window::CombatBurst, Window::PlayerOwned, Window::Invalidation})
+			Require(entries[static_cast<size_t>(window)] == 128, "cadence town entry sample count changed");
+		const std::string row = std::string(summary.Row.data()) + ".promotion";
+		summary.Append(
+			"# cadence-promotion row=%s batches=%zu rounds_per_batch=%zu settle_ticks_per_entry=%zu "
+			"actual_entries_per_trigger=128 measured_entry_ticks=512 measured_settle_ticks=8192 "
+			"maximum_fixture_lifetime_ticks=664 fixture_setup_warm_reference_excluded=1 "
+			"retained_payload_basis=maximum_single_batch_final "
+			"reference=opposite_VM_same_policy_outside_owner\n",
+			row.c_str(),
+			PROMOTION_BATCHES,
+			PROMOTION_ROUNDS,
+			PROMOTION_SETTLE_TICKS
+		);
+		measured.Summarize(
+			summary,
+			row.c_str(),
+			calls,
+			worlds * 2,
+			worlds,
+			1,
+			3,
+			worlds * 2,
+			worlds * 5,
+			FULL,
+			retained,
+			true,
+			WARM_TICKS * PROMOTION_BATCHES
+		);
+		summary.Append(
+			"# cadence-vm-memory row=%s vm_count_per_batch=%zu basis=unavailable "
+			"window=promotion_cohort reason=sequential_VM_lifetimes_not_aggregated\n",
+			row.c_str(),
+			worlds
+		);
+	}
+
+	template <Language LANGUAGE, bool COMPLEX, bool FULL> void Run() {
+		const bool promotions = PromotionEnabled();
+		static size_t calls = 0;
+		auto &summary = RunBaseline<LANGUAGE, COMPLEX, FULL>(++calls);
+		if (promotions) RunPromotions<LANGUAGE, COMPLEX, FULL>(summary, calls);
 	}
 }
 

@@ -438,7 +438,7 @@ namespace cadence_native_bench {
 		}
 	};
 
-	void RunEmpty() {
+	LatestSummary &RunEmptyBaseline(size_t calls) {
 		const size_t ticks = TickCount();
 		EmptyWorld world;
 		for (size_t tick = 0; tick < WARM_TICKS; ++tick) {
@@ -451,9 +451,8 @@ namespace cadence_native_bench {
 			measured.Measure(tick, WindowAt(tick, ticks), [&](Work &counts) { world.Step(counts); });
 			world.Verify(WARM_TICKS + tick + 1, measured.Ticks[tick].Counts);
 		}
-		static size_t calls = 0;
 		constexpr const char *row = "native-empty";
-		auto &summary = BeginSummary(row, ++calls);
+		auto &summary = BeginSummary(row, calls);
 		summary.Append(
 			"# cadence-empty fixture=native final_tick=%llu fidelity=n/a critical_promotions=n/a "
 			"pose_cache=n/a beam_cache=n/a cache_hit_rate=n/a reference=zero_work_oracle_outside_owner\n",
@@ -462,9 +461,48 @@ namespace cadence_native_bench {
 		measured.Summarize(summary, row, calls, 0, 1, 0, 0, 0, 0, false, 0, false);
 		VmMemoryWindow{}.Summarize(summary, row);
 		engine::testing::Consume(world.Storage.Time().Tick);
+		return summary;
 	}
 
-	template <bool COMPLEX, bool FULL, bool BUSY = false> void Run() {
+	void RunEmptyPromotions(LatestSummary &summary, size_t calls) {
+		Measurements measured(PROMOTION_TICKS);
+		for (size_t batch = 0; batch < PROMOTION_BATCHES; ++batch) {
+			EmptyWorld world;
+			for (size_t tick = 0; tick < WARM_TICKS; ++tick) {
+				Work counts;
+				world.Step(counts);
+				world.Verify(tick + 1, counts);
+			}
+			for (size_t tick = 0; tick < PROMOTION_BATCH_TICKS; ++tick) {
+				const size_t sample = batch * PROMOTION_BATCH_TICKS + tick;
+				measured.Measure(sample, PromotionWindow(tick), [&](Work &counts) { world.Step(counts); });
+				world.Verify(WARM_TICKS + tick + 1, measured.Ticks[sample].Counts);
+			}
+		}
+		constexpr const char *row = "native-empty.promotion";
+		summary.Append(
+			"# cadence-promotion row=%s batches=%zu rounds_per_batch=%zu settle_ticks_per_entry=%zu "
+			"scheduled_entries_per_trigger=128 actual_critical_entries=n/a invalidation_entries=n/a "
+			"pose_cache=n/a beam_cache=n/a cache_hit_rate=n/a fixture_setup_warm_reference_excluded=1\n",
+			row,
+			PROMOTION_BATCHES,
+			PROMOTION_ROUNDS,
+			PROMOTION_SETTLE_TICKS
+		);
+		measured.Summarize(
+			summary, row, calls, 0, 1, 0, 0, 0, 0, false, 0, false, WARM_TICKS * PROMOTION_BATCHES
+		);
+		VmMemoryWindow{}.Summarize(summary, row);
+	}
+
+	void RunEmpty() {
+		const bool promotions = PromotionEnabled();
+		static size_t calls = 0;
+		auto &summary = RunEmptyBaseline(++calls);
+		if (promotions) RunEmptyPromotions(summary, calls);
+	}
+
+	template <bool COMPLEX, bool FULL, bool BUSY = false> LatestSummary &RunBaseline(size_t calls) {
 		constexpr size_t actors = COMPLEX || BUSY ? 128 : 16, bones = COMPLEX ? 64 : 4;
 		constexpr size_t keys = COMPLEX ? 32 : 8, beams = COMPLEX ? 256 : (BUSY ? 128 : 16),
 						 obstacles = COMPLEX ? 2048 : (BUSY ? 1024 : 128);
@@ -508,11 +546,10 @@ namespace cadence_native_bench {
 					world.InitialPositions[index].Z - 1,
 				"cadence native Humanoid never physically moved"
 			);
-		static size_t calls = 0;
 		const char *row = COMPLEX ? (FULL ? "native-complex-full" : "native-complex-authored")
 						  : BUSY  ? (FULL ? "native-busy-full" : "native-busy-authored")
 								  : (FULL ? "native-simple-full" : "native-simple-authored");
-		auto &summary = BeginSummary(row, ++calls);
+		auto &summary = BeginSummary(row, calls);
 
 		summary.Append(
 			"# cadence-clock fixture=native full=%d final_tick=%llu track_time_seconds=%.9f "
@@ -544,6 +581,103 @@ namespace cadence_native_bench {
 		);
 		VmMemoryWindow{}.Summarize(summary, row);
 		engine::testing::Consume(total.Rays);
+		return summary;
+	}
+
+	template <bool COMPLEX, bool FULL, bool BUSY = false>
+	void RunPromotions(LatestSummary &summary, size_t calls) {
+		constexpr size_t actors = COMPLEX || BUSY ? 128 : 16, bones = COMPLEX ? 64 : 4;
+		constexpr size_t keys = COMPLEX ? 32 : 8, beams = COMPLEX ? 256 : (BUSY ? 128 : 16),
+						 obstacles = COMPLEX ? 2048 : (BUSY ? 1024 : 128);
+		Measurements measured(PROMOTION_TICKS);
+		std::array<size_t, static_cast<size_t>(Window::Count)> entries{};
+		uint64_t retained = 0;
+		for (size_t batch = 0; batch < PROMOTION_BATCHES; ++batch) {
+			World world(actors, bones, keys, beams, obstacles, FULL);
+			World reference(actors, bones, keys, beams, obstacles, true);
+			for (size_t tick = 0; tick < WARM_TICKS; ++tick) {
+				world.Author(Window::Steady);
+				reference.Author(Window::Steady);
+				Work counts, referenceWork;
+				world.Step(counts);
+				reference.Step(referenceWork);
+				reference.Remember();
+				world.Verify(reference, Window::Steady, counts);
+			}
+			for (size_t tick = 0; tick < PROMOTION_BATCH_TICKS; ++tick) {
+				const auto window = PromotionWindow(tick);
+				if (PromotionEntry(tick)) {
+					VerifyPromotionSettled(world.Storage);
+					VerifyPromotionSettled(reference.Storage);
+				}
+				world.Author(window);
+				reference.Author(window);
+				const size_t sample = batch * PROMOTION_BATCH_TICKS + tick;
+				measured.Measure(sample, window, [&](Work &counts) { world.Step(counts); });
+				Work referenceWork;
+				reference.Step(referenceWork);
+				reference.Remember();
+				auto &counts = measured.Ticks[sample].Counts;
+				world.Verify(reference, window, counts);
+				if (window == Window::Demotion) {
+					VerifyPromotionDemotion(world.Storage);
+					VerifyPromotionDemotion(reference.Storage);
+				}
+				if (PromotionEntry(tick)) {
+					++entries[static_cast<size_t>(window)];
+					const size_t refreshed =
+						window == Window::CombatBurst || window == Window::Invalidation ? actors : 1;
+					Require(
+						counts.Perception >= refreshed && counts.Behaviour >= refreshed &&
+							counts.PoseEvaluated >= refreshed && counts.BeamRebuilt > 0,
+						"cadence native entry did not refresh its actual consumers"
+					);
+				}
+			}
+			retained = std::max(
+				retained,
+				world.Beams.Payload(world.Storage) +
+					world.Storage.Resource<scene::PoseCadenceHistory>()->Poses.size() *
+						sizeof(scene::DomainCadenceState)
+			);
+		}
+		for (const auto window :
+			 {Window::SingleCombat, Window::CombatBurst, Window::PlayerOwned, Window::Invalidation})
+			Require(entries[static_cast<size_t>(window)] == 128, "cadence native entry sample count changed");
+		const std::string row = std::string(summary.Row.data()) + ".promotion";
+		summary.Append(
+			"# cadence-promotion row=%s batches=%zu rounds_per_batch=%zu settle_ticks_per_entry=%zu "
+			"actual_entries_per_trigger=128 measured_entry_ticks=512 measured_settle_ticks=8192 "
+			"maximum_fixture_lifetime_ticks=664 fixture_setup_warm_reference_excluded=1 "
+			"retained_payload_basis=maximum_single_batch_final\n",
+			row.c_str(),
+			PROMOTION_BATCHES,
+			PROMOTION_ROUNDS,
+			PROMOTION_SETTLE_TICKS
+		);
+		measured.Summarize(
+			summary,
+			row.c_str(),
+			calls,
+			actors,
+			1,
+			bones,
+			keys,
+			beams,
+			obstacles,
+			FULL,
+			retained,
+			true,
+			WARM_TICKS * PROMOTION_BATCHES
+		);
+		VmMemoryWindow{}.Summarize(summary, row.c_str());
+	}
+
+	template <bool COMPLEX, bool FULL, bool BUSY = false> void Run() {
+		const bool promotions = PromotionEnabled();
+		static size_t calls = 0;
+		auto &summary = RunBaseline<COMPLEX, FULL, BUSY>(++calls);
+		if (promotions) RunPromotions<COMPLEX, FULL, BUSY>(summary, calls);
 	}
 }
 

@@ -43,6 +43,14 @@ namespace cadence_bench {
 	inline constexpr float DELTA = 1.0f / 60.0f;
 	inline constexpr size_t WARM_TICKS = 120;
 	inline constexpr size_t HISTORY_TICKS = 16;
+	// Fresh batches keep finite-scene and clock oracles within the default baseline lifetime.
+	inline constexpr size_t PROMOTION_BATCHES = 16;
+	inline constexpr size_t PROMOTION_ROUNDS = 8;
+	inline constexpr size_t PROMOTION_SETTLE_TICKS = 16;
+	inline constexpr size_t PROMOTION_TRIGGER_COUNT = 4;
+	inline constexpr size_t PROMOTION_BATCH_TICKS =
+		PROMOTION_ROUNDS * PROMOTION_TRIGGER_COUNT * (PROMOTION_SETTLE_TICKS + 1);
+	inline constexpr size_t PROMOTION_TICKS = PROMOTION_BATCHES * PROMOTION_BATCH_TICKS;
 	inline constexpr std::array<std::string_view, 6> PHASES{
 		"cadence npc",
 		"cadence physics",
@@ -285,6 +293,29 @@ namespace cadence_bench {
 	inline constexpr std::array<const char *, static_cast<size_t>(Window::Count)> WINDOWS{
 		"steady", "invalidation", "single-combat", "combat-burst", "player-owned", "demotion"
 	};
+	inline bool PromotionEnabled() {
+		const char *setting = std::getenv("ATOMIC_CADENCE_PROMOTIONS");
+		if (setting == nullptr) return false;
+		const std::string_view value(setting);
+		if (value == "1") return true;
+		Require(value == "0", "ATOMIC_CADENCE_PROMOTIONS must be exactly 0 or 1");
+		return false;
+	}
+	inline Window PromotionWindow(size_t tick) {
+		Require(tick < PROMOTION_BATCH_TICKS, "cadence promotion tick outside one batch");
+		constexpr std::array<Window, PROMOTION_TRIGGER_COUNT> TRIGGERS{
+			Window::SingleCombat, Window::CombatBurst, Window::PlayerOwned, Window::Invalidation
+		};
+		const size_t triggerSpan = PROMOTION_SETTLE_TICKS + 1;
+		const size_t group = (tick / triggerSpan) % PROMOTION_TRIGGER_COUNT;
+		const size_t offset = tick % triggerSpan;
+		if (offset == PROMOTION_SETTLE_TICKS) return TRIGGERS[group];
+		if (offset < 3 && group != 0) return Window::Demotion;
+		return Window::Steady;
+	}
+	inline bool PromotionEntry(size_t tick) {
+		return tick % (PROMOTION_SETTLE_TICKS + 1) == PROMOTION_SETTLE_TICKS;
+	}
 	inline Window WindowAt(size_t tick, size_t count) {
 		if (tick == count / 3) return Window::Invalidation;
 		if (tick >= count * 4 / 10 && tick < count * 9 / 20) return Window::SingleCombat;
@@ -293,6 +324,55 @@ namespace cadence_bench {
 		for (const size_t end : {count * 9 / 20, count * 11 / 20, count * 13 / 20})
 			if (tick >= end && tick < end + 4) return Window::Demotion;
 		return Window::Steady;
+	}
+	inline void VerifyPromotionSettled(Store &store) {
+		const auto verify = [&store](const engine::scene::DomainCadenceState &state) {
+			if (state.Generation == 0) return;
+			Require(
+				state.CriticalReasons == 0 && store.Time().Tick > state.HoldUntilTick,
+				"cadence promotion settle retained critical or demotion state"
+			);
+		};
+		store.Each<const engine::scene::UpdateCadenceState>(
+			[&verify](Entity, const engine::scene::UpdateCadenceState &state) {
+				for (const auto &domain : state.Domains)
+					verify(domain);
+			}
+		);
+		const auto *poses = store.Resource<engine::scene::PoseCadenceHistory>();
+		const auto *beams = store.Resource<engine::effects::BeamCadenceCache>();
+		Require(poses != nullptr, "cadence promotion settle missing pose history");
+		Require(beams != nullptr, "cadence promotion settle missing beam cache");
+		for (const auto &[_, state] : poses->Poses)
+			verify(state);
+		for (const auto &[_, entry] : beams->Beams)
+			verify(entry.State);
+	}
+	inline void VerifyPromotionDemotion(Store &store) {
+		const uint64_t tick = store.Time().Tick;
+		size_t held = 0;
+		const auto verify = [&tick, &held](const engine::scene::DomainCadenceState &state) {
+			if (state.Generation == 0 || state.HoldUntilTick < tick) return;
+			++held;
+			Require(
+				state.LastCommittedTick == tick, "cadence promotion demotion did not consume a fresh value"
+			);
+		};
+		store.Each<const engine::scene::UpdateCadenceState>(
+			[&verify](Entity, const engine::scene::UpdateCadenceState &state) {
+				for (const auto &domain : state.Domains)
+					verify(domain);
+			}
+		);
+		const auto *poses = store.Resource<engine::scene::PoseCadenceHistory>();
+		const auto *beams = store.Resource<engine::effects::BeamCadenceCache>();
+		Require(poses != nullptr, "cadence promotion demotion missing pose history");
+		Require(beams != nullptr, "cadence promotion demotion missing beam cache");
+		for (const auto &[_, state] : poses->Poses)
+			verify(state);
+		for (const auto &[_, entry] : beams->Beams)
+			verify(entry.State);
+		Require(held > 0, "cadence promotion demotion had no held states");
 	}
 	inline bool Critical(Window window, size_t actor) {
 		return window == Window::CombatBurst ||
@@ -438,7 +518,8 @@ namespace cadence_bench {
 			size_t obstacles,
 			bool full,
 			uint64_t retainedPayload,
-			bool includesReference = true
+			bool includesReference = true,
+			size_t warmTicks = WARM_TICKS
 		) {
 			const auto residentAfter = ResidentBytes();
 			summary.Append(
@@ -459,7 +540,7 @@ namespace cadence_bench {
 				beams,
 				obstacles,
 				full,
-				WARM_TICKS,
+				warmTicks,
 				Ticks.size(),
 				includesReference,
 				static_cast<unsigned long long>(retainedPayload),
