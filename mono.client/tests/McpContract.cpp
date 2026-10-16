@@ -32,6 +32,38 @@ namespace {
 		return probe.local_endpoint().port();
 	}
 
+	void ConnectClient(engine::parallel::Process &child, asio::ip::tcp::socket &socket, uint16_t port) {
+		const auto childId = child.Id();
+		const auto started = std::chrono::steady_clock::now();
+		// Headless Vulkan startup measured about 14.4 seconds, so allow a slow runner room to finish.
+		const auto deadline = started + std::chrono::seconds(60);
+		std::error_code failure;
+		for (;;) {
+			const engine::parallel::ProcessStatus status = child.Poll();
+			if (!status.Alive()) {
+				FAIL(
+					"client process " << childId << " stopped before its MCP listener opened on port " << port
+									  << " (" << engine::parallel::Describe(status.Reason) << ", exit code "
+									  << status.Code << ", signal " << status.Signal << ")"
+				);
+			}
+
+			socket.connect({asio::ip::address_v4::loopback(), port}, failure);
+			if (!failure) return;
+			socket.close();
+			if (std::chrono::steady_clock::now() >= deadline) {
+				const engine::parallel::ProcessStatus finalStatus = child.Poll();
+				const auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+					std::chrono::steady_clock::now() - started
+				);
+				CAPTURE(port, failure.message(), childId, elapsed.count());
+				CAPTURE(engine::parallel::Describe(finalStatus.Reason), finalStatus.Code, finalStatus.Signal);
+				REQUIRE_FALSE(failure);
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		}
+	}
+
 	json Fixture() {
 		std::ifstream input(std::filesystem::path(__FILE__).parent_path() / "fixtures" / "McpContracts.json");
 		REQUIRE(input.good());
@@ -100,17 +132,7 @@ namespace {
 
 		asio::io_context context;
 		asio::ip::tcp::socket socket(context);
-		std::error_code failure;
-		// Vulkan and asset startup can exceed two seconds while the full suite runs.
-		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-		for (;;) {
-			socket.connect({asio::ip::address_v4::loopback(), port}, failure);
-			if (!failure) break;
-			socket.close();
-			if (std::chrono::steady_clock::now() >= deadline) break;
-			std::this_thread::sleep_for(std::chrono::milliseconds(10));
-		}
-		REQUIRE_FALSE(failure);
+		ConnectClient(child, socket, port);
 
 		const json opened = Ask(socket, 1, "initialize");
 		CHECK(StableInitialize(opened["result"]) == expected["initialize"]);
@@ -188,16 +210,7 @@ TEST_CASE("client MCP listener restarts with its reviewed normal manifest", "[cl
 
 		asio::io_context context;
 		asio::ip::tcp::socket socket(context);
-		std::error_code failure;
-		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-		for (;;) {
-			socket.connect({asio::ip::address_v4::loopback(), port}, failure);
-			if (!failure) break;
-			socket.close();
-			if (std::chrono::steady_clock::now() >= deadline) break;
-			std::this_thread::sleep_for(std::chrono::milliseconds(10));
-		}
-		REQUIRE_FALSE(failure);
+		ConnectClient(child, socket, port);
 
 		const json opened = Ask(socket, 1, "initialize");
 		const json tools = Ask(socket, 2, "tools/list")["result"]["tools"];
