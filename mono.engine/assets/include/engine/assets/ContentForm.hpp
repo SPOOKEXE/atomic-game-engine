@@ -134,6 +134,10 @@ namespace engine::assets {
 		// Authored composition and its cooked runtime document.
 		ImageGraph,
 		AImageGraph,
+
+		// Canonical generated region source and its ordinary baked placement list.
+		RegionArtifact,
+		AProcedural,
 	};
 
 	// The lowercase name for a form, which is also its canonical extension.

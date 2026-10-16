@@ -12,6 +12,9 @@
 #include <vector>
 
 namespace engine::procedural {
+	// Reads only the fixed RGK2 scope header; this does not authenticate its
+	// recipe or source witnesses. Refusal leaves out untouched.
+	bool ReadRegionKeyScope(std::span<const uint8_t> key, RegionScope &out);
 
 	// Hard ceilings for one portable regional artifact.
 	struct ArtifactLimits {

@@ -13,6 +13,7 @@
 #include <array>
 #include <assetc/Bake.hpp>
 #include <assetc/ImageGraph.hpp>
+#include <assetc/Procedural.hpp>
 #include <cmath>
 #include <fstream>
 #include <map>
@@ -315,6 +316,9 @@ namespace assetc {
 		if (IsMaterial(extension)) {
 			return WithoutExtension(path) + std::string(MATERIAL_EXTENSION);
 		}
+		if (extension == ".rga") {
+			return WithoutExtension(path) + ".aproc";
+		}
 		return std::string(path);
 	}
 
@@ -586,6 +590,62 @@ namespace assetc {
 					report.Assets.push_back(std::move(baked));
 					continue;
 				}
+			}
+			if (extension == ".rga") {
+				const engine::assets::ContentForm form = engine::assets::FormOfName(relative);
+				if (!settings.Content.Allows(form)) {
+					baked.Failure = "refused: rga content is turned off";
+					++report.Refused;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+				std::vector<uint8_t> artifact;
+				if (!ReadProceduralArtifactFile(settings.Input, relative, artifact, baked.Failure)) {
+					++report.Failures;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+				report.SourceBytes += artifact.size();
+				engine::procedural::RegionResult checked;
+				engine::procedural::Diagnostic diagnostic;
+				engine::procedural::RegionScope scope;
+				if (engine::procedural::DecodeRegionResult(artifact, checked, diagnostic) !=
+						engine::procedural::Status::Ok ||
+					!engine::procedural::ReadRegionKeyScope(checked.KeyBytes, scope)) {
+					baked.Failure = "procedural bake: invalid RGA1 scope";
+					++report.Failures;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+				engine::bake::ProceduralBake cooked;
+				if (!CookProceduralArtifact(artifact, scope, cooked, baked.Failure)) {
+					++report.Failures;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+				baked.Output = BakedName(relative);
+				baked.Kind = AssetKind::Data;
+				if (!settings.Output.empty() &&
+					!PublishProceduralBake(settings.Output, baked.Output, cooked, baked.Failure)) {
+					++report.Failures;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+				for (const auto &mesh : cooked.Meshes) {
+					Baked dependency;
+					dependency.Source = relative;
+					dependency.Output = mesh.Name;
+					dependency.Kind = AssetKind::Mesh;
+					dependency.Bytes = mesh.Bytes.size();
+					if (settings.Output.empty()) dependency.Payload = mesh.Bytes;
+					report.OutputBytes += dependency.Bytes;
+					report.Assets.push_back(std::move(dependency));
+				}
+				baked.Bytes = cooked.DescriptionBytes.size();
+				if (settings.Output.empty()) baked.Payload = std::move(cooked.DescriptionBytes);
+				report.OutputBytes += baked.Bytes;
+				report.Assets.push_back(std::move(baked));
+				continue;
 			}
 
 			const std::vector<std::byte> bytes = ReadFile(settings.Input / relative);

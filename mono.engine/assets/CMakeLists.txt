@@ -22,6 +22,8 @@ mono_add_library(assets
 	TIER shared
 	DEPS
 		Engine::core
+		# Cooked placement records share exact coordinates and stable domain names.
+		Engine::procedural
 	VENDOR
 		Vendor::blake3
 		Vendor::cryptopp

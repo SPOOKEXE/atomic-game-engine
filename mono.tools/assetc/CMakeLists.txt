@@ -6,6 +6,7 @@ mono_add_library(assetc
 		Engine::core
 		Engine::assets
 		Engine::bake
+		Engine::procedural
 		Engine::imagegraph
 )
 

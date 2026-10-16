@@ -1,5 +1,6 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/assets/Mesh.hpp>
+#include <engine/assets/ProceduralDescription.hpp>
 #include <engine/bake/Procedural.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/procedural/Geometry.hpp>
@@ -63,10 +64,10 @@ TEST_CASE("procedural bake round-trips ordinary meshes and placement description
 	CHECK(failure.empty());
 	REQUIRE(baked.Placements.size() == source.Objects.size());
 	REQUIRE(baked.Meshes.size() == source.Objects.size());
-	std::vector<bake::ProceduralPlacement> loaded;
-	REQUIRE(bake::DecodeProceduralDescription(baked.DescriptionBytes, loaded, failure));
+	std::vector<assets::ProceduralPlacement> loaded;
+	REQUIRE(assets::DecodeProceduralDescription(baked.DescriptionBytes, loaded, failure));
 	REQUIRE(loaded.size() == source.Objects.size());
-	for (const bake::ProceduralPlacement &placement : loaded) {
+	for (const assets::ProceduralPlacement &placement : loaded) {
 		const procedural::GeometryObject &expected = Find(source, placement.Id);
 		CHECK(placement.Kind == expected.Kind);
 		CHECK(placement.Origin == expected.Origin);
@@ -142,8 +143,8 @@ TEST_CASE("empty region has canonical description and no mesh assets", "[bake][p
 									   std::byte{0}
 								   })
 	);
-	std::vector<bake::ProceduralPlacement> loaded;
-	REQUIRE(bake::DecodeProceduralDescription(baked.DescriptionBytes, loaded, failure));
+	std::vector<assets::ProceduralPlacement> loaded;
+	REQUIRE(assets::DecodeProceduralDescription(baked.DescriptionBytes, loaded, failure));
 	CHECK(loaded.empty());
 }
 
@@ -161,13 +162,13 @@ TEST_CASE("malformed description and duplicate identities preserve loaded placem
 	bake::ProceduralBake baked;
 	std::string failure;
 	REQUIRE(bake::BakeProceduralGeometry(geometry, baked, failure));
-	std::vector<bake::ProceduralPlacement> loaded;
-	REQUIRE(bake::DecodeProceduralDescription(baked.DescriptionBytes, loaded, failure));
+	std::vector<assets::ProceduralPlacement> loaded;
+	REQUIRE(assets::DecodeProceduralDescription(baked.DescriptionBytes, loaded, failure));
 	REQUIRE(loaded.size() == 2);
 	const auto savedId = loaded.front().Id;
 	std::vector<std::byte> bytes = baked.DescriptionBytes;
 	bytes.push_back(std::byte{0});
-	CHECK_FALSE(bake::DecodeProceduralDescription(bytes, loaded, failure));
+	CHECK_FALSE(assets::DecodeProceduralDescription(bytes, loaded, failure));
 	CHECK(loaded.front().Id == savedId);
 	bytes = baked.DescriptionBytes;
 	const std::array<std::byte, 6> secondId{
@@ -176,7 +177,7 @@ TEST_CASE("malformed description and duplicate identities preserve loaded placem
 	const auto found = std::search(bytes.begin(), bytes.end(), secondId.begin(), secondId.end());
 	REQUIRE(found != bytes.end());
 	*(found + 5) = std::byte{'a'};
-	CHECK_FALSE(bake::DecodeProceduralDescription(bytes, loaded, failure));
+	CHECK_FALSE(assets::DecodeProceduralDescription(bytes, loaded, failure));
 	CHECK(loaded.size() == 2);
 	CHECK(loaded.front().Id == savedId);
 	bytes = baked.DescriptionBytes;
@@ -196,20 +197,20 @@ TEST_CASE("malformed description and duplicate identities preserve loaded placem
 	const auto path = std::search(bytes.begin(), bytes.end(), pathPrefix.begin(), pathPrefix.end());
 	REQUIRE(path != bytes.end());
 	*path = std::byte{'.'};
-	CHECK_FALSE(bake::DecodeProceduralDescription(bytes, loaded, failure));
+	CHECK_FALSE(assets::DecodeProceduralDescription(bytes, loaded, failure));
 	CHECK(loaded.size() == 2);
 	bytes = baked.DescriptionBytes;
 	const auto upperPath = std::search(bytes.begin(), bytes.end(), pathPrefix.begin(), pathPrefix.end());
 	REQUIRE(upperPath != bytes.end());
 	*(upperPath + pathPrefix.size()) = std::byte{'A'};
-	CHECK_FALSE(bake::DecodeProceduralDescription(bytes, loaded, failure));
+	CHECK_FALSE(assets::DecodeProceduralDescription(bytes, loaded, failure));
 	CHECK(loaded.size() == 2);
 	bytes = baked.DescriptionBytes;
 	bytes[4] = std::byte{0xff};
 	bytes[5] = std::byte{0xff};
 	bytes[6] = std::byte{0xff};
 	bytes[7] = std::byte{0xff};
-	CHECK_FALSE(bake::DecodeProceduralDescription(bytes, loaded, failure));
+	CHECK_FALSE(assets::DecodeProceduralDescription(bytes, loaded, failure));
 	CHECK(loaded.size() == 2);
 }
 

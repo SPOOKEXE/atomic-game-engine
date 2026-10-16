@@ -12,6 +12,19 @@
 #include <utility>
 
 namespace engine::procedural {
+	bool ReadRegionKeyScope(std::span<const uint8_t> key, RegionScope &out) {
+		if (key.size() < 14 || key.size() > 262144 || !std::equal(key.begin(), key.begin() + 4, "RGK2"))
+			return false;
+		const auto u32 = [&](size_t offset) {
+			return static_cast<uint32_t>(key[offset]) | (static_cast<uint32_t>(key[offset + 1]) << 8) |
+				   (static_cast<uint32_t>(key[offset + 2]) << 16) |
+				   (static_cast<uint32_t>(key[offset + 3]) << 24);
+		};
+		const uint16_t cells = static_cast<uint16_t>(key[12]) | (static_cast<uint16_t>(key[13]) << 8);
+		if (cells == 0 || cells > 64) return false;
+		out = {std::bit_cast<int32_t>(u32(4)), std::bit_cast<int32_t>(u32(8)), cells};
+		return true;
+	}
 
 	namespace {
 		bool ValidLimits(const ArtifactLimits &limits) {

@@ -49,6 +49,8 @@ namespace {
 		{"ashader", ContentForm::AShader, AssetKind::Shader, false},
 		{"imagegraph", ContentForm::ImageGraph, AssetKind::ImageGraph, true},
 		{"aimagegraph", ContentForm::AImageGraph, AssetKind::ImageGraph, false},
+		{"rga", ContentForm::RegionArtifact, AssetKind::Data, true},
+		{"aproc", ContentForm::AProcedural, AssetKind::Data, false},
 
 		{"atex", ContentForm::ATex, AssetKind::Texture, false},
 		{"aseq", ContentForm::ASeq, AssetKind::Animation, false},

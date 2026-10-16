@@ -12,6 +12,25 @@ TEST_DEPENDS("engine.procedural.region")
 
 using namespace engine::procedural;
 
+TEST_CASE(
+	"RGK2 scope header identifies its region without changing output on refusal", "[procedural][artifact]"
+) {
+	const std::array<uint8_t, 14> key{'R', 'G', 'K', '2', 0xff, 0xff, 0xff, 0xff, 2, 0, 0, 0, 16, 0};
+	RegionScope scope{};
+	REQUIRE(ReadRegionKeyScope(key, scope));
+	CHECK(scope.X == -1);
+	CHECK(scope.Y == 2);
+	CHECK(scope.CellsPerSide == 16);
+	const RegionScope previous = scope;
+	auto bad = key;
+	bad[12] = 0;
+	CHECK_FALSE(ReadRegionKeyScope(bad, scope));
+	CHECK(scope.X == previous.X);
+	CHECK(scope.Y == previous.Y);
+	CHECK(scope.CellsPerSide == previous.CellsPerSide);
+	CHECK_FALSE(ReadRegionKeyScope(std::span(key.data(), 13), scope));
+}
+
 namespace {
 	RegionResult Example() {
 		RegionResult result;

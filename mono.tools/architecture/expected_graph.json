@@ -81,7 +81,9 @@
       "tier": "shared",
       "layer": 8,
       "links": [
-        "core"
+        "core",
+        "graphcore",
+        "procedural"
       ]
     },
     "audio": {
@@ -126,9 +128,11 @@
         "core",
         "delivery",
         "discord",
+        "graphcore",
         "net",
         "network",
-        "parallel"
+        "parallel",
+        "procedural"
       ]
     },
     "client": {
@@ -226,7 +230,9 @@
       "links": [
         "assets",
         "core",
-        "net"
+        "graphcore",
+        "net",
+        "procedural"
       ]
     },
     "datastore": {
@@ -526,8 +532,10 @@
         "assets",
         "core",
         "ecs",
+        "graphcore",
         "net",
         "parallel",
+        "procedural",
         "world"
       ]
     },
