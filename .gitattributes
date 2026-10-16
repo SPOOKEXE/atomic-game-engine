@@ -4,3 +4,4 @@
 # Unified diff context markers carry spaces; git apply checks added source lines.
 mono.vendor/patches/sdl/vulkan-queues.patch -whitespace
 mono.vendor/patches/sdl/vulkan-texture-cancellation.patch -whitespace
+mono.vendor/patches/sdl/vulkan-defrag-source-layout.patch -whitespace

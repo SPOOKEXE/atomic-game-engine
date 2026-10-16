@@ -8,7 +8,8 @@ function(mono_prepare_sdl_queues root output revision_output)
 	set(source "${root}/mono.vendor/sdl")
 	set(patches
 		"${root}/mono.vendor/patches/sdl/vulkan-compute-samplers.patch"
-		"${root}/mono.vendor/patches/sdl/vulkan-texture-cancellation.patch")
+		"${root}/mono.vendor/patches/sdl/vulkan-texture-cancellation.patch"
+		"${root}/mono.vendor/patches/sdl/vulkan-defrag-source-layout.patch")
 	if(MONO_SDL_VULKAN_QUEUES)
 		list(APPEND patches "${root}/mono.vendor/patches/sdl/vulkan-queues.patch")
 	endif()

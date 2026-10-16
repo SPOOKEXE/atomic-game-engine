@@ -1,0 +1,41 @@
+Restore the old Vulkan texture layout after defragmentation copies.
+
+WHY THIS IS A PATCH
+    Defragmentation copies every mip into a replacement backing and restores the
+    replacement to its default layout. An already recorded command can still pin
+    the old backing after its container is repointed, so that backing must also
+    return from COPY_SOURCE to its default layout before later submissions use it.
+    Restore it after the copy and before repointing/releasing it. Existing texture
+    references keep both generations alive; no ownership or callback order changes.
+
+VALIDATION TARGET
+    engine.render.texturedefragmentationgpu retains a sampled seven-mip backing
+    across real allocator fragmentation and checks sampled/current contents. On the
+    unpatched RTX 4090 Vulkan backend, all pixel assertions pass but Khronos
+    validation reports seven InvalidImageLayout errors, one per retained mip.
+    ForestVillage Luau/JS client initialization is the production acceptance path.
+
+WHEN IT STOPS APPLYING
+    Pinned SDL commit: fa2c02bb6e21974a89ea9824bc53c9932abe5f9c.
+    Re-point the texture branch of VULKAN_INTERNAL_DefragmentMemory after its mip
+    copies and before the original container is repointed. This correctness patch
+    applies with private queues enabled or disabled. Do not edit the SDL submodule.
+
+--- a/src/gpu/vulkan/SDL_gpu_vulkan.c
++++ b/src/gpu/vulkan/SDL_gpu_vulkan.c
+@@ -11196,8 +11196,15 @@
+                 commandBuffer,
+                 VULKAN_TEXTURE_USAGE_MODE_COPY_DESTINATION,
+                 newTexture);
+ 
++            // Already recorded commands can still bind the old backing.
++            VULKAN_INTERNAL_TextureTransitionToDefaultUsage(
++                renderer,
++                commandBuffer,
++                VULKAN_TEXTURE_USAGE_MODE_COPY_SOURCE,
++                currentRegion->vulkanTexture);
++
+             // re-point original container to new texture
+             newTexture->container = currentRegion->vulkanTexture->container;
+             newTexture->containerIndex = currentRegion->vulkanTexture->containerIndex;
+             newTexture->container->textures[currentRegion->vulkanTexture->containerIndex] = newTexture;

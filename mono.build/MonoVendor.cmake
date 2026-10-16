@@ -179,13 +179,15 @@ if(MONO_BUILD_CLIENT)
 	# turned the precompiled header off" while the compile line carries `/Yu` is
 	# worse than no setting at all.
 
-	# Fix SDL's sampler barrier scope in every client build. The separate private
-	# queue extension remains optional until the renderer opts into that workload.
+	# Apply Vulkan sampler and texture backing correctness patches in every client
+	# build. The separate private queue extension remains optional until the
+	# renderer opts into that workload.
 	option(MONO_SDL_VULKAN_QUEUES "Build the private SDL Vulkan queue extension" ON)
 	include("${CMAKE_CURRENT_LIST_DIR}/MonoSdlQueues.cmake")
 	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
 		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/sdl/vulkan-compute-samplers.patch"
 		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/sdl/vulkan-texture-cancellation.patch"
+		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/sdl/vulkan-defrag-source-layout.patch"
 		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/sdl/vulkan-queues.patch"
 		"${CMAKE_SOURCE_DIR}/mono.build/private/AtomicGpuQueues.h")
 	mono_prepare_sdl_queues("${CMAKE_SOURCE_DIR}" mono_sdl_source mono_sdl_revision)
