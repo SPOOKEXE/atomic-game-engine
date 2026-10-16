@@ -60,7 +60,9 @@ jobs:
               break
             fi
           done
-      - uses: actions/cache@v4
+      - name: Restore compiler cache
+        id: ccache-restore
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/ccache
           key: demo-impact-${{ runner.os }}-${{ github.sha }}
@@ -73,6 +75,12 @@ jobs:
         run: |
           rm -f docs/VERSION_IMPACT.md
           bash scripts/demos/compare-version-impact.sh "$BASELINE_REF" docs/VERSION_IMPACT.md
+      - name: Save compiler cache
+        if: ${{ !cancelled() && steps.ccache-restore.outcome == 'success' && steps.ccache-restore.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ccache
+          key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
       - name: Publish comparison table in the job summary
         if: always()
         run: |
