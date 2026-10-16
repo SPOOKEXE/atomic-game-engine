@@ -419,10 +419,10 @@ weather-effects-bench samples="5" build_preset="bench":
     ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-effects --samples {{samples}}
 
 # Real sparse generation and integration at a configurable image size; opens a GPU device explicitly.
-weather-gpu-bench samples="3" build_preset="bench" width="1920" height="1080" shadow_resolution="256":
-    cmake --preset {{build_preset}} > /dev/null
+weather-gpu-bench samples="3" build_preset="bench" width="1920" height="1080" shadow_resolution="256" scene="simple" frames="256":
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_render
-    MONO_WEATHER_GPU_BENCH=1 MONO_WEATHER_GPU_BENCH_WIDTH={{width}} MONO_WEATHER_GPU_BENCH_HEIGHT={{height}} MONO_WEATHER_GPU_BENCH_SHADOW_RESOLUTION={{shadow_resolution}} ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-gpu --samples {{samples}}
+    MONO_WEATHER_GPU_BENCH=1 MONO_WEATHER_GPU_BENCH_WIDTH={{width}} MONO_WEATHER_GPU_BENCH_HEIGHT={{height}} MONO_WEATHER_GPU_BENCH_SHADOW_RESOLUTION={{shadow_resolution}} MONO_WEATHER_GPU_BENCH_SCENE={{scene}} MONO_WEATHER_GPU_BENCH_FRAMES={{frames}} ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-gpu --samples {{samples}}
 
 # Coverage-guided hostile weather checkpoint decoding, without graphics.
 weather-fuzz runs="10000" compiler="clang++-21":
@@ -2257,3 +2257,9 @@ update-cadence-town-bench samples="3" build_preset="bench":
     cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
     cmake --build --preset {{build_preset}} --target bench_client
     ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.update-cadence.town --samples {{samples}}
+
+# Actual renderer ray consumers at a fixed extent and projection.
+ray-gpu-bench samples="3" build_preset="bench" width="1920" height="1080" family="all" scene="all" frames="256" projection="perspective":
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_RAY_GPU_BENCH=1 MONO_RAY_GPU_BENCH_WIDTH={{width}} MONO_RAY_GPU_BENCH_HEIGHT={{height}} MONO_RAY_GPU_BENCH_CASE={{family}} MONO_RAY_GPU_BENCH_SCENE={{scene}} MONO_RAY_GPU_BENCH_FRAMES={{frames}} MONO_RAY_GPU_BENCH_PROJECTION={{projection}} ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.ray-consumers --samples {{samples}} --warmup-samples 0
