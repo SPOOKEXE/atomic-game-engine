@@ -2275,3 +2275,14 @@ procedural-pipeline-bench samples="3" trials="128" build_preset="bench":
 # Diagnostic comparison with unoptimised engine libraries.
 procedural-pipeline-bench-o0 samples="1" trials="1":
     just procedural-pipeline-bench {{samples}} {{trials}} bench-o0
+
+# Owner-thread recording cost for independently moving resident views.
+render-recording-bench samples="3":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset bench --target bench_render
+    if ! SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_RENDER_RECORDING_PROFILE=1 timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_render --suite engine.render.bench.recording-batch --samples {{samples}} --warmup-samples 0; then
+        echo "render-recording-bench failed or exceeded its 180s device deadline" >&2
+        exit 1
+    fi
