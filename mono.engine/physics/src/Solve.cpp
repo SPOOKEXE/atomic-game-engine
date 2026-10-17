@@ -629,7 +629,6 @@ namespace engine::physics {
 		};
 		std::vector<SolverBody> &bodies = PipelineInternals::Bodies(*world);
 		std::vector<ContactRow> &rows = PipelineInternals::Rows(*world);
-		bodies.clear();
 
 		// --- gather ----------------------------------------------------------
 		//
@@ -663,19 +662,32 @@ namespace engine::physics {
 				owners.erase(std::unique(owners.begin(), owners.end()), owners.end());
 			}
 
+			{
+				ENGINE_PROFILE_CAT("physics.solve-gather-index", core::ProfileCategory::Physics);
+				// Keep surviving nodes: clear/emplace allocates once per contacted body every step.
+				size_t current = 0;
+				for (const SolverBody &previous : bodies) {
+					while (current < owners.size() && owners[current].Id < previous.Owner.Id) {
+						current++;
+					}
+					if (current == owners.size() || owners[current] != previous.Owner) {
+						bodyIndex.erase(previous.Owner.Id);
+					}
+				}
+				const double bucketCapacity =
+					static_cast<double>(bodyIndex.bucket_count()) * bodyIndex.max_load_factor();
+				if (static_cast<double>(owners.size()) > bucketCapacity) {
+					bodyIndex.reserve(owners.size());
+				}
+				for (size_t index = 0; index < owners.size(); index++) {
+					bodyIndex.insert_or_assign(owners[index].Id, index);
+				}
+			}
+
 			bodies.resize(owners.size());
 			for (size_t index = 0; index < owners.size(); index++) {
 				bodies[index] = SolverBody{};
 				bodies[index].Owner = owners[index];
-			}
-
-			{
-				ENGINE_PROFILE_CAT("physics.solve-gather-index", core::ProfileCategory::Physics);
-				bodyIndex.clear();
-				bodyIndex.reserve(bodies.size());
-				for (size_t index = 0; index < bodies.size(); index++) {
-					bodyIndex.emplace(bodies[index].Owner.Id, index);
-				}
 			}
 		}
 

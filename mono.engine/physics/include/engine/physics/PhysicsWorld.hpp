@@ -1243,9 +1243,8 @@ namespace engine::physics {
 		// `size()` instead is a walk over last tick's tail, and a stale row is a
 		// contact between two bodies that are no longer touching.
 		std::vector<SolverBody> BodyList;
-		// Lookup-only index over `BodyList`, rebuilt with it. No system walks this
-		// table: body and contact order stay in their sorted arrays, while passes
-		// that need one known entity avoid repeating binary searches.
+		// Lookup-only index over `BodyList`, retaining nodes for surviving full entity ids.
+		// No system walks the table: body and contact order stay in their sorted arrays.
 		std::unordered_map<uint64_t, size_t> BodyIndexByOwner;
 		// A retained membership list for Solve's dense BasePart load pass.
 		std::vector<uint8_t> SolverBodyLoaded;
