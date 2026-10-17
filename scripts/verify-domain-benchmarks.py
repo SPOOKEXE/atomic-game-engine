@@ -218,6 +218,12 @@ def check_delivery(output: str) -> None:
 			)
 		)
 		equals(fixture, expected_fixture)
+		for region in range(2):
+			digest = fixture.get(f"generated_artifact_{region}_hash", "")
+			require(
+				len(digest) == 64 and all(char in "0123456789abcdef" for char in digest),
+				f"missing or invalid generated artifact hash: {shape}: {region}",
+			)
 		cold, warm = rows[(shape, "empty_cache")], rows[(shape, "warm_cache")]
 		for row in (cold, warm):
 			equals(
@@ -345,14 +351,14 @@ def main() -> int:
 				command,
 				cwd=Path(__file__).resolve().parents[1],
 				env=environment,
-				stdout=subprocess.PIPE,
-				stderr=subprocess.STDOUT,
+				capture_output=True,
 				encoding="utf-8",
 				errors="replace",
 				timeout=180,
 				check=False,
 			)
 			emit(result.stdout)
+			emit(result.stderr)
 			require(
 				result.returncode == 0,
 				f"native benchmark failed: {suite}: child_returncode={result.returncode}",
@@ -364,6 +370,7 @@ def main() -> int:
 			print(f"# native domain verified\t{suite}\ttiming_valid=0", flush=True)
 		except subprocess.TimeoutExpired as failure:
 			emit(failure.output)
+			emit(failure.stderr)
 			print(
 				f"native domain suite timed out after {failure.timeout}s: {suite}: {failure.cmd}",
 				file=sys.stderr,
