@@ -128,11 +128,10 @@ jobs:
     needs: version
     name: ${{ matrix.platform }} ${{ matrix.flavour }}
     runs-on: ${{ matrix.runner }}
-    # Linux is the platform this engine is developed on and its failure is a
-    # real failure. Windows compiles but has never shipped, and macOS has never
-    # been run at all - CMakeLists.txt warns as much when it configures. Neither
-    # gets to hold up a Linux release; both upload what they manage to build.
-    continue-on-error: ${{ matrix.optional }}
+    # Windows and macOS may fail without blocking a tagged release while those
+    # platforms mature. A manual domain benchmark run requires every platform
+    # so a missing native suite cannot leave the workflow green.
+    continue-on-error: ${{ matrix.optional && !inputs.domain_benchmarks }}
     timeout-minutes: 180
 
     strategy:
