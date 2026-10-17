@@ -29,11 +29,17 @@
 #include <engine/audio/Mixer.hpp>
 #include <engine/audio/Sample.hpp>
 #include <engine/audio/Spatial.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <algorithm>
+#include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -82,20 +88,8 @@ namespace mixing_bench {
 		return tone;
 	}
 
-	// A mixer with `voices` players, each through its own fader into the output.
-	//
-	// **Built once per shape and reused**, because constructing a graph
-	// allocates and a device thread never does. `ApplyPending` rather than
-	// posting through the queue and rendering, so the graph is in a known state
-	// before the first measured block.
-	AudioMixer &GraphOf(size_t voices, bool spatial) {
-		static std::vector<std::pair<std::pair<size_t, bool>, std::unique_ptr<AudioMixer>>> built;
-		for (auto &[key, mixer] : built) {
-			if (key.first == voices && key.second == spatial) {
-				return *mixer;
-			}
-		}
-
+	// grug build routing outside measured Render calls, including first-block probes.
+	std::unique_ptr<AudioMixer> BuildMixer(size_t voices, bool spatial) {
 		auto mixer = std::make_unique<AudioMixer>();
 		engine::audio::AudioGraph &graph = mixer->Graph();
 		const NodeId output{engine::audio::AudioGraph::OUTPUT_ID};
@@ -149,8 +143,171 @@ namespace mixing_bench {
 			throw std::runtime_error("audio benchmark graph did not activate the requested voices");
 		}
 
-		built.emplace_back(std::make_pair(voices, spatial), std::move(mixer));
+		return mixer;
+	}
+
+	// grug keep timing fixtures separate from the diagnostic first/next block mixers.
+	AudioMixer &GraphOf(size_t voices, bool spatial) {
+		static std::vector<std::pair<std::pair<size_t, bool>, std::unique_ptr<AudioMixer>>> built;
+		for (auto &[key, mixer] : built) {
+			if (key.first == voices && key.second == spatial) return *mixer;
+		}
+		built.emplace_back(std::make_pair(voices, spatial), BuildMixer(voices, spatial));
 		return *built.back().second;
+	}
+
+	template <class Work> void ProbeHeap(const char *name, Work work) {
+		using engine::core::HeapProfile;
+		if (!HeapProfile::IsCompiledIn())
+			throw std::runtime_error("runtime heap probe requires MONO_HEAP_PROFILE");
+		// grug single owner and no device threads: reset makes nested tags share one call's process peak.
+		HeapProfile::ResetTotals();
+		const auto before = HeapProfile::Totals();
+		{
+			ENGINE_HEAP_SCOPE(name);
+			work();
+		}
+		const auto after = HeapProfile::Totals();
+		int64_t peak = 0;
+		bool found = false;
+		for (uint32_t index = 1; index < HeapProfile::NodeCount(); ++index) {
+			const auto node = HeapProfile::Node(index);
+			if (node.Parent == HeapProfile::ROOT && node.Name == name) {
+				found = true;
+				peak = node.PeakBytes;
+			}
+		}
+		if (!found) throw std::runtime_error("runtime benchmark heap scope was not recorded");
+		std::cout << "# b0 heap\t" << name << '\t' << (after.TotalBytes - before.TotalBytes) << '\t'
+				  << (after.TotalBlocks - before.TotalBlocks) << '\t' << (after.LiveBytes - before.LiveBytes)
+				  << '\t' << after.LiveBytes << '\t' << peak << '\t' << after.LiveBlocks << '\t'
+				  << after.PeakBytes << '\t' << before.LiveBytes << '\t'
+				  << (after.PeakBytes - before.LiveBytes) << '\t' << after.OverheadBytes << '\t'
+				  << HeapProfile::BlockOverhead() << '\t' << (after.DroppedScopes - before.DroppedScopes)
+				  << '\t' << (after.ForeignFrees - before.ForeignFrees) << '\n';
+	}
+
+	void PrintHeapBasis() {
+		std::cout << "# b0 heap basis\ttracked_cpp_requested_payload=1\t"
+				  << "malloc_gpu_excluded=1\twork_invocations=1\tfixtures_prepared=1\t"
+				  << "reference_setup_excluded=1\toutput_retained_at_snapshot=1\t"
+				  << "scope_peak=exclusive\tprocess_peak=single_call_since_reset\t"
+				  << "fixtures_references_resident=1\tpeak_above_entry=additional_tracked_payload_not_rss\t"
+				  << "external_contention_invalidates_timing=1\ttiming_valid=0\t"
+				  << "counters=process_local\n";
+		std::cout << "# b0 heap v3\tname\tprocess_allocated_bytes\tprocess_allocated_blocks\t"
+				  << "process_retained_bytes\tprocess_live_bytes\tscope_self_peak_bytes\t"
+				  << "process_live_blocks\tprocess_peak_since_reset_bytes\tbaseline_live_bytes\t"
+				  << "process_peak_above_entry_live_bytes\t"
+				  << "process_header_overhead_model_bytes\tblock_overhead_bytes\t"
+				  << "dropped_scopes_delta\tforeign_frees_delta\n";
+	}
+
+	struct MixReference {
+		std::array<float, BLOCK * 2> Samples{};
+		float Peak = 0.0f;
+		bool Clipped = false;
+	};
+
+	// grug scalar oracle sums authored voice order, then clips once at the output.
+	MixReference ReferenceMix(size_t voices, bool spatial, uint64_t beginSample) {
+		MixReference expected;
+		const SoundRef source = Tone();
+		for (size_t voice = 0; voice < voices; ++voice) {
+			const float offset = static_cast<float>(voice);
+			const StereoGain gain =
+				spatial ? engine::audio::Place(
+							  engine::audio::ListenerPose{},
+							  EmitterPlacement{
+								  std::sin(offset) * 20.0f, 0.0f, std::cos(offset) * 20.0f, 5.0f, 60.0f
+							  }
+						  )
+						: engine::audio::PanGain(std::sin(offset) * 0.8f);
+			for (size_t frame = 0; frame < BLOCK; ++frame) {
+				const size_t cursor = (voice * 37u % 40'000u + beginSample + frame) % source->Frames();
+				const auto sample = source->Frame(cursor);
+				const float left = sample[0] * 0.5f;
+				const float right = sample[1] * 0.5f;
+				// grug force the stored stage's float rounding before the output sum; no fused multiply-add.
+				const volatile float stageLeft = left * (0.5f * gain.Left);
+				const volatile float stageRight = right * (0.5f * gain.Right);
+				expected.Samples[frame * 2] += stageLeft;
+				expected.Samples[frame * 2 + 1] += stageRight;
+			}
+		}
+		for (float &sample : expected.Samples) {
+			expected.Peak = std::max(expected.Peak, std::abs(sample));
+			expected.Clipped |= sample > 1.0f || sample < -1.0f;
+			sample = std::clamp(sample, -1.0f, 1.0f);
+		}
+		return expected;
+	}
+
+	uint64_t SampleHash(const SampleBuffer &output) {
+		uint64_t hash = 14695981039346656037ULL;
+		for (float sample : output.Data()) {
+			const uint32_t bits = std::bit_cast<uint32_t>(sample);
+			for (uint32_t shift = 0; shift < 32; shift += 8) {
+				hash ^= (bits >> shift) & 0xffu;
+				hash *= 1099511628211ULL;
+			}
+		}
+		return hash;
+	}
+
+	void ProbeMix(const char *firstName, const char *nextName, size_t voices, bool spatial) {
+		auto mixer = BuildMixer(voices, spatial);
+		SampleBuffer output(AudioFormat{}, BLOCK);
+		uint64_t previousSerial = mixer->ObservationSerial();
+		for (const char *name : {firstName, nextName}) {
+			const uint64_t beginSample = mixer->Clock();
+			const MixReference expected = ReferenceMix(voices, spatial, beginSample);
+			MixReport report;
+			ProbeHeap(name, [&] { report = mixer->Render(output); });
+			if (output.Data().size() != expected.Samples.size() ||
+				!std::equal(output.Data().begin(), output.Data().end(), expected.Samples.begin()) ||
+				report.Frames != BLOCK || report.Applied != 0 || report.Segments != 1 ||
+				report.Finished != 0 || report.Peak != expected.Peak || report.Clipped != expected.Clipped ||
+				report.BeginSample != beginSample || report.EndSample != beginSample + BLOCK ||
+				mixer->Clock() != beginSample + BLOCK || report.ObservationSerial != previousSerial + 1 ||
+				mixer->ObservationSerial() != report.ObservationSerial ||
+				!mixer->LastAppliedCommands().empty() || !mixer->LastFinishedSources().empty())
+				throw std::runtime_error("audio memory probe samples, report or clock changed");
+			previousSerial = report.ObservationSerial;
+			std::cout << "# b0 runtime oracle\t" << name << "\tfull_samples=1\tvoices=" << voices
+					  << "\tspatial=" << spatial << "\tframes=" << report.Frames
+					  << "\tbegin_sample=" << report.BeginSample << "\tend_sample=" << report.EndSample
+					  << "\tpeak=" << report.Peak << "\tclipped=" << report.Clipped
+					  << "\tsample_fnv1a64=" << SampleHash(output) << '\n';
+		}
+	}
+
+	void ProbeMemoryOnce() {
+		static const bool probed = [] {
+			const char *setting = std::getenv("MONO_BENCH_MEMORY");
+			if (setting == nullptr || setting[0] != '1' || setting[1] != '\0') return true;
+			PrintHeapBasis();
+			ProbeMix(
+				"b0 audio runtime empty prepared first", "b0 audio runtime empty prepared next", 0, false
+			);
+			ProbeMix(
+				"b0 audio runtime simple prepared first", "b0 audio runtime simple prepared next", 1, false
+			);
+			ProbeMix(
+				"b0 audio runtime busy prepared first", "b0 audio runtime busy prepared next", 64, false
+			);
+			ProbeMix(
+				"b0 audio runtime complex prepared first",
+				"b0 audio runtime complex prepared next",
+				511,
+				false
+			);
+			ProbeMix(
+				"b0 audio runtime spatial prepared first", "b0 audio runtime spatial prepared next", 64, true
+			);
+			return true;
+		}();
+		(void)probed;
 	}
 
 	// The output buffer, held the way a device callback holds one.
@@ -170,6 +327,7 @@ using namespace mixing_bench;
 // that passes 100% is where the audio breaks.
 
 BENCH("Render · 1 voice", 100) {
+	ProbeMemoryOnce();
 	AudioMixer &mixer = GraphOf(1, false);
 	SampleBuffer &out = Out();
 	for (size_t block = 0; block < 100; block++) {

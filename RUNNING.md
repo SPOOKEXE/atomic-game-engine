@@ -183,6 +183,7 @@ the backend submission call separately from engine submission bookkeeping.
 | `bench [args...]` | Run selected affected benchmarks. |
 | `bench-all [args...]` | Run every benchmark. |
 | `bench-accept [args...]` | Accept benchmark baselines. |
+| `domain-runtime-memory-bench [build_preset]` | Measure prepared image evaluation and audio mixing heap payload, per-call peaks, and full output checks. Default: `bench`, with heap hooks required. Diagnostic timings are invalid; output stays on stdout. |
 | `weather-bench [samples] [build_preset]` | Measure seeded weather, packing, clocks, assemblies, sparse residency, events and the stateful solver without graphics. Defaults: `5`, `bench`; use `bench-o0` for unoptimized costs. |
 | `weather-descriptor-bench [samples] [build_preset]` | Measure device-free weather GPU descriptor preparation. Defaults: `5`, `bench`. |
 | `weather-residency-bench [samples] [build_preset]` | Measure actual sparse cloud page selection, retained maintenance and teleports without graphics. Defaults: `5`, `bench`. |

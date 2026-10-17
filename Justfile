@@ -2255,6 +2255,18 @@ graph-pipeline-bench samples="101" build_preset="bench":
     ./.cache/build/{{build_preset}}/bench/bench_audio --suite engine.audio.bench.graphrouting --samples {{samples}}
     ./.cache/build/{{build_preset}}/bench/bench_graph --suite engine.graph.bench.enginegraph --samples {{samples}}
 
+# grug measure whole CPU image evaluation and prepared audio blocks. timings invalid with heap probes.
+# tracked C++ payload only; fixtures and full-output references stay outside each measured call.
+domain-runtime-memory-bench build_preset="bench":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_imagegraph bench_audio
+    export MONO_BENCH_MEMORY=1
+    echo "# domain runtime memory diagnostic: timing_valid=0; benchmark timings must be rejected"
+    ./.cache/build/{{build_preset}}/bench/bench_imagegraph --suite engine.imagegraph.bench.evaluate --samples 1 --warmup-samples 0
+    ./.cache/build/{{build_preset}}/bench/bench_audio --suite engine.audio.bench.mixing --samples 1 --warmup-samples 0
+
 # Real render schemas, startup registration and single-operation CPU planning.
 # Startup samples use fresh processes. MONO_BENCH_MEMORY=0 allows heap-disabled presets.
 render-catalogue-bench samples="101" startup_samples="101" build_preset="bench":
