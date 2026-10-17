@@ -177,8 +177,12 @@ namespace engine::core {
 			size_t FoldedFrameCount = 0;
 		};
 
+		// Scope callbacks must not construct the graph's name pools on an audio thread.
+		constinit std::atomic<State *> publishedState{nullptr};
+
 		State &Get() {
 			static State state;
+			publishedState.store(&state, std::memory_order_release);
 			return state;
 		}
 
@@ -1241,7 +1245,11 @@ namespace engine::core {
 	// Shared by both scope kinds. Returns the index of the span it opened, or a
 	// sentinel; the depth moves either way, so the matching Pop stays balanced.
 	size_t FrameGraph::Push(std::string_view name, ProfileCategory category, ProfileOwner owner) {
-		auto &state = Get();
+		State *existing = publishedState.load(std::memory_order_acquire);
+		if (existing == nullptr) {
+			return NOT_RECORDING;
+		}
+		auto &state = *existing;
 		if (!state.Recording) {
 			return NOT_RECORDING;
 		}
@@ -1301,7 +1309,11 @@ namespace engine::core {
 			return;
 		}
 
-		auto &state = Get();
+		State *existing = publishedState.load(std::memory_order_acquire);
+		if (existing == nullptr) {
+			return;
+		}
+		auto &state = *existing;
 		// Before the DEPTH_ONLY return, not after. A scope past the budget still
 		// moved the depth, so its close has to move it back - otherwise every
 		// sibling after it is recorded several levels too deep.
@@ -1336,7 +1348,11 @@ namespace engine::core {
 	FrameGraph::CopiedScope::CopiedScope(
 		std::string_view fallback, std::string_view name, ProfileCategory category, ProfileOwner owner
 	) {
-		auto &state = Get();
+		State *existing = publishedState.load(std::memory_order_acquire);
+		if (existing == nullptr) {
+			return;
+		}
+		auto &state = *existing;
 		if (!state.Recording || std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed)) {
 			Index = Push(name, category, owner);
 			return;
@@ -1363,7 +1379,11 @@ namespace engine::core {
 		std::string_view name, ProfileCategory category, float milliseconds, ProfileOwner owner
 	)
 		: Milliseconds(milliseconds) {
-		auto &state = Get();
+		State *existing = publishedState.load(std::memory_order_acquire);
+		if (existing == nullptr) {
+			return;
+		}
+		auto &state = *existing;
 		if (!(milliseconds >= 0.0f)) {
 			if (state.Recording &&
 				std::this_thread::get_id() == state.Owner.load(std::memory_order_relaxed)) {
@@ -1382,7 +1402,11 @@ namespace engine::core {
 			return;
 		}
 
-		auto &state = Get();
+		State *existing = publishedState.load(std::memory_order_acquire);
+		if (existing == nullptr) {
+			return;
+		}
+		auto &state = *existing;
 		FrameSpan &span = state.Building[index];
 		span.Milliseconds = Milliseconds;
 		span.Reported = true;
@@ -1392,7 +1416,11 @@ namespace engine::core {
 	void FrameGraph::Report(
 		std::string_view name, ProfileCategory category, float milliseconds, ProfileOwner owner
 	) {
-		auto &state = Get();
+		State *existing = publishedState.load(std::memory_order_acquire);
+		if (existing == nullptr) {
+			return;
+		}
+		auto &state = *existing;
 		if (!state.Recording) {
 			return;
 		}
@@ -1451,7 +1479,11 @@ namespace engine::core {
 		float milliseconds,
 		ProfileOwner owner
 	) {
-		auto &state = Get();
+		State *existing = publishedState.load(std::memory_order_acquire);
+		if (existing == nullptr) {
+			return;
+		}
+		auto &state = *existing;
 		if (!state.Recording || std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed) ||
 			name.empty()) {
 			Report(fallback, category, milliseconds, owner);
@@ -1473,7 +1505,11 @@ namespace engine::core {
 		float milliseconds,
 		ProfileOwner owner
 	) {
-		auto &state = Get();
+		State *existing = publishedState.load(std::memory_order_acquire);
+		if (existing == nullptr) {
+			return;
+		}
+		auto &state = *existing;
 		if (!state.Recording || std::this_thread::get_id() != state.Owner.load(std::memory_order_relaxed)) {
 			return;
 		}
