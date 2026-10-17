@@ -14,6 +14,7 @@
 // test touches goes stale silently, and a stale list means a skipped test that
 // should have run - the worst failure mode a runner has.
 
+#include <cstddef>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -78,6 +79,12 @@ namespace testrunner {
 	//               so they are resolved against it rather than against
 	//               wherever the runner was invoked from.
 	std::vector<Suite> ReadSuites(const std::filesystem::path &binary, const std::filesystem::path &build);
+
+	// Asks binaries concurrently, retaining their input order and each registry's
+	// suite order. jobs bounds child processes; zero uses one worker.
+	std::vector<Suite> ReadSuites(
+		const std::vector<std::filesystem::path> &binaries, const std::filesystem::path &build, size_t jobs
+	);
 
 	// The exact Catch2 filter for one suite. GPU cases are opt-in because they
 	// require a working device and driver; every ordinary invocation excludes

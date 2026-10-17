@@ -80,6 +80,7 @@ namespace studio {
 			{"OcclusionMap", AssetKind::Texture},
 			{"HeightMap", AssetKind::Texture},
 			{"EmissiveMap", AssetKind::Texture},
+			{"PackedPbrMap", AssetKind::Texture},
 
 			// `ParticleEmitter`, `Beam` and `Trail` all spell it this way, and
 			// all three mean the same thing - which is why the key is the
@@ -97,6 +98,11 @@ namespace studio {
 
 			// `ImageLabel.Image`, in the interface tree.
 			{"Image", AssetKind::Texture},
+			{"HoverImage", AssetKind::Texture},
+			{"PressedImage", AssetKind::Texture},
+			{"TopImage", AssetKind::Texture},
+			{"MidImage", AssetKind::Texture},
+			{"BottomImage", AssetKind::Texture},
 		};
 
 		for (const Row &row : ROWS) {
@@ -104,6 +110,17 @@ namespace studio {
 				return row.Kind;
 			}
 		}
+		return AssetKind::Unknown;
+	}
+
+	AssetKind ContentKindOfProperty(engine::ecs::ClassId owner, std::string_view property) {
+		const auto known = ContentKindOfProperty(property);
+		if (known != AssetKind::Unknown) return known;
+		const auto sky = engine::ecs::Classes::Find(engine::core::Name("SkyboxTextures"));
+		if (!owner.IsValid() || !sky.IsValid() || !engine::ecs::Classes::IsA(owner, sky))
+			return AssetKind::Unknown;
+		for (const std::string_view face : {"Front", "Back", "Left", "Right", "Up", "Down"})
+			if (property == face) return AssetKind::Texture;
 		return AssetKind::Unknown;
 	}
 

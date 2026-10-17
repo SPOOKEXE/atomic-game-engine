@@ -260,7 +260,7 @@ namespace engine::render {
 								reason = "pack-channels input cannot alias its output";
 								return false;
 							}
-							const graph::ResourceDesc *source = pipeline.FindResource(node->Reads[index]);
+							const graph::ResourceDesc *source = pipeline.FindResourceDesc(node->Reads[index]);
 							const std::string *component =
 								node->Parameter(core::Name(std::string(ports[index]) + "-component"));
 							if (component != nullptr &&
@@ -279,7 +279,7 @@ namespace engine::render {
 								return false;
 							}
 						}
-						const graph::ResourceDesc *target = pipeline.FindResource(node->Writes.front());
+						const graph::ResourceDesc *target = pipeline.FindResourceDesc(node->Writes.front());
 						if (target == nullptr || target->Format != graph::ResourceFormat::RGBA32F) {
 							offender = node->Name;
 							reason = "pack-channels output must be RGBA32F";
@@ -300,7 +300,7 @@ namespace engine::render {
 							reason = "blit target format is not recognised";
 							return false;
 						}
-						const graph::ResourceDesc *target = pipeline.FindResource(node->Writes.front());
+						const graph::ResourceDesc *target = pipeline.FindResourceDesc(node->Writes.front());
 						if (target == nullptr || target->Format != targetFormat) {
 							offender = node->Name;
 							reason = "blit target resource does not use its selected format";
@@ -388,7 +388,7 @@ namespace engine::render {
 				}
 				const bool producesEntityFlow =
 					std::any_of(node->Writes.begin(), node->Writes.end(), [&](graph::ResourceId resource) {
-						const graph::ResourceDesc *desc = pipeline.FindResource(resource);
+						const graph::ResourceDesc *desc = pipeline.FindResourceDesc(resource);
 						return desc != nullptr && (desc->Kind == graph::ResourceKind::Entities ||
 												   desc->Kind == graph::ResourceKind::Camera);
 					});
@@ -465,6 +465,12 @@ namespace engine::render {
 				std::string_view("deferred-lighting"),
 				std::string_view("skybox-compute"),
 				std::string_view("clouds-compute"),
+				std::string_view("weather-residency"),
+				std::string_view("weather-field"),
+				std::string_view("weather-summary"),
+				std::string_view("weather-history"),
+				std::string_view("weather-integrate"),
+				std::string_view("weather-reconstruct"),
 				std::string_view("sky"),
 				std::string_view("fog"),
 				std::string_view("shader-lenses"),
@@ -560,8 +566,20 @@ namespace engine::render {
 
 		RetainedNodePlan retained = RetainedNodesOf(pipeline, customKinds);
 		std::vector<graph::NodeId> entityNodes = EntityNodesOf(pipeline, compiled);
-		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled);
+		const std::vector<graph::NodeId> ordered = [&] {
+			std::vector<graph::NodeId> nodes = compiled.Shared;
+			nodes.insert(nodes.end(), compiled.PerView.begin(), compiled.PerView.end());
+			nodes.insert(nodes.end(), compiled.Final.begin(), compiled.Final.end());
+			return nodes;
+		}();
+		auto identities = detail::BuildIdentityContracts(pipeline, ordered);
+		std::vector<graph::ResourceId> identitySources;
+		for (const auto &identity : identities)
+			identitySources.push_back(identity.Source);
+		graph::ResourceAliasPlan aliases = graph::BuildResourceAliases(pipeline, compiled, identitySources);
 		std::vector<graph::PlannedCommandBuffer> buffers = graph::PlanCommandBuffers(schedule);
+		detail::EnabledNodeIndex nodeLookup;
+		nodeLookup.Rebuild(pipeline);
 		result.Package = InstalledPipeline{
 			.Name = name,
 			.Graph = pipeline,
@@ -571,7 +589,11 @@ namespace engine::render {
 			.RetainedFamilies = retained.Families,
 			.Schedule = std::move(schedule),
 			.Aliases = std::move(aliases),
+			.Identities = std::move(identities),
+			.IdentitySources = std::move(identitySources),
 			.Buffers = std::move(buffers),
+			.NodeLookup = std::move(nodeLookup),
+			.PlanDiagnostics = {},
 		};
 		return result;
 	}

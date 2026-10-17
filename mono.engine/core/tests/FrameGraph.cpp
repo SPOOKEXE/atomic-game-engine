@@ -848,6 +848,33 @@ TEST_CASE("reported siblings occupy adjacent logical time inside their parent", 
 	CHECK(spans[3].StartMilliseconds == spans[2].StartMilliseconds + 2.0f);
 }
 
+TEST_CASE("late device durations do not shift reported CPU siblings", "[framegraph]") {
+	Collecting collecting;
+
+	FrameGraph::BeginFrame();
+	{
+		FrameGraph::Scope submit("submit", ProfileCategory::Render);
+		FrameGraph::Report("worker before", ProfileCategory::ECS, 2.0f);
+		FrameGraph::Report("gpu late query", ProfileCategory::Gpu, 100.0f);
+		FrameGraph::Report("worker after", ProfileCategory::ECS, 3.0f);
+	}
+	FrameGraph::Report("root gpu query", ProfileCategory::Gpu, 1.0f);
+	FrameGraph::EndFrame();
+
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == 5);
+	CHECK(spans[1].Parent == 0);
+	CHECK(spans[2].Parent == 0);
+	CHECK(spans[2].Category == ProfileCategory::Gpu);
+	CHECK(spans[2].Reported);
+	CHECK(spans[2].Milliseconds == 100.0f);
+	CHECK(spans[2].StartMilliseconds == 0.0f);
+	CHECK(spans[3].StartMilliseconds == spans[1].StartMilliseconds + spans[1].Milliseconds);
+	CHECK(spans[4].Parent == FrameGraph::NO_PARENT);
+	CHECK(spans[4].StartMilliseconds == 0.0f);
+	CHECK(FrameGraph::CategoryMilliseconds(ProfileCategory::Gpu) == 101.0f);
+}
+
 TEST_CASE("reported world branches remain nested and adjacent", "[framegraph]") {
 	Collecting collecting;
 

@@ -283,6 +283,8 @@ namespace engine::script {
 		// @param released Filled in with the callable it held.
 		// @return `false` when nothing of that name is bound.
 		bool Unbind(std::string_view name, CallbackRef &released);
+		// discard the stopped source's handler without calling script cleanup.
+		bool DropCallback(CallbackRef callback);
 
 		// Drops every action.
 		//

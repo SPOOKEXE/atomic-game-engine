@@ -55,3 +55,34 @@ TEST_CASE("destroy invalidates stale scope handles", "[scope]") {
 	CHECK(replacement.Index == first.Index);
 	CHECK(replacement.Generation != first.Generation);
 }
+
+TEST_CASE("retiring callback slots forgets only VM references across scopes", "[scope]") {
+	ScopeTable scopes;
+	const auto first = scopes.Create();
+	const auto second = scopes.Create();
+	scopes.Add(first, {ScopeItemKind::Callback, 7});
+	scopes.Add(first, {ScopeItemKind::Entity, 7});
+	scopes.Add(first, {ScopeItemKind::Callback, 8});
+	scopes.Add(second, {ScopeItemKind::Custom, 7});
+	scopes.Add(second, {ScopeItemKind::Task, 7});
+	scopes.DropCallback(7);
+	std::vector<ScopeItem> items;
+	REQUIRE(scopes.Clean(first, items));
+	REQUIRE(items.size() == 2);
+	CHECK(items[0].Kind == ScopeItemKind::Entity);
+	CHECK(items[1].Value == 8);
+	items.clear();
+	REQUIRE(scopes.Clean(second, items));
+	REQUIRE(items.size() == 1);
+	CHECK(items[0].Kind == ScopeItemKind::Task);
+}
+
+TEST_CASE("thread-reference adapters remove task scope entries without numeric ownership leaks", "[scope]") {
+	ScopeTable scopes;
+	const auto scope = scopes.Create();
+	scopes.Add(scope, {ScopeItemKind::Task, 7});
+	scopes.Add(scope, {ScopeItemKind::Entity, 7});
+	scopes.DropCallback(7, true);
+	REQUIRE(scopes.Count(scope) == 1);
+	CHECK(scopes.Items(scope)[0].Kind == ScopeItemKind::Entity);
+}

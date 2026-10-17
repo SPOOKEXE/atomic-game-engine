@@ -2247,7 +2247,7 @@ namespace studio {
 		// The command list carries the paint order and clips already resolved by
 		// gui; rebuilding a second hit test here would make Studio disagree with
 		// what it just drew.
-		if (!IsRunning(shown) && viewport < Overlays.size()) {
+		if (!IsRunning(shown) && !IsReplicaWorld(shown) && viewport < Overlays.size()) {
 			const OverlaySlot &slot = Overlays[viewport];
 			if (slot.Drawn && slot.List != nullptr) {
 				const ViewportCanvas canvas =
@@ -2629,7 +2629,8 @@ namespace studio {
 					IM_COL32(80, 170, 255, 255)
 				);
 
-				const bool editable = !IsRunning(shown) && CurrentTool == ToolMode::Select && pointer.Inside;
+				const bool editable = !IsRunning(shown) && !IsReplicaWorld(shown) &&
+									  CurrentTool == ToolMode::Select && pointer.Inside;
 				const bool contains = mouse.x >= minimum.x && mouse.x <= maximum.x && mouse.y >= minimum.y &&
 									  mouse.y <= maximum.y;
 				const bool onHandle =
@@ -2709,11 +2710,17 @@ namespace studio {
 		// tell. That is the same split `RunMode` already draws everywhere else.
 		if (!events.empty()) {
 			for (const WorldRun &run : Runs) {
-				if (run.World != shown || run.Runtime == nullptr) {
-					continue;
+				if (run.World == shown && run.Runtime != nullptr) {
+					run.Runtime->DeliverGuiEvents(events);
+					break;
 				}
-				run.Runtime->DeliverGuiEvents(events);
-				break;
+				const auto client = std::find_if(run.Links.begin(), run.Links.end(), [&](const auto &link) {
+					return link != nullptr && link->ReplicaWorld() == shown;
+				});
+				if (client != run.Links.end()) {
+					(void)(*client)->DeliverGuiEvents(events);
+					break;
+				}
 			}
 		}
 	}

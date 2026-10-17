@@ -8,6 +8,7 @@
 #include <engine/script/Bus.hpp>
 #include <engine/script/Vocabulary.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -16,6 +17,18 @@ namespace engine::script {
 
 	void TopicSubscriptions::Add(std::string_view topic, CallbackRef callback) {
 		Topics[std::string(topic)].push_back(callback);
+	}
+
+	bool TopicSubscriptions::DropCallback(CallbackRef callback) {
+		bool removed = false;
+		for (auto iterator = Topics.begin(); iterator != Topics.end();) {
+			removed = std::erase(iterator->second, callback) != 0 || removed;
+			if (iterator->second.empty())
+				iterator = Topics.erase(iterator);
+			else
+				++iterator;
+		}
+		return removed;
 	}
 
 	std::span<const CallbackRef> TopicSubscriptions::Listeners(std::string_view topic) const {

@@ -31,6 +31,7 @@ namespace benchrunner {
 		std::string Status;
 		std::string Reason;
 		DemoJson Basis = DemoJson::object();
+		bool IterationBasisValid = false;
 		std::map<std::string, DemoStatistics> Metrics;
 	};
 
@@ -50,6 +51,8 @@ namespace benchrunner {
 		double AllocationsPerSecond = 1000;
 		bool Advisory = false;
 	};
+
+	enum class DemoCostBasis { Wall, Iteration };
 
 	inline DemoStatistics DemoAverage(const std::vector<double> &samples) {
 		if (samples.empty()) throw std::runtime_error("empty demo sample set");
@@ -105,6 +108,119 @@ namespace benchrunner {
 			   name.find("packets") != std::string_view::npos || DemoChurnMetric(name);
 	}
 
+	inline bool DemoKnownTimingFrameMetric(std::string_view metric) {
+		static constexpr std::array<std::string_view, 11> known{
+			"render_ms_per_frame",
+			"physics_ms_per_frame",
+			"replication_ms_per_frame",
+			"script_ms_per_frame",
+			"imagegraph_ms_per_frame",
+			"frame_ms_per_frame",
+			"render_wall_ms_per_frame",
+			"physics_wall_ms_per_frame",
+			"replication_wall_ms_per_frame",
+			"imagegraph_wall_ms_per_frame",
+			"script_wall_ms_per_frame"
+		};
+		return std::find(known.begin(), known.end(), metric) != known.end();
+	}
+
+	inline std::string DemoIterationFrameMetric(std::string_view metric) {
+		if (metric.ends_with("_per_second")) {
+			const std::string_view source =
+				metric.substr(0, metric.size() - std::string_view("_per_second").size());
+			if (DemoChurnMetric(source)) return std::string(source) + "_per_frame";
+		}
+		if (metric.ends_with("_ms_per_second")) {
+			const std::string frameMetric =
+				std::string(metric.substr(0, metric.size() - std::string_view("_ms_per_second").size())) +
+				"_ms_per_frame";
+			if (DemoKnownTimingFrameMetric(frameMetric)) return frameMetric;
+		}
+		return {};
+	}
+
+	inline bool DemoIterationFrameChurn(std::string_view metric) {
+		if (!metric.ends_with("_per_frame")) return false;
+		const std::string_view source =
+			metric.substr(0, metric.size() - std::string_view("_per_frame").size());
+		return DemoChurnMetric(source);
+	}
+
+	inline bool DemoMatchesDerived(double value, double expected) {
+		return std::abs(value - expected) <= std::max(1.0, std::abs(expected)) * 1e-9;
+	}
+
+	inline bool DemoIterationReportValid(const DemoJson &metrics, double frames, double seconds) {
+		if (!metrics.is_object() || frames <= 0 || seconds <= 0) return false;
+		for (const auto &[metric, value] : metrics.items()) {
+			const double number = DemoNumber(metrics, metric);
+			if (DemoChurnMetric(metric)) {
+				const double perFrame = number / frames;
+				const double perSecond = number / seconds;
+				if ((metrics.contains(metric + "_per_frame") &&
+					 !DemoMatchesDerived(DemoNumber(metrics, metric + "_per_frame"), perFrame)) ||
+					(metrics.contains(metric + "_per_second") &&
+					 !DemoMatchesDerived(DemoNumber(metrics, metric + "_per_second"), perSecond)))
+					return false;
+			}
+			if (DemoIterationFrameChurn(metric)) {
+				const std::string source =
+					metric.substr(0, metric.size() - std::string_view("_per_frame").size());
+				if (!metrics.contains(source)) return false;
+			}
+			if (metric.ends_with("_per_second")) {
+				const std::string source =
+					metric.substr(0, metric.size() - std::string_view("_per_second").size());
+				if (DemoChurnMetric(source) && !metrics.contains(source)) return false;
+			}
+			const std::string frameMetric = DemoIterationFrameMetric(metric);
+			if (metric.ends_with("_ms_per_second") && !frameMetric.empty()) {
+				if (!metrics.contains(frameMetric)) return false;
+				const double expected = DemoNumber(metrics, frameMetric) * frames / seconds;
+				if (!DemoMatchesDerived(number, expected)) return false;
+			}
+			(void)value;
+		}
+		return true;
+	}
+
+	inline bool DemoIterationCoverage(const DemoWorkload &workload) {
+		if (!workload.IterationBasisValid || !workload.Metrics.contains("frame_count") ||
+			!workload.Metrics.contains("duration_seconds") ||
+			workload.Metrics.at("frame_count").Minimum <= 0 ||
+			workload.Metrics.at("duration_seconds").Minimum <= 0)
+			return false;
+		for (const auto &[metric, statistics] : workload.Metrics) {
+			(void)statistics;
+			if (DemoChurnMetric(metric) && (!workload.Metrics.contains(metric + "_per_frame") ||
+											!workload.Metrics.contains(metric + "_per_second")))
+				return false;
+			const std::string frameMetric = DemoIterationFrameMetric(metric);
+			if (!frameMetric.empty() && !workload.Metrics.contains(frameMetric)) return false;
+			if (DemoIterationFrameChurn(metric) &&
+				!workload.Metrics.contains(
+					metric.substr(0, metric.size() - std::string_view("_per_frame").size()) + "_per_second"
+				))
+				return false;
+			if (DemoKnownTimingFrameMetric(metric)) {
+				const std::string rateMetric =
+					std::string(metric.substr(0, metric.size() - std::string_view("_ms_per_frame").size())) +
+					"_ms_per_second";
+				if (!workload.Metrics.contains(rateMetric)) return false;
+			}
+		}
+		return true;
+	}
+
+	inline bool DemoDiagnostic(std::string_view metric, DemoCostBasis basis) {
+		if (basis == DemoCostBasis::Wall) return DemoDiagnostic(metric);
+		if (!DemoIterationFrameMetric(metric).empty()) return true;
+		if (metric.ends_with("_per_second")) return false;
+		if (DemoIterationFrameChurn(metric)) return false;
+		return DemoDiagnostic(metric);
+	}
+
 	inline void DemoValidateManifest(const DemoJson &manifest) {
 		if (manifest.at("schema") != 1 || !manifest.at("source_revision").is_string() ||
 			manifest.at("source_revision").get<std::string>().empty() ||
@@ -136,6 +252,7 @@ namespace benchrunner {
 			}
 			DemoWorkload workload;
 			workload.Status = entry.at("status").get<std::string>();
+			workload.IterationBasisValid = true;
 			if (workload.Status == "unavailable") {
 				workload.Reason = entry.value("reason", "unavailable on this source revision");
 				collection.Workloads.emplace(name, std::move(workload));
@@ -188,6 +305,8 @@ namespace benchrunner {
 				}
 				workload.Basis = std::move(basis);
 				DemoJson metrics = report.at("metrics");
+				workload.IterationBasisValid =
+					workload.IterationBasisValid && DemoIterationReportValid(metrics, frames, seconds);
 				if (entry.value("kind", "") == "server-replica" &&
 					DemoNumber(metrics, "clients_admitted") < 1) {
 					throw std::runtime_error("server replication measurement admitted no client: " + name);
@@ -493,12 +612,31 @@ namespace benchrunner {
 		const DemoCollection &baseline,
 		const DemoCollection &current,
 		const DemoLimits &limits,
-		bool *coverageValid = nullptr
+		bool *coverageValid = nullptr,
+		DemoCostBasis basis = DemoCostBasis::Wall
 	) {
 		bool passed = true;
 		if (coverageValid) *coverageValid = true;
 		document << "| Demo | Metric | Baseline mean | Current mean | Impact | Ceiling | Result |\n"
 				 << "|---|---|---:|---:|---:|---:|---|\n";
+		if (basis == DemoCostBasis::Iteration) {
+			std::set<std::string> reportedInvalid;
+			auto validate = [&](const DemoCollection &collection) {
+				for (const auto &[name, workload] : collection.Workloads) {
+					if (workload.Status == "measured" && !DemoIterationCoverage(workload) &&
+						reportedInvalid.insert(name).second) {
+						document << "| " << DemoCell(name)
+								 << " | Missing or inconsistent iteration inputs; collect fresh reports with "
+									"matching "
+									"counters and denominators | | | | | FAIL: coverage |\n";
+						passed = false;
+						if (coverageValid) *coverageValid = false;
+					}
+				}
+			};
+			validate(baseline);
+			validate(current);
+		}
 		for (const auto &[name, oldWorkload] : baseline.Workloads) {
 			const auto candidate = current.Workloads.find(name);
 			if (candidate == current.Workloads.end() ||
@@ -546,7 +684,7 @@ namespace benchrunner {
 				}
 				const double currentMean = measurement->second.Mean;
 				const double delta = currentMean - oldStatistics.Mean;
-				const bool diagnostic = DemoDiagnostic(metric);
+				const bool diagnostic = DemoDiagnostic(metric, basis);
 				const double ceiling = DemoCeiling(oldStatistics.Mean, metric, limits);
 				const bool within = diagnostic || currentMean <= ceiling;
 				passed = passed && within;
@@ -593,6 +731,7 @@ namespace benchrunner {
 			std::string baselineLabel;
 			std::string currentLabel;
 			DemoLimits limits;
+			DemoCostBasis costBasis = DemoCostBasis::Wall;
 			bool comparing = false;
 			for (int index = 1; index < argc; ++index) {
 				const std::string option = argv[index];
@@ -614,11 +753,22 @@ namespace benchrunner {
 					currentLabel = value();
 				else if (option == "--demo-advisory")
 					limits.Advisory = true;
-				else if (option == "--demo-limit-percent" || option == "--demo-byte-floor" ||
-						 option == "--demo-byte-per-frame-floor" ||
-						 option == "--demo-byte-per-second-floor" || option == "--demo-ms-per-second-floor" ||
-						 option == "--demo-allocation-per-second-floor" || option == "--demo-ms-floor" ||
-						 option == "--demo-allocation-floor") {
+				else if (option == "--demo-cost-basis") {
+					const std::string basis = value();
+					if (basis == "wall")
+						costBasis = DemoCostBasis::Wall;
+					else if (basis == "iteration")
+						costBasis = DemoCostBasis::Iteration;
+					else
+						throw std::runtime_error(
+							"invalid demo cost basis: " + basis + " (expected wall or iteration)"
+						);
+				} else if (option == "--demo-limit-percent" || option == "--demo-byte-floor" ||
+						   option == "--demo-byte-per-frame-floor" ||
+						   option == "--demo-byte-per-second-floor" ||
+						   option == "--demo-ms-per-second-floor" ||
+						   option == "--demo-allocation-per-second-floor" || option == "--demo-ms-floor" ||
+						   option == "--demo-allocation-floor") {
 					const std::string text = value();
 					size_t consumed = 0;
 					const double number = std::stod(text, &consumed);
@@ -643,6 +793,11 @@ namespace benchrunner {
 				} else
 					throw std::runtime_error("unknown demo report argument: " + option);
 			}
+			if (costBasis == DemoCostBasis::Iteration && !comparing)
+				throw std::runtime_error(
+					"iteration cost basis requires --demo-compare on raw collections; aggregate-only tables "
+					"cannot verify per-sample counters"
+				);
 			const DemoCollection baseline = DemoLoadBaseline(baselineDirectory);
 			if (baselineLabel.empty()) baselineLabel = baseline.Manifest.value("label", "Baseline");
 			std::ostringstream document;
@@ -655,10 +810,17 @@ namespace benchrunner {
 				   "including nested waits. "
 				<< "replication includes Network category work. GPU memory is logical payload, not "
 				   "driver residency. "
-				<< "Timings are gated per iteration and per wall-clock second. Allocation churn is gated per "
-				   "wall-clock "
-				   "second. Per-iteration allocation values, raw "
-				   "totals and throughput are diagnostic. External peak process RSS covers the whole "
+				<< (costBasis == DemoCostBasis::Wall ? "Cost basis: wall-clock capacity. Timings are gated "
+													   "per iteration and per wall-clock second. "
+													   "Allocation churn is gated per wall-clock second. "
+													   "Per-iteration allocation values, raw totals "
+													   "and throughput are diagnostic. "
+													 : "Cost basis: iteration efficiency. Timing per frame "
+													   "and known churn per frame are gated. "
+													   "Known derived timing and churn rates per second "
+													   "remain visible as diagnostics. Unknown "
+													   "per-second cost metrics remain strict. ")
+				<< "External peak process RSS covers the whole "
 				   "process lifetime, "
 				   "including startup and shutdown. cpu_peak_bytes is sampled at frame boundaries; "
 				   "cpu_process_peak_bytes and GPU peaks cover process lifetime. CPU timings cover the "
@@ -687,6 +849,9 @@ namespace benchrunner {
 										baseline.Manifest.at("settings") == current.Manifest.at("settings");
 				document
 					<< "## " << DemoCell(baselineLabel) << " vs " << DemoCell(currentLabel) << "\n\n"
+					<< "Cost basis: "
+					<< (costBasis == DemoCostBasis::Wall ? "wall-clock capacity" : "iteration efficiency")
+					<< ". "
 					<< "Ceiling = baseline mean + max(" << DemoFormat(limits.Percent)
 					<< "% of baseline, absolute floor). "
 					<< "Floors: " << DemoFormat(limits.Bytes) << " bytes (memory), "
@@ -705,7 +870,8 @@ namespace benchrunner {
 				if (limits.Advisory)
 					document << "Advisory mode: cost ceilings do not determine the process exit status. "
 								"Invalid or missing measurements still fail.\n\n";
-				passed = DemoCompareTable(document, baseline, current, limits, &coverageValid) && compatible;
+				passed = DemoCompareTable(document, baseline, current, limits, &coverageValid, costBasis) &&
+						 compatible;
 				DemoMetadata(document, current, currentLabel);
 				DemoBaselineTable(document, current);
 			}

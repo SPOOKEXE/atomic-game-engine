@@ -1,3 +1,5 @@
+#include "WorldSystems.hpp"
+
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/Clock.hpp>
@@ -7,8 +9,6 @@
 #include <engine/world/World.hpp>
 
 #include <catch2/catch_test_macros.hpp>
-
-#include <client/WorldSystems.hpp>
 
 TEST_SUITE_ID("client.world-systems")
 

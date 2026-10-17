@@ -236,6 +236,20 @@ namespace engine::ecs {
 	// @threadsafe
 	class Schemas {
 	  public:
+		// Bounds a schema description before receiver allocation or registration.
+		static constexpr size_t MAXIMUM_DEFINITION_BYTES = 65536;
+		// Bounds the fields carried by one schema description.
+		static constexpr size_t MAXIMUM_DEFINITION_FIELDS = 256;
+		// Bounds component, field, enum and representation names in descriptions.
+		static constexpr size_t MAXIMUM_DEFINITION_NAME_BYTES = 256;
+
+		// Changes when component definitions or component tags change.
+		static uint64_t Revision();
+		// Writes one bounded definition using stable field and type spellings.
+		static bool WriteDefinition(ComponentId component, core::ByteWriter &writer);
+		// Validates the complete definition before registering any component type.
+		static bool ReadDefinition(core::Name component, core::ByteReader &reader);
+
 		// Why a registration was refused.
 		//
 		// Returned rather than aborted, which is the one place this diverges

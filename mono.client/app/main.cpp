@@ -73,7 +73,8 @@ int main(int argc, char **argv) {
 	arguments.Flag("stats", "Open the F3 statistics panel at startup");
 	arguments.Flag("net", "Open the F4 network panel at startup (needs --connect)");
 	arguments.Flag("graph", "Open the F5 frame graph at startup");
-	arguments.Flag("uncapped", "Present without waiting for vblank");
+	arguments.Flag("uncapped", "Present without waiting for vblank (default); overrides configured VSync");
+	arguments.Flag("vsync", "Wait for vblank instead of uncapped presentation; ignores --max-fps");
 	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
 	arguments.Value(
 		"texture-budget-mib",
@@ -90,7 +91,7 @@ int main(int argc, char **argv) {
 		"presentation-world", "NAME", "Serve one game world's portal images on an inherited driver link"
 	);
 	arguments.Value("presentation-session", "N", "Fresh driver-assigned session for the presentation host");
-	arguments.Value("max-fps", "N", "Cap presentation FPS. Needs --uncapped; 0 presents every update");
+	arguments.Value("max-fps", "N", "Cap presentation FPS (default 0, no cap). Ignored with --vsync");
 	arguments.Flag("verbose", "Log at trace level");
 	// Value-taking and absent by default. The conventional number remains in
 	// one constant, while any valid port supplied here is used as written.
@@ -222,6 +223,10 @@ int main(int argc, char **argv) {
 		std::fputs(arguments.Describe().c_str(), stdout);
 		return 0;
 	}
+	if (arguments.Has("uncapped") && arguments.Has("vsync")) {
+		std::fputs("--uncapped and --vsync cannot be combined.\n", stderr);
+		return 2;
+	}
 
 	// **`--verbose` before the settings, so it reaches the settings' own
 	// complaints.** It is the one option that has to act before anything can be
@@ -294,13 +299,12 @@ int main(int argc, char **argv) {
 	options.SurfaceBounces =
 		static_cast<int>(arguments.GetInteger("surface-bounces", options.SurfaceBounces));
 
-	// **`|=` rather than `=`, because these four are bare flags.** An absent
-	// `--stats` is silence and not "off", so assigning would make a command line
-	// with no panel flags on it overrule a config file that asked for one.
+	// An absent panel flag preserves a config file that asked for the panel.
 	options.ShowStatistics = options.ShowStatistics || arguments.Has("stats");
 	options.ShowNetwork = options.ShowNetwork || arguments.Has("net");
 	options.ShowFrameGraph = options.ShowFrameGraph || arguments.Has("graph");
-	options.Uncapped = options.Uncapped || arguments.Has("uncapped");
+	if (arguments.Has("uncapped")) options.Uncapped = true;
+	if (arguments.Has("vsync")) options.Uncapped = false;
 	options.FramesInFlight =
 		static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));
 	if (arguments.Has("texture-budget-mib")) {

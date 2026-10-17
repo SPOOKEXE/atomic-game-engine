@@ -163,7 +163,9 @@ namespace engine::script {
 			std::vector<TweenGoal> goals = ReadGoals(call, store, target);
 
 			std::vector<Entity> dropped;
-			const Entity tween = call.Tweens().Create(store, target, info, std::move(goals), dropped);
+			const bool clientExecution = call.Role().Client && !call.Role().Server;
+			const Entity tween =
+				call.Tweens().Create(store, target, info, std::move(goals), dropped, clientExecution);
 
 			// **The connections go before the row does.** Only a VM knows what a
 			// `CallbackRef` means, which is why the release is a request on the

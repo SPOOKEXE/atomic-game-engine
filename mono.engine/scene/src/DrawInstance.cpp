@@ -122,13 +122,12 @@ namespace engine::scene {
 			// in below. Keeping both would have signed one fact twice.
 			d = MixSignature(d, Pair(instance.Mesh.Id(), 0u));
 
-			// `Surface` is signed and -1 means "no surface", so it is widened
-			// through `uint8_t` exactly as it was before: sign-extending it
-			// would fold in twenty-four bits that say nothing.
+			// Preserve every slot bit, including the negative no-surface sentinel.
+			// Truncating to a byte aliases distinct captures in the retained image key.
 			a = MixSignature(
 				a,
 				Pair(
-					static_cast<uint8_t>(instance.Surface),
+					static_cast<uint16_t>(instance.Surface),
 					(instance.CastShadow ? 1u : 0u) | (instance.SurfaceIsPortal ? 2u : 0u)
 				)
 			);
@@ -384,8 +383,8 @@ namespace engine::scene {
 		// same reason: an order may name an index past the end of the list it
 		// was built for, and the four copies of that guard which had already
 		// drifted are why these predicates live in one file.
-		int8_t SurfaceOf(std::span<const DrawInstance> instances, uint32_t index) {
-			return index < instances.size() ? instances[index].Surface : static_cast<int8_t>(-1);
+		int16_t SurfaceOf(std::span<const DrawInstance> instances, uint32_t index) {
+			return index < instances.size() ? instances[index].Surface : int16_t{-1};
 		}
 
 		// Groups a run of mirrors by the surface each one shows.
@@ -427,7 +426,7 @@ namespace engine::scene {
 		) {
 			size_t start = 0;
 			while (start < order.size()) {
-				const int8_t surface = SurfaceOf(instances, order[start]);
+				const int16_t surface = SurfaceOf(instances, order[start]);
 				size_t end = start;
 				while (end < order.size() && SurfaceOf(instances, order[end]) == surface) {
 					end++;
@@ -436,7 +435,7 @@ namespace engine::scene {
 				// Negative cannot appear - the caller passes only the mirror run
 				// - but an index past the cap can, and it is dropped here rather
 				// than written past the end of the array.
-				if (surface >= 0 && static_cast<uint8_t>(surface) < MAX_SURFACES) {
+				if (surface >= 0 && static_cast<uint16_t>(surface) < MAX_SURFACES) {
 					SurfaceRun &run = out[surface];
 					const auto first = base + static_cast<uint32_t>(start);
 					const auto count = static_cast<uint32_t>(end - start);

@@ -5,6 +5,8 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Instance.hpp>
+#include <engine/ecs/Schema.hpp>
 #include <engine/net/Packet.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/replication/Authority.hpp>
@@ -147,7 +149,7 @@ namespace engine::replication {
 		}
 
 		for (const uint64_t entity : entities) {
-			Rows.push_back(Row{entity, Outstanding{}});
+			Rows.push_back(Row{entity, Outstanding{.Initial = true}});
 		}
 
 		// **Stable, and that is what keeps an existing row.** Everything already
@@ -270,12 +272,17 @@ namespace engine::replication {
 			const size_t slot = static_cast<size_t>(std::distance(Components.begin(), at));
 			Detection[slot] = detection;
 			Resources[slot] = resource;
+			Automatic[slot] = false;
+			Enabled[slot] = true;
 			return;
 		}
 
 		Components.push_back(component);
 		Detection.push_back(detection);
 		Resources.push_back(resource);
+		Automatic.push_back(false);
+		Enabled.push_back(true);
+		if (ecs::Schemas::Find(component) != nullptr) ++SchemaRevision;
 		Suppressors.emplace_back();
 		Signatures.emplace_back();
 	}
@@ -294,7 +301,8 @@ namespace engine::replication {
 	}
 
 	bool Authority::Replicated(core::Name component) const {
-		return std::find(Components.begin(), Components.end(), component) != Components.end();
+		const auto at = std::find(Components.begin(), Components.end(), component);
+		return at != Components.end() && Enabled[static_cast<size_t>(at - Components.begin())];
 	}
 
 	ChangeDetection Authority::DetectionFor(core::Name component) const {
@@ -397,6 +405,97 @@ namespace engine::replication {
 		return Reach(client) != nullptr;
 	}
 
+	bool Authority::HasPendingSnapshots() const {
+		return std::any_of(Clients.begin(), Clients.end(), [&](const Client &client) {
+			return client.Live && (Owed(client) != 0 || (client.Known.empty() && client.Applied == 0));
+		});
+	}
+
+	bool Authority::Interested(ClientId client, ecs::Entity entity, const ecs::Store &store) const {
+		if (!Reach(client) || !store.Alive(entity)) return false;
+		if (InterestBatch) {
+			uint8_t accepted = 0;
+			InterestBatch(client, store, {&entity, 1}, {&accepted, 1});
+			return accepted != 0;
+		}
+		return !Interest || Interest(client, entity, store);
+	}
+
+	void Authority::DiscoverSchemas() {
+		const uint64_t revision = ecs::Schemas::Revision();
+		if (revision == ObservedSchemaRevision) return;
+		ObservedSchemaRevision = revision;
+		std::vector<core::Name> tagged;
+		for (const ecs::ComponentId id : ecs::Schemas::All()) {
+			const auto tags = ecs::Schemas::Tags(id);
+			if (std::find(tags.begin(), tags.end(), "replicated") == tags.end()) continue;
+			const core::Name name = ecs::Components::Describe(id).Name;
+			tagged.push_back(name);
+			if (std::find(Components.begin(), Components.end(), name) != Components.end()) continue;
+			Replicate(name, ChangeDetection::Observed);
+			Automatic.back() = true;
+		}
+		for (size_t slot = 0; slot < Components.size(); ++slot) {
+			if (!Automatic[slot]) continue;
+			const bool enabled = std::find(tagged.begin(), tagged.end(), Components[slot]) != tagged.end();
+			if (Enabled[slot] != enabled) {
+				Enabled[slot] = enabled;
+				++SchemaRevision;
+			}
+		}
+	}
+
+	void
+	Authority::StageSchemas(Client &client, const ecs::Store &store, std::span<const ecs::Entity> visible) {
+		client.Schemas.clear();
+		client.SchemaIndex = 0;
+		client.ActiveSchemas.clear();
+		for (const Crossing &crossing : Crossings) {
+			if (!crossing.Sendable || !crossing.Id.IsValid() || crossing.Description == nullptr) continue;
+			const bool carried = std::any_of(visible.begin(), visible.end(), [&](ecs::Entity entity) {
+				return store.HasComponent(entity, crossing.Id);
+			});
+			if (!carried && !(crossing.Resource && store.ResourceById(crossing.Id) != nullptr)) continue;
+			client.ActiveSchemas.insert(crossing.Descriptor->Name);
+			if (client.KnownSchemas.contains(crossing.Descriptor->Name)) continue;
+			client.KnownSchemas.insert(crossing.Descriptor->Name);
+			client.Schemas.push_back({crossing.Descriptor->Name, {crossing.Definition, 0, 0}});
+		}
+	}
+
+	void Authority::StreamSchemas(Client &client) {
+		while (client.SchemaIndex < client.Schemas.size()) {
+			auto &schema = client.Schemas[client.SchemaIndex];
+			auto &definition = schema.Definition;
+			if (definition.Sent == definition.Bytes.size()) {
+				++client.SchemaIndex;
+				continue;
+			}
+			const size_t overhead = 19 + schema.Component.Text().size();
+			const size_t room = std::min(Settings_.ChunkBytes, net::Packet::MAXIMUM_MESSAGE_BYTES - overhead);
+			for (size_t index = 0;
+				 index < Settings_.ChunksPerTick && definition.Sent < definition.Bytes.size();
+				 ++index) {
+				const size_t take = std::min(room, definition.Bytes.size() - definition.Sent);
+				SchemaChunk chunk;
+				chunk.Component = schema.Component;
+				chunk.TotalBytes = static_cast<uint32_t>(definition.Bytes.size());
+				chunk.Offset = static_cast<uint32_t>(definition.Sent);
+				chunk.Bytes.assign(
+					definition.Bytes.begin() + static_cast<ptrdiff_t>(definition.Sent),
+					definition.Bytes.begin() + static_cast<ptrdiff_t>(definition.Sent + take)
+				);
+				Carried carried;
+				carried.SchemaIndex = client.SchemaIndex;
+				carried.SchemaOffset = definition.Sent;
+				client.Outgoing.push_back(Encode(chunk));
+				client.Carried_.push_back(carried);
+				definition.Sent += take;
+			}
+			return;
+		}
+	}
+
 	void Authority::Survey(ecs::Store &store) {
 		ENGINE_PROFILE_CAT("Authority::Survey", core::ProfileCategory::Network);
 		PrepareSurvey(store);
@@ -405,6 +504,7 @@ namespace engine::replication {
 	}
 
 	void Authority::PrepareSurvey(ecs::Store &store) {
+		DiscoverSchemas();
 
 		{
 			ENGINE_PROFILE_CAT("Authority::ResolveComponents", core::ProfileCategory::Network);
@@ -437,12 +537,14 @@ namespace engine::replication {
 				// `Crossing`, so `Changed` keeps the capacity it grew last
 				// tick.
 				Crossing &crossing = Crossings[slot];
+				const ecs::ComponentId previousId = crossing.Id;
 				crossing.Id = ecs::ComponentId{};
 				crossing.Descriptor = nullptr;
 				crossing.Sendable = false;
 				crossing.Resource = false;
 				crossing.Changed.clear();
 
+				if (!Enabled[slot]) continue;
 				const core::Name name = Components[slot];
 				const ecs::ComponentId id = ecs::Components::Find(name);
 				if (!id.IsValid()) {
@@ -452,7 +554,18 @@ namespace engine::replication {
 
 				crossing.Id = id;
 				crossing.Descriptor = &ecs::Components::Describe(id);
+				if (id != previousId) crossing.Description = ecs::Schemas::Of(id);
 				crossing.Resource = Resources[slot];
+				if (crossing.Description != nullptr && crossing.Definition.empty()) {
+					core::ByteWriter definition;
+					if (crossing.Descriptor->Name.Text().size() >
+							ecs::Schemas::MAXIMUM_DEFINITION_NAME_BYTES ||
+						!ecs::Schemas::WriteDefinition(id, definition)) {
+						ENGINE_WARN("replication: schema '{}' exceeds the description limits.", name.Text());
+						continue;
+					}
+					crossing.Definition = definition.TakeBytes();
+				}
 
 				// **The two guards a delta row has to pass, asked about the
 				// component rather than about a row and asked once a tick.** A
@@ -465,7 +578,8 @@ namespace engine::replication {
 				if (descriptor.Size > 0 && !descriptor.Serialisable) {
 					ENGINE_WARN("replication: '{}' has no serialisation and cannot cross.", name.Text());
 				} else if (const size_t crossingBytes = WireBytes(descriptor);
-						   !crossing.Resource && !CanStageOversize(descriptor) &&
+						   crossing.Description == nullptr && !crossing.Resource &&
+						   !CanStageOversize(descriptor) &&
 						   MESSAGE_OVERHEAD + ENTRY_OVERHEAD + sizeof(uint64_t) + crossingBytes >
 							   Settings_.ChunkBytes) {
 					ENGINE_WARN(
@@ -497,7 +611,11 @@ namespace engine::replication {
 				// archetype with somewhere to put the bits, which happens once, on
 				// the tick the first client makes this run.
 				if (Detection[slot] == ChangeDetection::Observed) {
-					store.ObserveComponent(id);
+					// Schemas are process-wide. An opt-in type from another world
+					// must not change this world's observation metadata or saved bytes.
+					if (!Automatic[slot] ||
+						store.CountMatching(std::span<const ecs::ComponentId>(&id, 1)) > 0)
+						store.ObserveComponent(id);
 				}
 			}
 
@@ -543,11 +661,19 @@ namespace engine::replication {
 			// replaced. A table carries an entity once however many of the components
 			// it holds.
 			Bearing.clear();
-			store.EachMatchingAny(Resolved, [this](const ecs::Entity *entities, size_t rows) {
-				for (size_t row = 0; row < rows; row++) {
-					Bearing.push_back(entities[row].Id);
+			// With no locality roots, every ancestry walk would prove the same absence.
+			const bool hasLocalInstances = ecs::HasClientLocalInstances(store);
+			store.EachMatchingAny(
+				Resolved, [this, &store, hasLocalInstances](const ecs::Entity *entities, size_t rows) {
+					for (size_t row = 0; row < rows; row++) {
+						const ecs::Entity entity = entities[row];
+						if (ecs::Store::IsPredicted(entity) ||
+							(hasLocalInstances && ecs::IsClientLocalInstance(store, entity)))
+							continue;
+						Bearing.push_back(entity.Id);
+					}
 				}
-			});
+			);
 
 			// Tables are filled as entities arrive in them, so this comes out in
 			// table order and not id order. `Prioritise` and `Refine` index into it
@@ -688,7 +814,7 @@ namespace engine::replication {
 		ResignWork.clear();
 
 		for (size_t slot = 0; slot < Components.size(); slot++) {
-			if (Detection[slot] != ChangeDetection::Signature) {
+			if (!Enabled[slot] || Detection[slot] != ChangeDetection::Signature) {
 				continue;
 			}
 
@@ -802,6 +928,13 @@ namespace engine::replication {
 	}
 
 	size_t Authority::Owed(const Client &client) {
+		if (client.SchemaIndex < client.Schemas.size()) {
+			size_t bytes = 0;
+			for (size_t index = client.SchemaIndex; index < client.Schemas.size(); ++index)
+				bytes +=
+					client.Schemas[index].Definition.Bytes.size() - client.Schemas[index].Definition.Sent;
+			if (bytes > 0) return bytes;
+		}
 		size_t owed = 0;
 		for (const Staged &staged : client.Snapshots) {
 			owed += staged.Bytes.size() - staged.Sent;
@@ -816,8 +949,8 @@ namespace engine::replication {
 		std::optional<std::span<const ecs::Entity>> resourceOwners,
 		std::span<std::optional<uint64_t>> resourceHashes
 	) const {
-		std::fill(resourceHashes.begin(), resourceHashes.end(), std::nullopt);
 		ecs::Store scratch("replica");
+		std::fill(resourceHashes.begin(), resourceHashes.end(), std::nullopt);
 
 		for (const ecs::Entity entity : entities) {
 			scratch.CreateAt(entity);
@@ -832,7 +965,7 @@ namespace engine::replication {
 		// this process does not register, so this walks its answers rather than
 		// asking the registry again per component per join.
 		for (const Crossing &crossing : Crossings) {
-			if (!crossing.Id.IsValid()) {
+			if (!crossing.Id.IsValid() || (crossing.Description != nullptr && crossing.Definition.empty())) {
 				continue;
 			}
 
@@ -847,12 +980,18 @@ namespace engine::replication {
 					continue;
 				}
 
-				// Full snapshots rebuild child indexes from visible parent links.
-				// Overlay slices retain external parents for the receiver to relink.
+				// **The tree is built, not copied, for `WriteComponents`'
+				// reason.** `ecs.Hierarchy` crosses as a parent handle alone, so
+				// a snapshot that copied the component would carry a node with
+				// no child list and the far side would load a world whose
+				// parents have no children. Every entity in `entities` was
+				// created above before any component was set, so the parent of
+				// anything in this set is already here to hang it from.
 				if (id == hierarchyId) {
 					const auto *node = static_cast<const ecs::Hierarchy *>(value);
 					if (overlay) {
-						// The receiver already holds parents outside this entity slice.
+						// A slice names the live receiver's parent, which may be absent
+						// here. The receiver rebuilds links without replacing child indexes.
 						ecs::Hierarchy links{};
 						links.Parent = node->Parent;
 						scratch.SetComponent(entity, id, &links);
@@ -894,7 +1033,8 @@ namespace engine::replication {
 			}
 		}
 		if (overlay) {
-			// Retain selected siblings' authored order without naming omitted rows.
+			// Preserve selected siblings' authored order, including gaps occupied
+			// by omitted rows. Each live parent is walked once per slice.
 			std::unordered_set<ecs::Entity> parents;
 			for (const ecs::Entity entity : entities) {
 				const auto *node = scratch.Get<ecs::Hierarchy>(entity);
@@ -912,14 +1052,15 @@ namespace engine::replication {
 			}
 		}
 
-		// An entity slice cannot replace a world resource with a partial owner set.
-		// Resource overlays carry the complete current visibility selection.
+		// Entity slices omit resources: replacing an attribute table selected
+		// from one oversized script would erase every other owner's attributes.
+		// Resource overlays select the complete current visible owner set.
 		for (const Crossing &crossing : Crossings) {
 			if (overlay && !resourceOwners.has_value()) continue;
 			if (!crossing.Sendable || !crossing.Resource) continue;
 			const void *value = store.ResourceById(crossing.Id);
 			if (value == nullptr) continue;
-			if (crossing.Descriptor->Name == core::Name("ecs.AttributeTable")) {
+			if (crossing.Id == ecs::Components::Assigned<ecs::AttributeTable>()) {
 				const auto selected = ecs::SelectAttributes(store, resourceOwners.value_or(entities));
 				scratch.SetResource(selected);
 			} else
@@ -930,7 +1071,8 @@ namespace engine::replication {
 		if (!scratch.Save(writer)) {
 			return {};
 		}
-		// Remember the captured value, which can differ from the value queued a tick earlier.
+		// Queueing and capture happen on different ticks. Remember the actual
+		// captured resource, which may have changed since its oversized offer.
 		for (size_t slot = 0; slot < resourceHashes.size(); ++slot) {
 			const Crossing &crossing = Crossings[slot];
 			if (!crossing.Sendable || !crossing.Resource) continue;
@@ -944,6 +1086,8 @@ namespace engine::replication {
 	}
 
 	void Authority::BeginSnapshot(Lane &lane, Client &client, ecs::Store &store, uint64_t tick) {
+		StageSchemas(client, store, lane.Visible);
+		client.SchemaRevision = SchemaRevision;
 		// **Both blobs are taken at one tick, from one world, in one call.** The
 		// alternative - build the world's only once the preface has gone - would
 		// give the two halves of a join two different ticks and a window in
@@ -978,6 +1122,8 @@ namespace engine::replication {
 			// blob has just been written from, so a failure here is that
 			// failure, and a join that arrives in one blob is better than one
 			// that does not arrive.
+			// Preface scripts may execute before the world stage. Their attributes
+			// must arrive with their code, without trimming the resource to this slice.
 			preface.Bytes = Capture(store, Preceding, true, lane.Visible);
 			preface.Tick = tick;
 		}
@@ -1031,7 +1177,7 @@ namespace engine::replication {
 		);
 
 		const bool resources =
-			std::binary_search(client.Oversize.begin(), client.Oversize.end(), ecs::NULL_ENTITY.Id);
+			std::binary_search(client.Oversize.begin(), client.Oversize.end(), uint64_t{0});
 		Preceding.clear();
 		for (const uint64_t named : client.Oversize) {
 			const ecs::Entity entity{named};
@@ -1223,12 +1369,21 @@ namespace engine::replication {
 			if (urgentFirst != urgentSecond) {
 				return urgentFirst;
 			}
+			// Older updates retain their deadline even under continuous creation.
+			if (urgentFirst && waitedFirst != waitedSecond) return waitedFirst > waitedSecond;
+			if (first.Initial != second.Initial) return first.Initial;
 
 			if (!urgentFirst && first.Hint != second.Hint) {
 				return first.Hint > second.Hint;
 			}
 			if (waitedFirst != waitedSecond) {
 				return waitedFirst > waitedSecond;
+			}
+
+			// Initial columns share packet headers. Interleaving every component of
+			// each new instance repeatedly spends the same entry overhead.
+			if (first.Initial && first.Entry != second.Entry) {
+				return first.Entry < second.Entry;
 			}
 
 			if (first.Entity.Id != second.Entity.Id) {
@@ -1435,6 +1590,7 @@ namespace engine::replication {
 
 				bytes += encoded.size();
 				messages++;
+				const size_t firstValue = placed.Values;
 				placed.Values += rows;
 
 				emittedAt = client.Outgoing.size();
@@ -1442,6 +1598,14 @@ namespace engine::replication {
 
 				Carried carried;
 				carried.Values = true;
+				carried.ValueFirst = static_cast<uint32_t>(client.ValueEdits.size());
+				carried.ValueCount = static_cast<uint32_t>(rows);
+				for (size_t position = firstValue; position < placed.Values; ++position) {
+					const Candidate &candidate = lane.Candidates[lane.Order[position]];
+					client.ValueEdits.push_back(
+						{lane.SourceSlot[candidate.Entry], candidate.Entity.Id, candidate.WaitingSince}
+					);
+				}
 				client.Carried_.push_back(carried);
 				emitted = std::move(piece);
 			}
@@ -1810,6 +1974,8 @@ namespace engine::replication {
 			// In bulk, because a joining client's `Appearing` is the whole world
 			// and inserting that into a sorted list one entity at a time moves
 			// the tail once per entity.
+			// Resource recovery uses NULL_ENTITY. Seeding newly visible entities
+			// here would leave unsendable entries excluding those rows from audits.
 			if (!crossing.Resource) {
 				const Lane::Timed timed(lane, Lane::Phase::PrepareOutstanding);
 				unconfirmed.EmplaceAll(lane.Appearing);
@@ -1896,12 +2062,12 @@ namespace engine::replication {
 					if (crossing.Resource) {
 						const auto hash = HashBytes(values.Bytes().data() + at, wrote);
 						if (client.OversizeResourceHashes[slot] == hash) return;
+						client.OversizeResourceHashes[slot] = hash;
 					}
 					client.Oversize.push_back(entity.Id);
 					lane.Stats.Oversized++;
 					return;
 				}
-
 				if (crossing.Resource) client.OversizeResourceHashes[slot].reset();
 
 				lane.Candidates.push_back(
@@ -1912,7 +2078,8 @@ namespace engine::replication {
 						entity,
 						pending.WaitingSince,
 						NOWHERE,
-						0.0f
+						0.0f,
+						pending.Initial
 					}
 				);
 				component.Entities.push_back(entity);
@@ -1920,10 +2087,9 @@ namespace engine::replication {
 
 			if (crossing.Resource) {
 				// Resources are authoritative world state. Sending the current copy
-				// each tick avoids a second dirty tracker for data outside ECS rows.
-				// Unchanged oversized values reuse their captured bulk stream.
+				// every tick avoids a second dirty tracker for data outside ECS rows.
 				if (const void *value = store.ResourceById(id)) {
-					if (name == core::Name("ecs.AttributeTable")) {
+					if (id == ecs::Components::Assigned<ecs::AttributeTable>()) {
 						const auto selected = ecs::SelectAttributes(store, lane.Visible);
 						offer(ecs::NULL_ENTITY, &selected);
 					} else
@@ -2216,6 +2382,14 @@ namespace engine::replication {
 				lane.Order[position] = static_cast<uint32_t>(position);
 			}
 
+			// A transport can admit fewer messages than the authority budget.
+			// Preserved refusal ages must order that next pass even if Pack fits it all.
+			const bool prioritised = client.TransportRefusedValues;
+			if (prioritised) {
+				Prioritise(lane, handle, tick);
+				client.TransportRefusedValues = false;
+			}
+
 			Placement placed;
 			{
 				const Lane::Timed timed(lane, Lane::Phase::Pack);
@@ -2226,8 +2400,9 @@ namespace engine::replication {
 				client.Outgoing.resize(structureMessages);
 				client.Carried_.resize(structureMessages);
 				client.Edits.resize(structureEdits);
+				client.ValueEdits.clear();
 
-				Prioritise(lane, handle, tick);
+				if (!prioritised) Prioritise(lane, handle, tick);
 
 				const Lane::Timed repacked(lane, Lane::Phase::Pack);
 				placed = Pack(lane, client, delta, Settings_.MessagesPerTick);
@@ -2433,6 +2608,7 @@ namespace engine::replication {
 				client.Outgoing.clear();
 				client.Carried_.clear();
 				client.Edits.clear();
+				client.ValueEdits.clear();
 
 				// Released a tick after the cursor reached the end, because
 				// `Unsent` is called after `Publish` has returned and may put it
@@ -2444,18 +2620,57 @@ namespace engine::replication {
 						staged.Sent = 0;
 					}
 				}
+				for (auto &schema : client.Schemas) {
+					auto &definition = schema.Definition;
+					if (!definition.Bytes.empty() && definition.Sent == definition.Bytes.size()) {
+						definition.Bytes.clear();
+						definition.Bytes.shrink_to_fit();
+						definition.Sent = 0;
+					}
+				}
 
 				const bool adrift = Owed(client) == 0 && client.Applied > 0 &&
 									client.Streamed > client.Applied &&
 									tick > client.Applied + Settings_.ResnapshotAfterTicks;
 				const bool joining = Owed(client) == 0 && client.Known.empty() && client.Applied == 0;
+				bool schemasChanged = false;
+				if (Owed(client) == 0 && client.SchemaRevision != SchemaRevision) {
+					client.SchemaRevision = SchemaRevision;
+					for (size_t slot = 0; slot < Components.size(); ++slot) {
+						if (Automatic[slot] && !Enabled[slot] &&
+							client.ActiveSchemas.contains(Components[slot]))
+							schemasChanged = true;
+					}
+				}
+				if (Owed(client) == 0 && !schemasChanged) {
+					const bool unknown =
+						std::any_of(Crossings.begin(), Crossings.end(), [&](const Crossing &crossing) {
+							return crossing.Sendable && crossing.Description != nullptr &&
+								   !client.ActiveSchemas.contains(crossing.Descriptor->Name);
+						});
+					if (unknown) {
+						SelectVisible(owner, handle, store);
+						for (const Crossing &crossing : Crossings) {
+							if (!crossing.Sendable || crossing.Description == nullptr ||
+								client.ActiveSchemas.contains(crossing.Descriptor->Name))
+								continue;
+							if ((crossing.Resource && store.ResourceById(crossing.Id) != nullptr) ||
+								std::any_of(
+									owner.Visible.begin(), owner.Visible.end(), [&](ecs::Entity entity) {
+										return store.HasComponent(entity, crossing.Id);
+									}
+								))
+								schemasChanged = true;
+						}
+					}
+				}
 
 				// A fresh world snapshot includes current changes. An older blob or a
 				// new oversized slice needs recovery for changes outside its captured rows.
 				if (Owed(client) > 0 || (!joining && !adrift && !client.Oversize.empty()))
 					RetainStreamingChanges(store, client, tick);
 
-				if (joining || adrift) {
+				if (joining || adrift || schemasChanged) {
 					// **Bounded, and the bound is why a server can be joined at
 					// all.** See `AuthoritySettings::JoinsPerTick`: a client
 					// turned away here is sent nothing this tick and is still
@@ -2500,7 +2715,10 @@ namespace engine::replication {
 						tick,
 						Owed(client)
 					);
-					StreamSnapshot(client);
+					if (client.SchemaIndex < client.Schemas.size())
+						StreamSchemas(client);
+					else
+						StreamSnapshot(client);
 
 					for (const std::vector<std::byte> &message : client.Outgoing) {
 						Stats_.Bytes += message.size();
@@ -2717,8 +2935,23 @@ namespace engine::replication {
 			});
 		}
 
+		if (carried.SchemaIndex != NOWHERE && carried.SchemaIndex < found->Schemas.size()) {
+			found->SchemaIndex = std::min(found->SchemaIndex, carried.SchemaIndex);
+			auto &definition = found->Schemas[carried.SchemaIndex].Definition;
+			definition.Sent = std::min(definition.Sent, carried.SchemaOffset);
+		}
+
 		if (carried.Values) {
+			found->TransportRefusedValues = true;
 			found->Streamed = found->StreamedBefore;
+			// Packing is not transport admission. A refused row keeps its age
+			// so repeated backpressure cannot permanently favour the same prefix.
+			for (uint32_t at = carried.ValueFirst; at < carried.ValueFirst + carried.ValueCount; ++at) {
+				const ValueEdit &edit = found->ValueEdits[at];
+				Outstanding &pending = found->Unconfirmed[edit.Slot][edit.Entity];
+				pending.SentAt = 0;
+				pending.WaitingSince = edit.WaitingSince;
+			}
 		}
 
 		// A question that was never asked may not be answered. Without this a
@@ -2892,6 +3125,7 @@ namespace engine::replication {
 			Stats_.Refused++;
 			return finish(false);
 
+		case MessageKind::Schemas:
 		case MessageKind::SnapshotChunk:
 		case MessageKind::Structure:
 			// **Still refused, and the asymmetry is the point.** A delta is a

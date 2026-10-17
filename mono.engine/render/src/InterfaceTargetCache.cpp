@@ -164,21 +164,9 @@ namespace engine::render {
 		}
 	}
 
-	std::vector<InterfaceTargetComposite> InterfaceTargetCache::Composite(
-		const gui::DrawList &list, uint64_t viewer, uint32_t width, uint32_t height
-	) const {
-		std::vector<InterfaceTargetComposite> output;
-		output.reserve(list.CollectorRanges.size());
-		for (const gui::CollectorRange &range : list.CollectorRanges) {
-			const InterfaceTargetKey key{
-				range.Collector, viewer, width, height, range.First, range.Count, range.Spatial
-			};
-			const Entry *entry = Find(key);
-			if (entry != nullptr && entry->Ready && entry->Target != nullptr) {
-				output.push_back({entry->Target, range});
-			}
-		}
-		return output;
+	void *InterfaceTargetCache::ReadyTarget(const InterfaceTargetKey &key) const {
+		const Entry *entry = Find(key);
+		return entry != nullptr && entry->Ready && entry->Target != nullptr ? entry->Target : nullptr;
 	}
 
 	void *InterfaceTargetCache::Target(const InterfaceTargetKey &key) const {

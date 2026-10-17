@@ -35,6 +35,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Enums.hpp>
 
+#include <functional>
 #include <string>
 #include <string_view>
 
@@ -79,7 +80,14 @@ namespace engine::ecs {
 	// @param reader The snapshot to apply.
 	// @param mode   What to do with entities the snapshot does not mention.
 	// @param clock  Whether to restore the incoming clock or retain local time.
+	// @param resourceAllow Optional filter for validated incoming resources.
 	// @return `false` when the snapshot could not be read, in which case
 	//         nothing was touched.
-	bool ApplySnapshot(StoreState &state, core::ByteReader &reader, ApplyMode mode, ApplyClock clock);
+	bool ApplySnapshot(
+		StoreState &state,
+		core::ByteReader &reader,
+		ApplyMode mode,
+		ApplyClock clock,
+		const std::function<bool(ComponentId)> &resourceAllow
+	);
 }

@@ -50,7 +50,7 @@ namespace engine::render {
 	// while serialisation deliberately writes no instances because PreRender
 	// rebuilds them before use.
 	struct DrawList {
-		// Value and membership epochs identify which kind of source change occurred.
+		// Revisions distinguish value edits from component membership changes.
 		struct SourceRevision {
 			uint64_t Writes = 0;	 // Writes to existing component values.
 			uint64_t Membership = 0; // Entities gaining or losing the component.
@@ -58,29 +58,44 @@ namespace engine::render {
 
 		// Source epochs last inspected by CollectInstances. Named fields keep a
 		// new source component from being coupled to an array position.
+		// Last inspected revision for each source component.
 		struct SourceRevisions {
-			// Last collected epochs for pose, appearance, visibility and skin inputs.
-			//@{
+			// Source revision for world transforms.
 			SourceRevision Transform{};
+			// Source revision for prior-tick transforms.
 			SourceRevision PreviousTransform{};
+			// Source revision for visibility bounds.
 			SourceRevision Bounds{};
+			// Source revision for visual components.
 			SourceRevision Visual{};
+			// Source revision for surface appearance.
 			SourceRevision SurfaceAppearance{};
+			// Source revision for visibility tags.
 			SourceRevision Tags{};
+			// Source revision for local transparency modifiers.
 			SourceRevision LocalTransparency{};
+			// Source revision for character limb membership.
 			SourceRevision CharacterLimb{};
+			// Source revision for skeleton data.
 			SourceRevision Skeleton{};
+			// Source revision for bone data.
 			SourceRevision Bone{};
+			// Source revision for render enablement.
 			SourceRevision Rendered{};
+			// Source revision for automatic level of detail.
 			SourceRevision LODAuto{};
+			// Source revision for custom level of detail.
 			SourceRevision LODCustom{};
+			// Source revision for level of detail settings.
 			SourceRevision LODSettings{};
+			// Source revision for render effects.
 			SourceRevision RenderEffects{};
-			//@}
 		};
 
 		// One row per visible scene instance.
 		std::vector<scene::DrawInstance> Instances;
+		// Sorted entity IDs for the world-drawable rows, before transparent rows are filtered.
+		std::vector<uint64_t> DrawableSourceIds;
 		// Stable object identities indexed by captured object-id values.
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
 		// Stable semantic identities indexed by captured class values.
@@ -112,6 +127,8 @@ namespace engine::render {
 		size_t BoneCount = 0;
 		// Whether source rows are ready for collection.
 		bool SourcesReady = false;
+		// Whether DrawableSourceIds describes the current source rows.
+		bool DrawableSourcesReady = false;
 		// Whether the draw list was built from interpolated tick state.
 		bool HasInterpolation = false;
 		// Whether any source rows use a visibility filter.
@@ -147,8 +164,9 @@ namespace engine::render {
 	LightingPresentationSignature(const scene::WorldLighting &lighting, std::span<const SceneLight> lights);
 
 	// Signs inputs that can move an invisible particle layer back into a camera.
-	// Simulation time is deliberately absent, so an off-camera resident pool can
-	// advance without invalidating pixels that remain unchanged.
+	// CPU simulation time is absent, so an off-camera resident pool can advance
+	// without invalidating pixels. GPU fields include their clock because live
+	// device positions have no retained host bounds to prove they remain invisible.
 	uint64_t ParticleVisibilitySignature(const View &view);
 
 	// Whether the selected Lighting children produce an environment layer.

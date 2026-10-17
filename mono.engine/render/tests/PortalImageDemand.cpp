@@ -40,6 +40,36 @@ TEST_CASE("nested portal budgets keep visible children ahead of seam radiance", 
 	CHECK(children[0].Accepted);
 	CHECK(children[1].Accepted);
 	CHECK(childBudget == 128 * 128);
+
+	std::array oversized{PortalChildBudget{.Pixels = 512 * 288}};
+	CHECK_FALSE(PlanPortalChildBudgets(oversized, 262144 - 512 * 288, false, childBudget, localPixels));
+}
+
+TEST_CASE("nested portal image extent fits a fair slice within pixel rounding", "[render][portal-demand]") {
+	using namespace engine::render;
+	PortalChildExtentFit fit;
+	REQUIRE(FitPortalChildExtent(512, 288, 114688, 1, fit));
+	CHECK(fit.Width == 451);
+	CHECK(fit.Height == 253);
+	CHECK(fit.Pixels <= 114688);
+	CHECK(fit.MaximumExtent == 451);
+	CHECK(std::abs(int(fit.Width) * 288 - int(fit.Height) * 512) <= 512);
+	REQUIRE(FitPortalChildExtent(512, 288, 114103, 1, fit));
+	CHECK(fit.Width == 451);
+	CHECK(fit.Height == 253);
+	REQUIRE(FitPortalChildExtent(1, 512, 8, 1, fit));
+	CHECK(fit.Width == 1);
+	CHECK(fit.Height == 8);
+
+	REQUIRE(FitPortalChildExtent(512, 288, 114688, 4, fit));
+	CHECK(fit.Pixels <= 114688);
+	CHECK(fit.Width < 451);
+	CHECK(fit.Height < 253);
+
+	REQUIRE(FitPortalChildExtent(512, 288, 262144, 1, fit));
+	CHECK(fit.Width == 512);
+	CHECK(fit.Height == 288);
+	CHECK_FALSE(FitPortalChildExtent(512, 288, 3, 4, fit));
 }
 
 TEST_CASE(

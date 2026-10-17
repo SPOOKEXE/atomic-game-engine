@@ -921,6 +921,34 @@ namespace engine::graph {
 			edit.Lifetime = ResourceLifetime::History;
 			document.Record(std::move(edit));
 		};
+		const auto weatherBuffer = [&document](std::string_view name, uint32_t count, uint32_t stride) {
+			Edit edit;
+			edit.Kind = EditKind::AddResource;
+			edit.Name = core::Name(name);
+			edit.Resource = ResourceKind::Buffer;
+			edit.Format = ResourceFormat::R8;
+			edit.Width = count;
+			edit.Height = 1;
+			edit.BufferStride = stride;
+			edit.Lifetime = ResourceLifetime::History;
+			document.Record(std::move(edit));
+		};
+		const auto weatherImage = [&document](
+									  std::string_view name,
+									  ResourceKind kind,
+									  uint32_t divisor,
+									  ResourceLifetime lifetime = ResourceLifetime::Transient
+								  ) {
+			Edit edit;
+			edit.Kind = EditKind::AddResource;
+			edit.Name = core::Name(name);
+			edit.Resource = kind;
+			edit.Format = ResourceFormat::RGBA16F;
+			edit.Divisor = divisor;
+			edit.Lifetime = lifetime;
+			edit.External = lifetime == ResourceLifetime::External;
+			document.Record(std::move(edit));
+		};
 
 		const auto node = [&document](std::string_view name, NodeScope scope) {
 			Edit edit;
@@ -952,6 +980,24 @@ namespace engine::graph {
 		resource("resident-meshes", ResourceKind::Buffer, ResourceFormat::R8);
 		historyResource("environment-sky");
 		historyResource("environment-clouds");
+		weatherBuffer("weather-pages", 512, 16);
+		weatherBuffer("weather-previous-pages", 512, 16);
+		weatherBuffer("weather-field", 262144, 8);
+		weatherBuffer("weather-summary", 512, 16);
+		weatherImage("weather-cloud-history", ResourceKind::Texture, 2, ResourceLifetime::External);
+		weatherImage("weather-depth-history", ResourceKind::Texture, 2, ResourceLifetime::External);
+		weatherImage("weather-clouds", ResourceKind::Storage, 2);
+		weatherImage("weather-cloud-depth", ResourceKind::Storage, 2);
+		weatherImage("weather-resolved", ResourceKind::Storage, 2);
+		Edit weatherShadow;
+		weatherShadow.Kind = EditKind::AddResource;
+		weatherShadow.Name = core::Name("weather-shadow");
+		weatherShadow.Resource = ResourceKind::Storage;
+		weatherShadow.Format = ResourceFormat::RGBA16F;
+		weatherShadow.Width = 256;
+		weatherShadow.Height = 256;
+		weatherShadow.Lifetime = ResourceLifetime::History;
+		document.Record(std::move(weatherShadow));
 		resource("view-instances", ResourceKind::Buffer, ResourceFormat::R8);
 		resource("lod-instances", ResourceKind::Buffer, ResourceFormat::R8);
 		resource("albedo", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
@@ -992,6 +1038,7 @@ namespace engine::graph {
 			}
 		}
 		resource("sky-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("weather-lit", ResourceKind::Storage, ResourceFormat::RGBA16F);
 		resource("volume-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("lens-b", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("lens-scratch", ResourceKind::Colour, ResourceFormat::RGBA16F);
@@ -1023,6 +1070,24 @@ namespace engine::graph {
 		node("clouds-compute", NodeScope::World);
 		touches(EditKind::Reads, "environment-sky", "sky");
 		touches(EditKind::Writes, "environment-clouds", "clouds");
+
+		node("weather-residency", NodeScope::World);
+		touches(EditKind::Writes, "weather-pages", "pages");
+		touches(EditKind::Writes, "weather-previous-pages", "previous-pages");
+
+		node("weather-field", NodeScope::World);
+		touches(EditKind::Reads, "weather-pages", "pages");
+		touches(EditKind::Writes, "weather-field", "field");
+
+		node("weather-summary", NodeScope::World);
+		touches(EditKind::Reads, "weather-field", "field");
+		touches(EditKind::Reads, "weather-pages", "pages");
+		touches(EditKind::Writes, "weather-summary", "summary");
+
+		node("weather-shadow-map", NodeScope::World);
+		touches(EditKind::Reads, "weather-field", "field");
+		touches(EditKind::Reads, "weather-pages", "pages");
+		touches(EditKind::Writes, "weather-shadow", "shadow");
 
 		node("camera", NodeScope::View);
 		touches(EditKind::Writes, "view-camera", "camera");
@@ -1114,6 +1179,7 @@ namespace engine::graph {
 		touches(EditKind::Reads, "linear-depth", "depth");
 		touches(EditKind::Reads, "occlusion", "occlusion");
 		touches(EditKind::Reads, "shadow", "shadow");
+		touches(EditKind::Reads, "weather-shadow", "weather-shadow");
 		// The seam light-field orders this pass after surface-capture, so
 		// the projection samples this frame's captures rather than last frame's.
 		touches(EditKind::Reads, "portal-light", "portal-light");
@@ -1141,8 +1207,32 @@ namespace engine::graph {
 		touches(EditKind::Reads, "environment-clouds", "environment");
 		touches(EditKind::Writes, "sky-lit", "colour");
 
-		node("fog", NodeScope::View);
+		node("weather-integrate", NodeScope::View);
 		touches(EditKind::Reads, "sky-lit", "colour");
+		touches(EditKind::Reads, "depth", "depth");
+		touches(EditKind::Reads, "weather-field", "field");
+		touches(EditKind::Reads, "weather-summary", "summary");
+		touches(EditKind::Reads, "weather-pages", "pages");
+		touches(EditKind::Reads, "weather-previous-pages", "previous-pages");
+		touches(EditKind::Writes, "weather-clouds", "clouds");
+		touches(EditKind::Writes, "weather-cloud-depth", "cloud-depth");
+
+		node("weather-history", NodeScope::View);
+		touches(EditKind::Writes, "weather-cloud-history", "history");
+		touches(EditKind::Writes, "weather-depth-history", "history-depth");
+
+		node("weather-reconstruct", NodeScope::View);
+		touches(EditKind::Reads, "sky-lit", "colour");
+		touches(EditKind::Reads, "depth", "depth");
+		touches(EditKind::Reads, "weather-clouds", "clouds");
+		touches(EditKind::Reads, "weather-cloud-depth", "cloud-depth");
+		touches(EditKind::Reads, "weather-cloud-history", "history");
+		touches(EditKind::Reads, "weather-depth-history", "history-depth");
+		touches(EditKind::Writes, "weather-resolved", "resolved");
+		touches(EditKind::Writes, "weather-lit", "colour");
+
+		node("fog", NodeScope::View);
+		touches(EditKind::Reads, "weather-lit", "colour");
 		touches(EditKind::Reads, "depth", "depth");
 		touches(EditKind::Writes, "volume-lit", "colour");
 
@@ -1283,9 +1373,9 @@ namespace engine::graph {
 		document.Record(
 			{.Kind = EditKind::Reads, .Target = core::Name("occlusion"), .Key = core::Name("source")}
 		);
-		// RGB is unshadowed directional radiance after fog, while alpha is the sampled
-		// directional shadow and portal-beam visibility factor. ShadowVisibility shares
-		// this readback and derives its compact display plane from alpha.
+		// RGB includes fog and cloud transmission, while alpha is solid directional
+		// shadow and portal-beam visibility. ShadowVisibility derives its display plane
+		// from alpha.
 		document.Record(
 			{.Kind = EditKind::AddNode,
 			 .Name = core::Name("data-capture-directional-response"),
@@ -1678,19 +1768,41 @@ namespace engine::graph {
 					edit.Name == core::Name("environment-clouds")) {
 					continue;
 				}
+				if (edit.Name == core::Name("weather-pages") ||
+					edit.Name == core::Name("weather-previous-pages") ||
+					edit.Name == core::Name("weather-field") || edit.Name == core::Name("weather-summary") ||
+					edit.Name == core::Name("weather-lit") || edit.Name == core::Name("weather-shadow") ||
+					edit.Name == core::Name("weather-cloud-history") ||
+					edit.Name == core::Name("weather-depth-history") ||
+					edit.Name == core::Name("weather-clouds") ||
+					edit.Name == core::Name("weather-cloud-depth") ||
+					edit.Name == core::Name("weather-resolved")) {
+					continue;
+				}
 			}
 			if (edit.Kind == EditKind::AddNode) {
 				skipNode = edit.NodeKind == core::Name("hzb") || edit.NodeKind == core::Name("ssao") ||
 						   edit.NodeKind == core::Name("select-lod") ||
 						   edit.NodeKind == core::Name("skybox-compute") ||
-						   edit.NodeKind == core::Name("clouds-compute");
+						   edit.NodeKind == core::Name("clouds-compute") ||
+						   edit.NodeKind == core::Name("weather-residency") ||
+						   edit.NodeKind == core::Name("weather-field") ||
+						   edit.NodeKind == core::Name("weather-summary") ||
+						   edit.NodeKind == core::Name("weather-integrate") ||
+						   edit.NodeKind == core::Name("weather-history") ||
+						   edit.NodeKind == core::Name("weather-reconstruct") ||
+						   edit.NodeKind == core::Name("weather-shadow-map");
 			}
 			if (skipNode ||
-				(edit.Kind == EditKind::Reads && (edit.Target == core::Name("occlusion") ||
-												  edit.Target == core::Name("environment-clouds")))) {
+				(edit.Kind == EditKind::Reads &&
+				 (edit.Target == core::Name("occlusion") || edit.Target == core::Name("environment-clouds") ||
+				  edit.Target == core::Name("weather-shadow")))) {
 				continue;
 			}
 			Edit reducedEdit = edit;
+			if (reducedEdit.Kind == EditKind::Reads && reducedEdit.Target == core::Name("weather-lit")) {
+				reducedEdit.Target = core::Name("sky-lit");
+			}
 			if (reducedEdit.Kind == EditKind::Reads && reducedEdit.Target == core::Name("lod-instances")) {
 				reducedEdit.Target = core::Name("view-instances");
 			}

@@ -1,9 +1,11 @@
+#include "Modal.hpp"
+#include "PlayerGuiState.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/gui/Animation.hpp>
 #include <engine/gui/Binding.hpp>
 #include <engine/gui/Components.hpp>
-#include <engine/gui/Modal.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/SettingsMenu.hpp>
 #include <engine/gui/Style.hpp>
@@ -945,5 +947,6 @@ namespace engine::gui {
 		// Appended because component identifiers are durable. A mask is authored
 		// and serialisable, while its resolved operation is compile output.
 		ecs::Components::Register<Mask>("gui.Mask");
+		RegisterPlayerGuiComponents();
 	}
 }

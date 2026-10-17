@@ -100,10 +100,15 @@ namespace engine::replication {
 	// @param allow Optional. Called as `allow(component, entity)` for every
 	//              value; an empty function permits everything, which is the
 	//              server→client case where the sender is the authority.
+	// @param resourceAllow Optional filter for decoded resource rows only.
+	//                      Entity rows still use only `allow`.
 	// @return What was written and what was not.
 	// @since v0.13
 	WriteOutcome WriteComponents(
-		ecs::Store &store, const Delta &delta, const std::function<bool(core::Name, ecs::Entity)> &allow = {}
+		ecs::Store &store,
+		const Delta &delta,
+		const std::function<bool(core::Name, ecs::Entity)> &allow = {},
+		const std::function<bool(core::Name)> &resourceAllow = {}
 	);
 
 	// Builds a delta carrying named components of named entities.

@@ -1,7 +1,12 @@
+#include <engine/core/Name.hpp>
+#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Entity.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/scene/Terrain.hpp>
 
 #include <algorithm>
+#include <stdexcept>
 
 namespace engine::scene {
 
@@ -19,16 +24,39 @@ namespace engine::scene {
 			terrain.ChunkResolution = std::min(terrain.ChunkResolution, MAX_CHUNK_RESOLUTION);
 			return terrain;
 		}
+
+		ecs::Entity TerrainInstance(const ecs::Store &store) {
+			const ecs::Entity workspace = WorkspaceOf(store);
+			const ecs::ClassId terrainClass = ecs::Classes::Find(core::Name("Terrain"));
+			if (workspace == ecs::NULL_ENTITY || !terrainClass.IsValid()) {
+				return ecs::NULL_ENTITY;
+			}
+			return store.FindFirstChildWhichIsA(workspace, terrainClass);
+		}
 	}
 
 	Terrain &TerrainOf(ecs::Store &store) {
-		if (!store.HasResource<Terrain>()) {
-			store.SetResource(Terrain{});
+		ecs::Entity terrain = TerrainInstance(store);
+		if (terrain == ecs::NULL_ENTITY && !store.AdoptOnly()) {
+			InstallServices(store);
+			terrain = TerrainInstance(store);
 		}
-		return *store.ResourceMutable<Terrain>();
+		if (terrain != ecs::NULL_ENTITY) {
+			if (Terrain *recipe = store.GetMutable<Terrain>(terrain)) {
+				return *recipe;
+			}
+		}
+		throw std::logic_error("TerrainOf requires the generated Terrain instance");
 	}
 
 	Terrain TerrainSettings(const ecs::Store &store) {
+		if (const ecs::Entity instance = TerrainInstance(store); instance != ecs::NULL_ENTITY) {
+			if (const Terrain *existing = store.Get<Terrain>(instance)) {
+				return Clamped(*existing);
+			}
+		}
+		// Old snapshots stored the recipe as a resource. Installation migrates it
+		// onto the generated instance and removes this compatibility path.
 		if (const Terrain *existing = store.Resource<Terrain>()) {
 			return Clamped(*existing);
 		}

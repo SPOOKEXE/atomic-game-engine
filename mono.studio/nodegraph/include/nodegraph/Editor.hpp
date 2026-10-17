@@ -254,6 +254,9 @@ namespace nodegraph {
 		// Where the host is told about the things a canvas may not decide.
 		Hooks Signals;
 
+		// Hosts can limit the shared palette to the vocabulary their document accepts.
+		std::function<bool(const NodeType &)> AcceptsType;
+
 		// Whether a dragged node lands on the grid. Off, because a graph is not
 		// a diagram and the snap fights small adjustments.
 		bool Snap = false;

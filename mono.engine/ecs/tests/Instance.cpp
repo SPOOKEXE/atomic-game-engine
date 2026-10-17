@@ -6,6 +6,7 @@
 #include "ClassTree.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
@@ -26,6 +27,7 @@ TEST_DEPENDS("engine.ecs.classes")
 
 using engine::core::ByteReader;
 using engine::core::ByteWriter;
+using engine::core::HeapProfile;
 using engine::core::Name;
 using engine::core::Random;
 using engine::ecs::Classes;
@@ -51,6 +53,44 @@ namespace {
 
 // --- the three components every instance carries ---------------------------
 
+TEST_CASE("locality absence follows live markers and exact class policy", "[ecs][instance][client-local]") {
+	Store store("locality-absence");
+	const auto &tree = ClassTree();
+	const ClassId localClass = Classes::Register("test.LocalityAbsence", tree.Instance, {});
+	Classes::SetRuntimeLocal(localClass, true);
+	CHECK_FALSE(engine::ecs::HasClientLocalInstances(store));
+	const Entity ordinary = store.CreateInstance(tree.Part, "ordinary");
+	const Entity child = store.CreateInstance(tree.Part, "child");
+	REQUIRE(store.SetParent(child, ordinary));
+	CHECK_FALSE(engine::ecs::HasClientLocalInstances(store));
+
+	const Entity marker = store.Create();
+	store.Set(marker, engine::ecs::ClientLocal{});
+	CHECK(engine::ecs::HasClientLocalInstances(store));
+	store.Remove<engine::ecs::ClientLocal>(marker);
+	CHECK_FALSE(engine::ecs::HasClientLocalInstances(store));
+
+	const Entity local = store.CreatePredictedInstance(localClass, "local-without-marker");
+	REQUIRE(local != NULL_ENTITY);
+	REQUIRE_FALSE(store.Has<engine::ecs::ClientLocal>(local));
+	CHECK(engine::ecs::HasClientLocalInstances(store));
+	REQUIRE(store.SetParent(child, local));
+	CHECK(engine::ecs::IsClientLocalInstance(store, child));
+	REQUIRE(store.SetParent(child, ordinary));
+	CHECK_FALSE(engine::ecs::IsClientLocalInstance(store, child));
+	store.Destroy(local);
+	CHECK_FALSE(engine::ecs::HasClientLocalInstances(store));
+
+	const ClassId changingClass = Classes::Register("test.ChangingLocality", tree.Instance, {});
+	const Entity changing = store.CreateInstance(changingClass, "changing");
+	CHECK_FALSE(engine::ecs::HasClientLocalInstances(store));
+	Classes::SetRuntimeLocal(changingClass, true);
+	CHECK(engine::ecs::HasClientLocalInstances(store));
+	CHECK(engine::ecs::IsClientLocalInstance(store, changing));
+	Classes::SetRuntimeLocal(changingClass, false);
+	CHECK_FALSE(engine::ecs::HasClientLocalInstances(store));
+}
+
 TEST_CASE("the instance components are registered under explicit names", "[ecs][instance]") {
 	// **A file, a wire and a recording all carry these strings**, so renaming
 	// one is a format change and this is what makes it show up as a failing
@@ -72,6 +112,9 @@ TEST_CASE("the instance components are registered under explicit names", "[ecs][
 	REQUIRE(Components::Find(Name("ecs.InstanceClass")) == Components::Of<InstanceClass>());
 	REQUIRE(Components::Find(Name("ecs.Hierarchy")) == Components::Of<Hierarchy>());
 	REQUIRE(Components::Find(Name("ecs.InstanceName")) == Components::Of<engine::ecs::InstanceName>());
+	REQUIRE(
+		Components::Find(Name("ecs.InstanceProjection")) == Components::Of<engine::ecs::InstanceProjection>()
+	);
 
 	// Not the compiler's spelling, which is what they had before.
 	REQUIRE_FALSE(Components::Find(Name("Hierarchy")).IsValid());
@@ -108,6 +151,26 @@ TEST_CASE("an instance name crosses a snapshot as text", "[ecs][instance]") {
 	REQUIRE(restored.InstanceNameOf(child) == Name("Wheel"));
 	REQUIRE_FALSE(restored.InstanceNameOf(anonymous).IsValid());
 	REQUIRE(restored.FindFirstChild(model, "Wheel") == child);
+}
+
+TEST_CASE("instance projection links are cleared by snapshots", "[ecs][instance]") {
+	const Tree &tree = ClassTree();
+	Store source("projection-snapshot");
+	const Entity model = source.CreateInstance(tree.Model, "Model");
+	const Entity child = source.CreateInstance(tree.Part, "Child");
+	source.SetParent(child, model);
+	source.Set(child, engine::ecs::InstanceProjection{model, true});
+
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+
+	Store restored("projection-restored");
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	const auto *projection = restored.Get<engine::ecs::InstanceProjection>(child);
+	REQUIRE(projection != nullptr);
+	CHECK(projection->Source == NULL_ENTITY);
+	CHECK_FALSE(projection->Active);
 }
 
 TEST_CASE("an instance class crosses as its registered name", "[ecs][instance]") {
@@ -1332,22 +1395,83 @@ TEST_CASE("roots come back in creation order, not insertion order", "[ecs][insta
 }
 
 TEST_CASE("FindFirstRoot takes the first root with the name", "[ecs][instance]") {
+	ENGINE_HEAP_SCOPE("find-root");
 	const Tree &tree = ClassTree();
 	Store store("find-root");
 
+	const Entity unnamed = store.CreateInstance(tree.Model);
 	const Entity first = store.CreateInstance(tree.Model, "Same");
-	const Entity second = store.CreateInstance(tree.Model, "Same");
+	const Entity second = store.CreateInstance(tree.Part, "Same");
+	const Entity predicted = store.CreatePredictedInstance(tree.Model, "Same");
 	const Entity buried = store.CreateInstance(tree.Part, "Buried");
 	store.SetParent(buried, first);
 
 	CHECK(store.FindFirstRoot("Same") == first);
 	CHECK(second != NULL_ENTITY);
+	CHECK(predicted.Id > second.Id);
+	CHECK(store.FindFirstRoot("") == unnamed);
 
-	// Not a root, so not found - this searches the world's own children and
-	// not its whole tree.
+	// Component edits move rows between archetypes without changing root order.
+	store.Set<ecs_test::Visual>(first, ecs_test::Visual{});
+	store.Remove<ecs_test::Visual>(first);
+	CHECK(store.FindFirstRoot("Same") == first);
+
+	// Detaching makes the child a root; reparenting removes it from this search.
+	REQUIRE(store.SetParent(buried, NULL_ENTITY));
+	CHECK(store.FindFirstRoot("Buried") == buried);
+	REQUIRE(store.SetParent(buried, first));
 	CHECK(store.FindFirstRoot("Buried") == NULL_ENTITY);
+
+	// The recycled slot has a newer generation, so its full id sorts after second.
+	store.Destroy(first);
+	const Entity recycled = store.CreateInstance(tree.Model, "Same");
+	REQUIRE(recycled != NULL_ENTITY);
+	REQUIRE(recycled.Id > second.Id);
+	CHECK(store.FindFirstRoot("Same") == second);
+
 	CHECK(store.FindFirstRoot("Nothing") == NULL_ENTITY);
-	CHECK(store.FindFirstRoot("") == NULL_ENTITY);
+
+	// Warm the interned names and query path before checking repeated lookups.
+	for (int call = 0; call < 4; call++) {
+		CHECK(store.FindFirstRoot("Same") == second);
+	}
+	if (HeapProfile::IsCompiledIn()) {
+		uint32_t lookupNode = 0;
+		for (uint32_t node = 1; node < HeapProfile::NodeCount(); node++) {
+			if (HeapProfile::Path(node).ends_with("find-root;ecs root lookup")) {
+				lookupNode = node;
+				break;
+			}
+		}
+		REQUIRE(lookupNode != 0);
+		struct LookupTotals {
+			uint64_t Blocks = 0;
+			uint64_t Bytes = 0;
+		};
+		const auto totalsWithinLookup = [&] {
+			LookupTotals totals;
+			for (uint32_t node = 1; node < HeapProfile::NodeCount(); node++) {
+				uint32_t ancestor = node;
+				while (ancestor != lookupNode && ancestor != 0) {
+					ancestor = HeapProfile::Node(ancestor).Parent;
+				}
+				if (ancestor != lookupNode) {
+					continue;
+				}
+				const auto profile = HeapProfile::Node(node);
+				totals.Blocks += profile.TotalBlocks;
+				totals.Bytes += profile.TotalBytes;
+			}
+			return totals;
+		};
+		const LookupTotals before = totalsWithinLookup();
+		for (int call = 0; call < 8; call++) {
+			CHECK(store.FindFirstRoot("Same") == second);
+		}
+		const LookupTotals after = totalsWithinLookup();
+		CHECK(after.Blocks == before.Blocks);
+		CHECK(after.Bytes == before.Bytes);
+	}
 }
 
 // --- the O(1) questions ----------------------------------------------------

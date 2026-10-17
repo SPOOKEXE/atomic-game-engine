@@ -1,11 +1,13 @@
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
@@ -14,8 +16,10 @@
 #include <engine/scene/Skinning.hpp>
 #include <engine/script/DataSceneService.hpp>
 #include <engine/script/RigExport.hpp>
+#include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
@@ -28,6 +32,7 @@
 TEST_SUITE_ID("engine.examples.data_factory_acceptance")
 TEST_DEPENDS("engine.scripthost.scripting")
 
+using Catch::Approx;
 using engine::core::CFrame;
 using engine::core::Name;
 using engine::core::Vector3;
@@ -69,6 +74,12 @@ namespace {
 	void PrepareDataFactoryWorld(Store &store) {
 		engine::physics::PreparePhysicsWorld(store);
 	}
+
+	engine::script::RuntimeLimits BothRuntimeLimits() {
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+		return limits;
+	}
 }
 
 TEST_CASE("data factory starter scene exposes three bounded spatial observations", "[data][acceptance]") {
@@ -76,13 +87,48 @@ TEST_CASE("data factory starter scene exposes three bounded spatial observations
 	Store store("data-factory-starter");
 	engine::ecs::Scheduler scheduler;
 	PrepareDataFactoryWorld(store);
+	const engine::script::RuntimeLimits limits = BothRuntimeLimits();
 	std::string error;
-	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryDemo.luau"), error));
+	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryDemo.luau"), error, nullptr, &limits));
+	const auto *localPlayer = store.Resource<engine::scene::LocalPlayer>();
+	REQUIRE(localPlayer != nullptr);
+	const Entity playerScripts = store.FindFirstChild(localPlayer->Instance, "PlayerScripts");
+	REQUIRE(playerScripts != engine::ecs::NULL_ENTITY);
+	const Entity demoCameraScript = store.FindFirstChild(playerScripts, "DemoCamera");
+	REQUIRE(demoCameraScript != engine::ecs::NULL_ENTITY);
+	CHECK(store.IsA(demoCameraScript, engine::ecs::Classes::Find(Name("LocalScript"))));
 	const Entity camera = DemoChild(store, "DataFactoryCamera");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	CHECK(engine::ecs::IsClientLocalInstance(store, camera));
+	const auto *activeCamera = store.Resource<engine::scene::ActiveCamera>();
+	REQUIRE(activeCamera != nullptr);
+	CHECK(activeCamera->Entity == camera);
+	store.Each<const engine::scene::Camera>([&](Entity candidate, const engine::scene::Camera &) {
+		CHECK(engine::ecs::IsClientLocalInstance(store, candidate));
+	});
+	const auto *cameraSettings = store.Get<engine::scene::Camera>(camera);
+	const auto *cameraTransform = store.Get<engine::scene::Transform>(camera);
+	REQUIRE(cameraSettings != nullptr);
+	REQUIRE(cameraTransform != nullptr);
+	CHECK(cameraTransform->Frame.Position.X == Approx(0.0f));
+	CHECK(cameraTransform->Frame.Position.Y == Approx(2.0f));
+	CHECK(cameraTransform->Frame.Position.Z == Approx(8.0f));
+	CHECK(cameraSettings->ImageWidth == 640);
+	CHECK(cameraSettings->ImageHeight == 360);
 	const engine::script::DataSceneResult rendering =
 		engine::script::GetCameraRenderingData(store, camera, 16);
 	REQUIRE(rendering.Status == std::string_view("ok"));
+	CHECK(Field(rendering.Value, "id")->Text == "data-factory-demo/camera");
+	CHECK(Field(rendering.Value, "vertical_fov_radians")->Number == Approx(1.22));
+	CHECK(Field(rendering.Value, "near_metres")->Number == Approx(0.1));
+	CHECK(Field(rendering.Value, "far_metres")->Number == Approx(500.0));
+	CHECK(Field(rendering.Value, "requested_width")->Number == 640);
+	CHECK(Field(rendering.Value, "requested_height")->Number == 360);
+	const auto *worldFromCamera = Field(rendering.Value, "world_from_camera");
+	REQUIRE(worldFromCamera != nullptr);
+	CHECK(worldFromCamera->Frame.Position.X == Approx(0.0f));
+	CHECK(worldFromCamera->Frame.Position.Y == Approx(2.0f));
+	CHECK(worldFromCamera->Frame.Position.Z == Approx(8.0f));
 	const auto *observations = Field(rendering.Value, "object_observations");
 	REQUIRE(observations != nullptr);
 	REQUIRE(observations->Items.size() == 3);
@@ -100,22 +146,39 @@ TEST_CASE("data factory package fixture replaces only its owned workspace subtre
 	Store store("data-factory-package");
 	engine::ecs::Scheduler scheduler;
 	PrepareDataFactoryWorld(store);
+	const engine::script::RuntimeLimits limits = BothRuntimeLimits();
 	std::string error;
-	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryPackageDemo.luau"), error));
+	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryPackageDemo.luau"), error, nullptr, &limits));
 	const Entity workspace = engine::scene::WorkspaceOf(store);
 	REQUIRE(workspace != engine::ecs::NULL_ENTITY);
 	const Entity firstRoot = store.FindFirstChild(workspace, "DataFactoryPackageDemo");
 	REQUIRE(firstRoot != engine::ecs::NULL_ENTITY);
+	const Entity firstCamera = DemoChild(store, "DataFactoryPackageCamera");
+	REQUIRE(firstCamera != engine::ecs::NULL_ENTITY);
+	CHECK(engine::ecs::IsClientLocalInstance(store, firstCamera));
 	const Entity unrelated = store.CreateInstance(engine::scene::PartClass(), "UnrelatedWorldContent");
 	REQUIRE(unrelated != engine::ecs::NULL_ENTITY);
 	REQUIRE(store.SetParent(unrelated, workspace));
-	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryPackageDemo.luau"), error));
+	REQUIRE(LoadScene(store, scheduler, ExamplePath("DataFactoryPackageDemo.luau"), error, nullptr, &limits));
 	const Entity root = store.FindFirstChild(workspace, "DataFactoryPackageDemo");
 	REQUIRE(root != engine::ecs::NULL_ENTITY);
 	CHECK(root != firstRoot);
+	CHECK_FALSE(store.Alive(firstCamera));
 	CHECK(store.FindFirstChild(workspace, "UnrelatedWorldContent") == unrelated);
-	const Entity camera = store.FindFirstChild(root, "DataFactoryPackageCamera");
+	CHECK(store.FindFirstChild(root, "DataFactoryPackageCamera") == engine::ecs::NULL_ENTITY);
+	const Entity camera = DemoChild(store, "DataFactoryPackageCamera");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	CHECK(camera != firstCamera);
+	CHECK(engine::ecs::IsClientLocalInstance(store, camera));
+	const auto *activeCamera = store.Resource<engine::scene::ActiveCamera>();
+	REQUIRE(activeCamera != nullptr);
+	CHECK(activeCamera->Entity == camera);
+	size_t cameraCount = 0;
+	store.Each<const engine::scene::Camera>([&](Entity candidate, const engine::scene::Camera &) {
+		cameraCount++;
+		CHECK(engine::ecs::IsClientLocalInstance(store, candidate));
+	});
+	CHECK(cameraCount == 1);
 	CHECK(store.FindFirstChild(root, "VisibleBox") != engine::ecs::NULL_ENTITY);
 	CHECK(store.FindFirstChild(root, "OffscreenBox") != engine::ecs::NULL_ENTITY);
 	CHECK(store.FindFirstChild(root, "BehindBox") != engine::ecs::NULL_ENTITY);

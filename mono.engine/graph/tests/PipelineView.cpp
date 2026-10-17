@@ -12,6 +12,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <string>
 
 TEST_SUITE_ID("engine.graph.pipelineview")
@@ -74,8 +75,17 @@ namespace {
 TEST_CASE("every enabled node is placed, in execution order", "[graph]") {
 	const RenderGraph graph = DefaultGraph();
 	const PipelineLayout layout = LayoutOf(graph);
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
-	REQUIRE(layout.Nodes.size() == 31);
+	const size_t expectedNodes = compiled.Shared.size() + compiled.PerView.size() + compiled.Final.size();
+	REQUIRE(layout.Nodes.size() == expectedNodes);
+	size_t placedIndex = 0;
+	for (const auto *block : {&compiled.Shared, &compiled.PerView, &compiled.Final}) {
+		for (const auto id : *block)
+			CHECK(layout.Nodes[placedIndex++].Node == id);
+	}
 	CHECK(layout.Nodes.front().Name == Name("world"));
 	CHECK(layout.Nodes.back().Name == Name("output-image"));
 }
@@ -95,7 +105,14 @@ TEST_CASE("nodes are banded the way the frame runs", "[graph]") {
 	};
 
 	CHECK(bandOf("shadow") == Band::Shared);
+	CHECK(bandOf("weather-residency") == Band::Shared);
+	CHECK(bandOf("weather-field") == Band::Shared);
+	CHECK(bandOf("weather-summary") == Band::Shared);
+	CHECK(bandOf("weather-shadow-map") == Band::Shared);
 	CHECK(bandOf("gbuffer") == Band::PerView);
+	CHECK(bandOf("weather-integrate") == Band::PerView);
+	CHECK(bandOf("weather-history") == Band::PerView);
+	CHECK(bandOf("weather-reconstruct") == Band::PerView);
 	CHECK(bandOf("interface") == Band::Final);
 	CHECK(bandOf("output-image") == Band::Final);
 }
@@ -116,20 +133,17 @@ TEST_CASE("columns restart within each band", "[graph]") {
 		return 0u;
 	};
 
+	std::array<uint32_t, 3> nextColumn{};
+	uint32_t maximumColumns = 0;
+	for (const auto &placed : layout.Nodes) {
+		const size_t bandIndex = placed.Where == Band::Shared ? 0 : placed.Where == Band::PerView ? 1 : 2;
+		CHECK(placed.Column == nextColumn[bandIndex]++);
+		maximumColumns = std::max(maximumColumns, nextColumn[bandIndex]);
+	}
+	CHECK(layout.Columns == maximumColumns);
 	CHECK(columnOf("world") == 0);
-	CHECK(columnOf("mesh-residency") == 1);
-	CHECK(columnOf("shadow") == 2);
 	CHECK(columnOf("camera") == 0);
-	CHECK(columnOf("select-lod") == 6);
-	CHECK(columnOf("surface-capture") == 7);
-	CHECK(columnOf("gbuffer") == 8);
 	CHECK(columnOf("present") == 0);
-	CHECK(columnOf("interface") == 1);
-	CHECK(columnOf("overlay") == 2);
-	CHECK(columnOf("output-image") == 3);
-
-	// Wide enough for the widest band, which is the per-view one at twenty.
-	CHECK(layout.Columns == 22);
 }
 
 // --- the edges ----------------------------------------------------------------
@@ -247,7 +261,8 @@ TEST_CASE("a disabled node is absent from the layout", "[graph]") {
 	REQUIRE(graph.Compile(before, offender) == GraphStatus::Ok);
 
 	engine::graph::NodeId surfaceCapture;
-	for (const auto &placed : LayoutPipeline(graph, before).Nodes) {
+	const PipelineLayout beforeLayout = LayoutPipeline(graph, before);
+	for (const auto &placed : beforeLayout.Nodes) {
 		if (placed.Name == Name("surface-capture")) {
 			surfaceCapture = placed.Node;
 		}
@@ -256,7 +271,7 @@ TEST_CASE("a disabled node is absent from the layout", "[graph]") {
 	REQUIRE(graph.SetEnabled(surfaceCapture, false));
 
 	const PipelineLayout after = LayoutOf(graph);
-	CHECK(after.Nodes.size() == 30);
+	CHECK(after.Nodes.size() + 1 == beforeLayout.Nodes.size());
 	CHECK_FALSE(Joined(graph, after, "surface-capture", "mirror-overlay", "mirror-views"));
 }
 

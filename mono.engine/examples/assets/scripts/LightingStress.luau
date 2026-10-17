@@ -7,6 +7,22 @@
 -- cloud provider are selected from Lighting, so this scene enables each once.
 
 local Lighting = game:GetService("Lighting")
+local fog = Instance.new("FogEffect")
+fog.Name = "Lighting Stress Fog"
+fog.Enabled = true
+fog.Parent = Lighting
+local bloom = Instance.new("BloomEffect")
+bloom.Name = "Lighting Stress Bloom"
+bloom.Enabled = true
+bloom.Parent = Lighting
+local depthOfField = Instance.new("DepthOfFieldEffect")
+depthOfField.Name = "Lighting Stress Depth Of Field"
+depthOfField.Enabled = true
+depthOfField.Parent = Lighting
+local godRays = Instance.new("GodRaysEffect")
+godRays.Name = "Lighting Stress God Rays"
+godRays.Enabled = true
+godRays.Parent = Lighting
 
 local LIGHTS_PER_KIND = 256
 local VOLUME_COUNT = 256
@@ -16,19 +32,19 @@ Lighting.GeographicLatitude = 28
 Lighting.Brightness = 2.5
 Lighting.Ambient = Color3.fromRGB(18, 22, 34)
 Lighting.OutdoorAmbient = Color3.fromRGB(42, 54, 80)
-Lighting.FogColor = Color3.fromRGB(70, 88, 120)
-Lighting.FogStart = 90
-Lighting.FogEnd = 420
-Lighting.BloomThreshold = 0.7
-Lighting.BloomIntensity = 1.25
-Lighting.BloomRadius = 10
-Lighting.DepthOfFieldIntensity = 0.7
-Lighting.DepthOfFieldFocusDistance = 72
-Lighting.DepthOfFieldFocusRange = 18
-Lighting.DepthOfFieldRadius = 9
-Lighting.GodRayIntensity = 0.8
-Lighting.GodRayThreshold = 0.65
-Lighting.GodRayRadius = 72
+fog.Color = Color3.fromRGB(70, 88, 120)
+fog.Start = 90
+fog.End = 420
+bloom.Threshold = 0.7
+bloom.Intensity = 1.25
+bloom.Radius = 10
+depthOfField.Intensity = 0.7
+depthOfField.FocusDistance = 72
+depthOfField.FocusRange = 18
+depthOfField.Radius = 9
+godRays.Intensity = 0.8
+godRays.Threshold = 0.65
+godRays.Radius = 72
 
 local sky = Instance.new("SkyboxCompute")
 sky.Name = "Lighting Stress Sky"
@@ -137,10 +153,11 @@ for index = 0, VOLUME_COUNT - 1 do
 	volume.Parent = workspace
 end
 
-local camera = Instance.new("Camera")
-camera.Name = "Lighting Stress Camera"
-camera.CFrame = CFrame.lookAt(Vector3.new(48, 20, 54), Vector3.new(0, 7, -96))
-camera.FieldOfView = 62
-camera.FarPlaneZ = 600
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+demoCamera:SetAttribute('Name', 'Lighting Stress Camera')
+demoCamera:SetAttribute('CFrame', CFrame.lookAt(Vector3.new(48, 20, 54), Vector3.new(0, 7, -96)))
+demoCamera:SetAttribute('FieldOfView', 62)
+demoCamera:SetAttribute('FarPlaneZ', 600)

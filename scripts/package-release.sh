@@ -243,13 +243,16 @@ echo "$archive"
 # shape somebody chasing a report unpacks anyway.
 case $platform:$flavour in
 	linux-*:)
-		# appimagetool is identical for the three independent images. Download it
-		# once into this package work tree, then each isolated AppDir can use it.
-		appimage_tool="$work/appimagetool"
-		arch=$(uname -m)
-		curl -fsSL -o "$appimage_tool" \
-			"https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage"
-		chmod +x "$appimage_tool"
+		# All three images share one builder. A supplied tool also lets local
+		# rebuilds reuse a validated download.
+		appimage_tool=${APPIMAGETOOL:-}
+		if [ -z "$appimage_tool" ]; then
+			appimage_tool="$work/appimagetool"
+			arch=$(uname -m)
+			curl -fsSL -o "$appimage_tool" \
+				"https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-$arch.AppImage"
+			chmod +x "$appimage_tool"
+		fi
 
 		# appimagetool extracts into a shared temporary location. Concurrent calls
 		# can corrupt that extraction, so the independent AppDirs still run through

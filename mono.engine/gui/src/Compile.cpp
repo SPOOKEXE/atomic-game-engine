@@ -10,6 +10,7 @@
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Localization.hpp>
+#include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/RichText.hpp>
 #include <engine/gui/Services.hpp>
@@ -819,6 +820,7 @@ namespace engine::gui {
 		uint64_t FoldLayoutRows(Store &store, uint64_t running) {
 			store.Each<const Label, const Hierarchy>(
 				[&](Entity entity, const Label &label, const Hierarchy &node) {
+					if (IsPlayerGuiSource(store, entity)) return;
 					running = Fold(running, entity);
 					running = Fold(running, node.Parent);
 					running = Fold(running, node.FirstChild);
@@ -844,6 +846,7 @@ namespace engine::gui {
 		uint64_t FoldLayoutPresentationRows(Store &store, uint64_t running) {
 			store.Each<const PresentationState, const Hierarchy>(
 				[&](Entity entity, const PresentationState &state, const Hierarchy &node) {
+					if (IsPlayerGuiSource(store, entity)) return;
 					running = Fold(running, entity);
 					running = Fold(running, node.Parent);
 					running = Fold(running, node.FirstChild);
@@ -856,13 +859,16 @@ namespace engine::gui {
 
 		bool LayoutMoving(Store &store) {
 			bool moving = false;
-			store.Each<const PageMotion>([&](Entity, const PageMotion &motion) {
+			store.Each<const PageMotion>([&](Entity entity, const PageMotion &motion) {
+				if (IsPlayerGuiSource(store, entity)) return;
 				moving = moving || motion.From != motion.To;
 			});
-			store.Each<const ScrollMotion>([&](Entity, const ScrollMotion &motion) {
+			store.Each<const ScrollMotion>([&](Entity entity, const ScrollMotion &motion) {
+				if (IsPlayerGuiSource(store, entity)) return;
 				moving = moving || motion.Held || motion.ReleasedAt >= 0.0;
 			});
-			store.Each<const PresentationState>([&](Entity, const PresentationState &state) {
+			store.Each<const PresentationState>([&](Entity entity, const PresentationState &state) {
+				if (IsPlayerGuiSource(store, entity)) return;
 				if (!state.Moving) {
 					return;
 				}
@@ -876,6 +882,7 @@ namespace engine::gui {
 		uint64_t FoldLayoutVirtualAnchorRows(Store &store, uint64_t running) {
 			store.Each<const VirtualAnchorState, const Hierarchy>(
 				[&](Entity entity, const VirtualAnchorState &anchor, const Hierarchy &node) {
+					if (IsPlayerGuiSource(store, entity)) return;
 					running = Fold(running, entity);
 					running = Fold(running, node.Parent);
 					running = Fold(running, node.FirstChild);
@@ -900,6 +907,7 @@ namespace engine::gui {
 		uint64_t FoldRows(Store &store, uint64_t running, Entity collector = ecs::NULL_ENTITY) {
 			store.Each<const T, const Hierarchy>(
 				[&](Entity entity, const T &component, const Hierarchy &node) {
+					if (IsPlayerGuiSource(store, entity)) return;
 					if (collector != ecs::NULL_ENTITY && entity != collector &&
 						!store.IsDescendantOf(entity, collector)) {
 						return;
@@ -2112,6 +2120,7 @@ namespace engine::gui {
 			Vector2 virtualRootSize = Vector2::Zero,
 			uint8_t maskDepth = 0
 		) {
+			if (IsPlayerGuiSource(store, instance)) return;
 			if (depth > 256) {
 				// The whole subtree below here is dropped from the draw list
 				// with the rest of the interface still painting, which reads as
@@ -2409,6 +2418,7 @@ namespace engine::gui {
 			);
 			stamp = Fold(stamp, request.Fonts != nullptr ? request.Fonts->Signature() : uint64_t{0});
 			store.Each<const ThemeBinding>([&](Entity entity, const ThemeBinding &binding) {
+				if (IsPlayerGuiSource(store, entity)) return;
 				if (collector != ecs::NULL_ENTITY && entity != collector &&
 					!store.IsDescendantOf(entity, collector)) {
 					return;
@@ -2421,10 +2431,12 @@ namespace engine::gui {
 				}
 			});
 			const auto localInteraction = [&](Entity target) {
-				return collector == ecs::NULL_ENTITY || target == collector ||
-							   (target != ecs::NULL_ENTITY && store.IsDescendantOf(target, collector))
-						   ? target
-						   : ecs::NULL_ENTITY;
+				if (IsPlayerGuiSource(store, target)) return ecs::NULL_ENTITY;
+				if (collector == ecs::NULL_ENTITY || target == collector ||
+					(target != ecs::NULL_ENTITY && store.IsDescendantOf(target, collector))) {
+					return target;
+				}
+				return ecs::NULL_ENTITY;
 			};
 			stamp = Fold(stamp, localInteraction(request.Hovered));
 			stamp = Fold(stamp, localInteraction(request.Pressed));
@@ -2433,6 +2445,7 @@ namespace engine::gui {
 
 			store.Each<const Element, const InstanceName>(
 				[&](Entity entity, const Element &, const InstanceName &label) {
+					if (IsPlayerGuiSource(store, entity)) return;
 					if (collector != ecs::NULL_ENTITY && !store.IsDescendantOf(entity, collector)) {
 						return;
 					}
@@ -2478,16 +2491,19 @@ namespace engine::gui {
 
 			moving = false;
 			store.Each<const PageMotion>([&](Entity entity, const PageMotion &motion) {
+				if (IsPlayerGuiSource(store, entity)) return;
 				moving =
 					moving || ((collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector)) &&
 							   motion.From != motion.To);
 			});
 			store.Each<const ScrollMotion>([&](Entity entity, const ScrollMotion &motion) {
+				if (IsPlayerGuiSource(store, entity)) return;
 				const bool included =
 					collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector);
 				moving = moving || (included && (motion.Held || motion.ReleasedAt >= 0.0));
 			});
 			store.Each<const PresentationState>([&](Entity entity, const PresentationState &state) {
+				if (IsPlayerGuiSource(store, entity)) return;
 				const bool included =
 					collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector);
 				moving = moving || (included && state.Moving);
@@ -2535,6 +2551,7 @@ namespace engine::gui {
 			stamp = Fold(stamp, request.Fonts != nullptr ? request.Fonts->Signature() : uint64_t{0});
 			store.Each<const Element, const InstanceName>(
 				[&](Entity entity, const Element &, const InstanceName &label) {
+					if (IsPlayerGuiSource(store, entity)) return;
 					stamp = Fold(stamp, entity);
 					stamp = Fold(stamp, label.Value);
 				}
@@ -2719,7 +2736,9 @@ namespace engine::gui {
 		const Ids &ids = Classes();
 
 		std::vector<Entity> collectors;
-		store.Each<const Layer>([&](Entity entity, const Layer &) { collectors.push_back(entity); });
+		store.Each<const Layer>([&](Entity entity, const Layer &) {
+			if (!IsPlayerGuiSource(store, entity)) collectors.push_back(entity);
+		});
 
 		std::stable_sort(collectors.begin(), collectors.end(), [&](Entity left, Entity right) {
 			const Layer *a = store.Get<Layer>(left);
@@ -2934,6 +2953,19 @@ namespace engine::gui {
 			List.CanvasSize = {};
 			DamageRegions.clear();
 			DamageReady = false;
+			return true;
+		}
+		if (IsPlayerGuiSource(store, collector)) {
+			List.Commands.clear();
+			List.Operations.clear();
+			List.Gradients.clear();
+			List.Transforms.clear();
+			List.CollectorRanges.clear();
+			List.Elements = 0;
+			List.CanvasSize = {};
+			DamageRegions.clear();
+			DamageReady = false;
+			Fresh = false;
 			return true;
 		}
 		EvaluateBindings(store);

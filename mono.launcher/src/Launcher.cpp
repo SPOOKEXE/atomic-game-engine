@@ -43,7 +43,7 @@ namespace launcher {
 			engine::core::Paths::SetAssetsOverride(Settings.Assets);
 		}
 
-		if (!SDL_SetAppMetadata("Atomic", nullptr, "atomic-launcher")) {
+		if (!SDL_SetAppMetadata("Atomic", nullptr, "io.github.spookexe.atomicgameengine.launcher")) {
 			ENGINE_WARN("SDL_SetAppMetadata: {}", SDL_GetError());
 		}
 

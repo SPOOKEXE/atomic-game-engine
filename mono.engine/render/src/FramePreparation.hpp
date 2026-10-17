@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <span>
@@ -19,28 +20,47 @@ namespace engine::render {
 	};
 
 	// Resolved pipeline identity keeps fallback aliases in one contiguous world.
-	inline std::vector<FrameViewGroup>
-	GroupFrameViews(std::span<const FrameViewIdentity> views, bool present) {
-		std::vector<FrameViewGroup> groups;
+	inline std::span<const FrameViewGroup> GroupFrameViews(
+		std::span<const FrameViewIdentity> views, bool present, std::vector<FrameViewGroup> &groups
+	) {
+		for (FrameViewGroup &group : groups) {
+			group.Identity = {};
+			group.Views.clear();
+		}
 		groups.reserve(views.size());
+		size_t active = 0;
 		for (size_t index = 0; index < views.size(); index++) {
 			const FrameViewIdentity &view = views[index];
-			auto found = std::find_if(groups.begin(), groups.end(), [&](const FrameViewGroup &group) {
+			const auto end = groups.begin() + static_cast<std::ptrdiff_t>(active);
+			auto found = std::find_if(groups.begin(), end, [&](const FrameViewGroup &group) {
 				return group.Identity.World == view.World && group.Identity.Pipeline == view.Pipeline;
 			});
-			if (found == groups.end()) {
-				groups.push_back({view, {index}});
+			if (found == end) {
+				if (active == groups.size()) groups.emplace_back();
+				FrameViewGroup &group = groups[active++];
+				group.Identity = view;
+				group.Views.push_back(index);
 			} else {
 				found->Views.push_back(index);
 			}
 		}
+		const std::span<const FrameViewGroup> result(groups.data(), active);
 		if (!present || views.empty()) {
-			return groups;
+			return result;
 		}
-		const auto finalGroup = std::find_if(groups.begin(), groups.end(), [&](const FrameViewGroup &group) {
+		const auto end = groups.begin() + static_cast<std::ptrdiff_t>(active);
+		const auto finalGroup = std::find_if(groups.begin(), end, [&](const FrameViewGroup &group) {
 			return group.Views.back() == views.size() - 1;
 		});
-		std::rotate(finalGroup, std::next(finalGroup), groups.end());
+		std::rotate(finalGroup, std::next(finalGroup), end);
+		return result;
+	}
+
+	inline std::vector<FrameViewGroup>
+	GroupFrameViews(std::span<const FrameViewIdentity> views, bool present) {
+		std::vector<FrameViewGroup> groups;
+		const size_t active = GroupFrameViews(views, present, groups).size();
+		groups.resize(active);
 		return groups;
 	}
 

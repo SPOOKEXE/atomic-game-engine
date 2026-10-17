@@ -1,18 +1,24 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/script/ChildWaiters.hpp>
+#include <engine/script/InstanceShim.hpp>
 
+#include <algorithm>
 #include <utility>
 
 namespace engine::script {
 
-	uint64_t ChildWaiters::Add(ecs::Entity parent, std::string name, uint64_t dueTick) {
+	uint64_t ChildWaiters::Add(ecs::Entity parent, std::string name, uint64_t dueTick, bool clientExecution) {
 		if (Waits.size() >= MAXIMUM) {
 			return 0;
 		}
 
 		const uint64_t id = NextSequence++;
-		Waits.push_back(Wait{parent, std::move(name), dueTick, id});
+		Waits.push_back(Wait{parent, std::move(name), dueTick, id, clientExecution});
 		return id;
+	}
+
+	bool ChildWaiters::Cancel(uint64_t waiter) {
+		return std::erase_if(Waits, [waiter](const Wait &wait) { return wait.Sequence == waiter; }) != 0;
 	}
 
 	void ChildWaiters::Advance(const ecs::Store &store, uint64_t tick, std::vector<Resumption> &ready) {
@@ -30,7 +36,7 @@ namespace engine::script {
 			// question.** `FindFirstChild` on a destroyed instance is a walk of
 			// nothing, and the honest answer to "wait for a child of this" when
 			// "this" has gone is nothing, now.
-			if (!store.Alive(wait.Parent)) {
+			if (InstanceForScriptRead(store, wait.Parent, wait.ClientExecution) == ecs::NULL_ENTITY) {
 				ready.push_back(Resumption{wait.Sequence, ecs::NULL_ENTITY});
 				continue;
 			}
@@ -38,7 +44,8 @@ namespace engine::script {
 			// Non-recursive, which is `WaitForChild`'s own shape: Roblox's takes
 			// no recursive flag, and a wait that matched a grandchild would
 			// answer with something `FindFirstChild(name)` never would.
-			if (const ecs::Entity child = store.FindFirstChild(wait.Parent, wait.Name);
+			if (const ecs::Entity child =
+					FindInstanceChild(store, wait.Parent, wait.Name, false, wait.ClientExecution);
 				child != ecs::NULL_ENTITY) {
 				ready.push_back(Resumption{wait.Sequence, child});
 				continue;

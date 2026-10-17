@@ -13,6 +13,7 @@
 
 #include <engine/core/Paths.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/examples/DemosLoader.hpp>
@@ -24,8 +25,10 @@
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/replication/Defaults.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
+#include <engine/scene/CameraPortalView.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
@@ -41,11 +44,15 @@
 #include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/WeatherClock.hpp>
+#include <engine/scene/WeatherCompute.hpp>
 #include <engine/scene/Wire.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/weather/Clock.hpp>
+#include <engine/weather/Runtime.hpp>
 #include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -216,6 +223,10 @@ namespace {
 				engine::script::MakeScript(store, engine::examples::ExamplePath(script), script) !=
 				engine::ecs::NULL_ENTITY
 			);
+			REQUIRE(
+				engine::examples::MountDemoCamera(store, engine::examples::ExamplePath(script)) !=
+				engine::ecs::NULL_ENTITY
+			);
 			engine::script::RuntimeLimits limits;
 			limits.Role = engine::script::HostRole{.Server = true, .Client = true, .Studio = true};
 			std::string error;
@@ -280,6 +291,9 @@ TEST_CASE("studio play carries procedural PBR content into its replica", "[studi
 		CHECK(link.Report().Bytes <= 50 * 1024);
 	}
 	fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
+		const Entity sharedAssets =
+			engine::scene::ServiceOf(store, engine::ecs::Classes::Find(Name("ReplicatedStorage")));
+		REQUIRE(sharedAssets != engine::ecs::NULL_ENTITY);
 		const std::array maps{
 			"PbrDemo_Colour",
 			"PbrDemo_Normal",
@@ -290,8 +304,9 @@ TEST_CASE("studio play carries procedural PBR content into its replica", "[studi
 		};
 		std::array<Name, std::tuple_size_v<decltype(maps)>> mapContent{};
 		for (size_t index = 0; index < maps.size(); index++) {
-			const Entity imageEntity = InScene(store, maps[index]);
+			const Entity imageEntity = store.FindFirstChild(sharedAssets, maps[index]);
 			REQUIRE(imageEntity != engine::ecs::NULL_ENTITY);
+			CHECK(store.ParentOf(imageEntity) == sharedAssets);
 			const auto *image = store.Get<engine::scene::EditableImage>(imageEntity);
 			REQUIRE(image != nullptr);
 			CHECK(image->Width == 256);
@@ -302,8 +317,10 @@ TEST_CASE("studio play carries procedural PBR content into its replica", "[studi
 		}
 
 		for (const char *partName : {"DefaultPbr", "CoolStonePbr", "FillStonePbr", "WarmStonePbr"}) {
-			const Entity meshEntity = InScene(store, std::string(partName) + "_ReliefMesh");
+			const Entity meshEntity =
+				store.FindFirstChild(sharedAssets, std::string(partName) + "_ReliefMesh");
 			REQUIRE(meshEntity != engine::ecs::NULL_ENTITY);
+			CHECK(store.ParentOf(meshEntity) == sharedAssets);
 			const auto *mesh = store.Get<engine::scene::EditableMesh>(meshEntity);
 			REQUIRE(mesh != nullptr);
 			CHECK(mesh->Positions.size() == 85 * 113);
@@ -364,6 +381,12 @@ TEST_CASE(
 			store.Get<engine::scene::Character>(engine::scene::CharacterOf(store, link.Player()));
 		REQUIRE(active != nullptr);
 		REQUIRE(character != nullptr);
+		CHECK(store.ParentOf(active->Entity) == engine::scene::WorkspaceOf(store));
+		size_t cameraCount = 0;
+		store.Each<const engine::scene::Camera>([&](Entity entity, const engine::scene::Camera &) {
+			if (store.ClassOf(entity) == engine::scene::CameraClass()) ++cameraCount;
+		});
+		CHECK(cameraCount == 1);
 		const auto *subject = store.Get<engine::scene::CameraSubject>(active->Entity);
 		REQUIRE(subject != nullptr);
 		CHECK(subject->Automatic);
@@ -499,7 +522,7 @@ TEST_CASE("server and client viewport cameras stay local through a play link", "
 	serverPose.Frame.Position = Vector3{31.0f, 17.0f, -9.0f};
 	Entity serverCamera;
 	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
-		serverCamera = studio::CreateRuntimeCamera(store, "ServerCamera", serverPose);
+		serverCamera = studio::CreateRuntimeCamera(store, serverPose);
 	});
 	REQUIRE(serverCamera != engine::ecs::NULL_ENTITY);
 
@@ -509,10 +532,21 @@ TEST_CASE("server and client viewport cameras stay local through a play link", "
 	fixture.Step(link, 32);
 
 	Entity clientCamera;
-	fixture.Worlds.Enter(link.ReplicaWorld(), [&](const Store &store) {
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
 		clientCamera = studio::RuntimeCameraOf(store);
 		REQUIRE(clientCamera != engine::ecs::NULL_ENTITY);
-		CHECK_FALSE(store.Alive(serverCamera));
+		// Entity numbers are local to each store; count and inspect this client's own eye.
+		size_t cameras = 0;
+		store.Each<const engine::scene::Camera>([&](Entity entity, const engine::scene::Camera &) {
+			if (store.ClassOf(entity) == engine::scene::CameraClass()) {
+				++cameras;
+				CHECK(entity == clientCamera);
+			}
+		});
+		CHECK(cameras == 1);
+		CHECK(Store::IsPredicted(clientCamera));
+		CHECK(store.InstanceNameOf(clientCamera) == Name("Camera"));
+		CHECK(store.Has<engine::ecs::ClientLocal>(clientCamera));
 		CHECK(store.Get<Transform>(clientCamera)->Frame.Position != serverPose.Frame.Position);
 	});
 
@@ -523,12 +557,19 @@ TEST_CASE("server and client viewport cameras stay local through a play link", "
 	focusedPose.Frame.Position = Vector3{8.0f, 41.0f, -16.0f};
 	Entity focusedCamera;
 	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
-		focusedCamera = studio::CreateRuntimeCamera(store, "FocusedServerCamera", focusedPose);
+		focusedCamera = studio::CreateRuntimeCamera(store, focusedPose);
 	});
 	REQUIRE(focusedCamera != engine::ecs::NULL_ENTITY);
 	fixture.Step(link, 4);
-	fixture.Worlds.Enter(link.ReplicaWorld(), [&](const Store &store) {
-		CHECK_FALSE(store.Alive(focusedCamera));
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+		size_t cameras = 0;
+		store.Each<const engine::scene::Camera>([&](Entity entity, const engine::scene::Camera &) {
+			if (store.ClassOf(entity) == engine::scene::CameraClass()) {
+				++cameras;
+				CHECK(entity == clientCamera);
+			}
+		});
+		CHECK(cameras == 1);
 		CHECK(store.Get<Transform>(clientCamera)->Frame.Position != focusedPose.Frame.Position);
 	});
 
@@ -655,6 +696,62 @@ TEST_CASE("a value written after the join crosses too", "[studio][playlink]") {
 	// this arrived as a change rather than in a fresh snapshot.
 	CHECK(link.Report().Applied > 0);
 	CHECK(link.Report().TotalMessages > 1);
+}
+
+TEST_CASE("workspace surface resources cross snapshots and deltas", "[studio][playlink][surfacebudget]") {
+	Fixture fixture;
+	engine::scene::RegisterSceneClasses();
+	const auto replicated = engine::replication::DefaultReplicatedComponents();
+	const auto limitRow = std::find_if(replicated.begin(), replicated.end(), [](const auto &component) {
+		return component.Name == "scene.SurfaceLimit";
+	});
+	const auto bouncesRow = std::find_if(replicated.begin(), replicated.end(), [](const auto &component) {
+		return component.Name == "scene.SurfaceBounces";
+	});
+	REQUIRE(limitRow != replicated.end());
+	REQUIRE(bouncesRow != replicated.end());
+	CHECK(limitRow->Resource);
+	CHECK(bouncesRow->Resource);
+	Entity workspace = engine::ecs::NULL_ENTITY;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		engine::scene::InstallServices(store);
+		workspace = engine::scene::WorkspaceOf(store);
+		int32_t panes = 320;
+		int32_t bounces = 1;
+		REQUIRE(store.SetProperty(workspace, Name("MaxSurfaces"), &panes, sizeof(panes)));
+		REQUIRE(store.SetProperty(workspace, Name("SurfaceBounces"), &bounces, sizeof(bounces)));
+	});
+
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	fixture.Step(link, 32);
+
+	auto replicaValues = [&]() {
+		std::pair<int32_t, int32_t> values{};
+		fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+			const auto *limit = store.Resource<engine::scene::SurfaceLimit>();
+			const auto *depth = store.Resource<engine::scene::SurfaceBounces>();
+			if (limit != nullptr) {
+				values.first = limit->Panes;
+			}
+			if (depth != nullptr) {
+				values.second = depth->Levels;
+			}
+		});
+		return values;
+	};
+
+	CHECK((replicaValues() == std::pair<int32_t, int32_t>{320, 1}));
+
+	fixture.Worlds.Enter(fixture.Authority, [workspace](Store &store) {
+		int32_t panes = 96;
+		int32_t bounces = 2;
+		REQUIRE(store.SetProperty(workspace, Name("MaxSurfaces"), &panes, sizeof(panes)));
+		REQUIRE(store.SetProperty(workspace, Name("SurfaceBounces"), &bounces, sizeof(bounces)));
+	});
+	fixture.Step(link, 4);
+	CHECK((replicaValues() == std::pair<int32_t, int32_t>{96, 2}));
 }
 
 TEST_CASE("stopping takes the client view away with it", "[studio][playlink]") {
@@ -946,6 +1043,8 @@ TEST_CASE(
 		}
 		destinationImage = store.CreateInstance(engine::scene::EditableImageClass(), "ArrivalImage");
 		REQUIRE(destinationImage != engine::ecs::NULL_ENTITY);
+		REQUIRE(store.SetParent(destinationImage, WorkspaceOf(store)));
+		REQUIRE(VisibleToClients(store, destinationImage));
 		REQUIRE(engine::scene::ResizeEditableImage(store, destinationImage, 1024, 1024));
 		auto *image = store.GetMutable<engine::scene::EditableImage>(destinationImage);
 		REQUIRE(image != nullptr);
@@ -1063,6 +1162,15 @@ TEST_CASE(
 		CHECK(image->Width == 1024);
 		CHECK(image->Height == 1024);
 		CHECK(image->Pixels.size() == 1024u * 1024u * 4u);
+		CHECK(store.ParentOf(destinationImage) == WorkspaceOf(store));
+		bool pixelsMatch = true;
+		for (size_t index = 0; index < image->Pixels.size(); ++index) {
+			if (image->Pixels[index] != static_cast<uint8_t>(index)) {
+				pixelsMatch = false;
+				break;
+			}
+		}
+		CHECK(pixelsMatch);
 	});
 	CHECK(arriving.Player() == arrival->Player);
 	CHECK(arriving.ReplicaWorld() != resident.ReplicaWorld());
@@ -2555,6 +2663,45 @@ TEST_CASE(
 }
 
 namespace {
+	WorldId ResolvePortalWalkEye(
+		Universe &worlds,
+		const PlayLink &link,
+		WorldId visual,
+		CFrame &eye,
+		engine::scene::Camera &lens,
+		bool check
+	) {
+		std::string before;
+		worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+			const auto *active = store.Resource<engine::scene::ActiveCamera>();
+			REQUIRE(active != nullptr);
+			if (const auto *control = store.Resource<engine::scene::CameraController>())
+				before = "mode=" + std::to_string(static_cast<int>(control->Mode)) + " ";
+			if (const auto *history = store.Get<engine::scene::CameraPortalView>(active->Entity)) {
+				before += "route depth=" + std::to_string(history->Route.size()) +
+						  " history world=" + history->World +
+						  " map x=" + std::to_string(history->FromInput.Frame.Position.X) +
+						  " z=" + std::to_string(history->FromInput.Frame.Position.Z);
+			}
+		});
+		const CFrame storedEye = eye;
+		const WorldId resolved =
+			client::ResolveCameraPortalWorld(worlds, link.ReplicaWorld(), visual, eye, lens);
+		if (check) {
+			INFO(before);
+			INFO(
+				"stored eye " << storedEye.Position.X << "," << storedEye.Position.Y << ","
+							  << storedEye.Position.Z
+			);
+			INFO("resolved eye " << eye.Position.X << "," << eye.Position.Y << "," << eye.Position.Z);
+			CHECK(resolved == link.AuthorityWorld());
+			CHECK((eye.Position - storedEye.Position).Magnitude() <= WIRE_POSITION_TOLERANCE_METRES);
+			CHECK(eye.LookVector().Dot(storedEye.LookVector()) > .9999f);
+			CHECK(eye.UpVector().Dot(storedEye.UpVector()) > .9999f);
+		}
+		return resolved;
+	}
+
 	struct PortalWalkImages {
 		engine::render::Renderer Render;
 		engine::render::PortalImageHost Images;
@@ -2588,6 +2735,9 @@ namespace {
 			mesh.Indices = {0, 1, 2, 0, 2, 3, 2, 1, 0, 3, 2, 0};
 			mesh.ComputeBounds();
 			REQUIRE(Render.AddMesh(Name("walk-marker"), mesh));
+			Vector3 extent;
+			REQUIRE(Render.MeshExtentOf(Name("walk-marker"), extent));
+			REQUIRE_FALSE(Render.MeshExtentOf(Name("walk-marker"), extent, Name("OtherRoom")));
 			engine::assets::TextureData white;
 			white.Width = white.Height = 1;
 			white.Format = engine::assets::TextureFormat::RGBA8;
@@ -2633,24 +2783,20 @@ namespace {
 				});
 			}
 			for (auto world : worlds.Worlds()) {
-				if (!worlds.IsRemote(world)) worlds.Present(world, 0, 1);
+				if (worlds.IsRemote(world)) continue;
+				// This fixture's custom assets share the renderer's global residency.
+				Images.SetContentOwner(world, {});
+				worlds.Present(world, 0, 1);
 			}
-			const CFrame storedEye = view.CameraFrame;
-			visual = client::ResolveCameraPortalWorld(
-				worlds, link.ReplicaWorld(), visual, view.CameraFrame, view.Camera
+			INFO("image frame " << Frame);
+			visual = ResolvePortalWalkEye(
+				worlds,
+				link,
+				visual,
+				view.CameraFrame,
+				view.Camera,
+				AssertResolvedEye && Frame >= 27 && Frame <= 80
 			);
-			if (AssertResolvedEye && Frame >= 27 && Frame <= 80) {
-				CHECK(visual == link.AuthorityWorld());
-				// The replica eye is decoded from the position wire grid before its
-				// route is reconciled with the authority world.  A valid handoff may
-				// therefore differ by the documented wire-position bound.
-				CHECK(
-					(view.CameraFrame.Position - storedEye.Position).Magnitude() <=
-					WIRE_POSITION_TOLERANCE_METRES
-				);
-				CHECK(view.CameraFrame.LookVector().Dot(storedEye.LookVector()) > .9999f);
-				CHECK(view.CameraFrame.UpVector().Dot(storedEye.UpVector()) > .9999f);
-			}
 			REQUIRE(visual.IsValid());
 			view.World = visual.Index;
 			view.WorldName = worlds.NameOf(visual);
@@ -2795,21 +2941,26 @@ static void WalkPortalReplicas(bool gpu) {
 			pane.Size = {16, 9, .4f};
 			pane.Frame = CFrame({0, 4.5f, -6});
 			const auto near = MakePart(store, pane);
+			store.SetInstanceName(near, "NearMouth");
 			store.SetParent(near, WorkspaceOf(store));
 			pane.Frame = CFrame({0, 4.5f, -5.6f}) * CFrame::Angles(0, std::numbers::pi_v<float>, 0);
 			const auto far = MakePart(store, pane);
+			store.SetInstanceName(far, "FarMouth");
 			store.SetParent(far, WorkspaceOf(store));
-			store.GetMutable<Collider>(far)->Trigger = true;
-			store.GetMutable<Visual>(far)->Transparency = 1;
+			// Each receiving mouth carries the exact inverse of the source seam.
+			const auto mouth = world == destination ? far : near;
+			const auto proxy = world == destination ? near : far;
+			store.GetMutable<Collider>(proxy)->Trigger = true;
+			store.GetMutable<Visual>(proxy)->Transparency = 1;
 			const auto hole = store.CreateInstance(engine::ecs::Classes::Find(Name("Portal")), "Door");
 			SurfaceCamera surface;
 			surface.Face = NormalId::Back;
 			store.Set(hole, surface);
 			Portal portal;
-			portal.Destination = far;
+			portal.Destination = proxy;
 			portal.DestinationWorld = Name(world == destination ? "Scene" : "OtherRoom");
 			store.Set(hole, portal);
-			store.SetParent(hole, near);
+			store.SetParent(hole, mouth);
 			if (gpu) {
 				PartDesc marker;
 				marker.Mesh = Name("walk-marker");
@@ -2989,6 +3140,10 @@ WalkTunnelsPortal(bool gpu, bool authorityVisual = false, bool diagonal = true, 
 			engine::script::MakeScript(store, engine::examples::ExamplePath("Tunnels.luau"), "Tunnels") !=
 			engine::ecs::NULL_ENTITY
 		);
+		REQUIRE(
+			engine::examples::MountDemoCamera(store, engine::examples::ExamplePath("Tunnels.luau")) !=
+			engine::ecs::NULL_ENTITY
+		);
 		engine::script::RuntimeLimits limits;
 		limits.Role = engine::script::HostRole{.Server = true, .Client = true, .Studio = true};
 		std::string error;
@@ -3060,7 +3215,20 @@ WalkTunnelsPortal(bool gpu, bool authorityVisual = false, bool diagonal = true, 
 		input->Focused = true;
 		input->Down.Set(engine::scene::KeyCode::W, true);
 	});
-	if (images) {
+	const auto resolveCpuEye = [&](bool check) {
+		CFrame eye;
+		engine::scene::Camera lens;
+		fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+			const auto *active = store.Resource<engine::scene::ActiveCamera>();
+			REQUIRE(active != nullptr);
+			eye = store.Get<Transform>(active->Entity)->Frame;
+			lens = *store.Get<engine::scene::Camera>(active->Entity);
+		});
+		for (const auto world : fixture.Worlds.Worlds())
+			if (!fixture.Worlds.IsRemote(world)) fixture.Worlds.Present(world, 0, 1);
+		(void)ResolvePortalWalkEye(fixture.Worlds, link, link.AuthorityWorld(), eye, lens, check);
+	};
+	{
 		fixture.Worlds.Enter(link.ReplicaWorld(), [](Store &store) {
 			auto *control = store.ResourceMutable<engine::scene::CameraController>();
 			REQUIRE(control != nullptr);
@@ -3070,7 +3238,10 @@ WalkTunnelsPortal(bool gpu, bool authorityVisual = false, bool diagonal = true, 
 			REQUIRE(engine::scene::PlaceCamera(store));
 		});
 		fixture.Worlds.Present(link.ReplicaWorld(), FRAME_SECONDS, 1.0f);
-		images->Draw(fixture.Worlds, link, false, false, true);
+		if (images)
+			images->Draw(fixture.Worlds, link, false, false, true);
+		else
+			resolveCpuEye(false);
 		fixture.Worlds.Enter(link.ReplicaWorld(), [diagonal, shortTunnel](Store &store) {
 			auto *control = store.ResourceMutable<engine::scene::CameraController>();
 			REQUIRE(control != nullptr);
@@ -3087,9 +3258,13 @@ WalkTunnelsPortal(bool gpu, bool authorityVisual = false, bool diagonal = true, 
 	Vector3 crossingPosition;
 	float lowestY = 1000.0f;
 	for (int tick = 0; tick < 240 && (!crossed || tick < crossedTick + 60); ++tick) {
+		INFO("walk tick " << tick);
 		fixture.Step(link);
 		fixture.Worlds.Present(link.ReplicaWorld(), FRAME_SECONDS, 1.0f);
-		if (images) images->Draw(fixture.Worlds, link, false, false, !crossed);
+		if (images)
+			images->Draw(fixture.Worlds, link, false, false, !crossed);
+		else
+			resolveCpuEye(tick + 1 >= 27 && tick + 1 <= 80);
 		fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
 			const auto *placement = store.Get<Transform>(root);
 			REQUIRE(placement != nullptr);
@@ -3190,4 +3365,107 @@ TEST_CASE(
 	"portal images follow the walking player through replica handoff", "[studio][gpu][portal-walk-images][.]"
 ) {
 	WalkPortalReplicas(true);
+}
+
+TEST_CASE(
+	"paused Play links finish joins and freeze weather without advancing simulation",
+	"[studio][playlink][weather]"
+) {
+	engine::weather::RegisterWeatherRuntimeComponents();
+	Fixture fixture;
+	Entity provider;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store, engine::ecs::Scheduler &systems) {
+		provider = store.Create("WeatherLayer");
+		store.Set(provider, engine::scene::WeatherCompute{});
+		engine::weather::RegisterWeatherClockSystem(systems);
+	});
+	REQUIRE(fixture.Worlds.OnState([](WorldId, Store &store, engine::world::WorldState state) {
+		(void)engine::weather::SetWeatherWorldPaused(store, state == engine::world::WorldState::Suspended);
+	}));
+	fixture.Worlds.Tick(0.1f);
+	PlayLink link;
+	std::string error;
+	REQUIRE(link.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	// Pause before the replica's initial snapshot has completed.
+	REQUIRE(
+		fixture.Worlds.SetState(fixture.Authority, engine::world::WorldState::Suspended) ==
+		engine::world::WorldStatus::Ok
+	);
+	uint64_t weatherTick = 0;
+	double sourceElapsed = 0;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		weatherTick = engine::scene::WeatherClockOf(store, provider).Tick;
+		sourceElapsed = store.Time().Elapsed;
+	});
+	REQUIRE(link.FlushPausedState(fixture.Worlds));
+	fixture.Worlds.Enter(fixture.Authority, [](Store &store) {
+		store.SetResource(engine::scene::WeatherClockPublication{});
+	});
+	for (int flush = 0; flush < 64; ++flush)
+		(void)link.FlushPausedState(fixture.Worlds);
+	fixture.Worlds.Enter(link.ReplicaWorld(), [&](Store &store) {
+		REQUIRE(store.Get<engine::scene::WeatherClock>(provider));
+		const auto clock = engine::scene::WeatherClockOf(store, provider);
+		CHECK(clock.Tick == weatherTick);
+		CHECK_FALSE(clock.Paused);
+		CHECK(clock.WorldPaused);
+		CHECK(store.Time().Elapsed == 0);
+	});
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		CHECK(store.Time().Elapsed == sourceElapsed);
+		CHECK(engine::scene::WeatherClockOf(store, provider).Tick == weatherTick);
+	});
+	link.Stop(fixture.Worlds);
+}
+
+TEST_CASE(
+	"Play links admit one heartbeat per client without a new simulation tick", "[studio][playlink][weather]"
+) {
+	engine::weather::RegisterWeatherRuntimeComponents();
+	Fixture fixture;
+	Entity provider;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store, engine::ecs::Scheduler &systems) {
+		provider = store.Create("HeartbeatLayer");
+		store.Set(provider, engine::scene::WeatherCompute{});
+		engine::weather::RegisterWeatherClockSystem(systems);
+	});
+	fixture.Worlds.Tick(0.1f);
+	PlayLink first, second;
+	std::string error;
+	REQUIRE(first.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	REQUIRE(second.Start(fixture.Worlds, fixture.Authority, TICK_RATE, error));
+	std::array<PlayLink *, 2> links{&first, &second};
+	for (uint32_t frame = 0; frame < 64; ++frame)
+		PlayLink::StepMany(fixture.Worlds, links);
+	uint64_t expectedSequence = 0;
+	uint64_t expectedTick = 0;
+	uint64_t simulationTick = 0;
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		auto clock = *store.Get<engine::scene::WeatherClock>(provider);
+		clock.Tick += 20;
+		store.Set(provider, clock);
+		expectedTick = clock.Tick;
+		expectedSequence = clock.Sequence + 1;
+		simulationTick = store.Time().Tick;
+		auto publication = *store.Resource<engine::scene::WeatherClockPublication>();
+		publication.Pending = false;
+		publication.NextHeartbeatSeconds = 0;
+		store.SetResource(publication);
+	});
+	PlayLink::StepMany(fixture.Worlds, links);
+	for (PlayLink *link : links) {
+		fixture.Worlds.Enter(link->ReplicaWorld(), [&](Store &store) {
+			const auto *clock = store.Get<engine::scene::WeatherClock>(provider);
+			REQUIRE(clock);
+			CHECK(clock->Sequence == expectedSequence);
+			CHECK(clock->Tick == expectedTick);
+		});
+		CHECK_FALSE(link->FlushPausedState(fixture.Worlds));
+	}
+	fixture.Worlds.Enter(fixture.Authority, [&](Store &store) {
+		CHECK(store.Time().Tick == simulationTick);
+		CHECK(store.Get<engine::scene::WeatherClock>(provider)->Sequence == expectedSequence);
+	});
+	first.Stop(fixture.Worlds);
+	second.Stop(fixture.Worlds);
 }

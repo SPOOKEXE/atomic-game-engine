@@ -94,8 +94,9 @@ namespace engine::script {
 		// @param parent  The instance whose children to watch.
 		// @param name    The child's name, as the script spelled it.
 		// @param dueTick The tick the wait gives up on.
+		// @param clientExecution Whether the originating script sees the local GUI projection.
 		// @return The waiter's id, or zero when the queue is full.
-		uint64_t Add(ecs::Entity parent, std::string name, uint64_t dueTick);
+		uint64_t Add(ecs::Entity parent, std::string name, uint64_t dueTick, bool clientExecution = false);
 
 		// Answers every waiter that can be answered at this tick, oldest first.
 		//
@@ -128,10 +129,8 @@ namespace engine::script {
 			return Waits.size();
 		}
 
-		// **There is no `Cancel`, and nothing asks for one.** A script cannot
-		// abandon a `WaitForChild` - it is suspended inside the call - and a
-		// world being torn down takes the VM's threads with it, which is
-		// `DebrisQueue`'s reason for having no `Clear`.
+		// Cancels a suspended script's wait when its owning Script is destroyed.
+		bool Cancel(uint64_t waiter);
 
 	  private:
 		// One outstanding wait.
@@ -150,6 +149,9 @@ namespace engine::script {
 			// Also the waiter's id, so insertion order and identity are one
 			// number rather than two that have to agree.
 			uint64_t Sequence = 0;
+
+			// A shared host may have server and local waits in the same VM.
+			bool ClientExecution = false;
 		};
 
 		// In insertion order, which is answer order. A vector rather than a map

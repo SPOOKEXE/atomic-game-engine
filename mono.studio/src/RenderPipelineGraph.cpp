@@ -873,7 +873,11 @@ namespace studio {
 				error = "a render link names a socket the pass no longer declares";
 				return false;
 			}
-			if (!PortsCompatible(fromPort->Kind, toPort->Kind)) {
+			// Inputs are reads. Raster composites can sample a compute-written
+			// colour image without changing its storage descriptor or attachment role.
+			const bool computeColourRead =
+				fromPort->Kind == ResourceKind::Storage && toPort->Kind == ResourceKind::Colour;
+			if (!PortsCompatible(fromPort->Kind, toPort->Kind) && !computeColourRead) {
 				error = std::string(WhyIncompatible(fromPort->Kind, toPort->Kind));
 				return false;
 			}

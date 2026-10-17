@@ -61,17 +61,15 @@ using engine::script::Runtime;
 namespace {
 	constexpr float FRAME_SECONDS = 1.0f / 60.0f;
 
-	// The two spellings of "append to the log", which is all the programs below
-	// differ by. `engine.script.guisurface`'s trick: a chunk's globals are its
-	// own and `Run` reports whether it ran rather than what it evaluated to, so
-	// the answer crosses as an attribute on the `Workspace`.
-	//
-	// **An attribute rather than a property, and that is not a workaround.**
-	// `ecs::SetAttribute` writes a table on the world; `Store::SetProperty` is
-	// refused in a replica. A client script that could log through the second one
-	// would mean the trust boundary was not there.
-	const char *NOTE = "local function note(mark)\n"
-					   "	workspace:SetAttribute('log', (workspace:GetAttribute('log') or '') .. mark)\n"
+	// Script results stay on a client-created row. grug must not use logging
+	// to give a LocalScript permission to change authoritative Workspace data.
+	const char *NOTE = "local log = workspace:FindFirstChild('ClientScriptLog')\n"
+					   "if not log then\n"
+					   "log = Instance.new('Folder', workspace)\n"
+					   "log.Name = 'ClientScriptLog'\n"
+					   "end\n"
+					   "local function note(mark)\n"
+					   "log:SetAttribute('log', (log:GetAttribute('log') or '') .. mark)\n"
 					   "end\n";
 
 	// A client's replica: the VM opens over an empty world, the world arrives,
@@ -156,18 +154,13 @@ namespace {
 		}
 
 		std::string Log() {
-			engine::ecs::AttributeValue value;
-			if (!engine::ecs::GetAttribute(World, engine::scene::WorkspaceOf(World), Name("log"), value)) {
-				return {};
-			}
-			return value.String;
+			return Read("log");
 		}
 
 		std::string Read(const char *attribute) {
 			engine::ecs::AttributeValue value;
-			if (!engine::ecs::GetAttribute(
-					World, engine::scene::WorkspaceOf(World), Name(attribute), value
-				)) {
+			const Entity log = World.FindFirstChild(engine::scene::WorkspaceOf(World), "ClientScriptLog");
+			if (!engine::ecs::GetAttribute(World, log, Name(attribute), value)) {
 				return {};
 			}
 			return value.String;
@@ -390,11 +383,15 @@ TEST_CASE(
 		"Writer",
 		mine,
 		true,
-		"local ok, err = pcall(function() workspace.Rock.Transparency = 0.5 end)\n"
-		"workspace:SetAttribute('refused', tostring(not ok))\n"
-		"workspace:SetAttribute('why', tostring(err))\n"
-		"local made = pcall(function() Instance.new('Part', workspace) end)\n"
-		"workspace:SetAttribute('minted', tostring(made))\n"
+		std::string(NOTE) +
+			"local ok, err = pcall(function() workspace.Rock.Transparency = 0.5 end)\n"
+			"log:SetAttribute('refused', tostring(not ok))\n"
+			"log:SetAttribute('why', tostring(err))\n"
+			"local attribute = pcall(function() workspace:SetAttribute('authority', true) end)\n"
+			"log:SetAttribute('attributeRefused', tostring(not attribute))\n"
+			"local made = Instance.new('Part', workspace)\n"
+			"made.Name = 'Minted'\n"
+			"made.Transparency = 0.25\n"
 	);
 
 	replica.Adopt();
@@ -405,16 +402,26 @@ TEST_CASE(
 	// delta, so the refusal has to arrive as an error at the line that made it.
 	CHECK(replica.Read("refused") == "true");
 	CHECK(replica.Read("why").find("replica") != std::string::npos);
+	CHECK(replica.Read("attributeRefused") == "true");
+	engine::ecs::AttributeValue authorityAttribute;
+	CHECK_FALSE(
+		engine::ecs::GetAttribute(
+			replica.World, engine::scene::WorkspaceOf(replica.World), Name("authority"), authorityAttribute
+		)
+	);
 
 	// And the value did not move.
 	const auto *visual = replica.World.Get<engine::scene::Visual>(part);
 	REQUIRE(visual != nullptr);
 	CHECK(visual->Transparency == 0.0f);
 
-	// `Instance.new` answers a null entity in an adopt-only store, which the
-	// binding turns into an error of its own - a client script cannot mint a row
-	// the authority is also handing indices out for.
-	CHECK(replica.Read("minted") == "false");
+	const Entity minted = replica.World.FindFirstChild(engine::scene::WorkspaceOf(replica.World), "Minted");
+	REQUIRE(minted != NULL_ENTITY);
+	CHECK(Store::IsPredicted(minted));
+	CHECK(engine::ecs::IsClientLocalInstance(replica.World, minted));
+	const auto *mintedVisual = replica.World.Get<engine::scene::Visual>(minted);
+	REQUIRE(mintedVisual != nullptr);
+	CHECK(mintedVisual->Transparency == 0.25f);
 }
 
 TEST_CASE("tearing a replica down leaves no runtime alive", "[client][replication][scripting]") {

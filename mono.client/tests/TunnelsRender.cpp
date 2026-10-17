@@ -38,13 +38,21 @@ namespace {
 	void WriteEntrySweep(const std::filesystem::path &path) {
 		std::string source =
 			ReadText(core::Paths::Base().parent_path() / "assets/examples/scripts/Tunnels.luau");
-		const size_t cameras = source.find("local cameras: { [string]: Camera } = {}");
-		const size_t viewSelection = source.find("if WHICH == \"long\" then", cameras);
+		const std::string namedCameras = "cameraScript:SetAttribute(\"NamedCameras\", true)";
+		const size_t cameras = source.find(namedCameras);
 		REQUIRE(cameras != std::string::npos);
-		REQUIRE(viewSelection != std::string::npos);
-		// The checked world has no authored `CurrentCamera`; remove its optional
-		// still cameras as well, so the client installs its default follow eye.
-		source.replace(cameras, viewSelection - cameras, "local cameras: { [string]: Camera } = {}\n\n");
+		// Keep the demo's real client companion, configured to leave the default
+		// follow eye in control of this character-driven crossing.
+		source.replace(cameras, namedCameras.size(), "cameraScript:SetAttribute(\"NamedCameras\", false)");
+		const auto companionDirectory = path.parent_path() / "client/DemoCameras";
+		std::filesystem::create_directories(companionDirectory);
+		REQUIRE(
+			std::filesystem::copy_file(
+				core::Paths::Base().parent_path() /
+					"assets/examples/scripts/client/DemoCameras/Tunnels.client.luau",
+				companionDirectory / (path.stem().string() + ".client.luau")
+			)
+		);
 		source += R"(
 
 -- Test capture: use the actual local player and its default follow camera.

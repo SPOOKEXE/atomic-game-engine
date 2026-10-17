@@ -527,6 +527,9 @@ declare namespace Enum {
 	interface VerticalScrollBarPosition extends EnumItem { readonly __enum: "VerticalScrollBarPosition"; }
 	interface ViewportUpdateMode extends EnumItem { readonly __enum: "ViewportUpdateMode"; }
 	interface VolumeShape extends EnumItem { readonly __enum: "VolumeShape"; }
+	interface WeatherBoundary extends EnumItem { readonly __enum: "WeatherBoundary"; }
+	interface WeatherMode extends EnumItem { readonly __enum: "WeatherMode"; }
+	interface WeatherTopBoundary extends EnumItem { readonly __enum: "WeatherTopBoundary"; }
 	interface ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
 
 	const AlphaMode: {
@@ -588,6 +591,7 @@ declare namespace Enum {
 		readonly LockFirstPerson: CameraType;
 		readonly ShiftLock: CameraType;
 		readonly Scriptable: CameraType;
+		readonly Custom: CameraType;
 	};
 	const CloudComputeShader: {
 		readonly Cumulus: CloudComputeShader;
@@ -995,6 +999,19 @@ declare namespace Enum {
 		readonly Box: VolumeShape;
 		readonly Ellipsoid: VolumeShape;
 	};
+	const WeatherBoundary: {
+		readonly Periodic: WeatherBoundary;
+		readonly Closed: WeatherBoundary;
+		readonly Open: WeatherBoundary;
+	};
+	const WeatherMode: {
+		readonly Procedural: WeatherMode;
+		readonly Stateful: WeatherMode;
+	};
+	const WeatherTopBoundary: {
+		readonly Closed: WeatherTopBoundary;
+		readonly Escape: WeatherTopBoundary;
+	};
 	const ZIndexBehavior: {
 		readonly Global: ZIndexBehavior;
 		readonly Sibling: ZIndexBehavior;
@@ -1259,6 +1276,10 @@ declare interface Instance {
 	ApplyImpulse(impulse: Vector3): void;
 	SetAppliedForce(force: Vector3): void;
 	SetAppliedTorque(torque: Vector3): void;
+	// WeatherCompute only. Missing, disabled or unavailable models return null.
+	Sample(positionMetres: Vector3, groundHeightMetres?: number | null): WeatherSample | null;
+	SetSpawnSamples(samples: ArrayBuffer): boolean;
+	SetLayer(index: number, colour: Color3, alpha: number, size: number, acceleration: Vector3): boolean;
 	Break(): number;
 	SetLocalTransparency(value: number): void;
 	AddVertex(position: Vector3, normal?: Vector3, uv?: Vector2): number;
@@ -1284,8 +1305,17 @@ declare interface Instance {
 	 * Buffers above the 64 MiB image ceiling raise before the image changes. */
 	ToBuffer(): ArrayBuffer;
 	FromBuffer(buffer: ArrayBuffer): boolean;
+	/** Bounded 1920x1080 imports; malformed data leaves the image unchanged. */
+	FromBase64(encoded: string, format: 'rgba8' | 'png' | 'jpeg'): boolean;
+	FromEncodedBuffer(buffer: ArrayBuffer, format: 'png' | 'jpeg'): boolean;
+	/** Raw RGBA8 bytes in current image space; empty string on export refusal. */
+	ToBase64(): string;
 	GetAttribute(name: string): EngineAttribute | null;
 	SetAttribute(name: string, value: EngineAttribute | null): void;
+	/** ImageGraph overrides; null restores the graph default. */
+	SetInput(name: string, value: number | boolean | Color3 | string | null): void;
+	GetInput(name: string): number | boolean | Color3 | string | null;
+	GetImage(output?: string): string;
 	GetAttributes(): { [name: string]: EngineAttribute };
 	GetAttributeChangedSignal(name: string): PropertyChangedSignal;
 	SetComponent(component: string, values: { [field: string]: any }): void;
@@ -1351,20 +1381,13 @@ declare interface VectorField3D extends PVInstance {
 	Vector: Vector3;
 }
 
-declare interface GpuParticleField extends Instance {
-	CondensationAlpha: number;
-	CondensationColor: Color3;
-	CondensationSize: number;
-	DebrisAlpha: number;
-	DebrisColor: Color3;
-	DebrisSize: number;
+declare interface GpuParticleField extends PVInstance {
+	Bounds: Vector3;
 	Enabled: boolean;
 	Layers: number;
-	RainAlpha: number;
-	RainColor: Color3;
-	RainSize: number;
 	RequestedCount: number;
 	Seed: number;
+	VelocityResponse: number;
 }
 
 declare interface BasePart extends PVInstance {
@@ -1405,15 +1428,6 @@ declare interface BasePart extends PVInstance {
 }
 
 declare interface Part extends BasePart {
-	StormDragCoefficient: number;
-	StormEnabled: boolean;
-	StormExposedArea: number;
-	StormForceScale: number;
-	StormMaximumBendRadians: number;
-	StormResponsePerSecond: number;
-	StormRestFrame: CFrame;
-	StormVegetationEnabled: boolean;
-	StormWindSpeedForMaximumBend: number;
 }
 
 declare interface SpawnLocation extends Part {
@@ -1499,8 +1513,9 @@ declare interface SkinnedMeshPart extends MeshPart {
 }
 
 declare interface Camera extends PVInstance {
-	CameraSubject: Instance;
+	CameraSubject: Instance | null;
 	CameraSubjectAutomatic: boolean;
+	CameraType: Enum.CameraType;
 	FarPlaneZ: number;
 	FieldOfView: number;
 	ImageHeight: number;
@@ -1810,11 +1825,6 @@ declare interface JointInstance extends Instance {
 }
 
 declare interface Weld extends JointInstance {
-	StormBreakForce: number;
-	StormDamageRate: number;
-	StormIntegrity: number;
-	StormLinkEnabled: boolean;
-	StormMaterialStrength: number;
 }
 
 declare interface WeldConstraint extends Instance {
@@ -1822,11 +1832,91 @@ declare interface WeldConstraint extends Instance {
 	Enabled: boolean;
 	Part0: Instance;
 	Part1: Instance;
-	StormBreakForce: number;
-	StormDamageRate: number;
-	StormIntegrity: number;
-	StormLinkEnabled: boolean;
-	StormMaterialStrength: number;
+}
+
+declare interface BloomEffect extends Instance {
+	Enabled: boolean;
+	Intensity: number;
+	Radius: number;
+	Threshold: number;
+}
+
+declare interface DepthOfFieldEffect extends Instance {
+	Enabled: boolean;
+	FocusDistance: number;
+	FocusRange: number;
+	Intensity: number;
+	Radius: number;
+}
+
+declare interface GodRaysEffect extends Instance {
+	Enabled: boolean;
+	Intensity: number;
+	Radius: number;
+	Threshold: number;
+}
+
+declare interface FogEffect extends Instance {
+	Color: Color3;
+	Enabled: boolean;
+	End: number;
+	Start: number;
+}
+
+declare interface WeatherCompute extends CloudCompute {
+	readonly AlgorithmVersion: number;
+	AtmosphereDensityStrength: number;
+	AtmosphereGlareSuppression: number;
+	AtmosphereHazeStrength: number;
+	BaseHeightMetres: number;
+	BasePressureHectopascals: number;
+	BaseTemperatureCelsius: number;
+	BoundaryX: Enum.WeatherBoundary;
+	BoundaryZ: Enum.WeatherBoundary;
+	CellSizeMetres: number;
+	CondensateScale: number;
+	Coverage: number;
+	readonly DefinitionRevision: number;
+	ExtentMetres: Vector3;
+	FeatureCells: number;
+	FogStrength: number;
+	FrontContrast: number;
+	GroundVapourFluxKilogramsPerSquareMetreSecond: number;
+	GrowthRate: number;
+	HailIntensity: number;
+	IceFraction: number;
+	LayerName: string;
+	LiftMetresPerSecond: number;
+	LightningRate: number;
+	LodError: number;
+	MaintenanceSeconds: number;
+	MaximumLod: number;
+	MaximumResidentBricks: number;
+	Mode: Enum.WeatherMode;
+	Paused: boolean;
+	PrecipitationRate: number;
+	PressureVariationHectopascals: number;
+	RainFallSpeedMetresPerSecond: number;
+	ShadowCascades: number;
+	ShadowDistanceMetres: number;
+	ShadowResolution: number;
+	ShadowStrength: number;
+	ShadowUpdateSeconds: number;
+	ShadowsEnabled: boolean;
+	ShearMetresPerSecond: number;
+	StormIntensity: number;
+	TemperatureLapseCelsiusPerKilometre: number;
+	TemperatureVariationCelsius: number;
+	TerrainRevision: number;
+	ThicknessMetres: number;
+	TickRate: number;
+	TimeScale: number;
+	TopBoundary: Enum.WeatherTopBoundary;
+	TurbulenceMetresPerSecond: number;
+	VapourMixingRatio: number;
+	VapourScale: number;
+	WeatherEnabled: boolean;
+	WindMetresPerSecond: Vector3;
 }
 
 declare interface ShaderScript extends Instance {
@@ -1850,12 +1940,19 @@ declare interface EditableMesh extends Instance {
 }
 
 declare interface EditableImage extends Instance {
+	ColorSpace: string;
 	readonly ContentId: string;
 	PackingAttributes: number;
 	PackingFormat: string;
 	PackingMaximum: number;
 	PackingMinimum: number;
 	readonly Size: Vector2;
+}
+
+declare interface ImageGraph extends Instance {
+	Graph: string;
+	InstanceKey: string;
+	Output: string;
 }
 
 declare interface LuaSourceContainer extends Instance {
@@ -2532,11 +2629,7 @@ declare interface Workspace extends WorldRoot {
 	CurrentCamera: Instance;
 	MaxSurfaces: number;
 	SurfaceBounces: number;
-	TerrainChunkSize: number;
-	TerrainEnabled: boolean;
-	TerrainGenerator: string;
-	TerrainSeed: number;
-	TerrainViewDistance: number;
+	readonly Terrain: Terrain;
 	Raycast(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
 	RaycastThroughPortals(origin: Vector3, direction: Vector3, params?: RaycastParams): RaycastResult | null;
 	OverlapBox(centre: Vector3, size: Vector3, params?: RaycastParams): Instance[];
@@ -2547,22 +2640,9 @@ declare interface Workspace extends WorldRoot {
 
 declare interface Lighting extends Service {
 	Ambient: Color3;
-	BloomIntensity: number;
-	BloomRadius: number;
-	BloomThreshold: number;
 	Brightness: number;
 	ClockTime: number;
-	DepthOfFieldFocusDistance: number;
-	DepthOfFieldFocusRange: number;
-	DepthOfFieldIntensity: number;
-	DepthOfFieldRadius: number;
-	FogColor: Color3;
-	FogEnd: number;
-	FogStart: number;
 	GeographicLatitude: number;
-	GodRayIntensity: number;
-	GodRayRadius: number;
-	GodRayThreshold: number;
 	OutdoorAmbient: Color3;
 	PostProcessShader: string;
 	RenderFeatureDisableMask: number;
@@ -2625,6 +2705,16 @@ declare interface Player extends Instance {
 
 declare interface Team extends Instance {
 	TeamColor: Color3;
+}
+
+declare interface Terrain extends Instance {
+	ChunkExtent: number;
+	ChunkResolution: number;
+	Enabled: boolean;
+	Generator: string;
+	Seed: number;
+	VerticalExtent: number;
+	ViewDistance: number;
 }
 
 // --- the bus services ------------------------------------------------------
@@ -2695,6 +2785,30 @@ declare interface DataStoreService {
 	GetAsync(key: string): Promise<StoreReply>;
 	SetAsync(key: string, value: unknown): Promise<StoreReply>;
 	RemoveAsync(key: string): Promise<StoreReply>;
+}
+
+// Copied accepted weather values in the named physical units. Tick and Epoch are exact decimal
+// uint64 text. Mutating this dictionary never changes the atmosphere.
+declare interface WeatherSample {
+	Layer: string;
+	Mode: "Procedural" | "Stateful";
+	Tick: string;
+	Epoch: string;
+	DefinitionRevision: number;
+	CondensateKilogramsPerCubicMetre: number;
+	VapourKilogramsPerKilogram: number;
+	TemperatureCelsius: number;
+	PressureHectopascals: number;
+	WindMetresPerSecond: Vector3;
+	IceFraction: number;
+	LiquidMillimetresPerHour: number;
+	SnowMillimetresPerHour: number;
+	HailMillimetresPerHour: number;
+	MeltingFraction: number;
+	SpawnSeed: number;
+	FogExtinctionPerMetre: number;
+	ChargeSeparation: number;
+	HailGrowth: number;
 }
 
 declare interface RunService {
@@ -3182,10 +3296,16 @@ declare const Instance: {
 		(className: "SpringConstraint", parent?: Instance): SpringConstraint;
 		(className: "Weld", parent?: Instance): Weld;
 		(className: "WeldConstraint", parent?: Instance): WeldConstraint;
+		(className: "BloomEffect", parent?: Instance): BloomEffect;
+		(className: "DepthOfFieldEffect", parent?: Instance): DepthOfFieldEffect;
+		(className: "GodRaysEffect", parent?: Instance): GodRaysEffect;
+		(className: "FogEffect", parent?: Instance): FogEffect;
+		(className: "WeatherCompute", parent?: Instance): WeatherCompute;
 		(className: "ShaderScript", parent?: Instance): ShaderScript;
 		(className: "LensShader", parent?: Instance): LensShader;
 		(className: "EditableMesh", parent?: Instance): EditableMesh;
 		(className: "EditableImage", parent?: Instance): EditableImage;
+		(className: "ImageGraph", parent?: Instance): ImageGraph;
 		(className: "Script", parent?: Instance): Script;
 		(className: "LocalScript", parent?: Instance): LocalScript;
 		(className: "ModuleScript", parent?: Instance): ModuleScript;

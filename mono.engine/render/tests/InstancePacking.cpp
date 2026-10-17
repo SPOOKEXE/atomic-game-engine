@@ -15,6 +15,7 @@
 
 #include <InstancePacking.hpp>
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -440,6 +441,43 @@ TEST_CASE("a part far from the origin keeps its position exactly", "[render][ins
 	CHECK(packed.Position.x == far.X);
 	CHECK(packed.Position.y == far.Y);
 	CHECK(packed.Position.z == far.Z);
+}
+
+TEST_CASE("centred packing preserves correction bytes and nonfinite fallback", "[render][instancepacking]") {
+	const float infinity = std::numeric_limits<float>::infinity();
+	const float nan = std::numeric_limits<float>::quiet_NaN();
+	for (int step = 0; step < 8; ++step) {
+		for (const Vector3 position :
+			 {Vector3{13, -7, 21},
+			  Vector3{0, -0.0f, 1},
+			  Vector3{-0.0f, 0, -0.0f},
+			  Vector3{infinity, 1, 2},
+			  Vector3{nan, 1, 2}}) {
+			for (const Vector3 half :
+				 {Vector3{1, 2, 3},
+				  Vector3{-1, -2, 3},
+				  Vector3{0, -0.0f, 1},
+				  Vector3{infinity, 1, 2},
+				  Vector3{nan, 1, 2}}) {
+				DrawInstance instance =
+					PartAt(RotationAt(step * .37f, step * .11f, step * .53f), position, 1);
+				instance.HalfExtent = half;
+				for (const Vector3 centre : {Vector3{0, 0, 0}, Vector3{-0.0f, 0, -0.0f}, Vector3{6, -2, 3}}) {
+					MeshEntry mesh = UnitMesh();
+					mesh.Centre = centre;
+					const GpuInstance packed = ToGpu(instance, mesh);
+					const glm::vec3 expected = glm::vec3{position.X, position.Y, position.Z} -
+											   UnpackRotation(packed.Rotation) *
+												   (packed.Scale * glm::vec3{centre.X, centre.Y, centre.Z});
+					for (int axis = 0; axis < 3; ++axis)
+						CHECK(
+							std::bit_cast<uint32_t>(packed.Position[axis]) ==
+							std::bit_cast<uint32_t>(expected[axis])
+						);
+				}
+			}
+		}
+	}
 }
 
 TEST_CASE("a mirrored part survives the row", "[render][instancepacking]") {

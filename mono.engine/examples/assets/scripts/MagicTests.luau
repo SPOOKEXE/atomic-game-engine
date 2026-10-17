@@ -74,11 +74,11 @@ marker.Size = Vector3.new(4, 4, 4)
 marker.Color = if report.failed > 0 then Color3.new(0.8, 0.2, 0.2) else Color3.new(0.2, 0.75, 0.35)
 marker.Parent = workspace
 
-local eye = Instance.new("Camera")
-eye.Name = "Eye"
-eye.CFrame = CFrame.lookAt(Vector3.new(8, 6, 12), Vector3.new(0, 0, 0))
-eye.Parent = workspace
-workspace.CurrentCamera = eye
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local eye = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+eye:SetAttribute("Name", "Eye")
+eye:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(8, 6, 12), Vector3.new(0, 0, 0)))
 
 -- Raised last, so the marker and the log survive a failing run.
 assert(

@@ -12,7 +12,7 @@ All of them are permissive and compatible with MPL-2.0. **Nothing here is
 copyleft beyond MPL-2.0's own file-level scope**, and that is a condition of
 adding a dependency rather than a happy accident - see `mono.vendor/AGENTS.md`.
 
-One of them is not a dependency of the build at all. **luau-lsp is a developer
+Two entries are not dependencies of the build at all. **luau-lsp is a developer
 tool**, cloned only when somebody runs `just luau-lsp`; `just setup` walks past
 it and no target links it. It brings a second copy of Luau with it, which is why
 it is built in a tree of its own - `.gitmodules` carries the reasoning.
@@ -23,6 +23,9 @@ of the cloned tree before building. Nothing modified is redistributed - the patc
 diff against upstream, the build is local, and no shipped game contains a byte of
 it. `mono.vendor/AGENTS.md` argues the shape.
 
+**Box2D is pinned for future 2D physics work.** The v3.1.0 submodule is not
+configured or linked today, so it is not built or shipped.
+
 | Library | Licence | Used for | In a shipped game |
 |---|---|---|---|
 | [SDL3](https://github.com/libsdl-org/SDL) | Zlib | window, input, GPU abstraction | client only |
@@ -31,6 +34,7 @@ it. `mono.vendor/AGENTS.md` argues the shape.
 | [spdlog](https://github.com/gabime/spdlog) | MIT (bundled fmt is MIT) | logging behind `core::Log` | yes |
 | [Tracy](https://github.com/wolfpld/tracy) | 3-clause BSD | the engine profiler | yes, on demand only |
 | [Catch2](https://github.com/catchorg/Catch2) | BSL-1.0 | the test framework | no - tests only |
+| [Box2D](https://github.com/erincatto/box2d) | MIT | future 2D physics work; pinned at v3.1.0 but not configured or linked | no |
 | [shaderc](https://github.com/google/shaderc) | Apache-2.0 | `glslc` at build time, `libshaderc` at runtime | yes, once a caller exists - see below |
 | [SPIRV-Cross](https://github.com/KhronosGroup/SPIRV-Cross) | Apache-2.0 | SPIR-V to MSL, from v0.15: `mono.tools/shadercross` at build time, `Engine::msl` at runtime | client only, once a caller exists - see below |
 | [Dear ImGui](https://github.com/ocornut/imgui) | MIT | editor and tooling UI | studio only |

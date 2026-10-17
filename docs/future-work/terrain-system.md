@@ -38,8 +38,9 @@ The system must provide:
 
 ### Saved world recipe
 
-`scene::Terrain` is already a one-per-world ECS resource. It owns the authored
-recipe, not generated chunks. Its saved fields are:
+`Workspace.Terrain` is a generated, non-creatable singleton instance. Its
+`scene::Terrain` component owns the saved recipe, not generated chunks. Its
+fields are:
 
 - `Seed`;
 - stable generator `core::Name`;
@@ -50,11 +51,13 @@ recipe, not generated chunks. Its saved fields are:
 - enabled state.
 
 The generator name serialises as text. Reads clamp chunk extent and resolution
-to declared ceilings. A world with no resource behaves like terrain is disabled.
-Workspace properties expose the recipe without creating a second copy.
+to declared ceilings. A world with no Terrain instance behaves like terrain is disabled. Workspace
+exposes the instance as `Workspace.Terrain`, and its properties edit the recipe
+on that same component. Installing services creates the singleton and migrates
+the older `scene::Terrain` resource into it.
 
 This remains the world-level entry point. New authored settings extend the
-resource through versioned save and replication schemas. Generated samples,
+component through versioned save and replication schemas. Generated samples,
 meshes, collision, and GPU allocations remain derived artifacts.
 
 ### Editable mesh bridge
@@ -330,8 +333,8 @@ limits. A consumer asks for a name and handles absence explicitly.
 
 ### World recipe extensions
 
-The existing `scene::Terrain` resource should grow only with world-wide authored
-policy:
+The `scene::Terrain` component on `Workspace.Terrain` should grow only with
+world-wide authored policy:
 
 - graph asset name and seed;
 - exposed parameter overrides;
@@ -346,10 +349,11 @@ policy:
 Large override maps and edit journals are referenced by stable asset or resource
 name instead of embedded into a fixed-size component.
 
-`scene::Terrain` registers before `ecs::Components::Seal()` as a world resource,
-not as a constructible `Terrain` instance. It holds the graph and seed that
-describe terrain. Generated chunks remain derived artifacts owned by the terrain
-runtime, never saved ECS rows or network payloads in place of their inputs.
+`scene::Terrain` registers before `ecs::Components::Seal()` as the authored
+component on the generated, non-creatable `Terrain` instance under Workspace. It
+holds the graph and seed that describe terrain. Generated chunks remain derived
+artifacts owned by the terrain runtime, never saved ECS rows or network payloads
+in place of their inputs.
 
 ### Generation request
 

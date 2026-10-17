@@ -10,9 +10,15 @@
 #include <engine/game/CollisionContent.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <numbers>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -31,6 +37,44 @@ namespace engine::game {
 				points.push_back(core::Vector3{vertex.Position[0], vertex.Position[1], vertex.Position[2]});
 			}
 			return points;
+		}
+
+		collision::ConvexHull
+		BuiltinSphereHull(std::span<const core::Vector3> points, const core::Vector3 &centre) {
+			double radiusSquared = 0.0;
+			for (const core::Vector3 &point : points) {
+				const double x = static_cast<double>(point.X) - centre.X;
+				const double y = static_cast<double>(point.Y) - centre.Y;
+				const double z = static_cast<double>(point.Z) - centre.Z;
+				radiusSquared = std::max(radiusSquared, x * x + y * y + z * z);
+			}
+			const float radius = std::nextafter(
+				static_cast<float>(std::sqrt(radiusSquared)), std::numeric_limits<float>::infinity()
+			);
+
+			// These 48 corners circumscribe the sphere with axis, edge and diagonal
+			// tangent planes, avoiding an underbounding render-mesh hull at the 64-corner cap.
+			const std::array<float, 3> coordinates{
+				radius,
+				radius * (std::numbers::sqrt2_v<float> - 1.0f),
+				radius * (std::numbers::sqrt3_v<float> - std::numbers::sqrt2_v<float>),
+			};
+			constexpr std::array<std::array<size_t, 3>, 6> PERMUTATIONS{
+				{{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}}
+			};
+			std::array<core::Vector3, 48> proxy;
+			size_t corner = 0;
+			for (const auto &permutation : PERMUTATIONS) {
+				for (uint32_t signs = 0; signs < 8; signs++) {
+					const core::Vector3 offset{
+						coordinates[permutation[0]] * ((signs & 1) != 0 ? -1.0f : 1.0f),
+						coordinates[permutation[1]] * ((signs & 2) != 0 ? -1.0f : 1.0f),
+						coordinates[permutation[2]] * ((signs & 4) != 0 ? -1.0f : 1.0f),
+					};
+					proxy[corner++] = centre + offset;
+				}
+			}
+			return collision::BuildConvexHull(proxy);
 		}
 
 		// The world's table, or an empty one. The caller writes it back.
@@ -99,7 +143,9 @@ namespace engine::game {
 				baked.push_back(
 					Baked{
 						core::Name(assets::BuiltinName(which)),
-						collision::BuildConvexHull(points),
+						which == assets::BuiltinMesh::Sphere
+							? BuiltinSphereHull(points, (mesh.Minimum + mesh.Maximum) * 0.5f)
+							: collision::BuildConvexHull(points),
 						collision::BuildTriangleMesh(points, mesh.Indices),
 					}
 				);

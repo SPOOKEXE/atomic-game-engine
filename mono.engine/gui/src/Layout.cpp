@@ -9,6 +9,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
+#include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/RichText.hpp>
 #include <engine/gui/Services.hpp>
@@ -319,6 +320,7 @@ namespace engine::gui {
 				ENGINE_HEAP_SCOPE("gui child scan");
 				store.EachChild(instance, [&context](Entity child) {
 					const Store &childStore = context.Host;
+					if (IsPlayerGuiSource(childStore, child)) return;
 					std::vector<Entity> &children = context.Children;
 					Scan &scan = context.Result;
 					if (childStore.Get<Element>(child) != nullptr) {
@@ -977,6 +979,7 @@ namespace engine::gui {
 			std::vector<Entity> &arena,
 			const TextResolutionRequest &text
 		) {
+			if (IsPlayerGuiSource(store, instance)) return Vector2::Zero;
 			const Element *element = store.Get<Element>(instance);
 			if (element == nullptr) {
 				return Vector2::Zero;
@@ -1746,7 +1749,8 @@ namespace engine::gui {
 		void AdvanceScrolling(Store &store, double seconds, Entity collector = ecs::NULL_ENTITY) {
 			std::vector<Entity> frames;
 			store.Each<const ScrollMotion>([&](Entity entity, const ScrollMotion &) {
-				if (collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector)) {
+				if (!IsPlayerGuiSource(store, entity) &&
+					(collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector))) {
 					frames.push_back(entity);
 				}
 			});
@@ -1810,7 +1814,8 @@ namespace engine::gui {
 			// what `Store::Each`'s deferral exists to prevent.
 			std::vector<Entity> layouts;
 			store.Each<const PageLayout>([&](Entity entity, const PageLayout &) {
-				if (collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector)) {
+				if (!IsPlayerGuiSource(store, entity) &&
+					(collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector))) {
 					layouts.push_back(entity);
 				}
 			});
@@ -2005,6 +2010,7 @@ namespace engine::gui {
 			const Scan &scan,
 			bool virtualTemplate
 		) {
+			if (IsPlayerGuiSource(store, instance)) return 0;
 			if (depth > MAXIMUM_DEPTH) {
 				// `Store::SetParent` refuses a cycle, so reaching this means
 				// something built a tree deeper than any interface is, or built
@@ -2467,7 +2473,8 @@ namespace engine::gui {
 	void ReconcileVirtualCollectionAnchors(Store &store, Entity collector) {
 		std::vector<Entity> collections;
 		store.Each<const VirtualCollection>([&](Entity entity, const VirtualCollection &) {
-			if (collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector))
+			if (!IsPlayerGuiSource(store, entity) &&
+				(collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector)))
 				collections.push_back(entity);
 		});
 		for (const Entity entity : collections) {
@@ -2499,7 +2506,8 @@ namespace engine::gui {
 		void RefreshVirtualCollectionAnchors(Store &store, Entity collector) {
 			std::vector<Entity> collections;
 			store.Each<const VirtualCollection>([&](Entity entity, const VirtualCollection &) {
-				if (collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector))
+				if (!IsPlayerGuiSource(store, entity) &&
+					(collector == ecs::NULL_ENTITY || store.IsDescendantOf(entity, collector)))
 					collections.push_back(entity);
 			});
 			for (const Entity entity : collections) {
@@ -2569,7 +2577,9 @@ namespace engine::gui {
 		// **Only the flag is cleared.** The rectangles stay, so an element
 		// scrolled out of view is distinguishable from one never laid out -
 		// `Resolved`'s own comment gives the reason.
-		store.Each<Resolved>([](Entity, Resolved &resolved) { resolved.Rendered = false; });
+		store.Each<Resolved>([&](Entity entity, Resolved &resolved) {
+			if (!IsPlayerGuiSource(store, entity)) resolved.Rendered = false;
+		});
 
 		// **Collected before anything is written.** `Place` writes `Resolved`,
 		// which can move a row between archetypes the first time a node gets
@@ -2580,7 +2590,9 @@ namespace engine::gui {
 		std::vector<Entity> collectors;
 		{
 			ENGINE_HEAP_SCOPE("gui collector handle snapshot");
-			store.Each<const Layer>([&](Entity entity, const Layer &) { collectors.push_back(entity); });
+			store.Each<const Layer>([&](Entity entity, const Layer &) {
+				if (!IsPlayerGuiSource(store, entity)) collectors.push_back(entity);
+			});
 			// Draw order, and stable so two collectors sharing a `DisplayOrder`
 			// keep the order the store held them in rather than swapping between
 			// frames as archetypes reshuffle.
@@ -2641,7 +2653,8 @@ namespace engine::gui {
 		ENGINE_PROFILE_CAT("gui collector layout", engine::core::ProfileCategory::ECS);
 
 		const LayoutIds &ids = LayoutClasses();
-		if (!store.Alive(collector) || !store.IsA(collector, ids.Collector)) {
+		if (!store.Alive(collector) || IsPlayerGuiSource(store, collector) ||
+			!store.IsA(collector, ids.Collector)) {
 			return 0;
 		}
 

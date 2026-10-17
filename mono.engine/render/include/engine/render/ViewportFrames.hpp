@@ -40,13 +40,15 @@ namespace engine::render {
 	  public:
 		// Renders every visible viewport command into consecutive scene slots.
 		// Returns the number whose camera and target were valid.
-		// Content names resolve in the containing world's residency namespace.
+		// Ordinary content resolves under owner; named graph instances resolve
+		// under worldOwner, which defaults to owner for scoped client content.
 		size_t Render(
 			Renderer &renderer,
 			ecs::Store &store,
 			const gui::DrawList &list,
 			size_t firstSlot,
-			core::Name owner = {}
+			core::Name owner = {},
+			core::Name worldOwner = {}
 		);
 
 		// Resolves the texture produced by the most recent `Render`.

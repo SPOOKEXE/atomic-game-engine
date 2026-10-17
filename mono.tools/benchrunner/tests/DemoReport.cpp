@@ -438,6 +438,249 @@ TEST_CASE("equal fifteen-second windows still reject GPU allocation rate regress
 			"1150000.000 | FAIL"
 		) != std::string::npos
 	);
+	std::ostringstream iterationDocument;
+	CHECK_FALSE(DemoCompareTable(
+		iterationDocument, baseline, current, DemoLimits{}, nullptr, DemoCostBasis::Iteration
+	));
+	CHECK(iterationDocument.str().find("gpu_allocated_bytes_per_frame") != std::string::npos);
+}
+
+TEST_CASE("iteration cost basis gates per-frame churn independently of frame rate", "[benchrunner]") {
+	DemoFixture fixture;
+	fixture.Report["metrics"]["gpu_allocated_bytes"] = 3'000'000;
+	fixture.Write();
+	const auto baseline = DemoLoad(fixture.Directory);
+	SECTION("faster frames with unchanged per-frame churn pass iteration and fail capacity") {
+		fixture.Report["frame_count"] = 450;
+		fixture.Report["metrics"]["gpu_allocated_bytes"] = 4'500'000;
+	}
+	SECTION("slower frames with higher per-frame churn fail iteration despite a lower rate") {
+		fixture.Report["frame_count"] = 150;
+		fixture.Report["metrics"]["gpu_allocated_bytes"] = 1'800'000;
+	}
+	fixture.Write();
+	const auto current = DemoLoad(fixture.Directory);
+	std::ostringstream iterationDocument;
+	const bool iterationPassed = DemoCompareTable(
+		iterationDocument, baseline, current, DemoLimits{}, nullptr, DemoCostBasis::Iteration
+	);
+	std::ostringstream capacityDocument;
+	const bool capacityPassed = DemoCompareTable(capacityDocument, baseline, current, DemoLimits{});
+	const bool faster = fixture.Report["frame_count"] == 450;
+	CHECK(iterationPassed == faster);
+	CHECK(capacityPassed == !faster);
+	if (faster) {
+		CHECK(
+			iterationDocument.str().find("gpu_allocated_bytes_per_frame | 10000.000 | 10000.000") !=
+			std::string::npos
+		);
+		CHECK(DemoDiagnostic("gpu_allocated_bytes_per_second", DemoCostBasis::Iteration));
+		CHECK(DemoDiagnostic("render_ms_per_second", DemoCostBasis::Iteration));
+		CHECK(capacityDocument.str().find("gpu_allocated_bytes_per_second") != std::string::npos);
+	} else {
+		CHECK(
+			iterationDocument.str().find("gpu_allocated_bytes_per_frame | 10000.000 | 12000.000") !=
+			std::string::npos
+		);
+		CHECK(iterationDocument.str().find("gpu_allocated_bytes_per_second") != std::string::npos);
+	}
+}
+
+TEST_CASE("iteration cost basis fails when paired per-frame coverage is missing", "[benchrunner]") {
+	DemoFixture fixture;
+	fixture.Report["metrics"]["gpu_allocated_bytes"] = 3'000;
+	fixture.Write();
+	auto baseline = DemoLoad(fixture.Directory);
+	auto current = baseline;
+	SECTION("frame denominator missing") {
+		current.Workloads.at("Demo").Metrics.erase("frame_count");
+	}
+	SECTION("matching churn per-frame counter missing") {
+		baseline.Workloads.at("Demo").Metrics.erase("gpu_allocated_bytes_per_frame");
+		current.Workloads.at("Demo").Metrics.erase("gpu_allocated_bytes_per_frame");
+	}
+	std::ostringstream document;
+	bool coverage = true;
+	CHECK_FALSE(
+		DemoCompareTable(document, baseline, current, DemoLimits{}, &coverage, DemoCostBasis::Iteration)
+	);
+	CHECK_FALSE(coverage);
+	CHECK(
+		document.str().find("collect fresh reports with matching counters and denominators") !=
+		std::string::npos
+	);
+}
+
+TEST_CASE("iteration cost basis rejects faster frames with higher per-frame churn", "[benchrunner]") {
+	DemoFixture fixture;
+	fixture.Report["frame_count"] = 300;
+	fixture.Report["metrics"]["gpu_allocated_bytes"] = 3'000'000;
+	fixture.Write();
+	const auto baseline = DemoLoad(fixture.Directory);
+	fixture.Report["frame_count"] = 450;
+	fixture.Report["metrics"]["gpu_allocated_bytes"] = 5'400'000;
+	fixture.Write();
+	const auto current = DemoLoad(fixture.Directory);
+	std::ostringstream iterationDocument;
+	CHECK_FALSE(DemoCompareTable(
+		iterationDocument, baseline, current, DemoLimits{}, nullptr, DemoCostBasis::Iteration
+	));
+	CHECK(
+		iterationDocument.str().find("gpu_allocated_bytes_per_frame | 10000.000 | 12000.000") !=
+		std::string::npos
+	);
+}
+
+TEST_CASE("iteration cost basis rejects stale or missing raw churn counters", "[benchrunner]") {
+	DemoFixture fixture;
+	fixture.Report["metrics"]["gpu_allocated_bytes"] = 3'000'000;
+	fixture.Write();
+	const auto baseline = DemoLoad(fixture.Directory);
+	SECTION("stale explicit per-frame value leaves wall policy unchanged") {
+		fixture.Report["metrics"]["gpu_allocated_bytes_per_frame"] = 12'000;
+	}
+	SECTION("per-frame and rate values lack their raw counter") {
+		fixture.Report["metrics"].erase("gpu_allocated_bytes");
+		fixture.Report["metrics"]["gpu_allocated_bytes_per_frame"] = 10'000;
+		fixture.Report["metrics"]["gpu_allocated_bytes_per_second"] = 598'802.3952095808;
+	}
+	fixture.Write();
+	const auto current = DemoLoad(fixture.Directory);
+	std::ostringstream iterationDocument;
+	bool iterationCoverage = true;
+	CHECK_FALSE(DemoCompareTable(
+		iterationDocument, baseline, current, DemoLimits{}, &iterationCoverage, DemoCostBasis::Iteration
+	));
+	CHECK_FALSE(iterationCoverage);
+	CHECK(
+		iterationDocument.str().find("collect fresh reports with matching counters and denominators") !=
+		std::string::npos
+	);
+	if (fixture.Report["metrics"].contains("gpu_allocated_bytes")) {
+		std::ostringstream capacityDocument;
+		CHECK(DemoCompareTable(capacityDocument, baseline, current, DemoLimits{}));
+	}
+}
+
+TEST_CASE("iteration cost basis rejects mismatched timing-rate provenance", "[benchrunner]") {
+	DemoFixture fixture;
+	fixture.Report["metrics"]["render_ms_per_second"] = 300.0 / 5.01;
+	fixture.Write();
+	const auto baseline = DemoLoad(fixture.Directory);
+	fixture.Report["metrics"]["render_ms_per_second"] = 10;
+	fixture.Write();
+	const auto current = DemoLoad(fixture.Directory);
+	std::ostringstream iterationDocument;
+	bool iterationCoverage = true;
+	CHECK_FALSE(DemoCompareTable(
+		iterationDocument, baseline, current, DemoLimits{}, &iterationCoverage, DemoCostBasis::Iteration
+	));
+	CHECK_FALSE(iterationCoverage);
+	std::ostringstream capacityDocument;
+	CHECK(DemoCompareTable(capacityDocument, baseline, current, DemoLimits{}));
+}
+
+TEST_CASE("legacy aggregate input cannot claim iteration provenance", "[benchrunner]") {
+	DemoFixture fixture;
+	fixture.Write();
+	const auto collection = DemoLoad(fixture.Directory);
+	auto aggregate = DemoAggregateJson(collection);
+	const auto legacy = DemoLoadAggregate(aggregate);
+	std::ostringstream iterationDocument;
+	bool iterationCoverage = true;
+	CHECK_FALSE(DemoCompareTable(
+		iterationDocument, legacy, legacy, DemoLimits{}, &iterationCoverage, DemoCostBasis::Iteration
+	));
+	CHECK_FALSE(iterationCoverage);
+	std::ostringstream capacityDocument;
+	CHECK(DemoCompareTable(capacityDocument, legacy, legacy, DemoLimits{}));
+}
+
+TEST_CASE("iteration coverage validates measured Added workloads", "[benchrunner]") {
+	DemoFixture fixture;
+	fixture.Write();
+	const auto measured = DemoLoad(fixture.Directory);
+	auto baseline = measured;
+	auto current = measured;
+	current.Workloads.at("Demo").IterationBasisValid = false;
+	SECTION("baseline marks the workload unavailable") {
+		baseline.Workloads.at("Demo").Status = "unavailable";
+		baseline.Workloads.at("Demo").Metrics.clear();
+	}
+	SECTION("current contains a new workload") {
+		baseline.Workloads.clear();
+	}
+	std::ostringstream iterationDocument;
+	bool iterationCoverage = true;
+	CHECK_FALSE(DemoCompareTable(
+		iterationDocument, baseline, current, DemoLimits{}, &iterationCoverage, DemoCostBasis::Iteration
+	));
+	CHECK_FALSE(iterationCoverage);
+	CHECK(iterationDocument.str().find("FAIL: coverage") != std::string::npos);
+	CHECK(iterationDocument.str().find("Added") != std::string::npos);
+	std::ostringstream capacityDocument;
+	CHECK(DemoCompareTable(capacityDocument, baseline, current, DemoLimits{}));
+}
+
+TEST_CASE("iteration cost basis keeps unknown per-second metrics strict", "[benchrunner]") {
+	DemoFixture fixture;
+	fixture.Report["metrics"]["background_jobs_per_second"] = 10;
+	fixture.Report["metrics"]["network_packets_per_second"] = 10;
+	fixture.Write();
+	const auto baseline = DemoLoad(fixture.Directory);
+	fixture.Report["metrics"]["background_jobs_per_second"] = 12;
+	fixture.Report["metrics"]["network_packets_per_second"] = 12;
+	fixture.Write();
+	const auto current = DemoLoad(fixture.Directory);
+	std::ostringstream document;
+	CHECK_FALSE(
+		DemoCompareTable(document, baseline, current, DemoLimits{}, nullptr, DemoCostBasis::Iteration)
+	);
+	CHECK(document.str().find("background_jobs_per_second | 10.000 | 12.000") != std::string::npos);
+	CHECK(
+		document.str().find(
+			"background_jobs_per_second | 10.000 | 12.000 | +2.000 (20.000%) | 11.500 | FAIL"
+		) != std::string::npos
+	);
+	CHECK(DemoDiagnostic("network_packets_per_second"));
+	CHECK_FALSE(DemoDiagnostic("network_packets_per_second", DemoCostBasis::Iteration));
+	CHECK(document.str().find("network_packets_per_second | 10.000 | 12.000") != std::string::npos);
+}
+
+TEST_CASE("demo CLI accepts and documents the opt-in iteration cost basis", "[benchrunner]") {
+	DemoFixture baseline;
+	DemoFixture current;
+	baseline.Write();
+	current.Write();
+	std::vector<std::string> arguments{
+		"benchrunner",
+		"--demo-compare",
+		baseline.Directory.string(),
+		current.Directory.string(),
+		"--demo-cost-basis",
+		"iteration"
+	};
+	std::vector<char *> pointers;
+	for (std::string &argument : arguments)
+		pointers.push_back(argument.data());
+	std::ostringstream captured;
+	auto *previous = std::cout.rdbuf(captured.rdbuf());
+	const int status = DemoReportMain(static_cast<int>(pointers.size()), pointers.data());
+	std::cout.rdbuf(previous);
+	CHECK(status == 0);
+	CHECK(captured.str().find("Cost basis: iteration efficiency") != std::string::npos);
+	CHECK(
+		captured.str().find(
+			"Known derived timing and churn rates per second remain visible as diagnostics"
+		) != std::string::npos
+	);
+	arguments = {
+		"benchrunner", "--demo-table", baseline.Directory.string(), "--demo-cost-basis", "iteration"
+	};
+	pointers.clear();
+	for (std::string &argument : arguments)
+		pointers.push_back(argument.data());
+	CHECK(DemoReportMain(static_cast<int>(pointers.size()), pointers.data()) == 2);
 }
 
 TEST_CASE(

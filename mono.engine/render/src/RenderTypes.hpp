@@ -1,5 +1,7 @@
 #pragma once
 
+#include "WeatherShadows.hpp"
+
 // The device-side layouts and the frame-wide constants every part of the
 // renderer shares.
 //
@@ -176,6 +178,8 @@ namespace engine::render {
 		glm::vec4 PackedPbrChannels{0.0f, 0.0f, 0.0f, 0.0f};
 		// x: dielectric IOR, y: surface thickness in metres.
 		glm::vec4 Transmission{1.5f, 0.0f, 0.0f, 0.0f};
+		// Appended after the established material prefix for native forward sunlight.
+		WeatherShadowLightingUniforms CloudShadow;
 	};
 
 	struct ShadowUniforms {

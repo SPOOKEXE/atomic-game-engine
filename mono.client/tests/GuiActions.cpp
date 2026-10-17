@@ -1,8 +1,8 @@
+#include "GuiActions.hpp"
+
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
-
-#include <client/GuiActions.hpp>
 
 TEST_SUITE_ID("client.gui_actions")
 

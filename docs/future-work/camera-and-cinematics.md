@@ -87,6 +87,42 @@ viewport frame, thumbnail, and Studio panel may have different sizes and near
 plane needs. The future system keeps that rule. It caches target-independent
 rig and lens output, then each view resolves matrices against its own target.
 
+### Tracked headset views
+
+The [VR system plan](vr-system.md) owns headset sessions, per-eye calibration,
+and experimental glasses-style magnification. It extends the shared view
+output with runtime eye poses and asymmetric frusta. A headset's optical focal
+plane is separate from this document's cinematic `FocusDistance` and depth of
+field; changing a render lens cannot supply physical diopter adjustment.
+
+In VR, camera rigs and sequences drive the allowed tracking origin or explicit
+locomotion policy while retaining the user's tracked head motion. Desktop
+camera shake, forced head rotation, and cinematic FOV curves require a separate
+VR comfort policy. The spectator camera remains an independent view and cannot
+overwrite headset eye geometry or the user's local calibration profile.
+
+### Current viewer-owned cameras
+
+`Instance.new` follows the script's execution side. A client script creates a
+predicted, viewer-local instance; a server script creates an authoritative
+instance. Creating below a viewer-local parent keeps the new subtree local, and
+classes explicitly marked runtime-local remain local on either side. Client-local
+instances do not enter authority replication or authored game saves, and that
+ownership applies to their descendants.
+
+The plain `Camera` class is runtime-local. Studio creates one named `Camera`
+for each local viewport, so two Studio views may each contain a `Camera` with
+the same name. The viewport retains its own entity handle; the name alone does
+not identify a panel's eye. Runtime cameras are also transient in Studio, which
+keeps the camera and its children out of the game file.
+
+`SurfaceCamera` and `Portal` are authored camera classes. They are not the
+viewer-local runtime `Camera` class: their lens and surface settings belong to
+the authored world and can be saved or replicated when created authoritatively.
+A client-created instance still follows the normal local-creation rule. This
+distinction keeps a mirror's projection camera from being mistaken for the
+editor's point of view.
+
 ## Non-negotiable design rules
 
 1. Simulation and presentation have separate clocks and separate side effects.

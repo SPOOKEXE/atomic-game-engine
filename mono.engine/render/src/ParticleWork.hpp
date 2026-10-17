@@ -9,6 +9,7 @@
 #include <engine/core/types/AABB.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/graph/Frustum.hpp>
+#include <engine/render/Renderer.hpp>
 
 #include <glm/mat4x4.hpp>
 
@@ -20,6 +21,27 @@ namespace engine::render {
 		uint32_t Block = 0;
 		uint32_t StateRow = 0;
 	};
+
+	// Derived residency key. Authored revisions may change without changing
+	// the flat work mapping, material groups or flipbook table membership.
+	struct ParticleWorkBlock {
+		uint32_t Index = 0;
+		uint32_t First = 0;
+		uint32_t Capacity = 0;
+		uint32_t Frames = 0;
+		bool Ready = false;
+		bool VariableTiming = false;
+		bool InvalidTiming = false;
+
+		bool operator==(const ParticleWorkBlock &) const = default;
+	};
+
+	ParticleWorkBlock ParticleWorkBlockOf(const ParticleBatch &batch);
+	bool ParticleLayoutMatches(
+		std::span<const ParticleBatch> current,
+		std::span<const ParticleBatch> prepared,
+		std::span<const ParticleWorkBlock> work
+	);
 
 	// A conservative world-space box for every particle one emitter can draw.
 	// `Cullable` is false when authored non-finite or amplifying values make a
@@ -49,6 +71,10 @@ namespace engine::render {
 			float maximumLifetime,
 			double simulatedSeconds
 		);
+
+		bool Matches(uint32_t generation, uint32_t revision, uint32_t curveRevision) const {
+			return Generation == generation && Revision == revision && CurveRevision == curveRevision;
+		}
 
 		bool Ready(double simulatedSeconds) const {
 			return Cullable && simulatedSeconds >= CullableAfter;

@@ -41,6 +41,12 @@
 namespace engine::render {
 
 	namespace {
+		bool NeedsMeshResidencyFilter(std::span<const scene::DrawInstance> rows) {
+			return std::any_of(rows.begin(), rows.end(), [](const scene::DrawInstance &row) {
+				return row.Mesh.IsValid();
+			});
+		}
+
 		template <typename Value>
 		void StageRanges(
 			Value *destination, std::span<const InstanceUploadRange> ranges, std::span<const Value> source
@@ -155,6 +161,9 @@ namespace engine::render {
 		const size_t targetSlot = Request.TargetSlot;
 		const View &source = *Request.Source;
 		State->ActiveContentOwner = source.ContentOwner;
+		State->ActiveImageGraphWorld = source.WorldName;
+		State->ActiveLocalImageGraphWorld =
+			source.ImageGraphWorldName.IsValid() ? source.ImageGraphWorldName : source.WorldName;
 		ContentSignature = scene::MixSignature(State->ResourceEpoch, source.ContentOwner.Id());
 		ContentSignature =
 			scene::MixSignature(ContentSignature, source.LensContentOwner.value_or(source.ContentOwner).Id());
@@ -177,6 +186,7 @@ namespace engine::render {
 		}
 		ContentSignature = scene::MixSignature(ContentSignature, source.World);
 		ContentSignature = scene::MixSignature(ContentSignature, source.WorldName.Id());
+		ContentSignature = scene::MixSignature(ContentSignature, source.ImageGraphWorldName.Id());
 		// Replacing a graph releases its targets even when world inputs stay unchanged.
 		if (const auto *installed = State->PipelineFor(Request.Pipeline))
 			ContentSignature = scene::MixSignature(ContentSignature, installed->Revision);
@@ -497,41 +507,48 @@ namespace engine::render {
 		// mirror pass and the camera pass disagree about `Transparency` before
 		// `OrderScene` was one function.
 		//
-		// A frame where everything named is loaded copies the span and does one
-		// hash lookup per instance, which is nothing beside the hundred and
-		// fifty bytes of traffic per instance the collector already pays.
+		// A span with no named meshes cannot lose rows. Keep it borrowed instead
+		// of copying every default Part into a per-view buffer. Named meshes still
+		// take the residency path so a missing asset never becomes a default cube.
 		{
-			ENGINE_PROFILE_CAT("filter unloaded", core::ProfileCategory::Render);
+			ENGINE_PROFILE_CAT("classify/filter mesh rows", core::ProfileCategory::Render);
 
 			State->DrawableHidden.clear();
-			scene::KeepLoaded(
-				instances,
-				[State, &source](const scene::DrawInstance &row) {
-					return State->Meshes.Has(
-						row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
-					);
-				},
-				State->Drawable,
-				source.EyeHiddenRows,
-				source.EyeHiddenRows.empty() ? nullptr : &State->DrawableHidden
-			);
+			if (NeedsMeshResidencyFilter(instances)) {
+				scene::KeepLoaded(
+					instances,
+					[State, &source](const scene::DrawInstance &row) {
+						return State->Meshes.Has(
+							row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
+						);
+					},
+					State->Drawable,
+					source.EyeHiddenRows,
+					source.EyeHiddenRows.empty() ? nullptr : &State->DrawableHidden
+				);
+				instances = State->Drawable;
+			} else {
+				// No row was removed, so source indices remain the drawable indices.
+				State->DrawableHidden.assign(source.EyeHiddenRows.begin(), source.EyeHiddenRows.end());
+			}
 
 			// **The other worlds pay the same toll.** A destination whose meshes
 			// have not arrived here would otherwise come up as the field of
 			// cubes described above - seen through a portal, which is the one
 			// place a viewer cannot walk over and check.
-			scene::KeepLoaded(
-				foreign,
-				[State, &source](const scene::DrawInstance &row) {
-					return State->Meshes.Has(
-						row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
-					);
-				},
-				State->DrawableForeign
-			);
+			if (NeedsMeshResidencyFilter(foreign)) {
+				scene::KeepLoaded(
+					foreign,
+					[State, &source](const scene::DrawInstance &row) {
+						return State->Meshes.Has(
+							row.Mesh, Impl::MeshContentOwner(row.Mesh, source.ContentOwnerOf(row.SourceWorld))
+						);
+					},
+					State->DrawableForeign
+				);
+				foreign = State->DrawableForeign;
+			}
 		}
-		instances = State->Drawable;
-		foreign = State->DrawableForeign;
 
 		// --- uploads --------------------------------------------------------
 
@@ -605,7 +622,7 @@ namespace engine::render {
 			MAX_PORTAL_DEPTH
 		);
 
-		const bool sharedCaptures = GraphEnabled(core::Name("surface-capture"));
+		const bool sharedCaptures = graphEnabled(core::Name("surface-capture"));
 		for (const SurfaceView &view : surfaces) {
 			if (view.Index < 0 || static_cast<size_t>(view.Index) >= scene::MAX_SURFACES) {
 				ENGINE_WARN(
@@ -676,7 +693,7 @@ namespace engine::render {
 			pane.Normal = view.PaneNormal;
 			pane.First = view.PaneFirst;
 			pane.Second = view.PaneSecond;
-			pane.Surface = static_cast<int8_t>(accepted[index].Index);
+			pane.Surface = static_cast<int16_t>(accepted[index].Index);
 			pane.TagFilter = view.TagFilter;
 			pane.NearPlane = view.PaneNear;
 			pane.FarPlane = view.PaneFar;
@@ -727,12 +744,19 @@ namespace engine::render {
 				.PixelBudget = capturePixels,
 				.Width = sceneWidth,
 				.Height = sceneHeight,
-				.Depth = budget.Depth
+				.Depth = budget.Depth,
+				// An explicit capture budget owns the whole path. Otherwise the
+				// authored mirror count must not inherit the portal depth default.
+				.MirrorDepth = source.SurfaceBudget || State->SurfaceBounces == 0 ? 32 : State->SurfaceBounces
 			};
 			const uint64_t captureSignature = SurfaceCaptureSignature(keyedCaptureRequest);
 			if (bank.CaptureCache.NeedsRefresh(captureSignature)) {
 				result.SurfaceCapturePlanWrite = true;
-				const auto captureStatus = PlanSurfaceCaptures(keyedCaptureRequest, bank.CapturePlan);
+				SurfaceCaptureStatus captureStatus;
+				{
+					ENGINE_PROFILE_CAT("plan surface captures", core::ProfileCategory::Render);
+					captureStatus = PlanSurfaceCaptures(keyedCaptureRequest, bank.CapturePlan);
+				}
 				if (captureStatus == SurfaceCaptureStatus::Invalid) {
 					EndIncompleteView();
 					return ViewStart::Abandoned;
@@ -775,9 +799,15 @@ namespace engine::render {
 		size_t visibleCount = instances.size();
 		opaqueCount = 0;
 		core::Name orderedEntities;
-		State->VisibilityWorking.Begin(State->FrameCounter, Request.TargetSlot, Request.Source->WorldName);
-		for (const scene::DrawInstance &instance : instances) {
-			State->VisibilityWorking.Observe(instance);
+		const bool profileCpuNodes = State->ProfileTier != ProfilingTier::Off;
+		{
+			ENGINE_PROFILE_CAT("observe scene visibility", core::ProfileCategory::Render);
+			State->VisibilityWorking.Begin(
+				State->FrameCounter, Request.TargetSlot, Request.Source->WorldName
+			);
+			for (const scene::DrawInstance &instance : instances) {
+				State->VisibilityWorking.Observe(instance);
+			}
 		}
 
 		// **The whole CPU half of the pipeline, and it had no span.** Frustum
@@ -796,14 +826,15 @@ namespace engine::render {
 				std::span<const uint32_t> frustumInput;
 				if (node->Kind == core::Name("cull-frustum")) {
 					for (const graph::ResourceId resource : node->Reads) {
-						const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+						const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 						if (desc != nullptr && desc->Kind == graph::ResourceKind::Entities) {
 							frustumInput = entityFlow.Get(desc->Name);
 							break;
 						}
 					}
 				}
-				const auto started = std::chrono::steady_clock::now();
+				const auto started = profileCpuNodes ? std::chrono::steady_clock::now()
+													 : std::chrono::steady_clock::time_point{};
 				const graph::EntityNodeRun run = graph::RunEntityNode(
 					selectedPipeline->Graph,
 					*node,
@@ -838,9 +869,11 @@ namespace engine::render {
 					opaqueCount = run.Opaque;
 					orderedEntities = run.Output;
 				}
-				const auto ended = std::chrono::steady_clock::now();
-				cpuNodeWall[node->Name.Id()] +=
-					std::chrono::duration<double, std::micro>(ended - started).count();
+				if (profileCpuNodes) {
+					cpuNodeWall[node->Name.Id()] +=
+						std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - started)
+							.count();
+				}
 			}
 		}
 		if (!sceneBoundsReady) {
@@ -849,7 +882,7 @@ namespace engine::render {
 
 		const std::span<const uint32_t> ordered = entityFlow.Get(orderedEntities);
 		{
-			// The filtered source already lives in Drawable; retain only its camera order.
+			// The caller or Drawable retains the source; copy only its camera order.
 			ENGINE_PROFILE_CAT("copy draw lists", core::ProfileCategory::Render);
 			State->VisibleInstances = instances;
 			State->DrawOrder.assign(ordered.begin(), ordered.end());
@@ -1068,10 +1101,12 @@ namespace engine::render {
 		// shows a second simulation and a camera parented to the world has no
 		// face, so neither can be descended into and neither reports a depth.
 		const graph::Node *mirrorCapture = graphNode(core::Name("mirror-capture"));
+		const graph::Node *captureFormatNode =
+			mirrorCapture ? mirrorCapture : graphNode(core::Name("surface-capture"));
 		MirrorFormat = State->ColourFormat();
-		if (mirrorCapture != nullptr) {
-			for (const auto resource : mirrorCapture->Writes) {
-				const auto *desc = selectedPipeline->Graph.FindResource(resource);
+		if (captureFormatNode != nullptr) {
+			for (const auto resource : captureFormatNode->Writes) {
+				const auto *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 				if (desc != nullptr && desc->Format == graph::ResourceFormat::RGBA16F) {
 					MirrorFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 					break;
@@ -1393,23 +1428,26 @@ namespace engine::render {
 			State->SceneJointFrames.assign(Request.JointFrames.begin(), Request.JointFrames.end());
 		}
 		ownCount = static_cast<uint32_t>(State->SceneInstances.size());
-		State->SceneInstances.insert(State->SceneInstances.end(), foreign.begin(), foreign.end());
-		const uint32_t foreignJointBase = static_cast<uint32_t>(State->SceneJointFrames.size());
-		State->SceneJointFrames.insert(
-			State->SceneJointFrames.end(),
-			Request.ForeignJointFrames.begin(),
-			Request.ForeignJointFrames.end()
-		);
-		for (uint32_t index = 0; index < State->SceneInstances.size(); index++) {
-			scene::DrawInstance &instance = State->SceneInstances[index];
-			const size_t available =
-				index < ownCount ? Request.JointFrames.size() : Request.ForeignJointFrames.size();
-			const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
-			if (instance.SkinCount == 0 || end > available) {
-				instance.SkinFirst = 0;
-				instance.SkinCount = 0;
-			} else if (index >= ownCount) {
-				instance.SkinFirst += foreignJointBase;
+		{
+			ENGINE_PROFILE_CAT("append/validate scene skins", core::ProfileCategory::Render);
+			State->SceneInstances.insert(State->SceneInstances.end(), foreign.begin(), foreign.end());
+			const uint32_t foreignJointBase = static_cast<uint32_t>(State->SceneJointFrames.size());
+			State->SceneJointFrames.insert(
+				State->SceneJointFrames.end(),
+				Request.ForeignJointFrames.begin(),
+				Request.ForeignJointFrames.end()
+			);
+			for (uint32_t index = 0; index < State->SceneInstances.size(); index++) {
+				scene::DrawInstance &instance = State->SceneInstances[index];
+				const size_t available =
+					index < ownCount ? Request.JointFrames.size() : Request.ForeignJointFrames.size();
+				const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
+				if (instance.SkinCount == 0 || end > available) {
+					instance.SkinFirst = 0;
+					instance.SkinCount = 0;
+				} else if (index >= ownCount) {
+					instance.SkinFirst += foreignJointBase;
+				}
 			}
 		}
 
@@ -1426,16 +1464,19 @@ namespace engine::render {
 		// so it would also move the very rows a surface has already named.
 		{
 			ENGINE_PROFILE_CAT("order scene", core::ProfileCategory::Render);
-			const auto started = std::chrono::steady_clock::now();
+			const auto started =
+				profileCpuNodes ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 			plan = scene::OrderScene(
 				std::span<const scene::DrawInstance>(State->SceneInstances).first(ownCount),
 				sceneEye,
 				State->SceneOrder
 			);
-			if (const graph::Node *worldNode = graphNode(core::Name("world")); worldNode != nullptr) {
-				cpuNodeWall[worldNode->Name.Id()] +=
-					std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - started)
-						.count();
+			if (profileCpuNodes) {
+				if (const graph::Node *worldNode = graphNode(core::Name("world")); worldNode != nullptr) {
+					cpuNodeWall[worldNode->Name.Id()] +=
+						std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - started)
+							.count();
+				}
 			}
 		}
 
@@ -1555,14 +1596,11 @@ namespace engine::render {
 			const Impl::ParticlePreparation prepared =
 				effectsVisible ? State->PrepareParticles(source, command, timingSlot)
 							   : Impl::ParticlePreparation{};
-			const bool fieldPrepared =
-				effectsVisible ? State->PrepareGpuParticleField(source, command, timingSlot) : true;
-			particleCount = prepared.Count + (State->ActiveGpuParticleFieldWorld == nullptr
-												  ? 0
-												  : State->ActiveGpuParticleFieldWorld->ActiveCount);
-			result.ComputeDispatches +=
-				prepared.Dispatches +
-				(fieldPrepared && State->ActiveGpuParticleFieldWorld != nullptr ? 1 : 0);
+			const Impl::GpuParticleFieldPreparation fieldPrepared =
+				effectsVisible ? State->PrepareGpuParticleFields(source, command, timingSlot)
+							   : Impl::GpuParticleFieldPreparation{};
+			particleCount = prepared.Count + fieldPrepared.Count;
+			result.ComputeDispatches += prepared.Dispatches + fieldPrepared.Dispatches;
 			result.Particles = particleCount;
 
 			ribbonCount = effectsVisible ? State->PrepareRibbons(ribbonVertices) : 0;
@@ -1708,16 +1746,10 @@ namespace engine::render {
 										  uint32_t &outWidth,
 										  uint32_t &outHeight,
 										  core::Name port = {}) {
+			ENGINE_PROFILE_CAT("resolve pipeline output extent", core::ProfileCategory::Render);
 			outWidth = sceneWidth;
 			outHeight = sceneHeight;
-			const graph::Node *node = nullptr;
-			for (uint32_t value = 1; value <= selectedPipeline->Graph.Count(); value++) {
-				const graph::Node *candidate = selectedPipeline->Graph.Find(graph::NodeId{value});
-				if (candidate != nullptr && candidate->Kind == kind) {
-					node = candidate;
-					break;
-				}
-			}
+			const graph::Node *node = selectedPipeline->NodeLookup.First(selectedPipeline->Graph, kind);
 			if (node == nullptr) return;
 			if (port.IsValid()) {
 				const auto found = std::find(node->WritePorts.begin(), node->WritePorts.end(), port);
@@ -1725,7 +1757,8 @@ namespace engine::render {
 				output = static_cast<size_t>(found - node->WritePorts.begin());
 			}
 			if (output >= node->Writes.size()) return;
-			const graph::ResourceDesc *resource = selectedPipeline->Graph.FindResource(node->Writes[output]);
+			const graph::ResourceDesc *resource =
+				selectedPipeline->Graph.FindResourceDesc(node->Writes[output]);
 			if (resource != nullptr) {
 				resource->Resolve(sceneWidth, sceneHeight, outWidth, outHeight);
 			}
@@ -1970,41 +2003,49 @@ namespace engine::render {
 			State->InstanceWorldFor(Request.Source->World, Request.Source->WorldName);
 		State->ActiveInstanceWorld = &residentWorld;
 		InstanceResidency &residency = residentWorld.Instances;
-		residency.BeginFrame(State->FrameCounter);
-		target.InstanceIndices.resize(uploadCount);
+		{
+			ENGINE_PROFILE_CAT("begin instance residency", core::ProfileCategory::Render);
+			residency.BeginFrame(State->FrameCounter);
+		}
+		{
+			ENGINE_PROFILE_CAT("prepare instance metadata", core::ProfileCategory::Render);
+			target.InstanceIndices.resize(uploadCount);
 
-		State->SlotMesh.resize(uploadCount);
-		State->SlotTexture.resize(uploadCount);
-		State->SlotContentOwner.resize(uploadCount);
-		State->SlotNormalMap.resize(uploadCount);
-		State->SlotRoughnessMap.resize(uploadCount);
-		State->SlotOcclusionMap.resize(uploadCount);
-		State->SlotHeightMap.resize(uploadCount);
-		State->SlotMetalnessMap.resize(uploadCount);
-		State->SlotEmissiveMap.resize(uploadCount);
-		State->SlotPackedPbrMap.resize(uploadCount);
-		State->SlotSpecularFactor.resize(uploadCount);
-		State->SlotTransmissionFactor.resize(uploadCount);
-		State->SlotIndexOfRefraction.resize(uploadCount);
-		State->SlotThickness.resize(uploadCount);
-		State->SlotPackedPbrChannels.resize(uploadCount);
-		State->SlotResample.resize(uploadCount);
-		State->SlotShadowDetail.resize(uploadCount);
-		State->SlotTwoSided.resize(uploadCount);
-		State->SlotShader.resize(uploadCount);
-		State->SlotTags.resize(uploadCount);
-		State->SlotRig.resize(uploadCount);
-		State->SlotSeam.resize(uploadCount);
-		State->SlotSeamFirst.resize(uploadCount);
-		State->SlotSeamSecond.resize(uploadCount);
-		State->SlotSeamCentre.resize(uploadCount);
-		State->SlotSeamLight.resize(uploadCount);
-		State->SlotInstanceKey.resize(sceneCount);
-		State->SlotInstanceCurrent.resize(sceneCount);
-		State->SlotLod.assign(uploadCount, NO_LOD_DRAW);
-		State->SceneSlotOfSource.resize(ownCount);
-		State->LodFrame.Clear();
-		State->Lod.Ready = false;
+			State->SlotMesh.resize(uploadCount);
+			State->SlotTexture.resize(uploadCount);
+			State->SlotContentOwner.resize(uploadCount);
+			State->SlotImageGraphWorld.resize(uploadCount);
+			State->SlotImageGraphFallbackWorld.resize(uploadCount);
+			State->SlotNormalMap.resize(uploadCount);
+			State->SlotRoughnessMap.resize(uploadCount);
+			State->SlotOcclusionMap.resize(uploadCount);
+			State->SlotHeightMap.resize(uploadCount);
+			State->SlotMetalnessMap.resize(uploadCount);
+			State->SlotEmissiveMap.resize(uploadCount);
+			State->SlotPackedPbrMap.resize(uploadCount);
+			State->SlotSpecularFactor.resize(uploadCount);
+			State->SlotTransmissionFactor.resize(uploadCount);
+			State->SlotIndexOfRefraction.resize(uploadCount);
+			State->SlotThickness.resize(uploadCount);
+			State->SlotPackedPbrChannels.resize(uploadCount);
+			State->SlotResample.resize(uploadCount);
+			State->SlotShadowDetail.resize(uploadCount);
+			State->SlotTwoSided.resize(uploadCount);
+			State->SlotShader.resize(uploadCount);
+			State->SlotTags.resize(uploadCount);
+			State->SlotRig.resize(uploadCount);
+			State->SlotSeam.resize(uploadCount);
+			State->SlotSeamFirst.resize(uploadCount);
+			State->SlotSeamSecond.resize(uploadCount);
+			State->SlotSeamCentre.resize(uploadCount);
+			State->SlotSeamLight.resize(uploadCount);
+			State->SlotInstanceKey.resize(sceneCount);
+			State->SlotInstanceCurrent.resize(sceneCount);
+			State->SlotLod.assign(uploadCount, NO_LOD_DRAW);
+			State->SceneSlotOfSource.resize(ownCount);
+			State->LodFrame.Clear();
+			State->Lod.Ready = false;
+		}
 		const bool haveOwnSources = target.InstanceSourcesReady && target.InstanceSources.size() == ownCount;
 		const bool rebuildOwnSources = Request.Damage.Objects || !haveOwnSources;
 		bool sourceOrderRetained = false;
@@ -2019,6 +2060,9 @@ namespace engine::render {
 				State->SlotMesh[drawSlot] = mesh;
 				State->SlotTexture[drawSlot] = instance.Texture;
 				State->SlotContentOwner[drawSlot] = Request.Source->ContentOwnerOf(instance.SourceWorld);
+				State->SlotImageGraphWorld[drawSlot] =
+					instance.SourceWorld.IsValid() ? instance.SourceWorld : viewWorld;
+				State->SlotImageGraphFallbackWorld[drawSlot] = viewWorld;
 				State->SlotNormalMap[drawSlot] = instance.NormalMap;
 				State->SlotRoughnessMap[drawSlot] = instance.RoughnessMap;
 				State->SlotOcclusionMap[drawSlot] = instance.OcclusionMap;
@@ -2230,6 +2274,9 @@ namespace engine::render {
 						State->SlotMesh[drawSlot] = State->SlotMesh[sceneSlot];
 						State->SlotTexture[drawSlot] = State->SlotTexture[sceneSlot];
 						State->SlotContentOwner[drawSlot] = State->SlotContentOwner[sceneSlot];
+						State->SlotImageGraphWorld[drawSlot] = State->SlotImageGraphWorld[sceneSlot];
+						State->SlotImageGraphFallbackWorld[drawSlot] =
+							State->SlotImageGraphFallbackWorld[sceneSlot];
 						State->SlotNormalMap[drawSlot] = State->SlotNormalMap[sceneSlot];
 						State->SlotRoughnessMap[drawSlot] = State->SlotRoughnessMap[sceneSlot];
 						State->SlotOcclusionMap[drawSlot] = State->SlotOcclusionMap[sceneSlot];
@@ -2285,8 +2332,12 @@ namespace engine::render {
 				uint32_t levelCount = 1;
 				const uint32_t wanted = std::clamp<uint32_t>(instance.LodLevels, 1u, scene::LOD_LEVELS);
 				const core::Name billboard = instance.LodBillboard;
-				const core::Name billboardOwner =
-					Impl::TextureContentOwner(billboard, State->SlotContentOwner[slot]);
+				const core::Name billboardOwner = State->TextureContentOwnerWithFallback(
+					billboard,
+					State->SlotContentOwner[slot],
+					State->SlotImageGraphWorld[slot],
+					State->SlotImageGraphFallbackWorld[slot]
+				);
 				const bool billboardResident =
 					billboard.IsValid() && State->Textures.Find(billboard, billboardOwner) != nullptr;
 				const MeshEntry *billboardMesh = nullptr;
@@ -2459,132 +2510,143 @@ namespace engine::render {
 			return;
 		}
 
-		target.SkinOffsets.assign(std::max<uint32_t>(residency.SlotCount(), 1), UINT32_MAX);
-		const auto assignSkin = [&](uint32_t drawSlot, const scene::DrawInstance &instance) {
-			const uint32_t residentSlot = target.InstanceIndices[drawSlot];
-			const MeshEntry *mesh = State->SlotMesh[drawSlot];
-			const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
-			if (residentSlot < target.SkinOffsets.size() && mesh != nullptr && instance.SkinCount != 0 &&
-				mesh->JointCount == instance.SkinCount && end <= State->SceneJointFrames.size()) {
-				target.SkinOffsets[residentSlot] = instance.SkinFirst;
+		{
+			ENGINE_PROFILE_CAT("prepare skin palettes", core::ProfileCategory::Render);
+			target.SkinOffsets.assign(std::max<uint32_t>(residency.SlotCount(), 1), UINT32_MAX);
+			const auto assignSkin = [&](uint32_t drawSlot, const scene::DrawInstance &instance) {
+				const uint32_t residentSlot = target.InstanceIndices[drawSlot];
+				const MeshEntry *mesh = State->SlotMesh[drawSlot];
+				const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
+				if (residentSlot < target.SkinOffsets.size() && mesh != nullptr && instance.SkinCount != 0 &&
+					mesh->JointCount == instance.SkinCount && end <= State->SceneJointFrames.size()) {
+					target.SkinOffsets[residentSlot] = instance.SkinFirst;
+				}
+			};
+			for (uint32_t drawSlot = 0; drawSlot < ownCount; drawSlot++) {
+				assignSkin(drawSlot, State->SceneInstances[State->SceneOrder[drawSlot]]);
 			}
-		};
-		for (uint32_t drawSlot = 0; drawSlot < ownCount; drawSlot++) {
-			assignSkin(drawSlot, State->SceneInstances[State->SceneOrder[drawSlot]]);
-		}
-		for (uint32_t drawSlot = ownCount; drawSlot < sceneCount; drawSlot++) {
-			assignSkin(drawSlot, State->SceneInstances[drawSlot]);
-		}
-		uint64_t skinOffsetSignature = scene::MixSignature(1, target.SkinOffsets.size());
-		for (const uint32_t offset : target.SkinOffsets) {
-			skinOffsetSignature = scene::MixSignature(skinOffsetSignature, offset);
-		}
-		target.SkinOffsetsDirty = target.SkinOffsetsDirty || !target.SkinOffsetsReady ||
-								  target.SkinOffsetSignature != skinOffsetSignature;
-		target.SkinOffsetSignature = skinOffsetSignature;
-		target.SkinOffsetsReady = true;
+			for (uint32_t drawSlot = ownCount; drawSlot < sceneCount; drawSlot++) {
+				assignSkin(drawSlot, State->SceneInstances[drawSlot]);
+			}
+			uint64_t skinOffsetSignature = scene::MixSignature(1, target.SkinOffsets.size());
+			for (const uint32_t offset : target.SkinOffsets) {
+				skinOffsetSignature = scene::MixSignature(skinOffsetSignature, offset);
+			}
+			target.SkinOffsetsDirty = target.SkinOffsetsDirty || !target.SkinOffsetsReady ||
+									  target.SkinOffsetSignature != skinOffsetSignature;
+			target.SkinOffsetSignature = skinOffsetSignature;
+			target.SkinOffsetsReady = true;
 
-		target.JointWords.assign(
-			std::max<size_t>(State->SceneJointFrames.size() * GPU_JOINT_WORDS, GPU_JOINT_WORDS), 0
-		);
-		for (size_t index = 0; index < State->SceneJointFrames.size(); index++) {
-			const core::CFrame &frame = State->SceneJointFrames[index];
-			const PackedRotation rotation = PackRotation(frame.Rotation());
-			const size_t word = index * GPU_JOINT_WORDS;
-			target.JointWords[word] = std::bit_cast<uint32_t>(frame.Position.X);
-			target.JointWords[word + 1] = std::bit_cast<uint32_t>(frame.Position.Y);
-			target.JointWords[word + 2] = std::bit_cast<uint32_t>(frame.Position.Z);
-			target.JointWords[word + 3] = rotation.Words[0];
-			target.JointWords[word + 4] = rotation.Words[1];
-			target.JointWords[word + 5] = rotation.Words[2];
-			target.JointWords[word + 6] = rotation.Words[3];
-		}
-		uint64_t jointWordSignature = scene::MixSignature(1, target.JointWords.size());
-		for (const uint32_t word : target.JointWords) {
-			jointWordSignature = scene::MixSignature(jointWordSignature, word);
-		}
-		target.JointWordsDirty = target.JointWordsDirty || !target.JointWordsReady ||
-								 target.JointWordSignature != jointWordSignature;
-		target.JointWordSignature = jointWordSignature;
-		target.JointWordsReady = true;
+			target.JointWords.assign(
+				std::max<size_t>(State->SceneJointFrames.size() * GPU_JOINT_WORDS, GPU_JOINT_WORDS), 0
+			);
+			for (size_t index = 0; index < State->SceneJointFrames.size(); index++) {
+				const core::CFrame &frame = State->SceneJointFrames[index];
+				const PackedRotation rotation = PackRotation(frame.Rotation());
+				const size_t word = index * GPU_JOINT_WORDS;
+				target.JointWords[word] = std::bit_cast<uint32_t>(frame.Position.X);
+				target.JointWords[word + 1] = std::bit_cast<uint32_t>(frame.Position.Y);
+				target.JointWords[word + 2] = std::bit_cast<uint32_t>(frame.Position.Z);
+				target.JointWords[word + 3] = rotation.Words[0];
+				target.JointWords[word + 4] = rotation.Words[1];
+				target.JointWords[word + 5] = rotation.Words[2];
+				target.JointWords[word + 6] = rotation.Words[3];
+			}
+			uint64_t jointWordSignature = scene::MixSignature(1, target.JointWords.size());
+			for (const uint32_t word : target.JointWords) {
+				jointWordSignature = scene::MixSignature(jointWordSignature, word);
+			}
+			target.JointWordsDirty = target.JointWordsDirty || !target.JointWordsReady ||
+									 target.JointWordSignature != jointWordSignature;
+			target.JointWordSignature = jointWordSignature;
+			target.JointWordsReady = true;
 
-		const auto ensureSkinBuffer = [&](SDL_GPUBuffer *&buffer,
-										  SDL_GPUTransferBuffer *&transfer,
-										  uint32_t &capacity,
-										  uint32_t words,
-										  const char *label,
-										  bool &dirty) {
-			if (buffer != nullptr && transfer != nullptr && capacity >= words) {
+			const auto ensureSkinBuffer = [&](SDL_GPUBuffer *&buffer,
+											  SDL_GPUTransferBuffer *&transfer,
+											  uint32_t &capacity,
+											  uint32_t words,
+											  const char *label,
+											  bool &dirty) {
+				if (buffer != nullptr && transfer != nullptr && capacity >= words) {
+					return true;
+				}
+				uint32_t grown = capacity == 0 ? 256 : capacity;
+				while (grown < words) {
+					grown *= 2;
+				}
+				if (buffer != nullptr) {
+					gpu::ReleaseBuffer(State->Device, buffer);
+				}
+				if (transfer != nullptr) {
+					gpu::ReleaseTransferBuffer(State->Device, transfer);
+				}
+				SDL_GPUBufferCreateInfo bufferInfo{};
+				bufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+				bufferInfo.size = grown * sizeof(uint32_t);
+				buffer = gpu::CreateBuffer(State->Device, &bufferInfo);
+				SDL_GPUTransferBufferCreateInfo transferInfo{};
+				transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+				transferInfo.size = bufferInfo.size;
+				transfer = gpu::CreateTransferBuffer(State->Device, &transferInfo);
+				if (buffer == nullptr || transfer == nullptr) {
+					ENGINE_ERROR("{} buffer of {} words: {}", label, grown, SDL_GetError());
+					capacity = 0;
+					return false;
+				}
+				capacity = grown;
+				dirty = true;
 				return true;
+			};
+			if (!ensureSkinBuffer(
+					target.SkinOffsetBuffer,
+					target.SkinOffsetTransfer,
+					target.SkinOffsetCapacity,
+					static_cast<uint32_t>(target.SkinOffsets.size()),
+					"skin offset",
+					target.SkinOffsetsDirty
+				) ||
+				!ensureSkinBuffer(
+					target.JointBuffer,
+					target.JointTransfer,
+					target.JointWordCapacity,
+					static_cast<uint32_t>(target.JointWords.size()),
+					"joint palette",
+					target.JointWordsDirty
+				)) {
+				return;
 			}
-			uint32_t grown = capacity == 0 ? 256 : capacity;
-			while (grown < words) {
-				grown *= 2;
-			}
-			if (buffer != nullptr) {
-				gpu::ReleaseBuffer(State->Device, buffer);
-			}
-			if (transfer != nullptr) {
-				gpu::ReleaseTransferBuffer(State->Device, transfer);
-			}
-			SDL_GPUBufferCreateInfo bufferInfo{};
-			bufferInfo.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-			bufferInfo.size = grown * sizeof(uint32_t);
-			buffer = gpu::CreateBuffer(State->Device, &bufferInfo);
-			SDL_GPUTransferBufferCreateInfo transferInfo{};
-			transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-			transferInfo.size = bufferInfo.size;
-			transfer = gpu::CreateTransferBuffer(State->Device, &transferInfo);
-			if (buffer == nullptr || transfer == nullptr) {
-				ENGINE_ERROR("{} buffer of {} words: {}", label, grown, SDL_GetError());
-				capacity = 0;
-				return false;
-			}
-			capacity = grown;
-			dirty = true;
-			return true;
-		};
-		if (!ensureSkinBuffer(
-				target.SkinOffsetBuffer,
-				target.SkinOffsetTransfer,
-				target.SkinOffsetCapacity,
-				static_cast<uint32_t>(target.SkinOffsets.size()),
-				"skin offset",
-				target.SkinOffsetsDirty
-			) ||
-			!ensureSkinBuffer(
-				target.JointBuffer,
-				target.JointTransfer,
-				target.JointWordCapacity,
-				static_cast<uint32_t>(target.JointWords.size()),
-				"joint palette",
-				target.JointWordsDirty
-			)) {
-			return;
-		}
 
-		if (target.SkinOffsetsDirty) {
-			void *skinMapped = SDL_MapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer, true);
-			if (skinMapped == nullptr) {
-				ENGINE_ERROR("skin offsets: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
-				return;
+			{
+				ENGINE_PROFILE_CAT("stage skin palettes", core::ProfileCategory::Render);
+				if (target.SkinOffsetsDirty) {
+					void *skinMapped =
+						SDL_MapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer, true);
+					if (skinMapped == nullptr) {
+						ENGINE_ERROR("skin offsets: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+						return;
+					}
+					std::memcpy(
+						skinMapped, target.SkinOffsets.data(), target.SkinOffsets.size() * sizeof(uint32_t)
+					);
+					SDL_UnmapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer);
+				}
+				if (target.JointWordsDirty) {
+					void *jointMapped = SDL_MapGPUTransferBuffer(State->Device, target.JointTransfer, true);
+					if (jointMapped == nullptr) {
+						ENGINE_ERROR("joint palettes: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+						return;
+					}
+					std::memcpy(
+						jointMapped, target.JointWords.data(), target.JointWords.size() * sizeof(uint32_t)
+					);
+					SDL_UnmapGPUTransferBuffer(State->Device, target.JointTransfer);
+				}
 			}
-			std::memcpy(skinMapped, target.SkinOffsets.data(), target.SkinOffsets.size() * sizeof(uint32_t));
-			SDL_UnmapGPUTransferBuffer(State->Device, target.SkinOffsetTransfer);
+			State->SkinOffsetBuffer = target.SkinOffsetBuffer;
+			State->SkinOffsetTransfer = target.SkinOffsetTransfer;
+			State->JointBuffer = target.JointBuffer;
+			State->JointTransfer = target.JointTransfer;
 		}
-		if (target.JointWordsDirty) {
-			void *jointMapped = SDL_MapGPUTransferBuffer(State->Device, target.JointTransfer, true);
-			if (jointMapped == nullptr) {
-				ENGINE_ERROR("joint palettes: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
-				return;
-			}
-			std::memcpy(jointMapped, target.JointWords.data(), target.JointWords.size() * sizeof(uint32_t));
-			SDL_UnmapGPUTransferBuffer(State->Device, target.JointTransfer);
-		}
-		State->SkinOffsetBuffer = target.SkinOffsetBuffer;
-		State->SkinOffsetTransfer = target.SkinOffsetTransfer;
-		State->JointBuffer = target.JointBuffer;
-		State->JointTransfer = target.JointTransfer;
 
 		bool rowsReallocated = false;
 		bool indicesReallocated = false;
@@ -2607,16 +2669,16 @@ namespace engine::render {
 				Result.InstanceRows = residency.LiveCount();
 				residentWorld.MetricFrame = State->FrameCounter;
 			}
-			std::vector<bool> dirtyChunks(residentChunks, false);
+			uint32_t dirtyChunks = 0;
+			uint32_t coveredChunkEnd = 0;
 			for (const InstanceUploadRange &range : residency.DirtyRanges()) {
-				const uint32_t last = range.First + range.Count - 1;
-				for (uint32_t chunk = range.First / METRIC_CHUNK_ROWS; chunk <= last / METRIC_CHUNK_ROWS;
-					 chunk++) {
-					dirtyChunks[chunk] = true;
-				}
+				const uint32_t first = range.First / METRIC_CHUNK_ROWS;
+				const uint32_t end = (range.First + range.Count - 1) / METRIC_CHUNK_ROWS + 1;
+				// Ordered ranges can share a metric chunk even though their rows do not overlap.
+				dirtyChunks += end - std::max(first, coveredChunkEnd);
+				coveredChunkEnd = end;
 			}
-			Result.InstanceChunksDirty =
-				static_cast<uint32_t>(std::count(dirtyChunks.begin(), dirtyChunks.end(), true));
+			Result.InstanceChunksDirty = dirtyChunks;
 			Result.InstanceRowsDirty = residency.DirtyCount();
 			target.ResidentIndices.Plan(
 				static_cast<uint32_t>(State->FrameCounter % IndexResidency::VERSIONS),
@@ -2829,6 +2891,74 @@ namespace engine::render {
 		const auto fixedTexture = [this](core::Name resource, size_t slot) {
 			return FixedTexture(resource, slot);
 		};
+		auto &sceneSlot = State->SlotAt(targetSlot);
+		const bool retainedBindings = !Request.Damage.Scene && !sceneSlot.ForwardUnavailable &&
+									  sceneSlot.ForwardPipeline == Pipeline->Name &&
+									  sceneSlot.ForwardRevision == Pipeline->Revision &&
+									  sceneSlot.ForwardWorld == Request.World &&
+									  sceneSlot.ForwardedTextures.size() == Pipeline->Graph.ResourceCount();
+		auto &working = sceneSlot.ForwardWorking;
+		working.Textures.resize(Pipeline->Graph.ResourceCount());
+		if (retainedBindings)
+			std::copy(
+				sceneSlot.ForwardedTextures.begin(),
+				sceneSlot.ForwardedTextures.end(),
+				working.Textures.begin()
+			);
+		else
+			std::fill(working.Textures.begin(), working.Textures.end(), Impl::NamedTexture{});
+		ForwardedTextures = working.Textures;
+		working.Pipeline = Pipeline->Name;
+		working.Revision = Pipeline->Revision;
+		working.World = Request.World;
+		working.Ready = false;
+		working.Command = command;
+		Activity = retainedBindings ? sceneSlot.Activity : PassActivity{};
+		if (!retainedBindings) {
+			Activity.Valid = true;
+			Activity.Sky = GraphEnabled(core::Name("sky")) && State->Caps.HasCompute &&
+						   (CurrentLighting.EnvironmentState.Skybox != scene::SkyboxSource::None ||
+							CurrentLighting.EnvironmentState.HasAtmosphere);
+			Activity.Fog = GraphEnabled(core::Name("fog")) &&
+						   (Uniforms.VolumeCount.x >= 0.5f || Uniforms.CloudCentreEnabled.w >= 0.5f);
+			Activity.ShaderLenses = GraphEnabled(core::Name("shader-lenses")) && LensGroupCount != 0;
+			Activity.DepthOfField = GraphEnabled(core::Name("dof")) && State->DepthOfFieldIntensity > 0.0f &&
+									State->DepthOfFieldRadius > 0.0f;
+			Activity.Bloom = GraphEnabled(core::Name("bloom")) && State->BloomIntensity > 0.0f &&
+							 State->BloomRadius > 0.0f;
+			for (size_t index = 0; index < scene::MAX_SURFACES; ++index) {
+				const auto &run = CameraRuns[index];
+				if (!HaveInstances || (run.OpaqueCount == 0 && run.BlendedCount == 0)) continue;
+				if (PortalOf[index] != nullptr && HavePortals && GraphEnabled(core::Name("portal-overlay")))
+					Activity.PortalOverlay = true;
+				if (PortalOf[index] == nullptr && GraphEnabled(core::Name("mirror-overlay")))
+					Activity.MirrorOverlay = true;
+			}
+			Activity.Grid = Request.Source->Grid.Enabled && Request.Source->Grid.Strength != 0.0f;
+			Activity.Particles = ParticleCount != 0;
+			Activity.Ribbons = RibbonCount != 0;
+			const bool worldInterface = DrawInterface && Request.GameInterfaceHook != nullptr &&
+										Request.GameInterfaceHook->AffectsScene();
+			Activity.Transparent = GraphEnabled(core::Name("transparent")) &&
+								   (Activity.Grid || PlainTransparent != 0 || worldInterface ||
+									Activity.Particles || Activity.Ribbons);
+		}
+		Activity.GodRays = false;
+		if (GraphEnabled(core::Name("god-rays")) && State->GodRayIntensity > 0.0f &&
+			State->GodRayRadius > 0.0f) {
+			const auto eye = Request.VisibilityCameraFrame.Position;
+			// Project at the view's far distance so an ordinary short camera still sees its sun.
+			const float distance = std::max(DrawCamera.NearPlane * 2.0f, DrawCamera.FarPlane * 0.99f);
+			GodRayClip = Matrices.ViewProjection * glm::vec4{
+													   eye.X - State->Sun.x * distance,
+													   eye.Y - State->Sun.y * distance,
+													   eye.Z - State->Sun.z * distance,
+													   1.0f
+												   };
+			Activity.GodRays = GodRayClip.w > 0.0f && std::abs(GodRayClip.x) <= GodRayClip.w &&
+							   std::abs(GodRayClip.y) <= GodRayClip.w && GodRayClip.z >= 0.0f &&
+							   GodRayClip.z <= GodRayClip.w;
+		}
 
 		// **The whole of the frame's recording, and it was the widest blank of
 		// the lot.** Everything below this line is `RenderGraph::Execute`
@@ -2855,9 +2985,21 @@ namespace engine::render {
 			}
 		};
 		RetainedRunner retained(frameRunner, [this](const graph::RunContext &context) {
-			if (Request.Damage.Scene) return true;
-			return context.Node.Value != 0 && context.Node.Value <= Pipeline->RetainedNodes.size() &&
-				   Pipeline->RetainedNodes[context.Node.Value - 1] != 0;
+			const bool enabled =
+				Request.Damage.Scene ||
+				(context.Node.Value != 0 && context.Node.Value <= Pipeline->RetainedNodes.size() &&
+				 Pipeline->RetainedNodes[context.Node.Value - 1] != 0);
+			if (enabled && (EmptyGBufferNormals || EmptyHardwareDepth != nullptr ||
+							FarLinearDepth != nullptr || OpaqueSkyTexture != nullptr ||
+							ClearedInterfaceTexture != nullptr || !this->State->Environments.empty())) {
+				// Authored handlers can write attachments without calling GraphTexture.
+				for (const auto resource : context.Writes) {
+					const auto target = ResourceTexture(resource, GraphTextureSlot(context), false);
+					const auto *node = Pipeline->Graph.Find(context.Node);
+					InvalidateBackgroundTexture(target.Texture, node != nullptr ? node->Kind : core::Name{});
+				}
+			}
+			return enabled;
 		});
 
 		State->StageProbe.ActivateView(
@@ -2926,7 +3068,7 @@ namespace engine::render {
 				}
 				if (context.Writes.empty()) save({}, "no-image-output");
 				for (const auto resource : context.Writes) {
-					const auto *description = Pipeline->Graph.FindResource(resource);
+					const auto *description = Pipeline->Graph.FindResourceDesc(resource);
 					save(
 						GraphTexture(resource, context, false),
 						description ? description->Name.Text() : "unknown"
@@ -2979,7 +3121,14 @@ namespace engine::render {
 			return;
 		}
 
-		State->SlotAt(targetSlot).ContentSignature = ContentSignature;
+		auto &pending = State->SlotAt(targetSlot).ForwardWorking;
+		pending.Activity = Activity;
+		pending.Pipeline = Pipeline->Name;
+		pending.Revision = Pipeline->Revision;
+		pending.World = Request.World;
+		pending.ContentSignature = ContentSignature;
+		pending.Ready = true;
+		pending.Command = command;
 
 		closePass();
 
@@ -2988,7 +3137,16 @@ namespace engine::render {
 		// bytes are display colour.
 		if (offscreen && State->Inspected.IsValid() &&
 			(State->InspectedSlot == Renderer::ANY_VIEWPORT || State->InspectedSlot == targetSlot)) {
-			Impl::NamedTexture inspected = fixedTexture(State->Inspected, targetSlot);
+			Impl::NamedTexture inspected;
+			for (uint32_t value = 1; value <= Pipeline->Graph.ResourceCount(); ++value) {
+				const graph::ResourceId resource{value};
+				const auto *desc = Pipeline->Graph.FindResourceDesc(resource);
+				if (desc && desc->Name == State->Inspected) {
+					inspected = ResourceTexture(resource, targetSlot, false);
+					break;
+				}
+			}
+			if (!inspected.IsValid()) inspected = fixedTexture(State->Inspected, targetSlot);
 			if (!inspected.IsValid()) {
 				for (const Impl::GraphTarget &target : State->GraphResources.Targets) {
 					if (target.Pipeline == selectedPipeline->Name && target.Resource == State->Inspected &&

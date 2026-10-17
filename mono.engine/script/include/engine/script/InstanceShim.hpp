@@ -16,6 +16,7 @@
 #include <engine/ecs/Store.hpp>
 
 #include <cstddef>
+#include <functional>
 #include <string_view>
 #include <vector>
 
@@ -67,7 +68,8 @@ namespace engine::script {
 		ecs::Entity instance,
 		const ecs::PropertyDescriptor &property,
 		void *value,
-		size_t bytes
+		size_t bytes,
+		bool clientExecution = false
 	);
 
 	// Writes a writable descriptor obtained from this shim.
@@ -76,11 +78,42 @@ namespace engine::script {
 		ecs::Entity instance,
 		const ecs::PropertyDescriptor &property,
 		const void *value,
-		size_t bytes
+		size_t bytes,
+		bool clientExecution = false
 	);
 
-	// Finds a direct child through the shared instance tree.
-	ecs::Entity FindInstanceChild(const ecs::Store &store, ecs::Entity instance, std::string_view name);
+	// Resolves an existing GUI source handle to this client's own projection.
+	// Server reads cannot resolve local GUI copies. Nothing is created here.
+	ecs::Entity
+	InstanceForScriptRead(const ecs::Store &store, ecs::Entity instance, bool clientExecution = false);
+
+	// Enumeration hides the opposite side's GUI rows rather than returning duplicates.
+	bool InstanceVisibleToScript(const ecs::Store &store, ecs::Entity instance, bool clientExecution = false);
+
+	// Visits visible direct children, preserving the store's sibling order.
+	void EachInstanceChild(
+		const ecs::Store &store,
+		ecs::Entity instance,
+		const std::function<void(ecs::Entity)> &body,
+		bool clientExecution = false
+	);
+
+	// Visits visible descendants in the store's depth-first order.
+	void EachInstanceDescendant(
+		const ecs::Store &store,
+		ecs::Entity instance,
+		const std::function<void(ecs::Entity)> &body,
+		bool clientExecution = false
+	);
+
+	// Direct matches precede depth-first recursive matches in the same script view.
+	ecs::Entity FindInstanceChild(
+		const ecs::Store &store,
+		ecs::Entity instance,
+		std::string_view name,
+		bool recursive = false,
+		bool clientExecution = false
+	);
 
 	// Reports whether the handle still names a row in this world.
 	bool InstanceAlive(const ecs::Store &store, ecs::Entity instance);
@@ -103,6 +136,11 @@ namespace engine::script {
 	// adapters cannot retain its handle after raising an error, so leaving it in
 	// the world would be invisible state.
 	InstanceCreateResult CreateScriptInstance(
-		ecs::Store &store, std::string_view className, ecs::Entity parent = ecs::NULL_ENTITY
+		ecs::Store &store,
+		std::string_view className,
+		ecs::Entity parent = ecs::NULL_ENTITY,
+		bool clientExecution = false
 	);
+	// Copies into the client range when called from a client script or local tree.
+	ecs::Entity CloneScriptInstance(ecs::Store &store, ecs::Entity source, bool clientExecution = false);
 }

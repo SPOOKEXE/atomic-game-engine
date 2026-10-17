@@ -366,8 +366,10 @@ TEST_CASE(
 																  : pairedDepth		  ? 12
 																					  : 8)
 	);
+	bool failedGraph = false;
 	SECTION("successful graph") {}
 	SECTION("valid upload followed by graph failure") {
+		failedGraph = true;
 		REQUIRE(fixture.Render.InstallNodeHandler(
 			core::Name("import-fixture-boundary"), [](const graph::RunContext &) { return false; }
 		));
@@ -400,6 +402,19 @@ TEST_CASE(
 																				   : 8)
 	);
 
+	if (failedGraph) {
+		// Partial commands invalidate intermediate bindings. A retry must use
+		// the resident import without repeating its already completed upload.
+		CHECK(fixture.Render.ResourceTexture(core::Name("tonemapped"), view.Slot) == nullptr);
+		CHECK_FALSE(fixture.Render.ViewPassActivity(view.Slot).Valid);
+		REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+		CHECK(
+			fixture.Render.PortalImageUsage().Uploads == (retainedDirectional ? 6
+														  : retainedAmbient	  ? 5
+														  : pairedDepth		  ? 2
+																			  : 1)
+		);
+	}
 	const auto actual =
 		CaptureResource(fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm);
 	CHECK_FALSE(CompareImages(before.View(), actual.View()).Passed());

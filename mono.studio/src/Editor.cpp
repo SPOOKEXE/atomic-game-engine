@@ -1,6 +1,10 @@
+#include "FrameGraphSnapshot.hpp"
+#include "ImageComposer.hpp"
+
 #include <engine/assets/Mesh.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -10,9 +14,11 @@
 #include <engine/examples/PackagedAssets.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
+#include <engine/game/WeatherGround.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
+#include <engine/imagegraph/Reference.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/Settings.hpp>
@@ -24,6 +30,7 @@
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Interpolation.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
@@ -36,6 +43,9 @@
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Teams.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/scene/VectorField.hpp>
+#include <engine/scene/Volume.hpp>
+#include <engine/scene/WeatherClock.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/PortalTransfer.hpp>
@@ -43,6 +53,7 @@
 #include <engine/script/SourceCache.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/ui/Theme.hpp>
+#include <engine/weather/Clock.hpp>
 
 #include <SDL3/SDL.h>
 // `Log.hpp` forward-declares `spdlog::logger` so that the rest of the tree does
@@ -50,9 +61,11 @@
 // that genuinely wants the type - `PanelSink` below installs itself into
 // `Log::Logger().sinks()` - so it completes it here. `logger.h` rather than
 // `spdlog.h`: the whole front end is not needed to reach a sink list.
+#include "DataFactoryHost.hpp"
 #include "ExternalEditor.hpp"
 #include "PlayedInput.hpp"
 #include "SourceEditor.hpp"
+#include "WeatherAudio.hpp"
 
 #include <spdlog/logger.h>
 #include <spdlog/sinks/base_sink.h>
@@ -68,7 +81,6 @@
 #include <network/Advert.hpp>
 #include <optional>
 #include <sstream>
-#include <studio/DataFactoryHost.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Keybinds.hpp>
 #include <studio/Presentation.hpp>
@@ -636,7 +648,7 @@ namespace studio {
 			ENGINE_INFO("assets from {}", Settings.Assets.string());
 		}
 
-		if (!SDL_SetAppMetadata("Atomic Studio", nullptr, "atomic-studio")) {
+		if (!SDL_SetAppMetadata("Atomic Studio", nullptr, "io.github.spookexe.atomicgameengine.studio")) {
 			ENGINE_WARN("SDL_SetAppMetadata: {}", SDL_GetError());
 		}
 
@@ -692,17 +704,8 @@ namespace studio {
 			);
 		}
 
-		// **After the renderer and only with a window**, because the present
-		// mode belongs to a swapchain and a headless run has none. The client
-		// makes the same call for `--uncapped`; see `Options::Uncapped` for why
-		// an editor wants it for a different reason.
-		//
-		// **Every run rather than only under a flag.** The editor's default is
-		// unpaced-and-capped rather than paced by the display, so this is the
-		// call that puts the swapchain in the state `Editor::VerticalSync`
-		// already claims it is in. The flag bypasses the saved ceiling for this
-		// run without erasing the rates that should return on the next one.
-
+		// Immediate mode is the default. Saved ceilings control the separate
+		// presentation schedule; --uncapped bypasses them for this run.
 		if (!Settings.Headless && !Renderer.SetVerticalSync(false)) {
 			// **The preference follows the device rather than the other way
 			// round.** A driver with no immediate present mode is an ordinary
@@ -767,12 +770,23 @@ namespace studio {
 		}
 		GameInterface.SetImageSource([this](const engine::core::Name &name) {
 			engine::render::InterfaceImage image;
-			image.Texture = Renderer.TextureHandle(name);
+			engine::imagegraph::Reference reference;
+			auto owner = (engine::imagegraph::ParseReference(name.Text(), reference) &&
+						  reference.Kind == engine::imagegraph::ReferenceKind::Instance) ||
+								 engine::imagegraph::IsEditableImageReference(name.Text())
+							 ? GameInterfaceImageOwner
+							 : engine::core::Name{};
+			image.Texture = Renderer.TextureHandle(name, owner);
+			if (image.Texture == nullptr && owner.IsValid() && GameInterfaceImageFallbackOwner.IsValid()) {
+				owner = GameInterfaceImageFallbackOwner;
+				image.Texture = Renderer.TextureHandle(name, owner);
+			}
+			image.SampledSRGB = Renderer.TextureSamplesSRGB(name, owner);
 			if (image.Texture == nullptr) {
 				return image;
 			}
-			image.Cell = Renderer.TextureCell(name, AnimationSeconds);
-			(void)Renderer.TextureSize(name, image.Width, image.Height);
+			image.Cell = Renderer.TextureCell(name, AnimationSeconds, owner);
+			(void)Renderer.TextureSize(name, image.Width, image.Height, owner);
 			return image;
 		});
 		GameInterface.SetViewportSource([this](engine::ecs::Entity instance) {
@@ -823,6 +837,12 @@ namespace studio {
 		engine::world::UniverseSettings interactiveWorlds;
 		interactiveWorlds.MaximumCatchUpTicks = engine::world::INTERACTIVE_CATCH_UP_TICKS;
 		Universe = std::make_unique<engine::world::Universe>(interactiveWorlds);
+		(void)Universe->OnState([](WorldId, engine::ecs::Store &store, engine::world::WorldState state) {
+			(void)engine::weather::SetWeatherWorldPaused(
+				store,
+				state == engine::world::WorldState::Suspended || state == engine::world::WorldState::Faulted
+			);
+		});
 		if (!Universe->ConfigurePresentation(1)) {
 			Say("could not configure portal image transport", LogLevel::Error);
 			return false;
@@ -956,6 +976,9 @@ namespace studio {
 	}
 
 	void Editor::Shutdown() {
+		WeatherAudio_.reset();
+		ReleaseImageComposerPreview();
+		ImageComposer.reset();
 		// A prepared import owns no universe state, but its result fields belong
 		// to this editor and must outlive the worker writing them.
 		if (WorldImportWorker.joinable()) {
@@ -1197,6 +1220,7 @@ namespace studio {
 				PumpPlugins(delta);
 
 				Simulate(delta);
+				PumpWeatherAudio();
 				if (engine::core::Clock::Seconds() >= NextDataStoreFlush) {
 					(void)FlushDataStore();
 					NextDataStoreFlush = engine::core::Clock::Seconds() + 1.0;
@@ -1417,7 +1441,11 @@ namespace studio {
 			}
 
 			SDL_Event event;
-			while (SDL_PollEvent(&event)) {
+			const auto poll = [&event] {
+				ENGINE_PROFILE("SDL event queue");
+				return SDL_PollEvent(&event);
+			};
+			while (poll()) {
 				process(event);
 			}
 		}
@@ -1473,6 +1501,19 @@ namespace studio {
 			}
 		}
 
+		for (WorldRun &run : Runs) {
+			if (!run.Paused) continue;
+			for (const auto &link : run.Links)
+				if (link) (void)link->FlushPausedState(*Universe);
+			Universe->Enter(run.World, [](engine::ecs::Store &store) {
+				if (const auto *publication = store.Resource<engine::scene::WeatherClockPublication>();
+					publication && publication->Pending) {
+					auto acknowledged = *publication;
+					acknowledged.Pending = false;
+					store.SetResource(acknowledged);
+				}
+			});
+		}
 		if (!anyLive) {
 			// **The clock stops and nothing else does.** The runtimes are
 			// still alive, their connections still exist and the snapshot Stop
@@ -1528,7 +1569,12 @@ namespace studio {
 					}
 				}
 			}
-			PlayLink::StepMany(*Universe, ActivePlayLinks);
+			PlayLink::StepMany(
+				*Universe, ActivePlayLinks, [this](WorldId world) -> engine::script::Runtime * {
+					const WorldRun *run = RunOf(world);
+					return run != nullptr ? run->Runtime.get() : nullptr;
+				}
+			);
 		}
 
 		Advancing = true;
@@ -1630,7 +1676,10 @@ namespace studio {
 			ENGINE_PROFILE_CAT("present world", engine::core::ProfileCategory::Render);
 			PresentWorld(frameSeconds);
 		}
-		Interface.PresentPlatformWindows();
+		{
+			ENGINE_PROFILE_CAT("present platform windows", engine::core::ProfileCategory::Render);
+			Interface.PresentPlatformWindows();
+		}
 
 		FinishControlAutomationFrame();
 	}
@@ -1875,19 +1924,9 @@ namespace studio {
 			}
 
 			if (viewer.Instance == NULL_ENTITY) {
-				// **Named per panel, because they share a workspace.** Four
-				// instances called `Camera` in one explorer is four rows nobody
-				// can tell apart, and `FindFirstChild` would hand every panel
-				// the first of them - which is the shared camera this replaces,
-				// reached by a different route.
-				const std::string name =
-					viewport == 0 ? std::string("Camera") : "Camera" + std::to_string(viewport + 1);
-
-				const Entity camera = store.CreateInstance(engine::scene::CameraClass(), name);
+				// Viewports own local eyes even when their world is authoritative.
+				const Entity camera = store.CreatePredictedInstance(engine::scene::CameraClass(), "Camera");
 				if (camera == NULL_ENTITY) {
-					// A replica refuses to mint an authoritative entity. That is
-					// not a failure here - `client::AimReplicaViewer` is the path
-					// for those, and it puts a predicted camera in instead.
 					return;
 				}
 
@@ -1898,10 +1937,12 @@ namespace studio {
 				// into the game file, which is the whole thing this component
 				// exists to stop.
 				store.Set(camera, engine::scene::TransientComponent{});
+				store.Set(camera, engine::ecs::ClientLocal{});
 
 				viewer.World = world;
 				viewer.Instance = camera;
 			}
+			if (store.ParentOf(viewer.Instance) != workspace) store.SetParent(viewer.Instance, workspace);
 
 			// **Named every frame, not once at creation.** It used to be set
 			// only when the instance was minted, so a script assigning
@@ -1990,10 +2031,11 @@ namespace studio {
 				Settings.FixedAnimationStep > 0.0 ? Settings.FixedAnimationStep : frameSeconds;
 		Renderer.SetAnimationTime(AnimationSeconds);
 
-		// **The frame graph is only collected while it is being read.**
+		// **The frame graph is only collected while it is being read live.**
 		// Recording every span of every frame costs real time, and the whole
 		// reason to look at that panel is that time is scarce. The client's
 		// overlay makes the same trade.
+		// A paused panel owns its snapshot and does not need new recordings.
 		//
 		// A snapshot at the end of the run counts as reading it, and is the
 		// only way to profile something - a window drag - that occupies the
@@ -2004,8 +2046,12 @@ namespace studio {
 		// which is exactly what `profile_frame` did until it had a flag of its
 		// own to set.
 		engine::core::FrameGraph::SetEnabled(
-			ShowFrameGraph || ShowScriptProfile || ShowScripting || ShowPhysicsSolver || ShowNetwork ||
-			ControlWantsProfile || !Settings.ProfileSnapshot.empty()
+			frame_graph_detail::ShouldRecordFrameGraph(
+				ShowFrameGraph,
+				FrameGraphState.Paused,
+				ShowScriptProfile || ShowScripting || ShowPhysicsSolver || ShowNetwork ||
+					ControlWantsProfile || !Settings.ProfileSnapshot.empty()
+			)
 		);
 
 		// The source profiler is opt-in at the VM boundary. It uses Luau's step
@@ -2331,6 +2377,7 @@ namespace studio {
 			}
 
 			behaviourEye = diagnostics.ResolveBehaviourFrame(eye, [&](engine::core::CFrame &frame) {
+				ENGINE_PROFILE_CAT("viewport resolve portals", engine::core::ProfileCategory::ECS);
 				if (shown.IsValid() && IsReplicaWorld(shown)) {
 					visual = client::ResolveCameraPortalWorld(
 						*Universe, shown, visual, frame, lens, PortalImages.get()
@@ -2340,93 +2387,96 @@ namespace studio {
 			if (visual.IsValid() && Universe->IsRemote(visual)) {
 				ReleaseViewerCamera(viewport);
 			} else if (visual.IsValid()) {
-				const bool runtimeVisual = IsRunning(visual) || IsReplicaWorld(visual);
-				if (runtimeVisual) {
-					// A viewport's aspect and a client panel's presentation eye are
-					// frame-local facts. Restore the runtime camera after PreRender so
-					// server scripts and other client panels keep their own state.
-					Universe->Enter(visual, [&](Store &store) {
-						if (const auto *active = store.Resource<engine::scene::ActiveCamera>();
-							active != nullptr) {
-							restoreRuntimeCamera = *active;
-						}
-					});
-				}
-
-				if (!runtimeVisual || visual != shown || !IsReplicaWorld(shown)) {
-					// An edit viewport owns this generated camera outright. A client
-					// viewport uses the same per-panel camera only while the authority
-					// prepares its camera-dependent surface views.
-					EnsureViewerCamera(
-						viewport, visual, behaviourEye, lens, runtimeVisual ? NULL_ENTITY : follow
-					);
-
-					if (!IsReplicaWorld(shown)) {
-						// `EnsureViewerCamera` leaves an authored lens intact. Read it
-						// back before building this panel's target and projection,
-						// otherwise the rendered view keeps the default lens from before
-						// the camera was prepared and FieldOfView appears to have no
-						// effect. A replica panel instead owns its lens through its local
-						// runtime camera; this generated authority camera only prepares
-						// that world's surface views.
+				{
+					ENGINE_PROFILE_CAT("viewport prepare camera", engine::core::ProfileCategory::ECS);
+					const bool runtimeVisual = IsRunning(visual) || IsReplicaWorld(visual);
+					if (runtimeVisual) {
+						// A viewport's aspect and a client panel's presentation eye are
+						// frame-local facts. Restore the runtime camera after PreRender so
+						// server scripts and other client panels keep their own state.
 						Universe->Enter(visual, [&](Store &store) {
-							const ViewerCamera &viewer = Viewers[viewport];
-							if (viewer.World != visual || !store.Alive(viewer.Instance)) {
-								return;
-							}
-							if (const auto *component = store.Get<engine::scene::Camera>(viewer.Instance)) {
-								lens = *component;
+							if (const auto *active = store.Resource<engine::scene::ActiveCamera>();
+								active != nullptr) {
+								restoreRuntimeCamera = *active;
 							}
 						});
 					}
-				}
 
-				// The requested panel extent belongs to this camera resource. Write
-				// it after `EnsureViewerCamera`, which replaces the whole resource,
-				// and before portal fitting reads its aspect ratio.
-				if (target.IsValid()) {
-					Universe->Enter(visual, [&](Store &store) {
-						(void)engine::scene::SetViewportSize(store, target.Width, target.Height);
-					});
-				}
+					if (!runtimeVisual || visual != shown || !IsReplicaWorld(shown)) {
+						// An edit viewport owns this generated camera outright. A client
+						// viewport uses the same per-panel camera only while the authority
+						// prepares its camera-dependent surface views.
+						EnsureViewerCamera(
+							viewport, visual, behaviourEye, lens, runtimeVisual ? NULL_ENTITY : follow
+						);
 
-				// **The render gate rides along with it**, because
-				// `client::InstallPresentation` registers `sync-rendered` in this
-				// same phase. That is what makes an edited world work at all: it
-				// never ticks, so a gate maintained by the simulation would leave a
-				// part dragged into `Workspace` invisible until somebody pressed
-				// play. See `scene/Visibility.hpp`.
-				// **A world that is not being ticked is presented at one, not at
-				// its accumulator.** Alpha is where *between* two ticks to draw,
-				// and a world nothing advances has no next tick to draw towards -
-				// its accumulator stops wherever it stopped, which is usually zero,
-				// and zero means "draw the previous frame". `capture-previous` is a
-				// `PreSimulation` system and `Present` runs `PreRender` alone, so
-				// that previous frame is wherever each part was created: an edited
-				// world drew every part at its birthplace while the selection
-				// outline followed the real transform.
-				//
-				// **This asked `StateOf` alone and that was wrong for Edit mode**,
-				// which is where an author spends most of their time.
-				// `SyncWorldStates` leaves every world `Active` when nothing is
-				// running, so the state said "ticking" while `Simulate` was
-				// returning before the tick. `studio::PresentationAlpha` carries
-				// the whole argument and is where it is now decided, because
-				// nothing in this class is reachable from a test.
-				// **After the world has been asked for its picture, so the bounds
-				// are this frame's.** The queue is empty on every frame but the one
-				// after a scene first builds itself, so this is a walk of an empty
-				// vector.
-				for (size_t index = 0; index < PendingFrame.size(); index++) {
-					if (PendingFrame[index] != visual) {
-						continue;
+						if (!IsReplicaWorld(shown)) {
+							// `EnsureViewerCamera` leaves an authored lens intact. Read it
+							// back before building this panel's target and projection,
+							// otherwise the rendered view keeps the default lens from before
+							// the camera was prepared and FieldOfView appears to have no
+							// effect. A replica panel instead owns its lens through its local
+							// runtime camera; this generated authority camera only prepares
+							// that world's surface views.
+							Universe->Enter(visual, [&](Store &store) {
+								const ViewerCamera &viewer = Viewers[viewport];
+								if (viewer.World != visual || !store.Alive(viewer.Instance)) {
+									return;
+								}
+								if (const auto *component =
+										store.Get<engine::scene::Camera>(viewer.Instance)) {
+									lens = *component;
+								}
+							});
+						}
 					}
-					if (FrameWorldContents(visual)) {
-						PendingFrame.erase(PendingFrame.begin() + static_cast<ptrdiff_t>(index));
-					}
-					break;
-				}
 
+					// The requested panel extent belongs to this camera resource. Write
+					// it after `EnsureViewerCamera`, which replaces the whole resource,
+					// and before portal fitting reads its aspect ratio.
+					if (target.IsValid()) {
+						Universe->Enter(visual, [&](Store &store) {
+							(void)engine::scene::SetViewportSize(store, target.Width, target.Height);
+						});
+					}
+
+					// **The render gate rides along with it**, because
+					// `client::InstallPresentation` registers `sync-rendered` in this
+					// same phase. That is what makes an edited world work at all: it
+					// never ticks, so a gate maintained by the simulation would leave a
+					// part dragged into `Workspace` invisible until somebody pressed
+					// play. See `scene/Visibility.hpp`.
+					// **A world that is not being ticked is presented at one, not at
+					// its accumulator.** Alpha is where *between* two ticks to draw,
+					// and a world nothing advances has no next tick to draw towards -
+					// its accumulator stops wherever it stopped, which is usually zero,
+					// and zero means "draw the previous frame". `capture-previous` is a
+					// `PreSimulation` system and `Present` runs `PreRender` alone, so
+					// that previous frame is wherever each part was created: an edited
+					// world drew every part at its birthplace while the selection
+					// outline followed the real transform.
+					//
+					// **This asked `StateOf` alone and that was wrong for Edit mode**,
+					// which is where an author spends most of their time.
+					// `SyncWorldStates` leaves every world `Active` when nothing is
+					// running, so the state said "ticking" while `Simulate` was
+					// returning before the tick. `studio::PresentationAlpha` carries
+					// the whole argument and is where it is now decided, because
+					// nothing in this class is reachable from a test.
+					// **After the world has been asked for its picture, so the bounds
+					// are this frame's.** The queue is empty on every frame but the one
+					// after a scene first builds itself, so this is a walk of an empty
+					// vector.
+					for (size_t index = 0; index < PendingFrame.size(); index++) {
+						if (PendingFrame[index] != visual) {
+							continue;
+						}
+						if (FrameWorldContents(visual)) {
+							PendingFrame.erase(PendingFrame.begin() + static_cast<ptrdiff_t>(index));
+						}
+						break;
+					}
+				}
 				ENGINE_PROFILE_CAT("world present", engine::core::ProfileCategory::ECS);
 				Universe->Present(
 					visual,
@@ -2436,6 +2486,7 @@ namespace studio {
 			}
 		}
 		if (restoreRuntimeCamera.has_value() && visual.IsValid() && !Universe->IsRemote(visual)) {
+			ENGINE_PROFILE_CAT("viewport restore camera", engine::core::ProfileCategory::ECS);
 			Universe->Enter(visual, [&](Store &store) { store.SetResource(*restoreRuntimeCamera); });
 		}
 
@@ -2465,11 +2516,13 @@ namespace studio {
 		// panel is empty.
 		Surfaces.clear();
 		bool particleFrameCollected = false;
+		bool editableImagesChanged = false;
 		RibbonVertices.clear();
 		RibbonRuns.clear();
 		Lights.clear();
 
 		engine::scene::WorldLighting visualLighting;
+		std::optional<engine::render::GpuParticleFieldView> gpuParticles;
 		uint32_t visualSurfaceBounces = Renderer.SurfaceBounces();
 		uint32_t visualSurfaceLimit = Renderer.SurfaceLimit();
 		const bool particleWorldRunning = visual.IsValid() && IsRunning(visual);
@@ -2477,21 +2530,59 @@ namespace studio {
 		const bool particlesEnabled =
 			ShowParticleEmitters && (!clientPresentation || ClientSettings.EnableParticles);
 		if (visual.IsValid() && !remoteEye) {
+			ENGINE_PROFILE_CAT("viewport collect scene", engine::core::ProfileCategory::Render);
 			const Name selectedProfile = Universe->SettingsOf(visual).RenderingProfile;
 			Universe->Enter(visual, [&, selectedProfile](Store &store) {
-				// Lighting is authored per world and Studio presents worlds without
-				// going through client::Client. Resolve it here so editing the
-				// service changes this viewport on the same frame.
-				visualLighting = engine::scene::LightingOf(store);
-				Renderer.SetLighting(visualLighting);
+				{
+					ENGINE_PROFILE_CAT("viewport world sources", engine::core::ProfileCategory::Render);
+					// Lighting is authored per world and Studio presents worlds without
+					// going through client::Client. Resolve it here so editing the
+					// service changes this viewport on the same frame.
+					visualLighting = engine::scene::LightingOf(store);
+					Renderer.SetLighting(visualLighting);
+					// sample definitions remain authority-owned; device state never enters the replica.
+					store.Observe<engine::scene::GpuParticleField>();
+					store.Each<const engine::scene::GpuParticleField, const engine::scene::Transform>(
+						[&](Entity instance, const auto &field, const auto &transform) {
+							if (particlesEnabled && !gpuParticles && field.Enabled &&
+								!field.SpawnSamples.empty() && engine::scene::ValidGpuParticleField(field))
+								gpuParticles = engine::render::GpuParticleFieldView{
+									field,
+									transform.Frame,
+									engine::scene::ResolveVectorField(store, instance),
+									instance,
+									store.ComponentChangeVersion<engine::scene::GpuParticleField>() + 1,
+									store.Time().Elapsed
+								};
+						}
+					);
 
-				if (const auto *list = store.Resource<engine::render::DrawList>()) {
-					// Copied out rather than borrowed. The renderer's call
-					// happens outside `Enter`, and a span into a store nobody
-					// is inside is a pointer across a boundary that rule 3
-					// exists to keep closed.
-					DrawnInstances = list->Instances;
-					jointFrames = list->JointFrames;
+					if (const auto *list = store.Resource<engine::render::DrawList>()) {
+						// Copied out rather than borrowed. The renderer's call
+						// happens outside `Enter`, and a span into a store nobody
+						// is inside is a pointer across a boundary that rule 3
+						// exists to keep closed.
+						{
+							ENGINE_PROFILE_CAT(
+								"viewport copy instances", engine::core::ProfileCategory::Render
+							);
+							DrawnInstances = list->Instances;
+							engine::core::Metrics::Count(
+								"studio.viewport.instance_copy_bytes",
+								static_cast<double>(
+									list->Instances.size() * sizeof(engine::scene::DrawInstance)
+								)
+							);
+						}
+						{
+							ENGINE_PROFILE_CAT("viewport copy joints", engine::core::ProfileCategory::Render);
+							jointFrames = list->JointFrames;
+							engine::core::Metrics::Count(
+								"studio.viewport.joint_copy_bytes",
+								static_cast<double>(list->JointFrames.size() * sizeof(engine::core::CFrame))
+							);
+						}
+					}
 				}
 
 				// **The surface cameras, which the studio was never asking
@@ -2570,31 +2661,6 @@ namespace studio {
 						const std::span<const engine::effects::RibbonRun> runs =
 							engine::effects::RibbonRuns(store);
 						RibbonRuns.assign(runs.begin(), runs.end());
-					}
-
-					{
-						ENGINE_PROFILE_CAT("effect lights", engine::core::ProfileCategory::Render);
-						// Lights are selected against the culled receiver rows, so an
-						// offscreen local light stays when its range reaches visible geometry.
-						static thread_local std::vector<uint32_t> visibleLightRows;
-						static thread_local std::vector<engine::core::AABB> lightReceivers;
-						lightReceivers.clear();
-						if (target.IsValid() && target.Width > 0 && target.Height > 0) {
-							(void)engine::render::CullForCamera(
-								DrawnInstances,
-								cullingEye,
-								lens,
-								static_cast<float>(target.Width) / static_cast<float>(target.Height),
-								visibleLightRows
-							);
-							lightReceivers.reserve(visibleLightRows.size());
-							for (const uint32_t row : visibleLightRows) {
-								lightReceivers.push_back(engine::graph::BoundsOf(DrawnInstances[row]));
-							}
-						}
-						(void)engine::render::CollectLights(
-							store, cullingEye.Position, lightReceivers, Lights
-						);
 					}
 				}
 
@@ -2736,7 +2802,10 @@ namespace studio {
 					{
 						ENGINE_PROFILE_CAT("editable images", engine::core::ProfileCategory::Assets);
 						if (!clientPresentation || ClientSettings.EnableEditableImages) {
-							VisualResourceRevision += EditableImages.Refresh(store, Renderer) > 0 ? 1u : 0u;
+							const auto uploaded =
+								EditableImages.Refresh(store, Renderer, Universe->NameOf(visual));
+							editableImagesChanged = uploaded > 0;
+							VisualResourceRevision += uploaded > 0 ? 1u : 0u;
 						}
 					}
 
@@ -2762,21 +2831,47 @@ namespace studio {
 				}
 			});
 		}
+		// A play viewport presents authority geometry but consumes images created
+		// in its displayed client world. Upload that store under its own residency
+		// name so local ImageGraph source bindings see the pixels the client wrote.
+		if (shown.IsValid() && shown != visual && IsReplicaWorld(shown) &&
+			ClientSettings.EnableEditableImages) {
+			Universe->Enter(shown, [&](Store &store) {
+				const auto uploaded = EditableImages.Refresh(store, Renderer, Universe->NameOf(shown));
+				editableImagesChanged = uploaded > 0 || editableImagesChanged;
+				VisualResourceRevision += uploaded > 0 ? 1u : 0u;
+			});
+		}
+		if (editableImagesChanged) (void)RefreshLiveImageGraphs();
 		if (!particleFrameCollected) {
 			Particles.Clear();
 		}
 
+		GameInterfaceImageOwner = shown.IsValid() ? Universe->NameOf(shown) : engine::core::Name{};
+		GameInterfaceImageFallbackOwner = visual.IsValid() ? Universe->NameOf(visual) : engine::core::Name{};
 		const bool viewportGuiPresent =
 			shown.IsValid() &&
 			ViewportGuiSourceFor(IsRunning(shown), IsReplicaWorld(shown)) != ViewportGuiSource::None;
 		if (shown.IsValid()) {
+			ENGINE_PROFILE_CAT("viewport collect local scene", engine::core::ProfileCategory::Render);
 			Universe->Enter(shown, [&](Store &store) {
+				if (shown != visual && IsReplicaWorld(shown)) {
+					// Lighting and skybox bindings are properties of the displayed
+					// client world, even when its geometry comes from authority.
+					visualLighting = engine::scene::LightingOf(store);
+					Renderer.SetLighting(visualLighting);
+				}
 				// The interface is client-local even when its scene is authority-backed.
 				// It is submitted from the replica store before that store boundary
 				// closes; only copied draw rows leave the boundary.
 				if (viewportGuiPresent && viewport < GuiLists.size() && target.IsValid()) {
 					(void)ViewportImages.Render(
-						Renderer, store, GuiLists[viewport].Commands(), PreviewSlot() + 1
+						Renderer,
+						store,
+						GuiLists[viewport].Commands(),
+						PreviewSlot() + 1,
+						{},
+						GameInterfaceImageOwner
 					);
 					// Canvas points and target pixels differ on a scaled display.
 					GameInterface.Submit(
@@ -2794,14 +2889,50 @@ namespace studio {
 
 				if (shown != visual && !remoteEye) {
 					if (const auto *list = store.Resource<engine::render::DrawList>()) {
-						ENGINE_PROFILE_CAT("merge client visuals", engine::core::ProfileCategory::Render);
-						AppendReplicaVisualInstances(
-							Universe->NameOf(shown),
-							list->Instances,
-							DrawnInstances,
-							list->JointFrames,
-							&jointFrames
-						);
+						ENGINE_PROFILE_CAT("client visuals", engine::core::ProfileCategory::Render);
+						if (IsReplicaWorld(shown) && visual == VisualWorldOf(shown)) {
+							// a client draws its interpolated scene and local effects. the
+							// authority still supplies authored programs and GPU sample tables.
+							DrawnInstances = list->Instances;
+							for (auto &instance : DrawnInstances)
+								if (!instance.SourceWorld.IsValid())
+									instance.SourceWorld = Universe->NameOf(shown);
+							jointFrames = list->JointFrames;
+							(void)CollectStudioParticleBatches(store, Particles, particlesEnabled);
+							Particles.Detach();
+							store.Observe<engine::scene::GpuParticleField>();
+							bool localFieldCollected = false;
+							store.Each<const engine::scene::GpuParticleField, const engine::scene::Transform>(
+								[&](Entity instance, const auto &field, const auto &transform) {
+									if (particlesEnabled && !localFieldCollected && field.Enabled &&
+										!field.SpawnSamples.empty() &&
+										engine::scene::ValidGpuParticleField(field)) {
+										gpuParticles = engine::render::GpuParticleFieldView{
+											field,
+											transform.Frame,
+											engine::scene::ResolveVectorField(store, instance),
+											instance,
+											store.ComponentChangeVersion<engine::scene::GpuParticleField>() +
+												1,
+											store.Time().Elapsed
+										};
+										localFieldCollected = true;
+									}
+								}
+							);
+							const auto vertices = engine::effects::RibbonStream(store);
+							RibbonVertices.assign(vertices.begin(), vertices.end());
+							const auto runs = engine::effects::RibbonRuns(store);
+							RibbonRuns.assign(runs.begin(), runs.end());
+						} else {
+							AppendReplicaVisualInstances(
+								Universe->NameOf(shown),
+								list->Instances,
+								DrawnInstances,
+								list->JointFrames,
+								&jointFrames
+							);
+						}
 					}
 				}
 			});
@@ -2811,6 +2942,7 @@ namespace studio {
 		if (visual.IsValid() && !remoteEye) {
 			// Foreground clones need destination presentation before they join this
 			// world's rows. The image host reuses those completed presentations.
+			ENGINE_PROFILE_CAT("viewport portal geometry", engine::core::ProfileCategory::Render);
 			PresentPortalDestinations(visual, frameSeconds);
 			(void)client::AppendForeignPortalClones(*Universe, visual, DrawnInstances, &jointFrames);
 
@@ -2862,6 +2994,7 @@ namespace studio {
 			}
 		}
 		engine::render::View view;
+		std::vector<uint32_t> hiddenEyeRows;
 		{
 			ENGINE_PROFILE_CAT("build render view", engine::core::ProfileCategory::Render);
 			diagnostics.ApplyCameraFrames(view, eye, cullingEye);
@@ -2878,12 +3011,11 @@ namespace studio {
 			view.ParticlePool = Particles.Pool;
 			view.ParticleBlocks = Particles.BlockCount;
 			// Every surface and nested camera in this render reads the same prepared
-			// authority pool. `Renderer::PrepareParticles` consumes the delta on the
+			// displayed pool. `Renderer::PrepareParticles` consumes the delta on the
 			// first view for this logical world and reuses that result for the rest.
 			view.ParticleDelta = frameSeconds;
 			view.RibbonVertices = RibbonVertices;
 			view.RibbonRuns = RibbonRuns;
-			view.Lights = Lights;
 			view.Target = drawingWorld && target.IsValid() ? &target : nullptr;
 			view.Slot = viewport;
 			view.Portals = Portals;
@@ -2892,6 +3024,58 @@ namespace studio {
 			view.EnableLODCulling = Prefs.EnableLODCulling;
 			view.World = visual.IsValid() ? visual.Index : 0;
 			view.WorldName = visual.IsValid() ? Universe->NameOf(visual) : engine::core::Name{};
+			view.ImageGraphWorldName = IsReplicaWorld(shown) ? Universe->NameOf(shown) : view.WorldName;
+			if (IsReplicaWorld(shown)) {
+				Universe->Enter(shown, [&](const Store &store) {
+					engine::render::SelectFirstPersonBody(store, view);
+				});
+				const uint64_t inputEyeRig = view.EyeRig;
+				if (visual != shown && view.EyePlayer) {
+					// A mapped eye hides the same player in the displayed world's rig.
+					if (visual.IsValid() && !remoteEye)
+						Universe->Enter(visual, [&](Store &store) {
+							engine::render::ResolveEyeBody(store, view);
+						});
+					const auto inputWorld = Universe->NameOf(shown);
+					for (size_t index = 0; index < view.Instances.size(); ++index) {
+						const auto &row = view.Instances[index];
+						if (row.Rig == inputEyeRig && row.SourceWorld == inputWorld)
+							hiddenEyeRows.push_back(static_cast<uint32_t>(index));
+					}
+					view.EyeHiddenRows = hiddenEyeRows;
+				}
+			}
+			view.GpuParticles = std::move(gpuParticles);
+			const WorldId layers = IsReplicaWorld(shown) && visual == VisualWorldOf(shown) ? shown : visual;
+			view.ParticleWorld = layers.IsValid() ? layers.Index : 0;
+			view.ParticleWorldName = layers.IsValid() ? Universe->NameOf(layers) : engine::core::Name{};
+			if (layers.IsValid() && !Universe->IsRemote(layers)) {
+				Universe->Enter(layers, [&](Store &store) {
+					ENGINE_PROFILE_CAT("effect lights and volumes", engine::core::ProfileCategory::Render);
+					static thread_local std::vector<uint32_t> visible;
+					static thread_local std::vector<engine::core::AABB> receivers;
+					receivers.clear();
+					if (target.IsValid() && target.Width > 0 && target.Height > 0) {
+						(void)engine::render::CullForCamera(
+							DrawnInstances,
+							cullingEye,
+							lens,
+							static_cast<float>(target.Width) / static_cast<float>(target.Height),
+							visible
+						);
+						receivers.reserve(visible.size());
+						for (const uint32_t row : visible)
+							receivers.push_back(engine::graph::BoundsOf(DrawnInstances[row]));
+					}
+					(void)engine::render::CollectLights(store, cullingEye.Position, receivers, Lights);
+					visualLighting.VolumeCount = engine::scene::ResolveVolumes(
+						store, cullingEye.Position, receivers, visualLighting.Volumes
+					);
+				});
+			}
+			view.Lights = Lights;
+			view.Lighting = visualLighting;
+			view.OverrideLighting = true;
 
 			// **The grid is drawn by the renderer now and not by the overlay**, so
 			// that the geometry in front of it hides it. `ConfigureGroundGrid`
@@ -2912,9 +3096,11 @@ namespace studio {
 		}
 
 		if (PortalImages && drawingWorld && remoteEye && shown.IsValid() && target.IsValid()) {
+			ENGINE_PROFILE_CAT("viewport portal images", engine::core::ProfileCategory::Render);
 			engine::render::View remote;
 			diagnostics.ApplyCameraFrames(remote, eye, cullingEye);
 			remote.Camera = lens;
+			remote.EyePlayer = view.EyePlayer;
 			remote.Target = view.Target;
 			remote.Slot = view.Slot;
 			remote.LodMinimumDistances = view.LodMinimumDistances;
@@ -2961,7 +3147,10 @@ namespace studio {
 										  !GuiLists[viewport].Commands().Commands.empty();
 		const uint64_t gameInterfaceSignature =
 			gameInterfacePresent
-				? engine::scene::MixSignature(GuiLists[viewport].Signature(), animationSignature)
+				? engine::scene::MixSignature(
+					  engine::scene::MixSignature(GuiLists[viewport].Signature(), animationSignature),
+					  Renderer.ResourceRevision()
+				  )
 				: 0;
 		engine::render::ScenePresentationSignatures scenePresentationSignatures;
 		{
@@ -2971,7 +3160,8 @@ namespace studio {
 				engine::render::ScenePresentationState{
 					.Lighting = visualLighting,
 					.Animation = animationSignature,
-					.Resources = VisualResourceRevision,
+					.Resources =
+						engine::scene::MixSignature(VisualResourceRevision, Renderer.ResourceRevision()),
 					.SurfaceBounces = visualSurfaceBounces,
 					.SurfaceLimit = visualSurfaceLimit,
 					.PostProcess = LastPostProcessShader,
@@ -2983,22 +3173,28 @@ namespace studio {
 		const engine::render::PresentationSignatures presentationSignatures{
 			.Scene = scenePresentationSignatures,
 			.GameInterface = gameInterfaceSignature,
-			.HostInterface = Interface.Signature(),
+			.HostInterface = engine::scene::MixSignature(Interface.Signature(), Renderer.ResourceRevision()),
 			.Viewport = engine::render::ViewportPresentationSignature(target.Width, target.Height),
 		};
-		engine::render::PresentationDamage damage =
-			ViewportPresentations[viewport].Inspect(presentationSignatures);
-		const bool particleLayerPresent = !view.Particles.empty();
+		engine::render::PresentationDamage damage;
+		{
+			ENGINE_PROFILE_CAT("viewport damage check", engine::core::ProfileCategory::Render);
+			damage = ViewportPresentations[viewport].Inspect(presentationSignatures);
+		}
+		const bool particleLayerPresent = !view.Particles.empty() || view.GpuParticles.has_value();
 		const bool ribbonLayerPresent = !view.RibbonRuns.empty();
 		const uint64_t particleVisibilitySignature = engine::render::ParticleVisibilitySignature(view);
 		auto &particleVisibility = ViewportParticleVisibility[viewport];
 		particleVisibility.Refine(
 			damage, particleLayerPresent, ribbonLayerPresent, particleVisibilitySignature
 		);
+		const bool weatherWorkPending = Renderer.HasPendingWeatherWork(view.World);
+		damage.Environment = damage.Environment || weatherWorkPending;
+		damage.Scene = damage.Scene || weatherWorkPending;
 		damage.Overlay = Overlay.IsDirty();
 		const engine::render::PresentationCacheApplicability cacheApplicability{
 			.Objects = !view.Instances.empty() || view.Grid.Enabled,
-			.Particles = !view.Particles.empty() || !view.RibbonRuns.empty(),
+			.Particles = particleLayerPresent || ribbonLayerPresent,
 			.Environment = engine::render::EnvironmentLayerPresent(visualLighting),
 			.Portals = view.EyeImageKey.IsValid() || !view.Portals.empty() || !view.Surfaces.empty(),
 			.GameInterface = gameInterfacePresent,
@@ -3025,16 +3221,13 @@ namespace studio {
 		view.Damage = damage;
 		const bool visualChanged = damage.Any();
 		const bool particleDeviceStep = particleLayerPresent && frameSeconds > 0.0f;
-		if (!visualChanged && !particleDeviceStep) {
-			return;
-		}
 		if (!visualChanged) {
-			// A retained image that prevents submission is a skipped opportunity,
-			// not a cache read. Count hits only when this presentation actually asks
-			// the renderer to reuse those layers.
+			// Reusing retained images is a cache decision even when it avoids a
+			// renderer call. Collection never depends on which diagnostic page is visible.
 			ViewportPresentations[viewport].CacheProfile().Record(
 				damage, true, false, false, cacheApplicability
 			);
+			if (!particleDeviceStep) return;
 		}
 		{
 			ENGINE_PROFILE_CAT("render frame", engine::core::ProfileCategory::Render);
@@ -3049,8 +3242,10 @@ namespace studio {
 		if (ViewportResults.size() <= viewport) {
 			ViewportResults.resize(viewport + 1);
 		}
-		ViewportResults[viewport].Triangles =
+		const uint64_t retainedTriangles =
 			UpdateSceneTriangleCount(ViewportResults[viewport].Triangles, LastFrame, damage.Scene);
+		ViewportResults[viewport] = LastFrame;
+		ViewportResults[viewport].Triangles = retainedTriangles;
 		if (LastFrame.Submitted) {
 			LastGraphViewport = viewport;
 			LastGraphRenderGeneration = Renderer.RenderGeneration();
@@ -3295,6 +3490,8 @@ namespace studio {
 		// tick rather than tuned now against a synthetic slab.
 		engine::physics::PreparePhysicsWorld(store);
 		engine::physics::RegisterPhysicsSystems(systems);
+		engine::weather::RegisterWeatherClockSystem(systems);
+		engine::game::RegisterWeatherGroundSystem(systems);
 
 		// **What a mesh collider resolves through**, and the studio needs it for
 		// the same reason a server does: a `Collider` names its geometry with a
@@ -3589,6 +3786,7 @@ namespace studio {
 	}
 
 	void Editor::NewGame() {
+		ReleaseImageComposerPreview();
 		EndAllRuns();
 		StopAllPlaytestPlugins();
 
@@ -3771,6 +3969,7 @@ namespace studio {
 	}
 
 	bool Editor::OpenGame(const std::filesystem::path &path) {
+		ReleaseImageComposerPreview();
 		EndAllRuns();
 		StopAllPlaytestPlugins();
 
@@ -4658,11 +4857,13 @@ namespace studio {
 
 		Universe->Enter(world, [&](Store &store) {
 			const engine::ecs::ClassInfo &info = engine::ecs::Classes::Describe(klass);
-			created = authoritative ? store.CreateInstance(klass, Label(info.Name))
-									: store.CreatePredictedInstance(klass, Label(info.Name));
+			const bool local = !authoritative || engine::ecs::IsClientLocalInstance(store, parent);
+			created = local ? store.CreatePredictedInstance(klass, Label(info.Name))
+							: store.CreateInstance(klass, Label(info.Name));
 			if (created == NULL_ENTITY) {
 				return;
 			}
+			if (local) store.Set(created, engine::ecs::ClientLocal{});
 
 			// **Nothing selected means `Workspace`, except a `ScreenGui` belongs in
 			// `StarterGui`.** An instance with no parent is an orphan: it is not in
@@ -5106,11 +5307,15 @@ namespace studio {
 		run.Mode = mode;
 		std::string failure;
 
-		// The runtime starts with its own transient camera after the snapshot, so
-		// scripts never borrow an authored camera and Stop cannot restore it.
+		// Reuse the viewport's local eye; mint a fallback only when no native
+		// camera exists. Neither camera belongs to the authored snapshot.
 		const ViewportCameraPose runtimePose = DefaultViewportCamera();
 		Universe->Enter(world, [&](Store &store) {
-			if (CreateRuntimeCamera(store, "ServerCamera", runtimePose) == NULL_ENTITY) {
+			const Entity existing = RuntimeCameraOf(store);
+			if (existing != NULL_ENTITY && store.Has<engine::ecs::ClientLocal>(existing) &&
+				store.Has<engine::scene::TransientComponent>(existing))
+				return;
+			if (CreateRuntimeCamera(store, runtimePose) == NULL_ENTITY) {
 				failure = "could not create the server runtime camera";
 			}
 		});
@@ -5215,6 +5420,11 @@ namespace studio {
 
 	void Editor::ReleaseWorldResidency(WorldId world) {
 		if (Universe == nullptr || !world.IsValid()) return;
+		// Replacement remints entity handles, so a surviving camera handle may
+		// name authored content in the new Store even when Alive returns true.
+		for (ViewerCamera &viewer : Viewers) {
+			if (viewer.World == world) viewer = {};
+		}
 		ReleaseWorldPresentation(world);
 		Universe->Enter(world, [](Store &store) { store.RemoveResource<engine::effects::ParticleSystem>(); });
 	}

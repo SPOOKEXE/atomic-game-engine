@@ -104,6 +104,8 @@ namespace engine::scene {
 
 			ecs::Classes::Computed(script, SourceProperty());
 			ecs::Classes::Computed(script, RevisionProperty());
+			(void)ecs::Classes::SetPropertiesTag(script, "Source", core::Name("Rendering"));
+			(void)ecs::Classes::SetPropertiesTag(script, "Revision", core::Name("Data"));
 			return script;
 		}
 
@@ -118,6 +120,8 @@ namespace engine::scene {
 			// shader contract, while the revision-on-write rule remains one rule.
 			ecs::Classes::Computed(lens, SourceProperty());
 			ecs::Classes::Computed(lens, RevisionProperty());
+			(void)ecs::Classes::SetPropertiesTag(lens, "Source", core::Name("Rendering"));
+			(void)ecs::Classes::SetPropertiesTag(lens, "Revision", core::Name("Data"));
 			return lens;
 		}
 	}

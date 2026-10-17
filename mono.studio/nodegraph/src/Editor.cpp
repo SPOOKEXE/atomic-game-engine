@@ -1303,6 +1303,7 @@ namespace nodegraph {
 				// headings, which is the shape a search is meant to remove.
 				bool opened = false;
 				for (const NodeType &type : NodeTypes::All()) {
+					if (AcceptsType && !AcceptsType(type)) continue;
 					if (type.Hidden || type.Category != category || !fits(type) ||
 						!Contains(type.Title + " " + type.Category, search)) {
 						continue;

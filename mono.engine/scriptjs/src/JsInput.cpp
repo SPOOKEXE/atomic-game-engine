@@ -160,12 +160,8 @@ namespace engine::script {
 					return;
 				}
 
-				JSValue result = JS_Call(
-					context,
-					Held(context, connection.Callback),
-					JS_UNDEFINED,
-					static_cast<int>(arguments.size()),
-					arguments.data()
+				JSValue result = InvokeJsCallback(
+					context, connection.Callback, static_cast<int>(arguments.size()), arguments.data()
 				);
 
 				// **Every connection runs even when one throws**, which is
@@ -214,14 +210,14 @@ namespace engine::script {
 				if (action == nullptr) {
 					return {};
 				}
+				if (!JsCallbackAlive(context, action->Callback)) continue;
 
 				JSValue arguments[3];
 				arguments[0] = JS_NewStringLen(context, action->Name.data(), action->Name.size());
 				arguments[1] = MakeJsEnumItem(context, core::Name("UserInputState"), report.State);
 				arguments[2] = MakeJsInputObject(context, report);
 
-				JSValue result =
-					JS_Call(context, Held(context, action->Callback), JS_UNDEFINED, 3, arguments);
+				JSValue result = InvokeJsCallback(context, action->Callback, 3, arguments);
 
 				std::string failure;
 				bool pass = false;

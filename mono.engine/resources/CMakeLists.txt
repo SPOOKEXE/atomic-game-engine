@@ -96,6 +96,15 @@ endif()
 set(ssao_radius_world_units "${CMAKE_MATCH_1}")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ssao_header}")
 
+# The ray-marched weather kernels run per view, so optimize them without changing
+# other built-in shaders. Keep debug names so the SPIR-V-to-MSL resource check
+# can match translated parameters to their source bindings.
+set_source_files_properties(
+	"${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather-clouds.comp"
+	"${CMAKE_CURRENT_SOURCE_DIR}/shaders/weather-shadow.comp"
+	PROPERTIES MONO_GLSLC_OPTIONS "-O;-g"
+)
+
 mono_add_library(resources
 	SHADER_DEFINES
 		MAX_LIGHTS=${max_scene_lights}

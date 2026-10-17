@@ -1003,15 +1003,26 @@ end)
 					const auto &capture = portals.at(0).at("capture");
 					REQUIRE(capture.is_object());
 					if (markerFrame != frame) {
-						CHECK(capture.at("producer") == "walk.destination");
-						CHECK(capture.at("scope") == "opaque-lighting");
-						CHECK(capture.at("spatial_overlay_image").get<uint64_t>() != 0);
-						if (roomShader == RoomShader::Lens) {
-							CHECK(capture.at("lens_count") == 1);
-							REQUIRE(capture.at("lenses").size() == 1);
-							CHECK(capture.at("lenses").at(0).at("shader") == "RoomLens");
-							CHECK(capture.at("lenses").at(0).at("program_hash") != std::string(64, '0'));
-							CHECK(std::isfinite(capture.at("lens_time").get<float>()));
+						const auto &handoff = previousSample->at("portal_handoff");
+						if (handoff.at("proceed_eye_source_remote").get<bool>()) {
+							CHECK(capture.at("producer") == "walk.destination");
+							CHECK(capture.at("scope") == "opaque-lighting");
+							CHECK(capture.at("spatial_overlay_image").get<uint64_t>() != 0);
+							if (roomShader == RoomShader::Lens) {
+								CHECK(capture.at("lens_count") == 1);
+								REQUIRE(capture.at("lenses").size() == 1);
+								CHECK(capture.at("lenses").at(0).at("shader") == "RoomLens");
+								CHECK(capture.at("lenses").at(0).at("program_hash") != std::string(64, '0'));
+								CHECK(std::isfinite(capture.at("lens_time").get<float>()));
+							}
+						} else {
+							// Local replicas bake spatial UI and lenses into the complete capture.
+							CHECK(capture.at("producer") == handoff.at("proceed_eye_source"));
+							CHECK(capture.at("producer") == sample.at("input_world"));
+							CHECK(capture.at("scope") == "complete-world");
+							CHECK(capture.at("spatial_overlay_image").get<uint64_t>() == 0);
+							CHECK(capture.at("lens_count") == 0);
+							CHECK(capture.at("lenses").empty());
 						}
 					}
 					const auto &position = capture.at("position");
@@ -1039,7 +1050,7 @@ end)
 						// Destination shifts right, then the eye world's lens shifts the portal left.
 						const int shift =
 							roomShader == RoomShader::Lens
-								? image->w / 16 - (markerSample.value("eye_world", "") == "server.world"
+								? image->w / 16 - (markerSample.at("presented_eye_world") == "server.world"
 													   ? image->w / 32
 													   : 0)
 								: 0;

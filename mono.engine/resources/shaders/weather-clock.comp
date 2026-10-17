@@ -1,0 +1,25 @@
+#version 450
+
+layout(local_size_x = 1) in;
+layout(set = 1, binding = 0, std430) buffer WeatherClockState {
+	uvec4 Phase;
+	uvec4 Time;
+} weatherClock;
+layout(set = 2, binding = 0) uniform Command {
+	uvec4 Phase;
+	uvec4 Time;
+} command;
+
+void main() {
+	if (command.Phase.z != 0u) {
+		weatherClock.Phase = uvec4(command.Phase.xy, 0u, 0u);
+		weatherClock.Time = command.Time;
+		return;
+	}
+	uint previousLow = weatherClock.Phase.x;
+	uvec2 phase = weatherClock.Phase.xy + command.Phase.xy;
+	phase.y += uint(phase.x < previousLow);
+	weatherClock.Phase = uvec4(phase, 0u, 0u);
+	weatherClock.Time.xyz += command.Time.xyz;
+	weatherClock.Time.w = command.Time.w;
+}

@@ -29,6 +29,8 @@
 // this editor already use. Keeping a text field beside a browser would be two
 // places to say the same thing.
 
+#include "AssetPublication.hpp"
+
 #include <engine/assets/AssetKind.hpp>
 #include <engine/assets/LocalStore.hpp>
 #include <engine/assets/Mesh.hpp>
@@ -1132,35 +1134,15 @@ namespace studio {
 		ImportAssetPath(path);
 	}
 
-	void Editor::PublishAssets(const std::string &hexSeed) {
-		if (hexSeed.size() != 64) {
-			AssetStatus = "the signing key is 64 hex characters";
-			return;
-		}
-
-		std::array<std::byte, 32> seed{};
-		for (size_t index = 0; index < seed.size(); index++) {
-			const std::string byte = hexSeed.substr(index * 2, 2);
-			char *end = nullptr;
-			const long value = std::strtol(byte.c_str(), &end, 16);
-			if (end != byte.c_str() + 2) {
-				AssetStatus = "the signing key is not hex";
-				return;
-			}
-			seed[index] = static_cast<std::byte>(value);
-		}
-
-		const auto signing = engine::assets::SigningKey::FromSeed(seed);
-		if (!signing.has_value()) {
-			AssetStatus = "that is not a usable signing key";
-			return;
-		}
+	bool Editor::PublishAssets(const std::string &hexSeed) {
+		const auto signing = ReadAssetPublishingKey(hexSeed, Content, AssetStatus);
+		if (!signing) return false;
 
 		const engine::assets::LocalPaths paths = engine::assets::DefaultLocalPaths();
 		const auto report = cdn::PublishLocal(paths, *signing, NowSeconds());
 		if (!report.has_value()) {
 			AssetStatus = "the publish failed - see the output panel";
-			return;
+			return false;
 		}
 
 		AssetStatus = std::to_string(report->Assets) + " asset(s) in " + std::to_string(report->Bundles) +
@@ -1171,5 +1153,6 @@ namespace studio {
 		// what fills the picker, and a picker that still said "nothing
 		// published" straight after would read as the publish having failed.
 		RefreshStoreContents();
+		return true;
 	}
 }

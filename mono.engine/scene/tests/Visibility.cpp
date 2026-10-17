@@ -14,6 +14,8 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/types/CFrame.hpp>
+#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
@@ -274,6 +276,69 @@ TEST_CASE("destroying a part re-syncs", "[scene][visibility]") {
 	store.DestroyInstance(gone);
 	CHECK(SyncRendered(store) == 1);
 	CHECK(store.Has<Rendered>(kept));
+}
+
+TEST_CASE("Workspace class changes invalidate visibility without a link write", "[scene][visibility]") {
+	visibility_test::Ready();
+	Store store("visibility_test.service.class");
+	const auto workspaceClass = engine::ecs::Classes::Find(engine::core::Name("Workspace"));
+	const auto folderClass = engine::ecs::Classes::Find(engine::core::Name("Folder"));
+	const Entity first = store.CreateInstance(workspaceClass, "First");
+	const Entity second = store.CreateInstance(workspaceClass, "Second");
+	REQUIRE(first != NULL_ENTITY);
+	REQUIRE(second != NULL_ENTITY);
+	const Entity firstPart = visibility_test::PartIn(store, first);
+	const Entity secondPart = visibility_test::PartIn(store, second);
+	REQUIRE(WorkspaceOf(store) == first);
+	REQUIRE(SyncRendered(store) == 1);
+	REQUIRE(store.Has<Rendered>(firstPart));
+	REQUIRE_FALSE(store.Has<Rendered>(secondPart));
+	const auto hierarchy = store.ComponentChangeVersion<engine::ecs::Hierarchy>();
+	const auto visual = store.ComponentChangeVersion<Visual>();
+	const auto classes = store.CountMatching<engine::ecs::InstanceClass>();
+
+	store.Set(first, engine::ecs::InstanceClass{folderClass});
+	store.ClearChanges();
+	CHECK(store.ComponentChangeVersion<engine::ecs::Hierarchy>() == hierarchy);
+	CHECK(store.ComponentChangeVersion<Visual>() == visual);
+	CHECK(store.CountMatching<engine::ecs::InstanceClass>() == classes);
+	REQUIRE(WorkspaceOf(store) == second);
+	CHECK(SyncRendered(store) == 1);
+	CHECK_FALSE(store.Has<Rendered>(firstPart));
+	CHECK(store.Has<Rendered>(secondPart));
+
+	// Removal has no surviving class row carrying a recorded value write.
+	const auto classWrites = store.ComponentChangeVersion<engine::ecs::InstanceClass>();
+	store.Remove<engine::ecs::InstanceClass>(second);
+	store.ClearChanges();
+	CHECK(store.ComponentChangeVersion<engine::ecs::InstanceClass>() == classWrites);
+	REQUIRE(WorkspaceOf(store) == NULL_ENTITY);
+	CHECK(SyncRendered(store) == 0);
+	CHECK_FALSE(store.Has<Rendered>(secondPart));
+	store.Set(first, engine::ecs::InstanceClass{workspaceClass});
+	CHECK(SyncRendered(store) == 1);
+	CHECK(store.Has<Rendered>(firstPart));
+}
+
+TEST_CASE("equal-count drawable replacements invalidate visibility", "[scene][visibility]") {
+	visibility_test::Ready();
+	Store store("visibility_test.membership.replacement");
+	const Entity workspace = InstallServices(store);
+	const Entity first = visibility_test::PartIn(store, workspace);
+	const Entity second = visibility_test::PartIn(store, workspace);
+	const Visual visual = *store.Get<Visual>(second);
+	store.Remove<Visual>(second);
+	REQUIRE(SyncRendered(store) == 1);
+	REQUIRE(store.Has<Rendered>(first));
+	REQUIRE_FALSE(store.Has<Rendered>(second));
+	const auto count = store.CountMatching<Visual>();
+	store.Remove<Visual>(first);
+	store.Set(second, visual);
+	store.ClearChanges();
+	REQUIRE(store.CountMatching<Visual>() == count);
+	CHECK(SyncRendered(store) == 1);
+	CHECK_FALSE(store.Has<Rendered>(first));
+	CHECK(store.Has<Rendered>(second));
 }
 
 TEST_CASE("a world with no Workspace draws nothing", "[scene][visibility]") {

@@ -3,8 +3,10 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Property.hpp>
+#include <engine/gui/PlayerGui.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/script/InstanceShim.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -12,6 +14,7 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -262,6 +265,10 @@ namespace engine::script {
 			ecs::Classes::Computed(container, LanguageProperty());
 
 			ecs::Classes::Computed(container, DisabledProperty());
+			for (const ecs::PropertyDescriptor &property : ecs::Classes::Describe(container).Properties)
+				(void)ecs::Classes::SetPropertiesTag(container, property.Spelling, core::Name("Scripting"));
+			for (const std::string_view property : {"Language", "Disabled"})
+				(void)ecs::Classes::SetPropertiesTag(container, property, core::Name("Behavior"));
 			return script;
 		}
 	}
@@ -333,8 +340,8 @@ namespace engine::script {
 
 		const ecs::ClassId scriptId = ecs::Classes::Find(core::Name("Script"));
 		const ecs::ClassId localId = ecs::Classes::Find(core::Name("LocalScript"));
-		const ecs::Entity starterPlayer =
-			scene::ServiceOf(store, ecs::Classes::Find(core::Name("StarterPlayer")));
+		const ecs::Entity starterGui = store.FindFirstRoot("StarterGui");
+		const ecs::Entity starterPlayer = store.FindFirstRoot("StarterPlayer");
 
 		std::vector<ecs::Entity> found;
 		// **The Luau container is what every script instance has**, whichever
@@ -358,12 +365,13 @@ namespace engine::script {
 			// a `LocalScript` where `IsClient()` is; a single-player host is
 			// both and runs both, which is exactly right rather than a special
 			// case.
-			// StarterPlayer contains templates; only per-player copies may run.
-			const bool playerTemplate =
-				starterPlayer != ecs::NULL_ENTITY && store.IsDescendantOf(entity, starterPlayer);
-			if ((isServerScript && server) || (isLocalScript && client && !playerTemplate)) {
-				found.push_back(entity);
-			}
+			const bool serverProgram =
+				isServerScript && server && InstanceVisibleToScript(store, entity, false);
+			const bool clientProgram =
+				isLocalScript && client && !gui::IsPlayerGuiSource(store, entity) &&
+				(starterGui == ecs::NULL_ENTITY || !store.IsDescendantOf(entity, starterGui)) &&
+				(starterPlayer == ecs::NULL_ENTITY || !store.IsDescendantOf(entity, starterPlayer));
+			if (serverProgram || clientProgram) found.push_back(entity);
 		});
 
 		// Creation order, so a world loaded the same way twice runs its scripts

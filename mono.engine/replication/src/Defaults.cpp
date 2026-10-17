@@ -1,4 +1,5 @@
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Schema.hpp>
 #include <engine/ecs/TypeDescriptor.hpp>
 #include <engine/replication/Defaults.hpp>
 
@@ -49,6 +50,16 @@ namespace engine::replication {
 		// the component from its class. That is a feature with a design, not a
 		// prefix.
 		constexpr std::string_view SHARED_PREFIXES[] = {"scene.", "gui."};
+		// Copied authority weather records are named individually. Derived caches
+		// and listener receipt state remain private even though they share a module.
+		constexpr std::string_view WEATHER_COMPONENTS[] = {
+			"weather.Events", "weather.RuntimeState", "weather.StatefulCheckpoint"
+		};
+		bool PartOfWeather(std::string_view component) {
+			for (const auto named : WEATHER_COMPONENTS)
+				if (component == named) return true;
+			return false;
+		}
 
 		bool UnderASharedPrefix(std::string_view component) {
 			for (const std::string_view prefix : SHARED_PREFIXES) {
@@ -116,11 +127,12 @@ namespace engine::replication {
 		//
 		// **`script.SourceCache` must never be here.** It is a world resource:
 		// one table of every program the world holds, keyed by path, with no
-		// owner projection. Resources cross as complete tables after any owner
-		// selection: `ecs.AttributeTable` selects visible owners, but this cache
-		// would expose `ServerScriptService`'s programs to every client.
-		// `script.Program` crosses instead: it sits on the instance, so it follows
-		// the instance's visibility rule, and `script::MirrorSourcePrograms`
+		// entity to hang it on. Interest filters entities, so a resource can
+		// only cross whole - and whole means `ServerScriptService`'s programs on
+		// every client, which is the leak `scene::VisibleToClients` was added to
+		// close for the instances themselves. `script.Program` is the row that
+		// crosses instead: it sits on the instance, so it is hidden by exactly
+		// the rule that hides the instance, and `script::MirrorSourcePrograms`
 		// never writes one for a `Script`.
 		//
 		// A prefix could not have said that, and the suite is what keeps it
@@ -140,15 +152,6 @@ namespace engine::replication {
 				if (component == named) {
 					return true;
 				}
-			}
-			return false;
-		}
-
-		constexpr std::string_view WORLD_RESOURCES[] = {"physics.Storm", "ecs.AttributeTable"};
-
-		bool IsSharedWorldResource(std::string_view component) {
-			for (const std::string_view named : WORLD_RESOURCES) {
-				if (component == named) return true;
 			}
 			return false;
 		}
@@ -180,7 +183,8 @@ namespace engine::replication {
 		// and worth reducing, but not by guessing a component's write path from
 		// outside the module that owns it.
 		bool WrittenEveryTick(std::string_view component) {
-			return component == "scene.Transform" || component == "scene.Motion";
+			return component == "scene.Transform" || component == "scene.Motion" ||
+				   component == "scene.WeatherClock" || component == "weather.RuntimeState";
 		}
 	}
 
@@ -233,6 +237,8 @@ namespace engine::replication {
 		// Label arguments and bindings also own bounded strings. They are
 		// authored rows, so excluding them would make localized labels and
 		// binding declarations disappear from replicas.
+		// GPU particle fields own bounded spawn samples. Their codec carries
+		// authored emitter data; observation avoids hashing vector addresses.
 		//
 		// They are the same shape as `script.Program` one row up: an author
 		// writes the text and then leaves it alone for the life of the world, so
@@ -242,10 +248,20 @@ namespace engine::replication {
 			   component == "gui.NodeCanvasGroup" || component == "gui.VirtualCollection" ||
 			   component == "script.Program" || component == "scene.EditableMesh" ||
 			   component == "scene.EditableImage" || component == "scene.TextContent" ||
-			   component == "scene.ShaderSource";
+			   component == "scene.ShaderSource" || component == "scene.ImageGraph" ||
+			   component == "scene.GpuParticleField" || component == "scene.WeatherAcceptedDefinition" ||
+			   component == "weather.Events" || component == "weather.StatefulCheckpoint";
 	}
 
 	bool LocalToTheClient(std::string_view component) {
+		// Monotonic receipt times and visual slew debt belong to the receiving machine.
+		if (component == "scene.WeatherClockEstimate" || component == "scene.WeatherClockPublication" ||
+			component == "scene.WeatherClockInbox" || component == "scene.WeatherWorldPause" ||
+			component == "weather.RuntimeCache" || component == "weather.Listener" ||
+			component == "weather.GroundQuery" || component == "weather.StatefulState" ||
+			component == "weather.StatefulInitializationFailure" || component == "weather.EpochHistory")
+			return true;
+		if (component == "ecs.ClientLocal" || component == "ecs.InstanceProjection") return true;
 		// **The client makes its own main camera, and the component that says
 		// *which* camera that is, is the one to keep local.** `ActiveCamera`
 		// names the live one and `client::AimReplicaViewer` mints a predicted
@@ -474,13 +490,17 @@ namespace engine::replication {
 			std::vector<ReplicatedComponent> found;
 
 			for (size_t index = 0; index < ecs::Components::Count(); index++) {
+				if (ecs::Schemas::Of(ecs::ComponentId{static_cast<uint32_t>(index)}) != nullptr) continue;
 				const ecs::TypeDescriptor &type =
 					ecs::Components::Describe(ecs::ComponentId{static_cast<uint32_t>(index)});
 
 				const std::string_view name = type.Name.Text();
-				const bool resource = IsSharedWorldResource(name);
-				const bool shared =
-					UnderASharedPrefix(name) || PartOfAnInstance(name) || PartOfAScript(name) || resource;
+				// Attributes are selected by visible owner. Workspace surface budgets
+				// have no owning entity, so their two values cross as world resources.
+				const bool resource = name == "ecs.AttributeTable" || name == "scene.SurfaceBounces" ||
+									  name == "scene.SurfaceLimit";
+				const bool shared = resource || UnderASharedPrefix(name) || PartOfAnInstance(name) ||
+									PartOfAScript(name) || PartOfWeather(name);
 				if (!shared || LocalToTheClient(name)) {
 					continue;
 				}

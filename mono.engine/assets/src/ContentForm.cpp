@@ -106,6 +106,8 @@ namespace engine::assets {
 
 			{ContentForm::AAnim, "aanim", AssetKind::Animation, false},
 			{ContentForm::AShader, "ashader", AssetKind::Shader, false},
+			{ContentForm::ImageGraph, "imagegraph", AssetKind::ImageGraph, true},
+			{ContentForm::AImageGraph, "aimagegraph", AssetKind::ImageGraph, false},
 		};
 
 		const Row *RowOf(ContentForm form) {

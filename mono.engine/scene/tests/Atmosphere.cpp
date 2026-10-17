@@ -1,15 +1,10 @@
-// The sky, and the fog it deliberately does not replace.
-//
-// **`docs/ARCH_REVIEW.md` D4 reads the tree as having no fog at all.** It has,
-// on the `Lighting` service, resolved by `LightingOf` and read by the renderer -
-// so the first case here is that adding an atmosphere leaves it alone. A
-// `scene::Fog` component would have been a second answer to what a world's
-// distance fade is, which is rule 2.
+// The sky and its independent linear fog effect.
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Atmosphere.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -69,17 +64,17 @@ TEST_CASE("a world with no atmosphere is clear air", "[scene][atmosphere]") {
 }
 
 TEST_CASE("an atmosphere does not disturb the fog beside it", "[scene][atmosphere]") {
-	// The two are separate models and a world may author either. This is the
-	// case that says D4's reading of the tree was wrong: the fog was always
-	// there, on the service where it belongs.
+	// The two are separate models and a world may author either.
 	RegisterSceneClasses();
 	Store store("atmosphere_test.fog");
 
-	LightingServiceComponent *service = store.GetMutable<LightingServiceComponent>(Lighting(store));
-	REQUIRE(service != nullptr);
-	service->FogColor = Color3{0.2f, 0.3f, 0.4f};
-	service->FogStart = 25.0f;
-	service->FogEnd = 90.0f;
+	const Entity fog = store.CreateInstance(Classes::Find(Name("FogEffect")), "Fog");
+	REQUIRE(store.SetParent(fog, Lighting(store)));
+	auto *effect = store.GetMutable<engine::scene::FogEffect>(fog);
+	REQUIRE(effect != nullptr);
+	effect->Color = Color3{0.2f, 0.3f, 0.4f};
+	effect->Start = 25.0f;
+	effect->End = 90.0f;
 
 	Atmosphere air;
 	air.Density = 0.8f;
@@ -262,9 +257,7 @@ TEST_CASE("compute shader choices are closed dropdowns", "[scene][atmosphere][co
 }
 
 TEST_CASE("authored values out of range are clamped on read", "[scene][atmosphere]") {
-	// `LightingOf`'s rule for `FogStart` and `FogEnd`: these arrive from a file
-	// and a wire, and a density above one is a shader reading past the end of a
-	// lookup rather than a slightly thick day.
+	// Raw component data can arrive from a file or wire, so resolve clamps it.
 	RegisterSceneClasses();
 	Store store("atmosphere_test.clamp");
 

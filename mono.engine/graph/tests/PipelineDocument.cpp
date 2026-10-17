@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <vector>
 
 TEST_SUITE_ID("engine.graph.pipelinedocument")
 TEST_DEPENDS("engine.graph.rendergraph")
@@ -33,6 +34,24 @@ using engine::graph::ResourceKind;
 using engine::graph::Write;
 
 namespace {
+	bool ContainsKind(const RenderGraph &graph, const std::vector<NodeId> &nodes, Name kind) {
+		return std::any_of(nodes.begin(), nodes.end(), [&](NodeId id) {
+			const auto *node = graph.Find(id);
+			return node != nullptr && node->Kind == kind;
+		});
+	}
+
+	bool HasKindsInOrder(
+		const RenderGraph &graph, const std::vector<NodeId> &nodes, const std::vector<Name> &kinds
+	) {
+		size_t next = 0;
+		for (const NodeId id : nodes) {
+			const auto *node = graph.Find(id);
+			if (node != nullptr && next < kinds.size() && node->Kind == kinds[next]) next++;
+		}
+		return next == kinds.size();
+	}
+
 	Edit Resource(std::string_view name, ResourceKind kind = ResourceKind::Colour) {
 		Edit edit;
 		edit.Kind = EditKind::AddResource;
@@ -90,14 +109,24 @@ TEST_CASE("the default document builds the engine frame", "[graph]") {
 	CompiledGraph fromDocument;
 	REQUIRE(graph.Compile(fromDocument, offender) == GraphStatus::Ok);
 
-	REQUIRE(fromDocument.Shared.size() == 5);
-	REQUIRE(fromDocument.PerView.size() == 22);
-	REQUIRE(fromDocument.Final.size() == 4);
 	CHECK(graph.Find(fromDocument.Shared.front())->Name == Name("world"));
-	CHECK(graph.Find(fromDocument.Shared[1])->Name == Name("mesh-residency"));
-	CHECK(graph.Find(fromDocument.Shared[2])->Name == Name("shadow"));
-	CHECK(graph.Find(fromDocument.Shared[3])->Name == Name("skybox-compute"));
-	CHECK(graph.Find(fromDocument.Shared.back())->Name == Name("clouds-compute"));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("mesh-residency")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("shadow")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("skybox-compute")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("clouds-compute")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("weather-residency")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("weather-field")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("weather-summary")));
+	CHECK(ContainsKind(graph, fromDocument.Shared, Name("weather-shadow-map")));
+	CHECK(ContainsKind(graph, fromDocument.PerView, Name("weather-integrate")));
+	CHECK(ContainsKind(graph, fromDocument.PerView, Name("weather-history")));
+	CHECK(ContainsKind(graph, fromDocument.PerView, Name("weather-reconstruct")));
+	for (const NodeId id : fromDocument.Shared)
+		CHECK(graph.Find(id)->Scope != NodeScope::View);
+	for (const NodeId id : fromDocument.PerView)
+		CHECK(graph.Find(id)->Scope == NodeScope::View);
+	for (const NodeId id : fromDocument.Final)
+		CHECK(graph.Find(id)->Scope == NodeScope::Frame);
 	CHECK(graph.Find(fromDocument.PerView.front())->Name == Name("camera"));
 	CHECK(graph.Find(fromDocument.PerView.back())->Name == Name("tonemap"));
 	CHECK(graph.Find(fromDocument.Final.back())->Name == Name("output-image"));
@@ -135,7 +164,7 @@ TEST_CASE("the data capture document keeps SSAO as an independent R8 source", "[
 	CHECK(ambient->Scope == NodeScope::Frame);
 	REQUIRE(ambient->Reads.size() == 1);
 	CHECK(ambient->ReadPorts == std::vector<Name>{Name("source")});
-	const auto *occlusion = graph.FindResource(ambient->Reads.front());
+	const auto *occlusion = graph.FindResourceDesc(ambient->Reads.front());
 	REQUIRE(occlusion != nullptr);
 	CHECK(occlusion->Name == Name("occlusion"));
 	CHECK(occlusion->Format == engine::graph::ResourceFormat::R8);
@@ -154,7 +183,7 @@ TEST_CASE("the HDR capture reads the completed transparent scene", "[graph][data
 		if (node && node->Name == Name("data-capture")) capture = node;
 	}
 	REQUIRE(capture != nullptr);
-	const auto *source = graph.FindResource(capture->Reads.front());
+	const auto *source = graph.FindResourceDesc(capture->Reads.front());
 	REQUIRE(source != nullptr);
 	CHECK(source->Name == Name("display"));
 	CHECK(source->Format == engine::graph::ResourceFormat::RGBA16F);
@@ -194,7 +223,7 @@ TEST_CASE(
 	CHECK(capture->Kind == Name("capture"));
 	CHECK(capture->ReadPorts == std::vector<Name>{Name("source")});
 	REQUIRE(capture->Reads.size() == 1);
-	const auto *response = graph.FindResource(capture->Reads.front());
+	const auto *response = graph.FindResourceDesc(capture->Reads.front());
 	REQUIRE(response != nullptr);
 	CHECK(response->Name == Name("directional-response"));
 	CHECK(response->Format == engine::graph::ResourceFormat::RGBA32F);
@@ -221,7 +250,7 @@ TEST_CASE("the data capture document exposes a GPU packed RGBA32F target", "[gra
 	CHECK(pack->Integer(Name("g-component"), 9) == 0);
 	CHECK(pack->Integer(Name("b-component"), 9) == 0);
 	CHECK(pack->Integer(Name("a-component"), 9) == 2);
-	const auto *packed = graph.FindResource(pack->Writes.front());
+	const auto *packed = graph.FindResourceDesc(pack->Writes.front());
 	REQUIRE(packed != nullptr);
 	CHECK(packed->Name == Name("packed-gpu"));
 	CHECK(packed->Format == engine::graph::ResourceFormat::RGBA32F);
@@ -252,7 +281,7 @@ TEST_CASE(
 	REQUIRE(capture != nullptr);
 	CHECK(capture->Kind == Name("capture"));
 	CHECK(capture->ReadPorts == std::vector<Name>{Name("source")});
-	const auto *vectors = graph.FindResource(capture->Reads.front());
+	const auto *vectors = graph.FindResourceDesc(capture->Reads.front());
 	REQUIRE(vectors != nullptr);
 	CHECK(vectors->Name == Name("camera-motion-vectors"));
 	CHECK(vectors->Format == engine::graph::ResourceFormat::RG16F);
@@ -274,7 +303,7 @@ TEST_CASE(
 	REQUIRE(capture != nullptr);
 	CHECK(capture->Kind == Name("capture"));
 	CHECK(capture->ReadPorts == std::vector<Name>{Name("source")});
-	const auto *uv = graph.FindResource(capture->Reads.front());
+	const auto *uv = graph.FindResourceDesc(capture->Reads.front());
 	REQUIRE(uv != nullptr);
 	CHECK(uv->Name == Name("mesh-uv"));
 	CHECK(uv->Format == engine::graph::ResourceFormat::RG16F);
@@ -295,7 +324,7 @@ TEST_CASE("the data capture document records visible opaque or masked coverage",
 	CHECK(capture->Kind == Name("capture"));
 	CHECK(capture->Scope == NodeScope::Frame);
 	CHECK(capture->ReadPorts == std::vector<Name>{Name("source")});
-	const auto *validity = graph.FindResource(capture->Reads.front());
+	const auto *validity = graph.FindResourceDesc(capture->Reads.front());
 	REQUIRE(validity != nullptr);
 	CHECK(validity->Name == Name("first-surface-validity"));
 	CHECK(validity->Format == engine::graph::ResourceFormat::R8);
@@ -323,8 +352,8 @@ TEST_CASE("the data capture document peels one aligned second surface", "[graph]
 	CHECK(capture->Kind == Name("capture"));
 	CHECK(capture->Scope == NodeScope::Frame);
 	CHECK(capture->ReadPorts == std::vector<Name>{Name("source"), Name("depth")});
-	const auto *validity = graph.FindResource(capture->Reads[0]);
-	const auto *depth = graph.FindResource(capture->Reads[1]);
+	const auto *validity = graph.FindResourceDesc(capture->Reads[0]);
+	const auto *depth = graph.FindResourceDesc(capture->Reads[1]);
 	REQUIRE(validity != nullptr);
 	REQUIRE(depth != nullptr);
 	CHECK(validity->Name == Name("second-surface-validity"));
@@ -390,7 +419,7 @@ TEST_CASE("resource and canvas contracts survive text and runtime build", "[grap
 
 	RenderGraph graph;
 	REQUIRE(Build(reloaded, graph, offender) == PipelineDocumentStatus::Ok);
-	const auto *built = graph.FindResource(engine::graph::ResourceId{1});
+	const auto *built = graph.FindResourceDesc(engine::graph::ResourceId{1});
 	REQUIRE(built != nullptr);
 	CHECK(built->Access == engine::graph::ResourceAccess::ReadWrite);
 	CHECK(built->Samples == 4);
@@ -414,37 +443,49 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
-	REQUIRE(compiled.Shared.size() == 5);
-	REQUIRE(compiled.PerView.size() == 22);
-	REQUIRE(compiled.Final.size() == 4);
-
-	CHECK(graph.Find(compiled.Shared[0])->Kind == Name("world"));
-	CHECK(graph.Find(compiled.Shared[1])->Kind == Name("mesh-residency"));
-	CHECK(graph.Find(compiled.Shared[2])->Kind == Name("shadow"));
-	CHECK(graph.Find(compiled.Shared[3])->Kind == Name("skybox-compute"));
-	CHECK(graph.Find(compiled.Shared[4])->Kind == Name("clouds-compute"));
-	CHECK(graph.Find(compiled.PerView[0])->Kind == Name("camera"));
-	CHECK(graph.Find(compiled.PerView[1])->Kind == Name("last-frame"));
-	CHECK(graph.Find(compiled.PerView[2])->Kind == Name("entities"));
-	CHECK(graph.Find(compiled.PerView[3])->Kind == Name("cull-frustum"));
-	CHECK(graph.Find(compiled.PerView[4])->Kind == Name("order-draw"));
-	CHECK(graph.Find(compiled.PerView[5])->Kind == Name("delta-upload"));
-	CHECK(graph.Find(compiled.PerView[6])->Kind == Name("select-lod"));
-	CHECK(graph.Find(compiled.PerView[7])->Kind == Name("surface-capture"));
-	CHECK(graph.Find(compiled.PerView[8])->Kind == Name("gbuffer"));
-	CHECK(graph.Find(compiled.PerView[9])->Kind == Name("depth-linearise"));
-	CHECK(graph.Find(compiled.PerView[10])->Kind == Name("ssao"));
-	CHECK(graph.Find(compiled.PerView[11])->Kind == Name("deferred-lighting"));
-	CHECK(graph.Find(compiled.PerView[12])->Kind == Name("sky"));
-	CHECK(graph.Find(compiled.PerView[13])->Kind == Name("fog"));
-	CHECK(graph.Find(compiled.PerView[14])->Kind == Name("portal-overlay"));
-	CHECK(graph.Find(compiled.PerView[15])->Kind == Name("mirror-overlay"));
-	CHECK(graph.Find(compiled.PerView[16])->Kind == Name("transparent"));
-	CHECK(graph.Find(compiled.PerView[17])->Kind == Name("shader-lenses"));
-	CHECK(graph.Find(compiled.PerView[20])->Kind == Name("bloom"));
-	CHECK(graph.Find(compiled.PerView[21])->Kind == Name("tonemap"));
-	CHECK(graph.Find(compiled.Final[0])->Kind == Name("present"));
-	CHECK(graph.Find(compiled.Final[3])->Kind == Name("output-image"));
+	CHECK(HasKindsInOrder(
+		graph,
+		compiled.Shared,
+		{Name("world"),
+		 Name("mesh-residency"),
+		 Name("shadow"),
+		 Name("skybox-compute"),
+		 Name("clouds-compute")}
+	));
+	CHECK(HasKindsInOrder(
+		graph,
+		compiled.PerView,
+		{Name("camera"),
+		 Name("last-frame"),
+		 Name("entities"),
+		 Name("cull-frustum"),
+		 Name("order-draw"),
+		 Name("delta-upload"),
+		 Name("select-lod"),
+		 Name("surface-capture"),
+		 Name("gbuffer"),
+		 Name("depth-linearise"),
+		 Name("ssao"),
+		 Name("deferred-lighting"),
+		 Name("sky"),
+		 Name("fog"),
+		 Name("portal-overlay"),
+		 Name("mirror-overlay"),
+		 Name("transparent"),
+		 Name("shader-lenses"),
+		 Name("bloom"),
+		 Name("tonemap")}
+	));
+	CHECK(HasKindsInOrder(
+		graph, compiled.Final, {Name("present"), Name("interface"), Name("overlay"), Name("output-image")}
+	));
+	CHECK(ContainsKind(graph, compiled.Shared, Name("weather-residency")));
+	CHECK(ContainsKind(graph, compiled.Shared, Name("weather-field")));
+	CHECK(ContainsKind(graph, compiled.Shared, Name("weather-summary")));
+	CHECK(ContainsKind(graph, compiled.Shared, Name("weather-shadow-map")));
+	CHECK(ContainsKind(graph, compiled.PerView, Name("weather-integrate")));
+	CHECK(ContainsKind(graph, compiled.PerView, Name("weather-history")));
+	CHECK(ContainsKind(graph, compiled.PerView, Name("weather-reconstruct")));
 
 	bool emissive = false;
 	bool occlusion = false;
@@ -452,7 +493,7 @@ TEST_CASE("the default PBR document carries material emission and ambient occlus
 	bool skyHistory = false;
 	bool cloudsHistory = false;
 	for (uint32_t value = 1; value <= graph.ResourceCount(); value++) {
-		const auto *resource = graph.FindResource(engine::graph::ResourceId{value});
+		const auto *resource = graph.FindResourceDesc(engine::graph::ResourceId{value});
 		REQUIRE(resource != nullptr);
 		emissive = emissive || (resource->Name == Name("emissive") &&
 								resource->Format == engine::graph::ResourceFormat::RGBA16F);
@@ -502,7 +543,37 @@ TEST_CASE("optional default graph nodes can be disabled without breaking their c
 	RenderGraph graph;
 	Name offender;
 	REQUIRE(Build(document, graph, offender) == PipelineDocumentStatus::Ok);
-	CHECK(graph.ResourceCount() == 44);
+	RenderGraph defaults;
+	REQUIRE(Build(DefaultPbrDocument(), defaults, offender) == PipelineDocumentStatus::Ok);
+	const auto resourceNames = [](const RenderGraph &candidate) {
+		std::vector<Name> names;
+		names.reserve(candidate.ResourceCount());
+		for (uint32_t index = 1; index <= candidate.ResourceCount(); ++index) {
+			const auto *resource = candidate.FindResourceDesc(engine::graph::ResourceId{index});
+			if (resource != nullptr) names.push_back(resource->Name);
+		}
+		return names;
+	};
+	const std::vector<Name> actualResources = resourceNames(graph);
+	const std::vector<Name> defaultResources = resourceNames(defaults);
+	CHECK(actualResources.size() == graph.ResourceCount());
+	CHECK(defaultResources.size() == defaults.ResourceCount());
+	CHECK(actualResources == defaultResources);
+	for (const std::string_view name : {
+			 "weather-pages",
+			 "weather-previous-pages",
+			 "weather-field",
+			 "weather-summary",
+			 "weather-shadow",
+			 "weather-cloud-history",
+			 "weather-depth-history",
+			 "weather-clouds",
+			 "weather-cloud-depth",
+			 "weather-resolved",
+			 "weather-lit",
+		 }) {
+		CHECK(std::find(actualResources.begin(), actualResources.end(), Name(name)) != actualResources.end());
+	}
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
@@ -672,9 +743,14 @@ TEST_CASE("an enable edit survives the round trip and the build", "[graph]") {
 
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	RenderGraph originalGraph;
+	REQUIRE(Build(DefaultPbrDocument(), originalGraph, offender) == PipelineDocumentStatus::Ok);
+	CompiledGraph original;
+	REQUIRE(originalGraph.Compile(original, offender) == GraphStatus::Ok);
 
 	// Out of the compile entirely, which is what disabling means here.
-	CHECK(compiled.PerView.size() == 21);
+	CHECK(compiled.PerView.size() + 1 == original.PerView.size());
+	CHECK_FALSE(ContainsKind(graph, compiled.PerView, Name("surface-capture")));
 }
 
 TEST_CASE("the game interface can be disabled without removing the frame output", "[graph][interface]") {
@@ -687,7 +763,11 @@ TEST_CASE("the game interface can be disabled without removing the frame output"
 
 	CompiledGraph compiled;
 	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
-	REQUIRE(compiled.Final.size() == 3);
+	RenderGraph originalGraph;
+	REQUIRE(Build(DefaultPbrDocument(), originalGraph, offender) == PipelineDocumentStatus::Ok);
+	CompiledGraph original;
+	REQUIRE(originalGraph.Compile(original, offender) == GraphStatus::Ok);
+	CHECK(compiled.Final.size() + 1 == original.Final.size());
 	CHECK(std::none_of(compiled.Final.begin(), compiled.Final.end(), [&](NodeId node) {
 		return graph.Find(node)->Kind == Name("interface");
 	}));
@@ -1135,7 +1215,7 @@ TEST_CASE(
 	REQUIRE(spatial.size() >= expectedTail.size());
 	CHECK(std::vector<Name>(spatial.end() - expectedTail.size(), spatial.end()) == expectedTail);
 	for (uint32_t value = 1; value <= graph.ResourceCount(); ++value) {
-		const auto *resource = graph.FindResource(engine::graph::ResourceId{value});
+		const auto *resource = graph.FindResourceDesc(engine::graph::ResourceId{value});
 		if (resource->Name == Name("mirror-views") || resource->Name == Name("portaled") ||
 			resource->Name == Name("mirrored") || resource->Name == Name("display") ||
 			resource->Name == Name("lens-b")) {
@@ -1152,10 +1232,10 @@ TEST_CASE(
 		REQUIRE(node->Writes.size() == 2);
 		CHECK(node->ReadPorts == std::vector<Name>{Name("colour"), Name("depth")});
 		CHECK(node->WritePorts == std::vector<Name>{Name("colour"), Name("scratch")});
-		CHECK(graph.FindResource(node->Reads[0])->Name == Name("display"));
-		CHECK(graph.FindResource(node->Reads[1])->Format == engine::graph::ResourceFormat::R32F);
+		CHECK(graph.FindResourceDesc(node->Reads[0])->Name == Name("display"));
+		CHECK(graph.FindResourceDesc(node->Reads[1])->Format == engine::graph::ResourceFormat::R32F);
 		CHECK(node->Writes[0] != node->Writes[1]);
-		CHECK(graph.FindResource(node->Writes[1])->Format == engine::graph::ResourceFormat::RGBA16F);
+		CHECK(graph.FindResourceDesc(node->Writes[1])->Format == engine::graph::ResourceFormat::RGBA16F);
 	}
 	PipelineDocument restored;
 	REQUIRE(Read(Write(document), restored, offender) == PipelineDocumentStatus::Ok);
@@ -1227,11 +1307,11 @@ TEST_CASE(
 						CHECK(exported->Kind == Name("capture"));
 						REQUIRE(exported->Reads.size() == 2);
 						CHECK(
-							graph.FindResource(exported->Reads[0])->Format ==
+							graph.FindResourceDesc(exported->Reads[0])->Format ==
 							engine::graph::ResourceFormat::RGBA16F
 						);
 						CHECK(
-							graph.FindResource(exported->Reads[1])->Format ==
+							graph.FindResourceDesc(exported->Reads[1])->Format ==
 							engine::graph::ResourceFormat::R32F
 						);
 						if (lenses) {
@@ -1304,11 +1384,15 @@ TEST_CASE(
 			const auto *ssao = find("ssao");
 			REQUIRE(merged->Writes.size() == 2);
 			CHECK(ssao->Reads == merged->Writes);
-			CHECK(graph.FindResource(merged->Writes[0])->Format == engine::graph::ResourceFormat::R32F);
-			CHECK(graph.FindResource(merged->Writes[1])->Format == engine::graph::ResourceFormat::RGB10A2);
+			CHECK(graph.FindResourceDesc(merged->Writes[0])->Format == engine::graph::ResourceFormat::R32F);
+			CHECK(
+				graph.FindResourceDesc(merged->Writes[1])->Format == engine::graph::ResourceFormat::RGB10A2
+			);
 			const auto *room = find("room-image");
 			REQUIRE(room->Writes.size() == 5);
-			CHECK(graph.FindResource(room->Writes.back())->Format == engine::graph::ResourceFormat::RGBA32F);
+			CHECK(
+				graph.FindResourceDesc(room->Writes.back())->Format == engine::graph::ResourceFormat::RGBA32F
+			);
 			const auto *body = find("body-compose");
 			CHECK(body->Reads[2] == find("ambient-correct")->Writes[0]);
 			const auto *correction = find("ambient-correct");
@@ -1366,12 +1450,14 @@ TEST_CASE(
 			const auto *node = graph.Find(id);
 			if (node->Kind != Name("deferred-lighting")) continue;
 			REQUIRE(node->Writes.size() == (directional ? 3 : 2));
-			CHECK(graph.FindResource(node->Writes[0])->Format == engine::graph::ResourceFormat::RGBA16F);
-			CHECK(graph.FindResource(node->Writes[1])->Format == engine::graph::ResourceFormat::RGBA32F);
+			CHECK(graph.FindResourceDesc(node->Writes[0])->Format == engine::graph::ResourceFormat::RGBA16F);
+			CHECK(graph.FindResourceDesc(node->Writes[1])->Format == engine::graph::ResourceFormat::RGBA32F);
 			CHECK(node->WritePorts[1] == Name("lighting-baseline"));
 			if (directional) {
 				CHECK(node->WritePorts[2] == Name("directional-response"));
-				CHECK(graph.FindResource(node->Writes[2])->Format == engine::graph::ResourceFormat::RGBA32F);
+				CHECK(
+					graph.FindResourceDesc(node->Writes[2])->Format == engine::graph::ResourceFormat::RGBA32F
+				);
 			}
 		}
 		PipelineDocument restored;
@@ -1428,7 +1514,7 @@ TEST_CASE(
 					std::find(correction->ReadPorts.begin(), correction->ReadPorts.end(), Name(input.Port));
 				REQUIRE(at != correction->ReadPorts.end());
 				const auto resource = correction->Reads[at - correction->ReadPorts.begin()];
-				const auto *description = graph.FindResource(resource);
+				const auto *description = graph.FindResourceDesc(resource);
 				REQUIRE(description);
 				CHECK(description->Name == Name(input.Resource));
 				CHECK(description->Format == input.Format);
@@ -1443,7 +1529,7 @@ TEST_CASE(
 			REQUIRE(background != body->ReadPorts.end());
 			REQUIRE(correction->Writes.size() == 1);
 			CHECK(body->Reads[background - body->ReadPorts.begin()] == correction->Writes.front());
-			CHECK(graph.FindResource(correction->Writes.front())->Format == ResourceFormat::RGBA16F);
+			CHECK(graph.FindResourceDesc(correction->Writes.front())->Format == ResourceFormat::RGBA16F);
 			CHECK(find("ambient-merge")->Writes.size() == 2);
 		}
 }

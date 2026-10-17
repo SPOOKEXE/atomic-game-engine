@@ -214,7 +214,10 @@ TEST_CASE(
 
 	view.Lighting.VolumeCount = 0;
 	OverlayImage overlay;
-	REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("fog")));
+	const auto empty = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(empty.Submitted);
+	CHECK_FALSE(empty.Ran(core::Name("fog")));
+	CHECK_FALSE(fixture.Render.ViewPassActivity(view.Slot).Fog);
 	const CapturedImage withoutVolumes = CaptureResource(
 		fixture.Render, core::Name("tonemapped"), view.Slot, EXTENT, EXTENT, ImageFormat::Rgba8Unorm
 	);

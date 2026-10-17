@@ -20,6 +20,7 @@ namespace engine::script {
 		using ecs::PropertyDescriptor;
 		using ecs::PropertyType;
 		using ecs::Store;
+		void PushInstance(lua_State *state, Entity entity);
 
 		// The world every instance in this VM belongs to.
 		//
@@ -30,12 +31,23 @@ namespace engine::script {
 			return *UpvalueContext(state).World;
 		}
 
-		Entity CheckInstance(lua_State *state, int index) {
+		Entity &CheckedInstanceStorage(lua_State *state, int index) {
 			void *value = lua_touserdatatagged(state, index, TAG_INSTANCE);
 			if (value == nullptr) {
 				luaL_typeerrorL(state, index, "Instance");
 			}
 			return *static_cast<Entity *>(value);
+		}
+
+		Entity CheckInstance(lua_State *state, int index) {
+			Entity &instance = CheckedInstanceStorage(state, index);
+			lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace");
+			const bool builtin = &instance == lua_touserdatatagged(state, -1, TAG_INSTANCE);
+			lua_pop(state, 1);
+			// Only the builtin service follows replica arrival or a reminted scene.
+			// Ordinary instances retain their exact authored generation.
+			if (builtin) instance = scene::WorkspaceOf(*ContextOf(state).World);
+			return instance;
 		}
 
 		bool IsRemoteEvent(const Store &store, Entity instance) {
@@ -45,7 +57,8 @@ namespace engine::script {
 		int RemoteEventFireServer(lua_State *state) {
 			LuauContext &context = UpvalueContext(state);
 			const Entity instance = CheckInstance(state, 1);
-			if (!context.Role.Client || !IsRemoteEvent(*context.World, instance)) {
+			if (!ExecutionRole(state).Client || !IsRemoteEvent(*context.World, instance) ||
+				scene::ScopeOfInstance(*context.World, instance) == scene::ServiceScope::Server) {
 				luaL_errorL(state, "FireServer is only available on a client RemoteEvent");
 				return 0;
 			}
@@ -71,7 +84,13 @@ namespace engine::script {
 				lua_pushlstring(
 					state, reinterpret_cast<const char *>(delivered.Payload.data()), delivered.Payload.size()
 				);
-				if (const std::string error = FireSignal(state, SignalKind::RemoteEvent, instance, 1);
+				const auto *local = context.World->Resource<scene::LocalPlayer>();
+				if (local != nullptr && context.World->Alive(local->Instance) &&
+					context.World->IsA(local->Instance, scene::PlayerClass()))
+					PushInstance(state, local->Instance);
+				else
+					lua_pushnil(state);
+				if (const std::string error = FireSignal(state, SignalKind::RemoteEvent, instance, 2);
 					!error.empty()) {
 					luaL_errorL(state, "RemoteEvent:FireServer handler failed: %s", error.c_str());
 				}
@@ -84,17 +103,15 @@ namespace engine::script {
 			return 0;
 		}
 
-		// This world's `Workspace`, as `OpenWorkspace` resolved it.
+		// This world's builtin `Workspace`, including a scene arriving after VM startup.
 		//
-		// **From the registry rather than from `WorkspaceOf`**, which is a scan
-		// of every root in the world. This is read on the miss path of a member
-		// lookup, so it has to be a table read and a compare rather than a
-		// search.
+		// The registry preserves builtin identity while its handle resolves the
+		// current canonical service, including a scene whose handles were reminted.
 		Entity WorkspaceEntity(lua_State *state) {
 			lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace");
 			Entity workspace = ecs::NULL_ENTITY;
-			if (void *value = lua_touserdatatagged(state, -1, TAG_INSTANCE); value != nullptr) {
-				workspace = *static_cast<Entity *>(value);
+			if (lua_touserdatatagged(state, -1, TAG_INSTANCE) != nullptr) {
+				workspace = CheckInstance(state, -1);
 			}
 			lua_pop(state, 1);
 			return workspace;
@@ -187,7 +204,9 @@ namespace engine::script {
 
 		int InstanceIndex(lua_State *state) {
 			Store &store = InstanceStoreOf(state);
-			const Entity instance = CheckInstance(state, 1);
+			const HostRole role = ExecutionRole(state);
+			const bool clientExecution = role.Client && !role.Server;
+			const Entity instance = InstanceForScriptRead(store, CheckInstance(state, 1), clientExecution);
 			const char *field = luaL_checkstring(state, 2);
 			const std::string_view name(field);
 
@@ -383,7 +402,9 @@ namespace engine::script {
 				// scanned a class's property list.
 				if (property->Type == PropertyType::String) {
 					std::string text;
-					if (!ReadInstanceProperty(store, instance, *property, &text, sizeof(text))) {
+					if (!ReadInstanceProperty(
+							store, instance, *property, &text, sizeof(text), clientExecution
+						)) {
 						luaL_errorL(state, "could not read '%s'", field);
 					}
 					lua_pushlstring(state, text.data(), text.size());
@@ -399,7 +420,9 @@ namespace engine::script {
 				// half the class-table traffic of a scripted frame.
 				alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
 				if (property->Size > sizeof(bytes) ||
-					!ReadInstanceProperty(store, instance, *property, bytes, property->Size)) {
+					!ReadInstanceProperty(
+						store, instance, *property, bytes, property->Size, clientExecution
+					)) {
 					luaL_errorL(state, "could not read '%s'", field);
 				}
 
@@ -451,7 +474,7 @@ namespace engine::script {
 			// deliberately: a child named `Size` must not shadow the property,
 			// or a scene could break every script that touched it by adding a
 			// part with an unlucky name.
-			const Entity child = FindInstanceChild(store, instance, name);
+			const Entity child = FindInstanceChild(store, instance, name, false, clientExecution);
 			if (child != ecs::NULL_ENTITY) {
 				PushInstance(state, child);
 				return 1;
@@ -464,6 +487,8 @@ namespace engine::script {
 			Store &store = InstanceStoreOf(state);
 			const Entity instance = CheckInstance(state, 1);
 			const char *field = luaL_checkstring(state, 2);
+			const HostRole role = ExecutionRole(state);
+			const bool clientExecution = role.Client && !role.Server;
 
 			// The other half of the Workspace's own members. Before the property
 			// lookup rather than after it only because there is no property of
@@ -491,7 +516,9 @@ namespace engine::script {
 				const char *text = luaL_checklstring(state, 3, &length);
 				const std::string value(text, length);
 
-				if (!WriteInstanceProperty(store, instance, *property, &value, sizeof(value))) {
+				if (!WriteInstanceProperty(
+						store, instance, *property, &value, sizeof(value), clientExecution
+					)) {
 					luaL_errorL(state, "could not write '%s'", field);
 				}
 				return 0;
@@ -507,7 +534,7 @@ namespace engine::script {
 			// rejecting the write is the case that matters: a script author
 			// cannot tell "rejected" from "applied and then overwritten by the
 			// next delta" without being told.
-			if (!WriteInstanceProperty(store, instance, *property, bytes, property->Size)) {
+			if (!WriteInstanceProperty(store, instance, *property, bytes, property->Size, clientExecution)) {
 				if (store.AdoptOnly()) {
 					luaL_errorL(
 						state,
@@ -540,7 +567,10 @@ namespace engine::script {
 			Store &store = InstanceStoreOf(state);
 			const char *className = luaL_checkstring(state, 1);
 			const Entity parent = lua_isnoneornil(state, 2) ? ecs::NULL_ENTITY : CheckInstance(state, 2);
-			const InstanceCreateResult created = CreateScriptInstance(store, className, parent);
+			const HostRole role = ExecutionRole(state);
+			const bool clientExecution = role.Client && !role.Server;
+			const InstanceCreateResult created =
+				CreateScriptInstance(store, className, parent, clientExecution);
 
 			if (created.Failure == InstanceCreateFailure::UnknownClass) {
 				luaL_errorL(state, "'%s' is not a registered class", className);
@@ -879,8 +909,8 @@ namespace engine::script {
 					return;
 				}
 
-				lua_getref(state, connection.Callback);
-				if (lua_pcall(state, 0, 0, 0) != LUA_OK) {
+				PushLuauValue(state, connection.Callback);
+				if (CallLuauValue(state, 0, 0, 0) != LUA_OK) {
 					if (firstError.empty()) {
 						const char *message = lua_tostring(state, -1);
 						firstError = message != nullptr ? message : "a property listener failed";
@@ -1020,7 +1050,7 @@ namespace engine::script {
 				}
 			}
 
-			lua_unref(state, reference);
+			ReleaseLuauValue(state, reference);
 		}
 
 		return firstError;
@@ -1216,6 +1246,37 @@ namespace engine::script {
 	}
 	ecs::Entity CheckInstanceArgument(lua_State *state, int index) {
 		return CheckInstance(state, index);
+	}
+
+	void ReadInstanceArrayArgument(lua_State *state, int index, std::vector<ecs::Entity> &out) {
+		luaL_checktype(state, index, LUA_TTABLE);
+		index = lua_absindex(state, index);
+		const int count = lua_objlen(state, index);
+		out.clear();
+		out.reserve(static_cast<size_t>(count));
+		if (count == 0) return;
+
+		lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace");
+		const void *builtin = lua_touserdatatagged(state, -1, TAG_INSTANCE);
+		lua_pop(state, 1);
+		ecs::Entity workspace = ecs::NULL_ENTITY;
+		bool resolvedWorkspace = false;
+
+		// Raw reads and tag checks cannot invoke scripts, so this proof ends with the array.
+		for (int at = 1; at <= count; at++) {
+			lua_rawgeti(state, index, at);
+			ecs::Entity &stored = CheckedInstanceStorage(state, -1);
+			if (&stored == builtin) {
+				if (!resolvedWorkspace) {
+					workspace = scene::WorkspaceOf(*ContextOf(state).World);
+					resolvedWorkspace = true;
+				}
+				stored = workspace;
+			}
+			const ecs::Entity instance = stored;
+			lua_pop(state, 1);
+			out.push_back(instance);
+		}
 	}
 
 }

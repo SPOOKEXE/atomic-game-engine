@@ -132,21 +132,24 @@ namespace client {
 		std::vector<engine::core::CFrame> *joints = nullptr
 	);
 
-	// An explicitly admitted, snapshot-ready replica may replace its remote
-	// producer. Merely discovering or staging a replica does not select it.
-	struct PortalImageWorldSelection {
-		// World retaining discovered portal topology, with the camera route's lifetime.
-		engine::world::WorldId TopologyOwner;
-		// Snapshot-ready destination permitted to replace its remote image producer.
-		engine::world::WorldId AdmittedDestination;
-		// Destination whose completed presentation the image producer may reuse.
-		engine::world::WorldId PresentedDestination;
-	};
 	// Resolves authored destinations through this product's replica policy. Viewer
 	// rows precede foreground clone attachment. Refresh caller spans after this
 	// appends portal claims and removes legacy surfaces; restore animation time
-	// before rendering the source view. Only explicitly named worlds are presented.
+	// before rendering the source view. Only explicitly named worlds were presented.
+	// TopologyOwner follows the same lifetime policy as ResolveCameraPortalWorld.
 	// True once every demanded portal has a retained image for this viewport.
+	// An explicitly admitted, snapshot-ready replica may replace its remote
+	// producer. Merely discovering or staging a replica does not select it.
+	struct PortalImageWorldSelection {
+		// World used to resolve portal topology and authored destinations.
+		engine::world::WorldId TopologyOwner;
+		// Destination admitted for presentation after its snapshot is ready.
+		engine::world::WorldId AdmittedDestination;
+		// Destination actually selected for this viewport.
+		engine::world::WorldId PresentedDestination;
+	};
+	// Updates retained portal images and appends their view claims for one viewport.
+	// Caller spans must be refreshed after this function changes the portal lists.
 	bool UpdatePortalImages(
 		engine::world::Universe &universe,
 		engine::render::PortalImageHost &images,

@@ -117,7 +117,7 @@ namespace engine::script {
 				LuauContext &context = ContextOf(state);
 
 				lua_pushvalue(state, index);
-				const int reference = lua_ref(state, -1);
+				const int reference = RetainLuauValue(state, -1);
 				lua_pop(state, 1);
 
 				const HostCallback callback{++context.NextHostCallback};
@@ -457,6 +457,7 @@ namespace engine::script {
 
 	bool
 	CallHostCallback(lua_State *state, HostCallback callback, HostArguments arguments, HostValue *result) {
+		ReapLuauSources(state);
 		LuauContext &context = ContextOf(state);
 
 		const auto found = context.HostCallbacks.find(callback.Id);
@@ -464,20 +465,27 @@ namespace engine::script {
 			return false;
 		}
 
-		lua_getref(state, found->second);
+		if (!PushLuauValue(state, found->second)) {
+			lua_pop(state, 1);
+			return false;
+		}
+		const ecs::Entity source = context.RetainedValues.at(found->second).Source;
 		for (const HostValue &argument : arguments) {
 			PushHostValue(state, argument);
 		}
 
 		const int results = result != nullptr ? 1 : 0;
-		if (lua_pcall(state, static_cast<int>(arguments.size()), results, 0) != LUA_OK) {
+		if (CallLuauValue(state, static_cast<int>(arguments.size()), results, 0) != LUA_OK) {
 			const char *message = lua_tostring(state, -1);
 			ENGINE_ERROR("host callback failed: {}", message != nullptr ? message : "unknown");
 			lua_pop(state, 1);
 			return false;
 		}
 		if (result != nullptr) {
+			const ecs::Entity previous = ExecutionSource(state);
+			context.ThreadSources.insert_or_assign(state, source);
 			const bool read = ReadHostValue(state, -1, *result, 0);
+			context.ThreadSources.insert_or_assign(state, previous);
 			lua_pop(state, 1);
 			if (!read) {
 				ENGINE_ERROR("host callback returned a value with no host representation");
@@ -495,7 +503,7 @@ namespace engine::script {
 			return;
 		}
 
-		lua_unref(state, found->second);
+		ReleaseLuauValue(state, found->second);
 		context.HostCallbacks.erase(found);
 	}
 }

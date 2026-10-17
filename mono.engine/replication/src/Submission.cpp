@@ -1,10 +1,13 @@
 #include <engine/core/Log.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/replication/Submission.hpp>
 
+#include <algorithm>
 #include <cstring>
+#include <unordered_set>
 #include <vector>
 
 namespace engine::replication {
@@ -36,7 +39,10 @@ namespace engine::replication {
 	}
 
 	WriteOutcome WriteComponents(
-		ecs::Store &store, const Delta &delta, const std::function<bool(core::Name, ecs::Entity)> &allow
+		ecs::Store &store,
+		const Delta &delta,
+		const std::function<bool(core::Name, ecs::Entity)> &allow,
+		const std::function<bool(core::Name)> &resourceAllow
 	) {
 		WriteOutcome outcome;
 		static const core::LogCategory rowTrace("replication-row");
@@ -83,7 +89,7 @@ namespace engine::replication {
 				// A tag carries no value, so there is no stream to keep in step
 				// and a refusal is simply a write that does not happen.
 				if (descriptor.Size == 0) {
-					if (!permitted) {
+					if (!permitted || (resource && resourceAllow && !resourceAllow(component.Component))) {
 						outcome.Refused++;
 					} else if (resource) {
 						store.RemoveResourceById(id);
@@ -119,9 +125,27 @@ namespace engine::replication {
 				// stream in step; skipping it for a refused value would put
 				// every value after this one on the wrong entity. See the
 				// header.
-				if (!permitted) {
+				if (!permitted || (resource && resourceAllow && !resourceAllow(component.Component))) {
 					outcome.Refused++;
 				} else if (resource) {
+					if (id == ecs::Components::Assigned<ecs::AttributeTable>()) {
+						auto &incoming = *reinterpret_cast<ecs::AttributeTable *>(scratch.data());
+						if (const auto *local = store.Resource<ecs::AttributeTable>()) {
+							std::unordered_set<uint32_t> localOwners;
+							store.EachEntity([&](ecs::Entity owner) {
+								if (ecs::Store::IsPredicted(owner)) localOwners.insert(owner.Id);
+							});
+							for (const auto &[index, attributes] : local->Entities) {
+								if (localOwners.contains(index))
+									incoming.Entities.insert_or_assign(index, attributes);
+							}
+							for (const auto &[index, revisions] : local->Revisions) {
+								if (localOwners.contains(index))
+									incoming.Revisions.insert_or_assign(index, revisions);
+							}
+							incoming.NextRevision = std::max(incoming.NextRevision, local->NextRevision);
+						}
+					}
 					store.SetResourceById(id, scratch.data());
 				} else if (!store.Alive(entity)) {
 					outcome.Whole = false;

@@ -1176,6 +1176,16 @@ namespace engine::render {
 		SDL_BindGPUIndexBuffer(pass, &index, SDL_GPU_INDEXELEMENTSIZE_16BIT);
 
 		auto *atlas = static_cast<SDL_GPUTexture *>(AtlasTexture);
+		const auto targetFormat = static_cast<SDL_GPUTextureFormat>(SwapchainFormat);
+		// Screen tint and blending use encoded values on UNORM attachments. Other
+		// target formats retain their existing hardware transfer or HDR semantics.
+		const bool encodedTarget = targetFormat == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM ||
+								   targetFormat == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM ||
+								   targetFormat == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_UNORM ||
+								   targetFormat == SDL_GPU_TEXTUREFORMAT_R10G10B10A2_UNORM ||
+								   targetFormat == SDL_GPU_TEXTUREFORMAT_B5G6R5_UNORM ||
+								   targetFormat == SDL_GPU_TEXTUREFORMAT_B5G5R5A1_UNORM ||
+								   targetFormat == SDL_GPU_TEXTUREFORMAT_B4G4R4A4_UNORM;
 
 		// **Rebound per batch only when it changes.** A bind is cheap and a
 		// redundant one is not free; tracking the last one is four lines against
@@ -1246,6 +1256,7 @@ namespace engine::render {
 			}
 
 			SDL_GPUTexture *texture = atlas;
+			bool sampledSRGB = false;
 			if (batch.ShapedPage != UINT16_MAX && batch.ShapedPage < ShapedAtlasTextures.size()) {
 				texture = static_cast<SDL_GPUTexture *>(ShapedAtlasTextures[batch.ShapedPage]);
 			}
@@ -1260,6 +1271,7 @@ namespace engine::render {
 				);
 				if (found != ResolvedImages.end() && found->Value.Texture != nullptr) {
 					texture = static_cast<SDL_GPUTexture *>(found->Value.Texture);
+					sampledSRGB = found->Value.SampledSRGB;
 				} else {
 				}
 				// **An unresolved name falls back to the atlas**, which draws
@@ -1286,7 +1298,8 @@ namespace engine::render {
 				boundSampler = sampler;
 			}
 
-			const FragmentUniforms uniforms = FragmentUniformsFor(batch);
+			FragmentUniforms uniforms = FragmentUniformsFor(batch);
+			uniforms.MaskCount[2] = encodedTarget && sampledSRGB ? 1.0f : 0.0f;
 			SDL_PushGPUFragmentUniformData(
 				static_cast<SDL_GPUCommandBuffer *>(commandBuffer), 0, &uniforms, sizeof(uniforms)
 			);
@@ -1647,18 +1660,18 @@ namespace engine::render {
 		}
 		const uint32_t width = static_cast<uint32_t>(std::max(TargetPixels.X, Canvas.X));
 		const uint32_t height = static_cast<uint32_t>(std::max(TargetPixels.Y, Canvas.Y));
-		const std::vector<InterfaceTargetComposite> composites = Targets.Composite(Pending, 0, width, height);
+		// PrepareRetainedTargets appends direct keys while traversing these same
+		// paint-ordered, nonempty screen ranges, so one cursor replaces per-range scans.
+		size_t directRange = 0;
 		for (const gui::CollectorRange &range : Pending.CollectorRanges) {
 			if (range.Spatial || range.Count == 0) continue;
 			const InterfaceTargetKey key{range.Collector, 0, width, height, range.First, range.Count, false};
-			const bool forceDirect = std::find(DirectTargetRanges.begin(), DirectTargetRanges.end(), key) !=
-									 DirectTargetRanges.end();
-			const auto found = std::find_if(composites.begin(), composites.end(), [&](const auto &entry) {
-				return entry.Range.Collector == range.Collector && entry.Range.First == range.First &&
-					   entry.Range.Count == range.Count && entry.Range.Spatial == range.Spatial;
-			});
-			if (!forceDirect && found != composites.end()) {
-				RecordComposite(commandBuffer, renderPass, found->Target, {{0.0f, 0.0f}, Canvas});
+			const bool forceDirect =
+				directRange < DirectTargetRanges.size() && DirectTargetRanges[directRange] == key;
+			if (forceDirect) directRange++;
+			void *target = forceDirect ? nullptr : Targets.ReadyTarget(key);
+			if (target != nullptr) {
+				RecordComposite(commandBuffer, renderPass, target, {{0.0f, 0.0f}, Canvas});
 			} else {
 				RecordScreenRange(commandBuffer, renderPass, range.First, range.Count, nullptr);
 			}
@@ -1881,7 +1894,12 @@ namespace engine::render {
 					fullbright + influence * ambient.B + scene,
 					1.0f,
 				},
-				glm::vec4{spatial.Size.X, spatial.Size.Y, 0.0f, 0.0f},
+				glm::vec4{
+					spatial.Size.X,
+					spatial.Size.Y,
+					spatial.Kind == gui::SpatialCanvasKind::Surface && !spatial.AlwaysOnTop ? 1.0f : 0.0f,
+					0.0f
+				},
 				glm::vec4{transformOrigin.X, transformOrigin.Y, transformScale.X, transformScale.Y},
 			};
 			SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));

@@ -26,10 +26,10 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 	std::string error;
 	REQUIRE(studio::LoadRenderPipelineGraph(DefaultPbrDocument(), canvas, error));
 
-	CHECK(canvas.Nodes().size() == 32);
+	CHECK(canvas.Nodes().size() == 39);
 
 	// Pin the default pipeline's node and link counts so stage changes update this checksum.
-	CHECK(canvas.Links().size() == 64);
+	CHECK(canvas.Links().size() == 82);
 	CHECK(canvas.Ordered().size() == canvas.Nodes().size());
 
 	bool sawSsao = false;
@@ -128,6 +128,118 @@ TEST_CASE("the default PBR pipeline becomes a typed Blender-style node graph", "
 		REQUIRE(pass != nullptr);
 		CHECK_FALSE(pass->PreviewPort.empty());
 	}
+}
+
+TEST_CASE(
+	"weather pins and resource layouts round trip to an executable pipeline", "[studio][pipeline][weather]"
+) {
+	const PipelineDocument basis = DefaultPbrDocument();
+	nodegraph::Graph canvas;
+	std::string error;
+	REQUIRE(studio::LoadRenderPipelineGraph(basis, canvas, error));
+	const std::array weatherKinds{
+		"weather-residency",
+		"weather-field",
+		"weather-summary",
+		"weather-shadow-map",
+		"weather-history",
+		"weather-integrate",
+		"weather-reconstruct"
+	};
+	for (const char *kind : weatherKinds) {
+		const auto found = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [&](const auto &node) {
+			return node.Type == std::string("render.pass.") + kind;
+		});
+		REQUIRE(found != canvas.Nodes().end());
+		const auto *type = nodegraph::NodeTypes::Find(found->Type);
+		const auto *spec = NodeCatalogue::Find(engine::core::Name(kind));
+		REQUIRE(type != nullptr);
+		REQUIRE(spec != nullptr);
+		CHECK(type->Inputs.size() == spec->Inputs.size());
+		CHECK(type->Outputs.size() == spec->Outputs.size());
+		for (const auto &input : spec->Inputs) {
+			const auto pin =
+				std::find_if(type->Inputs.begin(), type->Inputs.end(), [&](const auto &candidate) {
+					return candidate.Name == input.Name.Text();
+				});
+			REQUIRE(pin != type->Inputs.end());
+			CHECK(pin->Type == (input.Kind == ResourceKind::Buffer ? "render.buffer" : "render.image"));
+			CHECK(canvas.LinkInto(found->Id, pin->Name) != nullptr);
+		}
+		for (const auto &output : spec->Outputs) {
+			const auto pin =
+				std::find_if(type->Outputs.begin(), type->Outputs.end(), [&](const auto &candidate) {
+					return candidate.Name == output.Name.Text();
+				});
+			REQUIRE(pin != type->Outputs.end());
+			CHECK(pin->Type == (output.Kind == ResourceKind::Buffer ? "render.buffer" : "render.image"));
+		}
+		if (std::string_view(kind) == "weather-field") {
+			auto *node = canvas.Find(found->Id);
+			node->Widgets.at("queue").Text = "compute";
+			node->Widgets.at("async").Text = "allow";
+			node->Widgets.at("profile").Flag = false;
+		}
+	}
+	const auto fog = std::find_if(canvas.Nodes().begin(), canvas.Nodes().end(), [](const auto &node) {
+		return node.Type == "render.pass.fog";
+	});
+	REQUIRE(fog != canvas.Nodes().end());
+	const auto *fogInput = canvas.LinkInto(fog->Id, "colour");
+	REQUIRE(fogInput != nullptr);
+	REQUIRE(canvas.Find(fogInput->From) != nullptr);
+	CHECK(canvas.Find(fogInput->From)->Type == "render.pass.weather-reconstruct");
+
+	PipelineDocument saved;
+	const bool savedOk = studio::SaveRenderPipelineGraph(canvas, basis, saved, error);
+	INFO(error);
+	REQUIRE(savedOk);
+	PipelineDocument parsed;
+	engine::core::Name offender;
+	REQUIRE(Read(Write(saved), parsed, offender) == PipelineDocumentStatus::Ok);
+	PipelineDocument expectedResources, actualResources;
+	for (const auto &edit : basis.Edits())
+		if (edit.Kind == EditKind::AddResource && edit.Name.Text().starts_with("weather-"))
+			expectedResources.Record(edit);
+	for (const auto &edit : parsed.Edits())
+		if (edit.Kind == EditKind::AddResource && edit.Name.Text().starts_with("weather-"))
+			actualResources.Record(edit);
+	// This includes field strides, page capacities, fixed shadow extents,
+	// half-resolution images and external/history lifetimes.
+	CHECK(Write(actualResources) == Write(expectedResources));
+	RenderGraph original, rebuilt;
+	REQUIRE(Build(basis, original, offender) == PipelineDocumentStatus::Ok);
+	REQUIRE(Build(parsed, rebuilt, offender) == PipelineDocumentStatus::Ok);
+	const auto nodeOf = [](const RenderGraph &graph, const char *kind) -> const Node * {
+		for (uint32_t value = 1; value <= graph.Count(); ++value) {
+			const auto *node = graph.Find(NodeId{value});
+			if (node && node->Kind == engine::core::Name(kind)) return node;
+		}
+		return nullptr;
+	};
+	for (const char *kind : weatherKinds) {
+		const auto *before = nodeOf(original, kind);
+		const auto *after = nodeOf(rebuilt, kind);
+		REQUIRE(before != nullptr);
+		REQUIRE(after != nullptr);
+		CHECK(after->Reads == before->Reads);
+		CHECK(after->ReadPorts == before->ReadPorts);
+		CHECK(after->Writes == before->Writes);
+		CHECK(after->WritePorts == before->WritePorts);
+		CHECK(after->Scope == before->Scope);
+	}
+	const auto *field = nodeOf(rebuilt, "weather-field");
+	REQUIRE(field != nullptr);
+	REQUIRE(field->Parameter(engine::core::Name("profile")) != nullptr);
+	CHECK(*field->Parameter(engine::core::Name("profile")) == "false");
+	ExecutionSchedule schedule;
+	REQUIRE(CompileSchedule(rebuilt, schedule, offender) == ScheduleStatus::Ok);
+	bool computeField = false;
+	for (const auto &wave : schedule.Waves)
+		for (const auto &scheduled : wave.Nodes)
+			if (rebuilt.Find(scheduled.Node) == field)
+				computeField = scheduled.Queue == ExecutionQueue::Compute && scheduled.AsyncEligible;
+	CHECK(computeField);
 }
 
 TEST_CASE("canvas save keeps authoring metadata without canvas controls", "[studio][pipeline]") {
@@ -806,4 +918,22 @@ TEST_CASE("the IMAGE socket rejects a non-image before save", "[studio][pipeline
 	REQUIRE(entities != nodegraph::NO_NODE);
 	REQUIRE(tonemap != nodegraph::NO_NODE);
 	CHECK(canvas.Connect(entities, "entities", tonemap, "colour") == nodegraph::LinkResult::TypeMismatch);
+	const nodegraph::NodeId weather = canvas.Add("render.pass.weather-field", 0.0f, 200.0f);
+	REQUIRE(weather != nodegraph::NO_NODE);
+	CHECK(canvas.Connect(weather, "field", tonemap, "colour") == nodegraph::LinkResult::TypeMismatch);
+}
+
+TEST_CASE("compute colour admission keeps depth attachment roles distinct", "[studio][pipeline][weather]") {
+	studio::RegisterRenderPipelineNodeTypes();
+	nodegraph::Graph canvas;
+	const auto shadow = canvas.Add("render.pass.shadow", 0, 0);
+	const auto fog = canvas.Add("render.pass.fog", 200, 0);
+	REQUIRE(shadow != nodegraph::NO_NODE);
+	REQUIRE(fog != nodegraph::NO_NODE);
+	// Both pins are displayed as IMAGE. Save still enforces the engine roles.
+	REQUIRE(canvas.Connect(shadow, "shadow", fog, "colour") == nodegraph::LinkResult::Made);
+	PipelineDocument saved;
+	std::string error;
+	CHECK_FALSE(studio::SaveRenderPipelineGraph(canvas, PipelineDocument{}, saved, error));
+	CHECK(error.find("depth buffer") != std::string::npos);
 }

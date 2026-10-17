@@ -20,6 +20,8 @@ namespace {
 	using namespace engine::render;
 	constexpr PortalImageHost::Time START{};
 	constexpr auto HOST_SOURCE_TIMEOUT = std::chrono::seconds(5);
+	// Cold pipeline initialization needs a separate budget from image replies.
+	constexpr auto HOST_PROCESS_STARTUP_TIMEOUT = std::chrono::seconds(60);
 	struct Worlds {
 		world::Universe Universe;
 		world::WorldId Source = Universe.Create({.Name = core::Name("near")});
@@ -789,10 +791,16 @@ TEST_CASE(
 		std::move(pair.Remote)
 	));
 	world::HostLink link(std::move(pair.Local));
-	const auto readyDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+	const auto readyDeadline = std::chrono::steady_clock::now() + HOST_PROCESS_STARTUP_TIMEOUT;
 	bool ready = false;
 	while ((!ready || universe.LookupPresentation(destination, PORTAL_REQUEST_CHANNEL).World.empty()) &&
 		   std::chrono::steady_clock::now() < readyDeadline) {
+		const auto status = child.Poll();
+		if (!status.Alive())
+			FAIL(
+				"portal producer exited during startup: reason="
+				<< parallel::Describe(status.Reason) << " code=" << status.Code << " signal=" << status.Signal
+			);
 		std::vector<world::HostFrame> frames;
 		link.Receive(frames);
 		for (const auto &frame : frames) {

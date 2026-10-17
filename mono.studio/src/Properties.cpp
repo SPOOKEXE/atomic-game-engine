@@ -5,7 +5,9 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/render/ShaderCompiler.hpp>
+#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Tagging.hpp>
 #include <engine/ui/Metrics.hpp>
@@ -91,6 +93,94 @@ namespace studio {
 			if (property == Name("Lod2Distance")) return 1;
 			if (property == Name("Lod3Distance")) return 2;
 			return std::nullopt;
+		}
+
+		enum class RenderEffectStage : uint8_t { Compute, PostProcess };
+
+		std::optional<RenderEffectStage> RenderEffectStageOf(Name property) {
+			if (property == Name("ComputeEffectNode")) return RenderEffectStage::Compute;
+			if (property == Name("PostProcessEffectNode")) return RenderEffectStage::PostProcess;
+			return std::nullopt;
+		}
+
+		std::optional<RenderEffectStage> RenderEffectStageOf(const PropertyDescriptor &property) {
+			return RenderEffectStageOf(property.Name);
+		}
+
+		struct RenderEffectChoices {
+			std::vector<Name> Compute;
+			std::vector<Name> PostProcess;
+		};
+
+		RenderEffectChoices RenderEffectNodes(const engine::graph::PipelineDocument *document) {
+			RenderEffectChoices choices;
+			if (document == nullptr) return choices;
+
+			struct AuthoredNode {
+				Name NodeName;
+				Name NodeKind;
+				bool Visual = false;
+				bool Enabled = true;
+			};
+			std::vector<AuthoredNode> nodes;
+			Name nodeName;
+			Name nodeKind;
+			bool visualAttachment = false;
+			bool building = false;
+			const auto appendNode = [&] {
+				if (building) {
+					nodes.push_back({nodeName, nodeKind, visualAttachment});
+					building = false;
+				}
+			};
+			for (const engine::graph::Edit &edit : document->Edits()) {
+				if (edit.Kind == engine::graph::EditKind::AddNode) {
+					appendNode();
+					nodeName = edit.Name;
+					nodeKind = edit.NodeKind;
+					visualAttachment = false;
+					building = true;
+				} else if (edit.Kind == engine::graph::EditKind::AddResource) {
+					appendNode();
+				} else if (edit.Kind == engine::graph::EditKind::Enable) {
+					appendNode();
+					for (AuthoredNode &node : nodes) {
+						if (node.NodeName == edit.Name) node.Enabled = edit.Enabled;
+					}
+				} else if (edit.Kind == engine::graph::EditKind::Set && building &&
+						   edit.Key == Name("attachment")) {
+					visualAttachment = edit.Value == "visual";
+				}
+			}
+			appendNode();
+			for (const AuthoredNode &node : nodes) {
+				if (!node.NodeName.IsValid() || !node.Enabled || !node.Visual) continue;
+				if (node.NodeKind == Name("dispatch")) choices.Compute.push_back(node.NodeName);
+				if (node.NodeKind == Name("raster")) choices.PostProcess.push_back(node.NodeName);
+			}
+			return choices;
+		}
+
+		bool DrawRenderEffectNode(Name &value, std::span<const Name> choices, bool mixed = false) {
+			const std::string preview = mixed			  ? "Multiple values"
+										: value.IsValid() ? std::string(value.Text())
+														  : std::string("None");
+			bool changed = false;
+			if (!ImGui::BeginCombo("##v", preview.c_str())) return false;
+			if (ImGui::Selectable("None", !mixed && !value.IsValid())) {
+				value = {};
+				changed = true;
+			}
+			for (const Name choice : choices) {
+				const bool selected = !mixed && choice == value;
+				const std::string label(choice.Text());
+				if (ImGui::Selectable(label.c_str(), selected)) {
+					value = choice;
+					changed = true;
+				}
+			}
+			ImGui::EndCombo();
+			return changed;
 		}
 
 		bool ReadSchemaValue(const void *component, const FieldDescriptor &field, PropertyValue &value) {
@@ -207,57 +297,97 @@ namespace studio {
 			return false;
 		}
 
-		struct CollectionTagEdit {
-			Name Tag;
-			bool Add = false;
-			bool Wanted = false;
-		};
-
-		CollectionTagEdit
-		DrawCollectionTags(const Store &store, const std::vector<Entity> &selection, std::string &draft) {
+		CollectionTagEdit DrawCollectionTags(
+			const Store &store,
+			const std::vector<Entity> &selection,
+			std::string &draft,
+			Name &original,
+			bool &editing,
+			bool &focus
+		) {
 			CollectionTagEdit edit;
-			ImGui::SeparatorText("Collection Tags");
-
+			if (editing && original.IsValid() &&
+				std::none_of(selection.begin(), selection.end(), [&](Entity entity) {
+					return engine::scene::HasTag(store, entity, original);
+				})) {
+				editing = false;
+				focus = false;
+				original = Name{};
+				draft.clear();
+			}
+			if (!ImGui::CollapsingHeader("Collection Tags", ImGuiTreeNodeFlags_DefaultOpen)) return edit;
+			ImGui::PushID("collection-tags");
 			size_t taggable = 0;
-			for (const Entity instance : selection) {
-				if (store.Alive(instance) && store.Get<engine::scene::Tags>(instance) != nullptr) {
-					taggable++;
-				}
-			}
-			if (taggable == 0) {
-				ImGui::TextDisabled("the selection has no taggable instances");
-			}
-
+			for (const Entity instance : selection)
+				if (store.Alive(instance) && store.Get<engine::scene::Tags>(instance) != nullptr) taggable++;
+			ImGui::BeginDisabled(taggable == 0);
+			const auto drawDraft = [&] {
+				if (focus) ImGui::SetKeyboardFocusHere();
+				TextField("##tag-name", draft, "tag name");
+				const bool escaped = (ImGui::IsItemActive() || ImGui::IsItemDeactivated()) &&
+									 ImGui::IsKeyPressed(ImGuiKey_Escape);
+				const bool submit = (ImGui::IsItemActive() && ImGui::IsKeyPressed(ImGuiKey_Enter)) ||
+									(!focus && ImGui::IsItemDeactivated());
+				focus = false;
+				if (!escaped && !submit) return;
+				const bool blank = draft.find_first_not_of(" \t\r\n") == std::string::npos;
+				if (!escaped && !blank) edit = CollectionTagEdit{original, Name(draft), true};
+				editing = false;
+				original = Name{};
+				draft.clear();
+			};
 			if (const engine::scene::TagTable *table = store.Resource<engine::scene::TagTable>()) {
 				for (const Name tag : table->Names) {
 					size_t tagged = 0;
-					for (const Entity instance : selection) {
+					for (const Entity instance : selection)
 						tagged += engine::scene::HasTag(store, instance, tag) ? 1u : 0u;
-					}
-					bool enabled = taggable > 0 && tagged == taggable;
+					if (tagged == 0) continue;
 					ImGui::PushID(tag.Id());
-					if (ImGui::Checkbox(Label(tag), &enabled)) {
-						edit = CollectionTagEdit{tag, enabled, true};
-					}
-					if (tagged > 0 && tagged < taggable) {
+					if (editing && original == tag) {
+						drawDraft();
+					} else {
+						bool enabled = tagged == taggable;
+						if (ImGui::Checkbox("##membership", &enabled))
+							edit = enabled ? CollectionTagEdit{Name{}, tag, true}
+										   : CollectionTagEdit{tag, Name{}, true};
 						ImGui::SameLine();
-						ImGui::TextDisabled("mixed");
+						if (ImGui::Selectable(
+								Label(tag),
+								false,
+								ImGuiSelectableFlags_AllowDoubleClick,
+								ImVec2(ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight(), 0)
+							)) {
+							original = tag;
+							draft = std::string(tag.Text());
+							editing = true;
+							focus = true;
+						}
+						ImGui::SameLine();
+						if (ImGui::SmallButton("x")) edit = CollectionTagEdit{tag, Name{}, true};
+						if (tagged < taggable) {
+							ImGui::SameLine();
+							ImGui::TextDisabled("mixed");
+						}
 					}
 					ImGui::PopID();
 				}
 			}
-
-			ImGui::SetNextItemWidth(-engine::ui::Scaled(70.0f));
-			TextField("##new-collection-tag", draft, "new tag");
-			ImGui::SameLine();
-			ImGui::BeginDisabled(draft.empty() || taggable == 0);
-			if (ImGui::Button("Add")) {
-				edit = CollectionTagEdit{Name(draft), true, true};
+			if (editing && !original.IsValid()) {
+				ImGui::PushID("new");
+				drawDraft();
+				ImGui::PopID();
+			}
+			if (ImGui::SmallButton("+")) {
+				original = Name{};
 				draft.clear();
+				editing = true;
+				focus = true;
 			}
 			ImGui::EndDisabled();
+			ImGui::PopID();
 			return edit;
 		}
+
 	}
 
 	void Editor::DrawShaderCapabilities(
@@ -835,6 +965,9 @@ namespace studio {
 		std::optional<SelectedShader> selectedShader;
 
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
+		const engine::world::WorldSettings worldSettings = Universe->SettingsOf(SelectionWorld);
+		const RenderEffectChoices effectChoices =
+			RenderEffectNodes(RenderingProfiles.Find(worldSettings.RenderingProfile));
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			const auto primary = std::find_if(Selection.begin(), Selection.end(), [&](Entity instance) {
 				return store.Alive(instance) && store.ClassOf(instance).IsValid();
@@ -883,7 +1016,7 @@ namespace studio {
 			}
 
 			ImGui::Separator();
-			tagEdit = DrawCollectionTags(store, Selection, CollectionTagDraft);
+
 			if (Selection.size() == 1 && oneClass && primaryClass == engine::scene::ShaderScriptClass()) {
 				if (const engine::scene::ShaderSource *source =
 						store.Get<engine::scene::ShaderSource>(*primary)) {
@@ -891,22 +1024,29 @@ namespace studio {
 				}
 			}
 
-			const std::vector<SelectionPropertyGroup> groups = BuildPropertySelection(store, Selection);
+			const std::vector<SelectionPropertyGroup> groups = BuildTaggedPropertySelection(store, Selection);
 
 			for (const auto &group : groups) {
-				const engine::ecs::ClassInfo &owner = Classes::Describe(group.Owner);
-				std::string heading(Label(owner.Name));
+				std::string heading(Label(group.PropertiesTag));
 				if (group.Applicable != Selection.size()) {
 					heading += " (" + std::to_string(group.Applicable) + " of " +
 							   std::to_string(Selection.size()) + ")";
 				}
 
-				if (!ImGui::CollapsingHeader(heading.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+				heading += "###properties-tag-" + std::string(group.PropertiesTag.Text());
+				const bool matches = std::any_of(group.Rows.begin(), group.Rows.end(), [&](const auto &row) {
+					int score = 0;
+					return PropertyFilter.empty() ||
+						   FuzzyMatch(PropertyFilter, Label(row.Descriptor->Name), score);
+				});
+				if (!matches || !ImGui::CollapsingHeader(heading.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
 					continue;
 				}
 
 				if (!ImGui::BeginTable(
-						heading.c_str(), 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg
+						Label(group.PropertiesTag),
+						2,
+						ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg
 					)) {
 					continue;
 				}
@@ -916,7 +1056,8 @@ namespace studio {
 
 				for (const SelectionPropertyRow &row : group.Rows) {
 					const PropertyDescriptor *descriptor = row.Descriptor;
-					if (descriptor == nullptr) {
+					if (descriptor == nullptr || (row.Owner == engine::scene::ImageGraphClass() &&
+												  descriptor->Name == Name("Inputs"))) {
 						continue;
 					}
 					if (!PropertyFilter.empty()) {
@@ -936,7 +1077,7 @@ namespace studio {
 						for (const Entity instance : Selection) {
 							if (!store.Alive(instance) ||
 								!SelectionPropertyApplies(
-									store.ClassOf(instance), group.Owner, descriptor->Name, descriptor->Type
+									store.ClassOf(instance), row.Owner, descriptor->Name, descriptor->Type
 								)) {
 								continue;
 							}
@@ -961,6 +1102,8 @@ namespace studio {
 					ImGui::TextUnformatted(Label(descriptor->Name));
 
 					ImGui::TableSetColumnIndex(1);
+					ImGui::PushID(static_cast<int>(row.Owner.Index));
+					ImGui::PushID(group.PropertiesTag.Id());
 					ImGui::PushID(Label(descriptor->Name));
 					ImGui::SetNextItemWidth(-1.0f);
 
@@ -971,6 +1114,8 @@ namespace studio {
 						// anchored reads as the editor losing it.
 						ImGui::TextDisabled("-");
 						ImGui::PopID();
+						ImGui::PopID();
+						ImGui::PopID();
 						continue;
 					}
 
@@ -979,6 +1124,7 @@ namespace studio {
 
 					PropertyValue changed = value;
 					bool wrote = false;
+					const std::optional<RenderEffectStage> effectStage = RenderEffectStageOf(*descriptor);
 
 					if (mixed && descriptor->Type != PropertyType::Reference &&
 						descriptor->Type != PropertyType::Opaque) {
@@ -986,27 +1132,36 @@ namespace studio {
 						// field says that directly and accepts the same textual form a
 						// scene file does; once valid, the one value is written to every
 						// selected instance that actually declares this property.
-						std::string text;
-						TextField("##v", text);
-						if (ImGui::IsItemDeactivatedAfterEdit()) {
-							PropertyValue parsed;
-							std::string reason;
-							if (ParseValue(descriptor->Type, text, parsed, reason)) {
-								changed = parsed;
-								wrote = true;
+						if (effectStage) {
+							const std::vector<Name> &choices = *effectStage == RenderEffectStage::Compute
+																   ? effectChoices.Compute
+																   : effectChoices.PostProcess;
+							wrote = DrawRenderEffectNode(changed.Name, choices, true);
+						} else {
+							std::string text;
+							TextField("##v", text);
+							if (ImGui::IsItemDeactivatedAfterEdit()) {
+								PropertyValue parsed;
+								std::string reason;
+								if (ParseValue(descriptor->Type, text, parsed, reason)) {
+									changed = parsed;
+									wrote = true;
+								}
 							}
-						}
-						if (ImGui::IsItemHovered()) {
-							ImGui::SetTooltip("selected instances have different values");
+							if (ImGui::IsItemHovered()) {
+								ImGui::SetTooltip("selected instances have different values");
+							}
 						}
 						ImGui::EndDisabled();
 						if (wrote && !locked) {
 							edit.Property = descriptor->Name;
-							edit.Owner = group.Owner;
+							edit.Owner = row.Owner;
 							edit.Type = descriptor->Type;
 							edit.Value = changed;
 							edit.Wanted = true;
 						}
+						ImGui::PopID();
+						ImGui::PopID();
 						ImGui::PopID();
 						continue;
 					}
@@ -1193,6 +1348,13 @@ namespace studio {
 					}
 
 					case PropertyType::Name: {
+						if (effectStage) {
+							const std::vector<Name> &choices = *effectStage == RenderEffectStage::Compute
+																   ? effectChoices.Compute
+																   : effectChoices.PostProcess;
+							wrote = DrawRenderEffectNode(changed.Name, choices);
+							break;
+						}
 						std::string text =
 							changed.Name.IsValid() ? std::string(Label(changed.Name)) : std::string{};
 
@@ -1205,7 +1367,8 @@ namespace studio {
 						// has not streamed in yet looks like. Every other `Name`
 						// property is an ordinary label, and a modal over one
 						// would be a dialog in the way.
-						const engine::assets::AssetKind content = ContentKindOfProperty(descriptor->Spelling);
+						const engine::assets::AssetKind content =
+							ContentKindOfProperty(row.Owner, descriptor->Spelling);
 
 						if (content == engine::assets::AssetKind::Unknown) {
 							if (TextField("##v", text)) {
@@ -1237,7 +1400,7 @@ namespace studio {
 							PickerWanted = true;
 							PickerKind = content;
 							PickerProperty = descriptor->Name;
-							PickerOwner = group.Owner;
+							PickerOwner = row.Owner;
 							PickerType = descriptor->Type;
 							PickerChoice = text;
 						}
@@ -1307,17 +1470,41 @@ namespace studio {
 						// one instance and not for a multi-selection, and doing
 						// it in two places is how the two get different rules.
 						edit.Property = descriptor->Name;
-						edit.Owner = group.Owner;
+						edit.Owner = row.Owner;
 						edit.Type = descriptor->Type;
 						edit.Value = changed;
 						edit.Wanted = true;
 					}
 
 					ImGui::PopID();
+					ImGui::PopID();
+					ImGui::PopID();
 				}
 
 				ImGui::EndTable();
 			}
+			uint64_t context = SelectionWorld.Index;
+			for (const Entity instance : Selection)
+				context = (context * 1099511628211ULL) ^ instance.Id;
+			if (CollectionTagContext != context) {
+				CollectionTagContext = context;
+				CollectionTagEditing = false;
+				CollectionTagDraft.clear();
+				CollectionTagOriginal = Name{};
+				CollectionTagFocus = false;
+			}
+			ImGui::PushID(static_cast<int>(context));
+			tagEdit = DrawCollectionTags(
+				store,
+				Selection,
+				CollectionTagDraft,
+				CollectionTagOriginal,
+				CollectionTagEditing,
+				CollectionTagFocus
+			);
+			ImGui::PopID();
+			if (Selection.size() == 1 && store.Get<engine::scene::ImageGraph>(Selection.front()) != nullptr)
+				DrawImageGraphInstanceInputs(store, Selection.front());
 		});
 		if (selectedShader) {
 			DrawShaderCapabilities(selectedShader->Instance, selectedShader->Source, selectedShader->Label);
@@ -1355,18 +1542,11 @@ namespace studio {
 		if (tagEdit.Wanted) {
 			bool changed = false;
 			Universe->Enter(SelectionWorld, [&](Store &store) {
-				for (const Entity instance : Selection) {
-					const bool had = engine::scene::HasTag(store, instance, tagEdit.Tag);
-					if (had == tagEdit.Add) {
-						continue;
-					}
-					changed |= tagEdit.Add ? engine::scene::AddTag(store, instance, tagEdit.Tag)
-										   : engine::scene::RemoveTag(store, instance, tagEdit.Tag);
-				}
+				changed = ApplyCollectionTagEdit(
+					store, SelectionWorld, Selection, tagEdit, authoritative ? Commands.get() : nullptr
+				);
 			});
-			if (changed && authoritative) {
-				MarkModified();
-			}
+			if (changed && authoritative) MarkModified();
 		}
 
 		if (!edit.Wanted) {
@@ -1488,8 +1668,10 @@ namespace studio {
 			PropertyValue Value;
 		};
 		std::optional<PropertyEdit> propertyEdit;
-		CollectionTagEdit tagEdit;
 		const bool authoritative = AuthorityOf(SelectionWorld) == EditAuthority::Authoritative;
+		const engine::world::WorldSettings worldSettings = Universe->SettingsOf(SelectionWorld);
+		const RenderEffectChoices effectChoices =
+			RenderEffectNodes(RenderingProfiles.Find(worldSettings.RenderingProfile));
 		std::optional<PanelProjection> focusedProjection;
 		if (FocusedViewport < Overlays.size() && ViewportWorld(FocusedViewport) == SelectionWorld) {
 			// ProjectionFor may enter a replica world. Finish that work before the
@@ -1546,7 +1728,15 @@ namespace studio {
 				ImGui::SetNextItemWidth(-1.0f);
 				const std::string key =
 					std::string(componentType.Name.Text()) + "." + std::string(field.Spelling);
-				if (DrawSchemaValue(store, field, value, ComponentConfigDrafts[key])) {
+				const std::optional<RenderEffectStage> effectStage = RenderEffectStageOf(field.Name);
+				const bool changed =
+					effectStage ? DrawRenderEffectNode(
+									  value.Name,
+									  *effectStage == RenderEffectStage::Compute ? effectChoices.Compute
+																				 : effectChoices.PostProcess
+								  )
+								: DrawSchemaValue(store, field, value, ComponentConfigDrafts[key]);
+				if (changed) {
 					componentEdit = ComponentEdit{component, field.Name, value, true};
 				}
 				ImGui::PopID();
@@ -1592,19 +1782,9 @@ namespace studio {
 					ImGui::EndTable();
 				}
 			}
-			tagEdit = DrawCollectionTags(store, Selection, CollectionTagDraft);
 
-			// Structural properties must remain reachable after removing their backing tag.
 			const auto attached = store.ComponentsOf(instance);
-			std::vector<ComponentId> inspected(attached.begin(), attached.end());
-			for (const auto &property : store.PropertiesOf(instance)) {
-				if (!property.Reads) continue;
-				for (const auto component : property.Reads->Ids()) {
-					if (std::find(inspected.begin(), inspected.end(), component) == inspected.end())
-						inspected.push_back(component);
-				}
-			}
-			for (const ComponentId component : inspected) {
+			for (const ComponentId component : attached) {
 				const TypeDescriptor &descriptor = Components::Describe(component);
 				int score = 0;
 				if (!ComponentFilter.empty() && !FuzzyMatch(ComponentFilter, Label(descriptor.Name), score)) {
@@ -1670,7 +1850,10 @@ namespace studio {
 										  )
 										: std::array<float, 3>{};
 						for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
-							if (property.Reads == nullptr || !property.Reads->Contains(component)) continue;
+							if (property.Reads == nullptr || !property.Reads->Contains(component) ||
+								(component == Components::Of<engine::scene::ImageGraph>() &&
+								 property.Name == Name("Inputs")))
+								continue;
 							ImGui::TableNextRow();
 							ImGui::TableSetColumnIndex(0);
 							ImGui::AlignTextToFramePadding();
@@ -1697,8 +1880,18 @@ namespace studio {
 							field.Type = property.Type;
 							field.Enum = property.EnumName;
 							const std::string key = "property:" + std::string(property.Spelling);
-							if (DrawSchemaValue(store, field, value, ComponentConfigDrafts[key]) &&
-								property.Writable) {
+							const std::optional<RenderEffectStage> effectStage =
+								RenderEffectStageOf(property.Name);
+							const bool changed =
+								effectStage
+									? DrawRenderEffectNode(
+										  value.Name,
+										  *effectStage == RenderEffectStage::Compute
+											  ? effectChoices.Compute
+											  : effectChoices.PostProcess
+									  )
+									: DrawSchemaValue(store, field, value, ComponentConfigDrafts[key]);
+							if (changed && property.Writable) {
 								propertyEdit = PropertyEdit{
 									property.Name,
 									DeclaringPropertyClass(store.ClassOf(instance), property.Name),
@@ -1826,18 +2019,6 @@ namespace studio {
 					void *component = store.GetComponentMutable(instance, componentEdit.Component);
 					modified |=
 						component != nullptr && WriteSchemaValue(component, *field, componentEdit.Value);
-				}
-			});
-		}
-		if (tagEdit.Wanted) {
-			Universe->Enter(SelectionWorld, [&](Store &store) {
-				for (const Entity instance : Selection) {
-					const bool had = engine::scene::HasTag(store, instance, tagEdit.Tag);
-					if (had == tagEdit.Add) {
-						continue;
-					}
-					modified |= tagEdit.Add ? engine::scene::AddTag(store, instance, tagEdit.Tag)
-											: engine::scene::RemoveTag(store, instance, tagEdit.Tag);
 				}
 			});
 		}

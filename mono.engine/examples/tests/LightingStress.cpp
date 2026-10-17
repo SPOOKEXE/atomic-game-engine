@@ -9,6 +9,7 @@
 #include <engine/examples/Scene.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/Volume.hpp>
@@ -76,6 +77,27 @@ TEST_CASE(
 	CHECK(lighting.BloomIntensity == Catch::Approx(1.25f));
 	CHECK(lighting.DepthOfFieldIntensity == Catch::Approx(0.7f));
 	CHECK(lighting.GodRayIntensity == Catch::Approx(0.8f));
+	size_t bloomCount = 0;
+	store.Each<const engine::scene::BloomEffect>([&](engine::ecs::Entity, const auto &effect) {
+		bloomCount++;
+		CHECK(effect.Enabled);
+		CHECK(effect.Intensity == Catch::Approx(1.25f));
+	});
+	CHECK(bloomCount == 1);
+	size_t depthOfFieldCount = 0;
+	store.Each<const engine::scene::DepthOfFieldEffect>([&](engine::ecs::Entity, const auto &effect) {
+		depthOfFieldCount++;
+		CHECK(effect.Enabled);
+		CHECK(effect.Intensity == Catch::Approx(0.7f));
+	});
+	CHECK(depthOfFieldCount == 1);
+	size_t godRaysCount = 0;
+	store.Each<const engine::scene::GodRaysEffect>([&](engine::ecs::Entity, const auto &effect) {
+		godRaysCount++;
+		CHECK(effect.Enabled);
+		CHECK(effect.Intensity == Catch::Approx(0.8f));
+	});
+	CHECK(godRaysCount == 1);
 	CHECK(lighting.EnvironmentState.HasAtmosphereCompute);
 	CHECK(lighting.EnvironmentState.HasCloudCompute);
 	CHECK(lighting.EnvironmentState.CloudVolume.Steps == 24);

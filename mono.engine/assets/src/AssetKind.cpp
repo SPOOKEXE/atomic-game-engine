@@ -25,6 +25,8 @@ namespace engine::assets {
 			return "shader";
 		case AssetKind::Animation:
 			return "animation";
+		case AssetKind::ImageGraph:
+			return "imagegraph";
 		case AssetKind::Unknown:
 			break;
 		}
@@ -44,7 +46,7 @@ namespace engine::assets {
 	}
 
 	AssetKind KindFromName(std::string_view text) {
-		for (uint8_t value = 1; value <= static_cast<uint8_t>(AssetKind::Animation); ++value) {
+		for (uint8_t value = 1; value <= static_cast<uint8_t>(AssetKind::ImageGraph); ++value) {
 			const auto kind = static_cast<AssetKind>(value);
 			if (text == Describe(kind)) {
 				return kind;

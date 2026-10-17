@@ -84,7 +84,8 @@ namespace engine::render {
 		uint64_t &triangles,
 		const IndirectPhase *indirect,
 		SlotSelection selection,
-		VisibilityPass visibilityPass
+		VisibilityPass visibilityPass,
+		core::Name weatherPipeline
 	) {
 		if (count == 0 || first + count > SlotMesh.size()) {
 			return 0;
@@ -114,6 +115,32 @@ namespace engine::render {
 		// call somebody else's fragment shader.
 		SDL_GPUGraphicsPipeline *const base = ActivePipeline;
 		SDL_GPUGraphicsPipeline *bound = base;
+		const auto cloudGeneration = std::find_if(
+			WeatherGenerations.begin(),
+			WeatherGenerations.end(),
+			[this, weatherPipeline](const WeatherGpuGeneration &generation) {
+				return ActiveInstanceWorld && generation.World == ActiveInstanceWorld->Id &&
+					   generation.Pipeline == weatherPipeline;
+			}
+		);
+		const auto *cloudLighting = cloudGeneration != WeatherGenerations.end()
+										? cloudGeneration->Shadows.LightingFor(command)
+										: nullptr;
+		const SDL_GPUTextureSamplerBinding cloudMap{
+			cloudLighting && lighting && lighting->CloudShadow.Receiver.w != 0 &&
+					cloudGeneration->Shadows.Texture
+				? cloudGeneration->Shadows.Texture
+				: FallbackTexture,
+			OverlaySampler
+		};
+		SDL_BindGPUFragmentSamplers(pass, 15, &cloudMap, 1);
+		if (base != TransparentLayerPipeline && base != TransparentLayerColourPipeline &&
+			base != PackedTransparentLayerPipeline && base != PackedTransparentLayerColourPipeline) {
+			const SDL_GPUTextureSamplerBinding reserved[2]{
+				{FallbackTexture, OverlaySampler}, {FallbackTexture, OverlaySampler}
+			};
+			SDL_BindGPUFragmentSamplers(pass, 13, reserved, 2);
+		}
 		const auto packedPipeline = [&](SDL_GPUGraphicsPipeline *native) {
 			if (native == OpaquePipeline) return EnsureDeferredPipeline(PackedOpaquePipeline);
 			if (native == ForwardPipeline) return EnsureDeferredPipeline(PackedForwardPipeline);
@@ -174,7 +201,7 @@ namespace engine::render {
 				native == WireframeTransparentPipeline || native == HdrWireframeOpaquePipeline ||
 				native == HdrWireframeTransparentPipeline || native == ForwardPipeline ||
 				native == TransparentLayerPipeline || native == TransparentLayerColourPipeline;
-			materialSamplerCount = authoredMaterial || surfaceShader ? SURFACE_FRAGMENT_SAMPLERS : 11u;
+			materialSamplerCount = authoredMaterial || surfaceShader ? 13u : 11u;
 			if (want != bound) {
 				SDL_BindGPUGraphicsPipeline(pass, want);
 				bound = want;
@@ -235,7 +262,9 @@ namespace engine::render {
 				shadowUniformsDirty = false;
 			}
 
-			const core::Name textureOwner = TextureContentOwner(texture, SlotContentOwner[slot]);
+			const core::Name textureOwner = TextureContentOwnerWithFallback(
+				texture, SlotContentOwner[slot], SlotImageGraphWorld[slot], SlotImageGraphFallbackWorld[slot]
+			);
 			if (lighting != nullptr) {
 				// **The default, not the fallback texel, and not "do not
 				// sample".** A drawable naming no texture is not a drawable with
@@ -282,13 +311,17 @@ namespace engine::render {
 						// exactly what makes a shape hard to see.
 						return static_cast<SDL_GPUTexture *>(nullptr);
 					}
-					SDL_GPUTexture *foundMap =
-						Textures.Find(name, TextureContentOwner(name, SlotContentOwner[slot]));
+					const core::Name mapOwner = TextureContentOwnerWithFallback(
+						name,
+						SlotContentOwner[slot],
+						SlotImageGraphWorld[slot],
+						SlotImageGraphFallbackWorld[slot]
+					);
+					SDL_GPUTexture *foundMap = Textures.Find(name, mapOwner);
 					if (foundMap != nullptr) {
 						return foundMap;
 					}
-					if (name.IsValid() &&
-						!Textures.Expecting(name, TextureContentOwner(name, SlotContentOwner[slot]))) {
+					if (name.IsValid() && !Textures.Expecting(name, mapOwner)) {
 						return Textures.Missing();
 					}
 					return static_cast<SDL_GPUTexture *>(nullptr);
@@ -305,7 +338,12 @@ namespace engine::render {
 				// them with magenta-channel values.
 				SDL_GPUTexture *const packedPbr = Textures.Find(
 					SlotPackedPbrMap[slot],
-					TextureContentOwner(SlotPackedPbrMap[slot], SlotContentOwner[slot])
+					TextureContentOwnerWithFallback(
+						SlotPackedPbrMap[slot],
+						SlotContentOwner[slot],
+						SlotImageGraphWorld[slot],
+						SlotImageGraphFallbackWorld[slot]
+					)
 				);
 				SDL_GPUSampler *const materialSampler =
 					SlotResample[slot] == scene::SurfaceResampleMode::Pixelated ? Textures.PixelSampler()
@@ -347,6 +385,8 @@ namespace engine::render {
 				SDL_BindGPUFragmentSamplers(pass, 0, samplers, materialSamplerCount);
 
 				LightingUniforms uniforms = *lighting;
+				if (uniforms.CloudShadow.Receiver.w != 0)
+					uniforms.CloudShadow = cloudLighting ? *cloudLighting : WeatherShadowLightingUniforms{};
 
 				// **The marker arrives as itself, so the base colour stops
 				// applying to it.** Every other texture here is modulated by the

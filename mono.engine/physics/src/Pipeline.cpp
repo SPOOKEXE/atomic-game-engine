@@ -17,7 +17,6 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Solver.hpp>
-#include <engine/physics/Storm.hpp>
 #include <engine/physics/Welds.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -150,11 +149,6 @@ namespace engine::physics {
 		ecs::Components::Register<PhysicsClock>(
 			PHYSICS_CLOCK_COMPONENT, WritePhysicsClocks, ReadPhysicsClocks
 		);
-
-		// Appended after every existing physics type. Component ids are registration
-		// order, so inserting a storm row ahead of the clock would rewrite old
-		// snapshot layouts even in worlds that do not use weather.
-		RegisterStormComponents();
 	}
 
 	void PreparePhysicsWorld(ecs::Store &store, float cellSize) {
@@ -225,7 +219,6 @@ namespace engine::physics {
 			}
 
 			BeginCopiedContactStep(store);
-			ApplyStormForces(store);
 			ApplyPersistentLoads(store);
 			IntegrateMotion(store);
 			RecordPostIntegration(store);
@@ -278,7 +271,6 @@ namespace engine::physics {
 
 			while (BeginPhysicsStep(store)) {
 				BeginCopiedContactStep(store);
-				ApplyStormForces(store);
 				ApplyPersistentLoads(store);
 				IntegrateMotion(store);
 				RecordPostIntegration(store);

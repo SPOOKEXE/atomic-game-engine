@@ -1,5 +1,6 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/script/InstanceShim.hpp>
 
 #include <algorithm>
 #include <studio/Hierarchy.hpp>
@@ -125,6 +126,7 @@ namespace studio {
 				row = Rotate(row, 23) + node.NextSibling.Id;
 				row = row * GOLDEN + (static_cast<uint64_t>(label.Value.Id()) << 32 |
 									  static_cast<uint64_t>(declared.Class.Index));
+				row = row * GOLDEN + engine::script::InstanceVisibleToScript(store, entity);
 
 				stamp = Fold(stamp, row);
 			}
@@ -169,6 +171,8 @@ namespace studio {
 				copied.NextSibling = node.NextSibling;
 				copied.Name = label.Value;
 				copied.Class = declared.Class;
+				// Keep hidden nodes' sibling links, so the following local copy is reachable.
+				if (!engine::script::InstanceVisibleToScript(store, entity)) copied.Flags |= HIDDEN;
 				Nodes.push_back(copied);
 			}
 		);
@@ -197,7 +201,8 @@ namespace studio {
 		if (Narrowed) {
 			for (Node &node : Nodes) {
 				int score = 0;
-				if (node.Name.IsValid() && FuzzyMatch(request.Filter, Label(node.Name), score)) {
+				if ((node.Flags & HIDDEN) == 0 && node.Name.IsValid() &&
+					FuzzyMatch(request.Filter, Label(node.Name), score)) {
 					node.Flags |= MATCH | KEEP;
 					Matches++;
 				}
@@ -266,6 +271,7 @@ namespace studio {
 			if (node == nullptr) {
 				continue;
 			}
+			if ((node->Flags & HIDDEN) != 0) continue;
 			if (Narrowed && (node->Flags & KEEP) == 0) {
 				continue;
 			}
@@ -283,7 +289,7 @@ namespace studio {
 					// it, because the links *out of* that row went with it.
 					break;
 				}
-				if (!Narrowed || (link->Flags & KEEP) != 0) {
+				if ((link->Flags & HIDDEN) == 0 && (!Narrowed || (link->Flags & KEEP) != 0)) {
 					hasChildren = true;
 					break;
 				}
@@ -366,7 +372,8 @@ namespace studio {
 	}
 
 	bool HierarchyView::Holds(Entity instance) const {
-		return Find(instance) != nullptr;
+		const Node *node = Find(instance);
+		return node != nullptr && (node->Flags & HIDDEN) == 0;
 	}
 
 	bool HierarchyView::Filtering() const {

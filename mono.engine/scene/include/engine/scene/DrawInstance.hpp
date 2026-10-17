@@ -725,28 +725,18 @@ namespace engine::scene {
 	// input, and a world asking for a million mirrors must reach a bound rather
 	// than an allocator.
 	//
-	// **It was sixteen until v0.17 and the reason it moved is that it was being
-	// read as the design.** Sixteen was chosen because a room has four walls;
-	// what it meant in practice was that a hall of mirrors stopped at sixteen
-	// however much memory the device had. The per-world limit is the knob now,
-	// and this is headroom above its default.
-	//
-	// **What raising it costs, so the next person does not have to find out.**
-	// Every index in use is two colour targets and a depth buffer, and the
-	// descriptors for them are member arrays on the renderer's per-viewport
-	// bank - about three hundred bytes a slot, which is why a hundred and
-	// twenty-eight is comfortable. Going much past that wants `Renderer.cpp`'s
-	// per-frame arrays off the stack first: the surface pass builds a handful of
-	// `scene::SurfacePane`-sized arrays this long as locals, and those are the
-	// things that would grow, not the textures - which are made on demand and
-	// only for the slots a frame actually uses.
+	// The bound covers a 320-facet mirror ball while retaining finite per-view
+	// descriptor arrays. The renderer binds one surface texture per draw, so this
+	// does not enlarge a shader descriptor array or uniform block. Colour and
+	// depth textures are allocated only for captures that actually render.
 	//
 	// A scene may name any index it likes; one at or above this is dropped from
 	// the view list with a line in the log rather than silently rendering
 	// nothing, which is the failure that reads as a broken mirror.
 	//
 	// @since v0.8
-	constexpr uint16_t MAX_SURFACES = 128;
+	constexpr uint16_t MAX_SURFACES = 512;
+	static_assert(MAX_SURFACES <= INT16_MAX, "Surface slots must fit the signed scene index.");
 
 	// Where one surface's instances sit in an ordered draw list.
 	//
@@ -756,7 +746,7 @@ namespace engine::scene {
 	// have to bind and project *per index*, which means each index's instances
 	// must be contiguous - this is where that contiguity is recorded.
 	//
-	// Empty runs are the ordinary case: a scene with two mirrors leaves fourteen
+	// Empty runs are the ordinary case: a scene with two mirrors leaves the rest
 	// of these zeroed, and a zero count is a draw call not issued rather than a
 	// state to check for.
 	//

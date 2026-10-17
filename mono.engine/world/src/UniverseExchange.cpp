@@ -165,31 +165,38 @@ namespace engine::world {
 		ExchangeStage = ExchangePhase::BetweenRounds;
 		return static_cast<int>(ExchangeRounds);
 	}
+	bool Universe::ExchangeUsesWorkers(ExchangeWork work) const {
+		return Settings_.Mode == ExecutionMode::WorldParallel && !parallel::ForceSerialCompute() &&
+			   LaneCount && ActiveList.size() > 1 &&
+			   ExchangeWorkMilliseconds[static_cast<size_t>(work)] >=
+				   Settings_.WorldParallelFloorMilliseconds;
+	}
 	bool Universe::DispatchExchangeWorlds(
-		const std::function<void(size_t)> &body, std::span<float> worldMilliseconds
+		ExchangeWork work, const std::function<void(size_t)> &body, std::span<float> worldMilliseconds
 	) {
-		float estimated = 0;
-		for (const auto *world : ActiveList)
-			estimated += world->Statistics().LastTickMilliseconds;
-		const bool workers = Settings_.Mode == ExecutionMode::WorldParallel &&
-							 !parallel::ForceSerialCompute() && LaneCount && ActiveList.size() > 1 &&
-							 estimated >= Settings_.WorldParallelFloorMilliseconds;
+		float &estimated = ExchangeWorkMilliseconds[static_cast<size_t>(work)];
+		const bool workers = ExchangeUsesWorkers(work);
+		ExchangeWorldMilliseconds.resize(ActiveList.size());
 		const auto run = [&](size_t begin, size_t end) {
 			for (size_t at = begin; at < end; ++at) {
 				ActiveList[at]->Storage().BindToCallingThread();
-				const uint64_t started = worldMilliseconds.empty() ? 0 : core::Clock::Nanoseconds();
+				const uint64_t started = core::Clock::Nanoseconds();
 				body(at);
-				if (at < worldMilliseconds.size())
-					worldMilliseconds[at] = static_cast<float>(core::Clock::Nanoseconds() - started) / 1e6f;
+				ExchangeWorldMilliseconds[at] =
+					static_cast<float>(core::Clock::Nanoseconds() - started) / 1e6f;
 			}
 		};
 		if (workers) {
 			parallel::Jobs::ForWorkers(ActiveLanes, run);
-			return true;
 		} else {
 			run(0, ActiveList.size());
-			return false;
 		}
+		estimated = 0;
+		for (size_t at = 0; at < ExchangeWorldMilliseconds.size(); ++at) {
+			estimated += ExchangeWorldMilliseconds[at];
+			if (at < worldMilliseconds.size()) worldMilliseconds[at] = ExchangeWorldMilliseconds[at];
+		}
+		return workers;
 	}
 	bool Universe::BeginTickExchangeRound() {
 		RequireDriverThread("BeginTickExchangeRound");
@@ -197,10 +204,10 @@ namespace engine::world {
 		if (ExchangeStage != ExchangePhase::BetweenRounds) return false;
 		ExchangeRequests.clear();
 		std::vector<uint8_t> success(ActiveList.size(), 1);
-		const bool profileWorkers = core::FrameGraph::IsEnabled();
+		const bool profileWorkers = core::FrameGraph::IsEnabled() && ExchangeUsesWorkers(ExchangeWork::Input);
 		const std::vector<TimingSnapshot> before =
 			profileWorkers ? SnapshotTimings(ActiveList) : std::vector<TimingSnapshot>{};
-		const bool workers = DispatchExchangeWorlds([&](size_t at) {
+		const bool workers = DispatchExchangeWorlds(ExchangeWork::Input, [&](size_t at) {
 			const bool participant =
 				static_cast<unsigned>(OwedList[at]) > ExchangeRound && Ticks(ActiveList[at]->State());
 			ExchangeParticipants[at] = participant;
@@ -227,8 +234,12 @@ namespace engine::world {
 		if (ExchangeStage != ExchangePhase::Input) return false;
 		std::vector<std::vector<TickExchangeRequest>> collected(ActiveList.size());
 		std::vector<uint8_t> success(ActiveList.size(), 1);
-		std::vector<float> worldMilliseconds(core::FrameGraph::IsEnabled() ? ActiveList.size() : 0);
+		std::vector<float> worldMilliseconds(
+			core::FrameGraph::IsEnabled() && ExchangeUsesWorkers(ExchangeWork::Collect) ? ActiveList.size()
+																						: 0
+		);
 		const bool workers = DispatchExchangeWorlds(
+			ExchangeWork::Collect,
 			[&](size_t at) {
 				if (!ExchangeParticipants[at]) return;
 				try {
@@ -271,8 +282,11 @@ namespace engine::world {
 		std::vector<TickExchangeReply> replies(requests.size());
 		for (size_t at = 0; at < requests.size(); ++at)
 			replies[at].Stamp = requests[at].Stamp;
-		std::vector<float> worldMilliseconds(core::FrameGraph::IsEnabled() ? ActiveList.size() : 0);
+		std::vector<float> worldMilliseconds(
+			core::FrameGraph::IsEnabled() && ExchangeUsesWorkers(ExchangeWork::Serve) ? ActiveList.size() : 0
+		);
 		const bool workers = DispatchExchangeWorlds(
+			ExchangeWork::Serve,
 			[&](size_t worldIndex) {
 				auto &world = *ActiveList[worldIndex];
 				if (world.State() == WorldState::Faulted) return;
@@ -312,8 +326,11 @@ namespace engine::world {
 				return false;
 		}
 		std::vector<uint8_t> success(ActiveList.size(), 1);
-		std::vector<float> worldMilliseconds(core::FrameGraph::IsEnabled() ? ActiveList.size() : 0);
+		std::vector<float> worldMilliseconds(
+			core::FrameGraph::IsEnabled() && ExchangeUsesWorkers(ExchangeWork::Apply) ? ActiveList.size() : 0
+		);
 		const bool workers = DispatchExchangeWorlds(
+			ExchangeWork::Apply,
 			[&](size_t at) {
 				if (!ExchangeParticipants[at]) return;
 				std::vector<TickExchangeReply> selected;
@@ -344,10 +361,11 @@ namespace engine::world {
 		if (ExchangeStage == ExchangePhase::Applied && !AdvanceTickExchangeRoundToPhysics()) return false;
 		if (ExchangeStage == ExchangePhase::Simulated) ExchangeStage = ExchangePhase::BarrierApplied;
 		if (ExchangeStage != ExchangePhase::BarrierApplied) return false;
-		const bool profileWorkers = core::FrameGraph::IsEnabled();
+		const bool profileWorkers =
+			core::FrameGraph::IsEnabled() && ExchangeUsesWorkers(ExchangeWork::Commit);
 		const std::vector<TimingSnapshot> before =
 			profileWorkers ? SnapshotTimings(ActiveList) : std::vector<TimingSnapshot>{};
-		const bool workers = DispatchExchangeWorlds([&](size_t at) {
+		const bool workers = DispatchExchangeWorlds(ExchangeWork::Commit, [&](size_t at) {
 			if (ExchangeParticipants[at]) (void)ActiveList[at]->FinishExchangeRound();
 		});
 		if (workers && profileWorkers) {
@@ -365,11 +383,12 @@ namespace engine::world {
 	bool Universe::AdvanceTickExchangeRoundToPhysics() {
 		RequireDriverThread("AdvanceTickExchangeRoundToPhysics");
 		if (ExchangeStage != ExchangePhase::Applied) return false;
-		const bool profileWorkers = core::FrameGraph::IsEnabled();
+		const bool profileWorkers =
+			core::FrameGraph::IsEnabled() && ExchangeUsesWorkers(ExchangeWork::Simulation);
 		const std::vector<TimingSnapshot> before =
 			profileWorkers ? SnapshotTimings(ActiveList) : std::vector<TimingSnapshot>{};
 		std::vector<uint8_t> success(ActiveList.size(), 1);
-		const bool workers = DispatchExchangeWorlds([&](size_t at) {
+		const bool workers = DispatchExchangeWorlds(ExchangeWork::Simulation, [&](size_t at) {
 			if (ExchangeParticipants[at]) success[at] = ActiveList[at]->AdvanceExchangeRoundToPhysics();
 		});
 		if (workers && profileWorkers) {
@@ -391,7 +410,7 @@ namespace engine::world {
 		RequireDriverThread("CollectFixedStepBarrier");
 		if (ExchangeStage != ExchangePhase::Simulated || !collect) return false;
 		std::vector<std::vector<std::byte>> payloads(ActiveList.size());
-		(void)DispatchExchangeWorlds([&](size_t at) {
+		(void)DispatchExchangeWorlds(ExchangeWork::BarrierCollect, [&](size_t at) {
 			if (ExchangeParticipants[at])
 				collect(ActiveList[at]->Id(), ActiveList[at]->Storage(), payloads[at]);
 		});
@@ -413,7 +432,7 @@ namespace engine::world {
 		RequireDriverThread("ApplyFixedStepBarrier");
 		if (ExchangeStage != ExchangePhase::BarrierCollected || !apply) return false;
 		std::vector<uint8_t> success(ActiveList.size(), 1);
-		(void)DispatchExchangeWorlds([&](size_t at) {
+		(void)DispatchExchangeWorlds(ExchangeWork::BarrierApply, [&](size_t at) {
 			if (!ExchangeParticipants[at]) return;
 			const std::string_view name = ActiveList[at]->Name().Text();
 			const auto found =
@@ -461,8 +480,11 @@ namespace engine::world {
 		RequireDriverThread("CancelTickExchangeFrame");
 		if (ExchangeStage == ExchangePhase::Closed) return;
 		ENGINE_ERROR("universe: cancelling incomplete phase exchange before physics integration");
-		std::vector<float> worldMilliseconds(core::FrameGraph::IsEnabled() ? ActiveList.size() : 0);
+		std::vector<float> worldMilliseconds(
+			core::FrameGraph::IsEnabled() && ExchangeUsesWorkers(ExchangeWork::Cancel) ? ActiveList.size() : 0
+		);
 		const bool workers = DispatchExchangeWorlds(
+			ExchangeWork::Cancel,
 			[&](size_t at) {
 				if (ExchangeParticipants[at] && ActiveList[at]->State() != WorldState::Faulted)
 					ActiveList[at]->CancelExchangeRound();

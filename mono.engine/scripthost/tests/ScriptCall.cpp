@@ -23,6 +23,8 @@
 // makes it usable as the wire.
 
 #include <engine/core/Name.hpp>
+#include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/effects/Registration.hpp>
@@ -32,6 +34,9 @@
 #include <engine/scene/Audio.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/EditableImage.hpp>
+#include <engine/scene/GpuParticleField.hpp>
+#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
@@ -61,6 +66,251 @@ using engine::script::InstanceMethod;
 using engine::script::Language;
 using engine::script::MakeRuntime;
 using engine::script::NeutralInstanceMethods;
+
+TEST_CASE("generic GPU field authoring is transactional in both VMs", "[script][particles]") {
+	for (const auto language : {Language::Luau, Language::JavaScript}) {
+		engine::scene::RegisterSceneClasses();
+		Store store("scriptcall.gpu-field");
+		const auto runtime = MakeRuntime(store, language);
+		const char *source = language == Language::Luau ? R"(
+local field = Instance.new('GpuParticleField')
+field.Name = 'GenericField'
+field.Parent = workspace
+field.Position = Vector3.new(7, 8, 9)
+field.RequestedCount = 50000000
+local samples = buffer.create(32)
+buffer.writef32(samples, 0, 1)
+buffer.writef32(samples, 4, 2)
+buffer.writef32(samples, 8, 3)
+buffer.writef32(samples, 12, 10)
+buffer.writef32(samples, 16, 4)
+buffer.writef32(samples, 20, 5)
+buffer.writef32(samples, 24, 6)
+buffer.writeu32(samples, 28, 2)
+assert(field:SetSpawnSamples(samples))
+assert(field:SetLayer(2, Color3.new(1, 0, 0), .3, 4, Vector3.new(0, -9.8, 0)))
+assert(not field:SetSpawnSamples(buffer.create(31)))
+buffer.writeu32(samples, 28, 3)
+assert(not field:SetSpawnSamples(samples))
+assert(not field:SetLayer(3, Color3.new(1, 0, 0), .3, 4, Vector3.zero))
+assert(not field:SetLayer(2, Color3.new(1, 0, 0), 2, 4, Vector3.zero))
+assert(not pcall(function() field:SetSpawnSamples(buffer.create(8193 * 32)) end))
+assert(not workspace:SetSpawnSamples(buffer.create(0)))
+)"
+														: R"(
+const field = Instance.new('GpuParticleField');
+field.Name = 'GenericField';
+field.Parent = workspace;
+field.Position = Vector3.new(7, 8, 9);
+field.RequestedCount = 50000000;
+const samples = new ArrayBuffer(32), sampleView = new DataView(samples);
+[1, 2, 3, 10, 4, 5, 6].forEach((value, index) => sampleView.setFloat32(index * 4, value, true));
+sampleView.setUint32(28, 2, true);
+if (!field.SetSpawnSamples(samples) || !field.SetLayer(2, Color3.new(1, 0, 0), .3, 4, Vector3.new(0, -9.8, 0))) throw new Error('valid GPU field refused');
+if (field.SetSpawnSamples(new ArrayBuffer(31))) throw new Error('truncated sample accepted');
+sampleView.setUint32(28, 3, true);
+if (field.SetSpawnSamples(samples) || field.SetLayer(3, Color3.new(1, 0, 0), .3, 4, Vector3.zero) || field.SetLayer(2, Color3.new(1, 0, 0), 2, 4, Vector3.zero)) throw new Error('invalid authoring accepted');
+let oversizedRefused = false;
+try { field.SetSpawnSamples(new ArrayBuffer(8193 * 32)); } catch (_) { oversizedRefused = true; }
+if (!oversizedRefused || workspace.SetSpawnSamples(new ArrayBuffer(0))) throw new Error('GPU field buffer boundary failed');
+)";
+		const bool ran = runtime->Run(source, "generic-gpu-field-parity");
+		INFO(runtime->LastError());
+		REQUIRE(ran);
+		const auto entity = store.FindFirstChild(engine::scene::WorkspaceOf(store), "GenericField");
+		const auto *field = store.Get<engine::scene::GpuParticleField>(entity);
+		REQUIRE(field != nullptr);
+		CHECK(field->RequestedCount == 50'000'000);
+		REQUIRE(field->SpawnSamples.size() == 1);
+		CHECK(field->SpawnSamples[0].Position == engine::core::Vector3{1, 2, 3});
+		CHECK(field->SpawnSamples[0].Layer == 2);
+		CHECK(field->Styles[2].Alpha == .3f);
+		CHECK(field->Styles[2].Acceleration == engine::core::Vector3{0, -9.8f, 0});
+		const auto before = engine::scene::GpuParticleDefinition(*field);
+		store.SetAdoptOnly(true);
+		const char *refusal = language == Language::Luau ? R"(
+local held = workspace:FindFirstChild('GenericField')
+assert(not pcall(function() held:SetSpawnSamples(buffer.create(0)) end))
+assert(not pcall(function() held:SetLayer(0, Color3.new(0, 1, 0), .5, 2, Vector3.zero) end))
+)"
+														 : R"(
+const held = workspace.FindFirstChild('GenericField');
+let sharedSamplesRefused = false, sharedStyleRefused = false;
+try { held.SetSpawnSamples(new ArrayBuffer(0)); } catch (_) { sharedSamplesRefused = true; }
+try { held.SetLayer(0, Color3.new(0, 1, 0), .5, 2, Vector3.zero); } catch (_) { sharedStyleRefused = true; }
+if (!sharedSamplesRefused || !sharedStyleRefused) throw new Error('adopted field edited');
+)";
+		REQUIRE(runtime->Run(refusal, "generic-gpu-field-replica-refusal"));
+		CHECK(
+			engine::scene::GpuParticleDefinition(*store.Get<engine::scene::GpuParticleField>(entity)) ==
+			before
+		);
+	}
+}
+
+TEST_CASE("client-owned image and graph authoring works in both VMs", "[script][client-local][imagegraph]") {
+	for (const auto language : {Language::Luau, Language::JavaScript}) {
+		engine::scene::RegisterSceneClasses();
+		Store store("scriptcall.local-images");
+		const auto workspace = engine::scene::InstallServices(store);
+		const auto authorityImage =
+			store.CreateInstance(engine::scene::EditableImageClass(), "AuthorityImage");
+		const auto authorityGraph = store.CreateInstance(engine::scene::ImageGraphClass(), "AuthorityGraph");
+		REQUIRE(store.SetParent(authorityImage, workspace));
+		REQUIRE(store.SetParent(authorityGraph, workspace));
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfClient();
+		store.SetAdoptOnly(true);
+		const auto runtime = MakeRuntime(store, language, limits);
+		const char *source = language == Language::Luau ? R"(
+local image = Instance.new('EditableImage')
+image.Name = 'LocalImage'
+image.Parent = workspace
+assert(image:Resize(1, 1))
+local pixels = buffer.create(4)
+buffer.writeu8(pixels, 0, 128)
+buffer.writeu8(pixels, 3, 255)
+assert(image:FromBuffer(pixels))
+assert(image:FromBase64('gAAA/w==', 'rgba8'))
+assert(buffer.readu8(image:ToBuffer(), 0) == 128)
+assert(not image:FromBuffer(buffer.create(3)))
+local graph = Instance.new('ImageGraph')
+graph.Name = 'LocalGraph'
+graph.Parent = workspace
+graph.InstanceKey = 'viewer-graph'
+graph.Graph = 'graphs/viewer.aimagegraph'
+graph:SetInput('opacity', .5)
+graph:SetInput('source', 'textures/cloud.atex')
+assert(graph:GetInput('opacity') == .5)
+assert(graph:GetImage() == 'imagegraph-instance://viewer-graph#image')
+local field = Instance.new('GpuParticleField')
+field.Name = 'LocalField'
+field.Parent = workspace
+local samples = buffer.create(32)
+buffer.writef32(samples, 12, 10)
+assert(field:SetSpawnSamples(samples))
+assert(field:SetLayer(0, Color3.new(1, 0, 0), .5, 4, Vector3.zero))
+assert(not pcall(function() workspace:FindFirstChild('AuthorityImage'):FromBuffer(pixels) end))
+assert(not pcall(function() workspace:FindFirstChild('AuthorityGraph'):SetInput('opacity', .9) end))
+)"
+														: R"(
+const image = Instance.new('EditableImage');
+image.Name = 'LocalImage'; image.Parent = workspace;
+if (!image.Resize(1, 1)) throw new Error('local resize refused');
+const pixels = new Uint8Array([128, 0, 0, 255]);
+if (!image.FromBuffer(pixels.buffer) || !image.FromBase64('gAAA/w==', 'rgba8')) throw new Error('local pixels refused');
+if (new Uint8Array(image.ToBuffer())[0] !== 128 || image.FromBuffer(new ArrayBuffer(3))) throw new Error('local pixel transaction failed');
+const graph = Instance.new('ImageGraph');
+graph.Name = 'LocalGraph'; graph.Parent = workspace;
+graph.InstanceKey = 'viewer-graph'; graph.Graph = 'graphs/viewer.aimagegraph';
+graph.SetInput('opacity', .5); graph.SetInput('source', 'textures/cloud.atex');
+if (graph.GetInput('opacity') !== .5 || graph.GetImage() !== 'imagegraph-instance://viewer-graph#image') throw new Error('local graph mismatch');
+const field = Instance.new('GpuParticleField');
+field.Name = 'LocalField'; field.Parent = workspace;
+const samples = new ArrayBuffer(32); new DataView(samples).setFloat32(12, 10, true);
+if (!field.SetSpawnSamples(samples) || !field.SetLayer(0, Color3.new(1, 0, 0), .5, 4, Vector3.zero)) throw new Error('local field authoring refused');
+let imageRefused = false, graphRefused = false;
+try { workspace.FindFirstChild('AuthorityImage').FromBuffer(pixels.buffer); } catch (_) { imageRefused = true; }
+try { workspace.FindFirstChild('AuthorityGraph').SetInput('opacity', .9); } catch (_) { graphRefused = true; }
+if (!imageRefused || !graphRefused) throw new Error('authority image or graph edited');
+)";
+		const bool ran = runtime->Run(source, "client-local-image-graph-authoring");
+		INFO(runtime->LastError());
+		REQUIRE(ran);
+		const auto image = store.FindFirstChild(workspace, "LocalImage");
+		const auto graph = store.FindFirstChild(workspace, "LocalGraph");
+		const auto field = store.FindFirstChild(workspace, "LocalField");
+		for (const auto instance : {image, graph, field}) {
+			CHECK(Store::IsPredicted(instance));
+			CHECK(store.Has<engine::ecs::ClientLocal>(instance));
+		}
+		CHECK(store.Get<engine::scene::EditableImage>(image)->Pixels == std::vector<uint8_t>{128, 0, 0, 255});
+		CHECK(store.Get<engine::scene::ImageGraph>(graph)->Inputs.size() == 2);
+		REQUIRE(store.Get<engine::scene::GpuParticleField>(field)->SpawnSamples.size() == 1);
+		CHECK(store.Get<engine::scene::GpuParticleField>(field)->Styles[0].Alpha == .5f);
+		CHECK(store.Get<engine::scene::EditableImage>(authorityImage)->Revision == 0);
+		CHECK(store.Get<engine::scene::ImageGraph>(authorityGraph)->Inputs.empty());
+	}
+}
+
+TEST_CASE(
+	"live image graph methods preserve typed inputs and stable names in both VMs", "[script][imagegraph]"
+) {
+	for (const auto language : {Language::Luau, Language::JavaScript}) {
+		engine::scene::RegisterSceneClasses();
+		Store store("scriptcall.imagegraph");
+		const auto runtime = MakeRuntime(store, language);
+		const std::string source = language == Language::Luau ? R"(
+local graph = Instance.new('ImageGraph')
+graph.Name = 'LiveGraph'
+graph.Parent = workspace
+graph.InstanceKey = 'script-weather'
+graph.Graph = 'graphs/weather.aimagegraph'
+graph:SetInput('opacity', .5)
+graph:SetInput('opacity', .5)
+graph:SetInput('enabled', true)
+graph:SetInput('tint', Color3.fromRGB(128, 64, 32))
+graph:SetInput('source', 'textures/cloud.png')
+graph:SetInput('temporary', 1)
+graph:SetInput('temporary', nil)
+graph:SetInput('temporary', nil)
+assert(graph:GetInput('opacity') == .5)
+assert(graph:GetInput('enabled') == true)
+assert(graph:GetInput('source') == 'textures/cloud.png')
+assert(math.abs(graph:GetInput('tint').R - Color3.fromRGB(128, 64, 32).R) < 1e-6)
+assert(graph:GetInput('temporary') == nil)
+assert(graph:GetImage() == 'imagegraph-instance://script-weather#image')
+assert(graph:GetImage('mask') == 'imagegraph-instance://script-weather#mask')
+)"
+															  : R"(
+let graph = Instance.new('ImageGraph');
+graph.Name = 'LiveGraph';
+graph.Parent = workspace;
+graph.InstanceKey = 'script-weather';
+graph.Graph = 'graphs/weather.aimagegraph';
+graph.SetInput('opacity', .5);
+graph.SetInput('opacity', .5);
+graph.SetInput('enabled', true);
+graph.SetInput('tint', Color3.fromRGB(128, 64, 32));
+graph.SetInput('source', 'textures/cloud.png');
+graph.SetInput('temporary', 1);
+graph.SetInput('temporary', null);
+graph.SetInput('temporary', null);
+if (graph.GetInput('opacity') !== .5 || graph.GetInput('enabled') !== true ||
+    graph.GetInput('source') !== 'textures/cloud.png' || graph.GetInput('temporary') !== null ||
+    Math.abs(graph.GetInput('tint').R - Color3.fromRGB(128, 64, 32).R) > 1e-6 ||
+    graph.GetImage() !== 'imagegraph-instance://script-weather#image' ||
+    graph.GetImage('mask') !== 'imagegraph-instance://script-weather#mask') throw new Error('graph mismatch');
+)";
+		const bool ran = runtime->Run(source, "imagegraph-parity");
+		INFO(runtime->LastError());
+		REQUIRE(ran);
+		const auto entity = store.FindFirstChild(engine::scene::WorkspaceOf(store), "LiveGraph");
+		const auto *graph = store.Get<engine::scene::ImageGraph>(entity);
+		REQUIRE(graph != nullptr);
+		CHECK(graph->Revision == 8);
+		CHECK(graph->Inputs.size() == 4);
+		engine::scene::ImageGraphInput tint;
+		REQUIRE(engine::scene::GetImageGraphInput(store, entity, engine::core::Name("tint"), tint));
+		CHECK(tint.Colour == std::array<uint8_t, 4>{128, 64, 32, 255});
+		const auto before = graph->Revision;
+		const std::string receiver = language == Language::Luau
+										 ? "local graph = workspace:FindFirstChild('LiveGraph')\n"
+										 : "var held = workspace.FindFirstChild('LiveGraph');\n";
+		const std::string object = language == Language::Luau ? "graph:" : "held.";
+		CHECK_FALSE(runtime->Run(receiver + object + "SetInput('opacity', 1 / 0)", "imagegraph-nonfinite"));
+		CHECK(store.Get<engine::scene::ImageGraph>(entity)->Revision == before);
+		CHECK_FALSE(runtime->Run(
+			receiver + object + "SetInput('opacity', Instance.new('Part'))", "imagegraph-unsupported"
+		));
+		CHECK(store.Get<engine::scene::ImageGraph>(entity)->Revision == before);
+		store.SetAdoptOnly(true);
+		CHECK_FALSE(
+			runtime->Run(receiver + object + "SetInput('opacity', .9)", "imagegraph-replica-refusal")
+		);
+		CHECK(store.Get<engine::scene::ImageGraph>(entity)->Revision == before);
+	}
+}
 
 namespace {
 	const std::vector<Language> LANGUAGES = {Language::Luau, Language::JavaScript};
@@ -940,6 +1190,240 @@ TEST_CASE("who you are is not yours to assign, in both languages", "[scripting][
 			engine::scene::PlayersOf(store), engine::core::Name("MaxPlayers"), &seats, sizeof(seats)
 		));
 		CHECK(seats == 8);
+	}
+}
+
+TEST_CASE(
+	"BulkMoveTo refreshes locality and refuses mixed batches before moving",
+	"[scripting][scriptcall][client-local]"
+) {
+	for (const Language language : LANGUAGES) {
+		Store store = Fresh("scriptcall.bulk-locality");
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfServer();
+		const auto runtime = MakeRuntime(store, language, limits);
+		REQUIRE(runtime != nullptr);
+		const char *source = language == Language::Luau ? R"(
+local first = Instance.new('Part')
+first.Name = 'BulkFirst'
+first.Parent = workspace
+local second = Instance.new('Part')
+second.Name = 'BulkSecond'
+second.Parent = workspace
+local step = 0
+game:GetService('RunService').Heartbeat:Connect(function()
+    step += 1
+    workspace:BulkMoveTo({first, second}, {CFrame.new(step, 0, 0), CFrame.new(step, 1, 0)})
+end)
+)"
+														: R"(
+const first = Instance.new('Part');
+first.Name = 'BulkFirst'; first.Parent = workspace;
+const second = Instance.new('Part');
+second.Name = 'BulkSecond'; second.Parent = workspace;
+let step = 0;
+game.GetService('RunService').Heartbeat.Connect(() => {
+    ++step;
+    workspace.BulkMoveTo([first, second], [CFrame.new(step, 0, 0), CFrame.new(step, 1, 0)]);
+});
+)";
+		REQUIRE(runtime->Run(source, "bulk-locality"));
+		const auto workspace = engine::scene::WorkspaceOf(store);
+		const auto first = store.FindFirstChild(workspace, "BulkFirst");
+		const auto second = store.FindFirstChild(workspace, "BulkSecond");
+		REQUIRE(first != engine::ecs::NULL_ENTITY);
+		REQUIRE(second != engine::ecs::NULL_ENTITY);
+		REQUIRE_FALSE(engine::ecs::HasClientLocalInstances(store));
+		const auto checkX = [&](float expected) {
+			CHECK(store.Get<engine::scene::Transform>(first)->Frame.Position.X == expected);
+			CHECK(store.Get<engine::scene::Transform>(second)->Frame.Position.X == expected);
+		};
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(1);
+		const auto camera = store.CreatePredictedInstance(engine::scene::CameraClass(), "unrelated-camera");
+		REQUIRE(camera != engine::ecs::NULL_ENTITY);
+		REQUIRE_FALSE(store.Has<engine::ecs::ClientLocal>(camera));
+		REQUIRE(engine::ecs::HasClientLocalInstances(store));
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(2);
+
+		store.Set(second, engine::ecs::ClientLocal{});
+		CHECK_FALSE(runtime->Heartbeat(1.0f / 30));
+		checkX(2);
+		store.Remove<engine::ecs::ClientLocal>(second);
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(4);
+
+		const auto otherClass =
+			engine::ecs::Classes::Register("ScriptCallBulkOtherPart", engine::scene::PartClass(), {});
+		store.Set(second, engine::ecs::InstanceClass{otherClass});
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(5);
+		engine::ecs::Classes::SetRuntimeLocal(otherClass, true);
+		const bool acceptedLocalClass = runtime->Heartbeat(1.0f / 30);
+		engine::ecs::Classes::SetRuntimeLocal(otherClass, false);
+		CHECK_FALSE(acceptedLocalClass);
+		checkX(5);
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(7);
+
+		const auto descendant = store.CreateInstance(engine::scene::PartClass(), "local-descendant");
+		REQUIRE(store.SetParent(descendant, second));
+		store.Set(descendant, engine::ecs::ClientLocal{});
+		CHECK_FALSE(runtime->Heartbeat(1.0f / 30));
+		checkX(7);
+		store.Remove<engine::ecs::ClientLocal>(descendant);
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(9);
+
+		const auto localClass = engine::ecs::Classes::Register(
+			"ScriptCallBulkRuntimeLocal", engine::ecs::Classes::RegisterInstanceRoot(), {}
+		);
+		engine::ecs::Classes::SetRuntimeLocal(localClass, true);
+		const auto local = store.CreatePredictedInstance(localClass, "local-without-marker");
+		REQUIRE_FALSE(store.Has<engine::ecs::ClientLocal>(local));
+		REQUIRE(store.SetParent(second, local));
+		CHECK_FALSE(runtime->Heartbeat(1.0f / 30));
+		checkX(9);
+		REQUIRE(store.SetParent(second, workspace));
+		store.Destroy(local);
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(11);
+	}
+}
+
+TEST_CASE("bulk arrays refresh only builtin Workspace across calls", "[scripting][scriptcall]") {
+	using namespace engine;
+	for (const Language language : LANGUAGES) {
+		Store store = Fresh("scriptcall.bulk-workspace");
+		script::RuntimeLimits limits;
+		limits.Role = script::HostRole::OfServer();
+		const auto runtime = MakeRuntime(store, language, limits);
+		REQUIRE(runtime != nullptr);
+		const char *source = language == Language::Luau ? R"(
+local held = workspace
+local alias = game:GetService('Workspace')
+local bulk = workspace.BulkMoveTo
+local live = Instance.new('Part', workspace)
+live.Name = 'BulkLive'
+local stale = Instance.new('Part', workspace)
+stale.Name = 'BulkStale'
+local phase = 0
+game:GetService('RunService').Heartbeat:Connect(function()
+    phase += 1
+    bulk(live, {held, live, alias, stale}, {
+        CFrame.new(phase * 10 + 1, 0, 0), CFrame.new(phase * 10 + 2, 0, 0),
+        CFrame.new(phase * 10 + 3, 0, 0), CFrame.new(phase * 10 + 4, 0, 0)
+    })
+end)
+)"
+														: R"(
+const held = workspace;
+const alias = game.GetService('Workspace');
+const bulk = workspace.BulkMoveTo;
+const live = Instance.new('Part', workspace);
+live.Name = 'BulkLive';
+const stale = Instance.new('Part', workspace);
+stale.Name = 'BulkStale';
+let phase = 0;
+game.GetService('RunService').Heartbeat.Connect(() => {
+    ++phase;
+    bulk.call(live, [held, live, alias, stale], [
+        CFrame.new(phase * 10 + 1, 0, 0), CFrame.new(phase * 10 + 2, 0, 0),
+        CFrame.new(phase * 10 + 3, 0, 0), CFrame.new(phase * 10 + 4, 0, 0)
+    ]);
+});
+)";
+		REQUIRE(runtime->Run(source, "bulk-workspace"));
+		auto workspace = scene::WorkspaceOf(store);
+		const auto live = store.FindFirstChild(workspace, "BulkLive");
+		const auto stale = store.FindFirstChild(workspace, "BulkStale");
+		REQUIRE(live != ecs::NULL_ENTITY);
+		REQUIRE(stale != ecs::NULL_ENTITY);
+		store.DestroyInstance(stale);
+		const auto replacement = store.CreateInstance(scene::PartClass(), "Replacement");
+		REQUIRE(replacement != stale);
+		REQUIRE_FALSE(store.Alive(stale));
+		for (int phase = 1; phase <= 2; phase++) {
+			const auto previous = workspace;
+			if (!store.Has<scene::Transform>(previous)) store.Set(previous, scene::Transform{});
+			const float previousX = store.Get<scene::Transform>(previous)->Frame.Position.X;
+			// Keep a live decoy at the old handle while the canonical service changes.
+			store.Set(previous, ecs::InstanceClass{scene::PartClass()});
+			store.Remove<scene::ServiceComponent>(previous);
+			workspace = store.CreateInstance(ecs::Classes::Find(core::Name("Workspace")), "Workspace");
+			REQUIRE(workspace != ecs::NULL_ENTITY);
+			store.Set(workspace, scene::Transform{});
+			const bool moved = runtime->Heartbeat(1.0f / 30);
+			INFO(runtime->LastError());
+			REQUIRE(moved);
+			CHECK(store.Get<scene::Transform>(workspace)->Frame.Position.X == phase * 10 + 3);
+			CHECK(store.Get<scene::Transform>(live)->Frame.Position.X == phase * 10 + 2);
+			CHECK(store.Get<scene::Transform>(previous)->Frame.Position.X == previousX);
+			CHECK(store.Get<scene::Transform>(replacement)->Frame.Position.X == 0);
+		}
+	}
+}
+
+TEST_CASE("bulk arrays validate every value before placing any part", "[scripting][scriptcall]") {
+	for (const Language language : LANGUAGES) {
+		Store store = Fresh("scriptcall.bulk-types");
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+		const auto workspace = engine::scene::WorkspaceOf(store);
+		const auto first = store.CreateInstance(engine::scene::PartClass(), "BulkFirst");
+		const auto second = store.CreateInstance(engine::scene::PartClass(), "BulkSecond");
+		REQUIRE(store.SetParent(first, workspace));
+		REQUIRE(store.SetParent(second, workspace));
+		const bool luau = language == Language::Luau;
+		const std::string prefix =
+			Let(language,
+				"first",
+				luau ? "workspace:FindFirstChild('BulkFirst')" : "workspace.FindFirstChild('BulkFirst')") +
+			Let(language,
+				"second",
+				luau ? "workspace:FindFirstChild('BulkSecond')" : "workspace.FindFirstChild('BulkSecond')");
+		const auto withParts = [&](const std::string &body) {
+			return std::string(luau ? "do\n" : "{\n") + prefix + body + (luau ? "end\n" : "}\n");
+		};
+		const std::string valid = luau ? R"(
+local traps = {__index = function() error('array metamethod invoked') end,
+               __len = function() error('array metamethod invoked') end}
+workspace:BulkMoveTo(setmetatable({first, second}, traps),
+    setmetatable({CFrame.new(1, 0, 0), CFrame.new(2, 0, 0)}, traps))
+)"
+									   : "workspace.BulkMoveTo([first, second], [CFrame.new(1, 0, 0), "
+										 "CFrame.new(2, 0, 0)]);";
+		const bool placed = runtime->Run(withParts(valid), "bulk-raw-arrays");
+		INFO(runtime->LastError());
+		REQUIRE(placed);
+		std::vector<std::pair<std::string, std::string>> invalid = {
+			{luau ? "BulkMoveTo({first, CFrame.new()}, {CFrame.new(9, 0, 0), CFrame.new()})"
+				  : "BulkMoveTo([first, CFrame.new()], [CFrame.new(9, 0, 0), CFrame.new()])",
+			 "Instance"},
+			{luau ? "BulkMoveTo({first, second}, {CFrame.new(9, 0, 0), second})"
+				  : "BulkMoveTo([first, second], [CFrame.new(9, 0, 0), second])",
+			 "CFrame"},
+		};
+		if (luau) {
+			invalid.push_back(
+				{"BulkMoveTo(setmetatable({first, nil, second}, {__index = function() "
+				 "error('array metamethod invoked') end}), {CFrame.new(), CFrame.new(), CFrame.new()})",
+				 "Instance"}
+			);
+			invalid.push_back(
+				{"BulkMoveTo({first, second, first}, setmetatable({CFrame.new(9, 0, 0), nil, CFrame.new()}, "
+				 "{__index = function() error('array metamethod invoked') end}))",
+				 "CFrame"}
+			);
+		}
+		for (const auto &[probe, expected] : invalid) {
+			CHECK_FALSE(runtime->Run(withParts(Send(language, "workspace", probe)), "bulk-invalid-array"));
+			CHECK(runtime->LastError().find(expected) != std::string::npos);
+			CHECK(runtime->LastError().find("array metamethod invoked") == std::string::npos);
+			CHECK(store.Get<engine::scene::Transform>(first)->Frame.Position.X == 1);
+			CHECK(store.Get<engine::scene::Transform>(second)->Frame.Position.X == 2);
+		}
 	}
 }
 
@@ -1940,6 +2424,13 @@ TEST_CASE("the migrated tree methods answer the same in both languages", "[scrip
 					Let(language, "keep", "Instance.new('Part')") + "keep.Parent = part\n" +
 					Let(language, "gone", "Instance.new('Part')") + "gone.Parent = keep\n" +
 					Send(language, "part", "ClearAllChildren()") +
+					Let(language,
+						"terrain",
+						Call(language, "workspace", "FindFirstChildOfClass('Terrain')")) +
+					(language == Language::Luau ? "assert(terrain ~= nil and terrain.Name == 'Terrain', "
+												  "'generated Terrain missing')\n"
+												: "if (!terrain || terrain.Name !== 'Terrain') throw new "
+												  "Error('generated Terrain missing');\n") +
 					Say(language,
 						Join(
 							language,
@@ -1947,7 +2438,7 @@ TEST_CASE("the migrated tree methods answer the same in both languages", "[scrip
 							Length(language, Call(language, "workspace", "GetChildren()"))
 						));
 		 },
-		 "0/1"},
+		 "0/2"},
 
 		{"GetTags answers what one instance carries, sorted",
 		 [](Language language) {
@@ -2187,17 +2678,25 @@ TEST_CASE(
 ) {
 	for (const auto language : LANGUAGES) {
 		Store store = Fresh("scriptcall-camera-cut");
-		const auto runtime = MakeRuntime(store, language);
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfClient();
+		const auto runtime = MakeRuntime(store, language, limits);
 		REQUIRE(runtime != nullptr);
-		const auto source = Let(language, "camera", "Instance.new('Camera')") +
-							"camera.Name = 'CutCamera'\ncamera.Parent = workspace\n" +
-							Say(language, Call(language, "camera", "CutTo(CFrame.new(7, 8, 9))"));
+		const auto source =
+			Let(language, "camera", "Instance.new('Camera')") +
+			"camera.Name = 'CutCamera'\ncamera.Parent = workspace\n" +
+			(language == Language::Luau
+				 ? "assert(camera:CutTo(CFrame.new(7, 8, 9)))\n"
+				 : "if (!camera.CutTo(CFrame.new(7, 8, 9))) throw new Error('cut refused');\n");
 		const bool ran = runtime->Run(source.c_str());
 		INFO(runtime->LastError());
 		REQUIRE(ran);
 		const auto workspace = engine::scene::WorkspaceOf(store);
-		REQUIRE(store.InstanceNameOf(workspace).Text() == "true");
+		REQUIRE(store.InstanceNameOf(workspace).Text() == "Workspace");
 		const auto camera = store.FindFirstChild(workspace, "CutCamera");
+		REQUIRE(camera != engine::ecs::NULL_ENTITY);
+		CHECK(Store::IsPredicted(camera));
+		CHECK(engine::ecs::IsClientLocalInstance(store, camera));
 		REQUIRE(
 			store.Get<engine::scene::Transform>(camera)->Frame.Position == engine::core::Vector3(7, 8, 9)
 		);

@@ -110,25 +110,25 @@ namespace engine::control {
 		Up,
 	};
 
-	// One input action delivered across the host's input boundary.
+	// Validated input action passed from a control tool to the host.
 	struct InputAutomationEvent {
 		// Input category being emulated.
 		InputAutomationKind Kind = InputAutomationKind::MouseMove;
 		// Click, press, or release state for buttons and keys.
 		InputAutomationState State = InputAutomationState::Click;
-		// Horizontal pointer coordinate for mouse movement and button events.
+		// Horizontal pointer position for pointer events.
 		float X = 0.0f;
-		// Vertical pointer coordinate for mouse movement and button events.
+		// Vertical pointer position for pointer events.
 		float Y = 0.0f;
-		// Signed vertical wheel movement in notches.
+		// Wheel notches for a wheel event.
 		float Wheel = 0.0f;
-		// Named mouse button, when `Kind` is MouseButton.
+		// Mouse button name for a button event.
 		std::string Button;
-		// Named key, when `Kind` is Key.
+		// Key name for a key event.
 		std::string Key;
-		// UTF-8 text, when `Kind` is Text.
+		// Text inserted by a text event.
 		std::string Text;
-		// Modifier names accompanying a key event.
+		// Modifier keys held with the event.
 		std::vector<std::string> Modifiers;
 	};
 

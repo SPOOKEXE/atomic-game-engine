@@ -8,6 +8,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
+#include <engine/scene/WeatherClock.hpp>
 #include <engine/script/PortalTransfer.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -147,6 +148,7 @@ namespace client {
 				const auto owner = Universe_->NameOf(world);
 				render::InterfaceImage image;
 				image.Texture = Renderer.TextureHandle(name, owner);
+				image.SampledSRGB = Renderer.TextureSamplesSRGB(name, owner);
 				image.Cell = Renderer.TextureCell(name, captured->Frame.Seconds, owner);
 				Renderer.TextureSize(name, image.Width, image.Height, owner);
 				return image;
@@ -158,11 +160,13 @@ namespace client {
 		const core::Vector2 extent{float(width), float(height)};
 		uint64_t nativeEyeRig = 0;
 		uint64_t storeIdentity = 0;
+		bool editableImagesChanged = false;
 		const auto entered = Universe_->Enter(world, [&](ecs::Store &store) {
 			const auto owner = Universe_->NameOf(world);
 			storeIdentity = store.Identity();
 			const auto images =
 				Settings.EnableEditableImages ? EditableImages.Refresh(store, Renderer, owner) : 0;
+			editableImagesChanged = images > 0;
 			const auto meshes = Settings.EnableEditableMeshes
 									? EditableMeshes.Refresh(store, Renderer, owner)
 									: EditableMeshes.RefreshLods(store, Renderer, owner);
@@ -185,6 +189,12 @@ namespace client {
 			packet.SurfaceLimit = uint32_t(std::max(scene::SurfaceLimitOf(store), 0));
 		});
 		if (entered != world::WorldStatus::Ok) return false;
+		if (editableImagesChanged) {
+			if (PortalPrevious && PortalPrevious->World == world && PortalPrevious->Content)
+				RefreshImageGraphs(*PortalPrevious->Content, std::span(&world, 1));
+			if (PortalNext && PortalNext->World == world && PortalNext->Content)
+				RefreshImageGraphs(*PortalNext->Content, std::span(&world, 1));
+		}
 		auto &frame = packet.Frame;
 		const size_t nativeRows = frame.Instances.size();
 		AppendForeignPortalClones(*Universe_, world, frame.Instances, &frame.Joints);
@@ -970,6 +980,8 @@ namespace client {
 			approach.Connection = std::make_unique<replication::Connector>(
 				*approach.Socket, approach.Endpoint, nowSeconds, connecting
 			);
+			approach.Connection->OnTiming(scene::SynchronizeWeatherClocks);
+			approach.Connection->OnUserState(scene::AcceptWeatherClockUpdate);
 			approach.Content = std::make_unique<ContentSession>();
 			approach.Content->RelayName = approach.Endpoint.Text();
 			approach.Content->Relay = std::make_unique<ContentLink>(
@@ -1066,6 +1078,7 @@ namespace client {
 				next.CapturedReadiness.reset();
 				next.CapturedReadinessDecision.reset();
 				next.EmptyContentDemandRevision.reset();
+				next.EmptyContentResourceRevision = 0;
 				next.UndeliverableAssetNames = 0;
 				next.Failure.clear();
 				next.ReconnectAt = nowSeconds + .5;
@@ -1145,6 +1158,8 @@ namespace client {
 			connecting.Quic.BytesPerTick = connecting.Session.Link.BytesPerTick;
 			next.Connection =
 				std::make_unique<replication::Connector>(*next.Socket, next.Endpoint, nowSeconds, connecting);
+			next.Connection->OnTiming(scene::SynchronizeWeatherClocks);
+			next.Connection->OnUserState(scene::AcceptWeatherClockUpdate);
 			next.Content = std::make_unique<ContentSession>();
 			if (next.Readiness) {
 				// Reserve the destination and return images plus content/upload headroom
@@ -1312,16 +1327,26 @@ namespace client {
 				evidence.ResidentAssetRevision = evidence.AssetsResident ? scanned->second : 0;
 			}
 			if (!next.Content->Client) {
-				// A game with no content origin can still have an asset-free successor.
-				// Prove that from the replicated rows, and repeat only when their asset
-				// references change. A named asset without a client remains image-only.
+				// Embedded images must reach owner-scoped residency before adoption;
+				// no external origin is needed to upload their replicated pixels.
 				Universe_->Enter(next.World, [&](ecs::Store &store) {
+					const auto owner = Universe_->NameOf(next.World);
+					if (Settings.EnableEditableImages)
+						VisualResourcesChanged =
+							EditableImages.Refresh(store, Renderer, owner) > 0 || VisualResourcesChanged;
 					const uint64_t revision = WantedContentRevision(store);
-					if (next.EmptyContentDemandRevision != revision) {
+					const uint64_t resourceRevision = Renderer.ResourceRevision();
+					if (next.EmptyContentDemandRevision != revision ||
+						next.EmptyContentResourceRevision != resourceRevision) {
 						std::vector<core::Name> wanted;
 						CollectWantedContent(store, wanted);
-						next.UndeliverableAssetNames = wanted.size();
+						next.UndeliverableAssetNames = static_cast<size_t>(
+							std::count_if(wanted.begin(), wanted.end(), [&](core::Name name) {
+								return !OriginFreePortalContentResident(name, Renderer, owner);
+							})
+						);
 						next.EmptyContentDemandRevision = revision;
+						next.EmptyContentResourceRevision = resourceRevision;
 					}
 					(void)ApplyAssetlessReadiness(evidence, revision, next.UndeliverableAssetNames);
 				});

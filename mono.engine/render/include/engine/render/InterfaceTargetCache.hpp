@@ -52,14 +52,6 @@ namespace engine::render {
 		std::vector<core::Rect> Damage;						  // Damaged target rectangles.
 	};
 
-	// One cached image to composite at a particular paint-order range.
-	struct InterfaceTargetComposite {
-		// Device image for the cached range.
-		void *Target = nullptr;
-		// Draw-list range occupied by this image.
-		gui::CollectorRange Range;
-	};
-
 	// Keeps cache baselines separate from target resources.
 	//
 	// A baseline advances only through `Complete(key, true)`. Failed target
@@ -92,9 +84,8 @@ namespace engine::render {
 		// Commits successful pixels or preserves pending damage for a retry.
 		void Complete(const InterfaceTargetKey &key, bool succeeded);
 
-		// Returns ready targets in the exact paint order of collector ranges.
-		std::vector<InterfaceTargetComposite>
-		Composite(const gui::DrawList &list, uint64_t viewer, uint32_t width, uint32_t height) const;
+		// Returns a target only after its pixels have been successfully submitted.
+		void *ReadyTarget(const InterfaceTargetKey &key) const;
 
 		// Returns the resident target even while a newer write is pending. The
 		// renderer records into that image and calls Complete only after submit.

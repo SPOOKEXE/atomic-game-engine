@@ -10,6 +10,13 @@ documentation generators can update checked-in reference files.
 Every Linux preset builds with GCC, and configure refuses any other compiler.
 Only the fuzz recipes use `clang++-21`, because libFuzzer needs it. If a build
 directory picked up another compiler, run `cmake --preset <name> --fresh`.
+This does not change the compiler: `MONO_LINKER=auto` uses LLVM LLD on native
+GCC/Linux when its probe succeeds, and otherwise uses the system linker. To
+use the system linker, configure with
+`cmake --preset dev -DMONO_LINKER=system`;
+`MONO_LINK_JOBS` (default `2`) limits concurrent first-party Ninja links. Set
+`MONO_LLD` to an `ld.lld` path when CMake cannot find it automatically.
+See [build performance](docs/BUILD_PERFORMANCE.md) for measurements and comparisons.
 
 ## Start here
 
@@ -53,6 +60,14 @@ just preset=release build
 just preset=server test
 ```
 
+For `windows-cross` from Linux, install MinGW and Wine with
+`sudo apt install mingw-w64 wine`, then add the Rust target with
+`rustup target add x86_64-pc-windows-gnu`. The preset uses native `glslc` at
+`.cache/build/release/mono.vendor/shaderc/glslc/glslc`; prepare it with
+`just preset=release configure` and `just preset=release build glslc_exe`.
+Then run `just preset=windows-cross configure` and
+`just preset=windows-cross build`.
+
 ## Setup and build
 
 | Recipe | Purpose |
@@ -62,8 +77,10 @@ just preset=server test
 | `ccache [size]` | Show compiler-cache status, or set its size. |
 | `configure` | Configure the selected preset. |
 | `build [target]` | Build the selected preset, optionally one target. |
-| `build-profile [target]` | Build and report Ninja and compiler-cache timing. |
+| `build-profile [target]` | Build and report current-invocation edge, compiler-cache, and wall-clock timing. |
 | `build-profile-check` | Test the build-profile tool. |
+| `linker-check` | Check automatic, system, and LLD linker selection in a standalone CMake fixture. |
+| `compiler-cache-check` | Verify GCC PCH regeneration and compiler-cache hits. |
 | `client` | Build the client. |
 | `server` | Build the server. |
 | `cdn` | Build the content origin. |
@@ -118,6 +135,7 @@ Examples: `just test engine.ecs`, `just test-all`, and
 | `host [args...]` | Run the headless server. |
 | `serve [args...]` | Run the content origin. |
 | `materials [count]` | Fetch and publish PBR materials. Default: `100`. |
+| `demo-check [frames]` | Run staged scripts and worlds headlessly, then validate BMP captures. Default: `120`. |
 | `mcp [port] [args...]` | Run Studio's MCP bridge. Defaults: `8738`, `--width 1600`. |
 | `luau-lsp` | Build the vendored Luau language server. |
 | `unified [args...]` | Run unified client/server arrangements. |
@@ -145,12 +163,39 @@ Documentation is written to `.cache/build/<preset>/docs/`; use
 Benchmark output is printed to the terminal unless a recipe names an output
 directory. Use the `bench` preset for comparable measurements.
 
+Frame Graph's `250 ms` setting is the aggregation window, not a frame duration.
+Structural averages can place CPU spans at overlapping mean positions; separate
+rows preserve those values without claiming parallel execution. GPU queries use
+a separate duration scale because their results can arrive several frames late
+and have no correlated CPU start. `submit.scene SDL handoff` identifies time in
+the backend submission call separately from engine submission bookkeeping.
+
 | Recipe | Purpose |
 |---|---|
 | `bench [args...]` | Run selected affected benchmarks. |
 | `bench-all [args...]` | Run every benchmark. |
 | `bench-accept [args...]` | Accept benchmark baselines. |
+| `weather-bench [samples] [build_preset]` | Measure seeded weather, packing, clocks, assemblies, sparse residency, events and the stateful solver without graphics. Defaults: `5`, `bench`; use `bench-o0` for unoptimized costs. |
+| `weather-descriptor-bench [samples] [build_preset]` | Measure device-free weather GPU descriptor preparation. Defaults: `5`, `bench`. |
+| `weather-residency-bench [samples] [build_preset]` | Measure actual sparse cloud page selection, retained maintenance and teleports without graphics. Defaults: `5`, `bench`. |
+| `weather-temporal-bench [samples] [build_preset]` | Measure temporal invalidation, periodic displacement and cloud composition without graphics. Defaults: `5`, `bench`. |
+| `weather-shadow-bench [samples] [build_preset]` | Measure shadow caster bounds, cascades, low-sun fades and retained revisions without graphics. Defaults: `5`, `bench`. |
+| `weather-effects-bench [samples] [build_preset]` | Measure weather emission and roof/ground visibility against published geometry without graphics. Defaults: `5`, `bench`. |
+| `weather-gpu-bench [samples] [build_preset] [width] [height] [shadow_resolution]` | Open a GPU device and measure sparse weather generation, reuse, integration and tracked memory. Defaults: `3`, `bench`, `1920`, `1080`, `256`. Shadow resolution must be a power of two in `32..2048`. |
+| `weather-fuzz [runs] [compiler]` | Fuzz complete weather checkpoint decoding with AddressSanitizer and UBSan. Defaults: `10000`, `clang++-21`. |
+| `imagecodec-bench [samples]` | Measure CPU image imports at 1080p and print results to stdout. Default: `5`. |
+| `ui-headless-bench [samples]` | Measure ImGui layout and frozen draw signatures without a GPU. Default: `5`. |
+| `studio-interface-bench [samples] [build_preset]` | Measure toolbar, Preferences, retained 250 ms Frame Graph, and idle content scans without a window or GPU. Defaults: `5`, `bench`; use `bench-o0` for unoptimized engine costs. |
+| `studio-replication-stress-bench [samples] [build_preset]` | Measure the actual Studio link with 20,000 moving Parts, replica delivery, and acknowledgements. Defaults: `3`, `bench`. |
+| `client-frame-bench [samples] [build_preset]` | Measure idle content demand, visibility and actual PreRender systems. Defaults: `5`, `bench`; use `bench-o0` for unoptimized costs. |
+| `view-graph-lookup-bench [samples] [build_preset]` | Compare pipeline node scans and indexed lookup. Defaults: `5`, `bench`; use `bench-o0` for unoptimized costs. |
+| `instance-packing-bench [samples] [build_preset]` | Measure instance conversion and residency with centered and off-center meshes. Defaults: `5`, `bench`; inline conversion is optimized in the benchmark translation unit. |
+| `surface-capture-plan-bench [samples] [build_preset]` | Measure CPU planning for 320 visible mirror roots with one bounce and retained buffers. Defaults: `3`, `bench`; no GPU work is included. |
+| `frame-plan-bench [samples]` | Measure CPU frame planning, including the default PBR pipeline. Default: `5`. |
+| `frame-plan-cache-bench [samples]` | Compare installed-pipeline diagnostic cache misses and hits. Default: `5`. |
 | `render-preparation-bench [samples]` | Measure render-preparation work. Default: `5`. |
+| `keep-loaded-filter-bench [samples]` | Compare copying 100,000 default Parts with retaining their draw span, plus resident and missing named meshes. Default: `5`. |
+| `ordinary-particle-bench [samples]` | Measure ordinary emitter preparation, actual upload bytes, dispatch lanes, and delayed Vulkan pass timings. Default: `1`; waits are outside CPU recording spans. |
 | `volume-light-stress [frames]` | Check lighting stress scene, selection costs, and Vulkan fog stress. Default: `120`. |
 | `lighting-stress-scene [frames]` | Run the 256 point, 256 spot, 256 fog volume scene. Default: `720`. |
 | `data-capture-hook-bench [samples]` | Measure renderer data-capture hooks. Default: `5`. |
@@ -183,6 +228,20 @@ directory. Use the `bench` preset for comparable measurements.
 | `priority-refinement-bench [samples]` | Measure refined multi-row replication publishing. Default: `5`. |
 | `recovery-rows-bench [samples]` | Measure recovery-row re-offer work. Default: `5`. |
 | `bench-mesh-lod [samples]` | Measure mesh LOD generation. Default: `5`. |
+
+The prototype's 12 ms combined weather GPU budget was met by this one-layer,
+1920x1080 Vulkan fixture on an RTX 4090 with one 256x256 shadow cascade.
+Concurrent GPU residency affected timing variance; this measurement does not
+establish a universal frame guarantee or a quality ranking. The default matches
+authored shadow resolution. Compare lower-quality maps with
+`just weather-gpu-bench 3 bench 1920 1080 64` and
+`just weather-gpu-bench 3 bench 1920 1080 128`.
+`MONO_WEATHER_GPU_BENCH_SHADOW_RESOLUTION` sets the same value when running the
+benchmark executable directly; invalid values are refused before SDL
+initialization. Set `MONO_WEATHER_GPU_BENCH_TICK` to choose its initial
+canonical tick, for example `MONO_WEATHER_GPU_BENCH_TICK=128`; the benchmark
+prints `initial_tick` and refuses values that leave its eight-tick phase open to
+overflow. Its default is `0`.
 
 Profile and soak outputs are retained under `.cache/`, including
 `.cache/medium-render-profile/`, `.cache/heap-*.txt`, and

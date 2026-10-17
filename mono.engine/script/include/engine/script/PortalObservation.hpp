@@ -84,7 +84,7 @@ namespace engine::script {
 		bool Direct = false;
 		// Transfer sequence when `Begun`.
 		uint64_t Transfer = 0;
-		// Signed distance from the pane plane before the step.
+		// Signed distances from the pane plane before and after the step.
 		float PriorOffset = 0;
 		// Signed distance from the pane plane after the step.
 		float CurrentOffset = 0;

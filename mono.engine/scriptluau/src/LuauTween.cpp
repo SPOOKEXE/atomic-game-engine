@@ -47,7 +47,7 @@ namespace engine::script {
 			std::vector<CallbackRef> released;
 			context.Signals.DropSubject(tween, released);
 			for (const CallbackRef reference : released) {
-				lua_unref(state, reference);
+				ReleaseLuauValue(state, reference);
 			}
 			context.World->Destroy(tween);
 		}

@@ -1,7 +1,8 @@
+#include "PortalCaptureTreeImport.hpp"
+
 #include "RenderFixture.hpp"
 #include "portal/PortalRendererTerminalTrace.hpp"
 
-#include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalGeometry.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/testing/Suite.hpp>

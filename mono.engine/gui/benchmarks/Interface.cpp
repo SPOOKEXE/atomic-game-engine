@@ -670,6 +670,24 @@ BENCH_PER_ITEM("Compiled::Rebuild · 1k elements, unchanged", 1000) {
 	Consume(compiled.Commands().Commands.size());
 }
 
+BENCH_PER_ITEM("Compiled::Rebuild · 100 elements, unchanged cache hit", 100) {
+	Interface &tree = TreeOf(100, 3);
+	Compiled &compiled = CompiledFor(100, 3);
+	CompileRequest request;
+	request.Display = Display();
+	Consume(compiled.Rebuild(*tree.Data, request));
+	Consume(compiled.Commands().Commands.size());
+}
+
+BENCH_PER_ITEM("Compiled::Rebuild · 1k elements, unchanged cache hit", 1000) {
+	Interface &tree = TreeOf(1000, 3);
+	Compiled &compiled = CompiledFor(1000, 3);
+	CompileRequest request;
+	request.Display = Display();
+	Consume(compiled.Rebuild(*tree.Data, request));
+	Consume(compiled.Commands().Commands.size());
+}
+
 BENCH_PER_ITEM("Compiled::Rebuild · 1k elements, forced rebuild", 1000) {
 	// **What the signature is buying**, measured against the row above.
 	// `Invalidate` forgets the signature so every call rebuilds, which is the

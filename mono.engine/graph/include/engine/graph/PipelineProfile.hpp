@@ -33,6 +33,7 @@
 #include <engine/graph/RenderGraph.hpp>
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace engine::graph {
@@ -245,8 +246,11 @@ namespace engine::graph {
 	//
 	// @param graph    Graph holding descriptors and resource accesses.
 	// @param compiled Enabled nodes in execution order.
+	// @param retained Sources whose runtime identity consumers can outlive declared reads.
 	// @return Stable logical-to-physical target assignments.
-	ResourceAliasPlan BuildResourceAliases(const RenderGraph &graph, const CompiledGraph &compiled);
+	ResourceAliasPlan BuildResourceAliases(
+		const RenderGraph &graph, const CompiledGraph &compiled, std::span<const ResourceId> retained = {}
+	);
 
 	// Works out the grid.
 	//
@@ -260,8 +264,13 @@ namespace engine::graph {
 	// @param compiled   What `Compile` produced. Its order is the column order.
 	// @param viewWidth  The view's width in pixels.
 	// @param viewHeight Its height.
+	// @param retained   Sources kept live through runtime identity consumers.
 	// @return The grid. Empty for an empty compile.
 	PipelineProfile ProfilePipeline(
-		const RenderGraph &graph, const CompiledGraph &compiled, uint32_t viewWidth, uint32_t viewHeight
+		const RenderGraph &graph,
+		const CompiledGraph &compiled,
+		uint32_t viewWidth,
+		uint32_t viewHeight,
+		std::span<const ResourceId> retained = {}
 	);
 }

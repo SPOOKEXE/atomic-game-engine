@@ -200,6 +200,9 @@ namespace engine::scene {
 			ecs::Classes::Computed(editableMesh, MeshContentIdProperty());
 			for (auto &property : detail::PackingProperties<EditableMesh, SetEditableMeshPacking>())
 				ecs::Classes::Computed(editableMesh, std::move(property));
+			for (const ecs::PropertyDescriptor &property : ecs::Classes::Describe(editableMesh).Properties)
+				(void)ecs::Classes::SetPropertiesTag(editableMesh, property.Spelling, core::Name("Geometry"));
+			(void)ecs::Classes::SetPropertiesTag(editableMesh, "ContentId", core::Name("Identity"));
 			return editableMesh;
 		}
 	}

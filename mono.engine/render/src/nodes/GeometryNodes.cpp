@@ -39,9 +39,9 @@ namespace engine::render {
 			SDL_GPUBuffer *indices = GraphBuffer(context.Writes[1], context, true);
 			SDL_GPUBuffer *commands = GraphBuffer(context.Writes[2], context, true);
 			if (vertices == nullptr || indices == nullptr || commands == nullptr) return false;
-			const auto *vertexDesc = Pipeline->Graph.FindResource(context.Writes[0]);
-			const auto *indexDesc = Pipeline->Graph.FindResource(context.Writes[1]);
-			const auto *commandDesc = Pipeline->Graph.FindResource(context.Writes[2]);
+			const auto *vertexDesc = Pipeline->Graph.FindResourceDesc(context.Writes[0]);
+			const auto *indexDesc = Pipeline->Graph.FindResourceDesc(context.Writes[1]);
+			const auto *commandDesc = Pipeline->Graph.FindResourceDesc(context.Writes[2]);
 			if (vertexDesc == nullptr || indexDesc == nullptr || commandDesc == nullptr) return false;
 			const TessellationCapacity capacity{
 				static_cast<uint32_t>(
@@ -241,7 +241,8 @@ namespace engine::render {
 					Result.Triangles,
 					nullptr,
 					Impl::SlotSelection::All,
-					Impl::VisibilityPass::MainCamera
+					Impl::VisibilityPass::MainCamera,
+					Pipeline->Name
 				);
 				SDL_EndGPURenderPass(pass);
 				return true;
@@ -282,8 +283,12 @@ namespace engine::render {
 				const TessellationMaterial source =
 					TessellationMaterialFor(*mesh, entry.Material, State->SlotTexture[entry.Instance]);
 				const core::Name texture = source.Texture;
-				const core::Name owner =
-					State->TextureContentOwner(texture, State->SlotContentOwner[entry.Instance]);
+				const core::Name owner = State->TextureContentOwnerWithFallback(
+					texture,
+					State->SlotContentOwner[entry.Instance],
+					State->SlotImageGraphWorld[entry.Instance],
+					State->SlotImageGraphFallbackWorld[entry.Instance]
+				);
 				SDL_GPUTexture *found = State->Textures.Find(texture, owner);
 				const TextureChoice choice = ChooseTexture(
 					found != nullptr, texture.IsValid(), State->Textures.Expecting(texture, owner)
@@ -293,8 +298,12 @@ namespace engine::render {
 																			 : State->Textures.Default();
 				const bool absent = choice == TextureChoice::Missing;
 				const auto dataMap = [&](core::Name name) {
-					const core::Name mapOwner =
-						State->TextureContentOwner(name, State->SlotContentOwner[entry.Instance]);
+					const core::Name mapOwner = State->TextureContentOwnerWithFallback(
+						name,
+						State->SlotContentOwner[entry.Instance],
+						State->SlotImageGraphWorld[entry.Instance],
+						State->SlotImageGraphFallbackWorld[entry.Instance]
+					);
 					SDL_GPUTexture *map = State->Textures.Find(name, mapOwner);
 					if (map != nullptr) return map;
 					if (name.IsValid() && !State->Textures.Expecting(name, mapOwner))
@@ -311,8 +320,11 @@ namespace engine::render {
 				// loading or is absent. `dataMap` would turn that state into a marker.
 				SDL_GPUTexture *packedPbr = State->Textures.Find(
 					State->SlotPackedPbrMap[entry.Instance],
-					State->TextureContentOwner(
-						State->SlotPackedPbrMap[entry.Instance], State->SlotContentOwner[entry.Instance]
+					State->TextureContentOwnerWithFallback(
+						State->SlotPackedPbrMap[entry.Instance],
+						State->SlotContentOwner[entry.Instance],
+						State->SlotImageGraphWorld[entry.Instance],
+						State->SlotImageGraphFallbackWorld[entry.Instance]
 					)
 				);
 				SDL_GPUSampler *sampler =
@@ -346,7 +358,30 @@ namespace engine::render {
 					 State->RefractionSampler != nullptr ? State->RefractionSampler : fallbackSampler}
 				};
 				SDL_BindGPUFragmentSamplers(pass, 0, bindings, 13);
+				const auto cloudGeneration = std::find_if(
+					State->WeatherGenerations.begin(),
+					State->WeatherGenerations.end(),
+					[this](const WeatherGpuGeneration &generation) {
+						return generation.World == Request.World && generation.Pipeline == Pipeline->Name;
+					}
+				);
+				const auto *cloudLighting = cloudGeneration != State->WeatherGenerations.end()
+												? cloudGeneration->Shadows.LightingFor(Command)
+												: nullptr;
+				const SDL_GPUTextureSamplerBinding cloudMap{
+					cloudLighting && Lighting.CloudShadow.Receiver.w != 0 && cloudGeneration->Shadows.Texture
+						? cloudGeneration->Shadows.Texture
+						: State->FallbackTexture,
+					State->OverlaySampler
+				};
+				SDL_BindGPUFragmentSamplers(pass, 15, &cloudMap, 1);
+				const SDL_GPUTextureSamplerBinding reserved[2]{
+					{State->FallbackTexture, fallbackSampler}, {State->FallbackTexture, fallbackSampler}
+				};
+				SDL_BindGPUFragmentSamplers(pass, 13, reserved, 2);
 				LightingUniforms material = Lighting;
+				if (material.CloudShadow.Receiver.w != 0)
+					material.CloudShadow = cloudLighting ? *cloudLighting : WeatherShadowLightingUniforms{};
 				const std::array<float, 4> tint = absent ? std::array<float, 4>{1, 1, 1, 1} : source.Colour;
 				material.BaseColour = glm::vec4{tint[0], tint[1], tint[2], tint[3]};
 				material.Surface = glm::vec4{
@@ -448,7 +483,8 @@ namespace engine::render {
 					Result.Triangles,
 					nullptr,
 					Impl::SlotSelection::All,
-					Impl::VisibilityPass::MainCamera
+					Impl::VisibilityPass::MainCamera,
+					Pipeline->Name
 				);
 			}
 			SDL_EndGPURenderPass(pass);
@@ -457,6 +493,8 @@ namespace engine::render {
 
 		frameNodes.Set(core::Name("gbuffer"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
+			recording.EmptyGBufferNormals = false;
+			recording.EmptyHardwareDepth = nullptr;
 			Impl *const State = recording.State;
 			FrameResult &result = recording.Result;
 			SDL_GPUCommandBuffer *const command = recording.Command;
@@ -520,6 +558,7 @@ namespace engine::render {
 				if (pass == nullptr) {
 					return pass;
 				}
+				if (!haveInstances || plainOpaque == 0) return pass;
 				State->BindPipeline(pass, State->GBufferPipeline, Impl::PipelineFamily::GBuffer);
 				SDL_SetGPUViewport(pass, &sceneViewport);
 				SDL_SetGPUScissor(pass, &sceneScissor);
@@ -545,7 +584,8 @@ namespace engine::render {
 						result.Triangles,
 						phase,
 						Impl::SlotSelection::All,
-						Impl::VisibilityPass::MainCamera
+						Impl::VisibilityPass::MainCamera,
+						Pipeline->Name
 					);
 				};
 
@@ -607,7 +647,8 @@ namespace engine::render {
 						result.Triangles,
 						nullptr,
 						Impl::SlotSelection::All,
-						Impl::VisibilityPass::MainCamera
+						Impl::VisibilityPass::MainCamera,
+						Pipeline->Name
 					);
 				}
 				SDL_EndGPURenderPass(pass);
@@ -623,6 +664,9 @@ namespace engine::render {
 					drawOpaque(gbuffer, State->InstanceIndexBuffer, nullptr);
 				}
 				SDL_EndGPURenderPass(gbuffer);
+				recording.EmptyGBufferNormals = !haveInstances || plainOpaque == 0;
+				if (recording.EmptyGBufferNormals && depthTarget.clear_depth == 1.0f)
+					recording.EmptyHardwareDepth = depthTarget.texture;
 				return true;
 			}
 
@@ -682,7 +726,8 @@ namespace engine::render {
 				result.Triangles,
 				nullptr,
 				Impl::SlotSelection::LodOnly,
-				Impl::VisibilityPass::MainCamera
+				Impl::VisibilityPass::MainCamera,
+				Pipeline->Name
 			);
 			SDL_EndGPURenderPass(latePass);
 			return true;
@@ -797,7 +842,11 @@ namespace engine::render {
 					nullptr,
 					State->SurfaceSampler,
 					0,
-					Result.Triangles
+					Result.Triangles,
+					nullptr,
+					Impl::SlotSelection::All,
+					Impl::VisibilityPass::Secondary,
+					Pipeline->Name
 				);
 			}
 			SDL_EndGPURenderPass(pass);
@@ -929,7 +978,11 @@ namespace engine::render {
 						nullptr,
 						State->OverlaySampler,
 						0,
-						Result.Triangles
+						Result.Triangles,
+						nullptr,
+						Impl::SlotSelection::All,
+						Impl::VisibilityPass::Secondary,
+						Pipeline->Name
 					);
 				}
 				if (particleLayers || ribbonLayers) {
@@ -1099,10 +1152,10 @@ namespace engine::render {
 			const uint32_t particleCount = recording.ParticleCount;
 			const uint32_t ribbonCount = recording.RibbonCount;
 			const scene::CameraMatrices &matrices = recording.Matrices;
-			const View::GroundGrid &groundGrid = recording.Request.Source->Grid;
 			SDL_GPUColorTargetInfo &colourTarget = recording.ColourTarget;
 			SDL_GPUDepthStencilTargetInfo &depthTarget = recording.DepthTarget;
-			const bool drawInterface = recording.DrawInterface;
+			const bool drawInterface =
+				recording.DrawInterface && gameInterfaceHook != nullptr && gameInterfaceHook->AffectsScene();
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
 										) { recording.EnterNamedPass(name, recordedCommand); };
@@ -1121,12 +1174,15 @@ namespace engine::render {
 								   ) { return recording.DrawImage(source, target, load, reverseSpectrum); };
 
 			ENGINE_PROFILE_CAT("transparent pass", core::ProfileCategory::Render);
-			// Entered unconditionally, and that is the honest reading rather
-			// than a convenience: the stage clears colour and depth, so a frame
-			// with nothing in it still ran this pass - the background is what it
-			// drew. `Validate` sees the same thing, because the stage's writes
-			// are marked `Clear`.
-			enterNamedPass(context.Name);
+			// Publish the incoming scene even when no transparent hosts draw.
+
+			if (!recording.Activity.Transparent) {
+				if (context.Reads.empty() || context.Writes.empty()) return false;
+				State->RefractionTexture = nullptr;
+				State->RefractionSampler = nullptr;
+				State->RefractionGuardTexture = nullptr;
+				return recording.PublishIdentity(context, context.Reads.front(), context.Writes.front());
+			}
 
 			Impl::NamedTexture source;
 			Impl::NamedTexture target;
@@ -1140,6 +1196,25 @@ namespace engine::render {
 				}
 			}
 			State->RefractionGuardTexture = nullptr;
+			// A grid-only view publishes colour and grid together, preserving the
+			// incoming image for branches and captures without an extra scene copy.
+			const bool gridOnly = recording.Activity.Grid && plainTransparent == 0 && !drawInterface &&
+								  particleCount == 0 && ribbonCount == 0;
+			if (gridOnly && recording.ComposeGroundGrid(context.Name, source, target)) {
+				State->RefractionTexture = nullptr;
+				State->RefractionSampler = nullptr;
+				recording.StageHistoryWrites(context, command);
+				return true;
+			}
+			const bool exactCopy = source.IsValid() && target.IsValid() && source.Format == target.Format &&
+								   source.Width == target.Width && source.Height == target.Height;
+			if (!exactCopy || source.Texture == target.Texture) enterNamedPass(context.Name);
+			const bool published = exactCopy ? recording.CopyImage(context.Name, source, target)
+											 : drawImage(source, target, SDL_GPU_LOADOP_CLEAR);
+			if (!published) {
+				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
+				return false;
+			}
 			bool hasTransmission = false;
 			for (uint32_t index = 0; index < plainTransparent; ++index) {
 				const uint32_t slot = sceneCount + static_cast<uint32_t>(opaqueCount) + index;
@@ -1192,7 +1267,8 @@ namespace engine::render {
 						result.Triangles,
 						nullptr,
 						Impl::SlotSelection::All,
-						Impl::VisibilityPass::Secondary
+						Impl::VisibilityPass::Secondary,
+						Pipeline->Name
 					);
 					SDL_EndGPURenderPass(guard);
 					State->RefractionGuardTexture = recording.Pbr->RefractionGuard;
@@ -1201,8 +1277,14 @@ namespace engine::render {
 					);
 				}
 			}
-			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
-				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
+
+			const auto &grid = recording.Request.Source->Grid;
+			const bool drawGrid = grid.Enabled && grid.Strength != 0.0f;
+			if (!drawGrid && plainTransparent == 0 && !drawInterface && particleCount == 0 &&
+				ribbonCount == 0) {
+				State->RefractionTexture = nullptr;
+				State->RefractionSampler = nullptr;
+				State->RefractionGuardTexture = nullptr;
 				return true;
 			}
 			const bool hdr = target.Format == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
@@ -1213,8 +1295,21 @@ namespace engine::render {
 			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			colourTarget.store_op = SDL_GPU_STOREOP_STORE;
 			colourTarget.cycle = false;
+			// Empty mirror and portal overlays may skip their passes entirely.
+			// Load opaque depth here instead of inheriting their attachment state.
+			depthTarget.load_op = SDL_GPU_LOADOP_LOAD;
+			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
+			depthTarget.cycle = false;
 
+			recording.InvalidateBackgroundTexture(depthTarget.texture);
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
+			if (pass == nullptr) {
+				State->RefractionTexture = nullptr;
+				State->RefractionSampler = nullptr;
+				State->RefractionGuardTexture = nullptr;
+				return false;
+			}
+			core::Metrics::Count("render.transparent.raster_passes", 1);
 			// **The light set, pushed once for the whole pass.** Uniform state
 			// on a command buffer persists until it is replaced, so one push
 			// before the draws serves every one of them - which is the whole
@@ -1250,54 +1345,10 @@ namespace engine::render {
 			const SDL_Rect scissor{0, 0, static_cast<int>(sceneWidth), static_cast<int>(sceneHeight)};
 			SDL_SetGPUScissor(pass, &scissor);
 
-			// **The ground grid, first in this pass and nowhere else.** It is
-			// here rather than in a node of its own because a node would need
-			// the depth as a *sampler* and this pass already has it as an
-			// attachment - so the hardware does the occluding and the grid
-			// costs one triangle. First, so a transparent pane blends over it
-			// the way it blends over the floor.
-			//
-			// Off unless a view asked, which is the studio asking for an edited
-			// world. A client pays one branch.
-			if (groundGrid.Enabled && State->GridPipeline != nullptr) {
-				ENGINE_PROFILE_CAT("ground grid", core::ProfileCategory::Render);
+			// The grid shares opaque depth and precedes every transparent draw.
+			recording.DrawGroundGrid(pass, matrices.ViewProjection, visibilityCameraFrame, worldTarget);
 
-				GridUniforms gridUniforms;
-				gridUniforms.ViewProjection = matrices.ViewProjection;
-				gridUniforms.InverseViewProjection = glm::inverse(matrices.ViewProjection);
-				gridUniforms.Eye = glm::vec4{
-					visibilityCameraFrame.Position.X,
-					visibilityCameraFrame.Position.Y,
-					visibilityCameraFrame.Position.Z,
-					0.0f
-				};
-				gridUniforms.Params =
-					glm::vec4{groundGrid.Step, groundGrid.Major, groundGrid.Reach, groundGrid.Strength};
-				gridUniforms.Offset = glm::vec4{groundGrid.Offset.X, groundGrid.Offset.Z, 0.0f, 0.0f};
-				gridUniforms.Colour = glm::vec4{
-					groundGrid.Colour.R, groundGrid.Colour.G, groundGrid.Colour.B, groundGrid.Alpha
-				};
-				gridUniforms.AxisX = glm::vec4{
-					groundGrid.AxisX.R, groundGrid.AxisX.G, groundGrid.AxisX.B, groundGrid.AxisAlpha
-				};
-				gridUniforms.AxisZ = glm::vec4{
-					groundGrid.AxisZ.R, groundGrid.AxisZ.G, groundGrid.AxisZ.B, groundGrid.AxisAlpha
-				};
-
-				SDL_BindGPUGraphicsPipeline(pass, State->GridPipeline);
-				SDL_PushGPUFragmentUniformData(command, 0, &gridUniforms, sizeof(gridUniforms));
-				SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
-				result.DrawCalls++;
-
-				// **Bound directly rather than through `BindPipeline`, so the
-				// tracked one is cleared by hand.** `DrawSlots` reads
-				// `ActivePipeline` to know what to return to after a shader
-				// variant, and leaving the grid there would send an instance
-				// draw back to a fullscreen triangle's pipeline.
-				State->ActivePipeline = nullptr;
-			}
-
-			if (haveInstances || drawInterface || particleCount > 0 || ribbonCount > 0) {
+			if (plainTransparent > 0 || drawInterface || particleCount > 0 || ribbonCount > 0) {
 				State->BindPipeline(
 					pass,
 					hdr ? State->HdrOpaquePipeline : State->OpaquePipeline,
@@ -1392,7 +1443,8 @@ namespace engine::render {
 							result.Triangles,
 							nullptr,
 							Impl::SlotSelection::All,
-							Impl::VisibilityPass::MainCamera
+							Impl::VisibilityPass::MainCamera,
+							Pipeline->Name
 						);
 					}
 				}
@@ -1468,6 +1520,7 @@ namespace engine::render {
 			// making the deferred lighting source contain the glass itself.
 			if (plainTransparent > 0 && recording.Pbr != nullptr &&
 				State->GBufferTransparentPipeline != nullptr) {
+				recording.EmptyGBufferNormals = false;
 				Impl::PbrSlot &pbr = *recording.Pbr;
 				SDL_GPUColorTargetInfo metadata[8]{};
 				SDL_GPUTexture *const textures[] = {
@@ -1517,7 +1570,11 @@ namespace engine::render {
 							nullptr,
 							State->SurfaceSampler,
 							0,
-							result.Triangles
+							result.Triangles,
+							nullptr,
+							Impl::SlotSelection::All,
+							Impl::VisibilityPass::Secondary,
+							Pipeline->Name
 						);
 						SDL_EndGPURenderPass(metadataPass);
 					}

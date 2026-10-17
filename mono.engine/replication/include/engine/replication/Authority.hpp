@@ -19,6 +19,10 @@
 #include <unordered_set>
 #include <vector>
 
+namespace engine::ecs {
+	class Schema;
+}
+
 namespace engine::replication {
 	class ReplicationObservations;
 
@@ -217,6 +221,13 @@ namespace engine::replication {
 		// business receiving - a server-side AI's scratch state, a pending bus
 		// request - and a default of "everything" makes leaking one the
 		// consequence of forgetting rather than of deciding.
+		//
+		// Script-defined schemas also opt in through the `replicated` component
+		// tag, including schemas declared after clients join. Publish discovers
+		// them as observed rows and reliably sends bounded field definitions
+		// before values. Interest still controls which rows and definitions cross.
+		// Removing the tag retires automatic replication; an explicit declaration
+		// here takes precedence over the tag.
 		//
 		// @param component The component's registered name.
 		// @param detection How changes are detected.
@@ -627,6 +638,11 @@ namespace engine::replication {
 		// @param client The client to ask about.
 		// @return Its status, or an empty record for an unknown handle.
 		ClientStatus StatusOf(ClientId client) const;
+		// Whether any admitted client needs an initial or continuing snapshot stream.
+		bool HasPendingSnapshots() const;
+		// Applies the same configured interest selector used by component publication.
+		// For entity-scoped copied application state; neither selector nor store is modified.
+		bool Interested(ClientId client, ecs::Entity entity, const ecs::Store &store) const;
 
 		// What the last `Publish` did.
 		//
@@ -752,6 +768,9 @@ namespace engine::replication {
 		// One entity's value for one component, from the sender's side.
 		//
 		struct Outstanding {
+			// Initial state keeps priority until an admitted value is acknowledged.
+			bool Initial = false;
+
 			uint64_t SentAt = 0;
 
 			uint64_t WaitingSince = 0;
@@ -876,10 +895,18 @@ namespace engine::replication {
 			bool Restore = false;
 		};
 
+		struct ValueEdit {
+			size_t Slot = 0;
+			uint64_t Entity = 0;
+			uint64_t WaitingSince = 0;
+		};
+
 		// What one outgoing message moved, so a refusal can move it back.
 		//
 		struct Carried {
 			size_t SnapshotOffset = NOWHERE;
+			size_t SchemaIndex = NOWHERE;
+			size_t SchemaOffset = 0;
 
 			// Which blob that offset is into. A refusal that rewound the wrong
 			// cursor is the `applied=184 refused=17865` failure with an extra
@@ -890,6 +917,8 @@ namespace engine::replication {
 			uint32_t Count = 0;
 
 			bool Values = false;
+			uint32_t ValueFirst = 0;
+			uint32_t ValueCount = 0;
 
 			// Whether this message was the tick's audit. A refused one leaves
 			// the client with nothing to answer, so the record of what it owes
@@ -939,6 +968,19 @@ namespace engine::replication {
 			// place ordering could live - see `SetPreface`.
 			std::array<Staged, STAGES> Snapshots;
 
+			// Component definition queued for reliable transfer to this client.
+			struct PendingSchema {
+				// Registered component described by this schema entry.
+				core::Name Component;
+				// Encoded definition and this client's stream cursor.
+				Staged Definition;
+			};
+			std::vector<PendingSchema> Schemas;
+			std::unordered_set<core::Name> KnownSchemas;
+			std::unordered_set<core::Name> ActiveSchemas;
+			size_t SchemaIndex = 0;
+			uint64_t SchemaRevision = 0;
+
 			std::unordered_set<uint64_t> Known;
 
 			uint64_t Applied = 0;
@@ -970,6 +1012,8 @@ namespace engine::replication {
 			std::vector<Carried> Carried_;
 
 			std::vector<Edit> Edits;
+			std::vector<ValueEdit> ValueEdits;
+			bool TransportRefusedValues = false;
 
 			// The audit this client owes an answer to, and the tick the last
 			// one went out on.
@@ -1003,7 +1047,8 @@ namespace engine::replication {
 			// captures exactly these into the same staged blob a preface uses.
 			// See `Statistics::Oversized`.
 			std::vector<uint64_t> Oversize;
-			// Encoded resource values captured into the current bulk stream, by component slot.
+			// Reliable resource overlays already queued, by encoded value. The
+			// resource path is checked every tick, so unchanged bytes need no retry.
 			std::vector<std::optional<uint64_t>> OversizeResourceHashes;
 		};
 
@@ -1036,6 +1081,7 @@ namespace engine::replication {
 			size_t BearingSlot = NOWHERE;
 
 			float Hint = 0.0f;
+			bool Initial = false;
 		};
 
 		// How much of a delta a packing pass got onto the wire.
@@ -1091,6 +1137,8 @@ namespace engine::replication {
 			// tick anyway, because a slot is allowed to resolve later than the
 			// authority that declared it.
 			const ecs::TypeDescriptor *Descriptor = nullptr;
+			const ecs::Schema *Description = nullptr;
+			std::vector<std::byte> Definition;
 
 			// Whether a row of this component may go into a delta at all: it is
 			// registered, it has a serialisation, and its widest stored value
@@ -1391,11 +1439,12 @@ namespace engine::replication {
 
 		// Bytes of a join still owed to a client, across both blobs.
 		static size_t Owed(const Client &client);
+		void DiscoverSchemas();
+		void StageSchemas(Client &client, const ecs::Store &store, std::span<const ecs::Entity> visible);
+		void StreamSchemas(Client &client);
 
 		// Saves `entities` and the values a client would decode for them.
 		//
-		// Overlays omit resources unless a complete visible-owner set is supplied.
-		// The optional hash span records the resources actually captured.
 		// Empty means the world could not be written at all: a `Save` of a store
 		// with nothing in it still writes a header.
 		std::vector<std::byte> Capture(
@@ -1501,6 +1550,10 @@ namespace engine::replication {
 
 		std::vector<ChangeDetection> Detection;
 		std::vector<bool> Resources;
+		std::vector<bool> Automatic;
+		std::vector<bool> Enabled;
+		uint64_t ObservedSchemaRevision = 0;
+		uint64_t SchemaRevision = 1;
 
 		// Per slot, the tag whose presence suppresses that component's deltas for
 		// one entity, or an invalid name for none. See `SuppressWhenTagged`.

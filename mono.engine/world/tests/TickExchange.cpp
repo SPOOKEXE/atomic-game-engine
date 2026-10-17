@@ -1,4 +1,5 @@
 #include <engine/core/Bytes.hpp>
+#include <engine/core/Clock.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <vector>
 
 TEST_SUITE_ID("engine.world.tickexchange")
@@ -171,6 +173,24 @@ namespace {
 			world.ResourceMutable<PhaseTrace>()->Integrated++;
 		});
 	}
+
+	struct StageAdmissionTrace {
+		std::thread::id Driver;
+		bool InputOnDriver = true;
+		bool SimulationOnDriver = true;
+		bool CollectOnDriver = true;
+	};
+	void CollectAdmission(ecs::Store &store, std::vector<world::TickExchangeRequest> &out) {
+		auto *trace = store.ResourceMutable<StageAdmissionTrace>();
+		trace->CollectOnDriver = std::this_thread::get_id() == trace->Driver;
+		CollectPhase(store, out);
+	}
+	void SpendAdmissionWork() {
+		// A bounded busy interval gives admission a known lower bound without
+		// putting a blocking wait in a world system or asserting a machine's speed.
+		const uint64_t began = core::Clock::Nanoseconds();
+		while (core::Clock::Nanoseconds() - began < 2'000'000) {}
+	}
 }
 TEST_CASE(
 	"phase exchange joins input before serving and catch-up round before next input", "[world][tick-exchange]"
@@ -282,6 +302,84 @@ TEST_CASE("parallel endpoint exchange reports each physics worker stage once", "
 		if (serial.Names[index] == "physics.profile-step") {
 			CHECK_FALSE(serial.Reported[index]);
 		}
+	}
+}
+
+TEST_CASE(
+	"exchange admission separates costly systems from cold bookkeeping stages", "[world][tick-exchange]"
+) {
+	Pool pool{4};
+	if (parallel::Jobs::PinnedWorkerCount() < 2) {
+		SUCCEED("this platform or process affinity exposes fewer than two pinned workers");
+		return;
+	}
+	ecs::Components::Register<PhaseTrace>("test.TickExchangePhaseTrace");
+	ecs::Components::Register<StageAdmissionTrace>("test.TickExchangeStageAdmission");
+	REQUIRE(
+		world::RegisterTickExchangeChannel({"phase.admission", CollectAdmission, ServePhase, ApplyPhase})
+	);
+	world::UniverseSettings configuration;
+	configuration.WorldParallelFloorMilliseconds = 0.5f;
+	world::Universe worlds(configuration);
+	world::WorldSettings settings;
+	settings.Name = core::Name("phase-source");
+	const auto source = worlds.Create(settings);
+	settings.Name = core::Name("phase-destination");
+	const auto destination = worlds.Create(settings);
+	for (const auto id : {source, destination}) {
+		worlds.Enter(id, [](ecs::Store &store, ecs::Scheduler &systems) {
+			store.SetResource(PhaseTrace{});
+			store.SetResource(StageAdmissionTrace{.Driver = std::this_thread::get_id()});
+			REQUIRE(world::OpenTickExchange(store, "phase.admission", 303));
+			systems.Add("phase.admission-input", ecs::Phase::Input, [](ecs::Store &store) {
+				auto *trace = store.ResourceMutable<StageAdmissionTrace>();
+				trace->InputOnDriver = std::this_thread::get_id() == trace->Driver;
+				store.ResourceMutable<PhaseTrace>()->Input = store.Time().Tick;
+				SpendAdmissionWork();
+			});
+			systems.Add("phase.admission-simulation", ecs::Phase::Simulation, [](ecs::Store &store) {
+				auto *trace = store.ResourceMutable<StageAdmissionTrace>();
+				trace->SimulationOnDriver = std::this_thread::get_id() == trace->Driver;
+				auto *phase = store.ResourceMutable<PhaseTrace>();
+				phase->Integrated += phase->Observed;
+				SpendAdmissionWork();
+			});
+		});
+	}
+	for (const bool cold : {true, false}) {
+		REQUIRE(worlds.BeginTickExchangeFrame(1.0f / 60) == 1);
+		REQUIRE(worlds.BeginTickExchangeRound());
+		std::vector<world::TickExchangeRequest> requests;
+		std::vector<world::TickExchangeReply> replies;
+		REQUIRE(worlds.CollectTickExchangeRequests(requests));
+		REQUIRE(worlds.ServeTickExchangeRequests(requests, replies));
+		REQUIRE(worlds.ApplyTickExchangeReplies(replies));
+		const float sourceBefore = worlds.StatisticsOf(source).LastTickMilliseconds;
+		const float destinationBefore = worlds.StatisticsOf(destination).LastTickMilliseconds;
+		REQUIRE(worlds.AdvanceTickExchangeRoundToPhysics());
+		CHECK(worlds.StatisticsOf(source).LastTickMilliseconds - sourceBefore >= 1.9f);
+		CHECK(worlds.StatisticsOf(destination).LastTickMilliseconds - destinationBefore >= 1.9f);
+		REQUIRE(worlds.FinishTickExchangeRound());
+		REQUIRE(worlds.EndTickExchangeFrame());
+		for (const auto id : {source, destination}) {
+			worlds.Enter(id, [&](ecs::Store &store) {
+				const auto *trace = store.Resource<StageAdmissionTrace>();
+				CHECK(trace->InputOnDriver == cold);
+				CHECK(trace->SimulationOnDriver == cold);
+				// The first collect stays inline even after input has spent more
+				// than the floor. Its estimate belongs to collect, not input.
+				if (cold) CHECK(trace->CollectOnDriver);
+			});
+		}
+	}
+	for (const auto id : {source, destination}) {
+		worlds.Enter(id, [](ecs::Store &store) {
+			const auto *trace = store.Resource<PhaseTrace>();
+			CHECK(store.Time().Tick == 2);
+			CHECK(trace->Observed == 2);
+			CHECK(trace->Integrated == 3);
+			CHECK(trace->Arrivals == 2);
+		});
 	}
 }
 TEST_CASE(

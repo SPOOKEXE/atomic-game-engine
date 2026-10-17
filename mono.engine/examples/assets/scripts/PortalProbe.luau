@@ -117,9 +117,12 @@ block("InTheSeam", CFrame.new(Vector3.new(1.5, 3.0, -0.125)), Vector3.new(1.5, 4
 -- **Two stills rather than a moving camera**, because a still is what a bug
 -- report contains. `PROBE_VIEW=exit` looks back through B; anything else looks
 -- at A from room A, which is the entry side the complaint is about.
-local view = Instance.new("Camera")
-view.Name = "Viewer"
-view.FieldOfView = 70
+local view = assert(
+	assert(game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")):FindFirstChild("DemoCamera"),
+	"the demo camera companion is missing"
+)
+view:SetAttribute("Name", "Viewer")
+view:SetAttribute("FieldOfView", 70)
 
 -- **A line this file rewrites rather than a global.** `_G` is readonly in the
 -- script sandbox, so nothing outside a scene can set one - the capture scripts
@@ -127,12 +130,9 @@ view.FieldOfView = 70
 -- actually works from a shell.
 local VIEW = ""
 if VIEW == "exit" then
-	view.CFrame = CFrame.new(Vector3.new(114, 5, 0)) * CFrame.Angles(0, math.pi / 2, 0)
+	view:SetAttribute("CFrame", CFrame.new(Vector3.new(114, 5, 0)) * CFrame.Angles(0, math.pi / 2, 0))
 else
-	view.CFrame = CFrame.new(Vector3.new(0, 5, -14)) * CFrame.Angles(0, math.pi, 0)
+	view:SetAttribute("CFrame", CFrame.new(Vector3.new(0, 5, -14)) * CFrame.Angles(0, math.pi, 0))
 end
-
-view.Parent = WORLD
-WORLD.CurrentCamera = view
 
 print("portal probe: A at origin, B at +100 turned a quarter; orange in A, cyan in B, yellow in the seam")

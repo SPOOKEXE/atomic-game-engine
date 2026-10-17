@@ -31,6 +31,7 @@
 #include <functional>
 #include <span>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace engine::replication {
@@ -305,8 +306,15 @@ namespace engine::replication {
 		}
 
 	  private:
+		ApplyStatus Apply(const SchemaChunk &chunk);
+		core::Name SchemaComponent;
+		std::vector<std::byte> SchemaBytes;
+		std::vector<bool> SchemaReceived;
+		size_t SchemaOutstanding = 0;
 		ApplyStatus Apply(ecs::Store &store, const SnapshotChunk &chunk);
 		ApplyStatus Apply(ecs::Store &store, const replication::Delta &delta);
+		uint64_t ResourceTick(core::Name component) const;
+		void RememberResource(core::Name component, uint64_t tick);
 		ApplyStatus Apply(ecs::Store &store, const replication::Structure &structure);
 		ApplyStatus Check(const ecs::Store &store, const replication::GroupSignatures &signatures);
 
@@ -438,6 +446,9 @@ namespace engine::replication {
 		ReplicationObservations *Observations = nullptr;
 		uint64_t ObservationRound = 0;
 		uint64_t Applied_ = 0;
+		// Resources can arrive through reliable snapshots and unreliable deltas.
+		// Their accepted ticks prevent either channel restoring an older value.
+		std::vector<std::pair<core::Name, uint64_t>> ResourceTicks;
 		uint64_t ConsumedInput_ = 0;
 		bool Joined_ = false;
 		bool Prefaced_ = false;

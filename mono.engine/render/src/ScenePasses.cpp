@@ -17,8 +17,11 @@
 #include "GraphHistory.hpp"
 #include "SsaoSettings.hpp"
 #include "ViewRecording.hpp"
+#include "WeatherFallback.hpp"
+#include "WeatherShadows.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 
 #include <algorithm>
@@ -45,18 +48,7 @@ namespace engine::render {
 
 	const graph::Node *ViewRecording::GraphNode(core::Name kind) const {
 		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
-
-		for (size_t index = 0; index < selectedPipeline->Graph.Count(); index++) {
-			const graph::Node *node =
-				selectedPipeline->Graph.Find(graph::NodeId{static_cast<uint32_t>(index + 1)});
-			if (node != nullptr && node->Enabled && node->Kind == kind) {
-				return node;
-			}
-		}
-		if (kind == core::Name("mirror-capture") || kind == core::Name("portal-capture")) {
-			return GraphNode(core::Name("surface-capture"));
-		}
-		return nullptr;
+		return selectedPipeline->NodeLookup.Enabled(selectedPipeline->Graph, kind);
 	}
 
 	bool ViewRecording::GraphEnabled(core::Name kind) const {
@@ -549,6 +541,22 @@ namespace engine::render {
 			DrawCamera.RenderFeatures.Enable & scene::ALL_RENDER_FEATURES,
 			DrawCamera.RenderFeatures.Disable & scene::ALL_RENDER_FEATURES,
 		};
+		const auto &environment = worldLighting.EnvironmentState;
+		if (environment.HasWeatherCompute && environment.Weather.Enabled &&
+			environment.Weather.ShadowsEnabled && GraphEnabled(core::Name("weather-shadow-map"))) {
+			// A later world producer may publish the map after these view controls were built.
+			lighting.CloudShadow.Receiver.w = -1;
+			const auto generation = std::find_if(
+				State->WeatherGenerations.begin(),
+				State->WeatherGenerations.end(),
+				[this](const WeatherGpuGeneration &candidate) {
+					return candidate.World == Request.World && candidate.Pipeline == Pipeline->Name;
+				}
+			);
+			if (generation != State->WeatherGenerations.end())
+				if (const auto *cloudShadow = generation->Shadows.LightingFor(Command))
+					lighting.CloudShadow = *cloudShadow;
+		}
 		return lighting;
 	}
 
@@ -573,7 +581,8 @@ namespace engine::render {
 		const SDL_GPUViewport *viewport,
 		const LightUniforms &passLights,
 		const SDL_FColor *clearColour,
-		WorldColourTarget target
+		WorldColourTarget target,
+		bool storeDepth
 	) {
 		Impl *const State = this->State;
 		SDL_GPUCommandBuffer *const command = Command;
@@ -595,7 +604,7 @@ namespace engine::render {
 		depthInfo.texture = depth;
 		depthInfo.clear_depth = 1.0f;
 		depthInfo.load_op = SDL_GPU_LOADOP_CLEAR;
-		depthInfo.store_op = SDL_GPU_STOREOP_DONT_CARE;
+		depthInfo.store_op = storeDepth ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_DONT_CARE;
 		depthInfo.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
 		depthInfo.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
 		depthInfo.cycle = cycle;
@@ -641,6 +650,113 @@ namespace engine::render {
 		return pass;
 	}
 
+	bool ViewRecording::ComposeGroundGrid(
+		core::Name name, const Impl::NamedTexture &source, const Impl::NamedTexture &target
+	) {
+		if (!source.IsValid() || !target.IsValid() || source.Texture == target.Texture ||
+			source.Format != target.Format || source.Width != target.Width ||
+			source.Height != target.Height || target.Width != SceneWidth || target.Height != SceneHeight ||
+			DepthTarget.texture == nullptr || DepthTarget.texture == source.Texture ||
+			DepthTarget.texture == target.Texture)
+			return false;
+		// UNORM depth quantizes the written fragment depth before the hardware
+		// comparison. Keep that path until an equally precise manual test exists.
+		if (State->DepthFormat != SDL_GPU_TEXTUREFORMAT_D32_FLOAT) return false;
+		uint32_t depthWidth = State->DepthWidth;
+		uint32_t depthHeight = State->DepthHeight;
+		SDL_GPUTexture *depth = State->DepthTexture;
+		if (Offscreen) {
+			if (Request.TargetSlot >= State->SceneSlots.size()) return false;
+			const auto &slot = State->SceneSlots[Request.TargetSlot];
+			depthWidth = slot.DepthWidth;
+			depthHeight = slot.DepthHeight;
+			depth = slot.Depth;
+		}
+		if (depth != DepthTarget.texture || depthWidth < target.Width || depthHeight < target.Height)
+			return false;
+		// Normalized attachments clamp source colour and blend factors before
+		// blending. Keep their hardware path for authored values outside 0..1.
+		if (target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT) return false;
+		auto *pipeline = State->HdrGridCompositePipeline;
+		if (pipeline == nullptr || !State->EnsureSurfaceSampler()) return false;
+		const auto &grid = Request.Source->Grid;
+		if (!grid.Enabled || grid.Strength == 0.0f) return false;
+		GridUniforms uniforms;
+		uniforms.ViewProjection = Matrices.ViewProjection;
+		uniforms.InverseViewProjection = glm::inverse(Matrices.ViewProjection);
+		const auto &eye = Request.VisibilityCameraFrame.Position;
+		uniforms.Eye = {eye.X, eye.Y, eye.Z, 0};
+		uniforms.Params = {grid.Step, grid.Major, grid.Reach, grid.Strength};
+		uniforms.Offset = {grid.Offset.X, grid.Offset.Z, 0, 0};
+		uniforms.Colour = {grid.Colour.R, grid.Colour.G, grid.Colour.B, grid.Alpha};
+		uniforms.AxisX = {grid.AxisX.R, grid.AxisX.G, grid.AxisX.B, grid.AxisAlpha};
+		uniforms.AxisZ = {grid.AxisZ.R, grid.AxisZ.G, grid.AxisZ.B, grid.AxisAlpha};
+		const std::array bindings{
+			SDL_GPUTextureSamplerBinding{source.Texture, State->SurfaceSampler},
+			SDL_GPUTextureSamplerBinding{DepthTarget.texture, State->SurfaceSampler},
+		};
+		EnterNamedPass(name);
+		SDL_GPUColorTargetInfo attachment{};
+		attachment.texture = target.Texture;
+		attachment.load_op = SDL_GPU_LOADOP_DONT_CARE;
+		attachment.store_op = SDL_GPU_STOREOP_STORE;
+		attachment.cycle = true;
+		auto *pass = SDL_BeginGPURenderPass(Command, &attachment, 1, nullptr);
+		if (pass == nullptr) return false;
+		SDL_BindGPUGraphicsPipeline(pass, pipeline);
+		SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(), static_cast<uint32_t>(bindings.size()));
+		SDL_PushGPUFragmentUniformData(Command, 0, &uniforms, sizeof(uniforms));
+		const SDL_GPUViewport viewport{
+			0, 0, static_cast<float>(target.Width), static_cast<float>(target.Height), 0, 1
+		};
+		const SDL_Rect scissor{0, 0, static_cast<int>(target.Width), static_cast<int>(target.Height)};
+		SDL_SetGPUViewport(pass, &viewport);
+		SDL_SetGPUScissor(pass, &scissor);
+		SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+		SDL_EndGPURenderPass(pass);
+		++Result.DrawCalls;
+		State->ActivePipeline = nullptr;
+		core::Metrics::Count("render.grid_composite.commands", 1);
+		core::Metrics::Count("render.transparent.raster_passes", 1);
+		core::Metrics::Count("render.grid_composite.pixels", uint64_t(target.Width) * target.Height);
+		const uint64_t colourBytes =
+			SDL_CalculateGPUTextureFormatSize(target.Format, target.Width, target.Height, 1);
+		// Logical input payload, not a measurement of device memory traffic.
+		core::Metrics::Count(
+			"render.grid_composite.input_bytes", colourBytes + uint64_t(target.Width) * target.Height * 4
+		);
+		core::Metrics::Count("render.grid_composite.write_bytes", colourBytes);
+		return true;
+	}
+
+	void ViewRecording::DrawGroundGrid(
+		SDL_GPURenderPass *pass,
+		const glm::mat4 &viewProjection,
+		const core::CFrame &cameraFrame,
+		WorldColourTarget target
+	) {
+		const auto &grid = Request.Source->Grid;
+		if (!grid.Enabled || grid.Strength == 0.0f) return;
+		auto *pipeline = target == WorldColourTarget::Hdr ? State->HdrGridPipeline : State->GridPipeline;
+		if (pipeline == nullptr) return;
+		ENGINE_PROFILE_CAT("ground grid", core::ProfileCategory::Render);
+		GridUniforms uniforms;
+		uniforms.ViewProjection = viewProjection;
+		uniforms.InverseViewProjection = glm::inverse(viewProjection);
+		uniforms.Eye = {cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 0};
+		uniforms.Params = {grid.Step, grid.Major, grid.Reach, grid.Strength};
+		uniforms.Offset = {grid.Offset.X, grid.Offset.Z, 0, 0};
+		uniforms.Colour = {grid.Colour.R, grid.Colour.G, grid.Colour.B, grid.Alpha};
+		uniforms.AxisX = {grid.AxisX.R, grid.AxisX.G, grid.AxisX.B, grid.AxisAlpha};
+		uniforms.AxisZ = {grid.AxisZ.R, grid.AxisZ.G, grid.AxisZ.B, grid.AxisAlpha};
+		SDL_BindGPUGraphicsPipeline(pass, pipeline);
+		SDL_PushGPUFragmentUniformData(Command, 0, &uniforms, sizeof(uniforms));
+		SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+		++Result.DrawCalls;
+		// Fullscreen state must not become the pipeline DrawSlots restores after a material variant.
+		State->ActivePipeline = nullptr;
+	}
+
 	void ViewRecording::DrawWorldInto(
 		SDL_GPURenderPass *pass, const LightingUniforms &plainLighting, uint32_t filter, bool omitCharacters
 	) {
@@ -664,7 +780,9 @@ namespace engine::render {
 				filter,
 				result.Triangles,
 				nullptr,
-				omitCharacters ? Impl::SlotSelection::CharacterFree : Impl::SlotSelection::All
+				omitCharacters ? Impl::SlotSelection::CharacterFree : Impl::SlotSelection::All,
+				Impl::VisibilityPass::Secondary,
+				Pipeline->Name
 			);
 		}
 	}
@@ -715,7 +833,9 @@ namespace engine::render {
 			filter,
 			result.Triangles,
 			nullptr,
-			omitCharacters ? Impl::SlotSelection::CharacterFree : Impl::SlotSelection::All
+			omitCharacters ? Impl::SlotSelection::CharacterFree : Impl::SlotSelection::All,
+			Impl::VisibilityPass::Secondary,
+			Pipeline->Name
 		);
 	}
 
@@ -732,7 +852,8 @@ namespace engine::render {
 		const void *rawUniforms,
 		size_t rawUniformBytes,
 		const BeamUniforms *passBeams,
-		SDL_GPUBuffer *fragmentStorage
+		SDL_GPUBuffer *fragmentStorage,
+		const WeatherShadowLightingUniforms *weatherShadows
 	) {
 		FrameResult &result = Result;
 		SDL_GPUCommandBuffer *const command = Command;
@@ -761,6 +882,9 @@ namespace engine::render {
 		if (passBeams != nullptr) {
 			SDL_PushGPUFragmentUniformData(command, 2, passBeams, sizeof(*passBeams));
 		}
+		if (weatherShadows != nullptr) {
+			SDL_PushGPUFragmentUniformData(command, 3, weatherShadows, sizeof(*weatherShadows));
+		}
 		const SDL_GPUViewport viewport{
 			0.0f, 0.0f, static_cast<float>(passWidth), static_cast<float>(passHeight), 0.0f, 1.0f
 		};
@@ -774,6 +898,22 @@ namespace engine::render {
 
 	Renderer::Impl::NamedTexture ViewRecording::FixedTexture(core::Name resource, size_t slot) const {
 		Impl *const State = this->State;
+		if (resource == core::Name("weather-cloud-history") ||
+			resource == core::Name("weather-depth-history")) {
+			for (const auto &target : State->WeatherTemporalTargets) {
+				if (target.Slot != slot || target.World != Request.World || !target.History.Ready ||
+					(Pipeline && target.Pipeline != Pipeline->Name))
+					continue;
+				return {
+					resource == core::Name("weather-cloud-history") ? target.History.Clouds
+																	: target.History.Depth,
+					target.History.Width,
+					target.History.Height,
+					SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT
+				};
+			}
+			return {};
+		}
 		const size_t targetSlot = Request.TargetSlot;
 		SDL_GPUTexture *const viewTarget = ViewTarget;
 		const uint32_t sceneWidth = SceneWidth;
@@ -1043,9 +1183,20 @@ namespace engine::render {
 		const uint64_t world = Request.World;
 
 		SDL_GPUCommandBuffer *const selectedCommand = readCommand != nullptr ? readCommand : Command;
-		const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+		const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 		if (desc == nullptr) {
 			return Impl::NamedTexture{};
+		}
+		if (selectedSlot == Request.TargetSlot && resource.Value <= ForwardedTextures.size()) {
+			auto &forwarded = ForwardedTextures[resource.Value - 1];
+			if (make)
+				forwarded = {};
+			else if (forwarded.IsValid())
+				return forwarded;
+		} else if (!make && selectedSlot < State->SceneSlots.size()) {
+			const auto forwarded =
+				State->ForwardedTexture(*Pipeline, desc->Name, selectedSlot, selectedCommand);
+			if (forwarded.IsValid()) return forwarded;
 		}
 		Impl::NamedTexture fixed = FixedTexture(desc->Name, selectedSlot);
 		if (fixed.IsValid()) {
@@ -1097,16 +1248,20 @@ namespace engine::render {
 		return State->FindGraphTarget(*selectedPipeline, desc->Name, scope, owner);
 	}
 
-	SDL_GPUBuffer *ViewRecording::ResourceBuffer(graph::ResourceId resource, size_t selectedSlot, bool make) {
+	SDL_GPUBuffer *ViewRecording::ResourceBuffer(
+		graph::ResourceId resource, size_t selectedSlot, bool make, uint64_t actualBytes
+	) {
 		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
-		const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+		const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer) return nullptr;
 		const graph::NodeScope scope = State->ResourceScope(*selectedPipeline, resource);
 		const uint64_t owner = GraphHistoryOwner(scope, selectedSlot, Request.World);
 		if (make && scope == graph::NodeScope::World) {
 			State->GraphResources.WorldNames[owner] = Request.Source->WorldName;
 		}
-		return make ? State->EnsureGraphBuffer(*selectedPipeline, resource, owner, SceneWidth, SceneHeight)
+		return make ? State->EnsureGraphBuffer(
+						  *selectedPipeline, resource, owner, SceneWidth, SceneHeight, actualBytes
+					  )
 					: State->FindGraphBuffer(*selectedPipeline, desc->Name, scope, owner);
 	}
 
@@ -1118,13 +1273,34 @@ namespace engine::render {
 		return selectsView ? node->Integer(core::Name("view"), 0) : Request.TargetSlot;
 	}
 
+	void ViewRecording::InvalidateBackgroundTexture(SDL_GPUTexture *texture, core::Name writerKind) {
+		if (texture == nullptr) return;
+		if (Pbr != nullptr && texture == Pbr->Normal) EmptyGBufferNormals = false;
+		if (texture == EmptyHardwareDepth) EmptyHardwareDepth = nullptr;
+		if (texture == FarLinearDepth) FarLinearDepth = nullptr;
+		if (texture == OpaqueSkyTexture) OpaqueSkyTexture = nullptr;
+		if (texture == BlackSkyLit) BlackSkyLit = nullptr;
+		if (texture == ClearedInterfaceTexture) ClearedInterfaceTexture = nullptr;
+		for (auto &environment : State->Environments) {
+			if (texture == environment.SkyTarget && writerKind != core::Name("skybox-compute"))
+				environment.Sky = {};
+			if (texture == environment.CloudTarget && writerKind != core::Name("clouds-compute"))
+				environment.Cloud = {};
+		}
+	}
+
 	Renderer::Impl::NamedTexture ViewRecording::GraphTexture(
 		graph::ResourceId resource,
 		const graph::RunContext &context,
 		bool make,
 		SDL_GPUCommandBuffer *readCommand
 	) {
-		return ResourceTexture(resource, GraphTextureSlot(context), make, readCommand);
+		const auto texture = ResourceTexture(resource, GraphTextureSlot(context), make, readCommand);
+		if (make) {
+			const auto *node = Pipeline->Graph.Find(context.Node);
+			InvalidateBackgroundTexture(texture.Texture, node != nullptr ? node->Kind : core::Name{});
+		}
+		return texture;
 	}
 
 	void ViewRecording::StageHistoryWrites(const graph::RunContext &context, SDL_GPUCommandBuffer *command) {
@@ -1132,7 +1308,7 @@ namespace engine::render {
 		// a separate command submitted first could otherwise read unqueued pixels.
 		if (command == Command) MainGpuWorkRecorded = true;
 		for (const graph::ResourceId resource : context.Writes) {
-			const graph::ResourceDesc *desc = Pipeline->Graph.FindResource(resource);
+			const graph::ResourceDesc *desc = Pipeline->Graph.FindResourceDesc(resource);
 			if (desc == nullptr || desc->Lifetime != graph::ResourceLifetime::History) {
 				continue;
 			}
@@ -1148,9 +1324,10 @@ namespace engine::render {
 		}
 	}
 
-	SDL_GPUBuffer *
-	ViewRecording::GraphBuffer(graph::ResourceId resource, const graph::RunContext &context, bool make) {
-		return ResourceBuffer(resource, GraphTextureSlot(context), make);
+	SDL_GPUBuffer *ViewRecording::GraphBuffer(
+		graph::ResourceId resource, const graph::RunContext &context, bool make, uint64_t actualBytes
+	) {
+		return ResourceBuffer(resource, GraphTextureSlot(context), make, actualBytes);
 	}
 
 	std::vector<SDL_GPUTextureSamplerBinding>
@@ -1160,7 +1337,7 @@ namespace engine::render {
 
 		std::vector<SDL_GPUTextureSamplerBinding> bindings;
 		for (const graph::ResourceId resource : context.Reads) {
-			const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResource(resource);
+			const graph::ResourceDesc *desc = selectedPipeline->Graph.FindResourceDesc(resource);
 			if (desc == nullptr || desc->Kind == graph::ResourceKind::Buffer ||
 				desc->Kind == graph::ResourceKind::Camera || desc->Kind == graph::ResourceKind::Entities) {
 				continue;
@@ -1220,6 +1397,191 @@ namespace engine::render {
 		}
 	}
 
+	bool ViewRecording::IdentityWriterInactive(core::Name kind) const {
+		// A sky node can read an authored environment different from the first sky.
+		if (kind == core::Name("sky")) return false;
+		if (kind == core::Name("weather-reconstruct"))
+			return !VisibleWeatherMedium(CurrentLighting.EnvironmentState);
+		if (kind == core::Name("fog")) return !Activity.Fog;
+		if (kind == core::Name("shader-lenses")) return LensGroupCount == 0;
+		if (kind == core::Name("dof")) return !Activity.DepthOfField;
+		if (kind == core::Name("god-rays")) return !Activity.GodRays;
+		if (kind == core::Name("portal-overlay")) return !Activity.PortalOverlay;
+		if (kind == core::Name("mirror-overlay")) return !Activity.MirrorOverlay;
+		if (kind == core::Name("transparent")) return !Activity.Transparent;
+		return false;
+	}
+
+	bool ViewRecording::ForwardImage(
+		const graph::RunContext &context, graph::ResourceId source, graph::ResourceId target
+	) {
+		const auto contract = std::find_if(
+			Pipeline->Identities.begin(), Pipeline->Identities.end(), [&](const auto &candidate) {
+				return candidate.Node == context.Node && candidate.Source == source &&
+					   candidate.Target == target;
+			}
+		);
+		if (contract == Pipeline->Identities.end() || GraphTextureSlot(context) != Request.TargetSlot ||
+			target.Value > ForwardedTextures.size())
+			return false;
+		const auto image = GraphTexture(source, context, false);
+		if (!image.IsValid()) return false;
+		const auto *desc = Pipeline->Graph.FindResourceDesc(target);
+		uint32_t width = 0, height = 0;
+		desc->Resolve(SceneWidth, SceneHeight, width, height);
+		if (image.Width != width || image.Height != height || image.Format != DeviceFormat(desc->Format))
+			return false;
+
+		const auto fixedOutput = FixedTexture(desc->Name, Request.TargetSlot);
+		if (fixedOutput.IsValid() && fixedOutput.Texture != image.Texture) {
+			const auto aliasesOutput = [&](graph::ResourceId read) {
+				const auto *input = Pipeline->Graph.FindResourceDesc(read);
+				return input && FixedTexture(input->Name, Request.TargetSlot).Texture == fixedOutput.Texture;
+			};
+			// Fog shares Lit with deferred lighting. Later branches and inspection
+			// observe that fixed publication even when they name the earlier output.
+			if (detail::IdentityAliasReadAfter(
+					Pipeline->Graph, Pipeline->Compiled.PerView, context.Node, target, aliasesOutput
+				) ||
+				detail::IdentityAliasReadAfter(
+					Pipeline->Graph, Pipeline->Compiled.Final, {}, target, aliasesOutput
+				) ||
+				(State->Inspected.IsValid() && State->Inspected != desc->Name &&
+				 (State->InspectedSlot == Renderer::ANY_VIEWPORT ||
+				  State->InspectedSlot == Request.TargetSlot) &&
+				 FixedTexture(State->Inspected, Request.TargetSlot).Texture == fixedOutput.Texture))
+				return false;
+		}
+
+		// Fixed PBR roles may share a texture even though the graph ids differ.
+		// Follow inactive identity outputs so intervening weather cannot hide a
+		// later writer consuming this binding unchanged.
+		bool after = false;
+		bool outputRewritten = false;
+		auto binding = target;
+		for (const auto id : Pipeline->Compiled.PerView) {
+			if (id == context.Node) {
+				after = true;
+				continue;
+			}
+			const auto *node = Pipeline->Graph.Find(id);
+			if (!node) continue;
+			if (!after) continue;
+			const auto next = std::find_if(
+				Pipeline->Identities.begin(), Pipeline->Identities.end(), [&](const auto &identity) {
+					return identity.Node == id && identity.Source == binding;
+				}
+			);
+			const bool sameBinding =
+				!outputRewritten && IdentityWriterInactive(node->Kind) && next != Pipeline->Identities.end();
+			for (const auto written : node->Writes) {
+				const auto *output = Pipeline->Graph.FindResourceDesc(written);
+				if ((!sameBinding || written != next->Target) && output &&
+					FixedTexture(output->Name, Request.TargetSlot).Texture == image.Texture)
+					return false;
+			}
+			if (sameBinding)
+				binding = next->Target;
+			else
+				outputRewritten |=
+					std::find(node->Writes.begin(), node->Writes.end(), binding) != node->Writes.end();
+		}
+		for (const auto id : Pipeline->Compiled.Final) {
+			const auto *node = Pipeline->Graph.Find(id);
+			if (!node) continue;
+			for (const auto written : node->Writes) {
+				const auto *output = Pipeline->Graph.FindResourceDesc(written);
+				if (output && FixedTexture(output->Name, Request.TargetSlot).Texture == image.Texture)
+					return false;
+			}
+		}
+		ForwardedTextures[target.Value - 1] = image;
+		core::Metrics::Count("render.identity_forward.outputs", 1);
+		return true;
+	}
+
+	bool ViewRecording::PublishIdentity(
+		const graph::RunContext &context, graph::ResourceId source, graph::ResourceId target
+	) {
+		if (ForwardImage(context, source, target)) return true;
+		const auto input = GraphTexture(source, context, false);
+		const auto output = GraphTexture(target, context, true);
+		if (!input.IsValid() || !output.IsValid()) return false;
+		bool published = false;
+		if (input.Format == output.Format) {
+			if (input.Width == output.Width && input.Height == output.Height)
+				published = CopyImage(context.Name, input, output);
+			else {
+				EnterNamedPass(context.Name);
+				SDL_GPUBlitInfo blit{};
+				blit.source.texture = input.Texture;
+				blit.source.w = input.Width;
+				blit.source.h = input.Height;
+				blit.destination.texture = output.Texture;
+				blit.destination.w = output.Width;
+				blit.destination.h = output.Height;
+				blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+				blit.filter = SDL_GPU_FILTER_NEAREST;
+				blit.cycle = true;
+				SDL_BlitGPUTexture(Command, &blit);
+				core::Metrics::Count("render.identity_blit.commands", 1);
+				published = true;
+			}
+		} else if (output.Format == State->ColourFormat()) {
+			EnterNamedPass(context.Name);
+			published = DrawImage(input, output, SDL_GPU_LOADOP_CLEAR);
+		}
+		if (published) {
+			auto history = context;
+			history.Writes = std::span<const graph::ResourceId>(&target, 1);
+			StageHistoryWrites(history, Command);
+		}
+		return published;
+	}
+
+	bool ViewRecording::CopyImage(
+		core::Name name, const Impl::NamedTexture &source, const Impl::NamedTexture &target
+	) {
+		if (!source.IsValid() || !target.IsValid() || source.Format != target.Format ||
+			source.Width != target.Width || source.Height != target.Height)
+			return false;
+		if (source.Texture == target.Texture) return true;
+		EnterNamedPass(name);
+		auto *copy = SDL_BeginGPUCopyPass(Command);
+		if (copy == nullptr) return false;
+		SDL_GPUTextureLocation from{}, to{};
+		from.texture = source.Texture;
+		to.texture = target.Texture;
+		SDL_CopyGPUTextureToTexture(copy, &from, &to, target.Width, target.Height, 1, true);
+		SDL_EndGPUCopyPass(copy);
+		core::Metrics::Count("render.identity_copy.commands", 1);
+		core::Metrics::Count(
+			"render.identity_copy.bytes",
+			SDL_CalculateGPUTextureFormatSize(target.Format, target.Width, target.Height, 1)
+		);
+		return true;
+	}
+
+	bool ViewRecording::ClearImage(core::Name name, const Impl::NamedTexture &target, SDL_FColor colour) {
+		if (!target.IsValid()) return false;
+		EnterNamedPass(name);
+		SDL_GPUColorTargetInfo attachment{};
+		attachment.texture = target.Texture;
+		attachment.clear_color = colour;
+		attachment.load_op = SDL_GPU_LOADOP_CLEAR;
+		attachment.store_op = SDL_GPU_STOREOP_STORE;
+		attachment.cycle = true;
+		auto *pass = SDL_BeginGPURenderPass(Command, &attachment, 1, nullptr);
+		if (pass == nullptr) return false;
+		SDL_EndGPURenderPass(pass);
+		core::Metrics::Count("render.colour_clear.commands", 1);
+		core::Metrics::Count(
+			"render.colour_clear.bytes",
+			SDL_CalculateGPUTextureFormatSize(target.Format, target.Width, target.Height, 1)
+		);
+		return true;
+	}
+
 	bool ViewRecording::DrawImage(
 		const Impl::NamedTexture &source,
 		const Impl::NamedTexture &target,
@@ -1233,6 +1595,7 @@ namespace engine::render {
 		if (!source.IsValid() || !target.IsValid()) {
 			return false;
 		}
+		if (!State->EnsureSurfaceSampler()) return false;
 		SDL_GPUColorTargetInfo colour{};
 		colour.texture = target.Texture;
 		colour.clear_color = SDL_FColor{0.0f, 0.0f, 0.0f, 1.0f};
@@ -1240,6 +1603,7 @@ namespace engine::render {
 		colour.store_op = SDL_GPU_STOREOP_STORE;
 		colour.cycle = load == SDL_GPU_LOADOP_CLEAR;
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colour, 1, nullptr);
+		if (pass == nullptr) return false;
 		State->BindPipeline(pass, State->ImagePipeline, Impl::PipelineFamily::Other);
 		SetImageTargetArea(pass, target);
 		const SDL_GPUTextureSamplerBinding binding{source.Texture, State->SurfaceSampler};
@@ -1289,6 +1653,11 @@ namespace engine::render {
 		clearAo.cycle = true;
 		SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &clearAo, 1, nullptr);
 		SDL_EndGPURenderPass(pass);
+		core::Metrics::Count("render.occlusion_clear.commands", 1);
+		core::Metrics::Count(
+			"render.occlusion_clear.bytes",
+			uint64_t(PbrDimensions.OcclusionWidth) * PbrDimensions.OcclusionHeight
+		);
 
 		pbr.OcclusionProvenance = {
 			.SourceState = sourceState,

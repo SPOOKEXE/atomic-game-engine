@@ -103,7 +103,7 @@ namespace engine::render {
 										   const SDL_FColor *clearColour = nullptr
 									   ) {
 				return recording.OpenScenePass(
-					colour, depth, cycle, viewport, passLights, clearColour, captureTarget
+					colour, depth, cycle, viewport, passLights, clearColour, captureTarget, true
 				);
 			};
 			const auto drawWorldInto =
@@ -160,11 +160,11 @@ namespace engine::render {
 			// ask again: the depth would sit oscillating between two values for as
 			// long as the viewer stood still.
 			//
-			// Up to sixteen frustum tests and a reflection, once per pane at the
-			// bottom level only, beside a scene render each.
-			const auto wouldDescend = [&](const glm::mat4 &from, const core::CFrame &frame, int8_t skip) {
+			// Frustum tests and a reflection for each occupied slot at the bottom
+			// level only, beside a scene render each.
+			const auto wouldDescend = [&](const glm::mat4 &from, const core::CFrame &frame, int16_t skip) {
 				for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
-					if (!havePanes[slot] || static_cast<int8_t>(slot) == skip) {
+					if (!havePanes[slot] || static_cast<int16_t>(slot) == skip) {
 						continue;
 					}
 
@@ -194,11 +194,12 @@ namespace engine::render {
 			// @param skip    The pane this camera is *on*. Nothing sees itself in its
 			//                own reflection, and descending into it would put the pane
 			//                in front of its own camera.
-			std::function<void(const glm::mat4 &, const core::CFrame &, uint32_t, int8_t)> fillMirror;
+			std::function<void(const glm::mat4 &, const core::CFrame &, uint32_t, int16_t)> fillMirror;
+			bool weatherCaptureFailed = false;
 
-			fillMirror = [&](const glm::mat4 &from, const core::CFrame &frame, uint32_t level, int8_t skip) {
+			fillMirror = [&](const glm::mat4 &from, const core::CFrame &frame, uint32_t level, int16_t skip) {
 				for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
-					if (!havePanes[slot] || static_cast<int8_t>(slot) == skip) {
+					if (!havePanes[slot] || static_cast<int16_t>(slot) == skip) {
 						continue;
 					}
 
@@ -248,11 +249,12 @@ namespace engine::render {
 					// inside its own picture; whether that is the end of the chain or
 					// the end of the allowance is exactly `wouldDescend`.
 					if (level > 0) {
-						fillMirror(matrices.ViewProjection, eye.Frame, level - 1, static_cast<int8_t>(slot));
+						fillMirror(matrices.ViewProjection, eye.Frame, level - 1, static_cast<int16_t>(slot));
+						if (weatherCaptureFailed) return;
 					} else {
 						surfaceDepth.Deeper =
 							surfaceDepth.Deeper ||
-							wouldDescend(matrices.ViewProjection, eye.Frame, static_cast<int8_t>(slot));
+							wouldDescend(matrices.ViewProjection, eye.Frame, static_cast<int16_t>(slot));
 					}
 
 					// **The authored size, with no screen-coverage scaling.** A pane's
@@ -356,10 +358,15 @@ namespace engine::render {
 							paneTexture,
 							State->SurfaceSampler,
 							pane.TagFilter,
-							result.Triangles
+							result.Triangles,
+							nullptr,
+							Impl::SlotSelection::All,
+							Impl::VisibilityPass::Secondary,
+							Pipeline->Name
 						);
 					}
 
+					recording.DrawGroundGrid(pass, matrices.ViewProjection, eye.Frame, captureTarget);
 					if (drawInterface) {
 						result.DrawCalls += gameInterfaceHook->RecordWorld(
 							command,
@@ -394,6 +401,19 @@ namespace engine::render {
 					}
 
 					SDL_EndGPURenderPass(pass);
+					if (captureHdr && !recording.RecordCaptureWeather(
+										  context,
+										  target->Colour,
+										  target->Depth,
+										  matrices.ViewProjection,
+										  eye.Frame,
+										  target->Width,
+										  target->Height,
+										  currentLighting
+									  )) {
+						weatherCaptureFailed = true;
+						return;
+					}
 
 					// **Written after the pass has ended**, which is the invariant the
 					// whole ordering rests on: a level is readable only once the draw
@@ -526,13 +546,14 @@ namespace engine::render {
 								accepted[index].ViewProjection,
 								accepted[index].View->Frame,
 								mirrorLevels - 1,
-								static_cast<int8_t>(self)
+								static_cast<int16_t>(self)
 							);
+							if (weatherCaptureFailed) return false;
 						} else if (havePanes[self]) {
 							surfaceDepth.Deeper = surfaceDepth.Deeper || wouldDescend(
 																			 accepted[index].ViewProjection,
 																			 accepted[index].View->Frame,
-																			 static_cast<int8_t>(self)
+																			 static_cast<int16_t>(self)
 																		 );
 						}
 
@@ -621,7 +642,11 @@ namespace engine::render {
 								surfaceTexture,
 								State->SurfaceSampler,
 								surfaceFilter,
-								result.Triangles
+								result.Triangles,
+								nullptr,
+								Impl::SlotSelection::All,
+								Impl::VisibilityPass::Secondary,
+								Pipeline->Name
 							);
 
 							// **Ended and left for the sweep below to mark ready**, which
@@ -629,6 +654,17 @@ namespace engine::render {
 							// this frame may not be sampled as another surface's
 							// "previous" within the same frame.
 							SDL_EndGPURenderPass(pass);
+							if (captureHdr && !recording.RecordCaptureWeather(
+												  context,
+												  state.Texture[state.Slot],
+												  state.Depth,
+												  state.ViewProjection,
+												  capturedView.Frame,
+												  state.Width,
+												  state.Height,
+												  surfaceWorldLighting
+											  ))
+								return false;
 							continue;
 						}
 
@@ -707,7 +743,11 @@ namespace engine::render {
 										surfaceTexture,
 										State->SurfaceSampler,
 										surfaceFilter,
-										result.Triangles
+										result.Triangles,
+										nullptr,
+										Impl::SlotSelection::All,
+										Impl::VisibilityPass::Secondary,
+										Pipeline->Name
 									);
 									continue;
 								}
@@ -726,7 +766,11 @@ namespace engine::render {
 										surfaceTexture,
 										State->SurfaceSampler,
 										surfaceFilter,
-										result.Triangles
+										result.Triangles,
+										nullptr,
+										Impl::SlotSelection::All,
+										Impl::VisibilityPass::Secondary,
+										Pipeline->Name
 									);
 									continue;
 								}
@@ -761,12 +805,19 @@ namespace engine::render {
 									surfaceTexture,
 									State->SurfaceSampler,
 									surfaceFilter,
-									result.Triangles
+									result.Triangles,
+									nullptr,
+									Impl::SlotSelection::All,
+									Impl::VisibilityPass::Secondary,
+									Pipeline->Name
 								);
 							}
 						};
 
 						drawMirrors(false);
+						recording.DrawGroundGrid(
+							pass, state.ViewProjection, capturedView.Frame, captureTarget
+						);
 
 						if (drawInterface && accepted[index].View->InstanceCount == 0) {
 							result.DrawCalls += gameInterfaceHook->RecordWorld(
@@ -811,6 +862,17 @@ namespace engine::render {
 						}
 
 						SDL_EndGPURenderPass(pass);
+						if (captureHdr && !recording.RecordCaptureWeather(
+											  context,
+											  state.Texture[state.Slot],
+											  state.Depth,
+											  state.ViewProjection,
+											  capturedView.Frame,
+											  state.Width,
+											  state.Height,
+											  surfaceWorldLighting
+										  ))
+							return false;
 					}
 				}
 
@@ -906,7 +968,11 @@ namespace engine::render {
 								   ) { return recording.DrawImage(source, target, load, reverseSpectrum); };
 
 			ENGINE_PROFILE_CAT("mirror overlay pass", core::ProfileCategory::Render);
-			enterNamedPass(context.Name);
+
+			if (!recording.Activity.MirrorOverlay) {
+				if (context.Reads.empty() || context.Writes.empty()) return false;
+				return recording.PublishIdentity(context, context.Reads.front(), context.Writes.front());
+			}
 
 			Impl::NamedTexture source;
 			Impl::NamedTexture target;
@@ -919,10 +985,17 @@ namespace engine::render {
 					break;
 				}
 			}
-			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
+			const bool exactCopy = source.IsValid() && target.IsValid() && source.Format == target.Format &&
+								   source.Width == target.Width && source.Height == target.Height;
+			if (!exactCopy || source.Texture == target.Texture) enterNamedPass(context.Name);
+			const bool published = exactCopy ? recording.CopyImage(context.Name, source, target)
+											 : drawImage(source, target, SDL_GPU_LOADOP_CLEAR);
+			if (!published) {
 				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
-				return true;
+				return false;
 			}
+
+			if (!haveInstances || (surfaceInCamera == 0 && transparentSurfaces == 0)) return true;
 
 			const bool hdr = target.Format == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 			colourTarget.texture = target.Texture;
@@ -933,7 +1006,9 @@ namespace engine::render {
 			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
 			depthTarget.cycle = false;
 
+			recording.InvalidateBackgroundTexture(depthTarget.texture);
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &colourTarget, 1, &depthTarget);
+			if (pass == nullptr) return false;
 			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
 			SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
 			SDL_SetGPUViewport(pass, &sceneViewport);
@@ -1020,7 +1095,8 @@ namespace engine::render {
 							result.Triangles,
 							nullptr,
 							Impl::SlotSelection::All,
-							Impl::VisibilityPass::MainCamera
+							Impl::VisibilityPass::MainCamera,
+							Pipeline->Name
 						);
 						SDL_PushGPUVertexUniformData(command, 0, &frameUniforms, sizeof(frameUniforms));
 					}

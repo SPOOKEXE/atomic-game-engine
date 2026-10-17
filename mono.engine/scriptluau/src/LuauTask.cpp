@@ -1,10 +1,125 @@
 #include "LuauBindings.hpp"
 
 #include <cmath>
+#include <limits>
 #include <lualib.h>
 #include <string_view>
 
 namespace engine::script {
+
+	ecs::Entity ExecutionSource(lua_State *state) {
+		const auto &sources = ContextOf(state).ThreadSources;
+		const auto found = sources.find(state);
+		return found != sources.end() ? found->second : ecs::NULL_ENTITY;
+	}
+
+	void TrackLuauThread(lua_State *parent, lua_State *thread) {
+		LuauContext &context = ContextOf(parent != nullptr ? parent : thread);
+		if (parent == nullptr) {
+			context.ThreadSources.erase(thread);
+			context.InvocationSources.erase(thread);
+		} else {
+			context.ThreadSources.insert_or_assign(thread, ExecutionSource(parent));
+		}
+	}
+
+	CallbackRef RetainLuauValue(lua_State *state, int index) {
+		LuauContext &context = ContextOf(state);
+		if (context.NextRetainedValue == std::numeric_limits<CallbackRef>::max())
+			luaL_errorL(state, "too many retained script values");
+		const CallbackRef handle = ++context.NextRetainedValue;
+		const int registry = lua_ref(state, index);
+		context.RetainedValues.emplace(handle, LuauContext::RetainedValue{registry, ExecutionSource(state)});
+		return handle;
+	}
+
+	bool PushLuauValue(lua_State *state, CallbackRef reference) {
+		LuauContext &context = ContextOf(state);
+		const auto found = context.RetainedValues.find(reference);
+		if (found == context.RetainedValues.end()) {
+			lua_pushnil(state);
+			return false;
+		}
+		const ecs::Entity source = found->second.Source;
+		context.InvocationSources.insert_or_assign(state, source);
+		if (source != ecs::NULL_ENTITY && !context.World->Alive(source)) {
+			lua_pushnil(state);
+			return false;
+		}
+		lua_getref(state, found->second.Registry);
+		return true;
+	}
+
+	void ReleaseLuauValue(lua_State *state, CallbackRef reference) {
+		LuauContext &context = ContextOf(state);
+		const auto found = context.RetainedValues.find(reference);
+		if (found == context.RetainedValues.end()) return;
+		const int registry = found->second.Registry;
+		context.RetainedValues.erase(found);
+		lua_unref(state, registry);
+	}
+
+	int CallLuauValue(lua_State *state, int arguments, int results, int errorFunction) {
+		LuauContext &context = ContextOf(state);
+		const ecs::Entity previous = ExecutionSource(state);
+		const auto pending = context.InvocationSources.find(state);
+		const ecs::Entity source = pending != context.InvocationSources.end() ? pending->second : previous;
+		context.InvocationSources.erase(state);
+		if ((source != ecs::NULL_ENTITY && !context.World->Alive(source)) ||
+			lua_isnil(state, -arguments - 1)) {
+			lua_pop(state, arguments + 1);
+			for (int i = 0; i < results; ++i)
+				lua_pushnil(state);
+			return LUA_OK;
+		}
+		context.ThreadSources.insert_or_assign(state, source);
+		const int status = lua_pcall(state, arguments, results, errorFunction);
+		context.ThreadSources.insert_or_assign(state, previous);
+		return status;
+	}
+
+	void ReapLuauSources(lua_State *state) {
+		LuauContext &context = ContextOf(state);
+		std::vector<CallbackRef> dead;
+		for (const auto &[reference, value] : context.RetainedValues)
+			if (value.Source != ecs::NULL_ENTITY && !context.World->Alive(value.Source))
+				dead.push_back(reference);
+		for (const CallbackRef reference : dead) {
+			context.Signals.DropCallback(reference);
+			context.Actions.DropCallback(reference);
+			context.Subscriptions.DropCallback(reference);
+			context.Scopes.DropCallback(reference, true);
+			context.Tasks.Cancel(reference);
+			std::erase_if(context.HostCallbacks, [reference](const auto &entry) {
+				return entry.second == reference;
+			});
+			for (auto found = context.Threads.begin(); found != context.Threads.end();) {
+				if (found->second != reference) {
+					++found;
+					continue;
+				}
+				lua_State *thread = found->first;
+				context.WaitTicks.erase(thread);
+				context.PendingArguments.erase(thread);
+				std::erase_if(context.AwaitedTickets, [thread](const auto &entry) {
+					return entry.second == thread;
+				});
+				std::erase_if(context.AwaitedChildren, [&](const auto &entry) {
+					if (entry.second != thread) return false;
+					context.Waiters.Cancel(entry.first);
+					return true;
+				});
+				std::erase_if(context.AwaitedEditableMeshes, [thread](const auto &entry) {
+					return entry.second == thread;
+				});
+				std::erase_if(context.AwaitedComputations, [thread](const auto &entry) {
+					return entry.second == thread;
+				});
+				found = context.Threads.erase(found);
+			}
+			ReleaseLuauValue(state, reference);
+		}
+	}
 
 	namespace {
 		// Takes a ref to a thread and remembers which ref it is.
@@ -15,10 +130,8 @@ namespace engine::script {
 		// for as long as the ref keeps it alive.
 		CallbackRef RetainThread(LuauContext &context, lua_State *thread) {
 			lua_pushthread(thread);
-			lua_xmove(thread, context.State, 1);
-
-			const int reference = lua_ref(context.State, -1);
-			lua_pop(context.State, 1);
+			const CallbackRef reference = RetainLuauValue(thread, -1);
+			lua_pop(thread, 1);
 
 			// `insert_or_assign` for the reason `LuauBus.cpp` gives: a thread
 			// that suspends twice must not leave the first reference behind.
@@ -27,8 +140,9 @@ namespace engine::script {
 		}
 
 		void ReleaseThread(LuauContext &context, lua_State *thread, CallbackRef reference) {
-			context.Threads.erase(thread);
-			lua_unref(context.State, reference);
+			const auto found = context.Threads.find(thread);
+			if (found != context.Threads.end() && found->second == reference) context.Threads.erase(found);
+			ReleaseLuauValue(context.State, reference);
 		}
 
 		// `task.wait(seconds)` - resumes at a tick boundary.
@@ -85,7 +199,11 @@ namespace engine::script {
 				// `task.spawn` is synchronous up to the first yield and this is
 				// the same shape.
 				ReleaseThread(context, thread, reference);
-			} else if (status != LUA_YIELD) {
+			} else if (status == LUA_YIELD) {
+				const auto found = context.Threads.find(thread);
+				if (found != context.Threads.end() && found->second != reference)
+					ReleaseThread(context, thread, reference);
+			} else {
 				const char *message = lua_tostring(thread, -1);
 				ReleaseThread(context, thread, reference);
 				luaL_errorL(state, "task.spawn: %s", message != nullptr ? message : "the thread failed");
@@ -231,7 +349,7 @@ namespace engine::script {
 		std::string firstError;
 
 		const auto resume = [&](CallbackRef reference) {
-			lua_getref(state, reference);
+			PushLuauValue(state, reference);
 			if (!lua_isthread(state, -1)) {
 				lua_pop(state, 1);
 				return;

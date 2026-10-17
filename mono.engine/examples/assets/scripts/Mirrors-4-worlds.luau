@@ -248,12 +248,13 @@ end
 -- The camera the scene is *watched* through, which is what the view channel
 -- publishes from. Not a surface one: a world has several cameras and
 -- `workspace.CurrentCamera` names the live one.
-local view = Instance.new("Camera")
-view.Name = "Viewer"
-view.CFrame = CFrame.new(EYE)
-view.FieldOfView = EYE_FOV
-view.Parent = workspace
-workspace.CurrentCamera = view
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+demoCamera:SetAttribute('Name', 'Viewer')
+demoCamera:SetAttribute('CFrame', CFrame.new(EYE))
+demoCamera:SetAttribute('FieldOfView', EYE_FOV)
 
 -- --- what moves ---------------------------------------------------------------
 

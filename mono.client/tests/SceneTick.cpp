@@ -10,6 +10,8 @@
 // testable on a machine with no GPU, and drawing the line there is what keeps
 // the suite runnable everywhere.
 
+#include "WorldSystems.hpp"
+
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
@@ -28,14 +30,17 @@
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
-#include <engine/physics/Storm.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/InterfacePass.hpp>
+#include <engine/render/WeatherEffects.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
+#include <engine/scene/Atmosphere.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/GpuParticleField.hpp>
@@ -43,11 +48,14 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Skinning.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Wire.hpp>
+#include <engine/script/PlayerGui.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/Postbox.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -63,6 +71,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string_view>
+#include <vector>
 
 TEST_SUITE_ID("client.scene.tick")
 TEST_DEPENDS("engine.ecs.scheduler")
@@ -78,6 +87,8 @@ TEST_DEPENDS("engine.gui.compile")
 TEST_DEPENDS("engine.gui.input")
 TEST_DEPENDS("engine.gui.typing")
 TEST_DEPENDS("engine.game.roundtrip")
+TEST_DEPENDS("engine.weather.runtime")
+TEST_DEPENDS("engine.weather.consumers")
 
 using Catch::Approx;
 using engine::core::FrameGraph;
@@ -96,8 +107,11 @@ using engine::scene::WorldBounds;
 namespace {
 	constexpr uint32_t ENTITIES = 512;
 	constexpr float STEP = 1.0f / 60.0f;
+	// The authored world has one server script, one StarterPlayerScript, and
+	// its local-player copy in a combined host.
+	constexpr size_t BLADEBORNE_STARTUP_SCRIPT_COUNT = 2;
 	// The world loader puts each <Source> child in this cache.
-	constexpr size_t BLADEBORNE_SOURCE_COUNT = 15;
+	constexpr size_t BLADEBORNE_SOURCE_COUNT = 14;
 
 	// A world and the scheduler that ticks it. Nothing else - which is the
 	// point: after the scene loads, everything the tick reads and writes is
@@ -318,23 +332,44 @@ TEST_CASE("GuiInteraction routes client controls into visible scripted state", "
 }
 
 TEST_CASE(
-	"a GUI weather preset reaches the resident emitter before its next step", "[client][gui][particles]"
+	"a GUI weather preset changes authored controls before the next accepted precipitation boundary",
+	"[client][gui][particles][weather]"
 ) {
 	Session session("Weather.luau");
 	Store &store = session.World;
 	session.Tick(1);
 
-	const engine::ecs::Entity workspace = engine::scene::WorkspaceOf(store);
-	const engine::ecs::Entity emitter = FirstNamedDescendant(store, workspace, "Weather Rain");
-	const engine::ecs::Entity clear = FirstGuiElement(store, "Weather CLEAR");
-	REQUIRE(emitter != engine::ecs::NULL_ENTITY);
+	const auto environment = engine::scene::EnvironmentOf(store);
+	REQUIRE(environment.HasWeatherCompute);
+	const auto provider = environment.CloudProvider;
+	REQUIRE(provider != engine::ecs::NULL_ENTITY);
+	CHECK(store.InstanceNameOf(provider) == engine::core::Name("Weather Clouds"));
+	const auto clear = FirstGuiElement(store, "Weather Preset CLEAR");
 	REQUIRE(clear != engine::ecs::NULL_ENTITY);
-	const auto *slot = store.Get<engine::effects::EmitterSlot>(emitter);
-	REQUIRE(slot != nullptr);
-	REQUIRE(slot->Index != engine::effects::NO_SLOT);
-	auto *particles = store.ResourceMutable<engine::effects::ParticleSystem>();
-	REQUIRE(particles != nullptr);
-	CHECK(particles->RuntimeStates[slot->Index].ContinuousRate > 0.0f);
+	REQUIRE(store.Get<engine::scene::WeatherCompute>(provider));
+	CHECK(store.Get<engine::scene::WeatherCompute>(provider)->PrecipitationRate == Approx(38));
+	engine::render::WeatherEffectsFrame precipitation;
+	engine::effects::RibbonBuffer ribbons;
+	std::vector<engine::render::SceneLight> lights;
+	const auto collectPrecipitation = [&] {
+		const auto *active = store.Resource<ActiveCamera>();
+		REQUIRE(active);
+		const auto *transform = store.Get<Transform>(active->Entity);
+		REQUIRE(transform);
+		engine::render::View view;
+		view.World = store.Identity();
+		view.WorldName = engine::core::Name(store.Name());
+		view.CameraFrame = transform->Frame;
+		view.Lighting = engine::scene::LightingOf(store);
+		view.Instances = session.Drawn();
+		engine::render::CollectWeatherEffects(store, view, precipitation, ribbons, lights);
+	};
+	collectPrecipitation();
+	REQUIRE(precipitation.Precipitation);
+	CHECK(precipitation.Precipitation->Source == provider);
+	CHECK(engine::scene::ValidGpuParticleField(precipitation.Precipitation->Field));
+	CHECK_FALSE(precipitation.Precipitation->Field.SpawnSamples.empty());
+	const auto wetDefinition = precipitation.Definition;
 
 	engine::gui::CompileRequest request;
 	request.Display = {
@@ -369,11 +404,26 @@ TEST_CASE(
 
 	frame(false);
 	frame(true);
+	const auto clickTick = store.Time().Tick;
 	frame(false);
-
-	particles = store.ResourceMutable<engine::effects::ParticleSystem>();
-	CHECK(particles->RuntimeStates[slot->Index].ContinuousRate == 0.0f);
-	CHECK(particles->RuntimeStates[slot->Index].DeviceRetiring);
+	CHECK(store.Time().Tick == clickTick + 1);
+	CHECK(store.Get<engine::scene::WeatherCompute>(provider)->PrecipitationRate == 0);
+	// GUI handlers run after the clock pass. The accepted definition drains its
+	// existing tick before the next boundary admits the authored preset.
+	REQUIRE(engine::scene::WeatherControlsOf(store, provider));
+	CHECK(engine::scene::WeatherControlsOf(store, provider)->PrecipitationRate == Approx(38));
+	collectPrecipitation();
+	REQUIRE(precipitation.Precipitation);
+	CHECK(precipitation.Definition == wetDefinition);
+	session.Tick(1);
+	CHECK(engine::scene::WeatherControlsOf(store, provider)->PrecipitationRate == 0);
+	collectPrecipitation();
+	REQUIRE(precipitation.Sample);
+	CHECK(precipitation.Sample->Precipitation.LiquidMillimetresPerHour == 0);
+	CHECK(precipitation.Sample->Precipitation.SnowMillimetresPerHour == 0);
+	CHECK(precipitation.Sample->Precipitation.HailMillimetresPerHour == 0);
+	CHECK_FALSE(precipitation.Precipitation);
+	CHECK(precipitation.Definition != wetDefinition);
 }
 
 TEST_CASE("data capture driver ticket transition is paused, strict, and terminal", "[client][data-capture]") {
@@ -951,13 +1001,10 @@ TEST_CASE("alpha zero draws the previous tick exactly", "[demo]") {
 	// boundary sits.
 	const auto drawn = session.Drawn()[3].Frame.Position;
 
-	engine::core::Vector3 previous;
-	int seen = 0;
-	session.World.Each<const PreviousTransform>([&](engine::ecs::Entity, const PreviousTransform &transform) {
-		if (seen++ == 3) {
-			previous = transform.Frame.Position;
-		}
-	});
+	const engine::ecs::Entity rendered(session.Drawn()[3].Source);
+	const auto *previousTransform = session.World.Get<PreviousTransform>(rendered);
+	REQUIRE(previousTransform != nullptr);
+	const auto previous = previousTransform->Frame.Position;
 
 	REQUIRE(drawn.X == Approx(previous.X).margin(1e-4));
 	REQUIRE(drawn.Z == Approx(previous.Z).margin(1e-4));
@@ -1118,118 +1165,21 @@ TEST_CASE("the panels render a real tick's data", "[demo]") {
 	for (const auto &timing : session.Systems.Timings()) {
 		timings.push_back({timing.Name, timing.Milliseconds});
 	}
-	// capture-previous, script-heartbeat, move-camera, sync-rendered,
-	// aim-surface-cameras, collect-instances. `sync-rendered` arrived at v0.7
-	// with the render gate: it is what keeps `scene::Rendered` in step with the
-	// `Workspace` subtree, and it is structural. `aim-surface-cameras` arrived
-	// beside it and places every surface camera parented to a part - see
-	// `scene/SurfaceCameras.hpp`.
-	//
-	// **Ten more at v0.10**, from two installers. `InstallEffects` adds
-	// resolve-attachments in `PreSimulation`, then refreshes attachments and
-	// emitters after `script-heartbeat` and before step-particles in `Simulation`;
-	// record-trails also runs in `Simulation`, and build-ribbons in `PreRender`.
-	// `InstallControls` adds character-control in `PreSimulation` and
-	// camera-control in `PreRender`, and `physics::RegisterCharacterSystems`
-	// adds character.control in `PreSimulation` - that moved out of this file's
-	// installer at v0.14, so that a dedicated server grounds its characters too.
-	//
-	// Only two of the ten are presentation; the rest are simulation and are here
-	// because this count is over every phase rather than over one.
-	//
-	// The question this assertion exists to force was asked and answered:
-	// **a world that only presents still does the right thing.** The studio's
-	// suspended scene runs `PreRender` and not `Simulation`, so it builds ribbons
-	// from whatever the trails last recorded and steps no particles - a frozen
-	// effect rather than a missing one, which is what a suspended world should
-	// look like.
-	//
-	// **A count rather than a list, and it is worth keeping as one.** It fails
-	// whenever a system is added to the presentation phase, which is exactly
-	// when somebody should be asked whether a world that only presents - the
-	// studio's suspended scene - still does the right thing.
-	//
-	// **Sixteen since v0.10's `resolve-materials`, and the question it forces was
-	// answered.** It runs in `PreSimulation`, so a suspended scene does not run
-	// it - which is right: a `Material` instance's texture is already on the part
-	// from the last tick that did, so a frozen world keeps the material it was
-	// frozen with rather than losing it.
-	//
-	// **Seventeen since v0.14's `character.pose`, and its question has the
-	// friendliest answer of the three.** It is presentation, so a suspended
-	// scene *does* run it - and that is exactly right: a character's limbs are a
-	// product of where its root is, so a frozen world shows a character standing
-	// still rather than one whose arms are wherever they were when the world
-	// stopped.
-	//
-	// **Eighteen since `character.link`, and its answer is the same as
-	// `resolve-materials`'.** It runs in `PreSimulation`, so a suspended scene
-	// does not run it - which is right: the link between a player and the model
-	// they drive is state, not presentation, and a frozen world showing the
-	// character it was frozen with is exactly what it should show.
-	//
-	// **Eighteen since v0.14's `character.portal`.** It is `PostSimulation`, so
-	// a suspended scene does not run it, and that is right for a stronger reason
-	// than the others: a crossing is the segment between where a body started
-	// the tick and where it finished one, and a world that is not ticking has no
-	// such segment. Running it on a frozen world would compare the same pair of
-	// identical positions every frame and find nothing, for ever.
-	//
-	// **Nineteen since `character.link`**, which rebuilds a rig a client
-	// received over the wire. `PreSimulation`, so a suspended scene does not run
-	// it - and a scene nobody is playing has no client to have received one.
-	//
-	// **And eighteen again once the wake, the ground query and the step became
-	// one `character.control`.** They were two systems in two phases and the
-	// second shared `Simulation` with `physics.simulation`, which the scheduler
-	// leaves unordered - so the velocity a key press produced was written after
-	// the integrator that would have moved it, and thrown away with the
-	// `scene::Motion` when the resting body lost it. Composed, the way
-	// `physics.contacts` composes its four steps and for the same reason.
-	//
-	// **And nineteen again for `portal.open`**, which turns a portal's pane into
-	// a trigger so a body can be inside the hole rather than stopped on its
-	// picture. `PreSimulation`, and it is the one system here that a suspended
-	// scene genuinely does not need to run: what it writes is a property of the
-	// scene rather than of the tick, so a world that resumes gets it on the
-	// first tick it takes and nothing in between could have walked anywhere.
-	//
-	// **And twenty-one for the pair that holds a body up in one.** `portal.open`
-	// lets a body be inside a pane and nothing then had it standing on anything:
-	// the floor under the half that has gone through is in the other room, so a
-	// crate in a doorway was held by the near room alone. `portal.ghost` copies
-	// the far room's colliders into this one through the inverse seam, where they
-	// are ordinary static geometry the solver pushes with; `portal.retire` takes
-	// them away again in `PostSimulation`, because a proxy that outlived its tick
-	// is a piece of another room standing invisibly in this one. Both are a query
-	// that returns at its first line in a world with no portal in it.
-	//
-	// **And twenty-two for `snap-portal-transit`**, which is the render half of
-	// a crossing rather than the simulation half. `capture-previous` records
-	// where a body was when the tick began and the renderer blends the two;
-	// across a teleport that blend spans the gap between two rooms, and on a
-	// client - which never runs `CrossPortals` and so never gets the mapped
-	// previous frame the authority computes - the body is drawn once or twice
-	// somewhere in between. `PreRender`, because the serial it reads arrives
-	// with a replication delta and a delta lands after `PreSimulation` has run.
-	//
-	// **And twenty-seven for a standalone client's authority pipeline.** The
-	// script path now installs editable collision refresh, integration, contacts,
-	// gravity and abandoned-owner reclamation. Without those five a scripted
-	// Humanoid produced velocity that no system ever integrated.
-	//
-	// **And thirty-one for the animation pipeline.** The post-heartbeat attachment
-	// and emitter refresh lets script-authored particle changes reach the GPU
-	// before the particle step. Track clocks advance in
-	// `Simulation`; clip sampling and bone resolution are presentation work, so
-	// a suspended Studio scene retains and redraws its last simulated pose.
-	REQUIRE(timings.size() == 31);
+	// Timings cover the complete authority tick and its presentation passes.
+	// Weather clock, terrain and stateful preparation precede simulation;
+	// ground queries and event consumers run after physics, before collection.
+	REQUIRE(timings.size() == 36);
 	const auto hasTiming = [&timings](const std::string_view name) {
 		return std::ranges::any_of(timings, [name](const auto &timing) { return timing.Name == name; });
 	};
 	CHECK(hasTiming("advance-animation-tracks"));
 	CHECK(hasTiming("evaluate-animations"));
 	CHECK(hasTiming("resolve-bones"));
+	for (const auto name :
+		 {"weather.clock", "weather.terrain", "weather.stateful", "weather.ground", "weather.runtime"}) {
+		CAPTURE(name);
+		CHECK(hasTiming(name));
+	}
 
 	engine::render::OverlayImage image;
 	image.Resize(1280, 720);
@@ -1337,33 +1287,14 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 	REQUIRE(id.IsValid());
 
 	std::shared_ptr<engine::script::Runtime> runtime;
+	const auto settings = universe.SettingsOf(id);
 	universe.Enter(id, [&](Store &store, Scheduler &systems) {
 		client::InstallPresentation(store, systems);
+		client::InstallClientWorldSystems(store, systems, settings.PhysicsTickRate);
+		REQUIRE(store.Resource<engine::physics::PhysicsWorld>());
+		(void)client::InstallDefaultCamera(store, systems);
 		const engine::ecs::Entity localPlayer = client::EnsureLocalPlayer(store);
 		REQUIRE(localPlayer != engine::ecs::NULL_ENTITY);
-		const engine::ecs::Entity starterPlayer = store.FindFirstRoot("StarterPlayer");
-		REQUIRE(starterPlayer != engine::ecs::NULL_ENTITY);
-		const engine::ecs::Entity starterScripts =
-			store.FindFirstChild(starterPlayer, "StarterPlayerScripts");
-		REQUIRE(starterScripts != engine::ecs::NULL_ENTITY);
-		const engine::ecs::Entity playerScripts =
-			store.FindFirstChild(localPlayer, engine::scene::PLAYER_SCRIPTS_NAME);
-		REQUIRE(playerScripts != engine::ecs::NULL_ENTITY);
-		constexpr std::array localScriptNames{"BladeborneHud", "BladeborneCamera"};
-		std::array<engine::ecs::Entity, localScriptNames.size()> templates{};
-		std::array<engine::ecs::Entity, localScriptNames.size()> copies{};
-		for (size_t index = 0; index < localScriptNames.size(); ++index) {
-			templates[index] = store.FindFirstChild(starterScripts, localScriptNames[index]);
-			copies[index] = store.FindFirstChild(playerScripts, localScriptNames[index]);
-			REQUIRE(templates[index] != engine::ecs::NULL_ENTITY);
-			REQUIRE(copies[index] != engine::ecs::NULL_ENTITY);
-			CHECK(copies[index] != templates[index]);
-		}
-		const engine::ecs::Entity serverScriptService = store.FindFirstRoot("ServerScriptService");
-		REQUIRE(serverScriptService != engine::ecs::NULL_ENTITY);
-		const engine::ecs::Entity serverScript =
-			store.FindFirstChild(serverScriptService, "BladeborneArenaServer");
-		REQUIRE(serverScript != engine::ecs::NULL_ENTITY);
 
 		engine::script::RuntimeLimits limits;
 		limits.Role = engine::script::HostRole::OfBoth();
@@ -1373,19 +1304,65 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 		INFO(error);
 		REQUIRE(error.empty());
 		REQUIRE(runtime != nullptr);
-		// Combined hosts run the server script and player copies; templates remain inert.
-		const std::array startedScripts{serverScript, copies[0], copies[1]};
-		REQUIRE(runtime->Costs().size() == startedScripts.size());
-		for (const auto script : startedScripts)
-			CHECK(std::ranges::count(runtime->Costs(), script, &engine::script::ScriptCost::Instance) == 1);
-		for (const auto script : templates)
-			CHECK(std::ranges::count(runtime->Costs(), script, &engine::script::ScriptCost::Instance) == 0);
+		REQUIRE(runtime->Costs().size() == BLADEBORNE_STARTUP_SCRIPT_COUNT);
 		CHECK(std::ranges::all_of(runtime->Costs(), &engine::script::ScriptCost::Completed));
-		const engine::ecs::Entity camera = InWorkspace(store, "BladeborneCamera");
-		REQUIRE(camera != engine::ecs::NULL_ENTITY);
-		REQUIRE(store.Resource<ActiveCamera>() != nullptr);
-		CHECK(store.Resource<ActiveCamera>()->Entity == camera);
-		CHECK(CountNamedDescendants(store, engine::scene::WorkspaceOf(store), "BladeborneCamera") == 1);
+		(void)engine::script::ResetPlayerGui(store, localPlayer);
+
+		const engine::ecs::Entity players = engine::scene::PlayersOf(store);
+		const auto *playerSettings = store.Get<engine::scene::PlayersServiceComponent>(players);
+		REQUIRE(playerSettings != nullptr);
+		CHECK(playerSettings->CharacterAutoLoads);
+		CHECK(engine::scene::CharacterOf(store, localPlayer) == engine::ecs::NULL_ENTITY);
+		auto *mutableSettings = store.GetMutable<engine::scene::PlayersServiceComponent>(players);
+		REQUIRE(mutableSettings != nullptr);
+		mutableSettings->CharacterAutoLoads = false;
+		std::vector<engine::ecs::Entity> spawned;
+		CHECK(engine::scene::UpdateRespawns(store, spawned) == 0);
+		CHECK(spawned.empty());
+		CHECK(engine::scene::CharacterOf(store, localPlayer) == engine::ecs::NULL_ENTITY);
+		mutableSettings->CharacterAutoLoads = true;
+		REQUIRE(engine::scene::LoadCharacter(store, localPlayer) != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity firstCharacter = engine::scene::CharacterOf(store, localPlayer);
+		REQUIRE(firstCharacter != engine::ecs::NULL_ENTITY);
+		CHECK(CountNamedDescendants(store, engine::scene::WorkspaceOf(store), "Player") == 1);
+		const auto *firstRig = store.Get<engine::scene::Character>(firstCharacter);
+		REQUIRE(firstRig != nullptr);
+		systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+		const auto *active = store.Resource<engine::scene::ActiveCamera>();
+		REQUIRE(active != nullptr);
+		const auto *subject = store.Get<engine::scene::CameraSubject>(active->Entity);
+		REQUIRE(subject != nullptr);
+		CHECK(subject->Target == firstRig->Humanoid);
+		CHECK(engine::scene::CameraSubjectRoot(store, active->Entity) == firstRig->Root);
+		const auto *firstCameraTransform = store.Get<Transform>(active->Entity);
+		REQUIRE(firstCameraTransform != nullptr);
+		const engine::core::Vector3 firstCameraPosition = firstCameraTransform->Frame.Position;
+		systems.RunPhases(store, Phase::Simulation, Phase::Simulation);
+		const auto *simulatedCameraTransform = store.Get<Transform>(active->Entity);
+		REQUIRE(simulatedCameraTransform != nullptr);
+		CHECK(simulatedCameraTransform->Frame.Position == firstCameraPosition);
+
+		CHECK(engine::scene::RemoveCharacter(store, localPlayer));
+		CHECK(engine::scene::CharacterOf(store, localPlayer) == engine::ecs::NULL_ENTITY);
+		REQUIRE(engine::scene::LoadCharacter(store, localPlayer) != engine::ecs::NULL_ENTITY);
+		const engine::ecs::Entity respawnedCharacter = engine::scene::CharacterOf(store, localPlayer);
+		REQUIRE(respawnedCharacter != engine::ecs::NULL_ENTITY);
+		CHECK(respawnedCharacter != firstCharacter);
+		CHECK(CountNamedDescendants(store, engine::scene::WorkspaceOf(store), "Player") == 1);
+		systems.RunPhases(store, Phase::PreRender, Phase::PreRender);
+		const auto *respawnedRig = store.Get<engine::scene::Character>(respawnedCharacter);
+		REQUIRE(respawnedRig != nullptr);
+		const auto *respawnedSubject = store.Get<engine::scene::CameraSubject>(active->Entity);
+		REQUIRE(respawnedSubject != nullptr);
+		CHECK(respawnedSubject->Target == respawnedRig->Humanoid);
+		CHECK(engine::scene::CameraSubjectRoot(store, active->Entity) == respawnedRig->Root);
+		const auto *respawnedCameraTransform = store.Get<Transform>(active->Entity);
+		REQUIRE(respawnedCameraTransform != nullptr);
+		const engine::core::Vector3 respawnedCameraPosition = respawnedCameraTransform->Frame.Position;
+		systems.RunPhases(store, Phase::Simulation, Phase::Simulation);
+		const auto *simulatedRespawnCamera = store.Get<Transform>(active->Entity);
+		REQUIRE(simulatedRespawnCamera != nullptr);
+		CHECK(simulatedRespawnCamera->Frame.Position == respawnedCameraPosition);
 
 		const engine::script::SourceCache *sources = store.Resource<engine::script::SourceCache>();
 		REQUIRE(sources != nullptr);
@@ -1397,19 +1374,13 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 
 		const engine::ecs::Entity starterGui = store.FindFirstRoot(engine::gui::STARTER_GUI);
 		REQUIRE(starterGui != engine::ecs::NULL_ENTITY);
-		const engine::ecs::Entity templateHud = store.FindFirstChild(starterGui, "BladeborneHUD");
-		REQUIRE(templateHud != engine::ecs::NULL_ENTITY);
-		CHECK(CountNamedDescendants(store, starterGui, "BladeborneHUD") == 1);
-		CHECK(CountNamedDescendants(store, templateHud, "Ability1") == 1);
-		CHECK(CountNamedDescendants(store, templateHud, "Minimap") == 1);
+		CHECK(store.FindFirstChild(starterGui, "BladeborneHUD") == engine::ecs::NULL_ENTITY);
 
-		CHECK(engine::gui::ResetPlayerGui(store, localPlayer) == 1);
 		const engine::ecs::Entity playerGui = store.FindFirstChild(localPlayer, engine::gui::PLAYER_GUI);
 		REQUIRE(playerGui != engine::ecs::NULL_ENTITY);
 		const engine::ecs::Entity liveHud = store.FindFirstChild(playerGui, "BladeborneHUD");
 		REQUIRE(liveHud != engine::ecs::NULL_ENTITY);
-		CHECK(CountNamedDescendants(store, playerGui, "BladeborneHUD") == 1);
-		CHECK(CountNamedDescendants(store, liveHud, "Hotbar") == 1);
+		CHECK(engine::scene::InPlayerGui(store, liveHud, localPlayer));
 		CHECK(CountNamedDescendants(store, liveHud, "Ability1") == 1);
 		CHECK(CountNamedDescendants(store, liveHud, "Minimap") == 1);
 		CHECK(CountNamedDescendants(store, liveHud, "HotbarSlot1") == 2);
@@ -1424,6 +1395,11 @@ TEST_CASE("the shipped Bladeborne world runs both single-player roles", "[client
 		request.Viewer = localPlayer;
 		engine::gui::Compiled compiled;
 		REQUIRE(compiled.Rebuild(store, request));
+		CHECK(compiled.Commands().Elements > 0);
+		CHECK(std::ranges::any_of(compiled.Commands().Commands, [&](const auto &command) {
+			return command.Kind == engine::gui::DrawKind::Text && !command.Text.empty() &&
+				   store.IsDescendantOf(command.Source, liveHud);
+		}));
 		const bool opaqueScreenCover =
 			std::ranges::any_of(compiled.Commands().Commands, [&](const auto &command) {
 				return command.Kind == engine::gui::DrawKind::Rectangle && command.Transparency == 0.0f &&
@@ -1484,8 +1460,8 @@ TEST_CASE(
 
 	universe.Enter(id, [&](Store &store, Scheduler &systems) {
 		client::InstallPresentation(store, systems);
-		engine::physics::PreparePhysicsWorld(store);
-		engine::physics::RegisterPhysicsSystems(systems);
+		REQUIRE(client::InstallDefaultCamera(store, systems));
+		client::InstallClientWorldSystems(store, systems);
 		const engine::ecs::Entity localPlayer = client::EnsureLocalPlayer(store);
 		REQUIRE(localPlayer != engine::ecs::NULL_ENTITY);
 
@@ -1512,48 +1488,34 @@ TEST_CASE(
 		CHECK(CountNamedDescendants(store, environment, "Cell Roof Panel 2") == 25);
 		CHECK(CountNamedDescendants(store, environment, "Cell Chase Vehicle") > 0);
 
-		size_t stormBodies = 0;
-		store.Each<const engine::physics::StormResponse>(
-			[&](engine::ecs::Entity, const engine::physics::StormResponse &) { stormBodies++; }
-		);
-		size_t stormLinks = 0;
-		store.Each<const engine::physics::StormLink>(
-			[&](engine::ecs::Entity, const engine::physics::StormLink &) { stormLinks++; }
-		);
-		CHECK(stormBodies >= 80);
-		CHECK(stormLinks >= 60);
-
-		const engine::physics::Storm *storm = engine::physics::StormOf(store);
-		REQUIRE(storm != nullptr);
-		CHECK(storm->State.Parameters.Energy == Approx(0.72f));
-		CHECK(storm->State.Parameters.CoreRadius == Approx(34.0f));
-		CHECK(storm->State.Parameters.InfluenceRadius == Approx(260.0f));
-		CHECK(storm->State.Parameters.PeakTangentialSpeed == Approx(92.0f));
-		CHECK(storm->State.Parameters.PeakInflowSpeed == Approx(34.0f));
-		CHECK(storm->State.Parameters.PeakUpdraftSpeed == Approx(58.0f));
-		CHECK(storm->State.Parameters.PeakDowndraftSpeed == Approx(32.0f));
-		CHECK(storm->State.Parameters.SurfaceOutflowSpeed == Approx(28.0f));
-		CHECK(storm->State.Parameters.PressureDrop == Approx(72.0f));
-		CHECK(storm->State.Parameters.Humidity == Approx(.82f));
-		CHECK(storm->State.Parameters.RainRate == Approx(.68f));
-		CHECK(storm->State.Parameters.Turbulence == Approx(13.0f));
-		CHECK(storm->State.Parameters.GroundFriction == Approx(.28f));
-		CHECK(storm->State.Parameters.DebrisDensity == Approx(.65f));
-		CHECK(storm->State.Parameters.VortexTightness == Approx(2.25f));
-		CHECK(storm->State.Parameters.TopHeight == Approx(360.0f));
-		CHECK((storm->State.Parameters.UpperWind == engine::core::Vector3{18.0f, 0.0f, -6.0f}));
-		CHECK((storm->State.Parameters.TranslationVelocity == engine::core::Vector3{4.0f, 0.0f, 1.5f}));
+		REQUIRE(runtime->Run(R"(
+			assert(World:Count("Tornado.Response") >= 80)
+			assert(World:Count("Tornado.Link") >= 60)
+			local state = workspace:FindFirstChild("StormAnchor", true):GetComponent("Tornado.State")
+			assert(state ~= nil)
+			local expected = {
+				Energy = 0.72, CoreRadius = 34, InfluenceRadius = 260,
+				PeakTangentialSpeed = 92, PeakInflowSpeed = 34, PeakUpdraftSpeed = 58,
+				PeakDowndraftSpeed = 32, SurfaceOutflowSpeed = 28, PressureDrop = 72,
+				Humidity = 0.82, RainRate = 0.68, Turbulence = 13, GroundFriction = 0.28,
+				DebrisDensity = 0.65, VortexTightness = 2.25, TopHeight = 360,
+			}
+			for field, wanted in expected do
+				assert(math.abs(state[field] - wanted) < 0.0001, field)
+			end
+			assert(state.UpperWind == Vector3.new(18, 0, -6))
+			assert(state.TranslationVelocity == Vector3.new(4, 0, 1.5))
+		)"));
 
 		REQUIRE(runtime->Run(R"(
 			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"motion","x":-15,"y":5,"z":25}')
 			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"rotation","counterClockwise":false}')
 		)"));
-		storm = engine::physics::StormOf(store);
-		REQUIRE(storm != nullptr);
-		CHECK(storm->State.Parameters.TranslationVelocity.X == Approx(-15.0f));
-		CHECK(storm->State.Parameters.TranslationVelocity.Y == Approx(5.0f));
-		CHECK(storm->State.Parameters.TranslationVelocity.Z == Approx(25.0f));
-		CHECK_FALSE(storm->State.Parameters.CounterClockwise);
+		REQUIRE(runtime->Run(R"(
+			local state = workspace:FindFirstChild("StormAnchor", true):GetComponent("Tornado.State")
+			assert(state.TranslationVelocity == Vector3.new(-15, 5, 25))
+			assert(not state.CounterClockwise)
+		)"));
 
 		const engine::ecs::Entity playerGui = store.FindFirstChild(localPlayer, engine::gui::PLAYER_GUI);
 		REQUIRE(playerGui != engine::ecs::NULL_ENTITY);
@@ -1611,20 +1573,19 @@ TEST_CASE(
 		REQUIRE(field != nullptr);
 		CHECK_FALSE(condensation->Enabled);
 		CHECK(condensation->Rate == Approx(0.0f));
-		CHECK_FALSE(
-			engine::scene::HasGpuParticleLayer(*field, engine::scene::GpuParticleLayer::Condensation)
-		);
+		CHECK_FALSE(engine::scene::HasGpuParticleLayer(*field, engine::scene::GpuParticleLayer::First));
 
 		REQUIRE(runtime->Run(R"(
 			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"preset","name":"EF5"}')
 		)"));
-		storm = engine::physics::StormOf(store);
-		REQUIRE(storm != nullptr);
-		CHECK(storm->State.Parameters.CoreRadius == Approx(45.0f));
+		REQUIRE(runtime->Run(R"(
+			local state = workspace:FindFirstChild("StormAnchor", true):GetComponent("Tornado.State")
+			assert(math.abs(state.CoreRadius - 45) < 0.0001)
+		)"));
 		systems.Tick(store, STEP);
-		storm = engine::physics::StormOf(store);
-		REQUIRE(storm != nullptr);
-		CHECK(storm->State.ElapsedSeconds > 0.0f);
+		REQUIRE(runtime->Run(R"(
+			assert(workspace:FindFirstChild("StormAnchor", true):GetComponent("Tornado.State").ElapsedSeconds > 0)
+		)"));
 
 		// The first fixed step delivers the user-lane request after the server
 		// heartbeat. The second consumes its refresh flag without a long physics run.
@@ -1657,9 +1618,9 @@ TEST_CASE(
 		REQUIRE(runtime->Run(R"(
 			game:GetService("ReplicatedStorage").TornadoControl:FireServer('{"kind":"reset"}')
 		)"));
-		storm = engine::physics::StormOf(store);
-		REQUIRE(storm != nullptr);
-		CHECK(storm->State.ElapsedSeconds == Approx(0.0f));
+		REQUIRE(runtime->Run(R"(
+			assert(workspace:FindFirstChild("StormAnchor", true):GetComponent("Tornado.State").ElapsedSeconds == 0)
+		)"));
 		systems.Tick(store, STEP);
 
 		CHECK(childCount(environment) == 26);
@@ -1671,9 +1632,10 @@ TEST_CASE(
 		CHECK(
 			FirstNamedDescendant(store, resetInteraction, "Wood Sign Wind Link") != engine::ecs::NULL_ENTITY
 		);
-		storm = engine::physics::StormOf(store);
-		REQUIRE(storm != nullptr);
-		CHECK(storm->State.Parameters.Energy == Approx(0.72f));
-		CHECK(storm->State.Parameters.CoreRadius == Approx(34.0f));
+		REQUIRE(runtime->Run(R"(
+			local state = workspace:FindFirstChild("StormAnchor", true):GetComponent("Tornado.State")
+			assert(math.abs(state.Energy - 0.72) < 0.0001)
+			assert(math.abs(state.CoreRadius - 34) < 0.0001)
+		)"));
 	});
 }

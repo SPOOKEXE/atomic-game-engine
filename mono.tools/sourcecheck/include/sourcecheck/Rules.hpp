@@ -10,7 +10,7 @@
 // | `ecs-copy` | rule 2 | a long-lived object holding data the store owns |
 // | `world-pointer` | rule 3 | a type marked as crossing that reaches a pointer |
 // | `name-id` | rule 4 | `core::Name::Id()` reaching a serialiser |
-// | `public-header` | §3 | a header in `include/` nothing outside the module includes |
+// | `public-header` | §3 | a header in `include/` unreachable from external or application demand |
 //
 // Each rule documents its limits. Fixtures cover both a named refusal and a
 // permitted input.
@@ -153,12 +153,12 @@ namespace sourcecheck {
 	// @return Findings, waived or open.
 	std::vector<Finding> CheckNameId(const Tree &tree);
 
-	// A public header is one somebody outside the module includes.
+	// A public header is consumed outside its module, or required by a consumed public header.
 	//
-	// **Catches** a header under a module's `include/` that no file outside that
-	// module includes, and that the module's own `app/` does not include either -
-	// a program consumes its own surface from its `main.cpp`, and counting that
-	// is what keeps every program's headers from being reported as private.
+	// **Catches** a header under a module's `include/` unreachable through published
+	// header includes from an external-module or own-`app/` include. A program consumes
+	// its own surface from its `main.cpp`, so that is a demand root too. Same-module
+	// sources and tests do not create roots. A cycle without a root remains advisory.
 	//
 	// **Does not fail the build, ever.** Root `AGENTS.md` warns that an unwired
 	// subsystem is not dead code: `IssueContentGrant` and the viewpoint pair are

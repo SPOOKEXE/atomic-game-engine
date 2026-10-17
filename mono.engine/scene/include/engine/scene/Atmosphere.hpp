@@ -2,20 +2,9 @@
 
 // The sky between the eye and everything else, and the sky above it.
 //
-// **There is no `Fog` type here, and its absence is the decision.**
-// `docs/ARCH_REVIEW.md` D4 reads the tree as having no fog at all; it has, in
-// the one place it belongs. `LightingServiceComponent::FogColor`, `FogStart` and
-// `FogEnd` are authored on the `Lighting` service, `LightingOf` resolves them
-// into `WorldLighting`, and `render::ViewRecording` puts them in a uniform. A
-// `scene::Fog` component would be a second answer to what a world's distance
-// fade is, which is rule 2 and is exactly the mistake `Humanoid::Radius` was
-// deleted for.
-//
-// **`Atmosphere` is separate because linear fog cannot express it.** Two
-// distances and a colour give a fade that is the same looking up as looking
-// along the ground; scattering is not. Roblox draws the same line:
-// `Atmosphere` is an instance under `Lighting`, while the legacy fog remains
-// three properties on that service.
+// `Atmosphere` and `FogEffect` are separate authored instances beneath
+// `Lighting`. Linear fog has a fixed distance fade, while atmosphere scatters
+// light differently by view direction. Both resolve into presentation state.
 //
 // **Both of these are per-world presentation state and neither reaches a
 // simulation input.** That is decision 20: "render graphs may vary per platform.
@@ -37,6 +26,9 @@
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Entity.hpp>
+#include <engine/scene/WeatherClock.hpp>
+#include <engine/scene/WeatherCompute.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -312,6 +304,10 @@ namespace engine::scene {
 		AtmosphereProcedural AirCompute;
 		Clouds CloudLayer;
 		CloudCompute CloudVolume;
+		WeatherCompute Weather;
+		WeatherClock Clock;
+		// Local timeline corrections invalidate retained weather histories.
+		uint64_t WeatherHistoryRevision = 0;
 		//@}
 
 		// Deterministic animation time supplied by the world's simulation clock.
@@ -329,6 +325,12 @@ namespace engine::scene {
 		bool HasAtmosphereCompute = false;
 		// The selected cloud provider owns compute controls.
 		bool HasCloudCompute = false;
+		// Weather controls belong to the selected cloud provider only.
+		bool HasWeatherCompute = false;
+		// The selected provider carries an accepted replicated clock.
+		bool HasWeatherClock = false;
+		// Stable provider identity separates same-world layers and replacement history.
+		ecs::Entity CloudProvider = ecs::NULL_ENTITY;
 
 		// Explicit padding, for the reason `Components.hpp` opens with.
 		uint8_t Reserved[3] = {};

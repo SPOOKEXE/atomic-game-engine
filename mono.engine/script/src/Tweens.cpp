@@ -17,6 +17,7 @@
 #include <engine/core/types/UDim.hpp>
 #include <engine/core/types/Vector2.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/script/InstanceShim.hpp>
 #include <engine/script/Tweens.hpp>
 
 #include <algorithm>
@@ -232,7 +233,8 @@ namespace engine::script {
 		ecs::Entity target,
 		const core::TweenInfo &info,
 		std::vector<TweenGoal> goals,
-		std::vector<ecs::Entity> &dropped
+		std::vector<ecs::Entity> &dropped,
+		bool clientExecution
 	) {
 		if (Records.size() >= MAXIMUM) {
 			// At the cap, the oldest *finished* record is reclaimed - see
@@ -252,14 +254,15 @@ namespace engine::script {
 		// Unnamed: a name is for a thing a person or a save file has to be able
 		// to point at, and nothing points at a tween.
 		//
-		// **Predicted on a replica and authoritative anywhere else.** A tween's
+		// **Predicted for a client caller, including in a shared host.** A tween's
 		// entity carries no component, is never sent and never crosses a world,
 		// so which range it comes from is invisible - but a replica *refuses* an
 		// authoritative mint, and a client animating its own interface is the
 		// ordinary case rather than an edge one. The reserved range is exactly
 		// what it is for.
 		Record record;
-		record.Tween = store.AdoptOnly() ? store.CreatePredicted() : store.Create();
+		record.ClientExecution = clientExecution || store.AdoptOnly();
+		record.Tween = record.ClientExecution ? store.CreatePredicted() : store.Create();
 		if (record.Tween == ecs::NULL_ENTITY) {
 			// The index range is exhausted, which `Store::Create` has already
 			// said out loud. Nothing to hold a record against.
@@ -340,10 +343,11 @@ namespace engine::script {
 		return false;
 	}
 
-	size_t TweenTable::CancelFor(ecs::Entity target) {
+	size_t TweenTable::CancelFor(ecs::Entity target, bool clientExecution) {
 		size_t stopped = 0;
 		for (Record &record : Records) {
-			if (record.Target != target || record.State != TweenState::Playing) {
+			if (record.Target != target || record.State != TweenState::Playing ||
+				(clientExecution && !record.ClientExecution)) {
 				continue;
 			}
 			record.State = TweenState::Cancelled;
@@ -434,7 +438,13 @@ namespace engine::script {
 			// that stopped existing under a running tween is the same non-event
 			// as a target that was never a `Part`, and there is nowhere at a
 			// barrier to report it to.
-			(void)store.SetProperty(record.Target, goal.Property, bytes, goal.Size);
+			for (const ecs::PropertyDescriptor &property : store.PropertiesOf(record.Target)) {
+				if (property.Name != goal.Property) continue;
+				(void)WriteInstanceProperty(
+					store, record.Target, property, bytes, goal.Size, record.ClientExecution
+				);
+				break;
+			}
 		}
 	}
 

@@ -1,6 +1,7 @@
 #pragma once
 
 // @tier L12 · shared
+// arch-waiver public-header: Caller-fed lag-compensation API; games own hit tests and component lookups.
 
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>

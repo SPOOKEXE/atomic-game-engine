@@ -16,7 +16,6 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/physics/Pipeline.hpp>
-#include <engine/physics/Storm.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
@@ -234,27 +233,29 @@ TEST_CASE("active scenes submit a collected GPU particle field", "[client][activ
 	using namespace engine;
 	effects::RegisterEffectComponents();
 	scene::RegisterSceneClasses();
-	physics::RegisterStormComponents();
 	render::RegisterPresentationComponents();
 	Universe worlds({.Mode = world::ExecutionMode::WorldParallel});
-	const auto stormWorld = worlds.Create({.Name = Name("Storm")});
-	worlds.Enter(stormWorld, [](Store &store) {
+	const auto fieldWorld = worlds.Create({.Name = Name("Field")});
+	worlds.Enter(fieldWorld, [](Store &store) {
 		const auto camera = store.CreateInstance(scene::CameraClass(), "Eye");
 		store.Set(camera, scene::Transform{core::CFrame(Vector3{0, 80, 240})});
 		store.Set(camera, scene::Camera{});
 		store.SetResource(scene::ActiveCamera{camera});
 		store.SetResource(render::DrawList{});
-		physics::Storm storm;
-		storm.State.Position = {12, 0, -8};
-		storm.State.ElapsedSeconds = 42.0f;
-		physics::SetStorm(store, storm);
-		const auto field = store.CreateInstance(ecs::Classes::Find(Name("GpuParticleField")), "Funnel");
-		store.Set(field, scene::GpuParticleField{.RequestedCount = 262'144, .Seed = 73});
+		const auto field = store.CreateInstance(ecs::Classes::Find(Name("GpuParticleField")), "Particles");
+		store.Set(field, scene::Transform{core::CFrame(Vector3{12, 0, -8})});
+		scene::GpuParticleField particles{};
+		particles.RequestedCount = 262'144;
+		particles.Seed = 73;
+		particles.SpawnSamples.push_back(
+			{.Position = {1, 2, 3}, .Lifetime = 4, .Velocity = {0, 5, 0}, .Layer = 0}
+		);
+		store.Set(field, particles);
 	});
 
 	client::ActiveSceneCollector collector;
 	const std::array demands{
-		client::ActiveSceneDemand{world::Presentation{stormWorld, .016f, .25f}, Name("storm-pipeline")},
+		client::ActiveSceneDemand{world::Presentation{fieldWorld, .016f, .25f}, Name("field-pipeline")},
 	};
 	REQUIRE(collector.Collect(worlds, demands, {960, 540}) == 1);
 	const client::ActiveScene &scene = collector.Scenes().front();
@@ -262,10 +263,11 @@ TEST_CASE("active scenes submit a collected GPU particle field", "[client][activ
 	REQUIRE(scene.View.GpuParticles.has_value());
 	CHECK(scene.View.GpuParticles->Field.Seed == 73);
 	CHECK(scene.View.GpuParticles->Field.RequestedCount == 262'144);
-	CHECK(scene.View.GpuParticles->Centre == Vector3{12, 0, -8});
-	CHECK(scene.View.GpuParticles->Seconds == 42.0f);
+	CHECK(scene.View.GpuParticles->Frame.Position == Vector3{12, 0, -8});
+	REQUIRE(scene.View.GpuParticles->Field.SpawnSamples.size() == 1);
+	CHECK(scene.View.GpuParticles->Field.SpawnSamples.front().Position == Vector3{1, 2, 3});
 
-	collector.SubmitBatch(stormWorld, scene.View, 960, 540, false, {}, [](std::span<render::View> views) {
+	collector.SubmitBatch(fieldWorld, scene.View, 960, 540, false, {}, [](std::span<render::View> views) {
 		REQUIRE(views.size() == 1);
 		REQUIRE(views.front().GpuParticles.has_value());
 		CHECK(views.front().GpuParticles->Field.Seed == 73);
@@ -279,18 +281,16 @@ TEST_CASE(
 	using namespace engine;
 	client::ActiveScene activeScene;
 	activeScene.Frame = std::make_unique<render::WorldViewFrame>();
-	activeScene.Frame->GpuParticles = render::GpuParticleFieldView{
-		.Field = {.RequestedCount = 262'144, .Seed = 73},
-		.Storm = scene::EfPreset(scene::EfCategory::EF3),
-		.Centre = {12, 0, -8},
-		.Seconds = 42.0f,
-	};
+	render::GpuParticleFieldView particles{};
+	particles.Field.RequestedCount = 262'144;
+	particles.Field.Seed = 73;
+	particles.Frame = core::CFrame(Vector3{12, 0, -8});
+	activeScene.Frame->GpuParticles = particles;
 	render::View view;
 	client::BindDisplayedSceneFields(&activeScene, view);
 	REQUIRE(view.GpuParticles.has_value());
 	CHECK(view.GpuParticles->Field.Seed == 73);
-	CHECK(view.GpuParticles->Centre == Vector3{12, 0, -8});
-	CHECK(view.GpuParticles->Seconds == 42.0f);
+	CHECK(view.GpuParticles->Frame.Position == Vector3{12, 0, -8});
 
 	client::BindDisplayedSceneFields(nullptr, view);
 	CHECK_FALSE(view.GpuParticles.has_value());
@@ -2004,6 +2004,7 @@ TEST_CASE("foreground portal bodies come from the viewer's replica", "[client][p
 }
 
 TEST_CASE("a mapped follow arm keeps the pose the camera already has", "[client][camera-portal-world]") {
+	const bool rebased = GENERATE(false, true);
 	// **The arm and the eye are one decision, and this is where they came apart.**
 	// A follow camera whose subject has just walked through a same-world mouth
 	// swings its arm back out through the mouth it came in by, and `PlaceCamera`
@@ -2026,13 +2027,25 @@ TEST_CASE("a mapped follow arm keeps the pose the camera already has", "[client]
 		REQUIRE(engine::scene::GatherPortalSeams(store, seams) == 2);
 		REQUIRE(engine::scene::PlaceCamera(store));
 		placed = store.Get<engine::scene::Transform>(pair.Camera)->Frame;
+		if (rebased) {
+			engine::scene::CameraPortalView history;
+			REQUIRE(
+				engine::scene::StepCameraPortalView(
+					history, universe.NameOf(pair.World).Text(), placed, {}
+				) == engine::scene::CameraPortalStep::Settled
+			);
+			REQUIRE(
+				engine::scene::RebaseCameraPortalView(history, engine::scene::SeamMapping(seams.front()))
+			);
+			REQUIRE(history.Route.empty());
+			REQUIRE((history.FromInput.Place({}).Position).Magnitude() > 1.0f);
+			store.Set(pair.Camera, history);
+		}
 	});
 
 	// The arm really did cross, and the map is what carried it: the eye is in
 	// the plain's chart, twelve studs out from the mouth, rather than up the
 	// corridor where the orbit was. A case that stopped here would prove nothing.
-	const engine::core::CFrame orbit = placed * engine::core::CFrame{}.Inverse();
-	(void)orbit;
 	CHECK(placed.Position.X == Catch::Approx(0.0f).margin(0.5f));
 	CHECK(placed.Position.Z == Catch::Approx(12.0f).margin(0.5f));
 
@@ -2043,7 +2056,7 @@ TEST_CASE("a mapped follow arm keeps the pose the camera already has", "[client]
 	resolved = client::ResolveCameraPortalWorld(universe, pair.World, pair.World, eye, lens);
 
 	// The world is unchanged - one world holds both charts - and the pose is
-	// untouched, because the route has no map of its own to compose onto it.
+	// untouched. A body-rebased empty route must discard its previous input map.
 	CHECK(resolved == pair.World);
 	CHECK(eye.FuzzyEq(placed, .0001f));
 }

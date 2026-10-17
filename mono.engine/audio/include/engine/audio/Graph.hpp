@@ -171,8 +171,10 @@ namespace engine::audio {
 		// Host incarnation established by the last SetSound command.
 		uint64_t PlaybackGeneration = 0;
 
-		// `Player`: whether it is advancing.
+		// `Player`: whether playback is armed.
 		bool Playing = false;
+		// `Player`: retained Play deadline; no source frames advance before it.
+		uint64_t NotBeforeSample = 0;
 
 		// `Player`: whether it returns to the start rather than stopping.
 		bool Looping = false;

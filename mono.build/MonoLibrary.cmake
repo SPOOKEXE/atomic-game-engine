@@ -132,9 +132,13 @@ function(_mono_add_shaders name target defines)
 	foreach(shader IN LISTS sources)
 		get_filename_component(shader_name "${shader}" NAME)
 		set(spv "${stage}/${shader_name}.spv")
+		get_source_file_property(shader_options "${shader}" MONO_GLSLC_OPTIONS)
+		if(shader_options STREQUAL "NOTFOUND")
+			set(shader_options "")
+		endif()
 		add_custom_command(
 			OUTPUT "${spv}"
-			COMMAND ${MONO_GLSLC} ${define_flags} -I "${source_dir}" "${shader}" -o "${spv}"
+			COMMAND ${MONO_GLSLC} ${define_flags} ${shader_options} -I "${source_dir}" "${shader}" -o "${spv}"
 			# The compiler is a dependency, not just a command. Without it a
 			# shaderc bump leaves every .spv on disk stale, and the mismatch
 			# surfaces as a pipeline that fails to create. The `.glsl` fragments

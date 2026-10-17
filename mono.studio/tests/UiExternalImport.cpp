@@ -1,3 +1,7 @@
+#include "UiExternalImport.hpp"
+
+#include "UiImportAdapters.hpp"
+
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
@@ -14,8 +18,6 @@
 #include <filesystem>
 #include <fstream>
 #include <studio/Commands.hpp>
-#include <studio/UiExternalImport.hpp>
-#include <studio/UiImportAdapters.hpp>
 
 TEST_SUITE_ID("studio.ui_external_import")
 

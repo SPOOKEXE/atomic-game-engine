@@ -1,11 +1,12 @@
 #include "EnvironmentModes.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/gui/Components.hpp>
-#include <engine/physics/Storm.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/SpatialCanvas.hpp>
@@ -15,12 +16,136 @@
 #include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
+#include <engine/weather/Runtime.hpp>
+#include <engine/weather/StatefulRuntime.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <optional>
 
 namespace engine::render {
+	namespace {
+		void RetireWeatherCheckpoint(WorldViewFrame &frame) {
+			if (!frame.WeatherCheckpoint.empty()) {
+				std::vector<std::byte>{}.swap(frame.WeatherCheckpoint);
+				frame.WeatherCheckpointVersion =
+					frame.WeatherCheckpointVersion == UINT64_MAX ? 1 : frame.WeatherCheckpointVersion + 1;
+			}
+			frame.WeatherCheckpointTick = 0;
+			frame.WeatherCheckpointEpoch = 0;
+			frame.WeatherCheckpointRevision = 0;
+			frame.WeatherCheckpointSource = ecs::NULL_ENTITY;
+		}
+
+		void CollectWeatherSimulationLayer(ecs::Store &store, WorldViewFrame &frame, bool newWorld) {
+			const auto &environment = frame.Lighting.EnvironmentState;
+			frame.WeatherTerrainRevision = environment.HasWeatherCompute && environment.Weather.Enabled
+											   ? environment.Weather.TerrainRevision
+											   : 0;
+			if (!environment.HasWeatherCompute || !environment.Weather.Enabled ||
+				environment.CloudProvider == ecs::NULL_ENTITY) {
+				frame.WeatherSimulationLayer = {};
+				frame.WeatherSimulationLayerSource = ecs::NULL_ENTITY;
+				return;
+			}
+			store.Observe<ecs::InstanceName>();
+			store.Observe<ecs::Hierarchy>();
+			store.Observe<scene::WeatherCompute>();
+			store.Observe<scene::WeatherAcceptedDefinition>();
+			const auto nameWrites = store.ComponentChangeVersion<ecs::InstanceName>();
+			const auto hierarchyWrites = store.ComponentChangeVersion<ecs::Hierarchy>();
+			const auto definitionWrites = store.ComponentChangeVersion<scene::WeatherCompute>();
+			const auto acceptedWrites = store.ComponentChangeVersion<scene::WeatherAcceptedDefinition>();
+			const auto acceptedMembership =
+				store.ComponentMembershipVersion<scene::WeatherAcceptedDefinition>();
+			const bool changed = newWorld ||
+								 frame.WeatherSimulationLayerSource != environment.CloudProvider ||
+								 frame.WeatherLayerNameWrites != nameWrites ||
+								 frame.WeatherLayerHierarchyWrites != hierarchyWrites ||
+								 frame.WeatherLayerDefinitionWrites != definitionWrites ||
+								 frame.WeatherLayerAcceptedWrites != acceptedWrites ||
+								 frame.WeatherLayerAcceptedMembership != acceptedMembership;
+			// Accepted identity survives pending renames. Prefer the existing ECS-owned
+			// string so even a changed world need not allocate another temporary path.
+			std::string_view canonical;
+			if (const auto *accepted = store.Get<scene::WeatherAcceptedDefinition>(environment.CloudProvider))
+				canonical = accepted->Layer;
+			if (canonical.empty()) {
+				if (const auto *cache = store.Resource<weather::WeatherRuntimeCache>())
+					for (const auto &layer : cache->Layers)
+						if (layer.Provider == environment.CloudProvider && !layer.AmbiguousIdentity) {
+							canonical = layer.Layer;
+							break;
+						}
+			}
+			if (!canonical.empty()) {
+				if (canonical.size() > scene::MAX_WEATHER_STREAM_LAYER_BYTES)
+					frame.WeatherSimulationLayer = {};
+				else if (frame.WeatherSimulationLayer.Text() != canonical)
+					frame.WeatherSimulationLayer = core::Name(canonical);
+			} else if (changed) {
+				const auto layer = weather::WeatherLayerName(store, environment.CloudProvider);
+				frame.WeatherSimulationLayer = layer.empty() ? core::Name{} : core::Name(layer);
+			}
+			frame.WeatherSimulationLayerSource = environment.CloudProvider;
+			frame.WeatherLayerNameWrites = nameWrites;
+			frame.WeatherLayerHierarchyWrites = hierarchyWrites;
+			frame.WeatherLayerDefinitionWrites = definitionWrites;
+			frame.WeatherLayerAcceptedWrites = acceptedWrites;
+			frame.WeatherLayerAcceptedMembership = acceptedMembership;
+		}
+
+		void CollectWeatherCheckpoint(ecs::Store &store, WorldViewFrame &frame, bool newWorld) {
+			const auto &environment = frame.Lighting.EnvironmentState;
+			store.Observe<weather::StatefulWeatherCheckpoint>();
+			const auto changeVersion = store.ComponentChangeVersion<weather::StatefulWeatherCheckpoint>();
+			const bool medium =
+				environment.CloudLayer.Cover > 0 && environment.CloudLayer.Density > 0 &&
+				(environment.CloudLayer.Enabled ||
+				 (environment.Weather.ShadowsEnabled && environment.Weather.ShadowStrength > 0 &&
+				  environment.Weather.ShadowDistanceMetres > 0));
+			const auto *checkpoint =
+				environment.HasWeatherCompute && environment.Weather.Enabled && environment.HasClouds &&
+						medium && scene::ValidWeatherCompute(environment.Weather) &&
+						environment.Weather.Mode == scene::WeatherMode::Stateful
+					? store.Get<weather::StatefulWeatherCheckpoint>(environment.CloudProvider)
+					: nullptr;
+			if (!checkpoint || checkpoint->Bytes.empty() ||
+				checkpoint->Bytes.size() > weather::CheckpointLimits{}.MaximumBytes ||
+				checkpoint->Epoch == 0 || checkpoint->Revision != environment.Weather.DefinitionRevision ||
+				(environment.HasWeatherClock && checkpoint->Epoch != environment.Clock.Epoch)) {
+				RetireWeatherCheckpoint(frame);
+				frame.WeatherCheckpointChangeVersion = changeVersion;
+				return;
+			}
+			const bool replaced = newWorld || frame.WeatherCheckpointSource != environment.CloudProvider ||
+								  frame.WeatherCheckpointTick != checkpoint->Tick ||
+								  frame.WeatherCheckpointEpoch != checkpoint->Epoch ||
+								  frame.WeatherCheckpointRevision != checkpoint->Revision;
+			const bool changed = changeVersion != frame.WeatherCheckpointChangeVersion;
+			// Dirty rows identify same-metadata edits until ClearChanges. Past that
+			// watermark, a missed write requires a conservative refresh of this one provider.
+			const bool selectedChanged =
+				changed && (store.Changed<weather::StatefulWeatherCheckpoint>(environment.CloudProvider) ||
+							frame.WeatherCheckpointChangeVersion <
+								store.ComponentClearedChangeVersion<weather::StatefulWeatherCheckpoint>());
+			if (replaced || frame.WeatherCheckpoint.empty() ||
+				(selectedChanged && frame.WeatherCheckpoint != checkpoint->Bytes)) {
+				ENGINE_PROFILE_CAT("weather checkpoint collect", core::ProfileCategory::Render);
+				frame.WeatherCheckpoint = checkpoint->Bytes;
+				frame.WeatherCheckpointSource = environment.CloudProvider;
+				frame.WeatherCheckpointTick = checkpoint->Tick;
+				frame.WeatherCheckpointEpoch = checkpoint->Epoch;
+				frame.WeatherCheckpointRevision = checkpoint->Revision;
+				frame.WeatherCheckpointVersion =
+					frame.WeatherCheckpointVersion == UINT64_MAX ? 1 : frame.WeatherCheckpointVersion + 1;
+				core::Metrics::Count("render.weather.checkpoint_collect_bytes", checkpoint->Bytes.size());
+				core::Metrics::Count("render.weather.checkpoint_collect_copies", 1);
+			}
+			frame.WeatherCheckpointChangeVersion = changeVersion;
+		}
+	}
+
 	bool PrepareWorldShaders(
 		ecs::Store &store,
 		core::Name owner,
@@ -134,8 +259,20 @@ namespace engine::render {
 		view.JointFrames = frame.Joints;
 		view.Lighting = frame.Lighting;
 		view.CloudDensity = frame.CloudDensity;
+		view.WeatherCheckpoint = frame.WeatherCheckpoint;
+		view.WeatherSimulationLayer = frame.WeatherSimulationLayer;
+		view.WeatherTerrainRevision = frame.WeatherTerrainRevision;
+		view.WeatherCheckpointVersion = frame.WeatherCheckpointVersion;
+		view.WeatherCheckpointTick = frame.WeatherCheckpointTick;
+		view.WeatherCheckpointEpoch = frame.WeatherCheckpointEpoch;
+		view.WeatherCheckpointRevision = frame.WeatherCheckpointRevision;
 		view.Lighting.Volumes = camera.Volumes;
 		view.Lighting.VolumeCount = camera.VolumeCount;
+		if (camera.WeatherEffects.HasLighting) view.Lighting = camera.WeatherEffects.Lighting;
+		view.WeatherParticles =
+			camera.WeatherEffects.Precipitation
+				? std::span<const GpuParticleFieldView>(&*camera.WeatherEffects.Precipitation, 1)
+				: std::span<const GpuParticleFieldView>{};
 		view.OverrideLighting = true;
 		view.Lights = camera.Lights;
 		view.Surfaces = camera.Surfaces;
@@ -143,6 +280,8 @@ namespace engine::render {
 		view.RibbonRuns = camera.Ribbons.Runs;
 		view.Particles = frame.Particles.Batches;
 		view.ParticleSeams = frame.Particles.Seams;
+		view.ParticleWorld = binding.World;
+		view.ParticleWorldName = frame.Name;
 		view.ParticleRevision = frame.Particles.Revision;
 		view.ParticleLayoutRevision = frame.Particles.LayoutRevision;
 		view.ParticleResidentRevision = frame.Particles.ResidentRevision;
@@ -150,6 +289,11 @@ namespace engine::render {
 		view.ParticleDelta = frame.ParticleDelta;
 		view.ParticleBlocks = frame.Particles.BlockCount;
 		view.GpuParticles = frame.GpuParticles;
+		if (view.GpuParticles)
+			core::Metrics::Count(
+				"render.gpu_particle_field.sample_bind_bytes",
+				view.GpuParticles->Field.SpawnSamples.size() * sizeof(scene::GpuParticleSpawnSample)
+			);
 		view.Portals = frame.Portals;
 		view.EyeImage = 0;
 		view.EyeTransparentImages = {};
@@ -173,62 +317,42 @@ namespace engine::render {
 		frame.Tick = time.Tick;
 		frame.Seconds = time.Elapsed;
 		frame.ParticleDelta = advanced ? time.Delta : 0.0f;
-		frame.GpuParticles.reset();
-		frame.Lighting = scene::LightingOf(store);
-		if (newWorld) {
-			frame.CloudDensity.reset();
-			frame.CloudParameters.reset();
-		}
-		if (const auto *storm = physics::StormOf(store)) {
-			bool cloudInputsChanged = false;
-			if (frame.CloudParameters) {
-				auto previous = *frame.CloudParameters;
-				previous.Energy = storm->State.Parameters.Energy;
-				const float energyChange =
-					std::abs(frame.CloudParameters->Energy - storm->State.Parameters.Energy);
-				// Lifecycle energy evolves every tick. Rebuild immediately for a
-				// changed preset or a paused edit, and at a visible energy step.
-				cloudInputsChanged = previous != storm->State.Parameters || energyChange >= 0.05f ||
-									 (frame.CloudBuiltSeconds == time.Elapsed && energyChange > 0.0f);
-			}
-			store.Each<const scene::GpuParticleField>([&](ecs::Entity, const scene::GpuParticleField &field) {
-				if (!frame.GpuParticles.has_value()) {
-					frame.GpuParticles = GpuParticleFieldView{
-						field, storm->State.Parameters, storm->State.Position, storm->State.ElapsedSeconds
-					};
-				}
-			});
-			if (!frame.CloudDensity || cloudInputsChanged || time.Elapsed < frame.CloudBuiltSeconds ||
-				time.Elapsed - frame.CloudBuiltSeconds >= 0.25) {
-				ENGINE_PROFILE_CAT("storm cloud density build", core::ProfileCategory::Render);
-				frame.CloudBuiltSeconds = time.Elapsed;
-				frame.CloudParameters = storm->State.Parameters;
-				frame.CloudDensity.reset();
-				const scene::PreparedTornadoField field = scene::PrepareTornadoField(storm->State.Parameters);
-				const float extent = field.Parameters.InfluenceRadius;
-				const scene::CloudDensityOctreeConfig config{
-					.RootMinimum = {-extent, 0.0f, -extent},
-					.RootSize = {extent * 2.0f, field.Parameters.TopHeight * 1.16f, extent * 2.0f},
-					.MaximumDepth = 6,
-				};
-				if (auto tree = scene::CloudDensityOctree::Create(config)) {
-					const scene::CloudDensityBuildStats built = scene::BuildCloudDensity(
-						*tree, field, storm->State.ElapsedSeconds, {.CoarseDepth = 4, .FineDepth = 6}
-					);
-					if (built.Nodes != 0) {
-						frame.CloudDensity = scene::CloudDensitySnapshot{
-							.Centre = storm->State.Position,
-							.Config = config,
-							.Nodes = tree->GpuNodes(),
-						};
+		bool fieldCollected = false;
+		store.Observe<scene::GpuParticleField>();
+		const uint64_t fieldDefinitionRevision = store.ComponentChangeVersion<scene::GpuParticleField>() + 1;
+		store.Each<const scene::GpuParticleField, const scene::Transform>(
+			[&](ecs::Entity instance,
+				const scene::GpuParticleField &field,
+				const scene::Transform &transform) {
+				if (!fieldCollected && field.Enabled && !field.SpawnSamples.empty() &&
+					scene::ValidGpuParticleField(field)) {
+					// Refresh the owned packet in place so its sample capacity survives each tick.
+					if (!frame.GpuParticles) frame.GpuParticles.emplace();
+					auto &packet = *frame.GpuParticles;
+					if (newWorld || packet.Source != instance ||
+						packet.DefinitionRevision != fieldDefinitionRevision) {
+						packet.Field = field;
+						core::Metrics::Count(
+							"render.gpu_particle_field.sample_collect_bytes",
+							field.SpawnSamples.size() * sizeof(scene::GpuParticleSpawnSample)
+						);
 					}
+					packet.Frame = transform.Frame;
+					packet.ForceField = scene::ResolveVectorField(store, instance);
+					packet.Source = instance;
+					packet.DefinitionRevision = fieldDefinitionRevision;
+					packet.Seconds = time.Elapsed;
+					fieldCollected = true;
 				}
 			}
-			if (frame.CloudDensity) frame.CloudDensity->Centre = storm->State.Position;
-		} else {
-			frame.CloudDensity.reset();
-			frame.CloudParameters.reset();
-		}
+		);
+		if (!fieldCollected) frame.GpuParticles.reset();
+
+		frame.Lighting = scene::LightingOf(store);
+		CollectWeatherSimulationLayer(store, frame, newWorld);
+		CollectWeatherCheckpoint(store, frame, newWorld);
+		if (newWorld) frame.CloudDensity.reset();
+
 		// An inactive cloud clock cannot change the captured pixels.
 		if (EnvironmentModesOf(frame.Lighting.EnvironmentState).Clouds == 0 ||
 			frame.Lighting.EnvironmentState.CloudLayer.WindSpeed <= 0)
@@ -284,6 +408,10 @@ namespace engine::render {
 		visibilityView.VisibilityFrame.reset();
 		CollectSurfaceViews(store, frame.Surfaces, view.Portals, &visibilityView);
 		effects::BuildRibbons(store, visibilityFrame.Position, float(store.Time().Elapsed), frame.Ribbons);
+		View weatherView = view;
+		weatherView.Lighting.Volumes = frame.Volumes;
+		weatherView.Lighting.VolumeCount = frame.VolumeCount;
+		CollectWeatherEffects(store, weatherView, frame.WeatherEffects, frame.Ribbons, frame.Lights);
 		gui::Screen screen;
 		screen.Width = extent.X;
 		screen.Height = extent.Y;

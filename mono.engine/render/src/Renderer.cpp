@@ -793,6 +793,7 @@ namespace engine::render {
 		// finished. Waiting once here is simpler and no slower than tracking
 		// per-resource fences for a shutdown path.
 		SDL_WaitForGPUIdle(device);
+		State->ImageGraphs.Shutdown(device, State->Textures);
 		if (State->PortalTreeJob.Fence) {
 			SDL_ReleaseGPUFence(device, State->PortalTreeJob.Fence);
 			State->PortalTreeJob.Fence = nullptr;
@@ -853,6 +854,7 @@ namespace engine::render {
 		State->ReleaseLod();
 		State->ReleaseOcclusion();
 		State->ReleaseGpuParticleField();
+		State->ReleaseWeatherPipelines();
 		State->ReleaseParticlePool();
 		State->ReleaseEnvironments();
 
@@ -904,6 +906,9 @@ namespace engine::render {
 			  State->HdrAdditiveRibbonPipeline,
 			  State->HdrOpaquePipeline,
 			  State->HdrTransparentPipeline,
+			  State->GridPipeline,
+			  State->HdrGridPipeline,
+			  State->HdrGridCompositePipeline,
 			  State->HdrWireframeOpaquePipeline,
 			  State->HdrWireframeTransparentPipeline,
 			  State->GBufferPipeline,
@@ -929,6 +934,7 @@ namespace engine::render {
 			  State->PackChannelsPipeline,
 			  State->DeferredLightingPipeline,
 			  State->SkyPipeline,
+			  State->WeatherFallbackPipeline,
 			  State->VolumePipeline,
 			  State->BloomPipeline,
 			  State->DepthOfFieldPipeline,
@@ -983,6 +989,7 @@ namespace engine::render {
 			SDL_ReleaseGPUSampler(device, State->ShadowSampler);
 		}
 		for (Impl::SurfaceBank &bank : State->SurfaceBanks) {
+			ReleaseWeatherCapture(device, bank.WeatherCapture);
 			for (Impl::SurfaceSlotState &surface : bank.Surfaces) {
 				for (SDL_GPUTexture *texture : surface.Texture) {
 					if (texture) {
@@ -1156,7 +1163,15 @@ namespace engine::render {
 			return;
 		}
 		RequireOwningThread("ForgetWorld");
+		for (auto &slot : State->SceneSlots) {
+			if (slot.ForwardWorking.World == world) slot.ForwardWorking = {};
+			if (slot.ForwardWorld != world) continue;
+			slot.ForwardedTextures.clear();
+			slot.ForwardPipeline = {};
+			slot.Activity = {};
+		}
 		SDL_WaitForGPUIdle(State->Device);
+		State->ForgetWeatherWorld(world);
 		for (auto &tree : State->ImportedPortalTrees)
 			if (!tree.Nodes.empty() && tree.Nodes.front().Binding.World == world &&
 				tree.Nodes.front().Binding.WorldName == name)
@@ -1226,6 +1241,7 @@ namespace engine::render {
 				 {&resident.Buffer,
 				  &pool.States,
 				  &pool.Work,
+				  &pool.EmitWork,
 				  &pool.Params,
 				  &pool.Curves,
 				  &pool.EmitterRuntime,
@@ -1241,6 +1257,7 @@ namespace engine::render {
 			for (SDL_GPUTransferBuffer **staging :
 				 {&pool.StateStaging,
 				  &pool.WorkStaging,
+				  &pool.EmitWorkStaging,
 				  &pool.ParamStaging,
 				  &pool.CurveStaging,
 				  &pool.SeamStaging,
@@ -1251,6 +1268,20 @@ namespace engine::render {
 				}
 			}
 		}
+		for (Impl::GpuParticleFieldWorld &resident : State->GpuParticleFieldWorlds) {
+			if (!sameWorld(resident)) continue;
+			if (resident.States != nullptr) gpu::ReleaseBuffer(State->Device, resident.States);
+			if (resident.Samples != nullptr) gpu::ReleaseBuffer(State->Device, resident.Samples);
+			if (resident.SampleTransfer != nullptr)
+				gpu::ReleaseTransferBuffer(State->Device, resident.SampleTransfer);
+		}
+		State->GpuParticleFieldWorlds.erase(
+			std::remove_if(
+				State->GpuParticleFieldWorlds.begin(), State->GpuParticleFieldWorlds.end(), sameWorld
+			),
+			State->GpuParticleFieldWorlds.end()
+		);
+		State->ActiveGpuParticleFieldWorld = nullptr;
 		State->PendingInstanceUploads.erase(
 			std::remove_if(
 				State->PendingInstanceUploads.begin(), State->PendingInstanceUploads.end(), sameWorld
@@ -1281,8 +1312,13 @@ namespace engine::render {
 		return std::find(builtins.begin(), builtins.end(), name) != builtins.end() ? core::Name{} : owner;
 	}
 
-	core::Name Renderer::Impl::TextureContentOwner(core::Name name, core::Name owner) {
+	core::Name Renderer::Impl::TextureContentOwner(core::Name name, core::Name owner, core::Name world) {
 		static const core::Name checker(assets::BuiltinName(assets::BuiltinTexture::Checker));
+		// Generated images belong to their world; Studio keeps imported assets shared.
+		const auto text = name.Text();
+		if (world.IsValid() &&
+			(text.starts_with("imagegraph-instance://") || text.starts_with("editable-image://")))
+			return world;
 		return name == checker ? core::Name{} : owner;
 	}
 
@@ -1345,6 +1381,16 @@ namespace engine::render {
 
 	void Renderer::DropContentOwner(core::Name owner) {
 		if (State == nullptr || !owner.IsValid()) return;
+		for (auto graph = State->ImageGraphs.Documents.begin();
+			 graph != State->ImageGraphs.Documents.end();) {
+			if (graph->second.Owner != owner) {
+				++graph;
+				continue;
+			}
+			State->ImageGraphs.ReleaseDocument(State->Device, State->Textures, graph->second);
+			graph = State->ImageGraphs.Documents.erase(graph);
+			++State->ResourceEpoch;
+		}
 		for (auto &refusals : State->ShaderRefusals)
 			std::erase_if(refusals, [&](const auto &entry) {
 				return static_cast<uint32_t>(entry.first >> 32) == owner.Id();
@@ -1638,11 +1684,22 @@ namespace engine::render {
 		return State == nullptr ? 0 : State->ResourceEpoch;
 	}
 
+	bool Renderer::HasPendingWeatherWork(uint64_t world) const {
+		return State != nullptr && State->HasPendingWeatherWork(world);
+	}
+
 	void *Renderer::TextureHandle(const core::Name &name, core::Name owner) const {
 		if (State == nullptr) {
 			return nullptr;
 		}
 		return State->Textures.Find(name, Impl::TextureContentOwner(name, owner));
+	}
+
+	bool Renderer::TextureSamplesSRGB(const core::Name &name, core::Name owner) const {
+		assets::TextureFormat format{};
+		return State != nullptr &&
+			   State->Textures.FormatOf(name, format, Impl::TextureContentOwner(name, owner)) &&
+			   assets::IsSRGB(format);
 	}
 
 	bool
@@ -2274,6 +2331,14 @@ namespace engine::render {
 		return State == nullptr ? VisibilitySnapshot{} : State->VisibilityCompleted;
 	}
 
+	PassActivity Renderer::ViewPassActivity(size_t slot) const {
+		if (!State || slot >= State->SceneSlots.size()) return {};
+		const auto &scene = State->SceneSlots[slot];
+		const auto *pipeline = State->Installed(scene.ForwardPipeline);
+		if (!pipeline || pipeline->Revision != scene.ForwardRevision) return {};
+		return scene.Activity;
+	}
+
 	void *Renderer::SceneTexture(size_t slot) const {
 		if (slot >= State->SceneSlots.size()) {
 			return nullptr;
@@ -2306,6 +2371,14 @@ namespace engine::render {
 		}
 		const Impl::InstalledPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
 		if (pipeline != nullptr) {
+			if (slot < State->SceneSlots.size()) {
+				const auto &scene = State->SceneSlots[slot];
+				if (scene.ForwardUnavailable && scene.ForwardPipeline == pipeline->Name &&
+					scene.ForwardRevision == pipeline->Revision)
+					return nullptr;
+			}
+			const auto forwarded = State->ForwardedTexture(*pipeline, resource, slot);
+			if (forwarded.IsValid()) return forwarded.Texture;
 			const core::Name physical = State->GraphTargetName(*pipeline, resource);
 			for (const Impl::GraphTarget &target : State->GraphResources.Targets) {
 				if (target.Pipeline != pipeline->Name || target.Resource != physical ||
@@ -2534,7 +2607,13 @@ namespace engine::render {
 		// walked past by whoever captures the most.
 		const size_t bytes = static_cast<size_t>(source.DrawnWidth) * source.DrawnHeight * 4;
 
-		if (!State->Textures.Adopt(name, copy, source.DrawnWidth, source.DrawnHeight, bytes)) {
+		const bool sampledSRGB = info.format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB ||
+								 info.format == SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM_SRGB;
+		const auto capturedFormat =
+			sampledSRGB ? assets::TextureFormat::RGBA8 : assets::TextureFormat::RGBA8_LINEAR;
+		if (!State->Textures.Adopt(
+				name, copy, source.DrawnWidth, source.DrawnHeight, bytes, {}, capturedFormat
+			)) {
 			// Refused, so the texture is still ours to release - `Adopt` says so.
 			gpu::ReleaseTexture(State->Device, copy);
 			return false;
@@ -2577,6 +2656,14 @@ namespace engine::render {
 		}
 		const Impl::InstalledPipeline *pipeline = State->PipelineFor(State->ActiveGraph);
 		if (pipeline != nullptr) {
+			if (slot < State->SceneSlots.size()) {
+				const auto &scene = State->SceneSlots[slot];
+				if (scene.ForwardUnavailable && scene.ForwardPipeline == pipeline->Name &&
+					scene.ForwardRevision == pipeline->Revision)
+					return {};
+			}
+			const auto forwarded = State->ForwardedTexture(*pipeline, resource, slot);
+			if (forwarded.IsValid()) return SceneExtent{1.0f, 1.0f, forwarded.Width, forwarded.Height};
 			const core::Name physical = State->GraphTargetName(*pipeline, resource);
 			for (const Impl::GraphTarget &target : State->GraphResources.Targets) {
 				if (target.Pipeline != pipeline->Name || target.Resource != physical ||

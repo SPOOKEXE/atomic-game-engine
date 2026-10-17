@@ -1,0 +1,166 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// Endpoint branching cost 3 to 6 percent on interior phases in the RTX 4090 Vulkan shadow benchmark.
+#define WEATHER_BRANCHLESS_NOISE
+#include "weather-common.glsl"
+#define WEATHER_CLOCK_BINDING 2
+#include "weather-clock.glsl"
+#include "weather-assembly.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0, std430) readonly buffer Cells { uvec2 cells[]; } field;
+layout(set = 0, binding = 1, std430) readonly buffer Pages { ivec4 keys[]; } pageTable;
+layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D opticalDepthImage;
+layout(set = 2, binding = 0) uniform Pass {
+	vec4 Regions[4];
+	vec4 Controls;
+	vec4 ToSun;
+	vec4 Receiver;
+	vec4 Minimum;
+	vec4 Maximum;
+	uvec4 Quality;
+	vec4 OpticalError;
+	WeatherField Field;
+} pass;
+
+WeatherField effectiveField;
+
+bool approximationUsed;
+
+bool PageKeyLess(ivec4 first, ivec4 second) {
+	uint firstLod = uint(first.w) & 31u;
+	uint secondLod = uint(second.w) & 31u;
+	if (firstLod != secondLod) return firstLod < secondLod;
+	if (first.x != second.x) return first.x < second.x;
+	if (first.y != second.y) return first.y < second.y;
+	return first.z < second.z;
+}
+
+int FindPage(ivec3 coordinate, uint lod) {
+	int edge = 8 << lod;
+	ivec3 origin = ivec3(uvec3(coordinate) & uvec3(~(uint(edge) - 1u)));
+	ivec4 key = ivec4(origin, int(lod));
+	uint low = 0u;
+	uint high = effectiveField.Bricks.w;
+	while (low < high) {
+		uint middle = low + (high - low) / 2u;
+		if (PageKeyLess(pageTable.keys[middle], key)) low = middle + 1u;
+		else high = middle;
+	}
+	return low < effectiveField.Bricks.w && all(equal(pageTable.keys[low].xyz, key.xyz)) &&
+		(uint(pageTable.keys[low].w) & 31u) == lod ? int(low) : -1;
+}
+
+float CodeAt(ivec3 coordinate, uint lod) {
+	if (effectiveField.Origin.w > 0) {
+		ivec3 local = coordinate - effectiveField.Origin.xyz;
+		if (any(lessThan(local, ivec3(0))) || any(greaterThanEqual(local, ivec3(effectiveField.Grid.xyz))))
+			return 0.0;
+		return float(field.cells[WeatherCellIndex(uvec3(local), effectiveField.Grid.xyz)].x & 255u) / 255.0;
+	}
+	int page = FindPage(coordinate, lod);
+	if (page >= 0) {
+		ivec4 descriptor = pageTable.keys[page];
+		uint kind = (uint(descriptor.w) >> 5u) & 3u;
+		if (kind == 2u) return 0.0;
+		uvec3 local = uvec3((coordinate - descriptor.xyz) / (1 << lod));
+		uint offset = (uint(descriptor.w) >> 7u) / 2u;
+		if (kind == 1u) {
+			uvec2 address = WeatherAssemblyAddress(local);
+			uvec2 scalarWords = field.cells[offset + address.x * 4u];
+			if (WeatherAssemblyUnsafe(scalarWords))
+				return float(WeatherDensityCode(effectiveField, coordinate)) / 255.0;
+			approximationUsed = true;
+			return float(WeatherAssemblyDensityCode(scalarWords, address.y)) / 255.0;
+		}
+		if (lod > 0u) approximationUsed = true;
+		uint index = offset + local.x + 8u * (local.y + 8u * local.z);
+		return float(field.cells[index].x & 255u) / 255.0;
+	}
+	if (pass.Quality.w != 0u) return 0.0;
+	return float(WeatherDensityCode(effectiveField, coordinate)) / 255.0;
+}
+
+float DensityAtLod(vec3 canonical, uint lod) {
+	int stride = 1 << lod;
+	vec3 point = canonical / float(stride);
+	ivec3 cell = ivec3(floor(point)) * stride;
+	vec3 weight = fract(point);
+	float low = mix(mix(CodeAt(cell, lod), CodeAt(cell + ivec3(stride, 0, 0), lod), weight.x),
+		mix(CodeAt(cell + ivec3(0, stride, 0), lod), CodeAt(cell + ivec3(stride, stride, 0), lod), weight.x), weight.y);
+	float high = mix(mix(CodeAt(cell + ivec3(0, 0, stride), lod), CodeAt(cell + ivec3(stride, 0, stride), lod), weight.x),
+		mix(CodeAt(cell + ivec3(0, stride, stride), lod), CodeAt(cell + ivec3(stride), lod), weight.x), weight.y);
+	return mix(low, high, weight.z);
+}
+
+float DensityAt(vec3 world) {
+	vec3 canonical = world / pass.Minimum.w;
+	approximationUsed = false;
+	uint selected = 0u;
+	int selectedPage = -1;
+	if (effectiveField.Origin.w == 0)
+		for (uint lod = 0u; lod <= effectiveField.Phase.w; ++lod)
+			if ((selectedPage = FindPage(ivec3(floor(canonical)), lod)) >= 0) { selected = lod; break; }
+	// Certified empty pages include their reconstruction halo for every accepted time.
+	if (selectedPage >= 0 && ((uint(pageTable.keys[selectedPage].w) >> 5u) & 3u) == 2u) return 0.0;
+	float density = DensityAtLod(canonical, selected);
+	// Canonical fallback at coarse corners still interpolates across unresolved fine features.
+	if (effectiveField.Origin.w == 0 && (selected > 0u || approximationUsed)) {
+		ivec3 cell = ivec3(floor(canonical));
+		vec3 weight = fract(canonical);
+		float fine = 0.0;
+		for (uint z = 0u; z < 2u; ++z) for (uint y = 0u; y < 2u; ++y) for (uint x = 0u; x < 2u; ++x) {
+			float code = float(WeatherDensityCode(effectiveField, cell + ivec3(x, y, z))) / 255.0;
+			vec3 blend = mix(vec3(1.0) - weight, weight, vec3(x, y, z));
+			fine += code * blend.x * blend.y * blend.z;
+		}
+		// exp(-tau) is 1-Lipschitz for nonnegative tau. This per-sample budget
+		// bounds the accumulated transmission difference over the longest layer ray.
+		if (abs(density - fine) * pass.OpticalError.y > pass.OpticalError.x || density <= 0.0)
+			return fine;
+	}
+	return density;
+}
+
+bool Interval(vec3 origin, out float enter, out float exit) {
+	enter = 0.0;
+	exit = (pass.Maximum.y - origin.y) / pass.ToSun.y;
+	for (uint axis = 0u; axis < 3u; ++axis) {
+		if (abs(pass.ToSun[axis]) < 1e-7) {
+			if (origin[axis] < pass.Minimum[axis] || origin[axis] > pass.Maximum[axis]) return false;
+			continue;
+		}
+		float first = (pass.Minimum[axis] - origin[axis]) / pass.ToSun[axis];
+		float second = (pass.Maximum[axis] - origin[axis]) / pass.ToSun[axis];
+		enter = max(enter, min(first, second));
+		exit = min(exit, max(first, second));
+	}
+	return exit > enter;
+}
+
+void main() {
+	effectiveField = WeatherClockField(pass.Field);
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(pixel, imageSize(opticalDepthImage)))) return;
+	uint cascade = uint(pixel.y) / pass.Quality.x;
+	if (cascade >= pass.Quality.y) { imageStore(opticalDepthImage, pixel, vec4(0.0)); return; }
+	vec2 uv = (vec2(pixel.x, pixel.y % int(pass.Quality.x)) + 0.5) / float(pass.Quality.x);
+	vec4 region = pass.Regions[cascade];
+	vec2 horizontal = region.xy + (uv * 2.0 - 1.0) * region.z;
+	vec3 origin = vec3(horizontal.x, pass.Minimum.y, horizontal.y);
+	float enter;
+	float exit;
+	vec4 opticalDepth = vec4(0.0);
+	if (Interval(origin, enter, exit)) {
+		uint steps = clamp(pass.Quality.z, 8u, 128u);
+		float stepLength = (exit - enter) / float(steps);
+		for (uint index = 0u; index < steps; ++index) {
+			vec3 world = origin + pass.ToSun.xyz * (enter + (float(index) + 0.5) * stepLength);
+			uint band = min(uint((world.y - pass.Minimum.y) * 4.0 / (pass.Maximum.y - pass.Minimum.y)), 3u);
+			opticalDepth[band] += DensityAt(world) * pass.Maximum.w * stepLength;
+		}
+	}
+	// Four height bands let a terrain receiver discard the medium below its height.
+	// Partial bands assume uniform extinction within that quarter of the layer.
+	imageStore(opticalDepthImage, pixel, min(opticalDepth, vec4(80.0)));
+}

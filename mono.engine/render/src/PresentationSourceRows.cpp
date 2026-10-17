@@ -2,6 +2,7 @@
 
 #include "PresentationSource.hpp"
 
+#include <engine/core/Profiling.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Visibility.hpp>
@@ -57,9 +58,32 @@ namespace engine::render {
 			if (foundInterpolation) hasInterpolation.store(true, std::memory_order_relaxed);
 		};
 
-		const size_t loose =
-			PresentationSource::QueryWorldDrawables(store).Without<CharacterLimb>().EachBatchEntitiesParallel(
-				[&write](
+		size_t loose = 0;
+		{
+			ENGINE_PROFILE_CAT("update draw frames.loose query/join", core::ProfileCategory::Simulation);
+			loose = PresentationSource::QueryWorldDrawables(store)
+						.Without<CharacterLimb>()
+						.EachBatchEntitiesParallel(
+							[&write](
+								size_t first,
+								size_t rows,
+								const ecs::Entity *entities,
+								const Transform *transforms,
+								const PreviousTransform *previous,
+								const Bounds *,
+								const Visual *,
+								const SurfaceAppearance *,
+								const Tags *,
+								const LocalTransparency *
+							) { write(0, first, rows, entities, transforms, previous); },
+							grain
+						);
+		}
+		size_t rigged = 0;
+		{
+			ENGINE_PROFILE_CAT("update draw frames.rigged query/join", core::ProfileCategory::Simulation);
+			rigged = PresentationSource::QueryRiggedWorldDrawables(store).EachBatchEntitiesParallel(
+				[&write, loose](
 					size_t first,
 					size_t rows,
 					const ecs::Entity *entities,
@@ -69,26 +93,12 @@ namespace engine::render {
 					const Visual *,
 					const SurfaceAppearance *,
 					const Tags *,
-					const LocalTransparency *
-				) { write(0, first, rows, entities, transforms, previous); },
+					const LocalTransparency *,
+					const CharacterLimb *
+				) { write(loose, first, rows, entities, transforms, previous); },
 				grain
 			);
-		const size_t rigged = PresentationSource::QueryRiggedWorldDrawables(store).EachBatchEntitiesParallel(
-			[&write, loose](
-				size_t first,
-				size_t rows,
-				const ecs::Entity *entities,
-				const Transform *transforms,
-				const PreviousTransform *previous,
-				const Bounds *,
-				const Visual *,
-				const SurfaceAppearance *,
-				const Tags *,
-				const LocalTransparency *,
-				const CharacterLimb *
-			) { write(loose, first, rows, entities, transforms, previous); },
-			grain
-		);
+		}
 		drawList.HasInterpolation = hasInterpolation.load(std::memory_order_relaxed);
 		return sourceOrderChanged.load(std::memory_order_relaxed) ? 0 : loose + rigged;
 	}

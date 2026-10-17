@@ -10,7 +10,7 @@ namespace engine::render::test_support {
 	// wireframe fallback can be exercised on a device that supports them.
 	void SetForceDeferredPipelineFailure(bool enabled);
 
-	// Forces only the next analytical-field buffer reservation path to refuse.
+	// Forces only the next device-field buffer reservation path to refuse.
 	// It proves a larger requested preset retains the last working device field.
 	void SetForceGpuParticleFieldAllocationFailure(bool enabled);
 

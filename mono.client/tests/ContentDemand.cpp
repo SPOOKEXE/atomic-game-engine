@@ -24,7 +24,10 @@
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/ImageGraph.hpp>
+#include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Materials.hpp>
+#include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
@@ -148,6 +151,40 @@ TEST_CASE("every place content can be named is collected", "[client][contentdema
 	CHECK(Holds(wanted, "walk.aanim"));
 }
 
+TEST_CASE(
+	"scrollbar and LOD image references join demand and change its revision", "[client][contentdemand]"
+) {
+	Store store = Fresh("contentdemand.additional.images");
+	const auto scroll = store.Create();
+	engine::gui::Scrolling scrolling;
+	scrolling.TopImage = Name("imagegraph://scroll.aimagegraph#top");
+	scrolling.MidImage = Name("imagegraph://scroll.aimagegraph#middle");
+	scrolling.BottomImage = Name("imagegraph://scroll.aimagegraph#bottom");
+	store.Set(scroll, scrolling);
+	const auto automatic = store.Create();
+	engine::scene::LODAuto generated;
+	generated.Billboard = Name("imagegraph://lod.aimagegraph#automatic");
+	store.Set(automatic, generated);
+	const auto custom = store.Create();
+	engine::scene::LODCustom authored;
+	authored.Billboard = Name("imagegraph://lod.aimagegraph#custom");
+	store.Set(custom, authored);
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+	CHECK(wanted.size() == 5);
+	CHECK(Holds(wanted, "imagegraph://scroll.aimagegraph#top"));
+	CHECK(Holds(wanted, "imagegraph://scroll.aimagegraph#middle"));
+	CHECK(Holds(wanted, "imagegraph://scroll.aimagegraph#bottom"));
+	CHECK(Holds(wanted, "imagegraph://lod.aimagegraph#automatic"));
+	CHECK(Holds(wanted, "imagegraph://lod.aimagegraph#custom"));
+	const auto before = client::WantedContentRevision(store);
+	store.GetMutable<engine::gui::Scrolling>(scroll)->MidImage = Name("replacement.atex");
+	const auto changed = client::WantedContentRevision(store);
+	CHECK(changed != before);
+	store.GetMutable<engine::scene::LODCustom>(custom)->Billboard = Name("replacement-lod.atex");
+	CHECK(client::WantedContentRevision(store) != changed);
+}
+
 TEST_CASE("a world names nothing it does not use", "[client][contentdemand]") {
 	// **The property the whole change rests on.** A store of two thousand assets
 	// and a scene that uses three must ask for three - anything else is the
@@ -251,6 +288,42 @@ TEST_CASE("removing a content-bearing row advances demand revision", "[client][c
 	CHECK(client::WantedContentRevision(store) != before);
 }
 
+TEST_CASE("demand revisions cover destruction and equal-count replacement", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.revision.membership");
+	const Entity first = store.Create();
+	engine::effects::ParticleEmitter settings;
+	settings.Texture = Name("first.atex");
+	store.Set(first, settings);
+	const uint64_t initial = client::WantedContentRevision(store);
+	const uint64_t writes = store.ComponentChangeVersion<engine::effects::ParticleEmitter>();
+	store.Destroy(first);
+	store.ClearChanges();
+	CHECK(store.ComponentChangeVersion<engine::effects::ParticleEmitter>() == writes);
+	CHECK(client::WantedContentRevision(store) != initial);
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+	CHECK(wanted.empty());
+
+	const Entity second = store.Create();
+	store.Set(second, settings);
+	const uint64_t restored = client::WantedContentRevision(store);
+	const auto count = store.CountMatching<engine::effects::ParticleEmitter>();
+	const Entity replacement = store.Create();
+	settings.Texture = Name("replacement.atex");
+	store.Remove<engine::effects::ParticleEmitter>(second);
+	store.Set(replacement, settings);
+	store.ClearChanges();
+	REQUIRE(store.CountMatching<engine::effects::ParticleEmitter>() == count);
+	CHECK(client::WantedContentRevision(store) != restored);
+	client::CollectWantedContent(store, wanted);
+	REQUIRE(wanted.size() == 1);
+	CHECK(Holds(wanted, "replacement.atex"));
+	CHECK_FALSE(Holds(wanted, "first.atex"));
+	const uint64_t settled = client::WantedContentRevision(store);
+	store.ClearChanges();
+	CHECK(client::WantedContentRevision(store) == settled);
+}
+
 TEST_CASE("many emitters share one demanded texture name", "[client][contentdemand]") {
 	Store store = Fresh("contentdemand.shared.texture");
 	for (size_t index = 0; index < 4096; index++) {
@@ -350,4 +423,47 @@ TEST_CASE(
 	client::CollectWantedContent(store, wanted);
 	CHECK(Holds(wanted, "replacement.ashader"));
 	CHECK_FALSE(Holds(wanted, "material.ashader"));
+}
+
+TEST_CASE("mesh submesh image references survive reconstruction of demand", "[client][contentdemand]") {
+	Store store = Fresh("contentdemand.mesh.images");
+	const auto entity = store.Create();
+	engine::scene::Visual visual;
+	visual.Mesh = Name("mesh.amesh");
+	store.Set(entity, visual);
+	const Name sheet("imagegraph://material.aimagegraph#image");
+	REQUIRE(engine::scene::RecordMesh(store, visual.Mesh, 2, std::span(&sheet, 1)));
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+	CHECK(Holds(wanted, "imagegraph://material.aimagegraph#image"));
+	wanted.clear();
+	client::CollectWantedContent(store, wanted);
+	CHECK(Holds(wanted, "imagegraph://material.aimagegraph#image"));
+}
+
+TEST_CASE(
+	"image graph instance source assets and wire input replacements invalidate demand",
+	"[client][contentdemand]"
+) {
+	Store store = Fresh("contentdemand.graph.instance");
+	const auto entity = store.Create();
+	engine::scene::ImageGraph graph;
+	graph.InstanceKey = Name("instance");
+	graph.Graph = Name("live.aimagegraph");
+	store.Set(entity, graph);
+	std::vector<Name> wanted;
+	client::CollectWantedContent(store, wanted);
+	CHECK(Holds(wanted, "live.aimagegraph"));
+	const auto before = client::WantedContentRevision(store);
+	graph.Inputs.push_back(
+		{.Name = Name("opacity"),
+		 .Kind = engine::scene::ImageGraphInputKind::Number,
+		 .Number = 0.25,
+		 .Boolean = false,
+		 .Colour = {},
+		 .String = {}}
+	);
+	store.Set(entity, graph);
+	CHECK(graph.Revision == 0);
+	CHECK(client::WantedContentRevision(store) != before);
 }

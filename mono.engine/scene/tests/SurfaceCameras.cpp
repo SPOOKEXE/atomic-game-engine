@@ -3640,6 +3640,21 @@ TEST_CASE("a cross-world hole cuts both halves of what stands in it", "[scene][s
 	CHECK(picture[0].Surface == -1);
 }
 
+TEST_CASE("a high portal slot keeps its cross-world body clone", "[scene][surfacecameras][surface-wide]") {
+	Window window;
+	auto camera = *window.Room.World.Get<SurfaceCamera>(window.Room.Reflection);
+	camera.Surface = 319;
+	window.Room.World.Set(window.Room.Reflection, camera);
+	std::vector<engine::scene::DrawInstance> drawn{Window::Row(Vector3{0, 0, -.1f}, Vector3{.5f, 1, .5f})};
+	std::vector<engine::scene::DrawInstance> picture;
+	REQUIRE(engine::scene::AppendPortalClones(window.Room.World, int16_t{319}, drawn, picture) == 1);
+	REQUIRE(picture.size() == 1);
+	CHECK(picture[0].SeamNormal != Vector3{});
+	picture.clear();
+	CHECK(engine::scene::AppendPortalClones(window.Room.World, int16_t{63}, drawn, picture) == 0);
+	CHECK(picture.empty());
+}
+
 TEST_CASE("what crosses a hole is what is drawn, not what can move", "[scene][surfacecameras]") {
 	// **One rule for both halves of the file, which is what this case pins.**
 	// The cross-world copy was an entity walk over bodies carrying `Motion` or
@@ -4288,7 +4303,7 @@ namespace {
 	void Descend(
 		std::span<const engine::scene::SurfacePane> panes,
 		const CFrame &viewer,
-		int8_t skip,
+		int16_t skip,
 		uint32_t level,
 		uint32_t levels,
 		engine::scene::SurfaceBounceProbe &probe
@@ -4338,7 +4353,7 @@ namespace {
 	}
 
 	// One pane, on its own slot.
-	engine::scene::SurfacePane SlotPane(int8_t surface, const Vector3 &centre, const Vector3 &normal) {
+	engine::scene::SurfacePane SlotPane(int16_t surface, const Vector3 &centre, const Vector3 &normal) {
 		engine::scene::SurfacePane pane = PaneAt(centre, normal);
 		pane.Surface = surface;
 		return pane;

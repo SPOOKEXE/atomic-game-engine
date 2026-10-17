@@ -142,9 +142,9 @@ namespace engine::scene {
 			return false;
 		}
 		ENGINE_LOG(
-			core::LogLevel::Info,
+			core::LogLevel::Trace,
 			"scene",
-			"DIAG FollowPortalTransit serial={} went=({},{},{}) scale={}",
+			"FollowPortalTransit serial={} went=({},{},{}) scale={}",
 			went->Serial,
 			went->Frame.Position.X,
 			went->Frame.Position.Y,
@@ -187,11 +187,8 @@ namespace engine::scene {
 	}
 
 	bool UpdateCameraControl(ecs::Store &store) {
-		// **Before the guards below, and that is deliberate.** A camera that is
-		// disabled or scriptable still belongs to a body that may have just gone
-		// through a hole, and its carried basis still directs `ReadMoveIntent`.
-		// Turning it is not "camera control" in the sense the guards are about -
-		// it is keeping the eye pointing at the thing it was already pointing at.
+		// Disabled native camera control still carries the body's portal basis.
+		// Scriptable cameras own their pose and portal transit entirely.
 		const bool turned = FollowPortalTransit(store);
 
 		auto *controller = store.ResourceMutable<CameraController>();
@@ -337,8 +334,8 @@ namespace engine::scene {
 			return false;
 		}
 
-		const ecs::Entity diagSubject = CameraSubjectRoot(store, active->Entity);
-		const Transform *subject = store.Get<Transform>(diagSubject);
+		const ecs::Entity subjectEntity = CameraSubjectRoot(store, active->Entity);
+		const Transform *subject = store.Get<Transform>(subjectEntity);
 		if (subject == nullptr || !store.Alive(active->Entity)) {
 			// No subject is a free camera, which is what an editor has. Left
 			// where it is rather than moved to the origin.
@@ -362,38 +359,6 @@ namespace engine::scene {
 		if (engine::scene::PortalCrossing(store, head, pose.Position, carried)) {
 			pose = carried.Place(pose);
 		}
-		const auto *diagChar = store.Get<Character>(CharacterOf(store, diagSubject));
-		ENGINE_LOG(
-			core::LogLevel::Info,
-			"scene",
-			"DIAG PlaceCamera subjectEntity={} rigRoot={} diagRigRoot=({},{},{}) transit={} pred={} "
-			"subject=({},{},{}) dist={} occluded={} orbit=({},{},{}) final=({},{},{})",
-			diagSubject.Id,
-			diagChar != nullptr ? diagChar->Root.Id : 0u,
-			diagChar != nullptr && store.Get<Transform>(diagChar->Root) != nullptr
-				? store.Get<Transform>(diagChar->Root)->Frame.Position.X
-				: -1.0f,
-			diagChar != nullptr && store.Get<Transform>(diagChar->Root) != nullptr
-				? store.Get<Transform>(diagChar->Root)->Frame.Position.Y
-				: -1.0f,
-			diagChar != nullptr && store.Get<Transform>(diagChar->Root) != nullptr
-				? store.Get<Transform>(diagChar->Root)->Frame.Position.Z
-				: -1.0f,
-			store.Get<PortalTransit>(diagSubject) != nullptr ? 1 : 0,
-			0,
-			subject->Frame.Position.X,
-			subject->Frame.Position.Y,
-			subject->Frame.Position.Z,
-			distance,
-			controller->OccludedDistance,
-			CameraOrbit(*controller, subject->Frame.Position, distance).Position.X,
-			CameraOrbit(*controller, subject->Frame.Position, distance).Position.Y,
-			CameraOrbit(*controller, subject->Frame.Position, distance).Position.Z,
-			pose.Position.X,
-			pose.Position.Y,
-			pose.Position.Z
-		);
-
 		// **And never left standing in the glass.** The crossing above answers
 		// which room the eye is in; it does not stop the eye landing *inside*
 		// the pane, which an arm swung into a doorway or a first-person walk up

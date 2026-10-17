@@ -14,12 +14,9 @@
 -- generated coarse level. The console identifies the active view so captures
 -- can be paired with the selected distance.
 
-local RunService = game:GetService("RunService")
-
 local GRID_CELLS = 24
 local GRID_SPACING = 0.5
 local GRID_HALF = GRID_CELLS * GRID_SPACING * 0.5
-local OBSERVER_PERIOD_SECONDS = 4
 
 local function configureDecimation(part: MeshPart)
 	part.AutoLodStrategy = Enum.AutoMeshLODStrategy.Decimated
@@ -95,32 +92,11 @@ editablePart.Color = Color3.fromRGB(255, 154, 74)
 configureDecimation(editablePart)
 editablePart.Parent = workspace
 
-local mainCamera = Instance.new("Camera")
-mainCamera.Name = "LodMainCamera"
-mainCamera.FieldOfView = 48
-mainCamera.FarPlaneZ = 180
-mainCamera.CFrame = CFrame.lookAt(Vector3.new(0, 24, 31), Vector3.new(0, 3.5, 0))
-mainCamera.Parent = workspace
-
-local observerCamera = Instance.new("Camera")
-observerCamera.Name = "LodObserverCamera"
-observerCamera.FieldOfView = 70
-observerCamera.FarPlaneZ = 180
-observerCamera.CFrame = CFrame.lookAt(Vector3.new(0, 70, 110), Vector3.new(0, 3.5, 0))
-observerCamera.Parent = workspace
-
-workspace.CurrentCamera = mainCamera
-
-local observing = false
-local simulatedSeconds = 0
-RunService.Heartbeat:Connect(function(deltaTime: number)
-	simulatedSeconds += deltaTime
-	local shouldObserve = math.floor(simulatedSeconds / OBSERVER_PERIOD_SECONDS) % 2 == 1
-	if shouldObserve == observing then
-		return
-	end
-
-	observing = shouldObserve
-	workspace.CurrentCamera = if observing then observerCamera else mainCamera
-	print(if observing then "lod decimation: observer camera" else "lod decimation: main camera")
-end)
+local cameraTemplates = assert(game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts"), "the camera template container is missing")
+local cameraScript = assert(cameraTemplates:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+cameraScript:SetAttribute("MainFrame", CFrame.lookAt(Vector3.new(0, 24, 31), Vector3.new(0, 3.5, 0)))
+cameraScript:SetAttribute("ObserverFrame", CFrame.lookAt(Vector3.new(0, 70, 110), Vector3.new(0, 3.5, 0)))
+cameraScript:SetAttribute("MainFieldOfView", 48)
+cameraScript:SetAttribute("ObserverFieldOfView", 70)
+cameraScript:SetAttribute("FarPlaneZ", 180)
+cameraScript:SetAttribute("ObserverPeriodSeconds", 4)

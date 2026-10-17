@@ -1,17 +1,17 @@
+#include "PortalCaptureTreeImport.hpp"
 #include "PortalRendererTerminalTrace.hpp"
+#include "PortalResidentImages.hpp"
+#include "PortalShadowTransport.hpp"
 #include "RendererTestHooks.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
-#include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalGeometry.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/render/PortalImageDemand.hpp>
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
-#include <engine/render/PortalResidentImages.hpp>
-#include <engine/render/PortalShadowTransport.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/WorldPresentation.hpp>
@@ -2875,6 +2875,7 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 	SECTION("editable image changes are prepared before capture renewal") {
 		ecs::Entity editable;
 		core::Name editableName;
+		const core::Name editableOwner = worlds.Universe.NameOf(worlds.Destination);
 		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
 			editable = store.CreateInstance(scene::EditableImageClass(), "capture image");
 			scene::EditableImage image;
@@ -2886,7 +2887,8 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 			if (spatialImage) store.GetMutable<gui::Picture>(pictureEntity)->Image = editableName;
 		});
 		const auto prepared = capture();
-		REQUIRE(fixture.Render.TextureHandle(editableName, contentOwner) != nullptr);
+		REQUIRE(fixture.Render.TextureHandle(editableName, editableOwner) != nullptr);
+		CHECK(fixture.Render.TextureHandle(editableName, contentOwner) == nullptr);
 		CHECK(fixture.Render.TextureHandle(editableName) == nullptr);
 		const auto uploadedRevision = fixture.Render.ResourceRevision();
 		const auto unchanged = capture();
@@ -2907,7 +2909,8 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 		const core::Name reboundOwner("session:editable-rebound");
 		bindOwner(reboundOwner);
 		const auto rebound = capture();
-		CHECK(fixture.Render.TextureHandle(editableName, reboundOwner) != nullptr);
+		CHECK(fixture.Render.TextureHandle(editableName, editableOwner) != nullptr);
+		CHECK(fixture.Render.TextureHandle(editableName, reboundOwner) == nullptr);
 		CHECK(rebound.PixelHash == changed.PixelHash);
 		bindOwner(contentOwner);
 		const auto restored = capture();
@@ -3008,6 +3011,41 @@ TEST_CASE("portal content revision follows resident flipbook cells", "[render][g
 		const auto restored = capture();
 		CHECK(restored.PixelHash == before.PixelHash);
 		CHECK(restored.ContentRevision == before.ContentRevision);
+	}
+	SECTION("live instance pictures use the world namespace while assets use a content alias") {
+		if (!spatialImage) return;
+		const core::Name owner = worlds.Universe.NameOf(worlds.Destination);
+		REQUIRE(owner != contentOwner);
+		const core::Name graphName("Signal"), imageName("imagegraph-instance://Signal#image");
+		imagegraph::Document graph{
+			.Nodes = {{"blue", imagegraph::Solid{1, 1, {0, 0, 255, 255}}, {}, {}}},
+			.Outputs = {{"image", "blue"}},
+			.Parameters = {},
+			.Bindings = {}
+		};
+		imagegraph::Diagnostic diagnostic;
+		REQUIRE(fixture.Render.SetImageGraph(owner, graphName, graph, {}, diagnostic));
+		REQUIRE(
+			fixture.Render.EvaluateImageGraph(owner, graphName, "image", imageName, diagnostic) ==
+			ImageGraphEvaluation::Updated
+		);
+		assets::TextureData wrongNamespace;
+		wrongNamespace.Width = wrongNamespace.Height = 1;
+		wrongNamespace.Pixels = {std::byte{255}, std::byte{0}, std::byte{0}, std::byte{255}};
+		REQUIRE(fixture.Render.AddTexture(imageName, wrongNamespace, contentOwner));
+		worlds.Universe.Enter(worlds.Destination, [&](ecs::Store &store) {
+			store.GetMutable<gui::Picture>(pictureEntity)->Image = imageName;
+		});
+		const auto captured = capture();
+		REQUIRE(captured.Width == 8);
+		REQUIRE(captured.Height == 8);
+		core::ByteReader pixel(std::span(captured.Pixels).subspan(4 * captured.RowStride + 4 * 8, 8));
+		const auto redGreen = glm::unpackHalf2x16(pixel.ReadUInt32());
+		const auto blueAlpha = glm::unpackHalf2x16(pixel.ReadUInt32());
+		CHECK(redGreen.x < .01f);
+		CHECK(redGreen.y < .01f);
+		CHECK(blueAlpha.x > .5f);
+		CHECK(blueAlpha.y > .99f);
 	}
 	SECTION("retiring a hosted world removes its content binding") {
 		if (host) {

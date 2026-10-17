@@ -1,8 +1,9 @@
 #pragma once
 
+#include "PortalResidentImages.hpp"
+
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
-#include <engine/render/PortalResidentImages.hpp>
 #include <engine/render/Renderer.hpp>
 
 #include <cstdint>

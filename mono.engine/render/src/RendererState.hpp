@@ -3,6 +3,7 @@
 #include "FramePreparation.hpp"
 #include "GraphHistory.hpp"
 #include "PortalCaptureTreeWork.hpp"
+#include "WeatherCapture.hpp"
 
 // `Renderer::Impl` - every device object the renderer owns, and the operations
 // over them.
@@ -15,11 +16,14 @@
 // public header is what confines it to `src/`.
 
 #include "GpuHeap.hpp"
+#include "ImageGraphGpu.hpp"
 #include "IndexResidency.hpp"
 #include "InstanceResidency.hpp"
 #include "LodSelection.hpp"
 #include "ParticleWork.hpp"
 #include "PipelineCompiler.hpp"
+#include "PortalCaptureTreeImport.hpp"
+#include "PortalShadowImageImport.hpp"
 #include "RenderStageProbe.hpp"
 #include "RenderTypes.hpp"
 #include "ResourcePreview.hpp"
@@ -28,6 +32,8 @@
 #include "SurfaceCapturePlan.hpp"
 #include "Tessellation.hpp"
 #include "VulkanTimestamps.hpp"
+#include "WeatherGpu.hpp"
+#include "WeatherTemporal.hpp"
 
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
@@ -39,9 +45,7 @@
 #include <engine/graph/Schedule.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>
 #include <engine/render/MeshTable.hpp>
-#include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalImageImport.hpp>
-#include <engine/render/PortalShadowImageImport.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/TextureTable.hpp>
@@ -58,6 +62,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <span>
@@ -87,6 +92,8 @@ namespace engine::render {
 		SDL_GPUDevice *Device = nullptr;
 		RenderStageProbe StageProbe;
 		DeviceCaps Caps;
+		ImageGraphGpuState ImageGraphs;
+		bool EnsureImageGraphPipelines();
 
 		using InstalledPipeline = engine::render::InstalledPipeline;
 		using PipelineCompilation = engine::render::PipelineCompilation;
@@ -159,7 +166,9 @@ namespace engine::render {
 				.Compiled = pipeline.Compiled,
 				.Schedule = pipeline.Schedule,
 				.Aliases = pipeline.Aliases,
-				.Profile = graph::ProfilePipeline(pipeline.Graph, pipeline.Compiled, viewWidth, viewHeight),
+				.Profile = graph::ProfilePipeline(
+					pipeline.Graph, pipeline.Compiled, viewWidth, viewHeight, pipeline.IdentitySources
+				),
 			};
 		}
 
@@ -204,7 +213,7 @@ namespace engine::render {
 					continue;
 				}
 				for (size_t output = 0; output < node->Writes.size(); output++) {
-					const graph::ResourceDesc *desc = pipeline->Graph.FindResource(node->Writes[output]);
+					const graph::ResourceDesc *desc = pipeline->Graph.FindResourceDesc(node->Writes[output]);
 					if (desc == nullptr || desc->Name != resource) {
 						continue;
 					}
@@ -332,6 +341,28 @@ namespace engine::render {
 			}
 		};
 		BatchSubmitResult BatchSubmit;
+		struct FrameBatchScratch {
+			std::vector<FrameViewIdentity> Identities;
+			std::vector<FrameViewGroup> Groups;
+			std::vector<size_t> Order;
+			std::vector<ViewMutationIdentity> Restorations;
+			std::vector<const InstalledPipeline *> PlannedPipelines;
+			std::vector<uint64_t> Worlds;
+
+			void Clear() {
+				Identities.clear();
+				Order.clear();
+				Restorations.clear();
+				PlannedPipelines.clear();
+				Worlds.clear();
+				// Keep nested capacities without retaining borrowed pipeline identities.
+				for (FrameViewGroup &group : Groups) {
+					group.Identity = {};
+					group.Views.clear();
+				}
+			}
+		};
+		FrameBatchScratch BatchScratch;
 		bool BatchActive = false;
 		bool BatchFirst = false;
 		bool BatchFinal = false;
@@ -474,7 +505,7 @@ namespace engine::render {
 			PendingCaptureTimings[slot].clear();
 		}
 
-		static constexpr uint32_t SURFACE_FRAGMENT_SAMPLERS = 13;
+		static constexpr uint32_t SURFACE_FRAGMENT_SAMPLERS = 16;
 		SDL_GPUGraphicsPipeline *OpaquePipeline = nullptr;
 		// Optional built-in states compile on first use. Arrays outlive startup's
 		// stack descriptors; their pointers are rebound after records have moved.
@@ -574,6 +605,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *PackChannelsPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DeferredLightingPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *SkyPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *WeatherFallbackPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *VolumePipeline = nullptr;
 		SDL_GPUGraphicsPipeline *BloomPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *DepthOfFieldPipeline = nullptr;
@@ -585,6 +617,45 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *TonemapPipeline = nullptr;
 		SDL_GPUComputePipeline *EnvironmentSkyCompute = nullptr;
 		SDL_GPUComputePipeline *EnvironmentCloudCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherClockCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherFieldCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherShadowCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherSummaryCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherRaysCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherTemporalCompute = nullptr;
+		SDL_GPUComputePipeline *WeatherReconstructCompute = nullptr;
+		struct WeatherTemporalTarget {
+			size_t Slot = 0;
+			uint64_t World = 0;
+			core::Name Pipeline;
+			WeatherTemporalHistory History;
+		};
+		std::vector<WeatherTemporalTarget> WeatherTemporalTargets;
+		WeatherTemporalHistory &WeatherTemporalAt(size_t slot, uint64_t world, core::Name pipeline);
+		void ReleaseWeatherTemporalSlot(size_t slot);
+		void ForgetWeatherTemporalWorld(uint64_t world);
+		void ReleaseWeatherTemporalHistories();
+		void CommitWeatherTemporalWrites(const void *command);
+		void DiscardWeatherTemporalWrites(const void *command = nullptr);
+		SDL_GPUComputePipeline *WeatherEvolutionCompute = nullptr;
+		std::vector<WeatherGpuGeneration> WeatherGenerations;
+		std::vector<std::unique_ptr<WeatherPhysicalOwner>> WeatherPhysicalOwners;
+		WeatherPhysicalOwner &WeatherPhysicalFor(uint64_t world, uint64_t recipeSignature);
+		void PruneWeatherPhysicalOwners();
+		std::vector<WeatherGpuWorldView> WeatherViews;
+		bool HasPendingWeatherWork(uint64_t world = 0) const {
+			for (const auto &owner : WeatherPhysicalOwners)
+				if ((!world || owner->World == world) && (owner->Physical.Fence || owner->CatchupPending))
+					return true;
+			for (const auto &generation : WeatherGenerations)
+				if ((!world || generation.World == world) &&
+					(generation.Topology.WorkActive || generation.Topology.ClassificationActive ||
+					 generation.TransitionAlpha < 1.0f))
+					return true;
+			return false;
+		}
+		void ForgetWeatherWorld(uint64_t world);
+		void ReleaseWeatherPipelines();
 
 		// Each owner selects one grade. Missing owners use the engine tonemap.
 		struct PostProcessVariant {
@@ -679,7 +750,8 @@ namespace engine::render {
 			SDL_GPUTexture *destination,
 			uint32_t width,
 			uint32_t height,
-			uint32_t &dispatches
+			uint32_t &dispatches,
+			const std::function<void()> &beginWork
 		);
 		bool RecordEnvironmentClouds(
 			const scene::Environment &environment,
@@ -688,8 +760,14 @@ namespace engine::render {
 			SDL_GPUTexture *destination,
 			uint32_t width,
 			uint32_t height,
-			uint32_t &dispatches
+			uint32_t &dispatches,
+			bool opaqueSkySource,
+			const std::function<void()> &beginWork,
+			bool weatherIntegrationEnabled = false
 		);
+		bool IsBlackEnvironment(
+			const scene::Environment &environment, const void *command, SDL_GPUTexture *texture
+		) const;
 		void ReleaseEnvironments();
 		void CommitEnvironmentWrites(SDL_GPUCommandBuffer *command);
 		void DiscardEnvironmentWrites(SDL_GPUCommandBuffer *command = nullptr);
@@ -895,7 +973,8 @@ namespace engine::render {
 			graph::ResourceId resource,
 			uint64_t owner,
 			uint32_t viewWidth,
-			uint32_t viewHeight
+			uint32_t viewHeight,
+			bool authoredExtent = false
 		);
 		SDL_GPUBuffer *FindGraphBuffer(
 			const InstalledPipeline &pipeline, core::Name resource, graph::NodeScope scope, uint64_t owner
@@ -905,7 +984,8 @@ namespace engine::render {
 			graph::ResourceId resource,
 			uint64_t owner,
 			uint32_t viewWidth,
-			uint32_t viewHeight
+			uint32_t viewHeight,
+			uint64_t actualBytes = 0
 		);
 
 		struct GraphRasterPipeline {
@@ -981,6 +1061,9 @@ namespace engine::render {
 		// behind a wall. Null when the shader failed to build, which disables
 		// the grid and nothing else.
 		SDL_GPUGraphicsPipeline *GridPipeline = nullptr;
+		SDL_GPUGraphicsPipeline *HdrGridPipeline = nullptr;
+		// Grid-only composition reads the immutable colour and depth in one draw.
+		SDL_GPUGraphicsPipeline *HdrGridCompositePipeline = nullptr;
 
 		// --- shader variants --------------------------------------------------
 		//
@@ -1098,7 +1181,7 @@ namespace engine::render {
 
 		// Indices surviving culling.
 		std::vector<uint32_t> Visible;
-		// Camera and portal selection read Drawable throughout synchronous Begin/Finish.
+		// Camera and portal selection borrow input or Drawable during synchronous Begin/Finish.
 		std::span<const scene::DrawInstance> VisibleInstances;
 
 		// The whole draw list, ordered for the surface camera. What the shadow
@@ -1144,8 +1227,21 @@ namespace engine::render {
 		// Named resources can change without changing any submitted draw row.
 		// Active view scope for native environment, particle and ribbon texture bindings.
 		core::Name ActiveContentOwner;
+		core::Name ActiveImageGraphWorld;
+		core::Name ActiveLocalImageGraphWorld;
 		static core::Name MeshContentOwner(core::Name name, core::Name owner);
-		static core::Name TextureContentOwner(core::Name name, core::Name owner);
+		static core::Name TextureContentOwner(core::Name name, core::Name owner, core::Name world = {});
+		core::Name TextureContentOwnerWithFallback(
+			core::Name name, core::Name owner, core::Name world, core::Name authoredWorld
+		) const {
+			const core::Name local = TextureContentOwner(name, owner, world);
+			if (!authoredWorld.IsValid() || authoredWorld == world || Textures.Find(name, local) != nullptr)
+				return local;
+			return TextureContentOwner(name, owner, authoredWorld);
+		}
+		core::Name ParticleTextureOwner(
+			core::Name name, core::Name contentOwner, core::Name sourceWorld, core::Name authoredWorld
+		) const;
 
 		uint64_t ResourceEpoch = 0;
 
@@ -1261,6 +1357,8 @@ namespace engine::render {
 		std::vector<const MeshEntry *> SlotMesh;
 		std::vector<core::Name> SlotTexture;
 		std::vector<core::Name> SlotContentOwner;
+		std::vector<core::Name> SlotImageGraphWorld;
+		std::vector<core::Name> SlotImageGraphFallbackWorld;
 		std::vector<core::Name> SlotNormalMap;
 		std::vector<core::Name> SlotRoughnessMap;
 		std::vector<core::Name> SlotOcclusionMap;
@@ -1486,6 +1584,8 @@ namespace engine::render {
 			return SlotLod[next] == SlotLod[slot] && SlotMesh[next] == SlotMesh[slot] &&
 				   SlotTexture[next] == SlotTexture[slot] &&
 				   SlotContentOwner[next] == SlotContentOwner[slot] &&
+				   SlotImageGraphWorld[next] == SlotImageGraphWorld[slot] &&
+				   SlotImageGraphFallbackWorld[next] == SlotImageGraphFallbackWorld[slot] &&
 				   SlotNormalMap[next] == SlotNormalMap[slot] &&
 				   SlotRoughnessMap[next] == SlotRoughnessMap[slot] &&
 				   SlotOcclusionMap[next] == SlotOcclusionMap[slot] &&
@@ -1544,47 +1644,85 @@ namespace engine::render {
 		SDL_GPUComputePipeline *ParticleEmit = nullptr;
 		SDL_GPUComputePipeline *ParticleScatter = nullptr;
 
-		// The analytical storm field shares no allocation or simulation path with
-		// authored emitters. Its one state row is both compute storage and the
-		// vertex stream. A bounded front cohort feeds the depth-sliced cloud draw,
-		// so even fifty million particles remain device-local.
+		// Authored initial conditions seed device-local state. Only a bounded draw
+		// cohort crosses the raster pipeline; the full requested population stays
+		// resident and is stepped on the device.
 		SDL_GPUComputePipeline *GpuParticleFieldStep = nullptr;
 		SDL_GPUGraphicsPipeline *GpuParticleFieldPipeline = nullptr;
 		SDL_GPUGraphicsPipeline *HdrGpuParticleFieldPipeline = nullptr;
 		struct GpuParticleFieldWorld {
 			uint64_t Id = 0;
 			core::Name Name;
+			ecs::Entity Source = ecs::NULL_ENTITY;
+			bool Weather = false;
+			size_t ViewSlot = 0;
 			SDL_GPUBuffer *States = nullptr;
 			uint32_t Capacity = 0;
 			uint32_t ActiveCount = 0;
 			uint32_t RequestedCount = 0;
 			uint32_t Seed = 0;
 			uint8_t Layers = 0;
-			float TopHeight = 1.0f;
-			float CentreY = 0.0f;
-			core::Vector3 Centre;
-			float CoreRadius = 1.0f;
-			float InfluenceRadius = 1.0f;
+			SDL_GPUBuffer *Samples = nullptr;
+			SDL_GPUTransferBuffer *SampleTransfer = nullptr;
+			uint32_t SampleCapacity = 0;
+			bool SamplesDirty = true;
+			bool SampleUploadPending = false;
+			core::CFrame Frame;
+			scene::VectorFieldSample ForceField;
+
 			scene::GpuParticleField Field;
 			scene::WorldLighting Lighting;
 			bool ResetPending = true;
 			bool SubmissionPending = false;
+			uint64_t PreparedFrame = std::numeric_limits<uint64_t>::max();
+			ecs::Entity DefinitionSource = ecs::NULL_ENTITY;
+			uint64_t DefinitionRevision = 0;
+			bool DefinitionValid = false;
 		};
 		std::vector<GpuParticleFieldWorld> GpuParticleFieldWorlds;
 		GpuParticleFieldWorld *ActiveGpuParticleFieldWorld = nullptr;
+		std::vector<size_t> ActiveGpuParticleFieldIndices;
 
-		GpuParticleFieldWorld &GpuParticleFieldWorldFor(uint64_t id, core::Name name) {
+		GpuParticleFieldWorld &GpuParticleFieldWorldFor(
+			uint64_t id, core::Name name, ecs::Entity source, bool weather, size_t viewSlot
+		) {
 			for (GpuParticleFieldWorld &world : GpuParticleFieldWorlds) {
-				if (world.Id == id && world.Name == name) return world;
+				if (world.Id == id && world.Name == name && world.Source == source &&
+					world.Weather == weather && world.ViewSlot == viewSlot)
+					return world;
 			}
 			GpuParticleFieldWorld world;
 			world.Id = id;
 			world.Name = name;
+			world.Source = source;
+			world.Weather = weather;
+			world.ViewSlot = viewSlot;
 			GpuParticleFieldWorlds.push_back(std::move(world));
 			return GpuParticleFieldWorlds.back();
 		}
 		bool ReserveGpuParticleField(uint32_t count);
-		bool PrepareGpuParticleField(const View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot);
+		struct GpuParticleFieldPreparation {
+			uint32_t Dispatches = 0;
+			uint32_t Count = 0;
+		};
+		GpuParticleFieldPreparation
+		PrepareGpuParticleFields(const View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot);
+		GpuParticleFieldPreparation PrepareGpuParticleField(
+			const View &view,
+			const GpuParticleFieldView &source,
+			bool weather,
+			SDL_GPUCommandBuffer *command,
+			uint32_t timingSlot
+		);
+		uint32_t DrawOneGpuParticleField(
+			SDL_GPUCommandBuffer *command,
+			SDL_GPURenderPass *pass,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &eye,
+			uint64_t &triangles,
+			uint32_t &particlesDrawn,
+			WorldColourTarget target
+		);
 		uint32_t DrawGpuParticleField(
 			SDL_GPUCommandBuffer *command,
 			SDL_GPURenderPass *pass,
@@ -1698,14 +1836,6 @@ namespace engine::render {
 			TransparentLayerPhase layer = TransparentLayerPhase::None
 		);
 
-		// This frame's groups, and the batch order they were built from.
-		//
-		// Members rather than locals, so the capacity survives the frame - the
-		// same argument `DrawOrder` makes one screen up.
-		std::vector<ParticleGroup> ParticleGroups;
-		std::vector<ParticleCullSpan> ParticleSpans;
-		std::vector<uint32_t> ParticleOrder;
-
 		// --- the device-resident pool -----------------------------------------
 		//
 		// **The particles live here and are simulated here.** Until v0.17 the
@@ -1735,6 +1865,12 @@ namespace engine::render {
 			SDL_GPUTransferBuffer *WorkStaging = nullptr;
 			uint32_t WorkCapacity = 0;
 			//@}
+
+			// Emission runs once per admitted emitter, while integration visits
+			// every slot. Both lists derive from the same prepared layout.
+			SDL_GPUBuffer *EmitWork = nullptr;
+			SDL_GPUTransferBuffer *EmitWorkStaging = nullptr;
+			uint32_t EmitWorkCapacity = 0;
 
 			// The two tables the step reads by block index, and the one staging
 			// staging records that feed them.
@@ -1797,7 +1933,6 @@ namespace engine::render {
 			SDL_GPUBuffer *Timeline = nullptr;
 			std::unordered_map<uint64_t, uint32_t> TimelineOffsets;
 			uint64_t TimelineRevision = 0;
-			uint64_t TimelineLayoutRevision = 0;
 			uint64_t TimelineResidentRevision = 0;
 			bool TimelineIncomplete = false;
 			core::Name TimelineOwner;
@@ -1806,6 +1941,8 @@ namespace engine::render {
 			//@{
 			uint32_t WorkItems = 0;
 			uint32_t WorkUpdates = 0;
+			uint32_t EmitWorkItems = 0;
+			uint32_t EmitWorkUpdates = 0;
 			uint32_t SeamCount = 0;
 			uint32_t ParamUpdates = 0;
 			uint32_t CurveUpdates = 0;
@@ -1838,6 +1975,8 @@ namespace engine::render {
 			std::vector<ParticleGroup> PreparedGroups;
 			std::vector<ParticleCullSpan> PreparedSpans;
 			std::vector<uint32_t> PreparedOrder;
+			std::vector<ParticleWorkBlock> PreparedWorkBlocks;
+			bool VariableTimeline = false;
 			bool PreparedCullingSafe = true;
 
 			// Emitter bounds and their folded runs are host facts. Keep the last
@@ -1889,7 +2028,7 @@ namespace engine::render {
 		bool ReserveParticlePool(uint32_t slots, SDL_GPUCommandBuffer *command);
 		bool PrepareParticleTimeline(const View &view, SDL_GPUCommandBuffer *command);
 		bool ReserveParticleTables(uint32_t blocks, SDL_GPUCommandBuffer *command);
-		bool ReserveParticleStaging(uint32_t workItems, uint32_t seams);
+		bool ReserveParticleStaging(uint32_t workItems, uint32_t emitters, uint32_t seams);
 		//@}
 
 		// Runs changed-state uploads, emission and integration in the frame's
@@ -1972,6 +2111,23 @@ namespace engine::render {
 			static constexpr size_t RETAINED_FRAMES = 3;
 			uint64_t ContentSignature = 0;
 			static constexpr uint32_t NO_RETAINED_FRAME = UINT32_MAX;
+			PassActivity Activity;
+			core::Name ForwardPipeline;
+			uint64_t ForwardRevision = 0;
+			uint64_t ForwardWorld = 0;
+			bool ForwardUnavailable = false;
+			// Non-owning current-image bindings, bounded by the installed graph.
+			std::vector<NamedTexture> ForwardedTextures;
+			struct WorkingForwardSet {
+				core::Name Pipeline;
+				uint64_t Revision = 0;
+				uint64_t World = 0;
+				uint64_t ContentSignature = 0;
+				PassActivity Activity;
+				std::vector<NamedTexture> Textures;
+				bool Ready = false;
+				SDL_GPUCommandBuffer *Command = nullptr;
+			} ForwardWorking;
 
 			// Stable mesh and resident identities beside a retained viewport.
 			// Particle-only redraws still fill object draw metadata from the ECS rows,
@@ -2059,6 +2215,27 @@ namespace engine::render {
 		};
 
 		std::vector<SceneSlot> SceneSlots;
+		NamedTexture ForwardedTexture(
+			const InstalledPipeline &pipeline,
+			core::Name resource,
+			size_t slot,
+			SDL_GPUCommandBuffer *command = nullptr
+		) const {
+			if (slot >= SceneSlots.size()) return {};
+			const auto &scene = SceneSlots[slot];
+			const auto &working = scene.ForwardWorking;
+			const bool pending = command != nullptr && working.Command == command &&
+								 working.Pipeline == pipeline.Name && working.Revision == pipeline.Revision;
+			if (!pending &&
+				(scene.ForwardPipeline != pipeline.Name || scene.ForwardRevision != pipeline.Revision))
+				return {};
+			const auto &textures = pending ? working.Textures : scene.ForwardedTextures;
+			for (uint32_t value = 1; value <= pipeline.Graph.ResourceCount(); ++value) {
+				const auto *desc = pipeline.Graph.FindResourceDesc(graph::ResourceId{value});
+				if (desc && desc->Name == resource && value <= textures.size()) return textures[value - 1];
+			}
+			return {};
+		}
 
 		// One data-factory capture keeps its logical planes together. Shared
 		// capture nodes reduce thirteen resource-backed logical planes to at most
@@ -2194,7 +2371,9 @@ namespace engine::render {
 				world.StateInitialisationPending = false;
 			}
 			for (GpuParticleFieldWorld &world : GpuParticleFieldWorlds) {
-				if (!world.SubmissionPending) continue;
+				if (!world.SubmissionPending && !world.SampleUploadPending) continue;
+				if (!submitted && world.SampleUploadPending) world.SamplesDirty = true;
+				world.SampleUploadPending = false;
 				// A command buffer that never submitted cannot have initialized the
 				// replacement buffer. Re-run the device-only reset next frame.
 				if (!submitted) world.ResetPending = true;
@@ -2757,6 +2936,7 @@ namespace engine::render {
 		// reallocation `SCENE_TARGET_BLOCK` exists to avoid one layer up. The
 		// high-water mark is bounded by `scene::MAX_SURFACES`.
 		struct SurfaceBank {
+			WeatherCaptureScratch WeatherCapture;
 			SurfaceCapturePlan CapturePlan;
 			SurfaceCaptureCache CaptureCache;
 			std::vector<effects::RibbonVertex> CaptureRibbonSource;
@@ -3049,7 +3229,8 @@ namespace engine::render {
 			uint64_t &triangles,
 			const IndirectPhase *indirect = nullptr,
 			SlotSelection selection = SlotSelection::All,
-			VisibilityPass visibilityPass = VisibilityPass::Secondary
+			VisibilityPass visibilityPass = VisibilityPass::Secondary,
+			core::Name weatherPipeline = {}
 		);
 
 		void RecordVisibilityDraw(uint32_t first, uint32_t count);

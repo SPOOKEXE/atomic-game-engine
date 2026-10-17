@@ -13,7 +13,6 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/physics/Storm.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -135,46 +134,6 @@ TEST_CASE("a data package can set a detached RigKeypoint joint", "[scriptluau][d
 	);
 	CHECK(result.Terminal == engine::script::DataScriptPackageRunResult::State::Completed);
 	CHECK(result.Error.empty());
-}
-
-TEST_CASE(
-	"the luau storm service authors one physics resource and samples its field", "[scriptluau][storm]"
-) {
-	RegisterClasses();
-	Store store("scriptluau_storm");
-	const auto runtime = MakeLuauRuntime(store);
-
-	REQUIRE(runtime->Run(R"(
-		Storm.Preset("EF4")
-		Storm.Configure({ Position = Vector3.new(4, 0, 8), LifecycleEnabled = true })
-		local field = Storm.Sample(Vector3.new(32, 12, 8))
-		local snapshot = Storm.Snapshot()
-		local visibility = Storm.Visibility(Vector3.new(32, 12, 8), 400)
-		local damage = Storm.Damage(Vector3.new(32, 12, 8))
-		assert(field.Influence > 0 and snapshot.Position == Vector3.new(4, 0, 8))
-		assert(snapshot.Parameters.Energy > 0 and snapshot.LifecycleEnabled)
-		assert(visibility.EffectiveDistance > 0 and damage.Potential >= 0)
-	)"));
-
-	const engine::physics::Storm *storm = engine::physics::StormOf(store);
-	REQUIRE(storm != nullptr);
-	CHECK(storm->State.Position.FuzzyEq({4.0f, 0.0f, 8.0f}));
-	CHECK(storm->State.LifecycleEnabled);
-}
-
-TEST_CASE("the luau storm service refuses client-side authoring", "[scriptluau][storm]") {
-	RegisterClasses();
-	Store store("scriptluau_storm_client");
-	const auto runtime = MakeLuauRuntime(
-		store,
-		{
-			.Role = engine::script::HostRole::OfClient(),
-		}
-	);
-
-	CHECK_FALSE(runtime->Run("Storm.Configure({ Energy = 1 })"));
-	CHECK(runtime->LastError().find("authoritative server") != std::string::npos);
-	CHECK(engine::physics::StormOf(store) == nullptr);
 }
 
 TEST_CASE("luau package runtime exposes only immutable package data", "[scriptluau][data-script-package]") {
@@ -509,4 +468,60 @@ TEST_CASE("luau creates shader scripts and writes their source", "[scriptluau][s
 	REQUIRE(shader.Found);
 	CHECK(shader.Code == "#version 450\nvoid main() {}");
 	CHECK(shader.Revision > 0);
+}
+
+TEST_CASE("module factories and deferred Luau work keep their caller side", "[scriptluau][client]") {
+	using namespace engine;
+	RegisterClasses();
+	Store store("scriptluau_module_ownership");
+	StageModule(store, "factory.luau", "Factory", R"(
+local server = game:GetService('RunService'):IsServer()
+local initial = Instance.new('Part', workspace)
+initial.Name = server and 'ServerModuleInit' or 'ClientModuleInit'
+return function(name)
+    assert(game:GetService('RunService'):IsServer() == server)
+    local part = Instance.new('Part', workspace)
+    part.Name = name
+end
+)");
+	const std::string_view source = R"(
+local server = game:GetService('RunService'):IsServer()
+local prefix = server and 'ServerModule' or 'ClientModule'
+local make = require(workspace.Factory)
+make(prefix)
+task.defer(function() make(prefix .. 'Deferred') end)
+local changedEnvironment = function()
+    local part = Instance.new('Part', workspace)
+    part.Name = prefix .. 'Environment'
+end
+assert(not pcall(function()
+    setfenv(changedEnvironment, {Instance = Instance, workspace = workspace})
+end))
+changedEnvironment()
+)";
+	const auto runtime = MakeLuauRuntime(store, {.Role = script::HostRole::OfBoth()});
+	REQUIRE(runtime != nullptr);
+	for (const bool client : {false, true}) {
+		const auto path = client ? "client-module.luau" : "server-module.luau";
+		store.ResourceMutable<script::SourceCache>()->Set(core::Name(path), source);
+		const auto instance = script::MakeScript(store, path, client ? "Client" : "Server", client);
+		REQUIRE(instance != ecs::NULL_ENTITY);
+		const bool ran = runtime->RunInstance(instance);
+		INFO(runtime->LastError());
+		REQUIRE(ran);
+	}
+	const bool ticked = runtime->Heartbeat(1.0f / 60.0f);
+	INFO(runtime->LastError());
+	REQUIRE(ticked);
+	for (const std::string_view suffix : {"", "Init", "Deferred", "Environment"}) {
+		const auto client =
+			store.FindFirstChild(scene::WorkspaceOf(store), "ClientModule" + std::string(suffix));
+		const auto server =
+			store.FindFirstChild(scene::WorkspaceOf(store), "ServerModule" + std::string(suffix));
+		REQUIRE(client != ecs::NULL_ENTITY);
+		REQUIRE(server != ecs::NULL_ENTITY);
+		CHECK(ecs::Store::IsPredicted(client));
+		CHECK(store.Has<ecs::ClientLocal>(client));
+		CHECK_FALSE(ecs::Store::IsPredicted(server));
+	}
 }

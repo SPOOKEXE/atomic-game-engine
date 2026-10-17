@@ -38,6 +38,7 @@
 // | `Hierarchy::FirstChild`, `NextSibling` | The order the flatten descends in |
 // | `InstanceName` | Drawn on the row, and what the filter matches |
 // | `InstanceClass` | Drawn on the row |
+// | Script-side GUI visibility | Client copies and server sources are distinct views |
 // | The filter text, open set and reveal set | Inputs, so they change the rows |
 //
 // `LastChild` and `PreviousSibling` are absent because nothing here reads them.
@@ -181,8 +182,9 @@ namespace studio {
 
 		// Whether an instance is anywhere in this world.
 		//
-		// True even for a row a filter is hiding, because "is this handle still
-		// live" and "is it on screen" are different questions and answering
+		// True even for a row a text filter is hiding. Opposite-side GUI rows
+		// are excluded, because they cannot be selected in this view.
+		// "Is this handle still live" and "is it on screen" are different questions and answering
 		// them with one value is how a selection quietly disappears.
 		//
 		// @param instance The instance to test.
@@ -258,7 +260,7 @@ namespace studio {
 			// Where this instance ended up in `RowList`, or `NO_ROW`.
 			size_t Row = NO_ROW;
 
-			// `MATCH`, `KEEP` and `OPEN`.
+			// `MATCH`, `KEEP`, `OPEN` and `HIDDEN`.
 			uint8_t Flags = 0;
 		};
 
@@ -272,6 +274,9 @@ namespace studio {
 		// contiguously from a node up to its root, which is what lets both
 		// propagation walks stop at the first ancestor already carrying it.
 		static constexpr uint8_t OPEN = 1u << 2;
+
+		// Opposite-side GUI rows retain traversal links but cannot be drawn or picked.
+		static constexpr uint8_t HIDDEN = 1u << 3;
 
 		// One entry of the flatten's own stack.
 		struct Pending {

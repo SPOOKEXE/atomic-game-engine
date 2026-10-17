@@ -183,7 +183,7 @@ namespace engine::render {
 					}
 				}
 				const graph::ResourceDesc *source =
-					node->Reads.size() == 1 ? pipeline->Graph.FindResource(node->Reads.front()) : nullptr;
+					node->Reads.size() == 1 ? pipeline->Graph.FindResourceDesc(node->Reads.front()) : nullptr;
 				const bool residentR8Source =
 					source != nullptr && source->Format == graph::ResourceFormat::R8;
 				const bool labelIds = source != nullptr && (source->Name == core::Name("object-ids") ||

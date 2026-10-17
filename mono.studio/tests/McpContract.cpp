@@ -25,6 +25,35 @@ TEST_SUITE_ID("studio.mcpcontract")
 namespace {
 	using nlohmann::json;
 	using Clock = std::chrono::steady_clock;
+	// Local dev/Vulkan cold startup on an RTX 4090 took 24 seconds. Budget device/world startup
+	// separately so protocol replies retain their five-second deadline.
+	constexpr auto STUDIO_STARTUP_TIMEOUT = std::chrono::seconds(60);
+
+	struct TemporaryConfig {
+		std::filesystem::path Root;
+
+		TemporaryConfig() {
+			const auto prefix =
+				std::filesystem::temp_directory_path() /
+				("atomic-studio-mcp-" + std::to_string(Clock::now().time_since_epoch().count()));
+			for (uint32_t attempt = 0; attempt < 64; ++attempt) {
+				const std::filesystem::path candidate = prefix.string() + "-" + std::to_string(attempt);
+				std::error_code failure;
+				const bool created = std::filesystem::create_directory(candidate, failure);
+				INFO("temporary Studio config: " << candidate << ": " << failure.message());
+				REQUIRE_FALSE(failure);
+				if (!created) continue;
+				Root = candidate;
+				return;
+			}
+			FAIL("could not reserve an isolated Studio configuration directory");
+		}
+
+		~TemporaryConfig() {
+			std::error_code ignored;
+			std::filesystem::remove_all(Root, ignored);
+		}
+	};
 
 	std::filesystem::path Program() {
 		return engine::core::Paths::Base().parent_path() / "studio" / engine::core::Paths::Program("studio");
@@ -84,16 +113,30 @@ namespace {
 		}
 	}
 
-	bool Connect(asio::ip::tcp::socket &socket, uint16_t port) {
+	bool Connect(asio::ip::tcp::socket &socket, uint16_t port, engine::parallel::Process &child) {
 		std::error_code failure;
-		const Clock::time_point deadline = Clock::now() + std::chrono::seconds(10);
+		const Clock::time_point started = Clock::now();
+		const Clock::time_point deadline = started + STUDIO_STARTUP_TIMEOUT;
 		while (Clock::now() < deadline) {
+			const auto status = child.Poll();
+			if (!status.Alive()) {
+				FAIL(
+					"Studio exited before MCP became ready: " << engine::parallel::Describe(status.Reason)
+															  << ", exit code " << status.Code << ", signal "
+															  << status.Signal
+				);
+			}
 			socket.connect({asio::ip::address_v4::loopback(), port}, failure);
 			if (!failure) return true;
 			std::error_code ignored;
 			socket.close(ignored);
 			std::this_thread::sleep_for(std::chrono::milliseconds(10));
 		}
+		const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started);
+		FAIL(
+			"Studio did not expose MCP on port " << port << " after " << elapsed.count()
+												 << " ms; last TCP error: " << failure.message()
+		);
 		return false;
 	}
 
@@ -142,16 +185,24 @@ namespace {
 		if (!std::filesystem::exists(Program())) SKIP("the Studio program is not built into this preset");
 		const json expected = Fixture()[std::string(mode)];
 		const uint16_t port = FreePort();
+		// The child must stop before its isolated configuration is removed.
+		TemporaryConfig config;
 		engine::parallel::Process child;
 		std::vector<std::string> arguments{
-			"--headless", "--frames", "3000", "--mcp-port", std::to_string(port)
+			"--headless",
+			"--frames",
+			"3000",
+			"--mcp-port",
+			std::to_string(port),
+			"--config-root",
+			config.Root.string()
 		};
 		if (factory) arguments.push_back("--data-factory");
 		REQUIRE(child.Start(Program(), arguments));
 
 		asio::io_context context;
 		asio::ip::tcp::socket socket(context);
-		REQUIRE(Connect(socket, port));
+		REQUIRE(Connect(socket, port, child));
 		const auto opened = Ask(socket, 1, "initialize");
 		REQUIRE(opened);
 		CHECK((*opened)["result"]["serverInfo"]["name"] == expected["server"]);
@@ -246,9 +297,9 @@ namespace {
 	}
 }
 
-TEST_CASE("Studio normal MCP manifest is available", "[studio][mcp]") {
+TEST_CASE("Studio normal MCP manifest is available", "[studio][mcp][gpu]") {
 	Check("normal", false);
 }
-TEST_CASE("Studio factory MCP manifest is available", "[studio][mcp][data-factory]") {
+TEST_CASE("Studio factory MCP manifest is available", "[studio][mcp][data-factory][gpu]") {
 	Check("factory", true);
 }

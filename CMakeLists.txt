@@ -43,7 +43,7 @@ set_property(DIRECTORY APPEND
 # MONO_FUZZ_* option set on the command line.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
    NOT (MONO_FUZZ_GUI OR MONO_FUZZ_BAKE OR MONO_FUZZ_SHADER OR MONO_FUZZ_PRESENTATION OR
-        MONO_FUZZ_PORTAL_EXCHANGE))
+        MONO_FUZZ_PORTAL_EXCHANGE OR MONO_FUZZ_WEATHER))
 	message(FATAL_ERROR
 		"Linux builds use GCC; this configure picked ${CMAKE_CXX_COMPILER_ID} (${CMAKE_CXX_COMPILER}).\n"
 		"  Reconfigure without a compiler override: `cmake --preset <name> --fresh`.")
@@ -412,11 +412,13 @@ endif()
 # requests dependency files with `-MD`, which is what depend mode hashes.
 # Direct hits still work; a miss compiles once instead of expanding the PCH.
 #
-# Two calls per build still report as errors, and they are the two PCH
-# *generation* steps - ccache cannot parse a header as a source, so it passes
-# them to the compiler untouched. Correct, and 0.11% of the build.
+# PCH regeneration must remove its old output before calling ccache. GCC's
+# -include otherwise finds that same .gch as an input, which changes during
+# compilation and prevents caching both the PCH and its unchanged consumers.
+# CompilerCache.cmake handles only that generation step; ordinary compiles
+# retain their PCH. A cached regeneration restores identical PCH bytes.
 #
-# Passed through `cmake -E env` rather than left to each developer's
+# Passed through the compiler launcher rather than left to each developer's
 # `ccache.conf`, so the setting travels with the build. A machine-local config
 # would make the cache behave differently depending on who ran it, which is the
 # third category of rule `AGENTS.md` rule 6 refuses to allow. `sccache` reads no
@@ -454,14 +456,11 @@ if(MONO_CCACHE)
 	# could diagnose.
 	find_program(MONO_COMPILER_CACHE NAMES ccache sccache NO_CACHE)
 	if(MONO_COMPILER_CACHE)
-		if(MONO_COMPILER_CACHE MATCHES "ccache")
-		set(MONO_CACHE_LAUNCHER
-			"${CMAKE_COMMAND}" -E env
-			"CCACHE_SLOPPINESS=pch_defines,time_macros"
-			"CCACHE_BASEDIR=${CMAKE_SOURCE_DIR}"
-			"CCACHE_NOHASHDIR=true"
-			"CCACHE_DEPEND=true"
-			"${MONO_COMPILER_CACHE}")
+		get_filename_component(MONO_COMPILER_CACHE_NAME "${MONO_COMPILER_CACHE}" NAME_WE)
+		if(MONO_COMPILER_CACHE_NAME STREQUAL "ccache")
+			set(MONO_CACHE_LAUNCHER
+				"${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/mono.build/CompilerCache.cmake"
+				"${MONO_COMPILER_CACHE}" "${CMAKE_SOURCE_DIR}" --)
 		else()
 			set(MONO_CACHE_LAUNCHER "${MONO_COMPILER_CACHE}")
 		endif()
@@ -482,6 +481,9 @@ endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/mono.build")
 include(MonoVendor)
+
+# Apply link choices after vendor targets exist, before first-party targets do.
+include(MonoLinker)
 
 # After MonoVendor, so that glslc_exe exists to be named. Only the presentation
 # modules own GLSL, so a server-only configure needs no shader compiler at all.

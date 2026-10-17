@@ -270,7 +270,7 @@ namespace engine::ecs {
 		// them apart. The failure is not a crash: it is two different things
 		// quietly becoming one, discovered later and somewhere else.
 		//
-		// Set, `Create` and `CreateInstance` return `NULL_ENTITY` and say so
+		// Set, `Create` and authoritative `CreateInstance` return `NULL_ENTITY` and say so
 		// once. Two things are deliberately unaffected:
 		//
 		//   - **`CreatePredicted`**, because the predicted range is exactly the
@@ -1110,7 +1110,8 @@ namespace engine::ecs {
 		// A column copy per component rather than a constructor call, which is
 		// also what makes `Clone` need no separate machinery.
 		//
-		// Mints an **authoritative** entity, so an adopt-only store refuses it
+		// Exact classes marked RuntimeLocal mint a predicted, ClientLocal instance.
+		// Other classes mint an authoritative entity, so an adopt-only store refuses it
 		// exactly as it refuses `Create`. That check used to be missing here,
 		// and `scene::MakePart` carried a copy of it because this path walked
 		// straight past the flag - one minting path honouring the rule and one
@@ -1120,7 +1121,7 @@ namespace engine::ecs {
 		// @param id   The class to instantiate.
 		// @param name The instance's name, which need not be unique.
 		// @return The new instance, NULL_ENTITY for an invalid class, or
-		//         NULL_ENTITY in an adopt-only store.
+		//         NULL_ENTITY for an authoritative class in an adopt-only store.
 		Entity CreateInstance(ClassId id, std::string_view name = {});
 
 		// Creates a locally predicted instance from a class prototype.
@@ -1705,6 +1706,16 @@ namespace engine::ecs {
 			return ComponentChangeVersionRaw(Components::Of<T>());
 		}
 
+		// The write epoch at the last ClearChanges, even when no rows were dirty.
+		// A consumer with an older retained write epoch cannot use EachChanged<T>
+		// alone to recover every unseen write. Zero means no clear since observation.
+		// This process-local watermark is reset with world storage, not serialized.
+		//
+		// @return The last cleared write epoch for `T`, or zero when unobserved.
+		template <class T> uint64_t ComponentClearedChangeVersion() const {
+			return ComponentClearedChangeVersionRaw(Components::Of<T>());
+		}
+
 		// The monotonic membership epoch for one observed component.
 		// It advances when an entity gains or loses `T`, including destruction.
 		// Existing-value writes do not advance it. Zero means the component is not observed.
@@ -2134,8 +2145,15 @@ namespace engine::ecs {
 		// @param reader The snapshot to apply.
 		// @param mode   What to do with entities the snapshot does not mention.
 		// @param clock  Restore saved time, or preserve this world's clock for replicated state.
+		// @param resourceAllow Optional resource filter, called after the snapshot validates.
+		//                      A false result retains the current resource without affecting entities.
 		// @return `false` when the snapshot could not be read.
-		bool Apply(core::ByteReader &reader, ApplyMode mode, ApplyClock clock = ApplyClock::RestoreSnapshot);
+		bool Apply(
+			core::ByteReader &reader,
+			ApplyMode mode,
+			ApplyClock clock = ApplyClock::RestoreSnapshot,
+			const std::function<bool(ComponentId)> &resourceAllow = {}
+		);
 
 		// Empties the world: every entity, table, resource and name.
 		//
@@ -2148,41 +2166,10 @@ namespace engine::ecs {
 		// A reader refuses anything else outright. A format that tries to be
 		// tolerant of versions it has never seen is one that restores a world
 		// nobody can reason about.
-		//
-		// **2 - the entity directory is two runs rather than one.** The
-		// directory is written as a run of `Capacity()` entries, and the index
-		// space now has two regions with 2³¹ indices between them, so a version
-		// 1 reader handed a version 2 stream would read the predicted run's
-		// generations as authoritative slots and silently produce a world with
-		// entities nothing named. Bumped rather than sniffed, because the two
-		// layouts are indistinguishable from the bytes alone.
-		//
-		// **3 - `ecs.InstanceClass` is written as the class's name.** It was the
-		// registration index, which is `AGENTS.md` rule 4 in a file: nothing
-		// restores the class table the way `Load` restores the directory, so a
-		// world reloaded by a build that registered its classes in another order
-		// came back with every instance the wrong class. The bump is here rather
-		// than left to the reader because a length prefix read as a `ClassId`
-		// does not fail on that field - it consumes the bytes of the values
-		// behind it, and the load dies somewhere unrelated with nothing naming
-		// the cause.
-		//
-		// A component's serialiser is not the envelope this version usually
-		// describes, and that is not a reason to leave it. `ecs.InstanceName`
-		// went the same way at v0.8 without one, and every world saved before it
-		// loaded with its names garbled rather than being refused.
-		//
-		// **4 - a script's source path is written as its text.**
-		// `script.LuaSourceContainer` and its JavaScript twin hold a
-		// `core::Name` and had no writer of their own, so raw serialisation put
-		// an *interning index* in the file - the exact hazard
-		// `DescribeType`'s warning names. A world written by one process and
-		// read by another resolved every script's path to whatever that process
-		// happened to have interned in that slot, which is a game file that
-		// loads cleanly and runs the wrong programs. Same shape as 3, one type
-		// along, and refused for the same reason: a length prefix read as a
-		// four-byte id consumes the values behind it.
-		static constexpr uint32_t SNAPSHOT_VERSION = 7;
+		// The raw LightingService component layout changed when fog, bloom,
+		// depth of field and god rays moved into child components. This bump
+		// refuses snapshots whose component bytes use the old layout.
+		static constexpr uint32_t SNAPSHOT_VERSION = 8;
 
 		// The number of tables this world holds.
 		//
@@ -2438,6 +2425,7 @@ namespace engine::ecs {
 		void ObserveRaw(ComponentId id);
 		bool ObservedRaw(ComponentId id) const;
 		uint64_t ComponentChangeVersionRaw(ComponentId id) const;
+		uint64_t ComponentClearedChangeVersionRaw(ComponentId id) const;
 		uint64_t ComponentMembershipVersionRaw(ComponentId id) const;
 		Connection Listen(ComponentId id, std::function<void(Store &, Entity, const void *)> body);
 		bool ChangedRaw(Entity entity, ComponentId id) const;

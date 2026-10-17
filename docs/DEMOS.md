@@ -1,4 +1,5 @@
-# Demo projects
+# demo projects
+
 The staged sample set contains Luau scripts and authored `.aworld` files. Sources live under
 [`mono.engine/examples/assets`](../mono.engine/examples/assets). Use the
 examples to inspect behavior, then run them through the same headless client
@@ -21,11 +22,21 @@ payload and dimensions. Ordinary runs have a 45-second limit. `StressPhysics`
 and `PbrTextureUniqueStress` have a 600-second limit. The 4K texture stress
 also requests its documented 9,216 MiB texture budget.
 
+Before the Luau-only catalog cleanup, a bench-preset Vulkan capture sweep
+passed 77 staged rows at 120 frames each with dummy audio and a 60 FPS cap.
+All 77 captures received visual review. The captures and `results.json` are in
+`.cache/build/bench/demo-check/20261009T072153Z-1658443/`.
+
+A focused rerun with the current checker passed all 7 DataFactory, image-buffer
+and particle rows. This includes explicit `--data-factory` handling. Its
+results are in
+`.cache/build/bench/demo-check/20261009T073439Z-1687610/results.json`.
+
 For focused reruns, call the script directly:
 
 ```console
 python3 scripts/demos/check-demos.py --build .cache/build/dev \
-  --only '^(EditableImage|Particles)\.luau$' --frames 240 --timeout 60
+  --only '^(ImageBuffers|Particles)\.luau$' --frames 240 --timeout 60
 ```
 
 The headless sweep checks that each demo starts, runs and produces a valid
@@ -35,6 +46,10 @@ tests and real client checks for behavior that a startup capture cannot prove.
 
 ## image and particle examples
 
+- [`ImageBuffers.luau`](../mono.engine/examples/assets/scripts/ImageBuffers.luau)
+  shows raw RGBA8, PNG and JPEG import paths, then assigns images to labels,
+  mesh texture slots, a `Texture` and a particle emitter. See
+  [IMAGE_BUFFERS.md](IMAGE_BUFFERS.md) for the format and size contract.
 - [`EditableImage.luau`](../mono.engine/examples/assets/scripts/EditableImage.luau)
   draws into a live image and applies its `ContentId` to a mesh part.
 - [`Meshes.luau`](../mono.engine/examples/assets/scripts/Meshes.luau) and
@@ -48,7 +63,12 @@ tests and real client checks for behavior that a startup capture cannot prove.
   compares playback modes using the packaged `effects/fox_dance.atex` atlas.
   [`Particles.luau`](../mono.engine/examples/assets/scripts/Particles.luau)
   includes both a feature row and a large emitter grid.
-
+- [IMAGEGRAPH_LIVE.md](IMAGEGRAPH_LIVE.md) documents named source-path inputs
+  and ordinary image outputs. A string parameter bound to `image.source.path`
+  can receive an `EditableImage.ContentId`; without an instance override, the
+  source path uses the signed graph's authored parameter default. The focused
+  signed integration check exercises graph output in particles and other image
+  consumers.
 
 `PbrTextureUniqueStress.luau` is a memory stress scene, not a normal sample.
 Its 100 unique 4096-square RGBA8 images account for about 6.25 GiB before

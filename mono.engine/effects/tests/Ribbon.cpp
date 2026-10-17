@@ -41,6 +41,7 @@ TEST_SUITE_ID("engine.effects.ribbon")
 using engine::core::ByteReader;
 using engine::core::ByteWriter;
 using engine::core::Name;
+using engine::ecs::Classes;
 using engine::ecs::Components;
 using engine::ecs::Entity;
 using engine::ecs::TypeDescriptor;
@@ -59,6 +60,19 @@ namespace {
 		ByteWriter writer;
 		type.Write(writer, value, 1);
 		return writer.Size();
+	}
+}
+
+TEST_CASE("built-in effect properties have inspector groups", "[effects][registration]") {
+	engine::effects::RegisterEffectClasses();
+	for (const std::string_view name : {"ParticleEmitter", "Beam", "Trail", "Decal", "Texture"}) {
+		const auto owner = Classes::Find(Name(name));
+		INFO("class: " << name);
+		REQUIRE(owner.IsValid());
+		for (const auto &property : Classes::Describe(owner).Properties) {
+			INFO("property: " << property.Spelling);
+			CHECK(property.PropertiesTag.IsValid());
+		}
 	}
 }
 

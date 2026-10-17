@@ -1489,7 +1489,7 @@ namespace engine::scene {
 	// @since v0.15
 	size_t AppendPortalClones(
 		ecs::Store &store,
-		int8_t surface,
+		int16_t surface,
 		std::span<const DrawInstance> source,
 		std::vector<DrawInstance> &out
 	);

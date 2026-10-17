@@ -106,9 +106,8 @@ build target="":
     export CCACHE_STATSLOG="$PWD/{{build}}/ccache-stats.log"
     cmake --build --preset {{preset}} {{ if target == "" { "" } else { "--target " + target } }}
 
-# Report one selected build's Ninja edges and cumulative ccache outcomes. The
-# build status remains authoritative: a partial Ninja log is still useful after
-# a failed compile, but profiling must never turn that failure into success.
+# Report only the Ninja edges and ccache outcomes from this build invocation.
+# A partial log is still useful after a failed compile, and its exit status wins.
 build-profile target="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -116,22 +115,21 @@ build-profile target="":
         cmake --preset {{preset}} > /dev/null
     fi
     export CCACHE_STATSLOG="$PWD/{{build}}/ccache-stats.log"
-    set +e
-    cmake --build --preset {{preset}} {{ if target == "" { "" } else { "--target " + target } }}
-    build_status=$?
-    python3 scripts/build-profile.py --build-dir "{{build}}" --stats-log "$CCACHE_STATSLOG"
-    profile_status=$?
-    set -e
-    if [ "$build_status" -ne 0 ]; then
-        exit "$build_status"
-    fi
-    exit "$profile_status"
+    python3 scripts/build-profile.py --build-dir "{{build}}" --stats-log "$CCACHE_STATSLOG" --run cmake --build --preset {{preset}} {{ if target == "" { "" } else { "--target " + target } }}
 
 # The profiler is standalone so it can inspect a build before an engine tool
 # exists. Its synthetic fixtures cover Ninja timing, grouping, ccache outcomes
-# and unity-source attribution.
+# current-run log deltas and unity-source attribution.
 build-profile-check:
     python3 scripts/tests/build_profile_test.py
+
+# The real GCC PCH launcher, using an isolated cache under this preset's tree.
+compiler-cache-check:
+    cmake -DMONO_TEST_ROOT="{{build}}" -P mono.build/tests/CompilerCache.cmake
+
+# Check real linker selection, fallback, pool limits and compile flag isolation.
+linker-check:
+    cmake -DMONO_TEST_ROOT="{{build}}" -P mono.build/tests/Linker.cmake
 
 # One program and only its dependencies.
 client: (build "client")
@@ -188,6 +186,12 @@ render-preparation-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target benchrunner bench_render
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --baseline .cache/build/bench/render-baseline.tsv --filter engine.render.bench.world-presentation --all --samples {{samples}}
+
+# CPU-only filtering cost for large default-part and named-mesh draw lists.
+keep-loaded-filter-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    ./.cache/build/bench/bench/bench_render --suite engine.render.bench.keep-loaded --samples {{samples}}
 
 # Data-capture hook dispatch through the real renderer without opening a device.
 data-capture-hook-bench samples="5":
@@ -246,8 +250,8 @@ gpu-texture-atlas-bench samples="1":
     fi
 
 # Release-optimised compute, draw, timestamp and logical-memory measurement
-# for every supported analytical storm field preset. Allocation refusal remains
-# a reported result so modest GPUs still document their supported ceiling.
+# for generic GPU field presets plus CPU world collection and camera binding.
+# Allocation refusal remains a reported result so modest GPUs document their ceiling.
 gpu-particle-field-bench samples="1":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -378,6 +382,59 @@ fuzz-ui runs="1000" compiler="clang++-21":
         "$fuzz_build/fuzz/$target" "$corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$artifacts/"
     done
 
+# Seeded samples, packing, clocks, assemblies, residency, events and solver costs.
+weather-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_weather
+    ./.cache/build/{{build_preset}}/bench/bench_weather --samples {{samples}}
+
+# Device-free descriptor preparation for the weather GPU adapter.
+weather-descriptor-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-gpu --samples {{samples}}
+
+# Actual sparse page selection for cold, retained and teleported camera demands.
+weather-residency-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weatherresidency --samples {{samples}}
+
+# Device-free temporal invalidation, periodic displacement and cloud composition.
+weather-temporal-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-temporal --samples {{samples}}
+
+# Device-free shadow caster bounds, cascades, low-sun fades and retained revisions.
+weather-shadow-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-shadows --samples {{samples}}
+
+# Weather emission and roof/ground visibility against actual published geometry.
+weather-effects-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-effects --samples {{samples}}
+
+# Real sparse generation and integration at a configurable image size; opens a GPU device explicitly.
+weather-gpu-bench samples="3" build_preset="bench" width="1920" height="1080" shadow_resolution="256":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    MONO_WEATHER_GPU_BENCH=1 MONO_WEATHER_GPU_BENCH_WIDTH={{width}} MONO_WEATHER_GPU_BENCH_HEIGHT={{height}} MONO_WEATHER_GPU_BENCH_SHADOW_RESOLUTION={{shadow_resolution}} ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.weather-gpu --samples {{samples}}
+
+# Coverage-guided hostile weather checkpoint decoding, without graphics.
+weather-fuzz runs="10000" compiler="clang++-21":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fuzz_build=".cache/build/weather-fuzz"
+    cmake --preset server -B "$fuzz_build" -DCMAKE_CXX_COMPILER="{{compiler}}" -DCMAKE_C_COMPILER="${CC:-clang-21}" -DMONO_BUILD_TESTS=OFF -DMONO_TRACY=OFF -DMONO_HEAP_PROFILE=OFF -DMONO_FUZZ_WEATHER=ON
+    cmake --build "$fuzz_build" --target fuzz_weather_checkpoint -j 4
+    mkdir -p "$fuzz_build/fuzz/corpus" "$fuzz_build/fuzz/artifacts"
+    "$fuzz_build/fuzz/fuzz_weather_checkpoint" --write-seeds "$fuzz_build/fuzz/corpus"
+    "$fuzz_build/fuzz/fuzz_weather_checkpoint" "$fuzz_build/fuzz/corpus" -runs={{runs}} -max_len=2097152 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$fuzz_build/fuzz/artifacts/"
+
 # Measure the benchmark suites a change could have affected.
 #
 # **The same selection as `just test`, over `bench/` instead of `tests/`.** A
@@ -419,6 +476,20 @@ bakegraph-pipeline-set-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target bench_bakegraph
     ./.cache/build/bench/bench/bench_bakegraph --suite engine.bakegraph.bench.pipeline-set --samples {{samples}}
+
+# Static 2D image composition with normal source copies, allocations and budget checks.
+# Report complete CPU evaluation cost per call; retain output only on the terminal.
+imagegraph-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_imagegraph
+    ./.cache/build/bench/bench/bench_imagegraph --suite engine.imagegraph.bench.evaluate --samples {{samples}}
+
+# grug measures cold, source-edit, control-edit and cache-hit work on real Vulkan.
+# timestamp cost and fence-completed latency stay separate. output stays on stdout.
+gpu-imagegraph-bench samples="1":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    MONO_GPU_IMAGEGRAPH_REPORT=1 ./.cache/build/bench/bench/bench_render --suite engine.render.bench.imagegraph_gpu --samples {{samples}}
 
 # Durable datastore cost for a complete snapshot, using a disposable SQLite file under the bench build.
 datastore-sqlite-bench samples="5":
@@ -467,6 +538,48 @@ ui-headless-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target bench_ui
     ./.cache/build/bench/bench/bench_ui --suite engine.ui.bench.headless-interface --samples {{samples}}
+
+# Real Studio toolbar and Preferences widgets, without a window or GPU device.
+studio-interface-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_studio
+    ./.cache/build/{{build_preset}}/bench/bench_studio --suite studio.bench.interface --samples {{samples}}
+
+# Actual idle content demand, visibility sync, and client presentation systems.
+client-frame-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_client
+    ./.cache/build/{{build_preset}}/bench/bench_client --suite client.bench.frame --samples {{samples}}
+
+# Node-kind resolution for installed pipelines, preserving declaration order.
+view-graph-lookup-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.pipeline-node-lookup --samples {{samples}}
+
+# CPU instance packing and residency, including centered and off-center meshes.
+instance-packing-bench samples="5" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.instances --samples {{samples}}
+
+# CPU capture planning for 320 visible mirrors with one terminal bounce.
+surface-capture-plan-bench samples="3" build_preset="bench":
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.surface-capture-plan --samples {{samples}}
+
+# CPU planning used after render views, including the installed default pipeline.
+frame-plan-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_graph
+    ./.cache/build/bench/bench/bench_graph --suite engine.graph.bench.submission --samples {{samples}}
+
+# Installed-pipeline diagnostic totals, comparing cache misses with steady hits.
+frame-plan-cache-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    ./.cache/build/bench/bench/bench_render --suite engine.render.bench.frameplan --samples {{samples}}
 
 # Portal reply encoding and decoding, per complete batch. No GPU or process transport.
 # Run the binary directly so measurements stay on the terminal.
@@ -832,12 +945,13 @@ source-check: (build "sourcecheck")
 
     ./{{build}}/tools/sourcecheck .
 
-# The module index for the API reference, from the graph and the AGENTS.md files.
+# The module index for the API reference, from the graph, AGENTS.md files and
+# prose under module docs/ directories.
 #
 # `mono.tools/docgen/pages/Modules.md` was hand-maintained and listed ten of the
 # engine's twenty-nine modules, which is what a hand-maintained list of a
 # generated fact always becomes. It is now a walk of the tree ordered by the
-# layers, so a module that exists is on the page.
+# layers, so graph modules with invariants or prose are on the page.
 docs-pages:
     cmake -DEXPECTED=mono.tools/architecture/expected_graph.json \
           -DROOT="$(pwd)" \
@@ -1072,7 +1186,7 @@ bindings-check: (build "bindings")
 typecheck: (build "scriptcheck")
     #!/usr/bin/env bash
     set -euo pipefail
-    ./{{build}}/tools/scriptcheck mono.engine/examples/assets/scripts/*.luau
+    ./{{build}}/tools/scriptcheck mono.engine/examples/assets/scripts/*.luau mono.engine/examples/assets/scripts/client/DemoCameras/*.luau
 
     if command -v bun > /dev/null; then
         bun install --silent
@@ -1104,7 +1218,7 @@ typecheck: (build "scriptcheck")
 # 11 minutes of CPU, 39 s wall on 24 cores, once. Afterwards the dependency is a
 # no-op.
 typecheck-editor: luau-lsp
-    ./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/assets/scripts/*.luau
+    ./.cache/build/luau-lsp/luau-lsp analyze --settings=luau-lsp.json mono.engine/examples/assets/scripts/*.luau mono.engine/examples/assets/scripts/client/DemoCameras/*.luau
     @echo "typecheck-editor ok - every example agrees with the language server"
 
 # The editor, with its control surface open for a Model Context Protocol client.
@@ -1141,31 +1255,9 @@ mcp port="8738" +args="--width 1600": (build "studio") (build "mcpbridge")
 # the same `Luau.*` target names ours does. Adding it to this build fails at
 # configure time; `.gitmodules` carries the full argument.
 #
-# **`-Wno-error=maybe-uninitialized`, and the narrowness is the point.** luau-lsp
-# hardcodes `-Wall -Werror` with no option to disable it, and GCC 13 reports a
-# false positive in `src/operations/CallHierarchy.cpp`: a `std::string` inside an
-# `std::optional` inside the `FunctionName` pair, reported against
-# `bits/basic_string.h` rather than against any line upstream wrote. So the build
-# fails on a warning about vendored code in a vendored tree.
-# `MonoVendor.cmake` turns Luau's own `LUAU_WERROR` off for exactly this reason.
-#
-# A blanket `-Wno-error` does not work here: `CMAKE_CXX_FLAGS` lands *before*
-# their `target_compile_options`, so the later `-Werror` wins. A specific
-# `-Wno-error=<warning>` takes precedence over the blanket form whatever the
-# order, which is why this names the warning rather than silencing all of them -
-# every other warning upstream cares about still fails the build.
-#
-# **`-include cstdint` was the second one and is gone.** It was here because
-# luau-lsp pinned a Luau from before GCC 13 stopped including `<cstdint>`
-# transitively, so `Ast/src/StringUtils.cpp` named `uint8_t` without including
-# it. The v0.15 bump to the revision luau-lsp `d5df9af` pins carries the fix, and
-# the flag was removed after building without it rather than on the assumption
-# that a newer tree would be fine. `docs/DEFERRED.md` D00019 is the bump.
-#
-# Flags rather than patches wherever a flag will do. Where one will not, the
-# patch is a file under `mono.vendor/patches/luau-lsp/` - the third shape
-# `mono.vendor/AGENTS.md` argues for, taken over a fork so that nothing has to be
-# pushed to a remote we do not own.
+# Copied-tree patches make FunctionName construction and optional codegen logging
+# explicit so GCC 13 can check them with upstream warning flags.
+# Empty CMAKE_CXX_FLAGS also clears the old warning exemption in existing caches.
 #
 # **The patch is applied to a copy, never to the submodule.** Applying it in
 # place left `mono.vendor/luau-lsp` modified in every `git status` from then on,
@@ -1212,7 +1304,8 @@ luau-lsp:
 
     cmake -S "$src" -B .cache/build/luau-lsp -G Ninja \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_CXX_FLAGS="-Wno-error=maybe-uninitialized" > /dev/null
+          -DLUAU_BUILD_TESTS=OFF \
+          -DCMAKE_CXX_FLAGS="" > /dev/null
     cmake --build .cache/build/luau-lsp --target luau-lsp
     echo ""
     echo "luau-lsp built: $(pwd)/.cache/build/luau-lsp/luau-lsp"
@@ -1233,8 +1326,8 @@ luau-lsp:
 # recipe is meant to be runnable mid-change. Use `just preset=ci check` for the
 # strictest configuration this repository has - which is also what the hook
 # runs, so a push is held to the strictest configuration by default.
-check: format-check em-dash-check build-profile-check build test-all test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
-    @echo "check ok - format, em dashes, build profile, build, tests, architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
+check: format-check em-dash-check build-profile-check linker-check compiler-cache-check build test-all test-architecture source-check docs-pages-check shader-check check-one-node-graph bindings-check components-check typecheck typecheck-editor determinism replay-check client-smoke orphan-check
+    @echo "check ok - format, em dashes, build profile, compiler cache, build, tests, architecture, source rules, shaders, bindings, typecheck, editor, determinism, replay, orphans"
 
 # Run the launcher - the window that starts any of the others.
 #
@@ -1255,6 +1348,11 @@ run *args: (build "client")
 # Run the ECS demo scene with both debug panels open.
 demo: (build "client")
     ./{{build}}/client/client --stats --graph
+
+# Run every staged top-level script and world, then validate its BMP capture.
+# Large stress scenes get a longer timeout; 4K textures need a larger budget.
+demo-check frames="120": (build "client")
+    python3 scripts/demos/check-demos.py --build "{{build}}" --frames "{{frames}}"
 
 # Run the editor. `just edit --game My.agame` passes flags straight through.
 #
@@ -1369,10 +1467,6 @@ ui-lab *args: (build "client")
 # Rerun the UI lab contract suite, including after script-only edits.
 ui-test: (build "test_examples")
     ./{{build}}/tests/test_examples '[ui-lab]'
-
-# Capture every shipped Luau demo and authored world through the headless client.
-demo-check frames="120": client
-    python3 scripts/demos/check-demos.py --build {{build}} --frames {{frames}}
 
 # Exercise the UI lab through the native desktop input path.
 ui-live-check *args: (build "client")
@@ -1735,7 +1829,7 @@ check-cdn-is-bare:
 # wrong, in the half nobody tests: the cycle guard, or the hash.
 #
 # A third would arrive as a file rather than as a decision. The render pipeline
-# editor uses this library; future graph editors must do the
+# editor and Image Composer use this library; future graph editors must do the
 # same so their cycle guards and canvases do not diverge. AGENTS.md rule 6 says
 # to make that a build check rather than leave it in somebody's memory.
 #
@@ -2089,3 +2183,45 @@ metrics-lookup-bench:
     ATOMIC_METRICS_LOOKUP_PROFILE=1 timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_core --suite engine.core.bench.instrumentation --samples 5
 
 import 'scripts/demos/version-impact.just'
+
+# grug measure CPU imports at 1080p. flat grey fixtures, no benchmark file.
+imagecodec-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_imagecodec
+    ./.cache/build/bench/bench/bench_imagecodec --suite engine.imagecodec.bench.image --samples {{samples}}
+
+# Measure ordinary GUI copy refresh with a real 1080p EditableImage payload.
+# Heap counters cover C++ allocations; reports remain on the terminal.
+playergui-projection-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_script
+    MONO_PLAYERGUI_PROJECTION_REPORT=1 ./.cache/build/bench/bench/bench_script --suite engine.script.bench.playergui --samples {{samples}}
+
+# Actual Studio replication interest with the all-moving demo population.
+studio-replication-stress-bench samples="3" build_preset="bench":
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCHMARKS=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_studio
+    ./.cache/build/{{build_preset}}/bench/bench_studio --suite studio.bench.replicationstress --samples {{samples}}
+
+# Blank Studio grid: unique completed GPU samples, CPU recording and tracked residency.
+grid-composite-bench frames="120" build_preset="bench":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset {{build_preset}} > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_render
+    if ! SDL_VIDEO_DRIVER=offscreen SDL_GPU_DRIVER=vulkan MONO_GRID_COMPOSITE_REPORT=1 MONO_GRID_COMPOSITE_FRAMES={{frames}} MONO_GRID_COMPOSITE_PRESET={{build_preset}} timeout --foreground --kill-after=10s 180s ./.cache/build/{{build_preset}}/bench/bench_render --suite engine.render.bench.grid-composite --samples 1; then
+        echo "grid-composite-bench failed or exceeded its 180s device deadline" >&2
+        exit 1
+    fi
+
+# Actual ordinary-emitter CPU recording/self cost, GPU timestamps and residency.
+# Device waits are outside CPU recording spans, so these numbers are not FPS.
+ordinary-particle-bench samples="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    if ! MONO_ORDINARY_PARTICLE_REPORT=1 timeout --foreground --kill-after=10s 300s ./.cache/build/bench/bench/bench_render --suite engine.render.bench.particles --samples {{samples}}; then
+        echo "ordinary-particle-bench failed or exceeded its 300s device deadline" >&2
+        exit 1
+    fi

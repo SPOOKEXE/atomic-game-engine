@@ -1,10 +1,10 @@
+#include "UiImportAdapters.hpp"
+
 #include <engine/core/Name.hpp>
 #include <engine/gui/Localization.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
-
-#include <studio/UiImportAdapters.hpp>
 
 TEST_SUITE_ID("studio.ui_import_adapters")
 

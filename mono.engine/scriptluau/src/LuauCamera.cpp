@@ -23,10 +23,12 @@ namespace engine::script {
 
 	void PushCurrentCamera(lua_State *state) {
 		Store &store = *ContextOf(state).World;
+		const HostRole role = ExecutionRole(state);
+		const bool client = role.Client && !role.Server;
 
 		const auto *active = store.Resource<scene::ActiveCamera>();
 		if (active == nullptr || active->Entity == ecs::NULL_ENTITY ||
-			!InstanceAlive(store, active->Entity)) {
+			!InstanceVisibleToScript(store, active->Entity, client)) {
 			// **Nil rather than a camera made on demand.** Roblox's
 			// `workspace.CurrentCamera` is never nil because the client makes
 			// one; here a headless world genuinely has none, and inventing a row
@@ -46,6 +48,10 @@ namespace engine::script {
 
 	void SetCurrentCamera(lua_State *state, int index) {
 		Store &store = *ContextOf(state).World;
+		const HostRole role = ExecutionRole(state);
+		if (!role.Client || role.Server) {
+			luaL_errorL(state, "CurrentCamera belongs to the local client");
+		}
 
 		if (lua_isnil(state, index)) {
 			// Detaching is a real operation: a script tearing down a cutscene

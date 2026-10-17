@@ -35,10 +35,11 @@ end)
 
 local VIEW = ""
 if VIEW == "front" then
-	local view = Instance.new("Camera")
-	view.Name = "Viewer"
-	view.FieldOfView = 70
-	view.CFrame = CFrame.lookAt(Vector3.new(-13, 8, -13), Vector3.new(0, 4, 0))
-	view.Parent = WORLD
-	WORLD.CurrentCamera = view
+	local view = assert(
+		assert(game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")):FindFirstChild("DemoCamera"),
+		"the demo camera companion is missing"
+	)
+	view:SetAttribute("Name", "Viewer")
+	view:SetAttribute("FieldOfView", 70)
+	view:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(-13, 8, -13), Vector3.new(0, 4, 0)))
 end

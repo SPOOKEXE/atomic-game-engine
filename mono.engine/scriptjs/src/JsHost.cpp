@@ -20,6 +20,16 @@ namespace engine::script {
 	namespace {
 		constexpr uint32_t HOST_MAX_DEPTH = 16;
 
+		struct RetainingSource {
+			JsContext &Context;
+			ecs::Entity Previous;
+			RetainingSource(JsContext &context, ecs::Entity source)
+				: Context(context), Previous(std::exchange(context.RetainingSource, source)) {}
+			~RetainingSource() {
+				Context.RetainingSource = Previous;
+			}
+		};
+
 		class PropertyNames {
 		  public:
 			PropertyNames(JSContext *context, JSValueConst object) : Context(context) {
@@ -115,7 +125,7 @@ namespace engine::script {
 					static_cast<const ecs::Entity *>(JS_GetOpaque(value, bound.InstanceClass));
 				instance != nullptr) {
 				out = HostValue(HostTag::Instance);
-				out.Instance = *instance;
+				out.Instance = JsEntityOf(context, value);
 				return true;
 			}
 			if (const auto *vector =
@@ -433,10 +443,13 @@ namespace engine::script {
 		}
 
 		JSValueConst callable = Held(context, found->second);
-		if (JS_IsUndefined(callable)) {
+		if (!JsCallbackAlive(context, found->second)) {
 			error = "released host callback";
 			return false;
 		}
+		const RetainingSource retainingSource(
+			bound, bound.Callables[static_cast<size_t>(found->second)].Source
+		);
 
 		std::vector<JSValue> values;
 		values.reserve(arguments.size());

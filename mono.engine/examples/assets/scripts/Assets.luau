@@ -230,18 +230,16 @@ videoText.Parent = videoSurface
 
 -- --- the camera ---------------------------------------------------------------
 
-local view = Instance.new("Camera")
-view.Name = "AssetsCamera"
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local view = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+view:SetAttribute("Name", "AssetsCamera")
 
 -- Back far enough for six bays and high enough to see the floor they stand on,
 -- looking at the middle of the row rather than at the origin - the row is
 -- centred on X but its interesting half is above the pedestals.
-view.CFrame = CFrame.lookAt(Vector3.new(0, 9, 34), Vector3.new(0, 4, 0))
-view.Parent = workspace
+view:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(0, 9, 34), Vector3.new(0, 4, 0)))
 
--- **Parenting a camera is not aiming with it.** `ActiveCamera` names the live
--- one, so a camera that is only parented is a row nothing reads.
-workspace.CurrentCamera = view
 
 -- --- content, as it arrives ----------------------------------------------------
 

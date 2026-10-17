@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 namespace engine::script {
@@ -51,6 +52,10 @@ namespace engine::script {
 		bool Add(ScopeHandle handle, ScopeItem item);
 		// Removes an item from a live cleanup scope.
 		bool Remove(ScopeHandle handle, ScopeItem item);
+		// Forgets VM references; adapters retaining threads as values also remove Task items.
+		void DropCallback(uint64_t reference, bool includeTasks = false);
+		// Retained cleanup items for the VM's value identity lookup.
+		std::span<const ScopeItem> Items(ScopeHandle handle) const;
 		// Counts items in a live cleanup scope.
 		size_t Count(ScopeHandle handle) const;
 		// Returns items while keeping the cleanup scope live.

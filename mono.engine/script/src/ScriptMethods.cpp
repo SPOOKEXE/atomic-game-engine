@@ -51,11 +51,17 @@
 //
 // @tier L9 · shared
 
+#include "WeatherMethods.hpp"
+
 #include <engine/assets/Animation.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/effects/ParticleSystem.hpp>
+#include <engine/gui/PlayerGui.hpp>
+#include <engine/gui/Services.hpp>
+#include <engine/imagecodec/Image.hpp>
 #include <engine/physics/BodyMotion.hpp>
 #include <engine/scene/Accessories.hpp>
 #include <engine/scene/Animation.hpp>
@@ -65,10 +71,14 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/GpuParticleField.hpp>
+#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tagging.hpp>
+#include <engine/script/InstanceShim.hpp>
+#include <engine/script/PlayerGui.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/Subtree.hpp>
 #include <engine/script/Tasks.hpp>
@@ -89,6 +99,71 @@ namespace engine::script {
 		using core::Name;
 		using ecs::AttributeValue;
 		using ecs::Entity;
+
+		bool ClientExecution(const ScriptCall &call) {
+			return call.Role().Client && !call.Role().Server;
+		}
+
+		Entity ScriptReadSubject(ScriptCall &call) {
+			return InstanceForScriptRead(call.World(), call.Subject(), ClientExecution(call));
+		}
+
+		void RequireOwnedMutation(ScriptCall &call, Entity instance) {
+			if (!ClientExecution(call) && !call.World().AdoptOnly() &&
+				ecs::IsClientLocalInstance(call.World(), instance))
+				call.Raise("server scripts cannot change client-local instances");
+			if ((ClientExecution(call) || call.World().AdoptOnly()) &&
+				!(ecs::Store::IsPredicted(instance) && ecs::IsClientLocalInstance(call.World(), instance))) {
+				call.Raise("client scripts may only change their own local instances");
+			}
+		}
+
+		void RequireOwnedSubtree(ScriptCall &call, Entity instance) {
+			RequireOwnedMutation(call, instance);
+			call.World().EachDescendant(instance, [&](Entity child) { RequireOwnedMutation(call, child); });
+		}
+
+		void RequireOwnedPlacements(ScriptCall &call, std::span<const Entity> instances) {
+			auto &store = call.World();
+			if (ClientExecution(call) || store.AdoptOnly()) {
+				for (const Entity instance : instances)
+					RequireOwnedSubtree(call, instance);
+				return;
+			}
+			if (!ecs::HasClientLocalInstances(store)) return;
+
+			// No callbacks or locality writes occur during validation. Consecutive roots
+			// can share exact-class and parent proofs until this call finishes checking.
+			ecs::ClassId previousClass;
+			bool classLocal = false;
+			Entity previousParent = ecs::NULL_ENTITY;
+			bool parentLocal = false;
+			for (const Entity instance : instances) {
+				bool local = store.Has<ecs::ClientLocal>(instance);
+				if (!local) {
+					const ecs::ClassId current = store.ClassOf(instance);
+					if (current != previousClass) {
+						previousClass = current;
+						classLocal = ecs::Classes::Describe(current).RuntimeLocal;
+					}
+					local = classLocal;
+				}
+				const auto *hierarchy = local ? nullptr : store.Get<ecs::Hierarchy>(instance);
+				if (!local) {
+					const Entity parent = hierarchy == nullptr ? ecs::NULL_ENTITY : hierarchy->Parent;
+					if (parent != previousParent) {
+						previousParent = parent;
+						// This root is nonlocal itself; probing it retains the original depth bound.
+						parentLocal = ecs::IsClientLocalInstance(store, instance);
+					}
+					local = parentLocal;
+				}
+				if (local) call.Raise("server scripts cannot change client-local instances");
+				if (hierarchy != nullptr && hierarchy->FirstChild != ecs::NULL_ENTITY) {
+					store.EachDescendant(instance, [&](Entity child) { RequireOwnedMutation(call, child); });
+				}
+			}
+		}
 
 		// --- the pivot pair --------------------------------------------------
 		//
@@ -115,6 +190,7 @@ namespace engine::script {
 
 		// `instance:PivotTo(target)`
 		void PivotTo(ScriptCall &call) {
+			RequireOwnedSubtree(call, call.Subject());
 			const core::CFrame target = call.AsCFrame(0);
 
 			// The answer is dropped on purpose: Roblox's `PivotTo` returns
@@ -145,6 +221,7 @@ namespace engine::script {
 		// the parts hides it until somebody notices the other half never left.
 		void BulkMoveTo(ScriptCall &call) {
 			const PlacementBatch batch = call.ReadPlacements(0);
+			RequireOwnedPlacements(call, batch.Instances);
 			if (!batch.LengthsMatch) {
 				call.Raise("BulkMoveTo needs as many placements as parts");
 			}
@@ -165,6 +242,8 @@ namespace engine::script {
 		// pivot is for - back onto the per-instance path this exists to get off.
 		void BulkPivotTo(ScriptCall &call) {
 			const PlacementBatch batch = call.ReadPlacements(0);
+			for (const Entity instance : batch.Instances)
+				RequireOwnedSubtree(call, instance);
 			if (!batch.LengthsMatch) {
 				call.Raise("BulkPivotTo needs as many targets as parts");
 			}
@@ -277,15 +356,25 @@ namespace engine::script {
 			// is reading `player.Character` on the next line and hoping the
 			// assignment has landed - and a caller ignoring the answer reads
 			// exactly as Roblox's does.
-			call.ReturnInstance(scene::LoadCharacter(call.World(), call.Subject()));
+			const Entity character = scene::LoadCharacter(call.World(), call.Subject());
+			if (character != ecs::NULL_ENTITY) {
+				(void)ResetPlayerGui(call.World(), call.Subject());
+				const auto *local = call.World().Resource<scene::LocalPlayer>();
+				if (local != nullptr && local->Instance == call.Subject())
+					(void)gui::RefreshPlayerGuiProjection(call.World(), call.Subject(), character);
+			}
+			call.ReturnInstance(character);
 		}
 
 		void CutTo(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			call.ReturnBoolean(scene::CutCamera(call.World(), call.Subject(), call.AsCFrame(0)));
 		}
 
 		// Humanoid:AddAccessory uses the same authority and matching rules as C++.
 		void AddAccessory(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
+			RequireOwnedSubtree(call, call.AsInstance(0));
 			const auto &store = call.World();
 			const Entity character = store.ParentOf(call.Subject());
 			const auto *rig = store.Get<scene::Character>(character);
@@ -311,17 +400,19 @@ namespace engine::script {
 
 		// `instance:AddTag(name)`
 		void AddTag(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			call.ReturnBoolean(scene::AddTag(call.World(), call.Subject(), Name(call.AsString(0))));
 		}
 
 		// `instance:RemoveTag(name)`
 		void RemoveTag(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			call.ReturnBoolean(scene::RemoveTag(call.World(), call.Subject(), Name(call.AsString(0))));
 		}
 
 		// `instance:HasTag(name)`
 		void HasTag(ScriptCall &call) {
-			call.ReturnBoolean(scene::HasTag(call.World(), call.Subject(), Name(call.AsString(0))));
+			call.ReturnBoolean(scene::HasTag(call.World(), ScriptReadSubject(call), Name(call.AsString(0))));
 		}
 
 		// `instance:GetTags()` - every tag this instance carries, sorted.
@@ -338,7 +429,7 @@ namespace engine::script {
 		// asked.
 		void GetTags(ScriptCall &call) {
 			const ecs::Store &store = call.World();
-			const scene::Tags *tags = store.Get<scene::Tags>(call.Subject());
+			const scene::Tags *tags = store.Get<scene::Tags>(ScriptReadSubject(call));
 			const scene::TagTable *table = store.Resource<scene::TagTable>();
 			if (tags == nullptr || table == nullptr) {
 				call.ReturnStrings({});
@@ -362,6 +453,111 @@ namespace engine::script {
 			call.ReturnStrings(spellings);
 		}
 
+		Name ImageGraphArgumentName(ScriptCall &call, size_t index) {
+			const auto text = call.AsString(index);
+			if (!scene::ImageGraphTokenValid(text))
+				call.Raise("image graph names must be bounded portable tokens");
+			return Name(text);
+		}
+		void RequireImageGraph(ScriptCall &call) {
+			if (call.World().Get<scene::ImageGraph>(call.Subject()) == nullptr)
+				call.Raise("method needs an ImageGraph");
+		}
+		void ImageGraphSetInput(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
+			RequireImageGraph(call);
+			const Name name = ImageGraphArgumentName(call, 0);
+			const uint32_t revision = call.World().Get<scene::ImageGraph>(call.Subject())->Revision;
+			bool accepted = false;
+			if (call.IsNil(1))
+				accepted = scene::ResetImageGraphInput(call.World(), call.Subject(), name);
+			else {
+				AttributeValue value;
+				call.ReadAttribute(1, value);
+				scene::ImageGraphInput input;
+				input.Name = name;
+				switch (value.Type) {
+				case ecs::PropertyType::Bool:
+					input.Kind = scene::ImageGraphInputKind::Boolean;
+					input.Boolean = value.Bool;
+					break;
+				case ecs::PropertyType::Int32:
+					input.Number = value.Int32;
+					break;
+				case ecs::PropertyType::Int64:
+					input.Number = static_cast<double>(value.Int64);
+					break;
+				case ecs::PropertyType::Float:
+					input.Number = value.Float;
+					break;
+				case ecs::PropertyType::Double:
+					input.Number = value.Double;
+					break;
+				case ecs::PropertyType::Color3: {
+					input.Kind = scene::ImageGraphInputKind::Colour;
+					const std::array channels{value.Color3.R, value.Color3.G, value.Color3.B};
+					for (size_t channel = 0; channel < channels.size(); ++channel) {
+						const double channelValue = channels[channel];
+						if (!std::isfinite(channelValue) || channelValue < 0 || channelValue > 1)
+							call.Raise("image graph colours must be finite and within 0..1");
+						input.Colour[channel] = static_cast<uint8_t>(std::lround(channelValue * 255));
+					}
+					break;
+				}
+				case ecs::PropertyType::String:
+					input.Kind = scene::ImageGraphInputKind::String;
+					input.String = std::move(value.String);
+					break;
+				default:
+					call.Raise("image graph inputs accept number, boolean, Color3 or string");
+				}
+				accepted = scene::SetImageGraphInput(call.World(), call.Subject(), input);
+			}
+			if (!accepted) call.Raise("image graph input write refused");
+			if (call.World().Get<scene::ImageGraph>(call.Subject())->Revision != revision)
+				call.Changes().Record(call.Subject(), Name("Inputs"));
+		}
+		void ImageGraphGetInput(ScriptCall &call) {
+			RequireImageGraph(call);
+			scene::ImageGraphInput input;
+			if (!scene::GetImageGraphInput(
+					call.World(), call.Subject(), ImageGraphArgumentName(call, 0), input
+				)) {
+				call.ReturnNil();
+				return;
+			}
+			AttributeValue value;
+			switch (input.Kind) {
+			case scene::ImageGraphInputKind::Number:
+				value.Type = ecs::PropertyType::Double;
+				value.Double = input.Number;
+				break;
+			case scene::ImageGraphInputKind::Boolean:
+				value.Type = ecs::PropertyType::Bool;
+				value.Bool = input.Boolean;
+				break;
+			case scene::ImageGraphInputKind::Colour:
+				value.Type = ecs::PropertyType::Color3;
+				value.Color3 = core::Color3::FromLinear(
+					input.Colour[0] / 255.0f, input.Colour[1] / 255.0f, input.Colour[2] / 255.0f
+				);
+				break;
+			case scene::ImageGraphInputKind::String:
+				value.Type = ecs::PropertyType::String;
+				value.String = input.String;
+				break;
+			}
+			call.ReturnAttribute(value);
+		}
+		void ImageGraphGetImage(ScriptCall &call) {
+			RequireImageGraph(call);
+			const auto output = call.IsNil(0) ? Name{} : ImageGraphArgumentName(call, 0);
+			const auto image = scene::ImageGraphContentName(call.World(), call.Subject(), output);
+			if (!image.IsValid())
+				call.Raise("image graph has an invalid asset, output or duplicate instance key");
+			call.ReturnString(image.Text());
+		}
+
 		// --- the attributes ----------------------------------------------------
 		//
 		// **The same marshalling as a property and deliberately so.** An
@@ -377,7 +573,7 @@ namespace engine::script {
 			const Name name(call.AsString(0));
 
 			AttributeValue value;
-			if (!ecs::GetAttribute(call.World(), call.Subject(), name, value)) {
+			if (!ecs::GetAttribute(call.World(), ScriptReadSubject(call), name, value)) {
 				// **Nil for an attribute nobody set**, which is Roblox's answer
 				// and the only one a script can act on: an error would make
 				// `if part:GetAttribute("Health") then` a crash rather than a
@@ -398,6 +594,7 @@ namespace engine::script {
 		// `ecs::SetAttribute` carries the argument for why removal is not a
 		// method of its own.
 		void SetAttribute(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			const Name name(call.AsString(0));
 
 			// An `Opaque` value is what `ecs::SetAttribute` reads as remove, and
@@ -434,9 +631,9 @@ namespace engine::script {
 			// be state a method body could get wrong, and this is the surface
 			// nobody should be able to get wrong twice.
 			std::vector<std::pair<Name, AttributeValue>> found;
-			for (const Name &name : ecs::AttributeNames(call.World(), call.Subject())) {
+			for (const Name &name : ecs::AttributeNames(call.World(), ScriptReadSubject(call))) {
 				AttributeValue value;
-				if (!ecs::GetAttribute(call.World(), call.Subject(), name, value)) {
+				if (!ecs::GetAttribute(call.World(), ScriptReadSubject(call), name, value)) {
 					continue;
 				}
 				found.emplace_back(name, std::move(value));
@@ -485,11 +682,12 @@ namespace engine::script {
 				call.ReturnBoolean(false);
 				return;
 			}
-			call.ReturnBoolean(ecs::Classes::IsA(call.World().ClassOf(call.Subject()), wanted));
+			call.ReturnBoolean(ecs::Classes::IsA(call.World().ClassOf(ScriptReadSubject(call)), wanted));
 		}
 
 		// `instance:Destroy()`
 		void Destroy(ScriptCall &call) {
+			RequireOwnedSubtree(call, call.Subject());
 			const Entity instance = call.Subject();
 
 			// **The signal table is told before the storage is**, and it is told
@@ -518,6 +716,7 @@ namespace engine::script {
 
 		// `instance:ClearAllChildren()`
 		void ClearAllChildren(ScriptCall &call) {
+			RequireOwnedSubtree(call, call.Subject());
 			ecs::Store &store = call.World();
 
 			// Collected first. `DestroyInstance` unlinks from the sibling list
@@ -541,7 +740,7 @@ namespace engine::script {
 		// for it - `ReturnInstance` is what turns a null entity into each
 		// language's own nothing.
 		void Clone(ScriptCall &call) {
-			call.ReturnInstance(call.World().CloneInstance(call.Subject()));
+			call.ReturnInstance(CloneScriptInstance(call.World(), call.Subject(), ClientExecution(call)));
 		}
 
 		// `instance:GetChildren()`
@@ -549,7 +748,9 @@ namespace engine::script {
 			const ecs::Store &store = call.World();
 
 			std::vector<Entity> children;
-			store.EachChild(call.Subject(), [&](Entity child) { children.push_back(child); });
+			EachInstanceChild(
+				store, call.Subject(), [&](Entity child) { children.push_back(child); }, ClientExecution(call)
+			);
 
 			call.ReturnInstances(children);
 		}
@@ -560,9 +761,12 @@ namespace engine::script {
 		// and the one a script writing a recursive walk by hand would produce.
 		void GetDescendants(ScriptCall &call) {
 			std::vector<Entity> found;
-			EachDescendant(call.World(), call.Subject(), [&](Entity descendant) {
-				found.push_back(descendant);
-			});
+			EachInstanceDescendant(
+				call.World(),
+				call.Subject(),
+				[&](Entity descendant) { found.push_back(descendant); },
+				ClientExecution(call)
+			);
 
 			call.ReturnInstances(found);
 		}
@@ -573,9 +777,13 @@ namespace engine::script {
 		// script calling `FindFirstChild("Humanoid", true)` got the non-recursive
 		// answer - nil for anything not a direct child - and nothing said so.
 		void FindFirstChild(ScriptCall &call) {
-			call.ReturnInstance(
-				call.World().FindFirstChild(call.Subject(), call.AsString(0), call.OptionalBoolean(1, false))
-			);
+			call.ReturnInstance(FindInstanceChild(
+				call.World(),
+				call.Subject(),
+				call.AsString(0),
+				call.OptionalBoolean(1, false),
+				ClientExecution(call)
+			));
 		}
 
 		// `instance:WaitForChild(name, timeout)`
@@ -613,7 +821,9 @@ namespace engine::script {
 			// method.** A child that is already there is answered on the tick it
 			// was asked for; only a miss suspends, which is the half a lookup
 			// cannot do.
-			if (const Entity found = store.FindFirstChild(call.Subject(), name); found != ecs::NULL_ENTITY) {
+			if (const Entity found =
+					FindInstanceChild(store, call.Subject(), name, false, ClientExecution(call));
+				found != ecs::NULL_ENTITY) {
 				call.ReturnInstance(found);
 				return;
 			}
@@ -632,7 +842,10 @@ namespace engine::script {
 			// script gives up after a different amount of simulation on a busy
 			// machine than on an idle one.
 			const uint64_t waiter = call.Waiters().Add(
-				call.Subject(), name, store.Time().Tick + TicksFor(store, call.AsNumber(1))
+				call.Subject(),
+				name,
+				store.Time().Tick + TicksFor(store, call.AsNumber(1)),
+				ClientExecution(call)
 			);
 
 			if (waiter == 0) {
@@ -644,41 +857,81 @@ namespace engine::script {
 			call.AwaitChild(waiter);
 		}
 
+		Entity FindScriptChild(ScriptCall &call, ecs::ClassId wanted, bool derived, bool recursive) {
+			if (!wanted.IsValid()) return ecs::NULL_ENTITY;
+			Entity found;
+			const auto match = [&](Entity child) {
+				if (found != ecs::NULL_ENTITY) return;
+				if (derived ? call.World().IsA(child, wanted) : call.World().ClassOf(child) == wanted)
+					found = child;
+			};
+			EachInstanceChild(call.World(), call.Subject(), match, ClientExecution(call));
+			if (found == ecs::NULL_ENTITY && recursive)
+				EachInstanceDescendant(call.World(), call.Subject(), match, ClientExecution(call));
+			return found;
+		}
+
 		// `instance:FindFirstChildOfClass(className)`
 		void FindFirstChildOfClass(ScriptCall &call) {
-			call.ReturnInstance(call.World().FindFirstChildOfClass(call.Subject(), ClassArgument(call, 0)));
+			call.ReturnInstance(FindScriptChild(call, ClassArgument(call, 0), false, false));
 		}
 
 		// `instance:FindFirstChildWhichIsA(className, recursive)`
 		void FindFirstChildWhichIsA(ScriptCall &call) {
-			const ecs::ClassId wanted = ClassArgument(call, 0);
 			call.ReturnInstance(
-				call.World().FindFirstChildWhichIsA(call.Subject(), wanted, call.OptionalBoolean(1, false))
+				FindScriptChild(call, ClassArgument(call, 0), true, call.OptionalBoolean(1, false))
 			);
+		}
+
+		Entity FindScriptAncestor(ScriptCall &call, const std::function<bool(Entity)> &matches) {
+			for (Entity ancestor = call.World().ParentOf(ScriptReadSubject(call));
+				 ancestor != ecs::NULL_ENTITY;
+				 ancestor = call.World().ParentOf(ancestor)) {
+				if (InstanceVisibleToScript(call.World(), ancestor, ClientExecution(call)) &&
+					matches(ancestor))
+					return ancestor;
+			}
+			return ecs::NULL_ENTITY;
 		}
 
 		// `instance:FindFirstAncestor(name)`
 		void FindFirstAncestor(ScriptCall &call) {
-			call.ReturnInstance(call.World().FindFirstAncestor(call.Subject(), call.AsString(0)));
+			const std::string name = call.AsString(0);
+			const Name wanted(name);
+			call.ReturnInstance(
+				name.empty() ? ecs::NULL_ENTITY : FindScriptAncestor(call, [&](Entity ancestor) {
+					return call.World().InstanceNameOf(ancestor) == wanted;
+				})
+			);
 		}
 
 		// `instance:FindFirstAncestorOfClass(className)`
 		void FindFirstAncestorOfClass(ScriptCall &call) {
+			const auto wanted = ClassArgument(call, 0);
 			call.ReturnInstance(
-				call.World().FindFirstAncestorOfClass(call.Subject(), ClassArgument(call, 0))
+				wanted.IsValid()
+					? FindScriptAncestor(
+						  call, [&](Entity ancestor) { return call.World().ClassOf(ancestor) == wanted; }
+					  )
+					: ecs::NULL_ENTITY
 			);
 		}
 
 		// `instance:FindFirstAncestorWhichIsA(className)`
 		void FindFirstAncestorWhichIsA(ScriptCall &call) {
+			const auto wanted = ClassArgument(call, 0);
 			call.ReturnInstance(
-				call.World().FindFirstAncestorWhichIsA(call.Subject(), ClassArgument(call, 0))
+				wanted.IsValid()
+					? FindScriptAncestor(
+						  call, [&](Entity ancestor) { return call.World().IsA(ancestor, wanted); }
+					  )
+					: ecs::NULL_ENTITY
 			);
 		}
 
 		// `instance:GetFullName()`
 		void GetFullName(ScriptCall &call) {
-			call.ReturnString(call.World().GetFullName(call.Subject()));
+			call.ReturnString(call.World().GetFullName(ScriptReadSubject(call)));
 		}
 
 		// `instance:IsDescendantOf(ancestor)`
@@ -690,7 +943,10 @@ namespace engine::script {
 		// script and the render gate cannot disagree about whether something is
 		// in the scene.
 		void IsDescendantOf(ScriptCall &call) {
-			call.ReturnBoolean(call.World().IsDescendantOf(call.Subject(), call.AsInstance(0)));
+			call.ReturnBoolean(call.World().IsDescendantOf(
+				ScriptReadSubject(call),
+				InstanceForScriptRead(call.World(), call.AsInstance(0), ClientExecution(call))
+			));
 		}
 
 		// `instance:IsAncestorOf(descendant)`
@@ -701,7 +957,10 @@ namespace engine::script {
 		// answer with the arguments swapped, so there is nothing here for the
 		// two to disagree about.
 		void IsAncestorOf(ScriptCall &call) {
-			call.ReturnBoolean(call.World().IsDescendantOf(call.AsInstance(0), call.Subject()));
+			call.ReturnBoolean(call.World().IsDescendantOf(
+				InstanceForScriptRead(call.World(), call.AsInstance(0), ClientExecution(call)),
+				ScriptReadSubject(call)
+			));
 		}
 
 		// `instance:GetPropertyChangedSignal(name)`
@@ -729,6 +988,8 @@ namespace engine::script {
 
 		// `instance:KeepWorldAwake(reason)`
 		void KeepWorldAwake(ScriptCall &call) {
+			if (ClientExecution(call) || call.World().AdoptOnly())
+				call.Raise("world sleep is owned by the server");
 			// **The reason is required**, which is the one thing this surface
 			// insists on. A world that will not sleep costs a machine until
 			// somebody works out what is holding it up, and the answer should be
@@ -741,6 +1002,8 @@ namespace engine::script {
 
 		// `instance:LetWorldSleep()`
 		void LetWorldSleep(ScriptCall &call) {
+			if (ClientExecution(call) || call.World().AdoptOnly())
+				call.Raise("world sleep is owned by the server");
 			scene::LetWorldSleep(call.World(), call.Subject());
 		}
 
@@ -777,6 +1040,7 @@ namespace engine::script {
 		// guard was added beside it. Asking the two questions in this order is
 		// one body that refuses in both.
 		void SetNetworkOwner(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			const Entity player = call.IsNil(0) ? ecs::NULL_ENTITY : call.AsInstance(0);
 
 			if (!scene::SetNetworkOwner(call.World(), call.Subject(), player)) {
@@ -828,6 +1092,7 @@ namespace engine::script {
 
 		// `editableMesh:AddVertex(position, normal?, uv?)`
 		void EditableMeshAddVertex(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			const core::Vector3 position = AsVector3(call, 0, "AddVertex");
 			const core::Vector3 normal = call.Arguments() > 1 && !call.IsNil(1)
 											 ? AsVector3(call, 1, "AddVertex")
@@ -852,6 +1117,7 @@ namespace engine::script {
 		// work" is ordinary control flow and not a bug to stop the script
 		// over.
 		void EditableMeshAddTriangle(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			if (call.World().Get<scene::EditableMesh>(call.Subject()) == nullptr) {
 				call.Raise("AddTriangle needs an EditableMesh");
 			}
@@ -875,12 +1141,14 @@ namespace engine::script {
 		// swap-and-pop this can otherwise silently walk into, and a script
 		// asking "did that work" is the ordinary way to stay clear of it.
 		void EditableMeshRemoveTriangle(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			const auto id = static_cast<uint32_t>(call.AsNumber(0));
 			call.ReturnBoolean(scene::RemoveTriangle(call.World(), call.Subject(), id));
 		}
 
 		// `editableMesh:SetVertexPosition(id, position)`
 		void EditableMeshSetVertexPosition(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			const auto id = static_cast<uint32_t>(call.AsNumber(0));
 			const core::Vector3 position = AsVector3(call, 1, "SetVertexPosition");
 			call.ReturnBoolean(scene::SetVertexPosition(call.World(), call.Subject(), id, position));
@@ -888,6 +1156,7 @@ namespace engine::script {
 
 		// `editableMesh:SetVertexNormal(id, normal)`
 		void EditableMeshSetVertexNormal(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			const auto id = static_cast<uint32_t>(call.AsNumber(0));
 			const core::Vector3 normal = AsVector3(call, 1, "SetVertexNormal");
 			call.ReturnBoolean(scene::SetVertexNormal(call.World(), call.Subject(), id, normal));
@@ -895,6 +1164,7 @@ namespace engine::script {
 
 		// `editableMesh:SetVertexUV(id, uv)`
 		void EditableMeshSetVertexUV(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			const auto id = static_cast<uint32_t>(call.AsNumber(0));
 			const core::Vector2 uv = AsVector2(call, 1, "SetVertexUV");
 			call.ReturnBoolean(scene::SetVertexUV(call.World(), call.Subject(), id, uv));
@@ -902,6 +1172,7 @@ namespace engine::script {
 
 		// `editableMesh:SetVertexColor(id, colour, alpha?)`
 		void EditableMeshSetVertexColor(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			const auto id = static_cast<uint32_t>(call.AsNumber(0));
 			const core::Color3 colour = AsColor3(call, 1, "SetVertexColor");
 			const float alpha =
@@ -915,6 +1186,7 @@ namespace engine::script {
 		// deterministic mesh batch and the world row is changed once, on its owner
 		// thread, after the target revision is checked.
 		void EditableMeshSetGeometry(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			if (call.World().Get<scene::EditableMesh>(call.Subject()) == nullptr) {
 				call.Raise("SetGeometry needs an EditableMesh");
 			}
@@ -926,6 +1198,7 @@ namespace engine::script {
 
 		// `editableMesh:Clear()` or `particleEmitter:Clear()`
 		void EditableMeshClear(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			if (call.World().Get<effects::ParticleEmitter>(call.Subject()) != nullptr) {
 				call.ReturnBoolean(effects::ClearParticles(call.World(), call.Subject()));
 				return;
@@ -954,6 +1227,7 @@ namespace engine::script {
 		// Procedural keyframes are fixed 36-byte little-endian records:
 		// joint u16, reserved u16, time f32, position xyz f32, quaternion xyzw f32.
 		void BakeAnimation(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			RequireAnimationBuffer(call, "BakeAnimation");
 			const float duration = static_cast<float>(call.AsNumber(0));
 			constexpr size_t MAXIMUM_INPUT =
@@ -1010,6 +1284,7 @@ namespace engine::script {
 		}
 
 		void SetAnimationData(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			RequireAnimationBuffer(call, "SetAnimationData");
 			const std::vector<std::byte> bytes = call.AsBytes(0, scene::AnimationBuffer::MAXIMUM_BYTES);
 			core::ByteReader reader(bytes);
@@ -1027,12 +1302,14 @@ namespace engine::script {
 		}
 
 		void ClearAnimationData(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			RequireAnimationBuffer(call, "ClearAnimationData");
 			call.ReturnBoolean(scene::SetAnimationBuffer(call.World(), call.Subject(), {}));
 		}
 
 		// `particleEmitter:Emit(count)`
 		void ParticleEmitterEmit(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			const double requested = call.AsNumber(0);
 			if (!std::isfinite(requested) || requested < 0.0 || requested > 4294967295.0 ||
 				std::floor(requested) != requested) {
@@ -1058,6 +1335,7 @@ namespace engine::script {
 
 		// `editableImage:Resize(width, height)`
 		void EditableImageResize(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			RequireEditableImage(call, "Resize");
 			const auto width = static_cast<uint32_t>(call.AsNumber(0));
 			const auto height = static_cast<uint32_t>(call.AsNumber(1));
@@ -1074,14 +1352,96 @@ namespace engine::script {
 		// raises through `AsBytes`; a bounded buffer with the wrong exact length
 		// returns false from the scene layer without changing the image.
 		void EditableImageFromBuffer(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			RequireEditableImage(call, "FromBuffer");
 			const std::vector<std::byte> pixels =
 				call.AsBytes(0, static_cast<size_t>(scene::MAXIMUM_EDITABLE_IMAGE_PIXELS) * 4);
 			call.ReturnBoolean(scene::EditableImageFromBuffer(call.World(), call.Subject(), pixels));
 		}
 
+		bool ImageEncodedFormat(std::string_view name, imagecodec::Format &format) {
+			if (name == "png")
+				format = imagecodec::Format::Png;
+			else if (name == "jpeg")
+				format = imagecodec::Format::Jpeg;
+			else
+				return false;
+			return true;
+		}
+		bool
+		ImportEncodedImage(ScriptCall &call, std::span<const std::byte> bytes, imagecodec::Format format) {
+			imagecodec::Image decoded;
+			std::string failure;
+			if (!imagecodec::Decode(bytes, format, decoded, failure)) return false;
+			return scene::SetEditableImagePixels(
+				call.World(),
+				call.Subject(),
+				decoded.Width,
+				decoded.Height,
+				decoded.Pixels,
+				scene::EditableImageSpace::SRGB
+			);
+		}
+		void EditableImageFromBase64(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
+			RequireEditableImage(call, "FromBase64");
+			const auto formatName = call.AsBoundedString(1, 16);
+			imagecodec::Format format = imagecodec::Format::Png;
+			if (formatName != "rgba8" && !ImageEncodedFormat(formatName, format)) {
+				call.ReturnBoolean(false);
+				return;
+			}
+			const auto *held = call.World().Get<scene::EditableImage>(call.Subject());
+			if (formatName == "rgba8" && (held->Width == 0 || held->Height == 0 ||
+										  held->Width > scene::MAXIMUM_EDITABLE_IMAGE_IMPORT_WIDTH ||
+										  held->Height > scene::MAXIMUM_EDITABLE_IMAGE_IMPORT_HEIGHT)) {
+				call.ReturnBoolean(false);
+				return;
+			}
+			const auto text = call.AsBoundedString(0, 11059200);
+			std::vector<std::byte> bytes;
+			std::string failure;
+			if (!imagecodec::DecodeBase64(text, bytes, failure)) {
+				call.ReturnBoolean(false);
+				return;
+			}
+			if (formatName == "rgba8") {
+				call.ReturnBoolean(
+					scene::SetEditableImagePixels(
+						call.World(), call.Subject(), held->Width, held->Height, bytes, held->Space
+					)
+				);
+				return;
+			}
+			call.ReturnBoolean(ImportEncodedImage(call, bytes, format));
+		}
+		void EditableImageFromEncodedBuffer(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
+			RequireEditableImage(call, "FromEncodedBuffer");
+			imagecodec::Format format = imagecodec::Format::Png;
+			if (!ImageEncodedFormat(call.AsBoundedString(1, 16), format)) {
+				call.ReturnBoolean(false);
+				return;
+			}
+			const auto bytes = call.AsBytes(0, scene::MAXIMUM_EDITABLE_IMAGE_IMPORT_BYTES);
+			call.ReturnBoolean(ImportEncodedImage(call, bytes, format));
+		}
+		void EditableImageToBase64(ScriptCall &call) {
+			RequireEditableImage(call, "ToBase64");
+			const auto *held = call.World().Get<scene::EditableImage>(call.Subject());
+			std::string encoded;
+			if (held->Width <= scene::MAXIMUM_EDITABLE_IMAGE_IMPORT_WIDTH &&
+				held->Height <= scene::MAXIMUM_EDITABLE_IMAGE_IMPORT_HEIGHT) {
+				const auto bytes = scene::EditableImageToBuffer(call.World(), call.Subject());
+				std::string failure;
+				(void)imagecodec::EncodeBase64(bytes, encoded, failure);
+			}
+			call.ReturnString(encoded);
+		}
+
 		// `editableImage:DrawRectangle(position, size, colour, transparency?)`
 		void EditableImageDrawRectangle(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			RequireEditableImage(call, "DrawRectangle");
 			const core::Vector2 position = AsVector2(call, 0, "DrawRectangle");
 			const core::Vector2 size = AsVector2(call, 1, "DrawRectangle");
@@ -1095,6 +1455,7 @@ namespace engine::script {
 
 		// `editableImage:DrawLine(from, to, colour, transparency?)`
 		void EditableImageDrawLine(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			RequireEditableImage(call, "DrawLine");
 			const core::Vector2 from = AsVector2(call, 0, "DrawLine");
 			const core::Vector2 to = AsVector2(call, 1, "DrawLine");
@@ -1106,6 +1467,7 @@ namespace engine::script {
 
 		// `editableImage:DrawCircle(centre, radius, colour, transparency?)`
 		void EditableImageDrawCircle(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			RequireEditableImage(call, "DrawCircle");
 			const core::Vector2 centre = AsVector2(call, 0, "DrawCircle");
 			const auto radius = static_cast<float>(call.AsNumber(1));
@@ -1156,6 +1518,7 @@ namespace engine::script {
 		}
 
 		void SetLinearVelocity(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			if (!physics::SetLinearVelocity(
 					call.World(), call.Subject(), AsVector3(call, 0, "SetLinearVelocity")
 				)) {
@@ -1164,6 +1527,7 @@ namespace engine::script {
 		}
 
 		void SetAngularVelocity(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			if (!physics::SetAngularVelocity(
 					call.World(), call.Subject(), AsVector3(call, 0, "SetAngularVelocity")
 				)) {
@@ -1172,12 +1536,14 @@ namespace engine::script {
 		}
 
 		void ApplyImpulse(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			if (!physics::ApplyImpulse(call.World(), call.Subject(), AsVector3(call, 0, "ApplyImpulse"))) {
 				call.Raise("ApplyImpulse needs a simulated dynamic BasePart and a physics world");
 			}
 		}
 
 		void SetAppliedForce(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			if (!physics::SetAppliedForce(
 					call.World(), call.Subject(), AsVector3(call, 0, "SetAppliedForce")
 				)) {
@@ -1186,6 +1552,7 @@ namespace engine::script {
 		}
 
 		void SetAppliedTorque(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			if (!physics::SetAppliedTorque(
 					call.World(), call.Subject(), AsVector3(call, 0, "SetAppliedTorque")
 				)) {
@@ -1193,9 +1560,42 @@ namespace engine::script {
 			}
 		}
 
+		void SetSpawnSamples(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
+			if (call.World().Get<scene::GpuParticleField>(call.Subject()) == nullptr) {
+				call.ReturnBoolean(false);
+				return;
+			}
+			const auto bytes = call.AsBytes(
+				0, scene::MAX_GPU_PARTICLE_SPAWN_SAMPLES * scene::GPU_PARTICLE_SPAWN_SAMPLE_BYTES
+			);
+			call.ReturnBoolean(scene::SetGpuParticleSpawnSamples(call.World(), call.Subject(), bytes));
+		}
+		void SetParticleLayer(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
+			if (call.World().Get<scene::GpuParticleField>(call.Subject()) == nullptr) {
+				call.ReturnBoolean(false);
+				return;
+			}
+			const double index = call.AsNumber(0);
+			if (!std::isfinite(index) || index < 0 || index > 2 || std::floor(index) != index) {
+				call.ReturnBoolean(false);
+				return;
+			}
+			scene::GpuParticleStyle style;
+			style.Colour = AsColor3(call, 1, "SetLayer");
+			style.Alpha = static_cast<float>(call.AsNumber(2));
+			style.Size = static_cast<float>(call.AsNumber(3));
+			style.Acceleration = AsVector3(call, 4, "SetLayer");
+			call.ReturnBoolean(
+				scene::SetGpuParticleStyle(call.World(), call.Subject(), static_cast<uint32_t>(index), style)
+			);
+		}
+
 		// `breakGroup:Break()` releases its authored pieces. Damage, health and
 		// debris policy remain outside this low-level structural operation.
 		void Break(ScriptCall &call) {
+			RequireOwnedMutation(call, call.Subject());
 			const ecs::ClassId breakGroup = ecs::Classes::Find(Name("BreakGroup"));
 			if (!breakGroup.IsValid() || !call.World().IsA(call.Subject(), breakGroup)) {
 				call.Raise("Break needs a BreakGroup");
@@ -1209,7 +1609,13 @@ namespace engine::script {
 		// catalogue: a method table is a map from a name to a callable and no
 		// entry can be reached before another. Grouped by what they do, so a
 		// reader can see that the four attribute calls arrived together.
-		constexpr std::array<InstanceMethod, 72> SCRIPT_METHODS{{
+		constexpr std::array<InstanceMethod, 81> SCRIPT_METHODS{{
+			{"Sample", SampleWeather},
+			{"SetSpawnSamples", SetSpawnSamples},
+			{"SetLayer", SetParticleLayer},
+			{"SetInput", ImageGraphSetInput},
+			{"GetInput", ImageGraphGetInput},
+			{"GetImage", ImageGraphGetImage},
 			{"GetPivot", GetPivot},
 			{"PivotTo", PivotTo},
 			{"BulkMoveTo", BulkMoveTo},
@@ -1245,6 +1651,9 @@ namespace engine::script {
 			{"Resize", EditableImageResize},
 			{"ToBuffer", EditableImageToBuffer},
 			{"FromBuffer", EditableImageFromBuffer},
+			{"FromBase64", EditableImageFromBase64},
+			{"FromEncodedBuffer", EditableImageFromEncodedBuffer},
+			{"ToBase64", EditableImageToBase64},
 			{"DrawRectangle", EditableImageDrawRectangle},
 			{"DrawLine", EditableImageDrawLine},
 			{"DrawCircle", EditableImageDrawCircle},

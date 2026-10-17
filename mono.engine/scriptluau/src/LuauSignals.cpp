@@ -157,7 +157,7 @@ namespace engine::script {
 			// vector in the same integer; neither `SignalTable` nor anything
 			// else shared may interpret one.
 			lua_pushvalue(state, 2);
-			const int reference = lua_ref(state, -1);
+			const int reference = RetainLuauValue(state, -1);
 			lua_pop(state, 1);
 
 			const ConnectionId id =
@@ -186,7 +186,7 @@ namespace engine::script {
 			WatchTreeFor(context, signal.Kind);
 
 			lua_pushvalue(state, 2);
-			const int reference = lua_ref(state, -1);
+			const int reference = RetainLuauValue(state, -1);
 			lua_pop(state, 1);
 
 			const ConnectionId id =
@@ -245,7 +245,7 @@ namespace engine::script {
 			if (context.Signals.Disconnect(id, released)) {
 				// Released **after** the table has forgotten it, so a fire in
 				// progress cannot reach a ref that no longer resolves.
-				lua_unref(state, released);
+				ReleaseLuauValue(state, released);
 			}
 
 			// Disconnecting twice is not an error. A cleanup path runs whether
@@ -381,9 +381,16 @@ namespace engine::script {
 			// difference: `SetGeometry` may wait for its deterministic owner-thread
 			// commit, and a signal handler must be able to wait for the same legal
 			// resume sources as a top-level script or `task.spawn`.
+			if (!PushLuauValue(state, connection.Callback)) {
+				lua_pop(state, 1);
+				return;
+			}
+			const ecs::Entity owner = context.RetainedValues.at(connection.Callback).Source;
+			lua_pop(state, 1);
 			lua_State *thread = lua_newthread(state);
+			context.ThreadSources.insert_or_assign(thread, owner);
 			luaL_sandboxthread(thread);
-			lua_getref(state, connection.Callback);
+			PushLuauValue(state, connection.Callback);
 			for (int index = 1; index <= arguments; index++) {
 				lua_pushvalue(state, base + index);
 			}
@@ -422,7 +429,7 @@ namespace engine::script {
 		for (const ConnectionId id : spent) {
 			CallbackRef released = 0;
 			if (context.Signals.Disconnect(id, released)) {
-				lua_unref(state, released);
+				ReleaseLuauValue(state, released);
 			}
 		}
 

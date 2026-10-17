@@ -79,6 +79,10 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "shadow",
 				   "skybox-compute",
 				   "clouds-compute",
+				   "weather-residency",
+				   "weather-field",
+				   "weather-summary",
+				   "weather-shadow-map",
 				   "camera@0",
 				   "last-frame@0",
 				   "entities@0",
@@ -92,6 +96,9 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "ssao@0",
 				   "deferred-lighting@0",
 				   "sky@0",
+				   "weather-integrate@0",
+				   "weather-history@0",
+				   "weather-reconstruct@0",
 				   "fog@0",
 				   "portal-overlay@0",
 				   "mirror-overlay@0",
@@ -107,7 +114,7 @@ TEST_CASE("the default graph is dispatched in authored order", "[render][graph]"
 				   "output-image",
 			   }
 	);
-	CHECK(runner.Submitted() == 31);
+	CHECK(runner.Submitted() == 38);
 	CHECK_FALSE(runner.Unhandled().IsValid());
 }
 
@@ -125,6 +132,19 @@ TEST_CASE("world work is shared while view work is repeated", "[render][graph]")
 	CHECK(std::count(ran.begin(), ran.end(), "world") == 2);
 	CHECK(std::count(ran.begin(), ran.end(), "skybox-compute") == 2);
 	CHECK(std::count(ran.begin(), ran.end(), "clouds-compute") == 2);
+	CHECK(std::count(ran.begin(), ran.end(), "weather-residency") == 2);
+	CHECK(std::count(ran.begin(), ran.end(), "weather-field") == 2);
+	CHECK(std::count(ran.begin(), ran.end(), "weather-summary") == 2);
+	CHECK(std::count(ran.begin(), ran.end(), "weather-shadow-map") == 2);
+	CHECK(std::count(ran.begin(), ran.end(), "weather-history@0") == 1);
+	CHECK(std::count(ran.begin(), ran.end(), "weather-history@1") == 1);
+	CHECK(std::count(ran.begin(), ran.end(), "weather-history@2") == 1);
+	CHECK(std::count(ran.begin(), ran.end(), "weather-integrate@0") == 1);
+	CHECK(std::count(ran.begin(), ran.end(), "weather-integrate@1") == 1);
+	CHECK(std::count(ran.begin(), ran.end(), "weather-integrate@2") == 1);
+	CHECK(std::count(ran.begin(), ran.end(), "weather-reconstruct@0") == 1);
+	CHECK(std::count(ran.begin(), ran.end(), "weather-reconstruct@1") == 1);
+	CHECK(std::count(ran.begin(), ran.end(), "weather-reconstruct@2") == 1);
 	CHECK(std::count(ran.begin(), ran.end(), "gbuffer@0") == 1);
 	CHECK(std::count(ran.begin(), ran.end(), "gbuffer@1") == 1);
 	CHECK(std::count(ran.begin(), ran.end(), "gbuffer@2") == 1);
@@ -460,8 +480,9 @@ TEST_CASE("deferred baseline port extent follows its port in either order", "[re
 		std::find(deferred->WritePorts.begin(), deferred->WritePorts.end(), Name("lighting-baseline"));
 	REQUIRE(colourPort != deferred->WritePorts.end());
 	REQUIRE(baselinePort != deferred->WritePorts.end());
-	const auto *colour = graph.FindResource(deferred->Writes[colourPort - deferred->WritePorts.begin()]);
-	const auto *baseline = graph.FindResource(deferred->Writes[baselinePort - deferred->WritePorts.begin()]);
+	const auto *colour = graph.FindResourceDesc(deferred->Writes[colourPort - deferred->WritePorts.begin()]);
+	const auto *baseline =
+		graph.FindResourceDesc(deferred->Writes[baselinePort - deferred->WritePorts.begin()]);
 	REQUIRE(colour != nullptr);
 	REQUIRE(baseline != nullptr);
 	uint32_t colourWidth = 0, colourHeight = 0, baselineWidth = 0, baselineHeight = 0;
@@ -566,7 +587,7 @@ TEST_CASE("GraphRunner owns profiling tiers and dropped mark accounting", "[rend
 	REQUIRE(graph.Execute(Compile(graph), full, worlds));
 	// Bloom is a separate HDR graph pass and is profiled with the rest of the
 	// view chain, even when its authored intensity leaves it pass-through.
-	CHECK(opened == 30);
+	CHECK(opened == 37);
 	CHECK(closed == opened);
 	CHECK(full.DroppedProfileMarks() == 2);
 

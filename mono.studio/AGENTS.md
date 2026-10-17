@@ -479,8 +479,8 @@ a fact about today.
 The split matters whenever an editor is added. **The library owns everything
 that is true of any node graph.** **Studio owns host-specific documents, node
 types and presentation.** `src/RenderPipelineGraph.cpp` adapts render pipeline
-documents.
-It registers only the node types for its document through the public
+documents, and `src/ImageComposerGraph.cpp` adapts image-composer documents.
+Each registers only the node types for its document through the public
 `NodeTypes::Register` API. The library contains no Studio node vocabulary, and
 its tests register their own fixture.
 
@@ -489,8 +489,8 @@ the host when a texture is needed. Its `Chrome` settings are plain values, with
 no dependency on Studio preferences or renderer assets. Keep those host choices
 outside `mono.studio/nodegraph` so headless tests need no GPU.
 
-Do not build a second graph model or canvas for another editor. The render
-pipeline editor uses the shared library, and future ones should too. `just
+Do not build a second graph model or canvas for another editor. Both current
+editors use the shared library, and future ones should too. `just
 check-one-node-graph` enforces the boundary: no first-party file outside
 `mono.studio/nodegraph` may open `namespace nodegraph`. Host files may register
 node types through its public API without opening that namespace.

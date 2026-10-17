@@ -595,7 +595,7 @@ namespace sourcecheck {
 	std::vector<Finding> CheckPublicHeader(const Tree &tree) {
 		std::vector<Finding> findings;
 
-		// Include target -> the module directory it belongs to.
+		// Include target -> its published source file.
 		std::map<std::string, const File *> published;
 		for (const File &file : tree.Files) {
 			if (!file.IncludePath.empty()) {
@@ -603,7 +603,11 @@ namespace sourcecheck {
 			}
 		}
 
-		std::map<std::string, size_t> outside;
+		std::set<std::string> demanded;
+		std::vector<const File *> pending;
+		const auto demand = [&](const std::string &target, const File &header) {
+			if (demanded.insert(target).second) pending.push_back(&header);
+		};
 		for (const File &file : tree.Files) {
 			for (const std::string &target : file.Includes) {
 				const auto found = published.find(target);
@@ -619,22 +623,32 @@ namespace sourcecheck {
 				const bool sameModule = file.ModuleDir == header.ModuleDir;
 				const bool fromApp = file.Path.starts_with(header.ModuleDir + "/app/");
 				if (!sameModule || fromApp) {
-					outside[target]++;
+					demand(target, header);
 				}
 			}
 		}
 
+		// A consumed public API also exposes its published dependencies. Each header
+		// enters the worklist once, so unrooted cycles stay private and rooted cycles terminate.
+		for (size_t index = 0; index < pending.size(); ++index) {
+			for (const std::string &target : pending[index]->Includes) {
+				const auto found = published.find(target);
+				if (found != published.end()) demand(target, *found->second);
+			}
+		}
+
 		for (const auto &[target, header] : published) {
-			if (outside[target] != 0) {
+			if (demanded.contains(target)) {
 				continue;
 			}
 			Finding finding;
 			finding.Rule = "public-header";
 			finding.Path = header->Path;
 			finding.Line = 1;
-			finding.Message = "nothing outside " + header->ModuleDir + " includes <" + target +
-							  ">. Either it belongs beside the sources that use it, or it is forward API and "
-							  "should say so.";
+			finding.Message =
+				"nothing outside " + header->ModuleDir + " includes <" + target +
+				"> directly or through a consumed public header. Either it belongs beside the sources "
+				"that use it, or it is forward API and should say so.";
 			Apply(finding, FileWaiverFor(*header, "public-header"));
 			findings.push_back(finding);
 		}

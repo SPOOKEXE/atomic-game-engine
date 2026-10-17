@@ -205,7 +205,7 @@ set(flipbook_staged "${MONO_STAGE_ROOT}/assets/examples/effects/fox_dance.atex")
 add_custom_command(
 	OUTPUT "${flipbook_staged}"
 	COMMAND ${CMAKE_COMMAND} -E make_directory "${MONO_STAGE_ROOT}/assets/examples/effects"
-	COMMAND $<TARGET_FILE:assetc>
+	COMMAND assetc
 		--input "${CMAKE_CURRENT_SOURCE_DIR}/assets/effects"
 		--output "${MONO_STAGE_ROOT}/assets/examples/effects"
 		--flipbook-side 8

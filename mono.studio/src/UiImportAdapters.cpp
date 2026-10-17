@@ -1,3 +1,5 @@
+#include "UiImportAdapters.hpp"
+
 #include <engine/core/Name.hpp>
 
 #include <algorithm>
@@ -6,7 +8,6 @@
 #include <nlohmann/json.hpp>
 #include <ranges>
 #include <string>
-#include <studio/UiImportAdapters.hpp>
 #include <unordered_set>
 #include <utility>
 #include <vector>

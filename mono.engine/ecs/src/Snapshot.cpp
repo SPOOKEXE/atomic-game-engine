@@ -3,12 +3,15 @@
 #include "Instances.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/ecs/Time.hpp>
 
 #include <algorithm>
+#include <span>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -22,11 +25,21 @@ namespace engine::ecs {
 		// interpreting arbitrary bytes as a table count.
 		constexpr uint64_t SNAPSHOT_MAGIC = 0x504E'534F'4E4F'4D55ull;
 
-		const Hierarchy *SnapshotHierarchyOf(const StoreState &state, Entity entity, ComponentId hierarchy) {
+		struct LocalBranch {
+			Entity Root;
+			Entity Parent;
+		};
+
+		const Hierarchy *HierarchyOf(const StoreState &state, Entity entity, ComponentId hierarchy) {
 			return static_cast<const Hierarchy *>(GetComponent(state, entity, hierarchy));
 		}
 
-		// Parents and earlier siblings must move first. Reject cycles before live rows change.
+		Hierarchy *MutableHierarchy(StoreState &state, Entity entity, ComponentId hierarchy) {
+			return static_cast<Hierarchy *>(GetComponentMutable(state, entity, hierarchy));
+		}
+
+		// Resolve desired ancestors and earlier siblings before moving a node.
+		// Validate cycles before any live rows or local branches are touched.
 		bool OverlayHierarchyOrder(
 			const StoreState &receiving,
 			const StoreState &incoming,
@@ -45,7 +58,7 @@ namespace engine::ecs {
 				return incoming.Directory.Alive(key.Index, key.Generation);
 			};
 			const auto desiredHierarchy = [&](Entity entity) {
-				return SnapshotHierarchyOf(mentioned(entity) ? incoming : receiving, entity, hierarchy);
+				return HierarchyOf(mentioned(entity) ? incoming : receiving, entity, hierarchy);
 			};
 			std::unordered_map<Entity, Visit> visits;
 			std::vector<Pending> pending;
@@ -68,8 +81,7 @@ namespace engine::ecs {
 					visits.emplace(step.Instance, Visit::Visiting);
 					pending.push_back({step.Instance, true});
 					if (mentioned(step.Instance)) {
-						const Hierarchy *previous =
-							SnapshotHierarchyOf(incoming, node->PreviousSibling, hierarchy);
+						const Hierarchy *previous = HierarchyOf(incoming, node->PreviousSibling, hierarchy);
 						if (previous != nullptr && previous->Parent == node->Parent)
 							pending.push_back({node->PreviousSibling, false});
 					}
@@ -84,6 +96,116 @@ namespace engine::ecs {
 				}
 			}
 			return true;
+		}
+
+		// Keep the receiver's local branches separate from the incoming sibling
+		// chains. Their rows and internal links remain in the receiving store.
+		std::vector<LocalBranch>
+		LocalBranches(const StoreState &state, const StoreState &incoming, ApplyMode mode) {
+			const ComponentId hierarchy = Components::Assigned<Hierarchy>();
+			if (!hierarchy.IsValid()) return {};
+			const auto mentioned = [&](Entity entity) {
+				const EntityId key = EntityId::Of(entity);
+				return incoming.Directory.Alive(key.Index, key.Generation);
+			};
+			std::vector<LocalBranch> candidates;
+			std::vector<Entity> parents;
+			std::unordered_set<Entity> roots;
+			std::unordered_set<Entity> seenParents;
+			for (const Archetype &table : state.Tables) {
+				for (const Entity entity : table.Entities()) {
+					if (!SparseSet::IsPredicted(EntityId::Of(entity).Index) || mentioned(entity)) continue;
+					const Hierarchy *node = HierarchyOf(state, entity, hierarchy);
+					if (node == nullptr || node->Parent == NULL_ENTITY) continue;
+					const Entity parent = node->Parent;
+					const bool parentMentioned = mentioned(parent);
+					if (!parentMentioned &&
+						(mode == ApplyMode::Overlay || SparseSet::IsPredicted(EntityId::Of(parent).Index)))
+						continue;
+					candidates.push_back({entity, parent});
+					roots.insert(entity);
+					if (seenParents.insert(parent).second) parents.push_back(parent);
+				}
+			}
+			std::vector<LocalBranch> branches;
+			branches.reserve(candidates.size());
+			for (const Entity parent : parents) {
+				EachChild(state, parent, [&](Entity child) {
+					if (roots.erase(child) != 0) branches.push_back({child, parent});
+				});
+			}
+			// Also recover a live local branch whose parent already lost its link
+			// in an earlier correction. Its retained parent still identifies it.
+			for (const LocalBranch branch : candidates) {
+				if (roots.erase(branch.Root) != 0) branches.push_back(branch);
+			}
+			return branches;
+		}
+
+		// This is a merge detail, not a reparent: removal callbacks must never
+		// observe a temporary detach of an otherwise unchanged local instance.
+		void IsolateLocalBranch(StoreState &state, LocalBranch branch, ComponentId hierarchy) {
+			const Hierarchy links = *HierarchyOf(state, branch.Root, hierarchy);
+			if (Hierarchy *previous = MutableHierarchy(state, links.PreviousSibling, hierarchy);
+				previous != nullptr && previous->NextSibling == branch.Root)
+				previous->NextSibling = links.NextSibling;
+			if (Hierarchy *next = MutableHierarchy(state, links.NextSibling, hierarchy);
+				next != nullptr && next->PreviousSibling == branch.Root)
+				next->PreviousSibling = links.PreviousSibling;
+			if (Hierarchy *parent = MutableHierarchy(state, branch.Parent, hierarchy); parent != nullptr) {
+				if (parent->FirstChild == branch.Root) parent->FirstChild = links.NextSibling;
+				if (parent->LastChild == branch.Root) parent->LastChild = links.PreviousSibling;
+			}
+			Hierarchy *root = MutableHierarchy(state, branch.Root, hierarchy);
+			root->Parent = NULL_ENTITY;
+			root->PreviousSibling = NULL_ENTITY;
+			root->NextSibling = NULL_ENTITY;
+		}
+
+		void RestoreLocalBranch(StoreState &state, LocalBranch branch, ComponentId hierarchy) {
+			if (HierarchyOf(state, branch.Root, hierarchy) == nullptr) return;
+			const Hierarchy *parent = HierarchyOf(state, branch.Parent, hierarchy);
+			if (parent == nullptr) {
+				// A destroyed authority parent leaves the intact local subtree as
+				// a root. A reused index at another generation is a different parent.
+				if (state.WatchTree) state.TreeChanges.push_back({branch.Root, branch.Parent, NULL_ENTITY});
+				return;
+			}
+			Entity last = parent->LastChild;
+			if (last != NULL_ENTITY && HierarchyOf(state, last, hierarchy) == nullptr) {
+				last = NULL_ENTITY;
+				EachChild(state, branch.Parent, [&](Entity child) { last = child; });
+			}
+			if (last != NULL_ENTITY) MutableHierarchy(state, last, hierarchy)->NextSibling = branch.Root;
+			Hierarchy *host = MutableHierarchy(state, branch.Parent, hierarchy);
+			if (last == NULL_ENTITY) host->FirstChild = branch.Root;
+			host->LastChild = branch.Root;
+			Hierarchy *root = MutableHierarchy(state, branch.Root, hierarchy);
+			root->Parent = branch.Parent;
+			root->PreviousSibling = last;
+		}
+
+		// Attributes live in a shared resource, but receiver-created rows still
+		// belong to their local instances when authority rows are replaced.
+		void PreserveLocalAttributes(const StoreState &state, StoreState &incoming) {
+			const ComponentId attributes = Components::Assigned<AttributeTable>();
+			if (!attributes.IsValid()) return;
+			const Column *held = state.Resources.Find(attributes.Index);
+			Column *imported = incoming.Resources.Find(attributes.Index);
+			if (held == nullptr || imported == nullptr) return;
+			const auto &local = *static_cast<const AttributeTable *>(held->At(0));
+			auto &merged = *static_cast<AttributeTable *>(imported->At(0));
+			const auto receiverOwns = [&](uint32_t index) {
+				return SparseSet::IsPredicted(index) && state.Directory.Live(index) &&
+					   !incoming.Directory.Live(index);
+			};
+			for (const auto &[index, values] : local.Entities) {
+				if (receiverOwns(index)) merged.Entities.insert_or_assign(index, values);
+			}
+			for (const auto &[index, revisions] : local.Revisions) {
+				if (receiverOwns(index)) merged.Revisions.insert_or_assign(index, revisions);
+			}
+			merged.NextRevision = std::max(merged.NextRevision, local.NextRevision);
 		}
 	}
 
@@ -407,7 +529,13 @@ namespace engine::ecs {
 		return true;
 	}
 
-	bool ApplySnapshot(StoreState &state, core::ByteReader &reader, ApplyMode mode, ApplyClock clock) {
+	bool ApplySnapshot(
+		StoreState &state,
+		core::ByteReader &reader,
+		ApplyMode mode,
+		ApplyClock clock,
+		const std::function<bool(ComponentId)> &resourceAllow
+	) {
 		// Read into a scratch world first, so a corrupt snapshot cannot leave
 		// the live one half-merged. The live world is only touched once the
 		// whole thing has parsed.
@@ -421,6 +549,8 @@ namespace engine::ecs {
 			return false;
 		}
 
+		const ComponentId hierarchy = Components::Assigned<Hierarchy>();
+
 		// --- what the snapshot knows about ---
 		std::vector<Entity> incoming;
 		for (const Archetype &table : scratch.Tables) {
@@ -428,11 +558,13 @@ namespace engine::ecs {
 				incoming.push_back(entity);
 			}
 		}
-		const ComponentId hierarchy = Components::Of<Hierarchy>();
 		std::vector<Entity> hierarchyOrder;
 		if (mode == ApplyMode::Overlay &&
 			!OverlayHierarchyOrder(state, scratch, incoming, hierarchy, hierarchyOrder))
 			return false;
+		const auto localBranches = LocalBranches(state, scratch, mode);
+		for (const LocalBranch branch : localBranches)
+			IsolateLocalBranch(state, branch, hierarchy);
 
 		// --- entities here that the snapshot does not mention ---
 		if (mode == ApplyMode::Authoritative) {
@@ -519,7 +651,7 @@ namespace engine::ecs {
 					// A sender that does not observe this entity's components omits it,
 					// but removing it here would immediately be undone by Tracked().
 					if (id != dirtyBits && !wanted.Contains(id)) {
-						if (mode == ApplyMode::Overlay && id == hierarchy) DetachFromTree(state, entity);
+						if (id == hierarchy) DetachFromTree(state, entity);
 						RemoveComponent(state, entity, id);
 					}
 				}
@@ -527,8 +659,8 @@ namespace engine::ecs {
 
 			for (const ComponentId id : wanted.Ids()) {
 				if (mode == ApplyMode::Overlay && id == hierarchy) {
-					// Keep indexes of children and siblings omitted by this partial snapshot.
-					if (SnapshotHierarchyOf(state, entity, hierarchy) == nullptr) {
+					// A partial tree must not replace indexes of unmentioned children.
+					if (HierarchyOf(state, entity, hierarchy) == nullptr) {
 						const Hierarchy blank{};
 						SetComponent(state, entity, id, &blank);
 					}
@@ -538,21 +670,34 @@ namespace engine::ecs {
 				SetComponent(state, entity, id, column->At(from.Row));
 			}
 		}
+		// Desired parents move before their children, and earlier incoming
+		// siblings move first. Unchanged parents retain their live order.
 		for (const Entity entity : hierarchyOrder) {
-			const Entity parent = SnapshotHierarchyOf(scratch, entity, hierarchy)->Parent;
-			if (parent != NULL_ENTITY && SnapshotHierarchyOf(state, parent, hierarchy) == nullptr) {
-				// A join preface can precede its external parent; the full snapshot links it.
+			const Entity parent = HierarchyOf(scratch, entity, hierarchy)->Parent;
+			if (parent != NULL_ENTITY && HierarchyOf(state, parent, hierarchy) == nullptr) {
+				// A join preface may arrive before its external parent. The full
+				// world snapshot will install that relationship when it arrives.
 				const EntityId key = EntityId::Of(parent);
 				if (!scratch.Directory.Alive(key.Index, key.Generation)) continue;
 			}
-			if (!SetParent(state, entity, parent)) return false;
+			if (!SetParent(state, entity, parent)) {
+				for (const LocalBranch branch : localBranches)
+					RestoreLocalBranch(state, branch, hierarchy);
+				return false;
+			}
 		}
 
+		for (const LocalBranch branch : localBranches)
+			RestoreLocalBranch(state, branch, hierarchy);
+
 		// --- resources and the clock ---
+		PreserveLocalAttributes(state, scratch);
 		const ComponentId time = Components::Of<WorldTime>();
 		for (const auto &entry : scratch.Resources.Entries()) {
 			if (clock == ApplyClock::PreserveLocal && entry.Index == time.Index) continue;
-			SetResourceValue(state, ComponentId{entry.Index}, entry.Storage.At(0));
+			const ComponentId id{entry.Index};
+			if (resourceAllow && !resourceAllow(id)) continue;
+			SetResourceValue(state, id, entry.Storage.At(0));
 		}
 
 		return true;

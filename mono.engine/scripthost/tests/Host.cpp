@@ -8,7 +8,9 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/script/Host.hpp>
+#include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -496,6 +498,28 @@ TEST_CASE("the host seam has JavaScript parity", "[script][host][javascript]") {
 			runtime->Release(host.Handler);
 			runtime->Release(host.Handler);
 			CHECK_FALSE(runtime->Invoke(host.Handler, arguments));
+
+			const std::string ownerPath = language == Language::Luau ? "host-owner.luau" : "host-owner.js";
+			engine::script::SourceCache ownerCache;
+			ownerCache.Set(
+				engine::core::Name(ownerPath),
+				Source(
+					language,
+					"test.Remember(function() return function() test.Echo('owned nested') end end)",
+					"test.Remember(function() { return function() { test.Echo('owned nested'); }; });"
+				)
+			);
+			store.SetResource(ownerCache);
+			const auto owner = engine::script::MakeScript(store, ownerPath, "Owner", false);
+			REQUIRE(runtime->RunInstance(owner));
+			HostValue nested;
+			REQUIRE(runtime->Invoke(host.Handler, {}, nested));
+			REQUIRE(nested.Tag == HostTag::Callback);
+			CHECK(runtime->Invoke(nested.Callback, {}));
+			CHECK(host.Seen.Text == "owned nested");
+			store.DestroyInstance(owner);
+			CHECK_FALSE(runtime->Invoke(host.Handler, {}));
+			CHECK_FALSE(runtime->Invoke(nested.Callback, {}));
 
 			INFO(runtime->LastError());
 			REQUIRE(runtime->Run(Source(

@@ -1,12 +1,12 @@
+#include "PortalCaptureTreeImport.hpp"
+#include "PortalShadowTransport.hpp"
 #include "RenderFixture.hpp"
 #include "portal/PortalRendererTerminalTrace.hpp"
 #include "portal/PortalTerminalTrace.hpp"
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/graph/PipelineDocument.hpp>
-#include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalImageHost.hpp>
-#include <engine/render/PortalShadowTransport.hpp>
 #include <engine/scene/Accessories.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/Characters.hpp>

@@ -177,7 +177,9 @@ namespace engine::scene {
 		// @since v0.15
 		uint32_t SeenTransit = 0;
 
-		// How it is driven.
+		// How the current eye is driven. Camera.CameraType projects this resource:
+		// Custom selects Classic and Scriptable leaves the pose to authored code.
+		// Inactive cameras read Custom; only the current eye can change the mode.
 		CameraMode Mode = CameraMode::Classic;
 
 		// Whether the player may turn the camera at all.

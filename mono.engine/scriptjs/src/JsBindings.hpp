@@ -54,6 +54,10 @@
 #include <string>
 
 namespace engine::script {
+	// Delivers a bounded request to the unique authority-visible event in this world.
+	bool DeliverJsRemoteEvent(
+		JSContext *context, std::span<const std::byte> message, ecs::Entity sender, std::string &error
+	);
 
 	// Installs the property surface: `Instance`, the value types, `Enum`,
 	// `game`, `workspace`, `MessagingService` and `print`.
@@ -63,6 +67,15 @@ namespace engine::script {
 	// @param role    Where scripts under this runtime are standing.
 	void
 	OpenJsBindings(JSContext *context, ecs::Store &store, const HostRole &role, ScriptCapabilities access);
+
+	// Host-labelled bytecode retains creation and write authority across delayed invocation.
+	std::string RegisterJsSource(JSContext *, std::string_view name, const HostRole &, ecs::Entity source);
+	const HostRole &JsExecutionRole(JSContext *);
+	JSValue MakeJsInstanceConstructor(JSContext *, bool clientExecution);
+	void ReapJsScripts(JSContext *);
+	bool JsCallbackAlive(JSContext *, CallbackRef);
+	uint64_t JsCallbackGeneration(JSContext *, CallbackRef);
+	JSValue InvokeJsCallback(JSContext *, CallbackRef, int count, JSValueConst *arguments);
 
 	// Installs v0.6's surface: signals, the instance methods, `task`, the
 	// datatype vocabulary, the clock, `typeOf`/`warn` and the store services.
@@ -110,6 +123,8 @@ namespace engine::script {
 	//
 	// @param context The VM to install into.
 	void InstallJsInstanceMethods(JSContext *context);
+	// Class-specific members stay off the shared instance vocabulary.
+	void InstallJsRemoteEventMembers(JSContext *context, JSValueConst prototype);
 
 	// Adds every neutral instance method to the shared method object.
 	//

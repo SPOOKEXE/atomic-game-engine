@@ -109,7 +109,7 @@ namespace engine::graph {
 		}
 
 		std::string NameOf(const RenderGraph &graph, ResourceId resource) {
-			const ResourceDesc *desc = graph.FindResource(resource);
+			const ResourceDesc *desc = graph.FindResourceDesc(resource);
 			return desc == nullptr ? std::string("?") : std::string(desc->Name.Text());
 		}
 
@@ -127,7 +127,7 @@ namespace engine::graph {
 		// read" is not one either; and a pass writing one is producing the frame
 		// rather than feeding a later pass.
 		bool IsExternal(const RenderGraph &graph, ResourceId resource) {
-			const ResourceDesc *desc = graph.FindResource(resource);
+			const ResourceDesc *desc = graph.FindResourceDesc(resource);
 			return desc != nullptr && desc->External;
 		}
 	}
@@ -216,8 +216,8 @@ namespace engine::graph {
 						DiagnosticKind::DeadResource,
 						DiagnosticSeverity::Warning,
 						rows[writer].Body->Name,
-						graph.FindResource(resource) == nullptr ? core::Name{}
-																: graph.FindResource(resource)->Name,
+						graph.FindResourceDesc(resource) == nullptr ? core::Name{}
+																	: graph.FindResourceDesc(resource)->Name,
 						"'" + NameOf(graph, resource) + "' is written here and read by nothing",
 					}
 				);
@@ -295,7 +295,7 @@ namespace engine::graph {
 						DiagnosticKind::WastedWrite,
 						DiagnosticSeverity::Warning,
 						rows[first].Body->Name,
-						graph.FindResource(resource)->Name,
+						graph.FindResourceDesc(resource)->Name,
 						"'" + NameOf(graph, resource) + "' is overwritten by '" +
 							std::string(rows[next].Body->Name.Text()) + "' before anything reads it",
 					}
@@ -315,8 +315,8 @@ namespace engine::graph {
 						DiagnosticKind::UnwrittenRead,
 						DiagnosticSeverity::Warning,
 						row.Body->Name,
-						graph.FindResource(resource) == nullptr ? core::Name{}
-																: graph.FindResource(resource)->Name,
+						graph.FindResourceDesc(resource) == nullptr ? core::Name{}
+																	: graph.FindResourceDesc(resource)->Name,
 						"'" + NameOf(graph, resource) + "' is read here and written by nothing",
 					}
 				);
@@ -367,8 +367,8 @@ namespace engine::graph {
 						DiagnosticKind::SamplesOwnTarget,
 						DiagnosticSeverity::Warning,
 						row.Body->Name,
-						graph.FindResource(resource) == nullptr ? core::Name{}
-																: graph.FindResource(resource)->Name,
+						graph.FindResourceDesc(resource) == nullptr ? core::Name{}
+																	: graph.FindResourceDesc(resource)->Name,
 						"'" + NameOf(graph, resource) +
 							"' is sampled and written by the same pass; cycling leaves it undefined, "
 							"so this wants two resources and a ping-pong",
@@ -472,8 +472,8 @@ namespace engine::graph {
 						DiagnosticKind::OutOfOrder,
 						DiagnosticSeverity::Warning,
 						rows[at].Body->Name,
-						graph.FindResource(resource) == nullptr ? core::Name{}
-																: graph.FindResource(resource)->Name,
+						graph.FindResourceDesc(resource) == nullptr ? core::Name{}
+																	: graph.FindResourceDesc(resource)->Name,
 						"declared before '" + std::string(rows[earliest].Body->Name.Text()) +
 							"', which writes the '" + NameOf(graph, resource) +
 							"' it reads - the frame runs in the right order and the list does not",
@@ -496,7 +496,7 @@ namespace engine::graph {
 				// into it report as overspent. Skipped rather than given a
 				// sentinel format, because a format that means "not an image"
 				// would have to be understood everywhere a format is.
-				const ResourceDesc *described = graph.FindResource(resource);
+				const ResourceDesc *described = graph.FindResourceDesc(resource);
 				if (described != nullptr && described->Kind == ResourceKind::Entities) {
 					continue;
 				}
@@ -545,7 +545,7 @@ namespace engine::graph {
 							DiagnosticKind::FormatOverspend,
 							DiagnosticSeverity::Warning,
 							row.Body->Name,
-							graph.FindResource(resource)->Name,
+							graph.FindResourceDesc(resource)->Name,
 							"'" + NameOf(graph, resource) + "' is written as " +
 								std::string(Describe(produced)) + " and no reader takes more than " +
 								std::to_string(widest) + " bits a pixel",
@@ -554,7 +554,7 @@ namespace engine::graph {
 				}
 
 				if (row.Body->Kind == core::Name("blit") && !row.Body->Reads.empty()) {
-					const ResourceDesc *source = graph.FindResource(row.Body->Reads.front());
+					const ResourceDesc *source = graph.FindResourceDesc(row.Body->Reads.front());
 					if (source != nullptr && IsLossy(source->Format, produced)) {
 						found.push_back(
 							Diagnostic{
@@ -576,7 +576,7 @@ namespace engine::graph {
 							DiagnosticKind::LossyWire,
 							DiagnosticSeverity::Warning,
 							row.Body->Name,
-							graph.FindResource(resource)->Name,
+							graph.FindResourceDesc(resource)->Name,
 							"'" + NameOf(graph, resource) +
 								"' is read as a narrower format than it is written",
 						}
@@ -589,7 +589,7 @@ namespace engine::graph {
 							DiagnosticKind::UnusedAlpha,
 							DiagnosticSeverity::Hint,
 							row.Body->Name,
-							graph.FindResource(resource)->Name,
+							graph.FindResourceDesc(resource)->Name,
 							"'" + NameOf(graph, resource) + "' has an alpha channel no reader looks at",
 						}
 					);

@@ -4,22 +4,38 @@
 -- controls so a scene author can inspect their interaction with fog and bloom.
 
 local Lighting = game:GetService("Lighting")
+local fog = Instance.new("FogEffect")
+fog.Name = "Rays Fog"
+fog.Enabled = true
+fog.Parent = Lighting
+local bloom = Instance.new("BloomEffect")
+bloom.Name = "Rays Bloom"
+bloom.Enabled = true
+bloom.Parent = Lighting
+local depthOfField = Instance.new("DepthOfFieldEffect")
+depthOfField.Name = "Rays Depth Of Field"
+depthOfField.Enabled = true
+depthOfField.Parent = Lighting
+local godRays = Instance.new("GodRaysEffect")
+godRays.Name = "Rays God Rays"
+godRays.Enabled = true
+godRays.Parent = Lighting
 Lighting.ClockTime = 11.5
 Lighting.GeographicLatitude = 0
 Lighting.Brightness = 5
-Lighting.FogColor = Color3.fromRGB(98, 129, 166)
-Lighting.FogStart = 18
-Lighting.FogEnd = 92
-Lighting.BloomThreshold = 0.9
-Lighting.BloomIntensity = 0.8
-Lighting.BloomRadius = 8
-Lighting.DepthOfFieldIntensity = 0.85
-Lighting.DepthOfFieldFocusDistance = 24
-Lighting.DepthOfFieldFocusRange = 6
-Lighting.DepthOfFieldRadius = 8
-Lighting.GodRayIntensity = 0.7
-Lighting.GodRayThreshold = 0.8
-Lighting.GodRayRadius = 64
+fog.Color = Color3.fromRGB(98, 129, 166)
+fog.Start = 18
+fog.End = 92
+bloom.Threshold = 0.9
+bloom.Intensity = 0.8
+bloom.Radius = 8
+depthOfField.Intensity = 0.85
+depthOfField.FocusDistance = 24
+depthOfField.FocusRange = 6
+depthOfField.Radius = 8
+godRays.Intensity = 0.7
+godRays.Threshold = 0.8
+godRays.Radius = 64
 
 local sky = Instance.new("SkyboxCompute")
 sky.Name = "Rays Sky"
@@ -44,8 +60,8 @@ for index = 1, 18 do
 	pillar.Parent = workspace
 end
 
-local camera = Instance.new("Camera")
-camera.CFrame = CFrame.lookAt(Vector3.new(13, 8, 29), Vector3.new(0, 7, -30))
-camera.FieldOfView = 55
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local camera = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+camera:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(13, 8, 29), Vector3.new(0, 7, -30)))
+camera:SetAttribute("FieldOfView", 55)

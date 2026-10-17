@@ -69,7 +69,9 @@ namespace engine::graph {
 		}
 	}
 
-	ResourceAliasPlan BuildResourceAliases(const RenderGraph &graph, const CompiledGraph &compiled) {
+	ResourceAliasPlan BuildResourceAliases(
+		const RenderGraph &graph, const CompiledGraph &compiled, std::span<const ResourceId> retained
+	) {
 		ResourceAliasPlan plan;
 		plan.Allocations.resize(graph.ResourceCount());
 		const std::vector<NodeId> ordered = OrderedNodes(compiled);
@@ -97,6 +99,11 @@ namespace engine::graph {
 			}
 		}
 
+		for (const ResourceId resource : retained) {
+			if (resource.IsValid() && resource.Value <= lifetimes.size() && !ordered.empty())
+				lifetimes[resource.Value - 1].Last = static_cast<uint32_t>(ordered.size() - 1);
+		}
+
 		struct Slot {
 			ResourceId Owner;
 			uint32_t Last = 0;
@@ -104,14 +111,14 @@ namespace engine::graph {
 		std::vector<Slot> slots;
 		for (size_t index = 0; index < graph.ResourceCount(); index++) {
 			const ResourceId resource{static_cast<uint32_t>(index + 1)};
-			const ResourceDesc *desc = graph.FindResource(resource);
+			const ResourceDesc *desc = graph.FindResourceDesc(resource);
 			const Lifetime life = lifetimes[index];
 			if (desc == nullptr || !AllocatedTarget(*desc) || life.First == ProfileResource::NEVER) {
 				continue;
 			}
 
 			auto reusable = std::find_if(slots.begin(), slots.end(), [&](const Slot &slot) {
-				const ResourceDesc *owner = graph.FindResource(slot.Owner);
+				const ResourceDesc *owner = graph.FindResourceDesc(slot.Owner);
 				return slot.Last < life.First && owner != nullptr && Compatible(*owner, *desc) &&
 					   ScopeOf(graph, slot.Owner) == ScopeOf(graph, resource);
 			});
@@ -144,10 +151,14 @@ namespace engine::graph {
 	}
 
 	PipelineProfile ProfilePipeline(
-		const RenderGraph &graph, const CompiledGraph &compiled, uint32_t viewWidth, uint32_t viewHeight
+		const RenderGraph &graph,
+		const CompiledGraph &compiled,
+		uint32_t viewWidth,
+		uint32_t viewHeight,
+		std::span<const ResourceId> retained
 	) {
 		PipelineProfile profile;
-		const ResourceAliasPlan aliases = BuildResourceAliases(graph, compiled);
+		const ResourceAliasPlan aliases = BuildResourceAliases(graph, compiled, retained);
 		profile.AliasedResources = aliases.AliasedResources;
 
 		// **The three blocks in the order a frame runs them**, which is what
@@ -163,7 +174,7 @@ namespace engine::graph {
 
 		for (size_t index = 0; index < graph.ResourceCount(); index++) {
 			const ResourceId id{static_cast<uint32_t>(index + 1)};
-			const ResourceDesc *desc = graph.FindResource(id);
+			const ResourceDesc *desc = graph.FindResourceDesc(id);
 			if (desc == nullptr) {
 				continue;
 			}
@@ -217,6 +228,12 @@ namespace engine::graph {
 					row.LastRead = static_cast<uint32_t>(pass);
 				}
 			}
+		}
+
+		for (const ResourceId resource : retained) {
+			if (resource.IsValid() && resource.Value <= profile.Resources.size())
+				profile.Resources[resource.Value - 1].LastRead =
+					static_cast<uint32_t>(profile.Passes.size() - 1);
 		}
 
 		// **The peak, walked rather than summed.** The sum is what an engine

@@ -282,12 +282,19 @@ namespace engine::bake {
 		std::span<const std::byte> bytes,
 		assets::TextureData *atlas,
 		assets::TextureSequenceData *sequence,
-		std::string &failure
+		std::string &failure,
+		uint32_t maximumDimension = 0,
+		uint64_t maximumPixels = MAXIMUM_PIXELS
 	) {
+		if (maximumDimension > assets::Texture::MAXIMUM_DIMENSION || maximumPixels == 0 ||
+			maximumPixels > MAXIMUM_PIXELS) {
+			failure = "invalid GIF decode budget";
+			return false;
+		}
 		const uint32_t maximumFrames =
 			sequence ? assets::TextureSequence::MAXIMUM_FRAMES : MAX_SIDE * MAX_SIDE;
 		const uint64_t maximumFrameBytes =
-			sequence ? assets::TextureSequence::MAXIMUM_PIXEL_BYTES : 64ull * 1024 * 1024;
+			sequence ? assets::TextureSequence::MAXIMUM_PIXEL_BYTES : maximumPixels * 4;
 		Reader reader{bytes, 0};
 
 		if (!reader.Has(13)) {
@@ -310,9 +317,9 @@ namespace engine::bake {
 			failure = "a GIF with no canvas";
 			return false;
 		}
-		if (canvasWidth > assets::Texture::MAXIMUM_DIMENSION ||
-			canvasHeight > assets::Texture::MAXIMUM_DIMENSION ||
-			static_cast<uint64_t>(canvasWidth) * canvasHeight > MAXIMUM_PIXELS) {
+		if (canvasWidth > (maximumDimension == 0 ? assets::Texture::MAXIMUM_DIMENSION : maximumDimension) ||
+			canvasHeight > (maximumDimension == 0 ? assets::Texture::MAXIMUM_DIMENSION : maximumDimension) ||
+			static_cast<uint64_t>(canvasWidth) * canvasHeight > maximumPixels) {
 			failure = "a GIF canvas past the texture ceiling";
 			return false;
 		}
@@ -409,6 +416,14 @@ namespace engine::bake {
 				failure = sequence ? "a GIF has more than 4096 frames" : "a GIF has more than 256 frames";
 				return false;
 			}
+			// Each composited frame is a full canvas. Refuse before decoding it into
+			// the canvas, including when the compressed source is tiny.
+			const uint64_t frameBytes = uint64_t(canvasWidth) * canvasHeight * sizeof(Pixel);
+			if (seenImages > maximumFrameBytes / frameBytes) {
+				failure = sequence ? "a GIF sequence exceeds 256 MiB of frame pixels"
+								   : "a GIF flipbook exceeds 64 MiB of frame pixels";
+				return false;
+			}
 			if (!reader.Has(9)) {
 				failure = "an image descriptor running past the end";
 				return false;
@@ -482,14 +497,6 @@ namespace engine::bake {
 				}
 			}
 
-			// Each composited frame is a full canvas. Refuse before adding it to
-			// the retained frame list, including when the compressed source is tiny.
-			const uint64_t frameBytes = uint64_t(canvasWidth) * canvasHeight * sizeof(Pixel);
-			if (seenImages > maximumFrameBytes / frameBytes) {
-				failure = sequence ? "a GIF sequence exceeds 256 MiB of frame pixels"
-								   : "a GIF flipbook exceeds 64 MiB of frame pixels";
-				return false;
-			}
 			frames.push_back(canvas);
 
 			// **A delay of 0 or 1 means "as fast as the viewer can", and every
@@ -597,7 +604,8 @@ namespace engine::bake {
 
 		// The same ceiling every other decoder here uses, so a hostile GIF cannot
 		// ask for a gigabyte by claiming a large canvas and 256 frames.
-		if (static_cast<uint64_t>(sheetWidth) * sheetHeight > MAXIMUM_PIXELS) {
+		if ((maximumDimension != 0 && (sheetWidth > maximumDimension || sheetHeight > maximumDimension)) ||
+			static_cast<uint64_t>(sheetWidth) * sheetHeight > maximumPixels) {
 			failure = "a GIF whose flipbook would be larger than the pixel ceiling";
 			return false;
 		}
@@ -646,6 +654,16 @@ namespace engine::bake {
 
 	bool ReadGif(std::span<const std::byte> bytes, assets::TextureData &out, std::string &failure) {
 		return DecodeGif(bytes, &out, nullptr, failure);
+	}
+
+	bool ReadGifBounded(
+		std::span<const std::byte> bytes,
+		uint32_t maximumDimension,
+		uint64_t maximumPixels,
+		assets::TextureData &out,
+		std::string &failure
+	) {
+		return DecodeGif(bytes, &out, nullptr, failure, maximumDimension, maximumPixels);
 	}
 
 	bool ReadGifSequence(

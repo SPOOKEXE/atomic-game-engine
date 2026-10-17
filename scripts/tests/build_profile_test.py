@@ -3,14 +3,15 @@
 
 from __future__ import annotations
 
-from importlib.util import module_from_spec, spec_from_file_location
-from io import StringIO
-from pathlib import Path
 import contextlib
+import subprocess
 import sys
 import tempfile
 import unittest
-
+from importlib.util import module_from_spec, spec_from_file_location
+from io import StringIO
+from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = spec_from_file_location("build_profile", ROOT / "scripts" / "build-profile.py")
@@ -22,6 +23,139 @@ SPEC.loader.exec_module(MODULE)
 
 
 class BuildProfileTest(unittest.TestCase):
+	def test_direct_miss_events_are_auxiliary_to_uncacheable_reason(self) -> None:
+		outcomes = MODULE.parse_ccache_stats(
+			"# source.cpp\ndirect_cache_miss\npreprocessed_cache_miss\nmodified_input_file\n".splitlines()
+		)
+		outcome = outcomes["source.cpp"]
+		self.assertEqual(outcome.uncacheable, 1)
+		self.assertEqual(outcome.reasons, {"modified_input_file": 1})
+
+	def test_run_reports_only_new_edges_and_cache_calls(self) -> None:
+		with tempfile.TemporaryDirectory() as temporary:
+			build = Path(temporary)
+			ninja = build / ".ninja_log"
+			stats = build / "ccache-stats.log"
+			ninja.write_text("# ninja log v5\n1\t11\t100\told.o\thash\n", encoding="utf-8")
+			stats.write_text("# old.cpp\ncache_miss\n", encoding="utf-8")
+
+			def build_command(command: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
+				self.assertEqual((command, check), (["cmake", "--build", "tree"], False))
+				with ninja.open("a", encoding="utf-8") as log:
+					log.write("12\t42\t200\tnew.o\thash\n")
+				with stats.open("a", encoding="utf-8") as log:
+					log.write("# new.cpp\ndirect_cache_hit\n")
+				return subprocess.CompletedProcess(command, 0)
+
+			output = StringIO()
+			argv = ["build-profile.py", "--build-dir", str(build), "--run", "cmake", "--build", "tree"]
+			with (
+				patch.object(sys, "argv", argv),
+				patch.object(MODULE.subprocess, "run", side_effect=build_command),
+				contextlib.redirect_stdout(output),
+			):
+				self.assertEqual(MODULE.main(), 0)
+			text = output.getvalue()
+			self.assertIn("build wall time:", text)
+			self.assertIn("this-run span: 0.030 s across 1 completed edges", text)
+			self.assertIn("new.o", text)
+			self.assertNotIn("old.o", text)
+			self.assertIn("ccache this run: 1 hits, 0 misses", text)
+			self.assertNotIn("old.cpp", text)
+
+	def test_null_build_has_no_new_activity(self) -> None:
+		with tempfile.TemporaryDirectory() as temporary:
+			build = Path(temporary)
+			(build / ".ninja_log").write_text("# ninja log v5\n1\t11\t100\told.o\thash\n", encoding="utf-8")
+			(build / "ccache-stats.log").write_text("# old.cpp\ncache_miss\n", encoding="utf-8")
+			output = StringIO()
+			with (
+				patch.object(MODULE.subprocess, "run", return_value=subprocess.CompletedProcess(["true"], 0)),
+				contextlib.redirect_stdout(output),
+			):
+				self.assertEqual(MODULE.profile_run(build, build / "ccache-stats.log", 5, ["true"]), 0)
+			self.assertIn("ninja: no completed edges in this run", output.getvalue())
+			self.assertIn("ccache: no recorded calls in this run", output.getvalue())
+
+	def test_compacted_ninja_log_uses_raw_mtime_to_find_rebuilt_edge(self) -> None:
+		before = b"# ninja log v5\n1\t11\t100\trebuilt.o\thash\n2\t12\t101\tkept.o\tother\n"
+		after = b"# ninja log v5\n2\t12\t101\tkept.o\tother\n1\t11\t200\trebuilt.o\thash\n"
+		edges = MODULE.parse_ninja_log(MODULE.new_ninja_rows(before, after))
+		self.assertEqual(len(edges), 1)
+		self.assertEqual(edges[0].output, "rebuilt.o")
+
+	def test_rewritten_ninja_log_uses_only_latest_row_per_output(self) -> None:
+		before = (
+			b"# ninja log v5\n"
+			b"72\t1450\t100\tbuild.ninja\thash\n"
+			b"52\t1356\t100\tbuild.ninja\thash\n"
+		)
+		after = (
+			b"# ninja log v5\n"
+			b"52\t1356\t200\tbuild.ninja\thash\n"
+			b"52\t1274\t200\tbuild.ninja\thash\n"
+		)
+		expected = ["52\t1274\t200\tbuild.ninja\thash"]
+		self.assertEqual(MODULE.new_ninja_rows(before, after), expected)
+		edges = MODULE.parse_ninja_log(MODULE.new_ninja_rows(before, after))
+		self.assertEqual([edge.elapsed_milliseconds for edge in edges], [1222])
+
+		unchanged = b"9\t19\t300\tkept.o\tother\n"
+		self.assertEqual(MODULE.new_ninja_rows(before + unchanged, after + unchanged), expected)
+
+	def test_failed_command_reports_partial_logs_and_keeps_status(self) -> None:
+		with tempfile.TemporaryDirectory() as temporary:
+			build = Path(temporary)
+			def failed_command(command: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
+				(build / ".ninja_log").write_text("# ninja log v5\n1\t11\t100\tpartial.o\thash\n", encoding="utf-8")
+				(build / "ccache-stats.log").write_text("# partial.cpp\ncache_miss\n", encoding="utf-8")
+				return subprocess.CompletedProcess(command, 42)
+
+			output = StringIO()
+			with (
+				patch.object(MODULE.subprocess, "run", side_effect=failed_command),
+				contextlib.redirect_stdout(output),
+			):
+				self.assertEqual(MODULE.profile_run(build, build / "ccache-stats.log", 5, ["false"]), 42)
+			self.assertIn("partial.o", output.getvalue())
+			self.assertIn("ccache this run: 0 hits, 1 misses", output.getvalue())
+
+			with (
+				patch.object(MODULE.subprocess, "run", return_value=subprocess.CompletedProcess(["false"], 42)),
+				patch.object(MODULE, "print_edges", side_effect=OSError("report unavailable")),
+				contextlib.redirect_stderr(StringIO()),
+			):
+				self.assertEqual(MODULE.profile_run(build, build / "ccache-stats.log", 5, ["false"]), 42)
+
+	def test_replaced_ccache_log_is_not_counted_as_current_activity(self) -> None:
+		with tempfile.TemporaryDirectory() as temporary:
+			build = Path(temporary)
+			stats = build / "ccache-stats.log"
+			stats.write_text("# previous.cpp\ncache_miss\n", encoding="utf-8")
+			def replace_log(command: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
+				stats.write_text("# unknown.cpp\ndirect_cache_hit\n", encoding="utf-8")
+				return subprocess.CompletedProcess(command, 0)
+
+			output = StringIO()
+			with patch.object(MODULE.subprocess, "run", side_effect=replace_log), contextlib.redirect_stdout(output):
+				self.assertEqual(MODULE.profile_run(build, stats, 5, ["true"]), 0)
+			self.assertIn("stats log was replaced", output.getvalue())
+			self.assertNotIn("unknown.cpp", output.getvalue())
+
+	def test_standalone_mode_keeps_historical_report(self) -> None:
+		with tempfile.TemporaryDirectory() as temporary:
+			build = Path(temporary)
+			(build / ".ninja_log").write_text("# ninja log v5\n1\t11\t100\told.o\thash\n", encoding="utf-8")
+			(build / "ccache-stats.log").write_text("# old.cpp\ncache_miss\n", encoding="utf-8")
+			output = StringIO()
+			with (
+				patch.object(sys, "argv", ["build-profile.py", "--build-dir", str(build)]),
+				contextlib.redirect_stdout(output),
+			):
+				self.assertEqual(MODULE.main(), 0)
+			self.assertIn("ninja retained-log span", output.getvalue())
+			self.assertIn("ccache cumulative: 0 hits, 1 misses", output.getvalue())
+
 	def test_ninja_profile_expands_unity_sources_and_groups_work(self) -> None:
 		with tempfile.TemporaryDirectory() as temporary:
 			build = Path(temporary)

@@ -10,8 +10,11 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/PlayerGui.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -890,4 +893,53 @@ TEST_CASE("IsUnder is reflexive and stops at the root", "[studio][hierarchy]") {
 		view.IsUnder(scene.Lighting, scene.Workspace) ==
 		scene.World.IsDescendantOf(scene.Lighting, scene.Workspace)
 	);
+}
+
+TEST_CASE(
+	"Explorer GUI rows select the store's server or client projection", "[studio][hierarchy][playergui]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
+	Store store("hierarchy_gui_projection");
+	scene::InstallServices(store);
+	const Entity player = scene::AddPlayer(store, "Ada", true);
+	const Entity container = store.FindFirstChild(player, "PlayerGui");
+	const Entity source = store.CreateInstance(gui::GuiClass("ScreenGui"), "Hud");
+	REQUIRE(store.SetParent(source, container));
+	const Entity label = store.CreateInstance(gui::GuiClass("TextLabel"), "Status");
+	REQUIRE(store.SetParent(label, source));
+	REQUIRE(gui::RefreshPlayerGuiProjection(store, player, {}) == 1);
+	const Entity copy = gui::FindPlayerGuiCopy(store, source);
+	const Entity copiedLabel = gui::FindPlayerGuiCopy(store, label);
+	REQUIRE(store.IsPredicted(copy));
+	REQUIRE(store.IsPredicted(copiedLabel));
+
+	HierarchyView view;
+	HierarchyRequest request = Closed("Status");
+	REQUIRE(view.Rebuild(store, request));
+	CHECK(view.RowOf(source) != HierarchyView::NO_ROW);
+	CHECK(view.RowOf(label) != HierarchyView::NO_ROW);
+	CHECK(view.RowOf(copy) == HierarchyView::NO_ROW);
+	CHECK_FALSE(view.Holds(copy));
+	CHECK(view.MatchCount() == 1);
+	CHECK_FALSE(view.Rebuild(store, request));
+
+	store.SetAdoptOnly(true);
+	REQUIRE(view.Rebuild(store, request));
+	CHECK(view.RowOf(source) == HierarchyView::NO_ROW);
+	CHECK_FALSE(view.Holds(source));
+	CHECK(view.RowOf(copy) != HierarchyView::NO_ROW);
+	CHECK(view.RowOf(copiedLabel) != HierarchyView::NO_ROW);
+	CHECK(view.MatchCount() == 1);
+	CHECK(view.Holds(container));
+	CHECK_FALSE(view.Rebuild(store, request));
+
+	store.DestroyInstance(copy);
+	REQUIRE_FALSE(store.Alive(copy));
+	REQUIRE(view.Rebuild(store, request));
+	CHECK(view.MatchCount() == 0);
+	CHECK(view.RowOf(source) == HierarchyView::NO_ROW);
+	CHECK_FALSE(view.Holds(source));
+	CHECK(store.Alive(source));
 }

@@ -1,3 +1,4 @@
+#include "FrameGraphSnapshot.hpp"
 #include "PhysicsProfiler.hpp"
 #include "ProfilerFlame.hpp"
 #include "TimelineBar.hpp"
@@ -18,6 +19,8 @@
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <imgui.h>
+#include <imgui_internal.h>
 #include <studio/Diagnostics.hpp>
 #include <vector>
 
@@ -40,6 +43,107 @@ using studio::FocusDiagnosticSpans;
 using studio::LayoutDiagnosticRows;
 using studio::SelectHeapHistorySnapshot;
 using studio::ShouldReplaceDiagnosticSnapshot;
+
+TEST_CASE("frame graph recording serves live consumers while its panel is paused", "[studio][diagnostics]") {
+	using studio::frame_graph_detail::ShouldRecordFrameGraph;
+	CHECK_FALSE(ShouldRecordFrameGraph(false, false, false));
+	CHECK_FALSE(ShouldRecordFrameGraph(false, true, false));
+	CHECK(ShouldRecordFrameGraph(true, false, false));
+	CHECK_FALSE(ShouldRecordFrameGraph(true, true, false));
+	for (const bool visible : {false, true}) {
+		for (const bool paused : {false, true}) {
+			CHECK(ShouldRecordFrameGraph(visible, paused, true));
+		}
+	}
+}
+
+TEST_CASE(
+	"pausing frame graph collection retains the owned snapshot and resumes a clean history",
+	"[studio][diagnostics]"
+) {
+	using studio::frame_graph_detail::ShouldRecordFrameGraph;
+	struct RestoreRecording {
+		bool Enabled = FrameGraph::IsEnabled();
+		~RestoreRecording() {
+			FrameGraph::SetEnabled(Enabled);
+		}
+	};
+	const RestoreRecording restore;
+	FrameGraph::SetEnabled(false);
+	FrameGraph::SetEnabled(ShouldRecordFrameGraph(true, false, false));
+	FrameGraph::BeginFrame();
+	{ ENGINE_PROFILE("owned before pause"); }
+	FrameGraph::EndFrame();
+	REQUIRE(FrameGraph::HistoryFrames() == 1);
+
+	std::vector<DiagnosticSpan> owned;
+	AccumulateDiagnosticSpans(FrameGraph::Spans(), owned);
+	FinishDiagnosticAverage(owned, 1);
+	REQUIRE(owned.size() == 1);
+	const float retainedMilliseconds = owned.front().Milliseconds;
+
+	// A separate consumer keeps collecting without changing the panel's copy.
+	FrameGraph::SetEnabled(ShouldRecordFrameGraph(true, true, true));
+	FrameGraph::BeginFrame();
+	{ ENGINE_PROFILE("other live consumer"); }
+	FrameGraph::EndFrame();
+	CHECK(FrameGraph::HistoryFrames() == 2);
+	CHECK(owned.front().Name == "owned before pause");
+	CHECK(owned.front().Milliseconds == retainedMilliseconds);
+
+	FrameGraph::SetEnabled(ShouldRecordFrameGraph(true, true, false));
+	FrameGraph::BeginFrame();
+	{ ENGINE_PROFILE("discarded while paused"); }
+	FrameGraph::EndFrame();
+	CHECK_FALSE(FrameGraph::IsEnabled());
+	CHECK(FrameGraph::Spans().empty());
+	CHECK(FrameGraph::HistoryFrames() == 0);
+	CHECK(owned.front().Name == "owned before pause");
+	CHECK(owned.front().Milliseconds == retainedMilliseconds);
+
+	FrameGraph::SetEnabled(ShouldRecordFrameGraph(true, false, false));
+	FrameGraph::BeginFrame();
+	{ ENGINE_PROFILE("fresh after resume"); }
+	FrameGraph::EndFrame();
+	REQUIRE(FrameGraph::Spans().size() == 1);
+	CHECK(FrameGraph::Spans().front().Name == "fresh after resume");
+	CHECK(FrameGraph::HistoryFrames() == 1);
+	CHECK(FrameGraph::RecentMaximum("owned before pause") == 0.0f);
+}
+
+TEST_CASE("frame graph counters freeze while paused and refresh on resume", "[studio][diagnostics]") {
+	engine::render::FrameStatistics statistics;
+	statistics.Record(1.0, 1.0f / 60.0f);
+
+	engine::render::FrameSummary presentation{};
+	bool hasPresentation = false;
+	size_t droppedGpuMarks = 0;
+	size_t droppedMarkReads = 0;
+	const auto readDroppedMarks = [&droppedMarkReads] { return ++droppedMarkReads; };
+
+	studio::frame_graph_detail::UpdateFrameGraphCounters(
+		presentation, hasPresentation, droppedGpuMarks, false, statistics, readDroppedMarks
+	);
+	REQUIRE(hasPresentation);
+	CHECK(presentation.CurrentMilliseconds == Catch::Approx(1000.0f / 60.0f));
+	CHECK(droppedGpuMarks == 1);
+	CHECK(droppedMarkReads == 1);
+
+	statistics.Record(2.0, 0.001f);
+	studio::frame_graph_detail::UpdateFrameGraphCounters(
+		presentation, hasPresentation, droppedGpuMarks, true, statistics, readDroppedMarks
+	);
+	CHECK(presentation.CurrentMilliseconds == Catch::Approx(1000.0f / 60.0f));
+	CHECK(droppedGpuMarks == 1);
+	CHECK(droppedMarkReads == 1);
+
+	studio::frame_graph_detail::UpdateFrameGraphCounters(
+		presentation, hasPresentation, droppedGpuMarks, false, statistics, readDroppedMarks
+	);
+	CHECK(presentation.CurrentMilliseconds == Catch::Approx(1.0f));
+	CHECK(droppedGpuMarks == 2);
+	CHECK(droppedMarkReads == 2);
+}
 
 TEST_CASE("timeline bars fit at the right edge and in narrow panels", "[studio][diagnostics]") {
 	for (const float width : {0.0f, 0.5f, 1.0f, 100.0f}) {
@@ -417,6 +521,88 @@ TEST_CASE("averaging repeats smaller frames against retained rows", "[studio][di
 	CHECK(totals[2].Milliseconds == 5.0f);
 }
 
+TEST_CASE("averaged GPU timings use available timestamp samples", "[studio][diagnostics]") {
+	using engine::core::ProfileCategory;
+	const std::array first{
+		FrameSpan{.Name = "submit", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .Milliseconds = 10.0f},
+		FrameSpan{
+			.Name = "gpu composite",
+			.Depth = 1,
+			.Parent = 0,
+			.Milliseconds = 0.125f,
+			.Category = ProfileCategory::Gpu,
+			.Reported = true,
+		},
+	};
+	const std::array second{
+		FrameSpan{.Name = "submit", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .Milliseconds = 10.0f},
+		FrameSpan{
+			.Name = "gpu composite",
+			.Depth = 1,
+			.Parent = 0,
+			.Milliseconds = 0.25f,
+			.Category = ProfileCategory::Gpu,
+			.Reported = true,
+		},
+	};
+
+	std::vector<DiagnosticSpan> totals;
+	AccumulateDiagnosticSpans(first, totals);
+	AccumulateDiagnosticSpans(second, totals);
+	FinishDiagnosticAverage(totals, 250);
+
+	REQUIRE(totals.size() == 2);
+	CHECK(totals[0].Milliseconds == Catch::Approx(0.08f));
+	CHECK(totals[1].Occurrences == 2);
+	CHECK(totals[1].Milliseconds == Catch::Approx(0.1875f));
+}
+
+TEST_CASE("averaging does not merge same-named CPU and GPU spans", "[studio][diagnostics]") {
+	using engine::core::ProfileCategory;
+	const std::array first{
+		FrameSpan{.Name = "frame", .Depth = 0, .Parent = FrameGraph::NO_PARENT},
+		FrameSpan{
+			.Name = "composite",
+			.Depth = 1,
+			.Parent = 0,
+			.Milliseconds = 6.0f,
+			.Category = ProfileCategory::Render,
+		},
+		FrameSpan{
+			.Name = "composite",
+			.Depth = 1,
+			.Parent = 0,
+			.Milliseconds = 0.4f,
+			.Category = ProfileCategory::Gpu,
+			.Reported = true,
+		},
+	};
+	const std::array second{
+		FrameSpan{.Name = "frame", .Depth = 0, .Parent = FrameGraph::NO_PARENT},
+		FrameSpan{
+			.Name = "composite",
+			.Depth = 1,
+			.Parent = 0,
+			.Milliseconds = 0.2f,
+			.Category = ProfileCategory::Gpu,
+			.Reported = true,
+		},
+	};
+
+	std::vector<DiagnosticSpan> totals;
+	AccumulateDiagnosticSpans(first, totals);
+	AccumulateDiagnosticSpans(second, totals);
+	FinishDiagnosticAverage(totals, 2);
+
+	REQUIRE(totals.size() == 3);
+	CHECK(totals[1].Category == ProfileCategory::Render);
+	CHECK(totals[1].Milliseconds == Catch::Approx(3.0f));
+	CHECK(totals[1].Occurrences == 1);
+	CHECK(totals[2].Category == ProfileCategory::Gpu);
+	CHECK(totals[2].Milliseconds == Catch::Approx(0.3f));
+	CHECK(totals[2].Occurrences == 2);
+}
+
 TEST_CASE("averaging falls back when the same span rows change order", "[studio][diagnostics]") {
 	const std::array first{
 		FrameSpan{.Name = "root", .Depth = 0, .Parent = FrameGraph::NO_PARENT},
@@ -531,7 +717,225 @@ TEST_CASE("reported trees cannot overlap the next measured sibling", "[studio][d
 	CHECK(spans[4].StartMilliseconds >= simulationEnd);
 }
 
-TEST_CASE("timing overlap never changes hierarchy rows", "[studio][diagnostics]") {
+TEST_CASE("reported children use chronological measured gaps", "[studio][diagnostics]") {
+	std::vector spans{
+		DiagnosticSpan{.Name = "Application", .Depth = 0, .Milliseconds = 10.0f},
+		DiagnosticSpan{
+			.Name = "late measured span",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 7.0f,
+			.Milliseconds = 2.0f,
+		},
+		DiagnosticSpan{
+			.Name = "early appended span",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 1.0f,
+			.Milliseconds = 2.0f,
+		},
+		DiagnosticSpan{
+			.Name = "reported child",
+			.Depth = 1,
+			.Parent = 0,
+			.Milliseconds = 1.0f,
+			.Reported = true,
+		},
+	};
+
+	FitReportedDiagnosticTimeline(spans, 10.0f);
+
+	CHECK(spans[3].StartMilliseconds == 3.0f);
+	CHECK(spans[3].Milliseconds == 4.0f);
+}
+
+TEST_CASE("averaged late worker reports fit around earlier parent siblings", "[studio][diagnostics]") {
+	const std::array first{
+		FrameSpan{.Name = "application", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .Milliseconds = 10.0f},
+		FrameSpan{.Name = "simulation", .Depth = 1, .Parent = 0, .Milliseconds = 4.0f},
+		FrameSpan{.Name = "dispatch", .Depth = 2, .Parent = 1, .Milliseconds = 1.0f},
+		FrameSpan{
+			.Name = "presentation", .Depth = 1, .Parent = 0, .StartMilliseconds = 4.0f, .Milliseconds = 6.0f
+		},
+	};
+	const std::array second{
+		FrameSpan{.Name = "application", .Depth = 0, .Parent = FrameGraph::NO_PARENT, .Milliseconds = 10.0f},
+		FrameSpan{.Name = "simulation", .Depth = 1, .Parent = 0, .Milliseconds = 4.0f},
+		FrameSpan{.Name = "dispatch", .Depth = 2, .Parent = 1, .Milliseconds = 1.0f},
+		FrameSpan{
+			.Name = "worker",
+			.Depth = 2,
+			.Parent = 1,
+			.StartMilliseconds = 1.0f,
+			.Milliseconds = 8.0f,
+			.Reported = true,
+		},
+		FrameSpan{
+			.Name = "task",
+			.Depth = 3,
+			.Parent = 3,
+			.StartMilliseconds = 1.0f,
+			.Milliseconds = 2.0f,
+			.Reported = true,
+		},
+		FrameSpan{
+			.Name = "presentation", .Depth = 1, .Parent = 0, .StartMilliseconds = 4.0f, .Milliseconds = 6.0f
+		},
+	};
+
+	std::vector<DiagnosticSpan> totals;
+	AccumulateDiagnosticSpans(first, totals);
+	AccumulateDiagnosticSpans(second, totals);
+	FinishDiagnosticAverage(totals, 2);
+	FitReportedDiagnosticTimeline(totals, 10.0f);
+
+	REQUIRE(totals.size() == 6);
+	CHECK(totals[3].Name == "presentation");
+	CHECK(totals[4].Name == "worker");
+	CHECK(totals[4].StartMilliseconds == Catch::Approx(1.0f));
+	CHECK(totals[4].Milliseconds == Catch::Approx(3.0f));
+	CHECK(totals[5].Name == "task");
+	CHECK(totals[5].StartMilliseconds == Catch::Approx(1.0f));
+	CHECK(totals[5].Milliseconds == Catch::Approx(3.0f));
+}
+
+TEST_CASE("GPU reports keep their producer duration outside CPU timeline fitting", "[studio][diagnostics]") {
+	using engine::core::ProfileCategory;
+	std::vector spans{
+		DiagnosticSpan{
+			.Name = "submit", .Depth = 0, .Milliseconds = 10.0f, .Category = ProfileCategory::Render
+		},
+		DiagnosticSpan{
+			.Name = "device query",
+			.Depth = 1,
+			.Parent = 0,
+			.StartMilliseconds = 0.0f,
+			.Milliseconds = 100.0f,
+			.Category = ProfileCategory::Gpu,
+			.Reported = true,
+		},
+	};
+
+	FitReportedDiagnosticTimeline(spans, 10.0f);
+
+	CHECK(spans[1].StartMilliseconds == 0.0f);
+	CHECK(spans[1].Milliseconds == 100.0f);
+}
+
+TEST_CASE("CPU fine clipping bounds glyphs without per-label draw commands", "[studio][diagnostics]") {
+	IMGUI_CHECKVERSION();
+	ImGuiContext *previous = ImGui::GetCurrentContext();
+	ImGuiContext *context = ImGui::CreateContext();
+	struct ContextRestore {
+		ImGuiContext *Handle;
+		ImGuiContext *Previous;
+		~ContextRestore() {
+			ImGui::DestroyContext(Handle);
+			ImGui::SetCurrentContext(Previous);
+		}
+	} restore{context, previous};
+	ImGuiIO &io = ImGui::GetIO();
+	io.DisplaySize = ImVec2(320.0f, 200.0f);
+	io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+	io.DeltaTime = 1.0f / 60.0f;
+	io.IniFilename = nullptr;
+	io.Fonts->AddFontDefault();
+	REQUIRE(io.Fonts->Build());
+	ImGui::NewFrame();
+
+	const ImVec2 windowClipMinimum(12.0f, 8.0f);
+	const ImVec2 windowClipMaximum(210.0f, 150.0f);
+	const ImVec2 labelClipMinimum(30.25f, 20.5f);
+	const ImVec2 labelClipMaximum(82.75f, 48.125f);
+	const ImVec2 textPosition(25.0f, 15.0f);
+	constexpr ImU32 colour = IM_COL32(16, 18, 22, 235);
+	constexpr char label[] = "timeline label geometry";
+
+	ImDrawList pushedClip(ImGui::GetDrawListSharedData());
+	pushedClip._ResetForNewFrame();
+	pushedClip.PushClipRect(windowClipMinimum, windowClipMaximum, false);
+	pushedClip.PushClipRect(labelClipMinimum, labelClipMaximum, true);
+	pushedClip.AddText(textPosition, colour, label, label + sizeof(label) - 1);
+	pushedClip.PopClipRect();
+	pushedClip.PopClipRect();
+
+	ImDrawList fineClip(ImGui::GetDrawListSharedData());
+	fineClip._ResetForNewFrame();
+	fineClip.PushClipRect(windowClipMinimum, windowClipMaximum, false);
+	const ImVec4 fineClipRect(labelClipMinimum.x, labelClipMinimum.y, labelClipMaximum.x, labelClipMaximum.y);
+	fineClip.AddText(
+		nullptr, 0.0f, textPosition, colour, label, label + sizeof(label) - 1, 0.0f, &fineClipRect
+	);
+
+	REQUIRE(pushedClip.VtxBuffer.Size > 0);
+	REQUIRE(fineClip.VtxBuffer.Size > 0);
+	REQUIRE(pushedClip.IdxBuffer.Size > 0);
+	REQUIRE(fineClip.IdxBuffer.Size > 0);
+	REQUIRE(pushedClip.CmdBuffer.Size > fineClip.CmdBuffer.Size);
+	REQUIRE(fineClip.CmdBuffer.Size == 1);
+	const ImDrawCmd *textCommand = nullptr;
+	for (const ImDrawCmd &command : pushedClip.CmdBuffer) {
+		if (command.ElemCount > 0) {
+			textCommand = &command;
+			break;
+		}
+	}
+	REQUIRE(textCommand != nullptr);
+	CHECK(textCommand->ClipRect.x == labelClipMinimum.x);
+	CHECK(textCommand->ClipRect.y == labelClipMinimum.y);
+	CHECK(textCommand->ClipRect.z == labelClipMaximum.x);
+	CHECK(textCommand->ClipRect.w == labelClipMaximum.y);
+	CHECK(fineClip.CmdBuffer[0].ClipRect.x == windowClipMinimum.x);
+	CHECK(fineClip.CmdBuffer[0].ClipRect.y == windowClipMinimum.y);
+	CHECK(fineClip.CmdBuffer[0].ClipRect.z == windowClipMaximum.x);
+	CHECK(fineClip.CmdBuffer[0].ClipRect.w == windowClipMaximum.y);
+	for (const ImDrawVert &vertex : fineClip.VtxBuffer) {
+		CHECK(vertex.pos.x >= labelClipMinimum.x);
+		CHECK(vertex.pos.y >= labelClipMinimum.y);
+		CHECK(vertex.pos.x <= labelClipMaximum.x);
+		CHECK(vertex.pos.y <= labelClipMaximum.y);
+	}
+	ImGui::EndFrame();
+}
+
+TEST_CASE("GPU rows start in their own lane below CPU hierarchy", "[studio][diagnostics]") {
+	using engine::core::ProfileCategory;
+	const std::array spans{
+		DiagnosticSpan{.Name = "root", .Depth = 0},
+		DiagnosticSpan{.Name = "phase", .Depth = 1, .Parent = 0},
+		DiagnosticSpan{.Name = "submit", .Depth = 2, .Parent = 1},
+		DiagnosticSpan{
+			.Name = "query one",
+			.Depth = 3,
+			.Parent = 2,
+			.Milliseconds = 3.0f,
+			.Category = ProfileCategory::Gpu
+		},
+		DiagnosticSpan{
+			.Name = "query two",
+			.Depth = 3,
+			.Parent = 2,
+			.Milliseconds = 2.0f,
+			.Category = ProfileCategory::Gpu
+		},
+		DiagnosticSpan{
+			.Name = "query detail",
+			.Depth = 4,
+			.Parent = 3,
+			.StartMilliseconds = 3.0f,
+			.Milliseconds = 1.0f,
+			.Category = ProfileCategory::Gpu
+		},
+	};
+
+	std::vector<uint32_t> rows;
+	CHECK(LayoutDiagnosticRows(spans, rows) == 3);
+	CHECK(rows[3] == 0);
+	CHECK(rows[4] == 1);
+	CHECK(rows[5] == rows[3] + 1);
+}
+
+TEST_CASE("overlapping display intervals get separate rows below their parents", "[studio][diagnostics]") {
 	const std::array spans{
 		DiagnosticSpan{.Name = "first", .Depth = 0, .StartMilliseconds = 0.0f, .Milliseconds = 5.0f},
 		DiagnosticSpan{.Name = "overlap", .Depth = 0, .StartMilliseconds = 2.0f, .Milliseconds = 2.0f},
@@ -545,7 +949,7 @@ TEST_CASE("timing overlap never changes hierarchy rows", "[studio][diagnostics]"
 	const uint32_t count = LayoutDiagnosticRows(spans, rows);
 
 	REQUIRE(rows.size() == spans.size());
-	CHECK(rows[0] == rows[1]);
+	CHECK(rows[0] != rows[1]);
 	CHECK(rows[2] == rows[0] + 1);
 	CHECK(rows[3] == rows[2] + 1);
 	CHECK(count == 3);
@@ -570,8 +974,8 @@ TEST_CASE("parallel summaries keep every branch on the same depth grid", "[studi
 	const uint32_t count = LayoutDiagnosticRows(spans, rows);
 
 	REQUIRE(rows.size() == spans.size());
-	CHECK(rows == std::vector<uint32_t>{0, 1, 2, 2, 3, 3, 4});
-	CHECK(count == 5);
+	CHECK(rows == std::vector<uint32_t>{0, 1, 2, 3, 4, 5, 6});
+	CHECK(count == 7);
 }
 
 TEST_CASE("unaccounted spans fill gaps between direct children", "[studio][diagnostics]") {

@@ -1,3 +1,4 @@
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
@@ -102,20 +103,21 @@ namespace studio {
 		return pose;
 	}
 
-	engine::ecs::Entity
-	CreateRuntimeCamera(engine::ecs::Store &store, std::string_view name, const ViewportCameraPose &pose) {
+	engine::ecs::Entity CreateRuntimeCamera(engine::ecs::Store &store, const ViewportCameraPose &pose) {
 		const engine::ecs::Entity workspace = engine::scene::WorkspaceOf(store);
 		if (workspace == engine::ecs::NULL_ENTITY) {
 			return engine::ecs::NULL_ENTITY;
 		}
 
-		const engine::ecs::Entity camera = store.CreateInstance(engine::scene::CameraClass(), name);
+		const engine::ecs::Entity camera =
+			store.CreatePredictedInstance(engine::scene::CameraClass(), "Camera");
 		if (camera == engine::ecs::NULL_ENTITY) {
 			return camera;
 		}
 
 		store.SetParent(camera, workspace);
 		store.Set(camera, engine::scene::TransientComponent{});
+		store.Set(camera, engine::ecs::ClientLocal{});
 		store.Set(camera, engine::scene::Transform{pose.Frame});
 
 		engine::scene::ActiveCamera active;

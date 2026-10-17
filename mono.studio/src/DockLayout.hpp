@@ -89,6 +89,13 @@ namespace studio::detail {
 		return OccupiedDockLeaf(node->ChildNodes[1]);
 	}
 
+	inline ImGuiDockNode *CentralDockLeaf(ImGuiDockNode *node) {
+		if (node == nullptr) return nullptr;
+		if (node->IsLeafNode()) return node->IsCentralNode() ? node : nullptr;
+		if (ImGuiDockNode *central = CentralDockLeaf(node->ChildNodes[0])) return central;
+		return CentralDockLeaf(node->ChildNodes[1]);
+	}
+
 	inline void FillEmptyCentralDock(ImGuiID dockspace) {
 		ImGuiContext &context = *ImGui::GetCurrentContext();
 		// Keep drop targets stable during a drag. ImGui applies the dock request
@@ -96,7 +103,8 @@ namespace studio::detail {
 		if (context.MovingWindow != nullptr || context.DragDropActive) return;
 		ImGuiDockNode *root = ImGui::DockBuilderGetNode(dockspace);
 		if (root == nullptr || root->IsLeafNode()) return;
-		ImGuiDockNode *central = root->CentralNode;
+		// closing a split can free the cached CentralNode before dockspace updates it.
+		ImGuiDockNode *central = CentralDockLeaf(root);
 		if (central == nullptr || OccupiedDockLeaf(central) != nullptr) return;
 		ImGuiDockNode *occupied = OccupiedDockLeaf(root);
 		if (occupied == nullptr) return;
@@ -106,5 +114,12 @@ namespace studio::detail {
 		occupied->SetLocalFlags(occupied->LocalFlags | ImGuiDockNodeFlags_CentralNode);
 		root->CentralNode = occupied;
 		ImGui::MarkIniSettingsDirty();
+	}
+
+	inline void SubmitStudioDockSpace(ImGuiID dockspace, const ImGuiViewport *viewport = nullptr) {
+		// snap guides stay on host. a second copy moves inside dragged window.
+		ImGui::GetIO().ConfigDockingTransparentPayload = true;
+		FillEmptyCentralDock(dockspace);
+		ImGui::DockSpaceOverViewport(dockspace, viewport);
 	}
 }

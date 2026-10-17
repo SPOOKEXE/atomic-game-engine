@@ -81,14 +81,15 @@ inherited.Anchored = true
 inherited.RenderFeatureDisableMask = Feature.Reflections
 inherited.Parent = workspace
 
-local camera = Instance.new("Camera")
-camera.Name = "RenderFeaturesCamera"
-camera.CFrame = CFrame.lookAt(Vector3.new(15, 10, 20), Vector3.new(0, 2, 0))
-camera.FieldOfView = 58
-camera.RenderFeatureEnableMask = Feature.OcclusionCulling
-camera.RenderFeatureDisableMask = Feature.Reflections
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+demoCamera:SetAttribute('Name', 'RenderFeaturesCamera')
+demoCamera:SetAttribute('CFrame', CFrame.lookAt(Vector3.new(15, 10, 20), Vector3.new(0, 2, 0)))
+demoCamera:SetAttribute('FieldOfView', 58)
+demoCamera:SetAttribute('RenderFeatureEnableMask', Feature.OcclusionCulling)
+demoCamera:SetAttribute('RenderFeatureDisableMask', Feature.Reflections)
 
 print("render features demo pipeline: RenderFeatures.pipeline")
 print(

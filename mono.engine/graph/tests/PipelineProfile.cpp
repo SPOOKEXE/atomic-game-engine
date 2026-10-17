@@ -15,6 +15,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+
 TEST_SUITE_ID("engine.graph.pipelineprofile")
 TEST_DEPENDS("engine.graph.rendergraph")
 
@@ -79,11 +81,16 @@ namespace {
 // --- the frame we ship ------------------------------------------------------------
 
 TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
-	const PipelineProfile profile = Profiled(DefaultGraph());
+	const RenderGraph graph = DefaultGraph();
+	const PipelineProfile profile = Profiled(graph);
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
 
-	REQUIRE(profile.Passes.size() == 31);
-	REQUIRE(profile.Resources.size() == 44);
-	CHECK(profile.Cells.size() == 1364);
+	const size_t expectedPasses = compiled.Shared.size() + compiled.PerView.size() + compiled.Final.size();
+	CHECK(profile.Passes.size() == expectedPasses);
+	CHECK(profile.Resources.size() == graph.ResourceCount());
+	CHECK(profile.Cells.size() == profile.Passes.size() * profile.Resources.size());
 
 	// The three blocks, in the order a frame runs them.
 	CHECK(profile.Passes.front().Where == engine::graph::Band::Shared);
@@ -112,6 +119,15 @@ TEST_CASE("the default frame profiles into a full grid", "[graph][profile]") {
 
 	// And a pass that never touches a resource says so.
 	CHECK(profile.At(RowOf(profile, "shadow"), ColumnOf(profile, "interface")) == Access::None);
+	CHECK(
+		profile.At(RowOf(profile, "weather-field"), ColumnOf(profile, "weather-integrate")) == Access::Read
+	);
+	CHECK(
+		profile.At(RowOf(profile, "weather-shadow"), ColumnOf(profile, "weather-shadow-map")) == Access::Write
+	);
+	CHECK(
+		profile.At(RowOf(profile, "weather-shadow"), ColumnOf(profile, "deferred-lighting")) == Access::Read
+	);
 }
 
 TEST_CASE("a resource's lifetime is where it is written to where it is last read", "[graph][profile]") {
@@ -314,6 +330,34 @@ TEST_CASE("aliasing requires an exact descriptor and a dead prior lifetime", "[g
 	CHECK(aliases.AllocationOf(live) == aliases.AllocationOf(later));
 	CHECK(aliases.PhysicalTargets == 3);
 	CHECK(aliases.AliasedResources == 1);
+}
+
+TEST_CASE("retained identity sources cannot be recycled by a later target", "[graph][profile]") {
+	RenderGraph graph;
+	const auto source = graph.AddResource({.Name = Name("source")});
+	const auto identity = graph.AddResource({.Name = Name("identity")});
+	const auto later = graph.AddResource({.Name = Name("later")});
+	graph.AddNode({.Name = Name("producer"), .Kind = Name("raster"), .Writes = {source}});
+	graph.AddNode(
+		{.Name = Name("identity-pass"), .Kind = Name("raster"), .Reads = {source}, .Writes = {identity}}
+	);
+	graph.AddNode(
+		{.Name = Name("later-pass"), .Kind = Name("raster"), .Reads = {identity}, .Writes = {later}}
+	);
+	CompiledGraph compiled;
+	Name offender;
+	REQUIRE(graph.Compile(compiled, offender) == GraphStatus::Ok);
+	CHECK(
+		BuildResourceAliases(graph, compiled).AllocationOf(source) ==
+		BuildResourceAliases(graph, compiled).AllocationOf(later)
+	);
+	const std::array retained{source, ResourceId{}, ResourceId{999}};
+	const auto pinned = BuildResourceAliases(graph, compiled, retained);
+	CHECK(pinned.AllocationOf(source) != pinned.AllocationOf(later));
+	const auto profile = ProfilePipeline(graph, compiled, WIDTH, HEIGHT, retained);
+	CHECK(profile.Resources[0].Allocation == pinned.AllocationOf(source));
+	CHECK(profile.Resources[0].LastRead == profile.Passes.size() - 1);
+	CHECK(profile.AllocatedBytes == pinned.PhysicalTargets * uint64_t(WIDTH) * HEIGHT * 4);
 }
 
 TEST_CASE("targets from different execution scopes never alias", "[graph][profile]") {

@@ -72,7 +72,7 @@ namespace engine::scene {
 			SurfaceLens Lens;
 			// Handed out after the walk, by entity id. -1 is a camera past the
 			// renderer's cap, whose pane is left as an ordinary part.
-			int8_t Surface = -1;
+			int16_t Surface = -1;
 
 			// Whether there is a reflection to draw at all this frame.
 			//
@@ -2084,8 +2084,8 @@ namespace engine::scene {
 				++slot;
 			}
 			aim.Surface = aim.Renders && slot < slots.size() && slots[slot].Camera == aim.Camera
-							  ? static_cast<int8_t>(slots[slot].Index)
-							  : int8_t{-1};
+							  ? slots[slot].Index
+							  : int16_t{-1};
 		}
 
 		// **Every write is guarded on the value actually differing, and that is
@@ -2307,7 +2307,7 @@ namespace engine::scene {
 	}
 
 	size_t AppendPortalClones(
-		Store &store, int8_t surface, std::span<const DrawInstance> source, std::vector<DrawInstance> &out
+		Store &store, int16_t surface, std::span<const DrawInstance> source, std::vector<DrawInstance> &out
 	) {
 		std::vector<PortalSeam> &seams = Seams();
 		GatherSeams(store, seams);

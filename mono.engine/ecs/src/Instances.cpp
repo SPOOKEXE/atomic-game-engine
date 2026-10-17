@@ -1,5 +1,6 @@
 #include "Instances.hpp"
 
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -357,6 +358,46 @@ namespace engine::ecs {
 				}
 			}
 		);
+		Components::Register<ClientLocal>("ecs.ClientLocal");
+		Components::Register<InstanceProjection>(
+			"ecs.InstanceProjection",
+			[](core::ByteWriter &, const void *, size_t) {},
+			[](core::ByteReader &, void *destination, size_t count) {
+				auto *values = static_cast<InstanceProjection *>(destination);
+				for (size_t index = 0; index < count; ++index)
+					values[index] = {};
+			}
+		);
+	}
+
+	bool IsClientLocalInstance(const Store &store, Entity instance) {
+		for (size_t depth = 0; instance != NULL_ENTITY && depth < MAXIMUM_DEPTH; ++depth) {
+			if (store.Has<ClientLocal>(instance) || Classes::Describe(store.ClassOf(instance)).RuntimeLocal) {
+				return true;
+			}
+			instance = store.ParentOf(instance);
+		}
+		return false;
+	}
+
+	bool HasClientLocalInstances(Store &store) {
+		if (store.CountMatching<ClientLocal>() != 0) return true;
+
+		bool found = false;
+		ClassId previous;
+		store.EachBatch<const InstanceClass>([&](size_t rows, const InstanceClass *classes) {
+			if (found) return;
+			for (size_t row = 0; row < rows; ++row) {
+				const ClassId current = classes[row].Class;
+				if (current == previous) continue;
+				previous = current;
+				if (Classes::Describe(current).RuntimeLocal) {
+					found = true;
+					return;
+				}
+			}
+		});
+		return found;
 	}
 
 	ClassId Classes::RegisterInstanceRoot() {
@@ -385,6 +426,7 @@ namespace engine::ecs {
 		// which is a fact about ancestry and is derived per frame.
 		PropertyDescriptor parent;
 		parent.Name = core::Name("Parent");
+		parent.PropertiesTag = core::Name("Identity");
 		parent.Type = PropertyType::Reference;
 		parent.Size = sizeof(Entity);
 		parent.Kind = PropertyKind::Computed;
@@ -412,6 +454,7 @@ namespace engine::ecs {
 		// a binding, which is the drift this stopped: it was special-cased in
 		// the Luau binding and absent from the JavaScript one.
 		Classes::Property<&InstanceName::Value>(instance, "Name");
+		(void)Classes::SetPropertiesTag(instance, "Name", core::Name("Identity"));
 
 		return instance;
 	}

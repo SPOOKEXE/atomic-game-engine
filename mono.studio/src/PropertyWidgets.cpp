@@ -1,9 +1,14 @@
 #include "PropertyWidgets.hpp"
 
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/EnumTable.hpp>
+#include <engine/scene/Tagging.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <imgui.h>
+#include <optional>
+#include <studio/Commands.hpp>
 #include <studio/Widgets.hpp>
 #include <vector>
 
@@ -17,6 +22,54 @@ namespace studio {
 	using engine::game::FormatValue;
 	using engine::game::ParseValue;
 	using engine::game::PropertyValue;
+
+	bool ApplyCollectionTagEdit(
+		Store &store,
+		engine::world::WorldId world,
+		std::span<const Entity> selection,
+		const CollectionTagEdit &edit,
+		CommandLog *commands
+	) {
+		if (!edit.Wanted || (!edit.Before.IsValid() && !edit.After.IsValid()) || edit.Before == edit.After)
+			return false;
+		const bool applies = std::any_of(selection.begin(), selection.end(), [&](Entity entity) {
+			return store.Alive(entity) && store.Get<engine::scene::Tags>(entity) != nullptr &&
+				   (!edit.Before.IsValid() || engine::scene::HasTag(store, entity, edit.Before));
+		});
+		if (!applies) return false;
+		// Reserve the destination before removing anything. A full tag table refuses the whole edit.
+		if (edit.After.IsValid() && engine::scene::TagsOf(store).Register(edit.After) == 0) return false;
+		std::optional<std::string> recording;
+		if (commands != nullptr) {
+			recording = commands->TryBeginRecording("Collection Tags");
+			if (!recording) return false;
+		}
+		bool changed = false;
+		const auto &type =
+			engine::ecs::Components::Describe(engine::ecs::Components::Of<engine::scene::Tags>());
+		for (const Entity entity : selection) {
+			const auto *tags = store.Get<engine::scene::Tags>(entity);
+			if (tags == nullptr ||
+				(edit.Before.IsValid() && !engine::scene::HasTag(store, entity, edit.Before)))
+				continue;
+			engine::core::ByteWriter before;
+			type.Write(before, tags, 1);
+			if (edit.After.IsValid()) engine::scene::AddTag(store, entity, edit.After);
+			if (edit.Before.IsValid()) engine::scene::RemoveTag(store, entity, edit.Before);
+			engine::core::ByteWriter after;
+			type.Write(after, store.Get<engine::scene::Tags>(entity), 1);
+			auto beforeBytes = before.TakeBytes();
+			auto afterBytes = after.TakeBytes();
+			if (beforeBytes == afterBytes) continue;
+			changed = true;
+			if (commands != nullptr)
+				commands->RecordComponent(
+					world, entity, type.Name, std::move(beforeBytes), std::move(afterBytes), "Collection Tags"
+				);
+		}
+		if (recording) commands->FinishRecording(*recording, FinishOperation::Commit);
+		return changed;
+	}
 
 	bool IsAutomaticLodRatioProperty(std::string_view spelling) {
 		return spelling == "Lod1Ratio" || spelling == "Lod2Ratio" || spelling == "Lod3Ratio" ||

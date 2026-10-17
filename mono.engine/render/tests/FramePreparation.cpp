@@ -41,6 +41,42 @@ TEST_CASE(
 	CHECK(single[0].Views == std::vector<size_t>{0});
 }
 
+TEST_CASE("retained view groups shrink and grow without keeping prior identities", "[render][frame-prefix]") {
+	const int first = 0, second = 1;
+	const std::array<engine::render::FrameViewIdentity, 5> views = {{
+		{7, &first},
+		{9, &first},
+		{7, &second},
+		{7, &first},
+		{9, &second},
+	}};
+	std::vector<engine::render::FrameViewGroup> scratch;
+	const auto checkGroups = [&](std::span<const engine::render::FrameViewIdentity> input, bool present) {
+		const auto expected = engine::render::GroupFrameViews(input, present);
+		const auto actual = engine::render::GroupFrameViews(input, present, scratch);
+		REQUIRE(actual.size() == expected.size());
+		for (size_t index = 0; index < actual.size(); index++) {
+			CHECK(actual[index].Identity.World == expected[index].Identity.World);
+			CHECK(actual[index].Identity.Pipeline == expected[index].Identity.Pipeline);
+			CHECK(actual[index].Views == expected[index].Views);
+		}
+		for (size_t index = actual.size(); index < scratch.size(); index++) {
+			CHECK(scratch[index].Views.empty());
+			CHECK(scratch[index].Identity.World == 0);
+			CHECK(scratch[index].Identity.Pipeline == nullptr);
+		}
+	};
+	checkGroups(views, false);
+	const size_t capacity = scratch.capacity();
+	checkGroups(std::span(views).first(1), true);
+	CHECK(scratch.capacity() == capacity);
+	checkGroups({}, true);
+	checkGroups(std::span(views).first(4), true);
+	REQUIRE(scratch[2].Views == std::vector<size_t>{0, 3});
+	checkGroups(views, true);
+	checkGroups(views, false);
+}
+
 TEST_CASE("only completed scene setup consumes a pipeline's frame preparation", "[render][frame-prefix]") {
 	engine::render::FramePreparation prepared;
 	const int pipeline = 0;

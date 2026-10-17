@@ -1,9 +1,10 @@
 # bake - module invariants
 
-L9 `shared`. The importers and the node pipeline: the only code in this engine
-that reads a `.glb`, a `.pmx`, an `.obj`, a `.png`, a `.jpg`, a `.bmp`, an
-`.svg`, an `.rbxm` or an `.rbxmx`. `assets` is what a baked mesh or texture *is*;
-this is how somebody else's file becomes one.
+L9 `shared`. The importers and the node pipeline own format-specific readers
+for `.glb`, `.pmx`, `.obj`, `.bmp`, `.svg`, `.rbxm` and `.rbxmx`. PNG and JPEG
+decoding belongs to the shared `imagecodec` module; bake wraps its decoder for
+content import. `assets` is what a baked mesh or texture *is*; this is how
+somebody else's file becomes one.
 
 ## Nothing a shipped game links may link this
 

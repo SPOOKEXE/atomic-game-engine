@@ -23,6 +23,7 @@
 #include <engine/script/DataScriptPackageTransaction.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/weather/Clock.hpp>
 #include <engine/world/DataFactory.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -39,6 +40,7 @@
 #include <server/Server.hpp>
 #include <server/Simulation.hpp>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -91,6 +93,43 @@ TEST_CASE("a thousand worlds leave main for presentation and use every worker co
 	REQUIRE(plan.Processes == 12);
 	REQUIRE(plan.LocalWorlds == 0);
 	REQUIRE(plan.RemoteHosts == 11);
+}
+
+TEST_CASE("automatic world faults publish frozen weather from the owner entry", "[server][weather]") {
+	server::Options options;
+	options.Entities = 0;
+	options.Listening = true;
+	options.Unpaced = true;
+	options.MaximumTicks = -1;
+	server::Server host;
+	REQUIRE(host.Initialise(options));
+	Entity provider;
+	engine::scene::WeatherClock failedClock;
+	host.Worlds().Enter(host.Primary(), [&](Store &store, Scheduler &systems) {
+		provider = store.Create("FaultWeather");
+		store.Set(provider, engine::scene::WeatherCompute{});
+		systems.Add("weather.test-fault", Phase::Simulation, [&](Store &faulting) {
+			host.Stop();
+			if (const auto *clock = faulting.Get<engine::scene::WeatherClock>(provider)) failedClock = *clock;
+			throw std::runtime_error("weather fixture failure");
+		});
+	});
+	(void)host.Run();
+	REQUIRE(failedClock.Sequence > 0);
+	REQUIRE(host.Worlds().StateOf(host.Primary()) == engine::world::WorldState::Faulted);
+	host.Enter([&](Store &store) {
+		const auto *clock = store.Get<engine::scene::WeatherClock>(provider);
+		REQUIRE(clock);
+		CHECK(clock->WorldPaused);
+		CHECK_FALSE(clock->Paused);
+		CHECK(clock->Tick == failedClock.Tick);
+		CHECK(clock->Fraction == failedClock.Fraction);
+		CHECK(clock->ElapsedSeconds == failedClock.ElapsedSeconds);
+		CHECK(clock->Sequence > failedClock.Sequence);
+		REQUIRE(store.Resource<engine::scene::WeatherClockPublication>());
+		CHECK(store.Resource<engine::scene::WeatherClockPublication>()->Scheduled);
+	});
+	host.Shutdown();
 }
 
 TEST_CASE("server benchmark duration rejects invalid intervals", "[server][benchmark]") {

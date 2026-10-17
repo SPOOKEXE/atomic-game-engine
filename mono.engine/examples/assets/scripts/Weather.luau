@@ -1,22 +1,34 @@
 --!strict
--- A compact weather playground for the lighting and participating-media path.
+-- A compact weather playground for authored clouds, weather and local fog.
 --
 -- The panels drive target values. Heartbeat blends the targets into the live
 -- environment so a preset change reads as weather arriving, instead of as a
--- frame of unrelated property changes. Fog stays local: the script does not
--- write Lighting.FogStart, Lighting.FogEnd or Lighting.FogColor.
+-- frame of unrelated property changes. The weather provider drives precipitation
+-- and storm events; authored fog volumes add local appearance controls.
 
 local Lighting = game:GetService("Lighting")
+local bloom = Instance.new("BloomEffect")
+bloom.Name = "Weather Bloom"
+bloom.Enabled = true
+bloom.Parent = Lighting
+local depthOfField = Instance.new("DepthOfFieldEffect")
+depthOfField.Name = "Weather Depth Of Field"
+depthOfField.Enabled = true
+depthOfField.Parent = Lighting
+local godRays = Instance.new("GodRaysEffect")
+godRays.Name = "Weather God Rays"
+godRays.Enabled = true
+godRays.Parent = Lighting
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
 local Workspace = game:GetService("Workspace")
 
 local MAXIMUM_FRAME_SECONDS = 1 / 20
-local LIGHTNING_INTERVAL_SECONDS = 5.2
 
 type Weather = {
 	Name: string,
+	CloudShader: "Cumulus" | "Stratus" | "Storm" | "Voxel",
 	Brightness: number,
 	ClockTime: number,
 	Ambient: Color3,
@@ -26,19 +38,41 @@ type Weather = {
 	GodRayIntensity: number,
 	CloudCover: number,
 	CloudDensity: number,
-	CloudWindSpeed: number,
+	WeatherWindMetresPerSecond: number,
+	BaseHeightMetres: number,
+	ThicknessMetres: number,
+	BaseTemperatureCelsius: number,
+	TemperatureLapseCelsiusPerKilometre: number,
+	TemperatureVariationCelsius: number,
+	VapourMixingRatio: number,
+	CondensateScale: number,
+	FeatureCells: number,
+	TurbulenceMetresPerSecond: number,
+	ShearMetresPerSecond: number,
+	LiftMetresPerSecond: number,
+	FrontContrast: number,
+	GrowthRate: number,
 	AtmosphereDensity: number,
 	AtmosphereHaze: number,
 	AtmosphereGlare: number,
-	RainRate: number,
-	RainSpeed: number,
 	FogDensity: number,
 	FogExtinction: number,
+	WeatherCoverage: number,
+	FogStrength: number,
+	PrecipitationRate: number,
+	IceFraction: number,
+	StormIntensity: number,
+	HailIntensity: number,
+	LightningRate: number,
+	AtmosphereDensityStrength: number,
+	AtmosphereHazeStrength: number,
+	AtmosphereGlareSuppression: number,
 }
 
 local presets: { Weather } = {
 	{
 		Name = "CLEAR",
+		CloudShader = "Cumulus",
 		Brightness = 3.0,
 		ClockTime = 16.2,
 		Ambient = Color3.fromRGB(44, 51, 68),
@@ -48,17 +82,81 @@ local presets: { Weather } = {
 		GodRayIntensity = 0.42,
 		CloudCover = 0.22,
 		CloudDensity = 0.35,
-		CloudWindSpeed = 4,
+		WeatherWindMetresPerSecond = 4,
+		BaseHeightMetres = 768,
+		ThicknessMetres = 384,
+		BaseTemperatureCelsius = 20,
+		TemperatureLapseCelsiusPerKilometre = 6.5,
+		TemperatureVariationCelsius = 3,
+		VapourMixingRatio = 0.005,
+		CondensateScale = 0.001,
+		FeatureCells = 8,
+		TurbulenceMetresPerSecond = 0.8,
+		ShearMetresPerSecond = 0.5,
+		LiftMetresPerSecond = 0.1,
+		FrontContrast = 0.12,
+		GrowthRate = 0.08,
 		AtmosphereDensity = 0.16,
 		AtmosphereHaze = 0.55,
 		AtmosphereGlare = 0.52,
-		RainRate = 0,
-		RainSpeed = 18,
 		FogDensity = 0.05,
 		FogExtinction = 0.2,
+		WeatherCoverage = 0.34,
+		FogStrength = 0.16,
+		PrecipitationRate = 0,
+		IceFraction = 0,
+		StormIntensity = 0,
+		HailIntensity = 0,
+		LightningRate = 0,
+		AtmosphereDensityStrength = 0.18,
+		AtmosphereHazeStrength = 0.22,
+		AtmosphereGlareSuppression = 0.1,
 	},
 	{
-		Name = "RAIN",
+		Name = "SCATTERED CUMULUS",
+		CloudShader = "Cumulus",
+		Brightness = 2.6,
+		ClockTime = 14.4,
+		Ambient = Color3.fromRGB(42, 50, 65),
+		OutdoorAmbient = Color3.fromRGB(106, 127, 158),
+		BloomIntensity = 0.78,
+		DepthOfFieldIntensity = 0.34,
+		GodRayIntensity = 0.46,
+		CloudCover = 0.54,
+		CloudDensity = 0.48,
+		WeatherWindMetresPerSecond = 6,
+		BaseHeightMetres = 960,
+		ThicknessMetres = 640,
+		BaseTemperatureCelsius = 16,
+		TemperatureLapseCelsiusPerKilometre = 6.5,
+		TemperatureVariationCelsius = 7,
+		VapourMixingRatio = 0.016,
+		CondensateScale = 0.002,
+		FeatureCells = 16,
+		TurbulenceMetresPerSecond = 2,
+		ShearMetresPerSecond = 3,
+		LiftMetresPerSecond = 1.8,
+		FrontContrast = 0.35,
+		GrowthRate = 0.25,
+		AtmosphereDensity = 0.18,
+		AtmosphereHaze = 0.75,
+		AtmosphereGlare = 0.42,
+		FogDensity = 0.06,
+		FogExtinction = 0.22,
+		WeatherCoverage = 0.46,
+		FogStrength = 0.18,
+		PrecipitationRate = 0,
+		IceFraction = 0,
+		StormIntensity = 0,
+		HailIntensity = 0,
+		LightningRate = 0,
+		AtmosphereDensityStrength = 0.22,
+		AtmosphereHazeStrength = 0.32,
+		AtmosphereGlareSuppression = 0.12,
+	},
+	{
+		Name = "OVERCAST STRATUS",
+		CloudShader = "Stratus",
 		Brightness = 1.35,
 		ClockTime = 14.4,
 		Ambient = Color3.fromRGB(24, 30, 42),
@@ -68,17 +166,39 @@ local presets: { Weather } = {
 		GodRayIntensity = 0.68,
 		CloudCover = 0.74,
 		CloudDensity = 0.76,
-		CloudWindSpeed = 13,
+		WeatherWindMetresPerSecond = 13,
+		BaseHeightMetres = 1024,
+		ThicknessMetres = 256,
+		BaseTemperatureCelsius = 15,
+		TemperatureLapseCelsiusPerKilometre = 6.5,
+		TemperatureVariationCelsius = 8,
+		VapourMixingRatio = 0.015,
+		CondensateScale = 0.003,
+		FeatureCells = 32,
+		TurbulenceMetresPerSecond = 3,
+		ShearMetresPerSecond = 4,
+		LiftMetresPerSecond = 2,
+		FrontContrast = 0.3,
+		GrowthRate = 0.25,
 		AtmosphereDensity = 0.34,
 		AtmosphereHaze = 1.8,
 		AtmosphereGlare = 0.12,
-		RainRate = 280,
-		RainSpeed = 28,
 		FogDensity = 0.19,
 		FogExtinction = 0.55,
+		WeatherCoverage = 0.72,
+		FogStrength = 0.48,
+		PrecipitationRate = 38,
+		IceFraction = 0.04,
+		StormIntensity = 0.24,
+		HailIntensity = 0.02,
+		LightningRate = 0.25,
+		AtmosphereDensityStrength = 0.42,
+		AtmosphereHazeStrength = 0.55,
+		AtmosphereGlareSuppression = 0.38,
 	},
 	{
-		Name = "TEMPEST",
+		Name = "TOWERING STORM",
+		CloudShader = "Storm",
 		Brightness = 0.55,
 		ClockTime = 19.3,
 		Ambient = Color3.fromRGB(10, 14, 25),
@@ -88,14 +208,119 @@ local presets: { Weather } = {
 		GodRayIntensity = 0.9,
 		CloudCover = 0.96,
 		CloudDensity = 0.96,
-		CloudWindSpeed = 24,
+		WeatherWindMetresPerSecond = 24,
+		BaseHeightMetres = 896,
+		ThicknessMetres = 1024,
+		BaseTemperatureCelsius = 13,
+		TemperatureLapseCelsiusPerKilometre = 6.5,
+		TemperatureVariationCelsius = 10,
+		VapourMixingRatio = 0.016,
+		CondensateScale = 0.006,
+		FeatureCells = 32,
+		TurbulenceMetresPerSecond = 7,
+		ShearMetresPerSecond = 10,
+		LiftMetresPerSecond = 5,
+		FrontContrast = 0.72,
+		GrowthRate = 0.8,
 		AtmosphereDensity = 0.52,
 		AtmosphereHaze = 3.4,
 		AtmosphereGlare = 0.02,
-		RainRate = 460,
-		RainSpeed = 38,
 		FogDensity = 0.37,
 		FogExtinction = 0.9,
+		WeatherCoverage = 0.96,
+		FogStrength = 0.82,
+		PrecipitationRate = 150,
+		IceFraction = 0.24,
+		StormIntensity = 0.88,
+		HailIntensity = 0.3,
+		LightningRate = 1.4,
+		AtmosphereDensityStrength = 0.68,
+		AtmosphereHazeStrength = 0.82,
+		AtmosphereGlareSuppression = 0.72,
+	},
+	{
+		Name = "WISPY ICE",
+		CloudShader = "Stratus",
+		Brightness = 2.4,
+		ClockTime = 10.8,
+		Ambient = Color3.fromRGB(54, 67, 88),
+		OutdoorAmbient = Color3.fromRGB(145, 170, 202),
+		BloomIntensity = 0.9,
+		DepthOfFieldIntensity = 0.24,
+		GodRayIntensity = 0.5,
+		CloudCover = 0.38,
+		CloudDensity = 0.24,
+		WeatherWindMetresPerSecond = 10,
+		BaseHeightMetres = 2304,
+		ThicknessMetres = 512,
+		BaseTemperatureCelsius = -28,
+		TemperatureLapseCelsiusPerKilometre = 6.5,
+		TemperatureVariationCelsius = 3,
+		VapourMixingRatio = 0.004,
+		CondensateScale = 0.001,
+		FeatureCells = 16,
+		TurbulenceMetresPerSecond = 1,
+		ShearMetresPerSecond = 4,
+		LiftMetresPerSecond = 0.2,
+		FrontContrast = 0.18,
+		GrowthRate = 0.06,
+		AtmosphereDensity = 0.18,
+		AtmosphereHaze = 0.65,
+		AtmosphereGlare = 0.6,
+		FogDensity = 0.04,
+		FogExtinction = 0.18,
+		WeatherCoverage = 0.4,
+		FogStrength = 0.12,
+		PrecipitationRate = 8,
+		IceFraction = 0.96,
+		StormIntensity = 0.06,
+		HailIntensity = 0,
+		LightningRate = 0,
+		AtmosphereDensityStrength = 0.2,
+		AtmosphereHazeStrength = 0.28,
+		AtmosphereGlareSuppression = 0.08,
+	},
+	{
+		Name = "GROUND FOG",
+		CloudShader = "Stratus",
+		Brightness = 2.0,
+		ClockTime = 7.2,
+		Ambient = Color3.fromRGB(47, 56, 68),
+		OutdoorAmbient = Color3.fromRGB(111, 128, 148),
+		BloomIntensity = 0.45,
+		DepthOfFieldIntensity = 0.62,
+		GodRayIntensity = 0.2,
+		CloudCover = 0.12,
+		CloudDensity = 0.1,
+		WeatherWindMetresPerSecond = 1.5,
+		BaseHeightMetres = 128,
+		ThicknessMetres = 256,
+		BaseTemperatureCelsius = 17,
+		TemperatureLapseCelsiusPerKilometre = 6.5,
+		TemperatureVariationCelsius = 2,
+		VapourMixingRatio = 0.014,
+		CondensateScale = 0.001,
+		FeatureCells = 8,
+		TurbulenceMetresPerSecond = 0.3,
+		ShearMetresPerSecond = 0.2,
+		LiftMetresPerSecond = 0,
+		FrontContrast = 0.08,
+		GrowthRate = 0.02,
+		AtmosphereDensity = 0.28,
+		AtmosphereHaze = 2.8,
+		AtmosphereGlare = 0.08,
+		FogDensity = 0.3,
+		FogExtinction = 0.85,
+		WeatherCoverage = 0.14,
+		FogStrength = 0.88,
+		PrecipitationRate = 0,
+		IceFraction = 0,
+		StormIntensity = 0,
+		HailIntensity = 0,
+		LightningRate = 0,
+		AtmosphereDensityStrength = 0.32,
+		AtmosphereHazeStrength = 0.72,
+		AtmosphereGlareSuppression = 0.45,
 	},
 }
 
@@ -122,16 +347,16 @@ local function makePart(name: string, size: Vector3, position: Vector3, colour: 
 	return part
 end
 
-Lighting.BloomThreshold = 0.8
-Lighting.BloomRadius = 8
-Lighting.BloomIntensity = 1.0
-Lighting.DepthOfFieldFocusDistance = 54
-Lighting.DepthOfFieldFocusRange = 14
-Lighting.DepthOfFieldRadius = 7
-Lighting.DepthOfFieldIntensity = 0.54
-Lighting.GodRayThreshold = 0.72
-Lighting.GodRayRadius = 72
-Lighting.GodRayIntensity = 0.68
+bloom.Threshold = 0.8
+bloom.Radius = 8
+bloom.Intensity = 1.0
+depthOfField.FocusDistance = 54
+depthOfField.FocusRange = 14
+depthOfField.Radius = 7
+depthOfField.Intensity = 0.54
+godRays.Threshold = 0.72
+godRays.Radius = 72
+godRays.Intensity = 0.68
 
 local sky = Instance.new("SkyboxCompute")
 sky.Name = "Weather Sky"
@@ -148,20 +373,50 @@ atmosphere.Decay = Color3.fromRGB(65, 79, 112)
 atmosphere.Samples = 16
 atmosphere.Parent = Lighting
 
-local clouds = Instance.new("CloudCompute")
-clouds.Name = "Weather Clouds"
-clouds.Shader = Enum.CloudComputeShader.Storm
-clouds.Color = Color3.fromRGB(83, 94, 112)
-clouds.WindDirection = Vector2.new(0.9, 0.3)
-clouds.CellSize = 0.24
-clouds.Detail = 0.82
-clouds.Height = 0.48
-clouds.Thickness = 0.68
-clouds.Steps = 32
-clouds.Seed = 1337
-clouds.Parent = Lighting
+local weather = Instance.new("WeatherCompute")
+weather.Name = "Weather Clouds"
+weather.Shader = Enum.CloudComputeShader.Storm
+weather.Color = Color3.fromRGB(83, 94, 112)
+weather.WindDirection = Vector2.new(0.9, 0.3)
+weather.CellSize = 0.24
+weather.Detail = 0.82
+weather.Height = 0.48
+weather.Thickness = 0.68
+weather.Steps = 32
+weather.Seed = 1337
+weather.LayerName = "weather-demo"
+weather.Mode = Enum.WeatherMode.Procedural
+weather.CellSizeMetres = 64
+weather.BaseHeightMetres = 1024
+weather.ThicknessMetres = 256
+weather.ExtentMetres = Vector3.new(2048, 1024, 2048)
+weather.FeatureCells = 32
+weather.TemperatureLapseCelsiusPerKilometre = 6.5
+weather.TickRate = 20
+weather.MaximumResidentBricks = 512
+weather.MaximumLod = 4
+weather.ShadowsEnabled = true
+weather.ShadowStrength = 0.72
+weather.ShadowDistanceMetres = 2048
+weather.ShadowResolution = 256
+weather.ShadowCascades = 2
+weather.Coverage = 0.72
+weather.FogStrength = 0.48
+weather.PrecipitationRate = 38
+weather.IceFraction = 0.04
+weather.StormIntensity = 0.24
+weather.HailIntensity = 0.02
+weather.LightningRate = 0.25
+weather.AtmosphereDensityStrength = 0.42
+weather.AtmosphereHazeStrength = 0.55
+weather.AtmosphereGlareSuppression = 0.38
+weather.Parent = Lighting
 
 makePart("Weather Ground", Vector3.new(150, 1, 150), Vector3.new(0, -0.5, -28), Color3.fromRGB(26, 31, 38))
+makePart("Weather Valley East Ridge", Vector3.new(10, 28, 112), Vector3.new(62, 13.5, -38), Color3.fromRGB(38, 44, 53))
+makePart("Weather Valley West Ridge", Vector3.new(10, 28, 112), Vector3.new(-62, 13.5, -38), Color3.fromRGB(38, 44, 53))
+makePart("Weather Precipitation Roof", Vector3.new(30, 2, 30), Vector3.new(30, 18, -32), Color3.fromRGB(55, 60, 69))
+makePart("Weather Roof Receiver", Vector3.new(26, 0.12, 26), Vector3.new(30, 0.06, -32), Color3.fromRGB(72, 78, 84))
 makePart("Weather Ruin Left", Vector3.new(12, 18, 8), Vector3.new(-22, 9, -38), Color3.fromRGB(53, 57, 63))
 makePart("Weather Ruin Right", Vector3.new(9, 26, 9), Vector3.new(22, 13, -56), Color3.fromRGB(47, 52, 61))
 local beacon = makePart("Weather Beacon", Vector3.new(4, 20, 4), Vector3.new(0, 10, -72), Color3.fromRGB(36, 42, 51))
@@ -213,84 +468,34 @@ ruinMist.ShadowSteps = 12
 ruinMist.Seed = 71
 ruinMist.Parent = Workspace
 
-local rainEmitters: { ParticleEmitter } = {}
-for x = -1, 1 do
-	for z = -1, 1 do
-		-- A particle emitter takes its spawn box from its parent part. The hosts
-		-- stay invisible but deliberately broad, so nine emitters cover the whole
-		-- camera view rather than leaving nine narrow rain columns.
-		local rainHost = makePart(
-			"Weather Rain Host",
-			Vector3.new(22, 1, 22),
-			Vector3.new(x * 22, 30, -32 + z * 22),
-			Color3.new(1, 1, 1)
-		)
-		rainHost.Visible = false
-		local rain = Instance.new("ParticleEmitter")
-		rain.Name = "Weather Rain"
-		rain.Rate = 0
-		rain.MaxParticles = 480
-		rain.Lifetime = NumberRange.new(1.1, 1.55)
-		rain.Speed = NumberRange.new(18, 28)
-		rain.Acceleration = Vector3.new(7, -46, 3)
-		rain.Drag = 0.08
-		-- The default is Top. Rain emitted upward is mostly outside this camera,
-		-- even though its emitter is healthy and the GPU is stepping it.
-		rain.EmissionDirection = Enum.NormalId.Bottom
-		rain.Shape = Enum.ParticleEmitterShape.Box
-		rain.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
-		rain.ShapeInOut = Enum.ParticleEmitterShapeInOut.Outward
-		rain.ShapePartial = 1
-		rain.SpreadAngle = Vector2.new(7, 7)
-		-- 7 cm billboards disappear into the storm exposure at the showcase camera.
-		rain.Size = NumberSequence.new(0.34, 0.18)
-		rain.Squash = NumberSequence.new(8.0, 6.0)
-		rain.Transparency = NumberSequence.new(0.02, 0.42)
-		rain.Color = ColorSequence.new(Color3.fromRGB(159, 185, 214))
-		rain.Brightness = 8.0
-		rain.LightInfluence = 0
-		rain.NoiseStrength = 0.65
-		rain.NoiseFrequency = 0.9
-		rain.NoiseScrollSpeed = 1.4
-		rain.SoftParticles = true
-		rain.Parent = rainHost
-		table.insert(rainEmitters, rain)
+local starterPlayerScripts = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts')
+assert(starterPlayerScripts ~= nil, 'StarterPlayerScripts is missing')
+local demoCamera = starterPlayerScripts:FindFirstChild('DemoCamera')
+assert(demoCamera ~= nil, 'DemoCamera is missing')
+
+local sceneViews: { [string]: CFrame } = {
+	GROUND = CFrame.lookAt(Vector3.new(43, 18, 42), Vector3.new(0, 46, -42)),
+	VALLEY = CFrame.lookAt(Vector3.new(0, 12, 44), Vector3.new(0, 4, -42)),
+	ROOF = CFrame.lookAt(Vector3.new(30, 9, -32), Vector3.new(30, 1, -32)),
+	STORM = CFrame.lookAt(Vector3.new(43, 18, 42), Vector3.new(0, 1100, -42)),
+}
+
+local function sceneView(name: string, preset: Weather): CFrame?
+	local layerCentre = preset.BaseHeightMetres + preset.ThicknessMetres * 0.5
+	if name == "CLOUDS" then
+		return CFrame.lookAt(Vector3.new(0, layerCentre, 700), Vector3.new(0, layerCentre, 0))
 	end
+	if name == "ABOVE" then
+		local layerTop = preset.BaseHeightMetres + preset.ThicknessMetres
+		return CFrame.lookAt(Vector3.new(0, layerTop + 500, 700), Vector3.new(0, layerCentre, 0))
+	end
+	return sceneViews[name]
 end
 
-local lightningTop = makePart("Weather Lightning Top", Vector3.one, Vector3.new(18, 88, -48), Color3.new(1, 1, 1))
-lightningTop.Visible = false
-local lightningBottom = makePart("Weather Lightning Bottom", Vector3.one, Vector3.new(4, 1, -48), Color3.new(1, 1, 1))
-lightningBottom.Visible = false
-local lightningStart = Instance.new("Attachment")
-lightningStart.Parent = lightningTop
-local lightningEnd = Instance.new("Attachment")
-lightningEnd.Parent = lightningBottom
-local lightning = Instance.new("Beam")
-lightning.Name = "Weather Lightning"
-lightning.Attachment0 = lightningStart
-lightning.Attachment1 = lightningEnd
-lightning.Width0 = 1.1
-lightning.Width1 = 0.18
-lightning.CurveSize0 = 12
-lightning.CurveSize1 = -8
-lightning.Color = ColorSequence.new(Color3.fromRGB(218, 234, 255))
-lightning.Enabled = false
-lightning.Parent = lightningTop
-local lightningFlash = Instance.new("PointLight")
-lightningFlash.Name = "Weather Lightning Flash"
-lightningFlash.Color = Color3.fromRGB(201, 222, 255)
-lightningFlash.Range = 110
-lightningFlash.Brightness = 0
-lightningFlash.Parent = lightningBottom
-
-local camera = Instance.new("Camera")
-camera.Name = "Weather Camera"
-camera.FieldOfView = 62
-camera.FarPlaneZ = 550
-camera.CFrame = CFrame.lookAt(Vector3.new(43, 18, 42), Vector3.new(0, 7, -42))
-camera.Parent = Workspace
-Workspace.CurrentCamera = camera
+demoCamera:SetAttribute('Name', 'Weather Camera')
+demoCamera:SetAttribute('FieldOfView', 62)
+demoCamera:SetAttribute('FarPlaneZ', 6000)
+demoCamera:SetAttribute('CFrame', sceneViews.GROUND)
 
 local screen = Instance.new("ScreenGui")
 screen.Name = "Weather Controls"
@@ -309,14 +514,14 @@ panel.BackgroundColor3 = Color3.new(0, 0, 0)
 panel.BackgroundTransparency = 0.08
 panel.BorderSizePixel = 0
 panel.Position = UDim2.new(0, 18, 0, 18)
-panel.Size = UDim2.new(0, 258, 0, 258)
+panel.Size = UDim2.new(0, 258, 0, 402)
 panel.Parent = screen
 
 local status = Instance.new("TextLabel")
 status.Name = "Weather Status"
 status.BackgroundTransparency = 1
 status.Position = UDim2.new(0, 12, 0, 10)
-status.Size = UDim2.new(1, -24, 0, 52)
+status.Size = UDim2.new(1, -24, 0, 64)
 status.TextColor3 = Color3.new(1, 1, 1)
 status.TextSize = 13
 status.TextWrapped = true
@@ -324,24 +529,53 @@ status.TextXAlignment = Enum.TextXAlignment.Left
 status.TextYAlignment = Enum.TextYAlignment.Top
 status.Parent = panel
 
-local activePreset = 2
+local activePreset = 3
 local target = presets[activePreset]
 local fogMode = "LOW"
 local fogSize = 1
 local fogSquash = 1
 local fogFluff = 1
+local viewName = "GROUND"
+local weatherMode = "PROCEDURAL"
+local weatherPaused = false
 
--- The GPU keeps each emitter's continuous spawn accumulator in its resident
--- state. Updating Rate or Speed every heartbeat restarts that state before the
--- rain can build up, so only a preset change writes these particle properties.
-local function applyRain(preset: Weather)
-	for _, rain in rainEmitters do
-		rain.Rate = preset.RainRate / #rainEmitters
-		rain.Speed = NumberRange.new(preset.RainSpeed * 0.8, preset.RainSpeed)
+local function applyWeather(preset: Weather)
+	weather.WindMetresPerSecond = Vector3.new(0.9, 0, 0.3).Unit * preset.WeatherWindMetresPerSecond
+	if preset.CloudShader == "Storm" then
+		weather.Shader = Enum.CloudComputeShader.Storm
+	elseif preset.CloudShader == "Stratus" then
+		weather.Shader = Enum.CloudComputeShader.Stratus
+	elseif preset.CloudShader == "Voxel" then
+		weather.Shader = Enum.CloudComputeShader.Voxel
+	else
+		weather.Shader = Enum.CloudComputeShader.Cumulus
 	end
+	weather.BaseHeightMetres = preset.BaseHeightMetres
+	weather.ThicknessMetres = preset.ThicknessMetres
+	weather.BaseTemperatureCelsius = preset.BaseTemperatureCelsius
+	weather.TemperatureLapseCelsiusPerKilometre = preset.TemperatureLapseCelsiusPerKilometre
+	weather.TemperatureVariationCelsius = preset.TemperatureVariationCelsius
+	weather.VapourMixingRatio = preset.VapourMixingRatio
+	weather.CondensateScale = preset.CondensateScale
+	weather.FeatureCells = preset.FeatureCells
+	weather.TurbulenceMetresPerSecond = preset.TurbulenceMetresPerSecond
+	weather.ShearMetresPerSecond = preset.ShearMetresPerSecond
+	weather.LiftMetresPerSecond = preset.LiftMetresPerSecond
+	weather.FrontContrast = preset.FrontContrast
+	weather.GrowthRate = preset.GrowthRate
+	weather.Coverage = preset.WeatherCoverage
+	weather.FogStrength = preset.FogStrength
+	weather.PrecipitationRate = preset.PrecipitationRate
+	weather.IceFraction = preset.IceFraction
+	weather.StormIntensity = preset.StormIntensity
+	weather.HailIntensity = preset.HailIntensity
+	weather.LightningRate = preset.LightningRate
+	weather.AtmosphereDensityStrength = preset.AtmosphereDensityStrength
+	weather.AtmosphereHazeStrength = preset.AtmosphereHazeStrength
+	weather.AtmosphereGlareSuppression = preset.AtmosphereGlareSuppression
 end
 
-applyRain(target)
+applyWeather(target)
 
 local function applyFogProfile()
 	local sizeScale = ({ 0.68, 1, 1.36 })[fogSize]
@@ -354,13 +588,15 @@ end
 
 local function updateStatus()
 	status.Text = string.format(
-		"WEATHER %s\nRAIN %.0f/s  CLOUD %.0f%%\nFOG %s | DOF %.0f | RAYS %.0f",
+		"WEATHER %s | %s\nVIEW %s | %s\nPRECIP %.0fmm/h CLOUD %.0f%%\nFOG %s | WIND %.0fm/s",
 		target.Name,
-		target.RainRate,
+		weatherMode,
+		viewName,
+		if weatherPaused then "PAUSED" else "RUNNING",
+		target.PrecipitationRate,
 		target.CloudCover * 100,
 		fogMode,
-		target.DepthOfFieldIntensity * 100,
-		target.GodRayIntensity * 100
+		target.WeatherWindMetresPerSecond
 	)
 end
 
@@ -369,8 +605,8 @@ local function button(name: string, text: string, column: number, row: number): 
 	control.Name = name
 	control.BackgroundColor3 = Color3.fromRGB(25, 35, 50)
 	control.BorderSizePixel = 0
-	control.Position = UDim2.new(0, 12 + column * 78, 0, 68 + row * 34)
-	control.Size = UDim2.new(0, 70, 0, 30)
+	control.Position = UDim2.new(0, 12 + column * 78, 0, 78 + row * 32)
+	control.Size = UDim2.new(0, 70, 0, 28)
 	control.Text = text
 	control.TextColor3 = Color3.new(1, 1, 1)
 	control.TextSize = 11
@@ -378,17 +614,60 @@ local function button(name: string, text: string, column: number, row: number): 
 	return control
 end
 
+local function setView(name: string)
+	local frame = sceneView(name, target)
+	if frame == nil then
+		return
+	end
+	viewName = name
+	demoCamera:SetAttribute("CFrame", frame)
+	updateStatus()
+end
+
+local presetLabels: { string } = { "CLEAR", "CUMULUS", "STRATUS", "STORM", "ICE", "FOG" }
 for index, preset in presets do
-	local control = button("Weather " .. preset.Name, preset.Name, index - 1, 0)
+	local column = (index - 1) % 3
+	local row = math.floor((index - 1) / 3)
+	local control = button("Weather Preset " .. preset.Name, presetLabels[index], column, row)
 	control.Activated:Connect(function()
 		activePreset = index
 		target = presets[activePreset]
-		applyRain(target)
-		updateStatus()
+		applyWeather(target)
+		if viewName == "CLOUDS" or viewName == "ABOVE" then
+			setView(viewName)
+		else
+			updateStatus()
+		end
 	end)
 end
 
-local lowBankControl = button("Fog Low Bank", "LOW BANK", 0, 1)
+button("Weather Scene Ground", "GROUND", 0, 2).Activated:Connect(function()
+	setView("GROUND")
+end)
+button("Weather Scene Inside Clouds", "IN CLOUD", 1, 2).Activated:Connect(function()
+	setView("CLOUDS")
+end)
+button("Weather Scene Above Clouds", "ABOVE", 2, 2).Activated:Connect(function()
+	setView("ABOVE")
+end)
+
+button("Weather Scene Valley", "VALLEY", 0, 3).Activated:Connect(function()
+	setView("VALLEY")
+end)
+button("Weather Scene Roof", "ROOF RAIN", 1, 3).Activated:Connect(function()
+	activePreset = 3
+	target = presets[activePreset]
+	applyWeather(target)
+	setView("ROOF")
+end)
+button("Weather Scene Storm", "STORM", 2, 3).Activated:Connect(function()
+	activePreset = 4
+	target = presets[activePreset]
+	applyWeather(target)
+	setView("STORM")
+end)
+
+local lowBankControl = button("Fog Low Bank", "LOW BANK", 0, 4)
 lowBankControl.Activated:Connect(function()
 	fogMode = "LOW"
 	lowBank.Shape = Enum.VolumeShape.Ellipsoid
@@ -399,7 +678,7 @@ lowBankControl.Activated:Connect(function()
 	updateStatus()
 end)
 
-local squashedControl = button("Fog Squashed", "SQUASHED", 1, 1)
+local squashedControl = button("Fog Squashed", "SQUASHED", 1, 4)
 squashedControl.Activated:Connect(function()
 	fogMode = "SQUASH"
 	lowBank.Shape = Enum.VolumeShape.Ellipsoid
@@ -410,7 +689,7 @@ squashedControl.Activated:Connect(function()
 	updateStatus()
 end)
 
-local fluffyControl = button("Fog Fluffy", "FLUFFY", 2, 1)
+local fluffyControl = button("Fog Fluffy", "FLUFFY", 2, 4)
 fluffyControl.Activated:Connect(function()
 	fogMode = "FLUFF"
 	fogFluff = 3
@@ -423,7 +702,7 @@ local function slider(name: string, label: string, row: number): TextButton
 	track.Name = name
 	track.BackgroundColor3 = Color3.fromRGB(25, 35, 50)
 	track.BorderSizePixel = 0
-	track.Position = UDim2.new(0, 12, 0, 140 + row * 28)
+	track.Position = UDim2.new(0, 12, 0, 246 + row * 24)
 	track.Size = UDim2.new(0, 234, 0, 22)
 	track.Text = label
 	track.TextColor3 = Color3.new(1, 1, 1)
@@ -472,46 +751,57 @@ shapeSlider.Activated:Connect(function()
 	end
 end)
 
-updateStatus()
+local modeControl = button("Weather Stateful Checkpoint", "PROCEDURAL", 0, 8)
+modeControl.Position = UDim2.new(0, 12, 0, 362)
+modeControl.Size = UDim2.new(0, 108, 0, 28)
+modeControl.Activated:Connect(function()
+	if weatherMode == "STATEFUL" then
+		weatherMode = "PROCEDURAL"
+		weather.Mode = Enum.WeatherMode.Procedural
+		modeControl.Text = "PROCEDURAL"
+	else
+		weatherMode = "STATEFUL"
+		weather.Mode = Enum.WeatherMode.Stateful
+		modeControl.Text = "STATEFUL"
+	end
+	updateStatus()
+end)
 
-local elapsedSeconds = 0
-local nextLightningSeconds = LIGHTNING_INTERVAL_SECONDS
-local lightningUntilSeconds = 0
+local pauseControl = button("Weather Pause Solver", "PAUSE", 1, 8)
+pauseControl.Position = UDim2.new(0, 128, 0, 362)
+pauseControl.Size = UDim2.new(0, 118, 0, 28)
+pauseControl.Activated:Connect(function()
+	weatherPaused = not weatherPaused
+	weather.Paused = weatherPaused
+	pauseControl.Text = if weatherPaused then "RESUME" else "PAUSE"
+	updateStatus()
+end)
+
+updateStatus()
 
 RunService.Heartbeat:Connect(function(deltaTime: number)
 	local stepSeconds = math.min(math.max(deltaTime, 0), MAXIMUM_FRAME_SECONDS)
 	local alpha = math.min(stepSeconds * 0.7, 1)
-	elapsedSeconds += stepSeconds
 
 	Lighting.Brightness = lerp(Lighting.Brightness, target.Brightness, alpha)
 	Lighting.ClockTime = lerp(Lighting.ClockTime, target.ClockTime, alpha)
 	Lighting.Ambient = lerpColour(Lighting.Ambient, target.Ambient, alpha)
 	Lighting.OutdoorAmbient = lerpColour(Lighting.OutdoorAmbient, target.OutdoorAmbient, alpha)
-	Lighting.BloomIntensity = lerp(Lighting.BloomIntensity, target.BloomIntensity, alpha)
-	Lighting.DepthOfFieldIntensity = lerp(
-		Lighting.DepthOfFieldIntensity,
+	bloom.Intensity = lerp(bloom.Intensity, target.BloomIntensity, alpha)
+	depthOfField.Intensity = lerp(
+		depthOfField.Intensity,
 		target.DepthOfFieldIntensity,
 		alpha
 	)
-	Lighting.GodRayIntensity = lerp(Lighting.GodRayIntensity, target.GodRayIntensity, alpha)
+	godRays.Intensity = lerp(godRays.Intensity, target.GodRayIntensity, alpha)
 	atmosphere.Density = lerp(atmosphere.Density, target.AtmosphereDensity, alpha)
 	atmosphere.Haze = lerp(atmosphere.Haze, target.AtmosphereHaze, alpha)
 	atmosphere.Glare = lerp(atmosphere.Glare, target.AtmosphereGlare, alpha)
-	clouds.Cover = lerp(clouds.Cover, target.CloudCover, alpha)
-	clouds.Density = lerp(clouds.Density, target.CloudDensity, alpha)
-	clouds.WindSpeed = lerp(clouds.WindSpeed, target.CloudWindSpeed, alpha)
+	weather.Cover = lerp(weather.Cover, target.CloudCover, alpha)
+	weather.Density = lerp(weather.Density, target.CloudDensity, alpha)
 	lowBank.Density = lerp(lowBank.Density, target.FogDensity, alpha)
 	ruinMist.Density = lerp(ruinMist.Density, target.FogDensity * 1.3, alpha)
 	lowBank.Extinction = lerp(lowBank.Extinction, target.FogExtinction, alpha)
 	ruinMist.Extinction = lerp(ruinMist.Extinction, target.FogExtinction * 1.15, alpha)
 
-	if target.Name == "TEMPEST" and elapsedSeconds >= nextLightningSeconds then
-		nextLightningSeconds = elapsedSeconds + LIGHTNING_INTERVAL_SECONDS
-		lightningUntilSeconds = elapsedSeconds + 0.15
-		lightning.Enabled = true
-	end
-
-	local flashing = elapsedSeconds < lightningUntilSeconds
-	lightning.Enabled = flashing
-	lightningFlash.Brightness = if flashing then 550 else 0
 end)

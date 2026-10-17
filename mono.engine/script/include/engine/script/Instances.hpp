@@ -21,8 +21,7 @@
 // **Which scripts run is the host's role, not the world's.** A `Script` runs
 // where `RunService:IsServer()` is true and a `LocalScript` where `IsClient()`
 // is - Roblox's rule, and the one an author already expects. A single-player
-// host is both, so it runs both. StarterPlayer scripts remain templates;
-// their per-player copies run after the join.
+// host is both, so it runs both, which is exactly right.
 //
 // @tier L9 · shared
 

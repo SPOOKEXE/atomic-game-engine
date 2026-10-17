@@ -883,10 +883,11 @@ namespace engine::graph {
 		const Node *Find(NodeId node) const;
 
 		// A resource, or null.
+		// This name avoids the Win32 FindResource macro in unity builds.
 		//
 		// @param resource The handle.
 		// @return The descriptor, or null for an unknown handle.
-		const ResourceDesc *FindResource(ResourceId resource) const;
+		const ResourceDesc *FindResourceDesc(ResourceId resource) const;
 
 		// How many nodes the graph holds, enabled or not.
 		size_t Count() const {

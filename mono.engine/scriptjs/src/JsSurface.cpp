@@ -39,8 +39,10 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/Datatypes.hpp>
 #include <engine/script/InstanceShim.hpp>
+#include <engine/script/RemoteEvent.hpp>
 #include <engine/script/Subtree.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -310,6 +312,61 @@ namespace engine::script {
 
 		Entity SelfEntity(JSContext *context, JSValueConst self) {
 			return JsEntityOf(context, self);
+		}
+
+		bool IsJsRemoteEvent(JSContext *context, ecs::Entity instance) {
+			return JsOf(context).World->IsA(instance, ecs::Classes::Find(Name("RemoteEvent")));
+		}
+
+		JSValue RemoteEventSignal(JSContext *context, JSValueConst self) {
+			const auto &role = JsExecutionRole(context);
+			const Entity instance = InstanceForScriptRead(
+				*JsOf(context).World, SelfEntity(context, self), role.Client && !role.Server
+			);
+			if (!IsJsRemoteEvent(context, instance))
+				return JS_ThrowTypeError(context, "OnServerEvent requires a RemoteEvent");
+			return MakeJsSignal(context, SignalKind::RemoteEvent, instance);
+		}
+
+		JSValue RemoteEventFireServer(JSContext *context, JSValueConst self, int count, JSValueConst *argv) {
+			auto &bound = JsOf(context);
+			const auto &role = JsExecutionRole(context);
+			const Entity instance =
+				InstanceForScriptRead(*bound.World, SelfEntity(context, self), role.Client && !role.Server);
+			if (!role.Client || !IsJsRemoteEvent(context, instance) ||
+				scene::ScopeOfInstance(*bound.World, instance) == scene::ServiceScope::Server)
+				return JS_ThrowTypeError(context, "FireServer is only available on a client RemoteEvent");
+			if (count != 1 || !JS_IsString(argv[0]))
+				return JS_ThrowTypeError(context, "FireServer takes one bounded string payload");
+			const JSValue lengthValue = JS_GetPropertyStr(context, argv[0], "length");
+			uint32_t characters = 0;
+			const int lengthStatus = JS_ToUint32(context, &characters, lengthValue);
+			JS_FreeValue(context, lengthValue);
+			if (lengthStatus < 0) return JS_EXCEPTION;
+			if (characters > REMOTE_EVENT_MAXIMUM_PAYLOAD_BYTES)
+				return JS_ThrowTypeError(context, "RemoteEvent payload exceeds the byte limit");
+			size_t bytes = 0;
+			const char *payload = JS_ToCStringLen(context, &bytes, argv[0]);
+			if (payload == nullptr) return JS_EXCEPTION;
+			std::vector<std::byte> message;
+			const bool encoded = EncodeRemoteEvent(
+				bound.World->GetFullName(instance), std::as_bytes(std::span(payload, bytes)), message
+			);
+			JS_FreeCString(context, payload);
+			if (!encoded) return JS_ThrowTypeError(context, "RemoteEvent could not encode this payload");
+			if (bound.Role.Server) {
+				const auto *local = bound.World->Resource<scene::LocalPlayer>();
+				const Entity sender = local != nullptr && bound.World->Alive(local->Instance) &&
+											  bound.World->IsA(local->Instance, scene::PlayerClass())
+										  ? local->Instance
+										  : ecs::NULL_ENTITY;
+				std::string error;
+				if (!DeliverJsRemoteEvent(context, message, sender, error))
+					return JS_ThrowTypeError(context, "RemoteEvent delivery failed: %s", error.c_str());
+			} else if (!bound.RemoteEventSender || !bound.RemoteEventSender(message)) {
+				return JS_ThrowTypeError(context, "RemoteEvent could not send this payload");
+			}
+			return JS_UNDEFINED;
 		}
 
 		// `instance.Changed` - a getter, because it takes no arguments and
@@ -745,6 +802,50 @@ namespace engine::script {
 
 	// --- the pumps ------------------------------------------------------------
 
+	bool DeliverJsRemoteEvent(
+		JSContext *context, std::span<const std::byte> bytes, ecs::Entity sender, std::string &error
+	) {
+		auto &bound = JsOf(context);
+		auto &store = *bound.World;
+		if (!bound.Role.Server || (sender != ecs::NULL_ENTITY &&
+								   (!store.Alive(sender) || !store.IsA(sender, scene::PlayerClass())))) {
+			error = "RemoteEvent delivery requires an authority and a live admitted Player";
+			return false;
+		}
+		RemoteEventMessage message;
+		if (!DecodeRemoteEvent(bytes, message)) {
+			error = "malformed RemoteEvent envelope";
+			return false;
+		}
+		const auto eventClass = ecs::Classes::Find(Name("RemoteEvent"));
+		Entity subject = ecs::NULL_ENTITY;
+		bool ambiguous = false;
+		store.Each<const ecs::InstanceClass>([&](Entity entity, const ecs::InstanceClass &) {
+			if (ambiguous || !InstanceVisibleToScript(store, entity, false) ||
+				scene::ScopeOfInstance(store, entity) == scene::ServiceScope::Server ||
+				!store.IsA(entity, eventClass) || store.GetFullName(entity) != message.Event)
+				return;
+			if (subject != ecs::NULL_ENTITY)
+				ambiguous = true;
+			else
+				subject = entity;
+		});
+		if (subject == ecs::NULL_ENTITY || ambiguous) {
+			error = "RemoteEvent target is missing or ambiguous";
+			return false;
+		}
+		JSValue arguments[]{
+			JS_NewStringLen(
+				context, reinterpret_cast<const char *>(message.Payload.data()), message.Payload.size()
+			),
+			MakeJsInstance(context, sender)
+		};
+		error = FireJsSignal(context, SignalKind::RemoteEvent, subject, 2, arguments);
+		for (const JSValue value : arguments)
+			JS_FreeValue(context, value);
+		return error.empty();
+	}
+
 	std::string FireJsSignal(
 		JSContext *context, SignalKind kind, Entity subject, int count, JSValueConst *arguments, Name property
 	) {
@@ -760,8 +861,7 @@ namespace engine::script {
 				return;
 			}
 
-			JSValue result =
-				JS_Call(context, Held(context, connection.Callback), JS_UNDEFINED, count, arguments);
+			JSValue result = InvokeJsCallback(context, connection.Callback, count, arguments);
 
 			// **Every connection runs even when one throws**, and the first
 			// error is what the host hears about. A handler that threw once
@@ -816,8 +916,7 @@ namespace engine::script {
 					return;
 				}
 
-				JSValue result =
-					JS_Call(context, Held(context, connection.Callback), JS_UNDEFINED, 0, nullptr);
+				JSValue result = InvokeJsCallback(context, connection.Callback, 0, nullptr);
 				if (JS_IsException(result)) {
 					const std::string message = ExceptionOf(context, "a property listener failed");
 					if (firstError.empty()) {
@@ -939,7 +1038,7 @@ namespace engine::script {
 			// what `ExceptionOf` does: a pending exception left there would
 			// surface in whatever this VM did next, a long way from the resume
 			// that threw.
-			JSValue result = JS_Call(context, Held(context, resolver), JS_UNDEFINED, 1, &child);
+			JSValue result = InvokeJsCallback(context, resolver, 1, &child);
 			if (JS_IsException(result)) {
 				const std::string message = ExceptionOf(context, "a resumed WaitForChild failed");
 				if (firstError.empty()) {
@@ -1126,8 +1225,7 @@ namespace engine::script {
 				bound.WaitTicks.erase(waited);
 			}
 
-			JSValue result =
-				JS_Call(context, Held(context, reference), JS_UNDEFINED, isWait ? 1 : 0, &argument);
+			JSValue result = InvokeJsCallback(context, reference, isWait ? 1 : 0, &argument);
 			if (JS_IsException(result)) {
 				const std::string message = ExceptionOf(context, "a resumed task failed");
 				if (firstError.empty()) {
@@ -1186,6 +1284,14 @@ namespace engine::script {
 			}
 			JS_SetClassProto(context, id, proto);
 		}
+	}
+
+	void InstallJsRemoteEventMembers(JSContext *context, JSValueConst prototype) {
+		static const JSCFunctionListEntry entries[] = {
+			JS_CGETSET_DEF("OnServerEvent", RemoteEventSignal, nullptr),
+			JS_CFUNC_DEF("FireServer", 1, RemoteEventFireServer),
+		};
+		JS_SetPropertyFunctionList(context, prototype, entries, static_cast<int>(std::size(entries)));
 	}
 
 	void InstallJsInstanceMethods(JSContext *context) {

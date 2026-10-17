@@ -27,8 +27,9 @@ layout(set = 3, binding = 0) uniform Batch {
 	// limit here makes malformed lists unable to grow a fragment uniform block.
 	vec4 MaskBounds[8];
 	vec4 MaskData[8]; // x is the corner radius.
-	vec4 MaskCount; // x is the number of active masks; y is layer opacity.
-} batch;
+	vec4 MaskCount;	  // x is mask count; y is opacity; z restores sampled sRGB for screen UNORM.
+}
+batch;
 
 bool insideRoundedRect(vec2 point, vec4 bounds, float radius) {
 	if (point.x < bounds.x || point.y < bounds.y || point.x > bounds.z || point.y > bounds.w) {
@@ -38,6 +39,14 @@ bool insideRoundedRect(vec2 point, vec4 bounds, float radius) {
 	if (capped <= 0.0) return true;
 	const vec2 nearest = clamp(point, bounds.xy + vec2(capped), bounds.zw - vec2(capped));
 	return dot(point - nearest, point - nearest) <= capped * capped;
+}
+
+vec3 encodeSRGB(vec3 linear) {
+	return mix(
+		12.92 * linear,
+		1.055 * pow(max(linear, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055,
+		greaterThan(linear, vec3(0.0031308))
+	);
 }
 
 void main() {
@@ -50,7 +59,10 @@ void main() {
 			discard;
 		}
 	}
-	const vec4 sampled = texture(interfaceTexture, inUv);
+	vec4 sampled = texture(interfaceTexture, inUv);
+	// Hardware sRGB sampling is correct for spatial lighting. Screen UNORM
+	// blending needs the image's encoded RGB, matching authored interface tints.
+	if (batch.MaskCount.z != 0.0) sampled.rgb = encodeSRGB(sampled.rgb);
 
 	// **The atlas is coverage, not colour.** A glyph is one channel of alpha and
 	// the colour is the vertex's, which is what lets one sheet serve every

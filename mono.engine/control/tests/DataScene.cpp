@@ -1203,10 +1203,15 @@ TEST_CASE("data-scene MCP returns only explicit authored affordances", "[control
 		engine::scene::RegisterSceneComponents();
 		engine::scene::EnsureClassTree();
 		const Entity part = engine::scene::MakePart(store, {});
-		auto *affordance = store.GetMutable<engine::scene::AuthoredAffordance>(part);
-		affordance->Id = Name("fixture/door/open");
-		affordance->Kind = engine::scene::AuthoredAffordanceKind::Interactable;
-		affordance->Enabled = true;
+		store.Set(
+			part,
+			engine::scene::AuthoredAffordance{
+				.Id = engine::core::Name("fixture/door/open"),
+				.Kind = engine::scene::AuthoredAffordanceKind::Interactable,
+				.Enabled = true,
+				.Reserved = {}
+			}
+		);
 	});
 	bool failed = false;
 	const json response = Call(

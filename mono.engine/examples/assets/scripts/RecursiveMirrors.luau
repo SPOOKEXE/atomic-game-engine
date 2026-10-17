@@ -65,10 +65,10 @@ RunService.Heartbeat:Connect(function(deltaTime: number)
 	cube.CFrame = CFrame.new(x, 2.2, z) * CFrame.Angles(phase * 0.3, phase, 0)
 end)
 
-local view = Instance.new("Camera")
-view.Name = "RecursiveMirrorCamera"
-view.CFrame = CFrame.lookAt(Vector3.new(7, 6, 7), Vector3.new(0, 3.5, -14))
-view.Parent = workspace
-workspace.CurrentCamera = view
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local view = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+view:SetAttribute("Name", "RecursiveMirrorCamera")
+view:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(7, 6, 7), Vector3.new(0, 3.5, -14)))
 
 print("recursivemirrors: three same-frame levels, then last-frame history")

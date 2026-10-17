@@ -77,7 +77,7 @@ namespace engine::graph {
 				edge.From = found->second;
 				edge.To = placed.Node;
 
-				const ResourceDesc *desc = graph.FindResource(resource);
+				const ResourceDesc *desc = graph.FindResourceDesc(resource);
 				edge.Resource = desc != nullptr ? desc->Name : core::Name{};
 				layout.Edges.push_back(edge);
 			}

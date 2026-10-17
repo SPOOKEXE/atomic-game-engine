@@ -504,7 +504,7 @@ TEST_CASE("the host's create arrives in the guest", "[studio][editstream]") {
 	session.Host.Insert(session.Host.Workspace(), "Part");
 	session.Settle();
 
-	CHECK(session.Guest.ChildCount(session.Guest.Workspace()) == 1);
+	CHECK(session.Guest.ChildCount(session.Guest.Workspace()) == 2);
 	CHECK(session.Guest.Find({"Workspace", "Part"}) != NULL_ENTITY);
 	CHECK(session.HostStream->Counters().Sent == 1);
 	CHECK(session.GuestStream->Counters().Received == 1);
@@ -549,7 +549,7 @@ TEST_CASE("a whole recording crosses as one message", "[studio][editstream]") {
 	// the author never saw.
 	CHECK(session.HostStream->Counters().Sent == 0);
 	session.Settle();
-	CHECK(session.Guest.ChildCount(session.Guest.Workspace()) == 0);
+	CHECK(session.Guest.ChildCount(session.Guest.Workspace()) == 1);
 
 	REQUIRE(session.Host.Log.FinishRecording(*recording, FinishOperation::Commit));
 	session.Settle();
@@ -557,7 +557,7 @@ TEST_CASE("a whole recording crosses as one message", "[studio][editstream]") {
 	CHECK(session.HostStream->Counters().Sent == 1);
 	CHECK(session.GuestStream->Counters().Received == 1);
 	CHECK(session.GuestStream->Counters().Applied == 3);
-	CHECK(session.Guest.ChildCount(session.Guest.Workspace()) == 3);
+	CHECK(session.Guest.ChildCount(session.Guest.Workspace()) == 4);
 }
 
 TEST_CASE("a cancelled recording never reaches anybody", "[studio][editstream]") {
@@ -576,8 +576,8 @@ TEST_CASE("a cancelled recording never reaches anybody", "[studio][editstream]")
 	// to apply - and telling them would be telling them about a state that
 	// never existed anywhere.
 	CHECK(session.HostStream->Counters().Sent == 0);
-	CHECK(session.Guest.ChildCount(session.Guest.Workspace()) == 0);
-	CHECK(session.Host.ChildCount(session.Host.Workspace()) == 0);
+	CHECK(session.Guest.ChildCount(session.Guest.Workspace()) == 1);
+	CHECK(session.Host.ChildCount(session.Host.Workspace()) == 1);
 }
 
 TEST_CASE("a property write crosses with its value", "[studio][editstream]") {
@@ -605,12 +605,12 @@ TEST_CASE("a destroy crosses and takes the right instance", "[studio][editstream
 	session.Host.Insert(session.Host.Workspace(), "Keep");
 	const Entity doomed = session.Host.Insert(session.Host.Workspace(), "Doomed");
 	session.Settle();
-	REQUIRE(session.Guest.ChildCount(session.Guest.Workspace()) == 2);
+	REQUIRE(session.Guest.ChildCount(session.Guest.Workspace()) == 3);
 
 	session.Host.Destroy(doomed, "Doomed");
 	session.Settle();
 
-	CHECK(session.Guest.ChildCount(session.Guest.Workspace()) == 1);
+	CHECK(session.Guest.ChildCount(session.Guest.Workspace()) == 2);
 	CHECK(session.Guest.Find({"Workspace", "Keep"}) != NULL_ENTITY);
 	CHECK(session.Guest.Find({"Workspace", "Doomed"}) == NULL_ENTITY);
 }
@@ -649,7 +649,7 @@ TEST_CASE("one editor creates and the other edits it", "[studio][editstream]") {
 	CHECK(session.GuestStream->Counters().Sent == sentBefore + 1);
 	CHECK(session.GuestStream->Counters().Undelivered == 0);
 	CHECK(session.Host.Find({"Workspace", "Shared"}) == NULL_ENTITY);
-	CHECK(session.Host.ChildCount(session.Host.Workspace()) == 0);
+	CHECK(session.Host.ChildCount(session.Host.Workspace()) == 1);
 
 	// Neither editor's history holds the other's work.
 	CHECK(session.Guest.Log.Depth() == 2);
@@ -673,7 +673,7 @@ TEST_CASE("an edit into a scene the peer does not have is dropped", "[studio][ed
 	// two editors disagreeing about what the project contains, and the place to
 	// fix that is the join rather than each edit.
 	CHECK(studio::ApplyEdits(receiver.Log, receiver.Worlds, records) == 0);
-	CHECK(receiver.ChildCount(receiver.Workspace()) == 0);
+	CHECK(receiver.ChildCount(receiver.Workspace()) == 1);
 }
 
 TEST_CASE("an edit naming an instance the peer has not got is dropped", "[studio][editstream]") {

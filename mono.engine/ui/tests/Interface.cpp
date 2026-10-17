@@ -1,3 +1,5 @@
+#include "DrawSignature.hpp"
+
 #include <engine/render/Renderer.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/ui/Interface.hpp>
@@ -5,13 +7,160 @@
 #include <SDL3/SDL.h>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <imgui.h>
 #include <memory>
 #include <string>
 
 TEST_SUITE_ID("engine.ui.interface")
+
+TEST_CASE(
+	"draw signatures cover visible geometry and command state without changing context",
+	"[ui][headless][signature]"
+) {
+	engine::render::Renderer renderer;
+	engine::ui::Interface interface;
+	engine::ui::InterfaceSettings settings;
+	settings.DisplayWidth = 640;
+	settings.DisplayHeight = 480;
+	REQUIRE(interface.Initialise(renderer, nullptr, settings));
+	const auto frame = [&] {
+		interface.Begin(1.0f / 60.0f);
+		auto *list = ImGui::GetBackgroundDrawList();
+		list->AddRectFilled({32, 32}, {96, 96}, IM_COL32(240, 200, 160, 255));
+		list->AddImage(ImTextureRef{ImTextureID{19}}, {112, 32}, {176, 96});
+		interface.End();
+	};
+	frame();
+	frame();
+	const auto baseline = interface.Signature();
+	frame();
+	CHECK(interface.Signature() == baseline);
+	ImDrawData *draw = ImGui::GetDrawData();
+	REQUIRE(draw != nullptr);
+	REQUIRE(draw->CmdListsCount > 0);
+	const auto signature = [&] { return engine::ui::draw_signature_detail::DrawGeometrySignature(draw); };
+	CHECK(signature() == baseline);
+	ImDrawList &list = *draw->CmdLists[0];
+	REQUIRE_FALSE(list.VtxBuffer.empty());
+	REQUIRE_FALSE(list.IdxBuffer.empty());
+	REQUIRE_FALSE(list.CmdBuffer.empty());
+	const auto changed = [&](auto &field, const auto &replacement) {
+		const auto previous = field;
+		field = replacement;
+		CHECK(signature() != baseline);
+		field = previous;
+		CHECK(signature() == baseline);
+	};
+	changed(draw->DisplayPos.x, draw->DisplayPos.x + 1);
+	changed(draw->DisplaySize.x, draw->DisplaySize.x + 1);
+	changed(draw->FramebufferScale.x, draw->FramebufferScale.x + 1);
+	changed(list.VtxBuffer[0].pos.x, list.VtxBuffer[0].pos.x + 1);
+	changed(list.VtxBuffer[0].uv.x, list.VtxBuffer[0].uv.x + 0.25f);
+	changed(list.VtxBuffer[0].col, list.VtxBuffer[0].col ^ ImU32{0x00010000});
+	changed(list.IdxBuffer[0], static_cast<ImDrawIdx>(list.IdxBuffer[0] + 1));
+	auto &command = list.CmdBuffer[0];
+	changed(command.ClipRect.x, command.ClipRect.x + 1);
+	changed(command.TexRef, ImTextureRef{ImTextureID{29}});
+	changed(command.ElemCount, command.ElemCount + 1);
+	changed(command.IdxOffset, command.IdxOffset + 1);
+	changed(command.VtxOffset, command.VtxOffset + 1);
+	changed(command.UserCallback, ImDrawCallback_ResetRenderState);
+	ImGuiContext *owner = ImGui::GetCurrentContext();
+	ImGuiContext *foreign = ImGui::CreateContext();
+	ImGui::SetCurrentContext(foreign);
+	CHECK(signature() == baseline);
+	CHECK(ImGui::GetCurrentContext() == foreign);
+	ImGui::DestroyContext(foreign);
+	ImGui::SetCurrentContext(owner);
+	CHECK(engine::ui::draw_signature_detail::DrawGeometrySignature(nullptr) == 0);
+}
+
+TEST_CASE("draw byte signatures preserve alignment and exact tails", "[ui][headless][signature]") {
+	constexpr uint64_t SEED = 1469598103934665603ull;
+	alignas(uint64_t) std::array<std::byte, 544> aligned{};
+	alignas(uint64_t) std::array<std::byte, 552> shifted{};
+	for (size_t index = 0; index < aligned.size(); ++index)
+		aligned[index] = static_cast<std::byte>((index * 29 + 17) & 255);
+	for (const size_t size : {0u,  1u,	2u,	 7u,   8u,	 9u,   15u,	 16u,  17u,	 31u,  32u,	 33u,
+							  63u, 64u, 65u, 127u, 128u, 129u, 255u, 256u, 257u, 511u, 512u, 513u}) {
+		const auto expected = engine::ui::draw_signature_detail::FoldBytes(SEED, aligned.data(), size);
+		for (size_t offset = 0; offset < sizeof(uint64_t); ++offset) {
+			INFO("bytes=" << size << " offset=" << offset);
+			std::copy_n(aligned.data(), size, shifted.data() + offset);
+			CHECK(
+				engine::ui::draw_signature_detail::FoldBytes(SEED, shifted.data() + offset, size) == expected
+			);
+			shifted[offset + size] ^= std::byte{1};
+			CHECK(
+				engine::ui::draw_signature_detail::FoldBytes(SEED, shifted.data() + offset, size) == expected
+			);
+			if (size > 0) {
+				shifted[offset + size - 1] ^= std::byte{1};
+				CHECK(
+					engine::ui::draw_signature_detail::FoldBytes(SEED, shifted.data() + offset, size) !=
+					expected
+				);
+			}
+		}
+	}
+	std::array<std::byte, 16> zeros{};
+	CHECK(
+		engine::ui::draw_signature_detail::FoldBytes(SEED, nullptr, 0) ==
+		engine::ui::draw_signature_detail::FoldBytes(SEED, zeros.data(), 0)
+	);
+	for (size_t size = 0; size < zeros.size(); ++size)
+		CHECK(
+			engine::ui::draw_signature_detail::FoldBytes(SEED, zeros.data(), size) !=
+			engine::ui::draw_signature_detail::FoldBytes(SEED, zeros.data(), size + 1)
+		);
+}
+
+TEST_CASE("large draw signatures retain every lane and chunk order", "[ui][headless][signature]") {
+	constexpr uint64_t SEED = 1469598103934665603ull;
+	constexpr size_t CHUNK_BYTES = 4 * sizeof(uint64_t);
+	std::array<std::byte, 1027> bytes{};
+	for (size_t index = 0; index < bytes.size(); ++index)
+		bytes[index] = static_cast<std::byte>((index * 29 + index / 17 + 17) & 255);
+	const auto signature = [&] {
+		return engine::ui::draw_signature_detail::FoldBytes(SEED, bytes.data(), bytes.size());
+	};
+	const auto baseline = signature();
+	for (size_t lane = 0; lane < 4; ++lane) {
+		for (size_t chunk : {0u, 16u, 31u}) {
+			for (size_t byte : {0u, 3u, 7u}) {
+				INFO("lane=" << lane << " chunk=" << chunk << " byte=" << byte);
+				const size_t index = chunk * CHUNK_BYTES + lane * sizeof(uint64_t) + byte;
+				bytes[index] ^= std::byte{1};
+				CHECK(signature() != baseline);
+				bytes[index] ^= std::byte{1};
+				CHECK(signature() == baseline);
+			}
+		}
+	}
+	const auto exchanged = [&](size_t first, size_t second, size_t count) {
+		INFO("swap=" << first << "," << second << " bytes=" << count);
+		std::swap_ranges(bytes.begin() + first, bytes.begin() + first + count, bytes.begin() + second);
+		CHECK(signature() != baseline);
+		std::swap_ranges(bytes.begin() + first, bytes.begin() + first + count, bytes.begin() + second);
+		CHECK(signature() == baseline);
+	};
+	exchanged(0, sizeof(uint64_t), sizeof(uint64_t));
+	exchanged(0, CHUNK_BYTES, CHUNK_BYTES);
+	exchanged(0, 16 * CHUNK_BYTES, CHUNK_BYTES);
+	exchanged(16 * CHUNK_BYTES, 31 * CHUNK_BYTES, CHUNK_BYTES);
+	for (size_t index = 1024; index < bytes.size(); ++index) {
+		bytes[index] ^= std::byte{1};
+		CHECK(signature() != baseline);
+		bytes[index] ^= std::byte{1};
+		CHECK(signature() == baseline);
+	}
+	CHECK(engine::ui::draw_signature_detail::FoldBytes(SEED + 1, bytes.data(), bytes.size()) != baseline);
+}
 
 TEST_CASE("headless interface accepts SDL pointer and keyboard events", "[ui][headless]") {
 	engine::render::Renderer renderer;

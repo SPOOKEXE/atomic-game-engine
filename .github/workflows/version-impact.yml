@@ -40,6 +40,8 @@ jobs:
       SDL_VIDEO_DRIVER: offscreen
       SDL_AUDIO_DRIVER: dummy
       SDL_GPU_DRIVER: vulkan
+      # CI gates cost per iteration; local comparisons retain the wall default.
+      DEMO_COST_BASIS: iteration
     steps:
       - uses: actions/checkout@v4
         with:

@@ -22,10 +22,15 @@ mono_add_library(render
 		# Scene data and culling decisions are shared with headless hosts.
 		Engine::graph
 
+		# The GPU adapter consumes the immutable bounded L9 image document and plan.
+		Engine::imagegraph
+
 		# Shared interface draw data; the client does not link Engine::ui.
 		Engine::gui
 
 		Engine::scene
+		# Weather reference arithmetic and residency policy stay device-free at L8.
+		Engine::weather
 
 		# `render::ParticleBatch` names the effects block, spawn state and runtime
 		# rows. The renderer owns the particle pool and steps it, so those layouts

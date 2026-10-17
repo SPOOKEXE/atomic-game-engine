@@ -80,17 +80,38 @@ done
 
 # The icon has to sit at the AppDir root under the name the .desktop file's
 # Icon= key gives, and again as .DirIcon for file managers that show one before
-# anything is mounted. The atomic-$program.desktop filename matches the SDL app
-# metadata identifier, so Wayland shells can associate a packaged window with
-# this icon. appimagetool warns about a missing .DirIcon and then produces an
-# image nothing displays an icon for, which is easy to not notice.
+# anything is mounted. The desktop basename matches the SDL application ID, so
+# Wayland shells can associate a packaged window with this icon. appimagetool
+# warns about a missing .DirIcon and then produces an image without an icon.
 cp "$root/assets/small-icon.png" "$appdir/atomic-$program.png"
 cp "$root/assets/small-icon.png" "$appdir/.DirIcon"
 
 case $program in
-	studio)   display="Atomic Studio";   categories="Development;IDE;" ;;
-	launcher) display="Atomic";          categories="Game;" ;;
-	*)        display="Atomic Client";   categories="Game;" ;;
+	client)
+		display="Atomic Client"
+		categories="Game;"
+		appstream_id="io.github.spookexe.atomicgameengine.client"
+		summary="Run and inspect Atomic game worlds"
+		description="Run Atomic game worlds, inspect staged examples, and explore interactive scenes in the engine client."
+		;;
+	studio)
+		display="Atomic Studio"
+		categories="Development;IDE;"
+		appstream_id="io.github.spookexe.atomicgameengine.studio"
+		summary="Build and inspect Atomic games"
+		description="Create game worlds, edit scripts, and test projects in Atomic Studio's integrated authoring environment."
+		;;
+	launcher)
+		display="Atomic"
+		categories="Game;"
+		appstream_id="io.github.spookexe.atomicgameengine.launcher"
+		summary="Launch Atomic games and tools"
+		description="Choose and launch Atomic Client, Studio, server, or content delivery tools from one desktop entry point."
+		;;
+	*)
+		echo "unsupported AppImage program: $program" >&2
+		exit 1
+		;;
 esac
 
 cat > "$appdir/atomic-$program.desktop" <<DESKTOP
@@ -103,6 +124,36 @@ Icon=atomic-$program
 Categories=$categories
 Terminal=false
 DESKTOP
+
+# The upstream project URL is the repository's public origin. Keep metadata
+# current with the release being packaged rather than a copy that ages in-tree.
+release_date=$(date -u +%F)
+desktop_file="$appstream_id.desktop"
+mv "$appdir/atomic-$program.desktop" "$appdir/$desktop_file"
+mkdir -p \
+	"$appdir/usr/share/applications" \
+	"$appdir/usr/share/icons/hicolor/64x64/apps" \
+	"$appdir/usr/share/metainfo"
+cp "$appdir/$desktop_file" "$appdir/usr/share/applications/$desktop_file"
+cp "$root/assets/small-icon.png" "$appdir/usr/share/icons/hicolor/64x64/apps/atomic-$program.png"
+cat > "$appdir/usr/share/metainfo/$appstream_id.appdata.xml" <<METainfo
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>$appstream_id</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MPL-2.0</project_license>
+  <developer id="io.github.spookexe"><name>SPOOKEXE</name></developer>
+  <name>$display</name>
+  <summary>$summary</summary>
+  <description><p>$description</p></description>
+  <content_rating type="oars-1.1" />
+  <url type="homepage">https://github.com/SPOOKEXE/atomic-game-engine</url>
+  <launchable type="desktop-id">$desktop_file</launchable>
+  <releases>
+    <release version="$version" date="$release_date" />
+  </releases>
+</component>
+METainfo
 
 # exec rather than a plain call, so the program is PID 1 of the mount and a
 # signal sent to the AppImage reaches it rather than a shell that ignores it.

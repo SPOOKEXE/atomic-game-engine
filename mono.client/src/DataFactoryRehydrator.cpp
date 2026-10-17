@@ -1,3 +1,5 @@
+#include "WorldSystems.hpp"
+
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -8,7 +10,6 @@
 #include <algorithm>
 #include <client/DataFactoryRehydrator.hpp>
 #include <client/Scene.hpp>
-#include <client/WorldSystems.hpp>
 
 namespace client {
 	DataFactoryRehydrator::DataFactoryRehydrator(

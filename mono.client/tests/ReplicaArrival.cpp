@@ -32,7 +32,6 @@
 #include <engine/net/Transport.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/physics/Pipeline.hpp>
-#include <engine/physics/Storm.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Defaults.hpp>
 #include <engine/replication/Listener.hpp>
@@ -255,13 +254,11 @@ namespace {
 			return found;
 		}
 
-		// What the client's scripts wrote down, which is the only thing a
-		// replica can say without writing a property.
+		// grug reads results from the script's private client-owned row.
 		std::string Log() {
 			engine::ecs::AttributeValue value;
-			if (!engine::ecs::GetAttribute(
-					Replica, engine::scene::WorkspaceOf(Replica), Name("log"), value
-				)) {
+			const Entity log = Replica.FindFirstChild(engine::scene::WorkspaceOf(Replica), "ClientScriptLog");
+			if (!engine::ecs::GetAttribute(Replica, log, Name("log"), value)) {
 				return {};
 			}
 			return value.String;
@@ -490,7 +487,9 @@ TEST_CASE("a LocalScript authored on the authority runs on the client", "[client
 	link.Program(
 		"Authored",
 		link.ContainerOf(engine::scene::PLAYER_SCRIPTS_NAME),
-		"workspace:SetAttribute('log', 'ran')\n"
+		"local log = Instance.new('Folder', workspace)\n"
+		"log.Name = 'ClientScriptLog'\n"
+		"log:SetAttribute('log', 'ran')\n"
 	);
 
 	REQUIRE(link.Join());
@@ -498,6 +497,14 @@ TEST_CASE("a LocalScript authored on the authority runs on the client", "[client
 
 	INFO(link.ReplicaScripts->LastError());
 	CHECK(link.Log() == "ran");
+	const Entity log =
+		link.Replica.FindFirstChild(engine::scene::WorkspaceOf(link.Replica), "ClientScriptLog");
+	REQUIRE(log != NULL_ENTITY);
+	CHECK(Store::IsPredicted(log));
+	CHECK(engine::ecs::IsClientLocalInstance(link.Replica, log));
+	CHECK(
+		link.World.FindFirstChild(engine::scene::WorkspaceOf(link.World), "ClientScriptLog") == NULL_ENTITY
+	);
 }
 
 TEST_CASE("the program crosses and not a path the client could open", "[client][replication][scripting]") {
@@ -554,7 +561,9 @@ TEST_CASE("a disabled script arrives disabled", "[client][replication][scripting
 	const Entity off = link.Program(
 		"Stopped",
 		link.ContainerOf(engine::scene::PLAYER_SCRIPTS_NAME),
-		"workspace:SetAttribute('log', 'ran')\n"
+		"local log = Instance.new('Folder', workspace)\n"
+		"log.Name = 'ClientScriptLog'\n"
+		"log:SetAttribute('log', 'ran')\n"
 	);
 	link.World.Set(off, engine::script::Disabled{});
 
@@ -880,38 +889,43 @@ TEST_CASE(
 	CHECK(link.Client->Forgotten().empty());
 }
 
-TEST_CASE("a server storm reaches replica scripts as authoritative state", "[client][replication][storm]") {
+TEST_CASE(
+	"a script-authored field reaches replica scripts as authoritative state", "[client][replication][ecs]"
+) {
 	Link link;
-	engine::physics::Storm storm;
-	storm.State.Position = {37.0f, 4.0f, -12.0f};
-	storm.State.ElapsedSeconds = 9.5f;
-	storm.State.Parameters.Energy = 0.8f;
-	storm.State.LifecycleEnabled = true;
-	engine::physics::SetStorm(link.World, storm);
-
+	REQUIRE(link.WorldScripts->Run(R"(
+		assert(World:DefineComponent("WeatherTest.State", {
+			Position = "Vector3", ElapsedSeconds = "number", Energy = "number", Enabled = "boolean",
+		}))
+		assert(World:SetComponentTags("WeatherTest.State", {"replicated"}))
+		local anchor = Instance.new("Part")
+		anchor.Name = "WeatherAnchor"
+		anchor.Parent = workspace
+		anchor:SetComponent("WeatherTest.State", {
+			Position = Vector3.new(37, 4, -12), ElapsedSeconds = 9.5, Energy = 0.8, Enabled = true,
+		})
+	)"));
 	REQUIRE(link.Join());
 	link.Settle();
+	REQUIRE(link.ReplicaScripts->Run(R"(
+		local state = workspace.WeatherAnchor:GetComponent("WeatherTest.State")
+		assert(state ~= nil and state.Enabled)
+		assert(state.Position == Vector3.new(37, 4, -12))
+		assert(state.ElapsedSeconds == 9.5 and math.abs(state.Energy - 0.8) < 1e-5)
+	)"));
 
-	const engine::physics::Storm *arrived = engine::physics::StormOf(link.Replica);
-	REQUIRE(arrived != nullptr);
-	CHECK(arrived->State.Position.FuzzyEq(storm.State.Position));
-	CHECK(arrived->State.ElapsedSeconds == storm.State.ElapsedSeconds);
-	CHECK(arrived->State.Parameters.Energy == storm.State.Parameters.Energy);
-
-	storm.State.Position.X = 51.0f;
-	storm.State.ElapsedSeconds = 10.0f;
-	engine::physics::SetStorm(link.World, storm);
+	link.Tick([&] {
+		REQUIRE(link.WorldScripts->Run(R"(
+			workspace.WeatherAnchor:SetComponent("WeatherTest.State", {
+				Position = Vector3.new(51, 4, -12), ElapsedSeconds = 10,
+			})
+		)"));
+	});
 	link.Settle();
-
-	arrived = engine::physics::StormOf(link.Replica);
-	REQUIRE(arrived != nullptr);
-	CHECK(arrived->State.Position.FuzzyEq(storm.State.Position));
-	CHECK(arrived->State.ElapsedSeconds == storm.State.ElapsedSeconds);
-	REQUIRE(link.ReplicaScripts != nullptr);
-	CHECK(link.ReplicaScripts->Run(R"(
-		local state = Storm.Snapshot()
+	REQUIRE(link.ReplicaScripts->Run(R"(
+		local state = workspace.WeatherAnchor:GetComponent("WeatherTest.State")
 		assert(state.Position == Vector3.new(51, 4, -12))
-		assert(state.ElapsedSeconds == 10 and math.abs(state.Parameters.Energy - 0.8) < 1e-5)
+		assert(state.ElapsedSeconds == 10 and math.abs(state.Energy - 0.8) < 1e-5)
 	)"));
 }
 

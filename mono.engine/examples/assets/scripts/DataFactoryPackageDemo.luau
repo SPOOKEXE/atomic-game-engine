@@ -9,15 +9,16 @@ local root = Instance.new("Folder")
 root.Name = "DataFactoryPackageDemo"
 root.Parent = workspace
 
-local camera = Instance.new("Camera")
-camera.Name = "DataFactoryPackageCamera"
-camera:SetAttribute("DataFactoryId", "data-factory-package/camera")
-camera.CFrame = CFrame.new(0, 2, 8)
-camera.CameraSubjectAutomatic = false
-camera.ImageWidth = 512
-camera.ImageHeight = 288
-camera.Parent = root
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "StarterPlayerScripts camera template is missing")
+local cameraScript = starterPlayerScripts:FindFirstChild("DemoCamera")
+assert(cameraScript ~= nil and cameraScript:IsA("LocalScript"), "DemoCamera LocalScript is missing")
+cameraScript:SetAttribute("Name", "DataFactoryPackageCamera")
+cameraScript:SetAttribute("CameraDataFactoryId", "data-factory-package/camera")
+cameraScript:SetAttribute("CFrame", CFrame.new(0, 2, 8))
+cameraScript:SetAttribute("CameraSubjectAutomatic", false)
+cameraScript:SetAttribute("ImageWidth", 512)
+cameraScript:SetAttribute("ImageHeight", 288)
 
 local function part(name, id, semanticId, partId, position, size, colour)
 	local object = Instance.new("Part")

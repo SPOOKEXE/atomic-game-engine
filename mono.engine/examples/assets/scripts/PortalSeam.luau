@@ -246,12 +246,13 @@ elseif WHICH == "far" then
 end
 
 if viewpoint ~= nil then
-	local view = Instance.new("Camera")
-	view.Name = "Viewer"
-	view.FieldOfView = 70
-	view.CFrame = viewpoint
-	view.Parent = WORLD
-	WORLD.CurrentCamera = view
+	local view = assert(
+		assert(game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")):FindFirstChild("DemoCamera"),
+		"the demo camera companion is missing"
+	)
+	view:SetAttribute("Name", "Viewer")
+	view:SetAttribute("FieldOfView", 70)
+	view:SetAttribute("CFrame", viewpoint)
 end
 
 print("portal seam: near room at origin, far room at x=" .. GAP .. " through a quarter-turn pair")

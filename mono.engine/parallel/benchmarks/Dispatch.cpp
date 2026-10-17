@@ -4,6 +4,7 @@
 
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/HeapProfile.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/testing/Bench.hpp>
 
@@ -113,7 +114,7 @@ BENCH("For · dispatched, 128 empty ranges, four workers", 5000) {
 
 // --- pinned placement dispatch -------------------------------------------------
 //
-// Every pinned worker scans the whole task list and skips tasks assigned to
+// Each signaled worker scans the whole task list and skips tasks assigned to
 // others, so these rows separate the handover from that scan. With no pinned
 // workers the span runs inline and the rows measure the fallback instead.
 
@@ -189,6 +190,7 @@ namespace dispatch_bench {
 		double ProducerSelf = 0;
 		double Body = 0;
 		double Unmarked = 0;
+		double SignaledBefore = 0;
 		engine::core::HeapTotals Before;
 
 		AssignedCapture() {
@@ -203,6 +205,8 @@ namespace dispatch_bench {
 			Before = engine::core::HeapProfile::Totals();
 			PreviouslyEnabled = engine::core::FrameGraph::IsEnabled();
 			engine::core::FrameGraph::SetEnabled(true);
+			const auto signaled = engine::core::Metrics::Get("jobs.signaled_workers");
+			SignaledBefore = signaled ? signaled->Value : 0;
 		}
 		~AssignedCapture() {
 			if (Enabled) engine::core::FrameGraph::SetEnabled(PreviouslyEnabled);
@@ -259,8 +263,8 @@ namespace dispatch_bench {
 				}
 			}
 			if (owners != 1 || joins != 1 || workers != bodies ||
-				workers < std::min<size_t>(Jobs::PinnedWorkerCount(), assignment.size()) ||
-				workers > Jobs::WorkerCount() || spans.size() != 2 + 2 * workers)
+				workers != std::min<size_t>(Jobs::PinnedWorkerCount(), assignment.size()) ||
+				spans.size() != 2 + 2 * workers)
 				throw std::runtime_error("pinned capture missing or extra phases");
 			++Frames;
 			Spans += spans.size();
@@ -270,10 +274,11 @@ namespace dispatch_bench {
 		void Print(size_t tasks) const {
 			if (!Enabled) return;
 			static size_t totalBatches = 0;
-			static size_t calls64 = 0, calls1024 = 0;
-			const size_t call = tasks == 64 ? ++calls64 : ++calls1024;
+			static size_t calls2 = 0, calls64 = 0, calls1024 = 0;
+			const size_t call = tasks == 2 ? ++calls2 : tasks == 64 ? ++calls64 : ++calls1024;
 			if (++totalBatches > 128) throw std::runtime_error("pinned capture batch capacity exceeded");
 			const auto after = engine::core::HeapProfile::Totals();
+			const auto signaled = engine::core::Metrics::Get("jobs.signaled_workers");
 			if (after.DroppedScopes != Before.DroppedScopes)
 				throw std::runtime_error("pinned capture dropped heap scopes");
 			int64_t retained = 0, blocks = 0;
@@ -290,6 +295,7 @@ namespace dispatch_bench {
 					  << " benchmark_warmup=" << (call <= 8) << " workers=" << Jobs::WorkerCount()
 					  << " pinned=" << Jobs::PinnedWorkerCount() << " frames=" << Frames << " spans=" << Spans
 					  << " entered_workers=" << Entered
+					  << " signaled_workers=" << (signaled ? signaled->Value - SignaledBefore : 0)
 					  << " frame_drops=0 heap_drop_delta=0 owner_inclusive_ms=" << Owner
 					  << " owner_self_ms=" << OwnerSelf << " join_idle_ms=" << Join
 					  << " producer_inclusive_ms=" << Producer
@@ -313,8 +319,8 @@ namespace dispatch_bench {
 		for (size_t task = 0; task < tasks; task++) {
 			assignment[task] = pinned == 0 ? 0 : static_cast<unsigned>(task % pinned);
 		}
-		static bool checked64 = false, checked1024 = false;
-		bool &checked = tasks == 64 ? checked64 : checked1024;
+		static bool checked2 = false, checked64 = false, checked1024 = false;
+		bool &checked = tasks == 2 ? checked2 : tasks == 64 ? checked64 : checked1024;
 		if (!checked) {
 			VerifyAssignment(assignment);
 			std::vector<unsigned> skewed(tasks, 0);
@@ -328,6 +334,14 @@ namespace dispatch_bench {
 		}
 		return assignment;
 	}
+}
+
+BENCH("ForWorkers · 2 empty pinned tasks", 2000) {
+	const std::vector<unsigned> &assignment = Spread(2);
+	AssignedCapture capture;
+	for (int pass = 0; pass < 2000; pass++)
+		capture.Dispatch(assignment);
+	capture.Print(2);
 }
 
 BENCH("ForWorkers · 64 empty pinned tasks", 2000) {

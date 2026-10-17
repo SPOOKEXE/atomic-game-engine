@@ -27,6 +27,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -42,6 +43,74 @@ using engine::net::LossyTransport;
 using engine::net::Transport;
 using engine::replication::ClientId;
 using namespace replication_wire;
+
+TEST_CASE(
+	"bulk creations survive backpressure and loss while their deltas keep changing", "[replication][loss]"
+) {
+	engine::replication::SessionSettings session;
+	session.Link.PacketsPerTick = 4;
+	engine::replication::AuthoritySettings authority;
+	authority.MessagesPerTick = 8;
+	engine::net::LossSettings loss;
+	loss.LossChance = 0.15f;
+	loss.Seed = 17;
+	Wire wire(session, authority, loss, loss);
+	REQUIRE(wire.Join(512));
+
+	std::vector<Entity> movers;
+	for (int index = 0; index < 1536; ++index) {
+		const Entity entity = wire.Server.Create();
+		wire.Server.Set<Spot>(entity, Spot{0.0f, static_cast<float>(index)});
+		movers.push_back(entity);
+	}
+	for (int tick = 0; tick < 512; ++tick) {
+		for (const Entity entity : movers)
+			wire.Server.GetMutable<Spot>(entity)->X = static_cast<float>(tick);
+		wire.Tick();
+	}
+	// Stop changing only after structural traffic has competed with newer
+	// unreliable deltas. The final value must converge without another join.
+	std::string progress;
+	for (int tick = 0; tick < 128; ++tick) {
+		wire.Tick();
+		if ((tick + 1) % 32 == 0) {
+			size_t current = 0;
+			for (const auto entity : movers) {
+				const auto *value = wire.Client.Get<Spot>(entity);
+				current += value != nullptr && value->X == 511.0f;
+			}
+			progress += " tick=" + std::to_string(tick + 1) + " current=" + std::to_string(current) +
+						" applied=" + std::to_string(wire.Replica_.Applied()) +
+						" allowance=" + std::to_string(wire.ServerSide->Link().Stats().SendAllowanceBytes);
+		}
+	}
+	INFO(progress);
+	INFO(
+		"final tick=" << wire.Tick_ << " deferred=" << wire.Authority_.Stats().Deferred
+					  << " oldest=" << wire.Authority_.Stats().Stalest
+					  << " over-allowance=" << wire.ServerSide->Link().Stats().SendsOverAllowance
+	);
+	CHECK(wire.ServerSide->Link().Stats().SendsOverBudget > 0);
+	CHECK(wire.ClientEnd->Stats().Dropped > 0);
+	CHECK(wire.Replica_.Stats().Snapshots == 1);
+	size_t present = 0;
+	size_t current = 0;
+	uint64_t firstStale = 0;
+	float staleValue = 0.0f;
+	for (size_t index = 0; index < movers.size(); ++index) {
+		const Entity entity = movers[index];
+		present += wire.Client.Alive(entity);
+		const auto *value = wire.Client.Get<Spot>(entity);
+		if (firstStale == 0 && value != nullptr && value->X != 511.0f) {
+			firstStale = entity.Id;
+			staleValue = value->X;
+		}
+		current += value != nullptr && value->X == 511.0f && value->Y == static_cast<float>(index);
+	}
+	CHECK(present == movers.size());
+	INFO("first stale id=" << firstStale << " x=" << staleValue);
+	CHECK(current == movers.size());
+}
 
 TEST_CASE("a creation whose datagram is lost still reaches the client", "[replication][loss]") {
 	// **D00011, and the reason it needed a lossy link to state.** A creation is

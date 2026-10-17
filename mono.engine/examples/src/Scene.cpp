@@ -15,7 +15,6 @@
 #include <engine/scene/Services.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
-#include <engine/script/SourceCache.hpp>
 #include <engine/scripthost/Runtime.hpp>
 
 #include <algorithm>
@@ -51,9 +50,8 @@ namespace engine::examples {
 			path = DemosLoader().Directory(DemoKind::Script) / "client" / "DemoCameras" / filename;
 			if (!std::filesystem::is_regular_file(path, failure)) return ecs::NULL_ENTITY;
 		}
-		const auto starter = scene::ServiceOf(store, ecs::Classes::Find(core::Name("StarterPlayer")));
-		const auto scripts =
-			scene::ServiceUnder(store, starter, ecs::Classes::Find(core::Name("StarterPlayerScripts")));
+		const auto starter = store.FindFirstRoot("StarterPlayer");
+		const auto scripts = store.FindFirstChild(starter, "StarterPlayerScripts");
 		if (scripts == ecs::NULL_ENTITY) return ecs::NULL_ENTITY;
 		const auto absolute = std::filesystem::absolute(path);
 		const auto relative = std::filesystem::relative(absolute, core::Paths::Assets(), failure);
@@ -92,6 +90,21 @@ namespace engine::examples {
 			// The player can precede the scene builder. Clone the completed config,
 			// rather than running the template or retaining an earlier empty copy.
 			if (const auto old = store.FindFirstChild(scripts, "DemoCamera"); old != ecs::NULL_ENTITY) {
+				store.EachChild(old, [&](ecs::Entity marker) {
+					const auto name = store.InstanceNameOf(marker);
+					if ((name != core::Name("PublishedCamera") && name != core::Name("PublishedRoot")) ||
+						store.ClassOf(marker) != ecs::Classes::Find(core::Name("ObjectValue")))
+						return;
+					ecs::Entity published{};
+					if (!store.GetProperty(marker, core::Name("Value"), &published, sizeof(published)) ||
+						!store.Alive(published) || !Store::IsPredicted(published) ||
+						!ecs::IsClientLocalInstance(store, published))
+						return;
+					if (name == core::Name("PublishedCamera") &&
+						store.ClassOf(published) != scene::CameraClass())
+						return;
+					store.DestroyInstance(published);
+				});
 				store.DestroyInstance(old);
 			}
 			const auto camera = store.ClonePredictedInstance(source);
@@ -99,6 +112,8 @@ namespace engine::examples {
 				error = "the world refused the local demo camera script";
 				return false;
 			}
+			store.Set(camera, ecs::ClientLocal{});
+			store.EachDescendant(camera, [&](ecs::Entity child) { store.Set(child, ecs::ClientLocal{}); });
 			store.SetParent(camera, scripts);
 			if (!store.HasResource<scene::CameraController>()) store.SetResource(scene::CameraController{});
 			if (runtime.RunNewScripts(std::array{camera}) != 1) {
@@ -107,6 +122,7 @@ namespace engine::examples {
 			}
 			return true;
 		}
+
 		// Where a scene's own Luau modules are staged.
 		//
 		// `Magic.luau` and `Magic` both answer the same directory, so a
@@ -307,7 +323,6 @@ namespace engine::examples {
 			error = runtime->LastError().empty() ? "the scene script did not run" : runtime->LastError();
 			return false;
 		}
-
 		if (!StartDemoCamera(store, *runtime, demoCamera, error)) return false;
 
 		// **One beat with a zero delta before measuring, and that is what makes
@@ -357,6 +372,7 @@ namespace engine::examples {
 		});
 
 		scheduler.Add("script-heartbeat", Phase::Simulation, [runtime](Store &world) {
+			if (runtime->Role().Client) runtime->RunNewScripts(script::ClientScriptsIn(world));
 			// **The fixed tick delta, never a frame time.** A script
 			// integrating against wall time puts the scene somewhere else
 			// on a busy machine, and the recording stops replaying - which

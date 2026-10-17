@@ -29,6 +29,7 @@
 #include <engine/scene/Skinning.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Visibility.hpp>
+#include <engine/weather/Clock.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -134,15 +135,38 @@ namespace engine::render {
 			);
 		}
 
+		bool ClearAbsentCaptureLabels(const ecs::Store &store, DrawList &drawList) {
+			const auto *attributes = store.Resource<ecs::AttributeTable>();
+			if (attributes != nullptr && !attributes->Entities.empty()) return false;
+
+			// Clear retained rows once when their authored tables disappear. Fresh
+			// source rows and seam copies then keep their zero label defaults.
+			if (!drawList.ObjectLabels.empty() || !drawList.SemanticLabels.empty() ||
+				!drawList.PartLabels.empty()) {
+				ENGINE_PROFILE_CAT("clear absent capture labels", core::ProfileCategory::Simulation);
+				for (scene::DrawInstance &instance : drawList.Instances) {
+					instance.ObjectLabel = 0;
+					instance.SemanticLabel = 0;
+					instance.PartLabel = 0;
+				}
+				drawList.ObjectLabels.clear();
+				drawList.SemanticLabels.clear();
+				drawList.PartLabels.clear();
+			}
+			drawList.ObjectLabelsValid = true;
+			drawList.SemanticLabelsValid = true;
+			drawList.PartLabelsValid = true;
+			return true;
+		}
+
 		void AssignObjectLabels(ecs::Store &store, DrawList &drawList) {
 			drawList.ObjectLabelsValid = true;
+			const core::Name attributeName("DataFactoryId");
 			std::vector<std::pair<uint64_t, std::string>> identifiers;
 			identifiers.reserve(drawList.Instances.size());
 			for (const scene::DrawInstance &instance : drawList.Instances) {
 				ecs::AttributeValue attribute;
-				if (!ecs::GetAttribute(
-						store, ecs::Entity(instance.Source), core::Name("DataFactoryId"), attribute
-					) ||
+				if (!ecs::GetAttribute(store, ecs::Entity(instance.Source), attributeName, attribute) ||
 					attribute.Type != ecs::PropertyType::String || attribute.String.empty())
 					continue;
 				if (attribute.String.size() > 256 || attribute.String.find('\0') != std::string::npos ||
@@ -204,12 +228,11 @@ namespace engine::render {
 			bool allowShared
 		) {
 			valid = true;
+			const core::Name name(attributeName);
 			std::vector<std::pair<uint64_t, std::string>> identifiers;
 			for (const scene::DrawInstance &instance : drawList.Instances) {
 				ecs::AttributeValue attribute;
-				if (!ecs::GetAttribute(
-						store, ecs::Entity(instance.Source), core::Name(attributeName), attribute
-					) ||
+				if (!ecs::GetAttribute(store, ecs::Entity(instance.Source), name, attribute) ||
 					attribute.Type != ecs::PropertyType::String || attribute.String.empty())
 					continue;
 				if (attribute.String.size() > 256 || attribute.String.find('\0') != std::string::npos ||
@@ -274,6 +297,7 @@ namespace engine::render {
 
 		uint64_t ContentOwnerSignature(const View &view) {
 			uint64_t signature = FoldPresentation(0, view.ContentOwner.Id());
+			signature = FoldPresentation(signature, view.ImageGraphWorldName.Id());
 			signature = FoldPresentation(signature, view.ForeignContentOwners.size());
 			for (const auto &binding : view.ForeignContentOwners) {
 				signature = FoldPresentation(signature, binding.World.Id());
@@ -348,6 +372,44 @@ namespace engine::render {
 			return signature;
 		}
 
+		uint64_t FoldGpuParticleField(uint64_t signature, const GpuParticleFieldView &packet) {
+			const auto &field = packet.Field;
+			signature = FoldPresentation(signature, packet.Source.Id);
+			signature = FoldPresentation(signature, packet.DefinitionRevision);
+			signature = FoldPresentationObject(signature, packet.Seconds);
+			signature = FoldCFrame(signature, packet.Frame);
+			signature = FoldPresentation(signature, field.Enabled);
+			signature = FoldPresentation(signature, field.Layers);
+			signature = FoldPresentation(signature, field.RequestedCount);
+			signature = FoldPresentation(signature, field.Seed);
+			signature = FoldPresentationObject(signature, field.HalfExtent);
+			signature = FoldPresentationObject(signature, field.VelocityResponse);
+			for (const auto &style : field.Styles) {
+				signature = FoldPresentationObject(signature, style.Colour);
+				signature = FoldPresentationObject(signature, style.Alpha);
+				signature = FoldPresentationObject(signature, style.Size);
+				signature = FoldPresentationObject(signature, style.Acceleration);
+			}
+			signature = FoldPresentation(signature, field.SpawnSamples.size());
+			// Collected packets carry the ECS epoch. Hand-built views have no such
+			// owner and must sign their samples directly to notice authored edits.
+			if (packet.DefinitionRevision == 0)
+				signature = FoldPresentationSpan(
+					signature, std::span<const scene::GpuParticleSpawnSample>(field.SpawnSamples)
+				);
+			const auto &flow = packet.ForceField;
+			signature = FoldCFrame(signature, flow.Frame);
+			signature = FoldPresentationObject(signature, flow.Vector);
+			signature = FoldPresentationObject(signature, flow.HalfExtent);
+			signature = FoldPresentationObject(signature, flow.Axis);
+			signature = FoldPresentation(signature, flow.Source.Id);
+			signature = FoldPresentationObject(signature, flow.Radial);
+			signature = FoldPresentationObject(signature, flow.Tangential);
+			signature = FoldPresentationObject(signature, flow.Falloff);
+			signature = FoldPresentation(signature, flow.LocalSpace);
+			return FoldPresentation(signature, flow.TwoDimensional);
+		}
+
 		uint64_t FoldVolumeState(uint64_t signature, const scene::VolumeState &volume) {
 			signature = FoldCFrame(signature, volume.Frame);
 			for (const float value :
@@ -419,6 +481,99 @@ namespace engine::render {
 			return signature;
 		}
 
+		bool WeatherShadowLayerPresent(const scene::Environment &environment) {
+			const auto &weather = environment.Weather;
+			return environment.HasWeatherCompute && weather.Enabled && environment.HasClouds &&
+				   weather.ShadowsEnabled && weather.ShadowStrength > 0 && weather.ShadowDistanceMetres > 0 &&
+				   environment.CloudLayer.Density > 0 && environment.CloudLayer.Cover > 0;
+		}
+
+		uint64_t FoldWeatherState(uint64_t signature, const scene::Environment &environment) {
+			const auto &controls = environment.Weather;
+			signature = FoldPresentation(signature, environment.CloudProvider.Id);
+			signature = FoldPresentation(signature, controls.LayerName.Text().size());
+			for (const unsigned char byte : controls.LayerName.Text())
+				signature = FoldPresentation(signature, byte);
+			for (const float scalar : {
+					 controls.CellSizeMetres,
+					 controls.BaseHeightMetres,
+					 controls.ThicknessMetres,
+					 controls.ExtentMetres.X,
+					 controls.ExtentMetres.Y,
+					 controls.ExtentMetres.Z,
+					 controls.Coverage,
+					 controls.CondensateScale,
+					 controls.VapourMixingRatio,
+					 controls.VapourScale,
+					 controls.BaseTemperatureCelsius,
+					 controls.BasePressureHectopascals,
+					 controls.TemperatureLapseCelsiusPerKilometre,
+					 controls.TemperatureVariationCelsius,
+					 controls.PressureVariationHectopascals,
+					 controls.WindMetresPerSecond.X,
+					 controls.WindMetresPerSecond.Y,
+					 controls.WindMetresPerSecond.Z,
+					 controls.TurbulenceMetresPerSecond,
+					 controls.ShearMetresPerSecond,
+					 controls.LiftMetresPerSecond,
+					 controls.FrontContrast,
+					 controls.GrowthRate,
+					 controls.TimeScale,
+					 controls.MaintenanceSeconds,
+					 controls.LodError,
+					 controls.AtmosphereDensityStrength,
+					 controls.AtmosphereHazeStrength,
+					 controls.AtmosphereGlareSuppression,
+					 controls.FogStrength,
+					 controls.PrecipitationRate,
+					 controls.IceFraction,
+					 controls.StormIntensity,
+					 controls.HailIntensity,
+					 controls.LightningRate,
+				 })
+				signature = FoldPresentationObject(signature, scalar == 0 ? 0.0f : scalar);
+			signature = FoldPresentation(signature, controls.Seed);
+			signature = FoldPresentation(signature, controls.AlgorithmVersion);
+			signature = FoldPresentation(signature, controls.DefinitionRevision);
+			signature = FoldPresentation(signature, static_cast<uint8_t>(controls.Mode));
+			if (controls.Mode == scene::WeatherMode::Stateful) {
+				signature = FoldPresentation(signature, static_cast<uint8_t>(controls.BoundaryX));
+				signature = FoldPresentation(signature, static_cast<uint8_t>(controls.BoundaryZ));
+				signature = FoldPresentation(signature, static_cast<uint8_t>(controls.TopBoundary));
+				signature = FoldPresentation(signature, controls.TerrainRevision);
+				signature =
+					FoldPresentationObject(signature, controls.GroundVapourFluxKilogramsPerSquareMetreSecond);
+				signature = FoldPresentationObject(signature, controls.RainFallSpeedMetresPerSecond);
+			}
+			signature = FoldPresentation(signature, controls.FeatureCells);
+			signature = FoldPresentation(signature, controls.TickRate);
+			signature = FoldPresentation(signature, controls.Paused);
+			signature = FoldPresentation(signature, controls.MaximumResidentBricks);
+			signature = FoldPresentation(signature, controls.MaximumLod);
+			signature = FoldPresentation(signature, controls.ShadowsEnabled);
+			if (controls.ShadowsEnabled) {
+				signature = FoldPresentationObject(signature, controls.ShadowStrength);
+				signature = FoldPresentationObject(signature, controls.ShadowDistanceMetres);
+				signature = FoldPresentation(signature, controls.ShadowResolution);
+				signature = FoldPresentation(signature, controls.ShadowCascades);
+				signature = FoldPresentationObject(signature, controls.ShadowUpdateSeconds);
+			}
+			// Receipt fractions and packet sequence do not alter the canonical field.
+			const auto time = weather::WeatherTimeOf(environment.Clock);
+			signature = FoldPresentation(signature, time.has_value());
+			if (time) {
+				if (!environment.Clock.Paused && !environment.Clock.WorldPaused)
+					signature = FoldPresentation(signature, time->Tick);
+				signature = FoldPresentation(signature, time->PhaseTick);
+				signature = FoldPresentation(signature, time->PhaseFractionQ16);
+				signature = FoldPresentation(signature, time->Revision);
+				for (const auto displacement : time->DisplacementQ8)
+					signature = FoldPresentation(signature, displacement);
+			}
+			signature = FoldPresentation(signature, environment.Clock.Epoch);
+			return FoldPresentation(signature, environment.WeatherHistoryRevision);
+		}
+
 		uint64_t FoldSceneLight(uint64_t signature, const SceneLight &light) {
 			for (const float value :
 				 {light.Position.X,
@@ -446,7 +601,8 @@ namespace engine::render {
 			(environment.Textures.Front.IsValid() || environment.Textures.Back.IsValid() ||
 			 environment.Textures.Left.IsValid() || environment.Textures.Right.IsValid() ||
 			 environment.Textures.Up.IsValid() || environment.Textures.Down.IsValid());
-		return texturedSky || modes.Skybox == 2 || modes.Atmosphere != 0 || modes.Clouds != 0;
+		return texturedSky || modes.Skybox == 2 || modes.Atmosphere != 0 || modes.Clouds != 0 ||
+			   WeatherShadowLayerPresent(environment);
 	}
 
 	uint64_t
@@ -465,7 +621,8 @@ namespace engine::render {
 	}
 
 	uint64_t ParticleVisibilitySignature(const View &view) {
-		if (view.Particles.empty() && view.RibbonRuns.empty()) {
+		if (view.Particles.empty() && view.RibbonRuns.empty() && !view.GpuParticles &&
+			view.WeatherParticles.empty()) {
 			return 0;
 		}
 
@@ -474,11 +631,19 @@ namespace engine::render {
 		signature = FoldPresentation(signature, ProjectionSignature(view));
 		signature = FoldPresentation(signature, view.World);
 		signature = FoldPresentation(signature, view.WorldName.Id());
+		signature = FoldPresentation(signature, view.ParticleWorld);
+		signature = FoldPresentation(signature, view.ParticleWorldName.Id());
 		signature = FoldPresentation(signature, ContentOwnerSignature(view));
 		signature = FoldPresentation(signature, view.ParticleLayoutRevision);
 		signature = FoldPresentation(signature, view.ParticleResidentRevision);
 		signature = FoldPresentation(signature, view.Particles.size());
 		signature = FoldPresentation(signature, view.ParticleSeams.empty() ? 0u : 1u);
+		// Device positions can enter the frustum without changing CPU residency.
+		signature = FoldPresentation(signature, view.GpuParticles.has_value());
+		if (view.GpuParticles) signature = FoldGpuParticleField(signature, *view.GpuParticles);
+		signature = FoldPresentation(signature, !view.WeatherParticles.empty());
+		for (const auto &packet : view.WeatherParticles)
+			signature = FoldGpuParticleField(signature, packet);
 		return signature;
 	}
 
@@ -540,6 +705,7 @@ namespace engine::render {
 		// of them must not redraw an identical scene.
 		const scene::Environment &environment = lighting.EnvironmentState;
 		const EnvironmentUniformModes environmentModes = EnvironmentModesOf(environment);
+		const bool weatherShadows = WeatherShadowLayerPresent(environment);
 		if (!EnvironmentLayerPresent(lighting)) {
 			environmentSignature = 0;
 		} else {
@@ -581,11 +747,47 @@ namespace engine::render {
 				}
 			}
 			if (environmentModes.Clouds != 0) {
+				environmentSignature = FoldPresentation(environmentSignature, environmentModes.Clouds);
 				environmentSignature = FoldPresentationObject(environmentSignature, environment.CloudLayer);
 				if (environmentModes.Clouds == 2) {
 					environmentSignature =
 						FoldPresentationObject(environmentSignature, environment.CloudVolume);
 				}
+			}
+			if (environmentModes.Clouds == 3 || weatherShadows) {
+				if (weatherShadows) {
+					environmentSignature =
+						FoldPresentationObject(environmentSignature, environment.CloudLayer.Density);
+					environmentSignature =
+						FoldPresentationObject(environmentSignature, environment.CloudLayer.Cover);
+				}
+				environmentSignature = FoldWeatherState(environmentSignature, environment);
+				if (environment.Weather.Mode == scene::WeatherMode::Stateful) {
+					environmentSignature =
+						FoldPresentation(environmentSignature, view.WeatherTerrainRevision);
+					environmentSignature =
+						FoldPresentation(environmentSignature, view.WeatherSimulationLayer.Text().size());
+					for (const unsigned char byte : view.WeatherSimulationLayer.Text())
+						environmentSignature = FoldPresentation(environmentSignature, byte);
+					environmentSignature =
+						FoldPresentation(environmentSignature, view.WeatherCheckpointVersion);
+					environmentSignature = FoldPresentation(environmentSignature, view.WeatherCheckpointTick);
+					environmentSignature =
+						FoldPresentation(environmentSignature, view.WeatherCheckpointEpoch);
+					environmentSignature =
+						FoldPresentation(environmentSignature, view.WeatherCheckpointRevision);
+					environmentSignature =
+						FoldPresentation(environmentSignature, view.WeatherCheckpoint.size());
+					// Unowned hand-built views have no publication version to certify their bytes.
+					if (view.WeatherCheckpointVersion == 0)
+						for (const auto byte : view.WeatherCheckpoint)
+							environmentSignature =
+								FoldPresentation(environmentSignature, std::to_integer<uint8_t>(byte));
+				}
+
+				// Volumetric weather depends on the eye, including cloud-only worlds.
+				environmentSignature = FoldCFrame(environmentSignature, view.CameraFrame);
+				environmentSignature = FoldPresentationObject(environmentSignature, view.Camera);
 			}
 			environmentSignature = FoldPresentation(environmentSignature, view.OverrideLighting ? 1u : 0u);
 			if (view.OverrideLighting) {
@@ -594,15 +796,30 @@ namespace engine::render {
 		}
 
 		uint64_t &particles = signatures.Particles;
-		const bool particleLayer = !view.Particles.empty() || !view.RibbonRuns.empty();
+		const bool particleLayer = !view.Particles.empty() || !view.RibbonRuns.empty() ||
+								   view.GpuParticles.has_value() || !view.WeatherParticles.empty();
 		if (particleLayer) {
 			particles = FoldPresentation(particles, projection);
 			particles = FoldPresentation(particles, contentOwners);
+			particles = FoldPresentation(particles, view.ParticleWorld);
+			particles = FoldPresentation(particles, view.ParticleWorldName.Id());
 			particles = FoldPresentation(particles, view.ParticleRevision);
 			particles = FoldPresentation(particles, view.ParticleLayoutRevision);
 			particles = FoldPresentation(particles, view.ParticleResidentRevision);
 			particles = FoldPresentationSpan(particles, view.RibbonRuns);
 			particles = FoldPresentationSpan(particles, view.RibbonVertices);
+			if (view.GpuParticles || !view.WeatherParticles.empty()) {
+				particles = FoldPresentation(particles, view.World);
+				particles = FoldPresentation(particles, view.WorldName.Id());
+				particles = FoldCFrame(particles, view.CameraFrame);
+				particles = FoldPresentationObject(particles, view.Camera);
+				particles = FoldWorldLighting(particles, lighting);
+				particles = FoldPresentation(particles, view.GpuParticles.has_value());
+				if (view.GpuParticles) particles = FoldGpuParticleField(particles, *view.GpuParticles);
+				particles = FoldPresentation(particles, !view.WeatherParticles.empty());
+				for (const auto &packet : view.WeatherParticles)
+					particles = FoldGpuParticleField(particles, packet);
+			}
 		}
 
 		uint64_t &portals = signatures.Portals;
@@ -793,8 +1010,9 @@ namespace engine::render {
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 			{
 				ENGINE_PROFILE_CAT("reuse draw list.seams", engine::core::ProfileCategory::Simulation);
-				(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+				AppendPresentationSeamRows(store, *drawList);
 			}
+			if (ClearAbsentCaptureLabels(store, *drawList)) return;
 			{
 				ENGINE_PROFILE_CAT(
 					"reuse draw list.object labels", engine::core::ProfileCategory::Simulation
@@ -842,26 +1060,45 @@ namespace engine::render {
 				} else {
 					CollectSkinPalettes(store, *drawList);
 				}
-				(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
-				AssignObjectLabels(store, *drawList);
-				AssignAuthoredLabels(
-					store,
-					*drawList,
-					"DataFactorySemanticId",
-					drawList->SemanticLabels,
-					drawList->SemanticLabelsValid,
-					&scene::DrawInstance::SemanticLabel,
-					true
-				);
-				AssignAuthoredLabels(
-					store,
-					*drawList,
-					"DataFactoryPartId",
-					drawList->PartLabels,
-					drawList->PartLabelsValid,
-					&scene::DrawInstance::PartLabel,
-					false
-				);
+				{
+					ENGINE_PROFILE_CAT("update draw frames.seams", engine::core::ProfileCategory::Simulation);
+					AppendPresentationSeamRows(store, *drawList);
+				}
+				if (ClearAbsentCaptureLabels(store, *drawList)) return;
+				{
+					ENGINE_PROFILE_CAT(
+						"update draw frames.object labels", engine::core::ProfileCategory::Simulation
+					);
+					AssignObjectLabels(store, *drawList);
+				}
+				{
+					ENGINE_PROFILE_CAT(
+						"update draw frames.semantic labels", engine::core::ProfileCategory::Simulation
+					);
+					AssignAuthoredLabels(
+						store,
+						*drawList,
+						"DataFactorySemanticId",
+						drawList->SemanticLabels,
+						drawList->SemanticLabelsValid,
+						&scene::DrawInstance::SemanticLabel,
+						true
+					);
+				}
+				{
+					ENGINE_PROFILE_CAT(
+						"update draw frames.part labels", engine::core::ProfileCategory::Simulation
+					);
+					AssignAuthoredLabels(
+						store,
+						*drawList,
+						"DataFactoryPartId",
+						drawList->PartLabels,
+						drawList->PartLabelsValid,
+						&scene::DrawInstance::PartLabel,
+						false
+					);
+				}
 				return;
 			}
 			// A source query changed shape without a matching component epoch. The
@@ -1115,6 +1352,7 @@ namespace engine::render {
 		// whole copies straddling two panes. The same call serves a replica,
 		// which has a draw list and no simulation behind it.
 		AppendPresentationSeamRows(store, *drawList);
+		if (ClearAbsentCaptureLabels(store, *drawList)) return;
 		AssignObjectLabels(store, *drawList);
 		AssignAuthoredLabels(
 			store,
@@ -1312,6 +1550,7 @@ namespace engine::render {
 				batch.Runtime = &system->RuntimeStates[slot.Index];
 				batch.Index = slot.Index;
 				batch.Texture = emitter.Texture;
+				batch.SourceWorld = sourceWorld;
 				batch.FlipbookSide = static_cast<float>(effects::FlipbookSide(emitter.Flipbook));
 				batch.ZOffset = emitter.ZOffset;
 				batch.LightEmission = emitter.LightEmission;
@@ -1481,6 +1720,8 @@ namespace engine::render {
 					lists[index].SkeletonCount = 0;
 					lists[index].BoneCount = 0;
 					lists[index].SourcesReady = false;
+					lists[index].DrawableSourcesReady = false;
+					lists[index].DrawableSourceIds.clear();
 					lists[index].HasInterpolation = false;
 				}
 			}

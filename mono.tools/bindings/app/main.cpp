@@ -22,9 +22,9 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/physics/Pipeline.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
@@ -127,6 +127,10 @@ namespace {
 	// said `EnumItem`, which is the shape and not the type - and would have
 	// given an author completion for every enum in the engine at once.
 	std::string LuauType(const PropertyDescriptor &property) {
+		if (property.Type == PropertyType::Reference && property.ReferenceClass.IsValid()) {
+			return std::string(property.ReferenceClass.Text());
+		}
+
 		if (property.Type == PropertyType::Enum) {
 			// **`Enum.Material`, the same as the TypeScript half**, and getting
 			// here took a correction worth recording rather than editing out.
@@ -204,6 +208,10 @@ namespace {
 	}
 
 	std::string TypeScriptType(const PropertyDescriptor &property) {
+		if (property.Type == PropertyType::Reference && property.ReferenceClass.IsValid()) {
+			return std::string(property.ReferenceClass.Text());
+		}
+
 		if (property.Type == PropertyType::Enum) {
 			// **`Enum.Material`, which is what a Roblox script spells**, and this
 			// is the half of `ROADMAP.md` v0.10's rename that a type system can
@@ -508,10 +516,17 @@ namespace {
 				const PropertyDescriptor &described = properties[property];
 				out << "\t\t\t\t{";
 				out << "\"name\": \"" << described.Name.Text() << "\", ";
-				out << "\"type\": \"" << TypeName(described.Type) << "\", ";
+				out << "\"type\": \"";
+				if (described.Type == PropertyType::Reference && described.ReferenceClass.IsValid()) {
+					out << described.ReferenceClass.Text();
+				} else {
+					out << TypeName(described.Type);
+				}
+				out << "\", ";
 				out << "\"kind\": \"" << KindName(described.Kind) << "\", ";
 				out << "\"bytes\": " << described.Size << ", ";
 				out << "\"writable\": " << (described.Writable ? "true" : "false") << ", ";
+				out << "\"nullable\": " << (described.Nullable ? "true" : "false") << ", ";
 				if (described.Type == PropertyType::Enum) {
 					// Only on an enum property, so the shape of every other row
 					// is unchanged and the diff of this file reads as what
@@ -1845,6 +1860,30 @@ declare extern type RunService with
 	function IsReplica(self): boolean
 end
 
+-- Copied accepted weather values in the named physical units. Tick and Epoch are exact decimal
+-- uint64 text. Mutating this dictionary never changes the atmosphere.
+declare extern type WeatherSample with
+	Layer: string
+	Mode: string
+	Tick: string
+	Epoch: string
+	DefinitionRevision: number
+	CondensateKilogramsPerCubicMetre: number
+	VapourKilogramsPerKilogram: number
+	TemperatureCelsius: number
+	PressureHectopascals: number
+	WindMetresPerSecond: Vector3
+	IceFraction: number
+	LiquidMillimetresPerHour: number
+	SnowMillimetresPerHour: number
+	HailMillimetresPerHour: number
+	MeltingFraction: number
+	SpawnSeed: number
+	FogExtinctionPerMetre: number
+	ChargeSeparation: number
+	HailGrowth: number
+end
+
 -- The shared analytical tornado field. Configure and Preset require the
 -- authoritative server role; the remaining queries are read-only everywhere.
 declare extern type StormFieldSample with
@@ -2138,7 +2177,9 @@ declare task: {
 					out << "read ";
 				}
 
-				out << property.Name.Text() << ": " << LuauType(property) << "\n";
+				out << property.Name.Text() << ": " << LuauType(property);
+				if (property.Nullable && property.Type == PropertyType::Reference) out << "?";
+				out << "\n";
 			}
 
 			// **The host members, which project onto no component and never
@@ -2324,6 +2365,12 @@ declare task: {
 				out << "\tfunction ApplyImpulse(self, impulse: Vector3): ()\n";
 				out << "\tfunction SetAppliedForce(self, force: Vector3): ()\n";
 				out << "\tfunction SetAppliedTorque(self, torque: Vector3): ()\n";
+				out << "\t-- WeatherCompute only. Missing, disabled or unavailable models return nil.\n";
+				out << "\tfunction Sample(self, positionMetres: Vector3, groundHeightMetres: number?): "
+					   "WeatherSample?\n";
+				out << "\tfunction SetSpawnSamples(self, samples: buffer): boolean\n";
+				out << "\tfunction SetLayer(self, index: number, colour: Color3, alpha: number, size: "
+					   "number, acceleration: Vector3): boolean\n";
 				out << "\tfunction Break(self): number\n";
 
 				// **The one door onto `LocalTransparency`, for the same reason
@@ -2394,9 +2441,21 @@ declare task: {
 				out << "\t-- Buffers above the 64 MiB image ceiling raise before the image changes.\n";
 				out << "\tfunction ToBuffer(self): buffer\n";
 				out << "\tfunction FromBuffer(self, buffer: buffer): boolean\n";
+				out << "\t-- Bounded 1920x1080 imports; malformed data leaves the image unchanged.\n";
+				out << "\tfunction FromBase64(self, encoded: string, format: \"rgba8\" | \"png\" | "
+					   "\"jpeg\"): boolean\n";
+				out << "\tfunction FromEncodedBuffer(self, buffer: buffer, format: \"png\" | \"jpeg\"): "
+					   "boolean\n";
+				out << "\t-- Raw RGBA8 bytes in the current image space; empty string on export refusal.\n";
+				out << "\tfunction ToBase64(self): string\n";
 
 				out << "\tfunction GetAttribute(self, name: string): EngineAttribute?\n";
 				out << "\tfunction SetAttribute(self, name: string, value: EngineAttribute?): ()\n";
+				out << "\t-- ImageGraph overrides; nil restores the graph default.\n";
+				out << "\tfunction SetInput(self, name: string, value: (number | boolean | Color3 | "
+					   "string)?): ()\n";
+				out << "\tfunction GetInput(self, name: string): (number | boolean | Color3 | string)?\n";
+				out << "\tfunction GetImage(self, output: string?): string\n";
 				out << "\tfunction GetAttributes(self): { [string]: EngineAttribute }\n";
 				out << "\tfunction GetAttributeChangedSignal(self, name: string): "
 					   "PropertyChangedSignal\n";
@@ -3468,6 +3527,30 @@ declare interface DataStoreService {
 	RemoveAsync(key: string): Promise<StoreReply>;
 }
 
+// Copied accepted weather values in the named physical units. Tick and Epoch are exact decimal
+// uint64 text. Mutating this dictionary never changes the atmosphere.
+declare interface WeatherSample {
+	Layer: string;
+	Mode: "Procedural" | "Stateful";
+	Tick: string;
+	Epoch: string;
+	DefinitionRevision: number;
+	CondensateKilogramsPerCubicMetre: number;
+	VapourKilogramsPerKilogram: number;
+	TemperatureCelsius: number;
+	PressureHectopascals: number;
+	WindMetresPerSecond: Vector3;
+	IceFraction: number;
+	LiquidMillimetresPerHour: number;
+	SnowMillimetresPerHour: number;
+	HailMillimetresPerHour: number;
+	MeltingFraction: number;
+	SpawnSeed: number;
+	FogExtinctionPerMetre: number;
+	ChargeSeparation: number;
+	HailGrowth: number;
+}
+
 declare interface RunService {
 	readonly Heartbeat: HeartbeatSignal;
 }
@@ -3957,7 +4040,9 @@ declare const task: {
 				if (!property.Writable) {
 					out << "readonly ";
 				}
-				out << property.Name.Text() << ": " << TypeScriptType(property) << ";\n";
+				out << property.Name.Text() << ": " << TypeScriptType(property);
+				if (property.Nullable && property.Type == PropertyType::Reference) out << " | null";
+				out << ";\n";
 			}
 
 			// The host members, for the reason the Luau half states: they
@@ -4062,6 +4147,12 @@ declare const task: {
 				out << "\tApplyImpulse(impulse: Vector3): void;\n";
 				out << "\tSetAppliedForce(force: Vector3): void;\n";
 				out << "\tSetAppliedTorque(torque: Vector3): void;\n";
+				out << "\t// WeatherCompute only. Missing, disabled or unavailable models return null.\n";
+				out << "\tSample(positionMetres: Vector3, groundHeightMetres?: number | null): WeatherSample "
+					   "| null;\n";
+				out << "\tSetSpawnSamples(samples: ArrayBuffer): boolean;\n";
+				out << "\tSetLayer(index: number, colour: Color3, alpha: number, size: number, acceleration: "
+					   "Vector3): boolean;\n";
 				out << "\tBreak(): number;\n";
 
 				// The one door onto `LocalTransparency`, matching the Luau half
@@ -4105,11 +4196,20 @@ declare const task: {
 				out << "\t * Buffers above the 64 MiB image ceiling raise before the image changes. */\n";
 				out << "\tToBuffer(): ArrayBuffer;\n";
 				out << "\tFromBuffer(buffer: ArrayBuffer): boolean;\n";
+				out << "\t/** Bounded 1920x1080 imports; malformed data leaves the image unchanged. */\n";
+				out << "\tFromBase64(encoded: string, format: 'rgba8' | 'png' | 'jpeg'): boolean;\n";
+				out << "\tFromEncodedBuffer(buffer: ArrayBuffer, format: 'png' | 'jpeg'): boolean;\n";
+				out << "\t/** Raw RGBA8 bytes in current image space; empty string on export refusal. */\n";
+				out << "\tToBase64(): string;\n";
 
 				// Attributes, matching the Luau half. The union is the same
 				// closed set and for the same reason.
 				out << "\tGetAttribute(name: string): EngineAttribute | null;\n";
 				out << "\tSetAttribute(name: string, value: EngineAttribute | null): void;\n";
+				out << "\t/** ImageGraph overrides; null restores the graph default. */\n";
+				out << "\tSetInput(name: string, value: number | boolean | Color3 | string | null): void;\n";
+				out << "\tGetInput(name: string): number | boolean | Color3 | string | null;\n";
+				out << "\tGetImage(output?: string): string;\n";
 				out << "\tGetAttributes(): { [name: string]: EngineAttribute };\n";
 				out << "\tGetAttributeChangedSignal(name: string): PropertyChangedSignal;\n";
 
@@ -4380,7 +4480,6 @@ int main(int argc, char **argv) {
 	// from an empty table would be a valid file describing nothing, and its
 	// drift check would pass forever.
 	(void)engine::scene::PartClass();
-	engine::physics::RegisterPhysicsClasses();
 
 	// **`ShaderScript` and `EditableMesh`, which `PartClass` does not reach.**
 	// Both self-register through their own accessor rather than through
@@ -4394,6 +4493,7 @@ int main(int argc, char **argv) {
 	(void)engine::scene::LensShaderClass();
 	(void)engine::scene::EditableMeshClass();
 	(void)engine::scene::EditableImageClass();
+	(void)engine::scene::ImageGraphClass();
 
 	// The script classes too. A manifest that described `Part` and not `Script`
 	// would be describing what a script can *build* and not what a world can

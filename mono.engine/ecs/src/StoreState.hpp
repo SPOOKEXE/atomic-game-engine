@@ -364,6 +364,9 @@ namespace engine::ecs {
 		// matching archetype.
 		std::vector<uint64_t> ComponentChanges;
 
+		// Write epochs at the last dirty-row clear, for consumers that may skip ticks.
+		std::vector<uint64_t> ComponentClearedChanges;
+
 		// One monotonic epoch per observed component, advanced when an entity
 		// gains or loses that component, including when the entity is destroyed.
 		std::vector<uint64_t> ComponentMembershipChanges;

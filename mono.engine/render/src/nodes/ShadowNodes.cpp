@@ -246,13 +246,14 @@ namespace engine::render {
 
 				for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
 					const PortalView *const portal = portalOf[slot];
-					if (portal == nullptr || portal->Partner < 0) {
+					if (portal == nullptr || portal->Partner < 0 ||
+						static_cast<size_t>(portal->Partner) >= scene::MAX_SURFACES) {
 						continue;
 					}
 
 					// The partner is the source aperture in the mapped chart. A pane
 					// without that aperture cannot carry source-side occlusion.
-					const PortalView *const partner = portalOf[static_cast<uint8_t>(portal->Partner)];
+					const PortalView *const partner = portalOf[static_cast<uint16_t>(portal->Partner)];
 					if (partner == nullptr) {
 						continue;
 					}

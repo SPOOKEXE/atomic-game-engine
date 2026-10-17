@@ -1,0 +1,95 @@
+#version 450
+
+// Encoded/raw RGBA8 intermediates match the CPU document's numeric contract.
+// Hardware filtering and sRGB conversion cannot implement that contract.
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(set = 0, binding = 0) uniform sampler2D firstImage;
+layout(set = 0, binding = 1) uniform sampler2D secondImage;
+layout(set = 1, binding = 0, rgba8) writeonly uniform image2D targetImage;
+layout(set = 2, binding = 0, std140) uniform Node {
+	uvec4 Control;
+	ivec4 Extents;
+	ivec4 Region;
+	vec4 Colour;
+	vec4 Affine;
+	vec4 Parameters;
+}
+node;
+
+vec3 Encode(vec3 linear) {
+	linear = clamp(linear, vec3(0.0), vec3(1.0));
+	return mix(
+		12.92 * linear, 1.055 * pow(linear, vec3(1.0 / 2.4)) - 0.055, greaterThan(linear, vec3(0.0031308))
+	);
+}
+vec4 Quantize(vec4 bytes) {
+	return floor(clamp(bytes, vec4(0.0), vec4(255.0)) + 0.5);
+}
+vec4 At(ivec2 pixel, bool clampEdges) {
+	if (clampEdges) pixel = clamp(pixel, ivec2(0), node.Extents.zw - 1);
+	if (any(lessThan(pixel, ivec2(0))) || any(greaterThanEqual(pixel, node.Extents.zw))) return vec4(0.0);
+	return Quantize(texelFetch(firstImage, pixel, 0) * 255.0);
+}
+vec4 Sample(vec2 position, bool clampEdges) {
+	if (any(isnan(position)) || any(isinf(position))) return vec4(0.0);
+	if (node.Control.y == 0u) {
+		if (any(lessThan(position, vec2(0.0))) || any(greaterThanEqual(position, vec2(node.Extents.zw))))
+			return vec4(0.0);
+		return At(ivec2(floor(position)), false);
+	}
+	if (any(lessThan(position, vec2(-0.5))) || any(greaterThan(position, vec2(node.Extents.zw) + 0.5)))
+		return vec4(0.0);
+	position -= 0.5;
+	ivec2 corner = ivec2(floor(position));
+	vec2 fraction = position - vec2(corner);
+	vec4 total = vec4(0.0);
+	for (int row = 0; row < 2; row++) {
+		for (int column = 0; column < 2; column++) {
+			vec4 pixel = At(corner + ivec2(column, row), clampEdges);
+			float weight =
+				(column == 0 ? 1.0 - fraction.x : fraction.x) * (row == 0 ? 1.0 - fraction.y : fraction.y);
+			total.rgb += pixel.rgb * (pixel.a / 255.0) * weight;
+			total.a += pixel.a * weight;
+		}
+	}
+	if (total.a > 0.0) total.rgb *= 255.0 / total.a;
+	return total;
+}
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (any(greaterThanEqual(pixel, node.Extents.xy))) return;
+	vec4 result = vec4(0.0);
+	uint kind = node.Control.x;
+	if (kind == 0u) {
+		vec4 sampled = texelFetch(firstImage, pixel, 0);
+		if ((node.Control.z & 2u) != 0u) sampled = vec4(sampled.rrr, 1.0);
+		if ((node.Control.z & 4u) != 0u) sampled = vec4(sampled.r, 0.0, 0.0, 1.0);
+		if ((node.Control.z & 1u) != 0u) sampled.rgb = Encode(sampled.rgb);
+		result = sampled * 255.0;
+	} else if (kind == 1u) {
+		result = node.Colour;
+	} else if (kind == 2u) {
+		vec2 position = (vec2(pixel) + 0.5) * vec2(node.Extents.zw) / vec2(node.Extents.xy);
+		result = Sample(position, true);
+	} else if (kind == 3u) {
+		result = At(node.Region.xy + pixel, false);
+	} else if (kind == 4u) {
+		vec2 centre = vec2(pixel) + 0.5;
+		vec2 position = vec2(dot(node.Affine.xy, centre), dot(node.Affine.zw, centre)) + node.Parameters.xy;
+		result = Sample(position, false);
+	} else if (kind == 5u) {
+		ivec2 source = pixel;
+		if (node.Region.x != 0) source.x = node.Extents.z - 1 - pixel.x;
+		if (node.Region.y != 0) source.y = node.Extents.w - 1 - pixel.y;
+		result = At(source, false);
+	} else if (kind == 6u) {
+		vec4 background = At(pixel, false);
+		vec4 foreground = Quantize(texelFetch(secondImage, pixel, 0) * 255.0);
+		float front = foreground.a / 255.0 * node.Parameters.z;
+		float back = background.a / 255.0 * (1.0 - front);
+		float alpha = front + back;
+		if (alpha > 0.0)
+			result = vec4((foreground.rgb * front + background.rgb * back) / alpha, alpha * 255.0);
+	}
+	imageStore(targetImage, pixel, Quantize(result) / 255.0);
+}

@@ -221,8 +221,8 @@ namespace engine::render {
 		SDL_GPUShader *packedOpaqueVertex =
 			LoadShader("packed-opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 2, 5);
 
-		// **Thirteen samplers: material inputs plus primary and widened opaque
-		// sources for transmission.** The count is
+		// Sixteen samplers include material/transmission inputs, reserved layer
+		// bounds and the cloud optical-depth atlas. The count is
 		// part of the shader object rather than of the pipeline, so a mismatch
 		// with the `layout(set = 2, binding = n)` declarations is a bind that
 		// silently reads nothing rather than a validation error.
@@ -254,11 +254,13 @@ namespace engine::render {
 		SDL_GPUShader *ssaoFragment = LoadShader("ssao.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 		SDL_GPUShader *packChannelsFragment =
 			LoadShader("pack-channels.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 4, 1);
-		// Ten samplers: the seven G-buffer and shadow inputs, two seam light
-		// captures, then the portal shadow beam atlas.
+		// Eleven samplers include G-buffer inputs, solid/portal shadows and
+		// the independent weather optical-depth atlas.
 		SDL_GPUShader *deferredLightingFragment =
-			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
+			LoadShader("deferred-lighting.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 4);
 		SDL_GPUShader *skyFragment = LoadShader("sky.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 1);
+		SDL_GPUShader *weatherFallbackFragment =
+			LoadShader("weather-fallback.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 2);
 		SDL_GPUShader *volumeFragment = LoadShader("volume.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1, 1);
 		SDL_GPUShader *tonemapFragment = LoadShader("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
 		for (auto *shader :
@@ -519,6 +521,9 @@ namespace engine::render {
 			DeferredLightingPipeline =
 				fullscreen(deferredLightingFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			SkyPipeline = fullscreen(skyFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
+			if (weatherFallbackFragment)
+				WeatherFallbackPipeline =
+					fullscreen(weatherFallbackFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			VolumePipeline = fullscreen(volumeFragment, SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT);
 			TonemapPipeline = fullscreen(tonemapFragment, swapchainFormat);
 			if (DepthLinearPipeline == nullptr || DepthValidityPipeline == nullptr ||
@@ -626,7 +631,35 @@ namespace engine::render {
 				if (GridPipeline == nullptr) {
 					ENGINE_WARN("ground grid pipeline unavailable: {}", SDL_GetError());
 				}
+				if (hdrSupported) {
+					SDL_GPUColorTargetDescription hdrGridTarget = blendedTarget;
+					hdrGridTarget.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+					grid.target_info.color_target_descriptions = &hdrGridTarget;
+					HdrGridPipeline = SDL_CreateGPUGraphicsPipeline(Device, &grid);
+					if (HdrGridPipeline == nullptr) {
+						ENGINE_WARN("HDR ground grid pipeline unavailable: {}", SDL_GetError());
+					}
+				}
 				SDL_ReleaseGPUShader(Device, gridFragment);
+			}
+		}
+
+		// Grid-only tails blend into a new image without copying their input first.
+		if (hdrSupported) {
+			auto *fragment = LoadShader("grid-composite.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
+			if (fragment != nullptr) {
+				SDL_GPUColorTargetDescription target{};
+				target.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
+				SDL_GPUGraphicsPipelineCreateInfo composite = transparent;
+				composite.vertex_shader = overlayVertex;
+				composite.fragment_shader = fragment;
+				composite.vertex_input_state = {};
+				composite.depth_stencil_state = {};
+				composite.target_info.has_depth_stencil_target = false;
+				composite.target_info.depth_stencil_format = SDL_GPU_TEXTUREFORMAT_INVALID;
+				composite.target_info.color_target_descriptions = &target;
+				HdrGridCompositePipeline = SDL_CreateGPUGraphicsPipeline(Device, &composite);
+				SDL_ReleaseGPUShader(Device, fragment);
 			}
 		}
 
@@ -1041,6 +1074,7 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(Device, packChannelsFragment);
 		SDL_ReleaseGPUShader(Device, deferredLightingFragment);
 		SDL_ReleaseGPUShader(Device, skyFragment);
+		if (weatherFallbackFragment) SDL_ReleaseGPUShader(Device, weatherFallbackFragment);
 		SDL_ReleaseGPUShader(Device, volumeFragment);
 		SDL_ReleaseGPUShader(Device, tonemapFragment);
 		SDL_ReleaseGPUShader(Device, overlayVertex);
@@ -1068,6 +1102,13 @@ namespace engine::render {
 			GpuParticleFieldStep = LoadComputePipeline("gpu-particle-field.comp", 0, 1, 0, 1, 256, 1);
 			EnvironmentSkyCompute = LoadComputePipeline("environment.comp", 6, 0, 1, 0, 8, 8);
 			EnvironmentCloudCompute = LoadComputePipeline("environment-clouds.comp", 1, 0, 1, 0, 8, 8);
+			WeatherClockCompute = LoadComputePipeline("weather-clock.comp", 0, 0, 0, 1, 1, 1);
+			WeatherFieldCompute = LoadComputePipeline("weather-generate.comp", 0, 2, 0, 1, 64, 1);
+			WeatherSummaryCompute = LoadComputePipeline("weather-summary.comp", 0, 3, 0, 1, 64, 1);
+			WeatherRaysCompute = LoadComputePipeline("weather-clouds.comp", 1, 5, 2, 0, 8, 8);
+			WeatherTemporalCompute = LoadComputePipeline("weather-temporal.comp", 4, 0, 1, 0, 8, 8);
+			WeatherReconstructCompute = LoadComputePipeline("weather-reconstruct.comp", 4, 0, 1, 0, 8, 8);
+			WeatherEvolutionCompute = LoadComputePipeline("weather-evolve.comp", 0, 5, 0, 5, 64, 1);
 		}
 
 		// **The particle pipelines are deliberately not in this conjunction.** A
@@ -1075,6 +1116,8 @@ namespace engine::render {
 		// failing initialisation over an effect would take the whole client down
 		// for something a scene may not even use. `DrawParticles` checks for null
 		// and draws nothing, with the error already in the log above.
+		// Environment and weather compute are optional too: the sky handler uses
+		// the fragment approximation when those products cannot be published.
 		return OpaquePipeline != nullptr && ForwardPipeline != nullptr && TransparentPipeline != nullptr &&
 			   DeferredPipelineReady(PackedOpaquePipeline) && DeferredPipelineReady(PackedForwardPipeline) &&
 			   DeferredPipelineReady(PackedTransparentPipeline) &&
@@ -1087,8 +1130,7 @@ namespace engine::render {
 				 DepthValidityPipeline != nullptr && CameraMotionPipeline != nullptr &&
 				 SsaoPipeline != nullptr && DeferredLightingPipeline != nullptr && SkyPipeline != nullptr &&
 				 VolumePipeline != nullptr && TonemapPipeline != nullptr)) &&
-			   (!Caps.HasCompute || (EnvironmentSkyCompute != nullptr && EnvironmentCloudCompute != nullptr &&
-									 Lod.Select != nullptr));
+			   (!Caps.HasCompute || Lod.Select != nullptr);
 	}
 
 	bool Renderer::Impl::EnsureTransparentLayer() {
@@ -1097,7 +1139,7 @@ namespace engine::render {
 			AdditiveParticleLayerColourPipeline && RibbonLayerPipeline && RibbonLayerColourPipeline &&
 			AdditiveRibbonLayerColourPipeline)
 			return true;
-		auto *fragment = LoadShader("transparent-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 15, 4);
+		auto *fragment = LoadShader("transparent-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 16, 4);
 		auto *particleVertex = LoadShader("particle.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
 		auto *particleFragment = LoadShader("particle-layer.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 3, 2);
 		auto *ribbonVertex = LoadShader("ribbon.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1);
@@ -1300,7 +1342,7 @@ namespace engine::render {
 	bool Renderer::Impl::EnsureDeferredLightingBaseline() {
 		if (DeferredLightingBaselinePipeline) return true;
 		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
-		auto *fragment = LoadShader("deferred-lighting-baseline.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
+		auto *fragment = LoadShader("deferred-lighting-baseline.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 4);
 		if (vertex && fragment) {
 			SDL_GPUColorTargetDescription targets[2]{};
 			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
@@ -1327,7 +1369,7 @@ namespace engine::render {
 		if (DeferredLightingDirectionalPipeline) return true;
 		auto *vertex = LoadShader("overlay.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0);
 		auto *fragment =
-			LoadShader("deferred-lighting-directional.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 10, 3);
+			LoadShader("deferred-lighting-directional.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 11, 4);
 		if (vertex && fragment) {
 			SDL_GPUColorTargetDescription targets[3]{};
 			targets[0].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
@@ -2014,6 +2056,13 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::ReleaseGraphState(core::Name pipeline) {
+		for (auto &slot : SceneSlots) {
+			if (slot.ForwardWorking.Pipeline == pipeline) slot.ForwardWorking = {};
+			if (slot.ForwardPipeline != pipeline) continue;
+			slot.ForwardedTextures.clear();
+			slot.ForwardPipeline = {};
+			slot.Activity = {};
+		}
 		std::erase_if(GraphCaptureReceipts, [pipeline](const GraphCaptureReceipt &receipt) {
 			return receipt.Pipeline == pipeline;
 		});

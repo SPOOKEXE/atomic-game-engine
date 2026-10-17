@@ -19,6 +19,12 @@ namespace assetc {
 	//
 	// @since v0.9
 	struct Settings {
+		// Empty selects the sole authored image graph output.
+		std::string ImageGraphOutput;
+
+		// grug keeps nodes and inputs in .aimagegraph. source pixels stay exact.
+		bool LiveImageGraphs = false;
+
 		// The directory of source art to walk, recursively.
 		std::filesystem::path Input;
 

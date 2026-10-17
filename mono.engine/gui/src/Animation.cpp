@@ -1,6 +1,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Animation.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/gui/PlayerGui.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -325,6 +326,7 @@ namespace engine::gui {
 
 		std::vector<Pending> pending;
 		store.Each<const AnimationPlayback>([&](ecs::Entity entity, const AnimationPlayback &playback) {
+			if (IsPlayerGuiSource(store, entity)) return;
 			if (scope != ecs::NULL_ENTITY && entity != scope && !store.IsDescendantOf(entity, scope)) {
 				return;
 			}

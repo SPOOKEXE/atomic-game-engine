@@ -26,6 +26,7 @@ namespace engine::script {
 		bool RunInstance(ecs::Entity instance) override;
 
 		bool Heartbeat(float delta) override;
+		bool DeliverRemoteEvent(std::span<const std::byte> message, ecs::Entity sender) override;
 
 		Language Which() const override {
 			return Language::JavaScript;
@@ -52,6 +53,8 @@ namespace engine::script {
 		void Release(HostCallback callback) override;
 
 	  private:
+		bool
+		RunSource(std::string_view source, std::string_view name, const HostRole &, ecs::Entity instance);
 		// Drains promise reactions until there are none left, or until
 		// `RuntimeLimits::JobBudget` of them have run.
 		//

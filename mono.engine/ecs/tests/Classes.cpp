@@ -15,6 +15,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <string_view>
+
 TEST_SUITE_ID("engine.ecs.classes")
 
 using engine::core::Name;
@@ -149,6 +152,40 @@ TEST_CASE("a derived class inherits its base's properties", "[ecs]") {
 	REQUIRE(Classes::Describe(tree.Instance).Properties.empty());
 }
 
+TEST_CASE("property presentation tags follow inheritance and class-local overrides", "[ecs]") {
+	const Tree &tree = ClassTree();
+	const ClassId overrideClass = Classes::Register("test.TagOverride", tree.BasePart, {});
+	const ClassId childClass = Classes::Register("test.TagOverrideChild", overrideClass, {});
+	Classes::Property<&ecs_test::Bounds::HalfExtent>(overrideClass, "HalfExtent");
+
+	const Name transformTag("Transform");
+	const Name geometryTag("Geometry");
+	CHECK(Classes::SetPropertiesTag(tree.BasePart, "HalfExtent", transformTag));
+
+	const auto findTag = [](ClassId owner, std::string_view name) {
+		const auto &properties = Classes::Describe(owner).Properties;
+		const auto found = std::find_if(properties.begin(), properties.end(), [name](const auto &property) {
+			return property.Spelling == name;
+		});
+		return found == properties.end() ? Name{} : found->PropertiesTag;
+	};
+
+	CHECK(findTag(tree.Part, "HalfExtent") == transformTag);
+	CHECK(findTag(overrideClass, "HalfExtent") == transformTag);
+	CHECK(findTag(childClass, "HalfExtent") == transformTag);
+	CHECK_FALSE(Classes::SetPropertiesTag(tree.Part, "HalfExtent", geometryTag));
+
+	CHECK(Classes::SetPropertiesTag(overrideClass, "HalfExtent", geometryTag));
+	CHECK(findTag(tree.BasePart, "HalfExtent") == transformTag);
+	CHECK(findTag(tree.Part, "HalfExtent") == transformTag);
+	CHECK(findTag(overrideClass, "HalfExtent") == geometryTag);
+	CHECK(findTag(childClass, "HalfExtent") == geometryTag);
+
+	CHECK(Classes::SetPropertiesTag(overrideClass, "HalfExtent", Name{}));
+	CHECK(findTag(overrideClass, "HalfExtent") == transformTag);
+	CHECK(findTag(childClass, "HalfExtent") == transformTag);
+}
+
 TEST_CASE(
 	"replica property writes require local ownership and an explicit allowance", "[ecs][local-property]"
 ) {
@@ -181,4 +218,33 @@ TEST_CASE("an unregistered class describes as empty rather than crashing", "[ecs
 	REQUIRE(Classes::Describe(ClassId{}).Set == nullptr);
 	REQUIRE(Classes::Describe(ClassId{0xFFFF'FFF0u}).Set == nullptr);
 	REQUIRE_FALSE(Classes::Find(Name("test.never.registered")).IsValid());
+}
+
+TEST_CASE("runtime locality belongs to an exact class and its owned tree", "[ecs]") {
+	const Tree &tree = ClassTree();
+	const ClassId viewer = Classes::Register("test.ViewerLocal", tree.Instance, {});
+	const ClassId surface = Classes::Register("test.AuthoredSurface", viewer, {});
+	Classes::SetRuntimeLocal(viewer, true);
+	CHECK(Classes::Describe(viewer).RuntimeLocal);
+	CHECK_FALSE(Classes::Describe(surface).RuntimeLocal);
+	Store store("classes.runtime-local");
+	const auto camera = store.CreateInstance(viewer, "Camera");
+	REQUIRE(store.IsPredicted(camera));
+	CHECK(store.Has<engine::ecs::ClientLocal>(camera));
+	const auto descendant = store.CreateInstance(tree.Part, "Child");
+	const auto authored = store.CreateInstance(surface, "Surface");
+	CHECK_FALSE(store.IsPredicted(authored));
+	REQUIRE(store.SetParent(descendant, camera));
+	CHECK(engine::ecs::IsClientLocalInstance(store, camera));
+	CHECK(engine::ecs::IsClientLocalInstance(store, descendant));
+	CHECK_FALSE(engine::ecs::IsClientLocalInstance(store, authored));
+	const auto local = store.CreatePredictedInstance(tree.Part, "Local");
+	store.Set(local, engine::ecs::ClientLocal{});
+	CHECK(engine::ecs::IsClientLocalInstance(store, local));
+	store.SetAdoptOnly(true);
+	const auto replicaCamera = store.CreateInstance(viewer, "Camera");
+	REQUIRE(store.Alive(replicaCamera));
+	CHECK(store.IsPredicted(replicaCamera));
+	CHECK(store.Has<engine::ecs::ClientLocal>(replicaCamera));
+	CHECK(store.CreateInstance(surface, "Surface") == engine::ecs::NULL_ENTITY);
 }

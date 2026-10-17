@@ -1,5 +1,8 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
+#include <engine/gui/PlayerGui.hpp>
+#include <engine/scene/Characters.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/Runtime.hpp>
@@ -304,6 +307,13 @@ namespace engine::script {
 
 	size_t Runtime::RunWorldScripts() {
 		Error.clear();
+		if (HostRoleValue.Client) {
+			const auto *local = Store.Resource<scene::LocalPlayer>();
+			if (local != nullptr)
+				(void)gui::RefreshPlayerGuiProjection(
+					Store, local->Instance, scene::CharacterOf(Store, local->Instance)
+				);
+		}
 
 		const std::vector<ecs::Entity> scripts = ScriptsIn(Store, HostRoleValue.Server, HostRoleValue.Client);
 

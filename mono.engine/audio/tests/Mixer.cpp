@@ -118,7 +118,7 @@ namespace {
 		NodeId Player;
 		SampleBuffer Out{STEREO, BLOCK};
 
-		Rig() {
+		explicit Rig(size_t frames = BLOCK) : Engine(STEREO, frames), Out(STEREO, frames) {
 			Player = Engine.Commands().Allocate();
 			Post(AddNode(Player, NodeKind::Player));
 			Post(Wire(Player, Engine.Graph().Output()));
@@ -319,6 +319,74 @@ TEST_CASE("a deadline past this block takes effect at the start of the next", "[
 
 	rig.Render();
 	CHECK(rig.At(0) == 1.0f);
+}
+
+TEST_CASE("retained Play deadlines stay silent across callback blocks", "[audio][mixer][schedule]") {
+	constexpr size_t callbackFrames = engine::audio::DEFAULT_BLOCK_FRAMES;
+	Rig rig(callbackFrames);
+	rig.Post(SetSound(rig.Player, Constant(0.5f)));
+	rig.Engine.ApplyPending();
+	const uint64_t deadline = callbackFrames * 4 + 7;
+	auto play = Act(CommandKind::Play, rig.Player, deadline);
+	play.RetainDeadline = true;
+	rig.Post(play);
+	for (size_t block = 0; block < 4; ++block) {
+		rig.Render();
+		CHECK(rig.Out.Peak() == 0);
+		CHECK(rig.Engine.Graph().Find(rig.Player)->Cursor == 0);
+	}
+	rig.Render();
+	CHECK(rig.At(6) == 0);
+	CHECK(rig.At(7) == 0.5f);
+	CHECK(rig.Engine.Graph().Find(rig.Player)->Cursor == callbackFrames - 7);
+}
+
+TEST_CASE("producers read only completed native callback sample clocks", "[audio][mixer][schedule]") {
+	constexpr size_t callbackFrames = engine::audio::DEFAULT_BLOCK_FRAMES;
+	constexpr uint64_t callbackCount = 4096;
+	AudioMixer mixer(STEREO, callbackFrames);
+	std::atomic<bool> complete{false};
+	std::jthread callback([&] {
+		SampleBuffer block(STEREO, callbackFrames);
+		for (uint64_t index = 0; index < callbackCount; ++index)
+			mixer.Render(block);
+		complete.store(true, std::memory_order_release);
+	});
+	uint64_t previous = 0;
+	bool monotonic = true;
+	bool completedBlocks = true;
+	while (!complete.load(std::memory_order_acquire)) {
+		const uint64_t samples = mixer.Clock();
+		monotonic &= samples >= previous;
+		completedBlocks &= samples % callbackFrames == 0 && samples <= callbackCount * callbackFrames;
+		previous = samples;
+		std::this_thread::yield();
+	}
+	callback.join();
+	CHECK(monotonic);
+	CHECK(completedBlocks);
+	CHECK(mixer.Clock() == callbackCount * callbackFrames);
+}
+
+TEST_CASE("retained Play cancellation retires before its sample deadline", "[audio][mixer][schedule]") {
+	Rig rig(engine::audio::DEFAULT_BLOCK_FRAMES);
+	rig.Post(SetSound(rig.Player, Constant(0.5f)));
+	rig.Engine.ApplyPending();
+	auto play = Act(CommandKind::Play, rig.Player, engine::audio::DEFAULT_BLOCK_FRAMES * 4);
+	play.RetainDeadline = true;
+	rig.Post(play);
+	rig.Render();
+	rig.Post(Act(CommandKind::Stop, rig.Player, rig.Engine.Clock()));
+	rig.Render();
+	for (size_t block = 0; block < 5; ++block) {
+		rig.Render();
+		CHECK(rig.Out.Peak() == 0);
+	}
+	CHECK(rig.Engine.Graph().Find(rig.Player)->Cursor == 0);
+	CHECK_FALSE(rig.Engine.Graph().Find(rig.Player)->Playing);
+	rig.Post(Act(CommandKind::RemoveNode, rig.Player, rig.Engine.Clock()));
+	rig.Render();
+	CHECK_FALSE(rig.Engine.Graph().Find(rig.Player));
 }
 
 TEST_CASE("a block with nothing scheduled is one segment", "[audio][mixer][schedule]") {

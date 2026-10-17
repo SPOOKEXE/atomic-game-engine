@@ -6,6 +6,7 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
@@ -16,10 +17,12 @@
 #include <engine/render/ShaderCompiler.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/WorldView.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/ShaderLens.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/generators/catch_generators.hpp>
@@ -31,6 +34,7 @@
 #include <iostream>
 #include <optional>
 #include <sstream>
+#include <utility>
 
 TEST_SUITE_ID("engine.render.portalfixtures")
 TEST_DEPENDS("engine.render.imagecomparison")
@@ -77,8 +81,66 @@ namespace {
 		return instance;
 	}
 
-	graph::PipelineDocument InstallPortalFixture(render::Renderer &renderer, bool hdr = false) {
-		auto document = hdr ? graph::DefaultWorldHdrDocument() : graph::DefaultPbrDocument();
+	graph::PipelineDocument InstallPortalFixture(
+		render::Renderer &renderer,
+		bool hdr = false,
+		bool separateCaptures = false,
+		bool flatMirrorFeedback = false
+	) {
+		const auto basis = hdr ? graph::DefaultWorldHdrDocument() : graph::DefaultPbrDocument();
+		graph::PipelineDocument document;
+		bool replacingCapture = false;
+		for (const auto &edit : basis.Edits()) {
+			if (edit.Kind == graph::EditKind::AddNode) {
+				replacingCapture = separateCaptures && edit.NodeKind == core::Name("surface-capture");
+				if (replacingCapture) {
+					for (const char *kind : {"mirror-capture", "portal-capture"}) {
+						document.Record(
+							{.Kind = graph::EditKind::AddNode,
+							 .Name = core::Name(kind),
+							 .NodeKind = core::Name(kind),
+							 .Scope = graph::NodeScope::View}
+						);
+						for (const auto &input :
+							 {std::pair{"shadow", "shadow"},
+							  std::pair{"ordered-entities", "entities"},
+							  std::pair{"lod-instances", "instances"}})
+							document.Record(
+								{.Kind = graph::EditKind::Reads,
+								 .Target = core::Name(input.first),
+								 .Key = core::Name(input.second)}
+							);
+						if (core::Name(kind) == core::Name("mirror-capture")) {
+							if (flatMirrorFeedback)
+								document.Record(
+									{.Kind = graph::EditKind::Set,
+									 .Key = core::Name("feedback"),
+									 .Value = "flat"}
+								);
+							document.Record(
+								{.Kind = graph::EditKind::Reads,
+								 .Target = core::Name("world-entities"),
+								 .Key = core::Name("world-state")}
+							);
+							document.Record(
+								{.Kind = graph::EditKind::Writes,
+								 .Target = core::Name("mirror-views"),
+								 .Key = core::Name("surface")}
+							);
+						} else {
+							for (const auto &output :
+								 {std::pair{"portal-image", "portal"}, std::pair{"portal-light", "light"}})
+								document.Record(
+									{.Kind = graph::EditKind::Writes,
+									 .Target = core::Name(output.first),
+									 .Key = core::Name(output.second)}
+								);
+						}
+					}
+				}
+			}
+			if (!replacingCapture) document.Record(edit);
+		}
 		const core::Name captureKind("portal-fixture-capture-boundary");
 		graph::NodeKindSpec capture;
 		capture.Kind = captureKind;
@@ -430,7 +492,9 @@ TEST_CASE(
 					);
 					const auto frame = fixture.Render.Render(views, overlay, interface.get(), false);
 					REQUIRE(frame.Ran(core::Name("surface-capture")));
-					REQUIRE(frame.Ran(core::Name("portal-overlay")));
+					// Looking away leaves no portal rows to composite. Its identity
+					// image is forwarded while the exterior pixel oracle still runs.
+					CHECK(frame.Ran(core::Name("portal-overlay")) == (sample.MinimumInterior > 0));
 					if (sample.MinimumInterior > 0) {
 						REQUIRE(frame.PortalPasses > 0);
 					}
@@ -777,7 +841,10 @@ TEST_CASE(
 	);
 }
 
-TEST_CASE("lens pipelines stay within each view's content owner", "[render][gpu][lens-owner-draw][.]") {
+TEST_CASE(
+	"lens pipelines stay within each view's content owner and compose across skipped passes",
+	"[render][gpu][lens-owner-draw][lens-chain-parity][.]"
+) {
 	FixtureDevice fixture;
 	fixture.Initialise();
 	const auto lensDocument = InstallPortalFixture(fixture.Render);
@@ -964,6 +1031,9 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 	};
 	const std::string scale = "value=value*0.5+vec3(0.125,0.25,0.375);\n";
 	const std::string swizzle = "value=value.brg*0.5+vec3(0.5,0.125,0);\n";
+	const core::Name missingName("lens.chain.missing");
+	const std::array chainShaders{scaleName, missingName, swizzleName, scaleName};
+	const std::array<std::string_view, 4> operations{scale, "", swizzle, scale};
 	REQUIRE(fixture.Render.AddLensShader(scaleName, compileSample(scale)));
 	REQUIRE(fixture.Render.AddLensShader(swizzleName, compileSample(swizzle)));
 	const auto install = [&](const graph::PipelineDocument &document) {
@@ -1022,12 +1092,12 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 				edit.Target = core::Name("lens-repeat-colour");
 			chainDocument.Record(edit);
 		}
-		for (uint32_t count = 0; count <= 3; ++count) {
+		for (size_t count = 0; count <= chainShaders.size(); ++count) {
 			CAPTURE(repeated, count);
 			std::string fused;
-			for (uint32_t pass = 0; pass < (repeated ? 2u : 1u); ++pass)
-				for (uint32_t lens = 0; lens < count; ++lens)
-					fused += lens == 1 ? swizzle : scale;
+			for (size_t pass = 0; pass < (repeated ? size_t{2} : size_t{1}); ++pass)
+				for (size_t lens = 0; lens < count; ++lens)
+					fused += operations[lens];
 			REQUIRE(fixture.Render.AddLensShader(fusedName, compileSample(fused)));
 			auto &view = views[0];
 			view.ContentOwner = {};
@@ -1036,10 +1106,10 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 			install(lensDocument);
 			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 			const auto expected = capture(0);
-			view.Lighting.ShaderLensCount = count;
-			for (uint32_t lens = 0; lens < count; ++lens) {
+			view.Lighting.ShaderLensCount = static_cast<uint32_t>(count);
+			for (size_t lens = 0; lens < count; ++lens) {
 				view.Lighting.ShaderLenses[lens] = view.Lighting.ShaderLenses[0];
-				view.Lighting.ShaderLenses[lens].Shader = lens == 1 ? swizzleName : scaleName;
+				view.Lighting.ShaderLenses[lens].Shader = chainShaders[lens];
 			}
 			install(chainDocument);
 			fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
@@ -1178,7 +1248,14 @@ void main(){vec3 value=texture(sceneColour,uv).rgb;
 			install(depthDocument);
 			const auto rendered = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
 			if (divisor == 2) CHECK(rendered.Ran(core::Name("lens-upsample")));
-			CHECK(rendered.Ran(core::Name("dof")));
+			CHECK_FALSE(rendered.Ran(core::Name("dof")));
+			CHECK_FALSE(fixture.Render.ViewPassActivity(view.Slot).DepthOfField);
+			CHECK(
+				fixture.Render.ResourceTexture(core::Name("dof"), view.Slot) ==
+				fixture.Render.ResourceTexture(
+					core::Name(divisor == 2 ? "lens-full-colour" : "lens-b"), view.Slot
+				)
+			);
 			CheckImage(
 				fixture.Render,
 				"lens-graph-depth",
@@ -1313,6 +1390,168 @@ void main(){float blue=gl_FragCoord.x/64.0;colour=vec4(0,0,blue,1);}
 		CHECK(correctedBlue(lensed, 24) > leftBaseline + .01f);
 		CHECK(correctedBlue(lensed, 40) < rightBaseline - .01f);
 		CHECK(std::abs(correctedBlue(lensed, 32) - axisBaseline) < .01f);
+	}
+}
+
+TEST_CASE(
+	"weather volume reaches portal pixels at the destination canonical tick",
+	"[render][gpu][weather][portal][.]"
+) {
+	const bool separateCaptures = GENERATE(false, true);
+	const bool pendingStateful = GENERATE(false, true);
+	INFO("separate captures=" << separateCaptures << " pending stateful=" << pendingStateful);
+	FixtureDevice fixture;
+	fixture.Initialise();
+	const auto document = InstallPortalFixture(fixture.Render, false, separateCaptures);
+	const render::SceneTarget target{WIDTH, HEIGHT};
+	const core::Vector3 translation{DESTINATION_X, 32, 32};
+	const std::array destination{
+		Plane(1, translation + core::Vector3{-10, 0, -4}, 10, 20, {0.8f, 0.2f, 0.1f}),
+		Plane(2, translation + core::Vector3{10, 0, -4}, 10, 20, {0.1f, 0.6f, 0.8f})
+	};
+	auto pane = Plane(3, {}, HALF_WIDTH, HALF_HEIGHT, {0.3f, 0.3f, 0.3f});
+	pane.Surface = 0;
+	std::vector<scene::DrawInstance> instances(destination.begin(), destination.end());
+	instances.push_back(pane);
+	render::PortalView portal;
+	portal.Normal = {0, 0, 1};
+	portal.First = {HALF_WIDTH, 0, 0};
+	portal.Second = {0, HALF_HEIGHT, 0};
+	portal.Warp.Frame.Position = translation;
+	std::array<render::View, 2> views;
+	for (size_t index = 0; index < views.size(); ++index) {
+		auto &view = views[index];
+		view.Slot = index;
+		view.World = 19020 + index;
+		view.WorldName = core::Name(index == 0 ? "weather.portal" : "weather.portal.direct");
+		view.Pipeline = core::Name("portal.fixture.pbr");
+		view.Target = &target;
+		view.Camera.FieldOfViewRadians = 1.0471975512f;
+		view.Camera.NearPlane = .1f;
+		view.Camera.FarPlane = 64;
+		view.CameraCut = true;
+		view.OverrideLighting = true;
+		view.Lighting.Ambient = {.75f, .75f, .75f};
+		view.Lighting.OutdoorAmbient = {};
+		view.Lighting.Direct = {};
+		view.Lighting.FogStart = 1000;
+		view.Lighting.FogEnd = 1001;
+		auto &environment = view.Lighting.EnvironmentState;
+		environment.HasClouds = environment.HasWeatherCompute = environment.HasWeatherClock = true;
+		environment.Weather.Mode =
+			pendingStateful ? scene::WeatherMode::Stateful : scene::WeatherMode::Procedural;
+		environment.CloudLayer.Colour = {.8f, .1f, .05f};
+		environment.CloudLayer.Cover = environment.CloudLayer.Density = 1;
+		environment.Weather.CellSizeMetres = 2;
+		environment.Weather.ExtentMetres = {256, 32, 64};
+		environment.Weather.BaseHeightMetres = 24;
+		environment.Weather.ThicknessMetres = 16;
+		environment.Weather.Coverage = 1;
+		environment.Weather.VapourMixingRatio = .029f;
+		environment.Weather.BaseTemperatureCelsius = -50;
+		environment.Weather.FeatureCells = 8;
+		environment.Weather.WindMetresPerSecond = {};
+		environment.Weather.Seed = 17;
+		environment.Weather.LodError = .0001f;
+		environment.Weather.ShadowsEnabled = false;
+		environment.Clock.Tick = environment.Clock.AnchorTick = environment.Clock.PhaseTick = 123;
+		environment.Clock.WindQ20 = {};
+	}
+	views[0].Instances = instances;
+	views[0].Portals = std::span(&portal, 1);
+	views[1].Instances = destination;
+	render::OverlayImage overlay;
+	const auto capture = [&](size_t slot) {
+		return CaptureResource(
+			fixture.Render, core::Name("tonemapped"), slot, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+		);
+	};
+	const auto scratchCreations = [] {
+		const auto count = core::Metrics::Get("render.weather.capture_scratch_image_creations");
+		return count ? count->Value : 0.0;
+	};
+	bool firstCapture = true;
+	for (const auto &sample :
+		 {CameraSample{"weather-front", {0, 0, 4}}, CameraSample{"weather-off-centre", {1.1f, .6f, 4}}}) {
+		views[0].CameraFrame = core::CFrame::LookAt(sample.Eye, sample.Aim);
+		views[1].CameraFrame = views[0].CameraFrame;
+		views[1].CameraFrame.Position = views[1].CameraFrame.Position + translation;
+		for (auto &view : views) {
+			view.Damage.Scene = true;
+			view.Lighting.EnvironmentState.Weather.Enabled = false;
+		}
+		REQUIRE(fixture.Render.Render(views, overlay, nullptr, false).Submitted);
+		const auto clearPortal = capture(0);
+		const auto clearDirect = capture(1);
+		for (auto &view : views)
+			view.Lighting.EnvironmentState.Weather.Enabled = true;
+		// The source aperture lies below the slab. Only a destination capture can
+		// put clouds in its opening; the direct oracle samples identical world coordinates.
+		auto baseline = views[0];
+		baseline.Portals = {};
+		REQUIRE(fixture.Render.Render(std::span(&baseline, 1), overlay, nullptr, false).Submitted);
+		const auto before = capture(0);
+		const double scratchBefore = scratchCreations();
+		const auto frame = fixture.Render.Render(views, overlay, nullptr, false);
+		REQUIRE(frame.Submitted);
+		REQUIRE(frame.PortalPasses > 0);
+		CHECK(
+			scratchCreations() - scratchBefore ==
+			(firstCapture ? (pendingStateful ? 1 : 4) + (separateCaptures ? 1 : 0) : 0)
+		);
+		firstCapture = false;
+		const auto unfolded = capture(1);
+		const auto actual = capture(0);
+		size_t changedDirect = 0, changedPortal = 0;
+		const double tangent = std::tan(views[0].Camera.FieldOfViewRadians / 2);
+		for (uint32_t y = 0; y < HEIGHT; ++y)
+			for (uint32_t x = 0; x < WIDTH; ++x) {
+				const core::Vector3 local{
+					static_cast<float>((2 * (x + .5) / WIDTH - 1) * tangent * WIDTH / HEIGHT),
+					static_cast<float>((1 - 2 * (y + .5) / HEIGHT) * tangent),
+					-1
+				};
+				const auto ray = views[0].CameraFrame.VectorToWorldSpace(local);
+				if (std::abs(ray.Z) < 1e-6f) continue;
+				const float distance = -sample.Eye.Z / ray.Z;
+				const auto aperture = sample.Eye + ray * distance;
+				if (distance <= 0 || std::abs(aperture.X) >= HALF_WIDTH - .08f ||
+					std::abs(aperture.Y) >= HALF_HEIGHT - .08f)
+					continue;
+				const auto changed = [&](const CapturedImage &clear, const CapturedImage &cloudy) {
+					for (size_t channel = 0; channel < 3; ++channel)
+						if (std::abs(
+								std::to_integer<int>(
+									clear.Bytes[y * clear.RowStrideBytes + x * 4 + channel]
+								) -
+								std::to_integer<int>(
+									cloudy.Bytes[y * cloudy.RowStrideBytes + x * 4 + channel]
+								)
+							) > 2)
+							return true;
+					return false;
+				};
+				changedDirect += changed(clearDirect, unfolded);
+				changedPortal += changed(clearPortal, actual);
+			}
+		INFO(
+			sample.Name << " changed aperture pixels direct=" << changedDirect << " portal=" << changedPortal
+		);
+		CHECK(changedDirect > 30);
+		CHECK(changedPortal > 30);
+		CheckOpening(
+			fixture.Render,
+			sample,
+			.75f,
+			document,
+			views[0],
+			-4,
+			before,
+			unfolded,
+			actual,
+			destination,
+			destination
+		);
 	}
 }
 
@@ -1642,6 +1881,404 @@ TEST_CASE("interface shaders follow the submitted content owner", "[render][gpu]
 	CHECK(lagging.RefreshShaders(demand, library, first) == 1);
 	CHECK_FALSE(lagging.HasShaderVariant(name, first));
 	CHECK(CompareImages(missing.View(), capture(&lagging).View()).Passed());
+}
+
+TEST_CASE(
+	"weather clouds reflect inside a horizontal mirror without leaking outside",
+	"[render][gpu][weather][mirror][.]"
+) {
+	const bool separateCaptures = GENERATE(false, true);
+	INFO("separate captures=" << separateCaptures);
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallPortalFixture(fixture.Render, false, separateCaptures);
+	fixture.Render.SetSurfaceBounces(1);
+	const render::SceneTarget target{WIDTH, HEIGHT};
+	constexpr float MIRROR_HALF_SIZE = 3;
+	auto pane = Plane(1, {}, MIRROR_HALF_SIZE, MIRROR_HALF_SIZE, {1, 1, 1});
+	pane.Frame = core::CFrame::Angles(-1.5707963268f, 0, 0);
+	pane.Surface = 0;
+	const std::array instances{pane};
+	render::View view;
+	view.World = 19137;
+	view.WorldName = core::Name("weather.mirror.fixture");
+	view.Pipeline = core::Name("portal.fixture.pbr");
+	view.Target = &target;
+	view.Instances = instances;
+	view.CameraFrame = core::CFrame::LookAt({0, 6, 8}, {});
+	view.Camera.FieldOfViewRadians = .872664626f;
+	view.Camera.NearPlane = .1f;
+	view.Camera.FarPlane = 512;
+	view.CameraCut = true;
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {.75f, .75f, .75f};
+	view.Lighting.OutdoorAmbient = {};
+	view.Lighting.Direct = {};
+	view.Lighting.FogStart = 1000;
+	view.Lighting.FogEnd = 1001;
+	auto &environment = view.Lighting.EnvironmentState;
+	environment.HasClouds = environment.HasWeatherCompute = environment.HasWeatherClock = true;
+	environment.CloudLayer.Colour = {1, .04f, .02f};
+	environment.CloudLayer.Cover = environment.CloudLayer.Density = 1;
+	environment.CloudVolume.Steps = 32;
+	environment.Weather.CellSizeMetres = 2;
+	environment.Weather.ExtentMetres = {256, 64, 256};
+	environment.Weather.BaseHeightMetres = 24;
+	environment.Weather.ThicknessMetres = 16;
+	environment.Weather.Coverage = 1;
+	environment.Weather.VapourMixingRatio = .029f;
+	environment.Weather.BaseTemperatureCelsius = -50;
+	environment.Weather.FeatureCells = 8;
+	environment.Weather.WindMetresPerSecond = {};
+	environment.Weather.Seed = 17;
+	environment.Weather.LodError = .0001f;
+	environment.Weather.ShadowsEnabled = false;
+	environment.Clock.Tick = environment.Clock.AnchorTick = environment.Clock.PhaseTick = 123;
+	environment.Clock.Paused = true;
+	environment.Clock.WindQ20 = {};
+	const scene::SurfacePane geometry{
+		.Centre = {},
+		.Normal = {0, 1, 0},
+		.First = {MIRROR_HALF_SIZE, 0, 0},
+		.Second = {0, 0, -MIRROR_HALF_SIZE}
+	};
+	const auto reflected = scene::ReflectCamera(geometry, view.CameraFrame, {});
+	REQUIRE(reflected.Renders);
+	render::SurfaceView surface;
+	surface.Frame = reflected.Frame;
+	surface.Projection = scene::SurfaceProjection(reflected.Lens, reflected.Frame);
+	surface.PaneCentre = geometry.Centre;
+	surface.PaneNormal = geometry.Normal;
+	surface.PaneFirst = geometry.First;
+	surface.PaneSecond = geometry.Second;
+	surface.Width = WIDTH;
+	surface.Height = HEIGHT;
+	view.Surfaces = std::span(&surface, 1);
+	render::OverlayImage overlay;
+	const auto capture = [&](bool enabled) {
+		environment.Weather.Enabled = enabled;
+		view.Damage.Scene = true;
+		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(frame.Submitted);
+		REQUIRE(frame.SurfacePasses > 0);
+		return CaptureResource(
+			fixture.Render, core::Name("tonemapped"), view.Slot, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+		);
+	};
+	const auto disabled = capture(false);
+	const auto enabled = capture(true);
+	const auto restored = capture(false);
+	size_t interior = 0, exterior = 0, reflectedCloudPixels = 0;
+	int exteriorDifference = 0;
+	const double tangent = std::tan(view.Camera.FieldOfViewRadians * .5);
+	for (uint32_t y = 0; y < HEIGHT; ++y)
+		for (uint32_t x = 0; x < WIDTH; ++x) {
+			const core::Vector3 local{
+				static_cast<float>((2 * (x + .5) / WIDTH - 1) * tangent * WIDTH / HEIGHT),
+				static_cast<float>((1 - 2 * (y + .5) / HEIGHT) * tangent),
+				-1
+			};
+			const auto ray = view.CameraFrame.VectorToWorldSpace(local);
+			// Every primary ray points below the elevated slab. Only reflection can show it.
+			REQUIRE(ray.Y < 0);
+			const float distance = -view.CameraFrame.Position.Y / ray.Y;
+			const auto aperture = view.CameraFrame.Position + ray * distance;
+			if (std::abs(std::abs(aperture.X) - MIRROR_HALF_SIZE) < .08f ||
+				std::abs(std::abs(aperture.Z) - MIRROR_HALF_SIZE) < .08f)
+				continue;
+			const bool inside =
+				std::abs(aperture.X) < MIRROR_HALF_SIZE && std::abs(aperture.Z) < MIRROR_HALF_SIZE;
+			const size_t at = y * enabled.RowStrideBytes + x * 4;
+			if (inside) {
+				++interior;
+				const int red = std::to_integer<int>(enabled.Bytes[at]);
+				const int green = std::to_integer<int>(enabled.Bytes[at + 1]);
+				if (red > std::to_integer<int>(disabled.Bytes[at]) + 10 && red > green + 10)
+					++reflectedCloudPixels;
+			} else {
+				++exterior;
+				for (size_t channel = 0; channel < 3; ++channel)
+					exteriorDifference = std::max(
+						exteriorDifference,
+						std::abs(
+							std::to_integer<int>(enabled.Bytes[at + channel]) -
+							std::to_integer<int>(disabled.Bytes[at + channel])
+						)
+					);
+			}
+		}
+	INFO("interior=" << interior << " exterior=" << exterior << " clouds=" << reflectedCloudPixels);
+	REQUIRE(interior > 100);
+	REQUIRE(exterior > 100);
+	CHECK(reflectedCloudPixels > 30);
+	CHECK(exteriorDifference <= 2);
+	ImageTolerance tolerance;
+	tolerance.Absolute = 2.0 / 255;
+	CheckImage(
+		fixture.Render,
+		separateCaptures ? "weather-mirror-separate-restored" : "weather-mirror-mixed-restored",
+		"tonemapped",
+		"fixed weather tick123; horizontal mirror; cloud slab24..40m; weather disabled after capture",
+		disabled.View(),
+		restored.View(),
+		tolerance
+	);
+}
+
+TEST_CASE("device particles reach portal and mirror captures", "[render][gpu][surface-particles][.]") {
+	const bool mirror = GENERATE(false, true);
+	const bool separateCaptures = GENERATE(false, true);
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallPortalFixture(fixture.Render, true, separateCaptures);
+	const render::SceneTarget target{WIDTH, HEIGHT};
+	// Mirrors multiply the captured image by their pane tint; portals preserve its colour.
+	auto pane = Plane(1, {0, 1, 0}, HALF_WIDTH, HALF_HEIGHT, mirror ? core::Color3{1, 1, 1} : core::Color3{});
+	pane.Surface = 0;
+	const std::array instances{pane};
+	render::PortalView portal;
+	portal.Centre = pane.Frame.Position;
+	portal.Normal = {0, 0, 1};
+	portal.First = {HALF_WIDTH, 0, 0};
+	portal.Second = {0, HALF_HEIGHT, 0};
+	portal.Warp.Frame.Position = {DESTINATION_X, 0, 0};
+	render::SurfaceView surface;
+	surface.PaneCentre = portal.Centre;
+	surface.PaneNormal = portal.Normal;
+	surface.PaneFirst = portal.First;
+	surface.PaneSecond = portal.Second;
+	surface.Width = WIDTH;
+	surface.Height = HEIGHT;
+	render::View view;
+	view.World = 14901;
+	view.WorldName = core::Name("portal.fixture.device-particles");
+	view.Pipeline = core::Name("portal.fixture.pbr");
+	view.Target = &target;
+	view.CameraFrame = core::CFrame::LookAt({0, 1, 4}, {0, 1, 0});
+	view.Camera.NearPlane = .1f;
+	view.Camera.FarPlane = 256;
+	view.Instances = instances;
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {1, 1, 1};
+	view.Lighting.OutdoorAmbient = view.Lighting.Ambient;
+	view.Lighting.Direct = {};
+	if (mirror) {
+		const scene::SurfacePane geometry{
+			.Centre = portal.Centre, .Normal = portal.Normal, .First = portal.First, .Second = portal.Second
+		};
+		const auto reflected = scene::ReflectCamera(geometry, view.CameraFrame, {});
+		REQUIRE(reflected.Renders);
+		surface.Frame = reflected.Frame;
+		surface.Projection = scene::SurfaceProjection(reflected.Lens, reflected.Frame);
+		view.Surfaces = std::span(&surface, 1);
+		fixture.Render.SetSurfaceBounces(1);
+	} else {
+		view.Portals = std::span(&portal, 1);
+	}
+	render::OverlayImage overlay;
+	const auto capture = [&] {
+		view.Damage.Scene = true;
+		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		CHECK((mirror ? frame.SurfacePasses > 0 : frame.PortalPasses > 0));
+		return CaptureResource(
+			fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+		);
+	};
+	const auto empty = capture();
+	view.GpuParticles.emplace();
+	auto &field = view.GpuParticles->Field;
+	field.RequestedCount = 262144;
+	field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::First);
+	field.VelocityResponse = 0;
+	field.Styles[0].Colour = {1, 0, 0};
+	field.Styles[0].Alpha = .8f;
+	field.Styles[0].Size = .25f;
+	// The source is behind the primary eye for a mirror and outside its
+	// frustum for a portal, so only a real capture can add aperture pixels.
+	for (uint32_t sample = 0; sample < 64; ++sample) {
+		const core::Vector3 position{
+			(mirror ? 0 : DESTINATION_X) + static_cast<float>(sample % 8) * .16f - .56f,
+			.44f + static_cast<float>(sample / 8) * .16f,
+			mirror ? 6.0f : -2.0f
+		};
+		field.SpawnSamples.push_back({position, 15, {}, 0});
+	}
+	const auto populated = capture();
+	size_t redPixels = 0;
+	for (uint32_t y = 32; y < 65; ++y) {
+		for (uint32_t x = 35; x < 95; ++x) {
+			const size_t at = y * populated.RowStrideBytes + x * 4;
+			const int red = std::to_integer<int>(populated.Bytes[at]);
+			const int green = std::to_integer<int>(populated.Bytes[at + 1]);
+			const int before = std::to_integer<int>(empty.Bytes[at]);
+			if (red > green + 10 && red > before + 10) ++redPixels;
+		}
+	}
+	INFO("mirror=" << mirror << " separate=" << separateCaptures << " particle pixels=" << redPixels);
+	CHECK(redPixels > 30);
+}
+
+TEST_CASE("editor ground grid reaches portal and mirror captures", "[render][gpu][surface-grid][.]") {
+	const bool mirror = GENERATE(false, true);
+	const bool separateCaptures = GENERATE(false, true);
+	FixtureDevice fixture;
+	fixture.Initialise();
+	// Exact roundtrips cover current-frame recursion, without prior-frame feedback at the cutoff.
+	InstallPortalFixture(fixture.Render, true, separateCaptures, true);
+	const render::SceneTarget target{WIDTH, HEIGHT};
+	auto pane = Plane(1, {0, 1, 0}, HALF_WIDTH, HALF_HEIGHT, mirror ? core::Color3{1, 1, 1} : core::Color3{});
+	pane.Surface = 0;
+	std::vector instances{pane};
+	std::vector<render::SurfaceView> mirrors;
+	render::PortalView portal;
+	portal.Centre = pane.Frame.Position;
+	portal.Normal = {0, 0, 1};
+	portal.First = {HALF_WIDTH, 0, 0};
+	portal.Second = {0, HALF_HEIGHT, 0};
+	portal.Warp.Frame.Position = {DESTINATION_X, 0, 0};
+	render::SurfaceView surface;
+	surface.PaneCentre = portal.Centre;
+	surface.PaneNormal = portal.Normal;
+	surface.PaneFirst = portal.First;
+	surface.PaneSecond = portal.Second;
+	surface.Width = WIDTH;
+	surface.Height = HEIGHT;
+	render::View view;
+	view.Pipeline = core::Name("portal.fixture.pbr");
+	view.Target = &target;
+	view.CameraFrame = core::CFrame::LookAt({0, 2, 4}, {0, 1, 0});
+	view.Camera.FieldOfViewRadians = 1.0471975512f;
+	view.Camera.NearPlane = .1f;
+	view.Camera.FarPlane = 256;
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {.1f, .1f, .1f};
+	view.Lighting.OutdoorAmbient = view.Lighting.Ambient;
+	view.Lighting.Direct = {};
+	view.Instances = instances;
+	if (mirror) {
+		const scene::SurfacePane geometry{
+			.Centre = portal.Centre, .Normal = portal.Normal, .First = portal.First, .Second = portal.Second
+		};
+		const auto reflected = scene::ReflectCamera(geometry, view.CameraFrame, {});
+		REQUIRE(reflected.Renders);
+		surface.Frame = reflected.Frame;
+		surface.Projection = scene::SurfaceProjection(reflected.Lens, reflected.Frame);
+		mirrors.push_back(surface);
+		// Behind the primary eye, but visible from the first reflected eye.
+		auto opposite = geometry;
+		opposite.Centre.Z = 6;
+		opposite.Normal = {0, 0, -1};
+		opposite.First = {.45f, 0, 0};
+		opposite.Second = {0, .45f, 0};
+		const auto secondEye = scene::ReflectCamera(opposite, view.CameraFrame, {});
+		REQUIRE(secondEye.Renders);
+		auto secondView = surface;
+		secondView.Index = 1;
+		secondView.Frame = secondEye.Frame;
+		secondView.Projection = scene::SurfaceProjection(secondEye.Lens, secondEye.Frame);
+		secondView.PaneCentre = opposite.Centre;
+		secondView.PaneNormal = opposite.Normal;
+		secondView.PaneFirst = opposite.First;
+		secondView.PaneSecond = opposite.Second;
+		mirrors.push_back(secondView);
+		auto secondPane = Plane(2, opposite.Centre, .45f, .45f, {1, 1, 1});
+		secondPane.Surface = 1;
+		instances.push_back(secondPane);
+		view.Instances = instances;
+		view.Surfaces = mirrors;
+		fixture.Render.SetSurfaceBounces(2);
+	} else {
+		view.Portals = std::span(&portal, 1);
+	}
+	view.Grid.Step = 1;
+	view.Grid.Major = 4;
+	view.Grid.Reach = 128;
+	view.Grid.Colour = {1, 0, 1};
+	view.Grid.Alpha = 1;
+	view.Grid.AxisAlpha = 0;
+	view.Grid.Offset = {mirror ? .3f : DESTINATION_X + .3f, 0, .4f};
+	render::OverlayImage overlay;
+	uint32_t capturedDrawCalls = 0;
+	double capturedRasterPasses = 0;
+	const auto rasterPasses = [] {
+		const core::Name name("render.transparent.raster_passes");
+		for (const auto &counter : core::Metrics::Snapshot().Counters)
+			if (counter.Name == name) return counter.Value;
+		return 0.0;
+	};
+	const auto capture = [&] {
+		view.Damage.Scene = true;
+		const auto rasterPassesBefore = rasterPasses();
+		const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		capturedDrawCalls = frame.DrawCalls;
+		capturedRasterPasses = rasterPasses() - rasterPassesBefore;
+		CHECK((mirror ? frame.SurfacePasses >= 2 : frame.PortalPasses > 0));
+		return CaptureResource(
+			fixture.Render, core::Name("tonemapped"), 0, WIDTH, HEIGHT, ImageFormat::Rgba8Unorm
+		);
+	};
+	const auto disabled = capture();
+	CHECK(capturedRasterPasses == 0);
+	view.Grid.Enabled = true;
+	const auto enabled = capture();
+	CHECK(capturedRasterPasses == 1);
+	size_t gridPixels = 0;
+	// Only the aperture interior counts. The primary grid is behind this opaque pane.
+	for (uint32_t y = 50; y < 62; ++y) {
+		for (uint32_t x = 45; x < 84; ++x) {
+			const size_t at = y * enabled.RowStrideBytes + x * 4;
+			const int red = std::to_integer<int>(enabled.Bytes[at]);
+			const int before = std::to_integer<int>(disabled.Bytes[at]);
+			if (red > before + 10) ++gridPixels;
+		}
+	}
+	INFO("mirror=" << mirror << " separate=" << separateCaptures << " grid pixels=" << gridPixels);
+	CHECK(gridPixels > 30);
+	view.Grid.Enabled = false;
+	const auto restored = capture();
+	CHECK(capturedRasterPasses == 0);
+	const auto disabledDrawCalls = capturedDrawCalls;
+	const bool noGridLeak = restored.Bytes == disabled.Bytes;
+	CHECK(noGridLeak);
+	view.Grid.Enabled = true;
+	view.Grid.Strength = 0;
+	const auto muted = capture();
+	const bool zeroStrengthHidesGrid = muted.Bytes == disabled.Bytes;
+	CHECK(zeroStrengthHidesGrid);
+	CHECK(capturedDrawCalls == disabledDrawCalls);
+	CHECK(capturedRasterPasses == 0);
+	view.Grid.Strength = 1;
+	const auto reactivated = capture();
+	CHECK(capturedRasterPasses == 1);
+	CHECK(reactivated.Bytes == enabled.Bytes);
+	if (!mirror) {
+		instances.push_back(Plane(3, {DESTINATION_X, 1, -.4f}, 2, 2, {0, 1, 0}));
+		view.Instances = instances;
+		view.Grid.Enabled = false;
+		const auto blockedWithoutGrid = capture();
+		view.Grid.Enabled = true;
+		const auto blockedWithGrid = capture();
+		bool wallHidesGrid = true;
+		size_t wallPixels = 0;
+		for (uint32_t y = 50; y < 62; ++y) {
+			for (uint32_t x = 45; x < 84; ++x) {
+				const size_t at = y * blockedWithGrid.RowStrideBytes + x * 4;
+				for (size_t channel = 0; channel < 3; ++channel)
+					wallHidesGrid = wallHidesGrid && blockedWithGrid.Bytes[at + channel] ==
+														 blockedWithoutGrid.Bytes[at + channel];
+				if (std::to_integer<int>(blockedWithGrid.Bytes[at + 1]) >
+					std::to_integer<int>(blockedWithGrid.Bytes[at]) + 10)
+					++wallPixels;
+			}
+		}
+		CHECK(wallPixels > 30);
+		CHECK(wallHidesGrid);
+		// The same wall on the eye side of the mapped mouth must be clipped from the capture.
+		instances.back().Frame.Position.Z = .5f;
+		const auto clipped = capture();
+		const bool nearSideWallClipped = clipped.Bytes == enabled.Bytes;
+		CHECK(nearSideWallClipped);
+	}
 }
 
 TEST_CASE("interface pass matches the reference raster coverage", "[render][gpu][interface-reference][.]") {

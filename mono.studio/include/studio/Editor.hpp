@@ -52,6 +52,7 @@
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
 #include <engine/gui/SettingsMenu.hpp>
+#include <engine/imagegraph/Content.hpp>
 #include <engine/render/AdornmentGeometry.hpp>
 #include <engine/render/DebugPanels.hpp>
 #include <engine/render/EditableImages.hpp>
@@ -137,13 +138,19 @@ struct ImGuiTableSortSpecs;
 // to name one parameter type would make a headless suite compile a UI library.
 struct ImGuiTableSortSpecs;
 
+namespace studio::frame_graph_detail {
+	struct FlameGeometry;
+}
+
 namespace studio {
 	struct ComponentPanelProbe;
 	struct UiAuthoringProbe;
 	struct ToolsProbe;
 	struct ViewportCameraProbe;
 	struct PlayedInputAdapter;
+	struct ImageComposerState;
 	class DataFactoryHost;
+	struct WeatherAudio;
 
 	using engine::ecs::Entity;
 	using engine::world::WorldId;
@@ -545,20 +552,9 @@ namespace studio {
 		// Needs `--frames`, because a headless run has no window to close.
 		bool Headless = false;
 
-		// Draw as fast as the GPU allows: no vblank and no ceiling.
-		//
-		// **The client's flag, and it removes a different thing in each.** The
-		// client is paced by the display until this is passed. The editor never
-		// is - `Editor::VerticalSync` is off from the start, because the hands
-		// doing the work feel every millisecond between the mouse and the
-		// viewport - so what is left to remove here are the four presentation
-		// rates that keep a still scene off a laptop's fans.
-		//
-		// Which makes this a benchmark's flag rather than a comfort one: pass it
-		// when the number being read is the maximum presentation throughput.
-		// The scheduled rates never sleep or slow the update loop, but they still
-		// deliberately leave time between images. See
-		// `render::Renderer::SetVerticalSync`.
+		// Force uncapped presentation for this run, overriding saved ceilings and
+		// disabling pacing controls. False leaves the preferences in charge;
+		// fresh preferences already default to uncapped presentation.
 		bool Uncapped = false;
 
 		// Write the world the viewport is showing to this file, then carry on.
@@ -2125,7 +2121,7 @@ namespace studio {
 		// Publishes `raw/` into `processed/`.
 		//
 		// @param hexSeed 64 hex characters of Ed25519 seed. Not stored.
-		void PublishAssets(const std::string &hexSeed);
+		bool PublishAssets(const std::string &hexSeed);
 
 		// A modal listing the store's published assets of one kind.
 		//
@@ -2753,6 +2749,33 @@ namespace studio {
 		// A retry with an already resident verified root must not decode, upload or
 		// invalidate the scene again.
 		ContentResidency ContentResident;
+		// Signed image graph documents admitted from the current content session.
+		engine::imagegraph::Content ImageGraphContent;
+		// Graph references gathered from content-bearing instances by ECS row.
+		std::unordered_map<uint32_t, std::vector<engine::core::Name>> ImageGraphReferences;
+		// Revisions last applied for each live graph asset.
+		struct AppliedImageGraph {
+			// World that owns the graph.
+			engine::core::Name Owner;
+			// Graph name within its owner.
+			engine::core::Name Name;
+			// Image asset containing the graph document.
+			engine::core::Name Asset;
+			// Content revision last applied.
+			uint64_t ContentRevision = 0;
+			// Input revision last applied.
+			uint64_t InputRevision = 0;
+			// Graph outputs currently requested by the owner.
+			std::vector<engine::core::Name> Outputs;
+			// Whether the graph appeared in the latest live scan.
+			bool Seen = false;
+		};
+		// Previously applied graph state, keyed by its stable runtime identity.
+		std::unordered_map<uint64_t, AppliedImageGraph> AppliedImageGraphs;
+		// Finds the live graph document for a content asset.
+		const engine::imagegraph::Document *FindLiveImageGraph(engine::core::Name asset) const;
+		// Rebuilds live graph state after content or input revisions change.
+		bool RefreshLiveImageGraphs();
 
 		// Last content-reference revision scanned per open world. This is a
 		// reader watermark, not a second copy of the world's asset references.
@@ -3495,6 +3518,8 @@ namespace studio {
 		bool ShowClientSettings = false;
 		engine::render::OverlayImage Overlay;
 		engine::render::InterfacePass GameInterface;
+		engine::core::Name GameInterfaceImageOwner;
+		engine::core::Name GameInterfaceImageFallbackOwner;
 		engine::ui::Interface Interface;
 		engine::render::ViewportFrames ViewportImages;
 		engine::core::FrameClock Clock;
@@ -3505,6 +3530,10 @@ namespace studio {
 		// wherever this object was declared. Same reason `client::Client` holds
 		// its own that way.
 		std::unique_ptr<engine::world::Universe> Universe;
+		// Weather audio opens only for a focused Play viewport with due thunder.
+		std::unique_ptr<WeatherAudio> WeatherAudio_;
+		// Pumps due weather events for the focused Play viewport or silences stale playback.
+		void PumpWeatherAudio();
 		// Selected portal images.
 		std::unique_ptr<engine::render::PortalImageHost> PortalImages;
 		// Selected factory host.
@@ -3995,6 +4024,52 @@ namespace studio {
 		// A deque because it is trimmed from the front at `OUTPUT_LIMIT` and
 		// appended at the back, which is the one shape a vector is bad at.
 		std::deque<Message> Output;
+
+		// Messages are immutable after append. Serial bounds invalidate this owned
+		// display index after append, front trimming or Clear.
+		struct OutputDisplay {
+			// One filtered message with its cached vertical placement and height.
+			struct Row {
+				// Index into the output deque for the message this row displays.
+				size_t MessageIndex = 0;
+				// Row's vertical offset from the start of the panel.
+				float Offset = 0;
+				// Text extent measured with the active output font.
+				float Height = 0;
+			};
+			// Visible rows after applying the level toggles and text filter.
+			std::vector<Row> Rows;
+			// Text filter used to build `Rows`.
+			std::string Filter;
+			// Serial of the first output message when `Rows` was built.
+			uint64_t First = 0;
+			// Serial of the last output message when `Rows` was built.
+			uint64_t Last = 0;
+			// Output message count when `Rows` was built.
+			size_t Count = 0;
+			// Font identity used to measure the displayed rows.
+			const void *Font = nullptr;
+			// Font bake used to measure the displayed rows.
+			uint32_t FontBake = 0;
+			// Font size used to measure the displayed rows.
+			float FontSize = 0;
+			// Vertical spacing used between displayed rows.
+			float Spacing = 0;
+			// Total vertical extent of the displayed rows.
+			float TotalHeight = 0;
+			// Screen-space origin used to place rows after scrolling.
+			float LayoutOrigin = 0;
+			// Widest displayed row, used to size the content region.
+			float MaximumWidth = 0;
+			// Whether row offsets and total height are current for `LayoutOrigin`.
+			bool LayoutReady = false;
+			// Level toggles used to build `Rows`.
+			uint8_t Levels = 0;
+			// Whether `Rows` matches the current output and display settings.
+			bool Ready = false;
+		};
+		// Owned display index for the retained Output messages.
+		OutputDisplay OutputRows;
 
 		// The engine log, teed into that panel. See `PanelSink` in `Editor.cpp`:
 		// a script's `print` and the error that stopped it are the two things an
@@ -4891,18 +4966,13 @@ namespace studio {
 		// up. `Options::Uncapped` bypasses the persisted choice for one run and is
 		// never written back.
 		//
-		// **Off by default, and the pair is one decision.** An editor is a
-		// program with hands on it, and vertical sync puts the display's refresh
-		// between the mouse and the viewport - 16.7 ms on a 60 Hz panel before
-		// the compositor takes its turn. The cost of turning it off is a
-		// viewport spinning as fast as the GPU allows, which the rates below
-		// answer; the two ship together because either one alone is a worse
-		// default than what they are now.
+		// Off by default to keep the display's refresh out of the input path.
+		// The Preferences page can enable it when display pacing is preferred.
 		bool VerticalSync = false;
 
-		// Whether the adaptive presentation ceilings are bypassed. The rates stay
-		// intact so turning this off restores the previous pacing policy.
-		bool Uncapped = false;
+		// Bypass adaptive presentation ceilings by default. Saved preferences can
+		// restore the four configured rates without changing the simulation tick.
+		bool Uncapped = true;
 
 		// The image deadline, independent of the update loop. A busy swapchain
 		// does not consume its opportunity, and a late image does not cause a
@@ -4969,6 +5039,10 @@ namespace studio {
 		bool FocusFind = false;
 		std::string ComponentFilter;
 		std::string CollectionTagDraft;
+		engine::core::Name CollectionTagOriginal;
+		bool CollectionTagEditing = false;
+		bool CollectionTagFocus = false;
+		uint64_t CollectionTagContext = 0;
 		//@}
 
 		// What the output panel is showing, and what it is searching for.
@@ -6004,6 +6078,44 @@ namespace studio {
 		double NextPluginRootScanSeconds = 0.0;
 		//@}
 
+		// Image Composer state belongs to this editor instance.
+		//@{
+		bool ShowImageComposer = false;
+		std::unique_ptr<ImageComposerState> ImageComposer;
+		void DrawImageComposer();
+		void ReleaseImageComposerPreview();
+		void ApplyImageComposerPending();
+		void DrawImageGraphInstanceInputs(engine::ecs::Store &, Entity);
+		// Input override edit queued for application to an instance.
+		struct PendingImageGraphInput {
+			// World containing the target instance.
+			WorldId World;
+			// Instance whose graph input will change.
+			Entity Instance;
+			// Input override to apply.
+			engine::imagegraph::InputOverride Input;
+			// Whether to clear the override instead of setting it.
+			bool Reset = false;
+		};
+		std::vector<PendingImageGraphInput> ImageGraphInputEdits;
+		// Composer output assignment queued for the selected instances.
+		struct PendingComposerApply {
+			// World containing the selected instances.
+			WorldId World;
+			// Instances receiving the composer output.
+			std::vector<Entity> Instances;
+			// Property that will reference the output.
+			engine::core::Name Property;
+			// Image graph asset to apply.
+			engine::core::Name Graph;
+			// Named output within the graph.
+			engine::core::Name Output;
+		};
+		PendingComposerApply ComposerApply;
+		uint64_t ComposerInstanceSerial = 0;
+
+		//@}
+
 		// Native and script plugins have separate ownership. `Plugins` is only
 		// the stable presentation order consumed by the toolbar and manager.
 		PluginBindingRegistry StudioPluginBindings;
@@ -6075,8 +6187,34 @@ namespace studio {
 		// empty one is "do not filter on this" rather than "match nothing".
 		FindQuery Find;
 
-		// What matched, rebuilt every frame the panel is open.
+		// What matched. Class/name-only predicates reuse this display copy after
+		// validating a full live-name fingerprint; computed predicates stay live.
 		std::vector<FindResult> FindResults;
+		// Newline labels need the original variable-height row submission.
+		bool FindUniformRows = true;
+		// Font-dependent label extent retained between unchanged searches.
+		struct FindDisplay {
+			// Font whose metrics produced the label extent.
+			const void *Font = nullptr;
+			// Font bake identity used to measure labels.
+			uint32_t FontBake = 0;
+			// Effective font size used to measure labels.
+			float FontSize = 0;
+			// Widest formatted Name/Class label, excluding the leading spacing.
+			float MaximumTextWidth = 0;
+			// A result rebuild invalidates the retained label extent.
+			bool Dirty = true;
+		};
+		// Metrics for the current search result labels.
+		FindDisplay FindRows;
+		// Query that produced `FindResults`.
+		FindQuery LastFind;
+		// Explorer world used to produce `FindResults`.
+		WorldId LastFindWorld;
+		// Fingerprint of the matching worlds' entity names and classes.
+		uint64_t FindFingerprint = 0;
+		// Whether the cached fingerprint can validate the current result list.
+		bool FindFingerprintReady = false;
 
 		// Whether the walk stopped early. Reported, never silent.
 		bool FindTruncated = false;
@@ -6191,17 +6329,9 @@ namespace studio {
 
 		// --- the debug panels -------------------------------------------------
 		//
-		// **Drawn into the overlay rather than as imgui windows, and reused
-		// rather than rebuilt.** `render::DrawDebugPanels` is what the client
-		// draws with, so the editor's frame graph is the same panel with the
-		// same columns - an fps figure that meant something slightly different
-		// in two programs is worse than not having one in the editor.
-		//
-		// **No keys of their own.** They are panels like every other panel:
-		// opened from the View menu, docked where somebody wants them, closed
-		// with their own button. The client's F3/F5 could not be reused here -
-		// F5 is Play - and inventing a second set of function keys for the
-		// editor was a decision worth not making twice.
+		// Ordinary imgui windows reading the same profiler data as the client's overlay.
+		// The View menu owns visibility; the client's F3/F4/F5 are gameplay controls.
+
 		//@{
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
@@ -6248,9 +6378,8 @@ namespace studio {
 		// is on screen now, look less often, or look at what is typical rather
 		// than at whichever frame happened to be last.
 		struct FrameGraphView {
-			// Nothing is sampled and nothing is published while this is set.
-			// The panel keeps drawing whatever it last published, which is the
-			// point: a frozen graph can be read.
+			// Timing snapshots and their headline counters stop sampling while set.
+			// Cache decisions continue collecting with their own sampled display.
 			bool Paused = false;
 
 			// Index into `FRAME_GRAPH_INTERVALS`. Zero means every frame.
@@ -6262,6 +6391,10 @@ namespace studio {
 
 			// `ImGui::GetTime()` at which the next publish is due.
 			double NextPublish = 0.0;
+			// Latest image graph evaluation totals included in this view.
+			engine::render::ImageGraphStatistics ImageGraphProfile{};
+			// Time the next image graph profile snapshot is due.
+			double NextImageGraphProfile = 0.0;
 
 			// The published snapshot - what is drawn.
 			//@{
@@ -6280,13 +6413,64 @@ namespace studio {
 			std::vector<uint32_t> FocusedSourceIndices;
 			uint32_t FocusRoot = engine::core::FrameGraph::NO_PARENT;
 			uint32_t FocusedDisplayRows = 0;
+			// Flat row buckets and retained clipped indices for one flame paint pass.
+			struct FlamePass {
+				//@{
+				// Prefix offsets that group span indices by display row.
+				std::vector<uint32_t> RowOffsets;
+				// Per-row cursors used while filling the row buckets.
+				std::vector<uint32_t> WriteOffsets;
+				// Span indices arranged by row for clipped painting.
+				std::vector<uint32_t> Indices;
+				// Span indices in their original order for this pass.
+				std::vector<uint32_t> OriginalIndices;
+				// Retained span indices inside the current clipped row range.
+				std::vector<uint32_t> Visible;
+				// First row included by the last clipping pass.
+				uint32_t FirstRow = 0;
+				// Exclusive end row included by the last clipping pass.
+				uint32_t EndRow = 0;
+				// Whether `Visible` matches the stored clipped row range.
+				bool Prepared = false;
+				//@}
+			};
+			// Snapshot metadata is rebuilt with layout, rather than rescanned during paint.
+			struct FlameCache {
+				//@{
+				// Geometry belongs to this retained snapshot, while input and layout stay live.
+				std::array<std::shared_ptr<frame_graph_detail::FlameGeometry>, 2> Geometry;
+				// Changed whenever layout or the published snapshot is rebuilt.
+				uint64_t Revision = 0;
+				// Row buckets for accounting, CPU and GPU flame spans.
+				std::array<FlamePass, 3> Passes;
+				// Number of rows occupied by non-GPU spans.
+				uint32_t CpuRows = 0;
+				// Number of rows occupied by GPU spans.
+				uint32_t GpuRows = 0;
+				// Longest GPU span in the retained snapshot.
+				float GpuMaximumMilliseconds = 0;
+				// Sample count belonging to the longest retained GPU span.
+				uint32_t GpuMaximumSamples = 0;
+				// Whether any non-GPU span was moved below its tree depth to avoid overlap.
+				bool HasOverlap = false;
+				//@}
+			};
+			FlameCache Flame;
+			FlameCache FocusedFlame;
 			bool DisplayDirty = true;
+			// Row indices keep table sorting out of the captured hierarchy.
+			std::vector<size_t> TableOrder;
+			// Rebuilt after a new display snapshot or changed table sort specs.
+			bool TableOrderDirty = true;
 			engine::core::ProfileOwner OwnerFilter = engine::core::ProfileOwner::All;
 			std::array<float, static_cast<size_t>(engine::core::ProfileOwner::Count)> OwnerMilliseconds{};
 			float FrameMilliseconds = 0.0f;
 			float IdleMilliseconds = 0.0f;
 			float UnmarkedMilliseconds = 0.0f;
 			size_t Dropped = 0;
+			engine::render::FrameSummary PresentationSummary{};
+			size_t DroppedGpuMarks = 0;
+			bool HasPresentationSummary = false;
 			// Frames represented by the published snapshot. Kept apart from the
 			// next interval's running count so the label does not jump back to zero
 			// immediately after publishing a mean.
@@ -6347,6 +6531,22 @@ namespace studio {
 			// renderer's round-robin cursor so the table does not switch subjects
 			// every frame when several panels are open.
 			size_t CacheViewport = 0;
+			// Sampling changes diagnostic text at 4 Hz without changing live collection.
+			engine::render::PresentationCacheProfile CacheProfile;
+			// Separate sampled row order for viewport and host tables.
+			std::array<std::vector<size_t>, 2> CacheOrder;
+			// Profile revision used to build each table's row order.
+			std::array<uint64_t, 2> CacheOrderRevision{};
+			// Increments when a new cache profile sample invalidates table ordering.
+			uint64_t CacheProfileRevision = 0;
+			// Effective pass inputs and submitted work from the selected view, sampled together.
+			engine::render::PassActivity CachePassActivity;
+			// Submitted work reported for the sampled viewport.
+			engine::render::FrameResult CacheRecording;
+			// ImGui time when the next cache profile sample is due.
+			double NextCacheProfile = 0.0;
+			// Viewport represented by the sampled profile and recording metadata.
+			size_t SampledCacheViewport = SIZE_MAX;
 		};
 
 		// What the frame-graph panel is showing. Held across frames, which is

@@ -9,6 +9,7 @@
 // indexed by level *and* slot.
 
 #include "DisplayColour.hpp"
+#include "GraphBufferRoles.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
 #include "VulkanTimestamps.hpp"
@@ -263,31 +264,49 @@ namespace engine::render {
 
 	bool Renderer::Impl::SubmitSceneCommand(SDL_GPUCommandBuffer *command) {
 		PendingSceneSubmission submission;
-		for (uint32_t index = 0; index < GraphResources.Images.size(); index++) {
-			if (GraphResources.Images[index].Phase == ResourceImagePhase::Recorded) {
-				submission.Images[submission.ImageCount++] = index;
+		{
+			ENGINE_PROFILE_CAT("submit.scene gather staged images", core::ProfileCategory::Render);
+			for (uint32_t index = 0; index < GraphResources.Images.size(); index++) {
+				if (GraphResources.Images[index].Phase == ResourceImagePhase::Recorded) {
+					submission.Images[submission.ImageCount++] = index;
+				}
 			}
 		}
 		if (GraphResources.StagedSceneFrames.empty() && submission.ImageCount == 0) {
-			const bool submitted = SDL_SubmitGPUCommandBuffer(command);
-			FinishPortalImports(command, submitted);
+			bool submitted = false;
+			{
+				ENGINE_PROFILE_CAT("submit.scene SDL handoff", core::ProfileCategory::Render);
+				submitted = SDL_SubmitGPUCommandBuffer(command);
+			}
+			{
+				ENGINE_PROFILE_CAT("submit.scene publish state", core::ProfileCategory::Render);
+				FinishPortalImports(command, submitted);
+			}
 			return submitted;
 		}
 
-		SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+		SDL_GPUFence *fence = nullptr;
+		{
+			ENGINE_PROFILE_CAT("submit.scene SDL handoff", core::ProfileCategory::Render);
+			fence = SDL_SubmitGPUCommandBufferAndAcquireFence(command);
+		}
 		if (fence == nullptr) {
+			ENGINE_PROFILE_CAT("submit.scene publish state", core::ProfileCategory::Render);
 			DropStagedSceneFrames();
 			return false;
 		}
 
-		FinishPortalImports(command, true);
-		submission.Fence = fence;
-		submission.Frames = std::move(GraphResources.StagedSceneFrames);
-		for (uint32_t index = 0; index < submission.ImageCount; index++) {
-			GraphResources.Images[submission.Images[index]].Phase = ResourceImagePhase::Submitted;
+		{
+			ENGINE_PROFILE_CAT("submit.scene publish state", core::ProfileCategory::Render);
+			FinishPortalImports(command, true);
+			submission.Fence = fence;
+			submission.Frames = std::move(GraphResources.StagedSceneFrames);
+			for (uint32_t index = 0; index < submission.ImageCount; index++) {
+				GraphResources.Images[submission.Images[index]].Phase = ResourceImagePhase::Submitted;
+			}
+			GraphResources.PendingSceneSubmissions.push_back(std::move(submission));
+			GraphResources.StagedSceneFrames.clear();
 		}
-		GraphResources.PendingSceneSubmissions.push_back(std::move(submission));
-		GraphResources.StagedSceneFrames.clear();
 		return true;
 	}
 
@@ -696,6 +715,24 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::CommitPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command) {
+		for (auto &slot : SceneSlots) {
+			auto &working = slot.ForwardWorking;
+			if (working.Command != command || command == nullptr) continue;
+			slot.ForwardPipeline = working.Pipeline;
+			slot.ForwardRevision = working.Revision;
+			slot.ForwardWorld = working.World;
+			slot.ForwardUnavailable = !working.Ready;
+			if (working.Ready) {
+				slot.ForwardedTextures.swap(working.Textures);
+				slot.Activity = working.Activity;
+				slot.ContentSignature = working.ContentSignature;
+			} else {
+				slot.ForwardedTextures.clear();
+				slot.Activity = {};
+				slot.ContentSignature = 0;
+			}
+			working.Command = nullptr;
+		}
 		for (PendingGraphHistoryWrite &write : GraphResources.PendingHistoryWrites) {
 			if (write.Command != command || write.Submitted) continue;
 			if (write.Pipeline != nullptr) {
@@ -709,6 +746,20 @@ namespace engine::render {
 	}
 
 	void Renderer::Impl::DiscardPendingGraphHistoryWrites(SDL_GPUCommandBuffer *command) {
+		// A failed batch can still submit a partial image. Its intermediate targets
+		// cannot promise old pixels, so invalidate bindings and retry the scene.
+		for (auto &slot : SceneSlots) {
+			auto &working = slot.ForwardWorking;
+			if (working.Command == nullptr || (command != nullptr && working.Command != command)) continue;
+			slot.ForwardPipeline = working.Pipeline;
+			slot.ForwardRevision = working.Revision;
+			slot.ForwardWorld = working.World;
+			slot.ForwardUnavailable = true;
+			slot.ForwardedTextures.clear();
+			slot.Activity = {};
+			slot.ContentSignature = 0;
+			working.Command = nullptr;
+		}
 		if (command == nullptr) {
 			GraphResources.PendingHistoryWrites.clear();
 		} else {
@@ -733,12 +784,12 @@ namespace engine::render {
 	core::Name Renderer::Impl::GraphTargetName(const InstalledPipeline &pipeline, core::Name resource) const {
 		for (uint32_t value = 1; value <= pipeline.Graph.ResourceCount(); value++) {
 			const graph::ResourceId id{value};
-			const graph::ResourceDesc *desc = pipeline.Graph.FindResource(id);
+			const graph::ResourceDesc *desc = pipeline.Graph.FindResourceDesc(id);
 			if (desc == nullptr || desc->Name != resource) {
 				continue;
 			}
 			const graph::ResourceId allocation = pipeline.Aliases.AllocationOf(id);
-			const graph::ResourceDesc *physical = pipeline.Graph.FindResource(allocation);
+			const graph::ResourceDesc *physical = pipeline.Graph.FindResourceDesc(allocation);
 			return physical != nullptr ? physical->Name : resource;
 		}
 		return resource;
@@ -749,9 +800,10 @@ namespace engine::render {
 		graph::ResourceId resource,
 		uint64_t owner,
 		uint32_t viewWidth,
-		uint32_t viewHeight
+		uint32_t viewHeight,
+		bool authoredExtent
 	) {
-		const graph::ResourceDesc *desc = pipeline.Graph.FindResource(resource);
+		const graph::ResourceDesc *desc = pipeline.Graph.FindResourceDesc(resource);
 		if (desc == nullptr || desc->Kind == graph::ResourceKind::Texture ||
 			desc->Kind == graph::ResourceKind::Buffer || desc->Kind == graph::ResourceKind::Camera ||
 			desc->Kind == graph::ResourceKind::Entities) {
@@ -759,16 +811,21 @@ namespace engine::render {
 		}
 
 		bool presentationImage = false;
+		bool clearableSky = false;
+		bool haveWriter = false;
 		for (uint32_t value = 1; value <= pipeline.Graph.Count(); value++) {
 			const graph::Node *writer = pipeline.Graph.Find(graph::NodeId{value});
 			if (writer == nullptr ||
 				std::find(writer->Writes.begin(), writer->Writes.end(), resource) == writer->Writes.end()) {
 				continue;
 			}
-			presentationImage = writer->Kind == core::Name("present") ||
-								writer->Kind == core::Name("interface") ||
-								writer->Kind == core::Name("overlay");
-			break;
+			if (!haveWriter) {
+				presentationImage = writer->Kind == core::Name("present") ||
+									writer->Kind == core::Name("interface") ||
+									writer->Kind == core::Name("overlay");
+				haveWriter = true;
+			}
+			clearableSky |= writer->Kind == core::Name("skybox-compute");
 		}
 		if (desc->External && desc->Lifetime == graph::ResourceLifetime::External && !presentationImage) {
 			return {};
@@ -781,7 +838,12 @@ namespace engine::render {
 
 		uint32_t width = 0;
 		uint32_t height = 0;
-		desc->Resolve(viewWidth, viewHeight, width, height);
+		if (authoredExtent) {
+			width = viewWidth;
+			height = viewHeight;
+		} else {
+			desc->Resolve(viewWidth, viewHeight, width, height);
+		}
 		const graph::NodeScope scope = ResourceScope(pipeline, resource);
 		const core::Name targetName = GraphTargetName(pipeline, desc->Name);
 		for (GraphTarget &target : GraphResources.Targets) {
@@ -804,6 +866,7 @@ namespace engine::render {
 			info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
 			if (desc->Kind == graph::ResourceKind::Storage) {
 				info.usage |= SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+				if (clearableSky) info.usage |= SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
 			} else if (desc->Kind == graph::ResourceKind::Depth) {
 				info.usage |= SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
 			} else {
@@ -826,7 +889,7 @@ namespace engine::render {
 		}
 
 		GraphResources.Targets.push_back(GraphTarget{pipeline.Name, targetName, scope, owner});
-		return EnsureGraphTarget(pipeline, resource, owner, viewWidth, viewHeight);
+		return EnsureGraphTarget(pipeline, resource, owner, viewWidth, viewHeight, authoredExtent);
 	}
 
 	SDL_GPUBuffer *Renderer::Impl::FindGraphBuffer(
@@ -847,14 +910,20 @@ namespace engine::render {
 		graph::ResourceId resource,
 		uint64_t owner,
 		uint32_t viewWidth,
-		uint32_t viewHeight
+		uint32_t viewHeight,
+		uint64_t actualBytes
 	) {
-		const graph::ResourceDesc *desc = pipeline.Graph.FindResource(resource);
-		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer || desc->External ||
+		const graph::ResourceDesc *desc = pipeline.Graph.FindResourceDesc(resource);
+		// History is graph-owned; its External flag also excludes it from transient aliasing.
+		if (desc == nullptr || desc->Kind != graph::ResourceKind::Buffer ||
+			(desc->External && desc->Lifetime != graph::ResourceLifetime::History) ||
 			desc->BufferStride == 0) {
 			return nullptr;
 		}
-		const uint64_t bytes = desc->Bytes(viewWidth, viewHeight);
+		const uint64_t declaredBytes = desc->Bytes(viewWidth, viewHeight);
+		if (actualBytes != 0 && (actualBytes > declaredBytes || actualBytes % desc->BufferStride != 0))
+			return nullptr;
+		const uint64_t bytes = actualBytes != 0 ? actualBytes : declaredBytes;
 		if (bytes == 0 || bytes > MAX_GRAPH_BUFFER_BYTES || bytes > UINT32_MAX) {
 			ENGINE_WARN(
 				"graph buffer '{}' requests {} bytes, over the {} byte limit",
@@ -865,9 +934,10 @@ namespace engine::render {
 			return nullptr;
 		}
 		SDL_GPUBufferUsageFlags usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
-		if (desc->Name == core::Name("tessellated-vertices")) usage |= SDL_GPU_BUFFERUSAGE_VERTEX;
-		if (desc->Name == core::Name("tessellated-indices")) usage |= SDL_GPU_BUFFERUSAGE_INDEX;
-		if (desc->Name == core::Name("tessellated-commands")) usage |= SDL_GPU_BUFFERUSAGE_INDIRECT;
+		const auto roles = detail::GraphBufferRoles(pipeline.Graph, resource);
+		if (roles & detail::VertexBuffer) usage |= SDL_GPU_BUFFERUSAGE_VERTEX;
+		if (roles & detail::IndexBuffer) usage |= SDL_GPU_BUFFERUSAGE_INDEX;
+		if (roles & detail::IndirectBuffer) usage |= SDL_GPU_BUFFERUSAGE_INDIRECT;
 		if (desc->Access == graph::ResourceAccess::Write ||
 			desc->Access == graph::ResourceAccess::ReadWrite ||
 			desc->Access == graph::ResourceAccess::Automatic) {
@@ -1059,7 +1129,7 @@ namespace engine::render {
 		SDL_GPUTextureCreateInfo depth{};
 		depth.type = SDL_GPU_TEXTURETYPE_2D;
 		depth.format = DepthFormat;
-		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		depth.width = width;
 		depth.height = height;
 		depth.layer_count_or_depth = 1;
@@ -1210,7 +1280,7 @@ namespace engine::render {
 		SDL_GPUTextureCreateInfo depth{};
 		depth.type = SDL_GPU_TEXTURETYPE_2D;
 		depth.format = DepthFormat;
-		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		depth.width = width;
 		depth.height = height;
 		depth.layer_count_or_depth = 1;
@@ -1313,7 +1383,7 @@ namespace engine::render {
 		SDL_GPUTextureCreateInfo depth{};
 		depth.type = SDL_GPU_TEXTURETYPE_2D;
 		depth.format = DepthFormat;
-		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+		depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		depth.width = width;
 		depth.height = height;
 		depth.layer_count_or_depth = 1;

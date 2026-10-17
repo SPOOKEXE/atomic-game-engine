@@ -6,7 +6,9 @@
 
 #include "fixtures/SunlightParity.hpp"
 
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
@@ -53,19 +55,38 @@ TEST_CASE("Lighting reaches every resolved render term", "[scene][sunlight]") {
 	authored.Brightness = 3.0f;
 	authored.Ambient = Color3{0.1f, 0.2f, 0.3f};
 	authored.OutdoorAmbient = Color3{0.4f, 0.5f, 0.6f};
-	authored.FogColor = Color3{0.7f, 0.8f, 0.9f};
-	authored.FogStart = 10.0f;
-	authored.FogEnd = 40.0f;
-	authored.BloomThreshold = 0.8f;
-	authored.BloomIntensity = 1.25f;
-	authored.BloomRadius = 9.0f;
-	authored.DepthOfFieldIntensity = 0.8f;
-	authored.DepthOfFieldFocusDistance = 21.0f;
-	authored.DepthOfFieldFocusRange = 5.0f;
-	authored.DepthOfFieldRadius = 7.0f;
-	authored.GodRayIntensity = 1.4f;
-	authored.GodRayThreshold = 0.6f;
-	authored.GodRayRadius = 72.0f;
+	const Entity service = store.FindFirstRoot("Lighting");
+	const auto addEffect = [&](const char *className) {
+		const Entity effect =
+			store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name(className)), className);
+		REQUIRE(store.SetParent(effect, service));
+		return effect;
+	};
+	const Entity fogEntity = addEffect("FogEffect");
+	const Entity bloomEntity = addEffect("BloomEffect");
+	const Entity depthEntity = addEffect("DepthOfFieldEffect");
+	const Entity raysEntity = addEffect("GodRaysEffect");
+	auto *fog = store.GetMutable<engine::scene::FogEffect>(fogEntity);
+	auto *bloom = store.GetMutable<engine::scene::BloomEffect>(bloomEntity);
+	auto *depth = store.GetMutable<engine::scene::DepthOfFieldEffect>(depthEntity);
+	auto *rays = store.GetMutable<engine::scene::GodRaysEffect>(raysEntity);
+	REQUIRE(fog != nullptr);
+	REQUIRE(bloom != nullptr);
+	REQUIRE(depth != nullptr);
+	REQUIRE(rays != nullptr);
+	fog->Color = Color3{0.7f, 0.8f, 0.9f};
+	fog->Start = 10.0f;
+	fog->End = 40.0f;
+	bloom->Intensity = 1.25f;
+	bloom->Threshold = 0.8f;
+	bloom->Radius = 9.0f;
+	depth->Intensity = 0.8f;
+	depth->FocusDistance = 21.0f;
+	depth->FocusRange = 5.0f;
+	depth->Radius = 7.0f;
+	rays->Intensity = 1.4f;
+	rays->Threshold = 0.6f;
+	rays->Radius = 72.0f;
 
 	const WorldLighting resolved = engine::scene::LightingOf(store);
 	CHECK(resolved.Direction.X == Approx(0.0f).margin(0.0001f));
@@ -74,7 +95,7 @@ TEST_CASE("Lighting reaches every resolved render term", "[scene][sunlight]") {
 	CheckColour(resolved.Ambient, authored.Ambient);
 	CheckColour(resolved.OutdoorAmbient, authored.OutdoorAmbient);
 	CheckColour(resolved.Direct, Color3{3.0f, 3.0f, 3.0f});
-	CheckColour(resolved.FogColor, authored.FogColor);
+	CheckColour(resolved.FogColor, Color3{0.7f, 0.8f, 0.9f});
 	CHECK(resolved.FogStart == Approx(10.0f));
 	CHECK(resolved.FogEnd == Approx(40.0f));
 	CHECK(resolved.BloomThreshold == Approx(0.8f));
@@ -122,7 +143,10 @@ TEST_CASE("the legacy Sun resource remains an explicit override", "[scene][sunli
 	LightingServiceComponent &authored = Lighting(store);
 	authored.ClockTime = 12.0f;
 	authored.Ambient = Color3{0.1f, 0.1f, 0.1f};
-	authored.FogStart = 12.0f;
+	const Entity fog =
+		store.CreateInstance(engine::ecs::Classes::Find(engine::core::Name("FogEffect")), "Fog");
+	REQUIRE(store.SetParent(fog, store.FindFirstRoot("Lighting")));
+	store.GetMutable<engine::scene::FogEffect>(fog)->Start = 12.0f;
 
 	Sun override;
 	override.Direction = Vector3{0.0f, -4.0f, 0.0f};

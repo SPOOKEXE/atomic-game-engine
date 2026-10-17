@@ -15,6 +15,7 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/effects/Particles.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
@@ -77,6 +78,12 @@ using engine::scene::Visual;
 using engine::scene::WorldBounds;
 
 namespace {
+	bool LoadSceneForViewer(Store &store, Scheduler &systems, const std::string &path, std::string &error) {
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfBoth();
+		return LoadScene(store, systems, path, error, nullptr, &limits);
+	}
+
 	class DemoCaptureBridge final : public engine::script::DataCaptureBridge {
 	  public:
 		enum class ReadBehavior : uint8_t { Exact, Empty, Overlong };
@@ -576,7 +583,7 @@ TEST_CASE("the shaders scene authors and selects runtime shaders from Luau", "[e
 	Scheduler systems;
 
 	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("Shaders.luau"), error);
+	const bool loaded = LoadSceneForViewer(store, systems, ExamplePath("Shaders.luau"), error);
 	INFO(error);
 	REQUIRE(loaded);
 
@@ -610,6 +617,25 @@ TEST_CASE("the shaders scene authors and selects runtime shaders from Luau", "[e
 	const ActiveCamera *active = store.Resource<ActiveCamera>();
 	REQUIRE(active != nullptr);
 	CHECK(active->Entity == InScene(store, "ShaderCamera"));
+	const auto starter = store.FindFirstRoot("StarterPlayer");
+	const auto scripts = store.FindFirstChild(starter, "StarterPlayerScripts");
+	const auto templateCamera = store.FindFirstChild(scripts, "DemoCamera");
+	REQUIRE(templateCamera != engine::ecs::NULL_ENTITY);
+	const auto source = engine::script::ActiveSourceOf(store, templateCamera);
+	CHECK(source == Name("examples/scripts/client/DemoCameras/Shaders.client.luau"));
+
+	const Entity oldCamera = active->Entity;
+	REQUIRE(LoadSceneForViewer(store, systems, ExamplePath("Shaders.luau"), error));
+	CHECK_FALSE(store.Alive(oldCamera));
+	active = store.Resource<ActiveCamera>();
+	REQUIRE(active != nullptr);
+	CHECK(store.Alive(active->Entity));
+	CHECK(active->Entity != oldCamera);
+	size_t viewerCount = 0;
+	store.Each<const engine::scene::Camera>([&](Entity entity, const engine::scene::Camera &) {
+		if (store.ClassOf(entity) == engine::scene::CameraClass()) ++viewerCount;
+	});
+	CHECK(viewerCount == 1);
 }
 
 TEST_CASE("the mirrors scene builds what the render passes need", "[examples][scene]") {
@@ -619,7 +645,7 @@ TEST_CASE("the mirrors scene builds what the render passes need", "[examples][sc
 	Scheduler systems;
 
 	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("Mirrors-1-world.luau"), error);
+	const bool loaded = LoadSceneForViewer(store, systems, ExamplePath("Mirrors-1-world.luau"), error);
 	INFO(error);
 	REQUIRE(loaded);
 
@@ -733,7 +759,7 @@ TEST_CASE("the reflected camera is the eye mirrored through the plane", "[exampl
 	Scheduler systems;
 
 	std::string error;
-	REQUIRE(LoadScene(store, systems, ExamplePath("Mirrors-1-world.luau"), error));
+	REQUIRE(LoadSceneForViewer(store, systems, ExamplePath("Mirrors-1-world.luau"), error));
 
 	REQUIRE(engine::scene::AimSurfaceCameras(store) == 4);
 
@@ -804,7 +830,7 @@ TEST_CASE("every portal shows the room it names", "[examples][scene]") {
 	Scheduler systems;
 
 	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("Portals-1-world.luau"), error);
+	const bool loaded = LoadSceneForViewer(store, systems, ExamplePath("Portals-1-world.luau"), error);
 	INFO(error);
 	REQUIRE(loaded);
 
@@ -1071,7 +1097,7 @@ TEST_CASE("the hallway camera and character enter its long tunnel", "[examples][
 	Scheduler systems;
 
 	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("Hallway.luau"), error);
+	const bool loaded = LoadSceneForViewer(store, systems, ExamplePath("Hallway.luau"), error);
 	INFO(error);
 	REQUIRE(loaded);
 
@@ -1125,7 +1151,7 @@ TEST_CASE("the tunnels scene is shorter and longer inside than out", "[examples]
 	Scheduler systems;
 
 	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("Tunnels.luau"), error);
+	const bool loaded = LoadSceneForViewer(store, systems, ExamplePath("Tunnels.luau"), error);
 	INFO(error);
 	REQUIRE(loaded);
 
@@ -1731,6 +1757,72 @@ TEST_CASE("the gui interaction scene mounts labels, images, and emulated buttons
 	CHECK(placed->Rendered);
 }
 
+TEST_CASE(
+	"the image buffer demo imports formats into GUI, part and particle slots", "[examples][scene][image]"
+) {
+	const StagedAssets assets;
+	Store store("image.buffers");
+	Scheduler systems;
+	std::shared_ptr<engine::script::Runtime> runtime;
+	std::string error;
+	REQUIRE(LoadScene(store, systems, ExamplePath("ImageBuffers.luau"), error, &runtime));
+	INFO(error);
+	REQUIRE(runtime != nullptr);
+	CHECK(runtime->LastError().empty());
+	const Entity rawImage = InScene(store, "RawBuffer");
+	REQUIRE(rawImage != engine::ecs::NULL_ENTITY);
+	const engine::scene::EditableImage *rawPixels = store.Get<engine::scene::EditableImage>(rawImage);
+	REQUIRE(rawPixels != nullptr);
+	CHECK(rawPixels->Width == 64);
+	CHECK(rawPixels->Height == 64);
+	CHECK(rawPixels->Space == engine::scene::EditableImageSpace::SRGB);
+	const Entity pngImage = InScene(store, "PngBase64");
+	REQUIRE(pngImage != engine::ecs::NULL_ENTITY);
+	const engine::scene::EditableImage *pngPixels = store.Get<engine::scene::EditableImage>(pngImage);
+	REQUIRE(pngPixels != nullptr);
+	CHECK(pngPixels->Width == 2);
+	CHECK(pngPixels->Height == 1);
+	CHECK(pngPixels->Space == engine::scene::EditableImageSpace::SRGB);
+	const Entity jpegImage = InScene(store, "JpegBase64");
+	REQUIRE(jpegImage != engine::ecs::NULL_ENTITY);
+	const engine::scene::EditableImage *jpegPixels = store.Get<engine::scene::EditableImage>(jpegImage);
+	REQUIRE(jpegPixels != nullptr);
+	CHECK(jpegPixels->Width == 16);
+	CHECK(jpegPixels->Height == 16);
+	CHECK(jpegPixels->Space == engine::scene::EditableImageSpace::SRGB);
+
+	for (const char *name : {"RGBA export", "PNG Base64", "PNG buffer", "JPEG Base64", "JPEG buffer"}) {
+		const Entity imageLabel = FirstElement(store, name);
+		REQUIRE(imageLabel != engine::ecs::NULL_ENTITY);
+		const engine::gui::Picture *picture = store.Get<engine::gui::Picture>(imageLabel);
+		REQUIRE(picture != nullptr);
+		CHECK(picture->Image.Text().starts_with("editable-image://"));
+	}
+
+	const Entity mesh = InScene(store, "PngMeshPart");
+	REQUIRE(mesh != engine::ecs::NULL_ENTITY);
+	const engine::scene::SurfaceAppearance *meshAppearance =
+		store.Get<engine::scene::SurfaceAppearance>(mesh);
+	REQUIRE(meshAppearance != nullptr);
+	CHECK(meshAppearance->ColourMap.Text().starts_with("editable-image://"));
+
+	const Entity texturedPart = InScene(store, "RawTexturePart");
+	REQUIRE(texturedPart != engine::ecs::NULL_ENTITY);
+	const Entity texture = store.FindFirstChild(texturedPart, "RawRGBA");
+	REQUIRE(texture != engine::ecs::NULL_ENTITY);
+	Name textureContent;
+	REQUIRE(store.GetProperty(texture, Name("Texture"), &textureContent, sizeof(textureContent)));
+	CHECK(textureContent.Text().starts_with("editable-image://"));
+
+	const Entity particleHost = InScene(store, "JpegParticleHost");
+	REQUIRE(particleHost != engine::ecs::NULL_ENTITY);
+	const Entity emitter = store.FindFirstChild(particleHost, "JpegParticles");
+	REQUIRE(emitter != engine::ecs::NULL_ENTITY);
+	const engine::effects::ParticleEmitter *particles = store.Get<engine::effects::ParticleEmitter>(emitter);
+	REQUIRE(particles != nullptr);
+	CHECK(particles->Texture.Text().starts_with("editable-image://"));
+}
+
 TEST_CASE("the world interface scene contains every collector and a nested scene", "[examples][scene][gui]") {
 	const StagedAssets assets;
 	Store store("interface_world");
@@ -1738,7 +1830,7 @@ TEST_CASE("the world interface scene contains every collector and a nested scene
 
 	std::string error;
 	INFO(error);
-	REQUIRE(LoadScene(store, systems, ExamplePath("InterfaceWorld.luau"), error));
+	REQUIRE(LoadSceneForViewer(store, systems, ExamplePath("InterfaceWorld.luau"), error));
 
 	const Entity pane = InScene(store, "SurfacePanel");
 	const Entity marker = InScene(store, "BillboardMarker");
@@ -2172,7 +2264,7 @@ TEST_CASE("the planet quadtree follows the active camera", "[examples][scene][pl
 	Scheduler systems;
 
 	std::string error;
-	REQUIRE(LoadScene(store, systems, ExamplePath("Planet.luau"), error));
+	REQUIRE(LoadSceneForViewer(store, systems, ExamplePath("Planet.luau"), error));
 
 	const Entity camera = store.CreateInstance(engine::scene::CameraClass(), "PlanetTestCamera");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
@@ -2234,7 +2326,7 @@ TEST_CASE("the PBR stone demo binds every map to its relief meshes", "[examples]
 	Scheduler systems;
 
 	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("PbrShaderMaterialDemo.luau"), error);
+	const bool loaded = LoadSceneForViewer(store, systems, ExamplePath("PbrShaderMaterialDemo.luau"), error);
 	INFO(error);
 	REQUIRE(loaded);
 
@@ -2245,11 +2337,28 @@ TEST_CASE("the PBR stone demo binds every map to its relief meshes", "[examples]
 		systems.Tick(store, 1.0f / 60.0f);
 	}
 
+	const auto *active = store.Resource<ActiveCamera>();
+	REQUIRE(active != nullptr);
+	const Entity camera = active->Entity;
+	REQUIRE(store.Alive(camera));
+	CHECK(store.InstanceNameOf(camera) == Name("PbrShaderMaterialCamera"));
+	CHECK(Store::IsPredicted(camera));
+	CHECK(engine::ecs::IsClientLocalInstance(store, camera));
+	const auto *lens = store.Get<engine::scene::Camera>(camera);
+	REQUIRE(lens != nullptr);
+	CHECK(lens->FieldOfViewRadians == Approx(40.0f * std::numbers::pi_v<float> / 180.0f));
+	const auto *pose = store.Get<engine::scene::Transform>(camera);
+	REQUIRE(pose != nullptr);
+	CHECK(pose->Frame.Position == engine::core::Vector3{-5, 4.8f, 10});
+
 	// The renderer owns material resolution, so the generic scene loader leaves
 	// it unscheduled. Resolve once here to inspect the same derived draw inputs
 	// the client's pre-render phase consumes.
 	REQUIRE(engine::scene::ResolveMaterials(store) == 0);
 
+	const Entity sharedAssets =
+		engine::scene::ServiceOf(store, engine::ecs::Classes::Find(Name("ReplicatedStorage")));
+	REQUIRE(sharedAssets != engine::ecs::NULL_ENTITY);
 	const std::array maps{
 		"PbrDemo_Colour",
 		"PbrDemo_Normal",
@@ -2260,8 +2369,9 @@ TEST_CASE("the PBR stone demo binds every map to its relief meshes", "[examples]
 	};
 	std::array<engine::core::Name, std::tuple_size_v<decltype(maps)>> contentIds{};
 	for (size_t index = 0; index < maps.size(); index++) {
-		const Entity image = InScene(store, maps[index]);
+		const Entity image = store.FindFirstChild(sharedAssets, maps[index]);
 		REQUIRE(image != engine::ecs::NULL_ENTITY);
+		CHECK(store.ParentOf(image) == sharedAssets);
 		const auto *editable = store.Get<engine::scene::EditableImage>(image);
 		REQUIRE(editable != nullptr);
 		CHECK(editable->Width == 256);
@@ -2279,8 +2389,9 @@ TEST_CASE("the PBR stone demo binds every map to its relief meshes", "[examples]
 		  "CoolStonePbr_ReliefMesh",
 		  "FillStonePbr_ReliefMesh",
 		  "WarmStonePbr_ReliefMesh"}) {
-		const Entity meshEntity = InScene(store, meshName);
+		const Entity meshEntity = store.FindFirstChild(sharedAssets, meshName);
 		REQUIRE(meshEntity != engine::ecs::NULL_ENTITY);
+		CHECK(store.ParentOf(meshEntity) == sharedAssets);
 		const auto *mesh = store.Get<engine::scene::EditableMesh>(meshEntity);
 		REQUIRE(mesh != nullptr);
 		CHECK(mesh->Positions.size() == 85 * 113);
@@ -2404,7 +2515,7 @@ TEST_CASE("the terrain scene builds a coloured heightfield mesh", "[examples][sc
 	Scheduler systems;
 
 	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("Terrain.luau"), error);
+	const bool loaded = LoadSceneForViewer(store, systems, ExamplePath("Terrain.luau"), error);
 	INFO(error);
 	REQUIRE(loaded);
 
@@ -2496,7 +2607,7 @@ TEST_CASE("the terrain stream follows the camera that is actually active", "[exa
 	Scheduler systems;
 
 	std::string error;
-	REQUIRE(LoadScene(store, systems, ExamplePath("Terrain.luau"), error));
+	REQUIRE(LoadSceneForViewer(store, systems, ExamplePath("Terrain.luau"), error));
 
 	const Entity camera = store.CreateInstance(engine::scene::CameraClass(), "ViewportCamera");
 	REQUIRE(camera != engine::ecs::NULL_ENTITY);
@@ -2872,7 +2983,7 @@ TEST_CASE("the player list names everybody in the world", "[examples][scene][pla
 	store.SetResource(ActiveCamera{camera});
 
 	std::string error;
-	const bool loaded = LoadScene(store, systems, ExamplePath("PlayerList.luau"), error);
+	const bool loaded = LoadSceneForViewer(store, systems, ExamplePath("PlayerList.luau"), error);
 	INFO(error);
 	REQUIRE(loaded);
 
@@ -3058,19 +3169,11 @@ TEST_CASE("the recursive mirror demo moves through a bounded history corridor", 
 // where the passes go as `panes x (panes - 1) ^ (levels - 1)` - 3,600 of them at
 // sixteen panes. A change that dropped the `workspace.SurfaceBounces = 1` line
 // would turn this scene from slow into a hang.
-TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes", "[examples][scene]") {
-	// **Two of these claims were false and both read as the mirrors being
-	// broken.** The scene authored sixteen cameras over eighty facets because
-	// sixteen is what `scene::MAX_SURFACES` used to compile in - so five sixths
-	// of a *mirror ball* were not mirrors - and it cut each facet as a square
-	// 0.62 of an edge across, which is smaller than the triangle it sits on. A
-	// square cannot fill a triangle, so the tiles never met and the ball was a
-	// shell of loose plates with the dark core showing at every seam.
-	//
-	// The budget is the world's since v0.17 and the scene states it. Asking is
-	// still the scene's, and every facet asks: what the panes over budget cost
-	// is the whole point of a stress scene, so a change that quietly caps the
-	// asking again is a regression rather than a saving.
+TEST_CASE(
+	"the mirror ball mirrors every facet, faces them out and has no holes", "[examples][scene][mirrors]"
+) {
+	// Every facet is eligible to resolve. The surrounding room must remain
+	// reflected when rotation reveals panes that began behind the ball.
 	const StagedAssets assets;
 
 	Store store("mirrorball");
@@ -3102,14 +3205,14 @@ TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes"
 	);
 	CHECK(facets == 320);
 
-	// **A camera on every one of them, which is what makes it a mirror ball.**
-	// The world draws `workspace.MaxSurfaces` of them - the ones covering the
-	// most screen - and the rest reach no screen at all; that cost is the finding
-	// this scene exists to produce, and capping the asking to hide it would be
-	// hiding the finding.
+	// The authored budget and renderer slots both cover all facets.
 	static thread_local std::vector<engine::scene::SurfacePane> panes;
 	REQUIRE(engine::scene::GatherSurfacePanes(store, panes) == facets);
-	CHECK(engine::scene::SurfaceLimitOf(store) == 32);
+	CHECK(engine::scene::SurfaceLimitOf(store) == static_cast<int32_t>(facets));
+	std::vector<engine::scene::SurfaceSlot> slots;
+	REQUIRE(engine::scene::GatherSurfaceSlots(store, slots) == facets);
+	for (const auto &slot : slots)
+		CHECK(slot.Index >= 0);
 	for (const engine::scene::SurfacePane &pane : panes) {
 		REQUIRE(store.Get<engine::scene::SurfaceCamera>(pane.Camera) != nullptr);
 		CHECK(store.Get<engine::scene::SurfaceCamera>(pane.Camera)->FPS == Approx(60.0f));
@@ -3126,7 +3229,12 @@ TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes"
 	// few per cent to sit under the plates.
 	float cored = 0.0f;
 	size_t meshes = 0;
-	store.Each<const engine::scene::EditableMesh>([&](Entity, const engine::scene::EditableMesh &mesh) {
+	const Entity sharedAssets =
+		engine::scene::ServiceOf(store, engine::ecs::Classes::Find(Name("ReplicatedStorage")));
+	REQUIRE(sharedAssets != engine::ecs::NULL_ENTITY);
+	store.Each<const engine::scene::EditableMesh>([&](Entity entity,
+													  const engine::scene::EditableMesh &mesh) {
+		CHECK(store.ParentOf(entity) == sharedAssets);
 		meshes++;
 		for (size_t at = 0; at + 2 < mesh.Indices.size(); at += 3) {
 			const engine::core::Vector3 &a = mesh.Positions[mesh.Indices[at]];
@@ -3157,6 +3265,10 @@ TEST_CASE("the mirror ball mirrors every facet, faces them out and has no holes"
 		const engine::core::Vector3 outward = pane.Centre - hub->Frame.Position;
 		CHECK(outward.Magnitude() > 0.0f);
 		CHECK(outward.Dot(pane.Normal) > 0.0f);
+		const auto eye = pane.Centre + pane.Normal * 8.0f;
+		const auto reflection = engine::scene::ReflectCamera(pane, engine::core::CFrame{eye}, {});
+		CHECK(reflection.Renders);
+		CHECK((reflection.Frame.Position - (pane.Centre - pane.Normal * 8.0f)).Magnitude() < 0.0001f);
 	}
 
 	CHECK(engine::scene::SurfaceBouncesOf(store) == 1);
@@ -3188,5 +3300,134 @@ TEST_CASE("every staged scene is offered by name, sorted", "[examples][scene]") 
 		INFO(scene);
 		CHECK(scene.size() > 5);
 		CHECK(scene.compare(scene.size() - 5, 5, ".luau") == 0);
+	}
+}
+
+TEST_CASE(
+	"demo camera templates configure one private client camera after the builder", "[examples][scene][camera]"
+) {
+	const StagedAssets assets;
+	struct Files {
+		std::filesystem::path Root = engine::core::Paths::Base() / "demo-camera-fixture";
+		Files() {
+			std::filesystem::create_directories(Root / "client" / "DemoCameras");
+		}
+		~Files() {
+			std::filesystem::remove_all(Root);
+		}
+	} files;
+	for (const bool javascript : {false, true}) {
+		const auto builder = files.Root / (javascript ? "Fixture.js" : "Fixture.luau");
+		const auto companion = files.Root / "client" / "DemoCameras" /
+							   (javascript ? "Fixture.client.js" : "Fixture.client.luau");
+		{
+			std::ofstream source(builder);
+			REQUIRE(source);
+			source
+				<< (javascript ? R"(
+const config = game.GetService('StarterPlayer').FindFirstChild('StarterPlayerScripts').FindFirstChild('DemoCamera');
+config.SetAttribute('CFrame', CFrame.new(12, 13, 14));
+if (!workspace.FindFirstChild('Authored')) {
+ const part = Instance.new('Part', workspace);
+ part.Name = 'Authored';
+}
+)"
+							   : R"(
+local config = game:GetService('StarterPlayer'):FindFirstChild('StarterPlayerScripts'):FindFirstChild('DemoCamera')
+config:SetAttribute('CFrame', CFrame.new(12, 13, 14))
+if workspace:FindFirstChild('Authored') == nil then
+ local part = Instance.new('Part', workspace)
+ part.Name = 'Authored'
+end
+)");
+		}
+		{
+			std::ofstream source(companion);
+			REQUIRE(source);
+			source
+				<< (javascript ? R"(
+const camera = Instance.new('Camera', workspace);
+camera.Name = 'FixtureCamera';
+camera.CFrame = script.GetAttribute('CFrame');
+camera.CameraSubject = null;
+workspace.CurrentCamera = camera;
+camera.CameraType = Enum.CameraType.Scriptable;
+const marker = Instance.new('ObjectValue', script);
+marker.Name = 'PublishedCamera';
+marker.Value = camera;
+)"
+							   : R"(
+local camera = Instance.new('Camera', workspace)
+camera.Name = 'FixtureCamera'
+camera.CFrame = script:GetAttribute('CFrame')
+camera.CameraSubject = nil
+workspace.CurrentCamera = camera
+camera.CameraType = Enum.CameraType.Scriptable
+local marker = Instance.new('ObjectValue', script)
+marker.Name = 'PublishedCamera'
+marker.Value = camera
+)");
+		}
+		for (const bool client : {false, true}) {
+			Store store("demo-camera-fixture");
+			Scheduler systems;
+			engine::script::RuntimeLimits limits;
+			limits.Role = client ? engine::script::HostRole::OfBoth() : engine::script::HostRole::OfServer();
+			std::shared_ptr<engine::script::Runtime> runtime;
+			std::string error;
+			REQUIRE(LoadScene(store, systems, builder.string(), error, &runtime, &limits));
+			INFO(error);
+			const auto authored = InScene(store, "Authored");
+			REQUIRE(authored != engine::ecs::NULL_ENTITY);
+			CHECK_FALSE(Store::IsPredicted(authored));
+			const auto starter = store.FindFirstRoot("StarterPlayer");
+			const auto templates = store.FindFirstChild(starter, "StarterPlayerScripts");
+			const auto source = store.FindFirstChild(templates, "DemoCamera");
+			REQUIRE(source != engine::ecs::NULL_ENTITY);
+			CHECK_FALSE(Store::IsPredicted(source));
+			CHECK(
+				engine::script::ActiveSourceOf(store, source) ==
+				Name(std::filesystem::absolute(companion).string())
+			);
+			const auto *active = store.Resource<ActiveCamera>();
+			if (!client) {
+				CHECK(active == nullptr);
+				CHECK(InScene(store, "FixtureCamera") == engine::ecs::NULL_ENTITY);
+				continue;
+			}
+			REQUIRE(active != nullptr);
+			const auto camera = active->Entity;
+			CHECK(Store::IsPredicted(camera));
+			CHECK(engine::ecs::IsClientLocalInstance(store, camera));
+			CHECK(
+				store.Get<engine::scene::Transform>(camera)->Frame.Position ==
+				engine::core::Vector3{12, 13, 14}
+			);
+			CHECK(
+				store.Resource<engine::scene::CameraController>()->Mode ==
+				engine::scene::CameraMode::Scriptable
+			);
+			const auto player = store.Resource<engine::scene::LocalPlayer>()->Instance;
+			const auto copy =
+				store.FindFirstChild(store.FindFirstChild(player, "PlayerScripts"), "DemoCamera");
+			CHECK(copy != source);
+			CHECK(Store::IsPredicted(copy));
+			const auto cameraCount = [&] {
+				size_t count = 0;
+				store.Each<const engine::scene::Camera>([&](Entity entity, const engine::scene::Camera &) {
+					if (store.InstanceNameOf(entity) == Name("FixtureCamera")) ++count;
+				});
+				return count;
+			};
+			for (int tick = 0; tick < 3; ++tick)
+				systems.Tick(store, 1.0f / 60);
+			CHECK(cameraCount() == 1);
+			REQUIRE(LoadScene(store, systems, builder.string(), error, &runtime, &limits));
+			CHECK_FALSE(store.Alive(camera));
+			CHECK_FALSE(store.Alive(copy));
+			CHECK(store.Resource<ActiveCamera>()->Entity != camera);
+			CHECK(cameraCount() == 1);
+			CHECK(store.Alive(authored));
+		}
 	}
 }

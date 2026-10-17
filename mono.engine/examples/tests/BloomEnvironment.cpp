@@ -6,6 +6,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/scene/Atmosphere.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/testing/Suite.hpp>
@@ -51,6 +52,15 @@ TEST_CASE(
 	CHECK(lighting.BloomThreshold == Catch::Approx(0.8f));
 	CHECK(lighting.BloomIntensity == Catch::Approx(1.35f));
 	CHECK(lighting.BloomRadius == Catch::Approx(10.0f));
+	size_t bloomCount = 0;
+	store.Each<const engine::scene::BloomEffect>([&](engine::ecs::Entity, const auto &effect) {
+		bloomCount++;
+		CHECK(effect.Enabled);
+		CHECK(effect.Threshold == Catch::Approx(0.8f));
+		CHECK(effect.Intensity == Catch::Approx(1.35f));
+		CHECK(effect.Radius == Catch::Approx(10.0f));
+	});
+	CHECK(bloomCount == 1);
 	CHECK(lighting.Direct.R > 0.0f);
 	CHECK(lighting.EnvironmentState.HasAtmosphereCompute);
 	CHECK(lighting.EnvironmentState.HasCloudCompute);

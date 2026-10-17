@@ -114,15 +114,15 @@ end
 -- looking up its diagonal - the angle where the three axes are all foreshortened
 -- differently, so a projection error shows up as a bend rather than hiding
 -- along one of them.
-local view = Instance.new("Camera")
-view.Name = "Viewer"
-view.CFrame = CFrame.lookAt(
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local view = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+view:SetAttribute("Name", "Viewer")
+view:SetAttribute("CFrame", CFrame.lookAt(
 	Vector3.new(-26, -8, -30),
 	Vector3.new(0, 6 + (LAYERS - 1) * SPACING / 2, 0)
-)
-view.FieldOfView = 70
-view.Parent = workspace
-workspace.CurrentCamera = view
+))
+view:SetAttribute("FieldOfView", 70)
 
 -- **A slow drift rather than a spin.** The point of the motion is that the
 -- frame is not identical twice in a row - a still scene lets a driver reuse

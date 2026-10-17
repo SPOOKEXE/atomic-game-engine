@@ -40,6 +40,7 @@
 
 #include <engine/ecs/Schema.hpp>
 #include <engine/script/EcsInstanceMethods.hpp>
+#include <engine/script/InstanceShim.hpp>
 
 #include <algorithm>
 #include <array>
@@ -67,6 +68,33 @@ namespace engine::script {
 
 		Store &StoreOf(lua_State *state) {
 			return *UpvalueContext(state).World;
+		}
+
+		bool ClientExecution(lua_State *state) {
+			const HostRole role = ExecutionRole(state);
+			return (role.Client && !role.Server) || StoreOf(state).AdoptOnly();
+		}
+
+		void RequireServer(lua_State *state) {
+			if (ClientExecution(state)) luaL_errorL(state, "component metadata belongs to the server");
+		}
+
+		void RequireLocalComponent(lua_State *state, Entity entity, ComponentId component) {
+			const Store &store = StoreOf(state);
+			if (!ClientExecution(state)) {
+				if (ecs::IsClientLocalInstance(store, entity))
+					luaL_errorL(state, "server component writes cannot change client-local instances");
+				return;
+			}
+			if (!store.Alive(entity) || !Store::IsPredicted(entity) ||
+				!ecs::IsClientLocalInstance(store, entity) || component == Components::Of<ecs::Hierarchy>() ||
+				component == Components::Of<ecs::InstanceClass>() ||
+				component == Components::Of<ecs::ClientLocal>()) {
+				luaL_errorL(
+					state,
+					"client component writes need an owned local instance and a non-structural component"
+				);
+			}
 		}
 
 		Entity CheckEntity(lua_State *state, int index) {
@@ -242,6 +270,8 @@ namespace engine::script {
 		// `World:DefineComponent(name, { Field = "type", ... })`
 		int WorldDefineComponent(lua_State *state) {
 			const char *name = luaL_checkstring(state, 2);
+			if (ClientExecution(state) && Schemas::Find(Name(name)) == nullptr)
+				luaL_errorL(state, "new component definitions belong to the server");
 			luaL_checktype(state, 3, LUA_TTABLE);
 
 			Declaration declaration;
@@ -330,6 +360,7 @@ namespace engine::script {
 
 		// `World:SetComponentTags(name, { "tag" })`
 		int WorldSetComponentTags(lua_State *state) {
+			RequireServer(state);
 			const char *name = luaL_checkstring(state, 2);
 			const ComponentId component = Components::Find(Name(name));
 			if (!component.IsValid() || Schemas::Of(component) == nullptr) {
@@ -343,6 +374,7 @@ namespace engine::script {
 
 		// `World:SetComponentFieldTags(name, field, { "tag" })`
 		int WorldSetComponentFieldTags(lua_State *state) {
+			RequireServer(state);
 			const char *name = luaL_checkstring(state, 2);
 			const ComponentId component = Components::Find(Name(name));
 			if (!component.IsValid() || Schemas::Of(component) == nullptr) {
@@ -357,6 +389,7 @@ namespace engine::script {
 
 		// `World:ExposeComponentField(name, field, exposed)`
 		int WorldExposeComponentField(lua_State *state) {
+			RequireServer(state);
 			const char *name = luaL_checkstring(state, 2);
 			const ComponentId component = Components::Find(Name(name));
 			if (!component.IsValid() || Schemas::Of(component) == nullptr) {
@@ -424,9 +457,25 @@ namespace engine::script {
 		// class.
 		int WorldCreateEntity(lua_State *state) {
 			Store &store = StoreOf(state);
-
-			const Entity entity =
-				lua_isnoneornil(state, 2) ? store.Create() : store.Create(luaL_checkstring(state, 2));
+			const bool local = ClientExecution(state);
+			if (!local && !lua_isnoneornil(state, 2) &&
+				ecs::IsClientLocalInstance(store, store.Find(luaL_checkstring(state, 2))))
+				luaL_errorL(state, "a server entity name is already owned by the client");
+			if (local && !lua_isnoneornil(state, 2)) {
+				const Entity existing = store.Find(luaL_checkstring(state, 2));
+				if (store.Alive(existing) &&
+					(!Store::IsPredicted(existing) || !ecs::IsClientLocalInstance(store, existing)))
+					luaL_errorL(state, "a local entity name is already owned by another runtime");
+			}
+			const Entity entity = lua_isnoneornil(state, 2)
+									  ? (local ? store.CreatePredicted() : store.Create())
+									  : (local ? store.CreatePredicted(luaL_checkstring(state, 2))
+											   : store.Create(luaL_checkstring(state, 2)));
+			if (local && entity != ecs::NULL_ENTITY) {
+				if (!Store::IsPredicted(entity))
+					luaL_errorL(state, "a local entity name is already owned by the authority");
+				store.Set(entity, ecs::ClientLocal{});
+			}
 
 			if (entity == ecs::NULL_ENTITY) {
 				// The realistic cause, and the one worth naming: a replica may
@@ -525,10 +574,12 @@ namespace engine::script {
 			Store &store = StoreOf(state);
 			const std::vector<ComponentId> terms = CheckTerms(state, 2);
 
+			const bool client = ClientExecution(state);
 			lua_newtable(state);
 			int index = 0;
 
-			store.EachMatching(terms, [state, &index](Entity entity) {
+			store.EachMatching(terms, [state, &store, client, &index](Entity entity) {
+				if (!InstanceVisibleToScript(store, entity, client)) return;
 				PushInstanceValue(state, entity);
 				lua_rawseti(state, -2, ++index);
 			});
@@ -546,9 +597,11 @@ namespace engine::script {
 				std::span<const ComponentId>(excluded),
 			};
 
+			const bool client = ClientExecution(state);
 			lua_newtable(state);
 			int index = 0;
-			store.EachMatching(terms, [state, &index](Entity entity) {
+			store.EachMatching(terms, [state, &store, client, &index](Entity entity) {
+				if (!InstanceVisibleToScript(store, entity, client)) return;
 				PushInstanceValue(state, entity);
 				lua_rawseti(state, -2, ++index);
 			});
@@ -559,7 +612,12 @@ namespace engine::script {
 		int WorldCount(lua_State *state) {
 			Store &store = StoreOf(state);
 			const std::vector<ComponentId> terms = CheckTerms(state, 2);
-			lua_pushinteger(state, static_cast<int>(store.CountMatching(terms)));
+			const bool client = ClientExecution(state);
+			size_t count = 0;
+			store.EachMatching(terms, [&](Entity entity) {
+				if (InstanceVisibleToScript(store, entity, client)) ++count;
+			});
+			lua_pushinteger(state, static_cast<int>(count));
 			return 1;
 		}
 
@@ -581,6 +639,7 @@ namespace engine::script {
 
 			ComponentId id;
 			const Schema &schema = CheckSchema(state, name, id);
+			RequireLocalComponent(state, entity, id);
 
 			// A tag - a component with no fields - takes no value at all, and
 			// the table is optional for one.
@@ -641,7 +700,7 @@ namespace engine::script {
 		// `entity:GetComponent(name)` -> `{ Field = value }` or nil
 		int InstanceGetComponent(lua_State *state) {
 			Store &store = StoreOf(state);
-			const Entity entity = CheckEntity(state, 1);
+			const Entity entity = InstanceForScriptRead(store, CheckEntity(state, 1), ClientExecution(state));
 			const char *name = luaL_checkstring(state, 2);
 
 			ComponentId id;
@@ -676,7 +735,7 @@ namespace engine::script {
 		// `entity:HasComponent(name)`
 		int InstanceHasComponent(lua_State *state) {
 			Store &store = StoreOf(state);
-			const Entity entity = CheckEntity(state, 1);
+			const Entity entity = InstanceForScriptRead(store, CheckEntity(state, 1), ClientExecution(state));
 			const char *name = luaL_checkstring(state, 2);
 
 			// **Not `CheckSchema`, because asking is not reaching.** A script
@@ -696,6 +755,7 @@ namespace engine::script {
 
 			ComponentId id;
 			CheckSchema(state, name, id);
+			RequireLocalComponent(state, entity, id);
 
 			store.RemoveComponent(entity, id);
 			return 0;
@@ -710,7 +770,7 @@ namespace engine::script {
 		// which is stable within a build and says nothing to a reader.
 		int InstanceGetComponents(lua_State *state) {
 			Store &store = StoreOf(state);
-			const Entity entity = CheckEntity(state, 1);
+			const Entity entity = InstanceForScriptRead(store, CheckEntity(state, 1), ClientExecution(state));
 
 			std::vector<std::string_view> names;
 			for (const ComponentId id : store.ComponentsOf(entity)) {

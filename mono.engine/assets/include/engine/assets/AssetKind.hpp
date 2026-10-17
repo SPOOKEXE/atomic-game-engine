@@ -72,6 +72,9 @@ namespace engine::assets {
 		// Baked animation payloads: joint channels in `.aanim` and ordered image
 		// frames in `.aseq`. A consumer selects by the format name.
 		Animation = 10,
+
+		// A bounded cooked image composition document and its named texture inputs.
+		ImageGraph = 11,
 	};
 
 	// Returns a stable, human-readable name for a kind.

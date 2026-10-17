@@ -1,0 +1,69 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "weather-common.glsl"
+#define WEATHER_CLOCK_BINDING 2
+#include "weather-clock.glsl"
+#include "weather-assembly.glsl"
+
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0, std430) readonly buffer Cells { uvec2 cells[]; } inputField;
+layout(set = 0, binding = 1, std430) readonly buffer Pages { ivec4 keys[]; } pageTable;
+layout(set = 1, binding = 0, std430) writeonly buffer Summaries { uvec4 values[]; } outputSummary;
+layout(set = 2, binding = 0) uniform Pass { WeatherField Field; } pass;
+
+WeatherField effectiveField;
+
+shared uvec4 partial[64];
+
+void main() {
+	effectiveField = WeatherClockField(pass.Field);
+	uint index = gl_WorkGroupID.x;
+	uint lane = gl_LocalInvocationID.x;
+	// Page exits are uniform across the workgroup; clipped edge cells still reach every barrier.
+	if (index >= effectiveField.Bricks.w) return;
+	if (effectiveField.Origin.w == 0 && ((uint(pageTable.keys[index].w) >> 5u) & 3u) == 2u) {
+		if (lane == 0u) outputSummary.values[index] = uvec4(0u, 0u, 0u, 512u);
+		return;
+	}
+	uvec3 dimensions = effectiveField.Origin.w == 0 ? uvec3(1) : effectiveField.Bricks.xyz;
+	uvec3 brick = uvec3(index % dimensions.x, (index / dimensions.x) % dimensions.y, index / (dimensions.x * dimensions.y));
+	uint maximum = 0u;
+	uint minimum = 255u;
+	uint total = 0u;
+	uint count = 0u;
+	for (uint localCell = lane; localCell < 512u; localCell += 64u) {
+		uvec3 local = uvec3(localCell & 7u, (localCell >> 3u) & 7u, localCell >> 6u);
+		uvec3 point = brick * 8u + local;
+		if (effectiveField.Origin.w != 0 && any(greaterThanEqual(point, effectiveField.Grid.xyz))) continue;
+		uint density;
+		if (effectiveField.Origin.w == 0) {
+			ivec4 page = pageTable.keys[index];
+			uint descriptor = uint(page.w);
+			uint baseWords = descriptor >> 7u;
+			if (((descriptor >> 5u) & 3u) == 1u) {
+				uvec2 address = WeatherAssemblyAddress(local);
+				uvec2 scalarWords = inputField.cells[baseWords / 2u + address.x * 4u];
+				density = WeatherAssemblyUnsafe(scalarWords)
+					? WeatherDensityCode(effectiveField, page.xyz + ivec3(local) * (1 << (descriptor & 31u)))
+					: WeatherAssemblyDensityCode(scalarWords, address.y);
+			} else density = inputField.cells[baseWords / 2u + localCell].x & 255u;
+		} else density = inputField.cells[WeatherCellIndex(point, effectiveField.Grid.xyz)].x & 255u;
+		maximum = max(maximum, density);
+		minimum = min(minimum, density);
+		total += density;
+		++count;
+	}
+	partial[lane] = uvec4(maximum, minimum, total, count);
+	barrier();
+	// Integer extrema, sums and counts are exact under any reduction order.
+	for (uint offset = 32u; offset != 0u; offset >>= 1u) {
+		if (lane < offset) {
+			uvec4 other = partial[lane + offset];
+			partial[lane] = uvec4(max(partial[lane].x, other.x), min(partial[lane].y, other.y),
+				partial[lane].z + other.z, partial[lane].w + other.w);
+		}
+		barrier();
+	}
+	// Exact encoded total accompanies extrema. Rounded means cannot preserve child totals.
+	if (lane == 0u) outputSummary.values[index] = partial[0];
+}

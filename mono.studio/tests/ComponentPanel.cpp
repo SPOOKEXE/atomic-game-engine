@@ -5,13 +5,17 @@
 
 #include "PropertyWidgets.hpp"
 
+#include <engine/core/FrameGraph.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Schema.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/RenderFeatures.hpp>
+#include <engine/scene/Tagging.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/Universe.hpp>
 
@@ -19,12 +23,15 @@
 
 #include <array>
 #include <cstddef>
+#include <filesystem>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <studio/Config.hpp>
 #include <studio/Editor.hpp>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("studio.component-panel")
@@ -54,8 +61,50 @@ namespace studio {
 			editor.PropertyFilter = std::move(filter);
 			editor.DrawProperties();
 		}
+		static bool PrepareFrameGraph(Editor &editor) {
+			engine::ui::InterfaceSettings settings;
+			settings.DisplayWidth = 1280;
+			settings.DisplayHeight = 720;
+			editor.ShowFrameGraph = true;
+			editor.FrameGraphState.Interval = 0;
+			editor.FrameGraphState.Mode = DiagnosticAggregation::Latest;
+			return editor.Interface.Initialise(editor.Renderer, nullptr, settings);
+		}
+		static uint64_t FrameGraphPanel(Editor &editor) {
+			editor.Interface.Begin(1.0f / 60.0f);
+			ImGui::GetIO().IniFilename = nullptr;
+			ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+			ImGui::SetNextWindowSize(ImVec2(1220, 650), ImGuiCond_Always);
+			editor.DrawFrameGraph();
+			editor.Interface.End();
+			return editor.Interface.Signature();
+		}
+		static void PauseFrameGraph(Editor &editor, bool paused) {
+			editor.FrameGraphState.Paused = paused;
+		}
+		static void FrameSample(Editor &editor, double now, float seconds) {
+			editor.Statistics.Record(now, seconds);
+		}
+		static engine::render::FrameSummary FrameGraphSummary(const Editor &editor) {
+			return editor.FrameGraphState.PresentationSummary;
+		}
+		static size_t FrameGraphDropped(const Editor &editor) {
+			return editor.FrameGraphState.Dropped;
+		}
+		static size_t FrameGraphGpuDropped(const Editor &editor) {
+			return editor.FrameGraphState.DroppedGpuMarks;
+		}
+		static size_t FrameGraphSpanCount(const Editor &editor) {
+			return editor.FrameGraphState.Spans.size();
+		}
+		static bool EditingCollectionTag(const Editor &editor) {
+			return editor.CollectionTagEditing;
+		}
 		static void Draw(Editor &editor) {
 			editor.DrawComponents();
+		}
+		static void AddRenderingProfile(Editor &editor, Name name, engine::graph::PipelineDocument document) {
+			editor.RenderingProfiles.Set(name, std::move(document));
 		}
 		static void
 		SeedSurface(Editor &editor, WorldId world, Entity entity, const engine::core::CFrame &before) {
@@ -134,6 +183,22 @@ namespace {
 		ImGui::SetNextWindowSize(ImVec2(600.0f, 500.0f), ImGuiCond_Always);
 		studio::ComponentPanelProbe::Draw(editor);
 		ImGui::Render();
+	}
+
+	ImGuiID PropertyTableId(
+		const ImGuiWindow &window, std::string_view property, std::string_view className = "Part"
+	) {
+		for (const auto &descriptor :
+			 engine::ecs::Classes::Describe(engine::ecs::Classes::Find(Name(className))).Properties) {
+			if (descriptor.Name == Name(property))
+				return ImHashStr(
+					descriptor.PropertiesTag.IsValid() ? descriptor.PropertiesTag.Text().data()
+													   : "Unassigned",
+					0,
+					window.ID
+				);
+		}
+		return 0;
 	}
 
 	struct ExplorerInsertOverlap {
@@ -324,7 +389,7 @@ TEST_CASE("the Components panel shows metadata and edits exposed values", "[stud
 	CHECK(changed);
 }
 
-TEST_CASE("native component edits survive structural changes and support undo", "[studio][components]") {
+TEST_CASE("structural property edits survive component changes and support undo", "[studio][components]") {
 	Context context;
 	Jobs jobs;
 	studio::Editor editor;
@@ -340,10 +405,7 @@ TEST_CASE("native component edits survive structural changes and support undo", 
 	});
 	editor.SelectionWorld = world;
 	editor.Selection = {selected};
-	editor.ShowComponents = true;
-	studio::ComponentPanelProbe::Filter(
-		editor, std::string(Components::Describe(Components::Of<engine::scene::Simulated>()).Name.Text())
-	);
+	editor.ShowProperties = true;
 	const auto anchored = [&] {
 		bool result = false;
 		editor.Universe->Enter(world, [&](Store &store) {
@@ -353,27 +415,44 @@ TEST_CASE("native component edits survive structural changes and support undo", 
 	};
 	const auto toggle = [&] {
 		const bool before = anchored();
-		Frame(editor);
-		Frame(editor);
-		const auto component = Components::Of<engine::scene::Simulated>();
-		const auto window = ImGui::FindWindowByName("Components");
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 500.0f), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Properties(editor, "Anchored");
+		ImGui::Render();
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 500.0f), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Properties(editor, "Anchored");
+		ImGui::Render();
+		const auto window = ImGui::FindWindowByName("Properties");
 		REQUIRE(window != nullptr);
-		const ImGuiID componentId = ImHashData(&component.Index, sizeof(component.Index), window->ID);
-		const ImGuiID tableId = ImHashStr("##native-properties", 0, componentId);
+		const ImGuiID tableId = PropertyTableId(*window, "Anchored");
 		const ImGuiTable *table = GImGui->Tables.GetByKey(tableId);
 		REQUIRE(table != nullptr);
-		const float x = table->Columns[1].WorkMinX + 5;
+		const float x = table->Columns[1].WorkMinX + 12;
 		const float y = table->OuterRect.Min.y + ImGui::GetFrameHeight() * 0.5f;
-		Frame(editor, Mouse{.X = x, .Y = y});
-		Frame(editor, Mouse{.X = x, .Y = y, .Down = true});
-		Frame(editor, Mouse{.X = x, .Y = y});
+		auto &io = ImGui::GetIO();
+		const auto frame = [&] {
+			ImGui::NewFrame();
+			ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+			ImGui::SetNextWindowSize(ImVec2(600.0f, 500.0f), ImGuiCond_Always);
+			studio::ComponentPanelProbe::Properties(editor, "Anchored");
+			ImGui::Render();
+		};
+		io.AddMousePosEvent(x, y);
+		frame();
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+		frame();
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+		frame();
 		REQUIRE(anchored() != before);
 	};
 	ImGui::NewFrame();
 	ImGui::LogToBuffer();
 	ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
 	ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
-	studio::ComponentPanelProbe::Draw(editor);
+	studio::ComponentPanelProbe::Properties(editor, "Anchored");
 	const std::string panelText = GImGui->LogBuffer.c_str();
 	ImGui::LogFinish();
 	ImGui::Render();
@@ -387,6 +466,252 @@ TEST_CASE("native component edits survive structural changes and support undo", 
 	CHECK(anchored() != initial);
 	toggle();
 	CHECK(anchored() == initial);
+}
+
+TEST_CASE("component rows show attached storage and render effects default to None", "[studio][components]") {
+	Context context;
+	Jobs jobs;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
+	engine::scene::RegisterSceneClasses();
+	WorldSettings settings;
+	settings.Name = Name("AttachedComponentRows");
+	const WorldId world = editor.Universe->Create(settings);
+	Entity part;
+	Entity camera;
+	Entity surfaceCamera;
+	editor.Universe->Enter(world, [&](Store &store) {
+		part = store.CreateInstance(engine::scene::PartClass(), "Part");
+		camera = store.CreateInstance(engine::ecs::Classes::Find(Name("Camera")), "Camera");
+		surfaceCamera =
+			store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), "SurfaceCamera");
+		REQUIRE(part != NULL_ENTITY);
+		REQUIRE(camera != NULL_ENTITY);
+		REQUIRE(surfaceCamera != NULL_ENTITY);
+		store.Set(part, engine::scene::RenderEffects{});
+	});
+	editor.SelectionWorld = world;
+	editor.ShowComponents = true;
+	editor.ShowProperties = true;
+
+	const auto drawLog = [&](Entity selected, std::string filter, bool properties = false) {
+		editor.Selection = {selected};
+		studio::ComponentPanelProbe::Filter(editor, std::move(filter));
+		ImGui::NewFrame();
+		ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
+		if (properties) {
+			studio::ComponentPanelProbe::Properties(editor, "ComputeEffectNode");
+		} else {
+			studio::ComponentPanelProbe::Draw(editor);
+		}
+		const std::string log = GImGui->LogBuffer.c_str();
+		ImGui::LogFinish();
+		ImGui::Render();
+		return log;
+	};
+
+	const std::string absentStorm = drawLog(part, {});
+	CHECK(absentStorm.find("StormResponse") == std::string::npos);
+	const std::string absentVegetation = drawLog(part, {});
+	CHECK(absentVegetation.find("Vegetation") == std::string::npos);
+	const std::string absentSurfaceCamera = drawLog(camera, {});
+	CHECK(absentSurfaceCamera.find("SurfaceCamera") == std::string::npos);
+	const std::string attachedSurfaceCamera = drawLog(surfaceCamera, {});
+	CHECK(attachedSurfaceCamera.find("SurfaceCamera") != std::string::npos);
+	const std::string attachedRenderEffects = drawLog(part, {});
+	CHECK(attachedRenderEffects.find("RenderEffects") != std::string::npos);
+	const std::string defaultEffect = drawLog(part, {}, true);
+	CHECK(defaultEffect.find("ComputeEffectNode") != std::string::npos);
+	CHECK(defaultEffect.find("None") != std::string::npos);
+}
+
+TEST_CASE("component and property effect pickers save only matching graph nodes", "[studio][components]") {
+	Context context;
+	Jobs jobs;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
+	engine::scene::RegisterSceneClasses();
+	const Name profileName("EffectPickerProfile");
+	engine::graph::PipelineDocument document;
+	const auto addVisualNode = [&](Name nodeName, Name kind) {
+		document.Record({.Kind = engine::graph::EditKind::AddNode, .Name = nodeName, .NodeKind = kind});
+		document.Record({.Kind = engine::graph::EditKind::Set, .Key = Name("attachment"), .Value = "visual"});
+	};
+	addVisualNode(Name("compute.only"), Name("dispatch"));
+	addVisualNode(Name("raster.only"), Name("raster"));
+	const Name disabledName("compute.disabled");
+	addVisualNode(disabledName, Name("dispatch"));
+	document.Record({.Kind = engine::graph::EditKind::Enable, .Name = disabledName, .Enabled = false});
+	addVisualNode(Name("other.kind"), Name("sample"));
+	studio::ComponentPanelProbe::AddRenderingProfile(editor, profileName, std::move(document));
+	WorldSettings settings;
+	settings.Name = Name("EffectPickerWorld");
+	settings.RenderingProfile = profileName;
+	const WorldId world = editor.Universe->Create(settings);
+	Entity part;
+	const ComponentId renderEffects = Components::Of<engine::scene::RenderEffects>();
+	editor.Universe->Enter(world, [&](Store &store) {
+		part = store.CreateInstance(engine::scene::PartClass(), "Part");
+		REQUIRE(part != NULL_ENTITY);
+		store.Set(part, engine::scene::RenderEffects{});
+	});
+	editor.SelectionWorld = world;
+	editor.Selection = {part};
+	editor.ShowComponents = true;
+	editor.ShowProperties = true;
+	studio::ComponentPanelProbe::Filter(editor, "RenderEffects");
+
+	const auto panelFrame = [&](bool log = false) {
+		ImGui::NewFrame();
+		if (log) ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 500.0f), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Draw(editor);
+		const std::string result = log ? GImGui->LogBuffer.c_str() : std::string{};
+		if (log) ImGui::LogFinish();
+		ImGui::Render();
+		return result;
+	};
+	const auto readAttachment = [&](size_t index) {
+		engine::scene::RenderEffectAttachment attachment;
+		editor.Universe->Enter(world, [&](Store &store) {
+			const auto *effects = store.Get<engine::scene::RenderEffects>(part);
+			REQUIRE(effects != nullptr);
+			attachment = effects->Attachments[index];
+		});
+		return attachment;
+	};
+	const auto comboLocation = [&](size_t row) {
+		panelFrame();
+		const ImGuiWindow *window = ImGui::FindWindowByName("Components");
+		REQUIRE(window != nullptr);
+		const ImGuiID componentId = ImHashData(&renderEffects.Index, sizeof(renderEffects.Index), window->ID);
+		const ImGuiTable *table = GImGui->Tables.GetByKey(ImHashStr("##native-properties", 0, componentId));
+		REQUIRE(table != nullptr);
+		return ImVec2(
+			table->Columns[1].WorkMinX + 12.0f,
+			table->OuterRect.Min.y + ImGui::GetFrameHeight() * (0.5f + static_cast<float>(row))
+		);
+	};
+	const auto click = [&](ImVec2 point) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(point.x, point.y);
+		panelFrame();
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+		panelFrame();
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+		panelFrame();
+	};
+	const auto openPicker = [&](size_t row) {
+		const ImVec2 position = comboLocation(row);
+		click(position);
+		const std::string choices = panelFrame(true);
+		REQUIRE(!GImGui->OpenPopupStack.empty());
+		REQUIRE(GImGui->OpenPopupStack.back().Window != nullptr);
+		const ImVec2 start = GImGui->OpenPopupStack.back().Window->DC.CursorStartPos;
+		return std::pair<std::string, ImVec2>{choices, start};
+	};
+	const auto choose = [&](ImVec2 start, size_t row) {
+		click(ImVec2(
+			start.x + 12.0f, start.y + ImGui::GetTextLineHeightWithSpacing() * static_cast<float>(row) + 5.0f
+		));
+	};
+
+	const auto [computeChoices, computeMenu] = openPicker(0);
+	CHECK(computeChoices.find("compute.only") != std::string::npos);
+	CHECK(computeChoices.find("raster.only") == std::string::npos);
+	CHECK(computeChoices.find("compute.disabled") == std::string::npos);
+	CHECK(computeChoices.find("other.kind") == std::string::npos);
+	choose(computeMenu, 1);
+	CHECK(readAttachment(0).Node == Name("compute.only"));
+	CHECK(readAttachment(0).Enabled);
+
+	const auto [postChoices, postMenu] = openPicker(1);
+	CHECK(postChoices.find("raster.only") != std::string::npos);
+	choose(postMenu, 1);
+	CHECK(readAttachment(1).Node == Name("raster.only"));
+	CHECK(readAttachment(1).Enabled);
+
+	// The log also contains the selected compute name outside this popup. Try
+	// the third row directly to prove the incompatible node is not selectable.
+	const auto [postPanelLog, filteredPostMenu] = openPicker(1);
+	CHECK(postPanelLog.find("raster.only") != std::string::npos);
+	choose(filteredPostMenu, 2);
+	CHECK(readAttachment(1).Node == Name("raster.only"));
+
+	const auto [clearChoices, clearMenu] = openPicker(0);
+	CHECK(clearChoices.find("compute.only") != std::string::npos);
+	choose(clearMenu, 0);
+	CHECK_FALSE(readAttachment(0).Node.IsValid());
+	CHECK_FALSE(readAttachment(0).Enabled);
+
+	const auto propertyFrame = [&](bool log = false) {
+		ImGui::NewFrame();
+		if (log) ImGui::LogToBuffer();
+		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600.0f, 500.0f), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Properties(editor, "PostProcessEffectNode");
+		const std::string result = log ? GImGui->LogBuffer.c_str() : std::string{};
+		if (log) ImGui::LogFinish();
+		ImGui::Render();
+		return result;
+	};
+	propertyFrame();
+	propertyFrame();
+	const ImGuiWindow *propertiesWindow = ImGui::FindWindowByName("Properties");
+	REQUIRE(propertiesWindow != nullptr);
+	const ImGuiTable *propertiesTable =
+		GImGui->Tables.GetByKey(PropertyTableId(*propertiesWindow, "PostProcessEffectNode"));
+	REQUIRE(propertiesTable != nullptr);
+	const ImVec2 propertyPicker(
+		propertiesTable->Columns[1].WorkMinX + 12.0f,
+		propertiesTable->OuterRect.Min.y + ImGui::GetFrameHeight() * 0.5f
+	);
+	const auto clickProperty = [&](ImVec2 point) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(point.x, point.y);
+		propertyFrame();
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+		propertyFrame();
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+		propertyFrame();
+	};
+	const auto openPropertyPicker = [&] {
+		clickProperty(propertyPicker);
+		const std::string choices = propertyFrame(true);
+		REQUIRE(!GImGui->OpenPopupStack.empty());
+		REQUIRE(GImGui->OpenPopupStack.back().Window != nullptr);
+		return std::pair<std::string, ImVec2>{
+			choices, GImGui->OpenPopupStack.back().Window->DC.CursorStartPos
+		};
+	};
+	const auto chooseProperty = [&](ImVec2 menu, size_t row) {
+		clickProperty(ImVec2(
+			menu.x + 12.0f, menu.y + ImGui::GetTextLineHeightWithSpacing() * static_cast<float>(row) + 5.0f
+		));
+	};
+	const auto [propertyChoices, initialMenu] = openPropertyPicker();
+	CHECK(propertyChoices.find("raster.only") != std::string::npos);
+	CHECK(propertyChoices.find("compute.only") == std::string::npos);
+	chooseProperty(initialMenu, 0);
+	CHECK_FALSE(readAttachment(1).Node.IsValid());
+	CHECK_FALSE(readAttachment(1).Enabled);
+
+	const auto [reselectedChoices, reselectMenu] = openPropertyPicker();
+	CHECK(reselectedChoices.find("raster.only") != std::string::npos);
+	chooseProperty(reselectMenu, 1);
+	CHECK(readAttachment(1).Node == Name("raster.only"));
+	CHECK(readAttachment(1).Enabled);
+
+	const auto [finalChoices, finalMenu] = openPropertyPicker();
+	CHECK(finalChoices.find("raster.only") != std::string::npos);
+	chooseProperty(finalMenu, 0);
+	CHECK_FALSE(readAttachment(1).Node.IsValid());
+	CHECK_FALSE(readAttachment(1).Enabled);
 }
 
 namespace {
@@ -624,7 +949,7 @@ TEST_CASE("a shared property edit commits to every selected live instance", "[st
 	frame();
 	const auto window = ImGui::FindWindowByName("Properties");
 	REQUIRE(window != nullptr);
-	const ImGuiTable *table = GImGui->Tables.GetByKey(ImHashStr("BasePart", 0, window->ID));
+	const ImGuiTable *table = GImGui->Tables.GetByKey(PropertyTableId(*window, "Transparency"));
 	REQUIRE(table != nullptr);
 	auto &io = ImGui::GetIO();
 	io.AddMousePosEvent(
@@ -694,7 +1019,7 @@ TEST_CASE("a generic LOD distance edit materializes every distance band", "[stud
 	frame();
 	const ImGuiWindow *window = ImGui::FindWindowByName("Properties");
 	REQUIRE(window != nullptr);
-	const ImGuiTable *table = GImGui->Tables.GetByKey(ImHashStr("MeshPart", 0, window->ID));
+	const ImGuiTable *table = GImGui->Tables.GetByKey(PropertyTableId(*window, "Lod1Distance", "MeshPart"));
 	REQUIRE(table != nullptr);
 	auto &io = ImGui::GetIO();
 	io.AddMousePosEvent(
@@ -719,4 +1044,242 @@ TEST_CASE("a generic LOD distance edit materializes every distance band", "[stud
 					  std::array<float, 3>{15.0f, 60.0f, 120.0f},
 				  }
 	);
+}
+
+TEST_CASE(
+	"collection tag renames preserve mixed memberships and undo atomically", "[studio][properties][tags]"
+) {
+	engine::scene::RegisterSceneComponents();
+	engine::scene::RegisterSceneClasses();
+	Universe universe;
+	WorldSettings settings;
+	settings.Name = Name("CollectionTagUndo");
+	const WorldId world = universe.Create(settings);
+	studio::CommandLog commands(universe);
+	std::array<Entity, 3> selected;
+	universe.Enter(world, [&](Store &store) {
+		for (size_t i = 0; i < selected.size(); i++)
+			selected[i] = store.CreateInstance(engine::scene::PartClass(), "Tagged");
+		REQUIRE(engine::scene::AddTag(store, selected[0], Name("old")));
+		REQUIRE(engine::scene::AddTag(store, selected[1], Name("old")));
+		REQUIRE(engine::scene::AddTag(store, selected[1], Name("existing")));
+		REQUIRE(engine::scene::AddTag(store, selected[2], Name("existing")));
+		REQUIRE(
+			studio::ApplyCollectionTagEdit(
+				store, world, selected, {Name("old"), Name("existing"), true}, &commands
+			)
+		);
+		for (const Entity entity : selected)
+			CHECK(engine::scene::HasTag(store, entity, Name("existing")));
+		for (const Entity entity : selected)
+			CHECK_FALSE(engine::scene::HasTag(store, entity, Name("old")));
+	});
+	REQUIRE(commands.Undo());
+	universe.Enter(world, [&](Store &store) {
+		CHECK(engine::scene::HasTag(store, selected[0], Name("old")));
+		CHECK_FALSE(engine::scene::HasTag(store, selected[0], Name("existing")));
+		CHECK(engine::scene::HasTag(store, selected[1], Name("old")));
+		CHECK(engine::scene::HasTag(store, selected[1], Name("existing")));
+		CHECK_FALSE(engine::scene::HasTag(store, selected[2], Name("old")));
+		CHECK(engine::scene::HasTag(store, selected[2], Name("existing")));
+	});
+	REQUIRE(commands.Redo());
+	universe.Enter(world, [&](Store &store) {
+		REQUIRE(
+			studio::ApplyCollectionTagEdit(store, world, selected, {Name("existing"), {}, true}, &commands)
+		);
+		for (const Entity entity : selected)
+			CHECK_FALSE(engine::scene::HasTag(store, entity, Name("existing")));
+	});
+	REQUIRE(commands.Undo());
+	universe.Enter(world, [&](Store &store) {
+		for (const Entity entity : selected)
+			CHECK(engine::scene::HasTag(store, entity, Name("existing")));
+		for (size_t i = engine::scene::TagsOf(store).Names.size(); i < engine::scene::TagTable::MAXIMUM; i++)
+			REQUIRE(engine::scene::TagsOf(store).Register(Name("fill-" + std::to_string(i))) != 0);
+		CHECK_FALSE(
+			studio::ApplyCollectionTagEdit(
+				store, world, selected, {Name("existing"), Name("overflow"), true}, &commands
+			)
+		);
+		for (const Entity entity : selected)
+			CHECK(engine::scene::HasTag(store, entity, Name("existing")));
+	});
+}
+
+TEST_CASE(
+	"the Collection Tags divider adds editable rows and cancels empty drafts",
+	"[studio][properties][tags][input]"
+) {
+	Context context;
+	Jobs jobs;
+	const auto previousConfig = studio::ConfigRoot();
+	const auto scratch = std::filesystem::temp_directory_path() / "studio-collection-tag-input";
+	std::filesystem::create_directories(scratch);
+	studio::SetConfigRoot(scratch);
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previousConfig};
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	editor.Commands = std::make_unique<studio::CommandLog>(*editor.Universe);
+	engine::scene::RegisterSceneComponents();
+	engine::scene::RegisterSceneClasses();
+	WorldSettings settings;
+	settings.Name = Name("CollectionTagInput");
+	const WorldId world = editor.Universe->Create(settings);
+	Entity selected;
+	editor.Universe->Enter(world, [&](Store &store) {
+		selected = store.CreateInstance(engine::scene::PartClass(), "Selected");
+	});
+	editor.SelectionWorld = world;
+	editor.Selection = {selected};
+	editor.ShowProperties = true;
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Properties(editor, "nothing-matches-this-filter");
+		const auto *window = ImGui::FindWindowByName("Properties");
+		REQUIRE(window != nullptr);
+		// The '+' is the final row. End restores the parent last-item record,
+		// while the inspector window retains the row's actual submitted position.
+		const ImVec2 plus(
+			window->DC.CursorPosPrevLine.x -
+				(ImGui::CalcTextSize("+").x + ImGui::GetStyle().FramePadding.x * 2.0f) * .5f,
+			window->DC.CursorPosPrevLine.y + ImGui::GetTextLineHeight() * .5f
+		);
+		ImGui::Render();
+		return plus;
+	};
+	auto &io = ImGui::GetIO();
+	frame();
+	const auto add = [&] {
+		const ImVec2 plus = frame();
+		io.AddMousePosEvent(plus.x, plus.y);
+		frame();
+		io.AddMouseButtonEvent(0, true);
+		frame();
+		io.AddMouseButtonEvent(0, false);
+		frame();
+		frame();
+		frame();
+		REQUIRE(studio::ComponentPanelProbe::EditingCollectionTag(editor));
+	};
+	const auto key = [&](ImGuiKey value) {
+		io.AddKeyEvent(value, true);
+		frame();
+		io.AddKeyEvent(value, false);
+		frame();
+	};
+	add();
+	key(ImGuiKey_Enter);
+	CHECK_FALSE(studio::ComponentPanelProbe::EditingCollectionTag(editor));
+	add();
+	io.AddInputCharactersUTF8("cancelled");
+	frame();
+	key(ImGuiKey_Escape);
+	CHECK_FALSE(studio::ComponentPanelProbe::EditingCollectionTag(editor));
+	add();
+	io.AddMousePosEvent(580, 470);
+	frame();
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	frame();
+	CHECK_FALSE(studio::ComponentPanelProbe::EditingCollectionTag(editor));
+	add();
+	io.AddInputCharactersUTF8("new-tag");
+	frame();
+	key(ImGuiKey_Enter);
+	CHECK_FALSE(studio::ComponentPanelProbe::EditingCollectionTag(editor));
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK(engine::scene::HasTag(store, selected, Name("new-tag")));
+		CHECK_FALSE(engine::scene::HasTag(store, selected, Name("cancelled")));
+	});
+	REQUIRE(editor.Commands->Undo());
+	editor.Universe->Enter(world, [&](Store &store) {
+		CHECK_FALSE(engine::scene::HasTag(store, selected, Name("new-tag")));
+	});
+}
+
+TEST_CASE(
+	"a paused Frame Graph panel keeps its actual draw signature while live statistics change",
+	"[studio][components][diagnostics][paused]"
+) {
+	Context context;
+	const auto previousConfig = studio::ConfigRoot();
+	const auto scratch = std::filesystem::temp_directory_path() / "studio-paused-frame-graph";
+	std::filesystem::create_directories(scratch);
+	studio::SetConfigRoot(scratch);
+	struct RestoreConfig {
+		std::filesystem::path Previous;
+		~RestoreConfig() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restoreConfig{previousConfig};
+	using engine::core::FrameGraph;
+	const bool wasEnabled = FrameGraph::IsEnabled();
+	FrameGraph::SetEnabled(true);
+	struct RestoreGraph {
+		bool Enabled;
+		~RestoreGraph() {
+			FrameGraph::SetEnabled(Enabled);
+		}
+	} restoreGraph{wasEnabled};
+	studio::Editor editor;
+	REQUIRE(studio::ComponentPanelProbe::PrepareFrameGraph(editor));
+	FrameGraph::BeginFrame();
+	FrameGraph::Report("paused-panel-baseline", engine::core::ProfileCategory::Render, 0.25f);
+	FrameGraph::EndFrame();
+	studio::ComponentPanelProbe::FrameSample(editor, 1.0, 1.0f / 60.0f);
+	for (size_t i = 0; i < 4; i++)
+		studio::ComponentPanelProbe::FrameGraphPanel(editor);
+	const auto summary = studio::ComponentPanelProbe::FrameGraphSummary(editor);
+	const size_t spans = studio::ComponentPanelProbe::FrameGraphSpanCount(editor);
+	const size_t dropped = studio::ComponentPanelProbe::FrameGraphDropped(editor);
+	const size_t gpuDropped = studio::ComponentPanelProbe::FrameGraphGpuDropped(editor);
+	REQUIRE(summary.CurrentMilliseconds > 16.0f);
+	REQUIRE(spans > 0);
+	studio::ComponentPanelProbe::PauseFrameGraph(editor, true);
+	for (size_t i = 0; i < 3; i++)
+		studio::ComponentPanelProbe::FrameGraphPanel(editor);
+	const uint64_t paused = studio::ComponentPanelProbe::FrameGraphPanel(editor);
+	REQUIRE(paused != 0);
+
+	// Overflow the real collector's depth, so both the live tree and its
+	// dropped-span warning disagree with the retained paused snapshot.
+	FrameGraph::BeginFrame();
+	const auto deepScope = [&](auto &&self, size_t depth) -> void {
+		FrameGraph::Scope scope("changed-live-depth", engine::core::ProfileCategory::ECS);
+		if (depth > 0) self(self, depth - 1);
+	};
+	deepScope(deepScope, FrameGraph::MAXIMUM_DEPTH + 2);
+	FrameGraph::EndFrame();
+	REQUIRE(FrameGraph::Dropped() > dropped);
+	for (size_t i = 0; i < 8; i++) {
+		studio::ComponentPanelProbe::FrameSample(
+			editor, 2.0 + static_cast<double>(i), 0.001f + static_cast<float>(i) * 0.0001f
+		);
+		CHECK(studio::ComponentPanelProbe::FrameGraphPanel(editor) == paused);
+		const auto retained = studio::ComponentPanelProbe::FrameGraphSummary(editor);
+		CHECK(retained.Current == summary.Current);
+		CHECK(retained.CurrentMilliseconds == summary.CurrentMilliseconds);
+		CHECK(retained.Minimum == summary.Minimum);
+		CHECK(retained.Average == summary.Average);
+		CHECK(retained.Maximum == summary.Maximum);
+		CHECK(retained.Jitter == summary.Jitter);
+		CHECK(studio::ComponentPanelProbe::FrameGraphDropped(editor) == dropped);
+		CHECK(studio::ComponentPanelProbe::FrameGraphGpuDropped(editor) == gpuDropped);
+		CHECK(studio::ComponentPanelProbe::FrameGraphSpanCount(editor) == spans);
+	}
+	studio::ComponentPanelProbe::PauseFrameGraph(editor, false);
+	const uint64_t resumed = studio::ComponentPanelProbe::FrameGraphPanel(editor);
+	CHECK(resumed != paused);
+	CHECK(studio::ComponentPanelProbe::FrameGraphSummary(editor).CurrentMilliseconds < 2.0f);
+	CHECK(studio::ComponentPanelProbe::FrameGraphDropped(editor) == FrameGraph::Dropped());
+	CHECK(studio::ComponentPanelProbe::FrameGraphSpanCount(editor) == FrameGraph::Spans().size());
 }

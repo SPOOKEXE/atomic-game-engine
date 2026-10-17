@@ -349,3 +349,20 @@ TEST_CASE("a full queue refuses a wait rather than dropping one", "[scripting][w
 	CHECK(waiters.Add(container, "never", store.Time().Tick + 1000) == 0);
 	CHECK(waiters.Count() == ChildWaiters::MAXIMUM);
 }
+
+TEST_CASE("cancelling a script wait preserves other scripts' arrival order", "[scripting][waitforchild]") {
+	Store store = Fresh("waitforchild_cancel");
+	const auto parent = Container(store);
+	ChildWaiters waiters;
+	const auto first = waiters.Add(parent, "arrival", 100);
+	const auto cancelled = waiters.Add(parent, "arrival", 100);
+	const auto last = waiters.Add(parent, "arrival", 100);
+	REQUIRE(waiters.Cancel(cancelled));
+	CHECK_FALSE(waiters.Cancel(cancelled));
+	Arrives(store, parent, "arrival");
+	std::vector<ChildWaiters::Resumption> ready;
+	waiters.Advance(store, store.Time().Tick, ready);
+	REQUIRE(ready.size() == 2);
+	CHECK(ready[0].Waiter == first);
+	CHECK(ready[1].Waiter == last);
+}

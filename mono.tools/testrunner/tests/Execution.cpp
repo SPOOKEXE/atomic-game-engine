@@ -14,6 +14,32 @@ TEST_SUITE_ID("tools.testrunner.execution")
 
 namespace fs = std::filesystem;
 
+TEST_CASE("parallel discovery preserves complete registries and binary order", "[execution]") {
+	const fs::path self = "/proc/self/exe";
+	if (!fs::exists(self)) {
+		SUCCEED("no /proc/self/exe on this platform");
+		return;
+	}
+
+	const fs::path build = fs::current_path();
+	const auto registry = testrunner::ReadSuites(self, build);
+	REQUIRE_FALSE(registry.empty());
+	const fs::path absoluteSelf = fs::canonical(self);
+	const std::vector<fs::path> binaries{self, "/nonexistent/test-binary", absoluteSelf};
+	for (const size_t jobs : {size_t{0}, size_t{1}, size_t{2}, size_t{8}}) {
+		const auto discovered = testrunner::ReadSuites(binaries, build, jobs);
+		REQUIRE(discovered.size() == registry.size() * 2);
+		for (size_t index = 0; index < discovered.size(); index++) {
+			const auto &expected = registry[index % registry.size()];
+			CHECK(discovered[index].Id == expected.Id);
+			CHECK(discovered[index].Source == expected.Source);
+			CHECK(discovered[index].Depends == expected.Depends);
+			CHECK(discovered[index].Binary == (index < registry.size() ? self : absoluteSelf));
+		}
+	}
+	CHECK(testrunner::ReadSuites(std::vector<fs::path>{}, build, 8).empty());
+}
+
 TEST_CASE("simultaneous runner reports stay inside their own directories", "[execution]") {
 	const fs::path self = "/proc/self/exe";
 	if (!fs::exists(self)) {

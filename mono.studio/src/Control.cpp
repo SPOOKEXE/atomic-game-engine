@@ -15,6 +15,7 @@
 // frame loop, because `Universe::Enter` aborts on a foreign one.
 
 #include "ControlAutomation.hpp"
+#include "DataFactoryHost.hpp"
 
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
@@ -36,7 +37,6 @@
 #include <imgui.h>
 #include <nlohmann/json.hpp>
 #include <string>
-#include <studio/DataFactoryHost.hpp>
 #include <studio/Editor.hpp>
 #include <vector>
 

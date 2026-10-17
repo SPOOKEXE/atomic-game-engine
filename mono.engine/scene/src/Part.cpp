@@ -1,3 +1,5 @@
+#include "WeatherComputeRegistration.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
@@ -5,6 +7,7 @@
 #include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Accessories.hpp>
+#include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Atmosphere.hpp>
 #include <engine/scene/Attachments.hpp>
@@ -17,6 +20,7 @@
 #include <engine/scene/Enums.hpp>
 #include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -32,6 +36,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <numbers>
 #include <string>
@@ -656,6 +661,7 @@ namespace engine::scene {
 			property.Name = core::Name("CameraSubject");
 			property.PredictedWritable = true;
 			property.Type = PropertyType::Reference;
+			property.Nullable = true;
 			property.Kind = PropertyKind::Computed;
 			property.Size = sizeof(ecs::Entity);
 			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<CameraSubject>()});
@@ -675,6 +681,51 @@ namespace engine::scene {
 					return false;
 				}
 				store.GetMutable<CameraSubject>(camera)->Automatic = false;
+				return true;
+			};
+			return property;
+		}
+
+		constexpr std::array<std::string_view, 4> CAMERA_TYPE_NAMES{
+			"Custom", "LockFirstPerson", "ShiftLock", "Scriptable"
+		};
+
+		// Only the current eye controls the keyboard camera's world-local mode.
+		PropertyDescriptor CameraTypeProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("CameraType");
+			property.PredictedWritable = true;
+			property.Type = PropertyType::Enum;
+			property.EnumName = core::Name("CameraType");
+			property.Kind = PropertyKind::Resource;
+			property.Size = sizeof(core::Name);
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<CameraController>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity camera, void *out) -> bool {
+				const auto *active = store.Resource<ActiveCamera>();
+				const auto *controller = store.Resource<CameraController>();
+				*static_cast<core::Name *>(out) = core::Name("Custom");
+				if (active == nullptr || active->Entity != camera || controller == nullptr) return true;
+				const size_t index = static_cast<size_t>(controller->Mode);
+				if (index >= CAMERA_TYPE_NAMES.size()) return false;
+				*static_cast<core::Name *>(out) = core::Name(CAMERA_TYPE_NAMES[index]);
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity camera, const void *value) -> bool {
+				const auto *active = store.Resource<ActiveCamera>();
+				const auto *controller = store.Resource<CameraController>();
+				if (active == nullptr || active->Entity != camera || controller == nullptr) return false;
+				const core::Name named = *static_cast<const core::Name *>(value);
+				size_t index = 0;
+				if (named != core::Name("Classic")) {
+					for (; index < CAMERA_TYPE_NAMES.size(); ++index) {
+						if (named == core::Name(CAMERA_TYPE_NAMES[index])) break;
+					}
+				}
+				if (index >= CAMERA_TYPE_NAMES.size()) return false;
+				const auto mode = static_cast<CameraMode>(index);
+				if (controller->Mode == mode) return true;
+				store.ResourceMutable<CameraController>()->Mode = mode;
 				return true;
 			};
 			return property;
@@ -789,6 +840,53 @@ namespace engine::scene {
 		const core::Name &AuthoredAffordanceKindEnum() {
 			static const core::Name name("AuthoredAffordanceKind");
 			return name;
+		}
+
+		// Defaults remain readable without allocating gameplay metadata on ordinary parts.
+		template <auto Member, PropertyType Type>
+		PropertyDescriptor AuthoredAffordanceProperty(std::string_view name) {
+			using Field = std::remove_cvref_t<decltype(AuthoredAffordance{}.*Member)>;
+			using Value = std::conditional_t<Type == PropertyType::Enum, core::Name, Field>;
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = Type;
+			property.Size = sizeof(Value);
+			property.Kind = PropertyKind::Structural;
+			if constexpr (Type == PropertyType::Enum) property.EnumName = AuthoredAffordanceKindEnum();
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<AuthoredAffordance>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				if (!store.Alive(instance)) return false;
+				const auto *existing = store.Get<AuthoredAffordance>(instance);
+				const auto value = existing ? existing->*Member : AuthoredAffordance{}.*Member;
+				if constexpr (Type == PropertyType::Enum)
+					*static_cast<Value *>(out) =
+						ecs::EnumTable::MemberAt(AuthoredAffordanceKindEnum(), static_cast<size_t>(value));
+				else
+					*static_cast<Value *>(out) = value;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				if (!store.Alive(instance)) return false;
+				AuthoredAffordance authored;
+				if (const auto *existing = store.Get<AuthoredAffordance>(instance)) authored = *existing;
+				if constexpr (Type == PropertyType::Enum) {
+					size_t ordinal = 0;
+					if (!ecs::EnumTable::OrdinalOf(
+							AuthoredAffordanceKindEnum(), *static_cast<const Value *>(value), ordinal
+						))
+						return false;
+					authored.*Member = static_cast<Field>(ordinal);
+				} else
+					authored.*Member = *static_cast<const Value *>(value);
+				if (!authored.Id.IsValid() && authored.Kind == AuthoredAffordanceKind::None &&
+					!authored.Enabled)
+					store.Remove<AuthoredAffordance>(instance);
+				else
+					store.Set(instance, authored);
+				return true;
+			};
+			return property;
 		}
 
 		template <class Component, auto Member, const core::Name &(*EnumName)()>
@@ -2508,6 +2606,20 @@ namespace engine::scene {
 		// reads an id from it and cannot be registered twice. Classes are
 		// process-wide and never unregister, exactly as components are, so
 		// there is nothing to tear down.
+		void TagDeclaredProperties(ecs::ClassId owner, core::Name tag) {
+			const auto properties = ecs::Classes::Describe(owner).Properties;
+			for (const ecs::PropertyDescriptor &property : properties) {
+				(void)ecs::Classes::SetPropertiesTag(owner, property.Spelling, tag);
+			}
+		}
+
+		void TagProperty(ecs::ClassId owner, std::string_view property, std::string_view tag) {
+			const bool tagged = ecs::Classes::SetPropertiesTag(owner, property, core::Name(tag));
+			if (!tagged) {
+				assert(tagged && "property group must name a declaration on its owner class");
+			}
+		}
+
 		ecs::ClassId RegisterTree() {
 			RegisterSceneComponents();
 
@@ -2608,12 +2720,11 @@ namespace engine::scene {
 			const ecs::ClassId vectorField3D =
 				ecs::Classes::Register("VectorField3D", pvInstance, vectorField3DSet);
 
-			// A field holds only the renderer request. The renderer derives every
-			// particle from the authoritative storm copied into its view, so no
-			// device-local particle position can enter an authored world.
+			// A field owns bounded initial conditions and styles. Device-local live
+			// particle positions do not enter authored worlds or ECS snapshots.
 			const std::array gpuParticleField{ecs::Components::Of<GpuParticleField>()};
 			const ecs::ClassId gpuParticleFieldClass =
-				ecs::Classes::Register("GpuParticleField", instance, gpuParticleField);
+				ecs::Classes::Register("GpuParticleField", pvInstance, gpuParticleField);
 
 			const std::array base{
 				ecs::Components::Of<Bounds>(),
@@ -2667,11 +2778,6 @@ namespace engine::scene {
 				// description. Forty bytes on every part, which is the trade
 				// the two entries above already make.
 				ecs::Components::Of<RigidBody>(),
-
-				// Data-factory reads become a column scan because every BasePart has
-				// this eight-byte record. The fixed cost keeps one authoring surface
-				// and avoids a structural join for the bounded affordance query.
-				ecs::Components::Of<AuthoredAffordance>(),
 
 				// **`Simulated` is deliberately not here, and that is the safe
 				// default rather than an omission.** A part is static until
@@ -2798,6 +2904,7 @@ namespace engine::scene {
 				ecs::Components::Of<CameraSubject>()
 			};
 			const ecs::ClassId cameraClass = ecs::Classes::Register("Camera", pvInstance, camera);
+			ecs::Classes::SetRuntimeLocal(cameraClass, true);
 
 			// **A surface camera is a camera you parent to a part**, and that is
 			// the whole of the class.
@@ -2963,7 +3070,9 @@ namespace engine::scene {
 			ecs::EnumTable::Register("ListenerType", listeners);
 			ecs::EnumTable::Register(
 				"CameraType",
-				std::array<std::string_view, 4>{"Classic", "LockFirstPerson", "ShiftLock", "Scriptable"}
+				std::array<std::string_view, 5>{
+					"Classic", "LockFirstPerson", "ShiftLock", "Scriptable", "Custom"
+				}
 			);
 
 			const std::array bulb{ecs::Components::Of<Light>()};
@@ -3260,41 +3369,53 @@ namespace engine::scene {
 				gpuParticleFieldClass, "RequestedCount"
 			);
 			ecs::Classes::Property<&GpuParticleField::Seed>(gpuParticleFieldClass, "Seed");
-			ecs::Classes::Property<&GpuParticleField::CondensationColor>(
-				gpuParticleFieldClass, "CondensationColor"
+			ecs::Classes::Property<&GpuParticleField::HalfExtent>(gpuParticleFieldClass, "Bounds");
+			ecs::Classes::ClampedProperty<&GpuParticleField::VelocityResponse, 0.0f, 1000.0f>(
+				gpuParticleFieldClass, "VelocityResponse"
 			);
-			ecs::Classes::Property<&GpuParticleField::RainColor>(gpuParticleFieldClass, "RainColor");
-			ecs::Classes::Property<&GpuParticleField::DebrisColor>(gpuParticleFieldClass, "DebrisColor");
-			ecs::Classes::ClampedProperty<&GpuParticleField::CondensationAlpha, 0.0f, 1.0f>(
-				gpuParticleFieldClass, "CondensationAlpha"
-			);
-			ecs::Classes::ClampedProperty<&GpuParticleField::RainAlpha, 0.0f, 1.0f>(
-				gpuParticleFieldClass, "RainAlpha"
-			);
-			ecs::Classes::ClampedProperty<&GpuParticleField::DebrisAlpha, 0.0f, 1.0f>(
-				gpuParticleFieldClass, "DebrisAlpha"
-			);
-			ecs::Classes::ClampedProperty<&GpuParticleField::CondensationSize, 0.0f, 64.0f>(
-				gpuParticleFieldClass, "CondensationSize"
-			);
-			ecs::Classes::ClampedProperty<&GpuParticleField::RainSize, 0.0f, 64.0f>(
-				gpuParticleFieldClass, "RainSize"
-			);
-			ecs::Classes::ClampedProperty<&GpuParticleField::DebrisSize, 0.0f, 64.0f>(
-				gpuParticleFieldClass, "DebrisSize"
-			);
+			ecs::PropertyDescriptor definition;
+			definition.Name = core::Name("Definition");
+			definition.Type = PropertyType::String;
+			definition.Size = sizeof(std::string);
+			definition.Scriptable = false;
+			definition.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<GpuParticleField>()});
+			definition.Writes = definition.Reads;
+			definition.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) {
+				const auto *field = store.Get<GpuParticleField>(instance);
+				if (field == nullptr) return false;
+				*static_cast<std::string *>(out) = GpuParticleDefinition(*field);
+				return true;
+			};
+			definition.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) {
+				const auto *field = store.Get<GpuParticleField>(instance);
+				if (field == nullptr || (store.AdoptOnly() && !(ecs::Store::IsPredicted(instance) &&
+																ecs::IsClientLocalInstance(store, instance))))
+					return false;
+				auto candidate = *field;
+				if (!ReadGpuParticleDefinition(*static_cast<const std::string *>(value), candidate))
+					return false;
+				store.Set(instance, std::move(candidate));
+				return true;
+			};
+			ecs::Classes::Computed(gpuParticleFieldClass, definition);
 
 			ecs::Classes::Computed(basePart, PartSizeProperty());
 			ecs::Classes::Computed(basePart, CanCollideProperty());
 			ecs::Classes::Property<&Collider::CanQuery>(basePart, "CanQuery");
-			ecs::Classes::Property<&AuthoredAffordance::Id>(basePart, "AffordanceId");
 			ecs::Classes::Computed(
 				basePart,
-				EnumFieldProperty<AuthoredAffordance, &AuthoredAffordance::Kind, AuthoredAffordanceKindEnum>(
-					"AffordanceKind"
+				AuthoredAffordanceProperty<&AuthoredAffordance::Id, PropertyType::Name>("AffordanceId")
+			);
+			ecs::Classes::Computed(
+				basePart,
+				AuthoredAffordanceProperty<&AuthoredAffordance::Kind, PropertyType::Enum>("AffordanceKind")
+			);
+			ecs::Classes::Computed(
+				basePart,
+				AuthoredAffordanceProperty<&AuthoredAffordance::Enabled, PropertyType::Bool>(
+					"AffordanceEnabled"
 				)
 			);
-			ecs::Classes::Property<&AuthoredAffordance::Enabled>(basePart, "AffordanceEnabled");
 			ecs::Classes::Computed(basePart, AnchoredProperty());
 			ecs::Classes::Computed(basePart, KinematicProperty());
 
@@ -3595,8 +3716,14 @@ namespace engine::scene {
 			// than a match. `SpawnLocation::Forced` carries the argument.
 			ecs::Classes::Property<&SpawnLocation::Forced>(spawnLocation, "Forced");
 
-			ecs::Classes::Computed(cameraClass, FieldOfViewProperty());
+			// Local cameras may be scripted without granting writes to replicated eyes.
+			for (auto property :
+				 {CFrameProperty(), PositionProperty(), OrientationProperty(), FieldOfViewProperty()}) {
+				property.PredictedWritable = true;
+				ecs::Classes::Computed(cameraClass, property);
+			}
 			ecs::Classes::Computed(cameraClass, CameraSubjectProperty());
+			ecs::Classes::Computed(cameraClass, CameraTypeProperty());
 			ecs::Classes::Property<&CameraSubject::Automatic>(cameraClass, "CameraSubjectAutomatic");
 			ecs::Classes::Property<&Camera::NearPlane>(cameraClass, "NearPlaneZ");
 			ecs::Classes::Property<&Camera::FarPlane>(cameraClass, "FarPlaneZ");
@@ -3959,6 +4086,271 @@ namespace engine::scene {
 			// rubber floor may share a surface and never a material. Binding both
 			// under one script name would make one of them unreachable and the
 			// other ambiguous.
+			TagDeclaredProperties(pvInstance, core::Name("Transform"));
+			for (const ecs::ClassId owner : {basePart, part, meshPart, skinnedMeshPart, spawnLocation})
+				TagDeclaredProperties(owner, core::Name("Geometry"));
+			TagDeclaredProperties(skinnedMeshPart, core::Name("Animation"));
+			TagDeclaredProperties(cameraClass, core::Name("Camera"));
+			TagDeclaredProperties(surfaceCameraClass, core::Name("Rendering"));
+			TagDeclaredProperties(portalClass, core::Name("Geometry"));
+			TagDeclaredProperties(soundClass, core::Name("Audio"));
+			TagDeclaredProperties(attachmentClass, core::Name("Transform"));
+			TagDeclaredProperties(materialClass, core::Name("PBR"));
+			TagDeclaredProperties(humanoidClass, core::Name("Character"));
+			TagDeclaredProperties(toolClass, core::Name("Behavior"));
+			for (const ecs::ClassId owner : {lightClass, spotLightClass, surfaceLightClass})
+				TagDeclaredProperties(owner, core::Name("Lighting"));
+			for (const ecs::ClassId owner :
+				 {valueBase,
+				  stringValue,
+				  localizationTable,
+				  boolValue,
+				  cframeValue,
+				  color3Value,
+				  intValue,
+				  numberValue,
+				  objectValue,
+				  vector3Value})
+				TagDeclaredProperties(owner, core::Name("Data"));
+			for (const ecs::ClassId owner :
+				 {boneClass,
+				  rigKeypointClass,
+				  animationBufferClass,
+				  animationClass,
+				  animatorClass,
+				  trackClass})
+				TagDeclaredProperties(owner, core::Name("Animation"));
+			for (const ecs::ClassId owner :
+				 {atmosphereClass,
+				  atmosphereComponentClass,
+				  atmosphereProceduralClass,
+				  cloudsClass,
+				  cloudProceduralClass,
+				  cloudComputeClass,
+				  skyboxTexturesClass,
+				  skyboxComputeClass})
+				TagDeclaredProperties(owner, core::Name("Environment"));
+			for (const ecs::ClassId owner : {volumeClass, shaderLensClass, gravitationalLensClass})
+				TagDeclaredProperties(owner, core::Name("Rendering"));
+			for (const ecs::ClassId owner :
+				 {constraintClass,
+				  ballClass,
+				  hingeClass,
+				  prismaticClass,
+				  cylindricalClass,
+				  ropeClass,
+				  springClass,
+				  jointInstanceClass,
+				  weldClass,
+				  weldConstraintClass})
+				TagDeclaredProperties(owner, core::Name("Physics"));
+			TagDeclaredProperties(vectorField2D, core::Name("Physics"));
+			TagDeclaredProperties(vectorField3D, core::Name("Physics"));
+			TagDeclaredProperties(gpuParticleFieldClass, core::Name("Particles"));
+
+			for (const std::string_view property : {"CFrame", "Position", "Orientation", "PivotOffset"})
+				TagProperty(pvInstance, property, "Transform");
+			TagProperty(basePart, "Size", "Geometry");
+			for (const std::string_view property : {"Color", "Transparency", "LocalTransparency"})
+				TagProperty(basePart, property, "Appearance");
+			for (const std::string_view property :
+				 {"AffordanceId", "AffordanceKind", "AffordanceEnabled", "Locked"})
+				TagProperty(basePart, property, "Behavior");
+			for (const std::string_view property :
+				 {"Visible",
+				  "RenderFeatureEnableMask",
+				  "RenderFeatureDisableMask",
+				  "ComputeEffectNode",
+				  "PostProcessEffectNode",
+				  "CastShadow"})
+				TagProperty(basePart, property, "Rendering");
+			for (const std::string_view property :
+				 {"CanCollide",
+				  "CanQuery",
+				  "Anchored",
+				  "Kinematic",
+				  "CollisionGroup",
+				  "CollisionShape",
+				  "CollisionGeometry",
+				  "Mass",
+				  "CustomPhysicalProperties",
+				  "Density",
+				  "Friction",
+				  "Elasticity",
+				  "LinearDamping",
+				  "AngularDamping"})
+				TagProperty(basePart, property, "Physics");
+			for (const std::string_view property :
+				 {"AlphaCutoff", "AlphaMode", "SurfaceColor", "EmissiveTint", "EmissiveStrength"})
+				TagProperty(basePart, property, "PBR");
+			TagProperty(basePart, "ResampleMode", "Rendering");
+
+			for (const std::string_view property :
+				 {"TextureID",
+				  "NormalMap",
+				  "RoughnessMap",
+				  "MetalnessMap",
+				  "OcclusionMap",
+				  "HeightMap",
+				  "EmissiveMap",
+				  "PackedPbrMap",
+				  "SpecularFactor",
+				  "TransmissionFactor",
+				  "IndexOfRefraction",
+				  "Thickness",
+				  "PackedRoughnessChannel",
+				  "PackedOcclusionChannel",
+				  "PackedHeightChannel",
+				  "PackedMetalnessChannel"})
+				TagProperty(meshPart, property, "PBR");
+			for (const std::string_view property : {"MeshId", "TrianglesCount"})
+				TagProperty(meshPart, property, "Geometry");
+			for (const std::string_view property :
+				 {"Lod1MeshId",
+				  "Lod2MeshId",
+				  "Lod3MeshId",
+				  "Lod1Ratio",
+				  "Lod2Ratio",
+				  "Lod3Ratio",
+				  "LodTargetQuadArea",
+				  "LodBillboardTexture",
+				  "Lod1Distance",
+				  "Lod2Distance",
+				  "Lod3Distance",
+				  "AutoLod1MeshId",
+				  "AutoLod2MeshId",
+				  "AutoLod3MeshId",
+				  "AutoLod1Ratio",
+				  "AutoLod2Ratio",
+				  "AutoLod3Ratio",
+				  "AutoLodTargetQuadArea",
+				  "AutoLodBillboardTexture",
+				  "AutoLodLevels",
+				  "AutoLodStrategy",
+				  "CustomLod1MeshId",
+				  "CustomLod2MeshId",
+				  "CustomLod3MeshId",
+				  "CustomLod1Ratio",
+				  "CustomLod2Ratio",
+				  "CustomLod3Ratio",
+				  "CustomLodTargetQuadArea",
+				  "CustomLodBillboardTexture",
+				  "CustomLodLevels"})
+				TagProperty(meshPart, property, "LOD");
+			for (const std::string_view property : {"TeamColor", "Forced"})
+				TagProperty(spawnLocation, property, "Player");
+			for (const std::string_view property : {"Neutral", "Enabled"})
+				TagProperty(spawnLocation, property, "Behavior");
+
+			for (const std::string_view property :
+				 {"CameraSubject",
+				  "CameraType",
+				  "CameraSubjectAutomatic",
+				  "NearPlaneZ",
+				  "FarPlaneZ",
+				  "MaxImageWidth",
+				  "MaxImageHeight",
+				  "ImageWidth",
+				  "ImageHeight"})
+				TagProperty(cameraClass, property, "Camera");
+			for (const std::string_view property : {"RenderFeatureEnableMask", "RenderFeatureDisableMask"})
+				TagProperty(cameraClass, property, "Rendering");
+			TagProperty(cameraClass, "SurfaceSize", "Geometry");
+			TagProperty(surfaceCameraClass, "ImageTransparency", "Appearance");
+			TagProperty(surfaceCameraClass, "FPS", "Rendering");
+			for (const std::string_view property : {"Face", "Effect"})
+				TagProperty(surfaceCameraClass, property, "Rendering");
+			TagProperty(surfaceCameraClass, "TagFilter", "Behavior");
+			for (const std::string_view property : {"Destination", "DestinationWorld"})
+				TagProperty(portalClass, property, "Identity");
+			for (const std::string_view property : {"Enabled", "Bidirectional"})
+				TagProperty(portalClass, property, "Behavior");
+			TagProperty(materialClass, "MaterialId", "Identity");
+			TagProperty(materialClass, "Shader", "Rendering");
+			for (const std::string_view property : {"Enabled", "Shadows"})
+				TagProperty(lightClass, property, "Behavior");
+			for (const std::string_view property : {"Angle", "Face"}) {
+				TagProperty(spotLightClass, property, "Lighting");
+				TagProperty(surfaceLightClass, property, "Lighting");
+			}
+			TagProperty(toolClass, "Grip", "Transform");
+			for (const std::string_view property : {"RigId", "JointCount"})
+				TagProperty(skinnedMeshPart, property, "Animation");
+			for (const std::string_view property : {"Color"}) {
+				TagProperty(atmosphereClass, property, "Lighting");
+				TagProperty(cloudsClass, property, "Lighting");
+			}
+			for (const std::string_view property : {"Enabled"}) {
+				TagProperty(cloudsClass, property, "Behavior");
+				TagProperty(skyboxTexturesClass, property, "Behavior");
+				TagProperty(skyboxComputeClass, property, "Behavior");
+				TagProperty(cloudComputeClass, "ComputeEnabled", "Behavior");
+				TagProperty(volumeClass, property, "Behavior");
+				TagProperty(shaderLensClass, property, "Behavior");
+				TagProperty(atmosphereProceduralClass, "ProceduralEnabled", "Behavior");
+			}
+			for (const std::string_view property : {"ZenithColor", "HorizonColor", "GroundColor"})
+				TagProperty(skyboxComputeClass, property, "Lighting");
+			TagProperty(volumeClass, "Bounds", "Geometry");
+
+			// These are independent authored children of Lighting. Registering them
+			// after the existing tree retains the established class ids.
+			const ecs::ClassId bloomEffect = ecs::Classes::Register(
+				"BloomEffect", instance, std::array{ecs::Components::Of<BloomEffect>()}
+			);
+			const ecs::ClassId depthOfFieldEffect = ecs::Classes::Register(
+				"DepthOfFieldEffect", instance, std::array{ecs::Components::Of<DepthOfFieldEffect>()}
+			);
+			const ecs::ClassId godRaysEffect = ecs::Classes::Register(
+				"GodRaysEffect", instance, std::array{ecs::Components::Of<GodRaysEffect>()}
+			);
+			const ecs::ClassId fogEffect =
+				ecs::Classes::Register("FogEffect", instance, std::array{ecs::Components::Of<FogEffect>()});
+
+			ecs::Classes::ClampedProperty<&BloomEffect::Intensity, 0.0f, 100.0f>(bloomEffect, "Intensity");
+			ecs::Classes::ClampedProperty<&BloomEffect::Threshold, 0.0f, 10000.0f>(bloomEffect, "Threshold");
+			ecs::Classes::ClampedProperty<&BloomEffect::Radius, 0.0f, 128.0f>(bloomEffect, "Radius");
+			ecs::Classes::Property<&BloomEffect::Enabled>(bloomEffect, "Enabled");
+			ecs::Classes::ClampedProperty<&DepthOfFieldEffect::Intensity, 0.0f, 1.0f>(
+				depthOfFieldEffect, "Intensity"
+			);
+			ecs::Classes::ClampedProperty<&DepthOfFieldEffect::FocusDistance, 0.0f, 100000.0f>(
+				depthOfFieldEffect, "FocusDistance"
+			);
+			ecs::Classes::ClampedProperty<&DepthOfFieldEffect::FocusRange, 0.0f, 100000.0f>(
+				depthOfFieldEffect, "FocusRange"
+			);
+			ecs::Classes::ClampedProperty<&DepthOfFieldEffect::Radius, 0.0f, 128.0f>(
+				depthOfFieldEffect, "Radius"
+			);
+			ecs::Classes::Property<&DepthOfFieldEffect::Enabled>(depthOfFieldEffect, "Enabled");
+			ecs::Classes::ClampedProperty<&GodRaysEffect::Intensity, 0.0f, 100.0f>(
+				godRaysEffect, "Intensity"
+			);
+			ecs::Classes::ClampedProperty<&GodRaysEffect::Threshold, 0.0f, 10000.0f>(
+				godRaysEffect, "Threshold"
+			);
+			ecs::Classes::ClampedProperty<&GodRaysEffect::Radius, 0.0f, 512.0f>(godRaysEffect, "Radius");
+			ecs::Classes::Property<&GodRaysEffect::Enabled>(godRaysEffect, "Enabled");
+			ecs::Classes::Property<&FogEffect::Color>(fogEffect, "Color");
+			ecs::Classes::Property<&FogEffect::Start>(fogEffect, "Start");
+			ecs::Classes::Property<&FogEffect::End>(fogEffect, "End");
+			ecs::Classes::Property<&FogEffect::Enabled>(fogEffect, "Enabled");
+			for (const ecs::ClassId effect : {bloomEffect, depthOfFieldEffect, godRaysEffect, fogEffect}) {
+				TagDeclaredProperties(effect, core::Name("Rendering"));
+				TagProperty(effect, "Enabled", "Behavior");
+			}
+			for (const std::string_view property : {"Color", "Start", "End"})
+				TagProperty(fogEffect, property, "Lighting");
+
+			// Append new classes so existing authored class ids retain their order.
+			const ecs::ClassId weatherCompute = ecs::Classes::Register(
+				"WeatherCompute", cloudComputeClass, std::array{ecs::Components::Of<WeatherCompute>()}
+			);
+			RegisterWeatherComputeProperties(weatherCompute);
+			TagDeclaredProperties(weatherCompute, core::Name("Weather"));
+			TagProperty(weatherCompute, "WeatherEnabled", "Behavior");
+
 			return part;
 		}
 	}

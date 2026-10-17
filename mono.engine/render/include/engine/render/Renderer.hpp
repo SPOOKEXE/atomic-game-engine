@@ -17,6 +17,7 @@
 #include <engine/graph/PipelineProfile.hpp>
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
+#include <engine/imagegraph/Document.hpp>
 #include <engine/render/Capabilities.hpp>
 #include <engine/render/DataCapture.hpp>
 #include <engine/render/Flipbook.hpp>
@@ -32,9 +33,9 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/GpuParticleField.hpp>
-#include <engine/scene/Storm.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/VectorField.hpp>
 
 // `SurfaceView::Projection` is a matrix. glm has always arrived here through
 // `core/types/CFrame.hpp` and `graph/Frustum.hpp`, but a header that names a
@@ -42,12 +43,14 @@
 #include <glm/mat4x4.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <unordered_map>
@@ -59,7 +62,53 @@ namespace engine::graph {
 	class PipelineDocument;
 }
 
+namespace engine::imagegraph {
+	struct Document;
+	struct Diagnostic;
+}
+
 namespace engine::render {
+	// Exact resident source for one authored relative path. No owner fallback occurs.
+	struct ImageGraphSourceBinding {
+		// Authored source path, matched together with Interpretation.
+		std::string Path;
+		// Ordinary resident texture name and its exact residency namespace.
+		core::Name Texture;
+
+		// Content namespace used to resolve this exact resident texture.
+		core::Name Owner;
+		// Colour imports encoded colour; Data preserves normalized numeric channels.
+		imagegraph::SourceInterpretation Interpretation = imagegraph::SourceInterpretation::Colour;
+	};
+
+	// Accepted GPU update, unchanged resident output, or last-good output retained.
+	enum class ImageGraphEvaluation : uint8_t { Updated, Reused, Refused };
+
+	// Cumulative traffic and the latest completed GPU evaluation measurement.
+	struct ImageGraphStatistics {
+		// Submitted evaluations and unchanged calls since renderer initialization.
+		uint64_t Evaluations = 0;
+		// Evaluations that reused unchanged resident output.
+		uint64_t CacheHits = 0;
+		// Actual recorded compute work and successfully submitted command buffers.
+		uint64_t ComputeDispatches = 0;
+		// Successfully submitted buffers used for graph evaluation.
+		uint64_t CommandBuffers = 0;
+		// Logical graph texture allocations, publications and current residency.
+		uint64_t AllocatedBytes = 0;
+		// Logical bytes copied while publishing graph output.
+		uint64_t CopiedBytes = 0;
+		// Logical bytes currently resident for graph textures.
+		uint64_t ResidentBytes = 0;
+		// Sequence of the latest completed nonblocking device measurement.
+		uint64_t GpuTimingSequence = 0;
+		// Latest changed evaluation recording cost and completed device duration.
+		double CpuRecordingMicroseconds = 0;
+		// Device duration from the latest completed evaluation measurement.
+		double GpuMicroseconds = 0;
+		// Device timestamp support, independent of whether a result has completed.
+		bool HasGpuTimings = false;
+	};
 	// Planner outcome recorded with a portal view for capture diagnostics.
 	enum class PortalDemandStatus { Ready, Hidden, Invalid, Unsupported };
 
@@ -344,7 +393,7 @@ namespace engine::render {
 		// Planner outcome for this aperture. It is diagnostic metadata and does
 		// not change the renderer's external image mode.
 		PortalDemandStatus ImageDemandStatus = PortalDemandStatus::Invalid;
-		// Geometric reason a hidden demand did not produce a capture.
+		// Geometric reason a hidden image demand did not produce a capture.
 		PortalDemandHiddenReason ImageHiddenReason = PortalDemandHiddenReason::None;
 		// Whether the aperture intersects the demand culling frustum.
 		bool ImageFrustumVisible = false;
@@ -371,7 +420,7 @@ namespace engine::render {
 		// own clip plane: rendering through it produces a scene that is then
 		// entirely clipped away, at the cost of a full sub-render. Cheaper to
 		// name it than to draw it and throw it away.
-		int8_t Partner = -1;
+		int16_t Partner = -1;
 
 		// The pane's plane and rectangle in world space, exactly as
 		// `scene::PortalSeam` states them: `Centre ± First ± Second` is the four
@@ -616,6 +665,10 @@ namespace engine::render {
 		// visible flat square rather than nothing.
 		core::Name Texture;
 
+		// Store namespace that owns generated images used by this emitter.
+		// Missing local images fall back to the view's authored image namespace.
+		core::Name SourceWorld;
+
 		// How many cells the flipbook has on each side. One is not a flipbook.
 		//
 		// **A side rather than a layout enum**, because that is what the shader
@@ -699,17 +752,21 @@ namespace engine::render {
 		core::Name Owner;
 	};
 
-	// An owned copy of the authored request and analytical field that one frame
-	// gives to the device. No renderer path retains or dereferences a world row.
+	// An owned copy of authored initial conditions and the generic force field.
+	// No renderer path retains or dereferences a world row.
 	struct GpuParticleFieldView {
 		// The authored enable, layer, count and seed request.
 		scene::GpuParticleField Field;
-		// Analytical wind and geometry values that drive particle motion.
-		scene::TornadoParameters Storm;
-		// World-space position of the storm centre.
-		core::Vector3 Centre;
-		// Elapsed seconds in the storm state copied for this view.
-		float Seconds = 0.0f;
+		// Transform mapping authored local samples into world coordinates.
+		core::CFrame Frame;
+		// Generic nearest-ancestor vector field retained without an ECS pointer.
+		scene::VectorFieldSample ForceField;
+		// Source identity and observed definition epoch, including sample/style writes.
+		ecs::Entity Source = ecs::NULL_ENTITY;
+		// Component version used to invalidate retained particle images.
+		uint64_t DefinitionRevision = 0;
+		// Source-world time keeps retained images current while device positions advance.
+		double Seconds = 0;
 	};
 
 	// One camera invocation in a graph-owned frame.
@@ -720,8 +777,25 @@ namespace engine::render {
 	//
 	// @since v0.17
 	struct View {
+		// Borrowed immutable solver checkpoint bytes, owned by the collected world packet.
+		std::span<const std::byte> WeatherCheckpoint;
+		// Trusted canonical full stream name copied from the accepted source definition.
+		core::Name WeatherSimulationLayer;
+		// Accepted terrain snapshot identity, checked before adopting physical checkpoint resources.
+		uint32_t WeatherTerrainRevision = 1;
+		// Changes only when that packet publishes or retires a checkpoint.
+		uint64_t WeatherCheckpointVersion = 0;
+		// Copied checkpoint identity; decoder validates these against the encoded payload.
+		//@{
+		uint64_t WeatherCheckpointTick = 0;
+		uint64_t WeatherCheckpointEpoch = 0;
+		uint32_t WeatherCheckpointRevision = 0;
+		//@}
 		// Immutable packed cloud density copied from the source world.
 		std::optional<scene::CloudDensitySnapshot> CloudDensity;
+		// Borrowed camera-packet precipitation preserves the authored particle field.
+		// The owning WorldCameraFrame outlives this render invocation.
+		std::span<const GpuParticleFieldView> WeatherParticles;
 		// An HDR image owned by this world and viewport. The eye-image node defaults
 		// to whole-eye projection; seam intermediates require its explicit projection option.
 		// Zero denotes an unavailable image.
@@ -829,6 +903,9 @@ namespace engine::render {
 		// handles and particle block indices collide between stores, so both the
 		// instance rows and particle pool use this with `World`.
 		core::Name WorldName;
+		// World-local generated image lookup context. Studio may draw authority
+		// geometry with lighting and generated images from the displayed replica.
+		core::Name ImageGraphWorldName;
 
 		// Native rows use ContentOwner; copied rows select by SourceWorld.
 		// Unbound worlds retain the shared namespace for callers without scoped content.
@@ -869,6 +946,13 @@ namespace engine::render {
 		// Empty in a scene with no portals, which is nearly all of them. See
 		// `ParticleSeam`.
 		std::span<const ParticleSeam> ParticleSeams;
+
+		// Optional source-store identity for CPU and GPU particle residency.
+		// A client can share authored image/program ownership with its authority
+		// while its local emitter indices and device populations remain independent.
+		// An absent name uses World and WorldName.
+		uint64_t ParticleWorld = 0;
+		core::Name ParticleWorldName;
 
 		// Which simulation revision produced the particle blocks and seams. An
 		// unchanged value needs only another device step for the new
@@ -1188,6 +1272,37 @@ namespace engine::render {
 		// @param renderPass    An open `SDL_GPURenderPass *` with no depth
 		//                      attachment.
 		virtual void Record(void *commandBuffer, void *renderPass) = 0;
+	};
+
+	// Effective inputs from the last scene recording for one view. Retained
+	// frames keep these gates; command counts and FrameResult::Nodes describe work.
+	struct PassActivity {
+		// Whether a scene recording has been accepted; false before the first accepted record.
+		bool Valid = false;
+		// Whether sky inputs were active for the recorded view.
+		bool Sky = false;
+		// Whether fog inputs were active for the recorded view.
+		bool Fog = false;
+		// Whether shader lens inputs were active for the recorded view.
+		bool ShaderLenses = false;
+		// Whether depth of field inputs were active for the recorded view.
+		bool DepthOfField = false;
+		// Whether god ray inputs were active for the recorded view.
+		bool GodRays = false;
+		// Whether bloom inputs were active for the recorded view.
+		bool Bloom = false;
+		// Whether portal overlay inputs were active for the recorded view.
+		bool PortalOverlay = false;
+		// Whether mirror overlay inputs were active for the recorded view.
+		bool MirrorOverlay = false;
+		// Whether transparent inputs were active for the recorded view.
+		bool Transparent = false;
+		// Whether ground grid inputs were active for the recorded view.
+		bool Grid = false;
+		// Whether particle inputs were active for the recorded view.
+		bool Particles = false;
+		// Whether ribbon inputs were active for the recorded view.
+		bool Ribbons = false;
 	};
 
 	// What one `Render` call submitted, and whether it reached the display.
@@ -1526,6 +1641,8 @@ namespace engine::render {
 		// An owned copy of the last successfully submitted visibility snapshot.
 		// A submission is not a claim that pixels survived depth or blending.
 		VisibilitySnapshot Visibility() const;
+		// Effective pass gates for the last scene recording in this viewport.
+		PassActivity ViewPassActivity(size_t slot = 0) const;
 
 		// Whether this renderer has a window to present to.
 		//
@@ -1726,6 +1843,33 @@ namespace engine::render {
 		// @return `false` for an invalid image, a full table or a failed
 		//         upload.
 		bool AddTexture(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
+
+		// Installs a bounded authored graph and exact resident source bindings. A refused
+		// installation preserves the previous graph and every published output.
+		bool SetImageGraph(
+			core::Name owner,
+			core::Name name,
+			const imagegraph::Document &document,
+			std::span<const ImageGraphSourceBinding> sources,
+			imagegraph::Diagnostic &diagnostic
+		);
+
+		// Evaluates only the selected dirty dependency cone before consumers record.
+		// Publishes an ordinary texture in `owner`; unchanged calls submit no work.
+		// Same-size updates preserve TextureHandle. Refusal retains accepted pixels.
+		ImageGraphEvaluation EvaluateImageGraph(
+			core::Name owner,
+			core::Name name,
+			std::string_view output,
+			core::Name publishedTexture,
+			imagegraph::Diagnostic &diagnostic
+		);
+
+		// Releases this graph's intermediates and outputs without touching its sources.
+		bool DropImageGraph(core::Name owner, core::Name name);
+
+		// Polls completed timestamp queries without waiting and returns traffic totals.
+		ImageGraphStatistics ImageGraphProfile();
 
 		// Says that content is on its way under this name, and that it is not.
 		//
@@ -2273,6 +2417,10 @@ namespace engine::render {
 		// @since v0.10
 		void *TextureHandle(const core::Name &name, core::Name owner = {}) const;
 
+		// Whether TextureHandle's RGB is decoded from sRGB during hardware sampling.
+		// Missing textures return false, with the same exact owner lookup as the handle.
+		bool TextureSamplesSRGB(const core::Name &name, core::Name owner = {}) const;
+
 		// Where a texture's current animation cell sits.
 		//
 		// **For an interface painter, which has a name and no table.** The
@@ -2298,6 +2446,10 @@ namespace engine::render {
 		// Changes when registered render resources are admitted, replaced or removed.
 		// Scoped to this renderer lifetime; callers also track their world/endpoint identity.
 		uint64_t ResourceRevision() const;
+
+		/// Whether submitted weather evolution still needs a completion poll.
+		/// A zero world selects all worlds owned by this renderer.
+		bool HasPendingWeatherWork(uint64_t world = 0) const;
 
 		// How big a registered texture is, in source pixels.
 		//

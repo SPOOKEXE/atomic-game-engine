@@ -10,3 +10,4 @@ RenderFeatures client RenderFeaturesDemo.luau required
 ReplicationRings replica Rings.luau required
 ServerRings server-replica Rings.luau required
 ServerPhysics server StressPhysics.luau required
+ImageBuffers client ImageBuffers.luau added

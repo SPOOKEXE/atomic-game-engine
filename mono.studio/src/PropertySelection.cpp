@@ -81,6 +81,7 @@ namespace studio {
 
 			SelectionPropertyRow row;
 			row.Descriptor = &descriptor;
+			row.Owner = owner;
 			row.Applicable = liveInstances.size();
 			for (const Entity instance : liveInstances) {
 				PropertyValue value;
@@ -110,4 +111,28 @@ namespace studio {
 		});
 		return groups;
 	}
+	std::vector<SelectionPropertyGroup>
+	BuildTaggedPropertySelection(const engine::ecs::Store &store, std::span<const Entity> instances) {
+		static const Name unassigned("Unassigned");
+		std::vector<SelectionPropertyGroup> tagged;
+		for (auto &owner : BuildPropertySelection(store, instances)) {
+			for (auto &row : owner.Rows) {
+				const Name tag =
+					row.Descriptor->PropertiesTag.IsValid() ? row.Descriptor->PropertiesTag : unassigned;
+				auto found = std::find_if(tagged.begin(), tagged.end(), [tag](const auto &group) {
+					return group.PropertiesTag == tag;
+				});
+				if (found == tagged.end()) {
+					SelectionPropertyGroup group;
+					group.PropertiesTag = tag;
+					group.Applicable = owner.Applicable;
+					tagged.push_back(std::move(group));
+					found = tagged.end() - 1;
+				}
+				found->Rows.push_back(std::move(row));
+			}
+		}
+		return tagged;
+	}
+
 }

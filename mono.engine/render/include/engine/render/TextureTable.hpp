@@ -177,6 +177,7 @@ namespace engine::render {
 		//                `MAXIMUM_BYTES` like any upload. A caller that guessed
 		//                low would let the ceiling be walked past.
 		// @param owner   The exact content namespace, or empty for shared content.
+		// @param format  Sampling interpretation of the adopted native texture.
 		// @return `false` for an invalid name, a null texture or a full table -
 		//         and on `false` the caller still owns it.
 		// @since v0.10
@@ -186,7 +187,8 @@ namespace engine::render {
 			uint32_t width,
 			uint32_t height,
 			size_t bytes,
-			core::Name owner = {}
+			core::Name owner = {},
+			assets::TextureFormat format = assets::TextureFormat::RGBA8_LINEAR
 		);
 
 		// Replaces one owned texture without releasing the prior handle. The caller
@@ -320,6 +322,9 @@ namespace engine::render {
 		// Returns false for an absent name and leaves `format` alone.
 		bool FormatOf(const core::Name &name, assets::TextureFormat &format, core::Name owner = {}) const;
 
+		// Pixel content generation, distinct from animation timing. Missing names return zero.
+		uint64_t RevisionOf(const core::Name &name, core::Name owner = {}) const;
+
 		// Copies only the decoded base level retained by `Add`. This never reads
 		// device memory and never falls back across content owners. Refusal leaves
 		// `out` unchanged.
@@ -343,7 +348,7 @@ namespace engine::render {
 		// Empty for a fixed-rate sheet or missing name. The span remains valid
 		// until this texture is replaced or dropped.
 		std::span<const float> TimingOf(const core::Name &name, core::Name owner = {}) const;
-		// Generation for invalidating cached timing facts after table content changes.
+		// Changes when registered animation timing data changes.
 		uint64_t TimingRevision() const {
 			return TimingGeneration;
 		}
@@ -396,6 +401,9 @@ namespace engine::render {
 		}
 
 	  private:
+		// The GPU composer reserves a map slot before submission and commits it without
+		// allocating afterwards. Its reservation never exposes an unfinished texture.
+		friend struct ImageGraphGpuState;
 		// One registered texture and what it cost.
 		//
 		// **The size is held per texture rather than only summed**, which it was
@@ -407,6 +415,7 @@ namespace engine::render {
 		struct Entry {
 			SDL_GPUTexture *Texture = nullptr;
 			size_t Bytes = 0;
+			uint64_t Revision = 0;
 
 			// **What was uploaded, because a caller cannot ask the device.** A
 			// nine-sliced or tiled `ImageLabel` is laid out in *source* pixels -
@@ -459,6 +468,7 @@ namespace engine::render {
 
 		SDL_GPUDevice *Device = nullptr;
 		uint64_t TimingGeneration = 1;
+		uint64_t ContentGeneration = 1;
 		SDL_GPUSampler *SharedSampler = nullptr;
 		SDL_GPUSampler *NearestSampler = nullptr;
 

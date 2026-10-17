@@ -34,6 +34,7 @@ mono_add_library(client
 		# the render node kinds. Undeclared until v0.19, arriving through
 		# `Engine::render`.
 		Engine::graph
+		Engine::imagegraph
 
 		Engine::render
 
@@ -49,6 +50,7 @@ mono_add_library(client
 		# `render::ParticleBatch`es - see `client/Scene.hpp`, which explains why
 		# that conversion is here rather than in `effects`.
 		Engine::effects
+		Engine::weather
 
 		# L8, `shared`. Named because `client/src/Scene.cpp` includes
 		# `physics/Characters.hpp` and `physics/Query.hpp` and calls

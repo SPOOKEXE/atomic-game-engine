@@ -59,7 +59,7 @@ namespace client {
 	// A cheap fingerprint of every ECS column that can name content.
 	//
 	// The first call starts the ECS's component-specific change channels. Later
-	// calls are constant in entity count: a version and row count per component.
+	// calls read mutation and membership epochs per component, without counting rows.
 	// This is what lets a host avoid rediscovering identical texture names just
 	// because particles advanced or another viewport asked to draw the world.
 	uint64_t WantedContentRevision(engine::ecs::Store &store);

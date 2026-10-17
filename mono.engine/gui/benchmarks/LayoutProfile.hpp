@@ -20,12 +20,19 @@ namespace layout_bench {
 	constexpr std::string_view CHILD_SCAN = "gui child scan";
 	constexpr std::string_view ROOTS = "gui collector root snapshot";
 	constexpr std::string_view COLLECTORS = "gui collector handle snapshot";
+	// Heap totals for the layout owner and its major allocation regions.
 	struct HeapReading {
+		// All heap activity under the benchmark owner span.
 		engine::core::HeapNodeView Owner;
+		// Layout work excluding child scopes.
 		engine::core::HeapNodeView LayoutExclusive;
+		// Layout work including nested child scopes.
 		engine::core::HeapNodeView LayoutInclusive;
+		// Heap activity from scanning children.
 		engine::core::HeapNodeView ChildScan;
+		// Heap activity from snapshotting collector roots.
 		engine::core::HeapNodeView Roots;
+		// Heap activity from snapshotting collector handles.
 		engine::core::HeapNodeView Collectors;
 	};
 	inline void Add(engine::core::HeapNodeView &total, const engine::core::HeapNodeView &node) {
@@ -68,7 +75,9 @@ namespace layout_bench {
 		}();
 		return enabled;
 	}
+	// Restores frame-graph collection to its prior state on scope exit.
 	struct RestoreProfile {
+		// Collector setting captured when the diagnostic scope begins.
 		bool Previous = engine::core::FrameGraph::IsEnabled();
 		~RestoreProfile() {
 			engine::core::FrameGraph::SetEnabled(Previous);

@@ -27,8 +27,8 @@ namespace engine::core {
 
 	// A declarative command-line parser that generates help from its options.
 	//
-	// The parser stores views of declaration text and `argv`; both must outlive
-	// the `Arguments` object and any values read from it.
+	// Declaration text is copied so generated names and descriptions may be temporary.
+	// Parsed values remain views into `argv`, which must outlive their use.
 	class Arguments {
 	  public:
 		// The outcome of parsing one command line.
@@ -136,9 +136,9 @@ namespace engine::core {
 
 	  private:
 		struct Option {
-			std::string_view Name;
-			std::string_view ValueName;
-			std::string_view Description;
+			std::string Name;
+			std::string ValueName;
+			std::string Description;
 			bool TakesValue = false;
 
 			bool Present = false;
@@ -152,8 +152,8 @@ namespace engine::core {
 		Option *Find(std::string_view name);
 		const Option *Find(std::string_view name) const;
 
-		std::string_view Program;
-		std::string_view Summary;
+		std::string Program;
+		std::string Summary;
 		std::vector<Option> Options;
 		std::vector<std::string_view> Positionals;
 	};

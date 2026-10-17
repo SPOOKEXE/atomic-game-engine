@@ -1,0 +1,75 @@
+mono.vendor/patches/luau-lsp/codegen-null-logger-guards.patch
+
+Make optional lowering diagnostics explicitly require their logger.
+
+WHY THIS IS A PATCH
+    Native compilation calls lowerImpl with a null LogBuilder and disabled text
+    output. The routine already provides an empty string for that case, but its
+    output branches only test AssemblyOptions. GCC 13's optimized build reports
+    seven -Wnonnull warnings on the logger calls. Explicit logger guards keep
+    native compilation silent and preserve assembly/IR output when a logger is
+    supplied, without disabling warnings or removing language-server features.
+
+WHERE IT GOES
+    luau/CodeGen/src/CodeGenLower.h, in lowerImpl: the outputEnabled calculation,
+    three includeIr blocks, and the trailing IR-prefix output condition.
+
+WHEN IT STOPS APPLYING
+    Re-point the five guards at lowerImpl's optional diagnostic-output branches.
+    Remove this patch if upstream already makes those branches require a logger.
+    scripts/vendor-tree.sh applies it to the copied nested Luau tree only and
+    stops if upstream changes its preimage.
+
+VALIDATION
+    Rebuild through just typecheck-editor with warnings enabled and inspect the
+    cold build log. Also verify native compilation without a logger, then request
+    assembly and IR through getAssembly and check that both contain lowered code.
+
+diff --git a/luau/CodeGen/src/CodeGenLower.h b/luau/CodeGen/src/CodeGenLower.h
+--- a/luau/CodeGen/src/CodeGenLower.h
++++ b/luau/CodeGen/src/CodeGenLower.h
+@@ -101,7 +101,7 @@ inline bool lowerImpl(
+             bcLocations[irLocation] = uint32_t(i);
+     }
+ 
+-    bool outputEnabled = options.includeAssembly || options.includeIr;
++    bool outputEnabled = logger && (options.includeAssembly || options.includeIr);
+ 
+     std::string emptyLog;
+     IrToStringContext ctx{logger ? logger->text : emptyLog, function.blocks, function.constants, function.cfg, function.vmExitInfo, function.proto};
+@@ -138,7 +138,7 @@ inline bool lowerImpl(
+             seenFallback = true;
+         }
+ 
+-        if (options.includeIr)
++        if (logger && options.includeIr)
+         {
+             if (options.includeIrPrefix == IncludeIrPrefix::Yes)
+                 logger->formatAppend("# ");
+@@ -168,7 +168,7 @@ inline bool lowerImpl(
+         // Block might establish a safe environment right at the start
+         if ((block.flags & kBlockFlagSafeEnvCheck) != 0)
+         {
+-            if (options.includeIr)
++            if (logger && options.includeIr)
+             {
+                 if (options.includeIrPrefix == IncludeIrPrefix::Yes)
+                     logger->formatAppend("# ");
+@@ -230,7 +230,7 @@ inline bool lowerImpl(
+             // Either instruction result value is not referenced or the use count is not zero
+             CODEGEN_ASSERT(inst.lastUse == 0 || inst.useCount != 0);
+ 
+-            if (options.includeIr)
++            if (logger && options.includeIr)
+             {
+                 if (options.includeIrPrefix == IncludeIrPrefix::Yes)
+                     logger->formatAppend("# ");
+@@ -283,7 +283,7 @@ inline bool lowerImpl(
+             }
+         }
+ 
+-        if (options.includeIr && options.includeIrPrefix == IncludeIrPrefix::Yes)
++        if (logger && options.includeIr && options.includeIrPrefix == IncludeIrPrefix::Yes)
+             logger->formatAppend("#\n");
+ 
+         if (block.expectedNextBlock == ~0u)

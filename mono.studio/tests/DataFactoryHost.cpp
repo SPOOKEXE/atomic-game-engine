@@ -1,3 +1,5 @@
+#include "DataFactoryHost.hpp"
+
 #include "../../mono.engine/control/tests/HookFixture.hpp"
 
 #include <engine/assets/ContentHash.hpp>
@@ -17,7 +19,6 @@
 #include <nlohmann/json.hpp>
 #include <span>
 #include <stdexcept>
-#include <studio/DataFactoryHost.hpp>
 #include <studio/Editor.hpp>
 #include <vector>
 
@@ -403,10 +404,15 @@ TEST_CASE("Studio factory exposes fenced authored-affordance reads", "[studio][d
 	REQUIRE(worlds.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::EnsureClassTree();
 		const engine::ecs::Entity part = engine::scene::MakePart(store, {});
-		auto *affordance = store.GetMutable<engine::scene::AuthoredAffordance>(part);
-		affordance->Id = engine::core::Name("studio/door");
-		affordance->Kind = engine::scene::AuthoredAffordanceKind::Interactable;
-		affordance->Enabled = true;
+		store.Set(
+			part,
+			engine::scene::AuthoredAffordance{
+				.Id = engine::core::Name("studio/door"),
+				.Kind = engine::scene::AuthoredAffordanceKind::Interactable,
+				.Enabled = true,
+				.Reserved = {}
+			}
+		);
 	}) == engine::world::WorldStatus::Ok);
 	const nlohmann::json listed = Ask(surface, "tools/list");
 	const auto tool = std::ranges::find_if(listed["result"]["tools"], [](const nlohmann::json &item) {

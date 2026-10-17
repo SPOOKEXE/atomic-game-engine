@@ -749,6 +749,15 @@ end
 declare extern type Enum_VolumeShape extends EnumItem with
 end
 
+declare extern type Enum_WeatherBoundary extends EnumItem with
+end
+
+declare extern type Enum_WeatherMode extends EnumItem with
+end
+
+declare extern type Enum_WeatherTopBoundary extends EnumItem with
+end
+
 declare extern type Enum_ZIndexBehavior extends EnumItem with
 end
 
@@ -812,6 +821,7 @@ declare Enum: {
 		LockFirstPerson: Enum_CameraType,
 		ShiftLock: Enum_CameraType,
 		Scriptable: Enum_CameraType,
+		Custom: Enum_CameraType,
 	},
 	CloudComputeShader: {
 		Cumulus: Enum_CloudComputeShader,
@@ -1219,6 +1229,19 @@ declare Enum: {
 		Box: Enum_VolumeShape,
 		Ellipsoid: Enum_VolumeShape,
 	},
+	WeatherBoundary: {
+		Periodic: Enum_WeatherBoundary,
+		Closed: Enum_WeatherBoundary,
+		Open: Enum_WeatherBoundary,
+	},
+	WeatherMode: {
+		Procedural: Enum_WeatherMode,
+		Stateful: Enum_WeatherMode,
+	},
+	WeatherTopBoundary: {
+		Closed: Enum_WeatherTopBoundary,
+		Escape: Enum_WeatherTopBoundary,
+	},
 	ZIndexBehavior: {
 		Global: Enum_ZIndexBehavior,
 		Sibling: Enum_ZIndexBehavior,
@@ -1507,6 +1530,10 @@ declare extern type Instance with
 	function ApplyImpulse(self, impulse: Vector3): ()
 	function SetAppliedForce(self, force: Vector3): ()
 	function SetAppliedTorque(self, torque: Vector3): ()
+	-- WeatherCompute only. Missing, disabled or unavailable models return nil.
+	function Sample(self, positionMetres: Vector3, groundHeightMetres: number?): WeatherSample?
+	function SetSpawnSamples(self, samples: buffer): boolean
+	function SetLayer(self, index: number, colour: Color3, alpha: number, size: number, acceleration: Vector3): boolean
 	function Break(self): number
 	function SetLocalTransparency(self, value: number): ()
 	function AddVertex(self, position: Vector3, normal: Vector3?, uv: Vector2?): number
@@ -1532,8 +1559,17 @@ declare extern type Instance with
 	-- Buffers above the 64 MiB image ceiling raise before the image changes.
 	function ToBuffer(self): buffer
 	function FromBuffer(self, buffer: buffer): boolean
+	-- Bounded 1920x1080 imports; malformed data leaves the image unchanged.
+	function FromBase64(self, encoded: string, format: "rgba8" | "png" | "jpeg"): boolean
+	function FromEncodedBuffer(self, buffer: buffer, format: "png" | "jpeg"): boolean
+	-- Raw RGBA8 bytes in the current image space; empty string on export refusal.
+	function ToBase64(self): string
 	function GetAttribute(self, name: string): EngineAttribute?
 	function SetAttribute(self, name: string, value: EngineAttribute?): ()
+	-- ImageGraph overrides; nil restores the graph default.
+	function SetInput(self, name: string, value: (number | boolean | Color3 | string)?): ()
+	function GetInput(self, name: string): (number | boolean | Color3 | string)?
+	function GetImage(self, output: string?): string
 	function GetAttributes(self): { [string]: EngineAttribute }
 	function GetAttributeChangedSignal(self, name: string): PropertyChangedSignal
 	function SetComponent(self, component: string, values: { [string]: any }): ()
@@ -1599,20 +1635,13 @@ declare extern type VectorField3D extends PVInstance with
 	Vector: Vector3
 end
 
-declare extern type GpuParticleField extends Instance with
-	CondensationAlpha: number
-	CondensationColor: Color3
-	CondensationSize: number
-	DebrisAlpha: number
-	DebrisColor: Color3
-	DebrisSize: number
+declare extern type GpuParticleField extends PVInstance with
+	Bounds: Vector3
 	Enabled: boolean
 	Layers: number
-	RainAlpha: number
-	RainColor: Color3
-	RainSize: number
 	RequestedCount: number
 	Seed: number
+	VelocityResponse: number
 end
 
 declare extern type BasePart extends PVInstance with
@@ -1658,15 +1687,6 @@ declare extern type BasePart extends PVInstance with
 end
 
 declare extern type Part extends BasePart with
-	StormDragCoefficient: number
-	StormEnabled: boolean
-	StormExposedArea: number
-	StormForceScale: number
-	StormMaximumBendRadians: number
-	StormResponsePerSecond: number
-	StormRestFrame: CFrame
-	StormVegetationEnabled: boolean
-	StormWindSpeedForMaximumBend: number
 end
 
 declare extern type SpawnLocation extends Part with
@@ -1774,8 +1794,9 @@ declare extern type SkinnedMeshPart extends MeshPart with
 end
 
 declare extern type Camera extends PVInstance with
-	CameraSubject: Instance
+	CameraSubject: Instance?
 	CameraSubjectAutomatic: boolean
+	CameraType: Enum_CameraType
 	FarPlaneZ: number
 	FieldOfView: number
 	ImageHeight: number
@@ -2100,11 +2121,6 @@ declare extern type JointInstance extends Instance with
 end
 
 declare extern type Weld extends JointInstance with
-	StormBreakForce: number
-	StormDamageRate: number
-	StormIntegrity: number
-	StormLinkEnabled: boolean
-	StormMaterialStrength: number
 end
 
 declare extern type WeldConstraint extends Instance with
@@ -2112,11 +2128,92 @@ declare extern type WeldConstraint extends Instance with
 	Enabled: boolean
 	Part0: Instance
 	Part1: Instance
-	StormBreakForce: number
-	StormDamageRate: number
-	StormIntegrity: number
-	StormLinkEnabled: boolean
-	StormMaterialStrength: number
+end
+
+declare extern type BloomEffect extends Instance with
+	Enabled: boolean
+	Intensity: number
+	Radius: number
+	Threshold: number
+end
+
+declare extern type DepthOfFieldEffect extends Instance with
+	Enabled: boolean
+	FocusDistance: number
+	FocusRange: number
+	Intensity: number
+	Radius: number
+end
+
+declare extern type GodRaysEffect extends Instance with
+	Enabled: boolean
+	Intensity: number
+	Radius: number
+	Threshold: number
+end
+
+declare extern type FogEffect extends Instance with
+	Color: Color3
+	Enabled: boolean
+	End: number
+	Start: number
+end
+
+declare extern type WeatherCompute extends CloudCompute with
+	read AlgorithmVersion: number
+	AtmosphereDensityStrength: number
+	AtmosphereGlareSuppression: number
+	AtmosphereHazeStrength: number
+	BaseHeightMetres: number
+	BasePressureHectopascals: number
+	BaseTemperatureCelsius: number
+	BoundaryX: Enum_WeatherBoundary
+	BoundaryZ: Enum_WeatherBoundary
+	CellSizeMetres: number
+	CondensateScale: number
+	Coverage: number
+	read DefinitionRevision: number
+	ExtentMetres: Vector3
+	FeatureCells: number
+	FogStrength: number
+	FrontContrast: number
+	GroundVapourFluxKilogramsPerSquareMetreSecond: number
+	GrowthRate: number
+	HailIntensity: number
+	IceFraction: number
+	read LayerName: string
+	write LayerName: string?
+	LiftMetresPerSecond: number
+	LightningRate: number
+	LodError: number
+	MaintenanceSeconds: number
+	MaximumLod: number
+	MaximumResidentBricks: number
+	Mode: Enum_WeatherMode
+	Paused: boolean
+	PrecipitationRate: number
+	PressureVariationHectopascals: number
+	RainFallSpeedMetresPerSecond: number
+	ShadowCascades: number
+	ShadowDistanceMetres: number
+	ShadowResolution: number
+	ShadowStrength: number
+	ShadowUpdateSeconds: number
+	ShadowsEnabled: boolean
+	ShearMetresPerSecond: number
+	StormIntensity: number
+	TemperatureLapseCelsiusPerKilometre: number
+	TemperatureVariationCelsius: number
+	TerrainRevision: number
+	ThicknessMetres: number
+	TickRate: number
+	TimeScale: number
+	TopBoundary: Enum_WeatherTopBoundary
+	TurbulenceMetresPerSecond: number
+	VapourMixingRatio: number
+	VapourScale: number
+	WeatherEnabled: boolean
+	WindMetresPerSecond: Vector3
 end
 
 declare extern type ShaderScript extends Instance with
@@ -2141,6 +2238,8 @@ declare extern type EditableMesh extends Instance with
 end
 
 declare extern type EditableImage extends Instance with
+	read ColorSpace: string
+	write ColorSpace: string?
 	read ContentId: string
 	PackingAttributes: number
 	read PackingFormat: string
@@ -2148,6 +2247,15 @@ declare extern type EditableImage extends Instance with
 	PackingMaximum: number
 	PackingMinimum: number
 	read Size: Vector2
+end
+
+declare extern type ImageGraph extends Instance with
+	read Graph: string
+	write Graph: string?
+	read InstanceKey: string
+	write InstanceKey: string?
+	read Output: string
+	write Output: string?
 end
 
 declare extern type LuaSourceContainer extends Instance with
@@ -2857,12 +2965,7 @@ declare extern type Workspace extends WorldRoot with
 	CurrentCamera: Instance
 	MaxSurfaces: number
 	SurfaceBounces: number
-	TerrainChunkSize: number
-	TerrainEnabled: boolean
-	read TerrainGenerator: string
-	write TerrainGenerator: string?
-	TerrainSeed: number
-	TerrainViewDistance: number
+	read Terrain: Terrain
 	function OverlapBox(self, centre: Vector3, size: Vector3, params: RaycastParams?): { Instance }
 	function OverlapSphere(self, centre: Vector3, radius: number, params: RaycastParams?): { Instance }
 	function BlockCast(self, from: CFrame, size: Vector3, motion: Vector3, params: RaycastParams?): { Instance }
@@ -2885,22 +2988,9 @@ end
 
 declare extern type Lighting extends Service with
 	Ambient: Color3
-	BloomIntensity: number
-	BloomRadius: number
-	BloomThreshold: number
 	Brightness: number
 	ClockTime: number
-	DepthOfFieldFocusDistance: number
-	DepthOfFieldFocusRange: number
-	DepthOfFieldIntensity: number
-	DepthOfFieldRadius: number
-	FogColor: Color3
-	FogEnd: number
-	FogStart: number
 	GeographicLatitude: number
-	GodRayIntensity: number
-	GodRayRadius: number
-	GodRayThreshold: number
 	OutdoorAmbient: Color3
 	read PostProcessShader: string
 	write PostProcessShader: string?
@@ -2977,6 +3067,17 @@ end
 
 declare extern type Team extends Instance with
 	TeamColor: Color3
+end
+
+declare extern type Terrain extends Instance with
+	ChunkExtent: number
+	ChunkResolution: number
+	Enabled: boolean
+	read Generator: string
+	write Generator: string?
+	Seed: number
+	VerticalExtent: number
+	ViewDistance: number
 end
 
 -- --- the bus services ------------------------------------------------------
@@ -3405,6 +3506,30 @@ declare extern type RunService with
 	function IsReplica(self): boolean
 end
 
+-- Copied accepted weather values in the named physical units. Tick and Epoch are exact decimal
+-- uint64 text. Mutating this dictionary never changes the atmosphere.
+declare extern type WeatherSample with
+	Layer: string
+	Mode: string
+	Tick: string
+	Epoch: string
+	DefinitionRevision: number
+	CondensateKilogramsPerCubicMetre: number
+	VapourKilogramsPerKilogram: number
+	TemperatureCelsius: number
+	PressureHectopascals: number
+	WindMetresPerSecond: Vector3
+	IceFraction: number
+	LiquidMillimetresPerHour: number
+	SnowMillimetresPerHour: number
+	HailMillimetresPerHour: number
+	MeltingFraction: number
+	SpawnSeed: number
+	FogExtinctionPerMetre: number
+	ChargeSeparation: number
+	HailGrowth: number
+end
+
 -- The shared analytical tornado field. Configure and Preset require the
 -- authoritative server role; the remaining queries are read-only everywhere.
 declare extern type StormFieldSample with
@@ -3649,10 +3774,16 @@ type CreatableInstances = {
 	SpringConstraint: SpringConstraint,
 	Weld: Weld,
 	WeldConstraint: WeldConstraint,
+	BloomEffect: BloomEffect,
+	DepthOfFieldEffect: DepthOfFieldEffect,
+	GodRaysEffect: GodRaysEffect,
+	FogEffect: FogEffect,
+	WeatherCompute: WeatherCompute,
 	ShaderScript: ShaderScript,
 	LensShader: LensShader,
 	EditableMesh: EditableMesh,
 	EditableImage: EditableImage,
+	ImageGraph: ImageGraph,
 	Script: Script,
 	LocalScript: LocalScript,
 	ModuleScript: ModuleScript,

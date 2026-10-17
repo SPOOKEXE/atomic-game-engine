@@ -9,13 +9,14 @@
 #include <engine/effects/Ribbon.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/render/SpatialCanvas.hpp>
+#include <engine/render/WeatherEffects.hpp>
 #include <engine/render/WorldPresentation.hpp>
-#include <engine/scene/Storm.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
 #include <array>
 #include <cstddef>
 #include <optional>
+#include <vector>
 
 namespace engine::render {
 	class ShaderLibrary;
@@ -88,13 +89,37 @@ namespace engine::render {
 		float ParticleDelta = 0.0f;
 		// Camera-independent lighting copied from the world.
 		scene::WorldLighting Lighting;
-		// Packed cloud-density snapshot copied from the storm field.
+		// Packed generic cloud-density snapshot supplied by the presentation host.
 		std::optional<scene::CloudDensitySnapshot> CloudDensity;
-		// Field inputs used to invalidate the cached density when a preset changes.
-		std::optional<scene::TornadoParameters> CloudParameters;
-		// Last density rebuild in world time; the volume moves every tick while
-		// its expensive local density pattern changes only four times a second.
-		double CloudBuiltSeconds = -1.0;
+		// Immutable copied checkpoint bytes; unchanged frames retain the same allocation.
+		std::vector<std::byte> WeatherCheckpoint;
+		// Trusted canonical stream name; source epochs avoid rebuilding paths on quiet frames.
+		core::Name WeatherSimulationLayer;
+		// Accepted terrain snapshot revision comes from authored controls, independently of checkpoint bytes.
+		uint32_t WeatherTerrainRevision = 1;
+		// Derived path cache metadata, local to this owned packet.
+		//@{
+		ecs::Entity WeatherSimulationLayerSource = ecs::NULL_ENTITY;
+		uint64_t WeatherLayerNameWrites = 0;
+		uint64_t WeatherLayerHierarchyWrites = 0;
+		uint64_t WeatherLayerDefinitionWrites = 0;
+		uint64_t WeatherLayerAcceptedWrites = 0;
+		uint64_t WeatherLayerAcceptedMembership = 0;
+		//@}
+		// Local publication identity, stable across camera bindings and quiet collections.
+		uint64_t WeatherCheckpointVersion = 0;
+		// Semantic checkpoint metadata copied with its bytes.
+		//@{
+		uint64_t WeatherCheckpointTick = 0;
+		uint64_t WeatherCheckpointEpoch = 0;
+		uint32_t WeatherCheckpointRevision = 0;
+		//@}
+		// Source and observed ECS write watermark for bounded checkpoint copy decisions.
+		//@{
+		ecs::Entity WeatherCheckpointSource = ecs::NULL_ENTITY;
+		uint64_t WeatherCheckpointChangeVersion = 0;
+		//@}
+
 		// Renderable instances in presentation order.
 		std::vector<scene::DrawInstance> Instances;
 		// Object labels for capture output.
@@ -119,7 +144,7 @@ namespace engine::render {
 		std::vector<PortalView> Portals;
 		// Detached particle data owned by this packet.
 		ParticleFrame Particles;
-		// Device-local analytical particles. This is a copied request and field,
+		// Device-local generic particles. This is a copied request and field,
 		// never a borrowed ECS row.
 		std::optional<GpuParticleFieldView> GpuParticles;
 	};
@@ -127,6 +152,8 @@ namespace engine::render {
 	// One camera's light selection, surface demand, facing ribbons and spatial
 	// interface commands.
 	struct WorldCameraFrame {
+		// Camera-local copied weather consumers and their reusable derived packet.
+		WeatherEffectsFrame WeatherEffects;
 		// Camera-local selection of the world's bounded participating-media set.
 		std::array<scene::VolumeState, scene::MAX_SCENE_VOLUMES> Volumes{};
 		// Number of selected volumes in `Volumes`.

@@ -266,6 +266,63 @@ TEST_CASE("a suspended world costs nothing and does not accumulate", "[world]") 
 	REQUIRE(universe.StatisticsOf(id).Ticks == 2);
 }
 
+TEST_CASE("state observers share driver-owned storage after queued and worker transitions", "[world]") {
+	Pool pool(2);
+	UniverseSettings settings;
+	settings.Mode = ExecutionMode::WorldParallel;
+	Universe universe(settings);
+	const auto driver = std::this_thread::get_id();
+	const auto id = universe.Create(Named("world.state_observers"));
+	Populate(universe, id, 1);
+	unsigned first = 0, second = 0;
+	REQUIRE(universe.OnState([&](WorldId changed, Store &store, WorldState) {
+		CHECK(changed == id);
+		CHECK(std::this_thread::get_id() == driver);
+		CHECK(store.IsOnOwningThread());
+		CHECK_FALSE(universe.OnState([](WorldId, Store &, WorldState) {}));
+		++first;
+	}));
+	REQUIRE(universe.OnState([&](WorldId, Store &, WorldState) { ++second; }));
+	universe.Tick(1.0f / 60.0f);
+	REQUIRE(universe.SetState(id, WorldState::Suspended) == WorldStatus::Ok);
+	CHECK(first == 1);
+	CHECK(second == 1);
+	REQUIRE(universe.SetState(id, WorldState::Suspended) == WorldStatus::Ok);
+	CHECK(first == 1);
+	REQUIRE(universe.SetState(id, WorldState::Active) == WorldStatus::Ok);
+	CHECK(first == 2);
+	CHECK(second == 2);
+
+	UniverseSettings serialSettings;
+	serialSettings.Mode = ExecutionMode::WorldSerial;
+	Universe sequential(serialSettings);
+	const auto queued = sequential.Create(Named("world.queued_state"));
+	unsigned queuedCalls = 0;
+	REQUIRE(sequential.OnState([&](WorldId changed, Store &store, WorldState state) {
+		CHECK(changed == queued);
+		CHECK(state == WorldState::Suspended);
+		CHECK(store.IsOnOwningThread());
+		++queuedCalls;
+	}));
+	sequential.Enter(queued, [&](Store &, Scheduler &systems) {
+		systems.Add("queue_suspend", Phase::Simulation, [&](Store &) {
+			REQUIRE(sequential.SetState(queued, WorldState::Suspended) == WorldStatus::Ok);
+			CHECK(queuedCalls == 0);
+		});
+	});
+	sequential.Tick(1.0f / 60.0f);
+	CHECK(queuedCalls == 1);
+	CHECK(sequential.StateOf(queued) == WorldState::Suspended);
+}
+
+TEST_CASE("state observer registration refuses empty callbacks and bounds local storage", "[world]") {
+	Universe universe;
+	CHECK_FALSE(universe.OnState({}));
+	for (int index = 0; index < 16; ++index)
+		REQUIRE(universe.OnState([](WorldId, Store &, WorldState) {}));
+	CHECK_FALSE(universe.OnState([](WorldId, Store &, WorldState) {}));
+}
+
 TEST_CASE("an idle world ticks at its idle rate", "[world]") {
 	Universe universe;
 	WorldSettings settings = Named("world.idle", 60.0);

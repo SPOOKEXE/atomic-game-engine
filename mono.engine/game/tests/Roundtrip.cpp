@@ -6,16 +6,24 @@
 // a second one, and asks whether something specific survived: the tree, the
 // values, the references, the script text, the world settings.
 
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/ImageGraph.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Shaders.hpp>
+#include <engine/scene/Sunlight.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/Terrain.hpp>
+#include <engine/script/InstanceShim.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
@@ -25,6 +33,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -49,6 +58,117 @@ using engine::game::XmlStatus;
 using engine::world::Universe;
 using engine::world::WorldId;
 using engine::world::WorldSettings;
+
+TEST_CASE(
+	"authored Lighting effect children survive XML export and import", "[game][roundtrip][lighting-effects]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	Store source("game.lighting-effects.source");
+	scene::InstallServices(source);
+	const Entity lighting = scene::ServiceOf(source, ecs::Classes::Find(Name("Lighting")));
+	const auto add = [&]<typename Effect>(const char *className, Effect settings) {
+		const Entity child = source.CreateInstance(ecs::Classes::Find(Name(className)), className);
+		REQUIRE(source.SetParent(child, lighting));
+		source.Set(child, settings);
+	};
+	add("BloomEffect", scene::BloomEffect{.Intensity = 0.7f, .Threshold = 1.5f, .Radius = 9.0f});
+	add("DepthOfFieldEffect",
+		scene::DepthOfFieldEffect{
+			.Intensity = 0.4f, .FocusDistance = 32.0f, .FocusRange = 12.0f, .Radius = 7.0f
+		});
+	add("GodRaysEffect",
+		scene::GodRaysEffect{.Intensity = 0.6f, .Threshold = 1.2f, .Radius = 64.0f, .Enabled = false});
+	add("FogEffect", scene::FogEffect{.Color = {0.1f, 0.2f, 0.3f}, .Start = 16.0f, .End = 96.0f});
+	const std::string document = game::WriteInstanceDocument(source, lighting);
+	REQUIRE_FALSE(document.empty());
+	Store restored("game.lighting-effects.restored");
+	std::string error;
+	const Entity copy = game::ReadInstanceDocument(restored, document, NULL_ENTITY, error);
+	INFO(error);
+	REQUIRE(copy != NULL_ENTITY);
+	const auto childNamed = [&](const char *className) {
+		Entity found = NULL_ENTITY;
+		restored.EachChild(copy, [&](Entity child) {
+			if (restored.ClassOf(child) == ecs::Classes::Find(Name(className))) found = child;
+		});
+		REQUIRE(found != NULL_ENTITY);
+		return found;
+	};
+	const auto *bloom = restored.Get<scene::BloomEffect>(childNamed("BloomEffect"));
+	REQUIRE(bloom != nullptr);
+	CHECK(bloom->Intensity == 0.7f);
+	CHECK(bloom->Threshold == 1.5f);
+	CHECK(bloom->Radius == 9.0f);
+	const auto *depth = restored.Get<scene::DepthOfFieldEffect>(childNamed("DepthOfFieldEffect"));
+	REQUIRE(depth != nullptr);
+	CHECK(depth->Intensity == 0.4f);
+	CHECK(depth->FocusDistance == 32.0f);
+	CHECK(depth->FocusRange == 12.0f);
+	CHECK(depth->Radius == 7.0f);
+	const auto *rays = restored.Get<scene::GodRaysEffect>(childNamed("GodRaysEffect"));
+	REQUIRE(rays != nullptr);
+	CHECK(rays->Intensity == 0.6f);
+	CHECK(rays->Threshold == 1.2f);
+	CHECK(rays->Radius == 64.0f);
+	CHECK_FALSE(rays->Enabled);
+	const auto *fog = restored.Get<scene::FogEffect>(childNamed("FogEffect"));
+	REQUIRE(fog != nullptr);
+	CHECK(fog->Color == Color3{0.1f, 0.2f, 0.3f});
+	CHECK(fog->Start == 16.0f);
+	CHECK(fog->End == 96.0f);
+	const auto resolved = scene::LightingOf(restored);
+	CHECK(resolved.BloomIntensity == 0.7f);
+	CHECK(resolved.DepthOfFieldIntensity == 0.4f);
+	CHECK(resolved.GodRayIntensity == 0.0f);
+	CHECK(resolved.FogColor == fog->Color);
+}
+
+TEST_CASE(
+	"authored live image graph properties preserve typed overrides and references", "[game][imagegraph]"
+) {
+	engine::scene::RegisterSceneClasses();
+	Store source("game.imagegraph.source");
+	const auto entity = source.CreateInstance(engine::scene::ImageGraphClass(), "WeatherGraph");
+	REQUIRE(engine::scene::SetImageGraphInstanceKey(source, entity, Name("weather")));
+	REQUIRE(engine::scene::SetImageGraphAsset(source, entity, Name("graphs/weather.aimagegraph")));
+	REQUIRE(engine::scene::SetImageGraphOutput(source, entity, Name("mask")));
+	std::array<engine::scene::ImageGraphInput, 4> inputs;
+	inputs[0].Name = Name("opacity");
+	inputs[0].Number = .75;
+	inputs[1].Name = Name("enabled");
+	inputs[1].Kind = engine::scene::ImageGraphInputKind::Boolean;
+	inputs[1].Boolean = true;
+	inputs[2].Name = Name("tint");
+	inputs[2].Kind = engine::scene::ImageGraphInputKind::Colour;
+	inputs[2].Colour = {12, 34, 56, 78};
+	inputs[3].Name = Name("source");
+	inputs[3].Kind = engine::scene::ImageGraphInputKind::String;
+	inputs[3].String = "textures/cloud.png";
+	REQUIRE(engine::scene::SetImageGraphInputs(source, entity, inputs));
+	const auto encoded = engine::game::WriteInstanceDocument(source, entity);
+	CHECK(encoded.find("Inputs") != std::string::npos);
+	Store restored("game.imagegraph.restored");
+	std::string error;
+	const auto reopened = engine::game::ReadInstanceDocument(restored, encoded, NULL_ENTITY, error);
+	INFO(error);
+	REQUIRE(reopened != NULL_ENTITY);
+	REQUIRE(restored.Get<engine::scene::ImageGraph>(reopened) != nullptr);
+	CHECK(
+		restored.Get<engine::scene::ImageGraph>(reopened)->Inputs ==
+		source.Get<engine::scene::ImageGraph>(entity)->Inputs
+	);
+	CHECK(
+		engine::scene::ImageGraphContentName(restored, reopened).Text() ==
+		"imagegraph-instance://weather#mask"
+	);
+	const auto duplicate = engine::game::ReadInstanceDocument(restored, encoded, NULL_ENTITY, error);
+	CHECK(duplicate == NULL_ENTITY);
+	CHECK(
+		engine::scene::ImageGraphContentName(restored, reopened).Text() ==
+		"imagegraph-instance://weather#mask"
+	);
+}
 
 namespace {
 	// Everything a document can name has to be registered before one is read,
@@ -138,6 +258,73 @@ TEST_CASE("a universe of worlds survives a save and a load", "[game][roundtrip]"
 	CHECK(found);
 
 	std::filesystem::remove(path);
+}
+
+TEST_CASE("workspace surface budgets survive a game save and load", "[game][roundtrip][surfacebudget]") {
+	RegisterEverything();
+
+	Universe source;
+	const WorldId world = AddWorld(source, "SurfaceBudget");
+	source.Enter(world, [](Store &store) {
+		engine::scene::InstallServices(store);
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		int32_t panes = 320;
+		int32_t bounces = 1;
+		REQUIRE(store.SetProperty(workspace, Name("MaxSurfaces"), &panes, sizeof(panes)));
+		REQUIRE(store.SetProperty(workspace, Name("SurfaceBounces"), &bounces, sizeof(bounces)));
+	});
+
+	const auto path = ScratchFile("engine-game-surface-budget.agame");
+	std::string error;
+	REQUIRE(SaveGame(source, Name("SurfaceBudget"), path, error));
+
+	Universe loaded;
+	GameInfo info;
+	REQUIRE(LoadGame(loaded, path, info, error));
+	const WorldId restored = loaded.Find(Name("SurfaceBudget"));
+	REQUIRE(restored.IsValid());
+	loaded.Enter(restored, [](Store &store) {
+		engine::scene::InstallServices(store);
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		CHECK(PropertyOf<int32_t>(store, workspace, "MaxSurfaces") == 320);
+		CHECK(PropertyOf<int32_t>(store, workspace, "SurfaceBounces") == 1);
+	});
+	std::filesystem::remove(path);
+}
+
+TEST_CASE(
+	"workspace surface resources survive an ECS snapshot", "[game][roundtrip][surfacebudget][snapshot]"
+) {
+	RegisterEverything();
+	Store source("game.surfacebudget.snapshot.source");
+	source.SetResource(engine::scene::SurfaceLimit{320});
+	source.SetResource(engine::scene::SurfaceBounces{1});
+	engine::core::ByteWriter writer;
+	REQUIRE(source.Save(writer));
+
+	Store restored("game.surfacebudget.snapshot.restored");
+	engine::core::ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	REQUIRE(restored.Resource<engine::scene::SurfaceLimit>() != nullptr);
+	REQUIRE(restored.Resource<engine::scene::SurfaceBounces>() != nullptr);
+	CHECK(restored.Resource<engine::scene::SurfaceLimit>()->Panes == 320);
+	CHECK(restored.Resource<engine::scene::SurfaceBounces>()->Levels == 1);
+}
+
+TEST_CASE("workspace surface resource readers reject negative values", "[game][roundtrip][surfacebudget]") {
+	RegisterEverything();
+	const auto checkRejected = [](engine::ecs::ComponentId component, void *value) {
+		engine::core::ByteWriter writer;
+		writer.WriteInt32(-1);
+		engine::core::ByteReader reader(writer.Bytes());
+		engine::ecs::Components::Describe(component).Read(reader, value, 1);
+		CHECK(reader.Failed());
+	};
+
+	engine::scene::SurfaceLimit limit;
+	engine::scene::SurfaceBounces bounces;
+	checkRejected(engine::ecs::Components::Of<engine::scene::SurfaceLimit>(), &limit);
+	checkRejected(engine::ecs::Components::Of<engine::scene::SurfaceBounces>(), &bounces);
 }
 
 TEST_CASE("a multi-file universe restores authored settings and shader scripts", "[game][roundtrip]") {
@@ -713,6 +900,68 @@ TEST_CASE("a viewer's own instances are not written into the file", "[game][roun
 	});
 }
 
+TEST_CASE("legacy Workspace terrain properties import onto Workspace.Terrain", "[game][roundtrip][terrain]") {
+	RegisterEverything();
+	Universe universe;
+	const std::string legacy = R"(<World format="3" name="LegacyTerrain">
+		<Item class="Workspace" name="Workspace" id="1">
+			<Property name="TerrainEnabled" type="bool">true</Property>
+			<Property name="TerrainGenerator" type="string">terrain_test.Legacy</Property>
+			<Property name="TerrainSeed" type="int64">-7</Property>
+			<Property name="TerrainChunkSize" type="float">48</Property>
+			<Property name="TerrainViewDistance" type="float">900</Property>
+		</Item>
+	</World>)";
+	std::string error;
+	const WorldId world = engine::game::ReadWorldDocument(universe, legacy, Name("LegacyTerrain"), error);
+	REQUIRE(world.IsValid());
+
+	universe.Enter(world, [](Store &store) {
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		REQUIRE(workspace != NULL_ENTITY);
+		engine::scene::InstallServices(store);
+		Entity terrain = NULL_ENTITY;
+		REQUIRE(store.GetProperty(workspace, Name("Terrain"), &terrain, sizeof(terrain)));
+		REQUIRE(terrain != NULL_ENTITY);
+		const auto *recipe = store.Get<engine::scene::Terrain>(terrain);
+		REQUIRE(recipe != nullptr);
+		CHECK(recipe->Enabled);
+		CHECK(recipe->Generator == Name("terrain_test.Legacy"));
+		CHECK(recipe->Seed == static_cast<uint64_t>(-7));
+		CHECK(recipe->ChunkExtent == 48.0f);
+		CHECK(recipe->ViewDistance == 900.0f);
+		CHECK_FALSE(store.HasResource<engine::scene::Terrain>());
+	});
+}
+
+TEST_CASE(
+	"explicit Workspace.Terrain wins over legacy Workspace terrain properties", "[game][roundtrip][terrain]"
+) {
+	RegisterEverything();
+	Universe universe;
+	const std::string mixed = R"(<World format="3" name="MixedTerrain">
+		<Item class="Workspace" name="Workspace" id="1">
+			<Property name="TerrainEnabled" type="bool">true</Property>
+			<Item class="Terrain" name="Terrain" id="2">
+				<Property name="Enabled" type="bool">false</Property>
+			</Item>
+		</Item>
+	</World>)";
+	std::string error;
+	const WorldId world = engine::game::ReadWorldDocument(universe, mixed, Name("MixedTerrain"), error);
+	REQUIRE(world.IsValid());
+
+	universe.Enter(world, [](Store &store) {
+		const Entity workspace = engine::scene::WorkspaceOf(store);
+		engine::scene::InstallServices(store);
+		Entity terrain = NULL_ENTITY;
+		REQUIRE(store.GetProperty(workspace, Name("Terrain"), &terrain, sizeof(terrain)));
+		REQUIRE(terrain != NULL_ENTITY);
+		CHECK_FALSE(store.Get<engine::scene::Terrain>(terrain)->Enabled);
+		CHECK_FALSE(store.HasResource<engine::scene::Terrain>());
+	});
+}
+
 TEST_CASE("a format 1 file keeps its own settings", "[game][roundtrip]") {
 	// **The compatibility that makes the move safe.** A file written before
 	// the settings became an element has them on `<World>`, and a reader that
@@ -1201,7 +1450,58 @@ TEST_CASE("a renamed world keeps its handle and its place", "[game][roundtrip]")
 }
 
 TEST_CASE(
-	"camera follow selection survives documents and internal clone remapping",
+	"imported ordinary cameras stay local while surface cameras remain authored",
+	"[game][roundtrip][camera-local]"
+) {
+	RegisterEverything();
+	Store store("imported-local-camera");
+	std::string error;
+	const Entity rig = engine::game::ReadInstanceDocument(
+		store,
+		R"(<Instance format="3"><Item class="Model" name="Rig" id="1">
+<Item class="Camera" name="Camera" id="2"><Item class="Part" name="LocalChild" id="3" /></Item>
+<Item class="SurfaceCamera" name="Surface" id="4" />
+</Item></Instance>)",
+		NULL_ENTITY,
+		error
+	);
+	INFO(error);
+	REQUIRE(store.Alive(rig));
+	const Entity camera = store.FindFirstChild(rig, "Camera");
+	const Entity surface = store.FindFirstChild(rig, "Surface");
+	REQUIRE(store.IsPredicted(camera));
+	CHECK(store.Has<engine::ecs::ClientLocal>(camera));
+	const Entity localChild = store.FindFirstChild(camera, "LocalChild");
+	REQUIRE(store.IsPredicted(localChild));
+	CHECK(store.Has<engine::ecs::ClientLocal>(localChild));
+	const auto *placement = engine::script::ScriptableProperty(store, localChild, "CFrame");
+	REQUIRE(placement != nullptr);
+	const CFrame pose(Vector3{2.0f, 3.0f, 4.0f});
+	REQUIRE(engine::script::WriteInstanceProperty(store, localChild, *placement, &pose, sizeof(pose), true));
+	CFrame observed;
+	REQUIRE(store.GetProperty(localChild, *placement, &observed, sizeof(observed)));
+	CHECK(observed.Position == pose.Position);
+	REQUIRE(store.Alive(surface));
+	CHECK_FALSE(store.IsPredicted(surface));
+	CHECK_FALSE(engine::ecs::IsClientLocalInstance(store, surface));
+
+	const std::string authored = engine::game::WriteInstanceDocument(store, rig);
+	CHECK(authored.find("class=\"Camera\"") == std::string::npos);
+	CHECK(authored.find("LocalChild") == std::string::npos);
+	CHECK(authored.find("class=\"SurfaceCamera\"") != std::string::npos);
+
+	Store restored("restored-surface-camera");
+	const Entity reopened = engine::game::ReadInstanceDocument(restored, authored, NULL_ENTITY, error);
+	INFO(error);
+	REQUIRE(restored.Alive(reopened));
+	CHECK(restored.FindFirstChild(reopened, "Camera") == NULL_ENTITY);
+	const Entity retained = restored.FindFirstChild(reopened, "Surface");
+	REQUIRE(restored.Alive(retained));
+	CHECK(restored.ClassOf(retained) == engine::ecs::Classes::Find(Name("SurfaceCamera")));
+}
+
+TEST_CASE(
+	"surface camera follow selection survives documents and internal clone remapping",
 	"[game][roundtrip][camera-subject]"
 ) {
 	const bool humanoidTarget = GENERATE(false, true);
@@ -1224,7 +1524,8 @@ TEST_CASE(
 			for (const bool selected : {false, true}) {
 				const std::string name =
 					std::string(automatic ? "Automatic" : "Explicit") + (selected ? "Target" : "Nil");
-				const Entity camera = store.CreateInstance(engine::scene::CameraClass(), name);
+				const Entity camera =
+					store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), name);
 				store.SetParent(camera, group);
 				const Entity target = selected ? subject : NULL_ENTITY;
 				REQUIRE(store.SetProperty(camera, Name("CameraSubject"), &target, sizeof(target)));

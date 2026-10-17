@@ -48,18 +48,19 @@ namespace engine::render {
 		PortalImageDemand &demand
 	);
 
+	// Maps source-owned ordinary rows crossing directly into destination. Camera
+	// culling is deliberately absent: an eye beyond the mouth can see its far half.
+	// An eye in the source's authored world carries the live or held local body
+	// in source coordinates so its producer can forward that pose into child views.
+	// Foreign rows and local synthetic copies are omitted. Output is transactional;
+	// no crossing geometry produces an empty payload, not an encoded empty picture.
 	// The player whose body portal captures leave out for the viewer to compose:
 	// the held subject while a camera hold lasts, else the local player. Empty
 	// when neither carries an identity.
 	std::string PortalBodyPlayer(const ecs::Store &store);
 
-	// Maps source-owned ordinary rows crossing directly into destination. Camera
-	// culling is deliberately absent: an eye beyond the mouth can see its far half.
-	// An eye in the source's authored world carries the live or held local body
-	// in source coordinates so its producer can forward that pose into child views.
-	// Foreign rows and local synthetic copies are omitted. Refusal leaves `out`
-	// unchanged and explains the reason in `error`; no crossing geometry produces
-	// an empty payload rather than an encoded empty picture.
+	// Encodes retained and crossing-body draw rows for a destination eye.
+	// Refusal leaves `out` unchanged and explains the reason in `error`.
 	bool CollectPortalEyeGeometry(
 		ecs::Store &store,
 		core::Name destination,

@@ -1,6 +1,9 @@
 #include "RenderFixture.hpp"
 
+#include <engine/core/FrameGraph.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/effects/Ribbon.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/render/InterfacePass.hpp>
@@ -14,6 +17,7 @@
 
 #include <array>
 #include <cmath>
+#include <iostream>
 #include <span>
 
 TEST_SUITE_ID("engine.render.mirrorfixtures")
@@ -124,6 +128,160 @@ TEST_CASE("mirror capture preserves declared HDR radiance", "[render][gpu][mirro
 	view.Lighting.Direct = {};
 	view.Lighting.RenderFeatures.Disable |= scene::FeatureBit(scene::RenderFeature::AmbientOcclusion);
 
+	SECTION("one authored mirror bounce is independent of the portal depth default") {
+		constexpr size_t FACETS = 320;
+		renderer.SetSurfaceLimit(FACETS);
+		renderer.SetSurfaceBounces(1);
+		std::vector<render::SurfaceView> surfaces(FACETS, surface);
+		for (size_t index = 0; index < surfaces.size(); ++index) {
+			surfaces[index].Index = static_cast<int16_t>(index);
+			surfaces[index].Width = 4;
+			surfaces[index].Height = 2;
+		}
+		view.Surfaces = surfaces;
+		render::OverlayImage overlay;
+		const auto frame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE_FALSE(frame.SurfaceBudgetExceeded);
+		CHECK(frame.SurfacePasses == FACETS);
+		const auto image = render::test::CaptureResource(
+			renderer,
+			core::Name("scene-image"),
+			view.Slot,
+			target.Width,
+			target.Height,
+			render::test::ImageFormat::Bgra8Unorm
+		);
+		const auto centre =
+			image.Bytes.data() + (target.Height / 2) * image.RowStrideBytes + (target.Width / 2) * 4;
+		CHECK(std::to_integer<uint8_t>(centre[2]) > 128);
+		CHECK(std::to_integer<uint8_t>(centre[0]) < 32);
+		CHECK(std::to_integer<uint8_t>(centre[1]) < 32);
+	}
+
+	SECTION("320 distinct mirror runs preserve reflected radiance") {
+		constexpr size_t FACETS = 320;
+		renderer.SetSurfaceLimit(FACETS);
+		renderer.SetSurfaceBounces(1);
+		std::vector<scene::DrawInstance> mirrorRows;
+		std::vector<render::SurfaceView> mirrorViews;
+		for (size_t index = 0; index < FACETS; ++index) {
+			auto row = instances[0];
+			row.Source = static_cast<uint32_t>(index + 1);
+			row.Surface = static_cast<int16_t>(index);
+			row.Frame.Position = {(float(index % 20) - 10) * .18f, (float(index / 20) - 8) * .18f, -4};
+			row.HalfExtent = {.085f, .085f, .01f};
+			mirrorRows.push_back(row);
+			auto geometry = pane;
+			geometry.Centre = row.Frame.Position;
+			geometry.First = {.085f, 0, 0};
+			geometry.Second = {0, .085f, 0};
+			const auto reflected = scene::ReflectCamera(geometry, {}, {});
+			REQUIRE(reflected.Renders);
+			auto capture = surface;
+			capture.Index = row.Surface;
+			capture.Frame = reflected.Frame;
+			capture.Projection = scene::SurfaceProjection(reflected.Lens, reflected.Frame);
+			capture.PaneCentre = geometry.Centre;
+			capture.PaneFirst = geometry.First;
+			capture.PaneSecond = geometry.Second;
+			capture.Width = 4;
+			capture.Height = 2;
+			mirrorViews.push_back(capture);
+		}
+		auto redWall = instances[1];
+		redWall.Source = FACETS + 1;
+		mirrorRows.push_back(redWall);
+		view.Instances = mirrorRows;
+		view.Surfaces = mirrorViews;
+		const auto lookupProbes = [] {
+			for (const auto &counter : core::Metrics::Snapshot().Counters)
+				if (counter.Name == core::Name("render.surface_lookup.probes")) return counter.Value;
+			return 0.0;
+		};
+		const auto probesBefore = lookupProbes();
+		const bool profilingBefore = core::FrameGraph::IsEnabled();
+		struct RestoreProfiling {
+			bool Enabled;
+			~RestoreProfiling() {
+				core::FrameGraph::SetEnabled(Enabled);
+			}
+		} restore{profilingBefore};
+		core::FrameGraph::SetEnabled(true);
+		core::FrameGraph::BeginFrame();
+		render::OverlayImage overlay;
+		const auto frame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+		core::FrameGraph::EndFrame();
+		double paneMilliseconds = 0;
+		for (const auto &span : core::FrameGraph::Spans())
+			if (span.Name == "compose capture opaque panes") paneMilliseconds += span.Milliseconds;
+		std::cout << "mirror composition facets=" << FACETS << " views=1 backend=SDL_GPU"
+				  << " probes=" << lookupProbes() - probesBefore << " opaque_panes_ms=" << paneMilliseconds
+				  << " dropped_spans=" << core::FrameGraph::Dropped() << '\n';
+		REQUIRE_FALSE(frame.SurfaceBudgetExceeded);
+		CHECK(frame.SurfacePasses == FACETS);
+		CHECK(lookupProbes() - probesBefore == FACETS * (FACETS - 1));
+		const auto image = render::test::CaptureResource(
+			renderer,
+			core::Name("scene-image"),
+			view.Slot,
+			target.Width,
+			target.Height,
+			render::test::ImageFormat::Bgra8Unorm
+		);
+		const auto centre =
+			image.Bytes.data() + (target.Height / 2) * image.RowStrideBytes + (target.Width / 2) * 4;
+		CHECK(std::to_integer<uint8_t>(centre[2]) > 128);
+		CHECK(std::to_integer<uint8_t>(centre[0]) < 32);
+		CHECK(std::to_integer<uint8_t>(centre[1]) < 32);
+	}
+
+	SECTION("wide mirror slots preserve the reflected screen image") {
+		renderer.SetSurfaceLimit(scene::MAX_SURFACES);
+		renderer.SetSurfaceBounces(1);
+		render::test::CapturedImage expected;
+		for (const int16_t slot :
+			 {int16_t{0},
+			  int16_t{127},
+			  int16_t{128},
+			  int16_t{255},
+			  int16_t{256},
+			  int16_t{319},
+			  int16_t{511}}) {
+			INFO("surface " << slot);
+			REQUIRE(static_cast<size_t>(slot) < scene::MAX_SURFACES);
+			instances[0].Surface = slot;
+			surface.Index = slot;
+			render::OverlayImage overlay;
+			const auto frame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+			REQUIRE(frame.SurfacePasses > 0);
+			const auto image = render::test::CaptureResource(
+				renderer,
+				core::Name("scene-image"),
+				view.Slot,
+				target.Width,
+				target.Height,
+				render::test::ImageFormat::Bgra8Unorm
+			);
+			if (slot == 0) {
+				expected = image;
+				const auto centre = expected.Bytes.data() + (target.Height / 2) * expected.RowStrideBytes +
+									(target.Width / 2) * 4;
+				CHECK(std::to_integer<uint8_t>(centre[2]) > 128);
+				CHECK(std::to_integer<uint8_t>(centre[0]) < 32);
+				CHECK(std::to_integer<uint8_t>(centre[1]) < 32);
+			} else {
+				render::test::CheckImage(
+					renderer,
+					"wide-mirror-slots",
+					"scene-image",
+					"only the surface slot changes",
+					expected.View(),
+					image.View()
+				);
+			}
+		}
+	}
+
 	SECTION("primary body selection preserves reflected pixels and cache hits") {
 		const bool imported = GENERATE(false, true);
 		const std::array<uint32_t, 1> hiddenRows{1};
@@ -152,6 +310,113 @@ TEST_CASE("mirror capture preserves declared HDR radiance", "[render][gpu][mirro
 				CHECK(MatchesHalfPixels(expected, {2.0f, 0.0f, 0.0f, 1.0f}));
 			} else
 				CHECK(captured->Pixels == expected);
+		}
+	}
+
+	SECTION("rate-limited mirror captures do not upload untouched ribbons twice") {
+		const std::array<effects::RibbonVertex, 4> ribbon{
+			effects::RibbonVertex{{-.5f, .1f, -2}, {0, 0}, 0xFF00FF00},
+			effects::RibbonVertex{{-.5f, -.1f, -2}, {0, 1}, 0xFF00FF00},
+			effects::RibbonVertex{{.5f, .1f, -2}, {1, 0}, 0xFF00FF00},
+			effects::RibbonVertex{{.5f, -.1f, -2}, {1, 1}, 0xFF00FF00}
+		};
+		effects::RibbonRun run{};
+		run.Count = static_cast<uint32_t>(ribbon.size());
+		const std::array runs{run};
+		surface.FPS = 1;
+		view.RibbonVertices = ribbon;
+		view.RibbonRuns = runs;
+		render::OverlayImage overlay;
+		renderer.SetAnimationTime(1);
+		const auto warm = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(warm.SurfacePasses > 0);
+		REQUIRE(warm.RibbonVertices == ribbon.size());
+		renderer.SetAnimationTime(1.01);
+		view.RibbonVertices = {};
+		view.RibbonRuns = {};
+		const auto withoutRibbon = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(withoutRibbon.SurfacePasses == 0);
+		view.RibbonVertices = ribbon;
+		view.RibbonRuns = runs;
+		const auto limited = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+		CHECK(limited.SurfacePasses == 0);
+		REQUIRE(limited.RibbonVertices == ribbon.size());
+		CHECK(limited.UploadedBytes == withoutRibbon.UploadedBytes + sizeof(ribbon));
+		renderer.SetAnimationTime(2.01);
+		CHECK(renderer.Render(std::span(&view, 1), overlay, nullptr, false).SurfacePasses > 0);
+	}
+
+	SECTION("ribbon captures restore source uploads only after replacement") {
+		const uint32_t captures = GENERATE(0u, 1u, 3u);
+		const std::array<effects::RibbonVertex, 4> ribbon{
+			effects::RibbonVertex{{-.5f, .1f, -2}, {0, 0}, 0xFF00FF00},
+			effects::RibbonVertex{{-.5f, -.1f, -2}, {0, 1}, 0xFF00FF00},
+			effects::RibbonVertex{{.5f, .1f, -2}, {1, 0}, 0xFF00FF00},
+			effects::RibbonVertex{{.5f, -.1f, -2}, {1, 1}, 0xFF00FF00}
+		};
+		effects::RibbonRun run{};
+		run.Count = static_cast<uint32_t>(ribbon.size());
+		run.FaceCamera = true;
+		std::array runs{run};
+		std::vector<render::SurfaceView> surfaces(captures, surface);
+		for (uint32_t index = 0; index < captures; ++index)
+			surfaces[index].Index = int16_t(index);
+		view.Surfaces = surfaces;
+		renderer.SetSurfaceBounces(1);
+		render::OverlayImage overlay;
+		(void)renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+		const auto withoutRibbon = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+		view.RibbonVertices = ribbon;
+		view.RibbonRuns = runs;
+		const auto withRibbon = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(withRibbon.Submitted);
+		REQUIRE(withRibbon.RibbonVertices == ribbon.size());
+		CHECK(withRibbon.SurfacePasses == captures);
+		const uint32_t uploads = 1 + captures + (captures > 0 ? 1 : 0);
+		CHECK(withRibbon.UploadedBytes == withoutRibbon.UploadedBytes + uploads * sizeof(ribbon));
+		if (captures > 0) {
+			const auto expected = render::test::CaptureResource(
+				renderer,
+				core::Name("scene-image"),
+				view.Slot,
+				target.Width,
+				target.Height,
+				render::test::ImageFormat::Bgra8Unorm
+			);
+			// A refused capture must not leave a dirty ribbon restoration flag for the retry.
+			runs[0].Count = static_cast<uint32_t>(ribbon.size() + 2);
+			const auto refused = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+			CHECK(refused.SurfacePasses == 0);
+			runs[0] = run;
+			const auto retried = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+			REQUIRE(retried.Submitted);
+			CHECK(retried.SurfacePasses == captures);
+			CHECK(retried.RibbonVertices == ribbon.size());
+			const auto retryImage = render::test::CaptureResource(
+				renderer,
+				core::Name("scene-image"),
+				view.Slot,
+				target.Width,
+				target.Height,
+				render::test::ImageFormat::Bgra8Unorm
+			);
+			render::test::CheckImage(
+				renderer,
+				"ribbon-capture-retry",
+				"scene-image",
+				"valid retry restores ribbon pixels",
+				expected.View(),
+				retryImage.View()
+			);
+			view.RibbonVertices = {};
+			view.RibbonRuns = {};
+			const auto freshBaseline = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+			view.RibbonVertices = ribbon;
+			view.RibbonRuns = runs;
+			const auto steady = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
+			REQUIRE(steady.Submitted);
+			CHECK(steady.SurfacePasses == captures);
+			CHECK(steady.UploadedBytes == freshBaseline.UploadedBytes + uploads * sizeof(ribbon));
 		}
 	}
 

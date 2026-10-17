@@ -26,6 +26,8 @@ The system must support:
 - stable local avoidance for crowds without changing the global path;
 - sight, hearing, proximity, and script-defined perception facts;
 - high-level goals and a small domain-specific behaviour plan;
+- inspectable AI state machines with named states, declared guards, and
+  registered typed logic nodes;
 - server bot drivers that write the same neutral intent as players and replays;
 - offline baking, Studio preview baking, and explicit runtime publication;
 - streamed navigation data and paths that may cross cells, portals, and worlds;
@@ -113,7 +115,7 @@ Responsibilities are split as follows:
 | `spatial` | General spatial indexes and bounded candidate queries |
 | `scene` | Serializable navigation components, service classes, requests, results, links, modifiers, agents, sensors, and character intent |
 | `physics` | Resolve generic world-query batches against the authoritative collider indexes |
-| `navigation` | Bake artifacts, tile residency, pathfinding, route following, avoidance, perception reduction, goals, behaviour plans, and bot driver output |
+| `navigation` | Bake artifacts, tile residency, pathfinding, route following, avoidance, perception reduction, goals, AI state evaluation, behaviour plans, and bot driver output |
 | `assets` | Content addressing, manifests, bundles, and verified byte delivery |
 | `script` | Methods and properties that create scene requests and inspect scene results |
 | `render` | Debug drawing from immutable navigation debug snapshots |
@@ -783,8 +785,9 @@ condition.
 ### Goals
 
 A goal has a stable name, eligibility conditions, a bounded score expression,
-cooldown, minimum hold time, and one behaviour plan entry point. Goal scoring
-runs at a declared cadence and after relevant fact changes.
+cooldown, minimum hold time, and one default behaviour-plan entry point. Goal
+scoring runs at a declared cadence and after relevant fact changes. Activating
+a goal initializes its state machine and plan from their declared defaults.
 
 Equal scores are resolved by explicit author priority then stable goal name.
 Switching records the reason and source facts. A goal cannot oscillate every
@@ -818,6 +821,186 @@ Custom game logic may implement a registered native task or use a script to
 write goals and facts outside the plan. The format does not grow into a second
 general programming language.
 
+### Inspectable `AIController` state machines
+
+`AIController` owns an agent's decision state and evaluates it on the fixed
+tick. It is separate from `BotController`: an AI controller may direct a
+non-character agent, while `BotController` adapts bounded AI requests into the
+current character driver's neutral intent. A character can have an AI
+controller without having a player, and an AI agent need not be a character.
+
+Each controller references one immutable, named state-machine asset and one
+bounded runtime state row. States have stable names, an optional parent, entry
+and exit tasks, declared conditions, and a bounded set of outgoing transitions.
+The asset declares its initial state and an explicit fallback for invalidated
+or unavailable choices. Terminal states are explicit. A missing state never
+silently selects the first state in file order.
+
+Hierarchical state composition follows the same authoring vocabulary planned
+for character state and animation graphs, without requiring a shared runtime.
+An exclusive parent has one active child. A parallel parent has a bounded set
+of active regions, each with its own initial child and transition order. The
+authoring model can express exclusive OR composition and concurrent AND
+regions. Parent entry and exit tasks have explicit lifetime rules, and a child
+cannot accidentally restart a still-active parent task. AI, physical character
+state, and animation remain separate authorities even when their diagrams use
+the same composition terms.
+
+Conditions are typed declarations, separate from state composition. A
+transition guard may combine declared predicates with bounded Boolean AND, OR,
+and NOT nodes. Leaf conditions read named blackboard values or copied,
+read-only facts from navigation and gameplay owners. They do not invoke an
+arbitrary callback while parallel work or a solver is running. A transition
+declares its source, destination, guard, priority, optional minimum state
+duration, cooldown, and reason code. Ties resolve by explicit priority, deeper
+source state, then stable transition name. Every state with no eligible
+transition follows its declared hold or fallback policy.
+
+Transitions are evaluated at a declared boundary once per AI tick. A state
+change may lead to another state on a later tick, including a cycle such as
+patrol to investigate to patrol. The compiler rejects combinational dataflow
+cycles and unbounded same-tick state re-entry. A transition budget and
+per-tick entry/exit task budget provide a second runtime guard; exhausting a
+budget preserves the committed state and reports why work stopped. Explicit
+bounded retry operations remain valid inside a behaviour plan.
+
+Goal selection owns goal choice. On goal activation or change, it initializes
+the goal's declared state and default plan entry point. Retaining a goal
+preserves active state and task progress. The active state may select a
+state-specific plan entry point, which takes precedence over the goal default,
+but it cannot select or write a goal. State and goal changes select one entry
+point and operate one `BehaviourPlan` lifecycle. If the selected entry point
+changes, the old plan is cancelled or suspended by its declared policy before
+the new plan starts. One evaluation cannot enter both defaults or start two
+plans. This one-way flow avoids goal/state feedback and duplicate tasks.
+
+At the start of evaluation, the controller reads one immutable snapshot of
+facts, goal, state, and agent generation. Character-bound actions additionally
+read the current driver token and lease generation. It chooses at most one
+transition per active region for that tick. Parallel-region candidates are
+arbitrated atomically against the same snapshot. If transitions conflict because they
+exit a shared parent or target the same exclusive region, explicit priority,
+deeper source state, then stable transition name break the tie. Stable region
+order is only for deterministic traversal and commit. Independent region
+winners commit together. A flat exclusive machine can commit at most one
+transition globally per tick. No region observes a partially committed
+parallel transition set.
+
+Example tree:
+
+```text
+Agent
+├─ Activity (exclusive OR)
+│  ├─ Patrol (initial)
+│  ├─ Investigate
+│  ├─ Chase
+│  ├─ Attack
+│  └─ Return
+└─ Disabled (sibling state, reachable from every active state)
+```
+
+`Disabled` is a top-level sibling reachable from every active state on the
+authoritative death or disable fact, so it does not depend on each local
+transition list remembering a special case. Re-enabling returns through the
+declared initial-state policy. The table below sketches the normal exclusive
+`Activity` region; death/disable has higher declared priority than its rows.
+
+| State | Guard or event | Next state | Bounded request | Reason exposed to inspection |
+|---|---|---|---|---|
+| `Patrol` | visible hostile | `Chase` | path to visible target | `target-acquired` |
+| `Patrol` | new sound fact | `Investigate` | path to last heard position | `sound-remembered` |
+| `Investigate` | target becomes visible | `Chase` | path to visible target | `target-acquired` |
+| `Investigate` | search expires | `Return` | path to home position | `search-expired` |
+| `Chase` | target in range and action permitted | `Attack` | named attack action | `attack-range-reached` |
+| `Chase` | target lost past memory limit | `Investigate` | path to last seen position | `target-memory-expired` |
+| `Attack` | target leaves range | `Chase` | path to target | `target-left-range` |
+| Any active state | authoritative death or disable fact | `Disabled` | cancel actions, neutral intent | `agent-disabled` |
+| `Return` | home reached | `Patrol` | resume patrol route | `home-reached` |
+| `Disabled` | explicit gameplay re-enable | `Patrol` | none | `agent-enabled` |
+
+The example is a state-machine sketch, not a promise that every state needs a
+navigation route or character action. The active state, parent chain, active
+parallel regions, failed guard, winning transition, priority, source fact
+revision, and reason code are inspectable as a copied snapshot.
+
+### Programmable logic nodes and action boundary
+
+The authoring graph can include registered, typed condition, action, and task
+nodes. Each node declares stable type and version names, typed inputs and
+outputs, bounds, authority requirements, and a deterministic evaluation
+contract. Native nodes are registered before an asset is compiled. Unknown
+nodes remain visible in the source and prevent publication. Node implementations
+run in the owning AI phase and receive copied inputs plus bounded output slots.
+
+Luau and JavaScript may supply custom logic through a staged request/result
+boundary. Script code reads a copied input snapshot and emits typed requests;
+the owning fixed-tick phase validates and commits them, and results become
+visible on the next declared AI tick. Script callbacks do not run inside
+parallel sensor gathers, path solvers, collision queries, or other worker jobs.
+This keeps script logic useful without making task completion depend on OS
+scheduling.
+
+Every AI request carries a stable request id, request kind, source tick, and
+agent generation. Character-bound actions additionally carry the current
+driver token and lease generation and are embedded by `BotController` in the
+action field of the character's single `CharacterIntent` row for that tick.
+The character authority validates those fields and returns an acknowledgement
+with the same correlation data, a result phase (`Accepted`, `Refused`,
+`Running`, `Completed`, `Cancelled`, or `Failed`), and a bounded reason.
+Non-character request owners validate acknowledgements against their own agent
+generation and request id; they have no character lease fields. AI consumes
+acknowledgements on the following AI tick and ignores stale generations or
+unknown request ids.
+
+AI reads character feedback, including actual movement and action
+acknowledgements. It may request movement, facing, jump, or a named action via
+the active driver. It never writes transforms, velocity, physical character
+state, animation state, or bones. Navigation goals and non-character agents use
+the same decision runtime without passing through the character adapter.
+
+### Ownership and possession changes
+
+AI ownership, player roster membership, and the current driver lease are three
+different relations. An NPC/gameplay owner may keep an AI controller attached
+to an agent; a player may keep several characters in a roster; one active
+driver token holds the current right to write character intent. Player
+possession does not transfer character ownership or destroy the NPC's
+controller.
+
+When possession revokes the AI driver's character lease, pending character
+action requests are cancelled or suspended by a declared policy, task work
+cannot publish lease writes, and old acknowledgements are ignored by lease
+generation. The physical character state and current animation state are not
+reset by possession loss. A later lease may resume a declared resumable plan
+or start a new plan after an explicit owner decision. An AI controller for a
+non-character agent has no possession or character lease dependency.
+
+### State tree and transition exports
+
+Studio and offline tooling export a state tree and transition view from the
+canonical state-machine source. The exporter produces a standalone SVG and a
+self-contained HTML document with the SVG embedded. Neither output compiles or
+executes runtime behavior. State names, hierarchy, initial and terminal
+markers, exclusive parents, parallel regions, guard labels, transition
+priorities, and task/goal entry points come from the same validated source used
+by the compiler.
+
+An optional active-path snapshot may highlight active states and parallel
+regions and show the transition reason, failed guard, and source revision. It
+is attached to a specific compiled asset revision and runtime tick; it is not
+live control input. The static diagram remains useful without a snapshot.
+Optional read-only controls may pan, zoom, or collapse parent regions. The
+export has no external CDN, script dependency, or continuously repainting
+animation. It uses a true black background, white primary text, dense labels,
+and minimal chrome. Author-provided labels are escaped for SVG and HTML
+contexts.
+
+Layout and output bytes are deterministic for equivalent canonical source and
+export settings. Layout may be cached by source revision and renderer version.
+The exporter owns layout and serialization; transition semantics remain in the
+compiler and fixed-tick evaluator. SVG text includes a readable title,
+description, and semantic labels for logical components.
+
 ### Compile format
 
 Studio may use its `nodegraph` library to edit a behaviour document. Editor
@@ -829,16 +1012,22 @@ Compilation performs:
 
 - schema and version validation;
 - port type checking;
-- cycle rejection except for explicit bounded retry nodes;
+- dataflow-cycle rejection, while allowing state transitions across ticks;
+- rejection of unbounded same-tick state re-entry;
+- guard, state composition, transition-priority, and node-type validation;
 - reachability and dead-node diagnostics;
 - key and task name resolution;
 - bound aggregation for stack depth, active tasks, and work per tick;
 - canonical ordering and content hashing;
-- emission of an immutable flat `BehaviourPlan`.
+- emission of immutable bounded plan and state-machine artifacts from the same
+  domain-specific source model.
 
-Runtime evaluates the flat plan. It never walks Studio graph objects. Missing
-node or task types keep the source document openable and visibly broken, but a
-broken document cannot publish an executable artifact.
+Runtime evaluates compiled artifacts. It never walks Studio graph objects.
+Missing node or task types keep the source document openable and visibly
+broken, but a broken document cannot publish an executable artifact. State
+transition edges are not same-tick plan flow: compiler diagnostics identify
+the graph kind and cycle class so a valid cross-tick state cycle is not rejected
+as a dataflow loop.
 
 ### Task lifecycle
 
@@ -858,15 +1047,25 @@ an over-budget diagnostic. It does not spin until completion.
 
 ### Driver pipeline
 
-The server bot pipeline is:
+The server AI pipeline is:
 
 1. perception commits a memory snapshot;
-2. goal selection chooses or keeps one goal;
-3. the behaviour plan requests a route or action;
+2. the AI controller consumes due acknowledgements and selects or holds one
+   declared state and goal;
+3. the state selects a behaviour-plan entry point, which requests a route or
+   action;
 4. navigation computes or follows the route;
 5. local avoidance resolves preferred steering;
-6. `BotController` writes one neutral `CharacterIntent`;
-7. the character system consumes intent and reports actual progress next tick.
+6. `BotController` writes one neutral `CharacterIntent` for character agents;
+7. the character authority consumes intent and reports movement and action
+   acknowledgements for the following AI tick.
+
+At AI evaluation, only acknowledgements committed by the prior character phase
+are visible. An action submitted this tick cannot complete its own task this
+tick.
+
+An AI controller for a non-character agent produces that agent's declared
+bounded action requests without `BotController` or a character component.
 
 The intent includes desired movement, facing, jump and action edges, source
 tick, sequence, and expiry as defined by the character plan. It contains no bot
@@ -919,14 +1118,16 @@ The complete authority schedule is:
 5. gather perception candidates and emit generic world queries;
 6. physics resolves the bounded world-query batch;
 7. reduce complete perception memories;
-8. evaluate due goals and behaviour plans;
+8. evaluate due goals, AI state transitions, and behaviour plans from the
+   committed fact and acknowledgement snapshot;
 9. close and sort path requests;
 10. solve the path batch, joining all worker jobs;
 11. repair and advance route corridors;
 12. solve local avoidance from one frozen crowd snapshot;
 13. commit steering, route, perception, and behaviour state in stable order;
 14. bot drivers resolve and publish character intent;
-15. character controllers consume the intent;
+15. character controllers consume the intent and publish action acknowledgements
+    for the next AI tick;
 16. record profiling, overflow, and diagnostic counters.
 
 Structural ECS changes are queued and applied at the next allowed barrier.
@@ -1126,6 +1327,12 @@ budget use, and failure diagnostics. Runtime source editing is a Studio or
 asset-authoring operation. Live games switch to another validated immutable
 plan by content identity at a barrier.
 
+AI state machines expose the active parent chain and parallel regions, the
+winning transition and priority, failed guards, state duration, source fact
+revision, and bounded reason codes as copied diagnostic snapshots. Registered
+nodes and script-authored requests use deterministic request/result phases;
+script callbacks do not run inside a parallel gather or solver.
+
 ### Binding parity
 
 All classes, properties, enums, methods, and events are registered once and
@@ -1164,6 +1371,9 @@ Overlays may show:
 - avoidance radius, preferred velocity, and resolved velocity;
 - perception cones, candidates, occlusion rays, and remembered targets;
 - current goal and bounded behaviour task path.
+- active state hierarchy, parallel regions, winning transition, failed guard,
+  action request id, character lease generation when applicable, and
+  acknowledgement reason.
 
 Overlay geometry is rebuilt only when its source signature changes. Hidden
 overlays and docks do no tessellation, upload, or query work.
@@ -1174,6 +1384,8 @@ Studio uses the existing nodegraph library as a view and editing tool. The
 navigation module owns the domain schema and compiler. The editor provides:
 
 - searchable domain-specific nodes;
+- named AI states, exclusive and parallel regions, Boolean conditions, guard
+  priorities, and transition-cycle diagnostics;
 - typed ports and inline bounded fields;
 - compile diagnostics attached to nodes and ports;
 - live but rate-limited inspection of one selected agent;
@@ -1182,6 +1394,10 @@ navigation module owns the domain schema and compiler. The editor provides:
 - save as immutable behaviour asset.
 
 The editor does not execute the graph. Closing it does not change AI behaviour.
+
+The canonical source also exports SVG and self-contained HTML state diagrams.
+An optional revision-matched active-state snapshot and read-only pan, zoom, and
+collapse controls do not change runtime behavior.
 
 ### Path probe
 
@@ -1204,7 +1420,8 @@ bytes are hostile inputs. Validation must reject:
 - invalid polygon winding, indices, adjacency, and tile bounds;
 - negative edge or area costs;
 - links with missing endpoints, invalid worlds, or unbounded actions;
-- behaviour cycles without a bounded retry node;
+- combinational graph cycles and unbounded same-tick state re-entry;
+- malformed state transitions, guards, parallel-region bounds, or node types;
 - undeclared blackboard keys or type mismatches;
 - plans whose aggregate depth or work exceeds engine limits;
 - compressed payloads whose declared output exceeds the limit.
@@ -1227,6 +1444,8 @@ Hard settings cap:
 - perception candidates, world queries, hits, facts, and events per sensor;
 - goals, blackboard keys, behaviour operations, task depth, and retries per
   agent;
+- state count and hierarchy depth, parallel regions, transitions, guard nodes,
+  transition candidates per tick, and action request/acknowledgement rows;
 - debug stream bytes and retained history.
 
 Every cap has a status and counter. Silent drop is allowed only for a declared
@@ -1274,12 +1493,16 @@ include:
 - avoidance neighbours, constraints, stops, and overflows;
 - perception candidates, exact queries, visible targets, facts, and overflows;
 - goal switches, plan operations, active tasks, cancellations, and budget hits;
+- state changes, guard evaluations, arbitration conflicts, node operations,
+  action acknowledgements, stale character lease results, and state budget
+  hits;
 - bot intents, neutralisations, and rejected lease writes.
 
 `ENGINE_PROFILE` scopes cover source collection, each bake stage, batch path
 search, corridor generation, dynamic overlay update, perception gather and
-reduce, avoidance, behaviour evaluation, and bot intent publication. Worker
-durations are reported through the existing reported-span path after join.
+reduce, avoidance, AI state arbitration, behaviour evaluation, staged script
+request preparation, and bot intent publication. Worker durations are reported
+through the existing reported-span path after join.
 
 Logs use world name, request id, agent stable key, artifact content, and reason
 code. A dynamic log level may trace one agent without logging every crowd.
@@ -1303,7 +1526,8 @@ The migration keeps the engine working after each phase.
    temporary direct-transform bot movement introduced during bring-up.
 9. Add dynamic obstacles, route repair, and deterministic local avoidance.
 10. Add perception facts and sensors through the generic world-query batch.
-11. Add goal selection and the bounded domain-specific behaviour compiler.
+11. Add goal selection, AI state machines, and the bounded domain-specific
+    behaviour compiler.
 12. Add Studio baking, overlays, path probes, and behaviour editing.
 13. Add tile asset delivery and world-streaming residency integration.
 14. Add climb, jump, action, and portal links. Add swim and fly domains only
@@ -1432,13 +1656,33 @@ Deliver:
 
 - typed blackboards and goals;
 - bounded goal scoring and hysteresis;
-- domain-specific behaviour documents and compiler;
+- one domain-specific source model for behaviour plans and AI state machines;
+- exclusive state hierarchy, bounded parallel regions, declared initial and
+  fallback states, terminal states, and typed Boolean guards;
+- registered condition, action, and task nodes with deterministic bounds;
+- staged Luau and JavaScript request/result integration;
+- correlated AI requests keyed by request id and agent generation, with
+  character actions additionally keyed by driver lease generation and consumed
+  on the following AI tick;
 - immutable runtime plans and task lifecycle;
-- Studio graph editor and live selected-agent inspection.
+- Studio graph editor, state inspector, and SVG plus self-contained HTML
+  state-tree and transition exports;
+- live selected-agent inspection with revision-matched active-state snapshots.
 
 Gate:
 
-- invalid cycles, types, bounds, and missing tasks cannot publish;
+- dataflow cycles, unbounded same-tick re-entry, invalid types/bounds, and
+  missing nodes cannot publish, while declared cross-tick state cycles work;
+- one transition per exclusive machine and one atomic decision per parallel
+  region are stable across worker counts;
+- an acknowledgement from an old request or agent generation is ignored, and
+  character acknowledgements also reject stale driver lease generations;
+- possession revocation cancels or suspends AI tasks without resetting
+  physical character or animation state;
+- non-character agents run AI without `BotController` or a character component;
+- script requests commit at declared barriers and never run in worker callbacks
+  or solvers;
+- SVG/HTML exports are deterministic, self-contained, escaped, and read-only;
 - runtime uses no Studio nodegraph objects;
 - operation budgets suspend safely without losing task state;
 - goal state does not duplicate character or animation state;
@@ -1546,6 +1790,22 @@ Gate:
 - explicit seeded choice and replayed sequence;
 - source document preserved when it contains an unknown node;
 - unknown node cannot publish executable content.
+- valid cross-tick patrol/investigate cycles and invalid combinational cycles;
+- same-tick re-entry refusal preserves the committed state;
+- exclusive child changes and bounded parallel regions;
+- atomic region arbitration, hierarchy-depth ties, and one transition per
+  region per tick;
+- AND, OR, and NOT guards with stable priority and reason selection;
+- initial, fallback, terminal, disable, and re-enable state behavior;
+- state/goal phase direction and no duplicate active `BehaviourPlan` task;
+- registered node bounds and staged script request/result visibility;
+- every acknowledgement phase with matching and stale request ids and agent
+  generations, plus character lease generations;
+- possession revocation suspends/cancels tasks without changing physical or
+  animation state;
+- non-character agents without a character adapter;
+- SVG/HTML exports escape authored labels and remain stable for a source
+  revision.
 
 ### Driver, script, and network tests
 
@@ -1591,6 +1851,8 @@ Required runtime measurements:
 - avoidance time by agent density and neighbour cap;
 - perception candidate and exact-query time;
 - goal and behaviour operations per agent;
+- state and guard evaluations, parallel-region arbitration, staged script rows,
+  and action acknowledgement rate;
 - full AI tick at target agent counts;
 - live, peak, and churn bytes;
 - replication and diagnostic bytes per second.
@@ -1656,8 +1918,16 @@ The planned system is complete when:
 - walking routes, authored traversal links, dynamic obstacles, and local
   avoidance work without writing character state or transforms;
 - perception commits complete bounded facts before behaviour reads them;
+- named AI state machines choose one transition per tick in a flat exclusive
+  machine, or one per active parallel region with an atomic commit; they use
+  the shared bounded `BehaviourPlan` lifecycle and expose active path/reason
+  through Studio and deterministic SVG/HTML exports;
 - typed goals and immutable bounded behaviour plans select actions without
   becoming a general virtual machine;
+- character action acknowledgements match request ids and driver lease
+  generations, and possession loss suspends or cancels work without resetting
+  character or animation state;
+- non-character AI agents evaluate without a character controller or player;
 - a server bot drives a player-independent character only through neutral
   `CharacterIntent` and relinquishes it atomically to another driver;
 - saved worlds reference immutable navigation and behaviour assets by stable

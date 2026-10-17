@@ -81,7 +81,8 @@ namespace studio {
 						// **The picker's own table decides what content is.** A
 						// second list here would be a second opinion, and the two
 						// would disagree the first time one grew a row.
-						const engine::assets::AssetKind kind = ContentKindOfProperty(descriptor.Spelling);
+						const engine::assets::AssetKind kind =
+							ContentKindOfProperty(klass, descriptor.Spelling);
 						if (kind == engine::assets::AssetKind::Unknown) {
 							continue;
 						}
@@ -146,7 +147,8 @@ namespace studio {
 					if (descriptor.Type != PropertyType::Name || descriptor.Get == nullptr) {
 						continue;
 					}
-					if (ContentKindOfProperty(descriptor.Spelling) == engine::assets::AssetKind::Unknown) {
+					if (ContentKindOfProperty(klass, descriptor.Spelling) ==
+						engine::assets::AssetKind::Unknown) {
 						continue;
 					}
 

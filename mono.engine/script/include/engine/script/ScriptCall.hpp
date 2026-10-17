@@ -190,6 +190,13 @@ namespace engine::script {
 		// An argument as a string. Raises when it is not one.
 		virtual std::string AsString(size_t index) = 0;
 
+		// Strict string arguments bounded before the owned copy. VM adapters also
+		// bound any encoding conversion; unsupported adapters refuse explicitly.
+		virtual std::string AsBoundedString(size_t, size_t) {
+			Raise("bounded strings are not supported by this adapter");
+			return {};
+		}
+
 		// An argument as an owned byte buffer. Luau accepts `buffer`; JavaScript
 		// accepts `ArrayBuffer`. The copy prevents VM memory from escaping the call.
 		virtual std::vector<std::byte> AsBytes(size_t index, size_t maximum) = 0;

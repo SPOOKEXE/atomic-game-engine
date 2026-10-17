@@ -1,5 +1,7 @@
 #include "ThreadAffinity.hpp"
 
+#include <engine/core/FrameGraph.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
@@ -216,6 +218,122 @@ TEST_CASE("assigned tasks sharing a worker run serially", "[jobs]") {
 
 	CHECK(overlap.load(std::memory_order_relaxed) == 0);
 	CHECK(Jobs::LastBatch().Participants == 1);
+}
+
+TEST_CASE("assigned profiling reports task owners rather than the whole pool", "[jobs][profiling]") {
+	Pool pool{4};
+	if (Jobs::PinnedWorkerCount() < 2) {
+		SUCCEED("this platform exposes fewer than two pinned workers");
+		return;
+	}
+	struct Collecting {
+		bool Previous = engine::core::FrameGraph::IsEnabled();
+		Collecting() {
+			engine::core::FrameGraph::SetEnabled(true);
+		}
+		~Collecting() {
+			engine::core::FrameGraph::SetEnabled(Previous);
+		}
+	} collecting;
+	const auto before = engine::core::Metrics::Get("jobs.assigned.empty_workers");
+	const auto signaledBefore = engine::core::Metrics::Get("jobs.signaled_workers");
+	std::atomic<unsigned> visits{0};
+	const unsigned assignments[]{0, 1};
+	engine::core::FrameGraph::BeginFrame();
+	Jobs::ForWorkers(assignments, [&](size_t begin, size_t end) {
+		visits.fetch_add(static_cast<unsigned>(end - begin), std::memory_order_relaxed);
+	});
+	engine::core::FrameGraph::EndFrame();
+	CHECK(visits.load() == 2);
+	CHECK(Jobs::LastBatch().Participants == 2);
+
+	unsigned workerReports = 0;
+	unsigned bodyReports = 0;
+	unsigned emptyReports = 0;
+	bool joinIdle = false;
+	for (const auto &span : engine::core::FrameGraph::Spans()) {
+		if (span.Name == "jobs.assigned.worker") workerReports++;
+		if (span.Name == "jobs.assigned.body") bodyReports++;
+		if (span.Name == "jobs.assigned.empty workers") emptyReports++;
+		if (span.Name == "jobs.join.assigned")
+			joinIdle = span.Category == engine::core::ProfileCategory::Idle;
+	}
+	CHECK(workerReports == 2);
+	CHECK(bodyReports == 2);
+	CHECK(joinIdle);
+	const auto after = engine::core::Metrics::Get("jobs.assigned.empty_workers");
+	REQUIRE(after.has_value());
+	const double emptyWorkers = after->Value - (before ? before->Value : 0.0);
+	CHECK(emptyWorkers == 0);
+	CHECK(after->Samples == (before ? before->Samples : 0) + 1);
+	CHECK(emptyReports == 0);
+	const auto signaledAfter = engine::core::Metrics::Get("jobs.signaled_workers");
+	REQUIRE(signaledAfter.has_value());
+	CHECK(signaledAfter->Value - (signaledBefore ? signaledBefore->Value : 0.0) == 2);
+}
+
+TEST_CASE("private wake gates alternate range and repeated pinned mappings", "[jobs]") {
+	Pool pool{4};
+	const unsigned pinned = Jobs::PinnedWorkerCount();
+	if (pinned < 2) {
+		SUCCEED("this platform exposes fewer than two pinned workers");
+		return;
+	}
+	const unsigned assignments[]{pinned - 1, pinned - 1, 0, pinned - 1, 0};
+	std::thread::id firstAssigned;
+	for (unsigned cycle = 0; cycle < 32; ++cycle) {
+		std::atomic<unsigned> visits[64]{};
+		// Tiny generic batches can finish before their signaled worker enters.
+		Jobs::For(
+			2,
+			1,
+			[&](size_t begin, size_t end) {
+				for (size_t index = begin; index < end; ++index)
+					visits[index]++;
+			},
+			1
+		);
+		CHECK(visits[0].load() == 1);
+		CHECK(visits[1].load() == 1);
+		std::thread::id assigned[5];
+		Jobs::ForWorkers(assignments, [&](size_t begin, size_t end) {
+			for (size_t index = begin; index < end; ++index) {
+				assigned[index] = std::this_thread::get_id();
+				visits[index]++;
+				Jobs::For(
+					3,
+					1,
+					[&](size_t nestedBegin, size_t nestedEnd) {
+						for (size_t nested = nestedBegin; nested < nestedEnd; ++nested)
+							visits[8 + index * 3 + nested]++;
+					},
+					1
+				);
+			}
+		});
+		CHECK(Jobs::LastBatch().Participants == 2);
+		CHECK(assigned[0] == assigned[1]);
+		CHECK(assigned[0] == assigned[3]);
+		CHECK(assigned[2] == assigned[4]);
+		CHECK(assigned[0] != assigned[2]);
+		if (cycle == 0) firstAssigned = assigned[0];
+		CHECK(assigned[0] == firstAssigned);
+		for (unsigned index = 0; index < 5; ++index)
+			CHECK(visits[index].load() == (index < 2 ? 2 : 1));
+		for (unsigned index = 8; index < 23; ++index)
+			CHECK(visits[index].load() == 1);
+		Jobs::For(
+			64,
+			1,
+			[&](size_t begin, size_t end) {
+				for (size_t index = begin; index < end; ++index)
+					visits[index]++;
+			},
+			1
+		);
+		for (unsigned index = 23; index < 64; ++index)
+			CHECK(visits[index].load() == 1);
+	}
 }
 
 TEST_CASE("an assigned worker exception reaches the caller and releases the pool", "[jobs]") {

@@ -1,5 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#define WEATHER_LAYER_BOUNDS
 #include "surface-shading.glsl"
 
 // `surface-shading.glsl` owns bindings 0 through 12, including both completed

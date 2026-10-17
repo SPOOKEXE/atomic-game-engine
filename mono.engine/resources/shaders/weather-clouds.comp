@@ -1,0 +1,327 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "weather-common.glsl"
+#define WEATHER_CLOCK_BINDING 5
+#include "weather-clock.glsl"
+#include "weather-assembly.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D depthImage;
+layout(set = 0, binding = 1, std430) readonly buffer Cells { uvec2 cells[]; } inputField;
+layout(set = 0, binding = 2, std430) readonly buffer Summaries { uvec4 values[]; } inputSummary;
+layout(set = 0, binding = 3, std430) readonly buffer Pages { ivec4 keys[]; } pageTable;
+layout(set = 0, binding = 4, std430) readonly buffer PreviousPages { ivec4 keys[]; } previousPageTable;
+layout(set = 1, binding = 0, rgba16f) writeonly uniform image2D outputImage;
+layout(set = 1, binding = 1, rgba16f) writeonly uniform image2D cloudDepthImage;
+layout(set = 2, binding = 0) uniform Pass {
+	mat4 InverseViewProjection;
+	vec4 Eye;
+	vec4 Minimum;
+	vec4 Maximum;
+	vec4 ColourExtinction;
+	vec4 Sun;
+	vec4 SunColour;
+	vec4 Ambient;
+	uvec4 Quality;
+	WeatherField Field;
+	uvec4 ImageExtent;
+} pass;
+
+WeatherField effectiveField;
+
+// Bound the LOD approximation at the actual integration samples. A few
+// residency probes cannot certify contrast between those probes.
+float allowedDensityError = 0.0;
+bool sampledCompact = false;
+
+vec3 WorldAt(vec2 uv, float depth) {
+	vec4 position = pass.InverseViewProjection * vec4(uv.x * 2.0 - 1.0, 1.0 - uv.y * 2.0, depth, 1.0);
+	return position.xyz / position.w;
+}
+
+bool Interval(vec3 origin, vec3 direction, float maximum, out float enter, out float exit) {
+	enter = 0.0;
+	exit = maximum;
+	for (uint axis = 0u; axis < 3u; ++axis) {
+		if (abs(direction[axis]) < 1e-7) {
+			if (origin[axis] < pass.Minimum[axis] || origin[axis] > pass.Maximum[axis]) return false;
+			continue;
+		}
+		float first = (pass.Minimum[axis] - origin[axis]) / direction[axis];
+		float second = (pass.Maximum[axis] - origin[axis]) / direction[axis];
+		enter = max(enter, min(first, second));
+		exit = min(exit, max(first, second));
+	}
+	return exit > enter;
+}
+
+float DensityCode(ivec3 point) {
+	point = clamp(point, ivec3(0), ivec3(effectiveField.Grid.xyz) - 1);
+	return float(inputField.cells[WeatherCellIndex(uvec3(point), effectiveField.Grid.xyz)].x & 255u) / 255.0;
+}
+
+bool PageKeyLess(ivec4 first, ivec4 second) {
+	uint firstLod = uint(first.w) & 31u;
+	uint secondLod = uint(second.w) & 31u;
+	if (firstLod != secondLod) return firstLod < secondLod;
+	if (first.x != second.x) return first.x < second.x;
+	if (first.y != second.y) return first.y < second.y;
+	return first.z < second.z;
+}
+
+ivec3 PageOrigin(ivec3 coordinate, int extent) {
+	// Unsigned masking floors negative coordinates to the power-of-two page boundary.
+	return ivec3(uvec3(coordinate) & uvec3(~(uint(extent) - 1u)));
+}
+
+int FindPage(ivec3 coordinate, uint lod) {
+	ivec4 key = ivec4(PageOrigin(coordinate, 8 << lod), int(lod));
+	uint low = 0u;
+	uint high = effectiveField.Bricks.w;
+	while (low < high) {
+		uint middle = low + (high - low) / 2u;
+		ivec4 candidate = pageTable.keys[middle];
+		if (PageKeyLess(candidate, key)) low = middle + 1u;
+		else high = middle;
+	}
+	return low < effectiveField.Bricks.w && all(equal(pageTable.keys[low].xyz, key.xyz)) &&
+		(uint(pageTable.keys[low].w) & 31u) == lod ? int(low) : -1;
+}
+
+int FindPreviousPage(ivec3 coordinate, uint lod) {
+	ivec4 key = ivec4(PageOrigin(coordinate, 8 << lod), int(lod));
+	uint low = 0u;
+	uint high = pass.Quality.z;
+	while (low < high) {
+		uint middle = low + (high - low) / 2u;
+		if (PageKeyLess(previousPageTable.keys[middle], key)) low = middle + 1u;
+		else high = middle;
+	}
+	return low < pass.Quality.z && all(equal(previousPageTable.keys[low], key)) ? int(low) : -1;
+}
+
+uint PreviousLodAt(vec3 canonical) {
+	if (pass.Quality.z == 0u) return 0u;
+	uint maximumLod = uint(previousPageTable.keys[pass.Quality.z - 1u].w) & 31u;
+	ivec3 coordinate = ivec3(floor(canonical));
+	for (uint lod = 0u; lod <= maximumLod; ++lod)
+		if (FindPreviousPage(coordinate, lod) >= 0) return lod;
+	return 0u;
+}
+
+int PageAt(vec3 canonical) {
+	ivec3 coordinate = ivec3(floor(canonical));
+	for (uint lod = 0u; lod <= effectiveField.Phase.w; ++lod) {
+		int page = FindPage(coordinate, lod);
+		if (page >= 0) return page;
+	}
+	return -1;
+}
+
+float SparseCode(ivec3 coordinate, uint lod) {
+	int index = FindPage(coordinate, lod);
+	if (index >= 0) {
+		ivec4 page = pageTable.keys[index];
+		uint descriptor = uint(page.w);
+		uint kind = (descriptor >> 5u) & 3u;
+		if (kind == 2u) return 0.0;
+		uvec3 point = uvec3((coordinate - page.xyz) / (1 << (descriptor & 31u)));
+		uint baseWord = descriptor >> 7u;
+		if (kind == 0u) {
+			uint cell = baseWord / 2u + point.x + 8u * (point.y + 8u * point.z);
+			return float(inputField.cells[cell].x & 255u) / 255.0;
+		}
+		if (kind == 1u) {
+			uvec2 address = WeatherAssemblyAddress(point);
+			uvec2 scalarWords = inputField.cells[baseWord / 2u + address.x * 4u];
+			if (WeatherAssemblyUnsafe(scalarWords))
+				return float(WeatherDensityCode(effectiveField, coordinate)) / 255.0;
+			sampledCompact = true;
+			return float(WeatherAssemblyDensityCode(scalarWords, address.y)) / 255.0;
+		}
+	}
+	// Border and missing pages reconstruct canonical samples; allocation refusal cannot make a hole.
+	return float(WeatherDensityCode(effectiveField, coordinate)) / 255.0;
+}
+
+bool SparseEmpty(vec3 canonical, int selected) {
+	if (selected < 0) return false;
+	uint descriptor = uint(pageTable.keys[selected].w);
+	// The empty certificate covers every canonical sample in the page and its
+	// interpolation halo for every time, independent of a sampled summary.
+	if (((descriptor >> 5u) & 3u) == 2u) return true;
+	uint lod = descriptor & 31u;
+	// Coarse point samples cannot certify the occupancy between canonical cells.
+	if (lod > 0u) return false;
+	if (pass.Quality.z > 0u && uintBitsToFloat(pass.Quality.w) < 1.0) return false;
+	int stride = 1 << lod;
+	vec3 local = canonical - vec3(pageTable.keys[selected].xyz);
+	vec3 edge = min(local, vec3(8 * stride) - local);
+	if (min(min(edge.x, edge.y), edge.z) < 1.5 * float(stride)) return false;
+	// The edge margin keeps all eight lod-0 trilinear corners in this same page.
+	return inputSummary.values[selected].x == 0u;
+}
+
+float SparseDensityAtLod(vec3 canonical, uint lod) {
+	int stride = 1 << lod;
+	vec3 point = canonical / float(stride);
+	ivec3 cell = ivec3(floor(point)) * stride;
+	vec3 weight = fract(point);
+	float low = mix(mix(SparseCode(cell, lod), SparseCode(cell + ivec3(stride, 0, 0), lod), weight.x),
+		mix(SparseCode(cell + ivec3(0, stride, 0), lod), SparseCode(cell + ivec3(stride, stride, 0), lod), weight.x), weight.y);
+	float high = mix(mix(SparseCode(cell + ivec3(0, 0, stride), lod), SparseCode(cell + ivec3(stride, 0, stride), lod), weight.x),
+		mix(SparseCode(cell + ivec3(0, stride, stride), lod), SparseCode(cell + ivec3(stride), lod), weight.x), weight.y);
+	return mix(low, high, weight.z);
+}
+
+float CanonicalCode(ivec3 coordinate) {
+	return float(WeatherDensityCode(effectiveField, coordinate)) / 255.0;
+}
+
+float CanonicalDensityAtLod(vec3 canonical, uint lod) {
+	int stride = 1 << lod;
+	vec3 point = canonical / float(stride);
+	ivec3 cell = ivec3(floor(point)) * stride;
+	vec3 weight = fract(point);
+	float low = mix(mix(CanonicalCode(cell), CanonicalCode(cell + ivec3(stride, 0, 0)), weight.x),
+		mix(CanonicalCode(cell + ivec3(0, stride, 0)), CanonicalCode(cell + ivec3(stride, stride, 0)), weight.x), weight.y);
+	float high = mix(mix(CanonicalCode(cell + ivec3(0, 0, stride)), CanonicalCode(cell + ivec3(stride, 0, stride)), weight.x),
+		mix(CanonicalCode(cell + ivec3(0, stride, stride)), CanonicalCode(cell + ivec3(stride)), weight.x), weight.y);
+	return mix(low, high, weight.z);
+}
+
+float SparseCurrentDensity(vec3 canonical, int selected, out bool approximated) {
+	uint lod = selected >= 0 ? uint(pageTable.keys[selected].w) & 31u : 0u;
+	// Compact means need the same optical error check as coarse samples.
+	// Comparing them with their own decoded means would not bound that error.
+	sampledCompact = false;
+	float density = SparseDensityAtLod(canonical, lod);
+	approximated = lod > 0u || sampledCompact;
+	if (selected < 0) return density;
+	ivec4 page = pageTable.keys[selected];
+	float stride = float(1 << lod);
+	vec3 local = canonical - vec3(page.xyz);
+	vec3 edge = min(local, vec3(8.0 * stride) - local);
+	float edgeDistance = min(min(edge.x, edge.y), edge.z) / stride;
+	if (edgeDistance >= 1.5) return density;
+	for (uint parentLod = lod + 1u; parentLod <= effectiveField.Phase.w; ++parentLod) {
+		if (FindPage(ivec3(floor(canonical)), parentLod) < 0) continue;
+		float parent = SparseDensityAtLod(canonical, parentLod);
+		// Blend one density before integrating; overlap never doubles optical depth.
+		approximated = true;
+		return mix(parent, density, smoothstep(0.5, 1.5, edgeDistance));
+	}
+	return density;
+}
+
+float SparseDensity(vec3 canonical, int selected) {
+	bool approximated;
+	float density = SparseCurrentDensity(canonical, selected, approximated);
+	float transition = clamp(uintBitsToFloat(pass.Quality.w), 0.0, 1.0);
+	if (pass.Quality.z > 0u && transition < 1.0) {
+		// Retain topology only. Reevaluate its samples at the accepted current
+		// time so a transition never blends two different weather clocks.
+		float previous = CanonicalDensityAtLod(canonical, PreviousLodAt(canonical));
+		density = mix(previous, density, transition);
+		approximated = true;
+	}
+	if (!approximated) return density;
+	float fine = CanonicalDensityAtLod(canonical, 0u);
+	// One guard bounds compact, spatial LOD and topology blending together.
+	return abs(density - fine) <= allowedDensityError ? density : fine;
+}
+
+float DensityAt(vec3 world, int selected) {
+	vec3 lattice = world / pass.Minimum.w;
+	if (effectiveField.Origin.w == 0) return SparseDensity(lattice, selected);
+	vec3 point = (lattice - vec3(effectiveField.Origin.xyz)) / float(effectiveField.Origin.w);
+	ivec3 cell = ivec3(floor(point));
+	vec3 weight = fract(point);
+	float low = mix(mix(DensityCode(cell), DensityCode(cell + ivec3(1, 0, 0)), weight.x),
+		mix(DensityCode(cell + ivec3(0, 1, 0)), DensityCode(cell + ivec3(1, 1, 0)), weight.x), weight.y);
+	float high = mix(mix(DensityCode(cell + ivec3(0, 0, 1)), DensityCode(cell + ivec3(1, 0, 1)), weight.x),
+		mix(DensityCode(cell + ivec3(0, 1, 1)), DensityCode(cell + ivec3(1, 1, 1)), weight.x), weight.y);
+	return mix(low, high, weight.z);
+}
+
+bool EmptyNeighborhood(vec3 world, out int selected) {
+	selected = -1;
+	// Sparse borders may reconstruct missing neighbours; their old maxima cannot prove emptiness.
+	if (effectiveField.Origin.w == 0) {
+		vec3 canonical = world / pass.Minimum.w;
+		selected = PageAt(canonical);
+		return SparseEmpty(canonical, selected);
+	}
+	ivec3 cell = ivec3(floor((world / pass.Minimum.w - vec3(effectiveField.Origin.xyz)) / float(effectiveField.Origin.w)));
+	ivec3 brick = clamp(cell / 8, ivec3(0), ivec3(effectiveField.Bricks.xyz) - 1);
+	// Interpolation reaches neighboring bricks. Their maxima must also be zero before skipping.
+	for (int z = -1; z <= 1; ++z) for (int y = -1; y <= 1; ++y) for (int x = -1; x <= 1; ++x) {
+		ivec3 point = clamp(brick + ivec3(x, y, z), ivec3(0), ivec3(effectiveField.Bricks.xyz) - 1);
+		if (inputSummary.values[WeatherBrickIndex(uvec3(point), effectiveField.Bricks.xyz)].x != 0u) return false;
+	}
+	return true;
+}
+
+void main() {
+	effectiveField = WeatherClockField(pass.Field);
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 size = imageSize(outputImage);
+	if (any(greaterThanEqual(pixel, size))) return;
+	vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
+	ivec2 fullExtent = all(greaterThan(pass.ImageExtent.xy, uvec2(0)))
+		? ivec2(pass.ImageExtent.xy) : textureSize(depthImage, 0);
+	ivec2 depthPixel = clamp(ivec2(uv * vec2(fullExtent)), ivec2(0), fullExtent - 1);
+	float sceneDepth = texelFetch(depthImage, depthPixel, 0).r;
+	vec3 surface = WorldAt(uv, sceneDepth);
+	vec3 delta = surface - pass.Eye.xyz;
+	float rayLength = length(delta);
+	float maximum = sceneDepth >= 0.9999995 ? max(pass.Maximum.w, rayLength) : rayLength;
+	vec4 metadata = vec4(sceneDepth >= .9999995 ? 1.0 : 0.0, 0.0, min(rayLength, 65504.0), 0.0);
+	imageStore(outputImage, pixel, vec4(0.0, 0.0, 0.0, 1.0));
+	imageStore(cloudDepthImage, pixel, metadata);
+	// A stateful replay awaiting validation publishes a neutral initialized layer.
+	if (effectiveField.Phase.z == 0xffffffffu) return;
+	if (!(rayLength > 0.0) || !(maximum > 0.0)) return;
+	vec3 ray = delta / rayLength;
+	float enter;
+	float exit;
+	if (!Interval(pass.Eye.xyz, ray, maximum, enter, exit)) return;
+	// An oblique capture starts at its arrival aperture, not its virtual eye.
+	// Ordinary views use their near plane through this same inverse projection.
+	enter = max(enter, max(0.0, dot(WorldAt(uv, 0.0) - pass.Eye.xyz, ray)));
+	if (!(exit > enter)) return;
+	allowedDensityError = max(0.0, uintBitsToFloat(pass.Quality.y)) /
+		max(pass.ColourExtinction.w * (exit - enter), .000001);
+	uint steps = clamp(pass.Quality.x, 1u, 256u);
+	float stepLength = (exit - enter) / float(steps);
+	float transmittance = 1.0;
+	vec3 scattered = vec3(0.0);
+	float weightedDistance = 0.0;
+	float opacityWeight = 0.0;
+	float cosine = dot(ray, normalize(-pass.Sun.xyz));
+	float phase = (1.0 - 0.36) / (12.566370614359 * max(pow(1.36 - 1.2 * cosine, 1.5), 0.0001));
+	vec3 light = pass.ColourExtinction.rgb * (pass.Ambient.rgb + pass.SunColour.rgb * phase);
+	// View jitter only changes integration samples, never canonical weather cells.
+	float jitter = (float(WeatherHash(uint(pixel.x) ^ WeatherHash(uint(pixel.y)) ^
+		WeatherHash(effectiveField.Phase.x) ^ WeatherHash(effectiveField.Phase.y))) + .5) / 4294967296.0;
+	for (uint index = 0u; index < steps; ++index) {
+		float distance = enter + (float(index) + jitter) * stepLength;
+		vec3 world = pass.Eye.xyz + ray * distance;
+		int selected;
+		if (EmptyNeighborhood(world, selected)) continue;
+		float density = DensityAt(world, selected);
+		float stepTransmittance = exp(-pass.ColourExtinction.w * density * stepLength);
+		float contribution = transmittance * (1.0 - stepTransmittance);
+		scattered += contribution * light;
+		weightedDistance += contribution * distance;
+		opacityWeight += contribution;
+		transmittance *= stepTransmittance;
+		if (transmittance < 0.003) break;
+	}
+	if (opacityWeight > .00001) {
+		metadata.y = min(weightedDistance / opacityWeight, 65504.0);
+		metadata.w = 1.0;
+	}
+	imageStore(outputImage, pixel, vec4(scattered, transmittance));
+	imageStore(cloudDepthImage, pixel, metadata);
+}

@@ -54,9 +54,48 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.26
 
-- [_] Create owned 2D images usable by `ParticleEmitter`, `ImageLabel` and existing image consumers, with basic 2D transform and composition nodes.
-- [_] Review the preserved full work on the `v0.26.5-imagegraph-full` branch before integration.
-- [_] Exclude 3D, audio and broad simulation features from the first integration.
+- [x] Create bounded static 2D images with Source, Solid, Resize, Crop, Transform, Flip and Blend nodes, durable projects and named outputs.
+- [x] Add Studio Image Composer editing, cached previews, undo/redo, save/open and ordinary `.atex` export; add `.imagegraph` baking to assetc.
+- [x] Verify exported images through ordinary signed content delivery in `ParticleEmitter` and `ImageLabel`, plus CPU, editor and sanitizer checks.
+
+- [x] Define strict document v2 named parameters and bindings, backward v1 reads, pure input resolution and bounded selected-output preparation for the seven 2D nodes.
+- [x] Add the keyed L7 per-world `ImageGraph` owner and Luau `SetInput`, `GetInput` and `GetImage` paths using stable imagegraph references.
+- [x] Add L12 GPU evaluation, dirty-cone caching and transactional publication through ordinary `TextureTable` images; preserve last-good output on refusal.
+- [x] Add Studio live inputs, bindings, GPU preview and publish/apply to ordinary image slots.
+- [x] Add bounded raw RGBA8, PNG and JPEG imports, raw Base64 export, `ContentId` consumers and the `ImageBuffers` sample.
+- [x] Add a staged demo runner that captures each top-level script and world, checks client diagnostics and validates BMP output.
+- [x] Verify the encrypted 1080p EditableImage snapshot and observed update preserve dimensions, full byte payload, colour space, `ContentId` and unrelated replica rows across default chunk and pacing limits (18,302 assertions).
+- [x] Verify viewport checks (29 cases, 449 assertions) and final native viewport drag/resnap; repeat Play/Stop coverage passed 228 assertions in the strict-CI binary.
+- [x] Pass `just preset=dev docs-check` with zero malformed comments and no undocumented public entities.
+- [x] Finish three consecutive interactive Studio Play/Stop checks; restored orange graph output appears in ImageLabel and ParticleEmitter.
+- [x] Verify isolated signed GUI Publish/Apply and mismatched-key refusal; six SHA values stayed unchanged, the candidate was absent and the previous Apply remained enabled.
+- [x] Initial minimal ImageGraph baseline: strict CI passed 664 suites, 0 skipped and 0 failed; architecture had 50 modules, 6 programs and 36 layered modules.
+- [x] Keep LocalScript-created objects and `Workspace` camera descendants local, unsaved and unreplicated; give each player private `StarterGui` copies with independent `ResetOnSpawn`.
+- [x] Add protected generated `Workspace.Terrain` with helper and migration paths, opt-in `AuthoredAffordance`, cameras without a `SurfaceCamera` facet, `RenderEffects` None-default dropdowns and an authored portal/mirror grid.
+- [x] Build the Tornado demo in pure world Luau over generic GPU field, particle, volume and force systems; verify the 50M-particle server/client run through the Studio HUD button and Bladeborne's character-following local camera with HUD visible.
+- [x] Capture and pass all 77 top-level demos; pass GPU renderer checks (9 cases, 902 assertions) and consumer checks (4 cases, 617 assertions), and verify native viewport float and resnap behavior.
+- [x] Keep GPU timing averages sample-aware and separate from CPU placement: sparse device spans average over returned samples, and late query durations stay on the GPU timing axis (`82ba4842`, `da06e334`).
+- [x] Reuse drawable-source membership during presentation updates and hoist label-name lookup out of per-instance loops (`443e4588`).
+- [x] Bound mirror captures by authored bounce depth; the one-bounce GPU fixture renders all 320 mirror-ball facets independently of portal depth (`956e76e9`, `cf75b379`).
+- [x] Preserve complete instance births through transport pressure and loss; the stress test checks all 1,536 instances converge to the final changing value after one join (`813fd045`).
+- [x] Ground the ReplicationStress player before admission; verify all 20,000 authored block states, grounded client camera visibility and final position convergence through the actual Studio link.
+- [x] Group all built-in reflected properties with inherited `PropertiesTag` metadata and an `Unassigned` fallback; put collection tag add, rename, remove and undo in the Properties footer. See [Studio properties](docs/STUDIO_PROPERTIES.md).
+- [x] Freeze paused Frame Graph counters and draw data, stop recorder collection while paused unless another profiling consumer needs it, reuse retained clipped flame indices and theme palette, and fit structural averages by actual parent relationships so child order does not hide gaps.
+- [x] Admit tick exchange workers using each stage's measured cost, wake only workers selected for the active batch and report worker bodies only when they own tasks.
+- [x] Replace inactive DOF, god rays, bloom, lenses, sky, fog and empty overlays with output-preserving copies or clears; skip empty G-buffer shader draws, depth linearisation, SSAO and deferred lighting only when cleared texture contents prove the result. Retain disabled environment outputs without compute, copy matching presentation images and omit cleared game UI blends. GPU fixtures cover active transitions, authored writes, retained UI, lighting captures and authored zero-depth exports.
+- [x] Preserve cleared component write epochs for skipped presentation consumers, rebuild cached portal cuts and omit capture-label scans when no attribute rows exist.
+- [x] Reuse render-batch scratch and dirty ranges, step shared GPU particle fields once per frame and keep inactive inputs out of environment cache keys.
+- [x] Index capture surfaces by slot, avoid redundant ribbon restoration uploads and omit zero-strength ground-grid draws.
+- [x] Preserve opaque depth in transparent passes when empty surface overlays skip rendering, and refuse failed image publications or pass starts in transparent geometry, mirror and portal capture paths without exporting retained stale images.
+- [x] Retain Output filtering and text extents, clip visible rows and cache canonical Explorer searches while keeping computed-property searches live; preserve multiline layout and selection behavior.
+- [x] Resolve built-in and runtime image references through the correct content owner before portal promotion, and refresh readiness when renderer resource revisions change.
+- [x] Fit mandatory nested portal images to their existing fair pixel budget and regenerate their camera keys after sizing; keep optional seam radiance separate.
+- [x] Hide only the displayed local player's body in Studio first-person and restore it in third-person; the real viewport GPU fixture also checks another player's visibility.
+- [x] Preserve depth-tested SurfaceGui pixels through oblique captures with a bounded decal depth tolerance; GPU checks cover ordinary and authored shaders, close occluders and portal adoption.
+- [_] Non-acceptance follow-up: audit aggregate replica snapshot and staged-byte ceilings for large EditableImage rows. The current path has a `uint32_t` total cap but no explicit assembled-image budget; per-image bounds and windowed staging are tested.
+- [_] Security follow-up: audit dynamic schema and component-codec acceptance, plus client-local provenance and descendant filtering across replication and authored game saves.
+
+The accepted implementation is `v0.26.0-imagegraph-minimal`. The preserved full Composer work remains on `v0.26.5-imagegraph-full` for user review.
 
 ### v0.27
 
@@ -85,7 +124,9 @@ When you create a new world/scene, it auto appends the scripts in.
 
 ### FUTURE
 
-- [_] /docs/future-work/navigation-ai-system.md
+- [_] Navigation and AI: bounded navigation, perception, named inspectable AI
+  states, behaviour plans, and driver-safe character actions in the
+  [navigation and AI plan](docs/future-work/navigation-ai-system.md).
 - [_] pathfinding
 - [_] more advanced pathfinding where you can specify wall climbing and stuff, like a "can climb" zone or stuff lik that for ai too
 
@@ -98,7 +139,8 @@ When you create a new world/scene, it auto appends the scripts in.
 
 - [_] localization support
 - [_] /docs/future-work/terrain-system.md
-- [_] /docs/future-work/character-system.md
+- [_] Player-independent characters, controller state, animation graphs, and
+  player roster/possession in the [character system plan](docs/future-work/character-system.md).
 - [_] /docs/future-work/vfx-system.md
 - [_] /docs/future-work/input-system.md
 - [_] /docs/future-work/camera-and-cinematics.md
@@ -127,7 +169,11 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] concept idea: setup a public mcp repository in python, add .mcp.json in project folder that loads it, it watches forums channels in the discord server for new/existing bugs. agent writes a message in the channel stating you're fixing it, other agents work on other bugs. agents can write that "this bug is a big rewrite" in the channel too which could be helpful. as a custom plugin? maybe just consider as a separate project.
 - [_] could we try some minecraft shaders / pbr texture packs as test items? maybe upload to my cdn and then load it and ill check if it works
 - [_] add modulescript boundaries between luau and javascript VMs. moving values between vms. add a container component flag to enable it. add a [experiment] marker.
-- [_] VR support (oculus rift s)
+- [_] VR support, with Rift S as a requested validation target: OpenXR stereo
+  views, in-game per-eye image-clarity calibration, and calibrated glasses-style
+  magnification. Physical optical focus depends on headset support. Expand the
+  Far Cry VR and Space Marine VR references from Zero Latency Adelaide when
+  POVs arrive. See the [VR system plan](docs/future-work/vr-system.md).
 - [_] setup a studio permissions system for: microphone, camera, etc
 - [_] setup a example plugin for mocap with camera point track
 - [_] ECS driven RL agent environments

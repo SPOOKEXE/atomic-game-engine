@@ -1,5 +1,6 @@
+#include "PortalShadowTransport.hpp"
+
 #include <engine/core/Bytes.hpp>
-#include <engine/render/PortalShadowTransport.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

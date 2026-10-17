@@ -1,6 +1,7 @@
 // The multi-selection property grid without Dear ImGui.
 
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Property.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
@@ -135,4 +136,67 @@ TEST_CASE("a stale first handle does not hide later live selected properties", "
 	REQUIRE(transparency != nullptr);
 	CHECK(transparency->Applicable == 2);
 	CHECK(transparency->Readable == 2);
+}
+
+TEST_CASE(
+	"inspector metadata groups inherited rows without losing their declaring owners",
+	"[studio][properties][groups]"
+) {
+	engine::scene::RegisterSceneComponents();
+	engine::scene::RegisterSceneClasses();
+	Store store("property_tag_groups");
+	const Entity part = store.CreateInstance(Classes::Find(Name("MeshPart")), "Mesh");
+	const std::array selection{part};
+	const auto original = studio::BuildPropertySelection(store, selection);
+	const auto tagged = studio::BuildTaggedPropertySelection(store, selection);
+	size_t rowCount = 0;
+	for (const auto &group : tagged) {
+		REQUIRE(group.PropertiesTag.IsValid());
+		for (const auto &row : group.Rows) {
+			REQUIRE(row.Descriptor != nullptr);
+			CHECK(
+				group.PropertiesTag ==
+				(row.Descriptor->PropertiesTag.IsValid() ? row.Descriptor->PropertiesTag : Name("Unassigned"))
+			);
+			CHECK(row.Owner == studio::DeclaringPropertyClass(store.ClassOf(part), row.Descriptor->Name));
+			CHECK(
+				studio::SelectionPropertyApplies(
+					store.ClassOf(part), row.Owner, row.Descriptor->Name, row.Descriptor->Type
+				)
+			);
+			rowCount++;
+		}
+	}
+	size_t originalCount = 0;
+	for (const auto &group : original)
+		originalCount += group.Rows.size();
+	CHECK(rowCount == originalCount);
+}
+
+TEST_CASE(
+	"properties with no inspector metadata remain visible as Unassigned", "[studio][properties][groups]"
+) {
+	struct Untagged {
+		float Amount = 0;
+	};
+	engine::scene::RegisterSceneComponents();
+	engine::scene::RegisterSceneClasses();
+	const auto component = engine::ecs::Components::Register<Untagged>("studio.test.UntaggedProperty");
+	const std::array components{component};
+	const auto owner =
+		Classes::Register("StudioUntaggedProperty", Classes::Find(Name("Instance")), components);
+	Classes::Property<&Untagged::Amount>(owner, "UnmappedAmount");
+	Store store("untagged_properties");
+	const Entity entity = store.CreateInstance(owner, "Untyped");
+	const std::array selection{entity};
+	const auto groups = studio::BuildTaggedPropertySelection(store, selection);
+	const auto found = std::find_if(groups.begin(), groups.end(), [](const auto &group) {
+		return group.PropertiesTag == Name("Unassigned");
+	});
+	REQUIRE(found != groups.end());
+	const auto *row = Row(*found, "UnmappedAmount");
+	REQUIRE(row != nullptr);
+	CHECK(row->Owner == owner);
+	CHECK(row->Readable == 1);
+	CHECK(row->Value.Float == 0);
 }

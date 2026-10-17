@@ -249,3 +249,52 @@ TEST_CASE("a client cannot tell the server what exists", "[replication][ownershi
 
 	CHECK_FALSE(server.Authority_.Receive(server.Handle, message));
 }
+
+TEST_CASE(
+	"resource delta filters consume values without changing entity permissions", "[replication][ownership]"
+) {
+	RegisterTypes();
+	Store receiver("receiver");
+	const Entity owner = receiver.Create();
+	receiver.Set<Spot>(owner, Spot{1});
+	receiver.SetResource(Spot{99});
+	engine::core::ByteWriter bytes;
+	const auto &descriptor = engine::ecs::Components::Describe(engine::ecs::Components::Of<Spot>());
+	for (const Spot value : {Spot{22}, Spot{33}})
+		descriptor.Write(bytes, &value, 1);
+	engine::replication::ComponentDelta component;
+	component.Component = Name("ownership_test.Spot");
+	component.Entities = {engine::ecs::NULL_ENTITY, owner};
+	component.Values.assign(bytes.Bytes().begin(), bytes.Bytes().end());
+	Delta delta;
+	delta.Components.push_back(component);
+	size_t calls = 0;
+	const auto refuseResource = [&](Name name) {
+		++calls;
+		CHECK(name == component.Component);
+		return false;
+	};
+	Delta malformed = delta;
+	malformed.Components[0].Values.resize(sizeof(float) - 1);
+	CHECK(
+		engine::replication::WriteComponents(receiver, malformed, {}, refuseResource).Status ==
+		ApplyStatus::Malformed
+	);
+	CHECK(calls == 0);
+	CHECK(receiver.Resource<Spot>()->X == 99);
+	const auto filtered = engine::replication::WriteComponents(receiver, delta, {}, refuseResource);
+	CHECK(filtered.Status == ApplyStatus::Ok);
+	CHECK(filtered.Refused == 1);
+	CHECK(calls == 1);
+	CHECK(receiver.Resource<Spot>()->X == 99);
+	CHECK(receiver.Get<Spot>(owner)->X == 33);
+	const auto deny = [&](Name, Entity) { return false; };
+	const auto denied = engine::replication::WriteComponents(receiver, delta, deny, refuseResource);
+	CHECK(denied.Status == ApplyStatus::Ok);
+	CHECK(denied.Refused == 2);
+	CHECK(calls == 1);
+	CHECK(receiver.Get<Spot>(owner)->X == 33);
+	const auto allowed = engine::replication::WriteComponents(receiver, delta);
+	CHECK(allowed.Status == ApplyStatus::Ok);
+	CHECK(receiver.Resource<Spot>()->X == 22);
+}

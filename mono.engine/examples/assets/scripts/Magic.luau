@@ -139,10 +139,7 @@ local STRAY_CEILING = 60
 local edits = Terrain.Edits.new()
 local field = Terrain.HeightField.new({ seed = SEED }, edits)
 
-local terrainRoot = Instance.new("Folder")
-terrainRoot.Name = "Terrain"
-terrainRoot.Parent = workspace
-
+local terrainRoot = workspace.Terrain
 local builder = TerrainRuntime.new(field, CHUNK, terrainRoot)
 
 -- The top surface of a column. A block at integer height `h` occupies
@@ -535,27 +532,20 @@ local function step(lane: Lane, delta: number)
 	end
 end
 
-local eye = Instance.new("Camera")
-eye.Name = "Eye"
-eye.FieldOfView = 70
-eye.FarPlaneZ = ARENA_CHUNKS * CHUNK * 6
-eye.Parent = workspace
-workspace.CurrentCamera = eye
-
 local ORBIT_RADIUS = ARENA_CHUNKS * CHUNK * 1.05
 local ORBIT_PERIOD = 90
 local EYE_HEIGHT = 46
 
-local function aim(seconds: number)
-	local angle = seconds * (math.pi * 2 / ORBIT_PERIOD)
-	local centre = Vector3.new(originX, groundAt(originX, originZ), originZ)
-	eye.CFrame = CFrame.lookAt(
-		centre + Vector3.new(math.cos(angle) * ORBIT_RADIUS, EYE_HEIGHT, math.sin(angle) * ORBIT_RADIUS),
-		centre
-	)
-end
-
-aim(0)
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local demoCamera = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+demoCamera:SetAttribute("Name", "Eye")
+demoCamera:SetAttribute("FieldOfView", 70)
+demoCamera:SetAttribute("FarPlaneZ", ARENA_CHUNKS * CHUNK * 6)
+demoCamera:SetAttribute("OrbitCentre", Vector3.new(originX, groundAt(originX, originZ), originZ))
+demoCamera:SetAttribute("OrbitRadius", ORBIT_RADIUS)
+demoCamera:SetAttribute("OrbitPeriod", ORBIT_PERIOD)
+demoCamera:SetAttribute("EyeHeight", EYE_HEIGHT)
 
 local stats = builder:stats()
 print(
@@ -623,7 +613,6 @@ RunService.Heartbeat:Connect(function(delta: number)
 	end
 
 	local now = if lanes[1] ~= nil then lanes[1].simulationTime else 0
-	aim(now)
 
 	if now - reportedAt >= 15 then
 		reportedAt = now

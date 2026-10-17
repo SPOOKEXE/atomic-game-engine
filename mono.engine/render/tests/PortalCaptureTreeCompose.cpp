@@ -1,10 +1,10 @@
+#include "PortalCaptureTreeImport.hpp"
 #include "RenderFixture.hpp"
 
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/graph/PipelineDocument.hpp>
-#include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalGeometry.hpp>
 #include <engine/render/PortalImageRuntime.hpp>
 #include <engine/scene/ActiveCamera.hpp>

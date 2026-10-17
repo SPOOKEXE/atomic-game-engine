@@ -30,7 +30,8 @@ namespace engine::script {
 	// Free rather than file-local because `JsSurface.cpp` binds `:Destroy` and
 	// friends, and every one of them starts here.
 	ecs::Entity JsEntityOf(JSContext *context, JSValueConst object) {
-		void *opaque = JS_GetOpaque2(context, object, JsOf(context).InstanceClass);
+		auto &bound = JsOf(context);
+		void *opaque = JS_GetOpaque2(context, object, bound.InstanceClass);
 		if (opaque == nullptr) {
 			// The class check throws when the object is of another class.
 			// Cleared: a caller asking "is this an instance" is entitled to a
@@ -38,6 +39,8 @@ namespace engine::script {
 			JS_FreeValue(context, JS_GetException(context));
 			return ecs::NULL_ENTITY;
 		}
+		// Only the builtin follows the service arriving or being replaced in a replica.
+		if (JS_IsStrictEqual(context, object, bound.Workspace)) return scene::WorkspaceOf(*bound.World);
 		return *static_cast<ecs::Entity *>(opaque);
 	}
 
@@ -409,10 +412,8 @@ namespace engine::script {
 		}
 		case PropertyType::Reference: {
 			// An instance arrives as its object; `null` detaches, which is
-			// what Roblox's `Parent = nil` means. `workspace` needs no case
-			// of its own any more - it is an instance object like any other,
-			// which is the whole of what collapsing the two notions of "the
-			// workspace" bought.
+			// what Roblox's `Parent = nil` means. The builtin resolves the current
+			// service through the same instance conversion used by methods.
 			if (JS_IsNull(value) || JS_IsUndefined(value)) {
 				*static_cast<Entity *>(out) = ecs::NULL_ENTITY;
 				return true;
@@ -422,7 +423,7 @@ namespace engine::script {
 			if (opaque == nullptr) {
 				return false;
 			}
-			*static_cast<Entity *>(out) = *static_cast<Entity *>(opaque);
+			*static_cast<Entity *>(out) = JsEntityOf(context, value);
 			return true;
 		}
 		case PropertyType::Opaque:
@@ -467,6 +468,8 @@ namespace engine::script {
 			const char *name = JS_ToCString(context, data[0]);
 			const PropertyDescriptor *property = BoundProperty(*bound.World, instance, name, ordinal);
 			JS_FreeCString(context, name);
+			const auto &execution = JsExecutionRole(context);
+			const bool client = execution.Client && !execution.Server;
 
 			if (property == nullptr) {
 				return JS_ThrowTypeError(context, "no such property");
@@ -479,7 +482,7 @@ namespace engine::script {
 			// behaviour rather than a fast path. So it gets a real object.
 			if (property->Type == PropertyType::String) {
 				std::string text;
-				if (!ReadInstanceProperty(*bound.World, instance, *property, &text, sizeof(text))) {
+				if (!ReadInstanceProperty(*bound.World, instance, *property, &text, sizeof(text), client)) {
 					return JS_ThrowTypeError(context, "could not read '%s'", property->Name.Text().data());
 				}
 				return JS_NewStringLen(context, text.data(), text.size());
@@ -487,7 +490,7 @@ namespace engine::script {
 
 			alignas(16) unsigned char bytes[WIDEST_PROPERTY] = {};
 			if (property->Size > sizeof(bytes) ||
-				!ReadInstanceProperty(*bound.World, instance, *property, bytes, property->Size)) {
+				!ReadInstanceProperty(*bound.World, instance, *property, bytes, property->Size, client)) {
 				return JS_ThrowTypeError(context, "could not read '%s'", property->Name.Text().data());
 			}
 			return ToJsValue(context, property->Type, property->EnumName, bytes);
@@ -531,7 +534,15 @@ namespace engine::script {
 				const std::string value(text, length);
 				JS_FreeCString(context, text);
 
-				if (!WriteInstanceProperty(*bound.World, instance, *property, &value, sizeof(value))) {
+				const HostRole &execution = JsExecutionRole(context);
+				if (!WriteInstanceProperty(
+						*bound.World,
+						instance,
+						*property,
+						&value,
+						sizeof(value),
+						execution.Client && !execution.Server
+					)) {
 					return JS_ThrowTypeError(context, "could not set '%s'", property->Name.Text().data());
 				}
 				return JS_UNDEFINED;
@@ -548,7 +559,15 @@ namespace engine::script {
 			// Refused loudly. A replica rejecting the write is the case that
 			// matters: a script author cannot tell "rejected" from "applied and
 			// overwritten by the next delta" without being told.
-			if (!WriteInstanceProperty(*bound.World, instance, *property, bytes, property->Size)) {
+			const HostRole &execution = JsExecutionRole(context);
+			if (!WriteInstanceProperty(
+					*bound.World,
+					instance,
+					*property,
+					bytes,
+					property->Size,
+					execution.Client && !execution.Server
+				)) {
 				return JS_ThrowTypeError(context, "could not set '%s'", property->Name.Text().data());
 			}
 			return JS_UNDEFINED;
@@ -575,8 +594,12 @@ namespace engine::script {
 			JSValue proto =
 				JS_IsObject(methods) ? JS_NewObjectProto(context, methods) : JS_NewObject(context);
 			JS_FreeValue(context, methods);
+			if (bound.World->IsA(sample, ecs::Classes::Find(Name("RemoteEvent"))))
+				InstallJsRemoteEventMembers(context, proto);
 
-			const auto properties = bound.World->PropertiesOf(sample);
+			const auto properties = sample == ecs::NULL_ENTITY && id.IsValid()
+										? ecs::Classes::Describe(id).Properties
+										: bound.World->PropertiesOf(sample);
 			for (size_t index = 0; index < properties.size(); index++) {
 				const PropertyDescriptor &property = properties[index];
 				if (!property.Scriptable) continue;
@@ -725,7 +748,8 @@ namespace engine::script {
 			return table;
 		}
 
-		JSValue InstanceNew(JSContext *context, JSValueConst, int argc, JSValueConst *argv) {
+		JSValue
+		InstanceNew(JSContext *context, JSValueConst, int argc, JSValueConst *argv, int, JSValueConst *data) {
 			JsContext &bound = JsOf(context);
 			if (argc < 1) {
 				return JS_ThrowTypeError(context, "Instance.new needs a class name");
@@ -744,7 +768,11 @@ namespace engine::script {
 					return JS_ThrowTypeError(context, "Instance.new parent must be an instance");
 				}
 			}
-			const InstanceCreateResult created = CreateScriptInstance(*bound.World, className, parent);
+			const HostRole &execution = JsExecutionRole(context);
+			const bool clientExecution =
+				JS_ToBool(context, data[0]) > 0 || (execution.Client && !execution.Server);
+			const InstanceCreateResult created =
+				CreateScriptInstance(*bound.World, className, parent, clientExecution);
 			if (created.Failure == InstanceCreateFailure::UnknownClass) {
 				JSValue error = JS_ThrowTypeError(context, "'%s' is not a registered class", className);
 				JS_FreeCString(context, className);
@@ -1225,6 +1253,11 @@ namespace engine::script {
 			}
 
 			const char *name = JS_ToCString(context, argv[0]);
+			if (name == nullptr) return JS_EXCEPTION;
+			if (std::string_view(name) == "Workspace") {
+				JS_FreeCString(context, name);
+				return JS_DupValue(context, JsOf(context).Workspace);
+			}
 			JSValue global = JS_GetGlobalObject(context);
 			JSValue service = JS_GetPropertyStr(context, global, name);
 			JS_FreeValue(context, global);
@@ -1597,8 +1630,64 @@ namespace engine::script {
 		return *static_cast<JsContext *>(JS_GetContextOpaque(context));
 	}
 
+	std::string
+	RegisterJsSource(JSContext *context, std::string_view name, const HostRole &role, ecs::Entity source) {
+		const unsigned side =
+			unsigned(role.Server) | (unsigned(role.Client) << 1) | (unsigned(role.Studio) << 2);
+		std::string compiled = "atomic-script://" + std::to_string(side) + "/" + std::to_string(source.Id) +
+							   "/" + std::string(name);
+		const JSAtom atom = JS_NewAtomLen(context, compiled.data(), compiled.size());
+		auto &bound = JsOf(context);
+		if (bound.SourceOrigins.contains(atom))
+			JS_FreeAtom(context, atom);
+		else
+			bound.SourceOrigins.emplace(
+				atom, JsContext::SourceOrigin{role, std::string(name), compiled, source}
+			);
+		bound.HasClientSource |= role.Client && !role.Server;
+		return compiled;
+	}
+
+	namespace {
+		const JsContext::SourceOrigin *ExecutingJsSource(JSContext *context) {
+			auto &bound = JsOf(context);
+			for (int depth = 0; depth < int(Runtime::StackGuard::MAX_DEPTH); ++depth) {
+				const JSAtom atom = JS_GetScriptOrModuleName(context, depth);
+				if (atom == JS_ATOM_NULL) continue;
+				const auto found = bound.SourceOrigins.find(atom);
+				JS_FreeAtom(context, atom);
+				if (found != bound.SourceOrigins.end()) return &found->second;
+			}
+			return nullptr;
+		}
+	}
+
+	const HostRole &JsExecutionRole(JSContext *context) {
+		if (const auto *source = ExecutingJsSource(context)) return source->Role;
+		auto &bound = JsOf(context);
+		// Dynamic functions without a tracked parent cannot acquire server authority
+		// in a VM which also runs client source.
+		return bound.HasClientSource ? bound.ClientFallback : bound.Role;
+	}
+
+	JSValue MakeJsInstanceConstructor(JSContext *context, bool clientExecution) {
+		JSValue table = JS_NewObject(context);
+		JSValue side = JS_NewBool(context, clientExecution);
+		JS_DefinePropertyValueStr(
+			context,
+			table,
+			"new",
+			JS_NewCFunctionData(context, InstanceNew, 1, 0, 1, &side),
+			JS_PROP_ENUMERABLE
+		);
+		JS_PreventExtensions(context, table);
+		return table;
+	}
+
 	CallbackRef Retain(JSContext *context, JSValueConst value) {
 		JsContext &bound = JsOf(context);
+		const auto *origin = ExecutingJsSource(context);
+		const auto source = origin != nullptr ? origin->Source : bound.RetainingSource;
 
 		// A recycled slot when there is one. Without this a game that connects
 		// and disconnects every frame grows `Callables` by one index per frame
@@ -1607,11 +1696,14 @@ namespace engine::script {
 		if (!bound.FreeRefs.empty()) {
 			const CallbackRef reference = bound.FreeRefs.back();
 			bound.FreeRefs.pop_back();
-			bound.Callables[static_cast<size_t>(reference)] = JS_DupValue(context, value);
+			auto &callable = bound.Callables[static_cast<size_t>(reference)];
+			callable.Value = JS_DupValue(context, value);
+			callable.Source = source;
+			++callable.Generation;
 			return reference;
 		}
 
-		bound.Callables.push_back(JS_DupValue(context, value));
+		bound.Callables.push_back({JS_DupValue(context, value), source, 1});
 		return static_cast<CallbackRef>(bound.Callables.size() - 1);
 	}
 
@@ -1619,12 +1711,13 @@ namespace engine::script {
 		JsContext &bound = JsOf(context);
 		const auto slot = static_cast<size_t>(reference);
 
-		if (slot >= bound.Callables.size() || JS_IsUndefined(bound.Callables[slot])) {
+		if (slot >= bound.Callables.size() || JS_IsUndefined(bound.Callables[slot].Value)) {
 			return;
 		}
 
-		JS_FreeValue(context, bound.Callables[slot]);
-		bound.Callables[slot] = JS_UNDEFINED;
+		JS_FreeValue(context, bound.Callables[slot].Value);
+		bound.Callables[slot].Value = JS_UNDEFINED;
+		bound.Callables[slot].Source = ecs::NULL_ENTITY;
 		bound.FreeRefs.push_back(reference);
 	}
 
@@ -1632,7 +1725,70 @@ namespace engine::script {
 		JsContext &bound = JsOf(context);
 		const auto slot = static_cast<size_t>(reference);
 
-		return slot < bound.Callables.size() ? bound.Callables[slot] : JS_UNDEFINED;
+		return slot < bound.Callables.size() ? bound.Callables[slot].Value : JS_UNDEFINED;
+	}
+
+	bool JsCallbackAlive(JSContext *context, CallbackRef reference) {
+		const auto &bound = JsOf(context);
+		const auto slot = static_cast<size_t>(reference);
+		if (slot >= bound.Callables.size() || JS_IsUndefined(bound.Callables[slot].Value)) return false;
+		const auto source = bound.Callables[slot].Source;
+		return source == ecs::NULL_ENTITY || bound.World->Alive(source);
+	}
+
+	uint64_t JsCallbackGeneration(JSContext *context, CallbackRef reference) {
+		return JsCallbackAlive(context, reference)
+				   ? JsOf(context).Callables[static_cast<size_t>(reference)].Generation
+				   : 0;
+	}
+
+	JSValue InvokeJsCallback(JSContext *context, CallbackRef reference, int count, JSValueConst *arguments) {
+		// A previous listener may have destroyed this Script during the same pump.
+		if (!JsCallbackAlive(context, reference)) return JS_UNDEFINED;
+		return JS_Call(context, Held(context, reference), JS_UNDEFINED, count, arguments);
+	}
+
+	void ReapJsScripts(JSContext *context) {
+		auto &bound = JsOf(context);
+		for (size_t slot = 0; slot < bound.Callables.size(); ++slot) {
+			const auto &callable = bound.Callables[slot];
+			if (JS_IsUndefined(callable.Value) || callable.Source == ecs::NULL_ENTITY ||
+				bound.World->Alive(callable.Source))
+				continue;
+			const auto reference = static_cast<CallbackRef>(slot);
+			bound.Signals.DropCallback(reference);
+			bound.Tasks.Cancel(reference);
+			bound.Actions.DropCallback(reference);
+			bound.Subscriptions.DropCallback(reference);
+			bound.Scopes.DropCallback(static_cast<uint64_t>(reference));
+			bound.WaitTicks.erase(reference);
+			std::erase_if(bound.AwaitedTickets, [reference](const auto &entry) {
+				return entry.second == reference;
+			});
+			std::erase_if(bound.AwaitedChildren, [&](const auto &entry) {
+				if (entry.second != reference) return false;
+				bound.Waiters.Cancel(entry.first);
+				return true;
+			});
+			std::erase_if(bound.AwaitedEditableMeshes, [reference](const auto &entry) {
+				return entry.second == reference;
+			});
+			std::erase_if(bound.AwaitedComputations, [reference](const auto &entry) {
+				return entry.second == reference;
+			});
+			std::erase_if(bound.HostCallbacks, [reference](const auto &entry) {
+				return entry.second == reference;
+			});
+			Release(context, reference);
+		}
+		for (auto source = bound.SourceOrigins.begin(); source != bound.SourceOrigins.end();) {
+			if (source->second.Source == ecs::NULL_ENTITY || bound.World->Alive(source->second.Source)) {
+				++source;
+				continue;
+			}
+			JS_FreeAtom(context, source->first);
+			source = bound.SourceOrigins.erase(source);
+		}
 	}
 
 	// One instance object for an entity, prototype and all.
@@ -1697,10 +1853,12 @@ namespace engine::script {
 		// a `Folder` would be offering an answer that means nothing.
 		JSValue CurrentCameraGet(JSContext *context, JSValueConst) {
 			ecs::Store &store = *JsOf(context).World;
+			const HostRole &role = JsExecutionRole(context);
+			const bool client = role.Client && !role.Server;
 
 			const auto *active = store.Resource<scene::ActiveCamera>();
 			if (active == nullptr || active->Entity == ecs::NULL_ENTITY ||
-				!InstanceAlive(store, active->Entity)) {
+				!InstanceVisibleToScript(store, active->Entity, client)) {
 				// **Null rather than a camera made on demand**, which is the Luau
 				// side's answer and for its reason: a headless world genuinely has
 				// none, and minting a row so a property has something to point at
@@ -1713,6 +1871,10 @@ namespace engine::script {
 
 		JSValue CurrentCameraSet(JSContext *context, JSValueConst, JSValueConst value) {
 			ecs::Store &store = *JsOf(context).World;
+			const HostRole &role = JsExecutionRole(context);
+			if (!role.Client || role.Server) {
+				return JS_ThrowTypeError(context, "CurrentCamera belongs to the local client");
+			}
 
 			// The aspect ratio is the *consumer's* - a window wrote it - so it
 			// survives a camera change. Read first and kept, exactly as
@@ -1764,6 +1926,7 @@ namespace engine::script {
 		auto *bound = new JsContext();
 		bound->World = &store;
 		bound->Role = role;
+		bound->ClientFallback.Studio = role.Studio;
 		bound->Access = access;
 		bound->Js = context;
 		JS_SetContextOpaque(context, bound);
@@ -2104,11 +2267,9 @@ namespace engine::script {
 		}
 
 		// Instance
-		{
-			JSValue table = JS_NewObject(context);
-			JS_SetPropertyStr(context, table, "new", JS_NewCFunction(context, InstanceNew, "new", 1));
-			JS_SetPropertyStr(context, global, "Instance", table);
-		}
+		JS_SetPropertyStr(
+			context, global, "Instance", MakeJsInstanceConstructor(context, role.Client && !role.Server)
+		);
 
 		// workspace - **this world's `Workspace` service**, and until v0.7 it
 		// was a plain object standing for the world itself. `LuauBindings.hpp`
@@ -2131,15 +2292,14 @@ namespace engine::script {
 			// same prototype, same opaque entity, so `IsA`, `GetChildren` and
 			// every declared property arrive through the chain rather than
 			// being listed again here.
-			JSValue world = JS_NULL;
-			if (const ecs::ClassId id = InstanceClassOf(*bound->World, workspace); id.IsValid()) {
-				JSValue proto = PrototypeFor(context, id, workspace);
-				world = JS_NewObjectProtoClass(context, proto, static_cast<int>(bound->InstanceClass));
-				JS_FreeValue(context, proto);
-				JS_SetOpaque(world, new Entity(workspace));
-			} else {
-				world = JS_NewObject(context);
-			}
+			// Class registration does not furnish a replica. Its builtin must still
+			// expose instance methods before the first authoritative scene arrives.
+			(void)scene::ServiceClass();
+			const auto id = ecs::Classes::Find(Name("Workspace"));
+			JSValue proto = PrototypeFor(context, id, workspace);
+			JSValue world = JS_NewObjectProtoClass(context, proto, static_cast<int>(bound->InstanceClass));
+			JS_FreeValue(context, proto);
+			JS_SetOpaque(world, new Entity(workspace));
 
 			// **Before the seal**, because a sealed object cannot take a method
 			// - nor an accessor, which is what made `CurrentCamera`'s absence
@@ -2154,6 +2314,9 @@ namespace engine::script {
 			JS_PreventExtensions(context, world);
 
 			bound->Workspace = JS_DupValue(context, world);
+			JSValue game = JS_GetPropertyStr(context, global, "game");
+			JS_DefinePropertyValueStr(context, game, "Workspace", JS_DupValue(context, world), 0);
+			JS_FreeValue(context, game);
 			JS_SetPropertyStr(context, global, "workspace", world);
 		}
 
@@ -2174,6 +2337,8 @@ namespace engine::script {
 		for (auto &entry : bound->Prototypes) {
 			JS_FreeValue(context, entry.second);
 		}
+		for (const auto &[source, origin] : bound->SourceOrigins)
+			JS_FreeAtom(context, source);
 		JS_FreeValue(context, bound->Workspace);
 
 		// **The store's change listeners go before the VM does.** They capture
@@ -2187,8 +2352,8 @@ namespace engine::script {
 		// Every retained callable, whatever holds its reference. One loop
 		// because `Callables` is where they all actually live; the tables above
 		// hold integers into it.
-		for (JSValue &callable : bound->Callables) {
-			JS_FreeValue(context, callable);
+		for (auto &callable : bound->Callables) {
+			JS_FreeValue(context, callable.Value);
 		}
 
 		JS_SetContextOpaque(context, nullptr);
@@ -2253,7 +2418,7 @@ namespace engine::script {
 					context, reply, "Version", JS_NewFloat64(context, static_cast<double>(delivery.Version))
 				);
 
-				JSValue result = JS_Call(context, Held(context, resolver), JS_UNDEFINED, 1, &reply);
+				JSValue result = InvokeJsCallback(context, resolver, 1, &reply);
 				if (JS_IsException(result)) {
 					JSValue thrown = JS_GetException(context);
 					if (firstError.empty()) {
@@ -2336,7 +2501,7 @@ namespace engine::script {
 			arguments[1] = JS_NewStringLen(context, topic.data(), topic.size());
 
 			for (const CallbackRef callback : listeners) {
-				JSValue result = JS_Call(context, Held(context, callback), JS_UNDEFINED, 2, arguments);
+				JSValue result = InvokeJsCallback(context, callback, 2, arguments);
 				if (JS_IsException(result)) {
 					JSValue thrown = JS_GetException(context);
 					if (firstError.empty()) {

@@ -45,6 +45,7 @@ static void RunPortalSuccessor(int outcome) {
 	const bool readinessExpiry = outcome == 7;
 	const bool readinessDisconnect = outcome == 8;
 	const bool delayedDestination = outcome == 16;
+	const bool returnSeam = renderContent && !delayedDestination;
 	const bool withheldSnapshot = readinessExpiry || readinessDisconnect;
 	const bool retryRefusal = outcome == 1 || lostCancellationAck || withheldSnapshot;
 	CAPTURE(outcome);
@@ -61,6 +62,8 @@ static void RunPortalSuccessor(int outcome) {
 		const auto pane = scene::MakePart(source, part);
 		part.Frame = core::CFrame({0, 3, -30});
 		const auto exit = scene::MakePart(source, part);
+		REQUIRE(source.SetInstanceName(pane, "Pane"));
+		REQUIRE(source.SetInstanceName(exit, "Exit"));
 		REQUIRE(source.SetParent(pane, scene::WorkspaceOf(source)));
 		REQUIRE(source.SetParent(exit, scene::WorkspaceOf(source)));
 		const auto portal = source.CreateInstance(ecs::Classes::Find(core::Name("Portal")), "Window");
@@ -125,6 +128,7 @@ static void RunPortalSuccessor(int outcome) {
 		offer.Through = scene::SeamMapping(seams.front());
 	}
 	std::optional<replication::ClientId> sourcePeer;
+	std::optional<assets::PublicKey> sourceIdentity;
 	std::vector<std::pair<replication::ClientId, game::PortalSessionMessage>> sourceReplies,
 		destinationReplies;
 	bool proceeded = false, resumed = false, committed = false, destinationInput = false;
@@ -238,6 +242,54 @@ static void RunPortalSuccessor(int outcome) {
 			store.GetMutable<scene::SurfaceAppearance>(part)->ColourMap = core::Name(published.Name);
 	};
 	if (renderContent) contentWall(destination, destinationContent);
+	if (outcome == 0) {
+		// The arrival eye may look back through the far endpoint. Keep that route
+		// paired with the source seam instead of advertising an empty destination.
+		scene::PartDesc part;
+		part.Frame = core::CFrame({0, 3, -30});
+		part.Size = {40, 40, .4f};
+		const auto pane = scene::MakePart(destination, part);
+		part.Frame = core::CFrame({0, 3, -5});
+		const auto exit = scene::MakePart(destination, part);
+		REQUIRE(destination.SetInstanceName(pane, "Exit"));
+		REQUIRE(destination.SetInstanceName(exit, "Pane"));
+		REQUIRE(destination.SetParent(pane, scene::WorkspaceOf(destination)));
+		REQUIRE(destination.SetParent(exit, scene::WorkspaceOf(destination)));
+		const auto portal = destination.CreateInstance(ecs::Classes::Find(core::Name("Portal")), "Window");
+		REQUIRE(destination.SetParent(portal, pane));
+		destination.Set(portal, scene::Portal{exit, core::Name("source")});
+		std::vector<scene::PortalSeam> sourceSeams, destinationSeams;
+		REQUIRE(scene::GatherPortalSeams(source, sourceSeams) == 1);
+		REQUIRE(scene::GatherPortalSeams(destination, destinationSeams) == 1);
+		const auto sourceToDestination = scene::SeamMapping(sourceSeams.front());
+		const auto destinationToSource = scene::SeamMapping(destinationSeams.front());
+		const core::Vector3 samplePoint{2, 5, -8};
+		const core::Vector3 sampleDirection{.3f, .5f, -.8f};
+		CHECK(
+			(destinationToSource.Point(sourceToDestination.Point(samplePoint)) - samplePoint).Magnitude() <
+			0.01f
+		);
+		CHECK(
+			(destinationToSource.Rotate(sourceToDestination.Rotate(sampleDirection)) - sampleDirection)
+				.Magnitude() < 0.001f
+		);
+	}
+	if (returnSeam) {
+		// The source observation remains live only while the successor has a
+		// linked return seam. Keep it outside the camera's prewarm radius so this
+		// content test retains the source without adding another eye request.
+		scene::PartDesc paneDesc;
+		paneDesc.Frame = core::CFrame({1000, 3, -5});
+		paneDesc.Size = {40, 40, .4f};
+		const auto pane = scene::MakePart(destination, paneDesc);
+		paneDesc.Frame = core::CFrame({1100, 3, -5});
+		const auto exit = scene::MakePart(destination, paneDesc);
+		REQUIRE(destination.SetParent(pane, scene::WorkspaceOf(destination)));
+		REQUIRE(destination.SetParent(exit, scene::WorkspaceOf(destination)));
+		const auto portal = destination.CreateInstance(ecs::Classes::Find(core::Name("Portal")), "Return");
+		REQUIRE(destination.SetParent(portal, pane));
+		destination.Set(portal, scene::Portal{exit, core::Name("source")});
+	}
 	bool destinationContentRequestedBeforeAdoption = false;
 	const auto contentRequest =
 		[&](ContentPublication &published, replication::ClientId peer, std::span<const std::byte> bytes) {
@@ -310,11 +362,33 @@ static void RunPortalSuccessor(int outcome) {
 					reply.Message.Sequence = ++topologySequence;
 					reply.Message.Correlation = frame.Message.Correlation;
 					std::string failure;
-					REQUIRE(
-						scene::EncodeCameraPortalTopology(
-							{frame.Message.To.World, 1, {}}, reply.Message.Payload, failure
-						)
+					scene::CameraPortalTopology topology{frame.Message.To.World, topologySequence, {}};
+					ecs::Store *owner = nullptr;
+					if (frame.Message.To.World == "source") {
+						owner = &source;
+					} else if (frame.Message.To.World == offer.Claim.Destination) {
+						owner = &destination;
+					}
+					if (owner != nullptr) {
+						std::vector<scene::PortalSeam> seams;
+						scene::GatherPortalSeams(*owner, seams);
+						for (const auto &seam : seams) {
+							if (!seam.Crosses) continue;
+							scene::CameraPortalMouth mouth;
+							REQUIRE(
+								scene::CopyCameraPortalMouth(
+									owner->GetFullName(seam.Camera), seam, mouth, failure
+								)
+							);
+							topology.Mouths.push_back(std::move(mouth));
+						}
+					}
+					std::sort(
+						topology.Mouths.begin(),
+						topology.Mouths.end(),
+						[](const auto &left, const auto &right) { return left.Name < right.Name; }
 					);
+					REQUIRE(scene::EncodeCameraPortalTopology(topology, reply.Message.Payload, failure));
 					REQUIRE(stream.Queue(reply) == world::PresentationStatus::Ok);
 					continue;
 				}
@@ -391,6 +465,8 @@ static void RunPortalSuccessor(int outcome) {
 		if (request.Kind == game::PortalSessionKind::Fresh) {
 			sourceFresh++;
 			sourcePeer = peer;
+			sourceIdentity = from.IdentityOf(peer);
+			REQUIRE(sourceIdentity.has_value());
 			game::PortalSessionMessage ready;
 			ready.Kind = game::PortalSessionKind::Ready;
 			ready.Attempt = request.Attempt;
@@ -435,7 +511,7 @@ static void RunPortalSuccessor(int outcome) {
 				CHECK(now - *offerSentAt >= 15);
 				CHECK(request.Diagnostic == "destination connection or snapshot did not become ready");
 				REQUIRE(destinationPeer.has_value());
-				CHECK(to->IdentityOf(*destinationPeer) == from.IdentityOf(*sourcePeer));
+				CHECK(to->IdentityOf(*destinationPeer) == sourceIdentity);
 			}
 			if (readinessDisconnect) {
 				CHECK(transportLost);
@@ -459,7 +535,7 @@ static void RunPortalSuccessor(int outcome) {
 		}
 		if (receivePresentation(*destinationPresentation, destinationConsumers, bytes)) {
 			destinationPeer = peer;
-			CHECK(to->IdentityOf(peer) == from.IdentityOf(*sourcePeer));
+			CHECK(to->IdentityOf(peer) == sourceIdentity);
 			if (delayedDestination && !destinationLatencyAppliedAt) {
 				REQUIRE(to->SetSimulatedLatency(peer, 150));
 				destinationLatencyAppliedAt = now;
@@ -486,7 +562,7 @@ static void RunPortalSuccessor(int outcome) {
 		}
 		CHECK(request.Claim == offer.Claim);
 		CHECK(request.Attempt == offer.Attempt);
-		CHECK(to->IdentityOf(peer) == from.IdentityOf(*sourcePeer));
+		CHECK(to->IdentityOf(peer) == sourceIdentity);
 		if (delayedDestination && request.Kind == game::PortalSessionKind::Resume)
 			delayedResumeReceivedAt = now;
 		if (delayedDestination && request.Kind == game::PortalSessionKind::Commit)
@@ -709,8 +785,7 @@ end)
 	if (observeContent) {
 		CHECK(lateContentAuthored);
 		CHECK(sourceManifestWaited);
-		// The delayed successor resolves its own camera after adoption. With no
-		// return seam visible, the old source eye creates no late content demand.
+		// Delayed admission does not request the source bundle.
 		CHECK(sourceContent.BundleRequests == (delayedDestination ? 0 : 1));
 		if (renderContent) {
 			CHECK(destinationContentRequestedBeforeAdoption);
@@ -810,12 +885,13 @@ end)
 	if (outcome >= 2) CHECK(sourceInputsDuringContinuation > 0);
 	CHECK(sourceFresh == 1);
 	CHECK(destinationFresh == 0);
-	CHECK_FALSE(sourceConsumers.Endpoints.empty());
+	const bool portalConsumersExpected = outcome == 0 || delayedDestination || returnSeam;
+	CHECK(sourceConsumers.Endpoints.empty() == !portalConsumersExpected);
 	CHECK(destinationConsumers.Revision != 0);
-	CHECK(destinationConsumers.Endpoints.empty() == (outcome != 0 && !delayedDestination));
+	CHECK(destinationConsumers.Endpoints.empty() == !portalConsumersExpected);
 	CHECK(destinationConsumers.Session == sourceConsumers.Session);
 	CHECK(requestedImage == (outcome == 0));
-	CHECK(requestedEye == (outcome == 0 || delayedDestination));
+	CHECK(requestedEye == (outcome == 0));
 	CHECK(refusalSeen == retryRefusal);
 	CHECK(destinationRefusalSeen == (outcome == 2 || outcome == 3));
 	CHECK(transportLost == (outcome == 4 || outcome == 5 || readinessDisconnect));

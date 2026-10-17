@@ -419,8 +419,10 @@ reflection.SurfaceSize = Vector3.new(1024, 1024, 0)
 reflection.Face = Enum.NormalId.Back
 reflection.Parent = pane
 
-local view = Instance.new("Camera")
-view.Name = "Eye"
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local view = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+view:SetAttribute("Name", "Eye")
 
 -- **Aimed with `lookAt` rather than placed with `new`.** A bare `CFrame.new`
 -- carries no rotation, so a camera lifted above the grid still stares
@@ -431,20 +433,11 @@ view.Name = "Eye"
 -- fill the frame and the back row hides behind them, which reads as a grid that
 -- only half loaded. Looking down the rows separates them, and the target sits
 -- low and slightly back so the whole plate stays in shot.
-view.CFrame = CFrame.lookAt(
+view:SetAttribute("CFrame", CFrame.lookAt(
 	Vector3.new(0, PLATE_Z * 0.40, PLATE_Z * 0.78),
 	Vector3.new(0, MODEL_SIZE * 0.35, -SPACING * 0.5)
-)
-view.FieldOfView = 60
-view.Parent = workspace
-
--- **Parenting a camera is not aiming with it, and forgetting this line is
--- invisible.** A world holds as many cameras as it likes and `ActiveCamera`
--- names the live one, so a `Camera` that is only parented is a row nothing
--- reads. The client then keeps its own placeholder and orbits it - which
--- renders a perfectly good picture from the wrong place, so the scene looks
--- built and merely badly framed rather than broken.
-workspace.CurrentCamera = view
+))
+view:SetAttribute("FieldOfView", 60)
 
 -- **The grid grows here, and this is the whole change.** Content is fetched
 -- across frames, so the catalogue is empty when this chunk runs and fills as

@@ -423,13 +423,14 @@ namespace engine::render {
 				// The depth is bounded by `MAX_PORTAL_DEPTH`, so the recursion is four
 				// deep at worst and the indirection is paid once per hole per level
 				// beside a whole scene render.
-				std::function<void(const scene::CameraMatrices &, const core::CFrame &, uint32_t, int8_t)>
+				std::function<void(const scene::CameraMatrices &, const core::CFrame &, uint32_t, int16_t)>
 					fillLevel;
+				bool weatherCaptureFailed = false;
 
 				fillLevel = [&](const scene::CameraMatrices &from,
 								const core::CFrame &fromFrame,
 								uint32_t level,
-								int8_t skip) {
+								int16_t skip) {
 					for (size_t slot = 0; slot < scene::MAX_SURFACES; slot++) {
 						if (portalOf[slot] == nullptr) {
 							continue;
@@ -457,6 +458,7 @@ namespace engine::render {
 
 						if (level > 0) {
 							fillLevel(sub.Matrices, sub.Frame, level - 1, portal.Partner);
+							if (weatherCaptureFailed) return;
 						}
 
 						if (!recording.AdmitSurfaceCapture(sceneWidth, sceneHeight, portalLevels - level)) {
@@ -499,7 +501,8 @@ namespace engine::render {
 							&portalViewport,
 							lightUniforms,
 							nullptr,
-							WorldColourTarget::Hdr
+							WorldColourTarget::Hdr,
+							true
 						);
 
 						const FrameUniforms subFrameUniforms{
@@ -592,13 +595,20 @@ namespace engine::render {
 								paneTexture,
 								State->SurfaceSampler,
 								portal.TagFilter,
-								result.Triangles
+								result.Triangles,
+								nullptr,
+								Impl::SlotSelection::All,
+								Impl::VisibilityPass::Secondary,
+								Pipeline->Name
 							);
 						}
 
 						// **`panesFollow` is false here**, because this level's panes
 						// were drawn with the opaque head above - nothing follows that
 						// needs the transparent pipeline bound for it.
+						recording.DrawGroundGrid(
+							pass, sub.Matrices.ViewProjection, sub.Frame, WorldColourTarget::Hdr
+						);
 						if (drawInterface) {
 							result.DrawCalls += gameInterfaceHook->RecordWorld(
 								command,
@@ -663,6 +673,21 @@ namespace engine::render {
 						}
 
 						SDL_EndGPURenderPass(pass);
+						if (!recording.RecordCaptureWeather(
+								context,
+								target->Colour,
+								target->Depth,
+								sub.Matrices.ViewProjection,
+								sub.Frame,
+								sceneWidth,
+								sceneHeight,
+								recording.CurrentLighting,
+								targetWidth,
+								targetHeight
+							)) {
+							weatherCaptureFailed = true;
+							return;
+						}
 						result.PortalPasses++;
 					}
 				};
@@ -670,6 +695,7 @@ namespace engine::render {
 				fillLevel(
 					recording.BehaviourMatrices, recording.Request.VisibilityCameraFrame, portalLevels - 1, -1
 				);
+				if (weatherCaptureFailed) return false;
 
 				if (!recording.CaptureSeamLights(WorldColourTarget::Display)) {
 					return false;
@@ -778,7 +804,11 @@ namespace engine::render {
 									   bool reverseSpectrum = false
 								   ) { return recording.DrawImage(source, target, load, reverseSpectrum); };
 
-			enterNamedPass(context.Name);
+			if (!recording.Activity.PortalOverlay) {
+				if (context.Reads.empty() || context.Writes.empty()) return false;
+				return recording.PublishIdentity(context, context.Reads.front(), context.Writes.front());
+			}
+
 			Impl::NamedTexture source;
 			Impl::NamedTexture target;
 			if (!context.Reads.empty()) {
@@ -790,10 +820,17 @@ namespace engine::render {
 					break;
 				}
 			}
-			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
+			const bool exactCopy = source.IsValid() && target.IsValid() && source.Format == target.Format &&
+								   source.Width == target.Width && source.Height == target.Height;
+			if (!exactCopy || source.Texture == target.Texture) enterNamedPass(context.Name);
+			const bool published = exactCopy ? recording.CopyImage(context.Name, source, target)
+											 : drawImage(source, target, SDL_GPU_LOADOP_CLEAR);
+			if (!published) {
 				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
-				return true;
+				return false;
 			}
+
+			if (!haveInstances || !recording.HavePortals) return true;
 
 			const bool hdr = target.Format == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 			SDL_GPUColorTargetInfo portalTarget{};
@@ -804,7 +841,9 @@ namespace engine::render {
 			depthTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			depthTarget.store_op = SDL_GPU_STOREOP_STORE;
 			depthTarget.cycle = false;
+			recording.InvalidateBackgroundTexture(depthTarget.texture);
 			SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(command, &portalTarget, 1, &depthTarget);
+			if (pass == nullptr) return false;
 			SDL_PushGPUFragmentUniformData(command, 1, &lightUniforms, sizeof(lightUniforms));
 			SDL_PushGPUFragmentUniformData(command, 2, &State->Beams, sizeof(State->Beams));
 			SDL_SetGPUViewport(pass, &sceneViewport);
@@ -910,7 +949,8 @@ namespace engine::render {
 							result.Triangles,
 							nullptr,
 							Impl::SlotSelection::All,
-							Impl::VisibilityPass::MainCamera
+							Impl::VisibilityPass::MainCamera,
+							Pipeline->Name
 						);
 					}
 				};

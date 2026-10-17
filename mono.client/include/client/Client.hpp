@@ -20,6 +20,7 @@
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Input.hpp>
+#include <engine/imagegraph/Content.hpp>
 #include <engine/input/Translate.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/net/Wire.hpp>
@@ -63,6 +64,7 @@
 #include <client/Scene.hpp>
 #include <client/SettingsMenu.hpp>
 #include <client/Sounds.hpp>
+#include <client/WeatherSounds.hpp>
 #include <cstdint>
 #include <discord/Link.hpp>
 #include <filesystem>
@@ -289,6 +291,7 @@ namespace client {
 		void IndexPackagedAudio();
 		void LoadPackagedAudio(engine::ecs::Store &store);
 		void PumpContent(ContentSession &content, std::span<const engine::world::WorldId> worlds);
+		void RefreshImageGraphs(ContentSession &, std::span<const engine::world::WorldId>);
 
 		// Hands the session's worlds the mesh names its store published.
 		//
@@ -838,39 +841,40 @@ namespace client {
 			// receipt, asset, pose and capacity fact needed for live presentation.
 			std::shared_ptr<PortalReadinessController> Readiness;
 			std::optional<uint64_t> EmptyContentDemandRevision;
+			uint64_t EmptyContentResourceRevision = 0;
 			size_t UndeliverableAssetNames = 0;
 			// Capture-only snapshot of the facts that kept a crossed successor image-only.
 			std::shared_ptr<PortalReadinessEvidence> CapturedReadiness;
 			std::shared_ptr<PortalReadiness> CapturedReadinessDecision;
-			// Capture diagnostics for the destination eye prepared during a handoff.
+			// Captured IDs and slot state used to explain which portal eye was probed.
 			struct EyeProbe {
-				// World selected for the eye view.
+				// World chosen by the successor route.
 				std::string SelectedWorld;
-				// Authored destination resolved by the eye's camera route.
+				// World resolved for the eye being captured.
 				std::string EyeWorld;
-				// Camera key used to look up the retained eye image.
+				// Key used to address the eye's retained image.
 				std::string ImageKey;
-				// World bound to the prepared eye view.
+				// World currently associated with that image slot.
 				std::string BoundWorld;
-				// Whether the destination eye view was prepared.
+				// Whether the slot was prepared for capture.
 				bool Prepared = false;
-				// Viewport slot used for eye image lookup.
+				// Retained portal image slot.
 				size_t Slot = 0;
-				// Image handle selected for display, including a composed body when present.
+				// Image selected when the probe was captured.
 				uint64_t Image = 0;
-				// Current image handle published for this camera key.
+				// Image currently published by the slot.
 				uint64_t CurrentImage = 0;
-				// Imported image handle from the latest accepted capture.
+				// Image observed when capture was requested.
 				uint64_t CaptureImage = 0;
-				// Producer world tick of the latest accepted capture.
+				// World tick associated with the capture.
 				uint64_t CaptureTick = 0;
-				// Requests submitted for the probed eye view.
+				// Number of producer submissions observed by the probe.
 				size_t Submitted = 0;
-				// Whether the resolved producer world id is valid.
+				// Whether the image producer passed its validity checks.
 				bool ProducerValid = false;
-				// Retained image handles for the two neighbouring eye views.
+				// Retained images for the two viewport destinations.
 				std::array<uint64_t, 2> ViewportImages{};
-				// Authored destinations corresponding to those neighbouring images.
+				// Destination worlds associated with the viewport images.
 				std::array<std::string, 2> ViewportDestinations{};
 			};
 			std::optional<EyeProbe> CapturedEyeProbe;
@@ -974,6 +978,27 @@ namespace client {
 			std::vector<engine::delivery::RequestId> Pending;
 			std::vector<engine::delivery::RequestId> Issued;
 			std::unordered_set<uint64_t> Asked;
+			engine::imagegraph::Content GraphContent;
+			// Reader caches, rebuilt from content-bearing ECS columns when they change.
+			std::unordered_map<uint32_t, std::vector<engine::core::Name>> GraphReferences;
+			// Snapshot used to avoid reapplying unchanged image graph content.
+			struct AppliedGraph {
+				// World that owns the graph.
+				engine::core::Name Owner;
+				// Graph name within its owner.
+				engine::core::Name Name;
+				// Content asset backing the graph.
+				engine::core::Name Asset;
+				// Content revision last applied.
+				uint64_t ContentRevision = 0;
+				// Input revision last applied.
+				uint64_t InputRevision = 0;
+				// Outputs requested from the graph.
+				std::vector<engine::core::Name> Outputs;
+				// Whether this graph appeared in the latest scan.
+				bool Seen = false;
+			};
+			std::unordered_map<uint64_t, AppliedGraph> AppliedGraphs;
 			std::unordered_map<uint32_t, uint64_t> ScannedAtRevision;
 			std::vector<engine::core::Name> Wanted;
 			std::vector<engine::core::Name> Owners;
@@ -1008,6 +1033,8 @@ namespace client {
 		// inside its own store, so a single stage across two worlds would
 		// collide on both counts.
 		std::unordered_map<uint32_t, SoundStage> Stages;
+		// Thunder bindings remain listener-local and independent of authored sounds.
+		std::unordered_map<uint32_t, WeatherSoundStage> WeatherStages;
 
 		// The busiest frame's counters, for the run's closing line. See where
 		// they are folded for why the *last* frame's would be zero.

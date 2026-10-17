@@ -253,6 +253,59 @@ namespace engine::replication {
 		return taken;
 	}
 
+	bool Listener::BroadcastEntityState(
+		const ecs::Store &store,
+		ecs::Entity entity,
+		std::span<const std::byte> message,
+		double nowSeconds,
+		uint64_t publication
+	) {
+		core::ByteWriter writer;
+		User payload;
+		payload.Bytes.assign(message.begin(), message.end());
+		WriteMessage(writer, payload);
+		bool accepted = true;
+		const core::Name world(store.Name());
+		for (Peer &peer : Peers) {
+			if (!peer.Wire || !peer.Wire->Carrying() || !Authority_.Interested(peer.Client, entity, store))
+				continue;
+			Peer::EntityStateReceipt *receipt = nullptr;
+			if (publication != 0) {
+				for (size_t index = 0; index < peer.EntityStateReceiptCount; ++index) {
+					auto &held = peer.EntityStateReceipts[index];
+					if (held.World == world && held.Entity == entity) {
+						receipt = &held;
+						break;
+					}
+				}
+				if (receipt && receipt->Publication == publication) continue;
+				if (!receipt) {
+					for (size_t index = 0; index < peer.EntityStateReceiptCount; ++index) {
+						auto &held = peer.EntityStateReceipts[index];
+						if (held.World == world &&
+							(!store.Alive(held.Entity) || held.Publication != publication)) {
+							receipt = &held;
+							break;
+						}
+					}
+					if (!receipt && peer.EntityStateReceiptCount < peer.EntityStateReceipts.size())
+						receipt = &peer.EntityStateReceipts[peer.EntityStateReceiptCount++];
+					if (!receipt) {
+						accepted = false;
+						continue;
+					}
+					*receipt = {world, entity, 0};
+				}
+			}
+			if (peer.Wire->Send(writer.Bytes(), nowSeconds)) {
+				if (receipt) *receipt = {world, entity, publication};
+			} else {
+				accepted = false;
+			}
+		}
+		return accepted;
+	}
+
 	void
 	Listener::SetForeign(std::function<bool(std::span<const std::byte>, const net::Endpoint &)> handler) {
 		Foreign = std::move(handler);

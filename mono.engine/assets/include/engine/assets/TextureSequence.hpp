@@ -37,6 +37,7 @@ namespace engine::assets {
 	// Native `.aseq` payload. No renderer or filesystem dependency belongs here.
 	class TextureSequence {
 	  public:
+		// File signature identifying the native ASQ1 sequence container.
 		static constexpr uint32_t MAGIC = 0x31515341; // ASQ1
 		// Current serialized container version.
 		static constexpr uint16_t VERSION = 1;

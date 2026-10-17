@@ -379,7 +379,7 @@ namespace engine::script {
 					}
 				}
 
-				lua_unref(state, reference);
+				ReleaseLuauValue(state, reference);
 				continue;
 			}
 
@@ -435,7 +435,7 @@ namespace engine::script {
 			// language. What stays this file's is the two lines that *call* one.
 			const std::string_view topic = delivery.Key.Text();
 			for (const CallbackRef callback : context.Subscriptions.Listeners(topic)) {
-				lua_getref(state, callback);
+				PushLuauValue(state, callback);
 
 				// `(message, topic)`. Roblox hands a table with `Data` and
 				// `Sent`; this hands what it actually has, and adding fields
@@ -451,7 +451,7 @@ namespace engine::script {
 				// Every subscriber runs even when one raises, for the reason
 				// the heartbeat gives: half a world reacting points nowhere
 				// near the cause.
-				if (lua_pcall(state, 2, 0, 0) != LUA_OK) {
+				if (CallLuauValue(state, 2, 0, 0) != LUA_OK) {
 					if (firstError.empty()) {
 						const char *message = lua_tostring(state, -1);
 						firstError = message != nullptr ? message : "a subscriber failed";

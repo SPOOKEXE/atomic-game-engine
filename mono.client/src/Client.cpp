@@ -2,8 +2,11 @@
 #include "DataCaptureDriver.hpp"
 #include "DataFactoryPausedPresentation.hpp"
 #include "DisplayedSceneView.hpp"
+#include "GuiActions.hpp"
 #include "NamedCaptureView.hpp"
 #include "PortalReadiness.hpp"
+#include "PresentationPacing.hpp"
+#include "WorldSystems.hpp"
 
 #include <engine/assets/ContentHash.hpp>
 #include <engine/audio/Wav.hpp>
@@ -53,9 +56,12 @@
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/scene/WeatherClock.hpp>
 #include <engine/script/DataSceneService.hpp>
+#include <engine/script/PlayerGui.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/scripthost/Runtime.hpp>
+#include <engine/weather/Clock.hpp>
 #include <engine/world/HostLink.hpp>
 #include <engine/world/Postbox.hpp>
 
@@ -68,11 +74,7 @@
 #include <bit>
 #include <chrono>
 #include <client/Client.hpp>
-#include <client/DataScriptPackage.hpp>
-#include <client/DataScriptPackageTransaction.hpp>
-#include <client/GuiActions.hpp>
 #include <client/Replicated.hpp>
-#include <client/WorldSystems.hpp>
 #include <cmath>
 #include <cstddef>
 #include <fstream>
@@ -377,17 +379,7 @@ namespace client {
 				return false;
 			}
 		}
-		// A headless data-factory host has no swapchain wait to pace idle service
-		// frames. Keep its normal idle path near the simulation rate, while an
-		// explicit uncapped request keeps its existing rate selection.
-		constexpr uint32_t DATA_FACTORY_HEADLESS_FRAME_RATE = 60;
-		Presentations.SetRate(
-			Settings.PresentationSession != 0
-				? (Settings.MaximumFrameRate != 0 ? Settings.MaximumFrameRate : 60)
-				: (Settings.DataFactory && Settings.Headless && !Settings.Uncapped
-					   ? DATA_FACTORY_HEADLESS_FRAME_RATE
-					   : (Settings.Uncapped ? Settings.MaximumFrameRate : 0))
-		);
+		Presentations.SetRate(PresentationRateOf(Settings));
 
 		// **Said at startup rather than at the first refusal**, so "my texture
 		// never arrives" and "this client was told not to fetch GIFs" are one
@@ -410,7 +402,7 @@ namespace client {
 			ENGINE_INFO("scene from {}", Settings.ScriptPath);
 		}
 
-		if (!SDL_SetAppMetadata("Atomic Client", nullptr, "atomic-client")) {
+		if (!SDL_SetAppMetadata("Atomic Client", nullptr, "io.github.spookexe.atomicgameengine.client")) {
 			ENGINE_WARN("SDL_SetAppMetadata: {}", SDL_GetError());
 		}
 
@@ -491,8 +483,20 @@ namespace client {
 
 		// **Only with a window**, because a present mode belongs to a swapchain
 		// and a headless run has none.
-		if (Window != nullptr && !Renderer.SetVerticalSync(!Settings.Uncapped)) {
-			ENGINE_WARN("client could not select {} present mode", Settings.Uncapped ? "immediate" : "vsync");
+		if (Window != nullptr) {
+			ENGINE_INFO("presentation: {} mode requested", Settings.Uncapped ? "immediate" : "vsync");
+			if (!Renderer.SetVerticalSync(!Settings.Uncapped)) {
+				ENGINE_WARN(
+					"client could not select {} present mode", Settings.Uncapped ? "immediate" : "vsync"
+				);
+			}
+		}
+		if (Presentations.Rate() != 0) {
+			ENGINE_INFO("presentation: {} FPS cap", Presentations.Rate());
+		} else {
+			ENGINE_INFO(
+				"presentation: {}", Window != nullptr && !Settings.Uncapped ? "display paced" : "no FPS cap"
+			);
 		}
 
 		// **The configured count wins, and zero means work it out.** A machine
@@ -506,6 +510,14 @@ namespace client {
 		engine::world::UniverseSettings interactiveWorlds;
 		interactiveWorlds.MaximumCatchUpTicks = engine::world::INTERACTIVE_CATCH_UP_TICKS;
 		Universe_ = std::make_unique<engine::world::Universe>(interactiveWorlds);
+		(void)Universe_->OnState([](engine::world::WorldId,
+									engine::ecs::Store &store,
+									engine::world::WorldState state) {
+			(void)engine::weather::SetWeatherWorldPaused(
+				store,
+				state == engine::world::WorldState::Suspended || state == engine::world::WorldState::Faulted
+			);
+		});
 		if (Settings.DataFactory) {
 			if (Settings.Worlds != 1 || !Settings.ConnectAddress.empty() ||
 				Settings.PresentationSession != 0 || !Settings.PresentationWorld.empty()) {
@@ -558,7 +570,7 @@ namespace client {
 					return nlohmann::json(nullptr);
 				}
 				const auto resourceName = [&](engine::graph::ResourceId id) -> nlohmann::json {
-					const auto *resource = graph->Graph.FindResource(id);
+					const auto *resource = graph->Graph.FindResourceDesc(id);
 					return resource == nullptr ? nlohmann::json(nullptr)
 											   : nlohmann::json(resource->Name.Text());
 				};
@@ -628,7 +640,7 @@ namespace client {
 				nlohmann::json resources = nlohmann::json::array();
 				for (uint32_t value = 1; value <= graph->Graph.ResourceCount(); ++value) {
 					const engine::graph::ResourceId id{value};
-					const auto *resource = graph->Graph.FindResource(id);
+					const auto *resource = graph->Graph.FindResourceDesc(id);
 					const auto *profile = profileFor(id);
 					if (resource != nullptr && profile != nullptr) {
 						const engine::graph::ResourceId allocation = graph->Aliases.AllocationOf(id);
@@ -1099,16 +1111,28 @@ namespace client {
 					return;
 				}
 
-				// The scripts before the camera, so a scene that aimed one of
-				// its own keeps it - see `InstallDefaultCamera`.
+				// Startup source can control the local eye or replace CurrentCamera.
+				InstallDefaultCamera(store, systems);
 				Runtimes.emplace_back(
 					id,
 					engine::game::StartWorldScripts(
 						store, systems, limits, failure, nullptr, worldSettings.ScriptTickRate
 					)
 				);
-				(void)engine::gui::ResetPlayerGui(store, localPlayer);
-				InstallDefaultCamera(store, systems);
+				(void)engine::script::ResetPlayerGui(store, localPlayer);
+
+				// Startup scripts get the first say over `Players.CharacterAutoLoads`.
+				// Match the server join path, but only for this local authority world;
+				// a replica learns its character from the snapshot instead.
+				if (!engine::world::Postbox(store).IsReplica()) {
+					const engine::ecs::Entity players = engine::scene::PlayersOf(store);
+					const auto *settings = store.Get<engine::scene::PlayersServiceComponent>(players);
+					const bool autoLoads = settings == nullptr || settings->CharacterAutoLoads;
+					if (autoLoads &&
+						engine::scene::CharacterOf(store, localPlayer) == engine::ecs::NULL_ENTITY) {
+						(void)engine::scene::LoadCharacter(store, localPlayer);
+					}
+				}
 			});
 
 			if (!failure.empty()) {
@@ -1455,6 +1479,7 @@ namespace client {
 				// null device and stages before it may publish another observation.
 				DataAudio->Clear(clock.InstanceId);
 				Stages.clear();
+				WeatherStages.clear();
 				Sound = std::unique_ptr<engine::audio::Device>(engine::audio::OpenNullDevice({}));
 				if (Sound == nullptr) return;
 				DataAudio->ResetTickClock(clock, Sound->Format().SampleRate);
@@ -1469,6 +1494,13 @@ namespace client {
 				return false;
 			entry.second.Clear(Sound->Mixer());
 			return entry.second.PendingCloses() == 0;
+		});
+		std::erase_if(WeatherStages, [&](auto &entry) {
+			const engine::world::WorldId world{entry.first};
+			if (world == Replicated ||
+				std::find(Simulated.begin(), Simulated.end(), world) != Simulated.end())
+				return false;
+			return entry.second.Clear(Sound->Mixer());
 		});
 
 		// The listener is the composed camera's position, which is **last
@@ -1491,6 +1523,7 @@ namespace client {
 			Universe_->Enter(id, [&](engine::ecs::Store &store) {
 				LoadPackagedAudio(store);
 				stage.Sync(store, Sound->Mixer(), Audible, ear, rate);
+				WeatherStages[id.Index].Sync(store, Sound->Mixer(), ear, Audible);
 			});
 		};
 
@@ -2062,6 +2095,8 @@ namespace client {
 		Connection = std::make_unique<engine::replication::Connector>(
 			*Socket, *server, engine::core::Clock::Seconds(), connector
 		);
+		Connection->OnTiming(engine::scene::SynchronizeWeatherClocks);
+		Connection->OnUserState(engine::scene::AcceptWeatherClockUpdate);
 		ResetPlayPresentation();
 
 		// **Which player is this client's, which nothing else can tell it.**
@@ -4170,6 +4205,7 @@ namespace client {
 				const auto owner = Universe_->NameOf(InterfaceWorld());
 				engine::render::InterfaceImage image;
 				image.Texture = Renderer.TextureHandle(name, owner);
+				image.SampledSRGB = Renderer.TextureSamplesSRGB(name, owner);
 				if (image.Texture == nullptr) {
 					return image;
 				}
@@ -4199,6 +4235,7 @@ namespace client {
 		// press was picked correctly, produced the right event, and was handed to
 		// a VM that was not the one the button's script was in.
 		const engine::world::WorldId interfaceWorld = InterfaceWorld();
+		bool editableImagesChanged = false;
 		const auto prepareEditable = [&](engine::world::WorldId world) {
 			const auto owner = Universe_->NameOf(world);
 			Universe_->Enter(world, [&](engine::ecs::Store &store) {
@@ -4207,6 +4244,7 @@ namespace client {
 										: EditableMeshes.RefreshLods(store, Renderer, owner);
 				const auto images =
 					Settings.EnableEditableImages ? EditableImages.Refresh(store, Renderer, owner) : 0;
+				editableImagesChanged = images > 0 || editableImagesChanged;
 				VisualResourcesChanged = meshes > 0 || images > 0 || VisualResourcesChanged;
 			});
 		};
@@ -4216,6 +4254,7 @@ namespace client {
 				prepareEditable(world);
 			if (ReportedJoin) prepareEditable(Replicated);
 		}
+		if (editableImagesChanged) RefreshImageGraphs(*ContentState, ContentWorlds);
 
 		if (interfaceWorld.IsValid() && DataFactoryRenderOnly.AllowsInteractiveGui(factoryPaused)) {
 			ENGINE_HEAP_SCOPE("client.interface");
@@ -4823,7 +4862,8 @@ namespace client {
 			view.CameraTemporalId.clear();
 			Renderer.SetAnimationTime(AnimationSeconds);
 		} else if (!namedCaptureBound && !PresentationLink && PortalImages && Windowed) {
-			if (!ReportedJoin) {
+			// Sequence capture already prepared this native eye before returning to the displayed view.
+			if (!ReportedJoin && Settings.CaptureSequence.empty()) {
 				auto sourceView = view;
 				sourceView.Instances = Views.Instances();
 				sourceView.JointFrames = Views.JointFrames();
@@ -4884,7 +4924,7 @@ namespace client {
 				engine::render::ScenePresentationState{
 					.Lighting = visualLighting,
 					.Animation = Renderer.TextureAnimationSignature(visualSeconds),
-					.Resources = spatialSignature,
+					.Resources = spatialSignature ^ Renderer.ResourceRevision(),
 					.SurfaceBounces = visualSurfaceBounces,
 					.SurfaceLimit = visualSurfaceLimit,
 					.PostProcess = LastPostProcessShader,
@@ -4896,7 +4936,8 @@ namespace client {
 		const bool gameInterfacePresent = hook != nullptr && !InterfaceList.Commands().Commands.empty();
 		const engine::render::PresentationSignatures presentationSignatures{
 			.Scene = scenePresentationSignatures,
-			.GameInterface = gameInterfacePresent ? InterfaceList.Signature() : 0,
+			.GameInterface =
+				gameInterfacePresent ? InterfaceList.Signature() ^ Renderer.ResourceRevision() : 0,
 			.HostInterface = 0,
 			.Viewport = viewportSignature,
 		};
@@ -4911,9 +4952,11 @@ namespace client {
 		);
 		damage.Objects = damage.Objects || VisualResourcesChanged;
 		const bool portalUploadsPending = PortalImages && PortalImages->HasPendingUploads();
+		const bool weatherWorkPending = Renderer.HasPendingWeatherWork(view.World);
+		damage.Environment = damage.Environment || weatherWorkPending;
 		damage.Portals = damage.Portals || portalUploadsPending;
-		damage.Scene =
-			damage.Scene || damage.Objects || portalUploadsPending || diagnosticFrame || PresentedImages < 2;
+		damage.Scene = damage.Scene || damage.Objects || portalUploadsPending || weatherWorkPending ||
+					   diagnosticFrame || PresentedImages < 2;
 		damage.GameInterface =
 			damage.GameInterface || diagnosticFrame || interfaceContinuous || PresentedImages < 2;
 		damage.Overlay = Overlay.IsDirty();

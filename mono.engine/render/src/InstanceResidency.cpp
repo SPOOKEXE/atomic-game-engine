@@ -32,6 +32,7 @@ namespace engine::render {
 		}
 		Dirty.clear();
 		Ranges.clear();
+		RangesReady = true;
 		for (Entry &entry : Entries) {
 			entry.Dirty = false;
 		}
@@ -255,9 +256,10 @@ namespace engine::render {
 			Entries.pop_back();
 			Packed.pop_back();
 		}
-		std::erase_if(Dirty, [&](uint32_t slot) {
+		const size_t removed = std::erase_if(Dirty, [&](uint32_t slot) {
 			return slot >= Entries.size() || !Entries[slot].Occupied;
 		});
+		if (removed > 0) RangesReady = false;
 	}
 
 	void InstanceResidency::MarkAllDirty() {
@@ -280,11 +282,14 @@ namespace engine::render {
 		}
 		Dirty.clear();
 		Ranges.clear();
+		RangesReady = true;
 	}
 
 	std::span<const InstanceUploadRange> InstanceResidency::DirtyRanges() {
+		if (RangesReady) return Ranges;
 		Ranges.clear();
 		if (Dirty.empty()) {
+			RangesReady = true;
 			return Ranges;
 		}
 
@@ -303,6 +308,7 @@ namespace engine::render {
 			previous = slot;
 		}
 		Ranges.push_back({first, previous - first + 1});
+		RangesReady = true;
 		return Ranges;
 	}
 
@@ -346,5 +352,6 @@ namespace engine::render {
 		}
 		entry.Dirty = true;
 		Dirty.push_back(slot);
+		RangesReady = false;
 	}
 }

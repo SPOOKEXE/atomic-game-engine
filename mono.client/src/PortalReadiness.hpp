@@ -4,7 +4,10 @@
 
 // Bounded client-side evidence required before a portal may replace its retained image with local geometry.
 
+#include <engine/assets/Builtin.hpp>
 #include <engine/assets/ContentHash.hpp>
+#include <engine/imagegraph/Reference.hpp>
+#include <engine/render/Renderer.hpp>
 #include <engine/world/World.hpp>
 
 #include <cstddef>
@@ -91,7 +94,33 @@ namespace client {
 	};
 
 	// An origin-free world may promote only after a demand scan proves it names no
-	// external assets. The scanned revision is the evidence; zero is not one.
+	// unresolved assets. Runtime images and builtins still need exact residency.
+	enum class PortalOriginFreeContent { External, Mesh, Texture };
+	inline PortalOriginFreeContent OriginFreePortalContent(std::string_view name) {
+		engine::assets::BuiltinMesh mesh;
+		if (engine::assets::BuiltinFromName(name, mesh)) return PortalOriginFreeContent::Mesh;
+		engine::assets::BuiltinTexture texture;
+		if (engine::assets::BuiltinFromName(name, texture)) return PortalOriginFreeContent::Texture;
+		if (engine::imagegraph::IsEditableImageReference(name)) return PortalOriginFreeContent::Texture;
+		engine::imagegraph::Reference reference;
+		if (engine::imagegraph::ParseReference(name, reference)) return PortalOriginFreeContent::Texture;
+		return PortalOriginFreeContent::External;
+	}
+	inline bool OriginFreePortalContentResident(
+		engine::core::Name name, const engine::render::Renderer &renderer, engine::core::Name owner
+	) {
+		switch (OriginFreePortalContent(name.Text())) {
+		case PortalOriginFreeContent::Mesh:
+			return renderer.MeshRevision(name, owner) != 0;
+		case PortalOriginFreeContent::Texture:
+			return renderer.TextureHandle(name, owner) != nullptr;
+		case PortalOriginFreeContent::External:
+			return false;
+		}
+		return false;
+	}
+
+	// The scanned revision is the evidence; zero is not one.
 	inline bool
 	ApplyAssetlessReadiness(PortalReadinessEvidence &evidence, uint64_t scannedRevision, size_t namedAssets) {
 		if (scannedRevision == 0 || namedAssets != 0) return false;

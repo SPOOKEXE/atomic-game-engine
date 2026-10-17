@@ -1,3 +1,5 @@
+#include "UiDocumentFile.hpp"
+
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
@@ -19,7 +21,6 @@
 #include <fstream>
 #include <string>
 #include <studio/Commands.hpp>
-#include <studio/UiDocumentFile.hpp>
 
 TEST_SUITE_ID("studio.ui_document_file")
 

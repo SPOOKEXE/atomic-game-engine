@@ -38,6 +38,13 @@ namespace studio {
 			editor.DrawUiAuthoring();
 		}
 
+		static bool ExtractButtonHovered() {
+			ImGuiWindow *window = ImGui::FindWindowByName("UI Authoring");
+			if (window == nullptr) return false;
+			const ImGuiID button = ImHashStr("Extract repeated direct values", 0, window->ID);
+			return ImGui::GetCurrentContext()->HoveredId == button;
+		}
+
 		static engine::ecs::Entity Insert(
 			Editor &editor,
 			engine::world::WorldId world,
@@ -563,29 +570,38 @@ TEST_CASE(
 	editor.Selection = {screen};
 	editor.ShowUiAuthoring = true;
 	const size_t beforeExtraction = editor.Commands->Undoable().size();
-	const auto draw = [&](float y, bool down) {
+	const auto draw = [&](float x, float y, bool down) {
 		ImGuiIO &io = ImGui::GetIO();
-		io.AddMousePosEvent(250.0f, y);
+		io.AddMousePosEvent(x, y);
 		io.AddMouseButtonEvent(0, down);
 		ImGui::NewFrame();
 		ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_Always);
 		ImGui::SetNextWindowSize(ImVec2(640.0f, 480.0f), ImGuiCond_Always);
 		studio::UiAuthoringProbe::Draw(editor);
+		const bool extractHovered = studio::UiAuthoringProbe::ExtractButtonHovered();
 		ImGui::Render();
+		return extractHovered;
 	};
-	// The action shares the Styles row with Add local style. Probe only its
-	// horizontal range so no other authoring action can be activated.
-	for (float y = 150.0f; y < 260.0f; y += 5.0f) {
-		draw(y, false);
-		draw(y, true);
-		draw(y, false);
+	const auto clickExtractButton = [&]() {
+		// Find the item by its ImGui ID so unrelated panels and prior UI layout do
+		// not turn a guessed coordinate into a different authoring action.
+		for (float y = 20.0f; y < 500.0f; y += 2.0f) {
+			if (!draw(250.0f, y, false)) continue;
+			draw(250.0f, y, true);
+			draw(250.0f, y, false);
+			return true;
+		}
+		return false;
+	};
+	REQUIRE(clickExtractButton());
+	{
 		bool extracted = false;
 		editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
 			extracted =
 				store.Get<engine::gui::UITheme>(theme)->Tokens.Find(engine::core::Name("BackgroundColor3")) !=
 				nullptr;
 		});
-		if (extracted) break;
+		CHECK(extracted);
 	}
 
 	editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
@@ -647,11 +663,7 @@ TEST_CASE(
 		REQUIRE(otherBinding != nullptr);
 		otherBinding->Theme = theme;
 	});
-	for (float y = 150.0f; y < 260.0f; y += 5.0f) {
-		draw(y, false);
-		draw(y, true);
-		draw(y, false);
-	}
+	REQUIRE(clickExtractButton());
 	editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
 		CHECK(
 			store.Get<engine::gui::UITheme>(theme)->Tokens.Find(engine::core::Name("BackgroundColor3")) ==
@@ -675,11 +687,7 @@ TEST_CASE(
 		store.Set(theme, value);
 	});
 	const size_t beforeConflictingExtraction = editor.Commands->Undoable().size();
-	for (float y = 150.0f; y < 260.0f; y += 5.0f) {
-		draw(y, false);
-		draw(y, true);
-		draw(y, false);
-	}
+	REQUIRE(clickExtractButton());
 	CHECK(editor.Commands->Undoable().size() == beforeConflictingExtraction);
 	editor.Universe->Enter(world, [&](engine::ecs::Store &store) {
 		const auto *token =

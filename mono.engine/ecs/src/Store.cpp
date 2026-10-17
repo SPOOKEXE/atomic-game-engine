@@ -5,6 +5,7 @@
 
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Store.hpp>
@@ -335,6 +336,11 @@ namespace engine::ecs {
 		const EntityId key = EntityId::Of(entity);
 		if (State->Directory.Alive(key.Index, key.Generation)) {
 			return false;
+		}
+		if (State->Directory.Live(key.Index)) {
+			// A replacement can arrive before the old generation's retirement.
+			// Retire its row and tree links before replacing the directory location.
+			Destroy(EntityId::Pack(key.Index, State->Directory.Generation(key.Index)));
 		}
 
 		// The sender's index *and* generation. Matching on the index alone
@@ -701,6 +707,12 @@ namespace engine::ecs {
 
 	Entity Store::CreateInstance(ClassId id, std::string_view name) {
 		RequireOwningThread("CreateInstance");
+		// Class locality applies equally to importers, authoring tools, and scripts.
+		if (Classes::Describe(id).RuntimeLocal) {
+			const Entity local = CreatePredictedInstance(id, name);
+			if (local != NULL_ENTITY) Set(local, ClientLocal{});
+			return local;
+		}
 
 		// The same check `Create` makes, because this mints from the same
 		// authoritative range. It was missing, and `scene::MakePart` grew a copy
@@ -977,12 +989,14 @@ namespace engine::ecs {
 	}
 
 	Entity Store::FindFirstRoot(std::string_view name) const {
+		ENGINE_HEAP_SCOPE("ecs root lookup");
 		const core::Name wanted(name);
 
 		Entity found = NULL_ENTITY;
-		EachRoot([&](Entity root) {
-			if (found == NULL_ENTITY && InstanceNameOf(root) == wanted) {
-				found = root;
+		const_cast<Store *>(this)->Each<const Hierarchy>([&](Entity entity, const Hierarchy &node) {
+			if (node.Parent == NULL_ENTITY && (found == NULL_ENTITY || entity.Id < found.Id) &&
+				InstanceNameOf(entity) == wanted) {
+				found = entity;
 			}
 		});
 		return found;
@@ -1042,6 +1056,12 @@ namespace engine::ecs {
 		// because a property is reached through generated conversions that take
 		// a `Store`, and that layer holds a `StoreState`.
 		for (const engine::ecs::ClonedPair &pair : made) {
+			for (const core::Name name : AttributeNames(*this, pair.Source)) {
+				AttributeValue value;
+				if (GetAttribute(*this, pair.Source, name, value)) {
+					SetAttribute(*this, pair.Copy, name, value);
+				}
+			}
 			for (const PropertyDescriptor &property : PropertiesOf(pair.Copy)) {
 				if (property.Type != PropertyType::Reference || !property.Writable ||
 					property.Get == nullptr || property.Set == nullptr) {
@@ -1106,6 +1126,13 @@ namespace engine::ecs {
 			return 0;
 		}
 		return State->ComponentChanges[id.Index];
+	}
+
+	uint64_t Store::ComponentClearedChangeVersionRaw(ComponentId id) const {
+		if (!id.IsValid() || id.Index >= State->ComponentClearedChanges.size()) {
+			return 0;
+		}
+		return State->ComponentClearedChanges[id.Index];
 	}
 
 	uint64_t Store::ComponentMembershipVersionRaw(ComponentId id) const {
@@ -1503,6 +1530,7 @@ namespace engine::ecs {
 			}
 		}
 		for (const ComponentId watched : State->Watched) {
+			State->ComponentClearedChanges[watched.Index] = State->ComponentChanges[watched.Index];
 			State->ChangedEntities[watched.Index].clear();
 		}
 	}
@@ -1549,10 +1577,15 @@ namespace engine::ecs {
 		return destination.LoadContents(reader);
 	}
 
-	bool Store::Apply(core::ByteReader &reader, ApplyMode mode, ApplyClock clock) {
+	bool Store::Apply(
+		core::ByteReader &reader,
+		ApplyMode mode,
+		ApplyClock clock,
+		const std::function<bool(ComponentId)> &resourceAllow
+	) {
 		RequireOwningThread("Apply");
 
-		const bool applied = ApplySnapshot(*State, reader, mode, clock);
+		const bool applied = ApplySnapshot(*State, reader, mode, clock, resourceAllow);
 		if (applied) {
 			// Snapshot columns can replace source bytes without increasing their
 			// revisions. Invalidate incarnation-based caches even for equal images.

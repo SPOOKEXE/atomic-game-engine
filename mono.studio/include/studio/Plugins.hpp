@@ -1023,6 +1023,8 @@ namespace studio {
 		float Width = 92.0f;
 		size_t Order = 0;
 		std::string ControlLabel;
+		// Owned snapshot; changing source metadata requires toolbar layout invalidation.
+		std::string Tooltip;
 		//@}
 	};
 

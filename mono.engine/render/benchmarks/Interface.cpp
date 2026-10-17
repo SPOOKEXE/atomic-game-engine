@@ -46,12 +46,15 @@
 #include <engine/gui/Enums.hpp>
 #include <engine/render/GlyphAtlas.hpp>
 #include <engine/render/InterfaceMesh.hpp>
+#include <engine/render/InterfaceTargetCache.hpp>
 #include <engine/testing/Bench.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -67,6 +70,7 @@ using engine::gui::FontFace;
 using engine::gui::ScaleType;
 using engine::render::GlyphAtlas;
 using engine::render::InterfaceMesh;
+using engine::render::InterfaceTargetKey;
 using engine::testing::Consume;
 
 namespace interface_bench {
@@ -77,6 +81,50 @@ namespace interface_bench {
 	// comfortably inside the limit and not by a wide margin.
 	constexpr size_t ELEMENTS = 1000;
 	constexpr size_t MANY = 10'000;
+
+	// Mirrors the ready-target selection consumed by InterfacePass::Record.
+	// Fake stable target addresses keep the benchmark CPU-only while exercising
+	// the production keyed lookup in paint order.
+	struct ReadyTargetFixture {
+		engine::render::InterfaceTargetCache Cache;
+		DrawList List;
+		std::vector<uint8_t> Targets;
+
+		explicit ReadyTargetFixture(size_t count) : Cache({.Count = count, .Bytes = count}), Targets(count) {
+			List.CollectorRanges.reserve(count);
+			for (size_t index = 0; index < count; index++) {
+				const auto collector = engine::ecs::Entity(index + 1);
+				const engine::gui::CollectorRange range{
+					.Collector = collector, .First = index, .Count = 1, .Spatial = false
+				};
+				List.CollectorRanges.push_back(range);
+				const InterfaceTargetKey key{
+					collector, 0, 1920, 1080, range.First, range.Count, range.Spatial
+				};
+				if (!Cache.Attach(key, &Targets[index], 1, {})) std::abort();
+				Cache.Begin(key, 1, false, {});
+				Cache.Complete(key, true);
+			}
+		}
+	};
+
+	ReadyTargetFixture &ReadyTargets(size_t count) {
+		static std::vector<std::unique_ptr<ReadyTargetFixture>> fixtures;
+		for (const auto &fixture : fixtures)
+			if (fixture->List.CollectorRanges.size() == count) return *fixture;
+		fixtures.push_back(std::make_unique<ReadyTargetFixture>(count));
+		return *fixtures.back();
+	}
+
+	size_t SelectReadyTargets(const ReadyTargetFixture &fixture) {
+		size_t ready = 0;
+		for (const auto &range : fixture.List.CollectorRanges) {
+			if (range.Spatial || range.Count == 0) continue;
+			const InterfaceTargetKey key{range.Collector, 0, 1920, 1080, range.First, range.Count, false};
+			if (fixture.Cache.ReadyTarget(key) != nullptr) ready++;
+		}
+		return ready;
+	}
 
 	// The canvas the list is compiled against.
 	constexpr float WIDTH = 1920.0f;
@@ -211,6 +259,18 @@ namespace interface_bench {
 using namespace interface_bench;
 
 // --- the plain case -----------------------------------------------------------
+
+BENCH("InterfaceTargetCache::ReadyTarget · 8 ready ranges", 1) {
+	Consume(SelectReadyTargets(ReadyTargets(8)));
+}
+
+BENCH("InterfaceTargetCache::ReadyTarget · 128 ready ranges", 1) {
+	Consume(SelectReadyTargets(ReadyTargets(128)));
+}
+
+BENCH("InterfaceTargetCache::ReadyTarget · 1024 ready ranges", 1) {
+	Consume(SelectReadyTargets(ReadyTargets(1024)));
+}
 
 BENCH("InterfaceMesh::Build · 1000 rectangles", 1) {
 	Consume(Build(Listing("plain", ELEMENTS, [](DrawCommand &, size_t) {})));

@@ -4,13 +4,17 @@
 -- HDR bloom filter against the environment rather than against a flat colour.
 
 local Lighting = game:GetService("Lighting")
+local bloom = Instance.new("BloomEffect")
+bloom.Name = "Bloom Environment Effect"
+bloom.Enabled = true
+bloom.Parent = Lighting
 
 Lighting.ClockTime = 17.25
 Lighting.GeographicLatitude = 34
 Lighting.Brightness = 4.5
-Lighting.BloomThreshold = 0.8
-Lighting.BloomIntensity = 1.35
-Lighting.BloomRadius = 10
+bloom.Threshold = 0.8
+bloom.Intensity = 1.35
+bloom.Radius = 10
 
 local sky = Instance.new("SkyboxCompute")
 sky.Name = "Bloom Sun"
@@ -56,9 +60,9 @@ for index = 1, 512 do
 	orb.Parent = workspace
 end
 
-local camera = Instance.new("Camera")
-camera.Name = "Bloom Camera"
-camera.CFrame = CFrame.lookAt(Vector3.new(24, 13, 35), Vector3.new(0, 4, -8))
-camera.FieldOfView = 58
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "the starter player scripts container is missing")
+local camera = assert(starterPlayerScripts:FindFirstChild("DemoCamera"), "the demo camera companion is missing")
+camera:SetAttribute("Name", "Bloom Camera")
+camera:SetAttribute("CFrame", CFrame.lookAt(Vector3.new(24, 13, 35), Vector3.new(0, 4, -8)))
+camera:SetAttribute("FieldOfView", 58)

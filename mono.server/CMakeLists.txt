@@ -21,6 +21,7 @@ mono_add_library(server
 		# Factory scripts probe effect components after the component table is sealed.
 		# Register their stable names during server startup, before any world runs.
 		Engine::effects
+		Engine::weather
 
 		# L13, `shared`. The Model Context Protocol surface, opened only when
 		# `--mcp-port` asks for it.

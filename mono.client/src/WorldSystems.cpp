@@ -1,11 +1,13 @@
+#include "WorldSystems.hpp"
+
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/game/WeatherGround.hpp>
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Ownership.hpp>
-
-#include <client/WorldSystems.hpp>
+#include <engine/weather/Clock.hpp>
 
 namespace client {
 	void InstallClientWorldSystems(
@@ -23,5 +25,7 @@ namespace client {
 		engine::scene::PrepareGravity(store);
 		engine::scene::RegisterGravitySystem(systems);
 		engine::scene::RegisterOwnershipSystem(systems);
+		engine::weather::RegisterWeatherClockSystem(systems);
+		engine::game::RegisterWeatherGroundSystem(systems);
 	}
 }

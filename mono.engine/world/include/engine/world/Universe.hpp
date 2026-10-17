@@ -39,6 +39,7 @@
 #include <engine/world/TickExchange.hpp>
 #include <engine/world/World.hpp>
 
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -76,6 +77,8 @@ namespace engine::world {
 		// ownership of the worker pool. The estimate is the previous measured tick
 		// cost multiplied by ticks owed. Below this floor the driver runs the batch
 		// directly and leaves the pool available to systems inside each world.
+		// Joined tick-exchange stages use their own previous body cost instead of
+		// charging each bookkeeping dispatch for the entire world's simulation.
 		//
 		// The O0 to O3 simulation sweep measures an empty worker dispatch at 8 to
 		// 58 microseconds on the development machine. Fifty microseconds keeps tiny
@@ -457,6 +460,13 @@ namespace engine::world {
 		// @param state The state to move it to.
 		// @return Whether it was applied or queued.
 		WorldStatus SetState(WorldId id, WorldState state);
+
+		// Appends a local observer for requested state transitions after tick workers have joined.
+		// The borrowed store is bound to the driver thread, as with Enter. Observers
+		// cannot re-enter or retain it; structural requests wait for the next barrier.
+		// Up to sixteen observers
+		// coexist; callbacks remain local and never enter snapshots or messages.
+		bool OnState(std::function<void(WorldId, ecs::Store &, WorldState)> observer);
 
 		// Clears a world's fault so it ticks again.
 		//
@@ -865,11 +875,30 @@ namespace engine::world {
 		bool TickExchangeFrameOpen() const;
 
 	  private:
+		enum class ExchangeWork : uint8_t {
+			Input,
+			Collect,
+			Serve,
+			Apply,
+			Simulation,
+			Commit,
+			BarrierCollect,
+			BarrierApply,
+			Cancel,
+			Count
+		};
+		bool ExchangeUsesWorkers(ExchangeWork work) const;
 		// Returns whether the body ran on workers. The caller owns any worker
 		// timing report, after the join has made its measurements safe to read.
 		bool DispatchExchangeWorlds(
-			const std::function<void(size_t)> &body, std::span<float> worldMilliseconds = {}
+			ExchangeWork work,
+			const std::function<void(size_t)> &body,
+			std::span<float> worldMilliseconds = {}
 		);
+		// A costly simulation stage must not send cheap exchange bookkeeping to
+		// the pool. Retain joined body cost separately for each dispatch stage.
+		std::array<float, static_cast<size_t>(ExchangeWork::Count)> ExchangeWorkMilliseconds{};
+		std::vector<float> ExchangeWorldMilliseconds;
 		void CompleteExchangeFrame();
 		enum class ExchangePhase : uint8_t {
 			Closed,
@@ -901,6 +930,7 @@ namespace engine::world {
 		};
 
 		void Apply(const Control &control);
+		void ApplyState(WorldId id, WorldState state);
 		void DrainControls();
 		void RefreshLanes(unsigned laneCount);
 		WorldId Adopt(const WorldSettings &settings, core::Name host = {});
@@ -936,6 +966,7 @@ namespace engine::world {
 		unsigned LaneCount = 0;
 
 		std::vector<Control> Pending;
+		std::vector<std::function<void(WorldId, ecs::Store &, WorldState)>> StateObservers;
 
 		// Reused between driver ticks rather than rebuilt, because the active
 		// list is walked every frame and most frames it is nearly the same.

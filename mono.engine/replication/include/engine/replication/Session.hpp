@@ -285,6 +285,7 @@ namespace engine::replication {
 	  private:
 		bool Emit(net::ChannelKind channel, std::span<const std::byte> payload, double nowSeconds);
 		bool Transmit(net::PacketHeader header, std::span<const std::byte> payload, double nowSeconds);
+		size_t RetryReliable(double nowSeconds);
 		size_t FlushDelayed(double nowSeconds);
 
 		struct DelayedDatagram {

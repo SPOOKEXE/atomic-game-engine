@@ -97,14 +97,15 @@ rigClip.AnimationBuffer = clipBuffer
 rigClip.Parent = workspace
 print("DataFactory buffered clip", rigClip.Name, clipBuffer.DataSize)
 
-local camera = Instance.new("Camera")
-camera.Name = "DataFactoryCamera"
-camera:SetAttribute("DataFactoryId", "data-factory-demo/camera")
-camera.CFrame = CFrame.new(0, 3, 8)
-camera.ImageWidth = 640
-camera.ImageHeight = 360
-camera.Parent = workspace
-workspace.CurrentCamera = camera
+local starterPlayerScripts = game:GetService("StarterPlayer"):FindFirstChild("StarterPlayerScripts")
+assert(starterPlayerScripts ~= nil, "StarterPlayerScripts camera template is missing")
+local cameraScript = starterPlayerScripts:FindFirstChild("DemoCamera")
+assert(cameraScript ~= nil and cameraScript:IsA("LocalScript"), "DemoCamera LocalScript is missing")
+cameraScript:SetAttribute("Name", "DataFactoryCamera")
+cameraScript:SetAttribute("CameraDataFactoryId", "data-factory-demo/camera")
+cameraScript:SetAttribute("CFrame", CFrame.new(0, 3, 8))
+cameraScript:SetAttribute("ImageWidth", 640)
+cameraScript:SetAttribute("ImageHeight", 360)
 
 local image = Instance.new("EditableImage")
 image.Name = "DataFactoryLabel"
@@ -116,7 +117,6 @@ assert(image:FromBuffer(pixels))
 local capabilities = DataSceneService:GetCapabilities()
 local affordances = DataSceneService:GetAuthoredAffordances({limit = 16})
 local snapshot = DataSceneService:GetSceneSnapshot(128)
-local cameraMetadata = DataSceneService:GetCameraRenderingData(camera)
 local imageMetadata = DataSceneService:GetEditableImageMetadata(image)
 local captureChannels = DataSceneService:GetCaptureChannels()
 
@@ -240,30 +240,6 @@ print(
 	snapshot.physics_observations.impulses.available,
 	snapshot.physics_observations.forces.available,
 	snapshot.physics_observations.forces.reason
-)
-print(
-	"DataFactory camera",
-	cameraMetadata.id,
-	cameraMetadata.world_from_camera,
-	cameraMetadata.camera_from_world,
-	cameraMetadata.vertical_fov_radians,
-	cameraMetadata.near_metres,
-	cameraMetadata.far_metres,
-	cameraMetadata.requested_width,
-	cameraMetadata.requested_height,
-	cameraMetadata.coordinate_convention
-)
-print(
-	"DataFactory calibration",
-	cameraMetadata.projection_available,
-	cameraMetadata.projection_reason,
-	cameraMetadata.crop.convention,
-	cameraMetadata.lens_distortion.available,
-	cameraMetadata.lens_distortion.reason,
-	cameraMetadata.temporal_jitter.available,
-	cameraMetadata.temporal_jitter.reason,
-	cameraMetadata.units.world,
-	cameraMetadata.units.image
 )
 print("DataFactory image", imageMetadata.width, imageMetadata.height, imageMetadata.format, imageMetadata.row_order)
 print("DataFactory image bytes", buffer.len(pixels))

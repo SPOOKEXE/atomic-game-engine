@@ -47,6 +47,7 @@
 #include <vector>
 
 namespace engine::render {
+	struct WeatherShadowLightingUniforms;
 
 	// One prepared view, exactly as `Renderer::Render` handed it over.
 	//
@@ -173,6 +174,14 @@ namespace engine::render {
 
 		// The installed graph this view is drawing.
 		const Impl::InstalledPipeline *Pipeline = nullptr;
+		PassActivity Activity;
+		glm::vec4 GodRayClip{};
+		std::span<Impl::NamedTexture> ForwardedTextures;
+		bool IdentityWriterInactive(core::Name kind) const;
+		bool
+		ForwardImage(const graph::RunContext &context, graph::ResourceId source, graph::ResourceId target);
+		bool
+		PublishIdentity(const graph::RunContext &context, graph::ResourceId source, graph::ResourceId target);
 
 		// The buffer every pass records into, and the image it presents to.
 		SDL_GPUCommandBuffer *Command = nullptr;
@@ -230,6 +239,14 @@ namespace engine::render {
 		scene::SurfaceRun CameraRuns[scene::MAX_SURFACES];
 
 		bool HaveInstances = false;
+		// Successful empty G-buffer clears prove every normal has zero alpha.
+		bool EmptyGBufferNormals = false;
+		SDL_GPUTexture *EmptyHardwareDepth = nullptr;
+		SDL_GPUTexture *FarLinearDepth = nullptr;
+		SDL_GPUTexture *OpaqueSkyTexture = nullptr;
+		SDL_GPUTexture *BlackSkyLit = nullptr;
+		SDL_GPUTexture *ClearedInterfaceTexture = nullptr;
+		void InvalidateBackgroundTexture(SDL_GPUTexture *texture, core::Name writerKind = {});
 		bool HaveOverlay = false;
 		bool UploadOverlay = false;
 		bool HaveShadow = false;
@@ -281,6 +298,9 @@ namespace engine::render {
 		LightingUniforms Lighting;
 		FrameUniforms Frame;
 		PbrUniforms Uniforms;
+		// These describe products recorded for this view, not canonical world state.
+		bool WeatherFallbackApplied = false;
+		bool WeatherIntegrationRecorded = false;
 
 		// Lenses arrive ordered by priority. A run only combines consecutive
 		// entries with one shader, because combining the same shader across an
@@ -359,6 +379,33 @@ namespace engine::render {
 		// @param kind The node kind.
 		// @return `true` when one is enabled.
 		bool GraphEnabled(core::Name kind) const;
+		bool WeatherVolumeAvailable() const;
+		bool RecordWeatherFallback(
+			const graph::RunContext &context,
+			const Impl::NamedTexture &source,
+			const Impl::NamedTexture &depth,
+			const Impl::NamedTexture &target,
+			const Impl::NamedTexture &environment,
+			bool drawSky,
+			bool drawClouds,
+			bool linearDepth,
+			const PbrUniforms *captureUniforms = nullptr,
+			const scene::WorldLighting *captureLighting = nullptr
+		);
+		// Applies the accepted world field to a completed local capture before its
+		// parent samples it. Captures use their own depth and no temporal history.
+		bool RecordCaptureWeather(
+			const graph::RunContext &context,
+			SDL_GPUTexture *colour,
+			SDL_GPUTexture *depth,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &camera,
+			uint32_t width,
+			uint32_t height,
+			const scene::WorldLighting &lighting,
+			uint32_t backingWidth = 0,
+			uint32_t backingHeight = 0
+		);
 
 		// Where the schedule placed a node.
 		//
@@ -463,6 +510,7 @@ namespace engine::render {
 		// @param passLights  The light set, pushed once for the pass.
 		// @param clearColour Overrides the fog clear. The seam light captures
 		//                    clear to the world's ambient - the lit void.
+		// @param storeDepth Retains local capture depth for subsequent weather sampling.
 		// @return The open pass.
 		SDL_GPURenderPass *OpenScenePass(
 			SDL_GPUTexture *colour,
@@ -471,7 +519,22 @@ namespace engine::render {
 			const SDL_GPUViewport *viewport,
 			const LightUniforms &passLights,
 			const SDL_FColor *clearColour = nullptr,
-			WorldColourTarget target = WorldColourTarget::Display
+			WorldColourTarget target = WorldColourTarget::Display,
+			bool storeDepth = false
+		);
+
+		// Draws the requested editor grid after opaque depth, using this capture's camera and clip.
+		void DrawGroundGrid(
+			SDL_GPURenderPass *pass,
+			const glm::mat4 &viewProjection,
+			const core::CFrame &cameraFrame,
+			WorldColourTarget target
+		);
+
+		// Composes a grid-only tail while preserving opaque colour and depth.
+		// Unsupported inputs decline before recording so the caller can copy and draw.
+		bool ComposeGroundGrid(
+			core::Name name, const Impl::NamedTexture &source, const Impl::NamedTexture &target
 		);
 
 		// The world minus every pane, drawn into whatever pass is open.
@@ -529,10 +592,13 @@ namespace engine::render {
 			const void *rawUniforms = nullptr,
 			size_t rawUniformBytes = 0,
 			const BeamUniforms *passBeams = nullptr,
-			SDL_GPUBuffer *fragmentStorage = nullptr
+			SDL_GPUBuffer *fragmentStorage = nullptr,
+			const WeatherShadowLightingUniforms *weatherShadows = nullptr
 		);
 
 		bool UploadCloudDensity();
+
+		void RegisterWeatherShadowNodes(NodeTable &frameNodes);
 
 		// The renderer-owned texture a named resource role resolves to.
 		//
@@ -555,7 +621,8 @@ namespace engine::render {
 		);
 
 		// The buffer backing a graph resource, allocating it when asked.
-		SDL_GPUBuffer *ResourceBuffer(graph::ResourceId resource, size_t selectedSlot, bool make);
+		SDL_GPUBuffer *
+		ResourceBuffer(graph::ResourceId resource, size_t selectedSlot, bool make, uint64_t actualBytes = 0);
 
 		// The selected slot has to be shared by graph target allocation and history writes.
 		size_t GraphTextureSlot(const graph::RunContext &context) const;
@@ -578,7 +645,9 @@ namespace engine::render {
 		void StageHistoryWrites(const graph::RunContext &context, SDL_GPUCommandBuffer *command);
 
 		// `ResourceBuffer` for the viewport this node names, or this view's.
-		SDL_GPUBuffer *GraphBuffer(graph::ResourceId resource, const graph::RunContext &context, bool make);
+		SDL_GPUBuffer *GraphBuffer(
+			graph::ResourceId resource, const graph::RunContext &context, bool make, uint64_t actualBytes = 0
+		);
 
 		// The fragment samplers for everything a node reads, in read order. An
 		// absent image binds the fallback texel rather than nothing.
@@ -587,6 +656,12 @@ namespace engine::render {
 		// @return The bindings.
 		std::vector<SDL_GPUTextureSamplerBinding>
 		TextureBindings(const graph::RunContext &context, SDL_GPUCommandBuffer *readCommand = nullptr);
+
+		// Publishes an identical image without running a fullscreen shader.
+		bool CopyImage(core::Name name, const Impl::NamedTexture &source, const Impl::NamedTexture &target);
+
+		// Initializes a declared colour output without running a shader.
+		bool ClearImage(core::Name name, const Impl::NamedTexture &target, SDL_FColor colour);
 
 		// Copies one image into another through the image pipeline.
 		//

@@ -61,6 +61,9 @@ namespace engine::ecs {
 
 namespace engine::gui {
 
+	// Prepares one cloned StarterGui root before it becomes a live PlayerGui tree.
+	using PlayerGuiClonePrepare = bool (*)(ecs::Store &store, ecs::Entity source, ecs::Entity copy);
+
 	// Which way a selection move goes.
 	//
 	// @since v0.8
@@ -252,9 +255,13 @@ namespace engine::gui {
 	// @param player The `Player` whose `PlayerGui` to rebuild. Anything without
 	//        one is left alone and answers zero, which is a player some host
 	//        built without going through `scene::AddPlayer`.
+	// @param prepare Optional host adapter for clone-owned references. The GUI
+	//        layer owns the tree copy but not scene asset identities, so a higher
+	//        layer can rekey references after parenting. Returning false discards
+	//        that cloned subtree.
 	// @return How many children were cloned in. Zero for a world with no
 	//         `StarterGui`, an empty one, or a player whose surviving copies
 	//         already cover it - none of which is a failure.
 	// @since v0.15
-	size_t ResetPlayerGui(ecs::Store &store, ecs::Entity player);
+	size_t ResetPlayerGui(ecs::Store &store, ecs::Entity player, PlayerGuiClonePrepare prepare = nullptr);
 }

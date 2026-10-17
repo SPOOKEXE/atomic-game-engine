@@ -124,21 +124,21 @@ namespace engine::audio {
 	// A copy of an existing command/finish record with the resulting player state.
 	// NaturalCompletion selects Finished; otherwise Applied selects the command.
 	struct PlaybackEvent {
-		// True when this record reports a source reaching its end naturally.
+		// Selects the natural-finish record instead of the command record.
 		bool NaturalCompletion = false;
-		// Applied command details when this is not a natural completion.
+		// Command dispatch details when NaturalCompletion is false.
 		AppliedAudioCommand Applied{};
-		// Finished source details when this is a natural completion.
+		// Source completion details when NaturalCompletion is true.
 		FinishedAudioSource Finished{};
-		// Command result, or Applied for a natural completion.
+		// Outcome associated with the resulting player state.
 		PlaybackStatus Status = PlaybackStatus::Applied;
-		// Playback incarnation associated with this record.
+		// Player incarnation represented by this event.
 		uint64_t PlaybackGeneration = 0;
-		// Whether the player existed when the resulting state was captured.
+		// Whether the target player still exists after the event.
 		bool Present = false;
-		// Whether the player was playing when the resulting state was captured.
+		// Whether the target player is playing after the event.
 		bool Playing = false;
-		// Player cursor in source frames after the event.
+		// Player cursor after dispatch, measured in source frames.
 		double CursorFrames = 0.0;
 	};
 
@@ -182,13 +182,13 @@ namespace engine::audio {
 			return Shape;
 		}
 
-		// How many frames have been rendered since this mixer started.
+		// Completed frames since this mixer started, safely published for producers.
 		//
 		// **The sample clock**, and the thing a command's deadline is measured
 		// against. A caller scheduling something "in 20 milliseconds" adds
 		// `0.020 * SampleRate` to this.
 		uint64_t Clock() const {
-			return Rendered;
+			return PublishedRendered.load(std::memory_order_relaxed);
 		}
 
 		// Commands dispatched by the latest successful render, with outcomes.
@@ -230,7 +230,7 @@ namespace engine::audio {
 			return MissedPlaybackEvents.load(std::memory_order_relaxed);
 		}
 
-		// Fixed capacity of the playback-event ring; must remain a power of two.
+		// Fixed event capacity so render-side publication does not allocate.
 		static constexpr size_t PLAYBACK_EVENT_CAPACITY = 2048;
 
 		// Renders one block.
@@ -238,14 +238,16 @@ namespace engine::audio {
 		// Drains the queue, splits the block at every deadline inside it,
 		// applies commands at their exact sample, and mixes.
 		//
-		// @param[out] out Filled with exactly its own length in frames. Its
+		// @param[out] out At most the configured block length is mixed; the returned
+		//        Frames identifies the valid output length. Its
 		//        format must match this mixer's; a mismatch produces silence
 		//        rather than a resample, because a resample on this thread is
 		//        the wrong answer to a caller's configuration mistake.
 		// @return What happened.
 		MixReport Render(SampleBuffer &out);
 
-		// Applies every waiting command immediately, ignoring deadlines.
+		// Applies every waiting command immediately, ignoring dispatch deadlines.
+		// A Play with RetainDeadline still gates its samples until its deadline.
 		//
 		// For building a routing before the clock is running, and for a test
 		// that wants a graph in a known state. **Not for the device thread** -
@@ -282,6 +284,8 @@ namespace engine::audio {
 		CommandQueue Queue;
 
 		uint64_t Rendered = 0;
+		// The callback owns Rendered; producers read only this completed-block publication.
+		std::atomic<uint64_t> PublishedRendered{0};
 
 		// One scratch buffer per node, indexed alongside the graph's order.
 		// Sized when the graph changes and reused after that, so a render

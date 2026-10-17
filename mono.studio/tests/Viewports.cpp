@@ -12,16 +12,28 @@
 // a panel minted while a free one sat there is a `SceneTarget` and a turn in the
 // rotation nobody asked to pay.
 
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/examples/DemosLoader.hpp>
+#include <engine/gui/Components.hpp>
+#include <engine/gui/PlayerGui.hpp>
+#include <engine/gui/Registration.hpp>
+#include <engine/parallel/Jobs.hpp>
 #include <engine/render/PortalImageDemand.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/scene/ActiveCamera.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/script/Instances.hpp>
+#include <engine/script/SourceCache.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -33,6 +45,7 @@
 #include <numbers>
 #include <random>
 #include <stdexcept>
+#include <studio/Config.hpp>
 #include <studio/Editor.hpp>
 #include <studio/PlayLink.hpp>
 #include <studio/Projection.hpp>
@@ -55,6 +68,10 @@ namespace studio {
 			editor.SetRunMode(editor.Active, RunMode::Edit);
 		}
 
+		static Entity Insert(Editor &editor, WorldId world, engine::ecs::ClassId klass, Entity parent) {
+			return editor.InsertInstance(world, klass, parent);
+		}
+
 		static bool Initialise(Editor &editor, size_t viewports) {
 			Options options;
 			options.Headless = true;
@@ -64,6 +81,29 @@ namespace studio {
 
 		static void Present(Editor &editor, size_t viewport) {
 			editor.PresentViewport(viewport, 1.0f / 60.0f);
+		}
+
+		static void RetainCacheImages(Editor &editor) {
+			editor.Settings.Headless = false;
+			editor.LastGraphViewport = 0;
+			editor.LastGraphRenderGeneration = editor.Renderer.RenderGeneration();
+			editor.Overlay.MarkUploaded();
+			editor.ShowFrameGraph = false;
+		}
+
+		static engine::render::PresentationCacheProfile CacheProfile(const Editor &editor) {
+			return editor.ViewportPresentations[0].CacheProfile();
+		}
+
+		static void CachePage(Editor &editor, bool visible) {
+			editor.ShowFrameGraph = visible;
+			editor.FrameGraphState.ShowCascadedCaches = visible;
+		}
+
+		static engine::render::VisibilitySnapshot BodyVisibility(Editor &editor) {
+			editor.WorldTarget = {96, 96};
+			Present(editor, 0);
+			return editor.Renderer.Visibility();
 		}
 
 		static void SetFieldOfView(Editor &editor, size_t viewport, float fieldOfView) {
@@ -160,6 +200,19 @@ namespace studio {
 			return editor.Runs.back().Links.front()->ReplicaWorld();
 		}
 
+		static bool AddDemo(Editor &editor, const engine::examples::DemoEntry &demo) {
+			return editor.AddExampleWorld(demo);
+		}
+
+		static void TickPlay(Editor &editor) {
+			for (size_t tick = 0; tick < 24; ++tick) {
+				for (auto &run : editor.Runs)
+					for (auto &link : run.Links)
+						link->Step(*editor.Universe);
+				editor.Universe->Tick(1.0f / 60.0f);
+			}
+		}
+
 		static engine::scene::FlipbookFacts Flipbook(Editor &editor, engine::world::WorldId world) {
 			engine::scene::FlipbookFacts facts;
 			editor.Universe->Enter(world, [&](const engine::ecs::Store &store) {
@@ -226,6 +279,21 @@ namespace studio {
 	};
 
 	struct ViewportGuiControlsProbe {
+		static void DrawInput(Editor &editor, engine::world::WorldId world) {
+			editor.Active = world;
+			editor.FocusedIsViewport = true;
+			editor.FocusedViewport = 0;
+			editor.CurrentTool = Editor::ToolMode::None;
+			editor.ViewportActive = ImGui::IsItemActive();
+			auto &slot = editor.Overlays[0];
+			slot.List = ImGui::GetWindowDrawList();
+			slot.X = slot.Y = 20;
+			slot.Width = 300;
+			slot.Height = 220;
+			slot.Drawn = true;
+			editor.DrawViewportGui(0, {});
+		}
+
 		static bool VisibleByDefault(const Editor &editor) {
 			return editor.ShowGuiPreviewControls;
 		}
@@ -338,6 +406,133 @@ namespace {
 }
 
 TEST_CASE(
+	"Studio viewport clicks reach only its displayed client GUI across restart",
+	"[studio][viewports][gui][input]"
+) {
+	using namespace engine;
+	const SavedGameScratch scratch;
+	struct ConfigRestore {
+		std::filesystem::path Previous = studio::ConfigRoot();
+		~ConfigRestore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore;
+	studio::SetConfigRoot(scratch.Root);
+	GuiContext context;
+	studio::Editor editor;
+	parallel::Jobs::Start(1);
+	scene::RegisterSceneClasses();
+	gui::RegisterGuiClasses();
+	(void)script::ScriptClass();
+	editor.Universe = std::make_unique<world::Universe>();
+	world::WorldSettings settings;
+	settings.Name = core::Name("viewport.gui.input");
+	const auto authority = editor.Universe->Create(settings);
+	editor.Universe->Enter(authority, [](ecs::Store &store) {
+		scene::InstallServices(store);
+		const auto screen = store.CreateInstance(gui::GuiClass("ScreenGui"), "ClickHud");
+		store.SetParent(screen, store.FindFirstRoot("StarterGui"));
+		const auto boot = script::MakeScript(store, "viewport-input.luau", "Bootstrap", true);
+		store.SetParent(boot, screen);
+		store.Set(boot, script::Program{core::Name("viewport-input.luau"), R"(
+local button = Instance.new('TextButton')
+button.Name = 'Count'
+button.Position = UDim2.new(0, 20, 0, 20)
+button.Size = UDim2.new(0, 100, 0, 50)
+button.Text = '0'
+button.Parent = script.Parent
+local count = 0
+button.Activated:Connect(function()
+    count += 1
+    button.Text = tostring(count)
+end)
+)"});
+	});
+	auto &run = editor.Runs.emplace_back();
+	run.World = authority;
+	run.Mode = studio::RunMode::Play;
+	for (const auto name : {"Ada", "Grace"}) {
+		auto link = std::make_unique<studio::PlayLink>();
+		std::string error;
+		REQUIRE(link->Start(*editor.Universe, authority, 60, error, name));
+		run.Links.push_back(std::move(link));
+	}
+	const auto step = [&](int ticks) {
+		std::array links{run.Links[0].get(), run.Links[1].get()};
+		for (int tick = 0; tick < ticks; ++tick) {
+			studio::PlayLink::StepMany(*editor.Universe, links);
+			editor.Universe->Tick(1.0f / 60.0f);
+		}
+	};
+	const auto counter = [&](size_t client) {
+		std::string result;
+		editor.Universe->Enter(run.Links[client]->ReplicaWorld(), [&](const ecs::Store &store) {
+			const auto playerGui = store.FindFirstChild(run.Links[client]->Player(), "PlayerGui");
+			ecs::Entity screen;
+			store.EachChild(playerGui, [&](ecs::Entity child) {
+				if (store.InstanceNameOf(child) == core::Name("ClickHud") &&
+					!gui::IsPlayerGuiSource(store, child))
+					screen = child;
+			});
+			REQUIRE(screen != ecs::NULL_ENTITY);
+			const auto *label = store.Get<gui::Label>(store.FindFirstChild(screen, "Count"));
+			REQUIRE(label != nullptr);
+			result = label->Text;
+		});
+		return result;
+	};
+	const auto frame = [&](size_t client, bool down) {
+		auto &io = ImGui::GetIO();
+		io.AddMousePosEvent(60, 60);
+		io.AddMouseButtonEvent(ImGuiMouseButton_Left, down);
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_Always);
+		ImGui::Begin("client input");
+		ImGui::SetCursorScreenPos(ImVec2(20, 20));
+		ImGui::InvisibleButton("##surface", ImVec2(300, 220));
+		studio::ViewportGuiControlsProbe::DrawInput(editor, run.Links[client]->ReplicaWorld());
+		ImGui::End();
+		ImGui::Render();
+	};
+	const auto click = [&](size_t client) {
+		for (int idle = 0; idle < 3; ++idle)
+			frame(client, false);
+		frame(client, true);
+		frame(client, false);
+		step(2);
+	};
+	step(32);
+	CHECK(counter(0) == "0");
+	CHECK(counter(1) == "0");
+	click(0);
+	CHECK(counter(0) == "1");
+	CHECK(counter(1) == "0");
+	click(1);
+	CHECK(counter(0) == "1");
+	CHECK(counter(1) == "1");
+	editor.Universe->Enter(authority, [](const ecs::Store &store) {
+		const auto source = store.FindFirstChild(store.FindFirstRoot("StarterGui"), "ClickHud");
+		CHECK(store.FindFirstChild(source, "Count") == ecs::NULL_ENTITY);
+	});
+	run.Links[0]->Stop(*editor.Universe);
+	CHECK_FALSE(run.Links[0]->DeliverGuiEvents({}));
+	std::string error;
+	REQUIRE(run.Links[0]->Start(*editor.Universe, authority, 60, error, "Ada"));
+	step(32);
+	CHECK(counter(0) == "0");
+	click(0);
+	CHECK(counter(0) == "1");
+	CHECK(counter(1) == "1");
+	for (auto &link : run.Links) {
+		link->Stop(*editor.Universe);
+		CHECK_FALSE(link->DeliverGuiEvents({}));
+	}
+	editor.Active = authority;
+	editor.Runs.clear();
+}
+
+TEST_CASE(
 	"game UI uses each panel's logical size instead of its GPU allocation", "[studio][viewports][gui]"
 ) {
 	const studio::ViewportCanvas left = CanvasForViewport(12.0f, 30.0f, 841.0f, 674.0f, 432.0f, 367.0f);
@@ -374,8 +569,8 @@ TEST_CASE("runtime worlds keep separate generated cameras", "[studio][viewports]
 	ViewportCameraPose clientPose = DefaultViewportCamera();
 	clientPose.Frame.Position = {-10.0f, 4.0f, 8.0f};
 
-	const engine::ecs::Entity serverCamera = CreateRuntimeCamera(server, "ServerCamera", serverPose);
-	const engine::ecs::Entity clientCamera = CreateRuntimeCamera(client, "ClientCamera", clientPose);
+	const engine::ecs::Entity serverCamera = CreateRuntimeCamera(server, serverPose);
+	const engine::ecs::Entity clientCamera = CreateRuntimeCamera(client, clientPose);
 	REQUIRE(serverCamera != engine::ecs::NULL_ENTITY);
 	REQUIRE(clientCamera != engine::ecs::NULL_ENTITY);
 	CHECK(RuntimeCameraOf(server) == serverCamera);
@@ -384,6 +579,12 @@ TEST_CASE("runtime worlds keep separate generated cameras", "[studio][viewports]
 	CHECK(client.Get<engine::scene::Transform>(clientCamera)->Frame.Position == clientPose.Frame.Position);
 	CHECK(server.Get<engine::scene::TransientComponent>(serverCamera) != nullptr);
 	CHECK(client.Get<engine::scene::TransientComponent>(clientCamera) != nullptr);
+	CHECK(engine::ecs::Store::IsPredicted(serverCamera));
+	CHECK(engine::ecs::Store::IsPredicted(clientCamera));
+	CHECK(server.InstanceNameOf(serverCamera) == engine::core::Name("Camera"));
+	CHECK(client.InstanceNameOf(clientCamera) == engine::core::Name("Camera"));
+	CHECK(server.Has<engine::ecs::ClientLocal>(serverCamera));
+	CHECK(client.Has<engine::ecs::ClientLocal>(clientCamera));
 }
 
 TEST_CASE("editor viewports keep generated cameras and follows separate", "[studio][viewports][camera]") {
@@ -397,6 +598,20 @@ TEST_CASE("editor viewports keep generated cameras and follows separate", "[stud
 	REQUIRE(cameras[0] != engine::ecs::NULL_ENTITY);
 	REQUIRE(cameras[1] != engine::ecs::NULL_ENTITY);
 	CHECK(cameras[0] != cameras[1]);
+	const auto child =
+		studio::ViewportCameraProbe::Insert(editor, world, engine::scene::PartClass(), cameras[0]);
+	REQUIRE(child != engine::ecs::NULL_ENTITY);
+	editor.Universe->Enter(world, [&](const engine::ecs::Store &store) {
+		CHECK(engine::ecs::Store::IsPredicted(child));
+		CHECK(store.Has<engine::ecs::ClientLocal>(child));
+		CHECK(store.ParentOf(child) == cameras[0]);
+		for (const auto camera : cameras) {
+			CHECK(engine::ecs::Store::IsPredicted(camera));
+			CHECK(store.InstanceNameOf(camera) == engine::core::Name("Camera"));
+			CHECK(store.Has<engine::ecs::ClientLocal>(camera));
+			CHECK(store.Has<engine::scene::TransientComponent>(camera));
+		}
+	});
 
 	studio::ViewportCameraProbe::SetFollows(editor, cameras[0], cameras[1]);
 	CHECK(studio::ViewportCameraProbe::Follows(editor) == cameras);
@@ -566,6 +781,101 @@ TEST_CASE(
 	CHECK(client.Frames == 64);
 	CHECK(client.FrameRate > 23.0f);
 	CHECK(client.FrameRate < 25.0f);
+}
+
+TEST_CASE(
+	"Studio first person hides only the displayed player's body",
+	"[studio][viewports][camera][first-person-body][gpu][.]"
+) {
+	using namespace engine;
+	const SavedGameScratch scratch;
+	struct ConfigRestore {
+		std::filesystem::path Previous = studio::ConfigRoot();
+		~ConfigRestore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore;
+	studio::SetConfigRoot(scratch.Root);
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	const auto authority = editor.Universe->Create({.Name = core::Name("FirstPersonBody")});
+	editor.PrepareWorldIn(authority);
+	editor.Universe->Enter(authority, [&](ecs::Store &store) {
+		const auto observer = scene::AddPlayer(store, "observer", false, 91);
+		REQUIRE(observer != ecs::NULL_ENTITY);
+		const auto model = scene::LoadCharacter(store, observer);
+		const auto *character = store.Get<scene::Character>(model);
+		REQUIRE(character != nullptr);
+		store.Set(character->Root, scene::Transform{core::CFrame(core::Vector3{0, 0, -3})});
+	});
+	studio::ViewportCameraProbe::Show(editor, authority);
+	const WorldId replica = studio::ViewportCameraProbe::StartPlay(editor);
+	studio::ViewportCameraProbe::TickPlay(editor);
+	studio::ViewportCameraProbe::Show(editor, replica);
+	std::vector<uint64_t> body;
+	std::vector<uint64_t> otherBody;
+	const auto setMode = [&](scene::CameraMode mode) {
+		editor.Universe->Enter(replica, [&](ecs::Store &store) {
+			(void)scene::FollowOwnCharacter(store);
+			const auto *local = store.Resource<scene::LocalPlayer>();
+			REQUIRE(local != nullptr);
+			const auto *character = store.Get<scene::Character>(scene::CharacterOf(store, local->Instance));
+			REQUIRE(character != nullptr);
+			const auto *active = store.Resource<scene::ActiveCamera>();
+			REQUIRE(active != nullptr);
+			REQUIRE(scene::CameraSubjectRoot(store, active->Entity) == character->Root);
+			auto *control = store.ResourceMutable<scene::CameraController>();
+			REQUIRE(control != nullptr);
+			control->Angles = {-.8f, 0};
+			control->Mode = mode;
+			control->Distance = mode == scene::CameraMode::LockFirstPerson ? 0 : 5;
+			control->OccludedDistance = -1;
+			REQUIRE(scene::PlaceCamera(store));
+		});
+	};
+	setMode(scene::CameraMode::Classic);
+	const auto classic = studio::ViewportCameraProbe::BodyVisibility(editor);
+	REQUIRE(classic.Valid);
+	editor.Universe->Enter(replica, [&](const ecs::Store &store) {
+		const auto *active = store.Resource<scene::ActiveCamera>();
+		REQUIRE(active != nullptr);
+		const auto root = scene::CameraSubjectRoot(store, active->Entity);
+		REQUIRE(root != ecs::NULL_ENTITY);
+		const auto *drawn = store.Resource<render::DrawList>();
+		REQUIRE(drawn != nullptr);
+		const auto observer = store.FindFirstChild(scene::PlayersOf(store), "observer");
+		const auto *other = store.Get<scene::Character>(scene::CharacterOf(store, observer));
+		REQUIRE(other != nullptr);
+		for (const auto &row : drawn->Instances) {
+			if (row.Variant != 0) continue;
+			if (row.Rig == root.Id || row.Source == root.Id) body.push_back(row.Source);
+			if (row.Rig == other->Root.Id || row.Source == other->Root.Id) otherBody.push_back(row.Source);
+		}
+	});
+	REQUIRE_FALSE(body.empty());
+	REQUIRE_FALSE(otherBody.empty());
+	const auto submittedBody = [&](const render::VisibilitySnapshot &snapshot,
+								   const std::vector<uint64_t> &entities) {
+		size_t count = 0;
+		for (const auto &row : snapshot.Observations) {
+			if (std::find(entities.begin(), entities.end(), row.Entity) == entities.end()) continue;
+			if (row.State == render::VisibilityState::SubmittedOpaqueOrMasked ||
+				row.State == render::VisibilityState::SubmittedBlended ||
+				row.State == render::VisibilityState::GpuIndirectCandidate)
+				++count;
+		}
+		return count;
+	};
+	CHECK(submittedBody(classic, body) > 0);
+	setMode(scene::CameraMode::LockFirstPerson);
+	const auto first = studio::ViewportCameraProbe::BodyVisibility(editor);
+	REQUIRE(first.Valid);
+	CHECK(submittedBody(first, body) == 0);
+	CHECK(submittedBody(first, otherBody) > 0);
+	setMode(scene::CameraMode::Classic);
+	const auto restored = studio::ViewportCameraProbe::BodyVisibility(editor);
+	REQUIRE(restored.Valid);
+	CHECK(submittedBody(restored, body) > 0);
 }
 
 TEST_CASE(
@@ -930,6 +1240,74 @@ TEST_CASE("opening a saved game refocuses Worlds after Live Instances", "[studio
 	editor.Shutdown();
 }
 
+TEST_CASE(
+	"Studio demo import mounts a portable client camera companion", "[studio][viewports][demo-camera]"
+) {
+	using namespace engine;
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	const auto demo = examples::DemosLoader().Find(examples::DemoKind::Script, "Shaders.luau");
+	REQUIRE(demo.has_value());
+	REQUIRE(studio::ViewportCameraProbe::AddDemo(editor, *demo));
+	editor.Universe->Enter(editor.Active, [&](const ecs::Store &store) {
+		const auto starter = store.FindFirstRoot("StarterPlayer");
+		const auto templates = store.FindFirstChild(starter, "StarterPlayerScripts");
+		const auto companion = store.FindFirstChild(templates, "DemoCamera");
+		REQUIRE(companion != ecs::NULL_ENTITY);
+		CHECK(store.ClassOf(companion) == script::LocalScriptClass());
+		CHECK_FALSE(ecs::Store::IsPredicted(companion));
+		const core::Name source("examples/scripts/client/DemoCameras/Shaders.client.luau");
+		CHECK(script::ActiveSourceOf(store, companion) == source);
+		const auto *cache = store.Resource<script::SourceCache>();
+		REQUIRE(cache != nullptr);
+		const auto *text = cache->Find(source);
+		REQUIRE(text != nullptr);
+		CHECK(text->find("PublishedCamera") != std::string::npos);
+	});
+	const WorldId replica = studio::ViewportCameraProbe::StartPlay(editor);
+	studio::ViewportCameraProbe::TickPlay(editor);
+	const auto &link = *editor.Runs.back().Links.front();
+	editor.Universe->Enter(link.AuthorityWorld(), [&](const ecs::Store &store) {
+		const auto starter = store.FindFirstRoot("StarterPlayer");
+		const auto templates = store.FindFirstChild(starter, "StarterPlayerScripts");
+		const auto source = store.FindFirstChild(templates, "DemoCamera");
+		const auto scripts = store.FindFirstChild(link.Player(), "PlayerScripts");
+		const auto copy = store.FindFirstChild(scripts, "DemoCamera");
+		for (const auto companion : {source, copy}) {
+			REQUIRE(companion != ecs::NULL_ENTITY);
+			ecs::AttributeValue name;
+			REQUIRE(ecs::GetAttribute(store, companion, core::Name("Name"), name));
+			CHECK(name.Type == ecs::PropertyType::String);
+			CHECK(name.String == "ShaderCamera");
+			ecs::AttributeValue pose;
+			REQUIRE(ecs::GetAttribute(store, companion, core::Name("CFrame"), pose));
+			CHECK(pose.Type == ecs::PropertyType::CFrame);
+		}
+	});
+	editor.Universe->Enter(replica, [&](const ecs::Store &store) {
+		const auto *local = store.Resource<scene::LocalPlayer>();
+		REQUIRE(local != nullptr);
+		const auto scripts = store.FindFirstChild(local->Instance, "PlayerScripts");
+		const auto companion = store.FindFirstChild(scripts, "DemoCamera");
+		REQUIRE(companion != ecs::NULL_ENTITY);
+		ecs::AttributeValue name;
+		REQUIRE(ecs::GetAttribute(store, companion, core::Name("Name"), name));
+		CHECK(name.Type == ecs::PropertyType::String);
+		CHECK(name.String == "ShaderCamera");
+		ecs::AttributeValue pose;
+		REQUIRE(ecs::GetAttribute(store, companion, core::Name("CFrame"), pose));
+		CHECK(pose.Type == ecs::PropertyType::CFrame);
+		const auto camera = studio::RuntimeCameraOf(store);
+		REQUIRE(camera != ecs::NULL_ENTITY);
+		CHECK(store.InstanceNameOf(camera) == core::Name("ShaderCamera"));
+		CHECK(ecs::Store::IsPredicted(camera));
+		CHECK(ecs::IsClientLocalInstance(store, camera));
+		CHECK(store.ParentOf(camera) == scene::WorkspaceOf(store));
+	});
+	studio::ViewportCameraProbe::Stop(editor);
+	editor.Shutdown();
+}
+
 TEST_CASE("stopping the last Play run refocuses Worlds", "[studio][viewports][worlds]") {
 	studio::Editor editor;
 	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
@@ -942,4 +1320,99 @@ TEST_CASE("stopping the last Play run refocuses Worlds", "[studio][viewports][wo
 	CHECK(studio::ViewportCameraProbe::WorldsFocusedForEditing(editor));
 
 	editor.Shutdown();
+}
+
+TEST_CASE(
+	"repeated Play restores authored content after viewport camera handles remint",
+	"[studio][viewports][camera][worlds]"
+) {
+	using namespace engine;
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	const core::Name worldName = editor.Universe->NameOf(editor.Active);
+	const auto originalCameras = studio::ViewportCameraProbe::CreateTwo(editor, editor.Active);
+
+	// Authored children remain separate from the reserved local camera range
+	// while Stop rebuilds the store and its service hierarchy.
+	editor.Universe->Enter(editor.Active, [&](ecs::Store &store) {
+		for (int index = 0; index < 24; ++index) {
+			const auto part = store.CreateInstance(scene::PartClass(), "Authored" + std::to_string(index));
+			REQUIRE(part != ecs::NULL_ENTITY);
+			REQUIRE(store.SetParent(part, scene::WorkspaceOf(store)));
+		}
+	});
+
+	for (int cycle = 0; cycle < 3; ++cycle) {
+		INFO("Play/Stop cycle " << cycle);
+		REQUIRE(studio::ViewportCameraProbe::StartPlay(editor).IsValid());
+		editor.Universe->Enter(editor.Active, [&](ecs::Store &store) {
+			size_t cameras = 0;
+			store.Each<const scene::Camera>([&](ecs::Entity entity, const scene::Camera &) {
+				if (store.ClassOf(entity) != scene::CameraClass()) return;
+				++cameras;
+				CHECK(store.ParentOf(entity) == scene::WorkspaceOf(store));
+			});
+			CHECK(cameras == 2);
+		});
+		studio::ViewportCameraProbe::Stop(editor);
+		const WorldId restored = editor.Universe->Find(worldName);
+		REQUIRE(restored.IsValid());
+		editor.Universe->Enter(restored, [&](const ecs::Store &store) {
+			for (const auto camera : originalCameras)
+				CHECK_FALSE(store.Alive(camera));
+		});
+		studio::ViewportCameraProbe::Show(editor, restored);
+		const auto cameras = studio::ViewportCameraProbe::CreateTwo(editor, restored);
+		editor.Universe->Enter(restored, [&](const ecs::Store &store) {
+			for (const auto camera : cameras) {
+				REQUIRE(store.Get<scene::Camera>(camera) != nullptr);
+				CHECK(store.Has<scene::TransientComponent>(camera));
+				CHECK(store.ParentOf(camera) == scene::WorkspaceOf(store));
+			}
+			CHECK(RuntimeCameraOf(store) == cameras[1]);
+			for (int index = 0; index < 24; ++index) {
+				const auto part =
+					store.FindFirstChild(scene::WorkspaceOf(store), "Authored" + std::to_string(index));
+				REQUIRE(part != ecs::NULL_ENTITY);
+				CHECK(store.Get<scene::Camera>(part) == nullptr);
+			}
+		});
+	}
+	editor.Shutdown();
+}
+
+TEST_CASE(
+	"retained viewport opportunities collect cache hits with diagnostics hidden",
+	"[studio][viewports][cache][gpu]"
+) {
+	SavedGameScratch scratch;
+	const auto previous = studio::ConfigRoot();
+	struct Restore {
+		std::filesystem::path Previous;
+		~Restore() {
+			studio::SetConfigRoot(Previous);
+		}
+	} restore{previous};
+	studio::SetConfigRoot(scratch.Root);
+	studio::Editor editor;
+	REQUIRE(studio::ViewportCameraProbe::Initialise(editor, 1));
+	(void)studio::ViewportCameraProbe::BodyVisibility(editor);
+	studio::ViewportCameraProbe::RetainCacheImages(editor);
+	const auto before = studio::ViewportCameraProbe::CacheProfile(editor);
+	for (size_t opportunity = 0; opportunity < 4; opportunity++)
+		studio::ViewportCameraProbe::Present(editor, 0);
+	const auto hidden = studio::ViewportCameraProbe::CacheProfile(editor);
+	CHECK_FALSE(hidden.LastDamage().Any());
+	for (size_t index = 0; index < hidden.Activities().size(); index++) {
+		if (hidden.Activities()[index].Last != engine::render::PresentationCacheActivity::Decision::Hit)
+			continue;
+		CHECK(hidden.Activities()[index].Hits == before.Activities()[index].Hits + 4);
+		CHECK(hidden.Activities()[index].Writes == before.Activities()[index].Writes);
+	}
+	studio::ViewportCameraProbe::CachePage(editor, true);
+	studio::ViewportCameraProbe::Present(editor, 0);
+	const auto visible = studio::ViewportCameraProbe::CacheProfile(editor);
+	const size_t scene = static_cast<size_t>(engine::render::PresentationCacheLayer::SceneImage);
+	CHECK(visible.Activities()[scene].Hits == hidden.Activities()[scene].Hits + 1);
+	CHECK(visible.Activities()[scene].Writes == hidden.Activities()[scene].Writes);
 }

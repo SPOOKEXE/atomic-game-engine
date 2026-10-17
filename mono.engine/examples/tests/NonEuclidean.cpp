@@ -40,12 +40,21 @@ namespace {
 		std::vector<scene::PortalSeam> Seams;
 		std::shared_ptr<script::Runtime> Runtime;
 
-		Exhibit() {
+		explicit Exhibit(bool runClientCamera = false) {
 			core::Paths::SetAssetsOverride(core::Paths::Base().parent_path() / "assets");
 			std::string failure;
-			const bool loaded = examples::LoadScene(
-				Store, Systems, examples::ExamplePath("NonEuclidean.luau"), failure, &Runtime
-			);
+			bool loaded = false;
+			if (runClientCamera) {
+				script::RuntimeLimits limits;
+				limits.Role = script::HostRole::OfBoth();
+				loaded = examples::LoadScene(
+					Store, Systems, examples::ExamplePath("NonEuclidean.luau"), failure, &Runtime, &limits
+				);
+			} else {
+				loaded = examples::LoadScene(
+					Store, Systems, examples::ExamplePath("NonEuclidean.luau"), failure, &Runtime
+				);
+			}
 			INFO(failure);
 			REQUIRE(loaded);
 			scene::GatherPortalSeams(Store, Seams);
@@ -230,7 +239,7 @@ TEST_CASE(
 TEST_CASE(
 	"non-euclidean angle tour seeks every mouth without sweeping its cuts", "[examples][non-euclidean-tour]"
 ) {
-	Exhibit exhibit;
+	Exhibit exhibit(true);
 	auto &store = exhibit.Store;
 	const auto view = store.FindFirstChild(scene::WorkspaceOf(store), "Viewer");
 	REQUIRE(view != ecs::NULL_ENTITY);

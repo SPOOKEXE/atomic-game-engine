@@ -175,5 +175,6 @@ namespace engine::render {
 		uint64_t Token = 0;
 		uint32_t Live = 0;
 		bool TokenMode = false;
+		bool RangesReady = true;
 	};
 }

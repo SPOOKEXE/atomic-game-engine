@@ -21,8 +21,10 @@
 #include "JsBindings.hpp"
 
 #include <engine/core/Log.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Schema.hpp>
 #include <engine/script/EcsInstanceMethods.hpp>
+#include <engine/script/InstanceShim.hpp>
 
 #include <algorithm>
 #include <array>
@@ -49,6 +51,21 @@ namespace engine::script {
 
 		Store &StoreOf(JSContext *context) {
 			return *JsOf(context).World;
+		}
+
+		bool ClientExecution(JSContext *context) {
+			const auto &role = JsExecutionRole(context);
+			return StoreOf(context).AdoptOnly() || (role.Client && !role.Server);
+		}
+
+		bool MayWriteComponent(JSContext *context, Entity entity, ComponentId component) {
+			const auto &store = StoreOf(context);
+			if (!ClientExecution(context)) return !ecs::IsClientLocalInstance(store, entity);
+			return store.Alive(entity) && Store::IsPredicted(entity) &&
+				   ecs::IsClientLocalInstance(store, entity) &&
+				   component != Components::Of<ecs::Hierarchy>() &&
+				   component != Components::Of<ecs::InstanceClass>() &&
+				   component != Components::Of<ecs::ClientLocal>();
 		}
 
 		// One component value, constructed and destroyed properly.
@@ -397,6 +414,9 @@ namespace engine::script {
 				fields.push_back(FieldSpec{names[at], types[at], enums[at], packings[at]});
 			}
 
+			// A receiver can confirm an existing declaration without publishing a new global type.
+			if (ClientExecution(context) && Schemas::Find(Name(name.Get())) == nullptr)
+				return JS_ThrowTypeError(context, "the authority declares component types");
 			const Schemas::Result result = Schemas::Register(name.Get(), fields);
 			if (result.Why != Schemas::Status::Ok) {
 				return JS_ThrowTypeError(
@@ -452,6 +472,8 @@ namespace engine::script {
 		}
 
 		JSValue WorldSetComponentTags(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			if (ClientExecution(context))
+				return JS_ThrowTypeError(context, "the authority owns component metadata");
 			if (count < 2) {
 				return JS_ThrowTypeError(context, "SetComponentTags takes a component name and tags");
 			}
@@ -474,6 +496,8 @@ namespace engine::script {
 		}
 
 		JSValue WorldSetComponentFieldTags(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			if (ClientExecution(context))
+				return JS_ThrowTypeError(context, "the authority owns component metadata");
 			if (count < 3) {
 				return JS_ThrowTypeError(
 					context, "SetComponentFieldTags takes a component name, field, and tags"
@@ -499,6 +523,8 @@ namespace engine::script {
 		}
 
 		JSValue WorldExposeComponentField(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
+			if (ClientExecution(context))
+				return JS_ThrowTypeError(context, "the authority owns component metadata");
 			if (count < 3) {
 				return JS_ThrowTypeError(
 					context, "ExposeComponentField takes a component name, field, and boolean"
@@ -559,6 +585,7 @@ namespace engine::script {
 		// `World.CreateEntity(name?)`
 		JSValue WorldCreateEntity(JSContext *context, JSValueConst, int count, JSValueConst *argv) {
 			Store &store = StoreOf(context);
+			const bool client = ClientExecution(context);
 
 			Entity entity = ecs::NULL_ENTITY;
 			if (count >= 1 && !JS_IsUndefined(argv[0]) && !JS_IsNull(argv[0])) {
@@ -566,9 +593,15 @@ namespace engine::script {
 				if (!name.Present()) {
 					return JS_EXCEPTION;
 				}
-				entity = store.Create(name.Get());
+				const Entity existing = store.Find(name.Get());
+				if (!client && store.Alive(existing) && ecs::IsClientLocalInstance(store, existing))
+					return JS_ThrowTypeError(context, "this entity name belongs to client execution");
+				if (client && store.Alive(existing) &&
+					(!Store::IsPredicted(existing) || !ecs::IsClientLocalInstance(store, existing)))
+					return JS_ThrowTypeError(context, "this entity name is not owned by this client");
+				entity = client ? store.CreatePredicted(name.Get()) : store.Create(name.Get());
 			} else {
-				entity = store.Create();
+				entity = client ? store.CreatePredicted() : store.Create();
 			}
 
 			if (entity == ecs::NULL_ENTITY) {
@@ -582,6 +615,11 @@ namespace engine::script {
 				return JS_ThrowInternalError(context, "the world could not create an entity");
 			}
 
+			if (client) {
+				if (!Store::IsPredicted(entity))
+					return JS_ThrowTypeError(context, "this entity name belongs to the authority");
+				store.Set(entity, ecs::ClientLocal{});
+			}
 			return MakeJsInstance(context, entity);
 		}
 
@@ -623,7 +661,10 @@ namespace engine::script {
 			// array inside it would let a getter on `Array.prototype` run with
 			// that scope open.
 			std::vector<Entity> found;
-			store.EachMatching(terms, [&found](Entity entity) { found.push_back(entity); });
+			const bool client = ClientExecution(context);
+			store.EachMatching(terms, [&](Entity entity) {
+				if (InstanceVisibleToScript(store, entity, client)) found.push_back(entity);
+			});
 
 			JSValue array = JS_NewArray(context);
 			for (size_t at = 0; at < found.size(); at++) {
@@ -647,11 +688,15 @@ namespace engine::script {
 			}
 
 			std::vector<Entity> found;
-			StoreOf(context).EachMatching(
+			Store &store = StoreOf(context);
+			const bool client = ClientExecution(context);
+			store.EachMatching(
 				QueryTerms{
 					{}, std::span<const ComponentId>(required), std::span<const ComponentId>(excluded)
 				},
-				[&found](Entity entity) { found.push_back(entity); }
+				[&](Entity entity) {
+					if (InstanceVisibleToScript(store, entity, client)) found.push_back(entity);
+				}
 			);
 
 			JSValue array = JS_NewArray(context);
@@ -671,7 +716,12 @@ namespace engine::script {
 			if (!ReadTerms(context, count, argv, terms)) {
 				return JS_EXCEPTION;
 			}
-			return JS_NewInt64(context, static_cast<int64_t>(store.CountMatching(terms)));
+			const bool client = ClientExecution(context);
+			int64_t visible = 0;
+			store.EachMatching(terms, [&](Entity entity) {
+				if (InstanceVisibleToScript(store, entity, client)) ++visible;
+			});
+			return JS_NewInt64(context, visible);
 		}
 
 		// --- the instance half -------------------------------------------------
@@ -697,6 +747,8 @@ namespace engine::script {
 				return error;
 			}
 
+			if (!MayWriteComponent(context, entity, id))
+				return JS_ThrowTypeError(context, "component writes cannot cross script execution sides");
 			const bool tag = schema->Fields().empty();
 			if (!tag && (count < 2 || !JS_IsObject(argv[1]))) {
 				return JS_ThrowTypeError(context, "SetComponent takes an object of field values");
@@ -766,7 +818,8 @@ namespace engine::script {
 		// `entity.GetComponent(name)`
 		JSValue InstanceGetComponent(JSContext *context, JSValueConst self, int count, JSValueConst *argv) {
 			Store &store = StoreOf(context);
-			const Entity entity = JsEntityOf(context, self);
+			const Entity entity =
+				InstanceForScriptRead(store, JsEntityOf(context, self), ClientExecution(context));
 
 			if (count < 1) {
 				return JS_ThrowTypeError(context, "GetComponent takes a component name");
@@ -783,6 +836,7 @@ namespace engine::script {
 			if (schema == nullptr) {
 				return error;
 			}
+			if (entity == ecs::NULL_ENTITY) return JS_NULL;
 
 			const void *held = store.GetComponent(entity, id);
 			if (held == nullptr && !store.HasComponent(entity, id)) {
@@ -816,7 +870,8 @@ namespace engine::script {
 		// `entity.HasComponent(name)`
 		JSValue InstanceHasComponent(JSContext *context, JSValueConst self, int count, JSValueConst *argv) {
 			Store &store = StoreOf(context);
-			const Entity entity = JsEntityOf(context, self);
+			const Entity entity =
+				InstanceForScriptRead(store, JsEntityOf(context, self), ClientExecution(context));
 
 			if (count < 1) {
 				return JS_ThrowTypeError(context, "HasComponent takes a component name");
@@ -830,7 +885,9 @@ namespace engine::script {
 			// Not `FindSchema`, because asking is not reaching: the entity
 			// either carries it or does not, whoever declared it.
 			const ComponentId id = Components::Find(Name(name.Get()));
-			return JS_NewBool(context, id.IsValid() && store.HasComponent(entity, id));
+			return JS_NewBool(
+				context, entity != ecs::NULL_ENTITY && id.IsValid() && store.HasComponent(entity, id)
+			);
 		}
 
 		// `entity.RemoveComponent(name)`
@@ -854,6 +911,8 @@ namespace engine::script {
 				return error;
 			}
 
+			if (!MayWriteComponent(context, entity, id))
+				return JS_ThrowTypeError(context, "component writes cannot cross script execution sides");
 			store.RemoveComponent(entity, id);
 			return JS_UNDEFINED;
 		}
@@ -861,7 +920,9 @@ namespace engine::script {
 		// `entity.GetComponents()`
 		JSValue InstanceGetComponents(JSContext *context, JSValueConst self, int, JSValueConst *) {
 			Store &store = StoreOf(context);
-			const Entity entity = JsEntityOf(context, self);
+			const Entity entity =
+				InstanceForScriptRead(store, JsEntityOf(context, self), ClientExecution(context));
+			if (entity == ecs::NULL_ENTITY) return JS_NewArray(context);
 
 			std::vector<std::string_view> names;
 			for (const ComponentId id : store.ComponentsOf(entity)) {

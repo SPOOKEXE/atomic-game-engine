@@ -131,7 +131,9 @@ for view in "${views[@]}"; do
 		side|front|far) ;;
 		*) echo "unsupported portal view: $view" >&2; exit 1 ;;
 	esac
-	staged="$out/PortalSeam-$view.luau"
+	fixture="$out/fixtures/portal-seam-$view"
+	mkdir -p "$fixture"
+	staged="$fixture/PortalSeam.luau"
 	sequence="$out/portal-seam-$view"
 	sed "s/^local VIEW = \"[^\"]*\"$/local VIEW = \"$view\"/" "$scene" > "$staged"
 
@@ -152,7 +154,9 @@ done
 # or aperture history, then paired by frame number in the CPU report.
 report_requirements=()
 if [ "$front_requested" = true ]; then
-	reference_staged="$out/PortalSeamMatchedRoom-front.luau"
+	reference_fixture="$out/fixtures/portal-seam-reference-front"
+	mkdir -p "$reference_fixture"
+	reference_staged="$reference_fixture/PortalSeamMatchedRoom.luau"
 	reference_sequence="$out/portal-seam-reference-front"
 	sed 's/^local VIEW = "[^"]*"$/local VIEW = "front"/' "$reference_scene" > "$reference_staged"
 	if ! grep -q '^local VIEW = "front"$' "$reference_staged"; then

@@ -1,3 +1,5 @@
+#include "ImageGraphRegistration.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Instance.hpp>
@@ -18,8 +20,10 @@
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Gravity.hpp>
+#include <engine/scene/ImageGraph.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
@@ -41,59 +45,102 @@
 #include <engine/scene/VectorField.hpp>
 #include <engine/scene/Visibility.hpp>
 #include <engine/scene/Volume.hpp>
+#include <engine/scene/WeatherClock.hpp>
+#include <engine/scene/WeatherCompute.hpp>
 #include <engine/scene/Wire.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 namespace engine::scene {
 
 	namespace {
-		void WriteGpuParticleFields(core::ByteWriter &writer, const void *source, size_t count) {
-			const auto *fields = static_cast<const GpuParticleField *>(source);
+		void WriteSurfaceBounces(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *values = static_cast<const SurfaceBounces *>(source);
 			for (size_t index = 0; index < count; ++index) {
-				writer.WriteBool(fields[index].Enabled);
-				writer.WriteUInt8(fields[index].Layers);
-				writer.WriteUInt16(fields[index].Reserved);
-				writer.WriteUInt32(fields[index].RequestedCount);
-				writer.WriteUInt32(fields[index].Seed);
-				for (const core::Color3 colour :
-					 {fields[index].CondensationColor, fields[index].RainColor, fields[index].DebrisColor}) {
-					writer.WriteFloat(colour.R);
-					writer.WriteFloat(colour.G);
-					writer.WriteFloat(colour.B);
-				}
-				writer.WriteFloat(fields[index].CondensationAlpha);
-				writer.WriteFloat(fields[index].RainAlpha);
-				writer.WriteFloat(fields[index].DebrisAlpha);
-				writer.WriteFloat(fields[index].CondensationSize);
-				writer.WriteFloat(fields[index].RainSize);
-				writer.WriteFloat(fields[index].DebrisSize);
+				writer.WriteInt32(values[index].Levels);
 			}
 		}
 
-		void ReadGpuParticleFields(core::ByteReader &reader, void *destination, size_t count) {
-			auto *fields = static_cast<GpuParticleField *>(destination);
+		void ReadSurfaceBounces(core::ByteReader &reader, void *destination, size_t count) {
+			auto *values = static_cast<SurfaceBounces *>(destination);
 			for (size_t index = 0; index < count; ++index) {
+				values[index].Levels = reader.ReadInt32();
+				if (values[index].Levels < 0) {
+					reader.Fail();
+				}
+			}
+		}
+
+		void WriteSurfaceLimits(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *values = static_cast<const SurfaceLimit *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				writer.WriteInt32(values[index].Panes);
+			}
+		}
+
+		void ReadSurfaceLimits(core::ByteReader &reader, void *destination, size_t count) {
+			auto *values = static_cast<SurfaceLimit *>(destination);
+			for (size_t index = 0; index < count; ++index) {
+				values[index].Panes = reader.ReadInt32();
+				if (values[index].Panes < 0) {
+					reader.Fail();
+				}
+			}
+		}
+
+		void WriteGpuParticleFields(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *fields = static_cast<const GpuParticleField *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				const auto &field = fields[index];
+				// A marker refuses the previous specialized field layout instead of
+				// silently treating its weather controls as generic initial conditions.
+				writer.WriteUInt32(0x32465047);
+				writer.WriteBool(field.Enabled);
+				writer.WriteUInt8(field.Layers);
+				writer.WriteUInt32(field.RequestedCount);
+				writer.WriteUInt32(field.Seed);
+				writer.WriteFloat(field.HalfExtent.X);
+				writer.WriteFloat(field.HalfExtent.Y);
+				writer.WriteFloat(field.HalfExtent.Z);
+				writer.WriteFloat(field.VelocityResponse);
+				writer.WriteString(GpuParticleDefinition(field));
+			}
+		}
+		void ReadGpuParticleFields(core::ByteReader &reader, void *destination, size_t count) {
+			if (count > reader.Remaining() / 34) {
+				reader.Fail();
+				return;
+			}
+			auto *fields = static_cast<GpuParticleField *>(destination);
+			std::vector<GpuParticleField> candidate;
+			candidate.reserve(count);
+			for (size_t index = 0; index < count; ++index) {
+				if (reader.ReadUInt32() != 0x32465047) {
+					reader.Fail();
+					return;
+				}
 				GpuParticleField field;
-				field.Enabled = reader.ReadBool();
+				const uint8_t enabled = reader.ReadUInt8();
+				field.Enabled = enabled != 0;
 				field.Layers = reader.ReadUInt8();
-				field.Reserved = reader.ReadUInt16();
 				field.RequestedCount = reader.ReadUInt32();
 				field.Seed = reader.ReadUInt32();
-				field.CondensationColor = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
-				field.RainColor = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
-				field.DebrisColor = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
-				field.CondensationAlpha = reader.ReadFloat();
-				field.RainAlpha = reader.ReadFloat();
-				field.DebrisAlpha = reader.ReadFloat();
-				field.CondensationSize = reader.ReadFloat();
-				field.RainSize = reader.ReadFloat();
-				field.DebrisSize = reader.ReadFloat();
-				if ((field.Layers & ~GPU_PARTICLE_ALL_LAYERS) != 0 || field.Reserved != 0) reader.Fail();
-				fields[index] = field;
+				field.HalfExtent = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				field.VelocityResponse = reader.ReadFloat();
+				const auto definition = reader.ReadString();
+				if (enabled > 1 || reader.Failed() || !ReadGpuParticleDefinition(definition, field) ||
+					!ValidGpuParticleField(field)) {
+					reader.Fail();
+					return;
+				}
+				candidate.push_back(std::move(field));
 			}
+			for (size_t index = 0; index < count; ++index)
+				fields[index] = std::move(candidate[index]);
 		}
 
 		void WritePortals(core::ByteWriter &writer, const void *source, size_t count) {
@@ -492,6 +539,207 @@ namespace engine::scene {
 				sky.Shader = SkyboxComputeShaderFromName(reader.ReadName());
 				sky.Enabled = reader.ReadBool();
 			}
+		}
+
+		void WriteWeatherCompute(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *layers = static_cast<const WeatherCompute *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				const auto &layer = layers[index];
+				writer.WriteUInt32(2);
+				writer.WriteFloat(layer.CellSizeMetres);
+				writer.WriteFloat(layer.BaseHeightMetres);
+				writer.WriteFloat(layer.ThicknessMetres);
+				writer.WriteFloat(layer.ExtentMetres.X);
+				writer.WriteFloat(layer.ExtentMetres.Y);
+				writer.WriteFloat(layer.ExtentMetres.Z);
+				writer.WriteUInt32(layer.Seed);
+				writer.WriteUInt32(layer.AlgorithmVersion);
+				writer.WriteUInt32(layer.DefinitionRevision);
+				writer.WriteName(core::Name(Describe(layer.Mode)));
+				writer.WriteFloat(layer.Coverage);
+				writer.WriteFloat(layer.CondensateScale);
+				writer.WriteFloat(layer.VapourMixingRatio);
+				writer.WriteFloat(layer.VapourScale);
+				writer.WriteFloat(layer.BaseTemperatureCelsius);
+				writer.WriteFloat(layer.BasePressureHectopascals);
+				writer.WriteFloat(layer.TemperatureLapseCelsiusPerKilometre);
+				writer.WriteFloat(layer.TemperatureVariationCelsius);
+				writer.WriteFloat(layer.PressureVariationHectopascals);
+				writer.WriteFloat(layer.WindMetresPerSecond.X);
+				writer.WriteFloat(layer.WindMetresPerSecond.Y);
+				writer.WriteFloat(layer.WindMetresPerSecond.Z);
+				writer.WriteFloat(layer.TurbulenceMetresPerSecond);
+				writer.WriteFloat(layer.ShearMetresPerSecond);
+				writer.WriteFloat(layer.LiftMetresPerSecond);
+				writer.WriteUInt32(layer.FeatureCells);
+				writer.WriteFloat(layer.FrontContrast);
+				writer.WriteFloat(layer.GrowthRate);
+				writer.WriteUInt32(layer.TickRate);
+				writer.WriteFloat(layer.TimeScale);
+				writer.WriteBool(layer.Paused);
+				writer.WriteFloat(layer.MaintenanceSeconds);
+				writer.WriteUInt32(layer.MaximumResidentBricks);
+				writer.WriteUInt32(layer.MaximumLod);
+				writer.WriteFloat(layer.LodError);
+				writer.WriteBool(layer.ShadowsEnabled);
+				writer.WriteFloat(layer.ShadowStrength);
+				writer.WriteFloat(layer.ShadowDistanceMetres);
+				writer.WriteUInt32(layer.ShadowResolution);
+				writer.WriteUInt32(layer.ShadowCascades);
+				writer.WriteFloat(layer.ShadowUpdateSeconds);
+				writer.WriteFloat(layer.AtmosphereDensityStrength);
+				writer.WriteFloat(layer.AtmosphereHazeStrength);
+				writer.WriteFloat(layer.AtmosphereGlareSuppression);
+				writer.WriteFloat(layer.FogStrength);
+				writer.WriteFloat(layer.PrecipitationRate);
+				writer.WriteFloat(layer.IceFraction);
+				writer.WriteFloat(layer.StormIntensity);
+				writer.WriteFloat(layer.HailIntensity);
+				writer.WriteFloat(layer.LightningRate);
+				writer.WriteName(layer.LayerName);
+				writer.WriteBool(layer.Enabled);
+				writer.WriteName(core::Name(Describe(layer.BoundaryX)));
+				writer.WriteName(core::Name(Describe(layer.BoundaryZ)));
+				writer.WriteName(core::Name(Describe(layer.TopBoundary)));
+				writer.WriteUInt32(layer.TerrainRevision);
+				writer.WriteFloat(layer.GroundVapourFluxKilogramsPerSquareMetreSecond);
+				writer.WriteFloat(layer.RainFallSpeedMetresPerSecond);
+			}
+		}
+
+		void ReadWeatherCompute(core::ByteReader &reader, void *destination, size_t count) {
+			if (count > reader.Remaining() / 203) {
+				reader.Fail();
+				return;
+			}
+			std::vector<WeatherCompute> candidate;
+			candidate.reserve(count);
+			for (size_t index = 0; index < count; ++index) {
+				if (reader.ReadUInt32() != 2) {
+					reader.Fail();
+					return;
+				}
+				WeatherCompute layer;
+				layer.CellSizeMetres = reader.ReadFloat();
+				layer.BaseHeightMetres = reader.ReadFloat();
+				layer.ThicknessMetres = reader.ReadFloat();
+				layer.ExtentMetres = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				layer.Seed = reader.ReadUInt32();
+				layer.AlgorithmVersion = reader.ReadUInt32();
+				layer.DefinitionRevision = reader.ReadUInt32();
+				if (!WeatherModeFromName(reader.ReadName(), layer.Mode)) {
+					reader.Fail();
+					return;
+				}
+				layer.Coverage = reader.ReadFloat();
+				layer.CondensateScale = reader.ReadFloat();
+				layer.VapourMixingRatio = reader.ReadFloat();
+				layer.VapourScale = reader.ReadFloat();
+				layer.BaseTemperatureCelsius = reader.ReadFloat();
+				layer.BasePressureHectopascals = reader.ReadFloat();
+				layer.TemperatureLapseCelsiusPerKilometre = reader.ReadFloat();
+				layer.TemperatureVariationCelsius = reader.ReadFloat();
+				layer.PressureVariationHectopascals = reader.ReadFloat();
+				layer.WindMetresPerSecond = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				layer.TurbulenceMetresPerSecond = reader.ReadFloat();
+				layer.ShearMetresPerSecond = reader.ReadFloat();
+				layer.LiftMetresPerSecond = reader.ReadFloat();
+				layer.FeatureCells = reader.ReadUInt32();
+				layer.FrontContrast = reader.ReadFloat();
+				layer.GrowthRate = reader.ReadFloat();
+				layer.TickRate = reader.ReadUInt32();
+				layer.TimeScale = reader.ReadFloat();
+				const uint8_t paused = reader.ReadUInt8();
+				if (paused > 1) {
+					reader.Fail();
+					return;
+				}
+				layer.Paused = paused != 0;
+				layer.MaintenanceSeconds = reader.ReadFloat();
+				layer.MaximumResidentBricks = reader.ReadUInt32();
+				layer.MaximumLod = reader.ReadUInt32();
+				layer.LodError = reader.ReadFloat();
+				const uint8_t shadowsEnabled = reader.ReadUInt8();
+				if (shadowsEnabled > 1) {
+					reader.Fail();
+					return;
+				}
+				layer.ShadowsEnabled = shadowsEnabled != 0;
+				layer.ShadowStrength = reader.ReadFloat();
+				layer.ShadowDistanceMetres = reader.ReadFloat();
+				layer.ShadowResolution = reader.ReadUInt32();
+				layer.ShadowCascades = reader.ReadUInt32();
+				layer.ShadowUpdateSeconds = reader.ReadFloat();
+				layer.AtmosphereDensityStrength = reader.ReadFloat();
+				layer.AtmosphereHazeStrength = reader.ReadFloat();
+				layer.AtmosphereGlareSuppression = reader.ReadFloat();
+				layer.FogStrength = reader.ReadFloat();
+				layer.PrecipitationRate = reader.ReadFloat();
+				layer.IceFraction = reader.ReadFloat();
+				layer.StormIntensity = reader.ReadFloat();
+				layer.HailIntensity = reader.ReadFloat();
+				layer.LightningRate = reader.ReadFloat();
+				const auto layerName = reader.ReadString();
+				if (layerName.empty() || layerName.size() > MAX_WEATHER_LAYER_NAME_BYTES) {
+					reader.Fail();
+					return;
+				}
+				layer.LayerName = core::Name(layerName);
+				const uint8_t enabled = reader.ReadUInt8();
+				if (enabled > 1) {
+					reader.Fail();
+					return;
+				}
+				layer.Enabled = enabled != 0;
+				if (!WeatherBoundaryFromName(reader.ReadName(), layer.BoundaryX) ||
+					!WeatherBoundaryFromName(reader.ReadName(), layer.BoundaryZ) ||
+					!WeatherTopBoundaryFromName(reader.ReadName(), layer.TopBoundary)) {
+					reader.Fail();
+					return;
+				}
+				layer.TerrainRevision = reader.ReadUInt32();
+				layer.GroundVapourFluxKilogramsPerSquareMetreSecond = reader.ReadFloat();
+				layer.RainFallSpeedMetresPerSecond = reader.ReadFloat();
+				if (reader.Failed() || !ValidWeatherCompute(layer)) {
+					reader.Fail();
+					return;
+				}
+				candidate.push_back(layer);
+			}
+			auto *layers = static_cast<WeatherCompute *>(destination);
+			std::copy(candidate.begin(), candidate.end(), layers);
+		}
+
+		void WriteWeatherAcceptedDefinitions(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *definitions = static_cast<const WeatherAcceptedDefinition *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				writer.WriteUInt32(2);
+				WriteWeatherCompute(writer, &definitions[index].Controls, 1);
+				writer.WriteString(definitions[index].Layer);
+			}
+		}
+
+		void ReadWeatherAcceptedDefinitions(core::ByteReader &reader, void *destination, size_t count) {
+			if (count > reader.Remaining() / 211) {
+				reader.Fail();
+				return;
+			}
+			std::vector<WeatherAcceptedDefinition> candidate(count);
+			for (auto &definition : candidate) {
+				if (reader.ReadUInt32() != 2) {
+					reader.Fail();
+					return;
+				}
+				ReadWeatherCompute(reader, &definition.Controls, 1);
+				const auto layer = reader.ReadString();
+				if (reader.Failed() || layer.size() > MAX_WEATHER_STREAM_LAYER_BYTES) {
+					reader.Fail();
+					return;
+				}
+				definition.Layer = layer;
+			}
+			auto *definitions = static_cast<WeatherAcceptedDefinition *>(destination);
+			std::copy(candidate.begin(), candidate.end(), definitions);
 		}
 
 		void WriteCloudCompute(core::ByteWriter &writer, const void *source, size_t count) {
@@ -958,20 +1206,37 @@ namespace engine::scene {
 				writer.WriteFloat(image.Packing.Maximum);
 				writer.WriteUInt32(image.Packing.Revision);
 				writer.WriteUInt32(image.Revision);
+				writer.WriteString(
+					image.Space == EditableImageSpace::Linear ? "linear"
+					: image.Space == EditableImageSpace::SRGB ? "srgb"
+															  : "invalid"
+				);
 			}
 		}
 
 		void ReadEditableImages(core::ByteReader &reader, void *destination, size_t count) {
 			auto *images = static_cast<EditableImage *>(destination);
 			for (size_t index = 0; index < count; index++) {
-				EditableImage &image = images[index];
-				image.Width = reader.ReadUInt32();
-				image.Height = reader.ReadUInt32();
+				const uint32_t width = reader.ReadUInt32();
+				const uint32_t height = reader.ReadUInt32();
 				const uint32_t bytes = reader.ReadUInt32();
-				image.Pixels.assign(bytes, 0);
-				if (bytes > 0) {
-					reader.ReadRaw(image.Pixels.data(), bytes);
+				const uint64_t pixels = static_cast<uint64_t>(width) * height;
+				if (reader.Failed() || width == 0 || height == 0 || pixels > MAXIMUM_EDITABLE_IMAGE_PIXELS ||
+					bytes != pixels * 4 || bytes > reader.Remaining()) {
+					reader.Fail();
+					return;
 				}
+				// Validate the declaration before allocating, then publish only a complete image.
+				EditableImage image{
+					.Width = width,
+					.Height = height,
+					.Space = EditableImageSpace::Linear,
+					.Pixels = {},
+					.Packing = {},
+					.Revision = 0
+				};
+				image.Pixels.resize(bytes);
+				reader.ReadRaw(image.Pixels.data(), bytes);
 				const std::string_view format = reader.ReadString();
 				EditablePacking packing;
 				const bool knownPacking = ParseEditablePackingFormat(format, packing.Format);
@@ -981,6 +1246,13 @@ namespace engine::scene {
 				packing.Revision = reader.ReadUInt32();
 				image.Packing = knownPacking ? packing : EditablePacking{};
 				image.Revision = reader.ReadUInt32();
+				const auto space = reader.ReadString();
+				if (reader.Failed() || (space != "linear" && space != "srgb")) {
+					reader.Fail();
+					return;
+				}
+				image.Space = space == "linear" ? EditableImageSpace::Linear : EditableImageSpace::SRGB;
+				images[index] = std::move(image);
 			}
 		}
 
@@ -1419,7 +1691,13 @@ namespace engine::scene {
 		// counterpart for the identical reason.** A written pair because it
 		// holds a `std::vector<uint8_t>` of raw pixels.
 		ecs::Components::Register<EditableImage>(
-			"scene.EditableImage", WriteEditableImages, ReadEditableImages
+			"scene.EditableImage",
+			WriteEditableImages,
+			ReadEditableImages,
+			MAXIMUM_EDITABLE_IMAGE_PIXELS * 4 + 128
+		);
+		ecs::Components::Register<ImageGraph>(
+			"scene.ImageGraph", detail::WriteImageGraphs, detail::ReadImageGraphs
 		);
 
 		// The render gate, at the end for the reason this list opens with.
@@ -1691,12 +1969,14 @@ namespace engine::scene {
 		// is being registered - and a type that reaches `Components::Of` before
 		// an explicit name arrives keeps the compiler's spelling and aborts when
 		// the real one turns up. Appended, for this list's standing reason.
-		ecs::Components::Register<SurfaceBounces>("scene.SurfaceBounces");
+		ecs::Components::Register<SurfaceBounces>(
+			"scene.SurfaceBounces", WriteSurfaceBounces, ReadSurfaceBounces
+		);
 
 		// `workspace.MaxSurfaces`, beside the depth and for the same reason: a
 		// declared property has to resolve a component id, and a resource is
 		// keyed by one like anything else.
-		ecs::Components::Register<SurfaceLimit>("scene.SurfaceLimit");
+		ecs::Components::Register<SurfaceLimit>("scene.SurfaceLimit", WriteSurfaceLimits, ReadSurfaceLimits);
 
 		// **The three the team pipeline added, appended for this list's
 		// standing reason**: a component id is registration order, an archetype
@@ -1835,16 +2115,16 @@ namespace engine::scene {
 		// Decision 20 says a render graph may vary per platform and anything
 		// reaching a simulation input may not - these reach no simulation input,
 		// and what crosses is what the *author* wrote rather than what a machine
-		// resolved. `scene.LightingService` is already on this side of the line
-		// with the fog terms these sit beside; what stays local is the resolved
+		// resolved. `scene.LightingService` and the authored effect children are
+		// on this side of the line; what stays local is the resolved
 		// half, and the resolved half is `scene::WorldLighting`, which is not a
 		// component at all.
 		ecs::Components::Register<Atmosphere>("scene.Atmosphere");
 		ecs::Components::Register<Clouds>("scene.Clouds");
 		ecs::Components::Register<Volume>("scene.Volume");
 
-		// **A resource, and a hand-written pair because it holds the generator's
-		// name.**
+		// **A durable component with a hand-written codec because it holds the
+		// generator's stable name.**
 		//
 		// **The recipe crosses and the ground it makes never can.** A chunked
 		// world is gigabytes; both ends run the same graph over the same seed and
@@ -1853,9 +2133,8 @@ namespace engine::scene {
 		// at four fewer orders of magnitude: sending a conclusion instead of its
 		// input hands an attacker the half they get to choose.
 		//
-		// Registered rather than left to be minted by the first `SetResource`,
-		// which takes the compiler's spelling of the type and aborts once the
-		// table is sealed.
+		// Registered before the class table and component table are sealed so the
+		// generated Terrain class can carry this same snapshot and wire row.
 		ecs::Components::Register<Terrain>("scene.Terrain", WriteTerrains, ReadTerrains);
 
 		// Appended because component ids are registration order. Every format is
@@ -1914,11 +2193,30 @@ namespace engine::scene {
 		// Appended because component ids are registration order.
 		ecs::Components::Register<LODSettings>("scene.LODSettings", WriteLodSettings, ReadLodSettings);
 
-		// This is a compact authored request rather than particle state. Its
-		// fixed twelve-byte format keeps saves and replicas independent of struct
-		// padding while the renderer owns all device-local particles.
+		// Bounded authored initial conditions cross saves and replicas. The much
+		// larger live population remains device-local.
 		ecs::Components::Register<GpuParticleField>(
-			"scene.GpuParticleField", WriteGpuParticleFields, ReadGpuParticleFields
+			"scene.GpuParticleField", WriteGpuParticleFields, ReadGpuParticleFields, 525000
+		);
+
+		// Appended to preserve every existing component id. Explicit padding
+		// makes the generated snapshot form deterministic.
+		ecs::Components::Register<BloomEffect>("scene.BloomEffect");
+		ecs::Components::Register<DepthOfFieldEffect>("scene.DepthOfFieldEffect");
+		ecs::Components::Register<GodRaysEffect>("scene.GodRaysEffect");
+		ecs::Components::Register<FogEffect>("scene.FogEffect");
+
+		// Weather definitions append without renumbering existing snapshot components.
+		ecs::Components::Register<WeatherCompute>(
+			"scene.WeatherCompute", WriteWeatherCompute, ReadWeatherCompute, 512
+		);
+		RegisterWeatherClockComponents();
+		// Pending authored controls and the accepted backlog definition are distinct facts.
+		ecs::Components::Register<WeatherAcceptedDefinition>(
+			"scene.WeatherAcceptedDefinition",
+			WriteWeatherAcceptedDefinitions,
+			ReadWeatherAcceptedDefinitions,
+			800
 		);
 	}
 
@@ -1946,5 +2244,6 @@ namespace engine::scene {
 		(void)LensShaderClass();
 		(void)EditableMeshClass();
 		(void)EditableImageClass();
+		(void)ImageGraphClass();
 	}
 }

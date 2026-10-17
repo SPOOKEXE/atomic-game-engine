@@ -42,6 +42,7 @@
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/script/SourceCache.hpp>
+#include <engine/weather/Runtime.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>
@@ -192,6 +193,7 @@ namespace {
 		engine::ecs::RegisterAttributeComponents();
 		engine::world::RegisterMailboxTypes();
 		engine::scene::RegisterSceneComponents();
+		engine::weather::RegisterWeatherRuntimeComponents();
 		engine::gui::RegisterGuiComponents();
 		engine::physics::RegisterPhysicsComponents();
 		engine::effects::RegisterEffectComponents();

@@ -1,6 +1,7 @@
 // Shared shading for native colour and optional unrounded capture responses.
 #include "projection.glsl"
 #include "ambient-lighting.glsl"
+#include "weather-shadow-lighting.glsl"
 
 layout(location = 0) in vec2 inUv;
 
@@ -200,13 +201,14 @@ vec4 ShadeDeferred(out vec4 directionalResponse) {
 		pass.OutdoorAmbient.rgb, occlusion);
 	vec3 unshadowedDirect = (diffuse * lambert + specular) * pass.Direct.rgb;
 	float shadowVisibility = min(ShadowFactor(world, normal, toLight), PortalBeamFactor(world));
-	vec3 direct = unshadowedDirect * shadowVisibility;
+	vec3 transmittedDirect = unshadowedDirect * WeatherShadowFactor(world);
+	vec3 direct = transmittedDirect * shadowVisibility;
 	vec3 lit = ambient + direct + LocalLight(world, normal, diffuse) + emissive +
 			   SeamSpill(0, world, normal, albedo.rgb) + SeamSpill(1, world, normal, albedo.rgb);
 	float fogRange = max(pass.Fog.y - pass.Fog.x, 0.0001);
 	float fog = clamp((distance(world, pass.Eye.xyz) - pass.Fog.x) / fogRange, 0.0, 1.0);
 	// Fog attenuates the directional term; its own colour does not change with shadows.
-	directionalResponse = vec4(unshadowedDirect * (1.0 - fog), shadowVisibility);
+	directionalResponse = vec4(transmittedDirect * (1.0 - fog), shadowVisibility);
 	return vec4(mix(lit, pass.FogColour.rgb, fog), albedo.a);
 }
 

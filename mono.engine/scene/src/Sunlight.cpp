@@ -1,11 +1,13 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Atmosphere.hpp>
+#include <engine/scene/LightingEffects.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
 
 namespace engine::scene {
@@ -32,6 +34,16 @@ namespace engine::scene {
 				}
 			);
 		}
+
+		// Capture lighting requires a finite, strictly positive fog interval.
+		// The next representable float preserves Start except at the largest float.
+		void ResolveFogRange(float authoredStart, float authoredEnd, float &start, float &end) {
+			const float maximum = std::numeric_limits<float>::max();
+			const float largestStart = std::nextafter(maximum, 0.0f);
+			start = std::isnan(authoredStart) ? 0.0f : std::clamp(authoredStart, 0.0f, largestStart);
+			end = std::isnan(authoredEnd) ? 0.0f : std::clamp(authoredEnd, 0.0f, maximum);
+			if (end <= start) end = std::nextafter(start, maximum);
+		}
 	}
 
 	WorldLighting LightingOf(const ecs::Store &store) {
@@ -51,20 +63,62 @@ namespace engine::scene {
 			const float direct = std::max(authored->Brightness, 0.0f) * daylight;
 			lighting.Direct = core::Color3{direct, direct, direct};
 
-			lighting.FogColor = authored->FogColor;
-			lighting.FogStart = std::max(authored->FogStart, 0.0f);
-			lighting.FogEnd = std::max(authored->FogEnd, lighting.FogStart);
-			lighting.BloomThreshold = std::max(authored->BloomThreshold, 0.0f);
-			lighting.BloomIntensity = std::max(authored->BloomIntensity, 0.0f);
-			lighting.BloomRadius = std::max(authored->BloomRadius, 0.0f);
-			lighting.DepthOfFieldIntensity = std::clamp(authored->DepthOfFieldIntensity, 0.0f, 1.0f);
-			lighting.DepthOfFieldFocusDistance = std::max(authored->DepthOfFieldFocusDistance, 0.0f);
-			lighting.DepthOfFieldFocusRange = std::max(authored->DepthOfFieldFocusRange, 0.0f);
-			lighting.DepthOfFieldRadius = std::max(authored->DepthOfFieldRadius, 0.0f);
-			lighting.GodRayIntensity = std::max(authored->GodRayIntensity, 0.0f);
-			lighting.GodRayThreshold = std::max(authored->GodRayThreshold, 0.0f);
-			lighting.GodRayRadius = std::max(authored->GodRayRadius, 0.0f);
 			lighting.RenderFeatures = authored->RenderFeatures;
+		}
+
+		if (service != ecs::NULL_ENTITY) {
+			const ecs::ClassId bloomClass = ecs::Classes::Find(core::Name("BloomEffect"));
+			const ecs::ClassId depthClass = ecs::Classes::Find(core::Name("DepthOfFieldEffect"));
+			const ecs::ClassId raysClass = ecs::Classes::Find(core::Name("GodRaysEffect"));
+			const ecs::ClassId fogClass = ecs::Classes::Find(core::Name("FogEffect"));
+			bool hasBloom = false;
+			bool hasDepthOfField = false;
+			bool hasGodRays = false;
+			bool hasFog = false;
+			// The first provider of each class owns that effect, even when disabled.
+			// A fresh walk also observes mutation, removal and reparenting this frame.
+			store.EachDescendant(service, [&](ecs::Entity descendant) {
+				if (!hasBloom && store.IsA(descendant, bloomClass)) {
+					if (const BloomEffect *effect = store.Get<BloomEffect>(descendant)) {
+						hasBloom = true;
+						if (effect->Enabled) {
+							lighting.BloomIntensity = std::max(effect->Intensity, 0.0f);
+							lighting.BloomThreshold = std::max(effect->Threshold, 0.0f);
+							lighting.BloomRadius = std::max(effect->Radius, 0.0f);
+						}
+					}
+				}
+				if (!hasDepthOfField && store.IsA(descendant, depthClass)) {
+					if (const DepthOfFieldEffect *effect = store.Get<DepthOfFieldEffect>(descendant)) {
+						hasDepthOfField = true;
+						if (effect->Enabled) {
+							lighting.DepthOfFieldIntensity = std::clamp(effect->Intensity, 0.0f, 1.0f);
+							lighting.DepthOfFieldFocusDistance = std::max(effect->FocusDistance, 0.0f);
+							lighting.DepthOfFieldFocusRange = std::max(effect->FocusRange, 0.0f);
+							lighting.DepthOfFieldRadius = std::max(effect->Radius, 0.0f);
+						}
+					}
+				}
+				if (!hasGodRays && store.IsA(descendant, raysClass)) {
+					if (const GodRaysEffect *effect = store.Get<GodRaysEffect>(descendant)) {
+						hasGodRays = true;
+						if (effect->Enabled) {
+							lighting.GodRayIntensity = std::max(effect->Intensity, 0.0f);
+							lighting.GodRayThreshold = std::max(effect->Threshold, 0.0f);
+							lighting.GodRayRadius = std::max(effect->Radius, 0.0f);
+						}
+					}
+				}
+				if (!hasFog && store.IsA(descendant, fogClass)) {
+					if (const FogEffect *effect = store.Get<FogEffect>(descendant)) {
+						hasFog = true;
+						if (effect->Enabled) {
+							lighting.FogColor = effect->Color;
+							ResolveFogRange(effect->Start, effect->End, lighting.FogStart, lighting.FogEnd);
+						}
+					}
+				}
+			});
 		}
 
 		// **Resolved here rather than left to whoever draws**, for the reason

@@ -79,6 +79,9 @@ namespace engine::replication {
 		//
 		// @since v0.15
 		Disputed,
+
+		// A bounded script-defined component schema, sent before its values.
+		Schemas,
 	};
 
 	// Returns a stable, human-readable name for a message kind.
@@ -107,36 +110,22 @@ namespace engine::replication {
 	//
 	// Unknown versions are refused; wire changes require a version bump.
 	//
-	// **8 - no message changed shape, and it still had to move.** A peer of
-	// version 7 registers `ecs.InstanceClass` and would resolve the name in a
-	// delta perfectly well, then read a length-prefixed class name as a raw
-	// four-byte `ClassId` and lose the cursor for every value behind it. A
-	// version's job is to refuse that at the first field rather than at the
-	// twentieth; the two encodings are indistinguishable from the bytes alone,
-	// which is the same test `ecs::Store::SNAPSHOT_VERSION` 3 applies to the
-	// same change on the other side.
-	//
-	// **9 - the same shape of change, one type along, plus components a version
-	// 8 peer has never registered.** `script.LuaSourceContainer` now writes its
-	// path as text where it used to write the `core::Name`'s interning index, so
-	// a version 8 reader would consume a length prefix as a four-byte id and
-	// lose every value behind it - the version 8 story exactly, and the reason
-	// `ecs::Store::SNAPSHOT_VERSION` moved to 4 beside it. The interface and
-	// script sets crossing for the first time is the milder half: a peer that
-	// never registered `gui.Element` refuses the whole delta as naming an
-	// unknown component, which is loud, but there is no reason to make it find
-	// that out one message at a time.
-	// **10 - the admission set gained a fifth message.** A version 9 server has
-	// no `AdmissionKind::Refuse`, so it drops one as a malformed admission
-	// rather than reading it as a refusal - which is the timeout the refusal
-	// exists to remove, arriving anyway. Refused at the door instead: this is
-	// also the number `network::Advert::Protocol` carries, so two builds that
-	// disagree here do not appear joinable in a browser either.
-	// **13 - transform positions widened from +-64 m to +-2048 m while keeping
-	// their ten-byte shape.** A peer on the old grid would decode the same
-	// sixteen-bit codes at different coordinates, so the unchanged length is
-	// exactly why the version has to reject the mismatch at admission.
-	inline constexpr uint16_t PROTOCOL_VERSION = 13;
+	// The raw LightingService component layout changed when fog, bloom,
+	// depth of field and god rays moved into child components. Component
+	// payloads have no size negotiation, so admission must refuse old peers.
+	inline constexpr uint16_t PROTOCOL_VERSION = 15;
+
+	// One piece of one immutable script-defined component description.
+	struct SchemaChunk {
+		// Stable component name, never the sender's registration index.
+		core::Name Component;
+		// Total encoded definition bytes, bounded before receiver allocation.
+		uint32_t TotalBytes = 0;
+		// Byte position in that definition.
+		uint32_t Offset = 0;
+		// This piece of the definition.
+		std::vector<std::byte> Bytes;
+	};
 
 	// Which half of a join a snapshot chunk belongs to.
 	//
@@ -398,6 +387,8 @@ namespace engine::replication {
 	// @param chunk  The chunk to write.
 	// @since v0.3
 	void WriteMessage(core::ByteWriter &writer, const SnapshotChunk &chunk);
+	// Writes a bounded component definition chunk.
+	void WriteMessage(core::ByteWriter &writer, const SchemaChunk &chunk);
 
 	// Writes a delta.
 	//
@@ -469,6 +460,7 @@ namespace engine::replication {
 		// other than `Kind` is reading a value no sender sent.
 		//@{
 		SnapshotChunk Chunk;
+		SchemaChunk Schema;
 		replication::Delta Delta;
 		replication::Structure Structure;
 		replication::Input Input;

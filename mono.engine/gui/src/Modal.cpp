@@ -1,5 +1,6 @@
+#include "Modal.hpp"
+
 #include <engine/ecs/Components.hpp>
-#include <engine/gui/Modal.hpp>
 
 namespace engine::gui {
 	void RegisterModalComponents() {

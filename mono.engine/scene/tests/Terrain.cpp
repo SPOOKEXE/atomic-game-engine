@@ -110,6 +110,106 @@ TEST_CASE("a resolution of zero generates nothing", "[scene][terrain]") {
 	CHECK_FALSE(GeneratesGround(recipe));
 }
 
+TEST_CASE("legacy world resources migrate onto the generated Terrain instance", "[scene][terrain]") {
+	RegisterSceneClasses();
+	Store oldWorld("terrain_test.old_resource");
+	Terrain legacy;
+	legacy.Seed = 91;
+	legacy.Generator = Name("terrain_test.Legacy");
+	legacy.Enabled = true;
+	oldWorld.SetResource(legacy);
+	ByteWriter writer;
+	REQUIRE(oldWorld.Save(writer));
+
+	Store store("terrain_test.migrate");
+	ByteReader reader(writer.Bytes());
+	REQUIRE(store.Load(reader));
+	REQUIRE(store.HasResource<Terrain>());
+	InstallServices(store);
+	const Entity workspace = ServiceOf(store, Classes::Find(Name("Workspace")));
+	Entity terrain = engine::ecs::NULL_ENTITY;
+	REQUIRE(store.GetProperty(workspace, Name("Terrain"), &terrain, sizeof(terrain)));
+	REQUIRE(terrain != engine::ecs::NULL_ENTITY);
+	CHECK(store.Get<Terrain>(terrain)->Seed == 91);
+	CHECK(store.Get<Terrain>(terrain)->Generator == legacy.Generator);
+	CHECK_FALSE(store.HasResource<Terrain>());
+
+	InstallServices(store);
+	size_t count = 0;
+	store.EachChild(workspace, [&](Entity child) {
+		count += store.IsA(child, Classes::Find(Name("Terrain"))) ? 1 : 0;
+	});
+	CHECK(count == 1);
+}
+
+TEST_CASE("service installation nests legacy Terrain folders under the singleton", "[scene][terrain]") {
+	RegisterSceneClasses();
+	Store store("terrain_test.legacy_folder");
+	const Entity workspace = store.CreateInstance(Classes::Find(Name("Workspace")), "Workspace");
+	REQUIRE(workspace != engine::ecs::NULL_ENTITY);
+	const Entity legacy = store.CreateInstance(Classes::Find(Name("Folder")), "Terrain");
+	REQUIRE(legacy != engine::ecs::NULL_ENTITY);
+	store.SetParent(legacy, workspace);
+	const Entity ground = store.CreateInstance(Classes::Find(Name("Part")), "OldGround");
+	REQUIRE(ground != engine::ecs::NULL_ENTITY);
+	store.SetParent(ground, legacy);
+
+	InstallServices(store);
+	const Entity terrain = store.FindFirstChild(workspace, "Terrain");
+	REQUIRE(terrain != engine::ecs::NULL_ENTITY);
+	CHECK(store.IsA(terrain, Classes::Find(Name("Terrain"))));
+	CHECK(store.ParentOf(legacy) == terrain);
+	CHECK(store.ParentOf(ground) == legacy);
+}
+
+TEST_CASE("service installation folds duplicate Terrain instances into the singleton", "[scene][terrain]") {
+	RegisterSceneClasses();
+	Store store("terrain_test.duplicates");
+	const Entity workspace = InstallServices(store);
+	const auto terrainClass = Classes::Find(Name("Terrain"));
+	const Entity duplicate = store.CreateInstance(terrainClass, "Terrain");
+	REQUIRE(duplicate != engine::ecs::NULL_ENTITY);
+	store.SetParent(duplicate, workspace);
+	const Entity child = store.CreateInstance(Classes::Find(Name("Folder")), "AuthoredChild");
+	REQUIRE(child != engine::ecs::NULL_ENTITY);
+	store.SetParent(child, duplicate);
+
+	InstallServices(store);
+	const Entity terrain = store.FindFirstChild(workspace, "Terrain");
+	REQUIRE(terrain != engine::ecs::NULL_ENTITY);
+	CHECK(store.Alive(duplicate) == false);
+	CHECK(store.ParentOf(child) == terrain);
+	size_t count = 0;
+	store.EachChild(workspace, [&](Entity candidate) {
+		count += store.IsA(candidate, terrainClass) ? 1 : 0;
+	});
+	CHECK(count == 1);
+}
+
+TEST_CASE("adopt-only worlds receive Terrain through snapshots", "[scene][terrain]") {
+	RegisterSceneClasses();
+	Store authority("terrain_test.authority");
+	InstallServices(authority);
+	const Entity sourceWorkspace = ServiceOf(authority, Classes::Find(Name("Workspace")));
+	Entity sourceTerrain = engine::ecs::NULL_ENTITY;
+	REQUIRE(authority.GetProperty(sourceWorkspace, Name("Terrain"), &sourceTerrain, sizeof(sourceTerrain)));
+	authority.GetMutable<Terrain>(sourceTerrain)->Seed = 31337;
+
+	ByteWriter writer;
+	REQUIRE(authority.Save(writer));
+	Store replica("terrain_test.replica");
+	replica.SetAdoptOnly(true);
+	ByteReader reader(writer.Bytes());
+	REQUIRE(replica.Load(reader));
+
+	const Entity replicaWorkspace = ServiceOf(replica, Classes::Find(Name("Workspace")));
+	Entity replicaTerrain = engine::ecs::NULL_ENTITY;
+	REQUIRE(replica.GetProperty(replicaWorkspace, Name("Terrain"), &replicaTerrain, sizeof(replicaTerrain)));
+	REQUIRE(replicaTerrain != engine::ecs::NULL_ENTITY);
+	CHECK(replica.Get<Terrain>(replicaTerrain)->Seed == 31337);
+	CHECK_FALSE(Classes::Describe(Classes::Find(Name("Terrain"))).Creatable);
+}
+
 TEST_CASE("the recipe crosses a snapshot and the generator crosses as text", "[scene][terrain]") {
 	// The whole design in one case: what is stored is the recipe, and the name
 	// in it is a string somebody chose rather than an id this process assigned.
@@ -147,12 +247,9 @@ TEST_CASE("the recipe crosses a snapshot and the generator crosses as text", "[s
 	CHECK(back.Enabled);
 }
 
-TEST_CASE("the recipe is authored through workspace and nowhere else", "[scene][terrain]") {
-	// `SurfaceBounces`' arrangement: the resource is the only storage and the
-	// property is the only way in, so there is nothing for a second copy to
-	// drift from. The cases that matter are the ones a plain member projection
-	// could not express - a getter that never acquires the resource, and a
-	// refusal at the setter.
+TEST_CASE("the recipe is authored on Workspace.Terrain", "[scene][terrain]") {
+	// The generated instance is the only storage. Workspace exposes its
+	// reference, while recipe properties live on that entity.
 	RegisterSceneClasses();
 	Store store("terrain_test.properties");
 	InstallServices(store);
@@ -160,28 +257,30 @@ TEST_CASE("the recipe is authored through workspace and nowhere else", "[scene][
 	const Entity workspace = ServiceOf(store, Classes::Find(Name("Workspace")));
 	REQUIRE(workspace != engine::ecs::NULL_ENTITY);
 
-	// Reading before anything has written must not mint the resource, which is
-	// `TrianglesOf`'s split against `MeshesOf`: a getter that made a structural
-	// write would make one on every properties-panel refresh.
-	bool enabled = true;
-	REQUIRE(store.GetProperty(workspace, Name("TerrainEnabled"), &enabled, sizeof(enabled)));
-	CHECK_FALSE(enabled);
+	Entity terrain = engine::ecs::NULL_ENTITY;
+	REQUIRE(store.GetProperty(workspace, Name("Terrain"), &terrain, sizeof(terrain)));
+	REQUIRE(terrain != engine::ecs::NULL_ENTITY);
+	CHECK(store.InstanceNameOf(terrain) == Name("Terrain"));
 	CHECK_FALSE(store.HasResource<Terrain>());
 
+	bool enabled = true;
+	REQUIRE(store.GetProperty(terrain, Name("Enabled"), &enabled, sizeof(enabled)));
+	CHECK_FALSE(enabled);
+
 	const Name generator("terrain_test.Dunes");
-	REQUIRE(store.SetProperty(workspace, Name("TerrainGenerator"), &generator, sizeof(generator)));
+	REQUIRE(store.SetProperty(terrain, Name("Generator"), &generator, sizeof(generator)));
 
 	const int64_t seed = -7;
-	REQUIRE(store.SetProperty(workspace, Name("TerrainSeed"), &seed, sizeof(seed)));
+	REQUIRE(store.SetProperty(terrain, Name("Seed"), &seed, sizeof(seed)));
 
 	enabled = true;
-	REQUIRE(store.SetProperty(workspace, Name("TerrainEnabled"), &enabled, sizeof(enabled)));
+	REQUIRE(store.SetProperty(terrain, Name("Enabled"), &enabled, sizeof(enabled)));
 
 	const float chunk = 48.0f;
-	REQUIRE(store.SetProperty(workspace, Name("TerrainChunkSize"), &chunk, sizeof(chunk)));
+	REQUIRE(store.SetProperty(terrain, Name("ChunkExtent"), &chunk, sizeof(chunk)));
 
 	const float view = 900.0f;
-	REQUIRE(store.SetProperty(workspace, Name("TerrainViewDistance"), &view, sizeof(view)));
+	REQUIRE(store.SetProperty(terrain, Name("ViewDistance"), &view, sizeof(view)));
 
 	const Terrain recipe = TerrainSettings(store);
 	CHECK(recipe.Generator == generator);
@@ -193,21 +292,21 @@ TEST_CASE("the recipe is authored through workspace and nowhere else", "[scene][
 	// script wrote has to come back as the same negative number rather than as
 	// something clamped on the way through an unsigned field.
 	int64_t back = 0;
-	REQUIRE(store.GetProperty(workspace, Name("TerrainSeed"), &back, sizeof(back)));
+	REQUIRE(store.GetProperty(terrain, Name("Seed"), &back, sizeof(back)));
 	CHECK(back == -7);
 
 	// A negative distance is refused rather than clamped: too large is a world
 	// asking for more than a machine will allocate, and below zero is a world
 	// asking for something the word does not mean.
 	const float backwards = -1.0f;
-	CHECK_FALSE(store.SetProperty(workspace, Name("TerrainChunkSize"), &backwards, sizeof(backwards)));
-	CHECK_FALSE(store.SetProperty(workspace, Name("TerrainViewDistance"), &backwards, sizeof(backwards)));
+	CHECK_FALSE(store.SetProperty(terrain, Name("ChunkExtent"), &backwards, sizeof(backwards)));
+	CHECK_FALSE(store.SetProperty(terrain, Name("ViewDistance"), &backwards, sizeof(backwards)));
 	CHECK(TerrainSettings(store).ChunkExtent == 48.0f);
 
 	// Larger than the ceiling is clamped rather than refused, because the
 	// ceiling is a limit on what the generator will allocate rather than a
 	// statement about what the number means.
 	const float huge = MAX_CHUNK_EXTENT * 4.0f;
-	REQUIRE(store.SetProperty(workspace, Name("TerrainChunkSize"), &huge, sizeof(huge)));
+	REQUIRE(store.SetProperty(terrain, Name("ChunkExtent"), &huge, sizeof(huge)));
 	CHECK(TerrainSettings(store).ChunkExtent == MAX_CHUNK_EXTENT);
 }

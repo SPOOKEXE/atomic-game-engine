@@ -1,4 +1,5 @@
-#include <engine/render/PortalShadowPacked.hpp>
+#include "PortalShadowPacked.hpp"
+
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>

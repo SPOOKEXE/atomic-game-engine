@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
+#include <initializer_list>
 #include <string_view>
 #include <type_traits>
 #include <utility>
@@ -21,6 +23,20 @@ namespace engine::effects {
 		using ecs::PropertyDescriptor;
 		using ecs::PropertyKind;
 		using ecs::PropertyType;
+
+		void TagDeclaredProperties(ecs::ClassId owner, core::Name tag) {
+			const auto properties = ecs::Classes::Describe(owner).Properties;
+			for (const PropertyDescriptor &property : properties) {
+				(void)ecs::Classes::SetPropertiesTag(owner, property.Spelling, tag);
+			}
+		}
+
+		void TagProperty(ecs::ClassId owner, std::string_view property, std::string_view tag) {
+			const bool tagged = ecs::Classes::SetPropertiesTag(owner, property, core::Name(tag));
+			if (!tagged) {
+				assert(tagged && "property group must name a declaration on its owner class");
+			}
+		}
 
 		// The enum names, interned once each.
 		//
@@ -435,6 +451,32 @@ namespace engine::effects {
 				texture, ClampedIntegerProperty<Texture, &Texture::ZIndex, 0, 10>("ZIndex")
 			);
 			ecs::Classes::Computed(texture, EnumProperty<Texture, &Texture::Face, NormalIdEnum>("Face"));
+
+			TagDeclaredProperties(emitter, core::Name("Particles"));
+			for (const std::string_view property : {"Color", "Transparency", "Texture"})
+				TagProperty(emitter, property, "Appearance");
+			TagProperty(emitter, "Enabled", "Behavior");
+			TagProperty(emitter, "LockedToPart", "Behavior");
+
+			for (const ecs::ClassId owner : {beam, trail}) {
+				TagDeclaredProperties(owner, core::Name("Effects"));
+				for (const std::string_view property : {"Color", "Transparency", "Texture"})
+					TagProperty(owner, property, "Appearance");
+				for (const std::string_view property : {"Attachment0", "Attachment1"})
+					TagProperty(owner, property, "Geometry");
+				TagProperty(owner, "Enabled", "Behavior");
+				TagProperty(owner, "Additive", "Rendering");
+			}
+			for (const std::string_view property :
+				 {"Width0", "Width1", "CurveSize0", "CurveSize1", "ZOffset"})
+				TagProperty(beam, property, "Geometry");
+			for (const ecs::ClassId owner : {decal, texture}) {
+				TagDeclaredProperties(owner, core::Name("Appearance"));
+				for (const std::string_view property : {"Color3", "Transparency", "Texture"})
+					TagProperty(owner, property, "Image");
+				for (const std::string_view property : {"Face", "ZIndex"})
+					TagProperty(owner, property, "Rendering");
+			}
 
 			return emitter;
 		}

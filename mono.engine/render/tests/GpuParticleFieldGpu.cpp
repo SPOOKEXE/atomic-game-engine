@@ -1,8 +1,9 @@
-// Real-device execution coverage for the analytical cosmetic field.
+// Real-device execution coverage for the generic cosmetic field.
 
 #include "RenderFixture.hpp"
 #include "RendererTestHooks.hpp"
 
+#include <engine/core/Metrics.hpp>
 #include <engine/render/Renderer.hpp>
 #include <engine/scene/GpuParticleField.hpp>
 #include <engine/testing/Suite.hpp>
@@ -10,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -30,12 +32,17 @@ namespace {
 		view.Lighting.Ambient = {1.0f, 1.0f, 1.0f};
 		view.Lighting.FogEnd = 100'000.0f;
 		view.ParticleDelta = 1.0f / 60.0f;
-		view.GpuParticles = render::GpuParticleFieldView{
-			.Field = {.RequestedCount = count, .Seed = seed},
-			.Storm = scene::EfPreset(scene::EfCategory::EF3),
-			.Centre = {},
-			.Seconds = 1.0f,
-		};
+		view.GpuParticles.emplace();
+		view.GpuParticles->Field.RequestedCount = count;
+		view.GpuParticles->Field.Seed = seed;
+		view.GpuParticles->Field.VelocityResponse = 0;
+		view.GpuParticles->Field.Styles[0].Size = 3;
+		for (uint32_t sample = 0; sample < 256; ++sample) {
+			const float x = static_cast<float>(sample % 16) * 4 - 30,
+						y = static_cast<float>(sample / 16) * 8 + 100;
+			view.GpuParticles->Field.SpawnSamples.push_back({{x, y, 0}, 15, {}, 0});
+		}
+
 		return view;
 	}
 
@@ -118,8 +125,7 @@ TEST_CASE(
 	fixture.Initialise();
 	if (!fixture.Render.Capabilities().HasCompute) SKIP("the selected GPU has no compute support");
 
-	// The field is a broad atmospheric volume. A 960x540 target gives its
-	// three-metre cloud billboards enough LDR coverage for a meaningful capture.
+	// Authored samples cover a visible rectangle for a meaningful pixel capture.
 	render::SceneTarget target{960, 540};
 	render::OverlayImage overlay;
 	auto baseline = FieldView(target, 262'144, 17);
@@ -137,7 +143,7 @@ TEST_CASE(
 	const render::FrameResult firstFrame =
 		fixture.Render.Render(std::span(&first, 1), overlay, nullptr, false);
 	CHECK(firstFrame.ComputeDispatches >= 1);
-	CHECK(firstFrame.ParticlesDrawn >= 18'000 * 13);
+	CHECK(firstFrame.ParticlesDrawn >= 36'000 * 12);
 	const CapturedImage field = CaptureResource(
 		fixture.Render,
 		core::Name("composed-image"),
@@ -149,6 +155,21 @@ TEST_CASE(
 	// This is the post-transparent LDR result, so a difference proves the field
 	// affected rendered pixels rather than only recording a dispatch and draw.
 	CHECK(ChangedBytes(empty, field) > 64);
+
+	// An independent world with identical authored samples and seed must render identical reset pixels.
+	auto repeated = FieldView(target, 262144, 17);
+	repeated.World = 172;
+	repeated.WorldName = core::Name("generic-field-repeat");
+	fixture.Render.Render(std::span(&repeated, 1), overlay, nullptr, false);
+	const auto repeatedImage = CaptureResource(
+		fixture.Render,
+		core::Name("composed-image"),
+		repeated.Slot,
+		target.Width,
+		target.Height,
+		ImageFormat::Bgra8Unorm
+	);
+	CHECK(repeatedImage.Bytes == field.Bytes);
 
 	auto disabled = FieldView(target, 262'144, 17);
 	disabled.GpuParticles->Field.Enabled = false;
@@ -166,10 +187,10 @@ TEST_CASE(
 	CHECK(ChangedBytes(empty, disabledImage) == 0);
 
 	auto red = FieldView(target, 262'144, 17);
-	red.GpuParticles->Field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::Condensation);
-	red.GpuParticles->Field.CondensationColor = {1.0f, 0.0f, 0.0f};
-	red.GpuParticles->Field.CondensationAlpha = 0.8f;
-	red.GpuParticles->Field.CondensationSize = 3.0f;
+	red.GpuParticles->Field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::First);
+	red.GpuParticles->Field.Styles[0].Colour = {1.0f, 0.0f, 0.0f};
+	red.GpuParticles->Field.Styles[0].Alpha = 0.8f;
+	red.GpuParticles->Field.Styles[0].Size = 3.0f;
 	const render::FrameResult redFrame = fixture.Render.Render(std::span(&red, 1), overlay, nullptr, false);
 	CHECK(redFrame.ParticlesDrawn > 0);
 	const CapturedImage redImage = CaptureResource(
@@ -182,41 +203,30 @@ TEST_CASE(
 	);
 	CHECK(ChangedBytes(empty, redImage) > 64);
 	CHECK(RedDominantPixels(redImage, empty) > 64);
-	const PixelBounds condensation = RedParticleBounds(redImage, empty);
-	// The red-only capture isolates the condensation lanes. Its tall, bounded
-	// envelope proves parcels recycle below the zero-lift ceiling instead of
-	// accumulating into an upper rectangular cap.
-	CHECK(condensation.Height() > target.Height / 4);
-	CHECK(condensation.Height() < target.Height * 3 / 8);
-	CHECK(condensation.Width() < target.Width / 3);
-
-	auto shortFunnel = FieldView(target, 262'144, 17);
-	shortFunnel.World = 72;
-	shortFunnel.WorldName = core::Name("gpu-particle-field-short-funnel-test");
-	shortFunnel.GpuParticles->Field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::Condensation);
-	shortFunnel.GpuParticles->Field.CondensationColor = {1.0f, 0.0f, 0.0f};
-	shortFunnel.GpuParticles->Field.CondensationAlpha = 0.8f;
-	shortFunnel.GpuParticles->Field.CondensationSize = 3.0f;
-	shortFunnel.GpuParticles->Storm.TopHeight = 120.0f;
-	fixture.Render.Render(std::span(&shortFunnel, 1), overlay, nullptr, false);
-	const CapturedImage shortFunnelImage = CaptureResource(
+	const PixelBounds envelope = RedParticleBounds(redImage, empty);
+	CHECK(envelope.Found);
+	CHECK(envelope.Height() > 20);
+	CHECK(envelope.Width() > 10);
+	// Updating authored local samples must change the rendered envelope without any native service.
+	auto moved = red;
+	for (auto &sample : moved.GpuParticles->Field.SpawnSamples)
+		sample.Position.X += 150;
+	fixture.Render.Render(std::span(&moved, 1), overlay, nullptr, false);
+	const CapturedImage movedImage = CaptureResource(
 		fixture.Render,
 		core::Name("composed-image"),
-		shortFunnel.Slot,
+		moved.Slot,
 		target.Width,
 		target.Height,
 		ImageFormat::Bgra8Unorm
 	);
-	// Condensation size and opacity are both normalized to storm height. A
-	// shorter analytical field must therefore produce a distinct captured puff
-	// envelope rather than reusing the tall funnel's fixed billboard pattern.
-	CHECK(ChangedBytes(redImage, shortFunnelImage) > 512);
+	CHECK(ChangedBytes(redImage, movedImage) > 64);
 
 	auto smallerFainter = FieldView(target, 262'144, 17);
-	smallerFainter.GpuParticles->Field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::Condensation);
-	smallerFainter.GpuParticles->Field.CondensationColor = {1.0f, 0.0f, 0.0f};
-	smallerFainter.GpuParticles->Field.CondensationAlpha = 0.05f;
-	smallerFainter.GpuParticles->Field.CondensationSize = 0.5f;
+	smallerFainter.GpuParticles->Field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::First);
+	smallerFainter.GpuParticles->Field.Styles[0].Colour = {1.0f, 0.0f, 0.0f};
+	smallerFainter.GpuParticles->Field.Styles[0].Alpha = 0.05f;
+	smallerFainter.GpuParticles->Field.Styles[0].Size = 0.5f;
 	fixture.Render.Render(std::span(&smallerFainter, 1), overlay, nullptr, false);
 	const CapturedImage smallerFainterImage = CaptureResource(
 		fixture.Render,
@@ -235,7 +245,8 @@ TEST_CASE(
 	auto refused = FieldView(target, 50'000'000, 19);
 	const render::FrameResult refusedFrame =
 		fixture.Render.Render(std::span(&refused, 1), overlay, nullptr, false);
-	CHECK(refusedFrame.ParticlesDrawn >= 18'000 * 13);
+	CHECK(refusedFrame.ComputeDispatches == 0);
+	CHECK(refusedFrame.ParticlesDrawn >= 36'000 * 12);
 	CHECK(refusedFrame.ParticlesDrawn < 1'048'576);
 	CHECK(fixture.Render.MemoryStatistics().BufferBytes == firstMemory.BufferBytes);
 	const CapturedImage refusedImage = CaptureResource(
@@ -246,26 +257,167 @@ TEST_CASE(
 		target.Height,
 		ImageFormat::Bgra8Unorm
 	);
-	// The refused request changes the authored field back to its default grey
-	// condensation. Red pixels prove the retained GPU state and its preceding
-	// authored presentation values still draw after allocation fails.
-	CHECK(ChangedBytes(empty, refusedImage) > 64);
-	CHECK(RedDominantPixels(refusedImage, empty) > 64);
+	// Allocation refusal retains the prior resident population and authored styles.
+	CHECK(refusedImage.Bytes == smallerFainterImage.Bytes);
 
 	auto resized = FieldView(target, 1'048'576, 23);
 	const render::FrameResult resizedFrame =
 		fixture.Render.Render(std::span(&resized, 1), overlay, nullptr, false);
 	CHECK(resizedFrame.ComputeDispatches >= 1);
-	// The full million rows still step on the GPU, while the renderer submits an
-	// 18k condensation cohort across twelve ordered depth slices plus one rain
-	// cohort. The bounded draw keeps the 50M preset viable without weakening the
-	// simulation allocation.
-	CHECK(resizedFrame.ParticlesDrawn >= 18'000 * 13);
+	// Resident simulation still owns one million rows while drawing a bounded cohort.
+	CHECK(resizedFrame.ParticlesDrawn >= 36'000 * 12);
 	CHECK(resizedFrame.ParticlesDrawn < 1'048'576);
 	const render::GpuMemoryStatistics resizedMemory = fixture.Render.MemoryStatistics();
-	// The simulation state is the only field allocation: 32 bytes per row. A
-	// resize has no upload or download companion, so the transfer residency does
-	// not grow with the particle count.
+	// State is 32 bytes per row. The bounded sample upload does not grow with population.
 	CHECK(resizedMemory.BufferBytes >= firstMemory.BufferBytes + (1'048'576u - 262'144u) * 32ull);
 	CHECK(resizedMemory.TransferBufferBytes == firstMemory.TransferBufferBytes);
+}
+
+TEST_CASE(
+	"GPU particle field advances once for two views of the same world", "[render][gpu][gpu-field-step][.]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	if (!fixture.Render.Capabilities().HasCompute) SKIP("the selected GPU has no compute support");
+	render::SceneTarget target{320, 180};
+	render::OverlayImage overlay;
+	auto reference = FieldView(target, 262144, 17);
+	reference.World = 821;
+	reference.WorldName = core::Name("field-single-camera");
+	reference.ParticleDelta = .25f;
+	reference.GpuParticles->Field.Styles[0].Colour = {1, 0, 0};
+	reference.GpuParticles->Field.Layers = static_cast<uint8_t>(scene::GpuParticleLayer::First);
+	for (auto &sample : reference.GpuParticles->Field.SpawnSamples)
+		sample.Velocity = {80, 0, 0};
+	std::array<render::View, 2> together{reference, reference};
+	for (size_t index = 0; index < together.size(); ++index) {
+		together[index].World = 822;
+		together[index].WorldName = core::Name("field-two-cameras");
+		together[index].Slot = index + 1;
+	}
+	const auto capture = [&](size_t slot) {
+		return CaptureResource(
+			fixture.Render,
+			core::Name("tonemapped"),
+			slot,
+			target.Width,
+			target.Height,
+			ImageFormat::Rgba8Unorm
+		);
+	};
+	// Both viewports publish the same world delta, just as two Studio panels do.
+	// The second camera must see the same resident population as the first.
+	for (uint32_t frame = 0; frame < 3; ++frame) {
+		INFO("presentation frame " << frame);
+		REQUIRE(fixture.Render.Render(std::span(&reference, 1), overlay, nullptr, false).Submitted);
+		const auto expected = capture(reference.Slot);
+		const auto combined = fixture.Render.Render(together, overlay, nullptr, false);
+		REQUIRE(combined.Submitted);
+		CHECK(combined.ComputeDispatches == 1);
+		CHECK(combined.ParticlesDrawn > 0);
+		for (const auto &view : together) {
+			const auto actual = capture(view.Slot);
+			CHECK(ChangedBytes(expected, actual) == 0);
+		}
+	}
+}
+
+TEST_CASE(
+	"paused GPU particle fields reuse resident state without simulation or sample staging",
+	"[render][gpu][gpu-field-step][.]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	if (!fixture.Render.Capabilities().HasCompute) SKIP("the selected GPU has no compute support");
+	render::SceneTarget target{320, 180};
+	render::OverlayImage overlay;
+	auto view = FieldView(target, 262144, 17);
+	const auto capture = [&] {
+		return CaptureResource(
+			fixture.Render,
+			core::Name("tonemapped"),
+			view.Slot,
+			target.Width,
+			target.Height,
+			ImageFormat::Rgba8Unorm
+		);
+	};
+	REQUIRE(fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	const auto expected = capture();
+	view.ParticleDelta = 0;
+	const auto counter = [](std::string_view name) {
+		const auto value = core::Metrics::Get(name);
+		return value ? static_cast<uint64_t>(value->Value) : 0;
+	};
+	const auto prepared = counter("render.gpu_particle_field.sample_prepare_bytes");
+	const auto uploaded = counter("render.gpu_particle_field.sample_upload_bytes");
+	for (uint32_t frame = 0; frame < 3; ++frame) {
+		const auto paused = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+		REQUIRE(paused.Submitted);
+		CHECK(paused.ComputeDispatches == 0);
+		CHECK(paused.ParticlesDrawn > 0);
+		CHECK(ChangedBytes(expected, capture()) == 0);
+	}
+	CHECK(counter("render.gpu_particle_field.sample_prepare_bytes") == prepared);
+	CHECK(counter("render.gpu_particle_field.sample_upload_bytes") == uploaded);
+	// Authored updates remain live at zero delta; only the unchanged case skips.
+	view.GpuParticles->Field.Styles[0].Colour = {1, 0, 0};
+	const auto changed = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(changed.Submitted);
+	CHECK(changed.ComputeDispatches == 1);
+	CHECK(ChangedBytes(expected, capture()) > 64);
+	const auto recoloured = capture();
+	// Moving a narrow field must recycle its old, out-of-bounds population
+	// even while paused, rather than leaving it at the prior field position.
+	view.GpuParticles->Frame.Position.X += 150;
+	view.GpuParticles->Field.HalfExtent.X = 1;
+	const auto moved = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(moved.Submitted);
+	CHECK(moved.ComputeDispatches == 1);
+	CHECK(ChangedBytes(recoloured, capture()) > 64);
+}
+
+TEST_CASE(
+	"invalid GPU particle fields cannot draw a resident population", "[render][gpu][gpu-field-step][.]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	if (!fixture.Render.Capabilities().HasCompute) SKIP("the selected GPU has no compute support");
+	render::SceneTarget target{320, 180};
+	render::OverlayImage overlay;
+	auto view = FieldView(target, 262144, 17);
+	const auto capture = [&](size_t slot) {
+		return CaptureResource(
+			fixture.Render,
+			core::Name("tonemapped"),
+			slot,
+			target.Width,
+			target.Height,
+			ImageFormat::Rgba8Unorm
+		);
+	};
+	auto empty = view;
+	empty.GpuParticles.reset();
+	REQUIRE(fixture.Render.Render(std::span(&empty, 1), overlay, nullptr, false).Submitted);
+	const auto baseline = capture(empty.Slot);
+	const auto resident = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(resident.Submitted);
+	CHECK(resident.ParticlesDrawn > 0);
+	CHECK(ChangedBytes(baseline, capture(view.Slot)) > 64);
+	auto invalid = view;
+	invalid.GpuParticles->Field.SpawnSamples.front().Lifetime = -1;
+	const auto refused = fixture.Render.Render(std::span(&invalid, 1), overlay, nullptr, false);
+	REQUIRE(refused.Submitted);
+	CHECK(refused.ComputeDispatches == 0);
+	CHECK(refused.ParticlesDrawn == 0);
+	CHECK(ChangedBytes(baseline, capture(invalid.Slot)) == 0);
+	// Validation also precedes the same-frame reuse guard: another camera
+	// cannot draw the first camera's resident data for a malformed packet.
+	std::array<render::View, 2> together{view, invalid};
+	together[1].Slot = 1;
+	const auto combined = fixture.Render.Render(together, overlay, nullptr, false);
+	REQUIRE(combined.Submitted);
+	CHECK(combined.ComputeDispatches == 1);
+	CHECK(combined.ParticlesDrawn == resident.ParticlesDrawn);
+	CHECK(ChangedBytes(baseline, capture(together[1].Slot)) == 0);
 }

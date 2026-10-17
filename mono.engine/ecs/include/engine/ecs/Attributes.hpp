@@ -158,11 +158,8 @@ namespace engine::ecs {
 	};
 
 	// Copies attributes for the supplied visible authority instances only.
-	// Dead and predicted owners are excluded; runtime revisions are omitted.
-	// Work is bounded by the supplied owner list and its attributes.
-	// @param store The authoritative world containing the attribute table.
-	// @param instances The visible owner handles selected by the caller.
-	// @return An independent table containing only those owners' attributes.
+	// Predicted, client-local and dead owners are excluded. Work is bounded by
+	// the supplied owner list and its attributes; runtime revisions are omitted.
 	AttributeTable SelectAttributes(const Store &store, std::span<const Entity> instances);
 
 	// Reads one attribute.
@@ -191,7 +188,8 @@ namespace engine::ecs {
 	// @param instance The instance. Must be alive.
 	// @param name     The attribute's name.
 	// @param value    What to store. `Opaque` removes.
-	// @return `false` for a dead instance, a refused type, or an adopt-only store.
+	// @return `false` for a dead instance, a refused type, or a table that
+	//         cannot be created in an adopt-only store.
 	bool SetAttribute(Store &store, Entity instance, core::Name name, const AttributeValue &value);
 
 	// Every attribute an instance carries, by name.

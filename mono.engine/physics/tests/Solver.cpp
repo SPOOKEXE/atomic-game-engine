@@ -1,3 +1,4 @@
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
@@ -28,6 +29,7 @@
 #include <utility>
 
 TEST_SUITE_ID("engine.physics.solver")
+TEST_DEPENDS("engine.core.heapprofile")
 // The manifolds it consumes, and the normal convention every impulse is applied
 // along.
 TEST_DEPENDS("engine.physics.narrowphase")
@@ -43,6 +45,7 @@ TEST_DEPENDS("engine.ecs.archetype")
 
 using Catch::Approx;
 using engine::core::CFrame;
+using engine::core::HeapProfile;
 using engine::core::Metrics;
 using engine::core::Name;
 using engine::core::Vector3;
@@ -183,6 +186,146 @@ TEST_CASE("a contact removes the closing velocity", "[physics][solver]") {
 	CHECK(closing >= 0.0f);
 	CHECK(VelocityOf(store, left).X <= 0.0f);
 	CHECK(VelocityOf(store, right).X >= 0.0f);
+}
+
+TEST_CASE("an unchanged solver body index reuses its allocations", "[physics][solver][memory]") {
+	ENGINE_HEAP_SCOPE("solvertest-index-reuse");
+	Store store("solver.index.reuse");
+	PreparePhysicsWorld(store, 1.0f);
+	Place(store, Description{.Position = Vector3{-0.45f, 0.0f, 0.0f}});
+	Place(store, Description{.Position = Vector3{0.45f, 0.0f, 0.0f}});
+	store.AdvanceTick(TICK);
+	SyncBroadphase(store);
+	BroadPhase(store);
+	NarrowPhase(store);
+	for (int step = 0; step < 4; step++) {
+		Solve(store);
+	}
+	auto &world = *store.ResourceMutable<PhysicsWorld>();
+	REQUIRE(world.Bodies().size() == 2);
+	CHECK(PipelineInternals::BodyIndexByOwner(world).size() == 2);
+	if (!HeapProfile::IsCompiledIn()) {
+		return;
+	}
+
+	uint32_t indexNode = 0;
+	for (uint32_t node = 1; node < HeapProfile::NodeCount(); node++) {
+		if (HeapProfile::Path(node).ends_with(
+				"solvertest-index-reuse;physics.solve;physics.solve-gather;physics.solve-gather-index"
+			)) {
+			indexNode = node;
+			break;
+		}
+	}
+	REQUIRE(indexNode != 0);
+	const auto before = HeapProfile::Node(indexNode);
+	for (int step = 0; step < 8; step++) {
+		Solve(store);
+	}
+	const auto after = HeapProfile::Node(indexNode);
+	CHECK(after.TotalBlocks == before.TotalBlocks);
+	CHECK(after.TotalBytes == before.TotalBytes);
+}
+
+TEST_CASE("the solver body index follows changing full entity owners", "[physics][solver]") {
+	Store store("solver.index.owners");
+	PreparePhysicsWorld(store, 1.0f);
+	const Entity floor = Place(
+		store,
+		Description{
+			.Position = Vector3{0.0f, -0.5f, 0.0f}, .Extent = Vector3{4.0f, 0.5f, 4.0f}, .Anchored = true
+		}
+	);
+	const Entity earlier = Place(store, Description{.Position = Vector3{-1.0f, 0.4f, 0.0f}});
+	const Entity later = Place(store, Description{.Position = Vector3{1.0f, 0.4f, 0.0f}});
+	auto &world = *store.ResourceMutable<PhysicsWorld>();
+	auto &index = PipelineInternals::BodyIndexByOwner(world);
+	const auto solve = [&] {
+		store.AdvanceTick(TICK);
+		SyncBroadphase(store);
+		BroadPhase(store);
+		NarrowPhase(store);
+		Solve(store);
+	};
+	const auto checkIndex = [&] {
+		const auto bodies = world.Bodies();
+		REQUIRE(index.size() == bodies.size());
+		for (size_t at = 0; at < bodies.size(); at++) {
+			REQUIRE(index.contains(bodies[at].Owner.Id));
+			CHECK(index.at(bodies[at].Owner.Id) == at);
+			if (at > 0) {
+				CHECK(bodies[at - 1].Owner.Id < bodies[at].Owner.Id);
+			}
+		}
+	};
+	const auto publishAndCheck = [&](Entity entity) {
+		const float correction = world.Bodies()[index.at(entity.Id)].CorrectionLinear.Y;
+		REQUIRE(correction > 0.0f);
+		const float expected = HeightOf(store, entity) + correction * TICK;
+		Publish(store);
+		CHECK(HeightOf(store, entity) == Approx(expected));
+	};
+	solve();
+	checkIndex();
+	REQUIRE(index.size() == 3);
+	CHECK(index.at(floor.Id) == 0);
+	CHECK(index.at(earlier.Id) == 1);
+	CHECK(index.at(later.Id) == 2);
+	const size_t buckets = index.bucket_count();
+
+	SECTION("a surviving owner changes index when an earlier owner leaves and returns") {
+		store.Set<Transform>(earlier, Transform{CFrame{Vector3{-50.0f, 0.4f, 0.0f}}});
+		solve();
+		checkIndex();
+		REQUIRE(index.size() == 2);
+		CHECK_FALSE(index.contains(earlier.Id));
+		REQUIRE(index.at(later.Id) == 1);
+		publishAndCheck(later);
+		CHECK(HeightOf(store, earlier) == Approx(0.4f));
+
+		store.Set<Transform>(earlier, Transform{CFrame{Vector3{-1.0f, 0.4f, 0.0f}}});
+		solve();
+		checkIndex();
+		CHECK(index.size() == 3);
+		CHECK(index.at(earlier.Id) == 1);
+		CHECK(index.at(later.Id) == 2);
+		publishAndCheck(earlier);
+	}
+	SECTION("a recreated owner replaces the destroyed full entity key") {
+		store.Destroy(earlier);
+		REQUIRE_FALSE(store.Alive(earlier));
+		const Entity replacement = Place(store, Description{.Position = Vector3{-1.0f, 0.4f, 0.0f}});
+		REQUIRE(replacement != earlier);
+		REQUIRE(store.Alive(replacement));
+		solve();
+		checkIndex();
+		CHECK(index.size() == 3);
+		CHECK_FALSE(index.contains(earlier.Id));
+		CHECK(index.contains(replacement.Id));
+		publishAndCheck(replacement);
+		CHECK_FALSE(store.Alive(earlier));
+	}
+	SECTION("an empty contact set clears keys and retains buckets for refill") {
+		store.Set<Transform>(earlier, Transform{CFrame{Vector3{-50.0f, 0.4f, 0.0f}}});
+		store.Set<Transform>(later, Transform{CFrame{Vector3{50.0f, 0.4f, 0.0f}}});
+		solve();
+		checkIndex();
+		CHECK(world.Bodies().empty());
+		CHECK(index.empty());
+		CHECK(index.bucket_count() == buckets);
+		Publish(store);
+		CHECK(HeightOf(store, earlier) == Approx(0.4f));
+		CHECK(HeightOf(store, later) == Approx(0.4f));
+
+		store.Set<Transform>(later, Transform{CFrame{Vector3{1.0f, 0.4f, 0.0f}}});
+		solve();
+		checkIndex();
+		CHECK(index.size() == 2);
+		CHECK(index.contains(later.Id));
+		CHECK(index.bucket_count() == buckets);
+		publishAndCheck(later);
+		CHECK(HeightOf(store, earlier) == Approx(0.4f));
+	}
 }
 
 TEST_CASE("a speculative contact limits closing speed without reporting a touch", "[physics][solver]") {

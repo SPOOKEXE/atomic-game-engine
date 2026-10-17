@@ -30,6 +30,7 @@
 #include "LuauBindings.hpp"
 
 #include <engine/ecs/Attributes.hpp>
+#include <engine/script/InstanceShim.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/script/Subtree.hpp>
 
@@ -214,7 +215,11 @@ namespace engine::script {
 			// raises for anything else, which unwinds out of here before the
 			// object exists.
 			explicit LuauCall(lua_State *state)
-				: State(state), Context(UpvalueContext(state)), Self(CheckInstanceArgument(state, RECEIVER)) {
+				: State(state), Context(UpvalueContext(state)), Self(CheckInstanceArgument(state, RECEIVER)),
+				  Execution(ExecutionRole(state)) {
+				if (!(Execution.Client && !Execution.Server) && !Context.World->AdoptOnly() &&
+					ecs::IsClientLocalInstance(*Context.World, Self))
+					Raise("server scripts cannot access client-local instances");
 			}
 
 			// The same call on a service, whose receiver is its own table.
@@ -228,7 +233,8 @@ namespace engine::script {
 			struct OnService {};
 
 			LuauCall(lua_State *state, OnService)
-				: State(state), Context(UpvalueContext(state)), Self(ecs::NULL_ENTITY) {}
+				: State(state), Context(UpvalueContext(state)), Self(ecs::NULL_ENTITY),
+				  Execution(ExecutionRole(state)) {}
 
 			// How many values the method left on the stack.
 			int Results() const {
@@ -252,7 +258,7 @@ namespace engine::script {
 			}
 
 			const HostRole &Role() const override {
-				return Context.Role;
+				return Execution;
 			}
 
 			const std::shared_ptr<DataCaptureBridge> &DataCapture() const override {
@@ -327,6 +333,14 @@ namespace engine::script {
 				return std::string(text, length);
 			}
 
+			std::string AsBoundedString(size_t index, size_t maximum) override {
+				if (lua_type(State, Slot(index)) != LUA_TSTRING) Raise("expected a string");
+				size_t length = 0;
+				const char *text = luaL_checklstring(State, Slot(index), &length);
+				if (length > maximum) Raise("string is too large");
+				return std::string(text, length);
+			}
+
 			std::vector<std::byte> AsBytes(size_t index, size_t maximum) override {
 				size_t length = 0;
 				const void *data = luaL_checkbuffer(State, Slot(index), &length);
@@ -397,15 +411,8 @@ namespace engine::script {
 				const int count = static_cast<int>(lua_objlen(State, parts));
 				const int placed = static_cast<int>(lua_objlen(State, placements));
 
-				instances.reserve(static_cast<size_t>(count));
 				frames.reserve(static_cast<size_t>(count));
-
-				for (int at = 1; at <= count; at++) {
-					lua_rawgeti(State, parts, at);
-					const ecs::Entity instance = CheckInstanceArgument(State, -1);
-					lua_pop(State, 1);
-					instances.push_back(instance);
-				}
+				ReadInstanceArrayArgument(State, parts, instances);
 
 				for (int at = 1; at <= placed; at++) {
 					lua_rawgeti(State, placements, at);
@@ -544,13 +551,13 @@ namespace engine::script {
 				luaL_checktype(State, Slot(index), LUA_TFUNCTION);
 
 				lua_pushvalue(State, Slot(index));
-				const int reference = lua_ref(State, -1);
+				const int reference = RetainLuauValue(State, -1);
 				lua_pop(State, 1);
 				return reference;
 			}
 
 			void ReleaseCallback(CallbackRef callback) override {
-				lua_unref(State, callback);
+				ReleaseLuauValue(State, callback);
 			}
 
 			HostCallback RetainHostCallback(size_t index) override {
@@ -560,7 +567,7 @@ namespace engine::script {
 				luaL_checktype(State, Slot(index), LUA_TFUNCTION);
 
 				lua_pushvalue(State, Slot(index));
-				const int reference = lua_ref(State, -1);
+				const int reference = RetainLuauValue(State, -1);
 				lua_pop(State, 1);
 				const HostCallback callback{++Context.NextHostCallback};
 				Context.HostCallbacks.emplace(callback.Id, reference);
@@ -572,7 +579,7 @@ namespace engine::script {
 				if (found == Context.HostCallbacks.end()) {
 					return;
 				}
-				lua_unref(State, found->second);
+				ReleaseLuauValue(State, found->second);
 				Context.HostCallbacks.erase(found);
 			}
 
@@ -656,9 +663,12 @@ namespace engine::script {
 
 			void ReturnInstances(std::span<const Entity> values) override {
 				lua_createtable(State, static_cast<int>(values.size()), 0);
-				for (size_t index = 0; index < values.size(); index++) {
-					PushInstanceValue(State, values[index]);
-					lua_rawseti(State, -2, static_cast<int>(index) + 1);
+				int written = 0;
+				const bool client = Execution.Client && !Execution.Server;
+				for (const Entity value : values) {
+					if (!InstanceVisibleToScript(*Context.World, value, client)) continue;
+					PushInstanceValue(State, value);
+					lua_rawseti(State, -2, ++written);
 				}
 				Pushed++;
 			}
@@ -725,6 +735,7 @@ namespace engine::script {
 			}
 
 			void ReturnInstance(ecs::Entity value) override {
+				value = InstanceForScriptRead(*Context.World, value, Execution.Client && !Execution.Server);
 				// **Nil for a null, and `PushInstanceValue` does not do that.**
 				// It is the raw pusher: it makes a userdata whatever it is
 				// handed, so a null entity came out as an instance handle to
@@ -776,7 +787,7 @@ namespace engine::script {
 				std::vector<CallbackRef> released;
 				Context.Signals.DropSubject(subject, released);
 				for (const CallbackRef reference : released) {
-					lua_unref(State, reference);
+					ReleaseLuauValue(State, reference);
 				}
 			}
 
@@ -787,7 +798,7 @@ namespace engine::script {
 					Context.Signals,
 					Context.Changes,
 					instance,
-					[state](CallbackRef reference) { lua_unref(state, reference); }
+					[state](CallbackRef reference) { ReleaseLuauValue(state, reference); }
 				);
 			}
 
@@ -850,9 +861,8 @@ namespace engine::script {
 			// @param key     What that table keys this thread on.
 			void Suspend(std::unordered_map<uint64_t, lua_State *> &waiting, uint64_t key) {
 				lua_pushthread(State);
-				lua_xmove(State, Context.State, 1);
-				const int reference = lua_ref(Context.State, -1);
-				lua_pop(Context.State, 1);
+				const CallbackRef reference = RetainLuauValue(State, -1);
+				lua_pop(State, 1);
 
 				Context.Threads.insert_or_assign(State, reference);
 				waiting.insert_or_assign(key, State);
@@ -897,6 +907,7 @@ namespace engine::script {
 			lua_State *State;
 			LuauContext &Context;
 			Entity Self;
+			HostRole Execution;
 			int Pushed = 0;
 			bool Yielded = false;
 		};
@@ -1103,7 +1114,7 @@ namespace engine::script {
 					firstError += trace;
 				}
 			}
-			lua_unref(state, reference);
+			ReleaseLuauValue(state, reference);
 		}
 		context.EditableMeshes.ClearCompletions();
 		return firstError;
@@ -1144,7 +1155,7 @@ namespace engine::script {
 				const char *message = lua_tostring(thread, -1);
 				firstError = message != nullptr ? message : "a resumed compute job failed";
 			}
-			lua_unref(state, reference);
+			ReleaseLuauValue(state, reference);
 		}
 		context.Computations.ClearCompletions();
 		return firstError;

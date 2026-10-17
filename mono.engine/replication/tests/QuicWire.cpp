@@ -15,6 +15,7 @@
 
 #include <engine/assets/Signature.hpp>
 #include <engine/core/Name.hpp>
+#include <engine/ecs/Schema.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/net/LossyTransport.hpp>
 #include <engine/net/Transport.hpp>
@@ -175,12 +176,14 @@ namespace {
 
 // --- the mapping ------------------------------------------------------------
 
-TEST_CASE("every message kind has a channel of its own", "[replication][quic]") {
+TEST_CASE("bulk prerequisites share a reliable route apart from controls", "[replication][quic]") {
 	// `docs/CODE_ARCH.md` §10's table, read back. The pair that most obviously
 	// must not share a stream is a snapshot chunk and a structural change: one
 	// is megabytes and the other is a door opening.
 	CHECK(QuicRouteFor(MessageKind::SnapshotChunk).Channel != QuicRouteFor(MessageKind::Structure).Channel);
 	CHECK(QuicRouteFor(MessageKind::SnapshotChunk).Reliable);
+	CHECK(QuicRouteFor(MessageKind::Schemas).Reliable);
+	CHECK(QuicRouteFor(MessageKind::Schemas).Channel == QuicRouteFor(MessageKind::SnapshotChunk).Channel);
 	CHECK(QuicRouteFor(MessageKind::Structure).Reliable);
 	CHECK(QuicRouteFor(MessageKind::Input).Reliable);
 
@@ -531,4 +534,30 @@ TEST_CASE(
 	REQUIRE(pair.Client->AcknowledgePrediction(116));
 	REQUIRE(pair.Client->Unconfirmed().size() == 1);
 	CHECK(pair.Client->Unconfirmed().front().Tick == 117);
+}
+
+TEST_CASE(
+	"opt-in component definitions and live values cross both session transports",
+	"[replication][schema][quic]"
+) {
+	const WireMode mode = GENERATE(WireMode::Quic, WireMode::Datagram);
+	Pair pair({}, {}, mode);
+	const std::string name = mode == WireMode::Quic ? "wire_dynamic.QuicState" : "wire_dynamic.DatagramState";
+	const auto schema = engine::ecs::Schemas::Register(
+		name, std::array{engine::ecs::FieldSpec{"Energy", engine::ecs::PropertyType::Double}}
+	);
+	REQUIRE(schema.Why == engine::ecs::Schemas::Status::Ok);
+	REQUIRE(engine::ecs::Schemas::SetTags(schema.Id, std::array<std::string_view, 1>{"replicated"}));
+	const Entity entity = pair.World.Create();
+	const double initial = 6;
+	pair.World.SetComponent(entity, schema.Id, &initial);
+	REQUIRE(pair.Admit());
+	pair.Settle(203, 32);
+	REQUIRE(pair.Client->Joined());
+	REQUIRE(pair.Replica.GetComponent(entity, schema.Id) != nullptr);
+	CHECK(*static_cast<const double *>(pair.Replica.GetComponent(entity, schema.Id)) == 6);
+	const double changed = 19;
+	pair.World.SetComponent(entity, schema.Id, &changed);
+	pair.Settle(235, 16);
+	CHECK(*static_cast<const double *>(pair.Replica.GetComponent(entity, schema.Id)) == 19);
 }

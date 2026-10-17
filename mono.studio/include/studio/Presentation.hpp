@@ -123,7 +123,7 @@ namespace studio {
 		//@}
 
 		// Whether all four ceilings are bypassed.
-		bool Uncapped = false;
+		bool Uncapped = true;
 	};
 
 	// Resolves the one ceiling applied to the joined simulation and rendering

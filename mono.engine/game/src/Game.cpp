@@ -9,10 +9,12 @@
 #include <engine/game/Game.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/graph/PipelineDocument.hpp>
+#include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Registration.hpp>
-#include <engine/physics/Pipeline.hpp>
+#include <engine/scene/Characters.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Terrain.hpp>
 #include <engine/script/Clock.hpp>
 #include <engine/script/Instances.hpp>
 #include <engine/script/SourceCache.hpp>
@@ -64,11 +66,10 @@ namespace engine::game {
 		// Whether an instance belongs to the viewer rather than to the game.
 		//
 		// See `scene::TransientComponent`. Asked here rather than by class,
-		// because "is this a camera" is the wrong question - a script may make
-		// a camera that *is* content, and a viewer may make something that is
-		// not a camera.
+		// because local ownership also covers particles, interfaces and descendants.
 		bool IsTransient(const Store &store, Entity instance) {
-			return store.Has<scene::TransientComponent>(instance);
+			return store.Has<scene::TransientComponent>(instance) ||
+				   ecs::IsClientLocalInstance(store, instance);
 		}
 
 		// Written as an attribute and never as a property, because the tree
@@ -277,6 +278,109 @@ namespace engine::game {
 			return false;
 		}
 
+		// Older world files put the terrain recipe on Workspace. Keep this
+		// import-only bridge until those files have been saved with a Terrain item.
+		bool ReadLegacyWorkspaceTerrainProperty(
+			Store &store,
+			Entity workspace,
+			core::Name property,
+			const XmlElement &element,
+			bool explicitTerrainChild,
+			std::string &error
+		) {
+			PropertyType type = PropertyType::Opaque;
+			enum class Field {
+				None,
+				Enabled,
+				Generator,
+				Seed,
+				ChunkExtent,
+				ViewDistance
+			} field = Field::None;
+			if (property == core::Name("TerrainEnabled")) {
+				type = PropertyType::Bool;
+				field = Field::Enabled;
+			} else if (property == core::Name("TerrainGenerator")) {
+				type = PropertyType::Name;
+				field = Field::Generator;
+			} else if (property == core::Name("TerrainSeed")) {
+				type = PropertyType::Int64;
+				field = Field::Seed;
+			} else if (property == core::Name("TerrainChunkSize")) {
+				type = PropertyType::Float;
+				field = Field::ChunkExtent;
+			} else if (property == core::Name("TerrainViewDistance")) {
+				type = PropertyType::Float;
+				field = Field::ViewDistance;
+			}
+			if (field == Field::None) return false;
+
+			// A current Terrain child is the canonical authored value when both
+			// representations appear in one hand-edited file.
+			if (explicitTerrainChild) {
+				ENGINE_WARN(
+					"legacy Workspace.{} ignored because the world contains Workspace.Terrain",
+					property.Text()
+				);
+				return true;
+			}
+
+			if (element.HasAttribute("type")) {
+				PropertyType declared = PropertyType::Opaque;
+				if (TypeFromTag(element.Attribute("type"), declared) && TypeTag(declared) != TypeTag(type)) {
+					error = "'Workspace." + std::string(property.Text()) + "' is a " +
+							std::string(TypeTag(type)) + " and the file has a " +
+							std::string(TypeTag(declared));
+					return true;
+				}
+			}
+
+			PropertyValue value;
+			std::string reason;
+			if (!ParseValue(type, element.Text, value, reason)) {
+				error = "'Workspace." + std::string(property.Text()) + "': " + reason;
+				return true;
+			}
+
+			const ClassId terrainClass = Classes::Find(core::Name("Terrain"));
+			const Entity terrain =
+				terrainClass.IsValid() ? store.FindFirstChildWhichIsA(workspace, terrainClass) : NULL_ENTITY;
+			scene::Terrain *recipe =
+				terrain != NULL_ENTITY ? store.GetMutable<scene::Terrain>(terrain) : nullptr;
+			if (recipe == nullptr) {
+				recipe = store.ResourceMutable<scene::Terrain>();
+				if (recipe == nullptr) {
+					store.SetResource(scene::Terrain{});
+					recipe = store.ResourceMutable<scene::Terrain>();
+				}
+			}
+			if (recipe == nullptr) {
+				error = "could not retain legacy Workspace terrain settings";
+				return true;
+			}
+
+			switch (field) {
+			case Field::Enabled:
+				recipe->Enabled = value.Bool;
+				break;
+			case Field::Generator:
+				recipe->Generator = value.Name;
+				break;
+			case Field::Seed:
+				recipe->Seed = static_cast<uint64_t>(value.Int64);
+				break;
+			case Field::ChunkExtent:
+				recipe->ChunkExtent = value.Float;
+				break;
+			case Field::ViewDistance:
+				recipe->ViewDistance = value.Float;
+				break;
+			case Field::None:
+				break;
+			}
+			return true;
+		}
+
 		bool ReadInstance(
 			const XmlDocument &document,
 			const XmlElement &element,
@@ -299,11 +403,14 @@ namespace engine::game {
 				return false;
 			}
 
-			const Entity instance = store.CreateInstance(id, element.Attribute("name"));
+			const bool localParent = ecs::IsClientLocalInstance(store, parent);
+			const Entity instance = localParent ? store.CreatePredictedInstance(id, element.Attribute("name"))
+												: store.CreateInstance(id, element.Attribute("name"));
 			if (instance == NULL_ENTITY) {
 				error = "the world refused an instance of '" + std::string(className) + "'";
 				return false;
 			}
+			if (localParent) store.Set(instance, ecs::ClientLocal{});
 
 			if (parent != NULL_ENTITY) {
 				store.SetParent(instance, parent);
@@ -319,6 +426,16 @@ namespace engine::game {
 			}
 
 			const ecs::ClassInfo &info = Classes::Describe(id);
+			bool explicitTerrainChild = false;
+			if (info.Name == core::Name("Workspace")) {
+				for (const uint32_t childIndex : element.Children) {
+					const XmlElement *child = document.At(childIndex);
+					if (child != nullptr && child->Name == "Item" && child->Attribute("class") == "Terrain") {
+						explicitTerrainChild = true;
+						break;
+					}
+				}
+			}
 
 			for (const uint32_t childIndex : element.Children) {
 				const XmlElement *child = document.At(childIndex);
@@ -348,6 +465,13 @@ namespace engine::game {
 				}
 
 				if (descriptor == nullptr) {
+					if (info.Name == core::Name("Workspace") &&
+						ReadLegacyWorkspaceTerrainProperty(
+							store, instance, property, *child, explicitTerrainChild, error
+						)) {
+						if (!error.empty()) return false;
+						continue;
+					}
 					// **Ignored rather than refused, and the asymmetry with an
 					// unknown class is deliberate.** A property this build does
 					// not have is a field that was removed or renamed, and
@@ -917,7 +1041,6 @@ namespace engine::game {
 		// anyway. Naming both is what makes the order impossible to get wrong
 		// from outside.
 		scene::RegisterSceneClasses();
-		physics::RegisterPhysicsClasses();
 
 		// **The 2D tree, because a game file carries one.** A server authors a
 		// `ScreenGui` and saves it; a loader that had not registered the class
@@ -1068,24 +1191,34 @@ namespace engine::game {
 		// against a real clock puts the scene in a different place on a busy
 		// machine, and the recording stops replaying - the desync rule 5 names,
 		// arriving through the call a script uses most.
-		scheduler.Add("script-heartbeat", ecs::Phase::Simulation, [runtime](Store &world) {
-			std::optional<float> delta = script::TakeScriptUpdate(world);
-			while (delta) {
-				if (!runtime->Heartbeat(*delta)) {
-					// Logged per tick rather than swallowed. A world that silently
-					// stopped animating is a bug report with nothing in it.
-					ENGINE_ERROR("heartbeat: {}", runtime->LastError());
-					return;
+		scheduler.Add(
+			"script-heartbeat", ecs::Phase::Simulation, [runtime, client = limits.Role.Client](Store &world) {
+				if (client) {
+					const auto *local = world.Resource<scene::LocalPlayer>();
+					if (local != nullptr)
+						(void)gui::RefreshPlayerGuiProjection(
+							world, local->Instance, scene::CharacterOf(world, local->Instance)
+						);
+					(void)runtime->RunNewScripts(script::ClientScriptsIn(world));
 				}
+				std::optional<float> delta = script::TakeScriptUpdate(world);
+				while (delta) {
+					if (!runtime->Heartbeat(*delta)) {
+						// Logged per tick rather than swallowed. A world that silently
+						// stopped animating is a bug report with nothing in it.
+						ENGINE_ERROR("heartbeat: {}", runtime->LastError());
+						return;
+					}
 
-				// A rate above the world clock may need several barriers this tick.
-				// Zero returns the world delta and deliberately stops at one barrier.
-				if (*delta >= world.Time().Delta) {
-					return;
+					// A rate above the world clock may need several barriers this tick.
+					// Zero returns the world delta and deliberately stops at one barrier.
+					if (*delta >= world.Time().Delta) {
+						return;
+					}
+					delta = script::TakeScriptUpdate(world);
 				}
-				delta = script::TakeScriptUpdate(world);
 			}
-		});
+		);
 
 		if (ran > 0) {
 			ENGINE_INFO("world '{}': {} script(s) started", store.Name(), ran);

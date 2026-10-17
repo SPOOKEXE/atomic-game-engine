@@ -110,7 +110,11 @@ namespace engine::ecs {
 						[&property](const PropertyDescriptor &held) { return held.Name == property.Name; }
 					);
 					if (existing != entry.Merged.end()) {
-						*existing = property;
+						PropertyDescriptor replacement = property;
+						if (!replacement.PropertiesTag.IsValid()) {
+							replacement.PropertiesTag = existing->PropertiesTag;
+						}
+						*existing = replacement;
 					} else {
 						entry.Merged.push_back(property);
 					}
@@ -232,6 +236,33 @@ namespace engine::ecs {
 		table.Revision++;
 	}
 
+	bool Classes::SetPropertiesTag(ClassId owner, std::string_view propertyName, core::Name tag) {
+		auto &table = Get();
+		std::lock_guard lock(table.Guard);
+
+		if (!owner.IsValid() || owner.Index >= table.Entries.size()) {
+			return false;
+		}
+
+		Entry &entry = table.Entries[owner.Index];
+		const auto property = std::find_if(
+			entry.Declared.begin(),
+			entry.Declared.end(),
+			[propertyName](const PropertyDescriptor &candidate) { return candidate.Spelling == propertyName; }
+		);
+		if (property == entry.Declared.end()) {
+			return false;
+		}
+
+		if (property->PropertiesTag == tag) {
+			return true;
+		}
+
+		property->PropertiesTag = tag;
+		table.Revision++;
+		return true;
+	}
+
 	void Classes::SetDefault(ClassId owner, ComponentId component, const void *value) {
 		auto &table = Get();
 		std::lock_guard lock(table.Guard);
@@ -324,6 +355,15 @@ namespace engine::ecs {
 			return;
 		}
 		table.Entries[id.Index].Info.Creatable = creatable;
+	}
+
+	void Classes::SetRuntimeLocal(ClassId id, bool local) {
+		auto &table = Get();
+		std::lock_guard lock(table.Guard);
+		if (!id.IsValid() || id.Index >= table.Entries.size()) {
+			return;
+		}
+		table.Entries[id.Index].Info.RuntimeLocal = local;
 	}
 
 	void Classes::SetKind(ClassId id, ClassKind kind) {

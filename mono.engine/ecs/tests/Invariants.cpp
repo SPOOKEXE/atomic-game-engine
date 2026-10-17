@@ -242,6 +242,7 @@ TEST_CASE("every component this module registers obeys every rule", "[ecs][invar
 namespace invariants_test {
 	struct Dial {
 		float Value = 0.5f;
+		uint32_t HiddenWrites = 0;
 	};
 
 	// Declared once and shared, because `Classes::Register` is idempotent and a
@@ -285,7 +286,33 @@ namespace invariants_test {
 	}
 }
 
-TEST_CASE("a setter that reaches the bytes behind the store's back is named", "[ecs][invariants]") {
+TEST_CASE("a clean idempotent setter preserves dirty tracking for actual changes", "[ecs][invariants]") {
+	PropertyDescriptor property = DialProperty("Idempotent");
+	property.Set = [](Store &store, Entity instance, const void *value) -> bool {
+		const auto *dial = store.Get<Dial>(instance);
+		if (dial == nullptr) return false;
+		const float requested = *static_cast<const float *>(value);
+		if (dial->Value == requested) return true;
+		store.GetMutable<Dial>(instance)->Value = requested;
+		return true;
+	};
+	Classes::Computed(Widget(), property);
+	CHECK(PropertyRulesFor("Idempotent").empty());
+
+	Store store("invariants.idempotent");
+	const auto instance = store.CreateInstance(Widget(), "dial");
+	store.Observe<Dial>();
+	store.ClearChanges();
+	const float changed = .75f;
+	REQUIRE(property.Set(store, instance, &changed));
+	CHECK(store.Get<Dial>(instance)->Value == changed);
+	CHECK(store.Changed<Dial>(instance));
+	store.ClearChanges();
+	REQUIRE(property.Set(store, instance, &changed));
+	CHECK_FALSE(store.Changed<Dial>(instance));
+}
+
+TEST_CASE("a setter that changes bytes behind the store's back is named", "[ecs][invariants]") {
 	PropertyDescriptor property = DialProperty("Unmarked");
 
 	// `const_cast` off a `Get` rather than `GetMutable`, which is the shape of
@@ -297,13 +324,25 @@ TEST_CASE("a setter that reaches the bytes behind the store's back is named", "[
 		if (dial == nullptr) {
 			return false;
 		}
-		const_cast<Dial *>(dial)->Value = *static_cast<const float *>(value);
+		const_cast<Dial *>(dial)->Value = *static_cast<const float *>(value) + 1.0f;
 		return true;
 	};
 
 	Classes::Computed(Widget(), property);
 
 	REQUIRE(Mentions(PropertyRulesFor("Unmarked"), "marks none of the components"));
+}
+
+TEST_CASE("an unchanged getter does not hide reverted unmarked backing mutations", "[ecs][invariants]") {
+	PropertyDescriptor property = DialProperty("HiddenMutation");
+	property.Set = [](Store &store, Entity instance, const void *) -> bool {
+		const auto *dial = store.Get<Dial>(instance);
+		if (dial == nullptr) return false;
+		const_cast<Dial *>(dial)->HiddenWrites ^= 1;
+		return true;
+	};
+	Classes::Computed(Widget(), property);
+	REQUIRE(Mentions(PropertyRulesFor("HiddenMutation"), "marks none of the components"));
 }
 
 TEST_CASE("a read-only property whose setter writes is named", "[ecs][invariants]") {

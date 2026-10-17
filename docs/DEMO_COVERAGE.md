@@ -4,7 +4,7 @@ This is a source-level audit of every top-level Luau scene and authored world in
 
 ## Launch and assets
 
-Build with `just preset=dev client`, then run a script with `scripts/demos/run-demo.sh Rings` or a world with `scripts/demos/run-demo.sh TornadoSim.aworld`. The Windows launcher is `scripts\demos\run-demo.bat`. A bare stem selects `.luau`. Luau module trees and Arena's client shooting companion stage with their scenes. `just preset=dev demo-check` captures each listed scene headlessly; it checks startup and image validity, not appearance or interaction.
+Build with `just preset=dev client`, then run a script with `scripts/demos/run-demo.sh Rings` or a world with `scripts/demos/run-demo.sh TornadoSim.aworld`. The Windows launcher is `scripts\demos\run-demo.bat`. A bare stem selects `.luau`. Client camera companions and Luau module trees stage with their scenes. `just preset=dev demo-check` captures each listed scene headlessly; it checks startup and image validity, not appearance or interaction.
 
 - `Mirrors-4-worlds` needs `--worlds 4`. `CrossWorldSeam` compares `--worlds 1` with `--worlds 2 --view-spacing 0`; the zero spacing is required for its pane alignment. `ImmersivePortals` needs the same script in two named worlds. The `Playground` and `Arena` scenes need their respective pad scripts and both worlds for the teleport round trip. `Arena` shows its targets in a standalone preview; shooting and target resets require a server hosting `Arena.luau` and its Luau client companion.
 - `DataFactoryDemo` and `DataFactoryAdvancedDemo` need client data-factory mode and an MCP port, for example `--data-factory --mcp-port 8738`. `DataFactoryPackageDemo` exercises the external package workflow. `RenderFeaturesDemo` pairs with `examples/pipelines/RenderFeatures.pipeline`. `VirtualCameraCapture.agame` is launched by `scripts/studio-virtual-camera-capture-test.sh`, outside the normal demo list.
@@ -53,6 +53,7 @@ Build with `just preset=dev client`, then run a script with `scripts/demos/run-d
 | [`EditableImage.luau`](../mono.engine/examples/assets/scripts/EditableImage.luau) | DrawCircle and DrawLine; live image revision; texture on a 3D mesh |
 | [`EditableMesh.luau`](../mono.engine/examples/assets/scripts/EditableMesh.luau) | procedural vertices and triangles; per-vertex colour; live geometry deformation |
 | [`GuiInteraction.luau`](../mono.engine/examples/assets/scripts/GuiInteraction.luau) | 2D text entry; button/image activation; event callbacks and visual state |
+| [`ImageBuffers.luau`](../mono.engine/examples/assets/scripts/ImageBuffers.luau) | raw RGBA8; PNG and JPEG decoding; ImageLabel, texture and particle consumers |
 | [`Libraries.luau`](../mono.engine/examples/assets/scripts/Libraries.luau) | MagicCore compiler and validation; TerrainCore generation; runtime module loading |
 | [`Lighting.luau`](../mono.engine/examples/assets/scripts/Lighting.luau) | directional sun; fog; ambient/outdoor lighting over coloured blocks |
 | [`LodDecimation.luau`](../mono.engine/examples/assets/scripts/LodDecimation.luau) | automatic mesh decimation; built-in and EditableMesh sources; triangle count inspection |
@@ -106,10 +107,12 @@ Build with `just preset=dev client`, then run a script with `scripts/demos/run-d
 
 The focused scenes stay because their narrow compositions make failures visible: for example `MirrorDepth` fixes a reflection angle, `PortalSeamMatchedRoom` supplies a direct-room control frame, `MipProbe` isolates minification, and `MagicTests` runs Luau library checks. The heavy scenes and paired controls remain separate so their workloads and baselines are comparable. The most useful polish targets are the launch instructions for multi-world scenes, external asset setup, and live visual QA of the larger authored worlds.
 
-The demo source tree now contains Luau script assets only. Removed alternate scene sources: `Rings.js`, `Mirrors-1-world.ts`, and `Mirrors-4-worlds.ts`. The examples asset build no longer transpiles or stages those alternates, and the demo resolver accepts Luau scripts or authored worlds. The general JavaScript runtime, API, and source-map tests remain. The default server scene is now `ServerDefault.luau`, a deterministic moving cube field, and `Arena.luau` contains the arena shooting behavior with a Luau client companion.
+The demo source tree now contains Luau script assets only. Removed alternate scene sources: `Rings.js`, `Mirrors-1-world.ts`, and `Mirrors-4-worlds.ts`. Removed the two mirror `.client.js` companions. The examples asset build no longer transpiles or stages those alternates, and the demo resolver accepts Luau scripts or authored worlds. The general JavaScript runtime, API, and source-map tests remain. The default server scene is now `ServerDefault.luau`, a deterministic moving cube field, and `Arena.luau` contains the arena shooting behavior with a Luau client companion.
+
+The full source-based inventory, including dependencies, known rough edges, test references, XML embedded-script paths, and keep or polish recommendations, is in `.cache/demo-audit/catalog.json` in this workspace. These are source conclusions, not claims of a fresh live capture.
 
 ## Validation scope
 
-This inventory describes the v0.25.0-fixes sources. All 75 catalog entries and the separate `VirtualCameraCapture.agame` fixture passed a five-frame headless startup capture at 640 by 360 with the strict CI build. Arena's guidance was also inspected at 320 by 180. These captures check startup and image validity; they do not establish complete visual or interaction coverage for every scene.
+On 2026-10-12, the strict CI build passed headless Vulkan startup captures for all 76 scenes in the normal demo list at five frames each. The separate `VirtualCameraCapture.agame` fixture also passed a five-frame capture. The checker validates process exit, logs and image structure. These captures establish startup coverage for all 77 inventory entries; they do not establish visual quality, long-running behavior, multiplayer interactions or external asset completeness.
 
 Arena's C++ integration tests drive its actual Luau scripts through authenticated network clients. They cover valid shots, rejected aim payloads, cooldowns, obstructions, replica authority and client input. The default server scene has C++ wall-bounce parity and snapshot/replay checks.

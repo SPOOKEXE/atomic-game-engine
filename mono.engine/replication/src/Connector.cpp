@@ -458,11 +458,18 @@ namespace engine::replication {
 			// replica would count a failure for a message that arrived
 			// perfectly well.
 			if (PeekMessageKind(message) == MessageKind::User) {
-				if (UserMessages) {
+				if (UserMessages || UserState) {
 					core::ByteReader reader(message);
 					Message read;
 					if (ReadMessage(reader, read)) {
-						UserMessages(read.User.Bytes);
+						const bool consumed =
+							UserState && UserState(
+											 store,
+											 read.User.Bytes,
+											 nowSeconds,
+											 static_cast<double>(Port->RoundTripMilliseconds()) / 1000.0
+										 );
+						if (!consumed && UserMessages) UserMessages(read.User.Bytes);
 					}
 				}
 				continue;
@@ -476,6 +483,7 @@ namespace engine::replication {
 			}
 		}
 		Port->ClearInbound();
+		if (Timing) Timing(store, nowSeconds, static_cast<double>(Port->RoundTripMilliseconds()) / 1000.0);
 		if (!SendIdentity(nowSeconds)) {
 			Port->Flush(nowSeconds);
 			return;

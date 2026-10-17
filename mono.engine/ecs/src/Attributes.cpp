@@ -1,6 +1,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Components.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 
 #include <algorithm>
@@ -36,7 +37,9 @@ namespace engine::ecs {
 		const AttributeTable *table = TableOf(store);
 		if (table == nullptr) return selected;
 		for (const Entity instance : instances) {
-			if (!store.Alive(instance) || Store::IsPredicted(instance)) continue;
+			if (!store.Alive(instance) || Store::IsPredicted(instance) ||
+				IsClientLocalInstance(store, instance))
+				continue;
 			const auto found = table->Entities.find(instance.Id);
 			if (found != table->Entities.end()) selected.Entities.try_emplace(instance.Id, found->second);
 		}

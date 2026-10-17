@@ -1,42 +1,19 @@
 #pragma once
 
-// What a world's terrain is made from, which is a recipe and not a heightfield.
+// The authored recipe attached to a world's generated Terrain instance.
 //
-// **The storage decision is that the chunks are never stored, and it follows
-// from what the roadmap asks for.** `ROADMAP.md` wants a "(procedural,
-// node-based) terrain generator", so the authored thing is a graph and a seed.
-// The voxels or the heightfield that graph produces are derived from it, and
-// this module's standing rule is that a derived fact stored beside its inputs
-// goes stale silently - the same argument that keeps a world AABB off `Bounds`
-// and a triangle count off `Visual`, at a scale where getting it wrong costs
-// gigabytes rather than sixteen bytes.
+// The recipe is stored and serialised on the singleton child of Workspace.
+// Generated samples, meshes, and collision remain derived from the recipe and
+// are not stored here. Keeping those outputs out of the save and wire payload
+// lets each world generate them from the same authored inputs.
 //
-// **It is also the only form that can cross a wire.** `CollisionShapes` makes
-// exactly this argument for hulls: a shape derived from content the receiving
-// side already has must not be sent, because sending a conclusion instead of its
-// input hands an attacker the half they get to choose. A terrain is that with
-// four more orders of magnitude on it. Both ends run the same graph over the
-// same seed and get the same ground, which is decision 14's strict IEEE
-// arithmetic doing the work it exists to do.
+// `InstallServices` creates the non-creatable Terrain instance, migrates older
+// world resources into its component, and protects it from deletion or reparenting.
+// Scripts and tools reach it through `Workspace.Terrain`.
 //
-// **A resource and not a component on a `Terrain` instance**, which is where
-// Roblox puts it. Roblox's `Terrain` derives from `BasePart` and is a singleton
-// under `Workspace` that `Instance.new` refuses to make a second of, and this
-// engine has no way to register a class that cannot be constructed. A resource
-// is one per world by construction, which is the property that mattered, and
-// `WorldBounds` is the existing type with exactly this shape: authored, one per
-// world, and nothing derives it from anything. The script surface is on
-// `workspace`, which is where `SurfaceBounces` and `MaxSurfaces` already are.
-//
-// **Nothing here generates anything, and nothing here may.** `scene` depends on
-// `core`, `ecs` and `spatial` and that list is not growing. The generator is a
-// `graph` node set and the chunks it produces are the generator's own storage,
-// exactly as the broadphase grids are `physics::PhysicsWorld`'s.
-//
-// arch-waiver public-header: forward API. The generator that reads this recipe is a
-// `graph` node set; `docs/FUTURE_COMPONENTS.md` says why the chunks it produces
-// are never stored. Decision 16.
-//
+// Generation belongs to the graph and runtime layers. This module owns only
+// the authored settings and never stores generated chunks.
+
 // @tier L7 · shared
 
 #include <engine/core/Name.hpp>
@@ -65,7 +42,7 @@ namespace engine::scene {
 	// tile internally regardless.
 	inline constexpr uint16_t MAX_CHUNK_RESOLUTION = 1024;
 
-	// How a world's ground is generated, one per world.
+	// Authored generation settings stored on the world's Terrain instance.
 	//
 	// @since v0.19
 	struct Terrain {
@@ -124,24 +101,21 @@ namespace engine::scene {
 		uint8_t Reserved[5] = {};
 	};
 
-	// The world's terrain recipe, creating a default one if it has none.
+	// The recipe on this world's generated Terrain instance, creating the world
+	// fixtures first when necessary.
 	//
-	// **`RegisterSceneComponents` must have run first**, as it must before any
-	// resource here is set: `SetResource` keys on a component id, and one minted
-	// before the explicit registration lands takes the compiler's spelling of the
-	// type and aborts once the table is sealed.
+	// `RegisterSceneClasses` must have run first so the generated class and its
+	// registered component are available.
 	//
 	// @param store The world.
-	// @return Its terrain recipe.
+	// @return The mutable recipe component on the singleton Terrain instance.
 	Terrain &TerrainOf(ecs::Store &store);
 
-	// The world's terrain recipe, or the defaults when it has never set one.
+	// The world's recipe, or the defaults when no Terrain instance or legacy
+	// resource has supplied one.
 	//
-	// **A free function rather than `store.Resource<Terrain>()` at every call
-	// site**, which is `SunOf`'s arrangement and is here for its reason: "no
-	// terrain resource" and "terrain switched off" have to be the same answer, so
-	// that a world loaded from a file that predates this reads as having no
-	// ground rather than as a null a caller forgot to check.
+	// A read never creates fixtures or migrates the legacy resource. This keeps
+	// property inspection safe before world installation has completed.
 	//
 	// @param store The world.
 	// @return Its recipe, clamped.

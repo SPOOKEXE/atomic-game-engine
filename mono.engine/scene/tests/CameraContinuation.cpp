@@ -141,9 +141,13 @@ TEST_CASE(
 TEST_CASE("a replica can select a humanoid on its local camera", "[scene][camera-continuation]") {
 	Viewer viewer;
 	const auto camera = viewer.World.CreatePredictedInstance(scene::CameraClass(), "LocalEye");
+	const auto surface =
+		viewer.World.CreateInstance(ecs::Classes::Find(core::Name("SurfaceCamera")), "AuthoredSurface");
 	viewer.World.SetAdoptOnly(true);
 	const core::Name subject("CameraSubject");
-	CHECK_FALSE(viewer.World.SetProperty(viewer.Eye, subject, &viewer.Humanoid, sizeof(viewer.Humanoid)));
+	CHECK_FALSE(viewer.World.SetProperty(surface, subject, &viewer.Humanoid, sizeof(viewer.Humanoid)));
+	CHECK(viewer.World.Get<scene::CameraSubject>(surface)->Target == ecs::NULL_ENTITY);
+	REQUIRE(viewer.World.SetProperty(viewer.Eye, subject, &viewer.Humanoid, sizeof(viewer.Humanoid)));
 	REQUIRE(viewer.World.SetProperty(camera, subject, &viewer.Humanoid, sizeof(viewer.Humanoid)));
 	CHECK(scene::CameraSubjectRoot(viewer.World, camera) == viewer.Root);
 	CHECK_FALSE(viewer.World.Get<scene::CameraSubject>(camera)->Automatic);
