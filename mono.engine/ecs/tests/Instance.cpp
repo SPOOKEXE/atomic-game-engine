@@ -6,6 +6,7 @@
 #include "ClassTree.hpp"
 
 #include <engine/core/Bytes.hpp>
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
@@ -26,6 +27,7 @@ TEST_DEPENDS("engine.ecs.classes")
 
 using engine::core::ByteReader;
 using engine::core::ByteWriter;
+using engine::core::HeapProfile;
 using engine::core::Name;
 using engine::core::Random;
 using engine::ecs::Classes;
@@ -1393,22 +1395,83 @@ TEST_CASE("roots come back in creation order, not insertion order", "[ecs][insta
 }
 
 TEST_CASE("FindFirstRoot takes the first root with the name", "[ecs][instance]") {
+	ENGINE_HEAP_SCOPE("find-root");
 	const Tree &tree = ClassTree();
 	Store store("find-root");
 
+	const Entity unnamed = store.CreateInstance(tree.Model);
 	const Entity first = store.CreateInstance(tree.Model, "Same");
-	const Entity second = store.CreateInstance(tree.Model, "Same");
+	const Entity second = store.CreateInstance(tree.Part, "Same");
+	const Entity predicted = store.CreatePredictedInstance(tree.Model, "Same");
 	const Entity buried = store.CreateInstance(tree.Part, "Buried");
 	store.SetParent(buried, first);
 
 	CHECK(store.FindFirstRoot("Same") == first);
 	CHECK(second != NULL_ENTITY);
+	CHECK(predicted.Id > second.Id);
+	CHECK(store.FindFirstRoot("") == unnamed);
 
-	// Not a root, so not found - this searches the world's own children and
-	// not its whole tree.
+	// Component edits move rows between archetypes without changing root order.
+	store.Set<ecs_test::Visual>(first, ecs_test::Visual{});
+	store.Remove<ecs_test::Visual>(first);
+	CHECK(store.FindFirstRoot("Same") == first);
+
+	// Detaching makes the child a root; reparenting removes it from this search.
+	REQUIRE(store.SetParent(buried, NULL_ENTITY));
+	CHECK(store.FindFirstRoot("Buried") == buried);
+	REQUIRE(store.SetParent(buried, first));
 	CHECK(store.FindFirstRoot("Buried") == NULL_ENTITY);
+
+	// The recycled slot has a newer generation, so its full id sorts after second.
+	store.Destroy(first);
+	const Entity recycled = store.CreateInstance(tree.Model, "Same");
+	REQUIRE(recycled != NULL_ENTITY);
+	REQUIRE(recycled.Id > second.Id);
+	CHECK(store.FindFirstRoot("Same") == second);
+
 	CHECK(store.FindFirstRoot("Nothing") == NULL_ENTITY);
-	CHECK(store.FindFirstRoot("") == NULL_ENTITY);
+
+	// Warm the interned names and query path before checking repeated lookups.
+	for (int call = 0; call < 4; call++) {
+		CHECK(store.FindFirstRoot("Same") == second);
+	}
+	if (HeapProfile::IsCompiledIn()) {
+		uint32_t lookupNode = 0;
+		for (uint32_t node = 1; node < HeapProfile::NodeCount(); node++) {
+			if (HeapProfile::Path(node).ends_with("find-root;ecs root lookup")) {
+				lookupNode = node;
+				break;
+			}
+		}
+		REQUIRE(lookupNode != 0);
+		struct LookupTotals {
+			uint64_t Blocks = 0;
+			uint64_t Bytes = 0;
+		};
+		const auto totalsWithinLookup = [&] {
+			LookupTotals totals;
+			for (uint32_t node = 1; node < HeapProfile::NodeCount(); node++) {
+				uint32_t ancestor = node;
+				while (ancestor != lookupNode && ancestor != 0) {
+					ancestor = HeapProfile::Node(ancestor).Parent;
+				}
+				if (ancestor != lookupNode) {
+					continue;
+				}
+				const auto profile = HeapProfile::Node(node);
+				totals.Blocks += profile.TotalBlocks;
+				totals.Bytes += profile.TotalBytes;
+			}
+			return totals;
+		};
+		const LookupTotals before = totalsWithinLookup();
+		for (int call = 0; call < 8; call++) {
+			CHECK(store.FindFirstRoot("Same") == second);
+		}
+		const LookupTotals after = totalsWithinLookup();
+		CHECK(after.Blocks == before.Blocks);
+		CHECK(after.Bytes == before.Bytes);
+	}
 }
 
 // --- the O(1) questions ----------------------------------------------------

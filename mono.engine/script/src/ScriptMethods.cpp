@@ -57,6 +57,7 @@
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Instance.hpp>
 #include <engine/effects/ParticleSystem.hpp>
 #include <engine/gui/PlayerGui.hpp>
 #include <engine/gui/Services.hpp>
@@ -147,8 +148,9 @@ namespace engine::script {
 					}
 					local = classLocal;
 				}
+				const auto *hierarchy = local ? nullptr : store.Get<ecs::Hierarchy>(instance);
 				if (!local) {
-					const Entity parent = store.ParentOf(instance);
+					const Entity parent = hierarchy == nullptr ? ecs::NULL_ENTITY : hierarchy->Parent;
 					if (parent != previousParent) {
 						previousParent = parent;
 						// This root is nonlocal itself; probing it retains the original depth bound.
@@ -157,7 +159,7 @@ namespace engine::script {
 					local = parentLocal;
 				}
 				if (local) call.Raise("server scripts cannot change client-local instances");
-				if (store.HasChildren(instance)) {
+				if (hierarchy != nullptr && hierarchy->FirstChild != ecs::NULL_ENTITY) {
 					store.EachDescendant(instance, [&](Entity child) { RequireOwnedMutation(call, child); });
 				}
 			}
