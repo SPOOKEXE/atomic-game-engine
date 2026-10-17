@@ -35,6 +35,7 @@
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -123,6 +124,7 @@ namespace {
 		std::array<procedural::RegionScope, REGIONS> Scopes{};
 		std::array<script::ProceduralSceneTarget, REGIONS> Targets{};
 		std::array<bake::ProceduralBake, REGIONS> Baked{};
+		std::array<assets::ContentHash, REGIONS> ArtifactHashes{};
 		std::map<std::string, std::vector<std::byte>> Assets;
 		assets::Manifest Manifest;
 		cdn::PublishReport Publication;
@@ -224,6 +226,7 @@ namespace {
 			for (size_t index = 0; index < REGIONS; ++index) {
 				const auto &bytes = published->Regions[index].ArtifactBytes;
 				ArtifactBytes += bytes.size();
+				ArtifactHashes[index] = assets::Hasher::Of(std::as_bytes(std::span(bytes)));
 				Require(assetc::CookProceduralArtifact(bytes, Scopes[index], Baked[index], failure), failure);
 				const auto name = "region-" + std::to_string(index) + ".aproc";
 				Require(
@@ -459,6 +462,7 @@ namespace {
 		}
 		return assets::Hasher::Of(canonical.Bytes()).ToHex();
 	}
+	// grug flush complete rows before Windows logging bypasses the ostream buffer on the next phase.
 	void Print(
 		const Scenario &scenario,
 		std::string_view phase,
@@ -499,7 +503,7 @@ namespace {
 					  << "\tblock_overhead_bytes=" << core::HeapProfile::BlockOverhead()
 					  << "\tdropped_scopes_delta=" << report.After.DroppedScopes - report.Before.DroppedScopes
 					  << "\tforeign_frees_delta=" << report.After.ForeignFrees - report.Before.ForeignFrees;
-		std::cout << '\n';
+		std::cout << '\n' << std::flush;
 	}
 	// grug catch forces owned scratch cleanup before an unhandled benchmark error terminates the process.
 	void Run(size_t shape) try {
@@ -522,7 +526,8 @@ namespace {
 			<< "\theap_enabled=" << memory
 			<< "\theap=tracked_cpp_requested_payload_only\tmalloc_gpu_excluded=1\tprocess_peak=single_call_"
 			   "since_reset\tprepared_"
-			   "fixtures_resident=1\tpeak_above_entry=additional_payload_not_rss\n";
+			   "fixtures_resident=1\tpeak_above_entry=additional_payload_not_rss\n"
+			<< std::flush;
 		std::string coldBytes, coldScene;
 		for (bool warm : {false, true}) {
 			if (!warm)
@@ -572,7 +577,11 @@ namespace {
 				  << "\tfixture_work_units=" << fixture.WorkUnits
 				  << "\tfixture_candidate_cells=" << fixture.CandidateCells
 				  << "\tfixture_spatial_tests=" << fixture.SpatialTests << "\tobjects=" << objects
-				  << "\tvertices=" << vertices << "\tindices=" << indices << '\n';
+				  << "\tvertices=" << vertices << "\tindices=" << indices;
+		for (size_t index = 0; index < REGIONS; ++index)
+			std::cout << "\tgenerated_artifact_" << index
+					  << "_hash=" << fixture.ArtifactHashes[index].ToHex();
+		std::cout << '\n' << std::flush;
 	} catch (...) {
 		throw;
 	}
