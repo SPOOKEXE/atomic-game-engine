@@ -2267,6 +2267,15 @@ domain-runtime-memory-bench build_preset="bench":
     ./.cache/build/{{build_preset}}/bench/bench_imagegraph --suite engine.imagegraph.bench.evaluate --samples 1 --warmup-samples 0
     ./.cache/build/{{build_preset}}/bench/bench_audio --suite engine.audio.bench.mixing --samples 1 --warmup-samples 0
 
+# grug compare signed C06 directory delivery with an isolated empty then populated disk cache.
+# Source bundle payload counters exclude manifest reads. Phase timings stay diagnostic; no network runs.
+procedural-delivery-bench build_preset="bench" memory="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_unified_tests
+    MONO_PROCEDURAL_DELIVERY_B0=1 MONO_BENCH_MEMORY={{memory}} MONO_PROCEDURAL_DELIVERY_ROOT="$(pwd)/.cache/build/{{build_preset}}/bench/procedural-delivery" ./.cache/build/{{build_preset}}/bench/bench_unified_tests --suite unified.bench.procedural-delivery --samples 1 --warmup-samples 0
+
 # Real render schemas, startup registration and single-operation CPU planning.
 # Startup samples use fresh processes. MONO_BENCH_MEMORY=0 allows heap-disabled presets.
 render-catalogue-bench samples="101" startup_samples="101" build_preset="bench":
