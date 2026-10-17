@@ -310,7 +310,11 @@ def main() -> int:
 	parser = argparse.ArgumentParser(description=__doc__)
 	parser.add_argument("--build-dir", type=Path, default=Path(".cache/build/bench"))
 	args = parser.parse_args()
-	build = args.build_dir.resolve()
+	try:
+		build = args.build_dir.resolve()
+	except (OSError, ValueError) as failure:
+		print(f"invalid build directory {args.build_dir!s}: {failure}", file=sys.stderr)
+		return 1
 	environment = os.environ.copy()
 	environment.update(
 		MONO_BENCH_MEMORY="1",
@@ -322,16 +326,18 @@ def main() -> int:
 		("bench_audio", "engine.audio.bench.mixing"),
 		("bench_unified_tests", "unified.bench.procedural-delivery"),
 	)
-	try:
-		print(
-			f"# native domain diagnostics\tplatform={sys.platform}\ttiming_valid=0\tbuild_dir={build}",
-			flush=True,
-		)
-		for binary, suite in cases:
-			executable = build / "bench" / (binary + (".exe" if os.name == "nt" else ""))
+	print(
+		f"# native domain diagnostics\tplatform={sys.platform}\ttiming_valid=0\tbuild_dir={build}",
+		flush=True,
+	)
+	timed_out = False
+	failed = False
+	for binary, suite in cases:
+		executable = build / "bench" / (binary + (".exe" if os.name == "nt" else ""))
+		print(f"# native domain suite\t{suite}\ttimeout_seconds=180", flush=True)
+		try:
 			require(executable.is_file(), f"missing native benchmark executable: {executable}")
 			command = [str(executable), "--suite", suite, "--samples", "1", "--warmup-samples", "0"]
-			print(f"# native domain suite\t{suite}\ttimeout_seconds=180", flush=True)
 			result = subprocess.run(
 				command,
 				cwd=Path(__file__).resolve().parents[1],
@@ -353,14 +359,17 @@ def main() -> int:
 			else:
 				check_runtime(result.stdout, audio=binary == "bench_audio")
 			print(f"# native domain verified\t{suite}\ttiming_valid=0", flush=True)
-		return 0
-	except subprocess.TimeoutExpired as failure:
-		emit(failure.output)
-		print(f"native domain diagnostics timed out after {failure.timeout}s: {failure.cmd}", file=sys.stderr)
-		return 124
-	except (OSError, ValueError) as failure:
-		print(f"native domain diagnostics failed: {failure}", file=sys.stderr)
-		return 1
+		except subprocess.TimeoutExpired as failure:
+			emit(failure.output)
+			print(
+				f"native domain suite timed out after {failure.timeout}s: {suite}: {failure.cmd}",
+				file=sys.stderr,
+			)
+			timed_out = True
+		except (OSError, ValueError) as failure:
+			print(f"native domain suite failed: {suite}: {failure}", file=sys.stderr)
+			failed = True
+	return 124 if timed_out else 1 if failed else 0
 
 
 if __name__ == "__main__":
