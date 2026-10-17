@@ -372,7 +372,15 @@ namespace ray_consumer_bench {
 		if (core::HeapProfile::IsCompiledIn())
 			out << " cpu_allocated_bytes=" << report.HeapAfter.TotalBytes - report.HeapBefore.TotalBytes
 				<< " cpu_allocated_blocks=" << report.HeapAfter.TotalBlocks - report.HeapBefore.TotalBlocks
-				<< " cpu_live_change=" << report.HeapAfter.LiveBytes - report.HeapBefore.LiveBytes;
+				<< " cpu_live_change=" << report.HeapAfter.LiveBytes - report.HeapBefore.LiveBytes
+				<< " cpu_live_bytes=" << report.HeapAfter.LiveBytes
+				<< " cpu_live_blocks=" << report.HeapAfter.LiveBlocks
+				<< " cpu_peak_lifetime_bytes=" << report.HeapAfter.PeakBytes
+				<< " cpu_peak_lifetime_scope=process_lifetime_including_preflight_not_interval_peak"
+				<< " cpu_header_overhead_model_bytes=" << report.HeapAfter.OverheadBytes
+				<< " cpu_block_overhead_bytes=" << core::HeapProfile::BlockOverhead()
+				<< " cpu_dropped_scopes=" << report.HeapAfter.DroppedScopes - report.HeapBefore.DroppedScopes
+				<< " cpu_foreign_frees=" << report.HeapAfter.ForeignFrees - report.HeapBefore.ForeignFrees;
 		out << " memory=logical_payload_not_driver_commitment scheduling=one_outstanding_submission "
 			   "step_counts=configured_bounds_not_executed_samples\n";
 	}
