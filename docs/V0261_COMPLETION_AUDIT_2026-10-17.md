@@ -388,3 +388,30 @@ does not establish quiet timing or an optimization gain. Shader metric names
 conclusion can be drawn from those metrics. This capture advances C04 GPU-wait
 evidence only. C04 and B0 remain incomplete, with 0 of 3 optimization passes
 complete.
+
+## 1080p ray and weather GPU diagnostics
+
+At engine code head `9784ad17` (documentation-only head `1f13c5fb`), the existing
+ray benchmark ran eight families, with retained-static and moving-camera mirror
+workloads: 9 cohorts x 5 scenes x 3 projections, 135 scenarios at
+1920x1080. Each used 16 measured frames after 8 internal warm frames, one
+harness sample, and zero outer warmups. Bench used effective `-O3`, heap
+profiling, GNU 13.3, RTX 4090, and Vulkan. Perspective completed with 45 oracle
+rows, 5 moving-camera oracle rows, and 45 work rows; all drops were zero.
+Orthographic and oblique each completed 45 work rows and 50 oracle output rows,
+all with zero drops. All three exited 0 without errors. Every process enabled
+Khronos and synchronization validation. Full-stream scans reported zero Vulkan
+validation errors and zero engine errors.
+
+The opt-in weather device scenario CPU harness ran five fresh processes for
+inactive, empty, simple, busy, and complex scenes at 1920x1080 with shadow
+resolution 256. Each had one sample, zero outer warmups, and 16 phase frames.
+All passed oracles, exited 0, and had zero scanned validation errors. Each
+completed four phases with 1 cold, 96 maintenance, 16 strict-reuse, and 16
+advancing frames, 20 phases total across five processes. In the complex cohort, strict-reuse and advancing each reported zero new or released logical
+GPU resources; dropped events were zero in all four complex phases. These
+resource and drop observations are limited to that cohort.
+
+Benchmark output remained on stdout. Shared Ollama activity was present, so
+quiet timing and optimization gains are not claimed. B0 remains incomplete, with
+0 of 3 optimization passes complete.
