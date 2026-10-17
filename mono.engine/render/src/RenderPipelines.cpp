@@ -14,7 +14,9 @@
 #include "ShaderBinary.hpp"
 #include "VulkanTimestamps.hpp"
 
+#include <engine/core/Assert.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
 #include <engine/graph/PipelineDocument.hpp>
@@ -41,6 +43,9 @@ namespace engine::render {
 
 	namespace {
 		std::atomic_bool ForceGBufferPipelineFailureForTests = false;
+#if ENGINE_ASSERTS_ENABLED
+		std::atomic_bool ForceDeferredPipelineFailureForTests = false;
+#endif
 
 		using Vertex = assets::MeshVertex;
 	}
@@ -121,6 +126,95 @@ namespace engine::render {
 		return pipeline;
 	}
 
+	bool Renderer::Impl::DeferPipeline(
+		SDL_GPUGraphicsPipeline *&slot,
+		const SDL_GPUGraphicsPipelineCreateInfo &info,
+		std::string_view name,
+		bool twoSided,
+		bool optional
+	) {
+		if (!info.vertex_shader || !info.fragment_shader ||
+			(info.vertex_input_state.num_vertex_buffers &&
+			 !info.vertex_input_state.vertex_buffer_descriptions) ||
+			(info.vertex_input_state.num_vertex_attributes && !info.vertex_input_state.vertex_attributes) ||
+			(info.target_info.num_color_targets && !info.target_info.color_target_descriptions))
+			return false;
+		DeferredPipeline pending;
+		pending.Slot = &slot;
+		pending.Info = info;
+		pending.Name = name;
+		pending.TwoSided = twoSided;
+		pending.Optional = optional;
+		if (info.vertex_input_state.num_vertex_buffers)
+			pending.Buffers.assign(
+				info.vertex_input_state.vertex_buffer_descriptions,
+				info.vertex_input_state.vertex_buffer_descriptions +
+					info.vertex_input_state.num_vertex_buffers
+			);
+		if (info.vertex_input_state.num_vertex_attributes)
+			pending.Attributes.assign(
+				info.vertex_input_state.vertex_attributes,
+				info.vertex_input_state.vertex_attributes + info.vertex_input_state.num_vertex_attributes
+			);
+		if (info.target_info.num_color_targets)
+			pending.Targets.assign(
+				info.target_info.color_target_descriptions,
+				info.target_info.color_target_descriptions + info.target_info.num_color_targets
+			);
+		pending.Info.vertex_input_state.vertex_buffer_descriptions = nullptr;
+		pending.Info.vertex_input_state.vertex_attributes = nullptr;
+		pending.Info.target_info.color_target_descriptions = nullptr;
+		DeferredPipelines.push_back(std::move(pending));
+		return true;
+	}
+
+	bool Renderer::Impl::DeferredPipelineReady(SDL_GPUGraphicsPipeline *const &slot) const {
+		if (slot) return true;
+		return std::any_of(DeferredPipelines.begin(), DeferredPipelines.end(), [&](const auto &pending) {
+			return !pending.TwoSided && pending.Slot == &slot;
+		});
+	}
+
+	SDL_GPUGraphicsPipeline *Renderer::Impl::CreateDeferredPipeline(DeferredPipeline &pending) {
+		if (pending.Attempted) return pending.Pipeline;
+		pending.Attempted = true;
+		ENGINE_PROFILE_CAT("renderer.create deferred pipeline", core::ProfileCategory::Render);
+		pending.Info.vertex_input_state.vertex_buffer_descriptions = pending.Buffers.data();
+		pending.Info.vertex_input_state.vertex_attributes = pending.Attributes.data();
+		pending.Info.target_info.color_target_descriptions = pending.Targets.data();
+#if ENGINE_ASSERTS_ENABLED
+		if (ForceDeferredPipelineFailureForTests.load(std::memory_order_relaxed)) {
+			SDL_SetError("deferred pipeline refusal forced for test");
+		} else
+#endif
+		{
+			pending.Pipeline = SDL_CreateGPUGraphicsPipeline(Device, &pending.Info);
+		}
+		if (pending.Pipeline) {
+			core::Metrics::Count("render.pipeline.deferred.creates", 1);
+		} else {
+			core::Metrics::Count("render.pipeline.deferred.failures", 1);
+			if (pending.Optional)
+				ENGINE_WARN("{} pipeline unavailable: {}", pending.Name, SDL_GetError());
+			else
+				ENGINE_ERROR("{} pipeline unavailable: {}", pending.Name, SDL_GetError());
+		}
+		return pending.Pipeline;
+	}
+
+	SDL_GPUGraphicsPipeline *Renderer::Impl::EnsureDeferredPipeline(SDL_GPUGraphicsPipeline *&slot) {
+		if (slot) return slot;
+		for (auto &pending : DeferredPipelines)
+			if (!pending.TwoSided && pending.Slot == &slot) return slot = CreateDeferredPipeline(pending);
+		return nullptr;
+	}
+
+	SDL_GPUGraphicsPipeline *Renderer::Impl::TwoSidedFor(SDL_GPUGraphicsPipeline *culled) {
+		for (auto &pending : DeferredPipelines)
+			if (pending.TwoSided && *pending.Slot == culled) return CreateDeferredPipeline(pending);
+		return nullptr;
+	}
+
 	bool Renderer::Impl::CreatePipelines() {
 		ENGINE_PROFILE_CAT("renderer.create pipelines", core::ProfileCategory::Render);
 		SDL_GPUShader *opaqueVertex = LoadShader("opaque.vert", SDL_GPU_SHADERSTAGE_VERTEX, 0, 1, 4);
@@ -169,6 +263,18 @@ namespace engine::render {
 			LoadShader("weather-fallback.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 9, 2);
 		SDL_GPUShader *volumeFragment = LoadShader("volume.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1, 1);
 		SDL_GPUShader *tonemapFragment = LoadShader("tonemap.frag", SDL_GPU_SHADERSTAGE_FRAGMENT, 2, 1);
+		for (auto *shader :
+			 {opaqueVertex,
+			  packedOpaqueVertex,
+			  opaqueFragment,
+			  shadowVertex,
+			  packedShadowVertex,
+			  shadowFragment,
+			  gbufferFragment,
+			  depthPeelFragment})
+			if (shader &&
+				std::find(PipelineShaders.begin(), PipelineShaders.end(), shader) == PipelineShaders.end())
+				PipelineShaders.push_back(shader);
 
 		if (!opaqueVertex || !packedOpaqueVertex || !opaqueFragment || !shadowVertex || !packedShadowVertex ||
 			!shadowFragment || !overlayVertex || !imageFragment || !overlayFragment || !gbufferFragment ||
@@ -240,15 +346,14 @@ namespace engine::render {
 		// A surface's part is drawn from inside when the camera stands in it,
 		// which a pane with thickness allows. Culled, its far face vanishes and
 		// the world behind the pane shows through the hole.
-		const auto twoSided =
-			[this](SDL_GPUGraphicsPipeline *culled, SDL_GPUGraphicsPipelineCreateInfo info) {
-				if (culled == nullptr || info.rasterizer_state.cull_mode == SDL_GPU_CULLMODE_NONE) return;
-				info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-				if (auto *twin = SDL_CreateGPUGraphicsPipeline(Device, &info))
-					TwoSidedPipelines.emplace_back(culled, twin);
-				else
-					ENGINE_WARN("two-sided surface pipeline unavailable: {}", SDL_GetError());
-			};
+		const auto twoSided = [this](
+								  SDL_GPUGraphicsPipeline *&culled, SDL_GPUGraphicsPipelineCreateInfo info
+							  ) {
+			if (!DeferredPipelineReady(culled) || info.rasterizer_state.cull_mode == SDL_GPU_CULLMODE_NONE)
+				return;
+			info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+			DeferPipeline(culled, info, "two-sided surface", true, true);
+		};
 		twoSided(OpaquePipeline, opaque);
 		if (!OpaquePipeline) {
 			ENGINE_ERROR("opaque pipeline: {}", SDL_GetError());
@@ -299,10 +404,7 @@ namespace engine::render {
 		SDL_GPUGraphicsPipelineCreateInfo wireframeOpaque = opaque;
 		wireframeOpaque.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
 		wireframeOpaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-		WireframeOpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &wireframeOpaque);
-		if (!WireframeOpaquePipeline) {
-			ENGINE_WARN("wireframe opaque pipeline unavailable: {}", SDL_GetError());
-		}
+		DeferPipeline(WireframeOpaquePipeline, wireframeOpaque, "wireframe opaque", false, true);
 
 		// --- default PBR graph -----------------------------------------------
 		const auto hasFormat = [this](graph::ResourceFormat format) {
@@ -321,7 +423,7 @@ namespace engine::render {
 			twoSided(HdrOpaquePipeline, hdrOpaque);
 			hdrOpaque.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
 			hdrOpaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-			HdrWireframeOpaquePipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrOpaque);
+			DeferPipeline(HdrWireframeOpaquePipeline, hdrOpaque, "wireframe HDR opaque", false, true);
 		}
 
 		SDL_GPUColorTargetDescription gbufferTargets[8]{};
@@ -359,10 +461,7 @@ namespace engine::render {
 				SDL_GPUGraphicsPipelineCreateInfo wireframeGBuffer = gbuffer;
 				wireframeGBuffer.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
 				wireframeGBuffer.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-				WireframeGBufferPipeline = SDL_CreateGPUGraphicsPipeline(Device, &wireframeGBuffer);
-				if (WireframeGBufferPipeline == nullptr) {
-					ENGINE_WARN("wireframe gbuffer pipeline unavailable: {}", SDL_GetError());
-				}
+				DeferPipeline(WireframeGBufferPipeline, wireframeGBuffer, "wireframe G-buffer", false, true);
 			}
 		}
 		const bool pbrSupported = GBufferPipeline != nullptr;
@@ -501,7 +600,9 @@ namespace engine::render {
 			hdrTransparent.target_info.color_target_descriptions = &hdrBlended;
 			HdrTransparentPipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrTransparent);
 			hdrTransparent.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
-			HdrWireframeTransparentPipeline = SDL_CreateGPUGraphicsPipeline(Device, &hdrTransparent);
+			DeferPipeline(
+				HdrWireframeTransparentPipeline, hdrTransparent, "wireframe HDR transparent", false, true
+			);
 			if (HdrOpaquePipeline == nullptr || HdrTransparentPipeline == nullptr) {
 				ENGINE_ERROR("HDR scene pipeline: {}", SDL_GetError());
 			}
@@ -567,58 +668,98 @@ namespace engine::render {
 		// changes.
 		SDL_GPUGraphicsPipelineCreateInfo wireframeTransparent = transparent;
 		wireframeTransparent.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
-		WireframeTransparentPipeline = SDL_CreateGPUGraphicsPipeline(Device, &wireframeTransparent);
-		if (!WireframeTransparentPipeline) {
-			ENGINE_WARN("wireframe transparent pipeline unavailable: {}", SDL_GetError());
-		}
+		DeferPipeline(
+			WireframeTransparentPipeline, wireframeTransparent, "wireframe transparent", false, true
+		);
 
-		const auto packedPipeline = [&](SDL_GPUGraphicsPipelineCreateInfo info, SDL_GPUShader *vertex) {
+		const auto packedPipeline = [&](SDL_GPUGraphicsPipeline *&slot,
+										SDL_GPUGraphicsPipelineCreateInfo info,
+										SDL_GPUShader *vertex,
+										std::string_view name) {
 			info.vertex_shader = vertex;
 			info.vertex_input_state = SDL_GPUVertexInputState{};
-			auto *made = SDL_CreateGPUGraphicsPipeline(Device, &info);
-			twoSided(made, info);
-			return made;
+			if (DeferPipeline(slot, info, name)) twoSided(slot, info);
 		};
-		PackedOpaquePipeline = packedPipeline(opaque, packedOpaqueVertex);
-		PackedForwardPipeline = packedPipeline(forward, packedOpaqueVertex);
-		PackedWireframeOpaquePipeline = packedPipeline(wireframeOpaque, packedOpaqueVertex);
-		PackedTransparentPipeline = packedPipeline(transparent, packedOpaqueVertex);
-		PackedWireframeTransparentPipeline = packedPipeline(wireframeTransparent, packedOpaqueVertex);
-		PackedMeshShadowPipeline = packedPipeline(shadow, packedShadowVertex);
+		packedPipeline(PackedOpaquePipeline, opaque, packedOpaqueVertex, "PackedOpaquePipeline");
+		packedPipeline(PackedForwardPipeline, forward, packedOpaqueVertex, "PackedForwardPipeline");
+		packedPipeline(
+			PackedWireframeOpaquePipeline,
+			wireframeOpaque,
+			packedOpaqueVertex,
+			"PackedWireframeOpaquePipeline"
+		);
+		packedPipeline(
+			PackedTransparentPipeline, transparent, packedOpaqueVertex, "PackedTransparentPipeline"
+		);
+		packedPipeline(
+			PackedWireframeTransparentPipeline,
+			wireframeTransparent,
+			packedOpaqueVertex,
+			"PackedWireframeTransparentPipeline"
+		);
+		packedPipeline(PackedMeshShadowPipeline, shadow, packedShadowVertex, "PackedMeshShadowPipeline");
 		if (hdrSupported) {
 			SDL_GPUGraphicsPipelineCreateInfo packedHdrOpaque = opaque;
 			packedHdrOpaque.target_info.color_target_descriptions = &hdrTarget;
-			PackedHdrOpaquePipeline = packedPipeline(packedHdrOpaque, packedOpaqueVertex);
+			packedPipeline(
+				PackedHdrOpaquePipeline, packedHdrOpaque, packedOpaqueVertex, "PackedHdrOpaquePipeline"
+			);
 			packedHdrOpaque.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
 			packedHdrOpaque.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-			PackedHdrWireframeOpaquePipeline = packedPipeline(packedHdrOpaque, packedOpaqueVertex);
+			packedPipeline(
+				PackedHdrWireframeOpaquePipeline,
+				packedHdrOpaque,
+				packedOpaqueVertex,
+				"PackedHdrWireframeOpaquePipeline"
+			);
 			SDL_GPUColorTargetDescription packedHdrBlended = blendedTarget;
 			packedHdrBlended.format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 			SDL_GPUGraphicsPipelineCreateInfo packedHdrTransparent = transparent;
 			packedHdrTransparent.target_info.color_target_descriptions = &packedHdrBlended;
-			PackedHdrTransparentPipeline = packedPipeline(packedHdrTransparent, packedOpaqueVertex);
+			packedPipeline(
+				PackedHdrTransparentPipeline,
+				packedHdrTransparent,
+				packedOpaqueVertex,
+				"PackedHdrTransparentPipeline"
+			);
 			packedHdrTransparent.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
-			PackedHdrWireframeTransparentPipeline = packedPipeline(packedHdrTransparent, packedOpaqueVertex);
+			packedPipeline(
+				PackedHdrWireframeTransparentPipeline,
+				packedHdrTransparent,
+				packedOpaqueVertex,
+				"PackedHdrWireframeTransparentPipeline"
+			);
 		}
 		if (pbrSupported) {
-			PackedGBufferPipeline = packedPipeline(gbuffer, packedOpaqueVertex);
+			packedPipeline(PackedGBufferPipeline, gbuffer, packedOpaqueVertex, "PackedGBufferPipeline");
 			SDL_GPUGraphicsPipelineCreateInfo packedTransparentGBuffer = gbuffer;
 			packedTransparentGBuffer.depth_stencil_state.enable_depth_write = false;
 			packedTransparentGBuffer.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-			PackedGBufferTransparentPipeline = packedPipeline(packedTransparentGBuffer, packedOpaqueVertex);
+			packedPipeline(
+				PackedGBufferTransparentPipeline,
+				packedTransparentGBuffer,
+				packedOpaqueVertex,
+				"PackedGBufferTransparentPipeline"
+			);
 			SDL_GPUGraphicsPipelineCreateInfo packedWireframeGBuffer = gbuffer;
 			packedWireframeGBuffer.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
 			packedWireframeGBuffer.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
-			PackedWireframeGBufferPipeline = packedPipeline(packedWireframeGBuffer, packedOpaqueVertex);
-			PackedDepthPeelPipeline = packedPipeline(depthPeel, packedOpaqueVertex);
+			packedPipeline(
+				PackedWireframeGBufferPipeline,
+				packedWireframeGBuffer,
+				packedOpaqueVertex,
+				"PackedWireframeGBufferPipeline"
+			);
+			packedPipeline(PackedDepthPeelPipeline, depthPeel, packedOpaqueVertex, "PackedDepthPeelPipeline");
 		}
-		if (PackedOpaquePipeline == nullptr || PackedForwardPipeline == nullptr ||
-			PackedTransparentPipeline == nullptr || PackedMeshShadowPipeline == nullptr ||
-			(pbrSupported &&
-			 (PackedGBufferPipeline == nullptr || PackedGBufferTransparentPipeline == nullptr ||
-			  PackedDepthPeelPipeline == nullptr)) ||
-			(hdrSupported &&
-			 (PackedHdrOpaquePipeline == nullptr || PackedHdrTransparentPipeline == nullptr))) {
+		if (!DeferredPipelineReady(PackedOpaquePipeline) || !DeferredPipelineReady(PackedForwardPipeline) ||
+			!DeferredPipelineReady(PackedTransparentPipeline) ||
+			!DeferredPipelineReady(PackedMeshShadowPipeline) ||
+			(pbrSupported && (!DeferredPipelineReady(PackedGBufferPipeline) ||
+							  !DeferredPipelineReady(PackedGBufferTransparentPipeline) ||
+							  !DeferredPipelineReady(PackedDepthPeelPipeline))) ||
+			(hdrSupported && (!DeferredPipelineReady(PackedHdrOpaquePipeline) ||
+							  !DeferredPipelineReady(PackedHdrTransparentPipeline)))) {
 			ENGINE_ERROR("packed editable mesh pipeline: {}", SDL_GetError());
 		}
 
@@ -645,11 +786,9 @@ namespace engine::render {
 		VariantBlendedInfo.vertex_input_state.vertex_attributes = VariantAttributes;
 		VariantBlendedInfo.target_info.color_target_descriptions = &VariantBlendedTarget;
 
-		// The vertex stage is kept rather than released with the others below,
-		// because a variant built after this function has run needs it.
+		// Authored variants borrow the same retained vertex stages as deferred built-ins.
 		OpaqueVertexShader = opaqueVertex;
 		PackedOpaqueVertexShader = packedOpaqueVertex;
-		SDL_ReleaseGPUShader(Device, packedShadowVertex);
 		VariantsReady = true;
 
 		// --- particles ------------------------------------------------------
@@ -927,12 +1066,8 @@ namespace engine::render {
 			ENGINE_ERROR("overlay pipeline: {}", SDL_GetError());
 		}
 
-		// The pipelines hold what they need; the shader objects do not have to
-		// outlive their creation. **`opaqueVertex` is the exception and is
-		// released in `Shutdown` instead** - see `OpaqueVertexShader`.
-		SDL_ReleaseGPUShader(Device, opaqueFragment);
-		SDL_ReleaseGPUShader(Device, gbufferFragment);
-		SDL_ReleaseGPUShader(Device, depthPeelFragment);
+		// Deferred states retain their shared shader stages until shutdown.
+		// Stages used only by eager pipelines can be released now.
 		SDL_ReleaseGPUShader(Device, depthLinearFragment);
 		SDL_ReleaseGPUShader(Device, cameraMotionFragment);
 		SDL_ReleaseGPUShader(Device, ssaoFragment);
@@ -945,9 +1080,6 @@ namespace engine::render {
 		SDL_ReleaseGPUShader(Device, overlayVertex);
 		SDL_ReleaseGPUShader(Device, imageFragment);
 		SDL_ReleaseGPUShader(Device, overlayFragment);
-
-		SDL_ReleaseGPUShader(Device, shadowVertex);
-		SDL_ReleaseGPUShader(Device, shadowFragment);
 
 		// The occlusion culling compute set. Not in the conjunction below for
 		// the particle pipelines' reason: a build these failed on still draws a
@@ -987,8 +1119,9 @@ namespace engine::render {
 		// Environment and weather compute are optional too: the sky handler uses
 		// the fragment approximation when those products cannot be published.
 		return OpaquePipeline != nullptr && ForwardPipeline != nullptr && TransparentPipeline != nullptr &&
-			   PackedOpaquePipeline != nullptr && PackedForwardPipeline != nullptr &&
-			   PackedTransparentPipeline != nullptr && PackedMeshShadowPipeline != nullptr &&
+			   DeferredPipelineReady(PackedOpaquePipeline) && DeferredPipelineReady(PackedForwardPipeline) &&
+			   DeferredPipelineReady(PackedTransparentPipeline) &&
+			   DeferredPipelineReady(PackedMeshShadowPipeline) &&
 			   (!hdrSupported || (HdrOpaquePipeline != nullptr && HdrTransparentPipeline != nullptr)) &&
 			   ShadowPipeline != nullptr && ImagePipeline != nullptr && OverlayPipeline != nullptr &&
 			   (!pbrSupported ||
@@ -1473,18 +1606,28 @@ namespace engine::render {
 		// mirror get it with nothing edited at their own call sites. See
 		// `WireframeOpaquePipeline`'s own header for the rest of the argument.
 		if (WireframeMode) {
-			if (family == PipelineFamily::Opaque && WireframeOpaquePipeline != nullptr) {
-				pipeline = WireframeOpaquePipeline;
-			} else if (family == PipelineFamily::Transparent && WireframeTransparentPipeline != nullptr) {
-				pipeline = WireframeTransparentPipeline;
-			} else if (family == PipelineFamily::HdrOpaque && HdrWireframeOpaquePipeline != nullptr) {
-				pipeline = HdrWireframeOpaquePipeline;
-			} else if (family == PipelineFamily::HdrTransparent &&
-					   HdrWireframeTransparentPipeline != nullptr) {
-				pipeline = HdrWireframeTransparentPipeline;
-			} else if (family == PipelineFamily::GBuffer && WireframeGBufferPipeline != nullptr) {
-				pipeline = WireframeGBufferPipeline;
+			SDL_GPUGraphicsPipeline **wireframe = nullptr;
+			switch (family) {
+			case PipelineFamily::Opaque:
+				wireframe = &WireframeOpaquePipeline;
+				break;
+			case PipelineFamily::Transparent:
+				wireframe = &WireframeTransparentPipeline;
+				break;
+			case PipelineFamily::HdrOpaque:
+				wireframe = &HdrWireframeOpaquePipeline;
+				break;
+			case PipelineFamily::HdrTransparent:
+				wireframe = &HdrWireframeTransparentPipeline;
+				break;
+			case PipelineFamily::GBuffer:
+				wireframe = &WireframeGBufferPipeline;
+				break;
+			default:
+				break;
 			}
+			if (wireframe)
+				if (auto *variant = EnsureDeferredPipeline(*wireframe)) pipeline = variant;
 		}
 
 		SDL_BindGPUGraphicsPipeline(pass, pipeline);
@@ -1669,14 +1812,8 @@ namespace engine::render {
 		}
 		ShaderVariants.clear();
 
-		if (OpaqueVertexShader != nullptr) {
-			SDL_ReleaseGPUShader(Device, OpaqueVertexShader);
-			OpaqueVertexShader = nullptr;
-		}
-		if (PackedOpaqueVertexShader != nullptr) {
-			SDL_ReleaseGPUShader(Device, PackedOpaqueVertexShader);
-			PackedOpaqueVertexShader = nullptr;
-		}
+		OpaqueVertexShader = nullptr;
+		PackedOpaqueVertexShader = nullptr;
 		VariantsReady = false;
 	}
 
@@ -1999,6 +2136,14 @@ namespace engine::render {
 
 	void test_support::SetForceGBufferPipelineFailure(bool enabled) {
 		ForceGBufferPipelineFailureForTests.store(enabled, std::memory_order_relaxed);
+	}
+
+	void test_support::SetForceDeferredPipelineFailure(bool enabled) {
+#if ENGINE_ASSERTS_ENABLED
+		ForceDeferredPipelineFailureForTests.store(enabled, std::memory_order_relaxed);
+#else
+		(void)enabled;
+#endif
 	}
 
 	Renderer::~Renderer() {

@@ -861,9 +861,10 @@ namespace engine::render {
 		if (State->OpaquePipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->OpaquePipeline);
 		}
-		for (const auto &[culled, twin] : State->TwoSidedPipelines)
-			SDL_ReleaseGPUGraphicsPipeline(device, twin);
-		State->TwoSidedPipelines.clear();
+		for (const auto &pending : State->DeferredPipelines)
+			if (pending.TwoSided && pending.Pipeline)
+				SDL_ReleaseGPUGraphicsPipeline(device, pending.Pipeline);
+		State->DeferredPipelines.clear();
 		if (State->ForwardPipeline) {
 			SDL_ReleaseGPUGraphicsPipeline(device, State->ForwardPipeline);
 		}
@@ -1140,6 +1141,9 @@ namespace engine::render {
 			SDL_ReleaseWindowFromGPUDevice(device, State->Window);
 		}
 		gpu::ForgetDevice(device);
+		for (auto *shader : State->PipelineShaders)
+			SDL_ReleaseGPUShader(device, shader);
+		State->PipelineShaders.clear();
 		SDL_DestroyGPUDevice(device);
 
 		// **Rebuilt in place rather than assigned from a fresh one.** The two
