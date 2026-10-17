@@ -830,3 +830,45 @@ with status 143 after the Windows loader failure was inspected, to include its
 fix in the next strict check. It is not a passing gate. Partial log:
 `.cache/build/ci/v0261-native-audio-input-pre-push.log`. Only this task's process
 group was terminated; other workloads were left running.
+
+## Native probe rerun and output protocol
+
+At `fa35bbb9`, the fresh full strict gate passed 774 suites with zero skips and
+failures, plus all remaining checks. Log:
+`.cache/build/ci/v0261-native-domain-fixed-pre-push.log`. Native rerun
+[39025753401](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39025753401)
+passed product builds and process isolation on all three platforms. Linux and
+macOS passed all three domain verifiers, package steps, and uploads. Each
+recorded four image oracles, ten exact audio oracles with zero callback heap
+allocations, and eight complete C06 cache phases. Sharing the prepared voice
+inputs removed the macOS spatial failure without changing engine code, sample
+comparison, or compiler flags. These results do not identify a particular
+floating-point instruction as the previous cause.
+
+Windows now starts audio and passes all ten exact audio oracles with zero
+callback allocations, confirming the child SDL search-path repair. C06 completed
+all eight phases with full mesh/object parity and zero failures, refusals,
+pending installs, dropped scopes, or foreign frees. Its verifier still failed:
+logger text split structured stdout rows, producing
+`invalid diagnostic field: "[10:48:14.719] [info] ..."`. Package/upload steps
+were skipped. Overall workflow success again does not establish Windows success.
+
+`Log::Init` uses a stdout logger. On Windows its direct output can bypass
+buffered `std::cout`, so capturing stderr separately alone would be insufficient.
+All three C06 structured row types now flush after their completed newline,
+before subsequent synchronous directory-client logs. This remains outside the
+phase clocks and heap snapshots. The runner additionally captures stderr
+separately, emits both streams, and parses stdout only; it does not repair or
+ignore malformed rows. The final local job and verifier rerun passed, and Ruff,
+strict mypy, C++ formatting, and whitespace checks passed after review.
+
+Cross-platform generated-byte identity is not established: Windows and Linux
+share the four C06 asset and scene hash pairs, while macOS differs for simple,
+busy, and complex. The empty pair matches everywhere. Each platform passes
+cold/warm equality and its full local baked/install comparison. New fixed-size
+fixture digests capture both published generated artifacts immediately before
+cooking; their eight values are required by the verifier. They will distinguish
+a pre-cook difference from later cooking or scene conversion without guessing
+at its cause. Hashing stays in setup, outside phase measurements. The revised
+output protocol and this boundary metadata still need native verification.
+Quiet timing, complete B0, and all three optimization passes remain pending.
