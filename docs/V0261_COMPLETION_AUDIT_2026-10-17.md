@@ -514,13 +514,13 @@ were Linux 1,498 hits / 1,498 calls / 0 misses, Windows 1,488 / 1,488 / 0, and m
 1,229 / 1,435 / 206. Cold C/C++ misses were 87 / 87 / 293, and warm misses were
 0 / 0 / 206, ordered Linux, Windows, macOS. The macOS misses were 200 SDL units (C PCH and 199 C files)
 and six process-check test runner units (C++ PCH and five C++ cases). C/C++ counts
-include Release Build and process-check, not product compilation alone. The root
-cause of the macOS misses is under read-only investigation and is not established.
-Because the source changes include a public core header and many C/C++ misses,
-whole-build differences cannot be attributed solely to Cargo. Shared-host timing
-remains unaccepted. B0 is
-incomplete, with 0 of 3 optimization passes complete; this is not an engine
-optimization pass or broad engine speed claim.
+include Release Build and process-check, not product compilation alone. At this
+checkpoint, the root cause had not yet been established; the following PCH
+investigation reproduced timestamp-driven misses locally. Because the source
+changes include a public core header and many C/C++ misses, whole-build
+differences cannot be attributed solely to Cargo. Shared-host timing remains
+unaccepted. B0 is incomplete, with 0 of 3 optimization passes complete. No engine
+optimization pass or broad engine speed claim is made.
 
 ## Cold profiling in the audio callback
 
@@ -574,7 +574,27 @@ incorrectly required the edited-header PCH hash to change and failed; the correc
 fixture passed for Clang C/C++ and existing GCC C/C++ argument-boundary and error
 checks. Logs: `.cache/build/ci/v0261-clang-pch-fixture.log` and
 `.cache/build/ci/v0261-clang-pch-fixture-fixed.log`. `actionlint` 1.7.12 passed
-with ShellCheck disabled. The new workflow runs the fixture on non-Windows hosts.
-The full gate and native verification after the production fix remain pending.
-Shared-host timing remains unaccepted; B0 remains incomplete, with 0 of 3
-optimization passes complete.
+with ShellCheck disabled. Linux strict pre-push runs the Clang and GCC checks.
+Exact code at `da132daf75bc920a01a196145414ef3df405819e` passed full strict
+pre-push: 774 suites, 0 skipped, 0 failed, all checks passed. Log:
+`.cache/build/ci/v0261-clang-pch-pre-push.log`. Native runs
+[39017676705](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39017676705)
+and [39018193934](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39018193934)
+both completed successfully on Linux x86_64, Windows x86_64, and macOS ARM64.
+Build, ProcessIsolation, Package, and both uploads passed on all platforms, with
+six artifacts per run; publish was skipped as a manual dry run. Both runs had
+Cargo exact hits and freshness rechecks on all platforms. macOS used AppleClang
+15.0.0.15000309. Its first run populated the cache with 248 misses; the second
+had 1,435 hits / 1,435 calls / 0 misses. The previous warm run at `50a9c492`
+had 206 repeated macOS C/C++ misses, so reuse now reproduces on a fresh checkout.
+
+This verifies cache work reuse, not whole-build speedup. The first fixed macOS
+Ninja span was 80.131 s, with a 15.313 s Cargo edge. The second was 58.288 s,
+with a 20.181 s Cargo edge; the earlier `50a9c492` warm Ninja span was 53.975 s.
+SDL compile edges summed to 77.682 s and then 54.658 s, but overlap and are not
+CPU time or critical-path time. The fixture took 13/15 s on macOS and 15/16 s on
+Linux across the two runs. Actionlint 1.7.12 validated the later macOS-only
+condition. No further native run was performed after that workflow-only edit.
+Product build flags were unchanged. Linux already runs the fixture in strict
+pre-push. Shared-host timing remains unaccepted; B0 remains incomplete, with 0
+of 3 optimization passes complete.

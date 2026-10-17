@@ -124,6 +124,40 @@ cache hit on every platform, ran freshness checks, and compiled only `accesskit-
 The whole-job change cannot be attributed to Cargo alone. The source changes
 include a public core header. Cold C/C++ cache misses were 87 / 87 / 293, and
 warm misses were 0 / 0 / 206, ordered Linux, Windows, macOS. The warm macOS misses
-span release Build and process-check; their root cause is not established. These
-results do not establish broad engine speed gains or statistical performance
+span release Build and process-check. These misses led to the PCH investigation
+below. They do not establish broad engine speed gains or statistical performance
 acceptance. Shared-host timing remains unaccepted.
+
+## Native Clang PCH cache reuse
+
+At exact code head `da132daf75bc920a01a196145414ef3df405819e`, strict pre-push
+passed 774 suites with no skips or failures. Two native runs
+[39017676705](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39017676705)
+and [39018193934](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39018193934)
+passed on Linux x86_64, Windows x86_64, and macOS ARM64. After 248 first-run
+macOS cache misses, the next run had 1,435 hits / 1,435 calls / 0 misses. The
+earlier `50a9c492` warm run had 206 repeated macOS C/C++ misses. This reproduces
+cache reuse on a fresh checkout.
+
+This is evidence of cache reuse, not a whole-build speedup. macOS Ninja spans
+were 80.131 s on the first fixed run and 58.288 s on the second, compared with
+53.975 s in the earlier warm run. SDL compile-edge sums fell from 77.682 s to
+54.658 s, but overlap and do not represent CPU or critical-path time. Actionlint
+1.7.12 validated the later macOS-only condition. No further native run was
+performed after that workflow-only edit. Product build flags were unchanged.
+Shared-host timing remains unaccepted.
+
+## Remaining hot build edges
+
+In the second fixed native run at `da132daf`, these were the largest observed
+edges after Cargo cache reuse:
+
+| Platform | AccessKit Rust edge | Other largest observed edges |
+|---|---:|---|
+| Linux x86_64 | 35.268 s | `weather-clouds.comp.spv` 10.534 s; `libSPIRV-Tools-opt.a` archive 9.416 s |
+| macOS ARM64 | 20.181 s | SPIRV-Tools-opt archive 17.783 s; `weather-clouds` SPIR-V 14.079 s |
+| Windows x86_64 | 30.809 s | `weather-clouds` SPIR-V 22.054 s; `client.exe` link 11.695 s |
+
+These edges overlap and cannot be summed into build wall time or critical path.
+This is one observational run, not a statistical speed claim. Ccache hits do not
+eliminate archive assembly or shader translation.
