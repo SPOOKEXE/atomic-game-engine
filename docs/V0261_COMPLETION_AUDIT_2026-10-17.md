@@ -681,6 +681,9 @@ in 148 edges; logs are `.cache/build/bench/v0261-runtime-heap-build.log` and
 stdout. Publication checks are recorded separately in
 `.cache/build/ci/v0261-runtime-heap-pre-push.log`; their final result must be read
 before claiming the strict gate passed.
+At `6bb3ce63`, the full strict pre-push gate completed: 774 suites, zero skipped,
+zero failed, and all remaining checks passed. The push completed successfully;
+the remote branch matched the exact local revision.
 
 The procedural harness still states `generator_cache=absent`. Its unchanged
 request is regenerated; it is not a cache hit. Its baked artifact fixture uses
@@ -688,3 +691,70 @@ local asset publication, reads, and generator-free installation. This does not
 measure network delivery cache hits or network bytes. Those dimensions, complete
 quiet clock/latency acceptance, and the full B0 matrix remain pending. No engine
 optimization pass is accepted; 0 of 3 passes are complete.
+
+
+## Procedural signed delivery cache baseline
+
+`bd6ded44` adds `just procedural-delivery-bench bench 0`; `bench 1` enables
+per-phase heap counters. It runs the real signed directory publication through
+`delivery::AssetClient` and `client::ProceduralContent::PumpWorld`. Each of the
+four existing C06 authored shapes uses its first two regions and seed 91.
+Generation, cooking, signing, recipient construction, and full-output checks
+stay outside the measured phase. The phase includes a fresh client's complete
+lifetime, manifest verification, pumping, scene installation, and destruction.
+The warm phase creates another client against the populated disk cache.
+
+The initial build failed on missing declarations for `SetProceduralSpline` and
+`SetProceduralOverride`; their direct header resolved it. A real empty-case run
+then reproduced `procedural delivery target capture refused` with child status
+-6. The unbound fixture now sets the required collider trigger, matching the
+existing integration test. That failure also exposed an owned scratch directory
+left behind by an unhandled exception. A local function exception handler forces
+unwinding before rethrow. Reintroducing the bad trigger reproduced the refusal
+with zero added scratch directories; the valid trigger was then restored. No
+engine behavior was changed. Build logs are
+`.cache/build/bench/v0261-procedural-delivery-*-build.log`; the initial configuration
+and build logs omit the extra suffix.
+
+The final heap-enabled job passed. Three additional fresh processes each passed
+all eight phases, with identical counters, heap deltas/additional peaks, asset
+hashes, and scene hashes. All source failures, verification failures, refusals,
+pending requests, dropped scopes, and foreign frees were zero. Each phase
+installed two regions. The heap-disabled mode passed with the same asset/scene
+hashes, and the disabled opt-in emitted no diagnostic rows. Successful and
+injected-failure runs left no new scratch directories. Output stayed on stdout.
+
+| Scene | Cold cache hits / misses | Cold bundle payload bytes | Warm cache hits / misses | C++ allocation bytes, cold / warm |
+|---|---:|---:|---:|---:|
+| Empty | 1 / 1 | 16 | 2 / 0 | 125,356 / 59,762 |
+| Simple | 42 / 1 | 248,160 | 43 / 0 | 5,077,107 / 1,507,525 |
+| Busy | 103 / 1 | 461,426 | 104 / 0 | 9,989,723 / 3,817,084 |
+| Complex | 136 / 1 | 817,672 | 137 / 0 | 17,318,568 / 9,177,450 |
+
+Every warm phase fetched zero bundles and zero bundle payload bytes. Cold hits
+are legitimate: fetching one requested asset populates its bundle peers. These
+are existing cold/warm cache behaviors, not before/after optimization gains.
+Every cached byte is checked against both the authored bake and signed manifest.
+All mesh buffers and all six object fields are compared against generated scene
+output; scopes, PRD1 digests, world placement, fitted bindings, and contact masks
+are checked too. Canonical proofs serialize scalars and lengths with a 128 MiB
+bound, never raw structure padding.
+
+The source is a directory. Its transferred and expanded counters measure raw
+bundle payload, excluding manifest reads. A fresh warm client still reads and
+verifies its manifest. Socket bytes are not applicable to this cohort, and OS
+page-cache state is unspecified. Heap figures cover requested C++ payload, not
+C allocations, RSS, or GPU commitment. The per-call process peak starts from
+prepared resident live bytes; retained bytes include the installed recipient.
+
+A concrete work-removal candidate is now visible: every cold cohort reports two
+bundle reads for one published bundle, transferring twice its published content
+bytes. `AssetClient::Pump` drives bundles before delivering completions.
+`Advance` can retain a synchronous directory job while its request still appears
+pending; the next pump can start it again. This source explanation is consistent
+with the measured duplicate reads. It is recorded for the first optimization
+pass, without changing the baseline engine. Quiet clock/latency acceptance and
+the complete B0 matrix remain pending, with 0 of 3 optimization passes complete.
+Publication checks for this change are recorded in
+`.cache/build/ci/v0261-procedural-delivery-pre-push.log`; read their final result
+before claiming the strict gate passed.
