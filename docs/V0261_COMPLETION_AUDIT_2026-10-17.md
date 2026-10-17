@@ -796,7 +796,14 @@ zero-allocation spatial-first heap row and aborted with status -6:
 the original verifier stopped after the audio failure. macOS package steps were
 skipped. The complex image pixel hash differs from Linux despite each platform
 passing its own full oracle; no cross-platform bitwise image equality is claimed.
-Windows diagnostic compilation was still running at this checkpoint.
+Windows subsequently compiled the diagnostic targets and passed all four image
+oracles. Audio failed before main with child status 3221225781 (`0xC0000135`,
+`STATUS_DLL_NOT_FOUND`), with no audio output. C06 was consequently untested.
+The build log confirms `mono.vendor\\sdl\\SDL3.dll` in both product and bench
+trees. Product binaries stage SDL beside themselves; benchmark binaries do not.
+The verifier now prepends its native bench SDL directory to the Windows child
+`PATH`, preserving the inherited entries. This runtime-path fix still needs a
+native rerun; no system environment or DLL files were changed.
 
 The revised audio fixture prepares authored pan and emitter-placement floats
 once for both the mixer and scalar reference. Previously each independently
@@ -817,3 +824,9 @@ focused mixed-toolchain builds, not complete native Clang builds. Ruff, strict
 mypy, formatting, and whitespace checks passed after review. Native verification
 of the revised fixture is pending. B0 and all three optimization passes remain
 incomplete.
+
+The first publication attempt for the revised inputs was deliberately stopped
+with status 143 after the Windows loader failure was inspected, to include its
+fix in the next strict check. It is not a passing gate. Partial log:
+`.cache/build/ci/v0261-native-audio-input-pre-push.log`. Only this task's process
+group was terminated; other workloads were left running.
