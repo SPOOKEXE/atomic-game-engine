@@ -336,7 +336,8 @@ jobs:
           ccache --zero-stats
 
       - name: Check compiler cache PCH behavior
-        if: runner.os != 'Windows'
+        # Linux strict pre-push already runs this fixture; keep native CI for AppleClang.
+        if: runner.os == 'macOS'
         run: cmake -DMONO_TEST_ROOT="$GITHUB_WORKSPACE/.cache/build/${{ matrix.preset }}" -P mono.build/tests/CompilerCache.cmake
 
       # ccache covers C/C++; Cargo owns AccessKit's Rust dependency artifacts.
