@@ -321,6 +321,9 @@ def main() -> int:
 		MONO_PROCEDURAL_DELIVERY_B0="1",
 		MONO_PROCEDURAL_DELIVERY_ROOT=str(build / "bench" / "procedural-delivery"),
 	)
+	if os.name == "nt":
+		sdl_runtime = str(build / "mono.vendor" / "sdl")
+		environment["PATH"] = os.pathsep.join((sdl_runtime, environment.get("PATH", "")))
 	cases = (
 		("bench_imagegraph", "engine.imagegraph.bench.evaluate"),
 		("bench_audio", "engine.audio.bench.mixing"),
