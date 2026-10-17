@@ -465,3 +465,34 @@ design; per-queue timing was verified. C01 serial passed 15 cases and 972
 assertions; C04 parallel passed 6 cases and 1,087 assertions. Shared-host
 timings remain unaccepted. B0 remains incomplete, with 0 of 3 optimization
 passes complete.
+
+## Native timestamp gate and Cargo cache candidate
+
+Production head `5e45bca3` passed strict pre-push: 773 suites, 0 skipped, 0
+failed. Log: `.cache/build/ci/v0261-timestamp-capacity-pre-push.log`. Native
+workflow [39011792263](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39011792263)
+completed successfully for Linux x86_64, Windows x86_64, and macOS ARM64. Build,
+Process Isolation, Package, and Upload passed on each platform, with six artifact
+records; publish was skipped as a manual dry run.
+
+Raw profiles are in `.cache/build/ci/native-profile-5e45bca3`. Ninja build spans
+were Linux 142.117 s (AccessKit edge 120.010 s, 18.735 to 138.745 s), Windows
+160.519 s (105.912 s, 40.462 to 146.374 s), and macOS 136.211 s (43.603 s,
+45.190 to 88.793 s). These edges overlap; their sum is not wall-clock critical
+path time.
+
+The workflow now tests a Cargo cache candidate keyed by toolchain, image, preset,
+vendor, configuration, and platform, restoring only the AccessKit target and
+Cargo registry index/cache. Removing top-level archive outputs forces Cargo
+freshness. Rebuilding the existing local bench archive gave Cargo 0.270 s,
+AccessKit Ninja edge 0.301 s, 0.366 s wall time, and identical archive SHA-256
+`dc5ceae1b1e7d486e5ed073fc255bcb223275773fdfbbbb96a7df679bf208e56`. This does
+not establish fresh-checkout or native CI gains. `actionlint` 1.7.12 passed with
+external ShellCheck disabled because the tool was unavailable. Inline Python
+parse, key stability, sensitivity to Rust flags/preset/image/platform, and
+archive-cleanup checks passed. A local Windows-branch simulation failed with 127
+because Linux lacks `python`. Native Cargo-cache cold/warm measurements on all
+three platforms remain pending; the new Windows step has not run natively yet.
+Shared-host timing remains unaccepted. B0 is incomplete, with
+0 of 3 optimization passes complete; the Cargo candidate is not an engine
+optimization pass.

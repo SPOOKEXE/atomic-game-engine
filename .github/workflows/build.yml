@@ -335,6 +335,90 @@ jobs:
           ccache --set-config compiler_check=content
           ccache --zero-stats
 
+      # ccache covers C/C++; Cargo owns AccessKit's Rust dependency artifacts.
+      # Exact keys avoid retaining another large snapshot for every workflow run.
+      - name: Identify AccessKit Cargo cache
+        id: accesskit-key
+        shell: bash
+        env:
+          ACCESSKIT_PLATFORM: ${{ matrix.platform }}
+          ACCESSKIT_PRESET: ${{ matrix.preset }}
+        run: |
+          python_command=python3
+          if [ "$RUNNER_OS" = Windows ]; then python_command=python; fi
+          "$python_command" - <<'PYTHON'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          root = Path.cwd()
+          crate = root / "mono.vendor/accesskit-c"
+          cargo_home = Path(os.environ.get("CARGO_HOME", str(Path.home() / ".cargo"))).resolve()
+          rustc = subprocess.check_output(["rustc", "-Vv"], cwd=crate, text=True).strip()
+          cargo = subprocess.check_output(["cargo", "--version"], cwd=crate, text=True).strip()
+          revision = subprocess.check_output(
+              ["git", "rev-parse", "HEAD"], cwd=crate, text=True).strip()
+          environment_names = {
+              "RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "RUSTC", "RUSTC_WRAPPER",
+              "RUSTC_WORKSPACE_WRAPPER", "RUSTUP_TOOLCHAIN", "RUSTDOCFLAGS",
+              "CC", "CXX", "AR", "LD", "CFLAGS", "CXXFLAGS", "LDFLAGS",
+              "SDKROOT", "MACOSX_DEPLOYMENT_TARGET", "INCLUDE", "LIB", "LIBPATH",
+              "VSINSTALLDIR", "VCToolsVersion", "WindowsSDKVersion",
+          }
+          environment = {
+              name: value for name, value in os.environ.items()
+              if name in environment_names or name.startswith((
+                  "CARGO_BUILD_", "CARGO_TARGET_", "CARGO_PROFILE_"))
+          }
+          inputs = {
+              "rustc": rustc, "cargo": cargo, "revision": revision,
+              "platform": os.environ["ACCESSKIT_PLATFORM"],
+              "preset": os.environ["ACCESSKIT_PRESET"],
+              "image": [os.environ.get(name, "") for name in (
+                  "ImageOS", "ImageVersion", "RUNNER_OS", "RUNNER_ARCH")],
+              "environment": environment,
+          }
+          files = [root / "mono.build/MonoVendor.cmake", root / "CMakePresets.json",
+                   crate / "Cargo.toml", crate / "Cargo.lock",
+                   cargo_home / "config", cargo_home / "config.toml"]
+          for directory in (crate, *crate.parents):
+              files.extend(directory / name for name in (
+                  ".cargo/config", ".cargo/config.toml", "rust-toolchain", "rust-toolchain.toml"))
+          inputs["files"] = {
+              str(file): hashlib.sha256(file.read_bytes()).hexdigest()
+              for file in files if file.is_file()
+          }
+          digest = hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
+          key = f"accesskit-cargo-v1-{inputs['platform']}-{inputs['preset']}-{digest}"
+          print(rustc)
+          print(cargo)
+          print(f"AccessKit {revision} cache: {key}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"key={key}\n")
+              output.write(f"registry={cargo_home.as_posix()}/registry\n")
+          PYTHON
+
+      - name: Restore AccessKit Cargo cache
+        id: accesskit-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .cache/build/${{ matrix.preset }}/vendor/accesskit-c
+            ${{ steps.accesskit-key.outputs.registry }}/index
+            ${{ steps.accesskit-key.outputs.registry }}/cache
+          key: ${{ steps.accesskit-key.outputs.key }}
+
+      # Ninja must invoke Cargo's freshness checks even after restoring artifacts.
+      # Keep dependency objects and fingerprints; remove only the final archive.
+      - name: Recheck restored AccessKit archive
+        if: steps.accesskit-cache.outputs.cache-hit == 'true'
+        shell: bash
+        run: |
+          rm -f ".cache/build/${{ matrix.preset }}/vendor/accesskit-c/release/libaccesskit.a" \
+                ".cache/build/${{ matrix.preset }}/vendor/accesskit-c/release/accesskit.lib"
+
       - name: Build
         if: runner.os != 'Windows'
         run: |
@@ -353,6 +437,16 @@ jobs:
         run: |
           set PRESET=${{ matrix.preset }}
           scripts\build-windows.bat client studio server cdn launcher
+
+      - name: Save AccessKit Cargo cache
+        if: success() && steps.accesskit-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .cache/build/${{ matrix.preset }}/vendor/accesskit-c
+            ${{ steps.accesskit-key.outputs.registry }}/index
+            ${{ steps.accesskit-key.outputs.registry }}/cache
+          key: ${{ steps.accesskit-key.outputs.key }}
 
       # These headless process-contract checks exercise each platform's native
       # launcher. The release products above still use the matrix preset.
