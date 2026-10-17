@@ -42,7 +42,7 @@ BENCH("weather descriptor CPU preparation and bounded full-field grid", 1000) {
 
 namespace {
 	using namespace engine;
-	constexpr uint32_t DEFAULT_PHASE_FRAMES = 256;
+	constexpr uint32_t DEFAULT_PHASE_FRAMES = 512;
 	constexpr uint32_t MAINTENANCE_FRAMES = 96;
 	constexpr std::array<const char *, 7> WEATHER_PASSES{
 		"weather-clock",

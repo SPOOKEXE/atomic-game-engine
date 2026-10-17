@@ -1008,7 +1008,7 @@ BENCH("opt-in existing ray consumer device scenarios; use printed per-frame repo
 	);
 	const auto width = Setting("MONO_RAY_GPU_BENCH_WIDTH", 1920u, 3840u),
 			   height = Setting("MONO_RAY_GPU_BENCH_HEIGHT", 1080u, 2160u),
-			   frames = Setting("MONO_RAY_GPU_BENCH_FRAMES", 256u, 4096u);
+			   frames = Setting("MONO_RAY_GPU_BENCH_FRAMES", 512u, 4096u);
 	for (const std::string_view family : FAMILIES)
 		if (selected == "all" || selected == family)
 			for (const auto variant : SCENES)

@@ -100,6 +100,7 @@ namespace ray_consumer_bench {
 	inline void
 	PrintTails(std::string_view name, const std::vector<uint64_t> &samples, std::ostream &out = std::cout) {
 		out << ' ' << name << "_samples=" << samples.size();
+		out << ' ' << name << "_tail_insufficient=" << (samples.size() < 100 ? 1 : 0);
 		if (samples.empty()) {
 			out << ' ' << name << "=unavailable";
 			return;

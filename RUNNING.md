@@ -192,8 +192,8 @@ the backend submission call separately from engine submission bookkeeping.
 | `weather-temporal-bench [samples] [build_preset]` | Measure temporal invalidation, periodic displacement and cloud composition without graphics. Defaults: `5`, `bench`. |
 | `weather-shadow-bench [samples] [build_preset]` | Measure shadow caster bounds, cascades, low-sun fades and retained revisions without graphics. Defaults: `5`, `bench`. |
 | `weather-effects-bench [samples] [build_preset]` | Measure weather emission and roof/ground visibility against published geometry without graphics. Defaults: `5`, `bench`. |
-| `weather-gpu-bench [samples] [build_preset] [width] [height] [shadow_resolution] [scene] [frames]` | Open a GPU device and measure sparse weather generation, reuse, integration and tracked memory. Scenes: `inactive`, `empty`, `simple`, `busy`, `complex`. Defaults: `3`, `bench`, `1920`, `1080`, `256`, `simple`, `256`. Shadow resolution must be a power of two in `32..2048`. |
-| `ray-gpu-bench [samples] [build_preset] [width] [height] [family] [scene] [frames] [projection]` | Measure real renderer ray consumers. Families: `all`, `trace`, `volume`, `environment`, `fallback`, `god-rays`, `lens`, `capture`, `mirror`. Scenes: `all`, `inactive`, `empty`, `simple`, `busy`, `complex`. Projections: `perspective`, `orthographic`, `oblique`, one per invocation. Defaults: `3`, `bench`, `1920`, `1080`, `all`, `all`, `256`, `perspective`. Reports print the configured work and output oracles. |
+| `weather-gpu-bench [samples] [build_preset] [width] [height] [shadow_resolution] [scene] [frames]` | Open a GPU device and measure sparse weather generation, reuse, integration and tracked memory. Scenes: `inactive`, `empty`, `simple`, `busy`, `complex`. Defaults: `3`, `bench`, `1920`, `1080`, `256`, `simple`, `512`. Shadow resolution must be a power of two in `32..2048`. |
+| `ray-gpu-bench [samples] [build_preset] [width] [height] [family] [scene] [frames] [projection]` | Measure real renderer ray consumers. Families: `all`, `trace`, `volume`, `environment`, `fallback`, `god-rays`, `lens`, `capture`, `mirror`. Scenes: `all`, `inactive`, `empty`, `simple`, `busy`, `complex`. Projections: `perspective`, `orthographic`, `oblique`, one per invocation. Defaults: `3`, `bench`, `1920`, `1080`, `all`, `all`, `512`, `perspective`. Reports print the configured work and output oracles. |
 | `weather-fuzz [runs] [compiler]` | Fuzz complete weather checkpoint decoding with AddressSanitizer and UBSan. Defaults: `10000`, `clang++-21`. |
 | `procedural-fuzz [runs] [compiler]` | Fuzz portable procedural inputs, PRD1 descriptions, and script state snapshots with libFuzzer, AddressSanitizer, and UBSan. Defaults: `10000`, `clang++-21`. |
 | `imagecodec-bench [samples]` | Measure CPU image imports at 1080p and print results to stdout. Default: `5`. |
@@ -242,6 +242,12 @@ the backend submission call separately from engine submission bookkeeping.
 | `priority-refinement-bench [samples]` | Measure refined multi-row replication publishing. Default: `5`. |
 | `recovery-rows-bench [samples]` | Measure recovery-row re-offer work. Default: `5`. |
 | `bench-mesh-lod [samples]` | Measure mesh LOD generation. Default: `5`. |
+
+The ray and weather benchmarks sample GPU pass timestamps one frame in four.
+With 512 configured frames, passes running on every sampled frame yield 128
+observations. Conditional or inactive passes can yield fewer or zero. Each
+timing vector reports `<name>_tail_insufficient=1` below 100 samples, including
+the shorter cold and maintenance phases. CPU vectors count their own samples.
 
 The prototype's 12 ms combined weather GPU budget was met by this one-layer,
 1920x1080 Vulkan fixture on an RTX 4090 with one 256x256 shadow cascade.
