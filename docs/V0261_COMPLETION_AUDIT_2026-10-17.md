@@ -682,24 +682,6 @@ stdout. Publication checks are recorded separately in
 `.cache/build/ci/v0261-runtime-heap-pre-push.log`; their final result must be read
 before claiming the strict gate passed.
 
-## Native CPU domain verification
-
-`just domain-runtime-verify` builds and runs the three real image, audio, and
-procedural delivery suites with heap diagnostics enabled. The verifier requires
-the exact four image and ten audio cohorts with their full-output checks, and
-all eight C06 cache phases with the four authored fixture sizes. It rejects
-missing rows, invalid heap relationships, dropped scopes, foreign frees, delivery
-failures, pending installs, and warm-cache source reads. Output stays on stdout;
-all timings remain diagnostic and invalid for performance acceptance.
-
-The local Linux job and the final verifier rerun passed. Ruff, strict mypy with
-unreachable-code checks, actionlint, and whitespace checks passed. Review caught
-and closed an omitted authored C06 fixture-size check. Actionlint ran without
-ShellCheck, which is unavailable locally. The manual build workflow's optional
-`domain_benchmarks` input defaults to false and uses a separate `bench` build on
-each native platform. Windows and macOS verification remains pending until the
-actual job steps are inspected; existing optional-job handling means overall
-workflow success alone is insufficient. Shipped preset flags are unchanged.
 At `6bb3ce63`, the full strict pre-push gate completed: 774 suites, zero skipped,
 zero failed, and all remaining checks passed. The push completed successfully;
 the remote branch matched the exact local revision.
@@ -778,3 +760,60 @@ the complete B0 matrix remain pending, with 0 of 3 optimization passes complete.
 Publication checks for this change are recorded in
 `.cache/build/ci/v0261-procedural-delivery-pre-push.log`; read their final result
 before claiming the strict gate passed.
+
+## Native CPU domain verification
+
+`just domain-runtime-verify` builds and runs the three real image, audio, and
+procedural delivery suites with heap diagnostics enabled. The verifier requires
+the exact four image and ten audio cohorts with their full-output checks, and
+all eight C06 cache phases with the four authored fixture sizes. It rejects
+missing rows, invalid heap relationships, dropped scopes, foreign frees, delivery
+failures, pending installs, and warm-cache source reads. Output stays on stdout;
+all timings remain diagnostic and invalid for performance acceptance.
+
+The local Linux job and the final verifier rerun passed. Ruff, strict mypy with
+unreachable-code checks, actionlint, and whitespace checks passed. Review caught
+and closed an omitted authored C06 fixture-size check. Actionlint ran without
+ShellCheck, which is unavailable locally. The manual build workflow's optional
+`domain_benchmarks` input defaults to false and uses a separate `bench` build on
+each native platform. Windows and macOS verification remains pending until the
+actual job steps are inspected; existing optional-job handling means overall
+workflow success alone is insufficient. Shipped preset flags are unchanged.
+
+At `f82ec27b`, the strict pre-push check passed all 774 suites with zero skips
+and failures, then all remaining checks. Log:
+`.cache/build/ci/v0261-native-domain-pre-push.log`. Native manual run
+[39023656607](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39023656607)
+passed product builds and process-isolation checks on all three platforms.
+Linux passed all three diagnostic suites and package/upload steps. Its complete
+C06 asset and scene hashes match the local GNU 13.3 results, while allocation
+figures differ by toolchain and library. These counts are not ABI-independent.
+
+macOS ARM64 compiled the diagnostic targets and passed all four image oracles.
+Its audio process passed the eight flat first/next cases, then emitted a
+zero-allocation spatial-first heap row and aborted with status -6:
+`audio memory probe samples, report or clock changed`. C06 did not run because
+the original verifier stopped after the audio failure. macOS package steps were
+skipped. The complex image pixel hash differs from Linux despite each platform
+passing its own full oracle; no cross-platform bitwise image equality is claimed.
+Windows diagnostic compilation was still running at this checkpoint.
+
+The revised audio fixture prepares authored pan and emitter-placement floats
+once for both the mixer and scalar reference. Previously each independently
+recomputed trigonometric inputs. Exact sample, peak, report, sample-clock, and
+serial checks remain unchanged. Failure output now identifies the first sample
+and expected/actual bit patterns, plus report and clock fields. This fixes a
+fixture-input ambiguity, but its effect on the macOS failure is unverified until
+another native run. No engine code or floating-point flags changed.
+
+The verifier now continues through all independent suites while retaining a
+failure or timeout status. A real missing-audio-executable run returned 1 and
+still completed the image and C06 checks. The revised complete local job passed.
+Focused Clang 21 x86 builds of the audio unity unit and benchmark passed all ten
+oracles with native instructions and contraction both off and fast, before and
+after the input change. Disassembly counted zero and five fused instructions,
+respectively; the original macOS failure was not reproduced locally. These are
+focused mixed-toolchain builds, not complete native Clang builds. Ruff, strict
+mypy, formatting, and whitespace checks passed after review. Native verification
+of the revised fixture is pending. B0 and all three optimization passes remain
+incomplete.
