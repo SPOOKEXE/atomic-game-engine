@@ -872,3 +872,17 @@ a pre-cook difference from later cooking or scene conversion without guessing
 at its cause. Hashing stays in setup, outside phase measurements. The revised
 output protocol and this boundary metadata still need native verification.
 Quiet timing, complete B0, and all three optimization passes remain pending.
+
+The latest strict pre-push run,
+`.cache/build/ci/v0261-native-domain-protocol-pre-push.log`, attempted 774
+suites and failed in `server.replication`, case
+`a world too big for one datagram still streams`, at `REQUIRE(joined)`: 15 of
+16 cases and 663 of 664 assertions passed. The push was refused. The same
+unchanged CI binary, seed `995694263`, passed this exact case in three focused
+reruns, with six assertions per run; see
+`.cache/build/ci/v0261-native-domain-replication-focus.log`. The cause is
+unestablished, and no server code, test, timeout, or assertion changed. Native
+protocol verification is not complete, and the full gate remains required.
+
+Opting into domain benchmarks in the workflow requires all three platforms,
+while default and tagged release behavior is preserved.
