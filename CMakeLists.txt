@@ -462,6 +462,16 @@ if(MONO_CCACHE)
 			set(MONO_CACHE_LAUNCHER
 				"${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/mono.build/CompilerCache.cmake"
 				"${MONO_COMPILER_CACHE}" "${CMAKE_SOURCE_DIR}" --)
+			# Clang embeds input mtimes in PCH files unless told otherwise, so a
+			# fresh checkout misses ccache even when every header has the same bytes.
+			foreach(language IN ITEMS C CXX)
+				if(NOT MSVC AND
+				   NOT CMAKE_${language}_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" AND
+				   CMAKE_${language}_COMPILER_ID MATCHES "^(Clang|AppleClang)$")
+					list(APPEND CMAKE_${language}_COMPILE_OPTIONS_CREATE_PCH
+						-Xclang -fno-pch-timestamp)
+				endif()
+			endforeach()
 		else()
 			set(MONO_CACHE_LAUNCHER "${MONO_COMPILER_CACHE}")
 		endif()

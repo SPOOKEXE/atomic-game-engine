@@ -555,3 +555,26 @@ strict pre-push gate: 774 suites, 0 skipped, 0 failed. Log:
 `.cache/build/ci/v0261-profiler-cold-pre-push.log`. No speed gain or completed
 engine optimization pass is claimed; B0 remains incomplete, with 0 of 3 passes
 complete.
+
+## Clang PCH cache candidate
+
+A local Clang 21 launcher using CMake-shaped PCH and consumer commands reproduced
+timestamp-only PCH churn: after touching only the header and deleting outputs,
+the default used four cache misses, zero hits, and changed PCH bytes. With
+`-Xclang -fno-pch-timestamp`, it had two cold misses, then two direct hits with
+identical PCH bytes. A same-size content edit with the old mtime correctly
+failed the consumer static assertion under both variants. The production fix
+scopes the flag to active ccache C/C++ Clang or AppleClang PCH creation, excluding
+MSVC frontends. The rationale is described in
+[ccache discussion 1218](https://github.com/ccache/ccache/discussions/1218).
+
+The isolated C/C++ Clang fixture checks cold misses, mtime-only hits and identical
+PCH bytes, then an edited-header third miss and consumer error. Its first version
+incorrectly required the edited-header PCH hash to change and failed; the corrected
+fixture passed for Clang C/C++ and existing GCC C/C++ argument-boundary and error
+checks. Logs: `.cache/build/ci/v0261-clang-pch-fixture.log` and
+`.cache/build/ci/v0261-clang-pch-fixture-fixed.log`. `actionlint` 1.7.12 passed
+with ShellCheck disabled. The new workflow runs the fixture on non-Windows hosts.
+The full gate and native verification after the production fix remain pending.
+Shared-host timing remains unaccepted; B0 remains incomplete, with 0 of 3
+optimization passes complete.

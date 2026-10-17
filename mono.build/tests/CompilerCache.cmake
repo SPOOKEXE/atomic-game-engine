@@ -1,4 +1,4 @@
-# Exercise GCC PCH regeneration through the real launcher and an isolated cache.
+# Exercise Clang and GCC PCH regeneration through the real launcher and isolated caches.
 if(DEFINED MONO_CACHE_ARGUMENT_PROBE)
 	file(WRITE "${MONO_CACHE_ARGUMENT_PROBE}" "")
 	set(recording FALSE)
@@ -15,14 +15,9 @@ if(DEFINED MONO_CACHE_ARGUMENT_PROBE)
 	return()
 endif()
 
-if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
-	message(STATUS "compiler-cache-check: GCC/Linux fixture skipped on this platform")
-	return()
-endif()
 find_program(cache NAMES ccache)
-find_program(compiler NAMES g++)
-if(NOT cache OR NOT compiler)
-	message(STATUS "compiler-cache-check: fixture skipped (requires ccache and g++)")
+if(NOT cache)
+	message(STATUS "compiler-cache-check: fixtures skipped (requires ccache)")
 	return()
 endif()
 if(NOT DEFINED MONO_TEST_ROOT)
@@ -45,6 +40,119 @@ file(READ "${testRoot}/arguments.txt" arguments)
 set(expectedArguments "4:one\\\n3:two\n6:[first\n7:second]\n3:a;b\n3:a\"b\n10:\${literal}\n0:\n")
 if(NOT argumentStatus STREQUAL "0" OR NOT arguments STREQUAL expectedArguments)
 	message(FATAL_ERROR "Launcher changed arguments:\n${arguments}")
+endif()
+
+# Clang PCH bytes must survive a checkout that changes only header mtimes.
+# A real same-size content edit must still invalidate the PCH and reach the consumer.
+function(check_clang_pch compiler standard suffix pchLanguage assertion)
+	set(clangRoot "${testRoot}/clang-${suffix}")
+	file(MAKE_DIRECTORY "${clangRoot}/path with spaces")
+	file(REMOVE_RECURSE "${clangRoot}/cache")
+	set(ENV{CCACHE_DIR} "${clangRoot}/cache")
+	set(ENV{CCACHE_STATSLOG} "${clangRoot}/stats.log")
+	set(header "${clangRoot}/path with spaces/Probe.${suffix}")
+	set(pch "${clangRoot}/Probe.pch")
+	if(suffix STREQUAL "hpp")
+		set(source "${clangRoot}/Probe.cpp")
+	else()
+		set(source "${clangRoot}/Probe.c")
+	endif()
+	set(pchSource "${clangRoot}/PchInput.${suffix}")
+	set(object "${clangRoot}/Probe.o")
+	file(WRITE "${header}" "#define CACHE_VALUE 1\n")
+	file(WRITE "${source}" "${assertion}(CACHE_VALUE == 1, \"changed header reached consumer\");\n")
+	file(WRITE "${pchSource}" "/* Header is supplied with -include. */\n")
+	file(REMOVE "$ENV{CCACHE_STATSLOG}")
+	# ccache rejects inputs newer than its invocation on coarse filesystems.
+	execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 1)
+
+	function(compile_clang output input)
+		execute_process(
+			COMMAND "${CMAKE_COMMAND}" -P "${sourceRoot}/mono.build/CompilerCache.cmake"
+				"${cache}" "${sourceRoot}" -- "${compiler}" "-std=${standard}" ${ARGN}
+				-MD -MF "${clangRoot}/Probe.d" -o "${output}" -c "${input}"
+			RESULT_VARIABLE compileStatus OUTPUT_VARIABLE standardOutput ERROR_VARIABLE standardError)
+		if(NOT compileStatus STREQUAL "0")
+			message(FATAL_ERROR "Clang ${suffix} compile failed: ${standardOutput}${standardError}")
+		endif()
+	endfunction()
+
+	compile_clang("${pch}" "${pchSource}"
+		-Xclang -fno-pch-timestamp -Xclang -emit-pch
+		-Xclang -include -Xclang "${header}" -x "${pchLanguage}")
+	compile_clang("${object}" "${source}"
+		-Xclang -include-pch -Xclang "${pch}" -Xclang -include -Xclang "${header}")
+	file(SHA256 "${pch}" firstPch)
+	file(READ "$ENV{CCACHE_STATSLOG}" stats)
+	string(REGEX MATCHALL "\ncache_miss\n" misses "${stats}")
+	list(LENGTH misses missCount)
+	if(missCount LESS 2)
+		message(FATAL_ERROR "Expected cold Clang ${suffix} PCH and consumer misses:\n${stats}")
+	endif()
+
+	execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 1)
+	file(TOUCH "${header}")
+	execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 1)
+	file(REMOVE "${pch}" "${object}")
+	compile_clang("${pch}" "${pchSource}"
+		-Xclang -fno-pch-timestamp -Xclang -emit-pch
+		-Xclang -include -Xclang "${header}" -x "${pchLanguage}")
+	compile_clang("${object}" "${source}"
+		-Xclang -include-pch -Xclang "${pch}" -Xclang -include -Xclang "${header}")
+	file(SHA256 "${pch}" restoredPch)
+	file(READ "$ENV{CCACHE_STATSLOG}" stats)
+	string(REGEX MATCHALL "\ndirect_cache_hit\n" hits "${stats}")
+	list(LENGTH hits hitCount)
+	if(NOT firstPch STREQUAL restoredPch OR hitCount LESS 2)
+		message(FATAL_ERROR "Expected unchanged Clang ${suffix} PCH and two direct hits:\n${stats}")
+	endif()
+
+	execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 1)
+	file(WRITE "${header}" "#define CACHE_VALUE 2\n")
+	file(REMOVE "${pch}" "${object}")
+	execute_process(COMMAND "${CMAKE_COMMAND}" -E sleep 1)
+	compile_clang("${pch}" "${pchSource}"
+		-Xclang -fno-pch-timestamp -Xclang -emit-pch
+		-Xclang -include -Xclang "${header}" -x "${pchLanguage}")
+	file(READ "$ENV{CCACHE_STATSLOG}" stats)
+	string(REGEX MATCHALL "\ncache_miss\n" misses "${stats}")
+	list(LENGTH misses missCount)
+	if(missCount LESS 3)
+		message(FATAL_ERROR "Expected Clang ${suffix} PCH recompilation after a header edit:\n${stats}")
+	endif()
+	execute_process(
+		COMMAND "${CMAKE_COMMAND}" -P "${sourceRoot}/mono.build/CompilerCache.cmake"
+			"${cache}" "${sourceRoot}" -- "${compiler}" "-std=${standard}"
+			-Xclang -include-pch -Xclang "${pch}" -Xclang -include -Xclang "${header}"
+			-MD -MF "${clangRoot}/Probe.d" -o "${object}" -c "${source}"
+		RESULT_VARIABLE failure OUTPUT_VARIABLE standardOutput ERROR_VARIABLE standardError)
+	if(failure STREQUAL "0" OR NOT standardError MATCHES "changed header reached consumer")
+		message(FATAL_ERROR "Clang ${suffix} hid a header edit: ${standardOutput}${standardError}")
+	endif()
+	message(STATUS "compiler-cache-check: Clang ${suffix} PCH mtime hits and header edits verified")
+endfunction()
+
+find_program(clangCpp NAMES clang++-21 clang++-20 clang++-19 clang++)
+find_program(clangC NAMES clang-21 clang-20 clang-19 clang)
+if(clangCpp)
+	check_clang_pch("${clangCpp}" c++20 hpp c++-header static_assert)
+else()
+	message(STATUS "compiler-cache-check: Clang C++ fixture skipped (clang++ unavailable)")
+endif()
+if(clangC)
+	check_clang_pch("${clangC}" c17 h c-header _Static_assert)
+else()
+	message(STATUS "compiler-cache-check: Clang C fixture skipped (clang unavailable)")
+endif()
+
+if(NOT CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+	message(STATUS "compiler-cache-check: GCC/Linux fixture skipped on this platform")
+	return()
+endif()
+find_program(compiler NAMES g++)
+if(NOT compiler)
+	message(STATUS "compiler-cache-check: GCC fixture skipped (g++ unavailable)")
+	return()
 endif()
 
 set(ENV{CCACHE_DIR} "${testRoot}/cache")

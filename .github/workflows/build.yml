@@ -335,6 +335,10 @@ jobs:
           ccache --set-config compiler_check=content
           ccache --zero-stats
 
+      - name: Check compiler cache PCH behavior
+        if: runner.os != 'Windows'
+        run: cmake -DMONO_TEST_ROOT="$GITHUB_WORKSPACE/.cache/build/${{ matrix.preset }}" -P mono.build/tests/CompilerCache.cmake
+
       # ccache covers C/C++; Cargo owns AccessKit's Rust dependency artifacts.
       # Exact keys avoid retaining another large snapshot for every workflow run.
       - name: Identify AccessKit Cargo cache
