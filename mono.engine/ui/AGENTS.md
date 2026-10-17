@@ -73,10 +73,12 @@ ImGui until `gui` can draw a property grid, because an editor half on each is
 two widget sets and the rule against two ways to do one job applies hardest to
 the thing you look at all day.
 
-**The one thing to share is the glyph atlas.** Four faces are vendored here and
-`gui`'s text pass needs the same four files; a second rasteriser over them would
-be two answers to what a glyph looks like. Whichever module ends up owning the
-atlas, only one does.
+**The one thing to share is the font package and shaped result.** `gui` owns the
+validated font bytes and canonical headless shaping. This module loads the same
+role-mapped files into Dear ImGui and reserves one fixed custom atlas region
+before the first frame for rasterized shaped glyphs. Painting copies coverage
+into that region through ImGui texture updates, so it never repacks the atlas
+while earlier chrome vertices are recording.
 
 ## Fonts are asked for by role
 

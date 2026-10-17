@@ -546,6 +546,31 @@ namespace engine::ecs {
 			RemoveResourceRaw(Components::Of<T>());
 		}
 
+		// The type-erased resource boundary used by serializers that resolve a
+		// stable component name at runtime.
+		//
+		// @param id Registered component type id of the resource.
+		// @return A pointer to the stored value, or `nullptr` when unset.
+		const void *ResourceById(ComponentId id) const {
+			return GetResourceRaw(id);
+		}
+		// Copies a registered resource value into this world for type-erased
+		// serializers and replication code.
+		//
+		// @param id Registered component type id of the resource.
+		// @param value Pointer to a value matching the registered component type.
+		void SetResourceById(ComponentId id, const void *value) {
+			RequireOwningThread("SetResourceById");
+			SetResourceRaw(id, value);
+		}
+		// Removes the resource identified by its registered component type id.
+		//
+		// @param id Registered component type id of the resource.
+		void RemoveResourceById(ComponentId id) {
+			RequireOwningThread("RemoveResourceById");
+			RemoveResourceRaw(id);
+		}
+
 		// --- time ----------------------------------------------------------
 		//
 		// The clock is created as a resource and has dedicated read/write methods.
@@ -1680,6 +1705,26 @@ namespace engine::ecs {
 			return ComponentChangeVersionRaw(Components::Of<T>());
 		}
 
+		// The monotonic membership epoch for one observed component.
+		// It advances when an entity gains or loses `T`, including destruction.
+		// Existing-value writes do not advance it. Zero means the component is not observed.
+		//
+		// @return A counter that increases on membership changes.
+		template <class T> uint64_t ComponentMembershipVersion() const {
+			return ComponentMembershipVersionRaw(Components::Of<T>());
+		}
+
+		// Runtime component-name consumers can observe the same narrow epoch
+		// without naming a higher-layer component type in their public headers.
+		void Observe(ComponentId id) {
+			RequireOwningThread("Observe");
+			ObserveRaw(id);
+		}
+		// Returns the current mutation version for one component type.
+		uint64_t ComponentChangeVersion(ComponentId id) const {
+			return ComponentChangeVersionRaw(id);
+		}
+
 		// Reports whether one entity's `T` was written since the last
 		// ClearChanges.
 		//
@@ -2393,6 +2438,7 @@ namespace engine::ecs {
 		void ObserveRaw(ComponentId id);
 		bool ObservedRaw(ComponentId id) const;
 		uint64_t ComponentChangeVersionRaw(ComponentId id) const;
+		uint64_t ComponentMembershipVersionRaw(ComponentId id) const;
 		Connection Listen(ComponentId id, std::function<void(Store &, Entity, const void *)> body);
 		bool ChangedRaw(Entity entity, ComponentId id) const;
 		void VisitChanged(ComponentId subject, const std::function<void(Entity, void *)> &body);

@@ -17,8 +17,10 @@
 
 #include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Animation.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Input.hpp>
@@ -26,8 +28,11 @@
 #include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
+#include <engine/gui/VirtualCollection.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/parallel/Jobs.hpp>
+#include <engine/physics/Pipeline.hpp>
+#include <engine/physics/Storm.hpp>
 #include <engine/replication/Connector.hpp>
 #include <engine/replication/Defaults.hpp>
 #include <engine/replication/Listener.hpp>
@@ -43,6 +48,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <client/Replicated.hpp>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -101,6 +107,7 @@ namespace {
 			engine::scene::EnsureClassTree();
 			engine::scene::RegisterSceneComponents();
 			engine::scene::RegisterSceneClasses();
+			engine::physics::RegisterPhysicsComponents();
 			(void)engine::gui::RegisterGuiClasses();
 			(void)engine::script::ScriptClass();
 
@@ -136,7 +143,7 @@ namespace {
 			Server = std::make_unique<Listener>(*Transports[0], streaming);
 			for (const engine::replication::ReplicatedComponent &component :
 				 engine::replication::DefaultReplicatedComponents()) {
-				Server->Authority().Replicate(Name(component.Name), component.Detection);
+				Server->Authority().Replicate(Name(component.Name), component.Detection, component.Resource);
 				if (!component.Suppressor.empty()) {
 					Server->Authority().SuppressWhenTagged(Name(component.Name), Name(component.Suppressor));
 				}
@@ -156,26 +163,38 @@ namespace {
 		Link(const Link &) = delete;
 		Link &operator=(const Link &) = delete;
 
-		// One tick of each side, in the order two programs run them.
-		void Tick() {
+		void Publish(const std::function<void()> &afterClear = {}) {
 			Now += FRAME_SECONDS;
 			Beat++;
 
 			// Cleared at the head, exactly as `world::World::Tick` does it: the
 			// bits are the delta's source and `Publish` reads them at the end.
 			World.ClearChanges();
+			if (afterClear) {
+				afterClear();
+			}
 			World.SetFrame(FRAME_SECONDS, 0.0f);
 			WorldScripts->Heartbeat(FRAME_SECONDS);
 
 			Server->Poll(Now);
 			Server->Publish(World, Beat, Now);
 			Server->Advance(Now);
+		}
 
+		void Drain() {
 			Client->Poll(Replica, Now);
+			client::ForgetReplicatedRows(Replica, Client->Forgotten());
+			Client->ClearForgotten();
 			Replica.SetFrame(FRAME_SECONDS, 0.0f);
 			ReplicaSystems.RunPhases(Replica, Phase::PreSimulation, Phase::Simulation);
 			Replica.FlushSignals();
 			Client->Advance(Now);
+		}
+
+		// One tick of each side, in the order two programs run them.
+		void Tick(const std::function<void()> &afterClear = {}) {
+			Publish(afterClear);
+			Drain();
 		}
 
 		// Runs until the world has arrived, then names the viewer.
@@ -254,6 +273,64 @@ namespace {
 		return replica.FindFirstChild(parent, name);
 	}
 
+	engine::gui::AnimationPlayback FullAnimationPlayback() {
+		using namespace engine::gui;
+
+		AnimationPlayback playback;
+		playback.Playing = true;
+		playback.Clip.Tween = engine::core::TweenInfo(
+			2.0f, engine::core::EasingStyle::Sine, engine::core::EasingDirection::InOut, 3, true, 0.25f
+		);
+
+		for (const PresentationProperty property : {
+				 PresentationProperty::BackgroundColor,
+				 PresentationProperty::BackgroundTransparency,
+				 PresentationProperty::ImageColor,
+				 PresentationProperty::ImageTransparency,
+				 PresentationProperty::TextColor,
+				 PresentationProperty::TextTransparency,
+				 PresentationProperty::Rotation,
+				 PresentationProperty::Position,
+				 PresentationProperty::Size,
+			 }) {
+			PresentationTrack track;
+			track.Property = property;
+			for (size_t index = 0; index < PresentationTrack::MAXIMUM_KEYS; index++) {
+				const float time =
+					static_cast<float>(index) / static_cast<float>(PresentationTrack::MAXIMUM_KEYS - 1);
+				PresentationValue value;
+				switch (property) {
+				case PresentationProperty::BackgroundColor:
+				case PresentationProperty::ImageColor:
+				case PresentationProperty::TextColor:
+					value = PresentationValue::FromColor(engine::core::Color3{time, 1.0f - time, 0.5f});
+					break;
+				case PresentationProperty::Position:
+				case PresentationProperty::Size:
+					value = PresentationValue::FromUDim2(engine::core::UDim2{time, time, 1.0f - time, -time});
+					break;
+				default:
+					value = PresentationValue::FromNumber(time * 360.0f);
+					break;
+				}
+				REQUIRE(track.Add(PresentationKey{time, value}));
+			}
+			REQUIRE(playback.Clip.AddTrack(track));
+		}
+
+		for (size_t index = 0; index < UIAnimation::MAXIMUM_MARKERS; index++) {
+			std::string name(UIAnimation::MAXIMUM_MARKER_NAME_BYTES - 1, 'm');
+			name.push_back(static_cast<char>('a' + index));
+			REQUIRE(playback.Clip.AddMarker(
+				AnimationMarker{
+					Name(name),
+					static_cast<float>(index) / static_cast<float>(UIAnimation::MAXIMUM_MARKERS - 1),
+				}
+			));
+		}
+		return playback;
+	}
+
 	// What the default table says about one name, or nothing when it says
 	// nothing.
 	const engine::replication::ReplicatedComponent *Row(std::string_view name) {
@@ -275,6 +352,7 @@ namespace {
 	void RegisterEverything() {
 		engine::scene::EnsureClassTree();
 		engine::scene::RegisterSceneComponents();
+		engine::physics::RegisterPhysicsComponents();
 		(void)engine::gui::RegisterGuiClasses();
 		(void)engine::script::ScriptClass();
 	}
@@ -304,9 +382,9 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 
 		INFO("component: " << name);
 
-		// Four interface rows are what the machine looking at the world works
-		// out for itself, and the world's script table is a resource that could
-		// only ever cross whole. Everything else is authored and crosses.
+		// Viewer-local interface rows are what the machine looking at the world
+		// works out for itself, and the world's script table is a resource that
+		// could only ever cross whole. Everything else is authored and crosses.
 		//
 		// `gui.ScrollState` joined the four at v0.18 and is `gui.Resolved`'s case
 		// for one class: the pixel canvas, the visible window and the thumb
@@ -347,21 +425,30 @@ TEST_CASE("every interface and script component is classified", "[client][replic
 		// row. A capture consumer asks its own world for them, so sending the
 		// authority's declared observations to every gameplay replica is wrong.
 		// Portal contact requests and native input queues belong to the authority's tick exchange.
-		const bool excluded = name == "gui.Canvas" || name == "gui.Resolved" || name == "gui.SpatialCanvas" ||
-							  name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
-							  name == "gui.PageMotion" || name == "gui.ScrollMotion" ||
-							  name == "gui.SettingsMenuExtensions" || name == "script.SourceCache" ||
-							  name == "script.ScriptClock" || name == "script.DataCaptureDriver" ||
-							  name == "script.EventNarratives" || name == "script.TeleportRequestHandler" ||
-							  name == "script.TeleportRequestOutbox" || name == "script.PortalTransfers" ||
-							  name == "script.PortalContactRequests" || name == "script.PortalPlayerInput";
+		// Portal observation rings are process-local evidence, as event narratives are.
+		// Text composition, binding results, virtual focus and anchors, presentation
+		// samples, and resolved styles are derived from one viewer's input, source
+		// revisions, timeline, or display. Their authored inputs cross separately.
+		const bool excluded =
+			name == "gui.Canvas" || name == "gui.CanvasTransform" || name == "gui.Resolved" ||
+			name == "gui.SpatialCanvas" || name == "gui.GuiServiceState" || name == "gui.ScrollState" ||
+			name == "gui.PageMotion" || name == "gui.ScrollMotion" || name == "gui.SettingsMenuExtensions" ||
+			name == "gui.TextCompositionState" || name == "gui.BindingOutput" ||
+			name == "gui.BindingDependency" || name == "gui.VirtualFocusState" ||
+			name == "gui.VirtualAnchorState" || name == "gui.PresentationState" ||
+			name == "gui.ResolvedStyle" || name == "script.SourceCache" || name == "script.ScriptClock" ||
+			name == "script.DataCaptureDriver" || name == "script.EventNarratives" ||
+			name == "script.TeleportRequestHandler" || name == "script.TeleportRequestOutbox" ||
+			name == "script.PortalTransfers" || name == "script.PortalContactRequests" ||
+			name == "script.PortalPlayerInput" || name == "script.PortalObservationLog";
 
 		CHECK((excluded == (Row(name) == nullptr)));
 	}
 }
 
 TEST_CASE(
-	"the three a hash cannot cover are observed and the rest are signed", "[client][replication][defaults]"
+	"the four variable-storage components are observed and the rest are signed",
+	"[client][replication][defaults]"
 ) {
 	RegisterEverything();
 
@@ -372,10 +459,12 @@ TEST_CASE(
 	// nothing.
 	REQUIRE(Row("gui.Label") != nullptr);
 	REQUIRE(Row("gui.Entry") != nullptr);
+	REQUIRE(Row("gui.VirtualCollection") != nullptr);
 	REQUIRE(Row("script.Program") != nullptr);
 
 	CHECK(Row("gui.Label")->Detection == engine::replication::ChangeDetection::Observed);
 	CHECK(Row("gui.Entry")->Detection == engine::replication::ChangeDetection::Observed);
+	CHECK(Row("gui.VirtualCollection")->Detection == engine::replication::ChangeDetection::Observed);
 	CHECK(Row("script.Program")->Detection == engine::replication::ChangeDetection::Observed);
 
 	// And the ordinary interface row is signed, because a `UDim2` is bytes and a
@@ -537,6 +626,96 @@ TEST_CASE("a ScreenGui authored on the authority arrives drawable", "[client][re
 	CHECK(drawn);
 }
 
+TEST_CASE(
+	"an authored UIAnimation change reaches a replica through the bounded oversized row path",
+	"[client][replication][gui]"
+) {
+	Link link;
+	const Entity playerGui = link.ContainerOf(engine::gui::PLAYER_GUI);
+	const Entity screen = link.World.CreateInstance(engine::gui::GuiClass("ScreenGui"), std::string("Hud"));
+	REQUIRE(link.World.SetParent(screen, playerGui));
+	const Entity modifier =
+		link.World.CreateInstance(engine::gui::GuiClass("UIAnimation"), std::string("Open"));
+	REQUIRE(link.World.SetParent(modifier, screen));
+
+	REQUIRE(link.Join());
+	link.Settle();
+
+	const engine::gui::AnimationPlayback authored = FullAnimationPlayback();
+	const engine::ecs::TypeDescriptor &descriptor =
+		engine::ecs::Components::Describe(engine::ecs::Components::Of<engine::gui::AnimationPlayback>());
+	CHECK(descriptor.MaximumSerialisedBytes > 1024);
+	engine::core::ByteWriter bytes;
+	descriptor.Write(bytes, &authored, 1);
+	REQUIRE(bytes.Size() > 1024);
+
+	// AnimationPlayback uses signature detection. The write occurs after the
+	// preceding publish, so the next tick sees the authored bytes even though
+	// the ordinary dirty bits are cleared at its head.
+	link.World.Set(modifier, authored);
+	link.Settle();
+
+	const engine::gui::AnimationPlayback *arrived =
+		link.Replica.Get<engine::gui::AnimationPlayback>(modifier);
+	REQUIRE(arrived != nullptr);
+	CHECK(arrived->Playing);
+	CHECK(arrived->Clip.Tween == authored.Clip.Tween);
+	CHECK(arrived->Clip.Tracks().size() == authored.Clip.Tracks().size());
+	CHECK(arrived->Clip.Tracks().back().Keys().size() == engine::gui::PresentationTrack::MAXIMUM_KEYS);
+	CHECK(arrived->Clip.Markers().size() == engine::gui::UIAnimation::MAXIMUM_MARKERS);
+	CHECK(arrived->Clip.Markers().back().Name == authored.Clip.Markers().back().Name);
+}
+
+TEST_CASE(
+	"an observed virtual collection page reaches a replica through the bounded oversized row path",
+	"[client][replication][gui]"
+) {
+	Link link;
+	const Entity playerGui = link.ContainerOf(engine::gui::PLAYER_GUI);
+	const Entity screen = link.World.CreateInstance(engine::gui::GuiClass("ScreenGui"), std::string("Hud"));
+	REQUIRE(link.World.SetParent(screen, playerGui));
+	const Entity collection =
+		link.World.CreateInstance(engine::gui::GuiClass("UIVirtualCollection"), std::string("Rows"));
+	REQUIRE(link.World.SetParent(collection, screen));
+
+	REQUIRE(link.Join());
+	link.Settle();
+
+	engine::gui::VirtualCollection authored;
+	authored.ItemCount = 32;
+	authored.Page.Records.reserve(authored.ItemCount);
+	for (uint32_t index = 0; index < authored.ItemCount; index++) {
+		engine::gui::VirtualRecord record;
+		record.Key = "row" + std::to_string(index);
+		engine::gui::VirtualField field;
+		field.Name = "body";
+		field.Value.Type = engine::ecs::PropertyType::String;
+		field.Value.String = std::string(engine::gui::VirtualCollection::MAXIMUM_TEXT_BYTES, 'v');
+		record.Fields.push_back(std::move(field));
+		authored.Page.Records.push_back(std::move(record));
+	}
+	REQUIRE(engine::gui::ValidateVirtualCollection(authored));
+
+	engine::core::ByteWriter bytes;
+	REQUIRE(engine::gui::WriteVirtualCollection(bytes, authored));
+	REQUIRE(bytes.Size() > 1024);
+
+	// VirtualCollection is non-trivial and therefore observed. The write has to
+	// occur after ClearChanges, which is the same point a source provider runs.
+	link.Tick([&] { link.World.Set(collection, authored); });
+	link.Settle();
+
+	const engine::gui::VirtualCollection *arrived =
+		link.Replica.Get<engine::gui::VirtualCollection>(collection);
+	REQUIRE(arrived != nullptr);
+	CHECK(arrived->Page.Records.size() == authored.Page.Records.size());
+	CHECK(arrived->Page.Records.back().Key == authored.Page.Records.back().Key);
+	CHECK(
+		arrived->Page.Records.back().Fields.front().Value.String ==
+		authored.Page.Records.back().Fields.front().Value.String
+	);
+}
+
 TEST_CASE("the client's own keyboard focus does not cross", "[client][replication][gui]") {
 	Link link;
 
@@ -642,6 +821,98 @@ TEST_CASE("typing into a replicated TextBox survives what arrives next", "[clien
 	const auto *stillTyped = link.Replica.Get<engine::gui::Label>(arrived);
 	REQUIRE(stillTyped != nullptr);
 	CHECK(stillTyped->Text == "hello");
+}
+
+TEST_CASE(
+	"a forgotten visibility row leaves and returns without removing the predicted viewer",
+	"[client][replication]"
+) {
+	Link link(false);
+	const Entity playerGui = link.ContainerOf(engine::gui::PLAYER_GUI);
+	const Entity screen =
+		link.World.CreateInstance(engine::gui::GuiClass("ScreenGui"), std::string("Visibility"));
+	REQUIRE(link.World.SetParent(screen, playerGui));
+	const Entity watched =
+		link.World.CreateInstance(engine::gui::GuiClass("TextLabel"), std::string("Watched"));
+	REQUIRE(link.World.SetParent(watched, screen));
+	engine::gui::Label label;
+	label.Text = "before visibility changed";
+	link.World.Set(watched, label);
+
+	REQUIRE(link.Join());
+	link.Settle();
+	REQUIRE(link.Replica.Alive(watched));
+
+	const Entity viewer = client::AimReplicaViewer(link.Replica, {}, {});
+	REQUIRE(viewer != NULL_ENTITY);
+	REQUIRE(Store::IsPredicted(viewer));
+
+	bool visible = true;
+	link.Server->Authority().SetInterest([watched, &visible](
+											 engine::replication::ClientId, Entity entity, const Store &
+										 ) { return entity != watched || visible; });
+
+	visible = false;
+	link.Settle();
+
+	CHECK(link.World.Alive(watched));
+	CHECK_FALSE(link.Replica.Alive(watched));
+	CHECK(link.Replica.Alive(viewer));
+	CHECK(link.Client->Forgotten().empty());
+
+	visible = true;
+	link.Settle();
+	REQUIRE(link.Replica.Alive(watched));
+
+	// The client has not drained the first structure when the server makes the
+	// row visible again. Both structures arrive in the next connector poll.
+	visible = false;
+	link.World.Remove<engine::gui::Label>(watched);
+	link.Publish();
+	visible = true;
+	link.Publish();
+	link.Drain();
+
+	CHECK(link.World.Alive(watched));
+	CHECK(link.Replica.Alive(watched));
+	CHECK(link.Replica.Get<engine::gui::Label>(watched) == nullptr);
+	CHECK(link.Replica.Alive(viewer));
+	CHECK(link.Client->Forgotten().empty());
+}
+
+TEST_CASE("a server storm reaches replica scripts as authoritative state", "[client][replication][storm]") {
+	Link link;
+	engine::physics::Storm storm;
+	storm.State.Position = {37.0f, 4.0f, -12.0f};
+	storm.State.ElapsedSeconds = 9.5f;
+	storm.State.Parameters.Energy = 0.8f;
+	storm.State.LifecycleEnabled = true;
+	engine::physics::SetStorm(link.World, storm);
+
+	REQUIRE(link.Join());
+	link.Settle();
+
+	const engine::physics::Storm *arrived = engine::physics::StormOf(link.Replica);
+	REQUIRE(arrived != nullptr);
+	CHECK(arrived->State.Position.FuzzyEq(storm.State.Position));
+	CHECK(arrived->State.ElapsedSeconds == storm.State.ElapsedSeconds);
+	CHECK(arrived->State.Parameters.Energy == storm.State.Parameters.Energy);
+
+	storm.State.Position.X = 51.0f;
+	storm.State.ElapsedSeconds = 10.0f;
+	engine::physics::SetStorm(link.World, storm);
+	link.Settle();
+
+	arrived = engine::physics::StormOf(link.Replica);
+	REQUIRE(arrived != nullptr);
+	CHECK(arrived->State.Position.FuzzyEq(storm.State.Position));
+	CHECK(arrived->State.ElapsedSeconds == storm.State.ElapsedSeconds);
+	REQUIRE(link.ReplicaScripts != nullptr);
+	CHECK(link.ReplicaScripts->Run(R"(
+		local state = Storm.Snapshot()
+		assert(state.Position == Vector3.new(51, 4, -12))
+		assert(state.ElapsedSeconds == 10 and math.abs(state.Parameters.Energy - 0.8) < 1e-5)
+	)"));
 }
 
 TEST_CASE("an unchanged script costs nothing per tick", "[client][replication][scripting]") {

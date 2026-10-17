@@ -17,8 +17,9 @@ studio keeps Dear ImGui until this tree can draw a property grid, because an
 editor half on each is two widget sets and the rule against two ways to do one
 job applies hardest to the thing you look at all day.
 
-**The one thing they share is the glyph atlas**, and the edge that carries it
-runs `ui` → `gui` and never back. `ui::PaintGui` takes a `gui::DrawList` and an
+**They share validated font bytes and canonical shaped positions.** The client
+and Studio painters each own raster storage for their backend. The edge runs
+`ui` → `gui` and never back. `ui::PaintGui` takes a `gui::DrawList` and an
 `ImDrawList` and nothing else - no store, no class table, no tree. A reviewer
 should refuse any include of an `engine/ui/` header from this module, and the
 tier check will not catch it, because a `shared` module including a `client`
@@ -38,9 +39,12 @@ that reason, and resolving it to a texture is the backend's job.
 
 ## What it deliberately does not depend on, and cannot be made to
 
-`core` and `ecs` are the whole dependency list. Both refusals below are
-`shared`-to-`shared`, so **the build cannot catch either** - by rule 6 that
-makes them conventions, and this is where they are written down.
+`core` and `ecs` are the engine-module dependencies. The headless text shaper
+also links pinned FreeType, HarfBuzz, utf8proc, SheenBidi, and libunibreak
+vendor targets to consume verified font bytes without a graphics backend.
+The two module refusals below are `shared`-to-`shared`, so **the build cannot
+catch either** - by rule 6 that makes them conventions, and this is where they
+are written down.
 
 - **`scene`.** It looks necessary twice and is not. `SurfaceGui::Face` wants
   `NormalId`, which is a six-member enum registered by name - `gui::Face`
@@ -151,43 +155,45 @@ there is no base to put it on - `TextButton` derives from `GuiButton`,
 "TextThing" base would be a class no script has heard of appearing in `:IsA`
 and in the bindings manifest, which is the worse trade.
 
-## Layout is one pass and must stay one
+## Layout is top-down with explicit measure and place phases
 
 A `UDim2` needs a parent rectangle, so resolving one is inherently top-down;
 that is the single place the tree's shape is unavoidable, and everything
-downstream wants a flat list.
+downstream wants a flat list. `Measure` computes a subtree's extent without
+writing derived layout state. `Place` then writes resolved geometry and paint
+order from those measured extents.
 
-Two things keep it to one pass and both are easy to break:
+Two rules keep the phases deterministic and are easy to break:
 
 - **`Element::Rotation` does not affect layout.** A rotated child whose
   bounding box fed back into a list layout would need the layout to run twice
   to settle. Roblox does the same.
-- **`Measure` is separate from `Place`** only because a list or a grid has to
-  know how big a child is before deciding where it goes. Do not let `Measure`
-  grow side effects; it is called speculatively.
+- **`Measure` is separate from `Place`** because a list or a grid has to know
+  how big a child is before deciding where it goes. Do not let `Measure` grow
+  side effects; it is called speculatively.
 
-`AutomaticSize` is the one property that genuinely needs a second phase, which
-is why it is declared and not implemented. `D00021` carries the argument.
+`AutomaticSize` participates in `Measure` by growing the requested axes from
+the visible text or child extents. Its recursion is bounded, so it does not
+introduce an unbounded second layout pass.
 
-## Text is measured with a constant, and there is exactly one answer
+## Text is shaped headlessly, and there is exactly one answer
 
-`AVERAGE_ADVANCE` in `Layout.hpp` is a fraction of an em, and `TextScaled`
-fits against it. The exact answer needs a glyph atlas, which is `client` and
-cannot be here.
+`AVERAGE_ADVANCE` in `Layout.hpp` remains the bounded fallback for callers
+without a font package. A validated `FontPackage` uses the pinned headless
+FreeType and HarfBuzz stack to shape visible text, including bidi, wrapping,
+ellipsis, line metrics and caret boundaries. `TextScaled` and
+`Resolved::TextBounds` use those same glyph advances.
 
-**A backend must draw at `Resolved::TextSize` rather than measuring again.**
-Not because the estimate is good - because a backend with real metrics would
-disagree with the hit test and with what a headless test asserts, and two
-answers is the failure this module is arranged to avoid everywhere else.
+**A backend consumes the compiled glyph positions and draws at
+`Resolved::TextSize`.** It does not measure or reshape the string again. This
+keeps painting, hit testing and headless layout on one answer.
 
-## A backend lays text out, and that is why markup is spans
+## Rich text remains source ranges
 
 `RichText` parses to a plain string plus a list of **byte ranges** over it -
-`DrawSpan` - and never to positioned runs. The reason is the section on
-`AVERAGE_ADVANCE` above: only a backend can measure a glyph, so a compile that
-placed the second word would place it with an estimate the renderer disagrees
-with, and the emphasis would visibly drift as a panel resized. One string, one
-layout pass, styles looked up per byte.
+`DrawSpan` - and never to positioned runs. The canonical shaper applies those
+ranges while shaping the whole string, so a backend receives one shared set of
+glyph positions rather than independently positioned styled fragments.
 
 **A malformed string is shown literally, tags and all.** That is Roblox's
 behaviour and the useful one: an author who typed `a < b` sees `a < b`, and one

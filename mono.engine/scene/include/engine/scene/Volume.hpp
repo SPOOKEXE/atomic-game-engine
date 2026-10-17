@@ -9,6 +9,7 @@
 //
 // @tier L7 · shared
 
+#include <engine/core/types/AABB.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Color3.hpp>
 #include <engine/core/types/Vector3.hpp>
@@ -98,4 +99,14 @@ namespace engine::scene {
 	// cap makes the screen-space cost explicit and keeps the presentation copy
 	// bounded regardless of authored hierarchy size.
 	size_t ResolveVolumes(const ecs::Store &store, std::span<VolumeState> out);
+
+	// Copies the enabled volumes nearest to visible receivers into `out`, using
+	// `eye` when there are no receivers. This keeps authored volume count
+	// independent from the fixed fragment-work budget.
+	size_t ResolveVolumes(
+		const ecs::Store &store,
+		const core::Vector3 &eye,
+		std::span<const core::AABB> receivers,
+		std::span<VolumeState> out
+	);
 }

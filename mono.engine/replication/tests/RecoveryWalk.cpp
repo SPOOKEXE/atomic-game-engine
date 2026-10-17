@@ -9,9 +9,11 @@
 // See `AuthoritySettings::RecoveryRowsPerTick`. At two hundred clients the walk
 // was serialising two thousand rows a component to fill a link that took forty.
 
+#include <engine/core/Bytes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/replication/Authority.hpp>
+#include <engine/replication/Protocol.hpp>
 #include <engine/replication/Replica.hpp>
 #include <engine/testing/Suite.hpp>
 
@@ -37,6 +39,10 @@ namespace recovery_walk_test {
 		float X = 0.0f;
 	};
 
+	struct Retained {
+		float X = 0.0f;
+	};
+
 	void RegisterTypes() {
 		static bool once = [] {
 			engine::ecs::Components::Register<Tally>("recovery_walk_test.Tally");
@@ -58,7 +64,7 @@ namespace recovery_walk_test {
 			Handle = Authority_.Admit();
 		}
 
-		void Tick() {
+		void Tick(bool acknowledge = true) {
 			Now++;
 			Authority_.Publish(Server, Now);
 			for (const std::vector<std::byte> &message : Authority_.Outgoing(Handle)) {
@@ -66,9 +72,11 @@ namespace recovery_walk_test {
 			}
 			Server.ClearChanges();
 
-			const std::vector<std::byte> ack = Replica_.Acknowledge();
-			if (!ack.empty()) {
-				Authority_.Receive(Handle, ack);
+			if (acknowledge) {
+				const std::vector<std::byte> ack = Replica_.Acknowledge();
+				if (!ack.empty()) {
+					Authority_.Receive(Handle, ack);
+				}
 			}
 		}
 
@@ -196,4 +204,66 @@ TEST_CASE("a bound reaches the world sooner than one tick per row", "[replicatio
 
 	REQUIRE(pair.Agreeing(made, 3.0f) == made.size());
 	CHECK(ticks < 40);
+}
+
+TEST_CASE("recovery retires removed components and destroyed entities", "[replication][recovery]") {
+	static const bool registered = [] {
+		engine::ecs::Components::Register<Retained>("recovery_walk_test.Retained");
+		return true;
+	}();
+	(void)registered;
+
+	Pair pair(1);
+	pair.Authority_.Replicate(Name("recovery_walk_test.Retained"));
+	const std::vector<Entity> made = pair.Fill(3);
+	for (const Entity entity : made) {
+		pair.Server.Set(entity, Retained{5.0f});
+	}
+	REQUIRE(pair.Join());
+
+	// Withhold acknowledgements so removing a component leaves a real recovery entry.
+	for (const Entity entity : made) {
+		pair.Server.Set(entity, Tally{7.0f});
+	}
+	pair.Tick(false);
+	const Entity removed = made[0];
+	const Entity destroyed = made[1];
+	const Entity surviving = made[2];
+	pair.Server.Remove<Tally>(removed);
+	pair.Server.Destroy(destroyed);
+	const Entity replacement = pair.Server.Create();
+	REQUIRE(replacement != destroyed);
+	pair.Server.Set(replacement, Tally{11.0f});
+	pair.Server.Set(replacement, Retained{13.0f});
+	pair.Server.Set(surviving, Tally{17.0f});
+
+	const auto tally = engine::ecs::Components::Of<Tally>();
+	CHECK(pair.Server.Alive(removed));
+	CHECK(pair.Server.GetComponent(removed, tally) == nullptr);
+	CHECK(pair.Server.GetComponent(destroyed, tally) == nullptr);
+	REQUIRE(pair.Server.GetComponent(replacement, tally) != nullptr);
+
+	for (int tick = 0; tick < 12; tick++) {
+		pair.Tick(false);
+		for (const auto &bytes : pair.Authority_.Outgoing(pair.Handle)) {
+			engine::core::ByteReader reader(bytes);
+			engine::replication::Message message;
+			REQUIRE(engine::replication::ReadMessage(reader, message));
+			if (message.Kind != engine::replication::MessageKind::Delta) continue;
+			for (const auto &component : message.Delta.Components) {
+				for (const Entity entity : component.Entities) {
+					CHECK(entity != destroyed);
+					if (component.Component == Name("recovery_walk_test.Tally")) CHECK(entity != removed);
+				}
+			}
+		}
+	}
+
+	CHECK_FALSE(pair.Client.Alive(destroyed));
+	REQUIRE(pair.Client.Get<Retained>(removed) != nullptr);
+	CHECK(pair.Client.Get<Retained>(removed)->X == 5.0f);
+	REQUIRE(pair.Client.Get<Tally>(replacement) != nullptr);
+	CHECK(pair.Client.Get<Tally>(replacement)->X == 11.0f);
+	REQUIRE(pair.Client.Get<Tally>(surviving) != nullptr);
+	CHECK(pair.Client.Get<Tally>(surviving)->X == 17.0f);
 }

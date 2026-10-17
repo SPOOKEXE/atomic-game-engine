@@ -31,6 +31,14 @@ namespace engine::physics {
 	// The persistent world-space torque in newton metres, or zero for a non-body.
 	core::Vector3 AppliedTorque(const ecs::Store &store, ecs::Entity body);
 
+	// Whether a simulated body is currently asleep in the prepared physics world.
+	bool Sleeping(const ecs::Store &store, ecs::Entity body);
+
+	// Restores an admitted body's sleeping state. Sleeping removes Motion so the
+	// normal dynamic and broad-phase queries skip it; waking restores a zero
+	// motion row and clears its rest timer.
+	bool SetSleeping(ecs::Store &store, ecs::Entity body, bool sleeping);
+
 	// Sets a simulated body's linear velocity and wakes it. Static bodies and
 	// non-finite values are refused.
 	bool SetLinearVelocity(ecs::Store &store, ecs::Entity body, const core::Vector3 &velocity);

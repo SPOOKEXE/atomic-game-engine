@@ -15,6 +15,7 @@
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Vocabulary.hpp>
@@ -132,6 +133,7 @@ namespace {
 	struct Fixture {
 		Fixture() {
 			engine::scene::EnsureClassTree();
+			engine::gui::RegisterGuiClasses();
 		}
 	};
 
@@ -461,6 +463,10 @@ TEST_CASE("insertable classes exclude services and abstract bases", "[studio][co
 	CHECK(std::find(names.begin(), names.end(), "ValueBase") == names.end());
 	CHECK(std::find(names.begin(), names.end(), "Constraint") == names.end());
 	CHECK(std::find(names.begin(), names.end(), "JointInstance") == names.end());
+	CHECK(std::find(names.begin(), names.end(), "GuiBase") == names.end());
+	CHECK(std::find(names.begin(), names.end(), "GuiObject") == names.end());
+	CHECK(std::find(names.begin(), names.end(), "GuiService") == names.end());
+	CHECK(std::find(names.begin(), names.end(), "Frame") != names.end());
 }
 
 TEST_CASE("the list is ranked and stable", "[studio][complete]") {

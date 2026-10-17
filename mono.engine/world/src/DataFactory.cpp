@@ -114,6 +114,24 @@ namespace engine::world {
 		return WorldOperation(copy);
 	}
 
+	DataFactoryReply DataFactorySession::AdoptWorld(std::string_view instanceId) {
+		const WorldId world = Resolve(instanceId);
+		if (!world.IsValid() || Worlds.Count() != 1 || instanceId.empty() || instanceId.size() > 128)
+			return Reply(
+				world, DataFactoryStatus::ValidationFailed, "adoption requires one named local world"
+			);
+		if (!OwnedWorlds.empty() || !Forks.empty() || Version != 0)
+			return Reply(world, DataFactoryStatus::VersionConflict, "session already owns a world");
+		const double rate = Worlds.SettingsOf(world).TickRate;
+		if (!std::isfinite(rate) || rate <= 0.0 || rate > 1000.0)
+			return Reply(
+				world, DataFactoryStatus::ValidationFailed, "world tick rate is outside factory bounds"
+			);
+		OwnedWorlds.emplace(std::string(instanceId), OwnedWorld{0, rate});
+		++Version;
+		return Reply(world, DataFactoryStatus::Ok, "authored world adopted");
+	}
+
 	DataFactoryReply DataFactorySession::ResetWorld(const DataFactoryWorldRequest &request) {
 		DataFactoryWorldRequest copy = request;
 		copy.Operation = DataFactoryWorldOperation::Reset;

@@ -62,18 +62,21 @@ namespace engine::ecs {
 		// @param name  The stable name to register under.
 		// @param write Appends `count` values to a writer.
 		// @param read  Reads `count` already-constructed values back.
+		// @param maximumSerialisedBytes Maximum encoded size per component value.
 		// @return The dense id for `T`.
 		template <class T>
 		static ComponentId Register(
 			std::string_view name,
 			void (*write)(core::ByteWriter &, const void *, size_t),
-			void (*read)(core::ByteReader &, void *, size_t)
+			void (*read)(core::ByteReader &, void *, size_t),
+			uint32_t maximumSerialisedBytes = 0
 		) {
 			const core::Name key(name);
 			TypeDescriptor descriptor = DescribeType<T>(key);
 			descriptor.Write = write;
 			descriptor.Read = read;
 			descriptor.Serialisable = write != nullptr && read != nullptr;
+			descriptor.MaximumSerialisedBytes = maximumSerialisedBytes;
 
 			// The caller's writer replaces the object representation, so
 			// neither padding nor a process-local id inside `T` can reach a

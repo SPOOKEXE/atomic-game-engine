@@ -199,6 +199,8 @@ namespace {
 						.MaximumAbsoluteError = .25,
 					},
 				.PreviousCameraMotionFrame = std::nullopt,
+				.Packed = std::nullopt,
+				.Resampling = {},
 			});
 			poll.Planes.push_back({
 				.Channel = "ambient_occlusion",
@@ -236,6 +238,8 @@ namespace {
 				.AmbientOcclusion = std::nullopt,
 				.Noise = {},
 				.PreviousCameraMotionFrame = std::nullopt,
+				.Packed = std::nullopt,
+				.Resampling = {},
 			});
 			for (const char *channel : {"object_ids", "semantic_ids", "part_ids"})
 				poll.Planes.push_back({
@@ -274,6 +278,8 @@ namespace {
 					.AmbientOcclusion = std::nullopt,
 					.Noise = {},
 					.PreviousCameraMotionFrame = std::nullopt,
+					.Packed = std::nullopt,
+					.Resampling = {},
 				});
 			poll.ObjectLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 			poll.SemanticLabels = {{1, "fixture/box"}};
@@ -859,7 +865,8 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				options.CaptureNode = "lit"
 				options.Channels = {"rgb_linear_hdr", "object_ids"}
 				local queued = service:CaptureBundle("fixture/snapshot", options)
-				assert(queued.status == "queued" and queued.options.CameraId == "current_view")
+				assert(queued.status == "queued", "bundle status=" .. tostring(queued.status) .. " reason=" .. tostring(queued.reason))
+				assert(queued.options.CameraId == "current_view")
 				local invalid = service:CreateOptions()
 				invalid.CameraId = "fixture/camera"
 				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "queued")
@@ -895,6 +902,9 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				invalid = service:CreateOptions()
 				invalid.ViewSlot = 4294967296
 				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
+				invalid = service:CreateOptions()
+				invalid.LocalLightIds = { unexpected = true }
+				assert(service:CaptureBundle("fixture/snapshot", invalid).status == "invalid_data_scene_options")
 				assert(service:CaptureBundle("fixture/snapshot", options).status == "queued")
 			)");
 		} else {
@@ -907,7 +917,8 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				options.CaptureNode = "lit";
 				options.Channels = ["rgb_linear_hdr", "object_ids"];
 				const queued = service.CaptureBundle("fixture/snapshot", options);
-				if (queued.status !== "queued" || queued.options.CameraId !== "current_view") throw new Error("queue");
+				if (queued.status !== "queued") throw new Error("bundle status=" + queued.status + " reason=" + queued.reason);
+				if (queued.options.CameraId !== "current_view") throw new Error("queue options");
 				let invalid = service.CreateOptions();
 				invalid.CameraId = "fixture/camera";
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "queued") throw new Error("camera");
@@ -931,6 +942,8 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("pair");
 				invalid = service.CreateOptions(); invalid.ViewSlot = 4294967296;
 				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("view slot");
+				invalid = service.CreateOptions(); invalid.LocalLightIds = { unexpected: true };
+				if (service.CaptureBundle("fixture/snapshot", invalid).status !== "invalid_data_scene_options") throw new Error("local light map");
 				if (service.CaptureBundle("fixture/snapshot", options).status !== "queued") throw new Error("final queue");
 			)");
 		}
@@ -943,6 +956,7 @@ TEST_CASE("DataSceneService copies typed capture bundle options in both VMs", "[
 			bridge->CameraIds.end()
 		);
 		CHECK(bridge->LastRequest.Channels == std::vector<std::string>{"rgb_linear_hdr", "object_ids"});
+		CHECK(bridge->LastRequest.LocalLightIds.empty());
 		CHECK(bridge->LastRequest.IncludeSceneData);
 	}
 }

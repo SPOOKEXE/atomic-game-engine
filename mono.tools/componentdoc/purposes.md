@@ -37,13 +37,17 @@ effects.ParticleSystem | Per-world singleton particle pool: the particle slots a
 effects.RibbonBuffer | Per-world singleton holding the vertices and per-ribbon runs that this frame's beams and trails were built into, ready for the renderer.
 effects.Trail | A trail following two attachments: its authored colour, transparency, lifetime and texture, plus the ring of recorded edge points it is drawn from.
 effects.Texture | A tiled image projected onto one face of its parent BasePart, including tile size, offset, colour, transparency and draw order.
-examples.Orbit | Demo-only component that carries an entity round a fixed centre at a set radius, height, starting phase and angular speed.
-examples.Spin | Demo-only component that turns an entity at a fixed rate about its local X, Y and Z axes.
 graph.PipelineSet | Per-world singleton holding the named render pipeline documents a game file carried. A legacy load path: `game` reads it once and then removes it.
 physics.CopiedContactCache | Per-tick copied contact geometry and pre-step body poses used for portal collision correction.
+physics.CopiedDynamicContactCache | Per-world per-tick cache of copied dynamic far-side bodies, keyed by local root for the portal seam barrier.
 physics.PoppercamState | Per-world singleton holding the blocker the camera pass last faded, so the next call clears exactly that one and nothing else.
 physics.PhysicsClock | Per-world singleton physics clock: the step rate, simulated time owed but not yet spent, the running step's length, and which step of the tick it is.
 physics.PhysicsWorld | Per-world singleton holding the broadphase grids, collider proxies, contact manifolds and solver arrays that one physics step builds and walks.
+physics.Storm | Per-world authored analytical tornado field and its fixed-tick trajectory, sampled by the physics force pass when enabled.
+physics.StormLink | Per-joint wind failure rating, material strength and accumulated fatigue, read before rigid-joint connectivity is rebuilt.
+physics.StormResponse | Per-rigid-body aerodynamic area, drag and force settings that the storm pass uses to apply wind loads.
+physics.StormVegetation | Per-static-part rest pose and wind-bend settings used to flex authored vegetation in the storm field.
+physics.observation-log | Per-world bounded log of completed physics-step summaries at the post-integration, pre-solve, and completed-solver boundaries.
 replication.SnapshotBuffer | Per-world singleton on a replicated world: a ring of received poses per entity plus the render clock, sampled at a fixed delay behind the newest tick.
 script.PortalContactRequests | Per-tick portal contact requests pairing local roots with seam transforms for applying copied destination contacts.
 script.CodeSourceContainerSelector | Which language container the script actually runs, and the one part of the script trio a game may set at run time. Absent means Luau.
@@ -98,14 +102,20 @@ scene.ControllerState | Resource: this host's mapped gamepad and raw joystick st
 scene.EditableImage | Script-drawable RGBA8 pixels with dimensions, presentation packing policy and a revision the client watches for upload changes.
 scene.EditableMesh | Script-built geometry with presentation packing policy and a revision the client watches for upload changes; authored arrays remain canonical for editing and collision.
 scene.PortalBodyView | Local predicted-body presentation history that retains the crossed portal seam until the body returns or the mouth changes.
+scene.BodyIdentity | Globally unique persistent body key and lifetime generation, preserved by rename and reparent and refused when a live key collides.
+scene.BodyIdentityAuthority | Per-world authority holding the stable namespace and next sequence used to mint persistent body identities.
+scene.PortalCrossing | Portal-only state for one canonical body: its reference anchor, active seam, stable side, authority epoch and presentation revision. Pose and motion stay in their canonical components.
+scene.PortalRim | The four invisible static colliders preserving an open portal pane's physical perimeter while its aperture becomes a trigger.
 scene.EditableMeshCollision | Resource: which revision of each `EditableMesh` already has a collision shape baked for it, so a mesh a script is still editing is baked once per change and not once per tick.
 scene.Gravity | Per-world gravity acceleration applied to dynamic simulated bodies before physics integrates them; omitting the resource disables gravity, while `PrepareGravity` supplies Earth's default.
+scene.GpuParticleField | Authored request for a deterministic analytical storm particle field, including enabled layers, normalized count, reset seed, and per-layer colour, opacity and size.
 scene.Humanoid | The character controller's state: move direction, walk and jump speed, capsule size, health, and the grounded, jump-requested and enabled latches the movement pass reads every tick.
 scene.InputState | Resource: this host's keyboard, mouse and focus state for the current frame, with last-frame copies and sticky press edges. It is a machine's own input, never another's.
 scene.Light | A point, spot or surface light: colour, brightness, range, cone angle, face and enabled flag. The client walks these rows and fills its lighting uniforms.
 scene.LightingService | On the single `Lighting` service instance: ambient and outdoor ambient colour, fog colour and range, sun brightness, time of day and geographic latitude.
-scene.AutoMeshLOD | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, and projected quad-area target.
-scene.CustomMeshLOD | Per-level authored mesh overrides. Nil mesh slots inherit the matching `scene.AutoMeshLOD` artifact and valid slots take precedence.
+scene.LODAuto | Automatically produced coarse mesh artifacts, their triangle ratios, generation strategy, level count, projected quad-area target, and optional final billboard texture.
+scene.LODCustom | Per-level authored mesh overrides and an optional final billboard texture. Nil fields inherit the matching `scene.LODAuto` field and valid fields take precedence.
+scene.LODSettings | Per-item LOD distance floors. An all-zero row inherits the active view's default mesh LOD distances.
 scene.RenderEffects | A bounded list of compute and post-processing graph nodes attached to one visual, with selection masks, ordering, revisions, stages, and enabled state.
 scene.LocalPlayer | Resource: the `Player` this host is looking through, or null on a server. It backs the `Players.LocalPlayer` property.
 scene.LocalTransparency | A per-viewer override of `Visual::Transparency`, written only through `SetLocalTransparency`, that fades a part standing between the camera and what it is watching.
@@ -140,7 +150,7 @@ scene.Simulated | Tag meaning physics owns this body's motion. `Anchored = false
 scene.SkyboxCompute | Procedural sky controls on a `SkyboxCompute` instance: zenith, horizon and ground colours, deterministic stars and sun size, generated into one resident environment texture.
 scene.SkyboxTextures | Six CDN texture names on a `SkyboxTextures` instance, one per cube face. Only the first such instance below `Lighting` is selected and demanded.
 scene.Skeleton | On a skinned drawable: what the file called the rig, and how many palette slots the mesh's vertex joint indices may name. `Bone` rows under it are the joints.
-scene.Sound | What a sound is rather than a sound playing: asset name, volume, roll-off distances, looped and playing. The client's mixer walks these rows every frame.
+scene.Sound | What a sound is rather than a sound playing: asset name, volume, stereo pan, roll-off distances, looped and playing. The client's mixer walks these rows every frame.
 scene.SpawnLocation | On a spawn pad: which team colour it serves, whether it takes anyone regardless, and whether it is a spawn at all. `FindSpawn` reads all three.
 scene.Surface | The physical material name a part feels like, resolved against the world's `SurfaceTable` once per contact. Separate, on purpose, from what the part looks like.
 scene.Sun | Per-world singleton directional light: the direction it shines and the ambient standing in for sky on the faces it misses.
@@ -170,6 +180,7 @@ scene.Transient | Marks an instance made by whoever is looking rather than by th
 scene.VectorField2D | A planar vector field over its local XZ plane: constant, radial and tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor.
 scene.VectorField3D | A three-dimensional vector field: constant, radial and axis-directed tangential flow, optionally bounded and faded, that descendants select as their nearest field ancestor.
 scene.Visual | What a drawable looks like: mesh, tint, transparency, visibility, shadow casting, editor lock, and which mirror surface it shows. The draw-list walk reads it every frame.
+scene.ObservationTrace | Optional caller-chosen id stamped on observation records about this body. It travels with the body through portals, so one id follows a player across worlds and processes.
 scene.Volume | A placed participating medium: coloured, bounded density with extinction, falloff, noise and ray-march controls. `ResolveVolumes` copies enabled instances into a bounded value snapshot for the renderer.
 scene.WorldBounds | Resource: how far the world reaches from the origin on each axis. Camera framing, the bounce loop and wire quantisation all read it.
 
@@ -177,11 +188,16 @@ scene.WorldBounds | Resource: how far the world reaches from the origin on each 
 
 gui.Adornment | The half of a 3D adornment this module owns: which instance a `SelectionBox` or handle adornment is drawn around, in what colour, and whether it draws.
 gui.AdornmentInteraction | Opt-in pointer input for a 3D adornment. The renderer marks its geometry pickable only while enabled, so decorative adornments never steal scene input.
+gui.AnimationPlayback | An authored `UIAnimation` clip: bounded typed tracks and markers, explicit timeline start, and whether its presentation sample is active.
 gui.AspectRatio | `UIAspectRatioConstraint`: forces the parent element's resolved size to a width-over-height ratio, derived from whichever axis dominates.
 gui.Background | The box a `GuiObject` draws for itself: fill colour and transparency, plus the border's colour, thickness and inset mode.
+gui.Binding | A declarative attribute-to-text binding: its source, attribute, named target and fallback string.
+gui.BindingDependency | Local resolved source and revision used to invalidate one binding when its input changes.
+gui.BindingOutput | The local derived string and validity result of evaluating a `gui.Binding`.
 gui.Billboard | What a `BillboardGui` adds: the adornee it hangs off, its stud and extents offsets, lighting, and the distance past which it stops drawing.
 gui.Button | What makes a `GuiButton` a button: whether the fill shifts under the pointer and further on press, plus two reserved flags.
 gui.Canvas | The screen-sized rectangle a `ScreenGui` collects onto, in pixels. Derived, because a screen gui authors no canvas: its canvas is the viewport.
+gui.CanvasTransform | The derived scale and origin mapping a collector's logical canvas into presentation pixels.
 gui.Corner | `UICorner`: the radius the parent element's corners are rounded by, resolved against the parent's smaller axis.
 gui.DragDetector | `UIDragDetector`: makes the parent element draggable, deciding what a pointer drag does to `Element::Position` and how far it may move.
 gui.Element | The base row every `GuiObject` has: position, size, anchor, rotation, draw order and the visibility, clipping and input flags the layout pass reads.
@@ -200,8 +216,12 @@ gui.ConeHandleShape | The height, radius and hollow-base choice of a `ConeHandle
 gui.HandlesShape | The face mask drawn by a `Handles` instance.
 gui.ArcHandlesShape | The axis mask drawn by an `ArcHandles` instance.
 gui.Label | The text a `TextLabel`, `TextButton` or `TextBox` shows: the string, font, size, colour and alignment, with the wrap, scale and rich-text flags.
+gui.LabelLocalizationArguments | Named string, number and date values substituted into a localized label message.
+gui.LabelPresentation | Optional text presentation metadata: a stable localization key and style class, plus the explicit choice to use the style text colour.
 gui.Layer | What every `LayerCollector` shares: display order, whether it is enabled, `ZIndex` behaviour, whether it resets on spawn, and the top-bar inset.
+gui.Mask | `UIMask`: enables a rounded rectangle clip around a `GuiObject` and its subtree, with a radius resolved from the element's extent.
 gui.ListLayout | `UIListLayout`: stacks the parent's children along one axis, with padding, alignment, sort order, flex behaviour and wrapping.
+gui.ModalScope | `UIModalScope`: marks the parent subtree as the active input scope while enabled.
 gui.NodeCanvas | The view state of a typed graph editor: its pan, zoom and background grid policy, while graph nodes and links remain ordinary instances beneath it.
 gui.NodeCanvasNode | The stable id, node kind, bypass state, title, resize policy and input-port layout of one graph node; links refer to its id rather than its local entity handle.
 gui.NodeCanvasGroup | A named visual grouping of direct graph-node children, with optional edge-fitting or tight-fitting layout and ordinary Frame background colour.
@@ -211,7 +231,9 @@ gui.Padding | `UIPadding`: space held back inside the parent element on each of 
 gui.PageLayout | `UIPageLayout`: shows one of the parent's children at a time and slides the rest aside, with a tween time, easing curve and circular wrap.
 gui.PageMotion | Engine state for a sliding `UIPageLayout`: which pages it is between, when the slide began, and how far along the eased curve it is.
 gui.Picture | The image an `ImageLabel` or `ImageButton` shows: the asset name, tint, scale mode, slice and tile settings, and the hover and pressed swaps.
+gui.PresentationState | The local, derived override sample of an `AnimationPlayback`, rebuilt from the caller's explicit UI timeline and never saved or replicated.
 gui.Resolved | Where the layout pass actually put a 2D element: absolute position, size and rotation, the clip rectangle, the drawn text size and the paint order.
+gui.ResolvedStyle | Viewer-local result of resolving theme tokens, class rules, interaction state and direct properties.
 gui.Scale | `UIScale`: a factor multiplied into the parent's resolved size and text size after layout, so scaling a container does not re-flow its contents.
 gui.ScrollMotion | Local overscroll state for a `ScrollingFrame`: how far a drag has pulled the canvas past its end, and the spring returning it after release.
 gui.ScrollState | What the layout worked out about a `ScrollingFrame`: the pixel canvas extent, the visible window after any bar inset, and the two thumb rectangles.
@@ -222,10 +244,20 @@ gui.SettingsMenuExtensions | Resource: script-authored actions appended to the l
 gui.SizeLimits | `UISizeConstraint`: clamps the parent element's resolved size between a minimum and a maximum, in pixels.
 gui.SpatialCanvas | Where a `SurfaceGui` or `BillboardGui` was resolved to for the display looking at it: its pixel size, world plane, lighting and draw distance.
 gui.Stroke | `UIStroke`: an outline drawn around the parent outside its own border, with its own colour, thickness, transparency, join and sizing.
+gui.StyleClass | Stable style class names attached to one GUI element for bounded rule matching.
+gui.StyleDirect | Authored mask recording which visual properties were explicitly assigned on an element.
 gui.Surface | What a `SurfaceGui` adds: the adornee part and which face, how the pixel canvas is sized, its lighting, z-offset and draw distance.
 gui.TableLayout | `UITableLayout`: lays the parent's children out as rows and their children as cells, so one column is the same width in every row.
+gui.TextCompositionState | Viewer-local input-method candidate text and range for the currently edited `TextBox`.
 gui.TextSizeLimits | `UITextSizeConstraint`: clamps the pixel size a scaled label may pick between a floor and a ceiling.
+gui.ThemeBinding | Authored reference selecting the UI theme for one collector.
+gui.UIStyle | An authored bounded style rule with optional class, interaction state and typed declarations.
+gui.UITheme | Authored typed tokens shared by GUI style rules through a collector's theme binding.
 gui.Viewport | What a `ViewportFrame` renders into itself: the camera to render from, the frame's own ambient and directional light, and a tint over the result.
+gui.VirtualAnchorState | Viewer-local keyed scroll anchor preserved while a virtual page changes.
+gui.VirtualCollection | A bounded keyed data page, total item count, extent policy and overscan for one virtual scrolling collection.
+gui.VirtualFocusState | Viewer-local stable key and index used to restore focus after virtual row recycling.
 
+script.PortalObservationLog | Resource: bounded rings of portal crossing, arrival, input and handoff records, stamped with each subject's trace id. Hooks and the server observation sink read them; the oldest rows are overwritten and counted.
 script.PortalPlayerInput | Per-player forwarded input clock and bounded native movement queue. Preserves control timing across route adoption and reports physics-applied input; character replacement invalidates the queue.
 script.PortalTransfers | Snapshot state for bounded portal handoffs: host incarnation, pending source fences, destination reservations, authenticated peer receipts and retry ticks. The installed transfer admission system consumes owned simulation messages.

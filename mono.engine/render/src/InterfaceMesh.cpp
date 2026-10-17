@@ -51,6 +51,16 @@ namespace engine::render {
 				   left.Max.Y == right.Max.Y;
 		}
 
+		bool SameMasks(const InterfaceBatch &left, const InterfaceBatch &right) {
+			if (left.MaskCount != right.MaskCount) return false;
+			for (size_t index = 0; index < left.MaskCount; index++) {
+				const InterfaceMask &a = left.Masks[index];
+				const InterfaceMask &b = right.Masks[index];
+				if (!SameClip(a.Bounds, b.Bounds) || a.CornerRadius != b.CornerRadius) return false;
+			}
+			return true;
+		}
+
 		Typeface FaceFor(gui::FontFace face) {
 			switch (face) {
 			case gui::FontFace::Code:
@@ -704,7 +714,10 @@ namespace engine::render {
 		const gui::DrawList &list,
 		const GlyphAtlas &atlas,
 		const std::function<InterfaceImageInfo(const core::Name &)> &images,
-		const std::function<InterfaceImageInfo(ecs::Entity)> &viewports
+		const std::function<InterfaceImageInfo(ecs::Entity)> &viewports,
+		ShapedGlyphAtlas *shapedAtlas,
+		const gui::FontPackage *fonts,
+		uint64_t shapedUse
 	) {
 		VertexData.clear();
 		IndexData.clear();
@@ -712,28 +725,89 @@ namespace engine::render {
 
 		const Vector2 white = atlas.Ready() ? atlas.WhiteTexel() : Vector2{0.0f, 0.0f};
 		const Rect solid{white, white};
+		const size_t noRange = list.Commands.size();
+		const auto rangeFirstFor = [&](size_t command) {
+			for (const gui::CollectorRange &range : list.CollectorRanges) {
+				if (command >= range.First && command < range.First + range.Count) return range.First;
+			}
+			return noRange;
+		};
+		struct ActiveMask {
+			ecs::Entity Source;
+			ecs::Entity Collector;
+			InterfaceMask Value;
+		};
+		std::array<ActiveMask, MAXIMUM_INTERFACE_MASKS> activeMasks{};
+		size_t activeMaskCount = 0;
+		size_t operation = 0;
+		const auto applyOperations = [&](size_t command) {
+			while (operation < list.Operations.size() && list.Operations[operation].Command == command) {
+				const gui::DrawOperation &entry = list.Operations[operation++];
+				if (entry.Kind == gui::DrawOperationKind::BeginMask) {
+					if (activeMaskCount < MAXIMUM_INTERFACE_MASKS) {
+						activeMasks[activeMaskCount++] = {
+							entry.Source, entry.Collector, {entry.Bounds, entry.CornerRadius}
+						};
+					}
+				} else if (entry.Kind == gui::DrawOperationKind::EndMask) {
+					for (size_t index = activeMaskCount; index-- > 0;) {
+						if (activeMasks[index].Source != entry.Source) continue;
+						for (size_t move = index + 1; move < activeMaskCount; move++) {
+							activeMasks[move - 1] = activeMasks[move];
+						}
+						activeMaskCount--;
+						break;
+					}
+				}
+			}
+		};
 
-		for (const gui::DrawCommand &command : list.Commands) {
+		for (size_t commandIndex = 0; commandIndex < list.Commands.size(); commandIndex++) {
+			applyOperations(commandIndex);
+			const gui::DrawCommand &command = list.Commands[commandIndex];
 			const bool textured = command.Kind == gui::DrawKind::Image;
 			const bool viewport = command.Kind == gui::DrawKind::Viewport;
 			const core::Name image = textured ? command.Image : core::Name{};
-			const bool fresh =
-				BatchData.empty() || !SameClip(BatchData.back().Clip, command.Clip) ||
-				BatchData.back().Image != image || BatchData.back().Collector != command.Collector ||
-				BatchData.back().Viewport != (viewport ? command.Source : ecs::NULL_ENTITY) ||
-				BatchData.back().Shader != command.Shader || BatchData.back().Resample != command.Resample;
+			const size_t rangeFirst = rangeFirstFor(commandIndex);
+			InterfaceBatch maskState;
+			for (size_t index = 0; index < activeMaskCount; index++) {
+				const ActiveMask &mask = activeMasks[index];
+				if (mask.Collector != command.Collector || maskState.MaskCount == MAXIMUM_INTERFACE_MASKS)
+					continue;
+				maskState.Masks[maskState.MaskCount++] = mask.Value;
+			}
+			const auto beginBatch = [&](uint16_t shapedPage) {
+				const bool fresh =
+					BatchData.empty() || !SameClip(BatchData.back().Clip, command.Clip) ||
+					(rangeFirst != noRange && BatchData.back().FirstCommand != rangeFirst) ||
+					BatchData.back().Image != image || BatchData.back().Collector != command.Collector ||
+					BatchData.back().Viewport != (viewport ? command.Source : ecs::NULL_ENTITY) ||
+					BatchData.back().Shader != command.Shader ||
+					BatchData.back().Resample != command.Resample ||
+					BatchData.back().ShapedPage != shapedPage || !SameMasks(BatchData.back(), maskState);
 
-			if (fresh) {
+				if (!fresh) {
+					return;
+				}
+				if (!BatchData.empty()) {
+					BatchData.back().IndexCount =
+						static_cast<uint32_t>(IndexData.size()) - BatchData.back().FirstIndex;
+				}
 				InterfaceBatch batch;
 				batch.FirstIndex = static_cast<uint32_t>(IndexData.size());
+				batch.FirstCommand = commandIndex;
 				batch.Clip = command.Clip;
 				batch.Image = image;
 				batch.Collector = command.Collector;
 				batch.Viewport = viewport ? command.Source : ecs::NULL_ENTITY;
 				batch.Shader = command.Shader;
 				batch.Resample = command.Resample;
+				batch.ShapedPage = shapedPage;
+				batch.Masks = maskState.Masks;
+				batch.MaskCount = maskState.MaskCount;
 				BatchData.push_back(batch);
-			}
+			};
+			beginBatch(UINT16_MAX);
 
 			const uint32_t colour = Packed(command);
 			const Rotation turn = TurnOf(command);
@@ -894,6 +968,90 @@ namespace engine::render {
 			}
 
 			case gui::DrawKind::Text: {
+				// The compiler has already chosen every glyph position. Rendering this
+				// path therefore only resolves coverage and emits quads. It never asks
+				// a renderer font atlas to measure or break text a second time.
+				if (shapedAtlas != nullptr && fonts != nullptr &&
+					command.Shaping.Status == gui::TextShapeStatus::Ok && command.TextSize > 0) {
+					const std::vector<ShapedAtlasGlyph> glyphs = shapedAtlas->Resolve(
+						*fonts, command.Shaping.Glyphs, shapedUse, static_cast<float>(command.TextSize)
+					);
+					std::vector<gui::ShapedLine> lines = command.Shaping.Lines;
+					if (lines.empty()) {
+						lines.push_back(
+							gui::ShapedLine{
+								.GlyphCount = static_cast<uint32_t>(command.Shaping.Glyphs.size()),
+								.Advance = command.Shaping.Advance,
+								.Ascent = static_cast<float>(command.TextSize),
+							}
+						);
+					}
+					const float blockHeight =
+						lines.back().Baseline + lines.back().Ascent + lines.back().Descent;
+					float top = command.Bounds.Min.Y;
+					if (command.YAlignment == gui::TextYAlignment::Center) {
+						top += (command.Bounds.Height() - blockHeight) * 0.5f;
+					} else if (command.YAlignment == gui::TextYAlignment::Bottom) {
+						top = command.Bounds.Max.Y - blockHeight;
+					}
+					const auto lineFor = [&](size_t glyphIndex) -> const gui::ShapedLine & {
+						for (const gui::ShapedLine &line : lines) {
+							if (glyphIndex >= line.GlyphOffset &&
+								glyphIndex < line.GlyphOffset + line.GlyphCount)
+								return line;
+						}
+						return lines.front();
+					};
+
+					const auto draw = [&](uint32_t tint, float offsetX, float offsetY, bool styling) {
+						for (size_t glyphIndex = 0; glyphIndex < glyphs.size(); glyphIndex++) {
+							const ShapedAtlasGlyph &glyph = glyphs[glyphIndex];
+							if (!glyph.Present || glyph.Width == 0 || glyph.Height == 0) {
+								continue;
+							}
+							beginBatch(glyph.Page);
+							const gui::ShapedGlyph &placed = command.Shaping.Glyphs[glyphIndex];
+							const gui::ShapedLine &line = lineFor(glyphIndex);
+							float originX = command.Bounds.Min.X;
+							if (command.XAlignment == gui::TextXAlignment::Center) {
+								originX += (command.Bounds.Width() - line.Advance) * 0.5f;
+							} else if (command.XAlignment == gui::TextXAlignment::Right) {
+								originX = command.Bounds.Max.X - line.Advance;
+							}
+							const float baseline = top + line.Baseline + line.Ascent;
+							const float left = originX + placed.X + glyph.OffsetX + offsetX;
+							const float top = baseline + placed.Y + glyph.OffsetY + offsetY;
+							const float extent = static_cast<float>(ShapedGlyphAtlas::PAGE_EXTENT);
+							Push(
+								Rect{{left, top}, {left + glyph.Width, top + glyph.Height}},
+								Rect{
+									{glyph.X / extent, glyph.Y / extent},
+									{static_cast<float>(glyph.X + glyph.Width) / extent,
+									 static_cast<float>(glyph.Y + glyph.Height) / extent}
+								},
+								styling ? Packed(placed.Tint, placed.Transparency) : tint,
+								turn
+							);
+						}
+					};
+					if (command.StrokeTransparency < 1.0f) {
+						const uint32_t stroke = Packed(command.StrokeTint, command.StrokeTransparency);
+						for (const Vector2 offset : std::array<Vector2, 8>{
+								 Vector2{-1.0f, -1.0f},
+								 Vector2{0.0f, -1.0f},
+								 Vector2{1.0f, -1.0f},
+								 Vector2{-1.0f, 0.0f},
+								 Vector2{1.0f, 0.0f},
+								 Vector2{-1.0f, 1.0f},
+								 Vector2{0.0f, 1.0f},
+								 Vector2{1.0f, 1.0f},
+							 }) {
+							draw(stroke, offset.X, offset.Y, false);
+						}
+					}
+					draw(colour, 0.0f, 0.0f, true);
+					break;
+				}
 				if (!atlas.Ready() || command.Text.empty()) {
 					break;
 				}

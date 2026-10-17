@@ -12,11 +12,12 @@
 // ## The resolution order, which is the whole design
 //
 // A `Material` names a shader - `scene::MaterialRef::Shader` - and that one
-// name resolves three ways:
+// name resolves four ways:
 //
 // | what the world holds | what the library gets |
 // | --- | --- |
 // | a `ShaderScript` of that name | its GLSL, compiled here, now |
+// | no script, and this owner installed a cooked material variant | its admitted SPIR-V |
 // | no script, and the engine ships one | the staged SPIR-V `glslc` built |
 // | neither | no module and a diagnostic saying so |
 //
@@ -26,7 +27,7 @@
 // world with a valid `ShaderScript` called `toon` draws that. A failed override
 // keeps the accepted built-in and reports its attempted-source diagnostic.
 //
-// **The third row is a diagnostic and not silence**, for `MissingTexture`'s
+// **The final row is a diagnostic and not silence**, for `MissingTexture`'s
 // reason one layer along: a misspelled shader and a part somebody deliberately
 // left on the engine's default look identical from the frame, so the one that
 // is a mistake has to say so somewhere.
@@ -52,6 +53,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -60,6 +62,10 @@
 
 namespace engine::ecs {
 	class Store;
+}
+
+namespace engine::assets {
+	struct ShaderData;
 }
 
 namespace engine::render {
@@ -168,6 +174,16 @@ namespace engine::render {
 
 		// Compiler state is non-copyable.
 		ShaderLibrary &operator=(const ShaderLibrary &) = delete;
+
+		// Installs one explicitly selected cooked material fragment for this owner.
+		// The ABI is atomic.material.v1 and the renderer supplies its fixed vertex stage.
+		// Invalid replacements retain accepted code. Authored ShaderScripts take precedence.
+		// Refresh publishes demanded installations; DropOwner retires their backing bytes.
+		// No source compiler is called. Each owner admits at most 256 cooked backing
+		// modules and 64 MiB of their SPIR-V payloads. Refresh owns additional module copies.
+		std::optional<std::string> InstallCooked(
+			core::Name name, const assets::ShaderData &data, std::string_view variant, core::Name owner
+		);
 
 		// Resolves everything this world's materials name.
 		//

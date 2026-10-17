@@ -106,7 +106,7 @@ namespace engine::bake {
 		return Append(std::move(node));
 	}
 
-	NodeId Graph::AddFlipbook(uint8_t side, uint8_t frames, float fps) {
+	NodeId Graph::AddFlipbook(uint8_t side, uint16_t frames, float fps) {
 		Node node;
 		node.Kind = NodeKind::Flipbook;
 		node.FlipbookSide = side;
@@ -377,6 +377,33 @@ namespace engine::bake {
 			if (input.Kind != PayloadKind::Texture) {
 				return wrongKind("a texture");
 			}
+			if (!result.Texture.FlipbookFrameDurations.empty()) {
+				if (!std::isfinite(node.Size) || node.Size <= 0.0f) {
+					failure = "graph: '" + input.Source + "' needs a finite positive flipbook rate";
+					return false;
+				}
+				const auto &durations = result.Texture.FlipbookFrameDurations;
+				double total = 0.0;
+				for (const float duration : durations)
+					total += duration;
+				const double target = static_cast<double>(durations.size()) / node.Size;
+				const double scale = target / total;
+				std::vector<float> retimed;
+				retimed.reserve(durations.size());
+				float end = 0.0f;
+				for (const float duration : durations) {
+					const float changed = static_cast<float>(duration * scale);
+					const float next = end + changed;
+					if (!std::isfinite(changed) || changed <= 0.0f || !std::isfinite(next) || next <= end) {
+						failure = "graph: '" + input.Source + "' retime loses a frame duration";
+						return false;
+					}
+					retimed.push_back(changed);
+					end = next;
+				}
+				result.Texture.FlipbookFrameDurations = std::move(retimed);
+				break;
+			}
 			// **Only a flipbook is retimed.** A frame rate on a still image is
 			// a number nothing would read, and stamping one would make
 			// `TextureData::IsFlipbook` - which asks about the grid, not the
@@ -395,7 +422,7 @@ namespace engine::bake {
 			// existing flipbook has source animation facts this node must not erase.
 			const uint32_t side = node.FlipbookSide;
 			const uint32_t cells = side * side;
-			const bool powerOfTwoSide = side == 1 || side == 2 || side == 4 || side == 8;
+			const bool powerOfTwoSide = side == 1 || side == 2 || side == 4 || side == 8 || side == 16;
 			if (result.Texture.Format != assets::TextureFormat::RGBA8 || result.Texture.IsFlipbook() ||
 				!powerOfTwoSide || node.FlipbookFrames == 0 || node.FlipbookFrames > cells ||
 				!std::isfinite(node.Size) || node.Size <= 0.0f || node.Size >= 1000.0f ||

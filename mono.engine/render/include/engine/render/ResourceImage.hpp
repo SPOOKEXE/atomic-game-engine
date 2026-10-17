@@ -45,7 +45,8 @@ namespace engine::render {
 		RGBA8_SRGB,
 		RG16_Float,
 		RGBA16_Float,
-		R32_UInt
+		R32_UInt,
+		RGBA32_Float
 	};
 	// The state of the built-in SSAO image that produced an occlusion capture.
 	// It describes estimator provenance, never physical ambient-occlusion truth.

@@ -43,10 +43,10 @@ namespace client::data_factory_render_only {
 			Pending_.reset();
 		}
 
-		// A forced capture frame draws the already uploaded interface. Routing a
-		// click or typing here would mutate the retained world after its snapshot.
-		bool AllowsInteractiveGui() const {
-			return !Pending_;
+		// A paused world draws the already uploaded interface. Layout, routing,
+		// and typing would mark ECS rows changed after its retained snapshot.
+		bool AllowsInteractiveGui(bool allSystemsPaused = false) const {
+			return !Pending_ && !allSystemsPaused;
 		}
 
 		// Returns zero while capture freezes particle advancement for the pending request.

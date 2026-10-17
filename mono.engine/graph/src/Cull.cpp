@@ -6,6 +6,7 @@
 #include <engine/graph/Cull.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace engine::graph {
@@ -207,17 +208,50 @@ namespace engine::graph {
 		const core::Vector3 &first,
 		const core::Vector3 &second
 	) {
-		// **The absolute half-axes summed, which is `OrientedBoxBounds` written for
-		// a rectangle.** Whatever way the pane is turned, its box reaches
-		// `|first| + |second|` from the centre on each world axis - and the axis
-		// the rectangle has no thickness on comes out zero, which is exact rather
-		// than something to guard.
-		const core::Vector3 reach{
-			std::abs(first.X) + std::abs(second.X),
-			std::abs(first.Y) + std::abs(second.Y),
-			std::abs(first.Z) + std::abs(second.Z),
+		// **The rectangle clipped against the clip volume, not a box around it.**
+		// A box is exact per plane but not across them: a wide pane beside a
+		// turned camera, part of it behind the near plane and part outside a
+		// side plane, is outside no single plane and passed while none of it was
+		// on screen. For a portal that is a nested capture nobody sees, and a
+		// remote one is a round trip every capture of this view waits for.
+		//
+		// Clip space rather than world planes, because the recursion hands over
+		// oblique projections and the clip volume is the same for all of them.
+		const auto corner = [&](float a, float b) {
+			const core::Vector3 point = centre + first * a + second * b;
+			return camera * glm::vec4(point.X, point.Y, point.Z, 1.0f);
 		};
-
-		return Frustum::FromViewProjection(camera).Intersects(core::AABB::FromCentre(centre, reach));
+		// Four corners, and each of six planes adds at most one vertex.
+		std::array<glm::vec4, 10> polygon{corner(1, 1), corner(1, -1), corner(-1, -1), corner(-1, 1)};
+		std::array<glm::vec4, 10> clipped{};
+		size_t count = 4;
+		// `0 <= z <= w` under `GLM_FORCE_DEPTH_ZERO_TO_ONE`; see `FromViewProjection`.
+		const std::array<glm::vec4, 6> planes{
+			glm::vec4{1, 0, 0, 1},
+			glm::vec4{-1, 0, 0, 1},
+			glm::vec4{0, 1, 0, 1},
+			glm::vec4{0, -1, 0, 1},
+			glm::vec4{0, 0, 1, 0},
+			glm::vec4{0, 0, -1, 1},
+		};
+		for (const auto &plane : planes) {
+			size_t kept = 0;
+			for (size_t index = 0; index < count; ++index) {
+				const glm::vec4 &from = polygon[index];
+				const glm::vec4 &to = polygon[(index + 1) % count];
+				// A hair of slack keeps a pane exactly on a plane, which is the
+				// error direction culling has to take: a hole wrongly dropped
+				// goes black for a frame.
+				const float fromDistance = glm::dot(plane, from) + 1e-5f * (std::abs(from.w) + 1.0f);
+				const float toDistance = glm::dot(plane, to) + 1e-5f * (std::abs(to.w) + 1.0f);
+				if (fromDistance >= 0) clipped[kept++] = from;
+				if ((fromDistance >= 0) != (toDistance >= 0))
+					clipped[kept++] = from + (to - from) * (fromDistance / (fromDistance - toDistance));
+			}
+			count = kept;
+			if (count == 0) return false;
+			polygon = clipped;
+		}
+		return true;
 	}
 }

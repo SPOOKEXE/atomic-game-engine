@@ -39,69 +39,65 @@ namespace studio {
 	std::vector<SelectionPropertyGroup>
 	BuildPropertySelection(const engine::ecs::Store &store, std::span<const Entity> instances) {
 		std::vector<SelectionPropertyGroup> groups;
+		std::vector<Entity> liveInstances;
+		liveInstances.reserve(instances.size());
+		for (const Entity instance : instances) {
+			if (store.Alive(instance) && store.ClassOf(instance).IsValid()) {
+				liveInstances.push_back(instance);
+			}
+		}
+		if (liveInstances.empty()) {
+			return groups;
+		}
+
+		const ClassId primaryClass = store.ClassOf(liveInstances.front());
 		const Name parent("Parent");
 
-		for (const Entity instance : instances) {
-			if (!store.Alive(instance)) {
-				continue;
-			}
-			const ClassId klass = store.ClassOf(instance);
-			if (!klass.IsValid()) {
+		for (const PropertyDescriptor &descriptor : Classes::Describe(primaryClass).Properties) {
+			if (descriptor.Name == parent) {
 				continue;
 			}
 
-			std::vector<ClassId> ownersSeen;
-			for (const PropertyDescriptor &descriptor : Classes::Describe(klass).Properties) {
-				if (descriptor.Name == parent) {
-					continue;
-				}
+			const ClassId owner = DeclaringPropertyClass(primaryClass, descriptor.Name);
+			const bool shared = std::all_of(liveInstances.begin(), liveInstances.end(), [&](Entity instance) {
+				return SelectionPropertyApplies(
+					store.ClassOf(instance), owner, descriptor.Name, descriptor.Type
+				);
+			});
+			if (!shared) {
+				continue;
+			}
 
-				const ClassId owner = DeclaringPropertyClass(klass, descriptor.Name);
-				auto group = std::find_if(groups.begin(), groups.end(), [owner](const auto &candidate) {
-					return candidate.Owner == owner;
-				});
-				if (group == groups.end()) {
-					SelectionPropertyGroup added;
-					added.Owner = owner;
-					groups.push_back(std::move(added));
-					group = groups.end() - 1;
-				}
-				if (std::find(ownersSeen.begin(), ownersSeen.end(), owner) == ownersSeen.end()) {
-					group->Applicable++;
-					ownersSeen.push_back(owner);
-				}
+			auto group = std::find_if(groups.begin(), groups.end(), [owner](const auto &candidate) {
+				return candidate.Owner == owner;
+			});
+			if (group == groups.end()) {
+				SelectionPropertyGroup added;
+				added.Owner = owner;
+				added.Applicable = liveInstances.size();
+				groups.push_back(std::move(added));
+				group = groups.end() - 1;
+			}
 
-				auto row = std::find_if(group->Rows.begin(), group->Rows.end(), [&](const auto &candidate) {
-					return candidate.Descriptor != nullptr && candidate.Descriptor->Name == descriptor.Name &&
-						   candidate.Descriptor->Type == descriptor.Type;
-				});
-				if (row == group->Rows.end()) {
-					SelectionPropertyRow added;
-					added.Descriptor = &descriptor;
-					group->Rows.push_back(std::move(added));
-					row = group->Rows.end() - 1;
-				}
-
-				row->Applicable++;
+			SelectionPropertyRow row;
+			row.Descriptor = &descriptor;
+			row.Applicable = liveInstances.size();
+			for (const Entity instance : liveInstances) {
 				PropertyValue value;
 				if (!engine::game::ReadProperty(store, instance, descriptor, value)) {
 					continue;
 				}
-				if (row->Readable == 0) {
-					row->Value = value;
-				} else if (!engine::game::ValuesEqual(row->Value, value)) {
-					row->Mixed = true;
-				}
-				row->Readable++;
-			}
-		}
-
-		for (SelectionPropertyGroup &group : groups) {
-			for (SelectionPropertyRow &row : group.Rows) {
-				if (row.Readable != 0 && row.Readable != row.Applicable) {
+				if (row.Readable == 0) {
+					row.Value = value;
+				} else if (!engine::game::ValuesEqual(row.Value, value)) {
 					row.Mixed = true;
 				}
+				row.Readable++;
 			}
+			if (row.Readable != 0 && row.Readable != liveInstances.size()) {
+				row.Mixed = true;
+			}
+			group->Rows.push_back(std::move(row));
 		}
 
 		std::sort(groups.begin(), groups.end(), [](const auto &left, const auto &right) {

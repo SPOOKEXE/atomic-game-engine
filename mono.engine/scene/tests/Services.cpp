@@ -10,12 +10,17 @@
 
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+
+#include <algorithm>
+#include <array>
+#include <vector>
 
 TEST_SUITE_ID("engine.scene.services")
 
@@ -207,15 +212,27 @@ TEST_CASE("fixture identity is read-only and Lighting inputs are bounded", "[sce
 	const float negativeBrightness = -4.0f;
 	const float lateClock = 31.0f;
 	const float impossibleLatitude = 120.0f;
+	const float negativeBloom = -4.0f;
+	const float excessiveRadius = 1000.0f;
+	const float negativeDepthOfField = -4.0f;
+	const float excessiveGodRayRadius = 1000.0f;
 	REQUIRE(store.SetProperty(lighting, Name("Brightness"), &negativeBrightness, sizeof(float)));
 	REQUIRE(store.SetProperty(lighting, Name("ClockTime"), &lateClock, sizeof(float)));
 	REQUIRE(store.SetProperty(lighting, Name("GeographicLatitude"), &impossibleLatitude, sizeof(float)));
+	REQUIRE(store.SetProperty(lighting, Name("BloomIntensity"), &negativeBloom, sizeof(float)));
+	REQUIRE(store.SetProperty(lighting, Name("BloomRadius"), &excessiveRadius, sizeof(float)));
+	REQUIRE(store.SetProperty(lighting, Name("DepthOfFieldIntensity"), &negativeDepthOfField, sizeof(float)));
+	REQUIRE(store.SetProperty(lighting, Name("GodRayRadius"), &excessiveGodRayRadius, sizeof(float)));
 
 	const LightingServiceComponent *state = store.Get<LightingServiceComponent>(lighting);
 	REQUIRE(state != nullptr);
 	CHECK(state->Brightness == 0.0f);
 	CHECK(state->ClockTime == 24.0f);
 	CHECK(state->GeographicLatitude == 90.0f);
+	CHECK(state->BloomIntensity == 0.0f);
+	CHECK(state->BloomRadius == 128.0f);
+	CHECK(state->DepthOfFieldIntensity == 0.0f);
+	CHECK(state->GodRayRadius == 512.0f);
 
 	const uint32_t everyBit = UINT32_MAX;
 	const uint32_t post = engine::scene::FeatureBit(engine::scene::RenderFeature::PostProcessing);
@@ -478,6 +495,8 @@ TEST_CASE("only ReplicatedFirst is replicated first", "[scene][services]") {
 	const Entity first = store.FindFirstRoot("ReplicatedFirst");
 	const Entity shared = store.FindFirstRoot("ReplicatedStorage");
 	REQUIRE(first != NULL_ENTITY);
+	const engine::ecs::ClassId replicatedFirst = Classes::Find(Name("ReplicatedFirst"));
+	REQUIRE(replicatedFirst.IsValid());
 
 	const auto plain = Classes::Find(Name("Instance"));
 	const Entity screen = store.CreateInstance(plain, "LoadingScreen");
@@ -486,17 +505,67 @@ TEST_CASE("only ReplicatedFirst is replicated first", "[scene][services]") {
 	const Entity deep = store.CreateInstance(plain, "Logo");
 	store.SetParent(deep, screen);
 
+	const Entity workspace = WorkspaceOf(store);
+	const std::array<Entity, 5> candidates{first, shared, workspace, screen, deep};
+	// Resolve per candidate to preserve the pre-hoist result as the oracle.
+	const auto legacyContains = [&](Entity entity) {
+		const engine::ecs::ClassId klass = Classes::Find(Name("ReplicatedFirst"));
+		if (!klass.IsValid()) {
+			return false;
+		}
+		for (Entity at = entity; at != engine::ecs::NULL_ENTITY; at = store.ParentOf(at)) {
+			if (store.IsA(at, klass)) {
+				return true;
+			}
+		}
+		return false;
+	};
+	const auto ordered = [&](bool useCachedClass) {
+		std::vector<Entity> result(candidates.begin(), candidates.end());
+		const auto contains = [&](Entity entity) {
+			return useCachedClass ? engine::scene::InReplicatedFirst(store, entity, replicatedFirst)
+								  : legacyContains(entity);
+		};
+		std::sort(result.begin(), result.end(), [&](Entity left, Entity right) {
+			const bool leftFirst = contains(left);
+			const bool rightFirst = contains(right);
+			if (leftFirst != rightFirst) {
+				return leftFirst;
+			}
+			return left.Id < right.Id;
+		});
+		return result;
+	};
+	const auto checkOrderParity = [&] {
+		for (const Entity entity : candidates) {
+			CHECK(legacyContains(entity) == engine::scene::InReplicatedFirst(store, entity, replicatedFirst));
+		}
+		const std::vector<Entity> legacyOrder = ordered(false);
+		CHECK(legacyOrder == ordered(true));
+		CHECK(legacyOrder[0] == first);
+		if (legacyContains(screen)) {
+			CHECK(legacyOrder[1] == screen);
+			CHECK(legacyOrder[2] == deep);
+		}
+	};
+
+	checkOrderParity();
 	CHECK(engine::scene::InReplicatedFirst(store, first));
 	CHECK(engine::scene::InReplicatedFirst(store, screen));
 	CHECK(engine::scene::InReplicatedFirst(store, deep));
-
 	CHECK(!engine::scene::InReplicatedFirst(store, shared));
-	CHECK(!engine::scene::InReplicatedFirst(store, WorkspaceOf(store)));
+	CHECK(!engine::scene::InReplicatedFirst(store, workspace));
 
-	// Moved out, it stops being first - with nothing else edited.
+	// Reparenting changes the answer immediately and the next ordering follows it.
 	store.SetParent(screen, shared);
+	checkOrderParity();
 	CHECK(!engine::scene::InReplicatedFirst(store, screen));
 	CHECK(!engine::scene::InReplicatedFirst(store, deep));
+
+	store.SetParent(screen, first);
+	checkOrderParity();
+	CHECK(engine::scene::InReplicatedFirst(store, screen));
+	CHECK(engine::scene::InReplicatedFirst(store, deep));
 }
 
 TEST_CASE("every player container is that player's alone", "[scene][services]") {
@@ -615,4 +684,56 @@ TEST_CASE("a world read out of a file is protected too", "[scene][services][fixt
 	REQUIRE(InstallServices(store) != NULL_ENTITY);
 	CHECK(store.Protected(lighting));
 	CHECK_FALSE(store.DestroyAuthored(lighting));
+}
+
+TEST_CASE(
+	"service lookup follows root identity through authored mutations", "[scene][services][service-lookup]"
+) {
+	services_test::Ready();
+	Store store("services.lookup.transitions");
+	const auto lighting = Classes::Find(Name("Lighting"));
+	const auto workspace = Classes::Find(Name("Workspace"));
+	CHECK(engine::scene::ServiceOf(store, engine::ecs::ClassId{}) == NULL_ENTITY);
+	CHECK(engine::scene::ServiceOf(store, lighting) == NULL_ENTITY);
+	const Entity first = store.CreateInstance(lighting, "Z duplicate");
+	const Entity other = store.CreateInstance(workspace, "Unrelated");
+	const Entity second = store.CreateInstance(lighting, "A duplicate");
+	REQUIRE(first != NULL_ENTITY);
+	REQUIRE(second != NULL_ENTITY);
+	REQUIRE(other != NULL_ENTITY);
+	CHECK(engine::scene::ServiceOf(store, lighting) == first);
+	CHECK(engine::scene::ServiceOf(store, engine::scene::ServiceClass()) == first);
+	REQUIRE(store.SetInstanceName(first, "Renamed"));
+	CHECK(engine::scene::ServiceOf(store, lighting) == first);
+	// Move the earlier instance into a different archetype; table iteration
+	// order must not choose the later duplicate which remains in its old table.
+	store.Set(first, engine::scene::Motion{});
+	CHECK(engine::scene::ServiceOf(store, lighting) == first);
+	REQUIRE(store.SetParent(first, other));
+	CHECK(engine::scene::ServiceOf(store, lighting) == second);
+	REQUIRE(store.SetParent(first, NULL_ENTITY));
+	CHECK(engine::scene::ServiceOf(store, lighting) == first);
+	store.Remove<engine::scene::Motion>(first);
+	CHECK(engine::scene::ServiceOf(store, lighting) == first);
+	store.Destroy(first);
+	CHECK(engine::scene::ServiceOf(store, lighting) == second);
+	// Reusing the freed slot gives it a newer generation. Root order follows
+	// the complete handle, so the surviving duplicate stays ahead of it.
+	const Entity replacement = store.CreateInstance(lighting, "Replacement");
+	REQUIRE(replacement != NULL_ENTITY);
+	REQUIRE(second.Id < replacement.Id);
+	CHECK_FALSE(store.Alive(first));
+	std::vector<Entity> matchingRoots;
+	store.EachRoot([&](Entity root) {
+		if (store.IsA(root, lighting)) matchingRoots.push_back(root);
+	});
+	REQUIRE(matchingRoots.size() == 2);
+	CHECK(matchingRoots[0] == second);
+	CHECK(matchingRoots[1] == replacement);
+	CHECK(engine::scene::ServiceOf(store, lighting) == matchingRoots.front());
+	store.Destroy(second);
+	CHECK(engine::scene::ServiceOf(store, lighting) == replacement);
+	store.Destroy(replacement);
+	CHECK(engine::scene::ServiceOf(store, lighting) == NULL_ENTITY);
+	CHECK(engine::scene::ServiceOf(store, workspace) == other);
 }

@@ -15,6 +15,8 @@
 // Headless, and one worker, so a run of this agrees with the run before it.
 
 #include <engine/core/HeapProfile.hpp>
+#include <engine/core/Name.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/net/Packet.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/testing/Suite.hpp>
@@ -133,9 +135,13 @@ TEST_CASE("a final wire turn delivers content the relay already served", "[unifi
 	// drain rather than a made-up allowance in the cross-check.
 	Crossing crossing(Small(), Arrangement{.Carrying = Transport::Loopback, .Serving = Content::Relayed});
 	REQUIRE(crossing.Join());
-	crossing.Step();
-
-	const Reports before = crossing.Gather();
+	Reports before = crossing.Gather();
+	for (int turn = 0; turn < 32 && (!before.Relay.has_value() || !before.Link.has_value() ||
+									 before.Relay->Served <= before.Link->Completed);
+		 turn++) {
+		crossing.Step();
+		before = crossing.Gather();
+	}
 	REQUIRE(before.Relay.has_value());
 	REQUIRE(before.Link.has_value());
 	REQUIRE(before.Relay->Served > before.Link->Completed);
@@ -188,24 +194,47 @@ TEST_CASE("an announcement leaves the beacon and lands in the directory", "[unif
 	CHECK(reports.Directory->Listed + reports.Directory->Refreshed == reports.Beacon->Announcements);
 }
 
-TEST_CASE("a wire refuses nothing this world produces", "[unified][matrix]") {
-	// **The four-times bug, checked where it can actually happen.** The
-	// direct arrangement can only say a message is over the limit; a real link
-	// refuses it, and a refusal handed back through `Authority::Unsent` is the
-	// difference between a hole that is repaired and one that is permanent.
+TEST_CASE("a wire stages oversized resources and retries congestion refusals", "[unified][matrix]") {
+	// A real link enforces the message limit. A refused snapshot chunk must be
+	// returned through `Authority::Unsent` so a busy link cannot leave a hole.
 	Settings settings;
 	settings.Entities = 512;
 
 	Crossing crossing(settings, Arrangement{.Carrying = Transport::Loopback});
 	REQUIRE(crossing.Join());
+	const engine::ecs::Entity workspace = crossing.ServerWorld().FindFirstRoot("Workspace");
+	const engine::ecs::Entity field = crossing.ServerWorld().FindFirstChild(workspace, "ServerDefault");
+	const engine::ecs::Entity cube = crossing.ServerWorld().FindFirstChild(field, "Cube1");
+	REQUIRE(cube != engine::ecs::NULL_ENTITY);
+	const engine::core::Name velocity("Velocity");
+	engine::ecs::AttributeValue original;
+	REQUIRE(engine::ecs::GetAttribute(crossing.ClientWorld(), cube, velocity, original));
+	REQUIRE(original.Type == engine::ecs::PropertyType::Vector3);
+	REQUIRE_FALSE(original.Vector3 == engine::core::Vector3{});
+	engine::ecs::AttributeValue stopped;
+	stopped.Type = engine::ecs::PropertyType::Vector3;
+	stopped.Vector3 = {};
+	REQUIRE(engine::ecs::SetAttribute(crossing.ServerWorld(), cube, velocity, stopped));
 	for (int step = 0; step < 60; step++) {
 		crossing.Step();
 	}
+	engine::ecs::AttributeValue received;
+	REQUIRE(engine::ecs::GetAttribute(crossing.ClientWorld(), cube, velocity, received));
+	CHECK(received.Type == engine::ecs::PropertyType::Vector3);
+	CHECK(received.Vector3 == stopped.Vector3);
 
 	const Reports reports = crossing.Gather();
 	CHECK(reports.LargestMessage > 0);
 	CHECK(reports.LargestMessage <= engine::net::Packet::MAXIMUM_MESSAGE_BYTES);
-	CHECK(reports.Authority.Oversized == 0);
+	// Velocity attributes form a large resource. It must take the authority's
+	// chunked overlay path while every emitted datagram remains within the limit.
+	CHECK(reports.Authority.Oversized > 0);
+	REQUIRE(reports.ServerLink.has_value());
+	// The path may temporarily withhold allowance. Refusals from that limit
+	// are retried, while configured-budget refusals would hide an unsendable
+	// resource or a packet rate this scene cannot sustain.
+	CHECK(reports.ServerLink->SendsOverBudget == 0);
+	CHECK(reports.Refused <= reports.ServerLink->SendsOverAllowance);
 	CHECK(CrossCheck(reports).empty());
 }
 

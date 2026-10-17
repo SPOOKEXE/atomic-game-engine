@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Game format="3" name="Virtual Camera Capture">
+	<World format="3" name="Virtual Camera Capture">
+		<WorldProperties tickRate="60" idleTickRate="2" physicsTickRate="60" scriptTickRate="60" replicationTickRate="20" globalSimulatedNetworkLatency="0" faultLimit="3" isolation="Shared" renderingProfile="Default PBR" />
+		<Sources>
+			<Source path="scripts/client/VirtualCameraCapture.client.luau"><![CDATA[--!strict
+-- Deterministic visual coverage for Studio's virtual-camera capture gate.
+--
+-- The camera begins with every requested feature in front of it. The scene is
+-- static after setup so an inspection translation is the only intended input
+-- change between the gate's locked captures.
+
+local Workspace = game:GetService("Workspace")
+
+local function part(name: string, size: Vector3, position: Vector3, colour: Color3): Part
+	local value = Instance.new("Part")
+	value.Name = name
+	value.Anchored = true
+	value.Size = size
+	value.Position = position
+	value.Color = colour
+	value.Parent = Workspace
+	return value
+end
+
+local floor = part("CaptureFloor", Vector3.new(64, 1, 64), Vector3.new(0, -0.5, 0), Color3.fromRGB(18, 22, 30))
+
+local backdrop = part("CaptureBackdrop", Vector3.new(34, 16, 1), Vector3.new(0, 8, -18), Color3.fromRGB(32, 42, 66))
+local key = Instance.new("PointLight")
+key.Name = "CaptureKeyLight"
+key.Color = Color3.fromRGB(255, 218, 156)
+key.Brightness = 90
+key.Range = 52
+key.Parent = backdrop
+
+-- The built-in sphere has enough triangles for generated decimation levels.
+local lod = Instance.new("MeshPart")
+lod.Name = "CaptureLodMesh"
+lod.Anchored = true
+lod.MeshId = "engine.Sphere"
+lod.Size = Vector3.new(10, 10, 10)
+lod.Position = Vector3.new(-9, 5, -4)
+lod.Color = Color3.fromRGB(74, 166, 255)
+lod.AutoLodStrategy = Enum.AutoMeshLODStrategy.Decimated
+lod.AutoLodLevels = 3
+lod.AutoLod1Ratio = 0.4
+lod.AutoLod2Ratio = 0.15
+lod.AutoLodTargetQuadArea = 8
+lod.Parent = Workspace
+
+local particleHost = part("CaptureParticleHost", Vector3.new(2, 2, 2), Vector3.new(9, 2, -4), Color3.fromRGB(255, 140, 62))
+local particles = Instance.new("ParticleEmitter")
+particles.Name = "CaptureParticles"
+particles.Rate = 72
+particles.MaxParticles = 256
+particles.Lifetime = NumberRange.new(2, 2)
+particles.Speed = NumberRange.new(2, 2)
+particles.Acceleration = Vector3.new(0, 1, 0)
+particles.Size = NumberSequence.new(0.4, 1.2)
+particles.Color = ColorSequence.new(Color3.fromRGB(255, 210, 114))
+particles.Parent = particleHost
+
+-- Both panes face the camera. Each portal names its peer so the renderer has a
+-- visible portal request rather than an unpaired decorative surface.
+local leftPane = part("CapturePortalLeftPane", Vector3.new(8, 8, 1), Vector3.new(-15, 5, -12), Color3.fromRGB(35, 52, 84))
+local rightPane = part("CapturePortalRightPane", Vector3.new(8, 8, 1), Vector3.new(15, 5, -12), Color3.fromRGB(84, 52, 35))
+
+local function portal(name: string, host: Part, destination: Part): Portal
+
+	local value = Instance.new("Portal")
+	value.Name = name
+	value.SurfaceSize = Vector3.new(1024, 1024, 0)
+	value.Face = Enum.NormalId.Front
+	value.Destination = destination
+	value.ImageTransparency = 0
+	value.Parent = host
+	return value
+end
+
+portal("CapturePortalLeft", leftPane, rightPane)
+portal("CapturePortalRight", rightPane, leftPane)
+
+local camera = Instance.new("Camera")
+camera.Name = "CaptureCamera"
+camera.FieldOfView = 56
+camera.FarPlaneZ = 180
+camera.CFrame = CFrame.lookAt(Vector3.new(0, 10, 34), Vector3.new(0, 4, -7))
+camera.Parent = Workspace
+Workspace.CurrentCamera = camera
+]]></Source>
+		</Sources>
+		<Item class="Workspace" name="Workspace" id="1" />
+		<Item class="StarterPlayer" name="StarterPlayer" id="2">
+			<Item class="StarterPlayerScripts" name="StarterPlayerScripts" id="3">
+				<Item class="LocalScript" name="VirtualCameraCapture" id="4">
+					<Property name="Source" type="string">scripts/client/VirtualCameraCapture.client.luau</Property>
+				</Item>
+			</Item>
+		</Item>
+	</World>
+</Game>

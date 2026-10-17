@@ -110,6 +110,28 @@ TEST_CASE("directories come first, then files, each by name", "[studio][browse]"
 	CHECK(listing.Entries[3].Name == "zebra.agame");
 }
 
+TEST_CASE("mixed-case names use the displayed name to break equal sort keys", "[studio][browse]") {
+	Tree tree;
+	tree.Directory("alpha");
+	tree.Directory("Alpha");
+	tree.File("beta.agame");
+	tree.File("Beta.agame");
+
+	const Listing listing = BrowseDirectory(tree.Root);
+
+	// A filesystem that folds case cannot hold both fixture names. The ordering
+	// contract is exercised wherever the operating system can represent it.
+	if (listing.Entries.size() != 4) {
+		SKIP("filesystem does not preserve names that differ only by case");
+	}
+
+	REQUIRE(listing.Entries.size() == 4);
+	CHECK(listing.Entries[0].Name == "Alpha");
+	CHECK(listing.Entries[1].Name == "alpha");
+	CHECK(listing.Entries[2].Name == "Beta.agame");
+	CHECK(listing.Entries[3].Name == "beta.agame");
+}
+
 TEST_CASE("a filter hides other files but never hides folders", "[studio][browse]") {
 	Tree tree;
 	tree.File("keep.agame");
@@ -151,6 +173,17 @@ TEST_CASE("pointing at a file lists the folder it is in", "[studio][browse]") {
 	CHECK(listing.Error.empty());
 	CHECK(Tree::Has(listing, "world.agame"));
 	CHECK(Tree::Has(listing, "other.agame"));
+}
+
+TEST_CASE("a bare filename lists the working folder", "[studio][browse]") {
+	const Listing listing = BrowseDirectory("Untitled.agame");
+	std::error_code code;
+	const std::filesystem::path working =
+		std::filesystem::weakly_canonical(std::filesystem::current_path(code), code);
+
+	REQUIRE_FALSE(code);
+	CHECK(listing.Error.empty());
+	CHECK(listing.Directory == working);
 }
 
 TEST_CASE("a folder that is not there says so rather than looking empty", "[studio][browse]") {

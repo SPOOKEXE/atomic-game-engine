@@ -181,6 +181,12 @@ TEST_CASE("the gui inset is the screen's reserved strip", "[gui][services]") {
 
 	CHECK(GuiInset(screen).Y == Approx(36.0f));
 	CHECK(GuiInset(screen).X == Approx(0.0f));
+	screen.SafeArea.Left = 18.0f;
+	screen.SafeArea.Top = 42.0f;
+	screen.Occluded.Left = 12.0f;
+	screen.Occluded.Top = 30.0f;
+	CHECK(GuiInset(screen).X == Approx(18.0f));
+	CHECK(GuiInset(screen).Y == Approx(42.0f));
 
 	// Zero by default, because this engine has no top bar of its own and a
 	// reserved strip nothing occupies is dead space an author cannot explain.
@@ -205,6 +211,20 @@ TEST_CASE("selection refuses an element that cannot hold it", "[gui][services]")
 	// anything.
 	CHECK(Select(world.Data, engine::ecs::NULL_ENTITY));
 	CHECK(world.Selected() == engine::ecs::NULL_ENTITY);
+}
+
+TEST_CASE("disabled controls are absent from navigation", "[gui][services]") {
+	World world("gui_services.disabled");
+	const Entity first = world.Button("First", 0.0f, 0.0f, 100.0f, 40.0f);
+	const Entity disabled = world.Button("Disabled", 0.0f, 60.0f, 100.0f, 40.0f);
+	const Entity last = world.Button("Last", 0.0f, 120.0f, 100.0f, 40.0f);
+	world.Data.GetMutable<Element>(disabled)->Interactable = false;
+
+	const DrawList &list = world.Compile();
+	CHECK_FALSE(Select(world.Data, disabled));
+	REQUIRE(Select(world.Data, first));
+	REQUIRE(SelectNext(world.Data, list, SelectionMove::Down));
+	CHECK(world.Selected() == last);
 }
 
 TEST_CASE("selection seeds from nothing in paint order", "[gui][services]") {
@@ -338,6 +358,35 @@ TEST_CASE("an element that is not drawn cannot be selected into", "[gui][service
 	REQUIRE(Select(world.Data, visible));
 	CHECK_FALSE(SelectNext(world.Data, list, SelectionMove::Up));
 	CHECK(world.Selected() == visible);
+}
+
+TEST_CASE("selection overrides cannot reach a hidden target", "[gui][services]") {
+	World world("gui_services.hidden_override");
+	const Entity start = world.Button("Start", 100.0f, 200.0f, 60.0f, 40.0f);
+	const Entity visible = world.Button("Visible", 100.0f, 100.0f, 60.0f, 40.0f);
+	const Entity hidden = world.Button("Hidden", 100.0f, 0.0f, 60.0f, 40.0f);
+	world.Data.GetMutable<Element>(hidden)->Visible = false;
+
+	Selection override;
+	override.NextUp = hidden;
+	world.Data.Set(start, override);
+
+	const DrawList &list = world.Compile();
+	REQUIRE(Select(world.Data, start));
+	REQUIRE(SelectNext(world.Data, list, SelectionMove::Up));
+	CHECK(world.Selected() == visible);
+}
+
+TEST_CASE("selection reseeds when its current element leaves the compiled view", "[gui][services]") {
+	World world("gui_services.reseed");
+	const Entity first = world.Button("First", 100.0f, 0.0f, 60.0f, 40.0f);
+	const Entity second = world.Button("Second", 100.0f, 100.0f, 60.0f, 40.0f);
+	REQUIRE(Select(world.Data, first));
+	world.Data.GetMutable<Element>(first)->Visible = false;
+
+	const DrawList &list = world.Compile();
+	REQUIRE(SelectNext(world.Data, list, SelectionMove::Down));
+	CHECK(world.Selected() == second);
 }
 
 namespace {
@@ -641,4 +690,32 @@ TEST_CASE("ClearTextOnFocus empties the box at the moment focus is taken", "[gui
 	CHECK(world.Data.Get<Entry>(clearing)->CursorPosition == -1);
 	CHECK(world.Data.Get<Label>(keeping)->Text == "Ada");
 	CHECK(world.Data.Get<Entry>(keeping)->CursorPosition == 4);
+}
+
+TEST_CASE("a virtual text focus returns by stable key after its page recycles", "[gui][services][virtual]") {
+	World world("gui_services.virtual_focus");
+	const Entity box = TextBox(world, "TemplateEntry", "Ada");
+	const Entity collection = world.Data.CreateInstance(GuiClass("UIVirtualCollection"), "Collection");
+	world.Data.SetParent(collection, world.Screen);
+
+	DrawList resident;
+	DrawCommand facet;
+	facet.Source = box;
+	facet.Collection = collection;
+	facet.Key = "player-ada";
+	facet.Index = 7;
+	resident.Commands.push_back(facet);
+
+	REQUIRE(RememberVirtualFocus(world.Data, collection, "player-ada", 7));
+	REQUIRE(Focus(world.Data, box));
+	RestoreVirtualFocus(world.Data, resident);
+	CHECK(FocusedTextBox(world.Data) == box);
+
+	DrawList recycled;
+	RestoreVirtualFocus(world.Data, recycled);
+	CHECK(FocusedTextBox(world.Data) == engine::ecs::NULL_ENTITY);
+
+	resident.Commands.front().Index = 2;
+	RestoreVirtualFocus(world.Data, resident);
+	CHECK(FocusedTextBox(world.Data) == box);
 }

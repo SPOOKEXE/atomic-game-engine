@@ -31,8 +31,8 @@ TEST_CASE(
 	scene::RegisterSceneComponents();
 	const auto &type = ecs::Components::Describe(ecs::Components::Of<scene::Portal>());
 	const scene::Portal authored[] = {
-		{ecs::Entity{73}, core::Name("portal-wire-other-world"), false, true, {12, 34}},
-		{ecs::NULL_ENTITY, {}, true, false, {56, 78}}
+		{ecs::Entity{73}, core::Name("portal-wire-other-world"), false, .125f, true, {12, 34}},
+		{ecs::NULL_ENTITY, {}, true, .25f, false, {56, 78}}
 	};
 	core::ByteWriter writer;
 	type.Write(writer, authored, 2);
@@ -41,10 +41,12 @@ TEST_CASE(
 	CHECK(wire.ReadString() == "portal-wire-other-world");
 	CHECK_FALSE(wire.ReadBool());
 	CHECK(wire.ReadBool());
+	CHECK(wire.ReadFloat() == .125f);
 	CHECK(wire.ReadUInt64() == 0);
 	CHECK(wire.ReadString().empty());
 	CHECK(wire.ReadBool());
 	CHECK_FALSE(wire.ReadBool());
+	CHECK(wire.ReadFloat() == .25f);
 	REQUIRE_FALSE(wire.Failed());
 	CHECK(wire.AtEnd());
 	scene::Portal restored[2];
@@ -57,6 +59,7 @@ TEST_CASE(
 		CHECK(restored[index].DestinationWorld == authored[index].DestinationWorld);
 		CHECK(restored[index].Enabled == authored[index].Enabled);
 		CHECK(restored[index].Bidirectional == authored[index].Bidirectional);
+		CHECK(restored[index].RimThickness == authored[index].RimThickness);
 		CHECK(restored[index].Reserved[0] == 0);
 		CHECK(restored[index].Reserved[1] == 0);
 	}
@@ -132,8 +135,8 @@ namespace registration_test {
 		"scene.AnimationClip",
 		"scene.Animator",
 		"scene.AnimationTrack",
-		"scene.AutoMeshLOD",
-		"scene.CustomMeshLOD",
+		"scene.LODAuto",
+		"scene.LODCustom",
 		"scene.RenderEffects",
 		"scene.Constraint",
 		"scene.Atmosphere",
@@ -144,6 +147,8 @@ namespace registration_test {
 		"scene.CloudCompute",
 		"scene.AtmosphereProcedural",
 		"scene.Gravity",
+		"scene.LODSettings",
+		"scene.GpuParticleField",
 	};
 }
 
@@ -254,20 +259,27 @@ TEST_CASE("automatic and custom mesh lod components survive a snapshot", "[scene
 
 	ecs::Store source("registration_test.lod.source");
 	const ecs::Entity entity = source.Create();
-	scene::AutoMeshLOD automatic;
+	scene::LODAuto automatic;
 	automatic.Meshes[0] = core::Name("registration_test.auto-half");
 	automatic.Meshes[1] = core::Name("registration_test.auto-quarter");
 	automatic.Ratios[1] = 0.2f;
 	automatic.TargetQuadArea = 7.0f;
+	automatic.Billboard = core::Name("registration_test.auto-impostor");
 	automatic.Strategy = scene::LodStrategy::Reduced;
 	automatic.Levels = 3;
 	source.Set(entity, automatic);
-	scene::CustomMeshLOD custom;
+	scene::LODCustom custom;
 	custom.Meshes[0] = core::Name("registration_test.custom-half");
 	custom.Ratios[0] = 0.4f;
 	custom.TargetQuadArea = 11.0f;
+	custom.Billboard = core::Name("registration_test.custom-impostor");
 	custom.Levels = 4;
 	source.Set(entity, custom);
+	scene::LODSettings settings;
+	settings.MinimumDistances[0] = 17.0f;
+	settings.MinimumDistances[1] = 43.0f;
+	settings.MinimumDistances[2] = 91.0f;
+	source.Set(entity, settings);
 
 	core::ByteWriter writer;
 	REQUIRE(source.Save(writer));
@@ -277,21 +289,28 @@ TEST_CASE("automatic and custom mesh lod components survive a snapshot", "[scene
 	ecs::Store restored("registration_test.lod.restored");
 	core::ByteReader reader(writer.Bytes());
 	REQUIRE(restored.Load(reader));
-	const auto *automaticBack = restored.Get<scene::AutoMeshLOD>(entity);
-	const auto *customBack = restored.Get<scene::CustomMeshLOD>(entity);
+	const auto *automaticBack = restored.Get<scene::LODAuto>(entity);
+	const auto *customBack = restored.Get<scene::LODCustom>(entity);
+	const auto *settingsBack = restored.Get<scene::LODSettings>(entity);
 	REQUIRE(automaticBack != nullptr);
 	REQUIRE(customBack != nullptr);
+	REQUIRE(settingsBack != nullptr);
 	CHECK(automaticBack->Meshes[0].Text() == "registration_test.auto-half");
 	CHECK(automaticBack->Meshes[1].Text() == "registration_test.auto-quarter");
 	CHECK(automaticBack->Ratios[1] == 0.2f);
 	CHECK(automaticBack->TargetQuadArea == 7.0f);
+	CHECK(automaticBack->Billboard.Text() == "registration_test.auto-impostor");
 	CHECK(automaticBack->Strategy == scene::LodStrategy::Reduced);
 	CHECK(automaticBack->Levels == 3);
 	CHECK(customBack->Meshes[0].Text() == "registration_test.custom-half");
 	CHECK_FALSE(customBack->Meshes[1].IsValid());
 	CHECK(customBack->Ratios[0] == 0.4f);
 	CHECK(customBack->TargetQuadArea == 11.0f);
+	CHECK(customBack->Billboard.Text() == "registration_test.custom-impostor");
 	CHECK(customBack->Levels == 4);
+	CHECK(settingsBack->MinimumDistances[0] == 17.0f);
+	CHECK(settingsBack->MinimumDistances[1] == 43.0f);
+	CHECK(settingsBack->MinimumDistances[2] == 91.0f);
 }
 
 TEST_CASE("environment shader names and texture faces survive a snapshot", "[scene][registration]") {

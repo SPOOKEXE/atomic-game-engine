@@ -4,6 +4,7 @@
 #include <engine/ecs/Store.hpp>
 
 #include <algorithm>
+#include <vector>
 
 namespace engine::ecs {
 
@@ -20,6 +21,26 @@ namespace engine::ecs {
 		const AttributeTable *TableOf(const Store &store) {
 			return store.Resource<AttributeTable>();
 		}
+
+		void BumpRevision(AttributeTable &table, Entity instance, core::Name name) {
+			uint64_t revision = table.NextRevision++;
+			if (revision == 0) {
+				revision = table.NextRevision++;
+			}
+			table.Revisions[instance.Id][name.Id()] = revision;
+		}
+	}
+
+	AttributeTable SelectAttributes(const Store &store, std::span<const Entity> instances) {
+		AttributeTable selected;
+		const AttributeTable *table = TableOf(store);
+		if (table == nullptr) return selected;
+		for (const Entity instance : instances) {
+			if (!store.Alive(instance) || Store::IsPredicted(instance)) continue;
+			const auto found = table->Entities.find(instance.Id);
+			if (found != table->Entities.end()) selected.Entities.try_emplace(instance.Id, found->second);
+		}
+		return selected;
 	}
 
 	bool GetAttribute(const Store &store, Entity instance, core::Name name, AttributeValue &out) {
@@ -42,6 +63,19 @@ namespace engine::ecs {
 		return true;
 	}
 
+	uint64_t AttributeRevision(const Store &store, Entity instance, core::Name name) {
+		const AttributeTable *table = TableOf(store);
+		if (table == nullptr || !name.IsValid()) {
+			return 0;
+		}
+		const auto entity = table->Revisions.find(instance.Id);
+		if (entity == table->Revisions.end()) {
+			return 0;
+		}
+		const auto found = entity->second.find(name.Id());
+		return found == entity->second.end() ? 0 : found->second;
+	}
+
 	bool SetAttribute(Store &store, Entity instance, core::Name name, const AttributeValue &value) {
 		if (!name.IsValid() || !store.Alive(instance)) {
 			return false;
@@ -62,7 +96,10 @@ namespace engine::ecs {
 				return true;
 			}
 
-			entity->second.erase(name.Id());
+			if (entity->second.erase(name.Id()) == 0) {
+				return true;
+			}
+			BumpRevision(*table, instance, name);
 
 			// **The entity's map is dropped when it empties**, so a world that
 			// sets and clears attributes in a loop does not accumulate one empty
@@ -93,6 +130,7 @@ namespace engine::ecs {
 		}
 
 		table->Entities[instance.Id][name.Id()] = value;
+		BumpRevision(*table, instance, name);
 		return true;
 	}
 
@@ -136,6 +174,10 @@ namespace engine::ecs {
 		}
 
 		const size_t dropped = entity->second.size();
+		for (const auto &[name, ignored] : entity->second) {
+			(void)ignored;
+			BumpRevision(*table, instance, core::Name::FromId(name));
+		}
 		table->Entities.erase(entity);
 		return dropped;
 	}
@@ -367,13 +409,27 @@ namespace engine::ecs {
 				const AttributeTable &table = tables[index];
 
 				writer.WriteUInt32(static_cast<uint32_t>(table.Entities.size()));
-				for (const auto &[entity, attributes] : table.Entities) {
+				// Hash insertion order changes on restore; snapshot and replay bytes must not.
+				std::vector<uint32_t> entities;
+				entities.reserve(table.Entities.size());
+				for (const auto &entry : table.Entities)
+					entities.push_back(entry.first);
+				std::sort(entities.begin(), entities.end());
+				for (const uint32_t entity : entities) {
+					const auto &attributes = table.Entities.at(entity);
 					writer.WriteUInt32(entity);
 					writer.WriteUInt32(static_cast<uint32_t>(attributes.size()));
 
-					for (const auto &[nameId, value] : attributes) {
+					std::vector<uint32_t> names;
+					names.reserve(attributes.size());
+					for (const auto &entry : attributes)
+						names.push_back(entry.first);
+					std::sort(names.begin(), names.end(), [](uint32_t left, uint32_t right) {
+						return core::Name::FromId(left).Text() < core::Name::FromId(right).Text();
+					});
+					for (const uint32_t nameId : names) {
 						writer.WriteName(core::Name::FromId(nameId));
-						WriteValue(writer, value);
+						WriteValue(writer, attributes.at(nameId));
 					}
 				}
 			}
@@ -384,6 +440,8 @@ namespace engine::ecs {
 			for (size_t index = 0; index < count; index++) {
 				AttributeTable &table = tables[index];
 				table.Entities.clear();
+				table.Revisions.clear();
+				table.NextRevision = 1;
 
 				const uint32_t entities = reader.ReadUInt32();
 				for (uint32_t entity = 0; entity < entities; entity++) {
@@ -401,6 +459,7 @@ namespace engine::ecs {
 						// writing the text.
 						if (name.IsValid()) {
 							table.Entities[id][name.Id()] = std::move(value);
+							BumpRevision(table, Entity{id}, name);
 						}
 					}
 				}

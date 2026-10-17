@@ -49,6 +49,7 @@ namespace {
 				.ObjectLabels = {},
 				.SemanticLabels = {},
 				.PartLabels = {},
+				.LocalLightIds = {},
 			};
 			Context = {
 				.Pipeline = Pipeline,

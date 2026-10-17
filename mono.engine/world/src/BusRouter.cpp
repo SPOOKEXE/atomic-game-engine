@@ -6,6 +6,7 @@
 #include <engine/world/Postbox.hpp>
 
 #include <algorithm>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 
@@ -66,6 +67,29 @@ namespace engine::world {
 		}
 		Fanout[id.Index].push_back(std::move(delivery));
 		return true;
+	}
+
+	void BusRouter::RemoveWorld(WorldId id, core::Name name) {
+		if (!id.IsValid()) return;
+		DiscardPendingDeliveries(id);
+		for (auto &topic : Backends.Messaging.Subscribers) {
+			topic.second.erase(id.Index);
+		}
+		// CloseFor owns both membership and the per-world channel count. Its
+		// erasures do not invalidate the channel table being walked here.
+		for (const auto &channel : Backends.Channels.Open) {
+			Backends.Channels.CloseFor(channel.first, id.Index);
+		}
+		if (id.Index < Fanout.size()) Fanout[id.Index].clear();
+		if (id.Index < ChannelQueued.size()) ChannelQueued[id.Index] = 0;
+		if (id.Index < DeliveredAt.size()) DeliveredAt[id.Index] = 0;
+		if (name.IsValid()) {
+			// Accepted requests belong to the retiring sender, not a replacement
+			// later given its name. Already-applied mail to live worlds survives.
+			std::erase_if(Ingested, [&](const Envelope &message) { return message.From == name; });
+			std::erase_if(Injected, [&](const Envelope &message) { return message.From == name; });
+			std::erase_if(Outgoing, [&](const RemoteDelivery &delivery) { return delivery.World == name; });
+		}
 	}
 
 	void BusRouter::DiscardPendingDeliveries(WorldId id) {
@@ -398,6 +422,7 @@ namespace engine::world {
 	}
 
 	BarrierCounts BusRouter::Route(const WorldDirectory &directory, const UniverseSettings &settings) {
+		ENGINE_PROFILE_CAT("world bus route", engine::core::ProfileCategory::Simulation);
 		// Resized and cleared, never reassigned. `assign(N, {})` destroys every
 		// per-world vector and default-constructs a replacement, which throws
 		// away the capacity each world built up - once per world per tick,
@@ -439,31 +464,42 @@ namespace engine::world {
 			// A replayed world re-derives the same requests it made the first
 			// time, so its outbox is discarded rather than merged - applying
 			// both copies would double every operation.
-			for (const auto &world : directory.Registry) {
-				if (world == nullptr) {
-					continue;
+			{
+				ENGINE_PROFILE_CAT("world bus collect", engine::core::ProfileCategory::Simulation);
+				size_t pending = 0;
+				for (const Envelope &envelope : Injected) {
+					if (directory.Reach(directory.Find(envelope.From)) != nullptr) ++pending;
 				}
-				world->Storage().BindToCallingThread();
-				if (Outbox *outbox = world->Storage().ResourceMutable<Outbox>(); outbox != nullptr) {
-					outbox->Pending.clear();
+				traffic.reserve(pending);
+				for (const auto &world : directory.Registry) {
+					if (world == nullptr) {
+						continue;
+					}
+					world->Storage().BindToCallingThread();
+					if (Outbox *outbox = world->Storage().ResourceMutable<Outbox>(); outbox != nullptr) {
+						outbox->Pending.clear();
+					}
 				}
-			}
 
-			for (const Envelope &envelope : Injected) {
-				World *world = directory.Reach(directory.Find(envelope.From));
-				if (world != nullptr) {
-					traffic.emplace_back(world, envelope);
+				for (const Envelope &envelope : Injected) {
+					World *world = directory.Reach(directory.Find(envelope.From));
+					if (world != nullptr) {
+						traffic.emplace_back(world, envelope);
+					}
 				}
+				Injected.clear();
 			}
-			Injected.clear();
 
 			// Already in the order it was applied, so no sort: re-sorting a
 			// recording would be trusting this build's comparator over what
 			// actually happened.
-			Applied.clear();
-			for (const auto &[sender, envelope] : traffic) {
-				ApplyEnvelope(*sender, envelope, directory, settings);
-				Applied.push_back(envelope);
+			{
+				ENGINE_PROFILE_CAT("world bus apply", engine::core::ProfileCategory::Simulation);
+				Applied.clear();
+				for (const auto &[sender, envelope] : traffic) {
+					ApplyEnvelope(*sender, envelope, directory, settings);
+					Applied.push_back(envelope);
+				}
 			}
 			counts.BusOperations = traffic.size();
 
@@ -471,35 +507,59 @@ namespace engine::world {
 			return counts;
 		}
 
-		for (size_t index = 0; index < directory.Registry.size(); index++) {
-			const auto &world = directory.Registry[index];
-			if (world == nullptr) {
-				continue;
+		{
+			ENGINE_PROFILE_CAT("world bus collect", engine::core::ProfileCategory::Simulation);
+			// Count without draining so one allocation covers all accepted traffic.
+			size_t pending = 0;
+			const auto count = [&](size_t requests) {
+				if (requests > traffic.max_size() - pending)
+					throw std::length_error("bus traffic exceeds vector capacity");
+				pending += requests;
+			};
+			for (size_t index = 0; index < directory.Registry.size(); ++index) {
+				const auto &world = directory.Registry[index];
+				if (world == nullptr || (index < directory.Hosts.size() && directory.Hosts[index].IsValid()))
+					continue;
+				world->Storage().BindToCallingThread();
+				if (const Outbox *outbox = world->Storage().ResourceMutable<Outbox>(); outbox != nullptr)
+					count(outbox->Pending.size());
 			}
-			if (index < directory.Hosts.size() && directory.Hosts[index].IsValid()) {
-				// Its outbox is in another process. What it posted arrives
-				// through `Ingest` instead.
-				continue;
+			if (!settings.Federated) {
+				for (const Envelope &envelope : Ingested) {
+					if (directory.Reach(directory.Find(envelope.From)) != nullptr) count(1);
+				}
 			}
+			traffic.reserve(pending);
+			for (size_t index = 0; index < directory.Registry.size(); index++) {
+				const auto &world = directory.Registry[index];
+				if (world == nullptr) {
+					continue;
+				}
+				if (index < directory.Hosts.size() && directory.Hosts[index].IsValid()) {
+					// Its outbox is in another process. What it posted arrives
+					// through `Ingest` instead.
+					continue;
+				}
 
-			// Rebound first: the last thread to hold this store was a job
-			// worker, and reading a resource from the driver without the
-			// handoff is exactly what the affinity check aborts on.
-			world->Storage().BindToCallingThread();
+				// Rebound first: the last thread to hold this store was a job
+				// worker, and reading a resource from the driver without the
+				// handoff is exactly what the affinity check aborts on.
+				world->Storage().BindToCallingThread();
 
-			Outbox *outbox = world->Storage().ResourceMutable<Outbox>();
-			if (outbox == nullptr || outbox->Pending.empty()) {
-				continue;
-			}
+				Outbox *outbox = world->Storage().ResourceMutable<Outbox>();
+				if (outbox == nullptr || outbox->Pending.empty()) {
+					continue;
+				}
 
-			for (Envelope &envelope : outbox->Pending) {
-				// Stamped by the driver rather than by the sender. A world does
-				// not get to say who it is, and every ordering decision here
-				// depends on that field.
-				envelope.From = world->Name();
-				traffic.emplace_back(world.get(), std::move(envelope));
+				for (Envelope &envelope : outbox->Pending) {
+					// Stamped by the driver rather than by the sender. A world does
+					// not get to say who it is, and every ordering decision here
+					// depends on that field.
+					envelope.From = world->Name();
+					traffic.emplace_back(world.get(), std::move(envelope));
+				}
+				outbox->Pending.clear();
 			}
-			outbox->Pending.clear();
 		}
 
 		if (settings.Federated) {
@@ -507,11 +567,17 @@ namespace engine::world {
 			// same way - and then handed up the link instead of applied,
 			// because a host that answered its own DataStore read would be a
 			// second source of truth for the same key.
-			std::stable_sort(traffic.begin(), traffic.end(), Earlier);
+			{
+				ENGINE_PROFILE_CAT("world bus order", engine::core::ProfileCategory::Simulation);
+				std::stable_sort(traffic.begin(), traffic.end(), Earlier);
+			}
 
-			Applied.clear();
-			for (auto &[sender, envelope] : traffic) {
-				Applied.push_back(std::move(envelope));
+			{
+				ENGINE_PROFILE_CAT("world bus apply", engine::core::ProfileCategory::Simulation);
+				Applied.clear();
+				for (auto &[sender, envelope] : traffic) {
+					Applied.push_back(std::move(envelope));
+				}
 			}
 			counts.BusOperations = Applied.size();
 
@@ -523,24 +589,33 @@ namespace engine::world {
 		// Their `From` was checked against the host that sent it in `Ingest`, so
 		// by here a remote envelope is exactly as trusted as a local one - which
 		// is the point: one routing path, not two.
-		for (Envelope &envelope : Ingested) {
-			World *sender = directory.Reach(directory.Find(envelope.From));
-			if (sender != nullptr) {
-				traffic.emplace_back(sender, std::move(envelope));
+		{
+			ENGINE_PROFILE_CAT("world bus collect", engine::core::ProfileCategory::Simulation);
+			for (Envelope &envelope : Ingested) {
+				World *sender = directory.Reach(directory.Find(envelope.From));
+				if (sender != nullptr) {
+					traffic.emplace_back(sender, std::move(envelope));
+				}
 			}
+			Ingested.clear();
 		}
-		Ingested.clear();
 
-		std::stable_sort(traffic.begin(), traffic.end(), Earlier);
+		{
+			ENGINE_PROFILE_CAT("world bus order", engine::core::ProfileCategory::Simulation);
+			std::stable_sort(traffic.begin(), traffic.end(), Earlier);
+		}
 
-		Applied.clear();
-		for (const auto &[sender, envelope] : traffic) {
-			ApplyEnvelope(*sender, envelope, directory, settings);
+		{
+			ENGINE_PROFILE_CAT("world bus apply", engine::core::ProfileCategory::Simulation);
+			Applied.clear();
+			for (const auto &[sender, envelope] : traffic) {
+				ApplyEnvelope(*sender, envelope, directory, settings);
 
-			// Retained in applied order, which is what a recording records. A
-			// replay that re-sorted would be trusting this build's comparator
-			// over what actually happened.
-			Applied.push_back(envelope);
+				// Retained in applied order, which is what a recording records. A
+				// replay that re-sorted would be trusting this build's comparator
+				// over what actually happened.
+				Applied.push_back(envelope);
+			}
 		}
 		counts.BusOperations = traffic.size();
 
@@ -549,6 +624,7 @@ namespace engine::world {
 	}
 
 	uint64_t BusRouter::DeliverInboxes(const WorldDirectory &directory, const UniverseSettings &settings) {
+		ENGINE_PROFILE_CAT("world bus delivery", engine::core::ProfileCategory::Simulation);
 		// Replacing rather than appending: a system that forgets to drain its
 		// inbox misses messages, which is visible, rather than accumulating an
 		// unbounded backlog, which is not.

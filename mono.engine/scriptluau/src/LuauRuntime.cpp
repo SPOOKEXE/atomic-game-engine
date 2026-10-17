@@ -6,9 +6,11 @@
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/scene/Services.hpp>
 #include <engine/script/DataScriptExecutor.hpp>
 #include <engine/script/InstanceShim.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/RemoteEvent.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/scriptluau/Runtime.hpp>
@@ -527,6 +529,7 @@ namespace engine::script {
 		bounds->Context.Access = limits.EffectiveCapabilities();
 		bounds->Context.DataCapture = limits.DataCapture;
 		bounds->Context.DataLifecycle = limits.DataLifecycle;
+		bounds->Context.RemoteEventSender = limits.RemoteEventSender;
 		bounds->Context.Profiler = &ScriptProfile;
 
 		State = lua_newstate(Allocate, bounds);
@@ -577,6 +580,7 @@ namespace engine::script {
 		InstallLuauServices(State, ServiceAvailability::Always, bounds->Context.Access, IsPackageOnly());
 
 		OpenQueries(State);
+		OpenStorm(State);
 
 		// After `OpenInstances`, whose method table this adds the component
 		// half of the ECS surface to.
@@ -617,6 +621,42 @@ namespace engine::script {
 		// can read `math.floor` and cannot replace it, so one script cannot
 		// change the language the next one runs in.
 		luaL_sandbox(State);
+	}
+
+	bool LuauRuntime::DeliverRemoteEvent(std::span<const std::byte> bytes, ecs::Entity sender) {
+		Runtime::StackGuard guard(*this);
+		if (!guard || !Role().Server) return false;
+		if (sender != ecs::NULL_ENTITY && (!Store.Alive(sender) || !Store.IsA(sender, scene::PlayerClass())))
+			return false;
+
+		RemoteEventMessage message;
+		if (!DecodeRemoteEvent(bytes, message)) return false;
+
+		const ecs::ClassId remoteEvent = ecs::Classes::Find(core::Name("RemoteEvent"));
+		ecs::Entity subject = ecs::NULL_ENTITY;
+		bool ambiguous = false;
+		Store.Each<const ecs::InstanceClass>([&](ecs::Entity entity, const ecs::InstanceClass &) {
+			if (ambiguous || scene::ScopeOfInstance(Store, entity) == scene::ServiceScope::Server) return;
+			if (Store.IsA(entity, remoteEvent) && Store.GetFullName(entity) == message.Event) {
+				if (subject != ecs::NULL_ENTITY) {
+					ambiguous = true;
+					return;
+				}
+				subject = entity;
+			}
+		});
+		if (subject == ecs::NULL_ENTITY || ambiguous) return false;
+
+		lua_pushlstring(
+			State, reinterpret_cast<const char *>(message.Payload.data()), message.Payload.size()
+		);
+		if (sender == ecs::NULL_ENTITY)
+			lua_pushnil(State);
+		else
+			PushInstanceValue(State, sender);
+		BoundsOf(State).StepsBase = BoundsOf(State).StepsTaken;
+		Error = FireSignal(State, SignalKind::RemoteEvent, subject, 2);
+		return Error.empty();
 	}
 
 	LuauRuntime::~LuauRuntime() {

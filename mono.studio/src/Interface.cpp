@@ -1,3 +1,5 @@
+#include "DockLayout.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
@@ -52,12 +54,13 @@ namespace studio {
 		// layout is rebuilt once and then owned by the ini again. **Bump this
 		// when a panel is added or the arrangement changes**, and not otherwise
 		// - every bump costs everybody their layout.
-		constexpr const char *DOCKSPACE = "StudioDockSpace.v19";
+		constexpr const char *DOCKSPACE = "StudioDockSpace.v20";
 
 		constexpr const char *VIEWPORT = "Viewport 1";
 		constexpr const char *VIEWPORT2 = "Viewport 2";
 		constexpr const char *EXPLORER = "Explorer";
 		constexpr const char *PROPERTIES = "Properties";
+		constexpr const char *UI_AUTHORING = "UI Authoring";
 		constexpr const char *COMPONENTS = "Components";
 		constexpr const char *WORLDS = "Worlds";
 		constexpr const char *INSTANCES = "Live Instances";
@@ -89,6 +92,7 @@ namespace studio {
 			{WORLDS, PluginDock::Left},
 			{INSTANCES, PluginDock::Left},
 			{PROPERTIES, PluginDock::Right},
+			{UI_AUTHORING, PluginDock::Right},
 			{COMPONENTS, PluginDock::Right},
 			{OUTPUT, PluginDock::Bottom},
 			{"Command Bar", PluginDock::Bottom},
@@ -107,7 +111,6 @@ namespace studio {
 			{"Plugins", PluginDock::Right},
 			{TOOLBAR_EDITOR, PluginDock::Bottom},
 			{DOCK_WIDGET_EDITOR, PluginDock::Right},
-			{"Demo Nodes", PluginDock::Bottom},
 			{"Dataset Editor", PluginDock::Bottom},
 			{"DataStores", PluginDock::Right},
 			{"CDN", PluginDock::Right},
@@ -145,7 +148,7 @@ namespace studio {
 		//                      rather than spelled here because the editor owns
 		//                      both how many there are and what they are called -
 		//                      see `Editor::ResizeViewports`.
-		// @param splitViewports Whether an extra viewport is open in this layout.
+		// @param splitViewports Whether an open viewport needs a default split.
 		// @param pluginWindows  The dynamic plugin windows and their requested homes.
 		void BuildDefaultLayout(
 			ImGuiID dockspace,
@@ -155,7 +158,8 @@ namespace studio {
 		) {
 			ImGui::DockBuilderRemoveNode(dockspace);
 			ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
-			ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->Size);
+			ImGui::DockBuilderSetNodePos(dockspace, ImGui::GetMainViewport()->WorkPos);
+			ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
 
 			// Studio's arrangement, and it is Studio's for a reason worth
 			// stating: the tree and the properties are one conversation - you
@@ -297,14 +301,8 @@ namespace studio {
 			}
 		}
 
-		// **Spanned, because it is not the free line it looks like.** The
-		// dockspace host is a full-window `Begin` and the splitter arithmetic for
-		// every node under it, and it sat in the same unmeasured gap the bars did.
-		ImGuiID dockspace = 0;
-		{
-			ENGINE_PROFILE_CAT("dockspace", engine::core::ProfileCategory::Render);
-			dockspace = ImGui::DockSpaceOverViewport(ImGui::GetID(DOCKSPACE), viewport);
-		}
+		const ImGuiID dockspace = ImGui::GetID(DOCKSPACE);
+		const bool hasSavedDockspace = ImGui::DockBuilderGetNode(dockspace) != nullptr;
 
 		// The panels the layout has to place, gathered once for either branch
 		// below. `ViewportState::Title` owns the strings; this is a view of
@@ -314,13 +312,12 @@ namespace studio {
 		for (const ViewportState &view : Extras) {
 			extraTitles.push_back(view.Title.c_str());
 		}
-		static bool built = false;
+		const bool repairLayout = !DockLayoutInitialized;
 		bool buildLayout = ResetLayout;
 		ResetLayout = false;
-		if (!built) {
-			built = true;
-			if (ImGui::DockBuilderGetNode(dockspace) == nullptr ||
-				ImGui::DockBuilderGetNode(dockspace)->IsLeafNode()) {
+		if (!DockLayoutInitialized) {
+			DockLayoutInitialized = true;
+			if (!hasSavedDockspace) {
 				buildLayout = true;
 			}
 		}
@@ -339,11 +336,49 @@ namespace studio {
 					}
 				}
 			}
+			// Play clients split their source dock when drawn, so do not split them twice.
 			const bool splitViewports =
 				std::any_of(Extras.begin(), Extras.end(), [](const ViewportState &view) {
-					return view.Open;
+					return view.Open && view.SplitBeside == 0;
 				});
 			BuildDefaultLayout(dockspace, extraTitles, splitViewports, pluginWindows);
+		}
+
+		if (repairLayout && !buildLayout) {
+			// Resolve homes before repairing anything so a missing peer cannot bias
+			// the remaining panels toward the central fallback.
+			std::array<ImGuiID, 5> homes{};
+			for (size_t ordinal = 0; ordinal < homes.size(); ordinal++) {
+				const auto dock = static_cast<PluginDock>(ordinal);
+				std::vector<const char *> peers;
+				if (dock == PluginDock::Centre) peers.push_back(VIEWPORT);
+				for (const NativePanelDock &panel : NATIVE_PANEL_DOCKS)
+					if (panel.Dock == dock) peers.push_back(panel.Label);
+				homes[ordinal] = detail::PanelDockHome(dockspace, peers);
+			}
+			const auto homeFor = [&](PluginDock dock) { return homes[static_cast<size_t>(dock)]; };
+			detail::RepairPanelDock(VIEWPORT, homeFor(PluginDock::Centre));
+			for (const char *title : extraTitles)
+				detail::RepairPanelDock(title, homeFor(PluginDock::Centre));
+			for (const NativePanelDock &panel : NATIVE_PANEL_DOCKS)
+				detail::RepairPanelDock(panel.Label, homeFor(panel.Dock));
+			for (const PluginPresentation *plugin : Plugins) {
+				if (plugin == nullptr || !plugin->Running) continue;
+				for (const PluginWidget &widget : plugin->Widgets)
+					if (widget.BuiltinPanel == BuiltinStudioPanel::None &&
+						widget.Dock != PluginDock::Floating)
+						detail::RepairPanelDock(
+							PluginWidgetLabel(*plugin, widget).c_str(), homeFor(widget.Dock)
+						);
+			}
+		}
+
+		// Build and repair before submission, so the host sizes the final tree
+		// against its current work area on the very first frame too.
+		{
+			ENGINE_PROFILE_CAT("dockspace", engine::core::ProfileCategory::Render);
+			detail::FillEmptyCentralDock(dockspace);
+			ImGui::DockSpaceOverViewport(dockspace, viewport);
 		}
 
 		// Reset before any panel draws: the claim is a within-frame fact, not
@@ -405,6 +440,10 @@ namespace studio {
 			Skinned(INSTANCES, [&] { DrawLiveInstances(); });
 		}
 		{
+			ENGINE_PROFILE_CAT("ui authoring", engine::core::ProfileCategory::Render);
+			Skinned(UI_AUTHORING, [&] { DrawUiAuthoring(); });
+		}
+		{
 			ENGINE_PROFILE_CAT("output", engine::core::ProfileCategory::Render);
 			Skinned(OUTPUT, [&] { DrawOutput(); });
 			Skinned("Command Bar", [&] { DrawCommandBar(); });
@@ -459,7 +498,6 @@ namespace studio {
 			Skinned("Plugins", [&] { DrawPlugins(); });
 			Skinned(TOOLBAR_EDITOR, [&] { DrawToolbarEditor(); });
 			Skinned(DOCK_WIDGET_EDITOR, [&] { DrawDockWidgetEditor(); });
-			Skinned("Demo Nodes", [&] { DrawNodeDemo(); });
 
 			// Default Studio contributes native panels through this same plugin
 			// path. Installed widgets retain their per-widget script colours.
@@ -980,14 +1018,12 @@ namespace studio {
 			extra->Undocked = false;
 		}
 
-		// A Play client owns a split rather than borrowing a tab. Resolve the
-		// source here because several client panels may have been created before
-		// imgui has drawn any of them, so a later client's source dock can become
-		// real only earlier in this same viewport pass.
+		// A Play client owns one split. New source panels need a completed frame
+		// before their dock sizes reflect the host's available space.
 		if (extra != nullptr && extra->SplitBeside != 0) {
 			const size_t sourceIndex = extra->SplitBeside - 1;
 			if (const ImGuiWindow *source = ImGui::FindWindowByName(ViewportIdentity(sourceIndex));
-				source != nullptr && source->DockId != 0) {
+				source != nullptr && source->WasActive && source->DockId != 0) {
 				const ImGuiID clientDock =
 					ImGui::DockBuilderSplitNode(source->DockId, ImGuiDir_Right, 0.5f, nullptr, nullptr);
 				ImGui::SetNextWindowDockID(clientDock, ImGuiCond_Always);
@@ -1181,6 +1217,14 @@ namespace studio {
 			slot.Drawn = true;
 		}
 
+		// The full-image surface is a button so it can capture camera drags and
+		// picks. Submit the controls first so that button cannot claim their
+		// press before ImGui reaches them.
+		const bool previewControlsCapture = DrawViewportGuiControls(
+			index,
+			GuiPreviewControlsPosition(glm::vec2{origin.x + imageRect.Min.x, origin.y + imageRect.Min.y})
+		);
+
 		ImGui::SetCursorScreenPos(origin);
 
 		// **Left is claimed now, and the comment below used to say it was
@@ -1220,10 +1264,10 @@ namespace studio {
 		}
 
 		if (second) {
-			extra->Hovered = ImGui::IsItemHovered();
+			extra->Hovered = !previewControlsCapture && ImGui::IsItemHovered();
 			extra->Active = ImGui::IsItemActive();
 		} else {
-			ViewportHovered = ImGui::IsItemHovered();
+			ViewportHovered = !previewControlsCapture && ImGui::IsItemHovered();
 			ViewportActive = ImGui::IsItemActive();
 		}
 
@@ -1276,7 +1320,9 @@ namespace studio {
 		// Both panels fall through to the same readout now. See `DrawToolbar`.
 
 		// The readout, drawn back over the top-left of the image.
-		ImGui::SetCursorScreenPos(ImVec2(origin.x + 10.0f, origin.y + 8.0f));
+		const float previewControlsOffset =
+			ShowGuiPreviewControls ? ImGui::GetFrameHeightWithSpacing() * 2.0f : 0.0f;
+		ImGui::SetCursorScreenPos(ImVec2(origin.x + 10.0f, origin.y + 8.0f + previewControlsOffset));
 
 		// **Scoped to the readout and not to the function.** A pushed font that
 		// is still pushed when `ImGui::End` runs is imgui's "Missing PopFont()"
@@ -1326,6 +1372,11 @@ namespace studio {
 		}
 
 		ImGui::EndGroup();
+
+		// GUI-preview controls are widgets, so they must be submitted while this
+		// viewport owns the current ImGui window. Drawing them after `End` makes
+		// ImGui create its fallback Debug window and detaches them from the image.
+		DrawViewportGui(index, ProjectionFor(index));
 		ImGui::End();
 	}
 
@@ -1339,6 +1390,7 @@ namespace studio {
 		ImGui::MenuItem("Worlds", nullptr, &ShowWorlds);
 		ImGui::MenuItem("Live Instances", nullptr, &ShowLiveInstances);
 		ImGui::MenuItem("Properties", nullptr, &ShowProperties);
+		ImGui::MenuItem("UI Authoring", nullptr, &ShowUiAuthoring);
 		ImGui::MenuItem("Components", nullptr, &ShowComponents);
 		ImGui::MenuItem("Output", nullptr, &ShowOutput);
 		ImGui::MenuItem("Preferences", nullptr, &ShowSettings);
@@ -1374,12 +1426,49 @@ namespace studio {
 		ImGui::MenuItem("Statistics", nullptr, &ShowStatistics);
 		ImGui::MenuItem("Frame Graph", nullptr, &ShowFrameGraph);
 		ImGui::MenuItem("Heap", nullptr, &ShowHeap);
+		ImGui::MenuItem("GUI Preview Controls", nullptr, &ShowGuiPreviewControls);
 		ImGui::MenuItem("Ground Grid", nullptr, &ShowGrid);
 		ImGui::MenuItem("Direction Gizmo", nullptr, &ShowDirectionGizmo);
 		ImGui::MenuItem("3D Cursor", nullptr, &ShowCursor);
 		ImGui::MenuItem("Orbit Around Cursor", nullptr, &OrbitCamera);
 		ImGui::MenuItem("Lock Camera Direction", nullptr, &DirectionLocked);
 		ImGui::MenuItem("Particle Emitters", nullptr, &ShowParticleEmitters);
+
+		ImGui::SeparatorText("Viewport Diagnostics");
+		ViewportState *diagnosticViewport = ExtraAt(FocusedViewport);
+		ViewportDiagnostics &diagnostics =
+			diagnosticViewport != nullptr ? diagnosticViewport->Diagnostics : MainViewportDiagnostics;
+		engine::core::CFrame inspectionFrame =
+			diagnosticViewport != nullptr ? diagnosticViewport->Frame : CameraFrame;
+		if (FocusedViewport < Overlays.size() && Overlays[FocusedViewport].Presented &&
+			Overlays[FocusedViewport].PresentedWorld == ViewportWorld(FocusedViewport)) {
+			inspectionFrame = Overlays[FocusedViewport].PresentedFrame;
+		}
+		ImGui::MenuItem("Light Influence Probes", nullptr, &diagnostics.ShowLightInfluence);
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Blue traces open local-light influence, red marks a stop, and orange marks "
+				"pass-through or one surface-camera reflection. Portal seam-radiance spill "
+				"is a separate bounded field and is not sampled here."
+			);
+		}
+		if (ImGui::MenuItem("Lock Virtual Camera Position", nullptr, diagnostics.FrustumLocked)) {
+			if (diagnostics.FrustumLocked) {
+				diagnostics.FrustumLocked = false;
+			} else {
+				diagnostics.LockFrustum(inspectionFrame);
+			}
+		}
+		if (ImGui::IsItemHovered()) {
+			ImGui::SetTooltip(
+				"Uses the captured position and the live view direction for base draw culling, LOD, "
+				"local lights, particles, spatial GUI layout, and local surface aiming. "
+				"The displayed camera remains free for inspection."
+			);
+		}
+		if (diagnostics.FrustumLocked && ImGui::MenuItem("Recapture Virtual Camera Position")) {
+			diagnostics.LockFrustum(inspectionFrame);
+		}
 
 		// **Beside the grid, because it is the same kind of thing**: furniture
 		// that says something about the world rather than part of it. Off by
@@ -1438,8 +1527,9 @@ namespace studio {
 			ShowRenderPipeline = ShowPipelineProfile = open;
 			ShowNetwork = ShowControl = ShowTeamCreate = ShowCommandBar = open;
 			ShowPlugins = ShowToolbarEditor = ShowDockWidgetEditor = ShowRobloxImport = open;
-			ShowNodeDemo = ShowBus = ShowScriptProfile = ShowScripting = ShowDiff = ShowDebugger = open;
-			ShowStatistics = ShowFrameGraph = ShowHeap = ShowCallStack = ShowBreakpointsWatch = open;
+			ShowBus = ShowScriptProfile = ShowScripting = ShowDiff = ShowDebugger = open;
+			ShowStatistics = ShowFrameGraph = ShowHeap = ShowGuiPreviewControls = ShowCallStack =
+				ShowBreakpointsWatch = open;
 			ShowRojoSync = open;
 			for (PluginPresentation *plugin : Plugins) {
 				if (plugin == nullptr || !plugin->Running) {
@@ -1718,8 +1808,6 @@ namespace studio {
 
 		if (ImGui::BeginMenu("Demo")) {
 			DrawExampleSceneMenu();
-			ImGui::Separator();
-			ImGui::MenuItem("Node Graph", nullptr, &ShowNodeDemo);
 			ImGui::EndMenu();
 		}
 

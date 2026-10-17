@@ -245,6 +245,15 @@ namespace client {
 		const PortalPredictionContinuation &continuation,
 		float alpha = 0
 	);
+	// Seeds an arrived player from an applied destination snapshot when no source
+	// motion continuation has arrived yet. Refusal leaves the replica untouched.
+	bool SeedPortalAdoptionPrediction(
+		engine::ecs::Store &store,
+		engine::ecs::Entity player,
+		uint64_t appliedTick,
+		std::span<const engine::replication::Input> unconfirmed,
+		uint64_t destinationIncarnation
+	);
 
 	// Installs the presentation half of a replicated world, and opens its VM.
 	//
@@ -273,6 +282,7 @@ namespace client {
 	// @param interpolation How far behind the newest received tick to draw, and
 	//        the rate that delay is measured against. The tick rate must be the
 	//        authority's, not this client's frame rate.
+	// @param limits The client script role and user-message sender for this replica.
 	// @return The world's runtime, which is never null. The scheduler holds a
 	//         reference too and drops it with the world, so a caller that keeps
 	//         none still leaves the VM alive for exactly as long as the store -
@@ -280,7 +290,8 @@ namespace client {
 	std::shared_ptr<engine::script::Runtime> BuildReplicatedWorld(
 		engine::ecs::Store &store,
 		engine::ecs::Scheduler &scheduler,
-		const engine::replication::InterpolationSettings &interpolation = {}
+		const engine::replication::InterpolationSettings &interpolation = {},
+		const engine::script::RuntimeLimits &limits = {}
 	);
 
 	// Records where everything in a replicated world is, at the tick that put it
@@ -301,6 +312,10 @@ namespace client {
 	//        `engine::replication::Connector::Applied`. Zero does nothing:
 	//        the snapshot has not landed and there is no state to record.
 	void RecordReplicatedTick(engine::ecs::Store &store, uint64_t tick);
+
+	// Removes authoritative rows the server withdrew from this replica's visibility.
+	// Predicted rows belong to this client and a server cannot legitimately name them.
+	void ForgetReplicatedRows(engine::ecs::Store &store, std::span<const engine::ecs::Entity> forgotten);
 
 	// Replaces the local prediction with the just-applied authoritative player
 	// state, then replays every still-unacknowledged movement input.

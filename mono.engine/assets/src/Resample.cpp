@@ -1,8 +1,10 @@
 #include <engine/assets/Resample.hpp>
+#include <engine/assets/TexturePixel.hpp>
 
 #include <algorithm>
 #include <bit>
 #include <cstddef>
+#include <span>
 #include <utility>
 
 namespace engine::assets {
@@ -13,6 +15,22 @@ namespace engine::assets {
 		}
 		if (width > Texture::MAXIMUM_DIMENSION || height > Texture::MAXIMUM_DIMENSION) {
 			return false;
+		}
+		if (source.Width == width && source.Height == height) {
+			// A resize result owns only its base level, even when the dimensions already
+			// match. Keeping source mips here would make the result invalid if it came
+			// from an image whose chain no longer belongs to the caller's next step.
+			TextureData resized;
+			resized.Width = source.Width;
+			resized.Height = source.Height;
+			resized.Format = source.Format;
+			resized.FlipbookSide = source.FlipbookSide;
+			resized.FlipbookFrames = source.FlipbookFrames;
+			resized.FlipbookFrameRate = source.FlipbookFrameRate;
+			resized.FlipbookFrameDurations = source.FlipbookFrameDurations;
+			resized.Pixels = source.Pixels;
+			out = std::move(resized);
+			return true;
 		}
 
 		const uint32_t channels = BytesPerPixel(source.Format);
@@ -25,7 +43,7 @@ namespace engine::assets {
 		// **Carried across, because a resize does not change what the cells
 		// are.** A flipbook sheet shrunk to fit a texture budget is the same
 		// animation at a lower resolution - same grid, same frame count, same
-		// rate - and dropping the three fields here would turn every imported
+		// rate and optional durations - and dropping the timing here would turn every imported
 		// GIF larger than `--max-texture` back into an anonymous atlas. That is
 		// the whole failure this note exists to prevent: it would look like the
 		// decoder was broken, and the decoder would be fine.
@@ -37,8 +55,62 @@ namespace engine::assets {
 		resized.FlipbookSide = source.FlipbookSide;
 		resized.FlipbookFrames = source.FlipbookFrames;
 		resized.FlipbookFrameRate = source.FlipbookFrameRate;
+		resized.FlipbookFrameDurations = source.FlipbookFrameDurations;
 
 		resized.Pixels.resize(static_cast<size_t>(width) * height * channels);
+		const bool byteFormat = source.Format == TextureFormat::R8 || source.Format == TextureFormat::RGBA8 ||
+								source.Format == TextureFormat::RGBA8_LINEAR;
+		if (!byteFormat) {
+			for (uint32_t row = 0; row < height; row++) {
+				const uint32_t firstRow =
+					static_cast<uint32_t>(static_cast<uint64_t>(row) * source.Height / height);
+				const uint32_t lastRow = std::max(
+					firstRow + 1,
+					static_cast<uint32_t>(static_cast<uint64_t>(row + 1) * source.Height / height)
+				);
+				for (uint32_t column = 0; column < width; column++) {
+					const uint32_t firstColumn =
+						static_cast<uint32_t>(static_cast<uint64_t>(column) * source.Width / width);
+					const uint32_t lastColumn = std::max(
+						firstColumn + 1,
+						static_cast<uint32_t>(static_cast<uint64_t>(column + 1) * source.Width / width)
+					);
+					TexturePixel total{};
+					uint32_t count = 0;
+					for (uint32_t sourceRow = firstRow; sourceRow < lastRow && sourceRow < source.Height;
+						 sourceRow++) {
+						for (uint32_t sourceColumn = firstColumn;
+							 sourceColumn < lastColumn && sourceColumn < source.Width;
+							 sourceColumn++) {
+							const size_t offset =
+								(static_cast<size_t>(sourceRow) * source.Width + sourceColumn) * channels;
+							TexturePixel sample{};
+							if (!LoadTexturePixel(
+									source.Format,
+									std::span<const std::byte>(source.Pixels).subspan(offset, channels),
+									sample
+								))
+								return false;
+							for (size_t channel = 0; channel < total.size(); channel++)
+								total[channel] += sample[channel];
+							count++;
+						}
+					}
+					if (count == 0) return false;
+					for (double &channel : total)
+						channel /= count;
+					const size_t destination = (static_cast<size_t>(row) * width + column) * channels;
+					if (!StoreTexturePixel(
+							source.Format,
+							total,
+							std::span<std::byte>(resized.Pixels).subspan(destination, channels)
+						))
+						return false;
+				}
+			}
+			out = std::move(resized);
+			return true;
+		}
 
 		for (uint32_t row = 0; row < height; row++) {
 			// The source rows this destination row averages over. Computed as a
@@ -137,15 +209,17 @@ namespace engine::assets {
 		image.Mips.clear();
 		image.Mips.reserve(levels - 1u);
 
-		TextureData previous = image;
+		const TextureData *source = &image;
+		TextureData previous;
 
 		for (uint32_t level = 1; level < levels; level++) {
 			TextureData next;
-			if (!ResizeImage(previous, MipExtent(image.Width, level), MipExtent(image.Height, level), next)) {
+			if (!ResizeImage(*source, MipExtent(image.Width, level), MipExtent(image.Height, level), next)) {
 				return false;
 			}
-			image.Mips.push_back(next.Pixels);
 			previous = std::move(next);
+			image.Mips.push_back(previous.Pixels);
+			source = &previous;
 		}
 		return true;
 	}

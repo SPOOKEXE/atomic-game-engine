@@ -8,7 +8,17 @@ namespace engine::world {
 	inline constexpr uint32_t MAXIMUM_HOST_EXCHANGE_ROUNDS = 1024;
 
 	// Driver commands that advance one host-owned exchange frame.
-	enum class TickExchangeOperation : uint8_t { Begin, Collect, Serve, Apply, End, Cancel };
+	enum class TickExchangeOperation : uint8_t {
+		Begin,
+		Collect,
+		Serve,
+		Apply,
+		BarrierCollect,
+		BarrierResolve,
+		BarrierApply,
+		End,
+		Cancel
+	};
 
 	// One driver-owned phase command. Frame is monotonic for this host link;
 	// Round starts at zero. Only Serve carries requests and Apply carries replies.
@@ -25,6 +35,8 @@ namespace engine::world {
 		std::vector<TickExchangeRequest> Requests;
 		// Replies supplied only for the Apply operation.
 		std::vector<TickExchangeReply> Replies;
+		// Opaque fixed-step records supplied only by BarrierResolve.
+		std::vector<FixedStepBarrierRecord> BarrierRecords;
 	};
 
 	// Host result for one driver-owned exchange phase.
@@ -43,6 +55,8 @@ namespace engine::world {
 		std::vector<TickExchangeRequest> Requests;
 		// Replies produced during the Serve operation.
 		std::vector<TickExchangeReply> Replies;
+		// Opaque fixed-step records returned only by BarrierCollect.
+		std::vector<FixedStepBarrierRecord> BarrierRecords;
 	};
 
 	// Bounded, transactional control codecs. A command cannot decode as a result.
@@ -70,15 +84,29 @@ namespace engine::world {
 		TickExchangeResult Handle(const TickExchangeCommand &command);
 		// Cancels an open exchange frame after its driver disconnects.
 		void Disconnect();
+		// Installs the local halves of an opaque fixed-step barrier. Resolve
+		// remains on the driver, which is the only owner of all worlds' records.
+		void SetFixedStepBarrier(FixedStepBarrierCallbacks callbacks);
 
 	  private:
-		enum class Phase : uint8_t { Idle, Between, Collected, Served };
+		enum class Phase : uint8_t {
+			Idle,
+			Between,
+			Collected,
+			Served,
+			Applied,
+			BarrierCollected,
+			BarrierResolved
+		};
 		Universe &Worlds;
 		Phase Stage = Phase::Idle;
 		uint64_t LastFrame = 0;
 		uint64_t ActiveFrame = 0;
+		uint64_t FrameStartedNanoseconds = 0;
 		uint32_t NextRound = 0;
 		std::vector<std::byte> LastCommand;
 		TickExchangeResult LastResult;
+		FixedStepBarrierCallbacks Barrier;
+		std::vector<FixedStepBarrierRecord> BarrierResults;
 	};
 }

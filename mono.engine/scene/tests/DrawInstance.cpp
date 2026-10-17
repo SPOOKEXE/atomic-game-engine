@@ -244,6 +244,14 @@ TEST_CASE("a hair of transparency is treated as opaque", "[scene][drawinstance]"
 	DrawInstance solid;
 	CHECK_FALSE(engine::scene::IsTransparent(solid));
 
+	DrawInstance transmissive;
+	transmissive.TransmissionFactor = 0.25f;
+	CHECK(engine::scene::IsTransparent(transmissive));
+
+	DrawInstance nearlyOpaqueTransmission;
+	nearlyOpaqueTransmission.TransmissionFactor = 1.0f / 100000.0f;
+	CHECK_FALSE(engine::scene::IsTransparent(nearlyOpaqueTransmission));
+
 	DrawInstance texturedGlass;
 	texturedGlass.Transparency = 0.25f;
 	CHECK(engine::scene::IsTransparent(texturedGlass));
@@ -590,7 +598,7 @@ TEST_CASE("the seam a row is cut at moves its signature", "[scene][drawinstance]
 	// assumption they just changed.
 	//
 	// **It survived the seam fields**, which is the case worth recording: the
-	// single-byte fields - `Surface`, `CastShadow`, `Alpha` - sit inside one
+	// single-byte fields - `SurfaceIsPortal`, `CastShadow`, `Alpha` - sit inside one
 	// four-byte word, so a four-aligned `Vector3` lands immediately after them
 	// and opens nothing. A fourth byte-sized field would still fit; a fifth is
 	// what would widen the row.
@@ -636,10 +644,24 @@ TEST_CASE("every field a surface can see moves the signature", "[scene][drawinst
 	CHECK(moved([](DrawInstance &i) { i.Alpha = engine::scene::AlphaMode::Transparency; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Shader = Name("drawinstance_test.Shader"); }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.Surface = 0; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.SurfaceIsPortal = true; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.CastShadow = false; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.SkinFirst = 1; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.SkinCount = 1; }) != unchanged);
 	CHECK(moved([](DrawInstance &i) { i.ObjectLabel = 1; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.LodMeshes[0] = Name("drawinstance_test.Lod"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.LodBillboard = Name("drawinstance_test.Impostor"); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.LodRatios[0] = 0.25f; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.LodMinimumDistances[0] = 20.0f; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.LodTargetQuadArea = 8.0f; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) {
+			  i.LodStrategyMode = engine::scene::LodStrategy::Decimated;
+		  }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.LodLevels = 2; }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.SeamFirst = Vector3(1.0f, 0.0f, 0.0f); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.SeamSecond = Vector3(0.0f, 1.0f, 0.0f); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.SeamCentre = Vector3(0.0f, 0.0f, 1.0f); }) != unchanged);
+	CHECK(moved([](DrawInstance &i) { i.SeamMask = 1; }) != unchanged);
 
 	// A rotation with the same position, because the quaternion is four floats
 	// that a position-only hash would miss entirely - and a mirror on a

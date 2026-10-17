@@ -1,3 +1,4 @@
+#include "ObservationInternal.hpp"
 #include "PipelineInternals.hpp"
 #include "WorldResource.hpp"
 
@@ -16,6 +17,7 @@
 #include <engine/physics/PhysicsWorld.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/physics/Solver.hpp>
+#include <engine/physics/Storm.hpp>
 #include <engine/physics/Welds.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -143,10 +145,16 @@ namespace engine::physics {
 		// See `RegisterCharacterComponents`.
 		RegisterCharacterComponents();
 		RegisterCopiedContactComponents();
+		RegisterPhysicsObservations();
 
 		ecs::Components::Register<PhysicsClock>(
 			PHYSICS_CLOCK_COMPONENT, WritePhysicsClocks, ReadPhysicsClocks
 		);
+
+		// Appended after every existing physics type. Component ids are registration
+		// order, so inserting a storm row ahead of the clock would rewrite old
+		// snapshot layouts even in worlds that do not use weather.
+		RegisterStormComponents();
 	}
 
 	void PreparePhysicsWorld(ecs::Store &store, float cellSize) {
@@ -158,6 +166,7 @@ namespace engine::physics {
 		// apply calls `SetPhysicsTickRate` after this; a host with nothing to
 		// say gets what physics did before the clock existed.
 		store.SetResource(PhysicsClock{});
+		PreparePhysicsObservations(store);
 
 		// Declared when the world is built, per `Store::Observe`: observing
 		// later moves every row already carrying the component into an
@@ -216,8 +225,10 @@ namespace engine::physics {
 			}
 
 			BeginCopiedContactStep(store);
+			ApplyStormForces(store);
 			ApplyPersistentLoads(store);
 			IntegrateMotion(store);
+			RecordPostIntegration(store);
 			SolveCopiedContactStep(store);
 			SolveRigidJoints(store);
 
@@ -259,21 +270,27 @@ namespace engine::physics {
 
 			BroadPhase(store);
 			NarrowPhase(store);
+			RecordPreSolve(store);
 			Solve(store);
+			RecordCompletedSolver(store);
 			Publish(store);
 			SolveRigidJoints(store);
 
 			while (BeginPhysicsStep(store)) {
 				BeginCopiedContactStep(store);
+				ApplyStormForces(store);
 				ApplyPersistentLoads(store);
 				IntegrateMotion(store);
+				RecordPostIntegration(store);
 				SolveCopiedContactStep(store);
 				SolveRigidJoints(store);
 				SweepFastBodies(store);
 				SyncBroadphase(store);
 				BroadPhase(store);
 				NarrowPhase(store);
+				RecordPreSolve(store);
 				Solve(store);
+				RecordCompletedSolver(store);
 				Publish(store);
 				SolveRigidJoints(store);
 			}

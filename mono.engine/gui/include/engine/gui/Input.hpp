@@ -58,6 +58,11 @@ namespace engine::gui {
 		// Whether the primary button is down this frame.
 		bool Down = false;
 
+		// Ends a captured contact without activating its press target. A host uses
+		// this for touch cancellation, window focus loss, and a contact the OS
+		// withdrew before it delivered an up edge.
+		bool Cancelled = false;
+
 		// Whether the pointer is over the canvas at all.
 		//
 		// False when it has left the window, which is different from being over
@@ -88,6 +93,20 @@ namespace engine::gui {
 		//
 		// @since v0.18
 		float Wheel = 0.0f;
+	};
+
+	// Device-independent UI actions. Client adapters translate keyboard and
+	// controller edges into this value before routing.
+	enum class SemanticAction : uint8_t {
+		Up,
+		Down,
+		Left,
+		Right,
+		Activate,
+		// Gives a semantic target keyboard focus. Platform accessibility
+		// adapters use this for an explicit assistive-technology focus request.
+		Focus,
+		Cancel,
 	};
 
 	// What happened, in Roblox's vocabulary.
@@ -199,6 +218,14 @@ namespace engine::gui {
 		//
 		// @since v0.15
 		bool Entered = false;
+
+		// The virtual source identity carried by the command that was hit. Empty
+		// identity means this event came from an ordinary authored instance.
+		//@{
+		ecs::Entity Collection;
+		std::string Key;
+		uint32_t Index = UINT32_MAX;
+		//@}
 	};
 
 	// Applies one wheel gesture directly to one scrolling frame.
@@ -248,6 +275,18 @@ namespace engine::gui {
 	// @param point The pointer, in screen pixels.
 	// @return The element, or `NULL_ENTITY`.
 	ecs::Entity PickScreen(const ecs::Store &store, const DrawList &list, const core::Vector2 &point);
+
+	// The visible screen element under a point, whether or not it takes input.
+	//
+	// This is the authoring counterpart to `PickScreen`: a decorative Frame or
+	// TextLabel is transparent to game input and still needs to be selectable by
+	// an editor. Spatial collectors stay excluded because this point belongs to
+	// a screen canvas, not a projected surface.
+	//
+	// @param list The compiled list, in paint order.
+	// @param point The pointer, in screen pixels.
+	// @return The frontmost visible screen element, or `NULL_ENTITY`.
+	ecs::Entity PickVisibleScreen(const DrawList &list, const core::Vector2 &point);
 
 	// Every element under a point within one subtree, front to back.
 	//
@@ -310,6 +349,19 @@ namespace engine::gui {
 		//         this runs every frame and produces nothing most of them.
 		std::span<const GuiEvent> Update(ecs::Store &store, const DrawList &list, const Pointer &pointer);
 
+		// Routes one keyboard or controller action through the selected object.
+		// This does not inspect platform key codes, keeping gui shared and tests
+		// independent of a window backend.
+		std::span<const GuiEvent>
+		UpdateSemantic(ecs::Store &store, const DrawList &list, SemanticAction action);
+
+		// Routes an accessibility action to one compiled semantic target. The
+		// target must still be visible, interactable, and inside its collector's
+		// active modal scope when this is called. This is deliberately separate
+		// from selection navigation, which has no target identity.
+		std::span<const GuiEvent>
+		UpdateSemantic(ecs::Store &store, const DrawList &list, ecs::Entity target, SemanticAction action);
+
 		// The element the pointer is over, or null.
 		//
 		// Feed this back into `CompileRequest::Hovered` so an
@@ -340,6 +392,9 @@ namespace engine::gui {
 		void Forget() {
 			Over = ecs::NULL_ENTITY;
 			Holding = ecs::NULL_ENTITY;
+			HoldingCollection = ecs::NULL_ENTITY;
+			HoldingKey.clear();
+			HoldingIndex = UINT32_MAX;
 			Dragging = ecs::NULL_ENTITY;
 			Detector = ecs::NULL_ENTITY;
 			Dragged = ecs::NULL_ENTITY;
@@ -427,10 +482,34 @@ namespace engine::gui {
 		// @param store The world.
 		// @since v0.17
 		void ReleaseCanvas(ecs::Store &store);
+		void SyncModals(ecs::Store &store, const DrawList &list);
+		ecs::Entity CollectorOf(const ecs::Store &store, ecs::Entity entity) const;
+		ecs::Entity ModalFor(ecs::Entity collector) const;
+		bool AllowsModal(const ecs::Store &store, ecs::Entity entity) const;
+		void CancelCaptureInCollector(ecs::Store &store, ecs::Entity collector);
+
+		// A modal only owns the collector that contains its scope. Screen and
+		// spatial canvases may coexist in one draw list, so one global modal would
+		// turn a dialog on a surface into an invisible screen-wide input shield.
+		struct ModalContext {
+			ecs::Entity Collector;
+			ecs::Entity Modal;
+			ecs::Entity NextModal;
+			ecs::Entity FocusBeforeModal;
+			ecs::Entity SelectionBeforeModal;
+			bool Seen = false;
+		};
+
+		static constexpr size_t MAX_MODAL_CONTEXTS = 64;
 
 		std::vector<GuiEvent> Events;
+		std::vector<ModalContext> ModalContexts;
+		bool ModalOverflow = false;
 		ecs::Entity Over;
 		ecs::Entity Holding;
+		ecs::Entity HoldingCollection;
+		std::string HoldingKey;
+		uint32_t HoldingIndex = UINT32_MAX;
 
 		// --- the scroll bar drag ---------------------------------------------
 		//

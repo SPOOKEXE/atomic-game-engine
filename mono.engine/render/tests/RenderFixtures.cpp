@@ -13,7 +13,9 @@
 #include <engine/testing/Suite.hpp>
 
 #include <glm/ext/matrix_clip_space.hpp>
+#include <glm/packing.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -187,6 +189,23 @@ namespace {
 				.Key = core::Name(resource),
 			});
 		}
+		const std::array captures{
+			std::pair{"fixture-lit-capture", "lit"},
+			std::pair{"fixture-god-rays-capture", "god-rays"},
+		};
+		for (const auto &[name, resource] : captures) {
+			document.Record({
+				.Kind = graph::EditKind::AddNode,
+				.Name = core::Name(name),
+				.NodeKind = core::Name("capture"),
+				.Scope = graph::NodeScope::Frame,
+			});
+			document.Record({
+				.Kind = graph::EditKind::Reads,
+				.Target = core::Name(resource),
+				.Key = core::Name("source"),
+			});
+		}
 		graph::RenderGraph graph;
 		core::Name offender;
 		REQUIRE(graph::Build(document, graph, offender) == graph::PipelineDocumentStatus::Ok);
@@ -281,6 +300,258 @@ TEST_CASE(
 	}
 }
 
+TEST_CASE(
+	"scaled depth exports resample the active rectangle of a padded target",
+	"[render][gpu][fixture][projection][.]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	const auto basis = InstallFixture(fixture.Render);
+	graph::PipelineDocument document;
+	const core::Name exported("fixture-scaled-depth");
+	constexpr uint32_t outputWidth = 32, outputHeight = 16;
+	const auto addExport = [&] {
+		document.Record({
+			.Kind = graph::EditKind::AddResource,
+			.Name = exported,
+			.Resource = graph::ResourceKind::Colour,
+			.Format = graph::ResourceFormat::R32F,
+			.Width = outputWidth,
+			.Height = outputHeight,
+		});
+		document.Record({
+			.Kind = graph::EditKind::AddNode,
+			.Name = core::Name("fixture-scaled-depth-export"),
+			.NodeKind = core::Name("depth-linearise"),
+			.Scope = graph::NodeScope::View,
+		});
+		document.Record(
+			{.Kind = graph::EditKind::Reads, .Target = core::Name("depth"), .Key = core::Name("depth")}
+		);
+		document.Record({.Kind = graph::EditKind::Writes, .Target = exported, .Key = core::Name("linear")});
+		document.Record({.Kind = graph::EditKind::Set, .Key = core::Name("background"), .Value = "zero"});
+	};
+	for (const auto &edit : basis.Edits()) {
+		if (edit.Kind == graph::EditKind::AddNode && edit.Name == core::Name("present")) addExport();
+		document.Record(edit);
+	}
+	graph::NodeKindSpec boundary;
+	boundary.Kind = core::Name("fixture-scaled-depth-boundary");
+	boundary.Scope = graph::NodeScope::Frame;
+	boundary.Queue = graph::ExecutionQueue::Cpu;
+	boundary.Category = graph::NodeCategory::Output;
+	boundary.Inputs.push_back({.Name = core::Name("depth"), .Kind = graph::ResourceKind::Texture});
+	REQUIRE(graph::RegisterNodeKind(boundary));
+	REQUIRE(fixture.Render.InstallNodeHandler(boundary.Kind, [](const graph::RunContext &) { return true; }));
+	document.Record(
+		{.Kind = graph::EditKind::AddNode,
+		 .Name = boundary.Kind,
+		 .NodeKind = boundary.Kind,
+		 .Scope = graph::NodeScope::Frame}
+	);
+	document.Record({.Kind = graph::EditKind::Reads, .Target = exported, .Key = core::Name("depth")});
+	graph::RenderGraph pipeline;
+	core::Name offender;
+	REQUIRE(graph::Build(document, pipeline, offender) == graph::PipelineDocumentStatus::Ok);
+	REQUIRE(fixture.Render.SetPipeline(core::Name("fixture.scaled-depth"), pipeline));
+	const std::array planes{
+		Plane{-1.1f, 0.7f, 4, 0.72f, 0.46f, 0xFF0000FFu},
+		Plane{0.65f, -0.5f, 3, 0.52f, 0.65f, 0xFF00FF00u},
+		Plane{0.65f, -0.5f, 6, 1.5f, 1.5f, 0xFFFF0000u},
+	};
+	const auto instances = DrawPlanes(planes);
+	// Two fraction bits on each axis keep corner weights exact at four bits.
+	const render::SceneTarget target{80, 40};
+	render::View view;
+	view.World = 907;
+	view.Pipeline = core::Name("fixture.scaled-depth");
+	view.Instances = instances;
+	view.Target = &target;
+	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+	view.Camera.NearPlane = 0.25f;
+	view.Camera.FarPlane = 32;
+	render::OverlayImage overlay;
+	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(frame.Submitted);
+	REQUIRE(frame.Ran(core::Name("fixture-scaled-depth-export")));
+	// G-buffer attachments share the allocation; albedo reports its active fraction before publication.
+	const auto extent = fixture.Render.ResourceTextureExtent(core::Name("albedo"));
+	CHECK(extent.U < 1.0f);
+	CHECK(extent.V < 1.0f);
+	const auto source = ProjectPlanes(planes, target.Width, target.Height, view.Camera, {});
+	const double nearPlane = view.Camera.NearPlane, farPlane = view.Camera.FarPlane;
+	// A D24-quantized reference interpolates raw depth before distance, rather than blending metres.
+	const auto rawAt = [&](int x, int y) {
+		x = std::clamp(x, 0, static_cast<int>(target.Width) - 1);
+		y = std::clamp(y, 0, static_cast<int>(target.Height) - 1);
+		const double distance = source.Depth[static_cast<size_t>(y) * target.Width + x];
+		const double raw =
+			farPlane / (farPlane - nearPlane) - farPlane * nearPlane / ((farPlane - nearPlane) * distance);
+		constexpr double d24 = 16777215.0;
+		return std::round(raw * d24) / d24;
+	};
+	std::vector<float> expected(outputWidth * outputHeight);
+	size_t blendedPixels = 0;
+	for (uint32_t y = 0; y < outputHeight; ++y) {
+		for (uint32_t x = 0; x < outputWidth; ++x) {
+			const double sourceX = (x + 0.5) * target.Width / outputWidth - 0.5;
+			const double sourceY = (y + 0.5) * target.Height / outputHeight - 0.5;
+			const int left = static_cast<int>(std::floor(sourceX)),
+					  top = static_cast<int>(std::floor(sourceY));
+			const double horizontal = sourceX - left, vertical = sourceY - top;
+			const double upper = std::lerp(rawAt(left, top), rawAt(left + 1, top), horizontal);
+			const double lower = std::lerp(rawAt(left, top + 1), rawAt(left + 1, top + 1), horizontal);
+			const double raw = std::lerp(upper, lower, vertical);
+			blendedPixels += raw != rawAt(left, top);
+			expected[y * outputWidth + x] = static_cast<float>(
+				raw >= 0.999999 ? 0.0 : farPlane * nearPlane / (farPlane - raw * (farPlane - nearPlane))
+			);
+		}
+	}
+	CHECK(blendedPixels > 0);
+	const auto actual =
+		CaptureResource(fixture.Render, exported, 0, outputWidth, outputHeight, ImageFormat::R32Float);
+	ImageTolerance tolerance;
+	tolerance.Absolute = 0.001;
+	CheckImage(
+		fixture.Render,
+		"scaled-depth",
+		"linear-depth",
+		graph::Write(document),
+		{outputWidth, outputHeight, ImageFormat::R32Float, std::as_bytes(std::span(expected))},
+		actual.View(),
+		tolerance
+	);
+}
+
+TEST_CASE(
+	"default PBR preserves distinct part tints through the display transform", "[render][gpu][colour][.]"
+) {
+	FixtureDevice fixture;
+	fixture.Initialise();
+	InstallFixture(fixture.Render);
+	const std::array planes{
+		Plane{-1.2f, 0.0f, 4.0f, .8f, 1.0f, 0xFF0000FFu},
+		Plane{1.2f, 0.0f, 4.0f, .8f, 1.0f, 0xFF00FF00u},
+	};
+	const auto instances = DrawPlanes(planes);
+	CHECK(instances[0].EmissiveStrength == 0.0f);
+	CHECK(instances[1].EmissiveStrength == 0.0f);
+	render::SceneTarget target{96, 64};
+	render::View view;
+	view.World = 905;
+	view.WorldName = core::Name("fixture.part-colour");
+	view.Pipeline = core::Name("fixture.pbr");
+	view.Target = &target;
+	view.Camera.FieldOfViewRadians = 1.5707963267948966f;
+	view.Camera.NearPlane = .25f;
+	view.Camera.FarPlane = 32.0f;
+	view.Instances = instances;
+	view.OverrideLighting = true;
+	view.Lighting.Ambient = {1.0f, 1.0f, 1.0f};
+	view.Lighting.OutdoorAmbient = {};
+	view.Lighting.Direct = {};
+	render::OverlayImage overlay;
+	const uint64_t litToken =
+		fixture.Render.QueueResourceImage(view.Pipeline, core::Name("fixture-lit-capture"), view.Slot);
+	const uint64_t godRaysToken =
+		fixture.Render.QueueResourceImage(view.Pipeline, core::Name("fixture-god-rays-capture"), view.Slot);
+	REQUIRE(litToken != 0);
+	REQUIRE(godRaysToken != 0);
+	const auto frame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	REQUIRE(frame.Ran(core::Name("gbuffer")));
+	REQUIRE(frame.Ran(core::Name("deferred-lighting")));
+	REQUIRE(frame.Ran(core::Name("tonemap")));
+
+	const auto sample = [](const CapturedImage &image, uint32_t x, uint32_t y) {
+		const std::byte *pixel = image.Bytes.data() + y * image.RowStrideBytes + x * 4;
+		return std::array{
+			std::to_integer<uint8_t>(pixel[0]),
+			std::to_integer<uint8_t>(pixel[1]),
+			std::to_integer<uint8_t>(pixel[2]),
+		};
+	};
+	const CapturedImage albedo = CaptureResource(
+		fixture.Render, core::Name("albedo"), view.Slot, target.Width, target.Height, ImageFormat::Rgba8Unorm
+	);
+	const CapturedImage display = CaptureResource(
+		fixture.Render,
+		core::Name("tonemapped"),
+		view.Slot,
+		target.Width,
+		target.Height,
+		ImageFormat::Rgba8Unorm
+	);
+	const auto redAlbedo = sample(albedo, 38, 32);
+	const auto greenAlbedo = sample(albedo, 58, 32);
+	const auto redDisplay = sample(display, 38, 32);
+	const auto greenDisplay = sample(display, 58, 32);
+	const auto await = [&fixture](uint64_t token) {
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+		while (std::chrono::steady_clock::now() < deadline) {
+			if (auto image = fixture.Render.TakeResourceImage(token)) return std::move(*image);
+			SDL_Delay(1);
+		}
+		FAIL("HDR fixture image did not complete");
+		return render::ResourceImage{};
+	};
+	const render::ResourceImage lit = await(litToken);
+	const render::ResourceImage godRays = await(godRaysToken);
+	const auto sampleHdr = [](const render::ResourceImage &image, uint32_t x, uint32_t y) {
+		REQUIRE(image.Status == render::ResourceImageStatus::Ok);
+		REQUIRE(image.Format == render::ResourceImageFormat::RGBA16_Float);
+		const std::byte *pixel = image.Pixels.data() + y * image.RowStride + x * 8;
+		uint32_t redGreen, blueAlpha;
+		std::memcpy(&redGreen, pixel, sizeof(redGreen));
+		std::memcpy(&blueAlpha, pixel + sizeof(redGreen), sizeof(blueAlpha));
+		const glm::vec2 redGreenValue = glm::unpackHalf2x16(redGreen);
+		const glm::vec2 blueAlphaValue = glm::unpackHalf2x16(blueAlpha);
+		return std::array{redGreenValue.x, redGreenValue.y, blueAlphaValue.x};
+	};
+	const auto redLit = sampleHdr(lit, 38, 32);
+	const auto greenLit = sampleHdr(lit, 58, 32);
+	const auto redGodRays = sampleHdr(godRays, 38, 32);
+	const auto greenGodRays = sampleHdr(godRays, 58, 32);
+	INFO(
+		"red albedo=" << int(redAlbedo[0]) << ',' << int(redAlbedo[1]) << ',' << int(redAlbedo[2])
+					  << " display=" << int(redDisplay[0]) << ',' << int(redDisplay[1]) << ','
+					  << int(redDisplay[2])
+	);
+	INFO(
+		"green albedo=" << int(greenAlbedo[0]) << ',' << int(greenAlbedo[1]) << ',' << int(greenAlbedo[2])
+						<< " display=" << int(greenDisplay[0]) << ',' << int(greenDisplay[1]) << ','
+						<< int(greenDisplay[2])
+	);
+	INFO(
+		"red lit=" << redLit[0] << ',' << redLit[1] << ',' << redLit[2] << " god-rays=" << redGodRays[0]
+				   << ',' << redGodRays[1] << ',' << redGodRays[2]
+	);
+	INFO(
+		"green lit=" << greenLit[0] << ',' << greenLit[1] << ',' << greenLit[2]
+					 << " god-rays=" << greenGodRays[0] << ',' << greenGodRays[1] << ',' << greenGodRays[2]
+	);
+	CHECK(redAlbedo[0] > redAlbedo[1] + 80);
+	CHECK(redAlbedo[0] > redAlbedo[2] + 80);
+	CHECK(greenAlbedo[1] > greenAlbedo[0] + 80);
+	CHECK(greenAlbedo[1] > greenAlbedo[2] + 80);
+	CHECK(redLit[0] > .95f);
+	CHECK(std::abs(redLit[1]) < .02f);
+	CHECK(std::abs(redLit[2]) < .02f);
+	CHECK(greenLit[1] > .95f);
+	CHECK(std::abs(greenLit[0]) < .02f);
+	CHECK(std::abs(greenLit[2]) < .02f);
+	CHECK(redGodRays[0] > .95f);
+	CHECK(std::abs(redGodRays[1]) < .02f);
+	CHECK(std::abs(redGodRays[2]) < .02f);
+	CHECK(greenGodRays[1] > .95f);
+	CHECK(std::abs(greenGodRays[0]) < .02f);
+	CHECK(std::abs(greenGodRays[2]) < .02f);
+	CHECK(redDisplay[0] > redDisplay[1] + 40);
+	CHECK(redDisplay[0] > redDisplay[2] + 40);
+	CHECK(greenDisplay[1] > greenDisplay[0] + 40);
+	CHECK(greenDisplay[1] > greenDisplay[2] + 40);
+}
+
 TEST_CASE("completed camera submission publishes bounded visibility facts", "[render][gpu][visibility][.]") {
 	FixtureDevice fixture;
 	fixture.Initialise();
@@ -319,6 +590,30 @@ TEST_CASE("completed camera submission publishes bounded visibility facts", "[re
 	CHECK(snapshot.Observations[1].State == render::VisibilityState::FrustumCulled);
 	CHECK(snapshot.Observations[2].Entity == 303);
 	CHECK(snapshot.Observations[2].State == render::VisibilityState::SubmittedBlended);
+
+	view.VisibilityFrame = view.CameraFrame;
+	view.CameraFrame = core::CFrame(core::Vector3{8, 0, 0});
+	view.Damage.Scene = true;
+	const auto lockedFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(lockedFrame.Submitted);
+	CHECK(lockedFrame.DrawCalls > 0);
+	const auto locked = fixture.Render.Visibility();
+	REQUIRE(locked.Valid);
+	REQUIRE(locked.Observations.size() == 3);
+	CHECK(locked.Observations[0].State == render::VisibilityState::SubmittedOpaqueOrMasked);
+	CHECK(locked.Observations[1].State == render::VisibilityState::FrustumCulled);
+
+	view.VisibilityFrame.reset();
+	view.Damage.Scene = true;
+	const auto unlockedFrame = fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);
+	CHECK(unlockedFrame.Submitted);
+	CHECK(unlockedFrame.DrawCalls > 0);
+	const auto unlocked = fixture.Render.Visibility();
+	REQUIRE(unlocked.Valid);
+	REQUIRE(unlocked.Observations.size() == 3);
+	CHECK(unlocked.Observations[0].State == render::VisibilityState::FrustumCulled);
+	CHECK(unlocked.Observations[1].State == render::VisibilityState::SubmittedOpaqueOrMasked);
+	view.CameraFrame = {};
 
 	view.Instances = {};
 	fixture.Render.Render(std::span(&view, 1), overlay, nullptr, false);

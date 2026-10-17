@@ -42,10 +42,13 @@ namespace engine::assets {
 
 		// One-joint wedge used to exercise skinning without delivered content.
 		SkinnedWedge,
+
+		// Quad on XZ facing +Y with texture V increasing along +Z for camera-facing impostors.
+		Billboard,
 	};
 
 	// Number of built-ins.
-	constexpr uint8_t BUILTIN_MESH_COUNT = 7;
+	constexpr uint8_t BUILTIN_MESH_COUNT = 8;
 
 	// In-process selector; names cross persistence boundaries.
 	//

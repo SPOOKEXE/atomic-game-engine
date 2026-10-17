@@ -61,6 +61,7 @@
 #include <engine/render/PortalImageHost.hpp>
 #include <engine/render/PresentationSchedule.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/RuntimeDiagnostics.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/ViewportFrames.hpp>
 #include <engine/render/WorldPresentation.hpp>
@@ -77,6 +78,7 @@
 
 #include <array>
 #include <atomic>
+#include <client/Accessibility.hpp>
 #include <client/Options.hpp>
 #include <client/Scene.hpp>
 #include <cstdint>
@@ -89,7 +91,6 @@
 #include <nodegraph/Editor.hpp>
 #include <nodegraph/Evaluate.hpp>
 #include <nodegraph/Graph.hpp>
-#include <nodegraph/Preview.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -114,6 +115,7 @@
 #include <studio/Projection.hpp>
 #include <studio/RobloxImport.hpp>
 #include <studio/TeamCreate.hpp>
+#include <studio/ViewportDiagnostics.hpp>
 #include <studio/Viewports.hpp>
 #include <studio/Widgets.hpp>
 #include <thread>
@@ -137,6 +139,7 @@ struct ImGuiTableSortSpecs;
 
 namespace studio {
 	struct ComponentPanelProbe;
+	struct UiAuthoringProbe;
 	struct ToolsProbe;
 	struct ViewportCameraProbe;
 	struct PlayedInputAdapter;
@@ -843,37 +846,6 @@ namespace studio {
 	// past it the diff degrades rather than failing, and says so.
 	inline constexpr size_t DIFF_CELL_LIMIT = 4u * 1000u * 1000u;
 
-	// Hands `Mono::nodegraph` the four values it draws chrome with.
-	//
-	// **The whole of what the library asks this program for.** A canvas paints
-	// its nodes from its own `Style`, but a palette popup, a section heading and
-	// a stage that has not run are the *editor's* text rather than a graph's, and
-	// a library that guessed at those would look like something else docked
-	// beside this one.
-	//
-	// Called every frame the panel draws rather than once at start-up, because
-	// the theme and the interface scale are both settings somebody can change
-	// while the panel is open.
-	//
-	// @since v0.15
-	void ApplyNodeChrome();
-
-	// A node's picture, as the texture the renderer takes.
-	//
-	// **A free function because it is the seam, and a seam is the thing to
-	// test.** `nodegraph::PreviewImage` promises red first and the top row first
-	// at four bytes a pixel, which is exactly `TextureFormat::RGBA8` - and
-	// nothing in either repository would notice the day that stopped being true,
-	// because a wrongly-ordered thumbnail is a picture that still draws.
-	//
-	// @param image What a node produced.
-	// @param out   Filled. Untouched when the picture is not a picture.
-	// @return `false` for an empty or inconsistent image, which is what a
-	//         payload nobody taught the library to draw produces.
-	//
-	// @since v0.15
-	bool NodePreviewTexture(const nodegraph::PreviewImage &image, engine::assets::TextureData &out);
-
 	// The window, the renderer, the interface and the game.
 	//
 	// @hidecollaborationgraph
@@ -904,8 +876,10 @@ namespace studio {
 
 	  private:
 		friend struct ComponentPanelProbe;
+		friend struct UiAuthoringProbe;
 		friend struct ToolsProbe;
 		friend struct ViewportCameraProbe;
+		friend struct ViewportGuiControlsProbe;
 
 		// --- the frame ------------------------------------------------------
 
@@ -989,6 +963,7 @@ namespace studio {
 		// `FocusedViewport`.
 		void ResolveFocusedViewport();
 		void DrawProperties();
+		void DrawUiAuthoring();
 		void DrawShaderCapabilities(
 			Entity shader, const engine::scene::ShaderSource &source, engine::core::Name name
 		);
@@ -1729,6 +1704,10 @@ namespace studio {
 		// @param panel The projection already resolved for this panel.
 		void DrawViewportGui(size_t index, const PanelProjection &panel);
 
+		// Draws the editor's GUI preview controls before the viewport surface
+		// claims input, and reports whether those controls own the pointer.
+		bool DrawViewportGuiControls(size_t index, glm::vec2 position);
+
 		// How one panel maps between the world and itself, this frame.
 		//
 		// Built from the camera `PresentWorld` is about to use, so the two
@@ -1846,6 +1825,7 @@ namespace studio {
 		// none, and this panel is the editor's chrome rather than a game's UI.
 		//@{
 		void DrawRenderPipeline();
+		void PrepareRenderPipelineCanvas();
 		void DrawRenderPipelineLibrary();
 		void DrawRenderPipelineInspector();
 		void DrawRenderPipelineSchedule();
@@ -2462,100 +2442,6 @@ namespace studio {
 		void StartPlaytestPlugins(WorldId world, PluginRunTarget target);
 		void StopPlaytestPlugins(WorldId world);
 		void StopAllPlaytestPlugins();
-
-		// The ribbon's Demo row, and the panel it opens.
-		//
-		// **A demo is a panel like any other**, so it closes and comes back from
-		// the View menu, and it costs nothing while it is shut: the graph is
-		// built on the first open rather than at start-up.
-		//@{
-		void DrawDemoTools();
-		void DrawNodeDemo();
-
-		// The panel's menu bar: the file menu, the history, the selection tools
-		// and the build switch.
-		void DrawNodeDemoBar();
-
-		// The breadcrumb bar, when the view is inside a compressed node. Absent
-		// at the root, where it would be a row that only ever says one thing.
-		void DrawNodeDemoCrumbs();
-
-		// The one line under the canvas: zoom, counts, cache hit rate and
-		// whether the graph follows edits.
-		void DrawNodeDemoStatus();
-
-		// The right-hand side's three tabs.
-		//
-		// **Three tabs and not three panels**, which is the reference
-		// implementation's arrangement and the right one: they answer three
-		// questions about one selection - what can I add, what is this, and what
-		// can connect to what - and only one is being asked at a time.
-		//@{
-		void DrawNodeDemoLibrary();
-		void DrawNodeDemoInspector();
-		void DrawNodeDemoTypes();
-		//@}
-
-		// The selected node's knobs, as real widgets.
-		//
-		// **The same `WidgetSpec` the canvas paints and hit-tests from**, which
-		// is the third consumer `nodegraph/Layout.hpp` promises: a knob that existed
-		// here and not on the node, or took a different range, would be two
-		// declarations of one thing.
-		//
-		// @return Whether anything was changed.
-		bool DrawNodeDemoWidgets(nodegraph::Node &node);
-
-		// Writes one node's picture beside the graph file, as a PNG.
-		//
-		// **Encoded here rather than through `Engine::bake`**, which only reads
-		// one: its decoder is a publishing-pipeline concern this editor does not
-		// link, and a stored-block encoder needs nothing linked at all.
-		//
-		// @return What to say about it, either way.
-		std::string ExportNodeDemoImage(nodegraph::NodeId node);
-
-		// Snapshot undo over the demo graph.
-		//
-		// **Snapshots and not a command log.** The editor's own history is a log
-		// because a scene is large and an edit is small; this graph serialises to
-		// a few hundred bytes, and a snapshot cannot be wrong about what it
-		// reverses. `studio/Commands.hpp` carries the other side of that trade.
-		//@{
-		void CommitNodeDemo();
-		void UndoNodeDemo();
-		void RedoNodeDemo();
-		void RestoreNodeDemo(const std::string &document);
-		//@}
-
-		// Turns a node's preview into a texture the interface can draw.
-		//
-		// **Kept under the hash the payload was computed at.** A picture belongs
-		// to a result rather than to a node, so two nodes computing one thing
-		// share a texture and an edit makes a new key instead of overwriting a
-		// live one.
-		void *NodeDemoImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make);
-
-		// The 3-D view's picture, which is one texture rather than a table of
-		// them.
-		//
-		// **Not held under a hash like the rest.** A picture that changes on
-		// every frame of an orbit has an unbounded number of keys, and putting
-		// them in `NodeDemoTextures` would blow through its ceiling in a second
-		// and take every node's thumbnail with it. Two slots are alive at once:
-		// the one being drawn, and the one it replaced - which is released
-		// between frames, because a texture dropped while a draw list still
-		// names it is a use-after-free on the GPU.
-		void *NodeDemoOrbitImage(uint64_t key, const std::function<bool(nodegraph::PreviewImage &)> &make);
-
-		// Releases every preview texture. Called when the cache is dropped and
-		// when the graph is replaced - a texture per result would otherwise be a
-		// slow leak for as long as somebody keeps editing.
-		void DropNodeDemoImages();
-
-		// Enforces the preview ceiling, between frames.
-		void PumpNodeDemoImages();
-		//@}
 
 		// The ribbon's Plugins row: every running plugin's toolbars.
 		//
@@ -3389,15 +3275,17 @@ namespace studio {
 		// Answers everything the socket parked since the last frame.
 		void PumpControl();
 
-		// Enables this product's ordered engine and studio feature list once.
+		// Installs this product's ordered permanent control hooks once.
 		void EnableControlFeatures();
+		// Activates the editor-owned control rows after the shared rows are available.
+		void ActivateControlHooks();
 		// Starts the editor-owned data-factory host and registers its control features.
 		bool StartDataFactoryHost();
 		// Rebuilds client-owned runtime state required before a restored factory world is published.
 		bool PrepareDataFactoryWorld(engine::world::Universe &universe, WorldId world, std::string &detail);
 
-		// The editor's own tools, added on top of the shared ones.
-		void RegisterControlTools();
+		// The editor's own tools, staged into its product hook.
+		void RegisterControlTools(engine::control::HookRegistration &registration);
 
 		// The `world` argument, defaulting to the active scene.
 		WorldId ControlWorld(const nlohmann::json &arguments, std::string &failure);
@@ -3551,6 +3439,14 @@ namespace studio {
 			"independently - `world_run` starts one without starting the rest, and stopping restores "
 			"the snapshot taken when it started."
 		};
+		// Permanent product rows close while their editor-owned services still exist.
+		std::vector<engine::control::HookLease> PermanentControlHooks;
+		// Owns the editor-only rows while the control surface is available.
+		engine::control::HookLease StudioControlHook;
+		// Owns input automation while the Studio window accepts queued events.
+		engine::control::HookLease StudioInputControlHook;
+		// Owns the camera calibration row while the renderer and universe are available.
+		engine::control::HookLease StudioSceneRenderingHook;
 
 		// The window and the things that draw into it.
 		//
@@ -3559,6 +3455,7 @@ namespace studio {
 		// renderer before the window it borrowed its device from.
 		//@{
 		SDL_Window *Window = nullptr;
+		std::unique_ptr<client::AccessibilityAdapter> NativeAccessibility;
 		std::unique_ptr<PlayedInputAdapter> PlayedInput;
 		engine::render::Renderer Renderer;
 
@@ -3775,6 +3672,8 @@ namespace studio {
 		std::vector<engine::effects::RibbonVertex> RibbonVertices;
 		std::vector<engine::effects::RibbonRun> RibbonRuns;
 		std::vector<engine::render::SceneLight> Lights;
+		std::vector<uint32_t> FrozenVisibleRows;
+		std::vector<engine::scene::DrawInstance> FrozenVisibleInstances;
 		//@}
 
 		// The universe-authored rendering profiles. Worlds hold only the name
@@ -4184,6 +4083,7 @@ namespace studio {
 		float CameraPitch = 0.0f;
 		float CameraSpeed = 24.0f;
 		ViewportCameraMemory CameraMemory;
+		ViewportDiagnostics MainViewportDiagnostics;
 		//@}
 
 		// How big a texture the world is drawn into, from the main viewport
@@ -4194,6 +4094,8 @@ namespace studio {
 		// are different sizes: a single target would be reallocated twice a
 		// frame as each asked for its own dimensions.
 		engine::render::SceneTarget WorldTarget;
+		// Editor-only GUI preview settings for the main viewport.
+		GuiPreviewSettings MainGuiPreview;
 
 		// What a viewport panel is looking at, and from where.
 		//
@@ -4202,6 +4104,8 @@ namespace studio {
 		// the second is to watch a different world, or the same world from
 		// somewhere else, while the first stays where it was put.
 		struct ViewportState {
+			// Editor-only GUI preview settings for this panel.
+			GuiPreviewSettings GuiPreview;
 			// Which world it draws, or invalid to follow the active one.
 			WorldId World;
 
@@ -4215,6 +4119,7 @@ namespace studio {
 			float Pitch = 0.0f;
 			float Speed = 24.0f;
 			ViewportCameraMemory CameraMemory;
+			ViewportDiagnostics Diagnostics;
 			//@}
 
 			// What the pointer is doing to this panel.
@@ -4426,6 +4331,8 @@ namespace studio {
 		// `gui::Compiled` is for. A fresh one per frame would compute a
 		// signature, find nothing to compare it against and rebuild every time.
 		std::vector<engine::gui::Compiled> GuiLists;
+		// Per-viewport locale caches used while compiling game UI.
+		std::vector<engine::gui::LocalizationCache> GuiLocalizations;
 
 		// The retained scene, game UI, host UI, and geometry signatures for each
 		// viewport. A turn in the round robin can update one image without
@@ -4443,6 +4350,8 @@ namespace studio {
 		// reason. Editor state, not world state: nobody replicates where a
 		// mouse is.
 		std::vector<engine::gui::Router> GuiRouters;
+		// Whether the editor-only GUI preview controls own the pointer this frame.
+		std::vector<bool> GuiPreviewControlsCapture;
 		// Routes pointer input to adornment geometry for each viewport.
 		std::vector<engine::render::AdornmentPointerRouter> AdornmentRouters;
 
@@ -4479,6 +4388,59 @@ namespace studio {
 
 		// The click waiting to become a selection, if any.
 		PendingPickAction PendingPick;
+
+		// One direct manipulation of a GUI rectangle. The authored UDim2 values
+		// are captured on grab, while Resolved supplies only the canvas-space
+		// feedback rectangle.
+		struct GuiCanvasDrag {
+			// World containing the manipulated GUI instance.
+			WorldId World;
+			// Manipulated GUI instance.
+			Entity Instance;
+			// Viewport where the drag began.
+			size_t Viewport = 0;
+			// Current authored position.
+			engine::core::UDim2 Position;
+			// Current authored size.
+			engine::core::UDim2 Size;
+			// Position captured when the drag began.
+			engine::core::UDim2 BeforePosition;
+			// Size captured when the drag began.
+			engine::core::UDim2 BeforeSize;
+			// Whether the drag resizes instead of moves.
+			bool Resize = false;
+			// Whether the drag changed position or size.
+			bool Moved = false;
+		};
+
+		// Active direct manipulation of a GUI rectangle.
+		GuiCanvasDrag GuiDragging;
+
+		// A canvas drag writes after the viewport left Universe::Enter. Its final
+		// update commits one grouped undo step for Position and Size.
+		struct PendingGuiCanvasEdit {
+			// World containing the edited GUI instance.
+			WorldId World;
+			// Edited GUI instance.
+			Entity Instance;
+			// Requested authored position.
+			engine::core::UDim2 Position;
+			// Requested authored size.
+			engine::core::UDim2 Size;
+			// Position before the drag.
+			engine::core::UDim2 BeforePosition;
+			// Size before the drag.
+			engine::core::UDim2 BeforeSize;
+			// Whether the edit resizes instead of moves.
+			bool Resize = false;
+			// Whether this update completes the grouped undo command.
+			bool Commit = false;
+			// Whether an edit awaits application outside Universe::Enter.
+			bool Wanted = false;
+		};
+
+		// Pending GUI edit applied after viewport rendering.
+		PendingGuiCanvasEdit PendingGuiEdit;
 
 		// An Alt-click waiting to place the editor's 3D cursor after projection
 		// data is available.
@@ -5132,6 +5094,12 @@ namespace studio {
 		//
 		// @since v0.17
 		engine::render::AdornmentGeometry Adornments;
+		// Light path probe geometry drawn for viewport diagnostics.
+		engine::render::LightPathGeometry LightPathProbes;
+		// Lights collected for diagnostic overlays.
+		std::vector<engine::render::SceneLight> DiagnosticLights;
+		// Lines showing the editor camera lock location.
+		std::vector<engine::render::AdornmentLine> CameraLockAdornment;
 
 		// Which viewport a panel index refers to, or null for the main one.
 		//
@@ -5560,6 +5528,17 @@ namespace studio {
 		bool ShowExplorer = true;
 		bool ShowWorlds = true;
 		bool ShowProperties = true;
+		bool ShowUiAuthoring = false;
+		std::string UiDocumentImportPath;
+		std::string UiDocumentExportPath;
+		std::string UiThemeTokenImportPath;
+		std::string UiLocalizationImportPath;
+		std::string UiDocumentStatus;
+		std::string UiThemeTokenDraft = "token";
+		std::string UiAnimationMarkerDraft = "marker";
+		std::unordered_map<std::string, std::string> UiAuthoringTextDrafts;
+		uint64_t UiAuthoringDraftEntity = 0;
+		uint32_t UiAuthoringDraftEpoch = 0;
 		bool ShowComponents = true;
 		bool ShowScripts = false;
 		bool ShowDatasets = false;
@@ -6025,82 +6004,6 @@ namespace studio {
 		double NextPluginRootScanSeconds = 0.0;
 		//@}
 
-		// The Demo Nodes panel, and everything it holds.
-		//
-		// **On the editor rather than static inside the panel**, for the reason
-		// every other panel's state is: a static would be one graph shared by
-		// two editors in one process, which the tests and a future second window
-		// both produce.
-		//
-		// The graph is empty until the panel is first opened - see
-		// `DrawNodeDemo` - so an editor nobody opens it in carries three empty
-		// containers and nothing else.
-		//@{
-		bool ShowNodeDemo = false;
-		nodegraph::Graph NodeDemoGraph;
-		nodegraph::Canvas NodeDemoCanvas;
-		nodegraph::Evaluator NodeDemoRunner;
-		nodegraph::RunReport NodeDemoReport;
-
-		// The signature the demo last evaluated at, so dragging a node does not
-		// recompute a graph that has not changed.
-		uint64_t NodeDemoSignature = 0;
-
-		// Whether an edit re-runs the graph immediately.
-		//
-		// On, because a chain of cheap filters wants to follow the slider. A
-		// graph with a six-second task in it is what the switch is for.
-		bool NodeDemoLive = true;
-
-		// The preview textures, by result hash, and the names they were
-		// registered under so they can be dropped again.
-		//@{
-		std::unordered_map<uint64_t, void *> NodeDemoTextures;
-		std::unordered_map<uint64_t, engine::core::Name> NodeDemoTextureNames;
-		//@}
-
-		// The 3-D view's one texture: what it currently shows, what it is
-		// published as, and the name it displaced - released at the next pump.
-		//@{
-		uint64_t NodeDemoOrbitKey = 0;
-		void *NodeDemoOrbitHandle = nullptr;
-		engine::core::Name NodeDemoOrbitName;
-		engine::core::Name NodeDemoOrbitStale;
-		uint32_t NodeDemoOrbitSerial = 0;
-		//@}
-
-		// The undo stacks, as whole documents. `NodeDemoLast` is what the graph
-		// currently reads as, so a commit that changed nothing pushes nothing.
-		//@{
-		std::vector<std::string> NodeDemoPast;
-		std::vector<std::string> NodeDemoFuture;
-		std::string NodeDemoLast;
-		//@}
-
-		// Which of the right-hand tabs is open, and where the file menu reads
-		// and writes.
-		//@{
-		int NodeDemoTab = 0;
-		char NodeDemoPath[256] = "demo.nodegraph";
-		char NodeDemoFilter[64] = {};
-		char NodeDemoTypeName[64] = {};
-		std::string NodeDemoSaid;
-		//@}
-
-		// The counters the status line reads. Accumulated across runs rather
-		// than taken from the last one, because a hit rate over one frame of a
-		// settled graph is always 100%.
-		//@{
-		// Whether an inspector widget has been changed since the last commit.
-		// Survives the frames of a drag, so one drag is one undo step.
-		bool NodeDemoDirty = false;
-
-		size_t NodeDemoHits = 0;
-		size_t NodeDemoMisses = 0;
-		double NodeDemoRunMs = 0.0;
-		//@}
-		//@}
-
 		// Native and script plugins have separate ownership. `Plugins` is only
 		// the stable presentation order consumed by the toolbar and manager.
 		PluginBindingRegistry StudioPluginBindings;
@@ -6302,6 +6205,8 @@ namespace studio {
 		//@{
 		bool ShowStatistics = false;
 		bool ShowFrameGraph = false;
+		// Viewer-only GUI controls share the View menu with the other viewport tools.
+		bool ShowGuiPreviewControls = false;
 		// How many more frames an explicit `--graph` should select the dock tab.
 		// A few frames outlast the first-run dock rebuild, as `FocusWorlds` does.
 		int FocusFrameGraphFrames = 0;
@@ -6514,6 +6419,9 @@ namespace studio {
 		// dockspace's nodes from inside a menu is rearranging the tree that is
 		// being walked.
 		bool ResetLayout = false;
+
+		// Startup repair belongs to this editor, not to the lifetime of the process.
+		bool DockLayoutInitialized = false;
 
 		// What the panels asked for this frame, applied by
 		// `ApplyPendingActions` once every `Universe::Enter` has been left.

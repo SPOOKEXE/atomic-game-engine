@@ -12,6 +12,10 @@
 #include <nodegraph/Graph.hpp>
 #include <string>
 
+namespace engine::render {
+	class Renderer;
+}
+
 namespace studio {
 
 	// Registers render resource types and every catalogue pass with nodegraph.
@@ -31,6 +35,13 @@ namespace studio {
 		const nodegraph::Graph &graph,
 		const engine::graph::PipelineDocument &basis,
 		engine::graph::PipelineDocument &document,
+		std::string &error
+	);
+
+	// Reports the renderer's admission failure without changing the document.
+	bool ValidateRenderPipelineAdmission(
+		const engine::graph::PipelineDocument &document,
+		const engine::render::Renderer &renderer,
 		std::string &error
 	);
 }

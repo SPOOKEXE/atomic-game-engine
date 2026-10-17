@@ -33,11 +33,18 @@ namespace engine::parallel {
 	namespace {
 		struct Pool;
 
+		struct AssignedReading {
+			uint64_t InclusiveNanoseconds = 0;
+			uint64_t BusyNanoseconds = 0;
+			bool Entered = false;
+		};
+
 		// One batch may use the pool; competing dispatches run inline.
 		struct Batch {
 			Pool *Owner = nullptr;
 			const std::function<void(size_t, size_t)> *Body = nullptr;
 			const unsigned *AssignedWorkers = nullptr;
+			bool CaptureAssigned = false;
 			size_t Count = 0;
 			size_t Grain = 0;
 			std::atomic<size_t> Next{0};
@@ -72,6 +79,7 @@ namespace engine::parallel {
 			std::vector<std::thread> Workers;
 			std::vector<platform::Processor> WorkerProcessors;
 			std::vector<uint8_t> WorkerPinned;
+			std::vector<AssignedReading> AssignedReadings;
 			std::mutex Guard;
 			std::condition_variable Available;
 			std::condition_variable Finished;
@@ -184,6 +192,7 @@ namespace engine::parallel {
 		}
 
 		void DrainAssigned(Batch &batch, unsigned workerIndex) {
+			const uint64_t started = batch.CaptureAssigned ? core::Clock::Nanoseconds() : 0;
 			uint64_t busy = 0;
 			bool took = false;
 			bool pending = false;
@@ -211,6 +220,12 @@ namespace engine::parallel {
 
 			if (pending) {
 				Retire(batch);
+			}
+			if (batch.CaptureAssigned) {
+				// Published before Inside retires, including workers that found no assigned task.
+				batch.Owner->AssignedReadings[workerIndex] = {
+					core::Clock::Nanoseconds() - started, busy, true
+				};
 			}
 		}
 
@@ -312,6 +327,10 @@ namespace engine::parallel {
 		pool.Workers.reserve(workers);
 		pool.WorkerProcessors.resize(workers);
 		pool.WorkerPinned.assign(workers, 0);
+		{
+			ENGINE_HEAP_SCOPE("jobs.assigned.readings");
+			pool.AssignedReadings.resize(workers);
+		}
 		for (unsigned index = 0; index < workers && index < distinctCores.size(); index++) {
 			pool.WorkerProcessors[index] = distinctCores[index];
 		}
@@ -518,6 +537,7 @@ namespace engine::parallel {
 	void Jobs::ForWorkers(
 		std::span<const unsigned> workerByIndex, const std::function<void(size_t, size_t)> &body
 	) {
+		ENGINE_PROFILE("jobs.assigned");
 		if (workerByIndex.empty()) {
 			return;
 		}
@@ -568,6 +588,10 @@ namespace engine::parallel {
 		{
 			std::unique_lock lock(pool.Guard);
 			pool.Drained.wait(lock, [&] { return pool.Inside == 0; });
+			batch.CaptureAssigned = core::FrameGraph::IsEnabled();
+			if (batch.CaptureAssigned) {
+				std::fill(pool.AssignedReadings.begin(), pool.AssignedReadings.end(), AssignedReading{});
+			}
 
 			batch.Body = &body;
 			batch.AssignedWorkers = workerByIndex.data();
@@ -604,6 +628,22 @@ namespace engine::parallel {
 			static_cast<float>(static_cast<double>(core::Clock::Nanoseconds() - dispatched) / 1e6);
 		LastTiming.Participants = batch.Participants.load(std::memory_order_relaxed);
 
+		if (batch.CaptureAssigned) {
+			for (const AssignedReading &reading : pool.AssignedReadings) {
+				if (!reading.Entered) continue;
+				// Producer self time includes scanning, retirement and timer overhead, not wake/lock time.
+				core::FrameGraph::ReportedScope worker(
+					"jobs.assigned.worker",
+					core::ProfileCategory::Engine,
+					static_cast<float>(static_cast<double>(reading.InclusiveNanoseconds) / 1e6)
+				);
+				core::FrameGraph::Report(
+					"jobs.assigned.body",
+					core::ProfileCategory::Engine,
+					static_cast<float>(static_cast<double>(reading.BusyNanoseconds) / 1e6)
+				);
+			}
+		}
 		if (batch.Failure) {
 			std::rethrow_exception(batch.Failure);
 		}

@@ -1,8 +1,11 @@
+#include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/world/PresentationStream.hpp>
 
 #include <algorithm>
+#include <atomic>
+#include <cstdlib>
 #include <limits>
 
 namespace engine::world {
@@ -10,6 +13,15 @@ namespace engine::world {
 		constexpr uint32_t PRESENTATION_STREAM_MAGIC = 0x31535041;
 		constexpr size_t HEADER_BYTES = 20;
 		constexpr PresentationLimits LIMITS;
+		std::atomic_size_t SendRefusalTraces = 0;
+		bool EyeReplyTrace() {
+			return std::getenv("PORTAL_PRESENTATION_QUEUE_DIAGNOSTIC") != nullptr;
+		}
+		bool FirstServerReply(const PresentationStreamFrame &frame) {
+			return frame.Kind == PresentationStreamKind::Message &&
+				   frame.Message.From.World == "server.world" &&
+				   frame.Message.To.Channel == "portal-image-replies" && frame.Message.Correlation == 1;
+		}
 		bool Decode(std::span<const std::byte> bytes, PresentationStreamFrame &frame) {
 			core::ByteReader reader(bytes);
 			frame.Kind = static_cast<PresentationStreamKind>(reader.ReadUInt8());
@@ -54,6 +66,18 @@ namespace engine::world {
 		Sending.emplace_back(writer.Bytes().begin(), writer.Bytes().end());
 		SendSize.Messages++;
 		SendSize.Bytes += writer.Size();
+		if (EyeReplyTrace() && FirstServerReply(frame))
+			ENGINE_WARN(
+				"portal presentation server reply queued world={} channel={} session={} correlation={} "
+				"frame_bytes={} ahead_messages={} ahead_bytes={}",
+				frame.Message.To.World,
+				frame.Message.To.Channel,
+				frame.Message.To.Session,
+				frame.Message.Correlation,
+				writer.Size(),
+				SendSize.Messages - 1,
+				SendSize.Bytes - writer.Size()
+			);
 		core::Metrics::Count("world.presentation.stream.queued.bytes", static_cast<double>(writer.Size()));
 		return PresentationStatus::Ok;
 	}
@@ -72,12 +96,44 @@ namespace engine::world {
 			Packet.WriteUInt32(static_cast<uint32_t>(frame.size()));
 			Packet.WriteUInt32(static_cast<uint32_t>(SendingOffset));
 			Packet.WriteRaw(frame.data() + SendingOffset, count);
-			if (!send(Packet.Bytes())) break;
+			if (!send(Packet.Bytes())) {
+				if (EyeReplyTrace() && packets == 0 && SendRefusalTraces.fetch_add(1) < 16) {
+					PresentationStreamFrame head;
+					if (Decode(frame, head))
+						ENGINE_WARN(
+							"portal presentation stream send refused head_kind={} head_channel={} "
+							"head_correlation={} offset={} frame_bytes={} queued_messages={} queued_bytes={}",
+							static_cast<int>(head.Kind),
+							head.Message.To.Channel,
+							head.Message.Correlation,
+							SendingOffset,
+							frame.size(),
+							SendSize.Messages,
+							SendSize.Bytes
+						);
+				}
+				break;
+			}
 			core::Metrics::Count("world.presentation.stream.sent.bytes", static_cast<double>(Packet.Size()));
 			core::Metrics::Count("world.presentation.stream.sent.packets", 1);
 			SendingOffset += count;
 			packets++;
 			if (SendingOffset == frame.size()) {
+				if (EyeReplyTrace()) {
+					PresentationStreamFrame completed;
+					if (Decode(frame, completed) && FirstServerReply(completed))
+						ENGINE_WARN(
+							"portal presentation server reply sent world={} channel={} session={} "
+							"correlation={} frame_bytes={} remaining_messages={} remaining_bytes={}",
+							completed.Message.To.World,
+							completed.Message.To.Channel,
+							completed.Message.To.Session,
+							completed.Message.Correlation,
+							frame.size(),
+							SendSize.Messages - 1,
+							SendSize.Bytes - frame.size()
+						);
+				}
 				SendSize.Bytes -= frame.size();
 				SendSize.Messages--;
 				frames++;

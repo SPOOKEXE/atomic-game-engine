@@ -1,5 +1,9 @@
 #version 450
 
+#ifndef MAX_VOLUMES
+#define MAX_VOLUMES 8
+#endif
+
 layout(location = 0) in vec2 inUv;
 layout(location = 0) out vec4 outColour;
 
@@ -21,6 +25,16 @@ struct Volume {
 	vec4 Steps;
 };
 
+struct CloudNode {
+	uvec4 ChildrenLow;
+	uvec4 ChildrenHigh;
+	vec4 Values;
+};
+
+layout(set = 2, binding = 2, std430) readonly buffer CloudNodes {
+	CloudNode nodes[];
+} cloud;
+
 layout(set = 3, binding = 0) uniform Pass {
 	mat4 InverseViewProjection;
 	mat4 LightViewProjection;
@@ -39,8 +53,11 @@ layout(set = 3, binding = 0) uniform Pass {
 	vec4 SeamOutward[2];
 	vec4 SeamFirst[2];
 	vec4 SeamSecond[2];
-	Volume Volumes[4];
+	Volume Volumes[MAX_VOLUMES];
 	vec4 VolumeCount;
+	vec4 CloudMinimumNodeCount;
+	vec4 CloudSizeDepth;
+	vec4 CloudCentreEnabled;
 } pass;
 
 float Hash(vec3 point) {
@@ -114,6 +131,47 @@ float DensityAt(Volume volume, vec3 world) {
 	return volume.ColourDensity.w * fade * mix(1.0, signal, volume.ExtinctionNoise.z);
 }
 
+bool CloudInterval(vec3 origin, vec3 direction, float maximum, out float enter, out float exit) {
+	vec3 minimum = pass.CloudCentreEnabled.xyz + pass.CloudMinimumNodeCount.xyz;
+	vec3 maximumPoint = minimum + pass.CloudSizeDepth.xyz;
+	vec3 inverse = 1.0 / max(abs(direction), vec3(1e-5)) * sign(direction + vec3(1e-5));
+	vec3 first = (minimum - origin) * inverse;
+	vec3 second = (maximumPoint - origin) * inverse;
+	vec3 low = min(first, second);
+	vec3 high = max(first, second);
+	enter = max(max(low.x, low.y), max(low.z, 0.0));
+	exit = min(min(high.x, high.y), min(high.z, maximum));
+	return exit > enter;
+}
+
+float CloudDensityAt(vec3 world) {
+	if (pass.CloudCentreEnabled.w < 0.5 || pass.CloudMinimumNodeCount.w < 1.0) return 0.0;
+	vec3 minimum = pass.CloudMinimumNodeCount.xyz;
+	vec3 size = pass.CloudSizeDepth.xyz;
+	vec3 point = world - pass.CloudCentreEnabled.xyz;
+	if (any(lessThan(point, minimum)) || any(greaterThanEqual(point, minimum + size))) return 0.0;
+	uint nodeIndex = 0u;
+	uint count = uint(pass.CloudMinimumNodeCount.w);
+	uint depth = uint(pass.CloudSizeDepth.w);
+	for (uint level = 0u; level < 8u; ++level) {
+		if (nodeIndex >= count) return 0.0;
+		CloudNode node = cloud.nodes[nodeIndex];
+		if (all(equal(node.ChildrenLow, uvec4(0xffffffffu))) &&
+			all(equal(node.ChildrenHigh, uvec4(0xffffffffu)))) return node.Values.x;
+		if (level >= depth) return node.Values.x;
+		vec3 halfSize = size * 0.5;
+		vec3 middle = minimum + halfSize;
+		uint octant = uint(point.x >= middle.x) | (uint(point.y >= middle.y) << 1u) |
+			(uint(point.z >= middle.z) << 2u);
+		nodeIndex = octant < 4u ? node.ChildrenLow[octant] : node.ChildrenHigh[octant - 4u];
+		if ((octant & 1u) != 0u) minimum.x = middle.x;
+		if ((octant & 2u) != 0u) minimum.y = middle.y;
+		if ((octant & 4u) != 0u) minimum.z = middle.z;
+		size = halfSize;
+	}
+	return 0.0;
+}
+
 float LightTransmittance(Volume volume, vec3 point) {
 	vec3 toLight = normalize(-pass.Direction.xyz);
 	float enter;
@@ -135,7 +193,7 @@ float LightTransmittance(Volume volume, vec3 point) {
 
 void main() {
 	vec4 base = texture(litImage, inUv);
-	if (pass.VolumeCount.x < 0.5) {
+	if (pass.VolumeCount.x < 0.5 && pass.CloudCentreEnabled.w < 0.5) {
 		outColour = base;
 		return;
 	}
@@ -143,34 +201,61 @@ void main() {
 	vec3 surface = WorldAt(inUv, texture(depthImage, inUv * pass.Target.zw).r);
 	vec3 ray = normalize(surface - pass.Eye.xyz);
 	float maximum = length(surface - pass.Eye.xyz);
-	vec3 colour = base.rgb;
-	for (uint volumeIndex = 0u; volumeIndex < 4u; volumeIndex++) {
-		if (volumeIndex >= uint(pass.VolumeCount.x)) {
-			break;
-		}
-		Volume volume = pass.Volumes[volumeIndex];
+	// All active media share one march. Compositing each volume independently
+	// makes two overlapping volumes change colour when their entity order changes.
+	float first = maximum;
+	float last = 0.0;
+	uint steps = 1u;
+	for (uint volumeIndex = 0u; volumeIndex < MAX_VOLUMES; volumeIndex++) {
+		if (volumeIndex >= uint(pass.VolumeCount.x)) break;
 		float enter;
 		float exit;
-		if (!Interval(volume, pass.Eye.xyz, ray, maximum, enter, exit)) {
-			continue;
-		}
-
-		uint steps = uint(clamp(volume.Steps.x, 1.0, 64.0));
-		float delta = (exit - enter) / float(steps);
-		float transmittance = 1.0;
-		vec3 scattering = vec3(0.0);
-		for (uint index = 0u; index < 64u; index++) {
-			if (index >= steps) {
-				break;
-			}
-			vec3 point = pass.Eye.xyz + ray * (enter + (float(index) + 0.5) * delta);
-			float density = DensityAt(volume, point);
-			float light = LightTransmittance(volume, point);
-			vec3 source = volume.ColourDensity.rgb * (pass.Ambient.rgb + pass.Direct.rgb * light) * density;
-			scattering += transmittance * source * delta;
-			transmittance *= exp(-volume.ExtinctionNoise.x * density * delta);
-		}
-		colour = colour * transmittance + scattering;
+		if (!Interval(pass.Volumes[volumeIndex], pass.Eye.xyz, ray, maximum, enter, exit)) continue;
+		first = min(first, enter);
+		last = max(last, exit);
+		steps = max(steps, uint(clamp(pass.Volumes[volumeIndex].Steps.x, 1.0, 64.0)));
 	}
-	outColour = vec4(colour, base.a);
+	float cloudEnter;
+	float cloudExit;
+	if (CloudInterval(pass.Eye.xyz, ray, maximum, cloudEnter, cloudExit)) {
+		first = min(first, cloudEnter);
+		last = max(last, cloudExit);
+		steps = max(steps, 64u);
+	}
+	if (!(last > first)) {
+		outColour = base;
+		return;
+	}
+
+	float delta = (last - first) / float(steps);
+	float transmittance = 1.0;
+	vec3 scattering = vec3(0.0);
+	// The sun has no directional contribution below the horizon. Its shadow
+	// march cannot change the result then, even for a dense volume.
+	bool hasDirectLight = any(notEqual(pass.Direct.rgb, vec3(0.0)));
+	for (uint stepIndex = 0u; stepIndex < 64u; stepIndex++) {
+		if (stepIndex >= steps) break;
+		float distanceAlongRay = first + (float(stepIndex) + 0.5) * delta;
+		vec3 point = pass.Eye.xyz + ray * distanceAlongRay;
+		float extinction = 0.0;
+		vec3 source = vec3(0.0);
+		for (uint volumeIndex = 0u; volumeIndex < MAX_VOLUMES; volumeIndex++) {
+			if (volumeIndex >= uint(pass.VolumeCount.x)) break;
+			Volume volume = pass.Volumes[volumeIndex];
+			float enter;
+			float exit;
+			if (!Interval(volume, pass.Eye.xyz, ray, maximum, enter, exit) || distanceAlongRay < enter ||
+				distanceAlongRay > exit) continue;
+			float density = DensityAt(volume, point);
+			float light = hasDirectLight ? LightTransmittance(volume, point) : 1.0;
+			extinction += volume.ExtinctionNoise.x * density;
+			source += volume.ColourDensity.rgb * (pass.Ambient.rgb + pass.Direct.rgb * light) * density;
+		}
+		float cloudDensity = CloudDensityAt(point);
+		extinction += cloudDensity * 0.012;
+		source += mix(pass.FogColour.rgb, vec3(0.85), 0.35) * pass.Ambient.rgb * cloudDensity * 0.22;
+		scattering += transmittance * source * delta;
+		transmittance *= exp(-extinction * delta);
+	}
+	outColour = vec4(base.rgb * transmittance + scattering, base.a);
 }

@@ -4,9 +4,9 @@
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/examples/DemosLoader.hpp>
-#include <engine/examples/RenderFeaturesDemo.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/graph/PipelineCatalogue.hpp>
+#include <engine/graph/PipelineDocument.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Part.hpp>
@@ -21,6 +21,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <string_view>
 #include <tuple>
 
 TEST_SUITE_ID("engine.examples.renderfeaturesdemo")
@@ -48,91 +49,174 @@ namespace {
 		return store.FindFirstChild(engine::scene::WorkspaceOf(store), name);
 	}
 
-	bool HasNode(const engine::graph::RenderGraph &graph, Name name) {
+	const engine::graph::Node *FindNode(const engine::graph::RenderGraph &graph, Name name) {
 		for (uint32_t value = 1; value <= graph.Count(); ++value) {
 			const auto *node = graph.Find(engine::graph::NodeId{value});
 			if (node != nullptr && node->Name == name) {
-				return true;
+				return node;
 			}
+		}
+		return nullptr;
+	}
+
+	const engine::graph::ResourceDesc *FindResource(const engine::graph::RenderGraph &graph, Name name) {
+		for (uint32_t value = 1; value <= graph.ResourceCount(); ++value) {
+			const auto *resource = graph.FindResource(engine::graph::ResourceId{value});
+			if (resource != nullptr && resource->Name == name) return resource;
+		}
+		return nullptr;
+	}
+
+	bool HasPort(
+		const engine::graph::RenderGraph &graph,
+		const engine::graph::Node &node,
+		Name resource,
+		Name port,
+		bool read
+	) {
+		const auto &resources = read ? node.Reads : node.Writes;
+		const auto &ports = read ? node.ReadPorts : node.WritePorts;
+		for (size_t index = 0; index < resources.size(); ++index) {
+			const auto *description = graph.FindResource(resources[index]);
+			if (description != nullptr && description->Name == resource && index < ports.size() &&
+				ports[index] == port)
+				return true;
 		}
 		return false;
 	}
-}
 
-TEST_CASE("the render features pipeline asset matches and builds its recipe", "[examples][graph]") {
-	const StagedAssets assets;
-	engine::graph::RegisterRenderNodeKinds();
-	const engine::graph::PipelineDocument expected = engine::examples::RenderFeaturesDemoPipeline();
-
-	const std::filesystem::path path =
-		engine::core::Paths::Assets() / "examples" / "pipelines" / "RenderFeatures.pipeline";
-	std::ifstream input(path, std::ios::binary);
-	REQUIRE(input);
-	const std::string text(std::istreambuf_iterator<char>(input), {});
-
-	engine::graph::PipelineDocument loaded;
-	Name offender;
-	REQUIRE(engine::graph::Read(text, loaded, offender) == engine::graph::PipelineDocumentStatus::Ok);
-	CHECK(engine::graph::Write(loaded) == engine::graph::Write(expected));
-
-	engine::graph::RenderGraph graph;
-	REQUIRE(engine::graph::Build(loaded, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
-	CHECK(HasNode(graph, Name("demo-compute")));
-	CHECK(HasNode(graph, Name("demo-post")));
-	CHECK(HasNode(graph, Name("demo-fxaa")));
-}
-
-TEST_CASE("the tracing pipeline assets match their graph recipes", "[examples][graph][tracing]") {
-	const StagedAssets assets;
-	engine::graph::RegisterRenderNodeKinds();
-	for (const auto &[name, expected, trace] : {
-			 std::tuple{
-				 "RaytraceDemo.pipeline", engine::graph::RaytraceDemoDocument(), Name("screen-raytrace")
-			 },
-			 std::tuple{
-				 "PathtraceDemo.pipeline",
-				 engine::graph::PathtraceDemoDocument(),
-				 Name("progressive-pathtrace")
-			 },
-		 }) {
-		const std::filesystem::path path = engine::core::Paths::Assets() / "examples" / "pipelines" / name;
+	engine::graph::PipelineDocument LoadPipeline(std::string_view name) {
+		const std::filesystem::path path =
+			engine::core::Paths::Assets() / "examples" / "pipelines" / std::string(name);
 		std::ifstream input(path, std::ios::binary);
 		REQUIRE(input);
 		const std::string text(std::istreambuf_iterator<char>(input), {});
-
-		engine::graph::PipelineDocument loaded;
+		engine::graph::PipelineDocument document;
 		Name offender;
-		REQUIRE(engine::graph::Read(text, loaded, offender) == engine::graph::PipelineDocumentStatus::Ok);
-		CHECK(engine::graph::Write(loaded) == engine::graph::Write(expected));
-
-		engine::graph::RenderGraph graph;
-		REQUIRE(engine::graph::Build(loaded, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
-		CHECK(HasNode(graph, trace));
-		CHECK(HasNode(graph, Name("adaptive-tessellation")));
-		CHECK(HasNode(graph, Name("indirect-light")));
+		REQUIRE(engine::graph::Read(text, document, offender) == engine::graph::PipelineDocumentStatus::Ok);
+		return document;
 	}
 }
 
-TEST_CASE("the compositor pipeline asset matches its graph recipe", "[examples][graph][compositor]") {
+TEST_CASE("the render features pipeline runs its authored attachment and output chain", "[examples][graph]") {
 	const StagedAssets assets;
 	engine::graph::RegisterRenderNodeKinds();
-	const std::filesystem::path path =
-		engine::core::Paths::Assets() / "examples" / "pipelines" / "CompositorDemo.pipeline";
-	std::ifstream input(path, std::ios::binary);
-	REQUIRE(input);
-	const std::string text(std::istreambuf_iterator<char>(input), {});
-
-	engine::graph::PipelineDocument loaded;
-	Name offender;
-	REQUIRE(engine::graph::Read(text, loaded, offender) == engine::graph::PipelineDocumentStatus::Ok);
-	CHECK(engine::graph::Write(loaded) == engine::graph::Write(engine::graph::CompositorDemoDocument()));
-
+	const auto document = LoadPipeline("RenderFeatures.pipeline");
 	engine::graph::RenderGraph graph;
-	REQUIRE(engine::graph::Build(loaded, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
-	for (const char *name :
-		 {"grade-exposure", "grade-hsv", "mix-original", "frame-transform", "blur-x", "blur-y"}) {
-		CHECK(HasNode(graph, Name(name)));
+	Name offender;
+	REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+	engine::graph::CompiledGraph compiled;
+	REQUIRE(graph.Compile(compiled, offender) == engine::graph::GraphStatus::Ok);
+
+	const auto *compute = FindNode(graph, Name("demo-compute"));
+	const auto *post = FindNode(graph, Name("demo-post"));
+	const auto *fxaa = FindNode(graph, Name("demo-fxaa"));
+	const auto *output = FindNode(graph, Name("demo-output"));
+	REQUIRE(compute != nullptr);
+	REQUIRE(post != nullptr);
+	REQUIRE(fxaa != nullptr);
+	REQUIRE(output != nullptr);
+	CHECK(compute->Kind == Name("dispatch"));
+	CHECK(HasPort(graph, *compute, Name("tonemapped"), Name("source"), true));
+	CHECK(HasPort(graph, *compute, Name("demo-computed"), Name("target"), false));
+	CHECK(HasPort(graph, *post, Name("demo-computed"), Name("source"), true));
+	CHECK(HasPort(graph, *fxaa, Name("demo-post"), Name("source"), true));
+	CHECK(HasPort(graph, *output, Name("demo-composed"), Name("image"), true));
+	CHECK(output->Scope == engine::graph::NodeScope::Frame);
+	const auto *defaultOutput = FindNode(graph, Name("output-image"));
+	REQUIRE(defaultOutput != nullptr);
+	CHECK_FALSE(defaultOutput->Enabled);
+}
+
+TEST_CASE(
+	"the tracing pipeline assets keep geometry lighting and history wired", "[examples][graph][tracing]"
+) {
+	const StagedAssets assets;
+	engine::graph::RegisterRenderNodeKinds();
+	for (const auto &[asset, traceName, kind] : {
+			 std::tuple{"RaytraceDemo.pipeline", "screen-raytrace", "raytrace"},
+			 std::tuple{"PathtraceDemo.pipeline", "progressive-pathtrace", "pathtrace"},
+		 }) {
+		const auto document = LoadPipeline(asset);
+		engine::graph::RenderGraph graph;
+		Name offender;
+		REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+		engine::graph::CompiledGraph compiled;
+		REQUIRE(graph.Compile(compiled, offender) == engine::graph::GraphStatus::Ok);
+
+		const auto *tessellation = FindNode(graph, Name("adaptive-tessellation"));
+		const auto *geometry = FindNode(graph, Name("tessellated-geometry"));
+		const auto *illumination = FindNode(graph, Name("indirect-light"));
+		const auto *trace = FindNode(graph, Name(traceName));
+		REQUIRE(tessellation != nullptr);
+		REQUIRE(geometry != nullptr);
+		REQUIRE(illumination != nullptr);
+		REQUIRE(trace != nullptr);
+		CHECK(tessellation->Kind == Name("tessellate"));
+		CHECK(geometry->Kind == Name("tessellated-draw"));
+		CHECK(geometry->Reads.size() == 3);
+		CHECK(illumination->Kind == Name("global-illumination"));
+		CHECK(HasPort(graph, *illumination, Name("tessellated-depth"), Name("depth"), true));
+		CHECK(trace->Kind == Name(kind));
+		CHECK(HasPort(graph, *trace, Name("indirect"), Name("indirect"), true));
+		if (trace->Kind == Name("pathtrace")) {
+			CHECK(HasPort(graph, *trace, Name("linear-depth"), Name("depth"), true));
+			CHECK(HasPort(graph, *trace, Name("visible-entities"), Name("entities"), true));
+			CHECK(HasPort(graph, *trace, Name("coarse-instances"), Name("instances"), true));
+			CHECK(HasPort(graph, *trace, Name("path-radiance"), Name("radiance"), false));
+			const auto *history = FindResource(graph, Name("path-history"));
+			REQUIRE(history != nullptr);
+			CHECK(history->Lifetime == engine::graph::ResourceLifetime::History);
+			CHECK(HasPort(graph, *trace, Name("path-history"), Name("history"), true));
+			const auto *store = FindNode(graph, Name("path-history-store"));
+			REQUIRE(store != nullptr);
+			CHECK(HasPort(graph, *store, Name("path-radiance"), Name("source"), true));
+			CHECK(HasPort(graph, *store, Name("path-history"), Name("target"), false));
+		} else {
+			CHECK(HasPort(graph, *trace, Name("tessellated-depth"), Name("depth"), true));
+			CHECK(HasPort(graph, *trace, Name("tessellated-colour"), Name("scene"), true));
+			CHECK(HasPort(graph, *trace, Name("reflections"), Name("reflection"), false));
+		}
+		engine::graph::PipelineDocument reloaded;
+		REQUIRE(
+			engine::graph::Read(engine::graph::Write(document), reloaded, offender) ==
+			engine::graph::PipelineDocumentStatus::Ok
+		);
+		CHECK(engine::graph::Write(reloaded) == engine::graph::Write(document));
 	}
+}
+
+TEST_CASE("the compositor pipeline asset preserves the image pass order", "[examples][graph][compositor]") {
+	const StagedAssets assets;
+	engine::graph::RegisterRenderNodeKinds();
+	const auto document = LoadPipeline("CompositorDemo.pipeline");
+	engine::graph::RenderGraph graph;
+	Name offender;
+	REQUIRE(engine::graph::Build(document, graph, offender) == engine::graph::PipelineDocumentStatus::Ok);
+	engine::graph::CompiledGraph compiled;
+	REQUIRE(graph.Compile(compiled, offender) == engine::graph::GraphStatus::Ok);
+	const auto position = [&](const char *name) {
+		for (size_t index = 0; index < compiled.PerView.size(); ++index) {
+			if (graph.Find(compiled.PerView[index])->Name == Name(name)) return index;
+		}
+		return compiled.PerView.size();
+	};
+	CHECK(position("grade-exposure") < position("grade-hsv"));
+	CHECK(position("grade-hsv") < position("mix-original"));
+	CHECK(position("mix-original") < position("frame-transform"));
+	CHECK(position("frame-transform") < position("blur-x"));
+	CHECK(position("blur-x") < position("blur-y"));
+	CHECK(position("blur-y") < position("compositor-tonemap"));
+	const auto *exposure = FindNode(graph, Name("grade-exposure"));
+	const auto *blur = FindNode(graph, Name("blur-y"));
+	REQUIRE(exposure != nullptr);
+	REQUIRE(blur != nullptr);
+	CHECK(exposure->Kind == Name("exposure-grade"));
+	CHECK(HasPort(graph, *exposure, Name("lens-b"), Name("source"), true));
+	CHECK(blur->Kind == Name("blur"));
+	CHECK(HasPort(graph, *blur, Name("blur-horizontal"), Name("source"), true));
+	REQUIRE_FALSE(compiled.Final.empty());
+	CHECK(graph.Find(compiled.Final.back())->Name == Name("compositor-output-image"));
 }
 
 TEST_CASE("the render features scene authors policies attachments and LOD fallback", "[examples][scene]") {
@@ -149,8 +233,8 @@ TEST_CASE("the render features scene authors policies attachments and LOD fallba
 
 	const Entity part = Child(store, "RenderFeatureLodMesh");
 	REQUIRE(part != engine::ecs::NULL_ENTITY);
-	const auto *automatic = store.Get<engine::scene::AutoMeshLOD>(part);
-	const auto *custom = store.Get<engine::scene::CustomMeshLOD>(part);
+	const auto *automatic = store.Get<engine::scene::LODAuto>(part);
+	const auto *custom = store.Get<engine::scene::LODCustom>(part);
 	const auto *effects = store.Get<engine::scene::RenderEffects>(part);
 	const auto *visual = store.Get<engine::scene::Visual>(part);
 	REQUIRE(automatic != nullptr);

@@ -7,6 +7,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -53,9 +55,36 @@ namespace process_test {
 		}
 		return status;
 	}
+
+	struct TemporaryDirectory {
+		std::filesystem::path Path =
+			std::filesystem::temp_directory_path() /
+			("mono process cwd with spaces " +
+			 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+
+		TemporaryDirectory() {
+			std::filesystem::create_directories(Path);
+		}
+
+		~TemporaryDirectory() {
+			std::error_code ignored;
+			std::filesystem::remove_all(Path, ignored);
+		}
+	};
 }
 
 using namespace process_test;
+
+TEST_CASE("process cwd child marker", "[.process-cwd-child]") {
+	// Suite filters also select hidden cases. Only the prepared child directory may receive a marker.
+	if (!std::filesystem::exists("process-cwd-request")) {
+		return;
+	}
+	std::ofstream marker("process-cwd-marker");
+	REQUIRE(marker.good());
+	marker << std::filesystem::current_path().string();
+	REQUIRE(marker.good());
+}
 
 TEST_CASE("a handle that started nothing owns nothing", "[process]") {
 	Process child;
@@ -94,6 +123,41 @@ TEST_CASE("starting a program that does not exist fails rather than throwing", "
 	Process child;
 	REQUIRE_FALSE(child.Start("/definitely/not/a/program/anywhere"));
 	REQUIRE_FALSE(child.Started());
+}
+
+TEST_CASE("a child starts in its requested directory without changing the parent", "[process]") {
+	TemporaryDirectory directory;
+	const std::filesystem::path parentDirectory = std::filesystem::current_path();
+	Process child;
+	{
+		std::ofstream request(directory.Path / "process-cwd-request");
+		REQUIRE(request.good());
+	}
+
+	REQUIRE(child.Start(Self(), {"[.process-cwd-child]"}, directory.Path));
+	REQUIRE(std::filesystem::current_path() == parentDirectory);
+
+	const ProcessStatus status = Settle(child);
+	REQUIRE(status.Reason == ExitReason::Exited);
+	REQUIRE(status.Code == 0);
+	REQUIRE(std::filesystem::current_path() == parentDirectory);
+
+	std::ifstream marker(directory.Path / "process-cwd-marker");
+	REQUIRE(marker.good());
+	std::string childDirectory;
+	std::getline(marker, childDirectory);
+	REQUIRE(std::filesystem::equivalent(std::filesystem::path(childDirectory), directory.Path));
+}
+
+TEST_CASE("a nonexistent child directory fails without changing the parent", "[process]") {
+	TemporaryDirectory directory;
+	const std::filesystem::path parentDirectory = std::filesystem::current_path();
+	Process child;
+	const std::filesystem::path missingDirectory = directory.Path / "missing";
+
+	REQUIRE_FALSE(child.Start(Self(), QuickExit(), missingDirectory));
+	REQUIRE_FALSE(child.Started());
+	REQUIRE(std::filesystem::current_path() == parentDirectory);
 }
 
 TEST_CASE("a handle will not start a second child over the first", "[process]") {

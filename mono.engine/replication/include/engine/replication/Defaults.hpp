@@ -91,6 +91,9 @@ namespace engine::replication {
 		// that can forget it.
 		ChangeDetection Detection = ChangeDetection::Signature;
 
+		// Whether this slot is a world-scoped resource rather than entity rows.
+		bool Resource = false;
+
 		// The component whose presence on an entity takes *this* component's
 		// deltas off the wire for that entity, or empty for none.
 		//

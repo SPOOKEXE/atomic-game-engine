@@ -573,6 +573,8 @@ namespace studio {
 						.Side = image.FlipbookSide,
 						.Frames = image.FlipbookFrames,
 						.FrameRate = image.FlipbookFrameRate,
+						.FrameDurations = image.FlipbookFrameDurations,
+						.CumulativeEnds = {},
 					};
 					ContentTextureFacts[name.Id()] = facts;
 					EachOpenWorld([&](engine::ecs::Store &store) {

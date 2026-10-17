@@ -1,3 +1,7 @@
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include "InheritedSlot.hpp"
 
 #include <engine/core/Log.hpp>
@@ -9,6 +13,7 @@
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 extern char **environ;
@@ -87,11 +92,28 @@ namespace engine::parallel {
 	}
 
 	bool Process::Start(const std::filesystem::path &program, const std::vector<std::string> &arguments) {
-		return Start(program, arguments, ChannelEnd{});
+		return StartImpl(program, arguments, ChannelEnd{}, nullptr);
+	}
+
+	bool Process::Start(
+		const std::filesystem::path &program,
+		const std::vector<std::string> &arguments,
+		const std::filesystem::path &workingDirectory
+	) {
+		return StartImpl(program, arguments, ChannelEnd{}, &workingDirectory);
 	}
 
 	bool Process::Start(
 		const std::filesystem::path &program, const std::vector<std::string> &arguments, ChannelEnd endpoint
+	) {
+		return StartImpl(program, arguments, std::move(endpoint), nullptr);
+	}
+
+	bool Process::StartImpl(
+		const std::filesystem::path &program,
+		const std::vector<std::string> &arguments,
+		ChannelEnd endpoint,
+		const std::filesystem::path *workingDirectory
 	) {
 		if (Identifier != 0) {
 			return false;
@@ -119,6 +141,17 @@ namespace engine::parallel {
 		posix_spawn_file_actions_t *actionsPointer = nullptr;
 		int spare = -1;
 
+		if (endpoint.Valid() || workingDirectory != nullptr) {
+			const int initialized = ::posix_spawn_file_actions_init(&actions);
+			if (initialized != 0) {
+				ENGINE_ERROR(
+					"could not prepare child actions for '{}': {}", path, std::strerror(initialized)
+				);
+				return false;
+			}
+			actionsPointer = &actions;
+		}
+
 		if (endpoint.Valid()) {
 			auto handle = static_cast<int>(endpoint.Raw());
 
@@ -129,23 +162,41 @@ namespace engine::parallel {
 				spare = ::dup(handle);
 				if (spare < 0) {
 					ENGINE_ERROR("could not prepare a channel for '{}': {}", path, std::strerror(errno));
+					if (actionsPointer != nullptr) {
+						::posix_spawn_file_actions_destroy(&actions);
+					}
 					return false;
 				}
 				handle = spare;
 			}
 
-			if (::posix_spawn_file_actions_init(&actions) != 0) {
-				if (spare >= 0) {
-					::close(spare);
-				}
-				return false;
-			}
-			actionsPointer = &actions;
-
 			// The duplicate lands without close-on-exec, which is what lets it
 			// survive the exec while every other handle this process holds -
 			// including the driver's own end of this very channel - does not.
-			::posix_spawn_file_actions_adddup2(&actions, handle, INHERITED);
+			const int duplicated = ::posix_spawn_file_actions_adddup2(&actions, handle, INHERITED);
+			if (duplicated != 0) {
+				ENGINE_ERROR("could not prepare a channel for '{}': {}", path, std::strerror(duplicated));
+				::posix_spawn_file_actions_destroy(&actions);
+				if (spare >= 0) {
+					::close(spare);
+				}
+				endpoint.Close();
+				return false;
+			}
+		}
+
+		if (workingDirectory != nullptr) {
+			const std::string directory = workingDirectory->string();
+			const int changed = ::posix_spawn_file_actions_addchdir_np(&actions, directory.c_str());
+			if (changed != 0) {
+				ENGINE_ERROR("could not set child directory '{}': {}", directory, std::strerror(changed));
+				::posix_spawn_file_actions_destroy(&actions);
+				if (spare >= 0) {
+					::close(spare);
+				}
+				endpoint.Close();
+				return false;
+			}
 		}
 
 		pid_t child = 0;

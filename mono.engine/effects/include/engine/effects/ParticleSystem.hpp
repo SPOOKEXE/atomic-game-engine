@@ -59,6 +59,7 @@
 //
 // @tier L8 · shared
 
+#include <engine/core/Name.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Entity.hpp>
@@ -341,7 +342,7 @@ namespace engine::effects {
 		//
 		// **Resolved here rather than left as the emitter's zero-means-all**, so
 		// the step never has to ask which meaning it is looking at.
-		uint8_t Frames = 1;
+		uint16_t Frames = 1;
 
 		// A deterministic per-particle flipbook phase for Loop, OneShot and
 		// PingPong. Random playback already keeps one random cell by definition.
@@ -361,6 +362,16 @@ namespace engine::effects {
 		// How fast a flipbook runs, in cells per second, under a mode that pays
 		// attention to it.
 		float FlipbookRate = 12.0f;
+
+		// Variable timing is resolved from the world's texture catalogue. The
+		// name remains stable across content replacement and world boundaries.
+		core::Name FlipbookTexture;
+		// Rate converting particle age to time in the variable frame timeline.
+		float FlipbookTimelineScale = 1.0f;
+		// Whether frame durations come from the resolved texture sequence.
+		bool VariableFlipbookTiming = false;
+		// Whether the resolved sequence cannot provide usable frame timing.
+		bool InvalidFlipbookTiming = false;
 	};
 
 	// The compact mutable row consumed by host fallback or copied to device state.

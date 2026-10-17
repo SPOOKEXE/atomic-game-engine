@@ -54,12 +54,12 @@ namespace engine::render {
 			const SDL_GPUViewport viewport{0, 0, float(colour.Width), float(colour.Height), 0, 1};
 			SDL_SetGPUViewport(pass, &viewport);
 			if (DrawInterface && Request.GameInterfaceHook) {
-				const auto lighting = LightingAt(Request.CameraFrame.Position, 0, 0);
+				const auto lighting = LightingAt(Request.VisibilityCameraFrame.Position, 0, 0);
 				Result.DrawCalls += Request.GameInterfaceHook->RecordWorld(
 					Command,
 					pass,
 					Matrices.ViewProjection,
-					Request.CameraFrame,
+					Request.VisibilityCameraFrame,
 					{lighting.Ambient.x, lighting.Ambient.y, lighting.Ambient.z},
 					{lighting.Direction.x, lighting.Direction.y, lighting.Direction.z},
 					colour.Width,
@@ -397,7 +397,7 @@ namespace engine::render {
 		frameNodes.Set(core::Name("viewer"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
-			const Impl::NamedPipeline *const selectedPipeline = recording.Pipeline;
+			const Impl::InstalledPipeline *const selectedPipeline = recording.Pipeline;
 			const size_t targetSlot = recording.Request.TargetSlot;
 			const auto enterNamedPass = [&recording](
 											core::Name name, SDL_GPUCommandBuffer *recordedCommand = nullptr
@@ -470,7 +470,7 @@ namespace engine::render {
 		frameNodes.Set(core::Name("capture"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
-			const Impl::NamedPipeline *const selectedPipeline = recording.Pipeline;
+			const Impl::InstalledPipeline *const selectedPipeline = recording.Pipeline;
 			Impl::NamedTexture &authoredCapture = recording.AuthoredCapture;
 			std::filesystem::path &authoredCapturePath = recording.AuthoredCapturePath;
 			core::Name &authoredCaptureNode = recording.AuthoredCaptureNode;
@@ -495,7 +495,7 @@ namespace engine::render {
 				} else if (pinnedView) {
 					slots.push_back(node->Integer(core::Name("view"), 0));
 				} else {
-					for (const Impl::ResourceImageSlot &image : State->ResourceImages) {
+					for (const Impl::ResourceImageSlot &image : State->GraphResources.Images) {
 						const auto &request = image.Image.Request;
 						if (image.Phase != Impl::ResourceImagePhase::Queued ||
 							request.Pipeline != selectedPipeline->Name || request.Node != context.Name ||
@@ -535,21 +535,37 @@ namespace engine::render {
 					const DataCaptureSource &captureSource = slot < State->DataCaptureSources.size()
 																 ? State->DataCaptureSources[slot]
 																 : State->ActiveDataCaptureSource;
-					const auto source = recording.ResourceTexture(colorId, slot, false);
+					auto source = recording.ResourceTexture(colorId, slot, false);
 					const auto depth =
 						depthDesc ? recording.ResourceTexture(depthId, slot, false) : Impl::NamedTexture{};
 					auto normal =
 						normalDesc ? recording.ResourceTexture(normalId, slot, false) : Impl::NamedTexture{};
-					if (normal.IsValid() && slot < State->PbrSlots.size()) {
+					if (slot < State->PbrSlots.size()) {
 						const auto &pbr = State->PbrSlots[slot];
-						if (normal.Texture == pbr.Normal && source.Width == pbr.Dimensions.ViewWidth &&
-							source.Height == pbr.Dimensions.ViewHeight && normal.Width >= source.Width &&
-							normal.Height >= source.Height) {
-							// Native GBuffer storage is padded; its rendered viewport begins at (0, 0).
-							// Copy that rectangle directly, preserving every packed normal bit.
-							normal.Width = source.Width;
-							normal.Height = source.Height;
-						}
+						const auto cropNative = [&](Impl::NamedTexture &image) {
+							if (!image.IsValid() || captureSource.Width != pbr.Dimensions.ViewWidth ||
+								captureSource.Height != pbr.Dimensions.ViewHeight ||
+								image.Width < captureSource.Width || image.Height < captureSource.Height)
+								return;
+							for (SDL_GPUTexture *native :
+								 {pbr.Albedo,
+								  pbr.Normal,
+								  pbr.Material,
+								  pbr.Emissive,
+								  pbr.MeshUv,
+								  pbr.ObjectIds,
+								  pbr.SemanticIds,
+								  pbr.PartIds}) {
+								if (image.Texture != native) continue;
+								// These targets are block-padded, but the image outside the
+								// viewport was never rasterized by the camera.
+								image.Width = captureSource.Width;
+								image.Height = captureSource.Height;
+								return;
+							}
+						};
+						cropNative(source);
+						cropNative(normal);
 					}
 					const RenderObservationContext observation = DataFactoryObservation(
 						recording, context, selectedPipeline->Name, slot, captureSource
@@ -640,7 +656,7 @@ namespace engine::render {
 				return true;
 			}
 			Impl *const State = recording.State;
-			const Impl::NamedPipeline *const selectedPipeline = recording.Pipeline;
+			const Impl::InstalledPipeline *const selectedPipeline = recording.Pipeline;
 			const size_t targetSlot = recording.Request.TargetSlot;
 			SDL_GPUTexture *const swapchain = recording.Swapchain;
 			const uint32_t width = recording.Width;
@@ -669,7 +685,7 @@ namespace engine::render {
 								   ) { return recording.DrawImage(source, target, load, reverseSpectrum); };
 
 			enterNamedPass(context.Name);
-			for (Impl::ResourcePreviewTarget &preview : State->ResourcePreviews) {
+			for (Impl::ResourcePreviewTarget &preview : State->GraphResources.Previews) {
 				if (!preview.Refresh || preview.Route.Pipeline != selectedPipeline->Name ||
 					preview.Route.Slot != targetSlot) {
 					continue;
@@ -707,7 +723,7 @@ namespace engine::render {
 					// boundary instead of releasing either under that draw list.
 					for (SDL_GPUTexture *&texture : preview.Textures) {
 						if (texture != nullptr) {
-							State->RetiredScenes.push_back(texture);
+							State->GraphResources.RetiredTextures.push_back(texture);
 							texture = nullptr;
 						}
 					}

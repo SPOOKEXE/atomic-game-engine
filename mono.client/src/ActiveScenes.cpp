@@ -1,3 +1,5 @@
+#include "DisplayedSceneView.hpp"
+
 #include <engine/scene/ActiveCamera.hpp>
 
 #include <algorithm>
@@ -31,6 +33,11 @@ namespace client {
 		return id.size() <= 256 ? id : std::string{};
 	}
 
+	void BindDisplayedSceneFields(const ActiveScene *scene, engine::render::View &view) {
+		view.GpuParticles =
+			scene == nullptr || scene->Frame == nullptr ? std::nullopt : scene->Frame->GpuParticles;
+	}
+
 	size_t ActiveSceneCollector::Collect(
 		engine::world::Universe &universe,
 		std::span<const ActiveSceneDemand> requests,
@@ -38,8 +45,11 @@ namespace client {
 		bool frozen
 	) {
 		Demands.assign(requests.begin(), requests.end());
-		Collected.clear();
 		Submitted.clear();
+		// Keep presentation-owned snapshots across collects. The world packet
+		// refreshes itself against the store identity and simulation tick.
+		auto previous = std::move(Collected);
+		Collected.clear();
 		std::sort(Demands.begin(), Demands.end(), [&](const auto &left, const auto &right) {
 			return Before(left, right, universe);
 		});
@@ -58,8 +68,16 @@ namespace client {
 			scene.World = Demands[index].Request.World;
 			scene.Name = universe.NameOf(scene.World);
 			scene.Pipeline = Demands[index].Pipeline;
-			scene.Frame = std::make_unique<engine::render::WorldViewFrame>();
-			scene.CameraLayers = std::make_unique<engine::render::WorldCameraFrame>();
+			auto old = std::find_if(previous.begin(), previous.end(), [&](const auto &item) {
+				return item.World == scene.World && item.Name == scene.Name;
+			});
+			if (old != previous.end()) {
+				scene.Frame = std::move(old->Frame);
+				scene.CameraLayers = std::move(old->CameraLayers);
+			}
+			if (!scene.Frame) scene.Frame = std::make_unique<engine::render::WorldViewFrame>();
+			if (!scene.CameraLayers)
+				scene.CameraLayers = std::make_unique<engine::render::WorldCameraFrame>();
 		}
 		std::vector<engine::world::Presentation> presentations;
 		presentations.reserve(Demands.size());
@@ -81,7 +99,7 @@ namespace client {
 			scene.View.CameraFrame = placement->Frame;
 			scene.View.Camera = *lens;
 			scene.View.Portals = scene.Frame->Portals;
-			engine::render::CollectWorldCamera(store, scene.View, extent, *scene.CameraLayers);
+			engine::render::CollectWorldCamera(store, scene.View, extent, *scene.CameraLayers, frozen);
 			if (!engine::render::BindWorldView(
 					*scene.Frame,
 					*scene.CameraLayers,

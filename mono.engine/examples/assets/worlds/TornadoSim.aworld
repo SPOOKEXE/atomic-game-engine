@@ -1,0 +1,1682 @@
+<?xml version="1.0" encoding="utf-8"?>
+<World format="3" name="TornadoSim">
+	<WorldProperties tickRate="60" idleTickRate="2" physicsTickRate="60" scriptTickRate="60" replicationTickRate="20" globalSimulatedNetworkLatency="0" faultLimit="3" isolation="Shared" renderingProfile="Default PBR" />
+	<Sources>
+		<Source path="scripts/shared/TornadoSim/init.luau"><![CDATA[--!strict
+return require(script.StormControls)
+]]></Source>
+		<Source path="scripts/shared/TornadoSim/StormControls.luau"><![CDATA[--!strict
+-- One controls vocabulary for the server's storm resource and the local panel.
+local Controls = {}
+
+Controls.presets = {
+	"EF0", "EF1", "EF2", "EF3", "EF4", "EF5",
+	"Q0", "Q1", "Q2", "Q3", "Q4", "Q5",
+}
+
+Controls.default = {
+	Energy = 0.72,
+	CoreRadius = 34,
+	InfluenceRadius = 260,
+	PeakTangentialSpeed = 92,
+	PeakInflowSpeed = 34,
+	PeakUpdraftSpeed = 58,
+	PeakDowndraftSpeed = 32,
+	SurfaceOutflowSpeed = 28,
+	PressureDrop = 72,
+	Humidity = 0.82,
+	RainRate = 0.68,
+	Turbulence = 13,
+	GroundFriction = 0.28,
+	DebrisDensity = 0.65,
+	VortexTightness = 2.25,
+	TopHeight = 360,
+	UpperWind = Vector3.new(18, 0, -6),
+	TranslationVelocity = Vector3.new(4, 0, 1.5),
+	Position = Vector3.new(0, 0, 95),
+	LifecycleEnabled = false,
+	Enabled = true,
+}
+
+-- Bounds live beside the default so both clients give immediate feedback and
+-- the authority can reject values that do not describe a usable field.
+Controls.parameters = {
+	{ Key = "Energy", Label = "Energy", Min = 0, Max = 1, Step = 0.02 },
+	{ Key = "CoreRadius", Label = "Core radius", Min = 1, Max = 300, Step = 1 },
+	{ Key = "InfluenceRadius", Label = "Influence", Min = 20, Max = 1200, Step = 10 },
+	{ Key = "PeakTangentialSpeed", Label = "Tangential", Min = 0, Max = 220, Step = 5 },
+	{ Key = "PeakInflowSpeed", Label = "Inflow", Min = 0, Max = 160, Step = 5 },
+	{ Key = "PeakUpdraftSpeed", Label = "Updraft", Min = 0, Max = 180, Step = 5 },
+	{ Key = "PeakDowndraftSpeed", Label = "Downdraft", Min = 0, Max = 160, Step = 5 },
+	{ Key = "SurfaceOutflowSpeed", Label = "Outflow", Min = 0, Max = 140, Step = 5 },
+	{ Key = "PressureDrop", Label = "Pressure", Min = 0, Max = 220, Step = 5 },
+	{ Key = "Humidity", Label = "Humidity", Min = 0, Max = 1, Step = 0.02 },
+	{ Key = "RainRate", Label = "Rain", Min = 0, Max = 2, Step = 0.05 },
+	{ Key = "Turbulence", Label = "Turbulence", Min = 0, Max = 105, Step = 1 },
+	{ Key = "GroundFriction", Label = "Ground drag", Min = 0, Max = 1, Step = 0.02 },
+	{ Key = "DebrisDensity", Label = "Debris", Min = 0, Max = 1, Step = 0.02 },
+	{ Key = "VortexTightness", Label = "Tightness", Min = 1, Max = 20, Step = 0.5 },
+	{ Key = "TopHeight", Label = "Top height", Min = 60, Max = 1200, Step = 20 },
+}
+
+return Controls
+]]></Source>
+		<Source path="scripts/server/TornadoServer.server.luau"><![CDATA[--!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
+local controlEvent = ReplicatedStorage.TornadoControl
+
+-- The fixed-step physics resource owns lifecycle and force application.
+Storm.Configure(Controls.default)
+Storm.Preset("EF3")
+Storm.Configure(Controls.default)
+
+local validPreset = {}
+for _, preset in ipairs(Controls.presets) do validPreset[preset] = true end
+local validParticleCount = {
+	[262144] = true,
+	[524288] = true,
+	[1048576] = true,
+	[2000000] = true,
+	[5000000] = true,
+	[10000000] = true,
+	[15000000] = true,
+	[20000000] = true,
+	[50000000] = true,
+}
+local parameterBounds: { [string]: any } = {}
+for _, parameter in ipairs(Controls.parameters) do
+	parameterBounds[parameter.Key] = parameter
+end
+local particleField = workspace:FindFirstChild("TornadoParticles", true)
+local environmentResetRequested = false
+local environmentRefreshRequested = false
+local environmentObserverPosition = Controls.default.Position
+
+-- Authority applies validated requests from the in-game controls.
+controlEvent.OnServerEvent:Connect(function(payload: string)
+	local decoded, request = pcall(function() return HttpService:JSONDecode(payload) end)
+	if not decoded then return end
+	if type(request) ~= "table" then return end
+	if request.kind == "preset" and type(request.name) == "string" and validPreset[request.name] then
+		Storm.Preset(request.name)
+	elseif request.kind == "custom" and type(request.energy) == "number" and type(request.radius) == "number"
+		and request.energy >= 0 and request.energy <= 1 and request.radius >= 1 and request.radius <= 300 then
+		Storm.Configure({ Energy = request.energy, CoreRadius = request.radius })
+	elseif request.kind == "particles" and particleField ~= nil and type(request.count) == "number"
+		and validParticleCount[request.count] then
+		particleField.RequestedCount = request.count
+	elseif request.kind == "layers" and particleField ~= nil and type(request.mask) == "number"
+		and request.mask >= 0 and request.mask <= 7 and request.mask % 1 == 0 then
+		particleField.Layers = request.mask
+	elseif request.kind == "motion" and type(request.x) == "number" and type(request.y) == "number"
+		and type(request.z) == "number" and math.abs(request.x) <= 60 and math.abs(request.y) <= 60
+		and math.abs(request.z) <= 60 then
+		Storm.Configure({ TranslationVelocity = Vector3.new(request.x, request.y, request.z) })
+	elseif request.kind == "rotation" and type(request.counterClockwise) == "boolean" then
+		Storm.Configure({ CounterClockwise = request.counterClockwise })
+	elseif request.kind == "parameters" and type(request.values) == "table" then
+		local configuration: { [string]: number } = {}
+		for name, value in pairs(request.values) do
+			local bounds = parameterBounds[name]
+			if bounds ~= nil and type(value) == "number" and value >= bounds.Min and value <= bounds.Max then
+				configuration[name] = value
+			end
+		end
+		if next(configuration) ~= nil then Storm.Configure(configuration) end
+	elseif request.kind == "enabled" and type(request.value) == "boolean" then
+		Storm.Configure({ Enabled = request.value })
+	elseif request.kind == "reset" then
+		Storm.Configure({ ElapsedSeconds = 0 })
+		Storm.Configure(Controls.default)
+		environmentResetRequested = true
+	elseif request.kind == "observer" and type(request.x) == "number" and type(request.z) == "number"
+		and math.abs(request.x) <= 4096 and math.abs(request.z) <= 4096 then
+		environmentObserverPosition = Vector3.new(request.x, 0, request.z)
+		environmentRefreshRequested = true
+	elseif request.kind == "lifecycle" and type(request.value) == "boolean" then
+		Storm.Configure({ LifecycleEnabled = request.value })
+	end
+end)
+
+local interactionConnections: { RBXScriptConnection } = {}
+
+local function interactionPart(name: string, position: Vector3, size: Vector3, colour: Color3, anchored: boolean, parent: Instance): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Position = position
+	part.Size = size
+	part.Color = colour
+	part.Anchored = anchored
+	part.Parent = parent
+	return part
+end
+
+local function rebuildInteraction()
+	for _, connection in ipairs(interactionConnections) do connection:Disconnect() end
+	interactionConnections = {}
+	local old = workspace:FindFirstChild("StormInteraction")
+	if old then old:Destroy() end
+	local interaction = Instance.new("Folder")
+	interaction.Name = "StormInteraction"
+	interaction.Parent = workspace
+	local mast = interactionPart("SteelMast", Vector3.new(-28, 5, -12), Vector3.new(0.7, 10, 0.7), Color3.fromRGB(46, 51, 56), true, interaction)
+	local woodenSign = interactionPart("WoodenSign", Vector3.new(-25.3, 7, -12), Vector3.new(5, 2.8, 0.25), Color3.fromRGB(82, 46, 20), false, interaction)
+	local steelPanel = interactionPart("SteelPanel", Vector3.new(-25.8, 3.5, -12), Vector3.new(3.2, 2.1, 0.2), Color3.fromRGB(87, 92, 94), false, interaction)
+	local tree = interactionPart("WindBentTree", Vector3.new(13.630354, 7, -15.45179), Vector3.new(1.1, 14, 1.1), Color3.fromRGB(69, 51, 31), true, interaction)
+
+	woodenSign.StormExposedArea = 12.0
+	woodenSign.StormDragCoefficient = 1.15
+	woodenSign.StormForceScale = 1.0
+	steelPanel.StormExposedArea = 7.0
+	steelPanel.StormDragCoefficient = 1.05
+	steelPanel.StormForceScale = 0.7
+	tree.StormRestFrame = tree.CFrame
+	tree.StormMaximumBendRadians = 0.52
+	tree.StormResponsePerSecond = 5.0
+	tree.StormWindSpeedForMaximumBend = 72.0
+
+	local function stormLink(name: string, part: Part, breakForce: number, strength: number): WeldConstraint
+		local link = Instance.new("WeldConstraint")
+		link.Name = name
+		link.Part0 = mast
+		link.Part1 = part
+		link.StormBreakForce = breakForce
+		link.StormMaterialStrength = strength
+		link.Parent = interaction
+		return link
+	end
+
+	local function retireWhenBroken(link: WeldConstraint, part: Part)
+		local retired = false
+		table.insert(interactionConnections, RunService.Heartbeat:Connect(function()
+			if retired or link.Enabled then return end
+			retired = true
+			local damage = Storm.Damage(part.Position)
+			Debris:AddItem(part, if damage.Potential > 0.5 then 5.0 else 10.0)
+			Debris:AddItem(link, 10.0)
+		end))
+	end
+
+	local woodLink = stormLink("Wood Sign Wind Link", woodenSign, 360.0, 0.55)
+	local steelLink = stormLink("Steel Panel Wind Link", steelPanel, 640.0, 1.65)
+	retireWhenBroken(woodLink, woodenSign)
+	retireWhenBroken(steelLink, steelPanel)
+end
+
+-- Every assembly has an anchored foundation row. The physics weld pass selects
+-- that row as its root while support links survive, then the same connected
+-- component becomes dynamic when storm fatigue opens a path through it.
+local material = {
+	timber = { Colour = Color3.fromRGB(133, 87, 48), Strength = 0.72, BreakForce = 18500, DamageRate = 1.45 },
+	masonry = { Colour = Color3.fromRGB(128, 126, 119), Strength = 1.05, BreakForce = 32500, DamageRate = 0.72 },
+	steel = { Colour = Color3.fromRGB(104, 128, 145), Strength = 1.65, BreakForce = 42000, DamageRate = 0.38 },
+	glass = { Colour = Color3.fromRGB(112, 178, 192), Strength = 0.42, BreakForce = 9000, DamageRate = 2.1 },
+}
+
+local assemblies = Instance.new("Folder")
+assemblies.Name = "Storm Structure Assemblies"
+assemblies.Parent = workspace
+
+local function structuralPart(name: string, frame: CFrame, size: Vector3, profile: any, anchored: boolean, parent: Instance): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.CFrame = frame
+	part.Size = size
+	part.Color = profile.Colour
+	part.Anchored = anchored
+	part.StormExposedArea = size.X * size.Y
+	part.StormDragCoefficient = 1.08
+	part.StormForceScale = 0.82
+	part.Parent = parent
+	return part
+end
+
+local function stormJoint(name: string, first: Part, second: Part, profile: any, parent: Instance)
+	local joint = Instance.new("WeldConstraint")
+	joint.Name = name
+	joint.Part0 = first
+	joint.Part1 = second
+	joint.StormBreakForce = profile.BreakForce
+	joint.StormMaterialStrength = profile.Strength
+	joint.StormIntegrity = 1.0
+	joint.StormDamageRate = profile.DamageRate
+	joint.Parent = parent
+	return joint
+end
+
+local function assembly(name: string, origin: Vector3, yaw: number, columns: number, rows: number, depths: number, profile: any)
+	local model = Instance.new("Folder")
+	model.Name = name
+	model.Parent = assemblies
+	local parts: { [string]: Part } = {}
+	local frame = CFrame.new(origin) * CFrame.Angles(0, yaw, 0)
+	local function key(row: number, column: number, depth: number): string
+		return row .. ":" .. column .. ":" .. depth
+	end
+	for row = 0, rows - 1 do
+		for column = 0, columns - 1 do
+			for depth = 0, depths - 1 do
+				local localFrame = CFrame.new((column - (columns - 1) * 0.5) * 4.4, 1.65 + row * 3.3, (depth - (depths - 1) * 0.5) * 4.4)
+				local outerFace = row > 0 and (column == 0 or column == columns - 1 or depth == 0 or depth == depths - 1)
+				local memberProfile = outerFace and material.glass or profile
+				parts[key(row, column, depth)] = structuralPart(name .. " Member " .. key(row, column, depth), frame * localFrame, Vector3.new(3.8, 2.9, 3.8), memberProfile, row == 0, model)
+			end
+		end
+	end
+	for row = 0, rows - 1 do
+		for column = 0, columns - 1 do
+			for depth = 0, depths - 1 do
+				local current = parts[key(row, column, depth)]
+				if row + 1 < rows then stormJoint(name .. " Vertical " .. key(row, column, depth), current, parts[key(row + 1, column, depth)], profile, model) end
+				if column + 1 < columns then stormJoint(name .. " Cross " .. key(row, column, depth), current, parts[key(row, column + 1, depth)], profile, model) end
+				if depth + 1 < depths then stormJoint(name .. " Depth " .. key(row, column, depth), current, parts[key(row, column, depth + 1)], profile, model) end
+			end
+		end
+	end
+end
+
+local function rebuildAssemblies()
+	for _, child in ipairs(assemblies:GetChildren()) do child:Destroy() end
+	assembly("Timber Farmhouse", Vector3.new(-76, 0, 119), math.rad(24), 3, 3, 2, material.timber)
+	assembly("Masonry Depot", Vector3.new(46, 0, 83), math.rad(-31), 4, 2, 3, material.masonry)
+	assembly("Steel Workshop", Vector3.new(96, 0, 177), math.rad(47), 2, 4, 2, material.steel)
+end
+
+-- The vehicle body and every wheel are regular rigid parts. A single weak
+-- tie-down uses StormLink, so the same fatigue pass that releases roof panels
+-- turns a parked chase vehicle into a storm-driven physics assembly.
+local function vehiclePart(name: string, frame: CFrame, size: Vector3, colour: Color3, parent: Instance): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.CFrame = frame
+	part.Size = size
+	part.Color = colour
+	part.Anchored = false
+	part.CanCollide = true
+	part.StormExposedArea = size.X * size.Y
+	part.StormDragCoefficient = 1.04
+	part.StormForceScale = 0.62
+	part.Parent = parent
+	return part
+end
+
+local function vehicleJoint(name: string, first: Part, second: Part, parent: Instance): WeldConstraint
+	local joint = Instance.new("WeldConstraint")
+	joint.Name = name
+	joint.Part0 = first
+	joint.Part1 = second
+	joint.StormBreakForce = 24000
+	joint.StormMaterialStrength = 1.45
+	joint.StormDamageRate = 0.5
+	joint.Parent = parent
+	return joint
+end
+
+local function chaseVehicle(name: string, position: Vector3, yaw: number, parent: Instance)
+	local vehicle = Instance.new("Folder")
+	vehicle.Name = name
+	vehicle.Parent = parent
+	local frame = CFrame.new(position) * CFrame.Angles(0, yaw, 0)
+	local chassis = vehiclePart(name .. " Chassis", frame * CFrame.new(0, 1.55, 0), Vector3.new(2.35, 0.65, 4.9), Color3.fromRGB(49, 62, 67), vehicle)
+	chassis.StormExposedArea = 10.6
+	chassis.StormForceScale = 0.72
+	local cabin = vehiclePart(name .. " Cabin", frame * CFrame.new(0, 2.35, -0.28), Vector3.new(2.15, 1.12, 2.35), Color3.fromRGB(77, 92, 96), vehicle)
+	cabin.StormExposedArea = 7.2
+	vehicleJoint(name .. " Cabin Mount", chassis, cabin, vehicle)
+	for _, wheelOffset in ipairs({
+		Vector3.new(-1.32, 0.75, -1.55), Vector3.new(1.32, 0.75, -1.55),
+		Vector3.new(-1.32, 0.75, 1.55), Vector3.new(1.32, 0.75, 1.55),
+	}) do
+		local wheel = vehiclePart(name .. " Wheel", frame * CFrame.new(wheelOffset), Vector3.new(0.5, 1.08, 1.08), Color3.fromRGB(24, 26, 25), vehicle)
+		wheel.StormEnabled = false
+		vehicleJoint(name .. " Wheel Mount", chassis, wheel, vehicle)
+	end
+
+	local anchor = Instance.new("Part")
+	anchor.Name = name .. " Tie Down"
+	anchor.CFrame = frame * CFrame.new(0, 0.35, 0)
+	anchor.Size = Vector3.new(0.4, 0.4, 0.4)
+	anchor.Anchored = true
+	anchor.Visible = false
+	anchor.Parent = vehicle
+	local tieDown = vehicleJoint(name .. " Storm Tie Down", anchor, chassis, vehicle)
+	tieDown.StormBreakForce = 4300
+	tieDown.StormMaterialStrength = 0.88
+	tieDown.StormDamageRate = 1.35
+end
+
+-- This follows the reference's 160 metre deterministic scenery cells. At most
+-- nine cells are retained, so scenery stays bounded as the translating storm
+-- crosses the prairie. Every cell has nine mixed objects and selected cells
+-- carry a complete wind-releasable chase vehicle.
+local environment = Instance.new("Folder")
+environment.Name = "Tornado Environment Cells"
+environment.Parent = workspace
+local loadedCells: { [string]: Folder } = {}
+local retainedCells: { { Cell: Folder, RetireAt: number } } = {}
+local environmentCellSize = 160
+local environmentRadius = 2
+local retainedCellLimit = 8
+local retainedCellSeconds = 45.0
+local environmentElapsed = 0.0
+
+local function environmentKey(cellX: number, cellZ: number): string
+	return cellX .. ":" .. cellZ
+end
+
+local function environmentalPart(name: string, position: Vector3, size: Vector3, colour: Color3, parent: Instance): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Position = position
+	part.Size = size
+	part.Color = colour
+	part.Anchored = true
+	part.Parent = parent
+	return part
+end
+
+local function weatherAttachedScenery(name: string, position: Vector3, size: Vector3, colour: Color3, breakForce: number, parent: Instance): Part
+	local part = vehiclePart(name, CFrame.new(position), size, colour, parent)
+	part.StormExposedArea = size.X * size.Y
+	local anchor = environmentalPart(name .. " Anchor", position - Vector3.new(0, size.Y * 0.5, 0), Vector3.new(0.25, 0.25, 0.25), Color3.fromRGB(0, 0, 0), parent)
+	anchor.Visible = false
+	local link = vehicleJoint(name .. " Wind Link", anchor, part, parent)
+	link.StormBreakForce = breakForce
+	link.StormMaterialStrength = 0.72
+	link.StormDamageRate = 1.2
+	return part
+end
+
+local function appendEnvironmentCell(cellX: number, cellZ: number)
+	local key = environmentKey(cellX, cellZ)
+	if loadedCells[key] ~= nil then return end
+	local cell = Instance.new("Folder")
+	cell.Name = "Storm Cell " .. key
+	cell.Parent = environment
+	loadedCells[key] = cell
+	local origin = Vector3.new(cellX * environmentCellSize, 0, cellZ * environmentCellSize + 95)
+	for index = 0, 7 do
+		local x = origin.X + ((index * 47 + cellZ * 19) % 130) - 65
+		local z = origin.Z + ((index * 71 + cellX * 23) % 130) - 65
+		if index % 3 == 0 then
+			local tree = environmentalPart("Cell Tree " .. index, Vector3.new(x, 5.5, z), Vector3.new(1.05, 11, 1.05), Color3.fromRGB(67, 55, 36), cell)
+			tree.StormRestFrame = tree.CFrame
+			tree.StormMaximumBendRadians = 0.46
+			tree.StormResponsePerSecond = 4.2
+			tree.StormWindSpeedForMaximumBend = 78.0
+		elseif index % 3 == 1 then
+			weatherAttachedScenery("Cell Sign " .. index, Vector3.new(x, 2.1, z), Vector3.new(3.6, 1.8, 0.2), Color3.fromRGB(137, 87, 42), 980, cell)
+		else
+			weatherAttachedScenery("Cell Roof Panel " .. index, Vector3.new(x, 1.4, z), Vector3.new(4.4, 0.18, 2.8), Color3.fromRGB(85, 59, 44), 1650, cell)
+		end
+	end
+	if math.abs(cellX * 17 + cellZ * 31) % 3 == 0 then
+		chaseVehicle("Cell Chase Vehicle", origin + Vector3.new(-28, 1, 24), math.rad((cellX - cellZ) * 13), cell)
+	else
+		environmentalPart("Cell Windbreak", origin + Vector3.new(28, 1.2, -24), Vector3.new(7.5, 2.4, 0.3), Color3.fromRGB(91, 76, 52), cell)
+	end
+	local panel = vehiclePart("Cell Loose Roof Panel", CFrame.new(origin + Vector3.new(34, 2.0, -32)), Vector3.new(4.8, 0.16, 2.9), Color3.fromRGB(83, 57, 42), cell)
+	panel.StormExposedArea = 13.9
+	panel.StormForceScale = 0.9
+	local panelAnchor = environmentalPart("Cell Roof Anchor", origin + Vector3.new(34, 0.45, -32), Vector3.new(0.25, 0.25, 0.25), Color3.fromRGB(0, 0, 0), cell)
+	panelAnchor.Visible = false
+	local panelLink = vehicleJoint("Cell Roof Wind Link", panelAnchor, panel, cell)
+	panelLink.StormBreakForce = 1900
+	panelLink.StormMaterialStrength = 0.65
+	panelLink.StormDamageRate = 1.6
+end
+
+local function streamEnvironmentCells(position: Vector3)
+	local centreX = math.floor(position.X / environmentCellSize)
+	local centreZ = math.floor((position.Z - 95) / environmentCellSize)
+	local wanted: { [string]: boolean } = {}
+	for cellZ = centreZ - environmentRadius, centreZ + environmentRadius do
+		for cellX = centreX - environmentRadius, centreX + environmentRadius do
+			local key = environmentKey(cellX, cellZ)
+			wanted[key] = true
+			appendEnvironmentCell(cellX, cellZ)
+		end
+	end
+	for key, cell in pairs(loadedCells) do
+		if not wanted[key] then
+			local released = false
+			for _, descendant in ipairs(cell:GetDescendants()) do
+				if descendant:IsA("WeldConstraint") and not descendant.Enabled then
+					released = true
+					break
+				end
+			end
+			if released then
+				cell.Parent = environment
+				table.insert(retainedCells, { Cell = cell, RetireAt = environmentElapsed + retainedCellSeconds })
+			else
+				cell:Destroy()
+			end
+			loadedCells[key] = nil
+		end
+	end
+end
+
+local function cleanupRetainedCells(now: number)
+	for index = #retainedCells, 1, -1 do
+		local retained = retainedCells[index]
+		if now >= retained.RetireAt or retained.Cell.Parent == nil then
+			retained.Cell:Destroy()
+			table.remove(retainedCells, index)
+		end
+	end
+	while #retainedCells > retainedCellLimit do
+		retainedCells[1].Cell:Destroy()
+		table.remove(retainedCells, 1)
+	end
+end
+
+local function resetEnvironment()
+	for key, cell in pairs(loadedCells) do
+		cell:Destroy()
+		loadedCells[key] = nil
+	end
+	for _, retained in ipairs(retainedCells) do retained.Cell:Destroy() end
+	retainedCells = {}
+	local intercept = environment:FindFirstChild("Tornado Chase Intercept")
+	if intercept then intercept:Destroy() end
+	rebuildInteraction()
+	rebuildAssemblies()
+	chaseVehicle("Tornado Chase Intercept", Vector3.new(-84, 1, -54), math.rad(2), environment)
+	streamEnvironmentCells(environmentObserverPosition)
+end
+
+resetEnvironment()
+local environmentClock = 0.0
+RunService.Heartbeat:Connect(function(delta: number)
+	if environmentResetRequested then
+		environmentResetRequested = false
+		resetEnvironment()
+	end
+	environmentClock += delta
+	environmentElapsed += delta
+	if not environmentRefreshRequested and environmentClock < 0.75 then return end
+	environmentRefreshRequested = false
+	environmentClock = 0
+	streamEnvironmentCells(environmentObserverPosition)
+	cleanupRetainedCells(environmentElapsed)
+end)
+]]></Source>
+		<Source path="scripts/client/TornadoClient.client.luau"><![CDATA[--!strict
+local StarterGui = game:GetService("StarterGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local Controls = require(ReplicatedStorage.TornadoSim.StormControls)
+local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
+local controlEvent = ReplicatedStorage.TornadoControl
+
+local function makePart(name: string, size: Vector3, position: Vector3, colour: Color3): Part
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Anchored = true
+	part.Size = size
+	part.Position = position
+	part.Color = colour
+	part.Parent = Workspace
+	return part
+end
+
+local function makeVolume(name: string, position: Vector3, bounds: Vector3, density: number): Volume
+	local volume = Instance.new("Volume")
+	volume.Name = name
+	volume.Position = position
+	volume.Bounds = bounds
+	volume.Shape = Enum.VolumeShape.Ellipsoid
+	volume.Color = Color3.fromRGB(168, 178, 184)
+	volume.Density = density
+	volume.Extinction = 0.68
+	volume.Falloff = 0.58
+	volume.NoiseScale = 0.16
+	volume.NoiseStrength = 0.86
+	volume.Steps = 32
+	volume.ShadowSteps = 12
+	volume.Seed = #name * 41
+	volume.Parent = Workspace
+	return volume
+end
+
+-- A computed sky and a dark cloud deck keep the pale funnel visible. A black
+-- clear colour removes its silhouette before any particle system can help.
+Lighting.ClockTime = 17.2
+Lighting.GeographicLatitude = 35
+Lighting.Brightness = 0.06
+Lighting.Ambient = Color3.fromRGB(10, 13, 15)
+Lighting.OutdoorAmbient = Color3.fromRGB(13, 15, 16)
+Lighting.BloomThreshold = 1.1
+Lighting.BloomIntensity = 0.45
+Lighting.BloomRadius = 6
+Lighting.GodRayIntensity = 0.16
+Lighting.GodRayThreshold = 1.1
+Lighting.GodRayRadius = 46
+
+local sky = Instance.new("SkyboxCompute")
+sky.Name = "Tornado Storm Sky"
+sky.Shader = Enum.SkyboxComputeShader.Night
+sky.SunSize = 0.01
+sky.Seed = 401
+sky.Parent = Lighting
+
+local atmosphere = Instance.new("AtmosphereProcedural")
+atmosphere.Name = "Tornado Storm Atmosphere"
+atmosphere.Shader = Enum.AtmosphereProceduralShader.Earth
+atmosphere.Color = Color3.fromRGB(27, 33, 38)
+atmosphere.Decay = Color3.fromRGB(7, 10, 12)
+atmosphere.Density = 0.12
+atmosphere.Haze = 1.1
+atmosphere.Glare = 0.04
+atmosphere.Samples = 16
+atmosphere.Parent = Lighting
+
+local clouds = Instance.new("CloudCompute")
+clouds.Name = "Tornado Anvil Cloud Deck"
+clouds.Shader = Enum.CloudComputeShader.Storm
+clouds.Color = Color3.fromRGB(27, 29, 28)
+clouds.Cover = 0.98
+clouds.Density = 0.98
+clouds.WindSpeed = 19
+clouds.WindDirection = Vector2.new(0.85, 0.34)
+clouds.CellSize = 0.19
+clouds.Detail = 0.9
+clouds.Height = 0.54
+clouds.Thickness = 0.58
+clouds.Steps = 32
+clouds.Seed = 957
+clouds.Parent = Lighting
+
+-- The original sparse world rows remain for simulation compatibility. Hide
+-- their placeholder surfaces before constructing the visible scene, otherwise
+-- the coplanar white terrain intermittently wins the depth test.
+local authoredWorld = Workspace:FindFirstChild("TornadoSimWorld")
+if authoredWorld then
+	local placeholderTerrain = authoredWorld:FindFirstChild("Terrain")
+	if placeholderTerrain then placeholderTerrain.Visible = false end
+	local placeholderTrees = authoredWorld:FindFirstChild("TreeLine")
+	if placeholderTrees then placeholderTrees.Visible = false end
+	local placeholderSign = authoredWorld:FindFirstChild("RoadSign")
+	if placeholderSign then placeholderSign.Visible = false end
+	local placeholderVehicle = authoredWorld:FindFirstChild("ChaseVehicle")
+	if placeholderVehicle then placeholderVehicle.Visible = false end
+	for _, name in ipairs({"Farmhouse", "Barn", "Workshop"}) do
+		local structure = authoredWorld:FindFirstChild(name)
+		local roof = if structure then structure:FindFirstChild("RoofPanel") else nil
+		if roof then roof.Visible = false end
+	end
+end
+
+local ground = makePart("Storm Prairie", Vector3.new(1450, 3, 1450), Vector3.new(0, -2.0, 80), Color3.fromRGB(66, 59, 38))
+local road = makePart("Storm Chase Road", Vector3.new(18, 0.18, 650), Vector3.new(-82, 0.1, 84), Color3.fromRGB(64, 61, 54))
+for index = -14, 14 do
+	makePart("Road Mark " .. index, Vector3.new(0.55, 0.04, 9), Vector3.new(-82, 0.22, 84 + index * 20), Color3.fromRGB(193, 169, 99))
+end
+
+-- A local humanoid-shaped observer gives the field a playable scale. It is a
+-- camera proxy rather than an authority-owned character: moving it never
+-- writes a second simulation body into the replicated storm world.
+local observer = Instance.new("Model")
+observer.Name = "Storm Field Observer"
+observer.Parent = Workspace
+local observerRoot = makePart("Observer Root", Vector3.new(0.7, 4.6, 0.7), Vector3.new(-114, 2.3, -92), Color3.fromRGB(255, 255, 255))
+observerRoot.Visible = false
+observerRoot.Parent = observer
+local observerHumanoid = Instance.new("Humanoid")
+observerHumanoid.Name = "Humanoid"
+observerHumanoid.RootPart = observerRoot
+observerHumanoid.WalkSpeed = 8
+observerHumanoid.Parent = observer
+local observerTorso = makePart("Observer Storm Jacket", Vector3.new(1.45, 2.15, 0.82), observerRoot.Position, Color3.fromRGB(39, 72, 91))
+observerTorso.Parent = observer
+local observerHead = makePart("Observer Head", Vector3.new(1.02, 1.02, 1.02), observerRoot.Position, Color3.fromRGB(201, 166, 122))
+observerHead.Parent = observer
+local observerPosition = observerRoot.Position
+local observerHeading = Vector3.new(0, 0, 1)
+local observerFollow = false
+local observerPublishElapsed = 0.0
+
+local function updateObserverVisual()
+	observerRoot.Position = observerPosition
+	observerTorso.CFrame = CFrame.lookAt(observerPosition + Vector3.new(0, 0.15, 0), observerPosition + observerHeading)
+	observerHead.CFrame = CFrame.lookAt(observerPosition + Vector3.new(0, 1.65, 0), observerPosition + observerHeading)
+end
+
+UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+	if processed or input.KeyCode ~= Enum.KeyCode.F then return end
+	observerFollow = not observerFollow
+end)
+
+-- The reference keeps a projected grid locked to the prairie. These thin
+-- geometry lines give the same world scale without a per-frame projection pass.
+for index = -12, 12 do
+	local offset = index * 45
+	local northSouth = makePart("Prairie Grid NS " .. index, Vector3.new(0.10, 0.025, 1080), Vector3.new(offset, -0.47, 95), Color3.fromRGB(94, 101, 73))
+	northSouth.Transparency = 0.44
+	local eastWest = makePart("Prairie Grid EW " .. index, Vector3.new(1080, 0.025, 0.10), Vector3.new(0, -0.47, 95 + offset), Color3.fromRGB(94, 101, 73))
+	eastWest.Transparency = 0.44
+end
+
+local function building(name: string, x: number, z: number, width: number, depth: number, height: number, colour: Color3)
+	makePart(name .. " Walls", Vector3.new(width, height, depth), Vector3.new(x, height * 0.5, z), colour)
+	local roof = makePart(name .. " Roof", Vector3.new(width + 2, 1.5, depth + 2), Vector3.new(x, height + 0.75, z), Color3.fromRGB(68, 47, 39))
+	makePart(name .. " Foundation", Vector3.new(width + 1, 0.8, depth + 1), Vector3.new(x, 0.4, z), Color3.fromRGB(70, 62, 50))
+	makePart(name .. " Roof Ridge", Vector3.new(width * 0.72, 1.2, 1.0), Vector3.new(x, height + 1.75, z), Color3.fromRGB(55, 42, 37))
+	for window = -1, 1, 2 do
+		local pane = makePart(name .. " Window " .. window, Vector3.new(2.4, 2.6, 0.12), Vector3.new(x + window * width * 0.28, height * 0.57, z - depth * 0.505), Color3.fromRGB(116, 139, 146))
+		pane.EmissiveStrength = 0.15
+	end
+end
+
+building("Farmhouse", -80, 36, 24, 18, 12, Color3.fromRGB(111, 100, 82))
+building("Barn", 52, 72, 36, 24, 17, Color3.fromRGB(117, 61, 44))
+building("Workshop", 94, -12, 28, 20, 13, Color3.fromRGB(86, 88, 80))
+for row = 0, 3 do
+	for column = 0, 4 do
+		local bale = makePart("Hay Bale " .. row .. "/" .. column, Vector3.new(3.5, 2.1, 3.5), Vector3.new(-8 + column * 7, 1.05, 10 + row * 8), Color3.fromRGB(133, 107, 51))
+	end
+end
+for index = 0, 95 do
+	-- This slot is the replicated WindBentTree. The authority owns its pose, so
+	-- the local forest must leave the spot open instead of drawing a static twin.
+	if index ~= 57 then
+		local angle = index * 2.399
+		local radius = 118 + (index % 9) * 15
+		local x = math.cos(angle) * radius
+		local z = 95 + math.sin(angle) * radius * 0.68
+		local trunkHeight = 8 + index % 6
+		makePart("Tree Trunk " .. index, Vector3.new(1.1, trunkHeight, 1.1), Vector3.new(x, trunkHeight * 0.5, z), Color3.fromRGB(70, 55, 37))
+		local crownWidth = 7 + index % 5 * 2
+		makePart("Tree Crown Low " .. index, Vector3.new(crownWidth, 5 + index % 3, crownWidth), Vector3.new(x, trunkHeight + 2.8, z), Color3.fromRGB(39, 66 + index % 4 * 6, 38))
+		makePart("Tree Crown High " .. index, Vector3.new(crownWidth * 0.72, 4 + index % 3, crownWidth * 0.72), Vector3.new(x + (index % 3 - 1) * 0.9, trunkHeight + 6, z), Color3.fromRGB(42, 73 + index % 4 * 5, 40))
+	end
+end
+
+type DamageScenery = {
+	Source: Part,
+	Decoration: Part,
+	LocalFrame: CFrame,
+}
+
+-- The server parts are the simulation and replication source. These local
+-- details deliberately follow their received CFrames instead of rebuilding a
+-- second wind model on the client.
+local damageScenery: { DamageScenery } = {}
+local damageSceneryBound = false
+
+local function attachDamageScenery(name: string, source: Part, size: Vector3, colour: Color3, localFrame: CFrame)
+	local decoration = makePart(name, size, source.Position, colour)
+	decoration.CFrame = source.CFrame * localFrame
+	table.insert(damageScenery, { Source = source, Decoration = decoration, LocalFrame = localFrame })
+end
+
+local function bindStormDamageScenery()
+	if damageSceneryBound then return end
+	local interaction = Workspace:FindFirstChild("StormInteraction")
+	if not interaction then return end
+	local woodenSign = interaction:FindFirstChild("WoodenSign")
+	local steelPanel = interaction:FindFirstChild("SteelPanel")
+	local tree = interaction:FindFirstChild("WindBentTree")
+	if not woodenSign or not woodenSign:IsA("Part") or not steelPanel or not steelPanel:IsA("Part") or not tree or
+		not tree:IsA("Part") then
+		return
+	end
+
+	damageSceneryBound = true
+	attachDamageScenery("Wood Sign Face", woodenSign, Vector3.new(4.7, 2.45, 0.06), Color3.fromRGB(156, 97, 42), CFrame.new(0, 0, -0.16))
+	attachDamageScenery("Steel Panel Stripe", steelPanel, Vector3.new(2.9, 0.26, 0.06), Color3.fromRGB(184, 159, 74), CFrame.new(0, 0, -0.14))
+	attachDamageScenery("WindBentTree Crown Low", tree, Vector3.new(10, 5.8, 10), Color3.fromRGB(45, 82, 43), CFrame.new(0, 5.1, 0))
+	attachDamageScenery("WindBentTree Crown High", tree, Vector3.new(7.2, 4.6, 7.2), Color3.fromRGB(49, 91, 45), CFrame.new(0.7, 8.7, 0))
+end
+for index = -9, 9 do
+	local fenceZ = -58 + index * 12
+	makePart("Fence Post " .. index, Vector3.new(0.5, 3.8, 0.5), Vector3.new(39, 1.9, fenceZ), Color3.fromRGB(85, 67, 45))
+	makePart("Fence Rail " .. index, Vector3.new(0.35, 0.24, 12), Vector3.new(39, 2.4, fenceZ + 6), Color3.fromRGB(94, 72, 48))
+end
+
+-- Five local overlapping cells form a condensation funnel. The broad dirty
+-- base and the upper anvil feed preserve the reference's multi-layer shape.
+local stormOrigin = Vector3.new(0, 0, 95)
+local stormVisuals: { { Object: any, Origin: Vector3 } } = {}
+local function followStorm(object: any)
+	table.insert(stormVisuals, { Object = object, Origin = object.Position })
+end
+local funnelVolumes = {
+	makeVolume("Funnel Ground Spray", Vector3.new(0, 10, 95), Vector3.new(46, 12, 46), 0.10),
+	makeVolume("Funnel Lower Condensation", Vector3.new(0, 38, 95), Vector3.new(38, 32, 38), 0.08),
+	makeVolume("Funnel Mid Condensation", Vector3.new(0, 91, 95), Vector3.new(58, 50, 58), 0.065),
+	makeVolume("Funnel Upper Condensation", Vector3.new(0, 166, 95), Vector3.new(84, 64, 84), 0.05),
+	makeVolume("Funnel Anvil Feed", Vector3.new(0, 250, 95), Vector3.new(162, 34, 118), 0.035),
+}
+funnelVolumes[1].Color = Color3.fromRGB(170, 137, 92)
+funnelVolumes[1].NoiseStrength = 1
+funnelVolumes[2].Color = Color3.fromRGB(146, 139, 125)
+funnelVolumes[3].Color = Color3.fromRGB(126, 124, 116)
+funnelVolumes[4].Color = Color3.fromRGB(92, 99, 105)
+funnelVolumes[5].Color = Color3.fromRGB(67, 76, 86)
+funnelVolumes[5].Density = 0.055
+for _, volume in ipairs(funnelVolumes) do followStorm(volume) end
+local rainBank = makeVolume("Rain Curtain", Vector3.new(-34, 38, 44), Vector3.new(120, 46, 105), 0.035)
+rainBank.Color = Color3.fromRGB(112, 129, 140)
+rainBank.Falloff = 0.72
+followStorm(rainBank)
+
+-- A shallow stack makes the storm's wall cloud recede behind the funnel. The
+-- distant layers use fewer march steps because they only establish silhouette.
+local cloudShelf = {
+	makeVolume("Wall Cloud Near", Vector3.new(-92, 187, 112), Vector3.new(210, 52, 135), 0.024),
+	makeVolume("Wall Cloud West", Vector3.new(-205, 208, 61), Vector3.new(250, 64, 176), 0.021),
+	makeVolume("Wall Cloud East", Vector3.new(182, 221, 141), Vector3.new(280, 70, 192), 0.019),
+	makeVolume("Anvil Back Shelf", Vector3.new(28, 260, 246), Vector3.new(455, 54, 220), 0.017),
+}
+for index, shelf in ipairs(cloudShelf) do
+	followStorm(shelf)
+	shelf.Color = Color3.fromRGB(47 + index * 3, 53 + index * 3, 57 + index * 4)
+	shelf.Falloff = 0.68
+	shelf.NoiseScale = 0.22
+	shelf.NoiseStrength = 0.94
+	shelf.Steps = 20
+	shelf.ShadowSteps = 6
+end
+
+local function emitter(name: string, host: Part, rate: number, colour: Color3): ParticleEmitter
+	local effect = Instance.new("ParticleEmitter")
+	effect.Name = name
+	effect.Rate = rate
+	effect.MaxParticles = 2400
+	effect.Lifetime = NumberRange.new(1.8, 3.8)
+	effect.Speed = NumberRange.new(3, 11)
+	effect.Drag = 0.6
+	effect.Shape = Enum.ParticleEmitterShape.Disc
+	effect.ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface
+	effect.ShapeInOut = Enum.ParticleEmitterShapeInOut.InAndOut
+	effect.SpreadAngle = Vector2.new(35, 35)
+	effect.Size = NumberSequence.new(0.35, 1.8)
+	effect.Transparency = NumberSequence.new(0.18, 0.85)
+	effect.Color = ColorSequence.new(colour)
+	effect.NoiseStrength = 0.8
+	effect.NoiseFrequency = 0.65
+	effect.NoiseScrollSpeed = 1.2
+	effect.SoftParticles = true
+	effect.Parent = host
+	return effect
+end
+
+local stormHost = makePart("Storm Cosmetic Host", Vector3.new(24, 3, 24), Vector3.new(0, 1, 95), Color3.new(1, 1, 1))
+stormHost.Visible = false
+followStorm(stormHost)
+
+-- Each loop owns one perceptual layer from the reference mix. The engine
+-- decodes ordinary published WAVs, which keeps the authored demo portable
+-- while the future procedural audio graph receives the same control signals.
+local function stormSound(name: string, soundId: string, volume: number, looped: boolean): Sound
+	local sound = Instance.new("Sound")
+	sound.Name = name
+	sound.SoundId = soundId
+	sound.Volume = volume
+	sound.RollOffMinDistance = 48
+	sound.RollOffMaxDistance = 740
+	sound.Looped = looped
+	sound.Playing = looped
+	sound.Parent = stormHost
+	return sound
+end
+
+local windBed = stormSound("Tornado Wind Bed", "audio/tornado-wind.wav", 0.28, true)
+local circulationBed = stormSound("Tornado Low Circulation", "audio/tornado-circulation.wav", 0.23, true)
+local rainBed = stormSound("Tornado Rain Sheet", "audio/tornado-rain.wav", 0.13, true)
+local debrisBed = stormSound("Tornado Debris Rattle", "audio/tornado-debris.wav", 0.09, true)
+local thunder = stormSound("Tornado Delayed Thunder", "audio/tornado-thunder.wav", 0.62, false)
+local audioLayers = { windBed, circulationBed, rainBed, debrisBed }
+local audioEnabled = true
+local thunderRevision = 0
+
+local function updateStormAudio(snapshot: any, observer: Vector3)
+	local sample = Storm.Sample(observer)
+	local horizontalWind = Vector3.new(sample.Velocity.X, 0, sample.Velocity.Z).Magnitude
+	local parameters = snapshot.Parameters
+	local wind = math.clamp(horizontalWind / 105, 0, 1)
+	local rain = math.clamp(parameters.RainRate * parameters.Humidity * (0.35 + sample.Influence), 0, 1)
+	local debris = math.clamp(sample.DamagePotential * parameters.DebrisDensity * 0.45, 0, 1)
+	local rumble = math.clamp(parameters.Energy * sample.Influence * (0.4 + horizontalWind / 140), 0, 1)
+	windBed.Volume = 0.08 + wind * 0.34
+	circulationBed.Volume = 0.05 + rumble * 0.31
+	rainBed.Volume = 0.02 + rain * 0.22
+	debrisBed.Volume = 0.01 + debris * 0.18
+	local toStorm = snapshot.Position - observer
+	local pan = math.clamp(toStorm.X / math.max(toStorm.Magnitude, 1), -1, 1)
+	windBed.Pan = pan
+	circulationBed.Pan = pan
+	rainBed.Pan = pan
+	debrisBed.Pan = pan
+	thunder.Pan = pan
+	for _, sound in ipairs(audioLayers) do sound.Playing = audioEnabled and snapshot.Enabled end
+end
+
+local function scheduleThunder(delay: number)
+	local revision = thunderRevision
+	task.delay(delay, function()
+		if not audioEnabled or revision ~= thunderRevision then return end
+		thunder.Playing = false
+		thunder.Playing = true
+	end)
+end
+
+-- The simulation seeds mt19937 with this value. This compact Park-Miller
+-- sequence keeps the visual schedule reproducible without mutating Luau's
+-- shared random generator.
+local lightningSeed = 0x544F524E
+local lightningNextStrike = 1.5
+local lightningStrikeTime = -1000
+local lightningDuration = 0.18
+local lightningSerial = 0
+local lightningTop = Vector3.zero
+local lastStormElapsed = 0
+local camera: Camera
+
+local function lightningRandom(): number
+	lightningSeed = (lightningSeed * 16807) % 2147483647
+	return (lightningSeed - 1) / 2147483646
+end
+
+local function lightningRange(minimum: number, maximum: number): number
+	return minimum + (maximum - minimum) * lightningRandom()
+end
+
+local lightningHost = makePart("Tornado Lightning Flash", Vector3.one, stormOrigin, Color3.new(1, 1, 1))
+lightningHost.Visible = false
+local lightningLight = Instance.new("PointLight")
+lightningLight.Name = "Tornado Lightning Light"
+lightningLight.Color = Color3.fromRGB(218, 232, 255)
+lightningLight.Brightness = 0
+lightningLight.Range = 0
+lightningLight.Parent = lightningHost
+
+local lightningPoints: { Attachment } = {}
+for index = 0, 9 do
+	local point = Instance.new("Attachment")
+	point.Name = "Lightning Point " .. index
+	point.Parent = lightningHost
+	table.insert(lightningPoints, point)
+end
+
+local lightningBeams: { Beam } = {}
+for index = 1, 9 do
+	local beam = Instance.new("Beam")
+	beam.Name = "Tornado Lightning Segment " .. index
+	beam.Attachment0 = lightningPoints[index]
+	beam.Attachment1 = lightningPoints[index + 1]
+	beam.Width0 = 3.6
+	beam.Width1 = 3.6
+	beam.Color = ColorSequence.new(Color3.fromRGB(209, 225, 255))
+	beam.Transparency = NumberSequence.new(1)
+	beam.Additive = true
+	beam.Enabled = false
+	beam.Parent = lightningHost
+	table.insert(lightningBeams, beam)
+end
+
+local lightningSparks = Instance.new("ParticleEmitter")
+lightningSparks.Name = "Tornado Lightning Sparks"
+lightningSparks.Rate = 120
+lightningSparks.MaxParticles = 96
+lightningSparks.Lifetime = NumberRange.new(0.16, 0.34)
+lightningSparks.Speed = NumberRange.new(12, 26)
+lightningSparks.SpreadAngle = Vector2.new(42, 42)
+lightningSparks.Acceleration = Vector3.new(0, -34, 0)
+lightningSparks.Size = NumberSequence.new(0.35, 0)
+lightningSparks.Transparency = NumberSequence.new(0.05, 1)
+lightningSparks.Color = ColorSequence.new(Color3.fromRGB(218, 232, 255))
+lightningSparks.Additive = true
+lightningSparks.LightEmission = 1
+lightningSparks.TimeScale = 0
+lightningSparks.Parent = lightningHost
+
+local lightningEnabled = true
+local function setLightningVisible(visible: boolean, intensity: number)
+	visible = visible and lightningEnabled
+	for _, beam in ipairs(lightningBeams) do
+		beam.Enabled = visible
+		beam.Transparency = NumberSequence.new(1 - intensity)
+	end
+	lightningLight.Brightness = if visible then 360 * intensity else 0
+	lightningLight.Range = if visible then 220 * intensity else 0
+	lightningSparks.TimeScale = if visible then intensity else 0
+end
+
+local function resetLightning()
+	lightningSeed = 0x544F524E
+	lightningNextStrike = 1.5
+	lightningStrikeTime = -1000
+	lightningDuration = 0.18
+	lightningSerial = 0
+	setLightningVisible(false, 0)
+end
+
+local function strikeLightning(snapshot: any)
+	local parameters = snapshot.Parameters
+	local angle = lightningRange(0, math.pi * 2)
+	local radius = lightningRange(parameters.CoreRadius * 1.2, parameters.InfluenceRadius * 0.82)
+	local height = parameters.TopHeight * 0.82
+	lightningTop = Vector3.new(math.cos(angle) * radius, height, math.sin(angle) * radius)
+	lightningHost.Position = snapshot.Position + lightningTop
+	lightningDuration = lightningRange(0.12, 0.24)
+	lightningStrikeTime = lightningNextStrike
+	lightningSerial += 1
+
+	for index, point in ipairs(lightningPoints) do
+		local segment = index - 1
+		local fraction = segment / 9
+		point.CFrame = CFrame.new(Vector3.new(
+			math.sin(segment * 8.73 + lightningSerial * 0.71) * 5,
+			-height * fraction,
+			math.cos(segment * 5.19 + lightningSerial * 0.43) * 3
+		))
+	end
+
+	local moisture = math.max(0, math.min(1, parameters.Humidity * parameters.Energy))
+	lightningNextStrike += lightningRange(1.2, 5.5) / math.max(0.25 + moisture, 0.25)
+	scheduleThunder((lightningHost.Position - camera.CFrame.Position).Magnitude / 343)
+end
+local condensationEmitters: { ParticleEmitter } = {}
+local rainEmitters: { ParticleEmitter } = {}
+local debrisEmitters: { ParticleEmitter } = {}
+
+local debris = emitter("Debris Skirt", stormHost, 64, Color3.fromRGB(96, 75, 54))
+table.insert(debrisEmitters, debris)
+debris.Shape = Enum.ParticleEmitterShape.Cylinder
+debris.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
+debris.Lifetime = NumberRange.new(2.8, 5.0)
+debris.Size = NumberSequence.new(0.5, 1.7)
+debris.Transparency = NumberSequence.new(0.76, 0.985)
+debris.Acceleration = Vector3.new(0, 8, 0)
+
+-- Dirt first slides inward across the field, then the existing field particles
+-- loft it through the lower funnel. Several sparse sources read as one broad
+-- skirt while keeping the cosmetic emitter count bounded.
+for index = 0, 11 do
+	local angle = index * math.pi * 2 / 12
+	local radius = 46 + index % 3 * 9
+	local x = math.cos(angle) * radius
+	local z = 95 + math.sin(angle) * radius * 0.72
+	local host = makePart("Ground Debris Host " .. index, Vector3.new(12, 1, 12), Vector3.new(x, 0.6, z), Color3.new(1, 1, 1))
+	host.Visible = false
+	followStorm(host)
+	local dust = emitter("Ground Debris Inflow", host, 16, Color3.fromRGB(105, 78, 49))
+	table.insert(debrisEmitters, dust)
+	dust.MaxParticles = 480
+	dust.Lifetime = NumberRange.new(2.2, 3.7)
+	dust.Speed = NumberRange.new(3, 7)
+	dust.Shape = Enum.ParticleEmitterShape.Cylinder
+	dust.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
+	dust.Size = NumberSequence.new(0.45, 1.35)
+	dust.Transparency = NumberSequence.new(0.82, 0.985)
+	dust.Acceleration = Vector3.new(-x * 0.11, 5.5, -(z - 95) * 0.11)
+end
+
+-- Each source is a shallow volume rather than a point. Slow overlapping wisps
+-- close the vertical seams, leaving a single taper instead of stacked puffs.
+local function condensationLayer(name: string, height: number, radius: number, rate: number, colour: Color3)
+	local host = makePart(name .. " Host", Vector3.new(radius * 2, radius * 1.2, radius * 2), Vector3.new(0, height, 95), Color3.new(1, 1, 1))
+	host.Visible = false
+	followStorm(host)
+	local layer = emitter(name, host, rate, colour)
+	layer.MaxParticles = 900
+	layer.Shape = Enum.ParticleEmitterShape.Cylinder
+	layer.ShapeStyle = Enum.ParticleEmitterShapeStyle.Volume
+	layer.Lifetime = NumberRange.new(3.4, 5.4)
+	layer.Speed = NumberRange.new(2, 6)
+	layer.SpreadAngle = Vector2.new(48, 48)
+	layer.Size = NumberSequence.new(radius * 0.14, radius * 0.28)
+	layer.Transparency = NumberSequence.new(0.87, 0.985)
+	layer.Acceleration = Vector3.new(0, 5, 0)
+	return layer
+end
+
+for _, layer in ipairs({
+	condensationLayer("Condensation Streamers", 7, 14, 120, Color3.fromRGB(51, 34, 21)),
+	condensationLayer("Funnel Lower Wisps", 22, 20, 140, Color3.fromRGB(59, 45, 31)),
+	condensationLayer("Funnel Lower Body", 43, 27, 150, Color3.fromRGB(64, 54, 41)),
+	condensationLayer("Funnel Mid Wisps", 69, 35, 160, Color3.fromRGB(63, 60, 53)),
+	condensationLayer("Funnel Mid Body", 101, 46, 140, Color3.fromRGB(57, 58, 55)),
+	condensationLayer("Funnel Upper Wisps", 138, 60, 115, Color3.fromRGB(49, 51, 50)),
+	condensationLayer("Funnel Anvil Wisps", 176, 82, 80, Color3.fromRGB(43, 45, 44)),
+}) do table.insert(condensationEmitters, layer) end
+
+-- Layers is a field mask. Preserve condensation with rain and debris: omitting
+-- bit one leaves only a thin spray column, even with a million GPU particles.
+local gpuField = Workspace:FindFirstChild("TornadoParticles", true)
+if gpuField == nil then
+	local fieldAnchor = makePart("Tornado Particle Anchor", Vector3.one, Vector3.new(0, 0, 95), Color3.new(1, 1, 1))
+	fieldAnchor.Visible = false
+	followStorm(fieldAnchor)
+	gpuField = Instance.new("GpuParticleField")
+	gpuField.Name = "TornadoParticles"
+	local visualField = gpuField :: any
+	visualField.RequestedCount = 1048576
+	visualField.Seed = 123456789
+	visualField.CondensationColor = Color3.fromRGB(132, 135, 132)
+	visualField.CondensationAlpha = 0.12
+	visualField.CondensationSize = 11.5
+	visualField.RainColor = Color3.fromRGB(41, 51, 56)
+	visualField.RainAlpha = 0.10
+	visualField.RainSize = 0.30
+	visualField.DebrisColor = Color3.fromRGB(56, 38, 23)
+	visualField.DebrisAlpha = 0.16
+	visualField.DebrisSize = 0.8
+	gpuField.Parent = fieldAnchor
+end
+local visualField = gpuField :: any
+visualField.Layers = 7
+local authoredAnchor = Workspace:FindFirstChild("StormAnchor", true)
+if authoredAnchor and authoredAnchor:IsA("Part") then followStorm(authoredAnchor) end
+for x = -2, 2 do
+	for z = -2, 2 do
+		local host = makePart("Rain Host " .. x .. "/" .. z, Vector3.one, Vector3.new(x * 34, 74, 55 + z * 34), Color3.new(1, 1, 1))
+		host.Visible = false
+		followStorm(host)
+		local rain = emitter("Tornado Rain", host, 28, Color3.fromRGB(87, 112, 127))
+		table.insert(rainEmitters, rain)
+		rain.Lifetime = NumberRange.new(1.0, 1.5)
+		rain.Speed = NumberRange.new(26, 37)
+		rain.Acceleration = Vector3.new(8, -49, 3)
+		rain.Size = NumberSequence.new(0.05, 0.025)
+		rain.Squash = NumberSequence.new(-0.86, -0.95)
+		rain.Transparency = NumberSequence.new(0.76, 0.98)
+	end
+end
+
+camera = Instance.new("Camera")
+camera.Name = "TornadoChaseCamera"
+camera.FieldOfView = 68
+camera.FarPlaneZ = 1500
+-- Frame the mature EF3 column beside the control panel. The lower aim and
+-- wider lens match the reference orbit's horizon and funnel bounds at 1440 by
+-- 900 while keeping the camera controls centered on the same storm target.
+local cameraTarget = Vector3.new(240, 65, 95)
+local cameraHome = Vector3.new(-255, 125, -285)
+local cameraYaw = 0.0
+local cameraPitch = 0.0
+local cameraZoom = 1.0
+local function cameraFrame(target: Vector3): CFrame
+	local offset = cameraHome - cameraTarget
+	local yawCosine, yawSine = math.cos(cameraYaw), math.sin(cameraYaw)
+	local x = offset.X * yawCosine + offset.Z * yawSine
+	local z = -offset.X * yawSine + offset.Z * yawCosine
+	local pitchCosine, pitchSine = math.cos(cameraPitch), math.sin(cameraPitch)
+	local eye = target + Vector3.new(x, offset.Y * pitchCosine - z * pitchSine,
+		(offset.Y * pitchSine + z * pitchCosine)) / cameraZoom
+	return CFrame.lookAt(eye, target)
+end
+camera.CFrame = cameraFrame(cameraTarget)
+camera.Parent = Workspace
+Workspace.CurrentCamera = camera
+
+local function request(change: { [string]: any })
+	controlEvent:FireServer(HttpService:JSONEncode(change))
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "TornadoSimPanel"
+gui.ResetOnSpawn = false
+local player = Players.LocalPlayer
+gui.Parent = if player and player:FindFirstChild("PlayerGui") then player.PlayerGui else StarterGui
+
+local panel = Instance.new("ScrollingFrame")
+panel.Name = "StormControls"
+panel.Size = UDim2.new(0, 352, 1, -28)
+panel.Position = UDim2.new(0, 14, 0, 14)
+panel.CanvasSize = UDim2.new(0, 352, 0, 900)
+panel.CanvasPosition = Vector2.new(0, 0)
+panel.ScrollBarThickness = 8
+panel.ScrollBarImageColor3 = Color3.fromRGB(70, 117, 132)
+panel.BackgroundColor3 = Color3.fromRGB(3, 6, 9)
+panel.BackgroundTransparency = 0.08
+panel.BorderSizePixel = 0
+panel.Parent = gui
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -12, 0, 25)
+title.Position = UDim2.new(0, 7, 0, 7)
+title.Text = "TORNADO FIELD LAB"
+title.TextColor3 = Color3.fromRGB(224, 233, 239)
+title.TextSize = 14
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.BackgroundTransparency = 1
+title.Parent = panel
+
+local function button(label: string, x: number, y: number, callback: () -> (), width: number?): TextButton
+	local control = Instance.new("TextButton")
+	control.Name = label
+	control.Size = UDim2.new(0, width or 37, 0, 22)
+	control.Position = UDim2.new(0, x, 0, y)
+	control.Text = label
+	control.TextSize = 11
+	control.TextColor3 = Color3.fromRGB(220, 229, 235)
+	control.BackgroundColor3 = Color3.fromRGB(12, 22, 29)
+	control.BorderSizePixel = 0
+	control.Parent = panel
+	control.Activated:Connect(callback)
+	return control
+end
+
+for index, preset in ipairs(Controls.presets) do
+	local column = (index - 1) % 6
+	local row = math.floor((index - 1) / 6)
+	button(preset, 7 + column * 41, 39 + row * 25, function()
+		request({ kind = "preset", name = preset })
+	end)
+end
+
+button("PAUSE", 7, 91, function()
+	request({ kind = "enabled", value = false })
+end)
+button("PLAY", 48, 91, function()
+	request({ kind = "enabled", value = true })
+end)
+button("RESET", 89, 91, function()
+	request({ kind = "reset" })
+end)
+button("LIFE", 130, 91, function()
+	request({ kind = "lifecycle", value = true })
+end)
+button("OFF", 171, 91, function()
+	request({ kind = "lifecycle", value = false })
+end)
+button("AUDIO", 212, 91, function()
+	audioEnabled = not audioEnabled
+	thunderRevision += 1
+	for _, sound in ipairs(audioLayers) do sound.Playing = audioEnabled end
+	thunder.Playing = false
+end, 39)
+
+local counts = { 262144, 524288, 1000000, 2000000, 5000000, 10000000, 15000000, 20000000, 50000000 }
+for index, count in ipairs(counts) do
+	local column = (index - 1) % 5
+	local row = math.floor((index - 1) / 5)
+	button(string.format("P%.2gM", count / 1000000), 7 + column * 68, 119 + row * 25, function()
+		request({ kind = "particles", count = count })
+	end, 63)
+end
+
+local activeLayers = 7
+local layerButtons: { [number]: TextButton } = {}
+local rainOpacity = 1.0
+local rainDensity = 1.0
+local emitterRates: { [ParticleEmitter]: number } = {}
+local function layerActive(mask: number, bit: number): boolean
+	return mask % (bit * 2) >= bit
+end
+local function setEmitterLayer(emitters: { ParticleEmitter }, enabled: boolean, scale: number)
+	for _, effect in ipairs(emitters) do
+		effect.Enabled = enabled
+		effect.Rate = enabled and emitterRates[effect] * scale or 0
+	end
+end
+local function updateLayers()
+	request({ kind = "layers", mask = activeLayers })
+	rainBank.Enabled = layerActive(activeLayers, 2)
+	for bit, control in pairs(layerButtons) do
+		local enabled = layerActive(activeLayers, bit)
+		control.BackgroundColor3 = if enabled then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
+	end
+	setEmitterLayer(condensationEmitters, layerActive(activeLayers, 1) and activeLayers ~= 1, 1)
+	setEmitterLayer(rainEmitters, layerActive(activeLayers, 2), rainDensity)
+	setEmitterLayer(debrisEmitters, layerActive(activeLayers, 4), 1)
+	visualField.RainAlpha = 0.10 * rainOpacity * rainDensity
+end
+
+
+for index, layer in ipairs({ { 1, "COND" }, { 2, "RAIN" }, { 4, "DUST" } }) do
+	local bit = layer[1] :: number
+	local label = layer[2] :: string
+	layerButtons[bit] = button(label, 7 + (index - 1) * 69, 174, function()
+		if activeLayers % (bit * 2) >= bit then
+			activeLayers -= bit
+		else
+			activeLayers += bit
+		end
+		updateLayers()
+	end, 64)
+end
+
+local funnelOnlyControl: TextButton
+funnelOnlyControl = button("FUNNEL", 119, 810, function()
+	activeLayers = if activeLayers == 1 then 7 else 1
+	clouds.Cover = if activeLayers == 1 then 0 else 0.98
+	clouds.Density = if activeLayers == 1 then 0 else 0.98
+	for _, volume in ipairs(funnelVolumes) do volume.Enabled = activeLayers ~= 1 end
+	for _, shelf in ipairs(cloudShelf) do shelf.Enabled = activeLayers ~= 1 end
+	updateLayers()
+	funnelOnlyControl.BackgroundColor3 = if activeLayers == 1 then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
+end, 62)
+
+for _, emitters in ipairs({ condensationEmitters, rainEmitters, debrisEmitters }) do
+	for _, effect in ipairs(emitters) do emitterRates[effect] = effect.Rate end
+end
+updateLayers()
+local cameraOrbit = false
+local cameraShake = false
+local orbitControl: TextButton
+orbitControl = button("CAM ORBIT", 215, 174, function()
+	cameraOrbit = not cameraOrbit
+	orbitControl.BackgroundColor3 = if cameraOrbit then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
+end, 62)
+local shakeControl: TextButton
+shakeControl = button("SHAKE", 281, 174, function()
+	cameraShake = not cameraShake
+	shakeControl.BackgroundColor3 = if cameraShake then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
+end, 64)
+
+local section = Instance.new("TextLabel")
+section.Name = "FieldParameters"
+section.Size = UDim2.new(1, -14, 0, 18)
+section.Position = UDim2.new(0, 7, 0, 204)
+section.Text = "FIELD AND WEATHER  click −/+ or edit then press Return"
+section.TextColor3 = Color3.fromRGB(127, 170, 184)
+section.TextSize = 10
+section.TextXAlignment = Enum.TextXAlignment.Left
+section.BackgroundTransparency = 1
+section.Parent = panel
+
+local function clamp(value: number, minimum: number, maximum: number): number
+	return math.max(minimum, math.min(maximum, value))
+end
+
+local function formatValue(value: number): string
+	if value % 1 == 0 then return string.format("%.0f", value) end
+	return string.format("%.2f", value)
+end
+
+local parameterBoxes: { [string]: TextBox } = {}
+local editingBox: TextBox? = nil
+local panelClock = 0
+local lastParameterEdit = -1000
+local nextParameterSync = 0
+local function commitParameter(parameter: any, box: TextBox)
+	local requested = tonumber(box.Text)
+	if requested == nil then
+		box.Text = formatValue(Controls.default[parameter.Key])
+		return
+	end
+	requested = clamp(requested, parameter.Min, parameter.Max)
+	box.Text = formatValue(requested)
+	lastParameterEdit = panelClock
+	request({ kind = "parameters", values = { [parameter.Key] = requested } })
+end
+
+for index, parameter in ipairs(Controls.parameters) do
+	local column = (index - 1) % 2
+	local row = math.floor((index - 1) / 2)
+	local x = 7 + column * 172
+	local y = 227 + row * 27
+	local label = Instance.new("TextLabel")
+	label.Name = parameter.Key .. "Label"
+	label.Size = UDim2.new(0, 76, 0, 22)
+	label.Position = UDim2.new(0, x, 0, y)
+	label.Text = parameter.Label
+	label.TextSize = 10
+	label.TextColor3 = Color3.fromRGB(178, 196, 204)
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.BackgroundTransparency = 1
+	label.Parent = panel
+
+	local box = Instance.new("TextBox")
+	box.Name = parameter.Key .. "Slider"
+	box.Size = UDim2.new(0, 48, 0, 22)
+	box.Position = UDim2.new(0, x + 76, 0, y)
+	box.Text = formatValue(Controls.default[parameter.Key])
+	box.TextSize = 11
+	box.TextColor3 = Color3.fromRGB(227, 234, 239)
+	box.BackgroundColor3 = Color3.fromRGB(12, 22, 29)
+	box.BorderSizePixel = 0
+	box.Parent = panel
+	parameterBoxes[parameter.Key] = box
+	box.Focused:Connect(function() editingBox = box end)
+	box.FocusLost:Connect(function()
+		editingBox = nil
+		commitParameter(parameter, box)
+	end)
+	button("−", x + 127, y, function()
+		local value = tonumber(box.Text) or Controls.default[parameter.Key]
+		box.Text = formatValue(clamp(value - parameter.Step, parameter.Min, parameter.Max))
+		commitParameter(parameter, box)
+	end, 18)
+	button("+", x + 147, y, function()
+		local value = tonumber(box.Text) or Controls.default[parameter.Key]
+		box.Text = formatValue(clamp(value + parameter.Step, parameter.Min, parameter.Max))
+		commitParameter(parameter, box)
+	end, 18)
+end
+
+local vectorInset = Instance.new("Frame")
+vectorInset.Name = "FieldVectorInset"
+vectorInset.Size = UDim2.new(1, -14, 0, 106)
+vectorInset.Position = UDim2.new(0, 7, 0, 451)
+vectorInset.BackgroundColor3 = Color3.fromRGB(6, 15, 20)
+vectorInset.BorderSizePixel = 0
+vectorInset.Parent = panel
+
+local insetTitle = Instance.new("TextLabel")
+insetTitle.Size = UDim2.new(1, -10, 0, 18)
+insetTitle.Position = UDim2.new(0, 5, 0, 4)
+insetTitle.Text = "VECTOR INSET  circulation / inflow / vertical"
+insetTitle.TextColor3 = Color3.fromRGB(130, 186, 203)
+insetTitle.TextSize = 10
+insetTitle.TextXAlignment = Enum.TextXAlignment.Left
+insetTitle.BackgroundTransparency = 1
+insetTitle.Parent = vectorInset
+
+local horizontalAxis = Instance.new("Frame")
+horizontalAxis.Size = UDim2.new(1, -24, 0, 1)
+horizontalAxis.Position = UDim2.new(0, 12, 0, 57)
+horizontalAxis.BackgroundColor3 = Color3.fromRGB(48, 85, 94)
+horizontalAxis.BorderSizePixel = 0
+horizontalAxis.Parent = vectorInset
+local verticalAxis = Instance.new("Frame")
+verticalAxis.Size = UDim2.new(0, 1, 1, -32)
+verticalAxis.Position = UDim2.new(0.5, 0, 0, 24)
+verticalAxis.BackgroundColor3 = Color3.fromRGB(48, 85, 94)
+verticalAxis.BorderSizePixel = 0
+verticalAxis.Parent = vectorInset
+
+local vectorLabels: { TextLabel } = {}
+for index = 1, 5 do
+	local vector = Instance.new("TextLabel")
+	vector.Name = "FieldVector" .. index
+	vector.Size = UDim2.new(0, 64, 0, 16)
+	vector.Position = UDim2.new(0, 8 + (index - 1) * 67, 0, if index % 2 == 0 then 66 else 39)
+	vector.TextColor3 = Color3.fromRGB(191, 221, 229)
+	vector.TextSize = 10
+	vector.BackgroundTransparency = 1
+	vector.Parent = vectorInset
+	table.insert(vectorLabels, vector)
+end
+
+local readout = Instance.new("TextLabel")
+readout.Name = "FieldReadout"
+readout.Size = UDim2.new(1, -14, 0, 155)
+readout.Position = UDim2.new(0, 7, 0, 567)
+readout.TextColor3 = Color3.fromRGB(192, 211, 221)
+readout.TextSize = 12
+readout.TextWrapped = true
+readout.TextXAlignment = Enum.TextXAlignment.Left
+readout.TextYAlignment = Enum.TextYAlignment.Top
+readout.BackgroundTransparency = 1
+readout.Parent = panel
+
+local stormMotion = Controls.default.TranslationVelocity
+local counterClockwise = false
+local environmentEnabled = true
+local environmentControl: TextButton
+local lightningControl: TextButton
+local function setEnvironmentVisible(visible: boolean)
+	environmentEnabled = visible
+	for _, object in ipairs(Workspace:GetDescendants()) do
+		if not object:IsA("Part") and not object:IsA("Volume") then continue end
+		local name = object.Name
+		local environmentObject = string.find(name, "Storm Prairie") or string.find(name, "Storm Chase Road")
+			or string.find(name, "Road Mark") or string.find(name, "Prairie Grid") or string.find(name, "Farmhouse")
+			or string.find(name, "Barn") or string.find(name, "Workshop") or string.find(name, "Hay Bale")
+			or string.find(name, "Tree ") or string.find(name, "Fence ") or string.find(name, "Storm Cell")
+			or string.find(name, "Cell ") or string.find(name, "Tornado Chase") or string.find(name, "StormInteraction")
+			or string.find(name, "WoodenSign") or string.find(name, "SteelPanel") or string.find(name, "WindBentTree")
+		if environmentObject then
+			if object:IsA("Part") then object.Visible = visible else (object :: Volume).Enabled = visible end
+		end
+	end
+end
+local function setStormMotion(change: Vector3)
+	stormMotion = Vector3.new(
+		math.clamp(change.X, -60, 60), math.clamp(change.Y, -60, 60), math.clamp(change.Z, -60, 60)
+	)
+	request({ kind = "motion", x = stormMotion.X, y = stormMotion.Y, z = stormMotion.Z })
+end
+
+button("CCW", 7, 732, function()
+	counterClockwise = not counterClockwise
+	request({ kind = "rotation", counterClockwise = counterClockwise })
+end, 52)
+button("WIND X-", 7, 758, function() setStormMotion(stormMotion - Vector3.new(5, 0, 0)) end, 52)
+button("WIND X+", 61, 758, function() setStormMotion(stormMotion + Vector3.new(5, 0, 0)) end, 52)
+button("WIND Y-", 115, 758, function() setStormMotion(stormMotion - Vector3.new(0, 5, 0)) end, 52)
+button("WIND Y+", 169, 758, function() setStormMotion(stormMotion + Vector3.new(0, 5, 0)) end, 52)
+button("WIND Z-", 223, 758, function() setStormMotion(stormMotion - Vector3.new(0, 0, 5)) end, 52)
+button("WIND Z+", 277, 758, function() setStormMotion(stormMotion + Vector3.new(0, 0, 5)) end, 52)
+button("RAIN OP-", 7, 784, function() rainOpacity = math.max(0, rainOpacity - 0.1); updateLayers() end, 78)
+button("RAIN OP+", 87, 784, function() rainOpacity = math.min(1, rainOpacity + 0.1); updateLayers() end, 78)
+button("RAIN DEN-", 167, 784, function() rainDensity = math.max(0, rainDensity - 0.1); updateLayers() end, 86)
+button("RAIN DEN+", 255, 784, function() rainDensity = math.min(1, rainDensity + 0.1); updateLayers() end, 86)
+environmentControl = button("ENV", 7, 810, function()
+	setEnvironmentVisible(not environmentEnabled)
+	environmentControl.BackgroundColor3 = if environmentEnabled then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
+end, 52)
+lightningControl = button("LIGHT", 61, 810, function()
+	lightningEnabled = not lightningEnabled
+	setLightningVisible(false, 0)
+	lightningControl.BackgroundColor3 = if lightningEnabled then Color3.fromRGB(27, 57, 66) else Color3.fromRGB(12, 22, 29)
+end, 52)
+button("YAW -", 7, 836, function() cameraYaw -= math.rad(8) end, 52)
+button("YAW +", 61, 836, function() cameraYaw += math.rad(8) end, 52)
+button("PITCH -", 115, 836, function() cameraPitch = math.max(math.rad(-75), cameraPitch - math.rad(5)) end, 70)
+button("PITCH +", 187, 836, function() cameraPitch = math.min(math.rad(75), cameraPitch + math.rad(5)) end, 70)
+button("ZOOM -", 259, 836, function() cameraZoom = math.max(0.55, cameraZoom - 0.1) end, 78)
+button("ZOOM +", 259, 862, function() cameraZoom = math.min(1.7, cameraZoom + 0.1) end, 78)
+
+local vectorPoints = {
+	Vector3.new(-70, 15, 95), Vector3.new(-28, 15, 95), Vector3.new(0, 15, 95),
+	Vector3.new(28, 15, 95), Vector3.new(70, 15, 95),
+}
+local arrows = { "→", "↗", "↑", "↖", "←", "↙", "↓", "↘" }
+local elapsed = 0
+local stormOffset = Vector3.zero
+RunService.Heartbeat:Connect(function(delta: number)
+	elapsed += delta
+	panelClock += delta
+	bindStormDamageScenery()
+	for index = #damageScenery, 1, -1 do
+		local scenery = damageScenery[index]
+		-- A replicated source can disappear between frames. Keep every access to
+		-- that old handle inside pcall, then let the next bind find its replacement.
+		local readable, frame = pcall(function(): CFrame?
+			if scenery.Source.Parent == nil or scenery.Decoration.Parent == nil then return nil end
+			return scenery.Source.CFrame * scenery.LocalFrame
+		end)
+		if not readable or frame == nil then
+			pcall(function() scenery.Decoration:Destroy() end)
+			table.remove(damageScenery, index)
+		else
+			local placed = pcall(function() scenery.Decoration.CFrame = frame end)
+			if not placed then table.remove(damageScenery, index) end
+		end
+	end
+	if #damageScenery == 0 then damageSceneryBound = false end
+	local snapshot = Storm.Snapshot()
+	if snapshot.Parameters.TranslationVelocity then
+		stormMotion = snapshot.Parameters.TranslationVelocity
+	end
+	if type(snapshot.Parameters.CounterClockwise) == "boolean" then
+		counterClockwise = snapshot.Parameters.CounterClockwise
+	end
+	if snapshot.ElapsedSeconds > 0 and panelClock >= nextParameterSync then
+		nextParameterSync = panelClock + 0.25
+		if panelClock - lastParameterEdit >= 0.35 then
+			for _, parameter in ipairs(Controls.parameters) do
+				local box = parameterBoxes[parameter.Key]
+				local value = snapshot.Parameters[parameter.Key]
+				if box ~= editingBox and type(value) == "number" then
+					local formatted = formatValue(value)
+					if box.Text ~= formatted then box.Text = formatted end
+				end
+			end
+		end
+	end
+	if snapshot.ElapsedSeconds < lastStormElapsed then
+		resetLightning()
+	end
+	lastStormElapsed = snapshot.ElapsedSeconds
+	-- A replica starts without the server resource. Keep the authored origin
+	-- until its first fixed-step snapshot arrives, then move every local effect
+	-- from the same value that drives gameplay and GPU cloud presentation.
+	if snapshot.ElapsedSeconds > 0 then
+		local nextOffset = snapshot.Position - stormOrigin
+		if nextOffset.X ~= stormOffset.X or nextOffset.Y ~= stormOffset.Y or nextOffset.Z ~= stormOffset.Z then
+			stormOffset = nextOffset
+			for _, visual in ipairs(stormVisuals) do
+				visual.Object.Position = visual.Origin + stormOffset
+			end
+	if not cameraOrbit and not cameraShake and not observerFollow then
+				camera.CFrame = cameraFrame(cameraTarget + stormOffset)
+			end
+		end
+	end
+	if UserInputService:GetFocusedTextBox() == nil then
+		local move = Vector3.zero
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then move += Vector3.new(0, 0, 1) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then move += Vector3.new(0, 0, -1) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then move += Vector3.new(-1, 0, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then move += Vector3.new(1, 0, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.Q) then move += Vector3.new(0, -1, 0) end
+		if UserInputService:IsKeyDown(Enum.KeyCode.E) then move += Vector3.new(0, 1, 0) end
+		if move.Magnitude > 0 then
+			local direction = move.Unit
+			observerHumanoid.MoveDirection = direction
+			observerPosition += direction * observerHumanoid.WalkSpeed * delta
+			if direction.X ~= 0 or direction.Z ~= 0 then
+				observerHeading = Vector3.new(direction.X, 0, direction.Z).Unit
+			end
+		else
+			observerHumanoid.MoveDirection = Vector3.zero
+		end
+	end
+	updateObserverVisual()
+	updateStormAudio(snapshot, observerPosition)
+	observerPublishElapsed += delta
+	if observerPublishElapsed >= 0.5 then
+		observerPublishElapsed = 0
+		request({ kind = "observer", x = observerPosition.X, z = observerPosition.Z })
+	end
+	if cameraOrbit then
+		local orbit = elapsed * 0.16
+		local position = Vector3.new(math.cos(orbit) * 205, 72, 95 + math.sin(orbit) * 205) + stormOffset
+		camera.CFrame = CFrame.lookAt(position, cameraTarget + stormOffset)
+	elseif observerFollow then
+		local eye = observerPosition - observerHeading * 15 + Vector3.new(0, 7, 0)
+		camera.CFrame = CFrame.lookAt(eye, observerPosition + Vector3.new(0, 1.3, 0))
+	elseif cameraShake then
+		camera.CFrame = cameraFrame(cameraTarget + stormOffset)
+	end
+	if cameraShake then
+		-- Sample at the observer's eye so the optional camera response grows with
+		-- the same field and damage potential the reference program uses.
+		local observerField = Storm.Sample(observerPosition + Vector3.new(0, 1, 0))
+		local horizontalWind = Vector3.new(observerField.Velocity.X, 0, observerField.Velocity.Z).Magnitude
+		local shake = clamp(horizontalWind / 115 + observerField.DamagePotential * 0.45, 0, 1)
+		local phase = elapsed * (9 + horizontalWind * 0.035)
+		local offset = Vector3.new(
+			math.sin(phase * 1.7) * shake * 2.4,
+			math.sin(phase * 2.31 + 1.2) * shake * 1.1,
+			math.cos(phase * 1.13) * shake * 1.8
+		)
+		local yaw = math.sin(phase * 0.73) * shake * 0.018
+		local pitch = math.sin(phase * 1.37) * shake * 0.012
+		local roll = math.sin(phase * 0.91) * shake * 0.026
+		camera.CFrame = camera.CFrame * CFrame.Angles(pitch, yaw, roll) + offset
+	end
+	if snapshot.Enabled and snapshot.ElapsedSeconds > 0 then
+		while snapshot.ElapsedSeconds >= lightningNextStrike do
+			strikeLightning(snapshot)
+		end
+		local lightningAge = snapshot.ElapsedSeconds - lightningStrikeTime
+		local lightningIntensity = if lightningAge >= 0 and lightningAge < lightningDuration
+			then (1 - lightningAge / lightningDuration) ^ 2 else 0
+		setLightningVisible(lightningIntensity > 0, lightningIntensity)
+		if lightningIntensity > 0 then
+			lightningHost.Position = snapshot.Position + lightningTop
+		end
+	else
+		setLightningVisible(false, 0)
+	end
+	local samplePoint = Vector3.new(0, 15, 30) + stormOffset
+	local sample = Storm.Sample(samplePoint)
+	local visibility = Storm.Visibility(samplePoint, 500)
+	local damage = Storm.Damage(samplePoint)
+	for index, point in ipairs(vectorPoints) do
+		local field = Storm.Sample(point + stormOffset)
+		local velocity = field.Velocity
+		local angle = math.atan(velocity.Z, velocity.X)
+		local arrow = arrows[(math.floor((angle + math.pi / 8) / (math.pi / 4)) % 8) + 1]
+		vectorLabels[index].Text = string.format("%s %.0f / %.0f", arrow, velocity.Magnitude, velocity.Y)
+	end
+	readout.Text = string.format(
+		"MATURE MULTI-CELL TORNADO\nWind %.0f / %.0f / %.0f m/s\nVisibility %.0f m   Damage %.2f\nGPU: 262K  524K  1M  2M  5M  10M  15M  20M  50M\nLayers: condensation, rain, dust\nField band %d",
+		sample.Velocity.X, sample.Velocity.Y, sample.Velocity.Z,
+		visibility.EffectiveDistance, damage.Potential, damage.Band
+	)
+end)
+]]></Source>
+	</Sources>
+	<Item class="Workspace" name="Workspace" id="1">
+		<Item class="Model" name="TornadoSimWorld" id="2">
+			<Item class="Part" name="Terrain" id="3">
+				<Property name="Size" type="Vector3">1800,8,1800</Property>
+				<Property name="Position" type="Vector3">0,-4,0</Property>
+				<Property name="Color" type="Color3">0.12,0.16,0.10</Property>
+			</Item>
+			<Item class="Model" name="Farmhouse" id="3"><Item class="Part" name="RoofPanel" id="4"><Property name="Size" type="Vector3">20,2,16</Property><Property name="Position" type="Vector3">-65,12,35</Property></Item></Item>
+			<Item class="Model" name="Barn" id="5"><Item class="Part" name="RoofPanel" id="6"><Property name="Size" type="Vector3">30,2,18</Property><Property name="Position" type="Vector3">42,14,62</Property></Item></Item>
+			<Item class="Model" name="Workshop" id="7"><Item class="Part" name="RoofPanel" id="8"><Property name="Size" type="Vector3">24,2,18</Property><Property name="Position" type="Vector3">80,12,-18</Property></Item></Item>
+			<Item class="Part" name="TreeLine" id="9"><Property name="Size" type="Vector3">180,20,8</Property><Property name="Position" type="Vector3">-120,10,110</Property></Item>
+			<Item class="Part" name="RoadSign" id="10"><Property name="Size" type="Vector3">4,8,1</Property><Property name="Position" type="Vector3">-18,6,4</Property></Item>
+			<Item class="Part" name="ChaseVehicle" id="11"><Property name="Size" type="Vector3">4,2,8</Property><Property name="Position" type="Vector3">-10,2,-55</Property></Item>
+			<Item class="Part" name="StormAnchor" id="12"><Property name="Position" type="Vector3">0,0,95</Property>
+		<Item class="GpuParticleField" name="TornadoParticles" id="20"><Property name="Enabled" type="bool">true</Property><Property name="Layers" type="int">7</Property><Property name="RequestedCount" type="int">1048576</Property><Property name="Seed" type="int">123456789</Property><Property name="CondensationColor" type="Color3">0.34,0.27,0.20</Property><Property name="CondensationAlpha" type="float">0.16</Property><Property name="CondensationSize" type="float">8.5</Property><Property name="RainColor" type="Color3">0.16,0.20,0.22</Property><Property name="RainAlpha" type="float">0.10</Property><Property name="RainSize" type="float">0.30</Property><Property name="DebrisColor" type="Color3">0.22,0.15,0.09</Property><Property name="DebrisAlpha" type="float">0.16</Property><Property name="DebrisSize" type="float">0.8</Property></Item>
+			</Item>
+		</Item>
+		<Item class="Model" name="StormInteraction" id="25">
+			<Item class="Part" name="SteelMast" id="26">
+				<Property name="Size" type="Vector3">0.7,10,0.7</Property>
+				<Property name="Position" type="Vector3">-28,5,-12</Property>
+				<Property name="Color" type="Color3">0.18,0.20,0.22</Property>
+				<Property name="Anchored" type="bool">true</Property>
+			</Item>
+			<Item class="Part" name="WoodenSign" id="27">
+				<Property name="Size" type="Vector3">5,2.8,0.25</Property>
+				<Property name="Position" type="Vector3">-25.3,7,-12</Property>
+				<Property name="Color" type="Color3">0.32,0.18,0.08</Property>
+				<Property name="Anchored" type="bool">false</Property>
+			</Item>
+			<Item class="Part" name="SteelPanel" id="28">
+				<Property name="Size" type="Vector3">3.2,2.1,0.2</Property>
+				<Property name="Position" type="Vector3">-25.8,3.5,-12</Property>
+				<Property name="Color" type="Color3">0.34,0.36,0.37</Property>
+				<Property name="Anchored" type="bool">false</Property>
+			</Item>
+			<Item class="Part" name="WindBentTree" id="29">
+				<Property name="Size" type="Vector3">1.1,14,1.1</Property>
+				<Property name="Position" type="Vector3">13.630354,7,-15.45179</Property>
+				<Property name="Color" type="Color3">0.27,0.20,0.12</Property>
+				<Property name="Anchored" type="bool">true</Property>
+			</Item>
+		</Item>
+	</Item>
+	<Item class="ReplicatedStorage" name="ReplicatedStorage" id="16">
+		<Item class="RemoteEvent" name="TornadoControl" id="31" />
+		<Item class="ModuleScript" name="TornadoSim" id="17">
+			<Property name="Source" type="string">scripts/shared/TornadoSim/init.luau</Property>
+			<Item class="ModuleScript" name="StormControls" id="18"><Property name="Source" type="string">scripts/shared/TornadoSim/StormControls.luau</Property></Item>
+		</Item>
+	</Item>
+	<Item class="StarterPlayer" name="StarterPlayer" id="19"><Item class="StarterPlayerScripts" name="StarterPlayerScripts" id="20"><Item class="LocalScript" name="TornadoClient" id="21"><Property name="Source" type="string">scripts/client/TornadoClient.client.luau</Property></Item></Item></Item>
+	<Item class="StarterGui" name="StarterGui" id="22" />
+	<Item class="ServerScriptService" name="ServerScriptService" id="23"><Item class="Script" name="TornadoServer" id="24"><Property name="Source" type="string">scripts/server/TornadoServer.server.luau</Property></Item></Item>
+</World>

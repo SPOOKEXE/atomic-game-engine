@@ -19,6 +19,7 @@ namespace engine::assets {
 			"engine.Sphere",
 			"engine.Cylinder",
 			"engine.SkinnedWedge",
+			"engine.Billboard",
 		};
 
 		// The texture names, indexed by the enum, for `NAMES`' reason.
@@ -216,6 +217,14 @@ namespace engine::assets {
 				{0.5f, 0.0f, -0.5f},
 				{0.0f, 1.0f, 0.0f}
 			);
+			return data;
+		}
+
+		MeshData MakeBillboard() {
+			MeshData data = MakePlane();
+			for (MeshVertex &vertex : data.Vertices) {
+				vertex.TexCoord[1] = 1.0f - vertex.TexCoord[1];
+			}
 			return data;
 		}
 
@@ -426,6 +435,9 @@ namespace engine::assets {
 			break;
 		case BuiltinMesh::Plane:
 			data = MakePlane();
+			break;
+		case BuiltinMesh::Billboard:
+			data = MakeBillboard();
 			break;
 		case BuiltinMesh::Wedge:
 			data = MakeWedge();

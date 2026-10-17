@@ -10,6 +10,7 @@
 #include <engine/game/Values.hpp>
 #include <engine/graph/PipelineDocument.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/physics/Pipeline.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/Clock.hpp>
@@ -916,6 +917,7 @@ namespace engine::game {
 		// anyway. Naming both is what makes the order impossible to get wrong
 		// from outside.
 		scene::RegisterSceneClasses();
+		physics::RegisterPhysicsClasses();
 
 		// **The 2D tree, because a game file carries one.** A server authors a
 		// `ScreenGui` and saves it; a loader that had not registered the class

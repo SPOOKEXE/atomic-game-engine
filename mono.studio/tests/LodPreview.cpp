@@ -28,10 +28,11 @@ namespace {
 	using engine::ecs::Classes;
 	using engine::ecs::Entity;
 	using engine::ecs::Store;
-	using engine::scene::AutoMeshLOD;
 	using engine::scene::Bounds;
 	using engine::scene::Camera;
 	using engine::scene::CameraMatrices;
+	using engine::scene::LODAuto;
+	using engine::scene::LODSettings;
 	using engine::scene::MeshCatalogue;
 	using engine::scene::Transform;
 	using engine::scene::Visual;
@@ -59,7 +60,7 @@ namespace {
 		store.Set(part, visual);
 		store.Set(part, Transform{CFrame{Vector3{0.0f, 0.0f, -10.0f}}});
 		store.Set(part, Bounds{Vector3{1.0f, 1.0f, 1.0f}});
-		AutoMeshLOD lod;
+		LODAuto lod;
 		lod.Meshes[0] = Name("studio.lod-preview.half");
 		lod.Levels = 2;
 		store.Set(part, lod);
@@ -80,7 +81,7 @@ TEST_CASE(
 	engine::scene::RegisterSceneClasses();
 	Store store("studio_lod_preview");
 	const Entity part = MeshPart(store);
-	store.GetMutable<AutoMeshLOD>(part)->TargetQuadArea = 0.001f;
+	store.GetMutable<LODAuto>(part)->TargetQuadArea = 0.001f;
 	MeshCatalogue catalogue;
 	catalogue.Triangles[Name("studio.lod-preview.base").Id()] = 10000;
 	catalogue.Triangles[Name("studio.lod-preview.half").Id()] = 5000;
@@ -108,7 +109,7 @@ TEST_CASE("a base-only editable mesh reports active lod zero", "[studio][lod]") 
 	engine::scene::RegisterSceneClasses();
 	Store store("studio_lod_preview_base_only");
 	const Entity part = MeshPart(store);
-	store.Remove<AutoMeshLOD>(part);
+	store.Remove<LODAuto>(part);
 	MeshCatalogue catalogue;
 	catalogue.Triangles[Name("studio.lod-preview.base").Id()] = 10000;
 	store.SetResource(catalogue);
@@ -123,8 +124,8 @@ TEST_CASE("visible MeshPart labels survive switching between worlds", "[studio][
 	Store second("studio_lod_label_second");
 	const Entity firstPart = MeshPart(first);
 	const Entity secondPart = MeshPart(second);
-	first.Remove<AutoMeshLOD>(firstPart);
-	second.Remove<AutoMeshLOD>(secondPart);
+	first.Remove<LODAuto>(firstPart);
+	second.Remove<LODAuto>(secondPart);
 
 	CHECK(studio::ShouldDrawActiveLodLabel(first, firstPart));
 	CHECK(studio::ShouldDrawActiveLodLabel(second, secondPart));
@@ -155,7 +156,7 @@ TEST_CASE("distance preferences force the preview onto a coarse resident lod", "
 	engine::scene::RegisterSceneClasses();
 	Store store("studio_lod_preview_distance_floor");
 	const Entity part = MeshPart(store);
-	store.GetMutable<AutoMeshLOD>(part)->TargetQuadArea = 0.001f;
+	store.GetMutable<LODAuto>(part)->TargetQuadArea = 0.001f;
 	MeshCatalogue catalogue;
 	catalogue.Triangles[Name("studio.lod-preview.base").Id()] = 10000;
 	catalogue.Triangles[Name("studio.lod-preview.half").Id()] = 5000;
@@ -166,12 +167,53 @@ TEST_CASE("distance preferences force the preview onto a coarse resident lod", "
 	CHECK(*level == 1);
 }
 
+TEST_CASE(
+	"per-item LOD distances override Studio defaults only as one complete ordered set", "[studio][lod]"
+) {
+	engine::scene::RegisterSceneComponents();
+	engine::scene::RegisterSceneClasses();
+	Store store("studio_lod_preview_item_distances");
+	const Entity part = MeshPart(store);
+	store.GetMutable<LODAuto>(part)->TargetQuadArea = 0.001f;
+	MeshCatalogue catalogue;
+	catalogue.Triangles[Name("studio.lod-preview.base").Id()] = 10000;
+	catalogue.Triangles[Name("studio.lod-preview.half").Id()] = 5000;
+	store.SetResource(catalogue);
+
+	LODSettings settings;
+	settings.MinimumDistances[0] = 1.0f;
+	settings.MinimumDistances[1] = 2.0f;
+	settings.MinimumDistances[2] = 3.0f;
+	store.Set(part, settings);
+	CHECK(
+		studio::EffectiveLodDistanceBands(&settings, {100.0f, 200.0f, 300.0f}) ==
+		std::array<float, 3>{1.0f, 2.0f, 3.0f}
+	);
+	CHECK(
+		studio::EditedLodDistanceBands(&settings, {100.0f, 200.0f, 300.0f}, 1, 20.0f) ==
+		std::array<float, 3>{1.0f, 20.0f, 3.0f}
+	);
+	CHECK(studio::ActiveLodForViewport(store, part, Panel(), {100.0f, 200.0f, 300.0f}) == 1);
+
+	settings.MinimumDistances[1] = 0.0f;
+	store.Set(part, settings);
+	CHECK(
+		studio::EffectiveLodDistanceBands(&settings, {100.0f, 200.0f, 300.0f}) ==
+		std::array<float, 3>{100.0f, 200.0f, 300.0f}
+	);
+	CHECK(
+		studio::EditedLodDistanceBands(&settings, {100.0f, 200.0f, 300.0f}, 1, 150.0f) ==
+		std::array<float, 3>{100.0f, 150.0f, 300.0f}
+	);
+	CHECK(studio::ActiveLodForViewport(store, part, Panel(), {100.0f, 200.0f, 300.0f}) == 0);
+}
+
 TEST_CASE("the preview measures LOD area in render-target pixels", "[studio][lod]") {
 	engine::scene::RegisterSceneComponents();
 	engine::scene::RegisterSceneClasses();
 	Store store("studio_lod_preview_target_pixels");
 	const Entity part = MeshPart(store);
-	store.GetMutable<AutoMeshLOD>(part)->TargetQuadArea = 1.0f;
+	store.GetMutable<LODAuto>(part)->TargetQuadArea = 1.0f;
 	MeshCatalogue catalogue;
 	catalogue.Triangles[Name("studio.lod-preview.base").Id()] = 10000;
 	catalogue.Triangles[Name("studio.lod-preview.half").Id()] = 5000;
@@ -196,7 +238,7 @@ TEST_CASE("moving toward and away from a mesh updates its distance-floor lod", "
 	engine::scene::RegisterSceneClasses();
 	Store store("studio_lod_preview_bidirectional_distance");
 	const Entity part = MeshPart(store);
-	store.GetMutable<AutoMeshLOD>(part)->TargetQuadArea = 0.001f;
+	store.GetMutable<LODAuto>(part)->TargetQuadArea = 0.001f;
 	MeshCatalogue catalogue;
 	catalogue.Triangles[Name("studio.lod-preview.base").Id()] = 10000;
 	catalogue.Triangles[Name("studio.lod-preview.half").Id()] = 5000;

@@ -1,6 +1,7 @@
 #include "ConvexQuery.hpp"
 
 #include "ContactPairs.hpp"
+#include "FaceManifold.hpp"
 
 #include <engine/collision/TriangleMesh.hpp>
 #include <engine/physics/Integrate.hpp>
@@ -742,6 +743,142 @@ namespace engine::physics {
 	}
 
 	namespace {
+		// Fixed orientations keep all fifteen box SAT axes fixed. Wide, thin boxes
+		// need their exact overlap intervals rather than GJK distance witnesses.
+		ConvexSweep SweepBoxesTranslating(
+			const ShapeInstance &first,
+			const core::Vector3 &firstLinear,
+			const ShapeInstance &second,
+			const core::Vector3 &secondLinear,
+			float seconds,
+			bool permitSeparatingContact
+		) {
+			ConvexSweep answer;
+			if (!(seconds > 0.0f) || !std::isfinite(seconds)) return answer;
+			const auto dot = [](const core::Vector3 &left, const core::Vector3 &right) {
+				return static_cast<double>(left.X) * right.X + static_cast<double>(left.Y) * right.Y +
+					   static_cast<double>(left.Z) * right.Z;
+			};
+			const auto radius = [&](const ShapeInstance &shape, const core::Vector3 &axis) {
+				return std::abs(dot(shape.Axis[0], axis)) * shape.Extent.X +
+					   std::abs(dot(shape.Axis[1], axis)) * shape.Extent.Y +
+					   std::abs(dot(shape.Axis[2], axis)) * shape.Extent.Z;
+			};
+			std::array<core::Vector3, 15> axes;
+			size_t count = 0;
+			for (size_t axis = 0; axis < 3; axis++) {
+				axes[count++] = first.Axis[axis];
+				axes[count++] = second.Axis[axis];
+			}
+			for (size_t left = 0; left < 3; left++)
+				for (size_t right = 0; right < 3; right++)
+					axes[count++] = first.Axis[left].Cross(second.Axis[right]);
+
+			double entry = 0.0;
+			double exit = seconds;
+			double physicalEntry = 0.0;
+			double nearestGap = -std::numeric_limits<double>::infinity();
+			core::Vector3 entryNormal;
+			core::Vector3 initialNormal;
+			for (const auto &raw : axes) {
+				const double lengthSquared = dot(raw, raw);
+				if (!std::isfinite(lengthSquared)) return answer;
+				// A tiny cross axis can still separate very long boxes. Double
+				// normalization keeps every finite nonzero axis instead of dropping it
+				// under the discrete contact solver's axis preference tolerance.
+				if (lengthSquared == 0) continue;
+				const double inverseLength = 1.0 / std::sqrt(lengthSquared);
+				const core::Vector3 axis{
+					static_cast<float>(raw.X * inverseLength),
+					static_cast<float>(raw.Y * inverseLength),
+					static_cast<float>(raw.Z * inverseLength)
+				};
+				const double offset = dot(first.Frame.Position, axis) - dot(second.Frame.Position, axis);
+				const double speed = dot(firstLinear, axis) - dot(secondLinear, axis);
+				const double reach = radius(first, axis) + radius(second, axis);
+				if (!std::isfinite(offset) || !std::isfinite(speed) || !std::isfinite(reach) || reach < 0)
+					return answer;
+				const double gap = std::abs(offset) - reach;
+				const core::Vector3 normal = offset < 0 ? -axis : axis;
+				const double outward = offset < 0 ? -speed : speed;
+				if (permitSeparatingContact && gap >= -CONVEX_EPSILON && outward >= 0) return answer;
+				if (gap > nearestGap) {
+					nearestGap = gap;
+					initialNormal = normal;
+				}
+				const double paddedReach = reach + SWEEP_SKIN;
+				if (speed == 0) {
+					if (std::abs(offset) > paddedReach) return answer;
+					continue;
+				}
+				double begin = (-paddedReach - offset) / speed;
+				double end = (paddedReach - offset) / speed;
+				if (begin > end) std::swap(begin, end);
+				physicalEntry =
+					std::max(physicalEntry, std::min((-reach - offset) / speed, (reach - offset) / speed));
+				if (begin > entry) {
+					entry = begin;
+					entryNormal = offset + speed * begin < 0 ? -axis : axis;
+				}
+				exit = std::min(exit, end);
+				if (entry > exit) return answer;
+			}
+			if (!std::isfinite(nearestGap)) return answer;
+			const core::Vector3 normal = entry > 0 ? entryNormal : initialNormal;
+			const double closing = -(dot(firstLinear, normal) - dot(secondLinear, normal));
+			if (permitSeparatingContact && entry == 0 && closing <= CONVEX_EPSILON) return answer;
+			answer.Hit = true;
+			answer.Fraction = static_cast<float>(entry / seconds);
+			answer.Normal = normal;
+			answer.ClosingSpeed = static_cast<float>(
+				std::clamp(closing, 0.0, static_cast<double>(std::numeric_limits<float>::max()))
+			);
+			// Build the surface witness at the unpadded contact time, bounded by the
+			// submitted interval. The reported fraction keeps the conservative skin.
+			const float witnessTime =
+				static_cast<float>(std::min(physicalEntry, static_cast<double>(seconds)));
+			core::CFrame firstFrame = first.Frame;
+			core::CFrame secondFrame = second.Frame;
+			firstFrame.Position = firstFrame.Position + firstLinear * witnessTime;
+			secondFrame.Position = secondFrame.Position + secondLinear * witnessTime;
+			const ShapeInstance placedFirst{firstFrame, first.Extent, first.Shape};
+			const ShapeInstance placedSecond{secondFrame, second.Extent, second.Shape};
+			const auto contact = ManifoldBetween(placedFirst, placedSecond, -normal, 0.0f);
+			bool localWitness = contact.PointCount != 0;
+			if (localWitness) {
+				const auto onFirst = ToLocalPoint(firstFrame, contact.Positions[0]);
+				localWitness = std::isfinite(onFirst.X) && std::isfinite(onFirst.Y) &&
+							   std::isfinite(onFirst.Z) &&
+							   std::abs(onFirst.X) <= first.Extent.X + SWEEP_SKIN &&
+							   std::abs(onFirst.Y) <= first.Extent.Y + SWEEP_SKIN &&
+							   std::abs(onFirst.Z) <= first.Extent.Z + SWEEP_SKIN;
+			}
+			if (localWitness) {
+				answer.Position = contact.Positions[0];
+			} else {
+				// A skin-only edge gap can leave the face clip empty; its support
+				// fallback can be a distant corner. Clamp near the mover instead.
+				const auto local = ToLocalPoint(secondFrame, firstFrame.Position);
+				const auto direction = ToLocalVector(secondFrame, normal);
+				const std::array extent{second.Extent.X, second.Extent.Y, second.Extent.Z};
+				const std::array centre{local.X, local.Y, local.Z};
+				const std::array toward{direction.X, direction.Y, direction.Z};
+				std::array<float, 3> point{};
+				bool inside = true;
+				size_t face = 0;
+				for (size_t axis = 0; axis < 3; axis++) {
+					point[axis] = std::clamp(centre[axis], -extent[axis], extent[axis]);
+					inside = inside && point[axis] == centre[axis];
+					if (std::abs(toward[axis]) > std::abs(toward[face])) face = axis;
+				}
+				// Initial overlap can put the mover's centre inside the fixed box.
+				// Keep the witness on the responding face rather than in its interior.
+				if (inside) point[face] = toward[face] < 0 ? -extent[face] : extent[face];
+				answer.Position = secondFrame.PointToWorldSpace(core::Vector3{point[0], point[1], point[2]});
+			}
+			return answer;
+		}
+
 		// The sweep against one convex shape, which is what conservative
 		// advancement is written against.
 		//
@@ -750,6 +887,8 @@ namespace engine::physics {
 		ConvexSweep SweepConvexOnly(
 			const ShapeInstance &moving, const core::Vector3 &motion, const ShapeInstance &fixed
 		) {
+			if (moving.Shape == scene::ShapeKind::Box && fixed.Shape == scene::ShapeKind::Box)
+				return SweepBoxesTranslating(moving, motion, fixed, core::Vector3::Zero, 1.0f, false);
 			ConvexSweep answer;
 
 			const float travel = motion.Magnitude();
@@ -843,24 +982,17 @@ namespace engine::physics {
 				return SweepConvexOnly(first, core::Vector3::Zero, second);
 			}
 
+			if (first.Shape == scene::ShapeKind::Box && second.Shape == scene::ShapeKind::Box &&
+				firstAngular == core::Vector3::Zero && secondAngular == core::Vector3::Zero)
+				return SweepBoxesTranslating(
+					first, firstLinear, second, secondLinear, seconds, permitSeparatingContact
+				);
+
 			const float firstRadius = MaximumRadius(first);
 			const float secondRadius = MaximumRadius(second);
 			const float angularBound =
 				firstAngular.Magnitude() * firstRadius + secondAngular.Magnitude() * secondRadius;
 			const core::Vector3 relativeLinear = firstLinear - secondLinear;
-			if (permitSeparatingContact && angularBound == 0 && first.Shape == scene::ShapeKind::Box &&
-				second.Shape == scene::ShapeKind::Box) {
-				// A separating face plane stays separating under tangent translation,
-				// even when the closest feature later changes to a clipped floor edge.
-				for (const auto &shape : {first, second})
-					for (const auto &axis : shape.Axis) {
-						const float offset = (first.Frame.Position - second.Frame.Position).Dot(axis);
-						const float gap =
-							std::abs(offset) - ProjectionRadius(first, axis) - ProjectionRadius(second, axis);
-						const float outward = relativeLinear.Dot(axis) * (offset < 0 ? -1.f : 1.f);
-						if (gap >= -CONVEX_EPSILON && outward >= 0) return answer;
-					}
-			}
 			float elapsed = 0.0f;
 			core::Vector3 lastNormal = core::Vector3::YAxis;
 			core::Vector3 lastPosition;

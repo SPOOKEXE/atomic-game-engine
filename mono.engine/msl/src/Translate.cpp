@@ -54,20 +54,27 @@ namespace engine::msl {
 			const spv::ExecutionModel stage = compiler.get_execution_model();
 
 			std::vector<Slot> textures;
+			textures.reserve(
+				resources.sampled_images.size() + resources.separate_images.size() +
+				resources.storage_images.size()
+			);
 			Collect(compiler, resources.sampled_images, true, textures);
 			Collect(compiler, resources.separate_images, false, textures);
 			SortBySlot(textures);
 
 			std::vector<Slot> storageTextures;
+			storageTextures.reserve(resources.storage_images.size());
 			Collect(compiler, resources.storage_images, false, storageTextures);
 			SortBySlot(storageTextures);
 			textures.insert(textures.end(), storageTextures.begin(), storageTextures.end());
 
 			std::vector<Slot> buffers;
+			buffers.reserve(resources.uniform_buffers.size() + resources.storage_buffers.size());
 			Collect(compiler, resources.uniform_buffers, false, buffers);
 			SortBySlot(buffers);
 
 			std::vector<Slot> storageBuffers;
+			storageBuffers.reserve(resources.storage_buffers.size());
 			Collect(compiler, resources.storage_buffers, false, storageBuffers);
 			SortBySlot(storageBuffers);
 			buffers.insert(buffers.end(), storageBuffers.begin(), storageBuffers.end());
@@ -77,6 +84,7 @@ namespace engine::msl {
 			// so this counter continues after the combined ones and has never
 			// been exercised. Said here rather than assumed correct.
 			std::vector<Slot> samplers;
+			samplers.reserve(resources.separate_samplers.size());
 			Collect(compiler, resources.separate_samplers, false, samplers);
 			SortBySlot(samplers);
 

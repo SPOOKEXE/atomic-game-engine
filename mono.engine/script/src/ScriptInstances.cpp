@@ -333,6 +333,8 @@ namespace engine::script {
 
 		const ecs::ClassId scriptId = ecs::Classes::Find(core::Name("Script"));
 		const ecs::ClassId localId = ecs::Classes::Find(core::Name("LocalScript"));
+		const ecs::Entity starterPlayer =
+			scene::ServiceOf(store, ecs::Classes::Find(core::Name("StarterPlayer")));
 
 		std::vector<ecs::Entity> found;
 		// **The Luau container is what every script instance has**, whichever
@@ -356,7 +358,10 @@ namespace engine::script {
 			// a `LocalScript` where `IsClient()` is; a single-player host is
 			// both and runs both, which is exactly right rather than a special
 			// case.
-			if ((isServerScript && server) || (isLocalScript && client)) {
+			// StarterPlayer contains templates; only per-player copies may run.
+			const bool playerTemplate =
+				starterPlayer != ecs::NULL_ENTITY && store.IsDescendantOf(entity, starterPlayer);
+			if ((isServerScript && server) || (isLocalScript && client && !playerTemplate)) {
 				found.push_back(entity);
 			}
 		});

@@ -1,13 +1,19 @@
+#include "../src/LayoutScratch.hpp"
+#include "fixtures/LayoutOracle.hpp"
+
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Layout.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/VirtualCollection.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <limits>
 #include <string_view>
 
 TEST_SUITE_ID("engine.gui.layout")
@@ -92,6 +98,188 @@ TEST_CASE("a screen gui's canvas is the screen", "[gui][layout]") {
 	CHECK(canvas->Area.Width() == Approx(800.0f));
 	CHECK(canvas->Area.Height() == Approx(600.0f));
 	CHECK(world.Where(screen).Rendered);
+}
+
+TEST_CASE(
+	"a UIAnimation applies sampled position and size without changing Element", "[gui][layout][animation]"
+) {
+	World world("gui_layout.animation");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+	Element authored;
+	authored.Position = UDim2{0.0f, 10.0f, 0.0f, 20.0f};
+	authored.Size = UDim2{0.0f, 40.0f, 0.0f, 50.0f};
+	world.Data.Set(frame, authored);
+
+	const Entity modifier = world.Make("UIAnimation", frame);
+	AnimationPlayback *playback = world.Data.GetMutable<AnimationPlayback>(modifier);
+	REQUIRE(playback != nullptr);
+	playback->StartedAt = 0.0;
+	playback->Clip.Tween =
+		engine::core::TweenInfo(1.0f, engine::core::EasingStyle::Linear, engine::core::EasingDirection::In);
+	PresentationTrack position;
+	position.Property = PresentationProperty::Position;
+	REQUIRE(position.Add(PresentationKey{0.0f, PresentationValue::FromUDim2(authored.Position)}));
+	REQUIRE(
+		position.Add(PresentationKey{1.0f, PresentationValue::FromUDim2(UDim2{0.0f, 110.0f, 0.0f, 120.0f})})
+	);
+	REQUIRE(playback->Clip.AddTrack(position));
+	PresentationTrack size;
+	size.Property = PresentationProperty::Size;
+	REQUIRE(size.Add(PresentationKey{0.0f, PresentationValue::FromUDim2(authored.Size)}));
+	REQUIRE(size.Add(PresentationKey{1.0f, PresentationValue::FromUDim2(UDim2{0.0f, 140.0f, 0.0f, 150.0f})}));
+	REQUIRE(playback->Clip.AddTrack(size));
+
+	Layout(world.Data, world.Display, 0.5);
+	CHECK(world.Where(frame).AbsolutePosition == Vector2{60.0f, 70.0f});
+	CHECK(world.Where(frame).AbsoluteSize == Vector2{90.0f, 100.0f});
+	CHECK(world.Data.Get<Element>(frame)->Position == authored.Position);
+	CHECK(world.Data.Get<Element>(frame)->Size == authored.Size);
+}
+
+TEST_CASE(
+	"a virtual collection expands the scrolling canvas without authored row entities",
+	"[gui][layout][virtual]"
+) {
+	World world("gui_layout.virtual_collection");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity list = world.Make("ScrollingFrame", screen);
+	Element listElement;
+	listElement.Size = UDim2{0.0f, 200.0f, 0.0f, 100.0f};
+	world.Data.Set(list, listElement);
+
+	Scrolling scrolling;
+	scrolling.CanvasPosition.Y = 40.0f;
+	world.Data.Set(list, scrolling);
+
+	const Entity collection = world.Make("UIVirtualCollection", list);
+	VirtualCollection virtuals;
+	virtuals.ItemCount = 1000000;
+	virtuals.FixedExtent = 20.0f;
+	world.Data.Set(collection, virtuals);
+
+	Layout(world.Data, world.Display);
+	const ScrollState *state = world.Data.Get<ScrollState>(list);
+	REQUIRE(state != nullptr);
+	CHECK(state->CanvasSize.Y == Approx(20000000.0f));
+}
+
+TEST_CASE("a virtual grid expands both scrolling canvas axes", "[gui][layout][virtual]") {
+	World world("gui_layout.virtual_grid");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity list = world.Make("ScrollingFrame", screen);
+	Element listElement;
+	listElement.Size = UDim2{0.0f, 100.0f, 0.0f, 100.0f};
+	world.Data.Set(list, listElement);
+	const Entity collection = world.Make("UIVirtualCollection", list);
+	VirtualCollection grid;
+	grid.ItemCount = 31;
+	grid.LayoutPolicy = VirtualLayoutPolicy::Grid;
+	grid.GridColumns = 3;
+	grid.GridCellStride = {40.0f, 25.0f};
+	world.Data.Set(collection, grid);
+
+	Layout(world.Data, world.Display);
+	const ScrollState *state = world.Data.Get<ScrollState>(list);
+	REQUIRE(state != nullptr);
+	CHECK(state->CanvasSize.X == Approx(120.0f));
+	CHECK(state->CanvasSize.Y == Approx(275.0f));
+}
+
+TEST_CASE("a screen gui uses the display's safe and occluded content rectangle", "[gui][layout][display]") {
+	World world("gui_layout.display_insets");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity fill = world.Make("Frame", screen);
+
+	Element element;
+	element.Size = UDim2{1.0f, 0.0f, 1.0f, 0.0f};
+	world.Data.Set(fill, element);
+
+	world.Display.TopInset = 12.0f;
+	world.Display.SafeArea = DisplayInsets{20.0f, 8.0f, 30.0f, 16.0f};
+	world.Display.Occluded = DisplayInsets{4.0f, 40.0f, 50.0f, 120.0f};
+	Layout(world.Data, world.Display);
+
+	// The larger reservation owns each edge. A top bar and a cutout describe
+	// the same unavailable strip, so adding them would waste usable pixels.
+	const Canvas *canvas = world.Data.Get<Canvas>(screen);
+	REQUIRE(canvas != nullptr);
+	CHECK(canvas->Area.Min.X == Approx(20.0f));
+	CHECK(canvas->Area.Min.Y == Approx(40.0f));
+	CHECK(canvas->Area.Width() == Approx(730.0f));
+	CHECK(canvas->Area.Height() == Approx(440.0f));
+	CHECK(world.Where(fill).AbsolutePosition.X == Approx(20.0f));
+	CHECK(world.Where(fill).AbsolutePosition.Y == Approx(40.0f));
+	CHECK(world.Where(fill).AbsoluteSize.X == Approx(730.0f));
+	CHECK(world.Where(fill).AbsoluteSize.Y == Approx(440.0f));
+}
+
+TEST_CASE("IgnoreGuiInset lets a screen gui bleed to the complete display", "[gui][layout][display]") {
+	World world("gui_layout.display_bleed");
+	const Entity screen = world.Make("ScreenGui");
+	Layer layer;
+	layer.IgnoreGuiInset = true;
+	world.Data.Set(screen, layer);
+	world.Display.SafeArea = DisplayInsets{20.0f, 30.0f, 40.0f, 50.0f};
+	world.Display.Occluded = DisplayInsets{60.0f, 70.0f, 80.0f, 90.0f};
+
+	Layout(world.Data, world.Display);
+
+	const Canvas *canvas = world.Data.Get<Canvas>(screen);
+	REQUIRE(canvas != nullptr);
+	CHECK(canvas->Area.Min.X == Approx(0.0f));
+	CHECK(canvas->Area.Min.Y == Approx(0.0f));
+	CHECK(canvas->Area.Width() == Approx(800.0f));
+	CHECK(canvas->Area.Height() == Approx(600.0f));
+}
+
+TEST_CASE("oversized display reservations collapse rather than invert the canvas", "[gui][layout][display]") {
+	World world("gui_layout.display_clamped");
+	const Entity screen = world.Make("ScreenGui");
+	world.Display.SafeArea = DisplayInsets{900.0f, 700.0f, 900.0f, 700.0f};
+
+	Layout(world.Data, world.Display);
+
+	const Canvas *canvas = world.Data.Get<Canvas>(screen);
+	REQUIRE(canvas != nullptr);
+	CHECK(canvas->Area.Width() == Approx(0.0f));
+	CHECK(canvas->Area.Height() == Approx(0.0f));
+}
+
+TEST_CASE("a reference canvas refuses a fully occluded presentation area", "[gui][layout][display]") {
+	World world("gui_layout.reference_occluded");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+	Layer layer;
+	layer.ReferenceResolution = Vector2{400.0f, 300.0f};
+	layer.ScaleMode = CollectorScaleMode::Stretch;
+	world.Data.Set(screen, layer);
+	world.Display.SafeArea = DisplayInsets{800.0f, 600.0f, 800.0f, 600.0f};
+
+	CHECK(Layout(world.Data, world.Display) == 0);
+	CHECK_FALSE(world.Where(screen).Rendered);
+	CHECK_FALSE(world.Where(frame).Rendered);
+	CHECK(world.Data.Get<CanvasTransform>(screen) == nullptr);
+}
+
+TEST_CASE("an invalid display profile does not publish canvas geometry", "[gui][layout][display]") {
+	World world("gui_layout.invalid_display");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+	world.Display.Width = -1.0f;
+	CHECK(Layout(world.Data, world.Display) == 0);
+	CHECK_FALSE(world.Where(screen).Rendered);
+	CHECK_FALSE(world.Where(frame).Rendered);
+
+	world.Display.Width = 800.0f;
+	world.Display.SafeArea.Top = std::numeric_limits<float>::quiet_NaN();
+	CHECK(Layout(world.Data, world.Display) == 0);
+	CHECK_FALSE(world.Where(screen).Rendered);
+
+	world.Display.SafeArea = {};
+	world.Display.InterfaceScale = 0.0f;
+	CHECK(Layout(world.Data, world.Display) == 0);
+	CHECK_FALSE(world.Where(screen).Rendered);
 }
 
 TEST_CASE("a host lays out one DockWidgetPluginGui against its panel", "[gui][layout][plugin]") {
@@ -1196,9 +1384,6 @@ TEST_CASE("an element that draws text grows to its string", "[gui][layout][autom
 
 	Layout(world.Data, world.Display);
 
-	// Eight characters at the module's own advance, and one line at its own
-	// spacing. Spelled as the arithmetic rather than as the number, so a change
-	// to either constant moves this case with it instead of failing it.
 	const float expectedWidth = 8.0f * engine::gui::AVERAGE_ADVANCE * 14.0f;
 	const float expectedHeight = engine::gui::LINE_SPACING * 14.0f;
 
@@ -1709,4 +1894,105 @@ TEST_CASE("a circular page layout slides the short way round", "[gui][layout]") 
 
 	CHECK(world.Where(pages[2]).AbsolutePosition.X == Approx(-100.0f));
 	CHECK(world.Where(pages[0]).AbsolutePosition.X == Approx(100.0f));
+}
+
+TEST_CASE(
+	"plain collector snapshots preserve complete resolved geometry across mutation",
+	"[gui][layout][layout-oracle]"
+) {
+	World world("layout_snapshot_oracle");
+	const Entity collector = world.Make("ScreenGui");
+	std::array<Entity, 3> branch{};
+	for (size_t index = 0; index < 128; ++index) {
+		const Entity parent = world.Make("Frame", collector);
+		auto *shape = world.Data.GetMutable<Element>(parent);
+		shape->Position = UDim2(0.0f, static_cast<float>(index % 8) * 20.0f, 0.0f, 24.0f);
+		shape->Size = UDim2(0.25f, 40.0f, 0.25f, 10.0f);
+		shape->AnchorPoint = {0.125f, 0.125f};
+		shape->Rotation = static_cast<float>(index % 4) * 15.0f;
+		shape->ClipsDescendants = true;
+		const Entity child = world.Make("Frame", parent);
+		shape = world.Data.GetMutable<Element>(child);
+		shape->Position = UDim2(0.25f, 2.0f, 0.25f, 4.0f);
+		shape->Size = UDim2(0.5f, 8.0f, 0.5f, 6.0f);
+		shape->AnchorPoint = {0.25f, 0.25f};
+		shape->Rotation = -5.0f;
+		const Entity leaf = world.Make("Frame", child);
+		shape = world.Data.GetMutable<Element>(leaf);
+		shape->Position = UDim2(0.125f, 1.0f, 0.125f, 3.0f);
+		shape->Size = UDim2(0.25f, 10.0f, 0.25f, 12.0f);
+		if (index == 0) branch = {parent, child, leaf};
+	}
+	// First placement adds derived components while the snapshot is traversed.
+	REQUIRE(Layout(world.Data, world.Display) == 384);
+	REQUIRE_NOTHROW(layout_fixture::CheckTree(world.Data, collector, world.Display, 384));
+	REQUIRE(Layout(world.Data, world.Display) == 384);
+	REQUIRE_NOTHROW(layout_fixture::CheckTree(world.Data, collector, world.Display, 384));
+	world.Data.GetMutable<Element>(branch[0])->Size = UDim2(0.5f, 16.0f, 0.5f, 8.0f);
+	world.Data.GetMutable<Element>(branch[1])->Rotation = 30.0f;
+	world.Display.Width = 1024.0f;
+	world.Display.Height = 768.0f;
+	REQUIRE(Layout(world.Data, world.Display) == 384);
+	REQUIRE_NOTHROW(layout_fixture::CheckTree(world.Data, collector, world.Display, 384));
+	std::array<Resolved, 3> detached;
+	for (size_t index = 0; index < branch.size(); ++index) {
+		detached[index] = *world.Data.Get<Resolved>(branch[index]);
+		detached[index].Rendered = false;
+	}
+	REQUIRE(world.Data.SetParent(branch[0], engine::ecs::NULL_ENTITY));
+	REQUIRE(Layout(world.Data, world.Display) == 381);
+	for (size_t index = 0; index < branch.size(); ++index)
+		REQUIRE_NOTHROW(
+			layout_fixture::CheckResolved(*world.Data.Get<Resolved>(branch[index]), detached[index])
+		);
+	REQUIRE(world.Data.SetParent(branch[0], collector));
+	REQUIRE(Layout(world.Data, world.Display) == 384);
+	REQUIRE_NOTHROW(layout_fixture::CheckTree(world.Data, collector, world.Display, 384));
+}
+
+TEST_CASE(
+	"layout arena restores handles and plateaus across smaller worlds", "[gui][layout][layout-oracle]"
+) {
+	World large("layout_arena_large");
+	const Entity largeRoot = large.Make("ScreenGui");
+	for (size_t index = 0; index < 1024; ++index) {
+		const Entity parent = large.Make("Frame", largeRoot);
+		large.Data.GetMutable<Element>(parent)->Size = UDim2(0.0f, 240.0f, 0.0f, 180.0f);
+		large.Make("Frame", parent);
+		large.Make("Frame", parent);
+	}
+	const auto ledger = [] {
+		const auto value = engine::gui::detail::ReadChildArenaScratch();
+		REQUIRE(value.LogicalHandles == 0);
+		REQUIRE(value.PayloadBytes == value.CapacityHandles * sizeof(Entity));
+		return value;
+	};
+	const auto before = ledger();
+	REQUIRE(Layout(large.Data, large.Display) == 3072);
+	REQUIRE_NOTHROW(layout_fixture::CheckTree(large.Data, largeRoot, large.Display, 3072));
+	const auto warmed = ledger();
+	REQUIRE(warmed.CapacityHandles >= before.CapacityHandles);
+	if (layout_fixture::CanonicalEnabled()) layout_fixture::DumpResolved(large.Data, 6, 1);
+	REQUIRE(Layout(large.Data, large.Display) == 3072);
+	REQUIRE(ledger().CapacityHandles == warmed.CapacityHandles);
+	REQUIRE_NOTHROW(layout_fixture::CheckTree(large.Data, largeRoot, large.Display, 3072));
+	if (layout_fixture::CanonicalEnabled()) layout_fixture::DumpResolved(large.Data, 6, 2);
+	{
+		World smaller("layout_arena_smaller");
+		const Entity root = smaller.Make("ScreenGui");
+		for (size_t index = 0; index < 15; ++index) {
+			const Entity child = smaller.Make("Frame", root);
+			auto *shape = smaller.Data.GetMutable<Element>(child);
+			shape->Position = UDim2(0.0f, static_cast<float>(index) * 8.0f, 0.0f, 16.0f);
+			shape->Size = UDim2(0.0f, 32.0f, 0.0f, 24.0f);
+		}
+		REQUIRE(Layout(smaller.Data, smaller.Display) == 15);
+		REQUIRE_NOTHROW(layout_fixture::CheckTree(smaller.Data, root, smaller.Display, 15));
+		REQUIRE(ledger().CapacityHandles == warmed.CapacityHandles);
+		if (layout_fixture::CanonicalEnabled()) layout_fixture::DumpResolved(smaller.Data, 6, 3);
+	}
+	REQUIRE(Layout(large.Data, large.Display) == 3072);
+	REQUIRE_NOTHROW(layout_fixture::CheckTree(large.Data, largeRoot, large.Display, 3072));
+	REQUIRE(ledger().CapacityHandles == warmed.CapacityHandles);
+	if (layout_fixture::CanonicalEnabled()) layout_fixture::DumpResolved(large.Data, 6, 4);
 }

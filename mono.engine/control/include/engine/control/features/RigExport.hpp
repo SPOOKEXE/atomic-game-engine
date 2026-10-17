@@ -105,9 +105,10 @@ namespace engine::control {
 			return id;
 		}
 	}
-	inline void Surface::AddRigExportTools(world::Universe &universe, world::DataFactorySession *session) {
+	// Builds the rig-export tool for the selected world host.
+	inline Tool RigExportTool(world::Universe &universe, world::DataFactorySession *session) {
 		world::Universe *worlds = session != nullptr ? &session->UniverseOf() : &universe;
-		Add(Tool{
+		return Tool{
 			"get_rig_export",
 			"A bounded data-rig/v1 export of identified skeletons. Missing engine source data is declared "
 			"rather than inferred.",
@@ -226,14 +227,10 @@ namespace engine::control {
 				if (status != world::WorldStatus::Ok && failure.empty()) failure = "scene is unavailable";
 				return output;
 			}
-		});
+		};
 	}
-	namespace features {
-		// Registers bounded rig export, optionally fenced to the supplied session revision.
-		inline Feature RigExport(world::Universe &universe, world::DataFactorySession *session = nullptr) {
-			return Feature{"rig-export", [&universe, session](Surface &surface) {
-							   surface.AddRigExportTools(universe, session);
-						   }};
-		}
+
+	inline void Surface::AddRigExportTools(world::Universe &universe, world::DataFactorySession *session) {
+		Add(RigExportTool(universe, session));
 	}
 }

@@ -475,9 +475,7 @@ namespace engine::scene {
 		// jump was the first thing a simulation acted on: frames outnumber
 		// ticks, so a click that began and ended between two ticks happened on
 		// a frame no tick ever looked at, and roughly two clicks in three are
-		// lost. Nothing noticed because nothing in this engine fired a shot
-		// until v0.15 - `examples::EncodeShot` had no caller anywhere in the
-		// tree.
+		// lost. The input loss went unnoticed while no gameplay consumed clicks.
 		//
 		// **Taken out of `Reserved` rather than added to the end**, so `sizeof`
 		// is still 56 and no save format moved. The byte was already being
@@ -645,13 +643,9 @@ namespace engine::scene {
 
 		// Forgets the latched key edges alone.
 		//
-		// **Two halves under one name, because a client sends two messages and
-		// either can fail on its own.** `Client::SubmitMove` puts the jump in a
-		// `game::MoveInput` and the click in an `examples::Shot`, and clears
-		// each latch only once *that* message is on the wire - a shot refused by
-		// the send budget while the move went through would otherwise forget a
-		// click nobody was told about. `ConsumeTaps` is still the whole
-		// question, for the one caller that asks it whole.
+		// Movement can clear a latched jump after submission without consuming
+		// button presses that another input consumer may still need. `ConsumeTaps`
+		// remains available to clear both kinds of press together.
 		//
 		// @since v0.15
 		void ConsumeKeyTaps() {

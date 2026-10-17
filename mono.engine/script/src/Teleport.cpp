@@ -55,9 +55,7 @@ namespace engine::script {
 
 			const ecs::Entity player = scene::AddPlayer(store, name);
 			if (player == ecs::NULL_ENTITY) {
-				// A world with no `Players` service takes nobody. Quiet rather
-				// than an error, for `mono.server`'s reason: that is the
-				// placeholder scene and it is furnished by nobody.
+				// A service-free destination cannot admit a player.
 				return;
 			}
 
@@ -139,9 +137,7 @@ namespace engine::script {
 
 			AdmitArrival(store, taken);
 
-			// `AdmitArrival` is quiet about a world with no `Players` service -
-			// that is the placeholder scene and it takes nobody - so what is
-			// counted is what it built rather than what arrived.
+			// Count only players a destination with `Players` can admit.
 			admitted += scene::PlayersOf(store) == ecs::NULL_ENTITY ? 0u : 1u;
 		}
 

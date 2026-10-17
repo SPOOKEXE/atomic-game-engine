@@ -1,10 +1,15 @@
+#include "fixtures/ChannelOracle.hpp"
+
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Random.hpp>
 #include <engine/parallel/Channel.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -38,7 +43,7 @@ namespace channel_test {
 		}
 		return frame;
 	}
-}
+} // namespace channel_test
 
 using namespace channel_test;
 
@@ -379,4 +384,68 @@ TEST_CASE("random interleaving never loses or duplicates a frame", "[channel][fu
 		}
 	}
 	REQUIRE(wrong == 0);
+}
+
+TEST_CASE("mixed channel frames preserve owned bytes and caller capacity", "[channel][channel-ownership]") {
+	REQUIRE_NOTHROW(channel_fixture::Verify());
+}
+
+TEST_CASE(
+	"channel spare payloads preserve refusal and closed-drain ownership", "[channel][channel-ownership]"
+) {
+	ChannelSettings settings;
+	settings.MaximumFrame = 1024;
+	settings.Capacity = 128;
+	auto [left, right] = MakeLocalChannel(settings);
+	std::vector<std::byte> frame;
+	frame.reserve(1024);
+	const size_t capacity = frame.capacity();
+	// Different lengths and bytes expose stale data after a larger spare is reused.
+	for (uint32_t sequence = 0; sequence < 32; ++sequence) {
+		const size_t bytes = sequence % 2 == 0 ? 96 : 64;
+		auto source = channel_fixture::Pattern(sequence, bytes);
+		REQUIRE(left->Send(source) == ChannelStatus::Ok);
+		std::fill(source.begin(), source.end(), std::byte{0});
+		REQUIRE(right->Receive(frame) == ChannelStatus::Ok);
+		REQUIRE_NOTHROW(channel_fixture::Check(frame, sequence, bytes));
+		REQUIRE(frame.capacity() == capacity);
+	}
+	// This fresh larger queued payload coexists with the consumed smaller spare.
+	REQUIRE(left->Send(channel_fixture::Pattern(40, 128)) == ChannelStatus::Ok);
+	REQUIRE(left->Send(channel_fixture::Pattern(41, 1)) == ChannelStatus::Full);
+	REQUIRE(left->Send(channel_fixture::Pattern(42, 1025)) == ChannelStatus::TooLarge);
+	REQUIRE(right->Pending() == 1);
+	REQUIRE(right->PendingBytes() == 128);
+	REQUIRE(right->Send(channel_fixture::Pattern(43, 64)) == ChannelStatus::Ok);
+
+	// Only Send-tag residency is read: Close must release the spare while the
+	// queued payloads and caller-owned output remain alive independently.
+	const auto sendLive = [] {
+		int64_t bytes = 0;
+		for (uint32_t index = 1; index < engine::core::HeapProfile::NodeCount(); ++index) {
+			const auto node = engine::core::HeapProfile::Node(index);
+			if (node.Name == "local channel send") bytes += node.LiveBytes;
+		}
+		return bytes;
+	};
+	const int64_t beforeClose = sendLive();
+	left->Close();
+	const int64_t released = beforeClose - sendLive();
+	if (engine::core::HeapProfile::IsCompiledIn()) {
+		REQUIRE(released >= 96);
+		REQUIRE(released <= 128);
+	}
+	REQUIRE(right->PendingBytes() == 128);
+	REQUIRE(right->Receive(frame) == ChannelStatus::Ok);
+	REQUIRE_NOTHROW(channel_fixture::Check(frame, 40, 128));
+	REQUIRE(left->Receive(frame) == ChannelStatus::Ok);
+	REQUIRE_NOTHROW(channel_fixture::Check(frame, 43, 64));
+	const auto last = frame;
+	REQUIRE(left->Receive(frame) == ChannelStatus::Closed);
+	REQUIRE(frame == last);
+	REQUIRE(frame.capacity() == capacity);
+	REQUIRE(right->Receive(frame) == ChannelStatus::Closed);
+	REQUIRE(right->Pending() == 0);
+	REQUIRE(right->PendingBytes() == 0);
+	left->Close();
 }

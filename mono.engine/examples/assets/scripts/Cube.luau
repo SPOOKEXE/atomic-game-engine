@@ -80,7 +80,14 @@ floor.Parent = workspace
 -- Four walls, placed outside the footprint rather than on it, so the pit's
 -- inside measures `PIT` across and a block resting against a wall is resting
 -- where the arithmetic above says it is.
-for index, side in { Vector3.new(1, 0, 0), Vector3.new(-1, 0, 0), Vector3.new(0, 0, 1), Vector3.new(0, 0, -1) } do
+local WALL_SIDES: { Vector3 } = {
+	Vector3.new(1, 0, 0),
+	Vector3.new(-1, 0, 0),
+	Vector3.new(0, 0, 1),
+	Vector3.new(0, 0, -1),
+}
+
+for index, side in WALL_SIDES do
 	local wall = Instance.new("Part")
 	wall.Name = `Wall_{index}`
 	wall.Anchored = true

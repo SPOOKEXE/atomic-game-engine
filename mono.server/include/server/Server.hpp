@@ -13,13 +13,12 @@
 #include <engine/delivery/Source.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/examples/Shooting.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/net/Wire.hpp>
 #include <engine/replication/Listener.hpp>
-#include <engine/replication/Rewind.hpp>
+#include <engine/replication/Observation.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/world/DataFactory.hpp>
 #include <engine/world/DataStore.hpp>
@@ -33,6 +32,7 @@
 #include <engine/world/Universe.hpp>
 
 #include <cstdint>
+#include <deque>
 #include <discord/Link.hpp>
 #include <filesystem>
 #include <functional>
@@ -40,6 +40,7 @@
 #include <network/Advert.hpp>
 #include <network/Presence.hpp>
 #include <optional>
+#include <server/PortalJournal.hpp>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -66,6 +67,7 @@ namespace engine::game {
 
 namespace server {
 	class ContentRelay;
+	class ObservationSink;
 	class RetainedBodyGrants;
 	struct ContentRelayStatistics;
 }
@@ -138,8 +140,7 @@ namespace server {
 		double ReplicationTickRate = 0.0;
 		//@}
 
-		// Entities in the placeholder world, until there is a game file to load
-		// one from.
+		// Cubes in the default Luau scene when no game file is supplied.
 		uint32_t Entities = 4096;
 
 		// -1 runs until stopped. A tick budget is what makes the server usable
@@ -189,7 +190,7 @@ namespace server {
 		// @since v0.13
 		double IdleCloseSeconds = engine::world::DEFAULT_IDLE_LIMIT_SECONDS;
 
-		// The scene to host. Empty means the placeholder world.
+		// The scene to host. Empty loads the default Luau scene.
 		//
 		// Scene script loaded with the same path as the client.
 		std::string GamePath;
@@ -250,6 +251,13 @@ namespace server {
 		//
 		// @since v0.16
 		std::filesystem::path ProfilePath;
+
+		// Full-interval benchmark report, measured after startup and before shutdown.
+		std::filesystem::path BenchmarkReport;
+		// Minimum wall-clock interval; tick and replay limits still end the run.
+		double BenchmarkSeconds = 5.0;
+		// Exclude connection startup and measure only after a viewer is admitted.
+		bool BenchmarkWaitForClient = false;
 
 		// Ticks between windowed snapshots of `ProfilePath`, each written beside it
 		// as `<stem>.window<NNNNN><extension>`. Zero writes none.
@@ -328,6 +336,13 @@ namespace server {
 
 		// Test-only append-only report for deterministic fault evidence. Empty leaves it off.
 		std::filesystem::path TestPortalFaultReport;
+
+		// Directory for physics and portal observation records, one JSONL file per
+		// process. Hosts inherit it. Empty leaves observation files off.
+		std::filesystem::path ObserveDirectory;
+
+		// Default trace id stamped on portal observation records. Zero is untraced.
+		uint64_t ObserveTrace = 0;
 
 		// The worlds this host was granted, by name.
 		//
@@ -647,9 +662,9 @@ namespace server {
 
 		// Works out what every client can see, before any of them is served.
 		//
-		// Fills `HiddenFromClients` and `OwnedByPlayer` - see those members for
-		// why the client-independent half of the interest predicate is hoisted
-		// out of the per-client loop.
+		// Fills `VisibilityExceptions` - see that member for why the
+		// client-independent half of the interest predicate is hoisted out of
+		// the per-client loop.
 		//
 		// **Not `const`, because `EachEntity` is not**: walking a store binds it
 		// to the calling thread, which is a write however read-only the body is.
@@ -657,33 +672,12 @@ namespace server {
 		// @param store The world about to be published.
 		void SurveyVisibility(engine::ecs::Store &store);
 
-		// Where moving things were, for judging a client's action against what
-		// that client actually saw.
-		//
-		// **The query is a game's to make and the answer is a game's to act
-		// on.** The server retains an accurate record. Shots supply their
-		// rendered world tick separately from the input sequence.
-		//
-		// **Nothing calls this accessor today**, and the claim it used to carry
-		// - that nothing consumes the history at all - stopped being true when
-		// `ApplyInputs` gained the shot path, which asks over `History`
-		// directly. What is unwired is the *outward* half: a game asking its own
-		// question of the same record. `docs/CODE_ARCH.md` decision 16.
-		//
-		// @return The history.
-		const engine::replication::Rewind &Rewound() const {
-			return History;
-		}
-
 		// Tells the authority where a client is looking from, for the priority
 		// score.
 		//
-		// **A host's job rather than the authority's**, because a client's
-		// viewpoint is a game's idea and this engine has no per-client avatar
-		// yet: the placeholder world is cubes and nobody is in it. A client
-		// nothing has placed scores everything the same, which is the round
-		// robin the score replaces and the honest answer rather than pretending
-		// every client stands at the origin.
+		// The host resolves a client's viewpoint from its character. A client
+		// without a spawned character has no viewpoint and falls back to the
+		// authority's round-robin priority.
 		//
 		// @param client The client.
 		// @param at     Where it is looking from, in world space.
@@ -695,14 +689,6 @@ namespace server {
 		void ForgetClientViewpoint(engine::replication::ClientId client);
 
 		// Points every client's viewpoint at its own character.
-		//
-		// **The caller `SetClientViewpoint` waited three versions for.** That
-		// hook and `DistancePriority` have both existed since v0.4, and the
-		// reason nothing filled them in was written into the comment beside
-		// them: there was no per-client avatar, so the placeholder world was
-		// cubes and nobody was in it. There is one now - `scene::AddPlayer` per
-		// connection, with a character - so the honest answer stopped being
-		// "score everything the same".
 		//
 		// Called once a tick from `ServeClients`, before the delta is built.
 		// A client between a join and a spawn is *forgotten* rather than left
@@ -852,17 +838,17 @@ namespace server {
 		// The VM that owns one world's script callbacks, or null when it has no scripts.
 		engine::script::Runtime *RuntimeOf(engine::world::WorldId world);
 		// Builds one world, from a scene file when `--game` names one and from
-		// the placeholder otherwise.
+		// the default Luau scene otherwise.
 		//
-		// One place rather than the two call sites that used to build the
-		// placeholder directly: a locally hosted world and a remotely hosted
-		// one authoring different scenes is a divergence nothing would report,
+		// One place rather than two separate scene loaders: locally and remotely
+		// hosted worlds authoring different scenes is a divergence nothing reports,
 		// because each side is internally consistent.
 		//
 		// @param store     The world to build into.
 		// @param scheduler The systems to install.
 		// @return `false` when a named scene could not be loaded.
-		bool BuildWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
+		bool
+		BuildWorld(engine::world::WorldId id, engine::ecs::Store &store, engine::ecs::Scheduler &scheduler);
 
 		// Expands `Worlds` into one balanced local partition and supervised
 		// remote partitions before the job pool or any world exists.
@@ -878,6 +864,8 @@ namespace server {
 
 		// Writes only when the driver-owned records changed since the last flush.
 		bool FlushDataStore();
+		// Durably records sealed portal decisions between world ticks before Commit.
+		bool FlushPortalTransferDecisions();
 
 		// Builds the worlds a host was granted and announces itself.
 		//
@@ -943,7 +931,7 @@ namespace server {
 		// The built-in shapes always, because a `MeshPart` set to `Cube` needs
 		// one before any content exists, and `ContentShapes` when the store has
 		// been read. Called beside `PrepareSimulation`, so every world this
-		// process simulates gets it and the placeholder benchmark world - which
+		// process simulates gets it and the default Luau benchmark scene - which
 		// has no physics at all - does not.
 		void InstallCollisionShapes(engine::ecs::Store &store);
 
@@ -982,6 +970,7 @@ namespace server {
 		void ReplyToAdmission(engine::replication::ClientId client, std::vector<std::byte> bytes);
 		void PumpPortalSessions(double nowSeconds);
 		void PumpPortalDepartures(double nowSeconds);
+		void PumpPortalApproaches(double nowSeconds);
 		void ProceedThroughPortal(
 			engine::replication::ClientId client, const engine::game::PortalSessionMessage &request
 		);
@@ -1045,14 +1034,17 @@ namespace server {
 		// @param nowSeconds The current time.
 		void TouchWorld(engine::world::WorldId world, double nowSeconds);
 
-		// Adds this server's own tools after the engine feature list.
+		// Adds this server's own tools after the permanent engine hooks.
 		//
 		// **In `src/Control.cpp`, beside the state it reads**, which is the same
-		// place the editor keeps its own. Called by the custom feature in `Run`,
-		// and only when `--mcp-port` asked for a surface at all.
+		// place the editor keeps its own. The product hook owns the rows and only
+		// exists when `--mcp-port` asked for a surface at all.
 		//
 		// @since v0.19
-		void RegisterControlTools();
+		void RegisterControlTools(engine::control::HookRegistration &registration);
+
+		// Activates this run's ordered core and data-factory control hooks.
+		void ConfigureControlHooks();
 
 		// The control surface. Started only when asked; a server that was never
 		// started costs a thread that was never spawned.
@@ -1064,6 +1056,8 @@ namespace server {
 			"mode this program authors nothing. `--data-factory` instead exposes one isolated, "
 			"MCP-owned world through the data-factory lifecycle tools."
 		};
+		engine::control::HookLease ProductControlHook;
+		std::vector<engine::control::HookLease> BuiltinControlHooks;
 
 		Options Settings;
 
@@ -1088,6 +1082,14 @@ namespace server {
 		// construction, and that thread is decided in Initialise.
 		std::unique_ptr<engine::world::Driver> Driver_;
 		std::unique_ptr<engine::world::DataFactorySession> DataFactory;
+		// Factory callbacks borrow DataFactory, so their leases close first.
+		engine::control::HookLease FactoryLifecycleControlHook;
+		engine::control::HookLease FactorySceneControlHook;
+		engine::control::HookLease FactoryPhysicsControlHook;
+		engine::control::HookLease FactoryCameraRenderingControlHook;
+		engine::control::HookLease FactoryPackageControlHook;
+		// Replication callbacks borrow the completed-record queue.
+		engine::control::HookLease ReplicationObservationControlHook;
 		engine::world::WorldId PrimaryWorld;
 
 		// Placement derived once from `Options::Worlds`. The driver keeps the
@@ -1100,6 +1102,7 @@ namespace server {
 		// store through `Driver`, so no per-world persistence copy can diverge.
 		std::unique_ptr<engine::world::DataStoreRouter> DataStorePersistence;
 		std::vector<engine::world::SharedStoreEntry> PersistedDataStore;
+		std::vector<PortalJournalRecord> DurablePortalTransferDecisions;
 		bool DataStoreReady = false;
 
 		// How this server is found - the LAN beacon and the rendezvous
@@ -1202,6 +1205,8 @@ namespace server {
 		bool TestPortalCrossedAcknowledgementDropped = false;
 		bool TestPresentationRestarted = false;
 		std::unique_ptr<engine::replication::Listener> Replication;
+		std::unique_ptr<engine::replication::ReplicationObservations> ReplicationObservationRecords;
+		std::unique_ptr<ObservationSink> Observations;
 
 		// What Discord is told this server is hosting, or null when nothing is
 		// configured. Off unless `discord.enabled` and `discord.app-id` are
@@ -1250,27 +1255,7 @@ namespace server {
 		std::vector<engine::assets::PublicKey> AdmittedClientKeys;
 		bool AdmissionRestricted = false;
 
-		// Where moving things were, for the last `RewindSettings::HistoryTicks`
-		// ticks.
-		//
-		// **Recorded whether or not anything asks**, because the alternative is
-		// a game turning it on and finding the history empty for the first half
-		// second. It costs one map insert per moving entity per tick and no
-		// allocation after the ring has filled.
-		engine::replication::Rewind History;
-
-		// Reused across ticks so resolving a shot allocates nothing after the
-		// first one, which is the same reason every other per-tick buffer in
-		// this engine is a member rather than a local.
-		std::vector<engine::examples::Target> Candidates;
-
-		// How many inputs were resolved and how many were not this encoding.
-		//
-		// **Two counters and not one.** A shot that hit nothing is an ordinary
-		// event; a payload that did not decode is a client running a different
-		// game or probing, and burying the second in the first is how an
-		// unusual number stops being noticed.
-		uint64_t Struck = 0;
+		// Inputs that did not decode as engine movement.
 		uint64_t Dropped = 0;
 
 		// Where one client is looking from.
@@ -1327,6 +1312,15 @@ namespace server {
 			uint64_t MotionSentTick = 0;
 		};
 		std::unordered_map<uint32_t, PortalDeparture> PortalDepartures;
+		struct PortalApproach {
+			engine::replication::ClientId Client;
+			engine::game::PortalSessionMessage Request;
+			engine::world::PresentationAddress Destination;
+			double RetryAt = 0;
+			bool Advertised = false;
+		};
+		// One route per client bounds route discovery and destination prewarm work.
+		std::unordered_map<uint32_t, PortalApproach> PortalApproaches;
 		uint64_t NextPortalAttempt = 1;
 		engine::world::PresentationAddress PortalSessionEndpoint;
 		engine::parallel::Process ImageProcess;
@@ -1340,6 +1334,8 @@ namespace server {
 			engine::replication::ClientId Client;
 			engine::world::PresentationStream Stream;
 			engine::world::PresentationPeer Grant;
+			std::deque<engine::world::PresentationMessage> PendingReplies;
+			size_t DiagnosedReplyBackpressure = 0;
 			uint64_t PublishedSession = 0, PublishedRevision = 0;
 			PlayerPresentation(
 				engine::world::Universe &universe,
@@ -1369,7 +1365,7 @@ namespace server {
 		// viewpoint, which the score reads as "order these by rotation alone".
 		std::unordered_map<uint32_t, Viewpoint> Viewpoints;
 
-		// What `SetInterest` needs that does not depend on who is asking, worked
+		// What `SetInterestBatch` needs that does not depend on who is asking, worked
 		// out once per publish.
 		//
 		// **Because two of the predicate's three questions are about the world
@@ -1387,14 +1383,24 @@ namespace server {
 		// and nothing between the two mutates the world. It cannot drift,
 		// because it does not survive long enough to.
 		//
-		// Both are sorted by entity id, and both are usually tiny - the entities
-		// under a player, and the entities inside `ServerScriptService` and
-		// `ServerStorage`. Everything else answers "visible and unowned" after
-		// two failed binary searches.
-		//@{
-		std::vector<uint64_t> HiddenFromClients;
-		std::vector<std::pair<uint64_t, engine::ecs::Entity>> OwnedByPlayer;
-		//@}
+		// The list is sorted by the complete entity id and is usually tiny: rows
+		// under a player, and rows inside `ServerScriptService` or
+		// `ServerStorage`. Everything absent from it is public. The batch callback
+		// merge-walks it with the authority's sorted candidates, so it does one
+		// player-slot lookup per client instead of one per candidate.
+		enum class VisibilityExceptionKind : uint8_t {
+			Hidden,
+			RequirePlayer,
+			OwnerOnly,
+		};
+
+		struct VisibilityException {
+			uint64_t EntityId = 0;
+			VisibilityExceptionKind Kind = VisibilityExceptionKind::Hidden;
+			engine::ecs::Entity Owner;
+		};
+
+		std::vector<VisibilityException> VisibilityExceptions;
 
 		// The store `Listener::Publish` is walking, for as long as it is walking
 		// it. Null at every other moment.

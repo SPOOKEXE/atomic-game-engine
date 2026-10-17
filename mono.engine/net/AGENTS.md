@@ -313,11 +313,23 @@ list:
   a hundred players on one host is a hundred of these and the operator's bill is
   not a function of what the path can take.
 - **`net::CongestionControl`.** Copa is a delay-based controller tuned for input
-  latency and ngtcp2's default is Cubic. Deleting it is a decision to take
-  Cubic's latency and belongs in a commit that says so.
+  latency and drives the `datagram` wire. The QUIC wire runs ngtcp2's BBR, not
+  its default Cubic: Cubic reads random loss as congestion, and at 5% loss on a
+  50 ms path it held the window near five packets, so portal handoff messages
+  arrived two to three seconds late and the handoff stalled. Returning QUIC to a
+  loss-based controller belongs in a commit that says so.
 - **`ConnectionStats`**, refilled from ngtcp2. `SendsOverBudget` keeps its one
   meaning - a number somebody configured being enforced - because `render`'s
   panel and `D00007` are both phrased against it.
+
+**Control streams go out before unreliable messages.** Each packet a flush
+writes goes first to a reliable channel not marked in
+`ConnectionSettings::BulkChannels`, round-robin among them, then to unreliable
+messages and bulk channels in turn. A late control message stalls whatever waits
+on it, while a late unreliable message is replaced by the next one; draining the
+unreliable queue first let deltas take a congested window entirely. Replication
+marks the join snapshot channel bulk. A channel blocked on the peer's window is
+skipped for the rest of the flush rather than ending it.
 
 **No vendor type in a public header applies to ngtcp2 hardest.** A QUIC
 connection is ngtcp2 all the way through, so `quic/Connection.hpp` holds a pimpl

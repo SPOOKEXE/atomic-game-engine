@@ -93,7 +93,7 @@ namespace engine::audio {
 		StereoGain SpatialGain;
 	};
 
-	// One graph command aligned to both the requested and actual sample clocks.
+	// One attempted graph command with dispatch timing and owner-side outcome.
 	struct AudioEventObservation {
 		// Mixer command kind.
 		std::string Kind;
@@ -107,12 +107,16 @@ namespace engine::audio {
 		bool RelatedSourceIdentified = false;
 		// Sample clock position requested by the game tick.
 		uint64_t RequestedSample = 0;
-		// Sample clock position where the mixer applied the command.
+		// Sample clock position where the mixer dispatched the command.
 		uint64_t AppliedSample = 0;
 		// Frame offset within the copied mixer block.
 		size_t OffsetFrames = 0;
 		// Timing classification for the requested and applied samples.
 		std::string Timing;
+		// Refusals remain visible internally even when a wire format cannot encode them.
+		PlaybackStatus Status = PlaybackStatus::Applied;
+		// Bounded collector-defined reason, empty for an accepted command.
+		std::string RefusalReason;
 	};
 
 	// Immutable copy of one mixer block and its synchronized labels.

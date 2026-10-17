@@ -1,8 +1,9 @@
 // Forking is an MCP lifecycle mutation: the adapter must preserve the parent
 // revision fence and replay exactly the committed branch result.
 
+#include "HookFixture.hpp"
+
 #include <engine/control/Surface.hpp>
-#include <engine/control/features/DataFactory.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/testing/Suite.hpp>
 #include <engine/world/DataFactory.hpp>
@@ -59,7 +60,9 @@ namespace {
 				.Abort = {},
 				.Retire = {},
 			});
-			SurfaceRef.Enable(std::array{engine::control::features::DataFactory(Session)});
+			engine::control::test::Install(
+				SurfaceRef, std::array{engine::control::test::DataFactory(Session)}
+			);
 		}
 
 		json Request(std::string operation = "fork-one") {

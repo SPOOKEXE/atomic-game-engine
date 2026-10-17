@@ -1,3 +1,5 @@
+#include "ShaderResidency.hpp"
+
 #include <engine/assets/Shader.hpp>
 
 #include <algorithm>
@@ -391,52 +393,75 @@ namespace engine::assets {
 			}
 		}
 
-		bool ReadText(ByteReader &reader, std::string &out, bool empty = false) {
-			const auto text = reader.ReadString();
-			if (reader.Failed() || !Text(text, empty)) return false;
-			out.assign(text);
+		struct Decoder {
+			ByteReader Input;
+			detail::ShaderByteCounter Budget;
+		};
+
+		bool ReadText(Decoder &reader, std::string &out, bool empty = false) {
+			const auto text = reader.Input.ReadString();
+			if (reader.Input.Failed() || !Text(text, empty)) return false;
+			const uint64_t old = out.capacity() + 1;
+			const uint64_t wanted = std::max<uint64_t>(old, text.size() + 1);
+			if (!reader.Budget.Add(wanted - old)) return false;
+			std::string candidate(text);
+			if (candidate.capacity() + 1 > wanted && !reader.Budget.Add(candidate.capacity() + 1 - wanted))
+				return false;
+			out = std::move(candidate);
 			return true;
 		}
 
 		template <typename T, typename Read>
-		bool ReadRows(ByteReader &reader, std::vector<T> &rows, size_t maximum, Read read) {
-			const uint32_t count = reader.ReadUInt32();
-			if (reader.Failed() || count > maximum || count > reader.Remaining() / 4) return false;
+		bool ReadRows(Decoder &reader, std::vector<T> &rows, size_t maximum, Read read) {
+			const uint32_t count = reader.Input.ReadUInt32();
+			if (reader.Input.Failed() || count > maximum || count > reader.Input.Remaining() / 4)
+				return false;
+			const T prototype{};
+			detail::ShaderByteCounter fields;
+			if (!detail::ShaderFields(prototype, fields)) return false;
+			const uint64_t rowBytes = sizeof(T) + fields.Bytes;
+			if (count > (reader.Budget.Maximum - reader.Budget.Bytes) / rowBytes ||
+				!reader.Budget.Add(count * rowBytes))
+				return false;
 			rows.reserve(count);
+			if (rows.capacity() > count && !reader.Budget.Add((rows.capacity() - count) * sizeof(T)))
+				return false;
 			for (uint32_t index = 0; index < count; index++) {
 				T row;
-				if (!read(reader, row) || reader.Failed()) return false;
+				if (!read(reader, row) || reader.Input.Failed()) return false;
 				rows.push_back(std::move(row));
 			}
 			return true;
 		}
 
-		bool ReadBlob(ByteReader &reader, std::vector<std::byte> &out, size_t maximum) {
-			const uint32_t size = reader.ReadUInt32();
-			if (reader.Failed() || size > maximum || size > reader.Remaining()) return false;
-			const auto bytes = reader.ReadRawView(size);
+		bool ReadBlob(Decoder &reader, std::vector<std::byte> &out, size_t maximum) {
+			const uint32_t size = reader.Input.ReadUInt32();
+			if (reader.Input.Failed() || size > maximum || size > reader.Input.Remaining()) return false;
+			if (!reader.Budget.Add(size)) return false;
+			const auto bytes = reader.Input.ReadRawView(size);
 			out.assign(bytes.begin(), bytes.end());
-			return !reader.Failed();
+			if (out.capacity() > size && !reader.Budget.Add(out.capacity() - size)) return false;
+			return !reader.Input.Failed();
 		}
 
-		bool ReadInterface(ByteReader &reader, ShaderVariant &variant) {
+		bool ReadInterface(Decoder &reader, ShaderVariant &variant) {
 			if (!ReadText(reader, variant.Stage)) return false;
 			if (!ReadRows(
 					reader,
 					variant.Resources,
 					Shader::MAXIMUM_DECLARATIONS,
-					[](ByteReader &input, ShaderResource &row) {
+					[](Decoder &input, ShaderResource &row) {
 						if (!ReadText(input, row.Name) || !ReadText(input, row.Kind)) return false;
-						row.Set = input.ReadUInt32();
-						row.Binding = input.ReadUInt32();
+						row.Set = input.Input.ReadUInt32();
+						row.Binding = input.Input.ReadUInt32();
 						if (!ReadText(input, row.Access) || !ReadText(input, row.Dimension) ||
 							!ReadText(input, row.Format, true))
 							return false;
-						row.MinimumBytes = input.ReadUInt64();
-						row.DescriptorCount = input.ReadUInt32();
-						const uint8_t runtime = input.ReadUInt8();
+						row.MinimumBytes = input.Input.ReadUInt64();
+						row.DescriptorCount = input.Input.ReadUInt32();
+						const uint8_t runtime = input.Input.ReadUInt8();
 						row.RuntimeArray = runtime != 0;
-						return runtime <= 1 && ReadText(input, row.SampleType) && !input.Failed();
+						return runtime <= 1 && ReadText(input, row.SampleType) && !input.Input.Failed();
 					}
 				))
 				return false;
@@ -444,19 +469,19 @@ namespace engine::assets {
 					reader,
 					variant.Parameters,
 					Shader::MAXIMUM_DECLARATIONS,
-					[](ByteReader &input, ShaderParameter &row) {
+					[](Decoder &input, ShaderParameter &row) {
 						if (!ReadText(input, row.Name) || !ReadText(input, row.Resource) ||
 							!ReadText(input, row.Type))
 							return false;
-						row.Offset = input.ReadUInt32();
-						row.Bytes = input.ReadUInt32();
-						row.Alignment = input.ReadUInt32();
-						row.ArrayCount = input.ReadUInt32();
-						row.ArrayStride = input.ReadUInt32();
-						row.MatrixStride = input.ReadUInt32();
-						const uint8_t rowMajor = input.ReadUInt8();
+						row.Offset = input.Input.ReadUInt32();
+						row.Bytes = input.Input.ReadUInt32();
+						row.Alignment = input.Input.ReadUInt32();
+						row.ArrayCount = input.Input.ReadUInt32();
+						row.ArrayStride = input.Input.ReadUInt32();
+						row.MatrixStride = input.Input.ReadUInt32();
+						const uint8_t rowMajor = input.Input.ReadUInt8();
 						row.RowMajor = rowMajor != 0;
-						return rowMajor <= 1 && !input.Failed();
+						return rowMajor <= 1 && !input.Input.Failed();
 					}
 				))
 				return false;
@@ -465,17 +490,17 @@ namespace engine::assets {
 						reader,
 						*variables,
 						Shader::MAXIMUM_DECLARATIONS,
-						[](ByteReader &input, ShaderInterfaceVariable &row) {
+						[](Decoder &input, ShaderInterfaceVariable &row) {
 							if (!ReadText(input, row.Name) || !ReadText(input, row.Type)) return false;
-							row.Location = input.ReadUInt32();
-							row.Component = input.ReadUInt32();
-							row.LocationCount = input.ReadUInt32();
+							row.Location = input.Input.ReadUInt32();
+							row.Component = input.Input.ReadUInt32();
+							row.LocationCount = input.Input.ReadUInt32();
 							if (!ReadText(input, row.Interpolation)) return false;
-							const uint8_t centroid = input.ReadUInt8();
-							const uint8_t sample = input.ReadUInt8();
+							const uint8_t centroid = input.Input.ReadUInt8();
+							const uint8_t sample = input.Input.ReadUInt8();
 							row.Centroid = centroid != 0;
 							row.Sample = sample != 0;
-							return centroid <= 1 && sample <= 1 && !input.Failed();
+							return centroid <= 1 && sample <= 1 && !input.Input.Failed();
 						}
 					))
 					return false;
@@ -484,24 +509,21 @@ namespace engine::assets {
 					reader,
 					variant.RequiredCapabilities,
 					Shader::MAXIMUM_KEYS,
-					[](ByteReader &input, std::string &row) { return ReadText(input, row); }
+					[](Decoder &input, std::string &row) { return ReadText(input, row); }
 				))
 				return false;
-			variant.WorkgroupX = reader.ReadUInt32();
-			variant.WorkgroupY = reader.ReadUInt32();
-			variant.WorkgroupZ = reader.ReadUInt32();
+			variant.WorkgroupX = reader.Input.ReadUInt32();
+			variant.WorkgroupY = reader.Input.ReadUInt32();
+			variant.WorkgroupZ = reader.Input.ReadUInt32();
 			ContentHash signature;
-			return reader.ReadRaw(signature.Digest.data(), signature.Digest.size()) &&
+			return reader.Input.ReadRaw(signature.Digest.data(), signature.Digest.size()) &&
 				   InterfaceValid(variant) && Shader::InterfaceHash(variant) == signature;
 		}
 
-		bool ReadVariant(ByteReader &reader, ShaderVariant &variant) {
+		bool ReadVariant(Decoder &reader, ShaderVariant &variant) {
 			if (!ReadText(reader, variant.Name)) return false;
 			if (!ReadRows(
-					reader,
-					variant.Features,
-					Shader::MAXIMUM_KEYS,
-					[](ByteReader &input, ShaderFeature &row) {
+					reader, variant.Features, Shader::MAXIMUM_KEYS, [](Decoder &input, ShaderFeature &row) {
 						return ReadText(input, row.Name) && ReadText(input, row.Value);
 					}
 				))
@@ -510,39 +532,39 @@ namespace engine::assets {
 					reader,
 					variant.Specializations,
 					Shader::MAXIMUM_KEYS,
-					[](ByteReader &input, ShaderSpecialization &row) {
+					[](Decoder &input, ShaderSpecialization &row) {
 						if (!ReadText(input, row.Name) || !ReadText(input, row.Type)) return false;
-						row.ConstantId = input.ReadUInt32();
+						row.ConstantId = input.Input.ReadUInt32();
 						return ReadBlob(input, row.Value, 4);
 					}
 				))
 				return false;
 			if (!ReadInterface(reader, variant)) return false;
-			variant.Instructions = reader.ReadUInt32();
-			variant.ArithmeticInstructions = reader.ReadUInt32();
-			variant.TextureInstructions = reader.ReadUInt32();
-			variant.MemoryInstructions = reader.ReadUInt32();
-			variant.ControlFlowInstructions = reader.ReadUInt32();
+			variant.Instructions = reader.Input.ReadUInt32();
+			variant.ArithmeticInstructions = reader.Input.ReadUInt32();
+			variant.TextureInstructions = reader.Input.ReadUInt32();
+			variant.MemoryInstructions = reader.Input.ReadUInt32();
+			variant.ControlFlowInstructions = reader.Input.ReadUInt32();
 			if (!ReadRows(
 					reader,
 					variant.Optimizations,
 					Shader::MAXIMUM_OPTIMIZATIONS,
-					[](ByteReader &input, ShaderOptimization &row) {
+					[](Decoder &input, ShaderOptimization &row) {
 						if (!ReadText(input, row.Name)) return false;
-						row.BeforeInstructions = input.ReadUInt32();
-						row.AfterInstructions = input.ReadUInt32();
-						const uint8_t changed = input.ReadUInt8();
+						row.BeforeInstructions = input.Input.ReadUInt32();
+						row.AfterInstructions = input.Input.ReadUInt32();
+						const uint8_t changed = input.Input.ReadUInt8();
 						row.Changed = changed != 0;
-						return changed <= 1 && !input.Failed();
+						return changed <= 1 && !input.Input.Failed();
 					}
 				))
 				return false;
-			return ReadRows(reader, variant.Payloads, 2, [](ByteReader &input, ShaderPayload &row) {
+			return ReadRows(reader, variant.Payloads, 2, [](Decoder &input, ShaderPayload &row) {
 				if (!ReadText(input, row.Backend) || !ReadText(input, row.EntryPoint) ||
 					!ReadText(input, row.Target))
 					return false;
 				ContentHash digest;
-				if (!input.ReadRaw(digest.Digest.data(), digest.Digest.size())) return false;
+				if (!input.Input.ReadRaw(digest.Digest.data(), digest.Digest.size())) return false;
 				return ReadBlob(input, row.Bytes, Shader::MAXIMUM_PAYLOAD_BYTES) &&
 					   Hasher::Of(row.Bytes) == digest;
 			});
@@ -591,6 +613,14 @@ namespace engine::assets {
 		return encoder.Good ? Hasher::Of(writer.Bytes()) : ContentHash{};
 	}
 
+	std::optional<uint64_t> Shader::EncodedBytes(const ShaderData &data) {
+		if (!data.IsValid()) return {};
+		Encoder measured;
+		Encode(measured, data);
+		if (!measured.Good || measured.Bytes > MAXIMUM_BYTES - 10) return {};
+		return measured.Bytes + 10;
+	}
+
 	bool Shader::Write(core::ByteWriter &writer, const ShaderData &data) {
 		if (!data.IsValid()) return false;
 		ByteWriter body;
@@ -605,6 +635,10 @@ namespace engine::assets {
 	}
 
 	bool Shader::Read(core::ByteReader &reader, ShaderData &out) {
+		return Read(reader, out, std::numeric_limits<uint64_t>::max());
+	}
+
+	bool Shader::Read(core::ByteReader &reader, ShaderData &out, uint64_t maximumBytes) {
 		const auto refuse = [&reader]() {
 			reader.Fail();
 			return false;
@@ -613,8 +647,10 @@ namespace engine::assets {
 		const uint32_t bodyBytes = reader.ReadUInt32();
 		if (reader.Failed() || bodyBytes > MAXIMUM_BYTES - 10 || bodyBytes > reader.Remaining())
 			return refuse();
-		ByteReader body(reader.ReadRawView(bodyBytes));
 		ShaderData parsed;
+		const auto baseBytes = ShaderRetainedPayloadBytes(parsed, maximumBytes);
+		if (!baseBytes) return refuse();
+		Decoder body{ByteReader(reader.ReadRawView(bodyBytes)), {*baseBytes, maximumBytes}};
 		if (!ReadText(body, parsed.CompilerVersion) || !ReadText(body, parsed.OptimizerVersion) ||
 			!ReadText(body, parsed.TranslatorVersion) || !ReadText(body, parsed.ShaderAbi) ||
 			!ReadText(body, parsed.TargetEnvironment))
@@ -623,18 +659,18 @@ namespace engine::assets {
 			!ReadText(body, parsed.PolicyVersion) || !ReadText(body, parsed.CookProfile))
 			return refuse();
 		for (auto *options : {&parsed.CompilerOptions, &parsed.OptimizerOptions, &parsed.TranslatorOptions}) {
-			if (!ReadRows(body, *options, MAXIMUM_KEYS, [](ByteReader &input, ShaderFeature &row) {
+			if (!ReadRows(body, *options, MAXIMUM_KEYS, [](Decoder &input, ShaderFeature &row) {
 					return ReadText(input, row.Name) && ReadText(input, row.Value);
 				}))
 				return refuse();
 		}
-		if (!ReadRows(body, parsed.Dependencies, MAXIMUM_KEYS, [](ByteReader &input, ShaderDependency &row) {
+		if (!ReadRows(body, parsed.Dependencies, MAXIMUM_KEYS, [](Decoder &input, ShaderDependency &row) {
 				return ReadText(input, row.Name) &&
-					   input.ReadRaw(row.Root.Digest.data(), row.Root.Digest.size());
+					   input.Input.ReadRaw(row.Root.Digest.data(), row.Root.Digest.size());
 			}))
 			return refuse();
-		if (!ReadRows(body, parsed.Variants, MAXIMUM_VARIANTS, ReadVariant) || !body.AtEnd() ||
-			!parsed.IsValid())
+		if (!ReadRows(body, parsed.Variants, MAXIMUM_VARIANTS, ReadVariant) || !body.Input.AtEnd() ||
+			!parsed.IsValid() || !ShaderRetainedPayloadBytes(parsed, maximumBytes))
 			return refuse();
 		out = std::move(parsed);
 		return true;

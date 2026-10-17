@@ -558,6 +558,11 @@ TEST_CASE("portal content scope is explicit and part of reply admission", "[rend
 	PortalImageReply image;
 	REQUIRE(DecodePortalImageReply(bytes, image, error));
 	CHECK(image == reply);
+	request.Scope = PortalImageScope::SeamRadiance;
+	request.OrderedLayers = false;
+	REQUIRE(EncodePortalImageRequest(request, bytes, error));
+	REQUIRE(DecodePortalImageRequest(bytes, decoded, error));
+	CHECK(decoded == request);
 }
 
 TEST_CASE("portal renewal metadata is distinct and bounded", "[render][portal-exchange]") {

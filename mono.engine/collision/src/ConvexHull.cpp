@@ -1,9 +1,11 @@
 #include <engine/collision/ConvexHull.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <unordered_map>
@@ -134,6 +136,7 @@ namespace engine::collision {
 		// neighbours, and the answer is identical to the scan's: the test is an
 		// existence test, so which candidate matches first cannot change it.
 		std::vector<core::Vector3> Distinct(std::span<const core::Vector3> points, float weld) {
+			ENGINE_PROFILE("collision hull weld");
 			std::vector<core::Vector3> kept;
 			const float squared = weld * weld;
 
@@ -174,8 +177,13 @@ namespace engine::collision {
 			}
 
 			const double inverse = 1.0 / static_cast<double>(weld);
-			std::unordered_map<Cell, std::vector<uint32_t>, CellHash> grid;
+			constexpr size_t noPoint = std::numeric_limits<size_t>::max();
+			std::unordered_map<Cell, size_t, CellHash> grid;
 			grid.reserve(points.size());
+			// Cell chains share one temporary buffer; matching is an existence
+			// test, so reversing members preserves the first kept representative.
+			std::vector<size_t> next;
+			next.reserve(points.size());
 
 			for (const core::Vector3 &point : points) {
 				if (!Finite(point)) {
@@ -193,7 +201,7 @@ namespace engine::collision {
 							if (found == grid.end()) {
 								continue;
 							}
-							for (const uint32_t index : found->second) {
+							for (size_t index = found->second; index != noPoint; index = next[index]) {
 								if ((kept[index] - point).MagnitudeSquared() <= squared) {
 									duplicate = true;
 									break;
@@ -204,7 +212,9 @@ namespace engine::collision {
 				}
 
 				if (!duplicate) {
-					grid[home].push_back(static_cast<uint32_t>(kept.size()));
+					const auto cell = grid.try_emplace(home, noPoint).first;
+					next.push_back(cell->second);
+					cell->second = kept.size();
 					kept.push_back(point);
 				}
 			}
@@ -242,6 +252,7 @@ namespace engine::collision {
 		// when any stage finds nothing far enough away, which is exactly the
 		// "all collinear" and "all coplanar" cases the header promises.
 		bool SeedTetrahedron(std::span<const core::Vector3> points, float tolerance, uint32_t (&seed)[4]) {
+			ENGINE_PROFILE("collision hull seed");
 			if (points.size() < 4) {
 				ENGINE_TRACE(
 					"seed: {} distinct point(s), fewer than the four a tetrahedron needs", points.size()
@@ -348,6 +359,7 @@ namespace engine::collision {
 		// two genuinely different faces, and falling back to triangles is a
 		// coarser answer rather than a wrong one.
 		void EmitFaces(const std::vector<Facet> &facets, float tolerance, ConvexHull &hull) {
+			ENGINE_PROFILE("collision hull faces");
 			std::vector<uint32_t> group;
 			std::vector<bool> taken(facets.size(), false);
 
@@ -494,6 +506,7 @@ namespace engine::collision {
 	}
 
 	ConvexHull BuildConvexHull(std::span<const core::Vector3> points, float tolerance) {
+		ENGINE_PROFILE("collision hull build");
 		const float epsilon = tolerance > 0.0f ? tolerance : HULL_WELD_DISTANCE;
 
 		// A histogram rather than a counter, because the number that matters is
@@ -551,100 +564,108 @@ namespace engine::collision {
 		std::vector<uint32_t> visible;
 		std::vector<std::pair<uint32_t, uint32_t>> horizon;
 
-		// **Input order, so the hull is a function of the cloud.** Quickhull is
-		// usually written to take the furthest outside point next, which
-		// converges in fewer rounds and makes the result depend on a
-		// floating-point maximum - two builds of one cloud on two machines could
-		// then differ, which is the thing `just determinism` exists to prevent.
-		for (size_t index = 0; index < distinct.size(); index++) {
-			if (inside[index] || corners >= MAXIMUM_HULL_POINTS) {
-				continue;
-			}
-
-			const core::Vector3 &point = distinct[index];
-
-			visible.clear();
-			for (size_t facet = 0; facet < facets.size(); facet++) {
-				if (facets[facet].Live && Above(facets[facet], point) > epsilon) {
-					visible.push_back(static_cast<uint32_t>(facet));
+		{
+			ENGINE_PROFILE("collision hull expand");
+			// **Input order, so the hull is a function of the cloud.** Quickhull is
+			// usually written to take the furthest outside point next, which
+			// converges in fewer rounds and makes the result depend on a
+			// floating-point maximum - two builds of one cloud on two machines could
+			// then differ, which is the thing `just determinism` exists to prevent.
+			for (size_t index = 0; index < distinct.size(); index++) {
+				if (inside[index] || corners >= MAXIMUM_HULL_POINTS) {
+					continue;
 				}
-			}
-			if (visible.empty()) {
-				continue;
-			}
 
-			// The horizon is the boundary of the visible region: the directed
-			// edges of visible facets whose opposite belongs to a facet that is
-			// not visible.
-			horizon.clear();
-			for (uint32_t facet : visible) {
-				for (int corner = 0; corner < 3; corner++) {
-					const uint32_t from = facets[facet].Vertex[corner];
-					const uint32_t to = facets[facet].Vertex[(corner + 1) % 3];
+				const core::Vector3 &point = distinct[index];
 
-					bool shared = false;
-					for (uint32_t other : visible) {
-						if (other == facet) {
-							continue;
-						}
-						for (int edge = 0; edge < 3; edge++) {
-							if (facets[other].Vertex[edge] == to &&
-								facets[other].Vertex[(edge + 1) % 3] == from) {
-								shared = true;
+				visible.clear();
+				for (size_t facet = 0; facet < facets.size(); facet++) {
+					if (facets[facet].Live && Above(facets[facet], point) > epsilon) {
+						visible.push_back(static_cast<uint32_t>(facet));
+					}
+				}
+				if (visible.empty()) {
+					continue;
+				}
+
+				// The horizon is the boundary of the visible region: the directed
+				// edges of visible facets whose opposite belongs to a facet that is
+				// not visible.
+				horizon.clear();
+				for (uint32_t facet : visible) {
+					for (int corner = 0; corner < 3; corner++) {
+						const uint32_t from = facets[facet].Vertex[corner];
+						const uint32_t to = facets[facet].Vertex[(corner + 1) % 3];
+
+						bool shared = false;
+						for (uint32_t other : visible) {
+							if (other == facet) {
+								continue;
+							}
+							for (int edge = 0; edge < 3; edge++) {
+								if (facets[other].Vertex[edge] == to &&
+									facets[other].Vertex[(edge + 1) % 3] == from) {
+									shared = true;
+									break;
+								}
+							}
+							if (shared) {
 								break;
 							}
 						}
-						if (shared) {
-							break;
+						if (!shared) {
+							horizon.emplace_back(from, to);
 						}
 					}
-					if (!shared) {
-						horizon.emplace_back(from, to);
-					}
 				}
-			}
 
-			if (horizon.empty()) {
-				// Every facet saw the point, which means the point is not
-				// outside a closed hull at all - a plane test that disagreed
-				// with itself. Skipping it keeps the hull closed, which is the
-				// invariant everything below depends on.
-				ENGINE_WARN_EVERY(
-					1.0,
-					"point {} is outside all {} live facets at once; the plane test disagreed with itself",
-					index,
-					visible.size()
-				);
-				continue;
-			}
+				if (horizon.empty()) {
+					// Every facet saw the point, which means the point is not
+					// outside a closed hull at all - a plane test that disagreed
+					// with itself. Skipping it keeps the hull closed, which is the
+					// invariant everything below depends on.
+					ENGINE_WARN_EVERY(
+						1.0,
+						"point {} is outside all {} live facets at once; the plane test disagreed with "
+						"itself",
+						index,
+						visible.size()
+					);
+					continue;
+				}
 
-			for (uint32_t facet : visible) {
-				facets[facet].Live = false;
-			}
-			for (const auto &edge : horizon) {
-				facets.push_back(
-					MakeFacet(distinct, edge.first, edge.second, static_cast<uint32_t>(index), interior)
-				);
-			}
+				for (uint32_t facet : visible) {
+					facets[facet].Live = false;
+				}
+				for (const auto &edge : horizon) {
+					facets.push_back(
+						MakeFacet(distinct, edge.first, edge.second, static_cast<uint32_t>(index), interior)
+					);
+				}
 
-			inside[index] = true;
-			corners++;
+				inside[index] = true;
+				corners++;
+			}
 		}
 
 		// The hull's points are the ones its live facets name, in first-use
 		// order - so the array is compact and the indices below refer to it
 		// rather than to the welded cloud.
-		std::vector<uint32_t> slotOf(distinct.size(), UINT32_MAX);
-		for (Facet &facet : facets) {
-			if (!facet.Live) {
-				continue;
-			}
-			for (uint32_t &corner : facet.Vertex) {
-				if (slotOf[corner] == UINT32_MAX) {
-					slotOf[corner] = static_cast<uint32_t>(hull.Points.size());
-					hull.Points.push_back(distinct[corner]);
+		std::vector<uint32_t> slotOf;
+		{
+			ENGINE_PROFILE("collision hull remap");
+			slotOf = std::vector<uint32_t>(distinct.size(), UINT32_MAX);
+			for (Facet &facet : facets) {
+				if (!facet.Live) {
+					continue;
 				}
-				corner = slotOf[corner];
+				for (uint32_t &corner : facet.Vertex) {
+					if (slotOf[corner] == UINT32_MAX) {
+						slotOf[corner] = static_cast<uint32_t>(hull.Points.size());
+						hull.Points.push_back(distinct[corner]);
+					}
+					corner = slotOf[corner];
+				}
 			}
 		}
 

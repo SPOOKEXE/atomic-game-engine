@@ -380,6 +380,7 @@ namespace engine::render {
 		}
 
 		MeshEntry entry;
+		entry.Revision = ++ContentRevision;
 
 		// **The mesh's own box, which is what turns `Size` into a size.**
 		// `Mesh::Read` derives these from the vertices - nothing on disk states
@@ -473,6 +474,7 @@ namespace engine::render {
 		}
 
 		MeshEntry entry;
+		entry.Revision = ++ContentRevision;
 		entry.Centre = (mesh.Minimum + mesh.Maximum) * 0.5f;
 		entry.Extent = (mesh.Maximum - mesh.Minimum) * 0.5f;
 		entry.Whole.FirstIndex = static_cast<uint32_t>(indexAt);
@@ -749,6 +751,11 @@ namespace engine::render {
 
 	bool MeshTable::Has(const core::Name &name, core::Name owner) const {
 		return name.IsValid() && Entries.find(MeshKey(name, owner)) != Entries.end();
+	}
+
+	uint64_t MeshTable::RevisionOf(const core::Name &name, core::Name owner) const {
+		const auto found = Entries.find(MeshKey(name, owner));
+		return found == Entries.end() ? 0 : found->second.Revision;
 	}
 
 	MeshCopyStatus MeshTable::Copy(

@@ -24,12 +24,14 @@
 #include <engine/spatial/HashGrid.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace engine::spatial {
 
@@ -101,6 +103,59 @@ namespace engine::spatial {
 
 	// Reaches the grid's storage, and walks it.
 	struct GridInternals {
+		// Private diagnostics inspect the actual index after timed work. Coordinate
+		// occupancy differs from bucket load because distinct cells can hash together.
+		struct LevelOccupancy {
+			size_t Proxies = 0;
+			size_t Entries = 0;
+			size_t OccupiedCells = 0;
+			size_t MaximumCellMemberships = 0;
+			size_t Buckets = 0;
+			size_t OccupiedBuckets = 0;
+			size_t MaximumBucketEntries = 0;
+		};
+
+		struct Occupancy {
+			size_t Proxies = 0;
+			size_t ResidualProxies = 0;
+			std::array<LevelOccupancy, HashGrid::HIERARCHY_LEVEL_COUNT> Levels{};
+		};
+
+		// Scratch is caller-owned and reused; no grid storage is changed by this walk.
+		static Occupancy
+		ReadOccupancy(const HashGrid &grid, std::vector<std::array<int32_t, 3>> &coordinates) {
+			Occupancy result;
+			result.Proxies = grid.Proxies.size();
+			result.ResidualProxies = grid.Oversized.size();
+			for (size_t level = 0; level < result.Levels.size(); level++) {
+				auto &reading = result.Levels[level];
+				reading.Proxies = LevelProxyCount(grid, level);
+				const auto &entries = level == 0 ? grid.Entries : grid.CoarseLevels[level - 1].Entries;
+				const auto &buckets =
+					level == 0 ? grid.BucketStart : grid.CoarseLevels[level - 1].BucketStart;
+				reading.Entries = entries.size();
+				reading.Buckets = buckets.empty() ? 0 : buckets.size() - 1;
+				for (size_t bucket = 0; bucket < reading.Buckets; bucket++) {
+					const size_t count = buckets[bucket + 1] - buckets[bucket];
+					reading.OccupiedBuckets += count != 0;
+					reading.MaximumBucketEntries = std::max(reading.MaximumBucketEntries, count);
+				}
+				coordinates.clear();
+				for (const auto &entry : entries)
+					coordinates.push_back({entry.CellX, entry.CellY, entry.CellZ});
+				std::sort(coordinates.begin(), coordinates.end());
+				for (size_t begin = 0; begin < coordinates.size();) {
+					size_t end = begin + 1;
+					while (end < coordinates.size() && coordinates[end] == coordinates[begin])
+						end++;
+					reading.OccupiedCells++;
+					reading.MaximumCellMemberships = std::max(reading.MaximumCellMemberships, end - begin);
+					begin = end;
+				}
+			}
+			return result;
+		}
+
 		// How many bucket entries the last rebuild produced.
 		static size_t EntryCount(const HashGrid &grid) {
 			return grid.Entries.size();

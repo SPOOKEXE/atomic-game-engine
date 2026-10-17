@@ -19,6 +19,11 @@ namespace engine::bake {
 		// guessing what an unlabelled file is.
 		constexpr std::string_view HEADER = "bakegraph 1";
 
+		// `Name::Text()` takes the registry lock, so integer equality wins for the
+		// small pipeline sets a world normally holds. The focused benchmark keeps
+		// this crossover under measurement.
+		constexpr size_t PIPELINE_LINEAR_LOOKUP_LIMIT = 4096;
+
 		// Whether an operation adds a node, which is what positions count.
 		bool AddsNode(OperationKind kind) {
 			return kind != OperationKind::Connect;
@@ -434,9 +439,10 @@ namespace engine::bake {
 			return false;
 		}
 
-		for (size_t index = 0; index < Order.size(); ++index) {
-			if (Order[index] == name) {
-				Documents[index] = std::move(document);
+		if (Order.size() < PIPELINE_LINEAR_LOOKUP_LIMIT) {
+			const auto found = std::find(Order.begin(), Order.end(), name);
+			if (found != Order.end()) {
+				Documents[static_cast<size_t>(found - Order.begin())] = std::move(document);
 				return true;
 			}
 		}
@@ -448,30 +454,54 @@ namespace engine::bake {
 				return left.Text() < right.Text();
 			});
 		const size_t index = static_cast<size_t>(at - Order.begin());
+		if (Order.size() >= PIPELINE_LINEAR_LOOKUP_LIMIT && at != Order.end() && *at == name) {
+			Documents[index] = std::move(document);
+			return true;
+		}
 		Order.insert(at, name);
 		Documents.insert(Documents.begin() + static_cast<ptrdiff_t>(index), std::move(document));
 		return true;
 	}
 
 	const Document *PipelineSet::Find(core::Name name) const {
-		for (size_t index = 0; index < Order.size(); ++index) {
-			if (Order[index] == name) {
-				return &Documents[index];
-			}
+		if (Order.size() < PIPELINE_LINEAR_LOOKUP_LIMIT) {
+			const auto found = std::find(Order.begin(), Order.end(), name);
+			return found == Order.end() ? nullptr : &Documents[static_cast<size_t>(found - Order.begin())];
 		}
-		return nullptr;
+
+		const auto at =
+			std::lower_bound(Order.begin(), Order.end(), name, [](core::Name left, core::Name right) {
+				return left.Text() < right.Text();
+			});
+		if (at == Order.end() || *at != name) {
+			return nullptr;
+		}
+		return &Documents[static_cast<size_t>(at - Order.begin())];
 	}
 
 	bool PipelineSet::Remove(core::Name name) {
-		for (size_t index = 0; index < Order.size(); ++index) {
-			if (Order[index] != name) {
-				continue;
+		if (Order.size() < PIPELINE_LINEAR_LOOKUP_LIMIT) {
+			const auto found = std::find(Order.begin(), Order.end(), name);
+			if (found == Order.end()) {
+				return false;
 			}
-			Order.erase(Order.begin() + static_cast<ptrdiff_t>(index));
+			const size_t index = static_cast<size_t>(found - Order.begin());
+			Order.erase(found);
 			Documents.erase(Documents.begin() + static_cast<ptrdiff_t>(index));
 			return true;
 		}
-		return false;
+
+		const auto at =
+			std::lower_bound(Order.begin(), Order.end(), name, [](core::Name left, core::Name right) {
+				return left.Text() < right.Text();
+			});
+		if (at == Order.end() || *at != name) {
+			return false;
+		}
+		const size_t index = static_cast<size_t>(at - Order.begin());
+		Order.erase(at);
+		Documents.erase(Documents.begin() + static_cast<ptrdiff_t>(index));
+		return true;
 	}
 
 	void PipelineSet::Clear() {

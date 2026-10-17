@@ -26,10 +26,10 @@ namespace server {
 	using engine::control::Tool;
 	using nlohmann::json;
 
-	void Server::RegisterControlTools() {
+	void Server::RegisterControlTools(engine::control::HookRegistration &registration) {
 		Server *host = this;
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"engine_info",
 				"This server's own state: how many scenes it holds, whether the game socket is bound "
@@ -72,7 +72,7 @@ namespace server {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"host_link",
 				"What the game socket has done since this server started. `admitted` and `dropped` "
@@ -105,7 +105,7 @@ namespace server {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"host_players",
 				"Who is in this game: one row per client that has a Player instance, with the entity "
@@ -142,7 +142,7 @@ namespace server {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"admission_list",
 				"Lists the client public keys allowed to start new sessions. `restricted` false means "
@@ -159,7 +159,7 @@ namespace server {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"admission_allow",
 				"Allows a client public key to start future sessions and enables restricted admission. The "
@@ -200,7 +200,7 @@ namespace server {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"admission_revoke",
 				"Revokes a client public key for future sessions. Existing sessions are not disconnected. "
@@ -241,7 +241,7 @@ namespace server {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"admission_open",
 				"Disables the client-key whitelist for future sessions. This is an explicit operation "

@@ -71,6 +71,10 @@ int main(int argc, char **argv) {
 	arguments.Value(
 		"test-portal-fault-report", "PATH", "Test only: append fired portal fault markers to PATH"
 	);
+	arguments.Value(
+		"observe-dir", "DIR", "Write physics and portal observation records to DIR/<process>.jsonl"
+	);
+	arguments.Value("observe-trace", "ID", "Default trace id stamped on portal observation records");
 
 	// The control surface. Off unless asked for - see `Options::ControlPort`.
 	// The number is read from the one constant rather than written here, so the
@@ -90,7 +94,7 @@ int main(int argc, char **argv) {
 	arguments.Value("tick-rate", "HZ", "Ticks per second (default 30)");
 	arguments.Value("physics-tick-rate", "HZ", "Physics steps per second (default: the tick rate)");
 	arguments.Value("replication-tick-rate", "HZ", "Snapshots per second (default: every tick)");
-	arguments.Value("entities", "N", "Entities in the placeholder world (default 4096)");
+	arguments.Value("entities", "N", "Parts in the default Luau scene (default 4096)");
 	arguments.Value("worlds", "N", "Isolated worlds to distribute across physical-core processes");
 	arguments.Value("ticks", "N", "Exit after N ticks");
 	arguments.Value("seconds", "N", "Exit after N seconds");
@@ -129,6 +133,9 @@ int main(int argc, char **argv) {
 	arguments.Value("physical-core", "N", "Physical-core slot assigned by a supervising driver");
 	arguments.Value("process-index", "N", "Stable child index assigned by a supervising driver");
 	arguments.Value("profile-out", "PATH", "Fold this run's frame graph into a .folded flamegraph capture");
+	arguments.Value("benchmark-report", "PATH", "Write full-runtime benchmark measurements as JSON");
+	arguments.Value("benchmark-seconds", "SECONDS", "Benchmark wall-clock interval (default 5)");
+	arguments.Flag("benchmark-wait-for-client", "Start benchmark timing after the first client is admitted");
 	arguments.Value(
 		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
 	);
@@ -322,12 +329,18 @@ int main(int argc, char **argv) {
 	if (auto profile = arguments.Get("profile-out")) {
 		options.ProfilePath = std::filesystem::path(*profile);
 	}
+	if (auto report = arguments.Get("benchmark-report")) {
+		options.BenchmarkReport = std::filesystem::path(*report);
+	}
+	options.BenchmarkSeconds = arguments.GetNumber("benchmark-seconds", options.BenchmarkSeconds);
+	options.BenchmarkWaitForClient = arguments.Has("benchmark-wait-for-client");
 	if (auto report = arguments.Get("heap-report")) {
 		options.HeapReport = std::filesystem::path(*report);
 	}
 	options.ProcessIndex =
 		static_cast<uint32_t>(std::max<int64_t>(0, arguments.GetInteger("process-index", 0)));
 	options.ProfilePath = server::ProcessOutputPath(options.ProfilePath, options.ProcessIndex);
+	options.BenchmarkReport = server::ProcessOutputPath(options.BenchmarkReport, options.ProcessIndex);
 	options.HeapReport = server::ProcessOutputPath(options.HeapReport, options.ProcessIndex);
 	options.ProfileWindowTicks =
 		static_cast<uint64_t>(std::max<int64_t>(0, arguments.GetInteger("profile-window", 0)));
@@ -377,6 +390,9 @@ int main(int argc, char **argv) {
 	options.TestDropNextPortalCrossedAcknowledgement =
 		arguments.Has("test-drop-next-portal-crossed-acknowledgement");
 	if (auto report = arguments.Get("test-portal-fault-report")) options.TestPortalFaultReport = *report;
+	if (auto directory = arguments.Get("observe-dir")) options.ObserveDirectory = *directory;
+	options.ObserveTrace =
+		static_cast<uint64_t>(std::max<int64_t>(0, arguments.GetInteger("observe-trace", 0)));
 	options.Processes = static_cast<uint32_t>(arguments.GetInteger("processes", options.Processes));
 	if (arguments.Has("physical-core")) {
 		options.PhysicalCore =

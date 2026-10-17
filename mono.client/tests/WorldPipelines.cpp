@@ -14,6 +14,7 @@
 #include <client/Scene.hpp>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -25,6 +26,15 @@ TEST_DEPENDS("engine.render.passes")
 using engine::core::Name;
 using engine::graph::PipelineSet;
 using engine::render::Renderer;
+
+TEST_CASE("texture budget command-line values stay explicit and bounded", "[client][options]") {
+	constexpr size_t MEBIBYTE = 1024u * 1024u;
+	CHECK(client::Options::TextureBudgetBytesForMiB(1) == 1 * MEBIBYTE);
+	CHECK(client::Options::TextureBudgetBytesForMiB(9216) == 9216 * MEBIBYTE);
+	CHECK_FALSE(client::Options::TextureBudgetBytesForMiB(0));
+	CHECK_FALSE(client::Options::TextureBudgetBytesForMiB(-1));
+	CHECK_FALSE(client::Options::TextureBudgetBytesForMiB(std::numeric_limits<int64_t>::max()));
+}
 
 namespace {
 	struct TemporaryPipelineFile {

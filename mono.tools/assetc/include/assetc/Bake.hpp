@@ -51,8 +51,7 @@ namespace assetc {
 		// the source said. Zero keeps what the source said.
 		//
 		// **An override and not a default**, which is why zero means "leave it
-		// alone" rather than "use twelve": a GIF states a delay per frame and
-		// the decoder averages those into a rate, so the common case needs
+		// alone" rather than "use twelve": a fixed-delay GIF states its rate, so the common case needs
 		// nothing said here. This exists for the case where the source is wrong
 		// - an exporter that wrote 100ms on every frame of something drawn at
 		// 24fps, which is a thing exporters do - and for re-timing an animation
@@ -74,7 +73,7 @@ namespace assetc {
 		// @since v0.24
 		//@{
 		uint8_t FlipbookSide = 0;
-		uint8_t FlipbookFrames = 0;
+		uint16_t FlipbookFrames = 0;
 		//@}
 
 		// Finds the source a model's texture reference means, when the tree

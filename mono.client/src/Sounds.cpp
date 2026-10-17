@@ -454,6 +454,20 @@ namespace client {
 				}
 			}
 
+			// Pan has the same retry rule as gain. A full command queue must not
+			// leave a moving ambient layer permanently in its old stereo position.
+			if (std::abs(voice->second.Pan - sound.Pan) > GAIN_EPSILON) {
+				command = {};
+				command.Kind = CommandKind::SetPan;
+				command.Target = voice->second.Fader;
+				command.Value = sound.Pan;
+				if (queue.Post(command)) {
+					voice->second.Pan = sound.Pan;
+				} else {
+					RefusedCommands++;
+				}
+			}
+
 			if (!voice->second.LoopsPosted || voice->second.Loops != sound.Looped) {
 				command = {};
 				command.Kind = CommandKind::SetLooping;

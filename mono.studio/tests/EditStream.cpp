@@ -13,6 +13,9 @@
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Values.hpp>
+#include <engine/gui/Document.hpp>
+#include <engine/gui/Registration.hpp>
+#include <engine/gui/Style.hpp>
 #include <engine/net/Transport.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/scene/Components.hpp>
@@ -352,6 +355,86 @@ TEST_CASE("an empty waypoint encodes and reads back as one", "[studio][editstrea
 	const auto read = studio::DecodeEdits(bytes);
 	REQUIRE(read.has_value());
 	CHECK(read->empty());
+}
+
+TEST_CASE("a canonical UI import reaches a collaborating editor intact", "[studio][editstream]") {
+	Fixture jobs;
+	engine::gui::RegisterGuiClasses();
+	Session session;
+	REQUIRE(session.Connect());
+
+	engine::gui::UiDocument document;
+	engine::gui::DocumentTheme theme;
+	theme.Id = "theme";
+	theme.Name = "Shared palette";
+	REQUIRE(theme.Tokens.Set({Name("TextTransparency"), engine::gui::StyleValue::FromNumber(0.35f)}));
+	document.Themes.push_back(theme);
+	engine::gui::DocumentNode root;
+	root.Id = "root";
+	root.Class = "ScreenGui";
+	root.Name = "Shared UI";
+	engine::gui::DocumentProperty reference;
+	reference.Name = "Theme";
+	reference.Type = engine::ecs::PropertyType::Reference;
+	reference.Value.Type = engine::ecs::PropertyType::Reference;
+	reference.Reference = "theme";
+	root.Properties.push_back(reference);
+	document.Roots.push_back(std::move(root));
+
+	session.Host.Worlds.Enter(session.Host.Scene, [&](Store &store) {
+		std::vector<Entity> roots;
+		std::vector<Entity> themes;
+		engine::gui::DocumentReport report;
+		REQUIRE(engine::gui::ImportDocument(store, document, roots, report, {}, &themes));
+		const Entity starter =
+			engine::scene::ServiceOf(store, engine::ecs::Classes::Find(Name("StarterGui")));
+		REQUIRE(store.SetParent(roots.front(), starter));
+		REQUIRE(session.Host.Log.RecordUiDocumentImport(
+			store,
+			session.Host.Scene,
+			document,
+			roots,
+			themes,
+			std::span<const Entity>(&starter, 1),
+			"Import UI"
+		));
+	});
+	session.Settle();
+
+	session.Guest.Worlds.Enter(session.Guest.Scene, [&](Store &store) {
+		const Entity starter =
+			engine::scene::ServiceOf(store, engine::ecs::Classes::Find(Name("StarterGui")));
+		Entity imported = NULL_ENTITY;
+		store.EachChild(starter, [&](Entity child) {
+			if (store.InstanceNameOf(child).Text() == "Shared UI") imported = child;
+		});
+		REQUIRE(imported != NULL_ENTITY);
+		const auto *binding = store.Get<engine::gui::ThemeBinding>(imported);
+		REQUIRE(binding != nullptr);
+		const auto *restored = store.Get<engine::gui::UITheme>(binding->Theme);
+		REQUIRE(restored != nullptr);
+		const auto *token = restored->Tokens.Find(Name("TextTransparency"));
+		REQUIRE(token != nullptr);
+		CHECK(token->Number == 0.35f);
+	});
+}
+
+TEST_CASE("an empty canonical UI import is refused before replay", "[studio][editstream]") {
+	Fixture jobs;
+	Editor editor;
+	engine::gui::UiDocument empty;
+	engine::core::ByteWriter writer;
+	engine::gui::DocumentReport report;
+	REQUIRE(engine::gui::EncodeDocument(empty, writer, report));
+	EditRecord record;
+	record.Kind = studio::CommandKind::UiDocumentImport;
+	record.World = "Scene";
+	record.UiDocument.assign(writer.Bytes().begin(), writer.Bytes().end());
+	const std::vector<std::byte> wire = studio::EncodeEdits({&record, 1});
+	const auto decoded = studio::DecodeEdits(wire);
+	REQUIRE(decoded.has_value());
+	CHECK(studio::ApplyEdits(editor.Log, editor.Worlds, *decoded) == 0);
+	CHECK_FALSE(editor.Log.CanUndo());
 }
 
 TEST_CASE("hostile bytes are refused whole", "[studio][editstream]") {

@@ -1,3 +1,4 @@
+#include "PresentationReplyQueue.hpp"
 #include "RetainedBodyGrant.hpp"
 
 #include <engine/assets/Signature.hpp>
@@ -10,6 +11,7 @@
 #include <engine/script/PortalTransfer.hpp>
 
 #include <algorithm>
+#include <cstdlib>
 #include <network/SessionKey.hpp>
 #include <server/Server.hpp>
 
@@ -33,6 +35,7 @@ namespace server {
 		auto &peer = **found;
 		if (peer.Stream.Receive(bytes) == PresentationStreamReceive::Refused) {
 			peer.Grant.Close();
+			RetireClosedPresentationReplies(peer.PendingReplies, peer.Stream);
 			if (RetainedBodyGrantState) RetainedBodyGrantState->Drop(client);
 			return true;
 		}
@@ -41,6 +44,8 @@ namespace server {
 				frame.Kind == PresentationStreamKind::Directory ? peer.Grant.Apply(frame.Directory)
 				: frame.Kind == PresentationStreamKind::Message ? peer.Grant.Accept(frame.Message)
 																: PresentationStatus::WrongHost;
+			if (status == PresentationStatus::Ok && frame.Kind == PresentationStreamKind::Directory)
+				RetirePresentationReplies(peer.PendingReplies, frame.Directory);
 			if (status == PresentationStatus::Ok || status == PresentationStatus::StaleEndpoint) continue;
 			engine::core::Metrics::Count("server.presentation.refused", 1);
 			if (frame.Kind == PresentationStreamKind::Message && status != PresentationStatus::WrongHost &&
@@ -48,6 +53,7 @@ namespace server {
 				continue;
 			peer.Stream.Close();
 			peer.Grant.Close();
+			RetireClosedPresentationReplies(peer.PendingReplies, peer.Stream);
 			if (RetainedBodyGrantState) RetainedBodyGrantState->Drop(client);
 			break;
 		}
@@ -92,9 +98,15 @@ namespace server {
 		if (!Replication) return;
 		PruneRetainedBodyGrants();
 		size_t queuedPackets = 0;
+		const bool diagnoseQueue = std::getenv("PORTAL_PRESENTATION_QUEUE_DIAGNOSTIC") != nullptr;
 		for (const auto &entry : PlayerPresentations) {
 			auto &peer = *entry;
-			if (!peer.Stream.Open()) continue;
+			if (!peer.Stream.Open()) {
+				RetireClosedPresentationReplies(peer.PendingReplies, peer.Stream);
+				continue;
+			}
+			queuedPackets +=
+				peer.Stream.Flush([&](auto packet) { return Replication->SendTo(peer.Client, packet, now); });
 			const auto routes = peer.Grant.Routes();
 			if (routes.Session != peer.PublishedSession || routes.Revision != peer.PublishedRevision) {
 				PresentationStreamFrame frame;
@@ -106,10 +118,49 @@ namespace server {
 				}
 			}
 			for (auto &message : peer.Grant.Take()) {
-				PresentationStreamFrame frame;
-				frame.Message = std::move(message);
-				if (peer.Stream.Queue(frame) != PresentationStatus::Ok)
-					engine::core::Metrics::Count("server.presentation.reply-drops", 1);
+				if (message.Priority == PresentationPriority::TransferEye)
+					engine::core::Metrics::Count("server.presentation.transfer-eye-received", 1);
+				if (diagnoseQueue && message.From.World == "server.world" &&
+					message.To.Channel == "portal-image-replies" && message.Correlation == 1) {
+					const auto outgoing = peer.Stream.Outgoing();
+					ENGINE_WARN(
+						"portal presentation server reply taken world={} channel={} session={} "
+						"correlation={} reply_bytes={} pending_ahead={} stream_ahead_messages={} "
+						"stream_ahead_bytes={}",
+						message.To.World,
+						message.To.Channel,
+						message.To.Session,
+						message.Correlation,
+						message.Payload.size(),
+						peer.PendingReplies.size(),
+						outgoing.Messages,
+						outgoing.Bytes
+					);
+				}
+				peer.PendingReplies.push_back(std::move(message));
+			}
+			const auto drained = DrainPresentationReplies(peer.PendingReplies, peer.Stream);
+			if (drained.Invalid != 0)
+				engine::core::Metrics::Count("server.presentation.reply-invalid", drained.Invalid);
+			if (drained.TransferEyes != 0)
+				engine::core::Metrics::Count("server.presentation.transfer-eye-queued", drained.TransferEyes);
+			if (drained.RoutineDeferred != 0)
+				engine::core::Metrics::Count("server.presentation.routine-deferred", drained.RoutineDeferred);
+			if (drained.Full) {
+				engine::core::Metrics::Count("server.presentation.reply-backpressure", 1);
+				if (diagnoseQueue && peer.DiagnosedReplyBackpressure++ < 8) {
+					const auto outgoing = peer.Stream.Outgoing();
+					ENGINE_WARN(
+						"portal presentation reply queue full queued_messages={} queued_bytes={} "
+						"pending_messages={} reply_bytes={} channel={} correlation={}",
+						outgoing.Messages,
+						outgoing.Bytes,
+						peer.PendingReplies.size(),
+						peer.PendingReplies.front().Payload.size(),
+						peer.PendingReplies.front().To.Channel,
+						peer.PendingReplies.front().Correlation
+					);
+				}
 			}
 			queuedPackets +=
 				peer.Stream.Flush([&](auto packet) { return Replication->SendTo(peer.Client, packet, now); });

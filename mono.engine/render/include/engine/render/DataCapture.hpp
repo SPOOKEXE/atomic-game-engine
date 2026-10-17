@@ -33,6 +33,8 @@ namespace engine::render {
 	inline constexpr size_t MAX_DATA_CAPTURE_OBJECT_LABELS = 4096;
 	// Maximum combined UTF-8 bytes in a label table.
 	inline constexpr size_t MAX_DATA_CAPTURE_OBJECT_LABEL_BYTES = 512 * 1024;
+	// Maximum stable light identities accepted in one capture descriptor.
+	inline constexpr size_t MAX_DATA_CAPTURE_LOCAL_LIGHT_IDS = 4;
 
 	// Checks for well-formed UTF-8 without normalizing the input.
 	inline bool DataCaptureUtf8(std::string_view value) {
@@ -99,8 +101,8 @@ namespace engine::render {
 		PbrAlbedo,
 		PbrMaterial,
 		PbrEmissive,
-		// The current material model has no authored specular or transmission fact.
-		// They remain requestable so consumers receive a terminal provenance record.
+		// Scalar authored factors. The rendered RGB capture uses the engine's
+		// authored IOR and thickness with a bounded offscreen guard raster when transmission is nonzero.
 		PbrSpecular,
 		PbrTransmission,
 		// Perspective-correct interpolated authored mesh texcoords at visible opaque pixels.
@@ -115,6 +117,15 @@ namespace engine::render {
 		SecondSurfaceValidity,
 		MotionVectors,
 		OpticalFlow,
+		// Unshadowed directional radiance in RGB and the exact sampled visibility factor in alpha.
+		DirectionalResponse,
+		// One-byte display/export representation derived from DirectionalResponse alpha.
+		ShadowVisibility,
+		LocalLightContribution,
+		// Direct selected-local-light shadow factor in a one-byte grayscale plane.
+		LocalLightShadowVisibility,
+		// Explicit RGBA32F render-graph packing, with four documented retained lanes.
+		PackedGpu,
 	};
 
 	// Lifecycle and terminal outcomes of a capture channel.
@@ -141,6 +152,8 @@ namespace engine::render {
 			channel == DataCaptureChannel::PbrAlbedo			  ? "-albedo"
 			: channel == DataCaptureChannel::PbrMaterial		  ? "-material"
 			: channel == DataCaptureChannel::PbrEmissive		  ? "-emissive"
+			: channel == DataCaptureChannel::PbrSpecular		  ? "-specular"
+			: channel == DataCaptureChannel::PbrTransmission	  ? "-transmission"
 			: channel == DataCaptureChannel::MeshUv				  ? "-mesh-uv"
 			: channel == DataCaptureChannel::AmbientOcclusion	  ? "-ambient-occlusion"
 			: channel == DataCaptureChannel::ObjectIds			  ? "-object-ids"
@@ -152,7 +165,13 @@ namespace engine::render {
 				? "-second-surface"
 			: channel == DataCaptureChannel::MotionVectors ? "-motion-vectors"
 			: channel == DataCaptureChannel::OpticalFlow   ? "-optical-flow"
-														   : "";
+			: channel == DataCaptureChannel::DirectionalResponse ||
+					channel == DataCaptureChannel::ShadowVisibility
+				? "-directional-response"
+			: channel == DataCaptureChannel::LocalLightContribution		? "-local-light-response-0"
+			: channel == DataCaptureChannel::LocalLightShadowVisibility ? "-local-light-shadow-visibility-0"
+			: channel == DataCaptureChannel::PackedGpu					? "-packed-gpu"
+																		: "";
 		return suffix.empty() ? base : core::Name(std::string(base.Text()) + std::string(suffix));
 	}
 
@@ -216,6 +235,8 @@ namespace engine::render {
 		std::vector<DataCaptureSemanticLabel> SemanticLabels;
 		// Part identities to include beside part-mask pixels.
 		std::vector<DataCapturePartLabel> PartLabels;
+		// Stable light identities to isolate in local_light_contribution planes.
+		std::vector<std::string> LocalLightIds;
 		// History policy for temporal capture channels.
 		DataCaptureTemporalHistory TemporalHistory = DataCaptureTemporalHistory::Preserve;
 	};
@@ -245,6 +266,8 @@ namespace engine::render {
 		// Present only for the ambient-occlusion plane, including an explicit
 		// Unavailable state for an unrecognised R8 source.
 		std::optional<AmbientOcclusionProvenance> AmbientOcclusion;
+		// Stable source light identity, empty when the plane has no single light source.
+		std::string LightId;
 		// Why this channel has its reported status or contents.
 		std::string Provenance;
 		// Renderer-local preceding frame used by a verified camera-motion plane.
@@ -271,6 +294,12 @@ namespace engine::render {
 		DataCaptureTemporalHistory TemporalHistory = DataCaptureTemporalHistory::Preserve;
 		// Logical channels awaiting resource readback.
 		std::vector<DataCaptureChannel> Channels;
+		// Stable light identity per logical plane, empty for other channels.
+		std::vector<std::string> LightIds;
+		// Set after rendering when the requested local light matched a visible row.
+		std::vector<uint8_t> LocalLightMatched;
+		// Set for local-light shadow planes whose resolved light has shadows enabled.
+		std::vector<uint8_t> LocalLightShadowAvailable;
 		// Object label table retained for the final result.
 		std::vector<DataCaptureObjectLabel> ObjectLabels;
 		// Semantic label table retained for the final result.

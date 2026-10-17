@@ -69,7 +69,8 @@ namespace engine::assets {
 		// @since v0.11
 		Shader = 9,
 
-		// Joint animation channels in the engine's baked `.aanim` format.
+		// Baked animation payloads: joint channels in `.aanim` and ordered image
+		// frames in `.aseq`. A consumer selects by the format name.
 		Animation = 10,
 	};
 

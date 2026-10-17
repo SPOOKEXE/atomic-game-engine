@@ -48,11 +48,14 @@
 #include <engine/gui/NodeCanvas.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/gui/Typing.hpp>
+#include <engine/gui/VirtualCollection.hpp>
 #include <engine/script/ScriptCall.hpp>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
+#include <limits>
 #include <span>
 #include <string>
 #include <utility>
@@ -63,6 +66,69 @@ namespace engine::script {
 	namespace {
 		using core::Name;
 		using ecs::Entity;
+
+		gui::LabelLocalizationArguments *LocalizedArguments(ScriptCall &call) {
+			auto *arguments = call.World().GetMutable<gui::LabelLocalizationArguments>(call.Subject());
+			if (arguments == nullptr)
+				call.Raise("localized arguments need a TextLabel, TextButton, or TextBox");
+			return arguments;
+		}
+
+		gui::LabelLocalizationArgument &FindOrAppendLocalizedArgument(ScriptCall &call, Name name) {
+			if (!name.IsValid()) call.Raise("localized argument name must not be empty");
+			auto *arguments = LocalizedArguments(call);
+			for (size_t index = 0; index < arguments->Count; index++) {
+				if (arguments->Values[index].Name == name) return arguments->Values[index];
+			}
+			if (arguments->Count == gui::LabelLocalizationArguments::MAXIMUM_ARGUMENTS) {
+				call.Raise("localized labels accept at most eight arguments");
+			}
+			return arguments->Values[arguments->Count++];
+		}
+
+		void SetLocalizedStringArgument(ScriptCall &call) {
+			const Name name(call.AsString(0));
+			const std::string value = call.AsString(1);
+			if (value.size() > gui::LabelLocalizationArguments::MAXIMUM_STRING_BYTES) {
+				call.Raise("localized string argument is too long");
+			}
+			FindOrAppendLocalizedArgument(call, name) = {name, gui::LocalizedArgumentType::String, value};
+		}
+
+		void SetLocalizedNumberArgument(ScriptCall &call) {
+			const double value = call.AsNumber(1);
+			if (!std::isfinite(value)) call.Raise("localized number argument must be finite");
+			const Name name(call.AsString(0));
+			FindOrAppendLocalizedArgument(call, name) = {name, gui::LocalizedArgumentType::Number, {}, value};
+		}
+
+		void SetLocalizedDateArgument(ScriptCall &call) {
+			const double value = call.AsNumber(1);
+			if (!std::isfinite(value) || std::trunc(value) != value ||
+				value < static_cast<double>(std::numeric_limits<int64_t>::min()) ||
+				value > static_cast<double>(std::numeric_limits<int64_t>::max())) {
+				call.Raise("localized date argument must be integral Unix seconds");
+			}
+			const Name name(call.AsString(0));
+			FindOrAppendLocalizedArgument(call, name) = {
+				name, gui::LocalizedArgumentType::Date, {}, 0.0, static_cast<int64_t>(value)
+			};
+		}
+
+		void ClearLocalizedArgument(ScriptCall &call) {
+			const Name name(call.AsString(0));
+			auto *arguments = LocalizedArguments(call);
+			for (size_t index = 0; index < arguments->Count; index++) {
+				if (arguments->Values[index].Name != name) continue;
+				for (size_t next = index + 1; next < arguments->Count; next++) {
+					arguments->Values[next - 1] = std::move(arguments->Values[next]);
+				}
+				arguments->Values[--arguments->Count] = {};
+				call.ReturnBoolean(true);
+				return;
+			}
+			call.ReturnBoolean(false);
+		}
 
 		// `playerGui:GetGuiObjectsAtPosition(x, y)`
 		//
@@ -252,13 +318,17 @@ namespace engine::script {
 		void VirtualText(ScriptCall &call) {
 			RequireFocusedTextBox(call, "VirtualText");
 			const std::string text = call.AsString(0);
-			(void)gui::Type(call.World(), gui::Typing{.Text = text});
+			gui::Typing typing;
+			typing.Text = text;
+			(void)gui::Type(call.World(), typing);
 		}
 
 		// `textBox:VirtualSubmit()`
 		void VirtualSubmit(ScriptCall &call) {
 			RequireFocusedTextBox(call, "VirtualSubmit");
-			const gui::TypeResult result = gui::Type(call.World(), gui::Typing{.Text = {}, .Submit = true});
+			gui::Typing typing;
+			typing.Submit = true;
+			const gui::TypeResult result = gui::Type(call.World(), typing);
 			if (result.Released) {
 				RaiseIfHandlerFailed(call, call.DispatchFocusLost(call.Subject(), true));
 			}
@@ -268,6 +338,129 @@ namespace engine::script {
 		void VirtualScroll(ScriptCall &call) {
 			RequireScrollingFrame(call, "VirtualScroll");
 			(void)gui::Scroll(call.World(), call.Subject(), static_cast<float>(call.AsNumber(0)));
+		}
+
+		uint32_t Unsigned32(ScriptCall &call, size_t index, const char *name) {
+			const double value = call.AsNumber(index);
+			if (!std::isfinite(value) || value < 0.0 || std::floor(value) != value ||
+				value > static_cast<double>(UINT32_MAX)) {
+				call.Raise((std::string(name) + " must be a uint32").c_str());
+			}
+			return static_cast<uint32_t>(value);
+		}
+
+		uint64_t Unsigned64(ScriptCall &call, size_t index, const char *name) {
+			const double value = call.AsNumber(index);
+			if (!std::isfinite(value) || value < 0.0 || std::floor(value) != value ||
+				value > static_cast<double>(UINT64_MAX)) {
+				call.Raise((std::string(name) + " must be a uint64").c_str());
+			}
+			return static_cast<uint64_t>(value);
+		}
+
+		const ScriptValue *Field(const ScriptValue &record, std::string_view name) {
+			if (record.Tag != ValueTag::Map) return nullptr;
+			for (const auto &[key, value] : record.Entries)
+				if (key == name) return &value;
+			return nullptr;
+		}
+
+		bool Attribute(const ScriptValue &value, ecs::AttributeValue &out) {
+			switch (value.Tag) {
+			case ValueTag::False:
+			case ValueTag::True:
+				out.Type = ecs::PropertyType::Bool;
+				out.Bool = value.Boolean;
+				return true;
+			case ValueTag::Number:
+				out.Type = ecs::PropertyType::Double;
+				out.Double = value.Number;
+				return true;
+			case ValueTag::String:
+				out.Type = ecs::PropertyType::String;
+				out.String = value.Text;
+				return true;
+			case ValueTag::Vector3:
+				out.Type = ecs::PropertyType::Vector3;
+				out.Vector3 = value.Vector;
+				return true;
+			case ValueTag::Color3:
+				out.Type = ecs::PropertyType::Color3;
+				out.Color3 = value.Colour;
+				return true;
+			case ValueTag::CFrame:
+				out.Type = ecs::PropertyType::CFrame;
+				out.CFrame = value.Frame;
+				return true;
+			case ValueTag::Nil:
+			case ValueTag::Array:
+			case ValueTag::Map:
+				return false;
+			}
+			return false;
+		}
+
+		bool VirtualPage(const ScriptValue &source, gui::VirtualPage &out) {
+			if (source.Tag != ValueTag::Array ||
+				source.Items.size() > gui::VirtualCollection::MAXIMUM_PAGE_RECORDS) {
+				return false;
+			}
+			gui::VirtualPage page;
+			page.Records.reserve(source.Items.size());
+			for (const ScriptValue &sourceRecord : source.Items) {
+				const ScriptValue *key = Field(sourceRecord, "Key");
+				const ScriptValue *fields = Field(sourceRecord, "Fields");
+				if (key == nullptr || key->Tag != ValueTag::String || fields == nullptr ||
+					fields->Tag != ValueTag::Map ||
+					fields->Entries.size() > gui::VirtualCollection::MAXIMUM_FIELDS_PER_RECORD) {
+					return false;
+				}
+				gui::VirtualRecord record;
+				record.Key = key->Text;
+				if (const ScriptValue *extent = Field(sourceRecord, "Extent"); extent != nullptr) {
+					if (extent->Tag != ValueTag::Number) return false;
+					record.MeasuredExtent = static_cast<float>(extent->Number);
+				}
+				record.Fields.reserve(fields->Entries.size());
+				for (const auto &[name, sourceValue] : fields->Entries) {
+					ecs::AttributeValue value;
+					if (!Attribute(sourceValue, value)) return false;
+					record.Fields.push_back({name, std::move(value)});
+				}
+				page.Records.push_back(std::move(record));
+			}
+			out = std::move(page);
+			return true;
+		}
+
+		// A provider publishes one complete bounded page. Validation happens on a
+		// candidate so an invalid script record never leaves a partial source live.
+		void SetVirtualPage(ScriptCall &call) {
+			gui::VirtualCollection *collection =
+				call.World().GetMutable<gui::VirtualCollection>(call.Subject());
+			if (collection == nullptr) {
+				call.Raise("SetVirtualPage needs a UIVirtualCollection");
+			}
+
+			gui::VirtualCollection candidate = *collection;
+			const uint32_t first = Unsigned32(call, 0, "first");
+			const double extentBefore = call.AsNumber(1);
+			if (!std::isfinite(extentBefore) || extentBefore < 0.0 ||
+				extentBefore > static_cast<double>(gui::VirtualCollection::MAXIMUM_CANVAS_EXTENT)) {
+				call.Raise("extentBefore must be a finite canvas extent");
+			}
+			ScriptValue records;
+			CodecStatus status = CodecStatus::Ok;
+			if (!call.ReadValue(2, records, status) || !VirtualPage(records, candidate.Page)) {
+				call.Raise("SetVirtualPage needs bounded record data");
+			}
+			candidate.Page.First = first;
+			candidate.Page.ExtentBefore = static_cast<float>(extentBefore);
+			candidate.Revision = Unsigned64(call, 3, "revision");
+			if (!gui::ValidateVirtualCollection(candidate)) {
+				call.Raise("SetVirtualPage received invalid collection data");
+			}
+			*collection = std::move(candidate);
 		}
 
 		void VirtualDrag(ScriptCall &call, SignalKind kind, const char *method, bool hasDelta) {
@@ -532,7 +725,7 @@ namespace engine::script {
 		// nothing. What closing it needs is a topbar: a non-zero `TopInset` that
 		// something paints, and then this pair is the transparency of that paint.
 
-		constexpr std::array<InstanceMethod, 25> GUI_METHODS{{
+		constexpr std::array<InstanceMethod, 30> GUI_METHODS{{
 			{"GetGuiObjectsAtPosition", GetGuiObjectsAtPosition},
 			{"Connect", ConnectNodePorts},
 			{"Disconnect", DisconnectNodeInput},
@@ -546,6 +739,7 @@ namespace engine::script {
 			{"VirtualText", VirtualText},
 			{"VirtualSubmit", VirtualSubmit},
 			{"VirtualScroll", VirtualScroll},
+			{"SetVirtualPage", SetVirtualPage},
 			{"VirtualDragBegin", VirtualDragBegin},
 			{"VirtualDragContinue", VirtualDragContinue},
 			{"VirtualDragEnd", VirtualDragEnd},
@@ -555,6 +749,10 @@ namespace engine::script {
 			{"VirtualRightClick", VirtualRightClick},
 			{"VirtualRightHold", VirtualRightHold},
 			{"VirtualRightRelease", VirtualRightRelease},
+			{"SetLocalizedStringArgument", SetLocalizedStringArgument},
+			{"SetLocalizedNumberArgument", SetLocalizedNumberArgument},
+			{"SetLocalizedDateArgument", SetLocalizedDateArgument},
+			{"ClearLocalizedArgument", ClearLocalizedArgument},
 
 			{"TweenPosition", TweenPosition},
 			{"TweenSize", TweenSize},

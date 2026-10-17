@@ -17,10 +17,10 @@
 // other half - the pump itself, driven through the real binary - lives in
 // `Bridge.cpp`.
 
+#include "../../../mono.engine/control/tests/HookFixture.hpp"
+
 #include <engine/control/Architecture.hpp>
-#include <engine/control/Features.hpp>
 #include <engine/control/Surface.hpp>
-#include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/testing/Suite.hpp>
@@ -59,15 +59,15 @@ namespace {
 		universe.Create(settings);
 
 		const std::array features{
-			engine::control::features::Universe(universe),
-			engine::control::features::Architecture(),
-			engine::control::features::Script(),
-			engine::control::features::Diagnostics(),
-			engine::control::features::Build(),
-			engine::control::features::Resources(),
-			engine::control::features::Prompts(),
+			engine::control::test::Universe(universe),
+			engine::control::test::Architecture(),
+			engine::control::test::Script(),
+			engine::control::test::Diagnostics(),
+			engine::control::test::Build(),
+			engine::control::test::Resources(),
+			engine::control::test::Prompts(),
 		};
-		surface.Enable(features);
+		engine::control::test::Install(surface, features);
 	}
 
 	json Ask(Surface &surface, const std::string &method, const json &parameters = json::object()) {
@@ -162,7 +162,7 @@ TEST_CASE("intervention schema requires a causal base and typed edits", "[mcpbri
 									   std::span<const engine::world::DataFactoryIntervention>,
 									   std::string &) { return true; });
 	Surface surface("test", "a suite");
-	surface.Enable(std::array{engine::control::features::DataFactory(session)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataFactory(session)});
 	const json listed = Ask(surface, "tools/list");
 	const auto tool =
 		std::find_if(listed["result"]["tools"].begin(), listed["result"]["tools"].end(), [](const json &row) {
@@ -372,13 +372,18 @@ TEST_CASE("an unknown method is a protocol error and an unknown tool is not", "[
 
 TEST_CASE("a tool that throws is a failed tool and not a failed program", "[mcpbridge]") {
 	Surface surface("test", "a suite");
-	surface.Add(
-		Tool{
-			"explode",
-			"Throws, so the suite can prove an escaping exception does not take the frame loop with it.",
-			nullptr,
-			[](const json &, std::string &) -> json { throw std::runtime_error("boom"); },
-		}
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::Custom("throwing-tool", [](Surface &owner) {
+			owner.Add(
+				Tool{
+					"explode",
+					"Throws, so the suite can prove an escaping exception does not take the frame loop with "
+					"it.",
+					nullptr,
+					[](const json &, std::string &) -> json { throw std::runtime_error("boom"); },
+				}
+			);
+		})}
 	);
 
 	const json reply = Ask(surface, "tools/call", json{{"name", "explode"}});
@@ -389,18 +394,22 @@ TEST_CASE("a tool that throws is a failed tool and not a failed program", "[mcpb
 
 TEST_CASE("a resource that cannot be read is a protocol error", "[mcpbridge]") {
 	Surface surface("test", "a suite");
-	surface.AddResource(
-		Resource{
-			"atomic://test/missing",
-			"missing",
-			"A resource whose reader always refuses, so the suite can prove the refusal is not "
-			"reported as an empty document.",
-			"text/plain",
-			[](std::string &failure) {
-				failure = "there is nothing there";
-				return std::string();
-			},
-		}
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::Custom("refused-resource", [](Surface &owner) {
+			owner.AddResource(
+				Resource{
+					"atomic://test/missing",
+					"missing",
+					"A resource whose reader always refuses, so the suite can prove the refusal is not "
+					"reported as an empty document.",
+					"text/plain",
+					[](std::string &failure) {
+						failure = "there is nothing there";
+						return std::string();
+					},
+				}
+			);
+		})}
 	);
 
 	const json refused = Ask(surface, "resources/read", json{{"uri", "atomic://test/missing"}});

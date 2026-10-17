@@ -1,5 +1,7 @@
 #include "PortalContacts.hpp"
+#include "PortalObservation.hpp"
 
+#include <engine/assets/ContentHash.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
@@ -7,14 +9,18 @@
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Scheduler.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/physics/BodyMotion.hpp>
 #include <engine/physics/Broadphase.hpp>
 #include <engine/physics/Continuous.hpp>
 #include <engine/physics/Integrate.hpp>
+#include <engine/physics/PhysicsWorld.hpp>
+#include <engine/physics/PortalMotion.hpp>
 #include <engine/physics/Query.hpp>
 #include <engine/scene/Animation.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/PortalCrossing.hpp>
 #include <engine/scene/PortalTransfer.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/script/PortalTransfer.hpp>
@@ -22,7 +28,9 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 
 namespace engine::script {
@@ -35,6 +43,10 @@ namespace engine::script {
 		constexpr uint32_t MAGIC = 0x35545050;
 		constexpr size_t MAXIMUM_ACTIVE = 16;
 		constexpr size_t MAXIMUM_NATIVE_INPUTS = 64;
+		// Forwarded input is held from the seal until the destination commits and
+		// acknowledges it, so this bounds how long a seal may last before input
+		// is lost: about four seconds at 60 Hz, past a 300 ms client round trip.
+		constexpr size_t MAXIMUM_FORWARDED_INPUTS = 256;
 		struct ScheduledMove {
 			uint64_t InputTick = 0;
 			uint64_t PhysicsTick = 0;
@@ -67,7 +79,11 @@ namespace engine::script {
 			Cancel,
 			Cancelled,
 			Move,
-			MoveAck
+			MoveAck,
+			Prepare,
+			Prepared,
+			SealBaseline,
+			Sealed
 		};
 		struct ForwardMove {
 			uint64_t Sequence = 0;
@@ -83,6 +99,7 @@ namespace engine::script {
 			scene::SeamTransform Through;
 			std::vector<std::byte> Body;
 			std::string Diagnostic;
+			PortalTransferFence Fence;
 		};
 		struct AnimationHold {
 			Entity Owner;
@@ -98,16 +115,27 @@ namespace engine::script {
 			scene::Motion OriginalMotion;
 			scene::Humanoid OriginalHumanoid;
 			bool WasSimulated = false;
+			bool WasSleeping = false;
 			bool HadOwner = false;
 			scene::NetworkOwner OriginalOwner;
 			uint64_t DestinationIncarnation = 0;
+			// Newest input the source applied to this body itself before H. The sealed
+			// baseline states it so the destination does not replay those rows.
+			uint64_t LocalInputTick = 0;
 			uint64_t RetryAt = 0;
 			uint64_t AdmittedIncarnation = 0;
 			world::Ticket Ticket;
 			ForwardMove Move{};
+			std::array<ForwardMove, MAXIMUM_FORWARDED_INPUTS> PendingMoves{};
+			size_t PendingMoveCount = 0;
 			uint64_t AcknowledgedMove = 0;
 			bool InputClosed = false;
 			std::vector<std::byte> Body;
+			std::optional<scene::PortalBodySweep> Sweep;
+			std::optional<physics::PortalMouthMotion> SourceMouth;
+			std::optional<physics::PortalMouthMotion> DestinationMouth;
+			bool BaselineSealed = false;
+			bool DecisionAccepted = false;
 		};
 		struct Incoming {
 			scene::PortalBodyKind Kind = scene::PortalBodyKind::Player;
@@ -115,15 +143,24 @@ namespace engine::script {
 			std::vector<std::byte> Body;
 			scene::SeamTransform Through;
 			Entity Subject;
+			// The arrival consumes its source sweep. Keep its landed pose out of
+			// velocity reconstruction until this world actually moves the body.
+			std::optional<core::CFrame> ArrivalFrame;
 			bool Committed = false;
 			bool Cancelled = false;
 			ForwardMove Move{};
+			std::array<ForwardMove, MAXIMUM_FORWARDED_INPUTS> PendingMoves{};
+			size_t PendingMoveCount = 0;
 			uint64_t AppliedMove = 0;
 			uint64_t AppliedJump = 0;
 			uint64_t AppliedInputTick = 0;
+			// Input the committed baseline already includes; forwarded rows at or
+			// before it were applied by the source and are skipped here.
+			uint64_t BaselineInputTick = 0;
 			std::optional<PortalTransferMotion> Motion;
 			bool MotionReplyPending = false;
 			bool InputClosed = false;
+			PortalTransferFence Fence;
 		};
 		struct Peer {
 			std::string World;
@@ -137,6 +174,7 @@ namespace engine::script {
 			world::Ticket Opening;
 			bool Open = false;
 			bool RequirePlayerAdmission = false;
+			PortalTransferDurability Durability = PortalTransferDurability::InMemoryOnly;
 			std::vector<Outgoing> Out;
 			std::vector<Incoming> In;
 			std::vector<Peer> Peers;
@@ -170,6 +208,41 @@ namespace engine::script {
 			if (id.SourceIncarnation == 0 || id.Sequence == 0) reader.Fail();
 			return id;
 		}
+		bool ValidFence(const PortalTransferFence &fence, bool sealed = false) {
+			return fence.TopologyRevision != 0 && fence.AuthorityEpoch != 0 && fence.PrepareRevision != 0 &&
+				   (!sealed ||
+					(fence.BaselineId != 0 && !fence.BaselineHash.IsZero() && !fence.H.Domain.empty() &&
+					 fence.H.SourceTick != 0 && fence.H.DestinationTick != 0));
+		}
+		void WriteFence(ByteWriter &writer, const PortalTransferFence &fence) {
+			writer.WriteUInt64(fence.TopologyRevision);
+			writer.WriteUInt64(fence.AuthorityEpoch);
+			writer.WriteUInt64(fence.PrepareRevision);
+			writer.WriteUInt64(fence.BaselineId);
+			writer.WriteRaw(fence.BaselineHash.Digest.data(), fence.BaselineHash.Digest.size());
+			writer.WriteString(fence.H.Domain);
+			writer.WriteUInt64(fence.H.SourceTick);
+			writer.WriteUInt64(fence.H.DestinationTick);
+		}
+		PortalTransferFence ReadFence(ByteReader &reader) {
+			PortalTransferFence fence;
+			fence.TopologyRevision = reader.ReadUInt64();
+			fence.AuthorityEpoch = reader.ReadUInt64();
+			fence.PrepareRevision = reader.ReadUInt64();
+			fence.BaselineId = reader.ReadUInt64();
+			reader.ReadRaw(fence.BaselineHash.Digest.data(), fence.BaselineHash.Digest.size());
+			fence.H.Domain = Text(reader, true);
+			fence.H.SourceTick = reader.ReadUInt64();
+			fence.H.DestinationTick = reader.ReadUInt64();
+			const bool empty = fence.TopologyRevision == 0 && fence.AuthorityEpoch == 0 &&
+							   fence.PrepareRevision == 0 && fence.BaselineId == 0 &&
+							   fence.BaselineHash.IsZero() && fence.H.Domain.empty() &&
+							   fence.H.SourceTick == 0 && fence.H.DestinationTick == 0;
+			if ((!empty && !ValidFence(fence)) || (fence.BaselineId == 0) != fence.BaselineHash.IsZero() ||
+				(fence.H.Domain.empty() && (fence.H.SourceTick != 0 || fence.H.DestinationTick != 0)))
+				reader.Fail();
+			return fence;
+		}
 		void WriteBytes(ByteWriter &writer, std::span<const std::byte> bytes) {
 			writer.WriteUInt32(static_cast<uint32_t>(bytes.size()));
 			writer.WriteRaw(bytes.data(), bytes.size());
@@ -192,6 +265,13 @@ namespace engine::script {
 			const float norm = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
 			return finite(through.Frame.Position) && finite(through.Origin) && std::isfinite(norm) &&
 				   std::abs(norm - 1) < .001f && std::isfinite(through.Scale) && through.Scale > 0;
+		}
+		bool ValidFrame(const core::CFrame &frame) {
+			const auto rotation = frame.Rotation();
+			const float norm = rotation.x * rotation.x + rotation.y * rotation.y + rotation.z * rotation.z +
+							   rotation.w * rotation.w;
+			return std::isfinite(frame.Position.X) && std::isfinite(frame.Position.Y) &&
+				   std::isfinite(frame.Position.Z) && std::isfinite(norm) && std::abs(norm - 1) < .001f;
 		}
 		void WriteThrough(ByteWriter &writer, const scene::SeamTransform &through) {
 			writer.WriteRaw(&through.Frame, sizeof(through.Frame));
@@ -219,6 +299,35 @@ namespace engine::script {
 			writer.WriteFloat(move.Direction.Y);
 			writer.WriteFloat(move.Direction.Z);
 		}
+		void WriteSweep(ByteWriter &writer, const std::optional<scene::PortalBodySweep> &sweep) {
+			writer.WriteBool(sweep.has_value());
+			if (!sweep) return;
+			writer.WriteRaw(&sweep->From, sizeof(sweep->From));
+			writer.WriteRaw(&sweep->Displacement, sizeof(sweep->Displacement));
+			writer.WriteRaw(&sweep->AngularDisplacement, sizeof(sweep->AngularDisplacement));
+		}
+		std::optional<scene::PortalBodySweep> ReadSweep(ByteReader &reader) {
+			const auto present = reader.ReadUInt8();
+			if (present > 1) reader.Fail();
+			if (present == 0) return std::nullopt;
+			scene::PortalBodySweep sweep;
+			reader.ReadRaw(&sweep.From, sizeof(sweep.From));
+			reader.ReadRaw(&sweep.Displacement, sizeof(sweep.Displacement));
+			reader.ReadRaw(&sweep.AngularDisplacement, sizeof(sweep.AngularDisplacement));
+			return sweep;
+		}
+		void WriteMouth(ByteWriter &writer, const std::optional<physics::PortalMouthMotion> &mouth) {
+			writer.WriteBool(mouth.has_value());
+			if (mouth) writer.WriteRaw(&*mouth, sizeof(*mouth));
+		}
+		std::optional<physics::PortalMouthMotion> ReadMouth(ByteReader &reader) {
+			const auto present = reader.ReadUInt8();
+			if (present > 1) reader.Fail();
+			if (present == 0) return std::nullopt;
+			physics::PortalMouthMotion mouth;
+			reader.ReadRaw(&mouth, sizeof(mouth));
+			return mouth;
+		}
 		ForwardMove ReadMove(ByteReader &reader) {
 			ForwardMove move;
 			move.Sequence = reader.ReadUInt64();
@@ -233,6 +342,28 @@ namespace engine::script {
 				reader.Fail();
 			return move;
 		}
+		void WriteMoveSegment(ByteWriter &writer, std::span<const ForwardMove> moves) {
+			writer.WriteUInt32(static_cast<uint32_t>(moves.size()));
+			for (const auto &move : moves)
+				WriteMove(writer, move);
+		}
+		bool ReadMoveSegment(
+			ByteReader &reader, std::array<ForwardMove, MAXIMUM_FORWARDED_INPUTS> &moves, size_t &count
+		) {
+			const auto encoded = reader.ReadUInt32();
+			if (encoded == 0 || encoded > MAXIMUM_FORWARDED_INPUTS) {
+				reader.Fail();
+				return false;
+			}
+			uint64_t prior = 0;
+			for (size_t index = 0; index < encoded; ++index) {
+				moves[index] = ReadMove(reader);
+				if (moves[index].Sequence == 0 || moves[index].Sequence <= prior) reader.Fail();
+				prior = moves[index].Sequence;
+			}
+			count = encoded;
+			return !reader.Failed();
+		}
 		std::vector<std::byte> Encode(const Message &message) {
 			ByteWriter writer;
 			writer.WriteUInt32(MAGIC);
@@ -241,6 +372,7 @@ namespace engine::script {
 			writer.WriteUInt64(message.DestinationIncarnation);
 			WriteThrough(writer, message.Through);
 			writer.WriteString(message.Diagnostic);
+			WriteFence(writer, message.Fence);
 			WriteBytes(writer, message.Body);
 			return {writer.Bytes().begin(), writer.Bytes().end()};
 		}
@@ -249,16 +381,18 @@ namespace engine::script {
 			ByteReader reader(bytes);
 			if (reader.ReadUInt32() != MAGIC) return false;
 			const auto kind = reader.ReadUInt8();
-			if (kind > static_cast<uint8_t>(MessageKind::MoveAck)) return false;
+			if (kind > static_cast<uint8_t>(MessageKind::Sealed)) return false;
 			Message message;
 			message.Kind = static_cast<MessageKind>(kind);
 			message.Id = ReadId(reader);
 			message.DestinationIncarnation = reader.ReadUInt64();
 			message.Through = ReadThrough(reader);
 			message.Diagnostic = Text(reader, true);
+			message.Fence = ReadFence(reader);
 			message.Body = ReadBytes(reader);
 			if (reader.Failed() || !reader.AtEnd() ||
-				(message.Kind == MessageKind::Offer || message.Kind == MessageKind::Move ||
+				(message.Kind == MessageKind::Offer || message.Kind == MessageKind::Prepare ||
+				 message.Kind == MessageKind::SealBaseline || message.Kind == MessageKind::Move ||
 				 message.Kind == MessageKind::MoveAck) != !message.Body.empty())
 				return false;
 			out = std::move(message);
@@ -283,6 +417,7 @@ namespace engine::script {
 		}
 		bool Active(const Outgoing &record) {
 			return record.Receipt.Stage == PortalTransferStage::Preparing ||
+				   record.Receipt.Stage == PortalTransferStage::Prepared ||
 				   record.Receipt.Stage == PortalTransferStage::Committing ||
 				   record.Receipt.Stage == PortalTransferStage::Cancelling;
 		}
@@ -474,11 +609,13 @@ namespace engine::script {
 		void Restore(ecs::Store &store, Outgoing &record, std::string diagnostic) {
 			// Once commit is queued, no timeout or refusal can recreate source authority.
 			if (record.Receipt.Stage != PortalTransferStage::Preparing &&
+				record.Receipt.Stage != PortalTransferStage::Prepared &&
 				record.Receipt.Stage != PortalTransferStage::Cancelling)
 				return;
 			if (store.Alive(record.Root)) {
 				store.Set(record.Root, record.OriginalMotion);
 				if (record.WasSimulated) store.Set(record.Root, scene::Simulated{});
+				if (record.WasSleeping) (void)physics::SetSleeping(store, record.Root, true);
 				if (record.HadOwner) store.Set(record.Root, record.OriginalOwner);
 			}
 			if (store.Alive(record.Humanoid)) {
@@ -495,7 +632,17 @@ namespace engine::script {
 				if (held.Track) store.Set(held.Owner, *held.Track);
 			}
 			record.Animation.clear();
+			(void)scene::CancelPortalCrossing(store, record.Root);
 			record.Receipt.Stage = PortalTransferStage::Refused;
+			portal_observation::Handoff(
+				store,
+				record.Subject,
+				record.Root,
+				PortalHandoffEvent::Refused,
+				record.Receipt.Id.Sequence,
+				0,
+				record.Receipt.DestinationWorld
+			);
 			record.Receipt.Diagnostic = std::move(diagnostic);
 			record.Body.clear();
 		}
@@ -508,7 +655,129 @@ namespace engine::script {
 			response.Kind = kind;
 			response.Through = request.Through;
 			response.Diagnostic = std::move(diagnostic);
+			response.Fence = request.Fence;
 			return response;
+		}
+		// Retire source authority only after the sealed handoff has a durable host acknowledgement.
+		bool CommitSealed(ecs::Store &store, TransferState &state, Outgoing &record) {
+			if (record.Receipt.Stage != PortalTransferStage::Prepared || !record.BaselineSealed ||
+				!record.DecisionAccepted)
+				return false;
+			if (state.RequirePlayerAdmission && record.Receipt.Kind == scene::PortalBodyKind::Player) {
+				if (record.AdmittedIncarnation == 0) return false;
+				if (record.AdmittedIncarnation != record.DestinationIncarnation) {
+					record.Receipt.Diagnostic = "destination changed after player admission";
+					return false;
+				}
+			}
+			Message commit;
+			commit.Kind = MessageKind::Commit;
+			commit.Id = record.Receipt.Id;
+			commit.DestinationIncarnation = record.DestinationIncarnation;
+			commit.Through = record.Receipt.Through;
+			commit.Fence = record.Receipt.Fence;
+			const auto ticket = Send(store, record.Receipt.DestinationWorld, commit);
+			if (!ticket.Expected()) return false;
+			record.Receipt.Stage = PortalTransferStage::Committing;
+			record.Ticket = ticket;
+			record.RetryAt = store.Time().Tick + RETRY_TICKS;
+			(void)scene::CommitPortalCrossing(store, record.Root, record.Receipt.Fence.AuthorityEpoch);
+			portal_observation::Handoff(
+				store,
+				record.Subject,
+				record.Root,
+				PortalHandoffEvent::Committing,
+				record.Receipt.Id.Sequence,
+				0,
+				record.Receipt.DestinationWorld
+			);
+			if (record.Receipt.Kind == scene::PortalBodyKind::Player)
+				(void)scene::RemoveCharacter(store, record.Subject);
+			store.DestroyInstance(record.Subject);
+			record.Animation.clear();
+			return true;
+		}
+
+		// The generic body codec preserves identity bytes, so admission checks the destination's
+		// live key set before it creates any transferred entities.
+		bool
+		BodyIdentityAvailable(ecs::Store &store, const scene::PortalBodyCopy &body, std::string &failure) {
+			std::optional<scene::BodyIdentity> transferred;
+			for (const auto &node : body.Nodes)
+				for (const auto &component : node.Components) {
+					if (component.Type != "scene.BodyIdentity") continue;
+					if (transferred) {
+						failure = "portal body has multiple identities";
+						return false;
+					}
+					scene::BodyIdentity identity;
+					ByteReader reader(component.Bytes);
+					ecs::Components::Describe(ecs::Components::Of<scene::BodyIdentity>())
+						.Read(reader, &identity, 1);
+					if (reader.Failed() || !reader.AtEnd() || !identity.Key.IsValid() ||
+						identity.Generation == 0) {
+						failure = "portal body has invalid identity";
+						return false;
+					}
+					transferred = identity;
+				}
+			if (!transferred) {
+				failure = "portal body has no identity";
+				return false;
+			}
+			bool collision = false;
+			store.Each<const scene::BodyIdentity>([&](Entity, const scene::BodyIdentity &live) {
+				collision = collision || live.Key == transferred->Key;
+			});
+			if (collision) failure = "portal body identity is already live";
+			return !collision;
+		}
+
+		struct SlideResult {
+			core::CFrame End;
+			bool Contacted = false;
+			// False when the collision index was missing or a query hit its candidate bound.
+			bool Complete = true;
+		};
+
+		// Moves a collider through this world with a bounded sequence of sliding
+		// contacts, as local motion does in `CopiedContacts`. A walking body grazes
+		// the floor that holds it up; stopping at that contact would strand it.
+		// Each blocking contact keeps the continuous step's bite so the solver
+		// still reports it.
+		SlideResult SlideCollider(
+			const ecs::Store &store,
+			const scene::Collider &collider,
+			const core::CFrame &from,
+			core::Vector3 remaining,
+			core::Vector3 angular,
+			Entity ignore
+		) {
+			SlideResult result;
+			result.End = from;
+			for (int slide = 0; slide < 4 && remaining.MagnitudeSquared() > 1e-12f; ++slide) {
+				const auto hit =
+					physics::SweepPlacement(store, collider, result.End, remaining, angular, ignore, true);
+				if (!hit.Complete) {
+					result.Complete = false;
+					return result;
+				}
+				if (!hit.Hit) {
+					result.End = physics::Advanced(result.End, remaining, angular, 1);
+					break;
+				}
+				result.Contacted = true;
+				const float reach = remaining.Magnitude() + angular.Magnitude() * collider.Extent.Magnitude();
+				const float fraction =
+					std::min(1.0f, hit.Fraction + physics::CONTINUOUS_BITE / std::max(reach, .001f));
+				result.End = physics::Advanced(result.End, remaining, angular, fraction);
+				remaining = remaining * (1 - fraction);
+				const float into = remaining.Dot(hit.Normal);
+				if (into < 0) remaining = remaining - hit.Normal * into;
+				angular = {};
+				if (hit.ConservativeFallback) break;
+			}
+			return result;
 		}
 
 		bool ResolveSuffix(ecs::Store &store, scene::PortalBodyCopy &body, std::string &failure) {
@@ -539,21 +808,15 @@ namespace engine::script {
 				return false;
 			}
 			physics::SyncBroadphase(store);
-			const auto hit = physics::SweepPlacement(
-				store, collider, sweep.From, sweep.Displacement, sweep.AngularDisplacement
+			const auto slid = SlideCollider(
+				store, collider, sweep.From, sweep.Displacement, sweep.AngularDisplacement, ecs::NULL_ENTITY
 			);
-			if (!hit.Complete) {
+			if (!slid.Complete) {
 				failure = "destination suffix collision query is unavailable or exceeds its candidate bound";
 				return false;
 			}
-			if (!hit.Hit) return true;
-			const float reach = sweep.Displacement.Magnitude() +
-								sweep.AngularDisplacement.Magnitude() * collider.Extent.Magnitude();
-			const float fraction =
-				std::min(1.0f, hit.Fraction + physics::CONTINUOUS_BITE / std::max(reach, .001f));
-			const auto clamped =
-				physics::Advanced(sweep.From, sweep.Displacement, sweep.AngularDisplacement, fraction);
-			const auto adjustment = clamped * root.Frame.Inverse();
+			if (!slid.Contacted) return true;
+			const auto adjustment = slid.End * root.Frame.Inverse();
 			for (auto &node : body.Nodes)
 				for (auto &component : node.Components) {
 					if (component.Type != "scene.Transform" && component.Type != "scene.PreviousTransform")
@@ -593,6 +856,29 @@ namespace engine::script {
 			return true;
 		}
 
+		// Maps the source's input clock onto this world at the current tick, using the
+		// newest applied forwarded row. Native input queued later is timed from here.
+		void AnchorForwardClock(ecs::Store &store, const Incoming &record, const scene::Character &rig) {
+			if (record.Move.InputTick == 0 || record.Move.StepSeconds <= 0 || store.Time().Delta <= 0) return;
+			if (!store.Has<PlayerInputClock>(record.Subject)) store.Set(record.Subject, PlayerInputClock{});
+			auto *clock = store.GetMutable<PlayerInputClock>(record.Subject);
+			if (clock->Root != rig.Root || clock->Humanoid != rig.Humanoid) *clock = {};
+			if (!clock->Native && record.Move.InputTick > clock->AnchorInputTick) {
+				clock->Root = rig.Root;
+				clock->Humanoid = rig.Humanoid;
+				clock->AnchorWorldTick = store.Time().Tick;
+				clock->AnchorInputTick = record.Move.InputTick;
+				clock->InputStep = record.Move.StepSeconds;
+				clock->WorldStep = store.Time().Delta;
+				clock->AppliedInputTick = record.Move.InputTick;
+				clock->LastQueuedInputTick = record.Move.InputTick;
+			} else if (clock->Native && record.Move.InputTick > clock->AppliedInputTick) {
+				// Input sent to the previous host before takeover still precedes
+				// every queued native tick, so it remains the applied frontier.
+				clock->AppliedInputTick = record.Move.InputTick;
+			}
+		}
+
 		void ApplyForwardMove(ecs::Store &store, Incoming &record) {
 			if (!record.Committed || record.InputClosed) return;
 			if (!store.Alive(record.Subject)) {
@@ -609,22 +895,14 @@ namespace engine::script {
 			record.AppliedMove = record.Move.Sequence;
 			record.AppliedJump = record.Move.JumpSequence;
 			record.AppliedInputTick = record.Move.InputTick;
-			if (record.Move.InputTick != 0 && record.Move.StepSeconds > 0 && store.Time().Delta > 0) {
-				if (!store.Has<PlayerInputClock>(record.Subject))
-					store.Set(record.Subject, PlayerInputClock{});
-				auto *clock = store.GetMutable<PlayerInputClock>(record.Subject);
-				if (clock->Root != rig->Root || clock->Humanoid != rig->Humanoid) *clock = {};
-				if (!clock->Native && record.Move.InputTick > clock->AnchorInputTick) {
-					clock->Root = rig->Root;
-					clock->Humanoid = rig->Humanoid;
-					clock->AnchorWorldTick = store.Time().Tick;
-					clock->AnchorInputTick = record.Move.InputTick;
-					clock->InputStep = record.Move.StepSeconds;
-					clock->WorldStep = store.Time().Delta;
-					clock->AppliedInputTick = record.Move.InputTick;
-					clock->LastQueuedInputTick = record.Move.InputTick;
-				}
-			}
+			AnchorForwardClock(store, record, *rig);
+			portal_observation::Input(
+				store,
+				record.Subject,
+				PortalInputRoute::Forwarded,
+				record.Move.InputTick,
+				humanoid->MoveDirection
+			);
 			static const core::LogCategory controlTrace("portal-input");
 			if (controlTrace.Enabled(core::LogLevel::Trace)) {
 				const auto *root = store.Get<scene::Transform>(rig->Root);
@@ -651,6 +929,85 @@ namespace engine::script {
 			}
 			core::Metrics::Count("world.portal.move.applied", 1);
 		}
+		// Between the source's seal at H and this world's commit the body stood still
+		// while the client kept predicting it. The rows for that window arrive here
+		// together after commit. Replaying them one world step at a time would leave
+		// this world behind the client for the rest of the session, so all but the
+		// newest step's worth are moved through at once: the client's prediction
+		// model (walk speed along each direction for its step), resolved against this
+		// world with sliding contacts. Returns false and leaves the rows when the
+		// body or the collision index cannot support it; they then replay in time.
+		//
+		// The source holds its consumed input at H while frozen
+		// (`FrozenPortalPlayerInput`), so the client predicted every one of these
+		// rows and this lands the body where the client showed it.
+		bool CatchUpForwardedMoves(ecs::Store &store, Incoming &record, double step) {
+			if (!record.Committed || record.InputClosed || record.PendingMoveCount == 0 || step <= 0)
+				return false;
+			double backlog = 0;
+			for (size_t index = 0; index < record.PendingMoveCount; ++index) {
+				const double seconds = record.PendingMoves[index].StepSeconds;
+				if (!(seconds > 0)) return false;
+				backlog += seconds;
+			}
+			// Up to two steps is ordinary arrival jitter, not a frozen window.
+			if (backlog <= 2 * step + 1e-6) return false;
+			size_t overdue = 0;
+			for (double left = backlog; overdue < record.PendingMoveCount &&
+										left - record.PendingMoves[overdue].StepSeconds >= step - 1e-6;
+				 ++overdue)
+				left -= record.PendingMoves[overdue].StepSeconds;
+			if (overdue == 0 || !store.Alive(record.Subject)) return false;
+			const auto *rig = store.Get<scene::Character>(scene::CharacterOf(store, record.Subject));
+			if (!rig) return false;
+			auto *humanoid = store.GetMutable<scene::Humanoid>(rig->Humanoid);
+			const auto *collider = store.Get<scene::Collider>(rig->Root);
+			const auto *transform = store.Get<scene::Transform>(rig->Root);
+			if (!humanoid || !collider || !transform) return false;
+			core::Vector3 displacement;
+			for (size_t index = 0; index < overdue; ++index) {
+				const auto &move = record.PendingMoves[index];
+				displacement =
+					displacement + record.Through.Rotate(move.Direction) *
+									   (humanoid->WalkSpeed * static_cast<float>(move.StepSeconds));
+			}
+			// Height belongs to gravity and ground contact, which the solver keeps.
+			displacement.Y = 0;
+			if (!store.HasResource<physics::PhysicsWorld>()) return false;
+			const core::CFrame from = transform->Frame;
+			physics::SyncBroadphase(store);
+			const auto slid = SlideCollider(store, *collider, from, displacement, {}, rig->Root);
+			if (!slid.Complete) return false;
+			store.Set(rig->Root, scene::Transform{slid.End});
+			for (size_t index = 0; index < overdue; ++index) {
+				const auto &move = record.PendingMoves[index];
+				portal_observation::Input(
+					store,
+					record.Subject,
+					PortalInputRoute::CaughtUp,
+					move.InputTick,
+					record.Through.Rotate(move.Direction)
+				);
+			}
+			const auto &last = record.PendingMoves[overdue - 1];
+			humanoid = store.GetMutable<scene::Humanoid>(rig->Humanoid);
+			humanoid->MoveDirection = record.Through.Rotate(last.Direction);
+			humanoid->JumpRequested |= last.JumpSequence > record.AppliedJump;
+			record.Move = last;
+			record.AppliedMove = last.Sequence;
+			record.AppliedJump = last.JumpSequence;
+			record.AppliedInputTick = last.InputTick;
+			AnchorForwardClock(store, record, *rig);
+			std::move(
+				record.PendingMoves.begin() + overdue,
+				record.PendingMoves.begin() + record.PendingMoveCount,
+				record.PendingMoves.begin()
+			);
+			record.PendingMoveCount -= overdue;
+			core::Metrics::Count("world.portal.move.caught-up", overdue);
+			return true;
+		}
+
 		bool AcknowledgeMove(ecs::Store &store, const TransferState &state, const Incoming &record) {
 			if (record.Move.Sequence == 0 && !record.InputClosed) return false;
 			Message ack;
@@ -690,8 +1047,24 @@ namespace engine::script {
 								motion->InputTick >= found->Receipt.Motion->InputTick)))
 					found->Receipt.Motion = motion;
 				found->AcknowledgedMove = std::max(found->AcknowledgedMove, applied);
+				const auto retained = std::remove_if(
+					found->PendingMoves.begin(),
+					found->PendingMoves.begin() + found->PendingMoveCount,
+					[&](const ForwardMove &move) { return move.Sequence <= found->AcknowledgedMove; }
+				);
+				found->PendingMoveCount = static_cast<size_t>(retained - found->PendingMoves.begin());
 				found->Receipt.AcknowledgedInputTick =
 					std::max(found->Receipt.AcknowledgedInputTick, inputTick);
+				if (closed != 0 && !found->InputClosed)
+					portal_observation::Handoff(
+						store,
+						found->Subject,
+						found->Root,
+						PortalHandoffEvent::InputClosed,
+						found->Receipt.Id.Sequence,
+						inputTick,
+						found->Receipt.DestinationWorld
+					);
 				found->InputClosed |= closed != 0;
 				return;
 			}
@@ -703,8 +1076,9 @@ namespace engine::script {
 						   !record.Cancelled;
 				});
 				ByteReader reader(message.Body);
-				const auto move = ReadMove(reader);
-				if (reader.Failed() || !reader.AtEnd() || move.Sequence == 0) return;
+				std::array<ForwardMove, MAXIMUM_FORWARDED_INPUTS> moves;
+				size_t moveCount = 0;
+				if (!ReadMoveSegment(reader, moves, moveCount) || !reader.AtEnd()) return;
 				if (found == state.In.end()) {
 					const auto peer =
 						std::find_if(state.Peers.begin(), state.Peers.end(), [&](const auto &entry) {
@@ -718,15 +1092,22 @@ namespace engine::script {
 					AcknowledgeMove(store, state, retired);
 					return;
 				}
-				if (move.Sequence > found->Move.Sequence && move.JumpSequence >= found->Move.JumpSequence &&
-					move.InputTick >= found->Move.InputTick)
-					found->Move = move;
-				ApplyForwardMove(store, *found);
+				uint64_t expected = found->AppliedMove + found->PendingMoveCount + 1;
+				for (size_t index = 0; index < moveCount; ++index) {
+					const auto &move = moves[index];
+					if (move.Sequence < expected) continue;
+					// A packet may be duplicated or reordered, but it may not skip a source input.
+					if (move.Sequence != expected || found->PendingMoveCount == MAXIMUM_FORWARDED_INPUTS)
+						break;
+					found->PendingMoves[found->PendingMoveCount++] = move;
+					++expected;
+				}
 				found->MotionReplyPending = true;
 				if (found->InputClosed) AcknowledgeMove(store, state, *found);
 				return;
 			}
-			if (message.Kind == MessageKind::Ready || message.Kind == MessageKind::Done ||
+			if (message.Kind == MessageKind::Ready || message.Kind == MessageKind::Prepared ||
+				message.Kind == MessageKind::Sealed || message.Kind == MessageKind::Done ||
 				message.Kind == MessageKind::Refuse || message.Kind == MessageKind::Cancelled) {
 				const auto found = std::find_if(state.Out.begin(), state.Out.end(), [&](const auto &record) {
 					return record.Receipt.Id == message.Id && record.Receipt.DestinationWorld == from;
@@ -751,28 +1132,169 @@ namespace engine::script {
 					}
 					return;
 				}
-				if (record.Receipt.Stage != PortalTransferStage::Preparing ||
-					message.DestinationIncarnation == 0)
+				if (message.DestinationIncarnation == 0 ||
+					message.Fence.TopologyRevision != record.Receipt.Fence.TopologyRevision ||
+					message.Fence.AuthorityEpoch != record.Receipt.Fence.AuthorityEpoch ||
+					message.Fence.PrepareRevision != record.Receipt.Fence.PrepareRevision)
 					return;
-				Message commit = message;
-				if (state.RequirePlayerAdmission && record.Receipt.Kind == scene::PortalBodyKind::Player) {
-					if (record.AdmittedIncarnation == 0) return;
-					if (record.AdmittedIncarnation != message.DestinationIncarnation) {
-						record.Receipt.Diagnostic = "destination changed after player admission";
+				if (message.Kind == MessageKind::Ready) {
+					if (record.Receipt.Stage != PortalTransferStage::Preparing) return;
+					Message prepare = message;
+					prepare.Kind = MessageKind::Prepare;
+					prepare.Body = record.Body;
+					prepare.Fence = record.Receipt.Fence;
+					const auto ticket = Send(store, from, prepare);
+					if (!ticket.Expected()) return;
+					record.DestinationIncarnation = message.DestinationIncarnation;
+					record.Ticket = ticket;
+					record.RetryAt = store.Time().Tick + RETRY_TICKS;
+					return;
+				}
+				if (message.Kind == MessageKind::Prepared) {
+					if (record.Receipt.Stage != PortalTransferStage::Preparing ||
+						message.DestinationIncarnation != record.DestinationIncarnation)
+						return;
+					// Preparation reserves only the initial body. Capture H while this world
+					// still owns simulation, then replace the reservation with that immutable baseline.
+					scene::PortalBodyCopy baseline;
+					const ecs::ComponentId localComponents[]{ecs::Components::Assigned<PlayerInputClock>()};
+					std::string failure;
+					const bool captured =
+						record.Receipt.Kind == scene::PortalBodyKind::Player
+							? scene::CapturePortalBody(
+								  store, record.Subject, baseline, failure, localComponents
+							  )
+							: scene::CapturePortalObject(store, record.Subject, baseline, failure);
+					if (!captured) {
+						Restore(store, record, "portal cannot capture handoff baseline: " + failure);
 						return;
 					}
+					baseline.Sweep = record.Sweep;
+					// The source kept simulating with input it also forwarded since Begin, so
+					// H already contains every move it applied: scheduled ones through its
+					// clock, immediate ones through `NotePortalPlayerInputApplied`.
+					if (record.Receipt.Kind == scene::PortalBodyKind::Player) {
+						baseline.AppliedInputTick = std::max(
+							AppliedPortalPlayerInput(store, record.Subject).value_or(0), record.LocalInputTick
+						);
+						// From here the body is frozen and holds exactly this input.
+						record.LocalInputTick = baseline.AppliedInputTick;
+					}
+					portal_observation::Handoff(
+						store,
+						record.Subject,
+						record.Root,
+						PortalHandoffEvent::Sealed,
+						record.Receipt.Id.Sequence,
+						baseline.AppliedInputTick,
+						record.Receipt.DestinationWorld
+					);
+					if (baseline.Sweep) {
+						const auto *root = store.Get<scene::Transform>(record.Root);
+						if (root == nullptr) {
+							Restore(store, record, "portal handoff root has no baseline pose");
+							return;
+						}
+						// H is captured after the initial aperture crossing. Keep the suffix
+						// rooted at that crossing, then extend it to H so its endpoint still
+						// names the newly captured body rather than the stale offer pose.
+						baseline.Sweep->Displacement = root->Frame.Position - baseline.Sweep->From.Position;
+					}
+					if (!scene::MapPortalBody(baseline, record.Receipt.Through, failure)) {
+						Restore(store, record, "portal cannot map handoff baseline: " + failure);
+						return;
+					}
+					if (record.SourceMouth) {
+						const auto *transform = store.Get<scene::Transform>(record.Root);
+						const auto *motion = store.Get<scene::Motion>(record.Root);
+						if (!transform || !motion) {
+							Restore(store, record, "portal handoff root stopped before baseline");
+							return;
+						}
+						const auto mapped = physics::MapPortalMotion(
+							record.Receipt.Through,
+							transform->Frame.Position,
+							*motion,
+							*record.SourceMouth,
+							*record.DestinationMouth
+						);
+						for (auto &node : baseline.Nodes)
+							if (node.Key == baseline.Root)
+								for (auto &component : node.Components)
+									if (component.Type == "scene.Motion") {
+										ByteWriter encoded;
+										ecs::Components::Describe(ecs::Components::Of<scene::Motion>())
+											.Write(encoded, &mapped, 1);
+										component.Bytes.assign(
+											encoded.Bytes().begin(), encoded.Bytes().end()
+										);
+									}
+					}
+					ByteWriter writer;
+					if (!scene::WritePortalBody(writer, baseline) ||
+						writer.Size() > MAXIMUM_BYTES - std::min(MAXIMUM_BYTES, HeldBytes(state))) {
+						Restore(store, record, "portal handoff baseline exceeds source byte bound");
+						return;
+					}
+					record.Body.assign(writer.Bytes().begin(), writer.Bytes().end());
+					record.Receipt.Stage = PortalTransferStage::Prepared;
+					record.Receipt.Fence.BaselineId = record.Receipt.Fence.PrepareRevision;
+					record.Receipt.Fence.BaselineHash = assets::Hasher::Of(record.Body);
+					record.Receipt.Fence.H = {
+						std::string(store.Name()), store.Time().Tick, message.Fence.H.DestinationTick
+					};
+					Message seal = message;
+					seal.Kind = MessageKind::SealBaseline;
+					seal.Fence = record.Receipt.Fence;
+					seal.Body = record.Body;
+					record.Animation = HoldAnimation(store, record.Subject, record.Receipt.Kind);
+					record.OriginalMotion = store.Get<scene::Motion>(record.Root)
+												? *store.Get<scene::Motion>(record.Root)
+												: scene::Motion{};
+					record.WasSimulated = store.Has<scene::Simulated>(record.Root);
+					record.WasSleeping = !store.Has<scene::Motion>(record.Root);
+					if (const auto *owner = store.Get<scene::NetworkOwner>(record.Root)) {
+						record.HadOwner = true;
+						record.OriginalOwner = *owner;
+					}
+					for (const auto &animation : record.Animation) {
+						if (animation.Animator) store.Remove<scene::Animator>(animation.Owner);
+						if (animation.Track) store.Remove<scene::AnimationTrack>(animation.Owner);
+					}
+					store.Remove<scene::Motion>(record.Root);
+					store.Remove<scene::Simulated>(record.Root);
+					store.Remove<scene::NetworkOwner>(record.Root);
+					if (auto *steering = store.GetMutable<scene::Humanoid>(record.Humanoid))
+						steering->Enabled = false;
+					// The final baseline is H even when the bus is full. Stop the source
+					// before attempting delivery so a retry cannot describe an older body.
+					const auto ticket = Send(store, from, seal);
+					if (!ticket.Expected()) {
+						record.RetryAt = store.Time().Tick + RETRY_TICKS;
+						return;
+					}
+					record.Ticket = ticket;
+					record.RetryAt = store.Time().Tick + RETRY_TICKS;
+					if (state.RequirePlayerAdmission &&
+						record.Receipt.Kind == scene::PortalBodyKind::Player) {
+						if (record.AdmittedIncarnation == 0) {
+							record.Receipt.Stage = PortalTransferStage::Prepared;
+							record.Ticket = ticket;
+							record.RetryAt = store.Time().Tick + RETRY_TICKS;
+							return;
+						}
+						if (record.AdmittedIncarnation != message.DestinationIncarnation) return;
+					}
+					return;
 				}
-				commit.Kind = MessageKind::Commit;
-				const auto ticket = Send(store, from, commit);
-				if (!ticket.Expected()) return;
-				record.DestinationIncarnation = message.DestinationIncarnation;
-				record.Receipt.Stage = PortalTransferStage::Committing;
-				record.Ticket = ticket;
-				record.RetryAt = store.Time().Tick + RETRY_TICKS;
-				if (record.Receipt.Kind == scene::PortalBodyKind::Player)
-					(void)scene::RemoveCharacter(store, record.Subject);
-				store.DestroyInstance(record.Subject);
-				record.Animation.clear();
+				if (message.Kind != MessageKind::Sealed ||
+					record.Receipt.Stage != PortalTransferStage::Prepared ||
+					message.DestinationIncarnation != record.DestinationIncarnation ||
+					message.Fence != record.Receipt.Fence)
+					return;
+				record.BaselineSealed = true;
+				if (state.Durability == PortalTransferDurability::InMemoryOnly)
+					record.DecisionAccepted = true;
 				return;
 			}
 			if (from != message.Id.SourceWorld) return;
@@ -846,7 +1368,7 @@ namespace engine::script {
 					return;
 				}
 				if (message.Kind == MessageKind::Offer) {
-					if (!found->Committed && found->Body != message.Body) {
+					if (!found->Committed && (found->Body != message.Body || found->Fence != message.Fence)) {
 						Send(
 							store,
 							from,
@@ -861,8 +1383,49 @@ namespace engine::script {
 					);
 					return;
 				}
+				if (message.Kind == MessageKind::Prepare) {
+					if (found->Committed || found->Fence.TopologyRevision != message.Fence.TopologyRevision ||
+						found->Fence.AuthorityEpoch != message.Fence.AuthorityEpoch ||
+						message.Fence.PrepareRevision < found->Fence.PrepareRevision ||
+						message.Body != found->Body) {
+						Send(
+							store,
+							from,
+							Response(state, message, MessageKind::Refuse, "portal prepare fence changed")
+						);
+						return;
+					}
+					found->Fence.PrepareRevision = message.Fence.PrepareRevision;
+					Message prepared = Response(state, message, MessageKind::Prepared);
+					prepared.Fence.H.Domain = std::string(store.Name());
+					prepared.Fence.H.DestinationTick = store.Time().Tick;
+					Send(store, from, prepared);
+					return;
+				}
+				if (message.Kind == MessageKind::SealBaseline) {
+					scene::PortalBodyCopy baseline;
+					ByteReader reader(message.Body);
+					std::string failure;
+					if (found->Committed || message.Fence.PrepareRevision != found->Fence.PrepareRevision ||
+						!ValidFence(message.Fence, true) || !scene::ReadPortalBody(reader, baseline) ||
+						!reader.AtEnd() || baseline.Kind != found->Kind ||
+						!ResolveSuffix(store, baseline, failure) ||
+						assets::Hasher::Of(message.Body) != message.Fence.BaselineHash) {
+						Send(
+							store,
+							from,
+							Response(state, message, MessageKind::Refuse, "portal sealed baseline changed")
+						);
+						return;
+					}
+					found->Body = message.Body;
+					found->Fence = message.Fence;
+					Send(store, from, Response(state, message, MessageKind::Sealed));
+					return;
+				}
 				if (message.Kind != MessageKind::Commit ||
-					message.DestinationIncarnation != state.Incarnation)
+					message.DestinationIncarnation != state.Incarnation || message.Fence != found->Fence ||
+					!ValidFence(message.Fence, true))
 					return;
 				if (found->Committed) {
 					Send(store, from, Response(state, message, MessageKind::Done));
@@ -873,12 +1436,55 @@ namespace engine::script {
 				std::string failure;
 				scene::PortalBodyArrival arrival;
 				if (!scene::ReadPortalBody(reader, body) || !reader.AtEnd() ||
-					!ResolveSuffix(store, body, failure) ||
+					!ResolveSuffix(store, body, failure) || !BodyIdentityAvailable(store, body, failure) ||
 					!scene::AdmitPortalBody(store, body, arrival, failure)) {
 					ENGINE_WARN("portal commit remains pending: {}", failure);
 					return;
 				}
+				if (body.RootSleeping && store.HasResource<physics::PhysicsWorld>() &&
+					!physics::SetSleeping(store, arrival.Root, true)) {
+					if (body.Kind == scene::PortalBodyKind::Player) {
+						(void)scene::RemoveCharacter(store, arrival.Player);
+						store.DestroyInstance(arrival.Player);
+					} else
+						store.DestroyInstance(arrival.Root);
+					ENGINE_WARN("portal commit remains pending: destination cannot restore sleep state");
+					return;
+				}
+				if (body.RootSleeping && !store.HasResource<physics::PhysicsWorld>())
+					store.Remove<scene::Motion>(arrival.Root);
+				if (!store.Has<scene::PortalCrossingState>(arrival.Root)) {
+					store.Set(arrival.Root, scene::PortalCrossingState{});
+					std::vector<scene::PortalSeam> localSeams;
+					scene::GatherPortalSeams(store, localSeams);
+					if (!scene::AdvancePortalCrossing(
+							store, arrival.Root, localSeams, scene::PortalBodyReach(store, arrival.Root)
+						))
+						store.Remove<scene::PortalCrossingState>(arrival.Root);
+				}
 				found->Subject = body.Kind == scene::PortalBodyKind::Player ? arrival.Player : arrival.Root;
+				found->ArrivalFrame = store.Get<scene::Transform>(arrival.Root)->Frame;
+				found->BaselineInputTick = body.AppliedInputTick;
+				{
+					PortalArrivalRecord arrived;
+					if (auto *log =
+							portal_observation::Begin(store, found->Subject, arrival.Root, arrived.Stamp)) {
+						arrived.Transfer = found->Id.Sequence;
+						arrived.Position = found->ArrivalFrame->Position;
+						arrived.BaselineInputTick = found->BaselineInputTick;
+						arrived.Source.Assign(found->Id.SourceWorld);
+						log->Arrivals.Append(arrived);
+					}
+					portal_observation::Handoff(
+						store,
+						found->Subject,
+						arrival.Root,
+						PortalHandoffEvent::Committed,
+						found->Id.Sequence,
+						found->BaselineInputTick,
+						found->Id.SourceWorld
+					);
+				}
 				found->Committed = true;
 				found->Body.clear();
 				ApplyForwardMove(store, *found);
@@ -886,7 +1492,9 @@ namespace engine::script {
 				Send(store, from, Response(state, message, MessageKind::Done));
 				return;
 			}
-			if (message.Kind != MessageKind::Offer || message.Id.Sequence <= peer->RetiredThrough) return;
+			if (message.Kind != MessageKind::Offer || !ValidFence(message.Fence) ||
+				message.Id.Sequence <= peer->RetiredThrough)
+				return;
 			if (std::count_if(
 					state.In.begin(),
 					state.In.end(),
@@ -939,6 +1547,7 @@ namespace engine::script {
 			incoming.Id = message.Id;
 			incoming.Body = message.Body;
 			incoming.Through = message.Through;
+			incoming.Fence = message.Fence;
 			state.In.push_back(std::move(incoming));
 			Send(store, from, Response(state, message, MessageKind::Ready));
 		}
@@ -946,6 +1555,15 @@ namespace engine::script {
 		void PumpNativeMoves(ecs::Store &store) {
 			ENGINE_PROFILE("portal native input");
 			if (store.AdoptOnly()) return;
+			std::vector<Entity> started;
+			// Recorded after the walk: a log row is a resource write, not a row move,
+			// but keeping every write outside `Each` matches the rest of this pass.
+			struct Applied {
+				Entity Player;
+				uint64_t InputTick;
+				core::Vector3 Direction;
+			};
+			std::vector<Applied> observed;
 			store.Each<PlayerInputClock>([&](Entity player, PlayerInputClock &clock) {
 				if (!clock.Native) return;
 				const auto *rig = store.Get<scene::Character>(scene::CharacterOf(store, player));
@@ -958,10 +1576,14 @@ namespace engine::script {
 				while (clock.Count != 0) {
 					const auto &move = clock.Pending[clock.Begin];
 					if (move.PhysicsTick > store.Time().Tick) break;
+					// Forwarding stays open until native control actually starts, so
+					// input already sent to the previous host fills the time before it.
+					if (started.empty() || started.back() != player) started.push_back(player);
 					const auto previousDirection = humanoid->MoveDirection;
 					humanoid->MoveDirection = move.Direction;
 					humanoid->JumpRequested |= move.Jump;
 					clock.AppliedInputTick = move.InputTick;
+					observed.push_back({player, move.InputTick, move.Direction});
 					clock.Begin = (clock.Begin + 1) % MAXIMUM_NATIVE_INPUTS;
 					--clock.Count;
 					if (previousDirection != core::Vector3{} && humanoid->MoveDirection == core::Vector3{}) {
@@ -996,6 +1618,12 @@ namespace engine::script {
 					core::Metrics::Count("world.portal.native.applied", 1);
 				}
 			});
+			for (const auto &applied : observed)
+				portal_observation::Input(
+					store, applied.Player, PortalInputRoute::Scheduled, applied.InputTick, applied.Direction
+				);
+			for (const Entity player : started)
+				ClosePortalPlayerMoveForwarding(store, player);
 		}
 
 		void WriteInputClocks(ByteWriter &writer, const void *values, size_t count) {
@@ -1074,6 +1702,7 @@ namespace engine::script {
 				writer.WriteUInt64(state.Opening.Value);
 				writer.WriteBool(state.Open);
 				writer.WriteBool(state.RequirePlayerAdmission);
+				writer.WriteUInt8(static_cast<uint8_t>(state.Durability));
 				writer.WriteUInt32(static_cast<uint32_t>(state.Out.size()));
 				for (const auto &record : state.Out) {
 					WriteAnimationHolds(writer, record.Animation);
@@ -1083,6 +1712,7 @@ namespace engine::script {
 					writer.WriteUInt8(static_cast<uint8_t>(record.Receipt.Stage));
 					WriteThrough(writer, record.Receipt.Through);
 					writer.WriteString(record.Receipt.Diagnostic);
+					WriteFence(writer, record.Receipt.Fence);
 					writer.WriteUInt64(record.Receipt.AcknowledgedInputTick);
 					WriteMotion(writer, record.Receipt.Motion);
 					writer.WriteUInt64(record.Subject.Id);
@@ -1091,6 +1721,7 @@ namespace engine::script {
 					writer.WriteRaw(&record.OriginalMotion, sizeof(record.OriginalMotion));
 					writer.WriteRaw(&record.OriginalHumanoid, sizeof(record.OriginalHumanoid));
 					writer.WriteBool(record.WasSimulated);
+					writer.WriteBool(record.WasSleeping);
 					writer.WriteBool(record.HadOwner);
 					writer.WriteUInt64(record.OriginalOwner.Player.Id);
 					writer.WriteUInt64(record.DestinationIncarnation);
@@ -1098,8 +1729,17 @@ namespace engine::script {
 					writer.WriteUInt64(record.AdmittedIncarnation);
 					writer.WriteUInt64(record.Ticket.Value);
 					WriteMove(writer, record.Move);
+					writer.WriteUInt32(static_cast<uint32_t>(record.PendingMoveCount));
+					for (size_t index = 0; index < record.PendingMoveCount; ++index)
+						WriteMove(writer, record.PendingMoves[index]);
 					writer.WriteUInt64(record.AcknowledgedMove);
+					writer.WriteUInt64(record.LocalInputTick);
 					writer.WriteBool(record.InputClosed);
+					WriteSweep(writer, record.Sweep);
+					WriteMouth(writer, record.SourceMouth);
+					WriteMouth(writer, record.DestinationMouth);
+					writer.WriteBool(record.BaselineSealed);
+					writer.WriteBool(record.DecisionAccepted);
 					WriteBytes(writer, record.Body);
 				}
 				writer.WriteUInt32(static_cast<uint32_t>(state.In.size()));
@@ -1109,15 +1749,23 @@ namespace engine::script {
 					WriteBytes(writer, record.Body);
 					WriteThrough(writer, record.Through);
 					writer.WriteUInt64(record.Subject.Id);
+					writer.WriteBool(record.ArrivalFrame.has_value());
+					if (record.ArrivalFrame)
+						writer.WriteRaw(&*record.ArrivalFrame, sizeof(*record.ArrivalFrame));
 					writer.WriteBool(record.Committed);
 					writer.WriteBool(record.Cancelled);
 					WriteMove(writer, record.Move);
+					writer.WriteUInt32(static_cast<uint32_t>(record.PendingMoveCount));
+					for (size_t index = 0; index < record.PendingMoveCount; ++index)
+						WriteMove(writer, record.PendingMoves[index]);
 					writer.WriteUInt64(record.AppliedMove);
 					writer.WriteUInt64(record.AppliedJump);
 					writer.WriteUInt64(record.AppliedInputTick);
+					writer.WriteUInt64(record.BaselineInputTick);
 					WriteMotion(writer, record.Motion);
 					writer.WriteBool(record.MotionReplyPending);
 					writer.WriteBool(record.InputClosed);
+					WriteFence(writer, record.Fence);
 				}
 				writer.WriteUInt32(static_cast<uint32_t>(state.Peers.size()));
 				for (const auto &peer : state.Peers) {
@@ -1140,6 +1788,12 @@ namespace engine::script {
 				state.Opening = world::Ticket{reader.ReadUInt64()};
 				state.Open = reader.ReadBool();
 				state.RequirePlayerAdmission = reader.ReadBool();
+				const uint8_t durability = reader.ReadUInt8();
+				if (durability > static_cast<uint8_t>(PortalTransferDurability::Disabled)) {
+					reader.Fail();
+					return;
+				}
+				state.Durability = static_cast<PortalTransferDurability>(durability);
 				const uint32_t outgoing = reader.ReadUInt32();
 				if (outgoing > MAXIMUM_RECORDS) {
 					reader.Fail();
@@ -1164,6 +1818,7 @@ namespace engine::script {
 					record.Receipt.Stage = static_cast<PortalTransferStage>(stage);
 					record.Receipt.Through = ReadThrough(reader);
 					record.Receipt.Diagnostic = Text(reader, true);
+					record.Receipt.Fence = ReadFence(reader);
 					record.Receipt.AcknowledgedInputTick = reader.ReadUInt64();
 					record.Receipt.Motion = ReadMotion(reader);
 					record.Subject = Entity{reader.ReadUInt64()};
@@ -1172,6 +1827,7 @@ namespace engine::script {
 					reader.ReadRaw(&record.OriginalMotion, sizeof(record.OriginalMotion));
 					reader.ReadRaw(&record.OriginalHumanoid, sizeof(record.OriginalHumanoid));
 					record.WasSimulated = reader.ReadBool();
+					record.WasSleeping = reader.ReadBool();
 					record.HadOwner = reader.ReadBool();
 					record.OriginalOwner.Player = Entity{reader.ReadUInt64()};
 					record.DestinationIncarnation = reader.ReadUInt64();
@@ -1179,8 +1835,21 @@ namespace engine::script {
 					record.AdmittedIncarnation = reader.ReadUInt64();
 					record.Ticket = world::Ticket{reader.ReadUInt64()};
 					record.Move = ReadMove(reader);
+					record.PendingMoveCount = reader.ReadUInt32();
+					if (record.PendingMoveCount > MAXIMUM_FORWARDED_INPUTS) reader.Fail();
+					for (size_t index = 0; index < record.PendingMoveCount; ++index)
+						record.PendingMoves[index] = ReadMove(reader);
 					record.AcknowledgedMove = reader.ReadUInt64();
+					record.LocalInputTick = reader.ReadUInt64();
 					record.InputClosed = StrictBool(reader);
+					record.Sweep = ReadSweep(reader);
+					record.SourceMouth = ReadMouth(reader);
+					record.DestinationMouth = ReadMouth(reader);
+					if (record.SourceMouth.has_value() != record.DestinationMouth.has_value()) reader.Fail();
+					record.BaselineSealed = StrictBool(reader);
+					record.DecisionAccepted = StrictBool(reader);
+					if (state.Durability == PortalTransferDurability::RequirePrepareCommit)
+						record.DecisionAccepted = false;
 					if (record.AcknowledgedMove > record.Move.Sequence ||
 						record.Receipt.AcknowledgedInputTick > record.Move.InputTick ||
 						(record.Receipt.Motion &&
@@ -1209,15 +1878,28 @@ namespace engine::script {
 					remainingBytes -= record.Body.size();
 					record.Through = ReadThrough(reader);
 					record.Subject = Entity{reader.ReadUInt64()};
+					const bool hasArrivalFrame = StrictBool(reader);
+					if (hasArrivalFrame) {
+						core::CFrame arrivalFrame;
+						reader.ReadRaw(&arrivalFrame, sizeof(arrivalFrame));
+						if (!ValidFrame(arrivalFrame)) reader.Fail();
+						record.ArrivalFrame = arrivalFrame;
+					}
 					record.Committed = reader.ReadBool();
 					record.Cancelled = reader.ReadBool();
 					record.Move = ReadMove(reader);
+					record.PendingMoveCount = reader.ReadUInt32();
+					if (record.PendingMoveCount > MAXIMUM_FORWARDED_INPUTS) reader.Fail();
+					for (size_t index = 0; index < record.PendingMoveCount; ++index)
+						record.PendingMoves[index] = ReadMove(reader);
 					record.AppliedMove = reader.ReadUInt64();
 					record.AppliedJump = reader.ReadUInt64();
 					record.AppliedInputTick = reader.ReadUInt64();
+					record.BaselineInputTick = reader.ReadUInt64();
 					record.Motion = ReadMotion(reader);
 					record.MotionReplyPending = StrictBool(reader);
 					record.InputClosed = StrictBool(reader);
+					record.Fence = ReadFence(reader);
 					if (record.AppliedMove > record.Move.Sequence ||
 						record.AppliedJump > record.Move.JumpSequence ||
 						record.AppliedJump > record.AppliedMove ||
@@ -1293,22 +1975,126 @@ namespace engine::script {
 		// Snapshot restoration needs the contact codec and channel callbacks
 		// before a configured world's state is read.
 		(void)RegisterPortalContacts();
+		portal_observation::Register();
 		ecs::Components::Register<TransferState>("script.PortalTransfers", WriteStates, ReadStates);
 		ecs::Components::Register<PlayerInputClock>(
 			"script.PortalPlayerInput", WriteInputClocks, ReadInputClocks
 		);
 	}
-	bool ConfigurePortalTransfers(ecs::Store &store, uint64_t incarnation, bool requirePlayerAdmission) {
+	std::vector<PortalTransferDecision> PortalTransferPendingDecisions(const ecs::Store &store) {
+		std::vector<PortalTransferDecision> pending;
+		const auto *state = State(store);
+		if (state == nullptr || state->Durability != PortalTransferDurability::RequirePrepareCommit)
+			return pending;
+		for (const auto &record : state->Out) {
+			if (record.Receipt.Stage != PortalTransferStage::Prepared || !record.BaselineSealed ||
+				record.DecisionAccepted)
+				continue;
+			const auto *identity = store.Get<scene::BodyIdentity>(record.Root);
+			if (identity == nullptr || !identity->Key.IsValid()) continue;
+			pending.push_back({record.Receipt, *identity, record.Body});
+		}
+		return pending;
+	}
+	bool MarkPortalTransferDurable(
+		ecs::Store &store, const PortalTransferId &id, const assets::ContentHash &baselineHash
+	) {
+		auto *state = State(store);
+		if (state == nullptr || store.AdoptOnly() || world::Postbox(store).IsReplica() ||
+			state->Durability != PortalTransferDurability::RequirePrepareCommit || baselineHash.IsZero())
+			return false;
+		for (auto &record : state->Out) {
+			if (record.Receipt.Id != id) continue;
+			if ((record.Receipt.Stage != PortalTransferStage::Prepared &&
+				 record.Receipt.Stage != PortalTransferStage::Preparing) ||
+				!record.BaselineSealed || record.Receipt.Fence.BaselineHash != baselineHash)
+				return false;
+			record.DecisionAccepted = true;
+			return true;
+		}
+		return false;
+	}
+	bool RestorePortalTransferDecision(ecs::Store &store, const PortalTransferDecision &decision) {
+		auto *state = State(store);
+		if (state == nullptr || store.AdoptOnly() || world::Postbox(store).IsReplica() ||
+			state->Durability != PortalTransferDurability::RequirePrepareCommit ||
+			decision.Receipt.Stage != PortalTransferStage::Prepared ||
+			!ValidFence(decision.Receipt.Fence, true) || !decision.Body.Key.IsValid() ||
+			decision.Body.Generation == 0 || decision.Baseline.empty() ||
+			assets::Hasher::Of(decision.Baseline) != decision.Receipt.Fence.BaselineHash)
+			return false;
+		if (decision.Body.Key.Low == std::numeric_limits<uint64_t>::max() ||
+			!scene::ConfigureBodyIdentityAuthority(store, decision.Body.Key.High, decision.Body.Key.Low + 1))
+			return false;
+		for (const auto &record : state->Out)
+			if (record.Receipt.Id == decision.Receipt.Id)
+				return record.Receipt.Fence == decision.Receipt.Fence &&
+					   (record.Receipt.Stage == PortalTransferStage::Committed ||
+						record.Body == decision.Baseline);
+		if (state->Out.size() == MAXIMUM_RECORDS ||
+			HeldBytes(*state) > MAXIMUM_BYTES - decision.Baseline.size())
+			return false;
+		Outgoing record;
+		record.Receipt = decision.Receipt;
+		record.Receipt.Stage = PortalTransferStage::Preparing;
+		record.Body = decision.Baseline;
+		record.BaselineSealed = true;
+		store.Each<const scene::BodyIdentity>([&](Entity entity, const scene::BodyIdentity &identity) {
+			if (identity.Key == decision.Body.Key && identity.Generation == decision.Body.Generation)
+				record.Root = entity;
+		});
+		if (record.Receipt.Kind == scene::PortalBodyKind::Player && record.Root != NULL_ENTITY)
+			store.Each<const scene::Character>([&](Entity, const scene::Character &rig) {
+				if (rig.Root == record.Root) {
+					record.Subject = rig.Owner;
+					record.Humanoid = rig.Humanoid;
+				}
+			});
+		else
+			record.Subject = record.Root;
+		if (store.Alive(record.Root)) {
+			if (const auto *motion = store.Get<scene::Motion>(record.Root)) record.OriginalMotion = *motion;
+			record.WasSimulated = store.Has<scene::Simulated>(record.Root);
+			record.WasSleeping = !store.Has<scene::Motion>(record.Root);
+			if (const auto *owner = store.Get<scene::NetworkOwner>(record.Root)) {
+				record.HadOwner = true;
+				record.OriginalOwner = *owner;
+			}
+			store.Remove<scene::Motion>(record.Root);
+			store.Remove<scene::Simulated>(record.Root);
+			store.Remove<scene::NetworkOwner>(record.Root);
+		}
+		if (store.Alive(record.Humanoid)) {
+			record.OriginalHumanoid = *store.Get<scene::Humanoid>(record.Humanoid);
+			auto held = record.OriginalHumanoid;
+			held.Enabled = false;
+			store.Set(record.Humanoid, held);
+		}
+		record.Animation = HoldAnimation(store, record.Subject, record.Receipt.Kind);
+		state->NextSequence = std::max(state->NextSequence, decision.Receipt.Id.Sequence + 1);
+		state->Out.push_back(std::move(record));
+		return true;
+	}
+
+	bool ConfigurePortalTransfers(
+		ecs::Store &store,
+		uint64_t incarnation,
+		bool requirePlayerAdmission,
+		PortalTransferDurability durability
+	) {
 		if (incarnation == 0 || store.AdoptOnly() || world::Postbox(store).IsReplica()) return false;
 		RegisterPortalTransferComponents();
+		if (!scene::ConfigureBodyIdentityAuthority(store, incarnation)) return false;
+		portal_observation::Prepare(store);
 		if (const auto *previous = State(store); previous != nullptr)
 			return previous->Incarnation == incarnation &&
 				   previous->RequirePlayerAdmission == requirePlayerAdmission &&
-				   ConfigurePortalContacts(store, incarnation);
+				   previous->Durability == durability && ConfigurePortalContacts(store, incarnation);
 		if (!ConfigurePortalContacts(store, incarnation)) return false;
 		TransferState state;
 		state.Incarnation = incarnation;
 		state.RequirePlayerAdmission = requirePlayerAdmission;
+		state.Durability = durability;
 		store.SetResource(state);
 		return true;
 	}
@@ -1324,7 +2110,8 @@ namespace engine::script {
 			return false;
 		for (auto &record : state->Out) {
 			if (record.Receipt.Id != id || record.Receipt.Kind != scene::PortalBodyKind::Player ||
-				record.Receipt.Stage != PortalTransferStage::Preparing)
+				(record.Receipt.Stage != PortalTransferStage::Preparing &&
+				 record.Receipt.Stage != PortalTransferStage::Prepared))
 				continue;
 			if (record.AdmittedIncarnation != 0 && record.AdmittedIncarnation != destinationIncarnation)
 				return false;
@@ -1342,7 +2129,9 @@ namespace engine::script {
 		for (auto &record : state->Out) {
 			if (record.Receipt.Id != id || record.Receipt.Kind != scene::PortalBodyKind::Player) continue;
 			if (record.Receipt.Stage == PortalTransferStage::Cancelling) return true;
-			if (record.Receipt.Stage != PortalTransferStage::Preparing) return false;
+			if (record.Receipt.Stage != PortalTransferStage::Preparing &&
+				record.Receipt.Stage != PortalTransferStage::Prepared)
+				return false;
 			record.Receipt.Stage = PortalTransferStage::Cancelling;
 			record.Receipt.Diagnostic = diagnostic;
 			record.Body = std::vector<std::byte>{};
@@ -1361,12 +2150,15 @@ namespace engine::script {
 			const scene::SeamTransform &through,
 			PortalTransferId &out,
 			std::string &failure,
-			std::optional<scene::PortalBodySweep> sweep
+			std::optional<scene::PortalBodySweep> sweep,
+			std::optional<physics::PortalMouthMotion> sourceMouth = std::nullopt,
+			std::optional<physics::PortalMouthMotion> destinationMouth = std::nullopt
 		) {
 			ENGINE_PROFILE("begin portal transfer");
 			auto *state = State(store);
-			if (state == nullptr || !state->Open || store.AdoptOnly() || world::Postbox(store).IsReplica() ||
-				!ValidText(destination) || destination == store.Name() || !Similarity(through)) {
+			if (state == nullptr || state->Durability == PortalTransferDurability::Disabled || !state->Open ||
+				store.AdoptOnly() || world::Postbox(store).IsReplica() || !ValidText(destination) ||
+				destination == store.Name() || !Similarity(through)) {
 				failure = "portal transfer endpoint is not ready or is not authoritative";
 				return false;
 			}
@@ -1378,7 +2170,45 @@ namespace engine::script {
 				std::any_of(state->Out.begin(), state->Out.end(), [&](const auto &r) {
 					return r.Subject == subject && Active(r);
 				})) {
+				if (const char *diagnostic = std::getenv("PORTAL_RETURN_DIAGNOSTIC");
+					diagnostic && *diagnostic == '1') {
+					static std::atomic<uint32_t> emitted{0};
+					if (emitted.fetch_add(1, std::memory_order_relaxed) < 12) {
+						const auto active = std::count_if(state->Out.begin(), state->Out.end(), Active);
+						const auto existing =
+							std::find_if(state->Out.begin(), state->Out.end(), [&](const auto &record) {
+								return record.Subject == subject && Active(record);
+							});
+						ENGINE_INFO(
+							"portal return bound: world={} tick={} subject={} kind={} destination={} "
+							"out={} active={} next_sequence={} duplicate={} prior_destination={} stage={} "
+							"sequence={}",
+							store.Name(),
+							store.Time().Tick,
+							subject.Id,
+							static_cast<int>(kind),
+							destination,
+							state->Out.size(),
+							active,
+							state->NextSequence,
+							existing != state->Out.end(),
+							existing != state->Out.end() ? existing->Receipt.DestinationWorld : std::string{},
+							existing != state->Out.end() ? static_cast<int>(existing->Receipt.Stage) : -1,
+							existing != state->Out.end() ? existing->Receipt.Id.Sequence : uint64_t{0}
+						);
+					}
+				}
 				failure = "portal source transfer bound reached";
+				return false;
+			}
+			const auto *rig = kind == scene::PortalBodyKind::Player
+								  ? store.Get<scene::Character>(scene::CharacterOf(store, subject))
+								  : nullptr;
+			const Entity root =
+				kind == scene::PortalBodyKind::Object ? subject : (rig != nullptr ? rig->Root : NULL_ENTITY);
+			scene::BodyIdentity identity;
+			if (!scene::EnsureBodyIdentity(store, root, identity)) {
+				failure = "portal body has no stable identity";
 				return false;
 			}
 			scene::PortalBodyCopy copy;
@@ -1389,22 +2219,44 @@ namespace engine::script {
 					: scene::CapturePortalObject(store, subject, copy, failure);
 			if (!captured) return false;
 			copy.Sweep = sweep;
+			const Entity humanoid = rig ? rig->Humanoid : NULL_ENTITY;
+			const auto *sourceMotion = store.Get<scene::Motion>(root);
+			const auto *sourceTransform = store.Get<scene::Transform>(root);
+			const bool sleeping = copy.RootSleeping;
+			if (sourceMouth.has_value() != destinationMouth.has_value() ||
+				(!sleeping && sourceMotion == nullptr) ||
+				(kind == scene::PortalBodyKind::Player && store.Get<scene::Humanoid>(humanoid) == nullptr)) {
+				failure = "portal body has no moving root or incomplete mouth kinematics";
+				return false;
+			}
+			const scene::Motion sourceVelocity = sourceMotion ? *sourceMotion : scene::Motion{};
+			const std::optional<scene::Motion> mappedMotion =
+				sourceMouth ? std::optional(
+								  physics::MapPortalMotion(
+									  through,
+									  sourceTransform ? sourceTransform->Frame.Position : core::Vector3{},
+									  sourceVelocity,
+									  *sourceMouth,
+									  *destinationMouth
+								  )
+							  )
+							: std::nullopt;
 			if (!scene::MapPortalBody(copy, through, failure)) return false;
+			if (mappedMotion) {
+				for (auto &node : copy.Nodes)
+					if (node.Key == copy.Root)
+						for (auto &component : node.Components)
+							if (component.Type == "scene.Motion") {
+								ByteWriter encoded;
+								ecs::Components::Describe(ecs::Components::Of<scene::Motion>())
+									.Write(encoded, &*mappedMotion, 1);
+								component.Bytes.assign(encoded.Bytes().begin(), encoded.Bytes().end());
+							}
+			}
 			ByteWriter writer;
 			if (!scene::WritePortalBody(writer, copy) ||
 				writer.Size() > MAXIMUM_BYTES - std::min(MAXIMUM_BYTES, HeldBytes(*state))) {
 				failure = "portal source byte bound reached";
-				return false;
-			}
-			const auto *rig = kind == scene::PortalBodyKind::Player
-								  ? store.Get<scene::Character>(scene::CharacterOf(store, subject))
-								  : nullptr;
-			const Entity root =
-				kind == scene::PortalBodyKind::Object ? subject : (rig ? rig->Root : NULL_ENTITY);
-			const Entity humanoid = rig ? rig->Humanoid : NULL_ENTITY;
-			if (store.Get<scene::Motion>(root) == nullptr ||
-				(kind == scene::PortalBodyKind::Player && store.Get<scene::Humanoid>(humanoid) == nullptr)) {
-				failure = "portal body has no moving root";
 				return false;
 			}
 			Outgoing record;
@@ -1412,22 +2264,30 @@ namespace engine::script {
 			record.Receipt.DestinationWorld = destination;
 			record.Receipt.Through = through;
 			record.Receipt.Kind = kind;
+			record.Receipt.Fence.TopologyRevision = 1;
+			record.Receipt.Fence.AuthorityEpoch = state->Incarnation;
+			record.Receipt.Fence.PrepareRevision = 1;
 			record.Animation = HoldAnimation(store, subject, kind);
 			record.Subject = subject;
 			record.Root = root;
 			record.Humanoid = humanoid;
-			record.OriginalMotion = *store.Get<scene::Motion>(record.Root);
+			record.OriginalMotion = sourceVelocity;
 			if (humanoid != NULL_ENTITY) record.OriginalHumanoid = *store.Get<scene::Humanoid>(humanoid);
 			record.WasSimulated = store.Has<scene::Simulated>(record.Root);
+			record.WasSleeping = sleeping;
 			if (const auto *owner = store.Get<scene::NetworkOwner>(record.Root)) {
 				record.HadOwner = true;
 				record.OriginalOwner = *owner;
 			}
 			record.Body.assign(writer.Bytes().begin(), writer.Bytes().end());
+			record.Sweep = sweep;
+			record.SourceMouth = sourceMouth;
+			record.DestinationMouth = destinationMouth;
 			Message offer;
 			offer.Id = record.Receipt.Id;
 			offer.Body = record.Body;
 			offer.Through = through;
+			offer.Fence = record.Receipt.Fence;
 			record.Ticket = Send(store, destination, offer);
 			if (!record.Ticket.Expected()) {
 				failure = "portal offer exceeds the world's bus budget";
@@ -1440,18 +2300,12 @@ namespace engine::script {
 			}
 			out = record.Receipt.Id;
 			state->NextSequence++;
+			portal_observation::Handoff(
+				store, subject, root, PortalHandoffEvent::Offered, out.Sequence, 0, destination
+			);
 			state->Out.push_back(std::move(record));
-			const auto &held = state->Out.back();
-			// Keep the visible pose and playhead fixed while the copied body waits
-			// for admission. A precommit refusal restores these exact rows.
-			for (const auto &animation : held.Animation) {
-				if (animation.Animator) store.Remove<scene::Animator>(animation.Owner);
-				if (animation.Track) store.Remove<scene::AnimationTrack>(animation.Owner);
-			}
-			store.Remove<scene::Motion>(held.Root);
-			store.Remove<scene::Simulated>(held.Root);
-			store.Remove<scene::NetworkOwner>(held.Root);
-			if (auto *steering = store.GetMutable<scene::Humanoid>(held.Humanoid)) steering->Enabled = false;
+			// Source authority remains live until H. Prepared seals the final capture and
+			// CommitSealed retires it after the destination has acknowledged that baseline.
 			return true;
 		}
 
@@ -1504,12 +2358,23 @@ namespace engine::script {
 				if (owned) {
 					deliveries.push_back(std::move(*it));
 					it = inbox->Arrived.erase(it);
-				} else
+				} else {
 					++it;
+				}
 			}
 		}
 		for (const auto &delivery : deliveries) {
 			if (delivery.Reply.Expected()) {
+				if (std::getenv("PORTAL_RETURN_DIAGNOSTIC") &&
+					(std::string_view(store.Name()) == "walk.destination" ||
+					 std::string_view(store.Name()) == "server.world"))
+					ENGINE_INFO(
+						"portal return bus reply: world={} tick={} status={} ticket={}",
+						store.Name(),
+						store.Time().Tick,
+						static_cast<int>(delivery.Status),
+						delivery.Reply.Value
+					);
 				if (delivery.Reply == state->Opening) {
 					state->Open = delivery.Status == world::BusStatus::Ok;
 					state->Opening = {};
@@ -1525,20 +2390,110 @@ namespace engine::script {
 			Message message;
 			core::Metrics::Count("world.portal.received.messages", 1);
 			core::Metrics::Count("world.portal.received.bytes", delivery.Payload.size());
-			if (Decode(delivery.Payload, message)) Process(store, *state, delivery.From.Text(), message);
+			if (Decode(delivery.Payload, message)) {
+				if (std::getenv("PORTAL_RETURN_DIAGNOSTIC") && message.Id.Sequence == 1 &&
+					message.Id.SourceWorld == "walk.destination")
+					ENGINE_INFO(
+						"portal return received: world={} tick={} from={} kind={} incarnation={} "
+						"destination_incarnation={} bytes={}",
+						store.Name(),
+						store.Time().Tick,
+						delivery.From.Text(),
+						static_cast<int>(message.Kind),
+						message.Id.SourceIncarnation,
+						message.DestinationIncarnation,
+						message.Body.size()
+					);
+				Process(store, *state, delivery.From.Text(), message);
+			}
+		}
+		// Consume one world step of queued control at this fixed tick boundary. A
+		// batched packet must not collapse several ticks of turns, stops or jumps
+		// into its final row, but a client stepping faster than this world has to
+		// drain at its own rate: one row per tick falls further behind the client
+		// every tick, and native takeover then schedules against that stale input.
+		// Rows inside one step coalesce as native input does. The last direction
+		// wins and the cumulative JumpSequence keeps any jump among them.
+		const double step = store.Time().Delta;
+		for (auto &record : state->In) {
+			// Rows the committed baseline already contains were applied by the source.
+			// Count them as applied without replaying them, which would repeat their
+			// motion and start this world's input clock behind the client's.
+			if (record.Committed && record.BaselineInputTick != 0) {
+				size_t included = 0;
+				while (included < record.PendingMoveCount && record.PendingMoves[included].InputTick != 0 &&
+					   record.PendingMoves[included].InputTick <= record.BaselineInputTick) {
+					const auto &move = record.PendingMoves[included++];
+					portal_observation::Input(
+						store,
+						record.Subject,
+						PortalInputRoute::Included,
+						move.InputTick,
+						record.Through.Rotate(move.Direction)
+					);
+					record.Move = move;
+					record.AppliedMove = move.Sequence;
+					record.AppliedJump = move.JumpSequence;
+					record.AppliedInputTick = move.InputTick;
+				}
+				if (included != 0) {
+					if (!record.InputClosed && store.Alive(record.Subject))
+						if (const auto *rig =
+								store.Get<scene::Character>(scene::CharacterOf(store, record.Subject)))
+							AnchorForwardClock(store, record, *rig);
+					std::move(
+						record.PendingMoves.begin() + included,
+						record.PendingMoves.begin() + record.PendingMoveCount,
+						record.PendingMoves.begin()
+					);
+					record.PendingMoveCount -= included;
+					core::Metrics::Count("world.portal.move.included", included);
+				}
+			}
+			const bool caughtUp = CatchUpForwardedMoves(store, record, step);
+			if (record.PendingMoveCount == 0) {
+				if (caughtUp) AcknowledgeMove(store, *state, record);
+				continue;
+			}
+			size_t consumed = 0;
+			double seconds = 0;
+			do {
+				record.Move = record.PendingMoves[consumed++];
+				seconds += record.Move.StepSeconds;
+			} while (consumed < record.PendingMoveCount && record.Move.StepSeconds > 0 &&
+					 record.PendingMoves[consumed].StepSeconds > 0 &&
+					 seconds + record.PendingMoves[consumed].StepSeconds <= step + 1e-6);
+			std::move(
+				record.PendingMoves.begin() + consumed,
+				record.PendingMoves.begin() + record.PendingMoveCount,
+				record.PendingMoves.begin()
+			);
+			record.PendingMoveCount -= consumed;
+			ApplyForwardMove(store, record);
+			if (record.Committed) AcknowledgeMove(store, *state, record);
 		}
 		for (auto &record : state->Out) {
+			if (record.Receipt.Stage == PortalTransferStage::Prepared && record.BaselineSealed) {
+				(void)CommitSealed(store, *state, record);
+				continue;
+			}
 			if (!Active(record) || store.Time().Tick < record.RetryAt) continue;
 			Message message;
 			message.Id = record.Receipt.Id;
 			message.Through = record.Receipt.Through;
 			message.DestinationIncarnation = record.DestinationIncarnation;
+			message.Fence = record.Receipt.Fence;
 			message.Kind =
 				record.Receipt.Stage == PortalTransferStage::Cancelling
 					? MessageKind::Cancel
-					: (record.Receipt.Stage == PortalTransferStage::Preparing ? MessageKind::Offer
-																			  : MessageKind::Commit);
-			if (message.Kind == MessageKind::Offer) message.Body = record.Body;
+					: (record.Receipt.Stage == PortalTransferStage::Preparing
+						   ? (record.DestinationIncarnation == 0 ? MessageKind::Offer : MessageKind::Prepare)
+						   : (record.Receipt.Stage == PortalTransferStage::Prepared
+								  ? MessageKind::SealBaseline
+								  : MessageKind::Commit));
+			if (message.Kind == MessageKind::Offer || message.Kind == MessageKind::Prepare ||
+				message.Kind == MessageKind::SealBaseline)
+				message.Body = record.Body;
 			const auto sent = Send(store, record.Receipt.DestinationWorld, message);
 			if (sent.Expected()) {
 				record.Ticket = sent;
@@ -1556,7 +2511,14 @@ namespace engine::script {
 			message.Id = record.Receipt.Id;
 			message.DestinationIncarnation = record.DestinationIncarnation;
 			ByteWriter writer;
-			WriteMove(writer, record.Move);
+			const auto first = std::lower_bound(
+				record.PendingMoves.begin(),
+				record.PendingMoves.begin() + record.PendingMoveCount,
+				record.AcknowledgedMove + 1,
+				[](const ForwardMove &move, uint64_t sequence) { return move.Sequence < sequence; }
+			);
+			if (first == record.PendingMoves.begin() + record.PendingMoveCount) continue;
+			WriteMoveSegment(writer, std::span(first, record.PendingMoves.begin() + record.PendingMoveCount));
 			message.Body.assign(writer.Bytes().begin(), writer.Bytes().end());
 			Send(store, record.Receipt.DestinationWorld, message);
 		}
@@ -1620,6 +2582,13 @@ namespace engine::script {
 						std::string Destination;
 						scene::SeamTransform Through;
 						scene::PortalBodySweep Sweep;
+						physics::PortalMouthMotion SourceMouth;
+						physics::PortalMouthMotion DestinationMouth;
+						bool Direct = false;
+						float PriorOffset = 0;
+						float CurrentOffset = 0;
+						core::Vector3 Prior;
+						core::Vector3 Current;
 					};
 					std::vector<Crossing> crossings;
 					const auto gather = [&](Entity subject, Entity root, scene::PortalBodyKind kind) {
@@ -1629,29 +2598,137 @@ namespace engine::script {
 						if (subject == NULL_ENTITY || before == nullptr || now == nullptr ||
 							motion == nullptr)
 							return;
+						const auto previousFrame = before->Frame;
+						const auto currentFrame = now->Frame;
+						const auto linearVelocity = motion->Linear;
+						const auto angularVelocity = motion->Angular;
+						scene::BodyIdentity identity;
+						if (!scene::EnsureBodyIdentity(store, root, identity)) return;
 						scene::PortalHop hop;
 						size_t index = 0;
-						if (!scene::NearestPortalCrossing(
-								seams, before->Frame.Position, now->Frame.Position, true, hop, index
-							) ||
-							!seams[index].Crosses)
-							return;
+						const auto crosses = [&](const core::Vector3 &from) {
+							return scene::NearestPortalCrossing(
+								seams, from, currentFrame.Position, true, hop, index
+							);
+						};
+						const bool direct = crosses(previousFrame.Position);
+						if (!direct) {
+							const bool awaitingArrivalMovement =
+								std::any_of(state->In.begin(), state->In.end(), [&](const Incoming &record) {
+									return record.Committed && record.Subject == subject &&
+										   record.ArrivalFrame &&
+										   record.ArrivalFrame->Position == currentFrame.Position &&
+										   record.ArrivalFrame->QuaternionX == currentFrame.QuaternionX &&
+										   record.ArrivalFrame->QuaternionY == currentFrame.QuaternionY &&
+										   record.ArrivalFrame->QuaternionZ == currentFrame.QuaternionZ &&
+										   record.ArrivalFrame->QuaternionW == currentFrame.QuaternionW;
+								});
+							if (awaitingArrivalMovement) return;
+							// PreviousTransform may already be synchronized by a host that runs its
+							// transform pass before this service. Reconstruct one bounded physics
+							// step from velocity so a full-aperture sweep still has endpoints.
+							if (!crosses(currentFrame.Position - linearVelocity * store.Time().Delta)) return;
+						}
+						const auto &seam = seams[index];
+						if (!seam.Crosses) return;
+						if (!store.Has<scene::PortalCrossingState>(root))
+							store.Set(root, scene::PortalCrossingState{});
+						auto *crossing = store.GetMutable<scene::PortalCrossingState>(root);
+						if (crossing == nullptr) return;
+						// A sweep may traverse the full aperture without an overlap sample. Pin
+						// that seam before the next topology observation changes it.
+						const float prior = (previousFrame.Position - seam.Centre).Dot(seam.Normal);
+						const float current = (currentFrame.Position - seam.Centre).Dot(seam.Normal);
+						if (kind == scene::PortalBodyKind::Player) {
+							if (const char *diagnostic = std::getenv("PORTAL_RETURN_DIAGNOSTIC");
+								diagnostic && *diagnostic == '1') {
+								static std::atomic<uint32_t> emitted{0};
+								if (emitted.fetch_add(1, std::memory_order_relaxed) < 12)
+									ENGINE_INFO(
+										"portal crossing candidate: world={} tick={} subject={} pane={} "
+										"destination={} prior={} current={} velocity={},{},{} epoch={} "
+										"bidirectional={}",
+										store.Name(),
+										store.Time().Tick,
+										subject.Id,
+										seam.Pane.Id,
+										seam.DestinationWorld.Text(),
+										prior,
+										current,
+										linearVelocity.X,
+										linearVelocity.Y,
+										linearVelocity.Z,
+										crossing->AuthorityEpoch,
+										seam.Bidirectional
+									);
+							}
+						}
+						crossing->Pin = {
+							seam.Pane,
+							seam.Far,
+							core::CFrame(seam.Centre),
+							seam.Destination,
+							seam.Normal,
+							seam.First,
+							seam.Second,
+							seam.DestinationWorld,
+							seam.Scale,
+							seam.TagFilter,
+							seam.Surface,
+							seam.Crosses,
+							seam.Bidirectional
+						};
+						crossing->Pane = seam.Pane;
+						crossing->Far = seam.Far;
+						crossing->Reference = root;
+						crossing->TopologyRevision = std::max<uint64_t>(1, crossing->TopologyRevision);
+						crossing->StableSide = prior < 0 ? -1 : 1;
+						crossing->ReferenceSide = current < 0 ? -1 : 1;
+						crossing->Phase = scene::PortalCrossingPhase::Prepared;
+						crossing->PresentationRevision++;
+						const auto mouth = [&](Entity pane, const core::Vector3 &centre) {
+							physics::PortalMouthMotion sample;
+							sample.Centre = centre;
+							const auto *panePose = store.Get<scene::Transform>(pane);
+							const auto *paneMotion = store.Get<scene::Motion>(pane);
+							if (paneMotion != nullptr) {
+								sample.Angular = paneMotion->Angular;
+								sample.Linear =
+									paneMotion->Linear +
+									(panePose ? paneMotion->Angular.Cross(centre - panePose->Frame.Position)
+											  : core::Vector3{});
+							}
+							return sample;
+						};
 						const float remaining = store.Time().Delta * (1 - hop.Share);
-						auto start = physics::Advanced(now->Frame, {}, -motion->Angular, remaining);
-						start.Position = before->Frame.Position +
-										 (now->Frame.Position - before->Frame.Position) * hop.Share;
+						auto start = physics::Advanced(currentFrame, {}, -angularVelocity, remaining);
+						start.Position = previousFrame.Position +
+										 (currentFrame.Position - previousFrame.Position) * hop.Share;
 						crossings.push_back(
 							{subject,
 							 kind,
-							 std::string(seams[index].DestinationWorld.Text()),
+							 std::string(seam.DestinationWorld.Text()),
 							 hop.Through,
-							 {start, now->Frame.Position - start.Position, motion->Angular * remaining}}
+							 {start, currentFrame.Position - start.Position, angularVelocity * remaining},
+							 mouth(seam.Pane, seam.Centre),
+							 mouth(seam.Far, seam.Destination.Position),
+							 direct,
+							 prior,
+							 current,
+							 previousFrame.Position,
+							 currentFrame.Position}
 						);
 					};
+					struct Candidate {
+						Entity Subject;
+						Entity Root;
+						scene::PortalBodyKind Kind;
+					};
+					std::vector<Candidate> candidates;
 					std::vector<Entity> characterRoots;
 					store.Each<const scene::Character>([&](Entity, const scene::Character &rig) {
 						characterRoots.push_back(rig.Root);
-						gather(rig.Owner, rig.Root, scene::PortalBodyKind::Player);
+						candidates.push_back({rig.Owner, rig.Root, scene::PortalBodyKind::Player});
 					});
 					std::sort(characterRoots.begin(), characterRoots.end(), [](Entity left, Entity right) {
 						return left.Id < right.Id;
@@ -1665,22 +2742,49 @@ namespace engine::script {
 							) ||
 							store.Has<scene::CharacterLimb>(object) || store.Has<scene::Humanoid>(object))
 							return;
-						gather(object, object, scene::PortalBodyKind::Object);
+						candidates.push_back({object, object, scene::PortalBodyKind::Object});
 					});
+					for (const auto &candidate : candidates)
+						gather(candidate.Subject, candidate.Root, candidate.Kind);
 					for (const auto &crossing : crossings) {
 						PortalTransferId id;
 						std::string failure;
-						if (!BeginTransfer(
-								store,
-								crossing.Subject,
-								crossing.Kind,
-								crossing.Destination,
-								crossing.Through,
-								id,
-								failure,
-								crossing.Sweep
-							))
-							ENGINE_WARN("portal crossing refused: {}", failure);
+						const bool begun = BeginTransfer(
+							store,
+							crossing.Subject,
+							crossing.Kind,
+							crossing.Destination,
+							crossing.Through,
+							id,
+							failure,
+							crossing.Sweep,
+							crossing.SourceMouth,
+							crossing.DestinationMouth
+						);
+						// A subject already crossing is refused every tick it stays past the
+						// plane. That is expected, so only a first refusal is worth a row.
+						const bool duplicate =
+							!begun && std::any_of(state->Out.begin(), state->Out.end(), [&](const auto &r) {
+								return r.Subject == crossing.Subject && Active(r);
+							});
+						if (!duplicate) {
+							PortalCrossingRecord record;
+							if (auto *log = portal_observation::Begin(
+									store, crossing.Subject, crossing.Subject, record.Stamp
+								)) {
+								record.Begun = begun;
+								record.Direct = crossing.Direct;
+								record.Transfer = begun ? id.Sequence : 0;
+								record.PriorOffset = crossing.PriorOffset;
+								record.CurrentOffset = crossing.CurrentOffset;
+								record.Prior = crossing.Prior;
+								record.Current = crossing.Current;
+								record.Destination.Assign(crossing.Destination);
+								record.Reason.Assign(failure);
+								log->Crossings.Append(record);
+							}
+						}
+						if (!begun && !duplicate) ENGINE_WARN("portal crossing refused: {}", failure);
 					}
 				},
 				ecs::SystemOrder{{}, {}, {"character.portal"}, {"physics.contacts"}}
@@ -1709,6 +2813,13 @@ namespace engine::script {
 					return record.Subject;
 		return NULL_ENTITY;
 	}
+	std::optional<PortalTransferFence>
+	PortalTransferDestinationFence(const ecs::Store &store, const PortalTransferId &id) {
+		if (const auto *state = State(store))
+			for (const auto &record : state->In)
+				if (record.Id == id && ValidFence(record.Fence, true)) return record.Fence;
+		return std::nullopt;
+	}
 	bool ForwardPortalPlayerMove(
 		ecs::Store &store,
 		Entity sourcePlayer,
@@ -1725,18 +2836,22 @@ namespace engine::script {
 		for (auto it = state->Out.rbegin(); it != state->Out.rend(); ++it) {
 			if (it->Subject != sourcePlayer || it->Receipt.Kind != scene::PortalBodyKind::Player) continue;
 			if (it->InputClosed || (it->Receipt.Stage != PortalTransferStage::Preparing &&
+									it->Receipt.Stage != PortalTransferStage::Prepared &&
 									it->Receipt.Stage != PortalTransferStage::Committing &&
 									it->Receipt.Stage != PortalTransferStage::Committed))
 				return false;
 			if (inputTick != 0 && inputTick <= it->Move.InputTick) return true;
 			if (it->Move.Sequence != 0 && it->Move.Direction == direction && !jump && inputTick == 0)
 				return true;
-			if (it->Move.Sequence == std::numeric_limits<uint64_t>::max()) return false;
+			if (it->Move.Sequence == std::numeric_limits<uint64_t>::max() ||
+				it->PendingMoveCount == MAXIMUM_FORWARDED_INPUTS)
+				return false;
 			++it->Move.Sequence;
 			it->Move.JumpSequence += jump;
 			it->Move.Direction = direction;
 			it->Move.InputTick = std::max(it->Move.InputTick, inputTick);
 			it->Move.StepSeconds = stepSeconds;
+			it->PendingMoves[it->PendingMoveCount++] = it->Move;
 			return true;
 		}
 		return false;
@@ -1762,14 +2877,18 @@ namespace engine::script {
 		}
 		if (clock->AnchorInputTick == 0 || clock->InputStep <= 0 || clock->WorldStep <= 0)
 			return Result::Immediate;
-		auto refuse = [] {
+		auto refuse = [](std::string_view reason) {
 			core::Metrics::Count("world.portal.native.refused", 1);
+			core::Metrics::Count(reason, 1);
 			return Result::Refused;
 		};
-		if (stepSeconds != clock->InputStep || store.Time().Delta != clock->WorldStep) return refuse();
-		if (inputTick <= clock->LastQueuedInputTick) return clock->Native ? Result::Queued : refuse();
+		if (stepSeconds != clock->InputStep || store.Time().Delta != clock->WorldStep)
+			return refuse("world.portal.native.refused.step");
+		if (inputTick <= clock->LastQueuedInputTick)
+			return clock->Native ? Result::Queued : refuse("world.portal.native.refused.stale");
 		const auto now = store.Time().Tick;
-		if (now == std::numeric_limits<uint64_t>::max()) return refuse();
+		if (now == std::numeric_limits<uint64_t>::max())
+			return refuse("world.portal.native.refused.tick-overflow");
 		// Subtract integer epochs before converting, preserving precision on long sessions.
 		const long double offset = std::ceil(
 			static_cast<long double>(inputTick - clock->AnchorInputTick) * clock->InputStep /
@@ -1778,12 +2897,19 @@ namespace engine::script {
 		);
 		if (!std::isfinite(offset) || offset < 0 ||
 			offset >= static_cast<long double>(std::numeric_limits<uint64_t>::max() - clock->AnchorWorldTick))
-			return refuse();
-		const uint64_t due = std::max(now + 1, clock->AnchorWorldTick + static_cast<uint64_t>(offset));
+			return refuse("world.portal.native.refused.offset");
+		uint64_t due = std::max(now + 1, clock->AnchorWorldTick + static_cast<uint64_t>(offset));
 		// A corrupt or incompatible input clock cannot reserve an unbounded future.
 		if (static_cast<long double>(due - now) * clock->WorldStep >
-			std::max(1.0L, static_cast<long double>(clock->WorldStep)) + 1e-6L)
-			return refuse();
+			std::max(1.0L, static_cast<long double>(clock->WorldStep)) + 1e-6L) {
+			if (clock->Native) return refuse("world.portal.native.refused.horizon");
+			// Forwarded input can lag the authenticated client's clock at takeover.
+			// Re-anchor once, then keep the ordinary horizon for every native move.
+			clock->AnchorWorldTick = now;
+			clock->AnchorInputTick = inputTick;
+			due = now + 1;
+			core::Metrics::Count("world.portal.native.reanchored", 1);
+		}
 		if (clock->Count != 0 &&
 			clock->Pending[(clock->Begin + clock->Count - 1) % MAXIMUM_NATIVE_INPUTS].PhysicsTick == due) {
 			auto &pending = clock->Pending[(clock->Begin + clock->Count - 1) % MAXIMUM_NATIVE_INPUTS];
@@ -1792,7 +2918,7 @@ namespace engine::script {
 			pending.Jump |= jump;
 			core::Metrics::Count("world.portal.native.coalesced", 1);
 		} else {
-			if (clock->Count == MAXIMUM_NATIVE_INPUTS) return refuse();
+			if (clock->Count == MAXIMUM_NATIVE_INPUTS) return refuse("world.portal.native.refused.capacity");
 			clock->Pending[(clock->Begin + clock->Count) % MAXIMUM_NATIVE_INPUTS] = {
 				inputTick, due, direction, jump
 			};
@@ -1800,7 +2926,6 @@ namespace engine::script {
 		}
 		clock->LastQueuedInputTick = inputTick;
 		clock->Native = true;
-		ClosePortalPlayerMoveForwarding(store, player);
 		core::Metrics::Count("world.portal.native.queued", 1);
 		return Result::Queued;
 	}
@@ -1814,6 +2939,32 @@ namespace engine::script {
 		return clock->AppliedInputTick;
 	}
 
+	void NotePortalPlayerInputApplied(ecs::Store &store, Entity sourcePlayer, uint64_t inputTick) {
+		if (inputTick == 0 || store.AdoptOnly()) return;
+		auto *state = State(store);
+		if (!state) return;
+		for (auto it = state->Out.rbegin(); it != state->Out.rend(); ++it) {
+			if (it->Subject != sourcePlayer || it->Receipt.Kind != scene::PortalBodyKind::Player) continue;
+			// Only a live source body takes input; H is sealed when Preparing ends.
+			if (it->Receipt.Stage == PortalTransferStage::Preparing)
+				it->LocalInputTick = std::max(it->LocalInputTick, inputTick);
+			return;
+		}
+	}
+	std::optional<uint64_t> FrozenPortalPlayerInput(const ecs::Store &store, Entity sourcePlayer) {
+		const auto *state = State(store);
+		if (!state) return std::nullopt;
+		for (auto it = state->Out.rbegin(); it != state->Out.rend(); ++it) {
+			if (it->Subject != sourcePlayer || it->Receipt.Kind != scene::PortalBodyKind::Player) continue;
+			const auto stage = it->Receipt.Stage;
+			if (!it->BaselineSealed || it->InputClosed ||
+				(stage != PortalTransferStage::Prepared && stage != PortalTransferStage::Committing &&
+				 stage != PortalTransferStage::Committed))
+				return std::nullopt;
+			return it->LocalInputTick;
+		}
+		return std::nullopt;
+	}
 	void ClosePortalPlayerMoveForwarding(ecs::Store &store, Entity destinationPlayer) {
 		if (store.AdoptOnly() || world::Postbox(store).IsReplica()) return;
 		auto *state = State(store);
@@ -1824,6 +2975,15 @@ namespace engine::script {
 				continue;
 			record.InputClosed = true;
 			AcknowledgeMove(store, *state, record);
+			portal_observation::Handoff(
+				store,
+				record.Subject,
+				ecs::NULL_ENTITY,
+				PortalHandoffEvent::InputClosed,
+				record.Id.Sequence,
+				record.AppliedInputTick,
+				record.Id.SourceWorld
+			);
 		}
 	}
 	std::optional<PortalTransferReceipt>

@@ -27,8 +27,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <set>
+#include <utility>
 
 TEST_SUITE_ID("engine.effects.particles")
 
@@ -754,6 +756,8 @@ TEST_CASE("particle force controls survive component serialisation", "[effects]"
 	emitter.NoiseScrollSpeed = -2.0f;
 	emitter.RadialAcceleration = 4.0f;
 	emitter.TangentialAcceleration = -5.0f;
+	emitter.Flipbook = FlipbookLayout::Grid16x16;
+	emitter.FlipbookFrames = 256;
 
 	const auto component = engine::ecs::Components::Find(engine::core::Name("effects.ParticleEmitter"));
 	const engine::ecs::TypeDescriptor &type = engine::ecs::Components::Describe(component);
@@ -772,6 +776,8 @@ TEST_CASE("particle force controls survive component serialisation", "[effects]"
 	CHECK(restored.NoiseScrollSpeed == -2.0f);
 	CHECK(restored.RadialAcceleration == 4.0f);
 	CHECK(restored.TangentialAcceleration == -5.0f);
+	CHECK(restored.Flipbook == FlipbookLayout::Grid16x16);
+	CHECK(restored.FlipbookFrames == 256);
 }
 
 TEST_CASE("a spawn point lands inside the parent's own volume", "[effects]") {
@@ -936,7 +942,11 @@ TEST_CASE("an emitter adopts the frame count its texture states", "[effects]") {
 	const engine::core::Name texture("effects/fox_dance.atex");
 	REQUIRE(
 		engine::scene::RecordTexture(
-			store, texture, engine::scene::FlipbookFacts{.Side = 8, .Frames = 24, .FrameRate = 24.0f}
+			store,
+			texture,
+			engine::scene::FlipbookFacts{
+				.Side = 8, .Frames = 24, .FrameRate = 24.0f, .FrameDurations = {}, .CumulativeEnds = {}
+			}
 		)
 	);
 
@@ -985,7 +995,11 @@ TEST_CASE("an existing emitter adopts texture facts when content arrives", "[eff
 	store.ClearChanges();
 	REQUIRE(
 		engine::scene::RecordTexture(
-			store, texture, engine::scene::FlipbookFacts{.Side = 8, .Frames = 24, .FrameRate = 30.0f}
+			store,
+			texture,
+			engine::scene::FlipbookFacts{
+				.Side = 8, .Frames = 24, .FrameRate = 30.0f, .FrameDurations = {}, .CumulativeEnds = {}
+			}
 		)
 	);
 	engine::effects::RefreshEmitters(store);
@@ -1004,7 +1018,11 @@ TEST_CASE("what the emitter says beats what the texture says", "[effects]") {
 	const engine::core::Name texture("effects/fox_dance.atex");
 	REQUIRE(
 		engine::scene::RecordTexture(
-			store, texture, engine::scene::FlipbookFacts{.Side = 8, .Frames = 48, .FrameRate = 24.0f}
+			store,
+			texture,
+			engine::scene::FlipbookFacts{
+				.Side = 8, .Frames = 48, .FrameRate = 24.0f, .FrameDurations = {}, .CumulativeEnds = {}
+			}
 		)
 	);
 
@@ -1039,7 +1057,11 @@ TEST_CASE("a looping flipbook runs at the rate its texture was drawn at", "[effe
 	const engine::core::Name texture("effects/slow.atex");
 	REQUIRE(
 		engine::scene::RecordTexture(
-			store, texture, engine::scene::FlipbookFacts{.Side = 4, .Frames = 16, .FrameRate = 4.0f}
+			store,
+			texture,
+			engine::scene::FlipbookFacts{
+				.Side = 4, .Frames = 16, .FrameRate = 4.0f, .FrameDurations = {}, .CumulativeEnds = {}
+			}
 		)
 	);
 
@@ -1070,6 +1092,118 @@ TEST_CASE("a looping flipbook runs at the rate its texture was drawn at", "[effe
 	// whatever rate was used - which is the only thing that makes the one above
 	// worth asserting.
 	CHECK(static_cast<uint32_t>((29.0f / 60.0f) * 12.0f) == 5);
+}
+
+TEST_CASE("a 16 by 16 particle atlas reaches frame 65 without wrapping at 64", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	const engine::core::Name texture("effects/large.atex");
+	REQUIRE(
+		engine::scene::RecordTexture(
+			store,
+			texture,
+			engine::scene::FlipbookFacts{
+				.Side = 16, .Frames = 65, .FrameRate = 64.0f, .FrameDurations = {}, .CumulativeEnds = {}
+			}
+		)
+	);
+	auto &settings = Settings(store, emitter);
+	settings.Texture = texture;
+	settings.Rate = 64.0f;
+	settings.Lifetime = NumberRange{2.0f, 2.0f};
+	settings.Speed = NumberRange{0.0f, 0.0f};
+	settings.Flipbook = FlipbookLayout::Grid16x16;
+	settings.FlipbookPlayback = FlipbookMode::Loop;
+	Frame(store, 1.0f / 64.0f);
+	const auto *system = store.Resource<ParticleSystem>();
+	REQUIRE(system->Blocks[store.Get<EmitterSlot>(emitter)->Index].Frames == 65);
+	for (int tick = 0; tick < 64; tick++)
+		Frame(store, 1.0f / 64.0f);
+	CHECK((system->Instances[0].RotationAndCell >> 16) == 64);
+	Frame(store, 1.0f / 64.0f);
+	CHECK((system->Instances[0].RotationAndCell >> 16) == 0);
+}
+
+TEST_CASE("a looping particle follows unequal texture frame durations", "[effects]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	const engine::core::Name texture("effects/variable.atex");
+	REQUIRE(
+		engine::scene::RecordTexture(
+			store,
+			texture,
+			engine::scene::FlipbookFacts{
+				.Side = 2, .Frames = 3, .FrameDurations = {0.04f, 0.10f, 0.06f}, .CumulativeEnds = {}
+			}
+		)
+	);
+	auto &settings = Settings(store, emitter);
+	settings.Texture = texture;
+	settings.Rate = 100.0f;
+	settings.Lifetime = NumberRange{1.0f, 1.0f};
+	settings.Speed = NumberRange{0.0f, 0.0f};
+	settings.Flipbook = FlipbookLayout::Grid2x2;
+	settings.FlipbookPlayback = FlipbookMode::Loop;
+	Frame(store, 0.01f);
+	const auto *system = store.Resource<ParticleSystem>();
+	const auto cell = [&] { return system->Instances[0].RotationAndCell >> 16; };
+	for (int tick = 0; tick < 3; tick++)
+		Frame(store, 0.01f);
+	CHECK(cell() == 0);
+	for (int tick = 0; tick < 2; tick++)
+		Frame(store, 0.01f);
+	CHECK(cell() == 1);
+	for (int tick = 0; tick < 10; tick++)
+		Frame(store, 0.01f);
+	CHECK(cell() == 2);
+	for (int tick = 0; tick < 6; tick++)
+		Frame(store, 0.01f);
+	CHECK(cell() == 0);
+}
+
+TEST_CASE("unequal particle timing preserves playback modes and an explicit rate", "[effects]") {
+	const auto checkPlayback = [](FlipbookMode mode,
+								  float rate,
+								  std::initializer_list<std::pair<int, uint32_t>> checkpoints) {
+		Store store("effects_test");
+		const Entity emitter = MakeEmitter(store);
+		const engine::core::Name texture("effects/variable-modes.atex");
+		REQUIRE(
+			engine::scene::RecordTexture(
+				store,
+				texture,
+				engine::scene::FlipbookFacts{
+					.Side = 2, .Frames = 3, .FrameDurations = {0.04f, 0.10f, 0.06f}, .CumulativeEnds = {}
+				}
+			)
+		);
+		auto &settings = Settings(store, emitter);
+		settings.Texture = texture;
+		settings.Rate = 100.0f;
+		settings.Lifetime = NumberRange{1.0f, 1.0f};
+		settings.Speed = NumberRange{0.0f, 0.0f};
+		settings.Flipbook = FlipbookLayout::Grid2x2;
+		settings.FlipbookPlayback = mode;
+		settings.FlipbookFramerate = NumberRange{rate, rate};
+		Frame(store, 0.01f);
+		const auto *system = store.Resource<ParticleSystem>();
+		REQUIRE(system != nullptr);
+		int tick = 0;
+		for (const auto &[at, expected] : checkpoints) {
+			while (tick < at) {
+				Frame(store, 0.01f);
+				tick++;
+			}
+			CAPTURE(
+				mode, rate, at, system->Blocks[store.Get<EmitterSlot>(emitter)->Index].FlipbookTimelineScale
+			);
+			CHECK((system->Instances[0].RotationAndCell >> 16) == expected);
+		}
+	};
+
+	checkPlayback(FlipbookMode::PingPong, 0.0f, {{5, 1}, {15, 2}, {21, 1}, {31, 0}});
+	checkPlayback(FlipbookMode::OneShot, 0.0f, {{25, 1}, {75, 2}});
+	checkPlayback(FlipbookMode::Loop, 30.0f, {{3, 1}, {8, 2}, {11, 0}});
 }
 
 // --- cleanup ------------------------------------------------------------------
@@ -1168,31 +1302,30 @@ TEST_CASE("device burst requests are batched from the emitter row", "[effects][d
 	Settings(store, emitter).Rate = 0.0f;
 	Settings(store, emitter).Lifetime = NumberRange{0.25f, 0.25f};
 	Frame(store, 1.0f / 60.0f);
-	const auto *before = store.Resource<engine::effects::ParticleSystem>();
-	const uint64_t residentRevision = before->ResidentRevision;
-	const uint32_t blockRevision = before->Blocks[0].Revision;
+	CHECK(store.Get<EmitterSlot>(emitter)->Index == NO_SLOT);
 
 	REQUIRE(engine::effects::EmitParticles(store, emitter, 7));
 	REQUIRE(engine::effects::EmitParticles(store, emitter, 5));
-	const auto *queued = store.Resource<engine::effects::ParticleSystem>();
 	CHECK(store.Get<EmitterSlot>(emitter)->Requested == 12);
-	CHECK(queued->RuntimeStates[0].Requested == 0);
-	CHECK(queued->ResidentRevision == residentRevision);
-	CHECK(queued->Blocks[0].Revision == blockRevision);
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->Blocks.empty());
 
 	Frame(store, 1.0f / 60.0f);
 	auto *batched = store.ResourceMutable<engine::effects::ParticleSystem>();
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
 	CHECK(store.Get<EmitterSlot>(emitter)->Requested == 0);
-	CHECK(batched->RuntimeStates[0].Requested == 12);
-	CHECK(batched->ResidentRevision == residentRevision + 1);
-	CHECK(batched->Blocks[0].Revision == blockRevision + 1);
+	CHECK(batched->RuntimeStates[slot].Requested == 12);
 
 	// The resident counter is a total the device compares with what it already
 	// consumed. A second capped batch must advance it past one block ceiling.
+	const uint64_t residentRevision = batched->ResidentRevision;
+	const uint32_t blockRevision = batched->Blocks[slot].Revision;
 	batched->BlockCeiling = 8;
 	REQUIRE(engine::effects::EmitParticles(store, emitter, 40));
 	Frame(store, 1.0f / 60.0f);
-	CHECK(store.Resource<engine::effects::ParticleSystem>()->RuntimeStates[0].Requested == 20);
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->RuntimeStates[slot].Requested == 20);
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->ResidentRevision == residentRevision + 1);
+	CHECK(store.Resource<engine::effects::ParticleSystem>()->Blocks[slot].Revision == blockRevision + 1);
 }
 
 TEST_CASE("queued particle bursts saturate before a device batch", "[effects][device]") {
@@ -1277,6 +1410,44 @@ TEST_CASE("a device block empties once nothing has been born for a lifetime", "[
 	CHECK(store.Resource<engine::effects::ParticleSystem>()->RuntimeStates[0].Live == 0);
 }
 
+TEST_CASE("a zero-rate device emitter retires after its particles age out", "[effects][device]") {
+	Store store("effects_test");
+	const Entity emitter = MakeEmitter(store);
+	auto *system = store.ResourceMutable<engine::effects::ParticleSystem>();
+	system->DeviceStepped = true;
+
+	Settings(store, emitter).Rate = 60.0f;
+	Settings(store, emitter).Lifetime = NumberRange{0.25f, 0.25f};
+	for (int frame = 0; frame < 30; frame++) {
+		Frame(store, 1.0f / 60.0f);
+	}
+
+	const uint32_t slot = store.Get<EmitterSlot>(emitter)->Index;
+	REQUIRE(slot != NO_SLOT);
+	REQUIRE(system->RuntimeStates[slot].Live > 0);
+	CHECK_FALSE(system->RuntimeStates[slot].DeviceRetiring);
+
+	Settings(store, emitter).Rate = 0.0f;
+	Frame(store, 1.0f / 60.0f);
+	CHECK(system->RuntimeStates[slot].ContinuousRate == 0.0f);
+	CHECK(system->RuntimeStates[slot].DeviceRetiring);
+	CHECK(system->RetiringBlocks.size() == 1);
+
+	// Resuming before the last particle's lifetime keeps the same device block.
+	Settings(store, emitter).Rate = 60.0f;
+	Frame(store, 1.0f / 60.0f);
+	CHECK_FALSE(system->RuntimeStates[slot].DeviceRetiring);
+	CHECK(system->RetiringBlocks.empty());
+
+	Settings(store, emitter).Rate = 0.0f;
+	for (int frame = 0; frame < 30; frame++) {
+		Frame(store, 1.0f / 60.0f);
+	}
+
+	CHECK(store.Get<EmitterSlot>(emitter)->Index == NO_SLOT);
+	CHECK(system->RetiringBlocks.empty());
+}
+
 TEST_CASE("a disabled device burst releases its block after its lifetime", "[effects][device]") {
 	Store store("effects_test");
 	const Entity emitter = MakeEmitter(store);
@@ -1323,4 +1494,31 @@ TEST_CASE("a disabled device burst renews retirement after clear", "[effects][de
 	CHECK(runtime.DeviceRetiring);
 	CHECK(runtime.Idle == Catch::Approx(0.2f));
 	CHECK(runtime.Live > 0);
+}
+
+TEST_CASE("a 64 by 64 particle atlas reaches timed frame 4096", "[effects]") {
+	Store store("large_sequence_particles");
+	const Entity emitter = MakeEmitter(store);
+	const engine::core::Name texture("effects/maximum.aseq");
+	engine::scene::FlipbookFacts facts;
+	facts.Side = 64;
+	facts.Frames = 4096;
+	facts.FrameDurations.assign(4096, .125f);
+	REQUIRE(engine::scene::RecordTexture(store, texture, facts));
+	auto &settings = Settings(store, emitter);
+	settings.Texture = texture;
+	settings.Rate = 8;
+	settings.Lifetime = NumberRange{1024, 1024};
+	settings.Speed = NumberRange{0, 0};
+	settings.Flipbook = FlipbookLayout::Grid64x64;
+	settings.FlipbookPlayback = FlipbookMode::Loop;
+	Frame(store, .125f);
+	Settings(store, emitter).Rate = 0;
+	const auto *system = store.Resource<ParticleSystem>();
+	for (int frame = 0; frame < 4095; ++frame)
+		Frame(store, .125f);
+	REQUIRE(system->Instances.size() > 0);
+	CHECK((system->Instances[0].RotationAndCell >> 16) == 4095);
+	Frame(store, .125f);
+	CHECK((system->Instances[0].RotationAndCell >> 16) == 0);
 }

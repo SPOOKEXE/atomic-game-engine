@@ -24,12 +24,16 @@
 
 #include <engine/core/types/CFrame.hpp>
 #include <engine/ecs/Entity.hpp>
+#include <engine/gui/Layout.hpp>
+#include <engine/gui/Localization.hpp>
 #include <engine/world/World.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
 #include <string_view>
+#include <studio/Projection.hpp>
 #include <unordered_map>
 
 namespace engine::ecs {
@@ -37,6 +41,37 @@ namespace engine::ecs {
 }
 
 namespace studio {
+
+	// Device canvas selected for an editor-only GUI preview.
+	enum class GuiPreviewProfile : uint8_t { Desktop, Phone, Tablet };
+	// Viewer-only interaction state supplied to GUI compilation.
+	enum class GuiPreviewState : uint8_t { None, Hovered, Pressed };
+	// Editor-only device, scale, locale, and interaction settings for one GUI preview.
+	struct GuiPreviewSettings {
+		// Device profile that determines the preview canvas.
+		GuiPreviewProfile Profile = GuiPreviewProfile::Desktop;
+		// Scale applied to interface geometry.
+		float InterfaceScale = 1.0f;
+		// Scale applied to interface text.
+		float TextScale = 1.0f;
+		// This is viewer state, so switching the preview locale never edits a
+		// LocalizationTable in the world being inspected.
+		std::array<char, engine::gui::LocalizationCatalogue::MAXIMUM_LOCALE_BYTES + 1> Locale{'e', 'n'};
+		// Viewer-only interaction state for the selected GUI instance. This is
+		// fed into CompileRequest and never changes authored interaction state.
+		GuiPreviewState State = GuiPreviewState::None;
+	};
+	// Resolves the GUI canvas visible within a viewport panel.
+	engine::gui::Screen
+	ResolveGuiPreviewScreen(GuiPreviewSettings settings, float panelWidth, float panelHeight);
+
+	// Places GUI-preview controls over the rendered image, including when the
+	// image is fitted into only part of its docked viewport.
+	//
+	// @param imageMinimum The image's top-left display coordinate.
+	// @return The display-space position for the controls' top-left corner.
+	// @since v0.25
+	glm::vec2 GuiPreviewControlsPosition(glm::vec2 imageMinimum);
 
 	// No panel. Also what `ChooseViewportFor` says when one has to be made.
 	//

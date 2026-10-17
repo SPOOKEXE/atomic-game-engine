@@ -5,6 +5,7 @@
 #include <charconv>
 #include <cmath>
 #include <initializer_list>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -21,7 +22,7 @@ namespace engine::script {
 			Kind Type = Kind::Null;
 			std::string String;
 			bool Boolean = false;
-			std::vector<std::pair<std::string, JsonValue>> Object;
+			std::vector<std::pair<std::string, std::unique_ptr<JsonValue>>> Object;
 			std::vector<JsonValue> Array;
 		};
 
@@ -205,8 +206,8 @@ namespace engine::script {
 				while (true) {
 					std::string key;
 					if (!ReadString(key) || !Take(':')) return false;
-					JsonValue value;
-					if (!Read(value, depth + 1)) return false;
+					auto value = std::make_unique<JsonValue>();
+					if (!Read(*value, depth + 1)) return false;
 					for (const auto &[known, ignored] : out.Object) {
 						(void)ignored;
 						if (known == key) return Fail("manifest object has a duplicate key");
@@ -288,7 +289,7 @@ namespace engine::script {
 		const JsonValue *Member(const JsonValue &object, std::string_view name) {
 			if (object.Type != JsonValue::Kind::Object) return nullptr;
 			for (const auto &[key, value] : object.Object)
-				if (key == name) return &value;
+				if (key == name) return value.get();
 			return nullptr;
 		}
 

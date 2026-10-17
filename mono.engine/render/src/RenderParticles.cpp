@@ -9,6 +9,7 @@
 #include "ParticleWork.hpp"
 #include "RenderTypes.hpp"
 #include "RendererState.hpp"
+#include "RendererTestHooks.hpp"
 #include "VulkanTimestamps.hpp"
 
 #include <engine/core/Log.hpp>
@@ -22,6 +23,8 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <cmath>
 #include <cstring>
 #include <limits>
 #include <string>
@@ -29,6 +32,16 @@
 
 namespace engine::render {
 	namespace {
+		std::atomic_bool ForceGpuParticleFieldAllocationFailureForTests = false;
+
+		uint32_t GpuParticleFieldDrawBudget(uint32_t activeCount) {
+			if (activeCount <= 1'000'000) return 18'000;
+			if (activeCount <= 2'000'000) return 36'000;
+			if (activeCount <= 5'000'000) return 64'000;
+			if (activeCount <= 10'000'000) return 96'000;
+			if (activeCount <= 15'000'000) return 128'000;
+			return 160'000;
+		}
 		bool Finite(const core::Vector3 &value) {
 			return std::isfinite(value.X) && std::isfinite(value.Y) && std::isfinite(value.Z);
 		}
@@ -154,7 +167,8 @@ namespace engine::render {
 
 		// The block's parameters, in a table indexed by block. Forces and spawn
 		// configuration live here without widening a particle row.
-		constexpr uint32_t PARTICLE_PARAM_WORDS = 70;
+		constexpr uint32_t PARTICLE_PARAM_WORDS = 72;
+		constexpr uint32_t PARTICLE_TIMELINE_MAX_WORDS = 16u * 1024u * 1024u / sizeof(uint32_t);
 		constexpr uint32_t PARTICLE_PARAM_ROTATION = 0;
 		constexpr uint32_t PARTICLE_PARAM_POSITION = 4;
 		constexpr uint32_t PARTICLE_PARAM_ACCELERATION = 7;
@@ -196,6 +210,8 @@ namespace engine::render {
 		constexpr uint32_t PARTICLE_PARAM_FIELD_TANGENTIAL = 67;
 		constexpr uint32_t PARTICLE_PARAM_FIELD_FALLOFF = 68;
 		constexpr uint32_t PARTICLE_PARAM_FIELD_FLAGS = 69;
+		constexpr uint32_t PARTICLE_PARAM_TIMELINE_OFFSET = 70;
+		constexpr uint32_t PARTICLE_PARAM_TIMELINE_SCALE = 71;
 
 		// The four curves, in a second table indexed by block. Words rather than
 		// floats because the colour curve is packed RGB and the other three are
@@ -275,7 +291,8 @@ namespace engine::render {
 			uint32_t *words,
 			const effects::EmitterBlock &block,
 			const effects::EmitterSpawnState &spawn,
-			const effects::EmitterRuntime &runtime
+			const effects::EmitterRuntime &runtime,
+			uint32_t timelineOffset
 		) {
 			const glm::quat turn = block.Frame.Rotation();
 			PutFloat(words, PARTICLE_PARAM_ROTATION, turn.x);
@@ -343,6 +360,8 @@ namespace engine::render {
 			words[PARTICLE_PARAM_FIELD_FLAGS] = (field.Source != ecs::NULL_ENTITY ? 1u : 0u) |
 												(field.LocalSpace ? 2u : 0u) |
 												(field.TwoDimensional ? 4u : 0u);
+			words[PARTICLE_PARAM_TIMELINE_OFFSET] = timelineOffset;
+			PutFloat(words, PARTICLE_PARAM_TIMELINE_SCALE, block.FlipbookTimelineScale);
 		}
 
 		// Fills one row of the curve table.
@@ -724,6 +743,97 @@ namespace engine::render {
 			   );
 	}
 
+	bool Renderer::Impl::PrepareParticleTimeline(const View &view, SDL_GPUCommandBuffer *command) {
+		ParticlePool &pool = ActiveParticleWorld->Pool;
+		if (command == nullptr) return false;
+
+		std::vector<uint32_t> words{0};
+		std::unordered_map<uint64_t, uint32_t> offsets;
+		bool incomplete = false;
+		for (const ParticleBatch &batch : view.Particles) {
+			if (batch.Block == nullptr || !batch.Block->VariableFlipbookTiming) continue;
+			if (batch.Block->InvalidFlipbookTiming) {
+				incomplete = true;
+				continue;
+			}
+			const core::Name owner = TextureContentOwner(batch.Texture, view.ContentOwner);
+			const uint64_t key = (uint64_t(owner.Id()) << 32) | batch.Texture.Id();
+			const std::span<const float> ends = Textures.TimingOf(batch.Texture, owner);
+			if (ends.size() != batch.Block->Frames || ends.empty() || ends.size() > 4096) {
+				ENGINE_WARN(
+					"particle timeline {}: texture timing does not match emitter frame count",
+					batch.Texture.Text()
+				);
+				incomplete = true;
+				continue;
+			}
+			if (offsets.contains(key)) continue;
+			if (words.size() + ends.size() + 2 > PARTICLE_TIMELINE_MAX_WORDS) {
+				ENGINE_WARN(
+					"particle timeline {}: 16 MiB world timing budget exceeded", batch.Texture.Text()
+				);
+				incomplete = true;
+				continue;
+			}
+			const uint32_t offset = static_cast<uint32_t>(words.size());
+			offsets.emplace(key, offset);
+			words.push_back(static_cast<uint32_t>(ends.size()));
+			uint32_t bits = 0;
+			const float total = ends.back();
+			std::memcpy(&bits, &total, sizeof(bits));
+			words.push_back(bits);
+			for (float end : ends) {
+				std::memcpy(&bits, &end, sizeof(bits));
+				words.push_back(bits);
+			}
+		}
+
+		const uint32_t bytes = static_cast<uint32_t>(words.size() * sizeof(uint32_t));
+		SDL_GPUBufferCreateInfo info{};
+		info.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+		info.size = bytes;
+		SDL_GPUBuffer *next = gpu::CreateBuffer(Device, &info);
+		SDL_GPUTransferBufferCreateInfo transferInfo{};
+		transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+		transferInfo.size = bytes;
+		SDL_GPUTransferBuffer *staging = gpu::CreateTransferBuffer(Device, &transferInfo);
+		if (next == nullptr || staging == nullptr) {
+			if (next != nullptr) gpu::ReleaseBuffer(Device, next);
+			if (staging != nullptr) gpu::ReleaseTransferBuffer(Device, staging);
+			ENGINE_ERROR("particle timeline: could not allocate {} bytes: {}", bytes, SDL_GetError());
+			return false;
+		}
+		void *mapped = SDL_MapGPUTransferBuffer(Device, staging, false);
+		if (mapped == nullptr) {
+			gpu::ReleaseBuffer(Device, next);
+			gpu::ReleaseTransferBuffer(Device, staging);
+			return false;
+		}
+		std::memcpy(mapped, words.data(), bytes);
+		SDL_UnmapGPUTransferBuffer(Device, staging);
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(command);
+		if (copy == nullptr) {
+			gpu::ReleaseBuffer(Device, next);
+			gpu::ReleaseTransferBuffer(Device, staging);
+			return false;
+		}
+		const SDL_GPUTransferBufferLocation source{staging, 0};
+		const SDL_GPUBufferRegion destination{next, 0, bytes};
+		SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+		SDL_EndGPUCopyPass(copy);
+		gpu::ReleaseTransferBuffer(Device, staging);
+		if (pool.Timeline != nullptr) gpu::ReleaseBuffer(Device, pool.Timeline);
+		pool.Timeline = next;
+		pool.TimelineOffsets = std::move(offsets);
+		pool.TimelineRevision = Textures.TimingRevision();
+		pool.TimelineLayoutRevision = view.ParticleLayoutRevision;
+		pool.TimelineResidentRevision = view.ParticleResidentRevision;
+		pool.TimelineIncomplete = incomplete;
+		pool.TimelineOwner = view.ContentOwner;
+		std::fill(pool.ParamRevision.begin(), pool.ParamRevision.end(), ParticlePool::UNUPLOADED_REVISION);
+		return true;
+	}
+
 	void Renderer::Impl::ReleaseParticlePool() {
 		for (ParticleWorld &world : ParticleWorlds) {
 			ParticlePool &Particles = world.Pool;
@@ -736,7 +846,8 @@ namespace engine::render {
 				  &Particles.EmitterRuntime,
 				  &Particles.ParamUpdateBuffer,
 				  &Particles.CurveUpdateBuffer,
-				  &Particles.Seams}) {
+				  &Particles.Seams,
+				  &Particles.Timeline}) {
 				if (*buffer != nullptr) {
 					gpu::ReleaseBuffer(Device, *buffer);
 					*buffer = nullptr;
@@ -943,10 +1054,10 @@ namespace engine::render {
 			}
 
 			SDL_BindGPUComputePipeline(pass, ParticleStep);
-			SDL_GPUBuffer *const reads[4] = {
-				Particles.Work, Particles.Params, Particles.Curves, Particles.Seams
+			SDL_GPUBuffer *const reads[5] = {
+				Particles.Work, Particles.Params, Particles.Curves, Particles.Seams, Particles.Timeline
 			};
-			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 4);
+			SDL_BindGPUComputeStorageBuffers(pass, 0, reads, 5);
 
 			const float step[4] = {
 				Particles.Delta,
@@ -1060,9 +1171,26 @@ namespace engine::render {
 			ActiveParticleWorld->DrawPlanStamp.Valid = false;
 			return {};
 		}
+		const bool variableTimeline =
+			std::any_of(batches.begin(), batches.end(), [](const ParticleBatch &batch) {
+				return batch.Block != nullptr && batch.Block->VariableFlipbookTiming;
+			});
+		const bool timelineHasData = Particles.TimelineIncomplete || !Particles.TimelineOffsets.empty();
+		const bool authoredTimelineChanged =
+			Particles.TimelineResidentRevision != view.ParticleResidentRevision &&
+			(timelineHasData || variableTimeline);
+		// Fixed-rate emitters bind the one-word sentinel forever. Their layout may
+		// grow every frame without requiring another device allocation.
+		const bool timingChanged =
+			Particles.Timeline == nullptr ||
+			((timelineHasData || variableTimeline) &&
+			 (Particles.TimelineRevision != Textures.TimingRevision() ||
+			  Particles.TimelineLayoutRevision != view.ParticleLayoutRevision ||
+			  Particles.TimelineOwner != view.ContentOwner || authoredTimelineChanged));
+		if (timingChanged && !PrepareParticleTimeline(view, command)) return {};
 
 		const bool rebuildLayout =
-			!ActiveParticleWorld->PreparedRevisionValid ||
+			timingChanged || !ActiveParticleWorld->PreparedRevisionValid ||
 			ActiveParticleWorld->PreparedLayoutRevision != view.ParticleLayoutRevision ||
 			ActiveParticleWorld->PreparedBatches.size() != batches.size();
 		// A resident pool still has to advance when no authored emitter value did.
@@ -1242,6 +1370,22 @@ namespace engine::render {
 					continue;
 				}
 				const effects::EmitterBlock &block = *batch.Block;
+				uint32_t timelineOffset = 0;
+				if (block.VariableFlipbookTiming) {
+					if (block.InvalidFlipbookTiming) {
+						residentIncomplete = true;
+						continue;
+					}
+					const core::Name owner = TextureContentOwner(batch.Texture, view.ContentOwner);
+					const uint64_t key = (uint64_t(owner.Id()) << 32) | batch.Texture.Id();
+					const auto found = Particles.TimelineOffsets.find(key);
+					if (found == Particles.TimelineOffsets.end() || found->second == 0 ||
+						Textures.TimingOf(batch.Texture, owner).size() != block.Frames) {
+						residentIncomplete = true;
+						continue;
+					}
+					timelineOffset = found->second;
+				}
 
 				// **Brought up to date first, and left out of the frame if it cannot
 				// be.** The step reads a block's capacity out of the parameter table,
@@ -1262,7 +1406,7 @@ namespace engine::render {
 					if (needParams) {
 						uint32_t *const row = changedParams + params * (PARTICLE_PARAM_WORDS + 1);
 						row[0] = batch.Index;
-						WriteParticleParams(row + 1, block, *batch.Spawn, *batch.Runtime);
+						WriteParticleParams(row + 1, block, *batch.Spawn, *batch.Runtime, timelineOffset);
 						Particles.ParamRevision[batch.Index] = block.Revision;
 						params++;
 					}
@@ -1443,7 +1587,11 @@ namespace engine::render {
 			selectedAdditive = AdditiveParticleLayerColourPipeline;
 		}
 		if (selectedPipeline == nullptr || ActiveParticleWorld == nullptr || ParticleGroups.empty()) {
-			return 0;
+			return layer == TransparentLayerPhase::None
+					   ? DrawGpuParticleField(
+							 command, pass, viewProjection, eye, triangles, particlesDrawn, target
+						 )
+					   : 0;
 		}
 		ENGINE_PROFILE_CAT("draw particles", core::ProfileCategory::Render);
 		const std::span<const render::ParticleBatch> batches = ActiveParticleWorld->PreparedBatches;
@@ -1644,7 +1792,264 @@ namespace engine::render {
 			// had been submitted; the particles were on screen the whole time.
 		}
 
+		if (layer == TransparentLayerPhase::None) {
+			draws +=
+				DrawGpuParticleField(command, pass, viewProjection, eye, triangles, particlesDrawn, target);
+		}
 		return draws;
+	}
+
+	bool Renderer::Impl::ReserveGpuParticleField(uint32_t count) {
+		GpuParticleFieldWorld &field = *ActiveGpuParticleFieldWorld;
+		if (count == field.Capacity && field.States != nullptr) return true;
+		if (ForceGpuParticleFieldAllocationFailureForTests.exchange(false, std::memory_order_relaxed)) {
+			ENGINE_WARN("GPU particle field test fault rejected {} rows", count);
+			return false;
+		}
+
+		SDL_GPUBufferCreateInfo info{};
+		info.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
+					 SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+		info.size = count * static_cast<uint32_t>(sizeof(glm::vec4) * 2);
+		SDL_GPUBuffer *replacement = gpu::CreateBuffer(Device, &info);
+		if (replacement == nullptr) {
+			ENGINE_WARN(
+				"GPU particle field keeps {} rows after {}-row allocation failed: {}",
+				field.ActiveCount,
+				count,
+				SDL_GetError()
+			);
+			return false;
+		}
+		if (field.States != nullptr) gpu::ReleaseBuffer(Device, field.States);
+		field.States = replacement;
+		field.Capacity = count;
+		field.ActiveCount = count;
+		field.ResetPending = true;
+		return true;
+	}
+
+	bool Renderer::Impl::PrepareGpuParticleField(
+		const View &view, SDL_GPUCommandBuffer *command, uint32_t timingSlot
+	) {
+		ActiveGpuParticleFieldWorld = nullptr;
+		if (!view.GpuParticles.has_value() || !view.GpuParticles->Field.Enabled || command == nullptr ||
+			GpuParticleFieldStep == nullptr) {
+			return true;
+		}
+		ActiveGpuParticleFieldWorld = &GpuParticleFieldWorldFor(view.World, view.WorldName);
+		GpuParticleFieldWorld &state = *ActiveGpuParticleFieldWorld;
+		const GpuParticleFieldView &source = *view.GpuParticles;
+		const uint32_t requested = scene::NormalizeGpuParticleCount(source.Field.RequestedCount);
+		if ((state.States == nullptr || state.RequestedCount != requested) &&
+			!ReserveGpuParticleField(requested)) {
+			// An allocation failure intentionally retains the previous complete field.
+			return state.States != nullptr;
+		}
+		const bool changed = state.Seed != source.Field.Seed || state.Layers != source.Field.Layers;
+		state.RequestedCount = requested;
+		state.Seed = source.Field.Seed;
+		state.Layers = source.Field.Layers;
+		state.Field = source.Field;
+		state.Lighting = view.Lighting;
+		if (changed) state.ResetPending = true;
+
+		struct FieldUniforms {
+			glm::vec4 CentreTime;
+			glm::vec4 Radii;
+			glm::vec4 Wind;
+			glm::vec4 Control;
+		};
+		const scene::TornadoParameters parameters = scene::SanitizeTornadoParameters(source.Storm);
+		state.TopHeight = parameters.TopHeight;
+		state.CentreY = source.Centre.Y;
+		state.Centre = source.Centre;
+		state.CoreRadius = parameters.CoreRadius;
+		state.InfluenceRadius = parameters.InfluenceRadius;
+		const FieldUniforms uniforms{
+			{source.Centre.X, source.Centre.Y, source.Centre.Z, source.Seconds},
+			{parameters.CoreRadius, parameters.InfluenceRadius, parameters.TopHeight, view.ParticleDelta},
+			{parameters.PeakTangentialSpeed,
+			 parameters.PeakInflowSpeed,
+			 parameters.PeakUpdraftSpeed,
+			 parameters.RainRate},
+			{static_cast<float>(state.ActiveCount),
+			 static_cast<float>(state.Seed),
+			 state.ResetPending ? 1.0f : 0.0f,
+			 static_cast<float>(state.Layers)},
+		};
+		SDL_GPUStorageBufferReadWriteBinding output{};
+		output.buffer = state.States;
+		static const core::Name GPU_PARTICLE_FIELD_NAME("gpu-particle-field");
+		const uint32_t opened =
+			timingSlot < VulkanTimestamps::SLOTS ? Timestamps.Mark(command) : VulkanTimestamps::MARKS;
+		SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, nullptr, 0, &output, 1);
+		if (pass == nullptr) {
+			ENGINE_ERROR("GPU particle field: SDL_BeginGPUComputePass: {}", SDL_GetError());
+			return false;
+		}
+		SDL_BindGPUComputePipeline(pass, GpuParticleFieldStep);
+		SDL_PushGPUComputeUniformData(command, 0, &uniforms, sizeof(uniforms));
+		SDL_DispatchGPUCompute(pass, (state.ActiveCount + 255u) / 256u, 1, 1);
+		SDL_EndGPUComputePass(pass);
+		if (timingSlot < VulkanTimestamps::SLOTS) {
+			const uint32_t closed = Timestamps.Mark(command);
+			if (opened < VulkanTimestamps::MARKS && closed < VulkanTimestamps::MARKS) {
+				PendingMarks[timingSlot].push_back({GPU_PARTICLE_FIELD_NAME, opened, closed});
+			}
+		}
+		state.ResetPending = false;
+		state.SubmissionPending = true;
+		(void)timingSlot;
+		return true;
+	}
+
+	uint32_t Renderer::Impl::DrawGpuParticleField(
+		SDL_GPUCommandBuffer *command,
+		SDL_GPURenderPass *pass,
+		const glm::mat4 &viewProjection,
+		const core::CFrame &eye,
+		uint64_t &triangles,
+		uint32_t &particlesDrawn,
+		WorldColourTarget target
+	) {
+		if (ActiveGpuParticleFieldWorld == nullptr || ActiveGpuParticleFieldWorld->States == nullptr ||
+			ActiveGpuParticleFieldWorld->ActiveCount == 0 || pass == nullptr)
+			return 0;
+		auto *pipeline =
+			target == WorldColourTarget::Hdr ? HdrGpuParticleFieldPipeline : GpuParticleFieldPipeline;
+		if (pipeline == nullptr) return 0;
+		BindPipeline(pass, pipeline, PipelineFamily::Other);
+		const SDL_GPUBufferBinding states{ActiveGpuParticleFieldWorld->States, 0};
+		SDL_BindGPUVertexBuffers(pass, 0, &states, 1);
+		const core::Vector3 forward = eye.VectorToWorldSpace({0.0f, 0.0f, -1.0f});
+		const core::Vector3 right = eye.VectorToWorldSpace({1.0f, 0.0f, 0.0f});
+		const core::Vector3 up = eye.VectorToWorldSpace({0.0f, 1.0f, 0.0f});
+		struct FieldVertexUniforms {
+			glm::mat4 ViewProjection;
+			glm::vec4 CameraRight;
+			glm::vec4 CameraUp;
+			glm::vec4 CameraForward;
+			glm::vec4 Options;
+			glm::vec4 FieldBounds;
+			glm::vec4 FieldDensity;
+			glm::vec4 Condensation;
+			glm::vec4 Rain;
+			glm::vec4 Debris;
+			glm::vec4 Sizes;
+		};
+		struct FieldMaterial {
+			glm::vec4 Flags;
+			glm::vec4 Illumination;
+			glm::vec4 FogColour;
+			glm::vec4 Fog;
+			glm::vec4 Eye;
+		};
+		FieldVertexUniforms uniforms{
+			viewProjection,
+			{right.X, right.Y, right.Z, 0.0f},
+			{up.X, up.Y, up.Z, 0.0f},
+			{forward.X, forward.Y, forward.Z, 0.0f},
+			{ActiveGpuParticleFieldWorld->TopHeight,
+			 ActiveGpuParticleFieldWorld->CentreY,
+			 static_cast<float>(ActiveGpuParticleFieldWorld->Seed),
+			 0.0f},
+			{ActiveGpuParticleFieldWorld->Centre.X,
+			 ActiveGpuParticleFieldWorld->Centre.Y,
+			 ActiveGpuParticleFieldWorld->Centre.Z,
+			 ActiveGpuParticleFieldWorld->InfluenceRadius},
+			{ActiveGpuParticleFieldWorld->CoreRadius, 0.0f, 0.0f, 0.0f},
+			{ActiveGpuParticleFieldWorld->Field.CondensationColor.R,
+			 ActiveGpuParticleFieldWorld->Field.CondensationColor.G,
+			 ActiveGpuParticleFieldWorld->Field.CondensationColor.B,
+			 ActiveGpuParticleFieldWorld->Field.CondensationAlpha},
+			{ActiveGpuParticleFieldWorld->Field.RainColor.R,
+			 ActiveGpuParticleFieldWorld->Field.RainColor.G,
+			 ActiveGpuParticleFieldWorld->Field.RainColor.B,
+			 ActiveGpuParticleFieldWorld->Field.RainAlpha},
+			{ActiveGpuParticleFieldWorld->Field.DebrisColor.R,
+			 ActiveGpuParticleFieldWorld->Field.DebrisColor.G,
+			 ActiveGpuParticleFieldWorld->Field.DebrisColor.B,
+			 ActiveGpuParticleFieldWorld->Field.DebrisAlpha},
+			{ActiveGpuParticleFieldWorld->Field.CondensationSize,
+			 ActiveGpuParticleFieldWorld->Field.RainSize,
+			 ActiveGpuParticleFieldWorld->Field.DebrisSize,
+			 0.0f},
+		};
+		FieldMaterial material{};
+		material.Flags = {0.0f, 0.0f, 0.75f, 1.0f};
+		material.Illumination = {
+			ActiveGpuParticleFieldWorld->Lighting.Ambient.R +
+				ActiveGpuParticleFieldWorld->Lighting.OutdoorAmbient.R * 0.5f +
+				ActiveGpuParticleFieldWorld->Lighting.Direct.R * 0.5f,
+			ActiveGpuParticleFieldWorld->Lighting.Ambient.G +
+				ActiveGpuParticleFieldWorld->Lighting.OutdoorAmbient.G * 0.5f +
+				ActiveGpuParticleFieldWorld->Lighting.Direct.G * 0.5f,
+			ActiveGpuParticleFieldWorld->Lighting.Ambient.B +
+				ActiveGpuParticleFieldWorld->Lighting.OutdoorAmbient.B * 0.5f +
+				ActiveGpuParticleFieldWorld->Lighting.Direct.B * 0.5f,
+			1.0f,
+		};
+		material.FogColour = {
+			ActiveGpuParticleFieldWorld->Lighting.FogColor.R,
+			ActiveGpuParticleFieldWorld->Lighting.FogColor.G,
+			ActiveGpuParticleFieldWorld->Lighting.FogColor.B,
+			1.0f,
+		};
+		material.Fog = {
+			ActiveGpuParticleFieldWorld->Lighting.FogStart,
+			ActiveGpuParticleFieldWorld->Lighting.FogEnd,
+			0.0f,
+			0.0f,
+		};
+		material.Eye = {eye.Position.X, eye.Position.Y, eye.Position.Z, 0.0f};
+		SDL_PushGPUFragmentUniformData(command, 0, &material, sizeof(material));
+		SDL_GPUTextureSamplerBinding binding{FallbackTexture, Textures.Sampler()};
+		SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+		const uint32_t drawBudget = std::min(
+			GpuParticleFieldDrawBudget(ActiveGpuParticleFieldWorld->ActiveCount),
+			ActiveGpuParticleFieldWorld->ActiveCount / 2
+		);
+		if (drawBudget == 0) return 0;
+		// Match the reference condensation path with twelve far-to-near buckets.
+		// Rain keeps one bounded pass because TornadoSim's authored rain emitters
+		// already provide the dense depth cues a repeated field pass would add.
+		// This avoids sorting or a second 50M-sized buffer while keeping cloud
+		// alpha compositing stable.
+		constexpr uint32_t depthSlices = 12;
+		// Camera-forward depth grows away from this camera, so the largest bucket
+		// is farthest and must blend first.
+		for (uint32_t slice = depthSlices; slice-- > 0;) {
+			uniforms.Options.w = static_cast<float>(slice);
+			SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
+			SDL_DrawGPUPrimitives(pass, 4, drawBudget, 0, 0);
+		}
+		uniforms.Options.w = 0.0f;
+		SDL_PushGPUVertexUniformData(command, 0, &uniforms, sizeof(uniforms));
+		SDL_DrawGPUPrimitives(pass, 4, drawBudget, 0, drawBudget);
+		particlesDrawn += drawBudget * (depthSlices + 1);
+		triangles += static_cast<uint64_t>(drawBudget) * (depthSlices + 1) * 2;
+		return depthSlices + 1;
+	}
+
+	void Renderer::Impl::ReleaseGpuParticleField() {
+		for (GpuParticleFieldWorld &field : GpuParticleFieldWorlds) {
+			if (field.States != nullptr) gpu::ReleaseBuffer(Device, field.States);
+		}
+		GpuParticleFieldWorlds.clear();
+		ActiveGpuParticleFieldWorld = nullptr;
+		if (GpuParticleFieldStep != nullptr) SDL_ReleaseGPUComputePipeline(Device, GpuParticleFieldStep);
+		if (GpuParticleFieldPipeline != nullptr)
+			SDL_ReleaseGPUGraphicsPipeline(Device, GpuParticleFieldPipeline);
+		if (HdrGpuParticleFieldPipeline != nullptr)
+			SDL_ReleaseGPUGraphicsPipeline(Device, HdrGpuParticleFieldPipeline);
+		GpuParticleFieldStep = nullptr;
+		GpuParticleFieldPipeline = nullptr;
+		HdrGpuParticleFieldPipeline = nullptr;
+	}
+
+	void test_support::SetForceGpuParticleFieldAllocationFailure(bool enabled) {
+		ForceGpuParticleFieldAllocationFailureForTests.store(enabled, std::memory_order_relaxed);
 	}
 
 	bool Renderer::Impl::ReserveRibbons(uint32_t count) {

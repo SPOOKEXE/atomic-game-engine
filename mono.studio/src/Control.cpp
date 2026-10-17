@@ -9,15 +9,13 @@
 // **`engine_info` is replaced rather than extended.** The shared one knows about
 // worlds; this one also knows which game file is open and how many frames have
 // been drawn, and a client should get one answer to one question rather than two
-// tools that overlap. `Surface::Add` replaces by name, which is what makes that
-// a one-line decision.
+// tools that overlap. The Studio product hook owns that row.
 //
 // Every tool here runs on the editor thread, called from `PumpControl` in the
 // frame loop, because `Universe::Enter` aborts on a foreign one.
 
 #include "ControlAutomation.hpp"
 
-#include <engine/control/Features.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/Log.hpp>
@@ -78,36 +76,6 @@ namespace studio {
 			return directory;
 		}
 
-		uint8_t MouseButton(std::string_view button) {
-			if (button == "left") {
-				return SDL_BUTTON_LEFT;
-			}
-			if (button == "middle") {
-				return SDL_BUTTON_MIDDLE;
-			}
-			if (button == "right") {
-				return SDL_BUTTON_RIGHT;
-			}
-			return 0;
-		}
-
-		SDL_Keymod KeyboardModifiers(uint8_t modifiers) {
-			SDL_Keymod translated = SDL_KMOD_NONE;
-			if ((modifiers & automation::KeyboardModifierShift) != 0) {
-				translated |= SDL_KMOD_SHIFT;
-			}
-			if ((modifiers & automation::KeyboardModifierControl) != 0) {
-				translated |= SDL_KMOD_CTRL;
-			}
-			if ((modifiers & automation::KeyboardModifierAlt) != 0) {
-				translated |= SDL_KMOD_ALT;
-			}
-			if ((modifiers & automation::KeyboardModifierGui) != 0) {
-				translated |= SDL_KMOD_GUI;
-			}
-			return translated;
-		}
-
 		const Keybind *BindingFor(Action action) {
 			for (const Keybind &binding : Keybinds::All()) {
 				if (binding.Bound == action) {
@@ -115,6 +83,13 @@ namespace studio {
 				}
 			}
 			return nullptr;
+		}
+
+		json CameraPose(const engine::core::CFrame &frame) {
+			return {
+				{"position", {frame.Position.X, frame.Position.Y, frame.Position.Z}},
+				{"rotation", {frame.QuaternionX, frame.QuaternionY, frame.QuaternionZ, frame.QuaternionW}},
+			};
 		}
 
 		// Where `mcpbridge` is, spelled the way somebody would have to type it.
@@ -180,39 +155,6 @@ namespace studio {
 		}
 	}
 
-	void Editor::EnableControlFeatures() {
-		if (FactoryHost != nullptr) {
-			// A factory session owns world state and lifecycle. Ordinary Studio
-			// universe tools would mutate the same world outside that session.
-			const std::array features{
-				engine::control::features::Architecture(),
-				engine::control::features::Script(),
-				engine::control::features::Diagnostics(),
-				engine::control::features::Resources(),
-				engine::control::features::Prompts(),
-				engine::control::features::Discovery(),
-			};
-			ControlSurface.Enable(features);
-			FactoryHost->InstallTools(ControlSurface, true);
-			return;
-		}
-
-		const std::array features{
-			engine::control::features::Universe(*Universe),
-			engine::control::features::Architecture(),
-			engine::control::features::Script(),
-			engine::control::features::Diagnostics(),
-			engine::control::features::Build(),
-			engine::control::features::Resources(),
-			engine::control::features::Prompts(),
-			engine::control::features::Discovery(),
-			engine::control::features::Custom("studio", [this](engine::control::Surface &) {
-				RegisterControlTools();
-			}),
-		};
-		ControlSurface.Enable(features);
-	}
-
 	bool Editor::StartControl() {
 		// **The port field is seeded whether or not the server starts**, because
 		// the panel's Start button has to offer something sensible in the case
@@ -257,10 +199,10 @@ namespace studio {
 		ControlServer.Pump([this](const std::string &line) { return ControlSurface.Answer(line); });
 	}
 
-	void Editor::RegisterControlTools() {
+	void Editor::RegisterControlTools(engine::control::HookRegistration &registration) {
 		Editor *editor = this;
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"engine_info",
 				"The editor's own state: which game is open, whether it has unsaved changes, how many "
@@ -298,7 +240,69 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
+			Tool{
+				"viewport_behavior_diagnostics",
+				"One completed focused viewport's virtual behavior pose and bounded culling, LOD, light, "
+				"particle, and portal evidence. This is a read-only product diagnostic for capture gates.",
+				[] { return json{{"type", "object"}, {"additionalProperties", false}}; },
+				[editor](const json &, std::string &) {
+					// The scene texture and this result publish at the same fence. The UI's
+					// ViewportResults mirror is refreshed only while its panel is drawn, so
+					// it can still describe a cached redraw after an MCP screenshot request.
+					// Match the View menu's focused panel so this read-only tool reports the
+					// same lock state the user just changed.
+					const size_t viewport = editor->FocusedViewport;
+					const ViewportState *diagnosticViewport = editor->ExtraAt(viewport);
+					const ViewportDiagnostics &diagnostics = diagnosticViewport != nullptr
+																 ? diagnosticViewport->Diagnostics
+																 : editor->MainViewportDiagnostics;
+					engine::core::CFrame inspection =
+						diagnosticViewport != nullptr ? diagnosticViewport->Frame : editor->CameraFrame;
+					if (viewport < editor->Overlays.size() && editor->Overlays[viewport].Presented &&
+						editor->Overlays[viewport].PresentedWorld == editor->ViewportWorld(viewport)) {
+						inspection = editor->Overlays[viewport].PresentedFrame;
+					}
+					const engine::render::FrameResult frame = editor->Renderer.SceneFrameResult(viewport);
+					const engine::core::CFrame behaviour = diagnostics.EffectiveFrustum(inspection);
+
+					return json{
+						{"completed", frame.Submitted},
+						{"viewport", viewport},
+						{"frustum_locked", diagnostics.FrustumLocked},
+						{"inspection_pose", CameraPose(inspection)},
+						{"behavior_pose", CameraPose(behaviour)},
+						{"culling",
+						 json{
+							 {"visible_draw_calls", frame.DrawCalls},
+							 {"frustum_rejected", frame.Culled},
+							 {"submitted_draw_calls", frame.DrawCalls},
+							 {"submitted_triangles", frame.Triangles}
+						 }},
+						{"lod",
+						 json{
+							 {"enabled", editor->Prefs.EnableLODCulling},
+							 {"submitted_triangles", frame.Triangles}
+						 }},
+						{"lighting", json{{"selected_lights", editor->Lights.size()}}},
+						{"particles",
+						 json{
+							 {"batches", editor->Particles.Batches.size()},
+							 {"blocks", editor->Particles.BlockCount},
+							 {"layout_revision", editor->Particles.LayoutRevision}
+						 }},
+						{"portal_demand",
+						 json{
+							 {"requested_portals", editor->Portals.size()},
+							 {"submitted_passes", frame.PortalPasses},
+							 {"surface_budget_exceeded", frame.SurfaceBudgetExceeded}
+						 }},
+					};
+				},
+			}
+		);
+
+		registration.Add(
 			Tool{
 				"world_run",
 				"Starts or stops one scene. `play` runs both halves in this process, `server` runs only "
@@ -346,7 +350,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"selection_get",
 				"What is selected in the editor right now.",
@@ -364,7 +368,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"select",
 				"Selects instances in a scene, replacing whatever was selected.",
@@ -400,7 +404,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"log_tail",
 				"The tail of the output panel: the engine log and everything scripts have printed.",
@@ -432,7 +436,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"list_command_palette",
 				"Lists Studio command-palette entries from the live operator table, including stable ids, "
@@ -480,7 +484,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"run_palette_command",
 				"Runs one Studio command-palette entry by the stable id returned by list_command_palette. "
@@ -523,7 +527,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"screenshot",
 				"Queues BMP screenshots under the system temporary directory. `scene` captures visible "
@@ -630,253 +634,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
-			Tool{
-				"emulate_click",
-				"Queues one mouse click at Studio client coordinates. The press and release cross rendered "
-				"frames so ImGui observes the same lifecycle as physical input.",
-				[] {
-					return json{
-						{"type", "object"},
-						{"properties",
-						 json{
-							 {"x", json{{"type", "number"}}},
-							 {"y", json{{"type", "number"}}},
-							 {"button",
-							  json{
-								  {"type", "string"},
-								  {"enum", json::array({"left", "middle", "right"})},
-								  {"description", "Defaults to left."},
-							  }},
-						 }},
-						{"required", json::array({"x", "y"})},
-					};
-				},
-				[editor](const json &arguments, std::string &failure) -> json {
-					if (editor->Window == nullptr) {
-						failure = "Studio has no window in headless mode";
-						return nullptr;
-					}
-					if (editor->PendingControlClick.has_value()) {
-						failure = "an emulated click is already in progress";
-						return nullptr;
-					}
-					if (!arguments.contains("x") || !arguments["x"].is_number() || !arguments.contains("y") ||
-						!arguments["y"].is_number()) {
-						failure = "x and y must be numbers";
-						return nullptr;
-					}
-
-					const float x = arguments["x"].get<float>();
-					const float y = arguments["y"].get<float>();
-					int width = 0;
-					int height = 0;
-					(void)SDL_GetWindowSize(editor->Window, &width, &height);
-					if (x < 0.0f || y < 0.0f || x >= static_cast<float>(width) ||
-						y >= static_cast<float>(height)) {
-						failure = "click coordinates are outside the Studio window";
-						return nullptr;
-					}
-
-					const std::string buttonName = arguments.value("button", std::string("left"));
-					const uint8_t button = MouseButton(buttonName);
-					if (button == 0) {
-						failure = "button must be left, middle or right";
-						return nullptr;
-					}
-
-					SDL_Event motion{};
-					motion.type = SDL_EVENT_MOUSE_MOTION;
-					motion.motion.timestamp = SDL_GetTicksNS();
-					motion.motion.windowID = SDL_GetWindowID(editor->Window);
-					motion.motion.x = x;
-					motion.motion.y = y;
-					if (!SDL_PushEvent(&motion)) {
-						failure = std::string("could not queue mouse motion: ") + SDL_GetError();
-						return nullptr;
-					}
-
-					SDL_Event press{};
-					press.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
-					press.button.timestamp = SDL_GetTicksNS();
-					press.button.windowID = SDL_GetWindowID(editor->Window);
-					press.button.button = button;
-					press.button.down = true;
-					press.button.clicks = 1;
-					press.button.x = x;
-					press.button.y = y;
-					if (!SDL_PushEvent(&press)) {
-						failure = std::string("could not queue mouse press: ") + SDL_GetError();
-						return nullptr;
-					}
-
-					editor->PendingControlClick = Editor::ControlClick{x, y, button, false};
-					return json{
-						{"queued", true},
-						{"x", x},
-						{"y", y},
-						{"button", buttonName},
-					};
-				},
-			}
-		);
-
-		ControlSurface.Add(
-			Tool{
-				"emulate_key",
-				"Queues one named keyboard key. Optional modifiers are shift, control, alt and gui. "
-				"The press and release cross rendered frames so ImGui observes a physical key lifecycle.",
-				[] {
-					return json{
-						{"type", "object"},
-						{"properties",
-						 json{
-							 {"key",
-							  json{
-								  {"type", "string"},
-								  {"description", "An SDL key name such as A, Return or Escape."}
-							  }},
-							 {"modifiers",
-							  json{
-								  {"type", "array"},
-								  {"items",
-								   json{
-									   {"type", "string"},
-									   {"enum", json::array({"shift", "control", "alt", "gui"})}
-								   }},
-								  {"uniqueItems", true},
-							  }},
-						 }},
-						{"required", json::array({"key"})},
-					};
-				},
-				[editor](const json &arguments, std::string &failure) -> json {
-					if (editor->Window == nullptr) {
-						failure = "Studio has no window in headless mode";
-						return nullptr;
-					}
-					if (editor->PendingControlKey.has_value()) {
-						failure = "an emulated key is already in progress";
-						return nullptr;
-					}
-					if (!arguments.contains("key") || !arguments["key"].is_string()) {
-						failure = "key must be a string";
-						return nullptr;
-					}
-
-					std::vector<std::string> modifierNames;
-					if (arguments.contains("modifiers")) {
-						if (!arguments["modifiers"].is_array()) {
-							failure = "modifiers must be an array";
-							return nullptr;
-						}
-						for (const json &modifier : arguments["modifiers"]) {
-							if (!modifier.is_string()) {
-								failure = "each modifier must be a string";
-								return nullptr;
-							}
-							modifierNames.push_back(modifier.get<std::string>());
-						}
-					}
-
-					uint8_t modifierBits = automation::KeyboardModifierNone;
-					if (!automation::ParseKeyboardModifiers(modifierNames, modifierBits, failure)) {
-						return nullptr;
-					}
-					const SDL_Keymod modifiers = KeyboardModifiers(modifierBits);
-					const std::string keyName = arguments["key"].get<std::string>();
-					SDL_Keycode key = SDL_GetKeyFromName(keyName.c_str());
-					SDL_Scancode scancode = SDL_GetScancodeFromName(keyName.c_str());
-					if (key == SDLK_UNKNOWN && scancode == SDL_SCANCODE_UNKNOWN) {
-						failure = "key is not a recognized SDL key name";
-						return nullptr;
-					}
-					if (scancode == SDL_SCANCODE_UNKNOWN) {
-						SDL_Keymod derivedModifiers = modifiers;
-						scancode = SDL_GetScancodeFromKey(key, &derivedModifiers);
-					}
-					if (key == SDLK_UNKNOWN) {
-						key = SDL_GetKeyFromScancode(scancode, modifiers, true);
-					}
-
-					SDL_Event press{};
-					press.type = SDL_EVENT_KEY_DOWN;
-					press.key.timestamp = SDL_GetTicksNS();
-					press.key.windowID = SDL_GetWindowID(editor->Window);
-					press.key.scancode = scancode;
-					press.key.key = key;
-					press.key.mod = modifiers;
-					press.key.down = true;
-					press.key.repeat = false;
-					if (!SDL_PushEvent(&press)) {
-						failure = std::string("could not queue key press: ") + SDL_GetError();
-						return nullptr;
-					}
-
-					editor->PendingControlKey = Editor::ControlKey{
-						static_cast<uint32_t>(scancode),
-						static_cast<uint32_t>(key),
-						static_cast<uint16_t>(modifiers),
-						false,
-					};
-					return json{
-						{"queued", true},
-						{"key", keyName},
-						{"modifiers", modifierNames},
-					};
-				},
-			}
-		);
-
-		ControlSurface.Add(
-			Tool{
-				"emulate_text",
-				"Queues UTF-8 text for the focused Studio text field. Use emulate_key for shortcuts and "
-				"non-text keys.",
-				[] {
-					return json{
-						{"type", "object"},
-						{"properties", json{{"text", json{{"type", "string"}, {"maxLength", 16384}}}}},
-						{"required", json::array({"text"})},
-					};
-				},
-				[editor](const json &arguments, std::string &failure) -> json {
-					if (editor->Window == nullptr) {
-						failure = "Studio has no window in headless mode";
-						return nullptr;
-					}
-					if (editor->PendingControlText.has_value()) {
-						failure = "emulated text is already in progress";
-						return nullptr;
-					}
-					if (!arguments.contains("text") || !arguments["text"].is_string()) {
-						failure = "text must be a string";
-						return nullptr;
-					}
-
-					std::string text = arguments["text"].get<std::string>();
-					if (!automation::ValidateTextInput(text, failure)) {
-						return nullptr;
-					}
-					editor->PendingControlText = Editor::ControlText{std::move(text), false};
-
-					SDL_Event input{};
-					input.type = SDL_EVENT_TEXT_INPUT;
-					input.text.timestamp = SDL_GetTicksNS();
-					input.text.windowID = SDL_GetWindowID(editor->Window);
-					input.text.text = editor->PendingControlText->Text.c_str();
-					if (!SDL_PushEvent(&input)) {
-						editor->PendingControlText.reset();
-						failure = std::string("could not queue text input: ") + SDL_GetError();
-						return nullptr;
-					}
-
-					return json{{"queued", true}, {"bytes", editor->PendingControlText->Text.size()}};
-				},
-			}
-		);
-
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"open_window",
 				"Shows, restores and raises the Studio window, then reports its client geometry.",
@@ -906,7 +664,7 @@ namespace studio {
 			}
 		);
 
-		ControlSurface.Add(
+		registration.Add(
 			Tool{
 				"set_window_geometry",
 				"Sets the Studio client window position and size, then reports the geometry accepted by the "
@@ -985,25 +743,34 @@ namespace studio {
 	}
 
 	void Editor::FinishControlAutomationFrame() {
+		const uint32_t window = Window == nullptr ? 0 : SDL_GetWindowID(Window);
 		if (ControlScreenshotIssued && !Renderer.CapturePending()) {
 			ControlScreenshots.pop_front();
 			ControlScreenshotIssued = false;
 		}
 
 		if (PendingControlClick.has_value() && PendingControlClick->DownProcessed) {
+			SDL_Event motion{};
+			motion.type = SDL_EVENT_MOUSE_MOTION;
+			motion.motion.timestamp = SDL_GetTicksNS();
+			motion.motion.windowID = window;
+			motion.motion.x = PendingControlClick->X;
+			motion.motion.y = PendingControlClick->Y;
 			SDL_Event release{};
 			release.type = SDL_EVENT_MOUSE_BUTTON_UP;
 			release.button.timestamp = SDL_GetTicksNS();
-			release.button.windowID = SDL_GetWindowID(Window);
+			release.button.windowID = window;
 			release.button.button = PendingControlClick->Button;
 			release.button.down = false;
 			release.button.clicks = 1;
 			release.button.x = PendingControlClick->X;
 			release.button.y = PendingControlClick->Y;
-			if (!SDL_PushEvent(&release)) {
+			if (!SDL_PushEvent(&motion) || !SDL_PushEvent(&release)) {
 				Say(std::string("control: could not release emulated click: ") + SDL_GetError(),
 					engine::core::LogLevel::Error);
 			} else {
+				Interface.QueueAutomationEvent(motion);
+				Interface.QueueAutomationEvent(release);
 				PendingControlClick.reset();
 			}
 		}
@@ -1012,7 +779,7 @@ namespace studio {
 			SDL_Event release{};
 			release.type = SDL_EVENT_KEY_UP;
 			release.key.timestamp = SDL_GetTicksNS();
-			release.key.windowID = SDL_GetWindowID(Window);
+			release.key.windowID = window;
 			release.key.scancode = static_cast<SDL_Scancode>(PendingControlKey->Scancode);
 			release.key.key = static_cast<SDL_Keycode>(PendingControlKey->Key);
 			// Modifiers are released with the key so a shortcut cannot leave ImGui

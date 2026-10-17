@@ -236,6 +236,7 @@ TEST_CASE("what a machine works out for itself is not sent", "[replication][defa
 	// two was excluded, so the authority's screen rectangle crossed to every
 	// client and was overwritten by that client's next layout pass.
 	CHECK(LocalToTheClient("gui.Canvas"));
+	CHECK(LocalToTheClient("gui.CanvasTransform"));
 	CHECK(LocalToTheClient("gui.Resolved"));
 
 	// And what an author wrote still crosses, which is the line the whole gui
@@ -296,6 +297,7 @@ TEST_CASE("a serialiser is not enough to cross, and the two that say so", "[repl
 	CHECK(engine::replication::CannotBeSigned("scene.ShaderSource"));
 	CHECK(engine::replication::CannotBeSigned("gui.NodeCanvasNode"));
 	CHECK(engine::replication::CannotBeSigned("gui.NodeCanvasGroup"));
+	CHECK(engine::replication::CannotBeSigned("gui.VirtualCollection"));
 
 	// And the ordinary case, so this is a rule rather than a list: a component
 	// whose bytes *can* be hashed is signed, and declaring it here would buy a
@@ -364,7 +366,7 @@ TEST_CASE("the set is derived, and never contradicts the exclusions", "[replicat
 		CHECK_FALSE(LocalToTheClient(component.Name));
 
 		// And nothing that is neither a world's own state, nor part of an
-		// instance's identity, nor one of the script rows the table names.
+		// instance's identity, nor one of the script rows or world resources the table names.
 		const bool prefixed = component.Name.starts_with("scene.") || component.Name.starts_with("gui.");
 		const bool instance = component.Name == "ecs.Hierarchy" || component.Name == "ecs.InstanceName" ||
 							  component.Name == "ecs.InstanceClass";
@@ -372,7 +374,9 @@ TEST_CASE("the set is derived, and never contradicts the exclusions", "[replicat
 							  component.Name == "script.JavaScriptSourceContainer" ||
 							  component.Name == "script.CodeSourceContainerSelector" ||
 							  component.Name == "script.Disabled" || component.Name == "script.Program";
-		CHECK((prefixed || instance || scripted));
+		const bool resource = component.Name == "ecs.AttributeTable" || component.Name == "physics.Storm";
+		if (resource) CHECK(component.Resource);
+		CHECK((prefixed || instance || scripted || resource));
 	}
 }
 
@@ -451,7 +455,6 @@ TEST_CASE("every ecs component is classified rather than left to a prefix", "[re
 		// rather than a name - so they did not start with `ecs.` and this walk
 		// skipped them. Naming them is what let this test ask the question.
 		constexpr std::string_view NEVER_CROSSES[] = {
-			"ecs.AttributeTable",
 			"ecs.DirtyBits",
 			"ecs.WorldTime",
 			"ecs.NotArchivable",
@@ -529,7 +532,9 @@ TEST_CASE("only what a system writes or a hash cannot cover is observed", "[repl
 	// A signature hashes the object representation, and a `std::string`'s object
 	// representation is a pointer - so `gui.Label`, `gui.Entry`, the two
 	// node-canvas records and `script.Program` cannot be signed at all and are
-	// observed instead. That is the mechanism `Authority::Resign` already names
+	// observed instead. Owning world resources, including attributes, use the
+	// same detector and their encoded values are offered through the resource path.
+	// That is the mechanism `Authority::Resign` already names
 	// when it declines a non-trivial component rather than another detector.
 	//
 	// Asserted as a closed set rather than as a count, because the list depends
@@ -543,7 +548,8 @@ TEST_CASE("only what a system writes or a hash cannot cover is observed", "[repl
 			(component.Name == "scene.Transform" || component.Name == "scene.Motion" ||
 			 component.Name == "gui.Label" || component.Name == "gui.Entry" ||
 			 component.Name == "gui.NodeCanvasNode" || component.Name == "gui.NodeCanvasGroup" ||
-			 component.Name == "script.Program")
+			 component.Name == "script.Program" || component.Name == "ecs.AttributeTable" ||
+			 component.Name == "physics.Storm")
 		);
 	}
 }
@@ -568,4 +574,12 @@ TEST_CASE("nothing is declared twice and every name is qualified", "[replication
 			CHECK(table[outer].Name != table[inner].Name);
 		}
 	}
+}
+
+TEST_CASE("attributes cross as an observed owner-selected resource", "[replication][defaults]") {
+	defaults_test::Ready();
+	const auto *attributes = Row("ecs.AttributeTable");
+	REQUIRE(attributes != nullptr);
+	CHECK(attributes->Resource);
+	CHECK(attributes->Detection == ChangeDetection::Observed);
 }

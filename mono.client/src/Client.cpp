@@ -1,25 +1,28 @@
+#include "ControlHooks.hpp"
 #include "DataCaptureDriver.hpp"
 #include "DataFactoryPausedPresentation.hpp"
+#include "DisplayedSceneView.hpp"
 #include "NamedCaptureView.hpp"
+#include "PortalReadiness.hpp"
 
+#include <engine/assets/ContentHash.hpp>
 #include <engine/audio/Wav.hpp>
-#include <engine/control/Features.hpp>
-#include <engine/control/features/AudioObservation.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/control/features/DataCapture.hpp>
-#include <engine/control/features/DataFactory.hpp>
 #include <engine/control/features/DataScene.hpp>
-#include <engine/control/features/RigExport.hpp>
+#include <engine/control/features/PhysicsObservation.hpp>
 #include <engine/control/features/Script.hpp>
-#include <engine/control/features/TemporalSample.hpp>
 #include <engine/control/features/Universe.hpp>
-#include <engine/control/features/VisibilityObservation.hpp>
+#include <engine/core/Assert.hpp>
+#include <engine/core/BenchmarkReport.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
+#include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/effects/Ribbon.hpp>
 #include <engine/examples/DemosLoader.hpp>
-#include <engine/examples/Shooting.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>
@@ -31,6 +34,7 @@
 #include <engine/gui/SettingsMenu.hpp>
 #include <engine/gui/Typing.hpp>
 #include <engine/input/Translate.hpp>
+#include <engine/net/LossyTransport.hpp>
 #include <engine/parallel/Jobs.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/parallel/ProcessChannel.hpp>
@@ -49,6 +53,7 @@
 #include <engine/scene/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+#include <engine/script/DataSceneService.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/world/HostLink.hpp>
@@ -65,25 +70,119 @@
 #include <client/Client.hpp>
 #include <client/DataScriptPackage.hpp>
 #include <client/DataScriptPackageTransaction.hpp>
+#include <client/GuiActions.hpp>
 #include <client/Replicated.hpp>
 #include <client/WorldSystems.hpp>
 #include <cmath>
 #include <cstddef>
 #include <fstream>
+#include <map>
 #include <network/SessionKey.hpp>
 #include <nlohmann/json.hpp>
+#include <span>
 #include <thread>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace client {
 
-	using client::Action;
 	using engine::core::FrameGraph;
 	using engine::core::HeapProfile;
 	using engine::core::Metrics;
 	using engine::render::ProfilerTab;
 
 	namespace {
+		std::string AuthoredPathSegment(std::string_view name) {
+			std::string segment;
+			constexpr char digits[] = "0123456789ABCDEF";
+			for (const unsigned char byte : name) {
+				if ((byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') ||
+					(byte >= '0' && byte <= '9') || byte == '-' || byte == '_' || byte == '.') {
+					segment += static_cast<char>(byte);
+				} else {
+					segment += '%';
+					segment += digits[byte >> 4];
+					segment += digits[byte & 15];
+				}
+			}
+			return segment.empty() ? "unnamed" : segment;
+		}
+
+		bool IdentifyAuthoredInstances(engine::ecs::Store &store) {
+			const engine::core::Name key(engine::script::DATA_SCENE_ID_ATTRIBUTE);
+			struct NamedInstance {
+				engine::ecs::Entity Entity;
+				engine::ecs::Entity Parent;
+				std::string Segment;
+				bool Missing = false;
+			};
+			std::vector<NamedInstance> instances;
+			std::unordered_set<std::string> used;
+			store.Each<const engine::ecs::InstanceName>([&](engine::ecs::Entity entity, const auto &) {
+				engine::ecs::AttributeValue value;
+				const bool identified = engine::ecs::GetAttribute(store, entity, key, value) &&
+										value.Type == engine::ecs::PropertyType::String &&
+										!value.String.empty();
+				if (identified) used.insert(value.String);
+				instances.push_back(
+					{entity,
+					 store.ParentOf(entity),
+					 AuthoredPathSegment(store.InstanceNameOf(entity).Text()),
+					 !identified}
+				);
+			});
+			std::sort(instances.begin(), instances.end(), [](const auto &left, const auto &right) {
+				return left.Entity.Id < right.Entity.Id;
+			});
+			std::map<std::pair<uint64_t, std::string>, size_t> siblingCounts;
+			for (const auto &instance : instances)
+				++siblingCounts[{instance.Parent.Id, instance.Segment}];
+			std::unordered_map<uint64_t, size_t> byEntity;
+			for (size_t index = 0; index < instances.size(); ++index)
+				byEntity.emplace(instances[index].Entity.Id, index);
+			std::map<std::pair<uint64_t, std::string>, size_t> siblingOrdinals;
+			// Same-name siblings use creation order. Scripts needing persistent identity
+			// across reordered creation should set DataFactoryId explicitly.
+			for (auto &instance : instances) {
+				const auto sibling = std::pair{instance.Parent.Id, instance.Segment};
+				const size_t ordinal = siblingOrdinals[sibling]++;
+				if (siblingCounts[sibling] > 1) instance.Segment += "~" + std::to_string(ordinal);
+			}
+			for (const auto &instance : instances) {
+				if (!instance.Missing) continue;
+				std::vector<std::string_view> ancestry;
+				ancestry.push_back(instance.Segment);
+				auto parent = byEntity.find(instance.Parent.Id);
+				while (parent != byEntity.end()) {
+					const auto &ancestor = instances[parent->second];
+					ancestry.push_back(ancestor.Segment);
+					parent = byEntity.find(ancestor.Parent.Id);
+				}
+				std::string id = "authored";
+				for (auto segment = ancestry.rbegin(); segment != ancestry.rend(); ++segment) {
+					id += '/';
+					id += *segment;
+				}
+				if (id.size() > engine::script::MAX_DATA_SCENE_ID_BYTES || used.contains(id)) {
+					const std::string path = id;
+					for (size_t collision = 0;; ++collision) {
+						const std::string salted =
+							collision == 0 ? path : path + "#" + std::to_string(collision);
+						const auto bytes = std::as_bytes(std::span(salted.data(), salted.size()));
+						id = "authored/hash/" + engine::assets::Hasher::Of(bytes).ToHex();
+						if (!used.contains(id)) break;
+					}
+				}
+				used.insert(id);
+				engine::ecs::AttributeValue value;
+				value.Type = engine::ecs::PropertyType::String;
+				value.String = std::move(id);
+				if (!engine::ecs::SetAttribute(store, instance.Entity, key, value)) return false;
+			}
+			return true;
+		}
+
 		uint64_t MixCameraTemporal(uint64_t state, uint64_t value) {
 			return (state ^ value) * 1099511628211ull;
 		}
@@ -167,6 +266,8 @@ namespace client {
 				return "key up";
 			case SDL_EVENT_TEXT_INPUT:
 				return "text input";
+			case SDL_EVENT_TEXT_EDITING:
+				return "text editing";
 			case SDL_EVENT_MOUSE_MOTION:
 				return "mouse motion";
 			case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -205,9 +306,43 @@ namespace client {
 	}
 
 	bool Client::Initialise(const Options &options) {
+		ENGINE_PROFILE("client.initialise");
 		Settings = options;
+		Input.EnablePresentationInput();
 		SubmittedMoveTick = 0;
 		InputLocalEpoch = InputSequenceEpoch = 0;
+		if (!std::isfinite(Settings.InterfaceScale) || Settings.InterfaceScale <= 0.0f ||
+			!std::isfinite(Settings.TextScale) || Settings.TextScale <= 0.0f) {
+			ENGINE_ERROR("interface and text scales must be finite and positive");
+			return false;
+		}
+		engine::gui::FontPackage interfaceFonts;
+		size_t fontPackageBytes = 0;
+		{
+			ENGINE_PROFILE_CAT("client.font package", engine::core::ProfileCategory::Assets);
+			for (const auto &[file, face] : std::array{
+					 std::pair{"Inter.ttf", engine::gui::FontFace::Regular},
+					 std::pair{"Roboto.ttf", engine::gui::FontFace::Bold},
+					 std::pair{"NotoSans.ttf", engine::gui::FontFace::Italic},
+					 std::pair{"JetBrainsMono.ttf", engine::gui::FontFace::Code},
+				 }) {
+				std::ifstream input(engine::core::Paths::Fonts() / file, std::ios::binary | std::ios::ate);
+				if (!input) continue;
+				const std::streamsize size = input.tellg();
+				if (size <= 0 || static_cast<uint64_t>(size) > engine::gui::MAXIMUM_FONT_PACKAGE_BYTES ||
+					static_cast<uint64_t>(size) >
+						engine::gui::MAXIMUM_FONT_PACKAGE_TOTAL_BYTES - fontPackageBytes)
+					continue;
+				std::vector<std::byte> bytes(static_cast<size_t>(size));
+				input.seekg(0);
+				if (!input.read(reinterpret_cast<char *>(bytes.data()), size)) continue;
+				if (interfaceFonts.Add(engine::core::Name(std::string("fonts/") + file), face, bytes))
+					fontPackageBytes += bytes.size();
+			}
+		}
+		if (interfaceFonts.Faces().empty()) {
+			ENGINE_WARN("no GUI font package; text shaping uses the fallback path");
+		}
 		if (!Settings.RenderPipelineFile.empty()) {
 			if (!Settings.GameFile.empty()) {
 				ENGINE_ERROR("--render-pipeline applies to demo worlds; --game owns its rendering profiles");
@@ -222,7 +357,7 @@ namespace client {
 				);
 				return false;
 			}
-			ENGINE_INFO("demo render pipeline from {}", Settings.RenderPipelineFile.string());
+			ENGINE_INFO("render pipeline from {}", Settings.RenderPipelineFile.string());
 		}
 		if (!Settings.CaptureSequence.empty()) {
 			if (Settings.MaximumFrames <= 0 || !Settings.Capture.empty()) {
@@ -289,12 +424,13 @@ namespace client {
 				"atomic",
 				Settings.Width,
 				Settings.Height,
-				SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+				SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN
 			);
 			if (!Window) {
 				ENGINE_ERROR("SDL_CreateWindow: {}", SDL_GetError());
 				return false;
 			}
+			NativeAccessibility = std::make_unique<AccessibilityAdapter>(Window);
 
 			SDL_Surface *icon = SDL_LoadPNG((engine::core::Paths::Base() / "icon.png").string().c_str());
 			if (icon == nullptr) {
@@ -309,8 +445,16 @@ namespace client {
 
 		// Null when headless, which is what puts the renderer in that mode - the
 		// same call the editor makes, for the same reason.
+		if (Settings.TextureBudgetBytes != 0) {
+			ENGINE_INFO(
+				"texture table: {} MiB capacity requested", Settings.TextureBudgetBytes / (1024u * 1024u)
+			);
+		}
 		if (!Renderer.Initialise(
-				Window, static_cast<uint32_t>(Settings.FramesInFlight), Settings.DataFactory
+				Window,
+				static_cast<uint32_t>(Settings.FramesInFlight),
+				Settings.DataFactory,
+				Settings.TextureBudgetBytes
 			)) {
 			return false;
 		}
@@ -333,10 +477,16 @@ namespace client {
 		// one that draws a world with no interface over it, and the log says
 		// which happened.
 		{
+			ENGINE_PROFILE_CAT("client.interface", engine::core::ProfileCategory::Render);
 			const engine::render::BackendHandles backend = Renderer.Backend();
 			if (!Interface.Initialise(backend.Device, backend.ColourFormat)) {
 				ENGINE_WARN("no interface pass; a ScreenGui will not be drawn");
 			}
+			Interface.SetFontPackage(std::move(interfaceFonts));
+		}
+
+		if (Window != nullptr && !SDL_ShowWindow(Window)) {
+			ENGINE_WARN("SDL_ShowWindow: {}", SDL_GetError());
 		}
 
 		// **Only with a window**, because a present mode belongs to a swapchain
@@ -400,6 +550,10 @@ namespace client {
 					runtime, static_cast<uint32_t>(viewWidth), static_cast<uint32_t>(viewHeight)
 				);
 				if (!graph) {
+					const engine::graph::PipelineDocument *document = RenderingProfiles.Find(requested);
+					if (document != nullptr && RenderGraphAdmissionFailure(Renderer, *document, failure)) {
+						return nlohmann::json(nullptr);
+					}
 					failure = "unavailable: pipeline is not installed";
 					return nlohmann::json(nullptr);
 				}
@@ -620,6 +774,19 @@ namespace client {
 					});
 					return true;
 				}
+				if (paused && !Settings.ScriptPath.empty()) {
+					bool identified = false;
+					if (Universe_->Enter(
+							world,
+							[&identified](engine::ecs::Store &store) {
+								identified = IdentifyAuthoredInstances(store);
+							}
+						) != engine::world::WorldStatus::Ok ||
+						!identified) {
+						detail = "client could not identify authored scene instances";
+						return false;
+					}
+				}
 				if (Sound == nullptr) return true;
 				const bool before = Sound->Paused();
 				if (Sound->SetPaused(paused)) return true;
@@ -780,6 +947,13 @@ namespace client {
 		// camera comes from. A client draws one world's worth of camera however
 		// many it composites.
 		if (!Simulated.empty()) Rendered = Simulated.front();
+		if (Settings.DataFactory && !Settings.ScriptPath.empty()) {
+			const auto adopted = DataFactory->AdoptWorld(Universe_->NameOf(Rendered).Text());
+			if (adopted.Status != engine::world::DataFactoryStatus::Ok) {
+				ENGINE_ERROR("could not adopt authored data-factory world: {}", adopted.Detail);
+				return false;
+			}
+		}
 
 		if (!BeginConnecting()) {
 			return false;
@@ -794,7 +968,9 @@ namespace client {
 		// work, so it is off unless something wants it - and a run given
 		// `--profile-snapshot` and nothing else recorded nothing, then reported
 		// that it could not write the document.
-		FrameGraph::SetEnabled(Settings.ShowFrameGraph || !Settings.ProfileSnapshot.empty());
+		FrameGraph::SetEnabled(
+			Settings.ShowFrameGraph || !Settings.ProfileSnapshot.empty() || !Settings.BenchmarkReport.empty()
+		);
 
 		// **Sampled from the start of the run rather than from when the panel
 		// opens, whenever a report was asked for.** A slope is only as good as
@@ -950,6 +1126,7 @@ namespace client {
 	}
 
 	bool Client::BuildDemoWorlds() {
+		ENGINE_PROFILE("client.demo worlds");
 		if (Settings.DataFactory) {
 			RenderingProfiles.Set(
 				engine::core::Name("Default PBR"), engine::graph::DefaultPbrDataCaptureDocument()
@@ -1120,153 +1297,7 @@ namespace client {
 		}
 
 		if (Settings.ControlPort >= 0) {
-			const std::array features{
-				engine::control::features::Universe(*Universe_),
-				engine::control::features::Architecture(),
-				engine::control::features::Script(),
-				engine::control::features::Diagnostics(),
-				engine::control::features::Resources(),
-				engine::control::features::Prompts(),
-				engine::control::features::Discovery(),
-				engine::control::features::RenderGraph(),
-			};
-			ControlSurface.Enable(features);
-			if (DataFactory) {
-				ControlSurface.Enable(std::array{engine::control::features::DataFactory(*DataFactory)});
-				ControlSurface.Enable(
-					std::array{engine::control::features::DataAudioObservation(
-						*Universe_, DataAudio, DataFactory.get()
-					)}
-				);
-				AddDataScriptPackageTool(
-					ControlSurface, [this](const engine::script::DataScriptRequest &request) {
-						return ExecuteDataScriptPackageTransaction(
-							{
-								.Universe = *Universe_,
-								.Session = *DataFactory,
-								.RuntimeOf =
-									[this](engine::world::WorldId world) -> engine::script::Runtime * {
-									const auto runtime =
-										std::ranges::find_if(Runtimes, [world](const auto &entry) {
-											return entry.first == world;
-										});
-									return runtime == Runtimes.end() ? nullptr : runtime->second.get();
-								},
-								.DiscardRuntime =
-									[this](engine::world::WorldId world) {
-										std::erase_if(Runtimes, [world](const auto &entry) {
-											return entry.first == world;
-										});
-									},
-								.MakeRuntime =
-									[](engine::ecs::Store &store,
-									   const engine::script::RuntimeLimits &limits) {
-										return engine::script::MakeRuntime(
-											store, engine::script::Language::Luau, limits
-										);
-									},
-								.RunPackage = engine::script::RunDataScriptPackage,
-								.InstallSystems =
-									[this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-										InstallPresentation(store, systems, Settings.Entities);
-										(void)EnsureLocalPlayer(store);
-										(void)RestoreDefaultCameraMovement(store, systems);
-										(void)InstallDefaultCamera(store, systems);
-										InstallClientWorldSystems(store, systems);
-									},
-								.Admit =
-									[](std::string_view source, std::string_view entry, std::string &error) {
-										return engine::script::CheckDataScriptPackageSource(
-											engine::script::Language::Luau, source, entry, error
-										);
-									},
-								.Role = engine::script::HostRole::OfBoth(),
-								.Present = true,
-							},
-							request
-						);
-					}
-				);
-				ControlSurface.Enable(
-					std::array{engine::control::features::DataCapture(*DataFactory, DataCapture)}
-				);
-				ControlSurface.Enable(
-					std::array{engine::control::features::DataScene(
-						*Universe_,
-						DataCapture,
-						DataFactory.get(),
-						[this](std::string_view world, std::string_view name, engine::assets::MeshData &out) {
-							const auto status = Renderer.CopyMesh(
-								engine::core::Name(name),
-								out,
-								engine::script::MAX_GLTF_EXPORT_VERTICES,
-								engine::script::MAX_GLTF_EXPORT_INDICES,
-								engine::core::Name(world)
-							);
-							switch (status) {
-							case engine::render::MeshCopyStatus::Copied:
-								return engine::script::GltfMeshSourceStatus::Available;
-							case engine::render::MeshCopyStatus::OverLimit:
-								return engine::script::GltfMeshSourceStatus::OverLimit;
-							case engine::render::MeshCopyStatus::Packed:
-								return engine::script::GltfMeshSourceStatus::Unsupported;
-							case engine::render::MeshCopyStatus::Invalid:
-								return engine::script::GltfMeshSourceStatus::Invalid;
-							case engine::render::MeshCopyStatus::Missing:
-								return engine::script::GltfMeshSourceStatus::Missing;
-							}
-							return engine::script::GltfMeshSourceStatus::Unsupported;
-						},
-						[this](
-							std::string_view world, std::string_view name, engine::assets::TextureData &out
-						) {
-							const auto status = Renderer.CopyTexture(
-								engine::core::Name(name),
-								out,
-								engine::script::MAX_GLTF_EXPORT_SOURCE_TEXTURE_BYTES,
-								engine::core::Name(world)
-							);
-							switch (status) {
-							case engine::render::TextureCopyStatus::Copied:
-								return engine::script::GltfTextureSourceStatus::Available;
-							case engine::render::TextureCopyStatus::OverLimit:
-								return engine::script::GltfTextureSourceStatus::OverLimit;
-							case engine::render::TextureCopyStatus::Unsupported:
-								return engine::script::GltfTextureSourceStatus::Unsupported;
-							case engine::render::TextureCopyStatus::Invalid:
-								return engine::script::GltfTextureSourceStatus::Invalid;
-							case engine::render::TextureCopyStatus::Missing:
-								return engine::script::GltfTextureSourceStatus::Missing;
-							}
-							return engine::script::GltfTextureSourceStatus::Unsupported;
-						}
-					)}
-				);
-				ControlSurface.Enable(
-					std::array{engine::control::features::TemporalSample(*Universe_, *DataFactory)}
-				);
-				ControlSurface.Enable(
-					std::array{engine::control::features::RigExport(*Universe_, DataFactory.get())}
-				);
-			}
-			ControlSurface.Enable(std::array{engine::control::features::VisibilityObservations([this] {
-				const engine::render::VisibilitySnapshot snapshot = Renderer.Visibility();
-				engine::control::features::VisibilitySnapshotReply reply;
-				reply.Frame = snapshot.Frame;
-				reply.ViewSlot = snapshot.ViewSlot;
-				reply.World = std::string(snapshot.World.Text());
-				reply.Valid = snapshot.Valid;
-				reply.Dropped = snapshot.Dropped;
-				reply.DroppedExact = snapshot.DroppedExact;
-				for (const engine::render::VisibilityObservation &row : snapshot.Observations)
-					reply.Observations.push_back(
-						{std::string(row.World.Text()),
-						 row.Entity,
-						 engine::render::Describe(row.State),
-						 engine::render::Describe(row.Cause)}
-					);
-				return reply;
-			})});
+			ConfigureControlHooks();
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
 					"control: listening on 127.0.0.1:{} - {} tools",
@@ -1338,6 +1369,8 @@ namespace client {
 		// moves.
 		const engine::core::Name wanted(Settings.ClickElement);
 		engine::core::Vector2 centre;
+		engine::gui::CanvasTransform transform;
+		bool screenCollector = false;
 		bool found = false;
 
 		store.Each<const engine::gui::Resolved>([&](engine::ecs::Entity element,
@@ -1354,11 +1387,29 @@ namespace client {
 				resolved.AbsolutePosition.X + resolved.AbsoluteSize.X * 0.5f,
 				resolved.AbsolutePosition.Y + resolved.AbsoluteSize.Y * 0.5f,
 			};
+			static const engine::ecs::ClassId screenGui =
+				engine::ecs::Classes::Find(engine::core::Name("ScreenGui"));
+			for (engine::ecs::Entity above = element; above != engine::ecs::NULL_ENTITY;
+				 above = store.ParentOf(above)) {
+				if (store.Get<engine::gui::Layer>(above) != nullptr) {
+					screenCollector = store.IsA(above, screenGui);
+					if (const auto *foundTransform = store.Get<engine::gui::CanvasTransform>(above);
+						foundTransform != nullptr) {
+						transform = *foundTransform;
+					}
+					break;
+				}
+			}
 			found = true;
 		});
 
 		if (!found) {
 			return;
+		}
+		if (screenCollector) {
+			// `Resolved` uses collector logical pixels while SDL receives window
+			// coordinates. The collector transform is the sole conversion.
+			centre = transform.Origin + centre * transform.Scale;
 		}
 
 		// Moved and then pressed, as a real pointer is: the router admits a
@@ -1438,6 +1489,7 @@ namespace client {
 			}
 			SoundStage &stage = Stages[id.Index];
 			Universe_->Enter(id, [&](engine::ecs::Store &store) {
+				LoadPackagedAudio(store);
 				stage.Sync(store, Sound->Mixer(), Audible, ear, rate);
 			});
 		};
@@ -1545,6 +1597,7 @@ namespace client {
 					decoded->Seconds()
 				);
 			}
+			IndexPackagedAudio();
 			return true;
 		}
 		if (Settings.DataFactory && DataAudio && DataFactory && Rendered.IsValid()) {
@@ -1553,6 +1606,7 @@ namespace client {
 			DataAudio->ResetTickClock(clock, Sound->Format().SampleRate);
 			DataAudioEpoch = clock.WorldEpoch;
 		}
+		IndexPackagedAudio();
 		if (!decoded) {
 			return true;
 		}
@@ -1612,6 +1666,30 @@ namespace client {
 	void Client::Shutdown() {
 		// Stop dependants before renderer and SDL teardown.
 		ControlServer.Stop();
+		InputControlHook.reset();
+		VisibilityObservationHook.reset();
+		PhysicsObservationHook.reset();
+		TemporalSampleHook.reset();
+		RigExportHook.reset();
+		DataAudioObservationHook.reset();
+		SceneRenderingHook.reset();
+		DataSceneHook.reset();
+		DataScriptPackageHook.reset();
+		DataCaptureHook.reset();
+		ControlSurface.SetDataCaptureAvailabilityProvider({});
+		if (DataCapture) {
+			// The hook drain normally owns cancellation. Keep this fallback for work
+			// admitted without an active capture hook.
+			if (DataCapture->HasPending()) {
+				DataCapture->CancelPending();
+				DataCapture->Pump();
+			}
+			ENGINE_ASSERT(!DataCapture->HasPending());
+		}
+		DataFactoryLifecycleHook.reset();
+		RenderGraphHook.reset();
+		PermanentControlHooks.clear();
+		ControlSurface.SetRenderGraphProvider({});
 		if (DataCapture && DataCaptureDriverWorld.IsValid() && DataCaptureDriverTicket) {
 			const std::string instance(Universe_->NameOf(DataCaptureDriverWorld).Text());
 			DataCapture->Cancel(instance, *DataCaptureDriverTicket);
@@ -1636,6 +1714,16 @@ namespace client {
 			if (callback.Valid()) runtime->Release(callback);
 		}
 		DataCaptureDriverCallback = {};
+		if (DataCapture) {
+			const bool discarded = DataCapture->DiscardTerminal();
+			ENGINE_ASSERT(discarded);
+			ControlSurface.PumpHooks();
+			const auto hooks = ControlSurface.Hooks().Active();
+			ENGINE_ASSERT(std::none_of(hooks.begin(), hooks.end(), [](const auto &hook) {
+				return hook.Descriptor.Id == "client.data-capture";
+			}));
+			ENGINE_ASSERT(!DataCapture->HasOutstanding());
+		}
 		// The bridge owns renderer capture tickets. Tear it down while the renderer
 		// still exists so a ticket that remained pending after the bounded drain is
 		// cancelled by its one owner before device teardown.
@@ -1683,6 +1771,7 @@ namespace client {
 			SDL_CloseJoystick(joystick);
 		}
 		Joysticks.clear();
+		NativeAccessibility.reset();
 		if (Window) {
 			SDL_DestroyWindow(Window);
 			Window = nullptr;
@@ -1846,7 +1935,7 @@ namespace client {
 		// **Opened before the search, not after it.** The search punches on
 		// this socket, and a hole punched on any other one is a hole to a port
 		// the server will never send to.
-		Socket = engine::net::MakeUdpTransport(0);
+		Socket = OpenSocket(0);
 		if (Socket == nullptr) {
 			ENGINE_ERROR("could not open a socket to connect from");
 			return false;
@@ -1918,8 +2007,13 @@ namespace client {
 				// something mysterious.
 				engine::replication::InterpolationSettings interpolation;
 				interpolation.TickRate = Settings.TickRate;
+				engine::script::RuntimeLimits limits;
+				limits.RemoteEventSender = [this](std::span<const std::byte> payload) {
+					return Connection != nullptr &&
+						   Connection->SendUser(payload, engine::core::Clock::Seconds());
+				};
 
-				replicaScripts = BuildReplicatedWorld(store, systems, interpolation);
+				replicaScripts = BuildReplicatedWorld(store, systems, interpolation, limits);
 			}
 		);
 
@@ -2213,11 +2307,9 @@ namespace client {
 		}
 
 		engine::game::MoveInput move;
-		engine::scene::AimIntent aim;
 		uint64_t tick = 0;
-		double viewTick = 0;
 
-		Universe_->Enter(Replicated, [this, &move, &aim, &tick, &viewTick](engine::ecs::Store &store) {
+		Universe_->Enter(Replicated, [this, &move, &tick](engine::ecs::Store &store) {
 			// The authenticated source host forwards movement by transfer receipt
 			// after its Player has retired, until native destination input takes over.
 			const auto *local = store.Resource<engine::scene::LocalPlayer>();
@@ -2236,15 +2328,6 @@ namespace client {
 			move.Jump = intent.Jump;
 			move.StepSeconds = store.Time().Delta;
 
-			// **Read in the same scope as the move, from the same tick.** Two
-			// entries would sample the camera on one tick and the keys on
-			// another, so a shot fired while turning would be aimed a tick
-			// behind where the player was looking - which on a fast flick is
-			// several degrees and reads as the server cheating.
-			aim = engine::scene::ReadAimIntent(store);
-			if (const auto *buffer = store.Resource<engine::replication::SnapshotBuffer>())
-				viewTick = buffer->RenderTick();
-
 			tick = store.Time().Tick;
 		});
 
@@ -2253,40 +2336,6 @@ namespace client {
 		if (!inputTick) return;
 		tick = *inputTick;
 
-		// **The aim, and never the result.** `Server::ApplyInputs` states the
-		// division and this is the half that had no caller: `examples::
-		// EncodeShot` existed with a complete server-side rewind and hit test
-		// behind it, and nothing in the tree had ever sent one - `D00109`
-		// records that as two finished halves connected to nothing.
-		//
-		// Sent before the move because the two share a channel and a shot is
-		// the one a dropped tick cannot be re-derived from: a move repeats every
-		// tick by design, and a click happens once.
-		if (aim.Aimed && aim.Fired) {
-			engine::examples::Shot shot;
-			shot.Aim = aim.Ray;
-			shot.ViewTick = viewTick;
-
-			// **The engine's ceiling and not a game's choice.** A client picks
-			// its own range on the wire and `DecodeShot` refuses anything past
-			// `MAXIMUM_SHOT_RANGE`, so sending the ceiling is sending the most
-			// an honest client is allowed to - a game with a shorter weapon
-			// shortens it here and the host still bounds it.
-			shot.Range = engine::examples::MAXIMUM_SHOT_RANGE;
-
-			if (Connection->Submit(tick, engine::examples::EncodeShot(shot), nowSeconds)) {
-				// **Cleared once the click is actually on the wire**, and
-				// separately from the jump below: a shot refused by the send
-				// budget while the move went through would otherwise forget a
-				// click nobody was ever told about.
-				Universe_->Enter(Replicated, [](engine::ecs::Store &store) {
-					if (auto *input = store.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
-						input->ConsumeButtonTaps();
-					}
-				});
-			}
-		}
-
 		// Send once per observed simulation tick, including still states. A client
 		// that only spoke when its keys changed would leave a character walking for ever
 		// after a dropped release - an input channel is unreliable by design,
@@ -2294,6 +2343,8 @@ namespace client {
 		if (tick != SubmittedMoveTick &&
 			Connection->Submit(tick, engine::game::EncodeMoveInput(move), nowSeconds)) {
 			SubmittedMoveTick = tick;
+			if (!Settings.CaptureSequence.empty())
+				CapturedSubmittedMoveDirection = {move.Direction.X, move.Direction.Y, move.Direction.Z};
 			ENGINE_TRACE("move submitted at tick {}", tick);
 			Universe_->Enter(Replicated, [&move, tick](engine::ecs::Store &store) {
 				(void)RecordPortalPredictionInput(store, tick, move, store.Time().Delta);
@@ -2348,6 +2399,9 @@ namespace client {
 				if (auto *buffer = store.ResourceMutable<engine::replication::SnapshotBuffer>())
 					buffer->Predict(held.Root);
 			}
+
+			ForgetReplicatedRows(store, Connection->Forgotten());
+			Connection->ClearForgotten();
 
 			// **Here, not in the render pass.** This instant is the one where
 			// the store holds the tick the server described; a pass that only
@@ -2412,6 +2466,7 @@ namespace client {
 
 		Connection->Advance(nowSeconds);
 		PumpPortalSuccessor(nowSeconds, presentationReady);
+		PumpPortalApproach(nowSeconds);
 	}
 
 	void Client::SubmitTeleportRequests(double nowSeconds) {
@@ -2452,6 +2507,138 @@ namespace client {
 		// scripts read. Two questions about one keyboard, and both want every
 		// event.
 		Input.BeginFrame();
+
+		// Control requests arrive after the previous event pump. Feed them into
+		// this pump before the world reads input, including in headless mode.
+		std::vector<engine::control::InputAutomationEvent> automated;
+		automated.swap(DeferredControlRelease);
+		std::vector<engine::control::InputAutomationEvent> fresh;
+		fresh.swap(PendingControlInput);
+		for (auto &event : fresh)
+			automated.push_back(std::move(event));
+		const uint32_t windowId = Window == nullptr ? 0 : SDL_GetWindowID(Window);
+		struct ClickPress {
+			engine::control::InputAutomationKind Kind;
+			std::string Name;
+			SDL_Event Event;
+		};
+		std::vector<ClickPress> clicksThisPump;
+		for (const auto &input : automated) {
+			SDL_Event event{};
+			event.common.timestamp = SDL_GetTicksNS();
+			switch (input.Kind) {
+			case engine::control::InputAutomationKind::MouseMove:
+				event.type = SDL_EVENT_MOUSE_MOTION;
+				event.motion.windowID = windowId;
+				event.motion.x = input.X;
+				event.motion.y = input.Y;
+				break;
+			case engine::control::InputAutomationKind::MouseButton:
+				event.type = input.State == engine::control::InputAutomationState::Up
+								 ? SDL_EVENT_MOUSE_BUTTON_UP
+								 : SDL_EVENT_MOUSE_BUTTON_DOWN;
+				event.button.windowID = windowId;
+				event.button.button = input.Button == "right"	 ? SDL_BUTTON_RIGHT
+									  : input.Button == "middle" ? SDL_BUTTON_MIDDLE
+																 : SDL_BUTTON_LEFT;
+				event.button.down = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+				event.button.clicks = 1;
+				event.button.x = input.X;
+				event.button.y = input.Y;
+				break;
+			case engine::control::InputAutomationKind::MouseWheel:
+				event.type = SDL_EVENT_MOUSE_WHEEL;
+				event.wheel.windowID = windowId;
+				event.wheel.y = input.Wheel;
+				break;
+			case engine::control::InputAutomationKind::Key: {
+				event.type = input.State == engine::control::InputAutomationState::Up ? SDL_EVENT_KEY_UP
+																					  : SDL_EVENT_KEY_DOWN;
+				event.key.windowID = windowId;
+				event.key.key = SDL_GetKeyFromName(input.Key.c_str());
+				event.key.scancode = SDL_GetScancodeFromName(input.Key.c_str());
+				SDL_Keymod modifiers = SDL_KMOD_NONE;
+				for (const std::string &name : input.Modifiers) {
+					if (name == "shift") modifiers = static_cast<SDL_Keymod>(modifiers | SDL_KMOD_SHIFT);
+					if (name == "control") modifiers = static_cast<SDL_Keymod>(modifiers | SDL_KMOD_CTRL);
+					if (name == "alt") modifiers = static_cast<SDL_Keymod>(modifiers | SDL_KMOD_ALT);
+					if (name == "gui") modifiers = static_cast<SDL_Keymod>(modifiers | SDL_KMOD_GUI);
+				}
+				if (event.key.scancode == SDL_SCANCODE_UNKNOWN)
+					event.key.scancode = SDL_GetScancodeFromKey(event.key.key, &modifiers);
+				if (event.key.key == SDLK_UNKNOWN)
+					event.key.key = SDL_GetKeyFromScancode(event.key.scancode, modifiers, true);
+				event.key.mod = event.type == SDL_EVENT_KEY_UP ? SDL_KMOD_NONE : modifiers;
+				event.key.down = event.type == SDL_EVENT_KEY_DOWN;
+				break;
+			}
+			case engine::control::InputAutomationKind::Text:
+				event.type = SDL_EVENT_TEXT_INPUT;
+				event.text.windowID = windowId;
+				event.text.text = input.Text.c_str();
+				break;
+			}
+			const bool click = input.State == engine::control::InputAutomationState::Click &&
+							   (input.Kind == engine::control::InputAutomationKind::MouseButton ||
+								input.Kind == engine::control::InputAutomationKind::Key);
+			const std::string_view clickName =
+				input.Kind == engine::control::InputAutomationKind::MouseButton ? input.Button : input.Key;
+			auto previousClick =
+				std::find_if(clicksThisPump.begin(), clicksThisPump.end(), [&](const ClickPress &prior) {
+					return prior.Kind == input.Kind && prior.Name == clickName;
+				});
+			if (click && previousClick != clicksThisPump.end()) {
+				// Two Click requests for one control in a pump need an up between
+				// their downs. Keep the final up deferred for tick consumers.
+				SDL_Event released = previousClick->Event;
+				released.common.timestamp = SDL_GetTicksNS();
+				if (input.Kind == engine::control::InputAutomationKind::MouseButton) {
+					released.type = SDL_EVENT_MOUSE_BUTTON_UP;
+					released.button.down = false;
+				} else {
+					released.type = SDL_EVENT_KEY_UP;
+					released.key.down = false;
+					released.key.mod = SDL_KMOD_NONE;
+				}
+				if (!SDL_PushEvent(&released)) {
+					ENGINE_ERROR("control: could not queue input: {}", SDL_GetError());
+					continue;
+				}
+			}
+			const bool queued = SDL_PushEvent(&event);
+			if (!queued) {
+				ENGINE_ERROR("control: could not queue input: {}", SDL_GetError());
+			}
+			if (queued && click) {
+				if (previousClick != clicksThisPump.end()) {
+					std::erase_if(
+						DeferredControlRelease, [&](const engine::control::InputAutomationEvent &pending) {
+							return pending.Kind == input.Kind &&
+								   (input.Kind == engine::control::InputAutomationKind::MouseButton
+										? pending.Button == clickName
+										: pending.Key == clickName);
+						}
+					);
+					previousClick->Event = event;
+				} else {
+					clicksThisPump.push_back(ClickPress{input.Kind, std::string(clickName), event});
+				}
+				auto release = input;
+				release.State = engine::control::InputAutomationState::Up;
+				DeferredControlRelease.push_back(std::move(release));
+			}
+		}
+
+		const auto refreshFrameGraphCollection = [this]() {
+			FrameGraph::SetEnabled(
+				Settings.ShowFrameGraph || !Settings.ProfileSnapshot.empty() ||
+				!Settings.BenchmarkReport.empty()
+			);
+			HeapProfile::SetSamplingEnabled(
+				Settings.ShowFrameGraph || !Settings.HeapReport.empty() || Settings.HeapGrowthLimit > 0.0
+			);
+			ProfilerScroll = 0;
+		};
 
 		{
 			// **The pump on its own.** `pump events` covered the poll and every
@@ -2514,15 +2701,75 @@ namespace client {
 					"event", EventName(event.type), engine::core::ProfileCategory::Engine
 				);
 
+				bool debugPanelConsumedEvent = false;
+				if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+					DebugPanelMouseCaptured = false;
+				}
+				if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT &&
+					DebugPanelMouseCaptured) {
+					DebugPanelMouseCaptured = false;
+					debugPanelConsumedEvent = true;
+				}
+				if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT &&
+					Window != nullptr && !Overlay.IsEmpty()) {
+					int windowWidth = 0;
+					int windowHeight = 0;
+					(void)SDL_GetWindowSize(Window, &windowWidth, &windowHeight);
+					if (windowWidth > 0 && windowHeight > 0) {
+						engine::render::DebugPanelData visiblePanels;
+						visiblePanels.ShowStatistics = Settings.ShowStatistics;
+						visiblePanels.ShowNetwork = Settings.ShowNetwork;
+						visiblePanels.Network.Connected = Connection != nullptr;
+						visiblePanels.ShowFrameGraph = Settings.ShowFrameGraph;
+						visiblePanels.TickRate = Settings.TickRate;
+						visiblePanels.Scale = Overlay.GetWidth() >= 2400 ? 3 : 2;
+
+						const int pixelX = static_cast<int>(
+							event.button.x * static_cast<float>(Overlay.GetWidth()) /
+							static_cast<float>(windowWidth)
+						);
+						const int pixelY = static_cast<int>(
+							event.button.y * static_cast<float>(Overlay.GetHeight()) /
+							static_cast<float>(windowHeight)
+						);
+						const engine::render::DebugPanelCloseAction action =
+							engine::render::DebugPanelCloseAt(
+								visiblePanels, Overlay.GetWidth(), Overlay.GetHeight(), pixelX, pixelY
+							);
+						switch (action) {
+						case engine::render::DebugPanelCloseAction::Statistics:
+							Settings.ShowStatistics = false;
+							break;
+						case engine::render::DebugPanelCloseAction::Network:
+							Settings.ShowNetwork = false;
+							break;
+						case engine::render::DebugPanelCloseAction::FrameGraph:
+							Settings.ShowFrameGraph = false;
+							refreshFrameGraphCollection();
+							break;
+						case engine::render::DebugPanelCloseAction::None:
+							break;
+						}
+						if (action != engine::render::DebugPanelCloseAction::None) {
+							DebugPanelMouseCaptured = true;
+							debugPanelConsumedEvent = true;
+							PresentationInvalidated = true;
+						}
+					}
+				}
+				if (DebugPanelMouseCaptured &&
+					(event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL ||
+					 event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)) {
+					debugPanelConsumedEvent = true;
+				}
+
 				Actions.HandleEvent(event);
 
-				// **Both, unconditionally, and neither consumes for the other.**
-				// `Actions::HandleEvent` reports whether it took an event and that
-				// answer is about the *client's* bindings - a script watching F5
-				// should still see F5. Gating this on that return would make the
-				// engine's own keybindings invisible to the game, which is a rule
-				// nobody asked for.
-				Input.HandleEvent(event);
+				// Host close controls own their pointer gesture. Every other event
+				// still reaches game input, even when Actions handled the same key.
+				if (!debugPanelConsumedEvent) {
+					Input.HandleEvent(event);
+				}
 			}
 		}
 
@@ -2660,18 +2907,7 @@ namespace client {
 
 		if (Actions.Fired(Action::ToggleFrameGraph)) {
 			Settings.ShowFrameGraph = !Settings.ShowFrameGraph;
-			// Collection is off until something asks for it, so opening the
-			// panel is what turns it on.
-			FrameGraph::SetEnabled(Settings.ShowFrameGraph);
-
-			// **Not turned off with the panel when a report was asked for.**
-			// Closing F5 mid-run would otherwise throw away the window the
-			// report is fitted over, and the panel is the natural thing to
-			// close once you have seen the shape you were looking for.
-			HeapProfile::SetSamplingEnabled(
-				Settings.ShowFrameGraph || !Settings.HeapReport.empty() || Settings.HeapGrowthLimit > 0.0
-			);
-			ProfilerScroll = 0;
+			refreshFrameGraphCollection();
 		}
 
 		if (Actions.Fired(Action::ToggleWireframe)) {
@@ -2788,6 +3024,58 @@ namespace client {
 		}
 	}
 
+	std::unique_ptr<engine::net::Transport> Client::OpenSocket(uint32_t salt) {
+		auto socket = engine::net::MakeUdpTransport(0);
+		const Options::NetworkImpairment &impairment = Settings.Impairment;
+		if (socket == nullptr || !impairment.Active()) return socket;
+		engine::net::LossSettings loss;
+		loss.DelaySeconds = impairment.RoundTripSeconds;
+		loss.JitterSeconds = impairment.JitterSeconds;
+		loss.LossChance = impairment.LossChance;
+		loss.DuplicateChance = impairment.DuplicateChance;
+		loss.ReorderChance = impairment.ReorderChance;
+		loss.Seed = impairment.Seed ^ salt;
+		ENGINE_INFO(
+			"network impairment on socket {}: rtt {:.0f} ms, jitter {:.0f} ms, loss {:.1f}%, duplicate "
+			"{:.1f}%, "
+			"reorder {:.1f}%, seed {}",
+			salt,
+			impairment.RoundTripSeconds * 1000.0,
+			impairment.JitterSeconds * 1000.0,
+			impairment.LossChance * 100.0f,
+			impairment.DuplicateChance * 100.0f,
+			impairment.ReorderChance * 100.0f,
+			loss.Seed
+		);
+		return std::make_unique<engine::net::LossyTransport>(std::move(socket), loss);
+	}
+
+	void Client::RecordFrameTiming(engine::render::PresentationSchedule::TimePoint stepStarted) {
+		using Milliseconds = std::chrono::duration<double, std::milli>;
+		if (!FrameTimingFile.is_open()) {
+			FrameTimingFile.open(Settings.FrameTimings, std::ios::trunc);
+			if (!FrameTimingFile) {
+				ENGINE_ERROR("could not write frame timings to {}", Settings.FrameTimings.string());
+				Settings.FrameTimings.clear();
+				return;
+			}
+			FrameTimingFile << "frame,interval_ms,cpu_ms,gpu_ms\n";
+		}
+		const auto now = engine::render::PresentationSchedule::Clock::now();
+		FrameTimingFile << FramesDrawn << ',';
+		if (LastTimedFrame) FrameTimingFile << Milliseconds(now - *LastTimedFrame).count();
+		FrameTimingFile << ',' << Milliseconds(now - stepStarted).count() << ',';
+		if (const uint64_t sequence = Renderer.PassTimingSequence(); sequence > LastGpuTimingSequence) {
+			LastGpuTimingSequence = sequence;
+			double microseconds = 0.0;
+			for (const auto &[pass, time] : Renderer.PassTimings())
+				microseconds += time;
+			FrameTimingFile << microseconds / 1000.0;
+		}
+		FrameTimingFile << '\n';
+		LastTimedFrame = now;
+	}
+
 	void Client::WriteSnapshot() {
 		// Beside the binary rather than in the working directory, which is
 		// wherever the launcher happened to be.
@@ -2847,6 +3135,11 @@ namespace client {
 		}
 	}
 
+	float Client::PresentationAlpha(engine::world::WorldId world) const {
+		if (!Settings.CaptureSequence.empty() && Settings.CaptureAlpha) return *Settings.CaptureAlpha;
+		return Universe_->AlphaOf(world);
+	}
+
 	void Client::Step() {
 		UpdateIterations++;
 		const engine::render::PresentationSchedule::TimePoint presentationNow =
@@ -2893,7 +3186,21 @@ namespace client {
 			renderingActive = Renderer.WaitForFrame();
 		}
 
-		const float delta = Clock.Tick();
+		const float wallDelta = Clock.Tick();
+		// Reference sequences sample one declared simulation interval per due image.
+		// Wall-driven catch-up would give separately captured scenes different ticks
+		// whenever their render cost differs, even with a fixed presentation alpha.
+		// A frame schedule replays the same variable intervals and stalls.
+		float delta = wallDelta;
+		if (!Settings.CaptureSequence.empty()) {
+			delta = 0.0f;
+			if (presentationDue && !Settings.CaptureFrameSchedule.empty()) {
+				const auto &schedule = Settings.CaptureFrameSchedule;
+				delta = schedule[CaptureScheduleIndex++ % schedule.size()];
+			} else if (presentationDue) {
+				delta = 1.0f / float(Settings.MaximumFrameRate == 0 ? 60 : Settings.MaximumFrameRate);
+			}
+		}
 
 		{
 			ENGINE_HEAP_SCOPE("client.events");
@@ -2922,6 +3229,7 @@ namespace client {
 		bool factoryPaused = allSystemsPaused();
 		const bool renderOnlyPending = DataFactoryRenderOnly.Pending();
 		const bool capturePending = DataCapture != nullptr && DataCapture->HasPending();
+		ControlSurface.PumpHooks();
 		auto failRenderOnly = [this](std::string detail) {
 			const auto *request = DataFactoryRenderOnly.Request();
 			if (request == nullptr || !DataFactory) return;
@@ -3350,7 +3658,7 @@ namespace client {
 				}
 				if (!(factoryPaused && id == Rendered && !renderOnlyPending && !capturePending)) {
 					presentationDemand.push_back({
-						engine::world::Presentation{id, presentationDelta, Universe_->AlphaOf(id)},
+						engine::world::Presentation{id, presentationDelta, PresentationAlpha(id)},
 						installWorldPipeline(id),
 					});
 				}
@@ -3378,7 +3686,7 @@ namespace client {
 					// drawn by the recursive pass from a camera derived from
 					// this one; a surface camera aimed at the same pane
 					// would be a second answer taken from the eye.
-					(void)CollectPortalViews(store, Portals);
+					(void)CollectPortalViews(store, Portals, {}, PresentationAlpha(id));
 					(void)CollectSurfaceViews(store, Surfaces, Portals);
 
 					// **Whether any pane here names another world**, asked
@@ -3449,7 +3757,7 @@ namespace client {
 					scene.View.Camera,
 					scene.Frame->Instances,
 					scene.Frame->Tick,
-					Universe_->AlphaOf(scene.World),
+					PresentationAlpha(scene.World),
 					scene.Frame->Joints
 				);
 			}
@@ -3533,7 +3841,7 @@ namespace client {
 					);
 				});
 
-				Universe_->Present(Replicated, presentationDelta, Universe_->AlphaOf(Replicated));
+				Universe_->Present(Replicated, presentationDelta, PresentationAlpha(Replicated));
 
 				Universe_->Enter(Replicated, [&](engine::ecs::Store &store) {
 					const auto *list = store.Resource<engine::render::DrawList>();
@@ -3583,7 +3891,13 @@ namespace client {
 		if (PresentationLink && Particles.Batches.empty()) {
 			// Captures consume the prepared world directly. GPU particles still need their normal step.
 			Renderer.SetAnimationTime(AnimationSeconds);
-			const auto progress = PortalImages->Pump(0, 1, std::chrono::steady_clock::now(), true);
+			const auto progress = PortalImages->Pump(
+				0,
+				1,
+				std::chrono::steady_clock::now(),
+				ReportedJoin ? Replicated : Rendered,
+				ReportedJoin ? Rendered : engine::world::WorldId{}
+			);
 			Metrics::Count("render.portal-producer.captures", progress.Rendered);
 			Metrics::Count("render.portal-producer.replies", progress.Sent);
 			Statistics.Record(Clock.Now(), presentationDelta);
@@ -3609,8 +3923,6 @@ namespace client {
 
 		{
 			ENGINE_PROFILE_CAT("debug panels", engine::core::ProfileCategory::Render);
-
-			Overlay.Resize(pixelWidth, pixelHeight);
 
 			// The panels are redrawn on a clock of their own, and presented on
 			// every frame from the texture they were last drawn into.
@@ -3734,6 +4046,7 @@ namespace client {
 				// stay the same apparent size on a high-DPI display.
 				panels.Scale = pixelWidth >= 2400 ? 3 : 2;
 
+				Overlay.Resize(pixelWidth, pixelHeight);
 				engine::render::DrawDebugPanels(Overlay, panels);
 				if (Menu.IsOpen()) {
 					DrawSettingsMenu(Overlay, Settings, Menu, MenuActions);
@@ -3746,6 +4059,7 @@ namespace client {
 				Metrics::Clear();
 			}
 			if (redraw && WaitingForPortalViews()) {
+				Overlay.Resize(pixelWidth, pixelHeight);
 				Overlay.Fill(0, 0, pixelWidth, 16, 0, 0, 0, 255);
 				engine::render::DebugText::Draw(Overlay, 4, 4, "Loading portals", 255, 255, 255, 1);
 			}
@@ -3758,6 +4072,7 @@ namespace client {
 					ClientAdornments.Build(store);
 				});
 				if (!ClientAdornments.Lines().empty() && pixelWidth > 0 && pixelHeight > 0) {
+					Overlay.Resize(pixelWidth, pixelHeight);
 					const engine::scene::CameraMatrices camera = engine::scene::ResolveCamera(
 						Views.CameraFrame(),
 						Views.Camera(),
@@ -3902,11 +4217,11 @@ namespace client {
 			if (ReportedJoin) prepareEditable(Replicated);
 		}
 
-		if (interfaceWorld.IsValid() && DataFactoryRenderOnly.AllowsInteractiveGui()) {
+		if (interfaceWorld.IsValid() && DataFactoryRenderOnly.AllowsInteractiveGui(factoryPaused)) {
 			ENGINE_HEAP_SCOPE("client.interface");
 
 			engine::gui::CompileRequest request;
-			std::span<const engine::gui::GuiEvent> interfaceEvents;
+			std::vector<engine::gui::GuiEvent> interfaceEvents;
 			std::span<const engine::gui::GuiEvent> adornmentEvents;
 
 			// **What Return did, which the router cannot produce.** Releasing the
@@ -3915,6 +4230,7 @@ namespace client {
 			// the only record of it, and a script's `FocusLost` is owed one
 			// however the focus went away.
 			std::vector<engine::gui::GuiEvent> typedEvents;
+			std::vector<engine::gui::GuiEvent> semanticEvents;
 
 			// **The clock a page slide and a rubber band are measured against.**
 			// Passed in rather than read inside `gui`, which is the standing
@@ -3924,6 +4240,22 @@ namespace client {
 
 			request.Display.Width = static_cast<float>(windowWidth);
 			request.Display.Height = static_cast<float>(windowHeight);
+			const float framebufferScale =
+				windowWidth > 0 && windowHeight > 0
+					? std::min(
+						  static_cast<float>(pixelWidth) / static_cast<float>(windowWidth),
+						  static_cast<float>(pixelHeight) / static_cast<float>(windowHeight)
+					  )
+					: 1.0f;
+			request.Display.FramebufferScale =
+				std::isfinite(framebufferScale) && framebufferScale > 0.0f ? framebufferScale : 1.0f;
+			// SDL reports logical window coordinates and device framebuffer pixels,
+			// but no independent display-density value. They describe the same
+			// ratio here and must not be multiplied together.
+			request.Display.DevicePixelRatio = request.Display.FramebufferScale;
+			request.Display.InterfaceScale = Settings.InterfaceScale;
+			request.Display.TextScale = Settings.TextScale;
+			request.Fonts = Interface.FontPackageForCompile();
 			request.ScreenGuis = engine::gui::ScreenGuiSource::PlayerGui;
 
 			// Fed back from the previous frame's routing, deliberately: the
@@ -3933,6 +4265,8 @@ namespace client {
 			request.Pressed = InterfaceRouter.Pressed();
 
 			Universe_->Enter(interfaceWorld, [&](engine::ecs::Store &store) {
+				request.Catalogue = InterfaceLocalization.Refresh(store);
+				request.Locale = Settings.Locale;
 				// **Before the layout, and that order is the whole of it.** A
 				// `SurfaceGui` sized in pixels-per-stud and a `BillboardGui`
 				// sized in studs both need numbers `gui` cannot reach - the
@@ -3943,7 +4277,6 @@ namespace client {
 				// which on one a player is walking towards is a visible lag on
 				// everything inside it.
 				engine::render::ResolveSpatialCanvases(store, request.Display);
-				engine::gui::Layout(store, request.Display);
 
 				// **Whose eyes this list is for**, which only
 				// `BillboardGui.PlayerToHideFrom` reads and which only this
@@ -3955,7 +4288,49 @@ namespace client {
 					request.Viewer = local->Instance;
 				}
 
-				InterfaceList.Rebuild(store, request);
+				const bool interfaceRebuilt = InterfaceList.Rebuild(store, request);
+				if (NativeAccessibility != nullptr) {
+					NativeAccessibility->SetWindowFocused(
+						(SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0
+					);
+					if (interfaceRebuilt) {
+						NativeAccessibility->Update(
+							ProjectAccessibilitySnapshot(
+								engine::gui::CompileSemantics(store, InterfaceList.Commands()),
+								InterfaceList.Commands()
+							),
+							store.Identity()
+						);
+					}
+					for (const AccessibilityAction &action : NativeAccessibility->Drain()) {
+						if (!IsCurrentAccessibilityAction(action, store.Identity(), InterfaceList.Commands()))
+							continue;
+						const std::span<const engine::gui::GuiEvent> events = InterfaceRouter.UpdateSemantic(
+							store, InterfaceList.Commands(), action.Target, action.Action
+						);
+						semanticEvents.insert(semanticEvents.end(), events.begin(), events.end());
+					}
+				}
+
+				const engine::scene::ControllerState presentationControllers =
+					Input.ControllersForPresentation();
+				const auto routeActions = [&](const engine::scene::InputState &keyboard,
+											  const engine::scene::ControllerState &controllers) {
+					const bool textEditing = engine::gui::FocusedTextBox(store) != engine::ecs::NULL_ENTITY;
+					for (const engine::gui::SemanticAction action :
+						 GuiActions(keyboard, controllers, textEditing)) {
+						const std::span<const engine::gui::GuiEvent> events =
+							InterfaceRouter.UpdateSemantic(store, InterfaceList.Commands(), action);
+						semanticEvents.insert(semanticEvents.end(), events.begin(), events.end());
+					}
+				};
+				const engine::scene::ControllerState noControllers;
+				for (const engine::scene::KeyCode key : Input.PendingPresentation().KeyPresses) {
+					engine::scene::InputState oneKey;
+					oneKey.Down.Set(key, true);
+					routeActions(oneKey, noControllers);
+				}
+				routeActions(engine::scene::InputState{}, presentationControllers);
 
 				// **This frame's characters, and before the press that may move
 				// the focus.** They were produced by a keyboard aimed at whichever
@@ -3980,36 +4355,49 @@ namespace client {
 					ENGINE_INFO("type: sent '{}' on frame {}", Settings.TypedText, FramesDrawn);
 				}
 
-				// **Straight from the translator into `Label::Text`, with nothing
-				// in between.** `Translate.hpp` keeps the string on the translator
-				// rather than on `scene::InputState` because that resource is
-				// trivially copyable and a `std::string` on it buys a hand-written
-				// serialiser, so this is the one hop it makes - into the world,
-				// where rule 2 says the text lives.
+				// Edit keys and committed text keep their SDL order across skipped
+				// draws. Applying one batch would turn text, Backspace, text into
+				// text, text, Backspace and lose repeated key presses.
 				engine::gui::Typing typing;
-				typing.Text = Input.TypedText();
-				typing.Backspace = Input.State().WasKeyPressed(engine::scene::KeyCode::Backspace);
-				typing.Submit = Input.State().WasKeyPressed(engine::scene::KeyCode::Return);
-				typing.Extend = Input.State().IsKeyDown(engine::scene::KeyCode::LeftShift) ||
-								Input.State().IsKeyDown(engine::scene::KeyCode::RightShift);
-
-				// **One step per press and not one per repeat**, because
-				// `input::Translator` drops SDL's key repeats deliberately - a
-				// held arrow moves the caret once until something records how many
-				// times it fired.
-				if (Input.State().WasKeyPressed(engine::scene::KeyCode::Left)) {
-					typing.Caret = -1;
-				} else if (Input.State().WasKeyPressed(engine::scene::KeyCode::Right)) {
-					typing.Caret = 1;
+				const engine::input::TextComposition composition = Input.Composition();
+				typing.Preedit = composition.Text;
+				typing.PreeditStart = composition.Start;
+				typing.PreeditLength = composition.Length;
+				typing.PreeditRevision = composition.Revision;
+				const auto applyTyping = [&](const engine::gui::Typing &edit) {
+					if (const engine::gui::TypeResult typed = engine::gui::Type(store, edit);
+						typed.Released) {
+						engine::gui::GuiEvent released;
+						released.Kind = engine::gui::EventKind::FocusReleased;
+						released.Instance = typed.Instance;
+						released.Entered = true;
+						typedEvents.push_back(released);
+					}
+				};
+				for (const engine::input::PresentationEditEvent &event : Input.PendingPresentation().Edits) {
+					engine::gui::Typing edit = typing;
+					switch (event.Kind) {
+					case engine::input::PresentationEditKind::Text:
+						edit.Text = event.Text;
+						break;
+					case engine::input::PresentationEditKind::Backspace:
+						edit.Backspace = true;
+						break;
+					case engine::input::PresentationEditKind::Submit:
+						edit.Submit = true;
+						break;
+					case engine::input::PresentationEditKind::CaretLeft:
+						edit.Caret = -1;
+						edit.Extend = event.Extend;
+						break;
+					case engine::input::PresentationEditKind::CaretRight:
+						edit.Caret = 1;
+						edit.Extend = event.Extend;
+						break;
+					}
+					applyTyping(edit);
 				}
-
-				if (const engine::gui::TypeResult typed = engine::gui::Type(store, typing); typed.Released) {
-					engine::gui::GuiEvent released;
-					released.Kind = engine::gui::EventKind::FocusReleased;
-					released.Instance = typed.Instance;
-					released.Entered = true;
-					typedEvents.push_back(released);
-				}
+				applyTyping(typing);
 
 				// **The hit test, which a shipped client did not do at all.** The
 				// router was constructed, read for `Hovered` and `Pressed`, and
@@ -4024,9 +4412,10 @@ namespace client {
 				// fed that compile is deliberately the previous frame's - see
 				// `Router::Hovered`, which explains why the one-frame loop is the
 				// alternative to a compile that depends on its own output.
+				engine::core::Vector2 windowPointer = Input.State().MousePosition;
 				engine::gui::Pointer pointer;
-				pointer.Position = Input.State().MousePosition;
-				pointer.Down = Input.State().IsButtonDown(engine::scene::MouseButton::Left);
+				pointer.Position = windowPointer;
+				pointer.Down = Input.PrimaryDownForPresentation();
 
 				// **Focus and not a rectangle test.** The position is already in
 				// window pixels, and a pointer that has left the window stops
@@ -4040,7 +4429,7 @@ namespace client {
 				// and not this one - a list has to move the same distance in the
 				// client and in the editor, and scaling here would be the second
 				// answer.
-				pointer.Wheel = Input.State().WheelDelta;
+				pointer.Wheel = Input.PendingPresentation().WheelDelta;
 
 				// **Before the router reads the pointer, so the press is this
 				// frame's.** Synthesising after would put the click one frame
@@ -4049,28 +4438,42 @@ namespace client {
 				// direction.
 				if (!Settings.ClickElement.empty() && !InterfaceList.Commands().Commands.empty()) {
 					PressNamedElement(store);
-					pointer.Position = Input.State().MousePosition;
-					pointer.Down = Input.State().IsButtonDown(engine::scene::MouseButton::Left);
+					windowPointer = Input.State().MousePosition;
+					pointer.Position = windowPointer;
+					pointer.Down = Input.PrimaryDownForPresentation();
 				}
 
-				// A screen interface gets first refusal. If no interactive screen
-				// element is under the pointer, project the same window pixel onto
-				// the nearest interactive `SurfaceGui` or `BillboardGui` and route
-				// in that collector's own canvas coordinates.
-				if (pointer.Inside &&
-					engine::gui::PickScreen(store, InterfaceList.Commands(), pointer.Position) ==
-						engine::ecs::NULL_ENTITY) {
-					engine::render::SpatialPointer spatial;
-					if (engine::render::ResolveSpatialPointer(
-							store, InterfaceList.Commands(), request.Display, pointer.Position, spatial
-						)) {
-						pointer.Position = spatial.Position;
-						pointer.Collector = spatial.Collector;
-						pointer.ScreenOnly = false;
+				// Route every button edge against the displayed list before the
+				// current pointer level. A press and release can share one SDL pump,
+				// and several update loops may run before this presentation.
+				const auto routePointer = [&](engine::gui::Pointer routed) {
+					const engine::core::Vector2 windowPosition = routed.Position;
+					if (routed.Inside &&
+						engine::gui::PickScreen(store, InterfaceList.Commands(), windowPosition) ==
+							engine::ecs::NULL_ENTITY) {
+						engine::render::SpatialPointer spatial;
+						if (engine::render::ResolveSpatialPointer(
+								store, InterfaceList.Commands(), request.Display, windowPosition, spatial
+							)) {
+							routed.Position = spatial.Position;
+							routed.Collector = spatial.Collector;
+							routed.ScreenOnly = false;
+						}
 					}
+					const std::span<const engine::gui::GuiEvent> events =
+						InterfaceRouter.Update(store, InterfaceList.Commands(), routed);
+					interfaceEvents.insert(interfaceEvents.end(), events.begin(), events.end());
+				};
+				for (const engine::input::PrimaryPointerSample &transition :
+					 Input.PendingPresentation().PrimarySamples) {
+					engine::gui::Pointer edge = pointer;
+					edge.Position = transition.Position;
+					edge.Down = transition.Down;
+					edge.Cancelled = transition.Cancelled;
+					edge.Wheel = 0.0f;
+					routePointer(edge);
 				}
-
-				interfaceEvents = InterfaceRouter.Update(store, InterfaceList.Commands(), pointer);
+				routePointer(pointer);
 
 				// World adornments use the same window pointer after screen and spatial
 				// UI have had first refusal. Their hit geometry is resolved against the
@@ -4105,39 +4508,59 @@ namespace client {
 				// types is the one SDL was never asked for.
 				wantsTextInput = engine::gui::FocusedTextBox(store) != engine::ecs::NULL_ENTITY;
 
-				if (!InterfaceList.Commands().Commands.empty()) {
-					interfaceContinuous = std::any_of(
-						InterfaceList.Commands().Commands.begin(),
-						InterfaceList.Commands().Commands.end(),
-						[](const engine::gui::DrawCommand &command) {
-							return command.Kind == engine::gui::DrawKind::Viewport;
-						}
-					);
+				const bool hasInterfaceCommands = !InterfaceList.Commands().Commands.empty();
+				// The compiler signature includes its store, so a world switch always
+				// rebuilds. Keep the viewport answer beside that list and only walk its
+				// commands when either source changes.
+				if (interfaceRebuilt || InterfaceViewportWorld != interfaceWorld) {
+					InterfaceViewportWorld = interfaceWorld;
+					InterfaceHasViewport = hasInterfaceCommands &&
+										   std::any_of(
+											   InterfaceList.Commands().Commands.begin(),
+											   InterfaceList.Commands().Commands.end(),
+											   [](const engine::gui::DrawCommand &command) {
+												   return command.Kind == engine::gui::DrawKind::Viewport;
+											   }
+										   );
+				}
+				interfaceContinuous = InterfaceHasViewport;
+				if (hasInterfaceCommands) {
+					// A retained viewport still observes its scene and update policy on
+					// a list cache hit. Its renderer owns that narrower cache, while the
+					// outer interface submission only changes with the compiled list.
 					(void)ViewportImages.Render(
 						Renderer, store, InterfaceList.Commands(), 1, Universe_->NameOf(interfaceWorld)
 					);
-					Interface.Submit(
-						InterfaceList.Commands(),
-						engine::core::Vector2{request.Display.Width, request.Display.Height},
-						engine::core::Vector2{
-							static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)
-						},
-						store,
-						InterfaceList.Signature()
-					);
+					if (interfaceRebuilt) {
+						Interface.Submit(
+							InterfaceList.Commands(),
+							engine::core::Vector2{request.Display.Width, request.Display.Height},
+							engine::core::Vector2{
+								static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)
+							},
+							store,
+							InterfaceList.Signature(),
+							InterfaceList.DamageValid(),
+							InterfaceList.Damage()
+						);
+					}
 					hook = &Interface;
 				}
 			});
 
-			// **Outside the world's lock, because it reaches a VM.** The span
-			// points into the router's own vector, which is a member and is only
-			// rewritten by the next `Update`; `DeliverGuiEvents` copies.
-			if (!typedEvents.empty() || !interfaceEvents.empty() || !adornmentEvents.empty()) {
+			// Deliver after leaving the world: dispatch can reach the VM. Pointer
+			// events were copied after each router update because a later update
+			// replaces its event buffer.
+			if (!typedEvents.empty() || !semanticEvents.empty() || !interfaceEvents.empty() ||
+				!adornmentEvents.empty()) {
 				if (engine::script::Runtime *runtime = RuntimeOf(interfaceWorld); runtime != nullptr) {
 					// Typing first, because it happened first - the keystroke is
 					// applied above the routing for the reason stated there.
 					if (!typedEvents.empty()) {
 						runtime->DeliverGuiEvents(typedEvents);
+					}
+					if (!semanticEvents.empty()) {
+						runtime->DeliverGuiEvents(semanticEvents);
 					}
 					if (!interfaceEvents.empty()) {
 						runtime->DeliverGuiEvents(interfaceEvents);
@@ -4152,6 +4575,7 @@ namespace client {
 			// Do not relayout, route, or deliver events while submitting it.
 			hook = &Interface;
 		}
+		Input.ConsumePresentation();
 
 		// **SDL is asked for text only while a `TextBox` has the keyboard, and
 		// that is a decision rather than a saving.** Text input is not a stream
@@ -4318,6 +4742,9 @@ namespace client {
 			view.ParticlePool = particles.Pool;
 			view.ParticleBlocks = particles.BlockCount;
 		}
+		// The collected scene packet owns the storm's device-local field request.
+		// Omitting it here leaves the normal game view with only authored puffs.
+		BindDisplayedSceneFields(displayedActiveScene, view);
 
 		// The time since the last device step. Presentation may be slower than the
 		// update loop, and using only this update's delta would slow resident
@@ -4400,6 +4827,11 @@ namespace client {
 				auto sourceView = view;
 				sourceView.Instances = Views.Instances();
 				sourceView.JointFrames = Views.JointFrames();
+				// Keep the authenticated local producer through route discovery and
+				// preparation. Switching to a newly published remote endpoint would
+				// discard its visible capture while the replacement is still in flight.
+				const auto admittedPortalDestination =
+					AdmittedPortalCaptureWorld(engine::core::Clock::Seconds());
 				UpdatePortalImages(
 					*Universe_,
 					*PortalImages,
@@ -4408,9 +4840,11 @@ namespace client {
 					{.Width = targetWidth, .Height = targetHeight},
 					Portals,
 					Surfaces,
-					Universe_->AlphaOf(presentationWorld),
+					PresentationAlpha(presentationWorld),
 					std::chrono::steady_clock::now(),
-					Rendered
+					{.TopologyOwner = Rendered,
+					 .AdmittedDestination = admittedPortalDestination,
+					 .PresentedDestination = ReportedJoin ? Rendered : engine::world::WorldId{}}
 				);
 			}
 			Renderer.SetAnimationTime(AnimationSeconds);
@@ -4419,6 +4853,7 @@ namespace client {
 		} else if (!namedCaptureBound && PortalImages) {
 			PortalImages->RemoveViewport(view.Slot);
 		}
+		DisplayedWorld = view.WorldName;
 
 		const bool observedEye = PortalDrawing != nullptr;
 		engine::render::WorldViewInterface observedInterface(
@@ -4592,6 +5027,74 @@ namespace client {
 					return Renderer.Render(cameraBatch, Overlay, hook);
 				}
 			);
+			if (!Settings.CaptureSequence.empty() && std::getenv("PORTAL_VISIBILITY_DIAGNOSTIC") &&
+				FramesDrawn < 600 && LastFrame.Submitted) {
+				const auto visibility = Renderer.Visibility();
+				nlohmann::json bodyRows = nlohmann::json::array();
+				if (visibility.Valid && visibility.ViewSlot == view.Slot &&
+					visibility.World == view.WorldName) {
+					for (const auto &row : view.Instances) {
+						if (row.Rig == 0 || bodyRows.size() == 64) continue;
+						const auto world = row.SourceWorld.IsValid() ? row.SourceWorld : view.WorldName;
+						const auto observed = std::find_if(
+							visibility.Observations.begin(),
+							visibility.Observations.end(),
+							[&](const auto &entry) {
+								return entry.World == world && entry.Entity == row.Source;
+							}
+						);
+						bodyRows.push_back({
+							{"world", std::string(world.Text())},
+							{"entity", row.Source},
+							{"rig", row.Rig},
+							{"body_key", {row.BodyKeyHigh, row.BodyKeyLow, row.BodyGeneration}},
+							{"variant", row.Variant},
+							{"seam_mask", row.SeamMask},
+							{"position", {row.Frame.Position.X, row.Frame.Position.Y, row.Frame.Position.Z}},
+							{"visibility",
+							 observed == visibility.Observations.end()
+								 ? "missing"
+								 : engine::render::Describe(observed->State)},
+							{"cause",
+							 observed == visibility.Observations.end()
+								 ? "missing"
+								 : engine::render::Describe(observed->Cause)},
+						});
+					}
+				}
+				std::ofstream output(
+					Settings.CaptureSequence / (std::to_string(FramesDrawn) + ".visibility.json")
+				);
+				output << nlohmann::json{
+					{"frame", FramesDrawn},
+					{"renderer_frame", visibility.Frame},
+					{"view_world", std::string(view.WorldName.Text())},
+					{"visibility_world", std::string(visibility.World.Text())},
+					{"view_slot", view.Slot},
+					{"visibility_slot", visibility.ViewSlot},
+					{"valid", visibility.Valid},
+					{"dropped", visibility.Dropped},
+					{"body_rows", std::move(bodyRows)},
+				}.dump() << '\n';
+			}
+			if (!Settings.CaptureSequence.empty() && std::getenv("PORTAL_RENDER_FRAME_DIAGNOSTIC") &&
+				LastFrame.Submitted) {
+				const auto visibility = Renderer.Visibility();
+				const bool matched = visibility.Valid && visibility.ViewSlot == view.Slot &&
+									 visibility.World == view.WorldName;
+				std::ofstream output(
+					Settings.CaptureSequence / (std::to_string(FramesDrawn) + ".renderer.json")
+				);
+				output << nlohmann::json{
+					{"frame", FramesDrawn},
+					{"renderer_frame", matched ? nlohmann::json(visibility.Frame) : nlohmann::json(nullptr)},
+					{"view_world", std::string(view.WorldName.Text())},
+					{"visibility_world", std::string(visibility.World.Text())},
+					{"view_slot", view.Slot},
+					{"visibility_slot", visibility.ViewSlot},
+					{"matched", matched},
+				}.dump() << '\n';
+			}
 			if (sameFrameCapture && !LastFrame.Submitted)
 				DataCapture->AbortPreparedBatch(preparedCaptureBatch);
 			if (renderOnlyPending) {
@@ -4605,7 +5108,14 @@ namespace client {
 				});
 				DataFactoryRenderOnly.Consume();
 			}
-			if (PresentationLink) (void)PortalImages->Pump(0, 1, std::chrono::steady_clock::now(), true);
+			if (PresentationLink)
+				(void)PortalImages->Pump(
+					0,
+					1,
+					std::chrono::steady_clock::now(),
+					ReportedJoin ? Replicated : Rendered,
+					ReportedJoin ? Rendered : engine::world::WorldId{}
+				);
 		}
 		{
 			ENGINE_HEAP_SCOPE("client.statistics");
@@ -4665,6 +5175,7 @@ namespace client {
 		// would never end - which is the one failure mode a build server cannot
 		// recover from. The editor makes the same allowance for the same reason.
 		if (LastFrame.Presented || Settings.Headless) {
+			if (!Settings.FrameTimings.empty()) RecordFrameTiming(presentationNow);
 			FramesDrawn++;
 		}
 
@@ -4723,9 +5234,72 @@ namespace client {
 		// first card says.
 		StartDiscord();
 
+		const bool benchmarking = !Settings.BenchmarkReport.empty();
+		if (benchmarking && (!HeapProfile::IsCompiledIn() || !std::isfinite(Settings.ProfileSeconds) ||
+							 Settings.ProfileSeconds <= 0.0)) {
+			ENGINE_ERROR("benchmark report requires allocator hooks and positive profile-seconds");
+			return EXIT_PROFILE_ARTIFACT;
+		}
+		if (Settings.BenchmarkWaitForJoin &&
+			(!benchmarking || Settings.ConnectAddress.empty() || Settings.DataFactory ||
+			 Settings.PresentationSession != 0 || !Settings.PresentationWorld.empty())) {
+			ENGINE_ERROR(
+				"benchmark-wait-for-join requires a connected benchmark without a data-factory or "
+				"presentation host"
+			);
+			return EXIT_PROFILE_ARTIFACT;
+		}
+		engine::core::HeapTotals benchmarkHeap = HeapProfile::Totals();
+		engine::core::BenchmarkReport benchmark(benchmarkHeap);
+		const auto benchmarkRunStarted = std::chrono::steady_clock::now();
+		auto benchmarkStarted = benchmarkRunStarted;
+		bool benchmarkMeasurementStarted = !Settings.BenchmarkWaitForJoin;
+		auto initialGpu = Renderer.MemoryStatistics();
+		double benchmarkSeconds = 0.0;
+		uint64_t benchmarkDrawCalls = 0, benchmarkUploadedBytes = 0, benchmarkSubmittedFrames = 0;
+
 		while (Running) {
 			if (!PumpPresentationHost()) break;
+			if (benchmarking) LastFrame = {};
 			Step();
+			if (benchmarking && !benchmarkMeasurementStarted) {
+				// The joining frame contains bootstrap work. Start after it and
+				// include only the subsequent connected frames in the measured run.
+				if (Connection && Connection->Joined() && Connection->Live()) {
+					benchmarkHeap = HeapProfile::Totals();
+					benchmark = engine::core::BenchmarkReport(benchmarkHeap);
+					initialGpu = Renderer.MemoryStatistics();
+					benchmarkStarted = std::chrono::steady_clock::now();
+					benchmarkMeasurementStarted = true;
+				} else {
+					constexpr auto MAXIMUM_BENCHMARK_JOIN_WAIT = std::chrono::seconds(60);
+					if (std::chrono::steady_clock::now() - benchmarkRunStarted >=
+						MAXIMUM_BENCHMARK_JOIN_WAIT) {
+						ENGINE_ERROR("benchmark connected world did not join within 60 seconds");
+						return EXIT_PROFILE_ARTIFACT;
+					}
+				}
+			} else if (benchmarking) {
+				if (Settings.BenchmarkWaitForJoin &&
+					(!Connection || !Connection->Joined() || !Connection->Live())) {
+					ENGINE_ERROR("benchmark connected world disconnected before measurement finished");
+					return EXIT_PROFILE_ARTIFACT;
+				}
+				benchmarkHeap = HeapProfile::Totals();
+				benchmark.AddFrame(
+					FrameGraph::Spans(),
+					FrameGraph::FrameMilliseconds(),
+					FrameGraph::Dropped(),
+					benchmarkHeap,
+					FrameGraph::OffThreadDropped()
+				);
+				benchmarkDrawCalls += LastFrame.DrawCalls;
+				benchmarkUploadedBytes += LastFrame.UploadedBytes;
+				benchmarkSubmittedFrames += LastFrame.Submitted ? 1 : 0;
+				benchmarkSeconds =
+					std::chrono::duration<double>(std::chrono::steady_clock::now() - benchmarkStarted)
+						.count();
+			}
 			PumpPlayPresentation();
 			if (PresentationLink && !PumpPresentationHost()) break;
 
@@ -4734,7 +5308,8 @@ namespace client {
 				break;
 			}
 
-			if (Settings.ProfileSeconds > 0.0 && Clock.Now() >= Settings.ProfileSeconds) {
+			if (Settings.ProfileSeconds > 0.0 &&
+				(benchmarking ? benchmarkSeconds : Clock.Now()) >= Settings.ProfileSeconds) {
 				// **The pass counts are here because nothing else can report
 				// them.** A shadow pass or a surface pass that silently did not
 				// run looks exactly like one that ran and changed nothing, and
@@ -4829,6 +5404,40 @@ namespace client {
 		// snapshot taken after the world has gone is a snapshot of the
 		// shutdown.
 		bool profileArtifactsWritten = true;
+		if (benchmarking) {
+			const auto gpu = Renderer.MemoryStatistics();
+			const double frames = static_cast<double>(benchmark.FrameCount());
+			const std::array<engine::core::BenchmarkMetric, 8> metrics = {
+				{{"gpu_live_bytes", static_cast<double>(gpu.LiveBytes)},
+				 {"gpu_peak_bytes", static_cast<double>(gpu.PeakBytes)},
+				 {"gpu_allocated_bytes", static_cast<double>(gpu.AllocatedBytes - initialGpu.AllocatedBytes)},
+				 {"gpu_resources_created",
+				  static_cast<double>(
+					  (gpu.BufferAllocations - initialGpu.BufferAllocations) +
+					  (gpu.TransferBufferAllocations - initialGpu.TransferBufferAllocations) +
+					  (gpu.TextureAllocations - initialGpu.TextureAllocations)
+				  )},
+				 {"draw_calls_per_frame",
+				  frames > 0.0 ? static_cast<double>(benchmarkDrawCalls) / frames : 0.0},
+				 {"uploaded_bytes", static_cast<double>(benchmarkUploadedBytes)},
+				 {"uploaded_bytes_per_frame",
+				  frames > 0.0 ? static_cast<double>(benchmarkUploadedBytes) / frames : 0.0},
+				 {"submitted_frames", static_cast<double>(benchmarkSubmittedFrames)}}
+			};
+			if (!benchmark.Write(
+					Settings.BenchmarkReport,
+					benchmarkSeconds,
+					Settings.ProfileSeconds,
+					benchmarkHeap,
+					HeapProfile::IsCompiledIn(),
+					metrics
+				)) {
+				ENGINE_ERROR(
+					"benchmark run incomplete or could not write {}", Settings.BenchmarkReport.string()
+				);
+				profileArtifactsWritten = false;
+			}
+		}
 		if (!Settings.ProfileSnapshot.empty()) {
 			if (FrameGraph::WriteSnapshot(Settings.ProfileSnapshot)) {
 				ENGINE_INFO("frame graph written to {}", Settings.ProfileSnapshot.string());

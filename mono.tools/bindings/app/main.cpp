@@ -22,6 +22,7 @@
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/physics/Pipeline.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
 #include <engine/scene/Part.hpp>
@@ -763,6 +764,11 @@ end
 declare extern type ChangedSignal with
 	function Connect(self, handler: (property: string) -> ()): RBXScriptConnection
 	function Once(self, handler: (property: string) -> ()): RBXScriptConnection
+end
+
+declare extern type RemoteEventSignal with
+	function Connect(self, handler: (payload: string, sender: Player?) -> ()): RBXScriptConnection
+	function Once(self, handler: (payload: string, sender: Player?) -> ()): RBXScriptConnection
 end
 
 -- --- input ------------------------------------------------------------------
@@ -1839,6 +1845,46 @@ declare extern type RunService with
 	function IsReplica(self): boolean
 end
 
+-- The shared analytical tornado field. Configure and Preset require the
+-- authoritative server role; the remaining queries are read-only everywhere.
+declare extern type StormFieldSample with
+	Velocity: Vector3
+	Influence: number
+	DamagePotential: number
+	Condensation: number
+end
+
+declare extern type StormVisibility with
+	Clarity: number
+	EffectiveDistance: number
+	Rain: number
+	Condensation: number
+end
+
+declare extern type StormDamage with
+	Wind: Vector3
+	DynamicPressure: number
+	Potential: number
+	Band: number
+end
+
+declare extern type StormSnapshot with
+	Position: Vector3
+	ElapsedSeconds: number
+	LifecycleEnabled: boolean
+	Enabled: boolean
+	Parameters: { [string]: any }
+end
+
+declare extern type StormService with
+	function Configure(self, values: { [string]: any }): ()
+	function Preset(self, name: string): ()
+	function Sample(self, position: Vector3): StormFieldSample
+	function Snapshot(self): StormSnapshot
+	function Visibility(self, position: Vector3, viewDistance: number): StormVisibility
+	function Damage(self, position: Vector3): StormDamage
+end
+
 -- --- the globals -----------------------------------------------------------
 
 declare MessagingService: MessagingService
@@ -1847,6 +1893,7 @@ declare CrossWorldService: CrossWorldService
 declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
+declare Storm: StormService
 declare ComputeService: ComputeService
 declare DataSceneService: DataSceneService
 declare ContentService: ContentService
@@ -2500,6 +2547,14 @@ declare task: {
 				out << "\tfunction VirtualText(self, text: string): ()\n";
 				out << "\tfunction VirtualSubmit(self): ()\n";
 			}
+			if (name == "UIVirtualCollection") {
+				out << "\tfunction SetVirtualPage(self, first: number, extentBefore: number, records: { { "
+					   "Key: string, Extent: number?, Fields: { [string]: any } } }, revision: number): ()\n";
+			}
+			if (name == "RemoteEvent") {
+				out << "\tfunction FireServer(self, payload: string): ()\n";
+				out << "\tOnServerEvent: RemoteEventSignal\n";
+			}
 
 			// The member only the Workspace answers, for the reason
 			// `LuauInstances.cpp` keeps it in a table of its own: a `Raycast` on a
@@ -2853,6 +2908,11 @@ declare interface ChangedSignal {
 	Connect(handler: (property: string) => void): RBXScriptConnection;
 	Once(handler: (property: string) => void): RBXScriptConnection;
 	Equals(other: ChangedSignal): boolean;
+}
+
+declare interface RemoteEventSignal {
+	Connect(handler: (payload: string, sender: Player | null) => void): RBXScriptConnection;
+	Once(handler: (payload: string, sender: Player | null) => void): RBXScriptConnection;
 }
 
 // The instance tree's signals, matching the Luau half - undeclared until v0.13
@@ -4155,6 +4215,14 @@ declare const task: {
 				out << "\tVirtualText(text: string): void;\n";
 				out << "\tVirtualSubmit(): void;\n";
 			}
+			if (name == "UIVirtualCollection") {
+				out << "\tSetVirtualPage(first: number, extentBefore: number, records: { Key: string; "
+					   "Extent?: number; Fields: Record<string, unknown> }[], revision: number): void;\n";
+			}
+			if (name == "RemoteEvent") {
+				out << "\tFireServer(payload: string): void;\n";
+				out << "\treadonly OnServerEvent: RemoteEventSignal;\n";
+			}
 
 			// The member only the Workspace answers, matching the Luau half.
 			//
@@ -4312,6 +4380,7 @@ int main(int argc, char **argv) {
 	// from an empty table would be a valid file describing nothing, and its
 	// drift check would pass forever.
 	(void)engine::scene::PartClass();
+	engine::physics::RegisterPhysicsClasses();
 
 	// **`ShaderScript` and `EditableMesh`, which `PartClass` does not reach.**
 	// Both self-register through their own accessor rather than through

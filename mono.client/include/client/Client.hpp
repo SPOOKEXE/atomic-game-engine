@@ -6,6 +6,7 @@
 #include <engine/assets/Signature.hpp>
 #include <engine/assets/Texture.hpp>
 #include <engine/audio/Device.hpp>
+#include <engine/control/HookRegistry.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Clock.hpp>
@@ -50,6 +51,7 @@
 #include <engine/world/PresentationStream.hpp>
 #include <engine/world/Universe.hpp>
 
+#include <client/Accessibility.hpp>
 #include <client/Actions.hpp>
 #include <client/ActiveScenes.hpp>
 #include <client/Compositor.hpp>
@@ -64,6 +66,7 @@
 #include <cstdint>
 #include <discord/Link.hpp>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <network/Presence.hpp>
 #include <optional>
@@ -78,6 +81,9 @@ struct SDL_Gamepad;
 struct SDL_Joystick;
 
 namespace client {
+	class PortalReadinessController;
+	struct PortalReadinessEvidence;
+	struct PortalReadiness;
 
 	// The window, the renderer and the frame loop over one world.
 	//
@@ -144,6 +150,8 @@ namespace client {
 		//
 		// @return `true` when the client is ready to run.
 		bool FinishStartup();
+		// Activates client-owned MCP rows after every backing service exists.
+		void ConfigureControlHooks();
 		// Reconciles the factory-owned world after the control boundary has
 		// committed it. This runs only on the driver thread that owns Universe.
 		bool ReconcileDataFactoryWorlds();
@@ -159,6 +167,7 @@ namespace client {
 		void PumpEvents();
 		void Step();
 		void CaptureFrame(const engine::render::View &view, engine::world::WorldId inputWorld);
+		float PresentationAlpha(engine::world::WorldId world) const;
 		void StampCameraTemporalSamples(std::span<engine::render::View> views);
 		void SubmitTeleportRequests(double nowSeconds);
 		// Exit code for a run whose heap kept climbing, and for one that was
@@ -277,6 +286,8 @@ namespace client {
 		void PumpContent();
 		void RefreshContentBindings();
 		void LoadPackagedExampleTextures(ContentSession &content);
+		void IndexPackagedAudio();
+		void LoadPackagedAudio(engine::ecs::Store &store);
 		void PumpContent(ContentSession &content, std::span<const engine::world::WorldId> worlds);
 
 		// Hands the session's worlds the mesh names its store published.
@@ -354,10 +365,25 @@ namespace client {
 		void ReceiveServerMessage(std::span<const std::byte> message);
 		bool ReceivePortalSession(const engine::game::PortalSessionMessage &message);
 		void PumpPortalSuccessor(double nowSeconds, bool presentationReady);
+		void PumpPortalApproach(double nowSeconds);
 		bool PortalSuccessorDrawable();
 		void PumpPortalObservation(double nowSeconds);
 		void DropPortalObservation();
 		void RetainPortalObservation(engine::world::WorldId world);
+		engine::world::WorldId AdmittedPortalCaptureWorld(double nowSeconds) const;
+		// The world that answers an eye request into `destination`: the admitted
+		// local replica of it when there is one, else its remote endpoint.
+		engine::world::WorldId PortalEyeProducer(engine::core::Name destination, double nowSeconds);
+		// Whether the eye can be drawn in `selected`: a local copy, or a remote
+		// endpoint that has already answered with an image.
+		bool PortalEyeDrawable(engine::world::WorldId selected, engine::core::Name eyeWorld) const;
+		// Moves an eye that crossed into an undrawable room back to the source
+		// side of the pane it went through. False when that pane is unknown.
+		bool HoldEyeAtDoorway(
+			engine::render::View &view,
+			engine::world::WorldId inputWorld,
+			const std::optional<engine::core::CFrame> &sourceVisibility
+		);
 		struct PortalWorldView;
 		bool PreparePortalWorldView(
 			PortalWorldView &packet,
@@ -372,9 +398,11 @@ namespace client {
 			engine::world::WorldId inputWorld,
 			uint32_t width,
 			uint32_t height,
-			bool prepareNative = false
+			bool prepareNative = false,
+			bool honorDisplayHold = true
 		);
 		void DropPortalReplica(engine::world::WorldId world);
+		void DropPortalApproach();
 
 		// Copies this frame's keyboard and pointer onto a world's `InputState`.
 		//
@@ -437,6 +465,7 @@ namespace client {
 		int64_t DiscordStartedUnixSeconds = 0;
 
 		SDL_Window *Window = nullptr;
+		std::unique_ptr<AccessibilityAdapter> NativeAccessibility;
 		engine::render::Renderer Renderer;
 
 		// One compiler retains each world's accepted material and lens modules.
@@ -460,6 +489,9 @@ namespace client {
 		engine::render::EditableImageUploader EditableImages;
 
 		engine::render::OverlayImage Overlay;
+
+		// Keeps a click released after closing a raster debug panel from reaching the game input state.
+		bool DebugPanelMouseCaptured = false;
 
 		// **What draws a `ScreenGui` in a shipped client.** `mono.client` does
 		// not link `Engine::ui` and must not - that is what keeps Dear ImGui out
@@ -522,6 +554,9 @@ namespace client {
 		// nothing to compare it against and rebuild every time - every cost of
 		// the design and none of its benefit.
 		engine::gui::Compiled InterfaceList;
+		engine::gui::LocalizationCache InterfaceLocalization;
+		engine::world::WorldId InterfaceViewportWorld;
+		bool InterfaceHasViewport = false;
 
 		// Where the pointer is, for the world's own interface. Long-lived: it
 		// holds the hover and the press across frames.
@@ -623,6 +658,23 @@ namespace client {
 			"A shipped atomic game client. Its universe contains local scenes and may also contain a "
 			"replica received from a dedicated server. Replica writes are refused by their store."
 		};
+		// Permanent product rows have named leases so shutdown removes them before borrowed services.
+		std::vector<engine::control::HookLease> PermanentControlHooks;
+		// A tap releases on the next input frame so scripts and GUI see its down edge.
+		std::vector<engine::control::InputAutomationEvent> PendingControlInput;
+		std::vector<engine::control::InputAutomationEvent> DeferredControlRelease;
+		std::optional<engine::control::HookLease> InputControlHook;
+		std::optional<engine::control::HookLease> VisibilityObservationHook;
+		std::optional<engine::control::HookLease> PhysicsObservationHook;
+		std::optional<engine::control::HookLease> TemporalSampleHook;
+		std::optional<engine::control::HookLease> RigExportHook;
+		std::optional<engine::control::HookLease> DataAudioObservationHook;
+		std::optional<engine::control::HookLease> DataFactoryLifecycleHook;
+		std::optional<engine::control::HookLease> RenderGraphHook;
+		std::optional<engine::control::HookLease> DataSceneHook;
+		std::optional<engine::control::HookLease> SceneRenderingHook;
+		std::optional<engine::control::HookLease> DataScriptPackageHook;
+		std::optional<engine::control::HookLease> DataCaptureHook;
 
 		// One VM per world, while a game file is being played. Held here as
 		// well as by each world's scheduler, for the reason
@@ -674,6 +726,9 @@ namespace client {
 
 		// The world the panels report on, and the first view composited.
 		engine::world::WorldId Rendered;
+		// The world the last displayed frame drew. At adoption it decides whether
+		// the source route was on screen and so worth holding for one more frame.
+		engine::core::Name DisplayedWorld;
 
 		// The one rendering profile library loaded with this universe.
 		// arch-waiver ecs-copy: the authored library, which is a property of the
@@ -704,6 +759,20 @@ namespace client {
 		// copied on the presentation lanes and submitted together below.
 		ActiveSceneCollector ActiveScenes;
 
+		// Opens one ephemeral UDP socket for this client, wrapped in the seeded
+		// Settings.Impairment when one is active. `salt` gives each socket its
+		// own draws under one seed. Null when the socket cannot be opened.
+		std::unique_ptr<engine::net::Transport> OpenSocket(uint32_t salt);
+
+		// Due capture frames advanced so far, indexing CaptureFrameSchedule.
+		size_t CaptureScheduleIndex = 0;
+
+		// Settings.FrameTimings output and the state its rows are measured from.
+		std::ofstream FrameTimingFile;
+		std::optional<engine::render::PresentationSchedule::TimePoint> LastTimedFrame;
+		uint64_t LastGpuTimingSequence = 0;
+		void RecordFrameTiming(engine::render::PresentationSchedule::TimePoint stepStarted);
+
 		// The socket and the connection to a server. Both null unless
 		// `--connect` was given, which is what keeps a single-player run from
 		// opening a port it has no use for.
@@ -725,6 +794,7 @@ namespace client {
 		};
 		struct PortalSuccessor {
 			PortalWorldView View;
+			std::unique_ptr<PortalWorldView> LocalTrailingEye;
 			engine::game::PortalSessionMessage Offer;
 			std::optional<engine::game::PortalSessionMessage> Following;
 			engine::net::Endpoint Endpoint;
@@ -746,24 +816,99 @@ namespace client {
 			double CancellationRetryAt = 0;
 			double ReconnectAt = 0;
 			bool DrawingArrivedPlayer = false;
+			// Resolved primary eye destination that must reach the gate before adoption.
+			engine::core::Name ArrivedEyeWorld;
+			const char *PromotionBlocker = nullptr;
 			bool ProceedSent = false;
+			const char *ProceedBlocker = nullptr;
+			uint64_t ProceedEyeImage = 0;
+			size_t ProceedEyeSubmitted = 0;
+			std::string ProceedEyeSource;
+			bool ProceedEyeSourceRemote = false;
+			uint64_t ProceedEyeCapture = 0;
+			size_t ProceedProducerRequests = 0;
+			size_t ProceedProducerRendered = 0;
+			size_t ProceedProducerRefused = 0;
 			bool Crossed = false;
 			bool ResumeSent = false;
 			bool Ready = false;
 			bool CommitSent = false;
 			bool Committed = false;
+			// The retained image stays selected until this staged replica has every
+			// receipt, asset, pose and capacity fact needed for live presentation.
+			std::shared_ptr<PortalReadinessController> Readiness;
+			std::optional<uint64_t> EmptyContentDemandRevision;
+			size_t UndeliverableAssetNames = 0;
+			// Capture-only snapshot of the facts that kept a crossed successor image-only.
+			std::shared_ptr<PortalReadinessEvidence> CapturedReadiness;
+			std::shared_ptr<PortalReadiness> CapturedReadinessDecision;
+			// Capture diagnostics for the destination eye prepared during a handoff.
+			struct EyeProbe {
+				// World selected for the eye view.
+				std::string SelectedWorld;
+				// Authored destination resolved by the eye's camera route.
+				std::string EyeWorld;
+				// Camera key used to look up the retained eye image.
+				std::string ImageKey;
+				// World bound to the prepared eye view.
+				std::string BoundWorld;
+				// Whether the destination eye view was prepared.
+				bool Prepared = false;
+				// Viewport slot used for eye image lookup.
+				size_t Slot = 0;
+				// Image handle selected for display, including a composed body when present.
+				uint64_t Image = 0;
+				// Current image handle published for this camera key.
+				uint64_t CurrentImage = 0;
+				// Imported image handle from the latest accepted capture.
+				uint64_t CaptureImage = 0;
+				// Producer world tick of the latest accepted capture.
+				uint64_t CaptureTick = 0;
+				// Requests submitted for the probed eye view.
+				size_t Submitted = 0;
+				// Whether the resolved producer world id is valid.
+				bool ProducerValid = false;
+				// Retained image handles for the two neighbouring eye views.
+				std::array<uint64_t, 2> ViewportImages{};
+				// Authored destinations corresponding to those neighbouring images.
+				std::array<std::string, 2> ViewportDestinations{};
+			};
+			std::optional<EyeProbe> CapturedEyeProbe;
+			std::optional<engine::script::PortalTransferFence> SourceFence;
+			std::optional<engine::script::PortalTransferFence> DestinationFence;
+			float ReadinessDistance = 0;
+			bool HasReadinessDistance = false;
+			bool SuppressRetainedCapture = false;
+			bool LivePresentationReady = false;
 			bool Refused = false;
 			std::string Failure;
 		};
+		struct PortalApproachReplica {
+			engine::game::PortalSessionMessage Route;
+			engine::net::Endpoint Endpoint;
+			engine::world::WorldId World;
+			std::unique_ptr<engine::net::Transport> Socket;
+			std::unique_ptr<engine::replication::Connector> Connection;
+			std::unique_ptr<ContentSession> Content;
+			double Deadline = 0;
+			float LastDistance = 0;
+			bool HasDistance = false;
+			bool Active = false;
+		};
+		std::unique_ptr<PortalApproachReplica> PortalApproach;
 		struct PortalObservation {
 			PortalWorldView View;
 			engine::world::WorldId World;
 			engine::core::Name Authored;
+			bool HoldDisplayEye = false;
+			// True when the last draw from `View` was the eye resolved into this
+			// world, rather than a held or trailing redraw of the old route.
+			bool DrawnAsEye = false;
 			std::unique_ptr<engine::net::Transport> Socket;
 			std::unique_ptr<engine::replication::Connector> Connection;
 			std::unique_ptr<ContentSession> Content;
 		};
-		// One former body world, retained only while the crossing view needs it.
+		// One former body world, retained while the eye world still has a seam into it.
 		std::unique_ptr<PortalObservation> PortalPrevious;
 		// Borrows the selected packet for this draw; cleared when its session retires.
 		PortalWorldView *PortalDrawing = nullptr;
@@ -771,6 +916,17 @@ namespace client {
 		std::unique_ptr<PortalSuccessor> PortalNext;
 		uint64_t NextPortalReplica = 1;
 		engine::core::Name PortalEyeDestinations[2];
+		// Whether the last prepared eye is the body composed over an eye capture
+		// rather than the capture itself.
+		bool PortalEyeComposed = false;
+		// Authored worlds a capture has seen as ready local copies.
+		std::unordered_set<std::string> CapturedReadyDestinations;
+		// Where the eye last stood on the input world's own side of every pane.
+		struct PortalSourceEyePose {
+			engine::world::WorldId World;
+			engine::core::Vector3 Position;
+		};
+		std::optional<PortalSourceEyePose> PortalSourceEye;
 		// Initial entry waits once; body-world adoption preserves this viewport lifetime.
 		bool InitialPortalViewsReady = false;
 
@@ -844,6 +1000,8 @@ namespace client {
 		// must never resample on the callback thread, and a buffer converted
 		// per voice would do it once per part playing a footstep.
 		SoundCatalogue Audible;
+		// Pending files are consumed once, when a world first names the sound.
+		std::unordered_map<uint32_t, std::filesystem::path> PackagedAudio;
 
 		// The voices standing in for each world's `Sound` rows, one stage per
 		// world. Node ids are minted per mixer and an entity is only unique
@@ -931,6 +1089,7 @@ namespace client {
 		// One input timeline survives replica replacement. The epochs map the
 		// current replica's clock without changing that world's simulation time.
 		uint64_t SubmittedMoveTick = 0;
+		std::array<float, 3> CapturedSubmittedMoveDirection{};
 		uint64_t InputLocalEpoch = 0;
 		uint64_t InputSequenceEpoch = 0;
 

@@ -3,74 +3,19 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <iostream>
 #include <map>
-#include <testrunner/Process.hpp>
+#include <mutex>
 #include <testrunner/Report.hpp>
 #include <testrunner/Runner.hpp>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace fs = std::filesystem;
 using namespace testrunner;
-
-namespace {
-
-	// Catch2 tags every test with `[#<file stem>]`, and a suite is one file, so
-	// the filter is exact. Re-running a whole binary would quietly widen the
-	// granularity the identifiers promise.
-	//
-	// Two reporters, not one. `console::out=-` keeps the output a person reads
-	// when something goes red exactly as it was, and `mono::out=` writes the
-	// counts beside it. Catch2 has taken several reporters at once since 3.0, so
-	// the report costs nothing that was there before it.
-	//
-	// @param scratch Where the `mono` reporter writes. Overwritten per suite.
-	// @param report  Counts and failing case names, when the binary got far
-	//                enough to write them. Left alone otherwise, so a suite that
-	//                crashed reports zero cases rather than a stale suite's.
-	bool RunSuite(
-		const Suite &suite, const fs::path &scratch, bool gpuTests, std::string &output, SuiteReport &report
-	) {
-		const std::string filter = CatchFilter(suite, gpuTests);
-
-		std::error_code error;
-		fs::remove(scratch, error);
-
-		// Timed from out here, so the number includes starting the process and
-		// running its static initialisers. That is what a person waiting on
-		// `just test` actually pays; the reporter's per-case times, which do
-		// not include it, are the breakdown underneath.
-		const auto started = std::chrono::steady_clock::now();
-		const auto result = Run(
-			{suite.Binary.string(),
-			 // A source file can deliberately contain only GPU cases. The ordinary
-			 // run excludes them, which is a successful empty selection rather than
-			 // a failed suite.
-			 "--allow-running-no-tests",
-			 "-#",
-			 filter,
-			 "--reporter",
-			 "console::out=-",
-			 "--reporter",
-			 "mono::out=" + scratch.string()}
-		);
-		report.Microseconds = static_cast<unsigned long long>(
-			std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started)
-				.count()
-		);
-
-		output = result.Output;
-		if (!result.Started) {
-			output = "could not start " + suite.Binary.string();
-			return false;
-		}
-
-		ReadSuiteReport(scratch, report);
-		return result.ExitCode == 0;
-	}
-}
 
 int main(int argc, char **argv) {
 	engine::core::Arguments arguments("testrunner", "Runs the test suites a change could have affected.");
@@ -184,20 +129,18 @@ int main(int argc, char **argv) {
 			std::cout << "  skip " << suite->Id << '\n';
 		}
 	}
+	std::cout.flush();
 
-	// Not in the report directory: it is working state, and a directory a person
-	// opens documents out of should hold documents.
-	const fs::path scratch = buildDirectory / "testrunner-report.tsv";
-
-	std::map<std::string, SuiteReport> reports;
-
-	// The identifiers are a column, so the durations beside them are a column
-	// too. A ragged right edge is a list of numbers nobody compares.
-	size_t widest = 0;
-	for (const auto *suite : stale) {
-		widest = std::max(widest, suite->Id.size());
+	// A separate invocation can run against the same build tree. Reserve this
+	// directory before any worker starts, so only this invocation can remove it.
+	ReportScratchDirectory scratch(buildDirectory);
+	if (scratch.Path().empty()) {
+		std::cerr << "could not create test report scratch directory under " << buildDirectory.string()
+				  << ": " << scratch.Failure() << '\n';
+		return 1;
 	}
 
+	std::map<std::string, SuiteReport> reports;
 	unsigned long long totalMicroseconds = 0;
 
 	// **Eight by default, and the number is measured rather than chosen.**
@@ -211,11 +154,9 @@ int main(int argc, char **argv) {
 	const int requested = static_cast<int>(arguments.GetNumber("jobs", 8.0));
 	const auto jobs = static_cast<size_t>(std::max(requested, 1));
 
-	// **A scratch file each.** The `mono` reporter writes to a path this process
-	// hands it, and one shared path is one suite reading another's counts. This
-	// is the only shared state the loop had.
-	const auto scratchFor = [&buildDirectory](size_t slot) {
-		return buildDirectory / ("testrunner-report-" + std::to_string(slot) + ".tsv");
+	// Each worker reuses its slot only within this invocation's directory.
+	const auto scratchFor = [&scratch](size_t slot) {
+		return scratch.Path() / ("worker-" + std::to_string(slot) + ".tsv");
 	};
 
 	struct Outcome {
@@ -226,10 +167,36 @@ int main(int argc, char **argv) {
 
 	std::vector<Outcome> outcomes(stale.size());
 	std::atomic<size_t> next{0};
+	const size_t width = std::min(jobs, stale.size());
+
+	struct ProgressEvent {
+		size_t Slot;
+		size_t Index;
+		bool Started;
+		std::chrono::steady_clock::time_point At;
+	};
+	struct RunningSuite {
+		const Suite *Current = nullptr;
+		std::chrono::steady_clock::time_point Started;
+	};
+	std::mutex progressMutex;
+	std::condition_variable progressChanged;
+	std::vector<ProgressEvent> pending;
+	pending.reserve(stale.size() * 2);
+	std::vector<RunningSuite> running(width);
+
+	// Workers only publish events. The main thread writes every progress line,
+	// so a redirected log never interleaves two suite names or a heartbeat.
+	const auto publish = [&](size_t slot, size_t index, bool started) {
+		{
+			std::lock_guard lock(progressMutex);
+			pending.push_back({slot, index, started, std::chrono::steady_clock::now()});
+		}
+		progressChanged.notify_one();
+	};
 
 	{
 		std::vector<std::thread> workers;
-		const size_t width = std::min(jobs, stale.size());
 		workers.reserve(width);
 
 		for (size_t slot = 0; slot < width; slot++) {
@@ -240,14 +207,50 @@ int main(int argc, char **argv) {
 					Outcome &outcome = outcomes[index];
 					outcome.Report.Id = suite->Id;
 					outcome.Report.Ran = true;
+					publish(slot, index, true);
 					outcome.Ok =
 						RunSuite(*suite, mine, arguments.Has("gpu-tests"), outcome.Output, outcome.Report);
 					outcome.Report.Passed = outcome.Ok;
+					publish(slot, index, false);
 				}
-
-				std::error_code error;
-				fs::remove(mine, error);
 			});
+		}
+
+		size_t completed = 0;
+		auto nextHeartbeat = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+		while (completed < stale.size()) {
+			std::unique_lock lock(progressMutex);
+			progressChanged.wait_until(lock, nextHeartbeat, [&] { return !pending.empty(); });
+
+			for (const ProgressEvent &event : pending) {
+				const Suite &suite = *stale[event.Index];
+				if (event.Started) {
+					running[event.Slot] = {&suite, event.At};
+					std::cout << "  start [" << completed << '/' << stale.size() << "] " << suite.Id << '\n';
+				} else {
+					running[event.Slot].Current = nullptr;
+					completed++;
+					const Outcome &outcome = outcomes[event.Index];
+					std::cout << (outcome.Ok ? "  ok    [" : "  FAIL  [") << completed << '/' << stale.size()
+							  << "] " << suite.Id << "  " << FormatDuration(outcome.Report.Microseconds)
+							  << '\n';
+				}
+			}
+			pending.clear();
+
+			const auto now = std::chrono::steady_clock::now();
+			if (completed < stale.size() && now >= nextHeartbeat) {
+				std::cout << "  heartbeat [" << completed << '/' << stale.size() << "] running:";
+				for (const RunningSuite &active : running) {
+					if (active.Current == nullptr) continue;
+					const auto elapsed =
+						std::chrono::duration_cast<std::chrono::seconds>(now - active.Started);
+					std::cout << '\n' << "    " << active.Current->Id << "  " << elapsed.count() << " s";
+				}
+				std::cout << '\n';
+				nextHeartbeat = now + std::chrono::seconds(30);
+			}
+			std::cout.flush();
 		}
 
 		for (std::thread &worker : workers) {
@@ -255,19 +258,14 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	// **Reported in the order the suites were listed, not the order they
-	// finished.** A run whose output shuffles between invocations is a run
-	// nobody can diff, and the ordering is free: the results are already
-	// collected.
+	// Failure details, cache entries and documents stay in suite order. Live
+	// progress above already named each passing suite when it completed.
 	std::vector<std::string> failed;
 	for (size_t index = 0; index < stale.size(); index++) {
 		const Suite *suite = stale[index];
 		Outcome &outcome = outcomes[index];
 		totalMicroseconds += outcome.Report.Microseconds;
 
-		std::cout << (outcome.Ok ? "  ok   " : "  FAIL ") << suite->Id
-				  << std::string(widest - suite->Id.size() + 2, ' ')
-				  << FormatDuration(outcome.Report.Microseconds) << '\n';
 		if (!outcome.Ok) {
 			failed.push_back(suite->Id);
 			std::cout << outcome.Output << '\n';
@@ -286,9 +284,6 @@ int main(int argc, char **argv) {
 
 		reports[suite->Id] = std::move(outcome.Report);
 	}
-
-	std::error_code scratchError;
-	fs::remove(scratch, scratchError);
 
 	// A suite that no longer exists must not linger, or reintroducing one later
 	// makes it look already-passed.

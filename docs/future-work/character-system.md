@@ -47,6 +47,22 @@ The current default root is described as a capsule but uses a box. That is the
 first mismatch to remove. `ShapeKind::Capsule` already exists in scene,
 queries, narrow phase, solving, and Studio collider drawing.
 
+### Predeclared rig and animation storage
+
+`scene::Skeleton`, `scene::Bone`, `scene::AnimationClip`, `scene::Animator`,
+and `scene::AnimationTrack` must register before `ecs::Components::Seal()`.
+Registration deferred until an importer, script, or animation system first
+uses a row works in an isolated test but rejects a saved character when a host
+has already sealed its component registry.
+
+`Skeleton` and `Bone` remain optional rig rows. `Animator` and
+`AnimationTrack` remain general animation rows, so a door or other non-character
+object may use them without acquiring character state. `AnimationClip` names
+immutable published clip content; `AnimationBuffer` remains the mutable,
+world-owned authoring and procedural-bake path described below. None of these
+optional rows gains a `MeshPart` property: a property that fails for almost
+every unrigged mesh is a misleading script surface.
+
 ## External design checks
 
 The plan was checked against current first-party engine documentation. These

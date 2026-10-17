@@ -31,6 +31,7 @@ namespace engine::render::capture_record_validation {
 	}
 
 	struct State {
+		// Channel plus source light for local-light planes, channel alone otherwise.
 		std::unordered_set<std::string> Channels;
 		std::unordered_set<std::string> Resources;
 		size_t ReadyPlanes = 0;
@@ -41,32 +42,44 @@ namespace engine::render::capture_record_validation {
 
 	inline size_t MinimumRowStride(DataCaptureChannel channel, DataCaptureScalar scalar, uint32_t width) {
 		const bool valid =
-			(channel == DataCaptureChannel::RgbLinearHdr || channel == DataCaptureChannel::PbrEmissive)
+			(channel == DataCaptureChannel::RgbLinearHdr || channel == DataCaptureChannel::PbrEmissive ||
+			 channel == DataCaptureChannel::PbrTransmission ||
+			 channel == DataCaptureChannel::LocalLightContribution)
 				? scalar == DataCaptureScalar::Float16
 			: (channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors)
 				? scalar == DataCaptureScalar::Float16
 			: (channel == DataCaptureChannel::LinearDepth ||
-			   channel == DataCaptureChannel::SecondSurfaceDepth)
+			   channel == DataCaptureChannel::SecondSurfaceDepth ||
+			   channel == DataCaptureChannel::PackedGpu || channel == DataCaptureChannel::DirectionalResponse)
 				? scalar == DataCaptureScalar::Float32
 			: channel == DataCaptureChannel::ShadingNormal ? scalar == DataCaptureScalar::UNorm10A2
 			: channel == DataCaptureChannel::ObjectIds	   ? scalar == DataCaptureScalar::UInt32
 			: (channel == DataCaptureChannel::SemanticMask || channel == DataCaptureChannel::PartMask)
 				? scalar == DataCaptureScalar::UInt32
 			: (channel == DataCaptureChannel::AmbientOcclusion ||
+			   channel == DataCaptureChannel::ShadowVisibility ||
+			   channel == DataCaptureChannel::LocalLightShadowVisibility ||
 			   channel == DataCaptureChannel::FirstSurfaceValidity ||
-			   channel == DataCaptureChannel::SecondSurfaceValidity)
+			   channel == DataCaptureChannel::SecondSurfaceValidity ||
+			   channel == DataCaptureChannel::PbrSpecular)
 				? scalar == DataCaptureScalar::UNorm8
 			: (channel == DataCaptureChannel::PbrAlbedo || channel == DataCaptureChannel::PbrMaterial)
 				? scalar == DataCaptureScalar::UNorm8
 				: false;
 		const size_t bytesPerPixel =
 			(channel == DataCaptureChannel::AmbientOcclusion ||
+			 channel == DataCaptureChannel::ShadowVisibility ||
+			 channel == DataCaptureChannel::LocalLightShadowVisibility ||
 			 channel == DataCaptureChannel::FirstSurfaceValidity ||
-			 channel == DataCaptureChannel::SecondSurfaceValidity)
+			 channel == DataCaptureChannel::SecondSurfaceValidity ||
+			 channel == DataCaptureChannel::PbrSpecular)
 				? 1
+			: channel == DataCaptureChannel::PbrTransmission										  ? 2
 			: (channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors) ? 4
-			: scalar == DataCaptureScalar::Float16													  ? 8
-																									  : 4;
+			: (channel == DataCaptureChannel::PackedGpu || channel == DataCaptureChannel::DirectionalResponse)
+				? 16
+			: scalar == DataCaptureScalar::Float16 ? 8
+												   : 4;
 		return valid && width > 0 && bytesPerPixel <= std::numeric_limits<size_t>::max() / width
 				   ? bytesPerPixel * width
 				   : 0;
@@ -125,10 +138,31 @@ namespace engine::render::capture_record_validation {
 		});
 	}
 
+	inline bool ValidDirectionalResponseProvenance(std::string_view provenance) {
+		return provenance == "directional_response/v1;components=unshadowed_directional_radiance_rgb_"
+							 "shadow_visibility_a;radiance=linear_after_fog;visibility=directional_shadow_"
+							 "and_portal_beam_factor;range_a=0_to_1";
+	}
+
+	inline bool ValidShadowVisibilityProvenance(std::string_view provenance) {
+		return provenance ==
+			   "shadow_visibility/v1;source=directional_response_alpha;factor=directional_shadow_"
+			   "and_portal_beam_visibility;encoding=unorm8_round_to_nearest;source_range=0_to_1";
+	}
+
+	inline bool ValidLocalLightShadowVisibilityProvenance(std::string_view provenance) {
+		return provenance == "local_light_shadow_visibility/v1;source=selected_local_light_shadow_map;"
+							 "factor=pcf_visibility;encoding=unorm8_direct;range=zero_to_one";
+	}
+
 	inline bool
 	Plane(const DataCaptureTicket &ticket, const DataCapturePlane &plane, uint64_t id, State &state) {
 		const std::string channel(DataCaptureChannelName(plane.Channel));
-		const std::string resource = "capture/" + std::to_string(id) + "/" + channel;
+		const bool localLight = plane.Channel == DataCaptureChannel::LocalLightContribution ||
+								plane.Channel == DataCaptureChannel::LocalLightShadowVisibility;
+		const std::string planeKey = localLight ? channel + "\n" + plane.LightId : channel;
+		const std::string resource =
+			"capture/" + std::to_string(id) + "/" + channel + (localLight ? "/" + plane.LightId : "");
 		const bool requested =
 			std::find(ticket.Channels.begin(), ticket.Channels.end(), plane.Channel) != ticket.Channels.end();
 		const bool ready = plane.Status == DataCaptureStatus::Ready;
@@ -138,8 +172,11 @@ namespace engine::render::capture_record_validation {
 												   ? DataCaptureChannel::SecondSurfaceValidity
 												   : DataCaptureChannel::SecondSurfaceDepth;
 		if (ready) state.ReadyPlanes++;
-		if (!requested || plane.CaptureNode != ticket.CaptureNode || !state.Channels.insert(channel).second ||
-			!state.Resources.insert(resource).second)
+		const bool requestedLight =
+			!localLight ||
+			std::find(ticket.LightIds.begin(), ticket.LightIds.end(), plane.LightId) != ticket.LightIds.end();
+		if (!requested || !requestedLight || plane.CaptureNode != ticket.CaptureNode ||
+			!state.Channels.insert(planeKey).second || !state.Resources.insert(resource).second)
 			return false;
 		if (secondSurface && (std::find(ticket.Channels.begin(), ticket.Channels.end(), counterpart) ==
 								  ticket.Channels.end() ||
@@ -151,27 +188,27 @@ namespace engine::render::capture_record_validation {
 								  plane.Status == DataCaptureStatus::Invalid ||
 								  plane.Status == DataCaptureStatus::Failed ||
 								  plane.Status == DataCaptureStatus::Cancelled;
-			const bool authoredUnavailable = plane.Channel == DataCaptureChannel::PbrSpecular ||
-											 plane.Channel == DataCaptureChannel::PbrTransmission ||
-											 plane.Channel == DataCaptureChannel::MotionVectors ||
+			const bool localUnavailable =
+				localLight && plane.Status == DataCaptureStatus::Unsupported &&
+				(plane.Provenance == "unavailable/local_light_not_visible_or_culled/v1" ||
+				 (plane.Channel == DataCaptureChannel::LocalLightShadowVisibility &&
+				  plane.Provenance == "unavailable/local_light_shadows_disabled/v1"));
+			const bool authoredUnavailable = plane.Channel == DataCaptureChannel::MotionVectors ||
 											 plane.Channel == DataCaptureChannel::OpticalFlow;
 			const std::string_view expectedUnavailable =
-				plane.Channel == DataCaptureChannel::PbrSpecular
-					? "unavailable/authored_specular_not_in_current_material_model/v1"
-				: plane.Channel == DataCaptureChannel::PbrTransmission
-					? "unavailable/authored_transmission_not_in_current_material_model/v1"
-				: plane.Channel == DataCaptureChannel::MotionVectors
+				plane.Channel == DataCaptureChannel::MotionVectors
 					? "unavailable/camera_reprojection_history_not_verified/v1"
 					: "unavailable/optical_flow_not_implemented/v1";
 			return terminal && !plane.AmbientOcclusion && !plane.PreviousCameraMotionFrame &&
-				   (authoredUnavailable ? plane.Status == DataCaptureStatus::Unsupported &&
-											  plane.Provenance == expectedUnavailable
-										: plane.Provenance.empty()) &&
+				   ((authoredUnavailable ? plane.Status == DataCaptureStatus::Unsupported &&
+											   plane.Provenance == expectedUnavailable
+										 : localUnavailable || plane.Provenance.empty())) &&
 				   !plane.Resource.IsValid() && plane.Hash.IsZero() && plane.Bytes.empty() &&
 				   plane.Width == 0 && plane.Height == 0 && plane.RowStride == 0 &&
 				   plane.Scalar == DataCaptureScalar::Unknown &&
 				   plane.ColourSpace == DataCaptureColourSpace::Unknown;
 		}
+
 		const size_t stride = MinimumRowStride(plane.Channel, plane.Scalar, plane.Width);
 		const bool validSecondProvenance = ValidSecondSurfaceProvenance(plane.Provenance);
 		const bool validFirstProvenance = ValidFirstSurfaceProvenance(plane.Provenance);
@@ -179,6 +216,12 @@ namespace engine::render::capture_record_validation {
 				 ? !plane.AmbientOcclusion || !ValidAmbientOcclusion(*plane.AmbientOcclusion)
 				 : plane.AmbientOcclusion.has_value()) ||
 			(secondSurface ? !validSecondProvenance
+			 : plane.Channel == DataCaptureChannel::DirectionalResponse
+				 ? !ValidDirectionalResponseProvenance(plane.Provenance)
+			 : plane.Channel == DataCaptureChannel::ShadowVisibility
+				 ? !ValidShadowVisibilityProvenance(plane.Provenance)
+			 : plane.Channel == DataCaptureChannel::LocalLightShadowVisibility
+				 ? !ValidLocalLightShadowVisibilityProvenance(plane.Provenance)
 			 : plane.Channel == DataCaptureChannel::FirstSurfaceValidity
 				 ? !validFirstProvenance || !ValidFirstSurfaceValidityBytes(plane.Bytes)
 			 : plane.Channel == DataCaptureChannel::MeshUv
@@ -186,10 +229,26 @@ namespace engine::render::capture_record_validation {
 									   "v1;components=u_v;units=dimensionless;range=unbounded;interpolation="
 									   "perspective_correct;surface=visible_builtin_opaque_or_masked;"
 									   "validity=both_float16_components_finite"
+			 : plane.Channel == DataCaptureChannel::PackedGpu
+				 ? plane.Provenance != "render_graph_pack_channels/"
+									   "v1;mapping=author_defined;resampling=pixel_center_nearest;extent=r"
+			 : plane.Channel == DataCaptureChannel::RgbLinearHdr
+				 ? plane.Provenance !=
+					   "scene_linear_hdr/v2;source=transparent_composited_display;"
+					   "includes=opaque_sky_fog_portal_mirror_transparent;before=lenses_and_tonemap"
 			 : plane.Channel == DataCaptureChannel::MotionVectors
 				 ? plane.Provenance != "camera_reprojection/v1;components=delta_x_delta_y;units=pixels;"
 									   "surface=visible_static_builtin_opaque_or_masked;object_motion=false;"
 									   "disocclusion=unavailable;camera_history=verified"
+			 : plane.Channel == DataCaptureChannel::PbrSpecular
+				 ? plane.Provenance != "authored_specular_factor/v1;source=material_alpha;range=zero_to_one"
+			 : plane.Channel == DataCaptureChannel::PbrTransmission
+				 ? plane.Provenance != "authored_transmission_factor/"
+									   "v2;source=emissive_alpha;range=zero_to_one;"
+									   "visual_model=authored_ior_thickness_guard_refraction"
+			 : plane.Channel == DataCaptureChannel::LocalLightContribution
+				 ? plane.Provenance != "local_light_contribution/v1;source=single_selected_local_light;"
+									   "radiance=additive_linear_before_tonemap;encoding=rgba16_float"
 				 : !plane.Provenance.empty()) ||
 			(plane.Channel == DataCaptureChannel::MotionVectors
 				 ? !plane.PreviousCameraMotionFrame || *plane.PreviousCameraMotionFrame == 0
@@ -197,7 +256,8 @@ namespace engine::render::capture_record_validation {
 			!plane.Resource.IsValid() || plane.Hash.IsZero() || plane.Width == 0 || plane.Height == 0 ||
 			stride == 0 || plane.RowStride < stride || plane.Origin != DataCaptureOrigin::TopLeft ||
 			plane.ColourSpace != ((plane.Channel == DataCaptureChannel::RgbLinearHdr ||
-								   plane.Channel == DataCaptureChannel::PbrEmissive)
+								   plane.Channel == DataCaptureChannel::PbrEmissive ||
+								   plane.Channel == DataCaptureChannel::LocalLightContribution)
 									  ? DataCaptureColourSpace::Linear
 								  : plane.Channel == DataCaptureChannel::PbrAlbedo
 									  ? DataCaptureColourSpace::SRGB

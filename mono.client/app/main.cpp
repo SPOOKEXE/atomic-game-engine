@@ -18,6 +18,7 @@
 #include <client/Client.hpp>
 #include <client/Scene.hpp>
 #include <client/Settings.hpp>
+#include <cmath>
 #include <cstdio>
 #include <discord/Settings.hpp>
 #include <limits>
@@ -74,6 +75,11 @@ int main(int argc, char **argv) {
 	arguments.Flag("graph", "Open the F5 frame graph at startup");
 	arguments.Flag("uncapped", "Present without waiting for vblank");
 	arguments.Value("frames-in-flight", "N", "Frames the CPU may queue ahead of the GPU: 1 (default) to 3");
+	arguments.Value(
+		"texture-budget-mib",
+		"N",
+		"Texture-table capacity in MiB. Default 512; raise only for an explicit residency benchmark"
+	);
 	arguments.Flag("headless", "Run with no window (needs --frames except for --data-factory)");
 	arguments.Flag(
 		"data-factory",
@@ -115,6 +121,8 @@ int main(int argc, char **argv) {
 	);
 	arguments.Value("width", "PX", "Window width (default 1280)");
 	arguments.Value("height", "PX", "Window height (default 720)");
+	arguments.Value("interface-scale", "FACTOR", "Screen interface scale (default 1.0)");
+	arguments.Value("text-scale", "FACTOR", "Screen text accessibility scale (default 1.0)");
 	arguments.Value("profiler-tab", "NAME", "frame, categories, systems, counters or heap");
 
 	arguments.Value("script", "PATH", "Luau script to run at startup (v0.6)");
@@ -124,6 +132,12 @@ int main(int argc, char **argv) {
 	);
 	arguments.Value("enable-profiler", "SECONDS", "Wait for a Tracy profiler before starting");
 	arguments.Value("profile-seconds", "SECONDS", "Run for this long, then exit");
+	arguments.Value(
+		"benchmark-report",
+		"PATH",
+		"Write complete-run benchmark JSON; requires profile-seconds and heap hooks"
+	);
+	arguments.Flag("benchmark-wait-for-join", "Start benchmark measurement after the connected world joins");
 	arguments.Value("profile-snapshot", "PATH", "Write a frame-graph snapshot when the run ends");
 	arguments.Value(
 		"heap-report", "PATH", "Write a heap profile when the run ends, and sample while running"
@@ -174,6 +188,7 @@ int main(int argc, char **argv) {
 		"TEXT",
 		"Type this into the focused TextBox once, mid-run. Pairs with --click; see Options::TypedText"
 	);
+	arguments.Value("locale", "TAG", "Use this localization tag for the interface, for example fr-CA");
 	arguments.Value(
 		"capture",
 		"PATH",
@@ -182,6 +197,12 @@ int main(int argc, char **argv) {
 
 	arguments.Value(
 		"capture-sequence", "DIR", "Write each rendered frame as BMP and camera-state JSON. Needs --frames"
+	);
+	arguments.Value(
+		"capture-alpha", "PHASE", "Fix interpolation to [0, 1) for --capture-sequence comparisons"
+	);
+	arguments.Value(
+		"frame-timings", "PATH", "Write one CSV row per drawn frame: interval, CPU step and resolved GPU ms"
 	);
 
 	const auto parsed = arguments.Parse(argc, argv);
@@ -233,6 +254,9 @@ int main(int argc, char **argv) {
 	client::Options options = client::OptionsFromFlags();
 	options.Width = static_cast<int>(arguments.GetInteger("width", options.Width));
 	options.Height = static_cast<int>(arguments.GetInteger("height", options.Height));
+	options.InterfaceScale =
+		static_cast<float>(arguments.GetNumber("interface-scale", options.InterfaceScale));
+	options.TextScale = static_cast<float>(arguments.GetNumber("text-scale", options.TextScale));
 	options.Entities = static_cast<uint32_t>(arguments.GetInteger("entities", options.Entities));
 	options.Worlds = static_cast<uint32_t>(arguments.GetInteger("worlds", options.Worlds));
 	options.ViewSpacing = static_cast<float>(arguments.GetNumber("view-spacing", options.ViewSpacing));
@@ -243,6 +267,17 @@ int main(int argc, char **argv) {
 	options.EnablePostProcessing = options.EnablePostProcessing && !arguments.Has("disable-post-processing");
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
 	options.DataFactory = arguments.Has("data-factory");
+	if (auto locale = arguments.Get("locale")) {
+		if (locale->empty() || locale->size() > engine::gui::LocalizationCatalogue::MAXIMUM_LOCALE_BYTES) {
+			std::fprintf(
+				stderr,
+				"--locale must contain 1 to %zu bytes.\n",
+				engine::gui::LocalizationCatalogue::MAXIMUM_LOCALE_BYTES
+			);
+			return 2;
+		}
+		options.Locale = *locale;
+	}
 	if (auto world = arguments.Get("presentation-world")) options.PresentationWorld = *world;
 	if (arguments.Has("presentation-session")) {
 		const auto session = arguments.GetInteger("presentation-session", 0);
@@ -268,6 +303,15 @@ int main(int argc, char **argv) {
 	options.Uncapped = options.Uncapped || arguments.Has("uncapped");
 	options.FramesInFlight =
 		static_cast<int>(arguments.GetInteger("frames-in-flight", options.FramesInFlight));
+	if (arguments.Has("texture-budget-mib")) {
+		const int64_t requestedMiB = arguments.GetInteger("texture-budget-mib", 0);
+		const auto textureBudget = client::Options::TextureBudgetBytesForMiB(requestedMiB);
+		if (!textureBudget) {
+			std::fprintf(stderr, "--texture-budget-mib must fit in a positive byte count.\n");
+			return 2;
+		}
+		options.TextureBudgetBytes = *textureBudget;
+	}
 	options.Headless = arguments.Has("headless");
 
 	// Ordinary headless runs need a frame budget. A presentation host instead
@@ -285,6 +329,16 @@ int main(int argc, char **argv) {
 	}
 	options.MaximumFrameRate = static_cast<uint32_t>(maximumFrameRate);
 	options.ProfileSeconds = arguments.GetNumber("profile-seconds", 0.0);
+	if (auto report = arguments.Get("benchmark-report")) {
+		options.BenchmarkReport = std::filesystem::path(*report);
+		if (options.BenchmarkReport.empty() || !std::isfinite(options.ProfileSeconds) ||
+			options.ProfileSeconds <= 0.0) {
+			std::fprintf(
+				stderr, "--benchmark-report requires a path and finite positive --profile-seconds\n"
+			);
+			return 2;
+		}
+	}
 	if (auto snapshot = arguments.Get("profile-snapshot")) {
 		options.ProfileSnapshot = std::filesystem::path(*snapshot);
 	}
@@ -320,6 +374,17 @@ int main(int argc, char **argv) {
 	}
 	if (auto server = arguments.Get("connect")) {
 		options.ConnectAddress = std::string(*server);
+	}
+	options.BenchmarkWaitForJoin = arguments.Has("benchmark-wait-for-join");
+	if (options.BenchmarkWaitForJoin &&
+		(options.BenchmarkReport.empty() || options.ConnectAddress.empty() || options.DataFactory ||
+		 options.PresentationSession != 0 || !options.PresentationWorld.empty())) {
+		std::fprintf(
+			stderr,
+			"--benchmark-wait-for-join requires --benchmark-report and --connect without a data-factory or "
+			"presentation host\n"
+		);
+		return 2;
 	}
 	options.Browse = options.Browse || arguments.Has("browse");
 	options.BrowseSeconds = arguments.GetNumber("browse-seconds", options.BrowseSeconds);
@@ -390,8 +455,19 @@ int main(int argc, char **argv) {
 	if (auto capture = arguments.Get("capture")) {
 		options.Capture = std::filesystem::path(*capture);
 	}
+	if (auto timings = arguments.Get("frame-timings")) {
+		options.FrameTimings = std::filesystem::path(*timings);
+	}
 	if (auto sequence = arguments.Get("capture-sequence")) {
 		options.CaptureSequence = std::filesystem::path(*sequence);
+	}
+	if (arguments.Get("capture-alpha")) {
+		const double alpha = arguments.GetNumber("capture-alpha", -1.0);
+		if (options.CaptureSequence.empty() || !std::isfinite(alpha) || alpha < 0.0 || alpha >= 1.0) {
+			std::fprintf(stderr, "--capture-alpha needs --capture-sequence and a phase in [0, 1)\n");
+			return 2;
+		}
+		options.CaptureAlpha = static_cast<float>(alpha);
 	}
 	if (auto sound = arguments.Get("sound")) {
 		options.SoundPath = std::filesystem::path(*sound);
@@ -429,7 +505,7 @@ int main(int argc, char **argv) {
 	}
 
 	// A profiling run wants the graph collecting, or it measures nothing.
-	if (options.ProfileSeconds > 0.0) {
+	if (options.ProfileSeconds > 0.0 && options.BenchmarkReport.empty()) {
 		options.ShowFrameGraph = true;
 	}
 

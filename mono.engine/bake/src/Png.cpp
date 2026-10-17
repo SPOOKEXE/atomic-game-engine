@@ -16,10 +16,8 @@ namespace engine::bake {
 
 		// The largest compressed stream this will inflate.
 		//
-		// **The bound is on the input rather than only on the output**, because
-		// the output bound is derived from the header and the header is the
-		// thing an attacker wrote. A hundred megabytes of IDAT is far past any
-		// real texture and is the ceiling a zip bomb has to fit inside.
+		// Input and inflated output both bounded. Many compressed bytes can cost
+		// work even when the header permits only a small image.
 		constexpr size_t MAXIMUM_COMPRESSED_BYTES = 128u * 1024u * 1024u;
 
 		// PNG colour types, as the specification numbers them.
@@ -128,26 +126,36 @@ namespace engine::bake {
 			return true;
 		}
 
-		// Inflates the concatenated IDAT stream to exactly `expected` bytes.
-		//
-		// **Exactly, and that is the check.** A zlib stream says nothing about
-		// how much it will produce, so the only defence against a bomb is the
-		// size the *header* implies - which is bounded because the dimensions
-		// were bounded before this ran. A stream producing more or less than
-		// its own header implies is malformed whichever direction it errs in.
+		// ArraySink alone discards excess. Stop inflation as soon as output exceeds
+		// the header, before a malformed stream can grow storage or finish its work.
+		class BoundedInflateSink final : public CryptoPP::ArraySink {
+		  public:
+			using CryptoPP::ArraySink::ArraySink;
+
+			size_t Put2(const CryptoPP::byte *bytes, size_t length, int messageEnd, bool blocking) override {
+				if (length > AvailableSize()) {
+					throw CryptoPP::InvalidDataFormat("inflated data exceeds the header size");
+				}
+				return CryptoPP::ArraySink::Put2(bytes, length, messageEnd, blocking);
+			}
+		};
+
+		// Inflates into header-sized storage and refuses either size disagreement.
 		bool Inflate(
 			const std::vector<uint8_t> &compressed,
 			size_t expected,
 			std::vector<uint8_t> &out,
 			std::string &failure
 		) {
+			size_t inflatedBytes = 0;
 			try {
-				out.clear();
-				out.reserve(expected);
+				out.resize(expected);
 
-				CryptoPP::ZlibDecompressor decompressor(new CryptoPP::VectorSink(out));
+				auto *sink = new BoundedInflateSink(out.data(), out.size());
+				CryptoPP::ZlibDecompressor decompressor(sink);
 				decompressor.Put(compressed.data(), compressed.size());
 				decompressor.MessageEnd();
+				inflatedBytes = static_cast<size_t>(sink->TotalPutLength());
 			} catch (const CryptoPP::Exception &error) {
 				// Caught rather than allowed to escape because a malformed
 				// deflate stream is an ordinary property of an input file, and
@@ -157,7 +165,7 @@ namespace engine::bake {
 				return false;
 			}
 
-			if (out.size() != expected) {
+			if (inflatedBytes != expected) {
 				failure = "png: inflated size disagrees with the header";
 				return false;
 			}

@@ -5,14 +5,20 @@
 #include <engine/ecs/Invariants.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/ecs/TypeDescriptor.hpp>
+#include <engine/gui/Binding.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/Services.hpp>
+#include <engine/gui/Style.hpp>
+#include <engine/gui/VirtualCollection.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <limits>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.gui.registration")
@@ -39,12 +45,15 @@ namespace {
 		"gui.Element",
 		"gui.Background",
 		"gui.Label",
+		"gui.LabelPresentation",
+		"gui.LabelLocalizationArguments",
 		"gui.Picture",
 		"gui.Button",
 		"gui.Scrolling",
 		"gui.Entry",
 		"gui.Layer",
 		"gui.Canvas",
+		"gui.CanvasTransform",
 		"gui.Surface",
 		"gui.Billboard",
 		"gui.Group",
@@ -61,6 +70,7 @@ namespace {
 		"gui.Resolved",
 		"gui.SpatialCanvas",
 		"gui.GuiServiceState",
+		"gui.TextCompositionState",
 		"gui.Adornment",
 		"gui.AdornmentInteraction",
 		"gui.SelectionOutline",
@@ -90,6 +100,22 @@ namespace {
 		"gui.NodeCanvasGroup",
 		"gui.NodeCanvasPort",
 		"gui.NodeCanvasLink",
+		"gui.Binding",
+		"gui.BindingOutput",
+		"gui.BindingDependency",
+		"gui.VirtualCollection",
+		"gui.VirtualFocusState",
+		"gui.VirtualAnchorState",
+		"gui.ModalScope",
+		"gui.AnimationPlayback",
+		"gui.PresentationState",
+		"gui.UITheme",
+		"gui.StyleClass",
+		"gui.StyleDirect",
+		"gui.UIStyle",
+		"gui.ThemeBinding",
+		"gui.ResolvedStyle",
+		"gui.Mask",
 	};
 
 	struct ExpectedProperty {
@@ -166,6 +192,9 @@ namespace {
 		{"UIDragDetector", "Enabled"},
 		{"UIDragDetector", "DragStyle"},
 		{"UIDragDetector", "ResponseStyle"},
+		{"UIModalScope", "Enabled"},
+		{"UIAnimation", "StartTime"},
+		{"UIAnimation", "Playing"},
 	};
 }
 
@@ -256,8 +285,15 @@ TEST_CASE("the class tree registers every promised class", "[gui][registration]"
 			 "PluginGui",
 		 }) {
 		INFO(name);
-		CHECK_FALSE(Classes::Describe(GuiClass(name)).Creatable);
+		const auto &info = Classes::Describe(GuiClass(name));
+		CHECK_FALSE(info.Creatable);
+		CHECK_FALSE(info.StudioVisible);
+		CHECK(info.Kind == engine::ecs::ClassKind::Abstract);
 	}
+
+	const auto &service = Classes::Describe(GuiClass("GuiService"));
+	CHECK_FALSE(service.StudioVisible);
+	CHECK(service.Kind == engine::ecs::ClassKind::Service);
 
 	for (const std::string_view name : {
 			 "Frame",
@@ -267,21 +303,31 @@ TEST_CASE("the class tree registers every promised class", "[gui][registration]"
 			 "DockWidgetPluginGui",
 			 "UIListLayout",
 			 "UIAspectRatioConstraint",
+			 "UIMask",
+			 "UIBinding",
+			 "UIModalScope",
+			 "UIAnimation",
+			 "UIVirtualCollection",
+			 "UITheme",
+			 "UIStyle",
 			 "BoxHandleAdornment",
 		 }) {
 		INFO(name);
-		CHECK(Classes::Describe(GuiClass(name)).Creatable);
+		const auto &info = Classes::Describe(GuiClass(name));
+		CHECK(info.Creatable);
+		CHECK(info.StudioVisible);
+		CHECK(info.Kind == engine::ecs::ClassKind::Concrete);
 	}
 
 	// The list is a contract in both directions: a class registered and not
 	// listed would go unmentioned by the palette and the manifest.
 	//
-	// **Fifty-six**: the forty-two of the 2D tree including the five node graph
+	// **Sixty-three**: the forty-three of the 2D tree including the five node graph
 	// objects, `GuiService`, and the twelve of the 3D branch. The service is in
 	// `scene`'s because it is a `gui` class - the two modules may not link each
 	// other - and it is registered at all because it owns the selection, which
 	// is what finally gave `GuiObject::Selectable` a reader.
-	CHECK(GuiClassNames().size() == 56);
+	CHECK(GuiClassNames().size() == 63);
 }
 
 TEST_CASE("the 2D tree descends the way a script expects", "[gui][registration]") {
@@ -306,6 +352,7 @@ TEST_CASE("the 2D tree descends the way a script expects", "[gui][registration]"
 	// A `UIFlexItem` is a component-style modifier and not a constraint - a
 	// migrating script tells the two apart with exactly this pair.
 	CHECK(Classes::IsA(GuiClass("UIFlexItem"), GuiClass("UIComponent")));
+	CHECK(Classes::IsA(GuiClass("UIMask"), GuiClass("UIComponent")));
 	CHECK_FALSE(Classes::IsA(GuiClass("UIFlexItem"), GuiClass("UIConstraint")));
 
 	// **A collector is not a `GuiObject`**, which is the one relation people
@@ -435,6 +482,321 @@ TEST_CASE("a fully populated Label round-trips through its serialiser", "[gui][r
 	CHECK(read.Rich == written.Rich);
 }
 
+TEST_CASE("a LabelPresentation round-trips separately from a legacy Label", "[gui][registration]") {
+	RegisterGuiComponents();
+
+	LabelPresentation written;
+	written.LocalizationKey = Name("menu.greeting");
+
+	const TypeDescriptor &descriptor = Components::Describe(Components::Of<LabelPresentation>());
+	ByteWriter writer;
+	descriptor.Write(writer, &written, 1);
+
+	LabelPresentation read;
+	ByteReader reader(writer.Bytes());
+	descriptor.Read(reader, &read, 1);
+
+	CHECK(read.LocalizationKey == written.LocalizationKey);
+}
+
+TEST_CASE("localized label arguments round-trip through their independent component", "[gui][registration]") {
+	RegisterGuiComponents();
+	LabelLocalizationArguments written;
+	written.Count = 3;
+	written.Values[0] = {Name("name"), LocalizedArgumentType::String, "Ada"};
+	written.Values[1] = {Name("total"), LocalizedArgumentType::Number, {}, 12.5};
+	written.Values[2] = {Name("day"), LocalizedArgumentType::Date, {}, 0.0, 86400};
+
+	const TypeDescriptor &descriptor = Components::Describe(Components::Of<LabelLocalizationArguments>());
+	ByteWriter writer;
+	descriptor.Write(writer, &written, 1);
+	LabelLocalizationArguments read;
+	ByteReader reader(writer.Bytes());
+	descriptor.Read(reader, &read, 1);
+
+	REQUIRE_FALSE(reader.Failed());
+	CHECK(read.Count == 3);
+	CHECK(read.Values[0].Name == Name("name"));
+	CHECK(read.Values[0].String == "Ada");
+	CHECK(read.Values[1].Type == LocalizedArgumentType::Number);
+	CHECK(read.Values[1].Number == 12.5);
+	CHECK(read.Values[2].Type == LocalizedArgumentType::Date);
+	CHECK(read.Values[2].UnixSeconds == 86400);
+}
+
+TEST_CASE(
+	"authored style values preserve typed names and state through a save", "[gui][registration][style]"
+) {
+	RegisterGuiComponents();
+	UITheme theme;
+	REQUIRE(theme.Tokens.Set({Name("Panel"), StyleValue::FromColor({0.2f, 0.3f, 0.4f})}));
+	ByteWriter themeBytes;
+	const TypeDescriptor &themeDescriptor = Components::Describe(Components::Of<UITheme>());
+	REQUIRE(themeDescriptor.Serialisable);
+	themeDescriptor.Write(themeBytes, &theme, 1);
+	UITheme restoredTheme;
+	ByteReader themeReader(themeBytes.Bytes());
+	themeDescriptor.Read(themeReader, &restoredTheme, 1);
+	REQUIRE_FALSE(themeReader.Failed());
+	REQUIRE(restoredTheme.Tokens.Find(Name("Panel")) != nullptr);
+	CHECK(restoredTheme.Tokens.Find(Name("Panel"))->Color.G == 0.3f);
+
+	StyleClass classes;
+	REQUIRE(classes.Names.Add(Name("primary")));
+	REQUIRE(classes.Names.Add(Name("compact")));
+	ByteWriter classBytes;
+	const TypeDescriptor &classDescriptor = Components::Describe(Components::Of<StyleClass>());
+	classDescriptor.Write(classBytes, &classes, 1);
+	StyleClass restoredClasses;
+	ByteReader classReader(classBytes.Bytes());
+	classDescriptor.Read(classReader, &restoredClasses, 1);
+	REQUIRE_FALSE(classReader.Failed());
+	REQUIRE(restoredClasses.Names.Names().size() == 2);
+	CHECK(restoredClasses.Names.Names().back() == Name("compact"));
+
+	UIStyle style;
+	style.Rule.Class = Name("primary");
+	style.Rule.State = StyleState::Hovered | StyleState::Focused;
+	REQUIRE(style.Rule.Declarations.Set({Name("TextTransparency"), StyleValue::FromNumber(0.25f)}));
+	ByteWriter styleBytes;
+	const TypeDescriptor &styleDescriptor = Components::Describe(Components::Of<UIStyle>());
+	styleDescriptor.Write(styleBytes, &style, 1);
+	UIStyle restoredStyle;
+	ByteReader styleReader(styleBytes.Bytes());
+	styleDescriptor.Read(styleReader, &restoredStyle, 1);
+	REQUIRE_FALSE(styleReader.Failed());
+	CHECK(restoredStyle.Rule.Class == Name("primary"));
+	CHECK(Includes(restoredStyle.Rule.State, StyleState::Hovered | StyleState::Focused));
+	REQUIRE(restoredStyle.Rule.Declarations.Find(Name("TextTransparency")) != nullptr);
+	CHECK(restoredStyle.Rule.Declarations.Find(Name("TextTransparency"))->Number == 0.25f);
+	CHECK(Components::Describe(Components::Of<ResolvedStyle>()).Serialisable);
+
+	StyleDirect direct;
+	direct.Set(StyleDirectProperty::TextColor);
+	ByteWriter directBytes;
+	const TypeDescriptor &directDescriptor = Components::Describe(Components::Of<StyleDirect>());
+	REQUIRE(directDescriptor.Serialisable);
+	directDescriptor.Write(directBytes, &direct, 1);
+	StyleDirect restoredDirect;
+	ByteReader directReader(directBytes.Bytes());
+	directDescriptor.Read(directReader, &restoredDirect, 1);
+	CHECK(restoredDirect.Has(StyleDirectProperty::TextColor));
+}
+
+TEST_CASE("a GUI snapshot retains explicit default visual values", "[gui][registration][style]") {
+	RegisterGuiClasses();
+	Store source("gui_style_direct_snapshot_source");
+	const Entity label = source.CreateInstance(GuiClass("TextLabel"), "Title");
+	const engine::core::Color3 defaultColor = Label().Color;
+	REQUIRE(source.SetProperty(label, Name("TextColor3"), &defaultColor, sizeof(defaultColor)));
+
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	Store restored("gui_style_direct_snapshot_restored");
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	const StyleDirect *direct = restored.Get<StyleDirect>(label);
+	REQUIRE(direct != nullptr);
+	CHECK(direct->Has(StyleDirectProperty::TextColor));
+}
+
+TEST_CASE("IME composition is omitted from GUI snapshots", "[gui][registration][typing]") {
+	RegisterGuiClasses();
+	Store source("gui_composition_snapshot_source");
+	const Entity textBox = source.CreateInstance(GuiClass("TextBox"), "Entry");
+	TextCompositionState composition;
+	composition.Text = "candidate";
+	composition.Revision = 7;
+	source.Set(textBox, composition);
+
+	const TypeDescriptor &serviceType = Components::Describe(Components::Of<GuiServiceState>());
+	const TypeDescriptor &compositionType = Components::Describe(Components::Of<TextCompositionState>());
+	CHECK(serviceType.Serialisable);
+	CHECK(compositionType.Serialisable);
+
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	Store restored("gui_composition_snapshot_restored");
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+	const TextCompositionState *restoredComposition = restored.Get<TextCompositionState>(textBox);
+	CHECK((restoredComposition == nullptr || restoredComposition->Text.empty()));
+}
+
+TEST_CASE("a virtual collection persists its bounded source page", "[gui][registration]") {
+	RegisterGuiComponents();
+	Binding binding;
+	binding.SourcePath = "Services/Score";
+	binding.Attribute = Name("Value");
+	binding.Target = Name("Text");
+	binding.Fallback = "zero";
+	const TypeDescriptor &bindingType = Components::Describe(Components::Of<Binding>());
+	REQUIRE(bindingType.Serialisable);
+	ByteWriter bindingWriter;
+	bindingType.Write(bindingWriter, &binding, 1);
+	Binding readBinding;
+	ByteReader bindingReader(bindingWriter.Bytes());
+	bindingType.Read(bindingReader, &readBinding, 1);
+	CHECK(readBinding.SourcePath == binding.SourcePath);
+	CHECK(readBinding.Attribute == binding.Attribute);
+	CHECK(readBinding.Target == binding.Target);
+	CHECK(readBinding.Fallback == binding.Fallback);
+
+	VirtualCollection written;
+	written.ItemCount = 1000000;
+	written.Page.First = 800;
+	VirtualRecord record;
+	record.Key = "player";
+	written.Page.Records.push_back(std::move(record));
+	const TypeDescriptor &type = Components::Describe(Components::Of<VirtualCollection>());
+	REQUIRE(type.Serialisable);
+	CHECK(type.MaximumSerialisedBytes == VirtualCollection::MAXIMUM_PAGE_BYTES);
+
+	ByteWriter writer;
+	type.Write(writer, &written, 1);
+	VirtualCollection restored;
+	ByteReader reader(writer.Bytes());
+	type.Read(reader, &restored, 1);
+	CHECK(restored.ItemCount == written.ItemCount);
+	CHECK(restored.Page.First == written.Page.First);
+	REQUIRE(restored.Page.Records.size() == 1);
+	CHECK(restored.Page.Records.front().Key == "player");
+
+	CHECK(Components::Describe(Components::Of<BindingOutput>()).Serialisable);
+	CHECK(Components::Describe(Components::Of<BindingDependency>()).Serialisable);
+}
+
+TEST_CASE(
+	"a UIAnimation preserves its bounded typed tracks across a save", "[gui][registration][animation]"
+) {
+	RegisterGuiClasses();
+	AnimationPlayback written;
+	written.StartedAt = 42.5;
+	written.Playing = false;
+	written.Clip.Tween = engine::core::TweenInfo(
+		2.0f, engine::core::EasingStyle::Sine, engine::core::EasingDirection::InOut, 2, true, 0.25f
+	);
+	PresentationTrack track;
+	track.Property = PresentationProperty::Position;
+	REQUIRE(track.Add(
+		PresentationKey{0.0f, PresentationValue::FromUDim2(engine::core::UDim2{0.0f, 1.0f, 0.0f, 2.0f})}
+	));
+	REQUIRE(track.Add(
+		PresentationKey{1.0f, PresentationValue::FromUDim2(engine::core::UDim2{1.0f, 3.0f, 1.0f, 4.0f})}
+	));
+	REQUIRE(written.Clip.AddTrack(track));
+	REQUIRE(written.Clip.AddMarker(AnimationMarker{Name("half"), 0.5f}));
+
+	const TypeDescriptor &descriptor = Components::Describe(Components::Of<AnimationPlayback>());
+	REQUIRE(descriptor.Serialisable);
+	CHECK(descriptor.MaximumSerialisedBytes > 1024);
+	ByteWriter writer;
+	descriptor.Write(writer, &written, 1);
+	AnimationPlayback restored;
+	ByteReader reader(writer.Bytes());
+	descriptor.Read(reader, &restored, 1);
+	CHECK_FALSE(reader.Failed());
+	CHECK(restored.StartedAt == -1.0);
+	CHECK(restored.Playing == written.Playing);
+	CHECK(restored.Clip.Tween == written.Clip.Tween);
+	REQUIRE(restored.Clip.Tracks().size() == 1);
+	CHECK(restored.Clip.Tracks().front().Property == PresentationProperty::Position);
+	CHECK(
+		restored.Clip.Tracks().front().Keys().back().Value.UDim2 ==
+		engine::core::UDim2{1.0f, 3.0f, 1.0f, 4.0f}
+	);
+	REQUIRE(restored.Clip.Markers().size() == 1);
+	CHECK(restored.Clip.Markers().front().Name == Name("half"));
+
+	// Marker names are part of the declared maximum serialised size. Reject a
+	// longer one before interning it, so hostile bytes cannot turn the bound
+	// into process-lifetime Name storage.
+	ByteWriter hostile;
+	hostile.WriteBool(true);
+	hostile.WriteFloat(1.0f);
+	hostile.WriteFloat(0.0f);
+	hostile.WriteInt32(0);
+	hostile.WriteUInt8(static_cast<uint8_t>(engine::core::EasingStyle::Linear));
+	hostile.WriteUInt8(static_cast<uint8_t>(engine::core::EasingDirection::In));
+	hostile.WriteBool(false);
+	hostile.WriteUInt32(0);
+	hostile.WriteUInt32(1);
+	hostile.WriteString(std::string(UIAnimation::MAXIMUM_MARKER_NAME_BYTES + 1, 'x'));
+	hostile.WriteFloat(0.5f);
+	AnimationPlayback refused;
+	ByteReader hostileReader(hostile.Bytes());
+	descriptor.Read(hostileReader, &refused, 1);
+	CHECK(hostileReader.Failed());
+	restored.Playing = true;
+
+	Store store("gui_registration.animation_restart");
+	const Entity modifier = store.CreateInstance(GuiClass("UIAnimation"), "UIAnimation");
+	store.Set(modifier, restored);
+	AdvancePresentationAnimations(store, 500.0);
+	const AnimationPlayback *restarted = store.Get<AnimationPlayback>(modifier);
+	const PresentationState *state = store.Get<PresentationState>(modifier);
+	REQUIRE(restarted != nullptr);
+	REQUIRE(state != nullptr);
+	CHECK(restarted->StartedAt == 500.0);
+	const PresentationOverride *position = state->Overrides.Find(PresentationProperty::Position);
+	REQUIRE(position != nullptr);
+	CHECK(position->Value.UDim2 == engine::core::UDim2{0.0f, 1.0f, 0.0f, 2.0f});
+	CHECK(Components::Describe(Components::Of<PresentationState>()).Serialisable);
+}
+
+TEST_CASE("local GUI facets restore empty after a snapshot", "[gui][registration][snapshot]") {
+	RegisterGuiComponents();
+	Store source("gui_transient_snapshot_source");
+	const Entity instance = source.Create();
+
+	BindingOutput output;
+	output.Value = "old result";
+	output.Valid = true;
+	output.Failure = BindingFailure::MissingAttribute;
+	output.SourceRevision = 7;
+	output.EvaluationCount = 9;
+	source.Set(instance, output);
+	source.Set(instance, BindingDependency{Entity{22}, 5, 7});
+	source.Set(instance, VirtualFocusState{Entity{22}, "row-7", 7});
+	source.Set(instance, VirtualAnchorState{7, "row-7", 14.0f});
+	PresentationState presentation;
+	presentation.Active = true;
+	presentation.Moving = true;
+	source.Set(instance, presentation);
+	ResolvedStyle style;
+	style.State = StyleState::Hovered;
+	source.Set(instance, style);
+
+	ByteWriter writer;
+	REQUIRE(source.Save(writer));
+	Store restored("gui_transient_snapshot_restored");
+	ByteReader reader(writer.Bytes());
+	REQUIRE(restored.Load(reader));
+
+	const BindingOutput *restoredOutput = restored.Get<BindingOutput>(instance);
+	const BindingDependency *restoredDependency = restored.Get<BindingDependency>(instance);
+	const VirtualFocusState *restoredFocus = restored.Get<VirtualFocusState>(instance);
+	const VirtualAnchorState *restoredAnchor = restored.Get<VirtualAnchorState>(instance);
+	const PresentationState *restoredPresentation = restored.Get<PresentationState>(instance);
+	const ResolvedStyle *restoredStyle = restored.Get<ResolvedStyle>(instance);
+	REQUIRE(restoredOutput != nullptr);
+	REQUIRE(restoredDependency != nullptr);
+	REQUIRE(restoredFocus != nullptr);
+	REQUIRE(restoredAnchor != nullptr);
+	REQUIRE(restoredPresentation != nullptr);
+	REQUIRE(restoredStyle != nullptr);
+	CHECK(restoredOutput->Value.empty());
+	CHECK_FALSE(restoredOutput->Valid);
+	CHECK(restoredDependency->Source == Entity{});
+	CHECK(restoredFocus->Collection == Entity{});
+	CHECK(restoredFocus->Key.empty());
+	CHECK(restoredAnchor->Revision == std::numeric_limits<uint64_t>::max());
+	CHECK(restoredAnchor->Key.empty());
+	CHECK_FALSE(restoredPresentation->Active);
+	CHECK_FALSE(restoredPresentation->Moving);
+	CHECK(restoredStyle->State == StyleState::None);
+}
+
 TEST_CASE("a fully populated Picture round-trips through its serialiser", "[gui][registration]") {
 	RegisterGuiComponents();
 
@@ -560,6 +922,7 @@ TEST_CASE("a text box's caret does not cross a save", "[gui][registration]") {
 	// that received one would move the local player's caret.
 	Entry written;
 	written.PlaceholderText = "type here";
+	written.Password = true;
 	written.CursorPosition = 4;
 	written.SelectionStart = 2;
 
@@ -573,6 +936,7 @@ TEST_CASE("a text box's caret does not cross a save", "[gui][registration]") {
 	descriptor.Read(reader, &read, 1);
 
 	CHECK(read.PlaceholderText == written.PlaceholderText);
+	CHECK(read.Password);
 	CHECK(read.CursorPosition == -1);
 	CHECK(read.SelectionStart == -1);
 }

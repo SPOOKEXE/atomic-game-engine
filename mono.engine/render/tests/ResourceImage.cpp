@@ -2,6 +2,7 @@
 #include "DataCaptureCompact.hpp"
 #include "RenderFixture.hpp"
 #include "RendererTestHooks.hpp"
+#include "portal/PortalRendererTerminalTrace.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Paths.hpp>
@@ -561,6 +562,7 @@ namespace {
 			row.CastShadow = false;
 			row.EmissiveMap = core::Name("body-emission");
 			row.EmissiveTint = {0, .25f, 0};
+			row.EmissiveStrength = 1.0f;
 			frame.push_back(row);
 		};
 		panel(-10 - halfWidth, 0, 0, 10, 20);
@@ -1465,7 +1467,7 @@ TEST_CASE("default data capture records source depth and normal planes", "[rende
 			CHECK(observation.Camera.WorldFromCamera[column * 4 + row] == expectedCamera[column][row]);
 	CHECK(observation.ReadCount == 3);
 	CHECK(observation.ReadCount <= render::MAX_RENDER_OBSERVATION_RESOURCES);
-	CHECK(observation.ReadResources[0] == core::Name("lit"));
+	CHECK(observation.ReadResources[0] == core::Name("display"));
 	CHECK(observation.ReadResources[1] == core::Name("linear-depth"));
 	CHECK(observation.ReadResources[2] == core::Name("normal"));
 	CHECK(observation.WriteCount == 0);
@@ -1677,6 +1679,7 @@ TEST_CASE(
 	wall.CastShadow = false;
 	wall.EmissiveMap = emission;
 	wall.EmissiveTint = {0, 0, 1};
+	wall.EmissiveStrength = 1.0f;
 	render::SceneTarget target{65, 37};
 	render::View source;
 	source.World = 22;
@@ -1802,6 +1805,7 @@ TEST_CASE(
 		room[index].Source = index + 1;
 		room[index].CastShadow = false;
 		room[index].EmissiveMap = emission;
+		room[index].EmissiveStrength = 1.0f;
 	}
 	room[0].Frame.Position = {0, 0, -8};
 	room[0].HalfExtent = {8, 8, .05f};
@@ -2347,7 +2351,8 @@ TEST_CASE(
 		view.Lighting.Direct = {4, 4, 4};
 		wall.EmissiveMap = {};
 		wall.Tint = {1, 0, 0};
-	}
+	} else
+		wall.EmissiveStrength = 1.0f;
 	const bool resident = GENERATE(false, true);
 	const auto residentToken =
 		resident ? renderer.QueueResourceImage(
@@ -2467,7 +2472,8 @@ TEST_CASE(
 				if (shaded) {
 					row.EmissiveMap = {};
 					row.Tint = {0, 0, 1};
-				}
+				} else
+					row.EmissiveStrength = 1.0f;
 				row.SeamNormal = normal;
 				row.SeamOffset = normal.Dot(cut);
 			}
@@ -2643,6 +2649,7 @@ TEST_CASE(
 	body.CastShadow = false;
 	body.Tint = {};
 	body.EmissiveMap = emission;
+	body.EmissiveStrength = 1.0f;
 	view.Instances = std::span(&body, 1);
 	render::PortalImageBinding binding;
 	binding.WorldName = view.WorldName;
@@ -4236,6 +4243,11 @@ TEST_CASE(
 	white.Format = assets::TextureFormat::RGBA8;
 	white.Pixels.assign(4, std::byte{255});
 	REQUIRE(renderer.AddTexture(core::Name("object-id-white"), white));
+	assets::TextureData packedPbr;
+	packedPbr.Width = packedPbr.Height = 1;
+	packedPbr.Format = assets::TextureFormat::RGBA8_LINEAR;
+	packedPbr.Pixels = {std::byte{64}, std::byte{128}, std::byte{192}, std::byte{255}};
+	REQUIRE(renderer.AddTexture(core::Name("object-id-orm"), packedPbr));
 	assets::TextureData alphaSplit;
 	alphaSplit.Width = 2;
 	alphaSplit.Height = 1;
@@ -4298,6 +4310,12 @@ TEST_CASE(
 	scene::DrawInstance packedFront = packed;
 	packedFront.Source = 6;
 	packedFront.Frame.Position = {1, 0, -3};
+	packedFront.PackedPbrMap = core::Name("object-id-orm");
+	packedFront.RoughnessChannel = 2;
+	packedFront.OcclusionChannel = 1;
+	packedFront.MetalnessChannel = 0;
+	// Height remains absent: ORM alpha must not make this plane displace.
+	packedFront.HeightChannel = 255;
 	const std::array rows{labelled, transparentFront, nativeRear, unlabelled, centreRear, packedFront};
 	view.Instances = rows;
 	render::DataCaptureRequest request{
@@ -4315,6 +4333,7 @@ TEST_CASE(
 		.ObjectLabels = {},
 		.SemanticLabels = {},
 		.PartLabels = {},
+		.LocalLightIds = {},
 	};
 	render::DataCaptureTicket ticket;
 	REQUIRE(renderer.QueueDataCapture(request, ticket));
@@ -4335,8 +4354,8 @@ TEST_CASE(
 	REQUIRE(captured.Planes.size() == 5);
 	for (const auto &plane : captured.Planes) {
 		REQUIRE(plane.Status == render::DataCaptureStatus::Ready);
-		CHECK(plane.Width > 0);
-		CHECK(plane.Height > 0);
+		CHECK(plane.Width == target.Width);
+		CHECK(plane.Height == target.Height);
 		CHECK(plane.Hash == assets::Hasher::Of(plane.Bytes));
 	}
 	CHECK(captured.Planes[0].Channel == render::DataCaptureChannel::RgbLinearHdr);
@@ -4390,13 +4409,15 @@ TEST_CASE(
 		render::DataCaptureChannel::PartMask,
 		render::DataCaptureChannel::SecondSurfaceDepth,
 		render::DataCaptureChannel::SecondSurfaceValidity,
+		render::DataCaptureChannel::PbrSpecular,
+		render::DataCaptureChannel::PbrTransmission,
 	};
 	request.ObjectLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 	request.SemanticLabels = {{1, "fixture/box"}};
 	request.PartLabels = {{1, "fixture/alpha"}, {2, "fixture/packed"}};
 	render::DataCaptureTicket partial;
 	REQUIRE(renderer.QueueDataCapture(request, partial));
-	CHECK(partial.ResourceTokens.size() == 9);
+	CHECK(partial.ResourceTokens.size() == 11);
 	CHECK(partial.ChannelResourceIndices.size() == request.Channels.size());
 	CHECK(partial.ChannelResourceIndices[10] == partial.ChannelResourceIndices[11]);
 	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(captureNode));
@@ -4407,10 +4428,14 @@ TEST_CASE(
 			 std::chrono::steady_clock::now() < deadline);
 	REQUIRE(captured.Status == render::DataCaptureStatus::Ready);
 	CHECK(captured.Planes[0].Status == render::DataCaptureStatus::Ready);
-	REQUIRE(captured.Planes.size() == 12);
+	REQUIRE(captured.Planes.size() == 14);
 	for (const auto &plane : captured.Planes) {
 		REQUIRE(plane.Status == render::DataCaptureStatus::Ready);
 		CHECK(plane.Hash == assets::Hasher::Of(plane.Bytes));
+		if (plane.Channel != render::DataCaptureChannel::AmbientOcclusion) {
+			CHECK(plane.Width == target.Width);
+			CHECK(plane.Height == target.Height);
+		}
 	}
 	CHECK_FALSE(captured.Planes[0].Bytes.empty());
 	CHECK_FALSE(captured.Planes[1].Bytes.empty());
@@ -4442,13 +4467,36 @@ TEST_CASE(
 	CHECK(captured.Planes[4].ColourSpace == render::DataCaptureColourSpace::NotApplicable);
 	CHECK(captured.Planes[5].Scalar == render::DataCaptureScalar::Float16);
 	CHECK(captured.Planes[5].ColourSpace == render::DataCaptureColourSpace::Linear);
+	CHECK(captured.Planes[12].Channel == render::DataCaptureChannel::PbrSpecular);
+	CHECK(captured.Planes[12].Scalar == render::DataCaptureScalar::UNorm8);
+	CHECK(
+		captured.Planes[12].Provenance ==
+		"authored_specular_factor/v1;source=material_alpha;range=zero_to_one"
+	);
+	CHECK(captured.Planes[13].Channel == render::DataCaptureChannel::PbrTransmission);
+	CHECK(captured.Planes[13].Scalar == render::DataCaptureScalar::Float16);
+	CHECK(
+		captured.Planes[13].Provenance ==
+		"authored_transmission_factor/v2;source=emissive_alpha;range=zero_to_one;"
+		"visual_model=authored_ior_thickness_guard_refraction"
+	);
 	core::ByteReader objectIds(captured.Planes[7].Bytes);
 	size_t labelledPixels = 0, packedPixels = 0, zeroPixels = 0;
 	uint32_t centreLabel = 99;
 	for (size_t pixel = 0; pixel < captured.Planes[7].Width * captured.Planes[7].Height; ++pixel) {
 		const uint32_t label = objectIds.ReadUInt32();
 		if (label == 1) ++labelledPixels;
-		if (label == 2) ++packedPixels;
+		if (label == 2) {
+			++packedPixels;
+			const size_t material = pixel * 4;
+			CHECK(std::to_integer<uint8_t>(captured.Planes[4].Bytes[material]) == 192);
+			CHECK(std::to_integer<uint8_t>(captured.Planes[4].Bytes[material + 1]) == 64);
+			CHECK(std::to_integer<uint8_t>(captured.Planes[4].Bytes[material + 2]) == 128);
+			CHECK(std::to_integer<uint8_t>(captured.Planes[4].Bytes[material + 3]) == 255);
+			CHECK(std::to_integer<uint8_t>(captured.Planes[12].Bytes[pixel]) == 255);
+			CHECK(captured.Planes[13].Bytes[pixel * 2] == std::byte{0});
+			CHECK(captured.Planes[13].Bytes[pixel * 2 + 1] == std::byte{0});
+		}
 		if (label == 0) ++zeroPixels;
 		if (pixel ==
 			(captured.Planes[1].Height / 2) * captured.Planes[1].Width + captured.Planes[1].Width / 2)
@@ -4635,6 +4683,7 @@ TEST_CASE(
 				.ObjectLabels = {},
 				.SemanticLabels = {},
 				.PartLabels = {},
+				.LocalLightIds = {},
 			};
 			render::DataCaptureTicket ticket;
 			REQUIRE(renderer.QueueDataCapture(request, ticket));
@@ -4809,6 +4858,7 @@ TEST_CASE("second surface eligibility rejects non-built-in fragments", "[render]
 			.ObjectLabels = {},
 			.SemanticLabels = {},
 			.PartLabels = {},
+			.LocalLightIds = {},
 		};
 		render::DataCaptureTicket ticket;
 		REQUIRE(renderer.QueueDataCapture(request, ticket));
@@ -4872,7 +4922,7 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	REQUIRE(world.IsValid());
 	const std::string stablePipeline = "image-export-pipeline";
 	const std::string runtimePipeline = stablePipeline + "#" + std::to_string(world.Index);
-	InstallImageCapture(renderer, "lit", true, false, false, runtimePipeline);
+	InstallImageCapture(renderer, "display", true, false, false, runtimePipeline);
 	world::DataFactorySession session(worlds);
 	session.SetPauseParticipant(
 		[world](world::WorldId paused, world::DataFactoryPauseScope scope, bool, std::string &) {
@@ -4893,7 +4943,7 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 			return hook.Kind == render::RenderHookKind::DataCapture;
 		})
 	);
-	REQUIRE(observationHookCount == 17);
+	REQUIRE(observationHookCount == 22);
 	REQUIRE(observationHookCount + 1 == render::MAX_DATA_FACTORY_HOOKS);
 	script::DataCaptureBridgeRequest request{
 		.InstanceId = "script-capture-world",
@@ -4901,8 +4951,10 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 		.Pipeline = stablePipeline,
 		.CaptureNode = "image-export",
 		.Channels = {"object_ids"},
+		.LocalLightIds = {},
 		.TemporalHistory = "preserve",
 		.IncludeSceneData = true,
+		.PackedPlanes = {},
 	};
 	uint64_t ticket = 0;
 	std::string detail;
@@ -5205,50 +5257,6 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	CHECK(signedZeroBytes == nativeRgbBytes);
 	REQUIRE(bridge.Release("script-capture-world", signedZeroTicket, detail));
 
-	// Unmodeled authored facts have no readback texture, but still complete with
-	// the dispatch identity and explicit unavailable provenance.
-	script::DataCaptureBridgeRequest unavailable = request;
-	unavailable.Channels = {"pbr_specular", "pbr_transmission"};
-	unavailable.IncludeSceneData = false;
-	uint64_t unavailableTicket = 0;
-	REQUIRE(bridge.Queue("script-capture-world", unavailable, unavailableTicket, detail));
-	view.SnapshotId.clear();
-	bridge.PrepareView(view);
-	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
-	do {
-		bridge.Pump();
-		REQUIRE(bridge.Poll("script-capture-world", unavailableTicket, poll, detail));
-		if (poll.Status == "pending") SDL_Delay(1);
-	} while (poll.Status == "pending" && std::chrono::steady_clock::now() < deadline);
-	REQUIRE(poll.Status == "unsupported");
-	REQUIRE(poll.SnapshotId == snapshot);
-	REQUIRE(poll.Planes.size() == 2);
-	CHECK(poll.Planes[0].Status == "unsupported");
-	CHECK(poll.Planes[0].Provenance == "unavailable/authored_specular_not_in_current_material_model/v1");
-	CHECK(poll.Planes[1].Status == "unsupported");
-	CHECK(poll.Planes[1].Provenance == "unavailable/authored_transmission_not_in_current_material_model/v1");
-	REQUIRE(bridge.Release("script-capture-world", unavailableTicket, detail));
-
-	script::DataCaptureBridgeRequest mixed = request;
-	mixed.Channels = {"object_ids", "pbr_specular"};
-	mixed.IncludeSceneData = false;
-	uint64_t mixedTicket = 0;
-	REQUIRE(bridge.Queue("script-capture-world", mixed, mixedTicket, detail));
-	view.SnapshotId.clear();
-	bridge.PrepareView(view);
-	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(core::Name("image-export")));
-	do {
-		bridge.Pump();
-		REQUIRE(bridge.Poll("script-capture-world", mixedTicket, poll, detail));
-		if (poll.Status == "pending") SDL_Delay(1);
-	} while (poll.Status == "pending" && std::chrono::steady_clock::now() < deadline);
-	REQUIRE(poll.Status == "partial");
-	REQUIRE(poll.Planes.size() == 2);
-	CHECK(poll.Planes[0].Status == "ready");
-	CHECK(poll.Planes[1].Status == "unsupported");
-	CHECK(poll.Planes[1].Provenance == "unavailable/authored_specular_not_in_current_material_model/v1");
-	REQUIRE(bridge.Release("script-capture-world", mixedTicket, detail));
-
 	// Requested storage is observable before submission and after an early cancellation.
 	script::DataCaptureBridgeRequest pendingCompact = request;
 	pendingCompact.StorageProfile = "training_compact";
@@ -5341,4 +5349,83 @@ TEST_CASE("script capture retains copied bytes until explicit release", "[render
 	REQUIRE(bridge.Poll("script-capture-world", shutdownTicket, poll, detail));
 	CHECK(poll.Status == "cancelled");
 	REQUIRE(bridge.Release("script-capture-world", shutdownTicket, detail));
+}
+
+TEST_CASE(
+	"resident portal owners cancel each capture token once across retirement causes",
+	"[render][gpu][portal-resident][retirement][.]"
+) {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	InstallImageCapture(renderer, "lit", true);
+	const core::Name pipeline("image-export-pipeline");
+	const core::Name output("image-export");
+	std::array<uint64_t, 4> tokens{};
+	for (auto &token : tokens) {
+		token = renderer.QueueResourceImage(pipeline, output, 0, render::ResourceImageDelivery::Resident);
+		REQUIRE(token != 0);
+	}
+	const uint64_t probe = renderer.QueueResourceImage(pipeline, output);
+	REQUIRE(probe != 0);
+	render::SceneTarget target{65, 37};
+	render::View view;
+	view.Pipeline = pipeline;
+	view.Target = &target;
+	render::OverlayImage overlay;
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Ran(output));
+	REQUIRE(AwaitImage(renderer, probe).Status == render::ResourceImageStatus::Ok);
+	for (const uint64_t token : tokens)
+		REQUIRE(renderer.CanPublishResourceImage(token, 65, 37));
+
+	const render::PortalResidentImages::Time now{};
+	const world::PresentationAddress source{"resident-source", "replies", 1, 1};
+	render::PortalResidentImages resident(renderer);
+#if ENGINE_ASSERTS_ENABLED
+	render::test_support::PortalRendererTerminalTrace terminals(renderer);
+#endif
+	const auto publish = [&](size_t index, render::PortalResidentImages::Time at) {
+		const world::PresentationAddress producer{"producer-" + std::to_string(index), "requests", 1, 1};
+		render::PortalImageRequest request;
+		request.Key = {index + 1, "Door", 1, 1};
+		request.Width = 65;
+		request.Height = 37;
+		request.PixelBudget = 65 * 37;
+		render::PortalImageBinding binding;
+		binding.WorldName = core::Name(source.World);
+		binding.Portal = core::Name("Door");
+		binding.Expected = request.Key;
+		REQUIRE(resident.Reserve(source, producer, request, binding, at));
+		const render::PortalResidentReceipt receipt{request.Key, request.Scope, 0, 0, 0, 65, 37};
+		REQUIRE(resident.Publish(source, producer, receipt, tokens[index], at));
+		return producer;
+	};
+	const auto cancelledProducer = publish(0, now);
+	const auto invalidatedProducer = publish(1, now);
+	const auto expiredProducer = publish(2, now);
+	(void)cancelledProducer;
+	(void)expiredProducer;
+	resident.Cancel(source, 1);
+	resident.Cancel(source, 1);
+	resident.Invalidate(invalidatedProducer);
+	resident.Invalidate(invalidatedProducer);
+	REQUIRE(resident.Expire(now + std::chrono::seconds(2)));
+	CHECK(resident.Expire(now + std::chrono::seconds(2)));
+	const auto clearedProducer = publish(3, now + std::chrono::seconds(2));
+	(void)clearedProducer;
+	resident.Clear();
+	resident.Clear();
+#if ENGINE_ASSERTS_ENABLED
+	for (const uint64_t token : tokens) {
+		CHECK(
+			terminals.Count(render::test_support::PortalRendererTerminalKind::CancelResourceImage, token) == 1
+		);
+		CHECK(
+			terminals.AppliedCount(
+				render::test_support::PortalRendererTerminalKind::CancelResourceImage, token
+			) == 1
+		);
+	}
+#endif
 }

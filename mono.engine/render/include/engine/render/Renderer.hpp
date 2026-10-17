@@ -7,6 +7,7 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Texture.hpp>
+#include <engine/assets/TextureSequence.hpp>
 #include <engine/core/types/AABB.hpp>
 #include <engine/core/types/CFrame.hpp>
 #include <engine/effects/ParticleSystem.hpp>
@@ -21,13 +22,17 @@
 #include <engine/render/Flipbook.hpp>
 #include <engine/render/GraphRunner.hpp>
 #include <engine/render/Overlay.hpp>
+#include <engine/render/PipelineAdmission.hpp>
 #include <engine/render/PortalCaptureTreeCompose.hpp>
 #include <engine/render/PresentationDamage.hpp>
 #include <engine/render/Readback.hpp>
 #include <engine/render/ResourceImage.hpp>
 #include <engine/render/VisibilityObservation.hpp>
+#include <engine/scene/CloudDensity.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/DrawInstance.hpp>
+#include <engine/scene/GpuParticleField.hpp>
+#include <engine/scene/Storm.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 
@@ -55,6 +60,13 @@ namespace engine::graph {
 }
 
 namespace engine::render {
+	// Planner outcome recorded with a portal view for capture diagnostics.
+	enum class PortalDemandStatus { Ready, Hidden, Invalid, Unsupported };
+
+	// Distinguishes the two geometric refusals folded into PortalDemandStatus::Hidden.
+	enum class PortalDemandHiddenReason { None, Frustum, ClipPlane };
+
+	struct TextureBatchImage;
 	class DataFactoryHookBind;
 	struct PackedMeshData;
 	enum class MeshCopyStatus : uint8_t;
@@ -329,10 +341,27 @@ namespace engine::render {
 		// ImportedImage is a renderer-local generation handle. ImagePortal names
 		// the authored entrance. ExternalImage stays true while an image is absent.
 		bool ExternalImage = false;
+		// Planner outcome for this aperture. It is diagnostic metadata and does
+		// not change the renderer's external image mode.
+		PortalDemandStatus ImageDemandStatus = PortalDemandStatus::Invalid;
+		// Geometric reason a hidden demand did not produce a capture.
+		PortalDemandHiddenReason ImageHiddenReason = PortalDemandHiddenReason::None;
+		// Whether the aperture intersects the demand culling frustum.
+		bool ImageFrustumVisible = false;
+		// Culling frame used for ImageDemandStatus. It can differ from the raster
+		// camera while a presentation route retains its source eye.
+		core::CFrame ImageDemandCamera;
+		// Revision of the camera used to classify this demand.
+		uint64_t ImageCameraRevision = 0;
 		// Generation handle of the accepted imported image, or zero.
 		uint64_t ImportedImage = 0;
 		// Authored portal key used to resolve that imported image.
 		core::Name ImagePortal;
+		// Imported HDR radiance sampled only by deferred seam spill, or zero.
+		uint64_t ImportedLightImage = 0;
+		// Capture key and source-world side paired with ImportedLightImage.
+		core::Name LightImagePortal;
+		core::Vector3 LightOutward; // Source portal's outward light direction.
 
 		// The slot of the hole at the far end of this one, or -1 for none.
 		//
@@ -374,6 +403,27 @@ namespace engine::render {
 		// zero for all of them. `SurfaceView::TagFilter`'s argument, unchanged.
 		uint32_t TagFilter = 0;
 	};
+
+	// What a portal can show this frame. The degraded states are named so a
+	// frame missing destination content says why, instead of passing as
+	// continuity or failing without a reason.
+	enum class PortalPresentation {
+		// Drawn from the local world, or from an accepted destination image.
+		Current,
+		// The planner did not demand an image: hidden, invalid or unsupported.
+		// PortalView::ImageDemandStatus and ImageHiddenReason say which.
+		Unrequested,
+		// Demanded, but no destination image has been accepted yet, so nothing
+		// beyond the aperture can be drawn, including a body already past it.
+		AwaitingImage,
+	};
+
+	// Classifies one portal view from its demand outcome and accepted image.
+	inline PortalPresentation PresentationOf(const PortalView &view) {
+		if (!view.ExternalImage) return PortalPresentation::Current;
+		if (view.ImageDemandStatus != PortalDemandStatus::Ready) return PortalPresentation::Unrequested;
+		return view.ImportedImage != 0 ? PortalPresentation::Current : PortalPresentation::AwaitingImage;
+	}
 
 	// How many levels of portal recursion a renderer will go to.
 	//
@@ -471,6 +521,14 @@ namespace engine::render {
 		// angle would be an `acos` per light per fragment to compare something the
 		// dot product already gives.
 		float ConeCosine = -1.0f;
+
+		// The authored request for a depth-tested local-light term. The renderer
+		// retains this alongside the resolved row so final lighting and capture
+		// make the same availability decision.
+		bool Shadows = false;
+
+		// Interned runtime identity of the authored DataFactoryId, when present.
+		core::Name DataFactoryId = {};
 	};
 
 	// One portal pane a particle can be drawn through.
@@ -641,6 +699,19 @@ namespace engine::render {
 		core::Name Owner;
 	};
 
+	// An owned copy of the authored request and analytical field that one frame
+	// gives to the device. No renderer path retains or dereferences a world row.
+	struct GpuParticleFieldView {
+		// The authored enable, layer, count and seed request.
+		scene::GpuParticleField Field;
+		// Analytical wind and geometry values that drive particle motion.
+		scene::TornadoParameters Storm;
+		// World-space position of the storm centre.
+		core::Vector3 Centre;
+		// Elapsed seconds in the storm state copied for this view.
+		float Seconds = 0.0f;
+	};
+
 	// One camera invocation in a graph-owned frame.
 	//
 	// Spans are borrowed for the duration of `Renderer::Render`. A batch groups
@@ -649,6 +720,8 @@ namespace engine::render {
 	//
 	// @since v0.17
 	struct View {
+		// Immutable packed cloud density copied from the source world.
+		std::optional<scene::CloudDensitySnapshot> CloudDensity;
 		// An HDR image owned by this world and viewport. The eye-image node defaults
 		// to whole-eye projection; seam intermediates require its explicit projection option.
 		// Zero denotes an unavailable image.
@@ -686,6 +759,11 @@ namespace engine::render {
 		// The eye transform and lens for this invocation.
 		//@{
 		core::CFrame CameraFrame;
+		// The pose used for culling and camera-dependent collection. Empty keeps
+		// ordinary views on CameraFrame. The free CameraFrame still supplies raster
+		// projection, so callers can inspect from a different position while these
+		// camera-dependent decisions stay anchored to VisibilityFrame.
+		std::optional<core::CFrame> VisibilityFrame;
 		// arch-waiver ecs-copy: each View is one render invocation, not retained world state.
 		scene::Camera Camera;
 		// Set by the product's completed world snapshot barrier. A queued data
@@ -699,6 +777,11 @@ namespace engine::render {
 		uint64_t CameraTemporalSequence = 0;
 		bool CameraCut = false;
 		//@}
+
+		// Returns the frame used for culling and camera-dependent collection.
+		const core::CFrame &VisibilityCameraFrame() const {
+			return VisibilityFrame.has_value() ? *VisibilityFrame : CameraFrame;
+		}
 
 		// Explicit clip-space projection for a fitted or portal capture. Uses
 		// right-handed, Y-up, 0..1 depth coordinates for both culling and drawing.
@@ -835,6 +918,7 @@ namespace engine::render {
 
 		std::span<const effects::RibbonVertex> RibbonVertices;
 		std::span<const effects::RibbonRun> RibbonRuns;
+		std::optional<GpuParticleFieldView> GpuParticles;
 		std::span<const SceneLight> Lights;
 		//@}
 
@@ -1048,6 +1132,11 @@ namespace engine::render {
 		// @return `false` to skip `Record` - nothing to draw, which is not an
 		//         error and not a reason to fail the frame.
 		virtual bool Prepare(void *commandBuffer) = 0;
+
+		// Called after the frame command buffer has been accepted or rejected.
+		// Hooks that retain device output use this to advance a pixel baseline only
+		// after the bytes that produced it are owned by SDL.
+		virtual void CompleteFrame(bool) {}
 
 		// Batch indices remain stable between Prepare calls. Scratch capture writes
 		// fragment depth as well as colour, for composition with other world layers.
@@ -1424,8 +1513,15 @@ namespace engine::render {
 		//        Clamped to 1..3; ignored when headless, which has no swapchain
 		//        to be ahead of.
 		// @param retainSourceTextures Keep bounded decoded base pixels for factory export.
+		// @param textureBudgetBytes Content texture capacity. Zero keeps the normal
+		//        `TextureTable::MAXIMUM_BYTES` safety limit.
 		// @return True when the device, pipelines and geometry are ready.
-		bool Initialise(SDL_Window *window, uint32_t framesInFlight = 1, bool retainSourceTextures = false);
+		bool Initialise(
+			SDL_Window *window,
+			uint32_t framesInFlight = 1,
+			bool retainSourceTextures = false,
+			size_t textureBudgetBytes = 0
+		);
 
 		// An owned copy of the last successfully submitted visibility snapshot.
 		// A submission is not a claim that pixels survived depth or blending.
@@ -1579,6 +1675,9 @@ namespace engine::render {
 		// @param owner The exact content namespace, or empty for shared content.
 		// @return `false` for an invalid mesh, a full table or a failed upload.
 		bool AddMesh(const core::Name &name, const assets::MeshData &mesh, core::Name owner = {});
+		// Monotonically changes when one exact resident mesh is replaced. Zero
+		// means the requested owner has no mesh under this name.
+		uint64_t MeshRevision(const core::Name &name, core::Name owner = {}) const;
 		// Retires one mesh in `owner` without releasing that owner's unrelated resources.
 		// Its storage follows MeshTable's deferred-frame reuse rule.
 		bool DropMesh(const core::Name &name, core::Name owner = {});
@@ -1670,6 +1769,9 @@ namespace engine::render {
 		// @since v0.10
 		void SetAnimationTime(double seconds);
 
+		// Large sequences preserve cell dimensions and durations in one bounded atlas.
+		bool AddTextureSequence(core::Name name, assets::TextureSequenceData sequence, core::Name owner);
+
 		// Compiles and installs a named render graph for a view to select.
 		//
 		// The device path executes the node kinds its backend implements. The
@@ -1682,6 +1784,17 @@ namespace engine::render {
 		// @param pipeline Copied and compiled before installation.
 		// @return Whether the complete graph can run on this backend.
 		bool SetPipeline(core::Name name, const graph::RenderGraph &pipeline);
+
+		// Compiles and installs a graph while retaining the precise refusal reason.
+		// The bool overload above remains for callers that only need acceptance.
+		PipelineAdmissionResult SetPipelineWithResult(core::Name name, const graph::RenderGraph &pipeline);
+
+		// Builds and installs an authored document with the same diagnostics as
+		// direct graph admission.
+		PipelineAdmissionResult SetPipelineDocument(core::Name name, const graph::PipelineDocument &document);
+
+		// Checks an authored document against this renderer without installing it.
+		PipelineAdmissionResult ValidatePipelineDocument(const graph::PipelineDocument &document) const;
 
 		// Installs, or replaces, the native implementation of a custom node kind.
 		//
@@ -1855,6 +1968,11 @@ namespace engine::render {
 		const std::unordered_map<uint32_t, double> &PassTimings() const;
 		const std::unordered_map<uint32_t, double> &PassWallTimes() const;
 		//@}
+
+		// Sequence number of the frame whose GPU times PassTimings shows. It only
+		// grows, when a newer frame's timestamps resolve, so a caller can take
+		// each resolved frame's GPU totals exactly once.
+		uint64_t PassTimingSequence() const;
 
 		// Whether this backend can produce GPU timestamps.
 		bool Timed() const;
@@ -2249,6 +2367,11 @@ namespace engine::render {
 		// @since v0.15
 		// Identical owner, name and words reuse the pipeline without a frame wait or invalidation.
 		bool AddShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
+
+		// Reflects and admits a material fragment against the renderer's named
+		// sampler slots, then installs it through the normal replacement path.
+		bool
+		AddMaterialShader(const core::Name &name, std::span<const uint32_t> spirv, core::Name owner = {});
 
 		// Forgets a registered shader and frees its pipelines.
 		//
@@ -2687,6 +2810,7 @@ namespace engine::render {
 		// carries the split's argument; `docs/ARCH_REVIEW.md` C2 is the finding.
 		friend class ViewRecording;
 		friend class DataFactoryHookBind;
+		friend class FrameBatch;
 
 		// The thread that called `Initialise`, and the only one that may record.
 		//

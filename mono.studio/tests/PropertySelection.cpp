@@ -42,11 +42,11 @@ namespace {
 	}
 }
 
-TEST_CASE("mixed classes contribute a root-first union with mixed values", "[studio][properties]") {
+TEST_CASE("mixed classes expose only their shared property surface", "[studio][properties]") {
 	engine::scene::RegisterSceneComponents();
 	engine::scene::RegisterSceneClasses();
 
-	Store store("property_union");
+	Store store("property_intersection");
 	const Entity part = store.CreateInstance(Classes::Find(Name("Part")), "Block");
 	const Entity light = store.CreateInstance(Classes::Find(Name("PointLight")), "Lamp");
 	REQUIRE(part != engine::ecs::NULL_ENTITY);
@@ -59,11 +59,9 @@ TEST_CASE("mixed classes contribute a root-first union with mixed values", "[stu
 	const SelectionPropertyGroup *basePart = Group(groups, "BasePart");
 	const SelectionPropertyGroup *lightGroup = Group(groups, "Light");
 	REQUIRE(instance != nullptr);
-	REQUIRE(basePart != nullptr);
-	REQUIRE(lightGroup != nullptr);
+	CHECK(basePart == nullptr);
+	CHECK(lightGroup == nullptr);
 	CHECK(instance->Applicable == 2);
-	CHECK(basePart->Applicable == 1);
-	CHECK(lightGroup->Applicable == 1);
 
 	const SelectionPropertyRow *name = Row(*instance, "Name");
 	REQUIRE(name != nullptr);
@@ -71,31 +69,29 @@ TEST_CASE("mixed classes contribute a root-first union with mixed values", "[stu
 	CHECK(name->Readable == 2);
 	CHECK(name->Mixed);
 
-	const SelectionPropertyRow *transparency = Row(*basePart, "Transparency");
-	const SelectionPropertyRow *brightness = Row(*lightGroup, "Brightness");
-	REQUIRE(transparency != nullptr);
-	REQUIRE(brightness != nullptr);
-	CHECK_FALSE(transparency->Mixed);
-	CHECK_FALSE(brightness->Mixed);
+	CHECK(Row(*instance, "Transparency") == nullptr);
+	CHECK(Row(*instance, "Brightness") == nullptr);
 
+	const auto basePartClass = Classes::Find(Name("BasePart"));
+	const auto lightClass = Classes::Find(Name("Light"));
 	CHECK(
 		studio::SelectionPropertyApplies(
-			store.ClassOf(part), basePart->Owner, transparency->Descriptor->Name, PropertyType::Float
+			store.ClassOf(part), basePartClass, Name("Transparency"), PropertyType::Float
 		)
 	);
 	CHECK_FALSE(
 		studio::SelectionPropertyApplies(
-			store.ClassOf(light), basePart->Owner, transparency->Descriptor->Name, PropertyType::Float
+			store.ClassOf(light), basePartClass, Name("Transparency"), PropertyType::Float
 		)
 	);
 	CHECK(
 		studio::SelectionPropertyApplies(
-			store.ClassOf(light), lightGroup->Owner, brightness->Descriptor->Name, PropertyType::Float
+			store.ClassOf(light), lightClass, Name("Brightness"), PropertyType::Float
 		)
 	);
 	CHECK_FALSE(
 		studio::SelectionPropertyApplies(
-			store.ClassOf(part), lightGroup->Owner, brightness->Descriptor->Name, PropertyType::Float
+			store.ClassOf(part), lightClass, Name("Brightness"), PropertyType::Float
 		)
 	);
 }
@@ -117,4 +113,26 @@ TEST_CASE("equal values stay concrete in a multi-selection", "[studio][propertie
 	CHECK(transparency->Applicable == 2);
 	CHECK(transparency->Readable == 2);
 	CHECK_FALSE(transparency->Mixed);
+}
+
+TEST_CASE("a stale first handle does not hide later live selected properties", "[studio][properties]") {
+	engine::scene::RegisterSceneComponents();
+	engine::scene::RegisterSceneClasses();
+
+	Store store("property_stale_selection");
+	const Entity stale = store.CreateInstance(Classes::Find(Name("Part")), "Stale");
+	const Entity first = store.CreateInstance(Classes::Find(Name("Part")), "First");
+	const Entity second = store.CreateInstance(Classes::Find(Name("Part")), "Second");
+	store.Destroy(stale);
+
+	const std::array selected{stale, first, second};
+	const std::vector<SelectionPropertyGroup> groups = studio::BuildPropertySelection(store, selected);
+
+	const SelectionPropertyGroup *basePart = Group(groups, "BasePart");
+	REQUIRE(basePart != nullptr);
+	CHECK(basePart->Applicable == 2);
+	const SelectionPropertyRow *transparency = Row(*basePart, "Transparency");
+	REQUIRE(transparency != nullptr);
+	CHECK(transparency->Applicable == 2);
+	CHECK(transparency->Readable == 2);
 }

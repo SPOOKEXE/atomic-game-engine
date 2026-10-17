@@ -32,6 +32,9 @@ TEST_DEPENDS("server.host")
 namespace {
 	namespace fs = std::filesystem;
 
+	// The world loader puts each <Source> child in this cache.
+	constexpr size_t BLADEBORNE_SOURCE_COUNT = 15;
+
 	struct Tree {
 		fs::path Root;
 
@@ -175,7 +178,7 @@ TEST_CASE("server runs the shipped Bladeborne world with server role only", "[se
 	host.Worlds().Enter(host.Primary(), [](engine::ecs::Store &store) {
 		const engine::script::SourceCache *sources = store.Resource<engine::script::SourceCache>();
 		REQUIRE(sources != nullptr);
-		CHECK(sources->Count() == 14);
+		CHECK(sources->Count() == BLADEBORNE_SOURCE_COUNT);
 
 		const engine::ecs::Entity workspace = store.FindFirstRoot("Workspace");
 		REQUIRE(workspace != engine::ecs::NULL_ENTITY);

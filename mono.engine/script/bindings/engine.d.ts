@@ -178,6 +178,11 @@ declare interface ChangedSignal {
 	Equals(other: ChangedSignal): boolean;
 }
 
+declare interface RemoteEventSignal {
+	Connect(handler: (payload: string, sender: Player | null) => void): RBXScriptConnection;
+	Once(handler: (payload: string, sender: Player | null) => void): RBXScriptConnection;
+}
+
 // The instance tree's signals, matching the Luau half - undeclared until v0.13
 // for the reason given there.
 declare interface InstanceSignal {
@@ -465,6 +470,7 @@ declare namespace Enum {
 	interface BorderMode extends EnumItem { readonly __enum: "BorderMode"; }
 	interface CameraType extends EnumItem { readonly __enum: "CameraType"; }
 	interface CloudComputeShader extends EnumItem { readonly __enum: "CloudComputeShader"; }
+	interface CollectorScaleMode extends EnumItem { readonly __enum: "CollectorScaleMode"; }
 	interface ConstraintMotion extends EnumItem { readonly __enum: "ConstraintMotion"; }
 	interface ContextActionResult extends EnumItem { readonly __enum: "ContextActionResult"; }
 	interface DominantAxis extends EnumItem { readonly __enum: "DominantAxis"; }
@@ -480,6 +486,7 @@ declare namespace Enum {
 	interface LensShape extends EnumItem { readonly __enum: "LensShape"; }
 	interface LineJoinMode extends EnumItem { readonly __enum: "LineJoinMode"; }
 	interface ListenerType extends EnumItem { readonly __enum: "ListenerType"; }
+	interface LocalizedArgumentType extends EnumItem { readonly __enum: "LocalizedArgumentType"; }
 	interface MouseBehavior extends EnumItem { readonly __enum: "MouseBehavior"; }
 	interface NodeBypassMode extends EnumItem { readonly __enum: "NodeBypassMode"; }
 	interface NodeGroupLayout extends EnumItem { readonly __enum: "NodeGroupLayout"; }
@@ -518,6 +525,7 @@ declare namespace Enum {
 	interface UserInputType extends EnumItem { readonly __enum: "UserInputType"; }
 	interface VerticalAlignment extends EnumItem { readonly __enum: "VerticalAlignment"; }
 	interface VerticalScrollBarPosition extends EnumItem { readonly __enum: "VerticalScrollBarPosition"; }
+	interface ViewportUpdateMode extends EnumItem { readonly __enum: "ViewportUpdateMode"; }
 	interface VolumeShape extends EnumItem { readonly __enum: "VolumeShape"; }
 	interface ZIndexBehavior extends EnumItem { readonly __enum: "ZIndexBehavior"; }
 
@@ -586,6 +594,13 @@ declare namespace Enum {
 		readonly Stratus: CloudComputeShader;
 		readonly Storm: CloudComputeShader;
 		readonly Voxel: CloudComputeShader;
+	};
+	const CollectorScaleMode: {
+		readonly Stretch: CollectorScaleMode;
+		readonly Fit: CollectorScaleMode;
+		readonly Fill: CollectorScaleMode;
+		readonly Integer: CollectorScaleMode;
+		readonly None: CollectorScaleMode;
 	};
 	const ConstraintMotion: {
 		readonly Locked: ConstraintMotion;
@@ -746,6 +761,11 @@ declare namespace Enum {
 		readonly Camera: ListenerType;
 		readonly ObjectPosition: ListenerType;
 	};
+	const LocalizedArgumentType: {
+		readonly String: LocalizedArgumentType;
+		readonly Number: LocalizedArgumentType;
+		readonly Date: LocalizedArgumentType;
+	};
 	const MouseBehavior: {
 		readonly Default: MouseBehavior;
 		readonly LockCenter: MouseBehavior;
@@ -797,6 +817,9 @@ declare namespace Enum {
 		readonly Grid2x2: ParticleFlipbookLayout;
 		readonly Grid4x4: ParticleFlipbookLayout;
 		readonly Grid8x8: ParticleFlipbookLayout;
+		readonly Grid16x16: ParticleFlipbookLayout;
+		readonly Grid32x32: ParticleFlipbookLayout;
+		readonly Grid64x64: ParticleFlipbookLayout;
 	};
 	const ParticleFlipbookMode: {
 		readonly Loop: ParticleFlipbookMode;
@@ -961,6 +984,12 @@ declare namespace Enum {
 	const VerticalScrollBarPosition: {
 		readonly Right: VerticalScrollBarPosition;
 		readonly Left: VerticalScrollBarPosition;
+	};
+	const ViewportUpdateMode: {
+		readonly OnChange: ViewportUpdateMode;
+		readonly EveryFrame: ViewportUpdateMode;
+		readonly FixedRate: ViewportUpdateMode;
+		readonly Manual: ViewportUpdateMode;
 	};
 	const VolumeShape: {
 		readonly Box: VolumeShape;
@@ -1322,6 +1351,22 @@ declare interface VectorField3D extends PVInstance {
 	Vector: Vector3;
 }
 
+declare interface GpuParticleField extends Instance {
+	CondensationAlpha: number;
+	CondensationColor: Color3;
+	CondensationSize: number;
+	DebrisAlpha: number;
+	DebrisColor: Color3;
+	DebrisSize: number;
+	Enabled: boolean;
+	Layers: number;
+	RainAlpha: number;
+	RainColor: Color3;
+	RainSize: number;
+	RequestedCount: number;
+	Seed: number;
+}
+
 declare interface BasePart extends PVInstance {
 	AffordanceEnabled: boolean;
 	AffordanceId: string;
@@ -1360,6 +1405,15 @@ declare interface BasePart extends PVInstance {
 }
 
 declare interface Part extends BasePart {
+	StormDragCoefficient: number;
+	StormEnabled: boolean;
+	StormExposedArea: number;
+	StormForceScale: number;
+	StormMaximumBendRadians: number;
+	StormResponsePerSecond: number;
+	StormRestFrame: CFrame;
+	StormVegetationEnabled: boolean;
+	StormWindSpeedForMaximumBend: number;
 }
 
 declare interface SpawnLocation extends Part {
@@ -1395,6 +1449,7 @@ declare interface MeshPart extends BasePart {
 	AutoLod2Ratio: number;
 	AutoLod3MeshId: string;
 	AutoLod3Ratio: number;
+	AutoLodBillboardTexture: string;
 	AutoLodLevels: number;
 	AutoLodStrategy: Enum.AutoMeshLODStrategy;
 	AutoLodTargetQuadArea: number;
@@ -1404,23 +1459,37 @@ declare interface MeshPart extends BasePart {
 	CustomLod2Ratio: number;
 	CustomLod3MeshId: string;
 	CustomLod3Ratio: number;
+	CustomLodBillboardTexture: string;
 	CustomLodLevels: number;
 	CustomLodTargetQuadArea: number;
 	EmissiveMap: string;
 	HeightMap: string;
+	IndexOfRefraction: number;
+	Lod1Distance: number;
 	Lod1MeshId: string;
 	Lod1Ratio: number;
+	Lod2Distance: number;
 	Lod2MeshId: string;
 	Lod2Ratio: number;
+	Lod3Distance: number;
 	Lod3MeshId: string;
 	Lod3Ratio: number;
+	LodBillboardTexture: string;
 	LodTargetQuadArea: number;
 	MeshId: string;
 	MetalnessMap: string;
 	NormalMap: string;
 	OcclusionMap: string;
+	PackedHeightChannel: number;
+	PackedMetalnessChannel: number;
+	PackedOcclusionChannel: number;
+	PackedPbrMap: string;
+	PackedRoughnessChannel: number;
 	RoughnessMap: string;
+	SpecularFactor: number;
 	TextureID: string;
+	Thickness: number;
+	TransmissionFactor: number;
 	readonly TrianglesCount: number;
 }
 
@@ -1461,6 +1530,7 @@ declare interface Portal extends SurfaceCamera {
 
 declare interface Sound extends Instance {
 	Looped: boolean;
+	Pan: number;
 	Playing: boolean;
 	RollOffMaxDistance: number;
 	RollOffMinDistance: number;
@@ -1501,6 +1571,7 @@ declare interface Light extends Instance {
 	Color: Color3;
 	Enabled: boolean;
 	Range: number;
+	Shadows: boolean;
 }
 
 declare interface PointLight extends Light {
@@ -1739,6 +1810,11 @@ declare interface JointInstance extends Instance {
 }
 
 declare interface Weld extends JointInstance {
+	StormBreakForce: number;
+	StormDamageRate: number;
+	StormIntegrity: number;
+	StormLinkEnabled: boolean;
+	StormMaterialStrength: number;
 }
 
 declare interface WeldConstraint extends Instance {
@@ -1746,6 +1822,11 @@ declare interface WeldConstraint extends Instance {
 	Enabled: boolean;
 	Part0: Instance;
 	Part1: Instance;
+	StormBreakForce: number;
+	StormDamageRate: number;
+	StormIntegrity: number;
+	StormLinkEnabled: boolean;
+	StormMaterialStrength: number;
 }
 
 declare interface ShaderScript extends Instance {
@@ -1792,6 +1873,8 @@ declare interface ModuleScript extends LuaSourceContainer {
 }
 
 declare interface RemoteEvent extends Instance {
+	FireServer(payload: string): void;
+	readonly OnServerEvent: RemoteEventSignal;
 }
 
 declare interface BindableEvent extends Instance {
@@ -2101,6 +2184,8 @@ declare interface TextButton extends GuiButton {
 	readonly ContentText: string;
 	Font: Enum.Font;
 	LineHeight: number;
+	LocalizationArgumentCount: number;
+	LocalizationKey: string;
 	MaxVisibleGraphemes: number;
 	RichText: boolean;
 	Text: string;
@@ -2141,6 +2226,8 @@ declare interface TextLabel extends GuiLabel {
 	readonly ContentText: string;
 	Font: Enum.Font;
 	LineHeight: number;
+	LocalizationArgumentCount: number;
+	LocalizationKey: string;
 	MaxVisibleGraphemes: number;
 	RichText: boolean;
 	Text: string;
@@ -2178,8 +2265,11 @@ declare interface TextBox extends GuiObject {
 	CursorPosition: number;
 	Font: Enum.Font;
 	LineHeight: number;
+	LocalizationArgumentCount: number;
+	LocalizationKey: string;
 	MaxVisibleGraphemes: number;
 	MultiLine: boolean;
+	Password: boolean;
 	PlaceholderColor3: Color3;
 	PlaceholderText: string;
 	RichText: boolean;
@@ -2209,14 +2299,21 @@ declare interface ViewportFrame extends GuiObject {
 	CurrentCamera: Instance;
 	ImageColor3: Color3;
 	ImageTransparency: number;
+	InvalidationRevision: number;
 	LightColor: Color3;
 	LightDirection: Vector3;
+	ResolutionScale: number;
+	UpdateEveryFrames: number;
+	UpdateMode: Enum.ViewportUpdateMode;
 }
 
 declare interface LayerCollector extends GuiBase2d {
 	DisplayOrder: number;
 	Enabled: boolean;
+	ReferenceResolution: Vector2;
 	ResetOnSpawn: boolean;
+	ScaleMode: Enum.CollectorScaleMode;
+	Theme: Instance;
 	ZIndexBehavior: Enum.ZIndexBehavior;
 }
 
@@ -2321,6 +2418,11 @@ declare interface UIPageLayout extends UILayout {
 declare interface UIConstraint extends UIComponent {
 }
 
+declare interface UIMask extends UIComponent {
+	CornerRadius: UDim;
+	Enabled: boolean;
+}
+
 declare interface UIAspectRatioConstraint extends UIConstraint {
 	AspectRatio: number;
 	AspectType: Enum.AspectType;
@@ -2390,6 +2492,37 @@ declare interface UIDragDetector extends UIComponent {
 	VirtualDragEnd(x: number, y: number, dx: number, dy: number): void;
 }
 
+declare interface UIBinding extends Instance {
+	Attribute: string;
+	Fallback: string;
+	SourcePath: string;
+	Target: string;
+	readonly Valid: boolean;
+	readonly Value: string;
+}
+
+declare interface UIModalScope extends UIComponent {
+	Enabled: boolean;
+}
+
+declare interface UIAnimation extends UIComponent {
+	Playing: boolean;
+	StartTime: number;
+}
+
+declare interface UIStyle extends UIComponent {
+}
+
+declare interface UITheme extends Instance {
+}
+
+declare interface UIVirtualCollection extends Instance {
+	FixedExtent: number;
+	ItemCount: number;
+	Revision: number;
+	SetVirtualPage(first: number, extentBefore: number, records: { Key: string; Extent?: number; Fields: Record<string, unknown> }[], revision: number): void;
+}
+
 declare interface Service extends Instance {
 	readonly Fixture: boolean;
 	Scope: Enum.ServiceScope;
@@ -2414,12 +2547,22 @@ declare interface Workspace extends WorldRoot {
 
 declare interface Lighting extends Service {
 	Ambient: Color3;
+	BloomIntensity: number;
+	BloomRadius: number;
+	BloomThreshold: number;
 	Brightness: number;
 	ClockTime: number;
+	DepthOfFieldFocusDistance: number;
+	DepthOfFieldFocusRange: number;
+	DepthOfFieldIntensity: number;
+	DepthOfFieldRadius: number;
 	FogColor: Color3;
 	FogEnd: number;
 	FogStart: number;
 	GeographicLatitude: number;
+	GodRayIntensity: number;
+	GodRayRadius: number;
+	GodRayThreshold: number;
 	OutdoorAmbient: Color3;
 	PostProcessShader: string;
 	RenderFeatureDisableMask: number;
@@ -2983,6 +3126,7 @@ declare const Instance: {
 		(className: "Folder", parent?: Instance): Folder;
 		(className: "VectorField2D", parent?: Instance): VectorField2D;
 		(className: "VectorField3D", parent?: Instance): VectorField3D;
+		(className: "GpuParticleField", parent?: Instance): GpuParticleField;
 		(className: "Part", parent?: Instance): Part;
 		(className: "SpawnLocation", parent?: Instance): SpawnLocation;
 		(className: "Model", parent?: Instance): Model;
@@ -3084,6 +3228,7 @@ declare const Instance: {
 		(className: "UIGridLayout", parent?: Instance): UIGridLayout;
 		(className: "UITableLayout", parent?: Instance): UITableLayout;
 		(className: "UIPageLayout", parent?: Instance): UIPageLayout;
+		(className: "UIMask", parent?: Instance): UIMask;
 		(className: "UIAspectRatioConstraint", parent?: Instance): UIAspectRatioConstraint;
 		(className: "UISizeConstraint", parent?: Instance): UISizeConstraint;
 		(className: "UITextSizeConstraint", parent?: Instance): UITextSizeConstraint;
@@ -3094,6 +3239,12 @@ declare const Instance: {
 		(className: "UIFlexItem", parent?: Instance): UIFlexItem;
 		(className: "UIGradient", parent?: Instance): UIGradient;
 		(className: "UIDragDetector", parent?: Instance): UIDragDetector;
+		(className: "UIBinding", parent?: Instance): UIBinding;
+		(className: "UIModalScope", parent?: Instance): UIModalScope;
+		(className: "UIAnimation", parent?: Instance): UIAnimation;
+		(className: "UIStyle", parent?: Instance): UIStyle;
+		(className: "UITheme", parent?: Instance): UITheme;
+		(className: "UIVirtualCollection", parent?: Instance): UIVirtualCollection;
 		(className: "Player", parent?: Instance): Player;
 		(className: "Team", parent?: Instance): Team;
 	};

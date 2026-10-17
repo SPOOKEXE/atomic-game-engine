@@ -1,25 +1,11 @@
 # Code architecture
 
-**Where a thing goes, and what it is allowed to see.** `docs/CODE_FORMAT.md`
-says how code looks and `docs/CODE_QUALITY.md` is the checklist a change is
-reviewed against. This is the third one: the shape the modules make, the rule
-that orders them, and the reasoning that produced it.
+This reference defines module placement, dependency direction, boundary rules,
+and the checks that enforce them.
 
 Read it when adding a module, moving a type between modules, adding a
 dependency edge, or arguing about which module a thing belongs to. Nothing here
 is about a single function.
-
-## Its relationship to the design notes
-
-This document used to be the in-tree half of a pair. The other half was
-`repo_layout.md`, the design note the tree was built from, which lived outside
-this repository beside `CDN.md` and `MCP.md` and was cited by section number
-from CMake, public headers and `THIRD_PARTY_NOTICES.md`. Those notes are gone,
-and nothing here depends on them any more: every rule below stands on its own,
-and where an argument mattered it was written into this file rather than left a
-citation away. `docs/retired/ROADMAP.md` records what they were.
-
-Section numbers below are this file's own.
 
 ---
 

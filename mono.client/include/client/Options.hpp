@@ -19,8 +19,11 @@
 
 #include <engine/render/ProfilerTab.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -28,6 +31,24 @@ namespace client {
 
 	// Command-line configuration copied into Client during Initialise.
 	struct Options {
+		// A traversable portal prewarms two RGBA16F eye images and keeps bounded
+		// room for destination assets and uploads. 512 MiB admits both eyes at
+		// 3840x2160 (about 127 MiB together) plus the 256 MiB content allowance.
+		static constexpr size_t DEFAULT_PORTAL_READINESS_BUDGET_BYTES = 512u * 1024u * 1024u;
+		static constexpr size_t DEFAULT_PORTAL_READINESS_ASSET_UPLOAD_BYTES =
+			256u * 1024u * 1024u; // Default staged asset-upload allowance.
+
+		// Converts an explicit command-line MiB capacity into bytes. Zero and
+		// overflow are refused so the default budget cannot be disabled by error.
+		static std::optional<size_t> TextureBudgetBytesForMiB(int64_t mebibytes) {
+			constexpr size_t MEBIBYTE = 1024u * 1024u;
+			if (mebibytes <= 0 ||
+				static_cast<uint64_t>(mebibytes) > std::numeric_limits<size_t>::max() / MEBIBYTE) {
+				return std::nullopt;
+			}
+			return static_cast<size_t>(mebibytes) * MEBIBYTE;
+		}
+
 		// The loopback MCP port, or -1 when the control surface is disabled.
 		int ControlPort = -1;
 
@@ -41,6 +62,14 @@ namespace client {
 		// Window height in logical pixels. The window is resizable, so this is
 		// where it starts and not where it stays.
 		int Height = 720;
+
+		// Viewer accessibility scales applied once at the ScreenGui collector.
+		// They are local presentation policy and never change authored GUI rows.
+		float InterfaceScale = 1.0f;
+		float TextScale = 1.0f; // Viewer text accessibility scale.
+
+		// The viewer's requested localization tag. It affects only presentation.
+		std::string Locale = "en";
 
 		// How many cubes the demo scene builds, per world.
 		uint32_t Entities = 2048;
@@ -149,6 +178,17 @@ namespace client {
 		// @since v0.18
 		int FramesInFlight = 1;
 
+		// Texture-table capacity for this run. Zero preserves the renderer's
+		// normal safety limit; a command-line measurement may request more.
+		size_t TextureBudgetBytes = 0;
+
+		// Bounded local allowance for a staged portal destination. Integrators may
+		// lower either value for constrained devices; exhaustion keeps the mouth
+		// image-only until capacity becomes available.
+		size_t PortalReadinessBudgetBytes = DEFAULT_PORTAL_READINESS_BUDGET_BYTES;
+		size_t PortalReadinessAssetUploadBytes =
+			DEFAULT_PORTAL_READINESS_ASSET_UPLOAD_BYTES; // Destination asset-upload allowance.
+
 		// The maximum presentation rate, or zero for every update.
 		//
 		// **The other half of `Uncapped`, not a contradiction of it.** Turning
@@ -195,6 +235,12 @@ namespace client {
 		//
 		// @since v0.18
 		std::filesystem::path HeapReport;
+
+		// Writes complete-run benchmark totals before teardown; requires allocator hooks.
+		std::filesystem::path BenchmarkReport;
+
+		// Measures a connected run only after the remote world has joined.
+		bool BenchmarkWaitForJoin = false;
 
 		// Fail the run when a tag climbs faster than this, in bytes a second.
 		// Zero checks nothing.
@@ -428,5 +474,49 @@ namespace client {
 
 		// One BMP and camera-state JSON per rendered frame. Requires a positive frame budget.
 		std::filesystem::path CaptureSequence;
+
+		// Optional fixed interpolation phase for deterministic comparison captures.
+		// Only used with CaptureSequence; ordinary presentation keeps the world clock.
+		std::optional<float> CaptureAlpha;
+
+		// Simulation seconds each due frame advances in a capture sequence,
+		// cycled in order. Empty advances 1 / MaximumFrameRate per frame. A
+		// schedule with unequal and long entries replays the same variable
+		// frame timing and stalls on every run. Only used with CaptureSequence.
+		std::vector<float> CaptureFrameSchedule;
+
+		// One CSV row per drawn frame: interval since the previous frame, CPU
+		// time of this frame's step, and the summed GPU pass time of the newest
+		// frame whose timestamps resolved since the last row (blank when none
+		// did). Percentiles over a whole run come from this, not from the
+		// frame graph's five-second window. Empty writes nothing.
+		std::filesystem::path FrameTimings;
+
+		// Seeded impairment applied where this client's sockets receive, for
+		// acceptance runs. The whole round trip is applied on arrival, so
+		// RoundTripSeconds models that round trip for request and reply pairs.
+		// Every decision is drawn from the arrival number and Seed.
+		struct NetworkImpairment {
+			// Added round-trip delay, in seconds.
+			double RoundTripSeconds = 0.0;
+			// Maximum seeded timing variation, in seconds.
+			double JitterSeconds = 0.0;
+			// Probability that a received packet is dropped.
+			float LossChance = 0.0f;
+			// Probability that a received packet is delivered twice.
+			float DuplicateChance = 0.0f;
+			// Probability that a received packet is delayed behind a later packet.
+			float ReorderChance = 0.0f;
+			// Seed making packet impairment decisions repeatable.
+			uint32_t Seed = 0;
+
+			// Whether any setting changes packet delivery.
+			bool Active() const {
+				return RoundTripSeconds > 0.0 || JitterSeconds > 0.0 || LossChance > 0.0f ||
+					   DuplicateChance > 0.0f || ReorderChance > 0.0f;
+			}
+		};
+		// Network conditions applied at this client's receive boundary.
+		NetworkImpairment Impairment;
 	};
 }

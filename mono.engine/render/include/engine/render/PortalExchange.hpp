@@ -38,7 +38,7 @@ namespace engine::render {
 
 	// Partial capture is opt-in. CompleteWorld includes transparent content and spatial UI,
 	// composed in linear HDR before shared tone mapping. Host/screen UI is excluded.
-	enum class PortalImageScope : uint8_t { CompleteWorld, OpaqueLighting };
+	enum class PortalImageScope : uint8_t { CompleteWorld, OpaqueLighting, SeamRadiance };
 
 	// Source revisions represented by a captured portal image.
 	struct PortalImageVersion {
@@ -115,6 +115,8 @@ namespace engine::render {
 		// All four captures count against PixelBudget. Recursive requests require a
 		// bounded capture tree; renewal remains unavailable for this profile.
 		bool OrderedLayers = false;
+		// A portal handoff needs this eye before routine presentation work.
+		bool TransferEye = false;
 		// Compares the full request, including optional geometry and lens policy.
 		bool operator==(const PortalImageRequest &) const = default;
 	};

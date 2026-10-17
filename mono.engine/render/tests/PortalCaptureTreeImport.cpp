@@ -1,4 +1,5 @@
 #include "RenderFixture.hpp"
+#include "portal/PortalRendererTerminalTrace.hpp"
 
 #include <engine/render/PortalCaptureTreeImport.hpp>
 #include <engine/render/PortalGeometry.hpp>
@@ -97,6 +98,9 @@ TEST_CASE(
 ) {
 	test::FixtureDevice fixture;
 	fixture.Initialise();
+#if ENGINE_ASSERTS_ENABLED
+	test_support::PortalRendererTerminalTrace terminals(fixture.Render);
+#endif
 	ShaderCompiler compiler;
 	const auto compiled = compiler.Compile(
 		"#version 450\nlayout(location=0) out vec4 colour; void main(){colour=vec4(1);}",
@@ -190,7 +194,33 @@ TEST_CASE(
 	badLenses.Programs[0].Hash = assets::Hasher::Of(std::as_bytes(std::span(badLenses.Programs[0].SpirV)));
 	badLenses.Entries[0].ProgramHash = badLenses.Programs[0].Hash;
 	REQUIRE(ValidPortalCaptureTree(malformed));
+#if ENGINE_ASSERTS_ENABLED
+	const size_t rollbackStart = terminals.Calls.size();
+#endif
 	CHECK(fixture.Render.QueuePortalCaptureTree(binding, std::move(malformed)) == 0);
+#if ENGINE_ASSERTS_ENABLED
+	const auto rollbackCalls = std::span(terminals.Calls).subspan(rollbackStart);
+	std::vector<uint64_t> dropped, released;
+	for (const auto &call : rollbackCalls) {
+		if (!call.Applied || call.Token == 0) continue;
+		if (call.Kind == test_support::PortalRendererTerminalKind::DropPortalImage)
+			dropped.push_back(call.Token);
+		else if (call.Kind == test_support::PortalRendererTerminalKind::ReleasePortalImport)
+			released.push_back(call.Token);
+	}
+	REQUIRE(dropped.size() == 1);
+	REQUIRE(released.size() == 3);
+	for (const auto handle : dropped)
+		CHECK(std::count_if(rollbackCalls.begin(), rollbackCalls.end(), [&](const auto &call) {
+				  return call.Kind == test_support::PortalRendererTerminalKind::DropPortalImage &&
+						 call.Token == handle && call.Applied;
+			  }) == 1);
+	for (const auto handle : released)
+		CHECK(std::count_if(rollbackCalls.begin(), rollbackCalls.end(), [&](const auto &call) {
+				  return call.Kind == test_support::PortalRendererTerminalKind::ReleasePortalImport &&
+						 call.Token == handle && call.Applied;
+			  }) == 1);
+#endif
 	CHECK(fixture.Render.PortalImageUsage().Images == usage.Images);
 	CHECK(fixture.Render.PortalImageUsage().TextureBytes == usage.TextureBytes);
 	CHECK(fixture.Render.PortalImageUsage().PendingCpuBytes == usage.PendingCpuBytes);
@@ -378,6 +408,9 @@ TEST_CASE(
 	test::FixtureDevice fixture;
 	fixture.Initialise();
 	auto &renderer = fixture.Render;
+#if ENGINE_ASSERTS_ENABLED
+	test_support::PortalRendererTerminalTrace terminals(renderer);
+#endif
 	ShaderCompiler compiler;
 	const auto compiled = compiler.Compile(
 		"#version 450\nlayout(location=0) out vec4 colour; void main(){colour=vec4(1);}",
@@ -477,4 +510,29 @@ TEST_CASE(
 	renderer.ReleasePortalCaptureTreeLease(worldLease);
 	CHECK(renderer.PortalImageUsage().Images == 0);
 	CHECK(renderer.PortalImageUsage().PendingCpuBytes == 0);
+#if ENGINE_ASSERTS_ENABLED
+	CHECK(terminals.AppliedCount(test_support::PortalRendererTerminalKind::DropCaptureTree, oldTree) == 1);
+	CHECK(
+		terminals.AppliedCount(test_support::PortalRendererTerminalKind::DropCaptureTree, replacement) == 1
+	);
+	CHECK(
+		terminals.AppliedCount(test_support::PortalRendererTerminalKind::ReleaseCaptureTreeLease, third) == 1
+	);
+	CHECK(
+		terminals.AppliedCount(
+			test_support::PortalRendererTerminalKind::ReleaseCaptureTreeLease, replacementPreviewLease
+		) == 1
+	);
+	CHECK(
+		terminals.AppliedCount(
+			test_support::PortalRendererTerminalKind::ReleaseCaptureTreeLease, worldLease
+		) == 1
+	);
+	if (retirement == 0)
+		CHECK(
+			terminals.AppliedCount(
+				test_support::PortalRendererTerminalKind::ReleaseCaptureTreeLease, oldPreviewLease
+			) == 1
+		);
+#endif
 }

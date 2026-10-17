@@ -264,6 +264,121 @@ TEST_CASE("a sweep stops at the surface rather than in it", "[convexquery]") {
 	CHECK(hit.Normal.X == Approx(-1.0f).margin(1e-2f));
 }
 
+TEST_CASE("translation sweeps hit a wide thin floor at its surface", "[convexquery]") {
+	for (const float half : {4096.0f, 1'000'000.0f}) {
+		for (const float offset : {0.0f, 600'000.0f}) {
+			CAPTURE(half, offset);
+			const auto floor = Box(Vector3{offset, -1.0f, 0.0f}, Vector3{half, 1.0f, half});
+			const auto body = Box(Vector3{offset, 3.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+			const auto translated = SweepConvex(body, Vector3{0.0f, -5.0f, 0.0f}, floor);
+			const auto moving = SweepConvexMotion(
+				body,
+				Vector3{0.0f, -300.0f, 0.0f},
+				Vector3::Zero,
+				floor,
+				Vector3::Zero,
+				Vector3::Zero,
+				1.0f / 60.0f
+			);
+			const auto relative = SweepConvexMotion(
+				body,
+				Vector3{0.0f, -290.0f, 0.0f},
+				Vector3::Zero,
+				floor,
+				Vector3{0.0f, 10.0f, 0.0f},
+				Vector3::Zero,
+				1.0f / 60.0f
+			);
+			for (const auto &hit : {translated, moving, relative}) {
+				REQUIRE(hit.Hit);
+				CHECK_FALSE(hit.ConservativeFallback);
+				CHECK(hit.Fraction == Approx((2.5f - engine::physics::SWEEP_SKIN) / 5.0f).margin(1e-6f));
+				CHECK(hit.Normal.Y == Approx(1.0f).margin(1e-6f));
+				CHECK(std::abs(hit.Position.X - offset) <= 0.51f);
+				CHECK(std::abs(hit.Position.Z) <= 0.51f);
+			}
+			CHECK(moving.ClosingSpeed == Approx(300.0f).margin(1e-4f));
+			CHECK(relative.ClosingSpeed == Approx(300.0f).margin(1e-4f));
+			CHECK(moving.Position.Y == Approx(0.0f).margin(1e-4f));
+			CHECK(relative.Position.Y == Approx(10.0f * 2.5f / 300.0f).margin(1e-4f));
+		}
+	}
+}
+
+TEST_CASE("translation sweep keeps fixed orientation and rejects a near edge miss", "[convexquery]") {
+	const auto turn = CFrame::Angles(0.0f, 0.0f, 0.4f);
+	const Vector3 normal = turn.VectorToWorldSpace(Vector3::YAxis);
+	const auto floor = Box(Vector3::Zero, Vector3{50.0f, 1.0f, 50.0f}, turn);
+	const auto body = Box(normal * 4.0f, Vector3{0.5f, 0.5f, 0.5f}, turn);
+	const auto hit = SweepConvexMotion(
+		body, normal * -300.0f, Vector3::Zero, floor, Vector3::Zero, Vector3::Zero, 1.0f / 60.0f
+	);
+	REQUIRE(hit.Hit);
+	CHECK(hit.Fraction == Approx((2.5f - engine::physics::SWEEP_SKIN) / 5.0f).margin(1e-5f));
+	CHECK(hit.Normal.Dot(normal) > 0.9999f);
+	CHECK(std::abs(hit.Position.Dot(normal) - 1.0f) < 1e-4f);
+
+	const auto flat = Box(Vector3{0.0f, -1.0f, 0.0f}, Vector3{10.0f, 1.0f, 10.0f});
+	const auto nearEdge = Box(Vector3{10.49f, 3.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+	const auto outside = Box(Vector3{10.501f, 3.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+	CHECK(SweepConvex(nearEdge, Vector3{0.0f, -5.0f, 0.0f}, flat).Hit);
+	CHECK_FALSE(SweepConvex(outside, Vector3{0.0f, -5.0f, 0.0f}, flat).Hit);
+}
+
+TEST_CASE("translation sweep distinguishes a corner graze from disjoint time intervals", "[convexquery]") {
+	const auto fixed = Box(Vector3::Zero, Vector3{1.0f, 1.0f, 1.0f});
+	const auto grazing = Box(Vector3{-3.0f, 0.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+	const auto missed = Box(Vector3{-3.002f, 0.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+	// The x overlap begins exactly when the y overlap ends. Moving the start
+	// two millimetres farther left makes those time intervals disjoint.
+	const auto hit = SweepConvex(grazing, Vector3{6.0f, 6.0f, 0.0f}, fixed);
+	REQUIRE(hit.Hit);
+	CHECK(hit.Fraction == Approx(0.25f).margin(1e-4f));
+	CHECK(hit.Position.X == Approx(-1.0f).margin(1e-4f));
+	CHECK(hit.Position.Y == Approx(1.0f).margin(1e-4f));
+	CHECK_FALSE(SweepConvex(missed, Vector3{6.0f, 6.0f, 0.0f}, fixed).Hit);
+}
+
+TEST_CASE("skin-only box edge witnesses stay near the mover on the fixed surface", "[convexquery]") {
+	const auto floor = Box(Vector3{0.0f, -1.0f, 0.0f}, Vector3{10.0f, 1.0f, 1'000'000.0f});
+	// Both orthogonal gaps are within the skin. The face polygons do not
+	// intersect, so the manifold's support fallback would choose a far z corner.
+	const auto beside = Box(Vector3{10.5001f, 0.5001f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+	const auto falling = Box(Vector3{10.5001f, 3.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+	const auto still = SweepConvex(beside, Vector3::Zero, floor);
+	const auto motion = SweepConvexMotion(
+		falling,
+		Vector3{0.0f, -300.0f, 0.0f},
+		Vector3::Zero,
+		floor,
+		Vector3::Zero,
+		Vector3::Zero,
+		1.0f / 60.0f
+	);
+	for (const auto &hit : {still, motion}) {
+		REQUIRE(hit.Hit);
+		CHECK(hit.Position.X == Approx(10.0f).margin(1e-5f));
+		CHECK(hit.Position.Y == Approx(0.0f).margin(1e-5f));
+		CHECK(std::abs(hit.Position.Z) <= 0.5f);
+	}
+	CHECK(still.Fraction == 0.0f);
+}
+
+TEST_CASE("translation placement permits supporting tangent and separating motion", "[convexquery]") {
+	const auto floor = Box(Vector3{0.0f, -1.0f, 0.0f}, Vector3{1'000'000.0f, 1.0f, 1'000'000.0f});
+	const auto body = Box(Vector3{0.0f, 0.5f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
+	const auto probe = [&](Vector3 velocity, bool permit) {
+		return SweepConvexMotion(
+			body, velocity, Vector3::Zero, floor, Vector3::Zero, Vector3::Zero, 1.0f / 60.0f, permit
+		);
+	};
+	CHECK_FALSE(probe(Vector3::XAxis, true).Hit);
+	CHECK_FALSE(probe(Vector3::YAxis, true).Hit);
+	CHECK(probe(-Vector3::YAxis, true).Hit);
+	CHECK(probe(Vector3::XAxis, false).Hit);
+	CHECK(probe(Vector3::YAxis, false).Hit);
+}
+
 TEST_CASE("a motion sweep finds two bodies crossing between poses", "[convexquery]") {
 	const ShapeInstance first = Box(Vector3{-3.0f, 0.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});
 	const ShapeInstance second = Box(Vector3{3.0f, 0.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f});

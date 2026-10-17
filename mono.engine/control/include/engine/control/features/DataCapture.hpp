@@ -1,12 +1,14 @@
 #pragma once
 
 // The bounded MCP adapter for a host-installed script capture bridge.
-// Capture bytes remain in the bridge until explicit release; this surface only
-// serializes a caller-selected range as base64.
+// Capture bytes remain in the bridge until explicit release; this surface
+// serializes a caller-selected range as base64, or writes a whole plane to an
+// engine-chosen file for a caller on the same machine.
 
 #include <engine/control/DataFactoryOperationLedger.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/DataScene.hpp>
+#include <engine/core/Clock.hpp>
 #include <engine/script/DataCaptureBridge.hpp>
 #include <engine/world/DataFactory.hpp>
 
@@ -16,12 +18,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <filesystem>
+#include <fstream>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -38,7 +44,9 @@ namespace engine::control {
 		// Maximum byte length for one requested render channel name.
 		inline constexpr size_t MAXIMUM_CHANNEL_NAME = 64;
 		// Largest channel set accepted for one capture ticket.
-		inline constexpr size_t MAXIMUM_CHANNELS = 13;
+		inline constexpr size_t MAXIMUM_CHANNELS = 15;
+		// Per-light contribution uses one graph response target per selected light.
+		inline constexpr size_t MAXIMUM_LOCAL_LIGHT_IDS = 4;
 		// ScriptDataCaptureBridge owns six retained ticket slots. The MCP bound must
 		// match that admission limit rather than the separate hook-batch limit.
 		inline constexpr size_t MAXIMUM_MULTICAMERA_VIEWS = 6;
@@ -111,7 +119,8 @@ namespace engine::control {
 					 "coordinate_space",
 					 "noise_mode",
 					 "noise_seed",
-					 "noise_sigma"},
+					 "noise_sigma",
+					 "local_light_ids"},
 					failure
 				))
 				return false;
@@ -188,7 +197,7 @@ namespace engine::control {
 			}
 			if (!Field(options, "channels", field, failure) || !field->is_array() || field->empty() ||
 				field->size() > MAXIMUM_CHANNELS) {
-				failure = Error("validation_failed", "options.channels must contain 1 to 13 names");
+				failure = Error("validation_failed", "options.channels must contain 1 to 15 names");
 				return false;
 			}
 			bool hasSecondSurfaceDepth = false;
@@ -210,6 +219,35 @@ namespace engine::control {
 				failure = Error(
 					"validation_failed",
 					"second_surface_depth and second_surface_validity must be requested together"
+				);
+				return false;
+			}
+			if (const auto localLights = options.find("local_light_ids"); localLights != options.end()) {
+				if (!localLights->is_array() || localLights->empty() ||
+					localLights->size() > MAXIMUM_LOCAL_LIGHT_IDS) {
+					failure = Error("validation_failed", "local_light_ids must contain 1 to 4 ids");
+					return false;
+				}
+				for (const json &light : *localLights) {
+					std::string id;
+					if (!OptionText(light, "local_light_ids", MAXIMUM_ID, id, failure)) return false;
+					if (std::find(request.LocalLightIds.begin(), request.LocalLightIds.end(), id) !=
+						request.LocalLightIds.end()) {
+						failure = Error("validation_failed", "local_light_ids must be unique");
+						return false;
+					}
+					request.LocalLightIds.push_back(std::move(id));
+				}
+			}
+			const bool localLightChannel =
+				std::find(request.Channels.begin(), request.Channels.end(), "local_light_contribution") !=
+					request.Channels.end() ||
+				std::find(
+					request.Channels.begin(), request.Channels.end(), "local_light_shadow_visibility"
+				) != request.Channels.end();
+			if (localLightChannel != !request.LocalLightIds.empty()) {
+				failure = Error(
+					"validation_failed", "local_light_ids must accompany a local-light capture channel"
 				);
 				return false;
 			}
@@ -244,7 +282,8 @@ namespace engine::control {
 					 "coordinate_space",
 					 "noise_mode",
 					 "noise_seed",
-					 "noise_sigma"},
+					 "noise_sigma",
+					 "local_light_ids"},
 					failure
 				))
 				return false;
@@ -361,6 +400,35 @@ namespace engine::control {
 			};
 		}
 
+		// Maps an identifier onto one path component. Anything but ASCII letters,
+		// digits, '-' and '_' becomes '_', so no identifier can name a parent or a
+		// separator.
+		inline std::string PathComponent(std::string_view text) {
+			std::string safe;
+			safe.reserve(text.size());
+			for (const char character : text) {
+				const bool plain =
+					(character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') ||
+					(character >= '0' && character <= '9') || character == '-' || character == '_';
+				safe.push_back(plain ? character : '_');
+			}
+			return safe;
+		}
+
+		// Where save_resource writes one ticket's planes. Every part comes from
+		// validated identifiers, so a client never chooses where the engine writes.
+		inline std::filesystem::path
+		TicketDirectory(const std::filesystem::path &root, std::string_view instance, uint64_t ticket) {
+			return root / PathComponent(instance) / std::to_string(ticket);
+		}
+
+		// One plane's file name. PathComponent can map two resource names onto one
+		// string, so the name's hash keeps them apart.
+		inline std::string ResourceFileName(std::string_view resource) {
+			return PathComponent(resource) + "-" + std::to_string(std::hash<std::string_view>{}(resource)) +
+				   ".bin";
+		}
+
 		// Encodes retained binary bytes for the JSON-only MCP transport.
 		inline std::string Base64(std::span<const std::byte> bytes) {
 			static constexpr std::array alphabet{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K',
@@ -395,6 +463,9 @@ namespace engine::control {
 			if (plane.Channel == "rgb_linear_hdr") {
 				shape.push_back(4);
 				dtype = "float16";
+			} else if (plane.Packed || plane.Channel == "packed_gpu") {
+				shape.push_back(4);
+				dtype = "float32";
 			} else if (plane.Channel == "shading_normal") {
 				dtype = "uint32";
 				packing = "UNorm10A2";
@@ -440,8 +511,20 @@ namespace engine::control {
 					 value->MaximumAbsoluteError ? json(*value->MaximumAbsoluteError) : json(nullptr)},
 				};
 			};
+			json packed = nullptr;
+			if (plane.Packed) {
+				packed = {
+					{"schema_version", "data-capture-packed-rgba32f/v1"}, {"components", json::array()}
+				};
+				for (const auto &component : plane.Packed->Components)
+					packed["components"].push_back(
+						{{"source_channel", component.SourceChannel},
+						 {"source_component", component.SourceComponent}}
+					);
+			}
 			return {
 				{"channel", plane.Channel},
+				{"light_id", plane.LightId.empty() ? json(nullptr) : json(plane.LightId)},
 				{"status", plane.Status},
 				{"snapshot_id", snapshot},
 				{"resource_id", plane.Resource},
@@ -470,6 +553,8 @@ namespace engine::control {
 				{"provenance", plane.Provenance.empty() ? json(nullptr) : json(plane.Provenance)},
 				{"ambient_occlusion", ambientOcclusion(plane.AmbientOcclusion)},
 				{"noise", noise(plane.Noise)},
+				{"packed", std::move(packed)},
+				{"resampling", plane.Resampling.empty() ? json(nullptr) : json(plane.Resampling)},
 				{"previous_camera_motion_frame",
 				 plane.PreviousCameraMotionFrame ? json(*plane.PreviousCameraMotionFrame) : json(nullptr)},
 				{"row_stride", plane.RowStride},
@@ -479,7 +564,8 @@ namespace engine::control {
 		}
 
 		// Serializes a ticket poll, including only scene sidecars that fit the response budget.
-		inline json PollReply(uint64_t ticket, const script::DataCaptureBridgePoll &reply) {
+		inline json
+		PollReply(uint64_t ticket, const script::DataCaptureBridgePoll &reply, std::string_view detail) {
 			json planes = json::array();
 			for (const auto &plane : reply.Planes)
 				planes.push_back(Plane(plane, reply.SnapshotId));
@@ -506,6 +592,7 @@ namespace engine::control {
 			return {
 				{"ticket", ticket},
 				{"status", reply.Status},
+				{"detail", detail},
 				{"snapshot_id", reply.SnapshotId},
 				{"capture_frame", reply.CaptureFrame},
 				{"storage_profile", reply.StorageProfile},
@@ -585,6 +672,25 @@ namespace engine::control {
 			};
 		}
 
+		// Describes one explicit four-lane RGBA32F capture output for tool discovery.
+		inline json PackedPlaneSchema() {
+			json component{{"type", "object"}, {"additionalProperties", false}};
+			component["required"] = {"source_channel", "source_component"};
+			component["properties"] = {
+				{"source_channel",
+				 {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_CHANNEL_NAME}}},
+				{"source_component", {{"type", "integer"}, {"minimum", 0}, {"maximum", 3}}},
+			};
+			json result{{"type", "object"}, {"additionalProperties", false}};
+			result["required"] = {"name", "components"};
+			result["properties"] = {
+				{"name", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_CHANNEL_NAME}}},
+				{"components",
+				 {{"type", "array"}, {"minItems", 4}, {"maxItems", 4}, {"items", std::move(component)}}},
+			};
+			return result;
+		}
+
 		// Wraps tool-specific fields in the closed JSON object schema used by this surface.
 		inline json Schema(json properties, json required) {
 			return {
@@ -610,6 +716,15 @@ namespace engine::control {
 			};
 		});
 		auto ledger = DataFactoryOperations();
+		// Named by the clock, as script_check's scratch file is, so two hosts on one
+		// machine never write into each other's directory. Empty when the system has
+		// no temporary directory, and save_resource then refuses.
+		std::error_code noTemporary;
+		const std::filesystem::path temporary = std::filesystem::temp_directory_path(noTemporary);
+		const auto captureFiles = std::make_shared<const std::filesystem::path>(
+			noTemporary ? std::filesystem::path{}
+						: temporary / ("atomic-data-capture-" + std::to_string(core::Clock::Nanoseconds()))
+		);
 
 		Add(Tool{
 			"capture",
@@ -628,6 +743,15 @@ namespace engine::control {
 					   {"minItems", 1},
 					   {"maxItems", MAXIMUM_CHANNELS},
 					   {"items", {{"type", "string"}}}}},
+					 {"local_light_ids",
+					  {{"type", "array"},
+					   {"minItems", 1},
+					   {"maxItems", MAXIMUM_LOCAL_LIGHT_IDS},
+					   {"items", {{"type", "string"}}}}},
+					 {"packed_planes",
+					  {{"type", "array"},
+					   {"maxItems", script::MAX_DATA_CAPTURE_PACKED_PLANES},
+					   {"items", PackedPlaneSchema()}}},
 					 {"temporal_history", {{"type", "string"}, {"enum", {"preserve"}}}},
 					 {"operation_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 					 {"expected_tick", {{"type", "integer"}, {"minimum", 0}}},
@@ -656,6 +780,8 @@ namespace engine::control {
 						 "camera_id",
 						 "view_slot",
 						 "channels",
+						 "local_light_ids",
+						 "packed_planes",
 						 "temporal_history",
 						 "operation_id",
 						 "expected_tick",
@@ -699,13 +825,91 @@ namespace engine::control {
 				}
 				if (!Field(values, "channels", field, failure) || !field->is_array() || field->empty() ||
 					field->size() > MAXIMUM_CHANNELS) {
-					failure = Error("validation_failed", "channels must contain 1 to 13 names");
+					failure = Error("validation_failed", "channels must contain 1 to 15 names");
 					return nullptr;
 				}
 				for (const json &channel : *field) {
 					std::string name;
 					if (!Text(channel, "channel", name, failure)) return nullptr;
 					request.Channels.push_back(std::move(name));
+				}
+				if (const auto localLights = values.find("local_light_ids"); localLights != values.end()) {
+					if (!localLights->is_array() || localLights->empty() ||
+						localLights->size() > MAXIMUM_LOCAL_LIGHT_IDS) {
+						failure = Error("validation_failed", "local_light_ids must contain 1 to 4 ids");
+						return nullptr;
+					}
+					for (const json &light : *localLights) {
+						std::string id;
+						if (!Text(light, "local_light_ids", id, failure)) return nullptr;
+						if (std::find(request.LocalLightIds.begin(), request.LocalLightIds.end(), id) !=
+							request.LocalLightIds.end()) {
+							failure = Error("validation_failed", "local_light_ids must be unique");
+							return nullptr;
+						}
+						request.LocalLightIds.push_back(std::move(id));
+					}
+				}
+				const bool localLightChannel =
+					std::find(request.Channels.begin(), request.Channels.end(), "local_light_contribution") !=
+						request.Channels.end() ||
+					std::find(
+						request.Channels.begin(), request.Channels.end(), "local_light_shadow_visibility"
+					) != request.Channels.end();
+				if (localLightChannel != !request.LocalLightIds.empty()) {
+					failure = Error(
+						"validation_failed", "local_light_ids must accompany a local-light capture channel"
+					);
+					return nullptr;
+				}
+				if (const auto packed = values.find("packed_planes"); packed != values.end()) {
+					if (!packed->is_array() || packed->size() > script::MAX_DATA_CAPTURE_PACKED_PLANES) {
+						failure =
+							Error("validation_failed", "packed_planes must contain at most three outputs");
+						return nullptr;
+					}
+					for (const json &entry : *packed) {
+						if (!entry.is_object() || !Only(entry, {"name", "components"}, failure))
+							return nullptr;
+						const json *name = nullptr;
+						const json *components = nullptr;
+						if (!Field(entry, "name", name, failure) ||
+							!Field(entry, "components", components, failure) || !components->is_array() ||
+							components->size() != 4) {
+							failure = Error("validation_failed", "packed plane requires four components");
+							return nullptr;
+						}
+						script::DataCaptureBridgePackedPlane definition;
+						if (!OptionText(
+								*name, "packed_planes.name", MAXIMUM_CHANNEL_NAME, definition.Name, failure
+							))
+							return nullptr;
+						for (size_t lane = 0; lane < definition.Components.size(); ++lane) {
+							const json &component = (*components)[lane];
+							const json *source = nullptr;
+							const json *sourceComponent = nullptr;
+							uint64_t index = 0;
+							if (!component.is_object() ||
+								!Only(component, {"source_channel", "source_component"}, failure) ||
+								!Field(component, "source_channel", source, failure) ||
+								!OptionText(
+									*source,
+									"packed_planes.source_channel",
+									MAXIMUM_CHANNEL_NAME,
+									definition.Components[lane].SourceChannel,
+									failure
+								) ||
+								!Field(component, "source_component", sourceComponent, failure) ||
+								!UInt(*sourceComponent, "packed_planes.source_component", index, failure) ||
+								index > 3) {
+								failure =
+									Error("validation_failed", "packed source component must be 0 through 3");
+								return nullptr;
+							}
+							definition.Components[lane].SourceComponent = static_cast<uint8_t>(index);
+						}
+						request.PackedPlanes.push_back(std::move(definition));
+					}
 				}
 				json normalized = values;
 				normalized["tool"] = "capture";
@@ -748,7 +952,7 @@ namespace engine::control {
 			"capture_bundle",
 			"Queues one data-scene-options/v1 bundle from a paused world's exact completed snapshot.",
 			[] {
-				const json optionProperties{
+				json optionProperties{
 					{"schema_version",
 					 {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_OPTION_TEXT}}},
 					{"channels",
@@ -757,6 +961,11 @@ namespace engine::control {
 					  {"maxItems", MAXIMUM_CHANNELS},
 					  {"items",
 					   {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_CHANNEL_NAME}}}}},
+					{"local_light_ids",
+					 {{"type", "array"},
+					  {"minItems", 1},
+					  {"maxItems", MAXIMUM_LOCAL_LIGHT_IDS},
+					  {"items", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}}}},
 					{"camera_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_OPTION_TEXT}}},
 					{"pipeline", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_OPTION_TEXT}}},
 					{"capture_node",
@@ -784,7 +993,7 @@ namespace engine::control {
 					 {"snapshot_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 					 {"options",
 					  {{"type", "object"},
-					   {"properties", optionProperties},
+					   {"properties", std::move(optionProperties)},
 					   {"required",
 						json::array(
 							{"schema_version",
@@ -885,7 +1094,7 @@ namespace engine::control {
 			"Queues 2 to 6 named camera captures in one renderer frame from one exact paused world "
 			"snapshot. The shared renderer frame does not make simulation stepping atomic.",
 			[] {
-				const json optionProperties{
+				json optionProperties{
 					{"schema_version", {{"type", "string"}}},
 					{"channels", {{"type", "array"}, {"minItems", 1}, {"maxItems", MAXIMUM_CHANNELS}}},
 					{"pipeline", {{"type", "string"}}},
@@ -910,7 +1119,7 @@ namespace engine::control {
 					   {"items", {{"type", "object"}}}}},
 					 {"options",
 					  {{"type", "object"},
-					   {"properties", optionProperties},
+					   {"properties", std::move(optionProperties)},
 					   {"additionalProperties", false}}},
 					 {"operation_id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
 					 {"expected_tick", {{"type", "integer"}, {"minimum", 0}}},
@@ -1066,7 +1275,7 @@ namespace engine::control {
 					failure = Error("capture_not_found", detail);
 					return nullptr;
 				}
-				return PollReply(ticket, reply);
+				return PollReply(ticket, reply, detail);
 			},
 		});
 
@@ -1317,7 +1526,77 @@ namespace engine::control {
 			},
 		});
 
-		auto action = [&session, bridge, ledger](const char *name, bool release) {
+		Add(Tool{
+			"save_resource",
+			"Writes one whole retained capture plane to a file on this machine and returns the file's path. "
+			"Takes the same id and options as get_resource, without offset or max_bytes. Use it instead "
+			"of repeated get_resource calls when the caller can read this machine's files: it skips "
+			"base64 and the one MiB range limit. The engine chooses the path, and release_capture "
+			"deletes the ticket's files.",
+			[] {
+				return Schema(
+					{{"id", {{"type", "string"}, {"minLength", 1}, {"maxLength", MAXIMUM_ID}}},
+					 {"options", {{"type", "object"}}}},
+					{"id", "options"}
+				);
+			},
+			[bridge, captureFiles](const json &values, std::string &failure) -> json {
+				if (!Only(values, {"id", "options"}, failure)) return nullptr;
+				const json *field = nullptr;
+				std::string resource;
+				if (!Field(values, "id", field, failure) || !Text(*field, "id", resource, failure) ||
+					!Field(values, "options", field, failure) || !field->is_object()) {
+					if (failure.empty()) failure = Error("validation_failed", "options must be an object");
+					return nullptr;
+				}
+				const json &options = *field;
+				if (!Only(options, {"instance_id", "ticket"}, failure)) return nullptr;
+				std::string instance;
+				uint64_t ticket = 0;
+				if (!Field(options, "instance_id", field, failure) ||
+					!Text(*field, "instance_id", instance, failure) ||
+					!Field(options, "ticket", field, failure) || !UInt(*field, "ticket", ticket, failure))
+					return nullptr;
+				if (ticket == 0) {
+					failure = Error("validation_failed", "ticket must be positive");
+					return nullptr;
+				}
+				if (captureFiles->empty()) {
+					failure = Error("resource_unavailable", "this system has no temporary directory");
+					return nullptr;
+				}
+				std::vector<std::byte> bytes;
+				std::string detail;
+				if (!bridge->ReadPlane(
+						instance, ticket, resource, 0, std::numeric_limits<size_t>::max(), bytes, detail
+					)) {
+					failure = Error("resource_unavailable", detail);
+					return nullptr;
+				}
+				const std::filesystem::path directory = TicketDirectory(*captureFiles, instance, ticket);
+				std::error_code created;
+				std::filesystem::create_directories(directory, created);
+				const std::filesystem::path file = directory / ResourceFileName(resource);
+				std::ofstream output(file, std::ios::binary | std::ios::trunc);
+				output.write(
+					reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size())
+				);
+				output.close();
+				if (created || !output) {
+					failure = Error("resource_unavailable", "could not write " + file.string());
+					return nullptr;
+				}
+				return {
+					{"id", resource},
+					{"ticket", ticket},
+					{"byte_size", bytes.size()},
+					{"encoding", "file"},
+					{"path", file.string()}
+				};
+			},
+		});
+
+		auto action = [bridge, ledger, captureFiles](const char *name, bool release) {
 			return Tool{
 				name,
 				release ? "Releases one terminal capture and its retained bytes."
@@ -1330,7 +1609,8 @@ namespace engine::control {
 						{"instance_id", "ticket", "operation_id"}
 					);
 				},
-				[&session, bridge, ledger, name, release](const json &values, std::string &failure) -> json {
+				[bridge, ledger, captureFiles, name, release](const json &values, std::string &failure)
+					-> json {
 					if (!Only(values, {"instance_id", "ticket", "operation_id"}, failure)) return nullptr;
 					const json *field = nullptr;
 					std::string instance, operation;
@@ -1355,9 +1635,21 @@ namespace engine::control {
 					if (prior == DataFactoryOperationReplay::Replay) return replay;
 					std::string detail;
 					bool ok = true;
-					if (release)
+					if (release) {
 						ok = bridge->Release(instance, ticket, detail);
-					else
+						// The retained bytes are gone, so any files save_resource wrote
+						// for this ticket go with them.
+						if (ok && !captureFiles->empty()) {
+							const std::filesystem::path directory =
+								TicketDirectory(*captureFiles, instance, ticket);
+							std::error_code ignored;
+							std::filesystem::remove_all(directory, ignored);
+							// remove() refuses a directory that still holds another
+							// ticket, so these only clear parents left empty.
+							std::filesystem::remove(directory.parent_path(), ignored);
+							std::filesystem::remove(*captureFiles, ignored);
+						}
+					} else
 						bridge->Cancel(instance, ticket);
 					json result{
 						{"status", ok ? (release ? "released" : "cancel_requested") : "refused"},
@@ -1372,15 +1664,5 @@ namespace engine::control {
 		};
 		Add(action("release_capture", true));
 		Add(action("cancel_capture", false));
-	}
-}
-
-namespace engine::control::features {
-	// Installs the ticketed capture tools backed by the supplied product-owned bridge.
-	inline Feature
-	DataCapture(world::DataFactorySession &session, std::shared_ptr<script::DataCaptureBridge> bridge) {
-		return Feature{"data_capture", [&session, bridge = std::move(bridge)](Surface &surface) {
-						   surface.AddDataCaptureTools(session, bridge);
-					   }};
 	}
 }

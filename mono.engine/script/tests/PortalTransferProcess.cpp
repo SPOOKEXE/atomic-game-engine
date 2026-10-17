@@ -19,9 +19,17 @@
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_range.hpp>
 
+#include <algorithm>
+#include <charconv>
 #include <chrono>
+#include <cstdlib>
+#include <iostream>
+#include <string_view>
 #include <thread>
+#include <unordered_set>
 
 TEST_SUITE_ID("engine.script.portaltransferprocess")
 TEST_DEPENDS("engine.script.portaltransfer")
@@ -140,6 +148,28 @@ TEST_CASE(
 	"actual portal rig and object commit through authenticated host traffic in a separate process",
 	"[script][portal-transfer][process]"
 ) {
+	const int rttMilliseconds = GENERATE(0, 50, 150, 300);
+	const int jitterMilliseconds = GENERATE(0, 30);
+	const int lossPercent = GENERATE(0, 1, 5);
+	const int profileRepeats = [] {
+		const char *value = std::getenv("PORTAL_PROFILE_REPEATS");
+		if (!value) return 1;
+		int parsed = 0;
+		const std::string_view text(value);
+		const auto result = std::from_chars(text.data(), text.data() + text.size(), parsed);
+		return result.ec == std::errc{} && result.ptr == text.data() + text.size() && parsed >= 1 &&
+					   parsed <= 100
+				   ? parsed
+				   : 1;
+	}();
+	const int sample = GENERATE_COPY(Catch::Generators::range(0, profileRepeats));
+	const bool profileBaseline = rttMilliseconds == 0 && jitterMilliseconds == 0 && lossPercent == 0;
+	const bool profileImpaired = rttMilliseconds == 150 && jitterMilliseconds == 30 && lossPercent == 5;
+	if (profileRepeats > 1 && !profileBaseline && !profileImpaired) return;
+	INFO(
+		"RTT=" << rttMilliseconds << " jitter=" << jitterMilliseconds << " loss=" << lossPercent
+			   << " sample=" << sample
+	);
 	scene::RegisterSceneClasses();
 	auto channels = parallel::MakeProcessChannel();
 	REQUIRE(channels.Valid());
@@ -202,26 +232,129 @@ TEST_CASE(
 		store.Set(object, scene::Motion{{3, 4, 5}, {1, 2, 3}});
 		store.Set(object, scene::Simulated{});
 	});
+	struct PendingDelivery {
+		uint64_t Due;
+		uint64_t Sequence;
+		world::HostDelivery Value;
+	};
+	struct PendingTraffic {
+		uint64_t Due;
+		uint64_t Sequence;
+		world::Envelope Value;
+	};
+	std::vector<PendingDelivery> outbound;
+	std::vector<PendingTraffic> inbound;
+	uint64_t outboundCount = 0;
+	uint64_t inboundCount = 0;
+	uint64_t dropped = 0;
+	uint64_t duplicated = 0;
+	uint64_t reordered = 0;
+	uint64_t highestOutbound = 0;
+	uint64_t highestInbound = 0;
+	std::unordered_set<uint64_t> deliveredOutbound;
+	std::unordered_set<uint64_t> deliveredInbound;
+	const auto delayTicks = [&](uint64_t sequence, bool outboundDirection) {
+		const int roundTripTicks = (rttMilliseconds * 60 + 999) / 1000;
+		const int oneWayTicks = (roundTripTicks + (outboundDirection ? 1 : 0)) / 2;
+		const int jitterTicks = (jitterMilliseconds * 60 + 999) / 1000;
+		return static_cast<uint64_t>(oneWayTicks + (((sequence + sample) & 1) != 0 ? jitterTicks : 0));
+	};
+	const auto lost = [&](uint64_t sequence) {
+		// This permutation puts the first packet in the loss window and spreads
+		// later losses without a random seed or wall-clock-dependent outcome.
+		return ((sequence + static_cast<uint64_t>(sample) * 17) * 37) % 100 <
+			   static_cast<uint64_t>(lossPercent);
+	};
 	const auto tick = [&](uint64_t serial) {
 		worlds.Tick(1.0f / 60);
+		const bool impairTransfer = serial >= 5;
 		std::vector<world::HostDelivery> deliveries;
-		for (const auto &delivery : worlds.TakeOutbound())
-			deliveries.push_back({delivery.World, delivery.Message});
+		std::vector<uint64_t> deliverySequences;
+		for (const auto &delivery : worlds.TakeOutbound()) {
+			if (!impairTransfer) {
+				deliveries.push_back({delivery.World, delivery.Message});
+				continue;
+			}
+			const uint64_t sequence = outboundCount++;
+			if (lost(sequence)) {
+				dropped++;
+				continue;
+			}
+			outbound.push_back(
+				{serial + delayTicks(sequence, true), sequence, {delivery.World, delivery.Message}}
+			);
+			if ((sequence + sample) % 7 == 0) {
+				outbound.push_back(outbound.back());
+				duplicated++;
+			}
+		}
+		for (auto it = outbound.begin(); it != outbound.end();) {
+			if (it->Due <= serial) {
+				deliveries.push_back(std::move(it->Value));
+				deliverySequences.push_back(it->Sequence);
+				it = outbound.erase(it);
+			} else {
+				++it;
+			}
+		}
+		if (impairTransfer && deliveries.size() > 1) {
+			std::reverse(deliveries.begin(), deliveries.end());
+			std::reverse(deliverySequences.begin(), deliverySequences.end());
+		}
+		for (const uint64_t sequence : deliverySequences) {
+			if (!deliveredOutbound.insert(sequence).second) continue;
+			reordered += sequence < highestOutbound;
+			highestOutbound = std::max(highestOutbound, sequence);
+		}
 		REQUIRE(link.SendDeliveries(deliveries));
 		REQUIRE(link.Heartbeat(serial));
 		bool answered = false;
+		std::vector<world::Envelope> traffic;
+		std::vector<uint64_t> trafficSequences;
 		while (!answered) {
 			std::vector<world::HostFrame> frames;
 			REQUIRE(Await(link, frames));
 			for (const auto &frame : frames) {
 				REQUIRE(frame.Signal == world::HostSignal::Traffic);
 				REQUIRE(frame.Tick == serial);
-				REQUIRE(
-					worlds.IngestTraffic(core::Name("portal-host"), frame.Traffic) == frame.Traffic.size()
-				);
+				for (const auto &message : frame.Traffic) {
+					if (!impairTransfer) {
+						traffic.push_back(message);
+						continue;
+					}
+					const uint64_t sequence = inboundCount++;
+					if (lost(sequence)) {
+						dropped++;
+						continue;
+					}
+					inbound.push_back({serial + delayTicks(sequence, false), sequence, message});
+					if ((sequence + sample) % 7 == 0) {
+						inbound.push_back(inbound.back());
+						duplicated++;
+					}
+				}
 				answered = true;
 			}
 		}
+		for (auto it = inbound.begin(); it != inbound.end();) {
+			if (it->Due <= serial) {
+				traffic.push_back(std::move(it->Value));
+				trafficSequences.push_back(it->Sequence);
+				it = inbound.erase(it);
+			} else {
+				++it;
+			}
+		}
+		if (impairTransfer && traffic.size() > 1) {
+			std::reverse(traffic.begin(), traffic.end());
+			std::reverse(trafficSequences.begin(), trafficSequences.end());
+		}
+		for (const uint64_t sequence : trafficSequences) {
+			if (!deliveredInbound.insert(sequence).second) continue;
+			reordered += sequence < highestInbound;
+			highestInbound = std::max(highestInbound, sequence);
+		}
+		REQUIRE(worlds.IngestTraffic(core::Name("portal-host"), traffic) == traffic.size());
 	};
 	for (uint64_t serial = 0; serial < 5; ++serial)
 		tick(serial);
@@ -241,14 +374,44 @@ TEST_CASE(
 		REQUIRE(id.Sequence == 2);
 		REQUIRE(script::ForwardPortalPlayerMove(store, player, {1, 0, 0}, false));
 	});
-	for (uint64_t serial = 5; serial < 18; ++serial)
+	bool forwarded = false;
+	uint64_t committedAt = 0;
+	for (uint64_t serial = 5; serial < 240; ++serial) {
 		tick(serial);
+		worlds.Enter(source, [&](ecs::Store &store) {
+			if (!forwarded && !store.Alive(player)) {
+				REQUIRE(script::ForwardPortalPlayerMove(store, player, {0, 0, 1}, true));
+				forwarded = true;
+			}
+			const auto playerReceipt = script::PortalTransferOfPlayer(store, player);
+			const auto objectReceipt = script::PortalTransferOfObject(store, object);
+			if (playerReceipt && objectReceipt &&
+				playerReceipt->Stage == script::PortalTransferStage::Committed &&
+				objectReceipt->Stage == script::PortalTransferStage::Committed && committedAt == 0)
+				committedAt = serial;
+		});
+		if (committedAt != 0 && serial >= committedAt + delayTicks(1, true) + delayTicks(1, false) + 12 &&
+			outbound.empty() && inbound.empty())
+			break;
+	}
+	std::string playerState, objectState;
 	worlds.Enter(source, [&](ecs::Store &store) {
-		REQUIRE_FALSE(store.Alive(player));
-		REQUIRE(script::ForwardPortalPlayerMove(store, player, {0, 0, 1}, true));
+		const auto playerReceipt = script::PortalTransferOfPlayer(store, player);
+		const auto objectReceipt = script::PortalTransferOfObject(store, object);
+		playerState = playerReceipt ? std::to_string(static_cast<int>(playerReceipt->Stage)) + ":" +
+										  playerReceipt->Diagnostic
+									: "missing";
+		objectState = objectReceipt ? std::to_string(static_cast<int>(objectReceipt->Stage)) + ":" +
+										  objectReceipt->Diagnostic
+									: "missing";
 	});
-	for (uint64_t serial = 18; serial < 26; ++serial)
-		tick(serial);
+	std::cout << "portal process impairment rtt_ms=" << rttMilliseconds << " jitter_ms=" << jitterMilliseconds
+			  << " loss_percent=" << lossPercent << " sample=" << sample
+			  << " committed_at_tick=" << committedAt << " dropped=" << dropped
+			  << " duplicated=" << duplicated << " reordered=" << reordered << " forwarded=" << forwarded
+			  << " player=" << playerState << " object=" << objectState << '\n';
+	REQUIRE(forwarded);
+	REQUIRE(committedAt != 0);
 	worlds.Enter(source, [&](ecs::Store &store) {
 		REQUIRE_FALSE(store.Alive(player));
 		REQUIRE(store.Alive(sharedClip));

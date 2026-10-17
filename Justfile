@@ -163,6 +163,26 @@ render-check filter="[render][gpu]" backend="vulkan": (build "test_render")
     export MONO_RENDER_REVISION="$(git describe --always --dirty)"
     ./{{build}}/tests/test_render "{{filter}}"
 
+# Loads the authored high-count point, spot, fog and environment course, then
+# proves its sixteen-volume GPU budget. The light collector's receiver-aware
+# sixteen-light cap is exercised by the world-view release test. Each measured
+# submission waits for the GPU; no benchmark artifact is written outside build.
+volume-light-stress frames="120":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset release-tests > /dev/null
+    cmake --build --preset release-tests --target test_examples test_scene test_render
+    ./.cache/build/release-tests/tests/test_examples "[examples][lighting-stress]"
+    ./.cache/build/release-tests/tests/test_scene "[scene][volume]"
+    ./.cache/build/release-tests/tests/test_render "[render][lighting-stress]"
+    MONO_LIGHT_SELECTION_STRESS_FRAMES={{frames}} ./.cache/build/release-tests/tests/test_render "[render][world-view]"
+    MONO_VOLUME_STRESS_FRAMES={{frames}} ./.cache/build/release-tests/tests/test_render "[render][gpu][volume-stress]"
+
+# Runs the authored 256-point, 256-spot and 256-volume course through the
+# release renderer. The end-of-run statistics print to the terminal.
+lighting-stress-scene frames="720": (build "client")
+    ./{{build}}/client/client --headless --script mono.engine/examples/assets/scripts/LightingStress.luau --frames {{frames}} --stats --graph --uncapped
+
 # Whole camera-batch signature costs, with unchanged rows and one-row edits.
 render-preparation-bench samples="5":
     cmake --preset bench > /dev/null
@@ -174,6 +194,40 @@ data-capture-hook-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target benchrunner bench_render
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.render.bench.data-capture-hooks --all --samples {{samples}}
+
+# Repeat a fixed headless Vulkan data-capture workload in the release-optimised preset.
+data-capture-gpu-profile captures="30":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    if ! MONO_DATA_CAPTURE_PROFILE=1 MONO_DATA_CAPTURE_PROFILE_CAPTURES={{captures}} timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_render --suite engine.render.bench.data-capture-gpu-profile --samples 1; then
+        echo "data-capture-gpu-profile failed or exceeded its 180s device deadline" >&2
+        exit 1
+    fi
+
+# Release-optimised MCP discovery, capture dispatch, and provider lifecycle cost.
+mcp-control-profile:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_control
+    if ! timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_control --suite engine.control.bench.mcp-control --samples 1; then
+        echo "mcp-control-profile failed or exceeded its 180s deadline" >&2
+        exit 1
+    fi
+
+# Repeatedly activate and remove the real capture tool provider around a
+# synthetic 64 KiB pending ticket, then report live-byte slope and ownership.
+mcp-capture-hook-soak cycles="128":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_control
+    if ! MONO_MCP_CAPTURE_SOAK=1 MONO_MCP_CAPTURE_SOAK_CYCLES={{cycles}} timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_control --suite engine.control.bench.mcp-control --samples 1; then
+        echo "mcp-capture-hook-soak failed or exceeded its 180s device deadline" >&2
+        exit 1
+    fi
 
 # The normal benchmark runner reports only wall time. This GPU suite also emits
 # CPU recording, Vulkan timestamp, residency, allocation, cache and transfer
@@ -188,6 +242,19 @@ gpu-texture-atlas-bench samples="1":
     # benchmark in Renderer shutdown while it releases in-flight resources.
     if ! MONO_GPU_ATLAS_REPORT=1 timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_render --suite engine.render.bench.gpu-texture-atlas --samples {{samples}}; then
         echo "gpu-texture-atlas-bench failed or exceeded its 180s device deadline" >&2
+        exit 1
+    fi
+
+# Release-optimised compute, draw, timestamp and logical-memory measurement
+# for every supported analytical storm field preset. Allocation refusal remains
+# a reported result so modest GPUs still document their supported ceiling.
+gpu-particle-field-bench samples="1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_render
+    if ! MONO_GPU_PARTICLE_FIELD_REPORT=1 timeout --foreground --kill-after=10s 900s ./.cache/build/bench/bench/bench_render --suite engine.render.bench.gpu-particle-field --samples {{samples}}; then
+        echo "gpu-particle-field-bench failed or exceeded its 900s device deadline" >&2
         exit 1
     fi
 
@@ -294,6 +361,23 @@ presentation-fuzz runs="10000" compiler="clang++-21":
     "$fuzz_build/fuzz/fuzz_presentation" --write-seeds "$fuzz_build/fuzz/presentation-corpus"
     "$fuzz_build/fuzz/fuzz_presentation" "$fuzz_build/fuzz/presentation-corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$fuzz_build/fuzz/presentation-artifacts/"
 
+# Coverage-guided hostile GUI parsing under AddressSanitizer and UBSan. The
+# targets generate deterministic canonical documents, markup, a font package,
+# binding paths, and a bounded SVG before their bounded smoke run.
+fuzz-ui runs="1000" compiler="clang++-21":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    fuzz_build=".cache/build/gui-fuzz"
+    cmake --preset server -B "$fuzz_build" -DCMAKE_CXX_COMPILER="{{compiler}}" -DCMAKE_C_COMPILER="${CC:-clang-21}" -DMONO_BUILD_TESTS=OFF -DMONO_TRACY=OFF -DMONO_HEAP_PROFILE=OFF -DMONO_FUZZ_GUI=ON -DMONO_FUZZ_BAKE=ON
+    cmake --build "$fuzz_build" --target fuzz_gui_document fuzz_gui_text fuzz_gui_binding fuzz_bake_svg -j 4
+    for target in fuzz_gui_document fuzz_gui_text fuzz_gui_binding fuzz_bake_svg; do
+        corpus="$fuzz_build/fuzz/$target-corpus"
+        artifacts="$fuzz_build/fuzz/$target-artifacts"
+        mkdir -p "$corpus" "$artifacts"
+        "$fuzz_build/fuzz/$target" --write-seeds "$corpus"
+        "$fuzz_build/fuzz/$target" "$corpus" -runs={{runs}} -max_len=65536 -timeout=10 -rss_limit_mb=1024 -artifact_prefix="$artifacts/"
+    done
+
 # Measure the benchmark suites a change could have affected.
 #
 # **The same selection as `just test`, over `bench/` instead of `tests/`.** A
@@ -317,6 +401,72 @@ bench *args:
 
 # Every benchmark, whatever changed.
 bench-all *args: (bench "--all" args)
+
+#   just engine-stress-bench            # 5 samples, CPU suites
+#   just engine-stress-bench 11 1       # 11 samples, GPU suites too
+#
+# One table: module, stress target, row, min, spread, and the 2026-09-22 audit
+# figure where one exists. Device suites run only with gpu=1.
+# Run every engine and CDN benchmark suite into docs/ENGINE_STRESS_TEST.md.
+engine-stress-bench samples="5" gpu="0":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench
+    python3 scripts/engine-stress-report.py --build .cache/build/bench --samples {{samples}} {{ if gpu == "1" { "--gpu" } else { "" } }}
+
+# Lookup across a large, text-sorted bake-pipeline set. Output stays on the
+# terminal so a busy machine cannot turn one measurement into a stored claim.
+bakegraph-pipeline-set-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_bakegraph
+    ./.cache/build/bench/bench/bench_bakegraph --suite engine.bakegraph.bench.pipeline-set --samples {{samples}}
+
+# Durable datastore cost for a complete snapshot, using a disposable SQLite file under the bench build.
+datastore-sqlite-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_datastore
+    ./.cache/build/bench/bench/bench_datastore --suite engine.datastore.bench.sqlite-snapshot --samples {{samples}}
+
+# Each scheduler fixture gets a fresh heap-profile tree. Keep raw timings on stdout.
+scheduler-timing-bench samples="5":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{samples}}" in [1-5]) ;; *) echo "samples must be 1 through 5" >&2; exit 2 ;; esac
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_ecs
+    for scheduler_case in $(seq 0 79); do
+        ATOMIC_SCHEDULER_TIMING_PROFILE=1 ATOMIC_SCHEDULER_TIMING_CASE="$scheduler_case" \
+            ./.cache/build/bench/bench/bench_ecs --suite engine.ecs.bench.scheduler --samples {{samples}}
+    done
+
+# Example orbit and spin systems over deterministic ECS fixtures.
+examples-motion-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_examples
+    ./.cache/build/bench/bench/bench_examples --suite engine.examples.bench.motion --samples {{samples}}
+
+# Runtime SPIR-V to MSL translation through the same fixture used by the unit suite.
+msl-translation-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_msl
+    ./.cache/build/bench/bench/bench_msl --suite engine.msl.bench.translate --samples {{samples}}
+
+# Steady-state script source mirroring for cached LocalScripts.
+script-source-mirror-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_script
+    ./.cache/build/bench/bench/bench_script --suite engine.script.bench.source-mirror --samples {{samples}}
+
+# QuickJS property reads and writes through the engine's ECS bindings.
+scriptjs-property-access-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_scriptjs
+    ./.cache/build/bench/bench/bench_scriptjs --suite engine.scriptjs.bench.property-access --samples {{samples}}
+
+# Headless ImGui layout and geometry hashing; this does not open a GPU device.
+ui-headless-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_ui
+    ./.cache/build/bench/bench/bench_ui --suite engine.ui.bench.headless-interface --samples {{samples}}
 
 # Portal reply encoding and decoding, per complete batch. No GPU or process transport.
 # Run the binary directly so measurements stay on the terminal.
@@ -345,6 +495,17 @@ portal-ambient-profile samples="5":
     cmake --build --preset bench --target bench_render
     MONO_PORTAL_CODEC_PROFILE=1 ./.cache/build/bench/bench/bench_render --suite engine.render.bench.portal-ambient --samples {{samples}}
 
+# Runs the portal product acceptance matrix and writes one reviewable report
+# under the release-tests build: product walks at every rate, the stall schedule,
+# the 24-cell impairment grid, matched seam captures and uncaptured timing. It
+# exits nonzero unless every row passed.
+portal-product-acceptance:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset release-tests > /dev/null
+    cmake --build --preset release-tests --target client server test_client test_script
+    python3 scripts/demos/portal-product-acceptance.py --build .cache/build/release-tests
+
 # The Luau boundary rows, including the complete async compute lifecycle. Keep
 # this explicit because a binding benchmark is useful while working on the VM
 # without running every benchmark in the repository.
@@ -352,6 +513,12 @@ script-binding-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target benchrunner bench_scriptluau
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scriptluau.bench.bindings --all --samples {{samples}}
+
+# Active input dispatch through both VMs, with unchanged and sparse key words.
+script-input-dispatch-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_scripthost
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scripthost.bench.input-dispatch --all --samples {{samples}}
 
 # Repeated public ParticleEmitter:Emit calls plus one enabled-emitter tick. This
 # is the Luau boundary row for the ECS burst queue, measured in the bench preset.
@@ -396,6 +563,12 @@ persistent-manifold-bench samples="5":
     cmake --preset bench > /dev/null
     cmake --build --preset bench --target benchrunner bench_physics
     ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.physics.bench.narrowphase --all --samples {{samples}}
+
+# Compare candidate counts and stage costs for the deterministic 4,000-body pile.
+physics-pile-cell-bench samples="1":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_physics
+    ./.cache/build/bench/bench/bench_physics --suite engine.physics.bench.pile-cells --samples {{samples}}
 
 # Separated closing pairs through speculative generation, with and without the
 # broad-phase sync and query. Output remains on the terminal.
@@ -482,6 +655,46 @@ simulation-publish-sweep samples="3":
             --all \
             --samples "{{samples}}"
     done
+
+# The scored and refined multi-row publish path. The priority hook locates one
+# Bearing slot per entity and refinement must reuse it across component rows.
+priority-refinement-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_replication
+    ./.cache/build/bench/bench/bench_replication --suite engine.replication.bench.priority-refinement --samples {{samples}}
+
+# Compare grid cells on the dense pile and stacked/scattered controls. Exact
+# contacts and body-state parity is required before the profiled benchmark runs.
+physics-cell-size-sweep samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset release-tests > /dev/null
+    cmake --build --preset release-tests --target test_physics
+    ./.cache/build/release-tests/tests/test_physics '[physics][cell-sizes]'
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_physics
+    ./.cache/build/bench/bench/bench_physics --suite engine.physics.bench.cell-sizes --samples {{samples}}
+
+# Repeat pile, stack, scattered and mixed-scale cell orders in fresh processes.
+# Owner frames exclude occupancy diagnostics and exact comparisons in each BENCH call.
+physics-cell-size-counterbalance samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset release-tests > /dev/null
+    cmake --build --preset release-tests --target test_physics test_spatial
+    ./.cache/build/release-tests/tests/test_spatial '[hashgrid]'
+    ./.cache/build/release-tests/tests/test_physics '[physics][cell-sizes]'
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_physics
+    sha256sum ./.cache/build/bench/bench/bench_physics
+    printf '# cell-run repeat=1 preset=bench compute=serial background=unattributed\n'
+    ./.cache/build/bench/bench/bench_physics --suite engine.physics.bench.cell-size-counterbalance --samples {{samples}}
+    printf '# cell-run repeat=2 preset=bench compute=serial background=unattributed\n'
+    ./.cache/build/bench/bench/bench_physics --suite engine.physics.bench.cell-size-counterbalance --samples {{samples}}
+
+# Recovery-row re-offer work with acknowledgements withheld after the initial join.
+recovery-rows-bench samples="5":
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_replication
+    ./.cache/build/bench/bench/bench_replication --suite engine.replication.bench.recovery-rows --samples {{samples}}
 
 # How much of the repository is code, comment and blank, as markdown.
 #
@@ -835,18 +1048,17 @@ bindings: (build "bindings")
 bindings-check: (build "bindings")
     ./{{build}}/tools/bindings --check
 
-# Every authored script against the declarations, in both languages.
+# Luau examples and Studio's TypeScript panels against the engine declarations.
 #
 # **The other half of `bindings-check`.** That one asks whether the declarations
-# still match the class table; this asks whether the scripts still match the
-# declarations. A property removed from the class table regenerates cleanly and
-# leaves every script that named it broken, with nothing reporting it until the
-# scene fails to build.
+# still match the class table; this checks the Luau examples and Studio panels
+# against those declarations. A property removed from the class table regenerates
+# cleanly and leaves a caller broken, with nothing reporting it until runtime.
 #
-# The Luau half is `mono.tools/scriptcheck`, which exists because upstream's
-# `luau-analyze` has no way to load a definition file - see MonoVendor.cmake.
-# The TypeScript half is `tsc` against the checked-in `tsconfig.json`, which
-# already lists the generated `.d.ts` as its type root.
+# Luau examples go through `mono.tools/scriptcheck`, which exists because
+# upstream's `luau-analyze` has no way to load a definition file - see
+# MonoVendor.cmake. Studio panels go through `tsc` and the checked-in
+# `tsconfig.json`, which lists the generated `.d.ts` as its type root.
 #
 # **The compiler is the pinned one, not whatever `bunx tsc` resolves to.**
 # `package.json` names an exact version and this runs `node_modules/.bin/tsc`,
@@ -855,8 +1067,8 @@ bindings-check: (build "bindings")
 #
 # **`tsc` is skipped rather than fatal when no runner is installed.** It is the
 # one check here that needs something outside the C++ toolchain, and a
-# prerequisite list that grows a Node runtime for two example files is a worse
-# trade than a check that says out loud when it did not run.
+# prerequisite list that grows a Node runtime is a worse trade than a check that
+# says out loud when it did not run.
 typecheck: (build "scriptcheck")
     #!/usr/bin/env bash
     set -euo pipefail
@@ -872,7 +1084,7 @@ typecheck: (build "scriptcheck")
     fi
 
     ./node_modules/.bin/tsc --noEmit
-    echo "typecheck ok - luau and typescript $(./node_modules/.bin/tsc --version | cut -d' ' -f2)"
+    echo "typecheck ok - luau and studio typescript $(./node_modules/.bin/tsc --version | cut -d' ' -f2)"
 
 # The same scripts again, through the language server an editor actually runs.
 #
@@ -1140,10 +1352,31 @@ client-smoke: (build "client")
         || { echo "FAIL: the button was pressed and its Activated never reached the script"; tail -20 "$log"; exit 1; }
     echo "client ok - pressed a button with no display and the script heard it"
 
+# Runs the packaged TornadoSim world without publishing or serving content. The
+# check proves its sound rows resolve from the files staged beside the client.
+packaged-tornado-audio: (build "client")
+    PRESET={{preset}} ./scripts/packaged-tornado-audio-test.sh "./{{build}}/client/client"
+
 # Capture the shipped GUI compositor at two sizes and compare click-driven
 # status changes. The report keeps the BMPs beside the build for human review.
 ui-check: (build "client")
     PRESET={{preset}} ./scripts/demos/ui-visual-check.sh
+
+# Open the UI lab in the client. Extra arguments are passed to the client.
+ui-lab *args: (build "client")
+    ./{{build}}/client/client --script '{{build}}/assets/examples/scripts/UiLab.luau' {{args}}
+
+# Rerun the UI lab contract suite, including after script-only edits.
+ui-test: (build "test_examples")
+    ./{{build}}/tests/test_examples '[ui-lab]'
+
+# Capture every shipped Luau demo and authored world through the headless client.
+demo-check frames="120": client
+    python3 scripts/demos/check-demos.py --build {{build}} --frames {{frames}}
+
+# Exercise the UI lab through the native desktop input path.
+ui-live-check *args: (build "client")
+    python3 scripts/demos/ui-live-check.py --preset '{{preset}}' {{args}}
 
 # Run the client to a frame budget and check the process actually ends.
 #
@@ -1275,6 +1508,14 @@ studio-resize: (build "studio")
 # It is not part of `just check`: it requires X11, a Vulkan device and xdotool.
 studio-viewport-isolation: (build "studio")
     ./scripts/studio-viewport-isolation-test.sh ./{{build}}/studio/studio
+
+# Captures the View-menu virtual-camera position lock, a translation-only free
+# inspection view, a recapture and an unlock. The script retains scene BMPs,
+# menu XWDs and read-only renderer diagnostics for each phase.
+#
+# It is not part of `just check`: it requires X11, a Vulkan device and xdotool.
+studio-virtual-camera-capture: (build "studio")
+    ./scripts/studio-virtual-camera-capture-test.sh ./{{build}}/studio/studio
 
 # Run the headless server. `just host --ticks 100` passes flags through.
 host *args: (build "server")
@@ -1445,6 +1686,17 @@ stress label="baseline" clients="200" seconds="45" port="45100": (build "server"
 stress-motion label="motion-baseline" clients="1" seconds="20" port="45200" window="30": (build "server") (build "loadtest")
     ./scripts/stress-test.sh {{build}} {{label}} {{clients}} {{seconds}} {{port}} ReplicationStress.luau {{window}}
 
+# Two hundred moving clients with a fixed seed, ready to compare across server
+# changes. The script records both random-heading arguments beside the capture.
+stress-random-motion label="random-motion" clients="200" seconds="45" port="45300" window="30" seed="1" every="30": (build "server") (build "loadtest")
+    ./scripts/stress-test.sh {{build}} {{label}} {{clients}} {{seconds}} {{port}} Stress.luau {{window}} {{seed}} {{every}}
+
+# One driver, eight hosted remote worlds, 200 moving clients and a signed CDN
+# fetch cohort. Run with `just preset=release integrated-stress`; output stays
+# under the selected build directory's integrated-stress/ folder.
+integrated-stress seconds="45" port="45100": (build "server") (build "cdn") (build "loadtest")
+    ./scripts/integrated-stress-test.sh ./{{build}} {{seconds}} {{port}}
+
 # Configure and build with no client at all, which is how the tier split is
 # proved rather than asserted: the staged server/ gets no shaders/ directory.
 check-server-is-headless:
@@ -1483,19 +1735,15 @@ check-cdn-is-bare:
 # wrong, in the half nobody tests: the cycle guard, or the hash.
 #
 # A third would arrive as a file rather than as a decision. The render pipeline
-# editor and `Engine::bakegraph`'s pipeline documents are both still to be
-# written, and either could start its own registry and its own canvas without
-# anybody noticing until the first divergence - which is exactly what AGENTS.md
-# rule 6 says to make the build check rather than leave in somebody's memory.
+# editor uses this library; future graph editors must do the
+# same so their cycle guards and canvases do not diverge. AGENTS.md rule 6 says
+# to make that a build check rather than leave it in somebody's memory.
 #
 # Extend the library where it lives. `mono.studio/nodegraph` is ours: it was a
 # vendored submodule against a separate repository until v0.18.0, an engine
 # module until v0.19, and a library of the editor's since - so extending it is
 # an edit here rather than a pull request against somewhere else.
 #
-# The studio's Demo Nodes set is not a second implementation. It registers types
-# through that module's public `NodeTypes::Register` and implements none of the
-# model, which is the seam this rule is protecting rather than one it forbids.
 check-one-node-graph:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1764,6 +2012,40 @@ em-dash-check:
     fi
     echo "em-dash-check ok - no U+2014 in ${#files[@]} first-party file(s)"
 
+# Shows which complete preset trees can be reclaimed without touching sources,
+# downloads, the test signature cache or the shared compiler cache. `yes` is
+# required to delete. dev and release are kept for the normal edit/ship loop;
+# ci and the other checks can be rebuilt from their presets when needed.
+build-prune apply="no":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{apply}}" in
+        no|yes) ;;
+        *) echo "Use 'just build-prune' to preview or 'just build-prune yes' to delete." >&2; exit 2 ;;
+    esac
+    root=$PWD
+    total=0
+    for dir in .cache/build/*/; do
+        [ -d "$dir" ] && [ ! -L "$dir" ] || continue
+        name=${dir%/}
+        name=${name##*/}
+        case "$name" in dev|release) continue ;; esac
+        cache="$dir/CMakeCache.txt"
+        [ -f "$cache" ] || continue
+        # A build directory copied from another checkout does not belong to us.
+        if ! grep -qxF "CMAKE_HOME_DIRECTORY:INTERNAL=$root" "$cache"; then
+            echo "skipping $dir: CMake source is not this checkout"
+            continue
+        fi
+        bytes=$(du -sx --block-size=1 "$dir" | cut -f1)
+        total=$((total + bytes))
+        printf '%-28s %8d MiB\n' "$dir" "$((bytes / 1048576))"
+        if [ "{{apply}}" = yes ]; then
+            rm -rf -- "$dir"
+        fi
+    done
+    printf '%s: %d MiB %s\n' build-prune "$((total / 1048576))" "$(if [ "{{apply}}" = yes ]; then echo reclaimed; else echo reclaimable; fi)"
+
 clean:
     rm -rf .cache/build
 
@@ -1774,3 +2056,36 @@ clean-all:
 bench-mesh-lod samples="5":
     cmake --build --preset bench --target bench_assets
     ./.cache/build/bench/bench/bench_assets --suite engine.assets.bench.mesh-decimate --samples {{samples}}
+
+# Headless whole-rig pose resolution. Profile/canonical diagnostics remain stdout.
+scene-skinning-bench samples="5":
+    @test {{samples}} -ge 1 && test {{samples}} -le 5 || { echo "samples must be 1..5" >&2; exit 2; }
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_scene
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.scene.bench.skinning --all --samples {{samples}}
+
+# Direct headless convex-hull build phases and returned payload residency.
+convex-hull-bench samples="5":
+    @test {{samples}} -ge 1 && test {{samples}} -le 5 || { echo "samples must be 1..5" >&2; exit 2; }
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target benchrunner bench_collision
+    ./.cache/build/bench/tools/benchrunner --build .cache/build/bench --filter engine.collision.bench.convexhull --all --samples {{samples}}
+
+# Actual Audio Window observer/cache paths. Optional in-memory stdout capture by root driver.
+audio-window-panel-bench samples="5":
+    test "{{samples}}" -ge 1 -a "{{samples}}" -le 5
+    cmake --preset release-tests > /dev/null
+    cmake --build --preset release-tests --target test_studio
+    ./.cache/build/release-tests/tests/test_studio '[studio][audio_window_presentation]'
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_studio
+    ./.cache/build/bench/bench/bench_studio --suite studio.bench.audio-window --samples {{samples}}
+
+# Tagged Metrics lookup diagnostic. Numeric capture uses the isolated driver; stdout stays in RAM.
+metrics-lookup-bench:
+    # Eight warm and exactly five measured phases are required by the diagnostic gate.
+    cmake --preset bench > /dev/null
+    cmake --build --preset bench --target bench_core
+    ATOMIC_METRICS_LOOKUP_PROFILE=1 timeout --foreground --kill-after=10s 180s ./.cache/build/bench/bench/bench_core --suite engine.core.bench.instrumentation --samples 5
+
+import 'scripts/demos/version-impact.just'

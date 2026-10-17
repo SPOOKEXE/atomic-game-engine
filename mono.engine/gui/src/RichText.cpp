@@ -3,6 +3,7 @@
 #include <engine/core/Chars.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/gui/RichText.hpp>
+#include <engine/gui/ShapedText.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -182,7 +183,9 @@ namespace engine::gui {
 				return 0;
 			}
 
-			const size_t close = source.find(';');
+			// Decimal Unicode needs at most seven digits. A bounded lookahead
+			// keeps a run of bare ampersands linear in the source length.
+			const size_t close = source.substr(0, 10).find(';');
 			if (close == std::string_view::npos || close <= 2) {
 				return 0;
 			}
@@ -190,7 +193,9 @@ namespace engine::gui {
 			const std::string_view digits = source.substr(2, close - 2);
 			unsigned codepoint = 0;
 			const auto *end = digits.data() + digits.size();
-			if (std::from_chars(digits.data(), end, codepoint).ptr != end) {
+			const auto parsed = std::from_chars(digits.data(), end, codepoint);
+			if (parsed.ec != std::errc{} || parsed.ptr != end ||
+				(codepoint >= 0xD800 && codepoint <= 0xDFFF)) {
 				return 0;
 			}
 
@@ -224,6 +229,8 @@ namespace engine::gui {
 	) {
 		plain.clear();
 		spans.clear();
+		// Refuse before copying or scanning an input the shaper cannot consume.
+		if (source.size() > MAXIMUM_SHAPED_TEXT_BYTES) return false;
 
 		Style root;
 		root.Tint = base.Color;
@@ -237,6 +244,7 @@ namespace engine::gui {
 		const auto flush = [&] {
 			const Style &style = stack.back();
 			if (plain.size() > spanStart && Styled(style, base)) {
+				if (spans.size() == 64) return false;
 				DrawSpan span;
 				span.Begin = static_cast<uint32_t>(spanStart);
 				span.End = static_cast<uint32_t>(plain.size());
@@ -249,6 +257,7 @@ namespace engine::gui {
 				spans.push_back(span);
 			}
 			spanStart = plain.size();
+			return true;
 		};
 
 		// **Every failure below restores the input**, because half a parse is
@@ -320,7 +329,7 @@ namespace engine::gui {
 			std::string_view attributes = tag.substr(nameEnd);
 
 			if (name == "br") {
-				flush();
+				if (!flush()) return refuse();
 				plain.push_back('\n');
 				spanStart = plain.size();
 				continue;
@@ -330,12 +339,12 @@ namespace engine::gui {
 				if (stack.size() <= 1) {
 					return refuse();
 				}
-				flush();
+				if (!flush()) return refuse();
 				stack.pop_back();
 				continue;
 			}
 
-			flush();
+			if (!flush()) return refuse();
 			Style style = stack.back();
 
 			if (name == "b") {
@@ -398,6 +407,7 @@ namespace engine::gui {
 				continue;
 			}
 
+			if (stack.size() == 64) return refuse();
 			stack.push_back(style);
 		}
 
@@ -405,7 +415,7 @@ namespace engine::gui {
 			return refuse();
 		}
 
-		flush();
+		if (!flush()) return refuse();
 		return true;
 	}
 

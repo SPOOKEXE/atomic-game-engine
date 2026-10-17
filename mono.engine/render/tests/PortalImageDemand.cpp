@@ -1,3 +1,5 @@
+#include "PortalImageBudget.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/render/PortalImageDemand.hpp>
@@ -12,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <glm/ext/matrix_clip_space.hpp>
 
+#include <array>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -19,6 +22,25 @@
 TEST_SUITE_ID("engine.render.portalimagedemand")
 TEST_DEPENDS("engine.scene.surfacecameras")
 TEST_DEPENDS("engine.render.portalexchange")
+
+TEST_CASE("nested portal budgets keep visible children ahead of seam radiance", "[render][portal-demand]") {
+	using namespace engine::render;
+	std::array children{
+		PortalChildBudget{.Pixels = 32 * 32}, PortalChildBudget{.Pixels = 128 * 128, .Optional = true}
+	};
+	uint32_t childBudget = 0;
+	uint64_t localPixels = 0;
+	REQUIRE(PlanPortalChildBudgets(children, 32 * 32, false, childBudget, localPixels));
+	CHECK(children[0].Accepted);
+	CHECK_FALSE(children[1].Accepted);
+	CHECK(childBudget == 32 * 32);
+	CHECK(localPixels == 0);
+
+	REQUIRE(PlanPortalChildBudgets(children, 2 * 128 * 128, false, childBudget, localPixels));
+	CHECK(children[0].Accepted);
+	CHECK(children[1].Accepted);
+	CHECK(childBudget == 128 * 128);
+}
 
 TEST_CASE(
 	"source-world eyes export their retained body with account identity",
@@ -176,6 +198,38 @@ TEST_CASE("whole-eye requests preserve off-axis cameras and bound pixels", "[ren
 }
 
 TEST_CASE(
+	"whole-eye capture follows the behavior frame while the visible camera moves",
+	"[render][portal-eye-demand][camera-lock]"
+) {
+	auto eye = Viewer();
+	const core::CFrame behaviour = eye.CameraFrame;
+	eye.VisibilityFrame = behaviour;
+	PortalImageDemand original;
+	REQUIRE(
+		BuildPortalEyeDemand(core::Name("player-eye"), eye, SETTINGS, original) == PortalDemandStatus::Ready
+	);
+
+	eye.CameraFrame = core::CFrame(core::Vector3{90, -12, 45}) * core::CFrame::Angles(.2f, .7f, -.1f);
+	PortalImageDemand inspected;
+	REQUIRE(
+		BuildPortalEyeDemand(core::Name("player-eye"), eye, SETTINGS, inspected) == PortalDemandStatus::Ready
+	);
+	CHECK(inspected.Request.Position == original.Request.Position);
+	CHECK(inspected.Request.Orientation == original.Request.Orientation);
+	CHECK(inspected.Request.Key.CameraRevision == original.Request.Key.CameraRevision);
+	CHECK(inspected.Binding.Sampling == original.Binding.Sampling);
+
+	eye.VisibilityFrame = core::CFrame(core::Vector3{2, 3, 8}) * core::CFrame::Angles(.2f, .7f, -.1f);
+	PortalImageDemand moved;
+	REQUIRE(
+		BuildPortalEyeDemand(core::Name("player-eye"), eye, SETTINGS, moved) == PortalDemandStatus::Ready
+	);
+	CHECK(moved.Request.Key.CameraRevision != inspected.Request.Key.CameraRevision);
+	CHECK(moved.Request.Position[0] == Catch::Approx(2.0f));
+	CHECK(moved.Request.Position[1] == Catch::Approx(3.0f));
+}
+
+TEST_CASE(
 	"portal image demand preserves both-face rays through rolled scaled seams", "[render][portal-demand]"
 ) {
 	const auto seam = Seam();
@@ -306,6 +360,44 @@ TEST_CASE(
 	);
 	CHECK(request.Frustum[4] == Catch::Approx(near));
 	CHECK(request.Frustum[5] == Catch::Approx(viewer.Camera.FarPlane));
+}
+
+TEST_CASE(
+	"portal capture pose and sampling follow the behavior frame", "[render][portal-demand][camera-lock]"
+) {
+	const auto seam = Seam();
+	const auto through = scene::SeamMapping(seam);
+	auto viewer = Viewer();
+	viewer.VisibilityFrame = viewer.CameraFrame;
+	PortalImageDemand original;
+	REQUIRE(
+		BuildPortalImageDemand(seam, core::Name("Door.Locked"), viewer, 5, SETTINGS, original) ==
+		PortalDemandStatus::Ready
+	);
+
+	viewer.CameraFrame = core::CFrame::LookAt({90, 4, 12}, {90, 4, 0});
+	PortalImageDemand inspected;
+	REQUIRE(
+		BuildPortalImageDemand(seam, core::Name("Door.Locked"), viewer, 5, SETTINGS, inspected) ==
+		PortalDemandStatus::Ready
+	);
+	CHECK(inspected.Request.Position == original.Request.Position);
+	CHECK(inspected.Request.Orientation == original.Request.Orientation);
+	CHECK(inspected.Request.Key.CameraRevision == original.Request.Key.CameraRevision);
+	CHECK(inspected.Binding.Sampling == original.Binding.Sampling);
+	const auto mapped = through.Point(viewer.VisibilityFrame->Position);
+	for (size_t axis = 0; axis < 3; ++axis) {
+		const std::array<float, 3> expected{mapped.X, mapped.Y, mapped.Z};
+		CHECK(inspected.Request.Position[axis] == Catch::Approx(expected[axis]).margin(1e-5f));
+	}
+
+	viewer.VisibilityFrame = core::CFrame::LookAt({2, 3, 8}, {2, 3, 0});
+	PortalImageDemand moved;
+	REQUIRE(
+		BuildPortalImageDemand(seam, core::Name("Door.Locked"), viewer, 5, SETTINGS, moved) ==
+		PortalDemandStatus::Ready
+	);
+	CHECK(moved.Request.Key.CameraRevision != inspected.Request.Key.CameraRevision);
 }
 
 TEST_CASE(
@@ -504,10 +596,21 @@ TEST_CASE("authored portal demand claims mouths without mutating world cameras",
 	std::vector<PortalView> portals;
 	const auto gathered = CollectPortalImageDemands(store, viewer, SETTINGS, demands, portals, slots);
 	REQUIRE(gathered.Ready == 1);
-	REQUIRE(demands.size() == 1);
+	REQUIRE(demands.size() == 2);
 	REQUIRE(portals.size() == 1);
 	CHECK(demands[0].Binding.ViewSlot == 2);
 	CHECK(demands[0].Request.Key.PortalKey == store.GetFullName(camera));
+	CHECK_FALSE(demands[0].SeamRadiance);
+	CHECK(demands[1].SeamRadiance);
+	CHECK(demands[1].Request.Scope == PortalImageScope::SeamRadiance);
+	CHECK(demands[1].Request.Projection == PortalImageProjection::Seam);
+	CHECK(demands[1].Request.Width == 128);
+	CHECK(demands[1].Request.Height == 128);
+	CHECK(demands[1].Request.PixelBudget == 128 * 128);
+	CHECK(demands[1].Request.RecursionDepth == 0);
+	CHECK(demands[1].Request.Geometry.empty());
+	CHECK(demands[1].Binding.ExpectedScope == PortalImageScope::SeamRadiance);
+	CHECK(portals[0].LightImagePortal == demands[1].Binding.Portal);
 	CHECK(portals[0].Index == slots[0].Index);
 	CHECK(portals[0].ExternalImage);
 	CHECK(store.Get<scene::SurfaceCamera>(camera)->Surface == before.Surface);
@@ -534,7 +637,7 @@ TEST_CASE("authored portal demand claims mouths without mutating world cameras",
 	viewer.JointFrames = joints;
 	portals.clear();
 	REQUIRE(CollectPortalImageDemands(store, viewer, SETTINGS, demands, portals, slots).Ready == 1);
-	REQUIRE(demands.size() == 1);
+	REQUIRE(demands.size() == 2);
 	std::vector<scene::DrawInstance> received;
 	std::vector<core::CFrame> receivedJoints;
 	std::string error;
@@ -558,6 +661,36 @@ TEST_CASE("authored portal demand claims mouths without mutating world cameras",
 	REQUIRE(CollectPortalEyeGeometry(store, core::Name("other-room"), rows, joints, eyeGeometry, error));
 	CHECK(eyeGeometry == demands[0].Request.Geometry);
 	const auto baselineGeometry = eyeGeometry;
+	std::vector<scene::DrawInstance> rigRows{bodyRow};
+	rigRows.front().Rig = body.Id;
+	REQUIRE(CollectPortalEyeGeometry(store, core::Name("other-room"), rigRows, joints, eyeGeometry, error));
+	const auto rigGeometry = eyeGeometry;
+	REQUIRE_FALSE(rigGeometry.empty());
+	std::vector<scene::DrawInstance> cutRigRows = rigRows;
+	REQUIRE(scene::CutAndCloneSeams(store, cutRigRows) == 0);
+	REQUIRE(cutRigRows.front().Variant == 0);
+	REQUIRE(cutRigRows.front().SeamMask == 1);
+	REQUIRE(
+		CollectPortalEyeGeometry(store, core::Name("other-room"), cutRigRows, joints, eyeGeometry, error)
+	);
+	CHECK(eyeGeometry == rigGeometry);
+	cutRigRows.front().Rig = 0;
+	REQUIRE(
+		CollectPortalEyeGeometry(store, core::Name("other-room"), cutRigRows, joints, eyeGeometry, error)
+	);
+	CHECK(eyeGeometry.empty());
+	cutRigRows.front().Rig = body.Id;
+	cutRigRows.front().SeamMask = 2;
+	REQUIRE(
+		CollectPortalEyeGeometry(store, core::Name("other-room"), cutRigRows, joints, eyeGeometry, error)
+	);
+	CHECK(eyeGeometry.empty());
+	cutRigRows.front().SeamMask = 1;
+	cutRigRows.front().SourceWorld = core::Name("unrelated-world");
+	REQUIRE(
+		CollectPortalEyeGeometry(store, core::Name("other-room"), cutRigRows, joints, eyeGeometry, error)
+	);
+	CHECK(eyeGeometry.empty());
 	// A standalone scene may collect images before a universe is constructed.
 	world::RegisterMailboxTypes();
 	CHECK(ecs::Components::Describe(ecs::Components::Of<world::Replica>()).Name.Text() == "world.Replica");
@@ -590,7 +723,7 @@ TEST_CASE("authored portal demand claims mouths without mutating world cameras",
 	store.SetResource(scene::LocalPlayer{player});
 	portals.clear();
 	REQUIRE(CollectPortalImageDemands(store, viewer, layeredSettings, demands, portals, slots).Ready == 1);
-	REQUIRE(demands.size() == 1);
+	REQUIRE(demands.size() == 2);
 	CHECK(demands[0].Request.OrderedLayers);
 	CHECK(demands[0].Request.EyePlayer == "91");
 	CHECK(demands[0].Request.Scope == PortalImageScope::OpaqueLighting);
@@ -609,7 +742,7 @@ TEST_CASE("authored portal demand claims mouths without mutating world cameras",
 		REQUIRE(
 			CollectPortalImageDemands(store, viewer, layeredSettings, demands, portals, slots).Ready == 1
 		);
-		REQUIRE(demands.size() == 1);
+		REQUIRE(demands.size() == 2);
 		CHECK_FALSE(demands[0].Request.OrderedLayers);
 		CHECK(demands[0].Request.Scope == PortalImageScope::CompleteWorld);
 		CHECK(demands[0].Request.EyePlayer == (firstPerson ? "91" : ""));
@@ -680,4 +813,22 @@ TEST_CASE(
 	PortalImageDemand changed;
 	REQUIRE(BuildPortalEyeDemand(core::Name("eye"), eye, SETTINGS, changed) == PortalDemandStatus::Ready);
 	CHECK(changed.Request.Key.CameraRevision != selected.Request.Key.CameraRevision);
+}
+
+TEST_CASE(
+	"a demanded portal without an accepted image reports that it awaits one", "[render][portal-demand]"
+) {
+	using engine::render::PortalDemandStatus;
+	using engine::render::PortalPresentation;
+	engine::render::PortalView local;
+	CHECK(engine::render::PresentationOf(local) == PortalPresentation::Current);
+
+	engine::render::PortalView external;
+	external.ExternalImage = true;
+	external.ImageDemandStatus = PortalDemandStatus::Hidden;
+	CHECK(engine::render::PresentationOf(external) == PortalPresentation::Unrequested);
+	external.ImageDemandStatus = PortalDemandStatus::Ready;
+	CHECK(engine::render::PresentationOf(external) == PortalPresentation::AwaitingImage);
+	external.ImportedImage = 7;
+	CHECK(engine::render::PresentationOf(external) == PortalPresentation::Current);
 }

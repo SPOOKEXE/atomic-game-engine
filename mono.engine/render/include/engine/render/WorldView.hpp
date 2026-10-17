@@ -10,7 +10,12 @@
 #include <engine/gui/Compile.hpp>
 #include <engine/render/SpatialCanvas.hpp>
 #include <engine/render/WorldPresentation.hpp>
+#include <engine/scene/Storm.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
+
+#include <array>
+#include <cstddef>
+#include <optional>
 
 namespace engine::render {
 	class ShaderLibrary;
@@ -83,6 +88,13 @@ namespace engine::render {
 		float ParticleDelta = 0.0f;
 		// Camera-independent lighting copied from the world.
 		scene::WorldLighting Lighting;
+		// Packed cloud-density snapshot copied from the storm field.
+		std::optional<scene::CloudDensitySnapshot> CloudDensity;
+		// Field inputs used to invalidate the cached density when a preset changes.
+		std::optional<scene::TornadoParameters> CloudParameters;
+		// Last density rebuild in world time; the volume moves every tick while
+		// its expensive local density pattern changes only four times a second.
+		double CloudBuiltSeconds = -1.0;
 		// Renderable instances in presentation order.
 		std::vector<scene::DrawInstance> Instances;
 		// Object labels for capture output.
@@ -107,11 +119,18 @@ namespace engine::render {
 		std::vector<PortalView> Portals;
 		// Detached particle data owned by this packet.
 		ParticleFrame Particles;
+		// Device-local analytical particles. This is a copied request and field,
+		// never a borrowed ECS row.
+		std::optional<GpuParticleFieldView> GpuParticles;
 	};
 
 	// One camera's light selection, surface demand, facing ribbons and spatial
 	// interface commands.
 	struct WorldCameraFrame {
+		// Camera-local selection of the world's bounded participating-media set.
+		std::array<scene::VolumeState, scene::MAX_SCENE_VOLUMES> Volumes{};
+		// Number of selected volumes in `Volumes`.
+		size_t VolumeCount = 0;
 		// Lights selected for this camera.
 		std::vector<SceneLight> Lights;
 		// Surface views demanded by this camera.
@@ -161,8 +180,14 @@ namespace engine::render {
 	// Uses the supplied camera and target size without replacing ActiveCamera.
 	// Only spatial collectors enter the packet; the player's screen UI has its
 	// own owner. The world must already have completed its presentation phase.
+	// A frozen capture compiles camera-dependent GUI in a copied store so its
+	// retained source snapshot stays byte-identical.
 	void CollectWorldCamera(
-		ecs::Store &store, const View &view, const core::Vector2 &extent, WorldCameraFrame &frame
+		ecs::Store &store,
+		const View &view,
+		const core::Vector2 &extent,
+		WorldCameraFrame &frame,
+		bool frozen = false
 	);
 
 }

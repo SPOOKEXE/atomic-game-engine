@@ -74,7 +74,7 @@ namespace engine::scene {
 		core::Color3 Tint{1.0f, 1.0f, 1.0f};
 		core::Color3 SurfaceColour{1.0f, 1.0f, 1.0f};
 		core::Color3 EmissiveTint{1.0f, 1.0f, 1.0f};
-		float EmissiveStrength = 1.0f;
+		float EmissiveStrength = 0.0f;
 		//@}
 
 		// Which mesh, by name. Invalid means the consumer's default.
@@ -105,6 +105,15 @@ namespace engine::scene {
 		core::Name HeightMap;
 		core::Name MetalnessMap;
 		core::Name EmissiveMap;
+		core::Name PackedPbrMap;
+		uint8_t RoughnessChannel = 255;
+		uint8_t OcclusionChannel = 255;
+		uint8_t HeightChannel = 255;
+		uint8_t MetalnessChannel = 255;
+		float SpecularFactor = 1.0f;
+		float TransmissionFactor = 0.0f;
+		float IndexOfRefraction = 1.5f;
+		float Thickness = 0.0f;
 		//@}
 
 		// Which shader draws this instance, or invalid for the engine's own.
@@ -165,6 +174,11 @@ namespace engine::scene {
 		// so widening it fills the hole and `sizeof(DrawInstance)` is unchanged;
 		// the `static_assert` below is what keeps that true.
 		int16_t Surface = -1;
+
+		// A linked portal also samples a surface slot, but maps a view into its
+		// partner instead of reflecting this side. Consumers that need a mirror
+		// must use this distinction rather than treating every surface as one.
+		bool SurfaceIsPortal = false;
 
 		// Whether this instance is drawn into the shadow map.
 		//
@@ -230,6 +244,17 @@ namespace engine::scene {
 		float SeamOffset = 0.0f;
 		//@}
 
+		// The aperture axes from the seam centre. A zero mask keeps the legacy
+		// plane-only rule. Source-complement retains points in front of the plane
+		// or outside this rectangle; destination-inside retains the other points.
+		//@{
+		core::Vector3 SeamFirst{0.0f, 0.0f, 0.0f};
+		core::Vector3 SeamSecond{0.0f, 0.0f, 0.0f};
+		core::Vector3 SeamCentre{0.0f, 0.0f, 0.0f};
+		uint8_t SeamMask = 0;
+		uint8_t SeamReserved[3] = {};
+		//@}
+
 		// Which way the sun comes from *for this half*, or zero for the world's.
 		//
 		// **A copy turned by `R` has to be lit by `R · L`.** The far half of a
@@ -285,6 +310,14 @@ namespace engine::scene {
 		// and makes visibility a separate index stream.
 		uint64_t Source = 0;
 
+		// Logical body identity survives portal import, where Source and Rig are
+		// request-local handles and cannot safely identify a native body.
+		uint64_t BodyKeyHigh = 0;
+		// Low half of the persistent body key.
+		uint64_t BodyKeyLow = 0;
+		// Incarnation of the persistent body key.
+		uint64_t BodyGeneration = 0;
+
 		// Snapshot-local data-capture label. Zero is background or an entity
 		// without an authored DataFactoryId.
 		uint32_t ObjectLabel = 0;
@@ -294,8 +327,9 @@ namespace engine::scene {
 		uint32_t PartLabel = 0;
 
 		// Which synthetic form of `Source` this row is, or zero for the entity
-		// itself. A portal half uses the pane entity, so the original and its copy
-		// can both be resident without claiming the same slot.
+		// itself. A portal half derives this from both the pane and any existing
+		// form, so the original, its source variant, and its copy can all remain
+		// resident without claiming the same slot.
 		uint64_t Variant = 0;
 
 		// The world `Source` belongs to, or invalid for the view's own world.
@@ -312,10 +346,14 @@ namespace engine::scene {
 		// Four authored LOD levels, with level zero held in Mesh. Selection is a
 		// per-view GPU result, so this snapshot carries inputs and no chosen level.
 		core::Name LodMeshes[LOD_LEVELS - 1];
+		// A camera-facing textured impostor for the final LOD level.
+		core::Name LodBillboard;
 		// Screen-area ratios selecting each lower LOD.
 		float LodRatios[LOD_LEVELS - 1] = {0.5f, 0.25f, 0.125f};
 		// Target projected quad area for automatic LOD choice.
 		float LodTargetQuadArea = 0.0f;
+		// Per-item distance floors. An all-zero row inherits the active view.
+		float LodMinimumDistances[LOD_LEVELS - 1] = {};
 		// Rule used to interpret the LOD inputs.
 		LodStrategy LodStrategyMode = LodStrategy::None;
 		// Number of valid levels including Mesh.
@@ -331,7 +369,7 @@ namespace engine::scene {
 		uint16_t SkinCount = 0;
 
 		// Keeps the flat payload free of implicit tail padding.
-		uint16_t SkinReserved = 0;
+		uint16_t SkinReserved[5] = {};
 	};
 
 	// Copies optional LOD and graph-effect state into an existing draw row.
@@ -340,12 +378,14 @@ namespace engine::scene {
 	// @param automatic Optional automatically produced mesh ladder.
 	// @param custom    Optional per-level authored overrides. Valid meshes win;
 	//                  nil entries fall back to `automatic`.
+	// @param settings  Optional distances and policy for automatic LOD selection.
 	// @param effects   Optional graph-node attachments for this visual.
 	// @since v0.24
 	inline void ApplyDrawRenderState(
 		DrawInstance &instance,
-		const AutoMeshLOD *automatic,
-		const CustomMeshLOD *custom,
+		const LODAuto *automatic,
+		const LODCustom *custom,
+		const LODSettings *settings,
 		const RenderEffects *effects
 	) {
 		const LevelOfDetail lod = ResolveMeshLOD(instance.Mesh, automatic, custom);
@@ -354,9 +394,15 @@ namespace engine::scene {
 				instance.LodMeshes[level] = lod.Meshes[level];
 				instance.LodRatios[level] = lod.Ratios[level];
 			}
+			instance.LodBillboard = lod.Billboard;
 			instance.LodTargetQuadArea = lod.TargetQuadArea;
 			instance.LodStrategyMode = lod.Strategy;
 			instance.LodLevels = std::clamp<uint8_t>(lod.Levels, 1u, static_cast<uint8_t>(LOD_LEVELS));
+		}
+		if (settings != nullptr) {
+			for (size_t level = 0; level < LOD_LEVELS - 1; ++level) {
+				instance.LodMinimumDistances[level] = settings->MinimumDistances[level];
+			}
 		}
 		if (effects != nullptr) {
 			instance.Effects = *effects;
@@ -407,6 +453,7 @@ namespace engine::scene {
 	// @param automatic  Optional automatically produced mesh ladder.
 	// @param custom     Optional per-level authored overrides. Valid meshes win;
 	//                   nil entries fall back to `automatic`.
+	// @param settings   Optional per-item LOD distance floors.
 	// @param effects    Optional graph-node attachments for this visual.
 	// @return The instance to publish.
 	// @since v0.15
@@ -419,8 +466,9 @@ namespace engine::scene {
 		uint64_t source,
 		const LocalTransparency *local = nullptr,
 		const CharacterLimb *limb = nullptr,
-		const AutoMeshLOD *automatic = nullptr,
-		const CustomMeshLOD *custom = nullptr,
+		const LODAuto *automatic = nullptr,
+		const LODCustom *custom = nullptr,
+		const LODSettings *settings = nullptr,
 		const RenderEffects *effects = nullptr
 	) {
 		DrawInstance instance;
@@ -441,6 +489,15 @@ namespace engine::scene {
 			instance.HeightMap = appearance->HeightMap;
 			instance.MetalnessMap = appearance->MetalnessMap;
 			instance.EmissiveMap = appearance->EmissiveMap;
+			instance.PackedPbrMap = appearance->PackedPbrMap;
+			instance.RoughnessChannel = appearance->RoughnessChannel;
+			instance.OcclusionChannel = appearance->OcclusionChannel;
+			instance.HeightChannel = appearance->HeightChannel;
+			instance.MetalnessChannel = appearance->MetalnessChannel;
+			instance.SpecularFactor = appearance->SpecularFactor;
+			instance.TransmissionFactor = appearance->TransmissionFactor;
+			instance.IndexOfRefraction = appearance->IndexOfRefraction;
+			instance.Thickness = appearance->Thickness;
 			instance.Shader = appearance->Shader;
 			instance.Alpha = appearance->Mode;
 			instance.AlphaCutoff = appearance->AlphaCutoff;
@@ -468,7 +525,7 @@ namespace engine::scene {
 		if (limb != nullptr) {
 			instance.Rig = limb->Root.Id;
 		}
-		ApplyDrawRenderState(instance, automatic, custom, effects);
+		ApplyDrawRenderState(instance, automatic, custom, settings, effects);
 
 		instance.Surface = visual.Surface;
 		instance.CastShadow = visual.CastShadow;
@@ -858,6 +915,11 @@ namespace engine::scene {
 	// @return The new signature.
 	// @since v0.8
 	uint64_t MixSignature(uint64_t hash, uint64_t word);
+
+	// Names the portal form of one already-identified draw row. A plain row keeps
+	// the pane identity for compatibility; a synthetic source also contributes so
+	// two source forms cannot collapse into one portal-resident row.
+	uint64_t PortalVariant(uint64_t sourceVariant, uint64_t pane);
 
 	// What a draw list looks like, as one number.
 	//

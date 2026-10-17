@@ -17,27 +17,12 @@
 # `SDL_AudioStream` or an `SDL_AudioSpec`. `Device.hpp` hands out an interface
 # and a factory, which is what lets the null device and the real one be
 # interchangeable at the call site - the property the whole suite depends on.
-# **`core` and nothing else, and that is deliberate.** The obvious second
-# dependency is `scene`, so that a listener and an emitter could be placed by the
-# same `Transform` the renderer reads. It is not here because nothing in this
-# module calls it yet: `ListenerPose` and `EmitterPlacement` are plain
-# coordinates, and whoever drives the mixer converts. A dependency declared ahead
-# of its first caller is indistinguishable from a mistake.
-#
-# It is the right edge to add the day audio reads components directly, and when
-# that happens rule 2 is the argument - one copy of where things are, not two.
-#
-# minimp3 is VENDOR for SDL's reason: no public header here names a `mp3dec_t`,
-# and `Mp3.hpp` hands back the same `SampleBuffer` `Wav.hpp` does. It arrived
-# with its first caller - `DecodeMp3` - rather than ahead of one, and it was
-# addable at all because it is CC0. A codec is usually where a licence question
-# ends the conversation, which is why `Wav.hpp` carried the gap honestly for a
-# release rather than listing an extension it could not decode.
+# Pure sample buffers and byte decoders are exported by the lower shared audiocodec module.
 mono_add_library(audio
 	TIER client
 	DEPS
 		Engine::core
+		Engine::audiocodec
 	VENDOR
 		SDL3::SDL3
-		Vendor::minimp3
 )

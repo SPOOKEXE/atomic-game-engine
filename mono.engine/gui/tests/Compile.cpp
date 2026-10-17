@@ -1,10 +1,15 @@
 #include <engine/core/Name.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/gui/Binding.hpp>
 #include <engine/gui/Compile.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/gui/Input.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/gui/Style.hpp>
+#include <engine/gui/VirtualCollection.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
@@ -13,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -196,6 +202,233 @@ TEST_CASE("an empty GUI cache does not rescan component families", "[gui][compil
 	CHECK(world.Rebuild());
 }
 
+TEST_CASE("an unchanged compiled UI performs no derived work", "[gui][compile][cache]") {
+	World world("gui_compile.zero_work");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+	const Entity label = world.Make("TextLabel", frame);
+	world.Data.GetMutable<Background>(frame)->BorderSizePixel = 0;
+
+	REQUIRE(world.Rebuild());
+	const Compiled::WorkCounters first = world.List.Work();
+	const size_t rebuilds = world.List.Rebuilds();
+	const uint64_t signature = world.List.Signature();
+
+	CHECK_FALSE(world.Rebuild());
+	const Compiled::WorkCounters second = world.List.Work();
+	CHECK(second.BindingEvaluations == first.BindingEvaluations);
+	CHECK(second.PresentationAdvances == first.PresentationAdvances);
+	CHECK(second.VirtualAnchorReconciliations == first.VirtualAnchorReconciliations);
+	CHECK(second.Layouts == first.Layouts);
+	CHECK(world.List.Rebuilds() == rebuilds);
+	CHECK(world.List.Signature() == signature);
+
+	Background changed = *world.Data.Get<Background>(frame);
+	changed.Color = {0.2f, 0.4f, 0.6f};
+	world.Data.Set(frame, changed);
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Work().Layouts == first.Layouts);
+	const auto paint = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[frame](const DrawCommand &value) {
+			return value.Source == frame && value.Kind == DrawKind::Rectangle;
+		}
+	);
+	REQUIRE(paint != world.List.Commands().Commands.end());
+	CHECK(paint->Tint == changed.Color);
+	Element resized = *world.Data.Get<Element>(frame);
+	resized.Size.X.Offset += 10.0f;
+	world.Data.Set(frame, resized);
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Work().Layouts == first.Layouts + 1);
+	Label relabelled = *world.Data.Get<Label>(label);
+	relabelled.Text = "a wider text run";
+	world.Data.Set(label, relabelled);
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Work().Layouts == first.Layouts + 2);
+}
+
+TEST_CASE("a bound attribute remains dynamic across a retained compile", "[gui][compile][cache]") {
+	World world("gui_compile.bound_dynamic");
+	const Entity source = world.Data.CreateInstance(Classes::Find(Name("Instance")), "Source");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity label = world.Make("TextLabel", screen);
+	const Entity binding = world.Make("UIBinding", label);
+
+	engine::ecs::AttributeValue value;
+	value.Type = PropertyType::String;
+	value.String = "first";
+	REQUIRE(engine::ecs::SetAttribute(world.Data, source, Name("Value"), value));
+	Binding configured;
+	configured.SourcePath = "Source";
+	configured.Attribute = Name("Value");
+	configured.Fallback = "missing";
+	world.Data.Set(binding, configured);
+
+	REQUIRE(world.Rebuild());
+	const size_t evaluations = world.List.Work().BindingEvaluations;
+	value.String = "second";
+	REQUIRE(engine::ecs::SetAttribute(world.Data, source, Name("Value"), value));
+	REQUIRE(world.Rebuild());
+	const BindingOutput *output = world.Data.Get<BindingOutput>(binding);
+	REQUIRE(output != nullptr);
+	CHECK(output->Value == "second");
+	CHECK(world.List.Work().BindingEvaluations == evaluations + 1);
+}
+
+TEST_CASE("compiled UI damage joins old and new conservative collector bounds", "[gui][compile][damage]") {
+	World world("gui_compile.damage");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element element;
+	element.Position = UDim2{0.0f, 100.0f, 0.0f, 50.0f};
+	element.Size = UDim2{0.0f, 40.0f, 0.0f, 20.0f};
+	element.Rotation = 90.0f;
+	world.Data.Set(frame, element);
+	world.Data.GetMutable<Background>(frame)->BorderSizePixel = 0;
+
+	const Entity stroke = world.Make("UIStroke", frame);
+	Stroke outline;
+	outline.Thickness = 4.0f;
+	world.Data.Set(stroke, outline);
+
+	REQUIRE(world.Rebuild());
+	REQUIRE(world.List.DamageValid());
+	REQUIRE(world.List.Damage().size() == 1);
+	const Compiled::DamageRegion first = world.List.Damage().front();
+	CHECK(first.Collector == screen);
+	CHECK_FALSE(first.Spatial);
+	// The stroke expands its own command, then the tracker includes the
+	// centred backend stroke before taking the ninety-degree AABB.
+	CHECK(first.Bounds.Min.X == Approx(106.0f));
+	CHECK(first.Bounds.Min.Y == Approx(36.0f));
+	CHECK(first.Bounds.Max.X == Approx(134.0f));
+	CHECK(first.Bounds.Max.Y == Approx(84.0f));
+
+	CHECK_FALSE(world.Rebuild());
+	CHECK(world.List.DamageValid());
+	CHECK(world.List.Damage().empty());
+
+	element.Position.X.Offset = 200.0f;
+	world.Data.Set(frame, element);
+	REQUIRE(world.Rebuild());
+	REQUIRE(world.List.Damage().size() == 1);
+	const Compiled::DamageRegion moved = world.List.Damage().front();
+	// The dirty rectangle includes where the old pixels were as well as the
+	// new placement, so a retained target clears the vacated area too.
+	CHECK(moved.Bounds.Min.X == Approx(106.0f));
+	CHECK(moved.Bounds.Max.X == Approx(234.0f));
+	CHECK(moved.Bounds.Min.Y == Approx(36.0f));
+	CHECK(moved.Bounds.Max.Y == Approx(84.0f));
+}
+
+TEST_CASE("compiled UI damage leaves an unchanged collector alone", "[gui][compile][damage]") {
+	World world("gui_compile.damage_isolation");
+	const Entity first = world.Make("ScreenGui");
+	const Entity second = world.Make("ScreenGui");
+	const Entity firstFrame = world.Make("Frame", first);
+	const Entity secondFrame = world.Make("Frame", second);
+	Element element;
+	element.Size = UDim2{0.0f, 40.0f, 0.0f, 20.0f};
+	world.Data.Set(firstFrame, element);
+	world.Data.Set(secondFrame, element);
+	REQUIRE(world.Rebuild());
+	REQUIRE(world.List.Damage().size() == 2);
+
+	Background changed = *world.Data.Get<Background>(firstFrame);
+	changed.Color = {0.2f, 0.4f, 0.6f};
+	world.Data.Set(firstFrame, changed);
+	REQUIRE(world.Rebuild());
+	REQUIRE(world.List.DamageValid());
+	REQUIRE(world.List.Damage().size() == 1);
+	CHECK(world.List.Damage().front().Collector == first);
+	CHECK(world.List.Damage().front().Collector != second);
+
+	world.Request.Hovered = secondFrame;
+	REQUIRE(world.Rebuild());
+	REQUIRE(world.List.Damage().size() == 1);
+	CHECK(world.List.Damage().front().Collector == second);
+}
+
+TEST_CASE("compiled UI damage clips after rotating visual bounds", "[gui][compile][damage]") {
+	World world("gui_compile.damage_clip");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element element;
+	element.Position = UDim2{0.0f, -20.0f, 0.0f, 0.0f};
+	element.Size = UDim2{0.0f, 40.0f, 0.0f, 20.0f};
+	element.Rotation = 90.0f;
+	world.Data.Set(frame, element);
+	world.Data.GetMutable<Background>(frame)->BorderSizePixel = 0;
+	const Entity stroke = world.Make("UIStroke", frame);
+	Stroke outline;
+	outline.Thickness = 4.0f;
+	world.Data.Set(stroke, outline);
+
+	REQUIRE(world.Rebuild());
+	REQUIRE(world.List.Damage().size() == 1);
+	const engine::core::Rect damage = world.List.Damage().front().Bounds;
+	// The unrotated outline crosses the left edge. The rotated shape has pixels
+	// in the canvas, and its conservative bounds are clipped by the collector's
+	// scissor only after that turn.
+	CHECK(damage.Min.X == Approx(0.0f));
+	CHECK(damage.Min.Y == Approx(0.0f));
+	CHECK(damage.Max.X == Approx(14.0f));
+	CHECK(damage.Max.Y == Approx(34.0f));
+}
+
+TEST_CASE("failed UI damage extraction keeps the last usable baseline", "[gui][compile][damage]") {
+	World world("gui_compile.damage_failure");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+
+	Element element;
+	element.Position = UDim2{0.0f, 20.0f, 0.0f, 20.0f};
+	element.Size = UDim2{0.0f, 20.0f, 0.0f, 20.0f};
+	world.Data.Set(frame, element);
+	world.Data.GetMutable<Background>(frame)->BorderSizePixel = 0;
+	REQUIRE(world.Rebuild());
+	REQUIRE(world.List.DamageValid());
+
+	element.Rotation = std::numeric_limits<float>::quiet_NaN();
+	world.Data.Set(frame, element);
+	REQUIRE(world.Rebuild());
+	CHECK_FALSE(world.List.DamageValid());
+	CHECK(world.List.Damage().empty());
+	// The signature is unchanged, so this is the cache path that must preserve
+	// the invalid state until a successfully extracted list replaces it.
+	CHECK_FALSE(world.Rebuild());
+	CHECK_FALSE(world.List.DamageValid());
+	CHECK(world.List.Damage().empty());
+
+	element.Rotation = 0.0f;
+	element.Position.X.Offset = 60.0f;
+	world.Data.Set(frame, element);
+	REQUIRE(world.Rebuild());
+	REQUIRE(world.List.DamageValid());
+	REQUIRE(world.List.Damage().size() == 1);
+	// Had the rejected NaN list advanced the baseline, the vacated first
+	// rectangle would be absent here.
+	CHECK(world.List.Damage().front().Bounds.Min.X == Approx(20.0f));
+	CHECK(world.List.Damage().front().Bounds.Max.X == Approx(80.0f));
+}
+
+TEST_CASE("a compile request rejects unbounded locale and style inputs", "[gui][compile][limits]") {
+	World world("gui_compile.request_limits");
+	world.Make("ScreenGui");
+
+	world.Request.Locale.assign(LocalizationCatalogue::MAXIMUM_LOCALE_BYTES + 1, 'x');
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Commands().Commands.empty());
+
+	world.Request.Locale.clear();
+	world.Request.Locale.clear();
+	CHECK(world.Rebuild());
+}
+
 TEST_CASE("one hosted collector compiles without admitting other canvases", "[gui][compile][plugin]") {
 	World world("gui_compile.plugin_collector");
 	const Entity dock = world.Make("DockWidgetPluginGui");
@@ -222,6 +455,10 @@ TEST_CASE("one hosted collector compiles without admitting other canvases", "[gu
 		)
 	);
 	CHECK(world.List.Commands().CanvasSize == Vector2{360.0f, 240.0f});
+	REQUIRE(world.List.Commands().CollectorRanges.size() == 1);
+	CHECK(world.List.Commands().CollectorRanges.front().Collector == dock);
+	CHECK(world.List.Commands().CollectorRanges.front().First == 0);
+	CHECK(world.List.Commands().CollectorRanges.front().Count == world.List.Commands().Commands.size());
 	CHECK(
 		std::none_of(
 			world.List.Commands().Commands.begin(),
@@ -247,6 +484,127 @@ TEST_CASE("a still world compiles once and is then kept", "[gui][compile]") {
 
 	CHECK(world.List.Rebuilds() == 1);
 	CHECK(world.List.Requests() == 11);
+}
+
+TEST_CASE(
+	"a screen collector applies accessibility scale in one coordinate space", "[gui][compile][display]"
+) {
+	World world("gui_compile.display_scale");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity button = world.Make("TextButton", screen);
+
+	Element element;
+	element.Position = UDim2{0.0f, 10.0f, 0.0f, 20.0f};
+	element.Size = UDim2{0.0f, 0.0f, 0.0f, 40.0f};
+	element.Automatic = AutomaticSize::X;
+	world.Data.Set(button, element);
+	Label label;
+	label.Text = "wide";
+	label.Size = 10;
+	world.Data.Set(button, label);
+	world.Request.Display.InterfaceScale = 2.0f;
+	world.Request.Display.TextScale = 1.5f;
+
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Commands().CanvasSize == Vector2{800.0f, 600.0f});
+	REQUIRE(world.List.Commands().Transforms.size() == 1);
+	CHECK(world.List.Commands().Transforms.front().Scale == Vector2{2.0f, 2.0f});
+
+	const Resolved *resolved = world.Data.Get<Resolved>(button);
+	REQUIRE(resolved != nullptr);
+	CHECK(resolved->AbsolutePosition == Vector2{10.0f, 20.0f});
+	CHECK(resolved->AbsoluteSize.X == Approx(31.2f));
+	CHECK(resolved->TextSize == 15);
+
+	const auto command = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[button](const DrawCommand &draw) { return draw.Source == button; }
+	);
+	REQUIRE(command != world.List.Commands().Commands.end());
+	CHECK(command->Bounds.Min == resolved->AbsolutePosition);
+	CHECK(command->Bounds.Size() == resolved->AbsoluteSize);
+
+	// The client and renderer both use physical presentation coordinates while
+	// the list keeps the authored logical bounds.
+	CHECK(PickScreen(world.Data, world.List.Commands(), Vector2{40.0f, 60.0f}) == button);
+}
+
+TEST_CASE("collector reference modes map one logical canvas into presentation", "[gui][compile][display]") {
+	World world("gui_compile.reference_resolution");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity button = world.Make("TextButton", screen);
+	Layer layer;
+	layer.ReferenceResolution = Vector2{400.0f, 400.0f};
+	layer.ScaleMode = CollectorScaleMode::Fit;
+	world.Data.Set(screen, layer);
+	Element element;
+	element.Position = UDim2{0.0f, 0.0f, 0.0f, 0.0f};
+	element.Size = UDim2{0.0f, 100.0f, 0.0f, 100.0f};
+	world.Data.Set(button, element);
+
+	REQUIRE(world.Rebuild());
+	const Resolved *resolved = world.Data.Get<Resolved>(button);
+	REQUIRE(resolved != nullptr);
+	CHECK(resolved->AbsolutePosition == Vector2::Zero);
+	REQUIRE(world.List.Commands().Transforms.size() == 1);
+	const CollectorTransform &fit = world.List.Commands().Transforms.front();
+	CHECK(fit.Origin == Vector2{100.0f, 0.0f});
+	CHECK(fit.Scale == Vector2{1.5f, 1.5f});
+	CHECK(PickScreen(world.Data, world.List.Commands(), Vector2{175.0f, 75.0f}) == button);
+	CHECK(PickScreen(world.Data, world.List.Commands(), Vector2{50.0f, 75.0f}) == engine::ecs::NULL_ENTITY);
+
+	layer.ScaleMode = CollectorScaleMode::Fill;
+	world.Data.Set(screen, layer);
+	REQUIRE(world.Rebuild());
+	const CollectorTransform &fill = world.List.Commands().Transforms.front();
+	CHECK(fill.Origin == Vector2{0.0f, -100.0f});
+	CHECK(fill.Scale == Vector2{2.0f, 2.0f});
+
+	layer.ScaleMode = CollectorScaleMode::Integer;
+	world.Data.Set(screen, layer);
+	REQUIRE(world.Rebuild());
+	const CollectorTransform &integer = world.List.Commands().Transforms.front();
+	CHECK(integer.Origin == Vector2{200.0f, 100.0f});
+	CHECK(integer.Scale == Vector2{1.0f, 1.0f});
+}
+
+TEST_CASE(
+	"an authored UIAnimation rebuilds while moving and changes only presentation", "[gui][compile][animation]"
+) {
+	World world("gui_compile.animation");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+	world.Data.GetMutable<Background>(frame)->Color = Color3{1.0f, 0.0f, 0.0f};
+
+	const Entity modifier = world.Make("UIAnimation", frame);
+	AnimationPlayback *playback = world.Data.GetMutable<AnimationPlayback>(modifier);
+	REQUIRE(playback != nullptr);
+	playback->StartedAt = 0.0;
+	playback->Clip.Tween =
+		engine::core::TweenInfo(1.0f, engine::core::EasingStyle::Linear, engine::core::EasingDirection::In);
+	PresentationTrack track;
+	track.Property = PresentationProperty::BackgroundColor;
+	REQUIRE(track.Add(PresentationKey{0.0f, PresentationValue::FromColor(Color3{1.0f, 0.0f, 0.0f})}));
+	REQUIRE(track.Add(PresentationKey{1.0f, PresentationValue::FromColor(Color3{0.0f, 0.0f, 1.0f})}));
+	REQUIRE(playback->Clip.AddTrack(track));
+
+	world.Request.Seconds = 0.5;
+	REQUIRE(world.Rebuild());
+	const auto command = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[frame](const DrawCommand &draw) { return draw.Source == frame && draw.Kind == DrawKind::Rectangle; }
+	);
+	REQUIRE(command != world.List.Commands().Commands.end());
+	CHECK(command->Tint.R == Approx(0.5f));
+	CHECK(command->Tint.B == Approx(0.5f));
+	CHECK(world.Data.Get<Background>(frame)->Color == Color3{1.0f, 0.0f, 0.0f});
+
+	world.Request.Seconds = 2.0;
+	CHECK(world.Rebuild());
+	world.Request.Seconds = 3.0;
+	CHECK_FALSE(world.Rebuild());
 }
 
 TEST_CASE("screen interfaces are compiled from the selected viewer root", "[gui][compile][cache]") {
@@ -397,6 +755,19 @@ TEST_CASE("the tree, the name and the screen all move the signature", "[gui][com
 	world.Rebuild();
 	CHECK(world.List.Signature() != before);
 
+	// A display profile is an input to canonical layout. Even a field that does
+	// not currently move this desktop-shaped canvas must rebuild now, so a
+	// mobile host can change profile fields without retaining a stale list.
+	before = world.List.Signature();
+	world.Request.Display.SafeArea.Bottom = 48.0f;
+	world.Rebuild();
+	CHECK(world.List.Signature() != before);
+
+	before = world.List.Signature();
+	world.Request.Display.InterfaceScale = 1.25f;
+	world.Rebuild();
+	CHECK(world.List.Signature() != before);
+
 	// Destroying one.
 	before = world.List.Signature();
 	world.Data.DestroyInstance(second);
@@ -537,10 +908,10 @@ TEST_CASE("Global ZIndex behaviour re-sorts the whole collector", "[gui][compile
 	CHECK(commands.front().Source == child);
 }
 
-TEST_CASE("a fully transparent element emits nothing", "[gui][compile]") {
+TEST_CASE("a fully transparent button retains its interaction geometry", "[gui][compile]") {
 	World world("gui_compile.transparent");
 	const Entity screen = world.Make("ScreenGui");
-	const Entity frame = world.Make("Frame", screen);
+	const Entity button = world.Make("TextButton", screen);
 
 	REQUIRE(world.Rebuild());
 	const size_t opaque = world.List.Commands().Commands.size();
@@ -548,13 +919,20 @@ TEST_CASE("a fully transparent element emits nothing", "[gui][compile]") {
 
 	Background background;
 	background.Transparency = 1.0f;
-	world.Data.Set(frame, background);
+	world.Data.Set(button, background);
 
 	REQUIRE(world.Rebuild());
 
-	// Not emitted at all, so a backend never has to test for it - and the
-	// command count means "what is on screen" rather than "what exists".
-	CHECK(world.List.Commands().Commands.empty());
+	const auto command = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[button](const DrawCommand &draw) {
+			return draw.Source == button && draw.Kind == DrawKind::Rectangle;
+		}
+	);
+	REQUIRE(command != world.List.Commands().Commands.end());
+	CHECK(command->Transparency == 1.0f);
+	CHECK(PickScreen(world.Data, world.List.Commands(), command->Bounds.Center()) == button);
 
 	// The element is still counted as reached, which is what tells a panel the
 	// difference between an invisible element and a missing one.
@@ -618,6 +996,214 @@ TEST_CASE("a text box shows its placeholder when empty", "[gui][compile]") {
 	}
 }
 
+TEST_CASE("a password text box masks its compiled echo", "[gui][compile]") {
+	World world("gui_compile.password");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity box = world.Make("TextBox", screen);
+	Label label;
+	label.Text = "a\xC3\xA9\xF0\x9F\x98\x80";
+	world.Data.Set(box, label);
+	Entry entry;
+	entry.Password = true;
+	world.Data.Set(box, entry);
+
+	REQUIRE(world.Rebuild());
+	const auto text = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[box](const DrawCommand &command) { return command.Source == box && command.Kind == DrawKind::Text; }
+	);
+	REQUIRE(text != world.List.Commands().Commands.end());
+	CHECK(text->Text == "***");
+}
+
+TEST_CASE("a binding is the canonical compiled label text", "[gui][compile][binding]") {
+	World world("gui_compile.bound_label");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity label = world.Make("TextLabel", screen);
+	const Entity source = world.Data.CreateInstance(Classes::Find(Name("Instance")), "Source");
+	const Entity binding = world.Make("UIBinding", label);
+
+	Label authored;
+	authored.Text = "authored";
+	world.Data.Set(label, authored);
+
+	engine::ecs::AttributeValue value;
+	value.Type = PropertyType::String;
+	value.String = "bound";
+	REQUIRE(engine::ecs::SetAttribute(world.Data, source, Name("Score"), value));
+
+	Binding configured;
+	configured.SourcePath = "Source";
+	configured.Attribute = Name("Score");
+	configured.Fallback = "fallback";
+	world.Data.Set(binding, configured);
+	REQUIRE(EvaluateBindings(world.Data) == 1);
+	REQUIRE(world.Rebuild());
+
+	const auto run = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[label](const DrawCommand &command) {
+			return command.Source == label && command.Kind == DrawKind::Text;
+		}
+	);
+	REQUIRE(run != world.List.Commands().Commands.end());
+	CHECK(run->Text == "bound");
+
+	value.String = "changed";
+	REQUIRE(engine::ecs::SetAttribute(world.Data, source, Name("Score"), value));
+	REQUIRE(world.Rebuild());
+	const auto changed = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[label](const DrawCommand &command) {
+			return command.Source == label && command.Kind == DrawKind::Text;
+		}
+	);
+	REQUIRE(changed != world.List.Commands().Commands.end());
+	CHECK(changed->Text == "changed");
+}
+
+TEST_CASE("a localized label resolves through the viewer's compile request", "[gui][compile][localization]") {
+	World world("gui_compile.localized_label");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity label = world.Make("TextLabel", screen);
+	Label text;
+	text.Text = "Play";
+	world.Data.Set(label, text);
+	Element automatic;
+	automatic.Automatic = AutomaticSize::X;
+	world.Data.Set(label, automatic);
+	LabelPresentation presentation;
+	presentation.LocalizationKey = Name("menu.play");
+	world.Data.Set(label, presentation);
+
+	LocalizationCatalogue catalogue;
+	REQUIRE(catalogue.Set(CatalogueEntry{"fr", Name("menu.play"), "Jouer"}));
+	world.Request.Catalogue = &catalogue;
+	world.Request.Locale = "fr-CA";
+	REQUIRE(world.Rebuild());
+
+	const auto run = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[label](const DrawCommand &command) {
+			return command.Source == label && command.Kind == DrawKind::Text;
+		}
+	);
+	REQUIRE(run != world.List.Commands().Commands.end());
+	CHECK(run->Text == "Jouer");
+	const Resolved *resolved = world.Data.Get<Resolved>(label);
+	REQUIRE(resolved != nullptr);
+	CHECK(resolved->AbsoluteSize.X == Approx(resolved->TextBounds.X));
+
+	const uint64_t before = world.List.Signature();
+	REQUIRE(catalogue.Set(CatalogueEntry{"fr", Name("menu.play"), "Démarrer"}));
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Signature() != before);
+}
+
+TEST_CASE("an authored theme resolves class and local state variants", "[gui][compile][style]") {
+	World world("gui_compile.styled_label");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity label = world.Make("TextLabel", screen);
+	Label text;
+	text.Text = "Launch";
+	world.Data.Set(label, text);
+	StyleClass classes;
+	REQUIRE(classes.Names.Add(Name("primary")));
+	world.Data.Set(label, classes);
+	const Entity theme = world.Data.CreateInstance(GuiClass("UITheme"), "Theme");
+	UITheme *tokens = world.Data.GetMutable<UITheme>(theme);
+	REQUIRE(tokens != nullptr);
+	REQUIRE(tokens->Tokens.Set({Name("TextColor3"), StyleValue::FromColor(Color3{0.2f, 0.8f, 0.4f})}));
+	ThemeBinding *binding = world.Data.GetMutable<ThemeBinding>(screen);
+	REQUIRE(binding != nullptr);
+	binding->Theme = theme;
+	const Entity style = world.Make("UIStyle", label);
+	UIStyle *pressed = world.Data.GetMutable<UIStyle>(style);
+	REQUIRE(pressed != nullptr);
+	pressed->Rule.State = StyleState::Pressed;
+	REQUIRE(
+		pressed->Rule.Declarations.Set({Name("TextColor3"), StyleValue::FromColor(Color3{0.9f, 0.3f, 0.1f})})
+	);
+	REQUIRE(world.Rebuild());
+
+	auto run = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[label](const DrawCommand &command) {
+			return command.Source == label && command.Kind == DrawKind::Text;
+		}
+	);
+	REQUIRE(run != world.List.Commands().Commands.end());
+	CHECK(run->Tint.G == Approx(0.8f));
+	const ResolvedStyle *resolved = world.Data.Get<ResolvedStyle>(label);
+	REQUIRE(resolved != nullptr);
+	CHECK(resolved->Values.Find(Name("TextColor3"))->Color.G == Approx(0.8f));
+
+	const uint64_t themeBefore = world.List.Signature();
+	tokens = world.Data.GetMutable<UITheme>(theme);
+	REQUIRE(tokens != nullptr);
+	REQUIRE(tokens->Tokens.Set({Name("TextColor3"), StyleValue::FromColor(Color3{0.4f, 0.2f, 0.9f})}));
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Signature() != themeBefore);
+	run = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[label](const DrawCommand &command) {
+			return command.Source == label && command.Kind == DrawKind::Text;
+		}
+	);
+	REQUIRE(run != world.List.Commands().Commands.end());
+	CHECK(run->Tint.B == Approx(0.9f));
+
+	text.Color = Color3{0.9f, 0.1f, 0.1f};
+	world.Data.Set(label, text);
+	REQUIRE(world.Rebuild());
+	run = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[label](const DrawCommand &command) {
+			return command.Source == label && command.Kind == DrawKind::Text;
+		}
+	);
+	REQUIRE(run != world.List.Commands().Commands.end());
+	CHECK(run->Tint.R == Approx(0.9f));
+
+	text.Color = Label{}.Color;
+	world.Data.Set(label, text);
+	world.Request.Pressed = label;
+	REQUIRE(world.Rebuild());
+	run = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[label](const DrawCommand &command) {
+			return command.Source == label && command.Kind == DrawKind::Text;
+		}
+	);
+	REQUIRE(run != world.List.Commands().Commands.end());
+	CHECK(run->Tint.R == Approx(0.9f));
+
+	world.Request.Pressed = engine::ecs::NULL_ENTITY;
+	const Color3 directDefault = Label{}.Color;
+	REQUIRE(world.Data.SetProperty(label, Name("TextColor3"), &directDefault, sizeof(directDefault)));
+	const StyleDirect *direct = world.Data.Get<StyleDirect>(label);
+	REQUIRE(direct != nullptr);
+	CHECK(direct->Has(StyleDirectProperty::TextColor));
+	REQUIRE(world.Rebuild());
+	run = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[label](const DrawCommand &command) {
+			return command.Source == label && command.Kind == DrawKind::Text;
+		}
+	);
+	REQUIRE(run != world.List.Commands().Commands.end());
+	CHECK(run->Tint == directDefault);
+}
+
 TEST_CASE("Invalidate forces one rebuild and no more", "[gui][compile]") {
 	World world("gui_compile.invalidate");
 	world.Make("ScreenGui");
@@ -632,7 +1218,37 @@ TEST_CASE("Invalidate forces one rebuild and no more", "[gui][compile]") {
 	CHECK_FALSE(world.Rebuild());
 }
 
-TEST_CASE("a canvas group multiplies colour and opacity through its subtree", "[gui][compile]") {
+TEST_CASE("too many local styles fail closed instead of applying a prefix", "[gui][compile][style][limits]") {
+	World world("gui_compile.style_limit");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity label = world.Make("TextLabel", screen);
+	Label text;
+	text.Text = "bounded";
+	world.Data.Set(label, text);
+	const Entity theme = world.Data.CreateInstance(GuiClass("UITheme"), "Theme");
+	UITheme *tokens = world.Data.GetMutable<UITheme>(theme);
+	REQUIRE(tokens != nullptr);
+	REQUIRE(tokens->Tokens.Set({Name("TextColor3"), StyleValue::FromColor(Color3{1.0f, 0.0f, 0.0f})}));
+	ThemeBinding *binding = world.Data.GetMutable<ThemeBinding>(screen);
+	REQUIRE(binding != nullptr);
+	binding->Theme = theme;
+	for (size_t index = 0; index <= MAXIMUM_STYLE_RULES; index++) {
+		REQUIRE(world.Make("UIStyle", label) != engine::ecs::NULL_ENTITY);
+	}
+
+	REQUIRE(world.Rebuild());
+	const auto run = std::find_if(
+		world.List.Commands().Commands.begin(),
+		world.List.Commands().Commands.end(),
+		[label](const DrawCommand &command) {
+			return command.Source == label && command.Kind == DrawKind::Text;
+		}
+	);
+	REQUIRE(run != world.List.Commands().Commands.end());
+	CHECK(run->Tint == Label{}.Color);
+}
+
+TEST_CASE("a canvas group isolates opacity around its subtree", "[gui][compile]") {
 	World world("gui_compile.group");
 	const Entity screen = world.Make("ScreenGui");
 	const Entity groupEntity = world.Make("CanvasGroup", screen);
@@ -660,7 +1276,88 @@ TEST_CASE("a canvas group multiplies colour and opacity through its subtree", "[
 	CHECK(found->Tint.R == Approx(0.4f));
 	CHECK(found->Tint.G == Approx(0.1f));
 	CHECK(found->Tint.B == Approx(0.2f));
-	CHECK(found->Transparency == Approx(0.625f));
+	// Group alpha is applied after the whole subtree has blended. Folding it
+	// into this child would make overlapping descendants too dark.
+	CHECK(found->Transparency == Approx(0.25f));
+	REQUIRE(world.List.Commands().Operations.size() == 2);
+	const DrawOperation &begin = world.List.Commands().Operations[0];
+	const DrawOperation &end = world.List.Commands().Operations[1];
+	CHECK(begin.Kind == DrawOperationKind::BeginGroup);
+	CHECK(begin.Source == groupEntity);
+	CHECK(begin.Transparency == Approx(0.5f));
+	CHECK(begin.Command == 0);
+	CHECK(end.Kind == DrawOperationKind::EndGroup);
+	CHECK(end.Command == world.List.Commands().Commands.size());
+}
+
+TEST_CASE("a rounded mask brackets its parent paint subtree", "[gui][compile]") {
+	World world("gui_compile.mask");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+	const Entity child = world.Make("Frame", frame);
+	const Entity mask = world.Make("UIMask", frame);
+
+	Mask state;
+	state.Radius = {0.5f, 0.0f};
+	world.Data.Set(mask, state);
+	REQUIRE(world.Rebuild());
+
+	const auto &operations = world.List.Commands().Operations;
+	REQUIRE(operations.size() == 2);
+	CHECK(operations[0].Kind == DrawOperationKind::BeginMask);
+	CHECK(operations[0].Source == frame);
+	CHECK(operations[0].Command == 0);
+	CHECK(operations[0].CornerRadius == Approx(50.0f));
+	CHECK(operations[1].Kind == DrawOperationKind::EndMask);
+	CHECK(operations[1].Command == world.List.Commands().Commands.size());
+	CHECK(
+		std::any_of(
+			world.List.Commands().Commands.begin(),
+			world.List.Commands().Commands.end(),
+			[&](const DrawCommand &command) { return command.Source == child; }
+		)
+	);
+}
+
+TEST_CASE("an enabled zero-radius mask brackets a rectangular paint subtree", "[gui][compile]") {
+	World world("gui_compile.rectangular_mask");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity frame = world.Make("Frame", screen);
+	const Entity child = world.Make("Frame", frame);
+	const Entity mask = world.Make("UIMask", frame);
+	world.Data.Set(mask, Mask{});
+	REQUIRE(world.Rebuild());
+
+	const auto &operations = world.List.Commands().Operations;
+	REQUIRE(operations.size() == 2);
+	CHECK(operations[0].Kind == DrawOperationKind::BeginMask);
+	CHECK(operations[0].Source == frame);
+	CHECK(operations[0].CornerRadius == 0.0f);
+	CHECK(operations[0].Command == 0);
+	CHECK(operations[1].Kind == DrawOperationKind::EndMask);
+	CHECK(operations[1].Command == world.List.Commands().Commands.size());
+	CHECK(
+		std::any_of(
+			world.List.Commands().Commands.begin(),
+			world.List.Commands().Commands.end(),
+			[&](const DrawCommand &command) { return command.Source == child; }
+		)
+	);
+}
+
+TEST_CASE("rounded mask nesting stops at the declared boundary", "[gui][compile]") {
+	World world("gui_compile.mask_depth");
+	Entity parent = world.Make("ScreenGui");
+	for (size_t index = 0; index < 9; index++) {
+		const Entity frame = world.Make("Frame", parent);
+		const Entity mask = world.Make("UIMask", frame);
+		Mask state;
+		state.Radius = {0.0f, 4.0f};
+		world.Data.Set(mask, state);
+		parent = frame;
+	}
+	REQUIRE(world.Rebuild());
+	CHECK(world.List.Commands().Operations.size() == 16);
 }
 
 TEST_CASE("a node link compiles as a coloured segment behind its nodes", "[gui][compile][nodecanvas]") {
@@ -1234,4 +1931,147 @@ TEST_CASE("a stroke's join and sizing reach the draw list and the signature", "[
 	scaled.Sizing = StrokeSizing::ScaledSize;
 	world.Data.Set(stroke, scaled);
 	REQUIRE(world.Rebuild());
+}
+
+TEST_CASE(
+	"virtual record bindings project typed visual values without changing the template",
+	"[gui][compile][virtual]"
+) {
+	World world("gui_compile.virtual_visuals");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity list = world.Make("ScrollingFrame", screen);
+	Element listElement;
+	listElement.Size = UDim2{0.0f, 200.0f, 0.0f, 100.0f};
+	world.Data.Set(list, listElement);
+	const Entity collection = world.Make("UIVirtualCollection", list);
+	const Entity row = world.Make("TextLabel", collection);
+	Element rowElement;
+	rowElement.Size = UDim2{0.0f, 200.0f, 0.0f, 20.0f};
+	world.Data.Set(row, rowElement);
+	const Entity colourBinding = world.Make("UIBinding", row);
+	Binding binding;
+	binding.SourcePath = "$item.Shade";
+	binding.Target = Name("BackgroundColor3");
+	world.Data.Set(colourBinding, binding);
+	const Entity textBinding = world.Make("UIBinding", row);
+	binding.SourcePath = "$item.Caption";
+	binding.Target = Name("Text");
+	world.Data.Set(textBinding, binding);
+
+	VirtualCollection source;
+	source.ItemCount = 1;
+	source.FixedExtent = 20.0f;
+	VirtualRecord record;
+	record.Key = "one";
+	engine::ecs::AttributeValue shade;
+	shade.Type = PropertyType::Color3;
+	shade.Color3 = Color3{0.25f, 0.5f, 0.75f};
+	record.Fields.push_back(VirtualField{"Shade", shade});
+	engine::ecs::AttributeValue caption;
+	caption.Type = PropertyType::String;
+	caption.String = "First";
+	record.Fields.push_back(VirtualField{"Caption", caption});
+	source.Page.Records.push_back(record);
+	world.Data.Set(collection, source);
+	REQUIRE(world.Rebuild());
+	bool foundRectangle = false;
+	bool foundText = false;
+	for (const DrawCommand &command : world.List.Commands().Commands) {
+		if (command.Source != row || command.Collection != collection || command.Key != "one") continue;
+		if (command.Kind == DrawKind::Rectangle) {
+			foundRectangle = true;
+			CHECK(command.Tint == shade.Color3);
+		}
+		if (command.Kind == DrawKind::Text) {
+			foundText = true;
+			CHECK(command.Text == "First");
+		}
+	}
+	CHECK(foundRectangle);
+	CHECK(foundText);
+	CHECK(world.Data.Get<Background>(row)->Color != shade.Color3);
+}
+
+TEST_CASE("measured virtual records cull by their published extents", "[gui][compile][virtual]") {
+	World world("gui_compile.virtual_measured");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity list = world.Make("ScrollingFrame", screen);
+	Element listElement;
+	listElement.Size = UDim2{0.0f, 200.0f, 0.0f, 30.0f};
+	world.Data.Set(list, listElement);
+	Scrolling scrolling;
+	scrolling.CanvasPosition.Y = 50.0f;
+	world.Data.Set(list, scrolling);
+	const Entity collection = world.Make("UIVirtualCollection", list);
+	const Entity row = world.Make("TextLabel", collection);
+	Element rowElement;
+	rowElement.Size = UDim2{0.0f, 200.0f, 0.0f, 20.0f};
+	world.Data.Set(row, rowElement);
+
+	VirtualCollection source;
+	source.ItemCount = 3;
+	source.FixedExtent = 20.0f;
+	source.ExtentPolicy = VirtualExtentPolicy::Measured;
+	source.Overscan = 0;
+	source.Revision = 1;
+	for (int index = 0; index < 3; index++) {
+		VirtualRecord record;
+		record.Key = std::to_string(index);
+		record.MeasuredExtent = index == 1 ? 80.0f : 20.0f;
+		source.Page.Records.push_back(record);
+	}
+	world.Data.Set(collection, source);
+	REQUIRE(world.Rebuild());
+	bool middle = false;
+	bool last = false;
+	for (const DrawCommand &command : world.List.Commands().Commands) {
+		if (command.Source != row || command.Kind != DrawKind::Rectangle) continue;
+		middle |= command.Key == "1";
+		if (command.Key == "1") CHECK(command.Bounds.Height() == Catch::Approx(80.0f));
+		last |= command.Key == "2";
+	}
+	CHECK(middle);
+	CHECK_FALSE(last);
+
+	// A corrected earlier extent keeps the keyed row at the same screen Y.
+	source.Page.Records.front().MeasuredExtent = 30.0f;
+	source.Revision++;
+	world.Data.Set(collection, source);
+	REQUIRE(world.Rebuild());
+	CHECK(world.Data.Get<Scrolling>(list)->CanvasPosition.Y == Catch::Approx(60.0f));
+}
+
+TEST_CASE("virtual grids compile visible row-major template facets", "[gui][compile][virtual]") {
+	World world("gui_compile.virtual_grid");
+	const Entity screen = world.Make("ScreenGui");
+	const Entity list = world.Make("ScrollingFrame", screen);
+	Element listElement;
+	listElement.Size = UDim2{0.0f, 100.0f, 0.0f, 30.0f};
+	world.Data.Set(list, listElement);
+	const Entity collection = world.Make("UIVirtualCollection", list);
+	const Entity row = world.Make("Frame", collection);
+	Element rowElement;
+	rowElement.Size = UDim2{0.0f, 40.0f, 0.0f, 20.0f};
+	world.Data.Set(row, rowElement);
+
+	VirtualCollection grid;
+	grid.ItemCount = 6;
+	grid.LayoutPolicy = VirtualLayoutPolicy::Grid;
+	grid.GridColumns = 3;
+	grid.GridCellStride = {40.0f, 20.0f};
+	grid.Overscan = 0;
+	for (uint32_t index = 0; index < grid.ItemCount; index++) {
+		grid.Page.Records.push_back(VirtualRecord{.Key = std::to_string(index), .Fields = {}});
+	}
+	world.Data.Set(collection, grid);
+	REQUIRE(world.Rebuild());
+
+	std::vector<const DrawCommand *> facets;
+	for (const DrawCommand &command : world.List.Commands().Commands) {
+		if (command.Source == row && command.Kind == DrawKind::Rectangle) facets.push_back(&command);
+	}
+	REQUIRE(facets.size() == 6);
+	CHECK(facets[0]->Bounds.Min == Vector2{0.0f, 0.0f});
+	CHECK(facets[2]->Bounds.Min == Vector2{80.0f, 0.0f});
+	CHECK(facets[3]->Bounds.Min == Vector2{0.0f, 20.0f});
 }

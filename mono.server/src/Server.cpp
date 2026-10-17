@@ -1,14 +1,16 @@
+#include "ObservationSink.hpp"
 #include "RetainedBodyGrant.hpp"
 
 #include <engine/assets/ChunkStore.hpp>
 #include <engine/assets/Grant.hpp>
 #include <engine/assets/Signature.hpp>
 #include <engine/control/DataScriptPackage.hpp>
-#include <engine/control/Features.hpp>
-#include <engine/control/features/DataFactory.hpp>
+#include <engine/control/Surface.hpp>
 #include <engine/control/features/DataScene.hpp>
+#include <engine/control/features/PhysicsObservation.hpp>
 #include <engine/control/features/Script.hpp>
 #include <engine/control/features/Universe.hpp>
+#include <engine/core/BenchmarkReport.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/Log.hpp>
@@ -18,13 +20,18 @@
 #include <engine/datastore/Sqlite.hpp>
 #include <engine/delivery/Relay.hpp>
 #include <engine/delivery/Validation.hpp>
+#include <engine/ecs/Attributes.hpp>
+#include <engine/ecs/Classes.hpp>
+#include <engine/effects/Registration.hpp>
 #include <engine/examples/Scene.hpp>
 #include <engine/game/CollisionContent.hpp>
 #include <engine/game/Content.hpp>
 #include <engine/game/Game.hpp>
 #include <engine/game/Play.hpp>
+#include <engine/game/PortalSeamCoordinator.hpp>
 #include <engine/game/PortalSession.hpp>
 #include <engine/game/Project.hpp>
+#include <engine/gui/Registration.hpp>
 #include <engine/gui/Services.hpp>
 #include <engine/net/Endpoint.hpp>
 #include <engine/parallel/Jobs.hpp>
@@ -41,9 +48,14 @@
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Ownership.hpp>
+#include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/SurfaceCameras.hpp>
+#include <engine/script/Clock.hpp>
 #include <engine/script/Codec.hpp>
 #include <engine/script/DataScriptPackageTransaction.hpp>
+#include <engine/script/Instances.hpp>
+#include <engine/script/PortalObservation.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/scripthost/Runtime.hpp>
 #include <engine/world/DataStore.hpp>
@@ -56,19 +68,31 @@
 #include <cdn/Origin.hpp>
 #include <cdn/Service.hpp>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <network/SessionKey.hpp>
+#include <optional>
 #include <server/ContentRelay.hpp>
+#include <server/PortalJournal.hpp>
 #include <server/Server.hpp>
 #include <server/Simulation.hpp>
+#include <span>
 #include <thread>
 
 namespace server {
 
 	namespace {
+		std::filesystem::path PortalJournalPath(const Options &settings, engine::core::Name world) {
+			const std::string_view name = world.Text();
+			const auto digest =
+				engine::assets::Hasher::Of(std::as_bytes(std::span(name.data(), name.size())));
+			return settings.DataStoreRoot / engine::world::Describe(settings.DataStoreEnvironment) /
+				   "portal-journals" / (digest.ToHex() + ".journal");
+		}
+
 		void ReportPortalFault(const Options &settings, std::string_view marker) {
 			if (settings.TestPortalFaultReport.empty()) return;
 			std::ofstream report(settings.TestPortalFaultReport, std::ios::app);
@@ -316,20 +340,6 @@ namespace server {
 		// The one topic every chattering world uses.
 		constexpr const char *CHATTER_TOPIC = "placeholder.chatter";
 
-		// What one confirmed hit takes off a character.
-		//
-		// **A quarter of a default `Humanoid::MaxHealth`, chosen against that
-		// number rather than tuned.** Four hits to a kill is the smallest figure
-		// that makes a death reachable in a session and still leaves the health
-		// bar saying something on the way there; a game with an opinion sets its
-		// own on the humanoid it spawns.
-		//
-		// **A constant and never a roll.** A damage drawn from a random number is
-		// a recording that does not replay, which is the rule `scene::FindSpawn`
-		// already keeps about picking a pad in tree order - and `just
-		// replay-check` would report it a long way from here.
-		constexpr float SHOT_DAMAGE = 25.0f;
-
 		// This executable, for spawning hosts of itself.
 		//
 		// `Paths::Base()` is the directory the binary sits in, which is where
@@ -378,6 +388,16 @@ namespace server {
 		ContentService.reset();
 		ContentOrigin.reset();
 		ContentGrantSecret.reset();
+		ReplicationObservationControlHook.Close();
+		FactoryPackageControlHook.Close();
+		FactoryCameraRenderingControlHook.Close();
+		FactoryPhysicsControlHook.Close();
+		FactorySceneControlHook.Close();
+		FactoryLifecycleControlHook.Close();
+		ProductControlHook.Close();
+		for (auto hook = BuiltinControlHooks.rbegin(); hook != BuiltinControlHooks.rend(); ++hook)
+			hook->Close();
+		BuiltinControlHooks.clear();
 		// Runtime cleanup detaches hooks from its borrowed store.
 		Runtimes.clear();
 		DataFactory.reset();
@@ -741,6 +761,19 @@ namespace server {
 		// Stop is process-global because signal handlers cannot borrow a host. A
 		// fresh host must clear a prior host's stop before any early return.
 		StopRequested.store(false);
+		if (Settings.BenchmarkWaitForClient && (Settings.BenchmarkReport.empty() || !Settings.Listening)) {
+			ENGINE_ERROR("--benchmark-wait-for-client requires --benchmark-report and --listen");
+			return false;
+		}
+		if (!Settings.BenchmarkReport.empty() && (!std::isfinite(Settings.BenchmarkSeconds) ||
+												  Settings.BenchmarkSeconds <= 0.0 || Settings.DataFactory)) {
+			ENGINE_ERROR("benchmark reports require a positive finite duration and a simulation world");
+			return false;
+		}
+		if (!Settings.BenchmarkReport.empty() && !engine::core::HeapProfile::IsCompiledIn()) {
+			ENGINE_ERROR("benchmark reports require allocator hooks; configure with MONO_HEAP_PROFILE=ON");
+			return false;
+		}
 		if (Settings.DataFactory && Settings.ControlPort < 0) {
 			ENGINE_ERROR("--data-factory requires --mcp-port so an external factory can create its world");
 			return false;
@@ -818,7 +851,7 @@ namespace server {
 		}
 
 		// Register names before any snapshot or world is built.
-		RegisterPlaceholderComponents();
+		RegisterServerComponents();
 		engine::script::RegisterPortalTransferComponents();
 
 		engine::world::UniverseSettings universe;
@@ -862,6 +895,22 @@ namespace server {
 			driver.Hosts.Arguments.emplace_back("--game");
 			driver.Hosts.Arguments.emplace_back(Settings.GamePath);
 		}
+		if (!Settings.DataStoreRoot.empty()) {
+			// A child that owns a portal destination must keep the same durable
+			// transfer policy as its driver. Leaving this behind makes one side
+			// accept an offer that the other side is configured to refuse.
+			driver.Hosts.Arguments.emplace_back("--datastore-root");
+			driver.Hosts.Arguments.emplace_back(Settings.DataStoreRoot.string());
+		}
+		if (Settings.Listening) {
+			// A portal route ends at the host that owns the destination world. Give
+			// that host its own ephemeral listener so the client can complete the
+			// lease there rather than reconnecting to the source authority.
+			driver.Hosts.Arguments.insert(
+				driver.Hosts.Arguments.end(),
+				{"--listen", "--listen-port", "0", "--transport", engine::net::Describe(Settings.Transport)}
+			);
+		}
 		if (driver.CoordinateHostTicks) driver.Hosts.Arguments.emplace_back("--host-tick-exchange");
 		if (!Settings.PresentationProgram.empty()) {
 			driver.Hosts.Arguments.insert(
@@ -877,6 +926,12 @@ namespace server {
 		}
 		if (Settings.TestDropNextPortalCrossedAcknowledgement)
 			driver.Hosts.Arguments.emplace_back("--test-drop-next-portal-crossed-acknowledgement");
+		if (!Settings.ObserveDirectory.empty()) {
+			driver.Hosts.Arguments.emplace_back("--observe-dir");
+			driver.Hosts.Arguments.emplace_back(Settings.ObserveDirectory.string());
+			driver.Hosts.Arguments.emplace_back("--observe-trace");
+			driver.Hosts.Arguments.emplace_back(std::to_string(Settings.ObserveTrace));
+		}
 		if (!Settings.TestPortalFaultReport.empty()) {
 			driver.Hosts.Arguments.emplace_back("--test-portal-fault-report");
 			driver.Hosts.Arguments.emplace_back(Settings.TestPortalFaultReport.string());
@@ -897,6 +952,10 @@ namespace server {
 			driver.Hosts.Arguments.emplace_back("--profile-window");
 			driver.Hosts.Arguments.emplace_back(std::to_string(Settings.ProfileWindowTicks));
 		}
+		if (Settings.MetricsReportSeconds > 0.0) {
+			driver.Hosts.Arguments.emplace_back("--metrics-every");
+			driver.Hosts.Arguments.emplace_back(std::to_string(Settings.MetricsReportSeconds));
+		}
 
 		if (Settings.Chatter) {
 			driver.Hosts.Arguments.emplace_back("--chatter");
@@ -910,17 +969,39 @@ namespace server {
 		}
 
 		Driver_ = std::make_unique<engine::world::Driver>(driver);
+		Driver_->SetFixedStepBarrier(engine::game::MakePortalIslandCoordinator().Callbacks());
 		if (Settings.DataFactory) {
-			// A factory begins empty, but its first MCP create still constructs a
-			// Store. Construct and remove one private world while component
-			// registration remains open, so the later create cannot mint ECS
-			// bookkeeping types after the executable sealed the shared table.
+			const auto prepareFactoryWorld =
+				[this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+					RegisterServerDiagnostics(systems);
+					PrepareSimulation(store, systems, Settings.PhysicsTickRate);
+					InstallCollisionShapes(store);
+					engine::scene::InstallServices(store);
+					engine::gui::InstallGuiServices(store);
+				};
+			// Later MCP worlds and package VMs must not register types after Seal.
+			// The bootstrap runs no source and releases its VM before its store.
+			engine::scene::RegisterSceneClasses();
+			engine::effects::RegisterEffectClasses();
+			(void)engine::script::ScriptClass();
 			engine::world::WorldSettings bootstrap;
 			bootstrap.Name = engine::core::Name("server.data-factory.bootstrap");
 			bootstrap.TickRate = Settings.TickRate;
 			const engine::world::WorldId bootstrapWorld = Worlds().Create(bootstrap);
+			bool bootstrapReady = false;
 			if (!bootstrapWorld.IsValid() ||
-				Worlds().Destroy(bootstrapWorld) != engine::world::WorldStatus::Ok) {
+				Worlds().Enter(
+					bootstrapWorld,
+					[&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+						prepareFactoryWorld(store, systems);
+						engine::script::RuntimeLimits limits;
+						limits.Role = engine::script::HostRole::OfServer();
+						const auto runtime =
+							engine::script::MakeRuntime(store, engine::script::Language::Luau, limits);
+						bootstrapReady = runtime != nullptr;
+					}
+				) != engine::world::WorldStatus::Ok ||
+				!bootstrapReady || Worlds().Destroy(bootstrapWorld) != engine::world::WorldStatus::Ok) {
 				ENGINE_ERROR("server could not prepare isolated data-factory world storage");
 				return false;
 			}
@@ -947,8 +1028,8 @@ namespace server {
 			});
 			DataFactory->SetRehydrate(
 				[this](engine::world::Universe &universe, engine::world::WorldId world, std::string &detail) {
-					if (universe.Enter(world, [](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-							RegisterPlaceholderSystems(store, systems);
+					if (universe.Enter(world, [](engine::ecs::Store &, engine::ecs::Scheduler &systems) {
+							RegisterServerDiagnostics(systems);
 						}) != engine::world::WorldStatus::Ok) {
 						detail = "server could not rebuild factory scheduler state";
 						return false;
@@ -957,7 +1038,7 @@ namespace server {
 					return true;
 				}
 			);
-			DataFactory->SetWorldLifecycle([this](
+			DataFactory->SetWorldLifecycle([this, prepareFactoryWorld](
 											   engine::world::DataFactoryWorldOperation operation,
 											   engine::world::Universe &universe,
 											   engine::world::WorldId world,
@@ -979,8 +1060,11 @@ namespace server {
 				if (!world.IsValid() ||
 					universe.Enter(
 						world,
-						[this, &prepared](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-							prepared = BuildWorld(store, systems);
+						[&](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+							// Factory packages own the content. A benchmark VM would outlive
+							// its borrowed store when the factory replaces or retires it.
+							prepareFactoryWorld(store, systems);
+							prepared = true;
 						}
 					) != engine::world::WorldStatus::Ok ||
 					!prepared) {
@@ -1007,6 +1091,12 @@ namespace server {
 		}
 
 		if (!Settings.ReplayPath.empty()) {
+			// The snapshot names script and scene components before the restore
+			// callback has a world to enter. Register their class trees first.
+			engine::scene::RegisterSceneClasses();
+			engine::gui::RegisterGuiClasses();
+			engine::effects::RegisterEffectClasses();
+			(void)engine::script::ScriptClass();
 			std::vector<std::byte> bytes;
 			if (!ReadFile(Settings.ReplayPath, bytes)) {
 				ENGINE_ERROR("could not read the recording at '{}'", Settings.ReplayPath.string());
@@ -1021,18 +1111,42 @@ namespace server {
 			}
 
 			// Restore state, then install the systems for this executable.
-			const bool restored =
-				Replayer_->Restore(Worlds(), [](engine::world::Universe &into, engine::world::WorldId id) {
-					into.Enter(id, [](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-						RegisterPlaceholderSystems(store, systems);
-						const auto incarnation = engine::script::PortalTransferIncarnation(store);
-						if (incarnation != 0) {
-							engine::script::RegisterTeleportAdmission(systems);
+			bool restoredScripts = true;
+			const bool restored = Replayer_->Restore(
+				Worlds(), [this, &restoredScripts](engine::world::Universe &into, engine::world::WorldId id) {
+					const double scriptTickRate = into.SettingsOf(id).ScriptTickRate;
+					const double physicsTickRate = into.SettingsOf(id).PhysicsTickRate;
+					const auto status = into.Enter(
+						id,
+						[this, id, scriptTickRate, physicsTickRate, &restoredScripts](
+							engine::ecs::Store &store, engine::ecs::Scheduler &systems
+						) {
+							engine::scene::RegisterSceneClasses();
+							RegisterServerDiagnostics(systems);
+							PrepareSimulation(store, systems, physicsTickRate);
+							engine::script::RuntimeLimits limits;
+							limits.Role = engine::script::HostRole::OfServer();
+							std::string error;
+							Runtimes.emplace_back(
+								id,
+								engine::game::StartWorldScripts(
+									store, systems, limits, error, nullptr, scriptTickRate
+								)
+							);
+							if (!error.empty()) {
+								ENGINE_ERROR("replay world '{}': {}", store.Name(), error);
+								restoredScripts = false;
+							}
+							// Runtime rebinding may mark an observed script field. A replay
+							// starts at the same clean tick boundary as the source recording.
+							store.ClearChanges();
 						}
-					});
-				});
+					);
+					if (status != engine::world::WorldStatus::Ok) restoredScripts = false;
+				}
+			);
 
-			if (!restored) {
+			if (!restored || !restoredScripts) {
 				ENGINE_ERROR("the recording's snapshot could not be restored");
 				return false;
 			}
@@ -1077,14 +1191,17 @@ namespace server {
 					PrimaryWorld = id;
 				}
 
-				Worlds().Enter(id, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-					if (!BuildWorld(store, systems)) {
-						return;
+				bool built = false;
+				const auto status = Worlds().Enter(
+					id, [this, id, &built](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+						built = BuildWorld(id, store, systems);
+						if (!built) return;
+						if (Settings.Chatter) {
+							store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
+						}
 					}
-					if (Settings.Chatter) {
-						store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
-					}
-				});
+				);
+				if (status != engine::world::WorldStatus::Ok || !built) return false;
 			}
 		}
 
@@ -1226,6 +1343,43 @@ namespace server {
 		ENGINE_INFO("loaded {} DataStore record(s) from '{}'", PersistedDataStore.size(), location);
 		DataStorePersistence = std::move(persistence);
 		DataStoreReady = true;
+		return true;
+	}
+
+	bool Server::FlushPortalTransferDecisions() {
+		if (Settings.DataStoreRoot.empty() || !PrimaryWorld.IsValid()) return false;
+		std::vector<engine::script::PortalTransferDecision> pending;
+		Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store) {
+			pending = engine::script::PortalTransferPendingDecisions(store);
+		});
+		std::vector<PortalJournalRecord> writes;
+		for (const auto &decision : pending)
+			if (!PortalJournalPending(DurablePortalTransferDecisions, decision))
+				writes.push_back({decision, PortalJournalOutcome::Commit});
+		if (!AppendPortalJournal(PortalJournalPath(Settings, Worlds().NameOf(PrimaryWorld)), writes))
+			return false;
+		for (const auto &write : writes) {
+			auto existing = std::find_if(
+				DurablePortalTransferDecisions.begin(),
+				DurablePortalTransferDecisions.end(),
+				[&](const auto &prior) {
+					return prior.Decision.Receipt.Id == write.Decision.Receipt.Id &&
+						   prior.Decision.Receipt.Fence == write.Decision.Receipt.Fence &&
+						   prior.Decision.Body.Key == write.Decision.Body.Key &&
+						   prior.Decision.Body.Generation == write.Decision.Body.Generation;
+				}
+			);
+			if (existing == DurablePortalTransferDecisions.end())
+				DurablePortalTransferDecisions.push_back(write);
+			else
+				*existing = write;
+		}
+		Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store) {
+			for (const auto &decision : pending)
+				(void)engine::script::MarkPortalTransferDurable(
+					store, decision.Receipt.Id, decision.Receipt.Fence.BaselineHash
+				);
+		});
 		return true;
 	}
 
@@ -1536,34 +1690,53 @@ namespace server {
 		return true;
 	}
 
-	bool Server::BuildWorld(engine::ecs::Store &store, engine::ecs::Scheduler &scheduler) {
-		if (Settings.GamePath.empty()) {
-			// **No physics on the placeholder, deliberately.** It is a
-			// benchmark scene rather than a game: its entities carry no
-			// `Part` and so no rigid body, its own `Integrate` and `Bounce`
-			// are what it exists to measure, and `--entities 512 --ticks 200`
-			// is the shape `just determinism` and `just replay-check` compare.
-			// Preparing it would add a resource and two systems that find
-			// nothing to do, and put them inside the thing being measured.
-			BuildPlaceholderWorld(store, scheduler, Settings.Entities);
-			return true;
-		}
-
-		// The same loader the client calls, over the same file. A server that
-		// authored the scene differently would be disagreeing with its own
-		// replicas once per tick, and every side would look self-consistent.
-		//
-		// What it does *not* install is the client's half - there is no camera
-		// and no draw list here, because a server draws nothing. That split is
-		// the reason the loader stops where it does.
+	bool Server::BuildWorld(
+		engine::world::WorldId id, engine::ecs::Store &store, engine::ecs::Scheduler &scheduler
+	) {
+		RegisterServerDiagnostics(scheduler);
+		// Both the default Luau field and an explicit game use the server's
+		// physics and character systems. Prepare them before either script runs.
 		PrepareSimulation(store, scheduler, Settings.PhysicsTickRate);
 		InstallCollisionShapes(store);
-
-		std::string error;
-		if (!engine::examples::LoadScene(store, scheduler, Settings.GamePath, error)) {
-			ENGINE_ERROR("--game '{}' failed:\n{}", Settings.GamePath, error);
-			return false;
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfServer();
+		std::shared_ptr<engine::script::Runtime> runtime;
+		if (Settings.GamePath.empty()) {
+			// The default benchmark field is authored and moved by Luau. The host
+			// only passes the requested count through a serialized world attribute.
+			engine::scene::RegisterSceneClasses();
+			const engine::ecs::Entity workspace = engine::scene::InstallServices(store);
+			engine::ecs::AttributeValue count;
+			count.Type = engine::ecs::PropertyType::Double;
+			count.Double = Settings.Entities;
+			if (!engine::ecs::SetAttribute(
+					store, workspace, engine::core::Name("ServerDefaultCount"), count
+				)) {
+				ENGINE_ERROR("the default scene could not receive its entity count");
+				return false;
+			}
+			std::string error;
+			const std::string path = engine::examples::ExamplePath("ServerDefault.luau");
+			if (!engine::examples::LoadScene(store, scheduler, path, error, &runtime, &limits)) {
+				ENGINE_ERROR("default scene '{}' failed:\n{}", path, error);
+				return false;
+			}
+			// The replay path uses StartWorldScripts, whose scheduler reads this
+			// resource. Keep its initial snapshot equal on both paths.
+			engine::script::SetScriptTickRate(store, 0.0);
+		} else {
+			// The same loader the client calls, over the same file. A server that
+			// authored the scene differently would disagree with its own replicas.
+			std::string error;
+			if (!engine::examples::LoadScene(store, scheduler, Settings.GamePath, error, &runtime, &limits)) {
+				ENGINE_ERROR("--game '{}' failed:\n{}", Settings.GamePath, error);
+				return false;
+			}
 		}
+		// Scene construction precedes the first tick. Begin recording and replay
+		// from the same clean change boundary, including observed physics rows.
+		store.ClearChanges();
+		Runtimes.emplace_back(id, std::move(runtime));
 		return true;
 	}
 
@@ -1621,6 +1794,17 @@ namespace server {
 		}
 
 		Replication = std::make_unique<engine::replication::Listener>(*Socket, streaming);
+		if (Settings.ControlPort >= 0) {
+			if (!ReplicationObservationRecords)
+				ReplicationObservationRecords =
+					std::make_unique<engine::replication::ReplicationObservations>();
+			else
+				ReplicationObservationRecords->Clear();
+			const engine::core::Name worldName = Worlds().NameOf(PrimaryWorld);
+			Replication->Authority().SetObservations(
+				worldName, worldName, ReplicationObservationRecords.get()
+			);
+		}
 
 		AdmittedClientKeys.clear();
 		for (const std::string &text : Settings.AdmittedKeys) {
@@ -1670,7 +1854,9 @@ namespace server {
 		// gone is three chances to declare them differently.
 		for (const engine::replication::ReplicatedComponent &component :
 			 engine::replication::DefaultReplicatedComponents()) {
-			Replication->Authority().Replicate(engine::core::Name(component.Name), component.Detection);
+			Replication->Authority().Replicate(
+				engine::core::Name(component.Name), component.Detection, component.Resource
+			);
 
 			// After `Replicate`, which is what declares the slot this names.
 			if (!component.Suppressor.empty()) {
@@ -1700,18 +1886,9 @@ namespace server {
 				return PositionOf(entity, out);
 			};
 
-			// **Where a client is looking from, which this server now knows.**
-			// It did not until v0.15: the comment here said the placeholder
-			// world was cubes with nobody in it, and it was right - nothing
-			// called `SetClientViewpoint`, so `DistancePriority` fell back to
-			// the round robin it was written to replace, on every connection,
-			// for three versions. `UpdateClientViewpoints` points each client at
-			// its own character once a tick.
-			//
-			// A client nothing has placed still scores everything the same, and
-			// that is still the honest answer rather than pretending every
-			// client is at the origin: between a join and a spawn there is
-			// genuinely nowhere it is standing.
+			// A spawned character supplies the client's viewpoint. Until then,
+			// `DistancePriority` falls back to round-robin scoring rather than
+			// placing an unspawned client at the origin.
 			score.Viewpoint = [this](engine::replication::ClientId client, engine::core::Vector3 &out) {
 				return ViewpointOf(client, out);
 			};
@@ -1774,18 +1951,24 @@ namespace server {
 			// below have to agree about it: one grants the rank and the other has
 			// to recognise it in order to leave it alone.
 			constexpr float REPLICATED_FIRST = 2.0f;
+			const engine::ecs::ClassId replicatedFirstClass =
+				engine::ecs::Classes::Find(engine::core::Name("ReplicatedFirst"));
 
-			Replication->Authority().SetPriority(
-				[this, score](engine::replication::ClientId client, engine::ecs::Entity entity) {
-					// The publish's own store, for `PositionOf`'s reason: this runs
-					// once per candidate per client and re-entering the world to
-					// walk one entity's ancestry was the second of the two entries
-					// this path was paying per call.
-					const bool first =
-						Publishing != nullptr && engine::scene::InReplicatedFirst(*Publishing, entity);
-					return first ? REPLICATED_FIRST : score(client, entity);
-				}
-			);
+			Replication->Authority().SetPriority([this, score, replicatedFirstClass](
+													 engine::replication::ClientId client,
+													 engine::ecs::Entity entity
+												 ) {
+				// The publish's own store, for `PositionOf`'s reason: this runs
+				// once per candidate per client. A registered class id is stable for
+				// the process, so the common path avoids a registry lock. Keep the
+				// name lookup if services are registered after listener setup.
+				const bool first =
+					Publishing != nullptr &&
+					(replicatedFirstClass.IsValid()
+						 ? engine::scene::InReplicatedFirst(*Publishing, entity, replicatedFirstClass)
+						 : engine::scene::InReplicatedFirst(*Publishing, entity));
+				return first ? REPLICATED_FIRST : score(client, entity);
+			});
 
 			// **The occlusion raycast, asked only about the rows in
 			// contention.** `SetPriorityRefinement` is consulted for what a
@@ -1851,10 +2034,8 @@ namespace server {
 					return;
 				}
 
-				// **A world with no `Players` service gets no player, quietly.**
-				// That is not a misconfiguration to warn about - it is the
-				// placeholder world, which is furnished by nobody and is what
-				// `--entities` builds. A game file has services and gets one.
+				// A service-free world cannot admit a player. It may be intentionally
+				// hosted for simulation, so absence of `Players` is not warned here.
 				if (engine::scene::PlayersOf(store) == engine::ecs::NULL_ENTITY) {
 					return;
 				}
@@ -1929,6 +2110,20 @@ namespace server {
 		Replication->OnUserMessage(
 			[this, admitFresh](engine::replication::ClientId client, std::span<const std::byte> payload) {
 				if (ReceivePlayerPresentation(client, payload)) return;
+				engine::script::RemoteEventMessage remote;
+				if (engine::script::DecodeRemoteEvent(payload, remote)) {
+					const auto assigned = Players.find(client.Index);
+					if (assigned == Players.end() || assigned->second.Generation != client.Generation) return;
+					const engine::ecs::Entity sender = assigned->second.Instance;
+					Worlds().Enter(PrimaryWorld, [this, payload, sender](engine::ecs::Store &) {
+						if (engine::script::Runtime *runtime = RuntimeOf(PrimaryWorld); runtime != nullptr) {
+							if (!runtime->DeliverRemoteEvent(payload, sender)) {
+								ENGINE_WARN("server: refused RemoteEvent payload");
+							}
+						}
+					});
+					return;
+				}
 				engine::game::PortalSessionMessage admission;
 				if (engine::game::DecodePortalSession(payload, admission)) {
 					if (admission.Kind == engine::game::PortalSessionKind::Fresh) {
@@ -2021,7 +2216,7 @@ namespace server {
 
 		Replication->OnAdmitted([this](engine::replication::ClientId client) {
 			// Apply the world delay before the join notice and first snapshot are
-			// sent. Placeholder worlds have no Player row but still use this value.
+			// sent. A service-free world has no Player row but still uses this value.
 			Replication->SetSimulatedLatency(
 				client, Worlds().SettingsOf(PrimaryWorld).GlobalSimulatedNetworkLatency
 			);
@@ -2130,58 +2325,48 @@ namespace server {
 		// same split `SetOwnership` makes one block up: `mono.engine/replication`
 		// does not depend on `scene` and must not, because the wire's job is to
 		// move components and it has no business knowing what a service is.
-		Replication->Authority().SetInterest([this](
-												 engine::replication::ClientId client,
-												 engine::ecs::Entity entity,
-												 const engine::ecs::Store &store
-											 ) {
-			// **Two lookups into what `SurveyVisibility` worked out this tick,
-			// rather than two walks up the tree.** Both of those questions are
-			// about the world rather than about who is asking, and this runs once
-			// per entity per client - see `HiddenFromClients`.
-			if (std::binary_search(HiddenFromClients.begin(), HiddenFromClients.end(), entity.Id)) {
-				return false;
-			}
-
-			// **Almost everything is nobody's**, so this answers first and the
-			// player lookup below is paid only by the few rows under a player.
-			const auto owned = std::lower_bound(
-				OwnedByPlayer.begin(),
-				OwnedByPlayer.end(),
-				entity.Id,
-				[](const std::pair<uint64_t, engine::ecs::Entity> &row, uint64_t id) {
-					return row.first < id;
-				}
-			);
-			if (owned == OwnedByPlayer.end() || owned->first != entity.Id) {
-				return true;
-			}
-
-			const engine::ecs::Entity owner = owned->second;
-
-			// **The `Player` row itself goes to everybody; what is *under* it
-			// does not.** Roblox draws the line in the same place and for the
-			// same reason: `Players:GetPlayers()` is how a game knows who is in
-			// it, and a client shown only its own row would think it was alone.
-			// `server.replication`'s "a client is told which player is theirs"
-			// case is what caught this - the first version of this predicate hid
-			// every player from every other client, which reads as a lobby that
-			// never fills.
-			if (entity == owner) {
-				return true;
-			}
-
-			// **A client this server has forgotten sees nothing under any
-			// player**, rather than everything: the map is the only statement of
-			// who a connection is, and a handle it does not answer for is a
-			// connection that has gone. Failing open here would show a departing
-			// client every player's interface on its way out.
+		Replication->Authority().SetInterestBatch([this](
+													  engine::replication::ClientId client,
+													  const engine::ecs::Store &,
+													  std::span<const engine::ecs::Entity> candidates,
+													  std::span<uint8_t> accepted
+												  ) {
+			// **One client lookup for the whole batch.** A forgotten or recycled
+			// slot may still see public rows, but never any descendant of a
+			// `Player`; generation is the proof that the slot still names this
+			// connection.
 			const auto occupant = Players.find(client.Index);
-			if (occupant == Players.end() || occupant->second.Generation != client.Generation) {
-				return false;
+			const engine::ecs::Entity player =
+				occupant != Players.end() && occupant->second.Generation == client.Generation
+					? occupant->second.Instance
+					: engine::ecs::NULL_ENTITY;
+
+			size_t exception = 0;
+			for (size_t index = 0; index < candidates.size(); index++) {
+				const uint64_t entityId = candidates[index].Id;
+				while (exception < VisibilityExceptions.size() &&
+					   VisibilityExceptions[exception].EntityId < entityId) {
+					exception++;
+				}
+
+				uint8_t visible = 1;
+				if (exception < VisibilityExceptions.size() &&
+					VisibilityExceptions[exception].EntityId == entityId) {
+					const VisibilityException &entry = VisibilityExceptions[exception];
+					switch (entry.Kind) {
+					case VisibilityExceptionKind::Hidden:
+						visible = 0;
+						break;
+					case VisibilityExceptionKind::RequirePlayer:
+						visible = player != engine::ecs::NULL_ENTITY;
+						break;
+					case VisibilityExceptionKind::OwnerOnly:
+						visible = player != engine::ecs::NULL_ENTITY && entry.Owner == player;
+						break;
+					}
+				}
+				accepted[index] = visible;
 			}
-			const engine::ecs::Entity privateOwner = engine::scene::PrivatePlayerOwning(store, entity);
-			return privateOwner == engine::ecs::NULL_ENTITY || owner == occupant->second.Instance;
 		});
 
 		// A delta is the third reader of the dirty bits, so the components that
@@ -2205,17 +2390,50 @@ namespace server {
 		);
 
 		if (!Worlds().IsRemote(PrimaryWorld)) {
+			auto durability = Settings.DataStoreRoot.empty()
+								  ? engine::script::PortalTransferDurability::Disabled
+								  : engine::script::PortalTransferDurability::RequirePrepareCommit;
+			if (durability == engine::script::PortalTransferDurability::RequirePrepareCommit &&
+				!LoadPortalJournal(
+					PortalJournalPath(Settings, Worlds().NameOf(PrimaryWorld)), DurablePortalTransferDecisions
+				)) {
+				ENGINE_ERROR(
+					"could not recover portal transfer journal '{}'",
+					PortalJournalPath(Settings, Worlds().NameOf(PrimaryWorld)).string()
+				);
+				return false;
+			}
+			if (durability == engine::script::PortalTransferDurability::Disabled)
+				ENGINE_WARN("portal transfers are disabled because --datastore-root was not configured");
 			const auto endpoint =
 				Worlds().OpenPresentation(PrimaryWorld, engine::core::Name("portal-sessions"));
 			if (endpoint.Status != engine::world::PresentationStatus::Ok) return false;
 			PortalSessionEndpoint = endpoint.Address;
 			bool configured = false;
 			Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store, engine::ecs::Scheduler &scheduler) {
-				configured = engine::script::ConfigurePortalTransfers(store, endpoint.Address.Session, true);
+				configured = engine::script::ConfigurePortalTransfers(
+					store, endpoint.Address.Session, true, durability
+				);
 				if (configured) engine::script::RegisterTeleportAdmission(scheduler);
 			});
 			if (!configured) {
 				ENGINE_ERROR("listening world could not configure authenticated portal transfers");
+				return false;
+			}
+			bool restored = true;
+			if (durability == engine::script::PortalTransferDurability::RequirePrepareCommit)
+				Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store) {
+					for (const auto &record : DurablePortalTransferDecisions)
+						if (record.Outcome == PortalJournalOutcome::Commit)
+							restored &= engine::script::RestorePortalTransferDecision(store, record.Decision);
+				});
+			if (!restored) {
+				ENGINE_ERROR("portal transfer journal could not restore its sealed source decisions");
+				return false;
+			}
+			if (durability == engine::script::PortalTransferDurability::RequirePrepareCommit &&
+				!FlushPortalTransferDecisions()) {
+				ENGINE_ERROR("portal transfer journal does not match the restored source snapshot");
 				return false;
 			}
 		}
@@ -2239,8 +2457,7 @@ namespace server {
 	void Server::SurveyVisibility(engine::ecs::Store &store) {
 		ENGINE_PROFILE_CAT("Server::SurveyVisibility", engine::core::ProfileCategory::Network);
 
-		HiddenFromClients.clear();
-		OwnedByPlayer.clear();
+		VisibilityExceptions.clear();
 		if (Settings.GamePath.empty()) {
 			return;
 		}
@@ -2254,26 +2471,30 @@ namespace server {
 			return;
 		}
 
-		// **One walk for the world, where the predicate it feeds is one walk per
-		// entity per client.** `EachEntity` visits in archetype order, so both
-		// lists are sorted afterwards rather than assumed to be - the predicate
-		// reaches them by binary search.
+		// **One walk for the world, where the batch predicate it feeds walks only
+		// sorted candidates.** `EachEntity` visits in archetype order, so the
+		// exceptions are sorted afterwards rather than assumed to be.
 		store.EachEntity([this, &store](engine::ecs::Entity entity) {
 			if (!engine::scene::VisibleToClients(store, entity)) {
-				HiddenFromClients.push_back(entity.Id);
+				VisibilityExceptions.push_back({entity.Id, VisibilityExceptionKind::Hidden, {}});
 				return;
 			}
 
 			const engine::ecs::Entity owner = engine::scene::PlayerOwning(store, entity);
-			if (owner != engine::ecs::NULL_ENTITY) {
-				OwnedByPlayer.emplace_back(entity.Id, owner);
-			}
+			if (owner == engine::ecs::NULL_ENTITY || entity == owner) return;
+
+			const engine::ecs::Entity privateOwner = engine::scene::PrivatePlayerOwning(store, entity);
+			const VisibilityExceptionKind kind = privateOwner == engine::ecs::NULL_ENTITY
+													 ? VisibilityExceptionKind::RequirePlayer
+													 : VisibilityExceptionKind::OwnerOnly;
+			VisibilityExceptions.push_back({entity.Id, kind, privateOwner});
 		});
 
-		std::sort(HiddenFromClients.begin(), HiddenFromClients.end());
-		std::sort(OwnedByPlayer.begin(), OwnedByPlayer.end(), [](const auto &left, const auto &right) {
-			return left.first < right.first;
-		});
+		std::sort(
+			VisibilityExceptions.begin(),
+			VisibilityExceptions.end(),
+			[](const auto &left, const auto &right) { return left.EntityId < right.EntityId; }
+		);
 	}
 
 	bool Server::PositionOf(engine::ecs::Entity entity, engine::core::Vector3 &out) const {
@@ -2333,95 +2554,14 @@ namespace server {
 	}
 
 	void Server::ApplyInputs() {
-		// **The one place this engine is server-authoritative about something a
-		// client did.** A client sends where it aimed, never what it hit: a
-		// client that decided what it hit would be a client nothing downstream
-		// can second-guess, and no amount of validation afterwards recovers
-		// from that.
 		for (const auto &submission : Replication->Inputs()) {
 			for (const engine::replication::Input &input : submission.Inputs) {
-				// **Movement first, because it is the tagged one.** A shot is
-				// an untagged payload, so the order has to be "try the message
-				// that identifies itself, then the one that does not" - the
-				// reverse would eventually read a move as a shot at whatever
-				// three of its bytes happened to spell.
 				engine::game::MoveInput move;
 				if (engine::game::DecodeMoveInput(input.Bytes, move)) {
 					ApplyMove(submission.Client, move, input.Tick);
 					continue;
 				}
-
-				engine::examples::Shot shot;
-				if (!engine::examples::DecodeShot(input.Bytes, shot)) {
-					// A client sending something this is not is either running
-					// a different game or probing. Counted and dropped; there
-					// is nothing to answer.
-					Dropped++;
-					continue;
-				}
-
-				// The payload names the rendered authoritative tick, including its
-				// interpolation fraction. The envelope tick only orders inputs.
-				double seen = shot.ViewTick;
-
-				// Missing or out-of-window view time uses the present. History
-				// depth remains the maximum rewind a client can request.
-				if (History.Depth() == 0) {
-					continue;
-				}
-				if (seen == 0 || seen < static_cast<double>(History.Oldest()) ||
-					seen > static_cast<double>(History.Newest())) {
-					seen = static_cast<double>(History.Newest());
-				}
-
-				// The candidates are the *history's*, not the world's, and that
-				// is the whole reason a hit test uses one: an entity destroyed
-				// between the tick the client saw and now is still a legitimate
-				// thing to have shot at, and the world no longer has it.
-				Candidates.clear();
-				History.Each(seen, [this](engine::ecs::Entity entity, const engine::core::Vector3 &at) {
-					engine::examples::Target target;
-					target.Entity = entity;
-					target.At = at;
-					Candidates.push_back(target);
-				});
-
-				const engine::examples::Hit hit = engine::examples::NearestHit(shot, Candidates);
-				if (!hit.Struck) {
-					continue;
-				}
-
-				// Two effects, and they answer different questions: the recolour
-				// says *something* was hit and the damage says *somebody* was.
-				// `scene.Visual` and `scene.Humanoid` both replicate, so every
-				// client sees the server's verdict rather than the shooter's.
-				//
-				// **This is the consequence `docs/retired/DEFERRED.md` D00121 was
-				// waiting for.** A hit test with no consequence did not need "dead" to
-				// mean anything; the moment one subtracts something it does, and
-				// `scene::TakeDamage` is the door - including its refusal to run
-				// in a replica, which is why a client running this same code
-				// against its own copy could not kill anybody.
-				Worlds().Enter(PrimaryWorld, [&hit](engine::ecs::Store &store) {
-					if (auto *visual = store.GetMutable<engine::scene::Visual>(hit.Entity)) {
-						visual->Tint = engine::core::Color3{1.0f, 0.2f, 0.1f};
-					}
-
-					// **The rewind history holds parts, and a `Character` sits on
-					// the model above one.** A limb is intangible and never
-					// enters the history, so what can be struck on a person is
-					// the root - whose parent is the model. Anything else struck
-					// is scenery and has no humanoid to lose.
-					const auto *rig = store.Get<engine::scene::Character>(store.ParentOf(hit.Entity));
-					if (rig == nullptr) {
-						return;
-					}
-
-					if (engine::scene::TakeDamage(store, rig->Humanoid, SHOT_DAMAGE)) {
-						ENGINE_INFO("server: a shot killed a character; the respawn clock has started");
-					}
-				});
-				Struck++;
+				Dropped++;
 			}
 		}
 	}
@@ -2772,6 +2912,8 @@ namespace server {
 				if (script::PortalTransferIncarnation(store) != request.Claim.DestinationIncarnation) return;
 				const auto player = script::PortalTransferPlayer(store, request.Claim.Transfer);
 				if (player == ecs::NULL_ENTITY || !store.Alive(player)) return;
+				const auto fence = script::PortalTransferDestinationFence(store, request.Claim.Transfer);
+				if (!fence) return;
 				const auto assigned = Players.find(client.Index);
 				if (assigned != Players.end() &&
 					(assigned->second.Generation != client.Generation || assigned->second.Instance != player))
@@ -2779,6 +2921,7 @@ namespace server {
 				if (request.Kind == game::PortalSessionKind::Resume) {
 					if (!PortalLeases.Reserve(request.Claim, *identity, peer, player, PollNow)) return;
 					response.Kind = game::PortalSessionKind::Ready;
+					response.Fence = *fence;
 				} else {
 					if (!PortalLeases.Commit(request.Claim, peer, PollNow)) return;
 					Players.insert_or_assign(client.Index, Occupant{player, client.Generation});
@@ -2844,6 +2987,16 @@ namespace server {
 								store, request.Claim.Transfer, request.Claim.DestinationIncarnation
 							);
 						});
+					if (accepted && !departure.Accepted)
+						Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+							script::ObservePortalSession(
+								store,
+								ecs::NULL_ENTITY,
+								script::PortalHandoffEvent::Admitted,
+								departure.Request.Claim.Transfer.Sequence,
+								departure.Request.Claim.Destination
+							);
+						});
 					departure.Accepted = accepted;
 				}
 			}
@@ -2856,6 +3009,71 @@ namespace server {
 		ReplyToAdmission(client, game::EncodePortalSession(refusal));
 	}
 
+	void Server::PumpPortalApproaches(double nowSeconds) {
+		using namespace engine;
+		if (PortalSessionEndpoint.Generation == 0 || !Identity) return;
+
+		std::vector<scene::PortalSeam> seams;
+		Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) { scene::GatherPortalSeams(store, seams); });
+		const std::string source(Worlds().NameOf(PrimaryWorld).Text());
+		for (const auto &[index, player] : Players) {
+			const replication::ClientId client{index, player.Generation};
+			core::Vector3 eye;
+			if (!ViewpointOf(client, eye)) continue;
+			const scene::PortalSeam *nearest = nullptr;
+			float nearestDistance = 20.0f;
+			for (const scene::PortalSeam &seam : seams) {
+				if (!seam.Crosses || !seam.DestinationWorld.IsValid() || seam.PanePath.empty() ||
+					seam.FarPath.empty())
+					continue;
+				const float distance = (seam.Centre - eye).Magnitude();
+				if (distance < nearestDistance) {
+					nearest = &seam;
+					nearestDistance = distance;
+				}
+			}
+			if (!nearest) {
+				PortalApproaches.erase(index);
+				continue;
+			}
+			const std::string route = source + "/" + nearest->PanePath + "|" + nearest->FarPath;
+			auto current = PortalApproaches.find(index);
+			if (current != PortalApproaches.end() &&
+				(current->second.Client != client || current->second.Request.Seam != route ||
+				 current->second.Request.Destination != nearest->DestinationWorld.Text())) {
+				PortalApproaches.erase(current);
+				current = PortalApproaches.end();
+			}
+			if (current == PortalApproaches.end()) {
+				if (NextPortalAttempt == std::numeric_limits<uint64_t>::max()) continue;
+				PortalApproach approach;
+				approach.Client = client;
+				approach.Request.Kind = game::PortalSessionKind::Approach;
+				approach.Request.Attempt = NextPortalAttempt++;
+				approach.Request.World = source;
+				approach.Request.Destination = nearest->DestinationWorld.Text();
+				approach.Request.Seam = route;
+				approach.Request.Through = scene::SeamMapping(*nearest);
+				approach.Request.Identity = Identity->Public();
+				current = PortalApproaches.emplace(index, std::move(approach)).first;
+			}
+			auto &approach = current->second;
+			const auto destination = Worlds().Find(core::Name(approach.Request.Destination));
+			const auto endpoint = Worlds().LookupPresentation(destination, "portal-sessions");
+			if (endpoint.Generation == 0 || nowSeconds < approach.RetryAt) continue;
+			if (Worlds().SendPresentation(
+					PrimaryWorld,
+					PortalSessionEndpoint,
+					endpoint,
+					approach.Request.Attempt,
+					game::EncodePortalSession(approach.Request)
+				) == world::PresentationStatus::Ok) {
+				approach.Destination = endpoint;
+				approach.RetryAt = nowSeconds + 2.0;
+			}
+		}
+	}
+
 	void Server::PumpPortalDepartures(double nowSeconds) {
 		ENGINE_PROFILE("portal session departures");
 		using namespace engine;
@@ -2863,6 +3081,21 @@ namespace server {
 		std::vector<std::pair<replication::ClientId, script::PortalTransferReceipt>> receipts;
 		Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
 			const auto history = script::PortalTransferReceipts(store);
+			if (const char *diagnostic = std::getenv("PORTAL_RETURN_DIAGNOSTIC");
+				diagnostic && *diagnostic == '1' && store.Name() == "walk.destination" && !history.empty()) {
+				static std::atomic<uint32_t> emitted{0};
+				if (emitted.fetch_add(1, std::memory_order_relaxed) < 8)
+					ENGINE_INFO(
+						"portal return departure scan: tick={} players={} receipts={} pending={} "
+						"first_stage={} first_subject={}",
+						store.Time().Tick,
+						Players.size(),
+						history.size(),
+						PortalDepartures.size(),
+						static_cast<int>(history.front().Stage),
+						history.front().Id.Sequence
+					);
+			}
 			for (const auto &[index, player] : Players) {
 				const auto pending = PortalDepartures.find(index);
 				if (pending != PortalDepartures.end() &&
@@ -2910,6 +3143,29 @@ namespace server {
 			}
 			auto &departure = found->second;
 			if (departure.Client != client || departure.Request.Claim.Transfer != receipt.Id) continue;
+			if (const char *diagnostic = std::getenv("PORTAL_RETURN_DIAGNOSTIC");
+				diagnostic && *diagnostic == '1' && receipt.Id.SourceWorld == "walk.destination" &&
+				receipt.Id.Sequence == 1 && (receipt.Fence.H.SourceTick % 10 == 0 || !departure.Route)) {
+				static std::atomic<uint32_t> emitted{0};
+				if (emitted.fetch_add(1, std::memory_order_relaxed) < 16)
+					ENGINE_INFO(
+						"portal return lease: attempt={} stage={} route={} notified={} accepted={} "
+						"crossed={} destination_endpoint={} now={} retry={}",
+						departure.Request.Attempt,
+						static_cast<int>(receipt.Stage),
+						departure.Route.has_value(),
+						departure.Notified,
+						departure.Accepted,
+						departure.CrossedSent,
+						Worlds()
+							.LookupPresentation(
+								Worlds().Find(core::Name(receipt.DestinationWorld)), "portal-sessions"
+							)
+							.Generation,
+						nowSeconds,
+						departure.RetryAt
+					);
+			}
 			if (receipt.Stage == script::PortalTransferStage::Refused) {
 				game::PortalSessionMessage terminal;
 				terminal.Attempt = departure.Request.Attempt;
@@ -2926,8 +3182,19 @@ namespace server {
 				crossed.Attempt = departure.Request.Attempt;
 				crossed.Kind = game::PortalSessionKind::Crossed;
 				crossed.Claim = departure.Route->Claim;
+				crossed.Fence = receipt.Fence;
 				departure.CrossedSent =
 					Replication->SendTo(client, game::EncodePortalSession(crossed), nowSeconds);
+				if (departure.CrossedSent)
+					Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+						script::ObservePortalSession(
+							store,
+							ecs::NULL_ENTITY,
+							script::PortalHandoffEvent::CrossedNotified,
+							departure.Request.Claim.Transfer.Sequence,
+							departure.Request.Claim.Destination
+						);
+					});
 				// Adoption can wait after physical commit. Renew until the destination
 				// confirms adoption; the source connection may remain for presentation.
 			}
@@ -2982,6 +3249,16 @@ namespace server {
 				transfer.Through = departure.Request.Through;
 				departure.Notified =
 					Replication->SendTo(client, game::EncodePortalSession(transfer), nowSeconds);
+				if (departure.Notified)
+					Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+						script::ObservePortalSession(
+							store,
+							ecs::NULL_ENTITY,
+							script::PortalHandoffEvent::ClientNotified,
+							departure.Request.Claim.Transfer.Sequence,
+							departure.Request.Claim.Destination
+						);
+					});
 			}
 		}
 		for (auto &[_, departure] : PortalDepartures) {
@@ -3049,9 +3326,47 @@ namespace server {
 						}
 						break;
 					}
+					if (!departure.Route)
+						Worlds().Enter(PrimaryWorld, [&](ecs::Store &store) {
+							script::ObservePortalSession(
+								store,
+								ecs::NULL_ENTITY,
+								script::PortalHandoffEvent::Routed,
+								departure.Request.Claim.Transfer.Sequence,
+								departure.Request.Claim.Destination
+							);
+						});
 					departure.Route = request;
 					break;
 				}
+				continue;
+			}
+			if (request.Kind == game::PortalSessionKind::Approach) {
+				for (const auto &[index, approach] : PortalApproaches) {
+					if (approach.Request.Attempt != request.Attempt || approach.Destination != message.From ||
+						request.World != approach.Request.World ||
+						request.Destination != approach.Request.Destination ||
+						request.Seam != approach.Request.Seam || request.Port == 0)
+						continue;
+					(void)Replication->SendTo(
+						approach.Client, game::EncodePortalSession(request), nowSeconds
+					);
+					break;
+				}
+				if (request.Port != 0) continue;
+				if (request.World != message.From.World || request.Destination != PortalSessionEndpoint.World)
+					continue;
+				game::PortalSessionMessage response = request;
+				response.Port = ListeningOn().Port;
+				if (!Identity || response.Port == 0) continue;
+				response.Identity = Identity->Public();
+				(void)Worlds().SendPresentation(
+					PrimaryWorld,
+					PortalSessionEndpoint,
+					message.From,
+					message.Correlation,
+					game::EncodePortalSession(response)
+				);
 				continue;
 			}
 			if (request.Kind != game::PortalSessionKind::LeaseRequest ||
@@ -3122,6 +3437,7 @@ namespace server {
 		// where that client stood on the previous one - invisible while a
 		// player stands still and exactly wrong while they run.
 		UpdateClientViewpoints();
+		PumpPortalApproaches(nowSeconds);
 
 		// **Asked once per frame, and asking is what clears it.** A world with
 		// no replication rate answers `true` after every tick, which is what
@@ -3157,60 +3473,6 @@ namespace server {
 			// handed over, which is every world this repository ships, sees an
 			// empty loop.
 			Replication->ApplyOwnedState(store);
-
-			// **The rewind history, recorded beside the delta and from the same
-			// state.** Both answer questions about this tick, so taking them at
-			// two different moments is how a hit test starts disagreeing with
-			// what was actually sent.
-			//
-			// Only where something *can* move, which keeps the static geometry
-			// out of a ring whose rows would all carry the same answer.
-			//
-			// **`RigidBody` and not `Motion`, and the difference is a bug that
-			// made a standing player unhittable.** This walked `Motion` until
-			// v0.15, on the reading that a `Motion` is what makes a placement
-			// worth remembering - and `physics` takes a row's `Motion` *away*
-			// when it puts the body to sleep, deliberately, so that the solver's
-			// query never visits a resting row. `physics/AGENTS.md` carries that
-			// decision and `physics/tests/Solver.cpp` states it in one line.
-			//
-			// So the history held whatever happened to be awake. A player
-			// standing still is asleep within a second or so, which meant they
-			// could not be shot - and nothing reported it, because a hit test
-			// against an empty candidate list is an ordinary miss.
-			//
-			// `scene::Simulated` is the question actually being asked, and since
-			// v0.18 it is asked positively: a part the world may move carries
-			// the tag, so this records exactly those and skips the static
-			// geometry the old predicate was aiming at. `Static` is skipped for
-			// the same reason one layer in: it is a body that does not move.
-			//
-			// **A sleeping body keeps the tag**, which is the whole of the fix
-			// above surviving the polarity change: it loses `scene::Motion` and
-			// nothing else, so a player standing still is still in the rewind
-			// history and can still be shot.
-			//
-			// **It was the absence of `RigidBody` until v0.15**, when that
-			// component became the author's numbers rather than the world's
-			// decision and every part started carrying one. Left as it was, this
-			// would have recorded a rewind history for every wall in the map.
-			{
-				ENGINE_PROFILE_CAT("Server::Rewind", engine::core::ProfileCategory::Network);
-				if (History.Begin(store.Time().Tick)) {
-					store.Query<const engine::scene::Transform, const engine::scene::RigidBody>()
-						.With<engine::scene::Simulated>()
-						.Each([this](
-								  engine::ecs::Entity entity,
-								  const engine::scene::Transform &placement,
-								  const engine::scene::RigidBody &body
-							  ) {
-							if (body.Kind == engine::scene::BodyKind::Static) {
-								return;
-							}
-							History.Record(entity, placement.Frame.Position);
-						});
-				}
-			}
 
 			// Before `ClearChanges`, which the world does at the start of its
 			// next tick - the bits are the delta source and reading them after
@@ -3277,6 +3539,14 @@ namespace server {
 			ENGINE_PROFILE_CAT("Server::ApplyInputs", engine::core::ProfileCategory::Simulation);
 			ApplyInputs();
 		}
+		// A body frozen for a portal transfer applies none of the input it forwards,
+		// so that input is not consumed here. The client keeps predicting it, and
+		// what it shows is what the destination catches up to after commit.
+		Worlds().Enter(PrimaryWorld, [&](engine::ecs::Store &store) {
+			for (const auto &[index, occupant] : Players)
+				if (const auto frozen = engine::script::FrozenPortalPlayerInput(store, occupant.Instance))
+					Replication->Authority().HoldConsumedInput({index, occupant.Generation}, *frozen);
+		});
 		Replication->ClearInputs();
 
 		Replication->Advance(nowSeconds);
@@ -3311,7 +3581,7 @@ namespace server {
 		if (kind == engine::game::ProjectKind::WorldFile || kind == engine::game::ProjectKind::GameFile ||
 			kind == engine::game::ProjectKind::UniverseFolder ||
 			kind == engine::game::ProjectKind::ProjectZip) {
-			ENGINE_ERROR("--worlds duplicates a script or placeholder scene, not a multi-world project");
+			ENGINE_ERROR("--worlds duplicates a scripted scene, not a multi-world project");
 			return false;
 		}
 
@@ -3441,14 +3711,17 @@ namespace server {
 					return false;
 				}
 
-				Worlds().Enter(id, [this](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
-					if (!BuildWorld(store, systems)) {
-						return;
+				bool built = false;
+				const auto status = Worlds().Enter(
+					id, [this, id, &built](engine::ecs::Store &store, engine::ecs::Scheduler &systems) {
+						built = BuildWorld(id, store, systems);
+						if (!built) return;
+						if (Settings.Chatter) {
+							store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
+						}
 					}
-					if (Settings.Chatter) {
-						store.SetResource(Chatter{engine::core::Name(CHATTER_TOPIC)});
-					}
-				});
+				);
+				if (status != engine::world::WorldStatus::Ok || !built) return false;
 
 				// The first world granted is the one `Enter` reaches. A host holds
 				// several and a caller outside it addresses them by name, so this
@@ -3465,6 +3738,7 @@ namespace server {
 		engine::world::HostFrame ready;
 		if (Settings.HostTickExchange) {
 			HostExchange = std::make_unique<engine::world::TickExchangeHost>(Worlds());
+			HostExchange->SetFixedStepBarrier(engine::game::MakePortalIslandCoordinator().Callbacks());
 			PublishedHostFrame = 0;
 		}
 		ready.Signal = engine::world::HostSignal::Ready;
@@ -3736,6 +4010,16 @@ namespace server {
 			Socket.reset();
 		}
 
+		ReplicationObservationControlHook.Close();
+		FactoryPackageControlHook.Close();
+		FactoryCameraRenderingControlHook.Close();
+		FactoryPhysicsControlHook.Close();
+		FactorySceneControlHook.Close();
+		FactoryLifecycleControlHook.Close();
+		ProductControlHook.Close();
+		for (auto hook = BuiltinControlHooks.rbegin(); hook != BuiltinControlHooks.rend(); ++hook)
+			hook->Close();
+		BuiltinControlHooks.clear();
 		// Runtime cleanup detaches hooks from its borrowed store.
 		Runtimes.clear();
 		DataFactory.reset();
@@ -3780,6 +4064,12 @@ namespace server {
 
 		uint64_t lastObservedTick = 0;
 		uint64_t cumulativeObservedTicks = 0;
+		uint64_t lastHostMetricsReport = started;
+		uint64_t hostTrafficAcceptedWindow = 0;
+		uint64_t hostDeliveriesSentWindow = 0;
+		uint64_t hostDeliveriesDroppedWindow = 0;
+		std::vector<engine::core::Name> reportedReadyHosts;
+		reportedReadyHosts.reserve(Settings.RemoteWorlds.size());
 		const auto ticksSoFar = [this, &lastObservedTick, &cumulativeObservedTicks] {
 			const uint64_t observed = !Worlds().IsRemote(PrimaryWorld)
 										  ? Worlds().StatisticsOf(PrimaryWorld).Ticks
@@ -3816,62 +4106,7 @@ namespace server {
 		}
 
 		if (Settings.ControlPort >= 0) {
-			const std::array features{
-				engine::control::features::Universe(Worlds()),
-				engine::control::features::Architecture(),
-				engine::control::features::Script(),
-				engine::control::features::Diagnostics(),
-				engine::control::features::Build(),
-				engine::control::features::Resources(),
-				engine::control::features::Prompts(),
-				engine::control::features::Discovery(),
-				engine::control::features::Custom("server", [this](engine::control::Surface &) {
-					RegisterControlTools();
-				}),
-			};
-			ControlSurface.Enable(features);
-			if (DataFactory) {
-				ControlSurface.Enable(
-					std::array{engine::control::features::DataFactory(*DataFactory, {.RenderOnly = false})}
-				);
-				ControlSurface.Enable(
-					std::array{engine::control::features::DataScene(Worlds(), {}, DataFactory.get())}
-				);
-				engine::control::AddDataScriptPackageTool(
-					ControlSurface, [this](const engine::script::DataScriptRequest &request) {
-						return engine::script::ExecuteDataScriptPackageTransaction(
-							{.Universe = Worlds(),
-							 .Session = *DataFactory,
-							 .RuntimeOf = [this](engine::world::WorldId world) { return RuntimeOf(world); },
-							 .DiscardRuntime =
-								 [this](engine::world::WorldId world) {
-									 std::erase_if(Runtimes, [world](const auto &entry) {
-										 return entry.first == world;
-									 });
-								 },
-							 .MakeRuntime =
-								 [](engine::ecs::Store &store, const engine::script::RuntimeLimits &limits) {
-									 return engine::script::MakeRuntime(
-										 store, engine::script::Language::Luau, limits
-									 );
-								 },
-							 .RunPackage = engine::script::RunDataScriptPackage,
-							 .InstallSystems = [](
-												   engine::ecs::Store &store, engine::ecs::Scheduler &systems
-											   ) { RegisterPlaceholderSystems(store, systems); },
-							 .Admit =
-								 [](std::string_view source, std::string_view entry, std::string &error) {
-									 return engine::script::CheckDataScriptPackageSource(
-										 engine::script::Language::Luau, source, entry, error
-									 );
-								 },
-							 .Role = engine::script::HostRole::OfServer(),
-							 .Present = false},
-							request
-						);
-					}
-				);
-			}
+			ConfigureControlHooks();
 			if (ControlServer.Start(static_cast<uint16_t>(Settings.ControlPort))) {
 				ENGINE_INFO(
 					"control: listening on 127.0.0.1:{} - {} tools",
@@ -3894,7 +4129,30 @@ namespace server {
 		// card says.
 		StartDiscord();
 
+		std::optional<engine::core::BenchmarkReport> benchmark;
+		auto benchmarkStarted = std::chrono::steady_clock::now();
+		const auto benchmarkWaitStarted = benchmarkStarted;
+		uint64_t benchmarkInitialOverruns = 0;
+		if (!Settings.BenchmarkReport.empty()) {
+			engine::core::FrameGraph::SetEnabled(true);
+			if (!Settings.BenchmarkWaitForClient) benchmark.emplace(engine::core::HeapProfile::Totals());
+		}
+
 		while (Running && !StopRequested.load()) {
+			if (!benchmark && Settings.BenchmarkWaitForClient) {
+				if (Replication && Replication->Carrying() > 0) {
+					benchmark.emplace(engine::core::HeapProfile::Totals());
+					benchmarkStarted = std::chrono::steady_clock::now();
+					benchmarkInitialOverruns = summary.Overruns;
+				} else if (std::chrono::duration<double>(
+							   std::chrono::steady_clock::now() - benchmarkWaitStarted
+						   )
+							   .count() >= 60.0) {
+					ENGINE_ERROR("benchmark: no client admitted within 60 seconds");
+					summary.Failed = true;
+					break;
+				}
+			}
 			const uint64_t tickStarted = engine::core::Clock::Nanoseconds();
 
 			engine::core::FrameGraph::BeginFrame();
@@ -3996,6 +4254,67 @@ namespace server {
 				// Other deployments start their fixed frame through Driver here.
 				if (!HostExchange)
 					Driver_->Tick(delta, static_cast<double>(engine::core::Clock::Nanoseconds()) / 1e9);
+				if (!Settings.ObserveDirectory.empty()) {
+					if (!Observations) {
+						Observations = std::make_unique<ObservationSink>();
+						if (!Observations->Open(
+								Settings.ObserveDirectory,
+								IsHost() ? Settings.HostName : std::string("driver"),
+								Settings.ObserveTrace
+							))
+							Settings.ObserveDirectory.clear();
+					}
+					if (Observations) Observations->Collect(Worlds());
+				}
+
+				if (Link == nullptr && !Settings.RemoteWorlds.empty()) {
+					const engine::world::DriverStatistics &driverStats = Driver_->Statistics();
+					hostTrafficAcceptedWindow += driverStats.TrafficAccepted;
+					hostDeliveriesSentWindow += driverStats.DeliveriesSent;
+					hostDeliveriesDroppedWindow += driverStats.DeliveriesDropped;
+					const uint64_t hostNow = engine::core::Clock::Nanoseconds();
+					for (const engine::world::HostStatus &host : Driver_->Hosts().Hosts()) {
+						if (!host.Ready || host.Port == 0 || host.Worlds.size() != 1) continue;
+						if (std::find(reportedReadyHosts.begin(), reportedReadyHosts.end(), host.Name) ==
+							reportedReadyHosts.end()) {
+							reportedReadyHosts.push_back(host.Name);
+							ENGINE_INFO(
+								"host-ready host={} world={} port={}",
+								host.Name.Text(),
+								host.Worlds.front().Text(),
+								host.Port
+							);
+						}
+					}
+
+					if (Settings.MetricsReportSeconds > 0.0 &&
+						static_cast<double>(hostNow - lastHostMetricsReport) / 1e9 >=
+							Settings.MetricsReportSeconds) {
+						lastHostMetricsReport = hostNow;
+						ENGINE_INFO(
+							"host-bus-window accepted={} sent={} dropped={}",
+							hostTrafficAcceptedWindow,
+							hostDeliveriesSentWindow,
+							hostDeliveriesDroppedWindow
+						);
+						hostTrafficAcceptedWindow = 0;
+						hostDeliveriesSentWindow = 0;
+						hostDeliveriesDroppedWindow = 0;
+						for (const engine::world::HostStatus &host : Driver_->Hosts().Hosts()) {
+							if (!host.Ready || host.Worlds.size() != 1) continue;
+							ENGINE_INFO(
+								"host-metric host={} world={} tick={} tick-ms={:.3f}",
+								host.Name.Text(),
+								host.Worlds.front().Text(),
+								host.Tick,
+								host.Milliseconds
+							);
+						}
+					}
+				}
+				// Journal I/O is deliberately outside `Driver::Tick`; an acknowledgement affects the next
+				// tick.
+				(void)FlushPortalTransferDecisions();
 				if (Recorder_) {
 					Recorder_->Capture(Worlds(), delta);
 				}
@@ -4070,6 +4389,21 @@ namespace server {
 
 			const uint64_t tickEnded = engine::core::Clock::Nanoseconds();
 			const auto spent = static_cast<double>(tickEnded - tickStarted) / 1e9;
+			if (benchmark && Settings.BenchmarkWaitForClient &&
+				(!Replication || Replication->Carrying() == 0)) {
+				ENGINE_ERROR("benchmark: client disconnected before measurement finished");
+				summary.Failed = true;
+				break;
+			}
+			if (benchmark) {
+				benchmark->AddFrame(
+					engine::core::FrameGraph::Spans(),
+					spent * 1000.0,
+					engine::core::FrameGraph::Dropped(),
+					engine::core::HeapProfile::Totals(),
+					engine::core::FrameGraph::OffThreadDropped()
+				);
+			}
 
 			totalTickSeconds += spent;
 			tickMilliseconds.push_back(static_cast<float>(spent * 1000.0));
@@ -4121,6 +4455,11 @@ namespace server {
 			if (Settings.Seconds > 0.0 && elapsed >= Settings.Seconds) {
 				break;
 			}
+			if (benchmark &&
+				std::chrono::duration<double>(std::chrono::steady_clock::now() - benchmarkStarted).count() >=
+					Settings.BenchmarkSeconds) {
+				break;
+			}
 
 			if (Settings.Unpaced || Replayer_) {
 				// A replay is not paced: it reproduces a run rather than
@@ -4146,6 +4485,36 @@ namespace server {
 					nextTickAt = now;
 				}
 			}
+		}
+
+		if (benchmark) {
+			const engine::core::HeapTotals finalHeap = engine::core::HeapProfile::Totals();
+			const double durationSeconds =
+				std::chrono::duration<double>(std::chrono::steady_clock::now() - benchmarkStarted).count();
+			const std::array<engine::core::BenchmarkMetric, 4> observations{{
+				{"tick_count", static_cast<double>(benchmark->FrameCount())},
+				{"tick_rate_hz", Settings.TickRate},
+				{"tick_overruns", static_cast<double>(summary.Overruns - benchmarkInitialOverruns)},
+				{"clients_admitted", Replication ? static_cast<double>(Replication->Stats().Admitted) : 0.0},
+			}};
+			if (summary.Failed ||
+				!benchmark->Write(
+					Settings.BenchmarkReport,
+					durationSeconds,
+					Settings.BenchmarkSeconds,
+					finalHeap,
+					engine::core::HeapProfile::IsCompiledIn(),
+					std::span(observations).first(Replication ? observations.size() : observations.size() - 1)
+				)) {
+				ENGINE_ERROR(
+					"benchmark: incomplete measurement or could not write '{}'",
+					Settings.BenchmarkReport.string()
+				);
+				summary.Failed = true;
+			}
+		} else if (!Settings.BenchmarkReport.empty()) {
+			ENGINE_ERROR("benchmark: run ended before a client was admitted");
+			summary.Failed = true;
 		}
 
 		summary.Ticks = ticksSoFar();
@@ -4190,18 +4559,8 @@ namespace server {
 			summary.TickP99Milliseconds
 		);
 
-		// **Two counters that nothing read until now.** `Struck` and `Dropped`
-		// have been incremented since v0.9 and printed nowhere, which made them
-		// exactly the kind of number this file's own comment warns about: the
-		// reason they are two rather than one is that a payload which did not
-		// decode is a client running a different game or probing, and burying
-		// that in a hit count is how an unusual number stops being noticed.
-		// Neither could be noticed at all while neither was reported.
-		//
-		// Said only when something happened, so a run with no clients in it
-		// does not print a line of zeroes.
-		if (Struck > 0 || Dropped > 0) {
-			ENGINE_INFO("server: {} shot(s) struck, {} input(s) did not decode", Struck, Dropped);
+		if (Dropped > 0) {
+			ENGINE_INFO("server: {} input(s) did not decode as movement", Dropped);
 		}
 
 		// **The relay's own counters, and they are separate on purpose.** A

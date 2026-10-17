@@ -944,6 +944,15 @@ namespace engine::scene {
 		// What this surface emits with no light on it. Invalid means nothing,
 		// which is what almost every surface emits.
 		core::Name EmissiveMap = {};
+		core::Name PackedPbrMap = {};
+		uint8_t RoughnessChannel = 255;
+		uint8_t OcclusionChannel = 255;
+		uint8_t HeightChannel = 255;
+		uint8_t MetalnessChannel = 255;
+		float SpecularFactor = 1.0f;
+		float TransmissionFactor = 0.0f;
+		float IndexOfRefraction = 1.5f;
+		float Thickness = 0.0f;
 		//@}
 
 		// Which shader this surface is drawn with, or invalid for the engine's.
@@ -968,7 +977,7 @@ namespace engine::scene {
 		// Emission is tinted and scaled per surface. The map remains optional.
 		//@{
 		core::Color3 EmissiveTint{1.0f, 1.0f, 1.0f};
-		float EmissiveStrength = 1.0f;
+		float EmissiveStrength = 0.0f;
 		//@}
 
 		// Below this alpha a fragment is discarded rather than blended, when
@@ -982,7 +991,7 @@ namespace engine::scene {
 		SurfaceResampleMode Resample = SurfaceResampleMode::Default;
 
 		// Explicit padding, for the reason every other `Reserved` gives.
-		uint8_t Reserved[2] = {};
+		uint8_t Reserved[3] = {};
 	};
 
 	// Which material an instance names.
@@ -1148,6 +1157,13 @@ namespace engine::scene {
 		// a mixer sums, and defensive attenuation at every stage loses range it
 		// cannot get back.
 		float Volume = 0.5f;
+
+		// Signed stereo placement, from full left at -1 to full right at 1.
+		//
+		// This is a source mix control, separate from positional attenuation:
+		// a world can steer an ambient layer across the stereo field while its
+		// parent still decides where it falls off in three-dimensional space.
+		float Pan = 0.0f;
 
 		// How close the listener must be for a positional sound to be at full
 		// volume, in metres.
@@ -1403,6 +1419,10 @@ namespace engine::scene {
 		// @since v0.16
 		bool Enabled = true;
 
+		// Width of the authored physical and visual frame around this mouth, in
+		// metres. Zero makes the aperture the whole pane face.
+		float RimThickness = 0.0f;
+
 		// Whether this mouth may be entered from behind as well as from in
 		// front.
 		//
@@ -1426,7 +1446,7 @@ namespace engine::scene {
 		bool Bidirectional = true;
 
 		// Explicit in-memory padding. The wire codec omits it and restores zeroes.
-		uint8_t Reserved[2] = {};
+		uint8_t Reserved[3] = {};
 	};
 
 	// The frustum a surface camera renders through, fitted to its pane.
@@ -1664,8 +1684,8 @@ namespace engine::scene {
 		// Which of the three this is.
 		LightKind Kind = LightKind::Point;
 
-		// Reserved for a local-shadow pass. It is deliberately not exposed as a
-		// property until a renderer consumes it.
+		// Requests local shadows. The renderer may decline unsupported or culled
+		// lights, and capture reports that outcome per stable light identity.
 		bool Shadows = false;
 
 		// Whether it is on.

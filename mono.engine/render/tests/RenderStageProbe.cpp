@@ -9,6 +9,32 @@
 
 TEST_SUITE_ID("engine.render.stageprobe")
 
+TEST_CASE("stage probe arms once on the named display transition", "[render][stage-probe]") {
+	engine::render::RenderStageProbe probe;
+	probe.Directory = "stage-probe-transition-test";
+	probe.TransitionFrom = "client.replica";
+	probe.TransitionTo = "client.portal.approach.1";
+	probe.ObserveDisplay("client.replica", 0);
+	probe.ActivateView(10, "client.portal.approach.1", 0, true);
+	CHECK_FALSE(probe.Enabled(10, 0));
+	probe.ObserveDisplay("client.portal.approach.1", 0);
+	probe.ActivateView(11, "client.portal.approach.1", 1, true);
+	probe.ActivateView(11, "client.portal.approach.1", 0, false);
+	CHECK_FALSE(probe.Enabled(11, 0));
+	probe.ActivateView(11, "client.portal.approach.1", 0, true);
+	CHECK(probe.Enabled(11, 0));
+	CHECK_FALSE(probe.Enabled(11, 1));
+	CHECK_FALSE(probe.Enabled(12, 0));
+	CHECK(probe.Wants("gbuffer", "albedo"));
+	CHECK(probe.Wants("gbuffer", "depth"));
+	CHECK(probe.Wants("portal-overlay", "portaled"));
+	CHECK_FALSE(probe.Wants("gbuffer", "normal"));
+	probe.ObserveDisplay("client.replica", 0);
+	probe.ObserveDisplay("client.portal.approach.1", 0);
+	probe.ActivateView(20, "client.portal.approach.1", 0, true);
+	CHECK_FALSE(probe.Enabled(20, 0));
+}
+
 TEST_CASE(
 	"stage snapshots keep pixels from before an aliased target is overwritten",
 	"[render][gpu][stage-probe][.]"

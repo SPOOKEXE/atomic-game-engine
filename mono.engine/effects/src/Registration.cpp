@@ -149,7 +149,7 @@ namespace engine::effects {
 				writer.WriteUInt8(static_cast<uint8_t>(emitter.ShapeDirection));
 				writer.WriteUInt8(static_cast<uint8_t>(emitter.Flipbook));
 				writer.WriteUInt8(static_cast<uint8_t>(emitter.FlipbookPlayback));
-				writer.WriteUInt8(emitter.FlipbookFrames);
+				writer.WriteUInt16(emitter.FlipbookFrames);
 				writer.WriteBool(emitter.FlipbookStartRandom);
 				writer.WriteBool(emitter.LockedToPart);
 				writer.WriteBool(emitter.Enabled);
@@ -207,7 +207,7 @@ namespace engine::effects {
 				emitter.ShapeDirection = static_cast<ParticleShapeDirection>(reader.ReadUInt8());
 				emitter.Flipbook = static_cast<FlipbookLayout>(reader.ReadUInt8());
 				emitter.FlipbookPlayback = static_cast<FlipbookMode>(reader.ReadUInt8());
-				emitter.FlipbookFrames = reader.ReadUInt8();
+				emitter.FlipbookFrames = reader.ReadUInt16();
 				emitter.FlipbookStartRandom = reader.ReadBool();
 				emitter.LockedToPart = reader.ReadBool();
 				emitter.Enabled = reader.ReadBool();

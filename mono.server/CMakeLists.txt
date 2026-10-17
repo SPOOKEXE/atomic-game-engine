@@ -18,6 +18,9 @@ mono_add_library(server
 		Engine::world
 		Engine::datastore
 		Engine::scripthost
+		# Factory scripts probe effect components after the component table is sealed.
+		# Register their stable names during server startup, before any world runs.
+		Engine::effects
 
 		# L13, `shared`. The Model Context Protocol surface, opened only when
 		# `--mcp-port` asks for it.
@@ -127,3 +130,8 @@ mono_add_program(server
 		Mono::server
 		Engine::core
 )
+
+# The product MCP contract suite speaks the loopback wire directly.
+if(TARGET test_server)
+	target_link_libraries(test_server PRIVATE Vendor::asio Vendor::json)
+endif()

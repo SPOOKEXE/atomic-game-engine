@@ -20,9 +20,10 @@
 namespace engine::render {
 	class Renderer;
 	struct View;
+	class ViewRecording;
 
 	// Maximum registered hook capabilities owned by one renderer.
-	inline constexpr size_t MAX_DATA_FACTORY_HOOKS = 18;
+	inline constexpr size_t MAX_DATA_FACTORY_HOOKS = 23;
 	// Maximum live client connections to hook capabilities.
 	inline constexpr size_t MAX_DATA_FACTORY_CONNECTIONS = 6;
 	// Maximum admitted readback batches awaiting completion.
@@ -30,7 +31,7 @@ namespace engine::render {
 	// Maximum capture channels one hook may expose.
 	inline constexpr size_t MAX_DATA_FACTORY_HOOK_CHANNELS = 1;
 	// Maximum graph nodes whose readback one batch may retain.
-	inline constexpr size_t MAX_DATA_FACTORY_READBACK_NODES = 10;
+	inline constexpr size_t MAX_DATA_FACTORY_READBACK_NODES = 11;
 	// Aggregate byte budget for retained capture payloads.
 	inline constexpr size_t MAX_DATA_FACTORY_RETAINED_BYTES = 64 * 1024 * 1024;
 	// Pump runs once per owner frame, so this bounds a lost completion to ten
@@ -246,6 +247,11 @@ namespace engine::render {
 		// Runs one admitted batch against the current render observation context.
 		CallHooksResult
 		CallHooks(ConnectionHandle connection, BatchHandle batch, const RenderObservationContext &context);
+		// Copies the bounded local-light selection for this render observation into
+		// its recording before the local-light graph nodes run.
+		bool ApplyLocalLightCapture(const ViewMutationIdentity &identity, ViewRecording &recording);
+		// Retains the graph's per-slot selection result for the later readback poll.
+		void CompleteLocalLightCapture(const ViewMutationIdentity &identity, const ViewRecording &recording);
 		// Queues an owned one-shot patch for the built-in view.camera hook. Admission
 		// validates the complete identity and payload before it claims a slot.
 		ArmViewMutationResult ArmViewMutation(HookHandle hook, ViewCameraPatch patch);

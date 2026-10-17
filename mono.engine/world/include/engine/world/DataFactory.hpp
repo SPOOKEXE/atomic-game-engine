@@ -407,6 +407,8 @@ namespace engine::world {
 		CommitExternalMutation(std::string_view instanceId, uint64_t expectedTick, uint64_t expectedVersion);
 		// Creates a managed world after validating lifecycle preconditions.
 		DataFactoryReply CreateWorld(const DataFactoryWorldRequest &request);
+		// Takes ownership of one already loaded local world without rebuilding its scene.
+		DataFactoryReply AdoptWorld(std::string_view instanceId);
 		// Recreates a managed world while preserving its stable name.
 		DataFactoryReply ResetWorld(const DataFactoryWorldRequest &request);
 		// Retires a managed world and its host-owned state.

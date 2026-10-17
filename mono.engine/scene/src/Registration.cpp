@@ -16,12 +16,14 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/EditableImage.hpp>
 #include <engine/scene/EditableMesh.hpp>
+#include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Gravity.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/LevelOfDetail.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/PortalCrossing.hpp>
 #include <engine/scene/PublishedCatalogue.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -41,12 +43,59 @@
 #include <engine/scene/Volume.hpp>
 #include <engine/scene/Wire.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
 namespace engine::scene {
 
 	namespace {
+		void WriteGpuParticleFields(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *fields = static_cast<const GpuParticleField *>(source);
+			for (size_t index = 0; index < count; ++index) {
+				writer.WriteBool(fields[index].Enabled);
+				writer.WriteUInt8(fields[index].Layers);
+				writer.WriteUInt16(fields[index].Reserved);
+				writer.WriteUInt32(fields[index].RequestedCount);
+				writer.WriteUInt32(fields[index].Seed);
+				for (const core::Color3 colour :
+					 {fields[index].CondensationColor, fields[index].RainColor, fields[index].DebrisColor}) {
+					writer.WriteFloat(colour.R);
+					writer.WriteFloat(colour.G);
+					writer.WriteFloat(colour.B);
+				}
+				writer.WriteFloat(fields[index].CondensationAlpha);
+				writer.WriteFloat(fields[index].RainAlpha);
+				writer.WriteFloat(fields[index].DebrisAlpha);
+				writer.WriteFloat(fields[index].CondensationSize);
+				writer.WriteFloat(fields[index].RainSize);
+				writer.WriteFloat(fields[index].DebrisSize);
+			}
+		}
+
+		void ReadGpuParticleFields(core::ByteReader &reader, void *destination, size_t count) {
+			auto *fields = static_cast<GpuParticleField *>(destination);
+			for (size_t index = 0; index < count; ++index) {
+				GpuParticleField field;
+				field.Enabled = reader.ReadBool();
+				field.Layers = reader.ReadUInt8();
+				field.Reserved = reader.ReadUInt16();
+				field.RequestedCount = reader.ReadUInt32();
+				field.Seed = reader.ReadUInt32();
+				field.CondensationColor = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				field.RainColor = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				field.DebrisColor = {reader.ReadFloat(), reader.ReadFloat(), reader.ReadFloat()};
+				field.CondensationAlpha = reader.ReadFloat();
+				field.RainAlpha = reader.ReadFloat();
+				field.DebrisAlpha = reader.ReadFloat();
+				field.CondensationSize = reader.ReadFloat();
+				field.RainSize = reader.ReadFloat();
+				field.DebrisSize = reader.ReadFloat();
+				if ((field.Layers & ~GPU_PARTICLE_ALL_LAYERS) != 0 || field.Reserved != 0) reader.Fail();
+				fields[index] = field;
+			}
+		}
+
 		void WritePortals(core::ByteWriter &writer, const void *source, size_t count) {
 			const auto *portals = static_cast<const Portal *>(source);
 			for (size_t index = 0; index < count; ++index) {
@@ -54,6 +103,7 @@ namespace engine::scene {
 				writer.WriteName(portals[index].DestinationWorld);
 				writer.WriteBool(portals[index].Enabled);
 				writer.WriteBool(portals[index].Bidirectional);
+				writer.WriteFloat(portals[index].RimThickness);
 			}
 		}
 		void ReadPortals(core::ByteReader &reader, void *destination, size_t count) {
@@ -64,6 +114,8 @@ namespace engine::scene {
 				portal.DestinationWorld = reader.ReadName();
 				portal.Enabled = reader.ReadBool();
 				portal.Bidirectional = reader.ReadBool();
+				portal.RimThickness = reader.ReadFloat();
+				if (!std::isfinite(portal.RimThickness) || portal.RimThickness < 0) reader.Fail();
 				portals[index] = portal;
 			}
 		}
@@ -234,29 +286,40 @@ namespace engine::scene {
 		}
 
 		void WriteAutoMeshLods(core::ByteWriter &writer, const void *source, size_t count) {
-			const auto *ladders = static_cast<const AutoMeshLOD *>(source);
+			const auto *ladders = static_cast<const LODAuto *>(source);
 			for (size_t index = 0; index < count; index++) {
-				const AutoMeshLOD &ladder = ladders[index];
+				const LODAuto &ladder = ladders[index];
 				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
 					writer.WriteName(ladder.Meshes[level]);
 					writer.WriteFloat(ladder.Ratios[level]);
 				}
 				writer.WriteFloat(ladder.TargetQuadArea);
+				writer.WriteName(ladder.Billboard);
 				writer.WriteUInt8(static_cast<uint8_t>(ladder.Strategy));
 				writer.WriteUInt8(ladder.Levels);
 			}
 		}
 
 		void WriteCustomMeshLods(core::ByteWriter &writer, const void *source, size_t count) {
-			const auto *ladders = static_cast<const CustomMeshLOD *>(source);
+			const auto *ladders = static_cast<const LODCustom *>(source);
 			for (size_t index = 0; index < count; index++) {
-				const CustomMeshLOD &ladder = ladders[index];
+				const LODCustom &ladder = ladders[index];
 				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
 					writer.WriteName(ladder.Meshes[level]);
 					writer.WriteFloat(ladder.Ratios[level]);
 				}
 				writer.WriteFloat(ladder.TargetQuadArea);
+				writer.WriteName(ladder.Billboard);
 				writer.WriteUInt8(ladder.Levels);
+			}
+		}
+
+		void WriteLodSettings(core::ByteWriter &writer, const void *source, size_t count) {
+			const auto *settings = static_cast<const LODSettings *>(source);
+			for (size_t index = 0; index < count; index++) {
+				for (const float distance : settings[index].MinimumDistances) {
+					writer.WriteFloat(distance);
+				}
 			}
 		}
 
@@ -296,14 +359,15 @@ namespace engine::scene {
 		}
 
 		void ReadAutoMeshLods(core::ByteReader &reader, void *destination, size_t count) {
-			auto *ladders = static_cast<AutoMeshLOD *>(destination);
+			auto *ladders = static_cast<LODAuto *>(destination);
 			for (size_t index = 0; index < count; index++) {
-				AutoMeshLOD &ladder = ladders[index];
+				LODAuto &ladder = ladders[index];
 				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
 					ladder.Meshes[level] = reader.ReadName();
 					ladder.Ratios[level] = reader.ReadFloat();
 				}
 				ladder.TargetQuadArea = reader.ReadFloat();
+				ladder.Billboard = reader.ReadName();
 
 				// Clamped on read rather than trusted, because a strategy past the
 				// end of the enum is a `switch` falling through to whatever the
@@ -318,15 +382,25 @@ namespace engine::scene {
 		}
 
 		void ReadCustomMeshLods(core::ByteReader &reader, void *destination, size_t count) {
-			auto *ladders = static_cast<CustomMeshLOD *>(destination);
+			auto *ladders = static_cast<LODCustom *>(destination);
 			for (size_t index = 0; index < count; index++) {
-				CustomMeshLOD &ladder = ladders[index];
+				LODCustom &ladder = ladders[index];
 				for (size_t level = 0; level < LOD_LEVELS - 1; level++) {
 					ladder.Meshes[level] = reader.ReadName();
 					ladder.Ratios[level] = reader.ReadFloat();
 				}
 				ladder.TargetQuadArea = reader.ReadFloat();
+				ladder.Billboard = reader.ReadName();
 				ladder.Levels = reader.ReadUInt8();
+			}
+		}
+
+		void ReadLodSettings(core::ByteReader &reader, void *destination, size_t count) {
+			auto *settings = static_cast<LODSettings *>(destination);
+			for (size_t index = 0; index < count; index++) {
+				for (float &distance : settings[index].MinimumDistances) {
+					distance = reader.ReadFloat();
+				}
 			}
 		}
 
@@ -956,6 +1030,15 @@ namespace engine::scene {
 				writer.WriteFloat(appearances[index].EmissiveTint.B);
 				writer.WriteFloat(appearances[index].EmissiveStrength);
 				writer.WriteUInt8(static_cast<uint8_t>(appearances[index].Resample));
+				writer.WriteName(appearances[index].PackedPbrMap);
+				writer.WriteUInt8(appearances[index].RoughnessChannel);
+				writer.WriteUInt8(appearances[index].OcclusionChannel);
+				writer.WriteUInt8(appearances[index].HeightChannel);
+				writer.WriteUInt8(appearances[index].MetalnessChannel);
+				writer.WriteFloat(appearances[index].SpecularFactor);
+				writer.WriteFloat(appearances[index].TransmissionFactor);
+				writer.WriteFloat(appearances[index].IndexOfRefraction);
+				writer.WriteFloat(appearances[index].Thickness);
 			}
 		}
 
@@ -968,6 +1051,7 @@ namespace engine::scene {
 				const Sound &sound = sounds[index];
 				writer.WriteName(sound.SoundId);
 				writer.WriteFloat(sound.Volume);
+				writer.WriteFloat(sound.Pan);
 				writer.WriteFloat(sound.RollOffMinDistance);
 				writer.WriteFloat(sound.RollOffMaxDistance);
 				writer.WriteBool(sound.Looped);
@@ -987,6 +1071,7 @@ namespace engine::scene {
 				Sound &sound = sounds[index];
 				sound.SoundId = reader.ReadName();
 				sound.Volume = reader.ReadFloat();
+				sound.Pan = reader.ReadFloat();
 				sound.RollOffMinDistance = reader.ReadFloat();
 				sound.RollOffMaxDistance = reader.ReadFloat();
 				sound.Looped = reader.ReadBool();
@@ -1025,6 +1110,19 @@ namespace engine::scene {
 				appearances[index].Resample = resample <= static_cast<uint8_t>(SurfaceResampleMode::Pixelated)
 												  ? static_cast<SurfaceResampleMode>(resample)
 												  : SurfaceResampleMode::Default;
+				appearances[index].PackedPbrMap = reader.ReadName();
+				auto channel = [&reader]() {
+					const uint8_t value = reader.ReadUInt8();
+					return value <= 3 || value == 255 ? value : uint8_t{255};
+				};
+				appearances[index].RoughnessChannel = channel();
+				appearances[index].OcclusionChannel = channel();
+				appearances[index].HeightChannel = channel();
+				appearances[index].MetalnessChannel = channel();
+				appearances[index].SpecularFactor = reader.ReadFloat();
+				appearances[index].TransmissionFactor = reader.ReadFloat();
+				appearances[index].IndexOfRefraction = reader.ReadFloat();
+				appearances[index].Thickness = reader.ReadFloat();
 			}
 		}
 
@@ -1543,6 +1641,29 @@ namespace engine::scene {
 		// in which nothing snaps.
 		ecs::Components::Register<PortalTransitSeen>("scene.PortalTransitSeen");
 
+		// A logical body is named by a stable, fixed-width key. The explicit codec
+		// keeps host byte order out of snapshots and transfer baselines.
+		ecs::Components::Register<BodyIdentity>(
+			"scene.BodyIdentity", WriteBodyIdentities, ReadBodyIdentities
+		);
+		ecs::Components::Register<BodyIdentityAuthority>("scene.BodyIdentityAuthority");
+		// Fixed-width for the same reason as BodyIdentity: it crosses portals.
+		ecs::Components::Register<ObservationTrace>(
+			"scene.ObservationTrace",
+			[](core::ByteWriter &writer, const void *source, size_t count) {
+				const auto *traces = static_cast<const ObservationTrace *>(source);
+				for (size_t index = 0; index < count; ++index)
+					writer.WriteUInt64(traces[index].Id);
+			},
+			[](core::ByteReader &reader, void *destination, size_t count) {
+				auto *traces = static_cast<ObservationTrace *>(destination);
+				for (size_t index = 0; index < count; ++index)
+					traces[index].Id = reader.ReadUInt64();
+			}
+		);
+		ecs::Components::Register<PortalCrossingState>("scene.PortalCrossing");
+		ecs::Components::Register<PortalRim>("scene.PortalRim");
+
 		// **The three the player pipeline added, appended for this list's
 		// standing reason.** Component ids are a dense counter and an archetype
 		// is a sorted list of them, so inserting one anywhere but the end
@@ -1688,10 +1809,8 @@ namespace engine::scene {
 
 		// Both sources cross as authored content. The resolved level stays per-view
 		// GPU state and is never serialized.
-		ecs::Components::Register<AutoMeshLOD>("scene.AutoMeshLOD", WriteAutoMeshLods, ReadAutoMeshLods);
-		ecs::Components::Register<CustomMeshLOD>(
-			"scene.CustomMeshLOD", WriteCustomMeshLods, ReadCustomMeshLods
-		);
+		ecs::Components::Register<LODAuto>("scene.LODAuto", WriteAutoMeshLods, ReadAutoMeshLods);
+		ecs::Components::Register<LODCustom>("scene.LODCustom", WriteCustomMeshLods, ReadCustomMeshLods);
 		ecs::Components::Register<RenderEffects>(
 			"scene.RenderEffects", WriteRenderEffects, ReadRenderEffects
 		);
@@ -1786,10 +1905,20 @@ namespace engine::scene {
 		// startup path from minting an automatic compiler-spelled component id.
 		ecs::Components::Register<Gravity>("scene.Gravity");
 
-		// Registration order is part of the ECS layout. This new row stays last
-		// so existing component ids and snapshot layouts do not move.
+		// Registration order is part of the ECS layout. This row stays after every
+		// existing component so their ids and snapshot layouts do not move.
 		ecs::Components::Register<AuthoredAffordance>(
 			"scene.AuthoredAffordance", WriteAuthoredAffordances, ReadAuthoredAffordances
+		);
+
+		// Appended because component ids are registration order.
+		ecs::Components::Register<LODSettings>("scene.LODSettings", WriteLodSettings, ReadLodSettings);
+
+		// This is a compact authored request rather than particle state. Its
+		// fixed twelve-byte format keeps saves and replicas independent of struct
+		// padding while the renderer owns all device-local particles.
+		ecs::Components::Register<GpuParticleField>(
+			"scene.GpuParticleField", WriteGpuParticleFields, ReadGpuParticleFields
 		);
 	}
 

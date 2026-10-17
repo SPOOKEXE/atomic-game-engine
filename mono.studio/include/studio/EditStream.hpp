@@ -115,6 +115,13 @@ namespace studio {
 		// The subtree, for the kinds that rebuild one.
 		std::string Document;
 
+		// A canonical UI import's bounded binary document and one existing
+		// attachment path per document root. Theme resources are document-local
+		// and rebuild from the same bytes, so they need no wire handle.
+		std::vector<std::byte> UiDocument;
+		// Existing parents receiving the imported document roots.
+		std::vector<InstancePath> UiImportParents;
+
 		// Which property changed, by name.
 		std::string Property;
 

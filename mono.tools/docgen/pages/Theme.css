@@ -1,0 +1,20 @@
+/* The generated reference follows the engine's fixed dark presentation. */
+html {
+    color-scheme: dark;
+    --page-background-color: #000;
+    --page-foreground-color: #fff;
+    --page-secondary-foreground-color: #b8b8b8;
+    --header-background: #000;
+    --side-nav-background: #000;
+    --searchbar-background: #000;
+    --code-background: #000;
+    --fragment-background: #000;
+    --tablehead-background: #000;
+    --blockquote-background: #000;
+    --separator-color: #303030;
+    --primary-color: #fff;
+    --primary-dark-color: #d8d8d8;
+    --primary-light-color: #fff;
+    --on-primary-color: #000;
+    --link-color: #9ecbff;
+}

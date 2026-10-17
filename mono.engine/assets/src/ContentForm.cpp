@@ -46,6 +46,7 @@ namespace engine::assets {
 			{ContentForm::Pmx, "pmx", AssetKind::Mesh, true},
 
 			{ContentForm::ATex, "atex", AssetKind::Texture, false},
+			{ContentForm::ASeq, "aseq", AssetKind::Animation, false},
 			{ContentForm::Png, "png", AssetKind::Texture, true},
 			{ContentForm::Jpeg, "jpeg", AssetKind::Texture, true},
 			{ContentForm::Jpeg, "jpg", AssetKind::Texture, true},
@@ -57,12 +58,9 @@ namespace engine::assets {
 			{ContentForm::Dds, "dds", AssetKind::Texture, false},
 			{ContentForm::Basis, "basis", AssetKind::Texture, false},
 
-			// **A texture, because that is what one becomes.** `bake` lays a
-			// GIF's frames out as a grid in a single image and records the side,
-			// the count and the rate - see `assets::TextureData::FlipbookSide` -
-			// so everything downstream of the decoder handles it as the one
-			// image it now is. Naming a separate kind would need a second route
-			// through the client's content pump to arrive at the same table.
+			// Short GIFs bake to a texture atlas. Longer GIFs bake to `.aseq`.
+			// The source remains a texture form so existing content policy selects
+			// the decoder before the output format is known.
 			{ContentForm::Gif, "gif", AssetKind::Texture, true},
 
 			// **A texture, for the same reason `.gif` is one**: `bake`

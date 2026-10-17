@@ -6,6 +6,9 @@
 // that is wrong and the thing that looks wrong are in different modules. A
 // headless test over the same sequence is where that gets cornered.
 
+#include "../src/DisplayedSceneView.hpp"
+#include "../src/PortalEyeHandoff.hpp"
+
 #include <engine/core/Bytes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -13,11 +16,13 @@
 #include <engine/effects/Registration.hpp>
 #include <engine/gui/Registration.hpp>
 #include <engine/physics/Pipeline.hpp>
+#include <engine/physics/Storm.hpp>
 #include <engine/replication/SnapshotBuffer.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Attachments.hpp>
 #include <engine/scene/CameraPortalView.hpp>
 #include <engine/scene/Components.hpp>
+#include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -107,6 +112,11 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 	CHECK(collector.Views()[0].Instances.data() == collector.Scenes()[0].Frame->Instances.data());
 	REQUIRE(collector.Views()[0].Lights.size() == 1);
 	CHECK(collector.Views()[0].Lights.data() == collector.Scenes()[0].CameraLayers->Lights.data());
+	const auto *alphaFrame = collector.Scenes()[0].Frame.get();
+	const auto *zuluFrame = collector.Scenes()[1].Frame.get();
+	REQUIRE(collector.Collect(worlds, demands, {640, 480}) == 2);
+	CHECK(collector.Scenes()[0].Frame.get() == alphaFrame);
+	CHECK(collector.Scenes()[1].Frame.get() == zuluFrame);
 
 	size_t submissions = 0;
 	std::vector<world::WorldId> submittedWorlds;
@@ -220,6 +230,72 @@ TEST_CASE("active scenes copy valid cameras after one presentation batch", "[cli
 	);
 }
 
+TEST_CASE("active scenes submit a collected GPU particle field", "[client][active-scenes][gpu-particles]") {
+	using namespace engine;
+	effects::RegisterEffectComponents();
+	scene::RegisterSceneClasses();
+	physics::RegisterStormComponents();
+	render::RegisterPresentationComponents();
+	Universe worlds({.Mode = world::ExecutionMode::WorldParallel});
+	const auto stormWorld = worlds.Create({.Name = Name("Storm")});
+	worlds.Enter(stormWorld, [](Store &store) {
+		const auto camera = store.CreateInstance(scene::CameraClass(), "Eye");
+		store.Set(camera, scene::Transform{core::CFrame(Vector3{0, 80, 240})});
+		store.Set(camera, scene::Camera{});
+		store.SetResource(scene::ActiveCamera{camera});
+		store.SetResource(render::DrawList{});
+		physics::Storm storm;
+		storm.State.Position = {12, 0, -8};
+		storm.State.ElapsedSeconds = 42.0f;
+		physics::SetStorm(store, storm);
+		const auto field = store.CreateInstance(ecs::Classes::Find(Name("GpuParticleField")), "Funnel");
+		store.Set(field, scene::GpuParticleField{.RequestedCount = 262'144, .Seed = 73});
+	});
+
+	client::ActiveSceneCollector collector;
+	const std::array demands{
+		client::ActiveSceneDemand{world::Presentation{stormWorld, .016f, .25f}, Name("storm-pipeline")},
+	};
+	REQUIRE(collector.Collect(worlds, demands, {960, 540}) == 1);
+	const client::ActiveScene &scene = collector.Scenes().front();
+	REQUIRE(scene.Frame->GpuParticles.has_value());
+	REQUIRE(scene.View.GpuParticles.has_value());
+	CHECK(scene.View.GpuParticles->Field.Seed == 73);
+	CHECK(scene.View.GpuParticles->Field.RequestedCount == 262'144);
+	CHECK(scene.View.GpuParticles->Centre == Vector3{12, 0, -8});
+	CHECK(scene.View.GpuParticles->Seconds == 42.0f);
+
+	collector.SubmitBatch(stormWorld, scene.View, 960, 540, false, {}, [](std::span<render::View> views) {
+		REQUIRE(views.size() == 1);
+		REQUIRE(views.front().GpuParticles.has_value());
+		CHECK(views.front().GpuParticles->Field.Seed == 73);
+		return render::FrameResult{};
+	});
+}
+
+TEST_CASE(
+	"normal client view receives the displayed GPU particle field", "[client][active-scenes][gpu-particles]"
+) {
+	using namespace engine;
+	client::ActiveScene activeScene;
+	activeScene.Frame = std::make_unique<render::WorldViewFrame>();
+	activeScene.Frame->GpuParticles = render::GpuParticleFieldView{
+		.Field = {.RequestedCount = 262'144, .Seed = 73},
+		.Storm = scene::EfPreset(scene::EfCategory::EF3),
+		.Centre = {12, 0, -8},
+		.Seconds = 42.0f,
+	};
+	render::View view;
+	client::BindDisplayedSceneFields(&activeScene, view);
+	REQUIRE(view.GpuParticles.has_value());
+	CHECK(view.GpuParticles->Field.Seed == 73);
+	CHECK(view.GpuParticles->Centre == Vector3{12, 0, -8});
+	CHECK(view.GpuParticles->Seconds == 42.0f);
+
+	client::BindDisplayedSceneFields(nullptr, view);
+	CHECK_FALSE(view.GpuParticles.has_value());
+}
+
 TEST_CASE("a trailing eye draws its original world after body admission", "[client][camera-portal-world]") {
 	using namespace engine;
 	scene::RegisterSceneClasses();
@@ -250,6 +326,71 @@ TEST_CASE("a trailing eye draws its original world after body admission", "[clie
 }
 
 TEST_CASE(
+	"admitted body keeps the paired portal preview until its eye crosses", "[client][camera-portal-world]"
+) {
+	using namespace engine;
+	scene::RegisterSceneClasses();
+	Store adopted("adopted");
+	const auto camera = adopted.CreateInstance(scene::CameraClass(), "Eye");
+	adopted.SetResource(scene::ActiveCamera{camera});
+	const auto player = adopted.Create();
+	const auto model = adopted.Create();
+	const auto root = adopted.Create();
+	adopted.Set(root, scene::Transform{core::CFrame(Vector3{0, 1, 5})});
+	adopted.Set(player, scene::PlayerCharacter{model});
+	adopted.Set(model, scene::Character{root, {}, player});
+	adopted.SetResource(scene::LocalPlayer{player});
+	CHECK(scene::CameraSubjectRoot(adopted, camera) == ecs::NULL_ENTITY);
+	REQUIRE(client::PortalHandoffBody(adopted));
+	CHECK(*client::PortalHandoffBody(adopted) == Vector3{0, 1, 5});
+	adopted.Set(model, scene::Character{root, {}, {}});
+	CHECK_FALSE(client::PortalHandoffBody(adopted));
+	adopted.Set(model, scene::Character{root, {}, player});
+	scene::PortalSeam forward;
+	forward.Centre = {0, 0, 0};
+	forward.Normal = {0, 0, 1};
+	forward.First = {2, 0, 0};
+	forward.Second = {0, 3, 0};
+	forward.Destination = core::CFrame(Vector3{0, 0, 10});
+	forward.Crosses = true;
+	forward.DestinationWorld = Name("former source");
+	const std::array seams{forward};
+	const auto before = client::TrailingPortalEye(seams, Name("former source"), {0, 1, -4}, {0, 1, 5});
+	REQUIRE(before.has_value());
+	CHECK(before->Place(core::CFrame(Vector3{0, 1, -4})).Position.Z == Catch::Approx(6));
+	const auto moved = client::TrailingPortalEye(seams, Name("former source"), {0, 1, -2}, {0, 1, 5});
+	REQUIRE(moved.has_value());
+	CHECK(
+		moved->Place(core::CFrame(Vector3{0, 1, -2})).Position.Z !=
+		before->Place(core::CFrame(Vector3{0, 1, -4})).Position.Z
+	);
+	CHECK_FALSE(client::TrailingPortalEye(seams, Name("different source"), {0, 1, -4}, {0, 1, 5}));
+	CHECK_FALSE(client::TrailingPortalEye(seams, Name("former source"), {0, 1, 1}, {0, 1, 5}));
+	CHECK_FALSE(client::TrailingPortalEye(seams, Name("former source"), {0, 1, 0}, {0, 1, 5}));
+	CHECK_FALSE(client::TrailingPortalEye(seams, Name("former source"), {0, 1, -4}, {0, 1, -5}));
+	auto otherMouth = forward;
+	otherMouth.Centre.X = 20;
+	CHECK(
+		client::TrailingPortalEye(
+			std::array{otherMouth, forward}, Name("former source"), {0, 1, -4}, {0, 1, 5}
+		)
+	);
+	CHECK_FALSE(
+		client::TrailingPortalEye(std::array{forward, forward}, Name("former source"), {0, 1, -4}, {0, 1, 5})
+	);
+
+	// Returning through the paired face reverses its normal and the eye's side.
+	auto inverse = forward;
+	inverse.Normal = {0, 0, -1};
+	inverse.Destination = core::CFrame(Vector3{0, 0, -10});
+	const std::array returnSeams{inverse};
+	CHECK(client::TrailingPortalEye(returnSeams, Name("former source"), {0, 1, 4}, {0, 1, -5}));
+	CHECK_FALSE(client::TrailingPortalEye(returnSeams, Name("former source"), {0, 1, -1}, {0, 1, -5}));
+	inverse.Crosses = false;
+	CHECK_FALSE(client::TrailingPortalEye(std::array{inverse}, Name("former source"), {0, 1, 4}, {0, 1, -5}));
+}
+
+TEST_CASE(
 	"camera routing crosses and returns through copied destination topology", "[client][remote-eye-route]"
 ) {
 	using namespace engine;
@@ -258,6 +399,9 @@ TEST_CASE(
 	Universe viewer, producer;
 	const auto near = viewer.Create({.Name = Name("Near")});
 	const bool persistentOwner = GENERATE(false, true);
+	const float scale = GENERATE(.5f, 1.0f, 2.0f);
+	const bool transformed = GENERATE(false, true);
+	CAPTURE(persistentOwner, scale, transformed);
 	const auto owner = viewer.Create({.Name = Name("ViewOwner")});
 	const auto remoteFar = viewer.CreateRemote({.Name = Name("Far")}, Name("producer"));
 	const auto far = producer.Create({.Name = Name("Far")});
@@ -265,19 +409,24 @@ TEST_CASE(
 	producer.CreateRemote({.Name = Name("ViewOwner")}, Name("viewer"));
 	REQUIRE(viewer.ConfigurePresentation(123));
 	REQUIRE(producer.ConfigurePresentation(456));
-	const auto install = [](Universe &worlds, WorldId world, bool reverse) {
+	const auto placement = transformed
+							   ? core::CFrame(Vector3{11, 7, -13}) * core::CFrame::Angles(.3f, -.7f, .2f)
+							   : core::CFrame{};
+	const auto install = [placement, scale](Universe &worlds, WorldId world, bool reverse) {
 		worlds.Enter(world, [&](Store &store) {
 			const auto pane =
 				store.CreateInstance(ecs::Classes::Find(Name("Part")), reverse ? "StandIn" : "Door");
 			const auto standIn =
 				store.CreateInstance(ecs::Classes::Find(Name("Part")), reverse ? "Door" : "StandIn");
-			const core::CFrame front;
-			const auto back =
-				core::CFrame(Vector3{0, 0, -.2f}) * core::CFrame::Angles(0, 3.14159265358979323846f, 0);
+			const core::CFrame front = placement;
+			const auto back = placement * core::CFrame(Vector3{0, 0, -.2f}) *
+							  core::CFrame::Angles(0, 3.14159265358979323846f, 0);
 			store.Set(pane, scene::Transform{reverse ? back : front});
 			store.Set(standIn, scene::Transform{reverse ? front : back});
-			store.Set(pane, scene::Bounds{{2, 3, .1f}});
-			store.Set(standIn, scene::Bounds{{2, 3, .1f}});
+			const float paneScale = reverse ? scale : 1.0f;
+			const float standInScale = reverse ? 1.0f : scale;
+			store.Set(pane, scene::Bounds{{2 * paneScale, 3 * paneScale, .1f}});
+			store.Set(standIn, scene::Bounds{{2 * standInScale, 3 * standInScale, .1f}});
 			const auto portal = store.CreateInstance(ecs::Classes::Find(Name("Portal")), "Portal");
 			REQUIRE(store.SetParent(portal, pane));
 			store.Set(
@@ -303,22 +452,35 @@ TEST_CASE(
 		world::PresentationStatus::Ok
 	);
 	constexpr render::PortalImageHost::Time now{};
-	core::CFrame eye(Vector3{0, 0, 1});
+	const core::CFrame before = placement * core::CFrame(Vector3{0, 0, 1});
+	const core::CFrame after = placement * core::CFrame(Vector3{0, 0, -1});
+	core::CFrame eye = before;
 	scene::Camera lens;
+	const scene::Camera sourceLens = lens;
 	const auto topologyOwner = persistentOwner ? owner : WorldId{};
 	REQUIRE(
 		client::ResolveCameraPortalWorld(viewer, near, near, eye, lens, &images, now, topologyOwner) == near
 	);
-	eye.Position.Z = -1;
+	const core::CFrame apertureMiss = placement * core::CFrame(Vector3{5, 0, -1});
+	eye = apertureMiss;
+	REQUIRE(
+		client::ResolveCameraPortalWorld(viewer, near, near, eye, lens, &images, now, topologyOwner) == near
+	);
+	CHECK(eye.FuzzyEq(apertureMiss, .0001f));
+	eye = before;
+	REQUIRE(
+		client::ResolveCameraPortalWorld(viewer, near, near, eye, lens, &images, now, topologyOwner) == near
+	);
+	eye = after;
 	CHECK_FALSE(
 		client::ResolveCameraPortalWorld(viewer, near, near, eye, lens, &images, now, topologyOwner).IsValid()
 	);
-	CHECK(eye.Position.Z == -1);
+	CHECK(eye.FuzzyEq(after, .0001f));
 	viewer.Enter(near, [&](Store &store) {
 		const auto *history = store.Get<scene::CameraPortalView>(camera);
 		REQUIRE(history != nullptr);
 		CHECK(history->World == "Near");
-		CHECK(history->Previous.Position.Z == 1);
+		CHECK(history->Previous.FuzzyEq(before, .0001f));
 	});
 	REQUIRE(
 		producer.ApplyPresentationDirectory(Name("viewer"), viewer.LocalPresentationDirectory()) ==
@@ -340,8 +502,17 @@ TEST_CASE(
 		client::ResolveCameraPortalWorld(viewer, near, near, eye, lens, &images, now, topologyOwner) ==
 		remoteFar
 	);
-	CHECK((eye.Position - Vector3{0, 0, -1}).Magnitude() < .0001f);
-	eye = core::CFrame(Vector3{0, 0, 1});
+	scene::PortalSeam sourceSeam;
+	viewer.Enter(near, [&](Store &store) {
+		std::vector<scene::PortalSeam> seams;
+		REQUIRE(scene::GatherPortalSeams(store, seams) == 1);
+		sourceSeam = seams.front();
+	});
+	const auto expected = scene::SeamMapping(sourceSeam).Place(after);
+	CHECK(eye.FuzzyEq(expected, .0001f));
+	CHECK(lens.NearPlane == Catch::Approx(sourceLens.NearPlane * scale));
+	CHECK(lens.FarPlane == Catch::Approx(sourceLens.FarPlane * scale));
+	eye = before;
 	bool available = true;
 	auto next = now;
 	SECTION("return crossing") {}
@@ -356,7 +527,7 @@ TEST_CASE(
 	const auto result =
 		client::ResolveCameraPortalWorld(viewer, near, near, eye, lens, &images, next, topologyOwner);
 	CHECK(result == (available ? near : WorldId{}));
-	CHECK((eye.Position - Vector3{0, 0, 1}).Magnitude() < .0001f);
+	CHECK(eye.FuzzyEq(before, .0001f));
 	viewer.Enter(near, [&](Store &store) {
 		CHECK(store.Get<scene::CameraPortalView>(camera)->World == (available ? "Near" : "Far"));
 		CHECK(store.Get<scene::CameraSubject>(camera)->Target == humanoid);
@@ -420,7 +591,16 @@ TEST_CASE(
 	constexpr render::PortalImageHost::Time now{};
 	CHECK_FALSE(
 		client::UpdatePortalImages(
-			viewer, images, near, view, {.Width = 32, .Height = 32}, portals, surfaces, 0, now, {}, joining
+			viewer,
+			images,
+			near,
+			view,
+			{.Width = 32, .Height = 32},
+			portals,
+			surfaces,
+			0,
+			now,
+			{.TopologyOwner = {}, .AdmittedDestination = joining, .PresentedDestination = {}}
 		)
 	);
 	REQUIRE(portals.size() == 1);
@@ -453,8 +633,7 @@ TEST_CASE(
 			surfaces,
 			0,
 			now + std::chrono::milliseconds(2),
-			{},
-			near
+			{.TopologyOwner = {}, .AdmittedDestination = near, .PresentedDestination = {}}
 		);
 		CHECK(viewer.LookupPresentation(joining, render::PORTAL_REQUEST_CHANNEL).Generation == 0);
 		(void)client::UpdatePortalImages(
@@ -467,8 +646,7 @@ TEST_CASE(
 			surfaces,
 			0,
 			now + std::chrono::milliseconds(3),
-			{},
-			joining
+			{.TopologyOwner = {}, .AdmittedDestination = joining, .PresentedDestination = {}}
 		);
 		CHECK(viewer.LookupPresentation(joining, render::PORTAL_REQUEST_CHANNEL).Generation != 0);
 		CHECK(viewer.LookupPresentation(remote, render::PORTAL_REQUEST_CHANNEL) == endpoint);
@@ -493,6 +671,36 @@ TEST_CASE(
 		);
 		CHECK(viewer.LookupPresentation(joining, render::PORTAL_REQUEST_CHANNEL).Generation != 0);
 	}
+}
+
+TEST_CASE("a ready local copy beats a remote endpoint of the same name", "[client][portal-arrival-route]") {
+	// A product client's copies carry no view, so the view rule ties and the
+	// remote endpoint, registered first, used to win. Each camera sent to it
+	// waits a round trip; the copy draws the same room at once.
+	engine::replication::RegisterReplicationComponents();
+	Universe worlds;
+	const auto source = worlds.Create({.Name = Name("client.replica")});
+	const auto remote = worlds.Create({.Name = Name("Far")});
+	const auto copy = worlds.Create({.Name = Name("client.portal.approach.1")});
+	worlds.Enter(source, [](Store &store) {
+		store.SetResource(engine::world::Replica{true, Name("Near"), {}});
+	});
+	worlds.Enter(copy, [](Store &store) {
+		store.SetResource(engine::world::Replica{true, Name("Far"), {}});
+		store.SetResource(engine::replication::SnapshotBuffer{});
+		engine::physics::PreparePhysicsWorld(store);
+	});
+	std::vector<client::WorldIdentity> surveyed;
+	client::SurveyWorlds(worlds, surveyed);
+	for (auto &entry : surveyed)
+		if (entry.Id == remote) entry.IsRemote = true;
+	// Until the copy has a tick, the endpoint is the only live room.
+	CHECK(client::ResolveDestinationWorld(surveyed, source, Name("Far")) == remote);
+	worlds.Enter(copy, [](Store &store) { client::RecordReplicatedTick(store, 3); });
+	client::SurveyWorlds(worlds, surveyed);
+	for (auto &entry : surveyed)
+		if (entry.Id == remote) entry.IsRemote = true;
+	CHECK(client::ResolveDestinationWorld(surveyed, source, Name("Far")) == copy);
 }
 
 TEST_CASE("portal routes wait for a destination replica snapshot", "[client][portal-arrival-route]") {
@@ -1299,6 +1507,79 @@ namespace {
 			hole("FarHole", far, near, 1);
 		}
 	}
+
+	// **Two panes that face each other across a gap, in one world.** `MakePortalPair`
+	// lays its pair along X with both faces the same way, which is a window; this
+	// is the arrangement a short tunnel has, where a walker passes through one
+	// mouth and the corridor's far mouth is a second hole in the same space.
+	// `subjectZ` is how far past the second pane's face the body stands, and the
+	// return is the world, the body root and the camera.
+	struct FacingPair {
+		WorldId World;
+		Entity Root;
+		Entity Camera;
+
+		FacingPair(Universe &universe, float subjectZ) {
+			World = AddWorld(universe, "facing");
+			universe.Enter(World, [&](Store &store) {
+				const Entity services = engine::scene::InstallServices(store);
+				// A pane's face is its part centre plus the normal times the
+				// half-extent, so these two faces are 0.125 out from 0 and 11.75.
+				const auto pane = [&](std::string_view name, const Vector3 &at, float yaw) {
+					const Entity part = store.CreateInstance(engine::scene::PartClass(), name);
+					store.SetParent(part, services);
+					store.Set(
+						part,
+						engine::scene::Transform{
+							engine::core::CFrame{at} * engine::core::CFrame::Angles(0.0f, yaw, 0.0f)
+						}
+					);
+					store.Set(part, engine::scene::Bounds{Vector3{3.0f, 4.0f, 0.125f}});
+					return part;
+				};
+				// The near mouth faces north out of the plain, the corridor's own
+				// mouth faces south down the corridor: each is the far side of the
+				// other, which is what makes the pair a hole rather than a mirror.
+				const Entity mouth = pane("Mouth", Vector3{0.0f, 4.0f, 0.0f}, 3.14159265f);
+				const Entity corridor = pane("Corridor", Vector3{34.0f, 4.0f, 11.75f}, 0.0f);
+				const auto hole = [&](std::string_view name, Entity on, Entity to) {
+					const Entity camera =
+						store.CreateInstance(engine::ecs::Classes::Find(Name("SurfaceCamera")), name);
+					engine::scene::SurfaceCamera target;
+					target.Surface = 0;
+					store.Set(camera, target);
+					engine::scene::Portal portal;
+					portal.Destination = to;
+					store.Set(camera, portal);
+					store.SetParent(camera, on);
+				};
+				hole("MouthHole", mouth, corridor);
+				hole("CorridorHole", corridor, mouth);
+
+				Root = store.Create();
+				// A hundredth past the corridor mouth's face, so the follow arm
+				// behind the body leaves the corridor through it.
+				store.Set(
+					Root, engine::scene::Transform{engine::core::CFrame{Vector3{34.0f, 3.0f, subjectZ}}}
+				);
+				const Entity humanoid =
+					store.CreateInstance(engine::ecs::Classes::Find(Name("Humanoid")), "Subject");
+				engine::scene::Humanoid rig;
+				rig.RootPart = Root;
+				store.Set(humanoid, rig);
+
+				Camera = store.CreateInstance(engine::scene::CameraClass(), "Eye");
+				store.Set(Camera, engine::scene::CameraSubject{humanoid, false});
+				store.SetResource(engine::scene::ActiveCamera{Camera});
+				engine::scene::CameraController controller;
+				controller.Mode = engine::scene::CameraMode::Classic;
+				controller.Distance = 12.0f;
+				controller.HeadHeight = 1.5f;
+				store.SetResource(controller);
+				(void)engine::scene::AimSurfaceCameras(store);
+			});
+		}
+	};
 }
 
 TEST_CASE("new portals claim no render slot before the local aim pass", "[client][presentation]") {
@@ -1720,4 +2001,49 @@ TEST_CASE("foreground portal bodies come from the viewer's replica", "[client][p
 	REQUIRE(drawn.size() == own + 1);
 	CHECK(drawn.back().SourceWorld == universe.NameOf(thereSeen));
 	CHECK(drawn.back().Tint.R == Catch::Approx(.4f));
+}
+
+TEST_CASE("a mapped follow arm keeps the pose the camera already has", "[client][camera-portal-world]") {
+	// **The arm and the eye are one decision, and this is where they came apart.**
+	// A follow camera whose subject has just walked through a same-world mouth
+	// swings its arm back out through the mouth it came in by, and `PlaceCamera`
+	// maps that arm through the seam - the eye lands in the room the body left,
+	// looking back through the hole. The route pass then re-derives the eye from
+	// the *arm* rather than from the pose, and with no cross-world route of its
+	// own its map is still identity, so it handed back the pre-crossing arm.
+	//
+	// The two answers then disagree: the camera row says one place and the
+	// visibility frame says another, and every camera-dependent decision reads
+	// the second. Culling kept the far room and dropped the near one, so the
+	// frame was the empty plain with the tunnel missing from it - a hole showing
+	// nothing, found by a body that had walked through one.
+	Universe universe;
+	const FacingPair pair(universe, 11.625f - 0.01f);
+
+	engine::core::CFrame placed;
+	universe.Enter(pair.World, [&](Store &store) {
+		std::vector<engine::scene::PortalSeam> seams;
+		REQUIRE(engine::scene::GatherPortalSeams(store, seams) == 2);
+		REQUIRE(engine::scene::PlaceCamera(store));
+		placed = store.Get<engine::scene::Transform>(pair.Camera)->Frame;
+	});
+
+	// The arm really did cross, and the map is what carried it: the eye is in
+	// the plain's chart, twelve studs out from the mouth, rather than up the
+	// corridor where the orbit was. A case that stopped here would prove nothing.
+	const engine::core::CFrame orbit = placed * engine::core::CFrame{}.Inverse();
+	(void)orbit;
+	CHECK(placed.Position.X == Catch::Approx(0.0f).margin(0.5f));
+	CHECK(placed.Position.Z == Catch::Approx(12.0f).margin(0.5f));
+
+	engine::core::CFrame eye = placed;
+	engine::scene::Camera lens;
+	engine::world::WorldId resolved;
+	universe.Enter(pair.World, [&](Store &store) { (void)store; });
+	resolved = client::ResolveCameraPortalWorld(universe, pair.World, pair.World, eye, lens);
+
+	// The world is unchanged - one world holds both charts - and the pose is
+	// untouched, because the route has no map of its own to compose onto it.
+	CHECK(resolved == pair.World);
+	CHECK(eye.FuzzyEq(placed, .0001f));
 }

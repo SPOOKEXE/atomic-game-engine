@@ -25,6 +25,10 @@ mono_add_library(game
 		# reads and writes is `world::Universe`.
 		Engine::world
 
+		# L8. The portal seam coordinator gathers copied physics records at the
+		# fixed-step barrier and solves them once before either world publishes.
+		Engine::physics
+
 		# L7. `scene::RegisterSceneClasses` is what makes `Part` a name a
 		# document can carry. Named rather than left to a caller: a reader that
 		# depended on somebody else having registered the classes first would

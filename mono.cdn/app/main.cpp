@@ -21,17 +21,19 @@
 // The three deployments are flag combinations rather than three
 // programs, exactly as `CDNSettings` is one type rather than three.
 
+#include "ControlHooks.hpp"
+
 #include <engine/assets/ChunkStore.hpp>
 #include <engine/assets/ContentPolicy.hpp>
 #include <engine/assets/Grant.hpp>
 #include <engine/assets/Signature.hpp>
-#include <engine/control/Features.hpp>
 #include <engine/control/Server.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/core/Arguments.hpp>
 #include <engine/core/Config.hpp>
 #include <engine/core/Flags.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/delivery/Source.hpp>
 
@@ -175,6 +177,7 @@ int main(int argc, char **argv) {
 		"grant-key", "HEX", "64 hex characters - the secret shared with the server that issues grants"
 	);
 	arguments.Value("port", "N", "Port to listen on (default: 9080; 0 binds an ephemeral one)");
+	arguments.Value("seconds", "N", "Serve for at most this many seconds, then report and exit");
 	arguments.Value(
 		"ingest-key", "SECRET", "Accept uploads at /ingest from whoever sends this as x-atomic-ingest"
 	);
@@ -463,6 +466,7 @@ int main(int argc, char **argv) {
 
 	std::unique_ptr<engine::control::Server> controlServer;
 	std::unique_ptr<engine::control::Surface> controlSurface;
+	std::vector<engine::control::HookLease> controlHooks;
 	if (arguments.Has("mcp-port")) {
 		controlServer = std::make_unique<engine::control::Server>();
 		controlSurface = std::make_unique<engine::control::Surface>(
@@ -471,55 +475,18 @@ int main(int argc, char **argv) {
 			"module graph, process diagnostics, and content service state."
 		);
 
-		const std::array features{
-			engine::control::features::Architecture(),
-			engine::control::features::Diagnostics(),
-			engine::control::features::Resources(),
-			engine::control::features::Prompts(),
-			engine::control::features::Discovery(),
-			engine::control::features::Custom(
-				"cdn", [&origin, &serving, &controlServer](engine::control::Surface &surface) {
-					surface.Add(
-						engine::control::Tool{
-							"engine_info",
-							"This content origin's own state: where it is listening, the manifest root it "
-							"serves, cache use, request counters, and its loopback control endpoint.",
-							[] { return nlohmann::json{{"type", "object"}}; },
-							[&origin, &serving, &controlServer](const nlohmann::json &, std::string &) {
-								const cdn::ServiceCounters &counts = serving->Counters();
-								const std::shared_ptr<const cdn::Publication> publication = origin.Current();
-								return nlohmann::json{
-									{"endpoint", serving->Local().Text()},
-									{"manifest",
-									 publication == nullptr ? std::string()
-															: publication->Contents().Root().ToHex()},
-									{"cache",
-									 nlohmann::json{
-										 {"bytes", origin.Cache().Bytes()},
-										 {"entries", origin.Cache().Count()},
-										 {"capacity", origin.Cache().Capacity()},
-									 }},
-									{"requests",
-									 nlohmann::json{
-										 {"bundles", counts.Bundles},
-										 {"refused", counts.Refused},
-										 {"missing", counts.Missing},
-										 {"sentBytes", counts.SentBytes},
-										 {"receivedBytes", counts.ReceivedBytes},
-									 }},
-									{"control",
-									 nlohmann::json{
-										 {"port", controlServer->Port()},
-										 {"served", controlServer->Served()},
-									 }},
-								};
-							},
-						}
-					);
-				}
-			),
-		};
-		controlSurface->Enable(features);
+		std::string controlHookFailure;
+		controlHooks = cdn::ConfigureControlHooks(
+			{.Surface = *controlSurface,
+			 .ContentOrigin = origin,
+			 .ContentService = *serving,
+			 .ControlServer = *controlServer},
+			controlHookFailure
+		);
+		if (controlHooks.empty()) {
+			ENGINE_ERROR("cdn: could not install control product hook: {}", controlHookFailure);
+			return 1;
+		}
 
 		const int port =
 			static_cast<int>(arguments.GetInteger("mcp-port", engine::control::DEFAULT_CDN_PORT));
@@ -539,6 +506,12 @@ int main(int argc, char **argv) {
 	if (auto limit = arguments.Get("frames")) {
 		frames = std::atol(std::string(*limit).c_str());
 	}
+	const double seconds = arguments.GetNumber("seconds", 0.0);
+	if (seconds < 0.0) {
+		ENGINE_ERROR("cdn: --seconds must not be negative");
+		return 2;
+	}
+	const auto servingStarted = std::chrono::steady_clock::now();
 
 	ENGINE_INFO(
 		"cdn: local-first {}, upstream {}",
@@ -620,7 +593,10 @@ int main(int argc, char **argv) {
 	// beside the game it serves.
 	const std::unique_ptr<cdn::DiscordPresence> presence = cdn::DiscordPresence::Start();
 
-	for (long frame = 0; frames < 0 || frame < frames; ++frame) {
+	for (long frame = 0; (frames < 0 || frame < frames) &&
+						 (seconds == 0.0 || std::chrono::steady_clock::now() - servingStarted <
+												std::chrono::duration<double>(seconds));
+		 ++frame) {
 		const size_t answered = serving->Pump(NowSeconds());
 		if (controlServer && controlServer->IsRunning()) {
 			controlServer->Pump([&controlSurface](const std::string &line) {
@@ -704,5 +680,13 @@ int main(int argc, char **argv) {
 		counters.Missing
 	);
 	ENGINE_INFO("cdn: {} bytes out, {} bytes in", counters.SentBytes, counters.ReceivedBytes);
+	uint64_t preparedHits = 0;
+	uint64_t preparedMisses = 0;
+	const engine::core::MetricsSnapshot metrics = engine::core::Metrics::Snapshot();
+	for (const engine::core::Counter &counter : metrics.Counters) {
+		if (counter.Name.Text() == "cdn.prepared.hit") preparedHits = counter.Samples;
+		if (counter.Name.Text() == "cdn.prepared.miss") preparedMisses = counter.Samples;
+	}
+	ENGINE_INFO("cdn: prepared cache hits {}, misses {}", preparedHits, preparedMisses);
 	return 0;
 }

@@ -1,3 +1,5 @@
+#include "HookFixture.hpp"
+
 #include <engine/assets/Animation.hpp>
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/RigExport.hpp>
@@ -74,8 +76,8 @@ TEST_CASE("rig export MCP tool validates selection and preserves data-rig shape"
 		store.Set(clip, engine::scene::AnimationClip{{}, engine::core::Name("one"), buffer});
 	});
 	engine::control::Surface surface("test", "test");
-	surface.AddDiscoveryTools();
-	surface.Enable(std::array{engine::control::features::RigExport(worlds)});
+	engine::control::test::Install(surface, std::array{engine::control::test::Discovery()});
+	engine::control::test::Install(surface, std::array{engine::control::test::RigExport(worlds)});
 	const nlohmann::json discoveryRequest{
 		{"jsonrpc", "2.0"},
 		{"id", 0},
@@ -168,20 +170,27 @@ TEST_CASE("rig export response cap becomes a compact Surface refusal", "[control
 	engine::control::Surface surface("test", "test");
 	engine::script::ScriptValue enormous(engine::script::ValueTag::String);
 	enormous.Text.assign(engine::control::rig_export_detail::MAXIMUM_BYTES + 1, 'x');
-	surface.Add(
-		engine::control::Tool{
-			"get_rig_export",
-			"test overflow",
-			nullptr,
-			[enormous](const nlohmann::json &, std::string &failure) mutable -> nlohmann::json {
-				nlohmann::json output;
-				if (!engine::control::rig_export_detail::Result(enormous, output)) {
-					failure = "rig export exceeds the 4 MiB response limit";
-					return nullptr;
-				}
-				return output;
+	engine::control::test::Install(
+		surface,
+		std::array{engine::control::test::Custom(
+			"rig-export-overflow", [&enormous](engine::control::Surface &owner) {
+				owner.Add(
+					engine::control::Tool{
+						"get_rig_export",
+						"test overflow",
+						nullptr,
+						[enormous](const nlohmann::json &, std::string &failure) mutable -> nlohmann::json {
+							nlohmann::json output;
+							if (!engine::control::rig_export_detail::Result(enormous, output)) {
+								failure = "rig export exceeds the 4 MiB response limit";
+								return nullptr;
+							}
+							return output;
+						}
+					}
+				);
 			}
-		}
+		)}
 	);
 	const nlohmann::json request{
 		{"jsonrpc", "2.0"},
@@ -226,7 +235,7 @@ TEST_CASE(
 		store.Set<engine::scene::Skeleton>(rig, {engine::core::Name("fenced"), 0});
 	});
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::RigExport(decoy, &session)});
+	engine::control::test::Install(surface, std::array{engine::control::test::RigExport(decoy, &session)});
 	const auto current = session.Inspect("rig-fence");
 	const auto tool =
 		std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &item) {
@@ -271,7 +280,7 @@ TEST_CASE("compatibility rig exports reject factory revision fields", "[control]
 	settings.Name = engine::core::Name("compat-rig");
 	REQUIRE(worlds.Create(settings).IsValid());
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::RigExport(worlds)});
+	engine::control::test::Install(surface, std::array{engine::control::test::RigExport(worlds)});
 	const auto tool =
 		std::find_if(surface.Registered().begin(), surface.Registered().end(), [](const auto &item) {
 			return item.Name == "get_rig_export";

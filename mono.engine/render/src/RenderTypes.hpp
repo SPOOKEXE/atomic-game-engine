@@ -10,8 +10,8 @@
 // still obey: the device layout is private and stays private, so nothing here
 // reaches a public header.
 
-#include "BackendNodes.hpp"
 #include "InstancePacking.hpp"
+#include "RenderNodeExecutor.hpp"
 
 #include <engine/graph/RenderGraph.hpp>
 #include <engine/graph/Schedule.hpp>
@@ -147,6 +147,12 @@ namespace engine::render {
 		// to is chosen by that plane - a caller passing one here would be
 		// overwritten by the slot's.
 		glm::vec4 SeamPlane{0.0f, 0.0f, 0.0f, 0.0f};
+		// Finite portal aperture axes and ownership mode. Mode zero preserves the
+		// legacy plane cut; one is the source complement and two is the mapped
+		// destination interior.
+		glm::vec4 SeamFirst{0.0f, 0.0f, 0.0f, 0.0f};
+		glm::vec4 SeamSecond{0.0f, 0.0f, 0.0f, 0.0f};
+		glm::vec4 SeamCentre{0.0f, 0.0f, 0.0f, 0.0f};
 
 		// The sky term, fog colour and eye-relative fog interval. Appended so
 		// built-in and user shaders that copy the established prefix keep every
@@ -163,10 +169,20 @@ namespace engine::render {
 		// enable and disable masks. The resident instance supplies the final layer
 		// in the vertex shader, so material feature choice never needs CPU readback.
 		glm::uvec4 RenderFeatures{};
+
+		// Appended so authored shaders that already declare `RenderFeatures` keep
+		// its layout. Channel selectors are roughness, occlusion, height,
+		// metalness, with R=0 through A=3.
+		glm::vec4 PackedPbrChannels{0.0f, 0.0f, 0.0f, 0.0f};
+		// x: dielectric IOR, y: surface thickness in metres.
+		glm::vec4 Transmission{1.5f, 0.0f, 0.0f, 0.0f};
 	};
 
 	struct ShadowUniforms {
 		glm::vec4 Plane{0.0f, 0.0f, 0.0f, 0.0f};
+		glm::vec4 SeamFirst{0.0f, 0.0f, 0.0f, 0.0f};
+		glm::vec4 SeamSecond{0.0f, 0.0f, 0.0f, 0.0f};
+		glm::vec4 SeamCentre{0.0f, 0.0f, 0.0f, 0.0f};
 		glm::vec4 Material{1.0f, 0.0f, 0.0f, 0.0f};
 		glm::vec4 Flipbook{1.0f, 0.0f, 0.0f, 0.0f};
 	};
@@ -258,6 +274,30 @@ namespace engine::render {
 		};
 		VolumeUniform Volumes[scene::MAX_SCENE_VOLUMES]{};
 		glm::vec4 VolumeCount{};
+		glm::vec4 CloudMinimumNodeCount{};
+		glm::vec4 CloudSizeDepth{};
+		glm::vec4 CloudCentreEnabled{};
+	};
+
+	// The built-in bloom and tone-map passes share these controls. This stays
+	// separate from PbrUniforms because authored post-process shaders have a
+	// stable one-sampler, no-uniform contract.
+	struct BloomUniforms {
+		// x: bloom intensity, y: HDR threshold, z: filter radius in pixels.
+		glm::vec4 Settings{};
+		// xy: target size, zw: one target pixel in UV space.
+		glm::vec4 Target{};
+	};
+
+	// Built-in post-process controls. Both passes use their own vec4 slots so
+	// shader layouts remain explicit and the two effects can evolve separately.
+	struct LightingEffectsUniforms {
+		// x: depth-of-field intensity, y: focus distance, z: focus range, w: radius in pixels.
+		glm::vec4 DepthOfField{};
+		// x: god-ray intensity, y: HDR threshold, z: ray radius in pixels, w: projected-sun visibility.
+		glm::vec4 GodRays{};
+		// xy: projected sun UV, zw: one target pixel in UV space.
+		glm::vec4 Target{};
 	};
 
 	// The two camera transforms that define the bounded reprojection capture.

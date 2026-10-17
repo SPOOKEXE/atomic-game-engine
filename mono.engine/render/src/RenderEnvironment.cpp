@@ -108,9 +108,8 @@ namespace engine::render {
 		if (cache->Sky.Matches(signature, command)) return true;
 		SDL_GPUStorageTextureReadWriteBinding destination{};
 		destination.texture = destinationTexture;
-		// An authored edit can land while the previous environment version is
-		// still sampled by an in-flight frame. Cycling preserves that reader and
-		// hands this rare regeneration a writable backing image.
+		// The history target may still be sampled by an earlier submitted command
+		// buffer. Cycling gives this regeneration separate backing storage.
 		destination.cycle = true;
 		SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, &destination, 1, nullptr, 0);
 		if (pass == nullptr) {
@@ -270,6 +269,8 @@ namespace engine::render {
 
 		SDL_GPUStorageTextureReadWriteBinding destination{};
 		destination.texture = destinationTexture;
+		// A previous frame can still sample this history target when this command
+		// buffer begins, so this write needs fresh backing storage.
 		destination.cycle = true;
 		SDL_GPUComputePass *pass = SDL_BeginGPUComputePass(command, &destination, 1, nullptr, 0);
 		if (pass == nullptr) {

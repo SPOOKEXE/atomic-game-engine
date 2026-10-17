@@ -19,6 +19,7 @@
 // property's own type and `ValuesEqual` - so "0.5" does not match "0.50001"
 // when somebody asks for exactness.
 
+#include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/game/Values.hpp>
 #include <engine/ui/Theme.hpp>

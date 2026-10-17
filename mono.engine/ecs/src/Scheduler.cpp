@@ -6,8 +6,31 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <utility>
 
 namespace engine::ecs {
+
+	Scheduler::Scheduler(const Scheduler &other)
+		: Systems(other.Systems), LastTimings(other.LastTimings),
+		  SystemTimingGroups(other.SystemTimingGroups), TimingGroups(other.TimingGroups),
+		  Compiled(other.Compiled), ScheduleDirty(other.ScheduleDirty) {
+		RebindTimingNames();
+	}
+
+	Scheduler &Scheduler::operator=(const Scheduler &other) {
+		if (this == &other) return *this;
+		// Finish every allocating copy before this scheduler's state is replaced.
+		Scheduler copy(other);
+		using std::swap;
+		swap(Systems, copy.Systems);
+		swap(LastTimings, copy.LastTimings);
+		swap(SystemTimingGroups, copy.SystemTimingGroups);
+		swap(TimingGroups, copy.TimingGroups);
+		swap(Compiled, copy.Compiled);
+		swap(ScheduleDirty, copy.ScheduleDirty);
+		RebindTimingNames();
+		return *this;
+	}
 
 	std::string_view GetPhaseName(Phase phase) {
 		switch (phase) {
@@ -32,6 +55,7 @@ namespace engine::ecs {
 	}
 
 	void Scheduler::Add(std::string_view name, Phase phase, System system, SystemOrder order) {
+		const TimingRegistration timing = PrepareTimingRegistration(name);
 		Systems.push_back(
 			Registered{
 				.Name = std::string(name),
@@ -41,16 +65,17 @@ namespace engine::ecs {
 				.Order = std::move(order),
 			}
 		);
+		if (timing.NewGroup) {
+			TimingGroups.push_back(TimingGroup{Systems.size() - 1});
+		}
+		SystemTimingGroups.push_back(timing.Group);
+		RebindTimingNames();
 		ScheduleDirty = true;
-
-		// Registered systems are stable for the life of the scheduler, so the
-		// timing list is sized once and reused. Reallocating it inside Run
-		// would show up in the numbers it is reporting.
-		LastTimings.reserve(Systems.size());
 	}
 
 	void
 	Scheduler::AddParallel(std::string_view name, Phase phase, ParallelSystem system, SystemOrder order) {
+		const TimingRegistration timing = PrepareTimingRegistration(name);
 		Systems.push_back(
 			Registered{
 				.Name = std::string(name),
@@ -61,8 +86,29 @@ namespace engine::ecs {
 				.Mode = Execution::ParallelReadOnly,
 			}
 		);
+		if (timing.NewGroup) {
+			TimingGroups.push_back(TimingGroup{Systems.size() - 1});
+		}
+		SystemTimingGroups.push_back(timing.Group);
+		RebindTimingNames();
 		ScheduleDirty = true;
-		LastTimings.reserve(Systems.size());
+	}
+
+	// Secure every timing append before Systems can relocate; post-insertion
+	// updates are trivial.
+	Scheduler::TimingRegistration Scheduler::PrepareTimingRegistration(std::string_view name) {
+		for (size_t group = 0; group < TimingGroups.size(); group++) {
+			if (Systems[TimingGroups[group].RepresentativeSystem].Name == name) {
+				SystemTimingGroups.reserve(Systems.size() + 1);
+				LastTimings.reserve(Systems.size() + 1);
+				return {group, false};
+			}
+		}
+
+		SystemTimingGroups.reserve(Systems.size() + 1);
+		TimingGroups.reserve(TimingGroups.size() + 1);
+		LastTimings.reserve(Systems.size() + 1);
+		return {TimingGroups.size(), true};
 	}
 
 	bool Scheduler::Replace(std::string_view name, uint64_t revision, System system) {
@@ -274,19 +320,30 @@ namespace engine::ecs {
 		ScheduleDirty = false;
 	}
 
-	void Scheduler::RecordTiming(const Registered &system, float milliseconds) {
-		auto existing = std::find_if(LastTimings.begin(), LastTimings.end(), [&system](const Timing &timing) {
-			return timing.Name == system.Name;
-		});
-		if (existing != LastTimings.end()) {
-			existing->Milliseconds += milliseconds;
+	void Scheduler::RebindTimingNames() {
+		for (const TimingGroup &group : TimingGroups) {
+			if (group.ActiveRow != NO_TIMING_ROW) {
+				LastTimings[group.ActiveRow].Name = Systems[group.RepresentativeSystem].Name;
+			}
+		}
+	}
+
+	void Scheduler::RecordTiming(size_t systemIndex, float milliseconds) {
+		const Registered &system = Systems[systemIndex];
+		TimingGroup &group = TimingGroups[SystemTimingGroups[systemIndex]];
+		if (group.ActiveRow != NO_TIMING_ROW) {
+			LastTimings[group.ActiveRow].Milliseconds += milliseconds;
 		} else {
 			LastTimings.push_back(Timing{system.Name, system.RunPhase, milliseconds});
+			group.ActiveRow = LastTimings.size() - 1;
 		}
 	}
 
 	void Scheduler::ClearTimings() {
 		LastTimings.clear();
+		for (TimingGroup &group : TimingGroups) {
+			group.ActiveRow = NO_TIMING_ROW;
+		}
 	}
 
 	void Scheduler::Tick(Store &store, float deltaSeconds) {
@@ -350,7 +407,7 @@ namespace engine::ecs {
 					);
 					for (size_t task = 0; task < wave.Systems.size(); task++) {
 						const Registered &system = Systems[wave.Systems[task]];
-						RecordTiming(system, milliseconds[task]);
+						RecordTiming(wave.Systems[task], milliseconds[task]);
 						core::FrameGraph::ReportNamed(
 							"parallel system", system.Name, core::ProfileCategory::ECS, milliseconds[task]
 						);
@@ -373,9 +430,9 @@ namespace engine::ecs {
 					const uint64_t finished = core::Clock::Nanoseconds();
 					const auto milliseconds =
 						static_cast<float>(static_cast<double>(finished - started) / 1'000'000.0);
-					RecordTiming(system, milliseconds);
+					RecordTiming(systemIndex, milliseconds);
 				}
 			}
 		}
 	}
-}
+} // namespace engine::ecs

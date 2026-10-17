@@ -5,6 +5,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/graph/Cull.hpp>
 #include <engine/gui/Components.hpp>
+#include <engine/physics/Storm.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/ShaderLibrary.hpp>
 #include <engine/render/SpatialCanvas.hpp>
@@ -16,6 +17,7 @@
 #include <engine/scene/Sunlight.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 
 namespace engine::render {
@@ -131,6 +133,9 @@ namespace engine::render {
 		view.PartLabelsValid = frame.PartLabelsValid;
 		view.JointFrames = frame.Joints;
 		view.Lighting = frame.Lighting;
+		view.CloudDensity = frame.CloudDensity;
+		view.Lighting.Volumes = camera.Volumes;
+		view.Lighting.VolumeCount = camera.VolumeCount;
 		view.OverrideLighting = true;
 		view.Lights = camera.Lights;
 		view.Surfaces = camera.Surfaces;
@@ -144,6 +149,7 @@ namespace engine::render {
 		view.ParticlePool = frame.Particles.Pool;
 		view.ParticleDelta = frame.ParticleDelta;
 		view.ParticleBlocks = frame.Particles.BlockCount;
+		view.GpuParticles = frame.GpuParticles;
 		view.Portals = frame.Portals;
 		view.EyeImage = 0;
 		view.EyeTransparentImages = {};
@@ -160,14 +166,69 @@ namespace engine::render {
 		const ecs::WorldTime time = store.Time();
 		// A collected packet can be rebound for another camera while its source
 		// world is paused. Only a new source or world tick carries time to the device pool.
-		const bool advanced =
-			frame.Name != owner || frame.Identity != store.Identity() || time.Tick != frame.Tick;
+		const bool newWorld = frame.Name != owner || frame.Identity != store.Identity();
+		const bool advanced = newWorld || time.Tick != frame.Tick;
 		frame.Name = owner;
 		frame.Identity = store.Identity();
 		frame.Tick = time.Tick;
 		frame.Seconds = time.Elapsed;
 		frame.ParticleDelta = advanced ? time.Delta : 0.0f;
+		frame.GpuParticles.reset();
 		frame.Lighting = scene::LightingOf(store);
+		if (newWorld) {
+			frame.CloudDensity.reset();
+			frame.CloudParameters.reset();
+		}
+		if (const auto *storm = physics::StormOf(store)) {
+			bool cloudInputsChanged = false;
+			if (frame.CloudParameters) {
+				auto previous = *frame.CloudParameters;
+				previous.Energy = storm->State.Parameters.Energy;
+				const float energyChange =
+					std::abs(frame.CloudParameters->Energy - storm->State.Parameters.Energy);
+				// Lifecycle energy evolves every tick. Rebuild immediately for a
+				// changed preset or a paused edit, and at a visible energy step.
+				cloudInputsChanged = previous != storm->State.Parameters || energyChange >= 0.05f ||
+									 (frame.CloudBuiltSeconds == time.Elapsed && energyChange > 0.0f);
+			}
+			store.Each<const scene::GpuParticleField>([&](ecs::Entity, const scene::GpuParticleField &field) {
+				if (!frame.GpuParticles.has_value()) {
+					frame.GpuParticles = GpuParticleFieldView{
+						field, storm->State.Parameters, storm->State.Position, storm->State.ElapsedSeconds
+					};
+				}
+			});
+			if (!frame.CloudDensity || cloudInputsChanged || time.Elapsed < frame.CloudBuiltSeconds ||
+				time.Elapsed - frame.CloudBuiltSeconds >= 0.25) {
+				ENGINE_PROFILE_CAT("storm cloud density build", core::ProfileCategory::Render);
+				frame.CloudBuiltSeconds = time.Elapsed;
+				frame.CloudParameters = storm->State.Parameters;
+				frame.CloudDensity.reset();
+				const scene::PreparedTornadoField field = scene::PrepareTornadoField(storm->State.Parameters);
+				const float extent = field.Parameters.InfluenceRadius;
+				const scene::CloudDensityOctreeConfig config{
+					.RootMinimum = {-extent, 0.0f, -extent},
+					.RootSize = {extent * 2.0f, field.Parameters.TopHeight * 1.16f, extent * 2.0f},
+					.MaximumDepth = 6,
+				};
+				if (auto tree = scene::CloudDensityOctree::Create(config)) {
+					const scene::CloudDensityBuildStats built = scene::BuildCloudDensity(
+						*tree, field, storm->State.ElapsedSeconds, {.CoarseDepth = 4, .FineDepth = 6}
+					);
+					if (built.Nodes != 0) {
+						frame.CloudDensity = scene::CloudDensitySnapshot{
+							.Centre = storm->State.Position,
+							.Config = config,
+							.Nodes = tree->GpuNodes(),
+						};
+					}
+				}
+			}
+			if (frame.CloudDensity) frame.CloudDensity->Centre = storm->State.Position;
+		} else {
+			frame.CloudDensity.reset();
+			frame.CloudParameters.reset();
+		}
 		// An inactive cloud clock cannot change the captured pixels.
 		if (EnvironmentModesOf(frame.Lighting.EnvironmentState).Clouds == 0 ||
 			frame.Lighting.EnvironmentState.CloudLayer.WindSpeed <= 0)
@@ -185,29 +246,30 @@ namespace engine::render {
 			frame.Joints = draw->JointFrames;
 		}
 		scene::GatherSurfaceSlots(store, frame.Slots);
-		ApplySurfaceSlots(frame.Instances, frame.Slots, owner);
 		scene::GatherPortalSeams(store, frame.Seams);
 		for (auto &seam : frame.Seams) {
 			for (const auto &slot : frame.Slots)
 				if (slot.Camera == seam.Camera) seam.Surface = slot.Index;
 		}
+		ApplySurfaceSlots(frame.Instances, frame.Slots, owner, frame.Seams);
 		CollectPortalViews(store, frame.Portals, frame.Slots);
 		CollectParticleBatches(store, frame.Particles);
 		frame.Particles.Detach();
 	}
 
 	void CollectWorldCamera(
-		ecs::Store &store, const View &view, const core::Vector2 &extent, WorldCameraFrame &frame
+		ecs::Store &store, const View &view, const core::Vector2 &extent, WorldCameraFrame &frame, bool frozen
 	) {
 		ENGINE_PROFILE_CAT("world camera collect", core::ProfileCategory::Render);
+		const core::CFrame &visibilityFrame = view.VisibilityCameraFrame();
 		static thread_local std::vector<uint32_t> visible;
 		static thread_local std::vector<core::AABB> receivers;
 		std::optional<graph::Frustum> frustum;
 		receivers.clear();
 		if (extent.X > 0.0f && extent.Y > 0.0f) {
 			const scene::CameraMatrices matrices =
-				view.Projection ? scene::ResolveSurfaceCamera(view.CameraFrame, *view.Projection)
-								: scene::ResolveCamera(view.CameraFrame, view.Camera, extent.X / extent.Y);
+				view.Projection ? scene::ResolveSurfaceCamera(visibilityFrame, *view.Projection)
+								: scene::ResolveCamera(visibilityFrame, view.Camera, extent.X / extent.Y);
 			frustum = graph::Frustum::FromViewProjection(matrices.ViewProjection);
 			graph::Cull(view.Instances, *frustum, visible);
 			receivers.reserve(visible.size());
@@ -215,21 +277,39 @@ namespace engine::render {
 				receivers.push_back(graph::BoundsOf(view.Instances[index]));
 			}
 		}
-		CollectLights(store, view.CameraFrame.Position, receivers, frame.Lights);
-		CollectSurfaceViews(store, frame.Surfaces, view.Portals, &view);
-		effects::BuildRibbons(store, view.CameraFrame.Position, float(store.Time().Elapsed), frame.Ribbons);
-		const gui::Screen screen{extent.X, extent.Y};
-		ResolveSpatialCanvases(store, screen, &view.Camera, &view.CameraFrame);
+		CollectLights(store, visibilityFrame.Position, receivers, frame.Lights);
+		frame.VolumeCount = scene::ResolveVolumes(store, visibilityFrame.Position, receivers, frame.Volumes);
+		View visibilityView = view;
+		visibilityView.CameraFrame = visibilityFrame;
+		visibilityView.VisibilityFrame.reset();
+		CollectSurfaceViews(store, frame.Surfaces, view.Portals, &visibilityView);
+		effects::BuildRibbons(store, visibilityFrame.Position, float(store.Time().Elapsed), frame.Ribbons);
+		gui::Screen screen;
+		screen.Width = extent.X;
+		screen.Height = extent.Y;
+		std::optional<ecs::Store> frozenGui;
+		ecs::Store *guiStore = &store;
+		if (frozen) {
+			frozenGui.emplace("capture-spatial-gui");
+			if (!store.CloneTo(*frozenGui)) {
+				frame.SpatialCommands = {};
+				frame.SpatialCollectors.clear();
+				return;
+			}
+			guiStore = &*frozenGui;
+		}
+		ResolveSpatialCanvases(*guiStore, screen, &view.Camera, &visibilityFrame);
 		gui::CompileRequest compile;
 		compile.Display = screen;
 		compile.Seconds = store.Time().Elapsed;
-		frame.Compiled.Rebuild(store, compile);
+		frame.Compiled.Rebuild(*guiStore, compile);
 		frame.SpatialCommands = frame.Compiled.Commands();
 		std::erase_if(frame.SpatialCommands.Commands, [&](const gui::DrawCommand &command) {
-			return store.Get<gui::SpatialCanvas>(command.Collector) == nullptr;
+			return guiStore->Get<gui::SpatialCanvas>(command.Collector) == nullptr;
 		});
 		frame.SpatialCollectors.clear();
-		store.Each<const gui::SpatialCanvas>([&](ecs::Entity collector, const gui::SpatialCanvas &canvas) {
+		guiStore->Each<const gui::SpatialCanvas>([&](ecs::Entity collector,
+													 const gui::SpatialCanvas &canvas) {
 			frame.SpatialCollectors.push_back({collector, canvas});
 		});
 	}

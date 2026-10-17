@@ -43,12 +43,14 @@
 #include <engine/script/Debugger.hpp>
 #include <engine/script/Host.hpp>
 #include <engine/script/Language.hpp>
+#include <engine/script/RemoteEvent.hpp>
 #include <engine/script/SourceCache.hpp>
 #include <engine/script/TeleportRequest.hpp>
 #include <engine/script/Vocabulary.hpp>
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -214,9 +216,12 @@ namespace engine::script {
 	struct RuntimeLimits {
 		// Host-owned, runtime-scoped adapters. They are never process globals and
 		// service calls may only enqueue work for their owning host thread.
-		std::shared_ptr<DataCaptureBridge> DataCapture;
+		std::shared_ptr<DataCaptureBridge> DataCapture{};
 		// Host-owned lifecycle adapter for copied package and world state.
-		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
+		std::shared_ptr<DataLifecycleBridge> DataLifecycle{};
+		// The client host supplies the reliable, ordered user lane. It receives a
+		// complete RemoteEvent envelope and must copy it before returning.
+		std::function<bool(std::span<const std::byte>)> RemoteEventSender{};
 		// The most memory one VM may hold, in bytes.
 		//
 		// Allocation past this fails inside the VM, which surfaces as an
@@ -520,6 +525,16 @@ namespace engine::script {
 		// @return `false` when a connected function raised, with `LastError`
 		//         filled in. Remaining connections still run.
 		virtual bool Heartbeat(float delta) = 0;
+
+		// Delivers one copied RemoteEvent envelope at the authority's script
+		// barrier. The host resolves the sender from its admitted connection,
+		// never from the envelope. Local delivery without a player supplies nil.
+		virtual bool
+		DeliverRemoteEvent(std::span<const std::byte> message, ecs::Entity sender = ecs::NULL_ENTITY) {
+			(void)message;
+			(void)sender;
+			return false;
+		}
 
 		// Hands this VM what a pointer did to the 2D tree.
 		//

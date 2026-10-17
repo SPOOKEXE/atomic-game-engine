@@ -67,6 +67,28 @@ namespace engine::physics {
 		return rigidBody == nullptr ? core::Vector3::Zero : rigidBody->AppliedTorque;
 	}
 
+	bool Sleeping(const ecs::Store &store, ecs::Entity body) {
+		const PhysicsWorld *world = PreparedWorld(store);
+		return world != nullptr && world->Sleeping(body);
+	}
+
+	bool SetSleeping(ecs::Store &store, ecs::Entity body, bool sleeping) {
+		const scene::RigidBody *rigidBody = store.Get<scene::RigidBody>(body);
+		PhysicsWorld *world = PreparedWorldMutable(store);
+		if (world == nullptr || rigidBody == nullptr || rigidBody->Kind != scene::BodyKind::Dynamic ||
+			!store.Has<scene::Simulated>(body)) {
+			return false;
+		}
+		if (sleeping) {
+			world->Sleep(body);
+			if (store.Has<scene::Motion>(body)) store.Remove<scene::Motion>(body);
+			return true;
+		}
+		world->Wake(body);
+		if (!store.Has<scene::Motion>(body)) store.Set<scene::Motion>(body, {});
+		return true;
+	}
+
 	bool SetLinearVelocity(ecs::Store &store, ecs::Entity body, const core::Vector3 &velocity) {
 		if (!Finite(velocity) || !CanSetVelocity(store, body) || !Wake(store, body)) {
 			return false;

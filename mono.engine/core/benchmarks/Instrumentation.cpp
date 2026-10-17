@@ -30,11 +30,18 @@
 #include <engine/core/FrameGraph.hpp>
 #include <engine/core/HeapProfile.hpp>
 #include <engine/core/Metrics.hpp>
+#include <engine/core/Profiling.hpp>
 #include <engine/testing/Bench.hpp>
 
+#include <algorithm>
+#include <array>
+#include <cinttypes>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -71,6 +78,155 @@ namespace instrumentation_bench {
 			return built;
 		}();
 		return names;
+	}
+
+	void SeedSnapshotWorkload() {
+		const auto &names = CounterNames();
+		for (size_t index = 0; index < COUNTERS; ++index)
+			Metrics::Count(names[index], 1.0);
+		for (size_t index = 0; index < 8; ++index)
+			for (size_t sample = 0; sample < 1024; ++sample)
+				Metrics::Observe(names[index], static_cast<double>(sample));
+	}
+
+	void VerifySnapshot(const engine::core::MetricsSnapshot &taken) {
+		static const auto ordered = [] {
+			auto names = CounterNames();
+			std::sort(names.begin(), names.end());
+			return names;
+		}();
+		if (taken.Counters.size() != COUNTERS || !taken.Gauges.empty() || taken.Histograms.size() != 8)
+			throw std::runtime_error("Metrics Snapshot workload shape differs from oracle");
+		for (size_t index = 0; index < COUNTERS; ++index) {
+			const auto &counter = taken.Counters[index];
+			if (counter.Name.Text() != ordered[index] || counter.Value != 1.0 || counter.Samples != 1 ||
+				counter.IsTime)
+				throw std::runtime_error("Metrics Snapshot counter fields or ordering differ from oracle");
+		}
+		for (size_t index = 0; index < 8; ++index) {
+			const auto &shape = taken.Histograms[index];
+			if (shape.Name.Text() != CounterNames()[index] || shape.Samples != 1024 ||
+				shape.Sum != 523776.0 || shape.Minimum != 0.0 || shape.Maximum != 1023.0 ||
+				shape.Mean != 511.5 || shape.Retained != 1024 || shape.P50 != 512.0 || shape.P95 != 972.0 ||
+				shape.P99 != 1013.0 || shape.IsTime)
+				throw std::runtime_error("Metrics Snapshot histogram fields differ from oracle");
+		}
+	}
+
+	// One preflight, before the first warmup body, leaves the original measured
+	// setup and 100 Snapshot calls intact. Both snapshots must reset nothing.
+	void SnapshotPreflight() {
+		static const bool verified = [] {
+			Metrics::Clear();
+			SeedSnapshotWorkload();
+			const auto first = Metrics::Snapshot();
+			VerifySnapshot(first);
+			VerifySnapshot(Metrics::Snapshot());
+			Metrics::Clear();
+			VerifySnapshot(first);
+			return true;
+		}();
+		Consume(verified);
+	}
+
+	constexpr std::string_view SNAPSHOT_SCOPE = "Metrics::Snapshot diagnostic";
+
+	engine::core::HeapNodeView SnapshotHeap() {
+		const uint32_t count = HeapProfile::NodeCount();
+		if (count > 4096) throw std::runtime_error("Metrics Snapshot heap tree exceeds diagnostic bound");
+		engine::core::HeapNodeView result;
+		for (uint32_t index = 1; index < count; ++index) {
+			const auto node = HeapProfile::Node(index);
+			if (node.Name != SNAPSHOT_SCOPE) continue;
+			result.TotalBytes += node.TotalBytes;
+			result.TotalBlocks += node.TotalBlocks;
+			result.LiveBytes += node.LiveBytes;
+			result.LiveBlocks += node.LiveBlocks;
+			result.PeakBytes += node.PeakBytes;
+		}
+		return result;
+	}
+
+	struct RestoreSnapshotProfile {
+		bool Enabled = FrameGraph::IsEnabled();
+		~RestoreSnapshotProfile() {
+			FrameGraph::SetEnabled(Enabled);
+		}
+	};
+
+	// The root heap tag contains each returned snapshot and its destruction.
+	// Capture/counter reads and reporting are opt-in broader BENCH overhead.
+	void SnapshotMany() {
+		static const bool diagnostic = [] {
+			const char *value = std::getenv("ATOMIC_METRICS_SNAPSHOT_PROFILE");
+			return value != nullptr && std::string_view(value) == "1";
+		}();
+		if (!diagnostic) {
+			for (size_t pass = 0; pass < 100; ++pass) {
+				const auto taken = Metrics::Snapshot();
+				Consume(taken.Counters.size() + taken.Histograms.size());
+			}
+			return;
+		}
+		static size_t calls = 0;
+		if (!HeapProfile::IsCompiledIn() || calls == 128)
+			throw std::runtime_error("Metrics Snapshot profile requires heap hooks and at most 128 calls");
+		const RestoreSnapshotProfile restore;
+		FrameGraph::SetEnabled(true);
+		const auto before = SnapshotHeap();
+		const auto totalsBefore = HeapProfile::Totals();
+		float inclusive = 0, self = 0, frame = 0, unmarked = 0;
+		size_t spanCount = 0;
+		for (size_t pass = 0; pass < 100; ++pass) {
+			FrameGraph::BeginFrame();
+			try {
+				ENGINE_PROFILE("Metrics::Snapshot diagnostic");
+				const auto taken = Metrics::Snapshot();
+				Consume(taken.Counters.size() + taken.Histograms.size());
+			} catch (...) {
+				// Close the owner frame on refusal before restoring collector state.
+				FrameGraph::EndFrame();
+				throw;
+			}
+			FrameGraph::EndFrame();
+			const auto &spans = FrameGraph::Spans();
+			if (FrameGraph::Dropped() != 0 || spans.size() != 1 || spans.front().Name != SNAPSHOT_SCOPE ||
+				spans.front().Depth != 0 || spans.front().Parent != FrameGraph::NO_PARENT)
+				throw std::runtime_error("Metrics Snapshot profile incomplete hierarchy or dropped spans");
+			spanCount += spans.size();
+			inclusive += spans.front().Milliseconds;
+			self += spans.front().SelfMilliseconds;
+			frame += FrameGraph::FrameMilliseconds();
+			unmarked += FrameGraph::UnmarkedMilliseconds();
+		}
+		const auto after = SnapshotHeap();
+		const auto totalsAfter = HeapProfile::Totals();
+		if (totalsAfter.DroppedScopes != totalsBefore.DroppedScopes)
+			throw std::runtime_error("Metrics Snapshot profile dropped heap scopes");
+		++calls;
+		std::printf(
+			"# metrics-snapshot-profile call=%zu warmup=%d snapshots=100 frames=100 spans=%zu "
+			"frame_drops=0 heap_drop_delta=0 inclusive_ms=%.6f self_ms=%.6f frame_ms=%.6f "
+			"unmarked_ms=%.6f heap_coverage=cxx_new_delete allocated_bytes=%" PRIu64 " "
+			"allocated_blocks=%" PRIu64 " live_bytes_before=%" PRId64 " live_bytes_after=%" PRId64 " "
+			"live_blocks_before=%" PRId64 " live_blocks_after=%" PRId64 " "
+			"sum_tag_peak_bytes=%" PRId64 " profiler_overhead_bytes=%" PRId64 "\n",
+			calls,
+			calls <= 8,
+			spanCount,
+			inclusive,
+			self,
+			frame,
+			unmarked,
+			after.TotalBytes - before.TotalBytes,
+			after.TotalBlocks - before.TotalBlocks,
+			before.LiveBytes,
+			after.LiveBytes,
+			before.LiveBlocks,
+			after.LiveBlocks,
+			after.PeakBytes,
+			totalsAfter.OverheadBytes
+		);
 	}
 
 	// Runs `body(worker)` on `threads` threads and waits. The spawn is inside the
@@ -202,20 +358,9 @@ BENCH("Metrics::Snapshot · 64 counters and 8 histograms", 100) {
 	// kind by name and takes three percentiles per histogram over a window of
 	// up to 1024 readings, which is a report's price rather than a frame's. The
 	// server takes one at shutdown and, when asked, on an interval in seconds.
-	const std::vector<std::string> &names = CounterNames();
-	for (size_t index = 0; index < COUNTERS; index++) {
-		Metrics::Count(names[index], 1.0);
-	}
-	for (size_t index = 0; index < 8; index++) {
-		for (size_t sample = 0; sample < 1024; sample++) {
-			Metrics::Observe(names[index], static_cast<double>(sample));
-		}
-	}
-
-	for (size_t pass = 0; pass < 100; pass++) {
-		const engine::core::MetricsSnapshot taken = Metrics::Snapshot();
-		Consume(taken.Counters.size() + taken.Histograms.size());
-	}
+	SnapshotPreflight();
+	SeedSnapshotWorkload();
+	SnapshotMany();
 	Metrics::Clear();
 }
 
@@ -523,4 +668,451 @@ BENCH("HeapProfile::Sample · 500 readings of the whole tree", 500) {
 		HeapProfile::Sample();
 	}
 	HeapProfile::SetSamplingEnabled(false);
+}
+
+namespace metrics_lookup_bench {
+	using engine::core::MetricsSnapshot;
+	constexpr size_t CALLS = 8192;
+	constexpr std::string_view OWNER = "Metrics registered lookup diagnostic";
+	enum class Operation {
+		Count,
+		CountTime,
+		Gauge,
+		Observe,
+		ObserveTime,
+		Get,
+		GetGauge,
+		GetHistogram,
+		Register,
+		Refill,
+		Mixed
+	};
+	constexpr std::string_view OPERATIONS[] = {
+		"count",
+		"count-time",
+		"gauge",
+		"observe",
+		"observe-time",
+		"get",
+		"get-gauge",
+		"get-histogram",
+		"register",
+		"refill",
+		"mixed"
+	};
+	struct Row {
+		std::string Text;
+		double Total = 0, Level = 0;
+		uint64_t Counts = 0, Writes = 0;
+		bool CounterPresent = false, GaugePresent = false, HistogramPresent = false;
+		bool CounterTime = false, HistogramTime = false;
+		std::vector<double> Observations;
+	};
+	void Require(bool value) {
+		if (!value) throw std::runtime_error("Metrics lookup full semantic oracle mismatch");
+	}
+	void Model(Row &row, Operation operation, size_t serial) {
+		const double value = static_cast<double>(serial % 127 + 1);
+		if (operation == Operation::Count || operation == Operation::CountTime ||
+			operation == Operation::Register || operation == Operation::Refill ||
+			operation == Operation::Mixed) {
+			if (!row.CounterPresent)
+				row.CounterTime =
+					operation == Operation::CountTime || (operation == Operation::Mixed && serial % 3 == 1);
+			row.CounterPresent = true;
+			row.Total += value;
+			++row.Counts;
+		}
+		if (operation == Operation::Gauge || operation == Operation::Mixed) {
+			row.GaugePresent = true;
+			row.Level = value;
+			++row.Writes;
+		}
+		if (operation == Operation::Observe || operation == Operation::ObserveTime ||
+			operation == Operation::Mixed) {
+			if (!row.HistogramPresent)
+				row.HistogramTime =
+					operation == Operation::ObserveTime || (operation == Operation::Mixed && serial % 3 == 1);
+			row.HistogramPresent = true;
+			row.Observations.push_back(value);
+		}
+	}
+	void VerifyCounter(const engine::core::Counter &actual, const Row &expected) {
+		Require(
+			actual.Name.Text() == expected.Text && actual.Value == expected.Total &&
+			actual.Samples == expected.Counts && actual.IsTime == expected.CounterTime
+		);
+	}
+	void VerifyGauge(const engine::core::Gauge &actual, const Row &expected) {
+		Require(
+			actual.Name.Text() == expected.Text && actual.Value == expected.Level &&
+			actual.Writes == expected.Writes
+		);
+	}
+	void VerifyHistogram(const engine::core::Histogram &actual, const Row &expected) {
+		const auto &values = expected.Observations;
+		Require(!values.empty());
+		double sum = 0;
+		for (double value : values)
+			sum += value;
+		const size_t retained = std::min<size_t>(values.size(), Metrics::RETAINED_OBSERVATIONS);
+		std::vector<double> tail(values.end() - retained, values.end());
+		std::sort(tail.begin(), tail.end());
+		const auto percentile = [&](double fraction) {
+			return tail[static_cast<size_t>(fraction * static_cast<double>(retained - 1) + 0.5)];
+		};
+		Require(
+			actual.Name.Text() == expected.Text && actual.Samples == values.size() && actual.Sum == sum &&
+			actual.Minimum == *std::min_element(values.begin(), values.end()) &&
+			actual.Maximum == *std::max_element(values.begin(), values.end()) &&
+			actual.Mean == sum / values.size() && actual.Retained == retained &&
+			actual.P50 == percentile(.50) && actual.P95 == percentile(.95) && actual.P99 == percentile(.99) &&
+			actual.IsTime == expected.HistogramTime
+		);
+	}
+	void Verify(const MetricsSnapshot &actual, const std::vector<Row> &rows) {
+		size_t counters = 0, gauges = 0, histograms = 0;
+		std::vector<const Row *> sorted;
+		for (const auto &row : rows)
+			sorted.push_back(&row);
+		std::sort(sorted.begin(), sorted.end(), [](auto *a, auto *b) { return a->Text < b->Text; });
+		for (const auto *row : sorted) {
+			if (row->CounterPresent) {
+				Require(counters < actual.Counters.size());
+				VerifyCounter(actual.Counters[counters++], *row);
+			}
+			if (row->GaugePresent) {
+				Require(gauges < actual.Gauges.size());
+				VerifyGauge(actual.Gauges[gauges++], *row);
+			}
+			if (row->HistogramPresent) {
+				Require(histograms < actual.Histograms.size());
+				VerifyHistogram(actual.Histograms[histograms++], *row);
+			}
+		}
+		Require(
+			counters == actual.Counters.size() && gauges == actual.Gauges.size() &&
+			histograms == actual.Histograms.size()
+		);
+	}
+	void Write(const Row &row, Operation operation, size_t serial) {
+		const double value = static_cast<double>(serial % 127 + 1);
+		switch (operation) {
+		case Operation::Count:
+		case Operation::Register:
+		case Operation::Refill:
+			Metrics::Count(row.Text, value);
+			break;
+		case Operation::CountTime:
+			Metrics::CountTime(row.Text, static_cast<uint64_t>(value));
+			break;
+		case Operation::Gauge:
+			Metrics::SetGauge(row.Text, value);
+			break;
+		case Operation::Observe:
+			Metrics::Observe(row.Text, value);
+			break;
+		case Operation::ObserveTime:
+			Metrics::ObserveTime(row.Text, static_cast<uint64_t>(value));
+			break;
+		case Operation::Get: {
+			const auto actual = Metrics::Get(row.Text);
+			Require(actual.has_value());
+			VerifyCounter(*actual, row);
+			break;
+		}
+		case Operation::GetGauge: {
+			const auto actual = Metrics::GetGauge(row.Text);
+			Require(actual.has_value());
+			VerifyGauge(*actual, row);
+			break;
+		}
+		case Operation::GetHistogram: {
+			const auto actual = Metrics::GetHistogram(row.Text);
+			Require(actual.has_value());
+			VerifyHistogram(*actual, row);
+			break;
+		}
+		case Operation::Mixed:
+			if (serial % 3 == 1)
+				Metrics::CountTime(row.Text, static_cast<uint64_t>(value));
+			else
+				Metrics::Count(row.Text, value);
+			Metrics::SetGauge(row.Text, value);
+			if (serial % 3 == 1)
+				Metrics::ObserveTime(row.Text, static_cast<uint64_t>(value));
+			else
+				Metrics::Observe(row.Text, value);
+			break;
+		}
+	}
+	engine::core::HeapNodeView OwnerHeap() {
+		engine::core::HeapNodeView total;
+		Require(HeapProfile::NodeCount() <= 4096);
+		for (uint32_t id = 1; id < HeapProfile::NodeCount(); ++id) {
+			const auto row = HeapProfile::Node(id);
+			if (row.Name != OWNER) continue;
+			total.TotalBytes += row.TotalBytes;
+			total.TotalBlocks += row.TotalBlocks;
+			total.LiveBytes += row.LiveBytes;
+			total.LiveBlocks += row.LiveBlocks;
+			total.PeakBytes += row.PeakBytes;
+		}
+		return total;
+	}
+	void Fixture(size_t cardinality, Operation operation, size_t threads, size_t phase) {
+		Metrics::Clear();
+		std::vector<Row> rows(cardinality);
+		// Intern in ascending order, register in descending order to separate id and row order.
+		for (size_t index = 0; index < cardinality; ++index) {
+			rows[index].Text = "engine.bench.lookup." + std::to_string(index);
+			Consume(engine::core::Name(rows[index].Text));
+		}
+		const bool cold = operation == Operation::Register;
+		if (!cold)
+			for (size_t index = cardinality; index-- > 0;) {
+				const auto seed = operation == Operation::Get			 ? Operation::Count
+								  : operation == Operation::GetGauge	 ? Operation::Gauge
+								  : operation == Operation::GetHistogram ? Operation::Observe
+																		 : operation;
+				Write(rows[index], seed, index);
+				Model(rows[index], seed, index);
+			}
+		if (operation == Operation::Refill) {
+			const auto drained = Metrics::Drain();
+			Require(drained.size() == cardinality);
+			for (size_t index = 0; index < cardinality; ++index)
+				VerifyCounter(drained[index], rows[cardinality - 1 - index]);
+			for (auto &row : rows) {
+				row.CounterPresent = false;
+				row.Total = 0;
+				row.Counts = 0;
+			}
+		}
+		const auto expectedReads = rows;
+		const size_t calls = cold ? cardinality : CALLS;
+		// Oracle work and storage are outside the profiled operation boundary.
+		if (operation != Operation::Get && operation != Operation::GetGauge &&
+			operation != Operation::GetHistogram)
+			for (size_t serial = 0; serial < calls; ++serial)
+				Model(rows[serial % cardinality], operation, serial);
+		std::vector<std::optional<engine::core::Counter>> readCounters;
+		std::vector<std::optional<engine::core::Gauge>> readGauges;
+		std::vector<std::optional<engine::core::Histogram>> readHistograms;
+		if (operation == Operation::Get) readCounters.resize(calls);
+		if (operation == Operation::GetGauge) readGauges.resize(calls);
+		if (operation == Operation::GetHistogram) readHistograms.resize(calls);
+		const auto perform = [&](size_t serial) {
+			const auto &row = expectedReads[serial % cardinality];
+			if (operation == Operation::Get)
+				readCounters[serial] = Metrics::Get(row.Text);
+			else if (operation == Operation::GetGauge)
+				readGauges[serial] = Metrics::GetGauge(row.Text);
+			else if (operation == Operation::GetHistogram)
+				readHistograms[serial] = Metrics::GetHistogram(row.Text);
+			else
+				Write(row, operation, serial);
+		};
+		const bool enabled = FrameGraph::IsEnabled();
+		FrameGraph::SetEnabled(true);
+		const auto heapBefore = OwnerHeap();
+		const auto totalsBefore = HeapProfile::Totals();
+		FrameGraph::BeginFrame();
+		try {
+			ENGINE_PROFILE("Metrics registered lookup diagnostic");
+			if (threads == 1)
+				for (size_t serial = 0; serial < calls; ++serial)
+					perform(serial);
+			else {
+				std::vector<std::thread> workers;
+				workers.reserve(threads);
+				try {
+					for (size_t worker = 0; worker < threads; ++worker)
+						workers.emplace_back([&, worker] {
+							for (size_t serial = worker; serial < calls; serial += threads)
+								perform(serial);
+						});
+				} catch (...) {
+					for (auto &worker : workers)
+						worker.join();
+					throw;
+				}
+				{
+					ENGINE_PROFILE_CAT("Metrics workers join", ProfileCategory::Idle);
+					for (auto &worker : workers)
+						worker.join();
+				}
+			}
+		} catch (...) {
+			FrameGraph::EndFrame();
+			FrameGraph::SetEnabled(enabled);
+			throw;
+		}
+		FrameGraph::EndFrame();
+		const auto published = FrameGraph::Spans();
+		Require(published.size() <= 2);
+		std::array<engine::core::FrameSpan, 2> retained;
+		std::copy(published.begin(), published.end(), retained.begin());
+		const std::span<const engine::core::FrameSpan> spans(retained.data(), published.size());
+		Require(spans.size() == (threads == 1 ? 1 : 2) && FrameGraph::Dropped() == 0);
+		if (threads > 1)
+			Require(
+				spans[1].Name == "Metrics workers join" && spans[1].Parent == 0 && spans[1].Depth == 1 &&
+				!spans[1].Reported && spans[1].Category == ProfileCategory::Idle
+			);
+		const auto span = spans.front();
+		Require(
+			span.Name == OWNER && span.Depth == 0 && span.Parent == FrameGraph::NO_PARENT && !span.Reported &&
+			span.Category == ProfileCategory::Engine
+		);
+		const double frame = FrameGraph::FrameMilliseconds(), unmarked = FrameGraph::UnmarkedMilliseconds();
+		const auto heapAfter = OwnerHeap();
+		const auto totalsAfter = HeapProfile::Totals();
+		FrameGraph::SetEnabled(enabled);
+		Require(totalsBefore.DroppedScopes == totalsAfter.DroppedScopes);
+		for (size_t serial = 0; serial < calls; ++serial) {
+			const auto &row = expectedReads[serial % cardinality];
+			if (operation == Operation::Get) {
+				Require(readCounters[serial].has_value());
+				VerifyCounter(*readCounters[serial], row);
+			}
+			if (operation == Operation::GetGauge) {
+				Require(readGauges[serial].has_value());
+				VerifyGauge(*readGauges[serial], row);
+			}
+			if (operation == Operation::GetHistogram) {
+				Require(readHistograms[serial].has_value());
+				VerifyHistogram(*readHistograms[serial], row);
+			}
+		}
+		Verify(Metrics::Snapshot(), rows);
+		Verify(Metrics::Snapshot(), rows);
+		Require(
+			!Metrics::Get("engine.bench.lookup.missing") &&
+			!Metrics::GetGauge("engine.bench.lookup.missing") &&
+			!Metrics::GetHistogram("engine.bench.lookup.missing")
+		);
+		Verify(Metrics::Snapshot(), rows);
+		const auto drained = Metrics::Drain();
+		const bool counter = !rows.empty() && rows.front().CounterPresent;
+		Require(drained.size() == (counter ? cardinality : 0));
+		for (size_t index = 0; index < drained.size(); ++index)
+			VerifyCounter(
+				drained[index],
+				rows[(cold || operation == Operation::Refill) ? index : cardinality - 1 - index]
+			);
+		for (auto &row : rows) {
+			row.CounterPresent = false;
+			row.Total = 0;
+			row.Counts = 0;
+		}
+		Verify(Metrics::Snapshot(), rows);
+		Metrics::Clear();
+		Verify(Metrics::Snapshot(), {});
+		const auto totalsCleared = HeapProfile::Totals();
+		std::printf(
+			"# metrics-lookup phase=%zu warmup=%d cardinality=%zu operation=%.*s threads=%zu calls=%zu "
+			"metric_operations=%zu oracle=full-fields owner_scope=1 owner_thread_join_inclusive=%d "
+			"inclusive_ms=%.9f self_ms=%.9f frame_ms=%.9f unmarked_ms=%.9f heap_available=1 "
+			"owner_allocated_bytes=%" PRIu64 " owner_allocated_blocks=%" PRIu64 " owner_live_before=%" PRId64
+			" owner_live_after=%" PRId64 " owner_blocks_before=%" PRId64 " owner_blocks_after=%" PRId64
+			" owner_peak_bytes=%" PRId64 " profiler_overhead_bytes=%" PRId64 "\n",
+			phase,
+			phase <= 8,
+			cardinality,
+			static_cast<int>(OPERATIONS[static_cast<size_t>(operation)].size()),
+			OPERATIONS[static_cast<size_t>(operation)].data(),
+			threads,
+			calls,
+			calls * (operation == Operation::Mixed ? 3 : 1),
+			threads > 1,
+			span.Milliseconds,
+			span.SelfMilliseconds,
+			frame,
+			unmarked,
+			heapAfter.TotalBytes - heapBefore.TotalBytes,
+			heapAfter.TotalBlocks - heapBefore.TotalBlocks,
+			heapBefore.LiveBytes,
+			heapAfter.LiveBytes,
+			heapBefore.LiveBlocks,
+			heapAfter.LiveBlocks,
+			heapAfter.PeakBytes,
+			totalsAfter.OverheadBytes
+		);
+		std::printf(
+			"# metrics-lookup-detail phase=%zu cardinality=%zu operation=%.*s threads=%zu start_ms=%.9f "
+			"idle_ms=%.9f parent=%u depth=%u reported=%d frame_drops=0 heap_drops=0 "
+			"process_allocated_bytes=%" PRIu64 " process_allocated_blocks=%" PRIu64
+			" process_live_before=%" PRId64 " process_live_after=%" PRId64
+			" process_live_after_clear=%" PRId64 " process_blocks_before=%" PRId64
+			" process_blocks_after=%" PRId64 " process_blocks_after_clear=%" PRId64
+			" process_peak_bytes=%" PRId64 " profiler_overhead_before=%" PRId64
+			" retained_index_capacity_registration=%d name_registry_warm=1 "
+			"time_values=fixed_nanoseconds_no_clock "
+			"worker_heap_attribution=process_only\n",
+			phase,
+			cardinality,
+			static_cast<int>(OPERATIONS[static_cast<size_t>(operation)].size()),
+			OPERATIONS[static_cast<size_t>(operation)].data(),
+			threads,
+			span.StartMilliseconds,
+			span.IdleMilliseconds,
+			span.Parent,
+			span.Depth,
+			span.Reported,
+			totalsAfter.TotalBytes - totalsBefore.TotalBytes,
+			totalsAfter.TotalBlocks - totalsBefore.TotalBlocks,
+			totalsBefore.LiveBytes,
+			totalsAfter.LiveBytes,
+			totalsCleared.LiveBytes,
+			totalsBefore.LiveBlocks,
+			totalsAfter.LiveBlocks,
+			totalsCleared.LiveBlocks,
+			totalsAfter.PeakBytes,
+			totalsBefore.OverheadBytes,
+			cold
+		);
+		for (size_t index = 0; index < spans.size(); ++index) {
+			const auto &entry = spans[index];
+			std::printf(
+				"# metrics-lookup-span phase=%zu cardinality=%zu operation=%.*s threads=%zu index=%zu "
+				"name=%s category=%s parent=%u depth=%u start_ms=%.9f inclusive_ms=%.9f self_ms=%.9f "
+				"idle_ms=%.9f "
+				"reported=%d\n",
+				phase,
+				cardinality,
+				static_cast<int>(OPERATIONS[static_cast<size_t>(operation)].size()),
+				OPERATIONS[static_cast<size_t>(operation)].data(),
+				threads,
+				index,
+				index == 0 ? "metrics.lookup.owner" : "metrics.lookup.join",
+				index == 0 ? "engine" : "IDLE",
+				entry.Parent,
+				entry.Depth,
+				entry.StartMilliseconds,
+				entry.Milliseconds,
+				entry.SelfMilliseconds,
+				entry.IdleMilliseconds,
+				entry.Reported
+			);
+		}
+	}
+	void Run() {
+		const char *enabled = std::getenv("ATOMIC_METRICS_LOOKUP_PROFILE");
+		if (!enabled || std::string_view(enabled) != "1") return;
+		Require(HeapProfile::IsCompiledIn());
+		static size_t phase = 0;
+		Require(++phase <= 13);
+		for (size_t cardinality : {1u, 8u, 64u, 256u}) {
+			for (size_t operation = 0; operation < 11; ++operation)
+				Fixture(cardinality, static_cast<Operation>(operation), 1, phase);
+			for (size_t threads : {4u, 8u}) {
+				Fixture(cardinality, Operation::Count, threads, phase);
+				Fixture(cardinality, Operation::CountTime, threads, phase);
+			}
+		}
+	}
+}
+BENCH("Metrics registered lookup diagnostic", 1) {
+	metrics_lookup_bench::Run();
 }

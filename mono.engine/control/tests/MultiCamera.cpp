@@ -1,6 +1,8 @@
 // The multi-camera row is a protocol contract: it coordinates one checked
 // lifecycle revision and one renderer frame without claiming an atomic simulation step.
 
+#include "HookFixture.hpp"
+
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/DataCapture.hpp>
 #include <engine/control/features/DataScene.hpp>
@@ -174,8 +176,12 @@ namespace {
 			WorldSettings settings;
 			settings.Name = Name("capture-world");
 			UniverseRef.Create(settings);
-			SurfaceRef.Enable(std::array{engine::control::features::DataCapture(Session, Bridge)});
-			SurfaceRef.Enable(std::array{engine::control::features::DataScene(UniverseRef, Bridge)});
+			engine::control::test::Install(
+				SurfaceRef, std::array{engine::control::test::DataCapture(Session, Bridge)}
+			);
+			engine::control::test::Install(
+				SurfaceRef, std::array{engine::control::test::DataScene(UniverseRef, Bridge)}
+			);
 		}
 
 		Universe UniverseRef;
@@ -197,6 +203,19 @@ TEST_CASE("motion capture plane keeps its two-component wire shape", "[control][
 	CHECK(encoded.at("shape") == json::array({3, 4, 2}));
 	CHECK(encoded.at("dtype") == "float16");
 	CHECK(encoded.at("previous_camera_motion_frame") == 7);
+}
+
+TEST_CASE("GPU packed capture plane keeps its four float32 wire lanes", "[control][data-capture]") {
+	engine::script::DataCaptureBridgePlane plane;
+	plane.Channel = "packed_gpu";
+	plane.Status = "ready";
+	plane.Width = 4;
+	plane.Height = 3;
+	plane.Scalar = "float32";
+	plane.Packing = "rgba32_float";
+	const json encoded = engine::control::data_capture_detail::Plane(plane, "snapshot-1");
+	CHECK(encoded.at("shape") == json::array({3, 4, 4}));
+	CHECK(encoded.at("dtype") == "float32");
 }
 
 TEST_CASE(

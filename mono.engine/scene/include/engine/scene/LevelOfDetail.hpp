@@ -17,7 +17,7 @@
 // is that threshold expressed in pixels, and it is what the component stores.
 //
 // **How the levels came to exist is a separate question from which one to
-// draw**, and `AutoMeshLOD` plus `CustomMeshLOD` describe the first while
+// draw**, and `LODAuto` plus `LODCustom` describe the first while
 // `SelectLevel` describes the second.
 // `ROADMAP.md`'s bullet names three ways to produce them - four authored meshes,
 // auto-decimation, and triangle reduction driven by surface area - and a
@@ -78,7 +78,7 @@ namespace engine::scene {
 		Authored = 1,
 
 		// The bake step produced each level by decimating the one above it to
-		// `LevelOfDetail::Ratios`. `AutoMeshLOD::Meshes` records the published
+		// `LevelOfDetail::Ratios`. `LODAuto::Meshes` records the published
 		// artifact names, so selection can use their real triangle counts.
 		Decimated = 2,
 
@@ -94,17 +94,19 @@ namespace engine::scene {
 	//
 	// The bake path owns `Meshes`. Keeping the published names beside its inputs makes
 	// a save self-contained and lets a renderer use the artifacts without recreating
-	// geometry during a frame. A missing artifact ends the automatic ladder unless a
-	// custom component supplies that level.
+	// geometry during a frame. A missing artifact ends the mesh ladder unless a
+	// custom component supplies that level or a final billboard is authored.
 	//
 	// @since v0.25
-	struct AutoMeshLOD {
+	struct LODAuto {
 		// Published coarse artifacts for levels one through three.
 		core::Name Meshes[LOD_LEVELS - 1];
 		// Retained triangle fractions used to generate each coarse artifact.
 		float Ratios[LOD_LEVELS - 1] = {0.5f, 0.25f, 0.125f};
 		// Per-level projected-pixels-per-triangle target; zero uses the default.
 		float TargetQuadArea = 0.0f;
+		// Texture drawn on a camera-facing quad at the last resolved LOD level.
+		core::Name Billboard;
 		// Bake algorithm that produced the coarse artifacts.
 		LodStrategy Strategy = LodStrategy::Decimated;
 		// Number of valid levels including the base Visual mesh.
@@ -116,27 +118,41 @@ namespace engine::scene {
 	// Per-level authored overrides for an automatic mesh ladder.
 	//
 	// Each valid mesh replaces the automatic artifact at the same level. An
-	// invalid name is an intentional nil and falls back to `AutoMeshLOD` for that
+	// invalid name is an intentional nil and falls back to `LODAuto` for that
 	// level. Zero ratios and target area inherit the automatic option, or the
 	// engine default when no automatic component exists.
 	//
 	// @since v0.25
-	struct CustomMeshLOD {
+	struct LODCustom {
 		// Authored artifact overrides for levels one through three.
 		core::Name Meshes[LOD_LEVELS - 1];
 		// Per-level retained triangle fractions; zero inherits automatic settings.
 		float Ratios[LOD_LEVELS - 1] = {};
 		// Projected-pixels-per-triangle target; zero inherits automatic settings.
 		float TargetQuadArea = 0.0f;
+		// Authored billboard override. An invalid name inherits `LODAuto::Billboard`.
+		core::Name Billboard;
 		// Number of valid levels including the base Visual mesh.
 		uint8_t Levels = LOD_LEVELS;
 		// Explicit padding retained for the serialized component layout.
 		uint8_t Reserved[3] = {};
 	};
 
+	// Per-item distance floors for the LOD selector.
+	//
+	// A zero in every slot inherits the active view's default mesh LOD distances.
+	// Partial overrides are refused at resolution time, so a malformed saved row
+	// cannot make one threshold apply with the other two guessed.
+	//
+	// @since v0.25
+	struct LODSettings {
+		// Distances that force levels one, two, and three, in world units.
+		float MinimumDistances[LOD_LEVELS - 1] = {};
+	};
+
 	// A resolved automatic/custom ladder copied into a draw snapshot.
 	//
-	// This is not registered as ECS storage. `AutoMeshLOD` and `CustomMeshLOD`
+	// This is not registered as ECS storage. `LODAuto` and `LODCustom`
 	// own authored state; `ResolveMeshLOD` produces this flat value once while a
 	// draw list is built, before each camera selects a level on the GPU.
 	//
@@ -148,8 +164,8 @@ namespace engine::scene {
 		// Storing it here as well would be the second copy of a fact the part
 		// already carries, and repointing `MeshId` would leave it behind - the
 		// failure `Visual::Fitted` exists to make impossible one file along. An
-		// invalid name ends the ladder, so a part with one coarse level fills one
-		// slot.
+		// invalid name ends the mesh ladder; an authored billboard may fill the
+		// final slot without a coarse mesh.
 		core::Name Meshes[LOD_LEVELS - 1];
 
 		// What fraction of the base mesh's triangles each level keeps.
@@ -168,6 +184,10 @@ namespace engine::scene {
 		// Zero means `DEFAULT_TARGET_QUAD_AREA`, so a component an author never
 		// touched still selects rather than never advancing past level zero.
 		float TargetQuadArea = 0.0f;
+
+		// The texture for the coarsest level. The renderer substitutes it for
+		// that level's mesh when the texture is resident.
+		core::Name Billboard;
 
 		// Where the coarser levels came from.
 		LodStrategy Strategy = LodStrategy::None;
@@ -195,14 +215,13 @@ namespace engine::scene {
 	// @param base      The source mesh the automatic artifacts came from.
 	// @param automatic Generated artifacts and generation options, or null.
 	// @param custom    Authored per-level overrides, or null.
-	// @return A contiguous ladder. Strategy is `None` when no coarse level exists.
-	LevelOfDetail
-	ResolveMeshLOD(const core::Name &base, const AutoMeshLOD *automatic, const CustomMeshLOD *custom);
+	// @return A contiguous ladder. Strategy is `None` without a coarse mesh or billboard.
+	LevelOfDetail ResolveMeshLOD(const core::Name &base, const LODAuto *automatic, const LODCustom *custom);
 
 	// Resolves explicitly named artifacts when a caller has no base mesh.
 	//
 	// Kept for tools and tests that operate on stored component values alone.
-	LevelOfDetail ResolveMeshLOD(const AutoMeshLOD *automatic, const CustomMeshLOD *custom);
+	LevelOfDetail ResolveMeshLOD(const LODAuto *automatic, const LODCustom *custom);
 
 	// The deterministic name of an automatic mesh artifact.
 	//

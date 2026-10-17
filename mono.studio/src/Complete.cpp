@@ -569,8 +569,10 @@ namespace studio {
 			}
 
 			// The class table owns this answer so scripts, generated overloads and
-			// this palette cannot disagree about a virtual base or a fixture.
-			if (!info.Creatable) {
+			// this palette cannot disagree about a virtual base, service, or
+			// internal class. Creatability permits construction; Studio visibility
+			// permits offering that construction to an author.
+			if (!info.Creatable || !info.StudioVisible) {
 				continue;
 			}
 

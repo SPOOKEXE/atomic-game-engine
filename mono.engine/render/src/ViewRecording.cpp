@@ -18,6 +18,7 @@
 #include "DisplayColour.hpp"
 #include "SurfaceScale.hpp"
 
+#include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/graph/Cull.hpp>
@@ -52,6 +53,53 @@ namespace engine::render {
 				);
 			}
 		}
+	}
+
+	bool ViewRecording::UploadCloudDensity() {
+		const auto &cloud = Request.Source->CloudDensity;
+		scene::CloudDensityGpuNode empty{};
+		empty.ChildrenLow.fill(UINT32_MAX);
+		empty.ChildrenHigh.fill(UINT32_MAX);
+		const std::span<const scene::CloudDensityGpuNode> nodes =
+			cloud && cloud->IsValid() ? std::span(cloud->Nodes) : std::span(&empty, size_t{1});
+		const size_t bytes = nodes.size_bytes();
+		if (bytes > UINT32_MAX) return false;
+		if (State->CloudDensityCapacity < bytes) {
+			State->CloudDensityUploadedNodes.clear();
+			if (State->CloudDensityBuffer) gpu::ReleaseBuffer(State->Device, State->CloudDensityBuffer);
+			if (State->CloudDensityTransfer)
+				gpu::ReleaseTransferBuffer(State->Device, State->CloudDensityTransfer);
+			State->CloudDensityBuffer = nullptr;
+			State->CloudDensityTransfer = nullptr;
+			SDL_GPUBufferCreateInfo buffer{};
+			buffer.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+			buffer.size = static_cast<uint32_t>(bytes);
+			State->CloudDensityBuffer = gpu::CreateBuffer(State->Device, &buffer);
+			SDL_GPUTransferBufferCreateInfo transfer{};
+			transfer.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+			transfer.size = static_cast<uint32_t>(bytes);
+			State->CloudDensityTransfer = gpu::CreateTransferBuffer(State->Device, &transfer);
+			if (!State->CloudDensityBuffer || !State->CloudDensityTransfer) return false;
+			State->CloudDensityCapacity = static_cast<uint32_t>(bytes);
+		}
+		// The fallback node is present in every ordinary frame. Reuse the resident
+		// buffer when its packed contents are unchanged, including across views.
+		if (State->CloudDensityUploadedNodes.size() == nodes.size() &&
+			std::memcmp(State->CloudDensityUploadedNodes.data(), nodes.data(), bytes) == 0)
+			return true;
+		void *mapped = SDL_MapGPUTransferBuffer(State->Device, State->CloudDensityTransfer, false);
+		if (!mapped) return false;
+		std::memcpy(mapped, nodes.data(), bytes);
+		SDL_UnmapGPUTransferBuffer(State->Device, State->CloudDensityTransfer);
+		SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(Command);
+		if (!copy) return false;
+		const SDL_GPUTransferBufferLocation source{State->CloudDensityTransfer, 0};
+		const SDL_GPUBufferRegion destination{State->CloudDensityBuffer, 0, static_cast<uint32_t>(bytes)};
+		SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+		SDL_EndGPUCopyPass(copy);
+		State->CloudDensityUploadedNodes.assign(nodes.begin(), nodes.end());
+		Result.UploadedBytes += bytes;
+		return true;
 	}
 
 	ViewStart ViewRecording::Begin(const ViewRequest &request) {
@@ -97,6 +145,7 @@ namespace engine::render {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
 		const core::CFrame &cameraFrame = Request.CameraFrame;
+		const core::CFrame &behaviourFrame = Request.VisibilityCameraFrame;
 		const scene::Camera &camera = Request.Camera;
 		OverlayImage &overlay = *Request.Overlay;
 		const std::span<const SurfaceView> surfaces = Request.Surfaces;
@@ -168,8 +217,8 @@ namespace engine::render {
 		auto &targetHeight = TargetHeight;
 		auto &nearestPane = NearestPane;
 		auto &drawCamera = DrawCamera;
-		auto &cameraMatrix = CameraMatrix;
 		auto &matrices = Matrices;
+		auto &behaviourMatrices = BehaviourMatrices;
 		auto &lightViewProjection = LightViewProjection;
 		auto &sceneBounds = SceneBounds;
 		auto &plan = Plan;
@@ -275,27 +324,31 @@ namespace engine::render {
 		// to need it - CodeParade's `GH_CLAMP(NearestPortalDist() * 0.5f, ...)`,
 		// which the demo applies to its one and only camera.
 		//
-		// **Measured off the panes this frame was handed rather than off the
-		// world**, because that is the same set the pass below draws through and
-		// the renderer has no store to ask. `scene::NearestSeamDistance` answers
-		// the same question from a store, from the same functions, for a caller
-		// that has one.
+		// **Measured from the behavior eye**, because portal captures use that
+		// pose even while the visible raster remains a free inspection view.
 		nearestPane = std::numeric_limits<float>::infinity();
+		float visibleNearestPane = std::numeric_limits<float>::infinity();
 		for (const PortalView &portal : portals) {
 			nearestPane = std::min(
 				nearestPane,
+				scene::RectangleDistance(portal.Centre, portal.First, portal.Second, behaviourFrame.Position)
+			);
+			visibleNearestPane = std::min(
+				visibleNearestPane,
 				scene::RectangleDistance(portal.Centre, portal.First, portal.Second, cameraFrame.Position)
 			);
 		}
 
-		// **One adapted copy used by every projection this frame builds**, so the
-		// cull, the portal recursion and the opaque draw cannot disagree about
-		// where the near plane is. A cull run against a larger near plane than
-		// the draw uses throws away exactly the geometry the smaller one exists
-		// to keep.
+		// The screen and behavior eye can be in different rooms. Adapt their near
+		// planes separately so the inspection raster and portal captures each fit
+		// the panes they actually use.
 		drawCamera = camera;
 		if (!source.Projection) {
-			drawCamera.NearPlane = scene::PortalNearPlane(camera.NearPlane, nearestPane);
+			drawCamera.NearPlane = scene::PortalNearPlane(camera.NearPlane, visibleNearestPane);
+		}
+		scene::Camera behaviourCamera = camera;
+		if (!source.Projection) {
+			behaviourCamera.NearPlane = scene::PortalNearPlane(camera.NearPlane, nearestPane);
 		}
 
 		// **Claimed here only if the caller did not claim it first.** `WaitForFrame`
@@ -303,7 +356,7 @@ namespace engine::render {
 		// caller that does not is no worse off than before, because this is the
 		// same acquisition at the same point in the frame. See `Impl::BeginFrame`.
 		if (State->BatchActive) {
-			command = State->BatchCommand;
+			command = State->BatchSubmit.Command;
 			if (State->BatchFinal) {
 				swapchain = State->BatchSwapchain;
 				width = State->BatchWidth;
@@ -490,10 +543,9 @@ namespace engine::render {
 		// point. Culling first means the sort runs over what survives rather
 		// than over the world, and the upload carries only what is drawn.
 		//
-		// The frustum comes from the same `ResolveCamera` the draw does, so it
-		// cannot disagree with what was actually projected. A frustum built from
-		// a field of view and an aspect ratio kept separately is the bug that
-		// pops geometry at the screen edge on one machine and not another.
+		// Culling follows the behavior camera. The screen matrices remain attached
+		// to `cameraFrame`, so inspection can move without changing what the world
+		// submits, the selected LOD, or the portal captures.
 
 		// **Every surface camera's view, resolved before any pass runs.** Each
 		// is used twice: to render into its own texture now, and - one frame
@@ -639,6 +691,10 @@ namespace engine::render {
 		const float cameraAspect = static_cast<float>(sceneWidth) / static_cast<float>(sceneHeight);
 		matrices = source.Projection ? scene::ResolveSurfaceCamera(cameraFrame, *source.Projection)
 									 : scene::ResolveCamera(cameraFrame, drawCamera, cameraAspect);
+		behaviourMatrices = behaviourFrame.FuzzyEq(cameraFrame, 0.0f) ? matrices
+							: source.Projection
+								? scene::ResolveSurfaceCamera(behaviourFrame, *source.Projection)
+								: scene::ResolveCamera(behaviourFrame, behaviourCamera, cameraAspect);
 		State->ActiveDataCaptureSource.ProjectionAvailable = true;
 		State->ActiveDataCaptureSource.Width = sceneWidth;
 		State->ActiveDataCaptureSource.Height = sceneHeight;
@@ -650,7 +706,6 @@ namespace engine::render {
 			State->DataCaptureSources.resize(targetSlot + 1);
 		}
 		State->DataCaptureSources[targetSlot] = State->ActiveDataCaptureSource;
-		cameraMatrix = matrices.ViewProjection;
 		if (sharedCaptures) {
 			const auto budget = source.SurfaceBudget.value_or(
 				View::SurfaceCaptureBudget{
@@ -667,8 +722,8 @@ namespace engine::render {
 			const SurfaceCaptureRequest keyedCaptureRequest{
 				.Mirrors = surfaces,
 				.Portals = portals,
-				.Frame = cameraFrame,
-				.Projection = Matrices.Projection,
+				.Frame = behaviourFrame,
+				.Projection = BehaviourMatrices.Projection,
 				.PixelBudget = capturePixels,
 				.Width = sceneWidth,
 				.Height = sceneHeight,
@@ -712,9 +767,9 @@ namespace engine::render {
 		entityFlow.Clear();
 		viewpoints.Clear();
 		graph::Viewpoint fallbackViewpoint;
-		fallbackViewpoint.Frame = cameraFrame;
-		fallbackViewpoint.Lens = drawCamera;
-		fallbackViewpoint.Projection = matrices.ViewProjection;
+		fallbackViewpoint.Frame = behaviourFrame;
+		fallbackViewpoint.Lens = behaviourCamera;
+		fallbackViewpoint.Projection = behaviourMatrices.ViewProjection;
 		fallbackViewpoint.Fitted = true;
 
 		size_t visibleCount = instances.size();
@@ -794,10 +849,9 @@ namespace engine::render {
 
 		const std::span<const uint32_t> ordered = entityFlow.Get(orderedEntities);
 		{
-			// Two full copies of the draw list, per view, per frame. Small on a
-			// demo and not small on a scene, and nothing named them.
+			// The filtered source already lives in Drawable; retain only its camera order.
 			ENGINE_PROFILE_CAT("copy draw lists", core::ProfileCategory::Render);
-			State->VisibleInstances.assign(instances.begin(), instances.end());
+			State->VisibleInstances = instances;
 			State->DrawOrder.assign(ordered.begin(), ordered.end());
 		}
 		const auto isEyeBody = [&source](const scene::DrawInstance &row) {
@@ -1077,7 +1131,7 @@ namespace engine::render {
 
 			(void)graph::VisibleSurfaces(
 				instances,
-				cameraMatrix,
+				matrices.ViewProjection,
 				std::span<const graph::SurfaceEye>(eyes, acceptedCount),
 				std::span<bool>(surfaceVisible, scene::MAX_SURFACES),
 				std::span<float>(surfaceCoverage, scene::MAX_SURFACES),
@@ -1215,7 +1269,7 @@ namespace engine::render {
 		// the wrong eye, which is a compositing error confined to the second
 		// bounce and cheaper than an ordering pass per surface.
 		wantSurface = acceptedCount > 0;
-		sceneEye = wantSurface ? accepted[0].View->Frame.Position : cameraFrame.Position;
+		sceneEye = wantSurface ? accepted[0].View->Frame.Position : behaviourFrame.Position;
 
 		// **One signature shared by every surface, and that is not a shortcut.**
 		// Each camera's matrix is in it because a surface pass draws the *other*
@@ -1428,7 +1482,7 @@ namespace engine::render {
 		// frustum cull already ran - occlusion composes behind it rather than
 		// replacing it.
 		occlusionCulling = false;
-		if (const Impl::NamedPipeline *active = State->PipelineFor(State->ActiveGraph);
+		if (const Impl::InstalledPipeline *active = State->PipelineFor(State->ActiveGraph);
 			active != nullptr && State->Occlusion.Seed != nullptr && State->Occlusion.Reduce != nullptr &&
 			State->Occlusion.Cull != nullptr && State->Occlusion.Args != nullptr) {
 			for (uint32_t value = 1; value <= active->Graph.Count() && !occlusionCulling; value++) {
@@ -1456,6 +1510,12 @@ namespace engine::render {
 		// surface pass a different set would make a mirror disagree with the room
 		// it is in.
 		lightUniforms = ToGpu(lights);
+		SceneLightIds.fill({});
+		SceneLightShadows.fill(false);
+		for (size_t index = 0; index < std::min(lights.size(), MAX_SCENE_LIGHTS); ++index) {
+			SceneLightIds[index] = lights[index].DataFactoryId;
+			SceneLightShadows[index] = lights[index].Shadows;
+		}
 
 		// Begin the device timeline before particle preparation because its copy,
 		// scatter and simulation now belong to this frame command buffer. The old
@@ -1495,8 +1555,14 @@ namespace engine::render {
 			const Impl::ParticlePreparation prepared =
 				effectsVisible ? State->PrepareParticles(source, command, timingSlot)
 							   : Impl::ParticlePreparation{};
-			particleCount = prepared.Count;
-			result.ComputeDispatches += prepared.Dispatches;
+			const bool fieldPrepared =
+				effectsVisible ? State->PrepareGpuParticleField(source, command, timingSlot) : true;
+			particleCount = prepared.Count + (State->ActiveGpuParticleFieldWorld == nullptr
+												  ? 0
+												  : State->ActiveGpuParticleFieldWorld->ActiveCount);
+			result.ComputeDispatches +=
+				prepared.Dispatches +
+				(fieldPrepared && State->ActiveGpuParticleFieldWorld != nullptr ? 1 : 0);
 			result.Particles = particleCount;
 
 			ribbonCount = effectsVisible ? State->PrepareRibbons(ribbonVertices) : 0;
@@ -1721,7 +1787,7 @@ namespace engine::render {
 			lightViewProjection,
 			glm::mat4{1.0f},
 		};
-		lighting = LightingAt(cameraFrame.Position, 0.0f, 0.0f);
+		lighting = LightingAt(behaviourFrame.Position, 0.0f, 0.0f);
 
 		uniforms.InverseViewProjection = glm::inverse(matrices.ViewProjection);
 		uniforms.LightViewProjection = lightViewProjection;
@@ -1742,9 +1808,10 @@ namespace engine::render {
 		uniforms.OutdoorAmbient = State->OutdoorAmbient;
 		uniforms.Direct = State->Direct;
 		uniforms.Eye =
-			glm::vec4{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 1.0f};
-		const core::Vector3 forward = cameraFrame.LookVector();
-		uniforms.CameraDepth = glm::vec4{forward.X, forward.Y, forward.Z, -forward.Dot(cameraFrame.Position)};
+			glm::vec4{behaviourFrame.Position.X, behaviourFrame.Position.Y, behaviourFrame.Position.Z, 1.0f};
+		const core::Vector3 forward = behaviourFrame.LookVector();
+		uniforms.CameraDepth =
+			glm::vec4{forward.X, forward.Y, forward.Z, -forward.Dot(behaviourFrame.Position)};
 		uniforms.FogColour = glm::vec4{
 			WorkingFromDisplay(State->FogColour.r),
 			WorkingFromDisplay(State->FogColour.g),
@@ -1759,6 +1826,21 @@ namespace engine::render {
 			0.0f,
 		};
 		uniforms.VolumeCount = glm::vec4{static_cast<float>(currentLighting.VolumeCount), 0.0f, 0.0f, 0.0f};
+		if (const auto &cloud = source.CloudDensity; cloud && cloud->IsValid()) {
+			uniforms.CloudMinimumNodeCount = glm::vec4{
+				cloud->Config.RootMinimum.X,
+				cloud->Config.RootMinimum.Y,
+				cloud->Config.RootMinimum.Z,
+				static_cast<float>(cloud->Nodes.size())
+			};
+			uniforms.CloudSizeDepth = glm::vec4{
+				cloud->Config.RootSize.X,
+				cloud->Config.RootSize.Y,
+				cloud->Config.RootSize.Z,
+				static_cast<float>(cloud->Config.MaximumDepth)
+			};
+			uniforms.CloudCentreEnabled = glm::vec4{cloud->Centre.X, cloud->Centre.Y, cloud->Centre.Z, 1.0f};
+		}
 		for (size_t index = 0; index < currentLighting.VolumeCount; index++) {
 			const scene::VolumeState &volume = currentLighting.Volumes[index];
 			PbrUniforms::VolumeUniform &out = uniforms.Volumes[index];
@@ -1875,7 +1957,7 @@ namespace engine::render {
 	void ViewRecording::PackInstances() {
 		ENGINE_PROFILE_CAT("pack instances", core::ProfileCategory::Render);
 		Impl *const State = this->State;
-		const core::CFrame &cameraFrame = Request.CameraFrame;
+		const core::CFrame &behaviourFrame = Request.VisibilityCameraFrame;
 		const uint32_t uploadCount = UploadCount;
 		const uint32_t sceneCount = SceneCount;
 		const uint32_t cameraBase = sceneCount;
@@ -1900,12 +1982,22 @@ namespace engine::render {
 		State->SlotHeightMap.resize(uploadCount);
 		State->SlotMetalnessMap.resize(uploadCount);
 		State->SlotEmissiveMap.resize(uploadCount);
+		State->SlotPackedPbrMap.resize(uploadCount);
+		State->SlotSpecularFactor.resize(uploadCount);
+		State->SlotTransmissionFactor.resize(uploadCount);
+		State->SlotIndexOfRefraction.resize(uploadCount);
+		State->SlotThickness.resize(uploadCount);
+		State->SlotPackedPbrChannels.resize(uploadCount);
 		State->SlotResample.resize(uploadCount);
 		State->SlotShadowDetail.resize(uploadCount);
+		State->SlotTwoSided.resize(uploadCount);
 		State->SlotShader.resize(uploadCount);
 		State->SlotTags.resize(uploadCount);
 		State->SlotRig.resize(uploadCount);
 		State->SlotSeam.resize(uploadCount);
+		State->SlotSeamFirst.resize(uploadCount);
+		State->SlotSeamSecond.resize(uploadCount);
+		State->SlotSeamCentre.resize(uploadCount);
 		State->SlotSeamLight.resize(uploadCount);
 		State->SlotInstanceKey.resize(sceneCount);
 		State->SlotInstanceCurrent.resize(sceneCount);
@@ -1933,9 +2025,21 @@ namespace engine::render {
 				State->SlotHeightMap[drawSlot] = instance.HeightMap;
 				State->SlotMetalnessMap[drawSlot] = instance.MetalnessMap;
 				State->SlotEmissiveMap[drawSlot] = instance.EmissiveMap;
+				State->SlotPackedPbrMap[drawSlot] = instance.PackedPbrMap;
+				State->SlotSpecularFactor[drawSlot] = instance.SpecularFactor;
+				State->SlotTransmissionFactor[drawSlot] = instance.TransmissionFactor;
+				State->SlotIndexOfRefraction[drawSlot] = instance.IndexOfRefraction;
+				State->SlotThickness[drawSlot] = instance.Thickness;
+				State->SlotPackedPbrChannels[drawSlot] = glm::vec4{
+					static_cast<float>(instance.RoughnessChannel),
+					static_cast<float>(instance.OcclusionChannel),
+					static_cast<float>(instance.HeightChannel),
+					static_cast<float>(instance.MetalnessChannel),
+				};
 				State->SlotResample[drawSlot] = instance.Resample;
 				State->SlotShadowDetail[drawSlot] = instance.Alpha != scene::AlphaMode::Opaque ||
 													instance.SeamNormal.MagnitudeSquared() > 0.0f;
+				State->SlotTwoSided[drawSlot] = instance.Surface >= 0;
 				State->SlotShader[drawSlot] = instance.Shader;
 				State->SlotTags[drawSlot] = instance.TagMask;
 				State->SlotRig[drawSlot] = instance.Rig;
@@ -1945,6 +2049,13 @@ namespace engine::render {
 					instance.SeamNormal.Z,
 					instance.SeamOffset,
 				};
+				State->SlotSeamFirst[drawSlot] = glm::vec4{
+					instance.SeamFirst.X, instance.SeamFirst.Y, instance.SeamFirst.Z, float(instance.SeamMask)
+				};
+				State->SlotSeamSecond[drawSlot] =
+					glm::vec4{instance.SeamSecond.X, instance.SeamSecond.Y, instance.SeamSecond.Z, 0.0f};
+				State->SlotSeamCentre[drawSlot] =
+					glm::vec4{instance.SeamCentre.X, instance.SeamCentre.Y, instance.SeamCentre.Z, 0.0f};
 				State->SlotSeamLight[drawSlot] =
 					glm::vec4{instance.SeamLight.X, instance.SeamLight.Y, instance.SeamLight.Z, 0.0f};
 			};
@@ -2125,12 +2236,22 @@ namespace engine::render {
 						State->SlotHeightMap[drawSlot] = State->SlotHeightMap[sceneSlot];
 						State->SlotMetalnessMap[drawSlot] = State->SlotMetalnessMap[sceneSlot];
 						State->SlotEmissiveMap[drawSlot] = State->SlotEmissiveMap[sceneSlot];
+						State->SlotPackedPbrMap[drawSlot] = State->SlotPackedPbrMap[sceneSlot];
+						State->SlotPackedPbrChannels[drawSlot] = State->SlotPackedPbrChannels[sceneSlot];
+						State->SlotSpecularFactor[drawSlot] = State->SlotSpecularFactor[sceneSlot];
+						State->SlotTransmissionFactor[drawSlot] = State->SlotTransmissionFactor[sceneSlot];
+						State->SlotIndexOfRefraction[drawSlot] = State->SlotIndexOfRefraction[sceneSlot];
+						State->SlotThickness[drawSlot] = State->SlotThickness[sceneSlot];
 						State->SlotResample[drawSlot] = State->SlotResample[sceneSlot];
 						State->SlotShadowDetail[drawSlot] = State->SlotShadowDetail[sceneSlot];
+						State->SlotTwoSided[drawSlot] = State->SlotTwoSided[sceneSlot];
 						State->SlotShader[drawSlot] = State->SlotShader[sceneSlot];
 						State->SlotTags[drawSlot] = State->SlotTags[sceneSlot];
 						State->SlotRig[drawSlot] = State->SlotRig[sceneSlot];
 						State->SlotSeam[drawSlot] = State->SlotSeam[sceneSlot];
+						State->SlotSeamFirst[drawSlot] = State->SlotSeamFirst[sceneSlot];
+						State->SlotSeamSecond[drawSlot] = State->SlotSeamSecond[sceneSlot];
+						State->SlotSeamCentre[drawSlot] = State->SlotSeamCentre[sceneSlot];
 						State->SlotSeamLight[drawSlot] = State->SlotSeamLight[sceneSlot];
 					}
 				};
@@ -2163,7 +2284,15 @@ namespace engine::render {
 				levels[0] = State->SlotMesh[slot];
 				uint32_t levelCount = 1;
 				const uint32_t wanted = std::clamp<uint32_t>(instance.LodLevels, 1u, scene::LOD_LEVELS);
-				for (uint32_t level = 1; level < wanted; ++level) {
+				const core::Name billboard = instance.LodBillboard;
+				const core::Name billboardOwner =
+					Impl::TextureContentOwner(billboard, State->SlotContentOwner[slot]);
+				const bool billboardResident =
+					billboard.IsValid() && State->Textures.Find(billboard, billboardOwner) != nullptr;
+				const MeshEntry *billboardMesh = nullptr;
+				scene::DrawInstance billboardInstance;
+				const uint32_t meshLimit = billboardResident ? wanted - 1 : wanted;
+				for (uint32_t level = 1; level < meshLimit; ++level) {
 					const core::Name name = instance.LodMeshes[level - 1];
 					const core::Name owner = Impl::MeshContentOwner(name, State->SlotContentOwner[slot]);
 					if (!name.IsValid() || !State->Meshes.Has(name, owner)) {
@@ -2172,12 +2301,31 @@ namespace engine::render {
 					levels[level] = &State->Meshes.Resolve(name, owner);
 					levelCount++;
 				}
+				if (billboardResident && levelCount < wanted) {
+					billboardMesh = &State->Meshes.Resolve(
+						core::Name(assets::BuiltinName(assets::BuiltinMesh::Billboard))
+					);
+					billboardInstance = instance;
+					billboardInstance.Frame = core::CFrame::FromMatrix(
+						instance.Frame.Position, behaviourFrame.RightVector(), -behaviourFrame.LookVector()
+					);
+					billboardInstance.HalfExtent.Z = instance.HalfExtent.Y;
+					billboardInstance.Texture = billboard;
+					billboardInstance.Alpha = scene::AlphaMode::Transparency;
+					// The final page is a real textured plane. The preceding mesh remains
+					// selected when the authored texture has not become resident.
+					levels[levelCount] = levels[levelCount - 1];
+					levelCount++;
+				}
 				const uint32_t draw = static_cast<uint32_t>(State->LodFrame.Draws.size());
 				if (AppendAuthoredLod(
 						State->LodFrame,
 						slot,
 						instance,
-						std::span<const MeshEntry *const>(levels.data(), levelCount)
+						std::span<const MeshEntry *const>(levels.data(), levelCount),
+						billboardResident ? billboard : core::Name{},
+						billboardMesh,
+						billboardResident ? &billboardInstance : nullptr
 					)) {
 					State->SlotLod[slot] = draw;
 				}
@@ -2209,7 +2357,9 @@ namespace engine::render {
 			// disappoints.
 			constexpr float OCCLUDER_SCORE = 0.1f;
 
-			const glm::vec3 eye{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z};
+			const glm::vec3 eye{
+				behaviourFrame.Position.X, behaviourFrame.Position.Y, behaviourFrame.Position.Z
+			};
 			const auto base = static_cast<uint32_t>(cameraBase);
 			const uint32_t opaqueEnd = base + plainOpaque;
 
@@ -2656,7 +2806,7 @@ namespace engine::render {
 	void ViewRecording::Finish(const NodeTable &frameNodes) {
 		Impl *const State = this->State;
 		FrameResult &result = Result;
-		const Impl::NamedPipeline *const selectedPipeline = Pipeline;
+		const Impl::InstalledPipeline *const selectedPipeline = Pipeline;
 		SDL_GPUCommandBuffer *const command = Command;
 		SDL_GPUTexture *const swapchain = Swapchain;
 		FrameOverlayHook *const hostOverlayHook = Request.HostOverlayHook;
@@ -2710,6 +2860,9 @@ namespace engine::render {
 				   Pipeline->RetainedNodes[context.Node.Value - 1] != 0;
 		});
 
+		State->StageProbe.ActivateView(
+			State->FrameCounter, Request.Source->WorldName.Text(), Request.TargetSlot, State->BatchFinal
+		);
 		struct ProbedRunner final : graph::NodeRunner {
 			graph::NodeRunner &Inner;
 			std::function<void(const graph::RunContext &, bool, bool)> Probe;
@@ -2727,6 +2880,7 @@ namespace engine::render {
 				if (!State->StageProbe.Enabled(State->FrameCounter, Request.TargetSlot)) return;
 				ClosePass();
 				const auto save = [&](const Impl::NamedTexture &texture, std::string_view resource) {
+					if (!State->StageProbe.Wants(context.Name.Text(), resource)) return;
 					std::ostringstream metadata;
 					metadata << "\"pipeline\":" << RenderStageProbe::Quote(Pipeline->Name.Text())
 							 << ",\"stage\":" << RenderStageProbe::Quote(context.Name.Text())
@@ -2740,6 +2894,11 @@ namespace engine::render {
 							 << Request.Source->CameraFrame.Position.Z << "]"
 							 << ",\"before\":" << (before ? "true" : "false")
 							 << ",\"node_accepted\":" << (accepted ? "true" : "false");
+					if (State->StageProbe.TransitionMode())
+						metadata << ",\"transition_from\":"
+								 << RenderStageProbe::Quote(State->StageProbe.TransitionFrom)
+								 << ",\"transition_to\":"
+								 << RenderStageProbe::Quote(State->StageProbe.TransitionTo);
 					State->StageProbe.Record(
 						State->Device,
 						Command,
@@ -2831,7 +2990,7 @@ namespace engine::render {
 			(State->InspectedSlot == Renderer::ANY_VIEWPORT || State->InspectedSlot == targetSlot)) {
 			Impl::NamedTexture inspected = fixedTexture(State->Inspected, targetSlot);
 			if (!inspected.IsValid()) {
-				for (const Impl::GraphTarget &target : State->GraphTargets) {
+				for (const Impl::GraphTarget &target : State->GraphResources.Targets) {
 					if (target.Pipeline == selectedPipeline->Name && target.Resource == State->Inspected &&
 						target.Texture != nullptr &&
 						(target.Scope != graph::NodeScope::View || target.Owner == targetSlot)) {
@@ -2983,13 +3142,10 @@ namespace engine::render {
 			SDL_EndGPURenderPass(pass);
 		}
 
-		// Every earlier view has finished recording, but the command buffer still
-		// belongs to the batch. The last view alone transfers ownership to SDL.
+		// Every earlier view leaves command ownership with FrameBatch. The last
+		// view submits it, then hands the terminal result back for shared cleanup.
 		if (State->BatchActive && !State->BatchFinal) {
 			return;
-		}
-		if (State->BatchActive) {
-			State->BatchCommand = nullptr;
 		}
 
 		// Before the submit rather than after it, so a frame that fails to
@@ -3009,30 +3165,40 @@ namespace engine::render {
 			bool sceneSubmitted = false;
 			{
 				ENGINE_PROFILE_CAT("submit.scene", core::ProfileCategory::Render);
-				sceneSubmitted = State->SubmitSceneCommand(command);
+				sceneSubmitted = State->BatchActive ? State->SubmitFrameBatchCommand(command)
+													: State->SubmitSceneCommand(command);
+			}
+			const bool batchOwned = State->BatchActive;
+			if (batchOwned) {
+				State->BatchSubmit = {
+					command,
+					sceneSubmitted ? Impl::BatchSubmitStatus::Submitted : Impl::BatchSubmitStatus::Failed,
+				};
 			}
 			result.Submitted = sceneSubmitted;
 			if (!sceneSubmitted) {
-				State->VisibilityWorking.Invalidate();
-				State->VisibilityCompleted = {};
-				State->StageProbe.Clear(State->Device);
-				ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
-				State->CompleteResidentUploads(false);
-				State->DiscardPendingGraphHistoryWrites(command);
-				State->ClearSubmittedGraphHistoryWrites();
-				State->Timestamps.Abandon(timingSlot);
-				if (timingSlot < VulkanTimestamps::SLOTS) {
-					State->PendingMarks[timingSlot].clear();
-					State->AbandonCaptureTimings(timingSlot);
+				if (!batchOwned) {
+					State->VisibilityWorking.Invalidate();
+					State->VisibilityCompleted = {};
+					State->StageProbe.Clear(State->Device);
+					ENGINE_ERROR("SDL_SubmitGPUCommandBuffer: {}", SDL_GetError());
+					State->CompleteResidentUploads(false);
+					State->DiscardPendingGraphHistoryWrites(command);
+					State->ClearSubmittedGraphHistoryWrites();
+					State->Timestamps.Abandon(timingSlot);
+					if (timingSlot < VulkanTimestamps::SLOTS) {
+						State->PendingMarks[timingSlot].clear();
+						State->AbandonCaptureTimings(timingSlot);
+					}
 				}
 				if (capture != nullptr) {
 					gpu::ReleaseTransferBuffer(State->Device, capture);
 				}
-				State->DropDownloads();
+				if (!batchOwned) State->DropDownloads();
 				return;
 			}
-			State->VisibilityCompleted = State->VisibilityWorking.Snapshot();
-			{
+			if (!batchOwned) {
+				State->VisibilityCompleted = State->VisibilityWorking.Snapshot();
 				ENGINE_PROFILE_CAT("submit.residency complete", core::ProfileCategory::Render);
 				State->CompleteResidentUploads(true);
 				State->CommitPendingGraphHistoryWrites(command);

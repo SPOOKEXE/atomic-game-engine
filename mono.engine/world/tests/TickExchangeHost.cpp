@@ -47,12 +47,35 @@ namespace {
 				reply.Payload == std::vector{std::byte{17}})
 				store.ResourceMutable<Probe>()->Contacts++;
 	}
+	world::FixedStepBarrierCallbacks BarrierCallbacks() {
+		return {
+			[](ecs::Store &, std::vector<std::byte> &out) { out = {std::byte{41}}; },
+			[](std::span<const world::FixedStepBarrierRecord> records,
+			   std::vector<world::FixedStepBarrierRecord> &results) {
+				results.clear();
+				for (const auto &record : records)
+					results.push_back({record.World, {std::byte{99}}});
+				return true;
+			},
+			[](ecs::Store &store, std::span<const std::byte> bytes) {
+				if (bytes.size() != 1 || bytes.front() != std::byte{99}) return false;
+				store.ResourceMutable<Probe>()->Contacts++;
+				return true;
+			}
+		};
+	}
 	struct Host {
 		Probe Observed;
 		world::Universe Worlds;
 		world::TickExchangeHost Exchange{Worlds};
 		world::WorldId World;
-		Host(const char *name, const char *destination, uint64_t incarnation, double tickRate = 60) {
+		Host(
+			const char *name,
+			const char *destination,
+			uint64_t incarnation,
+			double tickRate = 60,
+			bool barrier = false
+		) {
 			ecs::Components::Register<Probe>("test.HostExchangeProbe");
 			REQUIRE(world::RegisterTickExchangeChannel({"test.host.contacts", Collect, Serve, Apply}));
 			World = Worlds.Create({.Name = core::Name(name), .TickRate = tickRate});
@@ -71,6 +94,7 @@ namespace {
 					Observed = *state.Resource<Probe>();
 				});
 			});
+			if (barrier) Exchange.SetFixedStepBarrier(BarrierCallbacks());
 		}
 		Probe Read() {
 			if (Worlds.TickExchangeFrameOpen()) return Observed;
@@ -110,10 +134,10 @@ namespace {
 	}
 }
 
-static void RunHostChild(bool refuseServe, bool reciprocal = false) {
+static void RunHostChild(bool refuseServe, bool reciprocal = false, bool barrier = false) {
 	auto channel = parallel::AdoptInheritedChannel();
 	REQUIRE(channel);
-	Host host("destination", reciprocal ? "source" : "", 202);
+	Host host("destination", reciprocal ? "source" : "", 202, 60, barrier);
 	world::HostFrame ready;
 	ready.Signal = world::HostSignal::Ready;
 	core::ByteWriter readyBytes;
@@ -144,7 +168,7 @@ static void RunHostChild(bool refuseServe, bool reciprocal = false) {
 	}
 	CHECK(host.Read().Inputs == 1);
 	CHECK(host.Read().Integrations == (refuseServe ? 0 : 1));
-	CHECK(host.Read().Contacts == (reciprocal && !refuseServe ? 1 : 0));
+	CHECK(host.Read().Contacts == (barrier ? 1 : reciprocal && !refuseServe ? 1 : 0));
 }
 TEST_CASE("tick exchange host process child", "[.host-tick-exchange-child]") {
 	RunHostChild(false);
@@ -157,6 +181,9 @@ TEST_CASE("tick exchange reciprocal host process child", "[.host-tick-exchange-c
 }
 TEST_CASE("tick exchange reciprocal refusing host process child", "[.host-tick-exchange-child]") {
 	RunHostChild(true, true);
+}
+TEST_CASE("tick exchange barrier host process child", "[.host-tick-exchange-child]") {
+	RunHostChild(false, false, true);
 }
 
 TEST_CASE(
@@ -433,5 +460,84 @@ TEST_CASE(
 		CHECK(probe->Inputs == (refuseServe ? 1 : expected));
 		CHECK(probe->Integrations == (refuseServe ? 0 : expected));
 		CHECK(probe->Contacts == (refuseServe ? 0 : expected));
+	});
+}
+
+TEST_CASE("fixed-step barrier applies to two local worlds before physics", "[world][host-exchange][thread]") {
+	world::DriverSettings settings;
+	settings.Universe.Mode = world::ExecutionMode::WorldParallel;
+	settings.Universe.WorldParallelFloorMilliseconds = 0;
+	world::Driver driver(settings);
+	driver.SetFixedStepBarrier(BarrierCallbacks());
+	for (const char *name : {"near", "far"}) {
+		const auto id = driver.Worlds().Create({.Name = core::Name(name), .TickRate = 60});
+		REQUIRE(id.IsValid());
+		driver.Worlds().Enter(id, [](ecs::Store &store, ecs::Scheduler &systems) {
+			store.SetResource(Probe{});
+			systems.Add("seam simulation", ecs::Phase::Simulation, [](ecs::Store &state) {
+				state.ResourceMutable<Probe>()->Integrations++;
+			});
+			systems.Add("seam physics", ecs::Phase::Physics, [](ecs::Store &state) {
+				const auto *probe = state.Resource<Probe>();
+				CHECK(probe->Contacts == probe->Integrations);
+			});
+		});
+	}
+	driver.Tick(1.0f / 60, 1);
+	CHECK_FALSE(driver.Statistics().TickExchangeFailed);
+	for (const char *name : {"near", "far"}) {
+		const auto id = driver.Worlds().Find(core::Name(name));
+		driver.Worlds().Enter(id, [](ecs::Store &store) {
+			const auto *probe = store.Resource<Probe>();
+			CHECK(probe->Integrations == 1);
+			CHECK(probe->Contacts == 1);
+		});
+	}
+}
+
+TEST_CASE(
+	"driver carries fixed-step records through a supervised process", "[world][host-exchange][process]"
+) {
+	world::DriverSettings settings;
+	settings.CoordinateHostTicks = true;
+	settings.Hosts.RestartLimit = 0;
+	world::Driver driver(settings);
+	driver.SetFixedStepBarrier(BarrierCallbacks());
+	auto channels = parallel::MakeProcessChannel();
+	REQUIRE(channels.Valid());
+	driver.Hosts().SetLauncher([&](const world::HostPlan &, parallel::Process &child) {
+		return child.Start(
+			core::Paths::Base() / core::Paths::Program("test_world"),
+			{"tick exchange barrier host process child"},
+			std::move(channels.Remote)
+		);
+	});
+	REQUIRE(driver.Start({{.Name = core::Name("destination"), .TickRate = 60}}) == 1);
+	const auto remote = driver.Hosts().Hosts().front().Name;
+	REQUIRE(driver.Hosts().Attach(remote, std::move(channels.Local)));
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+	while (!driver.Hosts().StatusOf(remote).Ready && std::chrono::steady_clock::now() < deadline) {
+		driver.Hosts().Pump(0);
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	REQUIRE(driver.Hosts().StatusOf(remote).Ready);
+	const auto local = driver.Worlds().Create({.Name = core::Name("source"), .TickRate = 60});
+	REQUIRE(local.IsValid());
+	driver.Worlds().Enter(local, [](ecs::Store &store, ecs::Scheduler &systems) {
+		store.SetResource(Probe{});
+		systems.Add("seam simulation", ecs::Phase::Simulation, [](ecs::Store &state) {
+			state.ResourceMutable<Probe>()->Integrations++;
+		});
+		systems.Add("seam physics", ecs::Phase::Physics, [](ecs::Store &state) {
+			const auto *probe = state.Resource<Probe>();
+			CHECK(probe->Contacts == probe->Integrations);
+		});
+	});
+	driver.Tick(1.0f / 60, 1);
+	CHECK_FALSE(driver.Statistics().TickExchangeFailed);
+	driver.Worlds().Enter(local, [](ecs::Store &store) {
+		const auto *probe = store.Resource<Probe>();
+		CHECK(probe->Integrations == 1);
+		CHECK(probe->Contacts == 1);
 	});
 }

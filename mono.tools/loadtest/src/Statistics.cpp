@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <loadtest/Statistics.hpp>
+#include <unordered_set>
 
 namespace loadtest {
 
@@ -39,6 +40,7 @@ namespace loadtest {
 
 		std::vector<double> admitted;
 		std::vector<double> joined;
+		std::unordered_set<uint64_t> playerIds;
 		double admitTotal = 0.0;
 		double joinTotal = 0.0;
 
@@ -87,6 +89,9 @@ namespace loadtest {
 			summary.Deltas += report.Deltas;
 			summary.Incomplete += report.Incomplete;
 			summary.Refusals += report.Refusals;
+			if (report.PlayerId != 0) playerIds.insert(report.PlayerId);
+			if (report.CharacterMovement > 0.001) summary.MovingCharacters++;
+			summary.CharacterMovement += report.CharacterMovement;
 
 			summary.ApplyTotalMilliseconds += report.ApplyMicroseconds / 1000.0;
 			summary.Polls += report.Polls;
@@ -113,6 +118,7 @@ namespace loadtest {
 			summary.ApplyMeanMicroseconds =
 				summary.ApplyTotalMilliseconds * 1000.0 / static_cast<double>(summary.Polls);
 		}
+		summary.UniquePlayerIds = playerIds.size();
 		if (seconds > 0.0) {
 			summary.SentBytesPerSecond = static_cast<double>(summary.BytesSent) / seconds;
 			summary.ReceivedBytesPerSecond = static_cast<double>(summary.BytesReceived) / seconds;
@@ -168,6 +174,9 @@ namespace loadtest {
 		Count(text, "datagrams refused", summary.Refusals);
 		Count(text, "smallest replica", summary.SmallestReplica);
 		Count(text, "largest replica", summary.LargestReplica);
+		Count(text, "unique player IDs", summary.UniquePlayerIds);
+		Count(text, "moving characters", summary.MovingCharacters);
+		Line(text, "character movement units", "%.2f", summary.CharacterMovement);
 
 		text += "\nclient-side cost\n";
 		Count(text, "polls", summary.Polls);

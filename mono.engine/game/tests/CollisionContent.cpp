@@ -196,11 +196,14 @@ TEST_CASE("the built-in meshes have collision geometry", "[game][collision]") {
 		CHECK_FALSE(hull->Points.empty());
 		CHECK(shapes.FindMesh(name) != nullptr);
 
-		// **Every one but `Plane`, which is flat and has no volume to hull.**
+		// **Every one but the two flat quads, which have no volume to hull.**
 		// `BuildConvexHull` says so: a degenerate input keeps its points and
 		// gets no faces, so `Solid()` is false and support queries still answer.
 		// A quad collides as a quad, which is what a quad should do.
-		CHECK(hull->Solid() == (which != engine::assets::BuiltinMesh::Plane));
+		CHECK(
+			hull->Solid() ==
+			(which != engine::assets::BuiltinMesh::Plane && which != engine::assets::BuiltinMesh::Billboard)
+		);
 	}
 }
 

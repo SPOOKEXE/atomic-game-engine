@@ -1,8 +1,12 @@
+#include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
+#include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/game/Game.hpp>
+#include <engine/gui/Document.hpp>
 
+#include <memory>
 #include <studio/Commands.hpp>
 #include <utility>
 
@@ -42,6 +46,26 @@ namespace studio {
 
 			return nullptr;
 		}
+
+		bool ApplyComponent(
+			Store &store, Entity instance, engine::core::Name name, std::span<const std::byte> bytes
+		) {
+			const engine::ecs::ComponentId id = engine::ecs::Components::Find(name);
+			if (!id.IsValid() || !store.HasComponent(instance, id)) return false;
+			const engine::ecs::TypeDescriptor &type = engine::ecs::Components::Describe(id);
+			if (!type.Serialisable || type.Size == 0 || type.DefaultConstruct == nullptr ||
+				type.Destruct == nullptr || type.Read == nullptr)
+				return false;
+			void *value = ::operator new(type.Size, std::align_val_t(type.Alignment));
+			type.DefaultConstruct(value, 1);
+			engine::core::ByteReader reader(bytes);
+			type.Read(reader, value, 1);
+			const bool valid = !reader.Failed() && reader.AtEnd();
+			if (valid) store.SetComponent(instance, id, value);
+			type.Destruct(value, 1);
+			::operator delete(value, std::align_val_t(type.Alignment));
+			return valid;
+		}
 	}
 
 	EditId CommandLog::Track(WorldId world, Entity instance) {
@@ -70,6 +94,13 @@ namespace studio {
 
 		const auto found = Entities.find(id.Value);
 		return found == Entities.end() ? NULL_ENTITY : found->second.Instance;
+	}
+
+	Entity CommandLog::ResolveInWorld(EditId id, WorldId world) const {
+		if (!id || !world.IsValid()) return NULL_ENTITY;
+		const auto found = Entities.find(id.Value);
+		if (found == Entities.end() || found->second.World != world) return NULL_ENTITY;
+		return found->second.Instance;
 	}
 
 	void CommandLog::Rebind(EditId id, WorldId world, Entity entity) {
@@ -397,6 +428,50 @@ namespace studio {
 		Push(std::move(command));
 	}
 
+	bool CommandLog::RecordUiDocumentImport(
+		Store &store,
+		WorldId world,
+		const engine::gui::UiDocument &document,
+		std::span<const Entity> roots,
+		std::span<const Entity> themes,
+		std::span<const Entity> parents,
+		std::string description
+	) {
+		if (!world.IsValid() || (roots.empty() && themes.empty()) || roots.size() != parents.size())
+			return false;
+		for (const Entity root : roots)
+			if (root == NULL_ENTITY || !store.Alive(root)) return false;
+		for (const Entity theme : themes)
+			if (theme == NULL_ENTITY || !store.Alive(theme)) return false;
+		for (const Entity parent : parents)
+			if (parent == NULL_ENTITY || !store.Alive(parent)) return false;
+
+		engine::core::ByteWriter writer(0, engine::gui::DocumentLimits::HARD_MAXIMUM_BINARY_BYTES);
+		engine::gui::DocumentReport report;
+		if (!engine::gui::EncodeDocument(document, writer, report)) return false;
+
+		Command command;
+		command.Kind = CommandKind::UiDocumentImport;
+		command.World = world;
+		if (!roots.empty()) {
+			command.Subject = Track(world, roots.front());
+			command.OldParent = Track(world, parents.front());
+		}
+		command.Import.Encoded.assign(writer.Bytes().begin(), writer.Bytes().end());
+		command.Import.Roots.reserve(roots.size());
+		command.Import.Themes.reserve(themes.size());
+		command.Import.Parents.reserve(parents.size());
+		for (const Entity root : roots)
+			command.Import.Roots.push_back(Track(world, root));
+		for (const Entity theme : themes)
+			command.Import.Themes.push_back(Track(world, theme));
+		for (const Entity parent : parents)
+			command.Import.Parents.push_back(Track(world, parent));
+		command.Description = std::move(description);
+		Push(std::move(command));
+		return true;
+	}
+
 	void CommandLog::RecordReparent(
 		WorldId world, Entity instance, Entity from, Entity to, std::string description
 	) {
@@ -443,6 +518,26 @@ namespace studio {
 		command.After = after;
 		command.Description = std::move(description);
 
+		Push(std::move(command));
+	}
+
+	void CommandLog::RecordComponent(
+		WorldId world,
+		Entity instance,
+		engine::core::Name component,
+		std::vector<std::byte> before,
+		std::vector<std::byte> after,
+		std::string description
+	) {
+		if (instance == NULL_ENTITY || !component.IsValid() || before == after) return;
+		Command command;
+		command.Kind = CommandKind::UiComponent;
+		command.World = world;
+		command.Subject = Track(world, instance);
+		command.Component = component;
+		command.ComponentBefore = std::move(before);
+		command.ComponentAfter = std::move(after);
+		command.Description = std::move(description);
 		Push(std::move(command));
 	}
 
@@ -538,6 +633,87 @@ namespace studio {
 				);
 				return;
 			}
+
+			case CommandKind::UiComponent: {
+				const Entity subject = Resolve(command.Subject);
+				if (subject == NULL_ENTITY || !store.Alive(subject)) return;
+				landed = ApplyComponent(
+					store,
+					subject,
+					command.Component,
+					forward ? std::span<const std::byte>(command.ComponentAfter)
+							: std::span<const std::byte>(command.ComponentBefore)
+				);
+				return;
+			}
+
+			case CommandKind::UiDocumentImport: {
+				const auto resolve = [this, &command](EditId id) {
+					return ResolveInWorld(id, command.World);
+				};
+				if (!forward) {
+					bool removed = false;
+					for (const EditId id : command.Import.Roots) {
+						const Entity root = resolve(id);
+						if (root != NULL_ENTITY && store.Alive(root)) {
+							store.DestroyInstance(root);
+							removed = true;
+						}
+						Rebind(id, command.World, NULL_ENTITY);
+					}
+					for (const EditId id : command.Import.Themes) {
+						const Entity theme = resolve(id);
+						if (theme != NULL_ENTITY && store.Alive(theme)) {
+							store.DestroyInstance(theme);
+							removed = true;
+						}
+						Rebind(id, command.World, NULL_ENTITY);
+					}
+					landed = removed;
+					return;
+				}
+
+				if ((command.Import.Roots.empty() && command.Import.Themes.empty()) ||
+					command.Import.Roots.size() != command.Import.Parents.size() ||
+					command.Import.Encoded.empty())
+					return;
+				std::vector<Entity> parents;
+				parents.reserve(command.Import.Parents.size());
+				for (const EditId id : command.Import.Parents) {
+					const Entity parent = resolve(id);
+					if (parent == NULL_ENTITY || !store.Alive(parent)) return;
+					parents.push_back(parent);
+				}
+				engine::core::ByteReader reader(command.Import.Encoded);
+				engine::gui::UiDocument document;
+				engine::gui::DocumentReport report;
+				if (!engine::gui::DecodeDocument(reader, document, report)) return;
+				std::vector<Entity> roots;
+				std::vector<Entity> themes;
+				if (!engine::gui::ImportDocument(store, document, roots, report, {}, &themes)) return;
+				if (roots.size() != command.Import.Roots.size() ||
+					themes.size() != command.Import.Themes.size()) {
+					for (const Entity root : roots)
+						if (store.Alive(root)) store.DestroyInstance(root);
+					for (const Entity theme : themes)
+						if (store.Alive(theme)) store.DestroyInstance(theme);
+					return;
+				}
+				for (size_t index = 0; index < roots.size(); ++index) {
+					if (store.SetParent(roots[index], parents[index])) continue;
+					for (const Entity root : roots)
+						if (store.Alive(root)) store.DestroyInstance(root);
+					for (const Entity theme : themes)
+						if (store.Alive(theme)) store.DestroyInstance(theme);
+					return;
+				}
+				for (size_t index = 0; index < roots.size(); ++index)
+					Rebind(command.Import.Roots[index], command.World, roots[index]);
+				for (size_t index = 0; index < themes.size(); ++index)
+					Rebind(command.Import.Themes[index], command.World, themes[index]);
+				landed = true;
+				return;
+			}
 			}
 		});
 
@@ -567,7 +743,8 @@ namespace studio {
 			// alternative is applying it to whatever now occupies the row, and
 			// the store reuses indices - so the wrong instance is not a remote
 			// possibility but the ordinary case.
-			if (Apply(command, false)) {
+			const bool applied = Apply(command, false);
+			if (applied) {
 				landed++;
 			} else {
 				ENGINE_WARN("nothing to undo for '{}' - its subject is gone", command.Description);
@@ -577,7 +754,12 @@ namespace studio {
 			// is not silently split in half: a redo of a waypoint whose middle
 			// command was unreversible has to face the same partial state
 			// rather than a shorter group that looks complete.
-			Undone.push_back(std::move(command));
+			// An import whose whole membership was independently deleted is the
+			// exception. Its original bytes would create a new, stale document on
+			// redo, so the lost import is dropped from history rather than revived.
+			if (command.Kind != CommandKind::UiDocumentImport || applied) {
+				Undone.push_back(std::move(command));
+			}
 		}
 
 		Replaying = wasReplaying;
@@ -645,15 +827,24 @@ namespace studio {
 		// hand back for an entity the store has since recycled into something
 		// else - the same reasoning as `Rebind`'s reverse-row erase.
 		const auto forgetIds = [this](const Command &command) {
-			for (const EditId id : {command.Subject, command.OldParent, command.NewParent}) {
+			auto forget = [this](EditId id) {
 				if (!id) {
-					continue;
+					return;
 				}
 				if (const auto found = Entities.find(id.Value); found != Entities.end()) {
 					Ids.erase(found->second);
 					Entities.erase(found);
 				}
+			};
+			for (const EditId id : {command.Subject, command.OldParent, command.NewParent}) {
+				forget(id);
 			}
+			for (const EditId id : command.Import.Roots)
+				forget(id);
+			for (const EditId id : command.Import.Themes)
+				forget(id);
+			for (const EditId id : command.Import.Parents)
+				forget(id);
 		};
 
 		const auto drop = [&](std::vector<Command> &stack) {

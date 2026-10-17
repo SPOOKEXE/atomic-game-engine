@@ -5,6 +5,7 @@
 #include <engine/graph/Frustum.hpp>
 #include <engine/gui/Components.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/physics/Storm.hpp>
 #include <engine/render/WorldPresentation.hpp>
 #include <engine/render/WorldView.hpp>
 #include <engine/scene/ActiveCamera.hpp>
@@ -14,11 +15,16 @@
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/Visibility.hpp>
+#include <engine/scene/Volume.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstdlib>
+#include <iostream>
 
 TEST_SUITE_ID("engine.render.worldview")
 TEST_DEPENDS("engine.render.worldpresentation")
@@ -38,6 +44,30 @@ namespace {
 		part.Frame.Position = position;
 		return scene::MakePart(store, part);
 	}
+}
+
+TEST_CASE("retained cloud density follows a frozen storm preset change", "[render][world-view][cloud]") {
+	ecs::Store store("frozen-cloud");
+	physics::Storm storm;
+	physics::SetStorm(store, storm);
+	render::WorldViewFrame frame;
+	render::CollectWorldView(store, core::Name("frozen-cloud"), frame);
+	REQUIRE(frame.CloudDensity.has_value());
+	const float originalWidth = frame.CloudDensity->Config.RootSize.X;
+	const auto *originalNodes = frame.CloudDensity->Nodes.data();
+	render::CollectWorldView(store, core::Name("frozen-cloud"), frame);
+	CHECK(frame.CloudDensity->Nodes.data() == originalNodes);
+
+	storm.State.Parameters.InfluenceRadius *= 1.5f;
+	physics::SetStorm(store, storm);
+	render::CollectWorldView(store, core::Name("frozen-cloud"), frame);
+	REQUIRE(frame.CloudDensity.has_value());
+	CHECK(frame.CloudDensity->Config.RootSize.X == originalWidth * 1.5f);
+	storm.State.Parameters.Energy += 0.01f;
+	physics::SetStorm(store, storm);
+	render::CollectWorldView(store, core::Name("frozen-cloud"), frame);
+	REQUIRE(frame.CloudParameters.has_value());
+	CHECK(frame.CloudParameters->Energy == storm.State.Parameters.Energy);
 }
 
 TEST_CASE(
@@ -231,8 +261,8 @@ TEST_CASE("world view owns a published replica pose and particle inputs", "[rend
 		store.Set(emitter, emission);
 		effects::InstallParticles(store, 128);
 		store.ResourceMutable<effects::ParticleSystem>()->DeviceStepped = true;
-		REQUIRE(effects::RefreshEmitters(store) == 1);
 		REQUIRE(effects::EmitParticles(store, emitter, 1));
+		REQUIRE(effects::RefreshEmitters(store) == 1);
 		store.AdvanceTick(.1);
 		render::CollectWorldView(store, core::Name("source"), frame);
 		REQUIRE(frame.Particles.Batches.size() == 1);
@@ -402,10 +432,22 @@ TEST_CASE(
 		store.Set(rectangle, element);
 		store.Set(rectangle, gui::Background{});
 	}
-	for (size_t index = 0; index <= render::MAX_SCENE_LIGHTS; ++index) {
+	std::vector<ecs::Entity> pointLights, spotLights;
+	pointLights.reserve(256);
+	spotLights.reserve(256);
+	for (size_t index = 0; index < 256; ++index) {
 		const auto anchor = PartAt(store, {float(index * 20), 0, -10});
-		const auto bulb = store.CreateInstance(ecs::Classes::Find(core::Name("PointLight")), "Light");
-		REQUIRE(store.SetParent(bulb, anchor));
+		const auto point = store.CreateInstance(ecs::Classes::Find(core::Name("PointLight")), "PointLight");
+		REQUIRE(store.SetParent(point, anchor));
+		pointLights.push_back(point);
+		const auto spot = store.CreateInstance(ecs::Classes::Find(core::Name("SpotLight")), "SpotLight");
+		REQUIRE(store.SetParent(spot, anchor));
+		spotLights.push_back(spot);
+	}
+	for (uint32_t index = 0; index < 256; index++) {
+		const auto volume = store.Create();
+		store.Set(volume, scene::Volume{.Seed = index});
+		store.Set(volume, scene::Transform{.Frame = core::CFrame{{0.0f, 0.0f, -10.0f - float(index)}}});
 	}
 	std::array<ecs::Entity, 2> ends;
 	for (size_t index = 0; index < ends.size(); ++index) {
@@ -424,9 +466,10 @@ TEST_CASE(
 	beam.Width0 = beam.Width1 = 1;
 	store.Set(beamEntity, beam);
 	render::View eye;
-	render::WorldCameraFrame first, second;
+	render::WorldCameraFrame first, locked, unlocked;
 	render::CollectWorldCamera(store, eye, {200, 200}, first);
 	REQUIRE(first.Lights.size() == render::MAX_SCENE_LIGHTS);
+	REQUIRE(first.VolumeCount == scene::MAX_SCENE_VOLUMES);
 	CHECK(first.Lights[0].Position.X == 0);
 	REQUIRE_FALSE(first.Ribbons.Vertices.empty());
 	REQUIRE_FALSE(first.SpatialCommands.Commands.empty());
@@ -439,24 +482,112 @@ TEST_CASE(
 	);
 	const float nearWidth = store.Get<gui::SpatialCanvas>(billboard)->Size.X;
 	const auto firstVertex = first.Ribbons.Vertices[0].Position;
-	const float farLight = float(render::MAX_SCENE_LIGHTS * 20);
+	const float farLight = 240.0f;
+	eye.VisibilityFrame = eye.CameraFrame;
 	eye.CameraFrame.Position = {farLight, 10, 10};
-	render::CollectWorldCamera(store, eye, {200, 200}, second);
-	REQUIRE(second.Lights.size() == render::MAX_SCENE_LIGHTS);
-	CHECK(second.Lights[0].Position.X == farLight);
+	render::CollectWorldCamera(store, eye, {200, 200}, locked);
+	CHECK(eye.CameraFrame.Position == core::Vector3{farLight, 10, 10});
+	REQUIRE(locked.Lights.size() == render::MAX_SCENE_LIGHTS);
+	REQUIRE(locked.VolumeCount == scene::MAX_SCENE_VOLUMES);
+	CHECK(locked.Lights[0].Position.X == 0);
+	CHECK(store.Get<gui::SpatialCanvas>(billboard)->Size.X == nearWidth);
+	REQUIRE_FALSE(locked.Ribbons.Vertices.empty());
+	CHECK(locked.Ribbons.Vertices[0].Position == firstVertex);
+
+	eye.VisibilityFrame.reset();
+	render::CollectWorldCamera(store, eye, {200, 200}, unlocked);
+	REQUIRE(unlocked.Lights.size() == render::MAX_SCENE_LIGHTS);
+	REQUIRE(unlocked.VolumeCount == scene::MAX_SCENE_VOLUMES);
+	CHECK(unlocked.Lights[0].Position.X == farLight);
 	CHECK(first.Lights[0].Position.X == 0);
 	CHECK(store.Get<gui::SpatialCanvas>(billboard)->Size.X < nearWidth);
 	REQUIRE(first.SpatialCollectors.size() == 1);
 	CHECK(first.SpatialCollectors[0].Collector == billboard);
 	CHECK(first.SpatialCollectors[0].Canvas.Size.X == nearWidth);
-	REQUIRE(second.SpatialCollectors.size() == 1);
-	CHECK(second.SpatialCollectors[0].Canvas.Size.X < nearWidth);
-	REQUIRE_FALSE(second.Ribbons.Vertices.empty());
-	CHECK(second.Ribbons.Vertices[0].Position != firstVertex);
+	REQUIRE(unlocked.SpatialCollectors.size() == 1);
+	CHECK(unlocked.SpatialCollectors[0].Canvas.Size.X < nearWidth);
+	REQUIRE_FALSE(unlocked.Ribbons.Vertices.empty());
+	CHECK(unlocked.Ribbons.Vertices[0].Position != firstVertex);
 	CHECK(first.Ribbons.Vertices[0].Position == firstVertex);
 	CHECK(store.Resource<scene::ActiveCamera>()->Entity == active);
 	CHECK(store.Get<scene::Transform>(active)->Frame.Position == activeFrame.Position);
 	CHECK(store.Get<scene::Transform>(active)->Frame.Rotation() == activeFrame.Rotation());
+
+	const char *configuredFrames = std::getenv("MONO_LIGHT_SELECTION_STRESS_FRAMES");
+	if (configuredFrames == nullptr) return;
+	const unsigned long requested = std::strtoul(configuredFrames, nullptr, 10);
+	REQUIRE(requested > 0);
+	const uint32_t frames = static_cast<uint32_t>(std::min(requested, 10'000ul));
+	std::array<scene::VolumeState, scene::MAX_SCENE_VOLUMES> volumes;
+	std::vector<render::SceneLight> selectedLights;
+	const auto setEnabled = [&](const std::vector<ecs::Entity> &lights, bool enabled) {
+		for (const ecs::Entity entity : lights) {
+			auto light = *store.Get<scene::Light>(entity);
+			light.Enabled = enabled;
+			store.Set(entity, light);
+		}
+	};
+	const auto measureLights = [&](const char *label) {
+		const auto started = std::chrono::steady_clock::now();
+		for (uint32_t frame = 0; frame < frames; frame++) {
+			const core::Vector3 selectionEye = frame & 1u ? core::Vector3{farLight, 10, 10} : core::Vector3{};
+			render::CollectLights(store, selectionEye, {}, selectedLights);
+		}
+		const double milliseconds =
+			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+		std::cout << label << " frames=" << frames << ", cpu ms/frame=" << milliseconds / double(frames)
+				  << '\n';
+	};
+	const auto measureVolumes = [&] {
+		const auto started = std::chrono::steady_clock::now();
+		for (uint32_t frame = 0; frame < frames; frame++) {
+			const core::Vector3 selectionEye = frame & 1u ? core::Vector3{farLight, 10, 10} : core::Vector3{};
+			scene::ResolveVolumes(store, selectionEye, {}, volumes);
+		}
+		const double milliseconds =
+			std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+		std::cout << "fog volume selection frames=" << frames
+				  << ", cpu ms/frame=" << milliseconds / double(frames) << '\n';
+	};
+	setEnabled(pointLights, true);
+	setEnabled(spotLights, false);
+	measureLights("point light selection");
+	setEnabled(pointLights, false);
+	setEnabled(spotLights, true);
+	measureLights("spot light selection");
+	setEnabled(pointLights, true);
+	measureLights("mixed local light selection");
+	measureVolumes();
+}
+
+TEST_CASE("frozen camera GUI collection preserves snapshot bytes", "[render][world-view]") {
+	RegisterViewClasses();
+	ecs::Store store("frozen-camera-gui");
+	const auto workspace = scene::InstallServices(store);
+	const auto part = PartAt(store, {0, 0, -10});
+	REQUIRE(store.SetParent(part, workspace));
+	const auto billboard = store.CreateInstance(gui::GuiClass("BillboardGui"), "WorldLabel");
+	REQUIRE(store.SetParent(billboard, part));
+	gui::Billboard label;
+	label.Size = {2, 0, 2, 0};
+	store.Set(billboard, label);
+	const auto panel = store.CreateInstance(gui::GuiClass("Frame"), "Panel");
+	REQUIRE(store.SetParent(panel, billboard));
+	gui::Element element;
+	element.Size = {1, 0, 1, 0};
+	store.Set(panel, element);
+	store.Set(panel, gui::Background{});
+	core::ByteWriter before;
+	REQUIRE(store.Save(before));
+	render::View eye;
+	render::WorldCameraFrame captured;
+	render::CollectWorldCamera(store, eye, {200, 200}, captured, true);
+	core::ByteWriter after;
+	REQUIRE(store.Save(after));
+	CHECK(before.Bytes().size() == after.Bytes().size());
+	CHECK(std::equal(before.Bytes().begin(), before.Bytes().end(), after.Bytes().begin()));
+	REQUIRE_FALSE(captured.SpatialCommands.Commands.empty());
+	CHECK(captured.SpatialCollectors.size() == 1);
 }
 
 TEST_CASE(

@@ -1,5 +1,6 @@
 #include "CaptureRecordValidation.hpp"
 #include "DataCaptureCompact.hpp"
+#include "DataCapturePacking.hpp"
 
 #include <engine/ecs/Attributes.hpp>
 #include <engine/render/DataFactoryHookBind.hpp>
@@ -29,9 +30,33 @@ namespace engine::render {
 	}
 
 	namespace {
-		constexpr size_t MAX_CAPTURE_CHANNELS = 15;
+		constexpr size_t MAX_CAPTURE_CHANNELS = 17;
 		constexpr size_t MAX_CAPTURE_TICKETS = 6;
 		constexpr size_t RETAINED_BYTE_LIMIT = 64 * 1024 * 1024;
+
+		// A requested inline sidecar must fit before a capture ticket is issued. Large
+		// worlds can still be captured using get_scene_snapshot and ranged reads.
+		bool SidecarFits(
+			world::DataFactorySession &session,
+			const script::DataCaptureBridgeRequest &request,
+			std::string &detail
+		) {
+			if (!request.IncludeSceneData) return true;
+			const world::WorldId worldId = session.UniverseOf().Find(core::Name(request.InstanceId));
+			if (!worldId.IsValid()) return true;
+			bool fits = false;
+			const world::WorldStatus status = session.UniverseOf().Enter(worldId, [&](ecs::Store &store) {
+				const script::DataSceneResult scene = script::GetSceneSnapshot(store);
+				size_t bytes = 0;
+				fits = scene.Status == std::string_view("ok") &&
+					   script::DataSceneJsonResponseBudget(scene.Value, bytes);
+			});
+			if (status != world::WorldStatus::Ok) return true;
+			if (fits) return true;
+			detail = "inline scene sidecar exceeds 64 KiB or is unavailable; use get_scene_snapshot "
+					 "and include_scene_data=false";
+			return false;
+		}
 
 		bool Text(std::string_view value, size_t limit = 256) {
 			return !value.empty() && value.size() <= limit && value.find('\0') == std::string_view::npos;
@@ -55,6 +80,12 @@ namespace engine::render {
 			if (name == "second_surface_depth") return DataCaptureChannel::SecondSurfaceDepth;
 			if (name == "second_surface_validity") return DataCaptureChannel::SecondSurfaceValidity;
 			if (name == "motion_vectors") return DataCaptureChannel::MotionVectors;
+			if (name == "directional_response") return DataCaptureChannel::DirectionalResponse;
+			if (name == "shadow_visibility") return DataCaptureChannel::ShadowVisibility;
+			if (name == "local_light_contribution") return DataCaptureChannel::LocalLightContribution;
+			if (name == "local_light_shadow_visibility")
+				return DataCaptureChannel::LocalLightShadowVisibility;
+			if (name == "packed_gpu") return DataCaptureChannel::PackedGpu;
 			return std::nullopt;
 		}
 
@@ -67,12 +98,37 @@ namespace engine::render {
 				(request.NoiseMode != "none" && request.NoiseMode != "gaussian") ||
 				!std::isfinite(request.NoiseSigma) || request.NoiseSigma < 0.0 || request.NoiseSigma > 64.0 ||
 				(request.NoiseMode == "none" && (request.NoiseSeed != 0 || request.NoiseSigma != 0.0)) ||
-				request.ViewSlot > std::numeric_limits<size_t>::max())
+				request.ViewSlot > std::numeric_limits<size_t>::max() ||
+				request.LocalLightIds.size() > MAX_DATA_CAPTURE_LOCAL_LIGHT_IDS)
 				return false;
+			for (size_t index = 0; index < request.LocalLightIds.size(); ++index) {
+				if (!Text(request.LocalLightIds[index], script::MAX_DATA_SCENE_ID_BYTES)) return false;
+				for (size_t previous = 0; previous < index; ++previous)
+					if (request.LocalLightIds[previous] == request.LocalLightIds[index]) return false;
+			}
+			const bool requested =
+				std::ranges::find(request.Channels, "local_light_contribution") != request.Channels.end() ||
+				std::ranges::find(request.Channels, "local_light_shadow_visibility") !=
+					request.Channels.end();
+			if (requested != !request.LocalLightIds.empty()) return false;
 			for (size_t first = 0; first < request.Channels.size(); ++first) {
 				if (!Text(request.Channels[first], 64) || !Channel(request.Channels[first])) return false;
 				for (size_t second = first + 1; second < request.Channels.size(); ++second)
 					if (request.Channels[first] == request.Channels[second]) return false;
+			}
+			if (request.PackedPlanes.size() > script::MAX_DATA_CAPTURE_PACKED_PLANES) return false;
+			for (size_t first = 0; first < request.PackedPlanes.size(); ++first) {
+				const auto &packed = request.PackedPlanes[first];
+				if (!Text(packed.Name, 64) ||
+					std::ranges::find(request.Channels, packed.Name) != request.Channels.end())
+					return false;
+				for (const auto &component : packed.Components)
+					if (!Text(component.SourceChannel, 64) || component.SourceComponent > 3 ||
+						std::ranges::find(request.Channels, component.SourceChannel) ==
+							request.Channels.end())
+						return false;
+				for (size_t second = first + 1; second < request.PackedPlanes.size(); ++second)
+					if (packed.Name == request.PackedPlanes[second].Name) return false;
 			}
 			const bool secondDepth =
 				std::ranges::find(request.Channels, "second_surface_depth") != request.Channels.end();
@@ -297,6 +353,8 @@ namespace engine::render {
 
 		const char *Packing(DataCaptureChannel channel, DataCaptureScalar scalar) {
 			return channel == DataCaptureChannel::AmbientOcclusion ||
+						   channel == DataCaptureChannel::ShadowVisibility ||
+						   channel == DataCaptureChannel::LocalLightShadowVisibility ||
 						   channel == DataCaptureChannel::FirstSurfaceValidity ||
 						   channel == DataCaptureChannel::SecondSurfaceValidity
 					   ? "unorm8"
@@ -304,7 +362,10 @@ namespace engine::render {
 				   : channel == DataCaptureChannel::MeshUv || channel == DataCaptureChannel::MotionVectors
 					   ? "rg16_float"
 				   : scalar == DataCaptureScalar::UNorm10A2 ? "unorm10a2"
-															: "";
+				   : (channel == DataCaptureChannel::PackedGpu ||
+					  channel == DataCaptureChannel::DirectionalResponse)
+					   ? "rgba32_float"
+					   : "";
 		}
 
 		bool Compactible(DataCaptureChannel channel) {
@@ -339,6 +400,10 @@ namespace engine::render {
 		const char *Provenance(DataCaptureChannel channel) {
 			return channel == DataCaptureChannel::AmbientOcclusion
 					   ? "ssao_estimator_visibility_factor_not_ground_truth"
+				   : channel == DataCaptureChannel::DirectionalResponse
+					   ? "directional_response_rgb_is_unshadowed_linear_radiance_alpha_is_visibility_factor"
+				   : channel == DataCaptureChannel::ShadowVisibility
+					   ? "directional_shadow_and_portal_beam_visibility_factor_quantized_to_unorm8"
 					   : "";
 		}
 
@@ -384,8 +449,15 @@ namespace engine::render {
 			};
 		}
 
-		std::string ResourceId(uint64_t ticket, DataCaptureChannel channel) {
-			return "capture/" + std::to_string(ticket) + "/" + std::string(DataCaptureChannelName(channel));
+		std::string ResourceId(uint64_t ticket, DataCaptureChannel channel, std::string_view lightId = {}) {
+			std::string resource =
+				"capture/" + std::to_string(ticket) + "/" + std::string(DataCaptureChannelName(channel));
+			if (!lightId.empty()) resource += "/" + std::string(lightId);
+			return resource;
+		}
+
+		std::string PackedResourceId(uint64_t ticket, std::string_view name) {
+			return "capture/" + std::to_string(ticket) + "/packed/" + std::string(name);
 		}
 
 		std::string CoordinateConvention(const DataCaptureCameraConvention &camera) {
@@ -457,7 +529,12 @@ namespace engine::render {
 				 "first_surface_validity",
 				 "second_surface_depth",
 				 "second_surface_validity",
-				 "motion_vectors"},
+				 "motion_vectors",
+				 "directional_response",
+				 "shadow_visibility",
+				 "local_light_contribution",
+				 "local_light_shadow_visibility",
+				 "packed_gpu"},
 			.StorageProfiles = {"lossless", "training_compact"},
 			.TrainingCompactLimitations =
 				{"linear_depth=float32_to_float16_le",
@@ -486,6 +563,7 @@ namespace engine::render {
 			.SameFrameMultiCamera = true,
 			.MaximumSameFrameCameraViews = static_cast<uint32_t>(MAX_CAPTURE_TICKETS),
 			.MaximumCameraIdBytes = static_cast<uint32_t>(script::MAX_DATA_SCENE_ID_BYTES),
+			.MaximumLocalLightIds = static_cast<uint32_t>(MAX_DATA_CAPTURE_LOCAL_LIGHT_IDS),
 			.Detail = CaptureAvailable ? "requires a declared compatible capture node"
 									   : "renderer is not ready for capture"
 		};
@@ -531,11 +609,12 @@ namespace engine::render {
 		uint64_t &ticket,
 		std::string &detail
 	) {
-		std::lock_guard lock(Mutex);
 		if (!Valid(instanceId, request)) {
 			detail = "invalid capture request";
 			return false;
 		}
+		if (!SidecarFits(Session, request, detail)) return false;
+		std::lock_guard lock(Mutex);
 		if (Entries.size() >= MAX_CAPTURE_TICKETS) {
 			detail = "capture queue is full; release a terminal capture";
 			return false;
@@ -564,6 +643,8 @@ namespace engine::render {
 			detail = "same-frame capture group needs matching request and ticket counts of at least two";
 			return false;
 		}
+		for (const auto &request : requests)
+			if (!SidecarFits(Session, request, detail)) return false;
 		std::lock_guard lock(Mutex);
 		if (requests.size() > MAX_CAPTURE_TICKETS - Entries.size() || NextTicket == 0 || NextGroup == 0) {
 			detail = Entries.size() >= MAX_CAPTURE_TICKETS
@@ -1100,6 +1181,7 @@ namespace engine::render {
 				.ObjectLabels = {view.ObjectLabels.begin(), view.ObjectLabels.end()},
 				.SemanticLabels = {view.SemanticLabels.begin(), view.SemanticLabels.end()},
 				.PartLabels = {view.PartLabels.begin(), view.PartLabels.end()},
+				.LocalLightIds = pendingRequest.Request.LocalLightIds,
 			};
 			for (const std::string &name : pendingRequest.Request.Channels) {
 				const auto channel = Channel(name);
@@ -1435,8 +1517,20 @@ namespace engine::render {
 				validationTicket.CaptureNode = core::Name(entry->second.Request.CaptureNode);
 				storageProfile = entry->second.Request.StorageProfile;
 				storedRequest = entry->second.Request;
-				for (const std::string &name : entry->second.Request.Channels)
-					if (const auto channel = Channel(name)) validationTicket.Channels.push_back(*channel);
+				for (const std::string &name : entry->second.Request.Channels) {
+					const auto channel = Channel(name);
+					if (!channel) continue;
+					if (*channel == DataCaptureChannel::LocalLightContribution ||
+						*channel == DataCaptureChannel::LocalLightShadowVisibility)
+						for (const std::string &lightId : entry->second.Request.LocalLightIds) {
+							validationTicket.Channels.push_back(*channel);
+							validationTicket.LightIds.push_back(lightId);
+						}
+					else {
+						validationTicket.Channels.push_back(*channel);
+						validationTicket.LightIds.emplace_back();
+					}
+				}
 				Hooks->Batches.erase(ticket.first);
 				if (const auto connection = Hooks->Connections.find(ticket.first);
 					connection != Hooks->Connections.end()) {
@@ -1546,18 +1640,78 @@ namespace engine::render {
 			if (captured.Status == DataCaptureStatus::Ready || captured.Status == DataCaptureStatus::Partial)
 				CopyCamera(captured, reply);
 			std::unordered_map<std::string, std::vector<std::byte>> bytes;
+			struct PackedOutput {
+				script::DataCaptureBridgePackedPlane Definition;
+				data_capture_packing::Result Image;
+				std::string Rejection;
+			};
+			std::vector<PackedOutput> packedOutputs;
+			packedOutputs.reserve(storedRequest.PackedPlanes.size());
+			size_t nativeBytes = 0;
+			for (const DataCapturePlane &plane : captured.Planes) {
+				if (nativeBytes > RETAINED_BYTE_LIMIT ||
+					plane.Bytes.size() > RETAINED_BYTE_LIMIT - nativeBytes) {
+					nativeBytes = RETAINED_BYTE_LIMIT + 1;
+					break;
+				}
+				nativeBytes += plane.Bytes.size();
+			}
+			size_t packedBudget = nativeBytes <= RETAINED_BYTE_LIMIT ? RETAINED_BYTE_LIMIT - nativeBytes : 0;
+			for (const script::DataCaptureBridgePackedPlane &definition : storedRequest.PackedPlanes) {
+				std::array<const DataCapturePlane *, 4> sourcePlanes{};
+				bool missingSource = false;
+				bool compactedDepth = false;
+				for (size_t lane = 0; lane < definition.Components.size(); ++lane) {
+					const auto match =
+						std::ranges::find_if(captured.Planes, [&](const DataCapturePlane &plane) {
+							return definition.Components[lane].SourceChannel ==
+								   DataCaptureChannelName(plane.Channel);
+						});
+					if (match == captured.Planes.end()) {
+						missingSource = true;
+						break;
+					}
+					sourcePlanes[lane] = &*match;
+					if (match->Channel == DataCaptureChannel::LinearDepth &&
+						match->Scalar != DataCaptureScalar::Float32)
+						compactedDepth = true;
+				}
+				PackedOutput output{.Definition = definition, .Image = {}, .Rejection = {}};
+				const size_t pixels =
+					sourcePlanes[0] == nullptr
+						? 0
+						: static_cast<size_t>(sourcePlanes[0]->Width) * sourcePlanes[0]->Height;
+				if (missingSource)
+					output.Rejection = "requested_source_missing";
+				else if (compactedDepth)
+					output.Rejection = "linear_depth_requires_float32_source";
+				else if (pixels > SIZE_MAX / 16 || pixels * 16 > packedBudget)
+					output.Rejection = "retained_byte_quota";
+				else
+					(void)data_capture_packing::PackRgba32F(
+						sourcePlanes, definition.Components, output.Image, output.Rejection
+					);
+				if (output.Rejection.empty()) packedBudget -= output.Image.Bytes.size();
+				packedOutputs.push_back(std::move(output));
+			}
+			if (std::ranges::any_of(
+					packedOutputs, [](const PackedOutput &output) { return !output.Rejection.empty(); }
+				) &&
+				reply.Status == "ready")
+				reply.Status = "partial";
 			bool objectIdsReady = false;
 			bool semanticIdsReady = false;
 			bool partIdsReady = false;
 			size_t totalBytes = 0;
 			for (size_t index = 0; index < captured.Planes.size(); ++index) {
 				DataCapturePlane &plane = captured.Planes[index];
-				const std::string resource = ResourceId(ticket.first, plane.Channel);
+				const std::string resource = ResourceId(ticket.first, plane.Channel, plane.LightId);
 				const std::string channel(DataCaptureChannelName(plane.Channel));
 				const std::string &source = sources[index].Resource;
 				const std::string hash = plane.Hash.ToHex();
 				reply.Planes.push_back(
 					{.Channel = channel,
+					 .LightId = plane.LightId,
 					 .Status = Status(plane.Status),
 					 .Resource = resource,
 					 .SourceResource = source,
@@ -1588,7 +1742,9 @@ namespace engine::render {
 					 .Provenance = plane.Provenance.empty() ? Provenance(plane.Channel) : plane.Provenance,
 					 .AmbientOcclusion = CopyAmbientOcclusion(plane.AmbientOcclusion),
 					 .Noise = std::move(noises[index]),
-					 .PreviousCameraMotionFrame = plane.PreviousCameraMotionFrame}
+					 .PreviousCameraMotionFrame = plane.PreviousCameraMotionFrame,
+					 .Packed = {},
+					 .Resampling = {}}
 				);
 				if (!plane.Bytes.empty()) {
 					if (totalBytes > RETAINED_BYTE_LIMIT ||
@@ -1603,6 +1759,52 @@ namespace engine::render {
 					semanticIdsReady = semanticIdsReady || plane.Channel == DataCaptureChannel::SemanticMask;
 					partIdsReady = partIdsReady || plane.Channel == DataCaptureChannel::PartMask;
 				}
+			}
+			for (PackedOutput &output : packedOutputs) {
+				const std::string resource = PackedResourceId(ticket.first, output.Definition.Name);
+				const bool ready = output.Rejection.empty();
+				const assets::ContentHash hash =
+					ready ? assets::Hasher::Of(output.Image.Bytes) : assets::ContentHash{};
+				reply.Planes.push_back(
+					{.Channel = "packed/" + output.Definition.Name,
+					 .Status = ready ? "ready" : "unsupported",
+					 .Resource = resource,
+					 .SourceResource = {},
+					 .HashAlgorithm = "blake3-256",
+					 .Hash = hash.ToHex(),
+					 .Width = output.Image.Width,
+					 .Height = output.Image.Height,
+					 .RowStride = output.Image.Width * 16,
+					 .ByteSize = output.Image.Bytes.size(),
+					 .Scalar = "float32",
+					 .SourceScalar = "mixed",
+					 .SourceHash = {},
+					 .SourceEncoding = "mixed",
+					 .SourceColourSpace = "mixed",
+					 .SourceOrigin = "top_left",
+					 .SourcePacking = "explicit_component_mapping",
+					 .SourceProvenance = "completed_capture_planes/v1",
+					 .ValueClassification = "not_inspected",
+					 .Encoding = "ieee754_binary32_le",
+					 .MaximumAbsoluteError = {},
+					 .ColourSpace = "not_applicable",
+					 .Origin = "top_left",
+					 .Packing = "rgba32_float",
+					 .Provenance = ready ? "derived/explicit_channel_pack_rgba32f/v1"
+										 : "unavailable/explicit_channel_pack_" + output.Rejection + "/v1",
+					 .AmbientOcclusion = {},
+					 .Noise = {},
+					 .PreviousCameraMotionFrame = {},
+					 .Packed = output.Definition,
+					 .Resampling = "pixel_center_nearest/v1"}
+				);
+				if (!ready) continue;
+				if (totalBytes > RETAINED_BYTE_LIMIT ||
+					output.Image.Bytes.size() > RETAINED_BYTE_LIMIT - totalBytes)
+					totalBytes = RETAINED_BYTE_LIMIT + 1;
+				else
+					totalBytes += output.Image.Bytes.size();
+				bytes.emplace(resource, std::move(output.Image.Bytes));
 			}
 			if (objectIdsReady)
 				for (const DataCaptureObjectLabel &label : captured.ObjectLabels)
@@ -1694,6 +1896,35 @@ namespace engine::render {
 		RendererRef.Hooks().DisconnectHooks(completedConnections);
 	}
 
+	void ScriptDataCaptureBridge::CancelPending() {
+		std::vector<MutationHandle> mutations;
+		{
+			std::lock_guard lock(Mutex);
+			for (auto &[ticket, entry] : Entries) {
+				(void)ticket;
+				if (!entry.Terminal) entry.CancelRequested = true;
+			}
+			for (auto &[ticket, entry] : Mutations) {
+				(void)ticket;
+				if (entry.Status != ViewMutationStatus::Pending &&
+					entry.Status != ViewMutationStatus::AppliedAwaitingRestore)
+					continue;
+				if (!entry.Handle.IsValid()) {
+					entry.Status = ViewMutationStatus::Cancelled;
+					continue;
+				}
+				mutations.push_back(entry.Handle);
+				entry.Handle = {};
+				entry.Status = ViewMutationStatus::Cancelled;
+				entry.CancelRequested = false;
+			}
+		}
+		// Applied patches normally wait for a following view to restore. Shutdown
+		// has no following view, so retire those handles through the teardown path.
+		for (MutationHandle mutation : mutations)
+			RendererRef.Hooks().DiscardViewMutation(mutation);
+	}
+
 	bool ScriptDataCaptureBridge::HasPending() const {
 		std::lock_guard lock(Mutex);
 		const bool captures = std::any_of(Entries.begin(), Entries.end(), [](const auto &entry) {
@@ -1703,5 +1934,27 @@ namespace engine::render {
 				   return entry.second.Status == ViewMutationStatus::Pending ||
 						  entry.second.Status == ViewMutationStatus::AppliedAwaitingRestore;
 			   });
+	}
+
+	bool ScriptDataCaptureBridge::HasOutstanding() const {
+		std::lock_guard lock(Mutex);
+		return !Entries.empty() || !Mutations.empty();
+	}
+
+	bool ScriptDataCaptureBridge::DiscardTerminal() {
+		std::lock_guard lock(Mutex);
+		if (std::any_of(
+				Entries.begin(), Entries.end(), [](const auto &entry) { return !entry.second.Terminal; }
+			) ||
+			std::any_of(Mutations.begin(), Mutations.end(), [](const auto &entry) {
+				return entry.second.Status == ViewMutationStatus::Pending ||
+					   entry.second.Status == ViewMutationStatus::AppliedAwaitingRestore ||
+					   entry.second.Handle.IsValid();
+			}))
+			return false;
+		Entries.clear();
+		Mutations.clear();
+		RetainedBytes = 0;
+		return true;
 	}
 }

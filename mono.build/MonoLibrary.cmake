@@ -581,13 +581,13 @@ function(mono_add_tests name)
 	# The vendored typefaces, for a test of something that reads them.
 	#
 	# **Same rule as a program's, applied to the one place it was not.** A
-	# program links `ui` or `render` and gets fonts staged beside it; a *test*
+	# program links a module that reads font bytes and gets fonts staged beside it; a *test*
 	# of `render::GlyphAtlas` linked the same module and got nothing, so every
 	# case that needed a real .ttf took its "no staged fonts" branch and passed
 	# without asserting anything. A test that skips silently is worse than one
 	# that fails: it reports green for a rasteriser nobody ran.
 	get_target_property(_mono_test_deps ${target} LINK_LIBRARIES)
-	if("Engine::render" IN_LIST _mono_test_deps OR "Engine::ui" IN_LIST _mono_test_deps)
+	if("Engine::render" IN_LIST _mono_test_deps OR "Engine::ui" IN_LIST _mono_test_deps OR "Engine::gui" IN_LIST _mono_test_deps)
 		file(GLOB _mono_test_fonts "${CMAKE_SOURCE_DIR}/mono.vendor/fonts/*.ttf")
 
 		# The directory first, for the reason the program-side copy gives:

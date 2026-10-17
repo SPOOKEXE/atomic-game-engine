@@ -38,6 +38,7 @@
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/TextureCatalogue.hpp>
+#include <engine/script/EcsInstanceMethods.hpp>
 #include <engine/script/Runtime.hpp>
 #include <engine/script/ScriptCall.hpp>
 #include <engine/scripthost/Runtime.hpp>
@@ -55,6 +56,7 @@
 TEST_SUITE_ID("engine.scripthost.scriptcall")
 
 using engine::ecs::Store;
+using engine::script::EcsInstanceMethods;
 using engine::script::InstanceMethod;
 using engine::script::Language;
 using engine::script::MakeRuntime;
@@ -351,7 +353,7 @@ namespace {
 	}
 }
 
-TEST_CASE("every neutral method is a member in both languages", "[scripting][scriptcall]") {
+TEST_CASE("every shared Instance method is a member in both languages", "[scripting][scriptcall]") {
 	// **The structural half, and the one that would have caught the drift.** A
 	// method missing from a language is `undefined` in JavaScript and a missing
 	// member in Luau, and neither says anything until a script reaches it - which
@@ -362,12 +364,12 @@ TEST_CASE("every neutral method is a member in both languages", "[scripting][scr
 		const auto runtime = MakeRuntime(store, language);
 		REQUIRE(runtime != nullptr);
 
-		for (const InstanceMethod &method : NeutralInstanceMethods()) {
+		auto requireMember = [&](const char *rawName) {
 			// **No local, because every JavaScript chunk shares one global
 			// scope** - a second `let part` in the same VM is a `SyntaxError`
 			// before a line of it runs, which would fail this case for a reason
 			// that has nothing to do with the method being asked about.
-			const std::string name(method.Name);
+			const std::string name(rawName);
 			const std::string subject = "Instance.new('Part')." + name;
 			const std::string source =
 				language == Language::Luau
@@ -375,10 +377,17 @@ TEST_CASE("every neutral method is a member in both languages", "[scripting][scr
 					: "if (typeof " + subject + " !== 'function') { throw new Error('" + name +
 						  " is missing') }\n";
 
-			INFO(method.Name);
+			INFO(rawName);
 			const bool ok = runtime->Run(source.c_str());
 			INFO(runtime->LastError());
 			CHECK(ok);
+		};
+
+		for (const InstanceMethod &method : NeutralInstanceMethods()) {
+			requireMember(method.Name);
+		}
+		for (const auto &method : EcsInstanceMethods()) {
+			requireMember(method.Name);
 		}
 	}
 }
@@ -1059,7 +1068,13 @@ TEST_CASE("a neutral service method answers the same in both languages", "[scrip
 				 engine::scene::RecordTexture(
 					 store,
 					 engine::core::Name("fx/fire.atex"),
-					 engine::scene::FlipbookFacts{.Side = 3, .Frames = 9, .FrameRate = 12.0f}
+					 engine::scene::FlipbookFacts{
+						 .Side = 3,
+						 .Frames = 9,
+						 .FrameRate = 12.0f,
+						 .FrameDurations = {},
+						 .CumulativeEnds = {}
+					 }
 				 )
 			 );
 		 }},
@@ -1432,6 +1447,29 @@ TEST_CASE("a service property is live in both languages", "[scripting][scriptcal
 	for (const ParityCase &probe : CASES) {
 		Both(probe);
 	}
+}
+
+TEST_CASE("an instance property is live in both languages", "[scripting][scriptcall]") {
+	const ParityCase pan{
+		"Sound Pan remains a signed live property",
+		[](Language language) {
+			return Let(language, "sound", "Instance.new('Sound')") + Let(language, "before", "sound.Pan") +
+				   "sound.Pan = -0.75\n" + Say(language, Join(language, "before", "sound.Pan"));
+		},
+		"0/-0.75",
+	};
+	Both(pan);
+
+	const ParityCase rigKeypointJoint{
+		"a detached RigKeypoint can be assigned before it is parented",
+		[](Language language) {
+			return Let(language, "rig", "Instance.new('SkinnedMeshPart')") + "rig.JointCount = 1\n" +
+				   Let(language, "nose", "Instance.new('RigKeypoint')") + "nose.Joint = 0\n" +
+				   "nose.Parent = rig\n" + Say(language, "nose.Joint");
+		},
+		"0",
+	};
+	Both(rigKeypointJoint);
 }
 
 TEST_CASE("the two input surfaces answer the same in both languages", "[scripting][scriptcall]") {

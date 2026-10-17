@@ -39,6 +39,16 @@ namespace engine::render {
 			return "motion_vectors";
 		case DataCaptureChannel::OpticalFlow:
 			return "optical_flow";
+		case DataCaptureChannel::DirectionalResponse:
+			return "directional_response";
+		case DataCaptureChannel::ShadowVisibility:
+			return "shadow_visibility";
+		case DataCaptureChannel::LocalLightContribution:
+			return "local_light_contribution";
+		case DataCaptureChannel::LocalLightShadowVisibility:
+			return "local_light_shadow_visibility";
+		case DataCaptureChannel::PackedGpu:
+			return "packed_gpu";
 		}
 		return "unknown";
 	}

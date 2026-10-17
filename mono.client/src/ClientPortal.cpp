@@ -1,12 +1,18 @@
+#include "PortalEyeHandoff.hpp"
+#include "PortalReadiness.hpp"
+
 #include <engine/core/Log.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
+#include <engine/scene/Controls.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Sunlight.hpp>
+#include <engine/script/PortalTransfer.hpp>
 #include <engine/world/Postbox.hpp>
 
 #include <client/Client.hpp>
+#include <client/ContentDemand.hpp>
 #include <client/Replicated.hpp>
 #include <client/Scene.hpp>
 #include <limits>
@@ -17,10 +23,23 @@ namespace client {
 	static constexpr size_t PORTAL_SUCCESSOR_VIEW = 1;
 	// Whole-eye replies belong to the viewport lifetime, not its current body replica.
 	static constexpr size_t PORTAL_EYE_VIEW = 2;
+	// The local route that trails a crossing has a different capture owner from the
+	// successor readiness image and the displayed view.
+	static constexpr size_t PORTAL_TRAILING_VIEW = 4;
+	static constexpr size_t PORTAL_OBSERVATION_VIEW = 5;
+
+	std::optional<PortalReadinessReservation> PortalPrewarmReservation(const Options &settings) {
+		const uint32_t width = static_cast<uint32_t>(std::max(settings.Width, 1));
+		const uint32_t height = static_cast<uint32_t>(std::max(settings.Height, 1));
+		return PortalReadinessReservation::ForRgba16fEyes(
+			width, height, static_cast<uint64_t>(settings.PortalReadinessAssetUploadBytes)
+		);
+	}
 
 	void Client::DropPortalObservation() {
 		if (!PortalPrevious) return;
 		if (PortalDrawing == &PortalPrevious->View) PortalDrawing = nullptr;
+		if (PortalImages) PortalImages->RemoveViewport(PORTAL_OBSERVATION_VIEW);
 		const auto world = PortalPrevious->World;
 		PortalPrevious.reset();
 		DropPortalReplica(world);
@@ -44,6 +63,11 @@ namespace client {
 		PortalPrevious = std::make_unique<PortalObservation>();
 		auto &observation = *PortalPrevious;
 		observation.World = world;
+		// The hold redraws the source route for the adoption frame, so it applies only
+		// when the display last drew that world. When it already drew the arrived eye,
+		// holding would swap that frame for the source world's view: a frame with
+		// neither the body nor the pane's image.
+		observation.HoldDisplayEye = DisplayedWorld == Universe_->NameOf(world);
 		observation.View.Pipeline = PipelineSelected;
 		observation.Socket = std::move(Socket);
 		observation.Connection = std::move(Connection);
@@ -198,8 +222,9 @@ namespace client {
 			packet.Surfaces,
 			Universe_->AlphaOf(world),
 			std::chrono::steady_clock::now(),
-			Rendered,
-			Replicated
+			{.TopologyOwner = Rendered,
+			 .AdmittedDestination = Replicated,
+			 .PresentedDestination = ReportedJoin ? Replicated : world::WorldId{}}
 		);
 		// Keep the completed eye until every visible destination can supply its room.
 		if (!imagesReady) return false;
@@ -220,10 +245,12 @@ namespace client {
 		engine::world::WorldId inputWorld,
 		uint32_t width,
 		uint32_t height,
-		bool prepareNative
+		bool prepareNative,
+		bool honorDisplayHold
 	) {
 		using namespace engine;
 		ENGINE_PROFILE("client portal eye");
+		if (prepareNative) PortalEyeComposed = false;
 		bool retainedCharacter = false;
 		Universe_->Enter(inputWorld, [&](ecs::Store &store) {
 			render::SelectFirstPersonBody(store, view);
@@ -242,47 +269,80 @@ namespace client {
 				tracked = history && history->Started;
 			});
 		if (!tracked) return false;
+		if (prepareNative && honorDisplayHold && PortalPrevious && PortalPrevious->HoldDisplayEye) {
+			auto observedView = view;
+			observedView.Slot = PORTAL_OBSERVATION_VIEW;
+			if (PreparePortalWorldView(
+					PortalPrevious->View, PortalPrevious->World, observedView, width, height
+				)) {
+				view = std::move(observedView);
+				PortalPrevious->DrawnAsEye = false;
+				// Input ownership changes between frames. Keep the already drawn source
+				// route for this one display draw, then resolve the adopted eye normally.
+				PortalPrevious->HoldDisplayEye = false;
+				return true;
+			}
+		}
 		const auto now = std::chrono::steady_clock::now();
-		const auto selected = ResolveCameraPortalWorld(
+		const auto sourceVisibility = view.VisibilityFrame;
+		const auto sourceLens = view.Camera;
+		auto visibilityFrame = view.VisibilityCameraFrame();
+		auto selected = ResolveCameraPortalWorld(
 			*Universe_,
 			inputWorld,
 			inputWorld,
-			view.CameraFrame,
+			visibilityFrame,
 			view.Camera,
 			PortalImages.get(),
 			now,
 			Rendered
 		);
+		view.VisibilityFrame = visibilityFrame;
 		core::Name eyeWorld = Universe_->NameOf(selected);
 		if (selected.IsValid() && !Universe_->IsRemote(selected))
 			Universe_->Enter(selected, [&](ecs::Store &store) {
 				if (const auto *replica = store.Resource<world::Replica>(); replica && replica->Of.IsValid())
 					eyeWorld = replica->Of;
 			});
+		// With nothing yet to draw beyond the pane, hold the eye at the doorway on
+		// the side it came from. The source view then shows the pane awaiting its
+		// image, which names the state, instead of an empty frame.
+		if (prepareNative && selected != inputWorld && !PortalEyeDrawable(selected, eyeWorld) &&
+			HoldEyeAtDoorway(view, inputWorld, sourceVisibility)) {
+			view.Camera = sourceLens;
+			selected = inputWorld;
+			eyeWorld = Universe_->NameOf(inputWorld);
+			Universe_->Enter(inputWorld, [&](ecs::Store &store) {
+				if (const auto *replica = store.Resource<world::Replica>(); replica && replica->Of.IsValid())
+					eyeWorld = replica->Of;
+			});
+		}
+		if (prepareNative && selected == inputWorld)
+			PortalSourceEye = {inputWorld, view.VisibilityCameraFrame().Position};
 		if (prepareNative && PortalPrevious && selected.IsValid() && eyeWorld.IsValid() &&
 			eyeWorld != PortalPrevious->Authored) {
-			std::vector<scene::PortalSeam> visibleSeams;
+			std::vector<scene::PortalSeam> selectedSeams;
+			// A remote world whose topology has not arrived says nothing either way.
+			bool known = true;
 			if (Universe_->IsRemote(selected)) {
-				if (const auto *topology = PortalImages->Topology(selected, now))
-					visibleSeams = topology->Seams;
+				const auto *topology = PortalImages->Topology(selected, now);
+				known = topology != nullptr;
+				if (topology) selectedSeams = topology->Seams;
 			} else {
 				Universe_->Enter(selected, [&](ecs::Store &store) {
-					scene::GatherPortalSeams(store, visibleSeams);
+					scene::GatherPortalSeams(store, selectedSeams);
 				});
 			}
-			const bool visible = std::any_of(visibleSeams.begin(), visibleSeams.end(), [&](const auto &seam) {
-				if (!seam.Crosses || seam.DestinationWorld != PortalPrevious->Authored) return false;
-				render::PortalImageDemand demand;
-				return render::BuildPortalImageDemand(
-						   seam,
-						   core::Name("observed-world-visibility"),
-						   view,
-						   view.Slot,
-						   {.Width = width, .Height = height},
-						   demand
-					   ) == render::PortalDemandStatus::Ready;
-			});
-			if (!visible) DropPortalObservation();
+			// A camera that turns away from the pane it came through often turns back,
+			// and one that leads its subject crosses back before the subject does and
+			// before any approach replica is ready. Keep the one observation while
+			// this world still has a seam into it, so that view is drawn from this
+			// replica rather than from a remote image that cannot draw nested portals.
+			const bool linked =
+				std::any_of(selectedSeams.begin(), selectedSeams.end(), [&](const auto &seam) {
+					return seam.Crosses && seam.DestinationWorld == PortalPrevious->Authored;
+				});
+			if (known && !linked) DropPortalObservation();
 		}
 		if (!prepareNative) {
 			if (selected == inputWorld && !retainedCharacter) return false;
@@ -301,11 +361,16 @@ namespace client {
 			sourceView.Instances = Views.Instances();
 			sourceView.JointFrames = Views.JointFrames();
 			world::WorldId admitted;
+			world::WorldId presentedPrevious;
 			if (PortalPrevious &&
 				Universe_->Present(
 					PortalPrevious->World, ParticleDeltaSeconds, Universe_->AlphaOf(PortalPrevious->World)
-				) == world::WorldStatus::Ok)
+				) == world::WorldStatus::Ok) {
 				admitted = PortalPrevious->World;
+				presentedPrevious = PortalPrevious->World;
+			}
+			const auto activeDestination = AdmittedPortalCaptureWorld(core::Clock::Seconds());
+			if (activeDestination.IsValid() && activeDestination != Rendered) admitted = activeDestination;
 			nativeImagesReady = UpdatePortalImages(
 				*Universe_,
 				*PortalImages,
@@ -316,8 +381,9 @@ namespace client {
 				Surfaces,
 				Universe_->AlphaOf(inputWorld),
 				now,
-				Rendered,
-				admitted
+				{.TopologyOwner = Rendered,
+				 .AdmittedDestination = admitted,
+				 .PresentedDestination = presentedPrevious}
 			);
 			view.Portals = Portals;
 			view.Surfaces = Surfaces;
@@ -330,36 +396,53 @@ namespace client {
 					retainNativeEye = true;
 			}
 		}
-		const auto requestEye = [&](core::Name destination, render::View &eye, core::Name retain) {
-			eye.EyePlayer = view.EyePlayer;
-			size_t slot = 0;
-			if (PortalEyeDestinations[1] == destination)
-				slot = 1;
-			else if (PortalEyeDestinations[0] != destination) {
-				if (PortalEyeDestinations[0].IsValid() &&
-					(!PortalEyeDestinations[1].IsValid() || PortalEyeDestinations[0] == retain))
+		const auto requestEye =
+			[&](core::Name destination, render::View &eye, core::Name retain, bool primary) {
+				// A frame whose route did not resolve names no destination. Submitting
+				// it would take over an eye slot and remove its source, retiring the
+				// request in flight; under enough latency no reply could ever land.
+				if (!destination.IsValid()) return;
+				eye.EyePlayer = view.EyePlayer;
+				size_t slot = 0;
+				if (PortalEyeDestinations[1] == destination)
 					slot = 1;
-			}
-			PortalEyeDestinations[slot] = destination;
-			eye.Slot = PORTAL_EYE_VIEW + slot;
-			// Prefer the authenticated producer over a transient local body replica.
-			const auto producer = Universe_->Find(destination);
-			if (producer.IsValid()) (void)PortalImages->RequestTopology(Rendered, producer, now);
-			(void)PortalImages->SubmitEye(
-				Rendered,
-				{destination, producer},
-				eye,
-				{.Width = width, .Height = height},
-				now,
-				{inputWorld, view.Instances, view.JointFrames}
-			);
-		};
+				else if (PortalEyeDestinations[0] != destination) {
+					if (PortalEyeDestinations[0].IsValid() &&
+						(!PortalEyeDestinations[1].IsValid() || PortalEyeDestinations[0] == retain))
+						slot = 1;
+				}
+				PortalEyeDestinations[slot] = destination;
+				eye.Slot = PORTAL_EYE_VIEW + slot;
+				// The route already chose a local copy of this room when one is ready.
+				const auto producer =
+					primary && selected.IsValid() && !Universe_->IsRemote(selected) && destination == eyeWorld
+						? selected
+						: PortalEyeProducer(destination, core::Clock::Seconds());
+				if (producer.IsValid()) (void)PortalImages->RequestTopology(Rendered, producer, now);
+				const bool transferEye = primary && PortalNext && PortalNext->Crossed && PortalNext->Ready &&
+										 destination == PortalNext->ArrivedEyeWorld;
+				const size_t submitted = PortalImages->SubmitEye(
+					Rendered,
+					{destination, producer},
+					eye,
+					{.Width = width, .Height = height},
+					now,
+					{inputWorld, view.Instances, view.JointFrames, !view.EyePlayer},
+					transferEye
+				);
+				if (!Settings.CaptureSequence.empty() && transferEye) {
+					auto &probe = PortalNext->CapturedEyeProbe.emplace();
+					probe.Submitted = submitted;
+					probe.ProducerValid = producer.IsValid();
+				}
+			};
 		render::View remote;
 		remote.CameraFrame = view.CameraFrame;
+		remote.VisibilityFrame = view.VisibilityFrame;
 		remote.Camera = view.Camera;
 		remote.Target = view.Target;
 		if (selected != inputWorld || PortalNext || retainedCharacter || retainNativeEye)
-			requestEye(eyeWorld, remote, {});
+			requestEye(eyeWorld, remote, {}, true);
 
 		// Keep one neighbouring eye warm before its plane is crossed. Two slots
 		// bound residency independently of portal count and preserve the return view.
@@ -382,9 +465,11 @@ namespace client {
 		for (const auto &seam : seams) {
 			if (!seam.Crosses || !seam.DestinationWorld.IsValid() || seam.DestinationWorld == eyeWorld)
 				continue;
-			const float distance = scene::SeamDistance(seam, view.CameraFrame.Position);
-			// Limit speculative work to one aperture diameter around the mouth.
-			if (distance > 2 * std::max(seam.First.Magnitude(), seam.Second.Magnitude())) continue;
+			const float distance = scene::SeamDistance(seam, view.VisibilityCameraFrame().Position);
+			// Limit speculative work to one and a half aperture diameters around the
+			// mouth. A composed eye's layers are several times a plain image, and at
+			// a 300 ms round trip one diameter of lead let the camera cross first.
+			if (distance > 3 * std::max(seam.First.Magnitude(), seam.Second.Magnitude())) continue;
 			if (!nearest || distance < nearestDistance) {
 				nearest = &seam;
 				nearestDistance = distance;
@@ -392,16 +477,37 @@ namespace client {
 		}
 		bool neighbourReady = nearest == nullptr;
 		if (nearest) {
-			const auto producer = Universe_->Find(nearest->DestinationWorld);
+			const auto producer = PortalEyeProducer(nearest->DestinationWorld, core::Clock::Seconds());
 			if (producer.IsValid()) {
 				(void)PortalImages->RequestTopology(Rendered, producer, now);
 				const auto through = scene::SeamMapping(*nearest);
 				render::View neighbour;
 				neighbour.CameraFrame = through.Place(view.CameraFrame);
+				neighbour.VisibilityFrame = through.Place(view.VisibilityCameraFrame());
 				neighbour.Camera = view.Camera;
 				neighbour.Camera.NearPlane *= through.Scale;
 				neighbour.Camera.FarPlane *= through.Scale;
-				requestEye(nearest->DestinationWorld, neighbour, eyeWorld);
+				// This image is shown the moment the eye crosses, from just past the far
+				// pane. A camera still before the source pane maps behind the far pane,
+				// and eye requests carry no clip plane, so it would render the far pane's
+				// own portal surface across the whole view. Keep it on the room side.
+				// The camera crosses from its current side of the source pane to the
+				// other, so the room it enters lies along the mapped crossing direction.
+				const float sourceSide = scene::SeamOffset(*nearest, view.VisibilityCameraFrame().Position);
+				const auto roomSide = through.Rotate(nearest->Normal) * (sourceSide < 0 ? 1.0f : -1.0f);
+				const float roomLength = roomSide.Magnitude();
+				if (roomLength > 0) {
+					const auto facing = roomSide * (1.0f / roomLength);
+					const auto centre = through.Point(nearest->Centre);
+					const float clearance = 2 * neighbour.Camera.NearPlane;
+					const auto clear = [&](core::CFrame &frame) {
+						const float depth = (frame.Position - centre).Dot(facing);
+						if (depth < clearance) frame.Position = frame.Position + facing * (clearance - depth);
+					};
+					clear(neighbour.CameraFrame);
+					if (neighbour.VisibilityFrame) clear(*neighbour.VisibilityFrame);
+				}
+				requestEye(nearest->DestinationWorld, neighbour, eyeWorld, false);
 				if (!InitialPortalViewsReady) {
 					// Look input may already have started another refresh. Require a usable
 					// completed image with this body-hiding profile, not an idle request slot.
@@ -421,19 +527,101 @@ namespace client {
 			InitialPortalViewsReady = true;
 			ENGINE_INFO("portal entry: initial views ready");
 		}
+		if (PortalPrevious && selected == inputWorld && !Universe_->IsRemote(inputWorld)) {
+			std::optional<scene::SeamTransform> trailing;
+			Universe_->Enter(inputWorld, [&](ecs::Store &store) {
+				const auto body = PortalHandoffBody(store);
+				if (!body) return;
+				std::vector<scene::PortalSeam> paired;
+				scene::GatherPortalSeams(store, paired);
+				trailing = TrailingPortalEye(
+					paired, PortalPrevious->Authored, view.VisibilityCameraFrame().Position, *body
+				);
+			});
+			if (trailing) {
+				auto sourceView = view;
+				sourceView.Slot = PORTAL_OBSERVATION_VIEW;
+				sourceView.CameraFrame = trailing->Place(view.CameraFrame);
+				sourceView.VisibilityFrame = trailing->Place(view.VisibilityCameraFrame());
+				sourceView.Camera.NearPlane *= trailing->Scale;
+				sourceView.Camera.FarPlane *= trailing->Scale;
+				// The admitted body is visible in the destination capture through the old pane.
+				sourceView.EyePlayer.reset();
+				sourceView.EyeRig = 0;
+				if (PreparePortalWorldView(
+						PortalPrevious->View, PortalPrevious->World, sourceView, width, height
+					)) {
+					view = std::move(sourceView);
+					PortalPrevious->DrawnAsEye = false;
+					return true;
+				}
+			}
+		}
 		// A held subject can use the current native camera once its portal images are ready.
 		if (selected == inputWorld && (!retainedCharacter || nativeImagesReady) && !retainNativeEye)
 			return false;
-		if (prepareNative && PortalPrevious && selected == PortalPrevious->World &&
-			PreparePortalWorldView(PortalPrevious->View, PortalPrevious->World, view, width, height))
-			return true;
+		if (prepareNative && PortalPrevious && selected == PortalPrevious->World) {
+			auto observedView = view;
+			observedView.Slot = PORTAL_OBSERVATION_VIEW;
+			if (PreparePortalWorldView(
+					PortalPrevious->View, PortalPrevious->World, observedView, width, height
+				)) {
+				view = std::move(observedView);
+				PortalPrevious->DrawnAsEye = true;
+				return true;
+			}
+		}
+		if (prepareNative && PortalNext && selected == Replicated && selected != inputWorld &&
+			!Universe_->IsRemote(selected)) {
+			if (!PortalNext->LocalTrailingEye) {
+				PortalNext->LocalTrailingEye = std::make_unique<PortalWorldView>();
+				PortalNext->LocalTrailingEye->Pipeline = PipelineSelected;
+			}
+			auto trailingView = view;
+			trailingView.Slot = PORTAL_TRAILING_VIEW;
+			if (PreparePortalWorldView(
+					*PortalNext->LocalTrailingEye, selected, trailingView, width, height
+				)) {
+				view = std::move(trailingView);
+				return true;
+			}
+		}
 		if (prepareNative && PortalNext && PortalNext->World.IsValid() && !PortalNext->Refused &&
 			PortalNext->Failure.empty() && PortalNext->Connection && PortalNext->Connection->Admitted() &&
 			PortalNext->Connection->Joined() && PortalNext->Connection->Live() &&
-			!PortalNext->Connection->Rejected() && eyeWorld.Text() == PortalNext->Offer.Claim.Destination &&
+			!PortalNext->Connection->Rejected() && PortalNext->LivePresentationReady &&
+			eyeWorld.Text() == PortalNext->Offer.Claim.Destination &&
 			PreparePortalWorldView(PortalNext->View, PortalNext->World, view, width, height))
 			return true;
 		remote.EyeImage = selected.IsValid() ? PortalImages->Image(remote.Slot, remote.EyeImageKey) : 0;
+		// A third-person body is drawn here at its current pose; the image is older.
+		if (remote.EyeImage != 0 && !view.EyePlayer)
+			if (const auto composed = PortalImages->ComposeEyeBody(
+					Rendered, remote.Slot, eyeWorld, {inputWorld, view.Instances, view.JointFrames, true}
+				)) {
+				remote.EyeImage = composed;
+				PortalEyeComposed = prepareNative;
+			}
+		if (!Settings.CaptureSequence.empty() && PortalNext && inputWorld == PortalNext->World) {
+			PortalSuccessor::EyeProbe probe =
+				PortalNext->CapturedEyeProbe.value_or(PortalSuccessor::EyeProbe{});
+			probe.SelectedWorld = Universe_->NameOf(selected).Text();
+			probe.EyeWorld = eyeWorld.Text();
+			probe.ImageKey = remote.EyeImageKey.Text();
+			probe.Slot = remote.Slot;
+			probe.Image = remote.EyeImage;
+			probe.CurrentImage = PortalImages->CurrentImage(remote.Slot, remote.EyeImageKey);
+			if (const auto capture = PortalImages->Capture(remote.Slot, remote.EyeImageKey)) {
+				probe.CaptureImage = capture->Image;
+				probe.CaptureTick = capture->CaptureTick;
+			}
+			for (size_t slot = 0; slot < probe.ViewportImages.size(); ++slot) {
+				probe.ViewportImages[slot] =
+					PortalImages->Image(PORTAL_EYE_VIEW + slot, core::Name("viewport-eye"));
+				probe.ViewportDestinations[slot] = PortalEyeDestinations[slot].Text();
+			}
+			PortalNext->CapturedEyeProbe = std::move(probe);
+		}
 		// The held subject has no visual rows after source retirement. Its source
 		// eye producer still sees the destination body through the aperture.
 		if (selected == inputWorld && remote.EyeImage == 0) return false;
@@ -446,6 +634,8 @@ namespace client {
 		ENGINE_PROFILE("client portal drawable");
 		if (!PortalNext || !PortalNext->Camera || !PortalImages) return false;
 		auto &next = *PortalNext;
+		next.ProceedEyeSource = Universe_->NameOf(next.World).Text();
+		next.ProceedEyeSourceRemote = Universe_->IsRemote(next.World);
 		Universe_->Enter(next.World, [&](ecs::Store &store) {
 			(void)AimReplicaViewer(store, next.Camera->Frame, next.Camera->Lens);
 		});
@@ -466,15 +656,46 @@ namespace client {
 		// camera move prevents a remote child capture from ever completing.
 		(void)PortalImages->Pump(0, Universe_->AlphaOf(next.World), now);
 		if (PortalImages->Image(view.Slot, core::Name("viewport-eye")) != 0) return true;
-		(void)PortalImages->SubmitEye(
-			next.World, {core::Name(next.Offer.Claim.Destination), next.World}, view, dimensions, now
+		next.ProceedEyeSubmitted = PortalImages->SubmitEye(
+			next.World,
+			{core::Name(next.Offer.Claim.Destination), next.World},
+			view,
+			dimensions,
+			now,
+			{},
+			true
 		);
-		(void)PortalImages->Pump(0, Universe_->AlphaOf(next.World), now);
-		return PortalImages->Image(view.Slot, view.EyeImageKey) != 0;
+		const auto progress = PortalImages->Pump(0, Universe_->AlphaOf(next.World), now);
+		next.ProceedProducerRequests = progress.Requests;
+		next.ProceedProducerRendered = progress.Rendered;
+		next.ProceedProducerRefused = progress.Refused;
+		next.ProceedEyeImage = PortalImages->Image(view.Slot, view.EyeImageKey);
+		if (const auto capture = PortalImages->Capture(view.Slot, view.EyeImageKey))
+			next.ProceedEyeCapture = capture->Image;
+		return next.ProceedEyeImage != 0;
 	}
 
 	bool Client::ReceivePortalSession(const engine::game::PortalSessionMessage &message) {
 		using namespace engine;
+		if (message.Kind == game::PortalSessionKind::Approach) {
+			if (message.Port == 0 || PortalNext) return false;
+			if (PortalApproach && PortalApproach->Route.Seam == message.Seam &&
+				PortalApproach->Route.Destination == message.Destination) {
+				if (PortalApproach->Route.Identity == message.Identity &&
+					PortalApproach->Route.Port == message.Port) {
+					PortalApproach->Route = message;
+					PortalApproach->Deadline = core::Clock::Seconds() + 20.0;
+					return true;
+				}
+			}
+			DropPortalApproach();
+			PortalApproach = std::make_unique<PortalApproachReplica>();
+			PortalApproach->Route = message;
+			PortalApproach->Endpoint = ConnectedServer;
+			PortalApproach->Endpoint.Port = message.Port;
+			PortalApproach->Deadline = core::Clock::Seconds() + 20.0;
+			return true;
+		}
 		if (message.Kind == game::PortalSessionKind::Transfer) {
 			if (PortalNext) {
 				if (!PortalNext->ProceedSent && message.Attempt > PortalNext->Offer.Attempt &&
@@ -482,12 +703,93 @@ namespace client {
 					PortalNext->Following = message;
 				return true;
 			}
-			DropPortalObservation();
+			// A return keeps its retained view of the destination. The display may be
+			// drawing that world through the pane, and the successor's own connection
+			// is not drawable for many frames. Adoption replaces the observation.
+			if (!PortalPrevious || PortalPrevious->Authored.Text() != message.Claim.Destination)
+				DropPortalObservation();
 			PortalNext = std::make_unique<PortalSuccessor>();
-			PortalNext->Offer = message;
-			PortalNext->Endpoint = ConnectedServer;
-			PortalNext->Endpoint.Port = message.Port;
-			PortalNext->Deadline = core::Clock::Seconds() + 15;
+			auto &next = *PortalNext;
+			next.Offer = message;
+			next.Endpoint = ConnectedServer;
+			next.Endpoint.Port = message.Port;
+			next.Deadline = core::Clock::Seconds() + 15;
+			next.View.Pipeline = PipelineSelected;
+			next.Readiness = std::make_shared<PortalReadinessController>(PortalReadinessSettings{
+				.EnterDistance = 16,
+				.ExitDistance = 20,
+				.CapacityBytes = static_cast<uint64_t>(Settings.PortalReadinessBudgetBytes)
+			});
+			if (PortalApproach && PortalApproach->World.IsValid() && PortalApproach->Connection &&
+				PortalApproach->Content && PortalApproachMatchesTransfer(PortalApproach->Route, message)) {
+				// The advisory route proved this endpoint before a receipt existed.
+				// Rebinding its callback is enough to turn the same replica into the
+				// authoritative successor without reopening a socket or reloading content.
+				auto warmed = std::move(PortalApproach);
+				next.World = warmed->World;
+				next.Socket = std::move(warmed->Socket);
+				next.Connection = std::move(warmed->Connection);
+				next.Content = std::move(warmed->Content);
+				next.ReadinessDistance = warmed->LastDistance;
+				next.HasReadinessDistance = warmed->HasDistance;
+				if (const auto reservation = PortalPrewarmReservation(Settings))
+					(void)next.Readiness->Reserve(*reservation);
+				next.Presentation = std::make_unique<world::PresentationStream>();
+				next.PresentationRoutes.reset();
+				next.PresentationAnnounced = false;
+				const auto destination = next.World;
+				next.Connection->OnUserMessage([this, destination](std::span<const std::byte> bytes) {
+					if (!PortalNext || PortalNext->World != destination) return;
+					auto &pending = *PortalNext;
+					if (world::PresentationStream::Recognizes(bytes)) {
+						if (pending.Presentation->Receive(bytes) ==
+							world::PresentationStreamReceive::Refused) {
+							pending.Failure = "destination presentation stream refused";
+							return;
+						}
+						for (auto &frame : pending.Presentation->Take()) {
+							if (frame.Kind != world::PresentationStreamKind::Routes) {
+								pending.Failure = "destination sent unsolicited presentation data";
+								return;
+							}
+							pending.PresentationRoutes = std::move(frame.Directory);
+						}
+						return;
+					}
+					game::ContentDirectory directory;
+					if (game::DecodeContentDirectory(bytes, directory)) {
+						AdoptContentDirectory(*pending.Content, directory);
+						return;
+					}
+					if (pending.Content->Relay && pending.Content->Relay->Receive(bytes)) return;
+					game::PortalSessionMessage reply;
+					if (!game::DecodePortalSession(bytes, reply) || reply.Attempt != pending.Offer.Attempt)
+						return;
+					if (reply.Kind == game::PortalSessionKind::Refused) {
+						if (pending.Crossed) {
+							pending.ResumeSent = false;
+							pending.Ready = false;
+							pending.CommitSent = false;
+							pending.AdmissionRetryAt = core::Clock::Seconds() + .25;
+							return;
+						}
+						pending.Failure = reply.Diagnostic;
+						return;
+					}
+					if (reply.World != pending.Offer.Claim.Destination) return;
+					if (reply.Kind == game::PortalSessionKind::Ready && pending.ResumeSent) {
+						if (pending.Player != ecs::NULL_ENTITY && pending.Player != reply.Player) return;
+						pending.Player = reply.Player;
+						pending.DestinationFence = reply.Fence;
+						pending.Ready = true;
+					}
+					if (reply.Kind == game::PortalSessionKind::Committed && pending.CommitSent &&
+						reply.Player == pending.Player)
+						pending.Committed = true;
+				});
+			} else {
+				DropPortalApproach();
+			}
 			return true;
 		}
 		if (!PortalNext || message.Attempt != PortalNext->Offer.Attempt) return false;
@@ -502,6 +804,8 @@ namespace client {
 			return true;
 		}
 		if (message.Kind == game::PortalSessionKind::Crossed && message.Claim == PortalNext->Offer.Claim) {
+			if (!message.Fence) return false;
+			PortalNext->SourceFence = message.Fence;
 			PortalNext->Crossed = true;
 			return true;
 		}
@@ -511,6 +815,188 @@ namespace client {
 			return true;
 		}
 		return false;
+	}
+
+	void Client::DropPortalApproach() {
+		if (!PortalApproach) return;
+		const auto world = PortalApproach->World;
+		PortalApproach.reset();
+		DropPortalReplica(world);
+	}
+
+	engine::world::WorldId Client::AdmittedPortalCaptureWorld(double nowSeconds) const {
+		PortalCaptureCandidate approach;
+		if (PortalApproach && PortalApproach->Connection) {
+			const auto &connection = *PortalApproach->Connection;
+			approach = {
+				PortalApproach->World,
+				connection.Admitted(),
+				connection.Joined(),
+				connection.Live(),
+				connection.Rejected(),
+				nowSeconds >= PortalApproach->Deadline
+			};
+		}
+		PortalCaptureCandidate successor;
+		if (PortalNext && PortalNext->Connection) {
+			const auto &connection = *PortalNext->Connection;
+			successor = {
+				PortalNext->World,
+				connection.Admitted(),
+				connection.Joined(),
+				connection.Live(),
+				connection.Rejected() || PortalNext->Refused,
+				!PortalNext->Failure.empty() || nowSeconds >= PortalNext->Deadline
+			};
+		}
+		return PortalCaptureDestination(Rendered, approach, successor);
+	}
+
+	bool Client::PortalEyeDrawable(engine::world::WorldId selected, engine::core::Name eyeWorld) const {
+		if (!selected.IsValid()) return false;
+		// The route resolves only ready local copies, and they draw any camera.
+		if (!Universe_->IsRemote(selected)) return true;
+		for (size_t slot = 0; slot < std::size(PortalEyeDestinations); ++slot)
+			if (PortalEyeDestinations[slot] == eyeWorld &&
+				PortalImages->Image(PORTAL_EYE_VIEW + slot, engine::core::Name("viewport-eye")) != 0)
+				return true;
+		return false;
+	}
+
+	bool Client::HoldEyeAtDoorway(
+		engine::render::View &view,
+		engine::world::WorldId inputWorld,
+		const std::optional<engine::core::CFrame> &sourceVisibility
+	) {
+		using namespace engine;
+		if (!PortalSourceEye || PortalSourceEye->World != inputWorld) return false;
+		const auto at = sourceVisibility.value_or(view.CameraFrame).Position;
+		std::vector<scene::PortalSeam> seams;
+		Universe_->Enter(inputWorld, [&](ecs::Store &store) { scene::GatherPortalSeams(store, seams); });
+		// The pane the eye went through: its side changed since the last source eye.
+		const scene::PortalSeam *crossed = nullptr;
+		float nearest = 0;
+		for (const auto &seam : seams) {
+			if (!seam.Crosses) continue;
+			const float before = scene::SeamOffset(seam, PortalSourceEye->Position);
+			const float after = scene::SeamOffset(seam, at);
+			if ((before < 0) == (after < 0)) continue;
+			const float distance = scene::SeamDistance(seam, at);
+			if (!crossed || distance < nearest) {
+				crossed = &seam;
+				nearest = distance;
+			}
+		}
+		if (!crossed) return false;
+		// Two near planes short of the pane, on the side the eye came from.
+		const float before = scene::SeamOffset(*crossed, PortalSourceEye->Position);
+		const float target = (before < 0 ? -2.0f : 2.0f) * view.Camera.NearPlane;
+		const auto shift = crossed->Normal * (target - scene::SeamOffset(*crossed, at));
+		view.VisibilityFrame = sourceVisibility;
+		view.CameraFrame.Position = view.CameraFrame.Position + shift;
+		if (view.VisibilityFrame) view.VisibilityFrame->Position = view.VisibilityFrame->Position + shift;
+		return true;
+	}
+
+	engine::world::WorldId Client::PortalEyeProducer(engine::core::Name destination, double nowSeconds) {
+		// The same rule `UpdatePortalImages` applies to pane images. An admitted
+		// replica answers within a frame and composes the current body, where the
+		// remote endpoint's reply is a round trip old when it lands.
+		const auto admitted = AdmittedPortalCaptureWorld(nowSeconds);
+		if (admitted.IsValid() && admitted != Rendered) {
+			std::vector<WorldIdentity> worlds;
+			SurveyWorlds(*Universe_, worlds);
+			const auto found = std::find_if(worlds.begin(), worlds.end(), [&](const auto &candidate) {
+				return candidate.Id == admitted && candidate.IsReplica && candidate.Ready &&
+					   candidate.Authored == destination;
+			});
+			if (found != worlds.end()) return admitted;
+		}
+		return Universe_->Find(destination);
+	}
+
+	void Client::PumpPortalApproach(double nowSeconds) {
+		using namespace engine;
+		if (!PortalApproach) return;
+		auto &approach = *PortalApproach;
+		if (nowSeconds >= approach.Deadline) {
+			DropPortalApproach();
+			return;
+		}
+		float distance = std::numeric_limits<float>::infinity();
+		Universe_->Enter(Replicated, [&](ecs::Store &store) {
+			const auto *player = store.Resource<scene::LocalPlayer>();
+			const auto character = player ? scene::CharacterOf(store, player->Instance) : ecs::NULL_ENTITY;
+			const auto *placement = store.Get<scene::Transform>(character);
+			if (placement) distance = (placement->Frame.Position - approach.Route.Through.Origin).Magnitude();
+		});
+		const float limit = approach.Active ? 20.0f : 16.0f;
+		if (distance > limit) {
+			DropPortalApproach();
+			return;
+		}
+		approach.LastDistance = distance;
+		approach.HasDistance = true;
+		approach.Active = true;
+		if (!approach.World.IsValid()) {
+			world::WorldSettings settings;
+			settings.Name = core::Name("client.portal.approach." + std::to_string(NextPortalReplica++));
+			settings.TickRate = Settings.TickRate;
+			approach.World = Universe_->Create(settings);
+			if (!approach.World.IsValid()) {
+				DropPortalApproach();
+				return;
+			}
+			Universe_->Enter(approach.World, [&](ecs::Store &store, ecs::Scheduler &systems) {
+				store.SetResource(
+					world::Replica{.Active = true, .Of = core::Name(approach.Route.Destination), .View = {}}
+				);
+				store.SetAdoptOnly(true);
+				replication::InterpolationSettings interpolation;
+				interpolation.TickRate = Settings.TickRate;
+				if (auto runtime = BuildReplicatedWorld(store, systems, interpolation))
+					Runtimes.emplace_back(approach.World, std::move(runtime));
+			});
+			approach.Socket = OpenSocket(1);
+			if (!approach.Socket || !ClientIdentity) {
+				DropPortalApproach();
+				return;
+			}
+			replication::ConnectorSettings connecting;
+			connecting.Prediction.MaximumPending = PortalInputHistory::CAPACITY;
+			connecting.ClientIdentity = &*ClientIdentity;
+			connecting.ServerIdentity = approach.Route.Identity;
+			connecting.Quic.BytesPerTick = connecting.Session.Link.BytesPerTick;
+			approach.Connection = std::make_unique<replication::Connector>(
+				*approach.Socket, approach.Endpoint, nowSeconds, connecting
+			);
+			approach.Content = std::make_unique<ContentSession>();
+			approach.Content->RelayName = approach.Endpoint.Text();
+			approach.Content->Relay = std::make_unique<ContentLink>(
+				[connection = approach.Connection.get()](std::span<const std::byte> bytes) {
+					return connection->SendUser(bytes, core::Clock::Seconds());
+				}
+			);
+			if (!Settings.ContentPublisherKey.empty()) (void)BuildContentClient(*approach.Content);
+			const auto world = approach.World;
+			approach.Connection->OnUserMessage([this, world](std::span<const std::byte> bytes) {
+				if (!PortalApproach || PortalApproach->World != world) return;
+				game::ContentDirectory directory;
+				if (game::DecodeContentDirectory(bytes, directory)) {
+					AdoptContentDirectory(*PortalApproach->Content, directory);
+					return;
+				}
+				if (PortalApproach->Content->Relay) (void)PortalApproach->Content->Relay->Receive(bytes);
+			});
+		}
+		Universe_->Enter(approach.World, [&](ecs::Store &store) {
+			approach.Connection->Poll(store, nowSeconds);
+			RecordReplicatedTick(store, approach.Connection->Applied());
+		});
+		approach.Connection->Advance(nowSeconds);
+		// A connector may replace a failed wire during its initial handshake.
+		// Its deadline owns that provisional period; only an exhausted exchange is terminal here.
+		if (approach.Connection->Rejected()) DropPortalApproach();
 	}
 
 	void Client::DropPortalReplica(engine::world::WorldId world) {
@@ -539,6 +1025,8 @@ namespace client {
 		if (!PortalNext) return;
 		ENGINE_PROFILE("client portal successor");
 		auto &next = *PortalNext;
+		next.PromotionBlocker = nullptr;
+		next.ProceedBlocker = nullptr;
 		if (next.Refused) {
 			Universe_->Enter(Replicated, [](ecs::Store &store) {
 				scene::ReleaseCameraCharacterHold(store);
@@ -547,7 +1035,10 @@ namespace client {
 			ENGINE_WARN("portal transfer refused: {}", next.Failure);
 			const auto world = next.World;
 			auto following = std::move(next.Following);
-			if (PortalDrawing == &PortalNext->View) PortalDrawing = nullptr;
+			if (PortalDrawing == &PortalNext->View ||
+				(PortalNext->LocalTrailingEye && PortalDrawing == PortalNext->LocalTrailingEye.get()))
+				PortalDrawing = nullptr;
+			PortalImages->RemoveViewport(PORTAL_TRAILING_VIEW);
 			PortalNext.reset();
 			DropPortalReplica(world);
 			if (following) (void)ReceivePortalSession(*following);
@@ -561,14 +1052,21 @@ namespace client {
 				next.Content.reset();
 				next.Connection.reset();
 				next.Socket.reset();
+				if (next.Readiness) next.Readiness->Release();
+				next.SuppressRetainedCapture = false;
 				const auto previous = next.World;
 				next.World = {};
+				PortalImages->RemoveViewport(PORTAL_TRAILING_VIEW);
 				DropPortalReplica(previous);
 				next.ResumeSent = false;
 				next.Ready = false;
 				next.CommitSent = false;
 				next.Committed = false;
 				next.DrawingArrivedPlayer = false;
+				next.CapturedReadiness.reset();
+				next.CapturedReadinessDecision.reset();
+				next.EmptyContentDemandRevision.reset();
+				next.UndeliverableAssetNames = 0;
 				next.Failure.clear();
 				next.ReconnectAt = nowSeconds + .5;
 				return;
@@ -635,7 +1133,7 @@ namespace client {
 				auto runtime = BuildReplicatedWorld(store, systems, interpolation);
 				if (runtime) Runtimes.emplace_back(next.World, std::move(runtime));
 			});
-			next.Socket = net::MakeUdpTransport(0);
+			next.Socket = OpenSocket(2);
 			if (!next.Socket || !ClientIdentity) {
 				next.Failure = "destination transport could not be opened";
 				return;
@@ -648,6 +1146,12 @@ namespace client {
 			next.Connection =
 				std::make_unique<replication::Connector>(*next.Socket, next.Endpoint, nowSeconds, connecting);
 			next.Content = std::make_unique<ContentSession>();
+			if (next.Readiness) {
+				// Reserve the destination and return images plus content/upload headroom
+				// before work begins. Failure remains explicitly image-only.
+				if (const auto reservation = PortalPrewarmReservation(Settings))
+					(void)next.Readiness->Reserve(*reservation);
+			}
 			next.Content->RelayName = next.Endpoint.Text();
 			next.Content->Relay =
 				std::make_unique<ContentLink>([connection =
@@ -706,6 +1210,7 @@ namespace client {
 				if (reply.Kind == game::PortalSessionKind::Ready && pending.ResumeSent) {
 					if (pending.Player != ecs::NULL_ENTITY && pending.Player != reply.Player) return;
 					pending.Player = reply.Player;
+					pending.DestinationFence = reply.Fence;
 					pending.Ready = true;
 				}
 				if (reply.Kind == game::PortalSessionKind::Committed && pending.CommitSent &&
@@ -738,8 +1243,21 @@ namespace client {
 			return;
 		}
 		if (!next.ProceedSent) {
-			if (!next.Connection->Admitted() || !next.Connection->Joined() || !next.Camera) return;
-			if (!presentationReady || !PortalSuccessorDrawable()) return;
+			if (!next.Connection->Admitted() || !next.Connection->Joined() || !next.Camera) {
+				next.ProceedBlocker = "destination-connection-or-camera";
+				return;
+			}
+			if (!presentationReady) {
+				next.ProceedBlocker = "presentation";
+				return;
+			}
+			if (!PortalSuccessorDrawable()) {
+				next.ProceedBlocker = "successor-eye-image";
+				return;
+			}
+			// Proceed starts authority preparation. It is not permission to replace
+			// the retained image, which remains selected until the destination sends
+			// a sealed, observed readiness fence in its later Ready response.
 			game::PortalSessionMessage proceed;
 			proceed.Kind = game::PortalSessionKind::Proceed;
 			proceed.Attempt = next.Offer.Attempt;
@@ -758,6 +1276,121 @@ namespace client {
 			return;
 		}
 		if (!next.Ready || !next.Connection->Joined() || !presentationReady) return;
+		if (!next.Readiness) return;
+		PortalReadinessEvidence evidence;
+		evidence.Distance =
+			next.HasReadinessDistance ? next.ReadinessDistance : std::numeric_limits<float>::infinity();
+		Universe_->Enter(Replicated, [&](ecs::Store &store) {
+			const auto *player = store.Resource<scene::LocalPlayer>();
+			const auto character = player ? scene::CharacterOf(store, player->Instance) : ecs::NULL_ENTITY;
+			const auto *placement = store.Get<scene::Transform>(character);
+			if (placement) {
+				next.ReadinessDistance = (placement->Frame.Position - next.Offer.Through.Origin).Magnitude();
+				next.HasReadinessDistance = true;
+				evidence.Distance = next.ReadinessDistance;
+			}
+		});
+		// The range gates prewarm, not adoption. A body the source says has crossed
+		// belongs to this destination however far it walked while the handoff
+		// finished, and under latency it can walk past the exit distance first.
+		if (next.Crossed) evidence.Distance = 0;
+		evidence.RetainedCapture =
+			PortalImages->Image(PORTAL_SUCCESSOR_VIEW, core::Name("viewport-eye")) != 0;
+		evidence.RetainedCaptureFresh = evidence.RetainedCapture;
+		// Both RGBA16F eyes and bounded content/upload headroom must fit before
+		// destination geometry can replace the retained image.
+		if (const auto reservation = PortalPrewarmReservation(Settings))
+			evidence.CapacityReserved = next.Readiness->Reserve(*reservation);
+		if (next.Content) {
+			// Content delivery retains deferred work, so a clear pair of queues is
+			// the only point this replica may promote its already scanned far region.
+			evidence.AssetsResident =
+				next.Content->Requested && next.Content->Pending.empty() && next.Content->Issued.empty();
+			const auto scanned = next.Content->ScannedAtRevision.find(next.World.Index);
+			if (scanned != next.Content->ScannedAtRevision.end()) {
+				evidence.RequiredAssetRevision = scanned->second;
+				evidence.ResidentAssetRevision = evidence.AssetsResident ? scanned->second : 0;
+			}
+			if (!next.Content->Client) {
+				// A game with no content origin can still have an asset-free successor.
+				// Prove that from the replicated rows, and repeat only when their asset
+				// references change. A named asset without a client remains image-only.
+				Universe_->Enter(next.World, [&](ecs::Store &store) {
+					const uint64_t revision = WantedContentRevision(store);
+					if (next.EmptyContentDemandRevision != revision) {
+						std::vector<core::Name> wanted;
+						CollectWantedContent(store, wanted);
+						next.UndeliverableAssetNames = wanted.size();
+						next.EmptyContentDemandRevision = revision;
+					}
+					(void)ApplyAssetlessReadiness(evidence, revision, next.UndeliverableAssetNames);
+				});
+			}
+		}
+		Universe_->Enter(Replicated, [&](ecs::Store &store) {
+			const auto *player = store.Resource<scene::LocalPlayer>();
+			if (!player) return;
+			const auto receipt = script::PortalTransferOfPlayer(store, player->Instance);
+			if (!receipt || receipt->Stage < script::PortalTransferStage::Prepared) return;
+			const auto &fence = receipt->Fence;
+			if (fence.TopologyRevision == 0 || fence.BaselineId == 0 || fence.H.DestinationTick == 0) return;
+			evidence.RequiredBaseline = fence.BaselineId;
+			evidence.RequiredBaselineHash = fence.BaselineHash;
+			// Connector exposes its completed tick, but not the fenced baseline
+			// identity, hash, or topology revision. Do not manufacture evidence
+			// from that tick: a missing destination receipt remains image-only.
+			evidence.RequiredTopologyRevision = fence.TopologyRevision;
+			evidence.RequiredAuthorityEpoch = fence.AuthorityEpoch;
+			evidence.RequiredPrepareRevision = fence.PrepareRevision;
+			evidence.RequiredClockDomain = fence.H.Domain;
+			evidence.RequiredSourceTick = fence.H.SourceTick;
+			evidence.RequiredDestinationTick = fence.H.DestinationTick;
+			evidence.RequiredPoseBegin = fence.H.DestinationTick;
+			evidence.RequiredPoseEnd = fence.H.DestinationTick;
+		});
+		if (next.SourceFence) {
+			const auto &fence = *next.SourceFence;
+			evidence.RequiredBaseline = fence.BaselineId;
+			evidence.RequiredBaselineHash = fence.BaselineHash;
+			evidence.RequiredTopologyRevision = fence.TopologyRevision;
+			evidence.RequiredAuthorityEpoch = fence.AuthorityEpoch;
+			evidence.RequiredPrepareRevision = fence.PrepareRevision;
+			evidence.RequiredClockDomain = fence.H.Domain;
+			evidence.RequiredSourceTick = fence.H.SourceTick;
+			evidence.RequiredDestinationTick = fence.H.DestinationTick;
+			evidence.RequiredPoseBegin = fence.H.DestinationTick;
+			evidence.RequiredPoseEnd = fence.H.DestinationTick;
+		}
+		std::optional<script::PortalTransferFence> localFence;
+		Universe_->Enter(next.World, [&](ecs::Store &store) {
+			localFence = script::PortalTransferDestinationFence(store, next.Offer.Claim.Transfer);
+		});
+		// Crossed and Ready arrive on authenticated source and destination channels.
+		// If replication also carries the receipt, it must agree with both hosts.
+		if (next.SourceFence && next.DestinationFence && *next.SourceFence == *next.DestinationFence &&
+			(!localFence || *localFence == *next.DestinationFence)) {
+			const auto &observed = *next.DestinationFence;
+			evidence.ReplicaBaseline = observed.BaselineId;
+			evidence.ReplicaBaselineHash = observed.BaselineHash;
+			evidence.ReplicaTopologyRevision = observed.TopologyRevision;
+			evidence.ReplicaAuthorityEpoch = observed.AuthorityEpoch;
+			evidence.ReplicaPrepareRevision = observed.PrepareRevision;
+			evidence.ReplicaClockDomain = observed.H.Domain;
+			evidence.ReplicaSourceTick = observed.H.SourceTick;
+			evidence.ReplicaDestinationTick = observed.H.DestinationTick;
+		}
+		// The local connector's applied watermark proves the destination body pose
+		// reached the named baseline after its receipt was replicated.
+		evidence.ReplicaPoseBegin = 0;
+		evidence.ReplicaPoseEnd = next.Connection->Applied();
+		const PortalReadiness readiness = next.Readiness->Evaluate(evidence);
+		if (!Settings.CaptureSequence.empty()) {
+			next.CapturedReadiness = std::make_shared<PortalReadinessEvidence>(evidence);
+			next.CapturedReadinessDecision = std::make_shared<PortalReadiness>(readiness);
+		}
+		next.SuppressRetainedCapture = readiness.SuppressRetainedCapture;
+		next.LivePresentationReady = readiness.Live;
+		if (!next.LivePresentationReady) return;
 		bool cameraReady = false;
 		size_t entities = 0;
 		Universe_->Present(next.World, 0, 0);
@@ -772,23 +1405,48 @@ namespace client {
 		});
 		if (!cameraReady) return;
 		if (!next.DrawingArrivedPlayer) {
-			PortalImages->RemoveViewport(PORTAL_SUCCESSOR_VIEW);
+			// The retained eye kept the destination visible while the local replica
+			// caught up. Retire it before the matching live body is submitted.
+			if (next.SuppressRetainedCapture) PortalImages->RemoveViewport(PORTAL_SUCCESSOR_VIEW);
 			next.DrawingArrivedPlayer = true;
 		}
-		if (!PortalSuccessorDrawable()) return;
 		// The body can arrive while a trailing or cleared eye remains in another world.
 		// Keep the old presentation until that eye's persistent viewport has an image.
 		render::View arrivedEye;
+		// The gate prepares a staged local packet while slot zero keeps presenting the
+		// source route. Its portal captures belong to the successor lifetime.
+		arrivedEye.Slot = PORTAL_TRAILING_VIEW;
 		arrivedEye.CameraFrame = next.Camera->Frame;
 		arrivedEye.Camera = next.Camera->Lens;
-		if (PreparePortalEye(
-				arrivedEye,
-				next.World,
-				static_cast<uint32_t>(std::max(Settings.Width, 1)),
-				static_cast<uint32_t>(std::max(Settings.Height, 1))
-			) &&
-			arrivedEye.EyeImage == 0)
+		const bool arrivedEyePrepared = PreparePortalEye(
+			arrivedEye,
+			next.World,
+			static_cast<uint32_t>(std::max(Settings.Width, 1)),
+			static_cast<uint32_t>(std::max(Settings.Height, 1)),
+			true,
+			false
+		);
+		next.ArrivedEyeWorld = arrivedEye.WorldName;
+		// PreparePortalWorldView assigns PortalDrawing only after it has presented the
+		// local scene, collected its rows, and submitted its interface. A retained source
+		// presentation is never proof that the arrived eye is locally drawable.
+		const bool arrivedEyeWasAlreadyBound =
+			(PortalDrawing == &next.View && arrivedEye.WorldName == Universe_->NameOf(next.World)) ||
+			(next.LocalTrailingEye && PortalDrawing == next.LocalTrailingEye.get() &&
+			 arrivedEye.WorldName == Universe_->NameOf(Replicated));
+		if (!Settings.CaptureSequence.empty()) {
+			if (!next.CapturedEyeProbe) next.CapturedEyeProbe.emplace();
+			auto &probe = *next.CapturedEyeProbe;
+			probe.Prepared = arrivedEyePrepared;
+			probe.BoundWorld = arrivedEye.WorldName.Text();
+			probe.Slot = arrivedEye.Slot;
+			probe.ImageKey = arrivedEye.EyeImageKey.Text();
+			probe.Image = arrivedEye.EyeImage;
+		}
+		if (PortalArrivedEyeBlocked(arrivedEyePrepared, arrivedEyeWasAlreadyBound, arrivedEye.EyeImage)) {
+			next.PromotionBlocker = "arrived-eye-image";
 			return;
+		}
 		if (!next.CommitSent) {
 			game::PortalSessionMessage commit;
 			commit.Kind = game::PortalSessionKind::Commit;
@@ -815,6 +1473,7 @@ namespace client {
 		std::optional<PortalPredictionContinuation> prediction;
 		std::optional<uint64_t> inputEpoch;
 		bool adoptedPrediction = false;
+		bool destinationPredictionReady = false;
 		uint64_t localInputEpoch = 0;
 		Universe_->Enter(previous, [&](ecs::Store &store) {
 			prediction = CapturePortalPrediction(store, next.Offer.Claim, Universe_->AlphaOf(previous));
@@ -826,21 +1485,47 @@ namespace client {
 		}
 		Universe_->Enter(next.World, [&](ecs::Store &store) {
 			localInputEpoch = store.Time().Tick;
-			if (prediction)
+			if (prediction) {
 				adoptedPrediction =
 					AdoptPortalPrediction(store, next.Player, *prediction, Universe_->AlphaOf(next.World));
+				destinationPredictionReady = adoptedPrediction;
+			} else {
+				// A destination snapshot can precede the source Motion message. Seed its
+				// local body before switching input ownership, as the primary poll would
+				// otherwise do only on the following frame.
+				destinationPredictionReady = SeedPortalAdoptionPrediction(
+					store,
+					next.Player,
+					next.Connection->Applied(),
+					next.Connection->Unconfirmed(),
+					next.Offer.Claim.DestinationIncarnation
+				);
+			}
+			if (destinationPredictionReady)
+				if (const auto *active = store.Resource<scene::ActiveCamera>())
+					store.Remove<scene::CameraPortalView>(active->Entity);
 		});
+		if (!destinationPredictionReady) {
+			next.PromotionBlocker = "destination-prediction";
+			return;
+		}
 		if (adoptedPrediction) {
 			next.Connection->UsePoseAcknowledgements();
 			if (!next.Connection->ContinueInputs(prediction->Inputs, prediction->CoveredThrough)) {
 				next.Failure = "destination input history could not continue";
 				return;
 			}
-		}
+		} else
+			next.Connection->UsePoseAcknowledgements();
 		RetainPortalObservation(previous);
 		Discovery.reset();
 		Socket = std::move(next.Socket);
 		Connection = std::move(next.Connection);
+		// The successor callback only accepts its pending attempt. Once this socket is
+		// primary it must receive the next portal offer through the normal server path.
+		Connection->OnUserMessage([this](std::span<const std::byte> message) {
+			ReceiveServerMessage(message);
+		});
 		PlayPresentation = std::move(next.Presentation);
 		PortalImages->RestartRequests();
 		PlayDirectorySession = PlayDirectoryRevision = 0;
@@ -856,9 +1541,12 @@ namespace client {
 		Views.Track(Replicated, Universe_->NameOf(Replicated), entities * 2);
 		ContentState = std::move(next.Content);
 		ENGINE_INFO("portal session adopted {} as player {}", next.Offer.Claim.Destination, next.Player.Id);
-		if (PortalDrawing == &PortalNext->View) PortalDrawing = nullptr;
+		if (PortalDrawing == &PortalNext->View ||
+			(PortalNext->LocalTrailingEye && PortalDrawing == PortalNext->LocalTrailingEye.get()))
+			PortalDrawing = nullptr;
 		PortalNext.reset();
 		PortalImages->RemoveViewport(PORTAL_SUCCESSOR_VIEW);
+		PortalImages->RemoveViewport(PORTAL_TRAILING_VIEW);
 		VisualResourcesChanged = true;
 		PresentationInvalidated = true;
 	}

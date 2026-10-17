@@ -39,61 +39,24 @@ The milestone headings below are development labels. Not in line with project ve
 
 ### v0.25
 
-- [_] review over v0.24 and consolidate, improve, tweak, etc.
-- [_] improve atomic-game-engine build file usage sizes. Takes over 120GB right now, needs to be reduced. Reduce hash for each mono repository to a reasonable size for each, cleanup old files, etc.
-- [_] simplify down RUNNING.md, should be minimal, shows each available `just` job, how to build each, etc. Should not contain lots of descriptive information about how those systems work, just short descriptions and what they are aimed at to do.
-- [_] USER WORK: cleanup documents in `docs/`, maybe a `docs/systems` folder would be more suited for things like `RENDER-HOOKS.md`, `DEMOS.md`, `ECS_COMPONENTS.md`, `schema.toml` and `schema-data.toml`.
-- [_] Prune `PLAN-procedural-planets.md`, `PORTAL-HANDOFF.md`, `RENDER-POST-HOOK-REFACTOR.md`, `RENDER-REFACTOR-TASKS.md`, `RENDER-REFACTOR.md` and `TORNADOSIM.md`.
-- [_] Prune old files in `docs/future-work/` as well. e.g. merge `FUTURE_COMPONENTS.md` components into relevent document files in `docs/future-work/`, then leave the remaining orphaned ones in `FUTURE_COMPONENTS.md`.
-- [_] improve `schema.toml` and `schema-data.toml` so its better laid out (schema is the general layout, schema-data is the actual useful information that we would grep and search specific classes, components and functions in). Like Roblox Studio Class API Reference.
-- [_] consolidate/improve `CONTRIBUTING.md`, `SECURITY.md`, `docs/THIRD_PARTY_NOTICES.md`, `CODE_ARCH.md`, `CODE_DOCUMENTING.md`, `CODE_FORMAT.md` and `CODE_QUALITY.md`, with small sentences at the start of the file describing what they contain in succinct detail.
-- [_] cleanup documentation and layout
-- [_] review and cleanup render pipeline (plan first)
-- [_] plan a consolidation for the MCP-ADDITIONS.md systems. Super big, needs to ensure its properly implemented and looks good. Maybe even isolating code to a separate folder and then using hooks to ingest (and make those hooks hot loadable and unloadable so we can disable when we don't need to use them).
-- [_] update and prune old content in documentation. check each statement, update, remove or replace.
-- [_] create a "sky grid" of floating terrain balls with each one having one of 8 custom made shaders, then have the camera fly forward between the seams. this is a benchmark called BenchmarkSkyGrid.luau built-in demo example. We'll also use this as a performance profiler for editablemesh + terrain + etc.
-- [_] add gpu resource constraining (freezes all other applications right now)
-- [_] check LOD is cleaned up when the mesh changes / is deleted / LOD properties are changed so they release and are recomputed
-- [_] stress test all underlying engine systems (input, cdn, assets, parallel world, physics, hundreds of players + characters all moving around randomly, etc). for each, find at least 5 optimisations.
-- [_] create two stress test demos: 100 unique 4k textures on material spheres with PBR (like the PBR demo), and 1 unique 4k texture on material spheres with PBR. tests instancing (for 1 duplicate item) and mem/compute usage for the uniques.
-- [_] add a "light path visualiser" that shows a visualisation of the spatial casting of light emitters so i can see what path they take, what they hit, etc. basically blue for empty space it travels, red for end of light, orange for pass-through or reflections.
-- [_] fix multi-select multi-property editing (when i select multiple objects, it should check all objects for the same component and value im editing and match them).
-
-- [_] add typed, read-only physics observation hooks at declared fixed-tick boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Define whether each record observes pre-solve, completed-solver or post-integration state; retain exact tick, world, units and availability; and expose completed records to data-factory MCP without allowing a hook to mutate physics state.
-- [_] add typed, read-only replication observation hooks at declared exchange boundaries. Use stable string discovery names, typed immutable per-hook contexts and bounded non-blocking records. Preserve world, authority, client, baseline, tick and exchange-round identity; expose applied, rejected, repaired and dropped work without crossing a world boundary by pointer; and keep private payloads behind the existing permission boundary.
-- [_] optimise server startup time
-- [_] optimise and improve tests (particularly server and physics, can we add deterministic hooks so we can immediately wait for an update for a change instead of guessing with timestamps? test.solver, test.replication, etc)
-
-- [_] add extensive (freecam) camera tests (like flying through portals)
-- [_] add extensive client character tests
-- [_] add extensive client character CAMERA tests (zooming out and projecting camera through portal)
-- [_] fix lights passing through portals not working
-- [_] fix portals so they are seamless. really plan out how to make them seamless and how to handle "standing in the middle" so objects are visually there on both sides of the portal with no seam especially during movement (and how to make replication seamless too)
-
-- [_] more lighting capabilities; god rays, blue, depth of field, fog fields (not global fog, more like "fog across area of ground")
-- [_] create a weather system demo using all the lighting capabilities (clouds, atmosphere, rain particles, etc).
-- [_] remake the tornado simulation demo using the C++ repository as a base. Check the existing documentation, add missing engine features that we need (ask user questions about it first, you'll need to swap into plan mode), then implement once you get the OK.
-- [_] pack multi-channel supporting render data in other channels, depth = r channel - ambient occulusion = g - anti-alias = b, for example.
-- [_] add a way to "virtually lock" the camera position, with a adornment visual, such that all camera behavior acts as if its from that location, this way i can test if culling works and other behaviors.
-
-- [_] test studio and fix found bugs
+- [x] Add typed physics, replication and portal observations with optional trace IDs, bounded per-world records and server JSONL export (physics and replication: `1dd7743d`).
+- [x] Finish the measured engine stress pass and matched 200-client `RecoverRows` profiling. Retain the 4 m physics grid default; cell-size results vary by scene. The recovery candidate was rejected without a demonstrated gain. See the [stress audit](docs/ENGINE_STRESS_AUDIT_2026-09-22.md).
+- [x] Validate the same-world follow-camera repair and extended tunnel walk with native presentation and render tests (`04315bcd`). Passed native dev/Vulkan validation on 2026-10-04: 32 presentation cases, the 64-frame tunnel sweep and 5 portal GPU cases.
+- [x] Fix Studio widgets that start unsnapped from their viewport slots.
+- [x] Allow Studio UI elements to move from the Studio screen to other screens.
+- [x] Carry forward completed portal traversal and camera fixes.
+- [x] Carry forward scheduler timing and Metrics fixes, plus physics, world, GUI and script fixes.
+- [x] Carry forward Studio dock and window fixes.
+- [x] Carry forward audio decode and mixer fixes.
+- [x] Carry forward texture format, material shader and sequence fixes.
+- [x] Bound PNG inflation before excess output allocation; preserve accepted output on malformed streams.
+- [x] Carry forward benchmark reports and jobs.
 
 ### v0.26
 
-- [_] go through engine and consolidate and cleanup dead code branches. remove backport compatibilities with previous engine versions and ground this as the version.
-- [_] go over render system and consolidate/improve hooks, nodes, graph system and visualiser of graph system
-
-- [_] do heavy memory, cpu and gpu benchmarking and profiling and see if we can squash data into multi-channel representations, improve computations and memory usage, trade lower precision for tiny visual changes, etc.
-
-- [_] add typed render hooks at proven boundaries. `DataFactoryHookBind` registers and discovers twelve stable read-only data-capture hooks and the synchronous `view.camera` mutation hook. Data capture remains pinned to exact pipeline, revision, view, snapshot and node identity and returns bounded asynchronous readbacks. `view.camera` accepts owned one-shot camera-frame, camera, and projection patches only for an exact installed pipeline revision, world, snapshot, and view slot; conflicts, stale revisions, malformed values, cancellation, and generation reuse are explicit. The renderer copies only the matching view before capture preparation and never calls external code or exposes a mutable view. The release CPU lifecycle benchmark fell from 41.62 to 20.48 microseconds per 64 lifecycles after dispatch stopped copying the full graph snapshot; validated capture planes now take ownership of readback vectors instead of copying them. GPU and readback release profiling plus a second real consumer remain open. A hook is an observer node, declared node output, or this bounded typed pre-view patch, not a second callback graph beside it.
-  1. Inventory the current node output, resource lifetime, GPU submission and asynchronous readback boundaries, then choose one stable post-pass observation point.
-  2. Give each internal hook an enum value and a stable string name for discovery, manifests and MCP. Never serialize the enum number.
-  3. Give each hook its own typed immutable context. Do not use a generic `any` bag or an inheritance tree. A context states its valid lifetime, thread, resource access and unavailable fields.
-  4. Keep observation non-blocking and read-only. GPU hooks append bounded records or schedule bounded asynchronous readback; the client polls completed records later. They never wait for the CPU or call arbitrary external code from the render thread.
-  5. Apply render changes through CPU-owned scene or graph state before submission, then upload the normal delta. The bounded `view.camera` patch is the named exception: it is a synchronously consumed value record, not an observation callback.
-  6. Make the existing data-capture resource observation the first consumer. Expose supported hook names and limits through capability discovery, then verify snapshot, camera, frame, crop and resource identity remain aligned.
-  7. Profile record bytes, allocations, readback latency, dropped records and GPU work in a release capture before adding another hook point.
-  8. Design separate typed observation hooks for physics and replication only after the render hook has two real consumers. Reuse the naming, bounded queue and polling rules, while keeping each subsystem's own tick, thread and lifetime contract.
+- [_] Create owned 2D images usable by `ParticleEmitter`, `ImageLabel` and existing image consumers, with basic 2D transform and composition nodes.
+- [_] Review the preserved full work on the `v0.26.5-imagegraph-full` branch before integration.
+- [_] Exclude 3D, audio and broad simulation features from the first integration.
 
 ### v0.27
 
@@ -118,7 +81,6 @@ When you create a new world/scene, it auto appends the scripts in.
 - [_] expose automation tools (AutomationService) like mouse clicks and keyboard inputs to luau scripts (so we can create ai that plays for you)
 
 - [_] /docs/future-work/physics-expansion.md
-- [_] /docs/future-work/ui-system.md
 - [_] /docs/future-work/world-streaming.md
 
 ### FUTURE

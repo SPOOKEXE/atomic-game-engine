@@ -421,8 +421,10 @@ Three things a reviewer should refuse:
 
 **A world larger than the grid is a decision made where the world is authored**,
 not inside the encoder - which sees one component and not a world.
-`WireCoversWorld` is the check and `mono.server`'s placeholder world holds it as
-a `static_assert`.
+`WireCoversWorld` checks the authored extent. The scene wire tests compare the
+default `WorldBounds::HalfExtent` with the grid, and the server test checks that
+the default Luau scene's 64-metre bounds remain covered. The default benchmark
+scene uses that same extent for its motion limits.
 
 ## There is no transform hierarchy, and there is not going to be one here
 
@@ -494,9 +496,10 @@ time so a snapshot could resolve, and a shared set is what made it unnecessary.
 
 That is what makes a snapshot cross without a translation layer, so **a program
 reintroducing a component of its own that means one of these is reopening the
-debt**. `Spin`, `Orbit` and `DrawList` in the client and `Chatter` and `Heard`
-in the server are demo and placeholder types rather than duplicates, and they
-stay where they are.
+debt**. Luau examples own their scene-specific motion. `DrawList` is a renderer
+output resource, while `Chatter` and `Heard` are optional server bus test state;
+none duplicates a scene component. Shared scene components remain the state
+used by the Luau examples.
 
 `render` converts a `DrawInstance` to whatever the GPU wants and calls
 `ResolveCamera` for its view-projection, so `render::Instance` and

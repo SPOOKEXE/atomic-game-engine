@@ -100,6 +100,7 @@ namespace engine::script {
 		// Installed by the host, never shared through a process-global registry.
 		std::shared_ptr<DataCaptureBridge> DataCapture;
 		std::shared_ptr<DataLifecycleBridge> DataLifecycle;
+		std::function<bool(std::span<const std::byte>)> RemoteEventSender;
 
 		// Connections, and the ordering rules both VMs share.
 		SignalTable Signals;
@@ -760,6 +761,11 @@ namespace engine::script {
 	//
 	// Called after `OpenWorkspace`, because it adds to the world's method table.
 	void OpenQueries(lua_State *state);
+
+	// Installs the authored storm resource and its read-only analytical queries.
+	// The service owns no copy of the field: every call reads or writes the
+	// physics world's one `physics::Storm` resource.
+	void OpenStorm(lua_State *state);
 
 	// Installs `World`, and the component methods every instance gains.
 	//

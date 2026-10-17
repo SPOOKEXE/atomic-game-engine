@@ -24,10 +24,11 @@
 #include <engine/core/Name.hpp>
 #include <engine/core/Paths.hpp>
 #include <engine/core/types/Vector3.hpp>
+#include <engine/ecs/Attributes.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Components.hpp>
 #include <engine/ecs/Store.hpp>
-#include <engine/examples/Shooting.hpp>
+#include <engine/examples/Scene.hpp>
 #include <engine/game/Play.hpp>
 #include <engine/game/PortalSession.hpp>
 #include <engine/gui/Registration.hpp>
@@ -35,19 +36,23 @@
 #include <engine/net/Wire.hpp>
 #include <engine/parallel/Process.hpp>
 #include <engine/replication/Connector.hpp>
+#include <engine/replication/Observation.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Input.hpp>
+#include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Tools.hpp>
 #include <engine/script/Instances.hpp>
+#include <engine/script/RemoteEvent.hpp>
+#include <engine/script/Runtime.hpp>
+#include <engine/scripthost/Runtime.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_test_macros.hpp>
-#include <catch2/generators/catch_generators.hpp>
 
 #include <array>
 #include <chrono>
@@ -77,7 +82,6 @@ using engine::replication::Connector;
 using engine::scene::Bounds;
 using engine::scene::Character;
 using engine::scene::Humanoid;
-using engine::scene::Motion;
 using engine::scene::Transform;
 using engine::scene::Visual;
 
@@ -95,7 +99,9 @@ namespace server_replication_test {
 	// every time. Registering the shared set is what removes the second
 	// declaration rather than renaming around the collision.
 	void RegisterTypes() {
-		engine::scene::RegisterSceneComponents();
+		// InstanceClass resolves names while adopting a snapshot. Register the
+		// full class tree before the first network bytes, as the client does.
+		engine::scene::RegisterSceneClasses();
 
 		// **And the two sets that started crossing at v0.15**, because this
 		// replica is a client and a client is what receives them. A snapshot
@@ -107,6 +113,22 @@ namespace server_replication_test {
 		// a `LocalScript` are what made that reachable.
 		(void)engine::gui::RegisterGuiClasses();
 		(void)engine::script::ScriptClass();
+	}
+
+	std::string RedParts(Store &world) {
+		std::string names;
+		world.EachEntity([&](Entity entity) {
+			const auto *visual = world.Get<Visual>(entity);
+			if (visual == nullptr || visual->Tint.R < 0.99f || visual->Tint.G >= 0.3f ||
+				visual->Tint.B >= 0.2f) {
+				return;
+			}
+			const Name name = world.InstanceNameOf(entity);
+			if (!name.IsValid()) return;
+			if (!names.empty()) names += ", ";
+			names += name.Text();
+		});
+		return names;
 	}
 
 	std::filesystem::path ServerProgram() {
@@ -142,6 +164,7 @@ namespace server_replication_test {
 		Process Child;
 		std::unique_ptr<Transport> Socket;
 		std::unique_ptr<Connector> Link;
+		engine::replication::ReplicationObservations Observations;
 		Store World{"replica"};
 		double Now = engine::core::Clock::Seconds();
 
@@ -159,8 +182,8 @@ namespace server_replication_test {
 		bool AutomaticFreshAdmission = true;
 		bool FreshAdmissionSent = false;
 
-		// @param entities How many the placeholder world holds.
-		// @param game     A scene to host instead, or empty for the placeholder.
+		// @param entities How many Parts the default scene builds.
+		// @param game     A scene to host instead, or empty for the default Luau scene.
 		// @param extra    Further arguments for the child, for a case that is
 		//                 about a setting rather than about a world.
 		bool Start(
@@ -217,6 +240,7 @@ namespace server_replication_test {
 				connecting.ClientIdentity = identity;
 				Now = engine::core::Clock::Seconds();
 				Link = std::make_unique<Connector>(*Socket, Endpoint::LoopbackIPv4(port), Now, connecting);
+				Link->SetObservations(Name("replica"), Name("server"), {}, &Observations);
 				ListenForJoinNotice();
 				return true;
 			}
@@ -235,6 +259,7 @@ namespace server_replication_test {
 			Port = port;
 			Now = engine::core::Clock::Seconds();
 			Link = std::make_unique<Connector>(*Socket, Endpoint::LoopbackIPv4(port), Now);
+			Link->SetObservations(Name("replica"), Name("server"), {}, &Observations);
 			ListenForJoinNotice();
 			return true;
 		}
@@ -301,83 +326,6 @@ namespace server_replication_test {
 				input->Down.Set(key, true);
 			}
 			input->LatchPresses();
-		}
-
-		// Puts a camera in the replica at `from`, looking along `direction`.
-		//
-		// **A predicted entity, exactly as `client::AimReplicaViewer` mints
-		// one.** A replica may not allocate an authoritative index - the
-		// authority allocates from the same range and `Apply` would be right to
-		// merge the two - and a camera nobody else can see is precisely what the
-		// reserved high range is for. Building it by hand here rather than
-		// calling that function keeps this suite out of `mono.client`.
-		void AimFrom(const engine::core::Vector3 &from, const engine::core::Vector3 &direction) {
-			auto *active = World.ResourceMutable<engine::scene::ActiveCamera>();
-			if (active == nullptr || !World.Alive(active->Entity)) {
-				engine::scene::ActiveCamera live;
-				live.Entity = World.CreatePredicted("ReplicaViewer");
-				World.SetResource(live);
-				active = World.ResourceMutable<engine::scene::ActiveCamera>();
-			}
-
-			World.Set(
-				active->Entity, engine::scene::Transform{engine::core::CFrame::LookAt(from, from + direction)}
-			);
-		}
-
-		// Presses and releases the left mouse button, latching the edge.
-		//
-		// **The edge and not the hold**, which is the whole reason
-		// `InputState::PressedButtons` exists: frames outnumber ticks, so a
-		// click that began and ended between two of them lands on a frame no
-		// tick ever looks at. `LatchPresses` is what a writer owes, exactly as
-		// it does for a key.
-		void Click() {
-			auto *input = World.ResourceMutable<engine::scene::InputState>();
-			if (input == nullptr) {
-				World.SetResource(engine::scene::InputState{});
-				input = World.ResourceMutable<engine::scene::InputState>();
-			}
-
-			input->Focused = true;
-			input->PreviousButtons = input->Buttons;
-			input->Buttons =
-				static_cast<uint8_t>(1u << static_cast<uint8_t>(engine::scene::MouseButton::Left));
-			input->LatchPresses();
-			input->PreviousButtons = input->Buttons;
-			input->Buttons = 0;
-		}
-
-		// `Client::SubmitMove`'s shot half, and deliberately not a paraphrase.
-		//
-		// The same guard, the same `ReadAimIntent`, the same codec, the same
-		// channel - because the point of the assertion is that a *client* can
-		// fire, and a hand-built `examples::Shot` would step straight over the
-		// arithmetic that turns a camera into a ray.
-		bool SubmitAim(double viewTick = 0, uint64_t inputTick = 0) {
-			if (Mine == engine::ecs::NULL_ENTITY ||
-				engine::scene::CharacterOf(World, Mine) == engine::ecs::NULL_ENTITY) {
-				return false;
-			}
-
-			const engine::scene::AimIntent aim = engine::scene::ReadAimIntent(World);
-			if (!aim.Aimed || !aim.Fired) {
-				return false;
-			}
-
-			engine::examples::Shot shot;
-			shot.Aim = aim.Ray;
-			shot.Range = engine::examples::MAXIMUM_SHOT_RANGE;
-			shot.ViewTick = viewTick == 0 ? static_cast<double>(Link->Applied()) : viewTick;
-			if (!Link->Submit(
-					inputTick == 0 ? Link->Applied() : inputTick, engine::examples::EncodeShot(shot), Now
-				)) {
-				return false;
-			}
-			if (auto *input = World.ResourceMutable<engine::scene::InputState>(); input != nullptr) {
-				input->ConsumeButtonTaps();
-			}
-			return true;
 		}
 
 		// Where the camera is pointing, which is what W is measured against.
@@ -587,7 +535,15 @@ TEST_CASE("a client joins a server that is a separate process", "[server][replic
 	REQUIRE(remote.Join(400));
 
 	// The world arrived, and it is the one that was asked for.
-	REQUIRE(remote.Entities() == 64);
+	const Entity workspace = remote.World.FindFirstRoot("Workspace");
+	const Entity field = remote.World.FindFirstChild(workspace, "ServerDefault");
+	REQUIRE(field != engine::ecs::NULL_ENTITY);
+	size_t cubes = 0;
+	remote.World.EachChild(field, [&](Entity entity) {
+		REQUIRE(remote.World.ClassOf(entity) == engine::scene::PartClass());
+		cubes++;
+	});
+	REQUIRE(cubes == 64);
 	REQUIRE(remote.Link->Applied() > 0);
 }
 
@@ -600,20 +556,24 @@ TEST_CASE("the replicated world holds the components the server sent", "[server]
 	REQUIRE(remote.Start(32));
 	REQUIRE(remote.Join(400));
 
-	// Every replicated component resolved by name in a process that never saw
-	// the server's header. A name that failed to resolve is a component that
-	// silently does not arrive, which is why this is asserted rather than
-	// assumed from the entity count.
-	REQUIRE(remote.World.CountMatching<Transform>() == 32);
-	REQUIRE(remote.World.CountMatching<Motion>() == 32);
-
-	// The two that are sent once in the snapshot and never again, because
-	// nothing in that world resizes or recolours anything. A client that
-	// received a position and no size has a scene it cannot draw, and this is
-	// the assertion that says they arrived rather than being assumed from the
-	// two above.
-	REQUIRE(remote.World.CountMatching<Bounds>() == 32);
-	REQUIRE(remote.World.CountMatching<Visual>() == 32);
+	// Check the Parts within the authored field: Workspace also owns a
+	// Transform, and Velocity now lives in each Part's attribute table.
+	const Entity workspace = remote.World.FindFirstRoot("Workspace");
+	const Entity field = remote.World.FindFirstChild(workspace, "ServerDefault");
+	REQUIRE(field != engine::ecs::NULL_ENTITY);
+	const Name velocity("Velocity");
+	size_t cubes = 0;
+	remote.World.EachChild(field, [&](Entity entity) {
+		REQUIRE(remote.World.ClassOf(entity) == engine::scene::PartClass());
+		REQUIRE(remote.World.Get<Transform>(entity) != nullptr);
+		REQUIRE(remote.World.Get<Bounds>(entity) != nullptr);
+		REQUIRE(remote.World.Get<Visual>(entity) != nullptr);
+		engine::ecs::AttributeValue value;
+		REQUIRE(engine::ecs::GetAttribute(remote.World, entity, velocity, value));
+		REQUIRE(value.Type == engine::ecs::PropertyType::Vector3);
+		cubes++;
+	});
+	REQUIRE(cubes == 32);
 }
 
 TEST_CASE("the world keeps moving after the join", "[server][replication]") {
@@ -742,8 +702,23 @@ TEST_CASE("a world too big for one datagram still streams", "[server][replicatio
 	// ordinary backpressure. The join worked and the world then never moved.
 	Remote remote;
 	REQUIRE(remote.Start(2000));
-	REQUIRE(remote.Join(1200));
-	REQUIRE(remote.Entities() == 2000);
+	// The full scene includes Part geometry and per-Part Velocity attributes.
+	// Snapshot streaming spends at most eight chunks per server tick, so this
+	// deadline allows the full blob through a busy scripted world.
+	const bool joined = remote.Join(3000);
+	const engine::net::ConnectionStats link = remote.Link->LinkStats();
+	const auto &replica = remote.Link->ReplicaStats();
+	INFO(
+		"admitted=" << remote.Link->Admitted() << " rejected=" << remote.Link->Rejected()
+					<< " bytes=" << link.BytesReceived << " packets=" << link.PacketsReceived
+					<< " lost=" << link.PacketsLost << " applied=" << remote.Link->Applied()
+					<< " snapshots=" << replica.Snapshots << " prefaces=" << replica.Prefaces
+					<< " malformed=" << replica.Malformed << " entities=" << remote.Entities()
+	);
+	REQUIRE(joined);
+	const Entity workspace = remote.World.FindFirstRoot("Workspace");
+	const Entity field = remote.World.FindFirstChild(workspace, "ServerDefault");
+	REQUIRE(field != engine::ecs::NULL_ENTITY);
 
 	const uint64_t joinedAt = remote.Link->Applied();
 	for (int tick = 0; tick < 240 && remote.Link->Applied() == joinedAt; tick++) {
@@ -756,7 +731,15 @@ TEST_CASE("a world too big for one datagram still streams", "[server][replicatio
 	// Every entity carries what it was sent, not merely the first datagram's
 	// worth. A split that dropped its tail would show as a short count here and
 	// as nothing at all anywhere else.
-	REQUIRE(remote.World.CountMatching<Transform>() == 2000);
+	size_t cubes = 0;
+	size_t transformed = 0;
+	remote.World.EachChild(field, [&](Entity entity) {
+		if (remote.World.ClassOf(entity) != engine::scene::PartClass()) return;
+		cubes++;
+		if (remote.World.Get<Transform>(entity) != nullptr) transformed++;
+	});
+	REQUIRE(cubes == 2000);
+	REQUIRE(transformed == cubes);
 }
 
 TEST_CASE("what ReplicatedFirst holds arrives before the world it covers", "[server][replication]") {
@@ -1001,6 +984,9 @@ TEST_CASE("a client is told which player is theirs, and can walk it", "[server][
 	CHECK(engine::scene::CharacterOf(second.World, first.Mine) != engine::ecs::NULL_ENTITY);
 
 	const engine::core::Vector3 before = first.World.Get<Transform>(rig->Root)->Frame.Position;
+	const uint64_t priorReplicaTick = second.Link->Applied();
+	second.Observations.Clear();
+	bool sawMoveExchange = false;
 
 	// **Walk, and keep walking.** An input channel is unreliable by design and
 	// the server clears what it has applied every tick, so a single submission
@@ -1017,8 +1003,18 @@ TEST_CASE("a client is told which player is theirs, and can walk it", "[server][
 		first.Walk(engine::core::Vector3{1.0f, 0.0f, 0.0f});
 		first.Tick();
 		second.Tick();
+		while (const auto record = second.Observations.Poll()) {
+			if (record->Hook == engine::replication::ReplicationHook::ReplicaApplied) {
+				const auto *applied =
+					std::get_if<engine::replication::ReplicaAppliedObservation>(&record->Context);
+				if (applied != nullptr && applied->Identity.TickAvailable &&
+					applied->Identity.Tick > priorReplicaTick)
+					sawMoveExchange = true;
+			}
+		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(4));
 	}
+	CHECK(sawMoveExchange);
 
 	const engine::core::Vector3 after = first.World.Get<Transform>(rig->Root)->Frame.Position;
 
@@ -1043,7 +1039,16 @@ TEST_CASE("a client is told which player is theirs, and can walk it", "[server][
 
 	// And the *other* client sees the same body in the new place, which is the
 	// half that separates "the server moved it" from "everybody was told".
-	Settle(second);
+	REQUIRE(second.Wait(
+		[&] {
+			const Entity character = engine::scene::CharacterOf(second.World, first.Mine);
+			const Character *current = second.World.Get<Character>(character);
+			const Transform *position =
+				current == nullptr ? nullptr : second.World.Get<Transform>(current->Root);
+			return position != nullptr && position->Frame.Position.X > before.X + 1.0f;
+		},
+		400
+	));
 	const Entity theirs = engine::scene::CharacterOf(second.World, first.Mine);
 	const Character *seen = second.World.Get<Character>(theirs);
 	REQUIRE(seen != nullptr);
@@ -1087,7 +1092,13 @@ TEST_CASE("WASD on a client walks its character on the server", "[server][replic
 	Remote client;
 	REQUIRE(client.Start(0, scene.string()));
 	REQUIRE(client.Join(400));
-	Settle(client);
+	REQUIRE(client.Wait(
+		[&] {
+			return client.Mine != engine::ecs::NULL_ENTITY &&
+				   engine::scene::CharacterOf(client.World, client.Mine) != engine::ecs::NULL_ENTITY;
+		},
+		400
+	));
 
 	REQUIRE(client.Mine != engine::ecs::NULL_ENTITY);
 	REQUIRE(engine::scene::CharacterOf(client.World, client.Mine) != engine::ecs::NULL_ENTITY);
@@ -1210,6 +1221,9 @@ TEST_CASE("a client holds its own containers and none of anybody else's", "[serv
 		file << "local block = Instance.new(\"Part\")\n"
 			 << "block.Anchored = true\n"
 			 << "block.Parent = workspace\n"
+			 << "local secret = Instance.new(\"Part\")\n"
+			 << "secret.Name = \"ServerOnlySecret\"\n"
+			 << "secret.Parent = game:GetService(\"ServerStorage\")\n"
 
 			 // **A `Tool` in `StarterPack`, because a container is only private
 			 // if what is *in* it is.** The four containers arriving empty proved
@@ -1278,6 +1292,19 @@ TEST_CASE("a client holds its own containers and none of anybody else's", "[serv
 	CHECK(children(second.World, second.Mine) == 4);
 	CHECK(children(second.World, first.Mine) == 0);
 
+	// The service itself and all of its descendants stay out of every replica.
+	// A named row makes this an end-to-end secrecy check rather than a count that
+	// would pass if the server sent the service but not its contents.
+	const auto named = [](Store &world, std::string_view name) {
+		bool found = false;
+		world.EachEntity([&](Entity entity) {
+			if (world.InstanceNameOf(entity) == Name(name)) found = true;
+		});
+		return found;
+	};
+	CHECK_FALSE(named(first.World, "ServerOnlySecret"));
+	CHECK_FALSE(named(second.World, "ServerOnlySecret"));
+
 	// **And the gear inside them, which is what a `Tool` made worth asserting.**
 	// Four empty containers prove the predicate hides a *row* under a player; a
 	// game keys "what am I holding" off the contents, so what has to be proved is
@@ -1329,203 +1356,319 @@ TEST_CASE("a client holds its own containers and none of anybody else's", "[serv
 	CHECK(toolsUnder(second.World, second.Mine) == 2);
 	CHECK(toolsUnder(second.World, first.Mine) == 0);
 
+	// Drop the second connection, then admit a new one. The listener owns the
+	// transport timeout, so this case only relies on the new connection getting
+	// its own private state rather than on a particular time for slot reuse.
+	second.Link.reset();
+	second.Socket->Close();
+	for (int tick = 0; tick < 60; tick++) {
+		first.Tick();
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+
+	Remote reconnected;
+	REQUIRE(reconnected.Connect(first.Port));
+	REQUIRE(reconnected.Join(400));
+	Settle(first);
+	Settle(reconnected);
+
+	REQUIRE(reconnected.Mine != engine::ecs::NULL_ENTITY);
+	CHECK(swordIn(reconnected.World, reconnected.Mine, "Backpack"));
+	CHECK_FALSE(swordIn(reconnected.World, first.Mine, "Backpack"));
+
 	std::error_code ignored;
 	std::filesystem::remove(scene, ignored);
 }
 
-TEST_CASE("a client's click is a shot the server resolves and everybody sees", "[server][replication]") {
-	const bool historical = GENERATE(false, true);
-	// **The other half of `D00109`, and the half that had never had a caller.**
-	// `Server::ApplyInputs` decodes an `examples::Shot`, rewinds the client's
-	// explicit view tick, hit-tests against the recorded history and
-	// recolours what was struck - a complete server-authoritative feature whose
-	// `examples::EncodeShot` was reachable from nothing in the tree. That entry
-	// calls it two finished halves connected to nothing; this is the wire
-	// between them.
-	//
-	// **Two clients, because one would prove less than it looks.** A client
-	// shooting a prop would exercise the same code and would leave the
-	// interesting property untested: the verdict is the *server's*, and what
-	// makes that visible is a second client learning about a hit it did not
-	// witness and did not decide. The shooter never says what it struck.
-	//
-	// **The target is a character and not a prop, and that is not a preference.**
-	// `Server::ServeClients` records the rewind history over `Transform` and
-	// `RigidBody` **filtered by `scene::Simulated`**, deliberately, so that
-	// static geometry does not fill the ring with rows whose answer is the same
-	// at every tick - a scripted anchored part is therefore invisible to the hit
-	// test. An unanchored one that has come to rest is *not*: it keeps
-	// `Simulated` when it sleeps and only loses `Motion`, which is exactly the
-	// v0.15 bug about a standing player being unhittable, fixed. What is being
-	// aimed at here is a character because that is what a shot means.
-	if (!ServerAvailable()) {
-		SKIP("the server program is not built into this preset");
-	}
-
-	const std::filesystem::path scene =
-		std::filesystem::temp_directory_path() / "server_replication_shot.luau";
-	{
-		std::ofstream file(scene, std::ios::trunc);
-		REQUIRE(file);
-		file << "local floor = Instance.new(\"Part\")\n"
-			 << "floor.Name = \"SpawnLocation\"\n"
-			 << "floor.Size = Vector3.new(400, 4, 400)\n"
-			 << "floor.Position = Vector3.new(0, -2, 0)\n"
-			 << "floor.Anchored = true\n"
-			 << "floor.Parent = workspace\n";
-	}
-
+TEST_CASE("Arena Luau validates shots and replicates hits", "[server][replication][arena]") {
+	if (!ServerAvailable()) SKIP("the server program is not built into this preset");
 	Remote shooter;
-	REQUIRE(shooter.Start(0, scene.string()));
+	REQUIRE(shooter.Start(0, engine::examples::ExamplePath("Arena.luau")));
 	REQUIRE(shooter.Join(400));
-
 	Remote victim;
 	REQUIRE(victim.Connect(shooter.Port));
 	REQUIRE(victim.Join(400));
-
-	Settle(victim);
 	Settle(shooter);
+	Settle(victim);
 
-	REQUIRE(shooter.Mine != engine::ecs::NULL_ENTITY);
-	REQUIRE(victim.Mine != engine::ecs::NULL_ENTITY);
-
-	// Resolve the victim once the initial snapshot is settled. The root entity
-	// is the stable target the rest of this test needs.
 	const Entity victimCharacter = engine::scene::CharacterOf(shooter.World, victim.Mine);
+	const Entity shooterCharacter = engine::scene::CharacterOf(shooter.World, shooter.Mine);
 	REQUIRE(victimCharacter != engine::ecs::NULL_ENTITY);
-	const Character *rig = shooter.World.Get<Character>(victimCharacter);
-	REQUIRE(rig != nullptr);
-	const Entity victimRoot = rig->Root;
-	REQUIRE(shooter.World.Get<Visual>(victimRoot) != nullptr);
+	REQUIRE(shooterCharacter != engine::ecs::NULL_ENTITY);
+	const Character *victimRig = shooter.World.Get<Character>(victimCharacter);
+	const Character *shooterRig = shooter.World.Get<Character>(shooterCharacter);
+	REQUIRE(victimRig != nullptr);
+	REQUIRE(shooterRig != nullptr);
+	const Entity victimRoot = victimRig->Root;
+	const Entity victimHumanoid = victimRig->Humanoid;
+	const Entity shooterRoot = shooterRig->Root;
+	const Entity shooterHumanoid = shooterRig->Humanoid;
+	REQUIRE(shooter.World.Get<Humanoid>(victimHumanoid) != nullptr);
+	REQUIRE(shooter.World.Get<Humanoid>(shooterHumanoid) != nullptr);
+	const Entity fire =
+		shooter.World.FindFirstChild(shooter.World.FindFirstRoot("ReplicatedStorage"), "ArenaFire");
+	REQUIRE(fire != engine::ecs::NULL_ENTITY);
+	CHECK(shooter.World.GetFullName(fire) == "ReplicatedStorage.ArenaFire");
 
-	// **The shooter walks away first**, so that its own body is nowhere near the
-	// ray. Both characters spawn at the same `SpawnLocation`, and the shooter's
-	// root is in the rewind history exactly as the victim's is - a shot fired
-	// from where they are standing could strike the shooter and the assertion
-	// below would never know the difference.
 	shooter.LookAlong(0.0f);
 	shooter.Hold({engine::scene::KeyCode::W}, 120, &victim);
+	const auto *shooterAt = shooter.World.Get<Transform>(shooterRoot);
+	const auto *victimAt = shooter.World.Get<Transform>(victimRoot);
+	REQUIRE(shooterAt != nullptr);
+	REQUIRE(victimAt != nullptr);
+	const engine::core::Vector3 muzzle = shooterAt->Frame.Position + engine::core::Vector3{0, 3, 0};
+	const engine::core::Vector3 victimPosition = victimAt->Frame.Position;
+	const engine::core::Vector3 direction = (victimPosition - muzzle).Unit();
+	const float initialHealth = shooter.World.Get<Humanoid>(victimHumanoid)->Health;
 
-	const engine::core::Color3 before = shooter.World.Get<Visual>(victimRoot)->Tint;
-	const auto historicalPosition = shooter.World.Get<Transform>(victimRoot)->Frame.Position;
-	const double historicalTick = static_cast<double>(shooter.Link->Applied());
-	if (historical) {
-		for (int tick = 0; tick < 100; ++tick) {
-			victim.Walk({0, 0, 1});
-			victim.Tick();
+	const auto payload = [](const engine::core::Vector3 &origin, const engine::core::Vector3 &aim) {
+		return std::string("{\"x\":") + std::to_string(origin.X) + ",\"y\":" + std::to_string(origin.Y) +
+			   ",\"z\":" + std::to_string(origin.Z) + ",\"dx\":" + std::to_string(aim.X) +
+			   ",\"dy\":" + std::to_string(aim.Y) + ",\"dz\":" + std::to_string(aim.Z) + "}";
+	};
+	const auto send = [&](std::string_view body) {
+		std::vector<std::byte> framed;
+		REQUIRE(
+			engine::script::EncodeRemoteEvent(
+				"ReplicatedStorage.ArenaFire", std::as_bytes(std::span(body.data(), body.size())), framed
+			)
+		);
+		REQUIRE(shooter.Link->SendUser(framed, engine::core::Clock::Seconds()));
+	};
+	const auto pump = [&](int cycles) {
+		for (int tick = 0; tick < cycles; tick++) {
 			shooter.Tick();
-			if (shooter.World.Get<Transform>(victimRoot)->Frame.Position.Z > historicalPosition.Z + 1.5f)
-				break;
+			victim.Tick();
 			std::this_thread::sleep_for(std::chrono::milliseconds(4));
 		}
-		victim.Walk({});
-		REQUIRE(shooter.World.Get<Transform>(victimRoot)->Frame.Position.Z > historicalPosition.Z + 1.5f);
+	};
+
+	send("not json");
+	send(payload(muzzle + engine::core::Vector3{200, 0, 0}, direction));
+	send(payload(muzzle, direction * 4.0f));
+	pump(30);
+	REQUIRE(shooter.World.Get<Humanoid>(victimHumanoid)->Health == initialHealth);
+
+	// A valid ray into open sky has no consequence.
+	send(payload(muzzle, engine::core::Vector3{0, 1, 0}));
+	pump(50);
+	REQUIRE(shooter.World.Get<Humanoid>(victimHumanoid)->Health == initialHealth);
+
+	// A ray through the shooter's body cannot damage its own humanoid.
+	const float shooterHealth = shooter.World.Get<Humanoid>(shooterHumanoid)->Health;
+	send(payload(muzzle, engine::core::Vector3{0, -1, 0}));
+	pump(50);
+	CHECK(shooter.World.Get<Humanoid>(shooterHumanoid)->Health == shooterHealth);
+
+	const std::string valid = payload(muzzle, direction);
+	for (int attempt = 0;
+		 attempt < 120 && shooter.World.Get<Humanoid>(victimHumanoid)->Health == initialHealth;
+		 attempt++) {
+		send(valid);
+		pump(1);
 	}
-
-	bool recoloured = false;
-	for (int attempt = 0; attempt < 200 && !recoloured; attempt++) {
-		// The historical case keeps aiming at the old view after the target
-		// moves clear. The current-view case follows any settling drift.
-		const Transform *placement = shooter.World.Get<Transform>(victimRoot);
-		if (placement == nullptr) {
-			break;
-		}
-
-		const engine::core::Vector3 at = historical ? historicalPosition : placement->Frame.Position;
-		const engine::core::Vector3 eye = at + engine::core::Vector3{20.0f, 0.0f, 0.0f};
-		shooter.AimFrom(eye, (at - eye).Unit());
-
-		// Fired repeatedly, because the input channel is unreliable by design:
-		// `net/AGENTS.md` makes structure reliable and values not, so one lost
-		// datagram is one click that never happened. A player clicking again is
-		// what this models.
-		shooter.Click();
-		shooter.SubmitAim(historical ? historicalTick : 0, historical ? 900000 + attempt : 0);
-		shooter.Tick();
-		victim.Tick();
-		std::this_thread::sleep_for(std::chrono::milliseconds(4));
-
-		if (const Visual *visual = shooter.World.Get<Visual>(victimRoot); visual != nullptr) {
-			// **The green channel, not the red.** A character's root is
-			// already white, so "the red went up" cannot distinguish the
-			// server's `{1, 0.2, 0.1}` from where it started - the first
-			// version of this case asserted exactly that and passed nothing
-			// while the server was striking every shot.
-			recoloured = visual->Tint.G < before.G - 0.3f && visual->Tint.R > 0.9f;
-		}
-	}
-
-	CHECK(recoloured);
-
-	// **A hit takes health off, and this is the consequence
-	// `docs/retired/DEFERRED.md` D00121 was waiting for.** Its reopen trigger was "anything in the engine
-	// that damages a character", on the reading that a hit test with no
-	// consequence does not need "dead" to mean anything - so the shot landing is
-	// what makes the health model load-bearing rather than decorative, and this
-	// is the assertion that says the two are wired together.
-	const Entity victimHumanoid = [&] {
-		const Character *now = shooter.World.Get<Character>(victimCharacter);
-		return now == nullptr ? engine::ecs::NULL_ENTITY : now->Humanoid;
-	}();
-	REQUIRE(victimHumanoid != engine::ecs::NULL_ENTITY);
-
-	const Humanoid *wounded = shooter.World.Get<Humanoid>(victimHumanoid);
-	REQUIRE(wounded != nullptr);
-	CHECK(wounded->Health < 100.0f);
-
-	// **And the shooter cannot put it back**, which is the authority half and
-	// the one only a real replica can prove: this store was made adopt-only by
-	// `replication::Connector`, so `Store::SetProperty` refuses by name rather
-	// than letting the write stand until the next delta overwrites it. A suite
-	// that only called `SetAdoptOnly` by hand would be asserting its own setup.
-	const engine::ecs::PropertyDescriptor *health = nullptr;
+	INFO(
+		"muzzle at " << muzzle.X << ", " << muzzle.Y << ", " << muzzle.Z << "; victim at " << victimPosition.X
+					 << ", " << victimPosition.Y << ", " << victimPosition.Z
+	);
+	INFO("red parts: " << RedParts(shooter.World));
+	REQUIRE(shooter.World.Get<Humanoid>(victimHumanoid)->Health < initialHealth);
+	const float wounded = shooter.World.Get<Humanoid>(victimHumanoid)->Health;
+	const auto *tint = shooter.World.Get<Visual>(victimRoot);
+	REQUIRE(tint != nullptr);
+	CHECK(tint->Tint.R >= 0.99f);
+	CHECK(tint->Tint.G <= 0.21f);
+	REQUIRE(victim.Wait(
+		[&] {
+			shooter.Tick();
+			const auto *received = victim.World.Get<Humanoid>(victimHumanoid);
+			return received != nullptr && received->Health <= wounded;
+		},
+		400
+	));
+	const engine::ecs::PropertyDescriptor *healthProperty = nullptr;
 	for (const auto &property : engine::ecs::Classes::Describe(engine::scene::HumanoidClass()).Properties) {
-		if (property.Name == Name("Health")) {
-			health = &property;
-		}
+		if (property.Name == Name("Health")) healthProperty = &property;
 	}
-	REQUIRE(health != nullptr);
+	REQUIRE(healthProperty != nullptr);
+	const float restored = 100.0f;
+	CHECK_FALSE(victim.World.SetProperty(victimHumanoid, *healthProperty, &restored, sizeof(restored)));
 
-	const float full = 100.0f;
-	CHECK_FALSE(shooter.World.SetProperty(victimHumanoid, *health, &full, sizeof(full)));
-	CHECK(shooter.World.Get<Humanoid>(victimHumanoid)->Health < 100.0f);
+	// Requests in one interval cannot apply damage twice.
+	pump(50);
+	const float beforeBurst = shooter.World.Get<Humanoid>(victimHumanoid)->Health;
+	send(valid);
+	send(valid);
+	pump(30);
+	CHECK(shooter.World.Get<Humanoid>(victimHumanoid)->Health >= beforeBurst - 25.0f);
 
-	// **And the victim sees the same verdict**, which is the half a single
-	// client cannot assert. It did not fire, it was not asked, and the colour
-	// reaches it as ordinary replicated `scene.Visual` - so a client that had
-	// decided its own hits would be a client nothing downstream could
-	// second-guess.
-	const Entity ownRoot = [&] {
-		const Entity character = engine::scene::CharacterOf(victim.World, victim.Mine);
-		const Character *own = victim.World.Get<Character>(character);
-		return own == nullptr ? engine::ecs::NULL_ENTITY : own->Root;
-	}();
-	REQUIRE(ownRoot != engine::ecs::NULL_ENTITY);
+	// The standalone scene's own target is damageable through the same raycast.
+	const Entity workspace = shooter.World.FindFirstRoot("Workspace");
+	const Entity target = shooter.World.FindFirstChild(workspace, "TargetCenter");
+	REQUIRE(target != engine::ecs::NULL_ENTITY);
+	const Entity targetCore = shooter.World.FindFirstChild(target, "Core");
+	const Entity targetHumanoid = shooter.World.FindFirstChild(target, "Humanoid");
+	REQUIRE(targetCore != engine::ecs::NULL_ENTITY);
+	REQUIRE(targetHumanoid != engine::ecs::NULL_ENTITY);
+	REQUIRE(shooter.World.Get<Humanoid>(targetHumanoid) != nullptr);
+	const auto *targetAt = shooter.World.Get<Transform>(targetCore);
+	REQUIRE(targetAt != nullptr);
+	const engine::core::Vector3 targetDirection = (targetAt->Frame.Position - muzzle).Unit();
+	pump(50);
+	for (int attempt = 0; attempt < 120 && shooter.World.Get<Humanoid>(targetHumanoid)->Health == 100.0f;
+		 attempt++) {
+		send(payload(muzzle, targetDirection));
+		pump(1);
+	}
+	REQUIRE(shooter.World.Get<Humanoid>(targetHumanoid)->Health < 100.0f);
+	REQUIRE(shooter.World.Get<Visual>(targetCore) != nullptr);
+	CHECK(shooter.World.Get<Visual>(targetCore)->Tint.R >= 0.99f);
+	CHECK(shooter.World.Get<Visual>(targetCore)->Tint.G <= 0.21f);
+}
 
-	bool seenByVictim = false;
-	for (int tick = 0; tick < 200 && !seenByVictim; tick++) {
-		victim.Tick();
+TEST_CASE(
+	"Arena client companion fires from a click and the current camera", "[server][replication][arena]"
+) {
+	if (!ServerAvailable()) SKIP("the server program is not built into this preset");
+	Remote viewer;
+	REQUIRE(viewer.Start(0, engine::examples::ExamplePath("Arena.luau")));
+	REQUIRE(viewer.Join(400));
+	Settle(viewer);
+	const Entity character = engine::scene::CharacterOf(viewer.World, viewer.Mine);
+	const Character *rig = viewer.World.Get<Character>(character);
+	REQUIRE(rig != nullptr);
+	const Entity workspace = viewer.World.FindFirstRoot("Workspace");
+	const Entity target = viewer.World.FindFirstChild(workspace, "TargetCenter");
+	REQUIRE(target != engine::ecs::NULL_ENTITY);
+	const Entity targetCore = viewer.World.FindFirstChild(target, "Core");
+	const Entity targetHumanoid = viewer.World.FindFirstChild(target, "Humanoid");
+	const Entity screened = viewer.World.FindFirstChild(workspace, "TargetLeft");
+	REQUIRE(screened != engine::ecs::NULL_ENTITY);
+	const Entity screenedCore = viewer.World.FindFirstChild(screened, "Core");
+	const Entity screenedHumanoid = viewer.World.FindFirstChild(screened, "Humanoid");
+	const Entity pillar = viewer.World.FindFirstChild(workspace, "Pillar4");
+	REQUIRE(targetCore != engine::ecs::NULL_ENTITY);
+	REQUIRE(viewer.World.Get<Humanoid>(targetHumanoid) != nullptr);
+	REQUIRE(screenedCore != engine::ecs::NULL_ENTITY);
+	REQUIRE(viewer.World.Get<Humanoid>(screenedHumanoid) != nullptr);
+	REQUIRE(pillar != engine::ecs::NULL_ENTITY);
+	REQUIRE(viewer.World.Get<Visual>(pillar) != nullptr);
+	const auto *rootAt = viewer.World.Get<Transform>(rig->Root);
+	const auto *targetAt = viewer.World.Get<Transform>(targetCore);
+	const auto *screenedAt = viewer.World.Get<Transform>(screenedCore);
+	REQUIRE(rootAt != nullptr);
+	REQUIRE(targetAt != nullptr);
+	REQUIRE(screenedAt != nullptr);
+	const engine::core::Vector3 eye = rootAt->Frame.Position + engine::core::Vector3{0, 3, 0};
+	const engine::core::Vector3 targetPosition = targetAt->Frame.Position;
+	const engine::core::Vector3 screenedPosition = screenedAt->Frame.Position;
+	const Entity camera = viewer.World.CreatePredictedInstance(engine::scene::CameraClass(), "ArenaView");
+	REQUIRE(camera != engine::ecs::NULL_ENTITY);
+	viewer.World.Set(camera, engine::scene::Transform{engine::core::CFrame::LookAt(eye, screenedPosition)});
+	viewer.World.Set(camera, engine::scene::Camera{});
+	viewer.World.SetParent(camera, workspace);
+	engine::scene::ActiveCamera active;
+	active.Entity = camera;
+	viewer.World.SetResource(active);
+
+	engine::script::RuntimeLimits limits;
+	limits.Role = engine::script::HostRole::OfClient();
+	limits.RemoteEventSender = [&](std::span<const std::byte> bytes) {
+		return viewer.Link->SendUser(bytes, engine::core::Clock::Seconds());
+	};
+	const auto *localBeforeRuntime = viewer.World.Resource<engine::scene::LocalPlayer>();
+	const Entity playerBeforeRuntime =
+		localBeforeRuntime != nullptr ? localBeforeRuntime->Instance : engine::ecs::NULL_ENTITY;
+	auto runtime = engine::script::MakeRuntime(viewer.World, engine::script::Language::Luau, limits);
+	REQUIRE(runtime != nullptr);
+	const Entity playerScripts = viewer.World.FindFirstChild(viewer.Mine, "PlayerScripts");
+	const Entity companion = viewer.World.FindFirstChild(playerScripts, "DemoCamera");
+	REQUIRE(companion != engine::ecs::NULL_ENTITY);
+	const auto selectedScripts = engine::script::ClientScriptsIn(viewer.World);
+	const size_t startedScripts = runtime->RunNewScripts(selectedScripts);
+	const auto *localAfterRuntime = viewer.World.Resource<engine::scene::LocalPlayer>();
+	const Entity playerAfterRuntime =
+		localAfterRuntime != nullptr ? localAfterRuntime->Instance : engine::ecs::NULL_ENTITY;
+	const auto companionClass = viewer.World.ClassOf(companion);
+	const auto playerClass = viewer.World.ClassOf(viewer.Mine);
+	const Entity starterPlayer =
+		engine::scene::ServiceOf(viewer.World, engine::ecs::Classes::Find(Name("StarterPlayer")));
+	INFO(
+		"mine: " << viewer.Mine.Id << "; local before runtime: " << playerBeforeRuntime.Id
+				 << "; local after runtime: " << playerAfterRuntime.Id
+	);
+	INFO(
+		"mine alive: " << viewer.World.Alive(viewer.Mine) << "; local resource: "
+					   << (localAfterRuntime != nullptr) << "; adopt only: " << viewer.World.AdoptOnly()
+	);
+	INFO(
+		"player class: "
+		<< (playerClass.IsValid() ? engine::ecs::Classes::Describe(playerClass).Name.Text() : "invalid")
+		<< "; companion class: "
+		<< (companionClass.IsValid() ? engine::ecs::Classes::Describe(companionClass).Name.Text() : "invalid")
+	);
+	INFO(
+		"companion: " << viewer.World.GetFullName(companion)
+					  << "; owner: " << engine::scene::PlayerOwning(viewer.World, companion).Id
+					  << "; disabled: " << viewer.World.Has<engine::script::Disabled>(companion)
+					  << "; template: "
+					  << (starterPlayer != engine::ecs::NULL_ENTITY &&
+						  viewer.World.IsDescendantOf(companion, starterPlayer))
+	);
+	INFO(
+		"companion has lua container: "
+		<< (viewer.World.Get<engine::script::LuaSourceContainer>(companion) != nullptr)
+		<< "; all client scripts: " << engine::script::ScriptsIn(viewer.World, false, true).size()
+	);
+	INFO("selected scripts: " << selectedScripts.size() << "; started scripts: " << startedScripts);
+	INFO("companion has program: " << (viewer.World.Get<engine::script::Program>(companion) != nullptr));
+	INFO(runtime->LastError());
+	REQUIRE(startedScripts >= 1);
+
+	auto *input = viewer.World.ResourceMutable<engine::scene::InputState>();
+	if (input == nullptr) {
+		viewer.World.SetResource(engine::scene::InputState{});
+		input = viewer.World.ResourceMutable<engine::scene::InputState>();
+	}
+	input->Focused = true;
+	input->PreviousButtons = 0;
+	input->Buttons = static_cast<uint8_t>(1u << static_cast<uint8_t>(engine::scene::MouseButton::Left));
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+	INFO(runtime->LastError());
+	input->PreviousButtons = input->Buttons;
+	input->Buttons = 0;
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+	REQUIRE(viewer.Wait(
+		[&] {
+			const auto *visual = viewer.World.Get<Visual>(pillar);
+			return visual != nullptr && visual->Tint.R >= 0.99f && visual->Tint.G <= 0.21f;
+		},
+		400
+	));
+	CHECK(viewer.World.Get<Humanoid>(screenedHumanoid)->Health == 100.0f);
+
+	for (int tick = 0; tick < 50; tick++) {
+		viewer.Tick();
 		std::this_thread::sleep_for(std::chrono::milliseconds(4));
-		if (const Visual *visual = victim.World.Get<Visual>(ownRoot); visual != nullptr) {
-			seenByVictim = visual->Tint.G < before.G - 0.3f && visual->Tint.R > 0.9f;
-		}
 	}
-	CHECK(seenByVictim);
-
-	// The same for the health, and on the machine that lost it. A client draws
-	// its own bar off this row, so a `scene.Humanoid` that stopped crossing
-	// would leave every client watching a number that never moves.
-	const Entity ownHumanoid = [&] {
-		const Entity character = engine::scene::CharacterOf(victim.World, victim.Mine);
-		const Character *own = victim.World.Get<Character>(character);
-		return own == nullptr ? engine::ecs::NULL_ENTITY : own->Humanoid;
-	}();
-	REQUIRE(ownHumanoid != engine::ecs::NULL_ENTITY);
-	REQUIRE(victim.World.Get<Humanoid>(ownHumanoid) != nullptr);
-	CHECK(victim.World.Get<Humanoid>(ownHumanoid)->Health < 100.0f);
-
-	std::error_code ignored;
-	std::filesystem::remove(scene, ignored);
+	viewer.World.Set(camera, engine::scene::Transform{engine::core::CFrame::LookAt(eye, targetPosition)});
+	input = viewer.World.ResourceMutable<engine::scene::InputState>();
+	REQUIRE(input != nullptr);
+	input->PreviousButtons = 0;
+	input->Buttons = static_cast<uint8_t>(1u << static_cast<uint8_t>(engine::scene::MouseButton::Left));
+	REQUIRE(runtime->Heartbeat(1.0f / 60.0f));
+	INFO(
+		"eye at " << eye.X << ", " << eye.Y << ", " << eye.Z << "; center at " << targetPosition.X << ", "
+				  << targetPosition.Y << ", " << targetPosition.Z
+	);
+	INFO("red parts: " << RedParts(viewer.World));
+	REQUIRE(viewer.Wait(
+		[&] {
+			const auto *wounded = viewer.World.Get<Humanoid>(targetHumanoid);
+			return wounded != nullptr && wounded->Health < 100.0f;
+		},
+		400
+	));
 }
 
 TEST_CASE(
@@ -1567,7 +1710,6 @@ TEST_CASE(
 		},
 		1000
 	));
-	Settle(remote);
 	CHECK(players() == 1);
 	const auto player = remote.Mine;
 	const auto character = engine::scene::CharacterOf(remote.World, player);

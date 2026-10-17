@@ -75,4 +75,10 @@ if(MONO_BUILD_CDN)
 			# universe and script features, so this does not pull ECS or world in.
 			Engine::control
 	)
+	target_sources(cdn PRIVATE app/ControlHooks.cpp)
+endif()
+
+# The product MCP contract suite speaks the loopback wire directly.
+if(TARGET test_cdn)
+	target_link_libraries(test_cdn PRIVATE Vendor::asio Vendor::json)
 endif()

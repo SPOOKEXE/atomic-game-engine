@@ -1,3 +1,4 @@
+#include "seam-mask.glsl"
 
 layout(location = 0) in vec3 inNormal;
 layout(location = 1) in vec4 inColour;
@@ -32,6 +33,14 @@ layout(set = 2, binding = 6) uniform sampler2D occlusionMap;
 layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
 layout(set = 2, binding = 8) uniform sampler2D heightMap;
 layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
+layout(set = 2, binding = 10) uniform sampler2D packedPbrMap;
+// The transparent node binds its completed opaque source here. It is a
+// different texture from the active colour target, so transmission never reads
+// and writes the same image in one render pass.
+layout(set = 2, binding = 11) uniform sampler2D refractionImage;
+// Wider opaque raster from this camera. Its central rectangle matches the
+// presented view and its border contains geometry outside that view.
+layout(set = 2, binding = 12) uniform sampler2D refractionGuardImage;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -95,6 +104,9 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// are drawn whole - the original hanging out of the back of the pane and the
 	// copy out of the far one. See `scene::DrawInstance::SeamNormal`.
 	vec4 SeamPlane;
+	vec4 SeamFirst;
+	vec4 SeamSecond;
+	vec4 SeamCentre;
 
 	// The sky term and eye-relative fog. Kept in this per-draw block because a
 	// mirror or portal pass has its own eye even when it shares the world.
@@ -107,7 +119,14 @@ layout(set = 3, binding = 0) uniform Lighting {
 	// x: 1 when a metalness map is present.
 	vec4 MaterialExtra;
 	uvec4 RenderFeatures;
+	vec4 PackedPbrChannels;
+	// x: authored IOR. y: authored surface thickness in metres.
+	vec4 Transmission;
 } lighting;
+
+float PackedPbrValue(vec2 uv, float channel) {
+	return texture(packedPbrMap, uv)[int(channel + 0.5)];
+}
 
 const uint FEATURE_EMISSION = 1u << 2u;
 const uint FEATURE_DISPLACEMENT = 1u << 9u;
@@ -478,7 +497,9 @@ void shadeSurface() {
 	if ((features & FEATURE_DISPLACEMENT) != 0u && lighting.Surface.z > 0.5) {
 		mat3 tangentFrame = CotangentFrame(normal, inWorldPosition, cellUv);
 		vec3 tangentEye = transpose(tangentFrame) * normalize(lighting.Eye.xyz - inWorldPosition);
-		float height = texture(heightMap, cellUv).r - 0.5;
+		float height = lighting.MaterialExtra.y > 0.5 && lighting.PackedPbrChannels.z < 4.0
+			? PackedPbrValue(cellUv, lighting.PackedPbrChannels.z) - 0.5
+			: texture(heightMap, cellUv).r - 0.5;
 		float grazing = max(abs(tangentEye.z), 0.2);
 		localUv = fract(localUv - tangentEye.xy * (height * lighting.Surface.w / grazing));
 		cellUv = localUv * lighting.Flipbook.x + lighting.Flipbook.yz;
@@ -498,10 +519,19 @@ void shadeSurface() {
 	float roughness = lighting.Material.y > 0.5 ? texture(roughnessMap, cellUv).r : 0.65;
 	roughness = clamp(roughness, 0.045, 1.0);
 	float occlusion = lighting.Material.z > 0.5 ? texture(occlusionMap, cellUv).r : 1.0;
-	vec3 emissive = (features & FEATURE_EMISSION) != 0u && lighting.Material.w > 0.5
-		? texture(emissiveMap, cellUv).rgb * inEmission.rgb * inEmission.a
+	// Emissive tint and strength are authored independently of an optional map.
+	// A missing map therefore leaves their constant radiance intact instead of
+	// turning the surface black.
+	vec3 emissive = (features & FEATURE_EMISSION) != 0u
+		? inEmission.rgb * inEmission.a *
+			(lighting.Material.w > 0.5 ? texture(emissiveMap, cellUv).rgb : vec3(1.0))
 		: vec3(0.0);
 	float metalness = lighting.MaterialExtra.x > 0.5 ? texture(metalnessMap, cellUv).r : 0.0;
+	if (lighting.MaterialExtra.y > 0.5) {
+		if (lighting.PackedPbrChannels.x < 4.0) roughness = PackedPbrValue(cellUv, lighting.PackedPbrChannels.x);
+		if (lighting.PackedPbrChannels.y < 4.0) occlusion = PackedPbrValue(cellUv, lighting.PackedPbrChannels.y);
+		if (lighting.PackedPbrChannels.w < 4.0) metalness = PackedPbrValue(cellUv, lighting.PackedPbrChannels.w);
+	}
 	metalness = clamp(metalness, 0.0, 1.0);
 
 	// Cut-out before anything else is computed. A hair card is authored as a
@@ -525,8 +555,7 @@ void shadeSurface() {
 	// only ever the halves that pay for the branch. It does defeat early-Z on
 	// those draws, which is why what may be cut is bounded by what fits through
 	// the hole.
-	if (dot(lighting.SeamPlane.xyz, lighting.SeamPlane.xyz) > 0.0 &&
-		dot(inWorldPosition, lighting.SeamPlane.xyz) < lighting.SeamPlane.w) {
+	if (!KeepSeamSample(inWorldPosition, lighting.SeamPlane, lighting.SeamFirst, lighting.SeamSecond, lighting.SeamCentre)) {
 		discard;
 	}
 
@@ -546,7 +575,7 @@ void shadeSurface() {
 	float shadow = min(ShadowFactor(normal, toLight), PortalBeamFactor(inWorldPosition));
 	vec3 viewDirection = normalize(lighting.Eye.xyz - inWorldPosition);
 	vec3 halfway = normalize(viewDirection + toLight);
-	vec3 baseReflectance = mix(vec3(0.04), albedo, metalness);
+	vec3 baseReflectance = mix(vec3(0.04), albedo, metalness) * clamp(lighting.MaterialExtra.z, 0.0, 1.0);
 	vec3 fresnel = FresnelSchlick(max(dot(halfway, viewDirection), 0.0), baseReflectance);
 	float distribution = DistributionGGX(normal, halfway, roughness);
 	float geometry = GeometrySchlickGGX(max(dot(normal, viewDirection), 0.0), roughness) *
@@ -664,5 +693,55 @@ void shadeSurface() {
 		}
 	}
 
-	outColour = vec4(Encode(lit), alpha);
+	const float transmission = clamp(lighting.MaterialExtra.w, 0.0, 1.0);
+	if (transmission <= 0.0) {
+		outColour = vec4(Encode(lit), alpha);
+		return;
+	}
+
+	// The thin term preserves the original zero-thickness glass appearance.
+	// Physical thickness measures the difference between refracted and straight
+	// travel through a slab. At IOR 1 the paths coincide exactly. Screen
+	// derivatives turn that world displacement into local pixel motion.
+	float ior = clamp(lighting.Transmission.x, 1.0, 3.0);
+	float thickness = max(lighting.Transmission.y, 0.0);
+	float refractionScale = (1.0 - 1.0 / ior) * 0.08;
+	vec2 sourceSize = vec2(textureSize(refractionImage, 0));
+	vec2 screenUv = gl_FragCoord.xy / max(sourceSize, vec2(1.0));
+	vec2 offset = normal.xy * (refractionScale * transmission / max(abs(normal.z), 0.2));
+	if (thickness > 0.0) {
+		vec3 incident = normalize(inWorldPosition - lighting.Eye.xyz);
+		vec3 facing = dot(incident, normal) < 0.0 ? normal : -normal;
+		vec3 ray = refract(incident, facing, 1.0 / ior);
+		vec3 travel = thickness * (
+			ray / max(-dot(ray, facing), 0.05) -
+			incident / max(-dot(incident, facing), 0.05)
+		);
+		vec3 horizontal = dFdx(inWorldPosition);
+		vec3 vertical = dFdy(inWorldPosition);
+		vec2 pixels = vec2(
+			dot(travel, horizontal) / max(dot(horizontal, horizontal), 1e-6),
+			dot(travel, vertical) / max(dot(vertical, vertical), 1e-6)
+		);
+		offset += pixels / max(sourceSize, vec2(1.0));
+	}
+	vec2 refractedUv = screenUv + offset;
+	vec3 refracted;
+	if (all(greaterThanEqual(refractedUv, vec2(0.0))) &&
+		all(lessThanEqual(refractedUv, vec2(1.0)))) {
+		refracted = texture(refractionImage, refractedUv).rgb;
+	} else if (lighting.Transmission.z > 0.5) {
+		vec2 guardSize = vec2(textureSize(refractionGuardImage, 0));
+		vec2 scale = sourceSize / max(guardSize, vec2(1.0));
+		vec2 guardUv = 0.5 * (vec2(1.0) - scale) + refractedUv * scale;
+		refracted = texture(refractionGuardImage, clamp(guardUv, vec2(0.0), vec2(1.0))).rgb;
+	} else {
+		refracted = texture(refractionImage, clamp(refractedUv, vec2(0.0), vec2(1.0))).rgb;
+	}
+	vec3 transmitted = mix(lit, refracted, transmission);
+	// Transmission is optical coverage, not a second alpha blend over the same
+	// source. The material owns this pixel, and the factor already selected the
+	// lit and refracted energy above. A second blend would apply transmission
+	// twice and make a 0.2 glass surface nearly disappear.
+	outColour = vec4(Encode(transmitted), 1.0);
 }

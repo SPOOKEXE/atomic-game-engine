@@ -194,6 +194,13 @@ TEST_CASE(
 			command.Operation = operation;
 			send();
 		}
+		for (auto operation :
+			 {TickExchangeOperation::BarrierCollect,
+			  TickExchangeOperation::BarrierResolve,
+			  TickExchangeOperation::BarrierApply}) {
+			command.Operation = operation;
+			send();
+		}
 		command.Operation = TickExchangeOperation::End;
 		command.Round = 1;
 		send();

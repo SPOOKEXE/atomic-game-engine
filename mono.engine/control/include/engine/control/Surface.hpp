@@ -23,6 +23,7 @@
 //
 // @tier shared
 
+#include <engine/control/HookRegistry.hpp>
 #include <engine/script/GltfSceneExport.hpp>
 
 #include <functional>
@@ -45,18 +46,6 @@ namespace engine::control {
 
 	class Surface;
 	class DataFactoryOperationLedger;
-
-	// One named group of tools, resources, or prompts a program elects to
-	// expose. The installer runs immediately and is not retained.
-	//
-	// @since v0.20
-	struct Feature {
-		// Stable feature identity and its immediate installer.
-		//@{
-		std::string Name;
-		std::function<void(Surface &)> Install;
-		//@}
-	};
 
 	// One thing a program can be asked to do.
 	//
@@ -100,6 +89,52 @@ namespace engine::control {
 
 	// Host callback that serializes the current frame graph or explains why it cannot.
 	using RenderGraphProvider = std::function<nlohmann::json(const nlohmann::json &, std::string &)>;
+
+	// One input action a host accepts from the control surface.
+	//
+	// The control module names no windowing API. A graphical host routes this to
+	// its existing event pump, while a host without an input path leaves these
+	// tools unregistered.
+	enum class InputAutomationKind : uint8_t {
+		MouseMove,
+		MouseButton,
+		MouseWheel,
+		Key,
+		Text,
+	};
+
+	// Whether an emulated button or key is a complete click, press, or release.
+	enum class InputAutomationState : uint8_t {
+		Click,
+		Down,
+		Up,
+	};
+
+	// One input action delivered across the host's input boundary.
+	struct InputAutomationEvent {
+		// Input category being emulated.
+		InputAutomationKind Kind = InputAutomationKind::MouseMove;
+		// Click, press, or release state for buttons and keys.
+		InputAutomationState State = InputAutomationState::Click;
+		// Horizontal pointer coordinate for mouse movement and button events.
+		float X = 0.0f;
+		// Vertical pointer coordinate for mouse movement and button events.
+		float Y = 0.0f;
+		// Signed vertical wheel movement in notches.
+		float Wheel = 0.0f;
+		// Named mouse button, when `Kind` is MouseButton.
+		std::string Button;
+		// Named key, when `Kind` is Key.
+		std::string Key;
+		// UTF-8 text, when `Kind` is Text.
+		std::string Text;
+		// Modifier names accompanying a key event.
+		std::vector<std::string> Modifiers;
+	};
+
+	// Delivers a validated automation event to the host's input boundary.
+	using InputAutomationCallback =
+		std::function<nlohmann::json(const InputAutomationEvent &, std::string &)>;
 
 	// Something a client may read without calling a tool.
 	//
@@ -184,20 +219,36 @@ namespace engine::control {
 		// @param name    What this program calls itself to a client.
 		// @param purpose One sentence a model reads before its first call.
 		Surface(std::string name, std::string purpose);
+		Surface(const Surface &) = delete;
+		Surface &operator=(const Surface &) = delete;
+		Surface(Surface &&) = delete;
+		Surface &operator=(Surface &&) = delete;
 
-		// Adds one tool. Later rows win, so a program may replace an inherited
-		// one with a better-informed version of itself.
+		// Adds one row during a named hook installation.
+		// Calls outside registration throw instead of creating an implicit owner.
 		void Add(Tool tool);
 
-		// Enables a program's explicit feature list, in order.
-		//
-		// A later feature may replace a row from an earlier one through `Add`,
-		// which is how product-specific tools refine shared engine tools without
-		// a second registry or a switch in the protocol.
-		//
-		// @param features Borrowed for this call. Installers are not retained.
-		// @since v0.20
-		void Enable(std::span<const Feature> features);
+		// The Add* installation helpers below require an active registration,
+		// supplied by ActivateHook.
+
+		// Activates an optional provider through owned transactional registration.
+		// During installation, Add, AddResource, and AddPrompt stage rows in the
+		// same transaction, so existing row builders can become a host hook without
+		// a shadow registration path.
+		HookLease
+		ActivateHook(HookDescriptor descriptor, const HookInstaller &installer, std::string &failure);
+		// The owner table for optional host providers.
+		HookRegistry &Hooks() {
+			return HookRegistry_;
+		}
+		// Advances optional hooks on the surface thread.
+		void PumpHooks() {
+			HookRegistry_.Pump();
+		}
+		// Returns the installed optional-hook registry.
+		const HookRegistry &Hooks() const {
+			return HookRegistry_;
+		}
 
 		// Supplies the host-owned capture readiness snapshot used by `negotiate`.
 		// No provider means this surface has no capture host.
@@ -235,7 +286,9 @@ namespace engine::control {
 		// @param writable Whether `instance_set` is offered at all. A replica
 		//                 refuses writes at the store, and a tool that always
 		//                 fails is worse than one that was never listed.
-		void AddUniverseTools(world::Universe &universe, bool writable = true);
+		// @param includeEngineInfo Whether to publish the generic engine_info row.
+		//                 Products with a richer replacement own that row themselves.
+		void AddUniverseTools(world::Universe &universe, bool writable = true, bool includeEngineInfo = true);
 
 		// Installs the module graph and the layer table.
 		//
@@ -284,7 +337,7 @@ namespace engine::control {
 		// use-after-free in the one component whose job is explaining a crash.
 		//
 		// @since v0.19
-		void AddDiagnosticTools();
+		void AddDiagnosticTools(bool includeLogTail = true);
 
 		// Installs the test runner.
 		//
@@ -298,6 +351,11 @@ namespace engine::control {
 		//
 		// @since v0.19
 		void AddBuildTools();
+
+		// Installs the five input automation tools when the host has an input
+		// boundary that can consume them. The callback owns event delivery, so
+		// control remains usable in programs built without SDL.
+		void AddInputTools(InputAutomationCallback callback);
 
 		// Installs pure capability and schema discovery for an external data
 		// factory. The result reports this surface's registered tools, while
@@ -328,12 +386,12 @@ namespace engine::control {
 		// Installs rig export tools, optionally fencing reads to a data-factory session revision.
 		void AddRigExportTools(world::Universe &universe, world::DataFactorySession *session = nullptr);
 
-		// Adds one resource. Later rows win, as `Add` does.
+		// Adds one resource during an active registration. Calls outside one throw.
 		//
 		// @since v0.19
 		void AddResource(Resource resource);
 
-		// Adds one prompt. Later rows win, as `Add` does.
+		// Adds one prompt during an active registration. Calls outside one throw.
 		//
 		// @since v0.19
 		void AddPrompt(Prompt prompt);
@@ -383,6 +441,7 @@ namespace engine::control {
 		// @return The tools.
 		// @since v0.12
 		std::span<const Tool> Registered() const {
+			const_cast<HookRegistry &>(HookRegistry_).Reap();
 			return Tools;
 		}
 
@@ -404,6 +463,7 @@ namespace engine::control {
 		// @return The resources.
 		// @since v0.19
 		std::span<const Resource> Readable() const {
+			const_cast<HookRegistry &>(HookRegistry_).Reap();
 			return Resources;
 		}
 
@@ -414,16 +474,27 @@ namespace engine::control {
 		// @return The prompts.
 		// @since v0.19
 		std::span<const Prompt> Prompted() const {
+			const_cast<HookRegistry &>(HookRegistry_).Reap();
 			return Prompts;
 		}
 
 	  private:
+		friend class HookRegistry;
+		void InstallHookTool(Tool tool, std::string_view id, uint64_t generation, bool replaceBuiltin);
+		void
+		InstallHookResource(Resource resource, std::string_view id, uint64_t generation, bool replaceBuiltin);
+		void InstallHookPrompt(Prompt prompt, std::string_view id, uint64_t generation, bool replaceBuiltin);
+		void RemoveHookTool(std::string_view name, std::string_view id, uint64_t generation);
+		void RemoveHookResource(std::string_view uri);
+		void RemoveHookPrompt(std::string_view name);
 		nlohmann::json ToolList() const;
 		nlohmann::json ResourceList() const;
 		nlohmann::json PromptList() const;
 
 		std::string Name;
 		std::string Purpose;
+		HookRegistry HookRegistry_;
+		HookRegistration *CurrentRegistration = nullptr;
 		std::vector<Tool> Tools;
 		std::function<DataCaptureAvailability()> CaptureAvailabilityProvider;
 		RenderGraphProvider RenderGraphProviderCallback;

@@ -51,11 +51,9 @@ namespace engine::game {
 	// The first byte of every message here, so a reader can refuse one it does
 	// not know rather than parsing a payload that was never for it.
 	//
-	// **A tag even for the first message**, because both channels are shared:
-	// the studio's edit stream already sends user messages over its own link,
-	// and a client's input channel already carries `examples::Shot`. The day an
-	// untagged payload is read as one of these is the day a wrong answer looks
-	// like a working one.
+	// **A tag even for the first message**, because both channels are shared
+	// with other traffic, including studio edits and script remote events. An
+	// untagged payload could otherwise be parsed as the wrong message.
 	enum class PlayMessage : uint8_t {
 		// Host to client: "this `Player` instance is yours."
 		AssignPlayer = 1,
@@ -250,10 +248,8 @@ namespace engine::game {
 
 	// Unpacks a move input.
 	//
-	// **Refuses a payload of any other length**, which is what keeps it apart
-	// from `examples::Shot` on the same channel: a shot is untagged,
-	// and a decoder that only checked the first byte would eventually
-	// read one as a move.
+	// **Refuses a payload of any other length**, so unrelated user messages
+	// cannot be mistaken for movement after their first byte matches.
 	//
 	// **The direction is not trusted.** A client may send any three floats; the
 	// host normalises what arrives and drops anything that is not finite, so

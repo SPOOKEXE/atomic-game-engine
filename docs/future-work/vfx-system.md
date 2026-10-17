@@ -1123,6 +1123,26 @@ buffer. The reference is explicit and serializable. The live effect samples the
 new revision at a simulation barrier and applies a declared restart or migrate
 policy.
 
+### TornadoSim demo boundary and proof
+
+`mono.engine/examples/assets/scripts/TornadoSim.luau` is a bounded script demo,
+not a tornado-specific engine system. One analytical Luau wind-field function
+drives kinematic debris, tree bend, hazard readout, and the parameters of
+existing GPU particle emitters. The script owns its storm state and caps moving
+debris. GPU emitters own visual particle state.
+
+The initial demo does not prove rigid-body debris, fluid behaviour, volumetric
+clouds, dense custom compute particles, or destruction simulation. It earns a
+generic engine extension only when a measured scene reaches a clear boundary:
+physics-body velocity and impulse for debris, field-sampled particle force for
+emitter shape, volume resources for cloud self-shadowing, or script-facing break
+groups for reusable destruction.
+
+Proof requires Luau typechecking, a headless load with world advancement, a
+visual run showing funnel, rain, debris, bending, and lightning, plus a release
+profile reporting scripted-debris and particle counts before any performance
+claim.
+
 ### Asynchronous work
 
 Compile, preload, and bake calls return the repository's normal ticket or

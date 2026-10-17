@@ -12,6 +12,7 @@
 #include "GridInternals.hpp"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <array>
@@ -249,12 +250,13 @@ TEST_CASE("a proxy far larger than the query volume is still found", "[hashgrid]
 }
 
 TEST_CASE("a large proxy promotes to a coarse level", "[hashgrid]") {
+	const float cellSize = GENERATE(1.0f, 2.0f, 4.0f);
 	// A baseplate belongs in one coarser grid, avoiding tens of thousands of
 	// base entries while preserving the normal cell walk for small bodies.
-	HashGrid grid{UNIT_CELL};
+	HashGrid grid{cellSize};
 	const Proxy proxies[] = {
-		Box(4, Vector3{-50.0f, -1.0f, -50.0f}, Vector3{50.0f, 0.0f, 50.0f}),
-		Box(5, Vector3{0.2f, 0.2f, 0.2f}, Vector3{0.8f, 0.8f, 0.8f}),
+		Box(4, Vector3{-50.0f, -1.0f, -50.0f} * cellSize, Vector3{50.0f, 0.0f, 50.0f} * cellSize),
+		Box(5, Vector3{0.2f, 0.2f, 0.2f} * cellSize, Vector3{0.8f, 0.8f, 0.8f} * cellSize),
 	};
 	grid.Rebuild(proxies);
 
@@ -264,30 +266,33 @@ TEST_CASE("a large proxy promotes to a coarse level", "[hashgrid]") {
 	// Found exactly once, from a query nowhere near where its cells would have
 	// started.
 	const std::vector<uint64_t> onTop =
-		Visited(grid, AABB{Vector3{20.0f, -0.5f, 20.0f}, Vector3{20.5f, -0.4f, 20.5f}});
+		Visited(grid, AABB{Vector3{20.0f, -0.5f, 20.0f} * cellSize, Vector3{20.5f, -0.4f, 20.5f} * cellSize});
 	REQUIRE(onTop == std::vector<uint64_t>{4});
 
 	// And not found where it is not, which says the exact box test still runs.
 	const std::vector<uint64_t> above =
-		Visited(grid, AABB{Vector3{20.0f, 5.0f, 20.0f}, Vector3{20.5f, 5.5f, 20.5f}});
+		Visited(grid, AABB{Vector3{20.0f, 5.0f, 20.0f} * cellSize, Vector3{20.5f, 5.5f, 20.5f} * cellSize});
 	REQUIRE(above.empty());
 
 	// The small proxy still comes out of the cells, and only once.
 	const std::vector<uint64_t> both =
-		Visited(grid, AABB{Vector3{0.0f, -0.5f, 0.0f}, Vector3{1.0f, 1.0f, 1.0f}});
+		Visited(grid, AABB{Vector3{0.0f, -0.5f, 0.0f} * cellSize, Vector3{1.0f, 1.0f, 1.0f} * cellSize});
 	REQUIRE(CountOf(both, 4) == 1);
 	REQUIRE(CountOf(both, 5) == 1);
 }
 
 TEST_CASE("clamped, inverted, and nonfinite bounds stay bounded", "[hashgrid]") {
-	HashGrid grid{UNIT_CELL};
-	const float beyondBaseLimit = static_cast<float>(engine::spatial::CELL_LIMIT + 32);
+	const float cellSize = GENERATE(1.0f, 2.0f, 4.0f);
+	HashGrid grid{cellSize};
+	const float beyondBaseLimit = static_cast<float>(engine::spatial::CELL_LIMIT) * cellSize + 32.0f;
 	const Proxy proxies[] = {
-		Box(1, Vector3{beyondBaseLimit, 0.0f, 0.0f}, Vector3{beyondBaseLimit + 0.5f, 0.5f, 0.5f}),
-		Box(2, Vector3{2.0f, 0.0f, 0.0f}, Vector3{1.0f, 0.5f, 0.5f}),
+		Box(1,
+			Vector3{beyondBaseLimit, 0.0f, 0.0f},
+			Vector3{beyondBaseLimit + 0.5f * cellSize, 0.5f * cellSize, 0.5f * cellSize}),
+		Box(2, Vector3{2.0f, 0.0f, 0.0f} * cellSize, Vector3{1.0f, 0.5f, 0.5f} * cellSize),
 		Box(3,
 			Vector3{std::numeric_limits<float>::infinity(), 0.0f, 0.0f},
-			Vector3{std::numeric_limits<float>::infinity(), 0.5f, 0.5f}),
+			Vector3{std::numeric_limits<float>::infinity(), 0.5f * cellSize, 0.5f * cellSize}),
 	};
 	grid.Rebuild(proxies);
 
@@ -298,7 +303,11 @@ TEST_CASE("clamped, inverted, and nonfinite bounds stay bounded", "[hashgrid]") 
 	REQUIRE(GridInternals::OversizedCount(grid) == 1);
 	REQUIRE(
 		Visited(
-			grid, AABB{Vector3{beyondBaseLimit, 0.0f, 0.0f}, Vector3{beyondBaseLimit + 0.5f, 0.5f, 0.5f}}
+			grid,
+			AABB{
+				Vector3{beyondBaseLimit, 0.0f, 0.0f},
+				Vector3{beyondBaseLimit + 0.5f * cellSize, 0.5f * cellSize, 0.5f * cellSize},
+			}
 		) == std::vector<uint64_t>{1}
 	);
 }
@@ -326,6 +335,21 @@ TEST_CASE("a bucket collision is a false positive and never a miss", "[hashgrid]
 		Box(2, Vector3{offset + 0.2f, 0.2f, 0.2f}, Vector3{offset + 0.8f, 0.8f, 0.8f}),
 	};
 	grid.Rebuild(proxies);
+
+	std::vector<std::array<int32_t, 3>> occupiedCoordinates;
+	const GridInternals::Occupancy occupancy = GridInternals::ReadOccupancy(grid, occupiedCoordinates);
+	const GridInternals::LevelOccupancy &base = occupancy.Levels[0];
+	REQUIRE(occupancy.Proxies == 2);
+	REQUIRE(occupancy.ResidualProxies == 0);
+	REQUIRE(base.Proxies == 2);
+	REQUIRE(base.Entries == 2);
+	REQUIRE(base.OccupiedCells == 2);
+	REQUIRE(base.MaximumCellMemberships == 1);
+	// Two base entries still select the minimum 64 buckets, retaining the
+	// collision forced above while the coordinate occupancy remains distinct.
+	REQUIRE(base.Buckets == 64);
+	REQUIRE(base.OccupiedBuckets == 1);
+	REQUIRE(base.MaximumBucketEntries == 2);
 
 	REQUIRE(GridInternals::BucketOf(grid, 0, 0, 0) == GridInternals::BucketOf(grid, collidingX, 0, 0));
 
@@ -622,16 +646,31 @@ TEST_CASE("the second rebuild reuses the first's storage", "[hashgrid]") {
 }
 
 TEST_CASE("exclusive hierarchy levels and the residual preserve exact candidates", "[hashgrid]") {
-	HashGrid grid{UNIT_CELL};
+	const float cellSize = GENERATE(1.0f, 2.0f, 4.0f);
+	HashGrid grid{cellSize};
 	const Proxy proxies[] = {
-		Box(1, Vector3{0.0f, 0.0f, 0.0f}, Vector3{0.5f, 0.5f, 0.5f}, LayerMask::Only(0)),
-		Box(2, Vector3{-25.0f, 0.0f, -5.0f}, Vector3{25.0f, 0.5f, 6.0f}, LayerMask::Only(0)),
-		Box(3, Vector3{-75.0f, 0.0f, -5.0f}, Vector3{75.0f, 0.5f, 6.0f}, LayerMask::Only(1)),
-		Box(4, Vector3{-600.0f, 0.0f, -5.0f}, Vector3{600.0f, 0.5f, 6.0f}, LayerMask::Only(1)),
-		Box(5, Vector3{-4800.0f, 0.0f, -5.0f}, Vector3{4800.0f, 0.5f, 6.0f}, LayerMask::Only(0)),
+		Box(
+			1, Vector3{0.0f, 0.0f, 0.0f} * cellSize, Vector3{0.5f, 0.5f, 0.5f} * cellSize, LayerMask::Only(0)
+		),
+		Box(2,
+			Vector3{-25.0f, 0.0f, -5.0f} * cellSize,
+			Vector3{25.0f, 0.5f, 6.0f} * cellSize,
+			LayerMask::Only(0)),
+		Box(3,
+			Vector3{-75.0f, 0.0f, -5.0f} * cellSize,
+			Vector3{75.0f, 0.5f, 6.0f} * cellSize,
+			LayerMask::Only(1)),
+		Box(4,
+			Vector3{-600.0f, 0.0f, -5.0f} * cellSize,
+			Vector3{600.0f, 0.5f, 6.0f} * cellSize,
+			LayerMask::Only(1)),
+		Box(5,
+			Vector3{-4800.0f, 0.0f, -5.0f} * cellSize,
+			Vector3{4800.0f, 0.5f, 6.0f} * cellSize,
+			LayerMask::Only(0)),
 		Box(6,
-			Vector3{-1000000.0f, 0.0f, -1000000.0f},
-			Vector3{1000000.0f, 0.5f, 1000000.0f},
+			Vector3{-1000000.0f, 0.0f, -1000000.0f} * cellSize,
+			Vector3{1000000.0f, 0.5f, 1000000.0f} * cellSize,
 			LayerMask::Only(0)),
 	};
 	grid.Rebuild(proxies);
@@ -641,7 +680,10 @@ TEST_CASE("exclusive hierarchy levels and the residual preserve exact candidates
 	}
 	REQUIRE(GridInternals::OversizedCount(grid) == 1);
 
-	const AABB centre{Vector3{-0.1f, -0.1f, -0.1f}, Vector3{0.1f, 0.1f, 0.1f}};
+	const AABB centre{
+		Vector3{-0.1f, -0.1f, -0.1f} * cellSize,
+		Vector3{0.1f, 0.1f, 0.1f} * cellSize,
+	};
 	const std::vector<uint64_t> first = Visited(grid, centre, LayerMask::All());
 	REQUIRE(first == std::vector<uint64_t>{1, 2, 3, 4, 5, 6});
 	REQUIRE(Visited(grid, centre, LayerMask::Only(1)) == std::vector<uint64_t>{3, 4});

@@ -269,7 +269,13 @@ namespace engine::render {
 					entry.Instance >= State->SlotHeightMap.size() ||
 					entry.Instance >= State->SlotMetalnessMap.size() ||
 					entry.Instance >= State->SlotEmissiveMap.size() ||
-					entry.Instance >= State->SlotSeam.size() || entry.Instance >= State->SlotSeamLight.size())
+					entry.Instance >= State->SlotPackedPbrMap.size() ||
+					entry.Instance >= State->SlotPackedPbrChannels.size() ||
+					entry.Instance >= State->SlotSeam.size() ||
+					entry.Instance >= State->SlotSeamFirst.size() ||
+					entry.Instance >= State->SlotSeamSecond.size() ||
+					entry.Instance >= State->SlotSeamCentre.size() ||
+					entry.Instance >= State->SlotSeamLight.size())
 					continue;
 				const MeshEntry *mesh = State->SlotMesh[entry.Instance];
 				if (mesh == nullptr) continue;
@@ -301,6 +307,14 @@ namespace engine::render {
 				SDL_GPUTexture *height = dataMap(State->SlotHeightMap[entry.Instance]);
 				SDL_GPUTexture *metalness = dataMap(State->SlotMetalnessMap[entry.Instance]);
 				SDL_GPUTexture *emissive = dataMap(State->SlotEmissiveMap[entry.Instance]);
+				// Keep legacy semantic maps active while the packed texture is still
+				// loading or is absent. `dataMap` would turn that state into a marker.
+				SDL_GPUTexture *packedPbr = State->Textures.Find(
+					State->SlotPackedPbrMap[entry.Instance],
+					State->TextureContentOwner(
+						State->SlotPackedPbrMap[entry.Instance], State->SlotContentOwner[entry.Instance]
+					)
+				);
 				SDL_GPUSampler *sampler =
 					State->SlotResample[entry.Instance] == scene::SurfaceResampleMode::Pixelated
 						? State->Textures.PixelSampler()
@@ -323,24 +337,52 @@ namespace engine::render {
 					{occlusion != nullptr ? occlusion : State->FallbackTexture, sampler},
 					{emissive != nullptr ? emissive : State->FallbackTexture, sampler},
 					{height != nullptr ? height : State->FallbackTexture, sampler},
-					{metalness != nullptr ? metalness : State->FallbackTexture, sampler}
+					{metalness != nullptr ? metalness : State->FallbackTexture, sampler},
+					{packedPbr != nullptr ? packedPbr : State->FallbackTexture, sampler},
+					{State->RefractionTexture != nullptr ? State->RefractionTexture : State->FallbackTexture,
+					 State->RefractionSampler != nullptr ? State->RefractionSampler : fallbackSampler},
+					{State->RefractionGuardTexture != nullptr ? State->RefractionGuardTexture
+															  : State->FallbackTexture,
+					 State->RefractionSampler != nullptr ? State->RefractionSampler : fallbackSampler}
 				};
-				SDL_BindGPUFragmentSamplers(pass, 0, bindings, 10);
+				SDL_BindGPUFragmentSamplers(pass, 0, bindings, 13);
 				LightingUniforms material = Lighting;
 				const std::array<float, 4> tint = absent ? std::array<float, 4>{1, 1, 1, 1} : source.Colour;
 				material.BaseColour = glm::vec4{tint[0], tint[1], tint[2], tint[3]};
-				material.Surface =
-					glm::vec4{sampled != nullptr ? 1.0f : 0.0f, 0.0f, height != nullptr ? 1.0f : 0.0f, 0.04f};
+				material.Surface = glm::vec4{
+					sampled != nullptr ? 1.0f : 0.0f,
+					0.0f,
+					height != nullptr ||
+							(packedPbr != nullptr && State->SlotPackedPbrChannels[entry.Instance].z < 4.0f)
+						? 1.0f
+						: 0.0f,
+					0.04f
+				};
 				material.Material = glm::vec4{
 					normal != nullptr ? 1.0f : 0.0f,
 					roughness != nullptr ? 1.0f : 0.0f,
 					occlusion != nullptr ? 1.0f : 0.0f,
 					emissive != nullptr ? 1.0f : 0.0f,
 				};
-				material.MaterialExtra = glm::vec4{metalness != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+				material.MaterialExtra = glm::vec4{
+					metalness != nullptr ? 1.0f : 0.0f,
+					packedPbr != nullptr ? 1.0f : 0.0f,
+					State->SlotSpecularFactor[entry.Instance],
+					State->SlotTransmissionFactor[entry.Instance]
+				};
+				material.PackedPbrChannels = State->SlotPackedPbrChannels[entry.Instance];
+				material.Transmission = glm::vec4{
+					State->SlotIndexOfRefraction[entry.Instance],
+					State->SlotThickness[entry.Instance],
+					0.0f,
+					0.0f
+				};
 				const FlipbookCell cell = State->Textures.CellOf(texture, State->AnimationSeconds, owner);
 				material.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
 				material.SeamPlane = State->SlotSeam[entry.Instance];
+				material.SeamFirst = State->SlotSeamFirst[entry.Instance];
+				material.SeamSecond = State->SlotSeamSecond[entry.Instance];
+				material.SeamCentre = State->SlotSeamCentre[entry.Instance];
 				const glm::vec3 seamLight{State->SlotSeamLight[entry.Instance]};
 				if (glm::dot(seamLight, seamLight) > 0.0f) material.Direction = glm::vec4{seamLight, 0.0f};
 				SDL_PushGPUFragmentUniformData(Command, 0, &material, sizeof(material));
@@ -733,8 +775,8 @@ namespace engine::render {
 			SDL_SetGPUViewport(pass, &SceneViewport);
 			SDL_SetGPUScissor(pass, &SceneScissor);
 			SDL_PushGPUVertexUniformData(Command, 0, &Frame, sizeof(Frame));
-			const core::Vector3 eye = Request.CameraFrame.Position;
-			const core::Vector3 forward = Request.CameraFrame.LookVector();
+			const core::Vector3 eye = Request.VisibilityCameraFrame.Position;
+			const core::Vector3 forward = Request.VisibilityCameraFrame.LookVector();
 			const std::array<glm::vec4, 2> peelUniforms{
 				glm::vec4{forward.X, forward.Y, forward.Z, -forward.Dot(eye)},
 				glm::vec4{depthRule->SourceQuantum, depthRule->NextRepresentable ? 1.0f : 0.0f, 0, 0},
@@ -841,8 +883,8 @@ namespace engine::render {
 				auto *pass = SDL_BeginGPURenderPass(Command, targets, 1, phase == 0 ? &depthTarget : nullptr);
 				if (!pass) return false;
 				++recordedPasses;
-				const auto eye = Request.CameraFrame.Position;
-				const auto forward = Request.CameraFrame.LookVector();
+				const auto eye = Request.VisibilityCameraFrame.Position;
+				const auto forward = Request.VisibilityCameraFrame.LookVector();
 				const std::array<glm::vec4, 3> capture{
 					glm::vec4{eye.X, eye.Y, eye.Z, 0},
 					glm::vec4{forward.X, forward.Y, forward.Z, 0},
@@ -865,7 +907,7 @@ namespace engine::render {
 						phase == 0 ? State->TransparentLayerPipeline : State->TransparentLayerColourPipeline,
 						Impl::PipelineFamily::Other
 					);
-					SDL_BindGPUFragmentSamplers(pass, 10, bounds, 2);
+					SDL_BindGPUFragmentSamplers(pass, 13, bounds, 2);
 					State->BindInstanceBuffers(pass);
 					const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
 					SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
@@ -905,7 +947,7 @@ namespace engine::render {
 							Command,
 							pass,
 							Matrices.ViewProjection,
-							Request.CameraFrame,
+							Request.VisibilityCameraFrame,
 							Result.Triangles,
 							Result.ParticlesDrawn,
 							Result.Culled,
@@ -917,7 +959,7 @@ namespace engine::render {
 							Command,
 							pass,
 							Matrices.ViewProjection,
-							Request.CameraFrame,
+							Request.VisibilityCameraFrame,
 							Request.RibbonRuns,
 							Result.Triangles,
 							WorldColourTarget::Hdr,
@@ -944,12 +986,12 @@ namespace engine::render {
 					++recordedPasses;
 					const SDL_GPUViewport viewport{0, 0, float(colour.Width), float(colour.Height), 0, 1};
 					SDL_SetGPUViewport(batchPass, &viewport);
-					const auto lighting = LightingAt(Request.CameraFrame.Position, 0, 0);
+					const auto lighting = LightingAt(Request.VisibilityCameraFrame.Position, 0, 0);
 					WorldInterfaceCapture capture;
 					capture.Command = Command;
 					capture.Pass = batchPass;
 					capture.ViewProjection = Matrices.ViewProjection;
-					capture.Camera = Request.CameraFrame;
+					capture.Camera = Request.VisibilityCameraFrame;
 					capture.Ambient = {lighting.Ambient.x, lighting.Ambient.y, lighting.Ambient.z};
 					capture.Sun = {lighting.Direction.x, lighting.Direction.y, lighting.Direction.z};
 					capture.Width = colour.Width;
@@ -988,7 +1030,8 @@ namespace engine::render {
 						 State->OverlaySampler}
 					};
 					SDL_BindGPUFragmentSamplers(merge, 0, samplers, 4);
-					const auto eye = Request.CameraFrame.Position, forward = Request.CameraFrame.LookVector();
+					const auto eye = Request.VisibilityCameraFrame.Position;
+					const auto forward = Request.VisibilityCameraFrame.LookVector();
 					struct Uniforms {
 						glm::mat4 Inverse;
 						glm::vec4 CameraDepth, Flags;
@@ -1008,6 +1051,8 @@ namespace engine::render {
 			// Body depth uses this same D32 reconstruction. Interpolated world depth
 			// can put coincident glass in front of an opaque body after import.
 			auto linearUniforms = Uniforms;
+			linearUniforms.Target.x = static_cast<float>(depth.Width);
+			linearUniforms.Target.y = static_cast<float>(depth.Height);
 			linearUniforms.Target.z = linearUniforms.Target.w = 1;
 			linearUniforms.Direction.w = 1;
 			const std::array linearBindings{
@@ -1038,7 +1083,7 @@ namespace engine::render {
 			Impl *const State = recording.State;
 			FrameResult &result = recording.Result;
 			SDL_GPUCommandBuffer *const command = recording.Command;
-			const core::CFrame &cameraFrame = recording.Request.CameraFrame;
+			const core::CFrame &visibilityCameraFrame = recording.Request.VisibilityCameraFrame;
 			FrameOverlayHook *const gameInterfaceHook = recording.Request.GameInterfaceHook;
 			const std::span<const effects::RibbonRun> ribbonRuns = recording.Request.RibbonRuns;
 			const uint32_t sceneWidth = recording.SceneWidth;
@@ -1094,12 +1139,76 @@ namespace engine::render {
 					break;
 				}
 			}
+			State->RefractionGuardTexture = nullptr;
+			bool hasTransmission = false;
+			for (uint32_t index = 0; index < plainTransparent; ++index) {
+				const uint32_t slot = sceneCount + static_cast<uint32_t>(opaqueCount) + index;
+				if (slot < State->SlotTransmissionFactor.size() &&
+					State->SlotTransmissionFactor[slot] > 0.00001f) {
+					hasTransmission = true;
+					break;
+				}
+			}
+			// Source slots contain every opaque row before camera culling, so this
+			// wider raster can see geometry the presentation frustum rejected.
+			const uint32_t guardWidth = sceneWidth + sceneWidth / 2;
+			const uint32_t guardHeight = sceneHeight + sceneHeight / 2;
+			if (hasTransmission && recording.Pbr != nullptr && recording.SceneOpaque > 0 &&
+				guardWidth <= 4096 && guardHeight <= 4096 && State->HdrOpaquePipeline != nullptr &&
+				State->EnsureRefractionGuard(*recording.Pbr, guardWidth, guardHeight)) {
+				const SDL_GPUViewport guardViewport{
+					0.0f, 0.0f, static_cast<float>(guardWidth), static_cast<float>(guardHeight), 0.0f, 1.0f
+				};
+				SDL_GPURenderPass *guard = recording.OpenScenePass(
+					recording.Pbr->RefractionGuard,
+					recording.Pbr->RefractionGuardDepth,
+					false,
+					&guardViewport,
+					lightUniforms,
+					nullptr,
+					WorldColourTarget::Hdr
+				);
+				if (guard != nullptr) {
+					glm::mat4 guardProjection = matrices.Projection;
+					guardProjection[0][0] *= static_cast<float>(sceneWidth) / guardWidth;
+					guardProjection[1][1] *= static_cast<float>(sceneHeight) / guardHeight;
+					const FrameUniforms guardFrame{
+						guardProjection * matrices.View, lightViewProjection, glm::mat4{1.0f}
+					};
+					SDL_PushGPUVertexUniformData(command, 0, &guardFrame, sizeof(guardFrame));
+					const LightingUniforms guardLighting =
+						lightingAt(visibilityCameraFrame.Position, 0.0f, 0.0f);
+					result.DrawCalls += State->DrawSlots(
+						command,
+						guard,
+						0,
+						static_cast<uint32_t>(recording.SceneOpaque),
+						&guardLighting,
+						State->ShadowTexture,
+						State->ShadowSampler,
+						nullptr,
+						State->SurfaceSampler,
+						0,
+						result.Triangles,
+						nullptr,
+						Impl::SlotSelection::All,
+						Impl::VisibilityPass::Secondary
+					);
+					SDL_EndGPURenderPass(guard);
+					State->RefractionGuardTexture = recording.Pbr->RefractionGuard;
+					core::Metrics::Count(
+						"render.refraction_guard.pixels", uint64_t(guardWidth) * guardHeight
+					);
+				}
+			}
 			if (!drawImage(source, target, SDL_GPU_LOADOP_CLEAR)) {
 				ENGINE_WARN("'{}' needs a scene image and an output image", context.Name.Text());
 				return true;
 			}
 			const bool hdr = target.Format == SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
 			const auto worldTarget = hdr ? WorldColourTarget::Hdr : WorldColourTarget::Display;
+			State->RefractionTexture = source.Texture;
+			State->RefractionSampler = recording.Sampler;
 			colourTarget.texture = target.Texture;
 			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;
 			colourTarget.store_op = SDL_GPU_STOREOP_STORE;
@@ -1156,8 +1265,12 @@ namespace engine::render {
 				GridUniforms gridUniforms;
 				gridUniforms.ViewProjection = matrices.ViewProjection;
 				gridUniforms.InverseViewProjection = glm::inverse(matrices.ViewProjection);
-				gridUniforms.Eye =
-					glm::vec4{cameraFrame.Position.X, cameraFrame.Position.Y, cameraFrame.Position.Z, 0.0f};
+				gridUniforms.Eye = glm::vec4{
+					visibilityCameraFrame.Position.X,
+					visibilityCameraFrame.Position.Y,
+					visibilityCameraFrame.Position.Z,
+					0.0f
+				};
 				gridUniforms.Params =
 					glm::vec4{groundGrid.Step, groundGrid.Major, groundGrid.Reach, groundGrid.Strength};
 				gridUniforms.Offset = glm::vec4{groundGrid.Offset.X, groundGrid.Offset.Z, 0.0f, 0.0f};
@@ -1211,7 +1324,7 @@ namespace engine::render {
 				// instance samples the surface is per instance and the uniform
 				// is per draw, so the split is a third draw rather than a
 				// per-fragment branch on data the shader does not have.
-				const LightingUniforms lighting = lightingAt(cameraFrame.Position, 0.0f, 0.0f);
+				const LightingUniforms lighting = lightingAt(visibilityCameraFrame.Position, 0.0f, 0.0f);
 				SDL_PushGPUFragmentUniformData(command, 0, &lighting, sizeof(lighting));
 
 				// Both samplers, every draw. A shadow map that was not rendered
@@ -1238,7 +1351,7 @@ namespace engine::render {
 						command,
 						pass,
 						viewProjection,
-						cameraFrame,
+						visibilityCameraFrame,
 						core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
 						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
 						sceneWidth,
@@ -1302,7 +1415,7 @@ namespace engine::render {
 						command,
 						pass,
 						frameUniforms.ViewProjection,
-						cameraFrame,
+						visibilityCameraFrame,
 						result.Triangles,
 						result.ParticlesDrawn,
 						result.Culled,
@@ -1317,7 +1430,7 @@ namespace engine::render {
 						command,
 						pass,
 						frameUniforms.ViewProjection,
-						cameraFrame,
+						visibilityCameraFrame,
 						ribbonRuns,
 						result.Triangles,
 						worldTarget
@@ -1329,7 +1442,7 @@ namespace engine::render {
 						command,
 						pass,
 						viewProjection,
-						cameraFrame,
+						visibilityCameraFrame,
 						core::Color3{State->Ambient.x, State->Ambient.y, State->Ambient.z},
 						core::Vector3{State->Sun.x, State->Sun.y, State->Sun.z},
 						sceneWidth,
@@ -1349,6 +1462,70 @@ namespace engine::render {
 			}
 
 			SDL_EndGPURenderPass(pass);
+			// The deferred resolve has consumed the opaque G-buffer by this point.
+			// Overlay the sorted transmissive tail into those metadata attachments
+			// only now, so data capture sees its authored labels and factors without
+			// making the deferred lighting source contain the glass itself.
+			if (plainTransparent > 0 && recording.Pbr != nullptr &&
+				State->GBufferTransparentPipeline != nullptr) {
+				Impl::PbrSlot &pbr = *recording.Pbr;
+				SDL_GPUColorTargetInfo metadata[8]{};
+				SDL_GPUTexture *const textures[] = {
+					pbr.Albedo,
+					pbr.Normal,
+					pbr.Material,
+					pbr.Emissive,
+					pbr.ObjectIds,
+					pbr.SemanticIds,
+					pbr.PartIds,
+					pbr.MeshUv,
+				};
+				bool valid = true;
+				for (size_t index = 0; index < std::size(metadata); ++index) {
+					metadata[index].texture = textures[index];
+					metadata[index].load_op = SDL_GPU_LOADOP_LOAD;
+					metadata[index].store_op = SDL_GPU_STOREOP_STORE;
+					metadata[index].cycle = false;
+					valid = valid && textures[index] != nullptr;
+				}
+				if (valid) {
+					auto metadataDepth = depthTarget;
+					metadataDepth.load_op = SDL_GPU_LOADOP_LOAD;
+					metadataDepth.store_op = SDL_GPU_STOREOP_STORE;
+					metadataDepth.cycle = false;
+					auto *metadataPass = SDL_BeginGPURenderPass(command, metadata, 8, &metadataDepth);
+					if (metadataPass != nullptr) {
+						State->BindPipeline(
+							metadataPass, State->GBufferTransparentPipeline, Impl::PipelineFamily::Other
+						);
+						State->BindInstanceBuffers(metadataPass);
+						const SDL_GPUBufferBinding indexBinding{State->Meshes.Indices(), 0};
+						SDL_BindGPUIndexBuffer(metadataPass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+						const FrameUniforms frame{
+							matrices.ViewProjection, lightViewProjection, glm::mat4{1.0f}
+						};
+						SDL_PushGPUVertexUniformData(command, 0, &frame, sizeof(frame));
+						const auto metadataLighting = lightingAt(visibilityCameraFrame.Position, 0.0f, 0.0f);
+						result.DrawCalls += State->DrawSlots(
+							command,
+							metadataPass,
+							static_cast<uint32_t>(sceneCount + opaqueCount),
+							plainTransparent,
+							&metadataLighting,
+							State->ShadowTexture,
+							State->ShadowSampler,
+							nullptr,
+							State->SurfaceSampler,
+							0,
+							result.Triangles
+						);
+						SDL_EndGPURenderPass(metadataPass);
+					}
+				}
+			}
+			State->RefractionTexture = nullptr;
+			State->RefractionGuardTexture = nullptr;
+			State->RefractionSampler = nullptr;
 			return true;
 		});
 	}

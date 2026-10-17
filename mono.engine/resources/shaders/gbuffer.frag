@@ -38,6 +38,7 @@ layout(set = 2, binding = 6) uniform sampler2D occlusionMap;
 layout(set = 2, binding = 7) uniform sampler2D emissiveMap;
 layout(set = 2, binding = 8) uniform sampler2D heightMap;
 layout(set = 2, binding = 9) uniform sampler2D metalnessMap;
+layout(set = 2, binding = 10) uniform sampler2D packedPbrMap;
 
 layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Direction;
@@ -51,13 +52,23 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Mirror;
 	vec4 PaneNormal;
 	vec4 SeamPlane;
+	vec4 SeamFirst;
+	vec4 SeamSecond;
+	vec4 SeamCentre;
 	vec4 OutdoorAmbient;
 	vec4 FogColour;
 	vec4 Fog;
 	vec4 Eye;
 	vec4 MaterialExtra;
 	uvec4 RenderFeatures;
+	vec4 PackedPbrChannels;
 } lighting;
+
+#include "seam-mask.glsl"
+
+float PackedPbrValue(vec2 uv, float channel) {
+	return texture(packedPbrMap, uv)[int(channel + 0.5)];
+}
 
 #include "opaque-eligibility.glsl"
 
@@ -72,11 +83,20 @@ void main() {
 
 	float roughness = lighting.Material.y > 0.5 ? texture(roughnessMap, surface.cellUv).r : 0.65;
 	float materialOcclusion = lighting.Material.z > 0.5 ? texture(occlusionMap, surface.cellUv).r : 1.0;
-	vec3 emissive = (surface.features & FEATURE_EMISSION) != 0u && lighting.Material.w > 0.5
-		? texture(emissiveMap, surface.cellUv).rgb * inEmission.rgb * inEmission.a
+	// Emissive tint and strength are authored independently of an optional map.
+	// A missing map therefore leaves their constant radiance intact instead of
+	// turning the surface black.
+	vec3 emissive = (surface.features & FEATURE_EMISSION) != 0u
+		? inEmission.rgb * inEmission.a *
+			(lighting.Material.w > 0.5 ? texture(emissiveMap, surface.cellUv).rgb : vec3(1.0))
 		: vec3(0.0);
 	float metalness =
 		lighting.MaterialExtra.x > 0.5 ? texture(metalnessMap, surface.cellUv).r : 0.0;
+	if (lighting.MaterialExtra.y > 0.5) {
+		if (lighting.PackedPbrChannels.x < 4.0) roughness = PackedPbrValue(surface.cellUv, lighting.PackedPbrChannels.x);
+		if (lighting.PackedPbrChannels.y < 4.0) materialOcclusion = PackedPbrValue(surface.cellUv, lighting.PackedPbrChannels.y);
+		if (lighting.PackedPbrChannels.w < 4.0) metalness = PackedPbrValue(surface.cellUv, lighting.PackedPbrChannels.w);
+	}
 
 	vec3 mappedColour = surface.colour.rgb * lighting.BaseColour.rgb;
 	vec3 albedo = inColour.rgb * mappedColour * inSurfaceColour;
@@ -87,8 +107,8 @@ void main() {
 	}
 	outAlbedo = vec4(albedo, surface.alpha);
 	outNormal = vec4(normal * 0.5 + 0.5, 1.0);
-	outMaterial = vec4(clamp(roughness, 0.045, 1.0), clamp(metalness, 0.0, 1.0), materialOcclusion, 0.0);
-	outEmissive = vec4(emissive, 1.0);
+	outMaterial = vec4(clamp(roughness, 0.045, 1.0), clamp(metalness, 0.0, 1.0), materialOcclusion, clamp(lighting.MaterialExtra.z, 0.0, 1.0));
+	outEmissive = vec4(emissive, clamp(lighting.MaterialExtra.w, 0.0, 1.0));
 	outObjectId = inObjectLabel;
 	outSemanticId = inSemanticLabel;
 	outPartId = inPartLabel;

@@ -44,7 +44,7 @@ int main(int argc, char **argv) {
 		"Override imported flipbook FPS, or state static-atlas FPS with --flipbook-side and --flipbook-frames"
 	);
 	arguments.Value(
-		"flipbook-side", "CELLS", "Mark ordinary image atlases as a 1, 2, 4 or 8 cell-wide flipbook"
+		"flipbook-side", "CELLS", "Mark ordinary image atlases as a 1, 2, 4, 8 or 16 cell-wide flipbook"
 	);
 	arguments.Value("flipbook-frames", "COUNT", "Populated static-atlas flipbook cells, up to side squared");
 	arguments.Flag("no-mipmaps", "Skip the mip chain, leaving every texture one level");
@@ -107,12 +107,14 @@ int main(int argc, char **argv) {
 	const int64_t flipbookSide = arguments.GetInteger("flipbook-side", settings.FlipbookSide);
 	const int64_t flipbookFrames = arguments.GetInteger("flipbook-frames", settings.FlipbookFrames);
 	if (flipbookSide < 0 || flipbookSide > std::numeric_limits<uint8_t>::max() || flipbookFrames < 0 ||
-		flipbookFrames > std::numeric_limits<uint8_t>::max()) {
-		ENGINE_ERROR("assetc: --flipbook-side and --flipbook-frames must be between 0 and 255");
+		flipbookFrames > 256) {
+		ENGINE_ERROR(
+			"assetc: --flipbook-side must be between 0 and 255 and --flipbook-frames between 0 and 256"
+		);
 		return 2;
 	}
 	settings.FlipbookSide = static_cast<uint8_t>(flipbookSide);
-	settings.FlipbookFrames = static_cast<uint8_t>(flipbookFrames);
+	settings.FlipbookFrames = static_cast<uint16_t>(flipbookFrames);
 
 	std::string failure;
 	const assetc::Report report = assetc::Bake(settings, failure);

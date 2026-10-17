@@ -35,6 +35,20 @@ project(atomic
 set_property(DIRECTORY APPEND
 	PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
 
+# One compiler for every Linux build: GCC. Generated output depends on it
+# (`ecs::HasPadding` needs `__builtin_clear_padding`, which clang lacks, so
+# docs/ECS_COMPONENTS.md reads differently under clang), and `just check`
+# compares builds against files the GCC `ci` preset wrote. The libFuzzer builds
+# are the exception, since libFuzzer is clang-only; they arrive with a
+# MONO_FUZZ_* option set on the command line.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+   NOT (MONO_FUZZ_GUI OR MONO_FUZZ_BAKE OR MONO_FUZZ_SHADER OR MONO_FUZZ_PRESENTATION OR
+        MONO_FUZZ_PORTAL_EXCHANGE))
+	message(FATAL_ERROR
+		"Linux builds use GCC; this configure picked ${CMAKE_CXX_COMPILER_ID} (${CMAKE_CXX_COMPILER}).\n"
+		"  Reconfigure without a compiler override: `cmake --preset <name> --fresh`.")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -392,6 +406,12 @@ endif()
 # nondeterministic bytes into every `.gch`, so precompiled-header users never
 # share across presets whatever is set here.
 #
+# `CCACHE_DEPEND=true` keeps a cache miss out of the preprocessor. Without it,
+# ccache runs `cc1plus -E -fpch-preprocess` on a PCH-backed source. One physics
+# object grew that process past 66 GiB RSS before it was stopped. Ninja already
+# requests dependency files with `-MD`, which is what depend mode hashes.
+# Direct hits still work; a miss compiles once instead of expanding the PCH.
+#
 # Two calls per build still report as errors, and they are the two PCH
 # *generation* steps - ccache cannot parse a header as a source, so it passes
 # them to the compiler untouched. Correct, and 0.11% of the build.
@@ -440,6 +460,7 @@ if(MONO_CCACHE)
 			"CCACHE_SLOPPINESS=pch_defines,time_macros"
 			"CCACHE_BASEDIR=${CMAKE_SOURCE_DIR}"
 			"CCACHE_NOHASHDIR=true"
+			"CCACHE_DEPEND=true"
 			"${MONO_COMPILER_CACHE}")
 		else()
 			set(MONO_CACHE_LAUNCHER "${MONO_COMPILER_CACHE}")

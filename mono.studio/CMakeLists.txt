@@ -81,16 +81,13 @@ mono_add_library(studio
 		# imgui-carrying `client` library nothing in the engine reaches is an
 		# editor widget library, not a layer of the engine.
 		#
-		# **Public, and it has to be.** `studio::Editor` *holds* the graph, the
-		# canvas and the evaluator by value and hands a
-		# `nodegraph::PreviewImage` to its texture sink, so those types are
-		# named in `studio/Editor.hpp` and cannot be hidden without a pimpl over
-		# the editor's whole state.
+		# **Public, and it has to be.** `studio::Editor` holds the render
+		# pipeline graph, canvas and evaluator by value. Those types are named
+		# in `studio/Editor.hpp` and cannot be hidden without a pimpl over the
+		# editor's whole state.
 		#
-		# The node set the Demo Nodes panel runs is *not* in it. It is
-		# `src/DemoNodes.cpp`, in this target, because it is content rather than
-		# library - D00113's seam, kept: a host with its own vocabulary links
-		# the library and gets none of it.
+		# Production graph editors register their own node types in this target;
+		# the library itself has no host-specific vocabulary.
 		Mono::nodegraph
 
 		# `shared`. The origin policy used when the editor publishes its
@@ -167,7 +164,7 @@ mono_add_library(studio
 	# document and reuses that emitter. **Private, and it stays private**: this
 	# is a parser for one file extension in an editor, and nothing in a public
 	# header here names a `toml::` type.
-	VENDOR Vendor::tomlplusplus
+	VENDOR Vendor::tomlplusplus Vendor::accesskit-c Vendor::json
 
 	ALLOW_TIER_ESCAPE Mono::server
 )
@@ -179,6 +176,11 @@ mono_add_program(studio
 		Mono::studio
 		Engine::core
 )
+
+# The product MCP contract suite speaks the loopback wire directly.
+if(TARGET test_studio)
+	target_link_libraries(test_studio PRIVATE Vendor::asio Vendor::json)
+endif()
 
 # --- the studio's own panels, authored in TypeScript --------------------------
 #

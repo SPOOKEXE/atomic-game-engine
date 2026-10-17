@@ -364,6 +364,10 @@ namespace engine::ecs {
 		// matching archetype.
 		std::vector<uint64_t> ComponentChanges;
 
+		// One monotonic epoch per observed component, advanced when an entity
+		// gains or loses that component, including when the entity is destroyed.
+		std::vector<uint64_t> ComponentMembershipChanges;
+
 		// The changed entity handles for each observed component, deduplicated by
 		// the row's dirty bit. Row-wise consumers then scale with actual writes;
 		// `DirtyBits` remains the source for consumers that need contiguous runs.

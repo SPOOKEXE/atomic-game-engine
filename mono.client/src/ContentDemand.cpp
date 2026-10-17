@@ -75,6 +75,7 @@ namespace client {
 		store.Each<const engine::scene::MaterialRef>(
 			[&out, &seen](engine::ecs::Entity, const engine::scene::MaterialRef &material) {
 				Want(out, seen, material.Asset);
+				if (material.Shader.Text().ends_with(".ashader")) Want(out, seen, material.Shader);
 			}
 		);
 
@@ -101,12 +102,17 @@ namespace client {
 				Want(out, seen, appearance.HeightMap);
 				Want(out, seen, appearance.MetalnessMap);
 				Want(out, seen, appearance.EmissiveMap);
+				Want(out, seen, appearance.PackedPbrMap);
 			}
 		);
 
-		store.Each<const engine::gui::Picture>([&out, &seen](
-												   engine::ecs::Entity, const engine::gui::Picture &picture
-											   ) { Want(out, seen, picture.Image); });
+		store.Each<const engine::gui::Picture>(
+			[&out, &seen](engine::ecs::Entity, const engine::gui::Picture &picture) {
+				Want(out, seen, picture.Image);
+				Want(out, seen, picture.HoverImage);
+				Want(out, seen, picture.PressedImage);
+			}
+		);
 
 		store.Each<const engine::effects::ParticleEmitter>(
 			[&out, &seen](engine::ecs::Entity, const engine::effects::ParticleEmitter &emitter) {

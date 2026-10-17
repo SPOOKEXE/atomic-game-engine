@@ -21,13 +21,53 @@
 
 namespace engine::render {
 
+	bool ViewRecording::RecordLocalLightShadow(const glm::mat4 &viewProjection) {
+		if (!State->EnsureShadow() || State->ShadowTexture == nullptr) return false;
+		SDL_GPUDepthStencilTargetInfo target{};
+		target.texture = State->ShadowTexture;
+		target.clear_depth = 1.0f;
+		target.load_op = SDL_GPU_LOADOP_CLEAR;
+		target.store_op = SDL_GPU_STOREOP_STORE;
+		target.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+		target.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+		target.cycle = true;
+		auto *pass = SDL_BeginGPURenderPass(Command, nullptr, 0, &target);
+		if (pass == nullptr) return false;
+		State->BindPipeline(pass, State->ShadowPipeline, Impl::PipelineFamily::Other);
+		State->BindInstanceBuffers(pass);
+		const SDL_GPUBufferBinding indices{State->Meshes.Indices(), 0};
+		SDL_BindGPUIndexBuffer(pass, &indices, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+		SDL_PushGPUVertexUniformData(Command, 0, &viewProjection, sizeof(viewProjection));
+		uint64_t triangles = 0;
+		if (ReflectedCasters > 0)
+			Result.DrawCalls += State->DrawSlots(
+				Command, pass, 0, ReflectedCasters, nullptr, nullptr, nullptr, nullptr, nullptr, 0, triangles
+			);
+		if (SurfaceCasters > 0)
+			Result.DrawCalls += State->DrawSlots(
+				Command,
+				pass,
+				SceneReflected,
+				SurfaceCasters,
+				nullptr,
+				nullptr,
+				nullptr,
+				nullptr,
+				nullptr,
+				0,
+				triangles
+			);
+		SDL_EndGPURenderPass(pass);
+		return true;
+	}
+
 	void ViewRecording::RegisterShadowNodes(NodeTable &frameNodes) {
 		frameNodes.Set(core::Name("shadow"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
 			FrameResult &result = recording.Result;
 			SDL_GPUCommandBuffer *const command = recording.Command;
-			const core::CFrame &cameraFrame = recording.Request.CameraFrame;
+			const core::Vector3 &behaviourEye = recording.Request.VisibilityCameraFrame.Position;
 			const core::AABB &sceneBounds = recording.SceneBounds;
 			const glm::mat4 &lightViewProjection = recording.LightViewProjection;
 			const uint32_t sceneReflected = recording.SceneReflected;
@@ -221,7 +261,7 @@ namespace engine::render {
 					const PortalBeamProjector projector =
 						PortalBeamFromPair(*portal, *partner, sceneBounds, sun);
 					float influence = PortalBeamInfluenceDistanceSquared(
-						projector, State->VisibleInstances, State->DrawOrder, cameraFrame.Position
+						projector, State->VisibleInstances, State->DrawOrder, behaviourEye
 					);
 					if (!std::isfinite(influence)) {
 						// A visible portal can show a child view whose receivers did not
@@ -231,7 +271,7 @@ namespace engine::render {
 							if (row < State->VisibleInstances.size() &&
 								State->VisibleInstances[row].Surface == portal->Index) {
 								const float distance = scene::RectangleDistance(
-									portal->Centre, portal->First, portal->Second, cameraFrame.Position
+									portal->Centre, portal->First, portal->Second, behaviourEye
 								);
 								influence = distance * distance;
 								break;

@@ -26,6 +26,12 @@
 #
 # The last one is not bookkeeping. Two graphs are only comparable when they came
 # from the same tree, and this repository has more than one agent working in it.
+#
+# Optional positional arguments after `windowTicks` select deterministic movement:
+# `randomHeadingSeed` and `randomHeadingEveryTicks`. A zero seed keeps the
+# fixed heading spread used by existing stress runs.
+# The tenth argument, `forceSerialCompute` (0 or 1), retains worker work on the
+# profiling owner for complete live-scope captures. Match it across A/B runs.
 
 set -euo pipefail
 
@@ -38,6 +44,14 @@ sceneName=${6:-Stress.luau}
 # Ticks between windowed profile snapshots. 0 (the default) writes only the
 # usual whole-run capture; a positive value also gets flamegraph.py --average.
 windowTicks=${7:-0}
+randomHeadingSeed=${8:-0}
+randomHeadingEveryTicks=${9:-30}
+forceSerialCompute=${10:-0}
+
+case "$forceSerialCompute" in
+	0|1) ;;
+	*) echo "FAIL: forceSerialCompute must be 0 or 1" >&2; exit 1 ;;
+esac
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 out="$root/.cache/stress"
@@ -62,6 +76,13 @@ done
 	echo "clients   $clients"
 	echo "seconds   $seconds"
 	echo "scene     $sceneName"
+	echo "profile_window  $windowTicks"
+	echo "force_serial_compute  $forceSerialCompute"
+	echo "random_heading_seed  $randomHeadingSeed"
+	echo "random_heading_every_ticks  $randomHeadingEveryTicks"
+	echo "server_sha256  $(sha256sum "$server" | awk '{print $1}')"
+	echo "loadtest_sha256  $(sha256sum "$harness" | awk '{print $1}')"
+	echo "scene_sha256  $(sha256sum "$scene" | awk '{print $1}')"
 	echo "captured  $(date -Is)"
 } > "$out/${label}_meta.txt"
 
@@ -71,6 +92,7 @@ done
 serverSeconds=$((seconds + 12))
 
 echo "stress: starting the server on port $port for ${serverSeconds}s"
+rm -f "$out/$label.folded"
 windowArgs=()
 if [ "$windowTicks" -gt 0 ]; then
 	windowArgs=(--profile-window "$windowTicks")
@@ -78,6 +100,10 @@ if [ "$windowTicks" -gt 0 ]; then
 	# they belonged to this one - the tick in their name says nothing about
 	# which run wrote them.
 	rm -f "$out/${label}".window*.folded
+fi
+computeArgs=()
+if [ "$forceSerialCompute" -eq 1 ]; then
+	computeArgs=(--force-serial-compute)
 fi
 timeout $((serverSeconds + 30)) "$server" \
 	--game "$scene" \
@@ -87,6 +113,7 @@ timeout $((serverSeconds + 30)) "$server" \
 	--seconds "$serverSeconds" \
 	--profile-out "$out/$label.folded" \
 	"${windowArgs[@]}" \
+	"${computeArgs[@]}" \
 	> "$out/${label}_server.log" 2>&1 &
 serverPid=$!
 
@@ -101,17 +128,34 @@ kill -0 "$serverPid" 2>/dev/null || {
 }
 
 echo "stress: $clients clients for ${seconds}s"
+headingArgs=()
+if [ "$randomHeadingSeed" -ne 0 ]; then
+	headingArgs=(
+		--random-heading-seed "$randomHeadingSeed"
+		--random-heading-every-ticks "$randomHeadingEveryTicks"
+	)
+fi
 set +e
 timeout $((seconds + 60)) "$harness" \
 	--port "$port" \
 	--clients "$clients" \
 	--seconds "$seconds" \
 	--tick-rate 30 \
+	"${headingArgs[@]}" \
 	> "$out/${label}_clients.txt" 2>&1
 harnessStatus=$?
 set -e
 
-wait "$serverPid" || true
+set +e
+wait "$serverPid"
+serverStatus=$?
+set -e
+
+if [ "$serverStatus" -ne 0 ]; then
+	echo "FAIL: the server exited $serverStatus"
+	tail -30 "$out/${label}_server.log"
+	exit 1
+fi
 
 if [ $harnessStatus -ne 0 ]; then
 	echo "FAIL: the harness exited $harnessStatus (124 means it never exited at all)"

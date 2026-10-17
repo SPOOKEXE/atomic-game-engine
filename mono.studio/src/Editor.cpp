@@ -20,6 +20,7 @@
 #include <engine/physics/Clock.hpp>
 #include <engine/physics/Pipeline.hpp>
 #include <engine/render/Animation.hpp>
+#include <engine/render/Renderer.hpp>
 #include <engine/scene/ActiveCamera.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/EditableMesh.hpp>
@@ -30,6 +31,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
+#include <engine/scene/Shaders.hpp>
 #include <engine/scene/Sunlight.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/scene/Teams.hpp>
@@ -77,6 +79,24 @@
 namespace studio {
 
 	using engine::core::CFrame;
+
+	void ViewportDiagnostics::ApplyCameraFrames(
+		engine::render::View &view,
+		const engine::core::CFrame &inspectionFrame,
+		const engine::core::CFrame &behaviourFrame
+	) const {
+		view.CameraFrame = inspectionFrame;
+		const bool sameFrame = behaviourFrame.Position == inspectionFrame.Position &&
+							   behaviourFrame.QuaternionX == inspectionFrame.QuaternionX &&
+							   behaviourFrame.QuaternionY == inspectionFrame.QuaternionY &&
+							   behaviourFrame.QuaternionZ == inspectionFrame.QuaternionZ &&
+							   behaviourFrame.QuaternionW == inspectionFrame.QuaternionW;
+		if (sameFrame) {
+			view.VisibilityFrame.reset();
+		} else {
+			view.VisibilityFrame = behaviourFrame;
+		}
+	}
 	using engine::core::LogLevel;
 	using engine::core::Name;
 	using engine::core::Vector3;
@@ -494,9 +514,11 @@ namespace studio {
 		Viewers.resize(1 + extras);
 		Overlays.resize(1 + extras);
 		GuiLists.resize(1 + extras);
+		GuiLocalizations.resize(1 + extras);
 		ViewportPresentations.resize(1 + extras);
 		ViewportParticleVisibility.resize(1 + extras);
 		GuiRouters.resize(1 + extras);
+		GuiPreviewControlsCapture.resize(1 + extras);
 		AdornmentRouters.resize(1 + extras);
 		GuiRouterWorlds.resize(1 + extras);
 
@@ -628,12 +650,13 @@ namespace studio {
 				"atomic studio",
 				Settings.Width,
 				Settings.Height,
-				SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY
+				SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN
 			);
 			if (!Window) {
 				ENGINE_ERROR("SDL_CreateWindow: {}", SDL_GetError());
 				return false;
 			}
+			NativeAccessibility = std::make_unique<client::AccessibilityAdapter>(Window);
 
 			SDL_Surface *icon = SDL_LoadPNG((engine::core::Paths::Base() / "icon.png").string().c_str());
 			if (icon == nullptr) {
@@ -647,8 +670,14 @@ namespace studio {
 		}
 
 		// Null when headless, which is what puts the renderer in that mode.
-		if (!Renderer.Initialise(Window, static_cast<uint32_t>(Settings.FramesInFlight))) {
+		// Plugin dock widgets paint CanvasGroups through Dear ImGui's CPU target.
+		// Retaining source pixels gives that bounded path image samples without a
+		// GPU readback. TextureTable caps retained copies at 256 MiB.
+		if (!Renderer.Initialise(Window, static_cast<uint32_t>(Settings.FramesInFlight), true)) {
 			return false;
+		}
+		if (Window != nullptr && !SDL_ShowWindow(Window)) {
+			ENGINE_WARN("SDL_ShowWindow: {}", SDL_GetError());
 		}
 
 		// **Said once here and applied per panel, where the world is entered.**
@@ -685,6 +714,7 @@ namespace studio {
 
 		engine::ui::InterfaceSettings interfaceSettings;
 		interfaceSettings.Docking = true;
+		interfaceSettings.PlatformWindows = true;
 		interfaceSettings.DisplayWidth = Settings.Width;
 		interfaceSettings.DisplayHeight = Settings.Height;
 
@@ -937,6 +967,12 @@ namespace studio {
 		// request the frame loop will never pump again would keep the process
 		// alive; Stop wakes it and joins.
 		ControlServer.Stop();
+		// Product rows capture editor and renderer services, so their guards must
+		// drain while those services still exist.
+		StudioInputControlHook.Close();
+		StudioSceneRenderingHook.Close();
+		StudioControlHook.Close();
+		PermanentControlHooks.clear();
 
 		// **Before anything is torn down**, because the graph's history is what
 		// is being written and a snapshot taken after the universe has gone is
@@ -988,6 +1024,10 @@ namespace studio {
 		ScriptPlugins.clear();
 		StopCppPlugins(CppPlugins);
 
+		// Its leases capture the factory session and its session borrows the
+		// universe, so release both before the universe disappears.
+		FactoryHost.reset();
+
 		// Before the universe, because it holds a reference to it.
 		Commands.reset();
 		PortalImages.reset();
@@ -1017,6 +1057,7 @@ namespace studio {
 			SDL_CloseJoystick(joystick);
 		PlayedInput->Joysticks.clear();
 
+		NativeAccessibility.reset();
 		if (Window != nullptr) {
 			SDL_DestroyWindow(Window);
 			Window = nullptr;
@@ -1160,7 +1201,7 @@ namespace studio {
 					(void)FlushDataStore();
 					NextDataStoreFlush = engine::core::Clock::Seconds() + 1.0;
 				}
-				if (renderingActive) {
+				if (renderingActive || (presentationDue && Interface.HasPlatformWindows())) {
 					Present(PresentationDeltaSeconds);
 					PresentationDeltaSeconds = 0.0f;
 					Presentations.Consume(engine::render::PresentationSchedule::Clock::now());
@@ -1308,19 +1349,19 @@ namespace studio {
 				PlayedInput->Translator.HandleEvent(event);
 
 				if (PendingControlClick.has_value() && event.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
-					event.button.windowID == SDL_GetWindowID(Window) &&
+					event.button.windowID == (Window == nullptr ? 0 : SDL_GetWindowID(Window)) &&
 					event.button.button == PendingControlClick->Button &&
 					event.button.x == PendingControlClick->X && event.button.y == PendingControlClick->Y) {
 					PendingControlClick->DownProcessed = true;
 				}
 				if (PendingControlKey.has_value() && event.type == SDL_EVENT_KEY_DOWN &&
-					event.key.windowID == SDL_GetWindowID(Window) &&
+					event.key.windowID == (Window == nullptr ? 0 : SDL_GetWindowID(Window)) &&
 					static_cast<uint32_t>(event.key.scancode) == PendingControlKey->Scancode &&
 					static_cast<uint32_t>(event.key.key) == PendingControlKey->Key) {
 					PendingControlKey->DownProcessed = true;
 				}
 				if (PendingControlText.has_value() && event.type == SDL_EVENT_TEXT_INPUT &&
-					event.text.windowID == SDL_GetWindowID(Window) &&
+					event.text.windowID == (Window == nullptr ? 0 : SDL_GetWindowID(Window)) &&
 					event.text.text == PendingControlText->Text.c_str()) {
 					PendingControlText->Processed = true;
 				}
@@ -1568,13 +1609,6 @@ namespace studio {
 				ENGINE_PROFILE_CAT("thumbnails", engine::core::ProfileCategory::Assets);
 				PumpThumbnails();
 			}
-
-			// The node demo's own previews, bounded the same way and in the same
-			// gap - see `PumpNodeDemoImages`.
-			{
-				ENGINE_PROFILE_CAT("node previews", engine::core::ProfileCategory::Assets);
-				PumpNodeDemoImages();
-			}
 		}
 
 		{
@@ -1596,6 +1630,7 @@ namespace studio {
 			ENGINE_PROFILE_CAT("present world", engine::core::ProfileCategory::Render);
 			PresentWorld(frameSeconds);
 		}
+		Interface.PresentPlatformWindows();
 
 		FinishControlAutomationFrame();
 	}
@@ -1667,6 +1702,7 @@ namespace studio {
 		// has no trace of `MagicCore` in it, and a brand-new game's tree is
 		// empty rather than carrying a demo's modules.
 		(void)engine::examples::MountSceneLibraries(store, script, file);
+		(void)engine::examples::MountDemoCamera(store, Label(located));
 	}
 
 	bool Editor::AddExampleWorld(const engine::examples::DemoEntry &demo) {
@@ -2064,7 +2100,7 @@ namespace studio {
 	}
 
 	float Editor::PacingCeiling() const {
-		const bool focused = Window == nullptr || (SDL_GetWindowFlags(Window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+		const bool focused = Interface.HasFocus();
 		const bool inputIdle = engine::core::Clock::Seconds() - LastInputSeconds > IDLE_AFTER_SECONDS;
 		return PresentationCeiling(
 			PresentationRates{
@@ -2153,6 +2189,7 @@ namespace studio {
 		);
 		ViewportState *extra = ExtraAt(viewport);
 		const bool drawingSecond = extra != nullptr;
+		ViewportDiagnostics &diagnostics = drawingSecond ? extra->Diagnostics : MainViewportDiagnostics;
 
 		// **The second panel defaults to a *different* world, not to the active
 		// one.** Two viewports showing the same world is one view drawn twice
@@ -2264,6 +2301,7 @@ namespace studio {
 		// shared visual scene. Presenting is PreRender only, so this does not tick
 		// either world twice.
 		std::optional<engine::scene::ActiveCamera> restoreRuntimeCamera;
+		engine::core::CFrame behaviourEye;
 		{
 			ENGINE_PROFILE_CAT("present views", engine::core::ProfileCategory::ECS);
 			if (shown.IsValid() && shown != visual) {
@@ -2292,10 +2330,13 @@ namespace studio {
 				});
 			}
 
-			if (shown.IsValid() && IsReplicaWorld(shown)) {
-				visual =
-					client::ResolveCameraPortalWorld(*Universe, shown, visual, eye, lens, PortalImages.get());
-			}
+			behaviourEye = diagnostics.ResolveBehaviourFrame(eye, [&](engine::core::CFrame &frame) {
+				if (shown.IsValid() && IsReplicaWorld(shown)) {
+					visual = client::ResolveCameraPortalWorld(
+						*Universe, shown, visual, frame, lens, PortalImages.get()
+					);
+				}
+			});
 			if (visual.IsValid() && Universe->IsRemote(visual)) {
 				ReleaseViewerCamera(viewport);
 			} else if (visual.IsValid()) {
@@ -2316,7 +2357,9 @@ namespace studio {
 					// An edit viewport owns this generated camera outright. A client
 					// viewport uses the same per-panel camera only while the authority
 					// prepares its camera-dependent surface views.
-					EnsureViewerCamera(viewport, visual, eye, lens, runtimeVisual ? NULL_ENTITY : follow);
+					EnsureViewerCamera(
+						viewport, visual, behaviourEye, lens, runtimeVisual ? NULL_ENTITY : follow
+					);
 
 					if (!IsReplicaWorld(shown)) {
 						// `EnsureViewerCamera` leaves an authored lens intact. Read it
@@ -2397,6 +2440,7 @@ namespace studio {
 		}
 
 		const bool remoteEye = visual.IsValid() && Universe->IsRemote(visual);
+		const engine::core::CFrame &cullingEye = behaviourEye;
 		// Remember the exact eye the texture below is rendered from. A hosted
 		// client may have moved its camera during `PreRender`; recording the eye
 		// before that phase would project overlays through the previous room.
@@ -2536,20 +2580,21 @@ namespace studio {
 						static thread_local std::vector<engine::core::AABB> lightReceivers;
 						lightReceivers.clear();
 						if (target.IsValid() && target.Width > 0 && target.Height > 0) {
-							const auto matrices = engine::scene::ResolveCamera(
-								eye,
+							(void)engine::render::CullForCamera(
+								DrawnInstances,
+								cullingEye,
 								lens,
-								static_cast<float>(target.Width) / static_cast<float>(target.Height)
+								static_cast<float>(target.Width) / static_cast<float>(target.Height),
+								visibleLightRows
 							);
-							const engine::graph::Frustum frustum =
-								engine::graph::Frustum::FromViewProjection(matrices.ViewProjection);
-							engine::graph::Cull(DrawnInstances, frustum, visibleLightRows);
 							lightReceivers.reserve(visibleLightRows.size());
 							for (const uint32_t row : visibleLightRows) {
 								lightReceivers.push_back(engine::graph::BoundsOf(DrawnInstances[row]));
 							}
 						}
-						(void)engine::render::CollectLights(store, eye.Position, lightReceivers, Lights);
+						(void)engine::render::CollectLights(
+							store, cullingEye.Position, lightReceivers, Lights
+						);
 					}
 				}
 
@@ -2602,6 +2647,8 @@ namespace studio {
 							: engine::core::Name{};
 					if (Shaders.Refresh(store) > 0) {
 						VisualResourceRevision++;
+						std::vector<engine::core::Name> materialShaders;
+						engine::scene::DemandedShaders(store, materialShaders);
 						for (const engine::core::Name &shader : Shaders.Changed()) {
 							const engine::render::ShaderModule *module = Shaders.Find(shader);
 							// A removed source has no accepted module. Drop its device
@@ -2618,7 +2665,9 @@ namespace studio {
 								continue;
 							}
 
-							(void)Renderer.AddShader(shader, module->SpirV);
+							if (std::find(materialShaders.begin(), materialShaders.end(), shader) !=
+								materialShaders.end())
+								(void)Renderer.AddMaterialShader(shader, module->SpirV);
 							if (shader == wantedPostProcess &&
 								Renderer.SetPostProcessShader(shader, module->SpirV)) {
 								LastPostProcessShader = shader;
@@ -2737,7 +2786,9 @@ namespace studio {
 							static_cast<float>(target.Width), static_cast<float>(target.Height)
 						},
 						store,
-						GuiLists[viewport].Signature()
+						GuiLists[viewport].Signature(),
+						GuiLists[viewport].DamageValid(),
+						GuiLists[viewport].Damage()
 					);
 				}
 
@@ -2764,6 +2815,26 @@ namespace studio {
 			(void)client::AppendForeignPortalClones(*Universe, visual, DrawnInstances, &jointFrames);
 
 			instances = &DrawnInstances;
+		}
+
+		if (diagnostics.FrustumLocked && instances != nullptr && target.IsValid() && target.Width > 0 &&
+			target.Height > 0) {
+			// The physical eye stays in `view.CameraFrame` so the author can inspect
+			// holes. Submit only rows the captured frustum would see. The renderer
+			// receives that same pose for its LOD selection below.
+			(void)engine::render::CullForCamera(
+				*instances,
+				cullingEye,
+				lens,
+				static_cast<float>(target.Width) / static_cast<float>(target.Height),
+				FrozenVisibleRows
+			);
+			FrozenVisibleInstances.clear();
+			FrozenVisibleInstances.reserve(FrozenVisibleRows.size());
+			for (const uint32_t row : FrozenVisibleRows) {
+				FrozenVisibleInstances.push_back((*instances)[row]);
+			}
+			instances = &FrozenVisibleInstances;
 		}
 
 		// **Nothing here.** Both the local client camera and the authority viewer
@@ -2793,7 +2864,7 @@ namespace studio {
 		engine::render::View view;
 		{
 			ENGINE_PROFILE_CAT("build render view", engine::core::ProfileCategory::Render);
-			view.CameraFrame = eye;
+			diagnostics.ApplyCameraFrames(view, eye, cullingEye);
 			view.Camera = lens;
 			view.Instances = instances != nullptr ? std::span<const engine::scene::DrawInstance>(*instances)
 												  : std::span<const engine::scene::DrawInstance>{};
@@ -2842,7 +2913,7 @@ namespace studio {
 
 		if (PortalImages && drawingWorld && remoteEye && shown.IsValid() && target.IsValid()) {
 			engine::render::View remote;
-			remote.CameraFrame = eye;
+			diagnostics.ApplyCameraFrames(remote, eye, cullingEye);
 			remote.Camera = lens;
 			remote.Target = view.Target;
 			remote.Slot = view.Slot;
@@ -3373,7 +3444,7 @@ namespace studio {
 		bool prepared = false;
 		if (universe.Enter(
 				world,
-				[this, &prepared, &settings](Store &store, Scheduler &systems) {
+				[&prepared, &settings](Store &store, Scheduler &systems) {
 					PrepareWorld(store, systems);
 					engine::physics::SetPhysicsTickRate(store, settings.PhysicsTickRate);
 					engine::script::SetScriptTickRate(store, settings.ScriptTickRate);
@@ -3772,6 +3843,11 @@ namespace studio {
 
 		Active = Universe->Worlds().empty() ? WorldId{} : Universe->Worlds().front();
 		SelectionWorld = Active;
+		// An open game returns to authoring. Live Instances may still have a
+		// pending focus from Play, and it draws after Worlds in the shared dock.
+		FocusInstances = 0;
+		ShowWorlds = true;
+		FocusWorlds = 4;
 
 		// **Remembered on a successful open rather than on the attempt.** A path
 		// that failed to load is not one to offer again from a menu - the list
@@ -4588,18 +4664,23 @@ namespace studio {
 				return;
 			}
 
-			// **Nothing selected means `Workspace`, and since v0.7 it has to.**
-			// An instance with no parent is an orphan: it is not in the scene,
-			// nothing draws it, and `Insert Object` with an empty selection
-			// would have quietly produced something invisible. It used to be
-			// drawn, because an unparented instance was a root of the world and
-			// roots were what the renderer collected - see
-			// `scene/Visibility.hpp` for why that is no longer the rule.
+			// **Nothing selected means `Workspace`, except a `ScreenGui` belongs in
+			// `StarterGui`.** An instance with no parent is an orphan: it is not in
+			// the scene, nothing draws it, and `Insert Object` with an empty
+			// selection would quietly produce something invisible. A ScreenGui has a
+			// second containment rule: the editor compiles its template only below
+			// StarterGui, and Play copies that template into PlayerGui.
 			//
-			// Studio does the same thing, and for an author it is the only
-			// sensible reading of "insert a Part" with nothing highlighted.
-			landed =
-				parent != NULL_ENTITY && store.Alive(parent) ? parent : engine::scene::WorkspaceOf(store);
+			// Explicit parents remain authoritative. This only supplies the parent
+			// the root Insert Object command means when there is no selection.
+			const Entity defaultParent =
+				store.IsA(created, engine::gui::GuiClass("ScreenGui"))
+					? engine::scene::ServiceOf(
+						  store, engine::ecs::Classes::Find(engine::core::Name("StarterGui"))
+					  )
+					: engine::scene::WorkspaceOf(store);
+
+			landed = parent != NULL_ENTITY && store.Alive(parent) ? parent : defaultParent;
 
 			if (landed != NULL_ENTITY) {
 				store.SetParent(created, landed);
@@ -5237,6 +5318,13 @@ namespace studio {
 			),
 			Runs.end()
 		);
+		if (Runs.empty()) {
+			// Live Instances shares a dock with Worlds and draws later. After the
+			// last Stop, return that dock to the scenes the author can edit.
+			FocusInstances = 0;
+			ShowWorlds = true;
+			FocusWorlds = 4;
+		}
 
 		if (document.empty()) {
 			SyncWorldStates();

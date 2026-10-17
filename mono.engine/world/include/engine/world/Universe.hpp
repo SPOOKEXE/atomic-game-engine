@@ -809,7 +809,8 @@ namespace engine::world {
 			const PresentationAddress &from,
 			const PresentationAddress &to,
 			uint64_t correlation,
-			std::span<const std::byte> payload
+			std::span<const std::byte> payload,
+			PresentationPriority priority = PresentationPriority::Routine
 		);
 		// Admits presentation traffic from an authenticated remote host.
 		PresentationStatus IngestPresentation(core::Name host, const PresentationMessage &message);
@@ -841,6 +842,19 @@ namespace engine::world {
 		);
 		// Applies a complete reply set on each source lane.
 		bool ApplyTickExchangeReplies(std::span<const TickExchangeReply> replies);
+		// Runs Simulation, then joins worlds before their Physics phase.
+		bool AdvanceTickExchangeRoundToPhysics();
+		// Collects one world's opaque fixed-step barrier payload.
+		using FixedStepBarrierCollect = std::function<void(WorldId, ecs::Store &, std::vector<std::byte> &)>;
+		// Applies one resolved fixed-step barrier payload to its owner.
+		using FixedStepBarrierApply = std::function<bool(WorldId, ecs::Store &, std::span<const std::byte>)>;
+		// Collects payloads after Simulation and before the joined Physics phase.
+		bool CollectFixedStepBarrier(
+			FixedStepBarrierCollect collect, std::vector<FixedStepBarrierRecord> &records
+		);
+		// Applies resolved barrier payloads before the joined Physics phase.
+		bool
+		ApplyFixedStepBarrier(FixedStepBarrierApply apply, std::span<const FixedStepBarrierRecord> records);
 		// Completes the current round and restores simulation phase.
 		bool FinishTickExchangeRound();
 		// Closes a completed exchange frame.
@@ -857,7 +871,16 @@ namespace engine::world {
 			const std::function<void(size_t)> &body, std::span<float> worldMilliseconds = {}
 		);
 		void CompleteExchangeFrame();
-		enum class ExchangePhase : uint8_t { Closed, BetweenRounds, Input, Collected, Applied };
+		enum class ExchangePhase : uint8_t {
+			Closed,
+			BetweenRounds,
+			Input,
+			Collected,
+			Applied,
+			Simulated,
+			BarrierCollected,
+			BarrierApplied
+		};
 		ExchangePhase ExchangeStage = ExchangePhase::Closed;
 		unsigned ExchangeRound = 0;
 		unsigned ExchangeRounds = 0;
@@ -908,6 +931,8 @@ namespace engine::world {
 		// on one lane are serial and therefore never contend for its processor.
 		static constexpr unsigned INVALID_LANE = static_cast<unsigned>(-1);
 		std::vector<unsigned> LaneByWorld;
+		// Driver-only scratch, rebuilt from current local worlds on every refresh.
+		std::vector<size_t> LaneLoads;
 		unsigned LaneCount = 0;
 
 		std::vector<Control> Pending;

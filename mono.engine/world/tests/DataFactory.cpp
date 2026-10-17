@@ -87,6 +87,25 @@ TEST_CASE("data-factory lifecycle revisions refuse numeric exhaustion", "[world]
 	CHECK(CanAdvanceDataFactoryRevision(maximum, maximum - 1, false));
 }
 
+TEST_CASE("data-factory adopts a loaded world without replacing its state", "[world][data-factory]") {
+	Universe universe;
+	const WorldId world = MakeWorld(universe, "authored.scene");
+	BuildCountingWorld(universe, world);
+	DataFactorySession session(universe);
+	CHECK_FALSE(session.OwnsWorld("authored.scene"));
+	const auto adopted = session.AdoptWorld("authored.scene");
+	REQUIRE(adopted.Status == DataFactoryStatus::Ok);
+	CHECK(adopted.WorldVersion == 1);
+	CHECK(session.OwnsWorld("authored.scene"));
+	CHECK(universe.Find(Name("authored.scene")) == world);
+	CHECK(session.AdoptWorld("authored.scene").Status == DataFactoryStatus::VersionConflict);
+	session.SetPauseParticipant([](WorldId, DataFactoryPauseScope, bool, std::string &) { return true; });
+	const auto paused = session.Pause("authored.scene", DataFactoryPauseScope::AllSystems, 0);
+	REQUIRE(paused.Status == DataFactoryStatus::Ok);
+	CHECK(paused.WorldVersion == 2);
+	CHECK(universe.StateOf(world) == WorldState::Suspended);
+}
+
 TEST_CASE("data-factory all-system pause steps one exact tick boundary", "[world][data-factory]") {
 	Universe universe;
 	const WorldId world = MakeWorld(universe, "data-factory.step");

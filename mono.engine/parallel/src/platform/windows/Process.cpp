@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cwchar>
 #include <string>
+#include <utility>
 #include <vector>
 #include <windows.h>
 
@@ -257,11 +258,28 @@ namespace engine::parallel {
 	}
 
 	bool Process::Start(const std::filesystem::path &program, const std::vector<std::string> &arguments) {
-		return Start(program, arguments, ChannelEnd{});
+		return StartImpl(program, arguments, ChannelEnd{}, nullptr);
+	}
+
+	bool Process::Start(
+		const std::filesystem::path &program,
+		const std::vector<std::string> &arguments,
+		const std::filesystem::path &workingDirectory
+	) {
+		return StartImpl(program, arguments, ChannelEnd{}, &workingDirectory);
 	}
 
 	bool Process::Start(
 		const std::filesystem::path &program, const std::vector<std::string> &arguments, ChannelEnd endpoint
+	) {
+		return StartImpl(program, arguments, std::move(endpoint), nullptr);
+	}
+
+	bool Process::StartImpl(
+		const std::filesystem::path &program,
+		const std::vector<std::string> &arguments,
+		ChannelEnd endpoint,
+		const std::filesystem::path *workingDirectory
 	) {
 		if (Identifier != 0) {
 			return false;
@@ -431,6 +449,7 @@ namespace engine::parallel {
 		}
 
 		std::vector<wchar_t> environment = EnvironmentWith(handoverChild);
+		const std::wstring directory = workingDirectory != nullptr ? workingDirectory->wstring() : L"";
 
 		PROCESS_INFORMATION child{};
 		const BOOL started = CreateProcessW(
@@ -444,10 +463,11 @@ namespace engine::parallel {
 			inherited.empty() ? FALSE : TRUE,
 			flags,
 			environment.data(),
-			nullptr,
+			workingDirectory != nullptr ? directory.c_str() : nullptr,
 			&startup.StartupInfo,
 			&child
 		);
+		const DWORD launchError = started ? ERROR_SUCCESS : GetLastError();
 
 		if (startup.lpAttributeList != nullptr) {
 			DeleteProcThreadAttributeList(startup.lpAttributeList);
@@ -468,7 +488,7 @@ namespace engine::parallel {
 		endpoint.Close();
 
 		if (!started) {
-			ENGINE_ERROR("could not start '{}': {}", program.string(), GetLastError());
+			ENGINE_ERROR("could not start '{}': {}", program.string(), launchError);
 			return false;
 		}
 

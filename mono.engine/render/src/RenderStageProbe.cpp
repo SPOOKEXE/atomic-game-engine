@@ -89,6 +89,16 @@ namespace engine::render {
 		Directory.clear();
 		const char *directory = std::getenv("ATOMIC_RENDER_PROBE_DIR");
 		if (!directory || !*directory) return;
+		const char *from = std::getenv("ATOMIC_RENDER_PROBE_TRANSITION_FROM");
+		const char *to = std::getenv("ATOMIC_RENDER_PROBE_TRANSITION_TO");
+		if (bool(from && *from) != bool(to && *to)) {
+			ENGINE_ERROR("render probe transition requires both world names");
+			return;
+		}
+		if (from && *from) {
+			TransitionFrom = from;
+			TransitionTo = to;
+		}
 		First = 0;
 		Last = 8;
 		ViewSlot = UINT64_MAX;
@@ -117,7 +127,31 @@ namespace engine::render {
 			Directory.clear();
 		}
 	}
+	void RenderStageProbe::ObserveDisplay(std::string_view world, uint64_t slot) {
+		if (!TransitionMode() || TransitionUsed) return;
+		TransitionArmed = PreviousDisplayWorld == TransitionFrom && world == TransitionTo;
+		TransitionSlot = TransitionArmed ? slot : UINT64_MAX;
+		PreviousDisplayWorld = world;
+	}
+	void
+	RenderStageProbe::ActivateView(uint64_t frame, std::string_view world, uint64_t slot, bool finalView) {
+		if (!TransitionArmed || !finalView || world != TransitionTo || slot != TransitionSlot) return;
+		TriggeredFrame = frame;
+		TransitionArmed = false;
+		TransitionUsed = true;
+	}
+	bool RenderStageProbe::Wants(std::string_view stage, std::string_view resource) const {
+		if (!TransitionMode()) return true;
+		return (stage == "gbuffer" && (resource == "albedo" || resource == "depth")) ||
+			   (stage == "deferred-lighting" && resource == "lit") ||
+			   (stage == "fog" && resource == "volume-lit") ||
+			   (stage == "portal-overlay" && resource == "portaled") ||
+			   (stage == "present" && resource == "scene-image");
+	}
 	bool RenderStageProbe::Enabled(uint64_t frame, uint64_t view) const {
+		if (TransitionMode())
+			return !Directory.empty() && frame == TriggeredFrame &&
+				   (view == UINT64_MAX || view == TransitionSlot);
 		return !Directory.empty() && frame >= First && frame <= Last &&
 			   (view == UINT64_MAX || ViewSlot == UINT64_MAX || view == ViewSlot);
 	}

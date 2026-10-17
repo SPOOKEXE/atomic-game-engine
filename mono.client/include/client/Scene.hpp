@@ -1,23 +1,11 @@
 #pragma once
 
-// The v0.1 demo scene.
+// Client presentation and world setup.
 //
-// **The components are `mono.engine/scene`'s and nothing here declares one.**
-// This file used to carry a `Transform`, a `PreviousTransform`, a `Visual`, a
-// `SceneBounds` and an `ActiveCamera` of its own, because the ECS is storage
-// and does not know what a Transform is and there was nowhere shared to put
-// them. `scene` at L7 is that place, both programs register the same set under
-// the same names, and a snapshot now crosses between them with no translation
-// layer. What is left here is the demo: `Spin` and `Orbit`, which describe how
-// this scene moves and nothing else does. The draw list and its collectors now
-// live in `Engine::render`, where both this client and Studio use them.
-//
-// **There is no scene object.** Building the world is a function, and
-// everything the tick touches is in the store: per-entity data as components,
-// world-scoped data as resources. That is not tidiness - a scene class with the
-// draw list and the clock as members puts the state the renderer reads outside
-// the world, where the affinity check does not cover it, the profiler does not
-// see it, and a second world cannot have its own.
+// Components belong to the engine modules that define them. This header adds
+// client orchestration, presentation state and world setup without owning a
+// second copy of simulation state. Per-entity data remains in components and
+// world-scoped data remains in store resources.
 
 #include <engine/core/types/Vector3.hpp>
 #include <engine/ecs/Scheduler.hpp>
@@ -58,18 +46,6 @@ namespace client {
 		engine::world::WorldId topologyOwner = {}
 	);
 
-	// --- components: per-entity, and iterated ------------------------------
-	//
-	// `Orbit` and `Spin` used to be declared here, and they moved to
-	// `engine::examples` at v0.5 for the reason that module's CMakeLists gives:
-	// a scene is not a client-tier idea. A server authors the same world and
-	// replicates it, so a component only a client could name was a component
-	// only a client could ever build a scene out of. These are the same two
-	// types under `examples.Orbit` and `examples.Spin`.
-
-	using engine::examples::Orbit;
-	using engine::examples::Spin;
-
 	// --- resources: one of each, for the whole world -----------------------
 
 	using engine::render::CollectPortalViews;
@@ -95,6 +71,8 @@ namespace client {
 		bool IsReplica = false;
 		// A replica becomes a presentation destination after one complete tick.
 		bool Ready = true;
+		// Hosted in another process and reached only through presentation.
+		bool IsRemote = false;
 	};
 
 	// Every world in the universe, with the name its panes are addressed by.
@@ -127,7 +105,9 @@ namespace client {
 	// interpolated view, and pointing it at the authority would show a room
 	// nobody's character is in. So a replica prefers a replica of the same
 	// `View`, after its first complete tick. Joining replicas are excluded;
-	// until then the live authority remains the presentation source.
+	// until then the live authority remains the presentation source. Among
+	// equal views a world in this process beats a remote endpoint, because it
+	// draws any camera at once where the endpoint answers a round trip later.
 	//
 	// Pure, and deliberately: `SurveyWorlds` does the entering once and this
 	// decides, so a pass resolving several names pays for one walk.
@@ -152,14 +132,21 @@ namespace client {
 		std::vector<engine::core::CFrame> *joints = nullptr
 	);
 
+	// An explicitly admitted, snapshot-ready replica may replace its remote
+	// producer. Merely discovering or staging a replica does not select it.
+	struct PortalImageWorldSelection {
+		// World retaining discovered portal topology, with the camera route's lifetime.
+		engine::world::WorldId TopologyOwner;
+		// Snapshot-ready destination permitted to replace its remote image producer.
+		engine::world::WorldId AdmittedDestination;
+		// Destination whose completed presentation the image producer may reuse.
+		engine::world::WorldId PresentedDestination;
+	};
 	// Resolves authored destinations through this product's replica policy. Viewer
 	// rows precede foreground clone attachment. Refresh caller spans after this
 	// appends portal claims and removes legacy surfaces; restore animation time
-	// before rendering the source view. Destinations were already presented.
-	// topologyOwner follows the same lifetime policy as ResolveCameraPortalWorld.
+	// before rendering the source view. Only explicitly named worlds are presented.
 	// True once every demanded portal has a retained image for this viewport.
-	// An explicitly admitted, snapshot-ready replica may replace its remote
-	// producer. Merely discovering or staging a replica does not select it.
 	bool UpdatePortalImages(
 		engine::world::Universe &universe,
 		engine::render::PortalImageHost &images,
@@ -170,8 +157,7 @@ namespace client {
 		std::vector<engine::render::SurfaceView> &surfaces,
 		float alpha,
 		engine::render::PortalImageHost::Time now,
-		engine::world::WorldId topologyOwner = {},
-		engine::world::WorldId admittedDestination = {}
+		PortalImageWorldSelection worlds = {}
 	);
 
 	// Builds the scene by running a Luau file instead of a C++ loop.

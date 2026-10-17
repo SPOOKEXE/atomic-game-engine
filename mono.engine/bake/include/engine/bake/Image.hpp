@@ -39,7 +39,9 @@ namespace engine::bake {
 		// a square power-of-two grid and become an ordinary texture that every
 		// existing path handles. `bake/src/Gif.cpp` carries the argument and
 		// states what it costs - a 12-frame GIF wastes four cells of a 4x4, and
-		// anything past 64 frames is truncated.
+		// one past 256 frames is refused because truncating an animation silently
+		// changes its authored playback. Unequal frame delays are carried as
+		// explicit per-frame seconds beside the atlas.
 		//
 		// @since v0.10
 		Gif,

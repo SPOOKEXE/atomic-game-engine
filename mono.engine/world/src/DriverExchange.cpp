@@ -78,6 +78,39 @@ namespace engine::world {
 			participants[0].Result = LocalExchange.Handle(participants[0].Command);
 			return participants[0].Result.Success && awaitReplies(deadline, true);
 		};
+		const auto validBarrierRecords = [&](const Participant &participant,
+											 std::span<const FixedStepBarrierRecord> records) {
+			if (records.size() > MAXIMUM_TICK_EXCHANGE_MESSAGES) return false;
+			size_t bytes = sizeof(uint32_t);
+			for (const auto &record : records) {
+				if (record.World.empty() || record.Payload.size() > MAXIMUM_TICK_EXCHANGE_BYTES) return false;
+				bytes += sizeof(uint32_t) + record.World.size() + sizeof(uint32_t) + record.Payload.size();
+				if (bytes > MAXIMUM_TICK_EXCHANGE_BYTES) return false;
+				const WorldId world = Universe_.Find(core::Name(record.World));
+				if (!world.IsValid() || Universe_.HostOf(world) != participant.Host) return false;
+			}
+			return true;
+		};
+		const auto boundedBarrierRecords = [](std::span<const FixedStepBarrierRecord> records) {
+			if (records.size() > MAXIMUM_TICK_EXCHANGE_MESSAGES) return false;
+			size_t bytes = sizeof(uint32_t);
+			for (const auto &record : records) {
+				if (record.World.empty() || record.Payload.size() > MAXIMUM_TICK_EXCHANGE_BYTES) return false;
+				bytes += sizeof(uint32_t) + record.World.size() + sizeof(uint32_t) + record.Payload.size();
+				if (bytes > MAXIMUM_TICK_EXCHANGE_BYTES) return false;
+			}
+			return true;
+		};
+		const auto orderedUnique = [](std::vector<FixedStepBarrierRecord> &records) {
+			std::sort(records.begin(), records.end(), [](const auto &left, const auto &right) {
+				return left.World < right.World;
+			});
+			return std::adjacent_find(
+					   records.begin(), records.end(), [](const auto &left, const auto &right) {
+						   return left.World == right.World;
+					   }
+				   ) == records.end();
+		};
 		const auto cancel = [&] {
 			LocalExchange.Disconnect();
 			for (size_t at = 1; at < participants.size(); ++at) {
@@ -140,6 +173,40 @@ namespace engine::world {
 			if (!phase(TickExchangeOperation::Apply)) return cancel();
 			for (auto &participant : participants)
 				participant.Command.Replies.clear();
+			if (Barrier.Valid()) {
+				if (!phase(TickExchangeOperation::BarrierCollect)) return cancel();
+				std::vector<FixedStepBarrierRecord> records;
+				for (const auto &participant : participants) {
+					if (!validBarrierRecords(participant, participant.Result.BarrierRecords)) return cancel();
+					records.insert(
+						records.end(),
+						participant.Result.BarrierRecords.begin(),
+						participant.Result.BarrierRecords.end()
+					);
+				}
+				if (!orderedUnique(records)) return cancel();
+				std::vector<FixedStepBarrierRecord> results;
+				if (!Barrier.Resolve(records, results) || !orderedUnique(results)) return cancel();
+				if (!boundedBarrierRecords(results)) return cancel();
+				for (const auto &result : results) {
+					const WorldId world = Universe_.Find(core::Name(result.World));
+					if (!world.IsValid() || result.Payload.size() > MAXIMUM_TICK_EXCHANGE_BYTES)
+						return cancel();
+					const auto collected = std::lower_bound(
+						records.begin(),
+						records.end(),
+						result.World,
+						[](const auto &record, const auto &name) { return record.World < name; }
+					);
+					if (collected == records.end() || collected->World != result.World) return cancel();
+				}
+				for (auto &participant : participants)
+					participant.Command.BarrierRecords = results;
+				if (!phase(TickExchangeOperation::BarrierResolve)) return cancel();
+				for (auto &participant : participants)
+					participant.Command.BarrierRecords.clear();
+				if (!phase(TickExchangeOperation::BarrierApply)) return cancel();
+			}
 		}
 		if (!phase(TickExchangeOperation::End)) return cancel();
 		return true;

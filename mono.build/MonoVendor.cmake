@@ -204,6 +204,53 @@ if(MONO_BUILD_CLIENT)
 	endif()
 endif()
 
+# --- AccessKit C ------------------------------------------------------------
+# AccessKit's C ABI is built from its pinned Rust crate rather than through
+# upstream CMake, whose Corrosion bootstrap fetches another repository at
+# configure time. The lock file fixes the Rust dependency graph; building here
+# keeps the product-only adapter private to client-tier programs.
+if(MONO_BUILD_CLIENT)
+	if(NOT EXISTS "${MONO_VENDOR}/accesskit-c/Cargo.toml")
+		message(FATAL_ERROR "mono.vendor/accesskit-c is missing. Run `just setup`.")
+	endif()
+	find_program(MONO_CARGO cargo REQUIRED)
+	set(MONO_ACCESSKIT_TARGET "${CMAKE_BINARY_DIR}/vendor/accesskit-c")
+	set(MONO_ACCESSKIT_PROFILE debug)
+	set(MONO_ACCESSKIT_RELEASE_FLAG)
+	if(MONO_OPTIMISE)
+		set(MONO_ACCESSKIT_PROFILE release)
+		set(MONO_ACCESSKIT_RELEASE_FLAG --release)
+	endif()
+	if(WIN32)
+		set(MONO_ACCESSKIT_LIBRARY_NAME accesskit.lib)
+	else()
+		set(MONO_ACCESSKIT_LIBRARY_NAME libaccesskit.a)
+	endif()
+	set(MONO_ACCESSKIT_LIBRARY "${MONO_ACCESSKIT_TARGET}/${MONO_ACCESSKIT_PROFILE}/${MONO_ACCESSKIT_LIBRARY_NAME}")
+	file(GLOB_RECURSE MONO_ACCESSKIT_SOURCES CONFIGURE_DEPENDS
+		"${MONO_VENDOR}/accesskit-c/src/*.rs"
+		"${MONO_VENDOR}/accesskit-c/build.rs")
+	add_custom_command(
+		OUTPUT "${MONO_ACCESSKIT_LIBRARY}"
+		COMMAND ${CMAKE_COMMAND} -E env "CARGO_TARGET_DIR=${MONO_ACCESSKIT_TARGET}"
+			${MONO_CARGO} build --locked ${MONO_ACCESSKIT_RELEASE_FLAG}
+			--manifest-path "${MONO_VENDOR}/accesskit-c/Cargo.toml"
+		DEPENDS "${MONO_VENDOR}/accesskit-c/Cargo.toml" "${MONO_VENDOR}/accesskit-c/Cargo.lock" ${MONO_ACCESSKIT_SOURCES}
+		WORKING_DIRECTORY "${MONO_VENDOR}/accesskit-c"
+		VERBATIM)
+	add_custom_target(vendor_accesskit_c DEPENDS "${MONO_ACCESSKIT_LIBRARY}")
+	add_library(vendor_accesskit_c_static STATIC IMPORTED GLOBAL)
+	set_target_properties(vendor_accesskit_c_static PROPERTIES
+		IMPORTED_LOCATION "${MONO_ACCESSKIT_LIBRARY}"
+		INTERFACE_INCLUDE_DIRECTORIES "${MONO_VENDOR}/accesskit-c/include")
+	add_dependencies(vendor_accesskit_c_static vendor_accesskit_c)
+	if(UNIX AND NOT APPLE)
+		target_link_libraries(vendor_accesskit_c_static INTERFACE Threads::Threads ${CMAKE_DL_LIBS} m)
+	endif()
+	add_library(Vendor::accesskit-c ALIAS vendor_accesskit_c_static)
+	mono_vendor_system(vendor_accesskit_c_static)
+endif()
+
 # --- glm --------------------------------------------------------------------
 set(GLM_ENABLE_CXX_20 ON CACHE BOOL "" FORCE)
 set(GLM_BUILD_TESTS   OFF CACHE BOOL "" FORCE)
@@ -213,6 +260,74 @@ add_subdirectory("${MONO_VENDOR}/glm" EXCLUDE_FROM_ALL)
 # Every first-party translation unit that links `core` carries this one - 504 of
 # them. mono_vendor_system above.
 mono_vendor_system(glm glm-header-only)
+
+# --- shared text ------------------------------------------------------------
+# A text layout decision must not depend on fonts installed on the host. These
+# libraries consume delivered font bytes and Unicode data compiled into their
+# pinned source trees, so a server and a client receive the same metrics.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+
+# FreeType reads the fixed font package. Compressed and embedded bitmap formats
+# are deliberately excluded until a content format needs them, which keeps the
+# parser surface to ordinary TrueType and OpenType tables.
+set(FT_DISABLE_ZLIB     ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_BZIP2    ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_PNG      ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_BROTLI   ON CACHE BOOL "" FORCE)
+set(SKIP_INSTALL_ALL    ON CACHE BOOL "" FORCE)
+add_subdirectory("${MONO_VENDOR}/freetype" EXCLUDE_FROM_ALL)
+
+# HarfBuzz uses the preceding target directly. ICU is intentionally absent:
+# its portable build is not CMake-native, and this tree must not acquire a
+# platform package dependency merely to shape text.
+set(HB_HAVE_FREETYPE ON CACHE BOOL "" FORCE)
+set(HB_HAVE_ICU      OFF CACHE BOOL "" FORCE)
+set(HB_BUILD_UTILS   OFF CACHE BOOL "" FORCE)
+set(HB_BUILD_SUBSET  OFF CACHE BOOL "" FORCE)
+# HarfBuzz's CMake port emits an unconditional migration warning during
+# configure. Keep its configure noise from masking warnings in our own build.
+if(DEFINED CMAKE_MESSAGE_LOG_LEVEL)
+	set(MONO_PREVIOUS_MESSAGE_LOG_LEVEL "${CMAKE_MESSAGE_LOG_LEVEL}")
+	set(MONO_HAD_MESSAGE_LOG_LEVEL TRUE)
+endif()
+set(CMAKE_MESSAGE_LOG_LEVEL ERROR)
+add_subdirectory("${MONO_VENDOR}/harfbuzz" EXCLUDE_FROM_ALL)
+if(MONO_HAD_MESSAGE_LOG_LEVEL)
+	set(CMAKE_MESSAGE_LOG_LEVEL "${MONO_PREVIOUS_MESSAGE_LOG_LEVEL}")
+else()
+	unset(CMAKE_MESSAGE_LOG_LEVEL)
+endif()
+unset(MONO_PREVIOUS_MESSAGE_LOG_LEVEL)
+unset(MONO_HAD_MESSAGE_LOG_LEVEL)
+
+set(UTF8PROC_INSTALL        OFF CACHE BOOL "" FORCE)
+set(UTF8PROC_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+add_subdirectory("${MONO_VENDOR}/utf8proc" EXCLUDE_FROM_ALL)
+
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+set(BUILD_GENERATOR OFF CACHE BOOL "" FORCE)
+set(SB_CONFIG_UNITY ON CACHE BOOL "" FORCE)
+add_subdirectory("${MONO_VENDOR}/sheenbidi" EXCLUDE_FROM_ALL)
+
+# libunibreak publishes autotools files only. Declaring its one static target
+# here keeps every consumer on the pinned source and avoids configure-time
+# package discovery.
+add_library(vendor_unibreak STATIC
+	"${MONO_VENDOR}/libunibreak/src/unibreakbase.c"
+	"${MONO_VENDOR}/libunibreak/src/unibreakdef.c"
+	"${MONO_VENDOR}/libunibreak/src/linebreak.c"
+	"${MONO_VENDOR}/libunibreak/src/linebreakdata.c"
+	"${MONO_VENDOR}/libunibreak/src/linebreakdef.c"
+	"${MONO_VENDOR}/libunibreak/src/eastasianwidthdef.c"
+	"${MONO_VENDOR}/libunibreak/src/emojidef.c"
+	"${MONO_VENDOR}/libunibreak/src/graphemebreak.c"
+	"${MONO_VENDOR}/libunibreak/src/wordbreak.c"
+)
+target_include_directories(vendor_unibreak PUBLIC "${MONO_VENDOR}/libunibreak/src")
+add_library(Vendor::unibreak ALIAS vendor_unibreak)
+
+mono_vendor_system(freetype harfbuzz utf8proc SheenBidi vendor_unibreak)
 
 # --- spdlog -----------------------------------------------------------------
 set(SPDLOG_BUILD_EXAMPLE OFF CACHE BOOL "" FORCE)
@@ -239,7 +354,30 @@ set(TRACY_ENABLE         ${MONO_TRACY} CACHE BOOL "" FORCE)
 set(TRACY_ON_DEMAND      ON  CACHE BOOL "" FORCE)
 set(TRACY_ONLY_LOCALHOST ON  CACHE BOOL "" FORCE)
 set(TRACY_NO_BROADCAST   ON  CACHE BOOL "" FORCE)
-add_subdirectory("${MONO_VENDOR}/tracy" EXCLUDE_FROM_ALL)
+# Tracy reads and parses `/proc/kallsyms` before an on-demand session is
+# attached. Linux builds use a patched tree so the scan waits until connection,
+# while user-space callstacks and crash backtraces stay enabled. The recipe is a
+# Bash script, so other platforms retain the pinned source directly.
+if(MONO_TRACY AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+	set_property(
+		DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+		"${CMAKE_SOURCE_DIR}/mono.vendor/patches/tracy/defer-linux-kernel-symbols.patch"
+		"${CMAKE_SOURCE_DIR}/scripts/vendor-tree.sh"
+	)
+	execute_process(
+		COMMAND "${CMAKE_SOURCE_DIR}/scripts/vendor-tree.sh" tracy
+		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+		RESULT_VARIABLE mono_tracy_vendor_result
+		OUTPUT_VARIABLE MONO_TRACY_VENDOR
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+	)
+	if(NOT mono_tracy_vendor_result EQUAL 0)
+		message(FATAL_ERROR "Could not prepare the patched Tracy source tree.")
+	endif()
+	add_subdirectory("${MONO_TRACY_VENDOR}" EXCLUDE_FROM_ALL)
+else()
+	add_subdirectory("${MONO_VENDOR}/tracy" EXCLUDE_FROM_ALL)
+endif()
 mono_vendor_system(TracyClient)
 # `pipe()` and `fscanf()` carry `warn_unused_result` on Linux, and Tracy's
 # `.cpp` files (included by TracyClient.cpp) do not check the return values.
@@ -358,7 +496,7 @@ target_include_directories(vendor_tomlplusplus SYSTEM INTERFACE "${MONO_VENDOR}/
 target_compile_definitions(vendor_tomlplusplus INTERFACE TOML_EXCEPTIONS=0)
 
 # --- minimp3 ------------------------------------------------------------------
-# MP3 decoding, for `Engine::audio`. Two headers, no build system, CC0.
+# MP3 decoding, for `Engine::audiocodec`. Two headers, no build system, CC0.
 #
 # **The licence is why this one exists at all.** `audio/AGENTS.md` said MP3 was
 # "a vendored codec and a licence decision" and left the gap honest rather than
@@ -374,11 +512,11 @@ target_compile_definitions(vendor_tomlplusplus INTERFACE TOML_EXCEPTIONS=0)
 # nothing to keep and is what a file with a `.mp3` extension sometimes actually
 # is; the second would turn off the SSE and NEON paths that make a five-minute
 # track decode in well under a second. `MINIMP3_IMPLEMENTATION` is defined in
-# exactly one translation unit - `audio/src/Mp3.cpp` - because these headers are
+# exactly one translation unit - `audiocodec/src/Mp3.cpp` - because these headers are
 # a single-header library and defining it twice is a duplicate-symbol link
 # error.
 #
-# `client` in engine terms: `audio` is L12 and only the client links it.
+# The shared L8 codec module exports pure decoding without the client device stack.
 add_library(vendor_minimp3 INTERFACE)
 add_library(Vendor::minimp3 ALIAS vendor_minimp3)
 target_include_directories(vendor_minimp3 SYSTEM INTERFACE "${MONO_VENDOR}/minimp3")

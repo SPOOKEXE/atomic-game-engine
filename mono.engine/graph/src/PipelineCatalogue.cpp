@@ -300,6 +300,15 @@ namespace engine::graph {
 				spec.Params.push_back(NumberParam("sigma", "Gaussian sigma", "2", 0.01, 32.0));
 				spec.Params.push_back(NumberParam("angle", "Direction degrees", "0", -360.0, 360.0));
 			}
+			if (spec.Kind == core::Name("pack-channels")) {
+				for (const auto &[name, label] : std::initializer_list<std::pair<const char *, const char *>>{
+						 {"r-component", "R component"},
+						 {"g-component", "G component"},
+						 {"b-component", "B component"},
+						 {"a-component", "A component"},
+					 })
+					spec.Params.push_back(NumberParam(name, label, "0", 0.0, 3.0));
+			}
 			if (Named(spec.Kind, {"raster", "dispatch"})) {
 				spec.Params.push_back(TextParam("shader", "Shader", ""));
 				spec.Params.push_back(TextParam("source", "GLSL source", ""));
@@ -429,6 +438,9 @@ namespace engine::graph {
 				 "sky",
 				 "fog",
 				 "shader-lenses",
+				 "bloom",
+				 "dof",
+				 "god-rays",
 				 "tonemap",
 				 "eye-image",
 				 "portal-overlay",
@@ -439,6 +451,7 @@ namespace engine::graph {
 				 "mix",
 				 "transform-crop",
 				 "blur",
+				 "pack-channels",
 				 "blit",
 				 "raster",
 				 "dispatch",
@@ -487,7 +500,8 @@ namespace engine::graph {
 				 "capture",
 				 "shadow-capture"}
 			);
-			spec.FlexibleScope = spec.Kind == core::Name("dispatch");
+			spec.FlexibleScope =
+				spec.Kind == core::Name("dispatch") || spec.Kind == core::Name("pack-channels");
 			spec.Needs.Compute = spec.Queue == ExecutionQueue::Compute;
 			spec.Needs.StorageTextures =
 				std::any_of(
@@ -1142,8 +1156,7 @@ namespace engine::graph {
 			 S::View,
 			 {{"source", K::Texture, RGBA16, true, "The lit frame."}},
 			 {{"bloom", K::Colour, F::RGBA16F, true, "The bright parts, spread."}},
-			 "Downsample, blur, upsample. Reuses its own chain, so it is one node "
-			 "rather than a dozen.",
+			 "Extracts HDR highlights and filters them with a bounded screen-space kernel.",
 			 false,
 			 "bloom.frag"},
 
@@ -1157,6 +1170,17 @@ namespace engine::graph {
 			 "Near and far fields at half resolution, composited back.",
 			 false,
 			 "dof.frag"},
+
+			{"god-rays",
+			 "God rays",
+			 C::Composite,
+			 S::View,
+			 {{"colour", K::Texture, RGBA16, true, "The HDR frame."},
+			  {"depth", K::Texture, R32, true, "Linear depth that blocks shafts behind opaque surfaces."}},
+			 {{"colour", K::Colour, RGBA16, true, "Sun shafts added in HDR."}},
+			 "Samples bright radiance toward the visible directional sun, masked by linear depth.",
+			 false,
+			 "god-rays.frag"},
 
 			{"motion-blur",
 			 "Motion blur",
@@ -1500,6 +1524,21 @@ namespace engine::graph {
 			 {{"colour", K::Colour, RGBA16, true, "At full resolution."}},
 			 "Spatial upscale. Depth-aware when given depth, which is the "
 			 "difference between usable and pixelated."},
+
+			{"pack-channels",
+			 "Pack channels",
+			 C::Composite,
+			 S::View,
+			 {{"r", K::Texture, F::R32F, true, "Retained source plane for output R."},
+			  {"g", K::Texture, F::R8, true, "Retained source plane for output G."},
+			  {"b", K::Texture, F::RGBA8, true, "Retained source plane for output B."},
+			  {"a", K::Texture, F::RGBA8, true, "Retained source plane for output A."}},
+			 {{"packed", K::Colour, F::RGBA32F, true, "Four selected source components as float32."}},
+			 "Copies one selected component from each native texture into RGBA32F. The R input sets the "
+			 "output extent; "
+			 "each source uses pixel-center nearest selection.",
+			 false,
+			 "pack-channels.frag"},
 
 			{"blit",
 			 "Blit",

@@ -13,6 +13,7 @@
 #include <engine/assets/ContentHash.hpp>
 #include <engine/core/FrameGraph.hpp>
 #include <engine/ecs/Store.hpp>
+#include <engine/physics/Storm.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -124,6 +125,58 @@ TEST_CASE("the luau adapter builds into the world it was handed", "[scriptluau]"
 	CHECK(store.InstanceNameOf(part).Text() == "FromLuau");
 }
 
+TEST_CASE("a data package can set a detached RigKeypoint joint", "[scriptluau][data-script-package]") {
+	const auto result = RunFreshPackage(
+		"local rig = Instance.new('SkinnedMeshPart')\n"
+		"rig.JointCount = 1\n"
+		"local nose = Instance.new('RigKeypoint')\n"
+		"nose.Joint = 0\n"
+		"nose.Parent = rig\n"
+	);
+	CHECK(result.Terminal == engine::script::DataScriptPackageRunResult::State::Completed);
+	CHECK(result.Error.empty());
+}
+
+TEST_CASE(
+	"the luau storm service authors one physics resource and samples its field", "[scriptluau][storm]"
+) {
+	RegisterClasses();
+	Store store("scriptluau_storm");
+	const auto runtime = MakeLuauRuntime(store);
+
+	REQUIRE(runtime->Run(R"(
+		Storm.Preset("EF4")
+		Storm.Configure({ Position = Vector3.new(4, 0, 8), LifecycleEnabled = true })
+		local field = Storm.Sample(Vector3.new(32, 12, 8))
+		local snapshot = Storm.Snapshot()
+		local visibility = Storm.Visibility(Vector3.new(32, 12, 8), 400)
+		local damage = Storm.Damage(Vector3.new(32, 12, 8))
+		assert(field.Influence > 0 and snapshot.Position == Vector3.new(4, 0, 8))
+		assert(snapshot.Parameters.Energy > 0 and snapshot.LifecycleEnabled)
+		assert(visibility.EffectiveDistance > 0 and damage.Potential >= 0)
+	)"));
+
+	const engine::physics::Storm *storm = engine::physics::StormOf(store);
+	REQUIRE(storm != nullptr);
+	CHECK(storm->State.Position.FuzzyEq({4.0f, 0.0f, 8.0f}));
+	CHECK(storm->State.LifecycleEnabled);
+}
+
+TEST_CASE("the luau storm service refuses client-side authoring", "[scriptluau][storm]") {
+	RegisterClasses();
+	Store store("scriptluau_storm_client");
+	const auto runtime = MakeLuauRuntime(
+		store,
+		{
+			.Role = engine::script::HostRole::OfClient(),
+		}
+	);
+
+	CHECK_FALSE(runtime->Run("Storm.Configure({ Energy = 1 })"));
+	CHECK(runtime->LastError().find("authoritative server") != std::string::npos);
+	CHECK(engine::physics::StormOf(store) == nullptr);
+}
+
 TEST_CASE("luau package runtime exposes only immutable package data", "[scriptluau][data-script-package]") {
 	RegisterClasses();
 	Store store("scriptluau_package");
@@ -176,6 +229,16 @@ TEST_CASE(
 		engine::script::CheckLuauDataScriptPackageSource(
 			"local count: number = 4\nlocal bytes: string = Package.asset('input.bin')\n"
 			"local part = Instance.new('Part')\npart.Parent = workspace\nreturn count",
+			"package.luau",
+			error
+		)
+	);
+	CHECK(error.empty());
+	CHECK(
+		engine::script::CheckLuauDataScriptPackageSource(
+			"local lighting: Lighting = game:GetService('Lighting')\n"
+			"lighting.Ambient = Color3.new(0.03, 0.04, 0.06)\n"
+			"lighting.Brightness = 2.5\nlighting.ClockTime = 14",
 			"package.luau",
 			error
 		)
@@ -248,6 +311,13 @@ TEST_CASE(
 	"luau packages refuse every deferred boundary in a fresh runtime", "[scriptluau][data-script-package]"
 ) {
 	RegisterClasses();
+	const auto lighting = RunFreshPackage(
+		"local lighting = game:GetService('Lighting')\n"
+		"lighting.Ambient = Color3.new(0.03, 0.04, 0.06)\n"
+		"lighting.Brightness = 2.5\nlighting.ClockTime = 14\n"
+		"assert(lighting.Brightness == 2.5 and lighting.ClockTime == 14)"
+	);
+	CHECK(lighting.Terminal == engine::script::DataScriptPackageRunResult::State::Completed);
 	CheckPackageRefusal("task.wait()", "data-script packages may not schedule deferred work");
 	CheckPackageRefusal("task.defer(function() end)", "data-script packages may not schedule deferred work");
 	CheckPackageRefusal("task.spawn(function() end)", "data-script packages may not schedule deferred work");

@@ -11,6 +11,56 @@
 
 namespace engine::gui {
 
+	namespace {
+		constexpr size_t MAXIMUM_PREEDIT_BYTES = 4096;
+
+		void ApplyComposition(ecs::Store &store, ecs::Entity instance, const Typing &typing) {
+			const ecs::Entity service = GuiServiceOf(store);
+			TextCompositionState *state =
+				service != ecs::NULL_ENTITY ? store.GetMutable<TextCompositionState>(service) : nullptr;
+			if (state == nullptr || state->Revision == typing.PreeditRevision) {
+				return;
+			}
+
+			state->Revision = typing.PreeditRevision;
+			state->TextBox = ecs::NULL_ENTITY;
+			state->Text.clear();
+			state->Start = -1;
+			state->Length = -1;
+			if (typing.Preedit.empty() || typing.Preedit.size() > MAXIMUM_PREEDIT_BYTES ||
+				store.Get<Entry>(instance) == nullptr || !store.Get<Entry>(instance)->TextEditable) {
+				return;
+			}
+
+			state->TextBox = instance;
+			state->Text = typing.Preedit;
+			state->Start = typing.PreeditStart;
+			state->Length = typing.PreeditLength;
+		}
+	}
+
+	std::string TextWithComposition(const ecs::Store &store, ecs::Entity instance, std::string_view text) {
+		const ecs::Entity service = GuiServiceOf(store);
+		const TextCompositionState *state =
+			service != ecs::NULL_ENTITY ? store.Get<TextCompositionState>(service) : nullptr;
+		const Entry *entry = store.Get<Entry>(instance);
+		if (state == nullptr || entry == nullptr || state->TextBox != instance || state->Text.empty()) {
+			return std::string(text);
+		}
+
+		const int32_t characters = static_cast<int32_t>(Characters(text));
+		const int32_t cursor = std::clamp(entry->CursorPosition, 1, characters + 1);
+		const int32_t anchor =
+			entry->SelectionStart < 1 ? cursor : std::clamp(entry->SelectionStart, 1, characters + 1);
+		const int32_t from = std::min(anchor, cursor);
+		const int32_t to = std::max(anchor, cursor);
+		std::string resolved(text);
+		const size_t start = ByteOffset(resolved, from);
+		const size_t end = ByteOffset(resolved, to);
+		resolved.replace(start, end - start, state->Text);
+		return resolved;
+	}
+
 	TypeResult Type(ecs::Store &store, const Typing &typing) {
 		ENGINE_PROFILE_CAT("gui type", engine::core::ProfileCategory::ECS);
 
@@ -20,13 +70,15 @@ namespace engine::gui {
 			return result;
 		}
 
+		ApplyComposition(store, result.Instance, typing);
+
 		Entry *entry = store.GetMutable<Entry>(result.Instance);
 		Label *label = store.GetMutable<Label>(result.Instance);
 		if (entry == nullptr || label == nullptr) {
 			return result;
 		}
 
-		// **Everything below counts characters and the string holds bytes**, so
+		// **Everything below counts graphemes and the string holds bytes**, so
 		// the count is taken once and maintained rather than recomputed after each
 		// edit - a walk of the whole string per keystroke would be the same answer
 		// for more work, and the two would then have to agree.
@@ -43,7 +95,7 @@ namespace engine::gui {
 			// far out of range is a script writing `Text` and `CursorPosition`
 			// out of step - which reads as typing landing in the wrong place.
 			ENGINE_DEBUG_EVERY(
-				5.0, "caret {} clamped to {} over {} character(s)", entry->CursorPosition, cursor, characters
+				5.0, "caret {} clamped to {} over {} grapheme(s)", entry->CursorPosition, cursor, characters
 			);
 		}
 		int32_t anchor = entry->SelectionStart < 1 ? -1 : std::min(entry->SelectionStart, characters + 1);
@@ -79,11 +131,15 @@ namespace engine::gui {
 		// whole order and why it is the one a person meant.
 		if (!typing.Text.empty() && entry->TextEditable) {
 			dropSelection();
-			label->Text.insert(ByteOffset(label->Text, cursor), typing.Text);
-
-			const auto added = static_cast<int32_t>(Characters(typing.Text));
-			cursor += added;
-			characters += added;
+			const size_t insertion = ByteOffset(label->Text, cursor);
+			label->Text.insert(insertion, typing.Text);
+			// A combining mark may join the preceding grapheme, so counting the
+			// incoming fragment alone would place the caret one step too far.
+			cursor = static_cast<int32_t>(
+						 Characters(std::string_view(label->Text).substr(0, insertion + typing.Text.size()))
+					 ) +
+					 1;
+			characters = static_cast<int32_t>(Characters(label->Text));
 			result.Changed = true;
 		}
 
@@ -91,7 +147,7 @@ namespace engine::gui {
 			if (dropSelection()) {
 				result.Changed = true;
 			} else if (cursor > 1) {
-				// **One character and never one byte.** Erasing a byte off the end
+				// **One grapheme and never one byte.** Erasing a byte off the end
 				// of an accented letter leaves its lead byte behind, which is not
 				// text in any encoding and reads as the box corrupting itself.
 				const size_t start = ByteOffset(label->Text, cursor - 1);

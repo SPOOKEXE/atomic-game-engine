@@ -115,19 +115,26 @@ namespace engine::render {
 		SDL_GPUGraphicsPipeline *const base = ActivePipeline;
 		SDL_GPUGraphicsPipeline *bound = base;
 		const auto packedPipeline = [&](SDL_GPUGraphicsPipeline *native) {
-			if (native == OpaquePipeline) return PackedOpaquePipeline;
-			if (native == ForwardPipeline) return PackedForwardPipeline;
-			if (native == TransparentPipeline) return PackedTransparentPipeline;
-			if (native == WireframeOpaquePipeline) return PackedWireframeOpaquePipeline;
-			if (native == WireframeTransparentPipeline) return PackedWireframeTransparentPipeline;
-			if (native == HdrOpaquePipeline) return PackedHdrOpaquePipeline;
-			if (native == HdrTransparentPipeline) return PackedHdrTransparentPipeline;
-			if (native == HdrWireframeOpaquePipeline) return PackedHdrWireframeOpaquePipeline;
-			if (native == HdrWireframeTransparentPipeline) return PackedHdrWireframeTransparentPipeline;
-			if (native == GBufferPipeline) return PackedGBufferPipeline;
-			if (native == WireframeGBufferPipeline) return PackedWireframeGBufferPipeline;
-			if (native == DepthPeelPipeline) return PackedDepthPeelPipeline;
-			if (native == ShadowPipeline) return PackedMeshShadowPipeline;
+			if (native == OpaquePipeline) return EnsureDeferredPipeline(PackedOpaquePipeline);
+			if (native == ForwardPipeline) return EnsureDeferredPipeline(PackedForwardPipeline);
+			if (native == TransparentPipeline) return EnsureDeferredPipeline(PackedTransparentPipeline);
+			if (native == WireframeOpaquePipeline)
+				return EnsureDeferredPipeline(PackedWireframeOpaquePipeline);
+			if (native == WireframeTransparentPipeline)
+				return EnsureDeferredPipeline(PackedWireframeTransparentPipeline);
+			if (native == HdrOpaquePipeline) return EnsureDeferredPipeline(PackedHdrOpaquePipeline);
+			if (native == HdrTransparentPipeline) return EnsureDeferredPipeline(PackedHdrTransparentPipeline);
+			if (native == HdrWireframeOpaquePipeline)
+				return EnsureDeferredPipeline(PackedHdrWireframeOpaquePipeline);
+			if (native == HdrWireframeTransparentPipeline)
+				return EnsureDeferredPipeline(PackedHdrWireframeTransparentPipeline);
+			if (native == GBufferPipeline) return EnsureDeferredPipeline(PackedGBufferPipeline);
+			if (native == GBufferTransparentPipeline)
+				return EnsureDeferredPipeline(PackedGBufferTransparentPipeline);
+			if (native == WireframeGBufferPipeline)
+				return EnsureDeferredPipeline(PackedWireframeGBufferPipeline);
+			if (native == DepthPeelPipeline) return EnsureDeferredPipeline(PackedDepthPeelPipeline);
+			if (native == ShadowPipeline) return EnsureDeferredPipeline(PackedMeshShadowPipeline);
 			if (native == TransparentLayerPipeline) return PackedTransparentLayerPipeline;
 			if (native == TransparentLayerColourPipeline) return PackedTransparentLayerColourPipeline;
 			return static_cast<SDL_GPUGraphicsPipeline *>(nullptr);
@@ -143,13 +150,31 @@ namespace engine::render {
 		const auto bindMesh = [&](const MeshEntry &mesh,
 								  SDL_GPUGraphicsPipeline *native,
 								  const core::Name &shader,
-								  core::Name owner) {
+								  core::Name owner,
+								  uint32_t &materialSamplerCount,
+								  bool twoSided) {
 			SDL_GPUGraphicsPipeline *want = native;
+			bool authoredMaterial = native != base;
 			if (mesh.Packed) {
 				SDL_GPUGraphicsPipeline *variant = WireframeMode ? nullptr : PackedVariantFor(shader, owner);
 				want = variant != nullptr ? variant : packedPipeline(base);
+				authoredMaterial = variant != nullptr;
 			}
 			if (want == nullptr) return false;
+			if (twoSided)
+				if (auto *twin = TwoSidedFor(want)) want = twin;
+			// The binding count comes from the pipeline that was actually selected.
+			// A valid authored name can still fall back for packed meshes, LODs, or
+			// a pass family without a matching variant. Those pipelines are engine
+			// PBR pipelines; forward and wireframe surface passes also declare
+			// the two refraction samplers.
+			const bool surfaceShader =
+				native == OpaquePipeline || native == TransparentPipeline || native == HdrOpaquePipeline ||
+				native == HdrTransparentPipeline || native == WireframeOpaquePipeline ||
+				native == WireframeTransparentPipeline || native == HdrWireframeOpaquePipeline ||
+				native == HdrWireframeTransparentPipeline || native == ForwardPipeline ||
+				native == TransparentLayerPipeline || native == TransparentLayerColourPipeline;
+			materialSamplerCount = authoredMaterial || surfaceShader ? SURFACE_FRAGMENT_SAMPLERS : 11u;
 			if (want != bound) {
 				SDL_BindGPUGraphicsPipeline(pass, want);
 				bound = want;
@@ -198,6 +223,7 @@ namespace engine::render {
 							  uint32_t slot,
 							  uint32_t run,
 							  bool simpleShadow,
+							  uint32_t materialSamplerCount,
 							  SDL_GPUBuffer *forcedArguments,
 							  uint32_t forcedArgument,
 							  bool tallyTriangles) {
@@ -274,6 +300,13 @@ namespace engine::render {
 				SDL_GPUTexture *const height = dataMap(SlotHeightMap[slot]);
 				SDL_GPUTexture *const metalness = dataMap(SlotMetalnessMap[slot]);
 				SDL_GPUTexture *const emissive = dataMap(SlotEmissiveMap[slot]);
+				// A missing packed map must leave each semantic on its legacy map or
+				// scalar. Treating the missing marker as data would overwrite all of
+				// them with magenta-channel values.
+				SDL_GPUTexture *const packedPbr = Textures.Find(
+					SlotPackedPbrMap[slot],
+					TextureContentOwner(SlotPackedPbrMap[slot], SlotContentOwner[slot])
+				);
 				SDL_GPUSampler *const materialSampler =
 					SlotResample[slot] == scene::SurfaceResampleMode::Pixelated ? Textures.PixelSampler()
 																				: Textures.Sampler();
@@ -305,8 +338,13 @@ namespace engine::render {
 					{emissive != nullptr ? emissive : FallbackTexture, materialSampler},
 					{height != nullptr ? height : FallbackTexture, materialSampler},
 					{metalness != nullptr ? metalness : FallbackTexture, materialSampler},
+					{packedPbr != nullptr ? packedPbr : FallbackTexture, materialSampler},
+					{RefractionTexture != nullptr ? RefractionTexture : FallbackTexture,
+					 RefractionSampler != nullptr ? RefractionSampler : fallbackSampler},
+					{RefractionGuardTexture != nullptr ? RefractionGuardTexture : FallbackTexture,
+					 RefractionSampler != nullptr ? RefractionSampler : fallbackSampler},
 				};
-				SDL_BindGPUFragmentSamplers(pass, 0, samplers, 10);
+				SDL_BindGPUFragmentSamplers(pass, 0, samplers, materialSamplerCount);
 
 				LightingUniforms uniforms = *lighting;
 
@@ -323,7 +361,9 @@ namespace engine::render {
 				uniforms.Surface = glm::vec4{
 					sampled != nullptr ? 1.0f : 0.0f,
 					0.0f,
-					height != nullptr ? 1.0f : 0.0f,
+					height != nullptr || (packedPbr != nullptr && SlotPackedPbrChannels[slot].z < 4.0f)
+						? 1.0f
+						: 0.0f,
 					0.04f,
 				};
 				uniforms.Material = glm::vec4{
@@ -332,7 +372,19 @@ namespace engine::render {
 					occlusion != nullptr ? 1.0f : 0.0f,
 					emissive != nullptr ? 1.0f : 0.0f,
 				};
-				uniforms.MaterialExtra = glm::vec4{metalness != nullptr ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+				uniforms.MaterialExtra = glm::vec4{
+					metalness != nullptr ? 1.0f : 0.0f,
+					packedPbr != nullptr ? 1.0f : 0.0f,
+					SlotSpecularFactor[slot],
+					SlotTransmissionFactor[slot]
+				};
+				uniforms.PackedPbrChannels = SlotPackedPbrChannels[slot];
+				uniforms.Transmission = glm::vec4{
+					SlotIndexOfRefraction[slot],
+					SlotThickness[slot],
+					RefractionGuardTexture != nullptr ? 1.0f : 0.0f,
+					0.0f
+				};
 
 				// **The cell is per draw, not per instance**, which is the whole
 				// simplification: a sheet plays on the clock rather than on
@@ -358,6 +410,9 @@ namespace engine::render {
 				// this draw is cut the same way - which is what makes a per-instance
 				// fact expressible in a per-draw uniform.
 				uniforms.SeamPlane = SlotSeam[slot];
+				uniforms.SeamFirst = SlotSeamFirst[slot];
+				uniforms.SeamSecond = SlotSeamSecond[slot];
+				uniforms.SeamCentre = SlotSeamCentre[slot];
 
 				// **The far half of a body in a hole is lit by the sun turned the way
 				// the body was.** Its normals are the near half's rotated by the
@@ -395,6 +450,9 @@ namespace engine::render {
 
 				ShadowUniforms uniforms;
 				uniforms.Plane = SlotSeam[slot];
+				uniforms.SeamFirst = SlotSeamFirst[slot];
+				uniforms.SeamSecond = SlotSeamSecond[slot];
+				uniforms.SeamCentre = SlotSeamCentre[slot];
 				uniforms.Material.x = colour[3];
 				const FlipbookCell cell = Textures.CellOf(texture, AnimationSeconds, textureOwner);
 				uniforms.Flipbook = glm::vec4{cell.Scale, cell.OffsetU, cell.OffsetV, 0.0f};
@@ -501,7 +559,16 @@ namespace engine::render {
 				for (uint32_t level = 0; level < draw.LevelCount; ++level) {
 					const LodDrawLevel &levelDraw = draw.Levels[level];
 					const MeshEntry &mesh = *levelDraw.Mesh;
-					if (!bindMesh(mesh, native, shader, SlotContentOwner[slot])) continue;
+					uint32_t materialSamplerCount = 11;
+					if (!bindMesh(
+							mesh,
+							native,
+							shader,
+							SlotContentOwner[slot],
+							materialSamplerCount,
+							SlotTwoSided[slot]
+						))
+						continue;
 					uint32_t lodArgument = levelDraw.FirstArgument;
 					const auto issue = [&](const LodDrawRange &cluster) {
 						const MeshRange &range = cluster.Range;
@@ -510,7 +577,8 @@ namespace engine::render {
 						}
 						const bool material = cluster.Material < mesh.Textures.size();
 						const core::Name texture =
-							SlotTexture[slot].IsValid()
+							levelDraw.Texture.IsValid() ? levelDraw.Texture
+							: SlotTexture[slot].IsValid()
 								? SlotTexture[slot]
 								: (material ? mesh.Textures[cluster.Material] : core::Name{});
 						const std::array<float, 4> colour =
@@ -522,6 +590,7 @@ namespace engine::render {
 							slot,
 							1,
 							simpleShadow,
+							materialSamplerCount,
 							Lod.Arguments,
 							lodArgument++,
 							level == selectedLevel
@@ -602,7 +671,10 @@ namespace engine::render {
 			SDL_GPUGraphicsPipeline *const wanted =
 				WireframeMode ? nullptr : VariantFor(shader, SlotContentOwner[slot]);
 			SDL_GPUGraphicsPipeline *const native = wanted != nullptr ? wanted : base;
-			if (!bindMesh(*mesh, native, shader, SlotContentOwner[slot])) {
+			uint32_t materialSamplerCount = 11;
+			if (!bindMesh(
+					*mesh, native, shader, SlotContentOwner[slot], materialSamplerCount, SlotTwoSided[slot]
+				)) {
 				slotRun++;
 				slot += run;
 				continue;
@@ -617,6 +689,7 @@ namespace engine::render {
 					slot,
 					phaseInstances,
 					simpleShadow,
+					materialSamplerCount,
 					nullptr,
 					0,
 					true
@@ -634,6 +707,7 @@ namespace engine::render {
 						slot,
 						phaseInstances,
 						simpleShadow,
+						materialSamplerCount,
 						nullptr,
 						0,
 						true
@@ -657,7 +731,8 @@ namespace engine::render {
 		// The built-in meshes and the sampler every texture shares. What used
 		// to be an unconditional upload of one cube is now a table that starts
 		// with six shapes and grows as content arrives.
-		if (!Meshes.Initialise(Device) || !Textures.Initialise(Device, RetainSourceTextures)) {
+		if (!Meshes.Initialise(Device) ||
+			!Textures.Initialise(Device, RetainSourceTextures, TextureBudgetBytes)) {
 			return false;
 		}
 

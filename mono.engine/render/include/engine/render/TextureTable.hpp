@@ -14,6 +14,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <span>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -23,6 +25,19 @@ struct SDL_GPUSampler;
 struct SDL_GPUTexture;
 
 namespace engine::render {
+	// Device bytes stored for one uploaded pixel, including format expansion.
+	// @param format The source texture layout.
+	// @return The resident pixel stride, or empty for an unknown format.
+	std::optional<uint32_t> TextureUploadBytesPerPixel(assets::TextureFormat format) noexcept;
+
+	// One named image in a texture-table transaction. The caller owns Image
+	// through the synchronous AddBatch call.
+	struct TextureBatchImage {
+		// Stable name used to register and look up the image.
+		core::Name Name;
+		// Borrowed decoded pixels, valid through the synchronous batch call.
+		const assets::TextureData *Image = nullptr;
+	};
 
 	// Which of the three textures a drawable naming one should sample.
 	//
@@ -115,8 +130,11 @@ namespace engine::render {
 		//
 		// @param device The GPU device. Kept, not owned.
 		// @param retainSources Keep decoded source copies for export support.
+		// @param maximumBytes Capacity for content textures. Zero uses
+		//                     `MAXIMUM_BYTES`.
 		// @return `false` when the sampler or the default could not be created.
-		bool Initialise(SDL_GPUDevice *device, bool retainSources = false);
+		bool
+		Initialise(SDL_GPUDevice *device, bool retainSources = false, size_t maximumBytes = MAXIMUM_BYTES);
 
 		// Releases every texture and the sampler.
 		void Shutdown();
@@ -132,6 +150,10 @@ namespace engine::render {
 		// @return `false` for an invalid image, a full table or a failed
 		//         upload.
 		bool Add(const core::Name &name, const assets::TextureData &image, core::Name owner = {});
+
+		// Replaces up to six names together. A refusal leaves every old entry
+		// available; no draw can observe only some of a new skybox generation.
+		bool AddBatch(std::span<const TextureBatchImage> images, core::Name owner = {});
 
 		// Takes ownership of a texture somebody else created.
 		//
@@ -165,6 +187,21 @@ namespace engine::render {
 			uint32_t height,
 			size_t bytes,
 			core::Name owner = {}
+		);
+
+		// Replaces one owned texture without releasing the prior handle. The caller
+		// must retire that handle only after the frame which sampled it completes.
+		// `format` records the logical pixel format even when the GPU upload uses
+		// a wider supported representation.
+		bool ReplaceAdopt(
+			const core::Name &name,
+			SDL_GPUTexture *texture,
+			uint32_t width,
+			uint32_t height,
+			size_t bytes,
+			core::Name owner,
+			SDL_GPUTexture *&retired,
+			assets::TextureFormat format = assets::TextureFormat::RGBA8_LINEAR
 		);
 
 		// The texture for a name, or null when it is not registered.
@@ -303,6 +340,14 @@ namespace engine::render {
 		// @since v0.10
 		FlipbookCell CellOf(const core::Name &name, double seconds, core::Name owner = {}) const;
 
+		// Empty for a fixed-rate sheet or missing name. The span remains valid
+		// until this texture is replaced or dropped.
+		std::span<const float> TimingOf(const core::Name &name, core::Name owner = {}) const;
+		// Generation for invalidating cached timing facts after table content changes.
+		uint64_t TimingRevision() const {
+			return TimingGeneration;
+		}
+
 		// A process-local signature of every registered animated sheet's current
 		// frame. Static textures contribute nothing.
 		uint64_t AnimationSignature(double seconds) const;
@@ -345,6 +390,11 @@ namespace engine::render {
 			return UploadedBytes;
 		}
 
+		// Content texture capacity for this table, in bytes.
+		size_t CapacityBytes() const {
+			return MaximumBytes;
+		}
+
 	  private:
 		// One registered texture and what it cost.
 		//
@@ -371,10 +421,13 @@ namespace engine::render {
 			// name.** A GIF bakes to an ordinary texture carrying its grid,
 			// frame count and rate - `assets::TextureData` - and every one of
 			// those was thrown away on upload, so nothing downstream could tell
-			// an animation from a tile atlas. They are three bytes an entry.
+			// an animation from a tile atlas. Variable timing also retains the
+			// bounded duration and cumulative-end arrays used by consumers.
 			uint8_t FlipbookSide = 0;
-			uint8_t FlipbookFrames = 0;
+			uint16_t FlipbookFrames = 0;
 			float FlipbookFrameRate = 0.0f;
+			std::vector<float> FlipbookFrameDurations;
+			std::vector<float> FlipbookCumulativeEnds;
 
 			// The decoded base level is retained for exact host-owned export. Mips
 			// stay device-only: the export seam promises source pixels, not a second
@@ -405,6 +458,7 @@ namespace engine::render {
 		Describe(SDL_GPUTexture *texture, size_t bytes, const assets::TextureData &image, bool retainSource);
 
 		SDL_GPUDevice *Device = nullptr;
+		uint64_t TimingGeneration = 1;
 		SDL_GPUSampler *SharedSampler = nullptr;
 		SDL_GPUSampler *NearestSampler = nullptr;
 
@@ -428,6 +482,7 @@ namespace engine::render {
 		std::unordered_set<uint64_t> Awaiting;
 
 		size_t UploadedBytes = 0;
+		size_t MaximumBytes = MAXIMUM_BYTES;
 		size_t RetainedCopyBytes = 0;
 		bool RetainSources = false;
 	};

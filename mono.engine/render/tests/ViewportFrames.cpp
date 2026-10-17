@@ -7,6 +7,7 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/gui/DrawList.hpp>
 #include <engine/gui/Registration.hpp>
+#include <engine/render/ViewportFramePolicy.hpp>
 #include <engine/render/ViewportFrames.hpp>
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
@@ -23,6 +24,32 @@ using engine::ecs::Entity;
 using engine::ecs::Store;
 using engine::render::CollectViewportInstances;
 using engine::scene::DrawInstance;
+
+TEST_CASE("ViewportFrame cache modes refresh only on their declared schedule", "[render][viewportframe]") {
+	using engine::gui::ViewportUpdateMode;
+	using engine::render::ViewportFrameCache;
+	using engine::render::ViewportFrameTargetOwner;
+
+	ViewportFrameCache cache;
+	CHECK(cache.NeedsRender(ViewportUpdateMode::OnChange, 1, 0, 11, 1));
+	cache.Commit(11, 1, 0);
+	CHECK_FALSE(cache.NeedsRender(ViewportUpdateMode::OnChange, 1, 0, 11, 2));
+	CHECK(cache.NeedsRender(ViewportUpdateMode::OnChange, 1, 0, 12, 2));
+	CHECK(cache.NeedsRender(ViewportUpdateMode::EveryFrame, 1, 0, 11, 2));
+	CHECK_FALSE(cache.NeedsRender(ViewportUpdateMode::FixedRate, 3, 0, 11, 3));
+	CHECK(cache.NeedsRender(ViewportUpdateMode::FixedRate, 3, 0, 11, 4));
+	CHECK_FALSE(cache.NeedsRender(ViewportUpdateMode::Manual, 1, 0, 11, 100));
+	CHECK(cache.NeedsRender(ViewportUpdateMode::Manual, 1, 1, 11, 100));
+
+	ViewportFrameTargetOwner target;
+	target.Commit(10, 1);
+	CHECK(target.Owns(10));
+	target.Commit(20, 2);
+	CHECK_FALSE(target.Owns(10));
+	CHECK(target.Owns(20));
+	CHECK_FALSE(target.Owns(0));
+	CHECK((!target.Owns(10) || cache.NeedsRender(ViewportUpdateMode::OnChange, 1, 0, 11, 2)));
+}
 
 TEST_CASE(
 	"viewport frames resolve textures in their containing world owner", "[render][gpu][viewport-owner][.]"
@@ -63,13 +90,15 @@ TEST_CASE(
 	command.Bounds = {{0, 0}, {64, 64}};
 	commands.Commands.push_back(command);
 	render::ViewportFrames frames;
-	REQUIRE(frames.Render(fixture.Render, store, commands, 1, firstOwner) == 1);
 	const auto capture = [&](Name owner) {
 		void *const previous = frames.Resolve(viewport).Texture;
 		render::InterfaceImage frameImage;
 		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
 		while (std::chrono::steady_clock::now() < deadline) {
-			REQUIRE(frames.Render(fixture.Render, store, commands, 1, owner) == 1);
+			if (frames.Render(fixture.Render, store, commands, 1, owner) != 1) {
+				SDL_Delay(1);
+				continue;
+			}
 			frameImage = frames.Resolve(viewport);
 			if (frameImage.Texture != nullptr && frameImage.Texture != previous) break;
 			SDL_Delay(1);
@@ -152,4 +181,64 @@ TEST_CASE("non-drawable ViewportFrame descendants stay out of the scene", "[rend
 	CollectViewportInstances(world.Data, world.Viewport, instances);
 
 	CHECK(instances.empty());
+}
+
+TEST_CASE("ViewportFrame collection does not merge a nested viewport world", "[render][viewportframe]") {
+	using namespace engine;
+	ViewportWorld world;
+	const Entity nested = world.Data.CreateInstance(gui::GuiClass("ViewportFrame"), "Nested");
+	REQUIRE(world.Data.SetParent(nested, world.World));
+	const Entity nestedWorld = world.Data.CreateInstance(Classes::Find(Name("WorldModel")), "NestedWorld");
+	REQUIRE(world.Data.SetParent(nestedWorld, nested));
+	const Entity nestedPart = world.Part("NestedPart", nestedWorld);
+
+	std::vector<DrawInstance> instances;
+	CollectViewportInstances(world.Data, world.Viewport, instances);
+
+	CHECK_FALSE(ContainsSource(instances, nestedPart));
+}
+
+TEST_CASE("ViewportFrame ignores local transparency overrides", "[render][viewportframe]") {
+	using namespace engine;
+	ViewportWorld world;
+	const Entity part = world.Part("Opaque", world.World);
+	world.Data.Set(part, scene::LocalTransparency{1.0f});
+
+	std::vector<DrawInstance> instances;
+	CollectViewportInstances(world.Data, world.Viewport, instances);
+	REQUIRE(instances.size() == 1);
+	CHECK(instances[0].Transparency == 0.0f);
+}
+
+TEST_CASE("ViewportFrame copies optional LOD and effect state", "[render][viewportframe]") {
+	using namespace engine;
+	ViewportWorld world;
+	const Entity part = world.Part("Detailed", world.World);
+
+	scene::LODAuto automatic;
+	automatic.Meshes[0] = Name("viewport.auto-half");
+	automatic.Meshes[1] = Name("viewport.auto-quarter");
+	automatic.Levels = 3;
+	world.Data.Set(part, automatic);
+	scene::LODCustom custom;
+	custom.Meshes[0] = Name("viewport.custom-half");
+	custom.Levels = 3;
+	world.Data.Set(part, custom);
+	scene::LODSettings settings;
+	settings.MinimumDistances[0] = 12.0f;
+	world.Data.Set(part, settings);
+	scene::RenderEffects effects;
+	effects.Attachments[0].Node = Name("viewport-outline");
+	effects.Attachments[0].Enabled = true;
+	effects.Count = 1;
+	world.Data.Set(part, effects);
+
+	std::vector<DrawInstance> instances;
+	CollectViewportInstances(world.Data, world.Viewport, instances);
+	REQUIRE(instances.size() == 1);
+	CHECK(instances[0].LodMeshes[0] == Name("viewport.custom-half"));
+	CHECK(instances[0].LodMeshes[1] == Name("viewport.auto-quarter"));
+	CHECK(instances[0].LodMinimumDistances[0] == 12.0f);
+	CHECK(instances[0].Effects.Count == 1);
+	CHECK(instances[0].Effects.Attachments[0].Node == Name("viewport-outline"));
 }

@@ -16,3 +16,9 @@ mono_add_library(replication
 
 		Engine::assets
 )
+
+# The RemoteEvent end-to-end case drives the public user lane through the
+# script host. This is test-only: replication itself still carries opaque bytes.
+if(TARGET test_replication)
+	target_link_libraries(test_replication PRIVATE Engine::scripthost)
+endif()

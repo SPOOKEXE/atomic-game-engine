@@ -3,6 +3,7 @@
 #include "Snapshot.hpp"
 #include "StoreState.hpp"
 
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/ecs/Classes.hpp>
 #include <engine/ecs/EnumTable.hpp>
@@ -954,6 +955,7 @@ namespace engine::ecs {
 	}
 
 	void Store::EachRoot(const std::function<void(Entity)> &body) const {
+		ENGINE_HEAP_SCOPE("ecs root snapshot");
 		// Collected and sorted rather than visited in place. The walk is over
 		// archetypes, and a row's position in one moves whenever anything
 		// changes its component set - so visiting in place would report the
@@ -1104,6 +1106,13 @@ namespace engine::ecs {
 			return 0;
 		}
 		return State->ComponentChanges[id.Index];
+	}
+
+	uint64_t Store::ComponentMembershipVersionRaw(ComponentId id) const {
+		if (!id.IsValid() || id.Index >= State->ComponentMembershipChanges.size()) {
+			return 0;
+		}
+		return State->ComponentMembershipChanges[id.Index];
 	}
 
 	bool Store::ChangedRaw(Entity entity, ComponentId id) const {

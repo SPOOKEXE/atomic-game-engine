@@ -676,6 +676,32 @@ TEST_CASE("a MeshPart is a BasePart with Roblox's vocabulary", "[scene][part]") 
 	CHECK(Read<Name>(store, part, "HeightMap") == Name("props/fox_height.atex"));
 	REQUIRE(Write(store, part, "EmissiveMap", Name("props/fox_emissive.atex")));
 	CHECK(Read<Name>(store, part, "EmissiveMap") == Name("props/fox_emissive.atex"));
+	REQUIRE(Write(store, part, "PackedPbrMap", Name("props/fox_orm.atex")));
+	CHECK(Read<Name>(store, part, "PackedPbrMap") == Name("props/fox_orm.atex"));
+	REQUIRE(Write(store, part, "PackedRoughnessChannel", int32_t{2}));
+	REQUIRE(Write(store, part, "PackedOcclusionChannel", int32_t{1}));
+	REQUIRE(Write(store, part, "PackedHeightChannel", int32_t{255}));
+	REQUIRE(Write(store, part, "PackedMetalnessChannel", int32_t{3}));
+	CHECK(Read<int32_t>(store, part, "PackedRoughnessChannel") == 2);
+	CHECK(Read<int32_t>(store, part, "PackedOcclusionChannel") == 1);
+	CHECK(Read<int32_t>(store, part, "PackedHeightChannel") == 255);
+	CHECK(Read<int32_t>(store, part, "PackedMetalnessChannel") == 3);
+	CHECK_FALSE(Write(store, part, "PackedRoughnessChannel", int32_t{4}));
+	CHECK_FALSE(Write(store, part, "PackedRoughnessChannel", int32_t{-1}));
+	CHECK(Read<int32_t>(store, part, "PackedRoughnessChannel") == 2);
+	REQUIRE(Write(store, part, "SpecularFactor", 0.35f));
+	REQUIRE(Write(store, part, "TransmissionFactor", 0.2f));
+	REQUIRE(Write(store, part, "IndexOfRefraction", 2.4f));
+	REQUIRE(Write(store, part, "Thickness", 1.25f));
+	CHECK(Read<float>(store, part, "SpecularFactor") == 0.35f);
+	CHECK(Read<float>(store, part, "TransmissionFactor") == 0.2f);
+	CHECK(Read<float>(store, part, "IndexOfRefraction") == 2.4f);
+	CHECK(Read<float>(store, part, "Thickness") == 1.25f);
+	CHECK_FALSE(Write(store, part, "SpecularFactor", 1.1f));
+	CHECK_FALSE(Write(store, part, "TransmissionFactor", -0.1f));
+	CHECK_FALSE(Write(store, part, "IndexOfRefraction", 0.99f));
+	CHECK_FALSE(Write(store, part, "IndexOfRefraction", 3.01f));
+	CHECK_FALSE(Write(store, part, "Thickness", -0.1f));
 
 	// **One spelling and not two.** `Mesh` and `ColorMap` were aliases of these
 	// on `BasePart` and are gone: two names for one field is the duplication
@@ -711,8 +737,8 @@ TEST_CASE(
 	REQUIRE(Write(store, part, "Lod1Ratio", 1.5f));
 	REQUIRE(Write(store, part, "Lod2Ratio", -0.5f));
 	REQUIRE(Write(store, part, "LodTargetQuadArea", -4.0f));
-	const AutoMeshLOD *automatic = store.Get<AutoMeshLOD>(part);
-	const CustomMeshLOD *custom = store.Get<CustomMeshLOD>(part);
+	const LODAuto *automatic = store.Get<LODAuto>(part);
+	const LODCustom *custom = store.Get<LODCustom>(part);
 	REQUIRE(automatic != nullptr);
 	REQUIRE(custom != nullptr);
 	CHECK(automatic->Meshes[0] == Name("lod/auto-half.amesh"));
@@ -722,6 +748,15 @@ TEST_CASE(
 	CHECK(automatic->TargetQuadArea == 0.0f);
 	CHECK(custom->Meshes[0] == Name("lod/custom-half.amesh"));
 	CHECK_FALSE(custom->Meshes[1].IsValid());
+
+	REQUIRE(Write(store, part, "Lod1Distance", 17.0f));
+	REQUIRE(Write(store, part, "Lod2Distance", 43.0f));
+	REQUIRE(Write(store, part, "Lod3Distance", 91.0f));
+	const LODSettings *settings = store.Get<LODSettings>(part);
+	REQUIRE(settings != nullptr);
+	CHECK(settings->MinimumDistances[0] == 17.0f);
+	CHECK(settings->MinimumDistances[1] == 43.0f);
+	CHECK(settings->MinimumDistances[2] == 91.0f);
 
 	const LevelOfDetail resolved = ResolveMeshLOD(automatic, custom);
 	CHECK(resolved.Strategy == LodStrategy::Authored);
@@ -777,13 +812,16 @@ TEST_CASE("a RigKeypoint joint uses minus one to clear its optional rig slot", "
 	REQUIRE(Write(store, keypoint, "Joint", int32_t{-1}));
 	CHECK(Read<int32_t>(store, keypoint, "Joint") == -1);
 	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{-2}));
-	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{0}));
+	REQUIRE(Write(store, keypoint, "Joint", int32_t{0}));
+	CHECK(Read<int32_t>(store, keypoint, "Joint") == 0);
+	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{engine::scene::MAX_JOINTS}));
 
 	const Entity rig = store.CreateInstance(Classes::Find(Name("Part")), "Rig");
 	REQUIRE(rig != NULL_ENTITY);
 	store.Set(rig, engine::scene::Skeleton{Name("test.rig"), 2, {}});
 	REQUIRE(store.SetParent(keypoint, rig));
 
+	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{2}));
 	REQUIRE(Write(store, keypoint, "Joint", int32_t{1}));
 	CHECK(Read<int32_t>(store, keypoint, "Joint") == 1);
 	CHECK_FALSE(Write(store, keypoint, "Joint", int32_t{2}));
@@ -1284,10 +1322,8 @@ TEST_CASE("light classes expose only controls their render path consumes", "[sce
 		return false;
 	};
 
-	// The renderer has no local-light shadow pass, and a point has no cone or
-	// face. A writable row for any of those would claim an effect that cannot
-	// occur.
-	CHECK_FALSE(has("PointLight", "Shadows"));
+	// Point shadows use six depth views; points still have no cone or face.
+	CHECK(has("PointLight", "Shadows"));
 	CHECK_FALSE(has("PointLight", "Angle"));
 	CHECK_FALSE(has("PointLight", "Face"));
 

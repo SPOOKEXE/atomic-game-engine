@@ -365,6 +365,28 @@ TEST_CASE("a refused gain is posted again rather than coalesced away", "[client]
 	CHECK(fader->Gain == 0.25f);
 }
 
+TEST_CASE("Sound Pan posts a signed stereo placement", "[client][sounds]") {
+	Store store("sounds_test.pan");
+	AudioMixer mixer;
+	SoundStage stage;
+	const Entity sound = NewSound(store, "audio/track.mp3");
+	store.GetMutable<engine::scene::Sound>(sound)->Pan = -0.65f;
+
+	stage.Sync(store, mixer, With("audio/track.mp3"), EAR, mixer.Format().SampleRate);
+	REQUIRE(stage.Find(sound) != nullptr);
+	CHECK(stage.Find(sound)->Pan == -0.65f);
+
+	mixer.ApplyPending();
+	const engine::audio::Node *fader = mixer.Graph().Find(stage.Find(sound)->Fader);
+	REQUIRE(fader != nullptr);
+	CHECK(fader->Pan == -0.65f);
+
+	store.GetMutable<engine::scene::Sound>(sound)->Pan = 0.45f;
+	stage.Sync(store, mixer, With("audio/track.mp3"), EAR, mixer.Format().SampleRate);
+	mixer.ApplyPending();
+	CHECK(fader->Pan == 0.45f);
+}
+
 TEST_CASE("a refused start is retried until the voice is audible", "[client][sounds]") {
 	Store store("sounds_test.refused_play");
 	AudioMixer mixer;

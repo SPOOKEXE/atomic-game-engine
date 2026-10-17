@@ -30,6 +30,15 @@ namespace {
 		row.Alpha = "transparency";
 		row.Resample = "pixelated";
 		row.CastShadow = false;
+		row.EffectCount = 1;
+		row.Effects[0] = {
+			.Node = "portal.effect",
+			.SelectionMask = 0x3u,
+			.Order = 4,
+			.Revision = 7,
+			.Stage = 0,
+			.Enabled = false,
+		};
 		row.JointCount = 2;
 		geometry.Rows.push_back(row);
 		geometry.Joints = {{0, 0, 0, 0, 0, 0, 1}, {1, 2, 3, 0, 1, 0, 0}};
@@ -54,6 +63,8 @@ TEST_CASE(
 		ownedBytes += row.Name.size() + row.Player.size() + row.Alpha.size() + row.Resample.size();
 		for (const auto &asset : row.Assets)
 			ownedBytes += asset.size();
+		for (size_t index = 0; index < row.EffectCount; ++index)
+			ownedBytes += row.Effects[index].Node.size();
 	}
 	CHECK(measured.MetadataBytes == ownedBytes);
 	const auto acceptedMeasure = measured;

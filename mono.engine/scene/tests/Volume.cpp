@@ -1,10 +1,12 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Components.hpp>
 #include <engine/scene/Registration.hpp>
+#include <engine/scene/Sunlight.hpp>
 #include <engine/scene/Volume.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <array>
 
 namespace {
@@ -59,5 +61,54 @@ namespace {
 		CHECK(volume.ShadowSteps == 32);
 		CHECK(volume.Seed == 73);
 		CHECK(volume.Shape == VolumeShape::Ellipsoid);
+	}
+
+	TEST_CASE("camera volume selection keeps visible bounded authored media", "[scene][volume]") {
+		RegisterSceneClasses();
+		Store store("volume.selection");
+		for (uint32_t index = 0; index < 256; index++) {
+			const auto source = store.Create();
+			store.Set(source, Volume{.Seed = 1000 + index});
+			store.Set(source, Transform{.Frame = CFrame{Vector3{0.0f, 0.0f, 2.0f + float(index)}}});
+		}
+		for (uint32_t index = 0; index < engine::scene::MAX_SCENE_VOLUMES; index++) {
+			const auto source = store.Create();
+			store.Set(source, Volume{.Seed = index});
+			store.Set(source, Transform{.Frame = CFrame{Vector3{0.0f, 0.0f, -90.0f - float(index)}}});
+		}
+
+		std::array<VolumeState, engine::scene::MAX_SCENE_VOLUMES> selected;
+		const std::array receivers{engine::core::AABB::FromCentre({0.0f, 0.0f, -94.0f}, {1.0f, 1.0f, 1.0f})};
+		REQUIRE(engine::scene::ResolveVolumes(store, {}, receivers, selected) == selected.size());
+		std::array<uint32_t, engine::scene::MAX_SCENE_VOLUMES> selectedSeeds;
+		std::transform(
+			selected.begin(), selected.end(), selectedSeeds.begin(), [](const VolumeState &volume) {
+				return volume.Seed;
+			}
+		);
+		std::sort(selectedSeeds.begin(), selectedSeeds.end());
+		for (uint32_t index = 0; index < selectedSeeds.size(); index++)
+			CHECK(selectedSeeds[index] == index);
+	}
+
+	TEST_CASE("camera selection retains a complete layered tornado stack", "[scene][volume][tornado]") {
+		RegisterSceneClasses();
+		Store store("volume.tornado");
+		constexpr uint32_t LAYERS = 10;
+		for (uint32_t index = 0; index < LAYERS; index++) {
+			const auto source = store.Create();
+			store.Set(source, Volume{.Seed = index});
+			store.Set(
+				source, Transform{.Frame = CFrame{Vector3{0.0f, 12.0f + float(index) * 24.0f, -80.0f}}}
+			);
+		}
+
+		std::array<VolumeState, engine::scene::MAX_SCENE_VOLUMES> selected;
+		REQUIRE(engine::scene::ResolveVolumes(store, {}, {}, selected) == LAYERS);
+		std::array<bool, LAYERS> present{};
+		for (const VolumeState &volume : selected) {
+			if (volume.Seed < present.size()) present[volume.Seed] = true;
+		}
+		CHECK(std::all_of(present.begin(), present.end(), [](bool layer) { return layer; }));
 	}
 }

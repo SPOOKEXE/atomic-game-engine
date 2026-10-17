@@ -231,20 +231,16 @@ jobs:
         shell: powershell
         run: choco install ccache --yes --no-progress
 
-      # The pinned TypeScript, and it is not optional here even though the build
-      # treats it as optional.
+      # The pinned TypeScript compiler stages Studio's authored panels during
+      # the build. The Studio target treats it as optional and reports when
+      # panels are skipped, so install it here to keep release artifacts whole.
+      # `just typecheck` also uses this compiler for the panels and generated
+      # engine declarations. `node_modules/` is gitignored, so every fresh
+      # runner needs this install or its cache.
       #
-      # `Mirrors-1-world.ts` and `Mirrors-4-worlds.ts` are transpiled to
-      # JavaScript during the build and staged as example scenes. A missing
-      # `node_modules/.bin/tsc` is not fatal - mono.engine/examples/CMakeLists.txt
-      # prints one STATUS line and skips them - so a runner without this step
-      # produces a green build and a release quietly short two scenes, which is
-      # the failure nobody notices. `node_modules/` is gitignored, so without an
-      # install step that is every run.
-      #
-      # `install` rather than `ci`: package.json pins typescript to an exact
-      # version and there is no package-lock.json to honour. The repository's
-      # bun.lock is for `bun`, and npm is what every runner image already has.
+      # `install` uses package.json's exact TypeScript version. There is no npm
+      # lockfile to honour; bun.lock is for Bun, and npm is available on every
+      # runner image.
       - name: Restore the TypeScript transpiler
         id: typescript-cache
         uses: actions/cache/restore@v4

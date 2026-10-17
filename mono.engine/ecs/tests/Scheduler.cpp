@@ -9,8 +9,14 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <functional>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 TEST_SUITE_ID("engine.ecs.scheduler")
@@ -27,10 +33,27 @@ using engine::ecs::SystemOrder;
 using engine::ecs::SystemScheduleStatus;
 
 namespace scheduler_test {
+	struct ThrowOnCopy {
+		bool *ThrowCopies;
+		int *Runs;
+
+		ThrowOnCopy(bool &throwCopies, int &runs) : ThrowCopies(&throwCopies), Runs(&runs) {}
+		ThrowOnCopy(const ThrowOnCopy &other) : ThrowCopies(other.ThrowCopies), Runs(other.Runs) {
+			if (*ThrowCopies) {
+				throw std::runtime_error("system target copy rejected");
+			}
+		}
+		ThrowOnCopy(ThrowOnCopy &&) noexcept = default;
+
+		void operator()(Store &) const {
+			++*Runs;
+		}
+	};
+
 	struct Health {
 		int Value = 0;
 	};
-}
+} // namespace scheduler_test
 
 using namespace scheduler_test;
 
@@ -285,6 +308,309 @@ TEST_CASE("timings accumulate across the calls that make up one frame", "[schedu
 
 	REQUIRE(scheduler.Timings().size() == 1);
 	REQUIRE(scheduler.Timings()[0].Name == "stepped");
+}
+
+TEST_CASE("timing names survive registration growth for serial and parallel systems", "[scheduler]") {
+	for (const bool parallel : {false, true}) {
+		Store store("test");
+		Scheduler scheduler;
+		if (parallel) {
+			scheduler.AddParallel("first", Phase::Input, [](const Store &) {});
+		} else {
+			scheduler.Add("first", Phase::Input, [](Store &) {});
+		}
+
+		scheduler.RunPhases(store, Phase::Input, Phase::Input);
+		REQUIRE(scheduler.Timings().size() == 1);
+		REQUIRE(scheduler.Timings()[0].Name == "first");
+		const float firstMillisecondsBeforeGrowth = scheduler.Timings()[0].Milliseconds;
+
+		for (size_t index = 0; index < 64; index++) {
+			const std::string name = "render-" + std::to_string(index);
+			if (parallel) {
+				scheduler.AddParallel(name, Phase::Render, [](const Store &) {});
+			} else {
+				scheduler.Add(name, Phase::Render, [](Store &) {});
+			}
+		}
+		REQUIRE(scheduler.Timings().size() == 1);
+		CHECK(scheduler.Timings()[0].Name == "first");
+		CHECK(std::isfinite(scheduler.Timings()[0].Milliseconds));
+		CHECK(scheduler.Timings()[0].Milliseconds >= 0.0f);
+
+		for (int run = 0; run < 2; run++) {
+			scheduler.RunPhases(store, Phase::Input, Phase::Input);
+			REQUIRE(scheduler.Timings().size() == 1);
+			CHECK(scheduler.Timings()[0].Name == "first");
+			CHECK(scheduler.Timings()[0].RunPhase == Phase::Input);
+			CHECK(scheduler.Timings()[0].Milliseconds >= firstMillisecondsBeforeGrowth);
+			for (const auto &timing : scheduler.Timings()) {
+				CHECK(std::isfinite(timing.Milliseconds));
+				CHECK(timing.Milliseconds >= 0.0f);
+			}
+		}
+
+		if (parallel) {
+			scheduler.AddParallel("shared", Phase::Input, [](const Store &) {});
+			scheduler.AddParallel("shared", Phase::Render, [](const Store &) {});
+		} else {
+			scheduler.Add("shared", Phase::Input, [](Store &) {});
+			scheduler.Add("shared", Phase::Render, [](Store &) {});
+		}
+		scheduler.RunPhases(store, Phase::Input, Phase::Input);
+		REQUIRE(scheduler.Timings().size() == 2);
+		CHECK(scheduler.Timings()[0].Name == "first");
+		CHECK(scheduler.Timings()[1].Name == "shared");
+		CHECK(scheduler.Timings()[1].RunPhase == Phase::Input);
+		for (const auto &timing : scheduler.Timings()) {
+			CHECK(std::isfinite(timing.Milliseconds));
+			CHECK(timing.Milliseconds >= 0.0f);
+		}
+		const float sharedMillisecondsBeforeRender = scheduler.Timings()[1].Milliseconds;
+		scheduler.RunPhases(store, Phase::Render, Phase::Render);
+		CHECK(scheduler.Timings()[1].Milliseconds >= sharedMillisecondsBeforeRender);
+		for (const auto &timing : scheduler.Timings()) {
+			CHECK(std::isfinite(timing.Milliseconds));
+			CHECK(timing.Milliseconds >= 0.0f);
+		}
+
+		scheduler.ClearTimings();
+		scheduler.RunPhases(store, Phase::Render, Phase::Render);
+		REQUIRE(scheduler.Timings().size() == 65);
+		CHECK(scheduler.Timings()[0].Name == "render-0");
+		for (const auto &timing : scheduler.Timings()) {
+			CHECK(std::isfinite(timing.Milliseconds));
+			CHECK(timing.Milliseconds >= 0.0f);
+		}
+	}
+}
+
+TEST_CASE("long names with shared prefixes retain separate timing rows", "[scheduler]") {
+	Store store("test");
+	Scheduler scheduler;
+	const std::string prefix = "scheduler-name-prefix-longer-than-forty-characters";
+	const std::string leftName = prefix + "-left";
+	const std::string rightName = prefix + "-right";
+	REQUIRE(prefix.size() >= 40);
+	scheduler.Add(leftName, Phase::Input, [](Store &) {});
+	scheduler.Add(rightName, Phase::Input, [](Store &) {});
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	REQUIRE(scheduler.Timings().size() == 2);
+	CHECK(scheduler.Timings()[0].Name == std::string_view(leftName));
+	CHECK(scheduler.Timings()[1].Name == std::string_view(rightName));
+
+	for (size_t index = 0; index < 64; index++) {
+		const std::string name = "growth-" + std::to_string(index);
+		scheduler.Add(name, Phase::Render, [](Store &) {});
+	}
+	REQUIRE(scheduler.Timings().size() == 2);
+	CHECK(scheduler.Timings()[0].Name == std::string_view(leftName));
+	CHECK(scheduler.Timings()[1].Name == std::string_view(rightName));
+	for (const auto &timing : scheduler.Timings()) {
+		CHECK(std::isfinite(timing.Milliseconds));
+		CHECK(timing.Milliseconds >= 0.0f);
+	}
+
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	REQUIRE(scheduler.Timings().size() == 2);
+	CHECK(scheduler.Timings()[0].Name == std::string_view(leftName));
+	CHECK(scheduler.Timings()[1].Name == std::string_view(rightName));
+	for (const auto &timing : scheduler.Timings()) {
+		CHECK(std::isfinite(timing.Milliseconds));
+		CHECK(timing.Milliseconds >= 0.0f);
+	}
+}
+
+TEST_CASE("timing groups keep first completion order and phase across reverse ranges", "[scheduler]") {
+	Store store("test");
+	Scheduler scheduler;
+	scheduler.Add("shared", Phase::Render, [](Store &) {});
+	scheduler.Add("shared", Phase::Input, [](Store &) {});
+	scheduler.Add("input-only", Phase::Input, [](Store &) {});
+
+	scheduler.RunPhases(store, Phase::Render, Phase::Render);
+	REQUIRE(scheduler.Timings().size() == 1);
+	CHECK(scheduler.Timings()[0].Name == "shared");
+	CHECK(scheduler.Timings()[0].RunPhase == Phase::Render);
+
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	REQUIRE(scheduler.Timings().size() == 2);
+	CHECK(scheduler.Timings()[0].Name == "shared");
+	CHECK(scheduler.Timings()[0].RunPhase == Phase::Render);
+	CHECK(scheduler.Timings()[1].Name == "input-only");
+}
+
+TEST_CASE("nested phase ranges share the name group of the first completed call", "[scheduler]") {
+	Store store("test");
+	Scheduler scheduler;
+	scheduler.Add("nested", Phase::Input, [&](Store &nestedStore) {
+		scheduler.RunPhases(nestedStore, Phase::Simulation, Phase::Simulation);
+	});
+	scheduler.Add("nested", Phase::Simulation, [](Store &) {});
+
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	REQUIRE(scheduler.Timings().size() == 1);
+	CHECK(scheduler.Timings()[0].Name == "nested");
+	CHECK(scheduler.Timings()[0].RunPhase == Phase::Simulation);
+}
+
+TEST_CASE("thrown systems leave completed rows intact for the next phase range", "[scheduler]") {
+	Store store("test");
+	Scheduler scheduler;
+	int failureAttempts = 0;
+	scheduler.Add("before", Phase::Input, [](Store &) {});
+	scheduler.Add("failure", Phase::Input, [&](Store &) {
+		if (failureAttempts++ == 0) {
+			throw std::runtime_error("first attempt");
+		}
+	});
+	scheduler.Add("after", Phase::Input, [](Store &) {});
+
+	CHECK_THROWS(scheduler.RunPhases(store, Phase::Input, Phase::Input));
+	REQUIRE(scheduler.Timings().size() == 1);
+	CHECK(scheduler.Timings()[0].Name == "before");
+
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+	REQUIRE(scheduler.Timings().size() == 3);
+	CHECK(scheduler.Timings()[0].Name == "before");
+	CHECK(scheduler.Timings()[1].Name == "failure");
+	CHECK(scheduler.Timings()[2].Name == "after");
+}
+
+TEST_CASE("timing groups survive Add, AddParallel, replacement, and reset", "[scheduler]") {
+	Store store("test");
+	Scheduler scheduler;
+	int serialRuns = 0;
+	int parallelRuns = 0;
+	scheduler.Add("serial", Phase::Input, [&](Store &) { serialRuns = 1; });
+	scheduler.RunPhases(store, Phase::Input, Phase::Input);
+
+	scheduler.AddParallel("parallel", Phase::Render, [](const Store &) {});
+	scheduler.Add("late", Phase::Render, [](Store &) {});
+	CHECK(scheduler.Replace("serial", 2, [&](Store &) { serialRuns = 2; }));
+	CHECK(scheduler.ReplaceParallel("parallel", 2, [&](const Store &) { parallelRuns++; }));
+	scheduler.RunPhases(store, Phase::Input, Phase::Render);
+	REQUIRE(scheduler.Timings().size() == 3);
+	CHECK(serialRuns == 2);
+	CHECK(parallelRuns == 1);
+	CHECK(scheduler.Timings()[0].Name == "serial");
+	CHECK(scheduler.Timings()[1].Name == "parallel");
+	CHECK(scheduler.Timings()[2].Name == "late");
+
+	scheduler.ClearTimings();
+	scheduler.RunPhases(store, Phase::Render, Phase::Render);
+	REQUIRE(scheduler.Timings().size() == 2);
+	CHECK(scheduler.Timings()[0].Name == "parallel");
+	CHECK(scheduler.Timings()[1].Name == "late");
+}
+
+TEST_CASE("scheduler copies rebind accumulated timing names to their own systems", "[scheduler]") {
+	static_assert(std::is_nothrow_move_constructible_v<Scheduler>);
+	static_assert(std::is_nothrow_move_assignable_v<Scheduler>);
+	Store store("test");
+	const std::string shortName = "shared-short";
+	const std::string longName = "shared-long-system-name-with-more-than-forty-characters-total";
+	REQUIRE(longName.size() >= 40);
+	std::optional<Scheduler> copyConstructed;
+	Scheduler copyAssigned;
+	copyAssigned.Add("discarded", Phase::Input, [](Store &) {});
+	copyAssigned.RunPhases(store, Phase::Input, Phase::Input);
+
+	{
+		Scheduler source;
+		source.Add(shortName, Phase::Input, [](Store &) {});
+		source.Add(shortName, Phase::Render, [](Store &) {});
+		source.AddParallel(longName, Phase::Input, [](const Store &) {});
+		source.AddParallel(longName, Phase::Render, [](const Store &) {});
+		source.RunPhases(store, Phase::Render, Phase::Render);
+		source.RunPhases(store, Phase::Input, Phase::Input);
+		REQUIRE(source.Timings().size() == 2);
+		CHECK(source.Timings()[0].RunPhase == Phase::Render);
+		CHECK(source.Timings()[1].RunPhase == Phase::Render);
+		copyConstructed.emplace(source);
+		copyAssigned = source;
+		REQUIRE(copyConstructed->Timings().size() == source.Timings().size());
+		REQUIRE(copyAssigned.Timings().size() == source.Timings().size());
+		for (size_t index = 0; index < source.Timings().size(); ++index) {
+			CHECK(copyConstructed->Timings()[index].Name.data() != source.Timings()[index].Name.data());
+			CHECK(copyAssigned.Timings()[index].Name.data() != source.Timings()[index].Name.data());
+		}
+	}
+
+	const auto checkSourceRows = [&](const Scheduler &scheduler) {
+		REQUIRE(scheduler.Timings().size() == 2);
+		CHECK(scheduler.Timings()[0].Name == shortName);
+		CHECK(scheduler.Timings()[0].RunPhase == Phase::Render);
+		CHECK(scheduler.Timings()[1].Name == longName);
+		CHECK(scheduler.Timings()[1].RunPhase == Phase::Render);
+	};
+	REQUIRE(copyConstructed.has_value());
+	checkSourceRows(*copyConstructed);
+	checkSourceRows(copyAssigned);
+
+	copyConstructed->RunPhases(store, Phase::Input, Phase::Input);
+	checkSourceRows(*copyConstructed);
+	const Scheduler &sameScheduler = copyAssigned;
+	copyAssigned = sameScheduler;
+	checkSourceRows(copyAssigned);
+
+	copyConstructed->Add("copy-only", Phase::Input, [](Store &) {});
+	CHECK(copyConstructed->SystemCount() == 5);
+	CHECK(copyAssigned.SystemCount() == 4);
+	copyConstructed->ClearTimings();
+	copyConstructed->RunPhases(store, Phase::Input, Phase::Input);
+	REQUIRE(copyConstructed->Timings().size() == 3);
+	CHECK(copyConstructed->Timings()[0].Name == shortName);
+	CHECK(copyConstructed->Timings()[0].RunPhase == Phase::Input);
+	CHECK(copyConstructed->Timings()[1].Name == longName);
+	CHECK(copyConstructed->Timings()[1].RunPhase == Phase::Input);
+	CHECK(copyConstructed->Timings()[2].Name == "copy-only");
+	checkSourceRows(copyAssigned);
+
+	Scheduler moved(std::move(copyAssigned));
+	checkSourceRows(moved);
+	Scheduler moveAssigned;
+	moveAssigned = std::move(moved);
+	checkSourceRows(moveAssigned);
+}
+
+TEST_CASE("failed scheduler copy assignment preserves destination state", "[scheduler]") {
+	Store store("test");
+	bool throwCopies = false;
+	int sourceRuns = 0;
+	int destinationRuns = 0;
+
+	Scheduler source;
+	source.Add("source", Phase::Input, Scheduler::System{ThrowOnCopy{throwCopies, sourceRuns}});
+	source.RunPhases(store, Phase::Input, Phase::Input);
+
+	Scheduler destination;
+	destination.Add("destination", Phase::Render, [&](Store &) { ++destinationRuns; });
+	destination.RunPhases(store, Phase::Render, Phase::Render);
+	REQUIRE(destination.Timings().size() == 1);
+	const double retainedMilliseconds = destination.Timings()[0].Milliseconds;
+
+	throwCopies = true;
+	CHECK_THROWS_AS(destination = source, std::runtime_error);
+	throwCopies = false;
+
+	REQUIRE(destination.SystemCount() == 1);
+	REQUIRE(destination.Timings().size() == 1);
+	CHECK(destination.Timings()[0].Name == "destination");
+	CHECK(destination.Timings()[0].RunPhase == Phase::Render);
+	CHECK(destination.Timings()[0].Milliseconds == retainedMilliseconds);
+	CHECK(destinationRuns == 1);
+	destination.RunPhases(store, Phase::Render, Phase::Render);
+	CHECK(destinationRuns == 2);
+	REQUIRE(destination.Timings().size() == 1);
+	CHECK(destination.Timings()[0].Name == "destination");
+	CHECK(destination.Timings()[0].RunPhase == Phase::Render);
+
+	CHECK(source.SystemCount() == 1);
+	REQUIRE(source.Timings().size() == 1);
+	CHECK(source.Timings()[0].Name == "source");
+	source.RunPhases(store, Phase::Input, Phase::Input);
+	CHECK(sourceRuns == 2);
 }
 
 TEST_CASE("a system mutates the store it is handed", "[scheduler]") {

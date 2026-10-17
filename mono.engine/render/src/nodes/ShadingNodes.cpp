@@ -2,10 +2,9 @@
 // built from it, ambient occlusion, the deferred lighting resolve, and the
 // grade that turns the result into a display image.
 //
-// **All five are fullscreen triangles, and they all go through
-// `ViewRecording::Fullscreen`.** One function opens the pass, binds the
-// samplers, pushes the uniforms and sets the viewport, so a node added here
-// cannot forget the scissor and scribble outside its own rectangle.
+// Fullscreen shading goes through `ViewRecording::Fullscreen` so every draw
+// binds its samplers, uniforms, viewport and scissor together. Disabled lighting
+// effects publish the same declared images through copies or clears.
 
 #include "../SeamLightSelection.hpp"
 #include "../SsaoSettings.hpp"
@@ -15,12 +14,42 @@
 #include <engine/core/Metrics.hpp>
 #include <engine/core/Profiling.hpp>
 
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
+
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <tuple>
 #include <type_traits>
 
 namespace engine::render {
+
+	namespace {
+		void CopyLightingEffect(
+			ViewRecording &recording,
+			core::Name name,
+			const ViewRecording::Impl::NamedTexture &source,
+			const ViewRecording::Impl::NamedTexture &target
+		) {
+			recording.EnterNamedPass(name);
+			SDL_GPUBlitInfo blit{};
+			blit.source.texture = source.Texture;
+			blit.source.w = source.Width;
+			blit.source.h = source.Height;
+			blit.destination.texture = target.Texture;
+			blit.destination.w = target.Width;
+			blit.destination.h = target.Height;
+			blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+			blit.filter = SDL_GPU_FILTER_NEAREST;
+			blit.cycle = true;
+			SDL_BlitGPUTexture(recording.Command, &blit);
+			core::Metrics::Count("render.lighting_effect.copy_operations", 1);
+			core::Metrics::Count(
+				"render.lighting_effect.copied_bytes", uint64_t(source.Width) * source.Height * 8
+			);
+		}
+	}
 
 	void ViewRecording::RegisterShadingNodes(NodeTable &frameNodes) {
 		for (const auto kind :
@@ -305,6 +334,51 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("pack-channels"), [this](const graph::RunContext &context) {
+			if (context.Reads.size() != 4 || context.Writes.size() != 1) return false;
+			const auto *node = Pipeline->Graph.Find(context.Node);
+			if (node == nullptr) return false;
+			const std::array ports{"r", "g", "b", "a"};
+			std::array<Impl::NamedTexture, 4> inputs;
+			std::array<uint32_t, 4> components{};
+			for (size_t index = 0; index < ports.size(); ++index) {
+				const auto found =
+					std::find(node->ReadPorts.begin(), node->ReadPorts.end(), core::Name(ports[index]));
+				if (found == node->ReadPorts.end()) return false;
+				inputs[index] = GraphTexture(context.Reads[found - node->ReadPorts.begin()], context, false);
+				const std::string *value =
+					node->Parameter(core::Name(std::string(ports[index]) + "-component"));
+				if (value != nullptr && (value->size() != 1 || (*value)[0] < '0' || (*value)[0] > '3'))
+					return false;
+				components[index] = value == nullptr ? 0 : uint32_t((*value)[0] - '0');
+				if (!inputs[index].IsValid()) return false;
+			}
+			const auto output = GraphTexture(context.Writes.front(), context, true);
+			if (!output.IsValid() || output.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT ||
+				output.Width != inputs.front().Width || output.Height != inputs.front().Height ||
+				State->PackChannelsPipeline == nullptr)
+				return false;
+			for (const Impl::NamedTexture &input : inputs)
+				if (input.Texture == output.Texture) return false;
+			std::array<SDL_GPUTextureSamplerBinding, 4> bindings;
+			for (size_t index = 0; index < inputs.size(); ++index)
+				bindings[index] = {inputs[index].Texture, Sampler};
+			Fullscreen(
+				context.Name,
+				State->PackChannelsPipeline,
+				output.Texture,
+				output.Width,
+				output.Height,
+				bindings,
+				nullptr,
+				nullptr,
+				SDL_FColor{0, 0, 0, 0},
+				components.data(),
+				sizeof(components)
+			);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("blit"), [this](const graph::RunContext &context) {
 			if (context.Reads.size() != 1 || context.Writes.size() != 1) {
 				return false;
@@ -341,6 +415,8 @@ namespace engine::render {
 			const auto *background = node ? node->Parameter(core::Name("background")) : nullptr;
 			const bool zeroBackground = background && *background == "zero";
 			PbrUniforms uniforms = recording.Uniforms;
+			uniforms.Target.x = static_cast<float>(target.Width);
+			uniforms.Target.y = static_cast<float>(target.Height);
 			uniforms.Direction.w = zeroBackground ? 1.f : 0.f;
 			const auto &depthBindings = recording.DepthBindings;
 			const auto fullscreen = [&recording](
@@ -387,6 +463,8 @@ namespace engine::render {
 			PbrUniforms uniforms = recording.Uniforms;
 			// The shared depth shader writes binary R8 when this mode is selected.
 			// G-buffer depth omits blended draws, so the plane remains honest about its scope.
+			uniforms.Target.x = static_cast<float>(target.Width);
+			uniforms.Target.y = static_cast<float>(target.Height);
 			uniforms.Direction.w = 2.0f;
 			recording.Fullscreen(
 				context.Name,
@@ -589,7 +667,7 @@ namespace engine::render {
 		frameNodes.Set(core::Name("deferred-lighting"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
-			const core::CFrame &cameraFrame = recording.Request.CameraFrame;
+			const core::Vector3 &behaviourEye = recording.Request.VisibilityCameraFrame.Position;
 			Impl::SurfaceBank &bank = *recording.Bank;
 			const LightUniforms &lightUniforms = recording.SceneLights;
 			const Impl::PbrDimensions &pbrDimensions = recording.PbrDimensions;
@@ -691,10 +769,10 @@ namespace engine::render {
 					const SeamLightProjector leftProjector = projectorOf(left);
 					const SeamLightProjector rightProjector = projectorOf(right);
 					const float leftDistance = SeamLightInfluenceDistanceSquared(
-						leftProjector, State->VisibleInstances, State->DrawOrder, cameraFrame.Position
+						leftProjector, State->VisibleInstances, State->DrawOrder, behaviourEye
 					);
 					const float rightDistance = SeamLightInfluenceDistanceSquared(
-						rightProjector, State->VisibleInstances, State->DrawOrder, cameraFrame.Position
+						rightProjector, State->VisibleInstances, State->DrawOrder, behaviourEye
 					);
 					if (leftDistance != rightDistance) {
 						return leftDistance < rightDistance;
@@ -750,6 +828,91 @@ namespace engine::render {
 				);
 				return false;
 			}
+			const auto applyLocalShadowCorrections = [&]() {
+				bool anyShadow = false;
+				for (uint32_t index = 0; index < static_cast<uint32_t>(lightUniforms.Count.x); ++index)
+					anyShadow = anyShadow || recording.SceneLightShadows[index];
+				if (!anyShadow) return true;
+				if (!State->EnsureDeferredLocalLightAccumulation()) return false;
+				const SDL_GPUViewport viewport{
+					0, 0, float(pbrDimensions.LitWidth), float(pbrDimensions.LitHeight), 0, 1
+				};
+				const SDL_Rect scissor{0, 0, int(pbrDimensions.LitWidth), int(pbrDimensions.LitHeight)};
+				const std::array<glm::vec3, 6> directions{{
+					{1, 0, 0},
+					{-1, 0, 0},
+					{0, 1, 0},
+					{0, -1, 0},
+					{0, 0, 1},
+					{0, 0, -1},
+				}};
+				const std::array<glm::vec3, 6> ups{{
+					{0, -1, 0},
+					{0, -1, 0},
+					{0, 0, 1},
+					{0, 0, -1},
+					{0, -1, 0},
+					{0, -1, 0},
+				}};
+				for (uint32_t lightRow = 0; lightRow < static_cast<uint32_t>(lightUniforms.Count.x);
+					 ++lightRow) {
+					if (!recording.SceneLightShadows[lightRow]) continue;
+					LightUniforms selected{};
+					selected.Position[0] = lightUniforms.Position[lightRow];
+					selected.Colour[0] = lightUniforms.Colour[lightRow];
+					selected.Direction[0] = lightUniforms.Direction[lightRow];
+					selected.Count.x = 1.0f;
+					const bool point = selected.Direction[0].w <= -1.0f;
+					const uint32_t faceCount = point ? 6u : 1u;
+					const glm::vec3 position = glm::vec3(selected.Position[0]);
+					for (uint32_t face = 0; face < faceCount; ++face) {
+						glm::mat4 projection;
+						glm::mat4 view;
+						if (point) {
+							projection = glm::perspectiveRH_ZO(
+								glm::radians(90.0f), 1.0f, 0.05f, selected.Position[0].w
+							);
+							view = glm::lookAtRH(position, position + directions[face], ups[face]);
+						} else {
+							const float angle =
+								2.0f * acos(glm::clamp(selected.Direction[0].w, -0.999f, 0.999f));
+							projection = glm::perspectiveRH_ZO(angle, 1.0f, 0.05f, selected.Position[0].w);
+							const glm::vec3 direction = glm::normalize(glm::vec3(selected.Direction[0]));
+							const glm::vec3 up =
+								std::abs(direction.y) > 0.99f ? glm::vec3{0, 0, 1} : glm::vec3{0, 1, 0};
+							view = glm::lookAtRH(position, position + direction, up);
+						}
+						if (!recording.RecordLocalLightShadow(projection * view)) return false;
+						PbrUniforms localUniforms = uniforms;
+						localUniforms.LightViewProjection = projection * view;
+						localUniforms.Shadow = glm::vec4{
+							1.0f, 1.0f / float(SHADOW_RESOLUTION), point ? float(face) : -1.0f, 0.0f
+						};
+						spillBindings[6] =
+							SDL_GPUTextureSamplerBinding{State->ShadowTexture, State->ShadowSampler};
+						SDL_GPUColorTargetInfo target{};
+						target.texture = pbr.Lit;
+						target.load_op = SDL_GPU_LOADOP_LOAD;
+						target.store_op = SDL_GPU_STOREOP_STORE;
+						auto *pass = SDL_BeginGPURenderPass(Command, &target, 1, nullptr);
+						if (!pass) return false;
+						SDL_BindGPUGraphicsPipeline(pass, State->DeferredLocalLightAccumulationPipeline);
+						SDL_BindGPUFragmentSamplers(
+							pass, 0, spillBindings.data(), static_cast<uint32_t>(spillBindings.size())
+						);
+						SDL_PushGPUFragmentUniformData(Command, 0, &localUniforms, sizeof(localUniforms));
+						SDL_PushGPUFragmentUniformData(Command, 1, &selected, sizeof(selected));
+						SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
+						SDL_SetGPUViewport(pass, &viewport);
+						SDL_SetGPUScissor(pass, &scissor);
+						SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+						SDL_EndGPURenderPass(pass);
+						++Result.DrawCalls;
+					}
+				}
+				return true;
+			};
+
 			if (baselinePort != node->WritePorts.end()) {
 				const auto baseline =
 					GraphTexture(context.Writes[baselinePort - node->WritePorts.begin()], context, true);
@@ -856,6 +1019,145 @@ namespace engine::render {
 						"render.directional_response.output_bytes",
 						uint64_t(baseline.Width) * baseline.Height * 16
 					);
+				// Each capture target is rendered with exactly one source row. It is
+				// not a copy of the summed local-light result.
+				for (uint32_t index = 0; index < 4; ++index) {
+					const core::Name requested = recording.LocalLightCaptureIds[index];
+					if (!requested.IsValid()) continue;
+					const auto activeLightEnd =
+						recording.SceneLightIds.begin() + static_cast<size_t>(lightUniforms.Count.x);
+					const auto row = std::find(recording.SceneLightIds.begin(), activeLightEnd, requested);
+					recording.LocalLightCaptureMatched[index] = row != activeLightEnd;
+					recording.LocalLightShadowCaptureAvailable[index] =
+						recording.LocalLightCaptureMatched[index] &&
+						recording
+							.SceneLightShadows[static_cast<size_t>(row - recording.SceneLightIds.begin())];
+					const core::Name port(std::string("local-light-response-") + std::to_string(index));
+					auto found = std::find(node->WritePorts.begin(), node->WritePorts.end(), port);
+					if (found == node->WritePorts.end()) continue;
+					const auto target =
+						GraphTexture(context.Writes[found - node->WritePorts.begin()], context, true);
+					if (!target.IsValid() || target.Format != SDL_GPU_TEXTUREFORMAT_R32G32B32A32_FLOAT) {
+						ENGINE_ERROR(
+							"deferred local light capture target {} invalid={} format={} extent={}x{}",
+							index,
+							!target.IsValid(),
+							static_cast<int>(target.Format),
+							target.Width,
+							target.Height
+						);
+						return false;
+					}
+					const core::Name visibilityPort(
+						std::string("local-light-shadow-visibility-") + std::to_string(index)
+					);
+					auto visibilityFound =
+						std::find(node->WritePorts.begin(), node->WritePorts.end(), visibilityPort);
+					if (visibilityFound == node->WritePorts.end()) return false;
+					const auto visibilityTarget = GraphTexture(
+						context.Writes[visibilityFound - node->WritePorts.begin()], context, true
+					);
+					if (!visibilityTarget.IsValid() ||
+						visibilityTarget.Format != SDL_GPU_TEXTUREFORMAT_R8_UNORM ||
+						visibilityTarget.Width != target.Width || visibilityTarget.Height != target.Height)
+						return false;
+					if (!recording.LocalLightCaptureMatched[index]) {
+						SDL_GPUColorTargetInfo emptyTargets[2]{};
+						emptyTargets[0].texture = target.Texture;
+						emptyTargets[1].texture = visibilityTarget.Texture;
+						for (auto &emptyTarget : emptyTargets) {
+							emptyTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+							emptyTarget.store_op = SDL_GPU_STOREOP_STORE;
+							emptyTarget.cycle = true;
+						}
+						auto *emptyPass = SDL_BeginGPURenderPass(Command, emptyTargets, 2, nullptr);
+						if (!emptyPass) return false;
+						SDL_EndGPURenderPass(emptyPass);
+						continue;
+					}
+					const uint32_t lightRow = static_cast<uint32_t>(row - recording.SceneLightIds.begin());
+					if (!State->EnsureDeferredLocalLight()) {
+						ENGINE_ERROR("deferred local light capture pipeline is unavailable");
+						return false;
+					}
+					LightUniforms selected{};
+					selected.Position[0] = lightUniforms.Position[lightRow];
+					selected.Colour[0] = lightUniforms.Colour[lightRow];
+					selected.Direction[0] = lightUniforms.Direction[lightRow];
+					selected.Count.x = 1.0f;
+					const bool shadows = recording.SceneLightShadows[lightRow];
+					const bool point = selected.Direction[0].w <= -1.0f;
+					const uint32_t faceCount = shadows && point ? 6u : 1u;
+					const glm::vec3 position = glm::vec3(selected.Position[0]);
+					const std::array<glm::vec3, 6> directions{{
+						{1, 0, 0},
+						{-1, 0, 0},
+						{0, 1, 0},
+						{0, -1, 0},
+						{0, 0, 1},
+						{0, 0, -1},
+					}};
+					const std::array<glm::vec3, 6> ups{{
+						{0, -1, 0},
+						{0, -1, 0},
+						{0, 0, 1},
+						{0, 0, -1},
+						{0, -1, 0},
+						{0, -1, 0},
+					}};
+					for (uint32_t face = 0; face < faceCount; ++face) {
+						PbrUniforms localUniforms = uniforms;
+						localUniforms.Shadow = glm::vec4{0.0f, 0.0f, -1.0f, 0.0f};
+						if (shadows) {
+							glm::mat4 projection;
+							glm::mat4 view;
+							if (point) {
+								projection = glm::perspectiveRH_ZO(
+									glm::radians(90.0f), 1.0f, 0.05f, selected.Position[0].w
+								);
+								view = glm::lookAtRH(position, position + directions[face], ups[face]);
+								localUniforms.Shadow.z = static_cast<float>(face);
+							} else {
+								const float angle =
+									2.0f * acos(glm::clamp(selected.Direction[0].w, -0.999f, 0.999f));
+								projection =
+									glm::perspectiveRH_ZO(angle, 1.0f, 0.05f, selected.Position[0].w);
+								const glm::vec3 direction = glm::normalize(glm::vec3(selected.Direction[0]));
+								const glm::vec3 up =
+									std::abs(direction.y) > 0.99f ? glm::vec3{0, 0, 1} : glm::vec3{0, 1, 0};
+								view = glm::lookAtRH(position, position + direction, up);
+							}
+							if (!recording.RecordLocalLightShadow(projection * view)) return false;
+							localUniforms.LightViewProjection = projection * view;
+							localUniforms.Shadow.x = 1.0f;
+							localUniforms.Shadow.y = 1.0f / float(SHADOW_RESOLUTION);
+							spillBindings[6] =
+								SDL_GPUTextureSamplerBinding{State->ShadowTexture, State->ShadowSampler};
+						}
+						SDL_GPUColorTargetInfo targetInfos[2]{};
+						targetInfos[0].texture = target.Texture;
+						targetInfos[1].texture = visibilityTarget.Texture;
+						for (auto &targetInfo : targetInfos) {
+							targetInfo.load_op = face == 0 ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
+							targetInfo.store_op = SDL_GPU_STOREOP_STORE;
+							targetInfo.cycle = face == 0;
+						}
+						auto *localPass = SDL_BeginGPURenderPass(Command, targetInfos, 2, nullptr);
+						if (!localPass) return false;
+						SDL_BindGPUGraphicsPipeline(localPass, State->DeferredLocalLightPipeline);
+						SDL_BindGPUFragmentSamplers(
+							localPass, 0, spillBindings.data(), static_cast<uint32_t>(spillBindings.size())
+						);
+						SDL_PushGPUFragmentUniformData(Command, 0, &localUniforms, sizeof(localUniforms));
+						SDL_PushGPUFragmentUniformData(Command, 1, &selected, sizeof(selected));
+						SDL_PushGPUFragmentUniformData(Command, 2, &State->Beams, sizeof(State->Beams));
+						SDL_SetGPUViewport(localPass, &viewport);
+						SDL_SetGPUScissor(localPass, &scissor);
+						SDL_DrawGPUPrimitives(localPass, 3, 1, 0, 0);
+						SDL_EndGPURenderPass(localPass);
+					}
+				}
+				if (!applyLocalShadowCorrections()) return false;
 				return true;
 			}
 
@@ -871,7 +1173,7 @@ namespace engine::render {
 				SDL_FColor{State->FogColour.r, State->FogColour.g, State->FogColour.b, 1.0f},
 				&State->Beams
 			);
-			return true;
+			return applyLocalShadowCorrections();
 		});
 
 		frameNodes.Set(core::Name("skybox-compute"), [this](const graph::RunContext &context) {
@@ -985,6 +1287,7 @@ namespace engine::render {
 		frameNodes.Set(core::Name("fog"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl::PbrSlot &pbr = *recording.Pbr;
+			if (!recording.UploadCloudDensity()) return false;
 			const std::array bindings{
 				SDL_GPUTextureSamplerBinding{pbr.SkyLit, recording.Sampler},
 				SDL_GPUTextureSamplerBinding{recording.DepthTarget.texture, recording.Sampler},
@@ -998,7 +1301,11 @@ namespace engine::render {
 				bindings,
 				&recording.Uniforms,
 				nullptr,
-				SDL_FColor{}
+				SDL_FColor{},
+				nullptr,
+				0,
+				nullptr,
+				recording.State->CloudDensityBuffer
 			);
 			return true;
 		});
@@ -1099,6 +1406,198 @@ namespace engine::render {
 			return true;
 		});
 
+		frameNodes.Set(core::Name("bloom"), [this](const graph::RunContext &context) {
+			ViewRecording &recording = *this;
+			Impl *const State = recording.State;
+			if (context.Reads.size() != 1 || context.Writes.size() != 1) return false;
+			const Impl::NamedTexture source = recording.GraphTexture(context.Reads.front(), context, false);
+			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
+			if (!source.IsValid() || !target.IsValid() ||
+				source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || source.Width != target.Width ||
+				source.Height != target.Height)
+				return false;
+
+			if (State->BloomIntensity <= 0.0f || State->BloomRadius <= 0.0f) {
+				// Bloom is additive radiance, so its disabled output is zero in every channel.
+				recording.EnterNamedPass(context.Name);
+				SDL_GPUColorTargetInfo colour{};
+				colour.texture = target.Texture;
+				colour.load_op = SDL_GPU_LOADOP_CLEAR;
+				colour.store_op = SDL_GPU_STOREOP_STORE;
+				colour.cycle = true;
+				auto *pass = SDL_BeginGPURenderPass(recording.Command, &colour, 1, nullptr);
+				if (pass == nullptr) return false;
+				SDL_EndGPURenderPass(pass);
+				core::Metrics::Count("render.lighting_effect.clear_operations", 1);
+				core::Metrics::Count(
+					"render.lighting_effect.cleared_bytes", uint64_t(target.Width) * target.Height * 8
+				);
+				return true;
+			}
+			if (!State->EnsureLightingEffectPipeline(State->BloomPipeline, "bloom.frag", 1)) return false;
+
+			const BloomUniforms uniforms{
+				.Settings = glm::vec4{State->BloomIntensity, State->BloomThreshold, State->BloomRadius, 0.0f},
+				.Target = glm::vec4{
+					static_cast<float>(target.Width),
+					static_cast<float>(target.Height),
+					1.0f / static_cast<float>(target.Width),
+					1.0f / static_cast<float>(target.Height),
+				},
+			};
+			const std::array bindings{SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler}};
+			recording.Fullscreen(
+				context.Name,
+				State->BloomPipeline,
+				target.Texture,
+				target.Width,
+				target.Height,
+				bindings,
+				nullptr,
+				nullptr,
+				SDL_FColor{},
+				&uniforms,
+				sizeof(uniforms)
+			);
+			return true;
+		});
+
+		frameNodes.Set(core::Name("dof"), [this](const graph::RunContext &context) {
+			ViewRecording &recording = *this;
+			Impl *const State = recording.State;
+			if (recording.Sampler == nullptr && !State->EnsureSurfaceSampler()) return false;
+			recording.Sampler = State->SurfaceSampler;
+			if (context.Reads.size() != 2 || context.Writes.size() != 1) return false;
+			const Impl::NamedTexture colour = recording.GraphTexture(context.Reads[0], context, false);
+			const Impl::NamedTexture depth = recording.GraphTexture(context.Reads[1], context, false);
+			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
+			if (!colour.IsValid() || !depth.IsValid() || !target.IsValid() ||
+				colour.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				depth.Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT ||
+				target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || colour.Width != target.Width ||
+				colour.Height != target.Height || depth.Width != target.Width ||
+				depth.Height != target.Height)
+				return false;
+			if (State->DepthOfFieldIntensity <= 0.0f || State->DepthOfFieldRadius <= 0.0f) {
+				// Keep the declared target and its alias lifetime while copying all four channels.
+				CopyLightingEffect(recording, context.Name, colour, target);
+				return true;
+			}
+			if (!State->EnsureLightingEffectPipeline(State->DepthOfFieldPipeline, "dof.frag", 2))
+				return false;
+			const LightingEffectsUniforms uniforms{
+				.DepthOfField =
+					glm::vec4{
+						State->DepthOfFieldIntensity,
+						State->DepthOfFieldFocusDistance,
+						State->DepthOfFieldFocusRange,
+						State->DepthOfFieldRadius,
+					},
+				.Target = glm::vec4{
+					0.0f,
+					0.0f,
+					1.0f / static_cast<float>(target.Width),
+					1.0f / static_cast<float>(target.Height),
+				},
+			};
+			const std::array bindings{
+				SDL_GPUTextureSamplerBinding{colour.Texture, recording.Sampler},
+				SDL_GPUTextureSamplerBinding{depth.Texture, recording.Sampler},
+			};
+			recording.Fullscreen(
+				context.Name,
+				State->DepthOfFieldPipeline,
+				target.Texture,
+				target.Width,
+				target.Height,
+				bindings,
+				nullptr,
+				nullptr,
+				SDL_FColor{},
+				&uniforms,
+				sizeof(uniforms)
+			);
+			return true;
+		});
+
+		frameNodes.Set(core::Name("god-rays"), [this](const graph::RunContext &context) {
+			ViewRecording &recording = *this;
+			Impl *const State = recording.State;
+			if (recording.Sampler == nullptr && !State->EnsureSurfaceSampler()) return false;
+			recording.Sampler = State->SurfaceSampler;
+			if (context.Reads.size() != 2 || context.Writes.size() != 1) return false;
+			const Impl::NamedTexture source = recording.GraphTexture(context.Reads[0], context, false);
+			const Impl::NamedTexture depth = recording.GraphTexture(context.Reads[1], context, false);
+			const Impl::NamedTexture target = recording.GraphTexture(context.Writes.front(), context, true);
+			if (!source.IsValid() || !depth.IsValid() || !target.IsValid() ||
+				source.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT ||
+				depth.Format != SDL_GPU_TEXTUREFORMAT_R32_FLOAT ||
+				target.Format != SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT || source.Width != target.Width ||
+				source.Height != target.Height || depth.Width != target.Width ||
+				depth.Height != target.Height)
+				return false;
+
+			const core::Vector3 eye = recording.Request.VisibilityCameraFrame.Position;
+			// The directional sun is projected at the eye's own far distance. A
+			// fixed kilometre point can lie behind an ordinary 500 metre camera far
+			// plane and incorrectly suppress every shaft.
+			const float sunDistance =
+				std::max(recording.DrawCamera.NearPlane * 2.0f, recording.DrawCamera.FarPlane * 0.99f);
+			const glm::vec4 sunWorld{
+				eye.X - State->Sun.x * sunDistance,
+				eye.Y - State->Sun.y * sunDistance,
+				eye.Z - State->Sun.z * sunDistance,
+				1.0f,
+			};
+			const glm::vec4 clip = recording.Matrices.ViewProjection * sunWorld;
+			const bool visible = clip.w > 0.0f && std::abs(clip.x) <= clip.w && std::abs(clip.y) <= clip.w &&
+								 clip.z >= 0.0f && clip.z <= clip.w;
+			if (State->GodRayIntensity <= 0.0f || State->GodRayRadius <= 0.0f || !visible) {
+				CopyLightingEffect(recording, context.Name, source, target);
+				return true;
+			}
+			if (!State->EnsureLightingEffectPipeline(State->GodRaysPipeline, "god-rays.frag", 2))
+				return false;
+			const float reciprocalW = visible ? 1.0f / clip.w : 0.0f;
+			const LightingEffectsUniforms uniforms{
+				// Standard linear-depth clears to FarPlane. Keep that value with the
+				// effect so the shader can distinguish sky from an opaque sample.
+				.DepthOfField = glm::vec4{recording.DrawCamera.FarPlane},
+				.GodRays =
+					glm::vec4{
+						State->GodRayIntensity,
+						State->GodRayThreshold,
+						State->GodRayRadius,
+						visible ? 1.0f : 0.0f,
+					},
+				.Target = glm::vec4{
+					clip.x * reciprocalW * 0.5f + 0.5f,
+					0.5f - clip.y * reciprocalW * 0.5f,
+					1.0f / static_cast<float>(target.Width),
+					1.0f / static_cast<float>(target.Height),
+				},
+			};
+			const std::array bindings{
+				SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler},
+				SDL_GPUTextureSamplerBinding{depth.Texture, recording.Sampler},
+			};
+			recording.Fullscreen(
+				context.Name,
+				State->GodRaysPipeline,
+				target.Texture,
+				target.Width,
+				target.Height,
+				bindings,
+				nullptr,
+				nullptr,
+				SDL_FColor{},
+				&uniforms,
+				sizeof(uniforms)
+			);
+			return true;
+		});
+
 		frameNodes.Set(core::Name("tonemap"), [this](const graph::RunContext &context) {
 			ViewRecording &recording = *this;
 			Impl *const State = recording.State;
@@ -1108,22 +1607,6 @@ namespace engine::render {
 			if (context.Reads.empty()) return false;
 			const auto source = recording.GraphTexture(context.Reads.front(), context, false);
 			if (!source.IsValid()) return false;
-			const std::array tonemapBindings{SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler}};
-			const auto fullscreen = [&recording](
-										core::Name name,
-										SDL_GPUGraphicsPipeline *pipeline,
-										SDL_GPUTexture *target,
-										uint32_t passWidth,
-										uint32_t passHeight,
-										std::span<const SDL_GPUTextureSamplerBinding> bindings,
-										const PbrUniforms *passUniforms,
-										const LightUniforms *passLights,
-										SDL_FColor clear
-									) {
-				recording.Fullscreen(
-					name, pipeline, target, passWidth, passHeight, bindings, passUniforms, passLights, clear
-				);
-			};
 			const auto graphTexture =
 				[&recording](graph::ResourceId resource, const graph::RunContext &runContext, bool make) {
 					return recording.GraphTexture(resource, runContext, make);
@@ -1136,20 +1619,63 @@ namespace engine::render {
 					break;
 				}
 			}
+			if (!target.IsValid()) return false;
 			// Portal previews retain their plain tonemap; this grade belongs to the view.
 			const auto postprocess = State->PostProcessPipelines.find(Request.Source->ContentOwner.Id());
-			fullscreen(
-				context.Name,
-				postprocess != State->PostProcessPipelines.end() ? postprocess->second.Pipeline
-																 : State->TonemapPipeline,
-				target.Texture,
-				target.Width,
-				target.Height,
-				tonemapBindings,
-				nullptr,
-				nullptr,
-				colourTarget.clear_color
-			);
+			if (postprocess != State->PostProcessPipelines.end()) {
+				const std::array bindings{SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler}};
+				recording.Fullscreen(
+					context.Name,
+					postprocess->second.Pipeline,
+					target.Texture,
+					target.Width,
+					target.Height,
+					bindings,
+					nullptr,
+					nullptr,
+					colourTarget.clear_color
+				);
+			} else {
+				const Impl::NamedTexture bloom =
+					context.Reads.size() > 1 ? recording.GraphTexture(context.Reads[1], context, false)
+											 : Impl::NamedTexture{};
+				const bool useBloom =
+					bloom.IsValid() && bloom.Width == source.Width && bloom.Height == source.Height;
+				const BloomUniforms uniforms{
+					.Settings =
+						glm::vec4{
+							useBloom ? State->BloomIntensity : 0.0f,
+							State->BloomThreshold,
+							State->BloomRadius,
+							0.0f,
+						},
+					.Target = glm::vec4{
+						static_cast<float>(target.Width),
+						static_cast<float>(target.Height),
+						1.0f / static_cast<float>(target.Width),
+						1.0f / static_cast<float>(target.Height),
+					},
+				};
+				const std::array bindings{
+					SDL_GPUTextureSamplerBinding{source.Texture, recording.Sampler},
+					SDL_GPUTextureSamplerBinding{
+						useBloom ? bloom.Texture : source.Texture, recording.Sampler
+					},
+				};
+				recording.Fullscreen(
+					context.Name,
+					State->TonemapPipeline,
+					target.Texture,
+					target.Width,
+					target.Height,
+					bindings,
+					nullptr,
+					nullptr,
+					colourTarget.clear_color,
+					&uniforms,
+					sizeof(uniforms)
+				);
+			}
 
 			// The forward tail consumes both completed attachments.
 			colourTarget.load_op = SDL_GPU_LOADOP_LOAD;

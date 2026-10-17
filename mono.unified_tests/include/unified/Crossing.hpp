@@ -64,11 +64,11 @@ namespace unified {
 	//
 	// @since v0.5
 	struct Settings {
-		// Entities in the server's placeholder world.
+		// Cubes in the server's default Luau scene.
 		uint32_t Entities = 64;
 
 		// A scene file to author the server's world from, or empty for the
-		// placeholder.
+		// default Luau scene.
 		//
 		// The same loader the client and the server call, over the same file.
 		// This harness exists to prove a server and a client agree, so a
@@ -114,8 +114,7 @@ namespace unified {
 		// Workers the job system runs with.
 		//
 		// One, because a diagnostic that reports a different number on every
-		// run is not a diagnostic. The placeholder world's motion goes through
-		// `EachParallel`, so this cannot be zero.
+		// run is not a diagnostic.
 		unsigned Workers = 1;
 
 		// Ticks between announcements, under `Discovery::Advertised`.
@@ -181,7 +180,7 @@ namespace unified {
 		// snapshot never finished.
 		uint64_t Applied = 0;
 
-		// Entities carrying a `scene::Transform` on each side.
+		// BaseParts carrying a `scene::Transform` on each side.
 		//
 		// **The first place a blank scene shows.** Equal counts and an empty
 		// draw list is a drawing problem; unequal counts is a replication one.
@@ -192,10 +191,8 @@ namespace unified {
 
 		// Rows the client's draw pass produced on the last frame of this tick.
 		//
-		// Below `ClientEntities` means rows arrived without a `Bounds` or a
-		// `Visual` - the components that are sent once in the snapshot and
-		// never again, so losing them is permanent and invisible everywhere
-		// else.
+		// Below `ClientEntities` means parts arrived without the `Bounds` or
+		// `Visual` needed to draw them, or were marked invisible.
 		size_t Drawn = 0;
 
 		// Where the probe entity is on the server, where the client's store
@@ -296,7 +293,7 @@ namespace unified {
 
 		// The entity whose position the reports follow.
 		//
-		// The lowest-numbered row the placeholder world made, so it is the same
+		// The lowest-numbered cube the default scene made, so it is the same
 		// entity across runs with the same entity count.
 		engine::ecs::Entity Probe() const {
 			return Probe_;

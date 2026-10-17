@@ -28,7 +28,9 @@ namespace engine::audio {
 			explicit SilentDevice(const DeviceSettings &settings)
 				: Shape(settings.Format.IsValid() ? settings.Format : AudioFormat{}),
 				  Engine(Shape, settings.BlockFrames),
-				  Block(Shape, settings.BlockFrames == 0 ? DEFAULT_BLOCK_FRAMES : settings.BlockFrames) {}
+				  Block(Shape, settings.BlockFrames == 0 ? DEFAULT_BLOCK_FRAMES : settings.BlockFrames) {
+				Engine.EnablePlaybackEvents(settings.PlaybackEvents);
+			}
 
 			AudioMixer &Mixer() override {
 				return Engine;
@@ -136,6 +138,7 @@ namespace engine::audio {
 			}
 
 			bool Open(const DeviceSettings &settings) {
+				Engine.EnablePlaybackEvents(settings.PlaybackEvents);
 				SDL_AudioSpec spec{};
 				spec.format = SDL_AUDIO_F32;
 				spec.channels = static_cast<int>(Shape.Channels);
@@ -148,7 +151,6 @@ namespace engine::audio {
 					return false;
 				}
 
-				(void)settings;
 				SDL_ResumeAudioStreamDevice(Stream);
 				return true;
 			}

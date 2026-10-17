@@ -1,4 +1,7 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "seam-mask.glsl"
 
 // The engine's flat shader: albedo, and nothing done to it.
 //
@@ -17,10 +20,9 @@
 //
 // ## The interface, which is `opaque.frag`'s and is not negotiable
 //
-// `Renderer::AddShader` creates every fragment shader with ten samplers and
-// three uniform buffers, because a shader object carries those counts rather
-// than the pipeline doing so. A module declaring a different arrangement binds
-// and silently samples nothing.
+// `Renderer::AddShader` uses the full surface sampler layout and three uniform
+// buffers. Authored material inputs remain limited to the first ten sampler
+// slots. Shader objects carry those counts, so their layout must match the draw.
 //
 // **So the `Lighting` block below is copied whole, including the members this
 // file never reads.** It is pushed as one blob at set 3 binding 0, so a member
@@ -58,6 +60,9 @@ layout(set = 3, binding = 0) uniform Lighting {
 	vec4 Mirror;
 	vec4 PaneNormal;
 	vec4 SeamPlane;
+	vec4 SeamFirst;
+	vec4 SeamSecond;
+	vec4 SeamCentre;
 	vec4 OutdoorAmbient;
 	vec4 FogColour;
 	vec4 Fog;
@@ -91,8 +96,7 @@ void main() {
 	}
 	float alpha = alphaMode == 1u ? inColour.a * materialAlpha : inColour.a;
 
-	if (dot(lighting.SeamPlane.xyz, lighting.SeamPlane.xyz) > 0.0 &&
-		dot(inWorldPosition, lighting.SeamPlane.xyz) < lighting.SeamPlane.w) {
+	if (!KeepSeamSample(inWorldPosition, lighting.SeamPlane, lighting.SeamFirst, lighting.SeamSecond, lighting.SeamCentre)) {
 		discard;
 	}
 

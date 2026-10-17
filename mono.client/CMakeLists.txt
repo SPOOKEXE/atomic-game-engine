@@ -12,7 +12,7 @@ mono_add_library(client
 		Engine::core
 		Engine::parallel
 		# The loopback MCP transport and registry. It stays closed until
-		# `--mcp-port` is supplied; the feature list lives in Client.cpp.
+		# `--mcp-port` is supplied; the hook manifest lives in ControlHooks.cpp.
 		Engine::control
 		Engine::ecs
 		Engine::world
@@ -123,7 +123,7 @@ mono_add_library(client
 	# signature is the same fact `input/CMakeLists.txt` states for `Translate.hpp`.
 	# If `Engine::input` ever stops being public about SDL, this line becomes
 	# `VENDOR_PUBLIC` in the same commit.
-	VENDOR SDL3::SDL3 Vendor::json
+	VENDOR SDL3::SDL3 Vendor::json Vendor::accesskit-c
 )
 
 mono_add_program(client
@@ -153,4 +153,5 @@ mono_add_program(client
 
 if(TARGET test_client)
 	add_dependencies(test_client client)
+	target_link_libraries(test_client PRIVATE Vendor::asio Vendor::json)
 endif()

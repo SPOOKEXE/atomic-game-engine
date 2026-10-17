@@ -4,6 +4,8 @@
 // property can round-trip through the ECS while changing no rendered state,
 // which is the regression this suite exists to prevent.
 
+#include "fixtures/SunlightParity.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
@@ -54,6 +56,16 @@ TEST_CASE("Lighting reaches every resolved render term", "[scene][sunlight]") {
 	authored.FogColor = Color3{0.7f, 0.8f, 0.9f};
 	authored.FogStart = 10.0f;
 	authored.FogEnd = 40.0f;
+	authored.BloomThreshold = 0.8f;
+	authored.BloomIntensity = 1.25f;
+	authored.BloomRadius = 9.0f;
+	authored.DepthOfFieldIntensity = 0.8f;
+	authored.DepthOfFieldFocusDistance = 21.0f;
+	authored.DepthOfFieldFocusRange = 5.0f;
+	authored.DepthOfFieldRadius = 7.0f;
+	authored.GodRayIntensity = 1.4f;
+	authored.GodRayThreshold = 0.6f;
+	authored.GodRayRadius = 72.0f;
 
 	const WorldLighting resolved = engine::scene::LightingOf(store);
 	CHECK(resolved.Direction.X == Approx(0.0f).margin(0.0001f));
@@ -65,6 +77,16 @@ TEST_CASE("Lighting reaches every resolved render term", "[scene][sunlight]") {
 	CheckColour(resolved.FogColor, authored.FogColor);
 	CHECK(resolved.FogStart == Approx(10.0f));
 	CHECK(resolved.FogEnd == Approx(40.0f));
+	CHECK(resolved.BloomThreshold == Approx(0.8f));
+	CHECK(resolved.BloomIntensity == Approx(1.25f));
+	CHECK(resolved.BloomRadius == Approx(9.0f));
+	CHECK(resolved.DepthOfFieldIntensity == Approx(0.8f));
+	CHECK(resolved.DepthOfFieldFocusDistance == Approx(21.0f));
+	CHECK(resolved.DepthOfFieldFocusRange == Approx(5.0f));
+	CHECK(resolved.DepthOfFieldRadius == Approx(7.0f));
+	CHECK(resolved.GodRayIntensity == Approx(1.4f));
+	CHECK(resolved.GodRayThreshold == Approx(0.6f));
+	CHECK(resolved.GodRayRadius == Approx(72.0f));
 }
 
 TEST_CASE("clock and latitude move the sun and remove night light", "[scene][sunlight]") {
@@ -111,4 +133,10 @@ TEST_CASE("the legacy Sun resource remains an explicit override", "[scene][sunli
 	CHECK(resolved.Direction == Vector3{0.0f, -1.0f, 0.0f});
 	CheckColour(resolved.Ambient, override.Ambient);
 	CHECK(resolved.FogStart == Approx(12.0f));
+}
+
+TEST_CASE(
+	"lighting resolves fresh authored state in root creation order", "[scene][sunlight][sunlight-parity]"
+) {
+	REQUIRE_NOTHROW(sunlight_fixture::Verify());
 }

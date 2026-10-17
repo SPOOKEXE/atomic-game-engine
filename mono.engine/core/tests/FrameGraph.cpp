@@ -7,9 +7,11 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -295,6 +297,8 @@ TEST_CASE("a scope on another thread is dropped and counted", "[framegraph]") {
 	REQUIRE(FrameGraph::Spans().size() == 1);
 	REQUIRE(FrameGraph::Spans()[0].Name == "main");
 	REQUIRE(FrameGraph::Dropped() == 1);
+	CHECK(FrameGraph::OffThreadDropped() == 1);
+	CHECK(FrameGraph::OwnerDropped() == 0);
 }
 
 TEST_CASE("a dropped scope reaches the metrics sink", "[framegraph]") {
@@ -509,51 +513,26 @@ TEST_CASE("the recent maximum keeps a spike an ordinary frame would hide", "[fra
 TEST_CASE("the recent maximum is a single reading, not a total", "[framegraph]") {
 	Collecting collecting;
 
-	// **The loop is timed as well as profiled**, and the assertion below is
-	// against that rather than against a number of milliseconds. A ceiling like
-	// "under 3 ms" is a claim about the machine: burns of a millisecond each
-	// take that long on an idle box and can take three times as long on a loaded
-	// one, so the test failed about one run in six while the code was correct.
-	//
-	// **A ratio was the first fix and it was not enough, for a reason worth
-	// keeping.** The comment here used to say the wall clock and the profiler
-	// stretch together - true only if the stretch is *uniform*, and a scheduler
-	// does not work that way. It preempts one span. With four repeats a single
-	// stall of three milliseconds puts the maximum past sixty percent of a loop
-	// that should have been four, and the case failed under this repository's
-	// own parallel test sweep while the code was right.
-	//
-	// **Sixteen repeats rather than four**, which widens the gap the assertion
-	// is measuring instead of loosening the assertion. A total now reads about
-	// sixteen times a single reading, so one preempted burn among sixteen is
-	// still far below the ceiling - the discrimination gets stronger and the
-	// flake goes, which is the opposite trade from raising the bound.
-	constexpr int REPEATS = 16;
-
-	const auto started = std::chrono::steady_clock::now();
+	constexpr std::array<float, 4> readings = {1.0f, 3.0f, 2.0f, 4.0f};
 
 	FrameGraph::BeginFrame();
-	for (int repeat = 0; repeat < REPEATS; repeat++) {
-		ENGINE_PROFILE("four-times");
-		BurnMilliseconds(1.0);
+	for (const float milliseconds : readings) {
+		FrameGraph::Report("repeated", ProfileCategory::Engine, milliseconds);
 	}
 	FrameGraph::EndFrame();
 
-	const float spent =
-		std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+	const auto &spans = FrameGraph::Spans();
+	REQUIRE(spans.size() == readings.size());
+	float maximum = 0.0f;
+	float total = 0.0f;
+	for (const auto &span : spans) {
+		CHECK(span.Name == "repeated");
+		maximum = std::max(maximum, span.Milliseconds);
+		total += span.Milliseconds;
+	}
 
-	// Sixteen opens of about a millisecond each. **A total would read near the
-	// whole loop; a single reading reads near a sixteenth of it** - and that is
-	// the difference the column has to show, so that it compares with the
-	// per-frame figure printed beside it.
-	//
-	// A third, which is nowhere near either answer: a sixteenth is far under it
-	// and a total is far over, and one stalled burn among sixteen cannot cross
-	// it however slow the machine got.
-	const float worst = FrameGraph::RecentMaximum("four-times");
-	INFO("worst " << worst << " ms of " << spent << " ms spent over " << REPEATS << " opens");
-	REQUIRE(worst >= 0.5f);
-	REQUIRE(worst < spent * 0.33f);
+	CHECK(total > maximum);
+	CHECK(FrameGraph::RecentMaximum("repeated") == maximum);
 }
 
 TEST_CASE("a span that stops running decays out of the window", "[framegraph]") {
@@ -642,6 +621,47 @@ TEST_CASE("a snapshot names the spans and the worst frames", "[framegraph]") {
 	REQUIRE(text.find("worst") != std::string::npos);
 	// The columns a spike hunt reads.
 	REQUIRE(text.find("p99") != std::string::npos);
+}
+
+TEST_CASE("a snapshot uses nearest-rank percentiles for unsorted span readings", "[framegraph]") {
+	const auto path = std::filesystem::temp_directory_path() / "atomic-framegraph-percentiles.txt";
+	std::filesystem::remove(path);
+
+	{
+		Collecting collecting;
+		for (float milliseconds : {4.0f, 1.0f, 10.0f, 7.0f, 3.0f, 6.0f, 2.0f, 9.0f, 5.0f, 8.0f}) {
+			FrameGraph::BeginFrame();
+			FrameGraph::Report("percentile-sample", ProfileCategory::ECS, milliseconds);
+			FrameGraph::EndFrame();
+		}
+
+		REQUIRE(FrameGraph::WriteSnapshot(path));
+	}
+
+	std::ifstream in(path);
+	REQUIRE(in);
+	const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+	in.close();
+	std::filesystem::remove(path);
+
+	const size_t entryStart = text.find("percentile-sample");
+	REQUIRE(entryStart != std::string::npos);
+	const size_t entryEnd = text.find('\n', entryStart);
+	std::istringstream entry{text.substr(entryStart, entryEnd - entryStart)};
+	std::string name;
+	size_t frames = 0;
+	float mean = 0.0f;
+	float p50 = 0.0f;
+	float p99 = 0.0f;
+	float maximum = 0.0f;
+	entry >> name >> frames >> mean >> p50 >> p99 >> maximum;
+
+	REQUIRE(name == "percentile-sample");
+	REQUIRE(frames == 10);
+	REQUIRE(mean == 5.5f);
+	REQUIRE(p50 == 6.0f);
+	REQUIRE(p99 == 10.0f);
+	REQUIRE(maximum == 10.0f);
 }
 
 TEST_CASE(
@@ -884,6 +904,8 @@ TEST_CASE("a negative duration is refused rather than clamped", "[framegraph]") 
 
 	REQUIRE(FrameGraph::Spans().empty());
 	REQUIRE(FrameGraph::Dropped() == 1);
+	CHECK(FrameGraph::OffThreadDropped() == 0);
+	CHECK(FrameGraph::OwnerDropped() == 1);
 }
 
 TEST_CASE("a report from a worker thread is dropped, not recorded", "[framegraph]") {
@@ -897,6 +919,8 @@ TEST_CASE("a report from a worker thread is dropped, not recorded", "[framegraph
 
 	REQUIRE(FrameGraph::Spans().empty());
 	REQUIRE(FrameGraph::Dropped() == 1);
+	CHECK(FrameGraph::OffThreadDropped() == 1);
+	CHECK(FrameGraph::OwnerDropped() == 0);
 }
 
 TEST_CASE("reporting while collection is off does nothing at all", "[framegraph]") {
@@ -1360,4 +1384,27 @@ TEST_CASE("device time reaches the flamegraph as its own line", "[framegraph]") 
 	REQUIRE(totals.at("frame;opaque") == 9000.0);
 	REQUIRE(totals.at("frame;record") == 2000.0);
 	REQUIRE(totals.at("frame") == 1000.0);
+}
+
+TEST_CASE("owner losses and excluded workers publish separate consistent frame counts", "[framegraph]") {
+	Collecting collecting;
+	FrameGraph::BeginFrame();
+	FrameGraph::Report("bad owner report", ProfileCategory::ECS, -1.0f);
+	std::thread worker([] {
+		FrameGraph::Scope scope("worker", ProfileCategory::Engine);
+		FrameGraph::Report("worker report", ProfileCategory::ECS, 1.0f);
+	});
+	worker.join();
+	FrameGraph::EndFrame();
+	CHECK(FrameGraph::OwnerDropped() == 1);
+	CHECK(FrameGraph::OffThreadDropped() == 2);
+	CHECK(FrameGraph::Dropped() == 3);
+	FrameGraph::BeginFrame();
+	FrameGraph::EndFrame();
+	CHECK(FrameGraph::OwnerDropped() == 0);
+	CHECK(FrameGraph::OffThreadDropped() == 0);
+	CHECK(FrameGraph::Dropped() == 0);
+	FrameGraph::SetEnabled(false);
+	CHECK(FrameGraph::OwnerDropped() == 0);
+	CHECK(FrameGraph::OffThreadDropped() == 0);
 }

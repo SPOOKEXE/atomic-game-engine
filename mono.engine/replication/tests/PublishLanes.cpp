@@ -24,6 +24,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cstdint>
+#include <span>
 #include <vector>
 
 TEST_SUITE_ID("engine.replication.publishlanes")
@@ -113,8 +114,13 @@ namespace publish_lanes_test {
 			// about how many bytes went out. A predicate that said yes to
 			// everything would pass even if the lanes had swapped two clients'
 			// interest sets.
-			Server.SetInterest([](ClientId client, Entity entity, const Store &) {
-				return entity.Id % 7 != client.Index % 7;
+			Server.SetInterestBatch([](ClientId client,
+									   const Store &,
+									   std::span<const Entity> entities,
+									   std::span<uint8_t> accepted) {
+				for (size_t index = 0; index < entities.size(); index++) {
+					accepted[index] = entities[index].Id % 7 != client.Index % 7;
+				}
 			});
 
 			// Nearest-first, so the ordering pass runs and its result is part of

@@ -158,6 +158,11 @@ namespace engine::net::quic {
 		// which is how RFC 9221 spells "do not send me any" - and
 		// `SendUnreliable` then refuses rather than silently sending nothing.
 		bool AllowUnreliable = true;
+
+		// Channels that carry bulk data, one bit per channel. Every other channel
+		// is control traffic and goes out ahead of unreliable messages; a bulk
+		// channel takes turns with them instead. Zero makes every channel control.
+		uint16_t BulkChannels = 0;
 	};
 
 	// What arrived from the peer.

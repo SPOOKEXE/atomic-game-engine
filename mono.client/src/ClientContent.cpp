@@ -1,14 +1,20 @@
+#include "ContentSequence.hpp"
+
 #include <engine/assets/Animation.hpp>
 #include <engine/assets/ContentForm.hpp>
 #include <engine/assets/Manifest.hpp>
 #include <engine/assets/Material.hpp>
+#include <engine/assets/Shader.hpp>
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
+#include <engine/core/Metrics.hpp>
+#include <engine/core/Paths.hpp>
 #include <engine/core/Profiling.hpp>
 #include <engine/examples/PackagedAssets.hpp>
 #include <engine/game/CollisionContent.hpp>
 #include <engine/render/Animation.hpp>
 #include <engine/render/AutomaticMeshLod.hpp>
+#include <engine/scene/Audio.hpp>
 #include <engine/scene/CollisionShapes.hpp>
 #include <engine/scene/Materials.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
@@ -51,8 +57,91 @@ namespace client {
 				.Side = stored.FlipbookSide,
 				.Frames = stored.FlipbookFrames,
 				.FrameRate = stored.FlipbookFrameRate,
+				.FrameDurations = stored.FlipbookFrameDurations,
+				.CumulativeEnds = {},
 			};
 		}
+	}
+
+	void Client::IndexPackagedAudio() {
+		ENGINE_PROFILE_CAT("client.packaged audio index", engine::core::ProfileCategory::Assets);
+		PackagedAudio.clear();
+		std::filesystem::path directory = engine::core::Paths::Assets() / "audio";
+		std::error_code error;
+		if (!std::filesystem::is_directory(directory, error)) {
+			const std::filesystem::path staged =
+				engine::core::Paths::Base().parent_path() / "assets" / "audio";
+			error.clear();
+			if (std::filesystem::is_directory(staged, error)) directory = staged;
+		}
+		if (error) {
+			ENGINE_WARN("audio: cannot find packaged sounds in {}", directory.string());
+			return;
+		}
+
+		std::vector<std::filesystem::path> files;
+		for (std::filesystem::directory_iterator entries(directory, error), end; entries != end && !error;
+			 entries.increment(error)) {
+			if (!entries->is_regular_file(error) || entries->path().extension() != ".wav") continue;
+			files.push_back(entries->path());
+		}
+		if (error) {
+			ENGINE_WARN("audio: cannot list packaged sounds in {}", directory.string());
+			return;
+		}
+		std::sort(files.begin(), files.end());
+		for (const std::filesystem::path &path : files) {
+			const engine::core::Name name("audio/" + path.filename().generic_string());
+			PackagedAudio.emplace(name.Id(), path);
+		}
+	}
+
+	void Client::LoadPackagedAudio(engine::ecs::Store &store) {
+		if (PackagedAudio.empty()) return;
+		size_t registered = 0;
+		const engine::audio::AudioFormat target = Sound ? Sound->Format() : engine::audio::AudioFormat{};
+		store.Each<const engine::scene::Sound>([&](engine::ecs::Entity, const engine::scene::Sound &sound) {
+			const auto pending = PackagedAudio.find(sound.SoundId.Id());
+			if (pending == PackagedAudio.end()) return;
+			const std::filesystem::path path = std::move(pending->second);
+			PackagedAudio.erase(pending);
+			if (Audible.Find(sound.SoundId)) return;
+			ENGINE_PROFILE_CAT("client.packaged audio", engine::core::ProfileCategory::Assets);
+			std::ifstream input(path, std::ios::binary | std::ios::ate);
+			if (!input) {
+				ENGINE_WARN("audio: cannot read packaged sound {}", path.string());
+				return;
+			}
+			const std::streamoff size = input.tellg();
+			if (size <= 0) {
+				ENGINE_WARN("audio: packaged sound {} is empty", path.string());
+				return;
+			}
+			input.seekg(0);
+			std::vector<std::byte> bytes(static_cast<size_t>(size));
+			input.read(reinterpret_cast<char *>(bytes.data()), size);
+			engine::core::Metrics::Count("client.audio.packaged.reads", 1.0);
+			engine::core::Metrics::Count(
+				"client.audio.packaged.read-bytes", static_cast<double>(input.gcount())
+			);
+			if (!input) {
+				ENGINE_WARN("audio: cannot read packaged sound {}", path.string());
+				return;
+			}
+			engine::core::Metrics::Count("client.audio.packaged.decodes", 1.0);
+			const std::optional<engine::audio::SampleBuffer> samples = DecodeAudio(bytes);
+			if (!samples) {
+				ENGINE_WARN("audio: packaged sound {} is not audio this engine decodes", path.string());
+				return;
+			}
+
+			auto ready = std::make_shared<const engine::audio::SampleBuffer>(samples->ConvertTo(target));
+			engine::core::Metrics::Count(
+				"client.audio.packaged.pcm-bytes", static_cast<double>(ready->Data().size_bytes())
+			);
+			if (Audible.Add(sound.SoundId, std::move(ready))) ++registered;
+		});
+		if (registered != 0) ENGINE_INFO("audio: {} packaged sound(s) registered", registered);
 	}
 
 	void Client::RefreshContentBindings() {
@@ -471,6 +560,8 @@ namespace client {
 						.Side = image.FlipbookSide,
 						.Frames = image.FlipbookFrames,
 						.FrameRate = image.FlipbookFrameRate,
+						.FrameDurations = image.FlipbookFrameDurations,
+						.CumulativeEnds = {},
 					};
 					for (const engine::world::WorldId id : worlds) {
 						Universe_->Enter(id, [&name, &facts](engine::ecs::Store &store) {
@@ -505,6 +596,15 @@ namespace client {
 					.Height = engine::core::Name(material.HeightMap),
 					.Metalness = engine::core::Name(material.MetalnessMap),
 					.Emissive = engine::core::Name(material.EmissiveMap),
+					.PackedPbr = engine::core::Name(material.PackedPbrMap),
+					.RoughnessChannel = material.RoughnessChannel,
+					.OcclusionChannel = material.OcclusionChannel,
+					.HeightChannel = material.HeightChannel,
+					.MetalnessChannel = material.MetalnessChannel,
+					.SpecularFactor = material.SpecularFactor,
+					.TransmissionFactor = material.TransmissionFactor,
+					.IndexOfRefraction = material.IndexOfRefraction,
+					.Thickness = material.Thickness,
 				};
 
 				// **Deliberately not asked for here**, unlike a mesh's sheets, and
@@ -525,7 +625,42 @@ namespace client {
 					});
 				}
 				ContentMaterials++;
+			} else if (asset->Kind == engine::assets::AssetKind::Shader) {
+				engine::assets::ShaderData shader;
+				if (!engine::assets::Shader::Read(reader, shader) || reader.Remaining() != 0) {
+					ENGINE_WARN("content: {} is not a cooked shader this engine reads", asset->Name);
+					continue;
+				}
+				// Material names select the declared material variant, never collection order.
+				for (const auto owner : content.Owners) {
+					if (const auto error = Shaders.InstallCooked(name, shader, "material", owner))
+						ENGINE_WARN("content: shader {} refused: {}", asset->Name, *error);
+				}
 			} else if (asset->Kind == engine::assets::AssetKind::Animation) {
+				if (engine::assets::FormOfName(asset->Name) == engine::assets::ContentForm::ASeq) {
+					engine::assets::TextureSequenceData sequence;
+					engine::scene::FlipbookFacts facts;
+					if (!ReadSequenceContent(asset->Name, asset->Bytes, sequence, facts)) {
+						ENGINE_WARN("content: {} is not a supported texture sequence", asset->Name);
+						continue;
+					}
+					bool admitted = false;
+					for (const auto owner : content.Owners)
+						admitted = Renderer.AddTextureSequence(name, sequence, owner) || admitted;
+					VisualResourcesChanged = admitted || VisualResourcesChanged;
+					if (!admitted && Renderer.Backend().Device != nullptr)
+						ENGINE_WARN(
+							"content: {} texture sequence exceeds native atlas limits or upload failed",
+							asset->Name
+						);
+					for (const engine::world::WorldId id : worlds) {
+						Universe_->Enter(id, [&name, &facts](engine::ecs::Store &store) {
+							engine::scene::RecordTexture(store, name, facts);
+						});
+					}
+					ContentTextures++;
+					continue;
+				}
 				engine::assets::AnimationData animation;
 				if (!engine::assets::Animation::Read(reader, animation)) {
 					ENGINE_WARN("content: {} is not an animation this engine reads", asset->Name);
@@ -639,7 +774,7 @@ namespace client {
 			return;
 		}
 
-		Universe_->Enter(world, [this, &content, world](engine::ecs::Store &store) {
+		Universe_->Enter(world, [&content, world](engine::ecs::Store &store) {
 			// **The gate, and it is a small fixed set of integer compares.**
 			// `CollectWantedContent`
 			// is several walks of the store, and this used to run all of them on

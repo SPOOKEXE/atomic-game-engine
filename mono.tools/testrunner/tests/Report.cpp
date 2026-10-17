@@ -156,6 +156,26 @@ TEST_CASE("a run that never finished is not a result", "[report]") {
 	);
 }
 
+TEST_CASE("malformed totals do not become a zero-case report", "[report]") {
+	SuiteReport report;
+	report.Id = "tools.testrunner.report";
+	REQUIRE_FALSE(testrunner::ParseSuiteReport("# mono test report v2\ntotal\tbad\t0\t0\t0\t0\n", report));
+	REQUIRE(report.Id == "tools.testrunner.report");
+	REQUIRE(report.CaseCount() == 0);
+	REQUIRE_FALSE(
+		testrunner::ParseSuiteReport(
+			"# mono test report v2\ncase\tpass\t1\t0\t1\tone\ntotal\t0\t0\t0\t0\t0\n", report
+		)
+	);
+	REQUIRE(report.Cases.empty());
+}
+
+TEST_CASE("a complete zero-case report is valid", "[report]") {
+	SuiteReport report;
+	REQUIRE(testrunner::ParseSuiteReport("# mono test report v2\ntotal\t0\t0\t0\t0\t0\n", report));
+	REQUIRE(report.CaseCount() == 0);
+}
+
 TEST_CASE("a missing report file is refused rather than throwing", "[report]") {
 	SuiteReport report;
 	REQUIRE_FALSE(testrunner::ReadSuiteReport("/nonexistent/report.tsv", report));

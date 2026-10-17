@@ -90,7 +90,7 @@ namespace engine::render {
 				return false;
 			for (size_t index = 0; index < spec.ChannelCount; ++index) {
 				if (static_cast<size_t>(spec.Channels[index]) >
-					static_cast<size_t>(DataCaptureChannel::OpticalFlow))
+					static_cast<size_t>(DataCaptureChannel::PackedGpu))
 					return false;
 				for (size_t previous = 0; previous < index; ++previous)
 					if (spec.Channels[previous] == spec.Channels[index]) return false;
@@ -181,6 +181,7 @@ namespace engine::render {
 			bool Submitted = false;
 			bool Ready = false;
 			bool Observed = false;
+			std::array<bool, MAX_DATA_CAPTURE_LOCAL_LIGHT_IDS> LocalLightCaptureMatched{};
 			uint16_t PollAttempts = 0;
 			size_t AccountedBytes = 0;
 			uint64_t SubmittedNanoseconds = 0;
@@ -539,6 +540,86 @@ namespace engine::render {
 		return {.Status = HookBindStatus::Ok, .Batch = batch};
 	}
 
+	bool DataFactoryHookBind::ApplyLocalLightCapture(
+		const ViewMutationIdentity &identity, ViewRecording &recording
+	) {
+		std::fill(recording.LocalLightCaptureIds.begin(), recording.LocalLightCaptureIds.end(), core::Name{});
+		std::fill(
+			recording.LocalLightCaptureMatched.begin(), recording.LocalLightCaptureMatched.end(), false
+		);
+		std::fill(
+			recording.LocalLightShadowCaptureAvailable.begin(),
+			recording.LocalLightShadowCaptureAvailable.end(),
+			false
+		);
+		for (const auto &batch : State->Batches) {
+			if (!batch.Used || !batch.Submitted || batch.Ready || !State->Valid(batch.Connection)) continue;
+			const auto &connection = State->Connections[batch.Connection.Slot];
+			if (connection.Request.PipelineRevision != identity.PipelineRevision ||
+				connection.Request.Session.WorldName != identity.WorldName ||
+				batch.Request.SnapshotId != identity.SnapshotId ||
+				batch.Request.Pipeline != identity.Pipeline || batch.Request.ViewSlot != identity.ViewSlot ||
+				(std::find(
+					 batch.Request.Channels.begin(),
+					 batch.Request.Channels.end(),
+					 DataCaptureChannel::LocalLightContribution
+				 ) == batch.Request.Channels.end() &&
+				 std::find(
+					 batch.Request.Channels.begin(),
+					 batch.Request.Channels.end(),
+					 DataCaptureChannel::LocalLightShadowVisibility
+				 ) == batch.Request.Channels.end()))
+				continue;
+			for (size_t index = 0; index < batch.Request.LocalLightIds.size(); ++index)
+				recording.LocalLightCaptureIds[index] = core::Name(batch.Request.LocalLightIds[index]);
+			return true;
+		}
+		return false;
+	}
+
+	void DataFactoryHookBind::CompleteLocalLightCapture(
+		const ViewMutationIdentity &identity, const ViewRecording &recording
+	) {
+		for (auto &batch : State->Batches) {
+			if (!batch.Used || !batch.Submitted || batch.Ready || !State->Valid(batch.Connection)) continue;
+			const auto &connection = State->Connections[batch.Connection.Slot];
+			if (connection.Request.PipelineRevision != identity.PipelineRevision ||
+				connection.Request.Session.WorldName != identity.WorldName ||
+				batch.Request.SnapshotId != identity.SnapshotId ||
+				batch.Request.Pipeline != identity.Pipeline || batch.Request.ViewSlot != identity.ViewSlot ||
+				(std::find(
+					 batch.Request.Channels.begin(),
+					 batch.Request.Channels.end(),
+					 DataCaptureChannel::LocalLightContribution
+				 ) == batch.Request.Channels.end() &&
+				 std::find(
+					 batch.Request.Channels.begin(),
+					 batch.Request.Channels.end(),
+					 DataCaptureChannel::LocalLightShadowVisibility
+				 ) == batch.Request.Channels.end()))
+				continue;
+			batch.LocalLightCaptureMatched = recording.LocalLightCaptureMatched;
+			for (size_t index = 0; index < batch.Ticket.Channels.size(); ++index) {
+				const DataCaptureChannel channel = batch.Ticket.Channels[index];
+				if (channel != DataCaptureChannel::LocalLightContribution &&
+					channel != DataCaptureChannel::LocalLightShadowVisibility)
+					continue;
+				size_t localSlot = 0;
+				for (size_t prior = 0; prior < index; ++prior)
+					if (batch.Ticket.Channels[prior] == channel) ++localSlot;
+				if (index < batch.Ticket.LocalLightMatched.size() &&
+					index < batch.Ticket.LocalLightShadowAvailable.size() &&
+					localSlot < recording.LocalLightCaptureMatched.size()) {
+					batch.Ticket.LocalLightMatched[index] =
+						recording.LocalLightCaptureMatched[localSlot] ? 1 : 0;
+					batch.Ticket.LocalLightShadowAvailable[index] =
+						recording.LocalLightShadowCaptureAvailable[localSlot] ? 1 : 0;
+				}
+			}
+			return;
+		}
+	}
+
 	void DataFactoryHookBind::Observe(const RenderObservationContext &context) {
 		for (auto &batch : State->Batches) {
 			if (!batch.Used || !batch.Submitted || batch.Ready || !State->Valid(batch.Connection)) continue;
@@ -599,6 +680,15 @@ namespace engine::render {
 				poll.PipelineRevision = batch.Observation.PipelineRevision;
 				poll.WorldName = batch.Observation.WorldName;
 				poll.ViewSlot = batch.Observation.ViewSlot;
+			} else if (poll.Status == DataCaptureStatus::Partial) {
+				// PollDataCapture already proved every retained image belongs to one
+				// capture bundle. A disabled sibling has no image and may otherwise
+				// leave the hook observing its node instead of the retained one.
+				batch.Observation.Frame = poll.CaptureFrame;
+				batch.Observation.Pipeline = poll.Pipeline;
+				batch.Observation.PipelineRevision = poll.PipelineRevision;
+				batch.Observation.WorldName = poll.WorldName;
+				batch.Observation.ViewSlot = poll.ViewSlot;
 			}
 			if (poll.SnapshotId != batch.Observation.SnapshotId ||
 				poll.CaptureFrame != batch.Observation.Frame || poll.Pipeline != batch.Observation.Pipeline ||
@@ -635,8 +725,9 @@ namespace engine::render {
 	}
 
 	void DataFactoryHookBind::RegisterBuiltInDataCaptureHooks() {
-		for (size_t index = 0; index <= static_cast<size_t>(DataCaptureChannel::MotionVectors); ++index) {
+		for (size_t index = 0; index <= static_cast<size_t>(DataCaptureChannel::PackedGpu); ++index) {
 			const auto channel = static_cast<DataCaptureChannel>(index);
+			if (channel == DataCaptureChannel::OpticalFlow) continue;
 			const std::string name = "data_capture." + std::string(DataCaptureChannelName(channel));
 			(void)RegisterHook({
 				.Name = core::Name(name),

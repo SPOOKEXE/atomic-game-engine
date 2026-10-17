@@ -3,7 +3,12 @@
 #include <engine/ui/Fonts.hpp>
 
 #include <array>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <unordered_map>
+#include <vector>
 
 namespace engine::ui {
 
@@ -37,6 +42,15 @@ namespace engine::ui {
 
 		// Loaded faces, by role and size. Null for anything that would not load.
 		std::array<ImFont *, FaceCount * SizeCount> Loaded{};
+		ImFontAtlas *LoadedAtlas = nullptr;
+		ImGuiContext *LoadedContext = nullptr;
+
+		// This is deliberately one fixed allocation, made before the first frame.
+		// The studio painter fills subrectangles in it for the canonical shaper;
+		// asking ImGui for one rectangle per glyph while panels are drawing can
+		// replace the atlas texture and invalidate vertices already recorded.
+		constexpr int SHAPED_GLYPH_ATLAS_EXTENT = 1024;
+		std::unordered_map<ImGuiContext *, ImFontAtlasRectId> ShapedGlyphRects;
 
 		size_t IndexOf(Typeface face, TextSize size) {
 			return static_cast<size_t>(face) * SizeCount + static_cast<size_t>(size);
@@ -47,6 +61,15 @@ namespace engine::ui {
 		Loaded.fill(nullptr);
 
 		ImGuiIO &io = ImGui::GetIO();
+		LoadedAtlas = io.Fonts;
+		LoadedContext = ImGui::GetCurrentContext();
+		ImFontAtlasRectId shapedRect =
+			io.Fonts->AddCustomRect(SHAPED_GLYPH_ATLAS_EXTENT, SHAPED_GLYPH_ATLAS_EXTENT);
+		if (shapedRect == ImFontAtlasRectId_Invalid) {
+			ENGINE_WARN("could not reserve the shaped glyph atlas rectangle");
+		} else {
+			ShapedGlyphRects[ImGui::GetCurrentContext()] = shapedRect;
+		}
 		const float factor = scale > 0.0f ? scale : 1.0f;
 
 		const std::filesystem::path root = core::Paths::Assets() / "fonts";
@@ -106,20 +129,66 @@ namespace engine::ui {
 		return true;
 	}
 
+	bool ShapedGlyphAtlasRect(ImFontAtlasRect *out) {
+		if (out == nullptr) {
+			return false;
+		}
+		ImGuiIO &io = ImGui::GetIO();
+		const auto found = ShapedGlyphRects.find(ImGui::GetCurrentContext());
+		return found != ShapedGlyphRects.end() && io.Fonts != nullptr &&
+			   io.Fonts->GetCustomRect(found->second, out);
+	}
+
 	ImFont *Font(Typeface face, TextSize size) {
-		if (face >= Typeface::Count || size >= TextSize::Count) {
+		if (face >= Typeface::Count || size >= TextSize::Count ||
+			LoadedContext != ImGui::GetCurrentContext() || LoadedAtlas != ImGui::GetIO().Fonts) {
 			return nullptr;
 		}
 
+		const auto live = [](ImFont *candidate) {
+			if (candidate == nullptr) return false;
+			for (ImFont *font : ImGui::GetIO().Fonts->Fonts) {
+				if (font == candidate) return true;
+			}
+			return false;
+		};
+
 		ImFont *found = Loaded[IndexOf(face, size)];
-		if (found != nullptr) {
-			return found;
-		}
+		if (live(found)) return found;
 
 		// A family that would not load falls back to the interface one at the
 		// same size rather than to nothing, so a missing file costs the shapes
 		// and not the layout.
-		return Loaded[IndexOf(Typeface::Interface, size)];
+		ImFont *fallback = Loaded[IndexOf(Typeface::Interface, size)];
+		return live(fallback) ? fallback : nullptr;
+	}
+
+	const gui::FontPackage &GuiFontPackage() {
+		static const gui::FontPackage package = [] {
+			gui::FontPackage loaded;
+			const std::filesystem::path root = core::Paths::Assets() / "fonts";
+			constexpr std::array packageFaces{
+				std::pair{"Inter.ttf", gui::FontFace::Regular},
+				std::pair{"Roboto.ttf", gui::FontFace::Bold},
+				std::pair{"NotoSans.ttf", gui::FontFace::Italic},
+				std::pair{"JetBrainsMono.ttf", gui::FontFace::Code},
+			};
+			size_t total = 0;
+			for (const auto &[name, role] : packageFaces) {
+				std::ifstream file(root / name, std::ios::binary | std::ios::ate);
+				if (!file) continue;
+				const std::streamsize size = file.tellg();
+				if (size <= 0 || static_cast<size_t>(size) > gui::MAXIMUM_FONT_PACKAGE_BYTES ||
+					total + static_cast<size_t>(size) > gui::MAXIMUM_FONT_PACKAGE_TOTAL_BYTES)
+					continue;
+				std::vector<std::byte> bytes(static_cast<size_t>(size));
+				file.seekg(0);
+				if (!file.read(reinterpret_cast<char *>(bytes.data()), size)) continue;
+				if (loaded.Add(core::Name(std::string("fonts/") + name), role, bytes)) total += bytes.size();
+			}
+			return loaded;
+		}();
+		return package;
 	}
 
 	ScopedFont::ScopedFont(Typeface face, TextSize size, float scale) {

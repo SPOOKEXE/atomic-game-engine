@@ -111,6 +111,9 @@ TEST_CASE(
 	);
 	CHECK(inbox.Usage().PendingCount == 0);
 	CHECK(inbox.Usage().HeldCount == 1);
+	CHECK(inbox.Usage().DecodedBytes == 32);
+	CHECK(inbox.Usage().StaleRejections == 0);
+	CHECK(inbox.Usage().PendingCapacity == 16);
 	CHECK(
 		inbox.AcceptAuthenticated(REMOTE, LOCAL, issued.Request.Key.RequestId, wire, START).Status ==
 		PortalInboxStatus::Unsolicited
@@ -120,6 +123,7 @@ TEST_CASE(
 	CHECK(held->Key == issued.Request.Key);
 	CHECK(held->Pixels.size() == 32);
 	CHECK(inbox.Usage().HeldBytes == 0);
+	CHECK(inbox.Usage().DecodedBytes == held->Pixels.size());
 	CHECK_FALSE(inbox.Take(LOCAL, REMOTE, "Door", START));
 }
 
@@ -162,6 +166,7 @@ TEST_CASE(
 		);
 		CHECK(inbox.Usage().PendingCount == 1);
 	}
+	CHECK(inbox.Usage().StaleRejections == 4);
 	CHECK(
 		inbox
 			.AcceptAuthenticated(
@@ -765,6 +770,8 @@ TEST_CASE(
 	PortalCaptureTreeMeasure measured;
 	REQUIRE(MeasurePortalCaptureTree(wire, measured, error));
 	CHECK(measured.Pixels == 15);
+	CHECK(inbox.Usage().DecodedBytes >= measured.Pixels * 8);
+	CHECK(inbox.Usage().StaleRejections == 3);
 	CHECK_FALSE(inbox.Take(LOCAL, REMOTE, "Door", START));
 	CHECK_FALSE(inbox.TakeLayers(LOCAL, REMOTE, "Door", START));
 	auto taken = inbox.TakeTree(LOCAL, REMOTE, "Door", START);

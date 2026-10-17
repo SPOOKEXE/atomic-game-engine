@@ -196,6 +196,14 @@ namespace engine::replication {
 		// @since v0.13
 		void SetForeign(std::function<bool(std::span<const std::byte>, const net::Endpoint &)> handler);
 
+		// Forwards a value-only observation sink to the replica receive boundary.
+		// The caller owns a queue scoped to this world and session.
+		void SetObservations(
+			core::Name world, core::Name authority, ClientId client, ReplicationObservations *observations
+		) {
+			Replica_.SetObservations(world, authority, client, observations);
+		}
+
 		// Whether the exchange failed and this connector will not retry.
 		// @return `true` when the exchange is over and failed.
 		bool Rejected() const {

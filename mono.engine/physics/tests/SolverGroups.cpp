@@ -593,10 +593,13 @@ TEST_CASE("an unchanged contact topology reuses its deterministic colours", "[so
 	StepOnce(store);
 	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
 	const std::vector<uint32_t> first = PipelineInternals::SolverColorOfManifold(world);
+	const auto firstTopology = PipelineInternals::SolverTopology(world);
 	REQUIRE(!first.empty());
+	REQUIRE(!firstTopology.empty());
 
 	StepOnce(store);
 	CHECK(PipelineInternals::SolverColorOfManifold(world) == first);
+	CHECK(PipelineInternals::SolverTopology(world) == firstTopology);
 	const auto reuse = Metrics::Get("physics.solve.color.topology-reuse");
 	REQUIRE(reuse.has_value());
 	CHECK(reuse->Value == 1.0);
@@ -707,10 +710,14 @@ TEST_CASE("trigger and eligibility changes rebuild the exact topology key", "[so
 	PhysicsWorld &world = *store.ResourceMutable<PhysicsWorld>();
 	std::vector<ContactManifold> &manifolds = PipelineInternals::Manifolds(world);
 	REQUIRE(!manifolds.empty());
+	const auto originalTopology = PipelineInternals::SolverTopology(world);
+	REQUIRE(!originalTopology.empty());
 
 	Metrics::Clear();
 	manifolds.front().Trigger = true;
 	Solve(store);
+	const auto triggerTopology = PipelineInternals::SolverTopology(world);
+	CHECK(triggerTopology != originalTopology);
 	const auto triggerRebuild = Metrics::Get("physics.solve.color.topology-rebuild");
 	REQUIRE(triggerRebuild.has_value());
 	CHECK(triggerRebuild->Value == 1.0);
@@ -719,6 +726,7 @@ TEST_CASE("trigger and eligibility changes rebuild the exact topology key", "[so
 	const Entity changed = manifolds.back().A;
 	store.Remove<Simulated>(changed);
 	Solve(store);
+	CHECK(PipelineInternals::SolverTopology(world) != triggerTopology);
 	const auto eligibilityRebuild = Metrics::Get("physics.solve.color.topology-rebuild");
 	REQUIRE(eligibilityRebuild.has_value());
 	CHECK(eligibilityRebuild->Value == 1.0);

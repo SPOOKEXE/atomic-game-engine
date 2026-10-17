@@ -18,6 +18,7 @@
 #include <cstring>
 #include <imgui.h>
 #include <optional>
+#include <span>
 #include <studio/Assets.hpp>
 #include <studio/Editor.hpp>
 #include <studio/Projection.hpp>
@@ -83,6 +84,13 @@ namespace studio {
 			}
 			value = pending;
 			return true;
+		}
+
+		std::optional<size_t> LodDistanceLevel(Name property) {
+			if (property == Name("Lod1Distance")) return 0;
+			if (property == Name("Lod2Distance")) return 1;
+			if (property == Name("Lod3Distance")) return 2;
+			return std::nullopt;
 		}
 
 		bool ReadSchemaValue(const void *component, const FieldDescriptor &field, PropertyValue &value) {
@@ -917,7 +925,34 @@ namespace studio {
 							continue;
 						}
 					}
-					const PropertyValue &value = row.Value;
+					const std::optional<size_t> lodDistanceLevel = descriptor->Type == PropertyType::Float
+																	   ? LodDistanceLevel(descriptor->Name)
+																	   : std::nullopt;
+					PropertyValue value = row.Value;
+					bool mixed = row.Mixed;
+					if (lodDistanceLevel) {
+						mixed = false;
+						size_t resolved = 0;
+						for (const Entity instance : Selection) {
+							if (!store.Alive(instance) ||
+								!SelectionPropertyApplies(
+									store.ClassOf(instance), group.Owner, descriptor->Name, descriptor->Type
+								)) {
+								continue;
+							}
+							PropertyValue effective;
+							effective.Type = PropertyType::Float;
+							effective.Float = EffectiveLodDistanceBands(
+								store.Get<engine::scene::LODSettings>(instance), LodMinimumDistances(Prefs)
+							)[*lodDistanceLevel];
+							if (resolved == 0) {
+								value = effective;
+							} else if (!engine::game::ValuesEqual(value, effective)) {
+								mixed = true;
+							}
+							resolved++;
+						}
+					}
 					const bool readable = row.Readable != 0;
 
 					ImGui::TableNextRow();
@@ -945,7 +980,7 @@ namespace studio {
 					PropertyValue changed = value;
 					bool wrote = false;
 
-					if (row.Mixed && descriptor->Type != PropertyType::Reference &&
+					if (mixed && descriptor->Type != PropertyType::Reference &&
 						descriptor->Type != PropertyType::Opaque) {
 						// A mixed selection has no truthful primary value. An empty
 						// field says that directly and accepts the same textual form a
@@ -1259,6 +1294,11 @@ namespace studio {
 						ImGui::TextDisabled("(not readable as a value)");
 						break;
 					}
+					if (lodDistanceLevel && ImGui::IsItemHovered()) {
+						ImGui::SetTooltip(
+							"Defaults apply until all three per-item distances are positive and ordered."
+						);
+					}
 
 					ImGui::EndDisabled();
 
@@ -1333,9 +1373,8 @@ namespace studio {
 			return;
 		}
 
-		// Applied to every selected instance, in its own `Enter`. A property
-		// another instance does not have is refused by `SetProperty` rather
-		// than skipped here, which keeps the rule in one place.
+		// Applied to every selected instance, in its own `Enter`. The projected
+		// grid exposes only properties every selected live instance carries.
 		Universe->Enter(SelectionWorld, [&](Store &store) {
 			for (const Entity instance : Selection) {
 				if (!store.Alive(instance)) {
@@ -1350,33 +1389,63 @@ namespace studio {
 				if (!SelectionPropertyApplies(klass, edit.Owner, edit.Property, edit.Type)) {
 					continue;
 				}
-				for (const PropertyDescriptor &descriptor : Classes::Describe(klass).Properties) {
-					if (descriptor.Name == edit.Property && descriptor.Type == edit.Type) {
-						// **One command per instance, because the write is per
-						// instance.** A multi-selection whose members held
-						// different values before cannot be reversed by one
-						// entry carrying one "before" - undo would give every
-						// one of them whatever the first happened to have.
-						//
-						// `RecordProperty` drops a write that changed nothing,
-						// which is what keeps the members that already agreed
-						// off the stack.
-						PropertyValue before;
-						const bool had = ReadProperty(store, instance, descriptor, before);
-
-						if (engine::game::WriteAuthoredProperty(store, instance, descriptor, edit.Value) &&
-							had && authoritative && Commands != nullptr) {
-							Commands->RecordProperty(
-								SelectionWorld,
-								instance,
-								descriptor.Name,
-								before,
-								edit.Value,
-								"Set " + std::string(Label(descriptor.Name))
-							);
-						}
-						break;
+				const auto writeProperty = [&](const PropertyDescriptor &descriptor,
+											   const PropertyValue &value) {
+					// **One command per instance, because the write is per
+					// instance.** A multi-selection whose members held
+					// different values before cannot be reversed by one
+					// entry carrying one "before" - undo would give every
+					// one of them whatever the first happened to have.
+					PropertyValue before;
+					if (!ReadProperty(store, instance, descriptor, before) ||
+						!engine::game::WriteAuthoredProperty(store, instance, descriptor, value)) {
+						return;
 					}
+					PropertyValue after;
+					if (!ReadProperty(store, instance, descriptor, after) ||
+						engine::game::ValuesEqual(before, after)) {
+						return;
+					}
+					if (authoritative && Commands != nullptr) {
+						Commands->RecordProperty(
+							SelectionWorld,
+							instance,
+							descriptor.Name,
+							before,
+							after,
+							"Set " + std::string(Label(descriptor.Name))
+						);
+					}
+				};
+
+				const std::span<const PropertyDescriptor> properties = Classes::Describe(klass).Properties;
+				if (edit.Type == PropertyType::Float) {
+					if (const std::optional<size_t> level = LodDistanceLevel(edit.Property)) {
+						const std::array<float, 3> bands = EditedLodDistanceBands(
+							store.Get<engine::scene::LODSettings>(instance),
+							LodMinimumDistances(Prefs),
+							*level,
+							edit.Value.Float
+						);
+						for (const PropertyDescriptor &descriptor : properties) {
+							const std::optional<size_t> propertyLevel = LodDistanceLevel(descriptor.Name);
+							if (!propertyLevel || descriptor.Type != PropertyType::Float) {
+								continue;
+							}
+							PropertyValue value;
+							value.Type = PropertyType::Float;
+							value.Float = bands[*propertyLevel];
+							writeProperty(descriptor, value);
+						}
+						continue;
+					}
+				}
+				for (const PropertyDescriptor &descriptor : properties) {
+					if (descriptor.Name != edit.Property || descriptor.Type != edit.Type) {
+						continue;
+					}
+					writeProperty(descriptor, edit.Value);
+					break;
 				}
 			}
 		});
@@ -1593,6 +1662,13 @@ namespace studio {
 						)) {
 						ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.42f);
 						ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
+						const bool lodSettings = component == Components::Of<engine::scene::LODSettings>();
+						const std::array<float, 3> lodDistanceBands =
+							lodSettings ? EffectiveLodDistanceBands(
+											  store.Get<engine::scene::LODSettings>(instance),
+											  LodMinimumDistances(Prefs)
+										  )
+										: std::array<float, 3>{};
 						for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
 							if (property.Reads == nullptr || !property.Reads->Contains(component)) continue;
 							ImGui::TableNextRow();
@@ -1604,6 +1680,15 @@ namespace studio {
 							if (!ReadProperty(store, instance, property, value)) {
 								ImGui::TextDisabled("unavailable");
 								continue;
+							}
+							if (lodSettings && property.Type == PropertyType::Float) {
+								if (property.Spelling == "Lod1Distance") {
+									value.Float = lodDistanceBands[0];
+								} else if (property.Spelling == "Lod2Distance") {
+									value.Float = lodDistanceBands[1];
+								} else if (property.Spelling == "Lod3Distance") {
+									value.Float = lodDistanceBands[2];
+								}
 							}
 							ImGui::PushID(property.Name.Id());
 							ImGui::SetNextItemWidth(-1.0f);
@@ -1620,13 +1705,19 @@ namespace studio {
 									std::move(value)
 								};
 							}
+							if (lodSettings && ImGui::IsItemHovered()) {
+								ImGui::SetTooltip(
+									"Defaults apply until all three per-item distances are positive and "
+									"ordered."
+								);
+							}
 							ImGui::EndDisabled();
 							ImGui::PopID();
 						}
-						const bool automaticLod = component == Components::Of<engine::scene::AutoMeshLOD>();
-						const bool customLod = component == Components::Of<engine::scene::CustomMeshLOD>();
+						const bool automaticLod = component == Components::Of<engine::scene::LODAuto>();
+						const bool customLod = component == Components::Of<engine::scene::LODCustom>();
 						if (automaticLod ||
-							(customLod && store.Get<engine::scene::AutoMeshLOD>(instance) == nullptr)) {
+							(customLod && store.Get<engine::scene::LODAuto>(instance) == nullptr)) {
 							ImGui::TableNextRow();
 							ImGui::TableSetColumnIndex(0);
 							ImGui::AlignTextToFramePadding();
@@ -1663,16 +1754,19 @@ namespace studio {
 													  propertyEdit->Value.Type
 												  ))
 						continue;
-					for (const auto &property : store.PropertiesOf(instance)) {
-						if (property.Name != propertyEdit->Property) continue;
+					const auto writeProperty = [&](const PropertyDescriptor &property,
+												   const PropertyValue &value) {
 						PropertyValue before;
 						if (!ReadProperty(store, instance, property, before) ||
-							!engine::game::WriteAuthoredProperty(
-								store, instance, property, propertyEdit->Value
-							))
-							break;
+							!engine::game::WriteAuthoredProperty(store, instance, property, value)) {
+							return;
+						}
 						PropertyValue after;
-						if (ReadProperty(store, instance, property, after) && authoritative && Commands) {
+						if (!ReadProperty(store, instance, property, after) ||
+							engine::game::ValuesEqual(before, after)) {
+							return;
+						}
+						if (authoritative && Commands) {
 							Commands->RecordProperty(
 								SelectionWorld,
 								instance,
@@ -1683,6 +1777,32 @@ namespace studio {
 							);
 						}
 						modified = true;
+					};
+
+					if (propertyEdit->Value.Type == PropertyType::Float) {
+						if (const std::optional<size_t> level = LodDistanceLevel(propertyEdit->Property)) {
+							const std::array<float, 3> bands = EditedLodDistanceBands(
+								store.Get<engine::scene::LODSettings>(instance),
+								LodMinimumDistances(Prefs),
+								*level,
+								propertyEdit->Value.Float
+							);
+							for (const PropertyDescriptor &property : store.PropertiesOf(instance)) {
+								const std::optional<size_t> propertyLevel = LodDistanceLevel(property.Name);
+								if (!propertyLevel || property.Type != PropertyType::Float) {
+									continue;
+								}
+								PropertyValue value;
+								value.Type = PropertyType::Float;
+								value.Float = bands[*propertyLevel];
+								writeProperty(property, value);
+							}
+							continue;
+						}
+					}
+					for (const auto &property : store.PropertiesOf(instance)) {
+						if (property.Name != propertyEdit->Property) continue;
+						writeProperty(property, propertyEdit->Value);
 						break;
 					}
 				}

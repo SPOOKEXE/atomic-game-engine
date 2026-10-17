@@ -176,6 +176,19 @@ namespace engine::physics {
 		return was;
 	}
 
+	bool PhysicsWorld::Sleep(ecs::Entity entity) {
+		const RestingBody probe{entity, 0.0f, false};
+		const auto found = std::lower_bound(RestingList.begin(), RestingList.end(), probe);
+		if (found != RestingList.end() && found->Owner == entity) {
+			const bool wasAwake = !found->Asleep;
+			found->Asleep = true;
+			found->RestingSeconds = 0.0f;
+			return wasAwake;
+		}
+		RestingList.insert(found, RestingBody{entity, 0.0f, true});
+		return true;
+	}
+
 	size_t PhysicsWorld::SleepingBodies() const {
 		size_t count = 0;
 		for (const RestingBody &body : RestingList) {

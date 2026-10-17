@@ -20,12 +20,7 @@ target_link_libraries(componentdoc PRIVATE
 	Engine::effects
 	Engine::graph
 	Engine::script
-	Engine::replication
-
-	# **Because `examples` registers two components a saved world can hold.**
-	# The example scene is linked into the client, the server and the studio
-	# alike, so its rows are as much part of the catalogue as `scene`'s.
-	Engine::examples)
+	Engine::replication)
 target_compile_options(componentdoc PRIVATE ${MONO_COMPILE_OPTIONS})
 
 set_target_properties(componentdoc PROPERTIES

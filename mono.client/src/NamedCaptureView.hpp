@@ -17,7 +17,7 @@ namespace client {
 	) {
 		engine::render::CollectWorldView(store, view.WorldName, frame);
 		view.Portals = frame.Portals;
-		engine::render::CollectWorldCamera(store, view, extent, camera);
+		engine::render::CollectWorldCamera(store, view, extent, camera, true);
 		if (engine::render::BindWorldView(frame, camera, binding, view)) return true;
 		abort();
 		return false;

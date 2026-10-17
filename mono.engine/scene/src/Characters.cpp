@@ -8,6 +8,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/Ownership.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/PortalCrossing.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/Teams.hpp>
 #include <engine/scene/Tools.hpp>
@@ -293,6 +294,12 @@ namespace engine::scene {
 		rootDesc.Simulated = true;
 
 		const ecs::Entity root = MakePart(store, rootDesc);
+		BodyIdentity identity;
+		if (root == ecs::NULL_ENTITY || !EnsureBodyIdentity(store, root, identity)) {
+			if (root != ecs::NULL_ENTITY) store.DestroyInstance(root);
+			store.DestroyInstance(model);
+			return ecs::NULL_ENTITY;
+		}
 		store.SetInstanceName(root, "HumanoidRootPart");
 		store.SetParent(root, model);
 
@@ -474,6 +481,10 @@ namespace engine::scene {
 		ecs::Entity humanoid = ecs::NULL_ENTITY;
 		if (!ResolveRig(store, model, root, humanoid)) {
 			return false;
+		}
+		if (!store.AdoptOnly()) {
+			BodyIdentity identity;
+			if (!EnsureBodyIdentity(store, root, identity)) return false;
 		}
 
 		// **The old body is released before the new one is taken**, so a respawn

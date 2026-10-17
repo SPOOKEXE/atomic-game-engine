@@ -53,11 +53,14 @@
 #include <engine/assets/Mesh.hpp>
 #include <engine/assets/Resample.hpp>
 #include <engine/assets/Texture.hpp>
+#include <engine/assets/TexturePixel.hpp>
 #include <engine/bake/Image.hpp>
 #include <engine/core/Log.hpp>
 
 #include <algorithm>
+#include <array>
 #include <fstream>
+#include <span>
 #include <studio/Editor.hpp>
 #include <studio/Preview.hpp>
 #include <vector>
@@ -160,18 +163,20 @@ namespace studio {
 					const size_t from = (static_cast<size_t>(y) * width + x) * stride;
 					const size_t to = ((static_cast<size_t>(top + y) * THUMBNAIL_SIDE) + (left + x)) * 4;
 
-					if (fitted.Format == engine::assets::TextureFormat::R8) {
-						const std::byte value = fitted.Pixels[from];
-						out.Pixels[to + 0] = value;
-						out.Pixels[to + 1] = value;
-						out.Pixels[to + 2] = value;
-						out.Pixels[to + 3] = std::byte{255};
-					} else {
-						out.Pixels[to + 0] = fitted.Pixels[from + 0];
-						out.Pixels[to + 1] = fitted.Pixels[from + 1];
-						out.Pixels[to + 2] = fitted.Pixels[from + 2];
-						out.Pixels[to + 3] = fitted.Pixels[from + 3];
-					}
+					std::array<float, 4> display{};
+					if (!engine::assets::LoadTexturePixelForDisplay(
+							fitted.Format,
+							std::span<const std::byte>(fitted.Pixels).subspan(from, stride),
+							display
+						))
+						return false;
+					engine::assets::TexturePixel pixel{display[0], display[1], display[2], display[3]};
+					if (!engine::assets::StoreTexturePixel(
+							engine::assets::TextureFormat::RGBA8,
+							pixel,
+							std::span<std::byte>(out.Pixels).subspan(to, 4)
+						))
+						return false;
 				}
 			}
 			return true;

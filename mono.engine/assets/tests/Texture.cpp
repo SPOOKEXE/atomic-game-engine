@@ -17,11 +17,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <array>
+#include <limits>
 #include <vector>
 
 TEST_SUITE_ID("engine.assets.texture")
 
 using engine::assets::BytesPerPixel;
+using engine::assets::IsSRGB;
 using engine::assets::MipExtent;
 using engine::assets::MipLevelCount;
 using engine::assets::Texture;
@@ -76,6 +80,39 @@ TEST_CASE("a texture round-trips", "[assets][texture]") {
 	// Every byte consumed. A reader and a writer that disagree about the layout
 	// otherwise surface as a bug much later.
 	CHECK(reader.AtEnd());
+}
+
+TEST_CASE("extended numeric texture layouts round-trip without changing bytes", "[assets][texture]") {
+	constexpr std::array formats{
+		TextureFormat::RGBA4_UNORM,
+		TextureFormat::RGBA4_SRGB,
+		TextureFormat::RGBA16_FLOAT,
+		TextureFormat::RGBA32_FLOAT,
+		TextureFormat::R16_FLOAT,
+		TextureFormat::R32_FLOAT,
+	};
+	for (const TextureFormat format : formats) {
+		TextureData source = Made(3, 2, format);
+		GiveChain(source);
+		REQUIRE(source.IsValid());
+		ByteWriter writer;
+		REQUIRE(Texture::Write(writer, source));
+		TextureData read;
+		ByteReader reader(writer.Bytes());
+		REQUIRE(Texture::Read(reader, read));
+		CHECK(read.Format == format);
+		CHECK(read.Pixels == source.Pixels);
+		CHECK(read.Mips == source.Mips);
+		CHECK(reader.AtEnd());
+	}
+	CHECK(BytesPerPixel(TextureFormat::RGBA4_UNORM) == 2);
+	CHECK(BytesPerPixel(TextureFormat::RGBA4_SRGB) == 2);
+	CHECK(BytesPerPixel(TextureFormat::RGBA16_FLOAT) == 8);
+	CHECK(BytesPerPixel(TextureFormat::RGBA32_FLOAT) == 16);
+	CHECK(BytesPerPixel(TextureFormat::R16_FLOAT) == 2);
+	CHECK(BytesPerPixel(TextureFormat::R32_FLOAT) == 4);
+	CHECK(IsSRGB(TextureFormat::RGBA4_SRGB));
+	CHECK_FALSE(Made(1, 1, static_cast<TextureFormat>(255)).IsValid());
 }
 
 TEST_CASE("rgba alpha bytes round-trip exactly", "[assets][texture]") {
@@ -314,6 +351,128 @@ TEST_CASE("a flipbook's grid, frame count and rate round-trip", "[assets][textur
 	CHECK(reader.AtEnd());
 }
 
+TEST_CASE("version 4 preserves a 256-cell atlas and version 3 still reads", "[assets][texture]") {
+	TextureData large = Made(16, 16);
+	large.FlipbookSide = 16;
+	large.FlipbookFrames = 256;
+	large.FlipbookFrameRate = 20.0f;
+	ByteWriter writer;
+	REQUIRE(Texture::Write(writer, large));
+	TextureData restored;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(Texture::Read(reader, restored));
+	CHECK(restored.FlipbookSide == 16);
+	CHECK(restored.FlipbookFrames == 256);
+	CHECK(restored.FlipbookFrameRate == 20.0f);
+	CHECK(reader.AtEnd());
+	large.FlipbookFrames = 257;
+	ByteWriter refused;
+	CHECK_FALSE(Texture::Write(refused, large));
+	CHECK(refused.Empty());
+
+	ByteWriter old;
+	old.WriteUInt32(Texture::MAGIC);
+	old.WriteUInt16(3);
+	old.WriteUInt8(static_cast<uint8_t>(TextureFormat::RGBA8));
+	old.WriteUInt32(2);
+	old.WriteUInt32(2);
+	old.WriteUInt8(2);
+	old.WriteUInt8(4);
+	old.WriteFloat(24.0f);
+	old.WriteUInt8(1);
+	for (size_t index = 0; index < 16; index++)
+		old.WriteUInt8(0);
+	ByteReader oldReader(old.Bytes());
+	TextureData oldRestored;
+	REQUIRE(Texture::Read(oldReader, oldRestored));
+	CHECK(oldRestored.FlipbookFrames == 4);
+	CHECK(oldReader.AtEnd());
+}
+
+TEST_CASE("fixed-rate textures retain the version 4 byte layout", "[assets][texture]") {
+	TextureData source = Made(2, 2);
+	source.FlipbookSide = 2;
+	source.FlipbookFrames = 3;
+	source.FlipbookFrameRate = 24.0f;
+	ByteWriter actual;
+	REQUIRE(Texture::Write(actual, source));
+
+	ByteWriter expected;
+	expected.WriteUInt32(Texture::MAGIC);
+	expected.WriteUInt16(4);
+	expected.WriteUInt8(static_cast<uint8_t>(source.Format));
+	expected.WriteUInt32(source.Width);
+	expected.WriteUInt32(source.Height);
+	expected.WriteUInt8(source.FlipbookSide);
+	expected.WriteUInt16(source.FlipbookFrames);
+	expected.WriteFloat(source.FlipbookFrameRate);
+	expected.WriteUInt8(1);
+	expected.WriteRaw(source.Pixels.data(), source.Pixels.size());
+	REQUIRE(actual.Bytes().size() == expected.Bytes().size());
+	CHECK(std::equal(actual.Bytes().begin(), actual.Bytes().end(), expected.Bytes().begin()));
+}
+
+TEST_CASE("variable frame durations round-trip in version 5", "[assets][texture]") {
+	TextureData source = Made(2, 2);
+	source.FlipbookSide = 2;
+	source.FlipbookFrames = 3;
+	source.FlipbookFrameDurations = {0.04f, 0.10f, 0.06f};
+	REQUIRE(source.IsValid());
+	ByteWriter writer;
+	REQUIRE(Texture::Write(writer, source));
+	ByteReader header(writer.Bytes());
+	CHECK(header.ReadUInt32() == Texture::MAGIC);
+	CHECK(header.ReadUInt16() == 5);
+	TextureData read;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(Texture::Read(reader, read));
+	CHECK(read.FlipbookFrameRate == 0.0f);
+	CHECK(read.FlipbookFrameDurations == source.FlipbookFrameDurations);
+	CHECK(read.Pixels == source.Pixels);
+	CHECK(reader.AtEnd());
+}
+
+TEST_CASE("malformed variable durations cannot replace a valid texture", "[assets][texture]") {
+	TextureData source = Made(2, 2);
+	source.FlipbookSide = 2;
+	source.FlipbookFrames = 3;
+	source.FlipbookFrameDurations = {0.04f, 0.10f, 0.06f};
+	const auto refusedWriter = [&](const TextureData &bad) {
+		ByteWriter writer;
+		CHECK_FALSE(Texture::Write(writer, bad));
+		CHECK(writer.Empty());
+	};
+	TextureData bad = source;
+	bad.FlipbookFrameDurations.pop_back();
+	refusedWriter(bad);
+	bad = source;
+	bad.FlipbookFrameDurations[1] = 0.0f;
+	refusedWriter(bad);
+	bad = source;
+	bad.FlipbookFrameDurations[1] = std::numeric_limits<float>::infinity();
+	refusedWriter(bad);
+	bad = source;
+	bad.FlipbookFrameRate = 12.0f;
+	refusedWriter(bad);
+
+	ByteWriter malformed;
+	malformed.WriteUInt32(Texture::MAGIC);
+	malformed.WriteUInt16(5);
+	malformed.WriteUInt8(static_cast<uint8_t>(TextureFormat::RGBA8));
+	malformed.WriteUInt32(2);
+	malformed.WriteUInt32(2);
+	malformed.WriteUInt8(2);
+	malformed.WriteUInt16(3);
+	malformed.WriteFloat(0.0f);
+	malformed.WriteUInt16(2); // A count that would drop the third frame.
+	TextureData held = Made(1, 1);
+	held.Pixels[0] = std::byte{0x5A};
+	ByteReader reader(malformed.Bytes());
+	CHECK_FALSE(Texture::Read(reader, held));
+	CHECK(held.Width == 1);
+	CHECK(held.Pixels[0] == std::byte{0x5A});
+}
+
 TEST_CASE("a still image writes zeroes and reads back a still", "[assets][texture]") {
 	const TextureData source = Made(4, 4);
 	CHECK_FALSE(source.IsFlipbook());
@@ -356,14 +515,12 @@ TEST_CASE("a version 1 file still reads, as a still image", "[assets][texture]")
 	CHECK(reader.AtEnd());
 }
 
-TEST_CASE("a frame count past the grid is clamped rather than refusing the file", "[assets][texture]") {
-	// **The opposite of how every other field here is treated, and right for the
-	// same reason the rest are not.** The others decide how many bytes to
-	// allocate; this one decides which cell to sample. A wrong count is a
-	// shorter animation, a wrong dimension is a buffer overrun.
+TEST_CASE("legacy frame count is clamped but version 4 refuses one past the grid", "[assets][texture]") {
+	// Older files retain their reader contract; a new file must not silently
+	// change an authored frame count when it crosses the content boundary.
 	ByteWriter writer;
 	writer.WriteUInt32(Texture::MAGIC);
-	writer.WriteUInt16(Texture::VERSION);
+	writer.WriteUInt16(3);
 	writer.WriteUInt8(static_cast<uint8_t>(TextureFormat::RGBA8));
 	writer.WriteUInt32(2);
 	writer.WriteUInt32(2);
@@ -380,17 +537,34 @@ TEST_CASE("a frame count past the grid is clamped rather than refusing the file"
 	REQUIRE(Texture::Read(reader, read));
 	CHECK(read.FlipbookFrames == 4);
 
+	ByteWriter current;
+	current.WriteUInt32(Texture::MAGIC);
+	current.WriteUInt16(4);
+	current.WriteUInt8(static_cast<uint8_t>(TextureFormat::RGBA8));
+	current.WriteUInt32(2);
+	current.WriteUInt32(2);
+	current.WriteUInt8(2);
+	current.WriteUInt16(200);
+	current.WriteFloat(24.0f);
+	current.WriteUInt8(1);
+	for (size_t index = 0; index < 16; index++)
+		current.WriteUInt8(0);
+	TextureData refused;
+	ByteReader currentReader(current.Bytes());
+	CHECK_FALSE(Texture::Read(currentReader, refused));
+	CHECK(refused.Pixels.empty());
+
 	// A rate that is not a rate reads as "unknown" rather than being refused,
 	// because every consumer already has to handle zero.
 	{
 		ByteWriter bad;
 		bad.WriteUInt32(Texture::MAGIC);
-		bad.WriteUInt16(Texture::VERSION);
+		bad.WriteUInt16(4);
 		bad.WriteUInt8(static_cast<uint8_t>(TextureFormat::RGBA8));
 		bad.WriteUInt32(1);
 		bad.WriteUInt32(1);
 		bad.WriteUInt8(1);
-		bad.WriteUInt8(1);
+		bad.WriteUInt16(1);
 		bad.WriteFloat(-5.0f);
 		bad.WriteUInt8(1);
 		for (size_t index = 0; index < 4; index++) {
@@ -468,12 +642,12 @@ TEST_CASE("more levels than the dimensions allow is refused", "[assets][texture]
 	// some larger number that happens to be safe to allocate.
 	ByteWriter writer;
 	writer.WriteUInt32(Texture::MAGIC);
-	writer.WriteUInt16(Texture::VERSION);
+	writer.WriteUInt16(4);
 	writer.WriteUInt8(static_cast<uint8_t>(TextureFormat::RGBA8));
 	writer.WriteUInt32(4);
 	writer.WriteUInt32(4);
 	writer.WriteUInt8(0);
-	writer.WriteUInt8(0);
+	writer.WriteUInt16(0);
 	writer.WriteFloat(0.0f);
 	writer.WriteUInt8(9); // A 4x4 image has three levels.
 	for (size_t index = 0; index < 4 * 4 * 4; index++) {
@@ -493,12 +667,12 @@ TEST_CASE("a chain claiming more bytes than the file holds is refused", "[assets
 	// comparison.
 	ByteWriter writer;
 	writer.WriteUInt32(Texture::MAGIC);
-	writer.WriteUInt16(Texture::VERSION);
+	writer.WriteUInt16(4);
 	writer.WriteUInt8(static_cast<uint8_t>(TextureFormat::RGBA8));
 	writer.WriteUInt32(4);
 	writer.WriteUInt32(4);
 	writer.WriteUInt8(0);
-	writer.WriteUInt8(0);
+	writer.WriteUInt16(0);
 	writer.WriteFloat(0.0f);
 	writer.WriteUInt8(3);
 	for (size_t index = 0; index < 4 * 4 * 4; index++) {
@@ -536,5 +710,21 @@ TEST_CASE("a version 2 file reads as a single level", "[assets][texture]") {
 	CHECK(read.Mips.empty());
 	CHECK(read.FlipbookSide == 2);
 	CHECK(read.FlipbookFrames == 3);
+	CHECK(reader.AtEnd());
+}
+
+TEST_CASE("version 5 preserves a 4096-cell variable-duration atlas", "[assets][texture]") {
+	TextureData large = Made(64, 64);
+	large.FlipbookSide = 64;
+	large.FlipbookFrames = 4096;
+	large.FlipbookFrameDurations.assign(4096, .125f);
+	ByteWriter writer;
+	REQUIRE(Texture::Write(writer, large));
+	TextureData restored;
+	ByteReader reader(writer.Bytes());
+	REQUIRE(Texture::Read(reader, restored));
+	CHECK(restored.FlipbookSide == 64);
+	CHECK(restored.FlipbookFrames == 4096);
+	CHECK(restored.FlipbookFrameDurations == large.FlipbookFrameDurations);
 	CHECK(reader.AtEnd());
 }

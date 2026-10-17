@@ -116,7 +116,7 @@ namespace engine::render {
 		glm::vec3 Scale{1.0f, 1.0f, 1.0f};
 		uint32_t Appearance = PackAppearance(scene::AlphaMode::Opaque, 0.5f);
 		uint32_t SurfaceColour = 0xFFFFFFFFu;
-		uint32_t Emission = PackEmission(core::Color3{1.0f, 1.0f, 1.0f}, 1.0f);
+		uint32_t Emission = PackEmission(core::Color3{1.0f, 1.0f, 1.0f}, 0.0f);
 		uint32_t FeatureEnable = 0;
 		uint32_t FeatureDisable = 0;
 		uint32_t ObjectLabel = 0;

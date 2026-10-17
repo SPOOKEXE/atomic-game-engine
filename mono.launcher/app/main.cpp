@@ -27,7 +27,8 @@ int main(int argc, char **argv) {
 	engine::core::Config::DeclareOptions(arguments);
 
 	arguments.Flag("verbose", "Log at trace level");
-	arguments.Flag("headless", "Run with no window (needs --frames)");
+	arguments.Flag("headless", "Run with no window (needs --frames or --mcp-port)");
+	arguments.Value("mcp-port", "PORT", "Listen for Model Context Protocol on 127.0.0.1:PORT");
 	arguments.Value("mode", "NAME", "Open straight onto a mode: play, join, host, studio or cdn");
 	arguments.Value("width", "PX", "Window width (default 1100)");
 	arguments.Value("height", "PX", "Window height (default 720)");
@@ -73,6 +74,14 @@ int main(int argc, char **argv) {
 	options.Scale = static_cast<float>(arguments.GetNumber("scale", options.Scale));
 	options.Headless = arguments.Has("headless");
 	options.MaximumFrames = arguments.GetInteger("frames", -1);
+	if (arguments.Has("mcp-port")) {
+		const int64_t port = arguments.GetInteger("mcp-port", -1);
+		if (port < 0 || port > 65535) {
+			std::fprintf(stderr, "--mcp-port must be between 0 and 65535\n");
+			return 2;
+		}
+		options.ControlPort = static_cast<int>(port);
+	}
 
 	if (const auto mode = arguments.Get("mode")) {
 		options.StartMode = std::string(*mode);
@@ -81,12 +90,10 @@ int main(int argc, char **argv) {
 		options.Assets = std::filesystem::path(*assets);
 	}
 
-	// A headless run has no window to close, so without a budget it would never
-	// stop. Refused rather than given a default, for the studio's reason: a
-	// default here is a number nobody chose deciding how long a build server
-	// waits.
-	if (options.Headless && options.MaximumFrames < 0) {
-		std::fprintf(stderr, "--headless needs --frames N: there is no window to close\n");
+	// A headless run needs either a frame budget or an MCP quit command. A
+	// default duration would decide how long a build server waits for somebody.
+	if (options.Headless && options.MaximumFrames < 0 && options.ControlPort < 0) {
+		std::fprintf(stderr, "--headless needs --frames N or --mcp-port PORT: there is no window to close\n");
 		return 2;
 	}
 

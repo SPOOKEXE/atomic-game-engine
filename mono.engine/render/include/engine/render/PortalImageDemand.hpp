@@ -33,10 +33,10 @@ namespace engine::render {
 		PortalImageRequest Request;
 		// Local renderer binding for the accepted image.
 		PortalImageBinding Binding;
+		// A radiance-only probe paired with a normal cross-world portal image.
+		// It is submitted and imported independently, but never displayed as a pane.
+		bool SeamRadiance = false;
 	};
-
-	// Planner outcomes for a candidate portal capture.
-	enum class PortalDemandStatus { Ready, Hidden, Invalid, Unsupported };
 
 	// The pose is already in the eye's destination world. Builds an owned camera
 	// demand without source geometry or a seam plane. Sampling maps destination-world
@@ -48,12 +48,18 @@ namespace engine::render {
 		PortalImageDemand &demand
 	);
 
+	// The player whose body portal captures leave out for the viewer to compose:
+	// the held subject while a camera hold lasts, else the local player. Empty
+	// when neither carries an identity.
+	std::string PortalBodyPlayer(const ecs::Store &store);
+
 	// Maps source-owned ordinary rows crossing directly into destination. Camera
 	// culling is deliberately absent: an eye beyond the mouth can see its far half.
 	// An eye in the source's authored world carries the live or held local body
 	// in source coordinates so its producer can forward that pose into child views.
-	// Foreign rows and local synthetic copies are omitted. Output is transactional;
-	// no crossing geometry produces an empty payload, not an encoded empty picture.
+	// Foreign rows and local synthetic copies are omitted. Refusal leaves `out`
+	// unchanged and explains the reason in `error`; no crossing geometry produces
+	// an empty payload rather than an encoded empty picture.
 	bool CollectPortalEyeGeometry(
 		ecs::Store &store,
 		core::Name destination,
@@ -101,6 +107,7 @@ namespace engine::render {
 		const View &viewer,
 		size_t viewSlot,
 		const PortalImageDemandSettings &settings,
-		PortalImageDemand &demand
+		PortalImageDemand &demand,
+		PortalDemandHiddenReason *hiddenReason = nullptr
 	);
 }

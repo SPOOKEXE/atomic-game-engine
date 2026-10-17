@@ -1,0 +1,12 @@
+# name kind asset availability
+Rings client Rings.luau required
+Meshes client Meshes.luau required
+Particles client Particles.luau required
+Interface client Interface.luau required
+Terrain client Terrain.luau required
+Cube client Cube.luau required
+StressPhysics client StressPhysics.luau required
+RenderFeatures client RenderFeaturesDemo.luau required
+ReplicationRings replica Rings.luau required
+ServerRings server-replica Rings.luau required
+ServerPhysics server StressPhysics.luau required

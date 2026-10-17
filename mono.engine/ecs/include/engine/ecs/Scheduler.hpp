@@ -121,6 +121,16 @@ namespace engine::ecs {
 		// A read-only system eligible to share a dependency wave.
 		using ParallelSystem = std::function<void(const Store &)>;
 
+		Scheduler() = default;
+		// Rebinds accumulated timing-name views to the copied registrations.
+		Scheduler(const Scheduler &other);
+		// Strong exception guarantee: a failed copy leaves this scheduler intact.
+		Scheduler &operator=(const Scheduler &other);
+		// Moving the system storage also moves the strings behind the timing views.
+		Scheduler(Scheduler &&other) noexcept = default;
+		// Replaces this scheduler with the moved registrations and timing views.
+		Scheduler &operator=(Scheduler &&other) noexcept = default;
+
 		// `name` is copied, so a caller may build one. It becomes the span
 		// label in the overlay and in Tracy.
 		//
@@ -246,15 +256,31 @@ namespace engine::ecs {
 			bool Parallel = false;
 		};
 
+		static constexpr size_t NO_TIMING_ROW = static_cast<size_t>(-1);
+
+		struct TimingGroup {
+			size_t RepresentativeSystem = 0;
+			size_t ActiveRow = NO_TIMING_ROW;
+		};
+
+		struct TimingRegistration {
+			size_t Group = 0;
+			bool NewGroup = false;
+		};
+
 		using Schedule = std::array<std::vector<Wave>, static_cast<size_t>(Phase::Count)>;
 
 		SystemScheduleIssue BuildSchedule(Schedule &schedule) const;
 		void EnsureSchedule();
-		void RecordTiming(const Registered &system, float milliseconds);
+		TimingRegistration PrepareTimingRegistration(std::string_view name);
+		void RebindTimingNames();
+		void RecordTiming(size_t systemIndex, float milliseconds);
 
 		std::vector<Registered> Systems;
 		std::vector<Timing> LastTimings;
+		std::vector<size_t> SystemTimingGroups;
+		std::vector<TimingGroup> TimingGroups;
 		Schedule Compiled;
 		bool ScheduleDirty = true;
 	};
-}
+} // namespace engine::ecs

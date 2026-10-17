@@ -560,6 +560,27 @@ TEST_CASE("a portal pane is culled per level rather than once for the eye", "[gr
 	CHECK_FALSE(engine::graph::VisiblePane(eye, Vector3{200.0f, 0.0f, -10.0f}, first, second));
 }
 
+TEST_CASE("a wide pane beside and behind a turned camera is not visible", "[graph][cull]") {
+	// A camera that has just stepped through a hole, turned a little, with the
+	// hole's far side a hand's width behind it. Part of the pane is in front of
+	// the near plane and part is inside each side plane, so a box around it is
+	// outside no single plane. None of it is on screen.
+	const Vector3 first{5.0f, 0.0f, 0.0f};
+	const Vector3 second{0.0f, 5.0f, 0.0f};
+	for (const float yaw : {-0.35f, 0.35f}) {
+		CAPTURE(yaw);
+		Camera camera;
+		camera.NearPlane = 0.1f;
+		camera.FarPlane = 100.0f;
+		const glm::mat4 eye =
+			engine::scene::ResolveCamera(CFrame::Angles(0.0f, yaw, 0.0f), camera, 1.0f).ViewProjection;
+		const Vector3 behind{-0.7f, -1.0f, 0.2f};
+		CHECK_FALSE(engine::graph::VisiblePane(eye, behind, first, second));
+		// The same pane a stud ahead is on screen.
+		CHECK(engine::graph::VisiblePane(eye, Vector3{-0.7f, -1.0f, -1.0f}, first, second));
+	}
+}
+
 TEST_CASE("a pane edge-on to the camera is still culled by what it reaches", "[graph][cull]") {
 	// A rectangle in the plane of the view direction has no thickness on one
 	// axis, and the box built from it is degenerate there. That is exact rather

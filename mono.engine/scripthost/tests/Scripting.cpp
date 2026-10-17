@@ -40,6 +40,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -91,6 +92,7 @@ namespace {
 	}
 	void RegisterClasses() {
 		engine::scene::EnsureClassTree();
+		engine::physics::RegisterPhysicsClasses();
 	}
 
 	// Runs a chunk and reports the error rather than a bare false, so a failing
@@ -825,6 +827,44 @@ TEST_CASE("a replica refuses a write and says so", "[scripting]") {
 }
 
 // --- enums ------------------------------------------------------------------
+
+TEST_CASE("Luau authors optional storm response, link, and vegetation components", "[scripting][storm]") {
+	RegisterClasses();
+	Store store("script_storm_authoring");
+	const auto runtime = MakeRuntime(store, Language::Luau);
+
+	MustRun(*runtime, R"(
+		local part = Instance.new('Part')
+		assert(part.StormEnabled, 'storm response default is not visible')
+		part.StormExposedArea = 6.5
+		part.StormDragCoefficient = 1.3
+		part.StormForceScale = 0.4
+		part.StormEnabled = false
+		assert(math.abs(part.StormExposedArea - 6.5) < 0.001)
+		assert(math.abs(part.StormDragCoefficient - 1.3) < 0.001)
+		assert(math.abs(part.StormForceScale - 0.4) < 0.001 and not part.StormEnabled)
+
+		part.StormRestFrame = CFrame.new(2, 3, 4)
+		part.StormMaximumBendRadians = 0.7
+		part.StormResponsePerSecond = 8
+		part.StormWindSpeedForMaximumBend = 120
+		part.StormVegetationEnabled = false
+		assert(part.StormRestFrame.Position == Vector3.new(2, 3, 4))
+		assert(math.abs(part.StormMaximumBendRadians - 0.7) < 0.001)
+		assert(math.abs(part.StormResponsePerSecond - 8) < 0.001)
+		assert(math.abs(part.StormWindSpeedForMaximumBend - 120) < 0.001 and not part.StormVegetationEnabled)
+
+		for _, className in {'Weld', 'WeldConstraint'} do
+			local link = Instance.new(className)
+			link.StormBreakForce = 450
+			link.StormMaterialStrength = 1.8
+			link.StormLinkEnabled = false
+			assert(math.abs(link.StormBreakForce - 450) < 0.001)
+			assert(math.abs(link.StormMaterialStrength - 1.8) < 0.001)
+			assert(not link.StormLinkEnabled)
+		end
+	)");
+}
 
 TEST_CASE("an enum property takes a member and refuses a stranger", "[scripting]") {
 	RegisterClasses();
@@ -1932,6 +1972,139 @@ TEST_CASE("an input signal hands over an InputObject", "[scripting]") {
 		local held = UIS:GetMouseButtonsPressed()
 		assert(#held == 0, 'nothing is pressed')
 	)");
+}
+
+TEST_CASE("keyboard edge dispatch preserves order and callback rebinding", "[scripting][input]") {
+	std::array<std::vector<std::string>, 2> traces;
+	size_t languageIndex = 0;
+
+	for (const Language language : {Language::Luau, Language::JavaScript}) {
+		RegisterClasses();
+		Store store(language == Language::Luau ? "input_luau" : "input_js");
+		store.SetResource(engine::scene::InputState{});
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+
+		const Entity log = MakeLog(store);
+		const bool luau = language == Language::Luau;
+		const std::string source = luau ? R"(
+			local log = workspace:FindFirstChild('Log')
+			local cas = game:GetService('ContextActionService')
+			local input = game:GetService('UserInputService')
+			local function replacement(name, state, object)
+				log.Name = log.Name .. 'late:' .. object.KeyCode.Name .. ':' .. state.Name .. ';'
+			end
+			cas:BindActionAtPriority('early', function(name, state, object)
+				log.Name = log.Name .. 'early:' .. object.KeyCode.Name .. ':' .. state.Name .. ';'
+				if object.KeyCode.Name == 'A' and state.Name == 'Begin' then
+					cas:BindActionAtPriority('late', replacement, false, 3, Enum.KeyCode.Z)
+				end
+				return Enum.ContextActionResult.Pass
+			end, false, 10, Enum.KeyCode.A)
+			cas:BindActionAtPriority('middle', function(name, state, object)
+				log.Name = log.Name .. 'middle:' .. object.KeyCode.Name .. ':' .. state.Name .. ';'
+				return Enum.ContextActionResult.Pass
+			end, false, 5, Enum.KeyCode.A)
+			cas:BindActionAtPriority('late', function(name, state, object)
+				log.Name = log.Name .. 'old:' .. object.KeyCode.Name .. ':' .. state.Name .. ';'
+			end, false, 3, Enum.KeyCode.Z)
+			input.InputBegan:Connect(function(object)
+				log.Name = log.Name .. 'signal:' .. object.KeyCode.Name .. ':' .. object.UserInputState.Name .. ';'
+			end)
+			input.InputEnded:Connect(function(object)
+				log.Name = log.Name .. 'signal:' .. object.KeyCode.Name .. ':' .. object.UserInputState.Name .. ';'
+			end)
+		)"
+										: R"(
+			const log = workspace.FindFirstChild('Log');
+			const cas = game.GetService('ContextActionService');
+			const input = game.GetService('UserInputService');
+			const replacement = (name, state, object) => {
+				log.Name = log.Name + 'late:' + object.KeyCode.Name + ':' + state.Name + ';';
+			};
+			cas.BindActionAtPriority('early', (name, state, object) => {
+				log.Name = log.Name + 'early:' + object.KeyCode.Name + ':' + state.Name + ';';
+				if (object.KeyCode.Name === 'A' && state.Name === 'Begin') {
+					cas.BindActionAtPriority('late', replacement, false, 3, Enum.KeyCode.Z);
+				}
+				return Enum.ContextActionResult.Pass;
+			}, false, 10, Enum.KeyCode.A);
+			cas.BindActionAtPriority('middle', (name, state, object) => {
+				log.Name = log.Name + 'middle:' + object.KeyCode.Name + ':' + state.Name + ';';
+				return Enum.ContextActionResult.Pass;
+			}, false, 5, Enum.KeyCode.A);
+			cas.BindActionAtPriority('late', (name, state, object) => {
+				log.Name = log.Name + 'old:' + object.KeyCode.Name + ':' + state.Name + ';';
+			}, false, 3, Enum.KeyCode.Z);
+			input.InputBegan.Connect(object => {
+				log.Name = log.Name + 'signal:' + object.KeyCode.Name + ':' + object.UserInputState.Name + ';';
+			});
+			input.InputEnded.Connect(object => {
+				log.Name = log.Name + 'signal:' + object.KeyCode.Name + ':' + object.UserInputState.Name + ';';
+			});
+		)";
+		MustRun(*runtime, source.c_str());
+
+		auto &input = *store.ResourceMutable<engine::scene::InputState>();
+		auto recordFrame = [&] {
+			REQUIRE(runtime->Heartbeat(0.016f));
+			traces[languageIndex].push_back(Trace(store, log));
+		};
+
+		recordFrame();
+		recordFrame();
+
+		// Set the bits in reverse order. The pump's report order stays numeric.
+		input.Previous = input.Down;
+		input.Down.Set(engine::scene::KeyCode::Z, true);
+		input.Down.Set(engine::scene::KeyCode::Q, true);
+		input.Down.Set(engine::scene::KeyCode::A, true);
+		recordFrame();
+
+		// A mouse edge makes this an active input frame with no new keyboard edge.
+		input.Previous = input.Down;
+		input.MouseDelta = engine::core::Vector2{1.0f, 0.0f};
+		recordFrame();
+
+		input.Previous = input.Down;
+		input.Down.Set(engine::scene::KeyCode::Z, false);
+		input.Down.Set(engine::scene::KeyCode::Q, false);
+		input.Down.Set(engine::scene::KeyCode::A, false);
+		input.MouseDelta = {};
+		recordFrame();
+
+		input.Previous = input.Down;
+		input.Down.Set(engine::scene::KeyCode::W, true);
+		recordFrame();
+
+		input.Previous = input.Down;
+		input.Down.Set(engine::scene::KeyCode::W, false);
+		recordFrame();
+		input.Previous = input.Down;
+		recordFrame();
+
+		languageIndex++;
+	}
+
+	const std::vector<std::string> expected{
+		"",
+		"",
+		"early:A:Begin;middle:A:Begin;signal:A:Begin;signal:Q:Begin;late:Z:Begin;signal:Z:Begin;",
+		"early:A:Begin;middle:A:Begin;signal:A:Begin;signal:Q:Begin;late:Z:Begin;signal:Z:Begin;",
+		"early:A:Begin;middle:A:Begin;signal:A:Begin;signal:Q:Begin;late:Z:Begin;signal:Z:Begin;"
+		"early:A:End;middle:A:End;signal:A:End;signal:Q:End;late:Z:End;signal:Z:End;",
+		"early:A:Begin;middle:A:Begin;signal:A:Begin;signal:Q:Begin;late:Z:Begin;signal:Z:Begin;"
+		"early:A:End;middle:A:End;signal:A:End;signal:Q:End;late:Z:End;signal:Z:End;"
+		"signal:W:Begin;",
+		"early:A:Begin;middle:A:Begin;signal:A:Begin;signal:Q:Begin;late:Z:Begin;signal:Z:Begin;"
+		"early:A:End;middle:A:End;signal:A:End;signal:Q:End;late:Z:End;signal:Z:End;"
+		"signal:W:Begin;signal:W:End;",
+		"early:A:Begin;middle:A:Begin;signal:A:Begin;signal:Q:Begin;late:Z:Begin;signal:Z:Begin;"
+		"early:A:End;middle:A:End;signal:A:End;signal:Q:End;late:Z:End;signal:Z:End;"
+		"signal:W:Begin;signal:W:End;",
+	};
+	CHECK(traces[0] == traces[1]);
+	CHECK(traces[0] == expected);
 }
 
 TEST_CASE("a mouse button is an input, which it never was before", "[scripting]") {
@@ -3695,7 +3868,7 @@ TEST_CASE("a script may switch which language an instance runs", "[scripting][in
 	REQUIRE(store.SetParent(program, engine::scene::WorkspaceOf(store)));
 
 	// The instance holds a JavaScript program as well, put there by the author.
-	const engine::core::Name javascript("examples/Rings.js");
+	const engine::core::Name javascript("tests/Behaviour.js");
 	REQUIRE(
 		store.SetProperty(program, engine::core::Name("JavaScriptSource"), &javascript, sizeof(javascript))
 	);
@@ -3712,7 +3885,7 @@ TEST_CASE("a script may switch which language an instance runs", "[scripting][in
 	// **Both programs are still there**, which is the whole point of two
 	// containers: switching a language is not a destructive edit.
 	CHECK(engine::script::ActiveLanguageOf(store, program) == Language::JavaScript);
-	CHECK(engine::script::ActiveSourceOf(store, program) == engine::core::Name("examples/Rings.js"));
+	CHECK(engine::script::ActiveSourceOf(store, program) == engine::core::Name("tests/Behaviour.js"));
 
 	const auto *lua = store.Get<engine::script::LuaSourceContainer>(program);
 	REQUIRE(lua != nullptr);
@@ -3735,6 +3908,19 @@ TEST_CASE("a world's scripts are selected by the host's role", "[scripting][inst
 	CHECK(engine::script::ScriptsIn(store, false, true) == std::vector<Entity>{onClient});
 	CHECK(engine::script::ScriptsIn(store, true, true) == std::vector<Entity>{onServer, onClient});
 	CHECK(engine::script::ScriptsIn(store, false, false).empty());
+
+	engine::scene::InstallServices(store);
+	const Entity starter =
+		engine::scene::ServiceOf(store, engine::ecs::Classes::Find(engine::core::Name("StarterPlayer")));
+	const Entity templates = store.FindFirstChild(starter, "StarterPlayerScripts");
+	REQUIRE(templates != engine::ecs::NULL_ENTITY);
+	store.SetParent(onClient, templates);
+	CHECK(engine::script::ScriptsIn(store, false, true).empty());
+	const Entity player = engine::scene::AddPlayer(store, "viewer", true, 1);
+	const Entity scripts = store.FindFirstChild(player, "PlayerScripts");
+	const Entity copied = store.FindFirstChild(scripts, "OnClient");
+	REQUIRE(copied != engine::ecs::NULL_ENTITY);
+	CHECK(engine::script::ScriptsIn(store, false, true) == std::vector<Entity>{copied});
 }
 
 TEST_CASE("a disabled script is not selected", "[scripting][instances]") {

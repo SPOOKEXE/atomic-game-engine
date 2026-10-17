@@ -115,7 +115,11 @@ TEST_CASE("a texture's flipbook facts reach a script", "[scripting][content]") {
 
 	REQUIRE(
 		engine::scene::RecordTexture(
-			store, Name("effects/fox_dance.atex"), FlipbookFacts{.Side = 8, .Frames = 48, .FrameRate = 24.0f}
+			store,
+			Name("effects/fox_dance.atex"),
+			FlipbookFacts{
+				.Side = 8, .Frames = 48, .FrameRate = 24.0f, .FrameDurations = {}, .CumulativeEnds = {}
+			}
 		)
 	);
 

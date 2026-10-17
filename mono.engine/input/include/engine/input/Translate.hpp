@@ -23,10 +23,95 @@
 
 #include <SDL3/SDL_events.h>
 
+#include <array>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace engine::input {
+
+	// The platform-owned text that is visible while an input method has not
+	// committed it yet. Positions are UTF-8 character offsets as SDL reports
+	// them, and the revision lets a consumer distinguish a retained preedit from
+	// a new platform update.
+	struct TextComposition {
+		static constexpr size_t MAXIMUM_BYTES = 4096; // Maximum UTF-8 preedit bytes.
+
+		std::string_view Text; // Borrowed UTF-8 preedit text.
+		int32_t Start = -1;	   // Selected preedit offset.
+		int32_t Length = -1;   // Selected preedit length.
+		uint64_t Revision = 0; // Platform update revision.
+	};
+
+	// One primary pointer sample in window pixels. Held motion samples let a
+	// drag move before its release when all events arrive between two draws.
+	struct PrimaryPointerSample {
+		// Where the event occurred, in window pixels.
+		core::Vector2 Position;
+		// Whether the primary button was held at this sample.
+		bool Down = false;
+		// Ends capture without activating its target.
+		bool Cancelled = false;
+		// Held motion, which may replace the preceding held motion sample.
+		bool Motion = false;
+	};
+
+	// Device-neutral edits the GUI applies in the order they arrived.
+	enum class PresentationEditKind : uint8_t {
+		// Committed UTF-8 text.
+		Text,
+		// Remove one grapheme or the selection.
+		Backspace,
+		// Submit a single-line entry or insert a line break.
+		Submit,
+		// Move the caret one grapheme left.
+		CaretLeft,
+		// Move the caret one grapheme right.
+		CaretRight,
+	};
+
+	// A committed text fragment or one edit key, in SDL event order. Extend is
+	// captured when a caret key arrives, before Shift may be released.
+	struct PresentationEditEvent {
+		// The edit to apply.
+		PresentationEditKind Kind = PresentationEditKind::Text;
+		// UTF-8 bytes for Text, empty for key edits.
+		std::string Text;
+		// Shift was down when a caret key arrived.
+		bool Extend = false;
+	};
+
+	// Input owed to the next presentation. Simulation still reads the ordinary
+	// per-update InputState; a draw can be skipped while events keep arriving.
+	struct PresentationInput {
+		// Holds the largest text event accepted by client control automation.
+		static constexpr size_t MAXIMUM_TEXT_BYTES = 16384;
+		// Upper bound on ordered primary pointer samples.
+		static constexpr size_t MAXIMUM_PRIMARY_SAMPLES = 1024;
+		// Upper bound on ordered text and edit key events.
+		static constexpr size_t MAXIMUM_EDIT_EVENTS = 1024;
+		// Upper bound on ordered key presses for semantic GUI actions.
+		static constexpr size_t MAXIMUM_KEY_PRESSES = 1024;
+
+		// Ordered key presses for GUI navigation and activation.
+		std::vector<scene::KeyCode> KeyPresses;
+		// Controller button presses since the last presentation, per slot.
+		std::array<uint32_t, scene::MAX_CONTROLLERS> PressedControllerButtons{};
+		// Ordered committed text and editing keys.
+		std::vector<PresentationEditEvent> Edits;
+		// Total retained UTF-8 bytes in Edits.
+		size_t TextBytes = 0;
+		// Vertical wheel notches owed to the next drawn pointer location.
+		float WheelDelta = 0.0f;
+		// Ordered primary pointer edges and held motion.
+		std::vector<PrimaryPointerSample> PrimarySamples;
+		// Samples were dropped and capture must be cancelled.
+		bool PointerOverflowed = false;
+		// Edits were dropped when either edit limit was reached.
+		bool EditsOverflowed = false;
+		// Key presses were dropped when their limit was reached.
+		bool KeysOverflowed = false;
+	};
 
 	// Accumulates SDL events into one frame's input state.
 	//
@@ -85,6 +170,27 @@ namespace engine::input {
 			return ControllerCurrent;
 		}
 
+		// A host that routes a GUI opts in. Other translators retain no
+		// presentation data and need no matching consume call.
+		void EnablePresentationInput();
+
+		// Edges and deltas retained across updates until a host routes one GUI
+		// presentation. Pointer edges stay ordered so two clicks remain two clicks.
+		const PresentationInput &PendingPresentation() const {
+			return PresentationPending;
+		}
+
+		// A copy of controller levels with unconsumed button press edges included.
+		// Controllers() keeps its ordinary update and tick semantics.
+		scene::ControllerState ControllersForPresentation() const;
+
+		// The physical primary level, except while a dropped gesture must wait
+		// for release before it can start a new GUI press.
+		bool PrimaryDownForPresentation() const;
+
+		// Called once after the host has routed a presentation's input.
+		void ConsumePresentation();
+
 		// What this frame's keystrokes spelled, as UTF-8.
 		//
 		// **A different question from which keys are down, which is why it is a
@@ -100,18 +206,23 @@ namespace engine::input {
 		// cut one in half. `gui::Focus` counts characters the way this has to be
 		// counted.
 		//
-		// **On the translator rather than on `scene::InputState`, which is where
-		// every other frame delta lives, and it stayed here once it had a
-		// reader.** `InputState` is a registered trivially-copyable component and
-		// a `std::string` on it would cost a hand-written serialiser - the price
-		// `gui::Label` paid, for a reason it had and this does not. The one
-		// consumer takes it from here instead: a host hands this to `gui::Type`,
-		// which writes the focused `TextBox`'s own `Label::Text`, so the string
-		// reaches the world without crossing a snapshot at all.
+		// `InputState` is trivially copyable, so this string stays in the input
+		// adapter. A host that presents less often than it updates uses the
+		// ordered `PendingPresentation().Edits` instead.
 		//
 		// @return This frame's text. Valid until the next `BeginFrame`.
 		std::string_view TypedText() const {
 			return Typed;
+		}
+
+		// The input method's current uncommitted text.
+		//
+		// **A level rather than a frame delta.** SDL only sends an editing event
+		// when the candidate changes, so clearing this in `BeginFrame` would make
+		// preedit disappear between platform events. A committed text event,
+		// an empty editing event, or losing window focus clears it instead.
+		TextComposition Composition() const {
+			return TextComposition{Preedit, PreeditStart, PreeditLength, PreeditRevision};
 		}
 
 		// Clears every key and button, and this frame's typed text with them.
@@ -140,11 +251,25 @@ namespace engine::input {
 		// the value is copied into each world. The world resource is authoritative
 		// after `Client::WriteInput` or Studio Play writes it.
 		scene::ControllerState ControllerCurrent;
+		PresentationInput PresentationPending;
+		bool PresentationEnabled = false;
+		bool PrimarySuppressedUntilRelease = false;
+
+		void QueuePrimarySample(PrimaryPointerSample sample);
+		void QueueEdit(PresentationEditEvent event);
 		uint32_t ControllerIds[scene::MAX_CONTROLLERS] = {};
 
 		// This frame's text, accumulated across however many
 		// `SDL_EVENT_TEXT_INPUT` events arrived.
 		std::string Typed;
+
+		// The bounded preedit retained across frames until SDL replaces or commits
+		// it. It belongs to this platform adapter and is forwarded to GUI as a
+		// viewer-local derived value.
+		std::string Preedit;
+		int32_t PreeditStart = -1;
+		int32_t PreeditLength = -1;
+		uint64_t PreeditRevision = 0;
 	};
 
 	// The key an SDL keycode names, or `Unknown`.

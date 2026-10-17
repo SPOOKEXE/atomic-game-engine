@@ -973,10 +973,31 @@ namespace engine::graph {
 		resource("second-surface-validity", ResourceKind::Colour, ResourceFormat::R8);
 		resource("occlusion", ResourceKind::Colour, ResourceFormat::R8, 2, true);
 		resource("lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		if (captureObservations) {
+			// Directional response keeps the source radiance and shadow factor before
+			// later scene passes alter the lit image.
+			resource("lighting-baseline", ResourceKind::Colour, ResourceFormat::RGBA32F);
+			resource("directional-response", ResourceKind::Colour, ResourceFormat::RGBA32F);
+			for (uint32_t index = 0; index < 4; ++index) {
+				resource(
+					"local-light-response-" + std::to_string(index),
+					ResourceKind::Colour,
+					ResourceFormat::RGBA32F
+				);
+				resource(
+					"local-light-shadow-visibility-" + std::to_string(index),
+					ResourceKind::Colour,
+					ResourceFormat::R8
+				);
+			}
+		}
 		resource("sky-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("volume-lit", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("lens-b", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("lens-scratch", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("dof", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("god-rays", ResourceKind::Colour, ResourceFormat::RGBA16F);
+		resource("bloom", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("tonemapped", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
 		resource("portaled", ResourceKind::Colour, ResourceFormat::RGBA16F);
 		resource("mirrored", ResourceKind::Colour, ResourceFormat::RGBA16F);
@@ -1097,6 +1118,22 @@ namespace engine::graph {
 		// the projection samples this frame's captures rather than last frame's.
 		touches(EditKind::Reads, "portal-light", "portal-light");
 		touches(EditKind::Writes, "lit", "colour");
+		if (captureObservations) {
+			touches(EditKind::Writes, "lighting-baseline", "lighting-baseline");
+			touches(EditKind::Writes, "directional-response", "directional-response");
+			for (uint32_t index = 0; index < 4; ++index) {
+				touches(
+					EditKind::Writes,
+					"local-light-response-" + std::to_string(index),
+					"local-light-response-" + std::to_string(index)
+				);
+				touches(
+					EditKind::Writes,
+					"local-light-shadow-visibility-" + std::to_string(index),
+					"local-light-shadow-visibility-" + std::to_string(index)
+				);
+			}
+		}
 
 		node("sky", NodeScope::View);
 		touches(EditKind::Reads, "lit", "colour");
@@ -1138,8 +1175,23 @@ namespace engine::graph {
 		touches(EditKind::Writes, "lens-b", "colour");
 		touches(EditKind::Writes, "lens-scratch", "scratch");
 
-		node("tonemap", NodeScope::View);
+		node("dof", NodeScope::View);
 		touches(EditKind::Reads, "lens-b", "colour");
+		touches(EditKind::Reads, "linear-depth", "depth");
+		touches(EditKind::Writes, "dof", "colour");
+
+		node("god-rays", NodeScope::View);
+		touches(EditKind::Reads, "dof", "colour");
+		touches(EditKind::Reads, "linear-depth", "depth");
+		touches(EditKind::Writes, "god-rays", "colour");
+
+		node("bloom", NodeScope::View);
+		touches(EditKind::Reads, "god-rays", "source");
+		touches(EditKind::Writes, "bloom", "bloom");
+
+		node("tonemap", NodeScope::View);
+		touches(EditKind::Reads, "god-rays", "colour");
+		touches(EditKind::Reads, "bloom", "bloom");
 		touches(EditKind::Writes, "tonemapped", "colour");
 
 		node("present", NodeScope::Frame);
@@ -1164,320 +1216,6 @@ namespace engine::graph {
 		return BuildDefaultPbrDocument(false);
 	}
 
-	PipelineDocument RaytraceDemoDocument() {
-		PipelineDocument document;
-		const auto resource = [&document](
-								  std::string_view name,
-								  ResourceKind kind,
-								  ResourceFormat format,
-								  bool external = false,
-								  uint32_t stride = 0,
-								  uint32_t width = 0
-							  ) {
-			document.Record({
-				.Kind = EditKind::AddResource,
-				.Name = core::Name(name),
-				.Resource = kind,
-				.Format = format,
-				.Width = width,
-				.Height = width == 0 ? 0u : 1u,
-				.External = external,
-				.BufferStride = stride,
-			});
-		};
-		const auto node =
-			[&document](std::string_view name, std::string_view kind, NodeScope scope = NodeScope::View) {
-				document.Record({
-					.Kind = EditKind::AddNode,
-					.Name = core::Name(name),
-					.NodeKind = core::Name(kind),
-					.Scope = scope,
-				});
-			};
-		const auto edge = [&document](EditKind kind, std::string_view resource, std::string_view port) {
-			document.Record({.Kind = kind, .Target = core::Name(resource), .Key = core::Name(port)});
-		};
-		const auto setting = [&document](std::string_view key, std::string_view value) {
-			document.Record({.Kind = EditKind::Set, .Key = core::Name(key), .Value = std::string(value)});
-		};
-
-		resource("camera", ResourceKind::Camera, ResourceFormat::R8, true);
-		resource("coarse-instances", ResourceKind::Buffer, ResourceFormat::R8, true);
-		resource("albedo", ResourceKind::Colour, ResourceFormat::RGBA8, true);
-		resource("normal", ResourceKind::Colour, ResourceFormat::RGB10A2, true);
-		resource("material", ResourceKind::Colour, ResourceFormat::RGBA8, true);
-		resource("linear-depth", ResourceKind::Colour, ResourceFormat::R32F, true);
-		resource("occlusion", ResourceKind::Colour, ResourceFormat::R8, true);
-		resource("scene-radiance", ResourceKind::Colour, ResourceFormat::RGBA16F, true);
-		resource("tessellated-vertices", ResourceKind::Buffer, ResourceFormat::R8, false, 48, 524288);
-		resource("tessellated-indices", ResourceKind::Buffer, ResourceFormat::R8, false, 4, 1572864);
-		resource("tessellated-commands", ResourceKind::Buffer, ResourceFormat::R8, false, 20, 4096);
-		resource("tessellated-colour", ResourceKind::Colour, ResourceFormat::RGBA16F);
-		resource("tessellated-depth", ResourceKind::Depth, ResourceFormat::D32F);
-		resource("indirect", ResourceKind::Storage, ResourceFormat::RGBA16F);
-		resource("reflections", ResourceKind::Storage, ResourceFormat::RGBA16F);
-		resource("combined-radiance", ResourceKind::Colour, ResourceFormat::RGBA16F);
-		resource("display", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
-		resource("scene-image", ResourceKind::Colour, ResourceFormat::RGBA8_SRGB);
-
-		node("adaptive-tessellation", "tessellate");
-		edge(EditKind::Reads, "coarse-instances", "instances");
-		edge(EditKind::Reads, "camera", "camera");
-		edge(EditKind::Writes, "tessellated-vertices", "vertices");
-		edge(EditKind::Writes, "tessellated-indices", "indices");
-		edge(EditKind::Writes, "tessellated-commands", "commands");
-		setting("target-pixels", "12");
-		setting("max-subdivisions", "2");
-		node("tessellated-geometry", "tessellated-draw");
-		edge(EditKind::Reads, "tessellated-vertices", "vertices");
-		edge(EditKind::Reads, "tessellated-indices", "indices");
-		edge(EditKind::Reads, "tessellated-commands", "commands");
-		edge(EditKind::Writes, "tessellated-colour", "colour");
-		edge(EditKind::Writes, "tessellated-depth", "depth");
-		node("indirect-light", "global-illumination");
-		for (const auto &[source, port] : std::array{
-				 std::pair{"albedo", "albedo"},
-				 std::pair{"normal", "normal"},
-				 std::pair{"material", "material"},
-				 std::pair{"tessellated-depth", "depth"},
-				 std::pair{"occlusion", "occlusion"}
-			 }) {
-			edge(EditKind::Reads, source, port);
-		}
-		edge(EditKind::Writes, "indirect", "indirect");
-		setting("uniforms", "view");
-		node("screen-raytrace", "raytrace");
-		for (const auto &[source, port] : std::array{
-				 std::pair{"tessellated-colour", "scene"},
-				 std::pair{"tessellated-depth", "depth"},
-				 std::pair{"normal", "normal"},
-				 std::pair{"material", "material"},
-				 std::pair{"indirect", "indirect"}
-			 }) {
-			edge(EditKind::Reads, source, port);
-		}
-		edge(EditKind::Writes, "reflections", "reflection");
-		setting("uniforms", "view");
-		setting("steps", "32");
-		setting("max-distance", "100");
-		setting("thickness", "0.1");
-		node("compose-reflections", "mix");
-		edge(EditKind::Reads, "scene-radiance", "a");
-		edge(EditKind::Reads, "reflections", "b");
-		edge(EditKind::Writes, "combined-radiance", "colour");
-		node("display-transform", "tonemap");
-		edge(EditKind::Reads, "combined-radiance", "colour");
-		edge(EditKind::Writes, "display", "colour");
-		node("present", "present", NodeScope::Frame);
-		edge(EditKind::Reads, "display", "image");
-		edge(EditKind::Writes, "scene-image", "image");
-		return document;
-	}
-
-	PipelineDocument PathtraceDemoDocument() {
-		const PipelineDocument document = RaytraceDemoDocument();
-		PipelineDocument pathtrace;
-		bool skippingRaytrace = false;
-		for (const Edit &edit : document.Edits()) {
-			if (edit.Kind == EditKind::AddResource && edit.Name == core::Name("reflections")) {
-				continue;
-			}
-			if (edit.Kind == EditKind::AddNode && edit.Name == core::Name("screen-raytrace")) {
-				pathtrace.Record({
-					.Kind = EditKind::AddResource,
-					.Name = core::Name("path-history"),
-					.Resource = ResourceKind::Storage,
-					.Format = ResourceFormat::RGBA16F,
-					.Lifetime = ResourceLifetime::History,
-				});
-				pathtrace.Record({
-					.Kind = EditKind::AddResource,
-					.Name = core::Name("visible-entities"),
-					.Resource = ResourceKind::Entities,
-					.Format = ResourceFormat::R8,
-					.External = true,
-				});
-				pathtrace.Record({
-					.Kind = EditKind::AddResource,
-					.Name = core::Name("path-radiance"),
-					.Resource = ResourceKind::Storage,
-					.Format = ResourceFormat::RGBA16F,
-				});
-				pathtrace.Record({
-					.Kind = EditKind::AddNode,
-					.Name = core::Name("progressive-pathtrace"),
-					.NodeKind = core::Name("pathtrace"),
-					.Scope = NodeScope::View,
-				});
-				for (const auto &[source, port] : std::array{
-						 std::pair{"camera", "camera"},
-						 std::pair{"visible-entities", "entities"},
-						 std::pair{"coarse-instances", "instances"},
-						 std::pair{"albedo", "albedo"},
-						 std::pair{"normal", "normal"},
-						 std::pair{"material", "material"},
-						 std::pair{"linear-depth", "depth"},
-						 std::pair{"indirect", "indirect"},
-						 std::pair{"path-history", "history"}
-					 }) {
-					pathtrace.Record(
-						{.Kind = EditKind::Reads, .Target = core::Name(source), .Key = core::Name(port)}
-					);
-				}
-				pathtrace.Record(
-					{.Kind = EditKind::Writes,
-					 .Target = core::Name("path-radiance"),
-					 .Key = core::Name("radiance")}
-				);
-				pathtrace.Record({.Kind = EditKind::Set, .Key = core::Name("uniforms"), .Value = "view"});
-				pathtrace.Record(
-					{.Kind = EditKind::Set, .Key = core::Name("samples-per-frame"), .Value = "1"}
-				);
-				pathtrace.Record({
-					.Kind = EditKind::AddNode,
-					.Name = core::Name("path-history-store"),
-					.NodeKind = core::Name("dispatch"),
-					.Scope = NodeScope::View,
-				});
-				pathtrace.Record(
-					{.Kind = EditKind::Reads,
-					 .Target = core::Name("path-radiance"),
-					 .Key = core::Name("source")}
-				);
-				pathtrace.Record(
-					{.Kind = EditKind::Writes,
-					 .Target = core::Name("path-history"),
-					 .Key = core::Name("target")}
-				);
-				pathtrace.Record(
-					{.Kind = EditKind::Set, .Key = core::Name("shader"), .Value = "attachment-copy.comp"}
-				);
-				pathtrace.Record({.Kind = EditKind::Set, .Key = core::Name("uniforms"), .Value = "view"});
-				skippingRaytrace = true;
-				continue;
-			}
-			if (skippingRaytrace && edit.Kind != EditKind::AddNode) {
-				continue;
-			}
-			skippingRaytrace = false;
-			Edit copied = edit;
-			if (copied.Kind == EditKind::AddNode && copied.Name == core::Name("compose-reflections")) {
-				copied.Name = core::Name("compose-path-radiance");
-			}
-			if (copied.Kind == EditKind::Reads && copied.Target == core::Name("reflections")) {
-				copied.Target = core::Name("path-radiance");
-			}
-			if (copied.Kind == EditKind::Reads && copied.Target == core::Name("scene-radiance")) {
-				copied.Target = core::Name("tessellated-colour");
-			}
-			pathtrace.Record(std::move(copied));
-		}
-		return pathtrace;
-	}
-
-	PipelineDocument CompositorDemoDocument() {
-		PipelineDocument document = DefaultPbrDocument();
-		const auto resource =
-			[&document](std::string_view name, ResourceFormat format, bool external = false) {
-				document.Record({
-					.Kind = EditKind::AddResource,
-					.Name = core::Name(name),
-					.Resource = ResourceKind::Colour,
-					.Format = format,
-					.External = external,
-				});
-			};
-		const auto node =
-			[&document](std::string_view name, std::string_view kind, NodeScope scope = NodeScope::View) {
-				document.Record({
-					.Kind = EditKind::AddNode,
-					.Name = core::Name(name),
-					.NodeKind = core::Name(kind),
-					.Scope = scope,
-				});
-			};
-		const auto edge = [&document](EditKind kind, std::string_view resourceName, std::string_view port) {
-			document.Record({.Kind = kind, .Target = core::Name(resourceName), .Key = core::Name(port)});
-		};
-		const auto setting = [&document](std::string_view key, std::string_view value) {
-			document.Record({.Kind = EditKind::Set, .Key = core::Name(key), .Value = std::string(value)});
-		};
-
-		for (const char *disabled : {"tonemap", "present", "interface", "overlay", "output-image"}) {
-			document.Record({.Kind = EditKind::Enable, .Name = core::Name(disabled), .Enabled = false});
-		}
-
-		for (const char *name :
-			 {"grade", "hsv-grade", "mixed", "transformed", "blur-horizontal", "blurred"}) {
-			resource(name, ResourceFormat::RGBA16F);
-		}
-		resource("compositor-display", ResourceFormat::RGBA8_SRGB);
-		resource("compositor-scene", ResourceFormat::RGBA8_SRGB);
-		resource("compositor-interface", ResourceFormat::RGBA8_SRGB, true);
-		resource("compositor-output", ResourceFormat::RGBA8_SRGB);
-
-		node("grade-exposure", "exposure-grade");
-		edge(EditKind::Reads, "lens-b", "source");
-		edge(EditKind::Writes, "grade", "colour");
-		setting("exposure", "0.5");
-		setting("contrast", "1.08");
-		setting("pivot", "0.18");
-		setting("gamma", "1");
-
-		node("grade-hsv", "hsv");
-		edge(EditKind::Reads, "grade", "source");
-		edge(EditKind::Writes, "hsv-grade", "colour");
-		setting("hue", "8");
-		setting("saturation", "1.1");
-		setting("value", "1");
-		setting("factor", "0.75");
-
-		node("mix-original", "mix");
-		edge(EditKind::Reads, "lens-b", "a");
-		edge(EditKind::Reads, "hsv-grade", "b");
-		edge(EditKind::Writes, "mixed", "colour");
-		setting("operation", "screen");
-		setting("factor", "0.2");
-		setting("clamp", "zero");
-
-		node("frame-transform", "transform-crop");
-		edge(EditKind::Reads, "mixed", "source");
-		edge(EditKind::Writes, "transformed", "colour");
-		setting("scale-x", "0.96");
-		setting("scale-y", "0.96");
-		setting("extend", "mirror");
-
-		node("blur-x", "blur");
-		edge(EditKind::Reads, "transformed", "source");
-		edge(EditKind::Writes, "blur-horizontal", "colour");
-		setting("radius", "2");
-		setting("sigma", "1.25");
-		setting("angle", "0");
-
-		node("blur-y", "blur");
-		edge(EditKind::Reads, "blur-horizontal", "source");
-		edge(EditKind::Writes, "blurred", "colour");
-		setting("radius", "2");
-		setting("sigma", "1.25");
-		setting("angle", "90");
-
-		node("compositor-tonemap", "tonemap");
-		edge(EditKind::Reads, "blurred", "colour");
-		edge(EditKind::Writes, "compositor-display", "colour");
-		node("compositor-present", "present", NodeScope::Frame);
-		edge(EditKind::Reads, "compositor-display", "image");
-		edge(EditKind::Writes, "compositor-scene", "image");
-		node("compositor-interface-pass", "interface", NodeScope::Frame);
-		edge(EditKind::Writes, "compositor-interface", "image");
-		node("compositor-overlay", "overlay", NodeScope::Frame);
-		edge(EditKind::Reads, "compositor-scene", "scene");
-		edge(EditKind::Reads, "compositor-interface", "interface");
-		edge(EditKind::Writes, "compositor-output", "image");
-		node("compositor-output-image", "output-image", NodeScope::Frame);
-		edge(EditKind::Reads, "compositor-output", "image");
-		return document;
-	}
-
 	PipelineDocument DefaultPbrDataCaptureDocument() {
 		PipelineDocument document = BuildDefaultPbrDocument(true);
 		document.Record({.Kind = EditKind::Enable, .Name = core::Name("depth-peel"), .Enabled = true});
@@ -1487,17 +1225,22 @@ namespace engine::graph {
 			 .NodeKind = core::Name("capture"),
 			 .Scope = NodeScope::Frame}
 		);
+		// `lit` is retained as the immutable opaque refraction source. RGB capture
+		// reads `display`, the HDR scene after transparent composition and before
+		// optional lenses and tonemapping.
 		for (const auto &[resource, port] : std::array<std::pair<const char *, const char *>, 3>{
-				 {{"lit", "source"}, {"linear-depth", "depth"}, {"normal", "normal"}}
+				 {{"display", "source"}, {"linear-depth", "depth"}, {"normal", "normal"}}
 			 }) {
 			document.Record(
 				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name(port)}
 			);
 		}
-		for (const auto &[node, resource] : std::array<std::pair<const char *, const char *>, 3>{
+		for (const auto &[node, resource] : std::array<std::pair<const char *, const char *>, 5>{
 				 {{"data-capture-albedo", "albedo"},
 				  {"data-capture-material", "material"},
-				  {"data-capture-emissive", "emissive"}}
+				  {"data-capture-emissive", "emissive"},
+				  {"data-capture-specular", "material"},
+				  {"data-capture-transmission", "emissive"}}
 			 }) {
 			document.Record(
 				{.Kind = EditKind::AddNode,
@@ -1539,6 +1282,79 @@ namespace engine::graph {
 		);
 		document.Record(
 			{.Kind = EditKind::Reads, .Target = core::Name("occlusion"), .Key = core::Name("source")}
+		);
+		// RGB is unshadowed directional radiance after fog, while alpha is the sampled
+		// directional shadow and portal-beam visibility factor. ShadowVisibility shares
+		// this readback and derives its compact display plane from alpha.
+		document.Record(
+			{.Kind = EditKind::AddNode,
+			 .Name = core::Name("data-capture-directional-response"),
+			 .NodeKind = core::Name("capture"),
+			 .Scope = NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = EditKind::Reads,
+			 .Target = core::Name("directional-response"),
+			 .Key = core::Name("source")}
+		);
+		// Each requested local light has a dedicated capture node. The response resources
+		// are populated by the shading pass only when their selected light is visible.
+		const std::array<std::pair<const char *, const char *>, 8> localLightResponses{{
+			{"data-capture-local-light-response-0", "local-light-response-0"},
+			{"data-capture-local-light-response-1", "local-light-response-1"},
+			{"data-capture-local-light-response-2", "local-light-response-2"},
+			{"data-capture-local-light-response-3", "local-light-response-3"},
+			{"data-capture-local-light-shadow-visibility-0", "local-light-shadow-visibility-0"},
+			{"data-capture-local-light-shadow-visibility-1", "local-light-shadow-visibility-1"},
+			{"data-capture-local-light-shadow-visibility-2", "local-light-shadow-visibility-2"},
+			{"data-capture-local-light-shadow-visibility-3", "local-light-shadow-visibility-3"},
+		}};
+		for (const auto &[node, resource] : localLightResponses) {
+			document.Record(
+				{.Kind = EditKind::AddNode,
+				 .Name = core::Name(node),
+				 .NodeKind = core::Name("capture"),
+				 .Scope = NodeScope::Frame}
+			);
+			document.Record(
+				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name("source")}
+			);
+		}
+		// The packed target is capture-only: native depth and material facts stay available
+		// independently, while this resource provides an opt-in GPU RGBA32F readback.
+		document.Record(
+			{.Kind = EditKind::AddResource,
+			 .Name = core::Name("packed-gpu"),
+			 .Resource = ResourceKind::Colour,
+			 .Format = ResourceFormat::RGBA32F}
+		);
+		document.Record(
+			{.Kind = EditKind::AddNode,
+			 .Name = core::Name("data-capture-pack-channels"),
+			 .NodeKind = core::Name("pack-channels"),
+			 .Scope = NodeScope::Frame}
+		);
+		for (const auto &[resource, port] : std::array<std::pair<const char *, const char *>, 4>{
+				 {{"linear-depth", "r"}, {"occlusion", "g"}, {"material", "b"}, {"material", "a"}}
+			 })
+			document.Record(
+				{.Kind = EditKind::Reads, .Target = core::Name(resource), .Key = core::Name(port)}
+			);
+		document.Record(
+			{.Kind = EditKind::Writes, .Target = core::Name("packed-gpu"), .Key = core::Name("packed")}
+		);
+		document.Record({.Kind = EditKind::Set, .Key = core::Name("r-component"), .Value = "0"});
+		document.Record({.Kind = EditKind::Set, .Key = core::Name("g-component"), .Value = "0"});
+		document.Record({.Kind = EditKind::Set, .Key = core::Name("b-component"), .Value = "0"});
+		document.Record({.Kind = EditKind::Set, .Key = core::Name("a-component"), .Value = "2"});
+		document.Record(
+			{.Kind = EditKind::AddNode,
+			 .Name = core::Name("data-capture-packed-gpu"),
+			 .NodeKind = core::Name("capture"),
+			 .Scope = NodeScope::Frame}
+		);
+		document.Record(
+			{.Kind = EditKind::Reads, .Target = core::Name("packed-gpu"), .Key = core::Name("source")}
 		);
 		// The G-buffer writes depth only for visible opaque or masked geometry. This
 		// R8 pass keeps background separate from a far-depth surface.
@@ -1811,16 +1627,17 @@ namespace engine::graph {
 		bool keep = false;
 		for (auto edit : basis.Edits()) {
 			if (edit.Kind == EditKind::AddResource) {
-				if (edit.Name == core::Name("tonemapped") || edit.Name == core::Name("scene-image") ||
-					edit.Name == core::Name("interface-image") || edit.Name == core::Name("composed-image"))
+				if (edit.Name == core::Name("bloom") || edit.Name == core::Name("tonemapped") ||
+					edit.Name == core::Name("scene-image") || edit.Name == core::Name("interface-image") ||
+					edit.Name == core::Name("composed-image"))
 					result.Record(std::move(edit));
 				continue;
 			}
 			if (edit.Kind == EditKind::AddNode) {
-				keep = edit.Name == core::Name("tonemap") || edit.Name == core::Name("present") ||
-					   edit.Name == core::Name("interface") || edit.Name == core::Name("overlay") ||
-					   edit.Name == core::Name("output-image");
-				if (edit.Name == core::Name("tonemap")) {
+				keep = edit.Name == core::Name("bloom") || edit.Name == core::Name("tonemap") ||
+					   edit.Name == core::Name("present") || edit.Name == core::Name("interface") ||
+					   edit.Name == core::Name("overlay") || edit.Name == core::Name("output-image");
+				if (edit.Name == core::Name("bloom")) {
 					result.Record(
 						{.Kind = EditKind::AddNode,
 						 .Name = core::Name("eye-image"),
@@ -1835,7 +1652,7 @@ namespace engine::graph {
 				}
 			}
 			if (!keep) continue;
-			if (edit.Kind == EditKind::Reads && edit.Target == core::Name("lens-b"))
+			if (edit.Kind == EditKind::Reads && edit.Target == core::Name("god-rays"))
 				edit.Target = core::Name("eye-hdr");
 			if (edit.Kind == EditKind::Reads && edit.Target == core::Name("display"))
 				edit.Target = core::Name("tonemapped");

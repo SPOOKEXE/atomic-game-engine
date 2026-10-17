@@ -39,6 +39,7 @@
 #include "LuauBindings.hpp"
 
 #include <engine/ecs/Schema.hpp>
+#include <engine/script/EcsInstanceMethods.hpp>
 
 #include <algorithm>
 #include <array>
@@ -766,11 +767,11 @@ namespace engine::script {
 			const char *Name;
 			lua_CFunction Function;
 		} METHODS[] = {
-			{"SetComponent", InstanceSetComponent},
-			{"GetComponent", InstanceGetComponent},
-			{"HasComponent", InstanceHasComponent},
-			{"RemoveComponent", InstanceRemoveComponent},
-			{"GetComponents", InstanceGetComponents},
+			{EcsInstanceMethodName(EcsInstanceMethod::SetComponent), InstanceSetComponent},
+			{EcsInstanceMethodName(EcsInstanceMethod::GetComponent), InstanceGetComponent},
+			{EcsInstanceMethodName(EcsInstanceMethod::HasComponent), InstanceHasComponent},
+			{EcsInstanceMethodName(EcsInstanceMethod::RemoveComponent), InstanceRemoveComponent},
+			{EcsInstanceMethodName(EcsInstanceMethod::GetComponents), InstanceGetComponents},
 		};
 
 		lua_getfield(state, LUA_REGISTRYINDEX, "engine.instance.methods");

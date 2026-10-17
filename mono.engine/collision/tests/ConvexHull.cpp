@@ -1,9 +1,12 @@
+#include "fixtures/ConvexHullParity.hpp"
+
 #include <engine/collision/ConvexHull.hpp>
 #include <engine/testing/Suite.hpp>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -388,4 +391,47 @@ TEST_CASE("the hull encloses the cloud it was built from", "[convexhull]") {
 	const ConvexHull hull = BuildConvexHull(cloud);
 	REQUIRE(hull.Solid());
 	CHECK(Encloses(hull, cloud, 1e-3f));
+}
+
+TEST_CASE(
+	"full hull topology matches independent analytic clouds across ordered permutations", "[convexhull]"
+) {
+	CHECK_NOTHROW(hull_fixture::Preflight());
+}
+
+TEST_CASE(
+	"weld representatives preserve authored order through overlapping "
+	"neighborhoods",
+	"[convexhull]"
+) {
+	const float weld = engine::collision::HULL_WELD_DISTANCE;
+	std::vector<Vector3> cloud;
+	std::vector<Vector3> expected;
+	SECTION("a dropped bridge does not weld later points") {
+		cloud = {{0, 0, 0}, {weld * .75f, 0, 0}, {weld * 1.5f, 0, 0}};
+		expected = {cloud[0], cloud[2]};
+	}
+	SECTION("a newer same-cell member cannot hide an older nearby representative") {
+		cloud = {
+			{weld * .05f, weld * .05f, weld * .05f},
+			{weld * .95f, weld * .95f, weld * .95f},
+			{weld * .1f, weld * .05f, weld * .05f}
+		};
+		expected = {cloud[0], cloud[1]};
+	}
+	const auto first = BuildConvexHull(cloud);
+	REQUIRE_FALSE(first.Solid());
+	REQUIRE(first.Points.size() == expected.size());
+	for (size_t index = 0; index < expected.size(); ++index) {
+		CHECK(first.Points[index].X == expected[index].X);
+		CHECK(first.Points[index].Y == expected[index].Y);
+		CHECK(first.Points[index].Z == expected[index].Z);
+	}
+	// Reordering can choose different representatives. Check each complete
+	// ordered result against the independent quadratic first-match oracle.
+	std::reverse(cloud.begin(), cloud.end());
+	hull_fixture::Input reversed;
+	reversed.Points = cloud;
+	reversed.Flat = true;
+	CHECK_NOTHROW(hull_fixture::Verify(reversed, BuildConvexHull(cloud)));
 }

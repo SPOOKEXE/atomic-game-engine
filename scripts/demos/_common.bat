@@ -84,7 +84,7 @@ set "SCRIPTARG="
 if not "%SCENE%"=="" (
     set "EXAMPLE_KIND=scripts"
     set "LOADER=--script"
-    if /i "%SCENE:~-6%"==".aworld" (
+    if /i "%SCENE:~-7%"==".aworld" (
         set "EXAMPLE_KIND=worlds"
         set "LOADER=--game"
     )

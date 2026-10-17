@@ -57,7 +57,7 @@ namespace studio {
 
 		// The frame version. Refused when unknown, for the reason every other
 		// format here gives: a reader that guesses mis-parses hostile bytes.
-		constexpr uint16_t EDIT_VERSION = 2;
+		constexpr uint16_t EDIT_VERSION = 3;
 
 		// The most records one waypoint may carry.
 		//
@@ -112,6 +112,11 @@ namespace studio {
 				writer.WriteString(record.Before);
 				writer.WriteString(record.After);
 				writer.WriteString(record.Description);
+				writer.WriteUInt32(static_cast<uint32_t>(record.UiDocument.size()));
+				writer.WriteRaw(record.UiDocument.data(), record.UiDocument.size());
+				writer.WriteUInt32(static_cast<uint32_t>(record.UiImportParents.size()));
+				for (const InstancePath &parent : record.UiImportParents)
+					WritePath(writer, parent);
 			}
 		}
 
@@ -127,7 +132,7 @@ namespace studio {
 				EditRecord record;
 
 				const uint8_t kind = reader.ReadUInt8();
-				if (reader.Failed() || kind > static_cast<uint8_t>(CommandKind::Property)) {
+				if (reader.Failed() || kind > static_cast<uint8_t>(CommandKind::UiDocumentImport)) {
 					return false;
 				}
 				record.Kind = static_cast<CommandKind>(kind);
@@ -143,6 +148,18 @@ namespace studio {
 				record.Before = reader.ReadString();
 				record.After = reader.ReadString();
 				record.Description = reader.ReadString();
+				const uint32_t documentBytes = reader.ReadUInt32();
+				if (reader.Failed() || documentBytes > engine::gui::DocumentLimits::HARD_MAXIMUM_BINARY_BYTES)
+					return false;
+				const std::span<const std::byte> document = reader.ReadRawView(documentBytes);
+				if (reader.Failed()) return false;
+				record.UiDocument.assign(document.begin(), document.end());
+				const uint32_t parents = reader.ReadUInt32();
+				if (reader.Failed() || parents > engine::gui::DocumentLimits::HARD_MAXIMUM_NODES)
+					return false;
+				record.UiImportParents.resize(parents);
+				for (InstancePath &parent : record.UiImportParents)
+					if (!ReadPath(reader, parent)) return false;
 
 				if (reader.Failed()) {
 					return false;
@@ -168,6 +185,22 @@ namespace studio {
 			bool first = true;
 
 			for (const EditRecord &record : records) {
+				if (record.Kind == CommandKind::UiDocumentImport) {
+					for (const InstancePath &parent : record.UiImportParents) {
+						if (first) {
+							root = parent;
+							first = false;
+							continue;
+						}
+						size_t shared = 0;
+						while (shared < root.size() && shared < parent.size() &&
+							   root[shared] == parent[shared]) {
+							shared++;
+						}
+						root.resize(shared);
+					}
+					continue;
+				}
 				const InstancePath &touched =
 					record.Kind == CommandKind::Create ? record.OldParent : record.Subject;
 				if (touched.empty()) {
@@ -387,6 +420,7 @@ namespace studio {
 			record.Before = engine::game::FormatValue(command.Before);
 			record.After = engine::game::FormatValue(command.After);
 			record.Description = command.Description;
+			record.UiDocument = command.Import.Encoded;
 
 			// The paths are read out of the store while the instances still
 			// exist, which is why this runs from `Watcher::Committed` and not
@@ -396,6 +430,20 @@ namespace studio {
 				const Entity subject = log.Resolve(command.Subject);
 				const Entity oldParent = log.Resolve(command.OldParent);
 				const Entity newParent = log.Resolve(command.NewParent);
+
+				if (command.Kind == CommandKind::UiDocumentImport) {
+					for (const EditId id : command.Import.Parents) {
+						const InstancePath parent = PathOf(store, log.Resolve(id));
+						if (parent.empty()) {
+							usable = false;
+							return;
+						}
+						record.UiImportParents.push_back(parent);
+					}
+					usable = !record.UiDocument.empty() && !command.Import.Roots.empty() &&
+							 record.UiImportParents.size() == command.Import.Roots.size();
+					return;
+				}
 
 				// A destroy is recorded *before* the destroy, so its subject is
 				// still alive here - and a create's is alive because it was
@@ -436,6 +484,15 @@ namespace studio {
 				continue;
 			}
 
+			engine::gui::UiDocument imported;
+			if (record.Kind == CommandKind::UiDocumentImport) {
+				engine::core::ByteReader reader(record.UiDocument);
+				engine::gui::DocumentReport report;
+				if (!engine::gui::DecodeDocument(reader, imported, report) || imported.Roots.empty() ||
+					record.UiImportParents.empty() || record.UiImportParents.size() != imported.Roots.size())
+					continue;
+			}
+
 			Command command;
 			command.Kind = record.Kind;
 			command.World = world;
@@ -471,6 +528,25 @@ namespace studio {
 					out = log.Track(world, found);
 					return true;
 				};
+
+				if (record.Kind == CommandKind::UiDocumentImport) {
+					command.Import.Encoded = record.UiDocument;
+					for (const InstancePath &parent : record.UiImportParents) {
+						EditId parentId;
+						if (!track(parent, parentId, true)) {
+							usable = false;
+							return;
+						}
+						command.Import.Parents.push_back(parentId);
+					}
+					for (size_t index = 0; index < imported.Roots.size(); ++index)
+						command.Import.Roots.push_back(log.Mint());
+					for (size_t index = 0; index < imported.Themes.size(); ++index)
+						command.Import.Themes.push_back(log.Mint());
+					command.Subject = command.Import.Roots.front();
+					command.OldParent = command.Import.Parents.front();
+					return;
+				}
 
 				if (record.Kind == CommandKind::Create) {
 					// Nothing to resolve: the subject does not exist here yet.

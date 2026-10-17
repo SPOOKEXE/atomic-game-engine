@@ -1,5 +1,7 @@
 # Code format
 
+This guide records source conventions that `.clang-format` cannot enforce.
+
 `.clang-format` is the authority for anything mechanical. Run `just format`, or
 let your editor do it. What follows is the part a formatter cannot decide.
 

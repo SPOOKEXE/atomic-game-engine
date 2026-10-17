@@ -19,6 +19,19 @@ namespace engine::render {
 	// destination frame; palette transforms retain the renderer's local convention.
 	// Position XYZ and destination-frame unit quaternion XYZW.
 	using PortalGeometryPose = std::array<float, 7>;
+	// Maximum effects attached to a transferred draw row.
+	inline constexpr size_t MAX_PORTAL_GEOMETRY_EFFECTS = 4;
+	// One graph effect selected for a transferred draw row.
+	struct PortalGeometryEffect {
+		std::string Node;					 // Graph node identity.
+		uint32_t SelectionMask = UINT32_MAX; // Selected visual channels.
+		uint32_t Order = 0;					 // Evaluation order.
+		uint32_t Revision = 0;				 // Source effect revision.
+		uint8_t Stage = 1;					 // Pipeline stage.
+		bool Enabled = true;				 // Whether the effect is active.
+		// Compares all transferred effect settings.
+		bool operator==(const PortalGeometryEffect &) const = default;
+	};
 	// One mesh draw and its material and skeletal-palette references.
 	struct PortalGeometryRow {
 		// Optional diagnostic path. Draw rows do not transfer ECS identity, so
@@ -26,10 +39,11 @@ namespace engine::render {
 		std::string Name;
 		// Canonical account identity, empty when the row has no known player owner.
 		std::string Player;
-		// Mesh, colour, normal, roughness, occlusion, height, metalness, emission, shader.
-		// Content names in mesh, colour, normal, roughness, occlusion, height, metalness, emission, shader
-		// order.
-		std::array<std::string, 9> Assets;
+		// Mesh, colour, normal, roughness, occlusion, height, metalness, emission, packed PBR, shader.
+		// Content names in mesh, colour, normal, roughness, occlusion, height, metalness, emission, packed
+		// PBR, shader order.
+		std::array<std::string, 10> Assets;
+		std::array<uint8_t, 4> PackedPbrChannels{255, 255, 255, 255}; // Packed PBR channel mapping.
 		// Row pose expressed in the destination frame.
 		PortalGeometryPose Pose{0, 0, 0, 0, 0, 0, 1};
 		// Axis-aligned half-size in destination-frame metres.
@@ -41,21 +55,36 @@ namespace engine::render {
 		// Linear RGB emission tint.
 		std::array<float, 3> EmissiveTint{1, 1, 1};
 		// Scalar multiplier applied to EmissiveTint.
-		float EmissiveStrength = 1;
+		float EmissiveStrength = 0;
 		// Material transparency from opaque zero to fully transparent one.
 		float Transparency = 0;
 		// Alpha-test threshold used by cutout materials.
 		float AlphaCutoff = .5f;
 		// Keep dot(XYZ, position) >= W; zero XYZ disables the cut.
 		std::array<float, 4> SeamPlane{};
+		// Finite aperture axes from SeamCentre. SeamMask describes which side of
+		// the finite transfer volume this row owns.
+		std::array<float, 3> SeamFirst{};
+		std::array<float, 3> SeamSecond{}; // Second aperture axis.
+		std::array<float, 3> SeamCentre{}; // Aperture centre.
+		uint8_t SeamMask = 0;			   // Owned aperture sides.
 		// Directional seam-light contribution in destination-frame coordinates.
 		std::array<float, 3> SeamLight{};
+		// Stable logical body identity. Zero identifies a drawable with no body
+		// association, such as an ordinary anchored part.
+		uint64_t BodyKeyHigh = 0;
+		uint64_t BodyKeyLow = 0;	 // Low body identity bits.
+		uint64_t BodyGeneration = 0; // Body identity generation.
 		// Alpha blend mode selected by the source material.
 		std::string Alpha = "opaque";
 		// Texture resampling mode selected by the source material.
 		std::string Resample = "default";
 		// Whether this row contributes to portal shadow maps.
 		bool CastShadow = true;
+		// Graph work attached to this visual. Names travel as content identities;
+		// the destination resolves them against its own graph library.
+		std::array<PortalGeometryEffect, MAX_PORTAL_GEOMETRY_EFFECTS> Effects{};
+		uint8_t EffectCount = 0; // Populated effects in Effects.
 		// First pose in PortalGeometry::Joints used by this row.
 		uint32_t FirstJoint = 0;
 		// Number of consecutive palette poses used by this row.
@@ -65,6 +94,11 @@ namespace engine::render {
 	};
 	// Owned geometry decoded from one authenticated portal payload.
 	struct PortalGeometry {
+		// The one presentation timestamp selected by the source view for every
+		// row and palette pose in this packet.
+		double PresentationSeconds = 0;
+		// Source-owned revision for diagnostics and stale-packet rejection.
+		uint64_t PresentationRevision = 0;
 		// Draw rows in sender declaration order.
 		std::vector<PortalGeometryRow> Rows;
 		// Shared pose palette addressed by each row's joint range.

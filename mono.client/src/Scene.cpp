@@ -273,6 +273,7 @@ namespace client {
 			WorldIdentity found;
 			found.Id = candidate;
 			found.Authored = universe.NameOf(candidate);
+			found.IsRemote = universe.IsRemote(candidate);
 
 			universe.Enter(candidate, [&found](Store &store) {
 				const auto *replica = store.Resource<engine::world::Replica>();
@@ -328,24 +329,28 @@ namespace client {
 			return {};
 		}
 
-		engine::world::WorldId first;
-		for (const WorldIdentity &known : worlds) {
-			if (known.Id == viewer || known.Authored != wanted || !known.Ready) {
-				continue;
-			}
-			if (known.View == view) {
-				return known.Id;
-			}
-			if (!first.IsValid()) {
-				first = known.Id;
-			}
-		}
-
+		// **Same view first, then a world in this process.** A local copy draws
+		// any camera every frame from replicated state; a remote endpoint answers
+		// each camera a round trip later and needs its topology first. Ties keep
+		// registration order.
+		//
 		// **The fallback is deliberate rather than a leftover.** A client whose
 		// universe holds one replica and the authority it mirrors has no second
 		// copy to find, and showing the authority is a live room rather than
 		// nothing.
-		return first;
+		engine::world::WorldId best;
+		int bestRank = -1;
+		for (const WorldIdentity &known : worlds) {
+			if (known.Id == viewer || known.Authored != wanted || !known.Ready) {
+				continue;
+			}
+			const int rank = (known.View == view ? 2 : 0) + (known.IsRemote ? 0 : 1);
+			if (rank > bestRank) {
+				best = known.Id;
+				bestRank = rank;
+			}
+		}
+		return best;
 	}
 
 	engine::world::WorldId ResolveCameraPortalWorld(
@@ -390,7 +395,17 @@ namespace client {
 						placed.LookVector().Dot(eye.LookVector()) > .9999f &&
 						placed.UpVector().Dot(eye.UpVector()) > .9999f) {
 						carriedArm = pane;
-						armInput = orbit;
+						// **The mapped arm, and the reason is the guard above.** The
+						// comparison only passes when `PlaceCamera` already produced
+						// exactly this pose, so the authored input for the route has to
+						// be the pose that carries, not the raw orbit behind it. The raw
+						// orbit is the *pre-crossing* position: handing it to a route
+						// whose own map is still identity returns it unchanged, and the
+						// caller then holds an eye in the room the subject left while its
+						// camera row says otherwise. Culling reads that eye and keeps the
+						// wrong half of the world - the whole picture went black the
+						// moment a same-world seam mapped the arm.
+						armInput = placed;
 					}
 				}
 			}
@@ -415,7 +430,16 @@ namespace client {
 		if (subjectFollowing && !carriedArm && history.Route.empty() && history.Started &&
 			history.World == authored.Text() && !sameMap(history.FromInput, {}))
 			history = {};
-		auto resolve = [&](const core::Name &name) {
+		// A route can start before a replica learns its authored name, and then
+		// records the local one. Map a local name to the authored name it now
+		// carries; without that the route would stop resolving for good once the
+		// identity lands.
+		auto resolve = [&](core::Name name) {
+			for (const auto &entry : worlds)
+				if (entry.Authored.IsValid() && universe.NameOf(entry.Id) == name) {
+					name = entry.Authored;
+					break;
+				}
 			if (name == authored) return visualWorld;
 			return ResolveDestinationWorld(worlds, visualWorld, name);
 		};
@@ -512,8 +536,7 @@ namespace client {
 		std::vector<engine::render::SurfaceView> &surfaces,
 		float alpha,
 		engine::render::PortalImageHost::Time now,
-		engine::world::WorldId topologyOwner,
-		engine::world::WorldId admittedDestination
+		PortalImageWorldSelection selection
 	) {
 		ENGINE_PROFILE("product.portal images");
 		bool requested = false;
@@ -538,8 +561,8 @@ namespace client {
 		std::vector<WorldIdentity> worlds;
 		SurveyWorlds(universe, worlds);
 		const auto admitted = std::find_if(worlds.begin(), worlds.end(), [&](const auto &candidate) {
-			return candidate.Id == admittedDestination && candidate.Id != world && candidate.IsReplica &&
-				   candidate.Ready && candidate.Authored.IsValid();
+			return candidate.Id == selection.AdmittedDestination && candidate.Id != world &&
+				   candidate.IsReplica && candidate.Ready && candidate.Authored.IsValid();
 		});
 		auto captureSettings = settings;
 		captureSettings.ResidentDestinations = {};
@@ -568,12 +591,12 @@ namespace client {
 				// Fetch return seams while the entrance image is already demanded.
 				if (universe.IsRemote(destination))
 					(void)images.RequestTopology(
-						topologyOwner.IsValid() ? topologyOwner : world, destination, now
+						selection.TopologyOwner.IsValid() ? selection.TopologyOwner : world, destination, now
 					);
 			}
 		}
 		const auto issued = images.Submit(world, viewer.Slot, demands, routes, now);
-		const auto progress = images.Pump(0, alpha, now, true);
+		const auto progress = images.Pump(0, alpha, now, world, selection.PresentedDestination);
 		engine::core::Metrics::Count("product.portal.requests", issued);
 		engine::core::Metrics::Count("product.portal.captures", progress.Rendered);
 		engine::core::Metrics::Count("product.portal.replies", progress.Sent);
@@ -583,6 +606,8 @@ namespace client {
 		for (auto &portal : portals) {
 			if (portal.ExternalImage) {
 				portal.ImportedImage = images.Image(viewer.Slot, portal.ImagePortal);
+				if (portal.LightImagePortal.IsValid())
+					portal.ImportedLightImage = images.Image(viewer.Slot, portal.LightImagePortal);
 				const auto captured = images.Capture(viewer.Slot, portal.ImagePortal);
 				if (!captured || captured->TransparentImages[0] == 0) continue;
 				const auto demand = std::find_if(demands.begin(), demands.end(), [&](const auto &entry) {
@@ -623,6 +648,7 @@ namespace client {
 			});
 		});
 		return std::all_of(demands.begin(), demands.end(), [&](const auto &demand) {
+			if (demand.SeamRadiance) return true;
 			return std::any_of(portals.begin(), portals.end(), [&](const auto &portal) {
 				return portal.ExternalImage && portal.ImagePortal == demand.Binding.Portal &&
 					   portal.ImportedImage != 0;
@@ -682,6 +708,12 @@ namespace client {
 					auto clones = std::span(drawn).subspan(begin);
 					for (auto &clone : clones) {
 						clone.SourceWorld = farName;
+						const engine::ecs::Entity body{clone.Rig != 0 ? clone.Rig : clone.Source};
+						if (const auto *identity = store.Get<engine::scene::BodyIdentity>(body)) {
+							clone.BodyKeyHigh = identity->Key.High;
+							clone.BodyKeyLow = identity->Key.Low;
+							clone.BodyGeneration = identity->Generation;
+						}
 					}
 					if (joints != nullptr) {
 						engine::render::RebaseSkinPalettes(clones, list->JointFrames, *joints);
@@ -738,36 +770,43 @@ namespace client {
 				store.SetResource(engine::effects::RibbonBuffer{});
 			}
 
-			// **Registered in both phases, and that is not a duplicate system.**
+			// **Resolved in all three phases, and that is not a duplicate system.**
 			// `ResolveAttachments` is a pure recompute of a cache - one multiply
-			// per attachment, from state it does not own - so running it twice
-			// gives the same answer twice, which is what makes this safe where
+			// per attachment, from state it does not own - so running it more than once
+			// gives the same answer each time, which is what makes this safe where
 			// two *different* systems writing one field would not be.
 			//
-			// It has a consumer in each phase and they need different things:
+			// Its consumers need different boundaries:
 			//
-			//   - `refresh-emitters`, below, reads `Attachment::WorldFrame` to
-			//     place a spawn, and it runs in `PreSimulation`. Resolving only
-			//     at `PreRender` would hand it the previous tick's frame, so a
-			//     rocket's exhaust would trail its nozzle by a tick.
+			//   - `refresh-emitters-after-scripts` reads `Attachment::WorldFrame`
+			//     after `script-heartbeat`, so particle properties and attachment
+			//     transforms authored by a GUI callback reach the GPU before stepping.
+			//   - `resolve-attachments` keeps the PreSimulation cache current for
+			//     systems that run before scripts.
 			//   - `render::CollectLights` reads it to place a lamp, and it runs
 			//     at present time. A world that is being *authored* never ticks
 			//     at all - `World::Present` runs `PreRender` alone - so
-			//     resolving only at `PreSimulation` left every attachment at the
+			//     resolving only at tick time left every attachment at the
 			//     identity and every lamp in the studio lighting the origin.
 			//
-			// `Attachments.hpp` says this pass runs in `PreRender`; it was
-			// registered in `PreSimulation` alone, and the header was the half
-			// that was right about the draw path. Both are true and both are
-			// declared.
+			// `Attachments.hpp` names the PreRender consumer; all three phases are
+			// declared here because they serve different readers.
 			scheduler.Add("resolve-attachments", Phase::PreSimulation, [](Store &world) {
 				(void)engine::scene::ResolveAttachments(world);
 			});
 			scheduler.Add(
-				"refresh-emitters",
-				Phase::PreSimulation,
+				"resolve-attachments-after-scripts",
+				Phase::Simulation,
+				[](Store &world) { (void)engine::scene::ResolveAttachments(world); },
+				SystemOrder{{}, {}, {}, {"script-heartbeat"}}
+			);
+			scheduler.Add(
+				"refresh-emitters-after-scripts",
+				Phase::Simulation,
 				[](Store &world) { (void)engine::effects::RefreshEmitters(world); },
-				SystemOrder{{}, {"resolve-attachments"}}
+				SystemOrder{
+					{}, {"resolve-attachments-after-scripts", "step-particles"}, {}, {"script-heartbeat"}
+				}
 			);
 			scheduler.Add("step-particles", Phase::Simulation, [](Store &world) {
 				(void)engine::effects::StepParticles(world, static_cast<float>(world.Time().Delta));

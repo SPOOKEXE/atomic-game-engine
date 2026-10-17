@@ -50,8 +50,8 @@ namespace studio {
 		static void Filter(Editor &editor, std::string filter) {
 			editor.ComponentFilter = std::move(filter);
 		}
-		static void Properties(Editor &editor) {
-			editor.PropertyFilter = "Transparency";
+		static void Properties(Editor &editor, std::string filter = "Transparency") {
+			editor.PropertyFilter = std::move(filter);
 			editor.DrawProperties();
 		}
 		static void Draw(Editor &editor) {
@@ -584,7 +584,7 @@ TEST_CASE("invalid compound input leaves the value unchanged", "[studio][compone
 	CHECK(engine::game::FormatValue(widget.Value) == before);
 }
 
-TEST_CASE("mixed property values commit once the complete edit is entered", "[studio][components]") {
+TEST_CASE("a shared property edit commits to every selected live instance", "[studio][components]") {
 	Context context;
 	Jobs jobs;
 	studio::Editor editor;
@@ -646,4 +646,77 @@ TEST_CASE("mixed property values commit once the complete edit is entered", "[st
 	io.AddKeyEvent(ImGuiKey_Enter, false);
 	frame();
 	CHECK(read() == std::array<float, 2>{0.75f, 0.75f});
+}
+
+TEST_CASE("a generic LOD distance edit materializes every distance band", "[studio][components]") {
+	Context context;
+	Jobs jobs;
+	studio::Editor editor;
+	editor.Universe = std::make_unique<Universe>();
+	engine::scene::RegisterSceneClasses();
+	WorldSettings settings;
+	settings.Name = Name("LodPropertyPanel");
+	const WorldId world = editor.Universe->Create(settings);
+	std::array<Entity, 2> selected;
+	editor.Universe->Enter(world, [&](Store &store) {
+		const auto meshPart = engine::ecs::Classes::Find(Name("MeshPart"));
+		selected[0] = store.CreateInstance(meshPart, "First");
+		selected[1] = store.CreateInstance(meshPart, "Second");
+	});
+	editor.SelectionWorld = world;
+	editor.Selection.assign(selected.begin(), selected.end());
+	editor.ShowProperties = true;
+	const auto frame = [&] {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_Always);
+		ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_Always);
+		studio::ComponentPanelProbe::Properties(editor, "Lod1Distance");
+		ImGui::Render();
+	};
+	const auto read = [&] {
+		std::array<std::array<float, 3>, 2> distances{};
+		editor.Universe->Enter(world, [&](Store &store) {
+			for (size_t index = 0; index < selected.size(); ++index) {
+				REQUIRE(store.GetProperty(
+					selected[index], Name("Lod1Distance"), &distances[index][0], sizeof(float)
+				));
+				REQUIRE(store.GetProperty(
+					selected[index], Name("Lod2Distance"), &distances[index][1], sizeof(float)
+				));
+				REQUIRE(store.GetProperty(
+					selected[index], Name("Lod3Distance"), &distances[index][2], sizeof(float)
+				));
+			}
+		});
+		return distances;
+	};
+	frame();
+	frame();
+	const ImGuiWindow *window = ImGui::FindWindowByName("Properties");
+	REQUIRE(window != nullptr);
+	const ImGuiTable *table = GImGui->Tables.GetByKey(ImHashStr("MeshPart", 0, window->ID));
+	REQUIRE(table != nullptr);
+	auto &io = ImGui::GetIO();
+	io.AddMousePosEvent(
+		table->Columns[1].WorkMinX + 12, table->OuterRect.Min.y + ImGui::GetFrameHeight() * 0.5f
+	);
+	frame();
+	io.AddKeyEvent(ImGuiMod_Ctrl, true);
+	io.AddMouseButtonEvent(0, true);
+	frame();
+	io.AddMouseButtonEvent(0, false);
+	io.AddKeyEvent(ImGuiMod_Ctrl, false);
+	frame();
+	io.AddInputCharactersUTF8("15");
+	frame();
+	io.AddKeyEvent(ImGuiKey_Enter, true);
+	frame();
+	io.AddKeyEvent(ImGuiKey_Enter, false);
+	frame();
+	CHECK(
+		read() == std::array<std::array<float, 3>, 2>{
+					  std::array<float, 3>{15.0f, 60.0f, 120.0f},
+					  std::array<float, 3>{15.0f, 60.0f, 120.0f},
+				  }
+	);
 }

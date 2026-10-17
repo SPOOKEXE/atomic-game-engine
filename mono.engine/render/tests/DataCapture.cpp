@@ -1,5 +1,6 @@
 #include "CaptureRecordValidation.hpp"
 #include "DataCaptureCompact.hpp"
+#include "DataCapturePacking.hpp"
 #include "RenderFixture.hpp"
 #include "SecondSurfaceDepth.hpp"
 
@@ -23,6 +24,7 @@
 #include <atomic>
 #include <bit>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <string_view>
 #include <thread>
@@ -122,6 +124,13 @@ TEST_CASE("data capture channel names are stable", "[render][data-capture]") {
 	CHECK(
 		std::string_view(DataCaptureChannelName(DataCaptureChannel::AmbientOcclusion)) == "ambient_occlusion"
 	);
+	CHECK(
+		std::string_view(DataCaptureChannelName(DataCaptureChannel::DirectionalResponse)) ==
+		"directional_response"
+	);
+	CHECK(
+		std::string_view(DataCaptureChannelName(DataCaptureChannel::ShadowVisibility)) == "shadow_visibility"
+	);
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::SemanticMask)) == "semantic_ids");
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::PartMask)) == "part_ids");
 	CHECK(
@@ -142,6 +151,95 @@ TEST_CASE("data capture channel names are stable", "[render][data-capture]") {
 		std::string_view(DataCaptureChannelName(DataCaptureChannel::PbrTransmission)) == "pbr_transmission"
 	);
 	CHECK(std::string_view(DataCaptureChannelName(DataCaptureChannel::MeshUv)) == "mesh_uv");
+}
+
+TEST_CASE("packed capture planes retain depth and resample scalar sources", "[render][data-capture]") {
+	DataCapturePlane depth;
+	depth.Channel = DataCaptureChannel::LinearDepth;
+	depth.Status = DataCaptureStatus::Ready;
+	depth.Width = 2;
+	depth.Height = 2;
+	depth.RowStride = 8;
+	depth.Scalar = DataCaptureScalar::Float32;
+	depth.Bytes.resize(16);
+	const std::array depthValues{1.25f, 2.5f, 3.75f, 5.0f};
+	for (size_t index = 0; index < depthValues.size(); ++index)
+		std::memcpy(depth.Bytes.data() + index * sizeof(float), &depthValues[index], sizeof(float));
+
+	DataCapturePlane occlusion;
+	occlusion.Channel = DataCaptureChannel::AmbientOcclusion;
+	occlusion.Status = DataCaptureStatus::Ready;
+	occlusion.Width = 1;
+	occlusion.Height = 1;
+	occlusion.RowStride = 1;
+	occlusion.Scalar = DataCaptureScalar::UNorm8;
+	occlusion.Bytes = {std::byte{128}};
+
+	DataCapturePlane material;
+	material.Channel = DataCaptureChannel::PbrMaterial;
+	material.Status = DataCaptureStatus::Ready;
+	material.Width = 2;
+	material.Height = 2;
+	material.RowStride = 8;
+	material.Scalar = DataCaptureScalar::UNorm8;
+	material.Bytes = {
+		std::byte{10},
+		std::byte{20},
+		std::byte{30},
+		std::byte{40},
+		std::byte{50},
+		std::byte{60},
+		std::byte{70},
+		std::byte{80},
+		std::byte{90},
+		std::byte{100},
+		std::byte{110},
+		std::byte{120},
+		std::byte{130},
+		std::byte{140},
+		std::byte{150},
+		std::byte{160},
+	};
+	const std::array<const DataCapturePlane *, 4> planes{&depth, &occlusion, &material, &material};
+	std::array components{
+		engine::script::DataCaptureBridgePackedComponent{"linear_depth", 0},
+		engine::script::DataCaptureBridgePackedComponent{"ambient_occlusion", 0},
+		engine::script::DataCaptureBridgePackedComponent{"pbr_material", 0},
+		engine::script::DataCaptureBridgePackedComponent{"pbr_material", 2},
+	};
+	data_capture_packing::Result packed;
+	std::string rejection;
+	REQUIRE(data_capture_packing::PackRgba32F(planes, components, packed, rejection));
+	CHECK(packed.Width == 2);
+	CHECK(packed.Height == 2);
+	CHECK(packed.Bytes.size() == 64);
+	for (size_t index = 0; index < depthValues.size(); ++index) {
+		float packedDepth = 0.0f;
+		std::memcpy(&packedDepth, packed.Bytes.data() + index * 16, sizeof(packedDepth));
+		CHECK(std::bit_cast<uint32_t>(packedDepth) == std::bit_cast<uint32_t>(depthValues[index]));
+		float packedAo = 0.0f;
+		std::memcpy(&packedAo, packed.Bytes.data() + index * 16 + 4, sizeof(packedAo));
+		CHECK(packedAo == 128.0f / 255.0f);
+	}
+	float roughness = 0.0f;
+	float materialOcclusion = 0.0f;
+	std::memcpy(&roughness, packed.Bytes.data() + 2 * 16 + 8, sizeof(roughness));
+	std::memcpy(&materialOcclusion, packed.Bytes.data() + 2 * 16 + 12, sizeof(materialOcclusion));
+	CHECK(roughness == 90.0f / 255.0f);
+	CHECK(materialOcclusion == 110.0f / 255.0f);
+	components[0].SourceComponent = 1;
+	CHECK_FALSE(data_capture_packing::PackRgba32F(planes, components, packed, rejection));
+	CHECK(rejection == "unsupported_source_layout");
+	DataCapturePlane oversized = depth;
+	oversized.Width = 8193;
+	oversized.Height = 8193;
+	oversized.RowStride = 4;
+	const std::array<const DataCapturePlane *, 4> oversizedPlanes{
+		&oversized, &oversized, &oversized, &oversized
+	};
+	components[0].SourceComponent = 0;
+	CHECK_FALSE(data_capture_packing::PackRgba32F(oversizedPlanes, components, packed, rejection));
+	CHECK(rejection == "packed_plane_size_overflow");
 }
 
 TEST_CASE("object label sidecars require bounded UTF-8 labels", "[render][data-capture]") {
@@ -218,6 +316,8 @@ TEST_CASE(
 	instance.Mesh = mesh;
 	instance.Frame.Position = {0, 0, -3};
 	instance.HalfExtent = {1, 1, 1};
+	instance.EmissiveTint = {0.25f, 0.5f, 1.0f};
+	instance.EmissiveStrength = 4.0f;
 	instance.CastShadow = false;
 	render::SceneTarget target{1280, 720};
 	render::View view;
@@ -240,12 +340,15 @@ TEST_CASE(
 			 render::DataCaptureChannel::SemanticMask,
 			 render::DataCaptureChannel::PartMask,
 			 render::DataCaptureChannel::AmbientOcclusion,
+			 render::DataCaptureChannel::DirectionalResponse,
+			 render::DataCaptureChannel::ShadowVisibility,
 			 render::DataCaptureChannel::FirstSurfaceValidity,
 			 render::DataCaptureChannel::SecondSurfaceDepth,
 			 render::DataCaptureChannel::SecondSurfaceValidity},
 		.ObjectLabels = {},
 		.SemanticLabels = {},
 		.PartLabels = {},
+		.LocalLightIds = {},
 	};
 	render::DataCaptureTicket ticket;
 	REQUIRE(renderer.QueueDataCapture(request, ticket));
@@ -263,11 +366,17 @@ TEST_CASE(
 	REQUIRE(poll.Planes.size() == request.Channels.size());
 	bool hasNativeResolutionPlane = false;
 	const render::DataCapturePlane *firstSurfaceValidity = nullptr;
+	const render::DataCapturePlane *pbrEmissive = nullptr;
+	const render::DataCapturePlane *directionalResponse = nullptr;
+	const render::DataCapturePlane *shadowVisibility = nullptr;
 	for (const render::DataCapturePlane &plane : poll.Planes) {
 		CHECK(plane.Status == render::DataCaptureStatus::Ready);
 		hasNativeResolutionPlane =
 			hasNativeResolutionPlane || (plane.Width >= target.Width && plane.Height >= target.Height);
 		if (plane.Channel == render::DataCaptureChannel::FirstSurfaceValidity) firstSurfaceValidity = &plane;
+		if (plane.Channel == render::DataCaptureChannel::PbrEmissive) pbrEmissive = &plane;
+		if (plane.Channel == render::DataCaptureChannel::DirectionalResponse) directionalResponse = &plane;
+		if (plane.Channel == render::DataCaptureChannel::ShadowVisibility) shadowVisibility = &plane;
 	}
 	CHECK(hasNativeResolutionPlane);
 	REQUIRE(firstSurfaceValidity != nullptr);
@@ -280,6 +389,163 @@ TEST_CASE(
 	const auto values = std::span(firstSurfaceValidity->Bytes);
 	CHECK(std::find(values.begin(), values.end(), std::byte{255}) != values.end());
 	CHECK(std::find(values.begin(), values.end(), std::byte{0}) != values.end());
+	REQUIRE(pbrEmissive != nullptr);
+	REQUIRE(pbrEmissive->Scalar == render::DataCaptureScalar::Float16);
+	float maximumEmissive = 0.0f;
+	for (size_t offset = 0; offset + 1 < pbrEmissive->Bytes.size(); offset += sizeof(uint16_t)) {
+		uint16_t packed = 0;
+		std::memcpy(&packed, pbrEmissive->Bytes.data() + offset, sizeof(packed));
+		maximumEmissive = std::max(maximumEmissive, data_capture_compact::Float16ToFloat32(packed));
+	}
+	CHECK(maximumEmissive > instance.EmissiveStrength - 16.0f / 255.0f);
+	CHECK(maximumEmissive < instance.EmissiveStrength + 16.0f / 255.0f);
+	REQUIRE(directionalResponse != nullptr);
+	REQUIRE(shadowVisibility != nullptr);
+	CHECK(directionalResponse->Scalar == render::DataCaptureScalar::Float32);
+	CHECK(directionalResponse->RowStride == directionalResponse->Width * 16);
+	CHECK(shadowVisibility->Scalar == render::DataCaptureScalar::UNorm8);
+	CHECK(shadowVisibility->RowStride == shadowVisibility->Width);
+	CHECK(shadowVisibility->Width == directionalResponse->Width);
+	CHECK(shadowVisibility->Height == directionalResponse->Height);
+	REQUIRE_FALSE(directionalResponse->Bytes.empty());
+	REQUIRE_FALSE(shadowVisibility->Bytes.empty());
+	const auto visibilityMatches = [&] {
+		for (uint32_t y = 0; y < directionalResponse->Height; ++y) {
+			for (uint32_t x = 0; x < directionalResponse->Width; ++x) {
+				float responseVisibility = 0.0f;
+				std::memcpy(
+					&responseVisibility,
+					directionalResponse->Bytes.data() + y * directionalResponse->RowStride + x * 16 + 12,
+					sizeof(responseVisibility)
+				);
+				if (!std::isfinite(responseVisibility)) return false;
+				const auto expected = static_cast<unsigned char>(
+					std::lround(std::clamp(responseVisibility, 0.0f, 1.0f) * 255.0f)
+				);
+				if (std::to_integer<unsigned char>(
+						shadowVisibility->Bytes[y * shadowVisibility->RowStride + x]
+					) != expected) {
+					return false;
+				}
+			}
+		}
+		return true;
+	};
+	CHECK(visibilityMatches());
+}
+
+TEST_CASE("script bridge retains an explicit packed capture plane", "[render][gpu][data-capture][.]") {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph graph;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipeline("bridge-packed-data-capture");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	const auto firstPipeline = renderer.ResolvePipelineIdentity(pipeline);
+	REQUIRE(firstPipeline);
+
+	world::Universe worlds;
+	const world::WorldId world = worlds.Create({.Name = core::Name("data-world")});
+	world::DataFactorySession session(worlds);
+	session.SetPauseParticipant(
+		[world](world::WorldId candidate, world::DataFactoryPauseScope, bool, std::string &) {
+			return candidate == world;
+		}
+	);
+	REQUIRE(
+		session.Pause("data-world", world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		world::DataFactoryStatus::Ok
+	);
+	std::string snapshot;
+	REQUIRE(session.Snapshot("data-world", snapshot).Status == world::DataFactoryStatus::Ok);
+	ScriptDataCaptureBridge bridge(session, renderer);
+	script::DataCaptureBridgeRequest request{
+		.InstanceId = "data-world",
+		.SnapshotId = snapshot,
+		.Pipeline = std::string(pipeline.Text()),
+		.CaptureNode = "data-capture",
+		.Channels = {"linear_depth", "ambient_occlusion", "pbr_material", "packed_gpu"},
+		.LocalLightIds = {},
+		.TemporalHistory = "preserve",
+		.PackedPlanes = {},
+	};
+	request.PackedPlanes.push_back({
+		.Name = "depth_ao_roughness",
+		.Components = {
+			{{"linear_depth", 0}, {"ambient_occlusion", 0}, {"pbr_material", 0}, {"pbr_material", 2}}
+		},
+	});
+	uint64_t ticket = 0;
+	std::string detail;
+	REQUIRE(bridge.Queue("data-world", request, ticket, detail));
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	const auto queuedPipeline = renderer.ResolvePipelineIdentity(pipeline);
+	REQUIRE(queuedPipeline);
+	CHECK(queuedPipeline->Revision != firstPipeline->Revision);
+	render::SceneTarget target{64, 64};
+	render::View view;
+	view.WorldName = core::Name("data-world");
+	view.Pipeline = pipeline;
+	view.Target = &target;
+	view.SnapshotId = snapshot;
+	bridge.PrepareView(view);
+	render::OverlayImage overlay;
+	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+
+	script::DataCaptureBridgePoll poll;
+	const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+	do {
+		bridge.Pump();
+		REQUIRE(bridge.Poll("data-world", ticket, poll, detail));
+		if (poll.Status == "pending") SDL_Delay(1);
+	} while (poll.Status == "pending" && std::chrono::steady_clock::now() < deadline);
+	REQUIRE(poll.Status == "ready");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	const auto replacementPipeline = renderer.ResolvePipelineIdentity(pipeline);
+	REQUIRE(replacementPipeline);
+	CHECK(replacementPipeline->Revision != queuedPipeline->Revision);
+	bridge.CancelPending();
+	bridge.Pump();
+	CHECK_FALSE(bridge.HasPending());
+	REQUIRE(bridge.Poll("data-world", ticket, poll, detail));
+	CHECK(poll.Status == "ready");
+	const auto packed = std::ranges::find_if(poll.Planes, [](const script::DataCaptureBridgePlane &plane) {
+		return plane.Channel == "packed/depth_ao_roughness";
+	});
+	REQUIRE(packed != poll.Planes.end());
+	CHECK(packed->Scalar == "float32");
+	CHECK(packed->Packing == "rgba32_float");
+	CHECK(packed->Resampling == "pixel_center_nearest/v1");
+	REQUIRE(packed->Packed);
+	CHECK(packed->Packed->Components[0].SourceChannel == "linear_depth");
+	const auto gpuPacked = std::ranges::find_if(poll.Planes, [](const script::DataCaptureBridgePlane &plane) {
+		return plane.Channel == "packed_gpu";
+	});
+	REQUIRE(gpuPacked != poll.Planes.end());
+	CHECK(gpuPacked->Scalar == "float32");
+	CHECK(gpuPacked->Packing == "rgba32_float");
+	CHECK(
+		gpuPacked->Provenance ==
+		"render_graph_pack_channels/v1;mapping=author_defined;resampling=pixel_center_nearest;extent=r"
+	);
+	std::vector<std::byte> bytes, gpuBytes;
+	REQUIRE(bridge.ReadPlane("data-world", ticket, packed->Resource, 0, packed->ByteSize, bytes, detail));
+	REQUIRE(
+		bridge.ReadPlane("data-world", ticket, gpuPacked->Resource, 0, gpuPacked->ByteSize, gpuBytes, detail)
+	);
+	CHECK(bytes.size() == packed->ByteSize);
+	CHECK(packed->RowStride == packed->Width * 16);
+	CHECK(gpuPacked->RowStride == gpuPacked->Width * 16);
+	CHECK(gpuBytes == bytes);
+	REQUIRE(bridge.Release("data-world", ticket, detail));
+	CHECK_FALSE(bridge.Poll("data-world", ticket, poll, detail));
+	CHECK_FALSE(bridge.ReadPlane("data-world", ticket, packed->Resource, 0, packed->ByteSize, bytes, detail));
 }
 
 TEST_CASE(
@@ -321,7 +587,8 @@ TEST_CASE(
 		 .Channels = {render::DataCaptureChannel::RgbLinearHdr},
 		 .ObjectLabels = {},
 		 .SemanticLabels = {},
-		 .PartLabels = {}},
+		 .PartLabels = {},
+		 .LocalLightIds = {}},
 		ticket
 	));
 	const std::array views{first, capture};
@@ -390,6 +657,7 @@ TEST_CASE("data capture refuses a non-rendering history policy before queueing",
 		.ObjectLabels = {},
 		.SemanticLabels = {},
 		.PartLabels = {},
+		.LocalLightIds = {},
 		.TemporalHistory = DataCaptureTemporalHistory::Reset,
 	};
 	DataCaptureTicket ticket;
@@ -403,34 +671,97 @@ TEST_CASE("data capture refuses a non-rendering history policy before queueing",
 	request.Channels = {DataCaptureChannel::SecondSurfaceDepth};
 	CHECK_FALSE(renderer.QueueDataCapture(request, ticket));
 	CHECK(ticket.ChannelResourceIndices.empty());
+
+	request.Channels = {DataCaptureChannel::LocalLightContribution};
+	CHECK_FALSE(renderer.QueueDataCapture(request, ticket));
+	request.LocalLightIds = {"light/key", "light/key"};
+	CHECK_FALSE(renderer.QueueDataCapture(request, ticket));
 }
 
 TEST_CASE(
-	"unmodeled authored material facts complete with explicit unavailable provenance",
-	"[render][data-capture]"
+	"data capture expands each requested local light into one logical plane", "[render][gpu][data-capture]"
 ) {
-	Renderer renderer;
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph graph;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipeline("local-light-capture-expansion");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+
 	DataCaptureRequest request{
-		.SnapshotId = "snapshot-1",
-		.Pipeline = engine::core::Name("capture-pipeline"),
-		.CaptureNode = engine::core::Name("capture"),
-		.Channels = {DataCaptureChannel::PbrSpecular, DataCaptureChannel::PbrTransmission},
+		.SnapshotId = "local-light-snapshot",
+		.Pipeline = pipeline,
+		.CaptureNode = core::Name("data-capture"),
+		.Channels =
+			{DataCaptureChannel::LocalLightContribution, DataCaptureChannel::LocalLightShadowVisibility},
 		.ObjectLabels = {},
 		.SemanticLabels = {},
 		.PartLabels = {},
+		.LocalLightIds = {"light/key", "light/fill"},
 	};
 	DataCaptureTicket ticket;
 	REQUIRE(renderer.QueueDataCapture(request, ticket));
-	CHECK(ticket.ResourceTokens.empty());
-	const DataCapturePoll captured = renderer.PollDataCapture(ticket);
-	CHECK(captured.Status == DataCaptureStatus::Unsupported);
-	REQUIRE(captured.Planes.size() == 2);
-	CHECK(captured.Planes[0].Status == DataCaptureStatus::Unsupported);
-	CHECK(captured.Planes[0].Provenance == "unavailable/authored_specular_not_in_current_material_model/v1");
-	CHECK(captured.Planes[1].Status == DataCaptureStatus::Unsupported);
 	CHECK(
-		captured.Planes[1].Provenance == "unavailable/authored_transmission_not_in_current_material_model/v1"
+		ticket.Channels == std::vector<DataCaptureChannel>{
+							   DataCaptureChannel::LocalLightContribution,
+							   DataCaptureChannel::LocalLightContribution,
+							   DataCaptureChannel::LocalLightShadowVisibility,
+							   DataCaptureChannel::LocalLightShadowVisibility
+						   }
 	);
+	CHECK(ticket.LightIds == std::vector<std::string>{"light/key", "light/fill", "light/key", "light/fill"});
+	CHECK(ticket.LocalLightMatched == std::vector<uint8_t>{0, 0, 0, 0});
+	CHECK(ticket.ChannelResourceIndices.size() == 4);
+	CHECK(ticket.ResourceTokens.size() == 4);
+	renderer.CancelDataCapture(ticket);
+}
+
+TEST_CASE(
+	"disabled local light shadows complete without a GPU timing result", "[render][gpu][data-capture]"
+) {
+	using namespace engine;
+	render::test::FixtureDevice fixture;
+	fixture.Initialise();
+	auto &renderer = fixture.Render;
+	graph::RenderGraph graph;
+	core::Name offender;
+	REQUIRE(
+		graph::Build(graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		graph::PipelineDocumentStatus::Ok
+	);
+	const core::Name pipeline("disabled-local-light-shadows");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	DataCaptureRequest request{
+		.SnapshotId = "disabled-shadow-snapshot",
+		.Pipeline = pipeline,
+		.CaptureNode = core::Name("data-capture"),
+		.Channels = {DataCaptureChannel::LocalLightShadowVisibility},
+		.ObjectLabels = {},
+		.SemanticLabels = {},
+		.PartLabels = {},
+		.LocalLightIds = {"light/key", "light/fill", "light/rim"},
+	};
+	DataCaptureTicket ticket;
+	REQUIRE(renderer.QueueDataCapture(request, ticket));
+	ticket.LocalLightMatched = {1, 1, 1};
+	ticket.LocalLightShadowAvailable = {0, 0, 0};
+	const DataCapturePoll poll = renderer.PollDataCapture(ticket);
+	REQUIRE(poll.Status == DataCaptureStatus::Unsupported);
+	REQUIRE(poll.Planes.size() == 3);
+	capture_record_validation::State validation;
+	for (size_t index = 0; index < poll.Planes.size(); ++index) {
+		CHECK(poll.Planes[index].LightId == request.LocalLightIds[index]);
+		CHECK(poll.Planes[index].Status == DataCaptureStatus::Unsupported);
+		CHECK(poll.Planes[index].Provenance == "unavailable/local_light_shadows_disabled/v1");
+		CHECK(capture_record_validation::Plane(ticket, poll.Planes[index], 1, validation));
+	}
+	CHECK(ticket.ResourceTokens.empty());
 }
 
 TEST_CASE(
@@ -537,6 +868,87 @@ TEST_CASE(
 	CHECK_FALSE(capture_record_validation::Plane(ticket, ambient, 1, malformedAmbient));
 }
 
+TEST_CASE(
+	"local-light planes validate per light and preserve unavailable identity", "[render][data-capture]"
+) {
+	DataCaptureTicket ticket;
+	ticket.CaptureNode = engine::core::Name("capture");
+	ticket.Channels = {
+		DataCaptureChannel::LocalLightContribution,
+		DataCaptureChannel::LocalLightContribution,
+	};
+	ticket.LightIds = {"light/key", "light/culled"};
+
+	DataCapturePlane ready;
+	ready.Channel = DataCaptureChannel::LocalLightContribution;
+	ready.CaptureNode = ticket.CaptureNode;
+	ready.Status = DataCaptureStatus::Ready;
+	ready.Resource = engine::core::Name("local-light-key");
+	ready.LightId = "light/key";
+	ready.Width = 1;
+	ready.Height = 1;
+	ready.RowStride = 8;
+	ready.Scalar = DataCaptureScalar::Float16;
+	ready.ColourSpace = DataCaptureColourSpace::Linear;
+	ready.Provenance = "local_light_contribution/v1;source=single_selected_local_light;"
+					   "radiance=additive_linear_before_tonemap;encoding=rgba16_float";
+	ready.Bytes.assign(8, std::byte{0});
+	ready.Hash = engine::assets::Hasher::Of(ready.Bytes);
+
+	DataCapturePlane unavailable;
+	unavailable.Channel = DataCaptureChannel::LocalLightContribution;
+	unavailable.CaptureNode = ticket.CaptureNode;
+	unavailable.Status = DataCaptureStatus::Unsupported;
+	unavailable.LightId = "light/culled";
+	unavailable.Provenance = "unavailable/local_light_not_visible_or_culled/v1";
+
+	capture_record_validation::State state;
+	CHECK(capture_record_validation::Plane(ticket, ready, 17, state));
+	CHECK(capture_record_validation::Plane(ticket, unavailable, 17, state));
+
+	DataCaptureTicket disabledTicket;
+	disabledTicket.CaptureNode = engine::core::Name("capture");
+	disabledTicket.Channels = {DataCaptureChannel::LocalLightShadowVisibility};
+	disabledTicket.LightIds = {"light/disabled"};
+	DataCapturePlane disabled;
+	disabled.Channel = DataCaptureChannel::LocalLightShadowVisibility;
+	disabled.CaptureNode = disabledTicket.CaptureNode;
+	disabled.Status = DataCaptureStatus::Unsupported;
+	disabled.LightId = "light/disabled";
+	disabled.Provenance = "unavailable/local_light_shadows_disabled/v1";
+	capture_record_validation::State disabledState;
+	CHECK(capture_record_validation::Plane(disabledTicket, disabled, 17, disabledState));
+
+	DataCapturePlane duplicate = ready;
+	duplicate.Resource = engine::core::Name("local-light-key-duplicate");
+	CHECK_FALSE(capture_record_validation::Plane(ticket, duplicate, 17, state));
+
+	DataCaptureTicket visibilityTicket;
+	visibilityTicket.CaptureNode = engine::core::Name("capture");
+	visibilityTicket.Channels = {DataCaptureChannel::LocalLightShadowVisibility};
+	visibilityTicket.LightIds = {"light/key"};
+	DataCapturePlane visibility;
+	visibility.Channel = DataCaptureChannel::LocalLightShadowVisibility;
+	visibility.CaptureNode = visibilityTicket.CaptureNode;
+	visibility.Status = DataCaptureStatus::Ready;
+	visibility.Resource = engine::core::Name("local-light-shadow-visibility-0");
+	visibility.LightId = "light/key";
+	visibility.Width = 2;
+	visibility.Height = 1;
+	visibility.RowStride = 2;
+	visibility.Scalar = DataCaptureScalar::UNorm8;
+	visibility.ColourSpace = DataCaptureColourSpace::NotApplicable;
+	visibility.Provenance = "local_light_shadow_visibility/v1;source=selected_local_light_shadow_map;"
+							"factor=pcf_visibility;encoding=unorm8_direct;range=zero_to_one";
+	visibility.Bytes = {std::byte{0}, std::byte{255}};
+	visibility.Hash = engine::assets::Hasher::Of(visibility.Bytes);
+	capture_record_validation::State visibilityState;
+	CHECK(capture_record_validation::Plane(visibilityTicket, visibility, 18, visibilityState));
+	visibility.Provenance.clear();
+	capture_record_validation::State malformedVisibility;
+	CHECK_FALSE(capture_record_validation::Plane(visibilityTicket, visibility, 18, malformedVisibility));
+}
+
 TEST_CASE("second surface capture records one strict aligned provenance pair", "[render][data-capture]") {
 	constexpr std::string_view suffix =
 		";eligibility=built_in_plain_opaque_front_facing;invalid_depth_metres=0;"
@@ -632,7 +1044,9 @@ namespace {
 			.Pipeline = "pipeline",
 			.CaptureNode = "capture",
 			.Channels = {"rgb_linear_hdr"},
+			.LocalLightIds = {},
 			.TemporalHistory = "preserve",
+			.PackedPlanes = {},
 		};
 	}
 	engine::script::ViewCameraMutationRequest MutationRequest(
@@ -755,7 +1169,7 @@ TEST_CASE("script view.camera validates a queued snapshot on its owner", "[rende
 }
 
 TEST_CASE(
-	"script view.camera rejects an armed patch after its snapshot becomes stale", "[render][data-capture]"
+	"script view.camera preserves terminal replies while cancelling pending work", "[render][data-capture]"
 ) {
 	engine::world::Universe worlds;
 	engine::world::DataFactorySession session(worlds);
@@ -789,16 +1203,28 @@ TEST_CASE(
 	bridge.PrepareView(fresh);
 	CHECK(fresh.SnapshotId.empty());
 	bridge.Pump();
+	uint64_t pendingTicket = 0;
+	REQUIRE(bridge.QueueViewCameraMutation(
+		"data-world",
+		MutationRequest("data-world", pipeline.Text(), installed->Revision, "pending-snapshot"),
+		pendingTicket,
+		detail
+	));
+	bridge.CancelPending();
+	bridge.Pump();
 	engine::script::ViewCameraMutationPoll poll;
 	REQUIRE(bridge.PollViewCameraMutation("data-world", ticket, poll, detail));
 	CHECK(poll.Terminal);
 	CHECK(poll.Status == "stale");
+	REQUIRE(bridge.PollViewCameraMutation("data-world", pendingTicket, poll, detail));
+	CHECK(poll.Terminal);
+	CHECK(poll.Status == "cancelled");
 	CHECK_FALSE(
 		renderer.Hooks().ConsumeViewMutation(MutationIdentity(snapshot, pipeline, installed->Revision), fresh)
 	);
 }
 
-TEST_CASE("script view.camera bridge tracks apply, restore and cancellation", "[render][data-capture]") {
+TEST_CASE("script view.camera bridge tracks apply, restore and cancellation", "[render][data-capture][gpu]") {
 	engine::world::Universe worlds;
 	engine::world::DataFactorySession session(worlds);
 	const std::string snapshot = PauseAndSnapshot(worlds, session);
@@ -856,9 +1282,6 @@ TEST_CASE("script view.camera bridge tracks apply, restore and cancellation", "[
 	const FrameResult restoredFrame = renderer.Render(std::span(&view, 1), overlay, nullptr, false);
 	REQUIRE(restoredFrame.Submitted);
 	bridge.Pump();
-	REQUIRE(bridge.PollViewCameraMutation("data-world", appliedTicket, poll, detail));
-	CHECK(poll.Terminal);
-	CHECK(poll.Status == "applied");
 
 	REQUIRE(
 		session.Pause("data-world", engine::world::DataFactoryPauseScope::AllSystems, 0).Status ==
@@ -883,9 +1306,14 @@ TEST_CASE("script view.camera bridge tracks apply, restore and cancellation", "[
 	bridge.Pump();
 	REQUIRE(bridge.PollViewCameraMutation("data-world", cancelledTicket, poll, detail));
 	CHECK_FALSE(poll.Terminal);
-	bridge.PrepareView(view);
-	REQUIRE(renderer.Render(std::span(&view, 1), overlay, nullptr, false).Submitted);
+	// Shutdown owns no future view to restore. It must retire this applied patch
+	// without waiting for another render frame.
+	bridge.CancelPending();
 	bridge.Pump();
+	CHECK_FALSE(bridge.HasPending());
+	REQUIRE(bridge.PollViewCameraMutation("data-world", appliedTicket, poll, detail));
+	CHECK(poll.Terminal);
+	CHECK(poll.Status == "applied");
 	REQUIRE(bridge.PollViewCameraMutation("data-world", cancelledTicket, poll, detail));
 	CHECK(poll.Terminal);
 	CHECK(poll.Status == "cancelled");
@@ -1020,12 +1448,59 @@ TEST_CASE("script capture does not retain a scene sidecar for a stale snapshot",
 	View view = MutationView(snapshot, pipeline);
 	bridge.PrepareView(view);
 	bridge.Pump();
+	bridge.CancelPending();
+	bridge.Pump();
 	engine::script::DataCaptureBridgePoll reply;
 	REQUIRE(bridge.Poll("data-world", ticket, reply, detail));
 	CHECK(reply.Status == "stale_snapshot");
 	CHECK_FALSE(reply.SceneSidecar);
 	REQUIRE(bridge.Release("data-world", ticket, detail));
 	CHECK_FALSE(bridge.Poll("data-world", ticket, reply, detail));
+}
+
+TEST_CASE("oversized inline scene sidecar is refused before capture is queued", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	const auto world = worlds.Create({.Name = engine::core::Name("data-world")});
+	worlds.Enter(world, [](engine::ecs::Store &store) {
+		engine::scene::RegisterSceneComponents();
+		engine::scene::RegisterSceneClasses();
+		const auto part = engine::ecs::Classes::Find(engine::core::Name("Part"));
+		for (size_t index = 0; index < 400; ++index) {
+			const auto entity = store.CreateInstance(part, "CapturePart");
+			engine::ecs::AttributeValue id;
+			id.Type = engine::ecs::PropertyType::String;
+			id.String = "capture/" + std::to_string(index);
+			REQUIRE(engine::ecs::SetAttribute(store, entity, engine::core::Name("DataFactoryId"), id));
+		}
+	});
+	session.SetPauseParticipant(
+		[world](engine::world::WorldId candidate, engine::world::DataFactoryPauseScope, bool, std::string &) {
+			return candidate == world;
+		}
+	);
+	REQUIRE(
+		session.Pause("data-world", engine::world::DataFactoryPauseScope::AllSystems, 0).Status ==
+		engine::world::DataFactoryStatus::Ok
+	);
+	std::string snapshot;
+	REQUIRE(session.Snapshot("data-world", snapshot).Status == engine::world::DataFactoryStatus::Ok);
+	Renderer renderer;
+	ScriptDataCaptureBridge bridge(session, renderer);
+	auto request = Request();
+	request.SnapshotId = snapshot;
+	request.IncludeSceneData = true;
+	uint64_t ticket = 0;
+	std::string detail;
+	CHECK_FALSE(bridge.Queue("data-world", request, ticket, detail));
+	CHECK(ticket == 0);
+	CHECK(detail.find("get_scene_snapshot") != std::string::npos);
+	request.IncludeSceneData = false;
+	CHECK(bridge.Queue("data-world", request, ticket, detail));
+	CHECK(ticket != 0);
+	bridge.Cancel("data-world", ticket);
+	bridge.Pump();
+	REQUIRE(bridge.Release("data-world", ticket, detail));
 }
 
 TEST_CASE(
@@ -1228,6 +1703,8 @@ TEST_CASE(
 	View currentView = MutationView({}, pipeline);
 	CHECK_FALSE(bridge.PrepareView(currentView));
 	CHECK(currentView.SnapshotId == secondSnapshot);
+	bridge.CancelPending();
+	bridge.Pump();
 	engine::script::DataCaptureBridgePoll poll;
 	REQUIRE(bridge.Poll("data-world", currentTicket, poll, detail));
 	CHECK(poll.Status == "failed");
@@ -1345,7 +1822,7 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 			return hook.Access == "observation";
 		})
 	);
-	REQUIRE(observationHooks == 17);
+	REQUIRE(observationHooks == 22);
 	CHECK(capabilities.HookRecords.size() == observationHooks + 1);
 	for (const auto &hook : capabilities.HookRecords) {
 		if (hook.Access != "observation") continue;
@@ -1369,7 +1846,7 @@ TEST_CASE("script capture advertises the SSAO estimator channel", "[render][data
 	CHECK(capabilities.MaximumHooks == MAX_DATA_FACTORY_HOOKS);
 	CHECK(capabilities.MaximumConnections == MAX_DATA_FACTORY_CONNECTIONS);
 	CHECK(capabilities.MaximumBatches == MAX_DATA_FACTORY_BATCHES);
-	CHECK(capabilities.MaximumReadbackNodes == 10);
+	CHECK(capabilities.MaximumReadbackNodes == 11);
 }
 
 TEST_CASE("script capture validates requests and isolates ticket owners", "[render][data-capture]") {
@@ -1412,7 +1889,9 @@ TEST_CASE("script capture validates requests and isolates ticket owners", "[rend
 			 "part_ids",
 			 "second_surface_depth",
 			 "second_surface_validity"},
+		.LocalLightIds = {},
 		.TemporalHistory = "preserve",
+		.PackedPlanes = {},
 	};
 	uint64_t broadTicket = 0;
 	REQUIRE(first.Queue("data-world", broad, broadTicket, detail));
@@ -1500,6 +1979,96 @@ TEST_CASE("script capture reuses capacity after sequential terminal releases", "
 	}
 }
 
+TEST_CASE("script capture owner cancellation drains every pending kind", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	Renderer renderer;
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	uint64_t captureTicket = 0;
+	uint64_t mutationTicket = 0;
+	REQUIRE(bridge.Queue("data-world", Request(), captureTicket, detail));
+	REQUIRE(bridge.QueueViewCameraMutation("data-world", MutationRequest(), mutationTicket, detail));
+	REQUIRE(bridge.HasPending());
+
+	bridge.CancelPending();
+	bridge.Pump();
+	CHECK_FALSE(bridge.HasPending());
+
+	engine::script::DataCaptureBridgePoll capture;
+	REQUIRE(bridge.Poll("data-world", captureTicket, capture, detail));
+	CHECK(capture.Status == "cancelled");
+	REQUIRE(bridge.Release("data-world", captureTicket, detail));
+	engine::script::ViewCameraMutationPoll mutation;
+	REQUIRE(bridge.PollViewCameraMutation("data-world", mutationTicket, mutation, detail));
+	CHECK(mutation.Terminal);
+	CHECK(mutation.Status == "cancelled");
+}
+
+TEST_CASE("script capture shutdown discards only terminal retained tickets", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	Renderer renderer;
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	uint64_t captureTicket = 0;
+	uint64_t mutationTicket = 0;
+	REQUIRE(bridge.Queue("data-world", Request(), captureTicket, detail));
+	REQUIRE(bridge.QueueViewCameraMutation("data-world", MutationRequest(), mutationTicket, detail));
+	CHECK(bridge.HasOutstanding());
+	CHECK_FALSE(bridge.DiscardTerminal());
+	bridge.CancelPending();
+	bridge.Pump();
+	CHECK_FALSE(bridge.HasPending());
+	CHECK(bridge.HasOutstanding());
+	REQUIRE(bridge.DiscardTerminal());
+	CHECK_FALSE(bridge.HasOutstanding());
+	engine::script::DataCaptureBridgePoll capture;
+	CHECK_FALSE(bridge.Poll("data-world", captureTicket, capture, detail));
+	engine::script::ViewCameraMutationPoll mutation;
+	CHECK_FALSE(bridge.PollViewCameraMutation("data-world", mutationTicket, mutation, detail));
+}
+
+TEST_CASE("renderer pipeline reset preserves terminal bridge tickets", "[render][data-capture]") {
+	engine::world::Universe worlds;
+	engine::world::DataFactorySession session(worlds);
+	const std::string snapshot = PauseAndSnapshot(worlds, session);
+	Renderer renderer;
+	engine::graph::RenderGraph graph;
+	engine::core::Name offender;
+	REQUIRE(
+		engine::graph::Build(engine::graph::DefaultPbrDataCaptureDocument(), graph, offender) ==
+		engine::graph::PipelineDocumentStatus::Ok
+	);
+	const engine::core::Name pipeline("capture-reset-pipeline");
+	REQUIRE(renderer.SetPipeline(pipeline, graph));
+	ScriptDataCaptureBridge bridge(session, renderer);
+	std::string detail;
+	auto request = Request();
+	request.SnapshotId = snapshot;
+	request.Pipeline = pipeline.Text();
+	request.CaptureNode = "data-capture";
+	uint64_t ticket = 0;
+	REQUIRE(bridge.Queue("data-world", request, ticket, detail));
+	View view = MutationView(snapshot, pipeline);
+	ScriptDataCaptureBridge::PreparedView prepared;
+	CHECK_FALSE(bridge.PrepareView(view, &prepared));
+	REQUIRE(prepared.Captures == std::vector<uint64_t>{ticket});
+	CHECK_FALSE(bridge.HasPending());
+	engine::script::DataCaptureBridgePoll beforeReset;
+	REQUIRE(bridge.Poll("data-world", ticket, beforeReset, detail));
+	CHECK(beforeReset.Status == "failed");
+
+	renderer.ResetPipelines();
+	bridge.CancelPending();
+	bridge.Pump();
+	CHECK_FALSE(bridge.HasPending());
+	engine::script::DataCaptureBridgePoll reply;
+	REQUIRE(bridge.Poll("data-world", ticket, reply, detail));
+	CHECK(reply.Status == beforeReset.Status);
+	REQUIRE(bridge.Release("data-world", ticket, detail));
+}
+
 TEST_CASE("script capture tears down one instance without touching another", "[render][data-capture]") {
 	engine::world::Universe worlds;
 	engine::world::DataFactorySession session(worlds);
@@ -1508,12 +2077,18 @@ TEST_CASE("script capture tears down one instance without touching another", "[r
 	std::string detail;
 	uint64_t retiring = 0;
 	uint64_t retained = 0;
+	uint64_t retiringMutation = 0;
 	REQUIRE(bridge.Queue("retiring-world", Request("retiring-world"), retiring, detail));
 	REQUIRE(bridge.Queue("retained-world", Request("retained-world"), retained, detail));
+	REQUIRE(bridge.QueueViewCameraMutation(
+		"retiring-world", MutationRequest("retiring-world"), retiringMutation, detail
+	));
 	REQUIRE(bridge.TeardownInstance("retiring-world", detail));
 	engine::script::DataCaptureBridgePoll reply;
 	CHECK_FALSE(bridge.Poll("retiring-world", retiring, reply, detail));
 	CHECK(bridge.Poll("retained-world", retained, reply, detail));
+	engine::script::ViewCameraMutationPoll mutation;
+	CHECK_FALSE(bridge.PollViewCameraMutation("retiring-world", retiringMutation, mutation, detail));
 	uint64_t replacement = 0;
 	CHECK(bridge.Queue("retiring-world", Request("retiring-world"), replacement, detail));
 	CHECK_FALSE(bridge.TeardownInstance("", detail));

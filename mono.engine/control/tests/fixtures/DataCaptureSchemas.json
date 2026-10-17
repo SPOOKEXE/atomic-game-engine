@@ -1,0 +1,260 @@
+{
+  "provenance": {
+    "source": "mono.client/tests/fixtures/McpContracts.json",
+    "sha256": "570f737172e9fb8071c73bbad24a491410643ee2bcef07968ce6fd2d046a76fb",
+    "selection": "factory.tools.capture_bundle.inputSchema and factory.tools.capture_multi_camera.inputSchema"
+  },
+  "schemas": {
+    "capture_bundle": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_tick": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expected_world_epoch": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expected_world_version": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "instance_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "operation_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "options": {
+          "additionalProperties": false,
+          "properties": {
+            "camera_id": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "capture_node": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "channels": {
+              "items": {
+                "maxLength": 64,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 15,
+              "minItems": 1,
+              "type": "array"
+            },
+            "coordinate_space": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "include_exact_masks": {
+              "type": "boolean"
+            },
+            "include_scene_data": {
+              "type": "boolean"
+            },
+            "local_light_ids": {
+              "items": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 4,
+              "minItems": 1,
+              "type": "array"
+            },
+            "noise_mode": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "noise_seed": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "noise_sigma": {
+              "maximum": 64,
+              "minimum": 0,
+              "type": "number"
+            },
+            "output": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "pipeline": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "schema_version": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "storage_profile": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "temporal_history": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "view_slot": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "schema_version",
+            "channels",
+            "camera_id",
+            "pipeline",
+            "capture_node",
+            "view_slot",
+            "temporal_history",
+            "storage_profile",
+            "output",
+            "include_scene_data",
+            "include_exact_masks",
+            "coordinate_space",
+            "noise_mode",
+            "noise_seed",
+            "noise_sigma"
+          ],
+          "type": "object"
+        },
+        "snapshot_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_id",
+        "snapshot_id",
+        "options",
+        "operation_id",
+        "expected_tick",
+        "expected_world_epoch",
+        "expected_world_version"
+      ],
+      "type": "object"
+    },
+    "capture_multi_camera": {
+      "additionalProperties": false,
+      "properties": {
+        "cameras": {
+          "items": {
+            "type": "object"
+          },
+          "maxItems": 6,
+          "minItems": 2,
+          "type": "array"
+        },
+        "expected_tick": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expected_world_epoch": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expected_world_version": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "instance_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "operation_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "options": {
+          "additionalProperties": false,
+          "properties": {
+            "capture_node": {
+              "type": "string"
+            },
+            "channels": {
+              "maxItems": 15,
+              "minItems": 1,
+              "type": "array"
+            },
+            "coordinate_space": {
+              "type": "string"
+            },
+            "include_exact_masks": {
+              "type": "boolean"
+            },
+            "include_scene_data": {
+              "type": "boolean"
+            },
+            "noise_mode": {
+              "type": "string"
+            },
+            "noise_seed": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "noise_sigma": {
+              "maximum": 64,
+              "minimum": 0,
+              "type": "number"
+            },
+            "output": {
+              "type": "string"
+            },
+            "pipeline": {
+              "type": "string"
+            },
+            "schema_version": {
+              "type": "string"
+            },
+            "storage_profile": {
+              "type": "string"
+            },
+            "temporal_history": {
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "snapshot_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "instance_id",
+        "snapshot_id",
+        "cameras",
+        "options",
+        "operation_id",
+        "expected_tick",
+        "expected_world_epoch",
+        "expected_world_version"
+      ],
+      "type": "object"
+    }
+  }
+}

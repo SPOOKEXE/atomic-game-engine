@@ -1,8 +1,11 @@
+#include "PortalPresentationClock.hpp"
+
 #include <engine/ecs/Store.hpp>
 #include <engine/render/PortalGeometryDraw.hpp>
 #include <engine/scene/CameraContinuation.hpp>
 #include <engine/scene/Characters.hpp>
 #include <engine/scene/Part.hpp>
+#include <engine/scene/PortalCrossing.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/scene/Services.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
@@ -16,6 +19,13 @@
 TEST_SUITE_ID("engine.render.portalgeometrydraw")
 TEST_DEPENDS("engine.render.portalgeometry")
 
+TEST_CASE("portal capture clocks do not leak across jobs", "[render][portal-clock]") {
+	using namespace engine::render;
+	CHECK(PortalPresentationSeconds(3.0, std::nullopt) == 3.0);
+	CHECK(PortalPresentationSeconds(3.0, 7.0) == 7.0);
+	CHECK(PortalPresentationSeconds(5.0, std::nullopt) == 5.0);
+}
+
 TEST_CASE("current body halves retain their side through scaled mappings", "[render][portal-body-split]") {
 	using namespace engine;
 	const float scale = GENERATE(.25f, 1.f, 4.f);
@@ -27,6 +37,7 @@ TEST_CASE("current body halves retain their side through scaled mappings", "[ren
 	through.Scale = scale;
 	const core::Vector3 normal{0, 0, side};
 	const float offset = -2 * side;
+	const core::Vector3 centre{3, -5, -2};
 	std::vector<core::CFrame> joints(9);
 	joints[4].Position = {1, 2, 3};
 	joints[5].Position = {4, 5, 6};
@@ -42,13 +53,23 @@ TEST_CASE("current body halves retain their side through scaled mappings", "[ren
 		row.SkinCount = 2;
 		row.TagMask = 17;
 		row.SeamLight = {1, 0, 0};
+		row.Effects.Count = 1;
+		row.Effects.Attachments[0].Node = core::Name("portal.effect");
+		row.Effects.Attachments[0].SelectionMask = 0x3u;
+		row.Effects.Attachments[0].Order = 4;
+		row.Effects.Attachments[0].Revision = 7;
+		row.Effects.Attachments[0].Stage = scene::RenderEffectStage::Compute;
+		row.Effects.Attachments[0].Enabled = false;
 	}
 	body[1].SeamNormal = normal;
 	body[1].SeamOffset = offset;
+	const core::Vector3 first{2, 0, 0}, second{0, 3, 0};
 	render::PortalBodyDraws out;
 	for (const float z : {-3.f, -1.f, -3.f}) {
 		body[0].Frame.Position.Z = z;
-		REQUIRE(render::SplitPortalBodyDraws(body, joints, through, normal, offset, out));
+		REQUIRE(
+			render::SplitPortalBodyDraws(body, joints, through, normal, offset, first, second, centre, out)
+		);
 		REQUIRE(out.Near.size() == 2);
 		REQUIRE(out.Far.size() == 2);
 		REQUIRE(out.Joints.size() == 2);
@@ -60,10 +81,26 @@ TEST_CASE("current body halves retain their side through scaled mappings", "[ren
 			CHECK(out.Far[i].HalfExtent == body[i].HalfExtent * scale);
 			CHECK(out.Near[i].SeamNormal == normal);
 			CHECK(out.Near[i].SeamOffset == offset);
+			CHECK(out.Near[i].SeamFirst == first);
+			CHECK(out.Near[i].SeamSecond == second);
+			CHECK(out.Near[i].SeamCentre == centre);
+			CHECK(out.Near[i].SeamMask == 1);
+			CHECK(out.Far[i].SeamMask == 2);
+			CHECK((out.Far[i].SeamFirst - through.Rotate(first) * scale).Magnitude() < .0001f);
+			CHECK((out.Far[i].SeamSecond - through.Rotate(second) * scale).Magnitude() < .0001f);
+			CHECK((out.Far[i].SeamCentre - through.Point(centre)).Magnitude() < .0001f);
 			CHECK(out.Far[i].TagMask == 0);
 			CHECK(out.Near[i].TagMask == 17);
 			CHECK(out.Far[i].Rig == 99);
 			CHECK(out.Far[i].SourceWorld == core::Name("source"));
+			CHECK(out.Near[i].Effects.Count == 1);
+			CHECK(out.Far[i].Effects.Count == 1);
+			CHECK(out.Far[i].Effects.Attachments[0].Node == core::Name("portal.effect"));
+			CHECK(out.Far[i].Effects.Attachments[0].SelectionMask == 0x3u);
+			CHECK(out.Far[i].Effects.Attachments[0].Order == 4);
+			CHECK(out.Far[i].Effects.Attachments[0].Revision == 7);
+			CHECK(out.Far[i].Effects.Attachments[0].Stage == scene::RenderEffectStage::Compute);
+			CHECK_FALSE(out.Far[i].Effects.Attachments[0].Enabled);
 			CHECK(out.Far[i].SkinFirst == 0);
 			CHECK(out.Near[i].SkinFirst == 0);
 			CHECK((out.Far[i].SeamLight - through.Rotate(body[i].SeamLight)).Magnitude() < .0001f);
@@ -78,7 +115,7 @@ TEST_CASE("current body halves retain their side through scaled mappings", "[ren
 	}
 	const auto *nearStorage = out.Near.data(), *farStorage = out.Far.data();
 	const auto *jointStorage = out.Joints.data();
-	REQUIRE(render::SplitPortalBodyDraws(body, joints, through, normal, offset, out));
+	REQUIRE(render::SplitPortalBodyDraws(body, joints, through, normal, offset, first, second, centre, out));
 	CHECK(out.Near.data() == nearStorage);
 	CHECK(out.Far.data() == farStorage);
 	CHECK(out.Joints.data() == jointStorage);
@@ -95,8 +132,12 @@ TEST_CASE("current body halves retain their side through scaled mappings", "[ren
 	SECTION("nonpositive scale is refused") {
 		through.Scale = 0;
 	}
-	SECTION("synthetic copies cannot duplicate the selected body") {
+	SECTION("synthetic variants retain their independent portal rows") {
 		body.back().Variant = 1;
+	}
+	SECTION("surface and alpha rows retain their material path") {
+		body.back().Surface = 4;
+		body.back().Alpha = scene::AlphaMode::Transparency;
 	}
 	SECTION("row count is bounded") {
 		body.resize(render::MAX_PORTAL_GEOMETRY_ROWS + 1);
@@ -112,7 +153,15 @@ TEST_CASE("current body halves retain their side through scaled mappings", "[ren
 	SECTION("scale cannot collapse the mapped geometry") {
 		through.Scale = std::numeric_limits<float>::denorm_min();
 	}
-	CHECK_FALSE(render::SplitPortalBodyDraws(body, joints, through, normal, offset, out));
+	if (body.back().Surface == 4 || body.back().Variant != 0) {
+		CHECK(
+			render::SplitPortalBodyDraws(body, joints, through, normal, offset, first, second, centre, out)
+		);
+	} else {
+		CHECK_FALSE(
+			render::SplitPortalBodyDraws(body, joints, through, normal, offset, first, second, centre, out)
+		);
+	}
 	CHECK(out.Near.front().Frame.Position == retainedPosition);
 	CHECK(out.Near.data() == nearStorage);
 }
@@ -228,6 +277,10 @@ TEST_CASE(
 	body.Name = "retired/body";
 	body.Pose[2] = -4;
 	body.SeamPlane = {0, 0, 1, 0};
+	body.SeamFirst = {7, 0, 0};
+	body.SeamSecond = {0, 11, 0};
+	body.SeamCentre = {13, 17, 0};
+	body.SeamMask = 2;
 	body.JointCount = 1;
 	source.Joints.push_back({1, 2, 3, 0, 0, 0, 1});
 	render::PortalGeometry original;
@@ -253,6 +306,19 @@ TEST_CASE(
 		const auto expected = scene::SeamMapping(seam).Point({0, 0, -4});
 		CHECK(core::Vector3(copy.Pose[0], copy.Pose[1], copy.Pose[2]).FuzzyEq(expected, .00001f));
 		CHECK(expected.Dot({copy.SeamPlane[0], copy.SeamPlane[1], copy.SeamPlane[2]}) >= copy.SeamPlane[3]);
+		CHECK(
+			core::Vector3(copy.SeamFirst[0], copy.SeamFirst[1], copy.SeamFirst[2])
+				.FuzzyEq(scene::SeamMapping(seam).Rotate({7, 0, 0}) * seam.Scale, .00001f)
+		);
+		CHECK(
+			core::Vector3(copy.SeamSecond[0], copy.SeamSecond[1], copy.SeamSecond[2])
+				.FuzzyEq(scene::SeamMapping(seam).Rotate({0, 11, 0}) * seam.Scale, .00001f)
+		);
+		CHECK(
+			core::Vector3(copy.SeamCentre[0], copy.SeamCentre[1], copy.SeamCentre[2])
+				.FuzzyEq(scene::SeamMapping(seam).Point({13, 17, 0}), .00001f)
+		);
+		CHECK(copy.SeamMask == 2);
 		CHECK(result.Joints == source.Joints);
 		CHECK(copy.FirstJoint == 0);
 	}
@@ -298,6 +364,7 @@ TEST_CASE(
 	scene::RegisterSceneClasses();
 	ecs::Store source("near");
 	const auto part = scene::MakePart(source, {});
+	source.Set(part, scene::BodyIdentity{{41, 73}, 5});
 	scene::DrawInstance draw;
 	draw.Source = part.Id;
 	draw.Rig = part.Id;
@@ -309,6 +376,10 @@ TEST_CASE(
 	draw.Tint = {.3f, .4f, .5f};
 	draw.SeamNormal = {0, 1, 0};
 	draw.SeamOffset = 2;
+	draw.SeamFirst = {2, 0, 0};
+	draw.SeamSecond = {0, 3, 0};
+	draw.SeamCentre = {7, 2, 0};
+	draw.SeamMask = 2;
 	draw.SkinFirst = 1;
 	draw.SkinCount = 1;
 	std::vector<core::CFrame> sourceJoints{core::CFrame{}, core::CFrame(core::Vector3{1, 2, 3})};
@@ -318,6 +389,9 @@ TEST_CASE(
 	render::PortalGeometry geometry;
 	REQUIRE(render::DecodePortalGeometry(bytes, geometry, error));
 	CHECK(geometry.Rows[0].Name == source.GetFullName(part));
+	CHECK(geometry.Rows[0].BodyKeyHigh == 41);
+	CHECK(geometry.Rows[0].BodyKeyLow == 73);
+	CHECK(geometry.Rows[0].BodyGeneration == 5);
 	CHECK(geometry.Joints.size() == 1);
 	std::vector<scene::DrawInstance> rows(1);
 	std::vector<core::CFrame> joints(2);
@@ -334,6 +408,10 @@ TEST_CASE(
 	CHECK(received.Tint == draw.Tint);
 	CHECK(received.SeamNormal == draw.SeamNormal);
 	CHECK(received.SeamOffset == draw.SeamOffset);
+	CHECK(received.SeamFirst == draw.SeamFirst);
+	CHECK(received.SeamSecond == draw.SeamSecond);
+	CHECK(received.SeamCentre == draw.SeamCentre);
+	CHECK(received.SeamMask == draw.SeamMask);
 	CHECK(received.SkinFirst == 2);
 	CHECK(received.SkinCount == 1);
 	CHECK(joints.back().Position == sourceJoints.back().Position);

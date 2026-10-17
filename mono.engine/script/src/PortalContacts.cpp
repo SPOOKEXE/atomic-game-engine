@@ -4,11 +4,13 @@
 #include <engine/ecs/Store.hpp>
 #include <engine/physics/CopiedContacts.hpp>
 #include <engine/scene/Controls.hpp>
+#include <engine/scene/PortalCrossing.hpp>
 #include <engine/scene/SurfaceCameras.hpp>
 #include <engine/world/TickExchange.hpp>
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 
 namespace engine::script {
@@ -61,7 +63,13 @@ namespace engine::script {
 					if (controlled != speeds.end() && controlled->first == root.Id)
 						speed = std::max(speed, controlled->second);
 					const float reach = collider.Extent.Magnitude() + speed * store.Time().Delta + .01f;
+					const auto *crossing = store.Get<scene::PortalCrossingState>(root);
+					const scene::PortalSeam *selected = nullptr;
+					float selectedDistance = std::numeric_limits<float>::infinity();
 					for (const auto &seam : seams) {
+						if (crossing && crossing->Phase != scene::PortalCrossingPhase::Idle &&
+							(seam.Pane != crossing->Pane || seam.Far != crossing->Far))
+							continue;
 						const auto relative = pose.Frame.Position - seam.Centre;
 						const float offset = relative.Dot(seam.Normal);
 						if (std::abs(offset) > reach || (!seam.Bidirectional && offset < 0)) continue;
@@ -70,6 +78,17 @@ namespace engine::script {
 							std::abs(relative.Dot(seam.First)) > first * (first + reach) ||
 							std::abs(relative.Dot(seam.Second)) > second * (second + reach))
 							continue;
+						const float distance = std::abs(offset);
+						if (selected &&
+							(distance > selectedDistance ||
+							 (distance == selectedDistance && seam.PanePath >= selected->PanePath)))
+							continue;
+						selected = &seam;
+						selectedDistance = distance;
+					}
+					if (selected) {
+						const auto &seam = *selected;
+						const float offset = (pose.Frame.Position - seam.Centre).Dot(seam.Normal);
 						if (pending.Pending.size() >= world::MAXIMUM_TICK_EXCHANGE_MESSAGES)
 							throw std::runtime_error("portal contact request capacity exceeded");
 						const auto through = scene::SeamMapping(seam);
@@ -109,40 +128,67 @@ namespace engine::script {
 			if (!physics::CollectStaticContacts(store, window, contacts, failure)) {
 				return world::TickExchangeStatus::Overflow;
 			}
+			physics::CopiedDynamicContacts dynamic;
+			if (!physics::CollectDynamicContacts(store, window, dynamic, failure)) {
+				return world::TickExchangeStatus::Overflow;
+			}
 			core::ByteWriter writer;
-			if (!physics::WriteCopiedContacts(writer, contacts)) return world::TickExchangeStatus::Refused;
+			if (!physics::WriteCopiedContacts(writer, contacts) ||
+				!physics::WriteCopiedDynamicContacts(writer, dynamic))
+				return world::TickExchangeStatus::Refused;
 			out.assign(writer.Bytes().begin(), writer.Bytes().end());
 			return world::TickExchangeStatus::Complete;
 		}
 		void Apply(ecs::Store &store, std::span<const world::TickExchangeReply> replies) {
 			std::vector<physics::CopiedBodyContacts> bodies;
+			std::vector<physics::CopiedDynamicBodyContacts> dynamicBodies;
 			const auto *pending = store.Resource<ContactRequests>();
 			if (pending && pending->Tick == store.Time().Tick) {
 				for (size_t index = 0; index < pending->Pending.size(); ++index) {
 					const auto &request = pending->Pending[index];
 					physics::CopiedBodyContacts body;
+					physics::CopiedDynamicBodyContacts dynamic;
 					body.Root = request.Root;
+					dynamic.Root = request.Root;
 					for (const auto &reply : replies) {
 						if (reply.Stamp.Sequence != index + 1 ||
 							reply.Status != world::TickExchangeStatus::Complete)
 							continue;
 						core::ByteReader reader(reply.Payload);
-						body.Complete =
-							physics::ReadCopiedContacts(reader, body.Geometry) && reader.Remaining() == 0;
+						body.Complete = physics::ReadCopiedContacts(reader, body.Geometry);
+						dynamic.Complete = body.Complete &&
+										   physics::ReadCopiedDynamicContacts(reader, dynamic.Contacts) &&
+										   reader.Remaining() == 0;
+						body.Complete = dynamic.Complete;
 						if (body.Complete) {
 							for (auto &shape : body.Geometry.Shapes) {
 								shape.Frame = request.Back.Place(shape.Frame);
 								shape.Extent = shape.Extent * request.Back.Scale;
+								shape.Linear = request.Back.Carry(shape.Linear);
+								shape.Angular = request.Back.Rotate(shape.Angular);
 								for (auto &point : shape.Points)
-									point = point * request.Back.Scale;
+									point = request.Back.Point(point);
+							}
+							for (auto &far : dynamic.Contacts.Bodies) {
+								far.Frame = request.Back.Place(far.Frame);
+								far.Extent = far.Extent * request.Back.Scale;
+								far.Motion.Linear = request.Back.Carry(far.Motion.Linear);
+								far.Motion.Angular = request.Back.Rotate(far.Motion.Angular);
+								far.Window.Centre = request.Back.Point(far.Window.Centre);
+								far.Window.Normal = request.Back.Rotate(far.Window.Normal);
+								far.Window.First = request.Back.Carry(far.Window.First);
+								far.Window.Second = request.Back.Carry(far.Window.Second);
+								far.Window.Depth *= request.Back.Scale;
 							}
 						}
 						break;
 					}
 					bodies.push_back(std::move(body));
+					dynamicBodies.push_back(std::move(dynamic));
 				}
 			}
 			physics::SetCopiedBodyContacts(store, std::move(bodies));
+			physics::SetCopiedDynamicBodyContacts(store, std::move(dynamicBodies));
 		}
 	}
 	bool RegisterPortalContacts() {

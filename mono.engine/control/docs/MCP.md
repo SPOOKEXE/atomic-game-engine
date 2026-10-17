@@ -5,6 +5,11 @@ running engine. An MCP client and the typed Python client in the sibling
 `datafactories-docs/api.py` use the same tool table, schemas, and engine
 validation. There is no private Python execution path around the engine.
 
+This document describes rows and lifecycle behavior shipped by the running
+host. Historical proposals and sibling handoff documents can explain intent,
+but they do not advertise a capability. `tools/list`, `resources/list`,
+`prompts/list`, and `negotiate` are the contract for one host process.
+
 The engine owns worlds, scene mutation, deterministic stepping, snapshots,
 captures, and retained resources. A caller owns recipes, dataset layout,
 conversion, storage, training, and evaluation.
@@ -46,6 +51,80 @@ paired `poll_render_only` row. Capture tickets use `poll_capture`. Always call
 `negotiate` and inspect `tools/list` before building a workflow around an
 optional feature.
 
+Interactive hosts advertise `emulate_mouse_move`, `emulate_click`,
+`emulate_mouse_wheel`, `emulate_key`, and `emulate_text` when they install an
+input provider. Client, Studio, and launcher process these events through their
+normal event loop, including when they run headlessly. A server and content
+origin do not advertise input rows because they own neither a window nor an
+input state. Their world rows remain available when the host owns a universe.
+
+## Hook discovery and refresh
+
+The control kernel owns the protocol tables. Product code composes optional
+providers locally, where it already owns the typed world, renderer, capture,
+or factory service. The shared control module does not link renderer adapters
+or load native plugins at runtime.
+
+Each product installs its permanent named hooks from a local
+`ControlHooks.cpp` manifest through `Surface::ActivateHook` and retains their
+leases until shutdown. These hooks use stable IDs of the form
+`builtin.<name>`. They appear in `negotiate` under `hooks` and advance
+`control_generation` when activated, closed, or removed. Optional providers
+use the same activation API with a typed context, dependencies, and limits.
+`Surface::Add`, `AddResource`, and `AddPrompt` only stage rows during a named
+hook activation; calls outside registration throw.
+
+World-owning client, server, and interactive Studio modes keep `Universe` in
+their permanent manifests. Its hook lease and the referenced `Universe` share
+the product lifetime. A Studio factory-only surface omits those world-backed
+rows.
+
+Each live provider has a stable hook ID, revision, state, tool names, and
+declared numeric limits. `negotiate` returns these under `hooks` and includes a
+monotonic `control_generation`. Activation, the start of draining, and completed
+removal each advance that generation. The hook list reports live registrations,
+while `operations` reports the callable tool table at the time of the response.
+
+The `mcpbridge` compatibility transcript uses the synthetic owner
+`builtin.mcpbridge.compatibility`. Its fixture records the owner's visible hook
+metadata and generation because the synthetic rows are installed through a
+named activation. Product hosts keep their own local manifests and reviewed
+hook expectations.
+
+```json
+{
+  "control_generation": 17,
+  "hooks": [
+    {
+      "id": "studio.data-factory.raw-scene",
+      "state": "active",
+      "revision": "v1",
+      "tools": ["begin_raw_scene_extract", "get_raw_scene_chunk", "release_raw_scene_extract"],
+      "limits": {}
+    }
+  ]
+}
+```
+
+A hook stages its tools, resources, and prompts as one registration. A name or
+URI collision rejects the activation, leaving the existing surface unchanged.
+Closing a hook first blocks new submissions. A provider may name cleanup tools
+that remain listed and callable while it drains retained work. The client capture
+hook keeps `poll_capture`, `get_resource`, `save_resource`, `cancel_capture`, `release_capture`,
+`poll_view_camera_mutation`, and `cancel_view_camera_mutation` available until
+their tickets are released or terminal mutation results are polled. Existing
+calls retain their activation guard until they return; rows disappear after the
+hook has drained. The host discards any terminal tickets still retained at
+shutdown, before destroying the capture bridge.
+Dependencies keep an owner hook from completing removal until its dependent
+hooks have closed.
+
+MCP `listChanged` remains `false` for tools, resources, and prompts. The host
+does not send list-change notifications. After a host acknowledges a provider
+change, refresh `negotiate`, `tools/list`, `resources/list`, and `prompts/list`
+before issuing another optional operation. A disabled provider is absent from
+the applicable list instead of remaining listed and refusing later.
+
 ## General tool reference
 
 The standard tool table is available to a host that enables the control surface.
@@ -55,7 +134,8 @@ Every row is described by the running program and is callable only when listed.
 | --- | --- | --- |
 | Discovery | `negotiate` | Read the exact advertised operation, capability, and limit contract before using an optional feature. |
 | Engine and worlds | `engine_info`, `world_list`, `world_tree` | Identify this engine and inspect the available worlds and bounded instance tree. |
-| Instances and components | `instance_get`, `instance_set`, `engine_components`, `component_list`, `entity_query`, `component_get`, `component_set` | Inspect the class-facing instance view and the engine or world component schemas. |
+| Instances and components | `instance_get`, `instance_set`, `entity_create`, `entity_destroy`, `engine_components`, `component_list`, `entity_query`, `component_get`, `component_set` | Inspect and edit authoritative entities, class properties, and engine or world component schemas. |
+| Input automation | `emulate_mouse_move`, `emulate_click`, `emulate_mouse_wheel`, `emulate_key`, `emulate_text` | Queue semantic pointer, keyboard, and UTF-8 text input through an interactive host's normal event boundary. |
 | Profiling | `profile_frame` | Read bounded frame-profile data. |
 | Architecture | `layer_table`, `module_get`, `module_may_link` | Inspect the compiled module graph and whether a proposed edge is allowed. |
 | Script surface | `class_list`, `class_get`, `script_check` | Discover class properties and type-check bounded Luau input without evaluating it. |
@@ -67,6 +147,11 @@ Every row is described by the running program and is callable only when listed.
 questions. `engine_components` is the sealed process-wide storage catalogue.
 `component_list` is what one world declares and how many entities use each
 component. `instance_get` is the class and property projection for one entity.
+
+`entity_create`, `entity_destroy`, `instance_set`, and `component_set` change
+only an authoritative world. A replicated world refuses those writes. Use
+`world_tree` or `entity_query` to find an entity before reading or changing it,
+then use the listed schema to supply a property or component value.
 
 `world_tree`, `entity_query`, log tails, profiles, and similar reads are bounded.
 Read their advertised JSON schema instead of assuming a full-world response.
@@ -128,7 +213,7 @@ release rows automatically where appropriate.
 | Scene exports | `export_gltf_scene`, `get_gltf_scene_chunk`, `release_gltf_scene` | Export one fenced GLB inline or through a retained ranged resource. |
 | Raw exports | `begin_raw_scene_extract`, `get_raw_scene_chunk`, `release_raw_scene_extract` | Read the raw geometry and source-texture manifest plus its retained bytes. |
 | Capture discovery | `get_capture_channels`, `get_resources` | Discover capture and durable-resource capabilities without guessing a schema. |
-| Capture jobs | `capture_bundle`, `poll_capture`, `get_resource`, `cancel_capture`, `release_capture` | Queue capture, poll terminal state, read planes, cancel pending work, and release retained data. |
+| Capture jobs | `capture_bundle`, `poll_capture`, `get_resource`, `save_resource`, `cancel_capture`, `release_capture` | Queue capture, poll terminal state, read planes as base64 ranges or as one engine-written file per plane, cancel pending work, and release retained data and files. |
 | Scene observations | `get_temporal_sample`, `get_event_narratives`, `get_authored_affordances`, `raycast`, `overlap_aabb`, `overlap_obb`, `get_collider_occupancy`, `get_collider_bev`, `get_filled_occupancy`, `get_signed_distance_field`, `get_authored_navmesh_path`, `get_rig_export` | Read bounded temporal, authored, spatial, navigation, occupancy, and rig observations. |
 
 `get_resources` can explicitly report that a durable-resource owner is
@@ -285,6 +370,15 @@ for entity in scene.entities:
 subset rather than a hidden complete world dump. It contains time, stable entity
 records, resolved-lighting provenance, coverage, and omission counts. Do not
 treat an omitted entity as absent or invisible.
+
+If the snapshot exceeds the 64 KiB MCP reply limit, the tool returns a
+`data-scene-resource/v1` manifest. Read its immutable JSON bytes with
+`get_scene_snapshot_chunk` using `resource_id`, `hash`, and contiguous
+`byte_begin`/`byte_end` ranges no larger than `chunk_byte_limit`. Concatenate
+decoded base64 chunks, verify the declared BLAKE3 hash and byte length, parse
+the result as `data-scene/v1`, then call `release_scene_snapshot`. Factory reads
+must pass the same revision options to each chunk call. A changed revision
+refuses the read; release remains available after the revision changes.
 
 `get_camera_rendering_data` reads calibration for a stable authored camera ID or
 the active camera. Its reply states the source of intrinsics and extrinsics, axes,

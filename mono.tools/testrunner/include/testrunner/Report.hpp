@@ -127,8 +127,8 @@ namespace testrunner {
 	// @return False if the header is missing or unrecognised, or if the run
 	//         never reached its totals line - a binary that crashed halfway
 	//         leaves a file that parses field by field and is still not a
-	//         result. The counts are then not to be trusted, and the caller
-	//         has the exit status to fall back on.
+	//         result. The counts are then not to be trusted, and a successful
+	//         child without a complete report must be treated as failed.
 	bool ParseSuiteReport(std::string_view text, SuiteReport &report);
 
 	// The same, reading the file itself. False also when it cannot be opened.

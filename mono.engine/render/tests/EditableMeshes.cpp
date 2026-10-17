@@ -106,7 +106,7 @@ TEST_CASE(
 	scene::Visual visual;
 	visual.Mesh = base;
 	store.Set(part, visual);
-	scene::AutoMeshLOD policy;
+	scene::LODAuto policy;
 	policy.Levels = 3;
 	policy.Ratios[0] = 0.5f;
 	policy.Ratios[1] = 0.25f;

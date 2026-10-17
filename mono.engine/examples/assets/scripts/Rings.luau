@@ -17,14 +17,14 @@
 --     part.Position   -> the translation of that frame, rotation kept
 --     part.Size       -> scene::Bounds.HalfExtent    (doubled on the way out)
 --     part.Color      -> scene::Visual.Tint
---     part.Anchored   -> whether RigidBody and Motion exist at all
+--     part.Anchored   -> scene::Simulated membership
 --
 -- An instance is an entity, a class is a set of components, and a property is a
 -- projection of one or more of them. Nothing else exists.
 --
 -- **Determinism.** `deltaTime` is the world's fixed tick delta, never wall
--- time, and there is no `os`, no clock and no `math.random` here. A recording
--- of this scene replays byte for byte.
+-- time. Given identical initial script state, this motion is deterministic;
+-- the scene tests cover its fixed-tick runs.
 
 local RunService = game:GetService("RunService")
 
@@ -93,9 +93,8 @@ for index = 0, COUNT - 1 do
 	)
 
 	-- Nothing here is simulated by physics; the script places every part every
-	-- beat. Anchoring says so, and it is a real archetype move rather than a
-	-- flag - an anchored part carries no RigidBody and no Motion, so the
-	-- dynamic queries never visit it.
+	-- beat. Anchoring removes `scene::Simulated` while retaining `RigidBody`, so
+	-- the dynamic queries never visit these parts.
 	part.Anchored = true
 	part.Parent = workspace
 

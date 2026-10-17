@@ -173,10 +173,11 @@ namespace engine::graph {
 	// space, and what has to be tested there is the *mapped* rectangle. The
 	// caller maps it and hands over four corners' worth of description.
 	//
-	// **A box around the rectangle, not the rectangle itself.** The box is at
-	// least the quad, so the error is always towards drawing - which is the
-	// direction culling has to err in, since a pane wrongly dropped is a hole
-	// that goes black for a frame.
+	// **The rectangle itself, clipped in clip space.** A box around it passed
+	// panes beside and behind a turned camera that no plane alone excluded. A
+	// hair of slack keeps the error towards drawing, which is the direction
+	// culling has to err in, since a pane wrongly dropped is a hole that goes
+	// black for a frame.
 	//
 	// @param camera The camera's world-to-clip matrix.
 	// @param centre The rectangle's middle, in world space.

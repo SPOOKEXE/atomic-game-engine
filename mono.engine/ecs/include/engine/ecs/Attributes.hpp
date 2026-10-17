@@ -45,6 +45,7 @@
 #include <engine/ecs/Entity.hpp>
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -148,7 +149,21 @@ namespace engine::ecs {
 		// outer map only ever holds entities somebody has actually set something
 		// on, which is the property that keeps an untouched world's table empty.
 		std::unordered_map<uint32_t, std::unordered_map<uint32_t, AttributeValue>> Entities;
+
+		// Revisions are derived runtime state.  A consumer that depends on one
+		// attribute can therefore avoid polling every value in the table.
+		uint64_t NextRevision = 1;
+		std::unordered_map<uint32_t, std::unordered_map<uint32_t, uint64_t>>
+			Revisions; // Latest revision for each entity attribute.
 	};
+
+	// Copies attributes for the supplied visible authority instances only.
+	// Dead and predicted owners are excluded; runtime revisions are omitted.
+	// Work is bounded by the supplied owner list and its attributes.
+	// @param store The authoritative world containing the attribute table.
+	// @param instances The visible owner handles selected by the caller.
+	// @return An independent table containing only those owners' attributes.
+	AttributeTable SelectAttributes(const Store &store, std::span<const Entity> instances);
 
 	// Reads one attribute.
 	//
@@ -158,6 +173,11 @@ namespace engine::ecs {
 	// @param out      Filled in on success; left alone otherwise.
 	// @return `false` when the instance has no such attribute.
 	bool GetAttribute(const Store &store, Entity instance, core::Name name, AttributeValue &out);
+
+	// Returns the latest write revision of one attribute, or zero when it has
+	// never been written in this incarnation of the world.  Revisions are
+	// runtime-only and are deliberately not part of snapshots.
+	uint64_t AttributeRevision(const Store &store, Entity instance, core::Name name);
 
 	// Writes one attribute, creating the table if the world has none.
 	//

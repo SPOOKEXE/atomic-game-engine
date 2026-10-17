@@ -1,18 +1,16 @@
 # Code quality checklist
 
-**The completion checklist.** Work through this before opening a pull request,
-and again when reviewing one. `CONTRIBUTING.md` points here rather than keeping
-a second copy - one checklist, in one place, or the two drift and nobody knows
-which is current.
+This is the review checklist for correctness, architecture, tests, performance,
+security, and reporting.
+
+Work through it before opening a pull request and again when reviewing one.
+`CONTRIBUTING.md` points here rather than keeping a second copy.
 
 Written as questions rather than rules, because the useful version of most of
 these is "did you think about it", not "did you comply".
 
 A reviewer should be able to work through this in a few minutes. If a change is
 too large for that, it is too large.
-
-Working with Claude Code, `/run-checklist` walks the whole thing and reports
-what it could not verify rather than skipping it quietly.
 
 ---
 

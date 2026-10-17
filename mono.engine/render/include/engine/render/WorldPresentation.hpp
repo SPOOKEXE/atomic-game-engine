@@ -17,7 +17,6 @@
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Skinning.hpp>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -51,6 +50,35 @@ namespace engine::render {
 	// while serialisation deliberately writes no instances because PreRender
 	// rebuilds them before use.
 	struct DrawList {
+		// Value and membership epochs identify which kind of source change occurred.
+		struct SourceRevision {
+			uint64_t Writes = 0;	 // Writes to existing component values.
+			uint64_t Membership = 0; // Entities gaining or losing the component.
+		};
+
+		// Source epochs last inspected by CollectInstances. Named fields keep a
+		// new source component from being coupled to an array position.
+		struct SourceRevisions {
+			// Last collected epochs for pose, appearance, visibility and skin inputs.
+			//@{
+			SourceRevision Transform{};
+			SourceRevision PreviousTransform{};
+			SourceRevision Bounds{};
+			SourceRevision Visual{};
+			SourceRevision SurfaceAppearance{};
+			SourceRevision Tags{};
+			SourceRevision LocalTransparency{};
+			SourceRevision CharacterLimb{};
+			SourceRevision Skeleton{};
+			SourceRevision Bone{};
+			SourceRevision Rendered{};
+			SourceRevision LODAuto{};
+			SourceRevision LODCustom{};
+			SourceRevision LODSettings{};
+			SourceRevision RenderEffects{};
+			//@}
+		};
+
 		// One row per visible scene instance.
 		std::vector<scene::DrawInstance> Instances;
 		// Stable object identities indexed by captured object-id values.
@@ -74,9 +102,8 @@ namespace engine::render {
 		// those view-derived rows are rebuilt independently.
 		size_t BaseInstanceCount = 0;
 
-		// Monotonic source epochs last inspected by CollectInstances. These are
-		// derived cache state and deliberately do not cross snapshots.
-		std::array<uint64_t, 14> SourceRevisions{};
+		// Derived cache state that deliberately does not cross snapshots.
+		SourceRevisions Revisions{};
 		// Entity count used to size the cached source rows.
 		size_t SourceEntityCount = 0;
 		// Number of skeletons represented by the cached source rows.
@@ -113,6 +140,11 @@ namespace engine::render {
 	// The same scene inputs split by resident source for cache diagnostics.
 	ScenePresentationSignatures
 	ScenePresentationSignaturesOf(const View &view, const ScenePresentationState &state);
+
+	// Signs resolved lighting and local lights without reading padding. Portal-image renewal uses this
+	// value because its reply must stay stable for equivalent copied world snapshots.
+	uint64_t
+	LightingPresentationSignature(const scene::WorldLighting &lighting, std::span<const SceneLight> lights);
 
 	// Signs inputs that can move an invisible particle layer back into a camera.
 	// Simulation time is deliberately absent, so an off-camera resident pool can
@@ -299,13 +331,19 @@ namespace engine::render {
 	void RegisterPresentationComponents();
 	// Copies shared seam geometry and traversal mappings for local portal captures.
 	size_t CollectPortalViews(
-		ecs::Store &store, std::vector<PortalView> &portals, std::span<const scene::SurfaceSlot> slots = {}
+		ecs::Store &store,
+		std::vector<PortalView> &portals,
+		std::span<const scene::SurfaceSlot> slots = {},
+		float alpha = 1.0f
 	);
 
 	// Applies request-local slots to copied rows from this world only. Rows from
 	// foreign presentation messages retain their independently owned indices.
 	void ApplySurfaceSlots(
-		std::span<scene::DrawInstance> instances, std::span<const scene::SurfaceSlot> slots, core::Name world
+		std::span<scene::DrawInstance> instances,
+		std::span<const scene::SurfaceSlot> slots,
+		core::Name world,
+		std::span<const scene::PortalSeam> portals = {}
 	);
 
 	// Copies surface views in entity order. An explicit viewer derives mirror

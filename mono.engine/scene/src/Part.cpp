@@ -15,6 +15,7 @@
 #include <engine/scene/Controls.hpp>
 #include <engine/scene/DrawInstance.hpp>
 #include <engine/scene/Enums.hpp>
+#include <engine/scene/GpuParticleField.hpp>
 #include <engine/scene/Input.hpp>
 #include <engine/scene/MeshCatalogue.hpp>
 #include <engine/scene/Part.hpp>
@@ -31,6 +32,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <numbers>
 #include <string>
 #include <string_view>
@@ -821,6 +823,32 @@ namespace engine::scene {
 				}
 				using Field = std::remove_cvref_t<decltype(component->*Member)>;
 				component->*Member = static_cast<Field>(ordinal);
+				return true;
+			};
+			return property;
+		}
+
+		PropertyDescriptor GpuParticleLayersProperty() {
+			PropertyDescriptor property;
+			property.Name = core::Name("Layers");
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<GpuParticleField>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const GpuParticleField *field = store.Get<GpuParticleField>(instance);
+				if (field == nullptr) return false;
+				*static_cast<int32_t *>(out) = field->Layers;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const int32_t layers = *static_cast<const int32_t *>(value);
+				if (layers < 0 || (layers & ~static_cast<int32_t>(GPU_PARTICLE_ALL_LAYERS)) != 0)
+					return false;
+				GpuParticleField *field = store.GetMutable<GpuParticleField>(instance);
+				if (field == nullptr) return false;
+				field->Layers = static_cast<uint8_t>(layers);
 				return true;
 			};
 			return property;
@@ -1751,6 +1779,60 @@ namespace engine::scene {
 			return property;
 		}
 
+		template <class Component> PropertyDescriptor LodBillboardProperty(const char *name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Name;
+			property.Size = sizeof(core::Name);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<Component>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const Component *lod = store.Get<Component>(instance);
+				*static_cast<core::Name *>(out) = lod == nullptr ? core::Name{} : lod->Billboard;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				Component lod;
+				if (const Component *existing = store.Get<Component>(instance)) {
+					lod = *existing;
+				}
+				lod.Billboard = *static_cast<const core::Name *>(value);
+				store.Set(instance, lod);
+				return true;
+			};
+			return property;
+		}
+
+		template <size_t Level> PropertyDescriptor LodDistanceProperty(const char *name) {
+			static_assert(Level > 0 && Level < LOD_LEVELS);
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Structural;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<LODSettings>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const LODSettings *settings = store.Get<LODSettings>(instance);
+				*static_cast<float *>(out) =
+					settings == nullptr ? 0.0f : settings->MinimumDistances[Level - 1];
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				LODSettings settings;
+				if (const LODSettings *existing = store.Get<LODSettings>(instance)) {
+					settings = *existing;
+				}
+				const float distance = *static_cast<const float *>(value);
+				settings.MinimumDistances[Level - 1] =
+					std::isfinite(distance) ? std::max(distance, 0.0f) : 0.0f;
+				store.Set(instance, settings);
+				return true;
+			};
+			return property;
+		}
+
 		template <class Component> PropertyDescriptor LodLevelsProperty(const char *name) {
 			PropertyDescriptor property;
 			property.Name = core::Name(name);
@@ -1778,6 +1860,68 @@ namespace engine::scene {
 			return property;
 		}
 
+		// Packed PBR channels remain bytes in the draw column, but scripts carry
+		// integers. Keeping that conversion here gives every binding the same
+		// four-byte value and reserves 255 as the explicit "not packed" marker.
+		template <uint8_t SurfaceAppearance::*Channel>
+		PropertyDescriptor PackedPbrChannelProperty(const char *name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Int32;
+			property.Size = sizeof(int32_t);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceAppearance>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(instance);
+				if (appearance == nullptr) {
+					return false;
+				}
+				*static_cast<int32_t *>(out) = appearance->*Channel;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const int32_t channel = *static_cast<const int32_t *>(value);
+				if (channel < 0 || (channel > 3 && channel != 255)) {
+					return false;
+				}
+				SurfaceAppearance *appearance = store.GetMutable<SurfaceAppearance>(instance);
+				if (appearance == nullptr) {
+					return false;
+				}
+				appearance->*Channel = static_cast<uint8_t>(channel);
+				return true;
+			};
+			return property;
+		}
+
+		template <float SurfaceAppearance::*Factor, int Minimum = 0, int Maximum = 1>
+		PropertyDescriptor BoundedSurfaceFactorProperty(const char *name) {
+			PropertyDescriptor property;
+			property.Name = core::Name(name);
+			property.Type = PropertyType::Float;
+			property.Size = sizeof(float);
+			property.Kind = PropertyKind::Field;
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<SurfaceAppearance>()});
+			property.Writes = property.Reads;
+			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
+				const SurfaceAppearance *appearance = store.Get<SurfaceAppearance>(instance);
+				if (appearance == nullptr) return false;
+				*static_cast<float *>(out) = appearance->*Factor;
+				return true;
+			};
+			property.Set = [](ecs::Store &store, ecs::Entity instance, const void *value) -> bool {
+				const float factor = *static_cast<const float *>(value);
+				if (!std::isfinite(factor) || factor < float(Minimum) || factor > float(Maximum))
+					return false;
+				SurfaceAppearance *appearance = store.GetMutable<SurfaceAppearance>(instance);
+				if (appearance == nullptr) return false;
+				appearance->*Factor = factor;
+				return true;
+			};
+			return property;
+		}
+
 		PropertyDescriptor AutoLodStrategyProperty() {
 			PropertyDescriptor property;
 			property.Name = core::Name("AutoLodStrategy");
@@ -1785,10 +1929,10 @@ namespace engine::scene {
 			property.EnumName = AutoMeshLodStrategyEnum();
 			property.Size = sizeof(core::Name);
 			property.Kind = PropertyKind::Structural;
-			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<AutoMeshLOD>()});
+			property.Reads = &ecs::ComponentSet::Intern({ecs::Components::Of<LODAuto>()});
 			property.Writes = property.Reads;
 			property.Get = [](const ecs::Store &store, ecs::Entity instance, void *out) -> bool {
-				const AutoMeshLOD *lod = store.Get<AutoMeshLOD>(instance);
+				const LODAuto *lod = store.Get<LODAuto>(instance);
 				const size_t ordinal = lod != nullptr && lod->Strategy == LodStrategy::Reduced ? 1 : 0;
 				*static_cast<core::Name *>(out) =
 					ecs::EnumTable::MemberAt(AutoMeshLodStrategyEnum(), ordinal);
@@ -1801,8 +1945,8 @@ namespace engine::scene {
 					)) {
 					return false;
 				}
-				AutoMeshLOD lod;
-				if (const AutoMeshLOD *existing = store.Get<AutoMeshLOD>(instance)) {
+				LODAuto lod;
+				if (const LODAuto *existing = store.Get<LODAuto>(instance)) {
 					lod = *existing;
 				}
 				lod.Strategy = ordinal == 0 ? LodStrategy::Decimated : LodStrategy::Reduced;
@@ -2031,7 +2175,10 @@ namespace engine::scene {
 					 walk = store.ParentOf(walk)) {
 					if ((skeleton = store.Get<Skeleton>(walk)) != nullptr) break;
 				}
-				if (skeleton == nullptr || joint >= skeleton->JointCount) return false;
+				// A detached keypoint is a normal intermediate state while a script
+				// builds a rig. Bound its slot by the shared palette limit until an
+				// ancestor skeleton exists; once parented, use that rig's tighter size.
+				if (skeleton != nullptr ? joint >= skeleton->JointCount : joint >= MAX_JOINTS) return false;
 				RigKeypoint *keypoint = store.GetMutable<RigKeypoint>(instance);
 				if (keypoint == nullptr) return false;
 				keypoint->Joint = static_cast<uint16_t>(joint);
@@ -2460,6 +2607,13 @@ namespace engine::scene {
 			const std::array vectorField3DSet{ecs::Components::Of<VectorField3D>()};
 			const ecs::ClassId vectorField3D =
 				ecs::Classes::Register("VectorField3D", pvInstance, vectorField3DSet);
+
+			// A field holds only the renderer request. The renderer derives every
+			// particle from the authoritative storm copied into its view, so no
+			// device-local particle position can enter an authored world.
+			const std::array gpuParticleField{ecs::Components::Of<GpuParticleField>()};
+			const ecs::ClassId gpuParticleFieldClass =
+				ecs::Classes::Register("GpuParticleField", instance, gpuParticleField);
 
 			const std::array base{
 				ecs::Components::Of<Bounds>(),
@@ -3100,6 +3254,36 @@ namespace engine::scene {
 			// keeps one answer to "what has a pivot".
 			ecs::Classes::Property<&Pivot::Offset>(pvInstance, "PivotOffset");
 
+			ecs::Classes::Property<&GpuParticleField::Enabled>(gpuParticleFieldClass, "Enabled");
+			ecs::Classes::Computed(gpuParticleFieldClass, GpuParticleLayersProperty());
+			ecs::Classes::Property<&GpuParticleField::RequestedCount>(
+				gpuParticleFieldClass, "RequestedCount"
+			);
+			ecs::Classes::Property<&GpuParticleField::Seed>(gpuParticleFieldClass, "Seed");
+			ecs::Classes::Property<&GpuParticleField::CondensationColor>(
+				gpuParticleFieldClass, "CondensationColor"
+			);
+			ecs::Classes::Property<&GpuParticleField::RainColor>(gpuParticleFieldClass, "RainColor");
+			ecs::Classes::Property<&GpuParticleField::DebrisColor>(gpuParticleFieldClass, "DebrisColor");
+			ecs::Classes::ClampedProperty<&GpuParticleField::CondensationAlpha, 0.0f, 1.0f>(
+				gpuParticleFieldClass, "CondensationAlpha"
+			);
+			ecs::Classes::ClampedProperty<&GpuParticleField::RainAlpha, 0.0f, 1.0f>(
+				gpuParticleFieldClass, "RainAlpha"
+			);
+			ecs::Classes::ClampedProperty<&GpuParticleField::DebrisAlpha, 0.0f, 1.0f>(
+				gpuParticleFieldClass, "DebrisAlpha"
+			);
+			ecs::Classes::ClampedProperty<&GpuParticleField::CondensationSize, 0.0f, 64.0f>(
+				gpuParticleFieldClass, "CondensationSize"
+			);
+			ecs::Classes::ClampedProperty<&GpuParticleField::RainSize, 0.0f, 64.0f>(
+				gpuParticleFieldClass, "RainSize"
+			);
+			ecs::Classes::ClampedProperty<&GpuParticleField::DebrisSize, 0.0f, 64.0f>(
+				gpuParticleFieldClass, "DebrisSize"
+			);
+
 			ecs::Classes::Computed(basePart, PartSizeProperty());
 			ecs::Classes::Computed(basePart, CanCollideProperty());
 			ecs::Classes::Property<&Collider::CanQuery>(basePart, "CanQuery");
@@ -3323,32 +3507,68 @@ namespace engine::scene {
 			ecs::Classes::Property<&SurfaceAppearance::OcclusionMap>(meshPart, "OcclusionMap");
 			ecs::Classes::Property<&SurfaceAppearance::HeightMap>(meshPart, "HeightMap");
 			ecs::Classes::Property<&SurfaceAppearance::EmissiveMap>(meshPart, "EmissiveMap");
-			ecs::Classes::Computed(meshPart, LodMeshProperty<CustomMeshLOD, 1>("Lod1MeshId"));
-			ecs::Classes::Computed(meshPart, LodMeshProperty<CustomMeshLOD, 2>("Lod2MeshId"));
-			ecs::Classes::Computed(meshPart, LodMeshProperty<CustomMeshLOD, 3>("Lod3MeshId"));
-			ecs::Classes::Computed(meshPart, LodRatioProperty<AutoMeshLOD, 1>("Lod1Ratio"));
-			ecs::Classes::Computed(meshPart, LodRatioProperty<AutoMeshLOD, 2>("Lod2Ratio"));
-			ecs::Classes::Computed(meshPart, LodRatioProperty<AutoMeshLOD, 3>("Lod3Ratio"));
-			ecs::Classes::Computed(meshPart, LodTargetQuadAreaProperty<AutoMeshLOD>("LodTargetQuadArea"));
+			ecs::Classes::Property<&SurfaceAppearance::PackedPbrMap>(meshPart, "PackedPbrMap");
+			ecs::Classes::Computed(
+				meshPart, BoundedSurfaceFactorProperty<&SurfaceAppearance::SpecularFactor>("SpecularFactor")
+			);
+			ecs::Classes::Computed(
+				meshPart,
+				BoundedSurfaceFactorProperty<&SurfaceAppearance::TransmissionFactor>("TransmissionFactor")
+			);
+			ecs::Classes::Computed(
+				meshPart,
+				BoundedSurfaceFactorProperty<&SurfaceAppearance::IndexOfRefraction, 1, 3>("IndexOfRefraction")
+			);
+			ecs::Classes::Computed(
+				meshPart, BoundedSurfaceFactorProperty<&SurfaceAppearance::Thickness, 0, 1000>("Thickness")
+			);
+			ecs::Classes::Computed(
+				meshPart,
+				PackedPbrChannelProperty<&SurfaceAppearance::RoughnessChannel>("PackedRoughnessChannel")
+			);
+			ecs::Classes::Computed(
+				meshPart,
+				PackedPbrChannelProperty<&SurfaceAppearance::OcclusionChannel>("PackedOcclusionChannel")
+			);
+			ecs::Classes::Computed(
+				meshPart, PackedPbrChannelProperty<&SurfaceAppearance::HeightChannel>("PackedHeightChannel")
+			);
+			ecs::Classes::Computed(
+				meshPart,
+				PackedPbrChannelProperty<&SurfaceAppearance::MetalnessChannel>("PackedMetalnessChannel")
+			);
+			ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 1>("Lod1MeshId"));
+			ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 2>("Lod2MeshId"));
+			ecs::Classes::Computed(meshPart, LodMeshProperty<LODCustom, 3>("Lod3MeshId"));
+			ecs::Classes::Computed(meshPart, LodRatioProperty<LODAuto, 1>("Lod1Ratio"));
+			ecs::Classes::Computed(meshPart, LodRatioProperty<LODAuto, 2>("Lod2Ratio"));
+			ecs::Classes::Computed(meshPart, LodRatioProperty<LODAuto, 3>("Lod3Ratio"));
+			ecs::Classes::Computed(meshPart, LodTargetQuadAreaProperty<LODAuto>("LodTargetQuadArea"));
+			ecs::Classes::Computed(meshPart, LodBillboardProperty<LODCustom>("LodBillboardTexture"));
+			ecs::Classes::Computed(meshPart, LodDistanceProperty<1>("Lod1Distance"));
+			ecs::Classes::Computed(meshPart, LodDistanceProperty<2>("Lod2Distance"));
+			ecs::Classes::Computed(meshPart, LodDistanceProperty<3>("Lod3Distance"));
 
 			for (const auto &property : {
-					 LodMeshProperty<AutoMeshLOD, 1>("AutoLod1MeshId"),
-					 LodMeshProperty<AutoMeshLOD, 2>("AutoLod2MeshId"),
-					 LodMeshProperty<AutoMeshLOD, 3>("AutoLod3MeshId"),
-					 LodRatioProperty<AutoMeshLOD, 1>("AutoLod1Ratio"),
-					 LodRatioProperty<AutoMeshLOD, 2>("AutoLod2Ratio"),
-					 LodRatioProperty<AutoMeshLOD, 3>("AutoLod3Ratio"),
-					 LodTargetQuadAreaProperty<AutoMeshLOD>("AutoLodTargetQuadArea"),
-					 LodLevelsProperty<AutoMeshLOD>("AutoLodLevels"),
+					 LodMeshProperty<LODAuto, 1>("AutoLod1MeshId"),
+					 LodMeshProperty<LODAuto, 2>("AutoLod2MeshId"),
+					 LodMeshProperty<LODAuto, 3>("AutoLod3MeshId"),
+					 LodRatioProperty<LODAuto, 1>("AutoLod1Ratio"),
+					 LodRatioProperty<LODAuto, 2>("AutoLod2Ratio"),
+					 LodRatioProperty<LODAuto, 3>("AutoLod3Ratio"),
+					 LodTargetQuadAreaProperty<LODAuto>("AutoLodTargetQuadArea"),
+					 LodBillboardProperty<LODAuto>("AutoLodBillboardTexture"),
+					 LodLevelsProperty<LODAuto>("AutoLodLevels"),
 					 AutoLodStrategyProperty(),
-					 LodMeshProperty<CustomMeshLOD, 1>("CustomLod1MeshId"),
-					 LodMeshProperty<CustomMeshLOD, 2>("CustomLod2MeshId"),
-					 LodMeshProperty<CustomMeshLOD, 3>("CustomLod3MeshId"),
-					 LodRatioProperty<CustomMeshLOD, 1>("CustomLod1Ratio"),
-					 LodRatioProperty<CustomMeshLOD, 2>("CustomLod2Ratio"),
-					 LodRatioProperty<CustomMeshLOD, 3>("CustomLod3Ratio"),
-					 LodTargetQuadAreaProperty<CustomMeshLOD>("CustomLodTargetQuadArea"),
-					 LodLevelsProperty<CustomMeshLOD>("CustomLodLevels"),
+					 LodMeshProperty<LODCustom, 1>("CustomLod1MeshId"),
+					 LodMeshProperty<LODCustom, 2>("CustomLod2MeshId"),
+					 LodMeshProperty<LODCustom, 3>("CustomLod3MeshId"),
+					 LodRatioProperty<LODCustom, 1>("CustomLod1Ratio"),
+					 LodRatioProperty<LODCustom, 2>("CustomLod2Ratio"),
+					 LodRatioProperty<LODCustom, 3>("CustomLod3Ratio"),
+					 LodTargetQuadAreaProperty<LODCustom>("CustomLodTargetQuadArea"),
+					 LodBillboardProperty<LODCustom>("CustomLodBillboardTexture"),
+					 LodLevelsProperty<LODCustom>("CustomLodLevels"),
 				 }) {
 				ecs::Classes::Computed(meshPart, property);
 			}
@@ -3422,7 +3642,7 @@ namespace engine::scene {
 			ecs::Classes::Property<&Portal::Enabled>(portalClass, "Enabled");
 			ecs::Classes::Property<&Portal::Bidirectional>(portalClass, "Bidirectional");
 
-			// The sound's six. All plain fields, which is unusual enough here
+			// The sound's seven. All plain fields, which is unusual enough here
 			// to be worth saying: nothing about a sound is a doubled
 			// half-extent or a quaternion in degrees, so there is no conversion
 			// to write and no place for one to be wrong in one direction.
@@ -3439,6 +3659,7 @@ namespace engine::scene {
 			// once at the device. Refusing at 1 would make a sound authored
 			// quiet unable to be brought up.
 			ecs::Classes::ClampedProperty<&Sound::Volume, 0.0f, 10.0f>(soundClass, "Volume");
+			ecs::Classes::ClampedProperty<&Sound::Pan, -1.0f, 1.0f>(soundClass, "Pan");
 			ecs::Classes::Property<&Sound::Looped>(soundClass, "Looped");
 			ecs::Classes::Property<&Sound::Playing>(soundClass, "Playing");
 			ecs::Classes::Property<&Sound::RollOffMinDistance>(soundClass, "RollOffMinDistance");
@@ -3476,6 +3697,7 @@ namespace engine::scene {
 			// angle or face that it cannot use.
 			ecs::Classes::Property<&Light::Colour>(lightClass, "Color");
 			ecs::Classes::Property<&Light::Enabled>(lightClass, "Enabled");
+			ecs::Classes::Property<&Light::Shadows>(lightClass, "Shadows");
 
 			// Clamped, because all three are quantities with an obvious nearest
 			// meaning outside their range - `ClampedProperty`'s own argument. The

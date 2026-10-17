@@ -17,13 +17,6 @@ namespace engine::examples {
 			return kind == DemoKind::Script ? path.extension() == ".luau" : path.extension() == ".aworld";
 		}
 
-		bool IsSupported(DemoKind kind, const std::filesystem::path &path) {
-			if (kind == DemoKind::World) {
-				return path.extension() == ".aworld";
-			}
-			return path.extension() == ".luau" || path.extension() == ".js";
-		}
-
 		bool IsLeaf(std::string_view name) {
 			if (name.empty()) {
 				return false;
@@ -45,7 +38,7 @@ namespace engine::examples {
 	}
 
 	std::filesystem::path DemosLoader::Resolve(DemoKind kind, std::string_view name) const {
-		if (!IsLeaf(name) || !IsSupported(kind, std::filesystem::path(name))) {
+		if (!IsLeaf(name) || !IsListed(kind, std::filesystem::path(name))) {
 			return {};
 		}
 

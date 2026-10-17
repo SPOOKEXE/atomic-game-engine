@@ -4,6 +4,7 @@
 
 #include <engine/assets/AssetKind.hpp>
 #include <engine/render/Renderer.hpp>
+#include <engine/render/TextureTable.hpp>
 
 #include <algorithm>
 #include <array>
@@ -43,9 +44,11 @@ namespace studio {
 		}
 
 		uint64_t gpu = 0;
+		const uint32_t residentBytesPerPixel =
+			engine::render::TextureUploadBytesPerPixel(texture.Format).value_or(0);
 		for (uint32_t level = 0; level < texture.LevelCount(); level++) {
 			gpu += static_cast<uint64_t>(engine::assets::MipExtent(texture.Width, level)) *
-				   engine::assets::MipExtent(texture.Height, level) * 4;
+				   engine::assets::MipExtent(texture.Height, level) * residentBytesPerPixel;
 		}
 		return {.DecodedBytes = decoded, .CpuResidentBytes = 0, .GpuResidentBytes = gpu};
 	}

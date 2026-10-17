@@ -262,3 +262,60 @@ TEST_CASE(
 		AudioObservationStatus::StaleMixReport
 	);
 }
+
+TEST_CASE(
+	"an internal observation preserves refused seeks and other command outcomes",
+	"[audio][observation][refused_capture]"
+) {
+	using engine::audio::PlaybackStatus;
+	SpatialRig rig;
+	Command sound = Act(CommandKind::SetSound, rig.Player);
+	sound.Sound = Constant(0.5f);
+	sound.PlaybackGeneration = 2;
+	rig.Post(sound);
+	rig.Mixer.ApplyPending();
+	Command command = Act(CommandKind::Play, rig.Player);
+	command.PlaybackGeneration = 2;
+	rig.Post(command);
+	command.Kind = CommandKind::Seek;
+	command.AtSample = 3;
+	command.CursorFrames = -1.0;
+	rig.Post(command);
+	command.AtSample = 4;
+	command.CursorFrames = 2.0;
+	command.PlaybackGeneration = 1;
+	rig.Post(command);
+	command.Kind = CommandKind::SetGain;
+	command.AtSample = 5;
+	command.Value = 0.0f;
+	rig.Post(command);
+	command.Kind = CommandKind::Stop;
+	command.AtSample = 6;
+	command.PlaybackGeneration = 2;
+	rig.Post(command);
+	const auto report = rig.Mixer.Render(rig.Output);
+	const auto captured = CaptureAudioObservation(rig.Mixer, rig.Output, report, rig.Bindings());
+	REQUIRE(captured.Status == AudioObservationStatus::Ready);
+	REQUIRE(captured.Value.has_value());
+	REQUIRE(captured.Value->Events.size() == 5);
+	CHECK(captured.Value->Events[0].Status == PlaybackStatus::Applied);
+	CHECK(captured.Value->Events[0].RefusalReason.empty());
+	CHECK(captured.Value->Events[1].Kind == "seek");
+	CHECK(captured.Value->Events[1].Status == PlaybackStatus::InvalidCursor);
+	CHECK(captured.Value->Events[1].RefusalReason == "invalid_cursor");
+	CHECK(captured.Value->Events[1].AppliedSample == 3);
+	CHECK(captured.Value->Events[2].Kind == "seek");
+	CHECK(captured.Value->Events[2].Status == PlaybackStatus::StaleGeneration);
+	CHECK(captured.Value->Events[2].RefusalReason == "stale_generation");
+	CHECK(captured.Value->Events[3].Kind == "set_gain");
+	CHECK(captured.Value->Events[3].Status == PlaybackStatus::StaleGeneration);
+	CHECK(captured.Value->Events[4].Status == PlaybackStatus::Applied);
+	CHECK(captured.Value->Events[4].RefusalReason.empty());
+	CHECK(rig.Mixer.Graph().Find(rig.Player)->Cursor == 6.0);
+	CHECK(rig.Mixer.Graph().Find(rig.Player)->Gain == 1.0f);
+	CHECK_FALSE(rig.Mixer.Graph().Find(rig.Player)->Playing);
+	CHECK(rig.Mixer.LastAppliedCommands()[1].Status == PlaybackStatus::InvalidCursor);
+	CHECK(rig.Mixer.LastAppliedCommands()[2].Status == PlaybackStatus::StaleGeneration);
+	for (const auto &event : captured.Value->Events)
+		CHECK(event.RefusalReason.size() <= 16);
+}

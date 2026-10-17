@@ -70,9 +70,15 @@ TEST_CASE("creatability does not change virtual class ancestry", "[ecs]") {
 	const ClassId concrete = Classes::Register("test.VirtualLeaf", virtualBase, {});
 
 	Classes::SetCreatable(virtualBase, false);
+	Classes::SetKind(virtualBase, engine::ecs::ClassKind::Abstract);
+	Classes::SetStudioVisible(virtualBase, false);
 
 	CHECK_FALSE(Classes::Describe(virtualBase).Creatable);
+	CHECK_FALSE(Classes::Describe(virtualBase).StudioVisible);
+	CHECK(Classes::Describe(virtualBase).Kind == engine::ecs::ClassKind::Abstract);
 	CHECK(Classes::Describe(concrete).Creatable);
+	CHECK(Classes::Describe(concrete).StudioVisible);
+	CHECK(Classes::Describe(concrete).Kind == engine::ecs::ClassKind::Concrete);
 	CHECK(Classes::IsA(concrete, virtualBase));
 	CHECK(Classes::IsA(concrete, tree.Instance));
 }

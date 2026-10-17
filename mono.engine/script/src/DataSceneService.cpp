@@ -943,6 +943,7 @@ namespace engine::script {
 						 {"maximum_same_frame_camera_views",
 						  Number(capabilities.MaximumSameFrameCameraViews)},
 						 {"maximum_camera_id_bytes", Number(capabilities.MaximumCameraIdBytes)},
+						 {"maximum_local_light_ids", Number(capabilities.MaximumLocalLightIds)},
 					 })},
 					{"reason", String(capabilities.Detail)},
 				})
@@ -1023,6 +1024,29 @@ namespace engine::script {
 					return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
 				request.Channels.push_back(channel.Text);
 			}
+			if (const ScriptValue *lightIds = Field(value, "local_light_ids"); lightIds != nullptr) {
+				const uint32_t maximum = bridge->Capabilities().MaximumLocalLightIds;
+				if (lightIds->Tag != ValueTag::Array || lightIds->Items.size() > maximum)
+					return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
+				request.LocalLightIds.reserve(lightIds->Items.size());
+				for (const ScriptValue &lightId : lightIds->Items) {
+					if (lightId.Tag != ValueTag::String || lightId.Text.empty() ||
+						lightId.Text.size() > MAX_DATA_SCENE_ID_BYTES ||
+						lightId.Text.find('\0') != std::string::npos || !DataSceneUtf8(lightId.Text) ||
+						std::find(request.LocalLightIds.begin(), request.LocalLightIds.end(), lightId.Text) !=
+							request.LocalLightIds.end())
+						return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
+					request.LocalLightIds.push_back(lightId.Text);
+				}
+			}
+			const bool localLightChannel =
+				std::find(request.Channels.begin(), request.Channels.end(), "local_light_contribution") !=
+					request.Channels.end() ||
+				std::find(
+					request.Channels.begin(), request.Channels.end(), "local_light_shadow_visibility"
+				) != request.Channels.end();
+			if (localLightChannel != !request.LocalLightIds.empty())
+				return {"invalid_argument", Map({{"status", String("invalid_capture_request")}})};
 			uint64_t ticket = 0;
 			std::string detail;
 			if (!bridge->Queue(worldName, request, ticket, detail))
@@ -1191,6 +1215,7 @@ namespace engine::script {
 				{"NoiseMode", String("none")},
 				{"NoiseSeed", Number(0)},
 				{"NoiseSigma", Number(0)},
+				{"LocalLightIds", Array({})},
 			});
 		}
 
@@ -1225,7 +1250,8 @@ namespace engine::script {
 					 "CoordinateSpace",
 					 "NoiseMode",
 					 "NoiseSeed",
-					 "NoiseSigma"}
+					 "NoiseSigma",
+					 "LocalLightIds"}
 				))
 				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
 
@@ -1250,6 +1276,9 @@ namespace engine::script {
 			const ScriptValue *exactMasks = Field(options, "IncludeExactMasks");
 			const ScriptValue *noiseSeed = Field(options, "NoiseSeed");
 			const ScriptValue *noiseSigma = Field(options, "NoiseSigma");
+			const ScriptValue *localLightIds = Field(options, "LocalLightIds");
+			const bool emptyLocalLightMap = localLightIds != nullptr && localLightIds->Tag == ValueTag::Map &&
+											localLightIds->Entries.empty();
 			uint64_t parsedNoiseSeed = 0;
 			if (channels == nullptr || channels->Tag != ValueTag::Array || channels->Items.empty() ||
 				channels->Items.size() > 12 || slot == nullptr || slot->Tag != ValueTag::Number ||
@@ -1265,6 +1294,9 @@ namespace engine::script {
 				noiseSigma->Number < 0.0 || noiseSigma->Number > 64.0 ||
 				(noiseMode == "none" && (noiseSeed->Number != 0.0 || noiseSigma->Number != 0.0)) ||
 				(noiseMode != "none" && noiseMode != "gaussian"))
+				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
+			if (localLightIds == nullptr || (!emptyLocalLightMap && localLightIds->Tag != ValueTag::Array) ||
+				localLightIds->Items.size() > (bridge ? bridge->Capabilities().MaximumLocalLightIds : 0))
 				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
 
 			if (exactMasks->Boolean)
@@ -1303,6 +1335,27 @@ namespace engine::script {
 			}
 			if (hasSecondSurfaceDepth != hasSecondSurfaceValidity)
 				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
+			std::vector<ScriptValue> copiedLightIds;
+			copiedLightIds.reserve(localLightIds->Items.size());
+			for (const ScriptValue &lightId : localLightIds->Items) {
+				if (lightId.Tag != ValueTag::String || lightId.Text.empty() ||
+					lightId.Text.size() > MAX_DATA_SCENE_ID_BYTES ||
+					lightId.Text.find('\0') != std::string::npos || !DataSceneUtf8(lightId.Text) ||
+					std::any_of(
+						copiedLightIds.begin(), copiedLightIds.end(), [&](const ScriptValue &existing) {
+							return existing.Text == lightId.Text;
+						}
+					))
+					return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
+				copiedLightIds.push_back(String(lightId.Text));
+			}
+			const bool localLightChannel =
+				std::any_of(copiedChannels.begin(), copiedChannels.end(), [](const ScriptValue &channel) {
+					return channel.Text == "local_light_contribution" ||
+						   channel.Text == "local_light_shadow_visibility";
+				});
+			if (localLightChannel != !copiedLightIds.empty())
+				return {"invalid_argument", Map({{"status", String("invalid_data_scene_options")}})};
 			if (noiseMode == "gaussian" &&
 				std::none_of(copiedChannels.begin(), copiedChannels.end(), [](const ScriptValue &channel) {
 					return channel.Text == "rgb_linear_hdr";
@@ -1324,6 +1377,7 @@ namespace engine::script {
 				{"camera_id", String(cameraId)},
 				{"view_slot", Number(slot->Number)},
 				{"channels", Array(std::move(copiedChannels))},
+				{"local_light_ids", Array(std::move(copiedLightIds))},
 				{"temporal_history", String(history)},
 				{"storage_profile", String(storage)},
 				{"noise_mode", String(noiseMode)},
@@ -1366,6 +1420,20 @@ namespace engine::script {
 			planes.reserve(poll.Planes.size());
 			for (const DataCaptureBridgePlane &plane : poll.Planes) {
 				ScriptValue noise;
+				ScriptValue packed;
+				if (plane.Packed) {
+					std::vector<ScriptValue> components;
+					components.reserve(plane.Packed->Components.size());
+					for (const DataCaptureBridgePackedComponent &component : plane.Packed->Components)
+						components.push_back(Map({
+							{"source_channel", String(component.SourceChannel)},
+							{"source_component", Number(component.SourceComponent)},
+						}));
+					packed = Map({
+						{"schema_version", String("data-capture-packed-rgba32f/v1")},
+						{"components", Array(std::move(components))},
+					});
+				}
 				if (plane.Noise) {
 					const DataCaptureBridgeNoise &value = *plane.Noise;
 					noise = Map({
@@ -1387,6 +1455,7 @@ namespace engine::script {
 				}
 				planes.push_back(Map({
 					{"channel", String(plane.Channel)},
+					{"light_id", plane.LightId.empty() ? ScriptValue{} : String(plane.LightId)},
 					{"status", String(plane.Status)},
 					{"resource", String(plane.Resource)},
 					{"source_resource", String(plane.SourceResource)},
@@ -1417,6 +1486,8 @@ namespace engine::script {
 					{"packing", String(plane.Packing)},
 					{"provenance", String(plane.Provenance)},
 					{"noise", std::move(noise)},
+					{"packed", std::move(packed)},
+					{"resampling", plane.Resampling.empty() ? ScriptValue{} : String(plane.Resampling)},
 				}));
 			}
 			const DataCaptureBridgeProfile &profile = poll.Profile;
@@ -1869,6 +1940,10 @@ namespace engine::script {
 						{"base_color", Colour(appearance->Colour)},
 						{"emissive_tint", Colour(appearance->EmissiveTint)},
 						{"emissive_strength", Number(appearance->EmissiveStrength)},
+						{"specular_factor", Number(appearance->SpecularFactor)},
+						{"transmission_factor", Number(appearance->TransmissionFactor)},
+						{"index_of_refraction", Number(appearance->IndexOfRefraction)},
+						{"thickness_metres", Number(appearance->Thickness)},
 						{"alpha_cutoff", Number(appearance->AlphaCutoff)},
 					})
 				);

@@ -49,7 +49,11 @@ namespace engine::scene {
 	}
 
 	bool IsTransparent(const DrawInstance &instance) {
-		return instance.Transparency > TRANSPARENCY_EPSILON;
+		// Transmission is a surface property rather than coverage, but it still
+		// needs the sorted tail: the refractive shader samples the completed opaque
+		// image, which cannot include this surface itself.
+		return instance.Transparency > TRANSPARENCY_EPSILON ||
+			   instance.TransmissionFactor > TRANSPARENCY_EPSILON;
 	}
 
 	uint64_t MixSignature(uint64_t hash, uint64_t word) {
@@ -59,6 +63,12 @@ namespace engine::scene {
 		// surface, on one frame - and an unfamiliar mixer would invite somebody
 		// to improve it.
 		return hash ^ (word + 0x9E3779B97F4A7C15ull + (hash << 6) + (hash >> 2));
+	}
+
+	uint64_t PortalVariant(uint64_t sourceVariant, uint64_t pane) {
+		if (sourceVariant == 0) return pane;
+		const uint64_t variant = MixSignature(pane, sourceVariant);
+		return variant != 0 ? variant : 1;
 	}
 
 	namespace {
@@ -115,7 +125,13 @@ namespace engine::scene {
 			// `Surface` is signed and -1 means "no surface", so it is widened
 			// through `uint8_t` exactly as it was before: sign-extending it
 			// would fold in twenty-four bits that say nothing.
-			a = MixSignature(a, Pair(static_cast<uint8_t>(instance.Surface), instance.CastShadow ? 1u : 0u));
+			a = MixSignature(
+				a,
+				Pair(
+					static_cast<uint8_t>(instance.Surface),
+					(instance.CastShadow ? 1u : 0u) | (instance.SurfaceIsPortal ? 2u : 0u)
+				)
+			);
 
 			// The three fields v0.9 added. Folded in for the reason every other
 			// field is: this signature answers "would drawing this again produce
@@ -139,7 +155,18 @@ namespace engine::scene {
 			a = MixSignature(a, Pair(instance.OcclusionMap.Id(), instance.HeightMap.Id()));
 			b = MixSignature(b, Pair(instance.EmissiveMap.Id(), instance.Shader.Id()));
 			c = MixSignature(c, Pair(instance.MetalnessMap.Id(), BitsOf(instance.EmissiveStrength)));
+			d = MixSignature(d, Pair(BitsOf(instance.SpecularFactor), BitsOf(instance.TransmissionFactor)));
+			d = MixSignature(d, Pair(BitsOf(instance.IndexOfRefraction), BitsOf(instance.Thickness)));
 			d = MixSignature(d, Pair(instance.SkinFirst, instance.SkinCount));
+			for (size_t level = 0; level < LOD_LEVELS - 1; ++level) {
+				a = MixSignature(a, Pair(instance.LodMeshes[level].Id(), BitsOf(instance.LodRatios[level])));
+				b = MixSignature(b, Pair(BitsOf(instance.LodMinimumDistances[level]), level));
+			}
+			a = MixSignature(a, Pair(instance.LodBillboard.Id(), 0u));
+			c = MixSignature(
+				c, Pair(BitsOf(instance.LodTargetQuadArea), static_cast<uint32_t>(instance.LodStrategyMode))
+			);
+			d = MixSignature(d, Pair(instance.LodLevels, 0u));
 			d = MixSignature(
 				d,
 				Pair(
@@ -164,6 +191,11 @@ namespace engine::scene {
 			// is what the skip wants.
 			d = MixSignature(d, Pair(BitsOf(instance.SeamNormal.X), BitsOf(instance.SeamNormal.Y)));
 			a = MixSignature(a, Pair(BitsOf(instance.SeamNormal.Z), BitsOf(instance.SeamOffset)));
+			b = MixSignature(b, Pair(BitsOf(instance.SeamFirst.X), BitsOf(instance.SeamFirst.Y)));
+			c = MixSignature(c, Pair(BitsOf(instance.SeamFirst.Z), BitsOf(instance.SeamSecond.X)));
+			d = MixSignature(d, Pair(BitsOf(instance.SeamSecond.Y), BitsOf(instance.SeamSecond.Z)));
+			a = MixSignature(a, Pair(BitsOf(instance.SeamCentre.X), BitsOf(instance.SeamCentre.Y)));
+			b = MixSignature(b, Pair(BitsOf(instance.SeamCentre.Z), instance.SeamMask));
 			b = MixSignature(b, Pair(BitsOf(instance.SeamLight.X), BitsOf(instance.SeamLight.Y)));
 			c = MixSignature(c, Pair(BitsOf(instance.SeamLight.Z), 0u));
 		}

@@ -19,6 +19,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <ranges>
 #include <string>
 #include <vector>
 
@@ -216,6 +218,44 @@ TEST_CASE("every attribute type a world may hold survives a save", "[ecs][attrib
 	}
 }
 
+TEST_CASE("attribute snapshots have one order for every insertion order", "[ecs][attributes]") {
+	RegisterAttributeComponents();
+	Store forward("attribute-order");
+	Store reverse("attribute-order");
+	std::array<Entity, 3> first{};
+	std::array<Entity, 3> second{};
+	for (size_t index = 0; index < first.size(); index++) {
+		first[index] = forward.Create();
+		second[index] = reverse.Create();
+		REQUIRE(first[index] == second[index]);
+	}
+	AttributeValue value;
+	value.Type = PropertyType::Int32;
+	for (size_t index = 0; index < first.size(); index++) {
+		value.Int32 = static_cast<int32_t>(index + 1);
+		REQUIRE(SetAttribute(forward, first[index], Name("Alpha"), value));
+		REQUIRE(SetAttribute(forward, first[index], Name("Beta"), value));
+	}
+	for (size_t offset = first.size(); offset > 0; offset--) {
+		const size_t index = offset - 1;
+		value.Int32 = static_cast<int32_t>(index + 1);
+		REQUIRE(SetAttribute(reverse, second[index], Name("Beta"), value));
+		REQUIRE(SetAttribute(reverse, second[index], Name("Alpha"), value));
+	}
+	ByteWriter firstImage;
+	ByteWriter secondImage;
+	REQUIRE(forward.Save(firstImage));
+	REQUIRE(reverse.Save(secondImage));
+	CHECK(std::ranges::equal(firstImage.Bytes(), secondImage.Bytes()));
+
+	Store restored("attribute-order");
+	ByteReader reader(firstImage.Bytes());
+	REQUIRE(restored.Load(reader));
+	ByteWriter thirdImage;
+	REQUIRE(restored.Save(thirdImage));
+	CHECK(std::ranges::equal(firstImage.Bytes(), thirdImage.Bytes()));
+}
+
 TEST_CASE("every attribute type survives being read straight back", "[ecs][attributes]") {
 	// The half above without the file in the way, so that a failure says which
 	// of the two the fault is in.
@@ -351,6 +391,30 @@ TEST_CASE("clearing drops every attribute and says how many", "[ecs][attributes]
 	CHECK(ClearAttributes(store, instance) == 0);
 }
 
+TEST_CASE("an attribute revision advances for each effective table mutation", "[ecs][attributes]") {
+	RegisterAttributeComponents();
+
+	Store store("attribute_revisions");
+	const Entity instance = store.Create();
+	const Name key("Value");
+	AttributeValue value;
+	value.Type = PropertyType::Int32;
+	value.Int32 = 7;
+
+	CHECK(AttributeRevision(store, instance, key) == 0);
+	REQUIRE(SetAttribute(store, instance, key, value));
+	const uint64_t written = AttributeRevision(store, instance, key);
+	REQUIRE(written != 0);
+
+	value.Type = PropertyType::Opaque;
+	REQUIRE(SetAttribute(store, instance, key, value));
+	const uint64_t removed = AttributeRevision(store, instance, key);
+	CHECK(removed > written);
+
+	REQUIRE(SetAttribute(store, instance, key, value));
+	CHECK(AttributeRevision(store, instance, key) == removed);
+}
+
 TEST_CASE("a dead instance takes neither a read nor a write", "[ecs][attributes]") {
 	RegisterAttributeComponents();
 
@@ -445,4 +509,26 @@ TEST_CASE("a recycled entity does not inherit the dead one's attributes", "[ecs]
 	// 32-bit key cannot tell apart.
 	AttributeValue read;
 	CHECK_FALSE(GetAttribute(store, second, Name("Carried"), read));
+}
+
+TEST_CASE("attribute selection copies only visible authority owners", "[ecs][attributes]") {
+	RegisterAttributeComponents();
+	Store store("attribute-selection");
+	const Entity visible = store.Create();
+	const Entity hidden = store.Create();
+	const Entity predicted = store.CreatePredicted();
+	const Entity dead = store.Create();
+	AttributeValue score;
+	score.Type = PropertyType::Int32;
+	score.Int32 = 7;
+	for (const Entity entity : {visible, hidden, predicted, dead}) {
+		REQUIRE(SetAttribute(store, entity, Name("Score"), score));
+	}
+	store.Destroy(dead);
+	const auto selected = SelectAttributes(store, std::array{visible, visible, predicted, dead});
+	REQUIRE(selected.Entities.size() == 1);
+	CHECK(selected.Entities.at(static_cast<uint32_t>(visible.Id)).at(Name("Score").Id()).Int32 == 7);
+	CHECK(selected.Revisions.empty());
+	CHECK(AttributeRevision(store, visible, Name("Score")) > 0);
+	CHECK(AttributeNames(store, hidden) == std::vector<Name>{Name("Score")});
 }

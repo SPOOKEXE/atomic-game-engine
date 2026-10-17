@@ -46,10 +46,21 @@ namespace {
 		return event;
 	}
 
-	SDL_Event ButtonEvent(uint8_t button, bool down) {
+	SDL_Event EditingEvent(const char *text, int32_t start, int32_t length) {
+		SDL_Event event{};
+		event.type = SDL_EVENT_TEXT_EDITING;
+		event.edit.text = text;
+		event.edit.start = start;
+		event.edit.length = length;
+		return event;
+	}
+
+	SDL_Event ButtonEvent(uint8_t button, bool down, float x = 0.0f, float y = 0.0f) {
 		SDL_Event event{};
 		event.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
 		event.button.button = button;
+		event.button.x = x;
+		event.button.y = y;
 		return event;
 	}
 
@@ -218,6 +229,187 @@ TEST_CASE("the pointer accumulates within a frame and starts each one at zero", 
 	CHECK_FALSE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_X1, true)));
 }
 
+TEST_CASE("presentation retains ordered fast clicks across update frames", "[input][presentation]") {
+	Translator translator;
+	translator.EnablePresentationInput();
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, true, 10.0f, 20.0f)));
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, false, 80.0f, 90.0f)));
+	CHECK_FALSE(translator.State().IsButtonDown(MouseButton::Left));
+
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, true, 30.0f, 40.0f)));
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, false, 30.0f, 40.0f)));
+	const auto &pending = translator.PendingPresentation();
+	REQUIRE(pending.PrimarySamples.size() == 4);
+	CHECK(pending.PrimarySamples[0].Down);
+	CHECK(pending.PrimarySamples[0].Position.X == 10.0f);
+	CHECK_FALSE(pending.PrimarySamples[1].Down);
+	CHECK(pending.PrimarySamples[1].Position.X == 80.0f);
+	CHECK(pending.PrimarySamples[2].Down);
+	CHECK_FALSE(pending.PrimarySamples[3].Down);
+
+	translator.ConsumePresentation();
+	CHECK(translator.PendingPresentation().PrimarySamples.empty());
+	translator.BeginFrame();
+	CHECK(translator.PendingPresentation().PrimarySamples.empty());
+}
+
+TEST_CASE("presentation keeps held motion between press and release", "[input][presentation]") {
+	Translator translator;
+	translator.EnablePresentationInput();
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, true, 10.0f, 20.0f)));
+	REQUIRE(translator.HandleEvent(MotionEvent(40.0f, 50.0f, 30.0f, 30.0f)));
+	REQUIRE(translator.HandleEvent(MotionEvent(60.0f, 70.0f, 20.0f, 20.0f)));
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, false, 80.0f, 90.0f)));
+	const auto &samples = translator.PendingPresentation().PrimarySamples;
+	REQUIRE(samples.size() == 3);
+	CHECK(samples[0].Down);
+	CHECK_FALSE(samples[0].Motion);
+	CHECK(samples[0].Position.X == 10.0f);
+	CHECK(samples[1].Down);
+	CHECK(samples[1].Motion);
+	CHECK(samples[1].Position.X == 60.0f);
+	CHECK_FALSE(samples[2].Down);
+	CHECK(samples[2].Position.X == 80.0f);
+}
+
+TEST_CASE("presentation retains text key presses and wheel until consumed", "[input][presentation]") {
+	Translator translator;
+	translator.EnablePresentationInput();
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_BACKSPACE, true)));
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_BACKSPACE, false)));
+	REQUIRE(translator.HandleEvent(TextEvent("A")));
+	REQUIRE(translator.HandleEvent(WheelEvent(1.0f)));
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(TextEvent("\xCE\xA9")));
+	REQUIRE(translator.HandleEvent(WheelEvent(2.0f)));
+
+	CHECK_FALSE(translator.State().WasKeyPressed(KeyCode::Backspace));
+	REQUIRE(translator.PendingPresentation().KeyPresses.size() == 1);
+	CHECK(translator.PendingPresentation().KeyPresses[0] == KeyCode::Backspace);
+	const auto &edits = translator.PendingPresentation().Edits;
+	REQUIRE(edits.size() == 3);
+	CHECK(edits[0].Kind == engine::input::PresentationEditKind::Backspace);
+	CHECK(edits[1].Text == "A");
+	CHECK(edits[2].Text == "\xCE\xA9");
+	CHECK(translator.PendingPresentation().WheelDelta == 3.0f);
+
+	translator.ConsumePresentation();
+	CHECK(translator.PendingPresentation().KeyPresses.empty());
+	CHECK(translator.PendingPresentation().Edits.empty());
+	CHECK(translator.PendingPresentation().WheelDelta == 0.0f);
+}
+
+TEST_CASE("presentation retains a controller tap until routed", "[input][presentation]") {
+	Translator translator;
+	translator.EnablePresentationInput();
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(ControllerAdded(41, true)));
+	REQUIRE(translator.HandleEvent(GamepadButton(41, SDL_GAMEPAD_BUTTON_SOUTH, true)));
+	REQUIRE(translator.HandleEvent(GamepadButton(41, SDL_GAMEPAD_BUTTON_SOUTH, false)));
+	translator.BeginFrame();
+	CHECK_FALSE(translator.Controllers().Slots[0].WasPressed(engine::scene::ControllerButton::A));
+	CHECK(translator.ControllersForPresentation().Slots[0].WasPressed(engine::scene::ControllerButton::A));
+	translator.ConsumePresentation();
+	CHECK_FALSE(
+		translator.ControllersForPresentation().Slots[0].WasPressed(engine::scene::ControllerButton::A)
+	);
+}
+
+TEST_CASE("focus loss cancels a held presentation press", "[input][presentation]") {
+	Translator translator;
+	translator.EnablePresentationInput();
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, true, 5.0f, 7.0f)));
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(WindowEvent(false)));
+	translator.ReleaseAll();
+	const auto &pending = translator.PendingPresentation();
+	REQUIRE(pending.PrimarySamples.size() == 1);
+	CHECK(pending.PrimarySamples[0].Cancelled);
+	CHECK_FALSE(pending.PrimarySamples[0].Down);
+}
+
+TEST_CASE("presentation retention is opt in and bounded while draws stop", "[input][presentation]") {
+	Translator translator;
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(TextEvent("unused")));
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, true)));
+	CHECK(translator.PendingPresentation().Edits.empty());
+	CHECK(translator.PendingPresentation().PrimarySamples.empty());
+
+	translator.EnablePresentationInput();
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, false)));
+	for (size_t index = 0; index <= engine::input::PresentationInput::MAXIMUM_PRIMARY_SAMPLES + 1; index++) {
+		REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, index % 2 == 1)));
+	}
+	const auto &pending = translator.PendingPresentation();
+	REQUIRE(pending.PrimarySamples.size() == 1);
+	CHECK(pending.PrimarySamples[0].Cancelled);
+	CHECK(pending.PointerOverflowed);
+	CHECK_FALSE(translator.PrimaryDownForPresentation());
+	translator.ConsumePresentation();
+	CHECK_FALSE(translator.PrimaryDownForPresentation());
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, false)));
+	REQUIRE(translator.HandleEvent(ButtonEvent(SDL_BUTTON_LEFT, true)));
+	CHECK(translator.PrimaryDownForPresentation());
+
+	const std::string large(16384, 'a');
+	REQUIRE(large.size() == engine::input::PresentationInput::MAXIMUM_TEXT_BYTES);
+	REQUIRE(translator.HandleEvent(TextEvent(large.c_str())));
+	REQUIRE(translator.PendingPresentation().Edits.size() == 1);
+	CHECK(translator.PendingPresentation().Edits[0].Text == large);
+	REQUIRE(translator.HandleEvent(TextEvent("b")));
+	CHECK(translator.PendingPresentation().Edits.empty());
+	CHECK(translator.PendingPresentation().EditsOverflowed);
+	translator.ConsumePresentation();
+	REQUIRE(translator.HandleEvent(TextEvent("c")));
+	REQUIRE(translator.PendingPresentation().Edits.size() == 1);
+	CHECK(translator.PendingPresentation().Edits[0].Text == "c");
+	translator.ConsumePresentation();
+	for (size_t index = 0; index <= engine::input::PresentationInput::MAXIMUM_KEY_PRESSES; index++) {
+		REQUIRE(translator.HandleEvent(KeyEvent(SDLK_A, true)));
+		REQUIRE(translator.HandleEvent(KeyEvent(SDLK_A, false)));
+	}
+	CHECK(translator.PendingPresentation().KeysOverflowed);
+	CHECK(translator.PendingPresentation().KeyPresses.empty());
+}
+
+TEST_CASE("presentation edits keep repeated keys and modifier timing", "[input][presentation]") {
+	Translator translator;
+	translator.EnablePresentationInput();
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(TextEvent("A")));
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_BACKSPACE, true)));
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_BACKSPACE, false)));
+	REQUIRE(translator.HandleEvent(TextEvent("B")));
+	translator.BeginFrame();
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_BACKSPACE, true)));
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_BACKSPACE, false)));
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_LSHIFT, true)));
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_LEFT, true)));
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_LEFT, false)));
+	REQUIRE(translator.HandleEvent(KeyEvent(SDLK_LSHIFT, false)));
+	const auto &edits = translator.PendingPresentation().Edits;
+	REQUIRE(edits.size() == 5);
+	CHECK(edits[0].Text == "A");
+	CHECK(edits[1].Kind == engine::input::PresentationEditKind::Backspace);
+	CHECK(edits[2].Text == "B");
+	CHECK(edits[3].Kind == engine::input::PresentationEditKind::Backspace);
+	CHECK(edits[4].Kind == engine::input::PresentationEditKind::CaretLeft);
+	CHECK(edits[4].Extend);
+	const auto &keys = translator.PendingPresentation().KeyPresses;
+	REQUIRE(keys.size() == 4);
+	CHECK(keys[0] == KeyCode::Backspace);
+	CHECK(keys[1] == KeyCode::Backspace);
+	CHECK(keys[2] == KeyCode::LeftShift);
+	CHECK(keys[3] == KeyCode::Left);
+}
+
 TEST_CASE("losing focus releases everything and says so", "[input]") {
 	Translator translator;
 
@@ -341,6 +533,37 @@ TEST_CASE("typed text arrives as UTF-8 and is a frame delta", "[input][translate
 	// other delta is dropped there: the frame did not finish delivering.
 	REQUIRE(translator.HandleEvent(WindowEvent(false)));
 	CHECK(translator.TypedText().empty());
+}
+
+TEST_CASE("IME preedit is bounded, retained, and cleared by a commit", "[input][translate]") {
+	Translator translator;
+	translator.BeginFrame();
+
+	REQUIRE(translator.HandleEvent(EditingEvent("\xE5\x80\x99\xE8\xA3\x9C", 1, 1)));
+	const engine::input::TextComposition first = translator.Composition();
+	CHECK(first.Text == "\xE5\x80\x99\xE8\xA3\x9C");
+	CHECK(first.Start == 1);
+	CHECK(first.Length == 1);
+	CHECK(first.Revision != 0);
+
+	// A candidate has no frame delta. SDL only reports it when it changes, so
+	// it must remain visible during the quiet frames between editing events.
+	translator.BeginFrame();
+	CHECK(translator.Composition().Text == first.Text);
+	CHECK(translator.Composition().Revision == first.Revision);
+
+	std::string oversized(engine::input::TextComposition::MAXIMUM_BYTES + 12, 'a');
+	REQUIRE(translator.HandleEvent(EditingEvent(oversized.c_str(), 0, 0)));
+	CHECK(translator.Composition().Text.size() == engine::input::TextComposition::MAXIMUM_BYTES);
+
+	REQUIRE(translator.HandleEvent(TextEvent("\xE5\x80\x99")));
+	CHECK(translator.TypedText() == "\xE5\x80\x99");
+	CHECK(translator.Composition().Text.empty());
+	CHECK(translator.Composition().Revision > first.Revision);
+
+	REQUIRE(translator.HandleEvent(EditingEvent("next", 0, 4)));
+	translator.ReleaseAll();
+	CHECK(translator.Composition().Text.empty());
 }
 
 TEST_CASE("gamepads occupy stable slots and normalize buttons and axes", "[input][gamepad]") {

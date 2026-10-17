@@ -181,6 +181,11 @@ declare extern type ChangedSignal with
 	function Once(self, handler: (property: string) -> ()): RBXScriptConnection
 end
 
+declare extern type RemoteEventSignal with
+	function Connect(self, handler: (payload: string, sender: Player?) -> ()): RBXScriptConnection
+	function Once(self, handler: (payload: string, sender: Player?) -> ()): RBXScriptConnection
+end
+
 -- --- input ------------------------------------------------------------------
 --
 -- **Hand-written, because these two are script globals rather than classes.**
@@ -573,6 +578,9 @@ end
 declare extern type Enum_CloudComputeShader extends EnumItem with
 end
 
+declare extern type Enum_CollectorScaleMode extends EnumItem with
+end
+
 declare extern type Enum_ConstraintMotion extends EnumItem with
 end
 
@@ -616,6 +624,9 @@ declare extern type Enum_LineJoinMode extends EnumItem with
 end
 
 declare extern type Enum_ListenerType extends EnumItem with
+end
+
+declare extern type Enum_LocalizedArgumentType extends EnumItem with
 end
 
 declare extern type Enum_MouseBehavior extends EnumItem with
@@ -732,6 +743,9 @@ end
 declare extern type Enum_VerticalScrollBarPosition extends EnumItem with
 end
 
+declare extern type Enum_ViewportUpdateMode extends EnumItem with
+end
+
 declare extern type Enum_VolumeShape extends EnumItem with
 end
 
@@ -804,6 +818,13 @@ declare Enum: {
 		Stratus: Enum_CloudComputeShader,
 		Storm: Enum_CloudComputeShader,
 		Voxel: Enum_CloudComputeShader,
+	},
+	CollectorScaleMode: {
+		Stretch: Enum_CollectorScaleMode,
+		Fit: Enum_CollectorScaleMode,
+		Fill: Enum_CollectorScaleMode,
+		Integer: Enum_CollectorScaleMode,
+		None: Enum_CollectorScaleMode,
 	},
 	ConstraintMotion: {
 		Locked: Enum_ConstraintMotion,
@@ -964,6 +985,11 @@ declare Enum: {
 		Camera: Enum_ListenerType,
 		ObjectPosition: Enum_ListenerType,
 	},
+	LocalizedArgumentType: {
+		String: Enum_LocalizedArgumentType,
+		Number: Enum_LocalizedArgumentType,
+		Date: Enum_LocalizedArgumentType,
+	},
 	MouseBehavior: {
 		Default: Enum_MouseBehavior,
 		LockCenter: Enum_MouseBehavior,
@@ -1015,6 +1041,9 @@ declare Enum: {
 		Grid2x2: Enum_ParticleFlipbookLayout,
 		Grid4x4: Enum_ParticleFlipbookLayout,
 		Grid8x8: Enum_ParticleFlipbookLayout,
+		Grid16x16: Enum_ParticleFlipbookLayout,
+		Grid32x32: Enum_ParticleFlipbookLayout,
+		Grid64x64: Enum_ParticleFlipbookLayout,
 	},
 	ParticleFlipbookMode: {
 		Loop: Enum_ParticleFlipbookMode,
@@ -1179,6 +1208,12 @@ declare Enum: {
 	VerticalScrollBarPosition: {
 		Right: Enum_VerticalScrollBarPosition,
 		Left: Enum_VerticalScrollBarPosition,
+	},
+	ViewportUpdateMode: {
+		OnChange: Enum_ViewportUpdateMode,
+		EveryFrame: Enum_ViewportUpdateMode,
+		FixedRate: Enum_ViewportUpdateMode,
+		Manual: Enum_ViewportUpdateMode,
 	},
 	VolumeShape: {
 		Box: Enum_VolumeShape,
@@ -1564,6 +1599,22 @@ declare extern type VectorField3D extends PVInstance with
 	Vector: Vector3
 end
 
+declare extern type GpuParticleField extends Instance with
+	CondensationAlpha: number
+	CondensationColor: Color3
+	CondensationSize: number
+	DebrisAlpha: number
+	DebrisColor: Color3
+	DebrisSize: number
+	Enabled: boolean
+	Layers: number
+	RainAlpha: number
+	RainColor: Color3
+	RainSize: number
+	RequestedCount: number
+	Seed: number
+end
+
 declare extern type BasePart extends PVInstance with
 	AffordanceEnabled: boolean
 	read AffordanceId: string
@@ -1607,6 +1658,15 @@ declare extern type BasePart extends PVInstance with
 end
 
 declare extern type Part extends BasePart with
+	StormDragCoefficient: number
+	StormEnabled: boolean
+	StormExposedArea: number
+	StormForceScale: number
+	StormMaximumBendRadians: number
+	StormResponsePerSecond: number
+	StormRestFrame: CFrame
+	StormVegetationEnabled: boolean
+	StormWindSpeedForMaximumBend: number
 end
 
 declare extern type SpawnLocation extends Part with
@@ -1645,6 +1705,8 @@ declare extern type MeshPart extends BasePart with
 	read AutoLod3MeshId: string
 	write AutoLod3MeshId: string?
 	AutoLod3Ratio: number
+	read AutoLodBillboardTexture: string
+	write AutoLodBillboardTexture: string?
 	AutoLodLevels: number
 	AutoLodStrategy: Enum_AutoMeshLODStrategy
 	AutoLodTargetQuadArea: number
@@ -1657,21 +1719,29 @@ declare extern type MeshPart extends BasePart with
 	read CustomLod3MeshId: string
 	write CustomLod3MeshId: string?
 	CustomLod3Ratio: number
+	read CustomLodBillboardTexture: string
+	write CustomLodBillboardTexture: string?
 	CustomLodLevels: number
 	CustomLodTargetQuadArea: number
 	read EmissiveMap: string
 	write EmissiveMap: string?
 	read HeightMap: string
 	write HeightMap: string?
+	IndexOfRefraction: number
+	Lod1Distance: number
 	read Lod1MeshId: string
 	write Lod1MeshId: string?
 	Lod1Ratio: number
+	Lod2Distance: number
 	read Lod2MeshId: string
 	write Lod2MeshId: string?
 	Lod2Ratio: number
+	Lod3Distance: number
 	read Lod3MeshId: string
 	write Lod3MeshId: string?
 	Lod3Ratio: number
+	read LodBillboardTexture: string
+	write LodBillboardTexture: string?
 	LodTargetQuadArea: number
 	read MeshId: string
 	write MeshId: string?
@@ -1681,10 +1751,19 @@ declare extern type MeshPart extends BasePart with
 	write NormalMap: string?
 	read OcclusionMap: string
 	write OcclusionMap: string?
+	PackedHeightChannel: number
+	PackedMetalnessChannel: number
+	PackedOcclusionChannel: number
+	read PackedPbrMap: string
+	write PackedPbrMap: string?
+	PackedRoughnessChannel: number
 	read RoughnessMap: string
 	write RoughnessMap: string?
+	SpecularFactor: number
 	read TextureID: string
 	write TextureID: string?
+	Thickness: number
+	TransmissionFactor: number
 	read TrianglesCount: number
 end
 
@@ -1728,6 +1807,7 @@ end
 
 declare extern type Sound extends Instance with
 	Looped: boolean
+	Pan: number
 	Playing: boolean
 	RollOffMaxDistance: number
 	RollOffMinDistance: number
@@ -1771,6 +1851,7 @@ declare extern type Light extends Instance with
 	Color: Color3
 	Enabled: boolean
 	Range: number
+	Shadows: boolean
 end
 
 declare extern type PointLight extends Light with
@@ -2019,6 +2100,11 @@ declare extern type JointInstance extends Instance with
 end
 
 declare extern type Weld extends JointInstance with
+	StormBreakForce: number
+	StormDamageRate: number
+	StormIntegrity: number
+	StormLinkEnabled: boolean
+	StormMaterialStrength: number
 end
 
 declare extern type WeldConstraint extends Instance with
@@ -2026,6 +2112,11 @@ declare extern type WeldConstraint extends Instance with
 	Enabled: boolean
 	Part0: Instance
 	Part1: Instance
+	StormBreakForce: number
+	StormDamageRate: number
+	StormIntegrity: number
+	StormLinkEnabled: boolean
+	StormMaterialStrength: number
 end
 
 declare extern type ShaderScript extends Instance with
@@ -2074,6 +2165,8 @@ declare extern type ModuleScript extends LuaSourceContainer with
 end
 
 declare extern type RemoteEvent extends Instance with
+	function FireServer(self, payload: string): ()
+	OnServerEvent: RemoteEventSignal
 end
 
 declare extern type BindableEvent extends Instance with
@@ -2405,6 +2498,9 @@ declare extern type TextButton extends GuiButton with
 	read ContentText: string
 	Font: Enum_Font
 	LineHeight: number
+	LocalizationArgumentCount: number
+	read LocalizationKey: string
+	write LocalizationKey: string?
 	MaxVisibleGraphemes: number
 	RichText: boolean
 	Text: string
@@ -2449,6 +2545,9 @@ declare extern type TextLabel extends GuiLabel with
 	read ContentText: string
 	Font: Enum_Font
 	LineHeight: number
+	LocalizationArgumentCount: number
+	read LocalizationKey: string
+	write LocalizationKey: string?
 	MaxVisibleGraphemes: number
 	RichText: boolean
 	Text: string
@@ -2488,8 +2587,12 @@ declare extern type TextBox extends GuiObject with
 	CursorPosition: number
 	Font: Enum_Font
 	LineHeight: number
+	LocalizationArgumentCount: number
+	read LocalizationKey: string
+	write LocalizationKey: string?
 	MaxVisibleGraphemes: number
 	MultiLine: boolean
+	Password: boolean
 	PlaceholderColor3: Color3
 	PlaceholderText: string
 	RichText: boolean
@@ -2519,14 +2622,21 @@ declare extern type ViewportFrame extends GuiObject with
 	CurrentCamera: Instance
 	ImageColor3: Color3
 	ImageTransparency: number
+	InvalidationRevision: number
 	LightColor: Color3
 	LightDirection: Vector3
+	ResolutionScale: number
+	UpdateEveryFrames: number
+	UpdateMode: Enum_ViewportUpdateMode
 end
 
 declare extern type LayerCollector extends GuiBase2d with
 	DisplayOrder: number
 	Enabled: boolean
+	ReferenceResolution: Vector2
 	ResetOnSpawn: boolean
+	ScaleMode: Enum_CollectorScaleMode
+	Theme: Instance
 	ZIndexBehavior: Enum_ZIndexBehavior
 end
 
@@ -2631,6 +2741,11 @@ end
 declare extern type UIConstraint extends UIComponent with
 end
 
+declare extern type UIMask extends UIComponent with
+	CornerRadius: UDim
+	Enabled: boolean
+end
+
 declare extern type UIAspectRatioConstraint extends UIConstraint with
 	AspectRatio: number
 	AspectType: Enum_AspectType
@@ -2700,6 +2815,39 @@ declare extern type UIDragDetector extends UIComponent with
 	function VirtualDragEnd(self, x: number, y: number, dx: number, dy: number): ()
 end
 
+declare extern type UIBinding extends Instance with
+	read Attribute: string
+	write Attribute: string?
+	Fallback: string
+	SourcePath: string
+	read Target: string
+	write Target: string?
+	read Valid: boolean
+	read Value: string
+end
+
+declare extern type UIModalScope extends UIComponent with
+	Enabled: boolean
+end
+
+declare extern type UIAnimation extends UIComponent with
+	Playing: boolean
+	StartTime: number
+end
+
+declare extern type UIStyle extends UIComponent with
+end
+
+declare extern type UITheme extends Instance with
+end
+
+declare extern type UIVirtualCollection extends Instance with
+	FixedExtent: number
+	ItemCount: number
+	Revision: number
+	function SetVirtualPage(self, first: number, extentBefore: number, records: { { Key: string, Extent: number?, Fields: { [string]: any } } }, revision: number): ()
+end
+
 declare extern type Service extends Instance with
 	read Fixture: boolean
 	Scope: Enum_ServiceScope
@@ -2737,12 +2885,22 @@ end
 
 declare extern type Lighting extends Service with
 	Ambient: Color3
+	BloomIntensity: number
+	BloomRadius: number
+	BloomThreshold: number
 	Brightness: number
 	ClockTime: number
+	DepthOfFieldFocusDistance: number
+	DepthOfFieldFocusRange: number
+	DepthOfFieldIntensity: number
+	DepthOfFieldRadius: number
 	FogColor: Color3
 	FogEnd: number
 	FogStart: number
 	GeographicLatitude: number
+	GodRayIntensity: number
+	GodRayRadius: number
+	GodRayThreshold: number
 	OutdoorAmbient: Color3
 	read PostProcessShader: string
 	write PostProcessShader: string?
@@ -3247,6 +3405,46 @@ declare extern type RunService with
 	function IsReplica(self): boolean
 end
 
+-- The shared analytical tornado field. Configure and Preset require the
+-- authoritative server role; the remaining queries are read-only everywhere.
+declare extern type StormFieldSample with
+	Velocity: Vector3
+	Influence: number
+	DamagePotential: number
+	Condensation: number
+end
+
+declare extern type StormVisibility with
+	Clarity: number
+	EffectiveDistance: number
+	Rain: number
+	Condensation: number
+end
+
+declare extern type StormDamage with
+	Wind: Vector3
+	DynamicPressure: number
+	Potential: number
+	Band: number
+end
+
+declare extern type StormSnapshot with
+	Position: Vector3
+	ElapsedSeconds: number
+	LifecycleEnabled: boolean
+	Enabled: boolean
+	Parameters: { [string]: any }
+end
+
+declare extern type StormService with
+	function Configure(self, values: { [string]: any }): ()
+	function Preset(self, name: string): ()
+	function Sample(self, position: Vector3): StormFieldSample
+	function Snapshot(self): StormSnapshot
+	function Visibility(self, position: Vector3, viewDistance: number): StormVisibility
+	function Damage(self, position: Vector3): StormDamage
+end
+
 -- --- the globals -----------------------------------------------------------
 
 declare MessagingService: MessagingService
@@ -3255,6 +3453,7 @@ declare CrossWorldService: CrossWorldService
 declare MemoryStoreService: MemoryStoreService
 declare DataStoreService: DataStoreService
 declare RunService: RunService
+declare Storm: StormService
 declare ComputeService: ComputeService
 declare DataSceneService: DataSceneService
 declare ContentService: ContentService
@@ -3394,6 +3593,7 @@ type CreatableInstances = {
 	Folder: Folder,
 	VectorField2D: VectorField2D,
 	VectorField3D: VectorField3D,
+	GpuParticleField: GpuParticleField,
 	Part: Part,
 	SpawnLocation: SpawnLocation,
 	Model: Model,
@@ -3495,6 +3695,7 @@ type CreatableInstances = {
 	UIGridLayout: UIGridLayout,
 	UITableLayout: UITableLayout,
 	UIPageLayout: UIPageLayout,
+	UIMask: UIMask,
 	UIAspectRatioConstraint: UIAspectRatioConstraint,
 	UISizeConstraint: UISizeConstraint,
 	UITextSizeConstraint: UITextSizeConstraint,
@@ -3505,6 +3706,12 @@ type CreatableInstances = {
 	UIFlexItem: UIFlexItem,
 	UIGradient: UIGradient,
 	UIDragDetector: UIDragDetector,
+	UIBinding: UIBinding,
+	UIModalScope: UIModalScope,
+	UIAnimation: UIAnimation,
+	UIStyle: UIStyle,
+	UITheme: UITheme,
+	UIVirtualCollection: UIVirtualCollection,
 	Player: Player,
 	Team: Team,
 }

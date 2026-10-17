@@ -259,7 +259,7 @@ namespace studio {
 		ImGui::TextDisabled("interface and renderer share one frame today, so the two act as");
 		ImGui::TextDisabled("ceilings on it rather than as separate clocks");
 
-		ImGui::SeparatorText("Level of detail");
+		ImGui::SeparatorText("Default Mesh LOD distances");
 		ImGui::Checkbox("Enable LOD culling", &Prefs.EnableLODCulling);
 		if (ImGui::IsItemHovered()) {
 			ImGui::SetTooltip("Skip mesh LOD clusters outside the viewport.");
@@ -1000,23 +1000,22 @@ namespace studio {
 		ImGui::Spacing();
 		ImGui::SeparatorText("Dispatch");
 
-		// The engine pool, world lanes and node graphs are independently
+		// The engine pool, world lanes and render pipeline preview are independently
 		// selectable domains. The master includes all three.
 		bool engineSerial = engine::parallel::ForceSerialCompute();
 		bool worldsSerial = Universe->Settings().Mode == engine::world::ExecutionMode::WorldSerial;
-		bool nodeGraphsSerial = NodeDemoRunner.IsSerial() && RenderPipelinePreviewEvaluator.IsSerial();
-		bool serial = engineSerial && worldsSerial && nodeGraphsSerial;
+		bool renderPreviewSerial = RenderPipelinePreviewEvaluator.IsSerial();
+		bool serial = engineSerial && worldsSerial && renderPreviewSerial;
 		if (ImGui::Checkbox("Force all serial compute", &serial)) {
 			engine::parallel::SetForceSerialCompute(serial);
 			Universe->SetMode(
 				serial ? engine::world::ExecutionMode::WorldSerial
 					   : engine::world::ExecutionMode::WorldParallel
 			);
-			NodeDemoRunner.SetSerial(serial);
 			RenderPipelinePreviewEvaluator.SetSerial(serial);
 			engineSerial = serial;
 			worldsSerial = serial;
-			nodeGraphsSerial = serial;
+			renderPreviewSerial = serial;
 			Modified = true;
 			Say(serial ? "every compute dispatch now runs on the thread that asked"
 					   : "parallel dispatch restored");
@@ -1048,9 +1047,8 @@ namespace studio {
 			);
 			Modified = true;
 		}
-		if (ImGui::Checkbox("Editor node graphs", &nodeGraphsSerial)) {
-			NodeDemoRunner.SetSerial(nodeGraphsSerial);
-			RenderPipelinePreviewEvaluator.SetSerial(nodeGraphsSerial);
+		if (ImGui::Checkbox("Render pipeline preview", &renderPreviewSerial)) {
+			RenderPipelinePreviewEvaluator.SetSerial(renderPreviewSerial);
 		}
 		ImGui::Unindent();
 

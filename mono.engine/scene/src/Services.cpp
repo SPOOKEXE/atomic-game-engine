@@ -1,3 +1,4 @@
+#include <engine/core/HeapProfile.hpp>
 #include <engine/core/Log.hpp>
 #include <engine/core/Name.hpp>
 #include <engine/ecs/Classes.hpp>
@@ -982,6 +983,36 @@ namespace engine::scene {
 			);
 			Classes::Property<&LightingServiceComponent::FogStart>(lighting, "FogStart");
 			Classes::Property<&LightingServiceComponent::FogEnd>(lighting, "FogEnd");
+			Classes::ClampedProperty<&LightingServiceComponent::BloomThreshold, 0.0f, 10000.0f>(
+				lighting, "BloomThreshold"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::BloomIntensity, 0.0f, 100.0f>(
+				lighting, "BloomIntensity"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::BloomRadius, 0.0f, 128.0f>(
+				lighting, "BloomRadius"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::DepthOfFieldIntensity, 0.0f, 1.0f>(
+				lighting, "DepthOfFieldIntensity"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::DepthOfFieldFocusDistance, 0.0f, 100000.0f>(
+				lighting, "DepthOfFieldFocusDistance"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::DepthOfFieldFocusRange, 0.0f, 100000.0f>(
+				lighting, "DepthOfFieldFocusRange"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::DepthOfFieldRadius, 0.0f, 128.0f>(
+				lighting, "DepthOfFieldRadius"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::GodRayIntensity, 0.0f, 100.0f>(
+				lighting, "GodRayIntensity"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::GodRayThreshold, 0.0f, 10000.0f>(
+				lighting, "GodRayThreshold"
+			);
+			Classes::ClampedProperty<&LightingServiceComponent::GodRayRadius, 0.0f, 512.0f>(
+				lighting, "GodRayRadius"
+			);
 			Classes::ClampedProperty<&LightingServiceComponent::GeographicLatitude, -90.0f, 90.0f>(
 				lighting, "GeographicLatitude"
 			);
@@ -1005,18 +1036,19 @@ namespace engine::scene {
 	}
 
 	Entity ServiceOf(const Store &store, ecs::ClassId klass) {
+		ENGINE_HEAP_SCOPE("scene service lookup");
 		if (!klass.IsValid()) {
 			return NULL_ENTITY;
 		}
 
 		Entity found = NULL_ENTITY;
-		store.EachRoot([&](Entity root) {
-			// **The first in `EachRoot`'s order**, which is creation order - the
-			// same tie-break `FindFirstRoot` made, kept so a world that somehow
-			// holds two of one service resolves to the same one it always did.
-			if (found == NULL_ENTITY && store.IsA(root, klass)) {
+		// This lookup has no mutating callback. Scan the hierarchy directly and
+		// retain EachRoot's smallest-id tie-break without collecting its snapshot.
+		auto &mutableStore = const_cast<Store &>(store);
+		mutableStore.Each<const ecs::Hierarchy>([&](Entity root, const ecs::Hierarchy &node) {
+			if (node.Parent == NULL_ENTITY && store.IsA(root, klass) &&
+				(found == NULL_ENTITY || root.Id < found.Id))
 				found = root;
-			}
 		});
 		return found;
 	}
@@ -1037,21 +1069,25 @@ namespace engine::scene {
 	}
 
 	bool InReplicatedFirst(const Store &store, Entity instance) {
-		const ecs::ClassId klass = Classes::Find(core::Name("ReplicatedFirst"));
-		if (!klass.IsValid()) {
+		return InReplicatedFirst(store, instance, Classes::Find(core::Name("ReplicatedFirst")));
+	}
+
+	bool InReplicatedFirst(const Store &store, Entity instance, ecs::ClassId replicatedFirst) {
+		if (!replicatedFirst.IsValid()) {
 			return false;
 		}
 
 		// **Up the chain rather than down from the service**, which is
 		// `ScopeOfInstance`'s walk and its argument: containment is the fact,
 		// and a flag copied onto every descendant would be the one that went
-		// stale on a reparent. A world's tree is shallow, and this is asked once
-		// per entity per publish beside a walk that already happens.
+		// stale on a reparent. A caller asking about many entities can resolve
+		// the class once and use this overload; the answer still comes from the
+		// current tree.
 		//
 		// Bounded by the walk itself: `SetParent` refuses a cycle, so every
 		// chain ends.
 		for (Entity at = instance; at != NULL_ENTITY; at = store.ParentOf(at)) {
-			if (store.IsA(at, klass)) {
+			if (store.IsA(at, replicatedFirst)) {
 				return true;
 			}
 		}

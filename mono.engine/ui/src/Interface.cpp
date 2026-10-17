@@ -2,9 +2,11 @@
 #include <engine/core/Profiling.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/ui/Fonts.hpp>
+#include <engine/ui/GuiPainter.hpp>
 #include <engine/ui/Interface.hpp>
 #include <engine/ui/Theme.hpp>
 
+#include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
@@ -15,9 +17,64 @@
 #include <cstring>
 #include <imgui.h>
 #include <string>
+#include <vector>
+
+// SDL's ImGui backend intentionally exports this mapper for other hosts.
+ImGuiKey ImGui_ImplSDL3_KeyEventToImGuiKey(SDL_Keycode keycode, SDL_Scancode scancode);
 
 namespace engine::ui {
 	namespace {
+		class ScopedContext final {
+		  public:
+			explicit ScopedContext(ImGuiContext *context) : Previous(ImGui::GetCurrentContext()) {
+				ImGui::SetCurrentContext(context);
+			}
+			~ScopedContext() {
+				ImGui::SetCurrentContext(Previous);
+			}
+			ScopedContext(const ScopedContext &) = delete;
+			ScopedContext &operator=(const ScopedContext &) = delete;
+
+		  private:
+			ImGuiContext *Previous;
+		};
+
+		void ApplyHeadlessEvent(const SDL_Event &event) {
+			ImGuiIO &io = ImGui::GetIO();
+			switch (event.type) {
+			case SDL_EVENT_MOUSE_MOTION:
+				io.AddMousePosEvent(event.motion.x, event.motion.y);
+				break;
+			case SDL_EVENT_MOUSE_BUTTON_DOWN:
+			case SDL_EVENT_MOUSE_BUTTON_UP: {
+				const int button = event.button.button == SDL_BUTTON_RIGHT	  ? 1
+								   : event.button.button == SDL_BUTTON_MIDDLE ? 2
+																			  : 0;
+				io.AddMouseButtonEvent(button, event.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
+				break;
+			}
+			case SDL_EVENT_MOUSE_WHEEL:
+				io.AddMouseWheelEvent(event.wheel.x, event.wheel.y);
+				break;
+			case SDL_EVENT_TEXT_INPUT:
+				io.AddInputCharactersUTF8(event.text.text);
+				break;
+			case SDL_EVENT_KEY_DOWN:
+			case SDL_EVENT_KEY_UP: {
+				const bool down = event.type == SDL_EVENT_KEY_DOWN;
+				io.AddKeyEvent(ImGuiMod_Shift, down && (event.key.mod & SDL_KMOD_SHIFT) != 0);
+				io.AddKeyEvent(ImGuiMod_Ctrl, down && (event.key.mod & SDL_KMOD_CTRL) != 0);
+				io.AddKeyEvent(ImGuiMod_Alt, down && (event.key.mod & SDL_KMOD_ALT) != 0);
+				io.AddKeyEvent(ImGuiMod_Super, down && (event.key.mod & SDL_KMOD_GUI) != 0);
+				const ImGuiKey key = ImGui_ImplSDL3_KeyEventToImGuiKey(event.key.key, event.key.scancode);
+				if (key != ImGuiKey_None) io.AddKeyEvent(key, down);
+				break;
+			}
+			default:
+				break;
+			}
+		}
+
 		uint64_t FoldBytes(uint64_t hash, const void *data, size_t size) {
 			constexpr uint64_t PRIME = 1099511628211ull;
 			const auto *bytes = static_cast<const std::byte *>(data);
@@ -69,6 +126,13 @@ namespace engine::ui {
 	}
 
 	struct Interface::Impl {
+		struct PendingEvent {
+			SDL_Event Event{};
+			std::string Text;
+		};
+		std::vector<PendingEvent> HeadlessEvents;
+		std::vector<PendingEvent> AutomationEvents;
+
 		render::InterfacePass Spatial;
 		double SpatialSeconds = 0.0;
 		ImGuiContext *Context = nullptr;
@@ -107,6 +171,7 @@ namespace engine::ui {
 	bool
 	Interface::Initialise(render::Renderer &renderer, SDL_Window *window, const InterfaceSettings &settings) {
 		if (State->Ready) {
+			ImGui::SetCurrentContext(State->Context);
 			return true;
 		}
 
@@ -115,20 +180,26 @@ namespace engine::ui {
 		const bool drawable = window != nullptr;
 
 		const render::BackendHandles backend = renderer.Backend();
-		if (backend.Device == nullptr) {
-			// Not an assertion. A headless run legitimately has no device, and
-			// the caller decides whether that is fatal - same contract as
-			// `Renderer::Initialise`.
-			ENGINE_ERROR("ui::Interface needs an initialised renderer");
+		if (drawable && backend.Device == nullptr) {
+			ENGINE_ERROR("ui::Interface needs an initialised renderer with a window");
 			return false;
 		}
 
 		IMGUI_CHECKVERSION();
+		ImGuiContext *previous = ImGui::GetCurrentContext();
 		State->Context = ImGui::CreateContext();
 		if (State->Context == nullptr) {
 			return false;
 		}
 
+		// CreateContext preserves a foreign current context. Configure only ours.
+		ImGui::SetCurrentContext(State->Context);
+		const auto discardContext = [&] {
+			ImGui::DestroyContext(State->Context);
+			State->Context = nullptr;
+			ImGui::SetCurrentContext(previous);
+			State->LayoutPath.clear();
+		};
 		ImGuiIO &io = ImGui::GetIO();
 
 		// **Keyboard navigation on, gamepad navigation off.** An editor is
@@ -139,6 +210,9 @@ namespace engine::ui {
 
 		if (settings.Docking) {
 			io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+		}
+		if (drawable && settings.PlatformWindows) {
+			io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 		}
 
 		if (settings.LayoutPath.empty()) {
@@ -178,8 +252,7 @@ namespace engine::ui {
 
 		if (drawable && !State->Spatial.Initialise(backend.Device, backend.ColourFormat, 16.0f * scale)) {
 			ENGINE_ERROR("ui::Interface could not initialise the spatial GUI pass");
-			ImGui::DestroyContext(State->Context);
-			State->Context = nullptr;
+			discardContext();
 			return false;
 		}
 		State->Spatial.SetImageSource([this, &renderer](const core::Name &name) {
@@ -218,8 +291,7 @@ namespace engine::ui {
 		if (!ImGui_ImplSDL3_InitForSDLGPU(window)) {
 			ENGINE_ERROR("ImGui_ImplSDL3_InitForSDLGPU failed");
 			State->Spatial.Shutdown();
-			ImGui::DestroyContext(State->Context);
-			State->Context = nullptr;
+			discardContext();
 			return false;
 		}
 
@@ -227,18 +299,26 @@ namespace engine::ui {
 		info.Device = static_cast<SDL_GPUDevice *>(backend.Device);
 		info.ColorTargetFormat = static_cast<SDL_GPUTextureFormat>(backend.ColourFormat);
 		info.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
+		// The host paces the interface. A vblank wait for every detached panel
+		// would add another display deadline while dragging between windows.
+		if (SDL_WindowSupportsGPUPresentMode(info.Device, window, SDL_GPU_PRESENTMODE_IMMEDIATE)) {
+			info.PresentMode = SDL_GPU_PRESENTMODE_IMMEDIATE;
+		}
 
 		if (!ImGui_ImplSDLGPU3_Init(&info)) {
 			ENGINE_ERROR("ImGui_ImplSDLGPU3_Init failed");
 			ImGui_ImplSDL3_Shutdown();
 			State->Spatial.Shutdown();
-			ImGui::DestroyContext(State->Context);
-			State->Context = nullptr;
+			discardContext();
 			return false;
 		}
 
 		State->Ready = true;
 		State->Drawable = true;
+		if (settings.PlatformWindows && (io.BackendFlags & ImGuiBackendFlags_PlatformHasViewports) == 0) {
+			io.ConfigFlags &= ~ImGuiConfigFlags_ViewportsEnable;
+			ENGINE_WARN("this display backend cannot place detached interface windows on other screens");
+		}
 		return true;
 	}
 
@@ -247,20 +327,28 @@ namespace engine::ui {
 			return;
 		}
 
+		ImGuiContext *previous = ImGui::GetCurrentContext();
+		ImGui::SetCurrentContext(State->Context);
+
 		if (State->Drawable) {
 			// Only what was started. Shutting down a backend that never
 			// initialised is an assertion inside imgui rather than a no-op.
 			ShutdownBackends();
 		}
 		State->Spatial.Shutdown();
+		ShutdownGuiPainter();
 
 		ImGui::DestroyContext(State->Context);
+		ImGui::SetCurrentContext(previous == State->Context ? nullptr : previous);
+		State->LayoutPath.clear();
 
 		State->Context = nullptr;
 		State->Draw = nullptr;
 		State->DrawSignature = 0;
 		State->UploadedSignature = 0;
 		State->UploadedSignatureValid = false;
+		State->HeadlessEvents.clear();
+		State->AutomationEvents.clear();
 		State->Ready = false;
 		State->Drawable = false;
 	}
@@ -280,10 +368,53 @@ namespace engine::ui {
 	}
 
 	void Interface::ProcessEvent(const SDL_Event &event) {
-		if (!State->Ready || !State->Drawable) {
+		if (!State->Ready) {
 			return;
 		}
-		ImGui_ImplSDL3_ProcessEvent(&event);
+		const ScopedContext context(State->Context);
+		if (State->Drawable) {
+			ImGui_ImplSDL3_ProcessEvent(&event);
+			return;
+		}
+		switch (event.type) {
+		case SDL_EVENT_MOUSE_MOTION:
+		case SDL_EVENT_MOUSE_BUTTON_DOWN:
+		case SDL_EVENT_MOUSE_BUTTON_UP:
+		case SDL_EVENT_MOUSE_WHEEL:
+		case SDL_EVENT_TEXT_INPUT:
+		case SDL_EVENT_KEY_DOWN:
+		case SDL_EVENT_KEY_UP:
+			break;
+		default:
+			return;
+		}
+		auto &pending = State->HeadlessEvents.emplace_back();
+		pending.Event = event;
+		if (event.type == SDL_EVENT_TEXT_INPUT) {
+			pending.Text = event.text.text == nullptr ? "" : event.text.text;
+			pending.Event.text.text = nullptr;
+		}
+	}
+
+	void Interface::QueueAutomationEvent(const SDL_Event &event) {
+		if (!State->Ready) return;
+		const ScopedContext context(State->Context);
+		auto &pending = State->AutomationEvents.emplace_back();
+		pending.Event = event;
+		if (State->Drawable && event.type == SDL_EVENT_MOUSE_MOTION &&
+			(ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0) {
+			if (SDL_Window *window = SDL_GetWindowFromID(event.motion.windowID); window != nullptr) {
+				int x = 0;
+				int y = 0;
+				SDL_GetWindowPosition(window, &x, &y);
+				pending.Event.motion.x += static_cast<float>(x);
+				pending.Event.motion.y += static_cast<float>(y);
+			}
+		}
+		if (event.type == SDL_EVENT_TEXT_INPUT) {
+			pending.Text = event.text.text == nullptr ? "" : event.text.text;
+			pending.Event.text.text = nullptr;
+		}
 	}
 
 	void Interface::Begin(float frameSeconds) {
@@ -297,6 +428,7 @@ namespace engine::ui {
 		if (!State->Ready) {
 			return;
 		}
+		ImGui::SetCurrentContext(State->Context);
 
 		if (State->Drawable) {
 			ImGui_ImplSDLGPU3_NewFrame();
@@ -308,7 +440,18 @@ namespace engine::ui {
 			ImGuiIO &headless = ImGui::GetIO();
 			headless.DisplaySize = State->Display;
 			headless.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+			for (auto &pending : State->HeadlessEvents) {
+				if (pending.Event.type == SDL_EVENT_TEXT_INPUT)
+					pending.Event.text.text = pending.Text.c_str();
+				ApplyHeadlessEvent(pending.Event);
+			}
+			State->HeadlessEvents.clear();
 		}
+		for (auto &pending : State->AutomationEvents) {
+			if (pending.Event.type == SDL_EVENT_TEXT_INPUT) pending.Event.text.text = pending.Text.c_str();
+			ApplyHeadlessEvent(pending.Event);
+		}
+		State->AutomationEvents.clear();
 
 		// **The delta is overwritten after `NewFrame`, not before it.** The
 		// SDL3 backend reads a wall clock and assigns `io.DeltaTime` itself, so
@@ -327,6 +470,7 @@ namespace engine::ui {
 		if (!State->Ready) {
 			return;
 		}
+		ImGui::SetCurrentContext(State->Context);
 
 		ImGui::Render();
 		State->Draw = ImGui::GetDrawData();
@@ -340,12 +484,47 @@ namespace engine::ui {
 		return State->DrawSignature;
 	}
 
+	void Interface::PresentPlatformWindows() {
+		if (!State->Drawable) return;
+		const ScopedContext context(State->Context);
+		if ((ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) == 0) {
+			return;
+		}
+		ENGINE_PROFILE_CAT("ui.platform windows", core::ProfileCategory::Render);
+		ImGui::UpdatePlatformWindows();
+		if (!HasPlatformWindows()) return;
+		ImGui::RenderPlatformWindowsDefault();
+		// Secondary windows upload into the backend's shared geometry buffers.
+		// The main overlay must restore its vertices even if its chrome stayed still.
+		State->UploadedSignatureValid = false;
+	}
+
+	bool Interface::HasPlatformWindows() const {
+		if (!State->Drawable) return false;
+		const ScopedContext context(State->Context);
+		return (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_ViewportsEnable) != 0 &&
+			   ImGui::GetPlatformIO().Viewports.Size > 1;
+	}
+
+	bool Interface::HasFocus() const {
+		if (!State->Drawable) return true;
+		SDL_Window *focused = SDL_GetKeyboardFocus();
+		if (focused == nullptr) return false;
+		const ScopedContext context(State->Context);
+		const auto id = reinterpret_cast<void *>(static_cast<intptr_t>(SDL_GetWindowID(focused)));
+		return ImGui::FindViewportByPlatformHandle(id) != nullptr;
+	}
+
 	bool Interface::WantsMouse() const {
-		return State->Ready && ImGui::GetIO().WantCaptureMouse;
+		if (!State->Ready) return false;
+		const ScopedContext context(State->Context);
+		return ImGui::GetIO().WantCaptureMouse;
 	}
 
 	bool Interface::WantsKeyboard() const {
-		return State->Ready && ImGui::GetIO().WantCaptureKeyboard;
+		if (!State->Ready) return false;
+		const ScopedContext context(State->Context);
+		return ImGui::GetIO().WantCaptureKeyboard;
 	}
 
 	void Interface::SubmitSpatial(
@@ -369,6 +548,7 @@ namespace engine::ui {
 		if (!State->Ready || commandBuffer == nullptr) {
 			return false;
 		}
+		const ScopedContext context(State->Context);
 		const bool spatial = State->Spatial.Prepare(commandBuffer);
 		if (!State->Drawable) {
 			return spatial;
@@ -432,6 +612,7 @@ namespace engine::ui {
 		if (!State->Ready || !State->Drawable || State->Draw == nullptr) {
 			return;
 		}
+		const ScopedContext context(State->Context);
 
 		ImGui_ImplSDLGPU3_RenderDrawData(
 			State->Draw,

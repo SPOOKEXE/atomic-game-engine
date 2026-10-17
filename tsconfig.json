@@ -11,14 +11,13 @@
 		"`types: []` and no `lib.dom` on purpose: the VM is QuickJS-ng, not a browser",
 		"and not Node. Nothing here should complete `document` or `require`.",
 		"",
-		"`moduleDetection: force` gives every example its own scope. They are separate",
-		"scripts loaded into separate worlds rather than one program, so two of them",
-		"declaring `PLATE` is not a redeclaration -- which is what a shared global",
-		"scope would call it.",
+		"`moduleDetection: force` gives every panel its own scope. These are",
+		"independent editor panels, so a shared global scope would create",
+		"redeclaration errors between unrelated panels.",
 		"",
-		"Typecheck with `bunx tsc --noEmit` (or `npx tsc --noEmit`). Nothing emits:",
-		"the engine compiles TypeScript through its own path, and this file exists",
-		"for the editor and for the check."
+		"Run `just typecheck` to check the panels against the generated engine",
+		"declarations. It uses the repository's pinned TypeScript compiler and",
+		"emits nothing. The Studio build transpiles those panels separately."
 	],
 	"compilerOptions": {
 		"target": "ES2020",
@@ -33,5 +32,5 @@
 		"forceConsistentCasingInFileNames": true
 	},
 	"files": ["mono.engine/script/bindings/engine.d.ts"],
-	"include": ["mono.engine/examples/**/*.ts", "mono.studio/panels/**/*.ts"]
+	"include": ["mono.studio/panels/**/*.ts"]
 }

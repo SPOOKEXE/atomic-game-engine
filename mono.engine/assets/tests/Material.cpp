@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <limits>
 #include <string>
 
 TEST_SUITE_ID("engine.assets.material")
@@ -210,6 +211,49 @@ TEST_CASE("a material round-trips its metalness map", "[assets]") {
 	MaterialData read;
 	REQUIRE(Material::Read(reader, read));
 	CHECK(read.MetalnessMap == written.MetalnessMap);
+}
+
+TEST_CASE("a material round-trips selected packed PBR channels", "[assets]") {
+	MaterialData written;
+	written.PackedPbrMap = "metal/ormh.atex";
+	written.OcclusionChannel = 0;
+	written.RoughnessChannel = 1;
+	written.MetalnessChannel = 2;
+
+	ByteWriter writer;
+	REQUIRE(Material::Write(writer, written));
+	ByteReader reader(writer.Bytes());
+	MaterialData read;
+	REQUIRE(Material::Read(reader, read));
+	CHECK(read.PackedPbrMap == written.PackedPbrMap);
+	CHECK(read.OcclusionChannel == 0);
+	CHECK(read.RoughnessChannel == 1);
+	CHECK(read.MetalnessChannel == 2);
+	CHECK(read.HeightChannel == 255);
+}
+
+TEST_CASE("a material round-trips bounded scalar PBR factors", "[assets]") {
+	MaterialData written;
+	written.SpecularFactor = 0.35f;
+	written.TransmissionFactor = 0.2f;
+	written.IndexOfRefraction = 2.4f;
+	written.Thickness = 1.25f;
+	ByteWriter writer;
+	REQUIRE(Material::Write(writer, written));
+	ByteReader reader(writer.Bytes());
+	MaterialData read;
+	REQUIRE(Material::Read(reader, read));
+	CHECK(read.SpecularFactor == written.SpecularFactor);
+	CHECK(read.TransmissionFactor == written.TransmissionFactor);
+	CHECK(read.IndexOfRefraction == written.IndexOfRefraction);
+	CHECK(read.Thickness == written.Thickness);
+
+	for (const float invalid : {-0.1f, 1.1f, std::numeric_limits<float>::infinity()}) {
+		written.SpecularFactor = invalid;
+		ByteWriter rejected;
+		CHECK_FALSE(Material::Write(rejected, written));
+		CHECK(rejected.Bytes().empty());
+	}
 }
 
 TEST_CASE("a version 3 material is one with no metalness map", "[assets]") {

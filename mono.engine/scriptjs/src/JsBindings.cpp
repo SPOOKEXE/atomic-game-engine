@@ -14,7 +14,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <iterator>
+#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -433,11 +435,29 @@ namespace engine::script {
 
 		// --- instances -------------------------------------------------------
 
-		// The accessor pair every property on a prototype is made of. The
-		// property's name travels as closure data, so one function serves all of
-		// them and none of them is written by hand.
-		JSValue
-		PropertyGet(JSContext *context, JSValueConst self, int, JSValueConst *, int, JSValueConst *data) {
+		// QuickJS stores callback magic as uint16_t and promotes it to int.
+		// Reserve its maximum for ordinals that require the original name lookup.
+		constexpr int UNBOUND_PROPERTY = std::numeric_limits<uint16_t>::max();
+
+		// A prototype's ordinal is only a hint: late declarations can move it,
+		// and an accessor can be borrowed by an instance of another class.
+		const PropertyDescriptor *
+		BoundProperty(const Store &store, Entity instance, const char *name, int ordinal) {
+			if (ordinal >= 0 && ordinal < UNBOUND_PROPERTY) {
+				const auto index = static_cast<size_t>(ordinal);
+				const auto properties = store.PropertiesOf(instance);
+				if (index < properties.size() && properties[index].Spelling == name) {
+					return properties[index].Scriptable ? &properties[index] : nullptr;
+				}
+			}
+			return ScriptableProperty(store, instance, name);
+		}
+
+		// Each accessor keeps the original JS name and a bounded ordinal hint.
+		// The descriptor always comes from the current receiver's merged schema.
+		JSValue PropertyGet(
+			JSContext *context, JSValueConst self, int, JSValueConst *, int ordinal, JSValueConst *data
+		) {
 			JsContext &bound = JsOf(context);
 			const Entity instance = JsEntityOf(context, self);
 			if (instance == ecs::NULL_ENTITY) {
@@ -445,7 +465,7 @@ namespace engine::script {
 			}
 
 			const char *name = JS_ToCString(context, data[0]);
-			const PropertyDescriptor *property = ScriptableProperty(*bound.World, instance, name);
+			const PropertyDescriptor *property = BoundProperty(*bound.World, instance, name, ordinal);
 			JS_FreeCString(context, name);
 
 			if (property == nullptr) {
@@ -474,7 +494,12 @@ namespace engine::script {
 		}
 
 		JSValue PropertySet(
-			JSContext *context, JSValueConst self, int argc, JSValueConst *argv, int, JSValueConst *data
+			JSContext *context,
+			JSValueConst self,
+			int argc,
+			JSValueConst *argv,
+			int ordinal,
+			JSValueConst *data
 		) {
 			JsContext &bound = JsOf(context);
 			const Entity instance = JsEntityOf(context, self);
@@ -483,7 +508,7 @@ namespace engine::script {
 			}
 
 			const char *name = JS_ToCString(context, data[0]);
-			const PropertyDescriptor *property = ScriptableProperty(*bound.World, instance, name);
+			const PropertyDescriptor *property = BoundProperty(*bound.World, instance, name, ordinal);
 			JS_FreeCString(context, name);
 
 			if (property == nullptr) {
@@ -551,13 +576,17 @@ namespace engine::script {
 				JS_IsObject(methods) ? JS_NewObjectProto(context, methods) : JS_NewObject(context);
 			JS_FreeValue(context, methods);
 
-			for (const PropertyDescriptor *property : ScriptableProperties(*bound.World, sample)) {
-				JSValue name = JS_NewString(context, property->Name.Text().data());
+			const auto properties = bound.World->PropertiesOf(sample);
+			for (size_t index = 0; index < properties.size(); index++) {
+				const PropertyDescriptor &property = properties[index];
+				if (!property.Scriptable) continue;
+				JSValue name = JS_NewString(context, property.Name.Text().data());
+				const int ordinal = index < static_cast<size_t>(UNBOUND_PROPERTY) ? static_cast<int>(index)
+																				  : UNBOUND_PROPERTY;
+				JSValue getter = JS_NewCFunctionData(context, PropertyGet, 0, ordinal, 1, &name);
+				JSValue setter = JS_NewCFunctionData(context, PropertySet, 1, ordinal, 1, &name);
 
-				JSValue getter = JS_NewCFunctionData(context, PropertyGet, 0, 0, 1, &name);
-				JSValue setter = JS_NewCFunctionData(context, PropertySet, 1, 0, 1, &name);
-
-				const JSAtom atom = JS_NewAtom(context, property->Name.Text().data());
+				const JSAtom atom = JS_NewAtom(context, property.Name.Text().data());
 				JS_DefinePropertyGetSet(context, proto, atom, getter, setter, JS_PROP_C_W_E);
 				JS_FreeAtom(context, atom);
 				JS_FreeValue(context, name);

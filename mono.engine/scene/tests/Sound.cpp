@@ -137,6 +137,20 @@ TEST_CASE("Volume clamps at ten rather than at one", "[scene][sound]") {
 	CHECK(Read<float>(store, sound, "Volume") == Approx(0.0f));
 }
 
+TEST_CASE("Pan stays within the stereo field", "[scene][sound]") {
+	Store store("sound_test.pan");
+	const Entity sound = NewSound(store);
+
+	REQUIRE(Write(store, sound, "Pan", -0.75f));
+	CHECK(Read<float>(store, sound, "Pan") == Approx(-0.75f));
+
+	REQUIRE(Write(store, sound, "Pan", 2.0f));
+	CHECK(Read<float>(store, sound, "Pan") == Approx(1.0f));
+
+	REQUIRE(Write(store, sound, "Pan", -2.0f));
+	CHECK(Read<float>(store, sound, "Pan") == Approx(-1.0f));
+}
+
 TEST_CASE("the roll-off distances are the sound's own", "[scene][sound]") {
 	Store store("sound_test.rolloff");
 	const Entity sound = NewSound(store);

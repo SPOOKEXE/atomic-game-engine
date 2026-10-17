@@ -200,7 +200,7 @@ namespace engine::world {
 		Store_.BindToCallingThread();
 		const uint64_t began = core::Clock::Nanoseconds();
 		try {
-			Scheduler_.RunPhases(Store_, ecs::Phase::Simulation, ecs::Phase::Replication);
+			Scheduler_.RunPhases(Store_, ecs::Phase::Physics, ecs::Phase::Replication);
 			CommitTick();
 			ExchangeOpen = false;
 			ConsecutiveFaults = 0;
@@ -210,8 +210,23 @@ namespace engine::world {
 		} catch (...) {
 			CancelExchangeRound();
 		}
+
 		Stats.LastTickMilliseconds += static_cast<float>(core::Clock::Nanoseconds() - began) / 1'000'000;
 		Stats.SlowestTickMilliseconds = std::max(Stats.SlowestTickMilliseconds, Stats.LastTickMilliseconds);
+		return State_ != WorldState::Faulted;
+	}
+
+	bool World::AdvanceExchangeRoundToPhysics() {
+		if (!ExchangeOpen) return false;
+		Store_.BindToCallingThread();
+		try {
+			Scheduler_.RunPhases(Store_, ecs::Phase::Simulation, ecs::Phase::Simulation);
+		} catch (const std::exception &failure) {
+			ENGINE_ERROR("world '{}' seam barrier fault: {}", Settings_.Name.Text(), failure.what());
+			CancelExchangeRound();
+		} catch (...) {
+			CancelExchangeRound();
+		}
 		return State_ != WorldState::Faulted;
 	}
 

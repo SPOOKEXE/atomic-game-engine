@@ -1,17 +1,9 @@
-# The selective benchmark runner.
-#
-# A thin executable over `Tool::testrunner` and nothing else. Discovery, the
-# cascading signature and the skip cache are that library's and are used here
-# unchanged - a second implementation of "what could this change have affected"
-# would be a second thing to keep correct, and the neglected one would be the
-# one that silently stopped re-running.
-#
-# What differs is only what a run produces: a benchmark answers "how long", not
-# "did it hold", so there is a baseline instead of a pass.
+# Selective microbenchmarks reuse Tool::testrunner discovery and its skip cache.
+# Demo impact reports aggregate runtime observations and enforce cost ceilings.
 
 if(MONO_BUILD_BENCH)
 	add_executable(benchrunner app/main.cpp)
-	target_link_libraries(benchrunner PRIVATE Tool::testrunner Engine::core)
+	target_link_libraries(benchrunner PRIVATE Tool::testrunner Engine::core Vendor::json)
 	target_compile_options(benchrunner PRIVATE ${MONO_COMPILE_OPTIONS})
 
 	set_target_properties(benchrunner PROPERTIES
@@ -20,5 +12,6 @@ endif()
 
 if(MONO_BUILD_TESTS AND IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests")
 	mono_add_tests(benchrunner DEPS Tool::testrunner Engine::core)
+	target_link_libraries(test_benchrunner PRIVATE Vendor::json)
 	target_include_directories(test_benchrunner PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/app")
 endif()

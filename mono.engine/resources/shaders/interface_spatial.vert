@@ -20,6 +20,7 @@ layout(set = 1, binding = 0) uniform Spatial {
 	vec4 AxisY;
 	vec4 Tint;
 	vec4 Canvas;
+	vec4 Transform;
 } spatial;
 
 void main() {
@@ -28,7 +29,7 @@ void main() {
 	outCanvasPosition = inPosition;
 
 	const vec2 size = max(spatial.Canvas.xy, vec2(1.0));
-	const vec2 local = inPosition / size;
+	const vec2 local = (spatial.Transform.xy + inPosition * spatial.Transform.zw) / size;
 	const vec3 world = spatial.Origin.xyz + spatial.AxisX.xyz * local.x + spatial.AxisY.xyz * local.y;
 	gl_Position = spatial.ViewProjection * vec4(world, 1.0);
 }

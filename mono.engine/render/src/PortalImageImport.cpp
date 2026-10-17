@@ -1,5 +1,6 @@
 #include "PortalImageSamples.hpp"
 #include "RendererState.hpp"
+#include "portal/PortalRendererTerminalObserver.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Metrics.hpp>
@@ -371,8 +372,9 @@ namespace engine::render {
 		bool replaceExisting
 	) {
 		RequireOwningThread("AdoptResourceImages");
-		if (State->Device == nullptr || tokens.empty() || tokens.size() > State->ResourceImages.size() ||
-			tokens.size() != bindings.size() || tokens.size() != handles.size())
+		if (State->Device == nullptr || tokens.empty() ||
+			tokens.size() > State->GraphResources.Images.size() || tokens.size() != bindings.size() ||
+			tokens.size() != handles.size())
 			return false;
 		struct Adoption {
 			Impl::ResourceImageSlot *Capture = nullptr;
@@ -400,7 +402,7 @@ namespace engine::render {
 			for (size_t previous = 0; previous < index; ++previous)
 				if (tokens[previous] == tokens[index] || SameOwner(bindings[previous], binding)) return false;
 			auto &adoption = planned[index];
-			for (auto &slot : State->ResourceImages) {
+			for (auto &slot : State->GraphResources.Images) {
 				if (slot.Image.Request.Token == tokens[index] && !slot.Cancelled && slot.Resident &&
 					slot.Image.Request.Delivery == ResourceImageDelivery::Resident &&
 					slot.Image.Status == ResourceImageStatus::Ok && slot.Image.CaptureFrame != 0 &&
@@ -452,7 +454,20 @@ namespace engine::render {
 			auto &slot = *adoption.Capture;
 			auto &image = *adoption.Destination;
 			State->CacheResidentImage(image);
+#if ENGINE_ASSERTS_ENABLED
+			const uint64_t replaced = image.Handle;
+#endif
 			State->ReleasePortalImport(image, true);
+#if ENGINE_ASSERTS_ENABLED
+			if (replaced != 0) {
+				test_support::ObservePortalRendererTerminal(
+					{this, test_support::PortalRendererTerminalKind::ReleasePortalImport, replaced, true}
+				);
+				test_support::ObservePortalRendererTerminal(
+					{this, test_support::PortalRendererTerminalKind::ReplacePortalImage, replaced, true}
+				);
+			}
+#endif
 			image.Handle = NextPortalImageHandle.fetch_add(1, std::memory_order_relaxed);
 			image.Binding = std::move(adoption.Binding);
 			// A local GPU frame has no authenticated producer simulation tick.
@@ -490,22 +505,57 @@ namespace engine::render {
 					for (const auto &node : tree.Nodes)
 						if (std::find(node.Images.begin(), node.Images.end(), handle) != node.Images.end()) {
 							DropPortalCaptureTree(tree.Token);
+#if ENGINE_ASSERTS_ENABLED
+							test_support::ObservePortalRendererTerminal(
+								{this,
+								 test_support::PortalRendererTerminalKind::DropPortalImage,
+								 handle,
+								 false}
+							);
+#endif
 							return true;
 						}
 		for (auto &image : State->ImportedPortals) {
 			if (handle != 0 && image.Handle == handle) {
 				const auto group = image.LayerSet;
-				if (group == 0)
+				if (group == 0) {
 					State->ReleasePortalImport(image);
-				else
+#if ENGINE_ASSERTS_ENABLED
+					test_support::ObservePortalRendererTerminal(
+						{this, test_support::PortalRendererTerminalKind::ReleasePortalImport, handle, true}
+					);
+#endif
+				} else
 					for (auto &member : State->ImportedPortals)
 						if (member.LayerSet == group) {
+#if ENGINE_ASSERTS_ENABLED
+							const uint64_t released = member.Handle;
+#endif
 							State->CacheResidentImage(member);
 							State->ReleasePortalImport(member);
+#if ENGINE_ASSERTS_ENABLED
+							if (released != 0)
+								test_support::ObservePortalRendererTerminal(
+									{this,
+									 test_support::PortalRendererTerminalKind::ReleasePortalImport,
+									 released,
+									 true}
+								);
+#endif
 						}
+#if ENGINE_ASSERTS_ENABLED
+				test_support::ObservePortalRendererTerminal(
+					{this, test_support::PortalRendererTerminalKind::DropPortalImage, handle, true}
+				);
+#endif
 				return true;
 			}
 		}
+#if ENGINE_ASSERTS_ENABLED
+		test_support::ObservePortalRendererTerminal(
+			{this, test_support::PortalRendererTerminalKind::DropPortalImage, handle, false}
+		);
+#endif
 		return false;
 	}
 
@@ -519,13 +569,14 @@ namespace engine::render {
 											: 8;
 		};
 		auto found = std::find_if(
-			ResidentImageCache.begin(), ResidentImageCache.end(), [](const ResidentImagePair &pair) {
-				return pair.Colour == nullptr;
-			}
+			GraphResources.ResidentImageCache.begin(),
+			GraphResources.ResidentImageCache.end(),
+			[](const ResidentImagePair &pair) { return pair.Colour == nullptr; }
 		);
-		if (found == ResidentImageCache.end()) {
-			found = ResidentImageCache.begin() + NextResidentCache;
-			NextResidentCache = (NextResidentCache + 1) % ResidentImageCache.size();
+		if (found == GraphResources.ResidentImageCache.end()) {
+			found = GraphResources.ResidentImageCache.begin() + GraphResources.NextResidentCache;
+			GraphResources.NextResidentCache =
+				(GraphResources.NextResidentCache + 1) % GraphResources.ResidentImageCache.size();
 			PortalImportUsage.CachedTextureBytes -=
 				size_t(found->Width) * found->Height * residentBytesPerPixel(*found);
 			gpu::ReleaseTexture(Device, found->Colour);
@@ -758,7 +809,12 @@ namespace engine::render {
 
 	uint64_t Renderer::ComposePortalBodyImage(const PortalImageCapture &capture, const View &body) {
 		if (capture.Tree != 0) return ComposePortalCaptureTree(capture.Tree, body);
-		return ComposePortalBodyImageInternal(capture, body, capture.Binding);
+		// A composed eye is a finished picture and is drawn by the eye output,
+		// which takes only complete-world images. A pane samples it either way.
+		auto output = capture.Binding;
+		if (output.ExpectedProjection == PortalImageProjection::Eye)
+			output.ExpectedScope = PortalImageScope::CompleteWorld;
+		return ComposePortalBodyImageInternal(capture, body, output);
 	}
 
 	uint64_t Renderer::ComposePortalBodyImageInternal(
@@ -917,9 +973,9 @@ namespace engine::render {
 			std::to_string(body.Slot)
 		);
 		if (std::none_of(
-				State->NamedPipelines.begin(), State->NamedPipelines.end(), [&](const auto &pipeline) {
-					return pipeline.Name == pipelineName;
-				}
+				State->InstalledPipelines.begin(),
+				State->InstalledPipelines.end(),
+				[&](const auto &pipeline) { return pipeline.Name == pipelineName; }
 			)) {
 			graph::PipelineDocument document;
 			const auto base = graph::DefaultPortalBodyDocument(
@@ -971,14 +1027,20 @@ namespace engine::render {
 	}
 
 	Renderer::Impl::ImportedPortalImage *Renderer::Impl::FindPortalImport(
-		const View &view, size_t viewSlot, const PortalView &portal, SDL_GPUCommandBuffer *command
+		const View &view,
+		size_t viewSlot,
+		const PortalView &portal,
+		SDL_GPUCommandBuffer *command,
+		bool seamRadiance
 	) {
 		for (auto &image : ImportedPortals) {
-			if (portal.ExternalImage && portal.ImportedImage != 0 && image.Handle == portal.ImportedImage &&
+			const uint64_t handle = seamRadiance ? portal.ImportedLightImage : portal.ImportedImage;
+			const core::Name key = seamRadiance ? portal.LightImagePortal : portal.ImagePortal;
+			if (portal.ExternalImage && handle != 0 && image.Handle == handle &&
 				image.Binding.World == view.World && image.Binding.WorldName == view.WorldName &&
 				image.Binding.ViewSlot == viewSlot && image.Binding.Index == portal.Index &&
-				image.Binding.Portal == portal.ImagePortal && image.Binding.Layer == 0 &&
-				image.Texture != nullptr && (image.Ready || image.Recorded == command)) {
+				image.Binding.Portal == key && image.Binding.Layer == 0 && image.Texture != nullptr &&
+				(image.Ready || image.Recorded == command)) {
 				return &image;
 			}
 		}

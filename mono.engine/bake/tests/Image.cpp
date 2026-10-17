@@ -84,6 +84,24 @@ namespace {
 		 0xCC, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82}
 	};
 
+	// CRC-valid one-pixel RGBA headers require five inflated bytes. Independent
+	// zlib streams below produce 4096 and four bytes, respectively.
+	constexpr std::array<uint8_t, 83> PNG_EXCESS_INFLATION{
+		{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00,
+		 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00,
+		 0x00, 0x00, 0x1A, 0x49, 0x44, 0x41, 0x54, 0x78, 0xDA, 0xED, 0xC1, 0x01, 0x0D, 0x00, 0x00, 0x00, 0xC2,
+		 0xA0, 0xF7, 0x4F, 0x6D, 0x0F, 0x07, 0x14, 0x00, 0x00, 0x00, 0xF0, 0x6E, 0x10, 0x00, 0x00, 0x01, 0x9B,
+		 0x68, 0x54, 0x63, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82}
+	};
+
+	constexpr std::array<uint8_t, 69> PNG_SHORT_INFLATION{
+		{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+		 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+		 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x78,
+		 0xDA, 0x63, 0x60, 0x60, 0x60, 0x00, 0x00, 0x00, 0x04, 0x00, 0x01, 0xC8, 0xEA, 0xEB,
+		 0xF9, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82}
+	};
+
 	constexpr std::array<uint8_t, 70> BMP_BOTTOM_UP{
 		{0x42, 0x4D, 0x46, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x36, 0x00, 0x00, 0x00,
 		 0x28, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00,
@@ -526,6 +544,26 @@ TEST_CASE("a corrupt png chunk is refused rather than decoded", "[bake][image]")
 	CHECK_FALSE(failure.empty());
 }
 
+TEST_CASE("png inflation stops at the header size and still rejects short streams", "[bake][image]") {
+	TextureData image = Decoded(PNG_RGB);
+	const TextureData original = image;
+	std::string failure;
+
+	SECTION("excess output is refused by the bounded sink") {
+		CHECK_FALSE(ReadImage(Bytes(PNG_EXCESS_INFLATION), image, failure));
+		CHECK(failure == "png: inflated data exceeds the header size");
+	}
+	SECTION("short output still fails the exact size check") {
+		CHECK_FALSE(ReadImage(Bytes(PNG_SHORT_INFLATION), image, failure));
+		CHECK(failure == "png: inflated size disagrees with the header");
+	}
+
+	CHECK(image.Width == original.Width);
+	CHECK(image.Height == original.Height);
+	CHECK(image.Format == original.Format);
+	CHECK(image.Pixels == original.Pixels);
+}
+
 TEST_CASE("a truncated image is refused or whole, never half", "[bake][image]") {
 	// **Not "every truncation fails", which is the assertion this started as
 	// and which is wrong.** A PNG missing only its `IEND` marker has every
@@ -871,20 +909,34 @@ TEST_CASE("a GIF's delays become one frame rate", "[bake]") {
 	CHECK(texture.Height == 2);
 }
 
-TEST_CASE("frames with different delays average to one rate", "[bake]") {
-	// **A real approximation, stated rather than hidden.** GIF permits a delay
-	// per frame and a flipbook has one rate by construction, so a sheet cannot
-	// hold both - the total duration over the frame count is what a single rate
-	// can honestly be. `fox_dance.gif` is exactly this case: forty-eight frames
-	// alternating four and five hundredths, two seconds, 24fps.
+TEST_CASE("frames with different delays retain their authored timeline", "[bake]") {
 	engine::assets::TextureData texture;
 	std::string failure;
 
 	REQUIRE(engine::bake::ReadImage(AnimatedGif({4, 5, 4, 5}), texture, failure));
+	CHECK(failure.empty());
+	CHECK(texture.FlipbookFrameRate == 0.0f);
+	REQUIRE(texture.FlipbookFrameDurations.size() == 4);
+	CHECK(texture.FlipbookFrameDurations[0] == Catch::Approx(0.04f));
+	CHECK(texture.FlipbookFrameDurations[1] == Catch::Approx(0.05f));
+	CHECK(texture.FlipbookFrameDurations[2] == Catch::Approx(0.04f));
+	CHECK(texture.FlipbookFrameDurations[3] == Catch::Approx(0.05f));
+}
 
-	// 0.18 seconds for four frames.
-	CHECK(texture.FlipbookFrames == 4);
-	CHECK(texture.FlipbookFrameRate == Catch::Approx(4.0f / 0.18f).epsilon(0.001));
+TEST_CASE("a GIF keeps at most 256 frames", "[bake]") {
+	engine::assets::TextureData texture;
+	std::string failure;
+
+	const std::vector<uint16_t> limit(256, 4);
+	REQUIRE(engine::bake::ReadImage(AnimatedGif(limit), texture, failure));
+	CHECK(texture.FlipbookSide == 16);
+	CHECK(texture.FlipbookFrames == 256);
+	CHECK(texture.Width == 32);
+	CHECK(texture.Height == 16);
+
+	const std::vector<uint16_t> overLimit(257, 4);
+	CHECK_FALSE(engine::bake::ReadImage(AnimatedGif(overLimit), texture, failure));
+	CHECK(failure.find("more than 256") != std::string::npos);
 }
 
 TEST_CASE("a delay of zero is read the way every browser reads it", "[bake]") {

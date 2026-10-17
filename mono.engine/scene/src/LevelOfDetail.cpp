@@ -19,8 +19,7 @@ namespace engine::scene {
 		);
 	}
 
-	LevelOfDetail
-	ResolveMeshLOD(const core::Name &base, const AutoMeshLOD *automatic, const CustomMeshLOD *custom) {
+	LevelOfDetail ResolveMeshLOD(const core::Name &base, const LODAuto *automatic, const LODCustom *custom) {
 		LevelOfDetail resolved;
 		const uint8_t automaticLevels =
 			automatic == nullptr ? 1
@@ -58,12 +57,18 @@ namespace engine::scene {
 			customSelected |= customAvailable;
 		}
 
-		if (resolved.Levels <= 1) {
-			return resolved;
-		}
 		resolved.TargetQuadArea = custom != nullptr && custom->TargetQuadArea > 0.0f
 									  ? custom->TargetQuadArea
 									  : (automatic == nullptr ? 0.0f : automatic->TargetQuadArea);
+		resolved.Billboard = custom != nullptr && custom->Billboard.IsValid()
+								 ? custom->Billboard
+								 : (automatic == nullptr ? core::Name{} : automatic->Billboard);
+		if (resolved.Levels <= 1 && !resolved.Billboard.IsValid()) {
+			return resolved;
+		}
+		if (resolved.Billboard.IsValid()) {
+			resolved.Levels = std::max<uint8_t>(resolved.Levels, 2);
+		}
 		resolved.Strategy =
 			customSelected || automatic == nullptr
 				? LodStrategy::Authored
@@ -73,7 +78,7 @@ namespace engine::scene {
 		return resolved;
 	}
 
-	LevelOfDetail ResolveMeshLOD(const AutoMeshLOD *automatic, const CustomMeshLOD *custom) {
+	LevelOfDetail ResolveMeshLOD(const LODAuto *automatic, const LODCustom *custom) {
 		return ResolveMeshLOD({}, automatic, custom);
 	}
 

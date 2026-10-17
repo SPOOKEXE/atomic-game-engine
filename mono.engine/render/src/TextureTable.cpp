@@ -1,4 +1,5 @@
 #include "GpuHeap.hpp"
+#include "TextureFormatSupport.hpp"
 
 #include <engine/assets/Builtin.hpp>
 #include <engine/core/Log.hpp>
@@ -9,7 +10,11 @@
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
+#include <limits>
+#include <new>
+#include <optional>
 #include <vector>
 
 namespace engine::render {
@@ -18,15 +23,38 @@ namespace engine::render {
 		uint64_t TextureKey(const core::Name &name, core::Name owner) {
 			return (uint64_t(owner.Id()) << 32) | name.Id();
 		}
+
+		std::optional<size_t> UploadedByteCount(const assets::TextureData &image) {
+			const auto format = detail::TextureFormatForUpload(image.Format);
+			if (!format) return std::nullopt;
+			uint64_t bytes = 0;
+			for (uint32_t level = 0; level < image.LevelCount(); level++) {
+				const uint64_t pixels =
+					uint64_t(assets::MipExtent(image.Width, level)) * assets::MipExtent(image.Height, level);
+				if (pixels > std::numeric_limits<uint64_t>::max() / format->UploadBytesPerPixel)
+					return std::nullopt;
+				const uint64_t levelBytes = pixels * format->UploadBytesPerPixel;
+				if (levelBytes > std::numeric_limits<size_t>::max() - bytes) return std::nullopt;
+				bytes += levelBytes;
+			}
+			return static_cast<size_t>(bytes);
+		}
+	}
+
+	std::optional<uint32_t> TextureUploadBytesPerPixel(assets::TextureFormat format) noexcept {
+		const auto support = detail::TextureFormatForUpload(format);
+		if (!support) return std::nullopt;
+		return support->UploadBytesPerPixel;
 	}
 
 	TextureTable::~TextureTable() {
 		Shutdown();
 	}
 
-	bool TextureTable::Initialise(SDL_GPUDevice *device, bool retainSources) {
+	bool TextureTable::Initialise(SDL_GPUDevice *device, bool retainSources, size_t maximumBytes) {
 		Device = device;
 		RetainSources = retainSources;
+		MaximumBytes = maximumBytes == 0 ? MAXIMUM_BYTES : maximumBytes;
 		if (Device == nullptr) {
 			return false;
 		}
@@ -125,6 +153,7 @@ namespace engine::render {
 		}
 
 		Textures.clear();
+		TimingGeneration++;
 		Awaiting.clear();
 		DefaultHandle = nullptr;
 		MissingHandle = nullptr;
@@ -138,6 +167,12 @@ namespace engine::render {
 
 	SDL_GPUTexture *
 	TextureTable::Upload(const assets::TextureData &image, std::string_view label, size_t &bytes) {
+		const auto format = detail::TextureFormatForUpload(image.Format);
+		const auto uploadSize = UploadedByteCount(image);
+		if (Device == nullptr || !image.IsValid() || !format || !uploadSize ||
+			*uploadSize > std::numeric_limits<uint32_t>::max() ||
+			!detail::SupportsTextureFormat(Device, image.Format))
+			return nullptr;
 		const uint32_t levels = image.LevelCount();
 
 		// **Every level staged back to back in one buffer**, so a chain costs one
@@ -147,35 +182,31 @@ namespace engine::render {
 		// alignment: SDL's backend inserts a staging copy for a level that lands
 		// unaligned, and paying that on the two or three smallest levels is
 		// cheaper than the padding on every level of every texture.
-		size_t uploadBytes = 0;
-		for (uint32_t level = 0; level < levels; level++) {
-			uploadBytes += static_cast<size_t>(assets::MipExtent(image.Width, level)) *
-						   assets::MipExtent(image.Height, level) * 4;
-		}
+		const size_t uploadBytes = *uploadSize;
 
-		// Expand R8 assets so every texture uses the pipeline's RGBA format.
-		std::vector<std::byte> staged(uploadBytes);
+		// R8 and packed RGBA4 expand explicitly; floating formats stay native.
+		std::vector<std::byte> staged;
+		try {
+			staged.resize(uploadBytes);
+		} catch (const std::bad_alloc &) {
+			return nullptr;
+		}
 		size_t written = 0;
 		for (uint32_t level = 0; level < levels; level++) {
 			const std::vector<std::byte> &source = level == 0 ? image.Pixels : image.Mips[level - 1];
-			if (image.Format == assets::TextureFormat::R8) {
-				for (size_t index = 0; index < source.size(); index++) {
-					staged[written + index * 4] = source[index];
-					staged[written + index * 4 + 1] = source[index];
-					staged[written + index * 4 + 2] = source[index];
-					staged[written + index * 4 + 3] = std::byte{255};
-				}
-				written += source.size() * 4;
-				continue;
-			}
-			std::memcpy(staged.data() + written, source.data(), source.size());
-			written += source.size();
+			const uint64_t pixels =
+				uint64_t(assets::MipExtent(image.Width, level)) * assets::MipExtent(image.Height, level);
+			const size_t destinationBytes = static_cast<size_t>(pixels * format->UploadBytesPerPixel);
+			if (!detail::CopyPixelsForUpload(
+					image.Format, source, std::span(staged).subspan(written, destinationBytes)
+				))
+				return nullptr;
+			written += destinationBytes;
 		}
 
 		SDL_GPUTextureCreateInfo info{};
 		info.type = SDL_GPU_TEXTURETYPE_2D;
-		info.format = assets::IsSRGB(image.Format) ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
-												   : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+		info.format = format->DeviceFormat;
 		info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
 		info.width = image.Width;
 		info.height = image.Height;
@@ -201,6 +232,11 @@ namespace engine::render {
 		}
 
 		void *mapped = SDL_MapGPUTransferBuffer(Device, transfer, false);
+		if (mapped == nullptr) {
+			gpu::ReleaseTransferBuffer(Device, transfer);
+			gpu::ReleaseTexture(Device, texture);
+			return nullptr;
+		}
 		std::memcpy(mapped, staged.data(), uploadBytes);
 		SDL_UnmapGPUTransferBuffer(Device, transfer);
 
@@ -226,7 +262,7 @@ namespace engine::render {
 			region.d = 1;
 
 			SDL_UploadToGPUTexture(copy, &source, &region, false);
-			offset += static_cast<size_t>(width) * height * 4;
+			offset += static_cast<size_t>(width) * height * format->UploadBytesPerPixel;
 		}
 
 		SDL_EndGPUCopyPass(copy);
@@ -254,9 +290,17 @@ namespace engine::render {
 			.FlipbookSide = image.FlipbookSide,
 			.FlipbookFrames = image.FlipbookFrames,
 			.FlipbookFrameRate = image.FlipbookFrameRate,
+			.FlipbookFrameDurations = image.FlipbookFrameDurations,
+			.FlipbookCumulativeEnds = {},
 			.SourcePixels = {},
 			.CopyStatus = TextureCopyStatus::Unsupported,
 		};
+		entry.FlipbookCumulativeEnds.reserve(image.FlipbookFrameDurations.size());
+		float elapsed = 0.0f;
+		for (float duration : image.FlipbookFrameDurations) {
+			elapsed += duration;
+			entry.FlipbookCumulativeEnds.push_back(elapsed);
+		}
 		if (retainSource) {
 			entry.SourcePixels = image.Pixels;
 			entry.CopyStatus = TextureCopyStatus::Copied;
@@ -272,9 +316,19 @@ namespace engine::render {
 		if (found == Textures.end()) {
 			return {};
 		}
-		return FlipbookCellAt(
-			found->second.FlipbookSide, found->second.FlipbookFrames, found->second.FlipbookFrameRate, seconds
-		);
+		const Entry &entry = found->second;
+		return entry.FlipbookCumulativeEnds.empty()
+				   ? FlipbookCellAt(
+						 entry.FlipbookSide, entry.FlipbookFrames, entry.FlipbookFrameRate, seconds
+					 )
+				   : FlipbookCellAt(entry.FlipbookSide, entry.FlipbookCumulativeEnds, seconds);
+	}
+
+	std::span<const float> TextureTable::TimingOf(const core::Name &name, core::Name owner) const {
+		if (!name.IsValid()) return {};
+		const auto found = Textures.find(TextureKey(name, owner));
+		return found == Textures.end() ? std::span<const float>{}
+									   : std::span<const float>(found->second.FlipbookCumulativeEnds);
 	}
 
 	uint64_t TextureTable::AnimationSignature(double seconds) const {
@@ -284,7 +338,10 @@ namespace engine::render {
 				continue;
 			}
 
-			const uint64_t frame = FlipbookFrameAt(entry.FlipbookFrames, entry.FlipbookFrameRate, seconds);
+			const uint64_t frame =
+				entry.FlipbookCumulativeEnds.empty()
+					? FlipbookFrameAt(entry.FlipbookFrames, entry.FlipbookFrameRate, seconds)
+					: FlipbookFrameAt(entry.FlipbookCumulativeEnds, seconds);
 			const uint64_t word = (name * 0x9E3779B97F4A7C15ull) ^ frame;
 			// Commutative because the catalogue is an unordered map. The name is
 			// part of every term, so two sheets on the same frame remain distinct.
@@ -301,15 +358,19 @@ namespace engine::render {
 		// The chain counts against the ceiling too - it is a third of a texture's
 		// device memory, and a pre-check that ignored it would let a full table
 		// take an upload it then could not afford.
-		size_t bytes = image.Pixels.size();
-		for (const std::vector<std::byte> &level : image.Mips) {
-			bytes += level.size();
-		}
-		if (UploadedBytes + bytes > MAXIMUM_BYTES) {
+		const auto uploadSize = UploadedByteCount(image);
+		if (!uploadSize || !detail::SupportsTextureFormat(Device, image.Format)) return false;
+		const size_t bytes = *uploadSize;
+		const auto existing = Textures.find(TextureKey(name, owner));
+		const size_t oldBytes =
+			existing == Textures.end() ? 0 : std::min(UploadedBytes, existing->second.Bytes);
+		const size_t residentBytes = UploadedBytes - oldBytes;
+		// The old handle stays alive until upload succeeds, but it should not consume
+		// the steady-state budget for its own replacement.
+		if (residentBytes > MaximumBytes || bytes > MaximumBytes - residentBytes) {
 			ENGINE_WARN("texture table: full, refusing {}", name.Text());
 			return false;
 		}
-		const auto existing = Textures.find(TextureKey(name, owner));
 		const size_t oldCopyBytes = existing == Textures.end() ? 0 : existing->second.SourcePixels.size();
 		const bool sourceTooLarge = image.Pixels.size() > MAXIMUM_COPY_BYTES;
 		const bool retainedOverLimit =
@@ -321,31 +382,31 @@ namespace engine::render {
 			return false;
 		}
 
-		// Release the old texture only after the replacement upload succeeds.
 		const bool retainSource = RetainSources && !sourceTooLarge && !retainedOverLimit;
-		if (existing != Textures.end()) {
-			gpu::ReleaseTexture(Device, existing->second.Texture);
+		Entry prepared;
+		Entry *destination = existing == Textures.end() ? nullptr : &existing->second;
+		try {
+			prepared = Describe(texture, uploadBytes, image, retainSource);
+			if (destination == nullptr)
+				destination = &Textures.try_emplace(TextureKey(name, owner)).first->second;
+		} catch (const std::bad_alloc &) {
+			gpu::ReleaseTexture(Device, texture);
+			return false;
+		}
+		if (!RetainSources)
+			prepared.CopyStatus = TextureCopyStatus::Unsupported;
+		else if (sourceTooLarge)
+			prepared.CopyStatus = TextureCopyStatus::OverLimit;
+		else if (retainedOverLimit)
+			prepared.CopyStatus = TextureCopyStatus::Unsupported;
 
-			// **The old size comes off before the new one goes on**, which it
-			// did not before: the total only ever grew, so a session that
-			// replaced textures drifted up until the ceiling refused an upload
-			// that would have fit.
-			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
-			existing->second = Describe(texture, uploadBytes, image, retainSource);
-		} else {
-			Textures.emplace(TextureKey(name, owner), Describe(texture, uploadBytes, image, retainSource));
-		}
-		Entry &entry = Textures.find(TextureKey(name, owner))->second;
+		// Build timing, source copies and the map slot before retiring accepted content.
+		// Moving the prepared vectors cannot allocate, so a refusal leaves the old entry intact.
+		if (destination->Texture != nullptr) gpu::ReleaseTexture(Device, destination->Texture);
+		*destination = std::move(prepared);
+		UploadedBytes -= oldBytes;
 		RetainedCopyBytes -= oldCopyBytes;
-		if (!RetainSources) {
-			entry.CopyStatus = TextureCopyStatus::Unsupported;
-		} else if (sourceTooLarge) {
-			entry.CopyStatus = TextureCopyStatus::OverLimit;
-		} else if (retainedOverLimit) {
-			entry.CopyStatus = TextureCopyStatus::Unsupported;
-		} else {
-			RetainedCopyBytes += entry.SourcePixels.size();
-		}
+		RetainedCopyBytes += destination->SourcePixels.size();
 
 		UploadedBytes += uploadBytes;
 
@@ -354,6 +415,99 @@ namespace engine::render {
 		// texture is still in flight, and a rule the type enforces is one no
 		// host can forget.
 		Awaiting.erase(TextureKey(name, owner));
+		TimingGeneration++;
+		return true;
+	}
+
+	bool TextureTable::AddBatch(std::span<const TextureBatchImage> images, core::Name owner) {
+		if (Device == nullptr || images.empty() || images.size() > 6) return false;
+		struct Pending {
+			uint64_t Key = 0;
+			SDL_GPUTexture *Texture = nullptr;
+			Entry Prepared;
+			bool Inserted = false;
+		};
+		std::array<Pending, 6> pending{};
+		size_t residentBytes = UploadedBytes;
+		size_t retainedBytes = RetainedCopyBytes;
+		for (size_t index = 0; index < images.size(); ++index) {
+			const TextureBatchImage &item = images[index];
+			if (!item.Name.IsValid() || item.Image == nullptr || !item.Image->IsValid() ||
+				!UploadedByteCount(*item.Image) || !detail::SupportsTextureFormat(Device, item.Image->Format))
+				return false;
+			pending[index].Key = TextureKey(item.Name, owner);
+			for (size_t earlier = 0; earlier < index; ++earlier)
+				if (pending[earlier].Key == pending[index].Key) return false;
+			const auto existing = Textures.find(pending[index].Key);
+			if (existing != Textures.end()) {
+				residentBytes -= std::min(residentBytes, existing->second.Bytes);
+				retainedBytes -= std::min(retainedBytes, existing->second.SourcePixels.size());
+			}
+		}
+		size_t newBytes = 0;
+		for (const TextureBatchImage &item : images) {
+			const auto uploaded = UploadedByteCount(*item.Image);
+			if (!uploaded) return false;
+			const size_t bytes = *uploaded;
+			if (residentBytes > MaximumBytes || newBytes > MaximumBytes - residentBytes ||
+				bytes > MaximumBytes - residentBytes - newBytes)
+				return false;
+			newBytes += bytes;
+		}
+
+		const auto cleanup = [&] {
+			for (size_t index = 0; index < images.size(); ++index) {
+				if (pending[index].Texture != nullptr) gpu::ReleaseTexture(Device, pending[index].Texture);
+				if (pending[index].Inserted) Textures.erase(pending[index].Key);
+			}
+		};
+		try {
+			Textures.reserve(Textures.size() + images.size());
+			for (size_t index = 0; index < images.size(); ++index)
+				pending[index].Inserted = Textures.try_emplace(pending[index].Key).second;
+		} catch (const std::bad_alloc &) {
+			cleanup();
+			return false;
+		}
+
+		size_t newRetainedBytes = 0;
+		for (size_t index = 0; index < images.size(); ++index) {
+			const auto &image = *images[index].Image;
+			size_t uploadBytes = 0;
+			pending[index].Texture = Upload(image, images[index].Name.Text(), uploadBytes);
+			if (pending[index].Texture == nullptr) {
+				cleanup();
+				return false;
+			}
+			const bool sourceTooLarge = image.Pixels.size() > MAXIMUM_COPY_BYTES;
+			const bool retainedOverLimit =
+				image.Pixels.size() > MAXIMUM_RETAINED_COPY_BYTES - retainedBytes - newRetainedBytes;
+			const bool retainSource = RetainSources && !sourceTooLarge && !retainedOverLimit;
+			try {
+				pending[index].Prepared = Describe(pending[index].Texture, uploadBytes, image, retainSource);
+			} catch (const std::bad_alloc &) {
+				cleanup();
+				return false;
+			}
+			if (!RetainSources)
+				pending[index].Prepared.CopyStatus = TextureCopyStatus::Unsupported;
+			else if (sourceTooLarge)
+				pending[index].Prepared.CopyStatus = TextureCopyStatus::OverLimit;
+			else if (retainedOverLimit)
+				pending[index].Prepared.CopyStatus = TextureCopyStatus::Unsupported;
+			else
+				newRetainedBytes += pending[index].Prepared.SourcePixels.size();
+		}
+		for (size_t index = 0; index < images.size(); ++index) {
+			Entry &old = Textures.find(pending[index].Key)->second;
+			if (old.Texture != nullptr) gpu::ReleaseTexture(Device, old.Texture);
+			old = std::move(pending[index].Prepared);
+			pending[index].Texture = nullptr;
+			Awaiting.erase(pending[index].Key);
+		}
+		UploadedBytes = residentBytes + newBytes;
+		RetainedCopyBytes = retainedBytes + newRetainedBytes;
+		TimingGeneration++;
 		return true;
 	}
 
@@ -405,6 +559,7 @@ namespace engine::render {
 		copied.FlipbookSide = entry.FlipbookSide;
 		copied.FlipbookFrames = entry.FlipbookFrames;
 		copied.FlipbookFrameRate = entry.FlipbookFrameRate;
+		copied.FlipbookFrameDurations = entry.FlipbookFrameDurations;
 		if (!copied.IsValid()) return TextureCopyStatus::Invalid;
 		out = std::move(copied);
 		return TextureCopyStatus::Copied;
@@ -426,7 +581,7 @@ namespace engine::render {
 		// texture.** The alternative - release the old entry and then discover
 		// there is no room - would drop a working picture to make space for one
 		// that is not going in.
-		if (UploadedBytes + bytes > MAXIMUM_BYTES) {
+		if (UploadedBytes > MaximumBytes || bytes > MaximumBytes - UploadedBytes) {
 			ENGINE_WARN("texture table: full, refusing {}", name.Text());
 			return false;
 		}
@@ -459,6 +614,47 @@ namespace engine::render {
 		// texture is still in flight, and a rule the type enforces is one no
 		// host can forget.
 		Awaiting.erase(TextureKey(name, owner));
+		TimingGeneration++;
+		return true;
+	}
+
+	bool TextureTable::ReplaceAdopt(
+		const core::Name &name,
+		SDL_GPUTexture *texture,
+		uint32_t width,
+		uint32_t height,
+		size_t bytes,
+		core::Name owner,
+		SDL_GPUTexture *&retired,
+		assets::TextureFormat format
+	) {
+		retired = nullptr;
+		if (Device == nullptr || !name.IsValid() || texture == nullptr ||
+			!detail::TextureFormatForUpload(format))
+			return false;
+		const auto existing = Textures.find(TextureKey(name, owner));
+		if (existing != Textures.end() && existing->second.Texture == texture) return false;
+		const size_t oldBytes = existing == Textures.end() ? 0 : existing->second.Bytes;
+		const size_t resident = UploadedBytes - std::min(UploadedBytes, oldBytes);
+		if (resident > MaximumBytes || bytes > MaximumBytes - resident) return false;
+		Entry entry;
+		entry.Texture = texture;
+		entry.Bytes = bytes;
+		entry.Width = width;
+		entry.Height = height;
+		entry.Format = format;
+		entry.CopyStatus = TextureCopyStatus::Unsupported;
+		if (existing != Textures.end()) {
+			retired = existing->second.Texture;
+			RetainedCopyBytes -= std::min(RetainedCopyBytes, existing->second.SourcePixels.size());
+			UploadedBytes -= std::min(UploadedBytes, existing->second.Bytes);
+			existing->second = std::move(entry);
+		} else {
+			Textures.emplace(TextureKey(name, owner), std::move(entry));
+		}
+		UploadedBytes += bytes;
+		Awaiting.erase(TextureKey(name, owner));
+		TimingGeneration++;
 		return true;
 	}
 
@@ -498,19 +694,22 @@ namespace engine::render {
 		UploadedBytes -= std::min(UploadedBytes, found->second.Bytes);
 		RetainedCopyBytes -= std::min(RetainedCopyBytes, found->second.SourcePixels.size());
 		Textures.erase(found);
+		TimingGeneration++;
 		return true;
 	}
 	size_t TextureTable::DropOwner(core::Name owner) {
 		if (!owner.IsValid()) return 0;
 		const uint32_t ownerId = owner.Id();
 		std::erase_if(Awaiting, [ownerId](uint64_t key) { return uint32_t(key >> 32) == ownerId; });
-		return std::erase_if(Textures, [&](const auto &pair) {
+		const size_t removed = std::erase_if(Textures, [&](const auto &pair) {
 			if (uint32_t(pair.first >> 32) != ownerId) return false;
 			gpu::ReleaseTexture(Device, pair.second.Texture);
 			UploadedBytes -= std::min(UploadedBytes, pair.second.Bytes);
 			RetainedCopyBytes -= std::min(RetainedCopyBytes, pair.second.SourcePixels.size());
 			return true;
 		});
+		if (removed != 0) TimingGeneration++;
+		return removed;
 	}
 
 }

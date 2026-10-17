@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -779,6 +780,82 @@ TEST_CASE("presentation demand ignores absent, remote, and duplicate worlds", "[
 	CHECK(universe.PresentMany(requests) == 1);
 	CHECK(presented == 1);
 	universe.Enter(local, [](Store &store) { CHECK(store.Time().Alpha == 0.5f); });
+}
+
+// Keep one universe across pool restarts and registry holes. Rebuilding the lane
+// loads must preserve exact physical outputs and tick/presentation ownership.
+TEST_CASE("lane refresh survives pool resize and local remote slot reuse", "[world][parallel]") {
+	const auto run = [](ExecutionMode mode) {
+		UniverseSettings settings;
+		settings.Mode = mode;
+		settings.WorldParallelFloorMilliseconds = 0.0f;
+		Universe universe(settings);
+		std::array<WorldId, 4> worlds;
+		std::array<int64_t, 4> expected{};
+		std::array<std::thread::id, 4> tickThreads{};
+		std::array<std::thread::id, 4> presentationThreads{};
+		const auto install = [&](size_t index, const char *name) {
+			worlds[index] = universe.Create(Named(name));
+			Populate(universe, worlds[index], 3);
+			expected[index] = 0;
+			universe.Enter(worlds[index], [&](Store &, Scheduler &systems) {
+				systems.Add("record-refresh-tick", Phase::Simulation, [&, index](Store &) {
+					tickThreads[index] = std::this_thread::get_id();
+				});
+				systems.Add("record-refresh-present", Phase::PreRender, [&, index](Store &) {
+					presentationThreads[index] = std::this_thread::get_id();
+				});
+			});
+		};
+		install(0, "refresh.first");
+		install(1, "refresh.second");
+		install(2, "refresh.third");
+		install(3, "refresh.fourth");
+		WorldId remote = universe.CreateRemote(Named("refresh.remote"), Name("refresh.host"));
+		std::vector<int64_t> outputs;
+		WorldId vacant;
+		const std::array workerCounts{2u, 4u, 1u, 0u, 2u};
+		for (size_t stage = 0; stage < workerCounts.size(); stage++) {
+			std::unique_ptr<Pool> pool;
+			if (workerCounts[stage] != 0) pool = std::make_unique<Pool>(workerCounts[stage]);
+			if (stage == 1) {
+				vacant = worlds[1];
+				REQUIRE(universe.Destroy(worlds[1]) == WorldStatus::Ok);
+				worlds[1] = {};
+			} else if (stage == 2) {
+				remote = universe.CreateRemote(Named("refresh.hole.remote"), Name("refresh.host"));
+				CHECK(remote.Index == vacant.Index);
+			} else if (stage == 3) {
+				REQUIRE(universe.Destroy(remote) == WorldStatus::Ok);
+				install(1, "refresh.replacement");
+				CHECK(worlds[1].Index == vacant.Index);
+				REQUIRE(universe.Destroy(worlds[3]) == WorldStatus::Ok);
+				worlds[3] = {};
+			} else if (stage == 4) {
+				install(3, "refresh.last.replacement");
+			}
+			for (int tick = 0; tick < 3; tick++) {
+				universe.Tick(1.0f / 60.0f);
+				std::vector<Presentation> requests;
+				for (const WorldId id : worlds) {
+					if (id.IsValid()) requests.push_back(Presentation{id, 1.0f / 60.0f, 0.5f});
+				}
+				const size_t localCount = requests.size();
+				requests.push_back(Presentation{remote, 1.0f / 60.0f, 0.5f});
+				REQUIRE(universe.PresentMany(requests) == localCount);
+				for (size_t index = 0; index < worlds.size(); index++) {
+					if (!worlds[index].IsValid()) continue;
+					expected[index] += 3;
+					const auto total = Total(universe, worlds[index]);
+					REQUIRE(total == expected[index]);
+					CHECK(tickThreads[index] == presentationThreads[index]);
+					outputs.push_back(total);
+				}
+			}
+		}
+		return outputs;
+	};
+	REQUIRE(run(ExecutionMode::WorldParallel) == run(ExecutionMode::WorldSerial));
 }
 
 // --- churn ----------------------------------------------------------------

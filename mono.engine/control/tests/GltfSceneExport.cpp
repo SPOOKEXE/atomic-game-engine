@@ -1,3 +1,5 @@
+#include "HookFixture.hpp"
+
 #include <engine/assets/Builtin.hpp>
 #include <engine/assets/ContentHash.hpp>
 #include <engine/control/Surface.hpp>
@@ -9,6 +11,7 @@
 #include <engine/scene/Part.hpp>
 #include <engine/scene/Registration.hpp>
 #include <engine/testing/Suite.hpp>
+#include <engine/world/DataFactory.hpp>
 #include <engine/world/Universe.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -94,23 +97,41 @@ TEST_CASE("glTF scene export MCP returns a checksummed GLB with stable IDs", "[c
 	engine::world::Universe universe;
 	const auto world = World(universe, "gltf");
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneClasses();
 		const auto part = engine::scene::MakePart(
 			store,
 			{
 				.Frame = {},
-				.Size = {1, 1, 1},
+				.Size = {2, 2, 2},
 				.Material = {},
 				.Mesh = engine::core::Name(engine::assets::BuiltinName(engine::assets::BuiltinMesh::Cube)),
 				.Class = {},
 			}
 		);
 		Identify(store, part, "export/cube");
+		auto appearance = *store.Get<engine::scene::SurfaceAppearance>(part);
+		appearance.TransmissionFactor = 0.7f;
+		appearance.IndexOfRefraction = 2.0f;
+		appearance.Thickness = 0.5f;
+		store.Set(part, appearance);
 		auto visual = *store.Get<engine::scene::Visual>(part);
 		visual.Transparency = 0.5f;
 		store.Set(part, visual);
+		const auto uneven = engine::scene::MakePart(
+			store,
+			{.Frame = {},
+			 .Size = {2, 1, 1},
+			 .Material = {},
+			 .Mesh = engine::core::Name(engine::assets::BuiltinName(engine::assets::BuiltinMesh::Cube)),
+			 .Class = {}}
+		);
+		Identify(store, uneven, "export/nonuniform");
+		auto unevenAppearance = *store.Get<engine::scene::SurfaceAppearance>(uneven);
+		unevenAppearance.TransmissionFactor = 0.7f;
+		unevenAppearance.Thickness = 0.5f;
+		store.Set(uneven, unevenAppearance);
 		const auto unavailable = engine::scene::MakePart(
 			store,
 			{.Frame = {},
@@ -139,6 +160,17 @@ TEST_CASE("glTF scene export MCP returns a checksummed GLB with stable IDs", "[c
 	const json document = GltfJson(bytes);
 	CHECK(document.at("materials").at(0).at("alphaMode") == "BLEND");
 	CHECK(document.at("materials").at(0).at("pbrMetallicRoughness").at("baseColorFactor").at(3) == 0.5f);
+	const auto &extensions = document.at("materials").at(0).at("extensions");
+	CHECK(extensions.at("KHR_materials_transmission").at("transmissionFactor") == 0.7f);
+	CHECK(extensions.at("KHR_materials_ior").at("ior") == 2.0f);
+	CHECK(extensions.at("KHR_materials_volume").at("thicknessFactor") == 0.25f);
+	const auto &unevenMaterial = document.at("materials").at(1);
+	CHECK_FALSE(unevenMaterial.at("extensions").contains("KHR_materials_volume"));
+	CHECK(unevenMaterial.at("extras").at("engine_authored_thickness_metres") == 0.5f);
+	CHECK(
+		document.at("extras").at("unavailable").at(1).at("reason") ==
+		"nonuniform_scale_cannot_encode_world_thickness"
+	);
 	CHECK(engine::assets::Hasher::Of(bytes).ToHex() == reply.at("hash").get<std::string>());
 }
 
@@ -146,7 +178,7 @@ TEST_CASE("glTF scene export embeds editable image maps as PNG buffer views", "[
 	engine::world::Universe universe;
 	const auto world = World(universe, "gltf.textures");
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneClasses();
 		const auto image = store.CreateInstance(engine::scene::EditableImageClass(), "Pixel");
@@ -201,8 +233,9 @@ TEST_CASE("glTF scene export uses a host's resident mesh source", "[control][glt
 	bool sourceCalled = false;
 	bool textureCalled = false;
 	engine::control::Surface surface("test", "test");
-	surface.Enable(
-		std::array{engine::control::features::DataScene(
+	engine::control::test::Install(
+		surface,
+		std::array{engine::control::test::DataScene(
 			universe,
 			{},
 			nullptr,
@@ -272,7 +305,7 @@ TEST_CASE("glTF scene export omits binary structures when a scene has no geometr
 	World(universe, "gltf.empty");
 	const auto cameraOnly = World(universe, "gltf.camera");
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	universe.Enter(cameraOnly, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneClasses();
 		const auto camera = store.Create();
@@ -308,7 +341,7 @@ TEST_CASE("glTF scene export retains and releases large GLB resources", "[contro
 	engine::world::Universe universe;
 	const auto world = World(universe, "gltf.large");
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe)});
+	engine::control::test::Install(surface, std::array{engine::control::test::DataScene(universe)});
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneClasses();
 		const auto editable = store.CreateInstance(engine::scene::EditableMeshClass(), "LargeMesh");
@@ -423,7 +456,9 @@ TEST_CASE("glTF resource reads keep their source lifecycle fence", "[control][gl
 		}
 	});
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe, {}, &session)});
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::DataScene(universe, {}, &session)}
+	);
 	const auto current = session.Inspect("gltf.fenced");
 	REQUIRE(current.Status == engine::world::DataFactoryStatus::Ok);
 	const json options{
@@ -475,7 +510,9 @@ TEST_CASE("raw scene extract preserves portable mesh and source texture sections
 			out.Pixels.assign(sourcePixels.begin(), sourcePixels.end());
 			return engine::script::GltfTextureSourceStatus::Available;
 		};
-	surface.Enable(std::array{engine::control::features::DataScene(universe, {}, nullptr, {}, source)});
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::DataScene(universe, {}, nullptr, {}, source)}
+	);
 	universe.Enter(world, [](engine::ecs::Store &store) {
 		engine::scene::RegisterSceneClasses();
 		const auto part = engine::scene::MakePart(
@@ -598,7 +635,9 @@ TEST_CASE("raw scene resource reads keep their source lifecycle fence", "[contro
 		Identify(store, part, "raw/fenced");
 	});
 	engine::control::Surface surface("test", "test");
-	surface.Enable(std::array{engine::control::features::DataScene(universe, {}, &session)});
+	engine::control::test::Install(
+		surface, std::array{engine::control::test::DataScene(universe, {}, &session)}
+	);
 	const auto current = session.Inspect("raw.fenced");
 	REQUIRE(current.Status == engine::world::DataFactoryStatus::Ok);
 	const json options{

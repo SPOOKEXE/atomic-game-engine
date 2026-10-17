@@ -55,6 +55,7 @@ namespace engine::render {
 	// recording as well; naming them once is what stops the two lists drifting.
 	struct ViewRequest {
 		core::CFrame CameraFrame;
+		core::CFrame VisibilityCameraFrame;
 		scene::Camera Camera;
 		std::span<const scene::DrawInstance> Instances;
 		std::span<const core::CFrame> JointFrames;
@@ -171,7 +172,7 @@ namespace engine::render {
 		ViewRequest Request;
 
 		// The installed graph this view is drawing.
-		const Impl::NamedPipeline *Pipeline = nullptr;
+		const Impl::InstalledPipeline *Pipeline = nullptr;
 
 		// The buffer every pass records into, and the image it presents to.
 		SDL_GPUCommandBuffer *Command = nullptr;
@@ -195,8 +196,8 @@ namespace engine::render {
 		// more, and a projection built from the world's would be a different one.
 		scene::Camera DrawCamera;
 		float NearestPane = 0.0f;
-		glm::mat4 CameraMatrix{1.0f};
 		scene::CameraMatrices Matrices;
+		scene::CameraMatrices BehaviourMatrices;
 		glm::mat4 LightViewProjection{1.0f};
 		core::AABB SceneBounds;
 		core::AABB DirectionalShadowBounds;
@@ -272,6 +273,11 @@ namespace engine::render {
 		// The world's lighting, and the blocks the passes push from it.
 		scene::WorldLighting CurrentLighting;
 		LightUniforms SceneLights;
+		std::array<core::Name, MAX_SCENE_LIGHTS> SceneLightIds{};
+		std::array<bool, MAX_SCENE_LIGHTS> SceneLightShadows{};
+		std::array<core::Name, 4> LocalLightCaptureIds{};
+		std::array<bool, 4> LocalLightCaptureMatched{};
+		std::array<bool, 4> LocalLightShadowCaptureAvailable{};
 		LightingUniforms Lighting;
 		FrameUniforms Frame;
 		PbrUniforms Uniforms;
@@ -522,8 +528,11 @@ namespace engine::render {
 			SDL_FColor clear,
 			const void *rawUniforms = nullptr,
 			size_t rawUniformBytes = 0,
-			const BeamUniforms *passBeams = nullptr
+			const BeamUniforms *passBeams = nullptr,
+			SDL_GPUBuffer *fragmentStorage = nullptr
 		);
+
+		bool UploadCloudDensity();
 
 		// The renderer-owned texture a named resource role resolves to.
 		//
@@ -624,6 +633,7 @@ namespace engine::render {
 
 		// `shadow`, which is the sun's map and the portal beam atlas beside it.
 		void RegisterShadowNodes(NodeTable &nodes);
+		bool RecordLocalLightShadow(const glm::mat4 &viewProjection);
 
 		// `mirror-capture` and `mirror-overlay`: what a pane shows, and the
 		// panes composited back over the frame.
@@ -640,7 +650,7 @@ namespace engine::render {
 		void RegisterGeometryNodes(NodeTable &nodes);
 
 		// `last-frame`, `depth-linearise`, `hzb`, `ssao`, `deferred-lighting`,
-		// `sky` and `tonemap`: the screen-space chain over the material head.
+		// `sky`, `dof`, `god-rays`, `bloom` and `tonemap`: the screen-space chain over the material head.
 		void RegisterShadingNodes(NodeTable &nodes);
 
 		// `raster` and `dispatch`: the two nodes a pipeline document can author

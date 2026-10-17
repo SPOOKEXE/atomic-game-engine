@@ -1,4 +1,7 @@
 #include <engine/assets/Material.hpp>
+#include <engine/assets/Resample.hpp>
+#include <engine/assets/TextureSequence.hpp>
+#include <engine/bake/GifSequence.hpp>
 #include <engine/bake/Graph.hpp>
 #include <engine/bake/Image.hpp>
 #include <engine/bake/Model.hpp>
@@ -27,6 +30,7 @@ namespace assetc {
 		// Extensions recognized by the runtime asset catalogue.
 		constexpr std::string_view MESH_EXTENSION = ".amesh";
 		constexpr std::string_view TEXTURE_EXTENSION = ".atex";
+		constexpr std::string_view SEQUENCE_EXTENSION = ".aseq";
 		constexpr std::string_view MATERIAL_EXTENSION = ".amat";
 
 		std::string Lowered(std::string text) {
@@ -71,12 +75,8 @@ namespace assetc {
 		}
 
 		bool IsImage(std::string_view extension) {
-			// **`.gif` is here and its output is a flipbook sheet**, which is the
-			// one entry whose baked result is not a picture of its input.
-			// `bake::ReadGif` lays the frames out as a square power-of-two grid,
-			// so a GIF becomes an ordinary texture and every path downstream -
-			// the chunker, the manifest, the renderer's table - handles it with no
-			// knowledge that it animates. `bake/src/Gif.cpp` carries the argument.
+			// A short GIF becomes a flipbook sheet; a longer one becomes an ordered
+			// `.aseq` sequence with each source delay intact.
 			//
 			// **`.svg` is here and it is the one that has no size of its own**,
 			// which is why it enters the graph through a different node - see
@@ -218,6 +218,11 @@ namespace assetc {
 			std::string Roughness;
 			std::string Occlusion;
 			std::string Height;
+			std::string PackedPbr;
+			std::string PackedRoughness;
+			std::string PackedOcclusion;
+			std::string PackedHeight;
+			std::string PackedMetalness;
 			std::string Emissive;
 			std::string Metalness;
 		};
@@ -272,6 +277,16 @@ namespace assetc {
 					out.Emissive = value;
 				} else if (key == "metalness") {
 					out.Metalness = value;
+				} else if (key == "packed_pbr") {
+					out.PackedPbr = value;
+				} else if (key == "packed_roughness") {
+					out.PackedRoughness = value;
+				} else if (key == "packed_occlusion") {
+					out.PackedOcclusion = value;
+				} else if (key == "packed_height") {
+					out.PackedHeight = value;
+				} else if (key == "packed_metalness") {
+					out.PackedMetalness = value;
 				}
 			}
 			return out;
@@ -299,12 +314,13 @@ namespace assetc {
 		if (staticFlipbook) {
 			const uint32_t side = settings.FlipbookSide;
 			const uint32_t cells = side * side;
-			const bool powerOfTwoSide = side == 1 || side == 2 || side == 4 || side == 8;
+			const bool powerOfTwoSide = side == 1 || side == 2 || side == 4 || side == 8 || side == 16;
 			if (!powerOfTwoSide || settings.FlipbookFrames == 0 || settings.FlipbookFrames > cells ||
 				!std::isfinite(settings.FlipbookFps) || settings.FlipbookFps <= 0.0f ||
 				settings.FlipbookFps >= 1000.0f) {
-				failure = "assetc: static flipbook needs side 1, 2, 4 or 8, a frame count within its grid, "
-						  "and FPS in (0, 1000)";
+				failure =
+					"assetc: static flipbook needs side 1, 2, 4, 8 or 16, a frame count within its grid, "
+					"and FPS in (0, 1000)";
 				return report;
 			}
 		}
@@ -336,6 +352,40 @@ namespace assetc {
 		}
 		std::sort(sources.begin(), sources.end());
 
+		// Material references decide a texture's sampling intent. Keep this full
+		// list before `Only` filters the output so rebaking one named PBR map later
+		// preserves the same linear format as a whole-tree bake.
+		const std::vector<std::string> allSources = sources;
+		std::set<std::string> numericTextures;
+		std::set<std::string> displayTextures;
+		for (const std::string &materialSource : allSources) {
+			if (!IsMaterial(ExtensionOf(materialSource))) {
+				continue;
+			}
+
+			const MaterialKeys keys = MaterialKeysOf(ReadFile(settings.Input / materialSource));
+			const size_t slash = materialSource.find_last_of('/');
+			const std::string directory =
+				slash == std::string::npos ? std::string() : materialSource.substr(0, slash);
+			const auto record = [&directory](const std::string &named, std::set<std::string> &textures) {
+				std::string resolved;
+				if (!named.empty() && Resolve(directory, named, resolved)) {
+					textures.insert(std::move(resolved));
+				}
+			};
+			record(keys.Colour, displayTextures);
+			record(keys.Emissive, displayTextures);
+			for (const std::string *named :
+				 {&keys.Normal,
+				  &keys.Roughness,
+				  &keys.Occlusion,
+				  &keys.Height,
+				  &keys.Metalness,
+				  &keys.PackedPbr}) {
+				record(*named, numericTextures);
+			}
+		}
+
 		// **After the sort, so a filtered run and a whole one agree about what
 		// a source is.** Filtering the walk instead would work today and would
 		// stop the moment something in the loop depended on a neighbour.
@@ -351,6 +401,17 @@ namespace assetc {
 		for (const std::string &relative : sources) {
 			Baked baked;
 			baked.Source = relative;
+			const std::string extension = ExtensionOf(relative);
+			if (extension == ".gif") {
+				std::error_code sizeError;
+				const uintmax_t fileBytes = fs::file_size(settings.Input / relative, sizeError);
+				if (sizeError || fileBytes > engine::assets::TextureSequence::MAXIMUM_PIXEL_BYTES) {
+					baked.Failure = "GIF source exceeds 256 MiB or is unavailable";
+					report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+			}
 
 			const std::vector<std::byte> bytes = ReadFile(settings.Input / relative);
 			report.SourceBytes += bytes.size();
@@ -376,7 +437,6 @@ namespace assetc {
 				continue;
 			}
 
-			const std::string extension = ExtensionOf(relative);
 			const bool model = IsModel(extension);
 			const bool image = IsImage(extension);
 
@@ -413,6 +473,7 @@ namespace assetc {
 					{&keys.Height, &material.HeightMap},
 					{&keys.Emissive, &material.EmissiveMap},
 					{&keys.Metalness, &material.MetalnessMap},
+					{&keys.PackedPbr, &material.PackedPbrMap},
 				};
 
 				for (const auto &[named, into] : maps) {
@@ -429,6 +490,28 @@ namespace assetc {
 						// state - `assets/Material.hpp` - so this is a material
 						// that draws the default rather than a failed row.
 						baked.Failure = "a map is outside the input tree";
+						report.Failures++;
+					}
+				}
+				if (!material.PackedPbrMap.empty()) {
+					const auto channel = [](const std::string &text, uint8_t fallback) {
+						if (text.empty()) return fallback;
+						if (text == "r") return uint8_t{0};
+						if (text == "g") return uint8_t{1};
+						if (text == "b") return uint8_t{2};
+						if (text == "a") return uint8_t{3};
+						if (text == "none") return uint8_t{255};
+						return uint8_t{254};
+					};
+					// `packed_pbr` alone is conventional ORM: AO/R, roughness/G,
+					// metalness/B. Selectors make every other channel order explicit.
+					material.RoughnessChannel = channel(keys.PackedRoughness, 1);
+					material.OcclusionChannel = channel(keys.PackedOcclusion, 0);
+					material.HeightChannel = channel(keys.PackedHeight, 255);
+					material.MetalnessChannel = channel(keys.PackedMetalness, 2);
+					if (material.RoughnessChannel == 254 || material.OcclusionChannel == 254 ||
+						material.HeightChannel == 254 || material.MetalnessChannel == 254) {
+						baked.Failure = "a packed PBR channel must be r, g, b, a, or none";
 						report.Failures++;
 					}
 				}
@@ -462,6 +545,55 @@ namespace assetc {
 			}
 
 			const bool vector = image && IsVector(extension);
+			const bool numericTexture = image && numericTextures.contains(relative);
+			if (image && numericTexture && displayTextures.contains(relative)) {
+				baked.Failure = "a texture cannot be both display colour and numeric material data";
+				report.Failures++;
+				report.Assets.push_back(std::move(baked));
+				continue;
+			}
+			if (extension == ".gif") {
+				engine::assets::TextureSequenceData sequence;
+				std::string decodeFailure;
+				if (!engine::bake::ReadGifSequence(bytes, sequence, decodeFailure)) {
+					baked.Failure = "GIF sequence: " + decodeFailure;
+					report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+				if (sequence.FrameDurations.size() > 256) {
+					const size_t failuresBefore = report.Failures;
+					if (staticFlipbook)
+						baked.Failure = "GIF sequence cannot use a static flipbook layout";
+					else if (numericTexture || displayTextures.contains(relative))
+						baked.Failure = "GIF sequence cannot be a material texture map";
+					else if (settings.MaximumTexture != 0 &&
+							 (std::max(sequence.Width, sequence.Height) > settings.MaximumTexture))
+						baked.Failure = "GIF sequence exceeds the frame dimension limit";
+					else if (settings.FlipbookFps != 0.0f || !std::isfinite(settings.FlipbookFps)) {
+						if (!std::isfinite(settings.FlipbookFps) || settings.FlipbookFps <= 0.0f ||
+							settings.FlipbookFps >= 1000.0f)
+							baked.Failure = "GIF sequence needs FPS in (0, 1000)";
+						else
+							sequence.FrameDurations.assign(
+								sequence.FrameDurations.size(), 1.0f / settings.FlipbookFps
+							);
+					}
+					if (baked.Failure.empty()) {
+						engine::core::ByteWriter writer;
+						if (!engine::assets::TextureSequence::Write(writer, sequence))
+							baked.Failure = "GIF sequence cannot be serialized";
+						else {
+							baked.Output = WithoutExtension(relative) + std::string(SEQUENCE_EXTENSION);
+							baked.Kind = AssetKind::Animation;
+							Emit(settings, report, baked, writer.Bytes());
+						}
+					}
+					if (!baked.Failure.empty() && report.Failures == failuresBefore) report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+			}
 
 			engine::bake::Graph graph;
 			engine::bake::NodeId source = graph.AddSource(relative, bytes);
@@ -718,12 +850,40 @@ namespace assetc {
 				tail = mipmap;
 			}
 
-			const engine::bake::NodeId write = graph.AddWrite(baked.Output);
-			graph.Connect(tail, write);
+			// The graph owns pixel transforms while material references supply the
+			// sampling intent. A numeric map therefore leaves the graph as the same
+			// RGBA bytes with a linear texture format before serialization.
+			if (!numericTexture) {
+				const engine::bake::NodeId write = graph.AddWrite(baked.Output);
+				graph.Connect(tail, write);
+			}
 
 			if (!graph.Run(graphFailure)) {
 				baked.Failure = graphFailure;
 				report.Failures++;
+				report.Assets.push_back(std::move(baked));
+				continue;
+			}
+
+			if (numericTexture) {
+				const engine::bake::Payload &output = graph.Output(tail);
+				if (output.Kind != engine::bake::PayloadKind::Texture) {
+					baked.Failure = "the pipeline did not produce a texture";
+					report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+				engine::assets::TextureData texture = output.Texture;
+				texture.Format = engine::assets::TextureFormat::RGBA8_LINEAR;
+				engine::core::ByteWriter writer;
+				if (!engine::assets::Texture::Write(writer, texture)) {
+					baked.Failure = "the pipeline produced a texture the format cannot hold";
+					report.Failures++;
+					report.Assets.push_back(std::move(baked));
+					continue;
+				}
+				baked.Kind = AssetKind::Texture;
+				Emit(settings, report, baked, writer.Bytes());
 				report.Assets.push_back(std::move(baked));
 				continue;
 			}

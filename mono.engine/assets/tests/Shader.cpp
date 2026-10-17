@@ -443,3 +443,83 @@ TEST_CASE(
 		CHECK(Encode(decoded) == mutation);
 	}
 }
+
+TEST_CASE(
+	"Shader owned residency counts retained nested capacity and exact limits", "[assets][shader-residency]"
+) {
+	using namespace engine::assets;
+	ShaderData data;
+	const auto empty = ShaderRetainedPayloadBytes(data);
+	REQUIRE(empty);
+	CHECK(*empty >= sizeof(ShaderData));
+	CHECK_FALSE(ShaderRetainedPayloadBytes(data, sizeof(ShaderData) - 1));
+	data.Variants.resize(1);
+	auto &variant = data.Variants[0];
+	variant.Parameters.resize(1);
+	variant.Parameters[0].Resource = "material";
+	variant.Payloads.resize(1);
+	variant.Payloads[0].Bytes.resize(17);
+	variant.Specializations.resize(1);
+	variant.Specializations[0].Value.resize(13);
+	variant.Features.push_back({"skin", "enabled"});
+	const auto before = ShaderRetainedPayloadBytes(data);
+	REQUIRE(before);
+	const auto capacity = variant.Payloads[0].Bytes.capacity();
+	variant.Payloads[0].Bytes.reserve(1000);
+	const auto reserved = ShaderRetainedPayloadBytes(data);
+	REQUIRE(reserved);
+	CHECK(*reserved - *before == variant.Payloads[0].Bytes.capacity() - capacity);
+	const auto textCapacity = variant.Parameters[0].Resource.capacity();
+	variant.Parameters[0].Resource.reserve(300);
+	const auto withText = ShaderRetainedPayloadBytes(data);
+	REQUIRE(withText);
+	CHECK(*withText - *reserved == variant.Parameters[0].Resource.capacity() - textCapacity);
+	const auto retained = *withText;
+	variant.Payloads[0].Bytes.clear();
+	CHECK(ShaderRetainedPayloadBytes(data) == retained);
+	CHECK(ShaderRetainedPayloadBytes(data, retained) == retained);
+	CHECK_FALSE(ShaderRetainedPayloadBytes(data, retained - 1));
+}
+TEST_CASE(
+	"Shader decode admits exact owned residency and refuses nested growth atomically",
+	"[assets][shader-residency]"
+) {
+	const auto authored = MetadataFixture();
+	ByteWriter writer;
+	REQUIRE(Shader::Write(writer, authored));
+	ShaderData parsed;
+	ByteReader unlimited(writer.Bytes());
+	REQUIRE(Shader::Read(unlimited, parsed));
+	const auto bytes = ShaderRetainedPayloadBytes(parsed);
+	REQUIRE(bytes);
+	ShaderData restored;
+	ByteReader exact(writer.Bytes());
+	REQUIRE(Shader::Read(exact, restored, *bytes));
+	CHECK(restored == parsed);
+	for (const uint64_t limit : {uint64_t(sizeof(ShaderData) - 1), *bytes - 1}) {
+		INFO(limit);
+		ShaderData held = Fixture();
+		const auto original = held;
+		ByteReader refused(writer.Bytes());
+		CHECK_FALSE(Shader::Read(refused, held, limit));
+		CHECK(refused.Failed());
+		CHECK(held == original);
+	}
+}
+
+TEST_CASE(
+	"Shader canonical size measure matches complete encoding and refuses invalid metadata",
+	"[assets][shader-residency]"
+) {
+	for (const auto &data : {Fixture(), MetadataFixture()}) {
+		const auto measured = Shader::EncodedBytes(data);
+		REQUIRE(measured);
+		ByteWriter writer;
+		REQUIRE(Shader::Write(writer, data));
+		CHECK(*measured == writer.Size());
+	}
+	auto invalid = MetadataFixture();
+	invalid.Variants[0].Parameters[0].Type = "unknown-member-type";
+	CHECK_FALSE(Shader::EncodedBytes(invalid));
+	CHECK_FALSE(Shader::EncodedBytes(ShaderData{}));
+}

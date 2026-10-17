@@ -1,6 +1,6 @@
 # L12 [client]. The GLSL this module binds lives in Engine::resources.
 
-set(render_vendor SDL3::SDL3 shaderc SPIRV-Tools-opt Vendor::spirv-cross Vendor::zstd)
+set(render_vendor SDL3::SDL3 shaderc SPIRV-Tools-opt Vendor::spirv-cross Vendor::zstd freetype)
 if(APPLE)
 	# SDL loads this dynamically. Naming it here lets mono_add_program stage it
 	# for every executable that actually links the renderer.
@@ -36,6 +36,10 @@ mono_add_library(render
 		# L8 is below L12 and `effects` is `shared`, so the edge goes downward and
 		# the tier check has nothing to say about it.
 		Engine::effects
+
+		# The renderer copies an installed analytical storm into its presentation
+		# packet for the GPU particle field. This is a downward L12 to L8 edge.
+		Engine::physics
 
 		Engine::script
 
@@ -81,6 +85,10 @@ if(TARGET test_render)
 	target_link_libraries(test_render PRIVATE SDL3::SDL3)
 	# Portal camera images run actual character movement and obstruction queries.
 	target_link_libraries(test_render PRIVATE Engine::physics)
+	# The SkyGrid benchmark test loads its authored Luau scene and compiles every
+	# selected ShaderScript through ShaderLibrary. This is test-only: the renderer
+	# does not need example content to ship.
+	target_link_libraries(test_render PRIVATE Engine::examples)
 endif()
 
 # The atlas experiment owns a real headless SDL device. Benchmarks normally

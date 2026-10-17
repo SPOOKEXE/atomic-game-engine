@@ -7,9 +7,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -366,4 +370,118 @@ TEST_CASE("a real device is optional and its absence is not an error", "[audio][
 	CHECK_FALSE(device->Running());
 	// Twice is safe.
 	device->Close();
+}
+
+TEST_CASE(
+	"null device exposes copied seek and playback acknowledgements", "[audio][device][playback_events]"
+) {
+	using namespace engine::audio;
+	DeviceSettings settings = Settings();
+	settings.PlaybackEvents = true;
+	auto device = OpenNullDevice(settings);
+	auto &queue = device->Mixer().Commands();
+	const NodeId player = queue.Allocate();
+	REQUIRE(queue.Free() >= 5);
+	REQUIRE(queue.Post(AddNode(player, NodeKind::Player)));
+	REQUIRE(queue.Post(Wire(player, device->Mixer().Graph().Output())));
+	const std::array<float, 4> samples{0.125f, 0.25f, 0.5f, 0.75f};
+	SoundRef sound =
+		std::make_shared<const SampleBuffer>(AudioFormat{.SampleRate = 24000, .Channels = 1}, samples);
+	Command command = Act(CommandKind::SetSound, player);
+	command.Sound = sound;
+	command.PlaybackGeneration = 11;
+	REQUIRE(queue.Post(command));
+	command = Act(CommandKind::Seek, player, 2);
+	command.CursorFrames = 1.5;
+	command.PlaybackGeneration = 11;
+	REQUIRE(queue.Post(command));
+	command.Kind = CommandKind::Play;
+	REQUIRE(queue.Post(command));
+	CHECK(device->Advance() == BLOCK);
+	CHECK(device->LastBlock().Frame(1)[0] == 0.0f);
+	CHECK(device->LastBlock().Frame(2)[0] == 0.25f);
+	CHECK(device->LastBlock().Frame(3)[0] == 0.5f);
+	std::array<PlaybackEvent, 8> events{};
+	REQUIRE(device->Mixer().PollPlaybackEvents(events) == 6);
+	CHECK(events[3].CursorFrames == 1.5);
+	CHECK(events[3].Applied.AppliedSample == 2);
+	CHECK(events[5].NaturalCompletion);
+	CHECK(events[5].Finished.AtSample == 7);
+	CHECK(events[5].PlaybackGeneration == 11);
+	const long referencesBeforePoll = sound.use_count();
+	CHECK(device->Mixer().PollPlaybackEvents(events) == 0);
+	CHECK(sound.use_count() == referencesBeforePoll);
+	command = Act(CommandKind::RemoveNode, player);
+	command.PlaybackGeneration = 11;
+	REQUIRE(queue.Post(command));
+	device->Advance();
+	REQUIRE(device->Mixer().PollPlaybackEvents(events) == 1);
+	CHECK_FALSE(events[0].Present);
+	CHECK(events[0].PlaybackGeneration == 11);
+	// Host ownership survives all callback commands and the state acknowledgement.
+	CHECK(sound.use_count() == 1);
+	device->Close();
+	CHECK(sound->Frame(0)[0] == 0.125f);
+}
+
+TEST_CASE("SDL dummy playback copies honor the device opt in", "[audio][device][sdl_dummy]") {
+	using namespace engine::audio;
+	const char *driver = std::getenv("SDL_AUDIODRIVER");
+	if (driver == nullptr || std::string_view(driver) != "dummy")
+		SKIP("run with SDL_AUDIODRIVER=dummy to test the headless SDL callback");
+	for (const bool enabled : {true, false}) {
+		CAPTURE(enabled);
+		DeviceSettings settings = Settings();
+		settings.PlaybackEvents = enabled;
+		auto device = OpenDevice(settings);
+		REQUIRE(device != nullptr);
+		REQUIRE(device->SetPaused(true));
+		auto &queue = device->Mixer().Commands();
+		const NodeId player = queue.Allocate();
+		REQUIRE(queue.Free() >= 5);
+		REQUIRE(queue.Post(AddNode(player, NodeKind::Player)));
+		REQUIRE(queue.Post(Wire(player, NodeId{AudioGraph::OUTPUT_ID})));
+		SoundRef sound =
+			std::make_shared<const SampleBuffer>(device->Format(), std::vector<float>(8192, 0.25f));
+		Command command = Act(CommandKind::SetSound, player);
+		command.Sound = sound;
+		command.PlaybackGeneration = 7;
+		REQUIRE(queue.Post(command));
+		command = Act(CommandKind::Seek, player);
+		command.CursorFrames = 1.5;
+		command.PlaybackGeneration = 7;
+		REQUIRE(queue.Post(command));
+		command.Kind = CommandKind::Play;
+		REQUIRE(queue.Post(command));
+		const uint64_t before = device->Rendered();
+		REQUIRE(device->SetPaused(false));
+		const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+		while (device->Rendered() == before && std::chrono::steady_clock::now() < deadline)
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+		REQUIRE(device->SetPaused(true));
+		REQUIRE(device->Rendered() > before);
+		device->Mixer().ApplyPending();
+		std::array<PlaybackEvent, 16> events{};
+		const size_t count = device->Mixer().PollPlaybackEvents(events);
+		if (enabled) {
+			REQUIRE(count >= 5);
+			CHECK(events[0].Applied.Kind == CommandKind::AddNode);
+			CHECK(events[1].Applied.Kind == CommandKind::Connect);
+			CHECK(events[2].Applied.Kind == CommandKind::SetSound);
+			CHECK(events[3].Applied.Kind == CommandKind::Seek);
+			CHECK(events[3].CursorFrames == 1.5);
+			CHECK(events[3].PlaybackGeneration == 7);
+			CHECK(events[4].Applied.Kind == CommandKind::Play);
+			CHECK(events[4].Playing);
+			for (size_t index = 0; index < 5; ++index) {
+				CHECK(events[index].Applied.Target == player);
+				CHECK(events[index].Status == PlaybackStatus::Applied);
+			}
+		} else {
+			CHECK(count == 0);
+		}
+		CHECK(device->Mixer().PlaybackEventsDropped() == 0);
+		device->Close();
+		device.reset();
+	}
 }

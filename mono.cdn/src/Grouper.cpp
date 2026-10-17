@@ -27,6 +27,22 @@ namespace cdn {
 		// an affinity like any other would bind every unrelated asset in the
 		// game into one lump, which is the opposite of what the value means.
 		std::vector<Cluster> BuildClusters(std::span<const GroupCandidate> candidates) {
+			if (std::all_of(candidates.begin(), candidates.end(), [](const GroupCandidate &candidate) {
+					return candidate.Affinity == 0;
+				})) {
+				// Without affinities, a map buys nothing and the final cluster count is known.
+				std::vector<Cluster> clusters;
+				clusters.reserve(candidates.size());
+				for (const GroupCandidate &candidate : candidates) {
+					clusters.emplace_back();
+					Cluster &single = clusters.back();
+					single.Assets.push_back(candidate.Root);
+					single.Bytes = candidate.Bytes;
+					single.Priority = candidate.Priority;
+				}
+				return clusters;
+			}
+
 			std::map<uint32_t, Cluster> byAffinity;
 			std::vector<Cluster> loose;
 
@@ -61,6 +77,7 @@ namespace cdn {
 			for (auto &entry : byAffinity) {
 				clusters.push_back(std::move(entry.second));
 			}
+
 			for (Cluster &cluster : loose) {
 				clusters.push_back(std::move(cluster));
 			}

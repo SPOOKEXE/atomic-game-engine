@@ -30,6 +30,15 @@ set(max_scene_lights "${CMAKE_MATCH_1}")
 # here to prevent, arriving by a different door.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${lights_header}")
 
+set(volumes_header "${CMAKE_SOURCE_DIR}/mono.engine/scene/include/engine/scene/Sunlight.hpp")
+file(STRINGS "${volumes_header}" volumes_line
+	REGEX "inline constexpr size_t MAX_SCENE_VOLUMES")
+if(NOT volumes_line MATCHES "=[ \t]*([0-9]+)")
+	message(FATAL_ERROR "resources: could not read MAX_SCENE_VOLUMES from ${volumes_header}")
+endif()
+set(max_scene_volumes "${CMAKE_MATCH_1}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${volumes_header}")
+
 # The instance row's word count, declared once in C++ and given to the shader.
 #
 # instance.glsl checks its resident row layout against this C++ stride.
@@ -90,6 +99,7 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${ssao_header}")
 mono_add_library(resources
 	SHADER_DEFINES
 		MAX_LIGHTS=${max_scene_lights}
+		MAX_VOLUMES=${max_scene_volumes}
 		GPU_INSTANCE_WORDS=${instance_words}
 		GPU_JOINT_WORDS=${joint_words}
 		SSAO_SAMPLE_COUNT=${ssao_sample_count}

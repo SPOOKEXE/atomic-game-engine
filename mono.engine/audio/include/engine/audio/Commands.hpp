@@ -95,6 +95,9 @@ namespace engine::audio {
 
 		// Move the listener.
 		SetListener,
+
+		// Seek in source frames without changing whether the player is running.
+		Seek,
 	};
 
 	// One instruction, and the sample it takes effect on.
@@ -141,6 +144,13 @@ namespace engine::audio {
 
 		// What to play, for `SetSound`.
 		SoundRef Sound;
+
+		// Seek position in source frames, finite and within the loaded sound.
+		double CursorFrames = 0.0;
+
+		// SetSound requires a strictly newer nonzero incarnation. Other commands
+		// must match it. Zero preserves unguarded legacy command behavior.
+		uint64_t PlaybackGeneration = 0;
 	};
 
 	// A bounded ring between one producer and one consumer.
@@ -195,7 +205,7 @@ namespace engine::audio {
 		//    its last-sent value before the refusal has coalesced the command
 		//    into nothing, and the node keeps the old level for ever.
 		//  * **Repairable** - `AddNode`, `Connect`, `SetSound`, `Play`,
-		//    `Rewind`. These build state and are not idempotent under a partial
+		//    `Rewind`, `Seek`. These build state and are not idempotent under a partial
 		//    burst: half a voice is a player wired to nothing. A producer
 		//    reserves with `Free()` before it starts, and treats a refusal as
 		//    "not opened" so the next pass builds it again.

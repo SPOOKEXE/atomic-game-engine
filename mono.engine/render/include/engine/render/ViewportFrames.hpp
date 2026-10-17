@@ -13,6 +13,7 @@
 #include <engine/ecs/Entity.hpp>
 #include <engine/render/InterfacePass.hpp>
 #include <engine/render/Overlay.hpp>
+#include <engine/render/ViewportFramePolicy.hpp>
 
 #include <cstddef>
 #include <vector>
@@ -60,7 +61,21 @@ namespace engine::render {
 			uint32_t Height = 0;
 		};
 
+		struct CachedViewport {
+			ecs::Entity Instance;
+			ViewportFrameCache Cache;
+			uint64_t LastSeenGeneration = 0;
+		};
+
+		struct CachedTarget {
+			size_t Slot = 0;
+			ViewportFrameTargetOwner Owner;
+			uint64_t LastSeenGeneration = 0;
+		};
+
 		std::vector<Entry> Entries;
+		std::vector<CachedViewport> Cached;
+		std::vector<CachedTarget> Targets;
 		OverlayImage EmptyOverlay;
 	};
 }

@@ -36,7 +36,9 @@ namespace engine::scene {
 	// A pixel samples every active entry, so the cap is renderer work rather
 	// than an arbitrary hierarchy restriction. Additional authored volumes stay
 	// valid scene data and are simply not selected for this presentation frame.
-	inline constexpr size_t MAX_SCENE_VOLUMES = 4;
+	// Sixteen retains TornadoSim's ten local funnel, rain and anvil cells while
+	// leaving a bounded worst case for the fragment march.
+	inline constexpr size_t MAX_SCENE_VOLUMES = 16;
 
 	// Where the sun shines *towards*, as a unit vector.
 	//
@@ -97,6 +99,26 @@ namespace engine::scene {
 		//@{
 		float FogStart = 100000.0f;
 		float FogEnd = 100001.0f;
+		//@}
+
+		// The bloom controls copied from Lighting. The renderer filters HDR
+		// radiance before it applies the display transform.
+		//@{
+		float BloomThreshold = 1.0f;
+		float BloomIntensity = 0.0f;
+		float BloomRadius = 6.0f;
+		//@}
+
+		// The depth-of-field and god-ray controls copied from Lighting. They stay
+		// with the resolved world lighting so portals and ordinary views agree.
+		//@{
+		float DepthOfFieldIntensity = 0.0f;
+		float DepthOfFieldFocusDistance = 24.0f;
+		float DepthOfFieldFocusRange = 8.0f;
+		float DepthOfFieldRadius = 6.0f;
+		float GodRayIntensity = 0.0f;
+		float GodRayThreshold = 1.0f;
+		float GodRayRadius = 48.0f;
 		//@}
 
 		// The first skybox, atmosphere and cloud providers beneath `Lighting`.

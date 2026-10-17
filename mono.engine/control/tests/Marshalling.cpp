@@ -11,6 +11,8 @@
 // on - and a probe holding one field of every type covers the table exactly
 // once, which no real class does.
 
+#include "HookFixture.hpp"
+
 #include <engine/control/Surface.hpp>
 #include <engine/control/features/Universe.hpp>
 #include <engine/core/types/CFrame.hpp>
@@ -30,6 +32,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
@@ -204,7 +207,7 @@ namespace marshalling_test {
 				Instance = store.CreateInstance(ProbeClass(), "Probe");
 			});
 
-			Panel.AddUniverseTools(Worlds, true);
+			engine::control::test::Install(Panel, std::array{engine::control::test::Universe(Worlds, true)});
 		}
 
 		json Read() {

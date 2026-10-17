@@ -12,6 +12,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <array>
+#include <cmath>
+
 TEST_SUITE_ID("engine.render.flipbook")
 
 using Catch::Approx;
@@ -47,6 +50,24 @@ TEST_CASE("frames advance on the clock and wrap on the frame count", "[render][f
 
 	// One full loop later, back to the start.
 	CHECK(FlipbookFrameAt(24, 10.0f, 2.45) == 0);
+}
+
+TEST_CASE("unequal frame endpoints select the authored cell", "[render][flipbook]") {
+	const std::array<float, 3> ends{0.04f, 0.14f, 0.20f};
+	CHECK(FlipbookFrameAt(ends, 0.03) == 0);
+	CHECK(FlipbookFrameAt(ends, 0.05) == 1);
+	CHECK(FlipbookFrameAt(ends, 0.15) == 2);
+	CHECK(FlipbookFrameAt(ends, 0.21) == 0);
+	CHECK(FlipbookCellAt(2, ends, 0.15).OffsetV == Approx(0.5f));
+}
+
+TEST_CASE("a 16 by 16 sheet reaches cell 256 before wrapping", "[render][flipbook]") {
+	CHECK(FlipbookFrameAt(256, 64.0f, 255.0 / 64.0) == 255);
+	CHECK(FlipbookFrameAt(256, 64.0f, 256.0 / 64.0) == 0);
+	const FlipbookCell last = FlipbookCellAt(16, 256, 64.0f, 255.0 / 64.0);
+	CHECK(last.Scale == Approx(1.0f / 16.0f));
+	CHECK(last.OffsetU == Approx(15.0f / 16.0f));
+	CHECK(last.OffsetV == Approx(15.0f / 16.0f));
 }
 
 TEST_CASE("a sheet with no rate still plays", "[render][flipbook]") {
@@ -120,4 +141,11 @@ TEST_CASE("time before the clock started holds the first frame", "[render][flipb
 	// another - the worst kind of difference to be told about.
 	CHECK(FlipbookFrameAt(24, 10.0f, -5.0) == 0);
 	CHECK(FlipbookCellAt(4, 16, 10.0f, -5.0).OffsetU == 0.0f);
+}
+
+TEST_CASE("variable playback keeps its last frame immediately before wrap", "[render][flipbook]") {
+	const std::array<float, 3> ends{0.04f, 0.14f, 0.20f};
+	const double total = ends.back();
+	CHECK(FlipbookFrameAt(ends, std::nextafter(total, 0.0)) == 2);
+	CHECK(FlipbookFrameAt(ends, total) == 0);
 }

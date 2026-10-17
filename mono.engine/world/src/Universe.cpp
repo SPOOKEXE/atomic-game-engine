@@ -94,6 +94,7 @@ namespace engine::world {
 	}
 
 	void Universe::RefreshLanes(unsigned laneCount) {
+		ENGINE_PROFILE_CAT("Universe::RefreshLanes", engine::core::ProfileCategory::Simulation);
 		if (laneCount != LaneCount) {
 			LaneCount = laneCount;
 			LaneByWorld.assign(Registry.size(), INVALID_LANE);
@@ -106,7 +107,8 @@ namespace engine::world {
 			return;
 		}
 
-		std::vector<size_t> laneLoads(laneCount, 0);
+		LaneLoads.resize(laneCount);
+		std::fill(LaneLoads.begin(), LaneLoads.end(), size_t{0});
 		for (size_t index = 0; index < Registry.size(); index++) {
 			const bool local =
 				Registry[index] != nullptr && (index >= Hosts.size() || !Hosts[index].IsValid());
@@ -115,7 +117,7 @@ namespace engine::world {
 				continue;
 			}
 			if (LaneByWorld[index] < laneCount) {
-				laneLoads[LaneByWorld[index]]++;
+				LaneLoads[LaneByWorld[index]]++;
 			}
 		}
 
@@ -126,8 +128,8 @@ namespace engine::world {
 				continue;
 			}
 
-			const auto lightest = std::min_element(laneLoads.begin(), laneLoads.end());
-			const unsigned lane = static_cast<unsigned>(std::distance(laneLoads.begin(), lightest));
+			const auto lightest = std::min_element(LaneLoads.begin(), LaneLoads.end());
+			const unsigned lane = static_cast<unsigned>(std::distance(LaneLoads.begin(), lightest));
 			LaneByWorld[index] = lane;
 			(*lightest)++;
 		}
@@ -267,7 +269,7 @@ namespace engine::world {
 		}
 
 		PresentationMessages.RemoveWorld(NameOf(id));
-		Router->DiscardPendingDeliveries(id);
+		Router->RemoveWorld(id, NameOf(id));
 		Registry[id.Index].reset();
 		if (id.Index < LaneByWorld.size()) {
 			LaneByWorld[id.Index] = INVALID_LANE;
@@ -331,7 +333,7 @@ namespace engine::world {
 		case Control::Kind::Destroy:
 			if (control.Target.IsValid() && control.Target.Index < Registry.size()) {
 				PresentationMessages.RemoveWorld(NameOf(control.Target));
-				Router->DiscardPendingDeliveries(control.Target);
+				Router->RemoveWorld(control.Target, NameOf(control.Target));
 				Registry[control.Target.Index].reset();
 				if (control.Target.Index < LaneByWorld.size()) {
 					LaneByWorld[control.Target.Index] = INVALID_LANE;

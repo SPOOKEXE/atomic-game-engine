@@ -9,11 +9,16 @@
 #include <engine/ecs/Entity.hpp>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 
 namespace engine::ecs {
 	class Store;
+}
+
+namespace engine::scene {
+	struct LODSettings;
 }
 
 namespace studio {
@@ -25,6 +30,23 @@ namespace studio {
 	// Whether the viewport overlay should identify this visible MeshPart. LOD 0
 	// is still useful before a policy exists or while its artifacts are building.
 	bool ShouldDrawActiveLodLabel(const engine::ecs::Store &store, engine::ecs::Entity instance);
+
+	// Resolves an optional per-item distance override against Studio's view defaults.
+	// An incomplete or unordered override cannot change a subset of the selector,
+	// so it inherits all three defaults.
+	std::array<float, 3> EffectiveLodDistanceBands(
+		const engine::scene::LODSettings *settings, const std::array<float, 3> &defaultBands
+	);
+
+	// Produces the complete triplet a per-item distance edit must commit. An
+	// inherited or malformed row is materialized from the current preferences
+	// before one field changes, so the renderer never rejects a partial edit.
+	std::array<float, 3> EditedLodDistanceBands(
+		const engine::scene::LODSettings *settings,
+		const std::array<float, 3> &defaultBands,
+		size_t level,
+		float distance
+	);
 
 	// Returns the level the focused viewport would select for a MeshPart. A
 	// partially resident ladder is limited to its available prefix; a missing

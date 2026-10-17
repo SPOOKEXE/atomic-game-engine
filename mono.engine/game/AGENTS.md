@@ -145,3 +145,12 @@ caller already has. The trust boundary stays `delivery`'s.
 Until v0.19 this paragraph read "nothing here opens a file or a socket", which
 was true of the `assets` edge it was written about and false of the module. Say
 the narrow thing, because the narrow thing is the one that is load-bearing.
+
+## A resting player still has a pose to acknowledge
+
+`CapturePlayerMotion` reads velocity from `scene::Motion`, which a sleeping body
+does not carry. It captures a resting body with zero velocity rather than
+nothing: a client on pose acknowledgements confirms input only through these
+samples, and a player standing still would otherwise grow its unconfirmed input
+for as long as it waited.
+

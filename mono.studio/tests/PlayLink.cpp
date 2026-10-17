@@ -1284,9 +1284,8 @@ TEST_CASE("a play link admits a player and gives it a body", "[studio][playlink]
 	//   * no route for its intent, and the keyboard reaches nothing.
 	Fixture fixture;
 
-	// A furnished world, because a player is a child of the `Players` service -
-	// a scene nobody furnished gets no player, quietly, which is the placeholder
-	// case `mono.server` names too.
+	// A player is a child of the `Players` service, so furnish the test world
+	// before admitting one.
 	fixture.Worlds.Enter(fixture.Authority, [](Store &store) {
 		engine::scene::RegisterSceneClasses();
 		engine::scene::InstallServices(store);
@@ -2642,7 +2641,13 @@ namespace {
 			);
 			if (AssertResolvedEye && Frame >= 27 && Frame <= 80) {
 				CHECK(visual == link.AuthorityWorld());
-				CHECK((view.CameraFrame.Position - storedEye.Position).Magnitude() < .001f);
+				// The replica eye is decoded from the position wire grid before its
+				// route is reconciled with the authority world.  A valid handoff may
+				// therefore differ by the documented wire-position bound.
+				CHECK(
+					(view.CameraFrame.Position - storedEye.Position).Magnitude() <=
+					WIRE_POSITION_TOLERANCE_METRES
+				);
 				CHECK(view.CameraFrame.LookVector().Dot(storedEye.LookVector()) > .9999f);
 				CHECK(view.CameraFrame.UpVector().Dot(storedEye.UpVector()) > .9999f);
 			}

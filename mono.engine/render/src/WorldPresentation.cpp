@@ -1,4 +1,8 @@
 #include "EnvironmentModes.hpp"
+#include "PresentationSource.hpp"
+#include "PresentationSourceDamage.hpp"
+#include "PresentationSourceOrder.hpp"
+#include "PresentationSourceRows.hpp"
 
 #include <engine/core/Bytes.hpp>
 #include <engine/core/Log.hpp>
@@ -330,6 +334,108 @@ namespace engine::render {
 				signature = FoldPresentationObject(signature, value);
 			return signature;
 		}
+
+		uint64_t FoldCFrame(uint64_t signature, const core::CFrame &frame) {
+			for (const float value :
+				 {frame.Position.X,
+				  frame.Position.Y,
+				  frame.Position.Z,
+				  frame.QuaternionX,
+				  frame.QuaternionY,
+				  frame.QuaternionZ,
+				  frame.QuaternionW})
+				signature = FoldPresentationObject(signature, value == 0 ? 0.0f : value);
+			return signature;
+		}
+
+		uint64_t FoldVolumeState(uint64_t signature, const scene::VolumeState &volume) {
+			signature = FoldCFrame(signature, volume.Frame);
+			for (const float value :
+				 {volume.Colour.R,
+				  volume.Colour.G,
+				  volume.Colour.B,
+				  volume.HalfExtent.X,
+				  volume.HalfExtent.Y,
+				  volume.HalfExtent.Z,
+				  volume.Density,
+				  volume.Extinction,
+				  volume.Falloff,
+				  volume.NoiseScale,
+				  volume.NoiseStrength})
+				signature = FoldPresentationObject(signature, value == 0 ? 0.0f : value);
+			signature = FoldPresentation(signature, volume.Steps);
+			signature = FoldPresentation(signature, volume.ShadowSteps);
+			signature = FoldPresentation(signature, volume.Seed);
+			signature = FoldPresentation(signature, static_cast<uint8_t>(volume.Shape));
+			return FoldPresentation(signature, volume.Enabled ? 1u : 0u);
+		}
+
+		uint64_t FoldShaderLensState(uint64_t signature, const scene::ShaderLensState &lens) {
+			signature = FoldCFrame(signature, lens.Frame);
+			signature = FoldPresentation(signature, lens.Shader.Id());
+			signature = FoldPresentation(signature, lens.EntityId);
+			for (const float value : {lens.Radius, lens.InnerRadius, lens.Falloff, lens.Strength, lens.Spin})
+				signature = FoldPresentationObject(signature, value == 0 ? 0.0f : value);
+			signature = FoldPresentation(signature, static_cast<uint32_t>(lens.Priority));
+			return FoldPresentation(signature, static_cast<uint8_t>(lens.Shape));
+		}
+
+		uint64_t FoldWorldLighting(uint64_t signature, const scene::WorldLighting &lighting) {
+			for (const float value :
+				 {lighting.Direction.X,
+				  lighting.Direction.Y,
+				  lighting.Direction.Z,
+				  lighting.Ambient.R,
+				  lighting.Ambient.G,
+				  lighting.Ambient.B,
+				  lighting.OutdoorAmbient.R,
+				  lighting.OutdoorAmbient.G,
+				  lighting.OutdoorAmbient.B,
+				  lighting.Direct.R,
+				  lighting.Direct.G,
+				  lighting.Direct.B,
+				  lighting.FogColor.R,
+				  lighting.FogColor.G,
+				  lighting.FogColor.B,
+				  lighting.FogStart,
+				  lighting.FogEnd,
+				  lighting.BloomThreshold,
+				  lighting.BloomIntensity,
+				  lighting.BloomRadius,
+				  lighting.DepthOfFieldIntensity,
+				  lighting.DepthOfFieldFocusDistance,
+				  lighting.DepthOfFieldFocusRange,
+				  lighting.DepthOfFieldRadius,
+				  lighting.GodRayIntensity,
+				  lighting.GodRayThreshold,
+				  lighting.GodRayRadius})
+				signature = FoldPresentationObject(signature, value == 0 ? 0.0f : value);
+			signature = FoldPresentation(signature, lighting.RenderFeatures.Enable);
+			signature = FoldPresentation(signature, lighting.RenderFeatures.Disable);
+			const size_t volumeCount = std::min(lighting.VolumeCount, lighting.Volumes.size());
+			signature = FoldPresentation(signature, volumeCount);
+			for (const auto &volume : std::span(lighting.Volumes).first(volumeCount))
+				signature = FoldVolumeState(signature, volume);
+			return signature;
+		}
+
+		uint64_t FoldSceneLight(uint64_t signature, const SceneLight &light) {
+			for (const float value :
+				 {light.Position.X,
+				  light.Position.Y,
+				  light.Position.Z,
+				  light.Range,
+				  light.Colour.R,
+				  light.Colour.G,
+				  light.Colour.B,
+				  light.Direction.X,
+				  light.Direction.Y,
+				  light.Direction.Z,
+				  light.ConeCosine})
+				signature = FoldPresentationObject(signature, value == 0 ? 0.0f : value);
+			signature = FoldPresentation(signature, light.Shadows ? 1u : 0u);
+			return FoldPresentation(signature, light.DataFactoryId.Id());
+		}
 	}
 
 	bool EnvironmentLayerPresent(const scene::WorldLighting &lighting) {
@@ -343,12 +449,27 @@ namespace engine::render {
 		return texturedSky || modes.Skybox == 2 || modes.Atmosphere != 0 || modes.Clouds != 0;
 	}
 
+	uint64_t
+	LightingPresentationSignature(const scene::WorldLighting &lighting, std::span<const SceneLight> lights) {
+		View view;
+		view.OverrideLighting = true;
+		view.Lighting = lighting;
+		view.Grid.Enabled = true;
+		ScenePresentationState state;
+		state.Lighting = lighting;
+		const ScenePresentationSignatures signatures = ScenePresentationSignaturesOf(view, state);
+		uint64_t signature = scene::MixSignature(signatures.Objects, signatures.Environment);
+		for (const SceneLight &light : lights)
+			signature = FoldSceneLight(signature, light);
+		return signature;
+	}
+
 	uint64_t ParticleVisibilitySignature(const View &view) {
 		if (view.Particles.empty() && view.RibbonRuns.empty()) {
 			return 0;
 		}
 
-		uint64_t signature = FoldPresentationObject(0, view.CameraFrame);
+		uint64_t signature = FoldPresentationObject(0, view.VisibilityCameraFrame());
 		signature = FoldPresentationObject(signature, view.Camera);
 		signature = FoldPresentation(signature, ProjectionSignature(view));
 		signature = FoldPresentation(signature, view.World);
@@ -375,6 +496,7 @@ namespace engine::render {
 			objects = scene::SignatureOf(view.Instances);
 			objects = FoldPresentationSpan(objects, view.JointFrames);
 			objects = FoldPresentationObject(objects, view.CameraFrame);
+			objects = FoldPresentationObject(objects, view.VisibilityCameraFrame());
 			objects = FoldPresentationObject(objects, view.Camera);
 			objects = FoldPresentation(objects, projection);
 			objects = FoldPresentation(objects, view.World);
@@ -396,20 +518,13 @@ namespace engine::render {
 			objects = FoldPresentation(objects, state.PostProcess.Id());
 			objects = FoldPresentation(objects, state.Untextured ? 1u : 0u);
 			objects = FoldPresentation(objects, state.Wireframe ? 1u : 0u);
-			objects = FoldPresentationSpan(objects, view.Lights);
-			objects = FoldPresentationObject(objects, state.Lighting.Direction);
-			objects = FoldPresentationObject(objects, state.Lighting.Ambient);
-			objects = FoldPresentationObject(objects, state.Lighting.OutdoorAmbient);
-			objects = FoldPresentationObject(objects, state.Lighting.Direct);
-			objects = FoldPresentationObject(objects, state.Lighting.FogColor);
-			objects = FoldPresentationObject(objects, state.Lighting.FogStart);
-			objects = FoldPresentationObject(objects, state.Lighting.FogEnd);
+			for (const SceneLight &light : view.Lights)
+				objects = FoldSceneLight(objects, light);
+			objects = FoldWorldLighting(objects, lighting);
 			objects = FoldPresentation(objects, view.OverrideLighting ? 1u : 0u);
-			if (view.OverrideLighting) {
-				objects = FoldPresentationObject(objects, view.Lighting);
-			}
 			if (lensCount != 0) {
-				objects = FoldPresentationSpan(objects, std::span(lighting.ShaderLenses).first(lensCount));
+				for (const auto &lens : std::span(lighting.ShaderLenses).first(lensCount))
+					objects = FoldShaderLensState(objects, lens);
 				objects = FoldPresentation(objects, view.LensPrograms);
 				if (view.LensPrograms == 0)
 					objects =
@@ -423,18 +538,17 @@ namespace engine::render {
 		// Only the selected environment enters the pixel signature. Lower siblings
 		// and providers outside Lighting cannot reach the sky node, so changing one
 		// of them must not redraw an identical scene.
-		const scene::Environment &environment = state.Lighting.EnvironmentState;
+		const scene::Environment &environment = lighting.EnvironmentState;
 		const EnvironmentUniformModes environmentModes = EnvironmentModesOf(environment);
-		if (!EnvironmentLayerPresent(state.Lighting)) {
+		if (!EnvironmentLayerPresent(lighting)) {
 			environmentSignature = 0;
 		} else {
 			environmentSignature = FoldPresentation(environmentSignature, projection);
 			environmentSignature = FoldPresentation(environmentSignature, contentOwners);
-			environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Direction);
-			environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Ambient);
-			environmentSignature =
-				FoldPresentationObject(environmentSignature, state.Lighting.OutdoorAmbient);
-			environmentSignature = FoldPresentationObject(environmentSignature, state.Lighting.Direct);
+			environmentSignature = FoldPresentationObject(environmentSignature, lighting.Direction);
+			environmentSignature = FoldPresentationObject(environmentSignature, lighting.Ambient);
+			environmentSignature = FoldPresentationObject(environmentSignature, lighting.OutdoorAmbient);
+			environmentSignature = FoldPresentationObject(environmentSignature, lighting.Direct);
 			environmentSignature =
 				FoldPresentation(environmentSignature, static_cast<uint8_t>(environment.Skybox));
 			if (environment.Skybox == scene::SkyboxSource::Textures) {
@@ -475,7 +589,7 @@ namespace engine::render {
 			}
 			environmentSignature = FoldPresentation(environmentSignature, view.OverrideLighting ? 1u : 0u);
 			if (view.OverrideLighting) {
-				environmentSignature = FoldPresentationObject(environmentSignature, view.Lighting);
+				environmentSignature = FoldWorldLighting(environmentSignature, lighting);
 			}
 		}
 
@@ -532,6 +646,9 @@ namespace engine::render {
 				portals = FoldPresentationObject(portals, portal.ExternalImage);
 				portals = FoldPresentationObject(portals, portal.ImportedImage);
 				portals = FoldPresentation(portals, portal.ImagePortal.Id());
+				portals = FoldPresentationObject(portals, portal.ImportedLightImage);
+				portals = FoldPresentation(portals, portal.LightImagePortal.Id());
+				portals = FoldPresentationObject(portals, portal.LightOutward);
 			}
 
 			portals = FoldPresentation(portals, view.Surfaces.size());
@@ -575,13 +692,14 @@ namespace engine::render {
 	}
 	using engine::ecs::Entity;
 	using engine::ecs::Store;
-	using engine::scene::AutoMeshLOD;
 	using engine::scene::Bone;
 	using engine::scene::Bounds;
 	using engine::scene::CharacterLimb;
-	using engine::scene::CustomMeshLOD;
 	using engine::scene::DrawInstance;
 	using engine::scene::LocalTransparency;
+	using engine::scene::LODAuto;
+	using engine::scene::LODCustom;
+	using engine::scene::LODSettings;
 	using engine::scene::PreviousTransform;
 	using engine::scene::Rendered;
 	using engine::scene::RenderEffects;
@@ -592,223 +710,10 @@ namespace engine::render {
 	using engine::scene::Visual;
 
 	namespace {
-		enum SourceRevision : size_t {
-			TRANSFORM_REVISION,
-			PREVIOUS_TRANSFORM_REVISION,
-			BOUNDS_REVISION,
-			VISUAL_REVISION,
-			SURFACE_REVISION,
-			TAGS_REVISION,
-			TRANSPARENCY_REVISION,
-			LIMB_REVISION,
-			SKELETON_REVISION,
-			BONE_REVISION,
-			RENDERED_REVISION,
-			AUTO_LOD_REVISION,
-			CUSTOM_LOD_REVISION,
-			EFFECTS_REVISION,
-		};
-
-		struct DrawSourceChanges {
-			bool Pose = false;
-			bool Full = false;
-		};
-
-		bool DrawableSource(const Store &store, Entity entity) {
-			return store.Has<Transform>(entity) && store.Has<PreviousTransform>(entity) &&
-				   store.Has<Bounds>(entity) && store.Has<Visual>(entity) &&
-				   store.Has<SurfaceAppearance>(entity) && store.Has<Tags>(entity) &&
-				   store.Has<LocalTransparency>(entity) && store.Has<Rendered>(entity);
-		}
-
-		template <class Component, class Relevant>
-		bool
-		SourceRevisionChanged(Store &store, DrawList &drawList, SourceRevision slot, Relevant &&relevant) {
-			store.Observe<Component>();
-			const uint64_t revision = store.ComponentChangeVersion<Component>();
-			uint64_t &seen = drawList.SourceRevisions[slot];
-			if (!drawList.SourcesReady || revision == seen) {
-				seen = revision;
-				return false;
-			}
-			seen = revision;
-
-			bool visited = false;
-			bool changed = false;
-			store.EachChanged<Component>([&](Entity entity, Component &) {
-				visited = true;
-				changed |= relevant(entity);
-			});
-			// A world may have ticked while it was not presented. Its monotonic
-			// revision survives, but the row bits do not, so an empty walk is not
-			// proof that the cached list is current.
-			return changed || !visited;
-		}
-
-		template <class Component>
-		bool SourceRevisionAdvanced(Store &store, DrawList &drawList, SourceRevision slot) {
-			store.Observe<Component>();
-			const uint64_t revision = store.ComponentChangeVersion<Component>();
-			uint64_t &seen = drawList.SourceRevisions[slot];
-			const bool changed = drawList.SourcesReady && revision != seen;
-			seen = revision;
-			return changed;
-		}
-
-		DrawSourceChanges DrawSourcesChanged(
-			Store &store, DrawList &drawList, size_t matching, size_t skeletons, size_t bones
-		) {
-			DrawSourceChanges changes;
-			changes.Full = !drawList.SourcesReady || matching != drawList.SourceEntityCount ||
-						   skeletons != drawList.SkeletonCount || bones != drawList.BoneCount;
-			const auto drawable = [&store](Entity entity) { return DrawableSource(store, entity); };
-
-			// Pose columns only affect the interpolated frame or the skin palette.
-			// A camera orbit writes `Transform` every frame but the camera has no
-			// draw row. Treating the component epoch as enough rebuilt every terrain
-			// row in Magic merely because its eye moved. The changed walk is normally
-			// one camera and a few projectiles, so filtering it at the source is
-			// cheaper than refreshing thousands of static draw rows.
-			changes.Pose |= SourceRevisionChanged<Transform>(store, drawList, TRANSFORM_REVISION, drawable);
-			changes.Pose |= SourceRevisionChanged<PreviousTransform>(
-				store, drawList, PREVIOUS_TRANSFORM_REVISION, drawable
-			);
-			changes.Full |= SourceRevisionChanged<Bounds>(store, drawList, BOUNDS_REVISION, drawable);
-			changes.Full |= SourceRevisionChanged<Visual>(store, drawList, VISUAL_REVISION, drawable);
-			changes.Full |=
-				SourceRevisionChanged<SurfaceAppearance>(store, drawList, SURFACE_REVISION, drawable);
-			changes.Full |= SourceRevisionChanged<Tags>(store, drawList, TAGS_REVISION, drawable);
-			changes.Full |=
-				SourceRevisionChanged<LocalTransparency>(store, drawList, TRANSPARENCY_REVISION, drawable);
-			changes.Full |= SourceRevisionChanged<CharacterLimb>(store, drawList, LIMB_REVISION, drawable);
-			changes.Full |= SourceRevisionChanged<AutoMeshLOD>(store, drawList, AUTO_LOD_REVISION, drawable);
-			changes.Full |=
-				SourceRevisionChanged<CustomMeshLOD>(store, drawList, CUSTOM_LOD_REVISION, drawable);
-			changes.Full |= SourceRevisionChanged<RenderEffects>(store, drawList, EFFECTS_REVISION, drawable);
-			changes.Pose |= SourceRevisionAdvanced<Skeleton>(store, drawList, SKELETON_REVISION);
-			changes.Pose |= SourceRevisionAdvanced<Bone>(store, drawList, BONE_REVISION);
-
-			store.Observe<Rendered>();
-			const uint64_t renderedRevision = store.ComponentChangeVersion<Rendered>();
-			changes.Full |=
-				drawList.SourcesReady && renderedRevision != drawList.SourceRevisions[RENDERED_REVISION];
-			drawList.SourceRevisions[RENDERED_REVISION] = renderedRevision;
-			drawList.SourceEntityCount = matching;
-			drawList.SkeletonCount = skeletons;
-			drawList.BoneCount = bones;
-			drawList.SourcesReady = true;
-			return changes;
-		}
-
-		void ApplyOptionalRenderState(const Store &store, std::span<DrawInstance> instances) {
-			for (DrawInstance &instance : instances) {
-				const Entity source(instance.Source);
-				engine::scene::ApplyDrawRenderState(
-					instance,
-					store.Get<AutoMeshLOD>(source),
-					store.Get<CustomMeshLOD>(source),
-					store.Get<RenderEffects>(source)
-				);
-			}
-		}
-
 		bool SameFrame(const core::CFrame &left, const core::CFrame &right) {
 			return left.Position == right.Position && left.QuaternionX == right.QuaternionX &&
 				   left.QuaternionY == right.QuaternionY && left.QuaternionZ == right.QuaternionZ &&
 				   left.QuaternionW == right.QuaternionW;
-		}
-
-		size_t UpdateDrawFrames(Store &store, DrawList &drawList, float alpha, size_t grain) {
-			std::atomic_bool hasInterpolation = false;
-			std::atomic_bool sourceOrderChanged = false;
-			DrawInstance *const out = drawList.Instances.data();
-			const size_t capacity = drawList.Instances.size();
-			const auto write = [out, capacity, alpha, &hasInterpolation, &sourceOrderChanged](
-								   size_t base,
-								   size_t first,
-								   size_t rows,
-								   const Entity *entities,
-								   const Transform *transforms,
-								   const PreviousTransform *previous
-							   ) {
-				const size_t at = base + first;
-				if (at >= capacity) {
-					return;
-				}
-				rows = std::min(rows, capacity - at);
-				bool foundInterpolation = false;
-				for (size_t row = 0; row < rows; row++) {
-					if (out[at + row].Source != entities[row].Id) {
-						sourceOrderChanged.store(true, std::memory_order_relaxed);
-						continue;
-					}
-					const bool moving = !SameFrame(previous[row].Frame, transforms[row].Frame);
-					foundInterpolation |= moving;
-					out[at + row].Frame = moving ? previous[row].Frame.NLerp(transforms[row].Frame, alpha)
-												 : transforms[row].Frame;
-				}
-				if (foundInterpolation) {
-					hasInterpolation.store(true, std::memory_order_relaxed);
-				}
-			};
-
-			const size_t loose = store
-									 .Query<
-										 const Transform,
-										 const PreviousTransform,
-										 const Bounds,
-										 const Visual,
-										 const SurfaceAppearance,
-										 const Tags,
-										 const LocalTransparency>()
-									 .With<Rendered>()
-									 .Without<CharacterLimb>()
-									 .EachBatchEntitiesParallel(
-										 [&write](
-											 size_t first,
-											 size_t rows,
-											 const Entity *entities,
-											 const Transform *transforms,
-											 const PreviousTransform *previous,
-											 const Bounds *,
-											 const Visual *,
-											 const SurfaceAppearance *,
-											 const Tags *,
-											 const LocalTransparency *
-										 ) { write(0, first, rows, entities, transforms, previous); },
-										 grain
-									 );
-			const size_t rigged = store
-									  .Query<
-										  const Transform,
-										  const PreviousTransform,
-										  const Bounds,
-										  const Visual,
-										  const SurfaceAppearance,
-										  const Tags,
-										  const LocalTransparency,
-										  const CharacterLimb>()
-									  .With<Rendered>()
-									  .EachBatchEntitiesParallel(
-										  [&write, loose](
-											  size_t first,
-											  size_t rows,
-											  const Entity *entities,
-											  const Transform *transforms,
-											  const PreviousTransform *previous,
-											  const Bounds *,
-											  const Visual *,
-											  const SurfaceAppearance *,
-											  const Tags *,
-											  const LocalTransparency *,
-											  const CharacterLimb *
-										  ) { write(loose, first, rows, entities, transforms, previous); },
-										  grain
-									  );
-			drawList.HasInterpolation = hasInterpolation.load(std::memory_order_relaxed);
-			// The pose path preserves all other fields of each cached row. A query
-			// order change invalidates that positional join, so rebuild every row.
-			return sourceOrderChanged.load(std::memory_order_relaxed) ? 0 : loose + rigged;
 		}
 	}
 
@@ -873,22 +778,14 @@ namespace engine::render {
 		size_t matching = 0;
 		{
 			ENGINE_PROFILE_CAT("count entities", engine::core::ProfileCategory::Simulation);
-			matching = store.CountMatching<
-				Transform,
-				PreviousTransform,
-				Bounds,
-				Visual,
-				SurfaceAppearance,
-				Tags,
-				LocalTransparency,
-				Rendered>();
+			matching = PresentationSource::CountWorldDrawables(store);
 		}
 		const size_t skeletons = store.CountMatching<Skeleton>();
 		const size_t bones = skeletons == 0 ? 0 : store.CountMatching<Bone>();
-		DrawSourceChanges sourceChanges;
+		PresentationSourceDamage sourceChanges;
 		{
 			ENGINE_PROFILE_CAT("source changes", engine::core::ProfileCategory::Simulation);
-			sourceChanges = DrawSourcesChanged(store, *drawList, matching, skeletons, bones);
+			sourceChanges = CollectPresentationSourceDamage(store, *drawList, matching, skeletons, bones);
 		}
 		if (!drawList->HasInterpolation && !sourceChanges.Pose && !sourceChanges.Full) {
 			ENGINE_PROFILE_CAT("reuse draw list", engine::core::ProfileCategory::Simulation);
@@ -935,7 +832,7 @@ namespace engine::render {
 		if (!sourceChanges.Full && !drawList->HasFilteredSources) {
 			ENGINE_PROFILE_CAT("update draw frames", engine::core::ProfileCategory::Simulation);
 			drawList->Instances.resize(drawList->BaseInstanceCount);
-			const size_t written = UpdateDrawFrames(store, *drawList, alpha, DRAW_LIST_GRAIN);
+			const size_t written = RefreshPresentationSourceRows(store, *drawList, alpha, DRAW_LIST_GRAIN);
 			if (written == drawList->BaseInstanceCount) {
 				engine::core::Metrics::Count(
 					"render.instances", static_cast<double>(drawList->Instances.size())
@@ -1081,18 +978,13 @@ namespace engine::render {
 					// what the world knows, and `render` is what turns it
 					// into something a GPU binds.
 					//
-					// The fields come from `scene::MakeDrawInstance`, which
-					// is the only place that list is written - the
-					// replicated collector fills the same row from a
-					// snapshot. Both components are required columns of
-					// *this* query, so the addresses are always good.
-					out[at + row] = engine::scene::MakeDrawInstance(
+					out[at + row] = PresentationSource::MakeDrawInstance(
 						previous[row].Frame.NLerp(transforms[row].Frame, alpha),
 						bounds[row],
 						visuals[row],
 						&appearances[row],
 						&tags[row],
-						entities[row].Id,
+						entities[row],
 						&locals[row],
 						limbs == nullptr ? nullptr : &limbs[row]
 					);
@@ -1106,16 +998,7 @@ namespace engine::render {
 				}
 			};
 
-			const size_t loose = store
-									 .Query<
-										 const Transform,
-										 const PreviousTransform,
-										 const Bounds,
-										 const Visual,
-										 const SurfaceAppearance,
-										 const Tags,
-										 const LocalTransparency>()
-									 .With<Rendered>()
+			const size_t loose = PresentationSource::QueryWorldDrawables(store)
 									 .Without<CharacterLimb>()
 									 .EachBatchEntitiesParallel(
 										 [&write](
@@ -1153,48 +1036,38 @@ namespace engine::render {
 			// `EachBatch` already says a batch boundary is not a unit
 			// anybody declared - and within each half it is as deterministic
 			// as it was.
-			const size_t rigged = store
-									  .Query<
-										  const Transform,
-										  const PreviousTransform,
-										  const Bounds,
-										  const Visual,
-										  const SurfaceAppearance,
-										  const Tags,
-										  const LocalTransparency,
-										  const CharacterLimb>()
-									  .With<Rendered>()
-									  .EachBatchEntitiesParallel(
-										  [&write, loose](
-											  size_t first,
-											  size_t rows,
-											  const Entity *entities,
-											  const Transform *transforms,
-											  const PreviousTransform *previous,
-											  const Bounds *bounds,
-											  const Visual *visuals,
-											  const SurfaceAppearance *appearances,
-											  const Tags *tags,
-											  const LocalTransparency *locals,
-											  const CharacterLimb *limbs
-										  ) {
-											  write(
-												  loose,
-												  first,
-												  rows,
-												  entities,
-												  transforms,
-												  previous,
-												  bounds,
-												  visuals,
-												  appearances,
-												  tags,
-												  locals,
-												  limbs
-											  );
-										  },
-										  DRAW_LIST_GRAIN
-									  );
+			const size_t rigged =
+				PresentationSource::QueryRiggedWorldDrawables(store).EachBatchEntitiesParallel(
+					[&write, loose](
+						size_t first,
+						size_t rows,
+						const Entity *entities,
+						const Transform *transforms,
+						const PreviousTransform *previous,
+						const Bounds *bounds,
+						const Visual *visuals,
+						const SurfaceAppearance *appearances,
+						const Tags *tags,
+						const LocalTransparency *locals,
+						const CharacterLimb *limbs
+					) {
+						write(
+							loose,
+							first,
+							rows,
+							entities,
+							transforms,
+							previous,
+							bounds,
+							visuals,
+							appearances,
+							tags,
+							locals,
+							limbs
+						);
+					},
+					DRAW_LIST_GRAIN
+				);
 
 			written = loose + rigged;
 		}
@@ -1208,12 +1081,9 @@ namespace engine::render {
 			// a vector writes nothing and keeps the capacity, so the frame
 			// after an entity is destroyed still does not allocate.
 			drawList->Instances.resize(std::min(written, drawList->Instances.size()));
-			ApplyOptionalRenderState(store, drawList->Instances);
-			if (hasFullyTransparent.load(std::memory_order_relaxed)) {
-				std::erase_if(drawList->Instances, [](const scene::DrawInstance &instance) {
-					return instance.Transparency >= 1.0f;
-				});
-			}
+			FinalizePresentationSourceRows(
+				store, *drawList, hasFullyTransparent.load(std::memory_order_relaxed)
+			);
 
 			engine::core::Metrics::Count("render.instances", static_cast<double>(drawList->Instances.size()));
 		}
@@ -1244,7 +1114,7 @@ namespace engine::render {
 		// is what lets it *cut* the body at the plane rather than leave two
 		// whole copies straddling two panes. The same call serves a replica,
 		// which has a draw list and no simulation behind it.
-		(void)engine::scene::CutAndCloneSeams(store, drawList->Instances);
+		AppendPresentationSeamRows(store, *drawList);
 		AssignObjectLabels(store, *drawList);
 		AssignAuthoredLabels(
 			store,
@@ -1264,55 +1134,6 @@ namespace engine::render {
 			&scene::DrawInstance::PartLabel,
 			false
 		);
-	}
-
-	void CollectSkinPalettes(ecs::Store &store, DrawList &drawList) {
-		ENGINE_PROFILE_CAT("build skin palettes", engine::core::ProfileCategory::Simulation);
-		drawList.JointFrames.clear();
-		for (scene::DrawInstance &instance : drawList.Instances) {
-			instance.SkinFirst = 0;
-			instance.SkinCount = 0;
-
-			const ecs::Entity source(instance.Source);
-			const scene::Skeleton *skeleton = store.Get<scene::Skeleton>(source);
-			if (skeleton == nullptr || skeleton->JointCount == 0 ||
-				skeleton->JointCount > scene::MAX_JOINTS || !std::isfinite(skeleton->PoseScale) ||
-				skeleton->PoseScale <= 0) {
-				continue;
-			}
-
-			instance.SkinFirst = static_cast<uint32_t>(drawList.JointFrames.size());
-			instance.SkinCount = skeleton->JointCount;
-			drawList.JointFrames.resize(drawList.JointFrames.size() + skeleton->JointCount);
-			store.EachDescendant(source, [&](ecs::Entity descendant) {
-				const scene::Bone *bone = store.Get<scene::Bone>(descendant);
-				if (bone != nullptr && bone->Joint < skeleton->JointCount) {
-					auto frame = instance.Frame.Inverse() * scene::SkinningFrameOf(*bone);
-					frame.Position = frame.Position * (1.0f / skeleton->PoseScale);
-					drawList.JointFrames[instance.SkinFirst + bone->Joint] = frame;
-				}
-			});
-		}
-	}
-
-	void RebaseSkinPalettes(
-		std::span<scene::DrawInstance> instances,
-		std::span<const core::CFrame> source,
-		std::vector<core::CFrame> &destination
-	) {
-		for (scene::DrawInstance &instance : instances) {
-			const uint64_t end = static_cast<uint64_t>(instance.SkinFirst) + instance.SkinCount;
-			if (instance.SkinCount == 0 || end > source.size() ||
-				destination.size() > std::numeric_limits<uint32_t>::max() - instance.SkinCount) {
-				instance.SkinFirst = 0;
-				instance.SkinCount = 0;
-				continue;
-			}
-
-			const size_t first = instance.SkinFirst;
-			instance.SkinFirst = static_cast<uint32_t>(destination.size());
-			destination.insert(destination.end(), source.begin() + first, source.begin() + end);
-		}
 	}
 
 	void ParticleFrame::Detach() {
@@ -1518,11 +1339,16 @@ namespace engine::render {
 			if (scene::ResolveLocalLight(store, entity, bulb, source) != scene::LocalLightRejection::None)
 				return;
 			SceneLight light;
+			ecs::AttributeValue identifier;
+			if (ecs::GetAttribute(store, entity, core::Name("DataFactoryId"), identifier) &&
+				identifier.Type == ecs::PropertyType::String)
+				light.DataFactoryId = core::Name(identifier.String);
 			light.Position = source.Position;
 			light.Range = source.Range;
 			light.Colour = source.Colour;
 			light.Direction = source.Direction;
 			light.ConeCosine = source.ConeCosine;
+			light.Shadows = bulb.Shadows;
 
 			lights.push_back(light);
 		});
@@ -1622,33 +1448,17 @@ namespace engine::render {
 			const graph::PipelineDocument *document = available->Find(name);
 			assert(document != nullptr);
 
-			graph::RenderGraph pipeline;
-			core::Name offender;
-			const graph::PipelineDocumentStatus status = graph::Build(*document, pipeline, offender);
-			if (status != graph::PipelineDocumentStatus::Ok) {
-				ENGINE_ERROR(
-					"pipeline '{}' does not build: {} at '{}'",
-					name.Text(),
-					graph::Describe(status),
-					offender.Text()
-				);
-				continue;
-			}
-
 			const core::Name key = WorldPipelineKey(name, world);
-			if (renderer.SetPipeline(key, pipeline)) {
+			if (renderer.SetPipelineDocument(key, *document)) {
 				return key;
 			}
 		}
 
 		if (profiles.Count() > 0 && tier != DefaultPipelineTier::Unavailable) {
-			graph::RenderGraph pipeline;
-			core::Name offender;
-			if (graph::Build(defaultDocument(), pipeline, offender) == graph::PipelineDocumentStatus::Ok) {
-				const core::Name key = WorldPipelineKey(core::Name("Default PBR"), world);
-				if (renderer.SetPipeline(key, pipeline)) {
-					return key;
-				}
+			const graph::PipelineDocument fallback = defaultDocument();
+			const core::Name key = WorldPipelineKey(core::Name("Default PBR"), world);
+			if (renderer.SetPipelineDocument(key, fallback)) {
+				return key;
 			}
 		}
 		return {};
@@ -1666,7 +1476,7 @@ namespace engine::render {
 					lists[index].Instances.clear();
 					lists[index].JointFrames.clear();
 					lists[index].BaseInstanceCount = 0;
-					lists[index].SourceRevisions.fill(0);
+					lists[index].Revisions = {};
 					lists[index].SourceEntityCount = 0;
 					lists[index].SkeletonCount = 0;
 					lists[index].BoneCount = 0;
@@ -1695,7 +1505,10 @@ namespace engine::render {
 		}
 	}
 	void ApplySurfaceSlots(
-		std::span<scene::DrawInstance> instances, std::span<const scene::SurfaceSlot> slots, core::Name world
+		std::span<scene::DrawInstance> instances,
+		std::span<const scene::SurfaceSlot> slots,
+		core::Name world,
+		std::span<const scene::PortalSeam> portals
 	) {
 		static thread_local std::vector<scene::SurfaceSlot> parts;
 		parts.assign(slots.begin(), slots.end());
@@ -1716,13 +1529,21 @@ namespace engine::render {
 			);
 			if (found != parts.begin() && (found - 1)->Part.Id == instance.Source) {
 				instance.Surface = (found - 1)->Index;
+				instance.SurfaceIsPortal =
+					std::any_of(portals.begin(), portals.end(), [&](const auto &portal) {
+						return portal.Surface == instance.Surface;
+					});
 			}
 		}
 	}
 
 	size_t CollectPortalViews(
-		ecs::Store &store, std::vector<PortalView> &portals, std::span<const scene::SurfaceSlot> slots
+		ecs::Store &store,
+		std::vector<PortalView> &portals,
+		std::span<const scene::SurfaceSlot> slots,
+		float alpha
 	) {
+		(void)alpha;
 		portals.clear();
 
 		// **`GatherPortalSeams`, and never a second measurement of the same
@@ -1885,7 +1706,8 @@ namespace engine::render {
 					view.PaneNear = pane.NearPlane;
 					view.PaneFar = pane.FarPlane;
 					if (viewer != nullptr) {
-						const auto reflected = scene::ReflectCamera(pane, viewer->CameraFrame, {});
+						const auto reflected =
+							scene::ReflectCamera(pane, viewer->VisibilityCameraFrame(), {});
 						if (!reflected.Renders) {
 							return;
 						}

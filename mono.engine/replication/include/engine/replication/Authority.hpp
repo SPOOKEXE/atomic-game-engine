@@ -13,42 +13,14 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <span>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace engine::replication {
-
-	// One connected client, from the server's point of view.
-	//
-	// @since v0.3
-	struct ClientId {
-		// The index no client ever has, so a default handle is not client zero.
-		static constexpr uint32_t INVALID = 0xFFFFFFFFu;
-
-		// Which slot this client occupies.
-		uint32_t Index = INVALID;
-
-		// How many clients have occupied that slot before it.
-		//
-		// **The half that makes a stale handle safe.** Slots are reused the
-		// moment a client leaves, so an index alone would let a message meant
-		// for somebody who disconnected be delivered to whoever arrived next -
-		// `ecs::Entity` carries a generation for the same reason.
-		uint32_t Generation = 0;
-
-		// @return `true` when it came from `Admit`.
-		bool IsValid() const {
-			return Index != INVALID;
-		}
-
-		// @param other The handle to compare.
-		// @return `true` when both name the same client.
-		bool operator==(const ClientId &other) const {
-			return Index == other.Index && Generation == other.Generation;
-		}
-	};
+	class ReplicationObservations;
 
 	// How the server streams.
 	//
@@ -115,8 +87,9 @@ namespace engine::replication {
 		// re-offers every value a client has not acknowledged, which is right
 		// while a client is keeping up and is the whole world once it is not:
 		// at two hundred clients the measured link took about forty rows a tick
-		// and this function was serialising two thousand of them per component
-		// to choose from.
+		// while the recovery walk considered two thousand rows per component.
+		// Each offered value is encoded once here; both packing passes reuse
+		// those bytes and their exact lengths.
 		//
 		// Large enough that a healthy connection never reaches it, so this
 		// changes nothing until a client is far behind - which is exactly when a
@@ -247,7 +220,10 @@ namespace engine::replication {
 		//
 		// @param component The component's registered name.
 		// @param detection How changes are detected.
-		void Replicate(core::Name component, ChangeDetection detection = ChangeDetection::Observed);
+		// @param resource Whether to replicate the component as a world resource.
+		void Replicate(
+			core::Name component, ChangeDetection detection = ChangeDetection::Observed, bool resource = false
+		);
 
 		// How a replicated component's changes are noticed.
 		//
@@ -336,6 +312,20 @@ namespace engine::replication {
 		//                  ecs::Store &)`. Must be safe to call concurrently and
 		//                  must not write to the store.
 		void SetInterest(std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> predicate);
+
+		// Decides which entities a client may see in one call.
+		//
+		// `candidates` are sorted by entity handle and `accepted` has the same
+		// length. Write a non-zero byte at each candidate the client may see.
+		// Setting this replaces the per-entity interest predicate.
+		//
+		// @param selector Called as `selector(ClientId, store, candidates, accepted)`.
+		//        It must be safe to call concurrently and must not write to the
+		//        store.
+		void SetInterestBatch(
+			std::function<
+				void(ClientId, const ecs::Store &, std::span<const ecs::Entity>, std::span<uint8_t>)> selector
+		);
 
 		// Scores which entities a client is sent first when not all of them
 		// fit.
@@ -543,6 +533,10 @@ namespace engine::replication {
 		// @since v0.15
 		void SetAllowance(ClientId client, size_t bytes);
 
+		// Names this authority's copied observation identity and optional record
+		// sink. The sink receives metadata only and cannot affect replication.
+		void SetObservations(core::Name world, core::Name authority, ReplicationObservations *observations);
+
 		// Builds this tick's messages for every client.
 		//
 		// @param store The authoritative world.
@@ -590,6 +584,15 @@ namespace engine::replication {
 		//
 		// @param client The client to clear.
 		void ClearInputs(ClientId client);
+
+		// Reports no input past `through` as consumed at the next `ClearInputs`.
+		// For input the game took but did not apply to what it replicates, such
+		// as moves forwarded from a frozen portal body: the client keeps
+		// predicting them until an authority actually applies them.
+		//
+		// @param client  The client whose next clear is held.
+		// @param through The newest input tick that counts as consumed.
+		void HoldConsumedInput(ClientId client, uint64_t through);
 
 		// What one client's stream is doing.
 		//
@@ -947,6 +950,8 @@ namespace engine::replication {
 			std::vector<Input> Pending;
 			uint64_t ConsumedInput = 0;
 			uint64_t AcknowledgedInput = 0;
+			// Set by `HoldConsumedInput` for one `ClearInputs`.
+			std::optional<uint64_t> ConsumedHold;
 
 			// Accepted inbound state, cleared by the host once applied. Same
 			// shape as `Pending` and for the same reason: this module carries
@@ -998,6 +1003,8 @@ namespace engine::replication {
 			// captures exactly these into the same staged blob a preface uses.
 			// See `Statistics::Oversized`.
 			std::vector<uint64_t> Oversize;
+			// Encoded resource values captured into the current bulk stream, by component slot.
+			std::vector<std::optional<uint64_t>> OversizeResourceHashes;
 		};
 
 		// One entity's value for one component, built and waiting for a place
@@ -1023,6 +1030,10 @@ namespace engine::replication {
 			ecs::Entity Entity;
 
 			uint64_t WaitingSince = 0;
+
+			// The entity's position in this tick's `Bearing`, when scoring found
+			// one. Refinement reuses it instead of searching the same sorted set.
+			size_t BearingSlot = NOWHERE;
 
 			float Hint = 0.0f;
 		};
@@ -1088,6 +1099,8 @@ namespace engine::replication {
 			// A refused slot is warned about here, once a tick, where it used to
 			// be warned about once per client per tick.
 			bool Sendable = false;
+
+			bool Resource = false;
 
 			// This tick's changed rows, for a slot whose detection reads the
 			// store's dirty bits. Empty for a signed slot, which carries its
@@ -1169,6 +1182,11 @@ namespace engine::replication {
 		struct Lane {
 			// The entities this client may be sent, ascending by handle.
 			std::vector<ecs::Entity> Visible;
+
+			// Batch interest acceptance bytes, one per `BearingEntities` row. This
+			// belongs to the lane because batch selectors run concurrently for
+			// different clients.
+			std::vector<uint8_t> Accepted;
 
 			// The rows this tick built, and a permutation of them the priority
 			// pass puts in order.
@@ -1376,9 +1394,17 @@ namespace engine::replication {
 
 		// Saves `entities` and the values a client would decode for them.
 		//
+		// Overlays omit resources unless a complete visible-owner set is supplied.
+		// The optional hash span records the resources actually captured.
 		// Empty means the world could not be written at all: a `Save` of a store
 		// with nothing in it still writes a header.
-		std::vector<std::byte> Capture(ecs::Store &store, std::span<const ecs::Entity> entities) const;
+		std::vector<std::byte> Capture(
+			ecs::Store &store,
+			std::span<const ecs::Entity> entities,
+			bool overlay = false,
+			std::optional<std::span<const ecs::Entity>> resourceOwners = std::nullopt,
+			std::span<std::optional<uint64_t>> resourceHashes = {}
+		) const;
 
 		void BeginSnapshot(Lane &lane, Client &client, ecs::Store &store, uint64_t tick);
 
@@ -1394,10 +1420,10 @@ namespace engine::replication {
 		// re-snapshot would have cost - measured at 81 ticks of streaming on a
 		// scene of a hundred entities, twice, for three module scripts nothing
 		// had edited.
-		void StageOversize(Client &client, ecs::Store &store, uint64_t tick);
+		void StageOversize(Lane &lane, ClientId handle, Client &client, ecs::Store &store, uint64_t tick);
 
 		void StreamSnapshot(Client &client);
-		// Filters `Bearing` through the host's interest predicate into
+		// Filters `BearingEntities` through the host's interest selector into
 		// `Lane::Visible`, ascending by handle.
 		void SelectVisible(Lane &lane, ClientId handle, const ecs::Store &store);
 
@@ -1450,10 +1476,12 @@ namespace engine::replication {
 
 		// Takes a client's answer to an audit, having decided the server agrees
 		// it asked the question.
-		bool Dispute(Client &into, const replication::Disputed &disputed);
+		bool Dispute(ClientId client, Client &into, const replication::Disputed &disputed);
 
 		AuthoritySettings Settings_;
 		std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> Interest;
+		std::function<void(ClientId, const ecs::Store &, std::span<const ecs::Entity>, std::span<uint8_t>)>
+			InterestBatch;
 		std::function<float(ClientId, ecs::Entity)> Priority;
 
 		// The expensive half of the score, asked only about the rows in
@@ -1466,8 +1494,13 @@ namespace engine::replication {
 		// `SetOwnership`.
 		std::function<bool(ClientId, ecs::Entity, const ecs::Store &)> Ownership;
 		std::vector<core::Name> Components;
+		core::Name ObservationWorld;
+		core::Name ObservationAuthority;
+		ReplicationObservations *Observations = nullptr;
+		uint64_t ObservationRound = 0;
 
 		std::vector<ChangeDetection> Detection;
+		std::vector<bool> Resources;
 
 		// Per slot, the tag whose presence suppresses that component's deltas for
 		// one entity, or an invalid name for none. See `SuppressWhenTagged`.
@@ -1500,6 +1533,11 @@ namespace engine::replication {
 		std::vector<ecs::Entity> Preceding;
 
 		std::vector<uint64_t> Bearing;
+
+		// `Bearing` as entity handles, materialized once after each survey while a
+		// batch selector is installed. `PublishOne` only reads it while client
+		// lanes run.
+		std::vector<ecs::Entity> BearingEntities;
 
 		// The signed slots this tick, as indices into `Signatures`.
 		//

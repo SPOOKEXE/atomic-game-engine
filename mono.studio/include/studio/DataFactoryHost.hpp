@@ -40,16 +40,27 @@ namespace studio {
 			PackageDependencies = {};
 	};
 
+	// Product services supplied when this host composes its optional control rows.
+	struct DataFactoryControlHookContext {
+		// Surface receiving the data-factory control rows.
+		engine::control::Surface &Surface;
+		// Whether renderer-dependent rows may be installed.
+		bool RendererReady = false;
+	};
+
 	// Binds one empty Studio universe to the shared factory lifecycle and MCP
 	// feature. The session refuses compatibility worlds itself, so a normal
 	// Studio scene can never become factory-owned by accident.
 	class DataFactoryHost final {
 	  public:
+		// Drains factory control hooks before the session they capture is released.
+		~DataFactoryHost();
+
 		bool
 		// Builds the lifecycle session and installs host callbacks for this universe.
 		Start(engine::world::Universe &universe, DataFactoryHostCallbacks callbacks, std::string &detail);
 		// Adds data-factory control rows whose availability matches renderer state.
-		void InstallTools(engine::control::Surface &surface, bool rendererReady);
+		void InstallTools(DataFactoryControlHookContext context);
 
 		// Advances the isolated factory universe only while its lifecycle has resumed it.
 		bool Tick(float frameSeconds);
@@ -65,11 +76,18 @@ namespace studio {
 		}
 
 	  private:
+		void CloseControlHooks();
 		engine::world::Universe *Worlds = nullptr;
 		std::unique_ptr<engine::world::DataFactorySession> Lifecycle;
 		std::function<engine::script::DataScriptPackageTransactionDependencies(
 			engine::world::Universe &, engine::world::DataFactorySession &
 		)>
 			PackageDependencies;
+		// Members close in reverse order, so every session reader drains before lifecycle rows.
+		engine::control::HookLease FactoryLifecycleHook;
+		engine::control::HookLease FactorySceneHook;
+		engine::control::HookLease FactoryPhysicsHook;
+		engine::control::HookLease FactoryPackageHook;
+		engine::control::HookLease FactorySelectionHook;
 	};
 }
