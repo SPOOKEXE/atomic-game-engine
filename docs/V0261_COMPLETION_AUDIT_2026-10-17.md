@@ -166,9 +166,10 @@ processes per suite produced 15 process runs; rows were byte-identical across
 the repeats. Each process took one measured body sample with zero warmups. Each
 set also ran 30 existing benchmark bodies, and all semantic oracles passed.
 Output remained on stdout and was not saved. The `bench` preset used
-RelWithDebInfo, `-O2`, `MONO_HEAP_PROFILE=ON`, unity builds, and GCC 13.3 on a
-Ryzen 9 9900X with 24 logical CPUs. The run was CPU-only, so GPU resolution was
-not applicable.
+RelWithDebInfo, `MONO_HEAP_PROFILE=ON`, unity builds, and GCC 13.3 on a Ryzen
+9 9900X with 24 logical CPUs. Compile commands show effective `-O3`: first-party
+and benchmark flags override the preset's `-O2`. This establishes no speed
+claim. The run was CPU-only, so GPU resolution was not applicable.
 
 The pre-fix graphcore empty case allocated 976 bytes in 14 blocks. Its prepared
 64-node order case allocated zero bytes and blocks in this fixture; this does
@@ -222,6 +223,57 @@ IDs, replacement and topology deadlines, overflow, and zero output. Existing
 format mismatch and float summation order checks pass. `SoundRef` ownership
 remains with the host; no retirement system was added.
 
-This repair establishes allocation correctness for the checked callback paths, not an accepted
-optimization pass. Full B0 and all three optimization passes remain
-incomplete. Native CI and the full gate are still pending.
+This repair establishes allocation correctness for the checked callback paths,
+not an accepted optimization pass. Full B0 and all three optimization passes
+remain incomplete.
+
+At `5116b884`, strict pre-push passed all 771 suites with zero skips or failures
+and all standard checks passing. Log: `.cache/build/ci/v0261-audio-pre-push.log`.
+The native workflow also passed Build, Process Isolation, Package, and Upload
+on all three platforms, with six artifact records:
+[workflow run](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/38984298078).
+The publish job was skipped in this manual dry run; no release publication is claimed.
+
+## Additional CPU heap baselines at 5116b884
+
+CPU-only stdout diagnostics used `bench`, effective `-O3`, heap profiling on,
+and GCC 13.3. Shared-host timings are rejected; no speed or GPU-traffic claim.
+
+Renderer startup registration matched in three fresh processes: 314,665
+requested bytes, 2,592 allocations, 162,364 retained bytes in 1,252 blocks.
+Its 99-kind canonical byte sequence is 13,121 bytes (SHA-256
+`bc0cedee5fccfa4c0bf8712383e55a22d45e58f478ddabd051a47eaa45be6e35`). Three
+warm processes matched across 20 heap, four work, and five canonical rows for
+empty/simple/default-PBR/stress-256. Repeated registration used 204,462 bytes
+and 2,215 allocations with no retained-byte delta. This candidate awaits full
+B0; planned logical bytes are not actual GPU traffic.
+
+Portal fixtures passed analytic owner and distance oracles within 0.003 m:
+five cases, three processes, 2,048 rays per case per process. Empty allocated
+zero; simple, blocked, and short each allocated 32,768 bytes in 8,192 blocks;
+the 32 linked portal pairs with 4,192 colliders allocated 1,048,576 bytes in 262,144
+blocks. Retained-byte delta was zero for every case.
+
+C06 passed eight cohorts (empty/simple/busy/complex in authoritative-serial and
+threaded-preview modes), three processes, one sample, zero warmups, one trial:
+192 phase rows, 16 fixtures each. Four artifact hashes matched across modes
+and processes; the last two also matched pinned expected hashes. Cancellation
+completion varies by schedule, and process peak includes the full trial and
+oracles, so this proves neither stable cancellation cost nor leak freedom. Max
+retained requests were 2; logical admission reservation was 64 MiB, not heap.
+Full B0 and all three optimization passes remain incomplete.
+
+## C02 paired Town CPU diagnostic
+
+C02 ran seven native and 12 paired Town workloads, one process per suite. Each
+row covered six windows: 600 measured ticks after 120 internal warm ticks, one
+harness sample, and zero outer warmups. All 42 native and 72 Town windows
+passed semantic checks. Maximum promotion latency was zero; authored maximum
+age was seven ticks. Animated fixtures ended at tick 720 with track time
+11.999988556 s. Town owners used the opposite VM under the same policy as a
+reference outside the measured owner. Shared-host timings are rejected.
+
+C++ heap counters and VM allocator counters remain separate. Luau reports
+requested bytes and sums of individual VM peaks; those peaks are not a
+simultaneous process peak. QuickJS reports charged malloc bytes without peaks.
+Cross-basis VM comparisons are invalid.
