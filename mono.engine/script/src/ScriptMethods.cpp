@@ -157,7 +157,9 @@ namespace engine::script {
 					local = parentLocal;
 				}
 				if (local) call.Raise("server scripts cannot change client-local instances");
-				store.EachDescendant(instance, [&](Entity child) { RequireOwnedMutation(call, child); });
+				if (store.HasChildren(instance)) {
+					store.EachDescendant(instance, [&](Entity child) { RequireOwnedMutation(call, child); });
+				}
 			}
 		}
 

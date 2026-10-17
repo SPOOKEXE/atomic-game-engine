@@ -1292,6 +1292,141 @@ game.GetService('RunService').Heartbeat.Connect(() => {
 	}
 }
 
+TEST_CASE("bulk arrays refresh only builtin Workspace across calls", "[scripting][scriptcall]") {
+	using namespace engine;
+	for (const Language language : LANGUAGES) {
+		Store store = Fresh("scriptcall.bulk-workspace");
+		script::RuntimeLimits limits;
+		limits.Role = script::HostRole::OfServer();
+		const auto runtime = MakeRuntime(store, language, limits);
+		REQUIRE(runtime != nullptr);
+		const char *source = language == Language::Luau ? R"(
+local held = workspace
+local alias = game:GetService('Workspace')
+local bulk = workspace.BulkMoveTo
+local live = Instance.new('Part', workspace)
+live.Name = 'BulkLive'
+local stale = Instance.new('Part', workspace)
+stale.Name = 'BulkStale'
+local phase = 0
+game:GetService('RunService').Heartbeat:Connect(function()
+    phase += 1
+    bulk(live, {held, live, alias, stale}, {
+        CFrame.new(phase * 10 + 1, 0, 0), CFrame.new(phase * 10 + 2, 0, 0),
+        CFrame.new(phase * 10 + 3, 0, 0), CFrame.new(phase * 10 + 4, 0, 0)
+    })
+end)
+)"
+														: R"(
+const held = workspace;
+const alias = game.GetService('Workspace');
+const bulk = workspace.BulkMoveTo;
+const live = Instance.new('Part', workspace);
+live.Name = 'BulkLive';
+const stale = Instance.new('Part', workspace);
+stale.Name = 'BulkStale';
+let phase = 0;
+game.GetService('RunService').Heartbeat.Connect(() => {
+    ++phase;
+    bulk.call(live, [held, live, alias, stale], [
+        CFrame.new(phase * 10 + 1, 0, 0), CFrame.new(phase * 10 + 2, 0, 0),
+        CFrame.new(phase * 10 + 3, 0, 0), CFrame.new(phase * 10 + 4, 0, 0)
+    ]);
+});
+)";
+		REQUIRE(runtime->Run(source, "bulk-workspace"));
+		auto workspace = scene::WorkspaceOf(store);
+		const auto live = store.FindFirstChild(workspace, "BulkLive");
+		const auto stale = store.FindFirstChild(workspace, "BulkStale");
+		REQUIRE(live != ecs::NULL_ENTITY);
+		REQUIRE(stale != ecs::NULL_ENTITY);
+		store.DestroyInstance(stale);
+		const auto replacement = store.CreateInstance(scene::PartClass(), "Replacement");
+		REQUIRE(replacement != stale);
+		REQUIRE_FALSE(store.Alive(stale));
+		for (int phase = 1; phase <= 2; phase++) {
+			const auto previous = workspace;
+			if (!store.Has<scene::Transform>(previous)) store.Set(previous, scene::Transform{});
+			const float previousX = store.Get<scene::Transform>(previous)->Frame.Position.X;
+			// Keep a live decoy at the old handle while the canonical service changes.
+			store.Set(previous, ecs::InstanceClass{scene::PartClass()});
+			store.Remove<scene::ServiceComponent>(previous);
+			workspace = store.CreateInstance(ecs::Classes::Find(core::Name("Workspace")), "Workspace");
+			REQUIRE(workspace != ecs::NULL_ENTITY);
+			store.Set(workspace, scene::Transform{});
+			const bool moved = runtime->Heartbeat(1.0f / 30);
+			INFO(runtime->LastError());
+			REQUIRE(moved);
+			CHECK(store.Get<scene::Transform>(workspace)->Frame.Position.X == phase * 10 + 3);
+			CHECK(store.Get<scene::Transform>(live)->Frame.Position.X == phase * 10 + 2);
+			CHECK(store.Get<scene::Transform>(previous)->Frame.Position.X == previousX);
+			CHECK(store.Get<scene::Transform>(replacement)->Frame.Position.X == 0);
+		}
+	}
+}
+
+TEST_CASE("bulk arrays validate every value before placing any part", "[scripting][scriptcall]") {
+	for (const Language language : LANGUAGES) {
+		Store store = Fresh("scriptcall.bulk-types");
+		const auto runtime = MakeRuntime(store, language);
+		REQUIRE(runtime != nullptr);
+		const auto workspace = engine::scene::WorkspaceOf(store);
+		const auto first = store.CreateInstance(engine::scene::PartClass(), "BulkFirst");
+		const auto second = store.CreateInstance(engine::scene::PartClass(), "BulkSecond");
+		REQUIRE(store.SetParent(first, workspace));
+		REQUIRE(store.SetParent(second, workspace));
+		const bool luau = language == Language::Luau;
+		const std::string prefix =
+			Let(language,
+				"first",
+				luau ? "workspace:FindFirstChild('BulkFirst')" : "workspace.FindFirstChild('BulkFirst')") +
+			Let(language,
+				"second",
+				luau ? "workspace:FindFirstChild('BulkSecond')" : "workspace.FindFirstChild('BulkSecond')");
+		const auto withParts = [&](const std::string &body) {
+			return std::string(luau ? "do\n" : "{\n") + prefix + body + (luau ? "end\n" : "}\n");
+		};
+		const std::string valid = luau ? R"(
+local traps = {__index = function() error('array metamethod invoked') end,
+               __len = function() error('array metamethod invoked') end}
+workspace:BulkMoveTo(setmetatable({first, second}, traps),
+    setmetatable({CFrame.new(1, 0, 0), CFrame.new(2, 0, 0)}, traps))
+)"
+									   : "workspace.BulkMoveTo([first, second], [CFrame.new(1, 0, 0), "
+										 "CFrame.new(2, 0, 0)]);";
+		const bool placed = runtime->Run(withParts(valid), "bulk-raw-arrays");
+		INFO(runtime->LastError());
+		REQUIRE(placed);
+		std::vector<std::pair<std::string, std::string>> invalid = {
+			{luau ? "BulkMoveTo({first, CFrame.new()}, {CFrame.new(9, 0, 0), CFrame.new()})"
+				  : "BulkMoveTo([first, CFrame.new()], [CFrame.new(9, 0, 0), CFrame.new()])",
+			 "Instance"},
+			{luau ? "BulkMoveTo({first, second}, {CFrame.new(9, 0, 0), second})"
+				  : "BulkMoveTo([first, second], [CFrame.new(9, 0, 0), second])",
+			 "CFrame"},
+		};
+		if (luau) {
+			invalid.push_back(
+				{"BulkMoveTo(setmetatable({first, nil, second}, {__index = function() "
+				 "error('array metamethod invoked') end}), {CFrame.new(), CFrame.new(), CFrame.new()})",
+				 "Instance"}
+			);
+			invalid.push_back(
+				{"BulkMoveTo({first, second, first}, setmetatable({CFrame.new(9, 0, 0), nil, CFrame.new()}, "
+				 "{__index = function() error('array metamethod invoked') end}))",
+				 "CFrame"}
+			);
+		}
+		for (const auto &[probe, expected] : invalid) {
+			CHECK_FALSE(runtime->Run(withParts(Send(language, "workspace", probe)), "bulk-invalid-array"));
+			CHECK(runtime->LastError().find(expected) != std::string::npos);
+			CHECK(runtime->LastError().find("array metamethod invoked") == std::string::npos);
+			CHECK(store.Get<engine::scene::Transform>(first)->Frame.Position.X == 1);
+			CHECK(store.Get<engine::scene::Transform>(second)->Frame.Position.X == 2);
+		}
+	}
+}
+
 TEST_CASE("BulkMoveTo refuses lists of different lengths", "[scripting][scriptcall]") {
 	// **Refused rather than truncated**, and the reason is in `ScriptMethods`:
 	// `scene::BulkMoveTo` takes the shorter of two spans because a C++ caller

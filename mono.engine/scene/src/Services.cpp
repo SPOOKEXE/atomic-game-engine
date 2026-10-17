@@ -1070,37 +1070,46 @@ namespace engine::scene {
 		return service != nullptr ? service->Scope : ServiceScope::Shared;
 	}
 
+	namespace {
+		std::array<ClassId, 10> ClientVisibleServiceClasses() {
+			return {
+				Classes::Find(core::Name("Workspace")),
+				Classes::Find(core::Name("Lighting")),
+				Classes::Find(core::Name("ReplicatedFirst")),
+				Classes::Find(core::Name("ReplicatedStorage")),
+				Classes::Find(core::Name("StarterGui")),
+				Classes::Find(core::Name("StarterPack")),
+				Classes::Find(core::Name("Players")),
+				Classes::Find(core::Name("Teams")),
+				Classes::Find(core::Name("StarterPlayerScripts")),
+				Classes::Find(core::Name("StarterCharacterScripts")),
+			};
+		}
+
+		Entity NearestService(const Store &store, Entity instance) {
+			Entity at = instance;
+			// Workspace is a WorldRoot in the class tree; the component declares its scope.
+			while (at != NULL_ENTITY && store.Get<ServiceComponent>(at) == nullptr) {
+				at = store.ParentOf(at);
+			}
+			return at;
+		}
+
+		bool
+		ServiceVisibleToClients(const Store &store, Entity service, const std::array<ClassId, 10> &allowed) {
+			if (std::find(allowed.begin(), allowed.end(), store.ClassOf(service)) == allowed.end())
+				return false;
+
+			const ServiceComponent *component = store.Get<ServiceComponent>(service);
+			return component != nullptr && component->Scope != ServiceScope::Server;
+		}
+	}
+
 	bool VisibleToClients(const Store &store, Entity instance) {
 		if (ecs::IsClientLocalInstance(store, instance)) return false;
-		Entity at = instance;
-		// ServiceComponent is the fixture fact. Workspace is a WorldRoot in the
-		// class tree, so using `IsA("Service")` here would make its entire scene
-		// disappear from replication even though it carries the same scope row.
-		while (at != NULL_ENTITY && store.Get<ServiceComponent>(at) == nullptr) {
-			at = store.ParentOf(at);
-		}
-		if (at == NULL_ENTITY) {
-			return false;
-		}
-
-		const ClassId allowed[] = {
-			Classes::Find(core::Name("Workspace")),
-			Classes::Find(core::Name("Lighting")),
-			Classes::Find(core::Name("ReplicatedFirst")),
-			Classes::Find(core::Name("ReplicatedStorage")),
-			Classes::Find(core::Name("StarterGui")),
-			Classes::Find(core::Name("StarterPack")),
-			Classes::Find(core::Name("Players")),
-			Classes::Find(core::Name("Teams")),
-			Classes::Find(core::Name("StarterPlayerScripts")),
-			Classes::Find(core::Name("StarterCharacterScripts")),
-		};
-		if (std::find(std::begin(allowed), std::end(allowed), store.ClassOf(at)) == std::end(allowed)) {
-			return false;
-		}
-
-		const ServiceComponent *component = store.Get<ServiceComponent>(at);
-		return component != nullptr && component->Scope != ServiceScope::Server;
+		const Entity service = NearestService(store, instance);
+		if (service == NULL_ENTITY) return false;
+		return ServiceVisibleToClients(store, service, ClientVisibleServiceClasses());
 	}
 
 	Entity PlayerOwning(const Store &store, Entity instance) {
@@ -1143,6 +1152,36 @@ namespace engine::scene {
 			at = parent;
 		}
 		return NULL_ENTITY;
+	}
+
+	void CollectClientVisibilityExceptions(Store &store, std::vector<ClientVisibilityException> &out) {
+		out.clear();
+		if (store.CountMatching<ServiceComponent>() == 0) return;
+
+		const auto allowed = ClientVisibleServiceClasses();
+		// No user callbacks or mutations occur during this survey, so absence stays true.
+		const bool checkLocality = ecs::HasClientLocalInstances(store);
+		store.EachEntity([&](Entity entity) {
+			if (checkLocality && ecs::IsClientLocalInstance(store, entity)) {
+				out.push_back({entity.Id, ClientVisibilityExceptionKind::Hidden, {}});
+				return;
+			}
+			const Entity service = NearestService(store, entity);
+			if (service == NULL_ENTITY || !ServiceVisibleToClients(store, service, allowed)) {
+				out.push_back({entity.Id, ClientVisibilityExceptionKind::Hidden, {}});
+				return;
+			}
+
+			const Entity owner = PlayerOwning(store, entity);
+			if (owner == NULL_ENTITY || entity == owner) return;
+			const Entity privateOwner = PrivatePlayerOwning(store, entity);
+			const auto kind = privateOwner == NULL_ENTITY ? ClientVisibilityExceptionKind::RequirePlayer
+														  : ClientVisibilityExceptionKind::OwnerOnly;
+			out.push_back({entity.Id, kind, privateOwner});
+		});
+		std::sort(out.begin(), out.end(), [](const auto &left, const auto &right) {
+			return left.EntityId < right.EntityId;
+		});
 	}
 
 	bool InPlayerGui(const Store &store, Entity instance, Entity player) {

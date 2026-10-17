@@ -31,14 +31,18 @@ namespace engine::script {
 			return *UpvalueContext(state).World;
 		}
 
-		Entity CheckInstance(lua_State *state, int index) {
+		Entity &CheckedInstanceStorage(lua_State *state, int index) {
 			void *value = lua_touserdatatagged(state, index, TAG_INSTANCE);
 			if (value == nullptr) {
 				luaL_typeerrorL(state, index, "Instance");
 			}
-			auto &instance = *static_cast<Entity *>(value);
+			return *static_cast<Entity *>(value);
+		}
+
+		Entity CheckInstance(lua_State *state, int index) {
+			Entity &instance = CheckedInstanceStorage(state, index);
 			lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace");
-			const bool builtin = value == lua_touserdatatagged(state, -1, TAG_INSTANCE);
+			const bool builtin = &instance == lua_touserdatatagged(state, -1, TAG_INSTANCE);
 			lua_pop(state, 1);
 			// Only the builtin service follows replica arrival or a reminted scene.
 			// Ordinary instances retain their exact authored generation.
@@ -1242,6 +1246,37 @@ namespace engine::script {
 	}
 	ecs::Entity CheckInstanceArgument(lua_State *state, int index) {
 		return CheckInstance(state, index);
+	}
+
+	void ReadInstanceArrayArgument(lua_State *state, int index, std::vector<ecs::Entity> &out) {
+		luaL_checktype(state, index, LUA_TTABLE);
+		index = lua_absindex(state, index);
+		const int count = lua_objlen(state, index);
+		out.clear();
+		out.reserve(static_cast<size_t>(count));
+		if (count == 0) return;
+
+		lua_getfield(state, LUA_REGISTRYINDEX, "engine.workspace");
+		const void *builtin = lua_touserdatatagged(state, -1, TAG_INSTANCE);
+		lua_pop(state, 1);
+		ecs::Entity workspace = ecs::NULL_ENTITY;
+		bool resolvedWorkspace = false;
+
+		// Raw reads and tag checks cannot invoke scripts, so this proof ends with the array.
+		for (int at = 1; at <= count; at++) {
+			lua_rawgeti(state, index, at);
+			ecs::Entity &stored = CheckedInstanceStorage(state, -1);
+			if (&stored == builtin) {
+				if (!resolvedWorkspace) {
+					workspace = scene::WorkspaceOf(*ContextOf(state).World);
+					resolvedWorkspace = true;
+				}
+				stored = workspace;
+			}
+			const ecs::Entity instance = stored;
+			lua_pop(state, 1);
+			out.push_back(instance);
+		}
 	}
 
 }

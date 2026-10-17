@@ -58,6 +58,7 @@ namespace engine::assets {
 }
 
 namespace engine::scene {
+	struct ClientVisibilityException;
 	struct CollisionShapes;
 }
 
@@ -1388,19 +1389,7 @@ namespace server {
 		// `ServerStorage`. Everything absent from it is public. The batch callback
 		// merge-walks it with the authority's sorted candidates, so it does one
 		// player-slot lookup per client instead of one per candidate.
-		enum class VisibilityExceptionKind : uint8_t {
-			Hidden,
-			RequirePlayer,
-			OwnerOnly,
-		};
-
-		struct VisibilityException {
-			uint64_t EntityId = 0;
-			VisibilityExceptionKind Kind = VisibilityExceptionKind::Hidden;
-			engine::ecs::Entity Owner;
-		};
-
-		std::vector<VisibilityException> VisibilityExceptions;
+		std::vector<engine::scene::ClientVisibilityException> VisibilityExceptions;
 
 		// The store `Listener::Publish` is walking, for as long as it is walking
 		// it. Null at every other moment.

@@ -1034,6 +1034,10 @@ namespace engine::script {
 	// @return The entity the instance names.
 	ecs::Entity CheckInstanceArgument(lua_State *state, int index);
 
+	// Reads a raw Instance array, clearing output while retaining its capacity.
+	// Builtin Workspace identity and remint resolution are shared only within this callback-free read.
+	void ReadInstanceArrayArgument(lua_State *state, int index, std::vector<ecs::Entity> &out);
+
 	// Installs `Instance`, and the metatable that turns `part.Size = v` into a
 	// property write.
 	//

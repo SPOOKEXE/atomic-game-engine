@@ -2363,15 +2363,16 @@ namespace server {
 				uint8_t visible = 1;
 				if (exception < VisibilityExceptions.size() &&
 					VisibilityExceptions[exception].EntityId == entityId) {
-					const VisibilityException &entry = VisibilityExceptions[exception];
+					using engine::scene::ClientVisibilityExceptionKind;
+					const auto &entry = VisibilityExceptions[exception];
 					switch (entry.Kind) {
-					case VisibilityExceptionKind::Hidden:
+					case ClientVisibilityExceptionKind::Hidden:
 						visible = 0;
 						break;
-					case VisibilityExceptionKind::RequirePlayer:
+					case ClientVisibilityExceptionKind::RequirePlayer:
 						visible = player != engine::ecs::NULL_ENTITY;
 						break;
-					case VisibilityExceptionKind::OwnerOnly:
+					case ClientVisibilityExceptionKind::OwnerOnly:
 						visible = player != engine::ecs::NULL_ENTITY && entry.Owner == player;
 						break;
 					}
@@ -2472,40 +2473,7 @@ namespace server {
 		if (Settings.GamePath.empty()) {
 			return;
 		}
-		bool hasServices = false;
-		store.Each<const engine::scene::ServiceComponent>(
-			[&hasServices](engine::ecs::Entity, const engine::scene::ServiceComponent &) {
-				hasServices = true;
-			}
-		);
-		if (!hasServices) {
-			return;
-		}
-
-		// **One walk for the world, where the batch predicate it feeds walks only
-		// sorted candidates.** `EachEntity` visits in archetype order, so the
-		// exceptions are sorted afterwards rather than assumed to be.
-		store.EachEntity([this, &store](engine::ecs::Entity entity) {
-			if (!engine::scene::VisibleToClients(store, entity)) {
-				VisibilityExceptions.push_back({entity.Id, VisibilityExceptionKind::Hidden, {}});
-				return;
-			}
-
-			const engine::ecs::Entity owner = engine::scene::PlayerOwning(store, entity);
-			if (owner == engine::ecs::NULL_ENTITY || entity == owner) return;
-
-			const engine::ecs::Entity privateOwner = engine::scene::PrivatePlayerOwning(store, entity);
-			const VisibilityExceptionKind kind = privateOwner == engine::ecs::NULL_ENTITY
-													 ? VisibilityExceptionKind::RequirePlayer
-													 : VisibilityExceptionKind::OwnerOnly;
-			VisibilityExceptions.push_back({entity.Id, kind, privateOwner});
-		});
-
-		std::sort(
-			VisibilityExceptions.begin(),
-			VisibilityExceptions.end(),
-			[](const auto &left, const auto &right) { return left.EntityId < right.EntityId; }
-		);
+		engine::scene::CollectClientVisibilityExceptions(store, VisibilityExceptions);
 	}
 
 	bool Server::PositionOf(engine::ecs::Entity entity, engine::core::Vector3 &out) const {
