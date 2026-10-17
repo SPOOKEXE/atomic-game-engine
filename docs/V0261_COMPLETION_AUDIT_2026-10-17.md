@@ -496,3 +496,35 @@ three platforms remain pending; the new Windows step has not run natively yet.
 Shared-host timing remains unaccepted. B0 is incomplete, with
 0 of 3 optimization passes complete; the Cargo candidate is not an engine
 optimization pass.
+
+## Cold profiling in the audio callback
+
+The push at `df1831cc` was refused by the mixer suite: 41 of 42 cases and
+22,058 of 22,062 assertions passed. The empty-output call allocated four blocks,
+1,152 bytes. GDB traced allocations of 64, 512, 64, and 512 bytes through
+`FrameGraph::Get`, its two empty name deques, and `AudioMixer::Render`, with
+recording disabled. Logs: `.cache/build/ci/v0261-cargo-cache-pre-push.log` and
+`.cache/build/ci/v0261-audio-cold-profile.log`.
+
+`157dd173` keeps initialization on FrameGraph control calls; cold scopes and
+reports use only published state. `35e2e8a7` prepares the SDL callback's heap
+tag path before opening the stream. Its thread-local guard prevents tag creation
+throughout the callback. Missing tags retain their ancestor and count drops;
+profiler capacity cannot refuse audio. Existing scope placements are retained.
+
+The new isolated cold test failed four allocation assertions against the old
+FrameGraph, with five assertions passing. The fixed test passed all nine.
+Active FrameGraph passed 63 cases and 324 assertions; heap profiling passed
+14 cases and 76 assertions. The original mixer seed, 3182939086, passed all
+42 cases and 22,062 assertions. With SDL's dummy driver, all 106 audio cases
+and 150,550 assertions passed. The release test preset built in 164 edges and
+passed 14 heap cases and 41 assertions with heap hooks compiled out.
+
+GDB observed two positive SDL Feed calls through their return instructions:
+both completed with zero C++ allocations, tag registrations, or static
+initialization guard calls; the playback fixture passed 44 assertions. This
+does not cover SDK or driver C allocations. Log:
+`.cache/build/ci/v0261-audio-feed-profile.log`. Format and documentation checks
+passed, with every public entity documented. Full-gate retry and native Cargo
+cache cold/warm measurements remain pending. No speed gain or completed engine
+optimization pass is claimed; B0 remains incomplete, with 0 of 3 passes complete.
