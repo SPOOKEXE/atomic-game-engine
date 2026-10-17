@@ -277,3 +277,63 @@ C++ heap counters and VM allocator counters remain separate. Luau reports
 requested bytes and sums of individual VM peaks; those peaks are not a
 simultaneous process peak. QuickJS reports charged malloc bytes without peaks.
 Cross-basis VM comparisons are invalid.
+
+## C02 fresh-process RSS diagnostic
+
+The benchmark binary used engine code at `5116b884` plus the selector-only
+patch; no engine-code changes were included.
+
+Collected 2026-10-17 with `/usr/bin/time -f PROCESS_RSS_MAX_KIB=%M`,
+`ATOMIC_CADENCE_TICKS=600`, one harness sample, zero outer warmups, 120 internal
+warmup ticks and 600 measured ticks. Each of the 19 selected rows emitted one
+benchmark row, and all semantic oracles passed. The following are whole-process
+resident high-water marks in KiB, including fixture setup, internal warmup,
+reference work and oracles. They are not owner or VM heap peaks, and do not
+measure physical GPU memory.
+
+| Cohort | Maximum RSS (KiB, full fidelity / authored cadence) |
+|---|---:|
+| Native empty, single policy | 29,936 |
+| Native simple | 31,756 / 32,200 |
+| Native busy | 35,216 / 35,436 |
+| Native complex | 48,584 / 48,396 |
+| Town Luau simple | 34,912 / 35,524 |
+| Town Luau complex | 77,360 / 78,320 |
+| Town Luau crowded | 37,252 / 37,556 |
+| Town JavaScript simple | 35,560 / 34,716 |
+| Town JavaScript complex | 77,092 / 77,188 |
+| Town JavaScript crowded | 35,988 / 36,080 |
+
+The build was `bench`, effective `-O3`, with heap profiling and unity builds
+enabled, using GNU 13.3 on a Ryzen 9 9900X. This CPU-only diagnostic makes no
+RSS improvement claim. Shared-host clock and latency gains remain pending, and
+full B0 has not passed.
+
+## Server host lifetime repair
+
+The original docs-only pre-push at `ac0dac6e` passed 770 of 771 suites, then
+crashed in `server.host` with SIGSEGV (`.cache/build/ci/v0261-baseline-notes-pre-push.log`).
+The VM destructor called `Store::ClearDescendantRemoving` through a borrowed
+`Store` after its world was destroyed; host `Runtimes` still retained the VM.
+Production create/reset/retire also
+reproduced exit 139 with allocator perturbation. An older partially instrumented
+ASan run confirmed heap-use-after-free in lifecycle and package fixtures. Logs:
+`.cache/build/ci/v0261-server-core-backtrace.log`,
+`.cache/build/ci/v0261-server-lifecycle-perturb.log`, and
+`.cache/build/ci/v0261-server-sanitize/old-{lifecycle,package}.log`.
+
+Commit `3997b2a3` stages a candidate VM through a weak reference while the
+candidate scheduler owns it strongly, clears old host VM references at swap
+commit and before retirement, and updates the primary world only after commit. The
+private `BuildWorld` output remains private. The package fixture now exercises
+`RuntimeOf` and `DiscardRuntime` in a standalone universe with host callbacks.
+Six focused data factory cases passed 262 assertions with allocator
+perturbation and ASan plus UBSan with leak detection. Sanitizers instrumented
+the LuauRuntime and Store unity translation units; other dependencies and test
+code were uninstrumented. Logs:
+`.cache/build/ci/v0261-server-lifetime-perturb-fixed-targeted.log` and
+`.cache/build/ci/v0261-server-sanitize/fixed-targeted-tests.log`. Selector commit
+`1894f6af` passed 249 assertions across 24 tool cases
+(`.cache/build/ci/v0261-benchmark-selector-{build,tests}.log`). A new full-gate
+retry is pending, so this does not claim full-gate completion or native results
+for this code.
