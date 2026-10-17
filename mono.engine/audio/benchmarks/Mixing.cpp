@@ -41,6 +41,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -88,8 +89,30 @@ namespace mixing_bench {
 		return tone;
 	}
 
+	struct VoiceInput {
+		float Pan = 0.0f;
+		EmitterPlacement Placement{};
+	};
+
+	// grug author once so the mixer and scalar oracle receive identical stored float inputs.
+	std::vector<VoiceInput> BuildInputs(size_t voices, bool spatial) {
+		std::vector<VoiceInput> inputs(voices);
+		for (size_t voice = 0; voice < voices; ++voice) {
+			const float offset = static_cast<float>(voice);
+			if (spatial) {
+				// grug keep emitters inside the falloff window, where distance and panning both do work.
+				inputs[voice].Placement =
+					EmitterPlacement{std::sin(offset) * 20.0f, 0.0f, std::cos(offset) * 20.0f, 5.0f, 60.0f};
+			} else {
+				inputs[voice].Pan = std::sin(offset) * 0.8f;
+			}
+		}
+		return inputs;
+	}
+
 	// grug build routing outside measured Render calls, including first-block probes.
-	std::unique_ptr<AudioMixer> BuildMixer(size_t voices, bool spatial) {
+	std::unique_ptr<AudioMixer> BuildMixer(std::span<const VoiceInput> inputs, bool spatial) {
+		const size_t voices = inputs.size();
 		auto mixer = std::make_unique<AudioMixer>();
 		engine::audio::AudioGraph &graph = mixer->Graph();
 		const NodeId output{engine::audio::AudioGraph::OUTPUT_ID};
@@ -118,17 +141,10 @@ namespace mixing_bench {
 
 			if (engine::audio::Node *node = graph.Find(stage)) {
 				node->Gain = 0.5f;
-				if (spatial) {
-					// Scattered around the listener and inside the falloff
-					// window, so distance attenuation actually computes rather
-					// than short-circuiting on "silent" or "full volume".
-					const auto offset = static_cast<float>(voice);
-					node->Placement = EmitterPlacement{
-						std::sin(offset) * 20.0f, 0.0f, std::cos(offset) * 20.0f, 5.0f, 60.0f
-					};
-				} else {
-					node->Pan = std::sin(static_cast<float>(voice)) * 0.8f;
-				}
+				if (spatial)
+					node->Placement = inputs[voice].Placement;
+				else
+					node->Pan = inputs[voice].Pan;
 			} else {
 				throw std::runtime_error("audio benchmark graph lost a voice stage");
 			}
@@ -152,7 +168,8 @@ namespace mixing_bench {
 		for (auto &[key, mixer] : built) {
 			if (key.first == voices && key.second == spatial) return *mixer;
 		}
-		built.emplace_back(std::make_pair(voices, spatial), BuildMixer(voices, spatial));
+		const auto inputs = BuildInputs(voices, spatial);
+		built.emplace_back(std::make_pair(voices, spatial), BuildMixer(inputs, spatial));
 		return *built.back().second;
 	}
 
@@ -210,19 +227,13 @@ namespace mixing_bench {
 	};
 
 	// grug scalar oracle sums authored voice order, then clips once at the output.
-	MixReference ReferenceMix(size_t voices, bool spatial, uint64_t beginSample) {
+	MixReference ReferenceMix(std::span<const VoiceInput> inputs, bool spatial, uint64_t beginSample) {
 		MixReference expected;
 		const SoundRef source = Tone();
-		for (size_t voice = 0; voice < voices; ++voice) {
-			const float offset = static_cast<float>(voice);
+		for (size_t voice = 0; voice < inputs.size(); ++voice) {
 			const StereoGain gain =
-				spatial ? engine::audio::Place(
-							  engine::audio::ListenerPose{},
-							  EmitterPlacement{
-								  std::sin(offset) * 20.0f, 0.0f, std::cos(offset) * 20.0f, 5.0f, 60.0f
-							  }
-						  )
-						: engine::audio::PanGain(std::sin(offset) * 0.8f);
+				spatial ? engine::audio::Place(engine::audio::ListenerPose{}, inputs[voice].Placement)
+						: engine::audio::PanGain(inputs[voice].Pan);
 			for (size_t frame = 0; frame < BLOCK; ++frame) {
 				const size_t cursor = (voice * 37u % 40'000u + beginSample + frame) % source->Frames();
 				const auto sample = source->Frame(cursor);
@@ -256,12 +267,13 @@ namespace mixing_bench {
 	}
 
 	void ProbeMix(const char *firstName, const char *nextName, size_t voices, bool spatial) {
-		auto mixer = BuildMixer(voices, spatial);
+		const auto inputs = BuildInputs(voices, spatial);
+		auto mixer = BuildMixer(inputs, spatial);
 		SampleBuffer output(AudioFormat{}, BLOCK);
 		uint64_t previousSerial = mixer->ObservationSerial();
 		for (const char *name : {firstName, nextName}) {
 			const uint64_t beginSample = mixer->Clock();
-			const MixReference expected = ReferenceMix(voices, spatial, beginSample);
+			const MixReference expected = ReferenceMix(inputs, spatial, beginSample);
 			MixReport report;
 			ProbeHeap(name, [&] { report = mixer->Render(output); });
 			if (output.Data().size() != expected.Samples.size() ||
@@ -271,8 +283,38 @@ namespace mixing_bench {
 				report.BeginSample != beginSample || report.EndSample != beginSample + BLOCK ||
 				mixer->Clock() != beginSample + BLOCK || report.ObservationSerial != previousSerial + 1 ||
 				mixer->ObservationSerial() != report.ObservationSerial ||
-				!mixer->LastAppliedCommands().empty() || !mixer->LastFinishedSources().empty())
+				!mixer->LastAppliedCommands().empty() || !mixer->LastFinishedSources().empty()) {
+				const auto actual = output.Data();
+				const size_t sharedSamples = std::min(actual.size(), expected.Samples.size());
+				size_t firstMismatch = 0;
+				while (firstMismatch < sharedSamples &&
+					   actual[firstMismatch] == expected.Samples[firstMismatch])
+					++firstMismatch;
+				std::cerr << "# b0 audio mismatch\t" << name
+						  << "\texpected_samples=" << expected.Samples.size()
+						  << "\tactual_samples=" << actual.size();
+				if (firstMismatch < sharedSamples)
+					std::cerr << "\tsample_index=" << firstMismatch << "\texpected_bits="
+							  << std::bit_cast<uint32_t>(expected.Samples[firstMismatch])
+							  << "\tactual_bits=" << std::bit_cast<uint32_t>(actual[firstMismatch]);
+				else
+					std::cerr << "\tsample_index=none";
+				std::cerr << "\texpected_peak_bits=" << std::bit_cast<uint32_t>(expected.Peak)
+						  << "\tactual_peak_bits=" << std::bit_cast<uint32_t>(report.Peak)
+						  << "\texpected_clipped=" << expected.Clipped
+						  << "\tactual_clipped=" << report.Clipped << "\tframes=" << report.Frames
+						  << "\tapplied=" << report.Applied << "\tsegments=" << report.Segments
+						  << "\tfinished=" << report.Finished << "\texpected_begin=" << beginSample
+						  << "\tactual_begin=" << report.BeginSample
+						  << "\texpected_end=" << beginSample + BLOCK << "\tactual_end=" << report.EndSample
+						  << "\tclock=" << mixer->Clock() << "\texpected_serial=" << previousSerial + 1
+						  << "\treport_serial=" << report.ObservationSerial
+						  << "\tmixer_serial=" << mixer->ObservationSerial()
+						  << "\tapplied_commands=" << mixer->LastAppliedCommands().size()
+						  << "\tfinished_sources=" << mixer->LastFinishedSources().size() << '\n'
+						  << std::flush;
 				throw std::runtime_error("audio memory probe samples, report or clock changed");
+			}
 			previousSerial = report.ObservationSerial;
 			std::cout << "# b0 runtime oracle\t" << name << "\tfull_samples=1\tvoices=" << voices
 					  << "\tspatial=" << spatial << "\tframes=" << report.Frames
