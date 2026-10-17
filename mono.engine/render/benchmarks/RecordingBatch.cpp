@@ -176,7 +176,7 @@ void main() {
 		};
 		return program;
 	}
-	template <size_t Count> void RunRecordingBatch() {
+	template <size_t Count, size_t MeshCount = 1024> void RunRecordingBatch() {
 		const size_t measuredFrames = RecordingFrameCount();
 		const uint32_t computeElements = RecordingComputeElementCount();
 		if (std::getenv("MONO_RENDER_RECORDING_PROFILE") == nullptr)
@@ -210,7 +210,7 @@ void main() {
 		PrintCaptureIdentity(invocationId, api);
 		std::cout << '\n' << std::flush;
 		const char *computeOption = std::getenv("MONO_RENDER_RECORDING_COMPUTE");
-		const bool computeEnabled = computeOption && std::string_view(computeOption) == "1";
+		const bool computeEnabled = MeshCount != 0 && computeOption && std::string_view(computeOption) == "1";
 		std::shared_ptr<script::ComputeBridge> bridge;
 		cg::Request computeRequest;
 		std::vector<std::byte> expectedCompute;
@@ -313,7 +313,6 @@ void main() {
 					"recording profile compute submission refused: " + ComputeStatusDetail(status, detail)
 				);
 		};
-		constexpr size_t ROWS = 1024;
 		constexpr size_t WARM_FRAMES = 16;
 		assets::MeshData mesh;
 		mesh.Vertices = {
@@ -324,8 +323,8 @@ void main() {
 		};
 		mesh.Indices = {0, 1, 2, 0, 2, 3};
 		mesh.ComputeBounds();
-		std::vector<scene::DrawInstance> instances(ROWS);
-		for (size_t row = 0; row < ROWS; ++row) {
+		std::vector<scene::DrawInstance> instances(MeshCount);
+		for (size_t row = 0; row < MeshCount; ++row) {
 			const core::Name name("recording-profile-mesh-" + std::to_string(row));
 			if (!renderer.AddMesh(name, mesh))
 				throw std::runtime_error("recording profile mesh upload failed");
@@ -435,8 +434,12 @@ void main() {
 			const auto result = renderer.Render(views, overlay, nullptr, false);
 			const auto elapsed = Elapsed(started);
 			core::FrameGraph::EndFrame();
-			if (!result.Submitted || result.DrawCalls < ROWS * Count)
+			if (!result.Submitted || result.DrawCalls < MeshCount * Count)
 				throw std::runtime_error("recording profile did not submit the required mesh draw runs");
+			if constexpr (MeshCount == 0) {
+				if (result.InstanceRows != 0 || result.InstanceRowsDirty != 0 || result.Triangles != 0)
+					throw std::runtime_error("recording profile empty view recorded mesh geometry");
+			}
 			if (batch && (batch->LastStatistics().Sequence == previousControllerSequence ||
 						  !batch->LastStatistics().Complete))
 				throw std::runtime_error("recording profile did not complete a new controller sequence");
@@ -530,8 +533,8 @@ void main() {
 		PrintCaptureIdentity(invocationId, api);
 		std::cout << " backend=" << renderer.BackendName() << " device=\""
 				  << SDL_GetStringProperty(properties, SDL_PROP_GPU_DEVICE_NAME_STRING, "unknown")
-				  << "\" mode=" << mode << " views=" << Count << " worlds=1 meshes=" << ROWS
-				  << " rows=" << ROWS << " extent=128x128 camera=moving warm_frames=" << WARM_FRAMES
+				  << "\" mode=" << mode << " views=" << Count << " worlds=1 meshes=" << MeshCount
+				  << " rows=" << MeshCount << " extent=128x128 camera=moving warm_frames=" << WARM_FRAMES
 				  << " frames=" << measuredFrames
 				  << " profiling=full frame_graph=on waits_outside_cpu=1 recording_workers="
 				  << (parallel ? 2 : 0) << " compute=" << (computeEnabled ? "rotate_add_f32x4" : "disabled")
@@ -588,7 +591,7 @@ void main() {
 					  << total.Prefix << "_self_us=" << total.Self * 1000 / measuredFrames << ' '
 					  << total.Prefix << "_spans=" << total.SpanCount;
 		std::cout << " draw_calls_per_frame=" << drawCalls / measuredFrames
-				  << " required_mesh_draw_runs_per_frame=" << ROWS * Count
+				  << " required_mesh_draw_runs_per_frame=" << MeshCount * Count
 				  << " instance_dirty_rows_per_frame=" << dirtyRows / measuredFrames
 				  << " uploaded_bytes_per_frame=" << uploadedBytes / measuredFrames
 				  << " cpu_profile_dropped_spans=" << droppedSpans << " gpu_dropped_marks=" << droppedMarks
@@ -632,6 +635,13 @@ void main() {
 	}
 }
 
+BENCH(
+	"GPU recording whole harness | 1 moving view | 0 resident meshes | no authored compute | use printed "
+	"per-frame rows",
+	1
+) {
+	RunRecordingBatch<1, 0>();
+}
 BENCH("GPU recording whole harness | 1 moving view | 1024 resident meshes | use printed per-frame rows", 1) {
 	RunRecordingBatch<1>();
 }

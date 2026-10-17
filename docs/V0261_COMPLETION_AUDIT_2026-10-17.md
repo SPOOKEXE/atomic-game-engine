@@ -415,3 +415,25 @@ resource and drop observations are limited to that cohort.
 Benchmark output remained on stdout. Shared Ollama activity was present, so
 quiet timing and optimization gains are not claimed. B0 remains incomplete, with
 0 of 3 optimization passes complete.
+
+## C04 empty recording row
+
+`RunRecordingBatch` defaults to 1,024 meshes. Its recipe discovers a one-view,
+zero-mesh row without authored compute even with `MONO_RENDER_RECORDING_COMPUTE=1`.
+Populated 1, 2, and 8 view rows are unchanged. The old binary rejected the
+selection with “no benchmark matches the requested selection”; the updated
+build passed. `clang-format-21` corrected the declaration in
+`RecordingBatch.cpp` only. The full format check and em-dash check passed.
+
+GPU validation covered ordinary, serial, and parallel modes in four cohorts
+at 128x128 per view, with 16 measured frames after 16 warm frames. All 12
+functional oracles passed. All three empty rows had zero `FrameResult`
+instance rows, dirty rows, and triangles. They also had zero instance-upload
+bytes and zero logical GPU allocation/release bytes during measured frames; no
+authored compute ran. All nine populated rows passed exact
+full-buffer 8 MiB checks. Eight private rows each completed 16 batches with zero
+GPU query drops. Full-stream scans found zero VUIDs or engine errors with
+Khronos and synchronization validation enabled. The ordinary 8-view row
+had 296 dropped GPU timing marks; the other 11 had zero, so that row's GPU
+profile is partial. Shared-host timings and tails are not accepted. B0 remains
+incomplete, with 0 of 3 optimization passes complete.

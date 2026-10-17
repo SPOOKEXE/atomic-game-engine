@@ -204,6 +204,7 @@ the backend submission call separately from engine submission bookkeeping.
 | `frame-plan-bench [samples]` | Measure CPU frame planning, including the default PBR pipeline. Default: `5`. |
 | `frame-plan-cache-bench [samples]` | Compare installed-pipeline diagnostic cache misses and hits. Default: `5`. |
 | `render-preparation-bench [samples]` | Measure render-preparation work. Default: `5`. |
+| `render-recording-bench [samples]` | Measure moving 128x128 views with zero or 1,024 resident meshes. Default: `3`. The zero-mesh row always has no authored compute, even with `MONO_RENDER_RECORDING_COMPUTE=1`; that option applies to the 1,024-mesh rows. |
 | `keep-loaded-filter-bench [samples]` | Compare copying 100,000 default Parts with retaining their draw span, plus resident and missing named meshes. Default: `5`. |
 | `ordinary-particle-bench [samples]` | Measure ordinary emitter preparation, actual upload bytes, dispatch lanes, and delayed Vulkan pass timings. Default: `1`; waits are outside CPU recording spans. |
 | `volume-light-stress [frames]` | Check lighting stress scene, selection costs, and Vulkan fog stress. Default: `120`. |
