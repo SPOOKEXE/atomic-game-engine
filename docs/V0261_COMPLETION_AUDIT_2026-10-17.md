@@ -681,6 +681,25 @@ in 148 edges; logs are `.cache/build/bench/v0261-runtime-heap-build.log` and
 stdout. Publication checks are recorded separately in
 `.cache/build/ci/v0261-runtime-heap-pre-push.log`; their final result must be read
 before claiming the strict gate passed.
+
+## Native CPU domain verification
+
+`just domain-runtime-verify` builds and runs the three real image, audio, and
+procedural delivery suites with heap diagnostics enabled. The verifier requires
+the exact four image and ten audio cohorts with their full-output checks, and
+all eight C06 cache phases with the four authored fixture sizes. It rejects
+missing rows, invalid heap relationships, dropped scopes, foreign frees, delivery
+failures, pending installs, and warm-cache source reads. Output stays on stdout;
+all timings remain diagnostic and invalid for performance acceptance.
+
+The local Linux job and the final verifier rerun passed. Ruff, strict mypy with
+unreachable-code checks, actionlint, and whitespace checks passed. Review caught
+and closed an omitted authored C06 fixture-size check. Actionlint ran without
+ShellCheck, which is unavailable locally. The manual build workflow's optional
+`domain_benchmarks` input defaults to false and uses a separate `bench` build on
+each native platform. Windows and macOS verification remains pending until the
+actual job steps are inspected; existing optional-job handling means overall
+workflow success alone is insufficient. Shipped preset flags are unchanged.
 At `6bb3ce63`, the full strict pre-push gate completed: 774 suites, zero skipped,
 zero failed, and all remaining checks passed. The push completed successfully;
 the remote branch matched the exact local revision.
@@ -748,8 +767,9 @@ C allocations, RSS, or GPU commitment. The per-call process peak starts from
 prepared resident live bytes; retained bytes include the installed recipient.
 
 A concrete work-removal candidate is now visible: every cold cohort reports two
-bundle reads for one published bundle, transferring twice its published content
-bytes. `AssetClient::Pump` drives bundles before delivering completions.
+bundle reads for one published bundle, transferring twice its signed bundle
+payload. The empty fixture aliases identical assets, so this is not twice the
+sum of its authored asset sizes. `AssetClient::Pump` drives bundles before delivering completions.
 `Advance` can retain a synchronous directory job while its request still appears
 pending; the next pump can start it again. This source explanation is consistent
 with the measured duplicate reads. It is recorded for the first optimization
