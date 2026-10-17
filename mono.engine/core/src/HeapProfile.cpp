@@ -138,6 +138,7 @@ namespace engine::core {
 		// still happening.
 		constinit thread_local uint32_t ThreadNode = HeapProfile::ROOT;
 		constinit thread_local uint32_t ThreadDepth = 0;
+		constinit thread_local bool ThreadAllowsRegistration = true;
 
 		// Returns the child of `parent` named `name`, or zero.
 		uint32_t FindChild(uint32_t parent, std::string_view name) {
@@ -521,7 +522,7 @@ namespace engine::core {
 		}
 
 		uint32_t child = FindChild(previous, name);
-		if (child == 0) {
+		if (child == 0 && ThreadAllowsRegistration) {
 			child = CreateChild(previous, name);
 		}
 		if (child == 0) {
@@ -531,6 +532,29 @@ namespace engine::core {
 
 		ThreadNode = child;
 		return previous;
+	}
+
+	bool HeapProfile::PrepareRootPath(std::span<const std::string_view> names) {
+		if constexpr (!TRACKING) return true;
+		if (names.size() > MAXIMUM_DEPTH) return false;
+
+		uint32_t parent = ROOT;
+		for (const std::string_view name : names) {
+			if (name.empty() || name.size() > MAXIMUM_NAME) return false;
+			uint32_t child = FindChild(parent, name);
+			if (child == 0) child = CreateChild(parent, name);
+			if (child == 0) return false;
+			parent = child;
+		}
+		return true;
+	}
+
+	HeapProfile::ExistingTagsScope::ExistingTagsScope() : Previous(ThreadAllowsRegistration) {
+		if constexpr (TRACKING) ThreadAllowsRegistration = false;
+	}
+
+	HeapProfile::ExistingTagsScope::~ExistingTagsScope() {
+		if constexpr (TRACKING) ThreadAllowsRegistration = Previous;
 	}
 
 	void HeapProfile::Pop(uint32_t previous) {

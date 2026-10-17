@@ -53,6 +53,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -332,6 +333,14 @@ namespace engine::core {
 		// @return The node that was open before, to be given to `Pop`.
 		static uint32_t Push(std::string_view name);
 
+		// Registers a tag path from the root during setup, without changing the
+		// calling thread's current scope or depth. Registration may take a lock.
+		//
+		// @param names Nonempty components of at most 128 bytes, at most MAXIMUM_DEPTH deep.
+		// @return False for invalid components or exhausted storage. A valid
+		//         prefix may remain registered. True when hooks are compiled out.
+		static bool PrepareRootPath(std::span<const std::string_view> names);
+
 		// Restores the node a matching `Push` returned.
 		//
 		// @param previous Exactly what the matching `Push` returned.
@@ -556,6 +565,33 @@ namespace engine::core {
 		static bool WriteReport(const std::filesystem::path &path, double windowSeconds = 0.0);
 
 		// --- scopes ------------------------------------------------------------
+
+		// Keeps this thread and its nested scopes on existing tags only. Missing
+		// tags count as dropped and retain their nearest ancestor, without taking
+		// the tag registration lock. Other threads keep their own policy.
+		class ExistingTagsScope {
+		  public:
+			// Disables registration until destruction restores the previous policy.
+			ExistingTagsScope();
+
+			// Restores the calling thread's previous registration policy.
+			~ExistingTagsScope();
+
+			// A scope owns one thread policy change and cannot be copied.
+			ExistingTagsScope(const ExistingTagsScope &) = delete;
+
+			// A scope cannot take ownership of another's policy change by copy.
+			ExistingTagsScope &operator=(const ExistingTagsScope &) = delete;
+
+			// A scope cannot move because destruction restores its thread's policy.
+			ExistingTagsScope(ExistingTagsScope &&) = delete;
+
+			// A scope cannot take ownership of another thread's policy by move.
+			ExistingTagsScope &operator=(ExistingTagsScope &&) = delete;
+
+		  private:
+			bool Previous;
+		};
 
 		// Attributes every allocation made on this thread, until the enclosing
 		// C++ scope exits, to `name` under whatever scope is already open.

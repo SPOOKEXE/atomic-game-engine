@@ -17,6 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -376,4 +377,101 @@ TEST_CASE("out of range nodes answer rather than read past the pool", "[heap]") 
 	// The root has no name of its own, so its path is empty rather than a
 	// leading separator on every other path.
 	REQUIRE(HeapProfile::Path(HeapProfile::ROOT).empty());
+}
+
+TEST_CASE("root tag preparation preserves the caller scope and is idempotent", "[heap]") {
+	const std::array<std::string_view, 2> path = {"heaptest-prepared-root", "callback"};
+	ENGINE_HEAP_SCOPE("heaptest-preparation-caller");
+	const uint32_t caller = HeapProfile::Current();
+	const auto before = HeapProfile::Totals();
+	const bool prepared = HeapProfile::PrepareRootPath(path);
+	const uint32_t currentAfterPreparation = HeapProfile::Current();
+	const uint32_t preparedCount = HeapProfile::NodeCount();
+	const bool repeated = HeapProfile::PrepareRootPath(path);
+	const auto after = HeapProfile::Totals();
+	REQUIRE(prepared);
+	REQUIRE(repeated);
+	CHECK(currentAfterPreparation == caller);
+	CHECK(after.Nodes == preparedCount);
+	CHECK(after.TotalBytes == before.TotalBytes);
+	CHECK(after.TotalBlocks == before.TotalBlocks);
+
+	std::array<std::string_view, HeapProfile::MAXIMUM_DEPTH + 1> tooDeep;
+	tooDeep.fill("depth");
+	const std::array<std::string_view, 1> emptyName = {""};
+	const std::string longComponent(129, 'x');
+	const std::array<std::string_view, 1> tooLong = {longComponent};
+	CHECK(HeapProfile::PrepareRootPath(tooLong) == !HeapProfile::IsCompiledIn());
+	CHECK(HeapProfile::PrepareRootPath(tooDeep) == !HeapProfile::IsCompiledIn());
+	CHECK(HeapProfile::PrepareRootPath(emptyName) == !HeapProfile::IsCompiledIn());
+	CHECK(HeapProfile::Current() == caller);
+	if (HeapProfile::IsCompiledIn()) {
+		CHECK(FindPath("heaptest-prepared-root;callback") != 0);
+		CHECK(FindPath("heaptest-preparation-caller;heaptest-prepared-root") == 0);
+	}
+}
+
+TEST_CASE("existing tags scopes retain ancestors and restore nested registration policy", "[heap]") {
+	const std::array<std::string_view, 1> path = {"heaptest-existing-parent"};
+	REQUIRE(HeapProfile::PrepareRootPath(path));
+	const uint32_t original = HeapProfile::Current();
+	const auto before = HeapProfile::Totals();
+	{
+		HeapProfile::ExistingTagsScope existing;
+		ENGINE_HEAP_SCOPE("heaptest-existing-parent");
+		const uint32_t parent = HeapProfile::Current();
+		{
+			HeapProfile::ExistingTagsScope nested;
+			ENGINE_HEAP_SCOPE("heaptest-missing-inner");
+			CHECK(HeapProfile::Current() == parent);
+		}
+		{
+			ENGINE_HEAP_SCOPE("heaptest-missing-after-inner");
+			CHECK(HeapProfile::Current() == parent);
+		}
+	}
+	CHECK(HeapProfile::Current() == original);
+	const auto after = HeapProfile::Totals();
+	CHECK(after.Nodes == before.Nodes);
+	CHECK(after.DroppedScopes == before.DroppedScopes + (HeapProfile::IsCompiledIn() ? 2 : 0));
+	{
+		ENGINE_HEAP_SCOPE("heaptest-registration-restored");
+		CHECK((HeapProfile::Current() != original || !HeapProfile::IsCompiledIn()));
+	}
+	CHECK(HeapProfile::Current() == original);
+}
+
+TEST_CASE("existing tags policy stays on its thread while prepared worker paths retain hierarchy", "[heap]") {
+	const std::array<std::string_view, 2> path = {"heaptest-worker-prepared", "render"};
+	REQUIRE(HeapProfile::PrepareRootPath(path));
+	uint32_t workerParent = 0;
+	uint32_t workerChild = 0;
+	uint32_t workerNew = 0;
+	uint32_t workerRestored = 0;
+	{
+		HeapProfile::ExistingTagsScope callerGuard;
+		std::thread worker([&] {
+			{
+				HeapProfile::ExistingTagsScope workerGuard;
+				ENGINE_HEAP_SCOPE("heaptest-worker-prepared");
+				workerParent = HeapProfile::Current();
+				ENGINE_HEAP_SCOPE("render");
+				workerChild = HeapProfile::Current();
+			}
+			workerRestored = HeapProfile::Current();
+			ENGINE_HEAP_SCOPE("heaptest-worker-registration-independent");
+			workerNew = HeapProfile::Current();
+		});
+		worker.join();
+	}
+	CHECK(workerRestored == HeapProfile::ROOT);
+	if (HeapProfile::IsCompiledIn()) {
+		CHECK(HeapProfile::Path(workerParent) == "heaptest-worker-prepared");
+		CHECK(HeapProfile::Path(workerChild) == "heaptest-worker-prepared;render");
+		CHECK(HeapProfile::Path(workerNew) == "heaptest-worker-registration-independent");
+	} else {
+		CHECK(workerParent == HeapProfile::ROOT);
+		CHECK(workerChild == HeapProfile::ROOT);
+		CHECK(workerNew == HeapProfile::ROOT);
+	}
 }

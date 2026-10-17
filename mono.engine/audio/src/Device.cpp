@@ -6,6 +6,7 @@
 #include <SDL3/SDL_audio.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <vector>
 
@@ -144,6 +145,10 @@ namespace engine::audio {
 				spec.channels = static_cast<int>(Shape.Channels);
 				spec.freq = static_cast<int>(Shape.SampleRate);
 
+				constexpr std::array<std::string_view, 2> callbackTags = {
+					"audio.feed", "audio::AudioMixer::Render"
+				};
+				core::HeapProfile::PrepareRootPath(callbackTags);
 				Stream = SDL_OpenAudioDeviceStream(
 					SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, &SdlDevice::Feed, this
 				);
@@ -169,6 +174,8 @@ namespace engine::audio {
 				// SDL's own thread, which no frame scope reaches. Without this
 				// the mixer's buffers are untagged and a leak in them looks like
 				// a leak in the program's static initialisers.
+				// Exhausted profiler storage must neither lock nor stop audio.
+				core::HeapProfile::ExistingTagsScope existingTags;
 				ENGINE_HEAP_SCOPE("audio.feed");
 
 				auto *device = static_cast<SdlDevice *>(self);
