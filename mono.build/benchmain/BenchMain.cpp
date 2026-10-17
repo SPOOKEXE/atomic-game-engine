@@ -109,6 +109,7 @@ namespace {
 				  << "  -h, --help                 Show this help and exit.\n"
 				  << "  --mono-suites              List suites for discovery and exit.\n"
 				  << "  --suite ID                 Run only benchmarks in ID.\n"
+				  << "  --benchmark NAME           Run benchmarks with this exact name.\n"
 				  << "  --samples N                Measured samples per benchmark (default: "
 				  << DEFAULT_SAMPLES << ").\n"
 				  << "  --warmup-samples N         Harness warmups, 0 through " << MAXIMUM_WARMUP_SAMPLES
@@ -119,7 +120,9 @@ namespace {
 int main(int argc, char **argv) {
 	int samples = DEFAULT_SAMPLES;
 	int warmupSamples = WARMUP_SAMPLES;
-	std::string filter;
+	std::string suiteFilter;
+	std::string benchmarkFilter;
+	bool hasBenchmarkFilter = false;
 	const char *latencySetting = std::getenv("MONO_BENCH_LATENCY");
 	const bool reportLatency = latencySetting != nullptr && std::strcmp(latencySetting, "1") == 0;
 
@@ -164,9 +167,34 @@ int main(int argc, char **argv) {
 		if (std::strcmp(argv[index], "--suite") == 0 && index + 1 < argc) {
 			// One suite at a time, so the runner's selection is honoured and a
 			// benchmark that did not change is not paid for.
-			filter = argv[++index];
+			suiteFilter = argv[++index];
 			continue;
 		}
+		if (std::strcmp(argv[index], "--benchmark") == 0) {
+			if (index + 1 >= argc) {
+				std::cerr << "--benchmark requires a non-empty exact name\n";
+				return 2;
+			}
+			benchmarkFilter = argv[++index];
+			if (benchmarkFilter.empty()) {
+				std::cerr << "--benchmark requires a non-empty exact name\n";
+				return 2;
+			}
+			hasBenchmarkFilter = true;
+			continue;
+		}
+	}
+	const auto selected = [&](const engine::testing::BenchCase &entry) {
+		return (suiteFilter.empty() || entry.Suite == suiteFilter) &&
+			   (!hasBenchmarkFilter || entry.Name == benchmarkFilter);
+	};
+	if (hasBenchmarkFilter && std::none_of(
+								  engine::testing::BenchRegistry::All().begin(),
+								  engine::testing::BenchRegistry::All().end(),
+								  selected
+							  )) {
+		std::cerr << "no benchmark matches the requested selection\n";
+		return 2;
 	}
 	if (reportLatency && samples > MAXIMUM_LATENCY_SAMPLES) {
 		std::cerr << "latency reporting accepts at most " << MAXIMUM_LATENCY_SAMPLES << " samples\n";
@@ -177,7 +205,7 @@ int main(int argc, char **argv) {
 	std::cout << "# mono bench warmup v1\t" << warmupSamples << '\n';
 
 	for (const auto &entry : engine::testing::BenchRegistry::All()) {
-		if (!filter.empty() && entry.Suite != filter) {
+		if (!selected(entry)) {
 			continue;
 		}
 

@@ -163,6 +163,14 @@ Documentation is written to `.cache/build/<preset>/docs/`; use
 Benchmark output is printed to the terminal unless a recipe names an output
 directory. Use the `bench` preset for comparable measurements.
 
+Select one benchmark by its exact original name with `--benchmark`; it combines
+with `--suite`, and missing, empty or unmatched selections fail before any
+benchmark runs or report is printed. For example:
+
+```sh
+.cache/build/bench/bench/bench_client --suite client.bench.update-cadence.native --benchmark 'Native complex authored cadence, whole harness' --samples 1 --warmup-samples 0
+```
+
 Frame Graph's `250 ms` setting is the aggregation window, not a frame duration.
 Structural averages can place CPU spans at overlapping mean positions; separate
 rows preserve those values without claiming parallel execution. GPU queries use
