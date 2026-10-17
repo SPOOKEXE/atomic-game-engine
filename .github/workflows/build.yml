@@ -25,6 +25,11 @@ on:
   push:
     tags: ['v*.*.*']
   workflow_dispatch:
+    inputs:
+      domain_benchmarks:
+        description: Run native CPU domain memory and delivery diagnostics
+        type: boolean
+        default: false
 
 # One run per ref, so a re-run cancels the attempt it replaces rather than
 # racing it.
@@ -470,6 +475,29 @@ jobs:
           CALL scripts\build-windows.bat test_testrunner testrunner
           if errorlevel 1 exit /b %ERRORLEVEL%
           .cache\build\release-tests\tests\test_testrunner.exe "[process]"
+
+      # grug use a separate heap-enabled preset; shipped flags and artifact paths stay with the matrix.
+      - name: Build domain benchmark diagnostics
+        if: github.event_name == 'workflow_dispatch' && inputs.domain_benchmarks && matrix.flavour == 'release' && runner.os != 'Windows'
+        run: |
+          cmake --preset bench
+          cmake --build --preset bench --target bench_imagegraph bench_audio bench_unified_tests
+
+      - name: Build domain benchmark diagnostics
+        if: github.event_name == 'workflow_dispatch' && inputs.domain_benchmarks && matrix.flavour == 'release' && runner.os == 'Windows'
+        shell: cmd
+        run: |
+          set PRESET=bench
+          CALL scripts\build-windows.bat bench_imagegraph bench_audio bench_unified_tests
+          if errorlevel 1 exit /b %ERRORLEVEL%
+
+      - name: Verify domain runtime diagnostics
+        if: github.event_name == 'workflow_dispatch' && inputs.domain_benchmarks && matrix.flavour == 'release'
+        shell: bash
+        run: |
+          python_command=python3
+          if [ "$RUNNER_OS" = Windows ]; then python_command=python; fi
+          "$python_command" scripts/verify-domain-benchmarks.py --build-dir .cache/build/bench
 
       # **Always, including after a failed compile.** A cache that stopped being
       # used is indistinguishable from one that never was. Failure statistics

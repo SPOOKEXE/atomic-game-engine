@@ -2267,6 +2267,14 @@ domain-runtime-memory-bench build_preset="bench":
     ./.cache/build/{{build_preset}}/bench/bench_imagegraph --suite engine.imagegraph.bench.evaluate --samples 1 --warmup-samples 0
     ./.cache/build/{{build_preset}}/bench/bench_audio --suite engine.audio.bench.mixing --samples 1 --warmup-samples 0
 
+# grug check the same actual CPU domain probes locally and on native CI runners.
+domain-runtime-verify build_preset="bench":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cmake --preset {{build_preset}} -DMONO_BUILD_BENCH=ON > /dev/null
+    cmake --build --preset {{build_preset}} --target bench_imagegraph bench_audio bench_unified_tests
+    python3 scripts/verify-domain-benchmarks.py --build-dir .cache/build/{{build_preset}}
+
 # grug compare signed C06 directory delivery with an isolated empty then populated disk cache.
 # Source bundle payload counters exclude manifest reads. Phase timings stay diagnostic; no network runs.
 procedural-delivery-bench build_preset="bench" memory="0":
