@@ -105,3 +105,25 @@ tested.
 The driver search option is applied only while linking, because GCC also uses
 [`-B` to select compiler tools and search paths](https://gcc.gnu.org/onlinedocs/gcc/Directory-Options.html).
 Link concurrency uses [CMake's Ninja job pools](https://cmake.org/cmake/help/v3.28/prop_gbl/JOB_POOLS.html).
+
+## Native Cargo cache cold and warm runs
+
+At exact source head `50a9c492`, native cold run
+[39014980981](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39014980981)
+and warm run
+[39016026769](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39016026769)
+passed on Linux x86_64, Windows x86_64, and macOS ARM64. Warm Cargo had an exact
+cache hit on every platform, ran freshness checks, and compiled only `accesskit-c`.
+
+| Platform | AccessKit Ninja edge, cold/warm (s) | Ninja span, cold/warm (s) | Whole job, cold/warm (s) | Rust crate compilations, cold/warm |
+|---|---:|---:|---:|---:|
+| Linux x86_64 | 143.499 / 31.419 s | 431.090 / 53.558 s | 637 / 287 s | 90 / 1 |
+| Windows x86_64 | 111.140 / 30.643 s | 654.638 / 100.025 s | 976 / 489 s | 23 / 1 |
+| macOS ARM64 | 54.595 / 19.305 s | 360.945 / 53.975 s | 638 / 345 s | 13 / 1 |
+
+The whole-job change cannot be attributed to Cargo alone. The source changes
+include a public core header. Cold C/C++ cache misses were 87 / 87 / 293, and
+warm misses were 0 / 0 / 206, ordered Linux, Windows, macOS. The warm macOS misses
+span release Build and process-check; their root cause is not established. These
+results do not establish broad engine speed gains or statistical performance
+acceptance. Shared-host timing remains unaccepted.

@@ -468,34 +468,59 @@ passes complete.
 
 ## Native timestamp gate and Cargo cache candidate
 
-Production head `5e45bca3` passed strict pre-push: 773 suites, 0 skipped, 0
-failed. Log: `.cache/build/ci/v0261-timestamp-capacity-pre-push.log`. Native
-workflow [39011792263](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39011792263)
-completed successfully for Linux x86_64, Windows x86_64, and macOS ARM64. Build,
-Process Isolation, Package, and Upload passed on each platform, with six artifact
-records; publish was skipped as a manual dry run.
+Exact code at `50a9c492` passed strict pre-push: 774 suites, 0 skipped, 0
+failed. Log: `.cache/build/ci/v0261-profiler-cold-pre-push.log`. Cold native
+workflow [39014980981](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39014980981)
+completed successfully for Linux x86_64, Windows x86_64, and macOS ARM64. Each
+platform passed Identify, Restore (cold miss), Build, SaveCargo, ProcessIsolation,
+Package, and both uploads. Six artifacts were produced; publish was skipped as a
+manual dry run. Windows Identify is now validated natively.
 
-Raw profiles are in `.cache/build/ci/native-profile-5e45bca3`. Ninja build spans
-were Linux 142.117 s (AccessKit edge 120.010 s, 18.735 to 138.745 s), Windows
-160.519 s (105.912 s, 40.462 to 146.374 s), and macOS 136.211 s (43.603 s,
-45.190 to 88.793 s). These edges overlap; their sum is not wall-clock critical
-path time.
+The cold run saved three actual caches: Linux 137,645,276 bytes, Windows
+45,348,531 bytes, and macOS 26,087,821 bytes. Fresh release Ninja spans were
+Linux 431.090 s (AccessKit edge 143.499 s), Windows 654.638 s (111.140 s), and
+macOS 360.945 s (54.595 s). These edges overlap; their sum is not wall-clock
+critical path time.
 
-The workflow now tests a Cargo cache candidate keyed by toolchain, image, preset,
-vendor, configuration, and platform, restoring only the AccessKit target and
-Cargo registry index/cache. Removing top-level archive outputs forces Cargo
-freshness. Rebuilding the existing local bench archive gave Cargo 0.270 s,
-AccessKit Ninja edge 0.301 s, 0.366 s wall time, and identical archive SHA-256
-`dc5ceae1b1e7d486e5ed073fc255bcb223275773fdfbbbb96a7df679bf208e56`. This does
-not establish fresh-checkout or native CI gains. `actionlint` 1.7.12 passed with
-external ShellCheck disabled because the tool was unavailable. Inline Python
-parse, key stability, sensitivity to Rust flags/preset/image/platform, and
-archive-cleanup checks passed. A local Windows-branch simulation failed with 127
-because Linux lacks `python`. Native Cargo-cache cold/warm measurements on all
-three platforms remain pending; the new Windows step has not run natively yet.
-Shared-host timing remains unaccepted. B0 is incomplete, with
-0 of 3 optimization passes complete; the Cargo candidate is not an engine
-optimization pass.
+The workflow tests a Cargo cache keyed by toolchain, image, preset, vendor,
+configuration, and platform. It restores the AccessKit target and Cargo registry
+index/cache, while removing top-level archive outputs forces Cargo freshness.
+Rebuilding the existing local bench archive gave Cargo 0.270 s, AccessKit Ninja
+edge 0.301 s, 0.366 s wall time, and identical archive SHA-256
+`dc5ceae1b1e7d486e5ed073fc255bcb223275773fdfbbbb96a7df679bf208e56`. This local
+artifact check does not establish fresh-checkout or native CI gains. `actionlint`
+1.7.12 passed with external ShellCheck disabled because the tool was unavailable.
+Inline Python parse, key stability, sensitivity to Rust flags, preset, image and
+platform, and archive-cleanup checks passed. A local Windows-branch simulation
+failed with 127 because Linux lacks `python`.
+Cold run [39014980981](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39014980981)
+and warm run
+[39016026769](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/39016026769)
+both completed successfully at exact head `50a9c492`. On each platform, warm
+Identify, Restore, Build, ProcessIsolation, Package, and both uploads passed, with
+six artifacts; publish was skipped. Cargo had an exact cache hit, freshness
+recheck ran, and SaveCargo was skipped. Warm Build compiled only `accesskit-c`.
+
+| Platform | AccessKit edge, cold/warm (s) | Ninja span, cold/warm (s) | Build step, cold/warm (s) | Whole job, cold/warm (s) | Rust crate compilations, cold/warm |
+|---|---:|---:|---:|---:|---:|
+| Linux x86_64 | 143.499 / 31.419 s | 431.090 / 53.558 s | 469 / 83 s | 637 / 287 s | 90 / 1 |
+| Windows x86_64 | 111.140 / 30.643 s | 654.638 / 100.025 s | 707 / 157 s | 976 / 489 s | 23 / 1 |
+| macOS ARM64 | 54.595 / 19.305 s | 360.945 / 53.975 s | 407 / 108 s | 638 / 345 s | 13 / 1 |
+
+Warm Identify/Restore/Recheck took 1/4/0 s on Linux, 6/2/0 s on Windows, and
+1/1/1 s on macOS. Cold Cache Save took 3, 3, and 2 s. Toolchains were Rust/Cargo
+1.99.0 on Linux and Windows, and 1.98.0 on macOS. Warm C/C++ job ccache totals
+were Linux 1,498 hits / 1,498 calls / 0 misses, Windows 1,488 / 1,488 / 0, and macOS
+1,229 / 1,435 / 206. Cold C/C++ misses were 87 / 87 / 293, and warm misses were
+0 / 0 / 206, ordered Linux, Windows, macOS. The macOS misses were 200 SDL units (C PCH and 199 C files)
+and six process-check test runner units (C++ PCH and five C++ cases). C/C++ counts
+include Release Build and process-check, not product compilation alone. The root
+cause of the macOS misses is under read-only investigation and is not established.
+Because the source changes include a public core header and many C/C++ misses,
+whole-build differences cannot be attributed solely to Cargo. Shared-host timing
+remains unaccepted. B0 is
+incomplete, with 0 of 3 optimization passes complete; this is not an engine
+optimization pass or broad engine speed claim.
 
 ## Cold profiling in the audio callback
 
@@ -525,6 +550,8 @@ both completed with zero C++ allocations, tag registrations, or static
 initialization guard calls; the playback fixture passed 44 assertions. This
 does not cover SDK or driver C allocations. Log:
 `.cache/build/ci/v0261-audio-feed-profile.log`. Format and documentation checks
-passed, with every public entity documented. Full-gate retry and native Cargo
-cache cold/warm measurements remain pending. No speed gain or completed engine
-optimization pass is claimed; B0 remains incomplete, with 0 of 3 passes complete.
+passed, with every public entity documented. Exact code at `50a9c492` passed the
+strict pre-push gate: 774 suites, 0 skipped, 0 failed. Log:
+`.cache/build/ci/v0261-profiler-cold-pre-push.log`. No speed gain or completed
+engine optimization pass is claimed; B0 remains incomplete, with 0 of 3 passes
+complete.
