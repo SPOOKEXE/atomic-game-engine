@@ -380,6 +380,26 @@ namespace engine::ecs {
 		return false;
 	}
 
+	bool HasClientLocalInstances(Store &store) {
+		if (store.CountMatching<ClientLocal>() != 0) return true;
+
+		bool found = false;
+		ClassId previous;
+		store.EachBatch<const InstanceClass>([&](size_t rows, const InstanceClass *classes) {
+			if (found) return;
+			for (size_t row = 0; row < rows; ++row) {
+				const ClassId current = classes[row].Class;
+				if (current == previous) continue;
+				previous = current;
+				if (Classes::Describe(current).RuntimeLocal) {
+					found = true;
+					return;
+				}
+			}
+		});
+		return found;
+	}
+
 	ClassId Classes::RegisterInstanceRoot() {
 		// The components have to exist before a property can name them, and
 		// this is reachable before any store has been built - a test that

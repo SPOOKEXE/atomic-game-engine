@@ -23,6 +23,7 @@
 // makes it usable as the wire.
 
 #include <engine/core/Name.hpp>
+#include <engine/ecs/Classes.hpp>
 #include <engine/ecs/Instance.hpp>
 #include <engine/ecs/Store.hpp>
 #include <engine/effects/ParticleSystem.hpp>
@@ -1189,6 +1190,105 @@ TEST_CASE("who you are is not yours to assign, in both languages", "[scripting][
 			engine::scene::PlayersOf(store), engine::core::Name("MaxPlayers"), &seats, sizeof(seats)
 		));
 		CHECK(seats == 8);
+	}
+}
+
+TEST_CASE(
+	"BulkMoveTo refreshes locality and refuses mixed batches before moving",
+	"[scripting][scriptcall][client-local]"
+) {
+	for (const Language language : LANGUAGES) {
+		Store store = Fresh("scriptcall.bulk-locality");
+		engine::script::RuntimeLimits limits;
+		limits.Role = engine::script::HostRole::OfServer();
+		const auto runtime = MakeRuntime(store, language, limits);
+		REQUIRE(runtime != nullptr);
+		const char *source = language == Language::Luau ? R"(
+local first = Instance.new('Part')
+first.Name = 'BulkFirst'
+first.Parent = workspace
+local second = Instance.new('Part')
+second.Name = 'BulkSecond'
+second.Parent = workspace
+local step = 0
+game:GetService('RunService').Heartbeat:Connect(function()
+    step += 1
+    workspace:BulkMoveTo({first, second}, {CFrame.new(step, 0, 0), CFrame.new(step, 1, 0)})
+end)
+)"
+														: R"(
+const first = Instance.new('Part');
+first.Name = 'BulkFirst'; first.Parent = workspace;
+const second = Instance.new('Part');
+second.Name = 'BulkSecond'; second.Parent = workspace;
+let step = 0;
+game.GetService('RunService').Heartbeat.Connect(() => {
+    ++step;
+    workspace.BulkMoveTo([first, second], [CFrame.new(step, 0, 0), CFrame.new(step, 1, 0)]);
+});
+)";
+		REQUIRE(runtime->Run(source, "bulk-locality"));
+		const auto workspace = engine::scene::WorkspaceOf(store);
+		const auto first = store.FindFirstChild(workspace, "BulkFirst");
+		const auto second = store.FindFirstChild(workspace, "BulkSecond");
+		REQUIRE(first != engine::ecs::NULL_ENTITY);
+		REQUIRE(second != engine::ecs::NULL_ENTITY);
+		REQUIRE_FALSE(engine::ecs::HasClientLocalInstances(store));
+		const auto checkX = [&](float expected) {
+			CHECK(store.Get<engine::scene::Transform>(first)->Frame.Position.X == expected);
+			CHECK(store.Get<engine::scene::Transform>(second)->Frame.Position.X == expected);
+		};
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(1);
+		const auto camera = store.CreatePredictedInstance(engine::scene::CameraClass(), "unrelated-camera");
+		REQUIRE(camera != engine::ecs::NULL_ENTITY);
+		REQUIRE_FALSE(store.Has<engine::ecs::ClientLocal>(camera));
+		REQUIRE(engine::ecs::HasClientLocalInstances(store));
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(2);
+
+		store.Set(second, engine::ecs::ClientLocal{});
+		CHECK_FALSE(runtime->Heartbeat(1.0f / 30));
+		checkX(2);
+		store.Remove<engine::ecs::ClientLocal>(second);
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(4);
+
+		const auto otherClass =
+			engine::ecs::Classes::Register("ScriptCallBulkOtherPart", engine::scene::PartClass(), {});
+		store.Set(second, engine::ecs::InstanceClass{otherClass});
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(5);
+		engine::ecs::Classes::SetRuntimeLocal(otherClass, true);
+		const bool acceptedLocalClass = runtime->Heartbeat(1.0f / 30);
+		engine::ecs::Classes::SetRuntimeLocal(otherClass, false);
+		CHECK_FALSE(acceptedLocalClass);
+		checkX(5);
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(7);
+
+		const auto descendant = store.CreateInstance(engine::scene::PartClass(), "local-descendant");
+		REQUIRE(store.SetParent(descendant, second));
+		store.Set(descendant, engine::ecs::ClientLocal{});
+		CHECK_FALSE(runtime->Heartbeat(1.0f / 30));
+		checkX(7);
+		store.Remove<engine::ecs::ClientLocal>(descendant);
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(9);
+
+		const auto localClass = engine::ecs::Classes::Register(
+			"ScriptCallBulkRuntimeLocal", engine::ecs::Classes::RegisterInstanceRoot(), {}
+		);
+		engine::ecs::Classes::SetRuntimeLocal(localClass, true);
+		const auto local = store.CreatePredictedInstance(localClass, "local-without-marker");
+		REQUIRE_FALSE(store.Has<engine::ecs::ClientLocal>(local));
+		REQUIRE(store.SetParent(second, local));
+		CHECK_FALSE(runtime->Heartbeat(1.0f / 30));
+		checkX(9);
+		REQUIRE(store.SetParent(second, workspace));
+		store.Destroy(local);
+		REQUIRE(runtime->Heartbeat(1.0f / 30));
+		checkX(11);
 	}
 }
 

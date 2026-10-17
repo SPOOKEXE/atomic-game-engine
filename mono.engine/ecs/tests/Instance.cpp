@@ -51,6 +51,44 @@ namespace {
 
 // --- the three components every instance carries ---------------------------
 
+TEST_CASE("locality absence follows live markers and exact class policy", "[ecs][instance][client-local]") {
+	Store store("locality-absence");
+	const auto &tree = ClassTree();
+	const ClassId localClass = Classes::Register("test.LocalityAbsence", tree.Instance, {});
+	Classes::SetRuntimeLocal(localClass, true);
+	CHECK_FALSE(engine::ecs::HasClientLocalInstances(store));
+	const Entity ordinary = store.CreateInstance(tree.Part, "ordinary");
+	const Entity child = store.CreateInstance(tree.Part, "child");
+	REQUIRE(store.SetParent(child, ordinary));
+	CHECK_FALSE(engine::ecs::HasClientLocalInstances(store));
+
+	const Entity marker = store.Create();
+	store.Set(marker, engine::ecs::ClientLocal{});
+	CHECK(engine::ecs::HasClientLocalInstances(store));
+	store.Remove<engine::ecs::ClientLocal>(marker);
+	CHECK_FALSE(engine::ecs::HasClientLocalInstances(store));
+
+	const Entity local = store.CreatePredictedInstance(localClass, "local-without-marker");
+	REQUIRE(local != NULL_ENTITY);
+	REQUIRE_FALSE(store.Has<engine::ecs::ClientLocal>(local));
+	CHECK(engine::ecs::HasClientLocalInstances(store));
+	REQUIRE(store.SetParent(child, local));
+	CHECK(engine::ecs::IsClientLocalInstance(store, child));
+	REQUIRE(store.SetParent(child, ordinary));
+	CHECK_FALSE(engine::ecs::IsClientLocalInstance(store, child));
+	store.Destroy(local);
+	CHECK_FALSE(engine::ecs::HasClientLocalInstances(store));
+
+	const ClassId changingClass = Classes::Register("test.ChangingLocality", tree.Instance, {});
+	const Entity changing = store.CreateInstance(changingClass, "changing");
+	CHECK_FALSE(engine::ecs::HasClientLocalInstances(store));
+	Classes::SetRuntimeLocal(changingClass, true);
+	CHECK(engine::ecs::HasClientLocalInstances(store));
+	CHECK(engine::ecs::IsClientLocalInstance(store, changing));
+	Classes::SetRuntimeLocal(changingClass, false);
+	CHECK_FALSE(engine::ecs::HasClientLocalInstances(store));
+}
+
 TEST_CASE("the instance components are registered under explicit names", "[ecs][instance]") {
 	// **A file, a wire and a recording all carry these strings**, so renaming
 	// one is a format change and this is what makes it show up as a failing

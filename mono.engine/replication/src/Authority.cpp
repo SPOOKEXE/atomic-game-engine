@@ -661,14 +661,19 @@ namespace engine::replication {
 			// replaced. A table carries an entity once however many of the components
 			// it holds.
 			Bearing.clear();
-			store.EachMatchingAny(Resolved, [this, &store](const ecs::Entity *entities, size_t rows) {
-				for (size_t row = 0; row < rows; row++) {
-					const ecs::Entity entity = entities[row];
-					if (ecs::Store::IsPredicted(entity) || ecs::IsClientLocalInstance(store, entity))
-						continue;
-					Bearing.push_back(entity.Id);
+			// With no locality roots, every ancestry walk would prove the same absence.
+			const bool hasLocalInstances = ecs::HasClientLocalInstances(store);
+			store.EachMatchingAny(
+				Resolved, [this, &store, hasLocalInstances](const ecs::Entity *entities, size_t rows) {
+					for (size_t row = 0; row < rows; row++) {
+						const ecs::Entity entity = entities[row];
+						if (ecs::Store::IsPredicted(entity) ||
+							(hasLocalInstances && ecs::IsClientLocalInstance(store, entity)))
+							continue;
+						Bearing.push_back(entity.Id);
+					}
 				}
-			});
+			);
 
 			// Tables are filled as entities arrive in them, so this comes out in
 			// table order and not id order. `Prioritise` and `Refine` index into it
