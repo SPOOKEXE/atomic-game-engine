@@ -145,8 +145,9 @@ staged shaders or the client; `--version` reported 0.26.1. Consult final-revisio
 gate and native workflow evidence in CI logs and GitHub Actions before claiming
 completion. The B0 matrix remains incomplete and zero of three optimization
 passes is complete. These correctness checks establish no optimization gain.
-Actual GPU dependency waits remain unverified; host API durations must not be
-relabeled GPU queue waits.
+At the time of this earlier audit section, actual GPU dependency waits remained
+unverified; host API durations must not be relabeled GPU queue waits. The saved
+Nsight Graphics capture evidence is recorded below.
 
 ## Partial CPU heap baseline
 
@@ -334,6 +335,56 @@ code were uninstrumented. Logs:
 `.cache/build/ci/v0261-server-lifetime-perturb-fixed-targeted.log` and
 `.cache/build/ci/v0261-server-sanitize/fixed-targeted-tests.log`. Selector commit
 `1894f6af` passed 249 assertions across 24 tool cases
-(`.cache/build/ci/v0261-benchmark-selector-{build,tests}.log`). A new full-gate
-retry is pending, so this does not claim full-gate completion or native results
-for this code.
+(`.cache/build/ci/v0261-benchmark-selector-{build,tests}.log`). At code head
+`9784ad17`, the strict pre-push gate passed 772 suites, 0 skipped, 0 failed;
+log: `.cache/build/ci/v0261-selector-lifetime-pre-push.log`. The server full-file
+test passed all 36 cases and 2,011 assertions; log:
+`.cache/build/server/v0261-server-lifetime-tests.log`. Native workflow
+[38987915616](https://github.com/SPOOKEXE/atomic-game-engine/actions/runs/38987915616)
+passed Linux x86_64, Windows x86_64, macOS ARM64, Build, Process Isolation,
+Package, and Upload. It recorded 6 artifact records; publish was skipped as a
+manual dry run.
+
+## C04 saved Nsight Graphics capture
+
+A privileged Nsight Graphics 2026.3.1 capture was saved from code head
+`9784ad17` in `.cache/build/bench/c04-sudo-trace-wbmiB5`. The trace
+`bench_render_2026_10_17_15_24_22.ngfx-gputrace` is 8,727,374 bytes, and capture
+status was 0. `capture.log` records successful save, load, and table exports
+before target termination and a later connection error. The profiler terminated
+the target after capture, so this is not a completed 512-frame benchmark oracle
+or accepted benchmark-row set.
+
+The run used the bench build at effective `-O3`, heap profiling enabled, GNU
+13.3.0, Ryzen 9 9900X, RTX 4090 (AD102), driver 580.173.02, Vulkan, and Nsight
+Graphics 2026.3.1. It rendered 8 moving views of 1,024 resident meshes at
+128x128 per view, with 16 internal warm frames and 0 harness warmups. It used a
+524,288-element `f32x4` compute input and output (8 MiB each) and was configured
+for 512 frames. Submit delay was 200, submit limit 256, and maximum capture
+duration 1,000 ms. Clocks were unaltered, HES and screenshots were off, and
+metric set was `AsyncComputeTriage`; real-time shader profiling was off.
+
+The exported `FRAME.xls` duration of 225.215 ms is the entire trace duration,
+not an engine frame. The `.xls` exports are ASCII TSV counters and include no
+per-queue wait export. The capture UI was reviewed offline under private Xvfb;
+queue labels resolved to graphics Q0, compute Q1, and transfer Q2. AT-SPI export
+recorded 256 submit rows in
+`.cache/build/bench/c04-offline-review/submit-events.json`.
+
+The compute queue has an observed 203.818 us dependency wait at 152.74 to
+152.94 ms on a transfer-upload semaphore. Compute events 188481 to 188495 wait
+on semaphore `0x61965c7b7090`, signaled by transfer events 188612 to 188615. A
+subsequent transfer readback wait lasted 45.139 us at 152.95 to 153.00 ms on
+compute signal `0x61965c23e120`. These are GPU timeline dependency waits, not
+CPU wait-call durations. Nsight Graphics documents these synchronization
+objects in its [GPU Trace UI guide](https://docs.nvidia.com/nsight-graphics/UserGuide/gpu-trace-ui.html#queue-synchronization-objects). The offline review screenshots are
+`compute-wait-152ms.png` and `readback-selected.png` under
+`.cache/build/bench/c04-offline-review/`.
+
+The frame-active value was 46.89 ms of 225.22 ms, rounded; other contexts show
+red hatches. External Ollama and RustDesk processes were resident, so the trace
+does not establish quiet timing or an optimization gain. Shader metric names
+`main_0x...` were missing and removed after a UI warning; no shader occupancy
+conclusion can be drawn from those metrics. This capture advances C04 GPU-wait
+evidence only. C04 and B0 remain incomplete, with 0 of 3 optimization passes
+complete.
