@@ -598,3 +598,93 @@ condition. No further native run was performed after that workflow-only edit.
 Product build flags were unchanged. Linux already runs the fixture in strict
 pre-push. Shared-host timing remains unaccepted; B0 remains incomplete, with 0
 of 3 optimization passes complete.
+
+
+## Refreshed domain heap diagnostics
+
+At engine revision `32069a3d`, the optimized heap-enabled `bench` preset rebuilt
+`bench_graphcore`, `bench_imagegraph`, `bench_bake`, `bench_audio`, and
+`bench_graph` in 41 edges. Configure/build logs are
+`.cache/build/bench/v0261-current-heap-config.log` and
+`.cache/build/bench/v0261-current-heap-build.log`. GNU C++ 13.3 used effective
+`-O3`; `MONO_HEAP_PROFILE=ON` and `MONO_OPTIMISE=ON` were verified. Each of the
+five compile/routing suites ran in three fresh processes with
+`MONO_BENCH_MEMORY=1`, one sample, and no harness warmups. All 15 invocations
+passed. Across each combined run, all 27 heap rows repeated their allocation
+bytes, blocks, retained-byte delta, dropped-scope delta, and foreign-free delta.
+Every row reported zero retained-byte change, dropped scopes, and foreign frees.
+Both prepared audio deadline calls allocated zero C++ bytes and blocks.
+Benchmark output stayed on stdout. The diagnostic wrapper mistakenly printed
+`rows=0` by checking a literal escaped tab; the actual tab-separated rows were
+printed and separately compared correctly.
+
+These counters measure requested C++ payload. They exclude C allocator and GPU
+memory, and the header overhead is a model. Scope peaks are exclusive; process
+peaks include fixture setup and the process lifetime. The image compile suite
+does not measure full evaluation, and the audio routing suite does not measure
+full mixing. Runtime probes below address those separate gaps. A running game
+and two model servers shared this host; no workload was stopped. Clock and
+latency acceptance remains pending. B0 is incomplete, with 0 of 3 optimization
+passes complete.
+
+
+## Whole-domain runtime heap probes
+
+`a3d082eb` adds opt-in full CPU image evaluation and prepared audio mixing
+probes, plus `just domain-runtime-memory-bench`. Setup and expected-output
+construction are outside each measured call. The v3 rows reset process counters
+before one synchronous call, report entry live bytes and additional peak payload,
+and keep the output live at the final snapshot. The exclusive tag peak remains
+separate. The process total includes prepared fixtures and reference data;
+additional payload is not RSS, allocator commitment, or GPU memory.
+
+The command built both changed targets in four edges and passed both complete
+existing benchmark suites. Three further fresh processes per domain passed all
+14 heap rows and full-output checks per combined run. Allocation bytes, blocks,
+retained-byte deltas, per-call additional peaks, and output hashes matched across
+all three runs. All rows had zero dropped scopes and foreign frees. Normal mode
+with `MONO_BENCH_MEMORY=0` passed without emitting heap probes. Source and compiler
+settings match the preceding diagnostic refresh; no engine algorithm changed.
+
+| Prepared evaluation | Allocated C++ bytes / blocks | Retained bytes at snapshot | Additional peak payload bytes |
+|---|---:|---:|---:|
+| Empty document refusal | 42 / 1 | 42 | 42 |
+| Simple 1x1 solid | 11,806 / 185 | 4 | 3,701 |
+| Busy 256x256 source/transform/blend | 802,094 / 242 | 262,144 | 786,827 |
+| Complex 1024x1024 source/transform/blend | 12,598,574 / 242 | 4,194,304 | 12,583,307 |
+
+The refusal retains its diagnostic string; successful calls retain the expected
+RGBA8 output. Every output byte is compared. The existing image reference uses
+production pixel sampling/composition helpers, so its pixel arithmetic is not an
+independent oracle. Prepared image fixtures have already evaluated during
+preflight; these rows do not claim a cold-process measurement.
+
+Audio covers 0, 1, 64, and 511 flat voices plus 64 spatial voices. Each prepared
+mixer renders its first and next 512-frame stereo block at 48 kHz. All ten calls
+have zero tracked C++ allocations, retained-byte change, and additional peak
+payload. Every sample is checked against a scalar authored-order mix, including
+stage rounding and final clipping; peak, clipping flag, report fields, and sample
+clock are checked too. Spatial gains use the independently tested public spatial
+helpers. Zero callback churn does not mean zero residency: the prepared process
+held about 18.2 MB of tracked C++ payload, including bounded mixer storage, source,
+output, and other benchmark state. Dedicated diagnostic mixers do not advance the
+normal timing fixtures.
+
+`76147194` adds ray CPU live bytes/blocks, modeled header overhead, and profiler
+error deltas. Its peak is explicitly process lifetime including preflight, not a
+per-frame peak. Five lens scenarios, inactive through complex, passed their
+existing oracles at 65x65 with eight measured frames on Vulkan, with all added
+fields present and zero dropped marks, dropped scopes, and foreign frees. This
+checks reporting only, not 1080p performance. The optimized render refresh built
+in 148 edges; logs are `.cache/build/bench/v0261-runtime-heap-build.log` and
+`.cache/build/bench/v0261-runtime-heap-final-build.log`. Benchmarks remained on
+stdout. Publication checks are recorded separately in
+`.cache/build/ci/v0261-runtime-heap-pre-push.log`; their final result must be read
+before claiming the strict gate passed.
+
+The procedural harness still states `generator_cache=absent`. Its unchanged
+request is regenerated; it is not a cache hit. Its baked artifact fixture uses
+local asset publication, reads, and generator-free installation. This does not
+measure network delivery cache hits or network bytes. Those dimensions, complete
+quiet clock/latency acceptance, and the full B0 matrix remain pending. No engine
+optimization pass is accepted; 0 of 3 passes are complete.
