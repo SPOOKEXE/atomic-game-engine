@@ -16,7 +16,8 @@ namespace engine::render {
 
 	class VulkanTimestamps {
 	  public:
-		static constexpr uint32_t MARKS = 128;
+		// The eight-view recording benchmark needs 202 marks; larger frames still report overflow.
+		static constexpr uint32_t MARKS = 256;
 		static constexpr uint32_t SLOTS = 4;
 		static constexpr uint32_t NO_SLOT = SLOTS;
 

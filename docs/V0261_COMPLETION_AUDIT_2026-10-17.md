@@ -412,7 +412,7 @@ advancing frames, 20 phases total across five processes. In the complex cohort, 
 GPU resources; dropped events were zero in all four complex phases. These
 resource and drop observations are limited to that cohort.
 
-Benchmark output remained on stdout. Shared Ollama activity was present, so
+Benchmark output remained on stdout. Ollama processes remained resident, so
 quiet timing and optimization gains are not claimed. B0 remains incomplete, with
 0 of 3 optimization passes complete.
 
@@ -437,3 +437,31 @@ Khronos and synchronization validation enabled. The ordinary 8-view row
 had 296 dropped GPU timing marks; the other 11 had zero, so that row's GPU
 profile is partial. Shared-host timings and tails are not accepted. B0 remains
 incomplete, with 0 of 3 optimization passes complete.
+
+## Ordinary multi-view timestamp capacity
+
+At `d69975cd`, GDB sampled eight frames of the ordinary eight-view recording
+benchmark (`-O3`, 128x128 views, 1,024 shared resident meshes, 8 MiB compute).
+It recorded 1,616 timestamp attempts, 202 per frame: 1,024 writes and 592
+capacity refusals with the old 128-mark pool. Null commands, inactive slots,
+and native-handle failures were zero. The benchmark's 16 measured frames
+reported 296 dropped GPU timing marks.
+
+The limit is now 256 marks per pool, with four pools per collector: 512 extra
+query slots. Driver allocation bytes are unknown. CPU result arrays grew from
+1 to 2 KiB at eight bytes per entry. Wait, lifecycle, and public APIs did not
+change. The old real Vulkan test failed at mark 128 (262 assertions passed,
+one failed; `.cache/build/ci/v0261-timestamp-capacity-red-tests.log`). The
+fixed test passed 742 assertions in one case in each of ordinary, serial, and
+parallel modes, with zero VUIDs.
+
+All 12 recording rows passed their oracles, including nine exact 8 MiB checks,
+with zero dropped GPU timing marks or VUIDs. Ordinary eight-view timing had
+four completed sequences. Private serial had 16 completed frames, 176 graphics
+samples, and intentionally zero compute and transfer samples. Private parallel
+had 16 completed frames, 128 graphics, 16 compute, and 32 transfer samples.
+Both had zero query drops and VUIDs. Private per-pass timing is unavailable by
+design; per-queue timing was verified. C01 serial passed 15 cases and 972
+assertions; C04 parallel passed 6 cases and 1,087 assertions. Shared-host
+timings remain unaccepted. B0 remains incomplete, with 0 of 3 optimization
+passes complete.
