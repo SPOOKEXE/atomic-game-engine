@@ -873,3 +873,111 @@ unknown. No server code, test, timeout, or assertion changed; the later full
 strict pass is recorded above.
 
 Quiet timing, complete B0, and all three optimization passes remain pending.
+
+## gpu availability follow-up
+
+grug rebuilt `bench_render` at `29b641bc` and completed the 1080p GPU
+matrix with the model servers absent. Hardware was Ryzen 9 9900X, RTX 4090,
+driver 580.173.02, GNU 13.3 and Vulkan. The `bench` preset used effective
+`-O3 -g1`, unity builds, heap profiling and full renderer timing.
+No clocks or power settings changed. These offscreen runs did not explicitly
+enable Khronos or synchronization validation; earlier validation proof remains
+separate.
+
+Ray coverage was nine cohorts across five scenes and three projections:
+135 measured cohorts, 135 passing primary oracle rows, and 15 passing
+moving-camera return checks. Each cohort measured 512 frames after eight
+internal warmups, with one outer sample and zero outer warmups.
+Every executing GPU timing vector contained 128 observations.
+All timing-mark drops, CPU heap-scope drops and foreign frees were zero.
+The 384 frames without a new query per cohort reflect the existing
+one-in-four sampling schedule, not lost queries.
+
+The five weather scenes also passed at 1920x1080 with shadow resolution 256.
+Each ran one cold frame, 96 maintenance frames, 512 strict-reuse frames and
+512 advancing frames. Active steady passes had 128 GPU observations.
+Strict reuse created no GPU resources and allocated zero logical GPU bytes.
+Cold and maintenance GPU timing distributions remained below 100 observations.
+
+One-second process monitoring found no foreign GPU activity in these batches.
+Barotrauma consumed up to 1,932.7% CPU during the ray runs. Device timestamps
+remain observations of the submitted GPU work under this host load.
+Whole-path CPU, submission and wait latency, quiet comparative gains and full
+B0 acceptance remain pending. Initial 256-frame weather and perspective runs
+passed but supplied only 64 steady GPU observations. The following 256-frame
+orthographic trial was deliberately stopped before restarting at 512; it
+returned -9 and is not passing verification.
+
+The complex volume fixture was the largest observed device-stage cost:
+16 authored volumes, 64 march steps, 32 shadow steps, noise strength 0.7,
+65 instances and 1920x1080 output.
+
+| Projection | Fog p50 / p95 / p99 / max, ms |
+|---|---|
+| Perspective | 297.790 / 299.055 / 299.874 / 301.234 |
+| Orthographic | 363.679 / 364.663 / 364.764 / 364.791 |
+| Oblique | 326.231 / 327.700 / 327.818 / 328.494 |
+
+These are stress-fixture observations, not a shipped frame budget or a gain.
+Source review found repeated per-volume ray interval calculations inside the
+shared march loop in `volume.frag`. Caching them per fragment is a candidate
+for pass one after B0, subject to compiler behavior, register pressure and
+whole-image parity. No shader, quality or renderer runtime changed here.
+
+Commit `108bf0bb` fixes the benchmark defaults and reports: ray and weather
+now default to 512 frames, and every timing vector marks fewer than 100
+observations with `tail_insufficient=1`. Shader work, query cadence and
+percentile calculations stay the same. A 65x65 lens check using the new default
+passed with 128 device observations and marker 0; a 16-frame check passed
+with four observations and marker 1. A 65x65 empty-weather check confirmed
+512-frame defaults, 128 steady GPU observations with marker 0, and cold and
+maintenance markers 1. Recipe inspection and Clang 21 formatting checks passed.
+
+A second monitored sweep at `108bf0bb` passed C01's seven cohorts, C04's
+12 cohorts, and all five weather scenes. No foreign GPU activity was detected.
+During C01, ordinary C04 and weather, no external non-desktop CPU process
+reached the monitor's 40% threshold in a one-second sample. This is a sampled
+load observation, not exclusive use of the host. External .NET builds and tests
+did overlap serial and parallel C04, reaching 1,002.4% CPU in `csc`.
+Those queue-mode whole-path timings remain contended.
+
+C01 ran three outer bodies with zero outer warmups. The retained report covers
+only the latest completed body, not pooled bodies. Each body measured 128
+batches. All seven complete-output oracles were exact, with zero unavailable
+GPU jobs, dropped timings and retained logical payload after retirement.
+The following device observations cover the entire upload, compute and download
+command, including instrumentation, not kernel-only cost.
+
+| Type | Capacity / logical count | In flight | GPU samples | p50 / p95 / p99 / max, us |
+|---|---:|---:|---:|---|
+| u32 | 65 / 65 | 1 | 128 | 93.856 / 95.296 / 96.736 / 133.152 |
+| u32 | 65537 / 65537 | 1 | 128 | 160.672 / 163.296 / 164.352 / 164.800 |
+| u32 | 1048576 / 1048576 | 1 | 128 | 632.512 / 654.048 / 681.312 / 697.824 |
+| u32 | 1048576 / 1048576 | 3 | 384 | 1717.472 / 2643.904 / 3055.584 / 3324.192 |
+| f32x4 | 65537 / 65537 | 1 | 128 | 347.584 / 358.144 / 440.576 / 625.280 |
+| f32x4 | 65537 / 65537 | 4 | 512 | 350.784 / 370.176 / 377.504 / 730.368 |
+| u32 | 65 / 0 | 1 | 128 | 128.576 / 130.976 / 146.528 / 184.160 |
+
+C04 measured 512 frames after 16 warmups per cohort, with one outer sample
+and zero outer warmups. Modes were ordinary, serial and parallel, each with
+an empty one-view row and 1/2/8 populated views of 1,024 meshes at 128x128.
+Populated rows used the unchanged two-pass `f32x4` kernel over 524,288 elements,
+checking all 8 MiB of output every frame. All oracles passed with zero dropped
+GPU queries, timing marks or CPU profile spans. Populated private-queue rows
+had 512 graphics timing observations; parallel rows also had 512 compute and
+transfer observations. Empty queue timings were unavailable. Ordinary mode
+provided 128 sampled pass sums rather than private queue distributions.
+No new physical-overlap claim follows from this run.
+
+Each populated C04 cohort allocated and released 21,474,836,480 logical GPU
+bytes across 512 frames, or 40 MiB per frame, with flat live payload.
+This remains a pass-two reuse candidate, not a leak or a measured improvement.
+The repeat weather run retained zero GPU creations and allocations during
+strict reuse; its active steady vectors contained 128 observations and
+the new insufficiency markers were correct.
+
+Raw benchmark output stayed on stdout. B0 remains incomplete, with zero of
+three optimization passes complete. This change improves measurement coverage
+and reporting only. Publication checks run through the normal strict pre-push
+hook; the final outcome is in
+`.cache/build/ci/v0261-gpu-tail-pre-push.log`.
